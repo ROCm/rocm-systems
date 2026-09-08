@@ -64,6 +64,7 @@ __device__ __attribute__((noinline)) void runRing(int tid, int nthreads, struct 
       dataOffset = partOffset + elemOffset;
 
         // step 0: push data to next GPU
+      sqtt_marker_enter("ALL_GATHER_RING_SEND");
       rankDest = ringRanks[0];
       offset = dataOffset + rankDest * count;
 
@@ -72,20 +73,25 @@ __device__ __attribute__((noinline)) void runRing(int tid, int nthreads, struct 
       } else {
         prims.directCopySend(dataOffset, offset, nelem);
       }
+      sqtt_marker_exit("ALL_GATHER_RING_SEND");
 
         // k-2 steps: copy to next GPU
+      sqtt_marker_enter("ALL_GATHER_RING_RECV_COPY_SEND");
       for (int j = 1; j < nranks - 1; ++j) {
         rankDest = ringRanks[nranks - j];
         offset = dataOffset + rankDest * count;
         prims.directRecvCopyDirectSend(offset, offset, nelem);
       }
+      sqtt_marker_exit("ALL_GATHER_RING_RECV_COPY_SEND");
 
         // Make final copy from buffer to dest.
+      sqtt_marker_enter("ALL_GATHER_RING_DIRECT_RECV");
       rankDest = ringRanks[1];
       offset = dataOffset + rankDest * count;
 
         // Final wait/copy.
       prims.directRecv(offset, nelem);
+      sqtt_marker_exit("ALL_GATHER_RING_DIRECT_RECV");
     }
   } else if (inputBuf != outputBuf + ringRanks[0] * count) {
     inputBuf = inputBuf + partOffset;
@@ -181,7 +187,8 @@ struct RunWorkColl<ncclFuncAllGather, T, RedOp, NCCL_ALGO_PAT, NCCL_PROTO_SIMPLE
 
     if (tid == nworkers) { // Algo computation thread
       PatAGAlgorithm<T> patAlgo(chunkCount * sizeof(T), NCCL_STEPS, NCCL_PAT_NWORKERS / WARP_SIZE, channelOffset,
-                                channelOffset + channelCount, count, chunkCount, rank, nranks);
+                                channelOffset + channelCount, count, chunkCount, rank, nranks,
+                                ncclShmem.comm.patSharedQps);
       int parallelFactor = shmem->parallelFactor = patAlgo.getParallelFactor();
       (void)parallelFactor;// unused variable - compiler warning
       int step = 0;

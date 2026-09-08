@@ -34,6 +34,19 @@ static inline ncclResult_t IbCastRecvCommGetQpForCts(struct ncclIbRecvComm* recv
   return ncclSuccess;
 }
 
+// Query whether a receiver QP is CTS-posting. Receiver QPs are dual-role: all
+// take data receives and a subset posts CTS, so ask the selector rather than
+// restate its rule. On selector failure answer false, since every QP takes
+// data, so "not CTS" is the truthful fallback and true would corrupt roles.
+static inline bool IbCastRecvCommIsCtsQp(struct ncclIbRecvComm* recvComm, int qpIndex) {
+  for (uint32_t id = 0; id < (uint32_t)recvComm->base.nqps; id++) {
+    ncclIbQp* ctsQp = NULL;
+    if (IbCastRecvCommGetQpForCts(recvComm, id, &ctsQp) != ncclSuccess) return false;
+    if (ctsQp == &recvComm->base.qps[qpIndex]) return true;
+  }
+  return false;
+}
+
 static inline ncclResult_t IbCastRequestRetrieveAsIndex(ncclIbRequest* reqs, uint32_t reqIndex, ncclIbRequest** req) {
   if (reqIndex >= NET_IB_MAX_REQUESTS) {
     WARN("NET/IB: %s: Invalid request index %u. Not in the range [%u, %u). Cannot retrieve request.", __func__,
@@ -59,13 +72,11 @@ static inline ncclResult_t IbCastRequestRetrieveAsIndex(ncclIbRequest* reqs, uin
 
 // --- Field accessors (layout-aware, row-based) ---
 static inline uint32_t ctsFifoNreqs(volatile void* slotBase, uint32_t rxReqId) {
-  if (IbCastAinicCtsInlineData)
-    return (uint32_t)((volatile struct ncclIbSendFifoCtsInline*)slotBase)[rxReqId].nreqs;
+  if (IbCastAinicCtsInlineData) return (uint32_t)((volatile struct ncclIbSendFifoCtsInline*)slotBase)[rxReqId].nreqs;
   return ((volatile struct ncclIbSendFifo*)slotBase)[rxReqId].nreqs;
 }
 static inline uint64_t ctsFifoAddr(volatile void* slotBase, uint32_t rxReqId) {
-  if (IbCastAinicCtsInlineData)
-    return ((volatile struct ncclIbSendFifoCtsInline*)slotBase)[rxReqId].addr;
+  if (IbCastAinicCtsInlineData) return ((volatile struct ncclIbSendFifoCtsInline*)slotBase)[rxReqId].addr;
   return ((volatile struct ncclIbSendFifo*)slotBase)[rxReqId].addr;
 }
 static inline uint16_t ctsFifoRxReqIndex(volatile void* slotBase, uint32_t rxReqId) {
@@ -80,18 +91,15 @@ static inline uint32_t ctsFifoRkey(volatile void* slotBase, uint32_t rxReqId, in
   return ((volatile struct ncclIbSendFifo*)slotBase)[rxReqId].rkeys[devIdx];
 }
 static inline uint32_t ctsFifoIdx(volatile void* slotBase, uint32_t rxReqId) {
-  if (IbCastAinicCtsInlineData)
-    return ((volatile struct ncclIbSendFifoCtsInline*)slotBase)[rxReqId].idx;
+  if (IbCastAinicCtsInlineData) return ((volatile struct ncclIbSendFifoCtsInline*)slotBase)[rxReqId].idx;
   return ((volatile struct ncclIbSendFifo*)slotBase)[rxReqId].idx;
 }
 static inline size_t ctsFifoSize(volatile void* slotBase, uint32_t rxReqId) {
-  if (IbCastAinicCtsInlineData)
-    return (size_t)((volatile struct ncclIbSendFifoCtsInline*)slotBase)[rxReqId].size;
+  if (IbCastAinicCtsInlineData) return (size_t)((volatile struct ncclIbSendFifoCtsInline*)slotBase)[rxReqId].size;
   return (size_t)((volatile struct ncclIbSendFifo*)slotBase)[rxReqId].size;
 }
 static inline uint32_t ctsFifoTag(volatile void* slotBase, uint32_t rxReqId) {
-  if (IbCastAinicCtsInlineData)
-    return (uint32_t)((volatile struct ncclIbSendFifoCtsInline*)slotBase)[rxReqId].tag;
+  if (IbCastAinicCtsInlineData) return (uint32_t)((volatile struct ncclIbSendFifoCtsInline*)slotBase)[rxReqId].tag;
   return ((volatile struct ncclIbSendFifo*)slotBase)[rxReqId].tag;
 }
 

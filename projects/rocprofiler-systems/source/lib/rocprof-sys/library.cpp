@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include <cstdint>
+#include <fmt/ranges.h>
 #include <timemory/log/color.hpp>
 //
 //  above should always be included first
@@ -10,6 +11,7 @@
 #include "common/defines.h"
 #include "common/delimit.hpp"
 #include "common/env_vars.hpp"
+#include "common/path.hpp"
 #include "common/setup.hpp"
 #include "common/static_object.hpp"
 #include "core/agent.hpp"
@@ -32,6 +34,7 @@
 #include "core/trace_cache/cacheable.hpp"
 #include "core/trace_cache/metadata_registry.hpp"
 #include "core/utility.hpp"
+#include "library/causal/components/causal_gotcha.hpp"
 #include "library/causal/data.hpp"
 #include "library/causal/experiment.hpp"
 #include "library/causal/sampling.hpp"
@@ -54,7 +57,6 @@
 #include "library/thread_data.hpp"
 #include "library/thread_info.hpp"
 #include "library/tracing.hpp"
-#include "rocprofiler-systems/categories.h"  // in rocprof-sys-user
 
 #include <timemory/hash/types.hpp>
 #include <timemory/log/logger.hpp>
@@ -314,10 +316,10 @@ struct set_env_s  // NOLINT
 extern "C" void
 rocprofsys_set_env_hidden(const char* env_name, const char* env_val)
 {
-    tim::auto_lock_t _lk{ tim::type_mutex<set_env_s>() };
+    const tim::auto_lock_t _lk{ tim::type_mutex<set_env_s>() };
 
     static auto _set_envs = std::set<std::string_view>{};
-    bool        _success  = _set_envs.emplace(env_name).second;
+    const bool  _success  = _set_envs.emplace(env_name).second;
 
     // just search env to avoid initializing the settings
     if(get_debug_init())
@@ -405,7 +407,7 @@ std::vector<callback_t> external_resume_callbacks;
 void
 invoke_external_pause_callbacks()
 {
-    std::lock_guard<std::mutex> _lk{ external_pause_resume_callbacks_mutex };
+    const std::lock_guard<std::mutex> lock{ external_pause_resume_callbacks_mutex };
     for(auto* _fn : external_pause_callbacks)
         _fn();
 }
@@ -413,7 +415,7 @@ invoke_external_pause_callbacks()
 void
 invoke_external_resume_callbacks()
 {
-    std::lock_guard<std::mutex> _lk{ external_pause_resume_callbacks_mutex };
+    const std::lock_guard<std::mutex> lock{ external_pause_resume_callbacks_mutex };
     for(auto* _fn : external_resume_callbacks)
         _fn();
 }
@@ -423,7 +425,7 @@ invoke_external_resume_callbacks()
 extern "C" void
 rocprofsys_external_register_pause_callbacks(void (*pause_fn)(), void (*resume_fn)())
 {
-    std::lock_guard<std::mutex> _lk{ external_pause_resume_callbacks_mutex };
+    const std::lock_guard<std::mutex> _lk{ external_pause_resume_callbacks_mutex };
 
     if(pause_fn)
     {
@@ -439,8 +441,8 @@ rocprofsys_external_register_pause_callbacks(void (*pause_fn)(), void (*resume_f
 extern "C" void
 rocprofsys_set_mpi_hidden(bool use)
 {
-    static bool _once = false;
-    static bool _arg  = use;
+    static bool       _once = false;
+    const static bool _arg  = use;
 
     // this function may be called multiple times if multiple libraries are instrumented
     // we want to guard against multiple calls which with different arguments
@@ -563,7 +565,7 @@ rocprofsys_init_library_hidden()
 
     auto _debug_value = get_debug();
     if(_debug_init) config::set_setting_value(std::string{ env_vars::DEBUG_MODE }, true);
-    scope::destructor _debug_dtor{ [_debug_value, _debug_init]() {
+    const scope::destructor _debug_dtor{ [_debug_value, _debug_init]() {
         if(_debug_init)
             config::set_setting_value(std::string{ env_vars::DEBUG_MODE }, _debug_value);
     } };
@@ -917,7 +919,7 @@ rocprofsys_finalize_hidden(void)
     // disable initialization callback
     threading::remove_callback(&ensure_initialization);
 
-    bool _is_child = is_child_process();
+    const bool _is_child = is_child_process();
     state::thread::set(state::thread::Completed);
 
     // return if not active
@@ -987,7 +989,7 @@ rocprofsys_finalize_hidden(void)
     auto _debug_init  = get_debug_finalize();
     auto _debug_value = get_debug();
     if(_debug_init) config::set_setting_value(std::string{ env_vars::DEBUG_MODE }, true);
-    scope::destructor _debug_dtor{ [_debug_value, _debug_init]() {
+    const scope::destructor _debug_dtor{ [_debug_value, _debug_init]() {
         if(_debug_init)
             config::set_setting_value(std::string{ env_vars::DEBUG_MODE }, _debug_value);
     } };
@@ -1046,6 +1048,35 @@ rocprofsys_finalize_hidden(void)
     {
         LOG_DEBUG("Shutting down background sampler...");
         process_sampler::shutdown();
+    }
+
+    // -----------------------------------------------------------------------
+    // Causal-profiling shutdown must happen BEFORE rocprofiler_sdk::shutdown().
+    //
+    // Why: rocprofiler_sdk uses a PTL (Portable Threading Library) thread pool
+    //   whose workers call pthread_cond_wait while waiting for async work.  That
+    //   call is intercepted by blocking_gotcha, which injects causal delay credits
+    //   after every blocking operation.  When the SDK tries to drain its buffers
+    //   and join its workers, the workers are stuck inside the blocking_gotcha
+    //   wrapper; because blocking_gotcha::shutdown() has not yet been called, the
+    //   wrapper keeps accumulating and applying delays and the workers never return
+    //   — a deadlock that prevents the process from shutting down cleanly.
+    //
+    // Fix 1 – disable blocking_gotcha BEFORE the SDK shutdown so that any
+    //   future pthread_cond_wait calls (or in-flight ones completing their
+    //   postblock step) bypass the delay logic and return immediately.
+    //
+    // Fix 2 – write the causal output files BEFORE the SDK shutdown.  This
+    //   ensures output is on disk even if SDK shutdown takes longer than expected.
+    //
+    // -----------------------------------------------------------------------
+    if(get_use_causal())
+    {
+        LOG_DEBUG("Disabling causal blocking interceptors before SDK shutdown...");
+        causal::component::causal_gotcha::shutdown();
+
+        LOG_DEBUG("Writing causal output before SDK shutdown...");
+        causal::finish_experimenting();
     }
 
     LOG_DEBUG("Shutting down ROCm...");
@@ -1150,9 +1181,7 @@ rocprofsys_finalize_hidden(void)
 
     if(get_use_causal())
     {
-        LOG_DEBUG("Finishing the causal experiments...");
-        causal::finish_experimenting();
-
+        LOG_DEBUG("Registering causal output files...");
         auto _base = config::get_causal_output_filename();
         _output_registry.register_file(fmt::format("{}.json", _base),
                                        output_format::causal_json);
@@ -1214,7 +1243,7 @@ rocprofsys_finalize_hidden(void)
             for(auto& itr : _maps)
             {
                 auto&& _path = itr.pathname;
-                if(!_path.empty() && _path.at(0) != '[' && filepath::exists(_path))
+                if(!_path.empty() && _path.at(0) != '[' && path::is_regular_file(_path))
                     _libs.emplace(_path);
             }
             ar(tim::cereal::make_nvp("memory_maps_files", _libs),

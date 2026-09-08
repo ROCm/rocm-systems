@@ -17,7 +17,7 @@ Panel Config:
 
   - metric_table:
       id: 401
-      title: "Roofline Performance Rates"
+      title: Roofline Performance Rates
       cli_style: Roofline
       tui_style: Roofline
       header:
@@ -27,71 +27,71 @@ Panel Config:
         peak: Peak (Empirical)
       metric:
         VALU FLOPs (FP16):
-          value: AVG(SP_VALU_FLOPS_FP16_sum / ((End_Timestamp - Start_Timestamp) / 1e9) / 1e9)
+          value: SUM(SP_VALU_FLOPS_FP16_sum) / SUM(End_Timestamp - Start_Timestamp)
           unit: GFLOP/s
           peak: $max_sclk * $cu_per_gpu * 128 / 1000
         VALU FLOPs (FP32):
-          value: AVG(SP_VALU_FLOPS_FP32_sum / ((End_Timestamp - Start_Timestamp) / 1e9) / 1e9)
+          value: SUM(SP_VALU_FLOPS_FP32_sum) / SUM(End_Timestamp - Start_Timestamp)
           unit: GFLOP/s
           peak: $max_sclk * $cu_per_gpu * 64 / 1000
         VALU FLOPs (FP64):
-          value: AVG(SP_VALU_FLOPS_FP64_sum / ((End_Timestamp - Start_Timestamp) / 1e9) / 1e9)
+          value: SUM(SP_VALU_FLOPS_FP64_sum) / SUM(End_Timestamp - Start_Timestamp)
           unit: GFLOP/s
           peak: $max_sclk * $cu_per_gpu * 32 / 1000
         VALU IOPs:
-          value: AVG(SP_VALU_IOPS_sum / ((End_Timestamp - Start_Timestamp) / 1e9) / 1e9)
+          value: SUM(SP_VALU_IOPS_sum) / SUM(End_Timestamp - Start_Timestamp)
           unit: GIOP/s
           peak: $max_sclk * $cu_per_gpu * 64 / 1000
         VALU Trans FLOPs (FP16):
-          value: AVG(SP_VALU_FLOPS_FP16_TRANS_sum / ((End_Timestamp - Start_Timestamp) / 1e9) / 1e9)
+          value: SUM(SP_VALU_FLOPS_FP16_TRANS_sum) / SUM(End_Timestamp - Start_Timestamp)
           unit: GFLOP/s
           peak: $max_sclk * $cu_per_gpu * 64 / 1000
         VALU Trans FLOPs (FP32):
-          value: AVG(SP_VALU_FLOPS_FP32_TRANS_sum / ((End_Timestamp - Start_Timestamp) / 1e9) / 1e9)
+          value: SUM(SP_VALU_FLOPS_FP32_TRANS_sum) / SUM(End_Timestamp - Start_Timestamp)
           unit: GFLOP/s
           peak: $max_sclk * $cu_per_gpu * 32 / 1000
         VALU Trans FLOPs (FP64):
-          value: AVG(SP_VALU_FLOPS_FP64_TRANS_sum / ((End_Timestamp - Start_Timestamp) / 1e9) / 1e9)
+          value: SUM(SP_VALU_FLOPS_FP64_TRANS_sum) / SUM(End_Timestamp - Start_Timestamp)
           unit: GFLOP/s
           peak: $max_sclk * $cu_per_gpu * 16 / 1000
         WMMA FLOPs (FP64):
-          value: AVG(SQ_VALU_WMMA_FLOP_FP64_sum * 64 / ((End_Timestamp - Start_Timestamp) / 1e9) / 1e9)
+          value: 64 * SUM(SQ_VALU_WMMA_FLOP_FP64_sum) / SUM(End_Timestamp - Start_Timestamp)
           unit: GFLOP/s
           peak: $WMMAF64Flops_empirical_peak
         WMMA FLOPs (FP32):
-          value: AVG(SQ_VALU_WMMA_FLOP_FP32_sum * 128 / ((End_Timestamp - Start_Timestamp) / 1e9) / 1e9)
+          value: 128 * SUM(SQ_VALU_WMMA_FLOP_FP32_sum) / SUM(End_Timestamp - Start_Timestamp)
           unit: GFLOP/s
           peak: $WMMAF32Flops_empirical_peak
         WMMA FLOPs (FP16):
-          value: AVG(SQ_VALU_WMMA_FLOP_FP16_sum * 2048 / ((End_Timestamp - Start_Timestamp) / 1e9) / 1e9)
+          value: 2048 * SUM(SQ_VALU_WMMA_FLOP_FP16_sum) / SUM(End_Timestamp - Start_Timestamp)
           unit: GFLOP/s
           peak: $WMMAF16Flops_empirical_peak
         WMMA FLOPs (BF16):
-          value: AVG(SQ_VALU_WMMA_FLOP_BF16_sum * 2048 / ((End_Timestamp - Start_Timestamp) / 1e9) / 1e9)
+          value: 2048 * SUM(SQ_VALU_WMMA_FLOP_BF16_sum) / SUM(End_Timestamp - Start_Timestamp)
           unit: GFLOP/s
           peak: $WMMABF16Flops_empirical_peak
         WMMA FLOPs (FP8):
-          value: AVG(SQ_VALU_WMMA_FLOP_FP8_sum * 4096 / ((End_Timestamp - Start_Timestamp) / 1e9) / 1e9)
+          value: 4096 * SUM(SQ_VALU_WMMA_FLOP_FP8_sum) / SUM(End_Timestamp - Start_Timestamp)
           unit: GFLOP/s
           peak: $WMMAF8Flops_empirical_peak
         WMMA FLOPs (FP6):
-          value: AVG(SQ_VALU_WMMA_FLOP_FP6_sum * 8192 / ((End_Timestamp - Start_Timestamp) / 1e9) / 1e9)
+          value: 8192 * SUM(SQ_VALU_WMMA_FLOP_FP6_sum) / SUM(End_Timestamp - Start_Timestamp)
           unit: GFLOP/s
           peak: $WMMAF6Flops_empirical_peak
         WMMA FLOPs (FP4):
-          value: AVG(SQ_VALU_WMMA_FLOP_FP4_sum * 8192 / ((End_Timestamp - Start_Timestamp) / 1e9) / 1e9)
+          value: 8192 * SUM(SQ_VALU_WMMA_FLOP_FP4_sum) / SUM(End_Timestamp - Start_Timestamp)
           unit: GFLOP/s
           peak: $WMMAF4Flops_empirical_peak
         WMMA FLOPs (F6F4):
-          value: AVG(SQ_VALU_WMMA_FLOP_F6F4_sum * 8192 / ((End_Timestamp - Start_Timestamp) / 1e9) / 1e9)
+          value: 8192 * SUM(SQ_VALU_WMMA_FLOP_F6F4_sum) / SUM(End_Timestamp - Start_Timestamp)
           unit: GFLOP/s
           peak: $WMMAF6F4Flops_empirical_peak
         WMMA IOPs (Int8):
-          value: AVG(SQ_VALU_WMMA_FLOP_I8_sum * 4096 / ((End_Timestamp - Start_Timestamp) / 1e9) / 1e9)
+          value: 4096 * SUM(SQ_VALU_WMMA_FLOP_I8_sum) / SUM(End_Timestamp - Start_Timestamp)
           unit: GIOP/s
           peak: $WMMAI8Ops_empirical_peak
         # WMMA IOPs (Int4):
-        #   value: AVG((((SQ_VALU_WMMA_FLOP_I4_sum * 8192)) / ((End_Timestamp - Start_Timestamp) / 1e9)) / 1e9)
+        #   value: SUM((((SQ_VALU_WMMA_FLOP_I4_sum * 8192)) / ((End_Timestamp - Start_Timestamp) / 1e9))) / SUM(1e9)
         #   unit: GIOP/s
         #   peak: $WMMAI4Ops_empirical_peak
 
@@ -99,25 +99,25 @@ Panel Config:
         # Memory Bandwidth - Sections 3.4, 3.7, 3.8, 3.9
         # =====================================================================
         HBM Bandwidth:
-          value: AVG((GC_EA_SE_SARB_DRAM_RD_SIZE_REQ_sum + GC_EA_SE_SARB_DRAM_WR_SIZE_REQ_sum) * 32 / ((End_Timestamp - Start_Timestamp) / 1e9) / 1e9)
+          value: 32 * SUM(GC_EA_SE_SARB_DRAM_RD_SIZE_REQ_sum + GC_EA_SE_SARB_DRAM_WR_SIZE_REQ_sum) / SUM(End_Timestamp - Start_Timestamp)
           unit: GB/s
           peak: $HBMBw_empirical_peak
         GL2 Cache Bandwidth:
-          value: AVG((TX_VMW_GL1_REQ_READ_sum + TX_VMW_GL1_REQ_WRITE_sum + TX_VMW_GL1_REQ_ATOMIC_WITH_RET_sum + TX_VMW_GL1_REQ_ATOMIC_WITHOUT_RET_sum) * 128 / ((End_Timestamp - Start_Timestamp) / 1e9) / 1e9)
+          value: 128 * SUM(TX_VMW_GL1_REQ_READ_sum + TX_VMW_GL1_REQ_WRITE_sum + TX_VMW_GL1_REQ_ATOMIC_WITH_RET_sum + TX_VMW_GL1_REQ_ATOMIC_WITHOUT_RET_sum) / SUM(End_Timestamp - Start_Timestamp)
           unit: GB/s
           peak: $L2Bw_empirical_peak
         GL0 Cache Bandwidth:
-          value: AVG((TX_VCA_CACHE_LOAD_BANDWIDTH_BYTES_sum + TX_VCA_CACHE_STORE_BANDWIDTH_BYTES_sum + TX_VCA_CACHE_ATOMIC_BANDWIDTH_BYTES_sum) / ((End_Timestamp - Start_Timestamp) / 1e9) / 1e9)
+          value: SUM(TX_VCA_CACHE_LOAD_BANDWIDTH_BYTES_sum + TX_VCA_CACHE_STORE_BANDWIDTH_BYTES_sum + TX_VCA_CACHE_ATOMIC_BANDWIDTH_BYTES_sum) / SUM(End_Timestamp - Start_Timestamp)
           unit: GB/s
           peak: $L0Bw_empirical_peak
         LDS Bandwidth:
-          value: AVG((TX_VMW_LDS_INPUT_ACTIVE_sum - TX_VMW_LDS_BANK_CONFLICT_sum) * 4 * $lds_banks_per_cu / ((End_Timestamp - Start_Timestamp) / 1e9) / 1e9)
+          value: SUM((TX_VMW_LDS_INPUT_ACTIVE_sum - TX_VMW_LDS_BANK_CONFLICT_sum) * 4 * $lds_banks_per_cu) / SUM(End_Timestamp - Start_Timestamp)
           unit: GB/s
           peak: $LDSBw_empirical_peak
 
   - metric_table:
       id: 402
-      title: "Roofline Plot Points"
+      title: Roofline Plot Points
       cli_style: Roofline
       tui_style: Roofline
       header:
@@ -193,7 +193,9 @@ Panel Config:
     #   Achieved Int4 WMMA throughput.
 
     HBM Bandwidth: >-
-      Total HBM bandwidth.
+      Total HBM bandwidth. The peak empirically measured bandwidth reflects
+      peak single-direction (read-only) bandwidth, so write-heavy or mixed
+      kernels fall below it.
     GL2 Cache Bandwidth: >-
       GL2 Cache bandwidth.
 

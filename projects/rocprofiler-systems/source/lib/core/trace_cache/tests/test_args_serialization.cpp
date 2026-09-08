@@ -32,14 +32,14 @@ TEST(args_serialization_test, empty_args_yields_empty_string)
 
 TEST(args_serialization_test, single_arg_exact_wire_format)
 {
-    function_args_t args{ { 0U, "string", "source_object", "libfoo.so" } };
+    const function_args_t args{ { 0U, "string", "source_object", "libfoo.so" } };
     EXPECT_EQ(get_args_string(args), "0;;string;;source_object;;libfoo.so;;");
 }
 
 TEST(args_serialization_test, multiple_args_are_concatenated)
 {
-    function_args_t args{ { 0U, "string", "object", "libomp.so" },
-                          { 1U, "int", "count", "42" } };
+    const function_args_t args{ { 0U, "string", "object", "libomp.so" },
+                                { 1U, "int", "count", "42" } };
     EXPECT_EQ(get_args_string(args), "0;;string;;object;;libomp.so;;1;;int;;count;;42;;");
 }
 
@@ -65,7 +65,7 @@ TEST(args_serialization_test, get_args_string_roundtrips_through_parser)
 TEST(args_serialization_test, value_containing_delimiter_roundtrips)
 {
     // A value that embeds the raw delimiter ";;" must not split into extra records.
-    function_args_t args{ { 0U, "string", "path", "a;;b" } };
+    const function_args_t args{ { 0U, "string", "path", "a;;b" } };
 
     auto parsed = process_arguments_string(get_args_string(args));
 
@@ -76,8 +76,8 @@ TEST(args_serialization_test, value_containing_delimiter_roundtrips)
 
 TEST(args_serialization_test, escape_character_and_semicolons_are_lossless)
 {
-    function_args_t args{ { 0U, "string", "name;with;semis", "50% off ;; today" },
-                          { 1U, "string", "already_escaped", "x%3By" } };
+    const function_args_t args{ { 0U, "string", "name;with;semis", "50% off ;; today" },
+                                { 1U, "string", "already_escaped", "x%3By" } };
 
     auto parsed = process_arguments_string(get_args_string(args));
 
@@ -92,7 +92,7 @@ TEST(args_serialization_test, escape_character_and_semicolons_are_lossless)
 // type and name also carry delimiters/escape chars must still round-trip intact.
 TEST(args_serialization_test, all_escapable_fields_roundtrip)
 {
-    function_args_t args{ { 7U, "ns::T<;;>%", "n;%ame", "v;;%val" } };
+    const function_args_t args{ { 7U, "ns::T<;;>%", "n;%ame", "v;;%val" } };
 
     auto parsed = process_arguments_string(get_args_string(args));
 
@@ -107,7 +107,7 @@ TEST(args_serialization_test, all_escapable_fields_roundtrip)
 // or merged into the trailing delimiter).
 TEST(args_serialization_test, empty_value_roundtrips)
 {
-    function_args_t args{ { 0U, "string", "name", "" } };
+    const function_args_t args{ { 0U, "string", "name", "" } };
 
     auto parsed = process_arguments_string(get_args_string(args));
 

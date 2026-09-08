@@ -10,20 +10,19 @@
 
 #include "scheduler.h"
 
-// Host-callable equivalent of device.h's __device__ ncclProtoGrainSize().
-// Mirrors enqueue.cc's static rcclProtoGrainSize() (which is file-local there).
-static int rcclProtoGrainSize(int proto, ncclComm* comm) {
-  switch (proto) {
-  case NCCL_PROTO_LL:
-    return 16;
-  case NCCL_PROTO_LL128:
-    return comm->WarpSize * NCCL_LL128_SHMEM_ELEMS_PER_THREAD * comm->ll128DataElems * sizeof(uint64_t) /
-           comm->ll128LineElems;
-  case NCCL_PROTO_SIMPLE:
-    return 512;
-  default:
-    return -1;
+// AllGatherV launches grid=nChannels and does not implement WarpSpeed's warp-level channel
+// distribution, so the tuner's multiplier inflation is undone here; an oversized grid faults
+// on gfx950. Pure function so the derivation stays in one traceable place.
+static int agvChannelCount(struct ncclComm* comm, int tunedChannels) {
+#ifdef ENABLE_WARP_SPEED
+  if (comm->warpSpeedChannelMultiplier > 1) {
+    int channels = std::max(1, tunedChannels / comm->warpSpeedChannelMultiplier);
+    INFO(NCCL_COLL, "AllGatherV: WarpSpeed not supported; channels %d -> %d (multiplier %d)", tunedChannels, channels,
+         comm->warpSpeedChannelMultiplier);
+    return channels;
   }
+#endif
+  return tunedChannels;
 }
 
 ncclResult_t ncclScheduleBcastTasksToPlan(struct ncclComm* comm, struct ncclKernelPlan* plan,
@@ -45,8 +44,9 @@ ncclResult_t ncclScheduleBcastTasksToPlan(struct ncclComm* comm, struct ncclKern
       if (t == nullptr) continue;
       // see if we can fit another batch to args, and a bunch of bcast to workStorage
       // Each batch can fit 64 bcast, if batchTasks > 64 we use nextExtends to extend the batch.
+      // workBytes accounts for nChannels: each task produces one ncclDevWorkBcast per channel.
       if (!ncclTestBudget(budget, nChannels * DIVUP(batchTasks + 1, 64),
-                          (batchTasks + 1) * sizeof(struct ncclDevWorkBcast)) ||
+                          nChannels * (batchTasks + 1) * sizeof(struct ncclDevWorkBcast)) ||
           batchTasks + 1 == maxitem) {
         break;
       }
@@ -79,12 +79,16 @@ ncclResult_t ncclScheduleBcastTasksToPlan(struct ncclComm* comm, struct ncclKern
     if (proto == NCCL_PROTO_LL) chunkSize = chunkSize / 2;
     if (proto == NCCL_PROTO_LL128) chunkSize = (chunkSize / NCCL_LL128_LINEELEMS) * NCCL_LL128_DATAELEMS;
     size_t grainSize = rcclProtoGrainSize(proto, comm);
-    nChannels = tcoll.nMaxChannels;
+    nChannels = agvChannelCount(comm, tcoll.nMaxChannels);
     chunkSize = chunkSize / grainSize * grainSize;
 
     // Determine thread count per block
+#if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
+    int threadPerBlock = tcoll.nWarps * comm->WarpSize;
+#else
     int threadPerBlock =
       (int)std::max((int)(tcoll.nWarps * WARP_SIZE), (int)(64 * sizeof(ncclDevWorkBcast) / 16 + 3 * WARP_SIZE));
+#endif
     plan->threadPerBlock = threadPerBlock;
 
     // Choose kernel for plan. Based on proto, algo=ring
@@ -153,6 +157,7 @@ ncclResult_t ncclScheduleBcastTasksToPlan(struct ncclComm* comm, struct ncclKern
           workNode->size = sizeof(struct ncclDevWorkBcast);
           ncclIntruQueueEnqueue(&plan->workQueue, workNode);
           struct ncclDevWorkBcast* work = (struct ncclDevWorkBcast*)(workNode + 1);
+          memset(work, 0, sizeof(*work));
           work->recvbuff = (char*)t->recvbuff + offset_lo;
           work->bytes = offset_hi - offset_lo;
           work->ringDepth = ringDepth;

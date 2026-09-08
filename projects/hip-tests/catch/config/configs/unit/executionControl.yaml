@@ -94,7 +94,7 @@ executionControl:
     tags: [attributes, kernel]
   Unit_hipFuncSetCacheConfig_Positive_VerifyCarveoutMapping:
     <<: *level_2
-    tags: [attributes, kernel]
+    tags: [attributes, kernel, P1]
   Unit_hipFuncSetSharedMemConfig_Positive_Basic:
     <<: *level_2
     # Note: intermittent Seg fault failure

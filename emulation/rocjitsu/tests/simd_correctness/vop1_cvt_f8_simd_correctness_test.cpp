@@ -13,6 +13,7 @@
 /// equal with EXPECT_EQ (util::set_force_scalar_for_testing flips the gate
 /// in-process). In-process inactive lanes must keep the DST sentinel.
 
+#include "decode_test_util.h"
 #include "util/simd_test_hooks.h"
 
 #include "rocjitsu/code/rj_code.h"
@@ -126,7 +127,7 @@ void check_words(const std::string &label, const uint32_t words[4], uint64_t exe
     Fixture fx;
     EXPECT_NE(fx.cu, nullptr);
     EXPECT_NE(fx.wf, nullptr);
-    Instruction *inst = fx.decoder->decode(words);
+    Instruction *inst = decode_valid(*fx.decoder, words);
     EXPECT_NE(inst, nullptr) << label << " decode failed";
     auto out = fx.run(inst, block, exec);
     delete inst;

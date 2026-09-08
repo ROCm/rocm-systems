@@ -339,6 +339,11 @@ struct PlaybackContext {
         std::unique_lock lk(map_mutex);
         alloc_map.erase(rec);
     }
+    // True if an allocation is already tracked under this recorded address.
+    bool has_alloc(uint64_t rec) const {
+        std::shared_lock lk(map_mutex);
+        return alloc_map.find(rec) != alloc_map.end();
+    }
 
     // ---- Handle registration (exclusive lock) ----
     void record_stream  (uint64_t rec, hipStream_t     live) { std::unique_lock lk(map_mutex); stream_map[rec]     = live; }

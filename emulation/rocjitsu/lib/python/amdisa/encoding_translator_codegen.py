@@ -18,10 +18,10 @@ Fields are classified as:
 Usage::
 
     from amdisa import Parser
-    from amdisa.isa_profile import CdnaProfile, Rdna4Profile
+    from amdisa.isa_profile import Cdna4Profile, Rdna4Profile
     from amdisa.encoding_translator_codegen import generate_encoding_translators
 
-    cdna4 = Parser('amdgpu_isa_cdna4.xml', CdnaProfile()).parse()
+    cdna4 = Parser('amdgpu_isa_cdna4.xml', Cdna4Profile()).parse()
     rdna4 = Parser('amdgpu_isa_rdna4.xml', Rdna4Profile()).parse()
     generate_encoding_translators(cdna4, rdna4, 'cdna4', 'rdna4', 'output/')
 """
@@ -478,7 +478,7 @@ def _all_field_names_from_encodings(encodings):
     multiple ISAs' encodings for the same format.
 
     Returned sorted alphabetically so the emitted struct layout is stable
-    across `--multi` argument orderings. Field order in these structs is
+    across ISA argument orderings. Field order in these structs is
     cosmetic (every read/write in the generated code is by name) but a
     deterministic order avoids gratuitous diff churn on regeneration.
     """

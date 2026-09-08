@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2023-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2023-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -25,6 +25,7 @@
 #if ROCPROFILER_SDK_HSA_PC_SAMPLING > 0
 
 #    include "lib/common/logging.hpp"
+#    include "lib/common/utility.hpp"
 #    include "lib/rocprofiler-sdk/hsa/defines.hpp"
 #    include "lib/rocprofiler-sdk/hsa/hsa.hpp"
 
@@ -115,6 +116,60 @@ namespace
 {
 template <size_t TableIdx, typename LookupT = internal_table, size_t OpIdx>
 void
+restore_table(hsa_pc_sampling_ext_table_t* _orig, uint64_t _tbl_instance)
+{
+    using table_type = typename hsa_table_lookup<TableIdx>::type;
+
+    static_assert(std::is_same<hsa_pc_sampling_ext_table_t, table_type>::value);
+
+    common::consume_args(_tbl_instance);  // currently unused
+
+    if constexpr(OpIdx > hsa_ven_amd_pcs_id_none)
+    {
+        auto _info = hsa_api_meta<TableIdx, OpIdx>{};
+
+        if(_info.offset() >= _orig->version.minor_id) return;
+
+        auto& _copy_table = _info.get_table(hsa_table_lookup<TableIdx>{}(LookupT{}));
+        auto& _copy_func  = _info.get_table_func(_copy_table);
+
+        // _copy_func will only be non-null after a call to copy_table has been made
+        if(_copy_func != nullptr)
+        {
+            // retrieve the current function pointer in the dispatch table
+            auto& _curr_table = _info.get_table(_orig);
+            auto& _curr_func  = _info.get_table_func(_curr_table);
+
+            if(_curr_func == nullptr)  // this really shouldn't happen
+            {
+                ROCP_CI_LOG(WARNING) << fmt::format(
+                    "current function pointer for '{}' is null... cannot restore to implementation",
+                    _info.name);
+            }
+            else if(_curr_func == _copy_func)
+            {
+                ROCP_TRACE << fmt::format("current function pointer for '{}' is already the "
+                                          "implementation... nothing to restore",
+                                          _info.name);
+            }
+            else if(_copy_func != nullptr)
+            {
+                ROCP_TRACE << fmt::format("restoring function pointer for '{}' to implementation",
+                                          _info.name);
+                _curr_func = _copy_func;
+            }
+        }
+        else
+        {
+            ROCP_TRACE << fmt::format(
+                "function pointer to implementation of '{}' is null... nothing to restore",
+                _info.name);
+        }
+    }
+}
+
+template <size_t TableIdx, typename LookupT = internal_table, size_t OpIdx>
+void
 copy_table(hsa_pc_sampling_ext_table_t* _orig, uint64_t _tbl_instance)
 {
     using table_type = typename hsa_table_lookup<TableIdx>::type;
@@ -133,10 +188,6 @@ copy_table(hsa_pc_sampling_ext_table_t* _orig, uint64_t _tbl_instance)
         auto& _copy_table = _info.get_table(hsa_table_lookup<TableIdx>{}(LookupT{}));
         auto& _copy_func  = _info.get_table_func(_copy_table);
 
-        ROCP_FATAL_IF(_copy_func && _tbl_instance == 0)
-            << _info.name << " has non-null function pointer " << _copy_func
-            << " despite this being the first instance of the library being copies";
-
         if(!_copy_func)
         {
             ROCP_TRACE << "copying table entry for " << _info.name;
@@ -152,6 +203,19 @@ copy_table(hsa_pc_sampling_ext_table_t* _orig, uint64_t _tbl_instance)
 
 template <size_t TableIdx, typename LookupT = internal_table, size_t... OpIdx>
 void
+restore_table(hsa_pc_sampling_ext_table_t* _orig,
+              uint64_t                     _tbl_instance,
+              std::index_sequence<OpIdx...>)
+{
+    static_assert(
+        std::is_same<hsa_pc_sampling_ext_table_t, typename hsa_table_lookup<TableIdx>::type>::value,
+        "unexpected type");
+
+    (restore_table<TableIdx, LookupT, OpIdx>(_orig, _tbl_instance), ...);
+}
+
+template <size_t TableIdx, typename LookupT = internal_table, size_t... OpIdx>
+void
 copy_table(hsa_pc_sampling_ext_table_t* _orig,
            uint64_t                     _tbl_instance,
            std::index_sequence<OpIdx...>)
@@ -162,8 +226,15 @@ copy_table(hsa_pc_sampling_ext_table_t* _orig,
 
     (copy_table<TableIdx, LookupT, OpIdx>(_orig, _tbl_instance), ...);
 }
-
 }  // namespace
+
+void
+restore_table(hsa_pc_sampling_ext_table_t* _orig, uint64_t _tbl_instance)
+{
+    if(_orig)
+        restore_table<ROCPROFILER_HSA_TABLE_ID_PcSamplingExt, internal_table>(
+            _orig, _tbl_instance, std::make_index_sequence<hsa_ven_amd_pcs_id_last>{});
+}
 
 void
 copy_table(hsa_pc_sampling_ext_table_t* _orig, uint64_t _tbl_instance)

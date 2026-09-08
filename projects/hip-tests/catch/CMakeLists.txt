@@ -34,6 +34,10 @@ option(ENABLE_YAML_TAGS "Enable YAML tags for test cases" ON)
 option(STANDALONE_TESTS "Generate standalone executable per source file" OFF)
 option(ENABLE_OOB_TESTS "Build OOB tests, deliberately wrong inputs" ON)
 
+# Build tests with -Wall -Werror. Defaults to OFF
+set(_hiptests_werror_default OFF)
+option(HIP_TESTS_ENABLE_WERROR "Build tests with -Wall -Werror (Linux default ON)" ${_hiptests_werror_default})
+
 if(NOT CMAKE_BUILD_TYPE)
   set(CMAKE_BUILD_TYPE "Release")
 endif()
@@ -253,7 +257,10 @@ if(HIP_PLATFORM STREQUAL "amd")
     # Which results in errors about missing headers etc
     set(win_cxx_standard -std=c++17)
   endif()
-  add_compile_options(${HIP_PATH_OPT} ${win_cxx_standard} -x hip -Wall -Wextra -Wvla -Wno-deprecated -Wno-option-ignored -Wno-unused-parameter ${win_disable_warnings})
+  add_compile_options(${HIP_PATH_OPT} ${win_cxx_standard} -x hip -Wall -Wextra -Wvla -Wno-deprecated ${win_disable_warnings})
+  if(HIP_TESTS_ENABLE_WERROR AND UNIX)
+    add_compile_options(-Werror)
+  endif()
 endif()
 
 # Turn off CMAKE_HIP_ARCHITECTURES Feature if cmake version is 3.21+
@@ -379,6 +386,118 @@ endif()
 set(CATCH_SCRIPT_BINARY_DIR ${CMAKE_CURRENT_BINARY_DIR}/${CATCH_BUILD_DIR}/script)
 file(COPY ${CMAKE_CURRENT_SOURCE_DIR}/cmake/hip-tests.cmake
      DESTINATION ${CATCH_SCRIPT_BINARY_DIR})
+
+# Patch CatchAddTests.cmake in-place so that catch_discover_tests_impl writes
+# an empty _tests.cmake when zero tests match the filter, instead of returning
+# early without creating the file.  The generated _include.cmake hardcodes the
+# path to CatchAddTests.cmake from Catch2's source tree, so we must patch it
+# there (not a copy) for the fix to take effect at ctest startup.
+# Without this, catch_discover_tests("[disabled]") on a binary with no
+# [disabled] tests leaves a dangling _include.cmake whose include() fails:
+#   "include could not find requested file: ..._tests.cmake"
+# This is a known Catch2 bug fixed upstream in:
+#   https://github.com/catchorg/Catch2/pull/3075
+# Remove this patch once we update to a Catch2 version that includes that fix.
+set(_catch_old_snippet "  if(num_tests STREQUAL \"0\")\n    return()\n  endif()")
+set(_catch_new_snippet "  if(num_tests STREQUAL \"0\")\n    file(WRITE \"\${_CTEST_FILE}\" \"# no tests discovered for this spec\\n\")\n    return()\n  endif()")
+file(READ "${CATCH_ADD_TESTS_SCRIPT}" _catch_content)
+string(FIND "${_catch_content}" "${_catch_new_snippet}" _catch_already_patched)
+if(_catch_already_patched EQUAL -1)
+  string(REPLACE "${_catch_old_snippet}" "${_catch_new_snippet}" _catch_patched "${_catch_content}")
+  if("${_catch_patched}" STREQUAL "${_catch_content}")
+    message(FATAL_ERROR
+      "Failed to patch CatchAddTests.cmake: expected snippet not found.\n"
+      "The Catch2 version may have changed. Check upstream fix:\n"
+      "  https://github.com/catchorg/Catch2/pull/3075")
+  endif()
+  file(WRITE "${CATCH_ADD_TESTS_SCRIPT}" "${_catch_patched}")
+endif()
+unset(_catch_old_snippet)
+unset(_catch_new_snippet)
+unset(_catch_content)
+unset(_catch_patched)
+unset(_catch_already_patched)
+
+# Patch CatchAddTests.cmake in-place so that tests tagged [exclude_amd_wsl] are
+# registered as DISABLED when test discovery runs on WSL.  The Linux package is
+# shared between native Linux and WSL, so the tag is baked into every binary at
+# build time and can only be resolved on the machine that runs ctest.
+# Detection requires both a WSL kernel signature and a WSL-specific runtime
+# artifact, so a native kernel whose release string happens to contain
+# "microsoft" is not mistaken for WSL.  It is cached in _hip_on_wsl so it runs
+# once per binary rather than once per test.  list(FIND) is used instead of
+# IN_LIST because CMP0057 is not set in the context ctest evaluates this in.
+#
+# parse_config.py emits [exclude_<reason>] for every disable reason regardless
+# of the build platform, so an amd_wsl entry also lands in nvidia binaries.  The
+# patch is therefore applied only for AMD builds, and only when the caller has
+# not asked for normally-skipped tests to run via HIP_TESTS_RUN_DISABLED.  When
+# either condition fails the patch is reversed instead, so reconfiguring an
+# existing build directory with changed options leaves Catch2's script in the
+# state those options imply.
+set(_wsl_old_snippet [==[          LABELS "${tag_list}"
+        )
+      endif()
+    endif(add_tags)]==])
+set(_wsl_new_snippet [==[          LABELS "${tag_list}"
+        )
+
+        if(NOT DEFINED _hip_on_wsl)
+          set(_hip_on_wsl FALSE)
+          if(NOT WIN32 AND EXISTS "/proc/sys/kernel/osrelease")
+            file(READ "/proc/sys/kernel/osrelease" _hip_osrelease)
+            string(TOLOWER "${_hip_osrelease}" _hip_osrelease)
+            # WSL2: "<ver>-microsoft-standard-WSL2", WSL1: "<ver>-<build>-Microsoft"
+            if(_hip_osrelease MATCHES "-microsoft" OR _hip_osrelease MATCHES "wsl[0-9]*")
+              if(EXISTS "/run/WSL"
+                 OR EXISTS "/proc/sys/fs/binfmt_misc/WSLInterop"
+                 OR EXISTS "/usr/lib/wsl/lib"
+                 OR DEFINED ENV{WSL_DISTRO_NAME}
+                 OR DEFINED ENV{WSL_INTEROP})
+                set(_hip_on_wsl TRUE)
+              endif()
+            endif()
+          endif()
+        endif()
+
+        if(_hip_on_wsl)
+          list(FIND tag_list "exclude_amd_wsl" _wsl_tag_idx)
+          if(NOT _wsl_tag_idx EQUAL -1)
+            add_command(set_tests_properties
+              "${prefix}${plain_name}${suffix}"
+              PROPERTIES
+              DISABLED TRUE
+            )
+          endif()
+        endif()
+      endif()
+    endif(add_tags)]==])
+if(HIP_PLATFORM STREQUAL "amd" AND NOT HIP_TESTS_RUN_DISABLED)
+  set(_wsl_from "${_wsl_old_snippet}")
+  set(_wsl_to "${_wsl_new_snippet}")
+else()
+  set(_wsl_from "${_wsl_new_snippet}")
+  set(_wsl_to "${_wsl_old_snippet}")
+endif()
+file(READ "${CATCH_ADD_TESTS_SCRIPT}" _wsl_content)
+string(FIND "${_wsl_content}" "${_wsl_to}" _wsl_already_patched)
+if(_wsl_already_patched EQUAL -1)
+  string(REPLACE "${_wsl_from}" "${_wsl_to}" _wsl_patched "${_wsl_content}")
+  if("${_wsl_patched}" STREQUAL "${_wsl_content}")
+    message(FATAL_ERROR
+      "Failed to patch CatchAddTests.cmake for WSL: expected snippet not found.\n"
+      "The Catch2 version may have changed.")
+  endif()
+  file(WRITE "${CATCH_ADD_TESTS_SCRIPT}" "${_wsl_patched}")
+endif()
+unset(_wsl_old_snippet)
+unset(_wsl_new_snippet)
+unset(_wsl_from)
+unset(_wsl_to)
+unset(_wsl_content)
+unset(_wsl_patched)
+unset(_wsl_already_patched)
+
 file(COPY ${CATCH_ADD_TESTS_SCRIPT}
          DESTINATION ${CATCH_SCRIPT_BINARY_DIR})
 set_property(GLOBAL APPEND PROPERTY G_INSTALL_SCRIPT_TARGETS ${CATCH_ADD_TESTS_SCRIPT})

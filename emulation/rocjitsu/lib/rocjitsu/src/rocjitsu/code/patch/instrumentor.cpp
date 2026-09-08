@@ -3,9 +3,9 @@
 
 #include "rocjitsu/code/patch/instrumentor.h"
 
-#include "rocjitsu/analysis/exec_state.h"
-#include "rocjitsu/analysis/liveness.h"
 #include "rocjitsu/code/amdgpu_code_object.h"
+#include "rocjitsu/code/analysis/exec_state.h"
+#include "rocjitsu/code/analysis/liveness.h"
 #include "rocjitsu/code/basic_block.h"
 #include "rocjitsu/code/builders/instruction_builder.h"
 #include "rocjitsu/code/code_object.h"
@@ -19,6 +19,7 @@
 #include "rocjitsu/code/patch/trampoline_builder.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
+#include "rocjitsu/isa/target_registry.h"
 #include "util/except.h"
 
 #include <algorithm>
@@ -130,7 +131,8 @@ uint32_t max_scratch_offset_bytes(rj_code_arch_t arch) {
 // TODO: these two arch predicates duplicate logic that also lives in DBT
 // (kernel_descriptor_translator.cpp's arch_has_accvgpr / uses_gfx90a_accum_offset)
 // and code_object_patcher.cpp (target_uses_gfx90a_accum_offset). They should be
-// consolidated into isa/isa_traits.h alongside arch_is_cdna/arch_is_rdna, but the
+// consolidated into isa/isa_traits.h alongside arch_is_cdna_4_or_lower/arch_is_rdna,
+// but the
 // arch_has_accvgpr copies disagree on CDNA1 (this one follows the physical AGPR file;
 // DBT's follows the HasAccVgpr trait, which models CDNA1 as zero), so unifying needs a
 // deliberate CDNA1-semantics decision. Kept DBI-local until then.
@@ -165,7 +167,7 @@ bool arch_has_unified_vgpr_allocation(rj_code_arch_t arch) {
   case ROCJITSU_CODE_ARCH_RDNA3:
   case ROCJITSU_CODE_ARCH_RDNA3_5:
   case ROCJITSU_CODE_ARCH_RDNA4:
-  case ROCJITSU_CODE_ARCH_GFX1250:
+  case ROCJITSU_CODE_ARCH_CDNA5:
     return false;
   default:
     throw util::UnimplementedInst("unified VGPR allocation for target architecture");
@@ -578,13 +580,29 @@ bool Instrumentor::ensure_blocks_built(std::string *error_out) {
     report(error_out, "AMDGPU instrumentation does not support RISC-V architectures");
     return false;
   }
-  auto decoder = Decoder::create(arch_);
+  const auto &registry = default_isa_target_registry();
+  const rj_code_target_id_t target = obj_.target_id();
+  if (target != ROCJITSU_CODE_TARGET_INVALID) {
+    const IsaTargetDescriptor *descriptor = registry.find(target);
+    if (descriptor == nullptr || descriptor->architecture_id != arch_) {
+      report(error_out, "code-object target does not match the requested architecture");
+      return false;
+    }
+  }
+  auto decoder = target == ROCJITSU_CODE_TARGET_INVALID ? Decoder::create(arch_)
+                                                        : Decoder::create(registry, target);
   if (!decoder) {
     report(error_out, "no decoder available for the requested architecture");
     return false;
   }
   decoder_ = std::move(decoder);
-  blocks_ = BasicBlock::build(obj_, *decoder_, arch_);
+  util::StringDiagnostic decode_error;
+  auto blocks = BasicBlock::build(obj_, *decoder_, arch_, decode_error.emitter());
+  if (blocks.failed()) {
+    report(error_out, decode_error.message().c_str());
+    return false;
+  }
+  blocks_ = std::move(blocks).value();
   // BasicBlock::build returns blocks in .text order. Keep clause state across
   // block boundaries because a branch target may split the linear instruction
   // stream in the middle of a clause.
@@ -633,6 +651,18 @@ Instrumentor::ResolvedPoints Instrumentor::resolve_points() {
   const std::span<const uint8_t> text_bytes(reinterpret_cast<const uint8_t *>(text->data()),
                                             text->size());
 
+  const auto &registry = default_isa_target_registry();
+  const IsaTargetDescriptor *arch_descriptor = registry.find(arch_);
+  auto effective_target = [&](const AmdGpuCodeObject &object) {
+    if (object.target_id() != ROCJITSU_CODE_TARGET_INVALID)
+      return object.target_id();
+    if (arch_descriptor == nullptr)
+      return ROCJITSU_CODE_TARGET_INVALID;
+    const IsaGpuTargetDescription *gpu_target = registry.find_default_gpu_target(*arch_descriptor);
+    return gpu_target == nullptr ? ROCJITSU_CODE_TARGET_INVALID : gpu_target->public_id;
+  };
+  const rj_code_target_id_t destination_target = effective_target(obj_);
+
   // Store probe objects and symbols together in probe_keys (object, symbol).
   std::vector<std::pair<const AmdGpuCodeObject *, std::string>> probe_keys;
   // Helper function to get a probe index for a given InstrumentationPoint
@@ -643,6 +673,12 @@ Instrumentor::ResolvedPoints Instrumentor::resolve_points() {
     for (size_t i = 0; i < probe_keys.size(); ++i) {
       if (probe_keys[i].first == pt.probe_obj && probe_keys[i].second == pt.probe_symbol)
         return i;
+    }
+    const rj_code_target_id_t probe_target = effective_target(*pt.probe_obj);
+    if (destination_target != ROCJITSU_CODE_TARGET_INVALID &&
+        probe_target != ROCJITSU_CODE_TARGET_INVALID && destination_target != probe_target) {
+      perr = "probe concrete target does not match the destination code-object target";
+      return std::nullopt;
     }
     auto sym = resolve_probe_symbol(*pt.probe_obj, pt.probe_symbol, &perr);
     if (!sym)

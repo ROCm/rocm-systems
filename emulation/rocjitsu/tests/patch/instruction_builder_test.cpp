@@ -16,6 +16,11 @@
 namespace rocjitsu {
 namespace {
 
+TEST(InstructionBuilder, Sop2SetsEncodingPrefix) {
+  const uint32_t word = build_s_lshl_b32(1, 2, 3, ROCJITSU_CODE_ARCH_RDNA4);
+  EXPECT_EQ((word >> 30) & 0x3u, 0x2u);
+}
+
 // SOPP semantics under test:
 //   target = branch_pc + 4 + simm16 * 4
 // Inverted:
@@ -163,20 +168,18 @@ TEST(GeneratedInstructionBuilder, Gfx1250ScalarPathsUseGeneratedLayouts) {
   constexpr uint16_t kSsrc0 = 8;
   constexpr uint16_t kSsrc1 = 9;
 
-  constexpr auto sopp = gfx1250::build_sopp(gfx1250::kSBranchSopp, {.simm16 = kSimm16});
-  EXPECT_EQ(build_sopp_encoding(ROCJITSU_CODE_ARCH_GFX1250, gfx1250::kSBranchSopp, kSimm16),
-            sopp[0]);
+  constexpr auto sopp = cdna5::build_sopp(cdna5::kSBranchSopp, {.simm16 = kSimm16});
+  EXPECT_EQ(build_sopp_encoding(ROCJITSU_CODE_ARCH_CDNA5, cdna5::kSBranchSopp, kSimm16), sopp[0]);
 
-  constexpr auto sop1 =
-      gfx1250::build_sop1(gfx1250::kSMovB32Sop1, {.ssrc0 = kSsrc0, .sdst = kSdst});
-  EXPECT_EQ(build_sop1_encoding(ROCJITSU_CODE_ARCH_GFX1250, gfx1250::kSMovB32Sop1, kSdst, kSsrc0),
+  constexpr auto sop1 = cdna5::build_sop1(cdna5::kSMovB32Sop1, {.ssrc0 = kSsrc0, .sdst = kSdst});
+  EXPECT_EQ(build_sop1_encoding(ROCJITSU_CODE_ARCH_CDNA5, cdna5::kSMovB32Sop1, kSdst, kSsrc0),
             sop1[0]);
 
-  constexpr auto sop2 = gfx1250::build_sop2(gfx1250::kSLshlB32Sop2,
-                                            {.ssrc0 = kSsrc0, .ssrc1 = kSsrc1, .sdst = kSdst});
-  EXPECT_EQ(build_sop2_encoding(ROCJITSU_CODE_ARCH_GFX1250, gfx1250::kSLshlB32Sop2, kSdst, kSsrc0,
-                                kSsrc1),
-            sop2[0]);
+  constexpr auto sop2 =
+      cdna5::build_sop2(cdna5::kSLshlB32Sop2, {.ssrc0 = kSsrc0, .ssrc1 = kSsrc1, .sdst = kSdst});
+  EXPECT_EQ(
+      build_sop2_encoding(ROCJITSU_CODE_ARCH_CDNA5, cdna5::kSLshlB32Sop2, kSdst, kSsrc0, kSsrc1),
+      sop2[0]);
 }
 
 TEST(InstructionBuilder, BuildSGetpcB64) {
@@ -186,7 +189,7 @@ TEST(InstructionBuilder, BuildSGetpcB64) {
   EXPECT_EQ(build_s_getpc_b64(0, ROCJITSU_CODE_ARCH_RDNA3), 0xBE804700u);
   EXPECT_EQ(build_s_getpc_b64(0, ROCJITSU_CODE_ARCH_RDNA4), 0xBE804700u);
   // gfx1250 renames the family (s_get_pc_i64) but keeps opcode 0x47.
-  EXPECT_EQ(build_s_getpc_b64(0, ROCJITSU_CODE_ARCH_GFX1250), 0xBE804700u);
+  EXPECT_EQ(build_s_getpc_b64(0, ROCJITSU_CODE_ARCH_CDNA5), 0xBE804700u);
 }
 
 TEST(InstructionBuilder, BuildSAddU32) {
@@ -213,17 +216,17 @@ TEST(InstructionBuilder, BuildSSwappcB64) {
   EXPECT_EQ(build_s_swappc_b64(30, 0, ROCJITSU_CODE_ARCH_RDNA3), 0xBE9E4900u);
   EXPECT_EQ(build_s_swappc_b64(30, 0, ROCJITSU_CODE_ARCH_RDNA4), 0xBE9E4900u);
   // gfx1250: s_swap_pc_i64, opcode 0x49
-  EXPECT_EQ(build_s_swappc_b64(30, 0, ROCJITSU_CODE_ARCH_GFX1250), 0xBE9E4900u);
+  EXPECT_EQ(build_s_swappc_b64(30, 0, ROCJITSU_CODE_ARCH_CDNA5), 0xBE9E4900u);
 }
 
 TEST(InstructionBuilder, BuildSCallB64UsesGfx1250SCallI64Opcode) {
   constexpr uint16_t kReturnSreg = 30;
   constexpr int16_t kOffsetDwords = -2;
   constexpr auto expected =
-      gfx1250::build_sopk(gfx1250::kSCallI64Sopk, {.simm16 = static_cast<uint16_t>(kOffsetDwords),
-                                                   .sdst = static_cast<uint8_t>(kReturnSreg)});
+      cdna5::build_sopk(cdna5::kSCallI64Sopk, {.simm16 = static_cast<uint16_t>(kOffsetDwords),
+                                               .sdst = static_cast<uint8_t>(kReturnSreg)});
 
-  EXPECT_EQ(build_s_call_b64(kReturnSreg, kOffsetDwords, ROCJITSU_CODE_ARCH_GFX1250), expected[0]);
+  EXPECT_EQ(build_s_call_b64(kReturnSreg, kOffsetDwords, ROCJITSU_CODE_ARCH_CDNA5), expected[0]);
   EXPECT_EQ(expected[0], 0xBA1EFFFEu);
 }
 
@@ -240,7 +243,7 @@ TEST(InstructionBuilder, BuildSCselectB32) {
             0x98028081u);
   // gfx1250 uses the GFX11+ opcode 0x30.
   EXPECT_EQ(build_s_cselect_b32(2, scalar_positive_inline_u32(1), scalar_positive_inline_u32(0),
-                                ROCJITSU_CODE_ARCH_GFX1250),
+                                ROCJITSU_CODE_ARCH_CDNA5),
             0x98028081u);
 }
 
@@ -252,7 +255,7 @@ TEST(InstructionBuilder, BuildSCmpLgU32) {
   // Opcode 7 is invariant across gens, including gfx1250.
   EXPECT_EQ(build_s_cmp_lg_u32(2, scalar_positive_inline_u32(0), ROCJITSU_CODE_ARCH_RDNA4),
             0xBF078002u);
-  EXPECT_EQ(build_s_cmp_lg_u32(2, scalar_positive_inline_u32(0), ROCJITSU_CODE_ARCH_GFX1250),
+  EXPECT_EQ(build_s_cmp_lg_u32(2, scalar_positive_inline_u32(0), ROCJITSU_CODE_ARCH_CDNA5),
             0xBF078002u);
 }
 
@@ -406,13 +409,13 @@ TEST(InstructionBuilder, ScalarOperandCodesMatchGeneratedTables) {
   EXPECT_EQ(scalar_operand_vcc_lo(ROCJITSU_CODE_ARCH_CDNA4), cdna4::OPR_SDST_VCC_LO);
   EXPECT_EQ(scalar_operand_vcc_lo(ROCJITSU_CODE_ARCH_RDNA2), rdna2::OPR_SDST_VCC_LO);
   EXPECT_EQ(scalar_operand_vcc_lo(ROCJITSU_CODE_ARCH_RDNA4), rdna4::OPR_SDST_VCC_LO);
-  EXPECT_EQ(scalar_operand_vcc_lo(ROCJITSU_CODE_ARCH_GFX1250), gfx1250::OPR_SDST_VCC_LO);
+  EXPECT_EQ(scalar_operand_vcc_lo(ROCJITSU_CODE_ARCH_CDNA5), cdna5::OPR_SDST_VCC_LO);
 
   EXPECT_EQ(scalar_operand_exec_lo(ROCJITSU_CODE_ARCH_CDNA1), cdna1::OPR_SDST_EXEC_LO);
   EXPECT_EQ(scalar_operand_exec_lo(ROCJITSU_CODE_ARCH_CDNA4), cdna4::OPR_SDST_EXEC_LO);
   EXPECT_EQ(scalar_operand_exec_lo(ROCJITSU_CODE_ARCH_RDNA2), rdna2::OPR_SDST_EXEC_LO);
   EXPECT_EQ(scalar_operand_exec_lo(ROCJITSU_CODE_ARCH_RDNA4), rdna4::OPR_SDST_EXEC_LO);
-  EXPECT_EQ(scalar_operand_exec_lo(ROCJITSU_CODE_ARCH_GFX1250), gfx1250::OPR_SDST_EXEC_LO);
+  EXPECT_EQ(scalar_operand_exec_lo(ROCJITSU_CODE_ARCH_CDNA5), cdna5::OPR_SDST_EXEC_LO);
 
   // Inline-constant source for -1 (193), also generation-stable.
   EXPECT_EQ(scalar_inline_neg_one(ROCJITSU_CODE_ARCH_CDNA4), 193);
@@ -420,7 +423,7 @@ TEST(InstructionBuilder, ScalarOperandCodesMatchGeneratedTables) {
   EXPECT_EQ(scalar_inline_neg_one(ROCJITSU_CODE_ARCH_CDNA4), cdna4::OPR_SRC_NEG_INT_MIN);
   EXPECT_EQ(scalar_inline_neg_one(ROCJITSU_CODE_ARCH_RDNA2), rdna2::OPR_SRC_NEG_INT_MIN);
   EXPECT_EQ(scalar_inline_neg_one(ROCJITSU_CODE_ARCH_RDNA4), rdna4::OPR_SRC_NEG_INT_MIN);
-  EXPECT_EQ(scalar_inline_neg_one(ROCJITSU_CODE_ARCH_GFX1250), gfx1250::OPR_SRC_NEG_INT_MIN);
+  EXPECT_EQ(scalar_inline_neg_one(ROCJITSU_CODE_ARCH_CDNA5), cdna5::OPR_SRC_NEG_INT_MIN);
 
   // Base for non-negative inline integers (128 = 0), also generation-stable.
   EXPECT_EQ(kScalarPositiveInlineBase, 128);
@@ -428,7 +431,7 @@ TEST(InstructionBuilder, ScalarOperandCodesMatchGeneratedTables) {
   EXPECT_EQ(kScalarPositiveInlineBase, cdna4::OPR_SRC_POS_INT_MIN);
   EXPECT_EQ(kScalarPositiveInlineBase, rdna2::OPR_SRC_POS_INT_MIN);
   EXPECT_EQ(kScalarPositiveInlineBase, rdna4::OPR_SRC_POS_INT_MIN);
-  EXPECT_EQ(kScalarPositiveInlineBase, gfx1250::OPR_SRC_POS_INT_MIN);
+  EXPECT_EQ(kScalarPositiveInlineBase, cdna5::OPR_SRC_POS_INT_MIN);
 }
 
 // M0 moved from 124 (gfx9/gfx10.x) to 125 (gfx11+); each arch resolves to its
@@ -443,13 +446,13 @@ TEST(InstructionBuilder, ScalarOperandM0IsPerArch) {
   EXPECT_EQ(scalar_operand_m0(ROCJITSU_CODE_ARCH_RDNA3), rdna3::OPR_SDST_M0);
   EXPECT_EQ(scalar_operand_m0(ROCJITSU_CODE_ARCH_RDNA3_5), rdna3_5::OPR_SDST_M0);
   EXPECT_EQ(scalar_operand_m0(ROCJITSU_CODE_ARCH_RDNA4), rdna4::OPR_SDST_M0);
-  EXPECT_EQ(scalar_operand_m0(ROCJITSU_CODE_ARCH_GFX1250), gfx1250::OPR_SDST_M0);
+  EXPECT_EQ(scalar_operand_m0(ROCJITSU_CODE_ARCH_CDNA5), cdna5::OPR_SDST_M0);
 
   // gfx9 / gfx10.x = 124; gfx11+ = 125.
   EXPECT_EQ(scalar_operand_m0(ROCJITSU_CODE_ARCH_CDNA4), 124);
   EXPECT_EQ(scalar_operand_m0(ROCJITSU_CODE_ARCH_RDNA2), 124);
   EXPECT_EQ(scalar_operand_m0(ROCJITSU_CODE_ARCH_RDNA4), 125);
-  EXPECT_EQ(scalar_operand_m0(ROCJITSU_CODE_ARCH_GFX1250), 125);
+  EXPECT_EQ(scalar_operand_m0(ROCJITSU_CODE_ARCH_CDNA5), 125);
 }
 
 } // namespace

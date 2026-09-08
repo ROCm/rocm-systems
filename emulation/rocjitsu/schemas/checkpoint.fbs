@@ -22,6 +22,26 @@ table WavefrontState {
   vgprs: [ubyte];  // Vector register file (raw bytes).
   mode: uint32;     // MODE register.
   wave_sched_mode: uint32; // WAVE_SCHED_MODE register.
+  // Trap-temporary registers (TTMP0-15). These are a separate register file,
+  // not the tail of `sgprs`: the ISA decoder routes scalar selectors 108..123
+  // here. Appended last so older checkpoints still load: the accessor returns
+  // null, and restore then migrates the values out of `sgprs[108..123]`, which
+  // is where the same selectors were stored before the split. Zeroing them
+  // instead would not be safe -- RDNA4 and GFX1250 seed TTMP6/7/9 with
+  // workgroup ids at dispatch, so a wave that was never in a trap handler still
+  // holds meaningful TTMPs there.
+  ttmps: [uint32];
+  // Workgroup coordinate (x, y, z) this wave was dispatched with. Not derivable
+  // from `wg_id`: recovering the coordinate from the flat id needs the grid
+  // dimensions, which live in the dispatch packet and are not part of a
+  // checkpoint. Trap entry publishes these three values in TTMP8/9/10 and the
+  // CWSR codec serializes them, so a restored wave that lost them reports the
+  // wrong workgroup identity to the trap handler and cannot be matched back to
+  // its CWSR record. Appended last so older checkpoints still load; see
+  // restore_checkpoint() for the fallback applied when the accessor is null.
+  wg_coord: [uint32];
+  kernel_wave_size: ubyte; // Architectural wave width.
+  vgpr_lane_count: ubyte; // Per-register lane count in the VGPR payload.
 }
 
 /// Serialized state of a compute unit.

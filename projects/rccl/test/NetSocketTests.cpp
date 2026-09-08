@@ -4,11 +4,15 @@
  * See LICENSE.txt for license information
  ************************************************************************/
 #include "net.h"
+#include "socket.h"
+#include "os.h"
 #include "common/ErrCode.hpp"
 #include "common/ProcessIsolatedTestRunner.hpp"
 #include "gtest/gtest.h"
 #include <atomic>
+#include <cstdlib>
 #include <cstring>
+#include <string>
 #include <thread>
 
 extern ncclNet_t ncclNetSocket;
@@ -1599,6 +1603,95 @@ TEST_F(NetSocketTests, TestIflushAlwaysFails) {
       << "iflush should always return ncclInternalError";
 
   TEST_INFO("TestIflushAlwaysFails completed");
+}
+
+// AICOMRCCL-1894: the libvirt bridge interface must be considered LAST in the
+// bootstrap TCP interface auto-selection. libvirt names its default network
+// bridge virbr0 (virbr1, ...); such bridges serve host-to-VM (virtual machine)
+// traffic and cannot reach a remote node, so ncclFindInterfaces() must (a)
+// exclude virbr* from the general candidate set and (b) never auto-pick a
+// virbr* interface while any other interface exists (see the "^docker,lo,virbr"
+// primary pick and the "virbr" final fallback in src/misc/socket.cc).
+// Deterministic and GPU-free: it only enumerates the host's interfaces via the
+// socket layer's own matcher.
+TEST(NetBootstrapInterfaceTest, VirbrConsideredLast) {
+  constexpr int kMaxIfs = 16;
+  constexpr int kNameSz = MAX_IF_NAME_SIZE;
+
+  // Save/restore the process-global env this test touches so we neither pin the
+  // auto-selection path to a user-forced interface/family nor leak state into
+  // other tests in the same binary.
+  struct EnvGuard {
+    const char* name;
+    std::string saved;
+    bool had;
+    explicit EnvGuard(const char* n) : name(n) {
+      const char* v = getenv(n);
+      had = (v != nullptr);
+      if (had) saved = v;
+      unsetenv(n);
+    }
+    ~EnvGuard() {
+      if (had) setenv(name, saved.c_str(), 1);
+      else unsetenv(name);
+    }
+  };
+  EnvGuard guardIfname("NCCL_SOCKET_IFNAME");
+  EnvGuard guardCommId("NCCL_COMM_ID");
+  EnvGuard guardFamily("NCCL_SOCKET_FAMILY");
+
+  // Resolve the socket family only after NCCL_SOCKET_FAMILY has been cleared, so
+  // the probes are not forced to IPv6 -- which can legitimately return zero
+  // interfaces on an IPv4-only host and make this test flaky.
+  const int family = ncclEnvSocketFamily();
+
+  auto nameAt = [](const char* names, int i) {
+    return std::string(names + static_cast<size_t>(i) * kNameSz);
+  };
+  auto isVirbr = [](const std::string& n) { return n.rfind("virbr", 0) == 0; };
+
+  // (1) General candidate bucket — the auto-pick's primary query: everything
+  //     EXCEPT docker*, lo and virbr*. No virbr* interface may appear here.
+  char generalNames[kMaxIfs * kNameSz] = {};
+  union ncclSocketAddress generalAddrs[kMaxIfs] = {};
+  int nGeneral = 0;
+  ASSERT_EQ(ncclOsFindInterfaces("^docker,lo,virbr", generalNames, generalAddrs,
+                                 family, kNameSz, kMaxIfs, &nGeneral),
+            ncclSuccess);
+  for (int i = 0; i < nGeneral; ++i)
+    EXPECT_FALSE(isVirbr(nameAt(generalNames, i)))
+        << "virbr* interface '" << nameAt(generalNames, i)
+        << "' leaked into the general (non-bridge) candidate set";
+
+  // (2) The virbr* last-resort bucket, queried on its own: any match must in
+  //     fact be a virbr* interface.
+  char virbrNames[kMaxIfs * kNameSz] = {};
+  union ncclSocketAddress virbrAddrs[kMaxIfs] = {};
+  int nVirbr = 0;
+  ASSERT_EQ(ncclOsFindInterfaces("virbr", virbrNames, virbrAddrs, family,
+                                 kNameSz, kMaxIfs, &nVirbr),
+            ncclSuccess);
+  for (int i = 0; i < nVirbr; ++i)
+    EXPECT_TRUE(isVirbr(nameAt(virbrNames, i)));
+
+  // (3) Full priority order: ncclFindInterfaces() must not auto-select a virbr*
+  //     interface. Some non-virbr interface always exists (lo at minimum), and
+  //     lo is tried before virbr, so the bridge is never chosen.
+  char pick[kNameSz] = {};
+  union ncclSocketAddress pickAddr = {};
+  int nPick = 0;
+  ASSERT_EQ(ncclFindInterfaces(pick, &pickAddr, kNameSz, 1, &nPick),
+            ncclSuccess);
+  ASSERT_GT(nPick, 0) << "no bootstrap interface found at all";
+  EXPECT_FALSE(isVirbr(std::string(pick)))
+      << "ncclFindInterfaces auto-selected libvirt bridge '" << pick
+      << "'; virbr* must be the last-resort interface";
+
+  if (nVirbr == 0)
+    GTEST_SKIP() << "no virbr* interface present; the libvirt bridge fallback "
+                    "ordering was not exercised on this host";
+  TEST_INFO("virbr present (%d bridge iface(s)) but auto-pick chose '%s'",
+            nVirbr, pick);
 }
 
 } // namespace RcclUnitTesting

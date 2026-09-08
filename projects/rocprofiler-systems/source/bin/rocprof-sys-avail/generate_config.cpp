@@ -10,9 +10,10 @@
 #include "common/env_vars.hpp"
 #include "common/environment.hpp"
 #include "common/json_config.hpp"
+#include "common/path.hpp"
 
+#include <fmt/format.h>
 #include <nlohmann/json.hpp>
-#include <spdlog/fmt/fmt.h>
 #include <timemory/mpl/concepts.hpp>
 #include <timemory/mpl/policy.hpp>
 #include <timemory/settings.hpp>
@@ -22,7 +23,6 @@
 #include <timemory/tpls/cereal/cereal/archives/json.hpp>
 #include <timemory/tpls/cereal/cereal/archives/xml.hpp>
 #include <timemory/tpls/cereal/cereal/cereal.hpp>
-#include <timemory/utility/filepath.hpp>
 #include <timemory/utility/types.hpp>
 
 #include <cstddef>
@@ -31,9 +31,8 @@
 #include <sstream>
 #include <string>
 
-namespace cereal   = ::tim::cereal;
-namespace filepath = ::tim::filepath;
-using settings     = ::tim::settings;
+namespace cereal = ::tim::cereal;
+using ::tim::settings;
 using ::tim::tsettings;
 using ::tim::type_list;
 using ::tim::policy::output_archive;
@@ -188,10 +187,10 @@ generate_config(std::string _config_file, const std::set<std::string>& _config_f
     _settings->find("suppress_config")->second->reset();
     _settings->find("suppress_parsing")->second->reset();
 
-    _config_file   = settings::format(_config_file, _settings->get_tag());
-    bool _absolute = _config_file.at(0) == '/';
-    auto _dirs     = rocprofsys::delimit(_config_file, "/\\/");
-    _config_file   = _dirs.back();
+    _config_file         = settings::format(_config_file, _settings->get_tag());
+    const bool _absolute = _config_file.at(0) == '/';
+    auto       _dirs     = rocprofsys::delimit(_config_file, "/\\/");
+    _config_file         = _dirs.back();
     _dirs.pop_back();
 
     std::string _output_dir = ".";
@@ -208,7 +207,7 @@ generate_config(std::string _config_file, const std::set<std::string>& _config_f
 
     auto        _fmts    = std::set<std::string>{};
     std::string _txt_ext = ".cfg";
-    for(std::string itr : { ".cfg", ".txt", ".json", ".xml" })
+    for(const std::string itr : { ".cfg", ".txt", ".json", ".xml" })
     {
         if(_config_file.length() <= itr.length()) continue;
         auto _pos = _config_file.rfind(itr);
@@ -251,7 +250,7 @@ generate_config(std::string _config_file, const std::set<std::string>& _config_f
     auto _open = [&_nout, &fmt_opts](std::ofstream& _ofs, const std::string& _fname,
                                      const std::string& _type) -> std::ofstream& {
         ++_nout;
-        if(file_exists(_fname))
+        if(rocprofsys::path::is_regular_file(_fname))
         {
             if(fmt_opts.force_config)
             {
@@ -272,11 +271,13 @@ generate_config(std::string _config_file, const std::set<std::string>& _config_f
             }
         }
 
-        if(filepath::open(_ofs, _fname))
+        if(rocprofsys::path::create_parent_dirs_and_open_ofstream(_ofs, _fname))
         {
             if(settings::verbose() >= 0)
+            {
                 printf("[rocprof-sys-avail] Outputting %s configuration file '%s'...\n",
                        _type.c_str(), _fname.c_str());
+            }
         }
         else
         {

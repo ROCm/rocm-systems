@@ -18,13 +18,14 @@
 /// Unlike the packed-16 family the destination is a single 32-bit lane (NOT
 /// packed) and src2 is a per-lane accumulator; the dot reduction happens
 /// within each lane and the fast path vectorizes across lanes. The signed
-/// integer forms lower-clamp to 0 when the clamp bit is set, so the integer
-/// test sweeps clamp ∈ {0,1}; the f16 form half-selects via op_sel, sign-
+/// integer forms saturate to the full INT32 range when the clamp bit is set,
+/// so the integer test sweeps clamp ∈ {0,1}; the f16 form half-selects via op_sel, sign-
 /// flips via neg/neg_hi, and clamps to [0,1], so it sweeps every neg/neg_hi
 /// combination × clamp with NaN-input lanes skipped (toolchain-dependent NaN
 /// payload divergence, same carve-out as the pk_fma slices). Default packing
 /// (op_sel = 0, op_sel_hi = 3) only — non-default modes bail to scalar.
 
+#include "decode_test_util.h"
 #include "util/simd_test_hooks.h"
 
 #include "rocjitsu/code/rj_code.h"
@@ -42,6 +43,7 @@
 #include <bit>
 #include <cstdint>
 #include <gtest/gtest.h>
+#include <limits>
 #include <memory>
 #include <string>
 
@@ -135,7 +137,7 @@ void check_int_case(const IntCase &c, uint64_t exec, uint32_t clamp) {
     uint32_t words[2] = {0u, 0u};
     vop3p_encode_dot(c.opcode, kDstVgpr, /*src0=*/256, /*src1=*/257, /*src2=*/258, /*neg=*/0,
                      /*neg_hi=*/0, clamp, words);
-    Instruction *inst = decoder->decode(words);
+    Instruction *inst = decode_valid(*decoder, words);
     EXPECT_NE(inst, nullptr) << c.name << " decode failed";
 
     uint32_t vb = wf->vgpr_alloc().base;
@@ -193,6 +195,81 @@ TEST(Vop3pDotIntSimdCorrectness, PartialExec) {
       check_int_case(c, /*exec=*/0xA5A5'F0F0'1234'8001ULL, clamp);
 }
 
+// GFX11 uses the ordinary integer CLAMP behavior for DOT4. GFX12 and gfx1250
+// explicitly ignore the same encoded bit. These fixed overflow vectors are an
+// ISA golden rather than a scalar/SIMD self-comparison.
+uint32_t run_modern_dot4(rj_code_arch_t arch, uint32_t opcode, uint32_t src0_value,
+                         uint32_t src1_value, uint32_t accumulator, uint32_t neg,
+                         bool force_scalar) {
+  ForceScalarGuard gate_guard;
+  util::set_force_scalar_for_testing(force_scalar);
+
+  amdgpu::GpuMemory gpu_mem("vop3p_dot4_policy_mem");
+  amdgpu::L2Cache l2("vop3p_dot4_policy_l2");
+  amdgpu::ComputeUnitCore::Config cfg{};
+  cfg.arch = arch;
+  cfg.num_wf_slots = 1;
+  cfg.sgprs_per_wf = SGPRS_PER_WF;
+  cfg.vgprs_per_wf = VGPRS_PER_WF;
+  cfg.lds_size_kb = 64;
+  auto cu = amdgpu::ComputeUnitCore::create("cu_vop3p_dot4_policy", cfg, &gpu_mem, &l2);
+  EXPECT_NE(cu, nullptr);
+  auto decoder = Decoder::create(arch);
+  amdgpu::Wavefront *wf = cu->dispatch_wf(0, 0, SGPRS_PER_WF, VGPRS_PER_WF);
+  EXPECT_NE(wf, nullptr);
+
+  // GFX11/GFX12/gfx1250 VOP3P layout. Sources 256..258 name v0..v2;
+  // CLAMP is word0 bit 15 and NEG is word1 bits 29:31.
+  const uint32_t words[2] = {
+      0xCC000000u | ((opcode & 0xFFu) << 16) | (1u << 15) | kDstVgpr,
+      256u | (257u << 9) | (258u << 18) | (3u << 27) | ((neg & 7u) << 29),
+  };
+  Instruction *inst = decode_valid(*decoder, words);
+  EXPECT_NE(inst, nullptr);
+
+  const uint32_t vb = wf->vgpr_alloc().base;
+  for (uint32_t lane = 0; lane < wf->wf_size(); ++lane) {
+    cu->write_vgpr(vb + 0, lane, src0_value);
+    cu->write_vgpr(vb + 1, lane, src1_value);
+    cu->write_vgpr(vb + 2, lane, accumulator);
+    cu->write_vgpr(vb + kDstVgpr, lane, DST_SENTINEL);
+  }
+  wf->set_exec(1);
+  cu->execute_instruction(inst, *wf);
+  const uint32_t result = cu->read_vgpr(vb + kDstVgpr, 0);
+  delete inst;
+  return result;
+}
+
+TEST(Vop3pDotIntSimdCorrectness, Dot4ClampPolicyMatchesArchitecture) {
+  constexpr uint32_t kUnsignedWrapped = 0x0003F704u;
+  constexpr uint32_t kMixedSignedWrapped = 0x8000FBF9u;
+
+  for (bool force_scalar : {true, false}) {
+    // v_dot4_u32_u8: 0xffffff00 + 4 * 255 * 255.
+    EXPECT_EQ(run_modern_dot4(ROCJITSU_CODE_ARCH_RDNA3, 23, 0xFFFFFFFFu, 0xFFFFFFFFu, 0xFFFFFF00u,
+                              0, force_scalar),
+              std::numeric_limits<uint32_t>::max());
+    EXPECT_EQ(run_modern_dot4(ROCJITSU_CODE_ARCH_RDNA4, 23, 0xFFFFFFFFu, 0xFFFFFFFFu, 0xFFFFFF00u,
+                              0, force_scalar),
+              kUnsignedWrapped);
+    EXPECT_EQ(run_modern_dot4(ROCJITSU_CODE_ARCH_CDNA5, 23, 0xFFFFFFFFu, 0xFFFFFFFFu, 0xFFFFFF00u,
+                              0, force_scalar),
+              kUnsignedWrapped);
+
+    // v_dot4_i32_iu8 with both inputs signed: INT_MAX-10 + 4 * 127 * 127.
+    EXPECT_EQ(run_modern_dot4(ROCJITSU_CODE_ARCH_RDNA3, 22, 0x7F7F7F7Fu, 0x7F7F7F7Fu, 0x7FFFFFF5u,
+                              3, force_scalar),
+              static_cast<uint32_t>(std::numeric_limits<int32_t>::max()));
+    EXPECT_EQ(run_modern_dot4(ROCJITSU_CODE_ARCH_RDNA4, 22, 0x7F7F7F7Fu, 0x7F7F7F7Fu, 0x7FFFFFF5u,
+                              3, force_scalar),
+              kMixedSignedWrapped);
+    EXPECT_EQ(run_modern_dot4(ROCJITSU_CODE_ARCH_CDNA5, 22, 0x7F7F7F7Fu, 0x7F7F7F7Fu, 0x7FFFFFF5u,
+                              3, force_scalar),
+              kMixedSignedWrapped);
+  }
+}
+
 // ---- v_dot2_f32_f16 -------------------------------------------------------
 
 const std::array<uint16_t, 14> kF16Bits = {{
@@ -245,7 +322,7 @@ void check_f16_case(uint64_t exec, uint32_t neg, uint32_t neg_hi, uint32_t clamp
     uint32_t words[2] = {0u, 0u};
     vop3p_encode_dot(/*op=*/35, kDstVgpr, /*src0=*/256, /*src1=*/257, /*src2=*/258, neg, neg_hi,
                      clamp, words);
-    Instruction *inst = decoder->decode(words);
+    Instruction *inst = decode_valid(*decoder, words);
     EXPECT_NE(inst, nullptr) << "v_dot2_f32_f16 decode failed";
 
     uint32_t vb = wf->vgpr_alloc().base;

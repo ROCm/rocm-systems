@@ -818,14 +818,30 @@ typedef struct {
     hrr_event_header hdr;
     int32_t ret;
     uint64_t pCopy;
+    uint8_t drv2d_bytes[136];  /* hip_Memcpy2D inline copy */
+    uint64_t blob_hash_lo;  /* H2D blob hash lo (0 if not H2D) */
+    uint64_t blob_hash_hi;  /* H2D blob hash hi */
+    uint64_t d2h_hash_lo;  /* D2H expected-output blob hash lo (0 if not D2H) */
+    uint64_t d2h_hash_hi;  /* D2H expected-output blob hash hi */
 } hrr_args_hipDrvMemcpy2DUnaligned;
+#ifdef HIP_INCLUDE_HIP_HIP_RUNTIME_H
+static_assert(sizeof(hip_Memcpy2D) <= 136, "hrr_args_hipDrvMemcpy2DUnaligned::drv2d_bytes[136] too small for hip_Memcpy2D");
+#endif
 
 /* hipError_t hipDrvMemcpy3D(const HIP_MEMCPY3D* pCopy) */
 typedef struct {
     hrr_event_header hdr;
     int32_t ret;
     uint64_t pCopy;
+    uint8_t drv3d_bytes[192];  /* HIP_MEMCPY3D inline copy */
+    uint64_t blob_hash_lo;  /* H2D blob hash lo (0 if not H2D) */
+    uint64_t blob_hash_hi;  /* H2D blob hash hi */
+    uint64_t d2h_hash_lo;  /* D2H expected-output blob hash lo (0 if not D2H) */
+    uint64_t d2h_hash_hi;  /* D2H expected-output blob hash hi */
 } hrr_args_hipDrvMemcpy3D;
+#ifdef HIP_INCLUDE_HIP_HIP_RUNTIME_H
+static_assert(sizeof(HIP_MEMCPY3D) <= 192, "hrr_args_hipDrvMemcpy3D::drv3d_bytes[192] too small for HIP_MEMCPY3D");
+#endif
 
 /* hipError_t hipDrvMemcpy3DAsync(const HIP_MEMCPY3D* pCopy, hipStream_t stream) */
 typedef struct {
@@ -833,7 +849,15 @@ typedef struct {
     int32_t ret;
     uint64_t pCopy;
     uint64_t stream;
+    uint8_t drv3d_bytes[192];  /* HIP_MEMCPY3D inline copy */
+    uint64_t blob_hash_lo;  /* H2D blob hash lo (0 if not H2D) */
+    uint64_t blob_hash_hi;  /* H2D blob hash hi */
+    uint64_t d2h_hash_lo;  /* D2H expected-output blob hash lo (0 if not D2H) */
+    uint64_t d2h_hash_hi;  /* D2H expected-output blob hash hi */
 } hrr_args_hipDrvMemcpy3DAsync;
+#ifdef HIP_INCLUDE_HIP_HIP_RUNTIME_H
+static_assert(sizeof(HIP_MEMCPY3D) <= 192, "hrr_args_hipDrvMemcpy3DAsync::drv3d_bytes[192] too small for HIP_MEMCPY3D");
+#endif
 
 /* hipError_t hipDrvPointerGetAttributes(unsigned int numAttributes, hipPointer_attribute* attributes, void** data, hipDeviceptr_t ptr) */
 typedef struct {

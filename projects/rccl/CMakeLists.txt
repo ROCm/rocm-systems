@@ -84,6 +84,7 @@ option(BUILD_BFD                               "Enable custom backtrace (if bfd.
 option(BUILD_LOCAL_GPU_TARGET_ONLY             "Build only for GPUs detected on this machine"  OFF)
 option(BUILD_SHARED_LIBS                       "Build as shared library"                       ON)
 option(BUILD_TESTS                             "Build unit test programs"                      OFF)
+option(BUILD_PROFILER_INSPECTOR                "Build the NCCL Inspector profiler plugin"      ${BUILD_TESTS})
 option(BUILD_PLUGIN_EXAMPLES                      "Build plugin example libraries (net, tuner, profiler, env)" OFF)
 option(DUMP_ASM                                "Disassemble and dump"                          OFF)
 option(ENABLE_CODE_COVERAGE                    "Enable code coverage"                          OFF)
@@ -99,18 +100,34 @@ option(BUILD_NCCL4PY                           "Build the nccl4py Python binding
 # layout for diagnostics.  See cmake/linker_scripts/hip_fatbin_tail.ld.
 option(RCCL_HIP_FATBIN_AT_TAIL                 "Place .hip_fatbin at the end of librccl.so"    ON)
 option(GENERATE_SYM_KERNELS                    "Generate symmetric memory kernels"             ON)
+option(ENABLE_TDM_SIMPLE                       "Build the experimental gfx1250 TDM SIMPLE copy path" OFF)
 option(INSTALL_DEPENDENCIES                    "Force install dependencies"                    OFF)
 option(REPORT_KERNEL_RESOURCE_USE              "Append -Rpass-analysis=kernel to CXX flags"    OFF)
 option(ROCTX                                   "Enable ROCTX"                                  ${RCCL_DEFAULT_ROCTX})
+option(SQTT_ENABLED                            "Enable SQTT instrumentation"                   OFF)
 option(TIMETRACE                               "Enable time-trace during compilation"          OFF)
 option(TRACE                                   "Enable additional tracing"                     OFF)
 option(QP_TRACKING                             "Enable per-device QP tracking"                 OFF)
 option(FAULT_INJECTION                         "Enable fault injection"                        ON)
 option(QUIET_WARNINGS                          "Supress compiler warnings"                     OFF)
 option(DWORDX4_INTRINSICS                      "Turn off compilation with dwordx4 intrinsics"  ON)
-option(ENABLE_ROCSHMEM                         "Link librocshmem.a into librccl.so (full rocSHMEM device+host integration)" OFF)
-option(ENABLE_ROCSHMEM_GIN                     "Compile GIN rocshmem plugins; symbols resolved at runtime by the executable" OFF)
-option(GIN_ANVIL_UNIT_TESTS                    "Build GIN Anvil device unit tests with ENABLE_ROCSHMEM on test targets only (no full librocshmem in librccl)" OFF)
+if(ENABLE_TDM_SIMPLE)
+  add_compile_definitions(ENABLE_TDM_SIMPLE=1)
+endif()
+# rocSHMEM integration (mutually exclusive — enabling both causes duplicate
+# rocshmem state between librccl.so and the executable at runtime):
+#   ENABLE_ROCSHMEM: alltoall_wg offload.  Links librocshmem.a into librccl.so
+#     via -fgpu-rdc --hip-link.  Does not enable GIN plugins.
+#   ENABLE_ROCSHMEM_GIN: GIN plugins (GDA, SDMA).  Device symbols (QueuePair)
+#     resolved via per-arch bitcode injection; host symbols resolved at runtime
+#     from the executable.  Does not enable alltoall_wg offload.
+option(ENABLE_ROCSHMEM                         "Full rocSHMEM: link librocshmem.a into librccl.so (alltoall_wg offload)" OFF)
+option(ENABLE_ROCSHMEM_GIN                     "GIN plugins: device bitcode injected at build, host resolved at runtime" OFF)
+if(ENABLE_ROCSHMEM AND ENABLE_ROCSHMEM_GIN)
+  message(FATAL_ERROR "ENABLE_ROCSHMEM and ENABLE_ROCSHMEM_GIN are mutually exclusive")
+endif()
+set(ROCSHMEM_CMAKE_OPTIONS "" CACHE STRING     "Extra cmake options passed to the rocSHMEM ExternalProject build")
+option(GIN_ANVIL_UNIT_TESTS                    "Build GIN Anvil device-template unit tests (ENABLE_ROCSHMEM_GIN on Fixtures; no full librocshmem in librccl)" OFF)
 option(ENABLE_WARP_SPEED                       "Enable WARP_SPEED optimizations"               OFF)
 
 # Default GPU architectures to build
@@ -166,10 +183,23 @@ set(GPU_TARGETS "${DEFAULT_GPUS}" CACHE STRING "Target default GPUs if GPU_TARGE
 
 # Modify GPU architectures for Address Sanitizer builds by appending "xnack+"
 if (BUILD_ADDRESS_SANITIZER)
-  execute_process(
-    COMMAND ${CMAKE_CXX_COMPILER} -print-file-name=libclang_rt.asan-x86_64.so
-    OUTPUT_VARIABLE ASAN_RUNTIME_PATH OUTPUT_STRIP_TRAILING_WHITESPACE)
-  get_filename_component(ASAN_RUNTIME_DIR "${ASAN_RUNTIME_PATH}" DIRECTORY)
+  set(_suffix "asan")
+  set(_clang_rt_names "libclang_rt.${_suffix}.so" "libclang_rt.${_suffix}-x86_64.so")
+  foreach(_clang_rt_name ${_clang_rt_names})
+    execute_process(
+      COMMAND ${CMAKE_CXX_COMPILER} -print-file-name=${_clang_rt_name}
+      OUTPUT_VARIABLE _clang_rt_path OUTPUT_STRIP_TRAILING_WHITESPACE)
+    # If _clang_rt_path is libclang_rt.asan-x86_64.so
+    # rather than /path/to/libclang_rt.asan-x86_64.so then
+    # we failed to locate it.
+    if(IS_ABSOLUTE "${_clang_rt_path}" AND EXISTS "${_clang_rt_path}")
+      get_filename_component(ASAN_RUNTIME_DIR "${_clang_rt_path}" DIRECTORY)
+      break()
+    endif()
+  endforeach()
+  if(NOT ASAN_RUNTIME_DIR)
+    message(FATAL_ERROR "Failed to locate libclang_rt.asan-x86_64.so or libclang_rt.asan.so")
+  endif()
   message(STATUS "ASAN runtime directory: ${ASAN_RUNTIME_DIR}")
 
   SET(amdgpu_targets "")
@@ -325,6 +355,18 @@ if (rocm_version_matches)
     # Convert the version components to int for comparison
     math(EXPR ROCM_VERSION "(10000 * ${ROCM_MAJOR_VERSION}) + (100 * ${ROCM_MINOR_VERSION}) + ${ROCM_PATCH_VERSION}")
     add_definitions("-DROCM_VERSION=${ROCM_VERSION}")
+
+    # SQTT instrumentation requires ROCm >= 7.13
+    if(SQTT_ENABLED)
+      set(ROCM_VERSION_STRING "${ROCM_MAJOR_VERSION}.${ROCM_MINOR_VERSION}")
+      if(ROCM_VERSION_STRING VERSION_LESS "7.13")
+        message(WARNING "SQTT instrumentation requires ROCm version >= 7.13. Current version: ${ROCM_VERSION_STRING}. Disabling SQTT_ENABLED.")
+        set(SQTT_ENABLED OFF CACHE BOOL "Enable SQTT instrumentation" FORCE)
+      else()
+        message(STATUS "SQTT instrumentation enabled (ROCm ${ROCM_VERSION_STRING})")
+        add_definitions("-DSQTT_ENABLED=1")
+      endif()
+    endif()
 else()
     message(WARNING "Failed to extract ROCm version.")
 endif()
@@ -652,6 +694,12 @@ configure_file(src/nccl.h.in ${PROJECT_BINARY_DIR}/include/nccl.h)      # Used b
 # Source directory contains library creation
 add_subdirectory(src)
 
+# NCCL Inspector profiler plugin. Built as its own .so and loaded at runtime via
+# NCCL_PROFILER_PLUGIN; the MPI tests pick up the in-tree build automatically.
+if(BUILD_PROFILER_INSPECTOR)
+  add_subdirectory(plugins/profiler/inspector)
+endif()
+
 # LLVM IR / bitcode for nccl_device APIs (HIP / AMDGPU)
 #==================================================================================================
 # When EMIT_LLVM_IR=ON, build a standalone LLVM bitcode artifact (librccl_device.bc)
@@ -662,7 +710,9 @@ if(EMIT_LLVM_IR)
   add_subdirectory(bindings/ir)
   # bindings/ir/ reads headers out of ${PROJECT_BINARY_DIR}/hipify, which is
   # populated by the copy_nccl_device_headers target defined in src/CMakeLists.txt.
-  add_dependencies(llvm_ir copy_nccl_device_headers)
+  # nccl_device_header_symlinks provides the un-suffixed core.h/comm.h/gin.h
+  # aliases (hipify renames them to *_tmp.h) that the verbatim IR wrapper needs.
+  add_dependencies(llvm_ir copy_nccl_device_headers nccl_device_header_symlinks)
   # Convenience aggregate target: builds librccl.so together with the bitcode.
   add_custom_target(rccl_with_ir ALL DEPENDS rccl llvm_ir)
 endif()
@@ -774,6 +824,7 @@ if(BUILD_TESTS)
     add_subdirectory(plugins/tuner/example)
     add_subdirectory(plugins/profiler/example)
     add_subdirectory(plugins/profiler/proxytrace)
+    add_subdirectory(plugins/profiler/accl)
   endif()
   add_subdirectory(test)
 

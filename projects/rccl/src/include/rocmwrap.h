@@ -68,8 +68,7 @@
 // asserted in unit tests; the gate itself is this build's instantiation.
 #define NCCL_CUMEM_DMABUF_EXPORT_GATE_FOR(probe, v) ((probe) && NCCL_CUMEM_VERSION_SUPPORTED(v))
 
-#define NCCL_CUMEM_DMABUF_EXPORT_GATE \
-  NCCL_CUMEM_DMABUF_EXPORT_GATE_FOR(NCCL_CUMEM_DMABUF_EXPORT_PROBE, HIP_VERSION)
+#define NCCL_CUMEM_DMABUF_EXPORT_GATE NCCL_CUMEM_DMABUF_EXPORT_GATE_FOR(NCCL_CUMEM_DMABUF_EXPORT_PROBE, HIP_VERSION)
 
 // HIP: implemented in rma_proxy_launch.cc (hipStreamBatchMemOp + old-HIP fallback).
 // CUDA: implemented in cudawrap.cc (cuStreamBatchMemOp).
@@ -198,6 +197,8 @@ static inline bool ncclHsaRegMrDmaBuf(ncclResult_t (*regMrDmaBuf)(void*, void*, 
 }
 
 extern int ncclCuMemEnable();
+extern int ncclIsCuMemSupported();
+extern int ncclCuMemRuntimeSupported();
 extern int ncclCuMemHostEnable();
 extern int64_t rcclParamForceEnableDMABUF();
 extern int64_t ncclParamDmaBufEnable();

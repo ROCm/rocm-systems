@@ -165,8 +165,8 @@ HPC presets
 
 **Purpose:** Optimized for MPI, OpenMP, and compute-intensive applications
 
-**Configuration:** Tracing ON, Profiling ON, MPI ON, OpenMP ON, Kokkos ON,
-RCCL ON, PAPI events ON, ROCm domains ON, GPU metrics ON
+**Configuration:** Tracing ON, Profiling ON (flat profile), MPI ON, OpenMP ON,
+Kokkos ON, RCCL ON, PAPI events ON, ROCm domains ON, GPU metrics ON
 
 .. code-block:: shell
 

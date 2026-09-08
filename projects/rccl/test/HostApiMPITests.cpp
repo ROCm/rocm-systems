@@ -11,6 +11,7 @@
  * Tests cover:
  *   W1  - WindowRegisterDeregister: collective register/deregister lifecycle
  *   P1  - SinglePutRank0ToRank1:   basic ncclPutSignal + ncclWaitSignal
+ *   G1  - GraphCaptureReplayPutWait: capture once, replay and verify repeatedly
  *   P2  - PutWithNonZeroOffset:    peerWinOffset at kSize/2
  *   P3  - PutMultipleDataTypes:    float32, int32, float16 (raw bytes)
  *   S1  - SignalOnlyNoData:        ncclSignal with no data transfer
@@ -277,6 +278,121 @@ TEST_F(HostApiTest, SinglePutRank0ToRank1)
     ASSERT_MPI_TRUE(ok);
 
     TEST_INFO("P1 rank %d: SinglePutRank0ToRank1 passed.", myRank);
+}
+
+// ============================================================================
+// G1 — GraphCaptureReplayPutWait
+// ============================================================================
+
+/**
+ * @test HostApiTest.GraphCaptureReplayPutWait
+ * @brief Capture ncclPutSignal/ncclWaitSignal once and replay repeatedly.
+ *
+ * Rank 0 captures a PUT into rank 1's window while rank 1 captures the
+ * matching wait.  Each replay uses a different source pattern, proving that
+ * the graph performs a fresh transfer rather than exposing data left by the
+ * first launch.  No eager Put/Wait warm-up is issued before capture.
+ */
+TEST_F(HostApiTest, GraphCaptureReplayPutWait)
+{
+    constexpr int kReplayCount = 10;
+
+    if(!validateTestPrerequisites(/*min=*/2, /*max=*/2))
+    {
+        GTEST_SKIP() << "Need exactly 2 MPI processes";
+    }
+
+    const int   myRank = rank();
+    ncclComm_t  comm   = getActiveCommunicator();
+    hipStream_t stream = getActiveStream();
+
+    void* winBuf = nullptr;
+    ASSERT_MPI_EQ(ncclSuccess, allocFineGrainBuffer(&winBuf, kOneMB));
+    auto winBufGuard = makeScopeGuard([&]() { freeFineGrainBuffer(winBuf); });
+
+    ncclWindow_t win = nullptr;
+    NcclWindowGuard wg(comm, winBuf, kOneMB, &win, winMode());
+    ASSERT_MPI_NE(win, nullptr);
+    ASSERT_MPI_EQ(ncclSuccess, wg.initResult());
+
+    void* srcBuf = static_cast<uint8_t*>(winBuf) + kSendOffset;
+    void* dstBuf = static_cast<uint8_t*>(winBuf) + kRecvOffset;
+
+    hipGraph_t graph = nullptr;
+    hipGraphExec_t graphExec = nullptr;
+    bool captureActive = false;
+
+    auto graphCleanup = makeScopeGuard([&]() {
+        if(captureActive)
+        {
+            hipGraph_t abandonedGraph = nullptr;
+            if(hipStreamEndCapture(stream, &abandonedGraph) == hipSuccess && abandonedGraph)
+                (void)hipGraphDestroy(abandonedGraph);
+        }
+        if(graphExec)
+            (void)hipGraphExecDestroy(graphExec);
+        if(graph)
+            (void)hipGraphDestroy(graph);
+    });
+
+    hipError_t captureRes = hipStreamBeginCapture(stream, hipStreamCaptureModeThreadLocal);
+    captureActive = (captureRes == hipSuccess);
+    ASSERT_MPI_EQ(hipSuccess, captureRes);
+
+    ncclResult_t rmaRes = ncclSuccess;
+    if(myRank == 0)
+    {
+        rmaRes = ncclPutSignal(srcBuf, kTransferSize, ncclUint8,
+                               /*peer=*/1, win, /*peerWinOffset=*/kRecvOffset,
+                               kSigIdx, kCtx, kFlags, comm, stream);
+    }
+    else
+    {
+        ncclWaitSignalDesc_t desc{/*opCnt=*/1, /*peer=*/0, kSigIdx, kCtx};
+        rmaRes = ncclWaitSignal(/*nDesc=*/1, &desc, comm, stream);
+    }
+    ASSERT_MPI_EQ(ncclSuccess, rmaRes);
+
+    captureRes = hipStreamEndCapture(stream, &graph);
+    captureActive = false;
+    ASSERT_MPI_EQ(hipSuccess, captureRes);
+    ASSERT_MPI_NE(nullptr, graph);
+
+    size_t numNodes = 0;
+    ASSERT_MPI_EQ(hipSuccess, hipGraphGetNodes(graph, nullptr, &numNodes));
+    ASSERT_MPI_GT(numNodes, 0u);
+
+    ASSERT_MPI_EQ(hipSuccess, hipGraphInstantiate(&graphExec, graph, nullptr, nullptr, 0));
+    ASSERT_MPI_NE(nullptr, graphExec);
+
+    for(int replay = 0; replay < kReplayCount; ++replay)
+    {
+        const int seed = 17 + replay * 31;
+        if(myRank == 0)
+            FillBuf(srcBuf, kTransferSize, seed);
+        else
+            FillSentinel(dstBuf, kTransferSize, 0);
+
+        ASSERT_MPI_SUCCESS(MPI_Barrier(MPI_COMM_WORLD));
+        ASSERT_MPI_EQ(hipSuccess, hipGraphLaunch(graphExec, stream));
+        ASSERT_MPI_EQ(hipSuccess, hipStreamSynchronize(stream));
+
+        const bool dataValid = (myRank != 1) || VerifyBuf(dstBuf, kTransferSize, seed);
+        ASSERT_MPI_TRUE(dataValid);
+        TEST_INFO("G1 rank %d: replay %d/%d passed.", myRank, replay + 1, kReplayCount);
+    }
+
+    hipError_t destroyRes = hipGraphExecDestroy(graphExec);
+    if(destroyRes == hipSuccess)
+        graphExec = nullptr;
+    ASSERT_MPI_EQ(hipSuccess, destroyRes);
+
+    destroyRes = hipGraphDestroy(graph);
+    if(destroyRes == hipSuccess)
+        graph = nullptr;
+    ASSERT_MPI_EQ(hipSuccess, destroyRes);
+
+    TEST_INFO("G1 rank %d: GraphCaptureReplayPutWait passed.", myRank);
 }
 
 // ============================================================================
@@ -1827,6 +1943,56 @@ TEST_F(HostApiTest, DestroyCommWithoutDeregister)
     MPI_Barrier(MPI_COMM_WORLD);
 
     TEST_INFO("W4 rank %d: DestroyCommWithoutDeregister passed.", worldRank);
+}
+
+// ============================================================================
+// W5 — WindowRegisterInvalidArgsNullWindow
+// ============================================================================
+
+/**
+ * @test HostApiTest.WindowRegisterInvalidArgsNullWindow
+ * @brief ncclCommWindowRegister must never leave the caller's window handle
+ *        pointing at an uninitialised/garbage value.
+ *
+ * Validates the entry-point contract aligned with NCCL 2.30.4: the window is
+ * initialised to NULL up front, and invalid arguments are rejected with
+ * ncclInvalidArgument while leaving the out window NULL. The caller seeds the
+ * handle with a non-NULL sentinel beforehand to prove the API overwrites it.
+ *
+ */
+TEST_F(HostApiTest, WindowRegisterInvalidArgsNullWindow)
+{
+    if(!validateTestPrerequisites(/*min=*/2))
+    {
+        GTEST_SKIP() << "Need at least 2 MPI processes";
+    }
+
+    const int  myRank = rank();
+    ncclComm_t comm   = getActiveCommunicator();
+
+    void* winBuf = nullptr;
+    ASSERT_MPI_EQ(ncclSuccess, allocFineGrainBuffer(&winBuf, kOneMB));
+    auto winBufGuard = makeScopeGuard([&]() { freeFineGrainBuffer(winBuf); });
+
+    ncclWindow_t sentinel = reinterpret_cast<ncclWindow_t>(0x1);
+
+    // Case 1: NULL buffer -> ncclInvalidArgument, window forced to NULL.
+    {
+        ncclWindow_t win = sentinel;
+        ncclResult_t res = ncclCommWindowRegister(comm, nullptr, kOneMB, &win, winMode());
+        ASSERT_MPI_EQ(ncclInvalidArgument, res);
+        ASSERT_MPI_EQ(win, nullptr);
+    }
+
+    // Case 2: zero size -> ncclInvalidArgument, window forced to NULL.
+    {
+        ncclWindow_t win = sentinel;
+        ncclResult_t res = ncclCommWindowRegister(comm, winBuf, 0, &win, winMode());
+        ASSERT_MPI_EQ(ncclInvalidArgument, res);
+        ASSERT_MPI_EQ(win, nullptr);
+    }
+
+    TEST_INFO("W5 rank %d: WindowRegisterInvalidArgsNullWindow passed.", myRank);
 }
 
 } // namespace RcclUnitTesting

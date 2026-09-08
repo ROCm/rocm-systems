@@ -598,9 +598,10 @@ bool Program::ParseAllOptions(const std::string& options, option::Options& parse
         allOpts.append(" ");
         allOpts.append(AMD_OCL_BUILD_OPTIONS);
       }
-      if (!Device::appProfile()->GetBuildOptsAppend().empty()) {
+      const std::string& buildOptsAppend = Device::appProfile()->GetBuildOptsAppend();
+      if (!buildOptsAppend.empty()) {
         allOpts.append(" ");
-        allOpts.append(Device::appProfile()->GetBuildOptsAppend());
+        allOpts.append(buildOptsAppend);
       }
       if (AMD_OCL_BUILD_OPTIONS_APPEND != NULL) {
         allOpts.append(" ");
@@ -608,7 +609,21 @@ bool Program::ParseAllOptions(const std::string& options, option::Options& parse
       }
     }
   }
-  return amd::option::parseAllOptions(allOpts, parsedOptions, linkOptsOnly);
+
+  bool result = amd::option::parseAllOptions(allOpts, parsedOptions, linkOptsOnly);
+
+  if (!result) {
+    // Sanitize newlines in both strings to keep the log output on a single line.
+    auto sanitize = [](std::string s) {
+      for (char& c : s)
+        if (c == '\n' || c == '\r') c = ' ';
+      return s;
+    };
+    LogPrintfError("ParseAllOptions failed: options=\"%s\", optionsLog=\"%s\"",
+                   sanitize(allOpts).c_str(), sanitize(parsedOptions.optionsLog()).c_str());
+  }
+
+  return result;
 }
 
 bool Symbol::setDeviceKernel(const Device& device, const device::Kernel* func) {

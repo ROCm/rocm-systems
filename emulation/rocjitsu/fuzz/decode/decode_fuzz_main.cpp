@@ -7,7 +7,7 @@
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna2/test_encodings.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna3/test_encodings.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna4/test_encodings.h"
-#include "rocjitsu/isa/arch/amdgpu/generated/gfx1250/test_encodings.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna5/test_encodings.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna1/test_encodings.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna2/test_encodings.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna3/test_encodings.h"
@@ -126,7 +126,7 @@ size_t emit_seeds(const std::filesystem::path &directory, std::string_view targe
   else if (target == "rdna4")
     write_encodings(rocjitsu::rdna4::test_data::ENCODINGS);
   else if (target == "gfx1250")
-    write_encodings(rocjitsu::gfx1250::test_data::ENCODINGS);
+    write_encodings(rocjitsu::cdna5::test_data::ENCODINGS);
   else
     throw std::runtime_error("unsupported decoder target: " + std::string(target));
 
@@ -136,7 +136,7 @@ size_t emit_seeds(const std::filesystem::path &directory, std::string_view targe
     constexpr std::array<uint32_t, 3> kFmamkF64 = {0x46040504u, 0x00000000u, 0xC1F00000u};
     constexpr std::array<uint32_t, 3> kFmaakF64 = {0x48040504u, 0x00000000u, 0xC1F00000u};
     constexpr std::array<uint32_t, 3> kTrue16Literal = {0xD7620086u, 0x02030CFFu, 0x000000FFu};
-    constexpr std::array<uint32_t, 4> kWmmaScale = {0xCC350000u, 0x02020900u, 0xCC330006u,
+    constexpr std::array<uint32_t, 4> kWmmaScale = {0xCC350000u, 0x04020900u, 0xCC330006u,
                                                     0x02026912u};
     write("v_fmamk_f64_literal", words_to_window(kFmamkF64));
     write("v_fmaak_f64_literal", words_to_window(kFmaakF64));

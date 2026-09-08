@@ -16,6 +16,12 @@
 #                          (first-hipMalloc capture, embedded-pointer struct
 #                          args, uncaptured-host-write divergence, null optional
 #                          output pointer 0x20000 fault class, replay zero-init).
+#   hrr_spt_workload_test.cc — Hidden ([.][hrr-direct]) workload for the
+#                          per-thread-default-stream (_spt) entry points.  Built
+#                          with the per-thread compile option set below, which is
+#                          how applications reach _spt; it must stay a separate
+#                          translation unit so the other workloads keep resolving
+#                          to the plain entry points.
 #   hrr_roundtrip_test.cc — Round-trip: sets HIP_HRR_CAPTURE_OUTPUT, spawns
 #                          Unit_HRR_GpuWorkload_Direct / Unit_HRR_GraphWorkload_Direct
 #                          as subprocesses, then runs hrr-playback to validate
@@ -41,9 +47,21 @@ set(TEST_SRC
     hrr_playback_test.cc
     hrr_workload_test.cc
     hrr_repro_workload_test.cc
+    hrr_spt_workload_test.cc
     hrr_roundtrip_test.cc
     ${HRR_CLR_DIR}/playback/hrr_reader.cpp
 )
+
+# hrr_spt_workload_test.cc calls the ordinary hipMemset* names and relies on
+# this option to redirect them to the _spt entry points under test.  Per source,
+# not per target: the remaining workloads must keep the plain entry points.
+if(HIP_PLATFORM STREQUAL "amd")
+  set_source_files_properties(hrr_spt_workload_test.cc PROPERTIES
+                              COMPILE_OPTIONS "-fgpu-default-stream=per-thread")
+elseif(HIP_PLATFORM STREQUAL "nvidia")
+  set_source_files_properties(hrr_spt_workload_test.cc PROPERTIES
+                              COMPILE_OPTIONS "--default-stream=per-thread")
+endif()
 
 hip_add_exe_to_target(NAME HrrTest
                       TEST_SRC ${TEST_SRC}

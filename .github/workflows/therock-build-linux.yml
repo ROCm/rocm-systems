@@ -31,7 +31,7 @@ jobs:
     permissions:
       id-token: write
     container:
-      image: ghcr.io/rocm/therock_build_manylinux_x86_64@sha256:a382085df3ba2419b58aa9051350883a0d0b732a4bc0a4ef60458f8161bb08c6 # 2026-06-11
+      image: ghcr.io/rocm/therock_build_manylinux_x86_64@sha256:cf4f6d9909056906e4a1c0bc4c245658a0af4c6a6174082a86adfa2d518b7aeb # 2026-08-18
     strategy:
       fail-fast: true
     env:
@@ -48,7 +48,7 @@ jobs:
         with:
           repository: "ROCm/TheRock"
           path: "TheRock"
-          ref: 2e7c190b99caa226a8644eda6eca720b3db102d5 # 2026-07-22
+          ref: 648a501e56a1e0919976d6f540b7853e63d44998 # 2026-09-02
 
       - name: Install python deps
         run: |

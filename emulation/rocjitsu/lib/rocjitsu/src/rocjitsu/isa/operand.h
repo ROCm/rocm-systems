@@ -9,10 +9,13 @@
 
 #include "rocjitsu/isa/arch/amdgpu/shared/vgpr_msb.h"
 #include "rocjitsu/isa/register_set.h"
+#include "rocjitsu/result.h"
+#include "util/diagnostic.h"
+#include "util/simd.h"
 
 #include <cassert>
+#include <cstddef>
 #include <cstdint>
-#include <memory>
 #include <optional>
 #include <string>
 
@@ -29,23 +32,103 @@ class InstructionComputeUnitView;
 class RegisterAccess;
 class Wavefront;
 
-/// @brief Wave64 VGPR storage type — the register file element. Operands hand
-/// the SIMD glue a typed view of this (a `simdojo::VectorReg<64,uint32_t>`, no
-/// raw pointer) for the read/write fast path.
-using VgprStorage = simdojo::VectorReg<64, uint32_t>;
+/// @brief Non-owning mutable view of one physical VGPR.
+/// @details The view keeps SIMD execution independent of the ISA-specific
+/// physical register width. gfx1250 stores 32 lanes while RDNA and CDNA store
+/// up to 64; both use the same native SIMD load/store path.
+class VgprStorage {
+public:
+  VgprStorage() = default;
+  VgprStorage(uint32_t *data, uint32_t lane_count) : data_(data), lane_count_(lane_count) {}
+
+  explicit operator bool() const { return data_ != nullptr; }
+  uint32_t lane_count() const { return lane_count_; }
+  uint32_t &operator[](size_t lane) const {
+    assert(lane < lane_count_);
+    return data_[lane];
+  }
+
+  template <typename T> util::native<T> simd_load(size_t lane_base) const {
+    assert(lane_base + util::native_width_v<T> <= lane_count_);
+    return util::load<T>(data_ + lane_base);
+  }
+  template <typename T>
+  void simd_store(size_t lane_base, util::native<T> value, uint64_t mask) const {
+    assert(lane_base + util::native_width_v<T> <= lane_count_);
+    util::masked_store<T>(data_ + lane_base, value, mask);
+  }
+  template <typename T> util::narrow32<T> simd_load_narrow(size_t lane_base) const {
+    assert(lane_base + util::native_width64 <= lane_count_);
+    return util::load_narrow<T>(data_ + lane_base);
+  }
+  template <typename T>
+  void simd_store_narrow(size_t lane_base, util::narrow32<T> value, uint64_t mask) const {
+    assert(lane_base + util::native_width64 <= lane_count_);
+    util::masked_store_narrow<T>(data_ + lane_base, value, mask);
+  }
+  template <typename T> util::native<T> simd_load64(const VgprStorage &hi, size_t lane_base) const {
+    assert(lane_count_ == hi.lane_count_);
+    assert(lane_base + util::native_width64 <= lane_count_);
+    return util::load64<T>(data_ + lane_base, hi.data_ + lane_base);
+  }
+  template <typename T>
+  void simd_store64(const VgprStorage &hi, size_t lane_base, util::native<T> value,
+                    uint64_t mask) const {
+    assert(lane_count_ == hi.lane_count_);
+    assert(lane_base + util::native_width64 <= lane_count_);
+    util::masked_store64<T>(data_ + lane_base, hi.data_ + lane_base, value, mask);
+  }
+
+private:
+  uint32_t *data_ = nullptr;
+  uint32_t lane_count_ = 0;
+};
+
+/// @brief Non-owning read-only view of one physical VGPR.
+class ConstVgprStorage {
+public:
+  ConstVgprStorage() = default;
+  ConstVgprStorage(const uint32_t *data, uint32_t lane_count)
+      : data_(data), lane_count_(lane_count) {}
+
+  explicit operator bool() const { return data_ != nullptr; }
+  uint32_t lane_count() const { return lane_count_; }
+  uint32_t operator[](size_t lane) const {
+    assert(lane < lane_count_);
+    return data_[lane];
+  }
+  template <typename T> util::native<T> simd_load(size_t lane_base) const {
+    assert(lane_base + util::native_width_v<T> <= lane_count_);
+    return util::load<T>(data_ + lane_base);
+  }
+  template <typename T> util::narrow32<T> simd_load_narrow(size_t lane_base) const {
+    assert(lane_base + util::native_width64 <= lane_count_);
+    return util::load_narrow<T>(data_ + lane_base);
+  }
+  template <typename T>
+  util::native<T> simd_load64(const ConstVgprStorage &hi, size_t lane_base) const {
+    assert(lane_count_ == hi.lane_count_);
+    assert(lane_base + util::native_width64 <= lane_count_);
+    return util::load64<T>(data_ + lane_base, hi.data_ + lane_base);
+  }
+
+private:
+  const uint32_t *data_ = nullptr;
+  uint32_t lane_count_ = 0;
+};
 
 /// @brief A `{lo, hi}` pair of typed per-register VGPR storage views for a
 /// 64-bit-lane operand. `lo` is the lower-numbered VGPR (reg N, bits [31:0]);
 /// `hi` is reg N+1 (bits [63:32]). Either both are valid or both are nullptr.
 struct VgprStoragePair64 {
-  VgprStorage *lo;
-  VgprStorage *hi;
+  VgprStorage lo;
+  VgprStorage hi;
 };
 
 /// @brief Read-only counterpart of `VgprStoragePair64`.
 struct ConstVgprStoragePair64 {
-  const VgprStorage *lo;
-  const VgprStorage *hi;
+  ConstVgprStorage lo;
+  ConstVgprStorage hi;
 };
 } // namespace amdgpu
 
@@ -85,6 +168,14 @@ public:
   Operand(int size_bits, int encoding_value)
       : size_bits_(size_bits), encoding_value_(encoding_value) {}
   virtual ~Operand() = default;
+
+  /// Validate encoding constraints deferred until the complete instruction is
+  /// decoded. Literal sentinels may replace their provisional operands first.
+  Result validate_encoding(const util::DiagnosticEmitter &emit_error = {}) const {
+    if (encoding_error_ == EncodingError::None) [[likely]]
+      return Result::success();
+    return emit_encoding_error(emit_error);
+  }
 
   /// @brief Human-readable name for this operand (e.g. "v0", "s4", or a literal).
   virtual std::string name() const { return std::to_string(encoding_value_); }
@@ -187,10 +278,12 @@ public:
 
   /// @brief Number of consecutive VGPRs this operand spans.
   [[nodiscard]] uint16_t vgpr_count() const {
-    return static_cast<uint16_t>(std::max(1, size_bits_ / 32));
+    return static_cast<uint16_t>(std::max(1, (size_bits_ + 31) / 32));
   }
 
 private:
+  Result emit_encoding_error(const util::DiagnosticEmitter &emit_error) const;
+
   // Value access is intentionally private. Instruction implementations use
   // RegisterAccess; Operand remains the ISA-specific resolver/backend.
 
@@ -300,6 +393,18 @@ public:
   amdgpu::VgprMsbRole vgpr_msb_role_ = amdgpu::VgprMsbRole::None;
 
 protected:
+  enum class EncodingError : uint8_t {
+    None,
+    InvalidSelector,
+    InvalidScalarRegisterSelector,
+    InvalidLaneSelector,
+    InvalidExecSelector,
+    InvalidVgprSourceSelector,
+    InvalidScalarSourceSelector,
+  };
+
+  void defer_encoding_error(EncodingError error) { encoding_error_ = error; }
+
   /// @brief Capability/role flags, set once at construction and never
   /// mutated afterward. Subclass constructors set is_vgpr_; fieldless
   /// operands get their (reads_value, writable, is_vgpr) triple from
@@ -314,6 +419,7 @@ protected:
   bool reads_value_ = true;
   bool writable_ = true;
   bool fieldless_ = false;
+  EncodingError encoding_error_ = EncodingError::None;
 
 private:
   // Private SIMD fast-path backend for RegisterAccess.
@@ -333,13 +439,13 @@ private:
     return simd_vgpr_base_mut_impl(wf);
   }
 
-  const amdgpu::VgprStorage *simd_vgpr_storage(const amdgpu::Wavefront &wf) const {
+  amdgpu::ConstVgprStorage simd_vgpr_storage(const amdgpu::Wavefront &wf) const {
     if (delegate_)
       return delegate_->simd_vgpr_storage(wf);
     return simd_vgpr_storage_impl(wf);
   }
 
-  amdgpu::VgprStorage *simd_vgpr_storage_mut(amdgpu::Wavefront &wf) const {
+  amdgpu::VgprStorage simd_vgpr_storage_mut(amdgpu::Wavefront &wf) const {
     return simd_vgpr_storage_mut_impl(wf);
   }
 
@@ -407,21 +513,20 @@ private:
   }
 
   /// @brief If this operand resolves to per-lane VGPR storage, return a typed
-  /// const view of that register (the `VgprStorage` the file holds, a
-  /// `simdojo::VectorReg<64,uint32_t>&`). Otherwise nullptr — the caller falls
+  /// const view of that register. Otherwise an empty view — the caller falls
   /// back to a scalar broadcast via `read_scalar`. Resolves the storage in a
   /// SINGLE virtual dispatch — the SIMD hot path reads through this without a
   /// raw pointer crossing the instruction-facing RegisterAccess API.
-  virtual const amdgpu::VgprStorage *simd_vgpr_storage_impl(const amdgpu::Wavefront &wf) const {
+  virtual amdgpu::ConstVgprStorage simd_vgpr_storage_impl(const amdgpu::Wavefront &wf) const {
     (void)wf;
-    return nullptr;
+    return {};
   }
 
   /// @brief Mutable counterpart of `simd_vgpr_storage` for the dst write path
   /// (no delegate — a dst is never DPP/SDWA).
-  virtual amdgpu::VgprStorage *simd_vgpr_storage_mut_impl(amdgpu::Wavefront &wf) const {
+  virtual amdgpu::VgprStorage simd_vgpr_storage_mut_impl(amdgpu::Wavefront &wf) const {
     (void)wf;
-    return nullptr;
+    return {};
   }
 
   /// @brief Notify the plugin system that this operand's VGPR was read
@@ -455,20 +560,20 @@ private:
   /// @brief 64-bit-lane counterpart of `simd_vgpr_storage`. A per-lane f64/i64
   /// value occupies two consecutive VGPRs (reg N + reg N+1), so this returns a
   /// `{lo, hi}` pair of typed register views (lo = reg N, hi = reg N+1) in a
-  /// SINGLE virtual dispatch. Returns `{nullptr, nullptr}` when the operand is
+  /// SINGLE virtual dispatch. Returns empty views when the operand is
   /// not contiguous VGPR storage — the caller broadcasts via `read_scalar64`.
   virtual amdgpu::ConstVgprStoragePair64
   simd_vgpr_storage64_impl(const amdgpu::Wavefront &wf) const {
     (void)wf;
-    return {nullptr, nullptr};
+    return {};
   }
 
   /// @brief Mutable counterpart of `simd_vgpr_storage64` for the 64-bit dst
   /// write path; returns writable `{lo, hi}` register views or
-  /// `{nullptr, nullptr}`.
+  /// empty views.
   virtual amdgpu::VgprStoragePair64 simd_vgpr_storage64_mut_impl(amdgpu::Wavefront &wf) const {
     (void)wf;
-    return {nullptr, nullptr};
+    return {};
   }
 
 private:
@@ -534,8 +639,8 @@ private:
 
   std::optional<uint32_t> simd_vgpr_base_impl(const amdgpu::Wavefront &wf) const override;
   std::optional<uint32_t> simd_vgpr_base_mut_impl(amdgpu::Wavefront &wf) const override;
-  const amdgpu::VgprStorage *simd_vgpr_storage_impl(const amdgpu::Wavefront &wf) const override;
-  amdgpu::VgprStorage *simd_vgpr_storage_mut_impl(amdgpu::Wavefront &wf) const override;
+  amdgpu::ConstVgprStorage simd_vgpr_storage_impl(const amdgpu::Wavefront &wf) const override;
+  amdgpu::VgprStorage simd_vgpr_storage_mut_impl(amdgpu::Wavefront &wf) const override;
   amdgpu::ConstVgprStoragePair64
   simd_vgpr_storage64_impl(const amdgpu::Wavefront &wf) const override;
   amdgpu::VgprStoragePair64 simd_vgpr_storage64_mut_impl(amdgpu::Wavefront &wf) const override;
@@ -585,53 +690,6 @@ private:
   Operand *operand_ = nullptr;
   Operand *previous_ = nullptr;
 };
-
-/// @brief Operand backed by instruction-scoped staged lane values.
-///
-/// Holds source values prepared before semantic execution, including lane
-/// permutations and sub-dword selection.
-class StagedOperand : public Operand {
-public:
-  static constexpr int MAX_LANES = 64;
-
-  StagedOperand();
-  ~StagedOperand() override;
-
-  /// @brief Construct from 32-bit staged lane values.
-  /// @param base The underlying operand (for name/size/scalar reads).
-  /// @param data Staged values (one per lane).
-  /// @param lane_count Number of valid lanes.
-  StagedOperand(const Operand &base, const uint32_t *data, int lane_count);
-
-  /// @brief Construct from 64-bit staged lane values.
-  StagedOperand(const Operand &base, const uint64_t *data, int lane_count);
-
-  std::string name() const override { return "staged_src"; }
-
-  bool simd_capable() const override { return true; }
-
-private:
-  uint32_t read_lane(const amdgpu::Wavefront &wf, uint32_t lane) const override;
-  uint64_t read_lane64(const amdgpu::Wavefront &wf, uint32_t lane) const override;
-  uint32_t read_scalar(const amdgpu::Wavefront &wf) const override;
-  uint64_t read_scalar64(const amdgpu::Wavefront &wf) const override;
-  void read_lane_chunk(const amdgpu::Wavefront &wf, uint32_t lane_base, uint32_t count,
-                       uint32_t *out) const override;
-
-  /// @brief Expose staged low dwords as read-only SIMD storage.
-  const amdgpu::VgprStorage *simd_vgpr_storage_impl(const amdgpu::Wavefront &wf) const override;
-
-  amdgpu::ConstVgprStoragePair64
-  simd_vgpr_storage64_impl(const amdgpu::Wavefront &wf) const override;
-
-  // Keep the execution-only storage type out of the model-facing include graph.
-  struct Storage;
-  std::unique_ptr<Storage> storage_;
-  int lane_count_ = 0;
-};
-
-// Compatibility name for generated output predating StagedOperand.
-using DppOperand = StagedOperand;
 
 } // namespace rocjitsu
 

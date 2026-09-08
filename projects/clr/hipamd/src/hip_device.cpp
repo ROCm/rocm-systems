@@ -186,7 +186,11 @@ void Device::WaitActiveStreams(hip::Stream* blocking_stream, bool wait_null_stre
       waitForStream(null_stream_);
     }
   } else {
-    activeQueues = blocking_stream->device().getActiveQueues();
+    // Wait on the active streams of this device, not blocking_stream->device().
+    // blocking_stream is only where the barrier gets enqueued and it can be on a
+    // different device. (e.g. hipMemcpyPeer is the cross-device caller waiting on peer
+    // device while enqueuing the barrier on the current device's null stream).
+    activeQueues = devices()[0]->getActiveQueues();
     for (const auto& queue : activeQueues) {
       auto* active_stream = static_cast<hip::Stream*>(queue);
       // Only wait on blocking (non-nonblocking) streams other than the current one
@@ -591,6 +595,38 @@ hipError_t hipDeviceGetUuid(hipUUID* uuid, hipDevice_t device) {
 }
 
 // ================================================================================================
+hipError_t hipDeviceGetLuid(char* luid, unsigned int* deviceNodeMask, hipDevice_t device) {
+  HIP_INIT_API(hipDeviceGetLuid, reinterpret_cast<void*>(luid),
+               reinterpret_cast<void*>(deviceNodeMask), device);
+
+  if (device < 0 || static_cast<size_t>(device) >= g_devices.size()) {
+    HIP_RETURN(hipErrorInvalidDevice);
+  }
+
+  if (luid == nullptr || deviceNodeMask == nullptr) {
+    HIP_RETURN(hipErrorInvalidValue);
+  }
+
+  if (IS_LINUX) {
+    // The LUID is a Windows/DXGI adapter concept; unsupported elsewhere and the
+    // output parameters are left untouched.
+    HIP_RETURN(hipErrorNotSupported);
+  }
+
+  auto* deviceHandle = g_devices[device]->devices()[0];
+  const auto& info = deviceHandle->info();
+
+  // The LUID is an 8-byte value formed from the low and high parts reported by the backend.
+  static_assert(sizeof(info.luidLowPart_) + sizeof(info.luidHighPart_) == 8,
+                "LUID is expected to be 8 bytes");
+  memcpy(&luid[0], &info.luidLowPart_, sizeof(info.luidLowPart_));
+  memcpy(&luid[sizeof(info.luidLowPart_)], &info.luidHighPart_, sizeof(info.luidHighPart_));
+  *deviceNodeMask = info.luidDeviceNodeMask_;
+
+  HIP_RETURN(hipSuccess);
+}
+
+// ================================================================================================
 hipError_t ihipGetDeviceProperties(hipDeviceProp_tR0600* props, int device) {
   if (props == nullptr) {
     return hipErrorInvalidValue;
@@ -775,6 +811,8 @@ hipError_t ihipGetDeviceProperties(hipDeviceProp_tR0600* props, int device) {
   deviceProps.gpuDirectRDMASupported = 0;
   deviceProps.gpuDirectRDMAFlushWritesOptions = 0;
   deviceProps.gpuDirectRDMAWritesOrdering = 0;
+  // The LUID is a Windows/DXGI adapter concept; the backend reports a zero LUID
+  // and zero node mask on platforms without a WDDM adapter.
   *reinterpret_cast<uint32_t*>(&deviceProps.luid[0]) = info.luidLowPart_;
   *reinterpret_cast<uint32_t*>(&deviceProps.luid[sizeof(uint32_t)]) = info.luidHighPart_;
   deviceProps.luidDeviceNodeMask = info.luidDeviceNodeMask_;

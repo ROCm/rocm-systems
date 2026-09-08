@@ -21,7 +21,7 @@ Panel Config:
 
   - metric_table:
       id: 1501
-      title: "CHA Utilization"
+      title: CHA Utilization
       header:
         metric: Metric
         avg: Avg
@@ -30,14 +30,14 @@ Panel Config:
         unit: Unit
       metric:
         Utilization:
-          avg: AVG((100 * CHA_BUSY_sum / CHA_CYCLE_sum) if (CHA_CYCLE_sum != 0) else None)
-          min: MIN((100 * CHA_BUSY_sum / CHA_CYCLE_sum) if (CHA_CYCLE_sum != 0) else None)
-          max: MAX((100 * CHA_BUSY_sum / CHA_CYCLE_sum) if (CHA_CYCLE_sum != 0) else None)
+          avg: 100 * SUM(CHA_BUSY_sum) / SUM(CHA_CYCLE_sum)
+          min: 100 * MIN(CHA_BUSY_sum / CHA_CYCLE_sum)
+          max: 100 * MAX(CHA_BUSY_sum / CHA_CYCLE_sum)
           unit: Percent
 
   - metric_table:
       id: 1502
-      title: "CHA Arbitration"
+      title: CHA Arbitration
       header:
         metric: Metric
         avg: Avg
@@ -46,34 +46,34 @@ Panel Config:
         unit: Unit
       metric:
         Request Latency:
-          avg: AVG((CHA_REQ_INFLIGHT_LEVEL_sum / CHA_ARB_REQUESTS_sum) if (CHA_ARB_REQUESTS_sum != 0) else None)
-          min: MIN((CHA_REQ_INFLIGHT_LEVEL_sum / CHA_ARB_REQUESTS_sum) if (CHA_ARB_REQUESTS_sum != 0) else None)
-          max: MAX((CHA_REQ_INFLIGHT_LEVEL_sum / CHA_ARB_REQUESTS_sum) if (CHA_ARB_REQUESTS_sum != 0) else None)
+          avg: SUM(CHA_REQ_INFLIGHT_LEVEL_sum) / SUM(CHA_ARB_REQUESTS_sum)
+          min: MIN(CHA_REQ_INFLIGHT_LEVEL_sum / CHA_ARB_REQUESTS_sum)
+          max: MAX(CHA_REQ_INFLIGHT_LEVEL_sum / CHA_ARB_REQUESTS_sum)
           unit: Cycles
         CHA-CHC0 Request Stall Rate:
-          avg: AVG((100 * CHA_STALL_CHC0_sum / CHA_BUSY_sum) if (CHA_BUSY_sum != 0) else None)
-          min: MIN((100 * CHA_STALL_CHC0_sum / CHA_BUSY_sum) if (CHA_BUSY_sum != 0) else None)
-          max: MAX((100 * CHA_STALL_CHC0_sum / CHA_BUSY_sum) if (CHA_BUSY_sum != 0) else None)
+          avg: 100 * SUM(CHA_STALL_CHC0_sum) / SUM(CHA_BUSY_sum)
+          min: 100 * MIN(CHA_STALL_CHC0_sum / CHA_BUSY_sum)
+          max: 100 * MAX(CHA_STALL_CHC0_sum / CHA_BUSY_sum)
           unit: Percent
         CHA-CHC1 Request Stall Rate:
-          avg: AVG((100 * CHA_STALL_CHC1_sum / CHA_BUSY_sum) if (CHA_BUSY_sum != 0) else None)
-          min: MIN((100 * CHA_STALL_CHC1_sum / CHA_BUSY_sum) if (CHA_BUSY_sum != 0) else None)
-          max: MAX((100 * CHA_STALL_CHC1_sum / CHA_BUSY_sum) if (CHA_BUSY_sum != 0) else None)
+          avg: 100 * SUM(CHA_STALL_CHC1_sum) / SUM(CHA_BUSY_sum)
+          min: 100 * MIN(CHA_STALL_CHC1_sum / CHA_BUSY_sum)
+          max: 100 * MAX(CHA_STALL_CHC1_sum / CHA_BUSY_sum)
           unit: Percent
         CHA Request Path Utilization:
-          avg: AVG((100 * CHA_REQ_PATH_BUSY_sum / CHA_BUSY_sum) if (CHA_BUSY_sum != 0) else None)
-          min: MIN((100 * CHA_REQ_PATH_BUSY_sum / CHA_BUSY_sum) if (CHA_BUSY_sum != 0) else None)
-          max: MAX((100 * CHA_REQ_PATH_BUSY_sum / CHA_BUSY_sum) if (CHA_BUSY_sum != 0) else None)
+          avg: 100 * SUM(CHA_REQ_PATH_BUSY_sum) / SUM(CHA_BUSY_sum)
+          min: 100 * MIN(CHA_REQ_PATH_BUSY_sum / CHA_BUSY_sum)
+          max: 100 * MAX(CHA_REQ_PATH_BUSY_sum / CHA_BUSY_sum)
           unit: Percent
         CHA Return Path Utilization:
-          avg: AVG((100 * CHA_RET_PATH_BUSY_sum / CHA_BUSY_sum) if (CHA_BUSY_sum != 0) else None)
-          min: MIN((100 * CHA_RET_PATH_BUSY_sum / CHA_BUSY_sum) if (CHA_BUSY_sum != 0) else None)
-          max: MAX((100 * CHA_RET_PATH_BUSY_sum / CHA_BUSY_sum) if (CHA_BUSY_sum != 0) else None)
+          avg: 100 * SUM(CHA_RET_PATH_BUSY_sum) / SUM(CHA_BUSY_sum)
+          min: 100 * MIN(CHA_RET_PATH_BUSY_sum / CHA_BUSY_sum)
+          max: 100 * MAX(CHA_RET_PATH_BUSY_sum / CHA_BUSY_sum)
           unit: Percent
 
   - metric_table:
       id: 1503
-      title: "CHC Utilization"
+      title: CHC Utilization
       header:
         metric: Metric
         avg: Avg
@@ -82,19 +82,19 @@ Panel Config:
         unit: Unit
       metric:
         Utilization:
-          avg: AVG((100 * CHC_BUSY_sum / CHC_CYCLE_sum) if (CHC_CYCLE_sum != 0) else None)
-          min: MIN((100 * CHC_BUSY_sum / CHC_CYCLE_sum) if (CHC_CYCLE_sum != 0) else None)
-          max: MAX((100 * CHC_BUSY_sum / CHC_CYCLE_sum) if (CHC_CYCLE_sum != 0) else None)
+          avg: 100 * SUM(CHC_BUSY_sum) / SUM(CHC_CYCLE_sum)
+          min: 100 * MIN(CHC_BUSY_sum / CHC_CYCLE_sum)
+          max: 100 * MAX(CHC_BUSY_sum / CHC_CYCLE_sum)
           unit: Percent
         Buffer Stall Rate:
-          avg: AVG((100 * CHC_STALL_BUFFER_FULL_sum / CHC_BUSY_sum) if (CHC_BUSY_sum != 0) else None)
-          min: MIN((100 * CHC_STALL_BUFFER_FULL_sum / CHC_BUSY_sum) if (CHC_BUSY_sum != 0) else None)
-          max: MAX((100 * CHC_STALL_BUFFER_FULL_sum / CHC_BUSY_sum) if (CHC_BUSY_sum != 0) else None)
+          avg: 100 * SUM(CHC_STALL_BUFFER_FULL_sum) / SUM(CHC_BUSY_sum)
+          min: 100 * MIN(CHC_STALL_BUFFER_FULL_sum / CHC_BUSY_sum)
+          max: 100 * MAX(CHC_STALL_BUFFER_FULL_sum / CHC_BUSY_sum)
           unit: Percent
 
   - metric_table:
       id: 1504
-      title: "CHC Requests"
+      title: CHC Requests
       header:
         metric: Metric
         avg: Avg
@@ -103,73 +103,73 @@ Panel Config:
         unit: Unit
       metric:
         Total Requests:
-          avg: AVG(CHC_REQ_sum / $denom)
+          avg: SUM(CHC_REQ_sum) / SUM($denom)
           min: MIN(CHC_REQ_sum / $denom)
           max: MAX(CHC_REQ_sum / $denom)
           unit: (Count + $normUnit)
         Total Requests - Read:
-          avg: AVG(CHC_REQ_READ_sum / $denom)
+          avg: SUM(CHC_REQ_READ_sum) / SUM($denom)
           min: MIN(CHC_REQ_READ_sum / $denom)
           max: MAX(CHC_REQ_READ_sum / $denom)
           unit: (Count + $normUnit)
         Total Requests - 32B Read:
-          avg: AVG(CHC_REQ_READ_32B_sum / $denom)
+          avg: SUM(CHC_REQ_READ_32B_sum) / SUM($denom)
           min: MIN(CHC_REQ_READ_32B_sum / $denom)
           max: MAX(CHC_REQ_READ_32B_sum / $denom)
           unit: (Count + $normUnit)
         Total Requests - 64B Read:
-          avg: AVG(CHC_REQ_READ_64B_sum / $denom)
+          avg: SUM(CHC_REQ_READ_64B_sum) / SUM($denom)
           min: MIN(CHC_REQ_READ_64B_sum / $denom)
           max: MAX(CHC_REQ_READ_64B_sum / $denom)
           unit: (Count + $normUnit)
         Total Requests - 128B Read:
-          avg: AVG(CHC_REQ_READ_128B_sum / $denom)
+          avg: SUM(CHC_REQ_READ_128B_sum) / SUM($denom)
           min: MIN(CHC_REQ_READ_128B_sum / $denom)
           max: MAX(CHC_REQ_READ_128B_sum / $denom)
           unit: (Count + $normUnit)
         Total Requests - 256B Read:
-          avg: AVG(CHC_REQ_READ_256B_sum / $denom)
+          avg: SUM(CHC_REQ_READ_256B_sum) / SUM($denom)
           min: MIN(CHC_REQ_READ_256B_sum / $denom)
           max: MAX(CHC_REQ_READ_256B_sum / $denom)
           unit: (Count + $normUnit)
         Total Requests - Write:
-          avg: AVG(CHC_REQ_WRITE_sum / $denom)
+          avg: SUM(CHC_REQ_WRITE_sum) / SUM($denom)
           min: MIN(CHC_REQ_WRITE_sum / $denom)
           max: MAX(CHC_REQ_WRITE_sum / $denom)
           unit: (Count + $normUnit)
         Total Requests - 32B Write:
-          avg: AVG(CHC_REQ_WRITE_32B_sum / $denom)
+          avg: SUM(CHC_REQ_WRITE_32B_sum) / SUM($denom)
           min: MIN(CHC_REQ_WRITE_32B_sum / $denom)
           max: MAX(CHC_REQ_WRITE_32B_sum / $denom)
           unit: (Count + $normUnit)
         Total Requests - 64B Write:
-          avg: AVG(CHC_REQ_WRITE_64B_sum / $denom)
+          avg: SUM(CHC_REQ_WRITE_64B_sum) / SUM($denom)
           min: MIN(CHC_REQ_WRITE_64B_sum / $denom)
           max: MAX(CHC_REQ_WRITE_64B_sum / $denom)
           unit: (Count + $normUnit)
         Total Requests - 128B Write:
-          avg: AVG(CHC_REQ_WRITE_128B_sum / $denom)
+          avg: SUM(CHC_REQ_WRITE_128B_sum) / SUM($denom)
           min: MIN(CHC_REQ_WRITE_128B_sum / $denom)
           max: MAX(CHC_REQ_WRITE_128B_sum / $denom)
           unit: (Count + $normUnit)
         Total Requests - 256B Write:
-          avg: AVG(CHC_REQ_WRITE_256B_sum / $denom)
+          avg: SUM(CHC_REQ_WRITE_256B_sum) / SUM($denom)
           min: MIN(CHC_REQ_WRITE_256B_sum / $denom)
           max: MAX(CHC_REQ_WRITE_256B_sum / $denom)
           unit: (Count + $normUnit)
         Total Requests - Atomic with Return:
-          avg: AVG(CHC_REQ_ATOMIC_WITH_RET_sum / $denom)
+          avg: SUM(CHC_REQ_ATOMIC_WITH_RET_sum) / SUM($denom)
           min: MIN(CHC_REQ_ATOMIC_WITH_RET_sum / $denom)
           max: MAX(CHC_REQ_ATOMIC_WITH_RET_sum / $denom)
           unit: (Count + $normUnit)
         Total Requests - Atomic without Return:
-          avg: AVG(CHC_REQ_ATOMIC_WITHOUT_RET_sum / $denom)
+          avg: SUM(CHC_REQ_ATOMIC_WITHOUT_RET_sum) / SUM($denom)
           min: MIN(CHC_REQ_ATOMIC_WITHOUT_RET_sum / $denom)
           max: MAX(CHC_REQ_ATOMIC_WITHOUT_RET_sum / $denom)
           unit: (Count + $normUnit)
   - metric_table:
       id: 1505
-      title: "CHC Bandwidth and Latency"
+      title: CHC Bandwidth and Latency
       header:
         metric: Metric
         avg: Avg
@@ -178,29 +178,29 @@ Panel Config:
         unit: Unit
       metric:
         CHC Bandwidth - Read:
-          avg: AVG((CHC_REQ_READ_32B_sum * 32 + CHC_REQ_READ_64B_sum * 64 + CHC_REQ_READ_128B_sum * 128 + CHC_REQ_READ_256B_sum * 256) / ((End_Timestamp - Start_Timestamp) / 1e9) / 1e9)
-          min: MIN((CHC_REQ_READ_32B_sum * 32 + CHC_REQ_READ_64B_sum * 64 + CHC_REQ_READ_128B_sum * 128 + CHC_REQ_READ_256B_sum * 256) / ((End_Timestamp - Start_Timestamp) / 1e9) / 1e9)
-          max: MAX((CHC_REQ_READ_32B_sum * 32 + CHC_REQ_READ_64B_sum * 64 + CHC_REQ_READ_128B_sum * 128 + CHC_REQ_READ_256B_sum * 256) / ((End_Timestamp - Start_Timestamp) / 1e9) / 1e9)
+          avg: SUM(CHC_REQ_READ_32B_sum * 32 + CHC_REQ_READ_64B_sum * 64 + CHC_REQ_READ_128B_sum * 128 + CHC_REQ_READ_256B_sum * 256) / SUM(End_Timestamp - Start_Timestamp)
+          min: MIN((CHC_REQ_READ_32B_sum * 32 + CHC_REQ_READ_64B_sum * 64 + CHC_REQ_READ_128B_sum * 128 + CHC_REQ_READ_256B_sum * 256) / (End_Timestamp - Start_Timestamp))
+          max: MAX((CHC_REQ_READ_32B_sum * 32 + CHC_REQ_READ_64B_sum * 64 + CHC_REQ_READ_128B_sum * 128 + CHC_REQ_READ_256B_sum * 256) / (End_Timestamp - Start_Timestamp))
           unit: GB/s
         CHC Bandwidth - Write:
-          avg: AVG(CHC_REQ_WRITE_32B_DATA_BEATS_sum * 32 / ((End_Timestamp - Start_Timestamp) / 1e9) / 1e9)
-          min: MIN(CHC_REQ_WRITE_32B_DATA_BEATS_sum * 32 / ((End_Timestamp - Start_Timestamp) / 1e9) / 1e9)
-          max: MAX(CHC_REQ_WRITE_32B_DATA_BEATS_sum * 32 / ((End_Timestamp - Start_Timestamp) / 1e9) / 1e9)
+          avg: 32 * SUM(CHC_REQ_WRITE_32B_DATA_BEATS_sum) / SUM(End_Timestamp - Start_Timestamp)
+          min: MIN(CHC_REQ_WRITE_32B_DATA_BEATS_sum * 32 / (End_Timestamp - Start_Timestamp))
+          max: MAX(CHC_REQ_WRITE_32B_DATA_BEATS_sum * 32 / (End_Timestamp - Start_Timestamp))
           unit: GB/s
         CHC-GL2 Latency - Read:
-          avg: AVG((CHC_GL2_REQ_READ_LEVEL_sum / CHC_REQ_READ_sum) if (CHC_REQ_READ_sum != 0) else None)
-          min: MIN((CHC_GL2_REQ_READ_LEVEL_sum / CHC_REQ_READ_sum) if (CHC_REQ_READ_sum != 0) else None)
-          max: MAX((CHC_GL2_REQ_READ_LEVEL_sum / CHC_REQ_READ_sum) if (CHC_REQ_READ_sum != 0) else None)
+          avg: SUM(CHC_GL2_REQ_READ_LEVEL_sum) / SUM(CHC_REQ_READ_sum)
+          min: MIN(CHC_GL2_REQ_READ_LEVEL_sum / CHC_REQ_READ_sum)
+          max: MAX(CHC_GL2_REQ_READ_LEVEL_sum / CHC_REQ_READ_sum)
           unit: Cycles
         CHC-GL2 Latency - Write:
-          avg: AVG((CHC_GL2_REQ_WRITE_LEVEL_sum / CHC_REQ_WRITE_sum) if (CHC_REQ_WRITE_sum != 0) else None)
-          min: MIN((CHC_GL2_REQ_WRITE_LEVEL_sum / CHC_REQ_WRITE_sum) if (CHC_REQ_WRITE_sum != 0) else None)
-          max: MAX((CHC_GL2_REQ_WRITE_LEVEL_sum / CHC_REQ_WRITE_sum) if (CHC_REQ_WRITE_sum != 0) else None)
+          avg: SUM(CHC_GL2_REQ_WRITE_LEVEL_sum) / SUM(CHC_REQ_WRITE_sum)
+          min: MIN(CHC_GL2_REQ_WRITE_LEVEL_sum / CHC_REQ_WRITE_sum)
+          max: MAX(CHC_GL2_REQ_WRITE_LEVEL_sum / CHC_REQ_WRITE_sum)
           unit: Cycles
         CHC Return Arbitration Latency:
-          avg: AVG((CHC_ARB_RET_LEVEL_sum / CHC_REQ_sum) if (CHC_REQ_sum != 0) else None)
-          min: MIN((CHC_ARB_RET_LEVEL_sum / CHC_REQ_sum) if (CHC_REQ_sum != 0) else None)
-          max: MAX((CHC_ARB_RET_LEVEL_sum / CHC_REQ_sum) if (CHC_REQ_sum != 0) else None)
+          avg: SUM(CHC_ARB_RET_LEVEL_sum) / SUM(CHC_REQ_sum)
+          min: MIN(CHC_ARB_RET_LEVEL_sum / CHC_REQ_sum)
+          max: MAX(CHC_ARB_RET_LEVEL_sum / CHC_REQ_sum)
           unit: Cycles
 
   metrics_description:

@@ -81,7 +81,6 @@ set(ROCPROFSYS_EXAMPLE_DIRS
     transpose
     parallel-overhead
     code-coverage
-    user-api
     openmp
     mpi
     python

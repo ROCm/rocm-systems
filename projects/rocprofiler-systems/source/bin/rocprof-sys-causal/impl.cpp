@@ -11,13 +11,12 @@
 #include "core/mproc.hpp"
 #include "core/utility.hpp"
 
-#include <spdlog/fmt/ranges.h>
+#include <fmt/ranges.h>
 
 #include <timemory/environment.hpp>
 #include <timemory/log/color.hpp>
 #include <timemory/utility/argparse.hpp>
 #include <timemory/utility/console.hpp>
-#include <timemory/utility/filepath.hpp>
 
 #include <algorithm>
 #include <cmath>
@@ -25,6 +24,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <filesystem>
 #include <gnu/lib-names.h>
 #include <iostream>
 #include <regex>
@@ -36,7 +36,6 @@
 #include <vector>
 
 namespace color    = ::tim::log::color;
-namespace filepath = ::tim::filepath;
 namespace console  = ::tim::utility::console;
 namespace argparse = ::tim::argparse;
 namespace path     = rocprofsys::common::path;
@@ -395,7 +394,16 @@ parse_args(int argc, char** argv, std::vector<std::string>& _env,
             _generate_configs = true;
             auto _dir         = p.get<std::string>("generate-configs");
             if(!_dir.empty()) _config_folder = std::move(_dir);
-            if(!filepath::exists(_config_folder)) filepath::makedir(_config_folder);
+
+            try
+            {
+                std::filesystem::create_directories(_config_folder);
+            } catch(const std::filesystem::filesystem_error& e)
+            {
+                stream(std::cerr, color::warning())
+                    << "Failed to create config folder '" << _config_folder
+                    << "': " << e.code().message() << "\n";
+            }
         });
     parser
         .add_argument({ "--no-defaults" },
@@ -779,7 +787,7 @@ parse_args(int argc, char** argv, std::vector<std::string>& _env,
                         << itr.second << "\n";
             };
 
-        int nwidth = (std::log10(_causal_envs_tmp.size()) + 1);
+        const int nwidth = (std::log10(_causal_envs_tmp.size()) + 1);
         for(size_t i = 0; i < _causal_envs_tmp.size(); ++i)
         {
             std::stringstream fname{};

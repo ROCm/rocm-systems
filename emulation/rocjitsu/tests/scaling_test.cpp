@@ -5,6 +5,7 @@
 // and matmul_mfma across 1..8 threads (one per XCD). Outputs CSV to stdout.
 
 #include "aql_queue.h"
+#include "scaling_thread_counts.h"
 #include "test_paths.h"
 
 #include "embedded_schema.h"
@@ -24,11 +25,13 @@ RJ_DIAGNOSTIC_POP
 #include "simdojo/sim/simulation.h"
 #include "simdojo/sim/topology.h"
 
+#include <algorithm>
 #include <chrono>
 #include <cstdint>
 #include <cstring>
 #include <iostream>
 #include <memory>
+#include <span>
 #include <string>
 #include <vector>
 
@@ -36,11 +39,11 @@ RJ_DIAGNOSTIC_POP
 
 using namespace rocjitsu;
 
-static const std::string CONFIG_PATH = test::config_path("gfx950_cdna4.json");
+static const std::string CONFIG_PATH = test::config_path("gfx950_mi355x.json");
 using test::kernel_path;
 
 static constexpr uint32_t TOTAL_XCDS = 8;
-static constexpr uint32_t CUS_PER_XCD = 32;
+static constexpr uint32_t CUS_PER_XCD = 36; // 4 SEs x 9 physical CUs
 static constexpr uint32_t TOTAL_CUS = TOTAL_XCDS * CUS_PER_XCD;
 static constexpr uint32_t WF_SIZE = 64;
 
@@ -131,7 +134,16 @@ double run_kernel(const char *kernel_name, uint32_t N, uint32_t num_threads) {
   return std::chrono::duration<double, std::milli>(end - start).count();
 }
 
-int main() {
+int main(int argc, char **argv) {
+  // Thread counts come from argv when given, otherwise sweep 1..TOTAL_XCDS.
+  const auto thread_counts = test::parse_thread_counts(
+      std::span<const char *const>(argv + 1, static_cast<size_t>(argc - 1)), TOTAL_XCDS);
+  if (!thread_counts) {
+    std::cerr << "usage: " << argv[0] << " [thread-count ...]   (each 1.." << TOTAL_XCDS
+              << "; none means sweep them all)\n";
+    return 2;
+  }
+
   struct Kernel {
     const char *name;
     uint32_t N;
@@ -149,7 +161,7 @@ int main() {
 
   constexpr int RUNS = 3;
 
-  for (uint32_t t = 1; t <= TOTAL_XCDS; ++t) {
+  for (uint32_t t : *thread_counts) {
     std::cout << t;
     for (auto &k : kernels) {
       // Take the median of RUNS.

@@ -132,7 +132,7 @@ TEST_F(BackendTest, enumerate_gpu_handles_throws_on_socket_count_error)
 
 TEST_F(BackendTest, enumerate_gpu_handles_throws_on_socket_data_error)
 {
-    InSequence seq;
+    const InSequence seq;
     EXPECT_CALL(*testing::g_mock_backend, get_socket_handles(NotNull(), IsNull()))
         .WillOnce(DoAll(SetArgPointee<0>(1U), Return(k_ok)));
     EXPECT_CALL(*testing::g_mock_backend, get_socket_handles(NotNull(), NotNull()))
@@ -146,7 +146,7 @@ TEST_F(BackendTest, enumerate_gpu_handles_skips_socket_with_no_processors)
 {
     constexpr std::uint64_t k_socket = 10;
 
-    InSequence seq;
+    const InSequence seq;
     EXPECT_CALL(*testing::g_mock_backend, get_socket_handles(NotNull(), IsNull()))
         .WillOnce(DoAll(SetArgPointee<0>(1U), Return(k_ok)));
     EXPECT_CALL(*testing::g_mock_backend, get_socket_handles(NotNull(), NotNull()))
@@ -164,7 +164,7 @@ TEST_F(BackendTest, enumerate_gpu_handles_returns_handles_from_single_socket)
     constexpr std::uint64_t k_socket  = 42;
     constexpr std::uint64_t k_procs[] = { 100, 101 };
 
-    InSequence seq;
+    const InSequence seq;
     EXPECT_CALL(*testing::g_mock_backend, get_socket_handles(NotNull(), IsNull()))
         .WillOnce(DoAll(SetArgPointee<0>(1U), Return(k_ok)));
     EXPECT_CALL(*testing::g_mock_backend, get_socket_handles(NotNull(), NotNull()))
@@ -190,7 +190,7 @@ TEST_F(BackendTest, enumerate_gpu_handles_aggregates_across_two_sockets)
     constexpr std::uint64_t k_proc_a    = 100;
     constexpr std::uint64_t k_proc_b    = 200;
 
-    InSequence seq;
+    const InSequence seq;
     EXPECT_CALL(*testing::g_mock_backend, get_socket_handles(NotNull(), IsNull()))
         .WillOnce(DoAll(SetArgPointee<0>(2U), Return(k_ok)));
     EXPECT_CALL(*testing::g_mock_backend, get_socket_handles(NotNull(), NotNull()))
@@ -221,7 +221,7 @@ TEST_F(BackendTest, enumerate_gpu_handles_throws_on_processor_data_error)
 {
     constexpr std::uint64_t k_socket = 10;
 
-    InSequence seq;
+    const InSequence seq;
     EXPECT_CALL(*testing::g_mock_backend, get_socket_handles(NotNull(), IsNull()))
         .WillOnce(DoAll(SetArgPointee<0>(1U), Return(k_ok)));
     EXPECT_CALL(*testing::g_mock_backend, get_socket_handles(NotNull(), NotNull()))
@@ -443,7 +443,7 @@ TEST_F(BackendTest, probe_sdma_support_returns_false_on_failure)
 TEST_F(BackendTest, get_gpu_process_list_returns_process_vector)
 {
     const testing::mock_proc_info_t procs[] = { { .sdma_usage = 500 } };
-    InSequence                      seq;
+    const InSequence                seq;
     EXPECT_CALL(*testing::g_mock_backend,
                 get_gpu_process_list(k_handle, NotNull(), IsNull()))
         .WillOnce(DoAll(SetArgPointee<1>(1U), Return(k_ok)));
@@ -501,7 +501,7 @@ TEST_F(BackendTest, enumerate_nic_handles_returns_handles_from_single_socket)
     constexpr std::uint64_t k_socket = 10;
     constexpr std::uint64_t k_nics[] = { 300, 301 };
 
-    InSequence seq;
+    const InSequence seq;
     EXPECT_CALL(*testing::g_mock_backend, get_socket_handles(NotNull(), IsNull()))
         .WillOnce(DoAll(SetArgPointee<0>(1U), Return(k_ok)));
     EXPECT_CALL(*testing::g_mock_backend, get_socket_handles(NotNull(), NotNull()))
@@ -525,7 +525,7 @@ TEST_F(BackendTest, enumerate_nic_handles_skips_socket_with_no_nics)
 {
     constexpr std::uint64_t k_socket = 10;
 
-    InSequence seq;
+    const InSequence seq;
     EXPECT_CALL(*testing::g_mock_backend, get_socket_handles(NotNull(), IsNull()))
         .WillOnce(DoAll(SetArgPointee<0>(1U), Return(k_ok)));
     EXPECT_CALL(*testing::g_mock_backend, get_socket_handles(NotNull(), NotNull()))

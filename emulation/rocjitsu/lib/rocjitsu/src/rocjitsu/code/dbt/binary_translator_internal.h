@@ -12,15 +12,50 @@
 
 #pragma once
 
+#include "rocjitsu/isa/decode_result.h"
+
 #include <cstdint>
+#include <memory>
 #include <span>
 #include <unordered_set>
+#include <vector>
 
 namespace rocjitsu {
 
 class BasicBlock;
+class Decoder;
+class Instruction;
 
 namespace internal {
+
+enum class RewriteDischargeDecodeStatus : uint8_t {
+  Success,
+  InvalidLookaheadBound,
+  InvalidEncoding,
+  InvalidInstructionSize,
+  TruncatedInstruction,
+};
+
+/// @brief Decode final output through exactly the lookahead declared by one ISA decoder.
+///
+/// @details The reusable buffer is zero-padded on every call. This keeps raw-pointer decoders
+/// within their declared read window while allowing the caller to distinguish an invalid bound,
+/// an invalid decoded size, and an instruction truncated by either the bound or remaining input.
+class RewriteDischargeInstructionDecoder {
+public:
+  explicit RewriteDischargeInstructionDecoder(Decoder &decoder);
+
+  [[nodiscard]] bool has_valid_lookahead_bound() const { return !lookahead_words_.empty(); }
+
+  [[nodiscard]] RewriteDischargeDecodeStatus decode(std::span<const uint8_t> remaining_bytes,
+                                                    uint64_t source_offset,
+                                                    std::unique_ptr<Instruction> &instruction,
+                                                    const DecodeErrorEmitter &emit_error = {});
+
+private:
+  Decoder &decoder_;
+  std::vector<uint32_t> lookahead_words_;
+};
 
 /// @brief Decide whether every external entry into an incomplete-consumer scope
 ///        is an entry-state root that cannot carry an original `.text` pointer.

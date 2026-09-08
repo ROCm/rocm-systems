@@ -57,7 +57,7 @@ NCCL_DEVICE_INLINE IntCount reduceCopyLoopCoreImpl(Coop coop, SrcLambda srcLambd
   if NCCL_IF_CONSTEXPR (!srcMultimem && !CHECK_BOUNDS) {
     if NCCL_IF_CONSTEXPR (SINGLE_SRC) {
       Pack* srcPtr0 = (Pack*)srcLambda(0);
-#pragma unroll UNROLL_PACKS
+      NVCC_PRAGMA_UNROLL(UNROLL_PACKS)
       for (int u = 0; u < UNROLL_PACKS; u++) {
         IntCount packIdx = groupLanePackIdx + u * runtimeStride;
         Pack loaded = srcPtr0[packIdx];
@@ -69,27 +69,26 @@ NCCL_DEVICE_INLINE IntCount reduceCopyLoopCoreImpl(Coop coop, SrcLambda srcLambd
 
       // Preseed acc[] with source 0 to avoid inner-loop branching.
       Pack* srcPtr = (Pack*)srcLambda(0);
-#pragma unroll UNROLL_PACKS
+      NVCC_PRAGMA_UNROLL(UNROLL_PACKS)
       for (int u = 0; u < UNROLL_PACKS; u++) {
         IntCount packIdx = groupLanePackIdx + u * runtimeStride;
         acc[u] = castPack<AccEltType, PackEltType, Pack::Count>(srcPtr[packIdx]);
-        ;
       }
 
       constexpr int srcCount = UNROLL_SOURCE;
-#pragma unroll UNROLL_SOURCE
+      NVCC_PRAGMA_UNROLL(UNROLL_SOURCE)
       for (int srcOffset = 1; srcOffset < srcCount; srcOffset++) {
         Pack* srcPtr = (Pack*)srcLambda(srcOffset);
-#pragma unroll UNROLL_PACKS
+        NVCC_PRAGMA_UNROLL(UNROLL_PACKS)
         for (int u = 0; u < UNROLL_PACKS; u++) {
           IntCount packIdx = groupLanePackIdx + u * runtimeStride;
           loaded[srcOffset][u] = srcPtr[packIdx];
         }
       }
 
-#pragma unroll UNROLL_PACKS
+      NVCC_PRAGMA_UNROLL(UNROLL_PACKS)
       for (int u = 0; u < UNROLL_PACKS; u++) {
-#pragma unroll UNROLL_SOURCE
+        NVCC_PRAGMA_UNROLL(UNROLL_SOURCE)
         for (int srcOffset = 1; srcOffset < srcCount; srcOffset++) {
           AccPackType val = castPack<AccEltType, PackEltType, Pack::Count>(loaded[srcOffset][u]);
           acc[u] = reducePack(accRedOp, acc[u], val);
@@ -98,19 +97,19 @@ NCCL_DEVICE_INLINE IntCount reduceCopyLoopCoreImpl(Coop coop, SrcLambda srcLambd
 
       // Remaining passes over sources.
       for (int srcBase = UNROLL_SOURCE; srcBase < nSrc; srcBase += UNROLL_SOURCE) {
-#pragma unroll UNROLL_SOURCE
+        NVCC_PRAGMA_UNROLL(UNROLL_SOURCE)
         for (int srcOffset = 0; srcOffset < srcCount; srcOffset++) {
           Pack* srcPtr = (Pack*)srcLambda(srcBase + srcOffset);
-#pragma unroll UNROLL_PACKS
+          NVCC_PRAGMA_UNROLL(UNROLL_PACKS)
           for (int u = 0; u < UNROLL_PACKS; u++) {
             IntCount packIdx = groupLanePackIdx + u * runtimeStride;
             loaded[srcOffset][u] = srcPtr[packIdx];
           }
         }
 
-#pragma unroll UNROLL_PACKS
+        NVCC_PRAGMA_UNROLL(UNROLL_PACKS)
         for (int u = 0; u < UNROLL_PACKS; u++) {
-#pragma unroll UNROLL_SOURCE
+          NVCC_PRAGMA_UNROLL(UNROLL_SOURCE)
           for (int srcOffset = 0; srcOffset < srcCount; srcOffset++) {
             AccPackType val = castPack<AccEltType, PackEltType, Pack::Count>(loaded[srcOffset][u]);
             acc[u] = reducePack(accRedOp, acc[u], val);
@@ -121,7 +120,7 @@ NCCL_DEVICE_INLINE IntCount reduceCopyLoopCoreImpl(Coop coop, SrcLambda srcLambd
   } else {
     if NCCL_IF_CONSTEXPR (SINGLE_SRC) {
       Pack* srcPtr0 = (Pack*)srcLambda(0);
-#pragma unroll UNROLL_PACKS
+      NVCC_PRAGMA_UNROLL(UNROLL_PACKS)
       for (int u = 0; u < UNROLL_PACKS; u++) {
         IntCount packIdx = groupLanePackIdx + u * runtimeStride;
         if NCCL_IF_CONSTEXPR (CHECK_BOUNDS) {
@@ -137,7 +136,7 @@ NCCL_DEVICE_INLINE IntCount reduceCopyLoopCoreImpl(Coop coop, SrcLambda srcLambd
 
       // Preseed acc[] with source 0 to avoid inner-loop branching.
       Pack* srcPtr = (Pack*)srcLambda(0);
-#pragma unroll UNROLL_PACKS
+      NVCC_PRAGMA_UNROLL(UNROLL_PACKS)
       for (int u = 0; u < UNROLL_PACKS; u++) {
         IntCount packIdx = groupLanePackIdx + u * runtimeStride;
         if NCCL_IF_CONSTEXPR (CHECK_BOUNDS) {
@@ -149,10 +148,10 @@ NCCL_DEVICE_INLINE IntCount reduceCopyLoopCoreImpl(Coop coop, SrcLambda srcLambd
       }
 
       constexpr int srcCount = UNROLL_SOURCE;
-#pragma unroll UNROLL_SOURCE
+      NVCC_PRAGMA_UNROLL(UNROLL_SOURCE)
       for (int srcOffset = 1; srcOffset < srcCount; srcOffset++) {
         Pack* srcPtr = (Pack*)srcLambda(srcOffset);
-#pragma unroll UNROLL_PACKS
+        NVCC_PRAGMA_UNROLL(UNROLL_PACKS)
         for (int u = 0; u < UNROLL_PACKS; u++) {
           IntCount packIdx = groupLanePackIdx + u * runtimeStride;
           if NCCL_IF_CONSTEXPR (CHECK_BOUNDS) {
@@ -162,13 +161,13 @@ NCCL_DEVICE_INLINE IntCount reduceCopyLoopCoreImpl(Coop coop, SrcLambda srcLambd
         }
       }
 
-#pragma unroll UNROLL_PACKS
+      NVCC_PRAGMA_UNROLL(UNROLL_PACKS)
       for (int u = 0; u < UNROLL_PACKS; u++) {
         if NCCL_IF_CONSTEXPR (CHECK_BOUNDS) {
           IntCount packIdx = groupLanePackIdx + u * runtimeStride;
           if (packIdx >= totalPacks) break;
         }
-#pragma unroll UNROLL_SOURCE
+        NVCC_PRAGMA_UNROLL(UNROLL_SOURCE)
         for (int srcOffset = 1; srcOffset < srcCount; srcOffset++) {
           AccPackType val = castPack<AccEltType, PackEltType, Pack::Count>(loaded[srcOffset][u]);
           acc[u] = reducePack(accRedOp, acc[u], val);
@@ -178,10 +177,10 @@ NCCL_DEVICE_INLINE IntCount reduceCopyLoopCoreImpl(Coop coop, SrcLambda srcLambd
       // Finish remaining sources.
       for (int srcBase = UNROLL_SOURCE; srcBase < nSrc; srcBase += UNROLL_SOURCE) {
         Pack loaded[UNROLL_SOURCE][UNROLL_PACKS];
-#pragma unroll UNROLL_SOURCE
+        NVCC_PRAGMA_UNROLL(UNROLL_SOURCE)
         for (int srcOffset = 0; srcOffset < srcCount; srcOffset++) {
           Pack* srcPtr = (Pack*)srcLambda(srcBase + srcOffset);
-#pragma unroll UNROLL_PACKS
+          NVCC_PRAGMA_UNROLL(UNROLL_PACKS)
           for (int u = 0; u < UNROLL_PACKS; u++) {
             IntCount packIdx = groupLanePackIdx + u * runtimeStride;
             if NCCL_IF_CONSTEXPR (CHECK_BOUNDS) {
@@ -191,13 +190,13 @@ NCCL_DEVICE_INLINE IntCount reduceCopyLoopCoreImpl(Coop coop, SrcLambda srcLambd
           }
         }
 
-#pragma unroll UNROLL_PACKS
+        NVCC_PRAGMA_UNROLL(UNROLL_PACKS)
         for (int u = 0; u < UNROLL_PACKS; u++) {
           if NCCL_IF_CONSTEXPR (CHECK_BOUNDS) {
             IntCount packIdx = groupLanePackIdx + u * runtimeStride;
             if (packIdx >= totalPacks) break;
           }
-#pragma unroll UNROLL_SOURCE
+          NVCC_PRAGMA_UNROLL(UNROLL_SOURCE)
           for (int srcOffset = 0; srcOffset < srcCount; srcOffset++) {
             AccPackType val = castPack<AccEltType, PackEltType, Pack::Count>(loaded[srcOffset][u]);
             acc[u] = reducePack(accRedOp, acc[u], val);
@@ -211,11 +210,11 @@ NCCL_DEVICE_INLINE IntCount reduceCopyLoopCoreImpl(Coop coop, SrcLambda srcLambd
   if NCCL_IF_CONSTEXPR (!dstMultimem && !CHECK_BOUNDS) {
     // Fast path: LSA destinations, no bounds checking - optimized for performance
     // Hoist pointer calculations outside inner loop for better instruction scheduling
-#pragma unroll 4
+    NVCC_PRAGMA_UNROLL(4)
     for (int dstIdx = 0; dstIdx < nDst; dstIdx++) {
       Pack* dstPtr = (Pack*)dstLambda(dstIdx);
       // Explicit unroll with direct memory access - compiler can better schedule instructions
-#pragma unroll UNROLL_PACKS
+      NVCC_PRAGMA_UNROLL(UNROLL_PACKS)
       for (int u = 0; u < UNROLL_PACKS; u++) {
         IntCount packIdx = groupLanePackIdx + u * runtimeStride;
         Pack result = castPack<PackEltType, AccEltType, Pack::Count>(acc[u]);
@@ -224,10 +223,10 @@ NCCL_DEVICE_INLINE IntCount reduceCopyLoopCoreImpl(Coop coop, SrcLambda srcLambd
     }
   } else {
     // General path: handles multimem and bounds checking
-#pragma unroll 4
+    NVCC_PRAGMA_UNROLL(4)
     for (int dstIdx = 0; dstIdx < nDst; dstIdx++) {
       Pack* dstPtr = (Pack*)dstLambda(dstIdx);
-#pragma unroll UNROLL_PACKS
+      NVCC_PRAGMA_UNROLL(UNROLL_PACKS)
       for (int u = 0; u < UNROLL_PACKS; u++) {
         IntCount packIdx = groupLanePackIdx + u * runtimeStride;
         if NCCL_IF_CONSTEXPR (CHECK_BOUNDS) {
@@ -260,7 +259,8 @@ NCCL_DEVICE_INLINE IntCount reduceCopyLoopCore(Coop coop, SrcLambda srcLambda, i
     if (nSrc >= 4 && nSrc % 4 == 0) {
       constexpr int UNROLL_DIV4 = UNROLL_PACKS / 4;
       if NCCL_IF_CONSTEXPR (UNROLL_DIV4 > 0) {
-        constexpr int UNROLL_DIV4_SAFE = (UNROLL_DIV4 > 0) ? UNROLL_DIV4 : 1; // only needed for dead-code instantiation
+        // only needed for dead-code instantiation
+        constexpr int UNROLL_DIV4_SAFE = (UNROLL_DIV4 > 0) ? UNROLL_DIV4 : 1;
         return reduceCopyLoopCoreImpl<UNROLL_DIV4_SAFE, /*nSrc=*/4, T, Pack, RedOp, IntCount, Coop, srcMultimem,
                                       dstMultimem, SrcLambda, DstLambda, CHECK_BOUNDS, /*singleSrc=*/false>(
           coop, srcLambda, nSrc, dstLambda, nDst, redOp, totalPacks, basePackIdx);
@@ -272,18 +272,20 @@ NCCL_DEVICE_INLINE IntCount reduceCopyLoopCore(Coop coop, SrcLambda srcLambda, i
     // if (nSrc >= 3 && nSrc % 3 == 0) {
     //   constexpr int UNROLL_DIV3 = UNROLL_PACKS / 3;
     //   if NCCL_IF_CONSTEXPR (UNROLL_DIV3 > 0) {
-    //     constexpr int UNROLL_DIV3_SAFE = (UNROLL_DIV3 > 0) ? UNROLL_DIV3 : 1;  // only needed for dead-code instantiation
-    //     return reduceCopyLoopCoreImpl<UNROLL_DIV3_SAFE, /*nSrc=*/3, T, Pack, RedOp, IntCount, Coop, srcMultimem, dstMultimem,
-    //                            SrcLambda, DstLambda, CHECK_BOUNDS, /*singleSrc=*/false>(
+    //     constexpr int UNROLL_DIV3_SAFE = (UNROLL_DIV3 > 0) ? UNROLL_DIV3 : 1;  // only needed for dead-code
+    //                                                                            // instantiation
+    //     return reduceCopyLoopCoreImpl<UNROLL_DIV3_SAFE, /*nSrc=*/3, T, Pack, RedOp, IntCount, Coop, srcMultimem,
+    //                                   dstMultimem, SrcLambda, DstLambda, CHECK_BOUNDS, /*singleSrc=*/false>(
     //         coop, srcLambda, nSrc, dstLambda, nDst, redOp, totalPacks, basePackIdx);
     //   }
     // }
     // if (nSrc >= 2 && nSrc % 2 == 0) {
     //   constexpr int UNROLL_DIV2 = UNROLL_PACKS / 2;
     //   if NCCL_IF_CONSTEXPR (UNROLL_DIV2 > 0) {
-    //     constexpr int UNROLL_DIV2_SAFE = (UNROLL_DIV2 > 0) ? UNROLL_DIV2 : 1;  // only needed for dead-code instantiation
-    //     return reduceCopyLoopCoreImpl<UNROLL_DIV2_SAFE, /*nSrc=*/2, T, Pack, RedOp, IntCount, Coop, srcMultimem, dstMultimem,
-    //                            SrcLambda, DstLambda, CHECK_BOUNDS, /*singleSrc=*/false>(
+    //     constexpr int UNROLL_DIV2_SAFE = (UNROLL_DIV2 > 0) ? UNROLL_DIV2 : 1;  // only needed for dead-code
+    //                                                                            // instantiation
+    //     return reduceCopyLoopCoreImpl<UNROLL_DIV2_SAFE, /*nSrc=*/2, T, Pack, RedOp, IntCount, Coop, srcMultimem,
+    //                                   dstMultimem, SrcLambda, DstLambda, CHECK_BOUNDS, /*singleSrc=*/false>(
     //         coop, srcLambda, nSrc, dstLambda, nDst, redOp, totalPacks, basePackIdx);
     //   }
     // }
@@ -299,9 +301,9 @@ struct ReduceCopyLoopParams {
   IntCount totalPacks;
   IntCount packsPerIteration;
   int effectiveUnrollPacks;
-  IntCount numFullChunks; // Number of unchecked rounds
-  IntCount remainingPacks; // Number of packs in checked round
-  IntCount processedElts; // Number of elements processed (full packs only)
+  IntCount numFullChunks;  // Number of unchecked rounds
+  IntCount remainingPacks;  // Number of packs in checked round
+  IntCount processedElts;  // Number of elements processed (full packs only)
 
   NCCL_DEVICE_INLINE ReduceCopyLoopParams(IntCount count, int coopSize, int stride, int nSrc) {
     if NCCL_IF_CONSTEXPR (Pack::Count > 0) {
@@ -422,7 +424,8 @@ NCCL_DEVICE_INLINE void reduceCopy(Coop coop, SrcLambda srcLambda, int nSrc, Dst
     processedElts = alignOffset;
   }
 
-  // Step 2: Process aligned bulk - match all_reduce.cuh strategy: check relative alignment and try pack sizes sequentially
+  // Step 2: Process aligned bulk - match all_reduce.cuh strategy: check relative alignment and try pack sizes
+  // sequentially
   IntCount remainingElts = count - processedElts;
   if (remainingElts == 0) {
     return;
@@ -478,7 +481,7 @@ NCCL_DEVICE_INLINE void reduceCopy(Coop coop, SrcLambda srcLambda, int nSrc, Dst
     // Check individual pointer alignment for Pack4 (always 4-byte alignment requirement)
     // getAlignment returns bytes to next aligned address (0 = already aligned)
     using Pack4 = nccl::utility::EltPackForBytes<T, 4>;
-    constexpr unsigned pack4Align = 4; // Pack4 always requires 4-byte alignment
+    constexpr unsigned pack4Align = 4;  // Pack4 always requires 4-byte alignment
     bool srcAligned4 = (srcPtrAfter16 == nullptr) || (nccl::utility::getAlignment(srcPtrAfter16, pack4Align) == 0);
     bool dstAligned4 = (dstPtrAfter16 == nullptr) || (nccl::utility::getAlignment(dstPtrAfter16, pack4Align) == 0);
 
