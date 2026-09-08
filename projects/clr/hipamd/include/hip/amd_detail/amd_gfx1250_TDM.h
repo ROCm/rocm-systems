@@ -34,31 +34,23 @@ THE SOFTWARE.
 #endif
 #endif
 
-namespace gfx1250
-{
-
 using __hip_uint32x4 = __NATIVE_VECTOR__(4, uint32_t);
 using __hip_uint32x8 = __NATIVE_VECTOR__(8, uint32_t);
 using __hip_int32x4 = __NATIVE_VECTOR__(4, int32_t);
 using __hip_int32x8 = __NATIVE_VECTOR__(8, int32_t);
 
-
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wshift-count-overflow" // we're going to be using overflow on purpose
 
-
-union TDM_GROUP0
+union gfx1250_TDM_GROUP0
 {
-    __device__ constexpr TDM_GROUP0() : m_bitfield{0, 0, 0, 0}
-    {
-        m_count             = 1;
-        m_type              = 2;
-    }
+    __device__ constexpr gfx1250_TDM_GROUP0() : m_bitfield{0x1, 0, 0, 0x80000000}
+    {}
 
-    __device__ TDM_GROUP0( uintptr_t lds_addr_in,
+    __device__ gfx1250_TDM_GROUP0( uintptr_t lds_addr_in,
                            uintptr_t global_addr_in,
                            uint32_t  gather_idx_size_in = 0,
-                           uint32_t  gather_mode_in = 0 ): m_bitfield{0, 0, 0, 0}
+                           uint32_t  gather_mode_in = 0 )
     {
         globalAddr(global_addr_in);
         m_count             = 1;
@@ -67,6 +59,7 @@ union TDM_GROUP0
         m_gather_index_size = gather_idx_size_in;
         m_gather_mode       = gather_mode_in;
     }
+
 
     struct
     {
@@ -128,9 +121,9 @@ union TDM_GROUP0
     }
 };
 
-union TDM_GROUP1
+union gfx1250_TDM_GROUP1
 {
-    __device__ constexpr TDM_GROUP1() : m_bitfield{0,0,0,0,0,0,0,0} {}
+    __device__ constexpr gfx1250_TDM_GROUP1() : m_bitfield{0,0,0,0,0,0,0,0} {}
 
     struct
     {
@@ -290,9 +283,9 @@ union TDM_GROUP1
     }
 };
 
-union TDM_GROUP2
+union gfx1250_TDM_GROUP2
 {
-    __device__ TDM_GROUP2() : m_bitfield{0,0,0,0} {}
+    __device__ gfx1250_TDM_GROUP2() : m_bitfield{0,0,0,0} {}
 
     struct
     {
@@ -333,9 +326,9 @@ union TDM_GROUP2
     }
 };
 
-union TDM_GROUP3
+union gfx1250_TDM_GROUP3
 {
-    __device__ TDM_GROUP3() : m_bitfield{0,0,0,0} {}
+    __device__ gfx1250_TDM_GROUP3() : m_bitfield{0,0,0,0} {}
 
     struct
     {
@@ -373,100 +366,6 @@ union TDM_GROUP3
         m_tensor_dim_4_lo = value & 0xFFFF;
         m_tensor_dim_4_hi = value >> 16;
     }
-
-    void __device__ inline tileDim4(uint32_t value)
-    {
-        m_tile_dim4 = value;
-    }
 };
-
-struct TDM_DESCRIPTOR
-{
-    TDM_GROUP0 group0;
-    TDM_GROUP1 group1;
-    TDM_GROUP2 group2;
-    TDM_GROUP3 group3;
-};
-
-union TDM_GATHER_GROUP2_32BIT
-{
-    __device__ TDM_GATHER_GROUP2_32BIT() : m_bitfield{0,0,0,0} {}
-
-    __hip_int32x4 m_bitfield;
-
-    void __device__ inline rowIndex(uint32_t slot, uint32_t value)
-    {
-        m_bitfield[slot] = static_cast<int32_t>(value);
-    }
-};
-
-union TDM_GATHER_GROUP3_32BIT
-{
-    __device__ TDM_GATHER_GROUP3_32BIT() : m_bitfield{0,0,0,0} {}
-
-    __hip_int32x4 m_bitfield;
-
-    void __device__ inline rowIndex(uint32_t slot, uint32_t value)
-    {
-        m_bitfield[slot] = static_cast<int32_t>(value);
-    }
-};
-
-// Descriptor layout from the hardware specification; currently untested.
-union TDM_GATHER_GROUP2_16BIT
-{
-    __device__ TDM_GATHER_GROUP2_16BIT() : m_bitfield{0,0,0,0} {}
-
-    __hip_int32x4 m_bitfield;
-
-    void __device__ inline rowIndex(uint32_t slot, uint16_t value)
-    {
-        const uint32_t lane = slot / 2;
-        const uint32_t shift = (slot % 2) * 16;
-        const uint32_t packed = static_cast<uint32_t>(m_bitfield[lane]);
-        m_bitfield[lane] = static_cast<int32_t>(
-            (packed & ~(0xffffu << shift)) | (static_cast<uint32_t>(value) << shift));
-    }
-};
-
-// Descriptor layout from the hardware specification; currently untested.
-union TDM_GATHER_GROUP3_16BIT
-{
-    __device__ TDM_GATHER_GROUP3_16BIT() : m_bitfield{0,0,0,0} {}
-
-    __hip_int32x4 m_bitfield;
-
-    void __device__ inline rowIndex(uint32_t slot, uint16_t value)
-    {
-        const uint32_t lane = slot / 2;
-        const uint32_t shift = (slot % 2) * 16;
-        const uint32_t packed = static_cast<uint32_t>(m_bitfield[lane]);
-        m_bitfield[lane] = static_cast<int32_t>(
-            (packed & ~(0xffffu << shift)) | (static_cast<uint32_t>(value) << shift));
-    }
-};
-
-template<typename Index>
-using TDM_INDEX_GROUP2 = std::conditional_t<
-    std::is_same_v<Index, uint16_t>,
-    TDM_GATHER_GROUP2_16BIT,
-    TDM_GATHER_GROUP2_32BIT>;
-
-template<typename Index>
-using TDM_INDEX_GROUP3 = std::conditional_t<
-    std::is_same_v<Index, uint16_t>,
-    TDM_GATHER_GROUP3_16BIT,
-    TDM_GATHER_GROUP3_32BIT>;
-
-template<typename Index>
-struct TDM_INDEXED_DESCRIPTOR
-{
-    TDM_GROUP0 group0;
-    TDM_GROUP1 group1;
-    TDM_INDEX_GROUP2<Index> group2;
-    TDM_INDEX_GROUP3<Index> group3;
-};
-} // namespace gfx1250
-
 #pragma clang diagnostic pop
 #endif // HIP_INCLUDE_HIP_AMD_GFX1250_TDM_H
