@@ -2428,5 +2428,111 @@ DecodeResult decodeFlatAtomicFmaxX2Flat(const MachineInst *opcode,
 }
 } // namespace detail
 
+GlobalLoadDwordAddtidFlat::GlobalLoadDwordAddtidFlat(const MachineInst *inst)
+    : Flat("global_load_dword_addtid", reinterpret_cast<const OpEncoding *>(inst),
+           selected_exec_fn(InstructionExecutionId::GlobalLoadDwordAddtidFlat)),
+      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr),
+      m0(32, OperandType::OPR_SDST_M0, 124) {
+  dst_operands_[0] = &vdst;
+  src_operands_[0] = &saddr;
+  src_operands_[1] = &m0;
+  num_src_ = 2;
+  num_dst_ = 1;
+  m0.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_OP;
+}
+
+namespace detail {
+DecodeResult decodeGlobalLoadDwordAddtidFlat(const MachineInst *opcode,
+                                             const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Flat::validate_encoding(
+      "global_load_dword_addtid", reinterpret_cast<const Flat::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (reinterpret_cast<const Flat::OpEncoding *>(inst)->seg != 2u) [[unlikely]]
+    return emit_error.emit() << "GLOBAL_LOAD_DWORD_ADDTID requires its GLOBAL segment";
+  return std::make_unique<GlobalLoadDwordAddtidFlat>(opcode);
+}
+} // namespace detail
+
+GlobalStoreDwordAddtidFlat::GlobalStoreDwordAddtidFlat(const MachineInst *inst)
+    : Flat("global_store_dword_addtid", reinterpret_cast<const OpEncoding *>(inst),
+           selected_exec_fn(InstructionExecutionId::GlobalStoreDwordAddtidFlat)),
+      data(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data),
+      saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr),
+      m0(32, OperandType::OPR_SDST_M0, 124) {
+  src_operands_[0] = &data;
+  src_operands_[1] = &saddr;
+  src_operands_[2] = &m0;
+  num_src_ = 3;
+  num_dst_ = 0;
+  m0.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_OP;
+}
+
+namespace detail {
+DecodeResult decodeGlobalStoreDwordAddtidFlat(const MachineInst *opcode,
+                                              const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Flat::validate_encoding(
+      "global_store_dword_addtid", reinterpret_cast<const Flat::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (reinterpret_cast<const Flat::OpEncoding *>(inst)->seg != 2u) [[unlikely]]
+    return emit_error.emit() << "GLOBAL_STORE_DWORD_ADDTID requires its GLOBAL segment";
+  return std::make_unique<GlobalStoreDwordAddtidFlat>(opcode);
+}
+} // namespace detail
+
+GlobalAtomicCsubFlat::GlobalAtomicCsubFlat(const MachineInst *inst)
+    : Flat("global_atomic_csub", reinterpret_cast<const OpEncoding *>(inst),
+           selected_exec_fn(InstructionExecutionId::GlobalAtomicCsubFlat)),
+      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
+      data(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data),
+      gpumem(32, OperandType::OPR_GPUMEM, 0), gpumem_in(32, OperandType::OPR_GPUMEM, 0),
+      m0(32, OperandType::OPR_SDST_M0, 124), saddr(0, OperandType::OPR_SREG, 0) {
+  src_operands_[0] = &addr;
+  src_operands_[1] = &data;
+  dst_operands_[0] = &gpumem;
+  src_operands_[2] = &gpumem_in;
+  src_operands_[3] = &m0;
+  num_src_ = 4;
+  num_dst_ = 1;
+  if ((inst_.glc != 0))
+    dst_operands_[num_dst_++] = &vdst;
+  if (inst_.seg == 1) {
+    addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
+    if (inst_.saddr != 0x7F) {
+      saddr = Operand(32, OperandType::OPR_SREG, inst_.saddr);
+      src_operands_[num_src_++] = &saddr;
+    }
+  } else if (inst_.seg == 2 && inst_.saddr != 0x7F) {
+    addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
+    saddr = Operand(64, OperandType::OPR_SREG, inst_.saddr);
+    src_operands_[num_src_++] = &saddr;
+  }
+  gpumem.apply_fieldless_caps(false, false, false);
+  gpumem_in.apply_fieldless_caps(false, false, false);
+  m0.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_OP;
+}
+
+namespace detail {
+DecodeResult decodeGlobalAtomicCsubFlat(const MachineInst *opcode,
+                                        const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Flat::validate_encoding(
+      "global_atomic_csub", reinterpret_cast<const Flat::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (reinterpret_cast<const Flat::OpEncoding *>(inst)->seg != 2u) [[unlikely]]
+    return emit_error.emit() << "GLOBAL_ATOMIC_CSUB requires its GLOBAL segment";
+  return std::make_unique<GlobalAtomicCsubFlat>(opcode);
+}
+} // namespace detail
+
 } // namespace rdna2
 } // namespace rocjitsu
