@@ -216,8 +216,8 @@ public:
   /// @param[in] d Dynamic state (ownership transferred).
   void set_data(std::unique_ptr<DynamicInstState> d) { data_ = std::move(d); }
 
-  /// @brief The instruction's human-readable mnemonic.
-  /// @returns Reference to the mnemonic string.
+  /// @brief The instruction's canonical semantic mnemonic.
+  /// @returns Reference to the mnemonic used by analysis and execution consumers.
   std::string_view mnemonic() const { return mnemonic_; }
 
   /// @brief The instruction's total number of operands.
@@ -333,6 +333,13 @@ public:
   /// @brief Opcode within the encoding format.
   [[nodiscard]] uint16_t opcode() const { return opcode_; }
 
+  /// @brief Target feature bits required to decode this instruction form.
+  ///
+  /// The generated constructor records both mnemonic-wide and encoding-form
+  /// requirements. Decoder instances compare this mask with the immutable
+  /// feature set of their concrete GPU target before exposing the instruction.
+  [[nodiscard]] uint64_t required_isa_features() const { return required_isa_features_; }
+
   /// @brief Produce the disassembly string for this instruction.
   ///
   /// @details On first call, generates and caches the disassembly string. Subsequent
@@ -340,20 +347,27 @@ public:
   /// @returns Reference to the disassembly string.
   const std::string &disassemble() const {
     if (disassembly_.empty()) {
-      disassembly_ += mnemonic_;
+      append_mnemonic(disassembly_);
       bool first = true;
       // TODO: Include explicit fieldless operands (and/or implicit ones too).
       for (uint8_t operand_index = 0; operand_index < num_dst_; ++operand_index) {
         if (dst_operands_[operand_index]->is_fieldless())
           continue;
         disassembly_ += (first ? " " : ", ");
-        disassembly_ += dst_operands_[operand_index]->name();
+        append_dst_operand(disassembly_, operand_index);
         first = false;
       }
       for (uint8_t operand_index = 0; operand_index < num_src_; ++operand_index) {
         if (src_operands_[operand_index]->size_bits() == 0 ||
             src_operands_[operand_index]->is_fieldless())
           continue;
+        if (omit_repeated_destination_sources_) {
+          bool repeats_dst = false;
+          for (uint8_t dst_index = 0; dst_index < num_dst_; ++dst_index)
+            repeats_dst |= src_operands_[operand_index] == dst_operands_[dst_index];
+          if (repeats_dst)
+            continue;
+        }
         disassembly_ += (first ? " " : ", ");
         append_src_operand(disassembly_, operand_index);
         first = false;
@@ -377,10 +391,19 @@ protected:
   /// CodeGenerator._DST_OPERANDS_CAPACITY; resize both together.
   std::array<Operand *, 3> dst_operands_{};
   uint8_t num_dst_ = 0;
-  /// @brief Append modifier flags to the disassembly string (e.g. " sc0 sc1").
-  /// Overridden by memory encoding bases that have flag bits to display.
+  /// @brief Whether read/write operands are rendered only in destination position.
+  bool omit_repeated_destination_sources_ = false;
+  /// @brief Append the encoding-specific mnemonic spelling used by disassembly.
+  /// The default matches mnemonic(); encoding decorations may override it.
+  virtual void append_mnemonic(std::string &out) const { out += mnemonic_; }
+  /// @brief Append encoding attributes to the disassembly string (e.g. cache flags or DPP state).
+  /// Overridden by encoding bases that have instruction attributes to display.
   /// Default: no modifiers. Called lazily by disassemble().
   virtual void build_modifiers(std::string & /*out*/) const {}
+  /// @brief Append one destination operand to textual disassembly.
+  virtual void append_dst_operand(std::string &out, uint8_t operand_index) const {
+    out += dst_operands_[operand_index]->name();
+  }
   /// @brief Append one source operand to textual disassembly.
   virtual void append_src_operand(std::string &out, uint8_t operand_index) const {
     out += src_operands_[operand_index]->name();
@@ -396,6 +419,11 @@ protected:
   uint16_t encoding_id_ = 0;
   /// @brief Opcode within the encoding format.
   uint16_t opcode_ = 0;
+  /// @brief Feature mask emitted from the ISA-variant manifest.
+  // A 32-bit mask fits in the alignment padding before src_loc_. Keep this
+  // compact: Instruction is on decode/simulation hot paths and every generated
+  // instruction derives from it.
+  uint32_t required_isa_features_ = 0;
   /// @brief Source byte offset assigned at construction or by Decoder::decode().
   uint64_t src_loc_ = 0;
 

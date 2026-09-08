@@ -18,3 +18,5 @@ rj_add_object_library(rocjitsu_vm_amdgpu
     l2_cache.cpp
     memory_side_cache.cpp
 )
+
+add_subdirectory(pci)

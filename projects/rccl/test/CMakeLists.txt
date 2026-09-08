@@ -64,6 +64,19 @@ if(BUILD_TESTS)
     add_compile_definitions(RCCL_TEST_CODE_COVERAGE=1)
   endif()
 
+  # add_rocshmem_targets() exports these with PARENT_SCOPE from src/, so re-derive them here.
+  if(ENABLE_ROCSHMEM OR ENABLE_ROCSHMEM_GIN)
+    if(NOT ROCSHMEM_INSTALL_DIR)
+      set(ROCSHMEM_INSTALL_DIR "${CMAKE_SOURCE_DIR}/ext/rocshmem")
+    endif()
+    if(NOT ROCSHMEM_INCLUDE_DIR)
+      set(ROCSHMEM_INCLUDE_DIR "${ROCSHMEM_INSTALL_DIR}/include")
+    endif()
+    if(NOT ROCSHMEM_LIBRARY)
+      set(ROCSHMEM_LIBRARY "${ROCSHMEM_INSTALL_DIR}/lib/librocshmem.a")
+    endif()
+  endif()
+
   find_package(hsa-runtime64 PATHS /opt/rocm )
   if(${hsa-runtime64_FOUND})
     message("hsa-runtime64 found @  ${hsa-runtime64_DIR} ")
@@ -289,6 +302,12 @@ if(BUILD_TESTS)
   target_link_options(rccl-UnitTests PRIVATE
     "LINKER:--export-dynamic-symbol=ncclNetPlugin_v12")
 
+  # AICOMRCCL-2183: RcclMockFuncs.hpp's empty ncclDebugLog, needed to link the Release-only
+  # sources above, overrides librccl.so's own in Debug and silences all library logging. Hidden
+  # keeps it linkable here but out of .dynsym, as rccl-UnitTestsFixturesDebug does below.
+  target_compile_options(rccl-UnitTests PRIVATE
+    -fvisibility=hidden -fvisibility-inlines-hidden)
+
   # A real shared library, unlike the net plugin above: ProfilerPluginCloseTests checks
   # that RCCL unloads an external profiler plugin, so it needs a separately loadable
   # object. It lands beside rccl-UnitTests in the build tree and is installed beside it
@@ -347,6 +366,13 @@ if(BUILD_TESTS)
 
   if(ENABLE_ROCSHMEM_GIN AND (ENABLE_ROCSHMEM OR GIN_ANVIL_UNIT_TESTS))
     list(APPEND TEST_FIXTURE_SOURCE_FILES
+      # GIN rocSHMEM-GDA device template test. Self-contained: supplies its own
+      # rocshmem::QueuePair device stubs in-TU (no librocshmem device link, no
+      # header shadow). Its body is guarded by NCCL_GIN_ROCSHMEM_GDA_ENABLE, which
+      # gin_device_common.h sets when ENABLE_ROCSHMEM_GIN is defined on HIP.
+      # Built here alongside the Anvil-SDMA template test under GIN_ANVIL_UNIT_TESTS
+      # or when librccl is built with full ENABLE_ROCSHMEM.
+      device/GinRocshmemGdaTemplate_test.cpp
       device/GinAnvilSdmaTemplate_test.cpp
     )
   endif()
@@ -375,7 +401,10 @@ if(BUILD_TESTS)
     target_compile_definitions(rccl-UnitTestsFixtures PRIVATE ENABLE_ROCSHMEM_GIN)
   endif()
 
-  if(ENABLE_ROCSHMEM_GIN AND (ENABLE_ROCSHMEM OR GIN_ANVIL_UNIT_TESTS))
+  # Match librccl.so ABI: ENABLE_ROCSHMEM changes ncclComm/ncclProxyState layout.
+  # GIN CI builds librccl with ENABLE_ROCSHMEM_GIN only; device templates need
+  # ENABLE_ROCSHMEM_GIN (above), not ENABLE_ROCSHMEM on this target.
+  if(ENABLE_ROCSHMEM_GIN AND ENABLE_ROCSHMEM)
     target_compile_definitions(rccl-UnitTestsFixtures PRIVATE ENABLE_ROCSHMEM)
   endif()
 
@@ -424,6 +453,9 @@ if(BUILD_TESTS)
     endif()
 
     target_compile_definitions(rccl-UnitTestsGinAnvilPlugin PRIVATE ENABLE_ROCSHMEM_GIN)
+
+    # No rccl link below, so the implicit ordering after hipify has to be explicit.
+    add_dependencies(rccl-UnitTestsGinAnvilPlugin hipify_all)
   endif()
   endif()
 
@@ -475,6 +507,57 @@ if(BUILD_TESTS)
   add_test(NAME rccl-UnitTestsGinSdmaPolicy COMMAND rccl-UnitTestsGinSdmaPolicy)
   set_tests_properties(rccl-UnitTestsGinSdmaPolicy PROPERTIES LABELS "unit")
 
+  # GIN Anvil-SDMA hybrid AllGather (-D 3) policy host unit test (no GPU).
+  # Compiles gin_sdma_allgather_policy.h from the sibling rccl-tests project with
+  # GIN_SDMA_HOST_ONLY (no librccl / device codegen needed), validating the exact
+  # chunk sizing, LSA<->SDMA tier crossover, context-threshold fallback and
+  # bandwidth math the GinHybridAllGatherKernel relies on. Skip the target if the
+  # rccl-tests checkout is absent so a standalone rccl build still configures.
+  # Runs under `ctest -L unit`.
+  set(_gin_sdma_ag_hdr_dir "${PROJECT_SOURCE_DIR}/../rccl-tests/src")
+  if (EXISTS "${_gin_sdma_ag_hdr_dir}/gin_sdma_allgather_policy.h")
+    add_executable(rccl-UnitTestsGinSdmaAllGatherPolicy gin/gin_sdma_allgather_policy_test.cpp)
+    set_source_files_properties(gin/gin_sdma_allgather_policy_test.cpp PROPERTIES LANGUAGE CXX)
+    target_include_directories(rccl-UnitTestsGinSdmaAllGatherPolicy PRIVATE
+      "${_gin_sdma_ag_hdr_dir}")
+    target_compile_definitions(rccl-UnitTestsGinSdmaAllGatherPolicy PRIVATE GIN_SDMA_HOST_ONLY)
+    target_link_libraries(rccl-UnitTestsGinSdmaAllGatherPolicy PRIVATE ${GTEST_BOTH_LIBRARIES} Threads::Threads)
+    set_target_properties(rccl-UnitTestsGinSdmaAllGatherPolicy PROPERTIES
+      RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/test")
+    add_test(NAME rccl-UnitTestsGinSdmaAllGatherPolicy COMMAND rccl-UnitTestsGinSdmaAllGatherPolicy)
+    set_tests_properties(rccl-UnitTestsGinSdmaAllGatherPolicy PROPERTIES LABELS "unit")
+
+    # GIN-SDMA AllGather ON-GPU correctness test. AllGather has no reduction, so
+    # this validates the LSA<->SDMA tier predicate device-vs-host and the
+    # direct-LSA gather addressing (the pointer-arithmetic core of
+    # AllGatherLsaDirect) on real hardware, self-contained (no librccl / GIN
+    # comm). Requires a visible GPU at run time (skips cleanly otherwise), so it
+    # carries a "gpu" label alongside "unit".
+    add_executable(rccl-UnitTestsGinSdmaAllGatherGpu gin/gin_sdma_allgather_gpu_test.cpp)
+    set_source_files_properties(gin/gin_sdma_allgather_gpu_test.cpp PROPERTIES LANGUAGE CXX)
+    target_include_directories(rccl-UnitTestsGinSdmaAllGatherGpu PRIVATE
+      "${_gin_sdma_ag_hdr_dir}")
+    # Offload for the configured GPU arch(s); hipcc (the CXX compiler) handles the
+    # HIP language, so no separate enable_language(HIP) is needed.
+    set(_gin_sdma_ag_gpu_offload "")
+    foreach(_g IN LISTS GPU_TARGETS)
+      if(_g)
+        list(APPEND _gin_sdma_ag_gpu_offload "--offload-arch=${_g}")
+      endif()
+    endforeach()
+    if(_gin_sdma_ag_gpu_offload)
+      target_compile_options(rccl-UnitTestsGinSdmaAllGatherGpu PRIVATE ${_gin_sdma_ag_gpu_offload})
+      target_link_options(rccl-UnitTestsGinSdmaAllGatherGpu PRIVATE ${_gin_sdma_ag_gpu_offload})
+    endif()
+    target_link_libraries(rccl-UnitTestsGinSdmaAllGatherGpu PRIVATE
+      ${GTEST_BOTH_LIBRARIES} hip::host hip::device Threads::Threads)
+    set_target_properties(rccl-UnitTestsGinSdmaAllGatherGpu PROPERTIES
+      RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/test"
+      CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
+    add_test(NAME rccl-UnitTestsGinSdmaAllGatherGpu COMMAND rccl-UnitTestsGinSdmaAllGatherGpu)
+    set_tests_properties(rccl-UnitTestsGinSdmaAllGatherGpu PROPERTIES LABELS "unit;gpu")
+  endif()
+
   # rccl-UnitTestsFixturesDebug: Tests that access internal symbols compiled into
   # librccl.so which are only visible in Debug builds (hidden visibility in Release).
   if (ROCM_VERSION VERSION_GREATER_EQUAL "60400" AND CMAKE_BUILD_TYPE MATCHES "Debug")
@@ -492,6 +575,7 @@ if(BUILD_TESTS)
       DdaFabricEligibilityTests.cpp
       CeAllReduceEligibilityTests.cpp
       CeAlltoAllvEligibilityTests.cpp
+      GinAlltoAllEligibilityTests.cpp
       EnqueueTests.cpp
       LL128RegVariantKernel_test.cpp
       IpcsocketTests.cpp
@@ -509,6 +593,7 @@ if(BUILD_TESTS)
       TimeoutTests.cpp
       mem_manager/MemManagerTests.cpp
       graph/SearchTests.cpp
+      graph/TuningTests.cpp
       graph/XmlTests.cpp
       graph/NetDevsPolicyP2pNetTests.cpp
       graph/TopoTests.cpp
@@ -782,9 +867,18 @@ if(BUILD_TESTS)
     endif()
   endif()
 
+  # Targets wired up with the sdma stub headers below; everything else opts out.
+  set(RCCL_ANVIL_SDMA_STUB_TARGETS rccl-UnitTestsFixtures rccl-UnitTestsGinAnvilPlugin)
+
   foreach(test_executable IN LISTS RCCL_TEST_EXECUTABLES)
     target_include_directories(${test_executable} PRIVATE ${RCCL_COMMON_INCLUDE_DIRS})
     target_compile_definitions(${test_executable} PRIVATE ${RCCL_COMMON_COMPILE_DEFS})
+
+    # RCCL_COMMON_COMPILE_DEFS inherits ENABLE_ROCSHMEM_GIN from rccl's COMPILE_DEFINITIONS,
+    # which defaults NCCL_GIN_ANVIL_SDMA_ENABLE to 1 and pulls in rocSHMEM's sdma headers.
+    if(ENABLE_ROCSHMEM_GIN AND NOT "${test_executable}" IN_LIST RCCL_ANVIL_SDMA_STUB_TARGETS)
+      target_compile_definitions(${test_executable} PRIVATE NCCL_GIN_ANVIL_SDMA_ENABLE=0)
+    endif()
     if(ENABLE_DEVICE_LINKER)
       # Mirror the rccl library define so device-linker-specific test expectations compile in.
       target_compile_definitions(${test_executable} PRIVATE RCCL_DEVICE_LINKER)
@@ -831,7 +925,8 @@ if(BUILD_TESTS)
 
     # Link the GIN device backend library and device-link its rdc code (-fgpu-rdc
     # --hip-link --offload-arch=... -rdynamic) so GIN device tests can run.
-    if(ENABLE_ROCSHMEM_GIN AND ROCSHMEM_INSTALL_DIR AND "${test_executable}" STREQUAL "rccl-UnitTestsMPI")
+    # GDA only. SDMA host code already lives in librccl.so and its device code is header-only.
+    if(ENABLE_ROCSHMEM_GIN AND ROCSHMEM_LIBRARY AND "${test_executable}" STREQUAL "rccl-UnitTestsMPI")
       set(_ROCSHMEM_OFFLOAD_FLAGS "")
       foreach(_g IN LISTS GPU_TARGETS)
         if(_g)
@@ -847,21 +942,74 @@ if(BUILD_TESTS)
       if(NOT _ROCSHMEM_DRM_AMDGPU)
         set(_ROCSHMEM_DRM_AMDGPU drm_amdgpu)
       endif()
-      # Enable the GIN device backend in the test kernels so ncclGinCall has a
-      # dispatch case for the corresponding runtime GIN type.
+      # Enable the rocshmem-gda GIN backend in the test kernels so ncclGinCall
+      # has a dispatch case for it.
       target_compile_definitions(${test_executable} PRIVATE NCCL_GIN_ROCSHMEM_GDA_ENABLE=1)
+
+      # Enable anvil-sdma only for the TU that launches its kernels; the rocSHMEM
+      # sdma headers are on that TU's include path alone.
+      set(_ANVIL_SDMA_INCLUDES "")
+      if(ROCSHMEM_SOURCE_DIR)
+        list(APPEND _ANVIL_SDMA_INCLUDES ${ROCSHMEM_SOURCE_DIR}/src ${ROCSHMEM_SOURCE_DIR}/include)
+      endif()
+      if(ROCSHMEM_INCLUDE_DIR)
+        list(APPEND _ANVIL_SDMA_INCLUDES ${ROCSHMEM_INCLUDE_DIR})
+      endif()
+      # -U first because the target opted out with =0, and a second -D warns under -Wmacro-redefined.
+      set_source_files_properties(transport/GinDeviceMPITests.cpp PROPERTIES
+          COMPILE_OPTIONS "-UNCCL_GIN_ANVIL_SDMA_ENABLE;-DNCCL_GIN_ANVIL_SDMA_ENABLE=1"
+          INCLUDE_DIRECTORIES "${_ANVIL_SDMA_INCLUDES}")
       target_compile_options(${test_executable} PRIVATE -fgpu-rdc)
+      if(TARGET rocshmem_static)
+        add_dependencies(${test_executable} rocshmem_static)
+      endif()
       target_link_libraries(${test_executable} PRIVATE
-          ${ROCSHMEM_INSTALL_DIR}/lib/librocshmem.a
+          ${ROCSHMEM_LIBRARY}
           ibverbs hsa-runtime64 hsakmt numa ${_ROCSHMEM_DRM} ${_ROCSHMEM_DRM_AMDGPU})
-      target_link_options(${test_executable} PRIVATE -fgpu-rdc --hip-link ${_ROCSHMEM_OFFLOAD_FLAGS} -rdynamic)
+      # ROCm < 7.14 emits cooperative_groups::this_cluster() as a non-inline stub, so -fgpu-rdc device TUs collide; keep one copy. Fixed (inline) in 7.14.
+      set(_ROCSHMEM_DEVLINK_EXTRA "")
+      if(ROCM_VERSION VERSION_LESS "71400")
+        set(_ROCSHMEM_DEVLINK_EXTRA "SHELL:-Xoffload-linker --allow-multiple-definition")
+      endif()
+      target_link_options(${test_executable} PRIVATE -fgpu-rdc --hip-link ${_ROCSHMEM_OFFLOAD_FLAGS} -rdynamic ${_ROCSHMEM_DEVLINK_EXTRA})
+    endif()
+
+    # librccl.so built with ENABLE_ROCSHMEM_GIN but without host librocshmem
+    # (ENABLE_ROCSHMEM=OFF, e.g. gin CI --rocshmem-gin) leaves
+    # rocshmem::envvar::log_flags undefined at load time. Link host rocSHMEM
+    # into the Fixtures binary so the executable satisfies those symbols when
+    # the dynamic loader brings in librccl.so.
+    if(ENABLE_ROCSHMEM_GIN AND GIN_ANVIL_UNIT_TESTS AND NOT ENABLE_ROCSHMEM
+       AND ROCSHMEM_INSTALL_DIR AND "${test_executable}" STREQUAL "rccl-UnitTestsFixtures")
+      set(_ROCSHMEM_FIXTURES_OFFLOAD_FLAGS "")
+      foreach(_g IN LISTS GPU_TARGETS)
+        if(_g)
+          list(APPEND _ROCSHMEM_FIXTURES_OFFLOAD_FLAGS "--offload-arch=${_g}")
+        endif()
+      endforeach()
+      find_library(_ROCSHMEM_FIXTURES_DRM        NAMES drm        HINTS ${ROCM_PATH}/lib/rocm_sysdeps/lib)
+      find_library(_ROCSHMEM_FIXTURES_DRM_AMDGPU NAMES drm_amdgpu HINTS ${ROCM_PATH}/lib/rocm_sysdeps/lib)
+      if(NOT _ROCSHMEM_FIXTURES_DRM)
+        set(_ROCSHMEM_FIXTURES_DRM drm)
+      endif()
+      if(NOT _ROCSHMEM_FIXTURES_DRM_AMDGPU)
+        set(_ROCSHMEM_FIXTURES_DRM_AMDGPU drm_amdgpu)
+      endif()
+      target_link_libraries(${test_executable} PRIVATE
+        ${ROCSHMEM_INSTALL_DIR}/lib/librocshmem.a
+        ibverbs hsa-runtime64 hsakmt numa
+        ${_ROCSHMEM_FIXTURES_DRM} ${_ROCSHMEM_FIXTURES_DRM_AMDGPU})
+      target_link_options(${test_executable} PRIVATE
+        -fgpu-rdc --hip-link ${_ROCSHMEM_FIXTURES_OFFLOAD_FLAGS} -rdynamic)
     endif()
 
     rocm_install(TARGETS ${test_executable} COMPONENT tests)
   endforeach()
 
   # Suite H: shadow rocSHMEM sdma headers with no-op test stubs (higher-priority include path).
-  if(ENABLE_ROCSHMEM_GIN AND (ENABLE_ROCSHMEM OR GIN_ANVIL_UNIT_TESTS))
+  # Gated on ENABLE_ROCSHMEM_GIN because that is what now turns on NCCL_GIN_ANVIL_SDMA_ENABLE,
+  # and these are the only two test targets that define it.
+  if(ENABLE_ROCSHMEM_GIN)
     if(ROCSHMEM_SOURCE_DIR)
       target_include_directories(rccl-UnitTestsFixtures PRIVATE ${ROCSHMEM_SOURCE_DIR}/src)
     else()
@@ -869,6 +1017,10 @@ if(BUILD_TESTS)
     endif()
     target_include_directories(rccl-UnitTestsFixtures BEFORE PRIVATE
       ${CMAKE_CURRENT_SOURCE_DIR}/device)
+    if(TARGET rccl-UnitTestsGinAnvilPlugin)
+      target_include_directories(rccl-UnitTestsGinAnvilPlugin BEFORE PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/device)
+    endif()
   endif()
 
   # Create install-time test file for distribution

@@ -23,7 +23,7 @@
 #
 # rocprofv3 tool tests for negating tracing options
 #
-cmake_minimum_required(VERSION 3.21.0 FATAL_ERROR)
+cmake_minimum_required(VERSION 3.24 FATAL_ERROR)
 
 project(
     rocprofiler-tests-rocprofv3-negate-aggregate-tracing-options

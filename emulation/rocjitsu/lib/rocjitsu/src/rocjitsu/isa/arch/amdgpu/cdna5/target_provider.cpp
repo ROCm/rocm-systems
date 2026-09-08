@@ -9,7 +9,17 @@
 namespace rocjitsu::cdna5 {
 
 std::unique_ptr<rocjitsu::Decoder> create_target_decoder() {
-  return make_isa_decoder<Isa>(&execution_backend());
+  return create_target_decoder(kGfx1250Target);
+}
+
+std::unique_ptr<rocjitsu::Decoder>
+create_target_decoder(const IsaGpuTargetDescription &gpu_target) {
+  if (gpu_target.public_id != ROCJITSU_CODE_TARGET_GFX1250 &&
+      gpu_target.public_id != ROCJITSU_CODE_TARGET_GFX1251)
+    return nullptr;
+  const IsaExecutionBackend *backend =
+      gpu_target.capabilities.execution_implemented ? &execution_backend() : nullptr;
+  return make_isa_decoder<Isa>(backend, gpu_target.capabilities.instruction_features);
 }
 
 } // namespace rocjitsu::cdna5

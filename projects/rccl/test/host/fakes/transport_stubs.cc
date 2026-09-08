@@ -10,6 +10,8 @@
 // (abort-on-call, except benign teardown returning ncclSuccess). A test that
 // needs to drive one of these replaces that individual entry with a real fake.
 
+#include "transport_stubs.h"
+
 #include <cstdlib>
 #include <functional>
 
@@ -17,6 +19,15 @@
 
 struct ncclComm;
 struct ncclTopoGraph;
+
+// src/transport/net.cc:343. Was a fail-loud stub in nccl_stubs.cc, which forced
+// the enqueue target to omit it via a macro and supply its own; a seam here
+// serves both. `false` means "no AINIC", which is what a host-only binary with
+// no device actually has, so no test is silently steered by the default.
+bool g_rcclUseAinic = false;
+bool rcclUseAinic() { return g_rcclUseAinic; }
+
+void ResetTransportStubs() { g_rcclUseAinic = false; }
 
 ncclResult_t ncclCollNetChainBufferSetup(ncclComm_t comm) { ::abort(); }
 ncclResult_t ncclCollNetDirectBufferSetup(ncclComm_t comm) { ::abort(); }

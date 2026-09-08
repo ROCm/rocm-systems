@@ -1,3 +1,6 @@
+# Copyright Advanced Micro Devices, Inc.
+# SPDX-License-Identifier: MIT
+
 # Generate py-interface and package targets
 
 # CLANG installed must be 16.0 or above

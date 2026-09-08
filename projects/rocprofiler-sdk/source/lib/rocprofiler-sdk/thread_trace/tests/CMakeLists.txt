@@ -2,7 +2,8 @@ rocprofiler_deactivate_clang_tidy()
 
 include(GoogleTest)
 
-set(ROCPROFILER_THREAD_TRACE_PACKET_TEST_SOURCES "att_packet_test.cpp")
+set(ROCPROFILER_THREAD_TRACE_PACKET_TEST_SOURCES "att_packet_test.cpp"
+                                                 "local_context.cpp")
 
 add_executable(thread-trace-packet-test)
 
@@ -16,6 +17,7 @@ target_link_libraries(
             rocprofiler-sdk::rocprofiler-sdk-hsa-runtime
             rocprofiler-sdk::rocprofiler-sdk-hip
             rocprofiler-sdk::rocprofiler-sdk-common-library
+            rocprofiler-sdk::rocprofiler-sdk-amd-comgr
             GTest::gtest
             GTest::gtest_main
             rocprofiler-sdk::counter-test-constants)
@@ -27,7 +29,7 @@ rocprofiler_add_unit_test(
     TARGET thread-trace-packet-test
     SOURCES ${ROCPROFILER_THREAD_TRACE_PACKET_TEST_SOURCES}
     TEST_LIST thread-trace-test_TESTS
-    TIMEOUT 10
+    TIMEOUT 30
     LABELS "unittests"
     ENVIRONMENT
         "ROCPROFILER_METRICS_PATH=${_ROCPROFILER_SHARE_DIR}"

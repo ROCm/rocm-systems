@@ -1615,6 +1615,49 @@ TEST(Rcclwrap, RcclUseHierarchicalReduceScatterTests)
     TEST_INFO("=== Process-Isolated rcclUseHierarchicalReduceScatter Tests Completed ===");
 }
 
+// Direct ReduceScatter reduces the gathered peer slices with PreOpSrcs=0 and
+// postOp=false, an unscaled sum. ncclAvg is rewritten to PreMulSum, so selecting that
+// backend for it returns the sum instead of the mean. The selector must keep avg (and
+// user-defined PreMulSum) on the ring kernel even when the arch/node/size window is
+// satisfied, and must still choose the direct path for the unscaled ops.
+TEST(Rcclwrap, ReduceScatterSelectionKeepsDirectPathOffScaledOps)
+{
+    ncclComm_t            mockComm = nullptr;
+    struct ncclTopoSystem mockTopo;
+    struct ncclTopoNode   mockGpu;
+    CreateMockComm(mockComm, mockTopo, mockGpu, "gfx950", /*nRanks=*/16);
+    SetMockNodes(mockComm, /*nNodes=*/2, /*topoNRanks=*/16);
+    // CreateMockComm leaves archName null, which the DDA gate dereferences.
+    mockComm->archName = const_cast<char*>("gfx950");
+    // The direct path needs PXN; seed the per-comm cache so this does not depend on
+    // NCCL_PXN_DISABLE or on the rank-count auto-detect heuristic.
+    mockComm->pxnDisable = 0;
+
+    // rcclSelectReduceScatter compares nRanks * recvcount * typeSize against the
+    // window, so this lands at 256 KiB, inside the 2-node 128 KiB .. 2 MiB range.
+    const size_t recvcount = (256 * 1024) / (16 * sizeof(float));
+    // Only inspected to look up symmetric windows, which a mock comm never has, so
+    // these are never dereferenced.
+    char sendbuff = 0;
+    char recvbuff = 0;
+
+    auto selectedAlgo = [&](ncclRedOp_t op) {
+        struct rcclCollDecision decision = {};
+        EXPECT_EQ(rcclSelectReduceScatter(mockComm, &sendbuff, &recvbuff, recvcount, ncclFloat32, op,
+                                          /*query=*/false, &decision),
+                  ncclSuccess);
+        return decision.algo;
+    };
+
+    ASSERT_EQ(selectedAlgo(ncclSum), static_cast<int>(RCCL_DIRECT_REDUCESCATTER))
+        << "mock comm must be direct-eligible for the redop expectations below to mean anything";
+    EXPECT_EQ(selectedAlgo(ncclMin), static_cast<int>(RCCL_DIRECT_REDUCESCATTER));
+    EXPECT_NE(selectedAlgo(ncclAvg), static_cast<int>(RCCL_DIRECT_REDUCESCATTER));
+    EXPECT_NE(selectedAlgo(static_cast<ncclRedOp_t>(ncclNumOps)), static_cast<int>(RCCL_DIRECT_REDUCESCATTER));
+
+    CleanupMockComm(mockComm);
+}
+
 TEST(Rcclwrap, RcclHierarchicalTempBufferSizeTests)
 {
     const size_t QUARTER = HIERARCHICAL_TEMP_BUFFER_SIZE / 4;

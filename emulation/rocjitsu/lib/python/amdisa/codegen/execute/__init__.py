@@ -119,6 +119,7 @@ def _register_handlers() -> None:
         gen_pk_fmac_vop3,
         gen_pk_binop_f32,
         gen_pk_ternary_f32,
+        gen_pk_lshl_add_u64,
         gen_pk_mov_b32,
         gen_mad_mix_f32,
         gen_mad_mix_lo_hi,
@@ -329,6 +330,7 @@ def _register_handlers() -> None:
         opsel_exprs=c.opsel_exprs,
         use_cdna5_helpers=c.arch_name == 'cdna5',
     )
+    DISPATCH['pk_lshl_add_u64'] = lambda c: gen_pk_lshl_add_u64(c.dst_ops, c.src_ops)
     DISPATCH['pk_mov_b32'] = lambda c: gen_pk_mov_b32(
         c.dst_ops,
         c.src_ops,

@@ -1,7 +1,7 @@
 #
 # Integration test applications
 #
-cmake_minimum_required(VERSION 3.21.0 FATAL_ERROR)
+cmake_minimum_required(VERSION 3.24 FATAL_ERROR)
 
 project(rocprofiler-sdk-tests-bin LANGUAGES C CXX)
 
@@ -34,6 +34,7 @@ add_subdirectory(reproducible-runtime)
 add_subdirectory(reproducible-dispatch-count)
 add_subdirectory(transpose)
 add_subdirectory(openmp)
+add_subdirectory(signal-handler)
 
 set(CMAKE_BUILD_RPATH "\$ORIGIN:\$ORIGIN/../lib")
 
@@ -75,3 +76,4 @@ add_subdirectory(late-start-tracing)
 add_subdirectory(thread-trace)
 add_subdirectory(hip-graph-bubbles)
 add_subdirectory(rocpd-api-test)
+add_subdirectory(kernel-replay)

@@ -15,6 +15,7 @@
 #include "stream.h"
 #endif
 
+#include "hipfile-data-ops.h"
 #include "hipfile-literals.h"
 #include "hipfile-warnings.h"
 #include "hipfile.h"
@@ -58,180 +59,6 @@ static std::array<AsyncIoFunction, 2> asyncIOFns{
     {{hipFileReadAsync, "hipFileReadAsync"}, {hipFileWriteAsync, "hipFileWriteAsync"}}};
 HIPFILE_WARN_NO_EXIT_DTOR_ON
 
-struct ScopedHipStream {
-    ScopedHipStream()
-    {
-        assert(hipStreamCreateWithFlags(&stream_, hipStreamNonBlocking) == hipSuccess);
-    }
-    ~ScopedHipStream()
-    {
-        assert(hipStreamDestroy(stream_) == hipSuccess);
-    }
-    hipStream_t stream() const
-    {
-        return stream_;
-    }
-
-private:
-    hipStream_t stream_;
-};
-
-struct HipFileDataOps {
-    static bool isGpuMemory(void *mem)
-    {
-        hipPointerAttribute_t attrs;
-        hipError_t            err = hipPointerGetAttributes(&attrs, mem);
-
-#ifdef __HIP_PLATFORM_NVIDIA__
-        // NVIDIA doesn't support pointers allocated outside of runtime
-        if (err == hipErrorInvalidValue) {
-            return false;
-        }
-#endif
-        assert(err == hipSuccess);
-        return attrs.type == hipMemoryTypeDevice;
-    }
-
-    static std::vector<uint8_t> copyGpuMemory(void *gpu_mem, hoff_t gpu_mem_offset, size_t region_size)
-    {
-        std::vector<uint8_t> mem_region(region_size);
-        assert(hipMemcpyAsync(mem_region.data(),
-                              reinterpret_cast<void *>(reinterpret_cast<uintptr_t>(gpu_mem) +
-                                                       static_cast<size_t>(gpu_mem_offset)),
-                              region_size, hipMemcpyDeviceToHost, staticHipStream()) == hipSuccess);
-        assert(hipStreamSynchronize(staticHipStream()) == hipSuccess);
-        return mem_region;
-    }
-
-    static void assertMemoryRegionsMatch(void *mem1, hoff_t mem1_offset, void *mem2, hoff_t mem2_offset,
-                                         size_t region_size)
-    {
-        std::vector<uint8_t> mem1_v;
-        std::vector<uint8_t> mem2_v;
-        assert(mem1_offset >= 0);
-        assert(mem2_offset >= 0);
-        if (isGpuMemory(mem1)) {
-            mem1_v = copyGpuMemory(mem1, mem1_offset, region_size);
-            mem1   = mem1_v.data();
-        }
-        else {
-            mem1 = reinterpret_cast<void *>(reinterpret_cast<uintptr_t>(mem1) +
-                                            static_cast<uintptr_t>(mem1_offset));
-        }
-        if (isGpuMemory(mem2)) {
-            mem2_v = copyGpuMemory(mem2, mem2_offset, region_size);
-            mem2   = mem2_v.data();
-        }
-        else {
-            mem2 = reinterpret_cast<void *>(reinterpret_cast<uintptr_t>(mem2) +
-                                            static_cast<uintptr_t>(mem2_offset));
-        }
-        assert(std::memcmp(mem1, mem2, region_size) == 0);
-    }
-
-    static void assertFileAndMemoryRegionsMatch(void *mem, hoff_t mem_offset, int fd, hoff_t fd_offset,
-                                                size_t region_size)
-    {
-        assert(fd_offset >= 0);
-        auto file_region = std::vector<uint8_t>(region_size);
-
-        ssize_t rv = pread(fd, file_region.data(), region_size, fd_offset);
-        assert(rv > 0 && static_cast<size_t>(rv) == region_size);
-
-        assertMemoryRegionsMatch(file_region.data(), 0, mem, mem_offset, region_size);
-    }
-
-    static void assertZeroedMemRegion(void *mem, hoff_t mem_offset, size_t region_size)
-    {
-        std::vector<uint8_t> mem_v;
-        assert(mem_offset >= 0);
-        if (isGpuMemory(mem)) {
-            mem_v = copyGpuMemory(mem, mem_offset, region_size);
-            mem   = mem_v.data();
-        }
-        else {
-            mem = reinterpret_cast<void *>(reinterpret_cast<uintptr_t>(mem) +
-                                           static_cast<uintptr_t>(mem_offset));
-        }
-        for (size_t i = 0; i < region_size; ++i) {
-            assert(reinterpret_cast<uint8_t *>(mem)[i] == 0);
-        }
-    }
-
-    static void assertZeroedFileRegion(int fd, hoff_t fd_offset, size_t region_size)
-    {
-        assert(fd_offset >= 0);
-        auto    file_region = std::vector<uint8_t>(region_size);
-        ssize_t rv          = pread(fd, file_region.data(), region_size, fd_offset);
-        assert(rv > 0 && static_cast<size_t>(rv) == region_size);
-        for (size_t i = 0; i < region_size; ++i) {
-            assert(file_region.data()[i] == 0);
-        }
-    }
-
-    static void randomizeMemoryRegion(void *mem, hoff_t offset, size_t region_size)
-    {
-        ssize_t rv;
-        int     rand_fd = open("/dev/urandom", O_RDONLY);
-        assert(rand_fd != -1);
-        if (isGpuMemory(mem)) {
-            std::vector<uint8_t> mem_v(region_size);
-            rv = read(rand_fd, mem_v.data(), region_size);
-            assert(rv > 0 && static_cast<size_t>(rv) == region_size);
-            assert(
-                hipMemcpyAsync(
-                    reinterpret_cast<void *>(reinterpret_cast<uintptr_t>(mem) + static_cast<size_t>(offset)),
-                    mem_v.data(), region_size, hipMemcpyHostToDevice, staticHipStream()) == hipSuccess);
-            assert(hipStreamSynchronize(staticHipStream()) == hipSuccess);
-        }
-        else {
-            rv =
-                read(rand_fd,
-                     reinterpret_cast<void *>(reinterpret_cast<uintptr_t>(mem) + static_cast<size_t>(offset)),
-                     region_size);
-            assert(rv > 0 && static_cast<size_t>(rv) == region_size);
-        }
-        assert(close(rand_fd) == 0);
-    }
-
-    static void zeroMemoryRegion(void *mem, hoff_t offset, size_t region_size)
-    {
-        if (isGpuMemory(mem)) {
-            assert(hipMemsetAsync(reinterpret_cast<void *>(reinterpret_cast<uintptr_t>(mem) +
-                                                           static_cast<size_t>(offset)),
-                                  0, region_size, staticHipStream()) == hipSuccess);
-            assert(hipStreamSynchronize(staticHipStream()) == hipSuccess);
-        }
-        else {
-            memset(reinterpret_cast<void *>(reinterpret_cast<uintptr_t>(mem) + static_cast<size_t>(offset)),
-                   0, region_size);
-        }
-    }
-
-    static void zeroFileRegion(int fd, size_t size, hoff_t offset = 0)
-    {
-        auto    vec = std::vector<uint8_t>(size, 0);
-        ssize_t rv  = pwrite(fd, vec.data(), size, offset);
-        assert(rv > 0 && static_cast<size_t>(rv) == size);
-    }
-
-    static void randomizeFileRegion(int fd, size_t size, hoff_t offset = 0)
-    {
-        auto vec = std::vector<uint8_t>(size, 0);
-        randomizeMemoryRegion(vec.data(), 0, size);
-        ssize_t rv = pwrite(fd, vec.data(), size, offset);
-        assert(rv > 0 && static_cast<size_t>(rv) == size);
-    }
-
-    static hipStream_t staticHipStream()
-    {
-        HIPFILE_WARN_NO_EXIT_DTOR_OFF
-        static ScopedHipStream s;
-        HIPFILE_WARN_NO_EXIT_DTOR_ON
-        return s.stream();
-    }
-};
-
 #ifdef __HIP_PLATFORM_AMD__
 class HipAsyncMemcpyKernel : public ::testing::Test {
 public:
@@ -259,7 +86,7 @@ public:
             // For a read, bytes_transferred_internal needs to be set to simulate that the read from disk
             // occurred. We fill the source (CPU bounce buffer) with random data and memset the destination
             // (GPU buffer) to zero.
-            HipFileDataOps::randomizeMemoryRegion(op->bounceBufferHostPtr(), 0, io_size);
+            HipFileDataOps::randomizeMemoryRegion(op->bounce_buffer_host_ptr, 0, io_size);
             op->bytes_transferred_internal = static_cast<ssize_t>(io_size);
             ASSERT_EQ(hipMemset(op->gpu_buffer, 0, buffer_size), hipSuccess);
             ASSERT_EQ(hipStreamSynchronize(nullptr), hipSuccess);
@@ -268,7 +95,7 @@ public:
             // For a write, we fill the source (GPU bounce buffer) with random data and memset the destination
             // (CPU bounce buffer) to zero.
             HipFileDataOps::randomizeMemoryRegion(op->gpu_buffer, 0, buffer_size);
-            memset(op->bounceBufferHostPtr(), 0, io_size);
+            memset(op->bounce_buffer_host_ptr, 0, io_size);
         }
         op_dev_ptr            = op->devPtr();
         kernel_args[0]        = {&op_dev_ptr};
@@ -288,6 +115,7 @@ public:
     size_t                           file_size         = 4_KiB;
     size_t                           buffer_size       = 4_KiB;
     size_t                           io_size           = 4_KiB;
+    size_t                           chunk_size        = 1_MiB;
     hoff_t                           file_offset       = 0;
     hoff_t                           buffer_offset     = 0;
     ssize_t                          bytes_transferred = 0;
@@ -332,14 +160,13 @@ TEST_F(HipAsyncMemcpyKernel, nullCpuBufferDevPointerReturnsInval)
 }
 
 struct AsyncMemcpyKernelTestParams {
-    IoType  io_type;
-    size_t  file_size;
-    size_t  buffer_size;
-    size_t  io_size;
-    hoff_t  file_offset;
-    hoff_t  buffer_offset;
-    ssize_t bytes_transferred_start;
-    ssize_t bytes_transferred_result;
+    IoType io_type;
+    size_t buffer_size;
+    size_t io_size;
+    hoff_t buffer_offset;
+    size_t chunk_size;
+    size_t bytes_completed; // op->bytes_transferred_internal at kernel launch (offset already done)
+    size_t expected_chunk;  // bytes this single kernel invocation copies
 };
 
 class HipAsyncMemcpyKernelWithParams : public HipAsyncMemcpyKernel,
@@ -347,25 +174,33 @@ class HipAsyncMemcpyKernelWithParams : public HipAsyncMemcpyKernel,
 public:
     void SetUp() override
     {
-        auto [_io_type, _file_size, _buffer_size, _io_size, _file_offset, _buffer_offset,
-              _bytes_transferred_start, _bytes_transferred_result] = GetParam();
-        io_type                                                    = _io_type;
-        file_size                                                  = _file_size;
-        buffer_size                                                = _buffer_size;
-        io_size                                                    = _io_size;
-        file_offset                                                = _file_offset;
-        buffer_offset                                              = _buffer_offset;
-        bytes_transferred_start                                    = _bytes_transferred_start;
-        bytes_transferred_result                                   = _bytes_transferred_result;
+        auto [_io_type, _buffer_size, _io_size, _buffer_offset, _chunk_size, _bytes_completed,
+              _expected_chunk] = GetParam();
+        io_type                = _io_type;
+        buffer_size            = _buffer_size;
+        io_size                = _io_size;
+        buffer_offset          = _buffer_offset;
+        chunk_size             = _chunk_size;
+        bytes_completed        = _bytes_completed;
+        expected_chunk         = _expected_chunk;
         HipAsyncMemcpyKernel::SetUp();
-        op->bytes_transferred_internal = bytes_transferred_start;
+        // The op's bounce buffer size normally comes from the stream's async buffer. Override it with the
+        // chunk_size param so the write path stages at most one chunk per kernel invocation, letting a
+        // full interior chunk sit strictly in the middle of a larger IO.
+        op->bounce_buffer_size         = chunk_size;
+        op->bytes_transferred_internal = static_cast<ssize_t>(bytes_completed);
+        // On a read, cpu_copy runs before the kernel and publishes how many bytes it staged in the
+        // bounce buffer; simulate that here. On a write, the kernel computes and publishes it.
+        if (io_type == IoType::Read) {
+            op->chunk_bytes_copied = expected_chunk;
+        }
     }
     void TearDown() override
     {
         HipAsyncMemcpyKernel::TearDown();
     }
-    ssize_t bytes_transferred_start;
-    ssize_t bytes_transferred_result;
+    size_t bytes_completed;
+    size_t expected_chunk;
 };
 
 TEST_P(HipAsyncMemcpyKernelWithParams, verifyIoRegions)
@@ -374,38 +209,53 @@ TEST_P(HipAsyncMemcpyKernelWithParams, verifyIoRegions)
                                          dim3(static_cast<uint32_t>(max_threads_per_block)), kernel_args, 0,
                                          op->stream->getHipStream());
     Context<Hip>::get()->hipStreamSynchronize(op->stream->getHipStream());
-    ASSERT_EQ(op->bytes_transferred_internal, bytes_transferred_result);
-    if (op->bytes_transferred_internal > 0) {
-        if (io_type == IoType::Read) {
-            HipFileDataOps::assertZeroedMemRegion(op->gpu_buffer, 0, static_cast<size_t>(buffer_offset));
-        }
-        HipFileDataOps::assertMemoryRegionsMatch(op->bounceBufferHostPtr(), 0, op->gpu_buffer, buffer_offset,
-                                                 static_cast<size_t>(op->bytes_transferred_internal));
-        if (io_type == IoType::Read) {
-            size_t end_length = buffer_size - (static_cast<size_t>(buffer_offset) +
-                                               static_cast<size_t>(op->bytes_transferred_internal));
-            HipFileDataOps::assertZeroedMemRegion(op->gpu_buffer,
-                                                  buffer_offset + op->bytes_transferred_internal, end_length);
-        }
+    // The kernel copies a single chunk; it leaves the running offset for async_io_advance to update.
+    ASSERT_EQ(op->bytes_transferred_internal, static_cast<ssize_t>(bytes_completed));
+    ASSERT_EQ(op->chunk_bytes_copied, expected_chunk);
+    if (expected_chunk == 0) {
+        return;
+    }
+    // The chunk lands at buffer_offset plus however much has already been transferred.
+    const hoff_t chunk_gpu_offset = buffer_offset + static_cast<hoff_t>(bytes_completed);
+    if (io_type == IoType::Read) {
+        HipFileDataOps::assertZeroedMemRegion(op->gpu_buffer, 0, static_cast<size_t>(chunk_gpu_offset));
+    }
+    HipFileDataOps::assertMemoryRegionsMatch(op->bounce_buffer_host_ptr, 0, op->gpu_buffer, chunk_gpu_offset,
+                                             expected_chunk);
+    if (io_type == IoType::Read) {
+        size_t end_length = buffer_size - (static_cast<size_t>(chunk_gpu_offset) + expected_chunk);
+        HipFileDataOps::assertZeroedMemRegion(
+            op->gpu_buffer, chunk_gpu_offset + static_cast<hoff_t>(expected_chunk), end_length);
     }
 }
 
 INSTANTIATE_TEST_SUITE_P(
     HipAsyncMemcpyKernelSuite, HipAsyncMemcpyKernelWithParams,
     testing::Values(
-        AsyncMemcpyKernelTestParams{IoType::Read, 1_MiB, 1_MiB, 1_MiB, 0, 0, 1_MiB, 1_MiB},
-        AsyncMemcpyKernelTestParams{IoType::Write, 1_MiB, 1_MiB, 1_MiB, 0, 0, 1_MiB, 1_MiB},
-        AsyncMemcpyKernelTestParams{IoType::Read, 1_MiB, 1_MiB, 1_MiB - 8_KiB, 0, 4_KiB, 1_MiB - 8_KiB,
-                                    1_MiB - 8_KiB},
-        AsyncMemcpyKernelTestParams{IoType::Write, 1_MiB, 1_MiB, 1_MiB - 8_KiB, 0, 4_KiB, 1_MiB - 8_KiB,
-                                    1_MiB - 8_KiB},
-        AsyncMemcpyKernelTestParams{IoType::Read, 1_MiB, 1_MiB, 1_MiB - 1, 0, 0, 1_MiB - 1, 1_MiB - 1},
-        AsyncMemcpyKernelTestParams{IoType::Write, 1_MiB, 1_MiB, 1_MiB - 1, 0, 0, 1_MiB - 1, 1_MiB - 1},
-        AsyncMemcpyKernelTestParams{IoType::Read, 1_MiB, 1_MiB, 1_MiB - 1, 0, 1, 1_MiB - 1, 1_MiB - 1},
-        AsyncMemcpyKernelTestParams{IoType::Write, 1_MiB, 1_MiB, 1_MiB - 1, 0, 1, 1_MiB - 1, 1_MiB - 1},
-        AsyncMemcpyKernelTestParams{IoType::Read, 1_MiB, 1_MiB, 1_MiB - 2, 0, 1, 1_MiB - 2, 1_MiB - 2},
-        AsyncMemcpyKernelTestParams{IoType::Write, 1_MiB, 1_MiB, 1_MiB - 2, 0, 1, 1_MiB - 2, 1_MiB - 2},
-        AsyncMemcpyKernelTestParams{IoType::Read, 1_MiB, 1_MiB, 1_MiB, 0, 0, 512_KiB, 512_KiB}),
+        // Single chunk covers the whole transfer (chunk_size >= io_size, nothing completed yet).
+        AsyncMemcpyKernelTestParams{IoType::Read, 1_MiB, 1_MiB, 0, 1_MiB, 0, 1_MiB},
+        AsyncMemcpyKernelTestParams{IoType::Write, 1_MiB, 1_MiB, 0, 1_MiB, 0, 1_MiB},
+        AsyncMemcpyKernelTestParams{IoType::Read, 1_MiB, 1_MiB - 8_KiB, 4_KiB, 1_MiB, 0, 1_MiB - 8_KiB},
+        AsyncMemcpyKernelTestParams{IoType::Write, 1_MiB, 1_MiB - 8_KiB, 4_KiB, 1_MiB, 0, 1_MiB - 8_KiB},
+        AsyncMemcpyKernelTestParams{IoType::Read, 1_MiB, 1_MiB - 1, 0, 1_MiB, 0, 1_MiB - 1},
+        AsyncMemcpyKernelTestParams{IoType::Write, 1_MiB, 1_MiB - 1, 0, 1_MiB, 0, 1_MiB - 1},
+        AsyncMemcpyKernelTestParams{IoType::Read, 1_MiB, 1_MiB - 1, 1, 1_MiB, 0, 1_MiB - 1},
+        AsyncMemcpyKernelTestParams{IoType::Write, 1_MiB, 1_MiB - 1, 1, 1_MiB, 0, 1_MiB - 1},
+        AsyncMemcpyKernelTestParams{IoType::Read, 1_MiB, 1_MiB - 2, 1, 1_MiB, 0, 1_MiB - 2},
+        AsyncMemcpyKernelTestParams{IoType::Write, 1_MiB, 1_MiB - 2, 1, 1_MiB, 0, 1_MiB - 2},
+        // Short read: cpu_copy staged fewer bytes than a full chunk (e.g. EOF).
+        AsyncMemcpyKernelTestParams{IoType::Read, 1_MiB, 1_MiB, 0, 1_MiB, 0, 512_KiB},
+        // Middle chunk: a full interior chunk, with bytes already transferred before it and untouched
+        // buffer still remaining after it (1 MiB IO, 256 KiB chunk, second of four chunks).
+        AsyncMemcpyKernelTestParams{IoType::Read, 1_MiB, 1_MiB, 0, 256_KiB, 256_KiB, 256_KiB},
+        AsyncMemcpyKernelTestParams{IoType::Write, 1_MiB, 1_MiB, 0, 256_KiB, 256_KiB, 256_KiB},
+        // Final full chunk: the last chunk is a full chunk that lands exactly at the buffer end
+        // (1 MiB IO, 512 KiB chunk, second of two chunks).
+        AsyncMemcpyKernelTestParams{IoType::Read, 1_MiB, 1_MiB, 0, 512_KiB, 512_KiB, 512_KiB},
+        AsyncMemcpyKernelTestParams{IoType::Write, 1_MiB, 1_MiB, 0, 512_KiB, 512_KiB, 512_KiB},
+        // Tail chunk: chunk_size larger than what remains, so the kernel clamps to the remainder.
+        AsyncMemcpyKernelTestParams{IoType::Read, 1_MiB, 1_MiB, 0, 512_KiB, 768_KiB, 256_KiB},
+        AsyncMemcpyKernelTestParams{IoType::Write, 1_MiB, 1_MiB, 0, 512_KiB, 768_KiB, 256_KiB}),
     [](const testing::TestParamInfo<HipAsyncMemcpyKernelWithParams::ParamType> &param_info) {
         auto params = param_info.param;
 
@@ -416,9 +266,8 @@ INSTANTIATE_TEST_SUITE_P(
         else {
             label << "write";
         }
-        label << "_" << params.file_size << "_" << params.buffer_size << "_" << params.io_size << "_"
-              << params.file_offset << "_" << params.buffer_offset << "_" << params.bytes_transferred_start
-              << "_" << params.bytes_transferred_result;
+        label << "_" << params.buffer_size << "_" << params.io_size << "_" << params.buffer_offset << "_"
+              << params.chunk_size << "_" << params.bytes_completed << "_" << params.expected_chunk;
         return label.str();
     });
 #endif
@@ -1047,6 +896,136 @@ TEST_P(HipAsyncStreamUnfixedPausedReadWrite, changedIOSizeAndBufferOffsetAndFile
 INSTANTIATE_TEST_SUITE_P(
     HipAsyncStreamUnfixed, HipAsyncStreamUnfixedPausedReadWrite, ::testing::ValuesIn(asyncIOFns),
     [](const testing::TestParamInfo<HipAsyncStreamUnfixedPausedReadWrite::ParamType> &param_info) {
+        return param_info.param.name;
+    });
+
+// Fallback path where the IO is several times the async buffer size, so the fallback loops over
+// multiple chunks. The async buffer defaults to 16 MiB, so a 64 MiB IO spans four chunks.
+class HipAsyncFallbackMultiChunk : public HipAsync, public ::testing::WithParamInterface<AsyncIoFunction> {
+public:
+    HipAsyncFallbackMultiChunk()
+    {
+        io_size     = 64_MiB;
+        file_size   = 64_MiB;
+        buffer_size = 64_MiB;
+    }
+    void SetUp() override
+    {
+        HipAsync::SetUp();
+        io_op = GetParam().function;
+        name  = GetParam().name;
+
+        // Force the fallback backend. Disabling fastpath means backend selection throws rather than
+        // silently choosing fastpath, guaranteeing the fallback path is exercised.
+        Context<Configuration>::get()->fastpath(false);
+        Context<Configuration>::get()->fallback(true);
+
+        if (name == "hipFileReadAsync") {
+            HipFileDataOps::zeroMemoryRegion(dev_ptr, 0, buffer_size);
+            HipFileDataOps::randomizeFileRegion(tf.fd, file_size);
+        }
+        else {
+            HipFileDataOps::zeroFileRegion(tf.fd, file_size);
+            HipFileDataOps::randomizeMemoryRegion(dev_ptr, 0, buffer_size);
+        }
+
+        ASSERT_EQ(hipStreamCreateWithFlags(&stream, hipStreamNonBlocking), hipSuccess);
+        ASSERT_EQ(hipFileStreamRegister(stream, 0xf), HIPFILE_SUCCESS);
+    }
+    void TearDown() override
+    {
+        ASSERT_EQ(hipFileStreamDeregister(stream), HIPFILE_SUCCESS);
+        ASSERT_EQ(hipStreamDestroy(stream), hipSuccess);
+        Context<Configuration>::get()->fastpath(true);
+        Context<Configuration>::get()->fallback(true);
+        HipAsync::TearDown();
+    }
+    hipFileError_t (*io_op)(hipFileHandle_t, void *, size_t *, hoff_t *, hoff_t *, ssize_t *, hipStream_t);
+    std::string name;
+    hipStream_t stream;
+};
+
+TEST_P(HipAsyncFallbackMultiChunk, spansMultipleChunks)
+{
+    ASSERT_EQ(io_op(fh, dev_ptr, &io_size, &file_offset, &buffer_offset, &bytes_transferred, stream),
+              HIPFILE_SUCCESS);
+    ASSERT_EQ(hipStreamSynchronize(stream), hipSuccess);
+    ASSERT_EQ(bytes_transferred, io_size);
+    HipFileDataOps::assertFileAndMemoryRegionsMatch(dev_ptr, buffer_offset, tf.fd, file_offset, io_size);
+}
+
+INSTANTIATE_TEST_SUITE_P(HipAsyncFallbackMultiChunkSuite, HipAsyncFallbackMultiChunk,
+                         ::testing::ValuesIn(asyncIOFns),
+                         [](const testing::TestParamInfo<HipAsyncFallbackMultiChunk::ParamType> &param_info) {
+                             return param_info.param.name;
+                         });
+
+// Fallback path on an unfixed, paused stream where the IO shrinks by more than a whole chunk after
+// submission. The fallback fixes the chunk count from the original (multi-chunk) size at submission
+// time, so the surplus chunks must safely no-op once bind_params publishes the smaller size.
+class HipAsyncFallbackMultiChunkShrink : public HipAsyncStreamUnfixedPaused,
+                                         public ::testing::WithParamInterface<AsyncIoFunction> {
+public:
+    HipAsyncFallbackMultiChunkShrink()
+    {
+        io_size     = 64_MiB;
+        file_size   = 64_MiB;
+        buffer_size = 64_MiB;
+    }
+    void SetUp() override
+    {
+        HipAsyncStreamUnfixedPaused::SetUp();
+        io_op = GetParam().function;
+        name  = GetParam().name;
+
+        Context<Configuration>::get()->fastpath(false);
+        Context<Configuration>::get()->fallback(true);
+
+        if (name == "hipFileReadAsync") {
+            HipFileDataOps::zeroMemoryRegion(dev_ptr, 0, buffer_size);
+            HipFileDataOps::randomizeFileRegion(tf.fd, file_size);
+        }
+        else {
+            HipFileDataOps::randomizeMemoryRegion(dev_ptr, 0, buffer_size);
+            HipFileDataOps::zeroFileRegion(tf.fd, file_size);
+        }
+    }
+    void TearDown() override
+    {
+        Context<Configuration>::get()->fastpath(true);
+        Context<Configuration>::get()->fallback(true);
+        HipAsyncStreamUnfixedPaused::TearDown();
+    }
+    hipFileError_t (*io_op)(hipFileHandle_t, void *, size_t *, hoff_t *, hoff_t *, ssize_t *, hipStream_t);
+    std::string name;
+};
+
+TEST_P(HipAsyncFallbackMultiChunkShrink, shrinkBelowChunkCountStillCorrect)
+{
+    // Submit the full 64 MiB (four 16 MiB chunks) while paused, then shrink to 24 MiB before releasing.
+    // That leaves two real chunks plus two surplus chunks that must no-op; bytes_transferred must
+    // reflect the shrunken size and the untouched tail of the destination must stay zero.
+    const size_t shrunk_size = 16_MiB + 8_MiB;
+    ASSERT_EQ(io_op(fh, dev_ptr, &io_size, &file_offset, &buffer_offset, &bytes_transferred, stream),
+              HIPFILE_SUCCESS);
+    io_size = shrunk_size;
+    updateFlag(1);
+    ASSERT_EQ(hipStreamSynchronize(stream), hipSuccess);
+    ASSERT_EQ(bytes_transferred, io_size);
+    HipFileDataOps::assertFileAndMemoryRegionsMatch(dev_ptr, buffer_offset, tf.fd, file_offset, io_size);
+    if (name == "hipFileReadAsync") {
+        HipFileDataOps::assertZeroedMemRegion(dev_ptr, static_cast<hoff_t>(shrunk_size),
+                                              buffer_size - shrunk_size);
+    }
+    else {
+        HipFileDataOps::assertZeroedFileRegion(tf.fd, static_cast<hoff_t>(shrunk_size),
+                                               file_size - shrunk_size);
+    }
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    HipAsyncFallbackMultiChunkShrinkSuite, HipAsyncFallbackMultiChunkShrink, ::testing::ValuesIn(asyncIOFns),
+    [](const testing::TestParamInfo<HipAsyncFallbackMultiChunkShrink::ParamType> &param_info) {
         return param_info.param.name;
     });
 

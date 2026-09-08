@@ -1,12 +1,10 @@
 {
   "iree": [
-    "iree.gfx942.e2e.pack_i8.static_pack_vnni_lhs_large"
   ],
   "cts": [
     "cts.gfx942.fpsan.fpsan_smfmac_cdna3_test",
     "cts.gfx942.fpsan.fpsan_atomic_test",
     "cts.gfx942.fpsan.fpsan_hip_device_test",
-    "cts.gfx942.fpsan.fpsan_wave_test",
     "cts.gfx942.fpsan.fpsan_amdgcn_math_test",
     "cts.gfx942.fpsan.fpsan_amdgcn_ldexp_test",
     "cts.gfx942.fpsan.fpsan_amdgcn_math_extra_test",
@@ -29,7 +27,6 @@
     "hip_streamk_simple::m256_n256_k256",
     "hip_streamk_two_tile::m256_n256_k256",
     "rocblas_sgemm::large_2048x2048",
-    "rocblas_sgemm::square_64x64",
     "llama_mul_mat_vec_q::default",
     "llama_rms_norm::default"
   ]

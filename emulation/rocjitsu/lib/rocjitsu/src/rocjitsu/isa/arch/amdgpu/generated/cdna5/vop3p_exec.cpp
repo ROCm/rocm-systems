@@ -36,6 +36,52 @@ PkF32Words read_pk_f32_words(const Operand &operand, const amdgpu::Wavefront &wf
   return {pair.lo, pair.hi};
 }
 
+struct PkU64Pair {
+  uint64_t lo;
+  uint64_t hi;
+};
+
+struct PkU32Pair {
+  uint32_t lo;
+  uint32_t hi;
+};
+
+Operand packed_register_dword_offset(const Operand &operand, uint32_t dword_offset) {
+  Operand shifted = operand;
+  shifted.encoding_value_ += static_cast<int>(dword_offset);
+  return shifted;
+}
+
+PkU64Pair read_pk_u64_pair(const Operand &operand, const amdgpu::Wavefront &wf, uint32_t lane) {
+  const uint64_t lo = amdgpu::RegisterAccess(wf).read_lane64(operand, lane);
+  const auto reg = operand.to_register_ref();
+  if (!reg || reg->cls != RegClass::VGPR)
+    return {lo, lo};
+
+  const Operand hi_operand = packed_register_dword_offset(operand, 2);
+  return {lo, amdgpu::RegisterAccess(wf).read_lane64(hi_operand, lane)};
+}
+
+PkU32Pair read_pk_u32_pair(const Operand &operand, const amdgpu::Wavefront &wf, uint32_t lane) {
+  // GFX12+ single-SGPR-read operands read the first SGPR and replicate it.
+  // VGPRs and 64-bit special registers such as VCC and EXEC remain pairs.
+  const auto reg = operand.to_register_ref();
+  if (reg && reg->cls == RegClass::SGPR) {
+    const uint32_t value = amdgpu::RegisterAccess(wf).read_lane(operand, lane);
+    return {value, value};
+  }
+  const auto pair = amdgpu::RegisterAccess(wf).read_lane_pair32(operand, lane);
+  return {pair.lo, pair.hi};
+}
+
+void write_pk_u64_pair(const Operand &operand, amdgpu::Wavefront &wf, uint32_t lane,
+                       PkU64Pair value) {
+  const Operand hi_operand = packed_register_dword_offset(operand, 2);
+  amdgpu::RegisterAccess access(wf);
+  access.write_lane64(operand, lane, value.lo);
+  access.write_lane64(hi_operand, lane, value.hi);
+}
+
 uint16_t read_fma_mix_f16_bits(uint32_t raw, uint32_t src_selector, bool high_half) {
   switch (src_selector) {
   case OpSelSrc::OPR_SRC_FLOAT_HALF:
@@ -1924,6 +1970,7 @@ void VFmaMixloBf16Vop3p::execute_impl(amdgpu::Wavefront &wf) {
     execute_modifier_impl(wf);
     return;
   }
+  amdgpu::fp_mode::detail::ScopedFenv nearest_environment(0);
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -1946,10 +1993,8 @@ void VFmaMixloBf16Vop3p::execute_impl(amdgpu::Wavefront &wf) {
       b = -b;
     if (inst_.neg & 4)
       c = -c;
-    float result = std::fma(a, b, c);
-    if (inst_.clamp)
-      result = amdgpu::clamp_floating_result(result, wf);
-    uint16_t h = util::f32_to_bf16(result);
+    uint16_t h = amdgpu::fp_mode::detail::fma_f32_to_bf16_nearest_environment(
+        a, b, c, wf.fp_round_mode_f16_f64(), inst_.clamp, amdgpu::floating_clamp_nan_to_zero(wf));
     ::rocjitsu::amdgpu::write_vop3_true16_dst(vdst, wf, lane, 0u, h);
   }
 }
@@ -1970,6 +2015,7 @@ RJ_NOINLINE void VFmaMixloBf16Vop3p::execute_modifier_impl(amdgpu::Wavefront &wf
   if (inst_.src0 == amdgpu::SRC_DPP)
     dpp_write_mask_scope_.bind(wf,
                                wf.exec() & dpp_plan_.row_bank_mask & dpp_plan_.source_write_mask);
+  amdgpu::fp_mode::detail::ScopedFenv nearest_environment(0);
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -1992,10 +2038,8 @@ RJ_NOINLINE void VFmaMixloBf16Vop3p::execute_modifier_impl(amdgpu::Wavefront &wf
       b = -b;
     if (inst_.neg & 4)
       c = -c;
-    float result = std::fma(a, b, c);
-    if (inst_.clamp)
-      result = amdgpu::clamp_floating_result(result, wf);
-    uint16_t h = util::f32_to_bf16(result);
+    uint16_t h = amdgpu::fp_mode::detail::fma_f32_to_bf16_nearest_environment(
+        a, b, c, wf.fp_round_mode_f16_f64(), inst_.clamp, amdgpu::floating_clamp_nan_to_zero(wf));
     ::rocjitsu::amdgpu::write_vop3_true16_dst(vdst, wf, lane, 0u, h);
   }
   dpp_write_mask_scope_.restore();
@@ -2006,6 +2050,7 @@ void VFmaMixhiBf16Vop3p::execute_impl(amdgpu::Wavefront &wf) {
     execute_modifier_impl(wf);
     return;
   }
+  amdgpu::fp_mode::detail::ScopedFenv nearest_environment(0);
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -2028,10 +2073,8 @@ void VFmaMixhiBf16Vop3p::execute_impl(amdgpu::Wavefront &wf) {
       b = -b;
     if (inst_.neg & 4)
       c = -c;
-    float result = std::fma(a, b, c);
-    if (inst_.clamp)
-      result = amdgpu::clamp_floating_result(result, wf);
-    uint16_t h = util::f32_to_bf16(result);
+    uint16_t h = amdgpu::fp_mode::detail::fma_f32_to_bf16_nearest_environment(
+        a, b, c, wf.fp_round_mode_f16_f64(), inst_.clamp, amdgpu::floating_clamp_nan_to_zero(wf));
     ::rocjitsu::amdgpu::write_vop3_true16_dst(vdst, wf, lane, 0x8u, h);
   }
 }
@@ -2052,6 +2095,7 @@ RJ_NOINLINE void VFmaMixhiBf16Vop3p::execute_modifier_impl(amdgpu::Wavefront &wf
   if (inst_.src0 == amdgpu::SRC_DPP)
     dpp_write_mask_scope_.bind(wf,
                                wf.exec() & dpp_plan_.row_bank_mask & dpp_plan_.source_write_mask);
+  amdgpu::fp_mode::detail::ScopedFenv nearest_environment(0);
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -2074,10 +2118,8 @@ RJ_NOINLINE void VFmaMixhiBf16Vop3p::execute_modifier_impl(amdgpu::Wavefront &wf
       b = -b;
     if (inst_.neg & 4)
       c = -c;
-    float result = std::fma(a, b, c);
-    if (inst_.clamp)
-      result = amdgpu::clamp_floating_result(result, wf);
-    uint16_t h = util::f32_to_bf16(result);
+    uint16_t h = amdgpu::fp_mode::detail::fma_f32_to_bf16_nearest_environment(
+        a, b, c, wf.fp_round_mode_f16_f64(), inst_.clamp, amdgpu::floating_clamp_nan_to_zero(wf));
     ::rocjitsu::amdgpu::write_vop3_true16_dst(vdst, wf, lane, 0x8u, h);
   }
   dpp_write_mask_scope_.restore();
@@ -2943,6 +2985,33 @@ void VWmmaF3232x16x128F4Vop3p::execute_impl(amdgpu::Wavefront &wf) {
   amdgpu::exec_wmma_f32(cu, 32, 16, 128, 4, dst, src0_base, src1_base, s2, amdgpu::extract_fp4,
                         amdgpu::extract_fp4, const_acc,
                         amdgpu::wmma_c_modifier(inst_.neg, inst_.neg_hi));
+}
+
+void VPkLshlAddU64Vop3p::execute_impl(amdgpu::Wavefront &wf) {
+  uint64_t exec = wf.exec();
+  std::array<PkU64Pair, 64> results{};
+  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+    if (!(exec & (1ULL << lane)))
+      continue;
+    const auto values = read_pk_u64_pair(src0, wf, lane);
+    const auto shifts = read_pk_u32_pair(src1, wf, lane);
+    const auto addends = read_pk_u64_pair(src2, wf, lane);
+    if (shifts.lo > 4u || shifts.hi > 4u) {
+      wf.report_instruction_execution_error(
+          amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+      return;
+    }
+    const uint64_t result_lo =
+        amdgpu::lshl_masked(values.lo, static_cast<uint64_t>(shifts.lo)) + addends.lo;
+    const uint64_t result_hi =
+        amdgpu::lshl_masked(values.hi, static_cast<uint64_t>(shifts.hi)) + addends.hi;
+    results[lane] = {result_lo, result_hi};
+  }
+  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+    if (!(exec & (1ULL << lane)))
+      continue;
+    write_pk_u64_pair(vdst, wf, lane, results[lane]);
+  }
 }
 
 void VWmmaScaleF32Vop3px2::execute_impl(amdgpu::Wavefront &wf) {

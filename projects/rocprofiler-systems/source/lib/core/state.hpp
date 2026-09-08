@@ -7,7 +7,7 @@
 #include "logger/debug.hpp"
 #include "utility.hpp"
 
-#include <spdlog/fmt/fmt.h>
+#include <fmt/format.h>
 
 #include <atomic>
 #include <cstdint>
