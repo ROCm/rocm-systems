@@ -135,6 +135,75 @@ hipError_t hipDeviceGetP2PAttribute(int* value, hipDeviceP2PAttr attr, int srcDe
   HIP_RETURN(hipSuccess);
 }
 
+// Maps an atomic operation to the set of native capabilities reported when the link
+// supports native atomics. ROCm does not expose per-operation/per-type atomic granularity
+// over a link (the backend only knows kLinkAtomicSupport, i.e. 32/64-bit native atomic
+// support), so this is a coarse best-effort mapping: integer ops report signed/unsigned
+// 32/64-bit scalar support, float ops report 32/64-bit scalar support.
+static unsigned int atomicOperationCapabilities(hipAtomicOperation op) {
+  switch (op) {
+    case hipAtomicOperationIntegerAdd:
+    case hipAtomicOperationIntegerMin:
+    case hipAtomicOperationIntegerMax:
+    case hipAtomicOperationIntegerIncrement:
+    case hipAtomicOperationIntegerDecrement:
+    case hipAtomicOperationAnd:
+    case hipAtomicOperationOr:
+    case hipAtomicOperationXOR:
+    case hipAtomicOperationExchange:
+    case hipAtomicOperationCAS:
+      return hipAtomicCapabilitySigned | hipAtomicCapabilityUnsigned |
+             hipAtomicCapabilityScalar32 | hipAtomicCapabilityScalar64;
+    case hipAtomicOperationFloatAdd:
+    case hipAtomicOperationFloatMin:
+    case hipAtomicOperationFloatMax:
+      return hipAtomicCapabilityScalar32 | hipAtomicCapabilityScalar64;
+    default:
+      return 0;
+  }
+}
+
+static bool isValidAtomicOperation(hipAtomicOperation op) {
+  return op >= hipAtomicOperationIntegerAdd && op <= hipAtomicOperationFloatMax;
+}
+
+hipError_t hipDeviceGetP2PAtomicCapabilities(unsigned int* capabilities,
+                                             const hipAtomicOperation* operations,
+                                             unsigned int count, int srcDevice, int dstDevice) {
+  HIP_INIT_API(hipDeviceGetP2PAtomicCapabilities, capabilities, operations, count, srcDevice,
+               dstDevice);
+
+  if (capabilities == nullptr || operations == nullptr || count == 0) {
+    HIP_RETURN(hipErrorInvalidValue);
+  }
+
+  if (srcDevice == dstDevice || srcDevice < 0 || dstDevice < 0 ||
+      srcDevice >= static_cast<int>(g_devices.size()) ||
+      dstDevice >= static_cast<int>(g_devices.size())) {
+    HIP_RETURN(hipErrorInvalidDevice);
+  }
+
+  // Validate every requested operation before writing any output.
+  for (unsigned int i = 0; i < count; ++i) {
+    if (!isValidAtomicOperation(operations[i])) {
+      LogPrintfError("Invalid atomic operation: %d ", operations[i]);
+      HIP_RETURN(hipErrorInvalidValue);
+    }
+  }
+
+  // Query the link's coarse native-atomic support once and apply it to every operation.
+  std::vector<amd::Device::LinkAttrType> link_attrs;
+  link_attrs.push_back(std::make_pair(amd::Device::LinkAttribute::kLinkAtomicSupport, 0));
+  HIP_RETURN_ONFAIL(findLinkInfo(srcDevice, dstDevice, &link_attrs));
+  const bool nativeAtomic = link_attrs[0].second != 0;
+
+  for (unsigned int i = 0; i < count; ++i) {
+    capabilities[i] = nativeAtomic ? atomicOperationCapabilities(operations[i]) : 0u;
+  }
+
+  HIP_RETURN(hipSuccess);
+}
+
 hipError_t hipDeviceCanAccessPeer(int* canAccess, int deviceId, int peerDeviceId) {
   HIP_INIT_API(hipDeviceCanAccessPeer, canAccess, deviceId, peerDeviceId);
   HIP_RETURN(canAccessPeer(canAccess, deviceId, peerDeviceId));

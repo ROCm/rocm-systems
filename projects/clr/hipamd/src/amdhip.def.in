@@ -34,6 +34,7 @@ hipDeviceGetUuid
 hipDeviceGetLuid
 hipDeviceGetPCIBusId
 hipDeviceGetSharedMemConfig
+hipDeviceGetP2PAtomicCapabilities
 hipDeviceGetP2PAttribute
 hipExternalMemoryGetMappedMipmappedArray
 hipDevicePrimaryCtxGetState

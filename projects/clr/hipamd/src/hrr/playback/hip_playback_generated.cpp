@@ -4724,6 +4724,21 @@ static hipError_t playback_hipExecutionCtxWaitEvent(PlaybackContext& ctx, const 
   return _r;
 }
 
+static hipError_t playback_hipMemGetDefaultMemPool(PlaybackContext& ctx, const uint8_t* payload) {
+  const auto* a = reinterpret_cast<const hrr_args_hipMemGetDefaultMemPool*>(payload);
+  hipMemPool_t _out_memPool = nullptr;
+  hipMemLocation* _s_location{};
+  hipError_t _r = (hipError_t)hipMemGetDefaultMemPool(&_out_memPool, _s_location, (hipMemAllocationType)a->type);
+  return _r;
+}
+
+static hipError_t playback_hipDeviceGetP2PAtomicCapabilities(PlaybackContext& ctx, const uint8_t* payload) {
+  const auto* a = reinterpret_cast<const hrr_args_hipDeviceGetP2PAtomicCapabilities*>(payload);
+  unsigned int _out_capabilities{};
+  hipError_t _r = (hipError_t)hipDeviceGetP2PAtomicCapabilities(&_out_capabilities, (const hipAtomicOperation*)a->operations, (unsigned int)a->count, (int)a->srcDevice, (int)a->dstDevice);
+  return _r;
+}
+
 
 // ============================================================
 // Minimum payload size per event type — indexed by hrr_api_id_t
@@ -5281,6 +5296,8 @@ const uint32_t hrr_api_min_payload_size[HRR_API_COUNT] = {
     static_cast<uint32_t>(sizeof(hrr_args_hipExecutionCtxRecordEvent)),  // [547] HRR_API_HIPEXECUTIONCTXRECORDEVENT
     static_cast<uint32_t>(sizeof(hrr_args_hipExecutionCtxSynchronize)),  // [548] HRR_API_HIPEXECUTIONCTXSYNCHRONIZE
     static_cast<uint32_t>(sizeof(hrr_args_hipExecutionCtxWaitEvent)),  // [549] HRR_API_HIPEXECUTIONCTXWAITEVENT
+    static_cast<uint32_t>(sizeof(hrr_args_hipMemGetDefaultMemPool)),  // [550] HRR_API_HIPMEMGETDEFAULTMEMPOOL
+    static_cast<uint32_t>(sizeof(hrr_args_hipDeviceGetP2PAtomicCapabilities)),  // [551] HRR_API_HIPDEVICEGETP2PATOMICCAPABILITIES
 };
 
 // ============================================================
@@ -5837,4 +5854,6 @@ hrr_playback_fn_t hrr_playback_dispatch[HRR_API_COUNT] = {
     playback_hipExecutionCtxRecordEvent,  // [547] HRR_API_HIPEXECUTIONCTXRECORDEVENT
     playback_hipExecutionCtxSynchronize,  // [548] HRR_API_HIPEXECUTIONCTXSYNCHRONIZE
     playback_hipExecutionCtxWaitEvent,  // [549] HRR_API_HIPEXECUTIONCTXWAITEVENT
+    playback_hipMemGetDefaultMemPool,  // [550] HRR_API_HIPMEMGETDEFAULTMEMPOOL
+    playback_hipDeviceGetP2PAtomicCapabilities,  // [551] HRR_API_HIPDEVICEGETP2PATOMICCAPABILITIES
 };

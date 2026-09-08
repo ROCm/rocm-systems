@@ -3640,6 +3640,16 @@ typedef union rocprofiler_hip_api_args_t
         unsigned int flags;
     } hipInitDevice;
 #endif
+#if HIP_RUNTIME_API_TABLE_STEP_VERSION >= 34
+    struct
+    {
+        unsigned int*             capabilities;
+        const hipAtomicOperation* operations;
+        unsigned int              count;
+        int                       srcDevice;
+        int                       dstDevice;
+    } hipDeviceGetP2PAtomicCapabilities;
+#endif
 } rocprofiler_hip_api_args_t;
 
 ROCPROFILER_EXTERN_C_FINI

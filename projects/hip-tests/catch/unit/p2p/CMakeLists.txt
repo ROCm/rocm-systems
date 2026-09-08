@@ -7,6 +7,7 @@
 # /catch/unit/p2p folder and its dependent files.
 set(TEST_SRC
     hipDeviceGetP2PAttribute.cc
+    hipDeviceGetP2PAtomicCapabilities.cc
 )
 
 # only for AMD

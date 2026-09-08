@@ -5357,6 +5357,26 @@ typedef struct {
     uint64_t event;
 } hrr_args_hipExecutionCtxWaitEvent;
 
+/* hipError_t hipMemGetDefaultMemPool(hipMemPool_t* memPool, hipMemLocation* location, hipMemAllocationType type) */
+typedef struct {
+    hrr_event_header hdr;
+    int32_t ret;
+    uint64_t memPool;
+    uint64_t location;
+    int32_t type;
+} hrr_args_hipMemGetDefaultMemPool;
+
+/* hipError_t hipDeviceGetP2PAtomicCapabilities(unsigned int* capabilities, const hipAtomicOperation* operations, unsigned int count, int srcDevice, int dstDevice) */
+typedef struct {
+    hrr_event_header hdr;
+    int32_t ret;
+    uint64_t capabilities;
+    uint64_t operations;
+    uint32_t count;
+    int32_t srcDevice;
+    int32_t dstDevice;
+} hrr_args_hipDeviceGetP2PAtomicCapabilities;
+
 /* ---- API id enumeration ---- */
 typedef enum hrr_api_id {
     HRR_API_HIPPOPCALLCONFIGURATION = 0,
@@ -5909,7 +5929,9 @@ typedef enum hrr_api_id {
     HRR_API_HIPEXECUTIONCTXRECORDEVENT = 547,
     HRR_API_HIPEXECUTIONCTXSYNCHRONIZE = 548,
     HRR_API_HIPEXECUTIONCTXWAITEVENT = 549,
-    HRR_API_COUNT = 550
+    HRR_API_HIPMEMGETDEFAULTMEMPOOL = 550,
+    HRR_API_HIPDEVICEGETP2PATOMICCAPABILITIES = 551,
+    HRR_API_COUNT = 552
 } hrr_api_id_t;
 
 /* Array of API names indexed by hrr_api_id_t */
@@ -6465,6 +6487,8 @@ const char* const hrr_api_names[HRR_API_COUNT] = {
     "hipExecutionCtxRecordEvent",
     "hipExecutionCtxSynchronize",
     "hipExecutionCtxWaitEvent",
+    "hipMemGetDefaultMemPool",
+    "hipDeviceGetP2PAtomicCapabilities",
 };
 #else
 extern const char* const hrr_api_names[HRR_API_COUNT];

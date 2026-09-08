@@ -693,6 +693,7 @@ hip_10.1 {
 global:
     hipDeviceGetLuid;
     hipInitDevice;
+    hipDeviceGetP2PAtomicCapabilities;
 local:
     *;
 } hip_7.15;
