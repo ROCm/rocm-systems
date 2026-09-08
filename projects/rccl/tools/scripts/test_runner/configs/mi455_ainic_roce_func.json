@@ -2290,7 +2290,8 @@
         "RCCL_MPI_LOG_ALL_RANKS": "1",
         "NCCL_CTA_POLICY": "2",
         "NCCL_LOCAL_REGISTER": "0",
-        "NCCL_CUMEM_ENABLE": "1"
+        "NCCL_CUMEM_ENABLE": "1",
+        "RCCL_DDA_ENABLE": "0"
       }
     },
     "ce_2rank": {
