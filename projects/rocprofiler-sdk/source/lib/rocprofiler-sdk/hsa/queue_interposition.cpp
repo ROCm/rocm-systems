@@ -616,6 +616,13 @@ async_signal_handler(hsa_signal_t                            completion_signal,
         }
     }
 
+    // Consumer stop may race kernel completion; re-read once before deciding abandon.
+    if(signal_value >= starting_value && !has_active_queue_interposition_consumers() &&
+       registration::get_fini_status() == 0)
+    {
+        signal_value = get_core_table()->hsa_signal_load_scacquire_fn(completion_signal);
+    }
+
     if(queue_interposition_debug_enabled())
     {
         const char* reason = (signal_value < starting_value) ? "completed"
