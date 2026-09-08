@@ -5,6 +5,7 @@
 
 #include "backends/rocprofiler_sdk/types.hpp"
 #include "common/version.hpp"
+#include "logger/debug.hpp"
 
 #include <rocprofiler-sdk/version.h>
 
@@ -29,6 +30,8 @@ sdk_check(typename Wrapper::status_t status)
     if(status != Wrapper::STATUS_SUCCESS)
     {
         const char* msg = Wrapper::get_status_string(status);
+        LOG_DEBUG("rocprofiler-sdk call failed (status={}): {}", static_cast<int>(status),
+                  msg != nullptr ? msg : "<unknown status>");
         throw std::runtime_error{ std::string{ "rocprofiler-sdk error: " } +
                                   (msg != nullptr ? msg : "<unknown status>") };
     }

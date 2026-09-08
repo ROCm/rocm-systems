@@ -4,11 +4,13 @@
 #pragma once
 
 #include "library/rocprofiler-sdk/types.hpp"
+#include "logger/debug.hpp"
 
 #include <fmt/format.h>
 
 #include <cstddef>
 #include <cstdint>
+#include <exception>
 
 namespace rocprofsys::domains::buffered
 {
@@ -22,6 +24,11 @@ on_kfd_page_migrate_configure()
     auto& agent_mgr  = Externals::get_agent_manager();
     auto  gpu_agents = agent_mgr.get_agents_by_type(Externals::AGENT_TYPE_GPU);
     auto  cpu_agents = agent_mgr.get_agents_by_type(Externals::AGENT_TYPE_CPU);
+    if(gpu_agents.empty() && cpu_agents.empty())
+    {
+        LOG_DEBUG("kfd_page_migrate: no GPU or CPU agents found; no PMC info will be "
+                  "registered");
+    }
 
     constexpr std::size_t k_event_code  = 0;
     constexpr std::size_t k_instance_id = 0;
@@ -90,13 +97,31 @@ on_kfd_page_migrate(typename SdkBackend::kfd_page_migrate_record* record, void* 
         return;
     }
 
-    const auto  name = std::string{ SdkBackend::get_buffer_tracing_names().at(
+    const auto name = std::string{ SdkBackend::get_buffer_tracing_names().at(
         SdkBackend::BUFFER_TRACING_KFD_PAGE_MIGRATE, record->operation) };
-    const auto  tid  = static_cast<std::uint64_t>(record->pid);
-    const auto* src_agent =
-        &Externals::get_agent_manager().get_agent_by_handle(record->src_agent.handle);
-    const auto* dst_agent =
-        &Externals::get_agent_manager().get_agent_by_handle(record->dst_agent.handle);
+    const auto tid  = static_cast<std::uint64_t>(record->pid);
+
+    const typename Externals::agent_t* src_agent = nullptr;
+    try
+    {
+        src_agent =
+            &Externals::get_agent_manager().get_agent_by_handle(record->src_agent.handle);
+    } catch(const std::exception& e)
+    {
+        LOG_DEBUG("kfd_page_migrate: src_agent lookup failed for handle {} ({})",
+                  record->src_agent.handle, e.what());
+    }
+
+    const typename Externals::agent_t* dst_agent = nullptr;
+    try
+    {
+        dst_agent =
+            &Externals::get_agent_manager().get_agent_by_handle(record->dst_agent.handle);
+    } catch(const std::exception& e)
+    {
+        LOG_DEBUG("kfd_page_migrate: dst_agent lookup failed for handle {} ({})",
+                  record->dst_agent.handle, e.what());
+    }
 
     Externals::add_thread_info(typename Externals::thread_info_t{
         Externals::get_ppid(), Externals::get_pid(), tid, 0, 0, "{}" });

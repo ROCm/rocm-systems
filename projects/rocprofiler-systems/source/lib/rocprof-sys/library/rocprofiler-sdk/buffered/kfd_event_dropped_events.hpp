@@ -4,6 +4,7 @@
 #pragma once
 
 #include "library/rocprofiler-sdk/types.hpp"
+#include "logger/debug.hpp"
 
 #include <fmt/format.h>
 
@@ -26,6 +27,8 @@ on_kfd_event_dropped_events_configure()
     auto  gpu_agents = agent_mgr.get_agents_by_type(Externals::AGENT_TYPE_GPU);
     if(gpu_agents.empty())
     {
+        LOG_DEBUG("kfd_event_dropped_events: no GPU agents found; no PMC info will be "
+                  "registered");
         return;
     }
 
