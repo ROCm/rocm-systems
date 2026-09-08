@@ -5,6 +5,8 @@
  * See LICENSE.txt for license information
  ************************************************************************/
 
+#include <atomic>
+
 #include "cuda_runtime.h"
 #include "common.h"
 #include "gin_sdma_broadcast_policy.h"  // pure host/device Broadcast tier policy (gin_sdma::)
@@ -519,9 +521,13 @@ __device__ void BroadcastLLImpl(ncclWindow_t sendwin, size_t sendoffset, ncclWin
 //
 // sdmaThresholdOverride lets the Broadcast-specific env var
 // NCCL_GIN_ANVIL_SDMA_THRESHOLD_BROADCAST tune this LSA<->GIN cutover
-// independently; TEST_SDMA_THRESHOLD_UNSET falls back to the shared backend
-// value (rsCtx->sdmaThreshold from NCCL_GIN_ANVIL_SDMA_THRESHOLD). The LL tier is
-// on by default up to BROADCAST_LL_DEFAULT_MAX_BYTES (disable with
+// independently. The host always resolves it to a concrete value before launch
+// (testResolveSdmaThreshold falls back to NCCL_GIN_ANVIL_SDMA_THRESHOLD and then
+// to kBroadcastSdmaThresholdDefault), so the TEST_SDMA_THRESHOLD_UNSET arm below
+// is unreachable from this caller; it is kept only so the kernel stays callable
+// with the sentinel, matching AllGather.
+//
+// The LL tier is on by default up to BROADCAST_LL_DEFAULT_MAX_BYTES (disable with
 // NCCL_GIN_ANVIL_BCAST_LL_MAX_BYTES=0, which leaves llHandle.nSlots==0).
 template <typename T>
 __global__ void GinHybridBroadcastKernel(ncclWindow_t sendwin, size_t sendoffset, ncclWindow_t recvwin, size_t recvoffset, size_t count, int root, struct ncclDevComm devComm, size_t sdmaThresholdOverride, ncclLLA2AHandle llHandle, size_t llMaxBytes) {
@@ -892,6 +898,19 @@ struct BcastRingState {
 #define BCAST_MAX_DEVICES 64
 static BcastRingState g_bcastRingState[BCAST_MAX_DEVICES];
 
+// hipify maps cudaMemcpyToSymbolAsync(sym, src, nbytes, offset, stream) to
+// hipMemcpyToSymbolAsync without hipMemcpyKind; ROCm 7.x requires the kind arg.
+// Template on the symbol so scalar __constant__ ints and array tables both resolve.
+template <typename Symbol>
+inline cudaError_t bcastMemcpyConstantAsync(Symbol& symbol, const void* src,
+                                            size_t nbytes, cudaStream_t stream) {
+#if defined(__HIPCC__) || defined(__HIP_PLATFORM_AMD__)
+  return hipMemcpyToSymbolAsync(symbol, src, nbytes, 0, hipMemcpyHostToDevice, stream);
+#else
+  return cudaMemcpyToSymbolAsync(symbol, src, nbytes, 0, stream);
+#endif
+}
+
 // startColl() calls cudaSetDevice(args->gpus[i]) immediately before runColl on the
 // device-API path, so the current device identifies the state slot. Out-of-range
 // ordinals fall back to slot 0 rather than scribbling past the array; that only
@@ -1047,6 +1066,40 @@ static int buildBcastRingDecomp(int N, int* succ, int* pos) {
 #endif
 #endif
 
+#if defined(ENABLE_DEVICE_API) && NCCL_VERSION_CODE >= NCCL_VERSION(2,28,7)
+// Which -D 3 kernel actually launched. A broadcast is correct whichever tier
+// serves it, so #wrong stays 0 even when a tier is removed and its messages fall
+// through to the next one -- a functional test that only checks the data cannot
+// tell the two apart, and the tier it meant to cover ends up covered by nothing.
+// Naming the launched kernel gives those tests something that fails.
+//
+// Opt-in via RCCL_TESTS_BCAST_TIER_LOG so default stdout stays byte-identical
+// for the perf harness. Reported once per distinct tier: RunColl is called for
+// warmup, every iteration and every root, and one line per launch would flood
+// the results table it shares stdout with.
+enum class BcastLaunchTier { RingTable, RingMulti, ScatterAllgather, Flat, LsaDirect, LL };
+
+static void bcastReportTier(BcastLaunchTier tier) {
+  static const char* const kTierNames[] = {
+    "ring-table", "ring-multi", "scatter-allgather", "flat-gin", "lsa-direct", "ll"
+  };
+  // Env read once, like the threshold lookups above: RunColl is on the timed
+  // path and is called for every iteration and every root.
+  static const bool enabled = getenv("RCCL_TESTS_BCAST_TIER_LOG") != nullptr;
+  if (!enabled || !is_main_proc) return;
+  // -t N host threads reach this concurrently; fetch_or makes "first one wins"
+  // per tier rather than a read-then-set race that can print twice.
+  static std::atomic<unsigned> reported{0};
+  const unsigned bit = 1u << (unsigned)tier;
+  if (reported.fetch_or(bit, std::memory_order_relaxed) & bit) return;
+  // Leading '#' keeps this out of the results table: the pytest row regex is
+  // anchored on a leading size field, and rccl-tests already prints #-prefixed
+  // side-channel lines (see #[bcast-devtime]).
+  printf("#[bcast-tier] %s\n", kTierNames[(unsigned)tier]);
+  fflush(stdout);
+}
+#endif
+
 testResult_t BroadcastRunColl(void* sendbuff, size_t sendoffset, void* recvbuff, size_t recvoffset, size_t count, ncclDataType_t type, ncclRedOp_t op, int root, ncclComm_t comm, cudaStream_t stream, int deviceImpl, void* bias = nullptr) {
   if (broadcast_grouped) {
     // nranks broadcasts with distinct roots inside one group — fuses into AllGatherV ring kernel
@@ -1158,13 +1211,15 @@ testResult_t BroadcastRunColl(void* sendbuff, size_t sendoffset, void* recvbuff,
                 const char* e = getenv("NCCL_GIN_ANVIL_BCAST_RING_STREAM");
                 return (e && e[0] == '0') ? 0 : 1;
               }();
-              CUDACHECK(cudaMemcpyToSymbolAsync(c_bcastNRings, &rs.builtNRings, sizeof(int), 0, stream));
-              CUDACHECK(cudaMemcpyToSymbolAsync(c_bcastRingSucc, h_succ, sizeof(int) * sagRanks * rs.builtNRings, 0, stream));
-              CUDACHECK(cudaMemcpyToSymbolAsync(c_bcastRingPos, h_pos, sizeof(int) * sagRanks * rs.builtNRings, 0, stream));
-              CUDACHECK(cudaMemcpyToSymbolAsync(c_bcastStream, &streamStores, sizeof(int), 0, stream));
+              CUDACHECK(bcastMemcpyConstantAsync(c_bcastNRings, &rs.builtNRings, sizeof(int), stream));
+              CUDACHECK(bcastMemcpyConstantAsync(c_bcastRingSucc, h_succ, sizeof(int) * sagRanks * rs.builtNRings, stream));
+              CUDACHECK(bcastMemcpyConstantAsync(c_bcastRingPos, h_pos, sizeof(int) * sagRanks * rs.builtNRings, stream));
+              CUDACHECK(bcastMemcpyConstantAsync(c_bcastStream, &streamStores, sizeof(int), stream));
             }
             rs.builtN = sagRanks;
           }
+          bcastReportTier(rs.builtNRings > 0 ? BcastLaunchTier::RingTable
+                                             : BcastLaunchTier::RingMulti);
           // The SM ring kernels launch their own power-of-2 CTA count (bcastRingCtas,
           // default 128) instead of -V/deviceCtaCount: the pipeline is CTA-bound and
           // needs ~128 CTAs to saturate all xGMI links (238 -> 350 GB/s @2 GiB).
@@ -1178,6 +1233,7 @@ testResult_t BroadcastRunColl(void* sendbuff, size_t sendoffset, void* recvbuff,
           return testSuccess;
         }
         if (largeTier == gin_sdma::BcastLargeTier::ScatterAG) {
+          bcastReportTier(BcastLaunchTier::ScatterAllgather);
           const int sagGrid = gin_sdma::bcastSagCtas(msgBytes, sagRanks, bcastThr, bcastCtasEnv, hybridPool);
           TESTCHECK(testLaunchDeviceKernelCtas(SPECIALIZE_KERNEL(GinScatterAllgatherBroadcastKernel, type, op), sendbuff, sendoffset, recvbuff, recvoffset, count, type, op, root, comm, stream, sagGrid));
           return testSuccess;
@@ -1190,6 +1246,14 @@ testResult_t BroadcastRunColl(void* sendbuff, size_t sendoffset, void* recvbuff,
           // 2.28.x build whose requirements arm cannot create the LL resource --
           // nSlots stays 0, bcastLLEligible is false, and the kernel takes LSA.
           const int llSlots = g_bcastLLHandle.nSlots;
+          // The hybrid kernel picks LL / direct-LSA / flat-GIN internally, so ask
+          // the same policy the kernel uses rather than reporting "hybrid" and
+          // leaving the three indistinguishable to the tests.
+          switch (gin_sdma::bcastKernelTier(msgBytes, bcastThr, llSlots, g_bcastLLMaxBytes)) {
+            case gin_sdma::BcastTier::LL:        bcastReportTier(BcastLaunchTier::LL); break;
+            case gin_sdma::BcastTier::LSADirect: bcastReportTier(BcastLaunchTier::LsaDirect); break;
+            case gin_sdma::BcastTier::Flat:      bcastReportTier(BcastLaunchTier::Flat); break;
+          }
           const int hybridGrid = gin_sdma::bcastHybridCtas(msgBytes, bcastThr, llSlots, g_bcastLLMaxBytes, bcastCtasEnv, hybridPool);
           TESTCHECK(testLaunchDeviceKernelThresholdLL(SPECIALIZE_KERNEL(GinHybridBroadcastKernel, type, op), sendbuff, sendoffset, recvbuff, recvoffset, count, type, op, root, comm, stream, bcastThr, g_bcastLLHandle, g_bcastLLMaxBytes, hybridGrid));
         }
