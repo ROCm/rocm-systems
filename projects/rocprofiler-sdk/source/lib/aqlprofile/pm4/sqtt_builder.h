@@ -231,7 +231,6 @@ public:
         builder.BuildWriteUConfigRegPacket(cmd_buffer,
                                            Primitives::CP_PERFMON_CNTL_ADDR,
                                            Primitives::cp_perfmon_cntl_start_value());
-        builder.BuildWriteWaitIdlePacket(cmd_buffer);
     }
 
     void StopPerfMon(CmdBuffer* cmd_buffer)
@@ -242,7 +241,6 @@ public:
                                            Primitives::CP_PERFMON_CNTL_ADDR,
                                            Primitives::cp_perfmon_cntl_reset_value());
         builder.BuildWriteUConfigRegPacket(cmd_buffer, Primitives::RLC_PERFMON_CLK_CNTL_ADDR, 0);
-        builder.BuildWriteWaitIdlePacket(cmd_buffer);
     }
 
     void Begin(CmdBuffer* cmd_buffer, TraceConfig* config) override
@@ -283,8 +281,6 @@ public:
             // Program Grbm to broadcast messages to all shader engines
             SetGRBMToBroadcast(cmd_buffer);
 
-            // Issue a CSPartialFlush cmd including cache flush
-            if(config->concurrent == 0) builder.BuildWriteWaitIdlePacket(cmd_buffer);
             // Program the thread trace mask - specifies SH, CU, SIMD and
             // VM Id masks to apply. Enabling SQ/SPI/REG_STALL_EN bits
             const uint32_t mask_value =
@@ -364,8 +360,6 @@ public:
                 builder.BuildWriteUConfigRegPacket(cmd_buffer,
                                                    Primitives::SQ_THREAD_TRACE_CTRL_ADDR,
                                                    Primitives::sqtt_ctrl_value(true, false));
-                // Issue a CSPartialFlush cmd including cache flush
-                builder.BuildWriteWaitIdlePacket(cmd_buffer);
                 // Program the thread trace mode register, mode ON
                 builder.BuildWriteUConfigRegPacket(
                     cmd_buffer,
@@ -375,7 +369,6 @@ public:
                 // If we are in double buffer mode
                 if(!config->buffer_data.empty())
                 {
-                    builder.BuildWriteWaitIdlePacket(cmd_buffer);
                     uint64_t buf2_addr =
                         reinterpret_cast<uint64_t>(config->buffer_data.at(se_index).at(0));
 
@@ -486,7 +479,6 @@ public:
                                           Primitives::sqtt_buffer0_size_value(sqtt_size));
                         WriteConfigPacket(
                             cmd_buffer, Primitives::SQ_THREAD_TRACE_BUF1_BASE_LO_ADDR, buff1_lo);
-                        builder.BuildWriteWaitIdlePacket(cmd_buffer);
                         WriteConfigPacket(
                             cmd_buffer, Primitives::SQ_THREAD_TRACE_BUF1_BASE_HI_ADDR, buff1_hi);
                     }
@@ -505,7 +497,6 @@ public:
             // Reset the GRBM to broadcast mode
             SetGRBMToBroadcast(cmd_buffer);
         }
-        builder.BuildWriteWaitIdlePacket(cmd_buffer);
 
         rocprof_trace_decoder_instrument_enable_t header{};
         header.char1          = '\0';
@@ -634,6 +625,12 @@ public:
             }
         }
         SetGRBMToBroadcast(cmd_buffer);
+
+        builder.BuildCacheFlushPacket(
+            cmd_buffer, size_t(config->data_buffer_ptr), config->data_buffer_size);
+        for(const auto& [_, buffers] : config->buffer_data)
+            for(auto* buffer : buffers)
+                builder.BuildCacheFlushPacket(cmd_buffer, size_t(buffer), config->data_buffer_size);
 
         if(Primitives::GFXIP_LEVEL != 10)
             builder.BuildCacheFlushPacket(

@@ -734,7 +734,10 @@ kfd_signal_t::wait() const
     ROCP_TRACE << "Waiting for KFD signal";
     auto t0 = std::chrono::system_clock::now();
     while(load_signal_value(_signal) != 0)
+    {
         std::this_thread::sleep_for(std::chrono::microseconds(1));
+        std::this_thread::yield();
+    }
 
     std::atomic_thread_fence(std::memory_order_acq_rel);
     auto t1 = std::chrono::system_clock::now();
@@ -891,7 +894,10 @@ struct direct_queue_t
     void wait_for_space(uint64_t end_index) const
     {
         while(end_index - load_acquire(rptr) >= ring_size)
+        {
+            std::this_thread::sleep_for(std::chrono::microseconds(1));
             std::this_thread::yield();
+        }
     }
 
     std::shared_ptr<kfd_memory_pool_t> memory{};
@@ -936,7 +942,10 @@ struct kfd_aql_queue_t::impl
     void submit(const hsa_ext_amd_aql_pm4_packet_t& packet, hsa_signal_t completion)
     {
         while((write_index + 1) - load_acquire(queue.rptr) >= AQL_QUEUE_PACKETS)
+        {
+            std::this_thread::sleep_for(std::chrono::microseconds(1));
             std::this_thread::yield();
+        }
 
         const auto  slot      = write_index & (AQL_QUEUE_PACKETS - 1);
         auto*       dst       = static_cast<hsa_ext_amd_aql_pm4_packet_t*>(queue.ring) + slot;
