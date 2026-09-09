@@ -15,7 +15,7 @@
 
 | Strategy | Execution model | Pros | Cons |
 | --- | --- | --- | --- |
-| **Application replay** | Launch and run the complete workload once per bucket. | Every bucket, across corresponding replayed dispatch occurrences — nothing is estimated from other occurrences. | Repeats process startup, runtime initialization and host work. |
+| **Application replay** | Launch and run the complete workload once per bucket. | Every counter collected for equivalent dispatch — nothing is estimated. | Repeats process startup, runtime initialization and host work. |
 | **Iteration multiplexing** | Launch once and let the native tool rotate buckets across comparable dispatches. Analysis imputes each dispatch's missing counters. | Avoids repeated launches for workloads with enough dispatches. | Never collects every bucket from one logical dispatch. Undersampled kernels cannot produce a complete metric set. |
 
 - Every configuration consumes the same buckets. Application replay works across all of them;
@@ -25,16 +25,15 @@
 
 ### Co-active profiling services
 
-Counter collection never runs alone. Every counter collection invocation must produce kernel-dispatch records,
-because those records carry the kernel records.
+Counter collection never runs alone. Every counter collection invocation must produce kernel-dispatch records.
 
-| Service | Context owner today | Per dispatch? | Consequence under replay |
+| Service | Context owner today | Per dispatch? | Consequence under kernel replay |
 | --- | --- | --- | --- |
-| Counter collection | Native tool, shared with code-object tracing | Yes | The point of the feature: one bucket per pass. |
+| Counter collection | Native tool, shared with code-object tracing | Yes | one bucket per pass. |
 | Code-object tracing | Native tool, shared with counter collection | No | Unaffected. |
 | Kernel dispatch tracing | `rocprofiler-sdk-tool` | Yes | *N* records for one logical dispatch. |
 | Marker / ROCTx tracing | `rocprofiler-sdk-tool` | Host-side, spans all passes | Region duration absorbs replay overhead. |
-| PC sampling | `rocprofiler-sdk-tool`, separate workload invocation | Agent-wide | Not a pass at all today. |
+| PC sampling | `rocprofiler-sdk-tool`, separate workload invocation | Agent-wide | A separate pass. |
 
 ### Prerequisites
 
@@ -45,12 +44,9 @@ context with nothing that must stay running. Neither condition holds today.
 | Prerequisite | Why kernel replay needs it |
 | --- | --- |
 | The native tool owns kernel dispatch tracing and emits its dispatch records | A tool cannot locally stop a context it does not own. |
-| The native tool owns PC sampling, in the same workload invocation as counter collection | A separate invocation has no pass to occupy. |
-| Counter collection moves to its own context, split from code-object tracing | A context starts and stops as a unit, and the PC sampling pass must stop counters without stopping code-object tracing. |
-| PC sampling honours per-pass local context overrides | PC sampling is agent-wide in the SDK, so it does not consult the override at all. |
+| The native tool owns PC sampling | Same as above. |
+| Counter collection moves to its own context | To allow fine-grained service start and stop. |
 
-These are tracked outside this design. Everything below assumes they are satisfied, and a run that
-finds them unsatisfied is rejected rather than degraded.
 
 ### SDK replay mechanism
 
