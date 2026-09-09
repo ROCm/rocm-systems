@@ -99,16 +99,37 @@ inline KfdDeviceConfig kfd_device_from_fb(const fb::KfdDeviceInfo *device,
   config.revision_id = device->revision_id();
   config.pci_revision_id = device->pci_revision_id();
   config.simd_count = device->simd_count();
-  config.max_waves_per_simd = device->max_waves_per_simd();
-  config.num_shader_engines = device->num_shader_engines();
-  config.num_shader_arrays_per_engine = device->num_shader_arrays_per_engine();
-  config.num_cu_per_sh = device->num_cu_per_sh();
+  if (const auto value = device->max_waves_per_simd()) {
+    config.max_waves_per_simd = *value;
+    config.discovery_overrides.max_waves_per_simd = *value;
+  }
+  if (const auto value = device->num_shader_engines()) {
+    config.num_shader_engines = *value;
+    config.discovery_overrides.num_shader_engines = *value;
+  }
+  if (const auto value = device->num_shader_arrays_per_engine()) {
+    config.num_shader_arrays_per_engine = *value;
+    config.discovery_overrides.num_shader_arrays_per_engine = *value;
+  }
+  if (const auto value = device->num_cu_per_sh()) {
+    config.num_cu_per_sh = *value;
+    config.discovery_overrides.num_cu_per_sh = *value;
+  }
   config.simd_per_cu = device->simd_per_cu();
-  config.wave_front_size = device->wave_front_size();
-  config.max_slots_scratch_cu = device->max_slots_scratch_cu();
+  if (const auto value = device->wave_front_size()) {
+    config.wave_front_size = *value;
+    config.discovery_overrides.wave_front_size = *value;
+  }
+  if (const auto value = device->max_slots_scratch_cu()) {
+    config.max_slots_scratch_cu = *value;
+    config.discovery_overrides.max_slots_scratch_cu = *value;
+  }
   config.local_mem_size = device->local_mem_size();
   config.vram_type = device->vram_type();
-  config.lds_size_kb = device->lds_size_kb();
+  if (const auto value = device->lds_size_kb()) {
+    config.lds_size_kb = *value;
+    config.discovery_overrides.lds_size_kb = *value;
+  }
   config.mem_width = device->mem_width();
   config.mem_clk_max = device->mem_clk_max();
   config.l1_size_kb = device->l1_size_kb();
