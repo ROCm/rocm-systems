@@ -522,8 +522,7 @@ Roofline visualization options (available only in analyze mode):
 * ``--sort``: Overlay top kernels or top dispatches (default: kernels)
 * ``--mem-level``: Filter by memory level -- HBM, L2, vL1D, L0, LDS (default: ALL)
 * ``--roofline-data-type``: Choose datatypes for roofline visualization (default: FP32)
-   * Multiple data types can be provided with this option in order to isolate and visualize said types in a single plot.
-   * Note: layering more than one data type could create a cluttered plot
+   * CLI only supports visualizing one precision at a time. Visualizing multiple data types on one plot is available in the Interactive Roofline HTML file.
 
 Example with multiple ``--mem-level`` and ``--roofline-data-type`` options:
 
@@ -534,6 +533,7 @@ Example with multiple ``--mem-level`` and ``--roofline-data-type`` options:
 Interactive Roofline HTML:
 
 * Use the *AI axis* selector to choose one memory level per kernel, or *All peaks* to plot every level at once. Isolating one kernel shows it across all available memory levels.
+* Use the *Precision* selector to choose one or more arithmetic precision's peak roofline to display on the plot.
 * Use the *Kernels* and *Bandwidth rooflines* panels to isolate, multi-select, or reset plotted items. The *Runtime shown* slider filters to the heaviest kernels that reach the selected GPU resident-time cutoff.
 * Hover over kernel dots and rooflines to see arithmetic intensity, throughput, roofline percentage, limiter, runtime, bandwidth, and compute-peak details.
 * Drag to pan, scroll to zoom, double-click or use *Reset zoom* to re-frame the chart, use *Export PNG* to save the current view, and use *Theme toggle* to switch between light and dark modes.

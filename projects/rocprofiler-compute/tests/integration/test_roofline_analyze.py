@@ -47,7 +47,7 @@ def test_analyze_generates_roofline_html(
     assert code == 0
 
     html_files = list(Path(workload_dir).glob("empirRoof_*.html"))
-    assert len(html_files) > 0, "Analyze should generate roofline HTML files"
+    assert [html_file.name for html_file in html_files] == ["empirRoof_gpu-0.html"]
 
     common.clean_output_dir(config["cleanup"], workload_dir)
 
@@ -74,7 +74,7 @@ def test_analyze_roofline_datatype_independently(
         assert code == 0
 
     html_files = list(Path(workload_dir).glob("empirRoof_*.html"))
-    assert len(html_files) > 0, "Analyze should generate roofline HTML files"
+    assert [html_file.name for html_file in html_files] == ["empirRoof_gpu-0.html"]
 
     common.clean_output_dir(config["cleanup"], workload_dir)
 
@@ -302,10 +302,10 @@ def test_analyze_roofline_datatype_html_legend(
     ])
     assert code == 0
 
-    html_files = list(Path(workload_dir).glob(f"empirRoof_*{dtype}*.html"))
-    assert len(html_files) > 0, f"Analyze should generate a {dtype} roofline HTML"
+    html_path = Path(workload_dir) / "empirRoof_gpu-0.html"
+    assert html_path.is_file(), f"Analyze should generate a {dtype} roofline HTML"
 
-    html_text = html_files[0].read_text(encoding="utf-8")
+    html_text = html_path.read_text(encoding="utf-8")
     for legend in DATATYPE_LEGEND_CASES[dtype]["present"]:
         assert legend in html_text, f"{dtype} HTML should contain '{legend}'"
     for legend in DATATYPE_LEGEND_CASES[dtype]["absent"]:

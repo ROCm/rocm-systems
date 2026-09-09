@@ -16,6 +16,17 @@ if (window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").match
 <body>
 <div class="roofline-app">
   <div class="roofline-toolbar">
+    <div class="roofline-control">Precision
+      <div class="roofline-precision-dropdown">
+        <button type="button" id="roofline-precision-btn"
+                class="roofline-precision-btn"
+                aria-haspopup="true" aria-expanded="false">
+          <span id="roofline-precision-label">All</span>&#9660;
+        </button>
+        <div class="roofline-precision-menu" id="roofline-precision-menu"
+             hidden></div>
+      </div>
+    </div>
     <label class="roofline-control" id="roofline-peak-control"
            for="roofline-peak-select"
            title="${PEAK_TITLE}">AI axis
