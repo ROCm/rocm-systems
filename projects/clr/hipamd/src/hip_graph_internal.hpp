@@ -962,6 +962,7 @@ class Graph {
     Graph* child_graph_ptr = nullptr;           // Direct pointer to child graph for quick access
 
     bool needs_completion_signal = false;        // True if any downstream segment is on a different stream/device, or this is a leaf
+    bool feeds_uncaptured_sdma = false;  // A successor begins with an uncaptured SDMA memcpy
   };
 
   //! Segment information for batch scheduling

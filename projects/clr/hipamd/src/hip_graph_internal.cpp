@@ -429,6 +429,34 @@ void GraphExecSegmented::BuildSyncPlan() {
     collapsed_to_single_stream_ = true;
   }
 
+  // Flag producers of an uncaptured SDMA memcpy. The copy runs on an engine the compute
+  // queue does not order, and waits on whichever signal the queue's pool cursor points at
+  // -- a positional lookup, so it is the producer's only by luck.
+  {
+    for (auto& seg : segments_) {
+      seg.feeds_uncaptured_sdma = false;
+    }
+    for (auto& seg : segments_) {
+      auto cbIt = segmentBatches_.find(seg.id);
+      if (cbIt == segmentBatches_.end()) continue;
+      const auto& cs = cbIt->second.node_capture_status;
+      if (cs.empty() || cs[0]) continue;  // first node must be uncaptured
+      if (seg.nodes.empty() || seg.nodes[0]->GetType() != hipGraphNodeTypeMemcpy) continue;
+      // Memcpy node types that don't derive from GraphMemcpyNode fall back to the
+      // conservative "assume SDMA" behavior, matching sdma_follows below.
+      auto* mcn = dynamic_cast<GraphMemcpyNode*>(seg.nodes[0]);
+      const bool uses_sdma = (mcn == nullptr) || !mcn->WillBypassSdmaEngine();
+      if (!uses_sdma) continue;
+      for (int dep_id : seg.segment_ids_dependencies) {
+        if (dep_id < 0 || dep_id >= static_cast<int>(segments_.size())) continue;
+        auto& p = segments_[dep_id];
+        // Cross-stream successors already get a signal via needs_completion_signal.
+        if (p.dev_id != seg.dev_id || p.stream_id != seg.stream_id) continue;
+        p.feeds_uncaptured_sdma = true;
+      }
+    }
+  }
+
   // PASS 1: Assign a compact HW-event slot only to segments whose completion
   // signal is consumed — cross-device/stream successor, or leaf when
   // leaf-sync is required. Same-stream successors are ordered by the
@@ -2822,6 +2850,11 @@ hipError_t GraphExecSegmented::EnqueueSegment(const Segment& segment, hip::Strea
       status = dispatchCurrentBatch();
       if (status != hipSuccess) return status;
     }
+  }
+
+  // Publish a completion signal into that slot, picked up by the Compute->SDMA engine switch.
+  if (segment.feeds_uncaptured_sdma) {
+    stream->vdev()->fenceQueueForSdmaConsumer();
   }
 
   return status;

@@ -1365,6 +1365,10 @@ class VirtualDevice : public amd::ReferenceCountedObject {
   //!< Request a system-scope release fence on the next AQL packet (ROCm specific)
   virtual void addSystemScope() {}
 
+  //!< Flush this queue's writes and publish a completion signal, so a following SDMA-engine
+  //!< op on this queue waits for the work enqueued so far (ROCm specific)
+  virtual void fenceQueueForSdmaConsumer() {}
+
   //! Get the blit manager object
   device::BlitManager& blitMgr() const { return *blitMgr_; }
 

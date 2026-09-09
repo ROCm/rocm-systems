@@ -951,6 +951,13 @@ std::vector<hsa_signal_t>& VirtualGPU::HwQueueTracker::WaitingSignal(HwQueueEngi
   return waiting_signals_;
 }
 
+// Allocates a tracker signal (Barriers().ActiveSignal) for the next SDMA op to wait on.
+// System scope also releases this queue's writes to the copy engine.
+void VirtualGPU::fenceQueueForSdmaConsumer() {
+  std::scoped_lock lock(execution());
+  dispatchBarrierPacket(kBarrierPacketHeader, false);
+}
+
 // ================================================================================================
 bool VirtualGPU::HwQueueTracker::CpuWaitForSignal(ProfilingSignal* signal) {
   // Wait for the current signal to complete
