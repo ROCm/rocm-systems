@@ -177,6 +177,17 @@ in the following table.
       - | ``1``: Enable channel-count override (default).
         | ``0``: Disable; keep RCCL's internal threadThreshold adjustments.
 
+    * - | ``RCCL_INIT_CHANNELS``
+        | On gfx1151 (Strix Halo), sets the ring-graph channel count during
+          topology preset, before the node count is known. RCCL uses this to
+          build a set of load-balanced Hamiltonian rings for multi-node
+          Ethernet fabrics. The value is clamped into the ring graph's
+          min/max channel range and then copied onto the tree graph. Other
+          architectures ignore this variable.
+      - | Positive integer channel count.
+        | Default: unset (``-1``), which selects ``6`` channels.
+        | Values ``<= 0`` are treated as unset.
+
     * - | ``NCCL_NTHREADS``
         | Controls the number of GPU threads per block/workgroup that RCCL uses for
           tuned communication kernels. If unset or non-positive, RCCL uses its
