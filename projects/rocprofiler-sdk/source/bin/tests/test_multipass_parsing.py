@@ -100,60 +100,25 @@ def test_parse_input_text_uses_pmc_subdir(rocprofv3, tmp_path):
 
 
 @pytest.mark.parametrize(
-    "cli_multipass,num_jobs,cli_has_pmc,input_has_pmc,expected",
-    [
-        (True, 1, True, False, "multiple --pmc flags"),
-        (False, 2, False, True, "multiple input-file jobs"),
-        (False, 1, True, True, "--pmc combined with input-file pmc"),
-        (True, 3, True, True, "multiple --pmc flags"),
-        (False, 1, True, False, None),
-        (False, 1, False, True, None),
-        (False, 0, False, False, None),
-    ],
-)
-def test_multipass_source(
-    rocprofv3, cli_multipass, num_jobs, cli_has_pmc, input_has_pmc, expected
-):
-    assert (
-        rocprofv3.multipass_source(cli_multipass, num_jobs, cli_has_pmc, input_has_pmc)
-        == expected
-    )
-
-
-@pytest.mark.parametrize(
-    "source,has_pid,has_collection_period",
-    [
-        (None, True, False),
-        (None, False, True),
-        ("multiple input-file jobs", False, False),
-    ],
-)
-def test_multipass_guard_does_not_reject_compatible_cases(
-    rocprofv3, source, has_pid, has_collection_period
-):
-    assert (
-        rocprofv3.multipass_incompatible_message(source, has_pid, has_collection_period)
-        is None
-    )
-
-
-@pytest.mark.parametrize(
     "jobs,cli_args,expected",
     [
         (
             [{"pmc": ["SQ_WAVES"]}, {"pmc": ["GRBM_COUNT"]}],
             ["--pid", "12345"],
-            "multiple input-file jobs) is not compatible with attach mode",
+            "[rocprofv3] Fatal error: Multi-pass counter collection "
+            "(multiple input-file jobs) is not compatible with attach mode (--pid)\n",
         ),
         (
             [{"pmc": ["SQ_WAVES"]}, {"pmc": ["GRBM_COUNT"]}],
             ["--collection-period", "0:100:1"],
-            "multiple input-file jobs) is not compatible with --collection-period",
+            "[rocprofv3] Fatal error: Multi-pass counter collection "
+            "(multiple input-file jobs) is not compatible with --collection-period\n",
         ),
         (
             [{"pmc": ["SQ_WAVES"]}, {"pmc": ["GRBM_COUNT"], "pid": 12345}],
             [],
-            "multiple input-file jobs) is not compatible with attach mode",
+            "[rocprofv3] Fatal error: Multi-pass counter collection "
+            "(multiple input-file jobs) is not compatible with attach mode (--pid)\n",
         ),
         (
             [
@@ -161,12 +126,15 @@ def test_multipass_guard_does_not_reject_compatible_cases(
                 {"pmc": ["GRBM_COUNT"], "collection_period": ["0:100:1"]},
             ],
             [],
-            "multiple input-file jobs) is not compatible with --collection-period",
+            "[rocprofv3] Fatal error: Multi-pass counter collection "
+            "(multiple input-file jobs) is not compatible with --collection-period\n",
         ),
         (
             [{"pmc": ["GRBM_COUNT"]}],
             ["--pmc", "SQ_WAVES", "--pid", "12345"],
-            "--pmc combined with input-file pmc) is not compatible with attach mode",
+            "[rocprofv3] Fatal error: Multi-pass counter collection "
+            "(--pmc combined with input-file pmc) is not compatible with attach mode "
+            "(--pid)\n",
         ),
     ],
 )
@@ -184,7 +152,7 @@ def test_multipass_incompatible_options_fail_before_launch(
         )
 
     assert exc_info.value.code == 1
-    assert expected in capsys.readouterr().err
+    assert capsys.readouterr().err == expected
     assert not output_path.exists()
 
 
