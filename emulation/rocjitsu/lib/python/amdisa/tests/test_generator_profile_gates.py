@@ -7012,6 +7012,26 @@ def test_gfx1250_flat_u64_atomic_payload_width_uses_two_dwords():
     assert 'data_base + 1' in body
 
 
+def test_flat_dword_store_snapshots_one_observed_vgpr_region():
+    codegen = object.__new__(CodeGenerator)
+    codegen.isa_spec = SimpleNamespace(
+        arch_name='cdna4',
+        profile=Cdna4Profile(),
+    )
+    store = SimpleNamespace(
+        name='GLOBAL_STORE_DWORDX4',
+        elem_size=4,
+        num_elems=4,
+        d16_hi=False,
+    )
+
+    body = codegen._gen_flat_store([], [], store)
+
+    assert 'RegisterAccess(wf).read_vgpr_region(data_base, 4, exec)' in body
+    assert 'data.copy_dwords_lane_major(d->store_data.data(), exec);' in body
+    assert '.read_vgpr(' not in body
+
+
 def test_gfx1250_cluster_load_generators_force_request_l1_bypass():
     codegen = object.__new__(CodeGenerator)
     codegen.isa_spec = SimpleNamespace(
