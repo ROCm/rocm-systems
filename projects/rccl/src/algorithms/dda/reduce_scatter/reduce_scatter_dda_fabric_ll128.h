@@ -118,7 +118,7 @@ __launch_bounds__(1024)
       LLLine128* src = myBase + (size_t)peer * slot;
       // All 16 lanes poll the shared flag word (broadcast); unfenced.
       if (!ddaLL128WaitFlag(&src[ln].w[kDdaLL128FlagElem], (uint64_t)flag, abortFlag)) {
-        ddaLLEpochEnd(epochDev, flatBlockId, total, epochLen, flag);
+        ddaSetLLEpoch(epochDev, epochLen, flatBlockId, total, flag);
         return;
       }
       if (hasWord) {
