@@ -2601,7 +2601,8 @@ void VirtMemoryTestBasic::ExportShareableHandlePcieMapping(hsa_agent_t agent,
   ASSERT_SUCCESS(
       hsa_amd_vmem_handle_create(pool, alloc_size, MEMORY_TYPE_NONE, 0, &exported_handle));
 
-  /* Request the dmabuf be mapped over PCIe (BAR) rather than the default fabric mapping. */
+  /* Request the dmabuf be mapped over PCIe (BAR)
+   * and fail if this is not supported on this system. */
   int dmabuf_fd = -1;
   hsa_status_t status = hsa_amd_vmem_export_shareable_handle(&dmabuf_fd, exported_handle,
                                                              HSA_AMD_DMABUF_MAPPING_TYPE_PCIE);
