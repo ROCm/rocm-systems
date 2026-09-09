@@ -181,8 +181,11 @@ void* MemoryPool::AllocateMemory(size_t size, Stream* stream, void* dptr) {
   // Device:: methods hold lock_ and then acquire lock_pool_ops_, so calling
   // NullStream() while holding lock_pool_ops_ creates an AB/BA deadlock.
   // Pre-fetch outside the lock — NullStream() is lock-free after first init.
-  if (state_.use_vm_heap_) {
-    (void)device_->NullStream(false);
+  if (state_.use_vm_heap_ || stream == nullptr) {
+    auto* nullstream = device_->NullStream(false);
+    if (stream == nullptr) {
+      stream = nullstream;
+    }
   }
   std::scoped_lock lock(lock_pool_ops_);
 
@@ -254,8 +257,11 @@ bool MemoryPool::FreeMemory(amd::Memory* memory, Stream* stream, Event* event, b
   // Device:: methods hold lock_ and then acquire lock_pool_ops_, so calling
   // NullStream() while holding lock_pool_ops_ creates an AB/BA deadlock.
   // Pre-fetch outside the lock — NullStream() is lock-free after first init.
-  if (state_.use_vm_heap_) {
-    (void)g_devices[memory->getUserData().deviceId]->NullStream(false);
+  if (state_.use_vm_heap_ || stream == nullptr) {
+    auto* nullstream = device_->NullStream(false);
+    if (stream == nullptr) {
+      stream = nullstream;
+    }
   }
   {
     std::scoped_lock lock(lock_pool_ops_);
