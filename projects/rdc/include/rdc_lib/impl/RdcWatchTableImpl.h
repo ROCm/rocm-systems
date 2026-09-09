@@ -126,6 +126,8 @@ class RdcWatchTableImpl : public RdcWatchTable {
 
   //!< The candidate health fields for a set of RDC_HEALTH_WATCH_* components.
   std::vector<rdc_field_t> health_component_fields(unsigned int components);
+  //!< rdc_health_clear without taking health_api_mutex_; for callers that hold it.
+  rdc_status_t health_clear_unlocked(rdc_gpu_group_t group_id);
   //!< Whether (gpu, field) survived the probe at rdc_health_set for this group.
   bool is_health_field_watched(rdc_gpu_group_t group_id, uint32_t gpu_index, rdc_field_t field);
   //!< output: Whether health incidents are full
@@ -172,6 +174,12 @@ class RdcWatchTableImpl : public RdcWatchTable {
   //!< The last clean up time
   std::atomic<uint64_t> last_cleanup_time_;
   std::mutex watch_mutex_;
+
+  //!< Serializes rdc_health_set/rdc_health_clear for a whole call. The probe
+  //!< in rdc_health_set runs without watch_mutex_ (it makes SMI calls), so two
+  //!< concurrent sets on one group could otherwise interleave clear/insert
+  //!< and leak a field group. Never taken while watch_mutex_ is held.
+  std::mutex health_api_mutex_;
 };
 
 }  // namespace rdc
