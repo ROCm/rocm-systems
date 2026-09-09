@@ -41,7 +41,7 @@ const std::set<clock_identifier>&
 accepted_clock_ids()
 {
     // NOLINTBEGIN(misc-include-cleaner)
-    static const auto instance =
+    static const auto k_instance =
         std::set<clock_identifier>{ ROCPROFSYS_CLOCK_IDENTIFIER(CLOCK_REALTIME),
                                     ROCPROFSYS_CLOCK_IDENTIFIER(CLOCK_MONOTONIC),
                                     ROCPROFSYS_CLOCK_IDENTIFIER(CLOCK_PROCESS_CPUTIME_ID),
@@ -50,20 +50,20 @@ accepted_clock_ids()
                                     ROCPROFSYS_CLOCK_IDENTIFIER(CLOCK_MONOTONIC_COARSE),
                                     ROCPROFSYS_CLOCK_IDENTIFIER(CLOCK_BOOTTIME) };
     // NOLINTEND(misc-include-cleaner)
-    return instance;
+    return k_instance;
 }
 
 template <typename Tp>
 clock_identifier
 find_clock_identifier(const Tp& _v)
 {
-    const auto& _accepted = accepted_clock_ids();
+    const auto& accepted = accepted_clock_ids();
 
     const char* _descript = "";
     if constexpr(std::is_integral<Tp>::value)
     {
         _descript = "value";
-        for(const auto& itr : _accepted)
+        for(const auto& itr : accepted)
         {
             if(itr.value == _v)
             {
@@ -75,7 +75,7 @@ find_clock_identifier(const Tp& _v)
     {
         _descript            = "name";
         auto normalized_name = utility::string::clock_name(_v);
-        for(const auto& itr : _accepted)
+        for(const auto& itr : accepted)
         {
             if(itr.name == normalized_name || itr.raw_name == _v ||
                std::to_string(itr.value) == _v)
@@ -86,8 +86,8 @@ find_clock_identifier(const Tp& _v)
     }
 
     auto _choices = std::vector<std::string>{};
-    _choices.reserve(_accepted.size());
-    for(const auto& itr : _accepted)
+    _choices.reserve(accepted.size());
+    for(const auto& itr : accepted)
     {
         _choices.emplace_back(itr.as_string());
     }
