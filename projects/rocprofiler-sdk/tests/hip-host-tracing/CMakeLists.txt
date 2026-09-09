@@ -10,20 +10,12 @@ project(
 
 find_package(rocprofiler-sdk REQUIRED)
 
-if(ROCPROFILER_MEMCHECK_PRELOAD_ENV_VALUE)
-    set(PRELOAD_ENV
-        "${ROCPROFILER_MEMCHECK_PRELOAD_ENV_VALUE}:$<TARGET_FILE:rocprofiler-sdk-json-tool>"
-        )
-else()
-    set(PRELOAD_ENV "$<TARGET_FILE:rocprofiler-sdk-json-tool>")
-endif()
-
 rocprofiler_add_integration_execute_test(
     hip-host-tracing
     TARGET hip-host
     TIMEOUT 100
     LABELS "integration-tests"
-    PRELOAD "${PRELOAD_ENV}"
+    PRELOAD "$<TARGET_FILE:rocprofiler-sdk-json-tool>"
     ENVIRONMENT "ROCPROFILER_TOOL_OUTPUT_FILE=hip-host-tracing-test.json"
     FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
     FIXTURES_SETUP hip-host-tracing)

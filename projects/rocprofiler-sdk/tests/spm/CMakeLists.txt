@@ -10,13 +10,6 @@ project(
 
 find_package(rocprofiler-sdk REQUIRED)
 
-if(ROCPROFILER_MEMCHECK_PRELOAD_ENV)
-    set(PRELOAD_ENV
-        "${ROCPROFILER_MEMCHECK_PRELOAD_ENV}:$<TARGET_FILE:rocprofiler-sdk-json-tool>")
-else()
-    set(PRELOAD_ENV "LD_PRELOAD=$<TARGET_FILE:rocprofiler-sdk-json-tool>")
-endif()
-
 if(NOT ROCPROFILER_MEMCHECK STREQUAL "")
     set(SANITIZER True)
 else()

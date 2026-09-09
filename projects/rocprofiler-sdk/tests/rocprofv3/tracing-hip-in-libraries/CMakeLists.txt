@@ -10,10 +10,9 @@ project(
 
 find_package(rocprofiler-sdk REQUIRED)
 
-string(REPLACE "LD_PRELOAD=" "" PRELOAD_ENV "${ROCPROFILER_MEMCHECK_PRELOAD_ENV}")
-
-if(PRELOAD_ENV)
-    set(PRELOAD_ARGS --suppress-marker-preload --preload ${PRELOAD_ENV})
+if(ROCPROFILER_MEMCHECK_PRELOAD_ENV_VALUE)
+    set(PRELOAD_ARGS --suppress-marker-preload --preload
+                     ${ROCPROFILER_MEMCHECK_PRELOAD_ENV_VALUE})
 else()
     set(PRELOAD_ARGS)
 endif()
@@ -29,7 +28,6 @@ foreach(_OUTPUT_FORMAT csv json pftrace otf2)
         DEPENDS hip-in-libraries
         TIMEOUT 120
         LABELS "integration-tests"
-        PRELOAD "${PRELOAD_ENV}"
         FIXTURES_SETUP rocprofv3-test-trace-hip-in-libraries)
 endforeach()
 

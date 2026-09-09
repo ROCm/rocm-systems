@@ -51,7 +51,6 @@ rocprofiler_add_integration_execute_test(
     TIMEOUT 90
     LABELS "attachment" "att"
     DISABLED ${IS_DISABLED}
-    PRELOAD "${ROCPROFILER_MEMCHECK_PRELOAD_ENV_VALUE}"
     ENVIRONMENT "${attachment-env}"
     FAIL_REGULAR_EXPRESSION
         "ERROR|FATAL|Skipping output generation|${ROCPROFILER_DEFAULT_FAIL_REGEX}"

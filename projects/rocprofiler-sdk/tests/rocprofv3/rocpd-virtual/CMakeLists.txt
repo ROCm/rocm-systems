@@ -55,7 +55,6 @@ rocprofiler_add_integration_execute_test(
     DEPENDS rocprofiler-sdk::rocprofv3
     TIMEOUT 120
     LABELS "integration-tests;rocpd"
-    PRELOAD "${ROCPROFILER_MEMCHECK_PRELOAD_ENV_VALUE}"
     ENVIRONMENT "${rocprofv3-rocpd-virtual-env}"
     FIXTURES_SETUP rocprofv3-test-rocpd-virtual-csv-generation
     FIXTURES_REQUIRED rocprofv3-test-rocpd-virtual)

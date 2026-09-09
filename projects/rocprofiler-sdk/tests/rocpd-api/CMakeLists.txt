@@ -29,7 +29,6 @@ rocprofiler_add_integration_execute_test(
     DEPENDS rocpd-api-test
     TIMEOUT 45
     LABELS "integration-tests;rocpd"
-    PRELOAD "${ROCPROFILER_MEMCHECK_PRELOAD_ENV_VALUE}"
     ENVIRONMENT "${rocpd-api-env}")
 
 ################################################################################
@@ -42,7 +41,6 @@ rocprofiler_add_integration_execute_test(
     DEPENDS rocprofiler-sdk::rocprofv3
     TIMEOUT 10
     LABELS "integration-tests;rocpd"
-    PRELOAD "${ROCPROFILER_MEMCHECK_PRELOAD_ENV_VALUE}"
     ENVIRONMENT "${rocpd-api-env}"
     FIXTURES_SETUP rocpd-api-python-interface)
 

@@ -57,14 +57,6 @@ target_sources(kernel-replay-local-context-testapp PRIVATE main.cpp)
 target_link_libraries(kernel-replay-local-context-testapp
                       PRIVATE rocprofiler-sdk::tests-build-flags)
 
-if(ROCPROFILER_MEMCHECK_PRELOAD_ENV_VALUE)
-    set(PRELOAD_ENV
-        "${ROCPROFILER_MEMCHECK_PRELOAD_ENV_VALUE}:$<TARGET_FILE:kernel-replay-local-context-client>"
-        )
-else()
-    set(PRELOAD_ENV "$<TARGET_FILE:kernel-replay-local-context-client>")
-endif()
-
 include(rocprofiler-sdk-utilities)
 rocprofiler_sdk_spm_disabled(IS_SPM_DISABLED)
 rocprofiler_sdk_pc_sampling_disabled(IS_PC_SAMPLING_DISABLED)
@@ -81,7 +73,7 @@ function(add_kr_lc_test NAME)
         DEPENDS kernel-replay-local-context-client
         TIMEOUT 120
         LABELS "integration-tests;kernel-replay"
-        PRELOAD "${PRELOAD_ENV}"
+        PRELOAD "$<TARGET_FILE:kernel-replay-local-context-client>"
         ENVIRONMENT ${arg_ENVIRONMENT} ${_disabled}
         PASS_REGULAR_EXPRESSION "\\[lc\\] PASS"
         FAIL_REGULAR_EXPRESSION "\\[lc\\] FAIL|${ROCPROFILER_DEFAULT_FAIL_REGEX}"

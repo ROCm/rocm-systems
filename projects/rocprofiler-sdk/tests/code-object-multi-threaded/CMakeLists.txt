@@ -13,14 +13,6 @@ target_sources(code-object-multithread-client PRIVATE client.cpp)
 target_link_libraries(code-object-multithread-client
                       PRIVATE rocprofiler-sdk::rocprofiler-sdk)
 
-if(ROCPROFILER_MEMCHECK_PRELOAD_ENV_VALUE)
-    set(PRELOAD_ENV
-        "${ROCPROFILER_MEMCHECK_PRELOAD_ENV_VALUE}:$<TARGET_FILE:code-object-multithread-client>"
-        )
-else()
-    set(PRELOAD_ENV "$<TARGET_FILE:code-object-multithread-client>")
-endif()
-
 # Register the test with CTest
 rocprofiler_add_integration_execute_test(
     test-code-object-multithread
@@ -28,7 +20,7 @@ rocprofiler_add_integration_execute_test(
     DEPENDS code-object-multithread-client
     TIMEOUT 120
     LABELS "integration-tests"
-    PRELOAD "${PRELOAD_ENV}"
+    PRELOAD "$<TARGET_FILE:code-object-multithread-client>"
     ENVIRONMENT
         "LD_LIBRARY_PATH=$<TARGET_FILE_DIR:rocprofiler-sdk::rocprofiler-sdk-shared-library>:$ENV{LD_LIBRARY_PATH}"
     PASS_REGULAR_EXPRESSION
