@@ -22,31 +22,17 @@ namespace amd_smi
 {
 namespace
 {
-std::string
-get_setting_name(std::string_view input)
-{
-    constexpr auto prefix = std::string_view{ "rocprofsys_" };
-
-    auto result = utility::string::to_lower(input);
-
-    if(result.starts_with(prefix))
-    {
-        return result.substr(prefix.size());
-    }
-
-    return result;
-}
-
 #define ROCPROFSYS_CONFIG_SETTING(TYPE, ENV_NAME, DESCRIPTION, INITIAL_VALUE, ...)       \
     [&]() {                                                                              \
         auto _ret = _config->insert<TYPE, TYPE>(                                         \
-            ENV_NAME, get_setting_name(ENV_NAME), DESCRIPTION, TYPE{ INITIAL_VALUE },    \
+            ENV_NAME, utility::string::strip_rocprofsys_prefix(ENV_NAME), DESCRIPTION,   \
+            TYPE{ INITIAL_VALUE },                                                       \
             std::set<std::string>{ "custom", "rocprofsys", "librocprof-sys",             \
                                    __VA_ARGS__ });                                       \
         if(!_ret.second)                                                                 \
         {                                                                                \
-            LOG_WARNING("Duplicate setting: {} / {}", get_setting_name(ENV_NAME),        \
-                        ENV_NAME);                                                       \
+            LOG_WARNING("Duplicate setting: {} / {}",                                    \
+                        utility::string::strip_rocprofsys_prefix(ENV_NAME), ENV_NAME);   \
         }                                                                                \
         return _config->find(ENV_NAME)->second;                                          \
     }()

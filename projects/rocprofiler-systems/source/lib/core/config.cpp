@@ -108,15 +108,6 @@ get_config()
     return settings::shared_instance();
 }
 
-std::string
-get_setting_name(std::string _v)
-{
-    constexpr auto _prefix = std::string_view{ "rocprofsys_" };
-    _v                     = utility::string::to_lower(_v);
-    if(_v.starts_with(_prefix)) return _v.substr(_prefix.length());
-    return _v;
-}
-
 template <typename Tp>
 Tp
 get_available_categories()
@@ -382,52 +373,55 @@ install_strict_config_value_callbacks(const std::shared_ptr<settings>& _config)
 
 // Accepts either a `const char*` literal or `std::string_view` (e.g. env_vars::FOO)
 // for ENV_NAME -- std::string{} can be constructed from either.
-#define ROCPROFSYS_CONFIG_SETTING(TYPE, ENV_NAME, DESCRIPTION, INITIAL_VALUE, ...)           \
-    [&]() {                                                                                  \
-        auto _env_name = std::string{ ENV_NAME };                                            \
-        auto _ret      = _config->insert<TYPE, TYPE>(                                        \
-            _env_name, get_setting_name(_env_name), DESCRIPTION, TYPE{ INITIAL_VALUE }, \
-            std::set<std::string>{ "custom", "rocprofsys", "librocprof-sys",            \
-                                        __VA_ARGS__ });                                      \
-        if(!_ret.second)                                                                     \
-        {                                                                                    \
-            LOG_WARNING("Duplicate setting: {} / {}", get_setting_name(_env_name),           \
-                        _env_name);                                                          \
-        }                                                                                    \
-        return _config->find(_env_name)->second;                                             \
+#define ROCPROFSYS_CONFIG_SETTING(TYPE, ENV_NAME, DESCRIPTION, INITIAL_VALUE, ...)            \
+    [&]() {                                                                                   \
+        auto _env_name = std::string{ ENV_NAME };                                             \
+        auto _ret      = _config->insert<TYPE, TYPE>(                                         \
+            _env_name, utility::string::strip_rocprofsys_prefix(_env_name), DESCRIPTION, \
+            TYPE{ INITIAL_VALUE },                                                       \
+            std::set<std::string>{ "custom", "rocprofsys", "librocprof-sys",             \
+                                        __VA_ARGS__ });                                       \
+        if(!_ret.second)                                                                      \
+        {                                                                                     \
+            LOG_WARNING("Duplicate setting: {} / {}",                                         \
+                        utility::string::strip_rocprofsys_prefix(_env_name), _env_name);      \
+        }                                                                                     \
+        return _config->find(_env_name)->second;                                              \
     }()
 
 // below does not include "librocprof-sys"
-#define ROCPROFSYS_CONFIG_EXT_SETTING(TYPE, ENV_NAME, DESCRIPTION, INITIAL_VALUE, ...)       \
-    [&]() {                                                                                  \
-        auto _env_name = std::string{ ENV_NAME };                                            \
-        auto _ret      = _config->insert<TYPE, TYPE>(                                        \
-            _env_name, get_setting_name(_env_name), DESCRIPTION, TYPE{ INITIAL_VALUE }, \
-            std::set<std::string>{ "custom", "rocprofsys", __VA_ARGS__ });              \
-        if(!_ret.second)                                                                     \
-        {                                                                                    \
-            LOG_WARNING("Duplicate setting: {} / {}", get_setting_name(_env_name),           \
-                        _env_name);                                                          \
-        }                                                                                    \
-        return _config->find(_env_name)->second;                                             \
+#define ROCPROFSYS_CONFIG_EXT_SETTING(TYPE, ENV_NAME, DESCRIPTION, INITIAL_VALUE, ...)        \
+    [&]() {                                                                                   \
+        auto _env_name = std::string{ ENV_NAME };                                             \
+        auto _ret      = _config->insert<TYPE, TYPE>(                                         \
+            _env_name, utility::string::strip_rocprofsys_prefix(_env_name), DESCRIPTION, \
+            TYPE{ INITIAL_VALUE },                                                       \
+            std::set<std::string>{ "custom", "rocprofsys", __VA_ARGS__ });               \
+        if(!_ret.second)                                                                      \
+        {                                                                                     \
+            LOG_WARNING("Duplicate setting: {} / {}",                                         \
+                        utility::string::strip_rocprofsys_prefix(_env_name), _env_name);      \
+        }                                                                                     \
+        return _config->find(_env_name)->second;                                              \
     }()
 
 // setting + command line option
-#define ROCPROFSYS_CONFIG_CL_SETTING(TYPE, ENV_NAME, DESCRIPTION, INITIAL_VALUE,             \
-                                     CMD_LINE, ...)                                          \
-    [&]() {                                                                                  \
-        auto _env_name = std::string{ ENV_NAME };                                            \
-        auto _ret      = _config->insert<TYPE, TYPE>(                                        \
-            _env_name, get_setting_name(_env_name), DESCRIPTION, TYPE{ INITIAL_VALUE }, \
-            std::set<std::string>{ "custom", "rocprofsys", "librocprof-sys",            \
-                                        __VA_ARGS__ },                                       \
-            std::vector<std::string>{ CMD_LINE });                                      \
-        if(!_ret.second)                                                                     \
-        {                                                                                    \
-            LOG_WARNING("Duplicate setting: {} / {}", get_setting_name(_env_name),           \
-                        _env_name);                                                          \
-        }                                                                                    \
-        return _config->find(_env_name)->second;                                             \
+#define ROCPROFSYS_CONFIG_CL_SETTING(TYPE, ENV_NAME, DESCRIPTION, INITIAL_VALUE,              \
+                                     CMD_LINE, ...)                                           \
+    [&]() {                                                                                   \
+        auto _env_name = std::string{ ENV_NAME };                                             \
+        auto _ret      = _config->insert<TYPE, TYPE>(                                         \
+            _env_name, utility::string::strip_rocprofsys_prefix(_env_name), DESCRIPTION, \
+            TYPE{ INITIAL_VALUE },                                                       \
+            std::set<std::string>{ "custom", "rocprofsys", "librocprof-sys",             \
+                                        __VA_ARGS__ },                                        \
+            std::vector<std::string>{ CMD_LINE });                                       \
+        if(!_ret.second)                                                                      \
+        {                                                                                     \
+            LOG_WARNING("Duplicate setting: {} / {}",                                         \
+                        utility::string::strip_rocprofsys_prefix(_env_name), _env_name);      \
+        }                                                                                     \
+        return _config->find(_env_name)->second;                                              \
     }()
 }  // namespace
 

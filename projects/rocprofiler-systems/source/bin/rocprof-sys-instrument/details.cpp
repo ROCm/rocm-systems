@@ -101,7 +101,6 @@ get_name(module_t* _module)
     if(itr == _v.end())
     {
         std::array<char, k_funcnamelen + 1> name{};
-        memset(name.data(), '\0', name.size());
 
         if(_module)
         {
