@@ -68,19 +68,16 @@ The SDK's kernel replay service provides the mechanism this design relies on.
 #### Per-pass context control
 
 The SDK supplies `replay_start_context` and `replay_stop_context` on the `PASS` record. The tool
-calls them to position one of its own contexts for the remainder of the replay loop.
+calls them to toggle one of its own contexts for the remainder of the replay loop.
 
-| Rule | Consequence for this design |
-| --- | --- |
-| Callable only during `PASS` `PHASE_ENTER`. | Every toggle is placed at a named pass boundary. |
-| Sticky across passes. | A context is positioned once, not re-issued every pass. |
-| Loop-scoped. Pre-replay state is restored when the loop ends, and global context state is never modified. | The tool never undoes its own toggles. |
-| A local enable only undoes a prior local disable; it cannot promote a globally inactive context. | Every context must already be globally started before the first dispatch. |
-| Kernel dispatch tracing honours a local stop only. Dispatch counter collection consults the override on every dispatch. | Tracing is suppressed by stopping it and leaving it stopped. |
-| Exactly one context may configure a `KERNEL_REPLAY` service. A second returns `ROCPROFILER_STATUS_ERROR_SERVICE_ALREADY_CONFIGURED`. | Only the native tool configures the service. |
+| Rule |
+| --- |
+| Callable only during `PASS` `PHASE_ENTER`. | 
+| Sticky across passes. | 
+| Loop-scoped. Pre-replay state is restored when the loop ends, and global context state is never modified. |
+| A local enable only undoes a prior local disable; it cannot promote a globally inactive context. |
+| Exactly one context may configure a `KERNEL_REPLAY` service. A second returns `ROCPROFILER_STATUS_ERROR_SERVICE_ALREADY_CONFIGURED`. |
 
-PC sampling is the one exception to the table above: it is agent-wide, so it ignores these overrides
-entirely. The design depends on that being fixed — see [Prerequisites](#prerequisites).
 
 ```mermaid
 sequenceDiagram
