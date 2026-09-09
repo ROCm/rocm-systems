@@ -522,7 +522,7 @@ Roofline visualization options (available only in analyze mode):
 * ``--sort``: Overlay top kernels or top dispatches (default: kernels)
 * ``--mem-level``: Filter by memory level -- HBM, L2, vL1D, L0, LDS (default: ALL)
 * ``--roofline-data-type``: Choose datatypes for roofline visualization (default: FP32)
-   * CLI only supports visualizing one precision at a time. Visualizing multiple data types on one plot is available in the Interactive Roofline HTML file. 
+   * CLI only supports visualizing one precision at a time. Visualizing multiple data types on one plot is available in the Interactive Roofline HTML file.
 
 Example with multiple ``--mem-level`` and ``--roofline-data-type`` options:
 
