@@ -20,7 +20,7 @@ steady::now() const noexcept
 bool
 steady::sleep_until(clock_time_point deadline)
 {
-    const auto _thread_state_guard = state::thread::scoped(state::thread::Internal);
+    const auto thread_state_guard = state::thread::scoped(state::thread::Internal);
     std::unique_lock<std::mutex> clk_lcoks{ m_mutex };
     // wait_until's predicate-form returns the predicate value at wakeup:
     //   true  -> interrupted (predicate satisfied before timeout)
@@ -31,7 +31,7 @@ steady::sleep_until(clock_time_point deadline)
 void
 steady::interrupt()
 {
-    const auto _thread_state_guard = state::thread::scoped(state::thread::Internal);
+    const auto thread_state_guard = state::thread::scoped(state::thread::Internal);
     {
         const std::scoped_lock clk_lcoks{ m_mutex };
         m_interrupted = true;

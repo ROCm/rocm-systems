@@ -121,8 +121,8 @@ auto               _timemory_settings = tim::settings::shared_instance();
 std::shared_ptr<control::session>&
 get_control_session()
 {
-    static auto instance = std::make_shared<control::session>();
-    return instance;
+    static auto s_instance = std::make_shared<control::session>();
+    return s_instance;
 }
 
 void
