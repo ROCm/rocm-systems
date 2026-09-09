@@ -365,7 +365,7 @@ producer_loop(
                 do_sleep = false;
                 ROCP_FATAL_IF(status->size > buffer_size)
                     << "GPU buffer overflow: " << status->size << " vs " << buffer_size;
-                buffers_requiring_swap.emplace_back(std::move(*status));
+                buffers_requiring_swap.emplace_back(*status);
             }
         }
 
