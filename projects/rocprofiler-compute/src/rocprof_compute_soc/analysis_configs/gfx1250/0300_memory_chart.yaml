@@ -110,7 +110,7 @@ Panel Config:
           value: SUM(TX_VMW_VEC32_REQ_ATOMIC_sum) / SUM($denom)
           unit: (Requests + $normUnit)
         GL0 Hit Rate:
-          value: 100 * SUM(1 - TX_VMW_REQ_MISS_sum) / SUM(TX_VMW_REQ_sum)
+          value: ROUND(SUM(TX_VMW_REQ_sum - TX_VMW_REQ_MISS_sum) / SUM(TX_VMW_REQ_sum) * 100, 0)
           unit: Percent
 
   - metric_table:
