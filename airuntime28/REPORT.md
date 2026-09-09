@@ -108,6 +108,7 @@ source, fan-out, repeated overwrite, staging reuse, concurrent copies, the narro
 at half, all, and 2.7x of GL2. Twenty-seven cases, **none where the hint is significantly
 worse**; most adverse +1.19%. The least sensitive case could not have caught a regression under
 6.1 pp, but the ones that matter most resolve to ~0.5 pp and show under 0.3% either way.
+
 ## Risks and limits
 
 - **Absolute copy times in the 16-48 MiB band are not a smooth function of size.** They sit on
