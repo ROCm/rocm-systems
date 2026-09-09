@@ -16,6 +16,7 @@
 #include "rocjitsu/isa/arch/amdgpu/shared/accvgpr_layout.h"
 #include "rocjitsu/kmd/linux/amdgpu_properties.h"
 #include "rocjitsu/kmd/linux/rpc.h"
+#include "rocjitsu/vm/amdgpu/register_access.h"
 #include "rocjitsu/vm/rj_vm.h"
 #include "rocjitsu/vm/rj_vm_impl.h"
 #include "rocjitsu/vm/soc.h"
@@ -58,6 +59,71 @@ test::ScopedTempFile write_temp_config(std::string_view json) {
 std::vector<uint8_t> read_binary_file(const std::string &path) {
   std::ifstream stream(path, std::ios::binary);
   return {std::istreambuf_iterator<char>(stream), std::istreambuf_iterator<char>()};
+}
+
+std::string register_allocation_test_config(std::string_view arch = "rdna4",
+                                            uint32_t vgprs_per_wf = 256,
+                                            uint32_t num_wf_slots = 1) {
+  return std::string(R"json({"max_ticks":1,"num_threads":1,"vm":{"arch":")json") +
+         std::string(arch) + R"("},
+            "topology":{"root":{"name":"soc","type":"soc","children":[
+              {"name":"vram","type":"gpu_memory"},
+              {"name":"xcd0","type":"xcd","children":[
+                {"name":"l2","type":"l2_cache"},
+                {"name":"cp","type":"command_processor"},
+                {"name":"se0","type":"shader_engine","children":[
+                  {"name":"cu0","type":"compute_unit","config":[
+                    {"key":"num_wf_slots","value":")" +
+         std::to_string(num_wf_slots) + R"("},
+                    {"key":"sgprs_per_wf","value":"112"},
+                    {"key":"vgprs_per_wf","value":")" +
+         std::to_string(vgprs_per_wf) + R"("},
+                    {"key":"lds_size_kb","value":"64"}
+                  ]}
+                ]}
+              ]}
+            ]},"links":[]}})";
+}
+
+TEST(ConfigLoaderTest, VgprAccessOutsideDescriptorAllocationFailsPublicRunner) {
+  rj_vm_t *vm = nullptr;
+  const std::string config_json = register_allocation_test_config();
+  ASSERT_EQ(rj_vm_create_from_string(config_json.c_str(), RJ_VM_MODE_DEFAULT, &vm),
+            ROCJITSU_STATUS_SUCCESS);
+  ASSERT_NE(vm, nullptr);
+  auto *cu = vm->soc->xcd(0)->shader_engine(0)->compute_unit(0);
+  ASSERT_NE(cu, nullptr);
+  auto *wave = cu->dispatch_wf(/*wg_id=*/0, /*pc=*/0, /*num_sgprs=*/16, /*num_vgprs=*/8);
+  ASSERT_NE(wave, nullptr);
+
+  // Mirrors the motivating gfx1201 failure: instrumentation uses v24 while
+  // the descriptor only reserves v0:v7. Simulator backing storage must not
+  // make the invalid access appear legal.
+  const uint32_t undeclared_v24 = wave->vgpr_alloc().base + 24;
+  EXPECT_EQ(amdgpu::RegisterAccess(*wave).read_vgpr(undeclared_v24, /*lane=*/0), 0u);
+  EXPECT_EQ(cu->register_allocation_violation_count(), 1u);
+  EXPECT_EQ(rj_vm_run(vm, nullptr), ROCJITSU_STATUS_ERROR);
+  rj_vm_destroy(vm);
+}
+
+TEST(ConfigLoaderTest, OrdinaryVgprLimitDoesNotRejectAccVgprBank) {
+  rj_vm_t *vm = nullptr;
+  const std::string config_json = register_allocation_test_config("cdna4", 512);
+  ASSERT_EQ(rj_vm_create_from_string(config_json.c_str(), RJ_VM_MODE_DEFAULT, &vm),
+            ROCJITSU_STATUS_SUCCESS);
+  ASSERT_NE(vm, nullptr);
+  auto *cu = vm->soc->xcd(0)->shader_engine(0)->compute_unit(0);
+  ASSERT_NE(cu, nullptr);
+  auto *wave = cu->dispatch_wf(/*wg_id=*/0, /*pc=*/0, /*num_sgprs=*/16, /*num_vgprs=*/8);
+  ASSERT_NE(wave, nullptr);
+
+  const uint32_t acc0 = wave->vgpr_alloc().base + amdgpu::ACC_VGPR_OFFSET;
+  EXPECT_EQ(amdgpu::RegisterAccess(*wave).read_vgpr(acc0, /*lane=*/0), 0u);
+  EXPECT_EQ(cu->register_allocation_violation_count(), 0u);
+
+  rj_vm_request_exit(vm, "AccVGPR address-space test complete");
+  EXPECT_EQ(rj_vm_run(vm, nullptr), ROCJITSU_STATUS_SUCCESS);
+  rj_vm_destroy(vm);
 }
 
 TEST(ConfigLoaderTest, LoadCdna2Config) {
@@ -1293,6 +1359,54 @@ TEST(CheckpointTest, SaveAndRestoreMemory) {
   EXPECT_EQ(restored.exec_mode, simdojo::ExecMode::CLOCKED);
   EXPECT_EQ(restored.soc()->exec_mode(), simdojo::ExecMode::CLOCKED);
   EXPECT_TRUE(restored.soc()->xcd(0)->command_processor()->packed_tid());
+}
+
+TEST(CheckpointTest, PreservesStrictVgprAllocationAndPhysicalOccupancy) {
+  constexpr uint32_t kWaveCount = 12;
+  constexpr uint32_t kAllocatedVgprs = 8;
+  auto loaded = config::load_config_from_string(
+      register_allocation_test_config("rdna4", /*vgprs_per_wf=*/256, kWaveCount),
+      rocjitsu::kEmbeddedSchema);
+  auto *cu = loaded.soc()->xcd(0)->shader_engine(0)->compute_unit(0);
+  ASSERT_NE(cu, nullptr);
+
+  // Twelve eight-VGPR waves fit. Restoring each as the 256-VGPR backing-block
+  // size would overcharge RDNA4's physical VRF and fail after ten waves.
+  for (uint32_t i = 0; i < kWaveCount; ++i) {
+    ASSERT_NE(cu->dispatch_wf(/*wg_id=*/i, /*pc=*/0x1000, /*num_sgprs=*/16, kAllocatedVgprs,
+                              /*wave_size=*/32),
+              nullptr);
+  }
+
+  test::ScopedTempFile checkpoint("rocjitsu-vgpr-allocation-checkpoint-");
+  config::save_checkpoint(checkpoint.path(), *loaded.soc(), 42, loaded.engine_config);
+
+  const auto checkpoint_bytes = read_binary_file(checkpoint.path());
+  flatbuffers::Verifier verifier(checkpoint_bytes.data(), checkpoint_bytes.size());
+  ASSERT_TRUE(fb::VerifySimulationCheckpointBuffer(verifier));
+  const auto *saved = fb::GetSimulationCheckpoint(checkpoint_bytes.data());
+  const auto *saved_waves = saved->compute_units()->Get(0)->wavefronts();
+  ASSERT_EQ(saved_waves->size(), kWaveCount);
+  for (const auto *wave : *saved_waves) {
+    EXPECT_TRUE(wave->has_vgpr_allocation());
+    EXPECT_EQ(wave->vgpr_allocation_count(), kAllocatedVgprs);
+    EXPECT_EQ(wave->ordinary_vgpr_count(), kAllocatedVgprs);
+    EXPECT_EQ(wave->accvgpr_count(), 0u);
+  }
+
+  auto restored = config::restore_checkpoint(checkpoint.path());
+  auto *restored_cu = restored.soc()->xcd(0)->shader_engine(0)->compute_unit(0);
+  ASSERT_NE(restored_cu, nullptr);
+  ASSERT_EQ(restored_cu->num_wfs(), kWaveCount);
+  auto *restored_wave = restored_cu->wf(0);
+  ASSERT_NE(restored_wave, nullptr);
+  EXPECT_EQ(restored_wave->num_vgprs(), kAllocatedVgprs);
+  EXPECT_EQ(restored_wave->num_ordinary_vgprs(), kAllocatedVgprs);
+  EXPECT_EQ(restored_wave->num_accvgprs(), 0u);
+
+  const uint32_t undeclared_v24 = restored_wave->vgpr_alloc().base + 24;
+  EXPECT_EQ(amdgpu::RegisterAccess(*restored_wave).read_vgpr(undeclared_v24, /*lane=*/0), 0u);
+  EXPECT_EQ(restored_cu->register_allocation_violation_count(), 1u);
 }
 
 TEST(CheckpointTest, SaveAndRestoreAccVgprs) {

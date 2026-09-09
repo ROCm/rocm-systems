@@ -8,6 +8,7 @@
 #define ROCJITSU_VM_AMDGPU_COMPUTE_UNIT_H_
 
 #include "rocjitsu/base/api.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/shared/isa_properties.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/accvgpr_layout.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
@@ -20,6 +21,7 @@
 #include "rocjitsu/vm/amdgpu/lds.h"
 #include "rocjitsu/vm/amdgpu/memory_pipeline.h"
 #include "rocjitsu/vm/amdgpu/mtype.h"
+#include "rocjitsu/vm/amdgpu/physical_register_resources.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
 #include "rocjitsu/vm/amdgpu/wf_scheduler.h"
 #include "rocjitsu/vm/amdgpu/workgroup_key.h"
@@ -134,11 +136,19 @@ public:
   Wavefront *dispatch_wf(uint32_t wg_id, uint64_t pc, uint32_t num_sgprs, uint32_t num_vgprs,
                          uint32_t wave_size = 0);
 
+  /// @brief Activate a wave with an explicit ordinary/accumulator VGPR split.
+  Wavefront *dispatch_wf(uint32_t wg_id, uint64_t pc, uint32_t num_sgprs, WaveVgprAllocation vgprs,
+                         uint32_t wave_size = 0);
+
   /// @brief Activate a specific idle wavefront slot.
   /// @details Used by checkpoint restoration when hardware slot identity is
   /// execution state. Returns nullptr when the requested slot is invalid or busy.
   Wavefront *dispatch_wf_at(uint32_t wf_id, uint32_t wg_id, uint64_t pc, uint32_t num_sgprs,
                             uint32_t num_vgprs, uint32_t wave_size = 0);
+
+  /// @brief Activate a specific slot with an explicit VGPR allocation split.
+  Wavefront *dispatch_wf_at(uint32_t wf_id, uint32_t wg_id, uint64_t pc, uint32_t num_sgprs,
+                            WaveVgprAllocation vgprs, uint32_t wave_size = 0);
 
   /// @brief Advance every RUNNING wavefront by one instruction, then report
   /// residency.
@@ -164,13 +174,17 @@ public:
 
   /// @brief Check whether this CU can accept an entire workgroup.
   ///
-  /// @details Queries the number of free wavefront slots and register file
-  /// blocks without modifying any state. The command processor calls this
+  /// @details Queries free wavefront slots, physical SIMD VRF/SRF capacity,
+  /// and LDS without modifying any state. The command processor calls this
   /// before dispatching to guarantee all-or-nothing workgroup placement.
   /// @param num_wfs Number of wavefronts in the workgroup.
+  /// @param num_sgprs Descriptor-derived SGPR allocation per wavefront.
+  /// @param num_vgprs Descriptor-derived VGPR allocation per wavefront.
+  /// @param wave_size Architectural wavefront width, or zero for the ISA default.
   /// @param lds_bytes LDS bytes required by the workgroup.
   /// @returns true if the CU has enough free slots, registers, and LDS.
-  bool can_accept_workgroup(uint32_t num_wfs, uint32_t lds_bytes = 0) const;
+  bool can_accept_workgroup(uint32_t num_wfs, uint32_t num_sgprs, uint32_t num_vgprs,
+                            uint32_t wave_size, uint32_t lds_bytes = 0) const;
 
   /// @brief Execute up to kFunctionalQuantum instructions, then yield.
   virtual bool execute_quantum() = 0;
@@ -548,6 +562,11 @@ public:
   /// @brief Return the physical SGPR allocation block size per wavefront.
   uint32_t sgpr_allocation_block_size() const { return config_.sgprs_per_wf; }
 
+  /// @brief Number of descriptor-allocation violations observed by this CU.
+  [[nodiscard]] uint64_t register_allocation_violation_count() const {
+    return register_allocation_violation_count_.load(std::memory_order_relaxed);
+  }
+
   /// @brief Test whether a physical SGPR range is contained in a wavefront's
   /// fixed simulator storage block.
   /// @details This is an isolation boundary, not the descriptor-derived
@@ -559,15 +578,45 @@ public:
                physical_base, physical_count);
   }
 
-  /// @brief Test whether a physical VGPR range is contained in a wavefront's
-  /// fixed simulator storage block.
-  /// @details This is an isolation boundary, not the descriptor-derived
-  /// architectural allocation extent recorded in `wf.vgpr_alloc().count`.
+  /// @brief Test whether a wavefront may access a physical VGPR range.
+  /// @details Enforces both the fixed simulator storage block and the
+  /// descriptor-derived ordinary-VGPR extent. Access beyond the descriptor
+  /// allocation is invalid hardware behavior and terminates the simulation.
   [[nodiscard]] bool owns_vgpr_range(const Wavefront &wf, uint32_t physical_base,
                                      uint32_t physical_count) const {
-    return &wf.raw_cu() == this && wf.vgpr_alloc().count != 0 &&
-           RegAllocation{wf.vgpr_alloc().base, vgpr_allocation_block_size()}.contains(
-               physical_base, physical_count);
+    if (&wf.raw_cu() != this || wf.vgpr_alloc().count == 0 || physical_count == 0)
+      return false;
+    const bool owns_storage =
+        RegAllocation{wf.vgpr_alloc().base, vgpr_allocation_block_size()}.contains(physical_base,
+                                                                                   physical_count);
+    if (!owns_storage || physical_base < wf.vgpr_alloc().base)
+      return false;
+
+    const uint32_t relative_base = physical_base - wf.vgpr_alloc().base;
+    const uint32_t ordinary_limit = isa_properties(arch()).max_addressable_vgprs_per_wf;
+    if (relative_base < ordinary_limit) {
+      const bool owns_ordinary = relative_base < wf.num_ordinary_vgprs() &&
+                                 physical_count <= wf.num_ordinary_vgprs() - relative_base;
+      if (owns_ordinary)
+        return owns_storage;
+      report_vgpr_allocation_violation(wf, relative_base, physical_count, false);
+      return false;
+    }
+
+    if (relative_base >= ACC_VGPR_OFFSET) {
+      const uint32_t acc_base = relative_base - ACC_VGPR_OFFSET;
+      const bool owns_accumulator =
+          acc_base < wf.num_accvgprs() && physical_count <= wf.num_accvgprs() - acc_base;
+      if (owns_accumulator)
+        return owns_storage;
+      report_vgpr_allocation_violation(wf, acc_base, physical_count, true);
+      return false;
+    }
+
+    if (owns_storage)
+      return owns_storage;
+
+    return false;
   }
 
 private:
@@ -885,6 +934,11 @@ protected:
   /// @brief Count the number of free VGPR allocation blocks.
   virtual uint32_t free_vgpr_blocks() const = 0;
 
+  /// @brief Reserve/release physical SIMD register-file capacity for a wave slot.
+  bool reserve_physical_registers(uint32_t wf_id, uint32_t num_sgprs, uint32_t num_vgprs,
+                                  uint32_t wave_size);
+  void release_physical_registers(uint32_t wf_id);
+
   using RawVgprVisitor = void (*)(const void *, std::span<const uint32_t>);
   virtual void for_each_raw_vgpr_impl(uint32_t base, uint32_t count, const void *context,
                                       RawVgprVisitor visitor) const = 0;
@@ -929,6 +983,24 @@ protected:
   std::unique_ptr<Decoder> decoder_;
   simdojo::RegisterFile<uint32_t> sgpr_file_{"sgpr"};
   std::vector<std::unique_ptr<Wavefront>> wfs_; ///< Pre-allocated wavefront slots.
+  struct SimdRegisterUsage {
+    uint32_t resident_waves = 0;
+    uint32_t sgprs = 0;
+    uint32_t vgprs = 0;
+  };
+  struct WaveRegisterReservation {
+    uint32_t simd = UINT32_MAX;
+    uint32_t sgprs = 0;
+    uint32_t vgprs = 0;
+  };
+  PhysicalRegisterProperties physical_registers_;
+  std::vector<SimdRegisterUsage> simd_register_usage_;
+  std::vector<WaveRegisterReservation> wave_register_reservations_;
+
+  [[nodiscard]] bool place_physical_registers(std::vector<SimdRegisterUsage> &usage,
+                                              uint32_t num_sgprs, uint32_t num_vgprs,
+                                              uint32_t wave_size,
+                                              WaveRegisterReservation *reservation) const;
   /// @brief Hold the wave-state lock, then notify the CP once it is released.
   /// @details The CP takes hw_queue_mutex_ and then this lock when it dispatches
   /// (handle_doorbell -> dispatch_workgroups -> dispatch_wf), so anything running
@@ -987,6 +1059,25 @@ protected:
   Lds lds_;
   ImmediateClusterLdsMulticastEngine default_cluster_lds_multicast_engine_;
   ClusterLdsMulticastEngine *cluster_lds_multicast_engine_ = &default_cluster_lds_multicast_engine_;
+
+  void report_vgpr_allocation_violation(const Wavefront &wf, uint32_t relative_base,
+                                        uint32_t register_count, bool accumulator) const {
+    const uint64_t prior =
+        register_allocation_violation_count_.fetch_add(1, std::memory_order_relaxed);
+    if (prior != 0)
+      return;
+    util::Logger::warn("RocJitsu register allocation violation: wave accessed ",
+                       accumulator ? "accumulator VGPR range acc" : "ordinary VGPR range v",
+                       relative_base, ":", accumulator ? "acc" : "v",
+                       relative_base + register_count - 1, " outside descriptor allocation (",
+                       accumulator ? "accumulator" : "ordinary",
+                       " count=", accumulator ? wf.num_accvgprs() : wf.num_ordinary_vgprs(),
+                       ") at pc=0x", std::hex, wf.pc, std::dec, " arch=", static_cast<int>(arch()));
+    if (engine())
+      engine()->request_exit("VGPR access exceeds descriptor allocation", 1);
+  }
+
+  mutable std::atomic<uint64_t> register_allocation_violation_count_{0};
   uint32_t next_lds_alloc_ = 0; ///< Next free LDS offset for per-WG allocation.
   std::unordered_set<uint64_t> lds_pinned_clusters_;
   ScalarMemPipeline scalar_mem_pipeline_;
