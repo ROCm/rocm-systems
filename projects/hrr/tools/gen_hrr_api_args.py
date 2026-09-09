@@ -3514,6 +3514,34 @@ def main() -> None:
             print(f"  '{n}'")
         sys.exit(1)
 
+    # An API's replay class is exactly one of these sets, and
+    # generate_playback_shim() tests them in this order, so an API in two of
+    # them silently gets the earlier one's handler while the later one's is
+    # left unreachable. That is what a merge resolving a rename against an
+    # edited set literal produces when it keeps an addition but drops the
+    # matching removal, and nothing downstream notices until a replay-class
+    # test disagrees.
+    replay_classes = [
+        ("ERROR_STUB_PLAYBACK_APIS", ERROR_STUB_PLAYBACK_APIS),
+        ("UNREPLAYABLE_PLAYBACK_APIS", set(UNREPLAYABLE_PLAYBACK_APIS)),
+        ("NOOP_PLAYBACK_APIS", NOOP_PLAYBACK_APIS),
+        ("CUSTOM_PLAYBACK_BODIES", set(CUSTOM_PLAYBACK_BODIES)),
+        ("MANUAL_PLAYBACK_APIS", MANUAL_PLAYBACK_APIS),
+    ]
+    overlaps: List[str] = []
+    for i, (first_name, first_set) in enumerate(replay_classes):
+        for later_name, later_set in replay_classes[i + 1:]:
+            for n in sorted(first_set & later_set):
+                overlaps.append(f"'{n}' is in both {first_name} and "
+                                f"{later_name}; it will be replayed as "
+                                f"{first_name} and the {later_name} handler "
+                                f"is dead code")
+    if overlaps:
+        print("\nERROR: an API may name only one replay classification set:")
+        for problem in overlaps:
+            print(f"  {problem}")
+        sys.exit(1)
+
     # A Deref that names a parameter the API does not have would silently do
     # nothing, which is indistinguishable from the payload loss it is there to
     # fix. The same goes for an array whose count parameter does not exist.
