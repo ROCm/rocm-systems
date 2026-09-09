@@ -26,6 +26,7 @@ THE SOFTWARE.
 #include <map>
 #include <memory>
 #include <mutex>  // NOLINT
+#include <set>
 #include <string>
 #include <utility>
 #include <vector>
@@ -60,6 +61,10 @@ struct HealthWatchTableEntry {
   rdc_field_grp_t field_group_id;
   std::vector<RdcFieldKey> fields;  //< store fields for faster query
 };
+
+//!< Snapshot of a group's watched (gpu, field) pairs, taken once per health
+//!< check so the per-field checks need not re-take watch_mutex_.
+using HealthWatchedSet = std::set<RdcFieldKey>;
 
 class RdcWatchTableImpl : public RdcWatchTable {
  public:
@@ -128,27 +133,29 @@ class RdcWatchTableImpl : public RdcWatchTable {
   std::vector<rdc_field_t> health_component_fields(unsigned int components);
   //!< rdc_health_clear without taking health_api_mutex_; for callers that hold it.
   rdc_status_t health_clear_unlocked(rdc_gpu_group_t group_id);
-  //!< Whether (gpu, field) survived the probe at rdc_health_set for this group.
-  bool is_health_field_watched(rdc_gpu_group_t group_id, uint32_t gpu_index, rdc_field_t field);
   //!< output: Whether health incidents are full
   bool add_health_incident(uint32_t gpu_index, rdc_health_system_t component,
                            rdc_health_result_t health, uint32_t err_code, std::string err_msg,
                            rdc_health_incidents_t* incident, rdc_health_response_t* response);
-  rdc_status_t get_start_end_values(rdc_gpu_group_t group_id, uint32_t gpu_index, rdc_field_t field,
+  //!< Read a field for a health check: start from the cache history, end from
+  //!< SMI. Returns RDC_ST_NOT_FOUND without touching SMI or logging when
+  //!< (gpu, field) is not in `watched` (dropped at rdc_health_set).
+  rdc_status_t get_start_end_values(const HealthWatchedSet& watched, rdc_gpu_group_t group_id,
+                                    uint32_t gpu_index, rdc_field_t field,
                                     uint64_t start_timestamp, rdc_field_value* start_value,
                                     rdc_field_value* end_value);
-  rdc_status_t pcie_check(rdc_gpu_group_t group_id, uint32_t gpu_index,
-                          rdc_health_response_t* response);
-  rdc_status_t xgmi_check(rdc_gpu_group_t group_id, uint32_t gpu_index,
-                          rdc_health_response_t* response);
-  rdc_status_t memory_check(rdc_gpu_group_t group_id, uint32_t gpu_index,
-                            rdc_health_response_t* response);
-  rdc_status_t eeprom_check(rdc_gpu_group_t group_id, uint32_t gpu_index,
-                            rdc_health_response_t* response);
-  rdc_status_t thermal_check(rdc_gpu_group_t group_id, uint32_t gpu_index,
-                             rdc_health_response_t* response);
-  rdc_status_t power_check(rdc_gpu_group_t group_id, uint32_t gpu_index,
-                           rdc_health_response_t* response);
+  rdc_status_t pcie_check(const HealthWatchedSet& watched, rdc_gpu_group_t group_id,
+                          uint32_t gpu_index, rdc_health_response_t* response);
+  rdc_status_t xgmi_check(const HealthWatchedSet& watched, rdc_gpu_group_t group_id,
+                          uint32_t gpu_index, rdc_health_response_t* response);
+  rdc_status_t memory_check(const HealthWatchedSet& watched, rdc_gpu_group_t group_id,
+                            uint32_t gpu_index, rdc_health_response_t* response);
+  rdc_status_t eeprom_check(const HealthWatchedSet& watched, rdc_gpu_group_t group_id,
+                            uint32_t gpu_index, rdc_health_response_t* response);
+  rdc_status_t thermal_check(const HealthWatchedSet& watched, rdc_gpu_group_t group_id,
+                             uint32_t gpu_index, rdc_health_response_t* response);
+  rdc_status_t power_check(const HealthWatchedSet& watched, rdc_gpu_group_t group_id,
+                           uint32_t gpu_index, rdc_health_response_t* response);
 
   RdcGroupSettingsPtr group_settings_;
   RdcCacheManagerPtr cache_mgr_;
