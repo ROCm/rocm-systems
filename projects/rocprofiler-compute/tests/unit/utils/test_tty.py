@@ -403,20 +403,46 @@ def test_show_all_membw_analysis_panel_gate(
     monkeypatch: pytest.MonkeyPatch,
     membw_analysis: bool,
 ) -> None:
-    """Panel 3000 is rendered only when present in arch_configs."""
-    args = make_args(
+    """Panel 3000 is rendered only when its table was built."""
+    args = argparse.Namespace(
+        decimal=2,
         filter_metrics=None,
         include_cols=None,
-        membw_analysis=membw_analysis,
+        normal_unit="per_wave",
         path=[["fixture"]],
         time_unit="ns",
+        view=None,
     )
-    panel = make_membw_panel(include_panel=membw_analysis)
+    metric_dataframe = pd.DataFrame({
+        "Metric": ["EA read request fraction - HBM"],
+        "Avg": [50.0],
+        "Unit": ["Percent"],
+    })
+    table_config = {
+        "id": 3013,
+        "title": "EA Interface",
+        "header": {"metric": "Metric", "value": "Avg", "unit": "Unit"},
+    }
+    arch_configs = SimpleNamespace(
+        panel_configs={
+            3000: {
+                "id": 3000,
+                "title": "Memory Bandwidth Analysis",
+                "data source": [{"metric_table": table_config}],
+            }
+        }
+    )
+    runs = {
+        "fixture": SimpleNamespace(
+            dfs={3013: metric_dataframe} if membw_analysis else {},
+            sys_info=pd.DataFrame([{"gpu_arch": "gfx950"}]),
+        )
+    }
     actual_calls: list[str] = []
 
     def record_process_table_data(*_args, **_kwargs):
         actual_calls.append("process_table_data")
-        return panel.metric_dataframe
+        return metric_dataframe
 
     def record_format_table_output(*args, **kwargs):
         actual_calls.append("format_table_output")
@@ -428,8 +454,8 @@ def test_show_all_membw_analysis_panel_gate(
 
     show_all(
         args,
-        panel.runs,
-        panel.arch_configs,
+        runs,
+        arch_configs,
         rendered_output,
         profiling_config={"filter_blocks": []},
     )
