@@ -44,13 +44,18 @@ INVALID_BLOCK_HINT = (
 
 
 def is_gfx9(gpu_arch: Optional[str]) -> bool:
-    """Return True if gpu_arch is a gfx9 (CDNA) architecture."""
+    """Return True if gpu_arch is a gfx9xx (CDNA) architecture."""
     return bool(gpu_arch and gpu_arch.startswith("gfx9"))
 
 
 def is_gfx115x(gpu_arch: Optional[str]) -> bool:
     """Return True if gpu_arch is a gfx115x (RDNA 3.5 APU) architecture."""
     return bool(gpu_arch and gpu_arch.startswith("gfx115"))
+
+
+def is_gfx1250(gpu_arch: Optional[str]) -> bool:
+    """Return True if gpu_arch is a gfx1250 architecture."""
+    return gpu_arch == "gfx1250"
 
 
 def canonical_config_arch(gpu_arch: Optional[str]) -> Optional[str]:
