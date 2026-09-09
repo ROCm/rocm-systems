@@ -4362,21 +4362,6 @@ void Runtime::ReleaseMemoryHandle(Runtime::MemoryHandle* handle) {
   memory_handles.erase(MemoryHandle::Convert(handle));
 }
 
-Agent* Runtime::KfdGttAnchorGpu() {
-  HSAuint32 node_id = 0;
-  HSAuint32 gpu_id = 0;
-  if (HSAKMT_CALL(hsaKmtGetDefaultHostGpu)(&node_id, &gpu_id) != HSAKMT_STATUS_SUCCESS) {
-    return nullptr;
-  }
-
-  auto it = agents_by_node_.find(node_id);
-  if (it == agents_by_node_.end() || it->second.empty()) {
-    return nullptr;
-  }
-
-  return it->second[0];
-}
-
 hsa_status_t Runtime::VMemoryHandleCreate(const MemoryRegion* region, size_t size,
                                           MemoryRegion::AllocateFlags alloc_flags,
                                           uint64_t flags_unused,
@@ -4388,25 +4373,26 @@ hsa_status_t Runtime::VMemoryHandleCreate(const MemoryRegion* region, size_t siz
 
   std::lock_guard<std::shared_mutex> lock(memory_lock_);
   core::DriverMemoryHandle driver_handle = {};
+  auto agentOwner = region->owner();
 
-  hsa_status_t status = region->Allocate(size, alloc_flags, 0, &driver_handle);
+  /* CPU-owned memory has no DRM device of its own, so the GTT allocation and the DRM
+  import that follows must be done using the same GPU. Rocr chooses that GPU here and pass it
+  down instead of letting thunk fall back to the default gpu node 0 */
+  core::Agent* agent_for_drm = agentOwner;
+  core::Agent* drm_owner = nullptr;
+  uint32_t alloc_node_id = 0;
+  if (agentOwner->device_type() == core::Agent::DeviceType::kAmdCpuDevice) {
+    if (gpu_agents().empty()) return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
+    agent_for_drm = gpu_agents()[0];
+    drm_owner = agent_for_drm;
+    alloc_node_id = agent_for_drm->node_id();
+    alloc_flags |= MemoryRegion::AllocateGTTAccess;
+  }
+
+  hsa_status_t status = region->Allocate(size, alloc_flags, alloc_node_id, &driver_handle);
   if (status == HSA_STATUS_SUCCESS) {
     // TODO: Combine the Allocate and CreateShareableHandle into a single function.
     uint64_t offset;
-    auto agentOwner = region->owner();
-
-    /* CPU-owned host memory: DRM import requires a GPU agent; use libhsakmt
-     * first_gpu_mem (KFD GTT anchor). Device-owned: use owner agent. */
-    core::Agent* agent_for_drm = agentOwner;
-    core::Agent* drm_owner = nullptr;
-    if (agentOwner->device_type() == core::Agent::DeviceType::kAmdCpuDevice) {
-      agent_for_drm = core::Runtime::runtime_singleton_->KfdGttAnchorGpu();
-      if (agent_for_drm == nullptr) {
-        region->Free(driver_handle);
-        return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
-      }
-      drm_owner = agent_for_drm;
-    }
 
     // alloc_handle goes in as the allocation handle and is transformed in place into the shareable
     // memory handle. This lets the driver recover the allocation from its native id (no virtual
@@ -4611,9 +4597,9 @@ hsa_status_t Runtime::MappedHandleAllowedAgent::EnableAccess(hsa_access_permissi
     /* For imported handles, we don't have a region/owner, but we can use any GPU agent for mmap.
      * The driver_handle created during import should have the correct mmap_offset. */
     if (mappedHandle->mem_handle->imported) {
-      core::Agent* drm_agent = core::Runtime::runtime_singleton_->KfdGttAnchorGpu();
-      if (drm_agent != nullptr) {
-        agent = drm_agent;
+      const auto& gpus = core::Runtime::runtime_singleton_->gpu_agents();
+      if (!gpus.empty()) {
+        agent = gpus[0];
         agent->driver().GetDeviceFd(agent->node_id(), &mmap_fd);
       }
     } else if (mappedHandle->mem_handle->region) {
