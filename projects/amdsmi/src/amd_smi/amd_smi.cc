@@ -4942,6 +4942,41 @@ amdsmi_status_t amdsmi_get_lib_version(amdsmi_version_t* version) {
   return AMDSMI_STATUS_SUCCESS;
 }
 
+amdsmi_status_t amdsmi_get_amdgpu_dkms_version(char* version, size_t len) {
+  AMDSMI_CHECK_INIT();
+
+  if (version == nullptr || len < AMDSMI_MAX_STRING_LENGTH) {
+    return AMDSMI_STATUS_INVAL;
+  }
+
+  auto version_file = std::ifstream{"/sys/module/amdgpu/version"};
+  auto loaded_version = std::string{};
+  if (!std::getline(version_file, loaded_version)) {
+    return AMDSMI_STATUS_NOT_SUPPORTED;
+  }
+  while (!loaded_version.empty() &&
+         std::isspace(static_cast<unsigned char>(loaded_version.back())) != 0) {
+    loaded_version.pop_back();
+  }
+
+  auto packages = smi_amdgpu_dkms_packages_t{};
+  if (smi_amdgpu_get_dkms_versions(&packages) != AMDSMI_STATUS_SUCCESS) {
+    return AMDSMI_STATUS_NOT_SUPPORTED;
+  }
+
+  auto active_version = std::string{};
+  if (smi_amdgpu_get_active_dkms_version(packages, loaded_version, &active_version) !=
+      AMDSMI_STATUS_SUCCESS) {
+    return AMDSMI_STATUS_NOT_SUPPORTED;
+  }
+  if (active_version.size() >= len) {
+    return AMDSMI_STATUS_NOT_SUPPORTED;
+  }
+
+  std::memcpy(version, active_version.c_str(), active_version.size() + 1);
+  return AMDSMI_STATUS_SUCCESS;
+}
+
 amdsmi_status_t amdsmi_get_gpu_vbios_info(amdsmi_processor_handle processor_handle,
                                           amdsmi_vbios_info_t* info) {
   AMDSMI_CHECK_INIT();

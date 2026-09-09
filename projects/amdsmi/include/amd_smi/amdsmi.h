@@ -5957,6 +5957,27 @@ amdsmi_status_t amdsmi_get_gpu_fabric_info(amdsmi_processor_handle processor_han
  */
 amdsmi_status_t amdsmi_get_lib_version(amdsmi_version_t* version);
 
+/**
+ *  @brief Get the active amdgpu DKMS package version.
+ *
+ *  @ingroup tagVersionQuery
+ *
+ *  @platform{gpu_bm_linux}
+ *
+ *  @details Returns the validated DKMS PACKAGE_VERSION that exactly matches
+ *           the currently loaded amdgpu module version.
+ *
+ *  @param[out] version Caller-allocated output buffer.
+ *  @param[in] len Size of @p version in bytes. Must be at least
+ *             ::AMDSMI_MAX_STRING_LENGTH.
+ *
+ *  @retval ::AMDSMI_STATUS_SUCCESS on success.
+ *  @retval ::AMDSMI_STATUS_INVAL if @p version is null or @p len is too small.
+ *  @retval ::AMDSMI_STATUS_NOT_INIT if AMD SMI is not initialized.
+ *  @retval ::AMDSMI_STATUS_NOT_SUPPORTED if no matching DKMS package is available.
+ */
+amdsmi_status_t amdsmi_get_amdgpu_dkms_version(char* version, size_t len);
+
 /** @} End tagVersionQuery */
 
 /*****************************************************************************/

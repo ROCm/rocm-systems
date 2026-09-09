@@ -3935,6 +3935,12 @@ try:
 except AttributeError:
     pass
 try:
+    amdsmi_get_amdgpu_dkms_version = _libraries['libamd_smi.so'].amdsmi_get_amdgpu_dkms_version
+    amdsmi_get_amdgpu_dkms_version.restype = amdsmi_status_t
+    amdsmi_get_amdgpu_dkms_version.argtypes = [ctypes.POINTER(ctypes.c_char), size_t]
+except AttributeError:
+    pass
+try:
     amdsmi_get_gpu_ecc_count = _libraries['libamd_smi.so'].amdsmi_get_gpu_ecc_count
     amdsmi_get_gpu_ecc_count.restype = amdsmi_status_t
     amdsmi_get_gpu_ecc_count.argtypes = [amdsmi_processor_handle, amdsmi_gpu_block_t, ctypes.POINTER(struct_amdsmi_error_count_t)]
@@ -5364,10 +5370,10 @@ __all__ = \
     'amdsmi_freq_volt_region_t', 'amdsmi_frequencies_t',
     'amdsmi_frequency_range_t', 'amdsmi_fw_block_t',
     'amdsmi_fw_info_t', 'amdsmi_get_afids_from_cper',
-    'amdsmi_get_clk_freq', 'amdsmi_get_clock_info',
-    'amdsmi_get_cpu_affinity_with_scope', 'amdsmi_get_cpu_cc6_enable',
-    'amdsmi_get_cpu_cclk_limit', 'amdsmi_get_cpu_core_boostlimit',
-    'amdsmi_get_cpu_core_ccd_power',
+    'amdsmi_get_amdgpu_dkms_version', 'amdsmi_get_clk_freq',
+    'amdsmi_get_clock_info', 'amdsmi_get_cpu_affinity_with_scope',
+    'amdsmi_get_cpu_cc6_enable', 'amdsmi_get_cpu_cclk_limit',
+    'amdsmi_get_cpu_core_boostlimit', 'amdsmi_get_cpu_core_ccd_power',
     'amdsmi_get_cpu_core_current_freq_limit',
     'amdsmi_get_cpu_core_eff_floor_freq_limit',
     'amdsmi_get_cpu_core_energy',

@@ -8,6 +8,10 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 
 ### Added
 
+- **Added active amdgpu DKMS version reporting.**  
+  - The new host-level `amdsmi_get_amdgpu_dkms_version()` API returns the validated DKMS package version that exactly matches the loaded amdgpu module.
+  - `amd-smi version` now reports `amdgpu_dkms_version`, or `N/A` when no active matching DKMS package is available.
+
 - **Exposed `BOOT_FIRMWARE` field in `amd-smi static --ifwi` output**.  
   - The `boot_firmware` value returned by `amdsmi_get_gpu_vbios_info()` now appears under the `IFWI` section alongside `NAME`, `BUILD_DATE`, `PART_NUMBER` and `VERSION` (`--vbios` remains available as a legacy alias).
 

@@ -4590,6 +4590,12 @@ extern "C" {
     pub fn amdsmi_get_lib_version(version: *mut AmdsmiVersionT) -> AmdsmiStatusT;
 }
 extern "C" {
+    pub fn amdsmi_get_amdgpu_dkms_version(
+        version: *mut ::std::os::raw::c_char,
+        len: usize,
+    ) -> AmdsmiStatusT;
+}
+extern "C" {
     pub fn amdsmi_get_gpu_ecc_count(
         processor_handle: AmdsmiProcessorHandle,
         block: AmdsmiGpuBlockT,

@@ -4203,6 +4203,18 @@ def amdsmi_get_lib_version():
     }
 
 
+def amdsmi_get_amdgpu_dkms_version() -> str:
+    version = ctypes.create_string_buffer(AMDSMI_MAX_STRING_LENGTH)
+
+    _check_res(
+        amdsmi_wrapper.amdsmi_get_amdgpu_dkms_version(
+            version, ctypes.c_size_t(AMDSMI_MAX_STRING_LENGTH)
+        )
+    )
+
+    return version.value.decode("utf-8")
+
+
 def amdsmi_topo_get_numa_node_number(processor_handle: processor_handle_t):
     if not isinstance(processor_handle, amdsmi_wrapper.amdsmi_processor_handle):
         raise AmdSmiParameterException(processor_handle, amdsmi_wrapper.amdsmi_processor_handle)
