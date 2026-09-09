@@ -46,6 +46,7 @@
 #include "functional/gpu/xgmi/xgmi_read_write.h"
 #include "functional/ifoe/fabric/fabric_read.h"
 #include "functional/ifoe/identity/ifoe_info_read.h"
+#include "functional/ifoe/tray/tray_info_read.h"
 #include "functional/system/cross_process_serialization.h"
 #include "functional/system/hw_topology_read.h"
 #include "functional/system/init_shutdown_refcount.h"
@@ -337,6 +338,11 @@ TEST(IfoeFunctionalReadOnly, TestIfoeInfoRead) {
   if (access("/dev/dxg", F_OK) == 0)
     GTEST_SKIP() << "Skipped on WSL: iFoE NIC not available on DXG backend";
   TestIfoeInfoRead tst;
+  RunGenericTest(&tst);
+}
+
+TEST(IfoeFunctionalReadOnly, TestTrayInfoRead) {
+  TestTrayInfoRead tst;
   RunGenericTest(&tst);
 }
 

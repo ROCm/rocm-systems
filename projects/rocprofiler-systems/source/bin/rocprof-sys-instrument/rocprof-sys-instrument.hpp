@@ -12,7 +12,7 @@
 #include "log.hpp"
 #include "module_function.hpp"
 
-#include <spdlog/fmt/ranges.h>
+#include <fmt/ranges.h>
 
 #include <dlfcn.h>
 #include <string>

@@ -42,6 +42,9 @@ main(int argc, char *argv[])
             return 1;
         }
         if (pid == 0) {
+            // Launching the user-specified command is this tool's entire
+            // purpose, so argv is trusted input by design.
+            // NOLINTNEXTLINE(clang-analyzer-optin.taint.GenericTaint)
             execvp(argv[1], &argv[1]);
             std::cerr << "Failed to launch " << argv[1] << '\n';
             return 1;

@@ -72,6 +72,18 @@ inline constexpr uint8_t kWorkgroupTrapBarrierBit = 2;
 inline constexpr uint8_t kClusterBarrierBit = 3;
 inline constexpr uint8_t kClusterTrapBarrierBit = 4;
 
+struct FunctionalQuantumResult {
+  bool ran = false;
+  bool yielded = false;
+  uint64_t iterations = 0;
+
+  void merge(const FunctionalQuantumResult &other) {
+    ran |= other.ran;
+    yielded |= other.yielded;
+    iterations = std::max(iterations, other.iterations);
+  }
+};
+
 /// @brief Base AMDGPU compute unit that owns wavefront slots and register files.
 ///
 /// @details Owns the physical SGPR and VGPR register files and a fixed array of
@@ -100,11 +112,15 @@ public:
 
   /// @brief Configuration for a compute unit.
   struct Config {
-    rj_code_arch_t arch;   ///< ISA architecture (determines wave size, decoder).
+    rj_code_arch_t arch; ///< ISA architecture (determines wave size, decoder).
+    rj_code_target_id_t target = ROCJITSU_CODE_TARGET_INVALID; ///< Concrete GPU target.
     uint32_t num_wf_slots; ///< Number of hardware wavefront slots (contexts).
     uint32_t sgprs_per_wf; ///< Scalar GPRs per wavefront (allocation granularity).
     uint32_t vgprs_per_wf; ///< Vector GPRs per wavefront (allocation granularity).
     uint32_t lds_size_kb;  ///< Local Data Share size in kilobytes.
+    /// Maximum CU step() iterations per functional slice. One step can issue
+    /// one instruction for every runnable wavefront resident on the CU.
+    uint32_t functional_quantum = kFunctionalQuantum;
   };
 
   ~ComputeUnitCore() override = default;
@@ -180,10 +196,47 @@ public:
   /// components can publish the state on which the wavefront is polling.
   void request_functional_yield() { functional_yield_requested_ = true; }
 
+  uint32_t functional_quantum() const {
+    return config_.functional_quantum == 0 ? UINT32_MAX : config_.functional_quantum;
+  }
+
+  /// @brief Select whether the CP continuation event owns functional execution.
+  void set_pool_driven(bool value) { pool_driven_ = value; }
+  bool pool_driven() const { return pool_driven_; }
+
+  /// @brief Execute up to one functional quantum of step() iterations on this CU.
+  /// @returns Whether wavefronts ran and whether one requested an event-loop yield.
+  FunctionalQuantumResult run_quantum() {
+    // A request left by direct step() execution must not shorten this quantum.
+    functional_yield_requested_ = false;
+    FunctionalQuantumResult result;
+    const uint32_t quantum = debug_active() ? kDebugFunctionalQuantum : functional_quantum();
+    for (uint32_t i = 0; i < quantum; ++i) {
+      if (!has_active_wfs())
+        break;
+      result.ran = true;
+      if (!step())
+        break;
+      ++result.iterations;
+      if (std::exchange(functional_yield_requested_, false)) {
+        result.yielded = true;
+        break;
+      }
+    }
+    return result;
+  }
+
   /// @brief Schedule the tick event if the CU is not already executing.
   /// Called from dispatch_wf(), the cpl_ port handler, and single-threaded VM
   /// initialization after engine creation but before simulation workers start.
   virtual void schedule_work() = 0;
+
+  /// @brief Schedule the serial CU driver at an absolute simulation tick.
+  virtual void schedule_work_at(simdojo::Tick tick) = 0;
+
+  /// @brief Retire the serial CU driver and return its next due tick.
+  /// @returns TICK_MAX when no serial driver was scheduled.
+  virtual simdojo::Tick suspend_scheduled_work() = 0;
 
   /// @brief Thread-safe scheduling for debugger resume from an ioctl thread.
   virtual void schedule_work_async() = 0;
@@ -200,6 +253,9 @@ public:
   /// The command processor uses this to detect when all CUs are done.
   /// @param cb Callback to invoke when idle.
   void set_on_idle(std::function<void()> cb) { on_idle_ = std::move(cb); }
+
+  /// @brief Register the CP wakeup used when a pool-driven CU becomes runnable.
+  void set_on_pool_ready(std::function<void()> cb) { on_pool_ready_ = std::move(cb); }
 
   struct TrapHandlerConfig {
     uint64_t tba = 0;
@@ -322,7 +378,7 @@ public:
 
   /// @brief Set the execution plugin group (shared ownership).
   void set_plugin_group(std::shared_ptr<ExecutionPluginGroup> pg) {
-    plugin_group_ = pg ? pg : ExecutionPluginGroup::empty_group();
+    plugin_group_ = pg ? std::move(pg) : ExecutionPluginGroup::empty_group();
     observes_sgpr_reads_ = plugin_group_->observes_sgpr_reads();
   }
 
@@ -638,8 +694,6 @@ public:
   /// ownership and the explicit executing wave are preserved.
   /// @param reg_idx Physical register index.
   /// @returns Register value.
-  // TODO(newling) consider cmake flag to build without plugins, this call
-  // overhead might be non-negligible.
   uint32_t read_sgpr(uint32_t reg_idx) const {
     if (reg_idx >= sgpr_file_.total_regs())
       return 0;
@@ -839,6 +893,19 @@ public:
   /// @returns Const pointer to the ISA decoder.
   const Decoder *decoder() const { return decoder_.get(); }
 
+  /// @brief Replace the concrete decoder in scheduler-level tests.
+  /// @details Some concrete targets intentionally remain unavailable to full
+  /// simulator configuration while individual instructions acquire execution
+  /// support. This seam lets a production-topology test exercise fetch, decode,
+  /// issue, and completion for such an instruction without weakening target
+  /// capability validation. The CU must be idle when its decoder is replaced.
+  void replace_decoder_for_test(std::unique_ptr<Decoder> decoder) {
+    assert(decoder != nullptr);
+    assert(!has_active_wfs());
+    decoder->enable_pool();
+    decoder_ = std::move(decoder);
+  }
+
   /// @brief Return the completer port (receives dispatch requests from CP).
   /// @returns Pointer to the completer port.
   simdojo::Port *cpl_port() { return cpl_; }
@@ -904,6 +971,11 @@ protected:
   void notify_idle() {
     if (on_idle_)
       on_idle_();
+  }
+
+  void notify_pool_ready() {
+    if (on_pool_ready_)
+      on_pool_ready_();
   }
 
   Config config_;
@@ -978,7 +1050,8 @@ protected:
   ScalarMemPipeline scalar_mem_pipeline_;
   GlobalMemPipeline global_mem_pipeline_;
   LocalMemPipeline local_mem_pipeline_;
-  std::function<void()> on_idle_; ///< Callback invoked when CU becomes idle.
+  std::function<void()> on_idle_;       ///< Callback invoked when CU becomes idle.
+  std::function<void()> on_pool_ready_; ///< Callback that wakes the CP-owned pool driver.
   TrapHandlerResolver trap_handler_resolver_;
   SendmsgHandler sendmsg_handler_;
   TrapCompletionHandler trap_completion_handler_;
@@ -1013,6 +1086,7 @@ protected:
 
   std::shared_ptr<ExecutionPluginGroup> plugin_group_ = ExecutionPluginGroup::empty_group();
   bool observes_sgpr_reads_ = false;
+  bool pool_driven_ = false;
 
   /// @brief Resolve the owner of a physical SGPR from its allocation block.
   /// @details Power-of-two block sizes use a shift on the instruction read path;
@@ -1095,16 +1169,14 @@ public:
 
   /// @brief Execute work up to the quantum limit, then yield.
   bool execute_quantum() override {
+    // A CP continuation event owns pool-driven execution. If the policy changed
+    // while a CU tick was already queued, retire that stale driver here.
+    if (this->pool_driven()) {
+      executing_ = false;
+      return false;
+    }
     if constexpr (Mode == simdojo::ExecMode::FUNCTIONAL) {
-      // A request left by direct step() execution must not shorten this quantum.
-      functional_yield_requested_ = false;
-      last_quantum_executed_ = 0;
-      const uint32_t quantum = debug_active() ? kDebugFunctionalQuantum : kFunctionalQuantum;
-      for (uint32_t i = 0; i < quantum && step(); ++i) {
-        ++last_quantum_executed_;
-        if (std::exchange(functional_yield_requested_, false))
-          break;
-      }
+      last_quantum_executed_ = this->run_quantum().iterations;
     } else {
       /// @todo: Support CLOCKED pipeline cycle.
     }
@@ -1136,11 +1208,25 @@ public:
     // resident on this CU, so scheduling work for it would spin the engine
     // against a wave that cannot retire an instruction until the debugger
     // resumes it.
-    if (executing_ || !this->engine() || !this->has_runnable_wfs())
+    if (!this->engine())
+      return;
+    auto now = this->engine()->context(this->partition_id()).current_tick();
+    schedule_work_at(now + 1);
+  }
+
+  void schedule_work_at(simdojo::Tick tick) override {
+    if (this->pool_driven() || executing_ || !this->engine() || !this->has_runnable_wfs())
       return;
     executing_ = true;
-    auto now = this->engine()->context(this->partition_id()).current_tick();
-    this->schedule_event(&tick_event_, now + 1);
+    schedule_next_tick(tick);
+  }
+
+  simdojo::Tick suspend_scheduled_work() override {
+    const simdojo::Tick tick = scheduled_tick_;
+    scheduled_tick_ = simdojo::TICK_MAX;
+    ++driver_generation_;
+    executing_ = false;
+    return tick;
   }
 
   void schedule_work_async() override {
@@ -1149,6 +1235,13 @@ public:
   }
 
 private:
+  void schedule_next_tick(simdojo::Tick tick) {
+    scheduled_tick_ = tick;
+    const uintptr_t generation = ++driver_generation_;
+    this->schedule_event(&tick_event_, tick,
+                         std::make_unique<simdojo::Message>(simdojo::MessageHeader{}, generation));
+  }
+
   // Reschedule by the number of quantum loop iterations taken, not a fixed
   // kFunctionalQuantum: a wavefront that requests a yield after k<kFunctionalQuantum
   // iterations (e.g. s_sleep, vendor-dep retry) resumes at now+k so a peer
@@ -1157,16 +1250,27 @@ private:
   // step() advances even when every wave is WAITCNT/BARRIER-stalled — so a fully
   // stalled CU still advances by the full quantum. max(1,...) keeps the event
   // strictly in the future so re-entries never collapse onto one tick.
-  simdojo::Event tick_event_{
-      this, simdojo::EventType::TIMER_CALLBACK, [this](simdojo::Tick now, simdojo::Message *) {
-        if (execute_quantum())
-          this->schedule_event(&tick_event_, now + std::max<uint64_t>(1, last_quantum_executed_));
-      }};
+  simdojo::Event tick_event_{this, simdojo::EventType::TIMER_CALLBACK,
+                             [this](simdojo::Tick now, simdojo::Message *message) {
+                               if (!message || message->payload() != driver_generation_)
+                                 return;
+                               scheduled_tick_ = simdojo::TICK_MAX;
+                               if (execute_quantum())
+                                 schedule_next_tick(now +
+                                                    std::max<uint64_t>(1, last_quantum_executed_));
+                             }};
   // Cross-thread debugger resumes first enter this event. Its handler runs on
-  // the CU partition and can safely update executing_ through schedule_work().
+  // the CU/CP partition and wakes whichever driver currently owns execution.
   simdojo::Event resume_event_{this, simdojo::EventType::TIMER_CALLBACK,
-                               [this](simdojo::Tick, simdojo::Message *) { schedule_work(); }};
+                               [this](simdojo::Tick, simdojo::Message *) {
+                                 if (this->pool_driven())
+                                   this->notify_pool_ready();
+                                 else
+                                   schedule_work();
+                               }};
   uint64_t last_quantum_executed_ = 0;
+  simdojo::Tick scheduled_tick_ = simdojo::TICK_MAX;
+  uintptr_t driver_generation_ = 0;
   bool executing_ = false;
 };
 
@@ -1327,6 +1431,7 @@ protected:
   /// @brief Execute one instruction on the given wavefront via direct dispatch.
   void execute_instruction(Instruction *inst, Wavefront &wf) override {
     assert(inst->execute && "instruction execution backend is not linked");
+    wf.clear_instruction_execution_error();
     inst->execute(*inst, &wf);
   }
 
