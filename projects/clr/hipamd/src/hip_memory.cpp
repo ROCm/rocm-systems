@@ -4934,7 +4934,7 @@ hipError_t hipMemGetHandleForAddressRange(void* handle, hipDeviceptr_t dptr, siz
   HIP_INIT_API(hipMemGetHandleForAddressRange, handle, dptr, size, handleType, flags);
 
   if (dptr == nullptr || size == 0 || handleType != hipMemRangeHandleTypeDmaBufFd ||
-      flags != 0 && flags != hipMemRangeFlagDmaBufMappingTypePcie) {
+      (flags != 0 && flags != hipMemRangeFlagDmaBufMappingTypePcie)) {
     HIP_RETURN(hipErrorInvalidValue);
   }
 
