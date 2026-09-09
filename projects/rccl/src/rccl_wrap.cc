@@ -105,10 +105,10 @@ int32_t rcclGetProtoForGfx120x(ncclFunc_t collectiveFunc, size_t sizePerRank) {
 int32_t rcclGetProtoForGfx110x(ncclFunc_t collectiveFunc, size_t sizePerRank) {
   int returnVal = NCCL_PROTO_SIMPLE;
   int SingleNodeLLCutoffs[] = {/*ncclFuncBroadcast*/ 1536,
-                               /*ncclFuncReduce*/ 8192,
-                               /*ncclFuncAllGather*/ 49152,
-                               /*ncclFuncReduceScatter*/ 49152,
-                               /*ncclFuncAllReduce*/ 32768,
+                               /*ncclFuncReduce*/ 1024,
+                               /*ncclFuncAllGather*/ 24756,
+                               /*ncclFuncReduceScatter*/ 24756,
+                               /*ncclFuncAllReduce*/ 65536,
                                /*ncclFuncSendRecv*/ 0,
                                /*ncclFuncSend*/ 0,
                                /*ncclFuncRecv*/ 0};

@@ -1,6 +1,6 @@
 
 /*
-Copyright (c) 2019-2026 Advanced Micro Devices, Inc. All rights reserved.
+Copyright (c) 2026 Advanced Micro Devices, Inc. All rights reserved.
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -26,7 +26,7 @@ THE SOFTWARE.
 
 #include <stdio.h>      // For NULL and
 #include <stdlib.h>     // For malloc(), calloc(), and free()
-#include <stdint.h>     // For uint8_t and other fixed-width types
+#include <stdint.h>     // For uint32_t and other fixed-width types
 #include <string.h>     // For memset()
 #include <limits.h>     // For INT_MAX
 #include <vector>
@@ -239,7 +239,7 @@ static int genRingsN_8(int* nodeOrder, int nChannelsRequested) {
   if (nodeOrder == NULL || nChannelsRequested <= 0) return 0;
   int numRingsCopied = 0;
   for (int c = 0; c < nChannelsRequested; c++) {
-    // Use modulo to cycle through the optimized patterns if nChannels > 13
+    // Use modulo to cycle through the optimized patterns if nChannels >= totalAvailable
     int sourceIdx = c % totalAvailable;
     // Copy 8 integers (32 bytes) into the correct offset
     memcpy(&nodeOrder[c * nNodes], optimizedRings[sourceIdx], nNodes * sizeof(int));
@@ -248,12 +248,13 @@ static int genRingsN_8(int* nodeOrder, int nChannelsRequested) {
   return numRingsCopied;
 }
 
-static ncclResult_t greedyRingGen(int nNodes, uint8_t nChannels, int* nodeOrder) {
-    // Choose to augment with Greedy approach only if nNodes/2 channels are not sufficient. Most systems
-    // do not execute below code as we have MAXCHANNELS = 128.
-    // Optimization: uint8_t is sufficient for nChannels <= 255, In RCCL we limit it to 128 channels now.
-  uint8_t* edgeUsage = (uint8_t*)calloc(nNodes * nNodes, sizeof(uint8_t));
-  uint8_t* visited = (uint8_t*)malloc(nNodes * sizeof(uint8_t));
+static ncclResult_t greedyRingGen(int nNodes, uint32_t nChannels, int* nodeOrder) {
+  /**
+   * Choose to augment with Greedy approach only if nNodes/2 channels are not sufficient. Most systems
+   * do not execute below code as we have MAXCHANNELS = 256.
+   */
+  uint32_t* edgeUsage = (uint32_t*)calloc(nNodes * nNodes, sizeof(uint32_t));
+  uint32_t* visited = (uint32_t*)malloc(nNodes * sizeof(uint32_t));
 
   if (!edgeUsage || !visited) {
     if (edgeUsage) free(edgeUsage);
@@ -274,7 +275,7 @@ static ncclResult_t greedyRingGen(int nNodes, uint8_t nChannels, int* nodeOrder)
       continue;
     }
         // Set all non-visited
-    memset(visited, 0, nNodes * sizeof(uint8_t));
+    memset(visited, 0, nNodes * sizeof(uint32_t));
         // Only to reduce the pressure on starting node
     startNode = (startNode + 1) % nNodes;
     int curr = startNode;
@@ -321,16 +322,10 @@ static ncclResult_t greedyRingGen(int nNodes, uint8_t nChannels, int* nodeOrder)
  * Assumptions : nodeOrder is pointer to flattened 2D array of size nNodes*nChannels*sizeof(int), and is pre-allocated before invoking this function.
  *
  */
-ncclResult_t generateRings(int nNodes, uint8_t nChannels, int* nodeOrder) {
-    // --- SAFETY CHECK: Guard against invalid cluster sizes ---
+ncclResult_t generateRings(int nNodes, uint32_t nChannels, int* nodeOrder) {
+  // --- SAFETY CHECK: Guard against invalid cluster sizes ---
   if (nNodes <= 0 || nChannels <= 0 || nodeOrder == NULL) return ncclInvalidArgument;
-  if (nChannels >= 255) {
-    WARN(" generateRings is implemented with an assumption nChannels [=%d] < 255 as an optimization. Update the "
-         "implementaion to accept uint16/32 for nChannels ",
-         nChannels);
-    return ncclInvalidArgument;
-  }
-    // Handle degenerate cases (N=1, N=2) where Hamiltonian diversity is impossible
+  // Handle degenerate cases (N=1, N=2) where Hamiltonian diversity is impossible
   if (nNodes < 3) {
     for (int c = 0; c < nChannels; c++) {
       for (int n = 0; n < nNodes; n++) {
