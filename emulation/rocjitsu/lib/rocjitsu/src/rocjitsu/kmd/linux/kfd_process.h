@@ -179,6 +179,11 @@ public:
     /// Bitmask of exception classes that are forwarded to the debugger.
     uint64_t exception_enable_mask = 0;
 
+    /// Process/device exception bits already used to wake this session.
+    uint64_t notified_process_exception_mask = 0;
+    /// Process/device exception bits reserved by a notifier write in flight.
+    uint64_t pending_process_exception_mask = 0;
+
     /// @brief Previously configured process debug flags.
     uint32_t flags = 0;
 
@@ -690,8 +695,10 @@ public:
     std::array<uint32_t, 64> runtime_exception_pending_counts{};
     /// Pending runtime bits for which at least one publication failed.
     uint64_t runtime_exception_failed_status = 0;
-    /// Failed runtime-owned bits waiting for a debugger to consume them.
+    /// Failed runtime-owned bits waiting for a debugger to resolve them.
     uint64_t runtime_exception_retained_status = 0;
+    /// Runtime-owned bits already queried by the current debugger session.
+    uint64_t runtime_exception_queried_status = 0;
     /// Session that owns the notification bookkeeping below.
     uint64_t debug_notification_session_generation = 0;
     /// Debugger notification writes currently in flight, counted per bit.
@@ -704,9 +711,13 @@ public:
     uint64_t debug_notification_retained_status = 0;
 
     /// @brief Return exception status that the debugger may currently consume.
-    uint64_t debugger_visible_exception_status() const {
+    uint64_t debugger_visible_exception_status(uint64_t session_generation = 0) const {
+      const uint64_t pending_status =
+          session_generation == 0 || debug_notification_session_generation == session_generation
+              ? debug_notification_pending_status
+              : 0;
       return exception_status & ~runtime_exception_pending_status &
-             ~debug_notification_pending_status;
+             ~runtime_exception_queried_status & ~pending_status;
     }
 
     /// @brief Reserve queue-exception bits for an in-flight ROCr decision.
@@ -734,6 +745,7 @@ public:
           if (!delivered && retain_failure) {
             exception_status |= bit_mask;
             runtime_exception_retained_status |= bit_mask;
+            runtime_exception_queried_status &= ~bit_mask;
             failed |= bit_mask;
           }
           continue;
@@ -743,6 +755,7 @@ public:
         runtime_exception_pending_status &= ~bit_mask;
         if ((runtime_exception_failed_status & bit_mask) != 0) {
           runtime_exception_retained_status |= bit_mask;
+          runtime_exception_queried_status &= ~bit_mask;
           failed |= bit_mask;
         } else if (((debug_notification_pending_status | debug_notification_delivered_status |
                      debug_notification_retained_status | runtime_exception_retained_status) &
@@ -773,9 +786,8 @@ public:
     }
 
     /// @brief Commit one debugger-notifier result without losing overlaps.
-    void finish_debug_notification(uint64_t mask, bool delivered) {
-      if (delivered)
-        debug_notification_delivered_status |= mask;
+    void finish_debug_notification(uint64_t mask, uint64_t delivered_mask) {
+      debug_notification_delivered_status |= mask & delivered_mask;
       for (uint32_t bit = 0; bit < 64; ++bit) {
         const uint64_t bit_mask = uint64_t{1} << bit;
         if ((mask & bit_mask) == 0 || debug_notification_pending_counts[bit] == 0)
@@ -790,18 +802,37 @@ public:
       }
     }
 
+    /// @brief Require another wake if this session later re-enables @p mask.
+    void reset_debug_notification_delivery(uint64_t mask, uint64_t session_generation) {
+      if (debug_notification_session_generation == session_generation)
+        debug_notification_delivered_status &= ~mask;
+    }
+
     /// @brief Consume only status currently visible to the debugger.
     void clear_debugger_exception_status(uint64_t mask) {
       const uint64_t consumed = mask & debugger_visible_exception_status();
-      exception_status &= ~consumed;
+      runtime_exception_queried_status |= consumed & runtime_exception_retained_status;
+      exception_status &= ~(consumed & ~runtime_exception_retained_status);
       debug_notification_delivered_status &= ~consumed;
       debug_notification_retained_status &= ~consumed;
-      runtime_exception_retained_status &= ~consumed;
+    }
+
+    /// @brief Resolve retained runtime ownership after a successful debugger resume.
+    void resolve_runtime_exceptions() {
+      const uint64_t resolved = runtime_exception_retained_status;
+      runtime_exception_retained_status = 0;
+      runtime_exception_queried_status &= ~resolved;
+      runtime_exception_failed_status &= ~resolved;
+      const uint64_t still_owned =
+          runtime_exception_pending_status | debug_notification_pending_status |
+          debug_notification_delivered_status | debug_notification_retained_status;
+      exception_status &= ~(resolved & ~still_owned);
     }
 
     /// @brief Clear every debugger-session-owned exception field.
     void clear_debugger_exception_state() {
       exception_status &= runtime_exception_pending_status | runtime_exception_retained_status;
+      runtime_exception_queried_status = 0;
       debug_notification_session_generation = 0;
       debug_notification_pending_counts.fill(0);
       debug_notification_pending_status = 0;

@@ -221,6 +221,7 @@ public:
 
   /// @brief Pause after a debugger-notifier write and before its state commit.
   void set_debug_notification_result_hook_for_testing(std::function<void(bool)> hook) {
+    std::lock_guard<std::mutex> lock(debug_sessions_mutex_);
     debug_notification_result_hook_for_testing_ = std::move(hook);
   }
 
@@ -234,6 +235,11 @@ public:
     std::lock_guard<std::mutex> lock(debug_sessions_mutex_);
     debug_notifier_dup_error_for_testing_ = error;
   }
+
+  /// @brief Replace a local session's notifier and generation without an ioctl boundary.
+  /// @details Models a new debugger session while an old notification commit is paused;
+  /// normal self-debug ioctls are serialized by KfdProcess::op_mutex_.
+  int replace_debug_session_for_testing(pid_t target_pid, int dbg_fd, uint64_t exception_mask);
 
   /// @brief Publish a queue debug event without constructing a wave stop.
   /// @details This narrow seam exercises notifier transaction races and retained
@@ -526,6 +532,7 @@ private:
                                         uint64_t exception_mask, bool delivered,
                                         bool retain_failure = true);
   int duplicate_debug_notifier(int fd);
+  int retry_debug_notifications(pid_t target_pid, bool invoke_result_hook = false);
   bool signal_runtime_queue_exception(uint32_t gpu_id, uint32_t queue_id, uint32_t process_id,
                                       uint64_t exception_mask);
 
