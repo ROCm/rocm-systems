@@ -278,6 +278,14 @@ in the following table.
         | ``0`` (default on older ROCm versions): Disable registration of user
           buffers.
 
+    * - | ``NCCL_LOCAL_REGISTER``
+        | Enables user local buffer registration when ``ncclCommRegister`` is
+          called explicitly.
+      - | ``1`` (default when RCCL is built with cuMem VMM support, ROCm ≥
+          7.12 or the 7.0.2.x backport): Enable local buffer registration.
+        | ``0`` (default on older ROCm build targets): Disable local buffer
+          registration.
+
     * - | ``NCCL_LEGACY_CUDA_REGISTER``
         | Controls registration of legacy buffers allocated by ``hipMalloc`` and
           related memory allocators. Registering legacy buffers can cause implicit
