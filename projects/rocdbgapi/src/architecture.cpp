@@ -3367,9 +3367,7 @@ gfx9_architecture_t::control_stack_iterate (
           auto cwsr_record = make_cwsr_record (queue, xcc_id, relaunch, state,
                                                last_wave_area - 64);
 
-          last_wave_area
-            = cwsr_record->register_address (amdgpu_regnum_t::v0_64).value ();
-
+          last_wave_area = cwsr_record->begin ();
           wave_callback (std::move (cwsr_record));
           ++wave_count;
         }
