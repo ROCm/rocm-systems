@@ -575,6 +575,10 @@ target_include_directories(rccl-source-wrappers PRIVATE
   ${ACCL_PROFILER_DIR}
   ${RCCL_INCLUDE_DIRS}
 )
+# Standalone HostUnitTests never find_package(hip); in-tree already has hip::host.
+if(NOT TARGET hip::host)
+  find_package(hip QUIET)
+endif()
 foreach(_hip_tgt hip::host hip::device)
   if(TARGET ${_hip_tgt})
     target_include_directories(rccl-source-wrappers PRIVATE

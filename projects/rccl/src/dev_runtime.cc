@@ -280,15 +280,17 @@ ncclResult_t ncclDevrFinalize(struct ncclComm* comm) {
       // so this is now expected to succeed. Surface failures instead of
       // masking with CUCHECKIGNORE — a regression in the drain path should
       // not be silently swallowed (AICOMRCCL-835).
-      // gfx1250 only (or NCCL_CUMEM_SKIP_FREE=1): leftover peer maps can make
-      // AddressFree hang or double-free. gfx950 still frees this reservation.
+      // Temporary gfx1250 workaround (ROCM-30633): leftover peer maps can make
+      // AddressFree hang or double-free. This is the only reclaim site, so the
+      // reservation (lsaSize * bigSize) is not returned until process exit.
+      // gfx950 still frees. Drop this skip once AddressFree is safe on gfx1250.
       CUdeviceptr flatAddr = reinterpret_cast<CUdeviceptr>(devr->lsaFlatBase);
       size_t flatBytes = devr->lsaSize * devr->bigSize;
       devr->lsaFlatBase = nullptr;
       if (!rcclSkipLsaFlatAddressFree()) {
         CUCHECKGOTO(cuMemAddressFree(flatAddr, flatBytes), fatalRet, cleanup);
       } else {
-        INFO(NCCL_INIT, "ncclDevrFinalize: skipping lsaFlatBase cuMemAddressFree (gfx1250/NCCL_CUMEM_SKIP_FREE)");
+        INFO(NCCL_INIT, "ncclDevrFinalize: skipping lsaFlatBase cuMemAddressFree (temporary gfx1250/NCCL_CUMEM_SKIP_FREE; VA unreclaimed until exit)");
       }
     }
     ncclSpaceDestruct(&devr->bigSpace);
@@ -2182,14 +2184,13 @@ ncclResult_t ncclDevCommDestroy(struct ncclComm* comm, struct ncclDevComm const*
   // window deregister (finalize drain still reclaims, but this is the explicit path).
   if (devComm->ginContextCount) {
     ncclResult_t ginRet = ncclGinDevCommFree(comm, devComm);
-    if (ginRet != ncclSuccess) ret = ginRet;
+    if (ginRet != ncclSuccess && ret == ncclSuccess) ret = ginRet;
   }
   if (devComm->resourceWindow != nullptr) {
     ncclResult_t winRet = ncclCommWindowDeregister(comm, devComm->resourceWindow);
     if (winRet != ncclSuccess && ret == ncclSuccess) ret = winRet;
   }
 
-end:
   CUDACHECKIGNORE(cudaSetDevice(saveDev));
   return ret;
 }

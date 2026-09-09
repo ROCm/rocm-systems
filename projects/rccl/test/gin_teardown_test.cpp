@@ -12,11 +12,11 @@
 
 #include DEV_RUNTIME_CC_PATH
 
+#include <memory>
+
 #include <gtest/gtest.h>
 
-#include "ProcessIsolatedTestRunner.hpp"
-
-#include <memory>
+#include "common/ProcessIsolatedTestRunner.hpp"
 
 extern int rcclTestHipMemAddressFreeCount;
 
@@ -200,7 +200,7 @@ TEST(SkipCuMemFreePolicy, IsolatedArchAndEnvBranches) {
             EXPECT_FALSE(rcclSkipCuMemFree());
             EXPECT_FALSE(rcclSkipLsaFlatAddressFree());
             drainAndCountAddressFree();
-            EXPECT_GE(rcclTestHipMemAddressFreeCount, 1);
+            EXPECT_EQ(rcclTestHipMemAddressFreeCount, 1);
           })
           .setVariable("NCCL_CUMEM_SKIP_FREE", "0")
           .setVariable("RCCL_TEST_GCN_ARCH", "gfx1250"),
@@ -220,7 +220,7 @@ TEST(SkipCuMemFreePolicy, IsolatedArchAndEnvBranches) {
             EXPECT_TRUE(rcclSkipCuMemFree());
             EXPECT_FALSE(rcclSkipLsaFlatAddressFree());
             drainAndCountAddressFree();
-            EXPECT_GE(rcclTestHipMemAddressFreeCount, 1);
+            EXPECT_EQ(rcclTestHipMemAddressFreeCount, 1);
           })
           .setVariable("RCCL_TEST_GCN_ARCH", "gfx950")
           .clearVariable("NCCL_CUMEM_SKIP_FREE"),
@@ -240,7 +240,7 @@ TEST(SkipCuMemFreePolicy, IsolatedArchAndEnvBranches) {
             EXPECT_FALSE(rcclSkipCuMemFree());
             EXPECT_FALSE(rcclSkipLsaFlatAddressFree());
             drainAndCountAddressFree();
-            EXPECT_GE(rcclTestHipMemAddressFreeCount, 1);
+            EXPECT_EQ(rcclTestHipMemAddressFreeCount, 1);
           })
           .setVariable("RCCL_TEST_GCN_ARCH", "gfx900")
           .clearVariable("NCCL_CUMEM_SKIP_FREE"));

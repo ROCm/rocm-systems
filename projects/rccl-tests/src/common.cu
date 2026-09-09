@@ -2783,6 +2783,9 @@ testResult_t run() {
 #endif
 
   if (!parallel_init) {
+    // Symmetric GIN teardown: stream sync, devCommDestroy, then comm destroy
+    // (ncclDevrFinalize drains windows), then ncclMemFree. Skip explicit
+    // SYMMETRIC_REGISTER window deregister — it races cuMemAddressFree on MI455.
     TESTCHECK(testStreamSynchronize(nGpus*nThreads, streams.data(), comms));
 #if defined(ENABLE_DEVICE_API) && NCCL_VERSION_CODE >= NCCL_VERSION(2,28,0)
     if (deviceImpl) {

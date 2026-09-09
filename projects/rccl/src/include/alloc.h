@@ -67,9 +67,12 @@ inline void rcclRegisterShutdownHandler() {
 // NCCL_CUMEM_SKIP_FREE=0 (force off) or =1 (force on).
 //
 // Separate site: ncclDevrFinalize may skip owner-local cuMemAddressFree of the
-// LSA flat VA reservation (lsaFlatBase). That skip is gfx1250-only by default —
-// MI355 (gfx950) device-API teardown AddressFrees this reservation with
-// skip-free auto-on and does not hang. NCCL_CUMEM_SKIP_FREE=0/1 still overrides.
+// LSA flat VA reservation (lsaFlatBase). Temporary gfx1250-only workaround
+// (ROCM-30633): leftover peer maps can hang or double-free AddressFree, and this
+// is the only reclaim site, so a process that creates/destroys device-API comms
+// in a loop will not recover that VA until exit. MI355 (gfx950) still
+// AddressFrees this reservation with skip-free auto-on. NCCL_CUMEM_SKIP_FREE
+// =0/1 still overrides both helpers below.
 inline bool rcclSkipCuMemFreeFromArch(const hipDeviceProp_t& prop) {
   return strstr(prop.gcnArchName, "gfx950") != nullptr ||
          strstr(prop.gcnArchName, "gfx1250") != nullptr;
@@ -87,28 +90,25 @@ inline bool rcclQueryDeviceProp(hipDeviceProp_t* prop) {
   return true;
 }
 
-inline bool rcclSkipCuMemFree() {
-  static const bool skip = [](){
+// Shared NCCL_CUMEM_SKIP_FREE parse + memoization; ArchPred is the only difference.
+template <bool (*ArchPred)(const hipDeviceProp_t&)>
+inline bool rcclSkipCuMemFreeIfArch() {
+  static const bool skip = []() {
     const char* e = getenv("NCCL_CUMEM_SKIP_FREE");
     if (e) return atoi(e) != 0;
     hipDeviceProp_t prop;
     if (!rcclQueryDeviceProp(&prop)) return false;
-    return rcclSkipCuMemFreeFromArch(prop);
+    return ArchPred(prop);
   }();
   return skip;
 }
 
-// gfx1250: leftover peer maps can make lsaFlatBase AddressFree hang/double-free.
-// gfx950: keep freeing the reservation (measured on MI355; see ROCM-30633).
+inline bool rcclSkipCuMemFree() {
+  return rcclSkipCuMemFreeIfArch<rcclSkipCuMemFreeFromArch>();
+}
+
 inline bool rcclSkipLsaFlatAddressFree() {
-  static const bool skip = [](){
-    const char* e = getenv("NCCL_CUMEM_SKIP_FREE");
-    if (e) return atoi(e) != 0;
-    hipDeviceProp_t prop;
-    if (!rcclQueryDeviceProp(&prop)) return false;
-    return rcclSkipLsaFlatAddressFreeFromArch(prop);
-  }();
-  return skip;
+  return rcclSkipCuMemFreeIfArch<rcclSkipLsaFlatAddressFreeFromArch>();
 }
 uint64_t clockNano(); // from utils.h with which we have a circular dependency
 

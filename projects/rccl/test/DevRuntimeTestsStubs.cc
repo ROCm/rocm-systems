@@ -1,9 +1,9 @@
 /*************************************************************************
  * Copyright (c) 2026 Advanced Micro Devices, Inc. All rights reserved.
  *
- * No-op host stubs for the DevRuntimeTests micro-test binary.
+ * No-op host stubs for the rccl-UnitTestsDevRuntime micro-test binary.
  *
- * dev_runtime.cc is #included whole into DevRuntimeTests.cpp, which leaves
+ * dev_runtime.cc is #included whole into gin_teardown_test.cpp, which leaves
  * undefined references to everything the translation unit calls but does not
  * define. These inert host-side definitions let the binary link without
  * librccl.so or a GPU. Real headers are included so every signature is checked
