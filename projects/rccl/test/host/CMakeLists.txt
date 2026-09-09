@@ -96,6 +96,35 @@ function(register_micro_test_categories tgt yaml_basename)
   endif()
 endfunction()
 
+# apply_host_only_build(<target> [GC_SECTIONS])
+#
+# Apply the shared host-only build model used by every in-RCCL-build micro
+# binary: compile with --offload-host-only (no amdgcn device pass, so llvm
+# coverage instrumentation never reaches the device link) and link with
+# -no-hip-rt (no HIP runtime), plus -fprofile-instr-generate/-fcoverage-mapping
+# on both. With GC_SECTIONS, also compile -ffunction-sections and link
+# -Wl,--gc-sections, which the init/enqueue binaries need so the real oracle TUs'
+# unreferenced deep deps are dropped rather than pulling in the world.
+function(apply_host_only_build tgt)
+  cmake_parse_arguments(ARG "GC_SECTIONS" "" "" ${ARGN})
+  if(ARG_GC_SECTIONS)
+    target_compile_options(${tgt} PRIVATE
+      --offload-host-only -ffunction-sections
+      -fprofile-instr-generate -fcoverage-mapping)
+    target_link_options(${tgt} PRIVATE
+      -no-hip-rt
+      -fprofile-instr-generate -fcoverage-mapping
+      -Wl,--gc-sections)
+  else()
+    target_compile_options(${tgt} PRIVATE
+      --offload-host-only
+      -fprofile-instr-generate -fcoverage-mapping)
+    target_link_options(${tgt} PRIVATE
+      -no-hip-rt
+      -fprofile-instr-generate -fcoverage-mapping)
+  endif()
+endfunction()
+
 if(BUILD_TESTS)
   # rccl-UnitTestsMicro: standalone unit-test binary compiled directly into
   # the test binary. This lets us use preprocessor and link-time substitution
@@ -146,13 +175,7 @@ if(BUILD_TESTS)
   # not exist on device, making amdgcn-link fail. --offload-host-only removes the
   # device pass entirely, which is robust across clang toolchains that ignore the
   # older -Xarch_device coverage split.
-  target_compile_options(rccl-UnitTestsMicro PRIVATE --offload-host-only)
-  target_link_options(rccl-UnitTestsMicro PRIVATE -no-hip-rt)
-
-  target_compile_options(rccl-UnitTestsMicro PRIVATE
-    -fprofile-instr-generate -fcoverage-mapping)
-  target_link_options(rccl-UnitTestsMicro PRIVATE
-    -fprofile-instr-generate -fcoverage-mapping)
+  apply_host_only_build(rccl-UnitTestsMicro)
 
   apply_asan_if_enabled(rccl-UnitTestsMicro)
 
@@ -240,13 +263,7 @@ if(BUILD_TESTS)
     # Host-only (no amdgcn pass, so llvm coverage never reaches the device link) +
     # -ffunction-sections/--gc-sections so the oracle TUs' unreferenced deep deps
     # are dropped rather than pulling in the world.
-    target_compile_options(${_init_tgt} PRIVATE
-      --offload-host-only -ffunction-sections
-      -fprofile-instr-generate -fcoverage-mapping)
-    target_link_options(${_init_tgt} PRIVATE
-      -no-hip-rt
-      -fprofile-instr-generate -fcoverage-mapping
-      -Wl,--gc-sections)
+    apply_host_only_build(${_init_tgt} GC_SECTIONS)
     apply_asan_if_enabled(${_init_tgt})
     rocm_install(TARGETS ${_init_tgt} COMPONENT tests)
     register_micro_test_categories(${_init_tgt} test_categories_micro_init.yaml)
@@ -337,13 +354,7 @@ if(BUILD_TESTS)
   apply_hip_compile_only(rccl-UnitTestsMicroEnqueue)
   target_link_libraries(rccl-UnitTestsMicroEnqueue PRIVATE ${MICRO_TEST_LINK_LIBS})
   add_dependencies(rccl-UnitTestsMicroEnqueue hipify_all copy_nccl_device_headers)
-  target_compile_options(rccl-UnitTestsMicroEnqueue PRIVATE
-    --offload-host-only -ffunction-sections
-    -fprofile-instr-generate -fcoverage-mapping)
-  target_link_options(rccl-UnitTestsMicroEnqueue PRIVATE
-    -no-hip-rt
-    -fprofile-instr-generate -fcoverage-mapping
-    -Wl,--gc-sections)
+  apply_host_only_build(rccl-UnitTestsMicroEnqueue GC_SECTIONS)
   apply_asan_if_enabled(rccl-UnitTestsMicroEnqueue)
   rocm_install(TARGETS rccl-UnitTestsMicroEnqueue COMPONENT tests)
   register_micro_test_categories(rccl-UnitTestsMicroEnqueue test_categories_micro_enqueue.yaml)
@@ -398,12 +409,7 @@ if(BUILD_TESTS)
       hipify_all copy_nccl_device_headers
       net_ib_header_symlinks rma_header_symlinks)
 
-    target_compile_options(rccl-UnitTestsMicroDevRuntime PRIVATE
-      --offload-host-only
-      -fprofile-instr-generate -fcoverage-mapping)
-    target_link_options(rccl-UnitTestsMicroDevRuntime PRIVATE
-      -no-hip-rt
-      -fprofile-instr-generate -fcoverage-mapping)
+    apply_host_only_build(rccl-UnitTestsMicroDevRuntime)
 
     apply_asan_if_enabled(rccl-UnitTestsMicroDevRuntime)
 
