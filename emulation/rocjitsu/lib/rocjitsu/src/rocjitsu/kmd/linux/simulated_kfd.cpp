@@ -748,14 +748,18 @@ void SimulatedKfd::init_command_processors_locked() {
         cu->set_sendmsg_handler([this](amdgpu::Wavefront &wf, uint32_t message) {
           return on_wave_sendmsg(wf, message);
         });
-        cu->set_queue_exception_handler(
-            [this, gpu_ordinal](uint32_t queue_id, uint32_t process_id, uint64_t status) {
-              const bool delivered = gpu_ordinal < gpus_.size() &&
-                                     signal_runtime_queue_exception(gpus_[gpu_ordinal].gpu_id,
-                                                                    queue_id, process_id, status);
-              complete_runtime_queue_exception(process_id, queue_id, status, delivered);
-              return delivered;
-            });
+        cu->set_queue_exception_handler([this, gpu_ordinal](uint32_t queue_id, uint32_t process_id,
+                                                            uint64_t status,
+                                                            bool retain_failure_for_debugger) {
+          const bool delivered = gpu_ordinal < gpus_.size() &&
+                                 signal_runtime_queue_exception(gpus_[gpu_ordinal].gpu_id, queue_id,
+                                                                process_id, status);
+          if (runtime_exception_result_hook_for_testing_)
+            runtime_exception_result_hook_for_testing_(delivered);
+          complete_runtime_queue_exception(process_id, queue_id, status, delivered,
+                                           retain_failure_for_debugger);
+          return delivered;
+        });
         cu->set_trap_completion_handler(
             [this](amdgpu::Wavefront &wf) { on_wave_trap_complete(wf); });
         cu->set_single_step_handler(
@@ -3265,16 +3269,59 @@ void SimulatedKfd::reserve_runtime_queue_exception(const std::shared_ptr<KfdProc
   queue->second.begin_runtime_exception(exception_mask);
 }
 
+int SimulatedKfd::duplicate_debug_notifier(int fd) {
+  if (debug_notifier_dup_error_for_testing_) {
+    errno = *debug_notifier_dup_error_for_testing_;
+    return -1;
+  }
+  return safe_fcntl(fd, F_DUPFD_CLOEXEC, 0);
+}
+
 void SimulatedKfd::complete_runtime_queue_exception(uint32_t process_id, uint32_t queue_id,
-                                                    uint64_t exception_mask, bool delivered) {
+                                                    uint64_t exception_mask, bool delivered,
+                                                    bool retain_failure) {
   auto proc = find_process(process_id);
   if (!proc)
     return;
+
+  UniqueDriverFd notifier;
+  uint64_t failed_mask = 0;
+  uint64_t session_generation = 0;
+  {
+    std::lock_guard<std::mutex> lock(debug_sessions_mutex_);
+    std::lock_guard<std::mutex> alloc_lock(proc->alloc_mutex_);
+    auto queue = proc->queue_snapshot_map_.find(queue_id);
+    if (queue == proc->queue_snapshot_map_.end())
+      return;
+    failed_mask = queue->second.finish_runtime_exception(exception_mask, delivered, retain_failure);
+    if (failed_mask == 0)
+      return;
+
+    auto session = debug_sessions_.find(proc->client_pid());
+    if (session == debug_sessions_.end() || !session->second.enabled ||
+        (session->second.exception_enable_mask & failed_mask) == 0 || session->second.dbg_fd < 0)
+      return;
+    session_generation = session->second.generation;
+    notifier = UniqueDriverFd(duplicate_debug_notifier(session->second.dbg_fd));
+    if (notifier.get() < 0)
+      return;
+    queue->second.begin_debug_notification(failed_mask, session_generation);
+  }
+
+  const bool notified = write_debug_notification(notifier.get()) == 0;
+  if (debug_notification_result_hook_for_testing_)
+    debug_notification_result_hook_for_testing_(notified);
+  std::lock_guard<std::mutex> lock(debug_sessions_mutex_);
+  auto session = debug_sessions_.find(proc->client_pid());
+  if (session == debug_sessions_.end() || !session->second.enabled ||
+      session->second.generation != session_generation)
+    return;
   std::lock_guard<std::mutex> alloc_lock(proc->alloc_mutex_);
   auto queue = proc->queue_snapshot_map_.find(queue_id);
-  if (queue == proc->queue_snapshot_map_.end())
+  if (queue == proc->queue_snapshot_map_.end() ||
+      queue->second.debug_notification_session_generation != session_generation)
     return;
-  queue->second.finish_runtime_exception(exception_mask, delivered);
+  queue->second.finish_debug_notification(failed_mask, notified);
 }
 
 bool SimulatedKfd::signal_runtime_queue_exception(uint32_t gpu_id, uint32_t queue_id,
@@ -3481,7 +3528,10 @@ bool SimulatedKfd::debug_stop_publishable(uint32_t gpu_id) {
 
 bool SimulatedKfd::report_wave_stopped(const std::shared_ptr<KfdProcess> &proc, uint32_t queue_id,
                                        uint32_t gpu_id, uint64_t ctx_base, uint32_t ctx_size,
-                                       uint64_t exception_mask, bool retain_on_rejection) {
+                                       uint64_t exception_mask, bool retain_on_rejection,
+                                       bool *runtime_failure_debuggable) {
+  if (runtime_failure_debuggable != nullptr)
+    *runtime_failure_debuggable = false;
   // Serialization must succeed before the debugger is woken. Event publication
   // latches per-queue exception status and queues an event the debugger will
   // answer with SUSPEND_QUEUES; without a record that request can only come
@@ -3493,6 +3543,8 @@ bool SimulatedKfd::report_wave_stopped(const std::shared_ptr<KfdProcess> &proc, 
       reserve_runtime_queue_exception(proc, queue_id, exception_mask);
     return false;
   }
+  if (runtime_failure_debuggable != nullptr)
+    *runtime_failure_debuggable = true;
   apply_debug_event_publication_hook_for_testing(proc);
   return notify_debug_event(proc, queue_id, exception_mask, retain_on_rejection,
                             /*reserve_runtime_on_rejection=*/retain_on_rejection);
@@ -3521,31 +3573,19 @@ bool SimulatedKfd::notify_debug_event(const std::shared_ptr<KfdProcess> &proc, u
     session_generation = session->second.generation;
     subscribed = (session->second.exception_enable_mask & exception_mask) != 0;
     if (subscribed && session->second.dbg_fd >= 0)
-      notifier = UniqueDriverFd(safe_fcntl(session->second.dbg_fd, F_DUPFD_CLOEXEC, 0));
+      notifier = UniqueDriverFd(duplicate_debug_notifier(session->second.dbg_fd));
     if ((!subscribed || notifier.get() < 0) && !retain_on_rejection)
       return false;
     std::lock_guard<std::mutex> alloc_lock(proc->alloc_mutex_);
     auto queue = proc->queue_snapshot_map_.find(queue_id);
     if (queue == proc->queue_snapshot_map_.end())
       return false;
-    if (queue->second.debug_notification_session_generation != session_generation) {
-      queue->second.debug_notification_session_generation = session_generation;
-      queue->second.debug_notification_pending_counts.fill(0);
-      queue->second.debug_notification_pending_status = 0;
-      queue->second.debug_notification_delivered_status = 0;
-    }
     queue->second.exception_status |= exception_mask;
     if (retain_on_rejection)
       queue->second.debug_notification_retained_status |= exception_mask;
     if (subscribed && notifier.get() >= 0) {
       notification_pending = true;
-      for (uint32_t bit = 0; bit < 64; ++bit) {
-        const uint64_t bit_mask = uint64_t{1} << bit;
-        if ((exception_mask & bit_mask) == 0)
-          continue;
-        ++queue->second.debug_notification_pending_counts[bit];
-        queue->second.debug_notification_pending_status |= bit_mask;
-      }
+      queue->second.begin_debug_notification(exception_mask, session_generation);
     }
     if (!notification_pending && reserve_runtime_on_rejection)
       queue->second.begin_runtime_exception(exception_mask);
@@ -3571,20 +3611,7 @@ bool SimulatedKfd::notify_debug_event(const std::shared_ptr<KfdProcess> &proc, u
     if (queue == proc->queue_snapshot_map_.end() ||
         queue->second.debug_notification_session_generation != session_generation)
       return false;
-    if (delivered)
-      queue->second.debug_notification_delivered_status |= exception_mask;
-    for (uint32_t bit = 0; bit < 64; ++bit) {
-      const uint64_t bit_mask = uint64_t{1} << bit;
-      if ((exception_mask & bit_mask) == 0 ||
-          queue->second.debug_notification_pending_counts[bit] == 0)
-        continue;
-      if (--queue->second.debug_notification_pending_counts[bit] != 0)
-        continue;
-      queue->second.debug_notification_pending_status &= ~bit_mask;
-      if ((queue->second.debug_notification_delivered_status & bit_mask) == 0 &&
-          (queue->second.debug_notification_retained_status & bit_mask) == 0)
-        queue->second.exception_status &= ~bit_mask;
-    }
+    queue->second.finish_debug_notification(exception_mask, delivered);
     if (!delivered && reserve_runtime_on_rejection)
       queue->second.begin_runtime_exception(exception_mask);
     accepted = delivered;
@@ -3595,18 +3622,23 @@ bool SimulatedKfd::notify_debug_event(const std::shared_ptr<KfdProcess> &proc, u
 bool SimulatedKfd::defer_wave_exception_to_runtime(amdgpu::Wavefront &wave, uint64_t exception_mask,
                                                    bool suspend_while_pending,
                                                    bool clear_debug_stop_on_success,
-                                                   bool runtime_already_reserved) {
+                                                   bool runtime_already_reserved,
+                                                   bool runtime_failure_debuggable) {
   auto proc = find_process(wave.process_id());
   if (proc && !runtime_already_reserved)
     reserve_runtime_queue_exception(proc, wave.queue_id(), exception_mask);
   wave.set_fatal_exception_pending(true);
   if (suspend_while_pending)
     wave.set_debug_suspended(true);
-  const bool queued = wave.cu().signal_queue_exception(wave.queue_id(), wave.process_id(),
-                                                       exception_mask, clear_debug_stop_on_success);
-  if (!queued && proc)
+  const bool queued =
+      wave.cu().signal_queue_exception(wave.queue_id(), wave.process_id(), exception_mask,
+                                       clear_debug_stop_on_success, runtime_failure_debuggable);
+  if (!queued && proc) {
+    if (runtime_exception_result_hook_for_testing_)
+      runtime_exception_result_hook_for_testing_(false);
     complete_runtime_queue_exception(wave.process_id(), wave.queue_id(), exception_mask,
-                                     /*delivered=*/false);
+                                     /*delivered=*/false, runtime_failure_debuggable);
+  }
   // Once a fatal path reaches this helper, the wave is either held here or in
   // its trap handler until the deferred result is known. The originating
   // instruction is therefore claimed even if no CP notification can be queued.
@@ -3804,12 +3836,15 @@ bool SimulatedKfd::on_wave_illegal_instruction(amdgpu::Wavefront &wave) {
   wave.set_fatal_exception_pending(true);
   wave.debug_trap(0);
   constexpr uint64_t kException = KFD_EC_MASK(EC_QUEUE_WAVE_ILLEGAL_INSTRUCTION);
-  if (!report_wave_stopped(proc, wave.queue_id(), gpu_id, ctx_base, ctx_size, kException)) {
+  bool runtime_failure_debuggable = false;
+  if (!report_wave_stopped(proc, wave.queue_id(), gpu_id, ctx_base, ctx_size, kException,
+                           /*retain_on_rejection=*/true, &runtime_failure_debuggable)) {
     wave.restore_debug_stop_state(saved);
     return defer_wave_exception_to_runtime(wave, kException,
                                            /*suspend_while_pending=*/true,
                                            /*clear_debug_stop_on_success=*/false,
-                                           /*runtime_already_reserved=*/true);
+                                           /*runtime_already_reserved=*/true,
+                                           runtime_failure_debuggable);
   }
   return true;
 }
@@ -3845,12 +3880,15 @@ bool SimulatedKfd::on_wave_memory_violation(amdgpu::Wavefront &wave, uint64_t, b
   wave.set_trapsts(wave.trapsts() | kTrapstsXnackError);
   wave.debug_trap(0);
   constexpr uint64_t kException = KFD_EC_MASK(EC_QUEUE_WAVE_MEMORY_VIOLATION);
-  if (!report_wave_stopped(proc, wave.queue_id(), gpu_id, ctx_base, ctx_size, kException)) {
+  bool runtime_failure_debuggable = false;
+  if (!report_wave_stopped(proc, wave.queue_id(), gpu_id, ctx_base, ctx_size, kException,
+                           /*retain_on_rejection=*/true, &runtime_failure_debuggable)) {
     wave.restore_debug_stop_state(saved);
     return defer_wave_exception_to_runtime(wave, kException,
                                            /*suspend_while_pending=*/true,
                                            /*clear_debug_stop_on_success=*/false,
-                                           /*runtime_already_reserved=*/true);
+                                           /*runtime_already_reserved=*/true,
+                                           runtime_failure_debuggable);
   }
   return true;
 }
@@ -3885,12 +3923,15 @@ bool SimulatedKfd::on_wave_alu_exception(amdgpu::Wavefront &wave) {
   wave.set_fatal_exception_pending(true);
   wave.debug_trap(0);
   constexpr uint64_t kException = KFD_EC_MASK(EC_QUEUE_WAVE_MATH_ERROR);
-  if (!report_wave_stopped(proc, wave.queue_id(), gpu_id, ctx_base, ctx_size, kException)) {
+  bool runtime_failure_debuggable = false;
+  if (!report_wave_stopped(proc, wave.queue_id(), gpu_id, ctx_base, ctx_size, kException,
+                           /*retain_on_rejection=*/true, &runtime_failure_debuggable)) {
     wave.restore_debug_stop_state(saved);
     return defer_wave_exception_to_runtime(wave, kException,
                                            /*suspend_while_pending=*/true,
                                            /*clear_debug_stop_on_success=*/false,
-                                           /*runtime_already_reserved=*/true);
+                                           /*runtime_already_reserved=*/true,
+                                           runtime_failure_debuggable);
   }
   return true;
 }
@@ -4505,12 +4546,11 @@ void SimulatedKfd::raise_process_debug_event(pid_t target_pid, uint64_t exceptio
     event.mask |= exception_mask;
     subscribed = (session->second.exception_enable_mask & exception_mask) != 0;
     if (subscribed && session->second.dbg_fd >= 0)
-      notifier = UniqueDriverFd(safe_fcntl(session->second.dbg_fd, F_DUPFD_CLOEXEC, 0));
+      notifier = UniqueDriverFd(duplicate_debug_notifier(session->second.dbg_fd));
   }
   if (!subscribed || notifier.get() < 0)
     return;
-  const uint64_t one = 1;
-  [[maybe_unused]] const ssize_t written = ::write(notifier.get(), &one, sizeof(one));
+  [[maybe_unused]] const int notification_result = write_debug_notification(notifier.get());
 }
 
 void SimulatedKfd::cancel_runtime_handshake(pid_t target_pid) {
@@ -4914,6 +4954,8 @@ int SimulatedKfd::debug_trap_ioctl(KfdProcess &caller, void *arg, int *target_me
     const int fl = safe_fcntl(dbg_fd, F_GETFL);
     if (fl == -1 || (fl & O_ACCMODE) == O_RDONLY)
       return -EBADF;
+    if ((fl & O_NONBLOCK) == 0)
+      return -EINVAL;
     if (daemon_mode_) {
       if (target_mem_fd == nullptr || *target_mem_fd < 0 || target_proc_fd < 0)
         return -EBADF;
@@ -5109,10 +5151,20 @@ int SimulatedKfd::debug_trap_ioctl(KfdProcess &caller, void *arg, int *target_me
           has_matching_event |= (entry.second.mask & enabled_mask) != 0;
     }
     UniqueDriverFd notifier;
-    if (has_matching_event && session_it->second.dbg_fd >= 0)
-      notifier = UniqueDriverFd(safe_fcntl(session_it->second.dbg_fd, F_DUPFD_CLOEXEC, 0));
+    int notification_error = 0;
+    if (has_matching_event) {
+      if (session_it->second.dbg_fd < 0) {
+        notification_error = -EBADF;
+      } else {
+        notifier = UniqueDriverFd(duplicate_debug_notifier(session_it->second.dbg_fd));
+        if (notifier.get() < 0)
+          notification_error = -errno;
+      }
+    }
     session_it->second.exception_enable_mask = enabled_mask;
     lk.unlock();
+    if (notification_error != 0)
+      return notification_error;
     if (notifier.get() >= 0)
       return write_debug_notification(notifier.get());
     return 0;

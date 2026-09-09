@@ -690,6 +690,8 @@ public:
     std::array<uint32_t, 64> runtime_exception_pending_counts{};
     /// Pending runtime bits for which at least one publication failed.
     uint64_t runtime_exception_failed_status = 0;
+    /// Failed runtime-owned bits waiting for a debugger to consume them.
+    uint64_t runtime_exception_retained_status = 0;
     /// Session that owns the notification bookkeeping below.
     uint64_t debug_notification_session_generation = 0;
     /// Debugger notification writes currently in flight, counted per bit.
@@ -720,19 +722,19 @@ public:
     }
 
     /// @brief Resolve one in-flight ROCr decision without losing overlaps.
-    void finish_runtime_exception(uint64_t mask, bool delivered) {
-      if (!delivered)
+    uint64_t finish_runtime_exception(uint64_t mask, bool delivered, bool retain_failure) {
+      uint64_t failed = 0;
+      if (!delivered && retain_failure)
         runtime_exception_failed_status |= mask;
       for (uint32_t bit = 0; bit < 64; ++bit) {
         const uint64_t bit_mask = uint64_t{1} << bit;
         if ((mask & bit_mask) == 0)
           continue;
         if (runtime_exception_pending_counts[bit] == 0) {
-          // Session teardown may clear an in-flight reservation. Recreate only
-          // failed status so a later debugger can discover the frozen wave.
-          if (!delivered) {
+          if (!delivered && retain_failure) {
             exception_status |= bit_mask;
-            debug_notification_retained_status |= bit_mask;
+            runtime_exception_retained_status |= bit_mask;
+            failed |= bit_mask;
           }
           continue;
         }
@@ -740,13 +742,51 @@ public:
           continue;
         runtime_exception_pending_status &= ~bit_mask;
         if ((runtime_exception_failed_status & bit_mask) != 0) {
-          debug_notification_retained_status |= bit_mask;
+          runtime_exception_retained_status |= bit_mask;
+          failed |= bit_mask;
         } else if (((debug_notification_pending_status | debug_notification_delivered_status |
-                     debug_notification_retained_status) &
+                     debug_notification_retained_status | runtime_exception_retained_status) &
                     bit_mask) == 0) {
           exception_status &= ~bit_mask;
         }
         runtime_exception_failed_status &= ~bit_mask;
+      }
+      return failed;
+    }
+
+    /// @brief Hide an event while its debugger-notifier write is in flight.
+    void begin_debug_notification(uint64_t mask, uint64_t session_generation) {
+      if (debug_notification_session_generation != session_generation) {
+        debug_notification_session_generation = session_generation;
+        debug_notification_pending_counts.fill(0);
+        debug_notification_pending_status = 0;
+        debug_notification_delivered_status = 0;
+      }
+      exception_status |= mask;
+      for (uint32_t bit = 0; bit < 64; ++bit) {
+        const uint64_t bit_mask = uint64_t{1} << bit;
+        if ((mask & bit_mask) == 0)
+          continue;
+        ++debug_notification_pending_counts[bit];
+        debug_notification_pending_status |= bit_mask;
+      }
+    }
+
+    /// @brief Commit one debugger-notifier result without losing overlaps.
+    void finish_debug_notification(uint64_t mask, bool delivered) {
+      if (delivered)
+        debug_notification_delivered_status |= mask;
+      for (uint32_t bit = 0; bit < 64; ++bit) {
+        const uint64_t bit_mask = uint64_t{1} << bit;
+        if ((mask & bit_mask) == 0 || debug_notification_pending_counts[bit] == 0)
+          continue;
+        if (--debug_notification_pending_counts[bit] != 0)
+          continue;
+        debug_notification_pending_status &= ~bit_mask;
+        if ((debug_notification_delivered_status & bit_mask) == 0 &&
+            (debug_notification_retained_status & bit_mask) == 0 &&
+            (runtime_exception_retained_status & bit_mask) == 0)
+          exception_status &= ~bit_mask;
       }
     }
 
@@ -756,14 +796,12 @@ public:
       exception_status &= ~consumed;
       debug_notification_delivered_status &= ~consumed;
       debug_notification_retained_status &= ~consumed;
+      runtime_exception_retained_status &= ~consumed;
     }
 
     /// @brief Clear every debugger-session-owned exception field.
     void clear_debugger_exception_state() {
-      exception_status = 0;
-      runtime_exception_pending_status = 0;
-      runtime_exception_pending_counts.fill(0);
-      runtime_exception_failed_status = 0;
+      exception_status &= runtime_exception_pending_status | runtime_exception_retained_status;
       debug_notification_session_generation = 0;
       debug_notification_pending_counts.fill(0);
       debug_notification_pending_status = 0;

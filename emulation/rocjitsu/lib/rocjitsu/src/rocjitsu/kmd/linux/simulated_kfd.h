@@ -224,6 +224,17 @@ public:
     debug_notification_result_hook_for_testing_ = std::move(hook);
   }
 
+  /// @brief Pause after ROCr decides queue-exception delivery and before ownership resolves.
+  void set_runtime_exception_result_hook_for_testing(std::function<void(bool)> hook) {
+    runtime_exception_result_hook_for_testing_ = std::move(hook);
+  }
+
+  /// @brief Inject an errno for debugger-notifier duplication.
+  void set_debug_notifier_dup_error_for_testing(std::optional<int> error) {
+    std::lock_guard<std::mutex> lock(debug_sessions_mutex_);
+    debug_notifier_dup_error_for_testing_ = error;
+  }
+
   /// @brief Publish a queue debug event without constructing a wave stop.
   /// @details This narrow seam exercises notifier transaction races and retained
   /// event re-notification through the same production helper.
@@ -512,7 +523,9 @@ private:
   void reserve_runtime_queue_exception(const std::shared_ptr<KfdProcess> &proc, uint32_t queue_id,
                                        uint64_t exception_mask);
   void complete_runtime_queue_exception(uint32_t process_id, uint32_t queue_id,
-                                        uint64_t exception_mask, bool delivered);
+                                        uint64_t exception_mask, bool delivered,
+                                        bool retain_failure = true);
+  int duplicate_debug_notifier(int fd);
   bool signal_runtime_queue_exception(uint32_t gpu_id, uint32_t queue_id, uint32_t process_id,
                                       uint64_t exception_mask);
 
@@ -525,11 +538,15 @@ private:
   bool defer_wave_exception_to_runtime(amdgpu::Wavefront &wf, uint64_t exception_mask,
                                        bool suspend_while_pending,
                                        bool clear_debug_stop_on_success = false,
-                                       bool runtime_already_reserved = false);
+                                       bool runtime_already_reserved = false,
+                                       bool runtime_failure_debuggable = true);
   /// @brief Publish a wave stop: serialize the queue, then wake the debugger.
   /// @param retain_on_rejection Whether a serialized stop whose notification
   ///        loses its subscription or notifier should remain in the queue's
   ///        exception status for a later debugger query.
+  /// @param runtime_failure_debuggable Receives whether CWSR serialization
+  ///        succeeded, so a later runtime-delivery failure can be exposed to a
+  ///        debugger without publishing an unusable queue snapshot.
   /// @returns True if the CWSR record was written and the event raised. False
   /// can still mean that CWSR serialization succeeded and, when retention is
   /// enabled, that exception status was latched. The caller must undo the stop
@@ -537,7 +554,8 @@ private:
   [[nodiscard]] bool report_wave_stopped(const std::shared_ptr<KfdProcess> &proc, uint32_t queue_id,
                                          uint32_t gpu_id, uint64_t ctx_base, uint32_t ctx_size,
                                          uint64_t exception_mask = KFD_EC_MASK(EC_QUEUE_WAVE_TRAP),
-                                         bool retain_on_rejection = true);
+                                         bool retain_on_rejection = true,
+                                         bool *runtime_failure_debuggable = nullptr);
 
   /// @brief Whether a wave stop on @p gpu_id could be published to a debugger.
   /// @details Checked *before* a handler claims a stop. The CWSR codec models
@@ -732,6 +750,8 @@ private:
   std::unordered_map<uint64_t, std::shared_ptr<QueueExceptionLock>> queue_exception_locks_;
   std::function<void(bool)> queue_exception_cleanup_hook_for_testing_;
   std::function<void(bool)> debug_notification_result_hook_for_testing_;
+  std::function<void(bool)> runtime_exception_result_hook_for_testing_;
+  std::optional<int> debug_notifier_dup_error_for_testing_;
   std::unordered_map<uint32_t, EventState *> event_dispatch_;
 
   /// @brief Process ID for local-mode (interposer). Set once in open().

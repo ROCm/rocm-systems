@@ -274,8 +274,8 @@ public:
     return sendmsg_handler_ && sendmsg_handler_(wf, message);
   }
 
-  using QueueExceptionHandler =
-      std::function<bool(uint32_t queue_id, uint32_t process_id, uint64_t status)>;
+  using QueueExceptionHandler = std::function<bool(
+      uint32_t queue_id, uint32_t process_id, uint64_t status, bool retain_failure_for_debugger)>;
   void set_queue_exception_handler(QueueExceptionHandler cb) {
     queue_exception_handler_ = std::move(cb);
   }
@@ -950,11 +950,12 @@ protected:
   /// processor takes its queue lock before this lock, so reporting synchronously
   /// here would invert that order against queue dispatch and destruction.
   bool defer_queue_exception(Wavefront *wave, uint32_t queue_id, uint32_t process_id,
-                             uint64_t status, bool clear_debug_stop_on_success = false) {
+                             uint64_t status, bool clear_debug_stop_on_success = false,
+                             bool retain_failure_for_debugger = true) {
     if (!cp_ || status == 0)
       return false;
-    pending_queue_exceptions_.push_back(
-        {queue_id, process_id, status, wave, clear_debug_stop_on_success});
+    pending_queue_exceptions_.push_back({queue_id, process_id, status, wave,
+                                         clear_debug_stop_on_success, retain_failure_for_debugger});
     return true;
   }
 
@@ -1065,6 +1066,7 @@ protected:
     uint64_t status;
     Wavefront *wave;
     bool clear_debug_stop_on_success;
+    bool retain_failure_for_debugger;
   };
 
   mutable std::recursive_mutex wave_state_mutex_;

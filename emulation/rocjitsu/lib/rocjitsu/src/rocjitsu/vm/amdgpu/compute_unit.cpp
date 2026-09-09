@@ -35,9 +35,10 @@ namespace rocjitsu {
 namespace amdgpu {
 bool InstructionComputeUnitView::signal_queue_exception(uint32_t queue_id, uint32_t process_id,
                                                         uint64_t status,
-                                                        bool clear_debug_stop_on_success) {
+                                                        bool clear_debug_stop_on_success,
+                                                        bool retain_failure_for_debugger) {
   return raw_cu().defer_queue_exception(&raw_wavefront(), queue_id, process_id, status,
-                                        clear_debug_stop_on_success);
+                                        clear_debug_stop_on_success, retain_failure_for_debugger);
 }
 
 uint32_t Wavefront::debug_read_sgpr(uint32_t reg) const {
@@ -309,7 +310,8 @@ void ComputeUnitCore::flush_cp_notifications() {
     for (const auto &exception : exceptions) {
       const bool delivered =
           queue_exception_handler_
-              ? queue_exception_handler_(exception.queue_id, exception.process_id, exception.status)
+              ? queue_exception_handler_(exception.queue_id, exception.process_id, exception.status,
+                                         exception.retain_failure_for_debugger)
               : cp_->signal_queue_exception(exception.queue_id, exception.process_id,
                                             exception.status);
       if (delivered && exception.wave != nullptr) {

@@ -60,7 +60,8 @@ public:
   /// Queue a runtime exception for delivery after instruction execution drops
   /// the compute unit's wave-state lock.
   bool signal_queue_exception(uint32_t queue_id, uint32_t process_id, uint64_t status,
-                              bool clear_debug_stop_on_success = false);
+                              bool clear_debug_stop_on_success = false,
+                              bool retain_failure_for_debugger = true);
 
 private:
   ComputeUnitCore &raw_cu() { return *cu_; }
