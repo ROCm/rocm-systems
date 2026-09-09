@@ -43,12 +43,17 @@ class WaitForJobTest(unittest.TestCase):
 
         with mock.patch.object(submit_slurm_job, "query_job", fake_query_job):
             with mock.patch.object(submit_slurm_job, "scancel_job", scancelled.append):
-                rc = wait_for_job("19010", 0.0, cancelled or (lambda: False), **kwargs)
-        return rc, scancelled, remaining
+                rc, result = wait_for_job(
+                    "19010", 0.0, cancelled or (lambda: False), **kwargs
+                )
+        return rc, result, scancelled, remaining
 
     def test_waits_through_non_terminal_states(self) -> None:
-        rc, scancelled, remaining = self._run(["PENDING", "RUNNING", "COMPLETED"])
+        rc, result, scancelled, remaining = self._run(
+            ["PENDING", "RUNNING", "COMPLETED"]
+        )
         self.assertEqual(rc, 0)
+        self.assertEqual(result.state, "COMPLETED")
         self.assertEqual(scancelled, [])
         self.assertEqual(remaining, [])
 
@@ -57,37 +62,45 @@ class WaitForJobTest(unittest.TestCase):
         # alive and still holding the reservation, with nothing scancelling it.
         for state in ("SUSPENDED", "RESV_DEL_HOLD", "REQUEUE_HOLD", "SPECIAL_EXIT"):
             with self.subTest(state=state):
-                rc, _, remaining = self._run([state, "COMPLETED"])
+                rc, result, _, remaining = self._run([state, "COMPLETED"])
                 self.assertEqual(rc, 0)
+                self.assertEqual(result.state, "COMPLETED")
                 self.assertEqual(remaining, [])
 
     def test_terminal_failure_still_returns_zero(self) -> None:
         # wait_for_job only reports "did we cancel it"; sacct is the success
-        # oracle, and evaluate() turns FAILED into a non-zero exit.
-        rc, scancelled, _ = self._run(["FAILED"])
+        # oracle, and evaluate() turns FAILED into a non-zero exit. The
+        # FAILED result itself must still come back to the caller: a second,
+        # independent sacct query right after the job ends can catch the
+        # accounting DB with no row yet and misread this as success.
+        rc, result, scancelled, _ = self._run(["FAILED"])
         self.assertEqual(rc, 0)
+        self.assertEqual(result.state, "FAILED")
         self.assertEqual(scancelled, [])
 
     def test_cancel_flag_scancels(self) -> None:
-        rc, scancelled, _ = self._run(["RUNNING"], cancelled=lambda: True)
+        rc, result, scancelled, _ = self._run(["RUNNING"], cancelled=lambda: True)
         self.assertEqual(rc, 1)
+        self.assertIsNone(result)
         self.assertEqual(scancelled, ["19010"])
 
     def test_missing_sacct_row_is_bounded(self) -> None:
         # "" is a non-terminal state, so an sacct that never produces a row
         # would otherwise spin until the GitHub job timeout with the
         # allocation still held.
-        rc, scancelled, _ = self._run(["", ""], missing_row_timeout=0.0)
+        rc, result, scancelled, _ = self._run(["", ""], missing_row_timeout=0.0)
         self.assertEqual(rc, 1)
+        self.assertIsNone(result)
         self.assertEqual(scancelled, ["19010"])
 
     def test_transient_empty_state_does_not_give_up(self) -> None:
         # query_job maps a CalledProcessError from sacct to state="". That must
         # not cancel a job that is otherwise reporting state.
-        rc, scancelled, remaining = self._run(
+        rc, result, scancelled, remaining = self._run(
             ["RUNNING", "", "COMPLETED"], missing_row_timeout=30.0
         )
         self.assertEqual(rc, 0)
+        self.assertEqual(result.state, "COMPLETED")
         self.assertEqual(scancelled, [])
         self.assertEqual(remaining, [])
 
@@ -102,14 +115,40 @@ class SubmitCommandTest(unittest.TestCase):
             return mock.Mock(returncode=0, stdout="19010\n", stderr="")
 
         with mock.patch.object(submit_slurm_job.subprocess, "run", fake_run):
-            with mock.patch.object(submit_slurm_job, "wait_for_job", lambda *a, **k: 0):
-                rc, job_id = submit_slurm_job.submit_and_wait(
+            with mock.patch.object(
+                submit_slurm_job, "wait_for_job", lambda *a, **k: (0, None)
+            ):
+                rc, job_id, result = submit_slurm_job.submit_and_wait(
+                    submit_slurm_job.Path("job.sbatch"), "ALL", None, None
+                )
+
+        self.assertEqual((rc, job_id, result), (0, "19010", None))
+        self.assertNotIn("--wait", seen["cmd"])
+        self.assertIn("--parsable", seen["cmd"])
+
+    def test_submit_returns_wait_for_jobs_terminal_result(self) -> None:
+        """submit_and_wait must hand back the JobResult wait_for_job saw.
+
+        Argus flagged that main() used to discard this and re-query sacct
+        itself, which can race the accounting DB right after a job ends and
+        read a real FAILED job as "no data" (i.e. success). Pinning that the
+        result flows through here is what makes that re-query unnecessary.
+        """
+        failed = JobResult(state="FAILED", exit_code="1:0")
+
+        def fake_run(cmd, **kwargs):
+            return mock.Mock(returncode=0, stdout="19010\n", stderr="")
+
+        with mock.patch.object(submit_slurm_job.subprocess, "run", fake_run):
+            with mock.patch.object(
+                submit_slurm_job, "wait_for_job", lambda *a, **k: (0, failed)
+            ):
+                rc, job_id, result = submit_slurm_job.submit_and_wait(
                     submit_slurm_job.Path("job.sbatch"), "ALL", None, None
                 )
 
         self.assertEqual((rc, job_id), (0, "19010"))
-        self.assertNotIn("--wait", seen["cmd"])
-        self.assertIn("--parsable", seen["cmd"])
+        self.assertIs(result, failed)
 
 
 if __name__ == "__main__":

@@ -107,11 +107,14 @@ def submit_and_wait(
     partition: str | None,
     reservation: str | None = None,
     wait_poll_interval: float = 15.0,
-) -> tuple[int, str]:
+) -> tuple[int, str, JobResult | None]:
     """Submit with `sbatch --parsable`, wait, scancel on INT/TERM/HUP.
 
-    Returns (returncode, job_id). returncode is 0 only if we did not cancel
-    the job from this process; sacct is still the source of truth for success.
+    Returns (returncode, job_id, result). returncode is 0 only if we did not
+    cancel the job from this process; sacct is still the source of truth for
+    success. result is the terminal JobResult wait_for_job observed (or None
+    if the job never reached one from this process's point of view) -- pass
+    it straight to evaluate() instead of re-querying sacct.
     """
     cmd = ["sbatch", "--parsable", f"--export={export}"]
     if partition:
@@ -156,21 +159,23 @@ def submit_and_wait(
             (chdir / "slurm-job-id").write_text(f"{job_id}\n")
             log(f"==> wrote {chdir / 'slurm-job-id'}")
         if proc.returncode != 0:
-            return proc.returncode, job_id
+            return proc.returncode, job_id, None
         if not job_id:
             log("WARNING: sbatch succeeded but printed no job id")
-            return proc.returncode, job_id
+            return proc.returncode, job_id, None
         if cancel_requested:
             scancel_job(job_id)
-            return 1, job_id
+            return 1, job_id, None
 
         log(f"==> waiting for job {job_id} (scancel on INT/TERM/HUP)")
-        wait_rc = wait_for_job(job_id, wait_poll_interval, lambda: cancel_requested)
-        return wait_rc, job_id
+        wait_rc, result = wait_for_job(
+            job_id, wait_poll_interval, lambda: cancel_requested
+        )
+        return wait_rc, job_id, result
     except KeyboardInterrupt:
         cancel_requested = True
         scancel_job(job_id)
-        return 130, job_id
+        return 130, job_id, None
     finally:
         for sig, handler in previous.items():
             signal.signal(sig, handler)
@@ -212,11 +217,16 @@ def wait_for_job(
     poll_interval: float,
     cancelled: Callable[[], bool],
     missing_row_timeout: float = MISSING_ROW_TIMEOUT,
-) -> int:
+) -> tuple[int, JobResult | None]:
     """Block until sacct reports a terminal state, or until a cancel flag is set.
 
-    Returns 0 if the job reached a terminal state on its own, 1 if we scancelled
-    it or gave up waiting.
+    Returns (rc, result). rc is 0 if the job reached a terminal state on its
+    own, 1 if we scancelled it or gave up waiting. result is the terminal
+    JobResult this function actually observed, or None if it gave up/cancelled
+    without ever seeing one. Callers must use this result rather than
+    re-querying sacct themselves: right after a job finishes, sacct's
+    accounting DB can lag and briefly return nothing, so a second, independent
+    query can read a real FAILED job as "no data" and report success.
 
     A real PENDING/RUNNING state is waited on without a deadline -- the queue is
     allowed to be slow, and the GitHub job timeout is the backstop. What *is*
@@ -231,11 +241,11 @@ def wait_for_job(
     while True:
         if cancelled():
             scancel_job(job_id)
-            return 1
+            return 1, None
         result = query_job(job_id, retries=1, interval=0)
         if result.state:
             if result.state not in NON_TERMINAL_STATES:
-                return 1 if cancelled() else 0
+                return (1 if cancelled() else 0), result
             last_state_seen = time.monotonic()
         elif time.monotonic() - last_state_seen >= missing_row_timeout:
             # Cancel: sacct is the only success oracle we have, so this run is
@@ -245,12 +255,12 @@ def wait_for_job(
                 f"ERROR: sacct reported no state for job {job_id} for "
                 f"{missing_row_timeout:.0f}s; giving up and cancelling it"
             )
-            return 1
+            return 1, None
         deadline = time.monotonic() + poll_interval
         while time.monotonic() < deadline:
             if cancelled():
                 scancel_job(job_id)
-                return 1
+                return 1, None
             remaining = deadline - time.monotonic()
             if remaining <= 0:
                 break
@@ -352,7 +362,7 @@ def main(argv: list[str]) -> int:
     if args.chdir:
         args.chdir.mkdir(parents=True, exist_ok=True)
 
-    sbatch_rc, job_id = submit_and_wait(
+    sbatch_rc, job_id, wait_result = submit_and_wait(
         args.script,
         args.export,
         args.chdir,
@@ -362,9 +372,14 @@ def main(argv: list[str]) -> int:
     )
     log(f"slurm wait rc={sbatch_rc}, job_id={job_id}")
 
-    result = JobResult(state="", exit_code="")
-    if job_id:
-        result = query_job(job_id, args.poll_retries, args.poll_interval)
+    # wait_for_job already saw a terminal sacct row -- trust it rather than
+    # re-querying, since a second query right after the job ends can race
+    # sacct's accounting-DB lag and read a real failure as "no data".
+    result = wait_result
+    if result is None:
+        result = JobResult(state="", exit_code="")
+        if job_id:
+            result = query_job(job_id, args.poll_retries, args.poll_interval)
 
     return evaluate(sbatch_rc, job_id, result)
 
