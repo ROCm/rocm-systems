@@ -12,6 +12,7 @@
 #include <cstdint>
 #include <iosfwd>
 #include <limits>
+#include <map>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -308,5 +309,62 @@ const char* smi_amdgpu_pp_dpm_filename_for_clk_type(amdsmi_clk_type_t clk_type);
  *  @param[out] info Structure to reset to its not-supported state.
  */
 void init_asic_info_defaults(amdsmi_asic_info_t* info);
+
+/**
+ * PACKAGE_VERSION (key) mapped to PACKAGE_NAME (value) for each amdgpu DKMS package.
+ */
+using smi_amdgpu_dkms_packages_t = std::map<std::string, std::string>;
+
+/**
+ *  @brief List amdgpu DKMS packages under /var/lib/dkms/amdgpu/.
+ *
+ *  @details Walks version-shaped subdirectories (for example
+ *  6.19.14-2370381.24.04), checks that each source symlink points to
+ *  /usr/src/amdgpu-<version>, reads source/dkms.conf, and records
+ *  PACKAGE_VERSION -> PACKAGE_NAME pairs. Ignores kernel-* symlinks and
+ *  any directory that fails validation. Results are sorted by version
+ *  string.
+ *
+ *  @param[out] packages Cleared on entry, then filled with one entry per
+ *  valid package.
+ *
+ *  @retval ::AMDSMI_STATUS_SUCCESS Scan finished; the map may be empty.
+ *  @retval ::AMDSMI_STATUS_INVAL @p packages is null.
+ *  @retval ::AMDSMI_STATUS_NOT_SUPPORTED /var/lib/dkms/amdgpu/ is absent
+ *          or unreadable.
+ */
+auto smi_amdgpu_get_dkms_versions(smi_amdgpu_dkms_packages_t* packages) -> amdsmi_status_t;
+
+/**
+ *  @brief List amdgpu DKMS packages under a caller-supplied root directory.
+ *
+ *  @details Same validation as ``smi_amdgpu_get_dkms_versions``, but reads
+ *  @p dkms_root instead of ``/var/lib/dkms/amdgpu/``. Unit tests pass a
+ *  temporary tree; production callers should use
+ *  ``smi_amdgpu_get_dkms_versions``.
+ *
+ *  @param[in] dkms_root Base directory containing version subdirectories.
+ *  @param[out] packages Cleared on entry, then filled with one entry per
+ *  valid package.
+ */
+auto smi_amdgpu_get_dkms_versions_from(std::string_view dkms_root,
+                                       smi_amdgpu_dkms_packages_t* packages) -> amdsmi_status_t;
+
+/**
+ *  @brief List amdgpu DKMS packages under a caller-supplied root and source tree.
+ *
+ *  @details Same as ``smi_amdgpu_get_dkms_versions_from`` but validates
+ *  ``source`` symlinks against @p source_tree_prefix concatenated with the
+ *  version directory name (for example ``/usr/src/amdgpu-`` +
+ *  ``6.19.14-2370381.24.04``). Unit tests pass a temporary prefix.
+ *
+ *  @param[in] dkms_root Base directory containing version subdirectories.
+ *  @param[in] source_tree_prefix Prefix for the ``source`` symlink target path.
+ *  @param[out] packages Cleared on entry, then filled with one entry per
+ *  valid package.
+ */
+auto smi_amdgpu_get_dkms_versions_from(std::string_view dkms_root,
+                                       std::string_view source_tree_prefix,
+                                       smi_amdgpu_dkms_packages_t* packages) -> amdsmi_status_t;
 
 #endif  // AMD_SMI_INCLUDE_AMD_SMI_UTILS_H_
