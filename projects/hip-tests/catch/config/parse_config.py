@@ -47,6 +47,19 @@ def parse_args():
     return parser.parse_args()
 
 
+def _skip_targets(field):
+    """Return the platform/arch/config targets from a skip field.
+
+    A skip field is either a flat list of targets ([amd_windows]) or a mapping
+    with a 'targets' list plus an optional 'reason' scalar
+    ({targets: [...], reason: ...}). Only the targets drive tag generation; the
+    reason is metadata for other tooling and is ignored here.
+    """
+    if isinstance(field, dict):
+        return field.get("targets", [])
+    return field
+
+
 def create_test_definition(
     group, case_name, case_config, platform, os_name, arch, asan=False
 ):
@@ -54,12 +67,14 @@ def create_test_definition(
     tags = case_config.get("tags", [])
     disabled = case_config.get("disabled", [])
     unsupported = case_config.get("unsupported", [])
-    # Merge both skip fields into one ordered local (disabled first) so the match
-    # and promotion logic below is identical for either field. Do not mutate the
-    # source lists. "disabled" is temporary/regressions, "unsupported" is
-    # permanent; both produce the same [disabled] skip tag and [exclude_<entry>]
-    # promotions that CI and the compute-utils/WSL runners depend on.
-    skip_reasons = disabled + unsupported
+    # Extract the targets from each skip field (list form or {targets, reason}
+    # mapping form) and merge into one ordered local (disabled first) so the
+    # match and promotion logic below is identical for either field. Do not
+    # mutate the source lists. "disabled" is temporary/regressions, "unsupported"
+    # is permanent; both produce the same [disabled] skip tag and
+    # [exclude_<entry>] promotions that CI and the compute-utils/WSL runners
+    # depend on.
+    skip_targets = _skip_targets(disabled) + _skip_targets(unsupported)
 
     tags_str = ""
 
@@ -69,9 +84,9 @@ def create_test_definition(
     tags_str += f"[{group}]"
 
     if (
-        f"{platform}_{os_name}" in skip_reasons
-        or arch in skip_reasons
-        or (asan and "asan" in skip_reasons)
+        f"{platform}_{os_name}" in skip_targets
+        or arch in skip_targets
+        or (asan and "asan" in skip_targets)
     ):
         # Disabled on this platform (e.g. amd_linux) or arch (e.g. gfx1260).
         # Use the [disabled] tag (no leading dot) so it is visible in --list-tests
@@ -85,7 +100,7 @@ def create_test_definition(
     # specific labels a test is disabled for (incl. OS labels dropped above).
     # Prefix is "exclude_" (not "disabled_") so it does not substring-match a
     # ctest -LE disabled filter; consumers should match anchored ^exclude_<entry>$.
-    for entry in skip_reasons:
+    for entry in skip_targets:
         tags_str += f"[exclude_{entry}]"
 
     return f'#define {case_name} "{case_name}", "{tags_str}"'

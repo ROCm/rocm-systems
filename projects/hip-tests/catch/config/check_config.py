@@ -35,15 +35,20 @@ def main():
             for field in ("disabled", "unsupported"):
                 if field not in case_config:
                     continue
-                # Skip fields must be flat YAML lists of tokens. A scalar or
-                # mapping would break tag generation (a string is iterated
-                # char-by-char; a mapping fails the list concatenation in
-                # parse_config). The optional sibling 'reason' scalar is metadata
-                # and is intentionally NOT enforced yet — reason enforcement is
+                value = case_config[field]
+                # A skip field is either a flat list of targets, or a mapping
+                # with a 'targets' list plus an optional 'reason' scalar. The
+                # reason is metadata and is intentionally NOT enforced yet —
                 # deferred to a later phase (AIRUNTIME-2744):
                 # https://amd-hub.atlassian.net/browse/AIRUNTIME-2744
-                if not isinstance(case_config[field], list):
-                    invalid_skip_fields.append(f"  {group}/{case_name}: '{field}'")
+                # We only guard that the targets are a list, since a scalar
+                # breaks tag generation (a string is iterated char-by-char) and
+                # a malformed mapping fails the parser's list concatenation.
+                if isinstance(value, list):
+                    continue
+                if isinstance(value, dict) and isinstance(value.get("targets"), list):
+                    continue
+                invalid_skip_fields.append(f"  {group}/{case_name}: '{field}'")
 
     if missing:
         print(
@@ -56,7 +61,7 @@ def main():
 
     if invalid_skip_fields:
         print(
-            f"[check_config] {ERROR}ERROR: The following test cases have a 'disabled'/'unsupported' field that is not a YAML list:{RESET}",
+            f"[check_config] {ERROR}ERROR: The following test cases have a 'disabled'/'unsupported' field that is neither a YAML list nor a mapping with a 'targets' list:{RESET}",
             file=sys.stderr,
         )
         for entry in invalid_skip_fields:
