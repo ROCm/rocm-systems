@@ -8,6 +8,11 @@
 namespace rocprofsys::domains::callback
 {
 
+template <typename Externals>
+inline void
+on_code_object_configure()
+{}
+
 template <typename SdkBackend, typename Externals>
 inline void
 on_code_object(typename SdkBackend::callback_tracing_record_t record,
@@ -27,7 +32,8 @@ inline constexpr auto k_code_object = callback_domain_definition<SdkBackend>{
             .mode  = collection_mode::callback,
             .group = std::nullopt,
         },
-    .on_record = on_code_object<SdkBackend, Externals>
+    .on_record    = on_code_object<SdkBackend, Externals>,
+    .on_configure = on_code_object_configure<Externals>
 };
 
 }  // namespace rocprofsys::domains::callback

@@ -210,6 +210,17 @@ struct agent_t
     std::size_t device_type_index = 0;
 };
 
+// Every production on_configure() body calls exactly these two Externals members
+// unconditionally (add_string, then get_agents_by_type); mocked so tests can verify
+// on_configure() actually ran instead of just not crashing.
+struct gmock_externals
+{
+    MOCK_METHOD(void, add_string, (std::string_view value));
+    MOCK_METHOD(std::vector<std::shared_ptr<agent_t>>, get_agents_by_type, (int type));
+};
+
+std::unique_ptr<StrictMock<gmock_externals>> g_externals_mock;
+
 struct externals
 {
     struct pmc_info_t
@@ -271,9 +282,9 @@ struct externals
 
     struct agent_manager_t
     {
-        std::vector<std::shared_ptr<agent_t>> get_agents_by_type(int /*type*/)
+        std::vector<std::shared_ptr<agent_t>> get_agents_by_type(int type)
         {
-            return {};
+            return g_externals_mock->get_agents_by_type(type);
         }
 
         agent_t& get_agent_by_handle(std::uint64_t /*handle*/)
@@ -292,7 +303,10 @@ struct externals
         return manager;
     }
 
-    static void add_string(std::string_view /*value*/) {}
+    static void add_string(std::string_view value)
+    {
+        g_externals_mock->add_string(value);
+    }
     static void add_thread_info(const thread_info_t& /*info*/) {}
     static void add_track(const track_t& /*info*/) {}
     static void add_pmc_info(const pmc_info_t& /*info*/) {}
@@ -449,11 +463,28 @@ protected:
     void SetUp() override
     {
         g_mock           = std::make_unique<StrictMock<gmock_sdk_backend>>();
+        g_externals_mock = std::make_unique<StrictMock<gmock_externals>>();
         g_buffer_table   = {};
         g_callback_table = {};
     }
 
-    void TearDown() override { g_mock.reset(); }
+    void TearDown() override
+    {
+        g_mock.reset();
+        g_externals_mock.reset();
+    }
+
+    // Every production on_configure() body calls add_string(category_name) followed by
+    // get_agents_by_type(AGENT_TYPE_GPU), unconditionally and exactly once; asserting
+    // both confirms on_configure() actually ran rather than merely not crashing.
+    void expect_on_configure_ran(std::string_view category_name)
+    {
+        InSequence seq;
+        EXPECT_CALL(*g_externals_mock, add_string(Eq(category_name))).Times(1);
+        EXPECT_CALL(*g_externals_mock, get_agents_by_type(Eq(externals::AGENT_TYPE_GPU)))
+            .Times(1)
+            .WillOnce(Return(std::vector<std::shared_ptr<agent_t>>{}));
+    }
 
     void expect_create_context(const mock_sdk::context_id_t& context)
     {
@@ -572,6 +603,7 @@ TEST_F(domain_service_test,
         context, buffer, thread,
         static_cast<mock_sdk::buffer_tracing_kind_t>(mock_sdk::BUFFER_TRACING_KFD_QUEUE),
         domains::buffered::k_kfd_queue<mock_sdk, externals>.on_records, { 0, 1 });
+    expect_on_configure_ran(externals::kfd_queue_category_name);
     expect_start_context(context);
 
     service.configure(std::vector<domain_selection>{ domain_selection{
@@ -700,6 +732,7 @@ TEST_F(domain_service_test,
         context, buffer, thread,
         static_cast<mock_sdk::buffer_tracing_kind_t>(mock_sdk::BUFFER_TRACING_KFD_QUEUE),
         domains::buffered::k_kfd_queue<mock_sdk, externals>.on_records, { 0, 1 });
+    expect_on_configure_ran(externals::kfd_queue_category_name);
     expect_start_context(context);
 
     service.configure(std::vector<domain_selection>{
@@ -736,6 +769,7 @@ TEST_F(domain_service_test, flush_calls_flush_on_each_configured_buffered_domain
         context, buffer, thread,
         static_cast<mock_sdk::buffer_tracing_kind_t>(mock_sdk::BUFFER_TRACING_KFD_QUEUE),
         domains::buffered::k_kfd_queue<mock_sdk, externals>.on_records, { 0 });
+    expect_on_configure_ran(externals::kfd_queue_category_name);
     expect_start_context(context);
 
     service.configure(std::vector<domain_selection>{ domain_selection{
@@ -745,6 +779,218 @@ TEST_F(domain_service_test, flush_calls_flush_on_each_configured_buffered_domain
     service.flush();
 
     expect_destroy_buffer(buffer);
+}
+
+TEST_F(domain_service_test, configure_calls_on_configure_when_domain_defines_it)
+{
+    g_buffer_table = mock_sdk::tracing_names_t{
+        .entries = { { .name       = "kfd_page_fault",
+                       .operations = { "op0" },
+                       .value      = mock_sdk::BUFFER_TRACING_KFD_PAGE_FAULT } }
+    };
+
+    sut_t service;
+
+    const mock_sdk::context_id_t         context{ 1 };
+    const mock_sdk::buffer_id_t          buffer{ 50 };
+    const mock_sdk::callback_thread_id_t thread{ 5 };
+
+    expect_create_context(context);
+    expect_configure_buffered(
+        context, buffer, thread,
+        static_cast<mock_sdk::buffer_tracing_kind_t>(
+            mock_sdk::BUFFER_TRACING_KFD_PAGE_FAULT),
+        domains::buffered::k_kfd_page_fault<mock_sdk, externals>.on_records, { 0 });
+    expect_on_configure_ran(externals::kfd_page_fault_category_name);
+    expect_start_context(context);
+
+    service.configure(std::vector<domain_selection>{ domain_selection{
+        .name = "kfd_page_fault", .group = std::nullopt, .operations = std::nullopt } });
+
+    expect_destroy_buffer(buffer);
+}
+
+TEST_F(domain_service_test, configure_skips_on_configure_when_domain_has_none)
+{
+    g_buffer_table = mock_sdk::tracing_names_t{
+        .entries = { { .name       = "kfd_event_page_fault",
+                       .operations = { "op0" },
+                       .value      = mock_sdk::BUFFER_TRACING_KFD_EVENT_PAGE_FAULT } }
+    };
+
+    sut_t service;
+
+    const mock_sdk::context_id_t         context{ 1 };
+    const mock_sdk::buffer_id_t          buffer{ 50 };
+    const mock_sdk::callback_thread_id_t thread{ 5 };
+
+    expect_create_context(context);
+    expect_configure_buffered(
+        context, buffer, thread,
+        static_cast<mock_sdk::buffer_tracing_kind_t>(
+            mock_sdk::BUFFER_TRACING_KFD_EVENT_PAGE_FAULT),
+        domains::buffered::k_kfd_event_page_fault<mock_sdk, externals>.on_records, { 0 });
+    // No expect_on_configure_ran(): kfd_event_page_fault has no on_configure callback,
+    // so StrictMock<gmock_externals> fails the test if add_string/get_agents_by_type
+    // are called here.
+    expect_start_context(context);
+
+    service.configure(
+        std::vector<domain_selection>{ domain_selection{ .name  = "kfd_event_page_fault",
+                                                         .group = std::nullopt,
+                                                         .operations = std::nullopt } });
+
+    expect_destroy_buffer(buffer);
+}
+
+TEST_F(domain_service_test,
+       configure_calls_on_configure_for_callback_domain_that_defines_it)
+{
+    // on_code_object_configure() is a no-op, so it has no Externals side effect to
+    // assert on; this instead asserts the precondition domain_service's `if` branches
+    // on (on_configure is non-null) and that invoking it does not throw or crash.
+    constexpr const auto& code_object_definition =
+        domains::callback::k_code_object<mock_sdk, externals>;
+    ASSERT_NE(code_object_definition.on_configure, nullptr);
+
+    g_callback_table = mock_sdk::tracing_names_t{
+        .entries = { { .name       = "code_object",
+                       .operations = {},
+                       .value      = mock_sdk::CALLBACK_TRACING_CODE_OBJECT } }
+    };
+
+    sut_t service;
+
+    const mock_sdk::context_id_t context{ 2 };
+
+    expect_create_context(context);
+    expect_configure_callback(
+        context,
+        static_cast<mock_sdk::callback_tracing_kind_t>(
+            mock_sdk::CALLBACK_TRACING_CODE_OBJECT),
+        domains::callback::k_code_object<mock_sdk, externals>.on_record, {});
+    expect_start_context(context);
+
+    service.configure(std::vector<domain_selection>{ domain_selection{
+        .name = "code_object", .group = std::nullopt, .operations = std::nullopt } });
+
+    const auto configuration = service.configuration();
+    ASSERT_EQ(configuration.size(), 1u);
+    EXPECT_EQ(configuration[0].key.value, mock_sdk::CALLBACK_TRACING_CODE_OBJECT);
+}
+
+TEST_F(domain_service_test,
+       configure_selects_domains_by_group_case_insensitively_and_configures_all_matches)
+{
+    g_buffer_table = mock_sdk::tracing_names_t{
+        .entries = { { .name       = "kfd_queue",
+                       .operations = { "op0" },
+                       .value      = mock_sdk::BUFFER_TRACING_KFD_QUEUE },
+                     { .name       = "kfd_page_fault",
+                       .operations = { "op0" },
+                       .value      = mock_sdk::BUFFER_TRACING_KFD_PAGE_FAULT } }
+    };
+
+    sut_t service;
+
+    const mock_sdk::context_id_t         context{ 1 };
+    const mock_sdk::buffer_id_t          queue_buffer{ 50 };
+    const mock_sdk::buffer_id_t          page_fault_buffer{ 51 };
+    const mock_sdk::callback_thread_id_t queue_thread{ 5 };
+    const mock_sdk::callback_thread_id_t page_fault_thread{ 6 };
+
+    expect_create_context(context);
+    expect_configure_buffered(
+        context, queue_buffer, queue_thread,
+        static_cast<mock_sdk::buffer_tracing_kind_t>(mock_sdk::BUFFER_TRACING_KFD_QUEUE),
+        domains::buffered::k_kfd_queue<mock_sdk, externals>.on_records, { 0 });
+    expect_on_configure_ran(externals::kfd_queue_category_name);
+    expect_configure_buffered(
+        context, page_fault_buffer, page_fault_thread,
+        static_cast<mock_sdk::buffer_tracing_kind_t>(
+            mock_sdk::BUFFER_TRACING_KFD_PAGE_FAULT),
+        domains::buffered::k_kfd_page_fault<mock_sdk, externals>.on_records, { 0 });
+    expect_on_configure_ran(externals::kfd_page_fault_category_name);
+    expect_start_context(context);
+
+    service.configure(std::vector<domain_selection>{ domain_selection{
+        .name = std::nullopt, .group = "KFD_EVENTS", .operations = std::nullopt } });
+
+    const auto configuration = service.configuration();
+    ASSERT_EQ(configuration.size(), 2u);
+    EXPECT_EQ(configuration[0].key.value, mock_sdk::BUFFER_TRACING_KFD_QUEUE);
+    EXPECT_EQ(configuration[1].key.value, mock_sdk::BUFFER_TRACING_KFD_PAGE_FAULT);
+
+    expect_destroy_buffer(queue_buffer);
+    expect_destroy_buffer(page_fault_buffer);
+}
+
+TEST_F(domain_service_test,
+       configure_selects_all_available_domains_when_selection_has_no_name_or_group)
+{
+    g_buffer_table = mock_sdk::tracing_names_t{
+        .entries = { { .name       = "kfd_queue",
+                       .operations = { "op0" },
+                       .value      = mock_sdk::BUFFER_TRACING_KFD_QUEUE },
+                     { .name       = "kfd_page_fault",
+                       .operations = { "op0" },
+                       .value      = mock_sdk::BUFFER_TRACING_KFD_PAGE_FAULT } }
+    };
+
+    sut_t service;
+
+    const mock_sdk::context_id_t         context{ 1 };
+    const mock_sdk::buffer_id_t          queue_buffer{ 50 };
+    const mock_sdk::buffer_id_t          page_fault_buffer{ 51 };
+    const mock_sdk::callback_thread_id_t queue_thread{ 5 };
+    const mock_sdk::callback_thread_id_t page_fault_thread{ 6 };
+
+    expect_create_context(context);
+    expect_configure_buffered(
+        context, queue_buffer, queue_thread,
+        static_cast<mock_sdk::buffer_tracing_kind_t>(mock_sdk::BUFFER_TRACING_KFD_QUEUE),
+        domains::buffered::k_kfd_queue<mock_sdk, externals>.on_records, { 0 });
+    expect_on_configure_ran(externals::kfd_queue_category_name);
+    expect_configure_buffered(
+        context, page_fault_buffer, page_fault_thread,
+        static_cast<mock_sdk::buffer_tracing_kind_t>(
+            mock_sdk::BUFFER_TRACING_KFD_PAGE_FAULT),
+        domains::buffered::k_kfd_page_fault<mock_sdk, externals>.on_records, { 0 });
+    expect_on_configure_ran(externals::kfd_page_fault_category_name);
+    expect_start_context(context);
+
+    // No name and no group set: match_domains() falls through to its final branch,
+    // which selects every available domain.
+    service.configure(std::vector<domain_selection>{ domain_selection{
+        .name = std::nullopt, .group = std::nullopt, .operations = std::nullopt } });
+
+    const auto configuration = service.configuration();
+    ASSERT_EQ(configuration.size(), 2u);
+    EXPECT_EQ(configuration[0].key.value, mock_sdk::BUFFER_TRACING_KFD_QUEUE);
+    EXPECT_EQ(configuration[1].key.value, mock_sdk::BUFFER_TRACING_KFD_PAGE_FAULT);
+
+    expect_destroy_buffer(queue_buffer);
+    expect_destroy_buffer(page_fault_buffer);
+}
+
+TEST_F(domain_service_test, configure_throws_runtime_error_for_unknown_group)
+{
+    g_buffer_table = mock_sdk::tracing_names_t{
+        .entries = { { .name       = "kfd_queue",
+                       .operations = { "op0" },
+                       .value      = mock_sdk::BUFFER_TRACING_KFD_QUEUE } }
+    };
+
+    sut_t service;
+
+    EXPECT_THROW(
+        {
+            service.configure(std::vector<domain_selection>{
+                domain_selection{ .name       = std::nullopt,
+                                  .group      = "no_such_group",
+                                  .operations = std::nullopt } });
+        },
+        std::runtime_error);
 }
 
 }  // namespace
