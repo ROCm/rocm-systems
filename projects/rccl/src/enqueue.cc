@@ -1213,13 +1213,13 @@ static ncclResult_t addP2pToPlan(struct ncclComm* comm, struct ncclKernelPlan* p
   struct ncclProxyOp proxyOps[2] = {};
   int nProxyOps = selfSend ? 0 : 2;
   // Latency-bound send/recv uses one of two separately-generated kernel variants:
-  //   - LL128 kernel: only generated for gfx942/gfx950 (see reg_values_of() in the device codegen),
-  //     and only activated when this comm has LL128 enabled and NCCL_ALLOC_P2P_NET_LL_BUFFERS=1
+  //   - LL128 kernel: only activated on gfx942/gfx950 (it is also built for gfx1250 so its
+  //     table slot is not a nullptr), and only when this comm has LL128 enabled and NCCL_ALLOC_P2P_NET_LL_BUFFERS=1
   //     (which is also what makes the LL128 staging buffer available on network connections).
   //   - legacy LL kernel: every other arch/comm, or when NCCL_ALLOC_P2P_NET_LL_BUFFERS=0.
   // The choice is per-communicator, so all P2P ops in a plan agree on the kernel variant.
-  // cudaArch is 100*major + 10*minor: 940 = gfx942, 950 = gfx950 -- the only archs whose LL128
-  // send/recv kernel is generated (see reg_values_of("SendRecv") in the device codegen).
+  // cudaArch is 100*major + 10*minor: 940 = gfx942, 950 = gfx950 -- the only archs that
+  // activate the LL128 send/recv kernel.
   // LL128 send/recv requires ALL of:
   //   - ENABLE_LL128 compiled in: otherwise the reg=1 LL128 kernel is not built (see the arch guard
   //     in generate.py and DeviceLinker.cmake), yet the host func-id table still maps it, so

@@ -6,8 +6,8 @@
 
 // The one register_stubs.cc entry that is a controllable seam, not a hard abort.
 
-#ifndef RCCL_TEST_HOST_REGISTER_FAKES_H_
-#define RCCL_TEST_HOST_REGISTER_FAKES_H_
+#ifndef RCCL_TEST_HOST_REGISTER_STUBS_H_
+#define RCCL_TEST_HOST_REGISTER_STUBS_H_
 
 #include <functional>
 
@@ -22,9 +22,6 @@ using ncclRegisterCollBuffersFn =
 
 extern ncclRegisterCollBuffersFn g_ncclRegisterCollBuffers;
 
-// The default: aborts, so an unhooked test still fails loudly.
-ncclRegisterCollBuffersFn RegisterCollBuffersFailLoud();
+void ResetRegisterStubs();
 
-void ResetRegisterFakes();
-
-#endif  // RCCL_TEST_HOST_REGISTER_FAKES_H_
+#endif  // RCCL_TEST_HOST_REGISTER_STUBS_H_

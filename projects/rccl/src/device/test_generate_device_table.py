@@ -36,8 +36,8 @@ GENERATE_PY = os.path.join(HERE, "generate.py")
 #
 # SendRecv is emitted as TWO latency-protocol kernel variants (reg_values_of):
 #   reg=0 -> legacy LL send/recv kernel, built unguarded on every arch (the default)
-#   reg=1 -> LL128 send/recv kernel, arch-guarded to gfx942/gfx950 + ENABLE_LL128. Emitted
-#            for every unroll regardless: a hole would shift that table's later indices.
+#   reg=1 -> LL128 send/recv kernel, arch-guarded to gfx942/gfx950/gfx1250 + ENABLE_LL128.
+#            Emitted for every unroll: a hole would shift that table's later indices.
 ONLY_FUNCS = "AllReduce RING SIMPLE Sum f32|AllReduce RING LL128 Sum f32|SendRecv"
 
 
@@ -184,8 +184,7 @@ class DeviceTableGenerationTest(unittest.TestCase):
         self.assertTrue(ll128, "LL128 SendRecv kernel (reg=1, '_1' suffix) missing")
 
     def test_sendrecv_ll128_is_arch_guarded_and_ll_is_not(self):
-        # Every reg=1 (LL128) SendRecv declaration must sit inside the
-        # gfx942/gfx950 + ENABLE_LL128 guard...
+        # Every reg=1 (LL128) SendRecv declaration must sit inside the arch guard...
         guarded = re.findall(
             r"#if \(defined\(__gfx942__\) \|\| defined\(__gfx950__\) \|\| defined\(__gfx1250__\)\)"
             r" && defined\(ENABLE_LL128\)\n"
@@ -249,7 +248,19 @@ class DeviceTableGenerationTest(unittest.TestCase):
         # BUILD_ALL_UNROLLS fills in the skipped unrolls and drops the gfx1250 restriction.
         with tempfile.TemporaryDirectory(prefix="rccl_devtable_all_") as tmpdir:
             header = _generate(tmpdir, all_unrolls="ON")
+            host = _read_generated(tmpdir, "host_table.cpp")
         self.assertEqual({"1", "2", "4", "8", "16", "32"}, set(_unroll_tables(header)))
+        # Both host tables flip under the flag, and no other test reads them on this path.
+        self.assertEqual(
+            ["true"] * 6,
+            re.findall(r"(true|false), // unroll", host),
+            "BUILD_ALL_UNROLLS must mark every unroll generated",
+        )
+        self.assertEqual(
+            ["nullptr"] * 6,
+            re.findall(r'(nullptr|"gfx\w+"), // unroll', host),
+            "BUILD_ALL_UNROLLS compiles every unroll for the target, so none stays pinned",
+        )
         self.assertNotIn("#if defined(__gfx1250__)\n", header)
 
     # ---- unroll arch restriction (host/device agreement) ---------------------
@@ -321,7 +332,7 @@ class DeviceTableGenerationTest(unittest.TestCase):
         return guards
 
     def _restricted_arch(self, unroll):
-        """The single arch ncclDevFuncTable_<unroll>[] is compiled for, else None.
+        """The lone arch that can run every slot of ncclDevFuncTable_<unroll>[], else None.
 
         The archs that can run EVERY slot, i.e. the intersection of the per-slot arch
         sets, with an unguarded slot counting as all archs. Per-slot rather than

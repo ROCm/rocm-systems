@@ -64,7 +64,7 @@ EXPECTED = {
             "Broadcast": 16,
             "Reduce": 484,
             "ReduceScatter": 968,
-            # 4 legacy-LL (reg=0) + 4 LL128 (reg=1, gfx942/950-guarded).
+            # 4 legacy-LL (reg=0) + 4 LL128 (reg=1, arch-guarded).
             "SendRecv": 8,
         },
     },
@@ -80,7 +80,7 @@ EXPECTED = {
             "Broadcast": 16,
             "Reduce": 484,
             "ReduceScatter": 968,
-            # 4 legacy-LL (reg=0) + 4 LL128 (reg=1, gfx942/950-guarded).
+            # 4 legacy-LL (reg=0) + 4 LL128 (reg=1, arch-guarded).
             "SendRecv": 8,
         },
     },

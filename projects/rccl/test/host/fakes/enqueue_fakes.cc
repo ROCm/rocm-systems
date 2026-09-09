@@ -19,7 +19,7 @@ void ResetEnqueueFakes() {
   ResetProxyFakes();
   ResetRcclWrapFakes();
   ResetRecorderFakes();
-  ResetRegisterFakes();
+  ResetRegisterStubs();
   ResetSymKernelsFakes();
   ResetTransportStubs();
   ResetTuningFakes();
