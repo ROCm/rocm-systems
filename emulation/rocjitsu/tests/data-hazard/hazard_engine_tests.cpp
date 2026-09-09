@@ -1232,6 +1232,140 @@ TEST(GenericDataHazardEngineTest, IdleWaitClearsAllPendingDomainsWithoutExplicit
   EXPECT_TRUE(snapshot->core.smem_load_fifo.empty());
 }
 
+// A ds_store (DScnt) and a later tensor_load_to_lds (TENSORcnt) that write the
+// same LDS retire on different counters. With no s_wait_dscnt between them the
+// store can land after the DMA and clobber the tensor data — a WAW. This mirrors
+// the tensor_lds shader's mut0 (the s_wait_dscnt before the tensor DMA removed).
+TEST(GenericDataHazardEngineTest, DetectsWawFromDsStoreOverwrittenByTensorLoad) {
+  FakeFormatter formatter;
+  auto &engine = reset_generic_engine(formatter);
+  engine.on_workgroup_begin(1, 0, 0);
+
+  ExecutionKey wave{1, 0, 0, 0};
+  engine.on_wave_begin(wave);
+
+  // ds_store to LDS 0x80, outstanding on DScnt.
+  InstructionEvent ds_store_inst;
+  ds_store_inst.instruction = make_instruction(1, 0x100);
+  ds_store_inst.hazards.local_write_wait = WaitCntType::LDS;
+  engine.on_instruction(ds_store_inst);
+
+  ResourceAccessEvent ds_store;
+  ds_store.instruction = ds_store_inst.instruction;
+  ds_store.resource_kind = ResourceKind::LocalMemory;
+  ds_store.address = 0x80;
+  ds_store.size_bytes = 4;
+  ds_store.is_write = true;
+  engine.on_resource_access(ds_store);
+
+  // tensor_load_to_lds writing the same LDS 0x80, outstanding on TENSORcnt, with
+  // no intervening s_wait_dscnt to order the store ahead of it.
+  InstructionEvent tensor_inst;
+  tensor_inst.instruction = make_instruction(2, 0x104);
+  tensor_inst.hazards.local_write_wait = WaitCntType::TENSOR;
+  engine.on_instruction(tensor_inst);
+
+  ResourceAccessEvent tensor_write;
+  tensor_write.instruction = tensor_inst.instruction;
+  tensor_write.resource_kind = ResourceKind::LocalMemory;
+  tensor_write.address = 0x80;
+  tensor_write.size_bytes = 4;
+  tensor_write.is_write = true;
+  engine.on_resource_access(tensor_write);
+
+  const auto warnings = engine.warning_snapshot();
+  ASSERT_EQ(warnings.size(), 1u);
+  EXPECT_EQ(warnings[0].finding.kind, HazardKind::WAW);
+  EXPECT_NE(warnings[0].message.find("WAW hazard: LDS address 0x80"), std::string::npos);
+  EXPECT_EQ(warnings[0].finding.required_wait, WaitCntType::LDS);
+  EXPECT_EQ(warnings[0].suggestion, "Add s_wait_dscnt 0 before writing this LDS address");
+}
+
+// With the s_wait_dscnt in place the store drains before the tensor DMA runs, so
+// there is no WAW. This is the baseline the mut0 mutation removes the wait from.
+TEST(GenericDataHazardEngineTest, DsStoreDrainedByDscntDoesNotWawWithTensorLoad) {
+  FakeFormatter formatter;
+  auto &engine = reset_generic_engine(formatter);
+  engine.on_workgroup_begin(1, 0, 0);
+
+  ExecutionKey wave{1, 0, 0, 0};
+  engine.on_wave_begin(wave);
+
+  InstructionEvent ds_store_inst;
+  ds_store_inst.instruction = make_instruction(1, 0x100);
+  ds_store_inst.hazards.local_write_wait = WaitCntType::LDS;
+  engine.on_instruction(ds_store_inst);
+
+  ResourceAccessEvent ds_store;
+  ds_store.instruction = ds_store_inst.instruction;
+  ds_store.resource_kind = ResourceKind::LocalMemory;
+  ds_store.address = 0x80;
+  ds_store.size_bytes = 4;
+  ds_store.is_write = true;
+  engine.on_resource_access(ds_store);
+
+  // s_wait_dscnt 0 drains the DScnt queue: the store is no longer pending.
+  InstructionEvent dscnt_wait;
+  dscnt_wait.instruction = make_instruction(2, 0x104);
+  dscnt_wait.wait_action.is_wait_instruction = true;
+  dscnt_wait.wait_action.counters.push_back({WaitCntType::LDS, 0});
+  engine.on_instruction(dscnt_wait);
+
+  InstructionEvent tensor_inst;
+  tensor_inst.instruction = make_instruction(3, 0x108);
+  tensor_inst.hazards.local_write_wait = WaitCntType::TENSOR;
+  engine.on_instruction(tensor_inst);
+
+  ResourceAccessEvent tensor_write;
+  tensor_write.instruction = tensor_inst.instruction;
+  tensor_write.resource_kind = ResourceKind::LocalMemory;
+  tensor_write.address = 0x80;
+  tensor_write.size_bytes = 4;
+  tensor_write.is_write = true;
+  engine.on_resource_access(tensor_write);
+
+  EXPECT_TRUE(engine.warning_snapshot().empty());
+}
+
+// A tensor load that writes LDS the pending store never touched is not a WAW:
+// the write path must discriminate by address, not fire on any pending store.
+TEST(GenericDataHazardEngineTest, NonOverlappingDsStoreAndTensorLoadDoNotWaw) {
+  FakeFormatter formatter;
+  auto &engine = reset_generic_engine(formatter);
+  engine.on_workgroup_begin(1, 0, 0);
+
+  ExecutionKey wave{1, 0, 0, 0};
+  engine.on_wave_begin(wave);
+
+  InstructionEvent ds_store_inst;
+  ds_store_inst.instruction = make_instruction(1, 0x100);
+  ds_store_inst.hazards.local_write_wait = WaitCntType::LDS;
+  engine.on_instruction(ds_store_inst);
+
+  ResourceAccessEvent ds_store;
+  ds_store.instruction = ds_store_inst.instruction;
+  ds_store.resource_kind = ResourceKind::LocalMemory;
+  ds_store.address = 0x80;
+  ds_store.size_bytes = 4;
+  ds_store.is_write = true;
+  engine.on_resource_access(ds_store);
+
+  InstructionEvent tensor_inst;
+  tensor_inst.instruction = make_instruction(2, 0x104);
+  tensor_inst.hazards.local_write_wait = WaitCntType::TENSOR;
+  engine.on_instruction(tensor_inst);
+
+  ResourceAccessEvent tensor_write;
+  tensor_write.instruction = tensor_inst.instruction;
+  tensor_write.resource_kind = ResourceKind::LocalMemory;
+  tensor_write.address = 0x100; // Disjoint from the store at 0x80.
+  tensor_write.size_bytes = 4;
+  tensor_write.is_write = true;
+  engine.on_resource_access(tensor_write);
+
+  EXPECT_TRUE(engine.warning_snapshot().empty());
+}
+
 TEST(GenericDataHazardEngineTest, DetectsPureDsVectorDestinationWithDscntSuggestion) {
   FakeFormatter formatter;
   auto &engine = reset_generic_engine(formatter);
