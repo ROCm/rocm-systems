@@ -333,7 +333,7 @@
  * 6. By default, for some architectures, the AMD GPU device driver for Linux
  *    causes all wavefronts created when the library is not attached to the
  *    process by ::amd_dbgapi_process_attach to be unable to query the
- *    wavesfront's ::AMD_DBGAPI_WAVE_INFO_DISPATCH,
+ *    wavefront's ::AMD_DBGAPI_WAVE_INFO_DISPATCH,
  *    ::AMD_DBGAPI_WAVE_INFO_WORKGROUP_COORD, or
  *    ::AMD_DBGAPI_WAVE_INFO_WAVE_NUMBER_IN_WORKGROUP, or workgroup's
  *    ::AMD_DBGAPI_WORKGROUP_INFO_DISPATCH, or
@@ -664,6 +664,12 @@ typedef unsigned long amd_dbgapi_DWORD;
  * symbol version string of ``"@AMD_DBGAPI_NAME@_0.80"``.
  */
 #define AMD_DBGAPI_VERSION_0_80
+
+/**
+ * The function was introduced in version 0.81 of the interface and has the
+ * symbol version string of ``"@AMD_DBGAPI_NAME@_0.81"``.
+ */
+#define AMD_DBGAPI_VERSION_0_81
 
 /** @} */
 
@@ -1090,6 +1096,10 @@ typedef enum
    * The requested memory location is valid but currently unreachable.
    */
   AMD_DBGAPI_STATUS_ERROR_MEMORY_UNAVAILABLE = -50,
+  /**
+   * The cluster handle is invalid.
+   */
+  AMD_DBGAPI_STATUS_ERROR_INVALID_CLUSTER_ID = -51,
 } amd_dbgapi_status_t;
 
 /**
@@ -3277,7 +3287,17 @@ typedef enum
    * not define a completion event, then ::amd_dbgapi_dispatch_get_info will
    * return ::AMD_DBGAPI_STATUS_ERROR_NOT_SUPPORTED.
    */
-  AMD_DBGAPI_DISPATCH_INFO_KERNEL_COMPLETION_ADDRESS = 17
+  AMD_DBGAPI_DISPATCH_INFO_KERNEL_COMPLETION_ADDRESS = 17,
+  /**
+   * Return the dispatch cluster size (work-items) in the X, Y, and Z
+   * dimensions.  The type of this attribute is \p uint32_t[3].  If
+   * the architecture does not support clusters, then
+   * ::amd_dbgapi_dispatch_get_info returns
+   * ::AMD_DBGAPI_STATUS_ERROR_NOT_SUPPORTED.  If the dispatch is not
+   * in cluster mode, then ::amd_dbgapi_dispatch_get_info
+   * returns ::AMD_DBGAPI_STATUS_ERROR_NOT_AVAILABLE.
+   */
+  AMD_DBGAPI_DISPATCH_INFO_CLUSTER_SIZES = 18,
 } amd_dbgapi_dispatch_info_t;
 
 /**
@@ -3323,7 +3343,7 @@ typedef enum
  */
 amd_dbgapi_status_t AMD_DBGAPI amd_dbgapi_dispatch_get_info (
     amd_dbgapi_dispatch_id_t dispatch_id, amd_dbgapi_dispatch_info_t query,
-    size_t value_size, void *value) AMD_DBGAPI_VERSION_0_54;
+    size_t value_size, void *value) AMD_DBGAPI_VERSION_0_81;
 
 /**
  * Dispatch barrier.
@@ -3421,6 +3441,112 @@ amd_dbgapi_status_t AMD_DBGAPI amd_dbgapi_process_dispatch_list (
 
 /** @} */
 
+/** \defgroup cluster_group Workgroup Clusters
+ *
+ * Operations related to AMD GPU Workgroup Clusters.
+ *
+ * @{
+ */
+
+/**
+ * Opaque cluster handle.
+ *
+ * AMD GPU may execute code as workgroups organized into clusters.
+ *
+ * Globally unique for a single library instance.
+ */
+typedef struct
+{
+  uint64_t handle;
+} amd_dbgapi_cluster_id_t;
+
+/**
+ * The NULL cluster handle.
+ */
+#define AMD_DBGAPI_CLUSTER_NONE                                                  \
+    AMD_DBGAPI_HANDLE_LITERAL (amd_dbgapi_cluster_id_t, 0)
+
+/**
+ * Cluster queries that are supported by ::amd_dbgapi_cluster_get_info.
+ *
+ * Each query specifies the type of data returned in the \p value argument to
+ * ::amd_dbgapi_cluster_get_info.
+ */
+typedef enum
+{
+  /**
+   * Return the dispatch to which this cluster belongs.  The type of this
+   * attribute is ::amd_dbgapi_dispatch_id_t.
+   */
+  AMD_DBGAPI_CLUSTER_INFO_DISPATCH = 1,
+  /**
+   * Return the queue to which this cluster belongs.  The type of this
+   * attribute is ::amd_dbgapi_queue_id_t.
+   */
+  AMD_DBGAPI_CLUSTER_INFO_QUEUE = 2,
+  /**
+   * Return the agent to which this cluster belongs.  The type of this
+   * attribute is ::amd_dbgapi_agent_id_t.
+   */
+  AMD_DBGAPI_CLUSTER_INFO_AGENT = 3,
+  /**
+   * Return the process to which this cluster belongs.  The type of this
+   * attribute is ::amd_dbgapi_process_id_t.
+   */
+  AMD_DBGAPI_CLUSTER_INFO_PROCESS = 4,
+  /**
+   * Return the architecture of this cluster.  The type of this attribute is
+   * ::amd_dbgapi_architecture_id_t.
+   */
+  AMD_DBGAPI_CLUSTER_INFO_ARCHITECTURE = 5,
+  /**
+   * The cluster coordinate in the dispatch grid dimensions.  The type
+   * of this attribute is \p uint32_t[3] with elements 1, 2, and 3
+   * corresponding to the X, Y, and Z coordinates respectively.
+   */
+  AMD_DBGAPI_CLUSTER_INFO_CLUSTER_COORD = 6,
+} amd_dbgapi_cluster_info_t;
+
+/**
+ * Query information about a cluster.
+ *
+ * ::amd_dbgapi_cluster_info_t specifies the queries supported and the type
+ * returned using the \p value argument.
+ *
+ * \param[in] cluster_id The handle of the cluster being queried.
+ *
+ * \param[in] query The query being requested.
+ *
+ * \param[in] value_size Size of the memory pointed to by \p value.  Must be
+ * equal to the byte size of the query result.
+ *
+ * \param[out] value Pointer to memory where the query result is stored.
+ *
+ * \retval ::AMD_DBGAPI_STATUS_SUCCESS The function has been executed
+ * successfully and the result is stored in \p value.
+ *
+ * \retval ::AMD_DBGAPI_STATUS_FATAL A fatal error occurred.  The library is
+ * left uninitialized and \p value is unaltered.
+ *
+ * \retval ::AMD_DBGAPI_STATUS_ERROR_NOT_INITIALIZED The library is not
+ * initialized.  The library is left uninitialized and \p value is unaltered.
+ *
+ * \retval ::AMD_DBGAPI_STATUS_ERROR_INVALID_CLUSTER_ID \p cluster_id is
+ * invalid. \p value is unaltered.
+ *
+ * \retval ::AMD_DBGAPI_STATUS_ERROR_INVALID_ARGUMENT \p value is NULL or \p
+ * query is invalid.  \p value is unaltered.
+ *
+ * \retval ::AMD_DBGAPI_STATUS_ERROR_INVALID_ARGUMENT_COMPATIBILITY \p
+ * value_size does not match the size of the \p query result.  \p value is
+ * unaltered.
+ */
+amd_dbgapi_status_t AMD_DBGAPI amd_dbgapi_cluster_get_info (
+    amd_dbgapi_cluster_id_t cluster_id, amd_dbgapi_cluster_info_t query,
+    size_t value_size, void *value) AMD_DBGAPI_VERSION_0_81;
+
+/** @} */
+
 /** \defgroup workgroup_group Workgroup
  *
  * Operations related to AMD GPU workgroups.
@@ -3494,7 +3620,26 @@ typedef enum
    * ::AMD_DBGAPI_STATUS_ERROR_NOT_AVAILABLE.  See the \ref known_limitations
    * section.
    */
-  AMD_DBGAPI_WORKGROUP_INFO_WORKGROUP_COORD = 6
+  AMD_DBGAPI_WORKGROUP_INFO_WORKGROUP_COORD = 6,
+  /**
+   * Return the cluster this workgroup belongs to.  The type of this attribute is
+   * ::amd_dbgapi_cluster_id_t.
+   *
+   * If the architecture does not support clusters or if the workgroup
+   * is not in cluster mode, ::amd_dbgapi_workgroup_get_info returns
+   * ::AMD_DBGAPI_STATUS_ERROR_NOT_AVAILABLE.
+   */
+  AMD_DBGAPI_WORKGROUP_INFO_CLUSTER = 7,
+  /**
+   * The workgroup coordinate within the cluster of the workgroup.  The
+   * type of this attribute is \p uint32_t[3] with elements 1, 2, and 3
+   * corresponding to the X, Y, and Z coordinates respectively.
+   *
+   * If the architecture does not support clusters or if the workgroup
+   * is not in cluster mode, ::amd_dbgapi_workgroup_get_info returns
+   * ::AMD_DBGAPI_STATUS_ERROR_NOT_AVAILABLE.
+   */
+  AMD_DBGAPI_WORKGROUP_INFO_WORKGROUP_COORD_IN_CLUSTER = 8,
 } amd_dbgapi_workgroup_info_t;
 
 /**
@@ -3541,7 +3686,7 @@ typedef enum
  */
 amd_dbgapi_status_t AMD_DBGAPI amd_dbgapi_workgroup_get_info (
     amd_dbgapi_workgroup_id_t workgroup_id, amd_dbgapi_workgroup_info_t query,
-    size_t value_size, void *value) AMD_DBGAPI_VERSION_0_64;
+    size_t value_size, void *value) AMD_DBGAPI_VERSION_0_81;
 
 /**
  * Return the list of existing workgroups.
@@ -3738,7 +3883,38 @@ typedef enum
    * The number of lanes supported by the wave.  The type of this attribute is
    * \p size_t.
    */
-  AMD_DBGAPI_WAVE_INFO_LANE_COUNT = 14
+  AMD_DBGAPI_WAVE_INFO_LANE_COUNT = 14,
+  /**
+   * Return the cluster this wave's workgroup belongs to.  The type of
+   * this attribute is ::amd_dbgapi_cluster_id_t.
+   *
+   * If the architecture does not support clusters or if the wave is
+   * not in cluster mode, ::amd_dbgapi_wave_get_info returns
+   * ::AMD_DBGAPI_STATUS_ERROR_NOT_AVAILABLE.
+   */
+  AMD_DBGAPI_WAVE_INFO_CLUSTER = 15,
+  /**
+   * The wave's workgroup's cluster coordinate in the dispatch grid
+   * dimensions.  The type of this attribute is \p uint32_t[3] with
+   * elements 1, 2, and 3 corresponding to the X, Y, and Z coordinates
+   * respectively.
+   *
+   * If the architecture does not support clusters or if the wave is
+   * not in cluster mode, ::amd_dbgapi_wave_get_info returns
+   * ::AMD_DBGAPI_STATUS_ERROR_NOT_AVAILABLE.
+   */
+  AMD_DBGAPI_WAVE_INFO_CLUSTER_COORD = 16,
+  /**
+   * The wave's workgroup's coordinate within the cluster of the
+   * workgroup.  The type of this attribute is \p uint32_t[3] with
+   * elements 1, 2, and 3 corresponding to the X, Y, and Z coordinates
+   * respectively.
+   *
+   * If the architecture does not support clusters or if the wave is
+   * not in cluster mode, ::amd_dbgapi_wave_get_info returns
+   * ::AMD_DBGAPI_STATUS_ERROR_NOT_AVAILABLE.
+   */
+  AMD_DBGAPI_WAVE_INFO_WORKGROUP_COORD_IN_CLUSTER = 17,
 } amd_dbgapi_wave_info_t;
 
 /**
@@ -3789,7 +3965,7 @@ typedef enum
  */
 amd_dbgapi_status_t AMD_DBGAPI amd_dbgapi_wave_get_info (
     amd_dbgapi_wave_id_t wave_id, amd_dbgapi_wave_info_t query,
-    size_t value_size, void *value) AMD_DBGAPI_VERSION_0_64;
+    size_t value_size, void *value) AMD_DBGAPI_VERSION_0_81;
 
 /**
  * The execution state of a wave.
