@@ -4376,8 +4376,8 @@ hsa_status_t Runtime::VMemoryHandleCreate(const MemoryRegion* region, size_t siz
   auto agentOwner = region->owner();
 
   /* CPU-owned memory has no DRM device of its own, so the GTT allocation and the DRM
-  import that follows must be done using the same GPU. Rocr chooses that GPU here and pass it
-  down instead of letting thunk fall back to the default gpu node 0 */
+  import that follows must be done using the same GPU. Rocr chooses that GPU here and 
+  passes it down instead of letting thunk fall back to the default gpu node 0 */
   core::Agent* agent_for_drm = agentOwner;
   core::Agent* drm_owner = nullptr;
   uint32_t alloc_node_id = 0;
