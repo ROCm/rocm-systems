@@ -86,28 +86,6 @@ tracked_pointers(hsa_agent_t agent)
     return out;
 }
 
-// Per-region digests of a snapshot's host copies, ordered by device address so two snapshots of the
-// same regions compare positionally (the inventory itself is unordered).
-digest::region_digests_t
-snapshot_digests(const snapshot_t& snapshot)
-{
-    auto keyed = std::vector<std::pair<const void*, uint64_t>>{};
-    keyed.reserve(snapshot.blocks.size());
-    for(const auto& block : snapshot.blocks)
-        keyed.emplace_back(block.gpu_addr,
-                           digest::hash_bytes(block.host_copy.data(), block.host_copy.size()));
-
-    std::sort(keyed.begin(), keyed.end(), [](const auto& lhs, const auto& rhs) {
-        return lhs.first < rhs.first;
-    });
-
-    auto out = digest::region_digests_t{};
-    out.reserve(keyed.size());
-    for(const auto& [addr, hash] : keyed)
-        out.emplace_back(hash);
-    return out;
-}
-
 // A kernarg block for one replay pass: every recorded dispatch's arguments, laid out back to back
 // with each kernel's alignment honored.
 class kernarg_staging
@@ -125,16 +103,10 @@ public:
     // pool allocation fails.
     bool reserve(const hsa::Queue& queue, const std::vector<recorded_dispatch_t>& dispatches)
     {
-        constexpr size_t alignment = 256;  // AQL kernarg segments are 256-byte aligned
+        auto placement = plan_kernarg_layout(dispatches);
+        m_offsets      = std::move(placement.offsets);
 
-        m_offsets.reserve(dispatches.size());
-        size_t total = 0;
-        for(const auto& dispatch : dispatches)
-        {
-            m_offsets.emplace_back(total);
-            total += ((dispatch.kernarg.size() + alignment - 1) / alignment) * alignment;
-        }
-
+        const auto total = placement.total;
         if(total == 0) return true;
 
         const auto& ext  = queue.ext_api();
@@ -183,11 +155,24 @@ private:
     hsa_status_t (*m_free_fn)(void*) = nullptr;
     std::vector<size_t> m_offsets    = {};
 };
+}  // namespace
 
-// Build the packet list for a pass: the recorded packets, forced to execute one at a time. The
-// barrier bit makes each dispatch wait for the previous one, which is stricter than the application
-// (packets may have been free to overlap) and is why replayed passes are not a faithful source of
-// concurrency-sensitive timings.
+kernarg_placement_t
+plan_kernarg_layout(const std::vector<recorded_dispatch_t>& dispatches)
+{
+    auto out = kernarg_placement_t{};
+    out.offsets.reserve(dispatches.size());
+
+    for(const auto& dispatch : dispatches)
+    {
+        out.offsets.emplace_back(out.total);
+        out.total += ((dispatch.kernarg.size() + kKernargAlignment - 1) / kKernargAlignment) *
+                     kKernargAlignment;
+    }
+
+    return out;
+}
+
 std::vector<hsa::rocprofiler_packet>
 build_pass_packets(const std::vector<recorded_dispatch_t>& dispatches)
 {
@@ -201,7 +186,26 @@ build_pass_packets(const std::vector<recorded_dispatch_t>& dispatches)
     }
     return packets;
 }
-}  // namespace
+
+digest::region_digests_t
+snapshot_digests(const snapshot_t& snapshot)
+{
+    auto keyed = std::vector<std::pair<const void*, uint64_t>>{};
+    keyed.reserve(snapshot.blocks.size());
+    for(const auto& block : snapshot.blocks)
+        keyed.emplace_back(block.gpu_addr,
+                           digest::hash_bytes(block.host_copy.data(), block.host_copy.size()));
+
+    std::sort(keyed.begin(), keyed.end(), [](const auto& lhs, const auto& rhs) {
+        return lhs.first < rhs.first;
+    });
+
+    auto out = digest::region_digests_t{};
+    out.reserve(keyed.size());
+    for(const auto& [addr, hash] : keyed)
+        out.emplace_back(hash);
+    return out;
+}
 
 bool
 divergence_check_enabled()

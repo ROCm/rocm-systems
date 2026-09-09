@@ -38,13 +38,17 @@
 // memory the snapshot covers, and a third transient snapshot is taken when divergence checking is
 // enabled.
 
+#include "lib/rocprofiler-sdk/kernel_replay/memory_snapshot.hpp"
+#include "lib/rocprofiler-sdk/range_replay/digest.hpp"
 #include "lib/rocprofiler-sdk/range_replay/range_state.hpp"
 
 #include <rocprofiler-sdk/experimental/range_replay.h>
 
 #include <hsa/hsa_ext_amd.h>
 
+#include <cstddef>
 #include <cstdint>
+#include <vector>
 
 namespace rocprofiler
 {
@@ -55,6 +59,35 @@ class Queue;
 
 namespace range_replay
 {
+// AQL kernarg segments are 256-byte aligned.
+inline constexpr size_t kKernargAlignment = 256;
+
+// Where each recorded dispatch's arguments sit in the pass's kernarg block.
+struct kernarg_placement_t
+{
+    std::vector<size_t> offsets = {};  // one per dispatch, parallel to the recording
+    size_t              total   = 0;   // bytes to allocate; 0 when no dispatch takes arguments
+};
+
+// Lay the recorded dispatches' arguments out back to back, each at its required alignment. Split
+// out from the staging buffer so the arithmetic can be checked without a kernarg pool: an offset
+// that is wrong by less than an alignment unit still lands inside the block, so a kernel would read
+// a neighbour's arguments rather than fault.
+kernarg_placement_t
+plan_kernarg_layout(const std::vector<recorded_dispatch_t>& dispatches);
+
+// Build the packet list for a pass: the recorded packets, forced to execute one at a time. The
+// barrier bit makes each dispatch wait for the previous one, which is stricter than the application
+// (packets may have been free to overlap) and is why replayed passes are not a faithful source of
+// concurrency-sensitive timings.
+std::vector<hsa::rocprofiler_packet>
+build_pass_packets(const std::vector<recorded_dispatch_t>& dispatches);
+
+// Per-region digests of a snapshot's host copies, ordered by device address so two snapshots of the
+// same regions compare positionally (the inventory itself is unordered).
+digest::region_digests_t
+snapshot_digests(const kernel_replay::memory_snapshot::device_snapshot_t& snapshot);
+
 // Capture the range-entry snapshot, if this range is bound and does not have one yet. Called from
 // the queue path while recording the range's first submission, before that submission reaches the
 // GPU: `writer` is the interceptor's packet writer, used to drain the queue so the snapshot sees
