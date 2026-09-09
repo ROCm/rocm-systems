@@ -719,7 +719,7 @@ namespace {
 // This comm's arch table, or NULL when the arch has no DDA tuning at all.
 // comm->archThresholds is populated at init; the lookup covers comms assembled
 // by hand (unit tests) so they resolve exactly like production ones.
-inline const rcclArchThresholds* ddaArchTable(const ncclComm* comm) {
+inline const rcclArchThresholds* extAlgoArchTable(const ncclComm* comm) {
   if (comm == nullptr) return nullptr;
   if (rcclParamIgnoreArchTable()) return nullptr;
   return comm->archThresholds != nullptr ? comm->archThresholds : rcclGetArchThresholds(comm->archName);
@@ -739,18 +739,20 @@ inline size_t ddaThresholdFromTable(const size_t* caps, ncclFunc_t func) {
 }
 
 // R2 symmetric-kernel size cap. Graph capture uses symMaxR2Graph; eager uses
-// symMaxR2. 0 means do not suppress symk (CE cannot win under capture).
+// symMaxR2. 0 in the arch table means no suppression (SIZE_MAX returned);
+// non-zero values are literal byte thresholds.
 inline size_t rcclSymMaxR2Cap(const ncclComm* comm, ncclFunc_t func, bool graphMode) {
-  const rcclArchThresholds* table = ddaArchTable(comm);
-  if (table == nullptr) return 0;
+  const rcclArchThresholds* table = extAlgoArchTable(comm);
+  if (table == nullptr) return SIZE_MAX;
   const size_t* caps = graphMode ? table->symMaxR2Graph : table->symMaxR2;
-  return ddaThresholdFromTable(caps, func);
+  const size_t v = ddaThresholdFromTable(caps, func);
+  return v == 0 ? SIZE_MAX : v;
 }
 
 // R2 symmetric-kernel lower-bound per collective.  Below this size DDA is
 // faster than symk; symk is suppressed so DDA can win.  0 = no suppression.
 inline size_t rcclSymMinR2Cap(const ncclComm* comm, ncclFunc_t func) {
-  const rcclArchThresholds* table = ddaArchTable(comm);
+  const rcclArchThresholds* table = extAlgoArchTable(comm);
   if (table == nullptr) return 0;
   return ddaThresholdFromTable(table->symMinR2, func);
 }
@@ -759,13 +761,13 @@ inline size_t rcclSymMinR2Cap(const ncclComm* comm, ncclFunc_t func) {
 size_t rcclCeRegMax(const ncclComm* comm, ncclFunc_t func) {
   const int64_t param = (func == ncclFuncAllReduce) ? rcclParamCeArRegMaxMsgBytes() : -1;
   if (param >= 0) return (size_t)param;
-  const rcclArchThresholds* table = ddaArchTable(comm);
+  const rcclArchThresholds* table = extAlgoArchTable(comm);
   if (table == nullptr) return 0;
   return (size_t)func < RCCL_DDA_FUNC_COUNT ? table->ceRegMax[(size_t)func] : 0;
 }
 
 size_t rcclCeNonRegMax(const ncclComm* comm, ncclFunc_t func) {
-  const rcclArchThresholds* table = ddaArchTable(comm);
+  const rcclArchThresholds* table = extAlgoArchTable(comm);
   if (table == nullptr) return 0;
   return (size_t)func < RCCL_DDA_FUNC_COUNT ? table->ceNonRegMax[(size_t)func] : 0;
 }
@@ -773,7 +775,7 @@ size_t rcclCeNonRegMax(const ncclComm* comm, ncclFunc_t func) {
 size_t rcclCeAr2ShotMax(const ncclComm* comm) {
   const int64_t param = rcclParamCeArMaxMsgBytes();
   if (param >= 0) return (size_t)param;
-  const rcclArchThresholds* table = ddaArchTable(comm);
+  const rcclArchThresholds* table = extAlgoArchTable(comm);
   // Null table (unknown arch or RCCL_IGNORE_ARCH_TABLE): restore the pre-table
   // 256 MiB 2-shot window, which matches the default staging allocation. A
   // present table with 0 means 2-shot is tuned off (gfx1250).
@@ -802,7 +804,7 @@ bool rcclForceCeAllReduceEnabled(const ncclComm* comm) {
 }
 
 size_t rcclCeNonRegMin(const ncclComm* comm, ncclFunc_t func) {
-  const rcclArchThresholds* table = ddaArchTable(comm);
+  const rcclArchThresholds* table = extAlgoArchTable(comm);
   if (table == nullptr) return 0;
   return (size_t)func < RCCL_DDA_FUNC_COUNT ? table->ceNonRegMin[(size_t)func] : 0;
 }
@@ -828,7 +830,7 @@ size_t rcclCeArRegisteredMax(const ncclComm* comm) {
 size_t rcclDdaLLThreshold(const ncclComm* comm, ncclFunc_t func) {
   size_t threshold;
   if (ddaThresholdFromEnv(rcclParamDdaLLThreshold(), &threshold)) return threshold;
-  const rcclArchThresholds* table = ddaArchTable(comm);
+  const rcclArchThresholds* table = extAlgoArchTable(comm);
   if (table == nullptr) return kDdaLLBaseDefault;
   return ddaThresholdFromTable(table->ddaLLMax, func);
 }
@@ -836,7 +838,7 @@ size_t rcclDdaLLThreshold(const ncclComm* comm, ncclFunc_t func) {
 size_t rcclDdaLL128Threshold(const ncclComm* comm, ncclFunc_t func) {
   size_t threshold;
   if (ddaThresholdFromEnv(rcclParamDdaLL128Threshold(), &threshold)) return threshold;
-  const rcclArchThresholds* table = ddaArchTable(comm);
+  const rcclArchThresholds* table = extAlgoArchTable(comm);
   if (table == nullptr) return kDdaLL128BaseDefault;
   return ddaThresholdFromTable(table->ddaLL128Max, func);
 }
@@ -844,7 +846,7 @@ size_t rcclDdaLL128Threshold(const ncclComm* comm, ncclFunc_t func) {
 size_t rcclDdaVmmThreshold(const ncclComm* comm, ncclFunc_t func) {
   size_t threshold;
   if (ddaThresholdFromEnv(rcclParamDdaThreshold(), &threshold)) return threshold;
-  const rcclArchThresholds* table = ddaArchTable(comm);
+  const rcclArchThresholds* table = extAlgoArchTable(comm);
   if (table == nullptr) return kDdaVmmBaseDefault;
   return ddaThresholdFromTable(table->ddaVmmMax, func);
 }
@@ -882,7 +884,7 @@ size_t rcclDdaScratchPayloadCap(const ncclComm* comm) {
   if (ddaThresholdFromEnv(rcclParamDdaLLThreshold(), &env)) bump(env);
   if (ddaThresholdFromEnv(rcclParamDdaLL128Threshold(), &env)) bump(env);
 
-  const rcclArchThresholds* table = ddaArchTable(comm);
+  const rcclArchThresholds* table = extAlgoArchTable(comm);
   if (table == nullptr) {
     // Same pre-table defaults rcclDda{LL,LL128,Vmm}Threshold return when the
     // table is ignored, so fabric scratch covers any DDA path the selector
@@ -925,7 +927,7 @@ size_t rcclDdaVmmThresholdCtx(const ncclComm* comm, ncclFunc_t func,
   // Env var wins unconditionally -- same as rcclDdaVmmThreshold().
   size_t threshold;
   if (ddaThresholdFromEnv(rcclParamDdaThreshold(), &threshold)) return threshold;
-  const rcclArchThresholds* table = ddaArchTable(comm);
+  const rcclArchThresholds* table = extAlgoArchTable(comm);
   if (table == nullptr) return kDdaVmmBaseDefault;
   // Graph-mode override: CE AR is blocked during captures; let DDA extend further.
   if (graphMode) {
@@ -952,7 +954,7 @@ size_t rcclDdaVmmThresholdCtx(const ncclComm* comm, ncclFunc_t func,
 void rcclApplyUnrollForSize(ncclComm* comm, ncclFunc_t func, size_t msgBytes) {
   // Env override (RCCL_UNROLL_FACTOR != -1) wins -- leave comm->unroll alone.
   if (rcclParamUnrollFactor() != -1) return;
-  const rcclArchThresholds* table = ddaArchTable(comm);
+  const rcclArchThresholds* table = extAlgoArchTable(comm);
   if (table == nullptr) return;
   const rcclArchThresholds::rcclUnrollEntry* map = nullptr;
   switch (func) {
@@ -1270,7 +1272,7 @@ ncclResult_t rcclSelectAllReduce(struct ncclComm* comm, const void* sendbuff, vo
   const bool recvRegistered = (winRegType == ncclSymSendRegRecvReg ||
                                 winRegType == ncclSymSendNonregRecvReg);
   const size_t symMaxR2 = rcclSymMaxR2Cap(comm, ncclFuncAllReduce, ceCapturing);
-  const bool symSuppressedBySize = recvRegistered && symMaxR2 > 0 && msgBytes > symMaxR2;
+  const bool symSuppressedBySize = recvRegistered && msgBytes > symMaxR2;
   const bool symkRequested =
     (op == ncclSum) &&
     isSymmetricKernelRequested(comm, ncclFuncAllReduce, (int)ncclDevSum, datatype, count, sendbuff, recvbuff);
@@ -1505,7 +1507,7 @@ ncclResult_t rcclSelectAllGather(struct ncclComm* comm, const void* sendbuff, vo
   const size_t agSymMinR2  = rcclSymMinR2Cap(comm, ncclFuncAllGather);
   const bool agSymSuppressedByMin  = agSymkRequested && agSymMinR2 > 0 && totalBytes < agSymMinR2;
   const bool agSymSuppressedBySize = agSymkRequested && agRecvRegistered &&
-                                     agSymMaxR2 > 0 && totalBytes > agSymMaxR2;
+                                     totalBytes > agSymMaxR2;
   const bool symEligible = agSymkRequested && !agSymSuppressedByMin && !agSymSuppressedBySize;
   // symEligible gates DDA below; the symk report itself is deferred until after
   // the CE-registered check so it loses to CE exactly as dispatch does
@@ -1745,7 +1747,7 @@ ncclResult_t rcclSelectReduceScatter(struct ncclComm* comm, const void* sendbuff
                                   rsWinRegType == ncclSymSendNonregRecvReg);
   const size_t rsSymMaxR2 = rcclSymMaxR2Cap(comm, ncclFuncReduceScatter, /*graphMode=*/false);
   const bool symSuppressedBySize = symkRequested && rsRecvRegistered &&
-                                   rsSymMaxR2 > 0 && totalBytes > rsSymMaxR2;
+                                   totalBytes > rsSymMaxR2;
   const bool symEligible = symkRequested && !symSuppressedByMin && !symSuppressedBySize;
 
   // (2) DDA fast paths. Symmetric wins when buffers are registered (-R 2); DDA
@@ -1930,7 +1932,7 @@ ncclResult_t rcclSelectAlltoAll(struct ncclComm* comm, const void* sendbuff, voi
     isSymmetricKernelRequested(comm, ncclFuncAlltoAll, (int)ncclDevSum, datatype, count, sendbuff, recvbuff);
   const size_t a2aSymMaxR2 = rcclSymMaxR2Cap(comm, ncclFuncAlltoAll, /*graphMode=*/false);
   const bool a2aSymSuppressedBySize = a2aSymkRequested && a2aRecvRegistered &&
-                                      a2aSymMaxR2 > 0 && totalBytes > a2aSymMaxR2;
+                                      totalBytes > a2aSymMaxR2;
   const bool a2aSymEligible = a2aSymkRequested && !a2aSymSuppressedBySize;
 
   // (3) DDA fast paths. gfx1250 uses fabric tiers; other archs use IPC.

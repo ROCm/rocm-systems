@@ -1881,19 +1881,19 @@ static const rcclArchThresholds rcclArchThresholds_gfx1250 = {
     0,                    // [1] Reduce          -- not used
     2ULL*1024*1024,       // [2] AllGather  -- CE-registered wins above 2 MiB for R2 (suppress symk)
     1ULL*1024,            // [3] ReduceScatter   -- no suppression (placeholder)
-    1,                    // [4] AllReduce       -- CE-registered wins above 256 KiB for R2 (suppress symk)
+    0,                    // [4] AllReduce       -- CE-registered wins above 0 B (suppress symk for all R2 AR)
     0,                    // [5] SendRecv        -- not used
     0,                    // [6] Send            -- not used
     0,                    // [7] Recv            -- not used
     0,                    // [8] AlltoAll        -- not used
   },
-  // Graph capture: CE is blocked, so do not withdraw symk (0 = no suppression).
+  // Graph capture: CE is blocked, so do not withdraw symk (0 = no suppression = SIZE_MAX).
   .symMaxR2Graph = {
     0,                    // [0] Broadcast      -- not used
     0,                    // [1] Reduce          -- not used
     2ULL*1024*1024,                    // [2] AllGather       -- keep symk in graph mode
     1ULL*1024,                    // [3] ReduceScatter   -- keep symk in graph mode
-    1,            // [4] AllReduce       -- keep symk in graph mode (CE blocked)
+    0,            // [4] AllReduce       -- keep symk in graph mode (CE blocked)
     0,                    // [5] SendRecv        -- not used
     0,                    // [6] Send            -- not used
     0,                    // [7] Recv            -- not used
