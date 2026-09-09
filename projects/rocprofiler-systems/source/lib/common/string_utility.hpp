@@ -125,4 +125,41 @@ to_bool(std::string_view value, bool fallback = false)
     return !std::ranges::any_of(k_false_values,
                                 [&lower](std::string_view val) { return lower == val; });
 }
+
+/// @brief Normalize a POSIX clock identifier name, e.g. "CLOCK_MONOTONIC" -> "monotonic".
+/// @param value The clock identifier name.
+/// @return The lowercased name with the "clock_" prefix stripped;
+///         "process_cputime_id" is further mapped to "cputime".
+[[nodiscard]] inline std::string
+clock_name(std::string_view value)
+{
+    constexpr std::string_view k_clock_prefix = "clock_";
+
+    std::string name{ to_lower(value) };
+    if(name.starts_with(k_clock_prefix))
+    {
+        name = name.substr(k_clock_prefix.length());
+    }
+    if(name == "process_cputime_id")
+    {
+        name = "cputime";
+    }
+    return name;
+}
+
+/// @brief Strip the "rocprofsys_" prefix from an environment/setting name.
+/// @param value The environment variable or setting name.
+/// @return The lowercased name with the "rocprofsys_" prefix removed, if present.
+[[nodiscard]] inline std::string
+strip_rocprofsys_prefix(std::string_view value)
+{
+    constexpr std::string_view k_rocprofsys_prefix = "rocprofsys_";
+
+    std::string name{ to_lower(value) };
+    if(name.starts_with(k_rocprofsys_prefix))
+    {
+        return name.substr(k_rocprofsys_prefix.length());
+    }
+    return name;
+}
 }  // namespace rocprofsys::utility::string

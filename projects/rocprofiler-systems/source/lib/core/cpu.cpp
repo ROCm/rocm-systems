@@ -97,10 +97,9 @@ process_cpu_info_data()
             continue;
         }
 
-        std::string       key   = utility::string::trim(line.substr(0, colon_pos));
+        const std::string key =
+            utility::string::to_lower(utility::string::trim(line.substr(0, colon_pos)));
         const std::string value = utility::string::trim(line.substr(colon_pos + 1));
-
-        std::transform(key.begin(), key.end(), key.begin(), ::tolower);
 
         auto it = field_parsers.find(key);
         if(it != field_parsers.end())

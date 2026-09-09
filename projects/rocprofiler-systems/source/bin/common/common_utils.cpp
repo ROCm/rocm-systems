@@ -31,12 +31,6 @@ namespace
 {
 constexpr std::string_view rocprofsys_prefix = "ROCPROFSYS";
 
-bool
-starts_with_rocprofsys(std::string_view entry) noexcept
-{
-    return entry.starts_with(rocprofsys_prefix);
-}
-
 [[nodiscard]] std::string_view
 env_key(std::string_view entry) noexcept
 {
@@ -87,7 +81,7 @@ print_environment_impl(const std::vector<std::string>&              env,
         return is_updated_key(env_key(entry));
     };
     auto is_general = [&](std::string_view entry) {
-        return !is_updated(entry) && starts_with_rocprofsys(entry);
+        return !is_updated(entry) && entry.starts_with(rocprofsys_prefix);
     };
 
     const bool has_updated = std::any_of(entries.begin(), entries.end(), is_updated);
