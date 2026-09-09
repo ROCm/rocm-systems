@@ -21,7 +21,11 @@ import pytest
 from sqlalchemy import text
 
 from pc_sampling import per_kernel_isa_export, source_snapshot_analysis
-from rocprof_compute_analyze.analysis_db import SourceFrameCollector, db_analysis
+from rocprof_compute_analyze.analysis_db import (
+    SourceFrameCollector,
+    db_analysis,
+    report_evaluation_diagnostics,
+)
 from utils import analysis_orm as orm
 from utils import schema
 from utils.metrics.noise_clamper import (
@@ -39,6 +43,14 @@ VIEW_CSV_FILENAMES = frozenset({
     "source_lines.csv",
     "workload_metric.csv",
 })
+
+
+def drain_evaluation_diagnostics():
+    """Discard messages left over from earlier evaluate() calls."""
+    with patch("rocprof_compute_analyze.analysis_db.console_warning"), patch(
+        "rocprof_compute_analyze.analysis_db.console_debug"
+    ):
+        report_evaluation_diagnostics()
 
 
 def make_dual_issue_arch_config(metric_name: str, peak_col: str = "Peak"):
@@ -451,6 +463,100 @@ def test_evaluate_divide_by_zero_silenced_and_logged_at_debug():
             f"Expected RuntimeWarning in console_debug output for '{expr}', "
             f"got {debug_msgs}"
         )
+
+
+# =============================================================================
+# Evaluation diagnostics tests
+# =============================================================================
+
+
+def test_evaluate_reports_na_at_debug_level():
+    """An expression that evaluates to N/A is reported as debug, not warning."""
+    drain_evaluation_diagnostics()
+    pmc_df = pd.DataFrame({"Counter1": []})
+
+    db_analysis.evaluate(
+        "test_metric",
+        "to_max(raw_pmc_df['Counter1'])",
+        pmc_df,
+        {},
+        parse=False,
+    )
+
+    with patch("rocprof_compute_analyze.analysis_db.console_warning") as mock_warning:
+        with patch("rocprof_compute_analyze.analysis_db.console_debug") as mock_debug:
+            report_evaluation_diagnostics()
+
+    mock_warning.assert_not_called()
+    debug_msgs = [call.args[0] for call in mock_debug.call_args_list]
+    assert any("evaluated to N/A" in msg for msg in debug_msgs), (
+        f"Expected an N/A message at debug level, got {debug_msgs}"
+    )
+
+
+def test_evaluate_failure_message_names_the_exception_type():
+    """A missing counter is reported as a warning naming the exception type."""
+    drain_evaluation_diagnostics()
+    pmc_df = pd.DataFrame({"Counter1": [1, 2, 3]})
+
+    db_analysis.evaluate(
+        "test_metric",
+        "to_sum(raw_pmc_df['TCC_TAG_STALL_sum'])",
+        pmc_df,
+        {},
+        parse=False,
+    )
+
+    with patch("rocprof_compute_analyze.analysis_db.console_warning") as mock_warning:
+        report_evaluation_diagnostics()
+
+    warning_msgs = [call.args[0] for call in mock_warning.call_args_list]
+    assert len(warning_msgs) == 1, f"Expected one warning, got {warning_msgs}"
+    assert "KeyError: 'TCC_TAG_STALL_sum'" in warning_msgs[0]
+
+
+def test_evaluate_reports_a_repeated_failure_once():
+    """The same failure across kernels is reported once, not once per kernel."""
+    drain_evaluation_diagnostics()
+    pmc_df = pd.DataFrame({"Counter1": [1, 2, 3]})
+
+    for _ in range(5):
+        db_analysis.evaluate(
+            "test_metric",
+            "to_sum(raw_pmc_df['Missing_Counter'])",
+            pmc_df,
+            {},
+            parse=False,
+        )
+
+    with patch("rocprof_compute_analyze.analysis_db.console_warning") as mock_warning:
+        report_evaluation_diagnostics()
+
+    assert mock_warning.call_count == 1, (
+        f"Expected one warning, got {mock_warning.call_args_list}"
+    )
+
+
+def test_report_evaluation_diagnostics_clears_collected_messages():
+    """A second report emits nothing, so a later run starts clean."""
+    drain_evaluation_diagnostics()
+    pmc_df = pd.DataFrame({"Counter1": [1, 2, 3]})
+
+    db_analysis.evaluate(
+        "test_metric",
+        "to_sum(raw_pmc_df['Missing_Counter'])",
+        pmc_df,
+        {},
+        parse=False,
+    )
+    drain_evaluation_diagnostics()
+
+    with patch("rocprof_compute_analyze.analysis_db.console_warning") as mock_warning:
+        with patch("rocprof_compute_analyze.analysis_db.console_debug") as mock_debug:
+            report_evaluation_diagnostics()
+
+    mock_warning.assert_not_called()
+    mock_debug.assert_not_called()
 
 
 # =============================================================================

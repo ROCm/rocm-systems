@@ -44,6 +44,8 @@ from utils.utils_common import (
 PMC_KERNEL_TOP_TABLE_ID: int = 1
 # 002 is ID of pmc_dispatch_info.csv table
 PMC_DISPATCH_INFO_TABLE_ID: int = 2
+# Panel id of block 30, Memory Bandwidth Analysis
+MEMBW_ANALYSIS_PANEL_ID: int = 3000
 
 
 @demarcate
@@ -91,6 +93,12 @@ def build_dfs(
     )
 
     for panel_id, panel in arch_configs.panel_configs.items():
+        # Profile only collects block 30 counters with --membw-analysis.
+        if panel_id == MEMBW_ANALYSIS_PANEL_ID and not profiling_config.get(
+            "membw_analysis", False
+        ):
+            continue
+
         for data_source in panel["data source"]:
             for table_type, data_config in data_source.items():
                 table_id = data_config["id"]

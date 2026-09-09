@@ -310,12 +310,11 @@ def test_show_all_membw_analysis_panel_gate(
     monkeypatch: pytest.MonkeyPatch,
     membw_analysis: bool,
 ) -> None:
-    """Panel 3000 is rendered only when memory bandwidth analysis is enabled."""
+    """Panel 3000 is rendered only when its table was built."""
     args = argparse.Namespace(
         decimal=2,
         filter_metrics=None,
         include_cols=None,
-        membw_analysis=membw_analysis,
         normal_unit="per_wave",
         path=[["fixture"]],
         time_unit="ns",
@@ -342,7 +341,7 @@ def test_show_all_membw_analysis_panel_gate(
     )
     runs = {
         "fixture": SimpleNamespace(
-            dfs={3013: metric_dataframe},
+            dfs={3013: metric_dataframe} if membw_analysis else {},
             sys_info=pd.DataFrame([{"gpu_arch": "gfx950"}]),
         )
     }

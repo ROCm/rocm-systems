@@ -314,6 +314,33 @@ class TestBuildDfs:
         assert ac.metric_counters["Kept"] == ["COUNTER_KEPT"]
         assert ac.dfs_expressions[201] == ["AVG(COUNTER_KEPT)"]
 
+    @pytest.mark.parametrize(
+        "profiling_config,expected_table_ids",
+        [
+            pytest.param({"membw_analysis": True}, {201, 3001}, id="collected"),
+            pytest.param({"membw_analysis": False}, {201}, id="not_collected"),
+            pytest.param({}, {201}, id="absent_from_config"),
+        ],
+    )
+    def test_block_30_built_only_when_membw_analysis_collected(
+        self, profiling_config, expected_table_ids
+    ):
+        ac = _make_arch_config([
+            (200, _metric_panel(200, 201, metrics={"M1": {"value": "AVG(COUNTER_A)"}})),
+            (
+                3000,
+                _metric_panel(3000, 3001, metrics={"BW": {"value": "AVG(TCC_HIT)"}}),
+            ),
+        ])
+        build_dfs(
+            ac,
+            filter_metrics=None,
+            sys_info=_sys_info(),
+            profiling_config=profiling_config,
+        )
+
+        assert set(ac.dfs.keys()) == expected_table_ids
+
 
 # =============================================================================
 # expand_placeholder_ranges
