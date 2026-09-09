@@ -56,6 +56,7 @@
 #include "common/hsatimer.h"
 #include "gtest/gtest.h"
 #include "hsa/hsa.h"
+#include "hsa/hsa_ext_amd.h"
 
 #ifdef ROCRTST_ASAN
 // ASAN defers the real free via its quarantine; drain it so freed VRAM is
@@ -550,6 +551,93 @@ void MemoryTest::MemAvailableTest(hsa_agent_t ag, hsa_amd_memory_pool_t pool) {
 
   if (verbosity() > 0) {
     std::cout << "     Available memory end: " << ag_avail_memory_after << std::endl;
+    std::cout << kSubTestSeparator << std::endl;
+  }
+}
+
+static void QueryPointerInfoExpectUnknown(const void* ptr) {
+  hsa_amd_pointer_info_t info = {};
+  info.size = sizeof(info);
+  EXPECT_EQ(hsa_amd_pointer_info(ptr, &info, nullptr, nullptr, nullptr), HSA_STATUS_SUCCESS)
+      << "hsa_amd_pointer_info failed for ptr=" << ptr;
+  EXPECT_EQ(info.type, HSA_EXT_POINTER_TYPE_UNKNOWN) << "ptr=" << ptr;
+}
+
+void MemoryTest::PointerInfoInvalidPointerTest(void) {
+  PrintMemorySubtestHeader("Pointer Info Invalid Pointer");
+
+  hsa_amd_pointer_info_t info = {};
+  info.size = sizeof(info);
+  ASSERT_EQ(hsa_amd_pointer_info(nullptr, &info, nullptr, nullptr, nullptr),
+            HSA_STATUS_ERROR_INVALID_ARGUMENT);
+
+  // ROCM-30769: VMemoryPtrInfo must not crash when the caller passes an unknown
+  // VA such as 0x18.
+  const void* invalid_ptrs[] = {reinterpret_cast<const void*>(0x18),
+                                 reinterpret_cast<const void*>(0x1),
+                                 reinterpret_cast<const void*>(0x1000)};
+  for (const void* ptr : invalid_ptrs) {
+    QueryPointerInfoExpectUnknown(ptr);
+  }
+
+  bool vmem_supported = false;
+  ASSERT_SUCCESS(
+      hsa_system_get_info(HSA_AMD_SYSTEM_INFO_VIRTUAL_MEM_API_SUPPORTED, &vmem_supported));
+  if (!vmem_supported) {
+    if (verbosity() > 0) {
+      std::cout << "  Virtual Memory API not supported; skipped mapped-handle path." << std::endl;
+      std::cout << kSubTestSeparator << std::endl;
+    }
+    return;
+  }
+
+  std::vector<hsa_agent_t> gpus;
+  ASSERT_SUCCESS(hsa_iterate_agents(rocrtst::IterateGPUAgents, &gpus));
+  if (gpus.empty()) {
+    if (verbosity() > 0) {
+      std::cout << "  No GPU agents; skipped mapped-handle path." << std::endl;
+      std::cout << kSubTestSeparator << std::endl;
+    }
+    return;
+  }
+
+  hsa_amd_memory_pool_t pool = {};
+  hsa_status_t err =
+      hsa_amd_agent_iterate_memory_pools(gpus[0], rocrtst::GetGlobalMemoryPool, &pool);
+  if ((err != HSA_STATUS_SUCCESS && err != HSA_STATUS_INFO_BREAK) || pool.handle == 0) {
+    if (verbosity() > 0) {
+      std::cout << "  No global GPU pool; skipped mapped-handle path." << std::endl;
+      std::cout << kSubTestSeparator << std::endl;
+    }
+    return;
+  }
+
+  rocrtst::pool_info_t pool_i;
+  ASSERT_SUCCESS(rocrtst::AcquirePoolInfo(pool, &pool_i));
+  if (!pool_i.alloc_allowed || !pool_i.alloc_granule) {
+    if (verbosity() > 0) {
+      std::cout << "  No allocatable pool; skipped mapped-handle path." << std::endl;
+      std::cout << kSubTestSeparator << std::endl;
+    }
+    return;
+  }
+
+  const size_t size = pool_i.alloc_granule;
+  void* reserved_addr = nullptr;
+  hsa_amd_vmem_alloc_handle_t mem_handle = {};
+  ASSERT_SUCCESS(hsa_amd_vmem_address_reserve(&reserved_addr, size, 0, 0));
+  ASSERT_SUCCESS(hsa_amd_vmem_handle_create(pool, size, MEMORY_TYPE_NONE, 0, &mem_handle));
+  ASSERT_SUCCESS(hsa_amd_vmem_map(reserved_addr, size, 0, mem_handle, 0));
+
+  for (const void* ptr : invalid_ptrs) {
+    QueryPointerInfoExpectUnknown(ptr);
+  }
+
+  ASSERT_SUCCESS(hsa_amd_vmem_unmap(reserved_addr, size));
+  ASSERT_SUCCESS(hsa_amd_vmem_handle_release(mem_handle));
+  ASSERT_SUCCESS(hsa_amd_vmem_address_free(reserved_addr, size));
+
+  if (verbosity() > 0) {
     std::cout << kSubTestSeparator << std::endl;
   }
 }

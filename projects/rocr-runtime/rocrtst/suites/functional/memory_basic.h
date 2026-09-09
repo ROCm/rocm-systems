@@ -76,6 +76,9 @@ class MemoryTest : public TestBase {
 
   void MemAvailableTest(void);
 
+  // ROCM-30769: hsa_amd_pointer_info must not crash on an unknown VA.
+  void PointerInfoInvalidPointerTest(void);
+
   hsa_status_t TestAllocate(hsa_amd_memory_pool_t pool, size_t sz);
 
  private:

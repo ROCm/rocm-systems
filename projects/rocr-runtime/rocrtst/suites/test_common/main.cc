@@ -345,6 +345,14 @@ TEST(rocrtstFunc, Memory_Available) {
     RunCustomTestEpilog(&mt);
 }
 
+TEST(rocrtstFunc, Pointer_Info_Invalid_Pointer) {
+    MemoryTest mt;
+
+    if (!RunCustomTestProlog(&mt)) return;
+    mt.PointerInfoInvalidPointerTest();
+    RunCustomTestEpilog(&mt);
+}
+
 TEST(rocrtstFunc, Time_Stamp) {
   TimeStamp ts;
   if (!RunCustomTestProlog(&ts)) return;
