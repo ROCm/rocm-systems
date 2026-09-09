@@ -4,8 +4,7 @@
 /// @file sparse_memory.h
 /// @brief Sparse page-table memory model with on-demand page allocation.
 
-#ifndef SIMDOJO_COMPONENTS_SPARSE_MEMORY_H_
-#define SIMDOJO_COMPONENTS_SPARSE_MEMORY_H_
+#pragma once
 
 #include "simdojo/sim/component.h"
 
@@ -141,6 +140,21 @@ public:
     }
   }
 
+  /// @brief Apply one indivisible mutation within a single sparse page.
+  /// @details The callback runs while holding the same exclusive page-stripe
+  /// lock used by ordinary reads and writes, so all SparseMemory accessors
+  /// observe the mutation atomically. Missing pages are allocated as zeroes.
+  /// @returns false when the range is empty or crosses a page boundary.
+  template <typename Mutation> bool atomic_modify(uint64_t addr, size_t size, Mutation &&mutation) {
+    if (size == 0 || (addr & PAGE_MASK) + size > PAGE_SIZE)
+      return false;
+    auto &stripe = page_stripe(addr);
+    std::unique_lock<std::shared_mutex> lock(stripe.mutex);
+    Page &page = get_page_locked(stripe, addr);
+    mutation(page.data() + (addr & PAGE_MASK));
+    return true;
+  }
+
   /// @brief Instruction fetch - read a 32-bit word (little-endian).
   /// @param addr Memory address to fetch from.
   /// @returns The 32-bit instruction word at the given address.
@@ -247,5 +261,3 @@ private:
 };
 
 } // namespace simdojo
-
-#endif // SIMDOJO_COMPONENTS_SPARSE_MEMORY_H_

@@ -177,6 +177,120 @@ private:
   Event timer_event_{this, EventType::TIMER_CALLBACK};
 };
 
+/// Injects a self-replenishing async stream from the first handler in a large
+/// same-tick batch. This models repeated host submissions arriving while
+/// already-scheduled CU quanta remain at that tick.
+class SameTickAsyncFairnessComponent : public Component {
+public:
+  SameTickAsyncFairnessComponent(std::string name, uint32_t batch_size, uint32_t async_count)
+      : Component(std::move(name)), batch_size_(batch_size), async_count_(async_count) {
+    inject_event_.set_handler(
+        [this](Tick, Message *) { engine()->schedule_event_now(&async_event_); });
+    batch_event_.set_handler([this](Tick, Message *) {
+      if (batch_events_processed_ == 0)
+        async_events_before_first_batch_event_ = async_events_processed_;
+      ++batch_events_processed_;
+    });
+    async_event_.set_handler([this](Tick tick, Message *) {
+      if (async_events_processed_ == 0) {
+        first_async_tick_ = tick;
+        batch_events_before_first_async_ = batch_events_processed_;
+      }
+      ++async_events_processed_;
+      if (async_events_processed_ < async_count_)
+        engine()->schedule_event_now(&async_event_);
+    });
+  }
+
+  void startup() override {
+    schedule_event(&inject_event_, 1);
+    for (uint32_t batch_index = 0; batch_index < batch_size_; ++batch_index)
+      schedule_event(&batch_event_, 1);
+  }
+
+  Tick first_async_tick() const { return first_async_tick_; }
+  uint32_t async_events_processed() const { return async_events_processed_; }
+  uint32_t batch_events_processed() const { return batch_events_processed_; }
+  uint32_t batch_events_before_first_async() const { return batch_events_before_first_async_; }
+  uint32_t async_events_before_first_batch_event() const {
+    return async_events_before_first_batch_event_;
+  }
+
+private:
+  uint32_t batch_size_ = 0;
+  uint32_t async_count_ = 0;
+  uint32_t async_events_processed_ = 0;
+  uint32_t batch_events_processed_ = 0;
+  uint32_t batch_events_before_first_async_ = 0;
+  uint32_t async_events_before_first_batch_event_ = 0;
+  Tick first_async_tick_ = TICK_MAX;
+  Event inject_event_{this, EventType::TIMER_CALLBACK};
+  Event batch_event_{this, EventType::TIMER_CALLBACK};
+  Event async_event_{this, EventType::TIMER_CALLBACK};
+};
+
+/// Models a level-triggered host poll that keeps requesting a retry while local
+/// device work is already scheduled for the following tick.
+class NextTickRetryFairnessComponent : public Component {
+public:
+  explicit NextTickRetryFairnessComponent(std::string name, uint32_t retry_count)
+      : Component(std::move(name)), retry_count_(retry_count) {
+    inject_event_.set_handler(
+        [this](Tick, Message *) { engine()->schedule_event_next_tick(&retry_event_); });
+    local_event_.set_handler([this](Tick tick, Message *) {
+      local_tick_ = tick;
+      retries_before_local_ = retries_processed_;
+    });
+    retry_event_.set_handler([this](Tick, Message *) {
+      ++retries_processed_;
+      if (retries_processed_ < retry_count_) {
+        engine()->schedule_event_next_tick(&retry_event_);
+      } else {
+        engine()->primary_release();
+      }
+    });
+  }
+
+  void startup() override {
+    engine()->register_as_primary();
+    schedule_event(&inject_event_, 1);
+    schedule_event(&local_event_, 2);
+  }
+
+  Tick local_tick() const { return local_tick_; }
+  uint32_t retries_processed() const { return retries_processed_; }
+  uint32_t retries_before_local() const { return retries_before_local_; }
+
+private:
+  uint32_t retry_count_ = 0;
+  uint32_t retries_processed_ = 0;
+  uint32_t retries_before_local_ = 0;
+  Tick local_tick_ = TICK_MAX;
+  Event inject_event_{this, EventType::TIMER_CALLBACK};
+  Event local_event_{this, EventType::TIMER_CALLBACK};
+  Event retry_event_{this, EventType::TIMER_CALLBACK};
+};
+
+/// Records the timestamp produced by a next-tick injection at the end of the
+/// representable simulation timeline.
+class NextTickSaturationComponent : public Component {
+public:
+  explicit NextTickSaturationComponent(std::string name) : Component(std::move(name)) {
+    inject_event_.set_handler(
+        [this](Tick, Message *) { engine()->schedule_event_next_tick(&observed_event_); });
+    observed_event_.set_handler([this](Tick tick, Message *) { observed_tick_ = tick; });
+  }
+
+  void startup() override { schedule_event(&inject_event_, TICK_MAX - 1); }
+
+  Tick observed_tick() const { return observed_tick_; }
+
+private:
+  Tick observed_tick_ = 0;
+  Event inject_event_{this, EventType::TIMER_CALLBACK};
+  Event observed_event_{this, EventType::TIMER_CALLBACK};
+};
+
 /// Component that counts initialize()/startup()/shutdown() calls. Used to verify
 /// that shutdown() cleanup fires exactly once per initialized component, on both
 /// the normal shutdown path and the startup-failure unwind path. When given a
@@ -1198,6 +1312,87 @@ TEST(AsyncCausalityTest, ScheduleEventNowProducesReasonableTimestamp) {
   }
 
   EXPECT_GE(injected_tick.load(), before);
+}
+
+TEST(AsyncCausalityTest, SustainedSameTickAsyncAndExistingBatchMakeBoundedProgress) {
+  constexpr uint32_t kBatchSize = 1024;
+  constexpr uint32_t kAsyncCount = 32;
+  SimulationEngine engine({.num_threads = 1});
+  auto root = std::make_unique<CompositeComponent>("root");
+  auto *component = static_cast<SameTickAsyncFairnessComponent *>(
+      root->add_child(std::make_unique<SameTickAsyncFairnessComponent>("same-tick-fairness",
+                                                                       kBatchSize, kAsyncCount)));
+  engine.topology().set_root(std::move(root));
+  engine.create();
+
+  ExitStatus exit = engine.run();
+
+  EXPECT_EQ(exit.reason, ExitReason::COMPLETED);
+  EXPECT_EQ(component->async_events_processed(), kAsyncCount);
+  EXPECT_EQ(component->batch_events_processed(), kBatchSize);
+  EXPECT_EQ(component->first_async_tick(), 1u)
+      << "schedule_event_now moved simulation time backward";
+  EXPECT_EQ(component->batch_events_before_first_async(), 0u)
+      << "an async event injected by the first handler waited behind the whole same-tick batch";
+  EXPECT_LE(component->async_events_before_first_batch_event(),
+            EventQueue::kMaxConsecutiveAsyncEvents)
+      << "a self-replenishing async stream starved pre-existing same-tick local work";
+}
+
+TEST(AsyncCausalityTest, StepUsesSameBoundedAsyncArbitration) {
+  constexpr uint32_t kBatchSize = 32;
+  constexpr uint32_t kAsyncCount = EventQueue::kMaxConsecutiveAsyncEvents + 1;
+  SimulationEngine engine({.num_threads = 1});
+  auto root = std::make_unique<CompositeComponent>("root");
+  auto *component = static_cast<SameTickAsyncFairnessComponent *>(root->add_child(
+      std::make_unique<SameTickAsyncFairnessComponent>("step-fairness", kBatchSize, kAsyncCount)));
+  engine.topology().set_root(std::move(root));
+  engine.create();
+
+  ASSERT_TRUE(engine.step());
+
+  EXPECT_EQ(component->async_events_processed(), kAsyncCount);
+  EXPECT_EQ(component->batch_events_processed(), kBatchSize);
+  EXPECT_EQ(component->batch_events_before_first_async(), 0u);
+  EXPECT_LE(component->async_events_before_first_batch_event(),
+            EventQueue::kMaxConsecutiveAsyncEvents);
+}
+
+TEST(AsyncCausalityTest, NextTickRetryDoesNotStarveScheduledDeviceWork) {
+  constexpr uint32_t kRetryCount = 32;
+  for (uint32_t num_threads : {1u, 2u}) {
+    SCOPED_TRACE(::testing::Message() << "num_threads=" << num_threads);
+    SimulationEngine engine({.num_threads = num_threads});
+    auto root = std::make_unique<CompositeComponent>("root");
+    auto *component = static_cast<NextTickRetryFairnessComponent *>(root->add_child(
+        std::make_unique<NextTickRetryFairnessComponent>("next-tick-retry", kRetryCount)));
+    engine.topology().set_root(std::move(root));
+    if (num_threads > 1)
+      engine.topology().partition_manual(num_threads, [](Component *) { return PartitionID{0}; });
+    engine.create();
+
+    ExitStatus exit = engine.run();
+
+    EXPECT_EQ(exit.reason, ExitReason::COMPLETED);
+    EXPECT_EQ(component->retries_processed(), kRetryCount);
+    EXPECT_EQ(component->local_tick(), 2u);
+    EXPECT_LE(component->retries_before_local(), EventQueue::kMaxConsecutiveAsyncEvents)
+        << "a level-triggered retry stream starved device work at the following tick";
+  }
+}
+
+TEST(AsyncCausalityTest, NextTickTimestampSaturatesAtTickMax) {
+  SimulationEngine engine({.num_threads = 1});
+  auto root = std::make_unique<CompositeComponent>("root");
+  auto *component = static_cast<NextTickSaturationComponent *>(
+      root->add_child(std::make_unique<NextTickSaturationComponent>("next-tick-saturation")));
+  engine.topology().set_root(std::move(root));
+  engine.create();
+
+  ExitStatus exit = engine.run();
+
+  EXPECT_EQ(exit.reason, ExitReason::COMPLETED);
+  EXPECT_EQ(component->observed_tick(), TICK_MAX);
 }
 
 // ============================================================================

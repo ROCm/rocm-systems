@@ -4,8 +4,7 @@
 /// @file compute_unit.h
 /// @brief AMDGPU compute unit hierarchy: ComputeUnitCore, ExecComputeUnit, and IsaExecComputeUnit.
 
-#ifndef ROCJITSU_VM_AMDGPU_COMPUTE_UNIT_H_
-#define ROCJITSU_VM_AMDGPU_COMPUTE_UNIT_H_
+#pragma once
 
 #include "rocjitsu/base/api.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/accvgpr_layout.h"
@@ -324,6 +323,17 @@ public:
   /// @brief Set the command processor for WG completion notification.
   void set_command_processor(CommandProcessor *cp) { cp_ = cp; }
 
+  /// @brief Set the device VM service shared by legacy and PCI/VFIO queues.
+  void set_gpu_vm(GpuVm *gpu_vm) {
+    gpu_vm_ = gpu_vm;
+    l1_vector_.set_gpu_vm(gpu_vm);
+    l1_scalar_.set_gpu_vm(gpu_vm);
+  }
+
+  /// @brief Return the device VM service used by translated wavefront accesses.
+  GpuVm *gpu_vm() { return gpu_vm_; }
+  const GpuVm *gpu_vm() const { return gpu_vm_; }
+
   /// @brief Return the command processor that owns this CU's dispatch stream.
   CommandProcessor *command_processor() { return cp_; }
 
@@ -378,6 +388,11 @@ public:
   /// then reclaims LDS if the CU is now idle and unpinned. The caller is responsible
   /// for unpinning any CP-side cluster LDS pin.
   void abort_workgroup(uint32_t dispatch_id, uint32_t wg_id);
+
+  /// @brief Cancel every resident wave and pending completion for one dispatch.
+  /// @details Used by the command processor after a terminal dispatch fault.
+  /// No normal wave/workgroup completion or plugin-completion callback is fired.
+  void abort_dispatch(uint32_t dispatch_id);
 
   /// @brief Set the execution plugin group (shared ownership).
   void set_plugin_group(std::shared_ptr<ExecutionPluginGroup> pg) {
@@ -507,11 +522,7 @@ public:
   ///
   /// Used by the config loader for deferred initialization.
   /// @param memory New GPU memory (not owned).
-  void set_memory(GpuMemory *memory) {
-    memory_ = memory;
-    l1_vector_.set_memory(memory);
-    l1_scalar_.set_memory(memory);
-  }
+  void set_memory(GpuMemory *memory) { memory_ = memory; }
 
   /// @brief Set (or replace) the L2 cache pointer.
   ///
@@ -522,6 +533,7 @@ public:
     l2_ = l2;
     l1_scalar_.set_l2(l2);
     l1_vector_.set_l2(l2);
+    inst_cache_.set_l2(l2);
     global_mem_pipeline_.set_l2(l2);
   }
 
@@ -968,7 +980,7 @@ protected:
   /// @brief Route a memory instruction into the appropriate pipeline.
   /// @param inst The memory instruction (ownership transferred).
   /// @param wf The issuing wavefront.
-  void route_memory_inst(Instruction *inst, Wavefront &wf);
+  VmAccessOutcome route_memory_inst(Instruction *inst, Wavefront &wf);
 
   /// @brief Fire the on_idle callback if registered.
   void notify_idle() {
@@ -1021,6 +1033,9 @@ protected:
   /// @warning Must be called with that lock released; it takes hw_queue_mutex_.
   void flush_wg_completions();
 
+  /// @brief Cancel local dispatch state and queue one terminal VM fault for CP delivery.
+  void handle_terminal_vm_fault(Wavefront &wf, VmAccessOutcome outcome);
+
   mutable std::recursive_mutex wave_state_mutex_;
   /// @brief Recursion depth of WaveStateGuard on the thread holding the mutex.
   /// @details Only ever touched under @ref wave_state_mutex_, so the value
@@ -1029,6 +1044,13 @@ protected:
   /// @brief Workgroups that finished while the wave-state lock was held.
   /// @details Drained by @ref flush_wg_completions once the lock is dropped.
   std::vector<std::pair<uint32_t, uint32_t>> pending_wg_completions_;
+  struct PendingVmFault {
+    uint32_t queue_id = 0;
+    uint32_t process_id = 0;
+    uint32_t dispatch_id = 0;
+    VmAccessOutcome outcome = VmAccessOutcome::Faulted;
+  };
+  std::vector<PendingVmFault> pending_vm_faults_;
   std::unique_ptr<WavefrontScheduler> scheduler_ = std::make_unique<OldestFirstScheduler>();
   uint64_t cycle_counter_ = 0;
 
@@ -1053,6 +1075,7 @@ protected:
   ScalarMemPipeline scalar_mem_pipeline_;
   GlobalMemPipeline global_mem_pipeline_;
   LocalMemPipeline local_mem_pipeline_;
+  TensorDmaPipeline tensor_dma_pipeline_;
   std::function<void()> on_idle_;       ///< Callback invoked when CU becomes idle.
   std::function<void()> on_pool_ready_; ///< Callback that wakes the CP-owned pool driver.
   TrapHandlerResolver trap_handler_resolver_;
@@ -1065,6 +1088,7 @@ protected:
   AluExceptionHandler alu_exception_handler_;
   std::atomic<bool> debug_active_{false};
   CommandProcessor *cp_ = nullptr;
+  GpuVm *gpu_vm_ = nullptr;
 
   std::unordered_map<uint64_t, uint32_t> active_wgs_;
 
@@ -1454,5 +1478,3 @@ private:
 
 } // namespace amdgpu
 } // namespace rocjitsu
-
-#endif // ROCJITSU_VM_AMDGPU_COMPUTE_UNIT_H_

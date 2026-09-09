@@ -8,20 +8,25 @@
 
 #include <cassert>
 #include <memory>
+#include <stdexcept>
 #include <string>
 
 namespace rocjitsu {
 namespace amdgpu {
 
 Xcd::Xcd(std::string name, const Config &config, rj_code_arch_t arch, GpuMemory *memory,
-         simdojo::ExecMode exec_mode)
-    : simdojo::CompositeComponent(std::move(name)), exec_mode_(exec_mode) {
+         simdojo::ExecMode exec_mode, std::shared_ptr<DeviceCacheCoherence> coherence)
+    : simdojo::CompositeComponent(std::move(name)), exec_mode_(exec_mode),
+      coherence_(std::move(coherence)) {
+  if (!coherence_)
+    throw std::invalid_argument("XCD requires a cache-coherence domain");
   set_weight(0); // Structural container, not a work-producing component.
   auto xcd_name = this->name();
 
   // Create shared L2 cache for this XCD. The backing store is connected
   // via the L2's requester port (wired by SoC::initialize()).
-  auto l2 = std::make_unique<L2Cache>(xcd_name + ".l2");
+  auto l2 = std::make_unique<L2Cache>(xcd_name + ".l2", coherence_);
+  l2->set_legacy_maintenance_memory(memory);
   l2_cache_ = l2.get();
   add_child(std::move(l2));
 
@@ -51,6 +56,23 @@ Xcd::Xcd(std::string name, const Config &config, rj_code_arch_t arch, GpuMemory 
 
   cp_->add_l2_cache(l2_cache_);
   add_child(std::move(cp));
+}
+
+void Xcd::set_l2_cache(L2Cache *l2) {
+  l2_cache_ = l2;
+  if (l2_cache_)
+    l2_cache_->set_coherence_domain(coherence_);
+}
+
+void Xcd::set_coherence_domain(std::shared_ptr<DeviceCacheCoherence> coherence) {
+  if (!coherence)
+    throw std::invalid_argument("XCD requires a cache-coherence domain");
+  coherence_ = std::move(coherence);
+  if (l2_cache_)
+    l2_cache_->set_coherence_domain(coherence_);
+  for (ShaderEngine *shader_engine : shader_engines_)
+    for (ComputeUnitCore *compute_unit : shader_engine->compute_units())
+      compute_unit->set_l2(l2_cache_);
 }
 
 void Xcd::initialize() {

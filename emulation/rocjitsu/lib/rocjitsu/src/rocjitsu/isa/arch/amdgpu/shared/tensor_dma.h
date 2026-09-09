@@ -1,8 +1,7 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-#ifndef ROCJITSU_ISA_ARCH_AMDGPU_SHARED_TENSOR_DMA_H_
-#define ROCJITSU_ISA_ARCH_AMDGPU_SHARED_TENSOR_DMA_H_
+#pragma once
 
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/lds_barrier_cell.h"
@@ -14,7 +13,11 @@
 #include <cstddef>
 #include <cstdint>
 #include <limits>
+#include <memory>
+#include <optional>
 #include <span>
+#include <utility>
+#include <vector>
 
 namespace rocjitsu {
 namespace amdgpu {
@@ -33,13 +36,14 @@ namespace tensor_dma_detail {
 constexpr int kSgprNull = 124;
 constexpr uint32_t kGlobalHighBitsMask = (1u << 25) - 1u;
 
-template <size_t N>
-uint64_t read_bits(const std::array<uint32_t, N> &words, uint32_t bit_offset, uint32_t bit_count) {
+template <size_t WordCount>
+uint64_t read_bits(const std::array<uint32_t, WordCount> &words, uint32_t bit_offset,
+                   uint32_t bit_count) {
   uint64_t value = 0;
   for (uint32_t bit = 0; bit < bit_count; ++bit) {
     const uint32_t absolute_bit = bit_offset + bit;
     const uint32_t word = absolute_bit / 32;
-    if (word >= N)
+    if (word >= WordCount)
       break;
     if (words[word] & (1u << (absolute_bit % 32)))
       value |= 1ull << bit;
@@ -47,26 +51,28 @@ uint64_t read_bits(const std::array<uint32_t, N> &words, uint32_t bit_offset, ui
   return value;
 }
 
-template <size_t N>
-std::array<uint32_t, N> read_sgpr_group(const Wavefront &wf, int reg, bool allow_null) {
-  std::array<uint32_t, N> words{};
+template <size_t WordCount>
+std::array<uint32_t, WordCount> read_sgpr_group(const Wavefront &wf, int reg, bool allow_null) {
+  std::array<uint32_t, WordCount> words{};
   if (reg == kSgprNull) {
     if (allow_null)
       return words;
     throw util::UnimplementedInst("tensor DMA null descriptor operand");
   }
-  if (reg < 0 || reg > 105 || static_cast<size_t>(reg) + N > 106)
+  if (reg < 0 || reg > 105 || static_cast<size_t>(reg) + WordCount > 106)
     throw util::UnimplementedInst("tensor DMA non-SGPR descriptor operand");
   const uint32_t base = wf.sgpr_alloc().base + static_cast<uint32_t>(reg);
-  auto group = amdgpu::RegisterAccess(wf).read_sgpr_region(base, static_cast<uint32_t>(N));
+  const RegisterAccess::SgprReadRegion group =
+      amdgpu::RegisterAccess(wf).read_sgpr_region(base, static_cast<uint32_t>(WordCount));
   if (!group.valid())
     throw util::UnimplementedInst("tensor DMA descriptor outside wavefront SGPR block");
-  for (size_t i = 0; i < N; ++i)
-    words[i] = group.dword(static_cast<uint32_t>(i));
+  for (size_t index = 0; index < WordCount; ++index)
+    words[index] = group.dword(static_cast<uint32_t>(index));
   return words;
 }
 
-struct TensorDmaDescriptor {
+class TensorDmaDescriptor {
+public:
   std::array<uint32_t, 4> d0{};
   std::array<uint32_t, 8> d1{};
   std::array<uint32_t, 4> d2{};
@@ -171,16 +177,16 @@ inline TensorDmaDescriptor parse_descriptor(std::array<uint32_t, 4> d0, std::arr
 
   if (desc.gather) {
     if (desc.gather_indices_32bit) {
-      for (uint32_t i = 0; i < 4; ++i)
-        desc.gather_indices[i] = d2[i];
-      for (uint32_t i = 0; i < 4; ++i)
-        desc.gather_indices[i + 4] = d3[i];
+      for (uint32_t index = 0; index < 4; ++index)
+        desc.gather_indices[index] = d2[index];
+      for (uint32_t index = 0; index < 4; ++index)
+        desc.gather_indices[index + 4] = d3[index];
     } else {
-      for (uint32_t i = 0; i < 4; ++i) {
-        desc.gather_indices[i * 2] = d2[i] & 0xffffu;
-        desc.gather_indices[i * 2 + 1] = (d2[i] >> 16) & 0xffffu;
-        desc.gather_indices[i * 2 + 8] = d3[i] & 0xffffu;
-        desc.gather_indices[i * 2 + 9] = (d3[i] >> 16) & 0xffffu;
+      for (uint32_t index = 0; index < 4; ++index) {
+        desc.gather_indices[index * 2] = d2[index] & 0xffffu;
+        desc.gather_indices[index * 2 + 1] = (d2[index] >> 16) & 0xffffu;
+        desc.gather_indices[index * 2 + 8] = d3[index] & 0xffffu;
+        desc.gather_indices[index * 2 + 9] = (d3[index] >> 16) & 0xffffu;
       }
     }
   }
@@ -232,7 +238,7 @@ public:
       const TensorDmaAxis axis = axes_[axis_idx];
       uint32_t insertion_idx = axis_idx;
       while (insertion_idx > 0) {
-        const auto &previous = axes_[insertion_idx - 1];
+        const TensorDmaAxis &previous = axes_[insertion_idx - 1];
         const bool axis_precedes_previous =
             axis.stride < previous.stride ||
             (axis.stride == previous.stride && axis.dimension < previous.dimension);
@@ -254,7 +260,7 @@ public:
 
     uint64_t occupied_span = 1;
     for (uint32_t axis_idx = 0; axis_idx < axis_count_; ++axis_idx) {
-      const auto &axis = axes_[axis_idx];
+      const TensorDmaAxis &axis = axes_[axis_idx];
       // Each axis must begin beyond the complete span of all faster axes for
       // greedy mixed-radix inversion to be unique.
       if (axis.stride < occupied_span)
@@ -272,7 +278,7 @@ public:
       return origin;
 
     for (uint32_t axis_idx = axis_count_; axis_idx > 0; --axis_idx) {
-      const auto &axis = axes_[axis_idx - 1];
+      const TensorDmaAxis &axis = axes_[axis_idx - 1];
       origin[axis.dimension] = linear_offset / axis.stride;
       linear_offset %= axis.stride;
     }
@@ -324,41 +330,56 @@ inline void validate_supported_descriptor(const TensorDmaDescriptor &desc,
   }
 }
 
-inline void copy_bytes(const TensorDmaDescriptor &desc, Wavefront &wf, uint64_t global_element,
-                       uint64_t lds_element, bool in_bounds, bool store_from_lds) {
-  if (!wf.has_gpu_memory())
-    throw util::UnimplementedInst("tensor DMA without GPU memory");
+class TensorDmaTransferElement {
+public:
+  uint64_t global_address = 0;
+  uint32_t lds_address = 0;
+  std::array<uint8_t, 8> bytes{};
+  std::size_t completed_bytes = 0;
+  bool in_bounds = false;
+};
 
+class TensorDmaState final : public DynamicInstState {
+public:
+  TensorDmaState(TensorDmaDescriptor descriptor, bool store)
+      : desc(std::move(descriptor)), store_from_lds(store) {
+    tag_ = TENSOR_DMA;
+  }
+
+  TensorDmaDescriptor desc;
+  std::optional<GpuVmAccess> access;
+  std::vector<TensorDmaTransferElement> elements;
+  std::size_t next_element = 0;
+  VmAccessOutcome outcome = VmAccessOutcome::Complete;
+  bool store_from_lds = false;
+  bool completion_committed = false;
+};
+
+inline void append_copy(TensorDmaState &state, Wavefront &wf, uint64_t global_element,
+                        uint64_t lds_element, bool in_bounds) {
+  const TensorDmaDescriptor &desc = state.desc;
   const uint64_t global_addr = desc.global_base + global_element * desc.elem_size;
   uint64_t lds_byte = lds_element * desc.elem_size;
   // The ISA applies descriptor padding only to memory-to-LDS transfers.
   // Stores read the ordinary dense LDS stream and ignore the padding fields.
-  if (desc.pad && !store_from_lds) {
+  if (desc.pad && !state.store_from_lds) {
     const uint32_t pad_interval_bytes = desc.pad_interval * sizeof(uint32_t);
     const uint32_t pad_amount_bytes = desc.pad_amount * sizeof(uint32_t);
     lds_byte += (lds_byte / pad_interval_bytes) * pad_amount_bytes;
   }
 
   const uint32_t lds_addr = wf.lds_base() + desc.lds_base + static_cast<uint32_t>(lds_byte);
-  std::array<uint8_t, 8> bytes{};
-  auto element_bytes = std::span<uint8_t>(bytes).first(desc.elem_size);
-  if (store_from_lds) {
-    if (!in_bounds)
-      return;
+  TensorDmaTransferElement element{
+      .global_address = global_addr, .lds_address = lds_addr, .in_bounds = in_bounds};
+  if (state.store_from_lds && in_bounds) {
     for (uint32_t byte = 0; byte < desc.elem_size; ++byte)
-      element_bytes[byte] = wf.lds().read8(lds_addr + byte);
-    wf.write_gpu_memory(global_addr, element_bytes);
-    return;
+      element.bytes[byte] = wf.lds().read8(lds_addr + byte);
   }
-
-  if (in_bounds)
-    wf.read_gpu_memory(global_addr, element_bytes);
-  for (uint32_t byte = 0; byte < desc.elem_size; ++byte)
-    wf.lds().write8(lds_addr + byte, element_bytes[byte]);
+  state.elements.push_back(element);
 }
 
 inline void copy_gather_tensor(const TensorDmaDescriptor &desc, const TensorDmaLayout &layout,
-                               Wavefront &wf, bool store_from_lds) {
+                               Wavefront &wf, TensorDmaState &state) {
   for (uint32_t idx = 0; idx < desc.valid_indices; ++idx) {
     const uint32_t gather_index = desc.gather_indices[idx];
     for (uint32_t coord0 = 0; coord0 < desc.tile_dims[0]; ++coord0) {
@@ -372,13 +393,13 @@ inline void copy_gather_tensor(const TensorDmaDescriptor &desc, const TensorDmaL
 
       const uint64_t lds_element =
           static_cast<uint64_t>(idx) * desc.tile_dims[0] + static_cast<uint64_t>(coord0);
-      copy_bytes(desc, wf, global_element, lds_element, in_bounds, store_from_lds);
+      append_copy(state, wf, global_element, lds_element, in_bounds);
     }
   }
 }
 
 inline void copy_dense_tensor(const TensorDmaDescriptor &desc, const TensorDmaLayout &layout,
-                              Wavefront &wf, bool store_from_lds) {
+                              Wavefront &wf, TensorDmaState &state) {
   const uint32_t rank = layout.rank();
   if (rank == 0)
     return;
@@ -390,9 +411,9 @@ inline void copy_dense_tensor(const TensorDmaDescriptor &desc, const TensorDmaLa
   const uint32_t iteration_count = desc.iterate ? desc.iteration_count : 1;
   for (uint32_t iter = 0; iter < iteration_count; ++iter) {
     const uint64_t iteration_offset = static_cast<uint64_t>(iter) * desc.global_increment;
-    const auto iteration_origin = desc.iterate && !layout.empty()
-                                      ? layout.origin_from_linear_offset(iteration_offset)
-                                      : std::array<uint64_t, 5>{};
+    const std::array<uint64_t, 5> iteration_origin =
+        desc.iterate && !layout.empty() ? layout.origin_from_linear_offset(iteration_offset)
+                                        : std::array<uint64_t, 5>{};
     for (uint64_t linear = 0; linear < element_count; ++linear) {
       uint64_t remaining = linear;
       uint64_t global_element = iteration_offset;
@@ -412,24 +433,93 @@ inline void copy_dense_tensor(const TensorDmaDescriptor &desc, const TensorDmaLa
         lds_stride *= tile_dim;
       }
 
-      copy_bytes(desc, wf, global_element, lds_element, in_bounds, store_from_lds);
+      append_copy(state, wf, global_element, lds_element, in_bounds);
     }
   }
 }
 
-inline void copy_tensor(const TensorDmaDescriptor &desc, Wavefront &wf, bool store_from_lds) {
+inline void prepare_tensor(TensorDmaState &state, Wavefront &wf) {
+  const TensorDmaDescriptor &desc = state.desc;
   const TensorDmaLayout layout(desc);
   validate_supported_descriptor(desc, layout);
   if (desc.gather)
-    copy_gather_tensor(desc, layout, wf, store_from_lds);
+    copy_gather_tensor(desc, layout, wf, state);
   else
-    copy_dense_tensor(desc, layout, wf, store_from_lds);
+    copy_dense_tensor(desc, layout, wf, state);
+
+  if (wf.address_space()) {
+    state.access = wf.snapshot_vm_access();
+    if (!state.access)
+      state.outcome = VmAccessOutcome::Faulted;
+  }
 }
 
 inline void arrive_atomic_barrier(const TensorDmaDescriptor &desc, Wavefront &wf) {
   const uint32_t addr = wf.lds_base() + desc.atomic_barrier_addr;
   const uint64_t state = wf.lds().read64(addr);
   wf.lds().write64(addr, lds_barrier_cell_update_arrive(state));
+}
+
+inline VmAccessOutcome resume_tensor_dma_state(TensorDmaState &state, Wavefront &wf) {
+  if (state.outcome != VmAccessOutcome::Complete && state.outcome != VmAccessOutcome::Unavailable)
+    return state.outcome;
+
+  if (state.access && !state.access->info().ready && state.next_element == 0 &&
+      (state.elements.empty() || state.elements.front().completed_bytes == 0)) {
+    state.access = wf.snapshot_vm_access();
+    if (!state.access)
+      return state.outcome = VmAccessOutcome::Faulted;
+  }
+
+  while (state.next_element < state.elements.size()) {
+    TensorDmaTransferElement &element = state.elements[state.next_element];
+    if (!element.in_bounds) {
+      ++state.next_element;
+      continue;
+    }
+
+    const uint32_t size = state.desc.elem_size;
+    VmAccessOutcome outcome = VmAccessOutcome::Complete;
+    if (state.access) {
+      if (state.store_from_lds) {
+        outcome = state.access->write(
+            element.global_address,
+            std::span<const std::byte>(reinterpret_cast<const std::byte *>(element.bytes.data()),
+                                       size),
+            element.completed_bytes);
+      } else {
+        outcome = state.access->read(
+            element.global_address,
+            std::span<std::byte>(reinterpret_cast<std::byte *>(element.bytes.data()), size),
+            element.completed_bytes);
+      }
+    } else if (state.store_from_lds) {
+      outcome = wf.write_gpu_memory(element.global_address,
+                                    std::span<const uint8_t>(element.bytes).first(size));
+    } else {
+      outcome =
+          wf.read_gpu_memory(element.global_address, std::span<uint8_t>(element.bytes).first(size));
+    }
+    if (outcome != VmAccessOutcome::Complete) {
+      state.outcome = outcome;
+      return outcome;
+    }
+    ++state.next_element;
+  }
+
+  if (!state.completion_committed) {
+    if (!state.store_from_lds) {
+      for (const TensorDmaTransferElement &element : state.elements) {
+        for (uint32_t byte = 0; byte < state.desc.elem_size; ++byte)
+          wf.lds().write8(element.lds_address + byte, element.bytes[byte]);
+      }
+    }
+    if (state.desc.atomic_barrier)
+      arrive_atomic_barrier(state.desc, wf);
+    state.completion_committed = true;
+  }
+  state.outcome = VmAccessOutcome::Complete;
+  return state.outcome;
 }
 
 class ScopedWaitCounter {
@@ -458,28 +548,44 @@ TensorDmaDescriptor read_descriptor(const Inst &inst, const Wavefront &wf) {
                           read_sgpr_group<4>(wf, inst.vaddr3.encoding_value(), true));
 }
 
-template <typename Inst>
-void execute_tensor_dma(const Inst &inst, Wavefront &wf, bool store_from_lds) {
+template <typename Inst> void execute_tensor_dma(Inst &inst, Wavefront &wf, bool store_from_lds) {
   ScopedWaitCounter counter(wf, WaitCounterType::TENSORCNT);
-  const auto desc = read_descriptor(inst, wf);
-  if (!desc.active())
+  if (inst.data() == nullptr) {
+    const TensorDmaDescriptor desc = read_descriptor(inst, wf);
+    std::unique_ptr<TensorDmaState> state = std::make_unique<TensorDmaState>(desc, store_from_lds);
+    if (desc.active())
+      prepare_tensor(*state, wf);
+    inst.set_data(std::move(state));
+  }
+  TensorDmaState &state = *inst.template data_as<TensorDmaState>();
+  if (!state.desc.active())
     return;
-  copy_tensor(desc, wf, store_from_lds);
-  if (desc.atomic_barrier)
-    arrive_atomic_barrier(desc, wf);
+  state.outcome = resume_tensor_dma_state(state, wf);
 }
 
 } // namespace tensor_dma_detail
 
-template <typename Inst> void execute_tensor_load_to_lds(const Inst &inst, Wavefront &wf) {
+inline bool is_tensor_dma_instruction(const Instruction &inst) {
+  return inst.data() != nullptr && inst.data()->tag() == TENSOR_DMA;
+}
+
+inline VmAccessOutcome tensor_dma_outcome(const Instruction &inst) {
+  return inst.data_as<tensor_dma_detail::TensorDmaState>()->outcome;
+}
+
+inline VmAccessOutcome resume_tensor_dma(Instruction &inst, Wavefront &wf) {
+  tensor_dma_detail::TensorDmaState &state = *inst.data_as<tensor_dma_detail::TensorDmaState>();
+  state.outcome = tensor_dma_detail::resume_tensor_dma_state(state, wf);
+  return state.outcome;
+}
+
+template <typename Inst> void execute_tensor_load_to_lds(Inst &inst, Wavefront &wf) {
   tensor_dma_detail::execute_tensor_dma(inst, wf, false);
 }
 
-template <typename Inst> void execute_tensor_store_from_lds(const Inst &inst, Wavefront &wf) {
+template <typename Inst> void execute_tensor_store_from_lds(Inst &inst, Wavefront &wf) {
   tensor_dma_detail::execute_tensor_dma(inst, wf, true);
 }
 
 } // namespace amdgpu
 } // namespace rocjitsu
-
-#endif // ROCJITSU_ISA_ARCH_AMDGPU_SHARED_TENSOR_DMA_H_

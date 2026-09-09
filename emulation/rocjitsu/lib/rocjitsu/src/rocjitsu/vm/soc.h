@@ -4,13 +4,18 @@
 /// @file soc.h
 /// @brief System-on-Chip container with XCDs, I/O Dies, and shared GPU memory.
 
-#ifndef ROCJITSU_VM_SOC_H_
-#define ROCJITSU_VM_SOC_H_
+#pragma once
 
 #include "rocjitsu/vm/amdgpu/cpu_dispatch_pool.h"
+#include "rocjitsu/vm/amdgpu/device_cache_coherence.h"
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"
+#include "rocjitsu/vm/amdgpu/gpu_memory_access.h"
+#include "rocjitsu/vm/amdgpu/gpu_queue_registry.h"
+#include "rocjitsu/vm/amdgpu/gpu_vm.h"
 #include "rocjitsu/vm/amdgpu/hbm_controller.h"
 #include "rocjitsu/vm/amdgpu/iod.h"
+#include "rocjitsu/vm/amdgpu/mes_engine.h"
+#include "rocjitsu/vm/amdgpu/sdma_queue_scheduler.h"
 #include "rocjitsu/vm/amdgpu/xcd.h"
 #include "rocjitsu/vm/plugins/execution_plugin_group.h"
 
@@ -21,6 +26,7 @@
 #include <cassert>
 #include <cstdint>
 #include <memory>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -38,7 +44,7 @@ class SoCTestAccess;
 /// connect directly to a standalone HBM controller (simplified path).
 ///
 /// Child components are owned via the CompositeComponent tree.
-class SoC : public simdojo::CompositeComponent {
+class SoC : public simdojo::CompositeComponent, private amdgpu::ComputeQueueBindingProvider {
 public:
   /// @brief Configuration for an AMDGPU SoC.
   struct Config {
@@ -55,15 +61,21 @@ public:
   SoC(std::string name, const Config &config);
 
   /// @brief Construct an empty SoC (children added externally by the config loader).
-  explicit SoC(std::string name, amdgpu::GpuMemory *memory = nullptr)
-      : simdojo::CompositeComponent(std::move(name)), memory_(memory) {
-    set_weight(0);
-  }
+  /// @param arch Architecture selecting ISA and SDMA packet semantics.
+  explicit SoC(std::string name, amdgpu::GpuMemory *memory = nullptr,
+               rj_code_arch_t arch = ROCJITSU_CODE_ARCH_INVALID);
+  ~SoC() override;
+
+  /// @brief Release queue-owned GPU VM state while adopted child components live.
+  /// @details VirtualMachine calls this before its flattened component children
+  /// are destroyed. The operation is idempotent so a directly owned SoC can use
+  /// the same path from its destructor.
+  void release_vm_resources();
 
   uint32_t gpu_id() const { return gpu_id_; }
 
-  void add_xcd(amdgpu::Xcd *xcd) { xcds_.push_back(xcd); }
-  void add_iod(amdgpu::Iod *iod) { iods_.push_back(iod); }
+  void add_xcd(amdgpu::Xcd *xcd);
+  void add_iod(amdgpu::Iod *iod);
 
   /// @brief Set flat-address-space aperture boundaries on all CUs via the SPI hierarchy.
   void set_apertures(uint64_t shared_base, uint64_t shared_limit, uint64_t private_base,
@@ -71,11 +83,15 @@ public:
     for (auto *xcd : xcds_)
       xcd->set_apertures(shared_base, shared_limit, private_base, private_limit);
   }
-  void set_memory(amdgpu::GpuMemory *m); // Defined in soc.cpp.
+  /// @brief Install legacy backing during configuration.
+  /// @details A non-null backing cannot be replaced with a different object.
+  /// Reusing the same pointer is idempotent and repairs the internal binding
+  /// after an explicit VM reset when no queue or other address space remains.
+  [[nodiscard]] bool set_memory(amdgpu::GpuMemory *memory); // Defined in soc.cpp.
 
   /// @brief Wire L2 → HBM backing store links (call after engine build).
   void wire_backing(simdojo::Topology &topo);
-  void set_arch(rj_code_arch_t a) { arch_ = a; }
+  void set_arch(rj_code_arch_t arch);
   rj_code_arch_t arch() const { return arch_; }
   void set_exec_mode(simdojo::ExecMode mode) { exec_mode_ = mode; }
   simdojo::ExecMode exec_mode() const { return exec_mode_; }
@@ -154,6 +170,12 @@ public:
         fn(cp);
   }
 
+  /// @brief Update every queue owner that scans a process doorbell page.
+  void set_process_doorbell_base(uint32_t process_id, void *base) {
+    for_each_cp([=](amdgpu::CommandProcessor *cp) { cp->set_doorbell_base(process_id, base); });
+    sdma_queue_scheduler_.set_process_doorbell_base(process_id, base);
+  }
+
   bool has_active_wfs_for_process(uint32_t process_id) const {
     for (auto *xcd_ptr : xcds_) {
       if (auto *cp = xcd_ptr->command_processor()) {
@@ -190,6 +212,31 @@ public:
   /// @returns Const pointer to the GPU memory.
   const amdgpu::GpuMemory *memory() const { return memory_; }
 
+  /// @brief Return the shared GPU address-space service.
+  amdgpu::GpuVm &gpu_vm() { return gpu_vm_; }
+  const amdgpu::GpuVm &gpu_vm() const { return gpu_vm_; }
+
+  /// @brief Flat VM binding used by standalone/internal model queues.
+  /// @details The binding is explicit-handle only and never claims numeric
+  /// VMID routing, so a PCI/VFIO GART binding may independently own VMID 0.
+  amdgpu::AddressSpaceHandle internal_address_space() const { return internal_address_space_; }
+
+  const std::shared_ptr<amdgpu::DeviceCacheCoherence> &cache_coherence() const {
+    return cache_coherence_;
+  }
+
+  /// @brief Return the SoC-owned SDMA queue scheduler.
+  amdgpu::SdmaQueueScheduler &sdma_queue_scheduler() { return sdma_queue_scheduler_; }
+  const amdgpu::SdmaQueueScheduler &sdma_queue_scheduler() const { return sdma_queue_scheduler_; }
+
+  /// @brief Return the shared GPU queue registry.
+  amdgpu::GpuQueueRegistry &queue_registry() { return queue_registry_; }
+  const amdgpu::GpuQueueRegistry &queue_registry() const { return queue_registry_; }
+
+  /// @brief Return the SoC-owned MES semantic engine.
+  amdgpu::MesEngine &mes_engine() { return mes_engine_; }
+  const amdgpu::MesEngine &mes_engine() const { return mes_engine_; }
+
   /// @brief Set the execution plugin group and distribute to CPs/CUs.
   void set_plugin_group(std::shared_ptr<ExecutionPluginGroup> plugin_group);
 
@@ -213,11 +260,24 @@ private:
   friend class test::SoCTestAccess;
 
   void apply_dispatch_threads();
+  [[nodiscard]] bool install_internal_address_space(amdgpu::GpuMemory *memory);
+  [[nodiscard]] std::optional<amdgpu::ComputeQueueBindingPlan>
+  make_aql(uint32_t queue_ordinal) override;
+  [[nodiscard]] std::optional<amdgpu::ComputeQueueBindingPlan>
+  make_pm4(uint32_t queue_ordinal, amdgpu::Pm4PacketCallbacks callbacks) override;
 
   static inline std::atomic<uint32_t> next_gpu_id_{0};
   uint32_t gpu_id_ = next_gpu_id_++;
   rj_code_arch_t arch_ = ROCJITSU_CODE_ARCH_INVALID;
   simdojo::ExecMode exec_mode_ = simdojo::ExecMode::FUNCTIONAL;
+  std::shared_ptr<amdgpu::DeviceCacheCoherence> cache_coherence_ =
+      std::make_shared<amdgpu::DeviceCacheCoherence>();
+  amdgpu::GpuVm gpu_vm_;
+  std::shared_ptr<amdgpu::GpuMemoryPhysicalAccess> internal_memory_access_;
+  amdgpu::AddressSpaceHandle internal_address_space_;
+  amdgpu::SdmaQueueScheduler sdma_queue_scheduler_;
+  amdgpu::GpuQueueRegistry queue_registry_;
+  amdgpu::MesEngine mes_engine_;
   std::vector<amdgpu::Xcd *> xcds_;
   std::vector<amdgpu::Iod *> iods_;
   amdgpu::GpuMemory *memory_ = nullptr;
@@ -227,8 +287,7 @@ private:
   uint32_t dispatch_threads_ = 1;
   std::shared_ptr<ExecutionPluginGroup> plugin_group_;
   std::vector<amdgpu::ComputeUnitCore *> all_cus_cache_;
+  bool vm_resources_released_ = false;
 };
 
 } // namespace rocjitsu
-
-#endif // ROCJITSU_VM_SOC_H_

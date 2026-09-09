@@ -9,12 +9,13 @@
 /// SimulatedKfd owns a process table mapping fds to KfdProcess instances,
 /// and delegates per-process ioctl operations through here.
 
-#ifndef ROCJITSU_KMD_LINUX_KFD_PROCESS_H_
-#define ROCJITSU_KMD_LINUX_KFD_PROCESS_H_
+#pragma once
 
 #include "rocjitsu/kmd/linux/events.h"
 #include "rocjitsu/kmd/linux/kfd_topology.h"
 #include "rocjitsu/kmd/linux/libc_passthrough.h"
+#include "rocjitsu/vm/amdgpu/gpu_handles.h"
+#include "rocjitsu/vm/amdgpu/legacy_page_table.h"
 #include "rocjitsu/vm/amdgpu/mtype.h"
 #include "util/unique_handle.h"
 
@@ -64,6 +65,7 @@ public:
     uint64_t scratch_backing_va = 0;
     uint64_t trap_tba_addr = 0;
     uint64_t trap_tma_addr = 0;
+    amdgpu::AddressSpaceHandle address_space;
   };
 
   /// @brief Construct a new KFD process with a unique process ID.
@@ -290,207 +292,12 @@ public:
     }
   };
 
-  // GPUVM uses the simulator's fixed 4 KiB translation granule. This models
-  // the GPU page table and is intentionally independent of the host page size.
-  static constexpr uint64_t kPageShift = 12;
-  static constexpr uint64_t kPageSize = 1ULL << kPageShift;
-
-  /// @brief Who owns the host memory behind an extent, and so who may revoke it.
-  ///
-  /// @details The two cannot be treated alike by anything that dereferences the
-  /// extent. Driver memory is a memfd this process mapped read-write and holds
-  /// open; nothing outside can change its protection or take it away, so its
-  /// pointer is valid by construction and checking it would be pure cost on the
-  /// path that moves the most bytes. Application memory is the caller's own
-  /// pages, registered through USERPTR or reached by identity; the application
-  /// may mprotect or munmap them at any time, and dereferencing one without
-  /// checking is how a GPU access becomes a host SIGSEGV.
-  enum class HostExtentOwner : uint8_t {
-    Driver,      ///< A memfd this driver created, mapped and keeps open.
-    Application, ///< The caller's pages; revocable, so validate before use.
-  };
-
-  /// @brief One host-backed interval within a GPU page.
-  struct HostExtent {
-    uint8_t *host_ptr = nullptr;
-    /// Number of host-allocation-backed bytes starting at host_ptr.
-    size_t host_backed_bytes = 0;
-    /// GPU-page offset that corresponds to host_ptr.
-    size_t gpu_page_offset = 0;
-    /// @brief Defaults to Application, which is the safe direction to be wrong
-    /// in: a driver extent mistaken for an application one is validated
-    /// needlessly, while the reverse is dereferenced without checking.
-    HostExtentOwner owner = HostExtentOwner::Application;
-
-    bool operator==(const HostExtent &) const = default;
-  };
-
-  /// @brief One inline host extent, spilling to dynamic storage only for split pages.
-  class HostExtentList {
-  public:
-    HostExtentList() = default;
-    HostExtentList(const HostExtentList &other) { copy_from(other); }
-    HostExtentList(HostExtentList &&other) noexcept { move_from(std::move(other)); }
-    HostExtentList(std::initializer_list<HostExtent> extents) {
-      for (const auto &extent : extents)
-        push_back(extent);
-    }
-
-    HostExtentList &operator=(const HostExtentList &other) {
-      if (this != &other)
-        copy_from(other);
-      return *this;
-    }
-    HostExtentList &operator=(HostExtentList &&other) noexcept {
-      if (this != &other)
-        move_from(std::move(other));
-      return *this;
-    }
-    bool operator==(const HostExtentList &) const = default;
-
-    [[nodiscard]] size_t size() const {
-      if (std::holds_alternative<std::monostate>(storage_))
-        return 0;
-      if (std::holds_alternative<HostExtent>(storage_))
-        return 1;
-      return std::get<std::vector<HostExtent>>(storage_).size();
-    }
-    [[nodiscard]] bool empty() const { return size() == 0; }
-
-    HostExtent *data() {
-      if (auto *single = std::get_if<HostExtent>(&storage_))
-        return single;
-      if (auto *many = std::get_if<std::vector<HostExtent>>(&storage_))
-        return many->data();
-      return nullptr;
-    }
-    const HostExtent *data() const {
-      if (const auto *single = std::get_if<HostExtent>(&storage_))
-        return single;
-      if (const auto *many = std::get_if<std::vector<HostExtent>>(&storage_))
-        return many->data();
-      return nullptr;
-    }
-    HostExtent *begin() { return data(); }
-    const HostExtent *begin() const { return data(); }
-    HostExtent *end() {
-      auto *first = data();
-      return first ? first + size() : nullptr;
-    }
-    const HostExtent *end() const {
-      const auto *first = data();
-      return first ? first + size() : nullptr;
-    }
-    HostExtent &front() { return (*this)[0]; }
-    const HostExtent &front() const { return (*this)[0]; }
-    HostExtent &back() { return (*this)[size() - 1]; }
-    const HostExtent &back() const { return (*this)[size() - 1]; }
-    HostExtent &operator[](size_t index) { return data()[index]; }
-    const HostExtent &operator[](size_t index) const { return data()[index]; }
-
-    void reserve(size_t capacity) {
-      if (capacity <= 1)
-        return;
-      if (auto *many = std::get_if<std::vector<HostExtent>>(&storage_)) {
-        many->reserve(capacity);
-        return;
-      }
-      std::vector<HostExtent> many;
-      many.reserve(capacity);
-      if (auto *single = std::get_if<HostExtent>(&storage_))
-        many.push_back(*single);
-      storage_.emplace<std::vector<HostExtent>>(std::move(many));
-    }
-
-    void push_back(const HostExtent &extent) {
-      if (std::holds_alternative<std::monostate>(storage_)) {
-        storage_.emplace<HostExtent>(extent);
-        return;
-      }
-      if (auto *single = std::get_if<HostExtent>(&storage_)) {
-        std::vector<HostExtent> many;
-        many.reserve(2);
-        many.push_back(*single);
-        many.push_back(extent);
-        storage_.emplace<std::vector<HostExtent>>(std::move(many));
-        return;
-      }
-      std::get<std::vector<HostExtent>>(storage_).push_back(extent);
-    }
-
-    void resize(size_t count) {
-      if (count == 0) {
-        storage_.emplace<std::monostate>();
-        return;
-      }
-      if (count == 1) {
-        if (auto *many = std::get_if<std::vector<HostExtent>>(&storage_)) {
-          HostExtent single = many->front();
-          storage_.emplace<HostExtent>(single);
-        }
-        return;
-      }
-      reserve(count);
-      std::get<std::vector<HostExtent>>(storage_).resize(count);
-    }
-
-    HostExtentList &operator=(std::vector<HostExtent> extents) {
-      if (extents.empty())
-        storage_.emplace<std::monostate>();
-      else if (extents.size() == 1)
-        storage_.emplace<HostExtent>(extents.front());
-      else
-        storage_.emplace<std::vector<HostExtent>>(std::move(extents));
-      return *this;
-    }
-
-  private:
-    void copy_from(const HostExtentList &other) {
-      if (const auto *single = std::get_if<HostExtent>(&other.storage_))
-        storage_.emplace<HostExtent>(*single);
-      else if (const auto *many = std::get_if<std::vector<HostExtent>>(&other.storage_))
-        storage_.emplace<std::vector<HostExtent>>(*many);
-      else
-        storage_.emplace<std::monostate>();
-    }
-
-    void move_from(HostExtentList &&other) {
-      if (auto *single = std::get_if<HostExtent>(&other.storage_))
-        storage_.emplace<HostExtent>(*single);
-      else if (auto *many = std::get_if<std::vector<HostExtent>>(&other.storage_))
-        storage_.emplace<std::vector<HostExtent>>(std::move(*many));
-      else
-        storage_.emplace<std::monostate>();
-    }
-
-    std::variant<std::monostate, HostExtent, std::vector<HostExtent>> storage_;
-  };
-
-  /// @brief Per-page translation entry, mirroring HW PTE fields.
-  /// @details A hardware PTE has one page-wide MTYPE, while local USERPTR
-  /// allocations can contribute several disjoint host-backed intervals to the
-  /// same GPU page. Keeping all intervals prevents a later sub-page mapping or
-  /// unmapping from silently replacing an unrelated sibling.
-  struct PageTableEntry {
-    PageTableEntry() = default;
-    PageTableEntry(uint8_t *host_ptr, amdgpu::Mtype page_mtype,
-                   HostExtentOwner owner = HostExtentOwner::Application)
-        : mtype(page_mtype), host_extents{{host_ptr, kPageSize, 0, owner}} {}
-    PageTableEntry(uint8_t *host_ptr, amdgpu::Mtype page_mtype, size_t host_backed_bytes,
-                   size_t gpu_page_offset, HostExtentOwner owner = HostExtentOwner::Application)
-        : mtype(page_mtype), host_extents{{host_ptr, host_backed_bytes, gpu_page_offset, owner}} {}
-
-    amdgpu::Mtype mtype = amdgpu::Mtype::RW;
-    HostExtentList host_extents;
-
-    bool operator==(const PageTableEntry &) const = default;
-  };
-
-  /// @brief Per-process GPU page table (GPU VA page number → PTE).
-  /// @details Managed by the driver's mmap/munmap handlers. GpuMemory holds a
-  ///          pointer to the active process's page table and resolves translations
-  ///          on each memory access (TLB-like role).
-  using PageTable = std::unordered_map<uint64_t, PageTableEntry>;
+  static constexpr uint64_t kPageShift = amdgpu::kLegacyPageShift;
+  static constexpr uint64_t kPageSize = amdgpu::kLegacyPageSize;
+  using HostExtentOwner = amdgpu::LegacyHostExtentOwner;
+  using HostExtent = amdgpu::LegacyHostExtent;
+  using PageTableEntry = amdgpu::LegacyPageTableEntry;
+  using PageTable = amdgpu::LegacyPageTable;
 
   /// @brief Map host pages into this process's GPU page table.
   /// @param mtype PTE MTYPE for these pages (derived from allocation flags).
@@ -657,6 +464,7 @@ public:
   struct QueueDoorbellInfo {
     uint32_t gpu_ordinal;
     uint32_t doorbell_offset;
+    amdgpu::QueueHandle queue_handle;
   };
   std::unordered_map<uint32_t, QueueDoorbellInfo> queue_doorbell_map_;
 
@@ -784,5 +592,3 @@ private:
 };
 
 } // namespace rocjitsu
-
-#endif // ROCJITSU_KMD_LINUX_KFD_PROCESS_H_

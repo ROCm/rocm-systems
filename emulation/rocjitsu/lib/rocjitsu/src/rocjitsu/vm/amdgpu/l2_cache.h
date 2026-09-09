@@ -4,11 +4,11 @@
 /// @file l2_cache.h
 /// @brief L2 cache component shared per XCD.
 
-#ifndef ROCJITSU_VM_AMDGPU_L2_CACHE_H_
-#define ROCJITSU_VM_AMDGPU_L2_CACHE_H_
+#pragma once
 
 #include "rocjitsu/vm/amdgpu/device_cache_coherence.h"
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"
+#include "rocjitsu/vm/amdgpu/gpu_vm.h"
 #include "rocjitsu/vm/amdgpu/mtype.h"
 #include "simdojo/components/cache.h"
 #include "simdojo/sim/component.h"
@@ -23,9 +23,12 @@
 #include <map>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <shared_mutex>
+#include <span>
 #include <string>
 #include <utility>
+#include <vector>
 
 namespace rocjitsu {
 namespace amdgpu {
@@ -79,7 +82,8 @@ public:
 
   /// @brief Construct an L2Cache component.
   /// @param name Human-readable name (e.g., "xcd0.l2").
-  explicit L2Cache(std::string name);
+  explicit L2Cache(std::string name, std::shared_ptr<DeviceCacheCoherence> coherence =
+                                         std::make_shared<DeviceCacheCoherence>());
   ~L2Cache() override;
 
   L2Cache(const L2Cache &) = delete;
@@ -94,6 +98,23 @@ public:
   /// @brief Set the backing memory for direct writeback in functional mode.
   /// @param mem GpuMemory instance (used when req_port_ has no link).
   void set_backing_memory(GpuMemory *mem) { backing_memory_ = mem; }
+
+  /// @brief Set the legacy backing used only by out-of-band cache maintenance.
+  /// @details This direct path avoids simulation-port traffic from SDMA's
+  /// worker. Translated PCI/VFIO accesses do not use this compatibility path.
+  void set_legacy_maintenance_memory(GpuMemory *memory) { legacy_maintenance_memory_ = memory; }
+  /// @brief Set the VM service used only by out-of-band cache maintenance.
+  /// @details The maintenance path snapshots nonzero VMIDs here instead of
+  /// routing an SDMA worker through the simulation message topology.
+  void set_legacy_maintenance_vm(GpuVm *gpu_vm) { legacy_maintenance_vm_ = gpu_vm; }
+  /// @brief Set the VM service used for nonzero-VMID direct backing accesses.
+  /// @details This is separate from the maintenance VM so direct functional
+  /// accesses and out-of-band maintenance remain independently configurable.
+  void set_gpu_vm(GpuVm *gpu_vm) { gpu_vm_ = gpu_vm; }
+
+  /// @brief Rebind this cache to a device-local coherence domain before use.
+  void set_coherence_domain(std::shared_ptr<DeviceCacheCoherence> coherence);
+  const std::shared_ptr<DeviceCacheCoherence> &coherence_domain() const { return coherence_; }
 
   uint64_t backing_read_transactions() const {
     return backing_read_transactions_.load(std::memory_order_relaxed);
@@ -110,7 +131,8 @@ public:
   /// @param dst Destination buffer.
   /// @param size Number of bytes to read.
   /// @param mtype Memory type for caching policy.
-  void read(uint64_t addr, uint8_t *dst, uint32_t size, Mtype mtype = Mtype::RW, uint32_t vmid = 0);
+  VmAccessOutcome read(uint64_t addr, uint8_t *dst, uint32_t size, Mtype mtype = Mtype::RW,
+                       uint32_t vmid = 0);
 
   /// @brief Write data to L2 (and possibly through to HBM).
   ///
@@ -119,8 +141,8 @@ public:
   /// @param src Source data.
   /// @param size Number of bytes to write.
   /// @param mtype Memory type for caching policy.
-  void write(uint64_t addr, const uint8_t *src, uint32_t size, Mtype mtype = Mtype::RW,
-             uint32_t vmid = 0);
+  VmAccessOutcome write(uint64_t addr, const uint8_t *src, uint32_t size, Mtype mtype = Mtype::RW,
+                        uint32_t vmid = 0);
 
   uint64_t write_count() const { return write_count_.load(std::memory_order_relaxed); }
 
@@ -130,14 +152,14 @@ public:
   /// at the line-aligned address containing addr.
   /// @param addr Any address within the desired cache line.
   /// @param[out] line_buf Buffer of at least LINE_SIZE bytes.
-  void fetch_line(uint64_t addr, uint8_t *line_buf, uint32_t vmid = 0);
+  VmAccessOutcome fetch_line(uint64_t addr, uint8_t *line_buf, uint32_t vmid = 0);
 
   /// @brief Write back a full cache line from L1 eviction.
   /// @param line_addr Line-aligned address.
   /// @param[in] data Full cache line data (LINE_SIZE bytes).
   /// @param mtype Memory type for caching policy.
-  void writeback_line(uint64_t line_addr, const uint8_t *data, Mtype mtype = Mtype::RW,
-                      uint32_t vmid = 0);
+  VmAccessOutcome writeback_line(uint64_t line_addr, const uint8_t *data, Mtype mtype = Mtype::RW,
+                                 uint32_t vmid = 0);
 
   /// @brief Write back only the modified bytes from a full L1 line snapshot.
   /// @param line_addr Line-aligned address.
@@ -146,12 +168,12 @@ public:
   /// @param dirty_size Number of modified bytes.
   /// @param mtype Memory type for caching policy.
   /// @param vmid Owning process address space.
-  void writeback_line(uint64_t line_addr, const uint8_t *data, uint32_t dirty_offset,
-                      uint32_t dirty_size, Mtype mtype = Mtype::RW, uint32_t vmid = 0);
+  VmAccessOutcome writeback_line(uint64_t line_addr, const uint8_t *data, uint32_t dirty_offset,
+                                 uint32_t dirty_size, Mtype mtype = Mtype::RW, uint32_t vmid = 0);
 
   /// @brief Perform an atomic read-modify-write on a cache line.
   ///
-  /// @details Establishes a process-wide device coherence boundary: dirty
+  /// @details Establishes a device-local coherence boundary: dirty
   /// scalar and L2 state is published, the device coherence epoch is advanced,
   /// and every L2 remains quiescent through the backing RMW. Cached clean lines
   /// are discarded lazily on their next ordinary access.
@@ -160,20 +182,36 @@ public:
   /// @param size Access size in bytes (4 or 8).
   /// @param fn Callback: fn(line_data_ptr, line_offset). Must read the
   ///           old value, compute the new value, and write it in place.
-  template <typename F> void atomic_rmw(uint64_t addr, uint32_t size, F &&fn, uint32_t vmid = 0) {
-    [[maybe_unused]] auto boundary = DeviceCacheCoherence::instance().acquire_atomic_boundary();
+  template <typename F>
+  [[nodiscard]] VmAccessOutcome atomic_rmw(uint64_t addr, uint32_t size, F &&fn,
+                                           uint32_t vmid = 0) {
+    DeviceCacheCoherence::AtomicBoundary boundary = coherence_->acquire_atomic_boundary();
+    if (boundary.outcome() != VmAccessOutcome::Complete)
+      return boundary.outcome();
 
     if (backing_memory_) {
       backing_read_transactions_.fetch_add(1, std::memory_order_relaxed);
       backing_write_transactions_.fetch_add(1, std::memory_order_relaxed);
-      backing_memory_->atomic_rmw(addr, size, [&](uint8_t *target) { fn(target, 0); }, vmid);
+      if (vmid == 0) {
+        const bool modified =
+            backing_memory_->atomic_modify(addr, size, [&](uint8_t *target) { fn(target, 0); });
+        return modified ? VmAccessOutcome::Complete : VmAccessOutcome::Malformed;
+      }
+      if (gpu_vm_ == nullptr)
+        return VmAccessOutcome::Unavailable;
+      std::optional<GpuVmAccess> vm_access = gpu_vm_->snapshot_vmid(vmid);
+      if (!vm_access)
+        return VmAccessOutcome::Faulted;
+      return vm_access->atomic_modify(addr, size, [&](std::span<std::byte> target) {
+        fn(reinterpret_cast<uint8_t *>(target.data()), 0);
+      });
     } else {
       assert((size == sizeof(uint32_t) || size == sizeof(uint64_t)) &&
              "L2 atomic size must be 4 or 8 bytes");
-      std::array<uint8_t, sizeof(uint64_t)> target{};
-      send_backing(addr, target.data(), size, simdojo::MessageOp::READ, vmid);
-      fn(target.data(), 0);
-      send_backing(addr, target.data(), size, simdojo::MessageOp::WRITE, vmid);
+      simdojo::MemoryAtomicMutation mutation = [&](std::span<std::byte> target) {
+        fn(reinterpret_cast<uint8_t *>(target.data()), 0);
+      };
+      return send_atomic_backing(addr, size, mutation, vmid);
     }
   }
 
@@ -183,11 +221,11 @@ public:
   /// written back to the backing store before the line is invalidated,
   /// so a subsequent ensure_line() refetch gets the latest data.
   /// @param addr Any address within the target cache line.
-  void flush_line(uint64_t addr, uint32_t vmid = 0);
+  VmAccessOutcome flush_line(uint64_t addr, uint32_t vmid = 0);
 
   /// @brief Invalidate all L2 lines.
   void invalidate_all() {
-    auto maintenance_lock = acquire_cache_maintenance();
+    std::unique_lock<std::shared_mutex> maintenance_lock = acquire_cache_maintenance();
     cache_.invalidate_all();
     clear_all_dirty_bytes();
   }
@@ -197,22 +235,22 @@ public:
   /// range are authoritative in backing memory. Dirty bytes outside a partial
   /// line update are preserved before the target VMID's line is invalidated.
   /// @param vmid Owning process address space to invalidate.
-  void invalidate_range(uint64_t addr, uint32_t size, uint32_t vmid);
+  VmAccessOutcome invalidate_range(uint64_t addr, uint32_t size, uint32_t vmid);
 
   /// @brief Flush all dirty L2 lines to HBM and invalidate.
   /// @param vmid Ignored. Each dirty line is written back under its own owning
   /// vmid (recorded in the line tag), so a caller-supplied vmid cannot be
   /// correct for a global flush. Retained only for call-site signature symmetry.
-  void flush_all(uint32_t vmid = 0);
+  VmAccessOutcome flush_all(uint32_t vmid = 0);
 
   /// @brief Create a completer port for a CU connection (one per CU).
   /// @param name Name suffix for the port (used for port naming).
   /// @returns Pointer to the newly created completer port.
   simdojo::Port *create_cpl_port(const std::string &name) {
-    auto port_id = static_cast<simdojo::PortID>(cpl_ports_.size() + 1);
+    simdojo::PortID port_id = static_cast<simdojo::PortID>(cpl_ports_.size() + 1);
     auto port = std::make_unique<simdojo::Port>(
         "cpl_" + name, port_id, this, simdojo::PortDirection::IN, simdojo::PortProtocol::MEMORY);
-    auto *raw = add_port(std::move(port));
+    simdojo::Port *raw = add_port(std::move(port));
     cpl_ports_.push_back(raw);
     return raw;
   }
@@ -285,25 +323,39 @@ private:
   std::shared_lock<std::shared_mutex> acquire_cache_access();
   std::unique_lock<std::shared_mutex> acquire_cache_maintenance();
   void synchronize_epoch_locked();
-  void ensure_line(uint64_t addr, uint32_t vmid = 0);
-  void flush_line_locked(uint64_t addr, uint32_t vmid = 0);
-  void flush_dirty_locked();
+  VmAccessOutcome ensure_line(uint64_t addr, uint32_t vmid = 0);
+  VmAccessOutcome flush_line_locked(uint64_t addr, uint32_t vmid = 0);
+  VmAccessOutcome flush_dirty_locked();
+  [[nodiscard]] VmAccessOutcome flush_dirty_to_legacy_backing_locked();
   using DirtyMask = std::array<uint64_t, LINE_SIZE / 64>;
   void mark_dirty_bytes(uint64_t line_addr, uint32_t offset, uint32_t size, uint32_t vmid);
   bool clear_dirty_bytes(uint64_t line_addr, uint32_t offset, uint32_t size, uint32_t vmid);
-  void publish_dirty_bytes(uint64_t line_addr, const uint8_t *data, uint32_t vmid,
-                           uint32_t discard_offset = 0, uint32_t discard_size = 0);
+  VmAccessOutcome publish_dirty_bytes(uint64_t line_addr, const uint8_t *data, uint32_t vmid,
+                                      uint32_t discard_offset = 0, uint32_t discard_size = 0);
+  [[nodiscard]] VmAccessOutcome
+  publish_dirty_bytes_to_legacy_backing(uint64_t line_addr, const uint8_t *data, uint32_t vmid);
+  bool has_legacy_maintenance_backing() const {
+    return legacy_maintenance_memory_ != nullptr && legacy_maintenance_vm_ != nullptr;
+  }
   void clear_all_dirty_bytes();
-  void invalidate_range_locked(uint64_t addr, uint32_t size, uint32_t vmid, uint64_t line_start,
-                               uint64_t line_count);
-  void send_backing(uint64_t addr, uint8_t *data, uint32_t size, simdojo::MessageOp op,
-                    uint32_t vmid = 0);
+  VmAccessOutcome invalidate_range_locked(uint64_t addr, uint32_t size, uint32_t vmid,
+                                          uint64_t line_start, uint64_t line_count);
+  VmAccessOutcome send_backing(uint64_t addr, uint8_t *data, uint32_t size, simdojo::MessageOp op,
+                               uint32_t vmid = 0);
+  VmAccessOutcome send_atomic_backing(uint64_t addr, uint32_t size,
+                                      const simdojo::MemoryAtomicMutation &mutation,
+                                      uint32_t vmid = 0);
+  static VmAccessOutcome access_outcome(simdojo::MessageStatus status);
 
   CacheStore cache_;
   mutable std::shared_mutex maintenance_mutex_;
   mutable std::array<std::mutex, NUM_SETS> set_mutexes_;
   simdojo::Port *req_port_ = nullptr;
   GpuMemory *backing_memory_ = nullptr; ///< Direct writeback path (functional mode).
+  GpuMemory *legacy_maintenance_memory_ = nullptr;
+  GpuVm *legacy_maintenance_vm_ = nullptr;
+  GpuVm *gpu_vm_ = nullptr;
+  std::shared_ptr<DeviceCacheCoherence> coherence_;
   uint64_t coherence_epoch_ = 0;
   std::mutex dirty_bytes_mutex_;
   std::map<std::pair<uint32_t, uint64_t>, DirtyMask> dirty_bytes_;
@@ -318,5 +370,3 @@ private:
 
 } // namespace amdgpu
 } // namespace rocjitsu
-
-#endif // ROCJITSU_VM_AMDGPU_L2_CACHE_H_
