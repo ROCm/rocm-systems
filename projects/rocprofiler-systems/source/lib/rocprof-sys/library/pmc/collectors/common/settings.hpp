@@ -255,17 +255,23 @@ struct settings_policy
     }
 
 private:
-    static cpu::enabled_metrics parse_cpu_enabled_metrics(const std::string& input)
+    /// @brief Strip tab/space characters from @p input.
+    static std::string remove_whitespace(const std::string& input)
     {
-        std::string filtered;
-        filtered.reserve(input.size());
-        std::ranges::for_each(input, [&filtered](char chr) {
+        std::string result;
+        result.reserve(input.size());
+        std::ranges::for_each(input, [&result](char chr) {
             if(chr != '\t' && chr != ' ')
             {
-                filtered.push_back(chr);
+                result.push_back(chr);
             }
         });
-        auto trimmed = rocprofsys::utility::string::to_lower(filtered);
+        return result;
+    }
+
+    static cpu::enabled_metrics parse_cpu_enabled_metrics(const std::string& input)
+    {
+        auto trimmed = rocprofsys::utility::string::to_lower(remove_whitespace(input));
 
         if(trimmed.empty() || trimmed == "all")
         {
@@ -321,15 +327,8 @@ private:
 
     static gpu::enabled_metrics parse_enabled_metrics(const std::string& input)
     {
-        std::string settings_filtered;
-        settings_filtered.reserve(input.size());
-        std::ranges::for_each(input, [&settings_filtered](char chr) {
-            if(chr != '\t' && chr != ' ')
-            {
-                settings_filtered.push_back(chr);
-            }
-        });
-        auto settings_trimmed = rocprofsys::utility::string::to_lower(settings_filtered);
+        auto settings_trimmed =
+            rocprofsys::utility::string::to_lower(remove_whitespace(input));
 
         if(settings_trimmed.empty() || settings_trimmed == "all")
         {
