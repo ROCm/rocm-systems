@@ -1767,23 +1767,28 @@ hsa_status_t Runtime::IPCAttach(const hsa_amd_ipc_memory_t* handle, size_t len, 
     };
 
   auto mapMemoryToNodes = [&](unsigned int numNodes, HSAuint32 *nodes) {
-    HSAuint64 altAddress;
-    if (!numNodes) {
-      if (HSAKMT_CALL(hsaKmtMapMemoryToGPU(importAddress, importSize, &altAddress)) != HSAKMT_STATUS_SUCCESS) {
-        HSAKMT_CALL(hsaKmtDeregisterMemory(importAddress));
-        return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
-      }
-    } else {
-      HsaMemMapFlags map_flags;
-      map_flags.Value = 0;
-      map_flags.ui32.PageSize = HSA_PAGE_SIZE_64KB;
-      if (HSAKMT_CALL(hsaKmtMapMemoryToGPUNodes(importAddress, importSize, &altAddress, map_flags, numNodes,
-                                    nodes)) != HSAKMT_STATUS_SUCCESS) {
-        map_flags.ui32.PageSize = HSA_PAGE_SIZE_4KB;
-        if (HSAKMT_CALL(hsaKmtMapMemoryToGPUNodes(importAddress, importSize, &altAddress, map_flags, numNodes,
-                                      nodes)) != HSAKMT_STATUS_SUCCESS) {
+    // In DRM mode the BO is already mapped into GPU VA during import
+    // (amdgpu_bo_va_op_raw2 in hsaKmtRegisterGraphicsHandleToNodesExt),
+    // so skip the KFD MapMemoryToGPU ioctl which would fail with EINVAL.
+    if (!flag().enable_drm()) {
+      HSAuint64 altAddress;
+      if (!numNodes) {
+        if (HSAKMT_CALL(hsaKmtMapMemoryToGPU(importAddress, importSize, &altAddress)) != HSAKMT_STATUS_SUCCESS) {
           HSAKMT_CALL(hsaKmtDeregisterMemory(importAddress));
           return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
+        }
+      } else {
+        HsaMemMapFlags map_flags;
+        map_flags.Value = 0;
+        map_flags.ui32.PageSize = HSA_PAGE_SIZE_64KB;
+        if (HSAKMT_CALL(hsaKmtMapMemoryToGPUNodes(importAddress, importSize, &altAddress, map_flags, numNodes,
+                                      nodes)) != HSAKMT_STATUS_SUCCESS) {
+          map_flags.ui32.PageSize = HSA_PAGE_SIZE_4KB;
+          if (HSAKMT_CALL(hsaKmtMapMemoryToGPUNodes(importAddress, importSize, &altAddress, map_flags, numNodes,
+                                        nodes)) != HSAKMT_STATUS_SUCCESS) {
+            HSAKMT_CALL(hsaKmtDeregisterMemory(importAddress));
+            return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
+          }
         }
       }
     }

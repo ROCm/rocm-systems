@@ -53,6 +53,13 @@
 #include <sys/stat.h>
 #include "hsakmt/linux/udmabuf.h"
 
+#ifndef AMDGPU_GEM_OP_OPEN_GLOBAL
+#define AMDGPU_GEM_OP_OPEN_GLOBAL	3
+#endif
+#ifndef AMDGPU_GEM_GLOBAL_MMIO_REMAP
+#define AMDGPU_GEM_GLOBAL_MMIO_REMAP	0
+#endif
+
 #ifndef MPOL_F_STATIC_NODES
 /* Bug in numaif.h, this should be defined in there. Definition copied
  * from linux/mempolicy.h.
@@ -4979,14 +4986,23 @@ HSAKMT_STATUS hsakmt_fmm_register_graphics_handle(HsaKFDContext *ctx,
 			return HSAKMT_STATUS_ERROR;
 		}
 
-		/* Choose aperture */
-		if (!gpu_id_array && gpu_id_array_size == 0 && !RegisterFlags.ui32.requiresVAddr) {
+		/* Choose aperture.
+		 * In DRM mode, mem_handle_aperture has a fake VA range that the
+		 * kernel rejects.  When no gpu_id_array is provided (e.g. signal
+		 * IPC with num_agents=0), use the GPU's real aperture instead.
+		 */
+		if (!gpu_id_array && gpu_id_array_size == 0 && !RegisterFlags.ui32.requiresVAddr
+		    && !hsakmt_enable_drm) {
 			aperture = &fmm_ctx->mem_handle_aperture;
+			pr_info("DRM import: aperture=mem_handle\n");
 		} else if (hsakmt_topology_is_svm_needed(fmm_ctx->gpu_mem[gpu_mem_id].EngineId)) {
 			aperture = fmm_ctx->svm.dgpu_aperture;
+			pr_info("DRM import: aperture=svm_dgpu (EngineId=0x%x)\n",
+				fmm_ctx->gpu_mem[gpu_mem_id].EngineId);
 		} else {
 			aperture = &fmm_ctx->gpu_mem[gpu_mem_id].gpuvm_aperture;
 			aperture_base = aperture->base;
+			pr_info("DRM import: aperture=gpuvm\n");
 		}
 		if (!aperture_is_valid(aperture->base, aperture->limit)) {
 			amdgpu_bo_free(import_res.buf_handle);
@@ -5013,6 +5029,15 @@ HSAKMT_STATUS hsakmt_fmm_register_graphics_handle(HsaKFDContext *ctx,
 		}
 		syncobj_point_t *ptu_syncobj = &(drm_ptu_syncobj[drm_index]);
 
+		pr_info("DRM import: VA map attempt: addr=%p size=0x%lx "
+			"aperture=[%p..%p] gpu_id=0x%x drm_index=%d "
+			"syncobj=0x%x pid=%d\n",
+			mem, (unsigned long)import_res.alloc_size,
+			aperture->base, aperture->limit,
+			gpu_id, drm_index,
+			ptu_syncobj->handle,
+			getpid());
+
 		r = amdgpu_bo_va_op_raw2(dev, import_res.buf_handle, 0,
 					 import_res.alloc_size, (uint64_t)mem,
 					 AMDGPU_VM_PAGE_READABLE | AMDGPU_VM_PAGE_WRITEABLE,
@@ -5021,7 +5046,10 @@ HSAKMT_STATUS hsakmt_fmm_register_graphics_handle(HsaKFDContext *ctx,
 					 get_next_ptu_sync_point(ptu_syncobj),
 					 0, 0);
 		if (r) {
-			pr_err("DRM import: bo_va_op_raw2 MAP failed: %d\n", r);
+			pr_err("DRM import: bo_va_op_raw2 MAP failed: %d "
+			       "(addr=%p size=0x%lx pid=%d)\n",
+			       r, mem, (unsigned long)import_res.alloc_size,
+			       getpid());
 			pthread_mutex_unlock(&aperture->fmm_mutex);
 			aperture_release_area(aperture, mem, import_res.alloc_size);
 			amdgpu_bo_free(import_res.buf_handle);
