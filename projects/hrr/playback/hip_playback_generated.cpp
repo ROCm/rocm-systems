@@ -4997,16 +4997,7 @@ static hipError_t playback_hipDrvGraphMemcpyNodeGetParams(PlaybackContext& ctx, 
   return hipSuccess;
 }
 
-static hipError_t playback_hipDrvGraphMemcpyNodeSetParams(PlaybackContext& ctx, const uint8_t* payload) {
-  (void)ctx; (void)payload;
-  static bool warned = false;
-  if (!warned) {
-    warned = true;
-    fprintf(stderr, "[HRR] NOOP playback handler called for hipDrvGraphMemcpyNodeSetParams — "
-            "this API is not replayed; results may differ from capture.\n");
-  }
-  return hipSuccess;
-}
+extern hipError_t playback_hipDrvGraphMemcpyNodeSetParams(PlaybackContext& ctx, const uint8_t* payload);
 
 static hipError_t playback_hipExtHostAlloc(PlaybackContext& ctx, const uint8_t* payload) {
   (void)ctx; (void)payload;
