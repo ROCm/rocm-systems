@@ -1,0 +1,89 @@
+# - How to use (install as git hook — only runs on staged files):
+#     python3 -m pip install pre-commit
+#     cd <repo-root>
+#     pre-commit install -c projects/cuid/.pre-commit-config.yaml
+#
+# - How to run manually on branch changes only (vs develop):
+#     pre-commit run --config projects/cuid/.pre-commit-config.yaml \
+#       --from-ref develop --to-ref HEAD
+#
+# - How to run on all files (CAUTION: reformats everything):
+#     pre-commit run --all-files --config projects/cuid/.pre-commit-config.yaml
+#
+# How to skip:
+#   git commit --no-verify
+# or
+#   SKIP=clang-format git commit
+#   SKIP=gersemi git commit
+
+# Scope every hook to this project. Without this, `pre-commit run --all-files`
+# from the repository root turns the generic hooks (end-of-file-fixer,
+# mixed-line-ending, check-json, codespell) loose on the whole monorepo: the
+# first run of it here rewrote 2223 files across emulation/, rocr-runtime and
+# rocprofiler-*. pre-commit ANDs this with each hook's own `files`, so the
+# per-hook patterns below still apply on top of it.
+files: '^projects/cuid/'
+
+exclude: |
+  (?x)
+    ^projects/cuid/docs/
+    | ^projects/cuid/build.*/
+    | \.(md|rst|rtf)$
+    | \.readthedocs\.yaml$
+fail_fast: false
+
+repos:
+-   repo: https://github.com/codespell-project/codespell
+    rev: v2.4.2
+    hooks:
+    -   id: codespell
+        args: ["-w", "--config", "projects/cuid/.codespellrc"]
+
+-   repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v6.0.0
+    hooks:
+    -   id: trailing-whitespace
+    -   id: end-of-file-fixer
+    -   id: check-yaml
+    -   id: check-json
+    -   id: check-merge-conflict
+    -   id: check-added-large-files
+    -   id: mixed-line-ending
+
+-   repo: https://github.com/pre-commit/mirrors-clang-format
+    rev: v22.1.0
+    hooks:
+    -   id: clang-format
+        files: '^projects/cuid/.*\.(c|cpp|cc|h|hpp)$'
+
+-   repo: https://github.com/BlankSpruce/gersemi
+    rev: 0.26.0
+    hooks:
+    -   id: gersemi
+        files: '^projects/cuid/.*(CMakeLists\.txt|\.cmake(\.in)?)$'
+
+-   repo: https://github.com/shellcheck-py/shellcheck-py
+    rev: v0.11.0.1
+    hooks:
+    -   id: shellcheck
+        # The .sh.in templates carry @CMAKE_VARIABLE@ placeholders, which
+        # shellcheck reads as ordinary words; that is fine for the checks we
+        # care about (quoting, unset variables, portability).
+        files: '^projects/cuid/.*\.(sh|sh\.in)$'
+        types: [file]
+
+-   repo: local
+    hooks:
+    -   id: cuid-sha256-drift
+        name: CUID/rocprofiler-sdk SHA-256 drift
+        description: >-
+            libamdcuid carries a copy of rocprofiler-sdk's SHA-256. A silent
+            divergence would not fail to build, it would change every CUID
+            ever issued, so the two are compared function by function.
+        entry: python3 projects/cuid/tests/check_sha256_drift.py
+        language: system
+        pass_filenames: false
+        # always_run rather than a `files` pattern: the global scope above would
+        # hide a change made only on the rocprofiler-sdk side, which is exactly
+        # the drift this is meant to catch. The check takes milliseconds.
+        always_run: true

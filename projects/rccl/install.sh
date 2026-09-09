@@ -36,6 +36,7 @@ run_tests_all=false
 time_trace=false
 use_ninja=false
 force_reduce_pipeline=false
+enable_tdm_simple=false
 generate_sym_kernels=true
 device_linker=true
 warp_speed_enabled=true # note that this flag will be overridden to false for non MI350/MI300 platforms
@@ -84,6 +85,7 @@ function display_help()
     echo "    -c|--enable-code-coverage  Enable code coverage"
     echo "       --enable_backtrace      Build with custom backtrace support"
     echo "       --enable-mpi-tests      Enable MPI-based tests (requires --debug and MPI installation; set MPI_PATH if not in /opt/ompi)"
+    echo "       --enable-tdm-simple     Build the experimental gfx1250 TDM SIMPLE copy path"
     echo "    -f|--fast                  Quick-build RCCL (local gpu arch only, no backtrace)"
     echo "       --force-reduce-pipeline Force reduce_copy sw pipeline to be used for every reduce-based collectives and datatypes"
     echo "    -h|--help                  Prints this help message"
@@ -103,6 +105,7 @@ function display_help()
     echo "                                resolved at runtime from the executable (no librocshmem in librccl)"
     echo "       --run_tests_all         Run all rccl unit tests (must be built already)"
     echo "    -r|--run_tests_quick       Run small subset of rccl unit tests (must be built already)"
+    echo "       --sqtt-enable           Enable SQTT instrumentation (requires ROCm >= 7.13)"
     echo "       --static                Build RCCL as a static library instead of shared library"
     echo "    -t|--tests_build           Build rccl unit tests, but do not run"
     echo "       --time-trace            Plot the build time of RCCL (requires \`ninja-build\` package installed on the system)"
@@ -137,7 +140,7 @@ function display_help()
 # check if we have a modern version of getopt that can handle whitespace and long parameters
 getopt -T
 if [[ "$?" -eq 4 ]]; then
-    GETOPT_PARSE=$(getopt --name "${0}" --options cdfhij:lprtq --longoptions address-sanitizer,amdgpu_targets:,cmake-options:,debug,debug-fast,dependencies,device-linker,disable-colltrace,disable-kernarg-preload,disable-roctx,disable-sym-kernels,disable-warp-speed,dump-asm,enable-code-coverage,enable_backtrace,enable-mpi-tests,fast,force-reduce-pipeline,generate-sym-kernels,help,install,jobs:,kernel-resource-use,local_gpu_only,log-trace,ninja,no_clean,no-device-linker,npkit-enable,openmp-test-enable,package_build,prefix:,quiet-warnings,rm-legacy-include-dir,rocshmem,rocshmem-gin,roctx-enable,run_tests_all,run_tests_quick,static,tests_build,time-trace,verbose -- "$@")
+    GETOPT_PARSE=$(getopt --name "${0}" --options cdfhij:lprtq --longoptions address-sanitizer,amdgpu_targets:,cmake-options:,debug,debug-fast,dependencies,device-linker,disable-colltrace,disable-kernarg-preload,disable-roctx,disable-sym-kernels,disable-warp-speed,dump-asm,enable-code-coverage,enable_backtrace,enable-mpi-tests,enable-tdm-simple,fast,force-reduce-pipeline,generate-sym-kernels,help,install,jobs:,kernel-resource-use,local_gpu_only,log-trace,ninja,no_clean,no-device-linker,npkit-enable,openmp-test-enable,package_build,prefix:,quiet-warnings,rm-legacy-include-dir,rocshmem,rocshmem-gin,roctx-enable,sqtt-enable,run_tests_all,run_tests_quick,static,tests_build,time-trace,verbose -- "$@")
 else
     echo "Need a new version of getopt"
     exit 1
@@ -167,6 +170,7 @@ while true; do
     -c | --enable-code-coverage)     enable_code_coverage=true;                                                                        shift ;;
          --enable_backtrace)         build_bfd=true;                                                                                   shift ;;
          --enable-mpi-tests)         enable_mpi_tests=true;                                                                            shift ;;
+         --enable-tdm-simple)        enable_tdm_simple=true;                                                                           shift ;;
     -f | --fast)                     build_local_gpu_only=true;                                                                        shift ;;
          --force-reduce-pipeline)    force_reduce_pipeline=true;                                                                       shift ;;
     -h | --help)                     display_help;                                                                                     exit 0 ;;
@@ -186,6 +190,7 @@ while true; do
          --rocshmem-gin)             build_rocshmem_gin=true;                                                                          shift ;;
          --run_tests_all)            run_tests=true; run_tests_all=true;                                                               shift ;;
     -r | --run_tests_quick)          run_tests=true;                                                                                   shift ;;
+         --sqtt-enable)              sqtt_enabled=true;                                                                                shift ;;
          --static)                   build_static=true;                                                                                shift ;;
     -t | --tests_build)              build_tests=true;                                                                                 shift ;;
          --time-trace)               time_trace=true;                                                                                  shift ;;
@@ -401,6 +406,11 @@ if [[ "${roctx_enabled}" == false ]]; then
     cmake_common_options="${cmake_common_options} -DROCTX=OFF"
 fi
 
+# Enable SQTT instrumentation
+if [[ "${sqtt_enabled}" == true ]]; then
+    cmake_common_options="${cmake_common_options} -DSQTT_ENABLED=ON"
+fi
+
 # Dump ASM files from GPU compilation
 if [[ "${dump_asm}" == true ]]; then
     cmake_common_options="${cmake_common_options} -DDUMP_ASM=ON"
@@ -423,6 +433,11 @@ fi
 # Force Reduce pipeline
 if [[ "${force_reduce_pipeline}" == true ]]; then
     cmake_common_options="${cmake_common_options} -DFORCE_REDUCE_PIPELINING=ON"
+fi
+
+# Experimental gfx1250 TDM SIMPLE copy path
+if [[ "${enable_tdm_simple}" == true ]]; then
+    cmake_common_options="${cmake_common_options} -DENABLE_TDM_SIMPLE=ON"
 fi
 
 # Disable symmetric memory kernels

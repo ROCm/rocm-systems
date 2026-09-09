@@ -612,6 +612,26 @@ class AmdSmiGpuBlock(IntEnum):
     JPEG = amdsmi_wrapper.AMDSMI_GPU_BLOCK_JPEG
     IH = amdsmi_wrapper.AMDSMI_GPU_BLOCK_IH
     MPIO = amdsmi_wrapper.AMDSMI_GPU_BLOCK_MPIO
+    MMSCH = amdsmi_wrapper.AMDSMI_GPU_BLOCK_MMSCH
+    MP5 = amdsmi_wrapper.AMDSMI_GPU_BLOCK_MP5
+    ATU = amdsmi_wrapper.AMDSMI_GPU_BLOCK_ATU
+    DACC_BE = amdsmi_wrapper.AMDSMI_GPU_BLOCK_DACC_BE
+    ECLR = amdsmi_wrapper.AMDSMI_GPU_BLOCK_ECLR
+    KPX_SERDES = amdsmi_wrapper.AMDSMI_GPU_BLOCK_KPX_SERDES
+    LSDMA = amdsmi_wrapper.AMDSMI_GPU_BLOCK_LSDMA
+    MPART = amdsmi_wrapper.AMDSMI_GPU_BLOCK_MPART
+    MPIFOE = amdsmi_wrapper.AMDSMI_GPU_BLOCK_MPIFOE
+    MPRAS = amdsmi_wrapper.AMDSMI_GPU_BLOCK_MPRAS
+    NBIF = amdsmi_wrapper.AMDSMI_GPU_BLOCK_NBIF
+    NBIO = amdsmi_wrapper.AMDSMI_GPU_BLOCK_NBIO
+    OXRP = amdsmi_wrapper.AMDSMI_GPU_BLOCK_OXRP
+    PCIE_PL = amdsmi_wrapper.AMDSMI_GPU_BLOCK_PCIE_PL
+    PCS_XGMI = amdsmi_wrapper.AMDSMI_GPU_BLOCK_PCS_XGMI
+    PIE = amdsmi_wrapper.AMDSMI_GPU_BLOCK_PIE
+    CS = amdsmi_wrapper.AMDSMI_GPU_BLOCK_CS
+    SHUB = amdsmi_wrapper.AMDSMI_GPU_BLOCK_SHUB
+    SSBDCI = amdsmi_wrapper.AMDSMI_GPU_BLOCK_SSBDCI
+    UCIE_PCS = amdsmi_wrapper.AMDSMI_GPU_BLOCK_UCIE_PCS
     RESERVED = amdsmi_wrapper.AMDSMI_GPU_BLOCK_RESERVED
 
 
@@ -2850,6 +2870,11 @@ def amdsmi_get_gpu_asic_info(processor_handle: processor_handle_t) -> Dict[str, 
         raise AmdSmiParameterException(processor_handle, amdsmi_wrapper.amdsmi_processor_handle)
 
     asic_info_struct = amdsmi_wrapper.amdsmi_asic_info_t()
+    # A DRM libamd_smi predating these fields leaves the reserved slots as the
+    # caller passed them, so seed N/A rather than the ctypes zero. A WSL library
+    # that old clears the whole structure and still reports zero.
+    asic_info_struct.chip_rev_id = MaxUIntegerTypes.UINT32_T
+    asic_info_struct.external_rev_id = MaxUIntegerTypes.UINT32_T
     _check_res(
         amdsmi_wrapper.amdsmi_get_gpu_asic_info(processor_handle, ctypes.byref(asic_info_struct))
     )
@@ -2858,17 +2883,30 @@ def amdsmi_get_gpu_asic_info(processor_handle: processor_handle_t) -> Dict[str, 
     target_graphics_version = hex(asic_info_struct.target_graphics_version)[2:]
     subsystem_id = _validate_if_max_uint(asic_info_struct.subsystem_id, MaxUIntegerTypes.UINT32_T)
     subvendor_id = _validate_if_max_uint(asic_info_struct.subvendor_id, MaxUIntegerTypes.UINT32_T)
+    rev_id = _validate_if_max_uint(asic_info_struct.rev_id, MaxUIntegerTypes.UINT32_T)
+    chip_rev_id = _validate_if_max_uint(asic_info_struct.chip_rev_id, MaxUIntegerTypes.UINT32_T)
+    external_rev_id = _validate_if_max_uint(
+        asic_info_struct.external_rev_id, MaxUIntegerTypes.UINT32_T
+    )
     if isinstance(subsystem_id, int):
         subsystem_id = _pad_hex_value(hex(subsystem_id), 4)
     if isinstance(subvendor_id, int):
         subvendor_id = _pad_hex_value(hex(subvendor_id), 4)
+    if isinstance(rev_id, int):
+        rev_id = _pad_hex_value(hex(rev_id), 2)
+    if isinstance(chip_rev_id, int):
+        chip_rev_id = _pad_hex_value(hex(chip_rev_id), 2)
+    if isinstance(external_rev_id, int):
+        external_rev_id = _pad_hex_value(hex(external_rev_id), 2)
     asic_info = {
         "market_name": market_name,
         "vendor_id": asic_info_struct.vendor_id,
         "vendor_name": asic_info_struct.vendor_name.decode("utf-8"),
         "subvendor_id": subvendor_id,
         "device_id": asic_info_struct.device_id,
-        "rev_id": _pad_hex_value(hex(asic_info_struct.rev_id), 2),
+        "rev_id": rev_id,
+        "chip_rev_id": chip_rev_id,
+        "external_rev_id": external_rev_id,
         "asic_serial": asic_info_struct.asic_serial.decode("utf-8"),
         "oam_id": _validate_if_max_uint(asic_info_struct.oam_id, MaxUIntegerTypes.UINT32_T),
         "physical_acc_id": _validate_if_max_uint(
@@ -3656,7 +3694,7 @@ def amdsmi_get_gpu_ras_block_features_enabled(
             continue
         gpu_block_name = gpu_block.name
         if gpu_block.name == "LAST":
-            gpu_block_name = "MPIO"
+            gpu_block_name = "UCIE_PCS"
         _check_res(
             amdsmi_wrapper.amdsmi_get_gpu_ras_block_features_enabled(
                 processor_handle,

@@ -118,6 +118,76 @@ Provenance does not by itself define target availability: a separate variant
 model must also be able to restrict encoding forms already present in the base
 XML.
 
+Production additions must be independently auditable from public inputs. Keep a
+colocated provenance manifest or equivalent record that names a pinned public
+source revision, the exact definition and test-vector locations, the public
+base-XML template used for every field, and the derivation of each identifier.
+When a repository verifier accompanies the delta, the production generation
+script must run it before parsing the XML and fail closed if the delta contains
+unrecorded metadata or no longer reconstructs from those inputs. The CDNA5
+gfx1251 manifest and verifier next to its delta are the reference pattern.
+
+## ISA variant capabilities
+
+An optional JSON manifest assigns semantic capability bits to concrete targets
+within one generated ISA family. It is deliberately separate from additive XML
+deltas: the XML describes which instruction forms can be decoded, while the
+manifest describes which concrete targets may use them. For example:
+
+```json
+{
+  "schema_version": 1,
+  "features": ["example_instruction", "example_encoding_form"],
+  "variants": {
+    "gfx_base": [],
+    "gfx_plus": ["example_instruction", "example_encoding_form"]
+  },
+  "instructions": [
+    {"feature": "example_instruction", "names": ["V_EXAMPLE"]}
+  ],
+  "model_only_instructions": ["V_EXAMPLE"],
+  "encodings": [
+    {
+      "feature": "example_encoding_form",
+      "encoding": "VOP1_VOP_DPP16",
+      "instructions": ["V_OTHER"]
+    }
+  ]
+}
+```
+
+Feature names describe reusable ISA properties rather than GPU revisions. The
+array order assigns the generated feature bit positions; within one schema
+version, existing entries must not be reordered or removed. The
+loader validates the complete manifest before changing the parsed `IsaSpec`.
+Unknown features, instructions, or encodings; duplicate requirements; malformed
+names; more than 32 instruction features; and generated C++ name collisions
+fail closed. Instruction requirements
+apply to every form of a mnemonic. Encoding requirements apply only when that
+runtime encoding modifier is present, so an ordinary form can remain legal when
+its DPP16 form is target-specific. Schema version 1 deliberately accepts only
+DPP16 encoding requirements; other encoding kinds fail validation until their
+runtime construction paths implement the same fail-closed contract.
+
+The generator emits immutable feature masks in `isa_features.h`. A
+target-specific decoder compares the decoded instruction's combined
+instruction-plus-encoding requirement with its concrete target mask before
+returning it. Entries in `model_only_instructions` are emitted without execute
+declarations, definitions, execution IDs, or callbacks; they can be decoded and
+inspected but cannot accidentally acquire placeholder execution semantics.
+
+Attach at most one manifest to each logical ISA name. It is applied after the
+base XML and all ISA additions are parsed, and before semantics derivation and
+code generation:
+
+```bash
+python -m amdisa cdna5:/path/to/amdgpu_isa_cdna5.xml \
+  --isa-additions cdna5:/path/to/cdna5-additions.xml \
+  --isa-variants cdna5:/path/to/cdna5-variants.json \
+  --isa-output /path/to/isa-output \
+  --dbt-output /path/to/dbt-output
+```
+
 ## Generated file locations
 
 | Generated files | Location | Generator |
@@ -130,10 +200,11 @@ XML.
 
 GPUOpen's public CDNA5 MR ISA uses the architecture name `AMD CDNA 5` and the
 filename `amdgpu_isa_cdna5.xml`. rocjitsu's logical generator key and
-configuration architecture are `cdna5`. Its concrete GPU/runtime target, ELF
-identity, and public DBT target identity remain `gfx1250`. Its filesystem
-directories, generated and hand-written C++ namespace (`rocjitsu::cdna5`), and
-internal CMake provider targets also use `cdna5`.
+configuration architecture are `cdna5`. Concrete GPU/runtime, ELF, and public
+DBT identities remain `gfx1250` or `gfx1251`; an architecture-only lookup uses
+the provider's explicit `gfx1250` default. Filesystem directories, generated
+and hand-written C++ namespace (`rocjitsu::cdna5`), and CMake provider targets
+continue to use `cdna5`.
 
 Hand-written per-ISA files (`isa.h`, `mma_exec.h`, `addr_calc.h/.cpp`) remain
 under `lib/rocjitsu/src/rocjitsu/isa/arch/amdgpu/<output-directory>/` and are
@@ -148,7 +219,8 @@ decode/encode functions and neutral field structs are auto-generated.
 ## CLI reference
 
 ```
-python -m amdisa [--isa-additions NAME:XML] [--gen-isas] [--gen-dbt]
+python -m amdisa [--isa-additions NAME:XML] [--isa-variants NAME:JSON]
+                 [--gen-isas] [--gen-dbt]
                  [--isa-output DIR] [--include-root DIR]
                  [--dbt-output DIR] [NAME:]XML ...
 ```
@@ -157,6 +229,7 @@ python -m amdisa [--isa-additions NAME:XML] [--gen-isas] [--gen-dbt]
 |---|---|
 | `[NAME:]XML ...` | One or more ISA XMLs. A recognized name selects its semantic profile. An unrecognized explicit name is treated as a custom generated identity, with its semantic profile detected from the XML |
 | `--isa-additions NAME:XML` | Apply a validated ISA additions file to the named ISA; may be repeated |
+| `--isa-variants NAME:JSON` | Attach one validated target-capability manifest to the named ISA |
 | `--gen-isas` | Generate ISA C++ files (decoders, encodings, execute bodies) |
 | `--gen-dbt` | Generate DBT legalization tables and encoding translators |
 | `--isa-output DIR` | Output path for generated ISA C++ files |
