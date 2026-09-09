@@ -75,6 +75,103 @@ def generate_machine_specs(
     return _probe_live_machine_specs(args)
 
 
+_ROCM_VERSION_RE = re.compile(r"(\d+\.\d+(?:\.\d+)?)")
+
+
+def _rocm_ver_from_versioned_path(rocm_base_path: path) -> Optional[str]:
+    """Extract ROCm version from paths like /opt/rocm-10.1.0."""
+    match = re.search(r"rocm-(\d+\.\d+(?:\.\d+)?)\s*$", str(rocm_base_path))
+    if match:
+        return match.group(1)
+    return None
+
+
+def _rocm_ver_from_core_dirs(rocm_base_path: path) -> Optional[str]:
+    """ROCm 10.x may ship core-10.1 directories instead of .info/version."""
+    if not rocm_base_path.is_dir():
+        return None
+
+    candidates: list[tuple[tuple[int, ...], str]] = []
+    for child in rocm_base_path.iterdir():
+        if not child.is_dir():
+            continue
+        match = re.fullmatch(r"core-(\d+\.\d+(?:\.\d+)?)", child.name)
+        if not match:
+            continue
+        version = match.group(1)
+        candidates.append(
+            (tuple(int(part) for part in version.split(".")), version)
+        )
+
+    if not candidates:
+        return None
+
+    candidates.sort(key=lambda item: item[0], reverse=True)
+    return candidates[0][1]
+
+
+def _rocm_ver_from_sibling_paths(rocm_base_path: path) -> Optional[str]:
+    """Find a versioned ROCm install sibling such as /opt/rocm-10.1.0."""
+    parent = rocm_base_path.parent
+    if not parent.is_dir():
+        return None
+
+    candidates: list[tuple[tuple[int, ...], str]] = []
+    for child in parent.iterdir():
+        if not child.is_dir():
+            continue
+        match = re.fullmatch(r"rocm-(\d+\.\d+(?:\.\d+)?)", child.name)
+        if not match:
+            continue
+        version = match.group(1)
+        candidates.append(
+            (tuple(int(part) for part in version.split(".")), version)
+        )
+
+    if not candidates:
+        return None
+
+    candidates.sort(key=lambda item: item[0], reverse=True)
+    return candidates[0][1]
+
+
+def _rocm_ver_from_command(cmd: list[str]) -> Optional[str]:
+    try:
+        completed = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=10,
+        )
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        return None
+
+    if completed.returncode != 0:
+        return None
+
+    output = f"{completed.stdout}\n{completed.stderr}"
+    match = _ROCM_VERSION_RE.search(output)
+    if match:
+        return match.group(1)
+    return None
+
+
+def _rocm_ver_from_amdsmi() -> Optional[str]:
+    return _rocm_ver_from_command(["amd-smi", "version"])
+
+
+def _rocm_ver_from_packages() -> Optional[str]:
+    for cmd in (
+        ["rpm", "-q", "--qf", "%{VERSION}", "amdrocm-core"],
+        ["dpkg-query", "-W", "-f=${Version}", "amdrocm-core"],
+    ):
+        version = _rocm_ver_from_command(cmd)
+        if version:
+            return version
+    return None
+
+
 def get_rocm_ver() -> str:
     """Detect the installed ROCm version from filesystem or environment."""
     rocm_base_path = path(os.getenv("ROCM_PATH", "/opt/rocm"))
@@ -83,6 +180,23 @@ def get_rocm_ver() -> str:
         version_file_path = rocm_base_path / ".info" / version_file_name
         if version_file_path.exists():
             return version_file_path.read_text(encoding="utf-8").strip()
+
+    fallback_probes: list[tuple[str, Optional[str]]] = [
+        ("ROCM_PATH suffix", _rocm_ver_from_versioned_path(rocm_base_path)),
+        ("core-* directory", _rocm_ver_from_core_dirs(rocm_base_path)),
+        ("versioned sibling path", _rocm_ver_from_sibling_paths(rocm_base_path)),
+        ("amd-smi version", _rocm_ver_from_amdsmi()),
+        ("package database", _rocm_ver_from_packages()),
+    ]
+    for source, detected_version in fallback_probes:
+        if detected_version:
+            console_log(
+                "profiling",
+                "Detected ROCm version "
+                f"{detected_version} from {source} "
+                f"(missing {rocm_base_path}/.info/).",
+            )
+            return detected_version
 
     rocm_ver_user = os.getenv("ROCM_VER")
     if rocm_ver_user:
