@@ -12,7 +12,11 @@ template <typename SdkBackend, typename Externals>
 inline void
 on_code_object(typename SdkBackend::callback_tracing_record_t record,
                typename SdkBackend::user_data_t* user_data, void* callback_data)
-{}
+{
+    (void) record;
+    (void) user_data;
+    (void) callback_data;
+}
 
 template <typename SdkBackend, typename Externals>
 inline constexpr auto k_code_object = callback_domain_definition<SdkBackend>{

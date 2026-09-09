@@ -66,6 +66,7 @@ inline void
 on_kfd_event_unmap_from_gpu(typename SdkBackend::kfd_event_unmap_record* record,
                             void*                                        data)
 {
+    (void) data;
     if(!record)
     {
         return;

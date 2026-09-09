@@ -15,7 +15,10 @@ template <typename SdkBackend, typename Externals>
 inline void
 on_kfd_event_page_migrate(typename SdkBackend::kfd_event_page_migrate_record* record,
                           void*                                               data)
-{}
+{
+    (void) record;
+    (void) data;
+}
 
 template <typename SdkBackend, typename Externals>
 inline constexpr auto k_kfd_event_page_migrate = buffered_domain_definition<SdkBackend>{

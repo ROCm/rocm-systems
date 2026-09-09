@@ -63,6 +63,7 @@ template <typename SdkBackend, typename Externals>
 inline void
 on_kfd_queue(typename SdkBackend::kfd_queue_record* record, void* data)
 {
+    (void) data;
     if(!record)
     {
         return;

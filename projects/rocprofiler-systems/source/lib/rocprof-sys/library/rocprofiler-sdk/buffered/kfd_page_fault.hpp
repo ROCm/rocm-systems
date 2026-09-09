@@ -63,6 +63,7 @@ template <typename SdkBackend, typename Externals>
 inline void
 on_kfd_page_fault(typename SdkBackend::kfd_page_fault_record* record, void* data)
 {
+    (void) data;
     if(!record)
     {
         return;

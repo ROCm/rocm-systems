@@ -92,6 +92,7 @@ template <typename SdkBackend, typename Externals>
 inline void
 on_kfd_page_migrate(typename SdkBackend::kfd_page_migrate_record* record, void* data)
 {
+    (void) data;
     if(!record)
     {
         return;
