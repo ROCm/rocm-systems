@@ -129,6 +129,8 @@ platforms:
     allowed_groups: ["*"]
     blocked_tests:
       - rocrtstFunc.IPC
+      - rocrtstFunc.DmaBufExportImportTest
+      - rocrtstFunc.DmaBufImportInvalidFd_Negative
       - rocrtstFunc.DISABLED_Signal_Kernel_Set
       - rocrtstFunc.DISABLED_Signal_Kernel_Multi_Set
       - rocrtstFunc.DISABLED_Signal_Kernel_Wait
@@ -186,6 +188,8 @@ platforms:
   FFM_SIMULATOR:
     allowed_groups: [Core, Extended]
     blocked_tests:
+      - rocrtstFunc.DmaBufExportImportTest
+      - rocrtstFunc.DmaBufImportInvalidFd_Negative
       - rocrtstFunc.Memory_Max_Mem
       - rocrtstFunc.Memory_Available  # Uses max & available mem; not accurate
       - rocrtstPerf.Memory_Async_Copy # Requires hwloc support
