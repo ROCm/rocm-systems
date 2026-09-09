@@ -201,8 +201,8 @@ static hipError_t createVarMem(amd::Memory** mem_out, const std::string& name, h
   amd::Program* program = as_amd(reinterpret_cast<cl_program>(hmod));
   device::Program* dev_program = program->getDeviceProgram(*g_devices.at(deviceId)->devices()[0]);
   if (dev_program == nullptr) {
-    LogPrintfError("Cannot find device program while quering for symbol: %s", name.c_str());
-    return hipErrorInvalidImage;
+    LogPrintfError("Cannot find device program while querying for symbol: %s", name.c_str());
+    return hipErrorInvalidDeviceFunction;
   }
 
   amd::Memory* mem = nullptr;
