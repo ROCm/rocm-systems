@@ -59,8 +59,8 @@ def _pmc_power_gating_warning(mspec: MachineSpecs) -> Optional[str]:
     """Return the STABLE_STD notice for architectures that gate the perfmon clock.
 
     On gfx115x the AUTO performance level can gate the perfmon clock, so PMC
-    clock, so PMC counters such as TCP_REQ report zero even when the kernel
-    issues global memory traffic.
+    counters such as TCP_REQ report zero even when the kernel issues global
+    memory traffic.
     """
     gpu_arch = getattr(mspec, "gpu_arch", None)
     if not gpu_arch or not gpu_arch.startswith(_PMC_POWER_GATED_ARCHS):
