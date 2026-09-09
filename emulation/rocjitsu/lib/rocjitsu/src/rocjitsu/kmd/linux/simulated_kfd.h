@@ -466,7 +466,7 @@ private:
                                       uint64_t exception_mask);
 
   bool on_wave_single_step_complete(amdgpu::Wavefront &wf);
-  void apply_debug_event_claim_mask_for_testing(const std::shared_ptr<KfdProcess> &proc);
+  void apply_debug_event_publication_hook_for_testing(const std::shared_ptr<KfdProcess> &proc);
   [[nodiscard]] bool notify_debug_event(const std::shared_ptr<KfdProcess> &proc, uint32_t queue_id,
                                         uint64_t exception_mask = KFD_EC_MASK(EC_QUEUE_WAVE_TRAP));
   /// @brief Publish a wave stop: serialize the queue, then wake the debugger.

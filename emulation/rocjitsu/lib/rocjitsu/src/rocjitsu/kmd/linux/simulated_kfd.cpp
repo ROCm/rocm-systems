@@ -3186,7 +3186,7 @@ void SimulatedKfd::on_wave_trap_complete(amdgpu::Wavefront &wave) {
     return;
   }
 
-  apply_debug_event_claim_mask_for_testing(proc);
+  apply_debug_event_publication_hook_for_testing(proc);
 
   // A trap interrupt is wave-local: hardware reports it without waiting for
   // every peer in the queue to stop. The debugger's ensuing SUSPEND_QUEUES
@@ -3455,7 +3455,7 @@ void SimulatedKfd::detach_debug_event_claim_for_testing() {
   debug_event_claim_detach_for_testing_ = true;
 }
 
-void SimulatedKfd::apply_debug_event_claim_mask_for_testing(
+void SimulatedKfd::apply_debug_event_publication_hook_for_testing(
     const std::shared_ptr<KfdProcess> &proc) {
   const pid_t target_pid = proc->client_pid();
   std::unique_lock<std::mutex> lk(debug_sessions_mutex_);
@@ -3523,7 +3523,7 @@ bool SimulatedKfd::on_wave_single_step_complete(amdgpu::Wavefront &wave) {
   // queue. The debugger's ensuing SUSPEND_QUEUES request publishes one stable,
   // authoritative CWSR snapshot instead of redundantly serializing every
   // resident wave here first.
-  apply_debug_event_claim_mask_for_testing(proc);
+  apply_debug_event_publication_hook_for_testing(proc);
   if (!notify_debug_event(proc, wave.queue_id())) {
     wave.restore_debug_stop_state(saved);
     return false;

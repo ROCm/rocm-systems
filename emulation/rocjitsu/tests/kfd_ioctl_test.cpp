@@ -62,14 +62,25 @@ TEST(CommandProcessorTest, InterruptCallbackRemovalWaitsForActiveCall) {
   });
 
   cp.invoke_completion_interrupt_callback_for_test(1, 1);
+  auto callback_entered_future = callback_entered.get_future();
   std::jthread caller([&] { cp.invoke_interrupt_callback_for_test(1, 2); });
-  callback_entered.get_future().wait();
+  if (callback_entered_future.wait_for(std::chrono::seconds(1)) != std::future_status::ready) {
+    release_callback.set_value();
+    caller.join();
+    FAIL() << "interrupt callback was not entered";
+  }
   std::promise<void> removal_started;
+  auto removal_started_future = removal_started.get_future();
   auto removal = std::async(std::launch::async, [&] {
     removal_started.set_value();
     cp.set_interrupt_callback(nullptr);
   });
-  removal_started.get_future().wait();
+  if (removal_started_future.wait_for(std::chrono::seconds(1)) != std::future_status::ready) {
+    release_callback.set_value();
+    caller.join();
+    removal.wait();
+    FAIL() << "callback removal worker did not start";
+  }
   EXPECT_EQ(removal.wait_for(std::chrono::milliseconds(20)), std::future_status::timeout);
 
   release_callback.set_value();
@@ -92,8 +103,14 @@ TEST(CommandProcessorTest, InterruptCallbackCanRemoveItself) {
     release_callback.get_future().wait();
   });
 
+  auto callback_removed_itself_future = callback_removed_itself.get_future();
   std::jthread caller([&] { cp.invoke_interrupt_callback_for_test(1, 2); });
-  callback_removed_itself.get_future().wait();
+  if (callback_removed_itself_future.wait_for(std::chrono::seconds(1)) !=
+      std::future_status::ready) {
+    release_callback.set_value();
+    caller.join();
+    FAIL() << "interrupt callback did not complete reentrant removal";
+  }
   std::promise<void> drain_reached;
   cp.set_interrupt_callback_drain_hook_for_testing([&] { drain_reached.set_value(); });
   auto external_replacement =
