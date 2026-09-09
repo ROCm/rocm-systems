@@ -2071,7 +2071,9 @@ ncclResult_t ncclLaunchPrepare(struct ncclComm* comm) {
         plan->ceCollArgs->sizes = (task->func == ncclFuncAlltoAllv) ? task->sizes : nullptr;
 
         if (comm->rank == 0) {
-          if (!ncclDevrIsOneLsaTeam(comm)) {
+          // Same predicate ncclLaunchCeColl dispatches on, so the marker cannot
+          // claim a path the launch did not take.
+          if (ncclCeHierDispatch(comm)) {
             INFO(NCCL_TUNING, "%s " RCCL_CE_HIER_SELECTED_TAG ": %ld Bytes -> RMA proxy + CE",
                  ncclFuncToString(task->func), task->count * ncclTypeSize(task->datatype));
           } else {

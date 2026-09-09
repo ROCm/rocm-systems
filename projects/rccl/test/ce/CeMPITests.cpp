@@ -17,6 +17,8 @@
 
 // For RCCL_CE_HIER_SELECTED_TAG, so the assertion cannot drift from the emitter.
 #include "ce_coll.h"
+// For the ncclHierCeAvailable prerequisite fields the scale-out cases gate on.
+#include <comm.h>
 
 #include <gtest/gtest.h>
 #include <hip/hip_runtime.h>
@@ -161,13 +163,22 @@ protected:
     }
 
     // MPI topology alone does not imply hierarchical CE is reachable: it also needs
-    // symmetric memory, which on a multi-node communicator requires a GIN backend.
-    // Distinguish "this machine cannot do it" (skip) from "prerequisites are present
-    // but the path was not taken" (fail), so a stack without GIN/RMA does not report
-    // a red for behaving correctly.
-    bool scaleOutPrerequisitesMet() const
+    // symmetric memory, which on a multi-node communicator requires a GIN backend,
+    // and an RMA context for the inter-node puts. Read those off the communicator
+    // rather than out of the log, because the absence of "Symmetric memory is not
+    // supported" clears only one of the ncclHierCeAvailable clauses: a stack with
+    // GIN but no RMA context would look ready here and then fail on a missing
+    // marker. Distinguish "this machine cannot do it" (skip) from "prerequisites
+    // are present but the path was not taken" (fail), so a stack without GIN/RMA
+    // does not report a red for behaving correctly.
+    bool scaleOutPrerequisitesMet()
     {
-        return readAllLogs().find("Symmetric memory is not supported") == std::string::npos;
+        auto* comm = static_cast<ncclComm*>(getActiveCommunicator());
+        if(comm == nullptr)
+            return false;
+
+        return comm->nNodes > 1 && comm->symmetricSupport && comm->hostRmaSupport &&
+               comm->config.numRmaCtx > 0;
     }
 
     void assertHierarchicalCEPathTaken(int rank, const char* context)
@@ -340,8 +351,8 @@ protected:
         ASSERT_EQ(ncclSuccess, createTestCommunicator());
 
         if(requireScaleOut && !scaleOutPrerequisitesMet())
-            GTEST_SKIP() << "Symmetric memory unavailable on this communicator; "
-                            "hierarchical CE needs a GIN backend";
+            GTEST_SKIP() << "Hierarchical CE prerequisites absent on this communicator; "
+                            "needs symmetric memory (GIN backend) and an RMA context";
 
         int rank{}, nRanks{};
         ncclCommUserRank(getActiveCommunicator(), &rank);
@@ -377,13 +388,16 @@ protected:
         }
 
         assertCEPathTaken(testId);
-        // CE batch numOps is per LSA destination, which is the node-local rank count
-        // on the scale-out path and the whole communicator otherwise.
-        const int batchPeers = requireScaleOut ? localRankCount() : nRanks;
         if(requireScaleOut)
             assertHierarchicalCEPathTaken(rank, testId);
-        // numOps = batchPeers (one copy per destination); chunkBytes = count * sizeof(float)
-        assertCEBatchPath(ceExpectIntraBatchSync(batchPeers, count * sizeof(float)), testId);
+        // The hierarchical path leaves intraBatchSync at its initialized false, so its
+        // batch always logs the without-sync line. Predicting from the thresholds
+        // instead would mispredict on a node with more than kCeIntraBatchSyncFreq
+        // ranks, because the 68 MiB chunk-boundary case clears the byte clause.
+        // Off that path numOps is one copy per destination, i.e. nRanks.
+        const bool expectIntraBatchSync =
+            requireScaleOut ? false : ceExpectIntraBatchSync(nRanks, count * sizeof(float));
+        assertCEBatchPath(expectIntraBatchSync, testId);
     }
 };
 
@@ -426,8 +440,8 @@ protected:
         ASSERT_EQ(ncclSuccess, createTestCommunicator());
 
         if(requireScaleOut && !scaleOutPrerequisitesMet())
-            GTEST_SKIP() << "Symmetric memory unavailable on this communicator; "
-                            "hierarchical CE needs a GIN backend";
+            GTEST_SKIP() << "Hierarchical CE prerequisites absent on this communicator; "
+                            "needs symmetric memory (GIN backend) and an RMA context";
 
         int rank{}, nRanks{};
         ncclCommUserRank(getActiveCommunicator(), &rank);
@@ -470,13 +484,16 @@ protected:
         }
 
         assertCEPathTaken(testId);
-        // CE batch numOps is per LSA destination, which is the node-local rank count
-        // on the scale-out path and the whole communicator otherwise.
-        const int batchPeers = requireScaleOut ? localRankCount() : nRanks;
         if(requireScaleOut)
             assertHierarchicalCEPathTaken(rank, testId);
-        // numOps = batchPeers (one per destination); chunkBytes = count * sizeof(float)
-        assertCEBatchPath(ceExpectIntraBatchSync(batchPeers, count * sizeof(float)), testId);
+        // The hierarchical path leaves intraBatchSync at its initialized false, so its
+        // batch always logs the without-sync line. Predicting from the thresholds
+        // instead would mispredict on a node with more than kCeIntraBatchSyncFreq
+        // ranks, because the 68 MiB chunk-boundary case clears the byte clause.
+        // Off that path numOps is one copy per destination, i.e. nRanks.
+        const bool expectIntraBatchSync =
+            requireScaleOut ? false : ceExpectIntraBatchSync(nRanks, count * sizeof(float));
+        assertCEBatchPath(expectIntraBatchSync, testId);
     }
 };
 

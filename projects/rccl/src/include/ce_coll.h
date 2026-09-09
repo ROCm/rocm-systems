@@ -157,6 +157,11 @@ bool ncclCeImplemented(ncclFunc_t coll, int /*ncclDevRedOp_t*/ red, ncclDataType
 bool ncclHierCeAvailable(struct ncclComm* comm, ncclFunc_t coll, int /*ncclDevRedOp_t*/ red, ncclDataType_t ty,
                          ncclSymRegType_t winRegType);
 
+// True when an admitted CE task must run on the hierarchical path. The launch
+// site and the selection marker share this so they cannot disagree about which
+// algorithm a task got.
+bool ncclCeHierDispatch(struct ncclComm* comm);
+
 ncclResult_t ncclCeInit(struct ncclComm* comm);
 
 ncclResult_t ncclCeFinalize(struct ncclComm* comm);

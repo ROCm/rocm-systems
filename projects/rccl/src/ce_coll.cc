@@ -306,6 +306,13 @@ bool ncclCeAvailable(struct ncclComm* comm, ncclFunc_t coll, int /*ncclDevRedOp_
     TRACE(NCCL_TUNING, "Skipping CE collective: comm is not a single node");
     return false;
   }
+  // The LSA-local routines address peers by LSA rank, so a team that does not
+  // cover the comm would gather only lsaSize slices, at the wrong indices.
+  // Reachable on a single node via NCCL_LSA_TEAM_SIZE.
+  if (!ncclDevrIsOneLsaTeam(comm)) {
+    TRACE(NCCL_TUNING, "Skipping CE collective: LSA team does not cover the comm");
+    return false;
+  }
   if (!comm->symmetricSupport) {
     TRACE(NCCL_TUNING, "Skipping CE collective: symmetric support is not enabled");
     return false;
@@ -333,6 +340,10 @@ bool ncclCeScratchAvailable(struct ncclComm* comm, ncclFunc_t coll, int /*ncclDe
   }
   if (comm->nNodes > 1) {
     TRACE(NCCL_TUNING, "Skipping CE collective: comm is not a single node");
+    return false;
+  }
+  if (!ncclDevrIsOneLsaTeam(comm)) {
+    TRACE(NCCL_TUNING, "Skipping CE collective: LSA team does not cover the comm");
     return false;
   }
   if (!comm->symmetricSupport) {
@@ -1160,6 +1171,10 @@ bool ncclHierCeAvailable(struct ncclComm* comm, ncclFunc_t coll, int /*ncclDevRe
     return false;
   }
   return true;
+}
+
+bool ncclCeHierDispatch(struct ncclComm* comm) {
+  return comm->nNodes > 1 && !ncclDevrIsOneLsaTeam(comm);
 }
 
 // Per-(peer, chunk) chunking plan in flat form. Peer p's chunks
@@ -2026,7 +2041,7 @@ ncclResult_t ncclLaunchCeColl(struct ncclComm* comm, struct ncclKernelPlan* plan
   // match the one ncclHierCeAvailable admitted the task under, otherwise a
   // single-node comm with a reduced LSA team (NCCL_LSA_TEAM_SIZE) would be
   // dispatched here without the RMA prerequisites having been checked.
-  if (comm->nNodes > 1 && !ncclDevrIsOneLsaTeam(comm)) {
+  if (ncclCeHierDispatch(comm)) {
     switch (args->func) {
     case ncclFuncAllGather:
       NCCLCHECKGOTO(ncclHierCeAllGather(comm, plan, stream), ret, fail);

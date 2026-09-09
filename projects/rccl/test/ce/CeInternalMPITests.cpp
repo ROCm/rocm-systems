@@ -472,16 +472,31 @@ TEST_F(CeInternalMPITest, FreeBatchOpsParamsIsIdempotent)
     ncclCeBatchOpsParams params{};
     ASSERT_EQ(ncclCeInitBatchOpsParams(&params, 4), ncclSuccess);
     ASSERT_NE(params.srcs, nullptr);
+#ifdef CE_BATCH_ASYNC_SUPPORTED
+    ASSERT_NE(params.attrs, nullptr);
+    ASSERT_NE(params.attrIdxs, nullptr);
+#endif
 
     ncclCeFreeBatchOpsParams(&params);
     EXPECT_EQ(params.srcs, nullptr);
     EXPECT_EQ(params.dsts, nullptr);
     EXPECT_EQ(params.sizes, nullptr);
     EXPECT_EQ(params.numOps, 0);
+    EXPECT_FALSE(params.intraBatchSync);
+#ifdef CE_BATCH_ASYNC_SUPPORTED
+    // Also allocated by ncclCeInitBatchOpsParams, so the release has to clear them
+    // too or the second free in ncclHierCeAllGather passes dangling pointers.
+    EXPECT_EQ(params.attrs, nullptr);
+    EXPECT_EQ(params.attrIdxs, nullptr);
+    EXPECT_EQ(params.numAttrs, 0);
+#endif
 
     // Must not double-free.
     ncclCeFreeBatchOpsParams(&params);
     EXPECT_EQ(params.srcs, nullptr);
+#ifdef CE_BATCH_ASYNC_SUPPORTED
+    EXPECT_EQ(params.attrs, nullptr);
+#endif
 }
 
 // ===========================================================================
