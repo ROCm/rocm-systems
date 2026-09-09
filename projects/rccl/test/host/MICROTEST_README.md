@@ -40,10 +40,22 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
     `FreshRegistration*`.
   - `rma/rma_proxy_progress.cc` (`RMA_PROXY_PROGRESS_CC_PATH`, from
     `rma-proxy-progress-test.cc`); suite `RmaProxyProgressTest.*`.
+  - `group.cc` (`GROUP_CC_PATH`, from `group-test.cc`); suite
+    `GroupEndInternalTest.*`.
   - `devcomm/devcomm_v22902.cc` + `devcomm/devcomm_v22907.cc`
     (`DEVCOMM_V22902_CC_PATH` / `DEVCOMM_V22907_CC_PATH`, both from
     `devcomm-test.cc`); suites `Devcomm*`. `devcomm/devcomm_v23000.cc` is not
     covered yet.
+  - `rccl_wrap.cc` (`WRAP_CC_PATH`, from `wrap-test.cc`); suites
+    `WrapMicrotest.*`, `WrapMicrotestIsolated.*`. Its dependency seams live
+    in `fakes/wrap_fakes.cc`, same as `p2p-test.cc`/`p2p_fakes.cc`. Real
+    `archinfo.cc` is compiled alongside it for `IsArchMatch`
+    (`rcclIsArchSupportedForFunc` et al. need the real prefix-match
+    behaviour) -- the same real-oracle-TU technique
+    `rccl-UnitTestsMicroInit` uses, with `--gc-sections` dropping the deep
+    deps it pulls in. **Do not add an `IsArchMatch` fake to this binary**:
+    it is a duplicate-symbol error against that TU. `p2p_fakes.cc`'s
+    former hardcoded-false stub was removed for exactly this reason.
 - **`rccl-UnitTestsMicroEnqueue`** — `enqueue.cc` (via `ENQUEUE_CC_PATH`); suite
   `EnqueueMicrotest.*`. All tests live in `enqueue-test.cc`, grouped by unit under
   test; several fixtures are reused by later groups, so the order within the file
@@ -169,6 +181,12 @@ target instead produces the same symbol faked three times in three files, each
 slightly weaker than the others, which is what `rccl::Recorder` and `ncclGetEnv`
 had become before this map existed.
 
+`src/rccl_wrap.cc` has two rows because it is both a unit under test
+(`rccl-UnitTestsMicro` compiles it and fakes its dependencies) and a
+dependency of another unit (`rccl-UnitTestsMicroEnqueue` doesn't compile it,
+so it fakes the file's own entry points). The two never define the same
+symbol.
+
 | Production TU | Fakes file |
 |---|---|
 | `src/ce_coll.cc` | `fakes/ce_fakes.cc` |
@@ -181,7 +199,8 @@ had become before this map existed.
 | `src/misc/utils.cc` | `fakes/utils_fakes.cc` |
 | `src/os/linux.cc` | `fakes/os_fakes.cc` |
 | `src/proxy.cc` | `fakes/proxy_fakes.cc` |
-| `src/rccl_wrap.cc` | `fakes/rccl_wrap_fakes.cc` |
+| `src/rccl_wrap.cc`'s own public entry points (targets that don't compile the real file, e.g. `rccl-UnitTestsMicroEnqueue`) | `fakes/rccl_wrap_fakes.cc` |
+| `src/rccl_wrap.cc`'s dependencies (`rccl-UnitTestsMicro`, which compiles the real file and tests it directly) | `fakes/wrap_fakes.cc` |
 | `src/recorder.cc` | `fakes/recorder_fakes.cc` |
 | `src/register/*.cc` | `fakes/register_stubs.cc` |
 | `src/scheduler/*.cc` and the deep launch paths | `fakes/sched_stubs.cc` |

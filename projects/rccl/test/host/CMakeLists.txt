@@ -5,6 +5,7 @@ set(RCCL_MICRO_TEST_SOURCES
   rma-proxy-progress-test.cc          # RMA proxy inflight-request coverage
   group-test.cc
   devcomm-test.cc
+  wrap-test.cc                         # rccl_wrap.cc microtests (AICOMRCCL-2195)
   fakes/nccl_fakes.cc                  # reusable stubs for nccl* symbols
   fakes/p2p_fakes.cc                   # p2p-specific stubs (arch/topo + alloc emulators)
   fakes/rma_fakes.cc                   # rma_proxy_progress externals (circular-buf / destroy)
@@ -14,9 +15,17 @@ set(RCCL_MICRO_TEST_SOURCES
   fakes/collective_stubs.cc            # fail-loud collective launch + transport floor
   fakes/devcomm_fakes.cc
   fakes/hip_fakes.cc                   # HIP runtime seams + link-satisfying stubs
+  fakes/wrap_fakes.cc                  # rccl_wrap.cc dependency seams (cf. p2p_fakes.cc)
   ../common/main_altrsmi.cpp           # minimal gtest main, no RCCL deps
   ../common/ProcessIsolatedTestRunner.cpp
 )
+# archinfo.cc (real IsArchMatch, for wrap-test.cc) is NOT in the list above:
+# its path is build-directory-relative, and this file is evaluated before
+# either the in-build or standalone project() context resolves that
+# directory -- PROJECT_BINARY_DIR is empty here in the standalone path
+# (project() hasn't run yet) and RCCL_HIPIFY_DIR doesn't exist yet either.
+# Added via target_sources() in each block below instead, once the right
+# path variable for that context is actually in scope.
 
 # =====================================================================
 # In-RCCL-build integration.
@@ -41,6 +50,11 @@ if(BUILD_TESTS)
   # so any un-shimmed HIP call surfaces as a link error rather than binding
   # libamdhip64.so (HIP compile requirements are applied below without linking).
   add_executable(rccl-UnitTestsMicro ${RCCL_MICRO_TEST_SOURCES})
+  target_sources(rccl-UnitTestsMicro PRIVATE
+    ${PROJECT_BINARY_DIR}/hipify/src/misc/archinfo.cc)  # real IsArchMatch, for wrap-test.cc
+  set_source_files_properties(
+    ${PROJECT_BINARY_DIR}/hipify/src/misc/archinfo.cc
+    PROPERTIES GENERATED TRUE)
 
   target_include_directories(rccl-UnitTestsMicro PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}
@@ -81,6 +95,16 @@ if(BUILD_TESTS)
     GROUP_CC_PATH="${PROJECT_BINARY_DIR}/hipify/src/group.cc"
     DEVCOMM_V22902_CC_PATH="${PROJECT_BINARY_DIR}/hipify/src/devcomm/devcomm_v22902.cc"
     DEVCOMM_V22907_CC_PATH="${PROJECT_BINARY_DIR}/hipify/src/devcomm/devcomm_v22907.cc"
+    WRAP_CC_PATH="${PROJECT_BINARY_DIR}/hipify/src/rccl_wrap.cc"
+    # Real paths for wrap-test.cc's ParamDefaults_MatchProductionSource test,
+    # which reads these at run time to catch a hardcoded
+    # fakes/wrap_fakes.cc RCCL_PARAM default (e.g. rcclParamForceCe)
+    # silently drifting from the real NCCL_PARAM/RCCL_PARAM invocation --
+    # there's no importable constant for these the way NCCL_NUM_ALGORITHMS
+    # etc. is, since the default is an inline macro-argument literal, not a
+    # separately declared symbol.
+    CONNECT_CC_PATH="${PROJECT_BINARY_DIR}/hipify/src/graph/connect.cc"
+    ENQUEUE_CC_PATH="${PROJECT_BINARY_DIR}/hipify/src/enqueue.cc"
   )
 
   # Make sure the hipify step has run before trying to compile the test.
@@ -95,8 +119,13 @@ if(BUILD_TESTS)
   # not exist on device, making amdgcn-link fail. --offload-host-only removes the
   # device pass entirely, which is robust across clang toolchains that ignore the
   # older -Xarch_device coverage split.
-  target_compile_options(rccl-UnitTestsMicro PRIVATE --offload-host-only)
-  target_link_options(rccl-UnitTestsMicro PRIVATE -no-hip-rt)
+  # -ffunction-sections/--gc-sections (added for wrap-test.cc): rccl_wrap.cc's
+  # abort()-floor stub surface (fakes/wrap_fakes.cc) is large and mostly
+  # unreached by the current test batch; this drops the unreferenced deep
+  # deps rather than pulling in the world, matching rccl-UnitTestsMicroInit's
+  # rationale for the same flags.
+  target_compile_options(rccl-UnitTestsMicro PRIVATE --offload-host-only -ffunction-sections)
+  target_link_options(rccl-UnitTestsMicro PRIVATE -no-hip-rt -Wl,--gc-sections)
 
   target_compile_options(rccl-UnitTestsMicro PRIVATE
     -fprofile-instr-generate -fcoverage-mapping)
@@ -665,9 +694,11 @@ target_link_libraries(rccl-HostUnitTests PRIVATE
 # satisfies every HIP/nccl symbol from fakes/ rather than librccl.so or the
 # HIP runtime.
 add_test_executable(rccl-UnitTestsMicro ${RCCL_MICRO_TEST_SOURCES})
+target_sources(rccl-UnitTestsMicro PRIVATE
+  ${RCCL_HIPIFY_DIR}/src/misc/archinfo.cc)  # real IsArchMatch, for wrap-test.cc
 
 target_compile_options(rccl-UnitTestsMicro PRIVATE
-  -Wno-unused-parameter -Wno-unused-variable)
+  -Wno-unused-parameter -Wno-unused-variable -ffunction-sections)
 
 target_include_directories(rccl-UnitTestsMicro PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}
@@ -684,6 +715,11 @@ target_compile_definitions(rccl-UnitTestsMicro PRIVATE
   GROUP_CC_PATH="${RCCL_HIPIFY_DIR}/src/group.cc"
   DEVCOMM_V22902_CC_PATH="${RCCL_HIPIFY_DIR}/src/devcomm/devcomm_v22902.cc"
   DEVCOMM_V22907_CC_PATH="${RCCL_HIPIFY_DIR}/src/devcomm/devcomm_v22907.cc"
+  WRAP_CC_PATH="${RCCL_HIPIFY_DIR}/src/rccl_wrap.cc"
+  # See the in-build block's comment: real paths for the
+  # ParamDefaults_MatchProductionSource drift check.
+  CONNECT_CC_PATH="${RCCL_HIPIFY_DIR}/src/graph/connect.cc"
+  ENQUEUE_CC_PATH="${RCCL_HIPIFY_DIR}/src/enqueue.cc"
   # Same fallback-vs-runtime conflicts the host target guards against: without
   # these, p2p-test.cc redefines hipMemFabricHandle_st and the amdsmi fabric
   # enumerators on ROCm 7.14+, and the standalone build fails.
@@ -694,7 +730,11 @@ target_compile_definitions(rccl-UnitTestsMicro PRIVATE
 # -no-pie for the same reason as rccl-HostUnitTests: the RCCL-vendored
 # libgtest.a used by this standalone path is built without -fPIC, so a PIE
 # link fails with "relocation R_X86_64_32 cannot be used against local symbol".
-target_link_options(rccl-UnitTestsMicro PRIVATE -no-hip-rt -no-pie)
+# --gc-sections (added for wrap-test.cc): rccl_wrap.cc's abort()-floor stub
+# surface (fakes/wrap_fakes.cc) is large and mostly unreached by the
+# current test batch; this drops the unreferenced deep deps, matching
+# rccl-UnitTestsMicroInit's rationale for the same flag.
+target_link_options(rccl-UnitTestsMicro PRIVATE -no-hip-rt -no-pie -Wl,--gc-sections)
 target_link_libraries(rccl-UnitTestsMicro PRIVATE
   GTest::GTest
   Threads::Threads
