@@ -10,8 +10,8 @@
 
 namespace rocjitsu {
 
-/// Register window copied into one entry-local VGPR while a prologue borrows
-/// scalar ABI state.
+/// Register window copied into one entry-local VGPR while either an
+/// owner/epoch or private-state prologue borrows scalar ABI state.
 ///
 /// `vgpr` is the wave-local carrier. `sgpr_base` and `sgpr_count` name the
 /// contiguous scalar window transferred through its lanes. The same plan is

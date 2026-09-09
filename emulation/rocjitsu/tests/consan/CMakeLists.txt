@@ -558,6 +558,45 @@ function(rj_add_consan_device_conformance_cases)
         )
     endif()
 
+    if(_device_TARGET STREQUAL "gfx950")
+        # Minimal device-level form of the tree-atomic-or regression: inserting
+        # queue/dispatch preloads shifts the kernarg pointer, while full scalar
+        # liveness forces the private entry prologue to preserve a borrowed
+        # guest-SGPR window. Saving that window before ABI repair restores the
+        # queue pointer over kernarg and faults on the first guest access.
+        rj_add_consan_hip_case(
+            NAME
+                "${_device_PREFIX}.RecordReplayPrivateEntryAbiSpill.Correct"
+            TARGET
+                hip_consan_device_dispatch_id_sgpr_pressure_${_device_TARGET}_test
+            FILTER "ConSanDeviceDispatchIdSgprPressureTest.PrivateEntryAbiSpill"
+            ${_config_args}
+            ${_resource_lock_args}
+            TIMEOUT 60
+            PASS_REGEX
+                "spill=[1-9][0-9]*.*emitted_spill_patches=[1-9][0-9]*"
+            ENVIRONMENT
+                "HSA_TOOLS_LIB=$<TARGET_FILE:rocjitsu_dbi_hooks>"
+                "RJ_CONSAN_MODE=record-replay"
+                "RJ_CONSAN_POLICY=strict"
+                "RJ_CONSAN_REQUIRE_PATCH=1"
+                "RJ_CONSAN_LOG=1"
+                "RJ_CONSAN_MOI_TRACK_BARRIERS=0"
+                "RJ_CONSAN_MOI_TRACK_ATOMICS=0"
+                "RJ_CONSAN_MOI_REQUIRE_RECORDS=1"
+                "RJ_CONSAN_MOI_FORBID_DIAGNOSTICS=1"
+                "RJ_CONSAN_MOI_FORBID_OVERFLOW=1"
+                "RJ_CONSAN_TEST_FORCE_VGPR_SPILL=1"
+                "RJ_CONSAN_TEST_FORCE_PRIVATE_EPOCH=1"
+                "RJ_CONSAN_TEST_KERNEL_FILTER=private_entry_abi_spill_for_consan"
+            LABELS
+                ${_labels}
+                correct
+                record-replay
+                private-entry-abi
+        )
+    endif()
+
     # Record/Replay samples whole workgroups. Offset zero must retain
     # workgroup zero even at the production default stride, and sparse
     # selection must preserve the exact identity of every selected

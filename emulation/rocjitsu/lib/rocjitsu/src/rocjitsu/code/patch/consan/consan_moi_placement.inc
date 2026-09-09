@@ -167,8 +167,11 @@ moi_descriptor_dispatch_id_preload_plan(const KD &desc, rj_code_arch_t arch) {
       preload_length > overflow && original_named_count == original_user_count) {
     expanded_user_count = user_sgpr_initialization_limit;
     plan.kernarg_reload_sgpr = static_cast<uint16_t>(original_user_count - overflow);
-    plan.kernarg_reload_base_sgpr = static_cast<uint16_t>(
-        *kernarg_ptr + (queue_enabled ? 0u : 2u));
+    // Reload executes after the explicit guest-SGPR repair.  At that point
+    // the kernarg pointer is back in its original ABI position; its shifted
+    // replacement position may already have been overwritten by another
+    // restored guest preload.
+    plan.kernarg_reload_base_sgpr = *kernarg_ptr;
     plan.kernarg_reload_offset_dwords = static_cast<uint16_t>(
         AMDHSA_BITS_GET(desc.kernarg_preload, kd::KERNARG_PRELOAD_SPEC_OFFSET) + preload_length -
         overflow);

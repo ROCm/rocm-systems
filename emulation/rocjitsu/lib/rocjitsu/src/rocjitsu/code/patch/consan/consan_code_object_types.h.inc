@@ -491,9 +491,9 @@ struct ConSanPatchAbiEffects {
   /// synchronization patches consume this exact ABI; other patch kinds leave
   /// the aggregate empty.
   ConSanMoiPersistentSgprState persistent_sgpr_state;
-  /// Entry-local carrier and contiguous guest-SGPR window preserved while
-  /// persistent vector state is initialized. The carrier is dead again before
-  /// any displaced guest instruction executes.
+  /// Entry-local carrier and contiguous guest-SGPR window preserved while an
+  /// owner/epoch or private-state prologue borrows scalar ABI state. The
+  /// carrier is dead again before any displaced guest instruction executes.
   std::optional<ConSanMoiEntryScalarBackup> entry_scalar_backup;
   /// Minimum ordinary SGPR allocation required by this patch, independent of
   /// whether its placement uses an indirect control-flow relay.

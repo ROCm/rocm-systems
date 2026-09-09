@@ -8608,6 +8608,87 @@ TEST(ConSanMoi, Cdna4PrivateDispatchSpillKeepsScalarTupleBelowOrdinaryLimit) {
   EXPECT_GT(access_patch->spilled_vgpr_count, 0u);
 }
 
+TEST(ConSanMoi, Cdna4PrivateEntryScalarSpillSavesRepairedGuestAbi) {
+  constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_CDNA4;
+  const auto access =
+      build_cdna4_ds_store_b32(/*vaddr=*/2u, /*vdata=*/3u, /*byte_offset=*/0u, kArch);
+  ASSERT_TRUE(access);
+
+  std::vector<uint32_t> words(768u, build_s_nop(0u, kArch));
+  std::ranges::copy(*access, words.begin());
+  size_t cursor = access->size();
+  // Keep the complete ordinary scalar bank live after the access. This forces
+  // dispatch identity into private state and makes the entry prologue preserve
+  // a borrowed scalar window, matching the minimal ABI shape that regressed in
+  // the tree-atomic-or E2E kernel.
+  for (uint16_t sgpr = 0u; sgpr < 100u; ++sgpr)
+    words[cursor++] = build_s_mov_b32(/*sdst=*/99u, sgpr, kArch);
+  words.back() = build_s_endpgm(kArch);
+
+  std::vector<uint8_t> bytes =
+      make_cdna4_lds_code_object(words, "gfx950_private_entry_abi_spill", 0u);
+  mutate_first_kernel_descriptor(bytes, [](KD &descriptor) {
+    AMDHSA_BITS_SET(descriptor.kernel_code_properties,
+                    kd::KERNEL_CODE_PROPERTY_ENABLE_SGPR_KERNARG_SEGMENT_PTR, 1u);
+    AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc2,
+                    kd::COMPUTE_PGM_RSRC2_USER_SGPR_COUNT, 2u);
+    AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc1,
+                    kd::COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT, 12u);
+  });
+
+  const ConSanMoiAutoReportPlan report_plan = plan_consan_moi_auto_report(
+      {.engine = ConSanMoiEngine::RecordReplay, .access_range_count = 1u});
+  ASSERT_TRUE(report_plan.complete());
+  const auto layout = report_plan.complete_layout();
+  ASSERT_TRUE(layout);
+  MoiOptions options = moi_options(ConSanMoiEngine::RecordReplay);
+  options.test_force_vgpr_spill = true;
+  options.max_patches = 1u;
+  options.moi_track_barriers = false;
+  options.moi_track_atomics = false;
+  options.moi_report_buffer_address = 0x123456780000ull;
+  options.moi_report_buffer_size = report_plan.required_bytes;
+  options.moi_report_layout = *layout;
+
+  const ConSanTransformArtifacts result = test_lower_consan(bytes, options);
+  ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
+  ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
+  EXPECT_TRUE(result.moi_operating_point.moi_dispatch_identity.private_fallback());
+
+  const auto prologue =
+      std::ranges::find(result.patches, ConSanPatchKind::KernelEntryMoiPrivateEpochPrologue,
+                        &ConSanPatchInfo::kind);
+  ASSERT_NE(prologue, result.patches.end());
+  ASSERT_TRUE(prologue->dispatch_id_prologue);
+  ASSERT_TRUE(prologue->entry_scalar_backup);
+  const auto &preload = prologue->dispatch_id_prologue->preload;
+  ASSERT_EQ(preload.guest_restore_count, 2u);
+
+  const auto dependency_delay = instrumentation::build_salu_dependency_delay(kArch);
+  ASSERT_TRUE(dependency_delay);
+  std::vector<uint32_t> guest_restore;
+  for (uint16_t index = 0u; index < preload.guest_restore_count; ++index) {
+    guest_restore.push_back(build_s_mov_b32(preload.guest_restore_destinations[index],
+                                            preload.guest_restore_sources[index], kArch));
+    guest_restore.push_back(*dependency_delay);
+  }
+  const auto first_save = instrumentation::build_v_writelane_b32(
+      prologue->entry_scalar_backup->vgpr, prologue->entry_scalar_backup->sgpr_base,
+      /*lane=*/0u, kArch);
+  ASSERT_TRUE(first_save);
+
+  AmdGpuCodeObject patched(result.replacement.data(), result.replacement.size());
+  ASSERT_TRUE(patched.is_valid());
+  const std::vector<uint32_t> entry_body =
+      text_words_at_offset(patched, prologue->trampoline_offset, prologue->trampoline_size);
+  const auto repair_position = std::ranges::search(entry_body, guest_restore).begin();
+  const auto save_position = std::ranges::search(entry_body, *first_save).begin();
+  ASSERT_NE(repair_position, entry_body.end());
+  ASSERT_NE(save_position, entry_body.end());
+  EXPECT_LT(repair_position, save_position)
+      << "private entry preservation must save the repaired guest ABI";
+}
+
 TEST(ConSanMoi, CdnaRecordReplayMovesOnlyEmptyAccumulatorBoundaryForDynamicStackState) {
   for (const rj_code_arch_t arch : {ROCJITSU_CODE_ARCH_CDNA3, ROCJITSU_CODE_ARCH_CDNA4}) {
     for (const uint8_t agpr_count : {0u, 1u}) {

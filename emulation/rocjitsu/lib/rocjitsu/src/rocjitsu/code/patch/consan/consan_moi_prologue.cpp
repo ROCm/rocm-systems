@@ -1087,13 +1087,6 @@ build_private_epoch_prologue_words(const MoiPrivateEpochPrologueEmissionPlan &pl
         build_v_mov_b32_e32(scratch_vgpr, vector_source_vgpr(kAmdGpuWorkitemIdX), arch),
         *owner_store);
   }
-  if (entry_scalar_spill) {
-    (void)sequence.emit(entry_scalar_spill->save_words);
-    if (workgroup_sources && !append_cdna_semantic_entry_scalar_spill_overrides(
-                                 words, *entry_scalar_spill, *workgroup_sources, arch, errors)) {
-      return std::nullopt;
-    }
-  }
   if (dispatch_id_offset) {
     if (!dispatch_plan || !dispatch_capture.vgpr() || dispatch_capture.sgpr() ||
         *dispatch_capture.vgpr() != scratch_vgpr ||
@@ -1106,6 +1099,18 @@ build_private_epoch_prologue_words(const MoiPrivateEpochPrologueEmissionPlan &pl
       return std::nullopt;
     }
     (void)sequence.emit_all(*dispatch_id_low_store, *dispatch_id_high_store, *wait_store);
+  }
+  // Descriptor surgery may insert queue/dispatch preloads ahead of the guest
+  // ABI.  Capture launch identity and repair the guest-visible SGPR layout
+  // before preserving any borrowed entry SGPRs; otherwise the eventual spill
+  // restore writes replacement-ABI values (notably the queue pointer) over the
+  // repaired kernarg pointer.
+  if (entry_scalar_spill) {
+    (void)sequence.emit(entry_scalar_spill->save_words);
+    if (workgroup_sources && !append_cdna_semantic_entry_scalar_spill_overrides(
+                                 words, *entry_scalar_spill, *workgroup_sources, arch, errors)) {
+      return std::nullopt;
+    }
   }
   if (workgroup_shadow &&
       !append_moi_workgroup_shadow_initialization(
@@ -1331,10 +1336,10 @@ template <typename Predicate>
   KD &desc = *descriptor_value;
   const ConSanMoiDispatchIdPreloadPlan current_plan =
       moi_descriptor_dispatch_id_preload_plan(desc, arch);
-  if (current_plan.support != plan.support ||
-      current_plan.dispatch_id_sgpr != plan.dispatch_id_sgpr ||
-      current_plan.original_user_sgpr_count != plan.original_user_sgpr_count ||
-      current_plan.system_sgpr_count != plan.system_sgpr_count) {
+  // The descriptor and its complete ABI rewrite are one transaction.  In
+  // particular, queue insertion, the explicit guest source map, and kernarg
+  // tail recovery must not drift between planning and descriptor mutation.
+  if (current_plan != plan) {
     errors.emplace_back("ConSan MOI dispatch-ID descriptor changed after preload planning");
     return false;
   }
@@ -1660,6 +1665,14 @@ void try_apply_private_epoch_prologue_patch(const ConSanRequest &request,
     info.private_state_layout = item.private_state_layout;
     info.spilled_vgpr_count = item.emission.spill.vgpr_count;
     info.required_private_segment_size = item.required_private_bytes;
+    if (item.emission.entry_scalar_spill &&
+        item.emission.entry_scalar_spill->lane_reservoir_vgpr) {
+      info.entry_scalar_backup = ConSanMoiEntryScalarBackup{
+          .vgpr = *item.emission.entry_scalar_spill->lane_reservoir_vgpr,
+          .sgpr_base = item.emission.entry_scalar_spill->sgpr_base,
+          .sgpr_count = item.emission.entry_scalar_spill->sgpr_count,
+      };
+    }
     note_dynamic_stack_private_requirement(info, &item.emission.spill);
     if (item.emission.dispatch_plan && item.emission.dispatch_capture.present())
       note_dispatch_id_patch_info(info, *item.emission.dispatch_plan,

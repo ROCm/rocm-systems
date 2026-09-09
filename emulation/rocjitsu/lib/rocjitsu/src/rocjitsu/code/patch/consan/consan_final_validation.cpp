@@ -1417,7 +1417,8 @@ void validate_entry_scalar_backup_semantics(const FinalValidationEnvironment &en
     if (!patch.entry_scalar_backup)
       continue;
     const ConSanMoiEntryScalarBackup &backup = *patch.entry_scalar_backup;
-    if (patch.kind != ConSanPatchKind::KernelEntryMoiOwnerEpochPrologue ||
+    if ((patch.kind != ConSanPatchKind::KernelEntryMoiOwnerEpochPrologue &&
+         patch.kind != ConSanPatchKind::KernelEntryMoiPrivateEpochPrologue) ||
         !backup.is_well_formed(kConSanOrdinaryVgprLimit, REGISTER_SET_ALLOCATABLE_SGPRS)) {
       errors.emplace_back("ConSan final validation found invalid entry scalar backup resources");
       continue;
@@ -1548,16 +1549,19 @@ void validate_dispatch_id_prologue_semantics(const FinalValidationEnvironment &e
           std::string(kernel_name) + "'");
       return;
     }
-    const uint32_t guest_input_count =
-        static_cast<uint32_t>(preload.original_user_sgpr_count) + preload.system_sgpr_count;
-    const bool invalid_restore =
-        preload.guest_restore_count > preload.guest_restore_sources.size() ||
-        std::ranges::any_of(
-            std::views::iota(uint16_t{0}, preload.guest_restore_count), [&](uint16_t index) {
-              return preload.guest_restore_destinations[index] >= guest_input_count ||
-                     preload.guest_restore_sources[index] >= preload.required_sgpr_count;
-            });
-    if (preload.descriptor_change_required() && invalid_restore) {
+    bool invalid_restore = preload.guest_restore_count > preload.guest_restore_sources.size();
+    for (uint16_t index = 0u; !invalid_restore && index < preload.guest_restore_count; ++index) {
+      const uint16_t destination = preload.guest_restore_destinations[index];
+      const uint16_t source = preload.guest_restore_sources[index];
+      invalid_restore =
+          destination >= preload.original_user_sgpr_count ||
+          source >= preload.expanded_user_sgpr_count || destination >= source ||
+          (index != 0u &&
+           (preload.guest_restore_destinations[index - 1u] >= destination ||
+            preload.guest_restore_sources[index - 1u] >= source));
+    }
+    if ((!preload.descriptor_change_required() && preload.guest_restore_count != 0u) ||
+        (preload.descriptor_change_required() && invalid_restore)) {
       errors.emplace_back(
           "ConSan final validation found invalid dispatch-ID restore bounds for kernel '" +
           std::string(kernel_name) + "'");
@@ -1905,11 +1909,14 @@ void validate_resource_and_metadata_deltas(const FinalValidationEnvironment &env
             requirement.required_vgpr_count = std::max<uint16_t>(
                 requirement.required_vgpr_count,
                 static_cast<uint16_t>(patch.moi_vgpr_state->required_vgpr_count()));
-          if (patch.entry_scalar_backup) {
-            requirement.required_vgpr_count =
-                std::max<uint16_t>(requirement.required_vgpr_count,
-                                   static_cast<uint16_t>(patch.entry_scalar_backup->vgpr + 1u));
-          }
+        }
+        // Both register-backed and private-state entry prologues may preserve
+        // borrowed guest SGPRs in a lane-backed VGPR.  The proof is also a
+        // descriptor resource requirement, regardless of prologue kind.
+        if (patch.entry_scalar_backup) {
+          requirement.required_vgpr_count =
+              std::max<uint16_t>(requirement.required_vgpr_count,
+                                 static_cast<uint16_t>(patch.entry_scalar_backup->vgpr + 1u));
         }
         if (patch.dispatch_id_prologue) {
           const ConSanMoiDispatchIdPrologueEffect &dispatch = *patch.dispatch_id_prologue;

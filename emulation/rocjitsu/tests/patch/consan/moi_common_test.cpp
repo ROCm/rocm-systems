@@ -3006,7 +3006,7 @@ TEST(ConSanMoi, DispatchPrologueCapturesBeforeAscendingRestoreAtBothKernargEntri
   verify_entry(*prologue.dispatch_id_secondary_prologue_offset);
 }
 
-TEST(ConSanMoi, AlreadyEnabledDispatchPreloadIsCapturedWithoutGuestShuffle) {
+TEST(ConSanMoi, DispatchAlreadyEnabledInsertsQueueAndRestoresGuestAbi) {
   std::vector<uint8_t> bytes = make_rdna4_supported_lds_code_object();
   mutate_first_kernel_descriptor(bytes, [](KD &descriptor) {
     AMDHSA_BITS_SET(descriptor.kernel_code_properties,
@@ -3032,6 +3032,14 @@ TEST(ConSanMoi, AlreadyEnabledDispatchPreloadIsCapturedWithoutGuestShuffle) {
   EXPECT_EQ(prologue->dispatch_id_prologue->preload.original_user_sgpr_count, 4u);
   EXPECT_EQ(prologue->dispatch_id_prologue->preload.expanded_user_sgpr_count, 6u);
   EXPECT_TRUE(prologue->dispatch_id_prologue->preload.descriptor_change_required());
+  EXPECT_FALSE(prologue->dispatch_id_prologue->preload.queue_ptr_was_enabled);
+  EXPECT_TRUE(prologue->dispatch_id_prologue->preload.dispatch_id_was_enabled);
+  EXPECT_EQ(prologue->dispatch_id_prologue->preload.identity_salt_sgpr, 0u);
+  EXPECT_EQ(prologue->dispatch_id_prologue->preload.guest_restore_count, 4u);
+  for (uint16_t index = 0u; index < 4u; ++index) {
+    EXPECT_EQ(prologue->dispatch_id_prologue->preload.guest_restore_destinations[index], index);
+    EXPECT_EQ(prologue->dispatch_id_prologue->preload.guest_restore_sources[index], index + 2u);
+  }
 
   AmdGpuCodeObject patched(result.replacement.data(), result.replacement.size());
   ASSERT_TRUE(patched.is_valid());
@@ -3041,6 +3049,9 @@ TEST(ConSanMoi, AlreadyEnabledDispatchPreloadIsCapturedWithoutGuestShuffle) {
               sizeof(descriptor));
   EXPECT_EQ(AMDHSA_BITS_GET(descriptor.compute_pgm_rsrc2, kd::COMPUTE_PGM_RSRC2_USER_SGPR_COUNT),
             6u);
+  EXPECT_EQ(AMDHSA_BITS_GET(descriptor.kernel_code_properties,
+                            kd::KERNEL_CODE_PROPERTY_ENABLE_SGPR_QUEUE_PTR),
+            1u);
   const std::vector<uint32_t> prologue_words =
       text_words_at_offset(patched, prologue->trampoline_offset, prologue->trampoline_size);
   ASSERT_TRUE(test_moi_exec_save_sgpr(result));
@@ -3303,6 +3314,23 @@ TEST(ConSanMoi, FinalValidationPinsDispatchDescriptorAndCaptureSequence) {
   std::memcpy(mix_corruption.replacement.data() + mix_file_offset, &missing_mix,
               sizeof(missing_mix));
   EXPECT_FALSE(validate_consan_modified_elf(bytes, mix_corruption).empty());
+
+  ConSanTransformArtifacts restore_metadata_corruption = valid;
+  auto corrupted_prologue = std::ranges::find_if(
+      restore_metadata_corruption.patches,
+      [](const ConSanPatchInfo &patch) { return patch.dispatch_id_prologue.has_value(); });
+  ASSERT_NE(corrupted_prologue, restore_metadata_corruption.patches.end());
+  auto &corrupted_preload = corrupted_prologue->dispatch_id_prologue->preload;
+  ASSERT_GT(corrupted_preload.guest_restore_count, 0u);
+  // The explicit source map is exclusively a user-preload repair. The old
+  // combined user+system bound incorrectly admitted this first system SGPR.
+  corrupted_preload.guest_restore_destinations[0] =
+      corrupted_preload.original_user_sgpr_count;
+  const std::vector<std::string> restore_errors =
+      validate_consan_modified_elf(bytes, restore_metadata_corruption);
+  EXPECT_TRUE(std::ranges::any_of(restore_errors, [](const std::string &error) {
+    return error.find("dispatch-ID restore bounds") != std::string::npos;
+  })) << testing::PrintToString(restore_errors);
 }
 
 TEST(ConSanMoi, WarnsWhenReportBufferIsSmallerThanHeader) {

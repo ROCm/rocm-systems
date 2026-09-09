@@ -13,15 +13,17 @@ denominators from 128 to 122 for `d128-block`, from 252 to 236 for
 `d128-pressure`, and from 58 to 50 for `wmma-attention`. The current Sampled
 denominators are 119 barriers for `d128-block`, 28 for `d128-pressure`, and 14
 for `wmma-attention`, matching the other MOI engines rather than the older
-117, 24, and 12 counts. The `tree-atomic-or` Record/Replay row is a
-reproducible regression: two independent physical runs and one gfx950 emulator
-run completed strict transformation with 48/48 accesses, 6/6 barriers, 3/3
-atomics, and 5/5 fences, then aborted before the independent oracle and ConSan
-teardown verdict. Physical execution raised `HSA_STATUS_ERROR_MEMORY_FAULT`
-during `hipDeviceSynchronize`; emulation rejected accesses to a missing host
-page and terminated on an invalid signal handle. The ordered physical
-post-instrumentation health check passed after the failures. The primary
-artifacts, including the test-corpus row, are under
+117, 24, and 12 counts. The initial `tree-atomic-or` Record/Replay attempt was
+a reproducible physical and emulator regression: its private-state entry
+prologue saved the replacement queue/dispatch preload layout before restoring
+the guest ABI, then restored a queue pointer over the guest kernarg pointer.
+The corrected transaction captures launch identity, repairs the guest ABI,
+and only then preserves borrowed entry SGPRs. The official physical validator
+now accepts both baseline and Record/Replay with the exact oracle, zero
+diagnostics, complete dynamic evidence, 48/48 accesses, 6/6 barriers, 3/3
+atomics, and 5/5 fences. The accepted artifact is
+`/tmp/consan-validation-gfx950-tree-rr-entry-abi-fix-20260909-c`. The original
+failure artifacts, including the test-corpus row, remain under
 `/tmp/consan-validation-gfx950-post-merge-6022be69`; the independent
 Record/Replay confirmation is under
 `/tmp/consan-validation-gfx950-tree-rr-confirm-6022be69`, and the emulator
@@ -59,6 +61,16 @@ queue-pointer/dispatch-ID
 fingerprint retains the collision and destroyed-queue address-reuse limitation
 documented in [VALIDATION.md](VALIDATION.md); Sampled's scalar-pressure literal
 fallback is weaker still. Neither may be described as exact identity.
+
+Private-entry ABI corrective qualification (2026-09-09): the complete ConSan
+host gate passes 1,574/1,576 with only the two intentional benchmark skips.
+A minimal scalar-pressure LDS device kernel that forces the same private
+dispatch-identity and lane-backed entry-save path passes under both the gfx950
+simulator and the physical MI350X. The neighboring memory-backed private-entry
+host test now also requires guest repair before its scalar save, and the CDNA3
+and CDNA4 full-window kernarg-preload tests verify that emitted tail reloads use
+the restored guest kernarg-pointer SGPR. The focused simulator/physical
+dispatch-identity, two-queue, and kernarg-preload matrix passes all 52 cases.
 
 Status snapshot: 2026-08-26. All rows execute on the physical gfx950. This balanced clean-tree refresh used source `e355d1479e` and artifacts under `/home/ossci/xx/consan-validation/production-design-revalidation-20260826-*`; the full physical device-test suite passed 587/587. Retained green cells keep their previously accepted paired-overhead and reviewed-fault evidence unless stated otherwise.
 
@@ -101,7 +113,7 @@ Legend: 🩶 unseen · 🟥 broken before useful evidence · 🟧 below 80% aggr
 | Main E2E | P4 | hip-moi D128 pressure (`d128-pressure`) | 🟩 physical clean revalidated; four exact oracles; 236/236 accesses; retained paired/fault bundle | 🟩 physical clean revalidated; exact; 236/236 accesses and 28/28 barriers; retained paired/fault bundle | 🟩 physical clean revalidated; exact; 236/236 accesses and 28/28 barriers; retained paired/fault bundle | 🟩 physical clean revalidated; exact; 236/236 accesses and 28/28 barriers; retained paired/fault bundle |
 | Main E2E | P4 | hip-moi MFMA attention (`wmma-attention`) | 🟩 physical clean revalidated; exact; 50/50 accesses; retained paired/fault bundle | 🟩 physical clean revalidated; exact; 50/50 accesses and 14/14 barriers; retained paired/fault bundle | 🟩 physical clean revalidated; exact; 50/50 accesses and 14/14 barriers; retained paired/fault bundle | 🟩 physical clean revalidated; exact; 50/50 accesses and 14/14 barriers; retained paired/fault bundle |
 | Main E2E | P4 | hip-moi Stream-K arrival (`streamk-arrival`) | 🟩 physical clean revalidated; exact; 32/32 accesses | 🟩 physical clean revalidated; exact/complete; 32/32 accesses, 6/6 barriers, 1/1 atomic, 2/2 fences | 🟩 physical clean revalidated; exact/complete; 32/32 accesses, 6/6 barriers, 1/1 atomic, 2/2 fences | 🟩 physical clean revalidated; exact/complete with zero forbidden diagnostics; 32/32 accesses, 6/6 barriers, 1/1 atomic, 2/2 fences |
-| Main E2E | P4 | hip-moi tree atomic-OR (`tree-atomic-or`) | 🟩 physical clean revalidated; exact; 48/48 accesses | 🟥 physical and emulator clean regression: complete 48/48 accesses, 6/6 barriers, 3/3 atomics, and 5/5 fences, then memory failure before oracle/teardown | 🟩 physical clean revalidated; exact/complete; 48/48 accesses, 6/6 barriers, 3/3 atomics, 5/5 fences | 🟩 physical clean revalidated; exact/complete with zero forbidden diagnostics; 48/48 accesses, 6/6 barriers, 3/3 atomics, 5/5 fences |
+| Main E2E | P4 | hip-moi tree atomic-OR (`tree-atomic-or`) | 🟩 physical clean revalidated; exact; 48/48 accesses | 🟩 physical clean revalidated after private-entry ABI repair; exact/complete with zero diagnostics; 48/48 accesses, 6/6 barriers, 3/3 atomics, 5/5 fences | 🟩 physical clean revalidated; exact/complete; 48/48 accesses, 6/6 barriers, 3/3 atomics, 5/5 fences | 🟩 physical clean revalidated; exact/complete with zero forbidden diagnostics; 48/48 accesses, 6/6 barriers, 3/3 atomics, 5/5 fences |
 | Main E2E | P4 | hip-moi Jakub attention (`jakub-attention`) | 🟩 four exact oracles; 338/338 accesses | 🟩 exact; 338/338 accesses and 35/35 barriers | 🟩 exact; 338/338 accesses and 35/35 barriers | 🟩 exact; 338/338 accesses and 35/35 barriers |
 | Test corpus | P0 | HIP matmul 128 cubed (`hip-matmul-m128-n128-k128`) | 🟩 physical clean revalidated; exact; 739/739 accesses; retained qualified exact-one FP16 tile-publication miss | 🟩 physical clean revalidated; exact; 739/739 accesses and 109/109 barriers | 🟩 physical clean revalidated; exact; 739/739 accesses and 109/109 barriers | 🟩 physical clean revalidated; exact; 739/739 accesses and 109/109 barriers; retained exact-one FP16 tile-publication fault diagnosis |
 | Test corpus | P0 | HipKittens BF16 (`hipkittens-bf16fp32-16x32`) | 🟩 exact; 96/96 accesses; qualified exact-one prologue-publication miss | 🟩 exact; 128/128 accesses and 32/32 barriers | 🟩 exact; 128/128 accesses and 32/32 barriers | 🟩 exact; 128/128 accesses and 32/32 barriers; qualified exact-one prologue-publication miss |

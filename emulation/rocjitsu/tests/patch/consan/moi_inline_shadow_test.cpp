@@ -595,7 +595,7 @@ TEST(ConSanMoi, Cdna4InlineShadowRecoversFullWindowKernargPreloadTail) {
   EXPECT_EQ(prologue->dispatch_id_prologue->preload.original_user_sgpr_count, 15u);
   EXPECT_EQ(prologue->dispatch_id_prologue->preload.expanded_user_sgpr_count, 16u);
   EXPECT_EQ(prologue->dispatch_id_prologue->preload.kernarg_reload_sgpr, 12u);
-  EXPECT_EQ(prologue->dispatch_id_prologue->preload.kernarg_reload_base_sgpr, 2u);
+  EXPECT_EQ(prologue->dispatch_id_prologue->preload.kernarg_reload_base_sgpr, 0u);
   EXPECT_EQ(prologue->dispatch_id_prologue->preload.kernarg_reload_offset_dwords, 13u);
   EXPECT_EQ(prologue->dispatch_id_prologue->preload.kernarg_reload_count, 3u);
   EXPECT_EQ(prologue->dispatch_id_prologue->preload.shifted_system_sgpr_count, 1u);
@@ -614,6 +614,15 @@ TEST(ConSanMoi, Cdna4InlineShadowRecoversFullWindowKernargPreloadTail) {
             1u);
   EXPECT_EQ(AMDHSA_BITS_GET(descriptor.kernarg_preload, kd::KERNARG_PRELOAD_SPEC_LENGTH), 10u);
   EXPECT_EQ(AMDHSA_BITS_GET(descriptor.kernarg_preload, kd::KERNARG_PRELOAD_SPEC_OFFSET), 3u);
+  const std::vector<uint32_t> prologue_words =
+      text_words_at_offset(patched, prologue->trampoline_offset, prologue->trampoline_size);
+  for (uint16_t index = 0u; index < 3u; ++index) {
+    const auto reload = instrumentation::build_s_load_dword(
+        static_cast<uint16_t>(12u + index), /*sbase=*/0u,
+        static_cast<uint32_t>(13u + index) * sizeof(uint32_t), ROCJITSU_CODE_ARCH_CDNA4);
+    ASSERT_TRUE(reload);
+    EXPECT_TRUE(contains_subsequence(prologue_words, *reload));
+  }
 }
 
 TEST(ConSanMoi, Cdna3InlineShadowRecoversFullWindowKernargPreloadTail) {
@@ -656,7 +665,7 @@ TEST(ConSanMoi, Cdna3InlineShadowRecoversFullWindowKernargPreloadTail) {
   EXPECT_EQ(prologue->dispatch_id_prologue->preload.original_user_sgpr_count, 15u);
   EXPECT_EQ(prologue->dispatch_id_prologue->preload.expanded_user_sgpr_count, 16u);
   EXPECT_EQ(prologue->dispatch_id_prologue->preload.kernarg_reload_sgpr, 12u);
-  EXPECT_EQ(prologue->dispatch_id_prologue->preload.kernarg_reload_base_sgpr, 2u);
+  EXPECT_EQ(prologue->dispatch_id_prologue->preload.kernarg_reload_base_sgpr, 0u);
   EXPECT_EQ(prologue->dispatch_id_prologue->preload.kernarg_reload_offset_dwords, 13u);
   EXPECT_EQ(prologue->dispatch_id_prologue->preload.kernarg_reload_count, 3u);
   EXPECT_EQ(prologue->dispatch_id_prologue->preload.shifted_system_sgpr_count, 1u);
@@ -675,6 +684,15 @@ TEST(ConSanMoi, Cdna3InlineShadowRecoversFullWindowKernargPreloadTail) {
             1u);
   EXPECT_EQ(AMDHSA_BITS_GET(descriptor.kernarg_preload, kd::KERNARG_PRELOAD_SPEC_LENGTH), 10u);
   EXPECT_EQ(AMDHSA_BITS_GET(descriptor.kernarg_preload, kd::KERNARG_PRELOAD_SPEC_OFFSET), 3u);
+  const std::vector<uint32_t> prologue_words =
+      text_words_at_offset(patched, prologue->trampoline_offset, prologue->trampoline_size);
+  for (uint16_t index = 0u; index < 3u; ++index) {
+    const auto reload = instrumentation::build_s_load_dword(
+        static_cast<uint16_t>(12u + index), /*sbase=*/0u,
+        static_cast<uint32_t>(13u + index) * sizeof(uint32_t), kArch);
+    ASSERT_TRUE(reload);
+    EXPECT_TRUE(contains_subsequence(prologue_words, *reload));
+  }
 }
 
 TEST(ConSanMoi, Cdna4InlineShadowPreservesDsWorkgroupKeyFromKernelEntry) {
@@ -972,6 +990,23 @@ TEST(ConSanMoi, Cdna4PrivateEpochProloguePreservesClobberedEntryAbiSgprs) {
       text_words_at_offset(patched, prologue->trampoline_offset, prologue->trampoline_size);
   EXPECT_TRUE(contains_subsequence(words, expected_scalar->save_words));
   EXPECT_TRUE(contains_subsequence(words, expected_scalar->restore_words));
+  ASSERT_TRUE(prologue->dispatch_id_prologue);
+  const auto &preload = prologue->dispatch_id_prologue->preload;
+  ASSERT_GT(preload.guest_restore_count, 0u);
+  const auto dependency_delay = instrumentation::build_salu_dependency_delay(kArch);
+  ASSERT_TRUE(dependency_delay);
+  std::vector<uint32_t> guest_restore;
+  for (uint16_t index = 0u; index < preload.guest_restore_count; ++index) {
+    guest_restore.push_back(build_s_mov_b32(preload.guest_restore_destinations[index],
+                                            preload.guest_restore_sources[index], kArch));
+    guest_restore.push_back(*dependency_delay);
+  }
+  const auto repair_position = std::ranges::search(words, guest_restore).begin();
+  const auto save_position = std::ranges::search(words, expected_scalar->save_words).begin();
+  ASSERT_NE(repair_position, words.end());
+  ASSERT_NE(save_position, words.end());
+  EXPECT_LT(repair_position, save_position)
+      << "memory-backed entry preservation must save the repaired guest ABI";
 }
 
 TEST(ConSanMoi, Cdna4PrivateEpochWholeObjectEntryDoesNotClobberEntryAbiSgprs) {
