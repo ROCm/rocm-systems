@@ -372,6 +372,17 @@ in the following table.
       - | ``0``: Disable thread naming (default).
         | ``1``: Enable thread naming.
 
+    * - | ``RCCL_ENABLE_SIGNALHANDLER``
+        | Installs RCCL's optional process-wide signal handlers so a crash
+          prints a CPU backtrace (with file and line information when the
+          Binary File Descriptor library is available at build time).
+          Handlers are registered for ``SIGILL``, ``SIGBUS``, ``SIGFPE``,
+          ``SIGSEGV``, and ``SIGUSR2``. Fatal signals then exit with status
+          ``-1``; ``SIGUSR2`` prints the backtrace and returns. Leave this
+          disabled when the application already installs its own handlers.
+      - | ``0``: Do not install RCCL signal handlers (default).
+        | ``1``: Install the handlers at communicator bootstrap.
+
     * - | ``NCCL_CHECK_MODE``
         | Selects how thoroughly RCCL validates the arguments of every
           collective call. Checking costs latency, so it is disabled by default
