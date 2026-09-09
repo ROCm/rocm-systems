@@ -51,6 +51,7 @@ public:
   int (*access)(const char *, int) = nullptr;
   int (*fstat_fn)(int, struct stat *) = nullptr;
   ssize_t (*readlink_fn)(const char *, char *, size_t) = nullptr;
+  char *(*realpath_fn)(const char *, char *) = nullptr;
   /// @brief The nine legacy stat aliases rocJITsu also exports.
   /// @details Resolved EAGERLY here rather than through a function-local static in
   /// each wrapper. A lazy static's C++ initialization guard can be inherited

@@ -54,6 +54,7 @@ void LibcPassthrough::resolve() {
   lxstat_fn = util::lookup_symbol<decltype(lxstat_fn)>(handle, "__lxstat");
   lxstat64_fn = util::lookup_symbol<decltype(lxstat64_fn)>(handle, "__lxstat64");
   readlink_fn = util::lookup_symbol<decltype(readlink_fn)>(handle, "readlink");
+  realpath_fn = util::lookup_symbol<decltype(realpath_fn)>(handle, "realpath");
   fork = util::lookup_symbol<decltype(fork)>(handle, "fork");
   // Keep ready() false unless every required interposed libc entry point was
   // resolved. In release builds the asserts disappear, so the boolean must not
@@ -62,7 +63,7 @@ void LibcPassthrough::resolve() {
   initialized_ = openat && close && read && write && ioctl && mmap && munmap && mprotect &&
                  madvise && memfd_create && dup && dup2 && dup3 && fcntl && fopen && freopen &&
                  opendir && readdir && closedir && stat && lstat && access && fstat_fn &&
-                 readlink_fn && fork;
+                 readlink_fn && realpath_fn && fork;
   assert(initialized_);
 }
 

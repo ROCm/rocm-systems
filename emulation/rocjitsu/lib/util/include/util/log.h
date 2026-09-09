@@ -18,7 +18,8 @@ namespace util {
 ///
 /// @details Log groups are independently enableable via a compile-time
 /// bitmask (e.g., cmake -DRJ_LOG_GROUPS=VM). Debug output is controlled by
-/// NDEBUG. All output is mutex-protected to prevent interleaved lines
+/// RJ_DEBUG_ENABLED (or NDEBUG for consumers outside RocJitsu's CMake build).
+/// All output is mutex-protected to prevent interleaved lines
 /// from concurrent threads.
 ///
 /// Two print overloads per group:
@@ -70,7 +71,7 @@ public:
   static constexpr unsigned groups = 0;
 #endif
 
-#ifndef NDEBUG
+#if defined(RJ_DEBUG_ENABLED) || (!defined(NDEBUG) && !defined(RJ_ASSERTIONS_ENABLED))
   static constexpr bool debug_enabled = true;
 #else
   static constexpr bool debug_enabled = false;

@@ -15,6 +15,7 @@
 #include "rocjitsu/kmd/linux/amdgpu_properties.h"
 #include "rocjitsu/kmd/linux/cwsr.h"
 #include "rocjitsu/kmd/linux/kfd_topology.h"
+#include "rocjitsu/kmd/linux/linux_kfd.h"
 #include "rocjitsu/vm/soc.h"
 
 #include "rocjitsu/base/rj_compiler.h"
@@ -76,6 +77,20 @@ TEST(SysfsTopologyCompatibilityTest, EveryNodePublishesName) {
 
   EXPECT_EQ(read_sysfs_file(topology_dir + "/nodes/0/name"), "CPU\n");
   EXPECT_EQ(read_sysfs_file(topology_dir + "/nodes/1/name"), "Test GPU\n");
+}
+
+TEST(SysfsTopologyCompatibilityTest, DrmDevicesPublishPciDisplayClass) {
+  Sysfs sysfs;
+  ASSERT_FALSE(sysfs.generate(make_gpu_info(90500u /* gfx950 */)).empty());
+
+  EXPECT_EQ(read_sysfs_file(sysfs.drm_path() + "/card0/device/class"), "0x030200\n");
+  EXPECT_EQ(read_sysfs_file(sysfs.drm_path() + "/renderD128/device/class"), "0x030200\n");
+  EXPECT_EQ(read_sysfs_file(sysfs.drm_path() + "/0000:03:00.0/class"), "0x030200\n");
+  EXPECT_TRUE(std::filesystem::is_directory(sysfs.drm_path() + "/pci_bus/0000:03"));
+
+  EXPECT_EQ(LinuxKfd::redirect_sysfs_root_path("/sys/class/pci_bus/0000:03", {},
+                                               sysfs.drm_path()),
+            sysfs.drm_path() + "/pci_bus/0000:03");
 }
 
 TEST(SysfsTopologyTest, DefaultGpuInfoHasCoherentSdmaCounts) {

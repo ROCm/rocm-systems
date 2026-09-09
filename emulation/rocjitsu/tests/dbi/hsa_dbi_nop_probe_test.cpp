@@ -135,13 +135,26 @@ protected:
     probe_body_words_ = callable->body_words;
     ASSERT_FALSE(probe_body_words_.empty());
 
-    // Decode .text and collect relocatable anchors. Decode-and-search so the
-    // test stays stable across compiler revisions.
+    // Decode only the dispatched vector_add body. Newer compilers may place
+    // unrelated runtime stubs ahead of it; selecting a site there makes the
+    // sabotage test pass through dead code instead of exercising the probe.
     auto decoder = Decoder::create(params_.arch);
     ASSERT_NE(decoder, nullptr);
-    auto block_result = BasicBlock::build(*co, *decoder, params_.arch, DecodeErrorEmitter{});
-    ASSERT_TRUE(block_result.succeeded());
-    auto blocks = std::move(block_result).value();
+    const AmdGpuKernelInfo *vector_add = nullptr;
+    for (const auto &kernel : co->kernels()) {
+      if (kernel.name == "vector_add") {
+        vector_add = &kernel;
+        break;
+      }
+    }
+    ASSERT_NE(vector_add, nullptr);
+    ASSERT_TRUE(vector_add->has_text_range);
+    const uint64_t entry_offsets[] = {vector_add->entry_text_offset};
+    const uint64_t entry_sizes[] = {vector_add->code_size};
+    auto blocks = BasicBlock::build_reachable(*co, *decoder, params_.arch, entry_offsets,
+                                              entry_sizes, params_.arch == ROCJITSU_CODE_ARCH_RDNA4
+                                                               ? 32u
+                                                               : 64u);
     ASSERT_FALSE(co->text_sections().empty());
     const auto *text = co->text_sections().front();
     const std::span<const uint8_t> text_bytes(reinterpret_cast<const uint8_t *>(text->data()),
@@ -158,6 +171,10 @@ protected:
     }
     ASSERT_FALSE(candidates.empty()) << "No relocatable anchor in " << params_.kernel_fixture
                                      << ".o; did the compiler change the lowering?";
+    for (uint64_t offset : candidates) {
+      EXPECT_GE(offset, vector_add->entry_text_offset);
+      EXPECT_LT(offset, vector_add->entry_text_offset + vector_add->code_size);
+    }
 
     // Pick the first anchor whose probe-call patch the resource/spill policy
     // accepts. A live fixed link pair s[30:31] or an exhausted dead-pair pool

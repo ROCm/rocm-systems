@@ -466,6 +466,10 @@ void Sysfs::write_drm_tree(const std::vector<GpuInfo> &gpus) {
     uint32_t bus = (gpu.location_id >> 8) & 0xFF;
     uint32_t dev = (gpu.location_id >> 3) & 0x1F;
     uint32_t func = gpu.location_id & 0x7;
+    std::ostringstream domain_bus, bus_id;
+    domain_bus << std::hex << std::setw(4) << std::setfill('0') << gpu.domain << ":"
+               << std::setw(2) << std::setfill('0') << bus;
+    bus_id << domain_bus.str() << ":" << std::setw(2) << std::setfill('0') << dev << "." << func;
     std::ostringstream uevent;
     uevent << "DRIVER=amdgpu\n"
            << std::hex << std::uppercase << "PCI_ID=" << std::setw(4) << std::setfill('0')
@@ -480,6 +484,10 @@ void Sysfs::write_drm_tree(const std::vector<GpuInfo> &gpus) {
       make_dir(device_dir + "/drm/" + render_name);
       write_file(device_dir + "/vendor", vendor_hex.str());
       write_file(device_dir + "/device", device_hex.str());
+      // PCI class 0x0302 is a 3D display controller, matching Instinct GPUs.
+      // Topology consumers such as RCCL require this standard PCI sysfs
+      // attribute when constructing their device graph.
+      write_file(device_dir + "/class", "0x030200\n");
       write_file(device_dir + "/uevent", uevent.str());
       // drmParseSubsystemType does readlink("subsystem") then strncmp for "/pci"
       std::filesystem::create_symlink("../../../bus/pci", device_dir + "/subsystem");
@@ -488,6 +496,21 @@ void Sysfs::write_drm_tree(const std::vector<GpuInfo> &gpus) {
       write_file(device_dir + "/subsystem_vendor", vendor_hex.str());
       write_file(device_dir + "/subsystem_device", device_hex.str());
     }
+
+    // ncclOsGetPciPath() starts at /sys/class/pci_bus/<domain:bus>, walks
+    // through ../.., and resolves the BDF before reading standard PCI files.
+    // Mirror that lookup shape so topology discovery cannot accidentally read
+    // an unrelated physical host device that happens to share the guest BDF.
+    make_dir(drm_dir_ + "/pci_bus/" + domain_bus.str());
+    const std::string pci_device_dir = drm_dir_ + "/" + bus_id.str();
+    make_dir(pci_device_dir);
+    write_file(pci_device_dir + "/class", "0x030200\n");
+    write_file(pci_device_dir + "/vendor", vendor_hex.str());
+    write_file(pci_device_dir + "/device", device_hex.str());
+    write_file(pci_device_dir + "/revision", revision_hex.str());
+    write_file(pci_device_dir + "/subsystem_vendor", vendor_hex.str());
+    write_file(pci_device_dir + "/subsystem_device", device_hex.str());
+    write_file(pci_device_dir + "/uevent", uevent.str());
   }
 
   make_dir(drm_dir_ + "/dev_dri");

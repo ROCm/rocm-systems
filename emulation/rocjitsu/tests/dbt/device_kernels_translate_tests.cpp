@@ -138,6 +138,16 @@ TEST(BinaryTranslatorE2E, TranslateVectorAddCdna4ToCdna3) {
 
   const auto *co = exec.code_object(ROCJITSU_CODE_TARGET_GFX950, 0);
   ASSERT_NE(co, nullptr);
+  ASSERT_FALSE(co->text_sections().empty());
+
+  const auto *original_text = co->text_sections()[0];
+  const auto *original_image = reinterpret_cast<const uint8_t *>(co->image_data());
+  rocjitsu::KernelDescriptorTranslator original_parser(ROCJITSU_CODE_ARCH_CDNA4,
+                                                       ROCJITSU_CODE_ARCH_CDNA3);
+  const auto original_infos = original_parser.translate_image(
+      {original_image, co->image_size()}, original_text->sectionOffset(), original_text->size(),
+      rocjitsu::KernelDescriptorTranslationOptions{});
+  ASSERT_FALSE(original_infos.empty());
 
   BinaryTranslator translator(ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_CDNA3);
   auto result = translator.translate(*co);
@@ -152,31 +162,52 @@ TEST(BinaryTranslatorE2E, TranslateVectorAddCdna4ToCdna3) {
   EXPECT_EQ(ehdr->e_flags & rocjitsu::EF_AMDGPU_MACH, rocjitsu::EF_AMDGPU_MACH_AMDGCN_GFX942)
       << "ELF e_flags should contain GFX942 machine type";
 
-  ASSERT_FALSE(co->text_sections().empty());
-  const auto *original_text = co->text_sections()[0];
   rocjitsu::AmdGpuCodeObject translated_co(result.elf_bytes.data(), result.elf_bytes.size());
   ASSERT_TRUE(translated_co.is_valid());
   ASSERT_FALSE(translated_co.text_sections().empty());
   const auto *translated_text = translated_co.text_sections()[0];
-  ASSERT_EQ(translated_text->size(), original_text->size());
-  const auto *original_text_bytes = reinterpret_cast<const uint8_t *>(original_text->data());
-  const auto *translated_text_bytes = reinterpret_cast<const uint8_t *>(translated_text->data());
-  const auto original_text_end = original_text_bytes + original_text->size();
-  const auto first_text_diff =
-      std::mismatch(original_text_bytes, original_text_end, translated_text_bytes);
-  EXPECT_EQ(first_text_diff.first, original_text_end)
-      << "The vector-add gfx950 and gfx942 codegen is byte-identical; CDNA4→CDNA3 DBT should "
-         "leave the instruction stream unchanged for this kernel. First differing byte offset is "
-      << std::distance(original_text_bytes, first_text_diff.first) << ", original word 0x"
-      << std::hex
-      << reinterpret_cast<const uint32_t *>(
-             original_text_bytes)[std::distance(original_text_bytes, first_text_diff.first) /
-                                  sizeof(uint32_t)]
-      << ", translated word 0x"
-      << reinterpret_cast<const uint32_t *>(
-             translated_text_bytes)[std::distance(original_text_bytes, first_text_diff.first) /
-                                    sizeof(uint32_t)]
-      << std::dec;
+
+  const auto *translated_image = reinterpret_cast<const uint8_t *>(translated_co.image_data());
+  rocjitsu::KernelDescriptorTranslator translated_parser(ROCJITSU_CODE_ARCH_CDNA3,
+                                                         ROCJITSU_CODE_ARCH_CDNA3);
+  const auto translated_infos = translated_parser.translate_image(
+      {translated_image, translated_co.image_size()}, translated_text->sectionOffset(),
+      translated_text->size(), rocjitsu::KernelDescriptorTranslationOptions{});
+  ASSERT_FALSE(translated_infos.empty());
+
+  // DBT replaces .text with the relocated reachable kernel bodies, so comparing
+  // the entire section also compares unrelated compiler-runtime stubs that are
+  // intentionally dropped. Compare the descriptor-selected vector_add body at
+  // its old and new entries instead. For this kernel, gfx950 and gfx942 codegen
+  // is byte-identical through s_endpgm.
+  auto guest_decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
+  auto host_decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA3);
+  ASSERT_NE(guest_decoder, nullptr);
+  ASSERT_NE(host_decoder, nullptr);
+  size_t guest_pc = original_infos[0].entry_text_offset;
+  size_t host_pc = translated_infos[0].entry_text_offset;
+  bool reached_endpgm = false;
+  while (guest_pc < original_text->size() && host_pc < translated_text->size()) {
+    const auto *guest_words = reinterpret_cast<const uint32_t *>(original_text->data() + guest_pc);
+    const auto *host_words = reinterpret_cast<const uint32_t *>(translated_text->data() + host_pc);
+    std::unique_ptr<rocjitsu::Instruction> guest_inst(decode_valid(*guest_decoder, guest_words));
+    std::unique_ptr<rocjitsu::Instruction> host_inst(decode_valid(*host_decoder, host_words));
+    ASSERT_NE(guest_inst, nullptr) << "failed to decode gfx950 instruction at 0x" << std::hex
+                                   << guest_pc;
+    ASSERT_NE(host_inst, nullptr) << "failed to decode gfx942 instruction at 0x" << std::hex
+                                  << host_pc;
+    ASSERT_EQ(host_inst->size(), guest_inst->size());
+    EXPECT_EQ(std::memcmp(guest_words, host_words, guest_inst->size()), 0)
+        << "CDNA4→CDNA3 changed byte-identical vector_add instruction at source offset 0x"
+        << std::hex << guest_pc << " and target offset 0x" << host_pc;
+    EXPECT_EQ(std::string_view(host_inst->mnemonic()), std::string_view(guest_inst->mnemonic()));
+    reached_endpgm = std::string_view(guest_inst->mnemonic()) == "s_endpgm";
+    guest_pc += guest_inst->size();
+    host_pc += host_inst->size();
+    if (reached_endpgm)
+      break;
+  }
+  EXPECT_TRUE(reached_endpgm) << "vector_add body did not terminate with s_endpgm";
 
   auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA3);
   ASSERT_NE(decoder, nullptr);
@@ -666,16 +697,20 @@ TEST(BinaryTranslatorE2E, NoTextPaddingStillMaterializesLocalCaveInText) {
 
   // Force away the old trailing-NOP escape hatch so this test only passes if
   // expansion bodies are materialized in the relocated .text.
-  size_t overwritten_padding_words = 0;
+  ASSERT_GT(word_count, 0u);
   for (size_t i = word_count; i > 0; --i) {
     uint32_t word = 0;
     std::memcpy(&word, text_bytes + (i - 1) * sizeof(uint32_t), sizeof(word));
     if (word != nop)
       break;
     std::memcpy(text_bytes + (i - 1) * sizeof(uint32_t), &filler, sizeof(filler));
-    ++overwritten_padding_words;
   }
-  ASSERT_GT(overwritten_padding_words, 0u);
+  // Newer compilers may already emit a section with no trailing padding. In
+  // either case, establish the precondition that the image passed to DBT ends
+  // in a real instruction rather than an s_nop escape hatch.
+  uint32_t terminal_word = 0;
+  std::memcpy(&terminal_word, text_bytes + (word_count - 1) * sizeof(uint32_t), sizeof(uint32_t));
+  EXPECT_NE(terminal_word, nop);
 
   rocjitsu::AmdGpuCodeObject no_padding(image.data(), image.size());
   ASSERT_TRUE(no_padding.is_valid());

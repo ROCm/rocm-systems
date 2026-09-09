@@ -81,15 +81,28 @@ protected:
                                reinterpret_cast<const uint8_t *>(co->image_data()) +
                                    co->image_size());
 
-    // Decode .text and find the first v_add_f32-mnemonic anchor that the
-    // trampoline machinery considers relocatable. Decode-and-search so the
-    // test is stable across compiler revisions.
-    // TODO: instrument multiple instructions
+    // Decode only the dispatched vector_add body and find the first two
+    // anchors that the trampoline machinery considers relocatable. Whole-text
+    // search is incorrect: newer compilers place unrelated runtime stubs ahead
+    // of the kernel, and sabotaging dead code cannot prove that dispatch
+    // executed the instrumentation.
     auto decoder = Decoder::create(params_.arch);
     ASSERT_NE(decoder, nullptr);
-    auto block_result = BasicBlock::build(*co, *decoder, params_.arch, DecodeErrorEmitter{});
-    ASSERT_TRUE(block_result.succeeded());
-    auto blocks = std::move(block_result).value();
+    const AmdGpuKernelInfo *vector_add = nullptr;
+    for (const auto &kernel : co->kernels()) {
+      if (kernel.name == "vector_add") {
+        vector_add = &kernel;
+        break;
+      }
+    }
+    ASSERT_NE(vector_add, nullptr);
+    ASSERT_TRUE(vector_add->has_text_range);
+    const uint64_t entry_offsets[] = {vector_add->entry_text_offset};
+    const uint64_t entry_sizes[] = {vector_add->code_size};
+    auto blocks = BasicBlock::build_reachable(*co, *decoder, params_.arch, entry_offsets,
+                                              entry_sizes, params_.arch == ROCJITSU_CODE_ARCH_RDNA4
+                                                               ? 32u
+                                                               : 64u);
 
     ASSERT_FALSE(co->text_sections().empty());
     const auto *text = co->text_sections().front();
@@ -113,6 +126,10 @@ protected:
     }
     ASSERT_NE(anchor_count_, 0u) << "No relocatable anchor in " << params_.kernel_fixture
                                  << ".o; did the compiler change the lowering?";
+    for (uint64_t offset : anchor_offsets_) {
+      EXPECT_GE(offset, vector_add->entry_text_offset);
+      EXPECT_LT(offset, vector_add->entry_text_offset + vector_add->code_size);
+    }
 
     // Apply the inline-nop trampoline.
     Instrumentor instrumentor(*co, params_.arch);

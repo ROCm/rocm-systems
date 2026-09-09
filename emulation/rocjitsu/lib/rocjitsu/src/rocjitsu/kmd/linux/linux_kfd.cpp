@@ -27,6 +27,7 @@ namespace {
 constexpr std::string_view kKfdTopologyPrefix = "/sys/devices/virtual/kfd/kfd/topology";
 constexpr std::string_view kKfdTopologyAltPrefix = "/sys/class/kfd/kfd/topology";
 constexpr std::string_view kDrmSysfsPrefix = "/sys/class/drm";
+constexpr std::string_view kPciBusSysfsPrefix = "/sys/class/pci_bus";
 constexpr std::string_view kDrmRenderPrefix = "/sys/class/drm/renderD";
 constexpr std::string_view kSysDevCharPrefix = "/sys/dev/char/";
 
@@ -47,6 +48,8 @@ std::string LinuxKfd::redirect_sysfs_root_path(const char *path, const std::stri
 
   if (!drm_path.empty() && sv.starts_with(kDrmSysfsPrefix))
     return drm_path + std::string(sv.substr(kDrmSysfsPrefix.size()));
+  if (!drm_path.empty() && sv.starts_with(kPciBusSysfsPrefix))
+    return drm_path + "/pci_bus" + std::string(sv.substr(kPciBusSysfsPrefix.size()));
 
   return {};
 }

@@ -404,6 +404,10 @@ FetchContent_MakeAvailable(googletest flatbuffers)
 # their shared build configuration. Fetched dependencies keep their upstream
 # assertion configuration.
 add_library(rj_build_config INTERFACE)
+target_compile_definitions(
+    rj_build_config
+    INTERFACE $<$<CONFIG:Debug>:RJ_DEBUG_ENABLED=1>
+)
 if(RJ_ENABLE_ASSERTIONS)
     if(MSVC)
         target_compile_options(

@@ -699,8 +699,8 @@ public:
       return {};
 
     std::string_view sv(path);
-    if (!sv.starts_with("/sys/class/drm") && !sv.starts_with("/sys/devices/virtual/kfd") &&
-        !sv.starts_with("/sys/class/kfd"))
+    if (!sv.starts_with("/sys/class/drm") && !sv.starts_with("/sys/class/pci_bus") &&
+        !sv.starts_with("/sys/devices/virtual/kfd") && !sv.starts_with("/sys/class/kfd"))
       return {};
 
     // initialized() already covers a live remote (remote_ != nullptr), which is
@@ -4535,6 +4535,18 @@ RJ_INTERPOSER_EXPORT ssize_t readlink(const char *path, char *buf, size_t bufsiz
     redirected = redirect_sysfs_path(path);
   const char *actual = redirected.empty() ? path : redirected.c_str();
   return InterposerContext::real().readlink_fn(actual, buf, bufsiz);
+}
+
+RJ_INTERPOSER_EXPORT char *realpath(const char *path, char *resolved_path) {
+  if (!InterposerContext::real().ready()) {
+    auto fn = util::lookup_symbol<char *(*)(const char *, char *)>(RTLD_NEXT, "realpath");
+    return fn ? fn(path, resolved_path) : nullptr;
+  }
+  if (!rj_owns_interposer_state())
+    return InterposerContext::real().realpath_fn(path, resolved_path);
+  const std::string redirected = redirect_sysfs_path(path);
+  return InterposerContext::real().realpath_fn(redirected.empty() ? path : redirected.c_str(),
+                                               resolved_path);
 }
 
 // -- stat64/lstat64 interposition (distinct from stat on glibc 2.33+) --
