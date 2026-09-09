@@ -20,8 +20,10 @@
 #include "nccl_device/gin/anvil_sdma/gin_anvil_ipc_table.h"
 #include <gin_anvil/sdma_factory.h>
 #include <hip/hip_runtime.h>
+#include <cstdint>
 #include <cstdlib>
 #include <cstring>
+#include <limits>
 #include <map>
 #include <mutex>
 
@@ -186,8 +188,18 @@ static int ginAnvilEnvInt(const char* name, int defaultVal) {
   return defaultVal;
 }
 
-static int ginAnvilSdmaThresholdFromEnv() {
-  return ginAnvilEnvInt("NCCL_GIN_ANVIL_SDMA_THRESHOLD", (int)NCCL_GIN_ANVIL_SDMA_THRESHOLD_DEFAULT);
+// Backend gin.put inline-vs-copy-engine threshold. Parsed as 64-bit so a value
+// >= 2 GiB does not wrap through int (atoi) and silently fall back to the
+// compiled default. Explicit 0 is honored. The GPU context field is uint32_t, so
+// values above UINT32_MAX saturate rather than wrapping.
+static size_t ginAnvilSdmaThresholdFromEnv() {
+  const char* e = getenv("NCCL_GIN_ANVIL_SDMA_THRESHOLD");
+  if (e && e[0] && *e != '-') {
+    char* end = nullptr;
+    unsigned long long v = strtoull(e, &end, 10);
+    if (end != e && *end == '\0') return (size_t)v;
+  }
+  return (size_t)NCCL_GIN_ANVIL_SDMA_THRESHOLD_DEFAULT;
 }
 
 static int ginAnvilSdmaNumChannels() {
@@ -456,6 +468,7 @@ static ncclResult_t ginAnvilRegisterLsaSignals(ginAnvilGinCtx* ctx, void* lsaSel
        "stride=%zu remote[0]=%#lx remote[self]=%#lx",
        ctx->signalSlot, lsaSelf, bytes, ctx->rank, devr->lsaSelf, devr->lsaSize, (size_t)devr->bigSize,
        (unsigned long)remote0, (unsigned long)remoteSelf);
+
   return ncclSuccess;
 }
 
@@ -540,7 +553,12 @@ static ncclResult_t ginAnvilCreateContext(void* collComm, ncclGinConfig_t* confi
   ctx->gpuCtxHost.sdmaChannelStride = ctx->sdmaChannelStride;
   ctx->gpuCtxHost.queueHandles = ctx->gpu_queue_handles;
   ctx->gpuCtxHost.sdmaDirty = ctx->sdma_dirty_d;
-  ctx->gpuCtxHost.sdmaThreshold = (uint32_t)ginAnvilSdmaThresholdFromEnv();
+  {
+    const size_t thr = ginAnvilSdmaThresholdFromEnv();
+    ctx->gpuCtxHost.sdmaThreshold =
+        (thr > (size_t)std::numeric_limits<uint32_t>::max()) ? std::numeric_limits<uint32_t>::max()
+                                                             : (uint32_t)thr;
+  }
   ctx->gpuCtxHost.fusedSdmaSignal = ginAnvilFusedSignalFromEnv();
   ctx->gpuCtxHost.ipcAgentFence = ginAnvilIpcAgentFenceFromEnv();
   ctx->gpuCtxHost.ipcSignalPeer = ginAnvilIpcSignalPeerFromEnv();

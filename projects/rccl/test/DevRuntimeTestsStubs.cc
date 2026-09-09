@@ -24,6 +24,9 @@
 #include "enqueue.h"
 #include "enqueue/mgmt_task_enq.h"
 #include "gin/gin_host.h"
+#ifdef ENABLE_ROCSHMEM_GIN
+#include "gin/gin_host_anvil_sdma.h"
+#endif
 #include "rma/rma.h"
 #include "rma/rma_proxy.h"
 #include "rma/rma_ce.h"
@@ -193,6 +196,11 @@ ncclResult_t ncclGinRegister(struct ncclComm*, void*, size_t, void*[NCCL_GIN_MAX
   return ncclSuccess;
 }
 ncclResult_t ncclGinDeregister(struct ncclComm*, void*[NCCL_GIN_MAX_CONNECTIONS]) { return ncclSuccess; }
+#ifdef ENABLE_ROCSHMEM_GIN
+ncclResult_t ncclGinAnvilBindResourceWindowSignals(struct ncclComm*, void*, size_t, int, int) {
+  return ncclSuccess;
+}
+#endif
 
 // ---------------------------------------------------------------------------
 // RMA proxy.

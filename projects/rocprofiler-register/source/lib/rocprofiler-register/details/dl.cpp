@@ -97,23 +97,23 @@ get_linked_path(std::string_view _name, open_modes_vec_t&& _open_modes)
     if(_open_modes.empty()) _open_modes = default_link_open_modes;
 
     void* _handle = nullptr;
-    bool  _noload = false;
     for(auto _mode : _open_modes)
     {
         _handle = dlopen(_name.data(), _mode);
-        _noload = (_mode & RTLD_NOLOAD) == RTLD_NOLOAD;
         if(_handle) break;
     }
 
     if(_handle)
     {
+        auto             _result   = std::optional<std::string>{};
         struct link_map* _link_map = nullptr;
         dlinfo(_handle, RTLD_DI_LINKMAP, &_link_map);
         if(_link_map != nullptr && !std::string_view{ _link_map->l_name }.empty())
         {
-            return fs::absolute(fs::path{ _link_map->l_name }).string();
+            _result = fs::absolute(fs::path{ _link_map->l_name }).string();
         }
-        if(_noload == false) dlclose(_handle);
+        dlclose(_handle);
+        return _result;
     }
 
     return std::nullopt;

@@ -22,7 +22,6 @@
 #include <timemory/mpl/policy.hpp>
 #include <timemory/operations/types/file_output_message.hpp>
 #include <timemory/tpls/cereal/cereal.hpp>
-#include <timemory/utility/filepath.hpp>
 #include <timemory/utility/macros.hpp>
 #include <timemory/utility/types.hpp>
 #include <timemory/variadic/macros.hpp>
@@ -815,7 +814,7 @@ generate(py::module& _pymod)
         _name = fmt::format(
             "{}.json", std::regex_replace(_name, std::regex{ "(.*)(\\.json$)" }, "$1"));
         std::ofstream ofs{};
-        if(tim::filepath::open(ofs, _name))
+        if(rocprofsys::path::create_parent_dirs_and_open_ofstream(ofs, _name))
         {
             tim::operation::file_output_message<rocprofsys::coverage::code_coverage>{}(
                 _name, std::string{ "coverage" });
