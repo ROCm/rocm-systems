@@ -2686,10 +2686,16 @@ TEST(SkipPresetTopoMatching, Gfx1250_SkipsRomeModelMatching)
 // commSetUnrollFactor reads only archName, nNodes and cuCount, so no GPU is
 // needed. RCCL_PARAM caches RCCL_UNROLL_FACTOR in a function-local static,
 // which is what the process isolation is for.
+//
+// They belong to the Rcclwrap suite because the fixtures-debug CI selection
+// enumerates suite prefixes with no catch-all (test_categories_fixtures_debug
+// .yaml and the unit_tests_fixtures_debug blocks under tools/scripts/
+// test_runner/configs), and Rcclwrap.* is the only listed pattern this file
+// matches. A suite of their own would never be run.
 // ---------------------------------------------------------------------------
-TEST(RcclUnrollFactor, RejectsArchRestrictedUnrollOnOtherArch)
+TEST(Rcclwrap, UnrollFactor_RejectsArchRestrictedUnrollOnOtherArch)
 {
-    RUN_ISOLATED_TEST_WITH_ENV("RejectsArchRestrictedUnrollOnOtherArch",
+    RUN_ISOLATED_TEST_WITH_ENV("UnrollFactor_RejectsArchRestrictedUnrollOnOtherArch",
       []() {
         ncclComm comm{};
         comm.archName = const_cast<char*>("gfx1200");
@@ -2704,9 +2710,9 @@ TEST(RcclUnrollFactor, RejectsArchRestrictedUnrollOnOtherArch)
     );
 }
 
-TEST(RcclUnrollFactor, RejectsOutOfRangeUnroll)
+TEST(Rcclwrap, UnrollFactor_RejectsOutOfRangeUnroll)
 {
-    RUN_ISOLATED_TEST_WITH_ENV("RejectsOutOfRangeUnroll",
+    RUN_ISOLATED_TEST_WITH_ENV("UnrollFactor_RejectsOutOfRangeUnroll",
       []() {
         ncclComm comm{};
         comm.archName = const_cast<char*>("gfx942");
@@ -2729,7 +2735,7 @@ constexpr char kUsableUnrollArch[] = "gfx942";
 // one or two (generate.py's calc_unroll_and_pipeline_for_local_arch), and none
 // of them is common to every arch. So ask the tables which factor is usable
 // here and assert that commSetUnrollFactor honors exactly that one.
-TEST(RcclUnrollFactor, AcceptsUsableUnroll)
+TEST(Rcclwrap, UnrollFactor_AcceptsUsableUnroll)
 {
     int usable = -1;
     for(int u = NCCL_UNROLL_1; u < NCCL_NUM_UNROLLS; ++u)
@@ -2741,9 +2747,11 @@ TEST(RcclUnrollFactor, AcceptsUsableUnroll)
         break;
     }
     if(usable < 0)
+    {
         GTEST_SKIP() << "no unroll factor in this build is usable on " << kUsableUnrollArch;
+    }
 
-    RUN_ISOLATED_TEST_WITH_ENV("AcceptsUsableUnroll",
+    RUN_ISOLATED_TEST_WITH_ENV("UnrollFactor_AcceptsUsableUnroll",
       [usable]() {
         ncclComm comm{};
         comm.archName = const_cast<char*>(kUsableUnrollArch);
