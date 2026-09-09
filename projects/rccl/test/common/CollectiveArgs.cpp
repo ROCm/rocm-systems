@@ -108,7 +108,7 @@ namespace RcclUnitTesting
         (this->funcType == ncclCollAlltoAll || this->funcType == ncclCollAllReduce
          || this->funcType == ncclCollReduceScatter))
     {
-      CHECK_CALL(this->expectedGpu.AllocateGpuMem(this->numOutputBytesAllocated, useManagedMem, false));
+      CHECK_CALL(this->expectedGpu.AllocateGpuMem(this->numOutputBytesAllocated, useManagedMem, userRegistered));
     }
 
     // Allocate bias buffers if bias is enabled
@@ -196,7 +196,7 @@ namespace RcclUnitTesting
     this->expected.FreeCpuMem();
     if (this->expectedGpu.ptr != nullptr)
     {
-      this->expectedGpu.FreeGpuMem();
+      this->expectedGpu.FreeGpuMem(this->userRegistered);
     }
 
     if (this->localScalar.ptr != nullptr)
