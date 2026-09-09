@@ -466,8 +466,6 @@ quietly turns a multi-bucket request into a single pass.
 | Missing or unexpectedly empty per-agent profile vector when counters were requested | Hard error describing the profile mismatch. |
 | SDK declines the device-memory snapshot | Abandon the entire profile without retry, reject incomplete output, and recommend application replay. |
 | Upstream drain timeout or process abort | Abort the failed run. |
-| A second `KERNEL_REPLAY` service configuration | Hard error naming `ROCPROFILER_STATUS_ERROR_SERVICE_ALREADY_CONFIGURED`. |
-| An unsatisfied prerequisite: a service the native tool does not own, counter collection still sharing the code-object context, or PC sampling ignoring per-pass overrides | Hard error naming that prerequisite, before profiling starts. |
 
 One wrinkle: a declined snapshot currently leaves a successful process status behind, so the
 required outcome cannot lean on subprocess failure alone. Classifying an upstream warning string is
