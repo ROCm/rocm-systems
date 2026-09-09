@@ -424,20 +424,8 @@ written, every pass for a logical dispatch must be collapsed.
 
 #### Kernel dispatch records
 
-Native-tool ownership of kernel dispatch tracing is a [prerequisite](#prerequisites), not something
-this design delivers. It has one consequence beyond the pass loop: the native tool produces the
-dispatch records too.
-
-- `ROCPROF_KERNEL_TRACE` is set to `0` for `rocprofiler-sdk-tool` under kernel replay, so the two
-  libraries cannot both emit dispatch records for the same dispatch.
-- The native tool's dispatch records are ingested alongside its counter records before the
-  consolidated result is produced, following the path its counter records already take. The record
-  format is a low-level design decision and is not specified here.
-- Exactly one dispatch record per logical dispatch reaches the result. This is not cosmetic: the
-  dispatch record carries the timestamps and launch metadata that counter rows are joined against,
-  so *N* records would multiply the joined result and defeat dispatch-ID collapsing.
-- **Risk for the low-level design.** The result database is created by `rocprofiler-sdk-tool`.
-  Confirm it is still created once `ROCPROF_KERNEL_TRACE` is `0`.
+Native-tool ownership of kernel dispatch tracing is a [prerequisite](#prerequisites). It has one consequence beyond the pass loop: the native tool produces the
+dispatch records too with exactly one dispatch record per logical dispatch.
 
 #### Marker region durations
 
