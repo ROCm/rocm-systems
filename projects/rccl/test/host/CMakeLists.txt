@@ -589,6 +589,21 @@ else()
   set(HIP_FABRIC_API OFF)
 endif()
 
+# --- Shared host-test compile definitions -------------------------------
+# The base set every standalone host-test binary needs: the HIP platform/OS/
+# version macros and the two fabric-API gates probed above. The in-RCCL-build
+# path gets the equivalent from RCCL_COMMON_COMPILE_DEFS (inherited from the
+# rccl target); here there is no such target, so define it once and reuse it.
+# Per-binary extras (USE_AMDSMI, *_CC_PATH, RCCL_STUBS_OMIT_*, RCCL_EXPOSE_STATIC,
+# ...) are still added at each target alongside this list.
+set(RCCL_HOST_TEST_DEFS
+  __HIP_PLATFORM_AMD__
+  NCCL_OS_LINUX
+  ROCM_VERSION=70000
+  $<$<BOOL:${AMDSMI_FABRIC_API}>:AMDSMI_FABRIC_DIRECT>
+  $<$<BOOL:${HIP_FABRIC_API}>:HIP_FABRIC_API>
+)
+
 # --- Common include paths for hipified RCCL headers ---
 set(RCCL_INCLUDE_DIRS
   ${RCCL_HIPIFY_DIR}/src/include
@@ -624,13 +639,7 @@ target_include_directories(rccl-source-wrappers PRIVATE
 set_source_files_properties(accl_profiler_wrapper.cc PROPERTIES
   COMPILE_FLAGS "-I${RCCL_SRC_ROOT}/src/include/plugin -I${RCCL_SRC_ROOT}/src/include"
 )
-target_compile_definitions(rccl-source-wrappers PRIVATE
-  __HIP_PLATFORM_AMD__
-  NCCL_OS_LINUX
-  ROCM_VERSION=70000
-  $<$<BOOL:${AMDSMI_FABRIC_API}>:AMDSMI_FABRIC_DIRECT>
-  $<$<BOOL:${HIP_FABRIC_API}>:HIP_FABRIC_API>
-)
+target_compile_definitions(rccl-source-wrappers PRIVATE ${RCCL_HOST_TEST_DEFS})
 target_link_libraries(rccl-source-wrappers PRIVATE
   GTest::GTest
   fmt::fmt-header-only
@@ -667,13 +676,9 @@ set_source_files_properties(${RCCL_TEST_DIR}/AcclProfilerTests.cpp PROPERTIES
 )
 
 target_compile_definitions(rccl-HostUnitTests PRIVATE
-  __HIP_PLATFORM_AMD__
-  NCCL_OS_LINUX
-  ROCM_VERSION=70000
+  ${RCCL_HOST_TEST_DEFS}
   RCCL_EXPOSE_STATIC
   ARSMI_TEST_BUILD
-  $<$<BOOL:${AMDSMI_FABRIC_API}>:AMDSMI_FABRIC_DIRECT>
-  $<$<BOOL:${HIP_FABRIC_API}>:HIP_FABRIC_API>
 )
 
 target_link_options(rccl-HostUnitTests PRIVATE -no-hip-rt -no-pie)
@@ -712,9 +717,7 @@ target_include_directories(rccl-UnitTestsMicro PRIVATE
 )
 
 target_compile_definitions(rccl-UnitTestsMicro PRIVATE
-  __HIP_PLATFORM_AMD__
-  NCCL_OS_LINUX
-  ROCM_VERSION=70000
+  ${RCCL_HOST_TEST_DEFS}
   P2P_CC_PATH="${RCCL_HIPIFY_DIR}/src/transport/p2p_tmp.cc"
   RMA_PROXY_PROGRESS_CC_PATH="${RCCL_HIPIFY_DIR}/src/rma/rma_proxy_progress.cc"
   GROUP_CC_PATH="${RCCL_HIPIFY_DIR}/src/group.cc"
@@ -780,16 +783,12 @@ foreach(_variant "" "-uncached")
   )
 
   target_compile_definitions(${_init_tgt} PRIVATE
-    __HIP_PLATFORM_AMD__
-    NCCL_OS_LINUX
-    ROCM_VERSION=70000
+    ${RCCL_HOST_TEST_DEFS}
     # init.cc selects amdsmi_wrap.h (amd_smi/amdsmi.h, ships with ROCm) over the
     # legacy rocm_smi_wrap.h; the amd_smi_* wrapper API it declares is stubbed by
     # init_fakes.cc, so no SMI runtime is linked. The in-RCCL-build path inherits
     # this from RCCL_COMMON_COMPILE_DEFS instead.
     USE_AMDSMI
-    $<$<BOOL:${AMDSMI_FABRIC_API}>:AMDSMI_FABRIC_DIRECT>
-    $<$<BOOL:${HIP_FABRIC_API}>:HIP_FABRIC_API>
     INIT_CC_PATH="${RCCL_HIPIFY_DIR}/src/init.cc"
   )
   if(_variant STREQUAL "-uncached")
@@ -864,12 +863,8 @@ foreach(_enq_variant "" "-devlinker")
   )
 
   target_compile_definitions(${_enq_tgt} PRIVATE
-    __HIP_PLATFORM_AMD__
-    NCCL_OS_LINUX
-    ROCM_VERSION=70000
+    ${RCCL_HOST_TEST_DEFS}
     USE_AMDSMI
-    $<$<BOOL:${AMDSMI_FABRIC_API}>:AMDSMI_FABRIC_DIRECT>
-    $<$<BOOL:${HIP_FABRIC_API}>:HIP_FABRIC_API>
     RCCL_STUBS_OMIT_ncclInitKernelsForDevice
     RCCL_STUBS_OMIT_ncclParamGraphStreamOrdering
     ENQUEUE_CC_PATH="${RCCL_HIPIFY_DIR}/src/enqueue.cc"
@@ -907,12 +902,8 @@ target_include_directories(rccl-UnitTestsMicroDevRuntime PRIVATE
 )
 
 target_compile_definitions(rccl-UnitTestsMicroDevRuntime PRIVATE
-  __HIP_PLATFORM_AMD__
-  NCCL_OS_LINUX
-  ROCM_VERSION=70000
+  ${RCCL_HOST_TEST_DEFS}
   DEV_RUNTIME_CC_PATH="${RCCL_HIPIFY_DIR}/src/dev_runtime.cc"
-  $<$<BOOL:${AMDSMI_FABRIC_API}>:AMDSMI_FABRIC_DIRECT>
-  $<$<BOOL:${HIP_FABRIC_API}>:HIP_FABRIC_API>
 )
 
 # -no-pie for the same reason as the other standalone binaries (the
