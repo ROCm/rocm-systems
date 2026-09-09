@@ -15,7 +15,8 @@
  *   - embedded device pointers inside a by-value struct kernel argument,
  *   - an uncaptured host write that deterministically diverges replay,
  *   - the "null optional output pointer + 0x20000" GPU-fault class, and
- *   - replay zero-init of an otherwise-uninitialised device allocation.
+ *   - replay zero-init of an allocation whose capture-time contents come from
+ *     an unrecorded write (host or HSA runtime).
  *
  * Like hrr_workload.cc, every TEST_CASE here is hidden with the Catch2 [.] tag
  * so it is NOT auto-discovered by CTest.  Each is driven from hrr_roundtrip.cc:
@@ -27,6 +28,10 @@
  */
 
 #include "hrr_test_common.hh"
+
+#ifndef _WIN32
+#include <hsa/hsa_ext_amd.h>
+#endif
 
 #include <cstdint>
 
@@ -274,19 +279,30 @@ TEST_CASE("Unit_HRR_NullOptionalPtr_Direct", "[.][hrr-direct]") {
 }
 
 // ===========================================================================
-// A5. Zero-init read of an uninitialised device allocation
+// A5. Zero-init read of an allocation initialized by an unrecorded write
 //
-// hipMalloc a buffer and do NOT initialise it; a kernel copies it to `out`,
-// then D2H.  Fresh ROCm allocations are zeroed, so at capture out == 0 and the
-// recorded blob is all-zero.  Replay with HIP_HRR_REPLAY_ZERO_INIT=1 reproduces
-// the zeroed source deterministically, so the replayed out matches; with the
-// knob off, replay may reuse stale bytes and diverge.
+// hipMalloc a buffer and zero it through the lower-level HSA runtime. HRR
+// records HIP calls only, so replay sees the allocation but not the HSA fill and
+// must reproduce the zeros through HIP_HRR_REPLAY_ZERO_INIT. This makes the
+// capture oracle deterministic without recording a hipMemset that playback
+// would execute independently of the zero-init knob.
 // ===========================================================================
 TEST_CASE("Unit_HRR_ZeroInitRead_Direct", "[.][hrr-direct]") {
   HRR_HIP_CHECK(hipSetDevice(0));
 
-  float* dsrc = nullptr;  // intentionally never written
+  float* dsrc = nullptr;
+#ifndef _WIN32
   HRR_HIP_CHECK(hipMalloc(&dsrc, kSZ));
+  // hsa_amd_memory_fill() counts in 32-bit words, not elements.  kN happens to
+  // be the same number here only because kSZ is float[kN]; spell out the unit
+  // so a change of element type cannot silently under- or over-fill.
+  REQUIRE(hsa_amd_memory_fill(dsrc, 0, kSZ / sizeof(uint32_t)) == HSA_STATUS_SUCCESS);
+#else
+  // Native Windows has no ROCr/HSA runtime. Keep its deterministic oracle via
+  // host stores; Linux retains coverage of the ordinary hipMalloc replay path.
+  HRR_HIP_CHECK(hipMallocManaged(&dsrc, kSZ));
+  for (int i = 0; i < kN; ++i) dsrc[i] = 0.0f;
+#endif
   float* dout = nullptr;
   HRR_HIP_CHECK(hipMalloc(&dout, kSZ));
 
