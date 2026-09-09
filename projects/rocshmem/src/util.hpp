@@ -304,14 +304,13 @@ __device__ __forceinline__ bool is_last_active_lane() {
   __threadfence();
   __syncthreads();
   if (threadIdx.x == 0) {
-    __hip_atomic_fetch_add(&global_counter[0], 1,
-                           __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT);
+    detail::atomic::fetch_add<int, int, detail::atomic::memory_scope_device>(
+        &global_counter[0], 1, detail::atomic::memory_order_relaxed);
   }
   __syncthreads();
   if (threadIdx.x == 0) {
-    while (__hip_atomic_load(global_counter,
-                             __ATOMIC_RELAXED,
-                             __HIP_MEMORY_SCOPE_AGENT) != num_blocks);
+    while (detail::atomic::load<int, detail::atomic::memory_scope_device>(
+               global_counter, detail::atomic::memory_order_relaxed) != num_blocks);
   }
   __syncthreads();
 }
@@ -326,9 +325,9 @@ __device__ __forceinline__ bool is_last_active_lane() {
 [[maybe_unused]] __device__ __forceinline__ bool spin_lock_try_acquire_unique(uint32_t *lock) {
   uint32_t lock_val = SPIN_LOCK_UNLOCKED;
 
-  __hip_atomic_compare_exchange_strong(lock, &lock_val, SPIN_LOCK_LOCKED,
-                                       __ATOMIC_ACQUIRE, __ATOMIC_ACQUIRE,
-                                       __HIP_MEMORY_SCOPE_AGENT);
+  detail::atomic::compare_exchange_strong<uint32_t, detail::atomic::memory_scope_device>(
+      lock, lock_val, SPIN_LOCK_LOCKED,
+      detail::atomic::memory_order_acquire, detail::atomic::memory_order_acquire);
 
   return lock_val == SPIN_LOCK_UNLOCKED;
 }
@@ -347,8 +346,8 @@ __device__ __forceinline__ bool is_last_active_lane() {
  * Each thread in wave releases a different lock.
  */
 [[maybe_unused]] __device__ __forceinline__ void spin_lock_release_unique(uint32_t *lock) {
-  __hip_atomic_store(lock, SPIN_LOCK_UNLOCKED, __ATOMIC_RELEASE,
-                     __HIP_MEMORY_SCOPE_AGENT);
+  detail::atomic::store<uint32_t, detail::atomic::memory_scope_device>(
+      lock, SPIN_LOCK_UNLOCKED, detail::atomic::memory_order_release);
 }
 
 /*
@@ -359,9 +358,9 @@ __device__ __forceinline__ bool is_last_active_lane() {
 
   if (is_first_active_lane(activemask)) {
     lock_val = SPIN_LOCK_UNLOCKED;
-    __hip_atomic_compare_exchange_strong(lock, &lock_val, SPIN_LOCK_LOCKED,
-                                         __ATOMIC_ACQUIRE, __ATOMIC_ACQUIRE,
-                                         __HIP_MEMORY_SCOPE_AGENT);
+    detail::atomic::compare_exchange_strong<uint32_t, detail::atomic::memory_scope_device>(
+        lock, lock_val, SPIN_LOCK_LOCKED,
+        detail::atomic::memory_order_acquire, detail::atomic::memory_order_acquire);
   }
   lock_val = __shfl(lock_val, get_first_active_lane_id(activemask));
 
@@ -382,8 +381,8 @@ __device__ __forceinline__ bool is_last_active_lane() {
  */
 [[maybe_unused]] __device__ __forceinline__ void spin_lock_release_shared(uint32_t *lock, uint64_t activemask) {
   if (is_first_active_lane(activemask)) {
-    __hip_atomic_store(lock, SPIN_LOCK_UNLOCKED, __ATOMIC_RELEASE,
-                       __HIP_MEMORY_SCOPE_AGENT);
+    detail::atomic::store<uint32_t, detail::atomic::memory_scope_device>(
+        lock, SPIN_LOCK_UNLOCKED, detail::atomic::memory_order_release);
   }
 }
 
