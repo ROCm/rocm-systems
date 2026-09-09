@@ -2109,7 +2109,8 @@
         "NCCL_GRAPH_REGISTER": "1",
         "NCCL_LEGACY_CUDA_REGISTER": "1",
         "NCCL_LOCAL_REGISTER": "1",
-        "RCCL_MPI_LOG_ALL_RANKS": "1"
+        "RCCL_MPI_LOG_ALL_RANKS": "1",
+        "RCCL_DDA_ENABLE": "0"
       },
       "tests": [
         {
