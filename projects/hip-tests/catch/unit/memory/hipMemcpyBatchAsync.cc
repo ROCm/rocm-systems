@@ -801,6 +801,8 @@ HIP_TEST_CASE(Unit_hipMemcpyBatchAsync_P2P_Functional) {
  * hipMemcpyFlagExtOpSwap across generated per-side allocation types, copy counts, and sizes.
  */
 HIP_TEST_CASE(Unit_hipMemcpyBatchAsync_Swap) {
+  skipMemcpyBatchAsyncIfAnyGfx1250();
+
   const size_t count = GENERATE(2, 3, 8);
   const size_t size_in_bytes = GENERATE(as<size_t>{}, 1, 63, 4096);
   const LinearAllocs allocTypeA =
@@ -1222,6 +1224,8 @@ HIP_TEST_CASE(Unit_hipMemcpyBatchAsync_IndirectCopy_StreamOrderedPointer) {
  *  - HIP_VERSION >= 7.1
  */
 HIP_TEST_CASE(Unit_hipMemcpyBatchAsync_MixedAttributes_DefaultSwapIndirect) {
+  skipMemcpyBatchAsyncIfAnyGfx1250();
+
   constexpr size_t kSizeInBytes = 4096;
   constexpr size_t kCopiesPerAttr = 2;
 

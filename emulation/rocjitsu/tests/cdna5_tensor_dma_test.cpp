@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "cdna5_sim_test_common.h"
+#include "decode_test_util.h"
 
 namespace {
 
@@ -698,7 +699,7 @@ TEST(Gfx1250ExecutionTest, TensorDmaRankThreeNullD2MasksTransfersAndCompletes) {
   EXPECT_EQ(wf->wait_counters().tensorcnt, 0u);
   EXPECT_TRUE(wf->wait_counters().empty());
   uint64_t barrier_state = cu->lds().read64(wf->lds_base() + kBarrierLdsAddr);
-  EXPECT_EQ(barrier_state, 0xffffull << 16);
+  EXPECT_EQ(barrier_state, amdgpu::kLdsBarrierCellPhaseMask << amdgpu::kLdsBarrierCellPhaseShift);
   EXPECT_TRUE(amdgpu::lds_barrier_cell_phase_parity(barrier_state));
 
   for (uint32_t i = 0; i < kElements; ++i) {
@@ -718,7 +719,7 @@ TEST(Gfx1250ExecutionTest, TensorDmaRankThreeNullD2MasksTransfersAndCompletes) {
   EXPECT_EQ(wf->wait_counters().tensorcnt, 0u);
   EXPECT_TRUE(wf->wait_counters().empty());
   barrier_state = cu->lds().read64(wf->lds_base() + kBarrierLdsAddr);
-  EXPECT_EQ(barrier_state, 0xffffull << 16);
+  EXPECT_EQ(barrier_state, amdgpu::kLdsBarrierCellPhaseMask << amdgpu::kLdsBarrierCellPhaseShift);
   EXPECT_TRUE(amdgpu::lds_barrier_cell_phase_parity(barrier_state));
 }
 
@@ -1054,7 +1055,7 @@ TEST(Gfx1250ExecutionTest, TensorDmaIterateZeroExtentSkipsLayoutValidationAndCom
   EXPECT_EQ(wf->wait_counters().tensorcnt, 0u);
   EXPECT_TRUE(wf->wait_counters().empty());
   uint64_t barrier_state = cu->lds().read64(wf->lds_base() + kBarrierLdsAddr);
-  EXPECT_EQ(barrier_state, 0xffffull << 16);
+  EXPECT_EQ(barrier_state, amdgpu::kLdsBarrierCellPhaseMask << amdgpu::kLdsBarrierCellPhaseShift);
   EXPECT_TRUE(amdgpu::lds_barrier_cell_phase_parity(barrier_state));
 
   for (uint32_t i = 0; i < 3; ++i)
@@ -1074,7 +1075,7 @@ TEST(Gfx1250ExecutionTest, TensorDmaIterateZeroExtentSkipsLayoutValidationAndCom
   EXPECT_EQ(wf->wait_counters().tensorcnt, 0u);
   EXPECT_TRUE(wf->wait_counters().empty());
   barrier_state = cu->lds().read64(wf->lds_base() + kBarrierLdsAddr);
-  EXPECT_EQ(barrier_state, 0xffffull << 16);
+  EXPECT_EQ(barrier_state, amdgpu::kLdsBarrierCellPhaseMask << amdgpu::kLdsBarrierCellPhaseShift);
   EXPECT_TRUE(amdgpu::lds_barrier_cell_phase_parity(barrier_state));
 }
 
@@ -1110,31 +1111,31 @@ TEST(Gfx1250ExecutionTest, TensorDmaAtomicBarrierArrivesAfterCopy) {
   EXPECT_EQ(cu->lds().read32(wf->lds_base() + 0 * 4), 0x55000000u);
   EXPECT_EQ(cu->lds().read32(wf->lds_base() + 1 * 4), 0x55000001u);
   const uint64_t state = cu->lds().read64(wf->lds_base() + kBarrierLdsAddr);
-  EXPECT_EQ(state, 0xffffull << 16);
+  EXPECT_EQ(state, amdgpu::kLdsBarrierCellPhaseMask << amdgpu::kLdsBarrierCellPhaseShift);
   EXPECT_TRUE(amdgpu::lds_barrier_cell_phase_parity(state));
 }
 
-TEST(Gfx1250ExecutionTest, SBarrierWaitEntersBarrierState) {
+TEST(Gfx1250ExecutionTest, SBarrierWaitIsNoOpForSingleWaveWorkgroup) {
   Gfx1250Sim sim;
   auto *cu = sim.cu();
   auto *wf = cu->dispatch_wf(0, 0, kGfx1250ScalarSlots, 32);
   ASSERT_NE(wf, nullptr);
   ASSERT_EQ(wf->state(), amdgpu::WfState::RUNNING);
 
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
   ASSERT_NE(decoder, nullptr);
 
-  const std::array<uint32_t, 2> wait_words = {0xBF940000u, 0u};
-  std::unique_ptr<Instruction> wait_inst(decoder->decode(wait_words.data()));
+  const std::array<uint32_t, 2> wait_words = {0xBF94FFFFu, 0u};
+  std::unique_ptr<Instruction> wait_inst(decode_valid(*decoder, wait_words.data()));
   ASSERT_NE(wait_inst, nullptr);
   ASSERT_EQ(std::string_view(wait_inst->mnemonic()), "s_barrier_wait");
 
   cu->execute_instruction(wait_inst.get(), *wf);
 
-  EXPECT_EQ(wf->state(), amdgpu::WfState::BARRIER);
+  EXPECT_EQ(wf->state(), amdgpu::WfState::RUNNING);
 }
 
-TEST(Gfx1250ExecutionTest, SBarrierWaitReleasesOnlyAfterAllSiblingsWait) {
+TEST(Gfx1250ExecutionTest, SBarrierWaitReleasesOnlyAfterSignalQuorum) {
   Gfx1250Sim sim;
   auto *cu = sim.cu();
   constexpr uint64_t kEndPgmPc = 0x150000;
@@ -1148,27 +1149,25 @@ TEST(Gfx1250ExecutionTest, SBarrierWaitReleasesOnlyAfterAllSiblingsWait) {
   ASSERT_NE(wf1, nullptr);
   cu->begin_workgroup(0, 0, 2);
 
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
   ASSERT_NE(decoder, nullptr);
 
-  const std::array<uint32_t, 2> wait_words = {0xBF940000u, 0u};
-  std::unique_ptr<Instruction> wait_inst(decoder->decode(wait_words.data()));
+  const std::array<uint32_t, 2> wait_words = {0xBF94FFFFu, 0u};
+  std::unique_ptr<Instruction> wait_inst(decode_valid(*decoder, wait_words.data()));
   ASSERT_NE(wait_inst, nullptr);
   ASSERT_EQ(std::string_view(wait_inst->mnemonic()), "s_barrier_wait");
 
   cu->execute_instruction(wait_inst.get(), *wf0);
-  wf1->wait_counters().increment(amdgpu::WaitCounterType::TENSORCNT);
-  wf1->set_wait_target_tensorcnt(0);
-  wf1->set_state(amdgpu::WfState::WAITCNT);
-
-  ASSERT_TRUE(cu->step());
   EXPECT_EQ(wf0->state(), amdgpu::WfState::BARRIER);
-  EXPECT_EQ(wf1->state(), amdgpu::WfState::WAITCNT);
-
-  wf1->release_wait_counter(amdgpu::WaitCounterType::TENSORCNT);
-  ASSERT_EQ(wf1->state(), amdgpu::WfState::RUNNING);
   cu->execute_instruction(wait_inst.get(), *wf1);
   ASSERT_EQ(wf1->state(), amdgpu::WfState::BARRIER);
+
+  EXPECT_TRUE(wf0->barrier_signal(-1, 0));
+  EXPECT_EQ(wf0->state(), amdgpu::WfState::BARRIER);
+  EXPECT_EQ(wf1->state(), amdgpu::WfState::BARRIER);
+  EXPECT_FALSE(wf1->barrier_signal(-1, 0));
+  EXPECT_EQ(wf0->state(), amdgpu::WfState::RUNNING);
+  EXPECT_EQ(wf1->state(), amdgpu::WfState::RUNNING);
 
   EXPECT_FALSE(cu->step());
   EXPECT_TRUE(wf0->is_halted());
@@ -1226,7 +1225,7 @@ TEST(Gfx1250ExecutionTest, DsAtomicAsyncBarrierArriveFlipsRawBarrierPhase) {
   local_pipeline.issue(arrive_inst, *wf);
 
   const uint64_t state = cu->lds().read64(wf->lds_base() + kBarrierLdsAddr);
-  EXPECT_EQ(state, 0xffffull << 16);
+  EXPECT_EQ(state, amdgpu::kLdsBarrierCellPhaseMask << amdgpu::kLdsBarrierCellPhaseShift);
   EXPECT_TRUE(amdgpu::lds_barrier_cell_phase_parity(state));
   EXPECT_TRUE(wf->wait_counters().empty());
 }
@@ -1258,7 +1257,9 @@ TEST(Gfx1250ExecutionTest, LocalMemPipelineUsesInjectedBarrierDecrementPayload) 
   const uint64_t expected =
       amdgpu::lds_barrier_cell_update_arrive(amdgpu::lds_barrier_cell_init_state(2), decrement);
   EXPECT_EQ(cu->lds().read64(wf->lds_base() + kBarrierLdsAddr), expected);
-  EXPECT_EQ(expected, (1ull << 32) | (0xffffull << 16) | 1ull);
+  EXPECT_EQ(expected, (1ull << 32) |
+                          (amdgpu::kLdsBarrierCellPhaseMask << amdgpu::kLdsBarrierCellPhaseShift) |
+                          1ull);
   EXPECT_TRUE(wf->wait_counters().empty());
 }
 
@@ -1271,7 +1272,9 @@ TEST(Gfx1250ExecutionTest, LdsBarrierCellHandlesSingleAndBatchedArrivals) {
   EXPECT_FALSE(amdgpu::lds_barrier_cell_phase_parity(state));
 
   state = amdgpu::lds_barrier_cell_update_arrive(state);
-  EXPECT_EQ(state, (1ull << 32) | (0xffffull << 16) | 1ull);
+  EXPECT_EQ(state, (1ull << 32) |
+                       (amdgpu::kLdsBarrierCellPhaseMask << amdgpu::kLdsBarrierCellPhaseShift) |
+                       1ull);
   EXPECT_TRUE(amdgpu::lds_barrier_cell_phase_parity(state));
 
   const uint64_t drained =
@@ -1287,7 +1290,8 @@ TEST(Gfx1250ExecutionTest, LdsBarrierCellHandlesSingleAndBatchedArrivals) {
   const uint64_t batched =
       amdgpu::lds_barrier_cell_update_arrive(amdgpu::lds_barrier_cell_init_state(2), 5);
   EXPECT_EQ(batched, iterated);
-  EXPECT_EQ(batched, (1ull << 32) | (0xfffeull << 16));
+  EXPECT_EQ(batched, (1ull << 32) | (0x6ull << amdgpu::kLdsBarrierCellPhaseShift));
+  EXPECT_FALSE(amdgpu::lds_barrier_cell_phase_parity(batched));
 
   for (uint32_t arrivals_per_phase : {0u, 1u}) {
     state = amdgpu::lds_barrier_cell_init_state(arrivals_per_phase);

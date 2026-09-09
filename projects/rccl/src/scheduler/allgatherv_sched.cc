@@ -17,8 +17,8 @@ static int agvChannelCount(struct ncclComm* comm, int tunedChannels) {
 #ifdef ENABLE_WARP_SPEED
   if (comm->warpSpeedChannelMultiplier > 1) {
     int channels = std::max(1, tunedChannels / comm->warpSpeedChannelMultiplier);
-    INFO(NCCL_COLL, "AllGatherV: WarpSpeed not supported; channels %d -> %d (multiplier %d)",
-         tunedChannels, channels, comm->warpSpeedChannelMultiplier);
+    INFO(NCCL_COLL, "AllGatherV: WarpSpeed not supported; channels %d -> %d (multiplier %d)", tunedChannels, channels,
+         comm->warpSpeedChannelMultiplier);
     return channels;
   }
 #endif
@@ -81,7 +81,6 @@ ncclResult_t ncclScheduleBcastTasksToPlan(struct ncclComm* comm, struct ncclKern
     size_t grainSize = rcclProtoGrainSize(proto, comm);
     nChannels = agvChannelCount(comm, tcoll.nMaxChannels);
     chunkSize = chunkSize / grainSize * grainSize;
-
 
     // Determine thread count per block
 #if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)

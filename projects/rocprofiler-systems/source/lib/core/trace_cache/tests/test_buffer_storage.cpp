@@ -100,6 +100,8 @@ std::unique_ptr<::testing::StrictMock<gmock_thread_state_policy_t>>
 
 struct mock_thread_state_policy_t
 {
+    using State = rocprofsys::state::thread::State;
+
     static constexpr rocprofsys::state::thread::State Internal =
         rocprofsys::state::thread::Internal;
 

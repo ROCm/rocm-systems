@@ -210,9 +210,8 @@ static_assert(offsetof(ncclCommProperties_t, ginType) == 36,
 static_assert(offsetof(ncclCommProperties_t, railedGinType) == 48,
               "ncclCommProperties_t.railedGinType offset changed; update nccl4py's "
               "cynccl.pxd and bindings/nccl4py/tests/test_comm_properties_abi.py to match");
-static_assert(sizeof(ncclCommProperties_t) == 56,
-              "ncclCommProperties_t size changed; update nccl4py's cynccl.pxd and "
-              "bindings/nccl4py/tests/test_comm_properties_abi.py to match");
+static_assert(sizeof(ncclCommProperties_t) == 56, "ncclCommProperties_t size changed; update nccl4py's cynccl.pxd and "
+                                                  "bindings/nccl4py/tests/test_comm_properties_abi.py to match");
 
 NCCL_EXTERN_C __host__ ncclResult_t ncclCommQueryProperties(ncclComm_t comm, ncclCommProperties_t* props);
 NCCL_EXTERN_C __host__ ncclResult_t ncclDevCommCreate(ncclComm_t comm, ncclDevCommRequirements_t const* reqs,

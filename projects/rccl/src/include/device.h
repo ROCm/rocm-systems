@@ -39,6 +39,12 @@ typedef __hip_bfloat16 hip_bfloat16;
 #ifdef ENABLE_ROCSHMEM
 #include <rocshmem/rocshmem.hpp>
 #endif
+#if SQTT_ENABLED
+#include <rocprof-trace-decoder/rocprof_trace_decoder/cxx/markers.hpp>
+#else
+#define sqtt_marker_enter(name) do {} while(0)
+#define sqtt_marker_exit(name) do {} while(0)
+#endif
 
 extern const char* ncclFuncStr[NCCL_NUM_FUNCTIONS + 4];
 
@@ -48,6 +54,25 @@ extern const char* ncclProtoStr[NCCL_NUM_PROTOCOLS];
 
 #define NCCL_MAX_OPS 2048
 #define NCCL_STEPS 8
+
+// Build gate for the experimental TDM SIMPLE path, set to 1 by -DENABLE_TDM_SIMPLE=ON.
+// Always defined so every site can use `#if ENABLE_TDM_SIMPLE` rather than mixing ifdef and if.
+#ifndef ENABLE_TDM_SIMPLE
+#define ENABLE_TDM_SIMPLE 0
+#endif
+
+// Global-address alignment for TDM's direct L2->LDS path.
+#define RCCL_TDM_ALIGN 256
+
+// Per-warp TDM staging. 4KB is the mover's floor; 16KB measured best. In ncclShmemData, so
+// every kernel pays the LDS: 167KB of 320KB at 16KB/warp. The arch check cannot move to CMake:
+// it must be zero on every device pass that is not gfx1250, or those kernels reserve LDS they
+// can never use. Host and non-gfx1250 passes therefore see 0 and the member disappears.
+#if ENABLE_TDM_SIMPLE && defined(__gfx1250__)
+#define RCCL_TDM_STAGE_BYTES_PER_WARP 16384
+#else
+#define RCCL_TDM_STAGE_BYTES_PER_WARP 0
+#endif
 
 #ifdef __CUDA_ARCH__
 #define NCCL_CUDA_ARCH __CUDA_ARCH__
@@ -355,6 +380,9 @@ struct alignas(16) ncclDevWorkP2p {
   // Chunk size stored in 8 bits via u32fp8Encode/Decode.
   uint8_t sendChunkSize_u32fp8, recvChunkSize_u32fp8;
 
+  // Set when the send/recv is latency-bound and should use the LL-family latency
+  // protocol instead of SIMPLE. Which one (legacy LL or LL128) is fixed by the kernel
+  // variant selected on the host via ncclDevFuncId_P2p(useLL128).
   uint8_t sendProtoLL:1, recvProtoLL:1;
   uint8_t sendNetReg:1, recvNetReg:1;
   uint8_t sendIpcReg:1, recvIpcReg:1;
@@ -613,6 +641,10 @@ struct ncclKernelComm {
   int isAllNvlink;
   int p2pnChannelsPerPeer;
   int cheapPostSendFenceOff; // RCCL: true if cheap post-peer fence is disabled (comm-global)
+#if ENABLE_TDM_SIMPLE
+  int tdmSimpleEnable; // RCCL: route copy-shaped SIMPLE slices through the TDM mover
+#endif
+  int patSharedQps; // true if PAT ReduceScatter and AllGather share one connection set
   int p2pChannelShiftSize; // [RCCL] Modifies how parts are mapped to p2p channels
   int* collNetDenseToUserRank;
 
@@ -827,6 +859,14 @@ inline int ncclDevFuncLL128RegMode(bool regUsed, bool netRegUsed) {
 // NCCL_UNROLL_* enum. Generated in host_table.cpp by generate.py.
 extern bool const ncclDevFuncUnrollGenerated[NCCL_NUM_UNROLLS];
 
+// Arch each unroll factor's device functions were compiled for, or nullptr when
+// the unroll carries no arch restriction. This is independent of what the build
+// generated: an entry still names its arch for an unroll this build left out, so
+// neither table implies the other and both have to be consulted. A multi-arch
+// build generates all unrolls, so together they are what distinguish "built"
+// from "usable on the running GPU".
+extern char const* const ncclDevFuncUnrollArch[NCCL_NUM_UNROLLS];
+
 // `ncclDevFuncId()` needs to be in sync with 'all_colls' in generate.py
 // `reg` is the user-buffer registration mode (0=n/a, 1=registered, 2=non-registered)
 // and is only used to distinguish the LL128 reg-variant collectives.
@@ -841,8 +881,12 @@ inline int ncclDevFuncId(int coll, int devRedOp, int type, int algo, int proto, 
     key = ((uint64_t)(coll & RCCL_FUNC_ID_MASK) << RCCL_COLL_SHIFT) |
           ((uint64_t)(proto & RCCL_FUNC_ID_MASK) << RCCL_PROTO_SHIFT) |
           ((uint64_t)(reg & RCCL_FUNC_ID_MASK) << RCCL_REG_SHIFT);
-  } else if (coll == ncclFuncSendRecv || coll == ncclFuncAlltoAllPivot || coll == ncclFuncAlltoAllGda ||
-             coll == ncclFuncAlltoAllvGda) {
+  } else if (coll == ncclFuncSendRecv) {
+    // SendRecv has two latency-protocol kernel variants distinguished by reg
+    // (0 = legacy LL, 1 = LL128). reg=0 preserves the historical coll-only key.
+    key = ((uint64_t)(coll & RCCL_FUNC_ID_MASK) << RCCL_COLL_SHIFT) |
+          ((uint64_t)(reg & RCCL_FUNC_ID_MASK) << RCCL_REG_SHIFT);
+  } else if (coll == ncclFuncAlltoAllPivot || coll == ncclFuncAlltoAllGda || coll == ncclFuncAlltoAllvGda) {
     key = ((uint64_t)(coll & RCCL_FUNC_ID_MASK) << RCCL_COLL_SHIFT);
   } else {
     key = ((uint64_t)(coll & RCCL_FUNC_ID_MASK) << RCCL_COLL_SHIFT) |
@@ -867,9 +911,15 @@ inline int ncclDevFuncId(int coll, int devRedOp, int type, int algo, int proto, 
   return row;
 }
 
-inline int ncclDevFuncId_P2p() {
-  static int ncclDevFuncIdP2p = ncclDevFuncId(ncclFuncSendRecv, -1, -1, NCCL_ALGO_UNDEF, NCCL_PROTO_UNDEF);
-  return ncclDevFuncIdP2p;
+// Selects the SendRecv kernel variant: useLL128 -> the LL128 latency kernel (reg=1,
+// gfx942/gfx950 only), otherwise the legacy LL kernel (reg=0). Keep in sync with
+// reg_values_of("SendRecv") in the device codegen.
+inline int ncclDevFuncId_P2p(bool useLL128 = false) {
+  static int ncclDevFuncIdP2pLL =
+    ncclDevFuncId(ncclFuncSendRecv, -1, -1, NCCL_ALGO_UNDEF, NCCL_PROTO_UNDEF, 0, 0, /*reg=*/0);
+  static int ncclDevFuncIdP2pLL128 =
+    ncclDevFuncId(ncclFuncSendRecv, -1, -1, NCCL_ALGO_UNDEF, NCCL_PROTO_UNDEF, 0, 0, /*reg=*/1);
+  return useLL128 ? ncclDevFuncIdP2pLL128 : ncclDevFuncIdP2pLL;
 }
 
 #endif

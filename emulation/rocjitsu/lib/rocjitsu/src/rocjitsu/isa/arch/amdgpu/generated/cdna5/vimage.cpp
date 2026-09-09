@@ -6,7 +6,6 @@
 
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/vimage.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/execution_backend.h"
-#include "util/except.h"
 #include <memory>
 
 namespace rocjitsu {
@@ -28,7 +27,12 @@ TensorLoadToLdsVimage::TensorLoadToLdsVimage(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeTensorLoadToLdsVimage(const MachineInst *opcode) {
+DecodeResult decodeTensorLoadToLdsVimage(const MachineInst *opcode,
+                                         const DecodeErrorEmitter &emit_error) {
+  Result validation = Vimage::validate_encoding(
+      "tensor_load_to_lds", reinterpret_cast<const Vimage::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<TensorLoadToLdsVimage>(opcode);
 }
 } // namespace detail
@@ -49,7 +53,12 @@ TensorStoreFromLdsVimage::TensorStoreFromLdsVimage(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeTensorStoreFromLdsVimage(const MachineInst *opcode) {
+DecodeResult decodeTensorStoreFromLdsVimage(const MachineInst *opcode,
+                                            const DecodeErrorEmitter &emit_error) {
+  Result validation = Vimage::validate_encoding(
+      "tensor_store_from_lds", reinterpret_cast<const Vimage::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<TensorStoreFromLdsVimage>(opcode);
 }
 } // namespace detail

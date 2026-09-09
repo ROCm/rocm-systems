@@ -22,10 +22,8 @@
 
 #pragma once
 
-#include "lib/common/defines.hpp"
-#include "lib/common/mpl.hpp"
-
 #include <array>
+#include <cstddef>
 #include <cstdint>
 #include <string>
 
@@ -33,6 +31,9 @@ namespace rocprofiler
 {
 namespace common
 {
+/// Size of a SHA-256 digest, in bytes.
+constexpr size_t SHA256_DIGEST_SIZE = 32;
+
 // --- SHA-256 Implementation ---
 class sha256
 {
@@ -43,9 +44,14 @@ public:
     void update(const uint8_t* data, size_t len);
     void update(const std::string& data);
 
-    void                    finalize();
-    std::string             hexdigest();
+    void        finalize();
+    std::string hexdigest();
+
+    /// State words in host byte order. Prefer digest() for bytes.
     std::array<uint32_t, 8> rawdigest();
+
+    /// Digest as big-endian bytes (FIPS 180-4 order). Finalises if needed.
+    std::array<uint8_t, SHA256_DIGEST_SIZE> digest();
 
 private:
     bool                    m_finalized = false;

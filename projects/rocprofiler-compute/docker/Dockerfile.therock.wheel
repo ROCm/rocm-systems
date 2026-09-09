@@ -18,13 +18,13 @@ RUN DEBIAN_FRONTEND=noninteractive apt-get install -y python3.12 python3.12-venv
 # use "all" for every arch). Available extras:
 #   https://github.com/ROCm/TheRock/blob/main/RELEASES.md#supported-python-device--install-extras
 # Pin a dated nightly via ROCM_VERSION for reproducibility; bump it manually to
-# update. Browse available versions at https://rocm.nightlies.amd.com/whl-multi-arch/rocm/
+# update. Browse available versions at https://nightly.repo.amd.com/rocm/core/whl-next/rocm/
 ARG ROCM_VERSION=<rocm_version>
 ARG GFX_ARCH=<gfx_arch>
 RUN rm -rf /rocm-venv && python3.12 -m venv /rocm-venv && \
     /rocm-venv/bin/pip install --upgrade pip && \
     /rocm-venv/bin/pip install \
-        --index-url https://rocm.nightlies.amd.com/whl-multi-arch/ \
+        --index-url https://nightly.repo.amd.com/rocm/core/whl-next/ \
         "rocm[profiler,devel,libraries,device-${GFX_ARCH}]==${ROCM_VERSION}"
 
 # Expand the devel tree and link the per-GPU device kernels (.kpack) into it.

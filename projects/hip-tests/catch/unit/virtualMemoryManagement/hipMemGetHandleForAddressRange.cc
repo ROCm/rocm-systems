@@ -885,3 +885,72 @@ HIP_TEST_CASE(Unit_hipMemGetHandleForAddressRange_DifferentOffsets) {
 
   HIP_CHECK(hipFree(dptr));
 }
+
+/**
+ * Test Description
+ * ------------------------
+ *  - Regression test for a leak in hipMemGetHandleForAddressRange(): exporting a DMA-BUF
+ *  - handle for a VMM address range retained an internal HSA allocation reference that was
+ *  - never released. Closing the returned fd, unmapping the address, and releasing the
+ *  - hipMemCreate() handle therefore did not reclaim the physical allocation.
+ *  - This test creates one VMM allocation, exports and closes its DMA-BUF handle, releases
+ *  - the allocation, and checks via hipMemGetInfo() that the memory is actually reclaimed.
+ * Test source
+ * ------------------------
+ *  - unit/virtualMemoryManagement/hipMemGetHandleForAddressRange.cc
+ * Test requirements
+ * ------------------------
+ *  - HIP_VERSION >= 7.0
+ */
+HIP_TEST_CASE(Unit_hipMemGetHandleForAddressRange_NoLeakOnRelease) {
+  hipDevice_t device;
+  constexpr int kDeviceId = 0;
+  HIP_CHECK(hipDeviceGet(&device, kDeviceId));
+  checkDmaBufSupported(device);
+  checkVMMSupported(device);
+
+  size_t granularity = GetGranularity(kDeviceId);
+  REQUIRE(granularity > 0);
+
+  hipMemAllocationProp prop{};
+  prop.type = hipMemAllocationTypePinned;
+  prop.location.type = hipMemLocationTypeDevice;
+  prop.location.id = kDeviceId;
+
+  hipMemGenericAllocationHandle_t memHandle;
+  HIP_CHECK(hipMemCreate(&memHandle, granularity, &prop, 0));
+
+  hipDeviceptr_t ptr;
+  HIP_CHECK(hipMemAddressReserve(reinterpret_cast<void**>(&ptr), granularity, granularity, 0, 0));
+  HIP_CHECK(hipMemMap(reinterpret_cast<void*>(ptr), granularity, 0, memHandle, 0));
+
+  hipMemAccessDesc accessDesc{};
+  accessDesc.location.type = hipMemLocationTypeDevice;
+  accessDesc.location.id = kDeviceId;
+  accessDesc.flags = hipMemAccessFlagsProtReadWrite;
+  HIP_CHECK(hipMemSetAccess(reinterpret_cast<void*>(ptr), granularity, &accessDesc, 1));
+
+  HIP_CHECK(hipDeviceSynchronize());
+  size_t freeBefore = 0, total = 0;
+  HIP_CHECK(hipMemGetInfo(&freeBefore, &total));
+
+  int dmaBufFd = -1;
+  HIP_CHECK(hipMemGetHandleForAddressRange(&dmaBufFd, ptr, granularity,
+                                           hipMemRangeHandleTypeDmaBufFd, 0));
+  REQUIRE(dmaBufFd > 0);
+  REQUIRE(close(dmaBufFd) == 0);
+
+  HIP_CHECK(hipMemUnmap(reinterpret_cast<void*>(ptr), granularity));
+  HIP_CHECK(hipMemAddressFree(reinterpret_cast<void*>(ptr), granularity));
+  HIP_CHECK(hipMemRelease(memHandle));
+  HIP_CHECK(hipDeviceSynchronize());
+
+  size_t freeAfter = 0;
+  HIP_CHECK(hipMemGetInfo(&freeAfter, &total));
+
+  // Once the fd, VA and allocation handle are all released, the physical allocation must be
+  // reclaimed. Before the fix, the retained-but-never-released HSA handle kept it resident,
+  // so freeAfter stayed pinned at freeBefore.
+  size_t reclaimed = (freeAfter > freeBefore) ? (freeAfter - freeBefore) : 0;
+  REQUIRE(reclaimed >= granularity / 2);
+}

@@ -11,12 +11,36 @@ namespace rocjitsu {
 std::unique_ptr<Decoder> Decoder::create(const IsaTargetRegistry &registry,
                                          std::string_view target_id) {
   const IsaTargetDescriptor *target = registry.find(target_id);
-  return target == nullptr ? nullptr : target->decoder_factory();
+  if (target == nullptr)
+    return nullptr;
+  const IsaGpuTargetDescription *binding = registry.find_gpu_target_by_code_object_id(target_id);
+  if (binding != nullptr && target->variant_decoder_factory != nullptr)
+    return target->variant_decoder_factory(*binding);
+  if (target->variant_decoder_factory != nullptr) {
+    binding = registry.find_default_gpu_target(*target);
+    return binding == nullptr ? nullptr : target->variant_decoder_factory(*binding);
+  }
+  return target->decoder_factory();
+}
+
+std::unique_ptr<Decoder> Decoder::create(const IsaTargetRegistry &registry,
+                                         rj_code_target_id_t target_id) {
+  const IsaTargetDescriptor *target = registry.find(target_id);
+  const IsaGpuTargetDescription *binding = registry.find_gpu_target(target_id);
+  if (target == nullptr || binding == nullptr)
+    return nullptr;
+  return target->variant_decoder_factory == nullptr ? target->decoder_factory()
+                                                    : target->variant_decoder_factory(*binding);
 }
 
 std::unique_ptr<Decoder> Decoder::create(const IsaTargetRegistry &registry, rj_code_arch_t arch) {
   const IsaTargetDescriptor *target = registry.find(arch);
-  return target == nullptr ? nullptr : target->decoder_factory();
+  if (target == nullptr)
+    return nullptr;
+  if (target->variant_decoder_factory == nullptr)
+    return target->decoder_factory();
+  const IsaGpuTargetDescription *binding = registry.find_default_gpu_target(*target);
+  return binding == nullptr ? nullptr : target->variant_decoder_factory(*binding);
 }
 
 Decoder::~Decoder() {
@@ -27,21 +51,11 @@ Decoder::~Decoder() {
 
 void Decoder::disable_pool() { Instruction::invalidate_allocator_pool(&pool_); }
 
-void Decoder::validate_instruction_operands(const Instruction &inst) {
-  for (int index = 0; index < inst.num_src_operands(); ++index) {
-    if (const Operand *operand = inst.src_operand(index))
-      operand->validate_encoding();
-  }
-  for (int index = 0; index < inst.num_dst_operands(); ++index) {
-    if (const Operand *operand = inst.dst_operand(index))
-      operand->validate_encoding();
-  }
-}
-
-Instruction *Decoder::decode(const rj_code_binary_inst_t *inst, uint64_t src_loc) {
-  Instruction *decoded = decode(inst);
-  if (decoded != nullptr)
-    decoded->src_loc_ = src_loc;
+DecodeResult Decoder::decode(const rj_code_binary_inst_t *inst, uint64_t src_loc,
+                             const DecodeErrorEmitter &emit_error) {
+  DecodeResult decoded = decode(inst, emit_error);
+  if (decoded.succeeded())
+    decoded.value()->src_loc_ = src_loc;
   return decoded;
 }
 
@@ -49,6 +63,21 @@ void Decoder::activate_pool(AllocFn alloc, DeallocFn dealloc, void *pool) {
   Instruction::alloc_fn_ = alloc;
   Instruction::dealloc_fn_ = dealloc;
   Instruction::alloc_pool_ = pool;
+}
+
+Result Decoder::validate_instruction_operands(const Instruction &inst,
+                                              const DecodeErrorEmitter &emit_error) {
+  for (int index = 0; index < inst.num_src_operands(); ++index) {
+    if (const Operand *operand = inst.src_operand(index))
+      if (operand->validate_encoding(emit_error).failed()) [[unlikely]]
+        return Result::failure();
+  }
+  for (int index = 0; index < inst.num_dst_operands(); ++index) {
+    if (const Operand *operand = inst.dst_operand(index))
+      if (operand->validate_encoding(emit_error).failed()) [[unlikely]]
+        return Result::failure();
+  }
+  return Result::success();
 }
 
 } // namespace rocjitsu

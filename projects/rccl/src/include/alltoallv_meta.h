@@ -38,8 +38,7 @@ static inline size_t* ncclAlltoAllvRecvDispls(size_t* gathered, int rank, int nR
 }
 
 static inline void ncclAlltoAllvPackLocalSizes(size_t* sizes, int nRanks, const size_t* sendcounts,
-                                                 const size_t* sdispls, const size_t* recvcounts,
-                                                 const size_t* rdispls) {
+                                               const size_t* sdispls, const size_t* recvcounts, const size_t* rdispls) {
   for (int i = 0; i < nRanks; ++i) {
     sizes[i] = sendcounts[i];
     sizes[nRanks + i] = sdispls[i];

@@ -21,6 +21,7 @@ public:
   Operand sdata;
   Operand sbase;
   Operand soffset;
+  Operand gpumem;
 };
 
 class SLoadDwordx2Smem : public Smem {
@@ -30,6 +31,7 @@ public:
   Operand sdata;
   Operand sbase;
   Operand soffset;
+  Operand gpumem;
 };
 
 class SLoadDwordx4Smem : public Smem {
@@ -39,6 +41,7 @@ public:
   Operand sdata;
   Operand sbase;
   Operand soffset;
+  Operand gpumem;
 };
 
 class SLoadDwordx8Smem : public Smem {
@@ -48,6 +51,7 @@ public:
   Operand sdata;
   Operand sbase;
   Operand soffset;
+  Operand gpumem;
 };
 
 class SLoadDwordx16Smem : public Smem {
@@ -57,6 +61,7 @@ public:
   Operand sdata;
   Operand sbase;
   Operand soffset;
+  Operand gpumem;
 };
 
 class SScratchLoadDwordSmem : public Smem {
@@ -66,6 +71,7 @@ public:
   Operand sdata;
   Operand sbase;
   Operand soffset;
+  Operand gpumem;
 };
 
 class SScratchLoadDwordx2Smem : public Smem {
@@ -75,6 +81,7 @@ public:
   Operand sdata;
   Operand sbase;
   Operand soffset;
+  Operand gpumem;
 };
 
 class SScratchLoadDwordx4Smem : public Smem {
@@ -84,6 +91,7 @@ public:
   Operand sdata;
   Operand sbase;
   Operand soffset;
+  Operand gpumem;
 };
 
 class SBufferLoadDwordSmem : public Smem {
@@ -93,6 +101,7 @@ public:
   Operand sdata;
   Operand sbase;
   Operand soffset;
+  Operand gpumem;
 };
 
 class SBufferLoadDwordx2Smem : public Smem {
@@ -102,6 +111,7 @@ public:
   Operand sdata;
   Operand sbase;
   Operand soffset;
+  Operand gpumem;
 };
 
 class SBufferLoadDwordx4Smem : public Smem {
@@ -111,6 +121,7 @@ public:
   Operand sdata;
   Operand sbase;
   Operand soffset;
+  Operand gpumem;
 };
 
 class SBufferLoadDwordx8Smem : public Smem {
@@ -120,6 +131,7 @@ public:
   Operand sdata;
   Operand sbase;
   Operand soffset;
+  Operand gpumem;
 };
 
 class SBufferLoadDwordx16Smem : public Smem {
@@ -129,6 +141,7 @@ public:
   Operand sdata;
   Operand sbase;
   Operand soffset;
+  Operand gpumem;
 };
 
 class SGl1InvSmem : public Smem {

@@ -13,7 +13,7 @@
 #include "internal_libs.hpp"
 #include "log.hpp"
 
-#include <spdlog/fmt/ranges.h>
+#include <fmt/ranges.h>
 
 #include <timemory/backends/process.hpp>
 #include <timemory/config.hpp>
@@ -24,7 +24,6 @@
 #include <timemory/settings.hpp>
 #include <timemory/signals/signal_mask.hpp>
 #include <timemory/utility/console.hpp>
-#include <timemory/utility/filepath.hpp>
 #include <timemory/utility/signals.hpp>
 
 #include <algorithm>
@@ -152,10 +151,9 @@ std::unique_ptr<std::ofstream> log_ofs = {};
 
 namespace
 {
-namespace process  = tim::process;  // NOLINT
-namespace signals  = tim::signals;
-namespace filepath = tim::filepath;
-namespace path     = rocprofsys::common::path;
+namespace process = tim::process;  // NOLINT
+namespace signals = tim::signals;
+namespace path    = rocprofsys::common::path;
 
 using signal_settings = tim::signals::signal_settings;
 using sys_signal      = tim::signals::sys_signal;
@@ -1287,8 +1285,10 @@ main(int argc, char** argv)
         log_ofs = std::make_unique<std::ofstream>();
         verbprintf_bare(0, "%s", ::tim::log::color::source());
         verbprintf(0, "Opening '%s' for log output... ", logfile.c_str());
-        if(!filepath::open(*log_ofs, logfile))
+        if(!path::create_parent_dirs_and_open_ofstream(*log_ofs, logfile))
+        {
             throw std::runtime_error("Error opening log output file " + logfile);
+        }
         verbprintf_bare(0, "Done\n%s", ::tim::log::color::end());
         print_log_entries(*log_ofs, -1, {}, {}, "", false);
     }
@@ -1741,11 +1741,6 @@ main(int argc, char** argv)
     if(!main_func && main_fname == "main")
         main_func = find_function(filtered_modules, "_main");
 
-    auto* user_start_func = find_function(filtered_modules, "rocprofsys_user_start_trace",
-                                          { "rocprofsys_user_start_thread_trace" });
-    auto* user_stop_func  = find_function(filtered_modules, "rocprofsys_user_stop_trace",
-                                          { "rocprofsys_user_stop_thread_trace" });
-
 #if ROCPROFSYS_USE_MPI > 0 || ROCPROFSYS_USE_MPI_HEADERS > 0
     // if any of the below MPI functions are found, enable MPI support
     for(const auto* itr :
@@ -2028,9 +2023,6 @@ main(int argc, char** argv)
 
     if(!binary_rewrite) env_vars.clear();
 
-    env_vars.emplace_back(
-        fmt::format("{}={}", rocprofsys::env_vars::INIT_ENABLED,
-                    (user_start_func && user_stop_func) ? "OFF" : "ON"));
     env_vars.emplace_back(fmt::format("{}={}", rocprofsys::env_vars::USE_MPIP,
                                       (binary_rewrite && use_mpi) ? "ON" : "OFF"));
     if(use_mpi)

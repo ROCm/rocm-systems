@@ -14,6 +14,7 @@ enum class OperandType {
   OPR_ACCVGPR,
   OPR_DSMEM,
   OPR_FLAT_SCRATCH,
+  OPR_GPUMEM,
   OPR_HWREG,
   OPR_LABEL,
   OPR_PC,
@@ -58,6 +59,10 @@ enum OpSelDsmem {
 
 enum OpSelFlatScratch {
   OPR_FLAT_SCRATCH_FLAT_SCRATCH_ALL = 0,
+};
+
+enum OpSelGpumem {
+  OPR_GPUMEM_GPUMEM = 0,
 };
 
 enum OpSelPc {
@@ -443,6 +448,8 @@ enum OpSelVgprOrLds {
   case OperandType::OPR_ACCVGPR:
   case OperandType::OPR_SRC:
   case OperandType::OPR_SRC_ACCVGPR:
+  case OperandType::OPR_SRC_NOLDS:
+  case OperandType::OPR_SRC_NOLIT:
   case OperandType::OPR_SRC_SIMPLE:
   case OperandType::OPR_SRC_VGPR:
   case OperandType::OPR_SRC_VGPR_OR_ACCVGPR:
