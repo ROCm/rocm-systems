@@ -4375,9 +4375,9 @@ hsa_status_t Runtime::VMemoryHandleCreate(const MemoryRegion* region, size_t siz
   core::DriverMemoryHandle driver_handle = {};
   auto agentOwner = region->owner();
 
-  /* CPU-owned memory has no DRM device of its own, so the GTT allocation and the DRM
-  import that follows must be done using the same GPU. Rocr chooses that GPU here and 
-  passes it down instead of letting thunk fall back to the default gpu node 0 */
+  /* Host memory has no DRM device of its own, so the GTT allocation and the DRM import 
+  that follows must be done using the same GPU. Rocr chooses the first enabled GPU here
+  and passes it down instead of letting thunk fall back to the default gpu node 0 */
   core::Agent* agent_for_drm = agentOwner;
   core::Agent* drm_owner = nullptr;
   uint32_t alloc_node_id = 0;
@@ -4387,6 +4387,13 @@ hsa_status_t Runtime::VMemoryHandleCreate(const MemoryRegion* region, size_t siz
     drm_owner = agent_for_drm;
     alloc_node_id = agent_for_drm->node_id();
     alloc_flags |= MemoryRegion::AllocateGTTAccess;
+
+    { // debugging
+      int drm_owner_fd = -1;
+      agent_for_drm->driver().GetDeviceFd(alloc_node_id, &drm_owner_fd);
+      std::cout << "VMemoryHandleCreate(): drm_owner node " << alloc_node_id
+                << " mmap_fd = " << drm_owner_fd << std::endl;
+    }
   }
 
   hsa_status_t status = region->Allocate(size, alloc_flags, alloc_node_id, &driver_handle);
@@ -4403,6 +4410,10 @@ hsa_status_t Runtime::VMemoryHandleCreate(const MemoryRegion* region, size_t siz
       region->Free(driver_handle);
       return ret;
     }
+
+    std::cout << "VMemoryHandleCreate(): node " << agent_for_drm->node_id()
+              << " mmap_offset = 0x" << std::hex << driver_handle.mmap_offset << std::dec
+              << std::endl;
 
     auto memoryHandle =
         std::make_unique<MemoryHandle>(region, flags_unused, driver_handle, alloc_flags);
@@ -4551,9 +4562,7 @@ Runtime::MappedHandleAllowedAgent::MappedHandleAllowedAgent(MappedHandle* _mappe
 
   /* Avoid creating multiple amdgpu bos in the same gpu agent that was used
   for drm import of host memory during the creation of a shareable_handle */
-  if (!memHandle->imported && memHandle->region &&
-      memHandle->agentOwner()->device_type() == core::Agent::DeviceType::kAmdCpuDevice &&
-      memHandle->drm_owner && memHandle->drm_owner == targetAgent) {
+  if (memHandle->drm_owner == targetAgent) {
     driver_handle = memHandle->driver_handle;
     owns_driver_handle = false;
     return;
@@ -4591,26 +4600,38 @@ hsa_status_t Runtime::MappedHandleAllowedAgent::EnableAccess(hsa_access_permissi
   if (targetAgent->device_type() == core::Agent::DeviceType::kAmdCpuDevice) {
     if (core::Runtime::runtime_singleton_->thunkLoader()->IsWslDxg()) return HSA_STATUS_ERROR;
 
-    core::Agent* agent = nullptr;
-    int mmap_fd = -1;
+    MemoryHandle* memHandle = mappedHandle->mem_handle;
 
-    /* For imported handles, we don't have a region/owner, but we can use any GPU agent for mmap.
-     * The driver_handle created during import should have the correct mmap_offset. */
-    if (mappedHandle->mem_handle->imported) {
+    // For imported handles, we don't have a region/drm_owner 
+    // we can import into first enabled gpu agent for getting an mmap_offset
+    if (!memHandle->drm_owner && !memHandle->region) {
       const auto& gpus = core::Runtime::runtime_singleton_->gpu_agents();
-      if (!gpus.empty()) {
-        agent = gpus[0];
-        agent->driver().GetDeviceFd(agent->node_id(), &mmap_fd);
-      }
-    } else if (mappedHandle->mem_handle->region) {
-      agent = mappedHandle->mem_handle->drmAgent();
-      /* Do not check the return value of GetDeviceFd. We do not need mmap_fd in some cases, so it
-       * is valid for mmap_fd to be -1*/
-      agent->driver().GetDeviceFd(agent->node_id(), &mmap_fd);
+      if (gpus.empty()) return HSA_STATUS_ERROR;
+      core::Agent* defaultDrm = gpus[0];
+
+      core::DriverMemoryHandle imported = {};
+      hsa_status_t status = defaultDrm->driver().ImportMemoryHandle(
+          *defaultDrm, &imported,
+          memHandle->is_fabric_handle ? ShareType::FABRIC_HANDLE : ShareType::DMABUF_FD,
+          &memHandle->driver_handle);
+      if (status != HSA_STATUS_SUCCESS) return status;
+
+      memHandle->driver_handle.handle = imported.handle;
+      memHandle->driver_handle.size = imported.size;
+      memHandle->driver_handle.mmap_offset = imported.mmap_offset;
+      memHandle->drm_owner = defaultDrm;
     }
 
+    core::Agent* agent = memHandle->drmAgent();
+    int mmap_fd = -1;
+    agent->driver().GetDeviceFd(agent->node_id(), &mmap_fd);
+
+    std::cout << "EnableAccess(): imported = " << memHandle->imported << " node "
+              << agent->node_id() << " mmap_fd = " << mmap_fd << " mmap_offset = 0x" << std::hex
+              << memHandle->driver_handle.mmap_offset << std::dec << std::endl;
+
     if (!rocr::os::MapMemory(va, size, PermissionsToMemProt(perms), mmap_fd,
-                             mappedHandle->mem_handle->driver_handle.mmap_offset)) {
+                             memHandle->driver_handle.mmap_offset)) {
       return HSA_STATUS_ERROR;
     }
   } else {
@@ -4701,13 +4722,12 @@ Runtime::MemoryHandle::MemoryHandle(hsa_fabric_handle_t fabric_handle)
       drm_owner(nullptr) {}
 
 Runtime::MemoryHandle::~MemoryHandle() {
-  if (driver_handle.handle != 0 && region != nullptr) {
+  if (driver_handle.handle != 0) {
     /* For host memory, CreateShareableHandle imports the BO into a GPU DRM context
     (drm_owner) to produce a driver_handle. The resulting driver_handle
     is owned by that GPU agent, not the CPU region, so destruction must be
     dispatched through drm_owner */
-    core::Agent* destroy_agent = drmAgent();
-    destroy_agent->driver().DestroyMemoryHandle(&driver_handle);
+    drmAgent()->driver().DestroyMemoryHandle(&driver_handle);
   } else {
     /* FIXME: the Driver class should close the dmabuf_fd, but in case of imported handles,
      * we do not have a region so we do not have an agentOwner() to call the driver.*/

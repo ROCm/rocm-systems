@@ -614,6 +614,9 @@ hsa_status_t KfdDriver::ImportMemoryHandle(const core::Agent& agent, core::Drive
     }
     handle->handle = reinterpret_cast<uint64_t>(res.buf_handle);
     handle->size = res.alloc_size;
+
+    HSAKMT_CALL(hsaKmtMemoryGetCpuAddr(gpu_agent.libThunkDev(), res.buf_handle,
+                                       &handle->mmap_offset));
     return HSA_STATUS_SUCCESS;
   }
   case core::ShareType::FABRIC_HANDLE: {
