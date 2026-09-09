@@ -1892,7 +1892,12 @@ def generate_build_table(entries: List[ApiEntry]) -> str:
     lines.append("  // Override every runtime slot with its capture shim")
     for e in runtime_entries:
         if e.reserved:
-            continue  # retired void* slot; leave the nullptr from the real table
+            # No shim is generated for a reserved slot, so leave whatever the
+            # real table holds. reserved covers three cases: a retired void*
+            # slot, where that is a nullptr, and a typedef that could not be
+            # found or parsed, where the slot is a live function pointer and
+            # keeping it preserves pass-through.
+            continue
         lines.append(f"  g_cap_table.{e.name}_fn = capture_{e.name};")
     lines.append("}")
     lines.append("")
