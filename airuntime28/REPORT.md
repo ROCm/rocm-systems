@@ -157,11 +157,10 @@ https://github.com/ROCm/rocm-systems/pull/11054
 
 ## Validation
 
-All nine variants emit the width and temporal hint they claim (`remote/isa_check.sh`, run
-against the real `BlitLinearSourceCode` blob as well as the transcription) and copy
-byte-exactly, both checked before any timing is trusted. Through the real path,
-`hipMemcpyAsync` D2D over 10 sizes x 3 offsets with a guard byte past the end gives 0 failures
-with the flag off and on, and `AMD_LOG_LEVEL=4` confirms the flag switches which kernel is
-dispatched. hip-tests MemoryTest1/2 and DeviceMemoryTest abort at identical pre-existing points
-either way; the one MemoryTest1 delta is `hipHostRegister.cc:754`, which this change cannot
-reach.
+Every variant compiles to exactly the instruction and cache hint it claims, verified on the
+real shipped kernel and not just the benchmark's copy of it, and copies byte-for-byte
+correctly. Both are checked before any timing is trusted. Through the real runtime, copies pass
+at every size and alignment tried — including unaligned starts, sizes with a leftover tail, and
+a guard byte proving nothing is written past the end — and the runtime's own logs confirm the
+flag switches which kernel runs. The hip-tests memory suites fail in the same pre-existing
+places with the flag on as with it off, apart from one flaky case this change cannot reach.
