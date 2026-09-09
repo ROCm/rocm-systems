@@ -16,7 +16,7 @@
  *   - an uncaptured host write that deterministically diverges replay,
  *   - the "null optional output pointer + 0x20000" GPU-fault class, and
  *   - replay zero-init of an allocation whose capture-time contents come from
- *     an unrecorded host write.
+ *     an unrecorded write (host or HSA runtime).
  *
  * Like hrr_workload.cc, every TEST_CASE here is hidden with the Catch2 [.] tag
  * so it is NOT auto-discovered by CTest.  Each is driven from hrr_roundtrip.cc:
@@ -279,7 +279,7 @@ TEST_CASE("Unit_HRR_NullOptionalPtr_Direct", "[.][hrr-direct]") {
 }
 
 // ===========================================================================
-// A5. Zero-init read of an allocation initialized by an unrecorded host write
+// A5. Zero-init read of an allocation initialized by an unrecorded write
 //
 // hipMalloc a buffer and zero it through the lower-level HSA runtime. HRR
 // records HIP calls only, so replay sees the allocation but not the HSA fill and
