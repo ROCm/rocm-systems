@@ -7,6 +7,8 @@
 #include <hip_test_common.hh>
 #include <hip_test_process.hh>
 
+#include "hipIpcHandleHex.hh"
+
 /**
  * @addtogroup hipIpcOpenMemHandle hipIpcOpenMemHandle
  * @{
@@ -117,31 +119,6 @@ static __global__ void square_kernel(int* buf) {
   buf[i] = buf[i] * buf[i];
 }
 
-static std::string ipcHandleToHex(const hipIpcMemHandle_t& handle) {
-  std::ostringstream oss;
-  oss << std::hex << std::setfill('0');
-  for (size_t i = 0; i < sizeof(handle.reserved); i++) {
-    oss << std::setw(2)
-        << static_cast<unsigned>(static_cast<unsigned char>(handle.reserved[i]));
-  }
-  return oss.str();
-}
-
-static hipIpcMemHandle_t hexToIpcHandle(const std::string& hex_str) {
-  hipIpcMemHandle_t handle = {};
-  std::stringstream hex_ss(hex_str);
-  for (size_t i = 0; i < sizeof(handle.reserved); i++) {
-    std::string byte_str(2, '\0');
-    if (!hex_ss.read(&byte_str[0], 2)) break;
-    unsigned int byte_val = 0;
-    std::stringstream byte_ss;
-    byte_ss << std::hex << byte_str;
-    byte_ss >> byte_val;
-    handle.reserved[i] = static_cast<char>(static_cast<unsigned char>(byte_val));
-  }
-  return handle;
-}
-
 /**
  * Test Description
  * ------------------------
@@ -205,7 +182,7 @@ HIP_TEST_CASE(Unit_hipIpcOpenMemHandle_Multiproc_Child) {
     HIP_SKIP_TEST("This test must be launched by parent multiprocess test.");
   }
 
-  hipIpcMemHandle_t handle = hexToIpcHandle(hex);
+  hipIpcMemHandle_t handle = hexToIpcHandle<hipIpcMemHandle_t>(hex);
 
   void* devPtr = nullptr;
   HIP_CHECK(hipIpcOpenMemHandle(&devPtr, handle, hipIpcMemLazyEnablePeerAccess));
