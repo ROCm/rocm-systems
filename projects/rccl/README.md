@@ -85,6 +85,7 @@ RCCL build & installation helper script
     -DENABLE_COMPRESS=OFF                 Disable GPU code compression (default: ON)
     -DENABLE_IFC=ON                       Enable indirect function call (default: OFF)
     -DFAULT_INJECTION=OFF                 Disable fault injection (default: ON)
+    -DRCCL_POISON_HIP_ATOMICS=OFF         Allow __hip_atomic_* builtins in RCCL sources (default: ON)
     -DRCCL_ROCPROFILER_REGISTER=OFF       Disable rocprofiler-register support (default: ON)
     -DTIMETRACE=ON                        Enable time-trace during compilation (default: OFF)
 
