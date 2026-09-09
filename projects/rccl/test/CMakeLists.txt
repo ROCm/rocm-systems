@@ -443,6 +443,7 @@ if(BUILD_TESTS)
       gin/gin_anvil_plugin_test_stubs.cc
       ../src/gin/gin_plugin_anvil_sdma.cc
       ../src/gin/gin_anvil_ipc_table_host.cc
+      ../src/gin/gin_fabric_a2a_lane.cc
       common/main_fixtures.cpp
       common/EnvVars.cpp
       common/TestChecks.cpp
@@ -452,6 +453,8 @@ if(BUILD_TESTS)
     target_include_directories(rccl-UnitTestsGinAnvilPlugin PRIVATE
       ${PROJECT_BINARY_DIR}/hipify/src/include
       ${PROJECT_BINARY_DIR}/hipify/src/include/nccl_device
+      ${PROJECT_SOURCE_DIR}/src
+      ${PROJECT_SOURCE_DIR}/src/include
       ${CMAKE_CURRENT_SOURCE_DIR}/gin
     )
     if(ROCSHMEM_SOURCE_DIR)

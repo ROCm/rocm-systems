@@ -17,5 +17,9 @@ void SetFactoryCreateFail(bool fail);
 void SetFactoryNullHandles(bool nullHandles);
 void SetLsaAddrFail(bool fail);
 void SetLsaSelfAddr(void* addr);
+void SetUseFabricMem(bool use);
+void SetFabricAddSelfFail(bool fail);
+void SetFabricExchangeFail(bool fail);
+void SetFabricPeerPtr(void* ptr);
 
 }  // namespace GinAnvilPluginStubs

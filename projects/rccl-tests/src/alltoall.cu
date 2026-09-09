@@ -16,6 +16,7 @@
 #include "algorithms/dda/device/CollCommon.h"
 #include "algorithms/dda/fabric/fabric_gpu_barrier.h"
 #include "include/gin/gin_fabric_a2a_host.h"
+#include "nccl_device/gin/anvil_sdma/gin_fabric_ll_policy.h"
 #endif
 #endif
 
@@ -264,43 +265,17 @@ __global__ void NvlAlltoAllKernelOptimized(ncclWindow_t sendwin, size_t sendoffs
 }
 
 #if NCCL_VERSION_CODE >= NCCL_VERSION(2,28,7) && defined(NCCL_OS_LINUX)
-using dda::common::kDdaLLMaxBytes;
-using dda::common::kDdaLLA2ASlotStridePkts;
-using dda::common::LLPacket16;
-using dda::common::kDdaMaxNranks;
 using ::bf16;
+using gin::fabric::ginFabricLlAlltoAllBlocksPerPeer;
+using gin::fabric::ginFabricLlAlltoAllEligible;
 
-// Pinned to nccl_dda_detail::kDdaLLAgMaxBlocksPerPeer and dda_alltoall_fabric_ll.cu.
-constexpr int kDdaLLAgMaxBlocksPerPeer = 8;
-constexpr size_t kDdaLLA2APktsPerBlock = 256;
-
-static size_t AlltoAllGinFabricLLScratchSize(int nRanks) {
-  return (size_t)2 * (size_t)nRanks * kDdaLLA2ASlotStridePkts * sizeof(LLPacket16);
-}
-
-static int AlltoAllGinFabricLLBlocksPerPeer(size_t perChunkBytes) {
-  const size_t nPk = perChunkBytes >> 3;
-  if (nPk <= kDdaLLA2APktsPerBlock) return 1;
-  size_t bpp = (nPk + kDdaLLA2APktsPerBlock - 1) / kDdaLLA2APktsPerBlock;
-  if (bpp > (size_t)kDdaLLAgMaxBlocksPerPeer) bpp = (size_t)kDdaLLAgMaxBlocksPerPeer;
-  return (int)bpp;
-}
-
-static bool AlltoAllGinFabricLLEligibleHost(ncclDevComm* devComm, size_t count, ncclDataType_t type) {
+static bool AlltoAllGinFabricLLEligibleHost(ncclDevComm* devComm, size_t count, ncclDataType_t type,
+                                            ncclGinFabricA2ALane* outLane) {
   ncclGinFabricA2ALane lane{};
-  if (!devComm || ncclGinQueryFabricA2ALane(devComm, &lane) != ncclSuccess || !lane.enabled) return false;
-  if (lane.peerScratch == nullptr || lane.llEpoch == nullptr) return false;
-  if (count == 0) return false;
-  if (devComm->nRanks < 2 || devComm->nRanks > kDdaMaxNranks) return false;
-  if (type != ncclFloat32 && type != ncclFloat16 && type != ncclBfloat16) return false;
-  const size_t perChunkBytes = count * wordSize(type);
-  if (perChunkBytes % 16 != 0) return false;
-  if (perChunkBytes * 2 > kDdaLLMaxBytes) return false;
-  if (AlltoAllGinFabricLLScratchSize(devComm->nRanks) > lane.scratchBytes) return false;
-  // 0 disables the lane at gin_host setup; treat 0 as a hard cap if it appears.
-  if ((size_t)devComm->nRanks * perChunkBytes > lane.llThreshold) {
-    return false;
-  }
+  if (!devComm || ncclGinQueryFabricA2ALane(devComm, &lane) != ncclSuccess) return false;
+  const bool dtypeOk = type == ncclFloat32 || type == ncclFloat16 || type == ncclBfloat16;
+  if (!ginFabricLlAlltoAllEligible(lane, devComm->nRanks, count, wordSize(type), dtypeOk)) return false;
+  if (outLane) *outLane = lane;
   return true;
 }
 
@@ -319,7 +294,7 @@ static testResult_t AlltoAllLaunchFabricLL(void* sendbuff, size_t sendoffset, vo
                                            size_t count, ncclDevComm* devComm, ncclGinFabricA2ALane const& lane,
                                            cudaStream_t stream) {
   const size_t perChunkBytes = count * sizeof(T);
-  const int blocksPerPeer = AlltoAllGinFabricLLBlocksPerPeer(perChunkBytes);
+  const int blocksPerPeer = ginFabricLlAlltoAllBlocksPerPeer(perChunkBytes);
   dim3 block(256);
   dim3 grid((unsigned)devComm->nRanks, (unsigned)blocksPerPeer);
 
@@ -563,9 +538,8 @@ testResult_t AlltoAllRunColl(void* sendbuff, size_t sendoffset, void* recvbuff, 
           kernel = GinAlltoAllKernel<bf16>;
         }
 #endif
-        if (AlltoAllGinFabricLLEligibleHost(devComm, count, type)) {
-          ncclGinFabricA2ALane lane{};
-          NCCLCHECK(ncclGinQueryFabricA2ALane(devComm, &lane));
+        ncclGinFabricA2ALane lane{};
+        if (AlltoAllGinFabricLLEligibleHost(devComm, count, type, &lane)) {
           if (type == ncclFloat32) {
             TESTCHECK(AlltoAllLaunchFabricLL<float>(sendbuff, sendoffset, recvbuff, recvoffset, count, devComm, lane,
                                                     stream));

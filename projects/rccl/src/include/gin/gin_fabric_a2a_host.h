@@ -31,6 +31,19 @@ struct ncclGinFabricA2ALane {
   size_t llThreshold;
 };
 
+#ifdef __cplusplus
+}
+#endif
+
+#ifdef __cplusplus
+void ncclGinFabricA2ALanePublish(void* ginHandle, ncclGinFabricA2ALane const& lane);
+void ncclGinFabricA2ALaneErase(void* ginHandle);
+#endif
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 ncclResult_t ncclGinQueryFabricA2ALane(struct ncclDevComm const* devComm, struct ncclGinFabricA2ALane* out);
 
 #ifdef __cplusplus

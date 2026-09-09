@@ -14,12 +14,40 @@
 #include <cstddef>
 
 #if !defined(__CUDA_ARCH__) && !defined(__HIP_DEVICE_COMPILE__)
-#include <cstdlib>
+#include "gin/gin_fabric_a2a_host.h"
 #include <cerrno>
+#include <cstdlib>
 #endif
 
 namespace gin {
 namespace fabric {
+
+// Keep in sync with dda::common::kDdaMaxNranks / kDdaLLMaxBytes / LLPacket16.
+constexpr int kGinFabricLlMaxNranks = 72;
+constexpr size_t kGinFabricLlMaxBytes = (size_t)16 * 1024 * 1024;
+constexpr size_t kGinFabricLlPacketBytes = 16;
+constexpr size_t kGinFabricLlA2ASlotStridePkts = kGinFabricLlMaxBytes / kGinFabricLlPacketBytes;
+constexpr size_t kGinFabricLlA2APktsPerBlock = 256;
+constexpr int kGinFabricLlAgMaxBlocksPerPeer = 8;
+
+inline size_t ginFabricLlA2AScratchBytes(int nRanks) {
+  return (size_t)2 * (size_t)nRanks * kGinFabricLlA2ASlotStridePkts * kGinFabricLlPacketBytes;
+}
+
+inline int ginFabricLlAlltoAllBlocksPerPeer(size_t perChunkBytes) {
+  const size_t nPk = perChunkBytes >> 3;
+  if (nPk <= kGinFabricLlA2APktsPerBlock) return 1;
+  size_t bpp = (nPk + kGinFabricLlA2APktsPerBlock - 1) / kGinFabricLlA2APktsPerBlock;
+  if (bpp > (size_t)kGinFabricLlAgMaxBlocksPerPeer) bpp = (size_t)kGinFabricLlAgMaxBlocksPerPeer;
+  return (int)bpp;
+}
+
+inline bool ginFabricLlLaneResourcesOk(int nRanks, size_t scratchBytes, size_t llThreshold) {
+  if (llThreshold == 0) return false;
+  if (nRanks < 2 || nRanks > kGinFabricLlMaxNranks) return false;
+  if (ginFabricLlA2AScratchBytes(nRanks) > scratchBytes) return false;
+  return true;
+}
 
 inline size_t pickGinFabricLLThresholdAlltoAll(bool alltoallSet, unsigned long long alltoallVal,
                                                size_t ddaLLThreshold) {
@@ -28,6 +56,19 @@ inline size_t pickGinFabricLLThresholdAlltoAll(bool alltoallSet, unsigned long l
 }
 
 #if !defined(__CUDA_ARCH__) && !defined(__HIP_DEVICE_COMPILE__)
+
+inline bool ginFabricLlAlltoAllEligible(ncclGinFabricA2ALane const& lane, int nRanks, size_t count, size_t typeBytes,
+                                        bool dtypeOk) {
+  if (!lane.enabled) return false;
+  if (lane.peerScratch == nullptr || lane.llEpoch == nullptr) return false;
+  if (!dtypeOk || count == 0) return false;
+  if (!ginFabricLlLaneResourcesOk(nRanks, lane.scratchBytes, lane.llThreshold)) return false;
+  const size_t perChunkBytes = count * typeBytes;
+  if (perChunkBytes % 16 != 0) return false;
+  if (perChunkBytes * 2 > kGinFabricLlMaxBytes) return false;
+  if ((size_t)nRanks * perChunkBytes > lane.llThreshold) return false;
+  return true;
+}
 
 inline bool parseGinFabricLLThresholdEnv(const char* name, unsigned long long* val) {
   const char* e = getenv(name);

@@ -191,6 +191,7 @@ set(SRC_FILES
   include/gin/gin_host_rocshmem_gda.h
   include/gin/gin_rocshmem_gda_factory.h
   include/gin/gin_host_anvil_sdma.h
+  include/gin/gin_fabric_a2a_host.h
   include/hip_rocm_version_info.h
   include/ibvcore.h
   include/ibvsymbols.h
@@ -502,6 +503,7 @@ set(SRC_FILES
   transport/profiler.cc
   transport/shm.cc
   gin/gin_host.cc
+  gin/gin_fabric_a2a_lane.cc
   gin/gin_host_proxy.cc
   gin/proxy_gpucontext/gpucontext.h
   gin/proxy_gpucontext/gpucontext_v1.h

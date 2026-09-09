@@ -29,6 +29,10 @@ struct State {
   bool factoryNullHandles = false;
   bool lsaAddrFail = false;
   void* lsaSelfAddr = reinterpret_cast<void*>(0x70001000ULL);
+  bool useFabricMem = false;
+  bool fabricAddSelfFail = false;
+  bool fabricExchangeFail = false;
+  void* fabricPeerPtr = reinterpret_cast<void*>(0x80000000ULL);
 };
 
 struct FakeSdmaOpaque {
@@ -50,6 +54,10 @@ void SetFactoryCreateFail(bool fail) { g.factoryCreateFail = fail; }
 void SetFactoryNullHandles(bool nullHandles) { g.factoryNullHandles = nullHandles; }
 void SetLsaAddrFail(bool fail) { g.lsaAddrFail = fail; }
 void SetLsaSelfAddr(void* addr) { g.lsaSelfAddr = addr; }
+void SetUseFabricMem(bool use) { g.useFabricMem = use; }
+void SetFabricAddSelfFail(bool fail) { g.fabricAddSelfFail = fail; }
+void SetFabricExchangeFail(bool fail) { g.fabricExchangeFail = fail; }
+void SetFabricPeerPtr(void* ptr) { g.fabricPeerPtr = ptr; }
 
 }  // namespace GinAnvilPluginStubs
 
@@ -162,4 +170,40 @@ extern "C" int gin_anvil_sdma_get_num_channels(gin_anvil_sdma_handle_t handle) {
 
 extern "C" int gin_anvil_sdma_get_channel_stride(gin_anvil_sdma_handle_t handle) {
   return handle ? reinterpret_cast<GinAnvilPluginStubs::FakeSdmaOpaque*>(handle)->sdmaChannelStride : 0;
+}
+
+#include "algorithms/dda/fabric/fabric_init.h"
+#include "algorithms/dda/fabric/fabric_mem_handler.h"
+
+bool ginAnvilUseFabricMem(struct ncclComm* comm) {
+  (void)comm;
+  return GinAnvilPluginStubs::g.useFabricMem;
+}
+
+ncclFabricMemHandler::ncclFabricMemHandler(void* bootstrap, int rank, int nranks, struct ncclMemManager* manager)
+  : bootstrap_(bootstrap), rank_(rank), nranks_(nranks), manager_(manager), selfPtr_(nullptr), selfHandle_{},
+    selfSize_(0), memPtrs_(static_cast<size_t>(nranks), nullptr), exchanged_(false) {}
+
+ncclFabricMemHandler::~ncclFabricMemHandler() {}
+
+ncclResult_t ncclFabricMemHandler::addSelfDeviceMem(void* deviceMemPtr, CUmemGenericAllocationHandle handle,
+                                                    size_t size) {
+  if (GinAnvilPluginStubs::g.fabricAddSelfFail) return ncclSystemError;
+  selfPtr_ = deviceMemPtr;
+  selfHandle_ = handle;
+  selfSize_ = size;
+  if (rank_ >= 0 && rank_ < nranks_) memPtrs_[static_cast<size_t>(rank_)] = deviceMemPtr;
+  return ncclSuccess;
+}
+
+ncclResult_t ncclFabricMemHandler::exchangeMemPtrs() {
+  if (GinAnvilPluginStubs::g.fabricExchangeFail) return ncclSystemError;
+  exchanged_ = true;
+  return ncclSuccess;
+}
+
+ncclResult_t ncclFabricMemHandler::getPeerDeviceMemPtr(int peerRank, void** outPeerPtr) const {
+  if (!outPeerPtr || peerRank < 0 || peerRank >= nranks_) return ncclInvalidArgument;
+  *outPeerPtr = GinAnvilPluginStubs::g.fabricPeerPtr;
+  return ncclSuccess;
 }

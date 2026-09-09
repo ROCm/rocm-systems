@@ -31,10 +31,19 @@
 #include <mutex>
 #include <new>
 
+struct GinAnvilFabricKey {
+  void* collComm;
+  void* data;
+  bool operator<(GinAnvilFabricKey const& o) const {
+    if (collComm != o.collComm) return collComm < o.collComm;
+    return data < o.data;
+  }
+};
+
 static std::map<void*, int> bufferRegRefcount;
-static std::map<void*, ncclFabricMemHandler*> fabricBufferHandlers;
-static std::map<void*, CUmemGenericAllocationHandle> fabricBufferHandles;
-static std::map<void*, int> fabricBufferRefcount;
+static std::map<GinAnvilFabricKey, ncclFabricMemHandler*> fabricBufferHandlers;
+static std::map<GinAnvilFabricKey, CUmemGenericAllocationHandle> fabricBufferHandles;
+static std::map<GinAnvilFabricKey, int> fabricBufferRefcount;
 static std::mutex pluginMutex;
 
 static void ginAnvilCuMemRelease(CUmemGenericAllocationHandle handle) {
@@ -42,7 +51,7 @@ static void ginAnvilCuMemRelease(CUmemGenericAllocationHandle handle) {
   (void)cuMemRelease(handle);
 }
 
-static void ginAnvilFabricRefDropLocked(void* key) {
+static void ginAnvilFabricRefDropLocked(GinAnvilFabricKey const& key) {
   auto it = fabricBufferRefcount.find(key);
   if (it == fabricBufferRefcount.end()) return;
   it->second--;
@@ -72,6 +81,44 @@ static ncclResult_t ginAnvilAllgatherOk(struct ncclComm* comm, int rank, int nra
     }
   }
   free(oks);
+  if (ret != ncclSuccess) return ret;
+  return allOk ? ncclSuccess : ncclSystemError;
+}
+
+struct GinAnvilFabricVote {
+  int ok;
+  int published;
+  uint64_t offset;
+};
+
+static ncclResult_t ginAnvilAllgatherFabricVote(struct ncclComm* comm, int rank, int nranks, GinAnvilFabricVote local,
+                                                int* allPublished) {
+  GinAnvilFabricVote* votes = nullptr;
+  NCCLCHECK(ncclCalloc(&votes, nranks));
+  votes[rank] = local;
+  ncclResult_t ret = bootstrapAllGather(comm->bootstrap, votes, sizeof(GinAnvilFabricVote));
+  int allOk = 1;
+  int published = 1;
+  if (ret == ncclSuccess) {
+    for (int i = 0; i < nranks; i++) {
+      if (!votes[i].ok) allOk = 0;
+    }
+    if (allOk) {
+      for (int i = 1; i < nranks; i++) {
+        if (votes[i].offset != votes[0].offset) {
+          WARN("GIN anvil-sdma fabric: VMM offset mismatch (rank0=%llu rank%d=%llu)",
+               (unsigned long long)votes[0].offset, i, (unsigned long long)votes[i].offset);
+          allOk = 0;
+          break;
+        }
+      }
+      for (int i = 0; i < nranks; i++) {
+        if (!votes[i].published) published = 0;
+      }
+    }
+  }
+  free(votes);
+  if (allPublished) *allPublished = published;
   if (ret != ncclSuccess) return ret;
   return allOk ? ncclSuccess : ncclSystemError;
 }
@@ -347,22 +394,33 @@ static ncclResult_t ginAnvilFinalize(void* ctx) {
 static ncclResult_t ginAnvilRegMrSymFabric(ginAnvilCollCtx* cctx, void* data, size_t size, ginAnvilMemHandle* mh,
                                            void** mhandle, void** ginHandle) {
   struct ncclComm* comm = cctx->comm;
+  const GinAnvilFabricKey key{cctx, data};
   ncclFabricMemHandler* handler = nullptr;
-  CUmemGenericAllocationHandle memHandle{};
   CUdeviceptr memAddr = 0;
   size_t memSize = 0;
   int numSegments = 0;
   ncclResult_t ret = ncclSuccess;
   uintptr_t* remote_vas_host = nullptr;
-  bool localRetainedHandle = false;
-  bool published = false;
   int setupOk = 1;
+  int allPublished = 0;
+
+  struct FabricSetupGuard {
+    ncclFabricMemHandler* handler = nullptr;
+    CUmemGenericAllocationHandle memHandle{};
+    bool retained = false;
+    bool published = false;
+    ~FabricSetupGuard() {
+      if (published) return;
+      delete handler;
+      if (retained) ginAnvilCuMemRelease(memHandle);
+    }
+  } guard;
 
   ret = ncclCuMemGetAddressRange(reinterpret_cast<CUdeviceptr>(data), size, &memAddr, &memSize, &numSegments);
   if (ret != ncclSuccess || numSegments != 1 || size > memSize) {
     if (numSegments != 1) {
-      WARN("GIN anvil-sdma fabric: multi-segment MR not supported yet (segments=%d data=%p size=%zu)", numSegments, data,
-           size);
+      WARN("GIN anvil-sdma fabric: multi-segment MR not supported yet (segments=%d data=%p size=%zu)",
+           numSegments, data, size);
     } else if (ret == ncclSuccess && size > memSize) {
       WARN("GIN anvil-sdma fabric: registration size %zu exceeds mapped segment size %zu for %p", size, memSize, data);
     }
@@ -370,91 +428,71 @@ static ncclResult_t ginAnvilRegMrSymFabric(ginAnvilCollCtx* cctx, void* data, si
     if (ret == ncclSuccess) ret = ncclSystemError;
   }
 
+  int publishedLocal = 0;
   {
-    ncclResult_t ag = ginAnvilAllgatherOk(comm, cctx->rank, cctx->nranks, setupOk);
+    std::lock_guard<std::mutex> lock(pluginMutex);
+    auto it = fabricBufferRefcount.find(key);
+    if (it != fabricBufferRefcount.end() && it->second > 0) publishedLocal = 1;
+  }
+
+  const uintptr_t offset =
+      setupOk ? (reinterpret_cast<uintptr_t>(data) - reinterpret_cast<uintptr_t>(memAddr)) : 0;
+  GinAnvilFabricVote vote{setupOk, publishedLocal, static_cast<uint64_t>(offset)};
+  {
+    ncclResult_t ag = ginAnvilAllgatherFabricVote(comm, cctx->rank, cctx->nranks, vote, &allPublished);
     if (ag != ncclSuccess) return ag;
   }
 
-  const uintptr_t offset = reinterpret_cast<uintptr_t>(data) - reinterpret_cast<uintptr_t>(memAddr);
-
-  {
+  if (allPublished) {
     std::lock_guard<std::mutex> lock(pluginMutex);
-    auto it = fabricBufferRefcount.find(data);
-    if (it != fabricBufferRefcount.end() && it->second > 0) {
-      auto hit = fabricBufferHandlers.find(data);
-      handler = hit != fabricBufferHandlers.end() ? hit->second : nullptr;
-      it->second++;
-      published = true;
+    auto it = fabricBufferRefcount.find(key);
+    auto hit = fabricBufferHandlers.find(key);
+    if (it == fabricBufferRefcount.end() || it->second <= 0 || hit == fabricBufferHandlers.end()) {
+      return ncclSystemError;
     }
-  }
-
-  if (!published) {
-    handler = new (std::nothrow) ncclFabricMemHandler(comm->bootstrap, comm->rank, cctx->nranks, comm->memManager);
-    if (handler == nullptr) {
+    it->second++;
+    handler = hit->second;
+  } else {
+    guard.handler = new (std::nothrow) ncclFabricMemHandler(comm->bootstrap, cctx->rank, cctx->nranks, comm->memManager);
+    if (guard.handler == nullptr) {
       setupOk = 0;
       ret = ncclSystemError;
     } else {
-      CUresult cuRes = cuMemRetainAllocationHandle(&memHandle, reinterpret_cast<void*>(memAddr));
+      CUresult cuRes = cuMemRetainAllocationHandle(&guard.memHandle, reinterpret_cast<void*>(memAddr));
       if (cuRes != CUDA_SUCCESS) {
-        delete handler;
-        handler = nullptr;
         setupOk = 0;
         ret = ncclSystemError;
       } else {
-        localRetainedHandle = true;
-        ret = handler->addSelfDeviceMem(reinterpret_cast<void*>(memAddr), memHandle, memSize);
-        if (ret != ncclSuccess) {
-          delete handler;
-          handler = nullptr;
-          ginAnvilCuMemRelease(memHandle);
-          localRetainedHandle = false;
-          setupOk = 0;
-        }
+        guard.retained = true;
+        ret = guard.handler->addSelfDeviceMem(reinterpret_cast<void*>(memAddr), guard.memHandle, memSize);
+        if (ret != ncclSuccess) setupOk = 0;
       }
     }
 
     {
       ncclResult_t ag = ginAnvilAllgatherOk(comm, cctx->rank, cctx->nranks, setupOk);
-      if (ag != ncclSuccess) {
-        if (handler) {
-          delete handler;
-          handler = nullptr;
-        }
-        if (localRetainedHandle) ginAnvilCuMemRelease(memHandle);
-        return ag;
-      }
+      if (ag != ncclSuccess) return ag;
     }
 
-    if (handler == nullptr) {
-      if (localRetainedHandle) ginAnvilCuMemRelease(memHandle);
-      return ncclSystemError;
-    }
+    if (guard.handler == nullptr || !guard.retained || !setupOk) return ncclSystemError;
 
     // Do not hold pluginMutex across exchangeMemPtrs (bootstrapAllGather).
-    ret = handler->exchangeMemPtrs();
-    if (ret != ncclSuccess) {
-      delete handler;
-      if (localRetainedHandle) ginAnvilCuMemRelease(memHandle);
-      return ret;
-    }
+    ret = guard.handler->exchangeMemPtrs();
+    if (ret != ncclSuccess) return ret;
 
     {
       std::lock_guard<std::mutex> lock(pluginMutex);
-      auto refIt = fabricBufferRefcount.emplace(data, 0).first;
+      auto refIt = fabricBufferRefcount.emplace(key, 0).first;
       auto& refcount = refIt->second;
       if (refcount == 0) {
-        fabricBufferHandlers[data] = handler;
-        fabricBufferHandles[data] = memHandle;
-        localRetainedHandle = false;
+        fabricBufferHandlers[key] = guard.handler;
+        fabricBufferHandles[key] = guard.memHandle;
+        handler = guard.handler;
+        guard.published = true;
         INFO(NCCL_INIT, "GIN anvil-sdma fabric: exported addr=%p memBase=%p size=%zu offset=%zu", data,
              reinterpret_cast<void*>(memAddr), memSize, static_cast<size_t>(offset));
       } else {
-        delete handler;
-        handler = fabricBufferHandlers[data];
-        if (localRetainedHandle) {
-          ginAnvilCuMemRelease(memHandle);
-          localRetainedHandle = false;
-        }
+        handler = fabricBufferHandlers[key];
       }
       refcount++;
     }
@@ -515,10 +553,7 @@ failFabricDevHandle:
 failFabricRef:
   {
     std::lock_guard<std::mutex> lock(pluginMutex);
-    ginAnvilFabricRefDropLocked(data);
-  }
-  if (localRetainedHandle) {
-    ginAnvilCuMemRelease(memHandle);
+    ginAnvilFabricRefDropLocked(key);
   }
   return ret;
 }
@@ -572,6 +607,10 @@ static ncclResult_t ginAnvilRegMrSymLsa(ginAnvilCollCtx* cctx, void* data, size_
   if (hipMalloc(&mh->remote_vas_dev, sizeof(uintptr_t) * (size_t)cctx->nranks) != hipSuccess ||
       hipMemcpy(mh->remote_vas_dev, remote_vas_host, sizeof(uintptr_t) * (size_t)cctx->nranks, hipMemcpyHostToDevice) !=
         hipSuccess) {
+    if (mh->remote_vas_dev) {
+      CUDACHECKIGNORE(hipFree(mh->remote_vas_dev));
+      mh->remote_vas_dev = nullptr;
+    }
     free(remote_vas_host);
     CUDACHECKIGNORE(hipFree(mh->devHandle));
     return ncclSystemError;
@@ -619,7 +658,7 @@ static ncclResult_t ginAnvilDeregMrSym(void* collComm, void* mhandle) {
   if (mh->addr) {
     std::lock_guard<std::mutex> lock(pluginMutex);
     if (mh->fabricMem) {
-      ginAnvilFabricRefDropLocked(mh->addr);
+      ginAnvilFabricRefDropLocked(GinAnvilFabricKey{collComm, mh->addr});
     } else {
       auto it = bufferRegRefcount.find(mh->addr);
       if (it != bufferRegRefcount.end()) {

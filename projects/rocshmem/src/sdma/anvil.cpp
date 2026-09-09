@@ -445,6 +445,7 @@ bool AnvilLib::connect(int srcDeviceId, int dstDeviceId, int numChannels) {
   // (KFD per-engine queue cap).
   const uint32_t engineSeed = getSdmaEngineId(srcDeviceId, dstDeviceId);
   const uint32_t nEng = numSdmaEnginesTotal_ > 0 ? numSdmaEnginesTotal_ : 1;
+  const size_t before = sdma_channels_[dstDeviceId].size();
   LOG_TRACE("SDMA: Connect from %d to %d with %d channels engineSeed=%u nEng=%u", srcDeviceId,
             dstDeviceId, numChannels, engineSeed, nEng);
   for (int c = 0; c < numChannels; ++c) {
@@ -465,6 +466,8 @@ bool AnvilLib::connect(int srcDeviceId, int dstDeviceId, int numChannels) {
     if (!created) {
       LOG_ERROR("anvil: connect(%d -> %d) failed: no SDMA engine accepted a queue", srcDeviceId,
                 dstDeviceId);
+      sdma_channels_[dstDeviceId].resize(static_cast<size_t>(before));
+      if (sdma_channels_[dstDeviceId].empty()) sdma_channels_.erase(dstDeviceId);
       return false;
     }
   }

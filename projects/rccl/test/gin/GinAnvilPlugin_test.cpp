@@ -9,9 +9,11 @@
 #include "gin_anvil_plugin_test_stubs.h"
 
 #include "gin/gin_host_anvil_sdma.h"
+#include "gin/gin_fabric_a2a_host.h"
 #include "comm.h"
 #include "nccl_device/gin/anvil_sdma/gin_anvil_ipc_table.h"
 #include "nccl_device/gin/anvil_sdma/gin_anvil_sdma_device_host_common.h"
+#include "nccl_device/impl/comm__types.h"
 #include "nccl_device/net_device.h"
 #include "plugin/nccl_gin.h"
 
@@ -435,6 +437,70 @@ TEST_F(GinAnvilPluginTest, CloseColl_AfterSignalBind) {
 
   EXPECT_EQ(plugin_.destroyContext(ginCtx), ncclSuccess);
   EXPECT_EQ(plugin_.closeColl(coll), ncclSuccess);
+  plugin_.finalize(ictx);
+}
+
+TEST_F(GinAnvilPluginTest, QueryFabricA2ALaneGuards) {
+  EXPECT_EQ(ncclGinQueryFabricA2ALane(nullptr, nullptr), ncclInvalidArgument);
+
+  ncclGinFabricA2ALane lane{};
+  lane.enabled = 7;
+  EXPECT_EQ(ncclGinQueryFabricA2ALane(nullptr, &lane), ncclSuccess);
+  EXPECT_EQ(lane.enabled, 0);
+
+  ncclDevComm dev{};
+  EXPECT_EQ(ncclGinQueryFabricA2ALane(&dev, &lane), ncclSuccess);
+  EXPECT_EQ(lane.enabled, 0);
+
+  void* handle = reinterpret_cast<void*>(0x1234);
+  ncclGinFabricA2ALane published{};
+  published.enabled = 1;
+  published.llThreshold = 4096;
+  ncclGinFabricA2ALanePublish(handle, published);
+  dev.ginHandles[0] = handle;
+  EXPECT_EQ(ncclGinQueryFabricA2ALane(&dev, &lane), ncclSuccess);
+  EXPECT_EQ(lane.enabled, 1);
+  EXPECT_EQ(lane.llThreshold, 4096u);
+  ncclGinFabricA2ALaneErase(handle);
+  EXPECT_EQ(ncclGinQueryFabricA2ALane(&dev, &lane), ncclSuccess);
+  EXPECT_EQ(lane.enabled, 0);
+}
+
+TEST_F(GinAnvilPluginTest, RegMrSym_FabricRefcountAndExchangeFail) {
+  GinAnvilPluginStubs::SetUseFabricMem(true);
+  void* ictx = nullptr;
+  initCtx(&ictx);
+  void* coll = nullptr;
+  connectColl(ictx, &coll);
+
+  void* data = nullptr;
+  if (hipMalloc(&data, 4096) != hipSuccess) {
+    GTEST_SKIP() << "no GPU memory for fabric register";
+  }
+
+  GinAnvilPluginStubs::SetFabricExchangeFail(true);
+  void* mhFail = nullptr;
+  void* ghFail = nullptr;
+  EXPECT_NE(plugin_.regMrSym(coll, data, 4096, 0, 0, &mhFail, &ghFail), ncclSuccess);
+  GinAnvilPluginStubs::SetFabricExchangeFail(false);
+
+  void* mh1 = nullptr;
+  void* gh1 = nullptr;
+  void* mh2 = nullptr;
+  void* gh2 = nullptr;
+  ncclResult_t r1 = plugin_.regMrSym(coll, data, 4096, 0, 0, &mh1, &gh1);
+  if (r1 != ncclSuccess) {
+    hipFree(data);
+    plugin_.closeColl(coll);
+    plugin_.finalize(ictx);
+    GTEST_SKIP() << "fabric register needs a VMM allocation";
+  }
+  ASSERT_EQ(plugin_.regMrSym(coll, data, 4096, 0, 0, &mh2, &gh2), ncclSuccess);
+  EXPECT_NE(mh1, mh2);
+  EXPECT_EQ(plugin_.deregMrSym(coll, mh1), ncclSuccess);
+  EXPECT_EQ(plugin_.deregMrSym(coll, mh2), ncclSuccess);
+  hipFree(data);
+  plugin_.closeColl(coll);
   plugin_.finalize(ictx);
 }
 
