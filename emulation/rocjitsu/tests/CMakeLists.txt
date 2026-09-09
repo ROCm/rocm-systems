@@ -437,6 +437,8 @@ add_executable(
     rocjitsu_tests
     rvsim_test.cpp
     amdgpu_vm_test.cpp
+    gpu_queue_registry_test.cpp
+    gpu_vm_translation_test.cpp
     config_test.cpp
     daemon_api_test.cpp
     matmul_test.cpp
