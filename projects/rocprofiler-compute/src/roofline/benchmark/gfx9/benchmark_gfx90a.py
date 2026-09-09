@@ -24,6 +24,8 @@ class Bench_gfx90a(benchmark_gfx9_base.Bench_gfx9):
             "MFMA-F4",
             "MFMA-F6",
             "MFMA-F6F4",
+            "MFMA-MXF8",
+            "MFMA-MXBF8",
             "MFMA-F8",
         ]
 
@@ -31,6 +33,8 @@ class Bench_gfx90a(benchmark_gfx9_base.Bench_gfx9):
             "F4": 0,
             "F6": 0,
             "F6F4": 0,  # Mixed precision F6 x F4
+            "MXF8": 0,  # microscaling FP8 format
+            "MXBF8": 0, # microscaling BF8 format
             "F8": 0,
             "F16": 16384,
             "F32": 4096,

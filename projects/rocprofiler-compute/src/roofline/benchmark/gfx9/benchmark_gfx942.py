@@ -19,12 +19,15 @@ class Bench_gfx942(benchmark_gfx9_base.Bench_gfx9):
     def __init__(self, device_id: int, cache_sizes: dict) -> None:
         super().__init__(device_id, cache_sizes)
 
-        self.unsupported_data_types = ["MFMA-F4", "MFMA-F6", "MFMA-F6F4"]
+        self.unsupported_data_types = ["MFMA-F4", "MFMA-F6", "MFMA-F6F4", "MFMA-MXF8",
+            "MFMA-MXBF8",]
 
         self.matrix_ops = {
             "F4": 0,
             "F6": 0,
             "F6F4": 0,  # Mixed precision F6 x F4
+            "MXF8": 0,  # microscaling FP8 format
+            "MXBF8": 0, # microscaling BF8 format
             "F8": 32768,
             "F16": 16384,
             "F32": 4096,

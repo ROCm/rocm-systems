@@ -606,7 +606,11 @@ class db_analysis(OmniAnalyze_Base):
                     elif dtype.startswith("I"):
                         keys.append(f"{dtype}Ops")
                 if OpsSupport.MATRIX in SUPPORTED_DATATYPES[gpu_arch][dtype]:
-                    if dtype.startswith("F") or dtype.startswith("B"):
+                    if (
+                        dtype.startswith("F")
+                        or dtype.startswith("B")
+                        or dtype.startswith("MX")
+                    ):
                         # FP16 -> F16
                         matrix_dtype = dtype.replace("FP", "F")
                         keys.append(f"{matrix_ops_type}{matrix_dtype}Flops")

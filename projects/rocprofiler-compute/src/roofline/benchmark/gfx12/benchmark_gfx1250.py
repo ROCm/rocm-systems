@@ -24,6 +24,8 @@ class Bench_gfx1250(benchmark_gfx12_base.Bench_gfx12):
             "F4": 65536,
             "F6": 65536,
             "F6F4": 65536,  # Mixed precision F6 x F4
+            "MXF8": 65536,  # microscaling FP8 format
+            "MXBF8": 65536, # microscaling BF8 format
             "F8": 32768,
             "F16": 16384,
             "F32": 2048,

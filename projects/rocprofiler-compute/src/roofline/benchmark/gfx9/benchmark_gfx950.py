@@ -25,6 +25,8 @@ class Bench_gfx950(benchmark_gfx9_base.Bench_gfx9):
             "F4": 131072,
             "F6": 131072,
             "F6F4": 131072,  # Mixed precision F6 x F4
+            "MXF8": 131072,  # microscaling FP8 format
+            "MXBF8": 131072, # microscaling BF8 format
             "F8": 32768,
             "F16": 32768,
             "F32": 4096,

@@ -116,7 +116,7 @@ class Bench_base(ABC):
         self.bf16_flops_benchmark_src: str
         self.matrix_f4_src: str
         self.matrix_f6_src: str
-        self.matrix_f6f4_src: str
+        self.matrix_f8f6f4_src: str
         self.matrix_f8_src: str
         self.matrix_f16_src: str
         self.matrix_bf16_src: str
@@ -777,6 +777,12 @@ class Bench_base(ABC):
 
     def matrix_f6f4_bench(self, device: int) -> PerfMetrics:
         return self.matrix_bench(device, "F6F4", "FLOP", "GFLOPS")
+
+    def matrix_mxf8_bench(self, device: int) -> PerfMetrics:
+        return self.matrix_bench(device, "MXF8", "FLOP", "GFLOPS")
+
+    def matrix_mxbf8_bench(self, device: int) -> PerfMetrics:
+        return self.matrix_bench(device, "MXBF8", "FLOP", "GFLOPS")
 
     def fp16_benchmark(self, device: int) -> PerfMetrics:
         return self.flops_bench(device, "FP16", "FLOP", "GFLOPS")
