@@ -47,18 +47,6 @@ def parse_args():
     return parser.parse_args()
 
 
-def _skip_tokens(field):
-    """Return the OS/arch/config tokens from a skip field.
-
-    Legacy form is a flat list of tokens ([amd_windows]). The structured form is
-    a mapping token -> {Reason: [...]} ({amd_windows: {Reason: [...]}}). Only the
-    tokens drive tag generation; the Reason is metadata consumed by other tooling.
-    """
-    if isinstance(field, dict):
-        return list(field.keys())
-    return field
-
-
 def create_test_definition(
     group, case_name, case_config, platform, os_name, arch, asan=False
 ):
@@ -71,7 +59,7 @@ def create_test_definition(
     # source lists. "disabled" is temporary/regressions, "unsupported" is
     # permanent; both produce the same [disabled] skip tag and [exclude_<entry>]
     # promotions that CI and the compute-utils/WSL runners depend on.
-    skip_reasons = _skip_tokens(disabled) + _skip_tokens(unsupported)
+    skip_reasons = disabled + unsupported
 
     tags_str = ""
 

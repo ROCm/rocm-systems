@@ -35,20 +35,15 @@ def main():
             for field in ("disabled", "unsupported"):
                 if field not in case_config:
                     continue
-                value = case_config[field]
-                if isinstance(value, list):
-                    # Legacy flat list of tokens: accept. Reasons are deferred to
-                    # the broader migration; do not force list entries to carry one.
-                    continue
-                if isinstance(value, dict):
-                    # Structured form: each token maps to {Reason: [...]}. Accept it
-                    # as valid, but do NOT enforce that tokens carry a non-empty
-                    # Reason yet. The ~1,100 existing configs have not been migrated
-                    # to the reason-bearing form, so Reason enforcement is
-                    # intentionally deferred to a later phase (AIRUNTIME-2744):
-                    # https://amd-hub.atlassian.net/browse/AIRUNTIME-2744
-                    continue
-                invalid_skip_fields.append(f"  {group}/{case_name}: '{field}'")
+                # Skip fields must be flat YAML lists of tokens. A scalar or
+                # mapping would break tag generation (a string is iterated
+                # char-by-char; a mapping fails the list concatenation in
+                # parse_config). The optional sibling 'reason' scalar is metadata
+                # and is intentionally NOT enforced yet — reason enforcement is
+                # deferred to a later phase (AIRUNTIME-2744):
+                # https://amd-hub.atlassian.net/browse/AIRUNTIME-2744
+                if not isinstance(case_config[field], list):
+                    invalid_skip_fields.append(f"  {group}/{case_name}: '{field}'")
 
     if missing:
         print(
@@ -61,7 +56,7 @@ def main():
 
     if invalid_skip_fields:
         print(
-            f"[check_config] {ERROR}ERROR: The following test cases have a 'disabled'/'unsupported' field that is neither a YAML list nor a mapping:{RESET}",
+            f"[check_config] {ERROR}ERROR: The following test cases have a 'disabled'/'unsupported' field that is not a YAML list:{RESET}",
             file=sys.stderr,
         )
         for entry in invalid_skip_fields:
