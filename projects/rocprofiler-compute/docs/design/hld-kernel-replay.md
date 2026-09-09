@@ -116,13 +116,6 @@ sequenceDiagram
     end
 ```
 
-- **Snapshot coverage.** Tracked, agent-owned, coarse-grained device allocations that are neither
-  kernarg nor executable memory. The SDK separately discovers and captures module-scope `__device__`
-  and `__constant__` storage visible to the agent.
-- **Isolation.** A replay window isolates a GPU agent.
-- **Restoration.** The snapshot is restored between passes, so every pass starts from identical
-  device state.
-
 #### Replay coverage and limitations
 
 | State or feature | Replay guarantee |
