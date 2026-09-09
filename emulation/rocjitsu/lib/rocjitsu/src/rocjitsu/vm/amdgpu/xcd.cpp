@@ -26,7 +26,7 @@ Xcd::Xcd(std::string name, const Config &config, rj_code_arch_t arch, GpuMemory 
   add_child(std::move(l2));
 
   // Create command processor for this XCD.
-  auto cp = std::make_unique<CommandProcessor>(xcd_name + ".cp");
+  auto cp = std::make_unique<CommandProcessor>(xcd_name + ".cp", exec_mode);
   cp_ = cp.get();
   cp_->configure_for_arch(arch);
 

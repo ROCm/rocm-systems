@@ -1235,6 +1235,26 @@ std::optional<RegisterRef> Operand::to_register_ref() const {
   return std::nullopt;
 }
 
+std::optional<RegClass> Operand::to_special_reg_class() const {
+  switch (opr_type_) {
+  case OperandType::OPR_EXEC:
+    return RegClass::EXEC;
+  case OperandType::OPR_PC:
+    return RegClass::PC;
+  case OperandType::OPR_SDST_EXEC:
+    return RegClass::EXEC;
+  case OperandType::OPR_SDST_M0:
+    return RegClass::M0;
+  case OperandType::OPR_SSRC_SPECIAL_SCC:
+    return RegClass::SCC;
+  case OperandType::OPR_VCC:
+    return RegClass::VCC;
+  default:
+    break;
+  }
+  return std::nullopt;
+}
+
 bool Operand::simd_capable() const {
   decltype(ExecutionBackend::simd_capable) callback =
       execution_backend_ ? execution_backend_->simd_capable : nullptr;

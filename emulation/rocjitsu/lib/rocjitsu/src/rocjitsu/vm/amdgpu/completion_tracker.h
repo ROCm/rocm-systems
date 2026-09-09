@@ -22,6 +22,8 @@
 namespace rocjitsu {
 namespace amdgpu {
 
+class L2Cache;
+
 class CompletionTracker {
 public:
   using InterruptCallback = std::function<void(uint32_t process_id, uint32_t event_id)>;
@@ -31,8 +33,9 @@ public:
   /// signal, and any peer parked behind a barrier bit waiting on this dispatch.
   using GridRetiredCallback = std::function<void(const DispatchEntry &entry)>;
 
-  CompletionTracker(GpuMemory *mem, std::vector<ComputeUnitCore *> &cus)
-      : memory_(mem), cus_(cus) {}
+  CompletionTracker(GpuMemory *mem, std::vector<ComputeUnitCore *> &cus,
+                    std::vector<L2Cache *> &l2_caches)
+      : memory_(mem), cus_(cus), l2_caches_(l2_caches) {}
 
   void set_plugin_group(std::shared_ptr<ExecutionPluginGroup> pg) {
     plugin_group_ = pg ? pg : ExecutionPluginGroup::empty_group();
@@ -50,6 +53,9 @@ public:
   /// @brief Scan all queues and fire completion signals for retired dispatches.
   void drain_completions(std::vector<HwQueueState> &queues);
 
+  /// @brief Deliver an out-of-order-ready non-kernel packet's completion.
+  void complete_non_kernel(DispatchEntry &entry);
+
   /// @brief Flush L1/L2 caches before firing a completion signal.
   void flush_caches(uint32_t vmid = 0);
 
@@ -60,10 +66,12 @@ public:
   void fire_queue_idle_signal(uint64_t queue_desc_va, uint32_t process_id);
 
 private:
+  void deliver_completion(DispatchEntry &entry);
   void fire_signal(const DispatchEntry &entry);
 
   GpuMemory *memory_;
   std::vector<ComputeUnitCore *> &cus_;
+  std::vector<L2Cache *> &l2_caches_;
   InterruptCallback interrupt_cb_;
   DispatchRetiredCallback dispatch_retired_cb_;
   GridRetiredCallback grid_retired_cb_;

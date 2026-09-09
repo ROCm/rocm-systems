@@ -167,6 +167,17 @@ jobs:
           exit 1
         fi
 
+  banned-includes:
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v6
+      with:
+        sparse-checkout: projects/rocprofiler-systems
+    - name: check-banned-includes
+      working-directory: projects/rocprofiler-systems/
+      run: python3 scripts/check-banned-includes.py
+
   fixedwidth-types:
     runs-on: ubuntu-latest
 

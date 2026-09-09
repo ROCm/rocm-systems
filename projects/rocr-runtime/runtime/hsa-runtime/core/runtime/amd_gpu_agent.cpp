@@ -619,8 +619,8 @@ void GpuAgent::InitScratchPool() {
 
   void* scratch_base = nullptr;
   hsa_status_t err = driver().AllocateScratchMemory(node_id(), max_scratch_len, &scratch_base);
-  assert(err == HSA_STATUS_SUCCESS && "AllocateScratchMemory failed");
-  assert(IsMultipleOf(scratch_base, 0x1000) &&
+  debug_warning(err == HSA_STATUS_SUCCESS && "AllocateScratchMemory failed");
+  assert((err != HSA_STATUS_SUCCESS || IsMultipleOf(scratch_base, 0x1000)) &&
          "Scratch base is not page aligned!");
 
   scratch_pool_. ~SmallHeap();

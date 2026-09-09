@@ -142,6 +142,23 @@ public:
     }
     return any_runnable;
   }
+
+  /// @brief Check whether any CU in this SE has active wavefronts.
+  bool has_active_cus() const {
+    for (auto *cu : cus_)
+      if (cu->has_active_wfs())
+        return true;
+    return false;
+  }
+
+  /// @brief Append this SPI's active CUs to a command-processor work batch.
+  void append_active_cus(std::vector<ComputeUnitCore *> &active) const {
+    for (auto *cu : cus_) {
+      if (cu->has_active_wfs())
+        active.push_back(cu);
+    }
+  }
+
   /// @brief Check if any WGs are queued or any CU is active.
   bool has_pending() const {
     for (auto &q : pipe_queues_)

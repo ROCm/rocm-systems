@@ -86,6 +86,29 @@ void SoC::set_plugin_group(std::shared_ptr<ExecutionPluginGroup> plugin_group) {
     xcd->set_plugin_group(plugin_group_);
 }
 
+void SoC::set_dispatch_threads(uint32_t threads) {
+  requested_dispatch_threads_ = std::max(threads, 1u);
+  apply_dispatch_threads();
+}
+
+void SoC::apply_dispatch_threads() {
+  uint32_t effective_threads = requested_dispatch_threads_;
+  if (exec_mode_ != simdojo::ExecMode::FUNCTIONAL)
+    effective_threads = 1;
+
+  std::unique_ptr<amdgpu::CpuDispatchPool> new_pool;
+  if (effective_threads > 1)
+    new_pool = std::make_unique<amdgpu::CpuDispatchPool>(effective_threads);
+
+  auto *pool = new_pool.get();
+  for_each_cp([pool, effective_threads](auto *cp) {
+    cp->set_shared_dispatch_pool(pool);
+    cp->set_dispatch_threads(effective_threads);
+  });
+  dispatch_pool_ = std::move(new_pool);
+  dispatch_threads_ = effective_threads;
+}
+
 void SoC::flush_all() {
   // Flush all per-CU L1 caches (invalidate, since L1 is write-through).
   for (auto *x : xcds_) {

@@ -31,6 +31,7 @@ public:
   std::optional<uint64_t> literal64_value() const override;
   std::optional<uint64_t> const_value() const override;
   std::optional<RegisterRef> to_register_ref() const override;
+  std::optional<RegClass> to_special_reg_class() const override;
   /// @brief Return the immutable full-simulator operand table.
   static const void *full_execution_backend();
   /// @brief Validate that every full-simulator operand callback is present.

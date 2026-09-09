@@ -1102,8 +1102,12 @@ names one deliberately and is then the only one asked.
 Finding an emulator's runtime library has its own set: `ROCJITSU_LIB` and
 `ROCJITSU_HOOKS_LIB` name a library file outright, `LD_LIBRARY_PATH`,
 `ROCM_HOME` and `ROCM_PATH` are searched, and the ROCm SDK install root
-reported by `rocm-sdk path --root` is consulted after them. `mirage
-emulators -l` prints which one was used, or every path that was tried; see
+reported by `rocm-sdk path --root` is consulted after them. Note that the
+ROCm variables do not outrank everything: a `<prefix>/lib` beside the
+`mirage` you are running is searched before them, so from an install
+prefix that ships its own library only `ROCJITSU_LIB` or
+`LD_LIBRARY_PATH` will redirect the search. `mirage emulators -l` prints
+which one was used, or every path that was tried; see
 [`building.md`](building.md) for the full order.
 
 ## Exit codes

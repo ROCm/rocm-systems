@@ -42,6 +42,8 @@ RJ_DIAGNOSTIC_POP
 #include <memory>
 #include <optional>
 #include <string>
+#include <unordered_map>
+#include <utility>
 #include <vector>
 
 #ifdef HAS_DEVICE_KERNELS
@@ -68,7 +70,12 @@ constexpr uint64_t SIGNAL_ADDR = 0x500000;
 // amd_signal_t::value sits 8 bytes into the signal object.
 constexpr uint32_t SIGNAL_VALUE_OFFSET = 8;
 
-TEST(VectorAddStressTest, AllCUsGoldenReference) {
+struct VectorAddRunResult {
+  std::vector<uint32_t> output_words;
+  std::vector<float> expected;
+};
+
+void run_vector_add(uint32_t dispatch_threads, VectorAddRunResult &result) {
   // Load the compiled vector_add kernel.
   Executable exec(kernel_path("vector_add"));
   ASSERT_TRUE(exec.is_valid()) << "Failed to load vector_add.o";
@@ -80,6 +87,7 @@ TEST(VectorAddStressTest, AllCUsGoldenReference) {
   auto loaded = config::load_config(CONFIG_PATH, rocjitsu::kEmbeddedSchema);
   auto *soc = loaded.soc();
   auto *memory = loaded.memory();
+  soc->set_dispatch_threads(dispatch_threads);
   auto engine = std::make_unique<simdojo::SimulationEngine>(loaded.engine_config);
   engine->topology().set_root(loaded.take_root());
   loaded.wire_links(engine->topology());
@@ -133,17 +141,63 @@ TEST(VectorAddStressTest, AllCUsGoldenReference) {
   engine->run();
   soc->flush_all();
 
-  // Read back results and compare against golden reference.
+  std::vector<uint32_t> output_words(N);
+  for (uint32_t i = 0; i < N; ++i)
+    output_words[i] = memory->read32(C_ADDR + i * sizeof(float));
+
+  result.output_words = std::move(output_words);
+  result.expected = std::move(C_expected);
+}
+
+void expect_vector_add_matches_golden(const std::vector<uint32_t> &output_words,
+                                      const std::vector<float> &expected) {
+  ASSERT_EQ(output_words.size(), expected.size());
+
   unsigned mismatches = 0;
-  for (uint32_t i = 0; i < N; ++i) {
-    float actual = std::bit_cast<float>(memory->read32(C_ADDR + i * sizeof(float)));
-    if (std::abs(actual - C_expected[i]) > 1e-6f) {
+  for (size_t i = 0; i < output_words.size(); ++i) {
+    float actual = std::bit_cast<float>(output_words[i]);
+    if (std::abs(actual - expected[i]) > 1e-6f) {
       if (mismatches < 10)
-        ADD_FAILURE() << "Mismatch at C[" << i << "]: GPU=" << actual << " CPU=" << C_expected[i];
+        ADD_FAILURE() << "Mismatch at C[" << i << "]: GPU=" << actual << " CPU=" << expected[i];
       ++mismatches;
     }
   }
   EXPECT_EQ(mismatches, 0u) << mismatches << " elements differ (showing first 10)";
+}
+
+void expect_same_output_words(const std::vector<uint32_t> &expected_words,
+                              const std::vector<uint32_t> &actual_words) {
+  ASSERT_EQ(actual_words.size(), expected_words.size());
+
+  unsigned mismatches = 0;
+  for (size_t i = 0; i < actual_words.size(); ++i) {
+    if (actual_words[i] == expected_words[i])
+      continue;
+    if (mismatches < 10) {
+      ADD_FAILURE() << "Output word mismatch at C[" << i
+                    << "]: dispatch_threads=1 word=" << expected_words[i]
+                    << " threaded word=" << actual_words[i];
+    }
+    ++mismatches;
+  }
+  EXPECT_EQ(mismatches, 0u) << mismatches << " output words differ (showing first 10)";
+}
+
+TEST(VectorAddStressTest, AllCUsGoldenReference) {
+  VectorAddRunResult result;
+  ASSERT_NO_FATAL_FAILURE(run_vector_add(1, result));
+  expect_vector_add_matches_golden(result.output_words, result.expected);
+}
+
+TEST(VectorAddStressTest, CpuDispatchThreadsPreserveOutputBytes) {
+  VectorAddRunResult serial;
+  VectorAddRunResult threaded;
+  ASSERT_NO_FATAL_FAILURE(run_vector_add(1, serial));
+  ASSERT_NO_FATAL_FAILURE(run_vector_add(TOTAL_XCDS, threaded));
+
+  expect_vector_add_matches_golden(serial.output_words, serial.expected);
+  expect_vector_add_matches_golden(threaded.output_words, threaded.expected);
+  expect_same_output_words(serial.output_words, threaded.output_words);
 }
 
 // Multi-threaded version: one worker thread per XCD (8 threads).
