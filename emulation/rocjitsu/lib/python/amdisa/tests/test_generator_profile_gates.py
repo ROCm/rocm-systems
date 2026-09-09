@@ -7134,23 +7134,52 @@ def test_gfx1250_flat_u64_atomic_payload_width_uses_two_dwords():
     assert 'data_base + 1' in body
 
 
-def test_flat_dword_store_snapshots_one_observed_vgpr_region():
+@pytest.mark.parametrize(
+    ('name', 'elem_size', 'num_elems', 'd16_hi', 'expected'),
+    [
+        (
+            'GLOBAL_STORE_DWORDX4',
+            4,
+            4,
+            False,
+            'data.copy_dwords_lane_major(d->store_data, exec);',
+        ),
+        (
+            'GLOBAL_STORE_BYTE',
+            1,
+            1,
+            False,
+            'd->store_data[lane * 1 + 0] = static_cast<uint8_t>(val0);',
+        ),
+        (
+            'GLOBAL_STORE_SHORT_D16_HI',
+            2,
+            1,
+            True,
+            'val0 >>= 16;',
+        ),
+    ],
+)
+def test_flat_store_snapshots_one_observed_vgpr_region(
+    name: str, elem_size: int, num_elems: int, d16_hi: bool, expected: str
+):
     codegen = object.__new__(CodeGenerator)
     codegen.isa_spec = SimpleNamespace(
         arch_name='cdna4',
         profile=Cdna4Profile(),
     )
     store = SimpleNamespace(
-        name='GLOBAL_STORE_DWORDX4',
-        elem_size=4,
-        num_elems=4,
-        d16_hi=False,
+        name=name,
+        elem_size=elem_size,
+        num_elems=num_elems,
+        d16_hi=d16_hi,
     )
 
     body = codegen._gen_flat_store([], [], store)
 
-    assert 'RegisterAccess(wf).read_vgpr_region(data_base, 4, exec)' in body
-    assert 'data.copy_dwords_lane_major(d->store_data.data(), exec);' in body
+    data_regs = num_elems if elem_size == 4 else 1
+    assert f'RegisterAccess(wf).read_vgpr_region(data_base, {data_regs}, exec)' in body
+    assert expected in body
     assert '.read_vgpr(' not in body
 
 
