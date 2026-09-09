@@ -33,6 +33,28 @@ set(RCCL_MICRO_TEST_SOURCES
 # not defined, so we fall through to the standalone project that builds
 # rccl-HostUnitTests + rccl-UnitTestsMicro from a hipified snapshot.
 # =====================================================================
+
+# apply_hip_compile_only(<target>)
+#
+# Apply HIP's *compile* usage requirements (headers, device intrinsics/codegen,
+# compile defs, options) to <target> WITHOUT linking the HIP runtime.
+# $<COMPILE_ONLY:hip::host> would express this in one line but requires
+# CMake >= 3.27; pulling the interface properties directly keeps this valid at
+# the project's declared minimum (3.16). Used by the host-only binaries in the
+# in-RCCL-build path, which must not bind libamdhip64.so.
+function(apply_hip_compile_only tgt)
+  foreach(_hip_tgt hip::host hip::device)
+    if(TARGET ${_hip_tgt})
+      target_include_directories(${tgt} PRIVATE
+        $<TARGET_PROPERTY:${_hip_tgt},INTERFACE_INCLUDE_DIRECTORIES>)
+      target_compile_definitions(${tgt} PRIVATE
+        $<TARGET_PROPERTY:${_hip_tgt},INTERFACE_COMPILE_DEFINITIONS>)
+      target_compile_options(${tgt} PRIVATE
+        $<TARGET_PROPERTY:${_hip_tgt},INTERFACE_COMPILE_OPTIONS>)
+    endif()
+  endforeach()
+endfunction()
+
 if(BUILD_TESTS)
   # rccl-UnitTestsMicro: standalone unit-test binary compiled directly into
   # the test binary. This lets us use preprocessor and link-time substitution
@@ -55,20 +77,8 @@ if(BUILD_TESTS)
     target_compile_definitions(rccl-UnitTestsMicro PRIVATE NCCL_GIN_ANVIL_SDMA_ENABLE=0)
   endif()
 
-  # Apply HIP's *compile* usage requirements (headers, device intrinsics/codegen,
-  # compile defs) WITHOUT linking the HIP runtime. $<COMPILE_ONLY:hip::host> would
-  # express this in one line but requires CMake >= 3.27; pulling the interface
-  # properties directly keeps this valid at the project's declared minimum (3.16).
-  foreach(_hip_tgt hip::host hip::device)
-    if(TARGET ${_hip_tgt})
-      target_include_directories(rccl-UnitTestsMicro PRIVATE
-        $<TARGET_PROPERTY:${_hip_tgt},INTERFACE_INCLUDE_DIRECTORIES>)
-      target_compile_definitions(rccl-UnitTestsMicro PRIVATE
-        $<TARGET_PROPERTY:${_hip_tgt},INTERFACE_COMPILE_DEFINITIONS>)
-      target_compile_options(rccl-UnitTestsMicro PRIVATE
-        $<TARGET_PROPERTY:${_hip_tgt},INTERFACE_COMPILE_OPTIONS>)
-    endif()
-  endforeach()
+  # Apply HIP's compile usage requirements without linking the runtime.
+  apply_hip_compile_only(rccl-UnitTestsMicro)
 
   target_link_libraries(rccl-UnitTestsMicro PRIVATE ${MICRO_TEST_LINK_LIBS})
 
@@ -202,16 +212,7 @@ if(BUILD_TESTS)
       target_compile_definitions(${_init_tgt} PRIVATE HIP_HOST_UNCACHED_MEMORY HIP_UNCACHED_MEMORY)
     endif()
     # HIP compile requirements without linking the runtime (see rccl-UnitTestsMicro).
-    foreach(_hip_tgt hip::host hip::device)
-      if(TARGET ${_hip_tgt})
-        target_include_directories(${_init_tgt} PRIVATE
-          $<TARGET_PROPERTY:${_hip_tgt},INTERFACE_INCLUDE_DIRECTORIES>)
-        target_compile_definitions(${_init_tgt} PRIVATE
-          $<TARGET_PROPERTY:${_hip_tgt},INTERFACE_COMPILE_DEFINITIONS>)
-        target_compile_options(${_init_tgt} PRIVATE
-          $<TARGET_PROPERTY:${_hip_tgt},INTERFACE_COMPILE_OPTIONS>)
-      endif()
-    endforeach()
+    apply_hip_compile_only(${_init_tgt})
     target_link_libraries(${_init_tgt} PRIVATE ${MICRO_TEST_LINK_LIBS})
     add_dependencies(${_init_tgt} hipify_all copy_nccl_device_headers)
     # Host-only (no amdgcn pass, so llvm coverage never reaches the device link) +
@@ -330,16 +331,7 @@ if(BUILD_TESTS)
     RCCL_STUBS_OMIT_ncclParamGraphStreamOrdering
     ENQUEUE_CC_PATH="${PROJECT_BINARY_DIR}/hipify/src/enqueue.cc")
   # HIP compile requirements without linking the runtime (see rccl-UnitTestsMicro).
-  foreach(_hip_tgt hip::host hip::device)
-    if(TARGET ${_hip_tgt})
-      target_include_directories(rccl-UnitTestsMicroEnqueue PRIVATE
-        $<TARGET_PROPERTY:${_hip_tgt},INTERFACE_INCLUDE_DIRECTORIES>)
-      target_compile_definitions(rccl-UnitTestsMicroEnqueue PRIVATE
-        $<TARGET_PROPERTY:${_hip_tgt},INTERFACE_COMPILE_DEFINITIONS>)
-      target_compile_options(rccl-UnitTestsMicroEnqueue PRIVATE
-        $<TARGET_PROPERTY:${_hip_tgt},INTERFACE_COMPILE_OPTIONS>)
-    endif()
-  endforeach()
+  apply_hip_compile_only(rccl-UnitTestsMicroEnqueue)
   target_link_libraries(rccl-UnitTestsMicroEnqueue PRIVATE ${MICRO_TEST_LINK_LIBS})
   add_dependencies(rccl-UnitTestsMicroEnqueue hipify_all copy_nccl_device_headers)
   target_compile_options(rccl-UnitTestsMicroEnqueue PRIVATE
@@ -407,16 +399,7 @@ if(BUILD_TESTS)
       DEV_RUNTIME_CC_PATH="${PROJECT_BINARY_DIR}/hipify/src/dev_runtime.cc")
 
     # HIP compile requirements without linking the runtime (see rccl-UnitTestsMicro).
-    foreach(_hip_tgt hip::host hip::device)
-      if(TARGET ${_hip_tgt})
-        target_include_directories(rccl-UnitTestsMicroDevRuntime PRIVATE
-          $<TARGET_PROPERTY:${_hip_tgt},INTERFACE_INCLUDE_DIRECTORIES>)
-        target_compile_definitions(rccl-UnitTestsMicroDevRuntime PRIVATE
-          $<TARGET_PROPERTY:${_hip_tgt},INTERFACE_COMPILE_DEFINITIONS>)
-        target_compile_options(rccl-UnitTestsMicroDevRuntime PRIVATE
-          $<TARGET_PROPERTY:${_hip_tgt},INTERFACE_COMPILE_OPTIONS>)
-      endif()
-    endforeach()
+    apply_hip_compile_only(rccl-UnitTestsMicroDevRuntime)
 
     # Mirrors the opt-out rccl-UnitTestsMicro and rccl-UnitTestsMicroInit make above,
     # and the one test/CMakeLists.txt's RCCL_TEST_EXECUTABLES loop used to make for
