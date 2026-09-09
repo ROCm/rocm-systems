@@ -181,7 +181,7 @@ Example: CPX on MI300X
 
 **How to read results:**
 
-* **Active CUs**, VALU utilization, and L2 metrics describe **one XCD** (38 CUs
+* **CU Utilization**, VALU utilization, and L2 metrics describe **one XCD** (38 CUs
   on MI300X), not all 304 CUs on the package.
 * **L2 Cache BW** peaks use the **partition** L2 channel count (one XCD), not
   the full eight-XCD total.
