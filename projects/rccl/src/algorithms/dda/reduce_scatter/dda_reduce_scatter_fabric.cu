@@ -54,7 +54,7 @@ static ncclResult_t ncclReduceScatterDdaFabricTyped(const void* sendbuff, void* 
   T** d_ipcbuffs = reinterpret_cast<T**>(peerPtrsDev);
 
   CUDACHECK(cudaMemcpyAsync(comm->ddaScratch, sendbuff, totalCount * sizeof(T), cudaMemcpyDeviceToDevice, stream));
-  dda::common::fabricGpuBarrierPublish<><<<1, 64, 0, stream>>>(barrierHost);
+  dda::common::launchFabricGpuBarrierPublish(barrierHost, stream);
   CUDACHECK(cudaGetLastError());
 
   INFO(NCCL_COLL, "DDA fabric ReduceScatter: launching kernel: nRanks=%d recvcount=%zu grid=%u block=%u%s", nRanks,

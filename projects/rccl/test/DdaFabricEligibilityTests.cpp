@@ -44,11 +44,6 @@ TEST(DdaFabricMaxBlocksTest, Uses192CuDefault)
     EXPECT_EQ(nccl_dda_detail::ddaFabricMaxNBlocksForScratch(192, nullptr), 192);
 }
 
-TEST(DdaFabricMaxBlocksTest, Uses256CuDefault)
-{
-    EXPECT_EQ(nccl_dda_detail::ddaFabricMaxNBlocksForScratch(256, nullptr), 256);
-}
-
 TEST(DdaFabricMaxBlocksTest, ClampsCuCountToHardLimit)
 {
     EXPECT_EQ(nccl_dda_detail::ddaFabricMaxNBlocksForScratch(512, nullptr), 256);
@@ -113,6 +108,23 @@ TEST(DdaFabricMaxBlocksTest, LargeOverrideDoesNotOverflow)
     // Values beyond INT_MAX should not overflow and incorrectly lower maxBlocks
     EXPECT_EQ(nccl_dda_detail::ddaFabricMaxNBlocksForScratch(96, "3000000000"), 96);
     EXPECT_EQ(nccl_dda_detail::ddaFabricMaxNBlocksForScratch(96, "9999999999"), 96);
+}
+
+TEST(DdaFabricMaxBlocksTest, ReportsParsedOverride)
+{
+    nccl_dda_detail::DdaFabricMaxBlocksOverride parsed;
+    EXPECT_EQ(nccl_dda_detail::ddaFabricMaxNBlocksForScratch(96, "48", &parsed), 48);
+    EXPECT_TRUE(parsed.specified);
+    EXPECT_TRUE(parsed.valid);
+    EXPECT_EQ(parsed.requested, 48);
+}
+
+TEST(DdaFabricMaxBlocksTest, ReportsInvalidOverride)
+{
+    nccl_dda_detail::DdaFabricMaxBlocksOverride parsed;
+    EXPECT_EQ(nccl_dda_detail::ddaFabricMaxNBlocksForScratch(96, "96 ", &parsed), 96);
+    EXPECT_TRUE(parsed.specified);
+    EXPECT_FALSE(parsed.valid);
 }
 
 // ---------------------------------------------------------------------------

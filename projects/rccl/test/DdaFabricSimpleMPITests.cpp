@@ -8,9 +8,10 @@
  * @file DdaFabricSimpleMPITests.cpp
  * @brief MPI end-to-end tests for DDA fabric SIMPLE collectives
  *
- * The selected payloads naturally bypass the default LL/LL128 tiers and
- * exercise multi-block SIMPLE kernels. Each test checks both output data and
- * the COLL log so a correct fallback cannot hide a DDA regression.
+ * The selected payloads bypass LL, while the fixture explicitly disables
+ * LL128 before communicator creation, so every case exercises a multi-block
+ * SIMPLE kernel. Each test checks both output data and the COLL log so a
+ * correct fallback cannot hide a DDA regression.
  */
 
 #ifdef MPI_TESTS_ENABLED
@@ -20,13 +21,16 @@
 #include "MPITestBase.hpp"
 #include "ResourceGuards.hpp"
 #include "TestChecks.hpp"
+#include "rccl_common.h"
 
 #include <gtest/gtest.h>
 #include <hip/hip_runtime.h>
 
 #include <cstddef>
+#include <cstdio>
 #include <memory>
 #include <string>
+#include <vector>
 
 using namespace MPITestConstants;
 using namespace RCCLTestGuards;
@@ -34,21 +38,22 @@ using namespace RCCLTestHelpers;
 
 namespace
 {
-constexpr size_t kAllReduceCount     = 8 * 1024 * 1024; // 32 MiB per rank
+constexpr size_t kAllReduceCount     = 8 * 1024 * 1024 + 1; // Just above 32 MiB per rank
 constexpr size_t kAllGatherCount     = 32 * 1024;       // 1 MiB total at 8 ranks
 constexpr size_t kReduceScatterCount = 32 * 1024;       // 1 MiB input at 8 ranks
 constexpr size_t kAllToAllCount      = 32 * 1024;       // 1 MiB input at 8 ranks
 constexpr int    kRepeatedIterations = 10;
 
-// AllReduce must exceed the default 16 MiB LL two-shot threshold to reach the
-// SIMPLE barrier path without relying on process-global environment settings.
+// AllReduce exceeds both its 16 MiB LL and 32 MiB LL128 thresholds.
 constexpr size_t kAllReduceBarrierStressCount =
-    16 * 1024 * 1024 / sizeof(float) + 1;
+    32 * 1024 * 1024 / sizeof(float) + 1;
 
-// ReduceScatter and AllToAll use a 32 KiB LL threshold, so a 512 KiB shard or
-// peer chunk naturally selects their SIMPLE barrier path.
-constexpr size_t kBarrierStressCount      = 128 * 1024;
+// A shard just above the 512 KiB LL128 hard cap remains small enough to expose
+// publication races in ReduceScatter. AllToAll is additionally capped by its
+// 4 MiB total-message DDA threshold.
+constexpr size_t kBarrierStressCount      = 128 * 1024 + 4;
 constexpr int    kBarrierStressIterations = 100;
+constexpr size_t kAllToAllMaxTotalBytes   = 4 * 1024 * 1024;
 
 constexpr char kAllReduceNeedle[] =
     "DDA fabric AllReduce: launching tree (two-shot) kernel";
@@ -72,9 +77,16 @@ class DdaFabricSimpleMPITest : public MPITestBase
 protected:
     std::unique_ptr<MPIHelpers::MpiEnvGuard>             debugGuard_;
     std::unique_ptr<MPIHelpers::MpiEnvGuard>             debugSubsysGuard_;
+    std::unique_ptr<MPIHelpers::MpiEnvGuard>             ll128Guard_;
+    std::unique_ptr<MPIHelpers::MpiEnvGuard>             maxBlocksGuard_;
     std::unique_ptr<MPIHelpers::TestLogAssertionContext> logCtx_;
     int                                                   rank_{};
     int                                                   nRanks_{};
+
+    virtual const char* maxBlocksOverride() const
+    {
+        return nullptr;
+    }
 
     void SetUp() override
     {
@@ -82,6 +94,10 @@ protected:
         debugGuard_ = std::make_unique<MPIHelpers::MpiEnvGuard>("NCCL_DEBUG", "INFO");
         debugSubsysGuard_ =
             std::make_unique<MPIHelpers::MpiEnvGuard>("NCCL_DEBUG_SUBSYS", "INIT,COLL");
+        ll128Guard_ = std::make_unique<MPIHelpers::MpiEnvGuard>("RCCL_DDA_LL128", "0");
+        if(const char* value = maxBlocksOverride())
+            maxBlocksGuard_ =
+                std::make_unique<MPIHelpers::MpiEnvGuard>("RCCL_DDA_FABRIC_MAXBLOCKS", value);
         logCtx_ = std::make_unique<MPIHelpers::TestLogAssertionContext>(
             MPIHelpers::makeCombinedAssertionLogOptions(getTestMpiRank()));
 
@@ -89,6 +105,9 @@ protected:
             GTEST_SKIP() << "Need at least 2 MPI ranks";
         if(!isGfx1250Device())
             GTEST_SKIP() << "DDA fabric SIMPLE requires gfx1250";
+        if(rcclParamDdaLL128() != 0)
+            GTEST_SKIP() << "RCCL_DDA_LL128 was cached as enabled before this fixture; "
+                            "launch with RCCL_DDA_LL128=0 to exercise SIMPLE";
 
         ASSERT_MPI_EQ(ncclSuccess, createTestCommunicator());
         ASSERT_MPI_EQ(ncclSuccess, ncclCommUserRank(getActiveCommunicator(), &rank_));
@@ -99,25 +118,39 @@ protected:
     {
         MPITestBase::TearDown();
         logCtx_.reset();
+        maxBlocksGuard_.reset();
+        ll128Guard_.reset();
         debugSubsysGuard_.reset();
         debugGuard_.reset();
     }
 
-    void expectPath(const char* needle)
+    void expectLog(const char* needle)
     {
         const std::string merged =
             logCtx_->readNcclDebugLog() + logCtx_->readPerRankStderrLog();
         EXPECT_NE(merged.find(needle), std::string::npos)
-            << "Rank " << rank_ << " did not execute expected DDA fabric SIMPLE path: "
-            << needle;
+            << "Rank " << rank_ << " did not log expected DDA fabric marker: " << needle;
+    }
+
+    void expectPath(const char* needle)
+    {
+        expectLog(needle);
+    }
+
+    size_t allToAllCount(size_t desired) const
+    {
+        const size_t maxCount =
+            kAllToAllMaxTotalBytes / (static_cast<size_t>(nRanks_) * sizeof(float));
+        const size_t alignedMaxCount = maxCount - maxCount % (16 / sizeof(float));
+        return desired < alignedMaxCount ? desired : alignedMaxCount;
     }
 
     void runAllReduce(bool inPlace, int iterations = 1)
     {
+        const size_t countAlignment =
+            static_cast<size_t>(nRanks_) * (16 / sizeof(float));
         const size_t count =
-            ((kAllReduceCount + static_cast<size_t>(nRanks_) - 1)
-             / static_cast<size_t>(nRanks_))
-            * static_cast<size_t>(nRanks_);
+            ((kAllReduceCount + countAlignment - 1) / countAlignment) * countAlignment;
         const size_t bytes = count * sizeof(float);
         void* sendBuf = nullptr;
         ASSERT_MPI_EQ(hipSuccess, hipMalloc(&sendBuf, bytes));
@@ -254,7 +287,9 @@ protected:
 
     void runAllToAll(int iterations = 1)
     {
-        const size_t totalCount = kAllToAllCount * static_cast<size_t>(nRanks_);
+        const size_t countPerPeer = allToAllCount(kAllToAllCount);
+        ASSERT_GT(countPerPeer, 0u);
+        const size_t totalCount = countPerPeer * static_cast<size_t>(nRanks_);
         const size_t bytes = totalCount * sizeof(float);
 
         void* sendBuf = nullptr;
@@ -265,9 +300,9 @@ protected:
         DeviceBufferAutoGuard recvGuard(recvBuf);
 
         ASSERT_MPI_EQ(hipSuccess, initializeBufferWithPattern<float>(
-            sendBuf, totalCount, [this](size_t i) {
-                const size_t dest = i / kAllToAllCount;
-                const size_t idx = i % kAllToAllCount;
+            sendBuf, totalCount, [this, countPerPeer](size_t i) {
+                const size_t dest = i / countPerPeer;
+                const size_t idx = i % countPerPeer;
                 return static_cast<float>(
                     rank_ * 100000 + static_cast<int>(dest) * 10000 + idx % 997);
             }));
@@ -278,7 +313,7 @@ protected:
             ASSERT_MPI_EQ(ncclSuccess,
                           ncclAllToAll(sendBuf,
                                        recvBuf,
-                                       kAllToAllCount,
+                                       countPerPeer,
                                        ncclFloat32,
                                        getActiveCommunicator(),
                                        getActiveStream()));
@@ -286,9 +321,9 @@ protected:
 
         ASSERT_MPI_EQ(hipSuccess, hipStreamSynchronize(getActiveStream()));
         ASSERT_MPI_TRUE(verifyBufferData<float>(
-            recvBuf, totalCount, [this](size_t i) {
-                const size_t src = i / kAllToAllCount;
-                const size_t idx = i % kAllToAllCount;
+            recvBuf, totalCount, [this, countPerPeer](size_t i) {
+                const size_t src = i / countPerPeer;
+                const size_t idx = i % countPerPeer;
                 return static_cast<float>(
                     static_cast<int>(src) * 100000 + rank_ * 10000 + idx % 997);
             }));
@@ -298,6 +333,23 @@ protected:
 
 class DdaMPI_FabricSimple : public DdaFabricSimpleMPITest
 {};
+
+class DdaMPI_FabricBlockCap : public DdaFabricSimpleMPITest
+{
+protected:
+    const char* maxBlocksOverride() const override
+    {
+        return getTestMpiRank() == 0 ? "32" : "64";
+    }
+};
+
+TEST_F(DdaMPI_FabricBlockCap, UsesCliqueWideMinimum)
+{
+    // Rank 0 advertises 32 while every other rank advertises 64. Observing 32
+    // in every rank's local init log proves the bootstrap exchange selected the
+    // communicator-wide minimum rather than retaining each local value.
+    expectLog("communicator max blocks=32");
+}
 
 TEST_F(DdaMPI_FabricSimple, AllReduceOutOfPlace)
 {
@@ -352,13 +404,13 @@ TEST_F(DdaMPI_FabricSimple, RepeatedAllToAll)
 TEST_F(DdaMPI_FabricSimple, AlternatingCollectivesOnSameCommunicator)
 {
     runAllReduce(false);
-    if(HasFatalFailure())
+    if(HasFatalFailure() || IsSkipped())
         return;
     runAllGather(false);
-    if(HasFatalFailure())
+    if(HasFatalFailure() || IsSkipped())
         return;
     runReduceScatter(false);
-    if(HasFatalFailure())
+    if(HasFatalFailure() || IsSkipped())
         return;
     runAllToAll();
 }
@@ -389,7 +441,8 @@ protected:
         ASSERT_MPI_EQ(hipSuccess, hipMalloc(&recvBuf, bytes));
         DeviceBufferAutoGuard recvGuard(recvBuf);
 
-        int totalMismatches = 0;
+        long long totalMismatches = 0;
+        int reportsEmitted = 0;
 
         for(int iter = 0; iter < kBarrierStressIterations; ++iter)
         {
@@ -433,19 +486,21 @@ protected:
             if(iterMismatches > 0)
             {
                 totalMismatches += iterMismatches;
-                if(totalMismatches <= 5 * static_cast<int>(count))
+                if(reportsEmitted < 5)
                 {
                     // Log first few failures
                     fprintf(stderr,
                             "Rank %d: Iteration %d had %d mismatches (expected %.0f)\n",
                             rank_, iter, iterMismatches, expected);
+                    ++reportsEmitted;
                 }
             }
         }
 
         // Aggregate across ranks
-        int globalMismatches = 0;
-        MPI_Reduce(&totalMismatches, &globalMismatches, 1, MPI_INT, MPI_SUM, 0, MPI_COMM_WORLD);
+        long long globalMismatches = 0;
+        MPI_Reduce(
+            &totalMismatches, &globalMismatches, 1, MPI_LONG_LONG, MPI_SUM, 0, MPI_COMM_WORLD);
 
         if(rank_ == 0)
         {
@@ -473,7 +528,7 @@ protected:
         ASSERT_MPI_EQ(hipSuccess, hipMalloc(&recvBuf, recvBytes));
         DeviceBufferAutoGuard recvGuard(recvBuf);
 
-        int totalMismatches = 0;
+        long long totalMismatches = 0;
 
         for(int iter = 0; iter < kBarrierStressIterations; ++iter)
         {
@@ -515,8 +570,9 @@ protected:
             totalMismatches += iterMismatches;
         }
 
-        int globalMismatches = 0;
-        MPI_Reduce(&totalMismatches, &globalMismatches, 1, MPI_INT, MPI_SUM, 0, MPI_COMM_WORLD);
+        long long globalMismatches = 0;
+        MPI_Reduce(
+            &totalMismatches, &globalMismatches, 1, MPI_LONG_LONG, MPI_SUM, 0, MPI_COMM_WORLD);
 
         if(rank_ == 0)
         {
@@ -530,7 +586,8 @@ protected:
 
     void runBarrierStressAllToAll()
     {
-        const size_t countPerPeer = kBarrierStressCount;
+        const size_t countPerPeer = allToAllCount(kBarrierStressCount);
+        ASSERT_GT(countPerPeer, 0u);
         const size_t totalCount = countPerPeer * static_cast<size_t>(nRanks_);
         const size_t bytes = totalCount * sizeof(float);
 
@@ -541,12 +598,12 @@ protected:
         ASSERT_MPI_EQ(hipSuccess, hipMalloc(&recvBuf, bytes));
         DeviceBufferAutoGuard recvGuard(recvBuf);
 
-        int totalMismatches = 0;
+        long long totalMismatches = 0;
 
         for(int iter = 0; iter < kBarrierStressIterations; ++iter)
         {
             ASSERT_MPI_EQ(hipSuccess, initializeBufferWithPattern<float>(
-                sendBuf, totalCount, [this, iter](size_t i) {
+                sendBuf, totalCount, [this, iter, countPerPeer](size_t i) {
                     const size_t dest = i / countPerPeer;
                     const size_t idx = i % countPerPeer;
                     return static_cast<float>(
@@ -583,8 +640,9 @@ protected:
             totalMismatches += iterMismatches;
         }
 
-        int globalMismatches = 0;
-        MPI_Reduce(&totalMismatches, &globalMismatches, 1, MPI_INT, MPI_SUM, 0, MPI_COMM_WORLD);
+        long long globalMismatches = 0;
+        MPI_Reduce(
+            &totalMismatches, &globalMismatches, 1, MPI_LONG_LONG, MPI_SUM, 0, MPI_COMM_WORLD);
 
         if(rank_ == 0)
         {

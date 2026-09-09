@@ -28,6 +28,7 @@ using nccl_dda_detail::ddaFabricMaxNBlocksForScratch;
 using nccl_dda_detail::ddaFabricScratchSizing;
 using nccl_dda_detail::ddaLLEpochCount;
 using nccl_dda_detail::DdaFabricBarrierState;
+using nccl_dda_detail::DdaFabricMaxBlocksOverride;
 
 RCCL_PARAM(DdaFabricBufferSizeForScratch, "DDA_FABRIC_BUFFER_SIZE", -1);
 
@@ -83,21 +84,24 @@ ncclResult_t ncclDdaFabricCommInit(ncclComm* comm) {
   }
 
   const char* fabricMaxBlocksOverride = getenv("RCCL_DDA_FABRIC_MAXBLOCKS");
-  const int localBlocksMax = ddaFabricMaxNBlocksForScratch(comm->cuCount, fabricMaxBlocksOverride);
+  DdaFabricMaxBlocksOverride parsedOverride;
+  const int localBlocksMax =
+    ddaFabricMaxNBlocksForScratch(comm->cuCount, fabricMaxBlocksOverride, &parsedOverride);
 
-  // Warn if user override was ignored because it exceeds the CU-derived cap
-  if (fabricMaxBlocksOverride != nullptr && fabricMaxBlocksOverride[0] != '\0') {
-    char* endptr = nullptr;
-    long requestedVal = strtol(fabricMaxBlocksOverride, &endptr, 10);
-    if (endptr != fabricMaxBlocksOverride && *endptr == '\0' && requestedVal > localBlocksMax) {
-      WARN("RCCL_DDA_FABRIC_MAXBLOCKS=%ld exceeds CU-derived cap (%d); using %d. "
-           "The override can only lower the block count, not raise it.",
-           requestedVal, localBlocksMax, localBlocksMax);
-    }
+  if (parsedOverride.specified && !parsedOverride.valid) {
+    WARN("Ignoring invalid RCCL_DDA_FABRIC_MAXBLOCKS='%s'; using CU-derived cap %d.",
+         fabricMaxBlocksOverride, localBlocksMax);
+  } else if (parsedOverride.valid && parsedOverride.requested > localBlocksMax) {
+    WARN("RCCL_DDA_FABRIC_MAXBLOCKS=%ld exceeds CU-derived cap (%d); using %d. "
+         "The override can only lower the block count, not raise it.",
+         parsedOverride.requested, localBlocksMax, localBlocksMax);
   }
 
   std::vector<int> blockCaps(nRanks, 0);
   blockCaps[comm->rank] = localBlocksMax;
+  // Do not locally degrade on a bootstrap collective error: failures need not
+  // be observed identically by every rank, and rank-divergent fallback could
+  // deadlock the later fabric pointer exchanges.
   NCCLCHECK(bootstrapAllGather(comm->bootstrap, blockCaps.data(), sizeof(int)));
 
   int nBlocksMax = localBlocksMax;
