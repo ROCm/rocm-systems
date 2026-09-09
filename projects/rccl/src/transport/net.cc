@@ -164,6 +164,7 @@ struct recvNetResources {
   ncclNetDeviceHandle_t* netDeviceHandle;
   size_t maxP2pBytes;
   volatile uint32_t* curr_hdp_reg; // Curr GPU in ring (for rdma transport use only)
+  int isP2p;
 };
 
 struct netRegInfo {
@@ -534,6 +535,12 @@ static ncclResult_t recvSetup(struct ncclComm* comm, struct ncclTopoGraph* graph
   req.channelId = channelId;
   req.connIndex = connIndex;
   req.netDev = -1;
+  // Determine if this is a P2P connection or not based on the graph pointer
+  if (graph == NULL) {
+    req.isP2p = 1;
+  } else {
+    req.isP2p = 0;
+  }
 
   // Use myInfo->rank as the receiver uses its own NIC
   int proxyRank = myInfo->rank;
@@ -1030,6 +1037,7 @@ static ncclResult_t recvProxySetup(struct ncclProxyConnection* connection, struc
   resources->connIndex = req->connIndex;
   resources->curr_hdp_reg = req->curr_hdp_reg;
   resources->sameDevice = req->sameDevice;
+  resources->isP2p = req->isP2p;
   ncclNetProperties_t props;
   NCCLCHECK(proxyState->ncclNet->getProperties(req->netDev, &props));
   /* GDR mode selection: RCCL_FORCE_ENABLE_DMABUF=1 forces DMAbuf, otherwise prefer peermem.
@@ -1136,6 +1144,7 @@ static ncclResult_t sendProxyConnect(struct ncclProxyConnection* connection, str
           comms->activeConnect[resources->channelId] == (resources->tpLocalRank + 1)) {
         if (rcclAinicRoce) {
           ncclNetCtxt.chId = resources->channelId;
+          ncclNetCtxt.isP2p = resources->isP2p;
           ret =
             proxyState->ncclNet->connect(proxyState->netContext, resources->netDev, req->handle,
                                          comms->sendComm + resources->channelId, (ncclNetDeviceHandle_t**)&ncclNetCtxt);
@@ -1149,6 +1158,7 @@ static ncclResult_t sendProxyConnect(struct ncclProxyConnection* connection, str
     } else {
       if (rcclAinicRoce) {
         ncclNetCtxt.chId = resources->channelId;
+        ncclNetCtxt.isP2p = resources->isP2p;
         ret = proxyState->ncclNet->connect(proxyState->netContext, resources->netDev, req->handle,
                                            &resources->netSendComm, (ncclNetDeviceHandle_t**)&ncclNetCtxt);
       } else {
@@ -1160,6 +1170,7 @@ static ncclResult_t sendProxyConnect(struct ncclProxyConnection* connection, str
     // Connect to remote peer
     if (rcclAinicRoce) {
       ncclNetCtxt.chId = resources->channelId;
+      ncclNetCtxt.isP2p = resources->isP2p;
       ret = proxyState->ncclNet->connect(proxyState->netContext, resources->netDev, req->handle,
                                          &resources->netSendComm, (ncclNetDeviceHandle_t**)&ncclNetCtxt);
     } else {
@@ -1402,6 +1413,7 @@ static ncclResult_t recvProxyConnect(struct ncclProxyConnection* connection, str
           comms->activeAccept[resources->channelId] == (resources->tpLocalRank + 1)) {
         if (rcclAinicRoce) {
           ncclNetCtxt.chId = resources->channelId;
+          ncclNetCtxt.isP2p = resources->isP2p;
           ret = proxyState->ncclNet->accept(resources->netListenComm, comms->recvComm + resources->channelId,
                                             (ncclNetDeviceHandle_t**)&ncclNetCtxt);
         } else {
@@ -1414,6 +1426,7 @@ static ncclResult_t recvProxyConnect(struct ncclProxyConnection* connection, str
     } else {
       if (rcclAinicRoce) {
         ncclNetCtxt.chId = resources->channelId;
+        ncclNetCtxt.isP2p = resources->isP2p;
         ret = proxyState->ncclNet->accept(resources->netListenComm, &resources->netRecvComm,
                                           (ncclNetDeviceHandle_t**)&ncclNetCtxt);
       } else {
@@ -1425,6 +1438,7 @@ static ncclResult_t recvProxyConnect(struct ncclProxyConnection* connection, str
     // Connect to remote peer
     if (rcclAinicRoce) {
       ncclNetCtxt.chId = resources->channelId;
+      ncclNetCtxt.isP2p = resources->isP2p;
       ret = proxyState->ncclNet->accept(resources->netListenComm, &resources->netRecvComm,
                                         (ncclNetDeviceHandle_t**)&ncclNetCtxt);
     } else {

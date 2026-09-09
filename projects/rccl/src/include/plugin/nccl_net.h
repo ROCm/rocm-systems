@@ -67,6 +67,9 @@ typedef ncclNetCommConfig_v12_t ncclNetCommConfig_t;
 typedef struct {
   // channel id
   uint32_t chId;
+  // 1 if this connection belongs to a P2P (sendrecv/alltoall) transfer,
+  // 0 if it belongs to a collective (ring/tree) graph
+  uint32_t isP2p;
 } ncclNet_ctxt_t;
 
 #endif // end include guard
