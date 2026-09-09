@@ -2677,11 +2677,17 @@ protected:
         cleanup(recvInfo);
     }
 
-    // Compute pattern value - use integer patterns for bfloat16 precision
-    // Pattern: rank * 100 + dest * 10 + (iter % 10) + offset
+    // Pattern: rank * 100 + dest * 10 + (iter % 10) + offset.
+    // hip_bfloat16 ULP is 4 for values in [512, 1024), so rank>=6 is not exact
+    // as float. Encode through T so init and verify use the same rounded value.
     static float computePattern(int rank, int peerRank, int iter, float offset = 0.0f)
     {
         return static_cast<float>(rank * 100 + peerRank * 10 + (iter % 10)) + offset;
+    }
+
+    static T encodePattern(int rank, int peerRank, int iter, float offset = 0.0f)
+    {
+        return static_cast<T>(computePattern(rank, peerRank, iter, offset));
     }
 
     void initBuffer(void* buffer, size_t countPerRank, int nRanks, int rank, int iter, float offset = 0.0f)
@@ -2689,7 +2695,7 @@ protected:
         (void)initializeBufferWithPattern<T>(buffer, countPerRank * nRanks,
             [rank, countPerRank, iter, offset](size_t i) {
                 int dest = static_cast<int>(i / countPerRank);
-                return static_cast<T>(computePattern(rank, dest, iter, offset));
+                return encodePattern(rank, dest, iter, offset);
             });
     }
 
@@ -2700,7 +2706,7 @@ protected:
             return false;
 
         for (int src = 0; src < nRanks; src++) {
-            T expected = static_cast<T>(computePattern(src, myRank, iter, offset));
+            T expected = encodePattern(src, myRank, iter, offset);
             for (size_t i = 0; i < countPerRank; i++) {
                 // Round the formula through T first. bfloat16 ULP is 8 around 1100,
                 // so comparing the unrounded float (1100) against a stored 1104 fails
@@ -2725,7 +2731,7 @@ protected:
         std::vector<T> data(total);
 
         for (int dest = 0; dest < nRanks; dest++) {
-            T value = static_cast<T>(computePattern(rank, dest, iter, 0.5f));
+            T value = encodePattern(rank, dest, iter, 0.5f);
             for (size_t i = 0; i < counts[dest]; i++)
                 data[displs[dest] + i] = value;
         }
@@ -2742,9 +2748,14 @@ protected:
             return false;
 
         for (int src = 0; src < nRanks; src++) {
-            T expected = static_cast<T>(computePattern(src, myRank, iter, 0.5f));
+            T expected = encodePattern(src, myRank, iter, 0.5f);
             for (size_t i = 0; i < counts[src]; i++) {
-                if (data[displs[src] + i] != expected) return false;
+                if (data[displs[src] + i] != expected) {
+                    TEST_WARN("Mismatch src=%d idx=%zu exp=%f got=%f iter=%d",
+                              src, i, static_cast<float>(expected),
+                              static_cast<float>(data[displs[src] + i]), iter);
+                    return false;
+                }
             }
         }
         return true;
