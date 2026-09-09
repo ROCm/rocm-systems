@@ -15,7 +15,9 @@ from typing import Any
 from unittest.mock import MagicMock, patch
 
 import pytest
+import yaml
 
+import config
 from rocprof_compute_soc.soc_base import (
     CounterFile,
     LimitedSet,
@@ -24,6 +26,7 @@ from rocprof_compute_soc.soc_base import (
     _trial_counter_file_with_extra,
     flat_counters_in_perfmon_file,
 )
+from utils.utils_common import canonical_config_arch, convert_metric_id_to_panel_info
 
 # =============================================================================
 # Fixtures
@@ -62,6 +65,8 @@ BASELINE_COUNTER = "SQ_BASELINE_COUNTER"  # table 201, outside block 30
 TABLE_3012_COUNTER = "TCC_BOTTLENECK_COUNTER"  # block 30, table 3012
 TABLE_3013_COUNTER = "TCC_EA_COUNTER"  # block 30, table 3013
 FIXTURE_COUNTERS = {BASELINE_COUNTER, TABLE_3012_COUNTER, TABLE_3013_COUNTER}
+
+HBM_TRAFFIC_METRIC_NAMES = {"HBM Read Traffic", "HBM Write and Atomic Traffic"}
 
 
 @pytest.fixture
@@ -177,6 +182,28 @@ def apply_cp_util_priority_patches(soc: OmniSoC_Base, patch_stack: ExitStack) ->
             ]),
         )
     )
+
+
+def _resolve_metric_name(config_dir: Path, arch: str, metric_id: str) -> str | None:
+    """Look up the metric name for *metric_id* in the analysis YAML tree."""
+    file_id, panel_id, metric_idx = convert_metric_id_to_panel_info(metric_id)
+    arch_dir = config_dir / (canonical_config_arch(arch) or arch)
+    for ypath in sorted(arch_dir.glob("*.yaml")):
+        if not ypath.name.startswith(file_id):
+            continue
+        doc = yaml.safe_load(ypath.read_text(encoding="utf-8"))
+        if not isinstance(doc, dict):
+            continue
+        sources = doc.get("Panel Config", {}).get("data source", [])
+        for src in sources:
+            mt = src.get("metric_table", {})
+            if mt.get("id") != panel_id:
+                continue
+            metrics = mt.get("metric", {})
+            for idx, name in enumerate(metrics):
+                if idx == metric_idx:
+                    return name
+    return None
 
 
 # =============================================================================
@@ -554,8 +581,29 @@ def test_same_bucket_priority_resolves_gfx115x_policy(gpu_arch):
     assert "17.1.0" in ids
 
 
-def test_same_bucket_priority_empty_for_gfx942():
-    soc = _make_soc(PERFMON_CONFIG, arch="gfx942")
+@pytest.mark.parametrize("gpu_arch", ["gfx908", "gfx90a", "gfx940", "gfx941", "gfx942"])
+def test_same_bucket_priority_hbm_traffic_ids_match_yaml(gpu_arch):
+    """Policy metric IDs must resolve to 'HBM Read Traffic' and
+    'HBM Write and Atomic Traffic' in the analysis YAMLs.  Guards against
+    metric index drift after YAML re-org."""
+    config_dir = (
+        Path(config.rocprof_compute_home) / "rocprof_compute_soc" / "analysis_configs"
+    )
+    soc = _make_soc(PERFMON_CONFIG, arch=gpu_arch)
+    ids = soc._same_bucket_priority_metric_ids()
+    resolved = [_resolve_metric_name(config_dir, gpu_arch, mid) for mid in ids]
+    assert None not in resolved, (
+        f"{gpu_arch}: some policy IDs did not resolve: "
+        f"{[mid for mid, name in zip(ids, resolved) if name is None]}"
+    )
+    unexpected = set(resolved) - HBM_TRAFFIC_METRIC_NAMES
+    assert not unexpected, (
+        f"{gpu_arch}: policy IDs resolve to unexpected metrics: {unexpected}"
+    )
+
+
+def test_same_bucket_priority_empty_for_gfx950():
+    soc = _make_soc(PERFMON_CONFIG, arch="gfx950")
     assert soc._same_bucket_priority_metric_ids() == ()
 
 
