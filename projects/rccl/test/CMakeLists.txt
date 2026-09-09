@@ -240,6 +240,13 @@ if(BUILD_TESTS)
     list(APPEND RCCL_COMMON_COMPILE_DEFS ${RCCL_INTERFACE_COMPILE_DEFINITIONS})
   endif()
 
+  if(AMDSMI_HEADER_HAS_FABRIC_TELEMETRY)
+    list(APPEND RCCL_COMMON_COMPILE_DEFS AMDSMI_HEADER_HAS_FABRIC_TELEMETRY)
+  endif()
+  if(AMDSMI_FABRIC_API)
+    list(APPEND RCCL_COMMON_COMPILE_DEFS AMDSMI_FABRIC_DIRECT)
+  endif()
+
   # Collect testing framework source files
   set(TEST_SOURCE_FILES
     AllGatherTests.cpp
@@ -800,6 +807,9 @@ if(BUILD_TESTS)
     endif()
     if(AMDSMI_FABRIC_API)
       target_compile_definitions(rccl-UnitTestsAmdSmi PRIVATE AMDSMI_FABRIC_DIRECT)
+    endif()
+    if(AMDSMI_HEADER_HAS_FABRIC_TELEMETRY)
+      target_compile_definitions(rccl-UnitTestsAmdSmi PRIVATE AMDSMI_HEADER_HAS_FABRIC_TELEMETRY)
     endif()
   endif()
 

@@ -1237,10 +1237,9 @@ NCCL_PARAM(ChunkSize, "CHUNK_SIZE", 0);
 // Need this temporary parameter to disable p2p batching to avoid some dips at 4MB - 32 MB message size at large scale
 // This parameter must be removed after further investigation,
 // Note that NCCL enables batching by default and it is needed to achieve perf for with smaller messages <= 4MB
-// Currently, p2p-batching thresholds are only used for gfx950 for 16 nodes and above
-// previously, p2p-batching was causing regression on all node-counts for larger message sizes (64KB "per-rank")
-// we want to auto-enable only for gfx950 paired with a non-AINIC NIC, so we use
-// rcclEffectiveP2pBatchEnable helper to branch based on arch and NIC type.
+// Batching helps small P2P operations but loses bandwidth once each peer carries
+// more than 64 KiB. Apply the cutoff even when the user explicitly enables
+// batching; rcclEffectiveP2pBatchEnable separately controls the default policy.
 RCCL_PARAM(P2pBatchEnable, "P2P_BATCH_ENABLE", -1);
 RCCL_PARAM(P2pBatchThreshold, "P2P_BATCH_THRESHOLD", 1 << 16); // 64k per-rank message size
 
@@ -1250,6 +1249,11 @@ static int rcclEffectiveP2pBatchEnable(struct ncclComm* comm) {
   if (comm->nNodes <= 1) return 0;
   bool isGfx950 = IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx950");
   return (isGfx950 && !rcclUseAinic()) ? 1 : 0;
+}
+
+static bool rcclP2pBatchEligible(struct ncclComm* comm, ssize_t sendBytes, ssize_t recvBytes) {
+  return rcclP2pBatchEligible(rcclEffectiveP2pBatchEnable(comm), sendBytes, recvBytes,
+                              rcclParamP2pBatchThreshold());
 }
 
 // Put p2p op in plan assuming there is sizeof(ncclDevWorkBatch) in batch budget
@@ -1273,18 +1277,8 @@ static ncclResult_t addP2pToPlan(struct ncclComm* comm, struct ncclKernelPlan* p
   bool proxySameProcess[2] = {true, true};
   void** handles[2] = {NULL, NULL};
   uint64_t p2pDirChannelMask[2] = {0, 0}; // per-direction channels (idx 0 recv, 1 send)
-  auto batchP2PEnableEnv = rcclEffectiveP2pBatchEnable(comm);
-  auto p2pBatchThreshold = rcclParamP2pBatchThreshold();
-  bool belowThreshold = (recvBytes <= p2pBatchThreshold) && (sendBytes <= p2pBatchThreshold);
-  bool batchP2P =
-    batchP2PEnableEnv && (sendBytes == recvBytes) &&
-    (IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx950") && comm->nNodes >= 16 ? belowThreshold : true);
-  // ncclP2pChannelBaseForRound now computes channel-base based on batching enablement (env. variable RCCL_P2P_BATCH_ENABLE=1)
-  // but batching is only applicable if msg size is below threshold which is not checked below
-  // this causes perf. dips in some cases but also boosts in other cases even when no batching happens because msg size is above threshold
-  // replacing line below with ncclP2pChannelBaseForRound(comm, p2pRound, batchP2P) can cause issues due to taskAppend calling the same routine where no threshold info is available
-  // channel base computed in taskAppend and here must be the same, but in taskAppend the call happens once and is cached for later usage, which is why it wouldn't be consistent with the call below
-  uint8_t base = ncclP2pChannelBaseForRound(comm, p2pRound, batchP2PEnableEnv);
+  bool batchP2P = rcclP2pBatchEligible(comm, sendBytes, recvBytes);
+  uint8_t base = ncclP2pChannelBaseForRound(comm, p2pRound, batchP2P);
   struct ncclProxyOp proxyOps[2] = {};
   int nProxyOps = selfSend ? 0 : 2;
   // Latency-bound send/recv uses one of two separately-generated kernel variants:
@@ -3511,45 +3505,51 @@ static ncclResult_t p2pTaskAppend(struct ncclComm* comm, struct ncclInfo* info, 
       while (peer != (isSendNotRecv ? comm->p2pSchedule[round].sendRank : comm->p2pSchedule[round].recvRank)) {
         round += 1;
       }
-      uint8_t base = ncclP2pChannelBaseForRound(comm, round, rcclEffectiveP2pBatchEnable(comm));
-
-      for (int c = 0; c < comm->p2pnChannelsPerPeer; c++) {
-        int channelId = ncclP2pChannelForPart(comm->p2pnChannels, base, c, comm->p2pnChannelsPerPeer, comm->nNodes,
-                                              comm->p2pChannelShiftSize);
-        if (isSendNotRecv) {
-          if (comm->channels[channelId].peers[peer]->send[1].hasSeen == 0) {
-            // P2P uses only 1 connector
-            // the send/recv connector is shared among split shared comms. We need to set hasSeen to
-            // 1 in order to avoid duplicate connection setup if user group sendrecv ops with split
-            // shared comms together.
-            comm->channels[channelId].peers[peer]->send[1].hasSeen = 1;
-            comm->channels[channelId].peers[peer]->send[1].p2pOnly = 1;
-            // comm->connectSend[peer] |= (1UL<<channelId);
-            comm->connectSend[peer].masks[channelId / 64] |= (1UL << (channelId % 64));
-            ncclGroupCommPreconnect(comm);
-          }
-          if (comm->p2pNet && comm->channels[channelId].peers[peer]->send[NCCL_CONN_IDX_P2P_NET].hasSeen == 0) {
-            comm->channels[channelId].peers[peer]->send[1].hasSeen = 1;
-            // comm->connectSend[peer+comm->nRanks*NCCL_CONN_IDX_P2P_NET] |= (1UL<<channelId);
-            comm->connectSend[peer + comm->nRanks * NCCL_CONN_IDX_P2P_NET].masks[channelId / 64] |=
-              (1UL << (channelId % 64));
-            ncclGroupCommPreconnect(comm);
-          }
-        } else {
-          if (comm->channels[channelId].peers[peer]->recv[1].hasSeen == 0) {
-            // P2P uses only 1 connector
-            comm->channels[channelId].peers[peer]->recv[1].hasSeen = 1;
-            comm->channels[channelId].peers[peer]->recv[1].p2pOnly = 1;
-            // comm->connectRecv[peer] |= (1UL<<channelId);
-            comm->connectRecv[peer].masks[channelId / 64] |= (1UL << (channelId % 64));
-            ncclGroupCommPreconnect(comm);
-          }
-          if (comm->p2pNet && comm->channels[channelId].peers[peer]->recv[NCCL_CONN_IDX_P2P_NET].hasSeen == 0) {
-            comm->channels[channelId].peers[peer]->recv[1].hasSeen = 1;
-            // comm->connectRecv[peer+comm->nRanks*NCCL_CONN_IDX_P2P_NET] |= (1UL<<channelId);
-            comm->connectRecv[peer + comm->nRanks * NCCL_CONN_IDX_P2P_NET].masks[channelId / 64] |=
-              (1UL << (channelId % 64));
-            ncclGroupCommPreconnect(comm);
+      // A communicator can execute both small, batch-eligible P2P operations and
+      // larger operations over its lifetime. Pre-connect both channel layouts
+      // when batching is enabled so planning can select by message size without
+      // depending on whichever size happened to be enqueued first.
+      const int baseModeCount = rcclEffectiveP2pBatchEnable(comm) ? 2 : 1;
+      for (int baseMode = 0; baseMode < baseModeCount; baseMode++) {
+        uint8_t base = ncclP2pChannelBaseForRound(comm, round, baseMode);
+        for (int c = 0; c < comm->p2pnChannelsPerPeer; c++) {
+          int channelId = ncclP2pChannelForPart(comm->p2pnChannels, base, c, comm->p2pnChannelsPerPeer, comm->nNodes,
+                                                comm->p2pChannelShiftSize);
+          if (isSendNotRecv) {
+            if (comm->channels[channelId].peers[peer]->send[1].hasSeen == 0) {
+              // P2P uses only 1 connector
+              // the send/recv connector is shared among split shared comms. We need to set hasSeen to
+              // 1 in order to avoid duplicate connection setup if user group sendrecv ops with split
+              // shared comms together.
+              comm->channels[channelId].peers[peer]->send[1].hasSeen = 1;
+              comm->channels[channelId].peers[peer]->send[1].p2pOnly = 1;
+              // comm->connectSend[peer] |= (1UL<<channelId);
+              comm->connectSend[peer].masks[channelId / 64] |= (1UL << (channelId % 64));
+              ncclGroupCommPreconnect(comm);
+            }
+            if (comm->p2pNet && comm->channels[channelId].peers[peer]->send[NCCL_CONN_IDX_P2P_NET].hasSeen == 0) {
+              comm->channels[channelId].peers[peer]->send[1].hasSeen = 1;
+              // comm->connectSend[peer+comm->nRanks*NCCL_CONN_IDX_P2P_NET] |= (1UL<<channelId);
+              comm->connectSend[peer + comm->nRanks * NCCL_CONN_IDX_P2P_NET].masks[channelId / 64] |=
+                (1UL << (channelId % 64));
+              ncclGroupCommPreconnect(comm);
+            }
+          } else {
+            if (comm->channels[channelId].peers[peer]->recv[1].hasSeen == 0) {
+              // P2P uses only 1 connector
+              comm->channels[channelId].peers[peer]->recv[1].hasSeen = 1;
+              comm->channels[channelId].peers[peer]->recv[1].p2pOnly = 1;
+              // comm->connectRecv[peer] |= (1UL<<channelId);
+              comm->connectRecv[peer].masks[channelId / 64] |= (1UL << (channelId % 64));
+              ncclGroupCommPreconnect(comm);
+            }
+            if (comm->p2pNet && comm->channels[channelId].peers[peer]->recv[NCCL_CONN_IDX_P2P_NET].hasSeen == 0) {
+              comm->channels[channelId].peers[peer]->recv[1].hasSeen = 1;
+              // comm->connectRecv[peer+comm->nRanks*NCCL_CONN_IDX_P2P_NET] |= (1UL<<channelId);
+              comm->connectRecv[peer + comm->nRanks * NCCL_CONN_IDX_P2P_NET].masks[channelId / 64] |=
+                (1UL << (channelId % 64));
+              ncclGroupCommPreconnect(comm);
+            }
           }
         }
       }

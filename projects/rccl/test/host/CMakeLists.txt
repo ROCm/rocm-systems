@@ -510,7 +510,16 @@ message(STATUS "Hipified sources: ${RCCL_HIPIFY_DIR}")
 # Compile-only (STATIC_LIBRARY) avoids link failures from amdsmi symbols.
 include(CheckCXXSourceCompiles)
 unset(AMDSMI_FABRIC_API CACHE)
+unset(AMDSMI_HEADER_HAS_FABRIC_TELEMETRY CACHE)
 set(CMAKE_TRY_COMPILE_TARGET_TYPE STATIC_LIBRARY)
+check_cxx_source_compiles("
+  #include <amd_smi/amdsmi.h>
+  int main() {
+    amdsmi_fabric_telemetry_category_t cat = AMDSMI_FABRIC_TELEMETRY_CATEGORY_UNKNOWN;
+    (void)cat;
+    return 0;
+  }
+" AMDSMI_HEADER_HAS_FABRIC_TELEMETRY)
 check_cxx_source_compiles("
   #include <amd_smi/amdsmi.h>
   #if !defined(AMDSMI_FABRIC_MAX_LOCAL_GPUS)
@@ -525,7 +534,10 @@ check_cxx_source_compiles("
   }
 " AMDSMI_FABRIC_API)
 set(CMAKE_TRY_COMPILE_TARGET_TYPE EXECUTABLE)
-if(AMDSMI_FABRIC_API)
+if(AMDSMI_HEADER_HAS_FABRIC_TELEMETRY AND NOT AMDSMI_FABRIC_API)
+  set(AMDSMI_FABRIC_API TRUE)
+  message(STATUS "amdsmi fabric telemetry types found - enabling AMDSMI_FABRIC_DIRECT")
+elseif(AMDSMI_FABRIC_API)
   message(STATUS "amdsmi fabric API found - enabling AMDSMI_FABRIC_DIRECT")
 else()
   message(STATUS "amdsmi fabric API not found (AMDSMI_FABRIC_DIRECT disabled)")
@@ -598,6 +610,7 @@ target_compile_definitions(rccl-source-wrappers PRIVATE
   NCCL_OS_LINUX
   ROCM_VERSION=70000
   $<$<BOOL:${AMDSMI_FABRIC_API}>:AMDSMI_FABRIC_DIRECT>
+  $<$<BOOL:${AMDSMI_HEADER_HAS_FABRIC_TELEMETRY}>:AMDSMI_HEADER_HAS_FABRIC_TELEMETRY>
   $<$<BOOL:${HIP_FABRIC_API}>:HIP_FABRIC_API>
 )
 target_link_libraries(rccl-source-wrappers PRIVATE
@@ -642,6 +655,7 @@ target_compile_definitions(rccl-HostUnitTests PRIVATE
   RCCL_EXPOSE_STATIC
   ARSMI_TEST_BUILD
   $<$<BOOL:${AMDSMI_FABRIC_API}>:AMDSMI_FABRIC_DIRECT>
+  $<$<BOOL:${AMDSMI_HEADER_HAS_FABRIC_TELEMETRY}>:AMDSMI_HEADER_HAS_FABRIC_TELEMETRY>
   $<$<BOOL:${HIP_FABRIC_API}>:HIP_FABRIC_API>
 )
 
@@ -693,6 +707,7 @@ target_compile_definitions(rccl-UnitTestsMicro PRIVATE
   # these, p2p-test.cc redefines hipMemFabricHandle_st and the amdsmi fabric
   # enumerators on ROCm 7.14+, and the standalone build fails.
   $<$<BOOL:${AMDSMI_FABRIC_API}>:AMDSMI_FABRIC_DIRECT>
+  $<$<BOOL:${AMDSMI_HEADER_HAS_FABRIC_TELEMETRY}>:AMDSMI_HEADER_HAS_FABRIC_TELEMETRY>
   $<$<BOOL:${HIP_FABRIC_API}>:HIP_FABRIC_API>
 )
 
@@ -758,6 +773,7 @@ foreach(_variant "" "-uncached")
     # this from RCCL_COMMON_COMPILE_DEFS instead.
     USE_AMDSMI
     $<$<BOOL:${AMDSMI_FABRIC_API}>:AMDSMI_FABRIC_DIRECT>
+    $<$<BOOL:${AMDSMI_HEADER_HAS_FABRIC_TELEMETRY}>:AMDSMI_HEADER_HAS_FABRIC_TELEMETRY>
     $<$<BOOL:${HIP_FABRIC_API}>:HIP_FABRIC_API>
     INIT_CC_PATH="${RCCL_HIPIFY_DIR}/src/init.cc"
   )

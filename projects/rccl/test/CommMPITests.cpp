@@ -10,6 +10,7 @@
 #include "MPIHelpers.hpp"
 #include "TestChecks.hpp"
 #include "ResourceGuards.hpp"
+#include "SymmetricMemPrereq.hpp"
 
 #include "nccl_device.h"
 #include "comm.h"
@@ -787,7 +788,8 @@ protected:
         const char* gin_type = std::getenv("NCCL_GIN_TYPE");
         const char* cumem    = std::getenv("NCCL_CUMEM_ENABLE");
         return gin_type != nullptr && std::string(gin_type) == "2"
-            && cumem != nullptr && std::string(cumem) == "1";
+            && cumem != nullptr && std::string(cumem) == "1"
+            && ncclCuMemRuntimeSupported();
     }
 
     static std::array<int, 2> collectiveBoolSummary(bool value)
@@ -925,7 +927,7 @@ TEST_F(GinTrafficClassMPITest, DeviceHostPrecedence)
 {
     const auto proxy_prerequisites = collectiveBoolSummary(proxyPrerequisitesMet());
     if(proxy_prerequisites[0] == 0 && proxy_prerequisites[1] == 0)
-        GTEST_SKIP() << "Requires NCCL_GIN_TYPE=2 and NCCL_CUMEM_ENABLE=1";
+        GTEST_SKIP() << "Requires NCCL_GIN_TYPE=2 and runtime-supported cuMem";
     ASSERT_MPI_TRUE(proxy_prerequisites[0] == 1 && proxy_prerequisites[1] == 1);
 
     const bool local_ib_env_unset =

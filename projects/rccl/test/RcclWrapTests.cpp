@@ -175,7 +175,9 @@ TEST(Rcclwrap, RcclUpdateCollectiveProtocol_UsesLL128WhenInRange)
     comm->nNodes                    = 2; // triggers inter-node logic
     comm->rank                      = 0;
     comm->topo                      = new ncclTopoSystem();
-    *comm->topo                     = {};
+    // Aggregate value-initialization creates a sizeof(ncclTopoSystem) (13 MiB)
+    // temporary in this stack frame and overflows the default 8 MiB stack.
+    memset(comm->topo, 0, sizeof(*comm->topo));
     comm->topo->ll128Enabled        = true;
     comm->topo->nodes[GPU].nodes[0] = {};
     comm->topo->nodes[GPU].count    = 1;
@@ -218,6 +220,7 @@ TEST(Rcclwrap, RcclUpdateCollectiveProtocol_WarnsOnGfx942Arch)
     comm->nNodes                    = 2; // triggers inter-node logic
     comm->rank                      = 0;
     comm->topo                      = new ncclTopoSystem();
+    memset(comm->topo, 0, sizeof(*comm->topo));
     comm->topo->ll128Enabled        = true;
     comm->topo->nodes[GPU].nodes[0] = {};
     strncpy(
@@ -261,7 +264,7 @@ TEST(Rcclwrap, RcclUpdateCollectiveProtocol_HonorsUserProtocolEnv)
     comm->rank   = 0;
     comm->topo   = new ncclTopoSystem(); //(struct ncclTopoSystem*)calloc(1,
                                          // sizeof(struct ncclTopoSystem));
-    *comm->topo                     = {};
+    memset(comm->topo, 0, sizeof(*comm->topo));
     comm->topo->ll128Enabled        = true;
     comm->topo->nodes[GPU].nodes[0] = {};
     strncpy(
@@ -296,7 +299,7 @@ TEST(Rcclwrap, RcclUpdateCollectiveProtocol_SimpleFallbackWhenNoRanges)
     comm->rank   = 0;
     comm->topo   = new ncclTopoSystem(); //(struct ncclTopoSystem*)calloc(1,
                                          // sizeof(struct ncclTopoSystem));
-    *comm->topo                     = {};
+    memset(comm->topo, 0, sizeof(*comm->topo));
     comm->topo->ll128Enabled        = true;
     comm->topo->nodes[GPU].nodes[0] = {};
     comm->topo->nodes[GPU].count    = 1;
@@ -1535,8 +1538,7 @@ TEST(Rcclwrap, RcclUseHierarchicalReduceScatterTests)
         std::unordered_map<std::string, std::string> extraEnv;
     };
 
-    const size_t HALF = HIERARCHICAL_TEMP_BUFFER_SIZE / 2; // 8-node threshold (64MB)
-    const size_t FULL = HIERARCHICAL_TEMP_BUFFER_SIZE;     // 16-node threshold (128MB)
+    const size_t HALF = HIERARCHICAL_TEMP_BUFFER_SIZE / 2; // 8/16-node threshold (64MB)
 
     std::vector<HierRSCase> testCases = {
         // nNodes < 8 --> disabled
@@ -1545,8 +1547,8 @@ TEST(Rcclwrap, RcclUseHierarchicalReduceScatterTests)
         {"CommsNotInitialized",       16, false, 1ULL << 20, false, {{"RCCL_HIERARCHICAL_REDUCE_SCATTER", "1"}}},
         // 8 node size > 64MB --> disabled
         {"Disabled_8Nodes_AboveHalf", 8,  true,  HALF + 1,   false, {{"RCCL_HIERARCHICAL_REDUCE_SCATTER", "1"}}},
-        // 16 node size > 128MB --> disabled
-        {"Disabled_16N_AboveFull",    16, true,  FULL + 1,   false, {{"RCCL_HIERARCHICAL_REDUCE_SCATTER", "1"}}},
+        // 16 node size > 64MB --> disabled
+        {"Disabled_16N_AboveHalf",    16, true,  HALF + 1,   false, {{"RCCL_HIERARCHICAL_REDUCE_SCATTER", "1"}}},
         // disabled by default
         {"DisabledByDefault",          16, true,  1ULL << 20, false, {}},
         // env var forces off --> disabled
@@ -1556,9 +1558,9 @@ TEST(Rcclwrap, RcclUseHierarchicalReduceScatterTests)
         // 8 nodes, exactly at threshold --> enabled
         {"Enabled_8Nodes_AtHalf",     8,  true,  HALF,       true,  {{"RCCL_HIERARCHICAL_REDUCE_SCATTER", "1"}}},
         // 16 nodes, initialized, below threshold --> enabled
-        {"Enabled_16Nodes_BelowFull", 16, true,  1ULL << 20, true,  {{"RCCL_HIERARCHICAL_REDUCE_SCATTER", "1"}}},
+        {"Enabled_16Nodes_BelowHalf", 16, true,  1ULL << 20, true,  {{"RCCL_HIERARCHICAL_REDUCE_SCATTER", "1"}}},
         // 16 nodes, exactly at threshold --> enabled
-        {"Enabled_16Nodes_AtFull",    16, true,  FULL,       true,  {{"RCCL_HIERARCHICAL_REDUCE_SCATTER", "1"}}},
+        {"Enabled_16Nodes_AtHalf",    16, true,  HALF,       true,  {{"RCCL_HIERARCHICAL_REDUCE_SCATTER", "1"}}},
     };
 
     // Base environment shared by every case
@@ -1633,10 +1635,10 @@ TEST(Rcclwrap, ReduceScatterSelectionKeepsDirectPathOffScaledOps)
         "ReduceScatterSelectionKeepsDirectPathOffScaledOps",
         []()
         {
-            ncclComm_t          mockComm = nullptr;
+            ncclComm_t            mockComm = nullptr;
             // ncclTopoSystem is ~13 MiB, so a stack local overflows the default 8 MiB stack.
-            auto*               mockTopo = static_cast<ncclTopoSystem*>(std::calloc(1, sizeof(ncclTopoSystem)));
-            struct ncclTopoNode mockGpu;
+            auto                  mockTopo = std::make_unique<ncclTopoSystem>();
+            struct ncclTopoNode   mockGpu;
             CreateMockComm(mockComm, *mockTopo, mockGpu, "gfx950", /*nRanks=*/16);
             SetMockNodes(mockComm, /*nNodes=*/2, /*topoNRanks=*/16);
             // CreateMockComm leaves archName null, which the DDA gate dereferences.
@@ -1668,7 +1670,6 @@ TEST(Rcclwrap, ReduceScatterSelectionKeepsDirectPathOffScaledOps)
             EXPECT_NE(selectedAlgo(static_cast<ncclRedOp_t>(ncclNumOps)), static_cast<int>(RCCL_DIRECT_REDUCESCATTER));
 
             CleanupMockComm(mockComm);
-            std::free(mockTopo);
         },
         {{"RCCL_DDA_ENABLE", "0"}});
 }
@@ -1692,8 +1693,8 @@ TEST(Rcclwrap, RcclHierarchicalTempBufferSizeTests)
 
     EXPECT_EQ(rcclHierarchicalTempBufferSize(8, false, true), HALF);
     EXPECT_EQ(rcclHierarchicalTempBufferSize(15, false, true), HALF);
-    EXPECT_EQ(rcclHierarchicalTempBufferSize(16, false, true), FULL);
-    EXPECT_EQ(rcclHierarchicalTempBufferSize(32, false, true), FULL);
+    EXPECT_EQ(rcclHierarchicalTempBufferSize(16, false, true), HALF);
+    EXPECT_EQ(rcclHierarchicalTempBufferSize(32, false, true), HALF);
 }
 
 TEST(Rcclwrap, RcclHierarchicalAlgoInfoTests)

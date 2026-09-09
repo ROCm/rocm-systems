@@ -476,12 +476,21 @@ if(ROCM_VERSION VERSION_GREATER_EQUAL "71100")
     message(STATUS "Found amd_smi at ${SMI_INCLUDE_DIR}")
     set(SMI_LIBRARIES amd_smi)
 
-    ### Check whether the installed amdsmi headers expose the UALoE fabric struct
-    ### (amdsmi_fabric_info_t). The probe compiles against the struct only — no
-    ### link-time dependency on amdsmi_get_gpu_fabric_info — because amdsmi is
-    ### loaded lazily at runtime via dlopen. If the struct is absent, the compat
-    ### types in amdsmi_wrap.h must be compiled in.
+    ### Check whether the installed amdsmi headers expose UALoE fabric types.
+    ### Classic UALoE headers define AMDSMI_FABRIC_MAX_LOCAL_GPUS plus
+    ### amdsmi_fabric_info_t. ROCm 7.14 can ship fabric telemetry enumerators
+    ### without that macro; requiring the macro then leaves AMDSMI_FABRIC_DIRECT
+    ### off and amdsmi_wrap.h redefines the system enums.
     set(CMAKE_REQUIRED_INCLUDES "${SMI_INCLUDE_DIR}")
+    unset(AMDSMI_HEADER_HAS_FABRIC_TELEMETRY CACHE)
+    check_cxx_source_compiles("
+      #include <amd_smi/amdsmi.h>
+      int main() {
+        amdsmi_fabric_telemetry_category_t cat = AMDSMI_FABRIC_TELEMETRY_CATEGORY_UNKNOWN;
+        (void)cat;
+        return 0;
+      }
+    " AMDSMI_HEADER_HAS_FABRIC_TELEMETRY)
     check_cxx_source_compiles("
       #include <amd_smi/amdsmi.h>
       #if !defined(AMDSMI_FABRIC_MAX_LOCAL_GPUS)
@@ -496,7 +505,10 @@ if(ROCM_VERSION VERSION_GREATER_EQUAL "71100")
       }
     " AMDSMI_FABRIC_API)
     unset(CMAKE_REQUIRED_INCLUDES)
-    if(AMDSMI_FABRIC_API)
+    if(AMDSMI_HEADER_HAS_FABRIC_TELEMETRY AND NOT AMDSMI_FABRIC_API)
+      set(AMDSMI_FABRIC_API TRUE)
+      message(STATUS "amdsmi fabric telemetry types found (no AMDSMI_FABRIC_MAX_LOCAL_GPUS) - enabling AMDSMI_FABRIC_DIRECT")
+    elseif(AMDSMI_FABRIC_API)
       message(STATUS "amdsmi UALoE fabric API found - enabling AMDSMI_FABRIC_DIRECT")
     else()
       message(STATUS "amdsmi UALoE fabric API not found - using compat types")

@@ -718,7 +718,10 @@ size_t rcclHierarchicalTempBufferSize(int nNodes, bool allGather, bool reduceSca
   size_t rsThreshold = 0;
   if (reduceScatter) {
     if (nNodes >= 16) {
-      rsThreshold = HIERARCHICAL_TEMP_BUFFER_SIZE; // 128MB
+      // At 16 nodes the hierarchical path loses to RING/LL128 at 128 MiB.
+      // Keep the measured 64 MiB crossover as both the selection threshold
+      // and the temporary-buffer ceiling.
+      rsThreshold = HIERARCHICAL_TEMP_BUFFER_SIZE / 2; // 64MB
     } else if (nNodes >= 8) {
       rsThreshold = HIERARCHICAL_TEMP_BUFFER_SIZE / 2; // 64MB
     }
