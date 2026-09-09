@@ -218,11 +218,11 @@ flowchart TD
 
 | ID | Requirement |
 | --- | --- |
-| **FR-7** | One kernel-replay invocation produces one consolidated counter result using the existing naming and discovery convention. The contract the analysis path consumes is unchanged; kernel replay adds one native artifact and one ingestion step upstream of it. |
+| **FR-7** | One kernel-replay invocation produces one consolidated counter result using the existing naming and discovery convention. The contract the analysis path consumes is unchanged. |
 | **FR-8** | All passes of one logical dispatch resolve to one `Dispatch_ID` group holding the complete counter set. |
 | **FR-9** | Start and end timestamps follow the same cross-pass normalization semantics used for application-replay results. |
 | **FR-10** | Exactly one kernel dispatch record reaches the result per logical dispatch, from pass 0. |
-| **FR-11** | Marker region durations are corrected by subtracting the replay overhead of the dispatches the region encloses. |
+| **FR-11** | Marker region durations are corrected by subtracting the kernel replay overhead. |
 
 #### Composition and filtering
 
@@ -232,18 +232,16 @@ flowchart TD
 | **FR-13** | A dispatch whose kernel is excluded is not replayed. |
 | **FR-14** | `--dispatch` retains its per-kernel dispatch filtering. A replay-ineligible kernel dispatch is not replayed. |
 | **FR-15** | Kernel replay stays available for multi-rank workloads and emits a kernel-replay-specific diagnostic describing the risk. |
-| **FR-16** | Only the native tool configures a `KERNEL_REPLAY` service. `rocprofiler-sdk-tool` must not, because only one context may configure one. |
 
 #### Failure
 
 | ID | Requirement |
 | --- | --- |
-| **FR-17** | An SDK below the supported version floor is a hard error stating the required version. |
-| **FR-18** | If the SDK declines a device-memory snapshot, abandon the profile without retry and recommend application replay in the diagnostic. |
-| **FR-19** | If the upstream replay mechanism aborts, report the failed run without attempting recovery. |
-| **FR-20** | If counters were requested but an agent has no usable counter profiles, do not silently degrade the dispatch to one pass. |
-| **FR-21** | A second `KERNEL_REPLAY` service configuration is a hard error naming `ROCPROFILER_STATUS_ERROR_SERVICE_ALREADY_CONFIGURED`. |
-| **FR-22** | An unsatisfied prerequisite is a hard error naming that prerequisite, before any workload runs. Kernel replay never proceeds with multiplied dispatch records, a counter context it cannot stop independently, or a missing PC sampling pass. |
+| **FR-16** | An SDK below the supported version floor is a hard error stating the required version. |
+| **FR-17** | If the SDK declines a device-memory snapshot, abandon the profile without retry and recommend application replay in the diagnostic. |
+| **FR-18** | If the upstream replay mechanism aborts, report the failed run without attempting recovery. |
+| **FR-19** | If counters were requested but an agent has no usable counter profiles, do not silently degrade the dispatch to one pass. |
+| **FR-20** | A second `KERNEL_REPLAY` service configuration is a hard error naming `ROCPROFILER_STATUS_ERROR_SERVICE_ALREADY_CONFIGURED`. |
 
 ### Non-functional requirements
 
