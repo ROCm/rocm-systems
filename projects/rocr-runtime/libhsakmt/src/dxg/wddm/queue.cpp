@@ -209,10 +209,10 @@ void ComputeQueue::FaultMonitorThread(ComputeQueue* queue) {
     // error_reason written by GPU trap handler
     if (queue->error_code_ &&
         queue->error_code_->load(std::memory_order_acquire) != 0) {
+      if (queue->thread_stop_.exchange(true)) return;
       int64_t code = queue->error_code_->load(std::memory_order_relaxed);
       pr_err("GPU fault detected via error_reason: 0x%" PRIx64 "\n", static_cast<uint64_t>(code));
-      queue->thread_stop_ = true;
-      queue->HandleError(static_cast<hsa_status_t>(HSA_STATUS_ERROR_MEMORY_APERTURE_VIOLATION));
+      queue->HandleError(static_cast<hsa_status_t>(code));
       return;
     }
 
@@ -227,10 +227,10 @@ void ComputeQueue::FaultMonitorThread(ComputeQueue* queue) {
       } else if (current_wptr > current_rptr) {
         auto stall_duration = std::chrono::steady_clock::now() - last_progress;
         if (stall_duration > std::chrono::milliseconds(kStallTimeoutMs)) {
+          if (queue->thread_stop_.exchange(true)) return;
           pr_err("GPU stall detected: rptr=%" PRIu64 " wptr=%" PRIu64
                  " stalled for %dms — possible device memory fault\n",
                  current_rptr, current_wptr, kStallTimeoutMs);
-          queue->thread_stop_ = true;
           queue->HandleError(static_cast<hsa_status_t>(HSA_STATUS_ERROR_MEMORY_APERTURE_VIOLATION));
           return;
         }
@@ -255,11 +255,10 @@ void ComputeQueue::AqlToPm4Thread(ComputeQueue* queue) {
     // Poll error_reason for trap handler fault codes (DXG lacks KFD event path).
     if (queue->thread_stop_) break;
     if (queue->error_code_ && queue->error_code_->load(std::memory_order_acquire) != 0) {
-      if (queue->thread_stop_) break;
+      if (queue->thread_stop_.exchange(true)) break;
       int64_t code = queue->error_code_->load(std::memory_order_relaxed);
       pr_err("GPU fault detected via error_reason: 0x%" PRIx64 "\n", static_cast<uint64_t>(code));
-      queue->thread_stop_ = true;
-      queue->HandleError(static_cast<hsa_status_t>(HSA_STATUS_ERROR_MEMORY_APERTURE_VIOLATION));
+      queue->HandleError(static_cast<hsa_status_t>(code));
       break;
     }
 
@@ -340,9 +339,9 @@ ComputeQueue::ComputeQueue(WDDMDevice* device, void* ring, uint64_t ring_size,
       error_code_ = reinterpret_cast<volatile std::atomic<int64_t>*>(error_reason_);
       pr_info("Allocated GPU-visible error_reason at %p\n", error_reason_);
     } else {
-      error_reason_storage_ = 0;
-      error_reason_ = &error_reason_storage_;
-      error_code_ = reinterpret_cast<volatile std::atomic<int64_t>*>(&error_reason_storage_);
+      error_reason_storage_.store(0, std::memory_order_relaxed);
+      error_reason_ = reinterpret_cast<volatile int64_t*>(&error_reason_storage_);
+      error_code_ = &error_reason_storage_;
       pr_warn("Failed to allocate GPU-visible error_reason, using CPU fallback\n");
     }
   }

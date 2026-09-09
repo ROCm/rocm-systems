@@ -49,6 +49,7 @@
 #include <unistd.h>
 #include <linux/mman.h>
 #include <poll.h>
+#include <cerrno>
 #endif
 #include <sys/stat.h>
 #include <fcntl.h>
@@ -1337,12 +1338,13 @@ HSAKMT_STATUS WDDMDevice::WaitOnMultipleEvents(HsaEvent* events[], uint32_t num_
     signaled[i] = false;
   }
 
-  uint32_t kWaitTimeout = 6000;
-  if (!dxg_runtime->disable_wait_timeout_ && (msec > kWaitTimeout)) {
-    msec = kWaitTimeout;
+  uint32_t effective_msec = msec;
+  constexpr uint32_t kWaitTimeout = 6000;
+  if (!dxg_runtime->disable_wait_timeout_ && (effective_msec > kWaitTimeout)) {
+    effective_msec = kWaitTimeout;
   }
 
-  auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(msec);
+  auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(effective_msec);
   uint32_t signaled_count = 0;
 
   while (true) {
@@ -1351,6 +1353,11 @@ HSAKMT_STATUS WDDMDevice::WaitOnMultipleEvents(HsaEvent* events[], uint32_t num_
     if (remaining_ms < 0) remaining_ms = 0;
 
     int ret = poll(pfds, num_elems, remaining_ms);
+    if (ret < 0) {
+      if (errno == EINTR) continue;
+      pr_err("poll() failed: %d\n", errno);
+      return HSAKMT_STATUS_WAIT_FAILURE;
+    }
     if (ret > 0) {
       for (uint32_t i = 0; i < num_elems; ++i) {
         if ((pfds[i].revents & POLLIN) && !signaled[i]) {

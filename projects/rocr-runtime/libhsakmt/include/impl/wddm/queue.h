@@ -265,7 +265,7 @@ private:
   uint64_t amd_queue_size_rocr_;    //!< Size of the AQL queue allocated in ROCR, including header
   uint64_t doorbell_signal_value_;
   volatile std::atomic<int64_t> *error_code_;
-  int64_t error_reason_storage_ = 0;
+  std::atomic<int64_t> error_reason_storage_{0};
   GpuMemoryHandle error_reason_mem_ = nullptr;
   std::thread aql_to_pm4_thread_;
   std::thread fault_monitor_thread_;
