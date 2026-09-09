@@ -3193,7 +3193,8 @@ void SimulatedKfd::on_wave_trap_complete(amdgpu::Wavefront &wave) {
   // request publishes the authoritative full-queue CWSR snapshot.
   const bool notified = notify_debug_event(
       proc, queue_id,
-      queue_exception_status != 0 ? debugger_status : KFD_EC_MASK(EC_QUEUE_WAVE_TRAP));
+      queue_exception_status != 0 ? debugger_status : KFD_EC_MASK(EC_QUEUE_WAVE_TRAP),
+      /*retain_on_rejection=*/queue_exception_status != 0);
   if (!notified)
     fall_back_to_runtime();
 }
@@ -3245,9 +3246,9 @@ bool SimulatedKfd::signal_runtime_queue_exception(uint32_t gpu_id, uint32_t queu
     return false;
 
   // Every XCD owns a replica of a fanned-out queue. Stop every replica before
-  // publishing the shared status, but do not hold queue_exception_mutex_ while
-  // entering a CU: releasing its wave-state guard can flush another exception
-  // back through this function.
+  // publishing the shared status, but do not hold the per-queue publication
+  // mutex while entering a CU: releasing its wave-state guard can flush another
+  // exception back through this function.
   amdgpu::CommandProcessor *publisher = nullptr;
   gpu->soc->for_each_cp([&](amdgpu::CommandProcessor *cp) {
     if (cp->signal_queue_exception(queue_id, process_id, exception_mask,
@@ -3262,29 +3263,29 @@ bool SimulatedKfd::signal_runtime_queue_exception(uint32_t gpu_id, uint32_t queu
   // that read-modify-write, interrupt, and acknowledgement wait without
   // blocking independent processes or queues behind a stalled runtime.
   const uint64_t key = (static_cast<uint64_t>(process_id) << 32) | queue_id;
-  std::shared_ptr<std::mutex> publication_mutex;
+  std::shared_ptr<QueueExceptionLock> publication_lock;
   {
     std::lock_guard<std::mutex> lock(queue_exception_locks_mutex_);
     auto &entry = queue_exception_locks_[key];
-    publication_mutex = entry.lock();
-    if (!publication_mutex) {
-      publication_mutex = std::make_shared<std::mutex>();
-      entry = publication_mutex;
-    }
+    if (!entry)
+      entry = std::make_shared<QueueExceptionLock>();
+    publication_lock = entry;
+    ++publication_lock->users;
   }
   bool published = false;
   {
-    std::lock_guard<std::mutex> lock(*publication_mutex);
+    std::lock_guard<std::mutex> lock(publication_lock->publication_mutex);
     published = publisher->publish_queue_exception(queue_id, process_id, exception_mask);
   }
-  // Keep only live per-queue mutexes. A racing publisher takes a strong
-  // reference under queue_exception_locks_mutex_ before this cleanup, so an
-  // entry is removed only after no thread can still acquire the old mutex.
+  // A publisher joins and leaves under the registry lock, so the last user
+  // always observes zero and erases the entry. The identity check prevents a
+  // stale releaser from erasing a replacement allocated for the same key.
   {
     std::lock_guard<std::mutex> lock(queue_exception_locks_mutex_);
-    if (publication_mutex.use_count() == 1) {
+    const bool last_user = --publication_lock->users == 0;
+    if (last_user) {
       auto entry = queue_exception_locks_.find(key);
-      if (entry != queue_exception_locks_.end() && entry->second.lock() == publication_mutex)
+      if (entry != queue_exception_locks_.end() && entry->second == publication_lock)
         queue_exception_locks_.erase(entry);
     }
   }
@@ -3445,6 +3446,7 @@ bool SimulatedKfd::report_wave_stopped(const std::shared_ptr<KfdProcess> &proc, 
   // the serializer selects waves by debug_stopped() -- so the caller undoes it.
   if (!serialize_queue_debug_waves(proc->process_id(), queue_id, gpu_id, ctx_base, ctx_size))
     return false;
+  apply_debug_event_publication_hook_for_testing(proc);
   return notify_debug_event(proc, queue_id, exception_mask, retain_on_rejection);
 }
 
@@ -4128,7 +4130,7 @@ int SimulatedKfd::resume_debug_queues(KfdProcess *proc, uint32_t *queue_ids, uin
     for (size_t index = 0; index < stopped.size(); ++index) {
       owners[index]->with_wave_state_locked([&] {
         const bool fatal_exception_pending = stopped[index]->fatal_exception_pending();
-        if (restored && fatal_exception_pending)
+        if (fatal_exception_pending)
           stopped[index]->set_fatal_exception_cwsr_valid(false);
         // A malformed or stale CWSR image must not strand a temporarily
         // suspended wave after the queue gate is released. Architecturally

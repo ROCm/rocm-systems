@@ -206,6 +206,12 @@ public:
     return signal_runtime_queue_exception(gpu_id, queue_id, process_id, exception_mask);
   }
 
+  /// @brief Number of per-queue exception publication locks currently in use.
+  [[nodiscard]] size_t queue_exception_lock_count_for_testing() {
+    std::lock_guard<std::mutex> lock(queue_exception_locks_mutex_);
+    return queue_exception_locks_.size();
+  }
+
   /// @brief Release the local process's parked event waiters so a blocking
   /// WAIT_EVENTS returns and drops its driver snapshot before teardown.
   /// @details Fires EventState::begin_wait_cancel() on the local process: waiters
@@ -491,10 +497,13 @@ private:
                                         bool retain_on_rejection = true);
   static bool defer_wave_exception_to_runtime(amdgpu::Wavefront &wf, uint64_t exception_mask);
   /// @brief Publish a wave stop: serialize the queue, then wake the debugger.
-  /// @returns True if the CWSR record was written and the event raised. On
-  /// false nothing was published and the caller must undo the stop it claimed:
-  /// the debugger has no record to read, so a wave left halted is invisible to
-  /// it and can never be resumed.
+  /// @param retain_on_rejection Whether a serialized stop whose notification
+  ///        loses its subscription or notifier should remain in the queue's
+  ///        exception status for a later debugger query.
+  /// @returns True if the CWSR record was written and the event raised. False
+  /// can still mean that CWSR serialization succeeded and, when retention is
+  /// enabled, that exception status was latched. The caller must undo the stop
+  /// it claimed because no debugger was woken to resume it.
   [[nodiscard]] bool report_wave_stopped(const std::shared_ptr<KfdProcess> &proc, uint32_t queue_id,
                                          uint32_t gpu_id, uint64_t ctx_base, uint32_t ctx_size,
                                          uint64_t exception_mask = KFD_EC_MASK(EC_QUEUE_WAVE_TRAP),
@@ -684,8 +693,12 @@ private:
   /// @details Protected by interrupt_mutex_. Decoupled from process_mutex_
   /// to avoid ABBA deadlocks with hw_queue_mutex_ in the CP doorbell thread.
   mutable std::mutex interrupt_mutex_;
+  struct QueueExceptionLock {
+    std::mutex publication_mutex;
+    uint32_t users = 0;
+  };
   std::mutex queue_exception_locks_mutex_;
-  std::unordered_map<uint64_t, std::weak_ptr<std::mutex>> queue_exception_locks_;
+  std::unordered_map<uint64_t, std::shared_ptr<QueueExceptionLock>> queue_exception_locks_;
   std::unordered_map<uint32_t, EventState *> event_dispatch_;
 
   /// @brief Process ID for local-mode (interposer). Set once in open().
