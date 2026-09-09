@@ -117,6 +117,14 @@ elseif(ROCPROFILER_MEMCHECK STREQUAL "LeakSanitizer")
     rocprofiler_set_memcheck_env("${ROCPROFILER_MEMCHECK}" "lsan")
 elseif(ROCPROFILER_MEMCHECK STREQUAL "ThreadSanitizer")
     rocprofiler_add_memcheck_flags("${ROCPROFILER_MEMCHECK}" "tsan" "thread")
+    if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+        # GCC cannot model standalone atomic fences under ThreadSanitizer and emits -Wtsan
+        # for every use. The SDK uses one to order reads from a device-owned ring buffer,
+        # which is outside TSan's synchronization model.
+        target_compile_options(
+            rocprofiler-sdk-sanitizer
+            INTERFACE "$<BUILD_INTERFACE:$<$<COMPILE_LANGUAGE:C,CXX>:-Wno-tsan>>")
+    endif()
     rocprofiler_set_memcheck_env("${ROCPROFILER_MEMCHECK}" "tsan"
                                  ${ThreadSanitizer_SOVERSION})
 elseif(ROCPROFILER_MEMCHECK STREQUAL "UndefinedBehaviorSanitizer")
