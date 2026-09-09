@@ -21,20 +21,19 @@ list_metrics: null
 list_sets: false
 loglevel: 20
 membw_analysis: false
-ml_api_trace: true
-ml_trace_with_params: shapes
+ml_api_trace: false
 mode: profile
-name: ml_api_trace
+name: triton_trace
 no_native_tool: false
-no_roof: false
-output_directory: /app/projects/rocprofiler-compute/workloads/ml_api_trace/MI300A_A1
+no_roof: true
+output_directory: /app/projects/rocprofiler-compute/workloads/triton_trace/MI300A
 overwrite: false
 pc_sampling: false
 pc_sampling_interval: null
 pc_sampling_method: stochastic
 quiet: false
 remaining: python3 /app/projects/rocprofiler-compute/src/utils/inject_roctx/launch.py
-  --frameworks torch,triton --capture-args 1 --capture-arg-values 0 -- /app/projects/rocprofiler-compute/sample/torch_compile_triton.py
+  --frameworks triton -- ./tests/triton_ffn.py
 retain_rocpd_output: false
 rocprofiler_sdk_tool_path: /rocm-venv/lib/python3.12/site-packages/_rocm_sdk_core/lib/rocprofiler-sdk/librocprofiler-sdk-tool.so
 roof_only: false
@@ -42,5 +41,5 @@ set_selected: compute_thruput_util
 specs: false
 target: null
 torch_trace: false
-triton_trace: false
+triton_trace: true
 verbose: 0
