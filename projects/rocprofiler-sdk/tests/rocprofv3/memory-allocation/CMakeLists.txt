@@ -22,7 +22,7 @@ rocprofiler_add_integration_execute_test(
     DEPENDS hsa-memory-allocation
     TIMEOUT 45
     LABELS "integration-tests"
-    PRELOAD "${PRELOAD_ENV}"
+    ENVIRONMENT "${PRELOAD_ENV}"
     FIXTURES_SETUP rocprofv3-test-memory-allocation-tracing)
 
 rocprofiler_add_integration_validate_test(

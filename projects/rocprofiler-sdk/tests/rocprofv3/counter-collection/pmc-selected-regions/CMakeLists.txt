@@ -46,7 +46,7 @@ rocprofiler_add_integration_execute_test(
     DEPENDS roctx-pause-resume
     TIMEOUT 120
     LABELS "integration-tests;pause-resume;counter-collection;selected-regions"
-    PRELOAD "${PRELOAD_ENV}"
+    ENVIRONMENT "${PRELOAD_ENV}"
     FIXTURES_SETUP rocprofv3-test-counter-collection-pmc-selected-regions)
 
 rocprofiler_add_integration_validate_test(

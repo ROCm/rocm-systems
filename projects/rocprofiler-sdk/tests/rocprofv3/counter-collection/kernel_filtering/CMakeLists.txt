@@ -22,7 +22,7 @@ rocprofiler_add_integration_execute_test(
     DEPENDS vector-ops
     TIMEOUT 120
     LABELS "integration-tests"
-    PRELOAD "${PRELOAD_ENV}"
+    ENVIRONMENT "${PRELOAD_ENV}"
     FIXTURES_SETUP rocprofv3-test-counter-collection-kernel-filtering-input-json)
 
 rocprofiler_add_integration_validate_test(
@@ -63,7 +63,7 @@ rocprofiler_add_integration_execute_test(
     DEPENDS vector-ops
     TIMEOUT 120
     LABELS "integration-tests"
-    PRELOAD "${PRELOAD_ENV}"
+    ENVIRONMENT "${PRELOAD_ENV}"
     FIXTURES_SETUP rocprofv3-test-counter-collection-kernel-filtering-input-cmd)
 
 rocprofiler_add_integration_validate_test(
@@ -93,7 +93,7 @@ rocprofiler_add_integration_execute_test(
     DEPENDS vector-ops
     TIMEOUT 120
     LABELS "integration-tests"
-    PRELOAD "${PRELOAD_ENV}"
+    ENVIRONMENT "${PRELOAD_ENV}"
     FIXTURES_SETUP
         rocprofv3-test-counter-collection-kernel-filtering-input-cmd-iteration-range)
 
@@ -123,7 +123,7 @@ rocprofiler_add_integration_execute_test(
     DEPENDS vector-ops
     TIMEOUT 120
     LABELS "integration-tests"
-    PRELOAD "${PRELOAD_ENV}"
+    ENVIRONMENT "${PRELOAD_ENV}"
     FIXTURES_SETUP rocprofv3-test-counter-collection-kernel-filtering-input-yaml)
 
 rocprofiler_add_integration_validate_test(
@@ -172,7 +172,7 @@ rocprofiler_add_integration_execute_test(
     DEPENDS vector-ops
     TIMEOUT 120
     LABELS "integration-tests"
-    PRELOAD "${PRELOAD_ENV}"
+    ENVIRONMENT "${PRELOAD_ENV}"
     FIXTURES_SETUP rocprofv3-test-counter-collection-kernel-filtering-cli-single-kernel)
 
 rocprofiler_add_integration_validate_test(
@@ -203,7 +203,7 @@ rocprofiler_add_integration_execute_test(
     DEPENDS vector-ops
     TIMEOUT 120
     LABELS "integration-tests"
-    PRELOAD "${PRELOAD_ENV}"
+    ENVIRONMENT "${PRELOAD_ENV}"
     FIXTURES_SETUP rocprofv3-test-counter-collection-kernel-filtering-cli-multitoken-range
     )
 
@@ -235,7 +235,7 @@ rocprofiler_add_integration_execute_test(
     DEPENDS vector-ops
     TIMEOUT 120
     LABELS "integration-tests"
-    PRELOAD "${PRELOAD_ENV}"
+    ENVIRONMENT "${PRELOAD_ENV}"
     FIXTURES_SETUP rocprofv3-test-counter-collection-kernel-filtering-cli-exclude)
 
 rocprofiler_add_integration_validate_test(
@@ -260,7 +260,7 @@ rocprofiler_add_integration_execute_test(
     DEPENDS vector-ops
     TIMEOUT 120
     LABELS "integration-tests"
-    PRELOAD "${PRELOAD_ENV}"
+    ENVIRONMENT "${PRELOAD_ENV}"
     FIXTURES_SETUP rocprofv3-test-counter-collection-kernel-filtering-cli-mangled)
 
 rocprofiler_add_integration_validate_test(
@@ -288,7 +288,7 @@ rocprofiler_add_integration_execute_test(
     DEPENDS vector-ops
     TIMEOUT 120
     LABELS "integration-tests"
-    PRELOAD "${PRELOAD_ENV}"
+    ENVIRONMENT "${PRELOAD_ENV}"
     FIXTURES_SETUP rocprofv3-test-counter-collection-kernel-filtering-cli-exclude-all)
 
 rocprofiler_add_integration_validate_test(
@@ -311,7 +311,7 @@ rocprofiler_add_integration_execute_test(
     DEPENDS vector-ops
     TIMEOUT 120
     LABELS "integration-tests"
-    PRELOAD "${PRELOAD_ENV}"
+    ENVIRONMENT "${PRELOAD_ENV}"
     FIXTURES_SETUP rocprofv3-test-counter-collection-kernel-filtering-cli-empty-match)
 
 rocprofiler_add_integration_validate_test(
@@ -335,7 +335,7 @@ rocprofiler_add_integration_execute_test(
     DEPENDS vector-ops
     TIMEOUT 120
     LABELS "integration-tests"
-    PRELOAD "${PRELOAD_ENV}"
+    ENVIRONMENT "${PRELOAD_ENV}"
     FIXTURES_SETUP
         rocprofv3-test-counter-collection-kernel-filtering-cli-range-out-of-bounds)
 
@@ -364,7 +364,7 @@ rocprofiler_add_integration_execute_test(
     DEPENDS vector-ops
     TIMEOUT 120
     LABELS "integration-tests"
-    PRELOAD "${PRELOAD_ENV}"
+    ENVIRONMENT "${PRELOAD_ENV}"
     FIXTURES_SETUP rocprofv3-test-counter-collection-kernel-filtering-cli-malformed-range)
 
 rocprofiler_add_integration_execute_test(
@@ -375,6 +375,6 @@ rocprofiler_add_integration_execute_test(
     DEPENDS vector-ops
     TIMEOUT 120
     LABELS "integration-tests"
-    PRELOAD "${PRELOAD_ENV}"
+    ENVIRONMENT "${PRELOAD_ENV}"
     FIXTURES_SETUP rocprofv3-test-counter-collection-kernel-filtering-cli-noninteger-range
     )

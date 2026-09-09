@@ -68,8 +68,9 @@ rocprofiler_add_integration_execute_test(
     TIMEOUT 45
     LABELS "integration-tests"
     DISABLED ${IS_DISABLED}
-    PRELOAD "$<TARGET_FILE:rocprofiler-sdk-json-tool>" "${PRELOAD_ENV}"
+    PRELOAD "$<TARGET_FILE:rocprofiler-sdk-json-tool>"
     ENVIRONMENT
+        "${PRELOAD_ENV}"
         "ROCPROFILER_TOOL_OUTPUT_FILE=hipfile-tracing-test.json"
         "ROCPROFILER_TOOL_CONTEXTS=HIPFILE_API_CALLBACK HIPFILE_API_BUFFERED HIPFILE_API_EXT_BUFFERED"
         "ROCPROFILER_TOOL_DISABLE_PERFETTO=1"

@@ -45,7 +45,7 @@ rocprofiler_add_integration_execute_test(
     DEPENDS hip-stream-reuse
     TIMEOUT 60
     LABELS "integration-tests"
-    PRELOAD "${PRELOAD_ENV}"
+    ENVIRONMENT "${PRELOAD_ENV}"
     FIXTURES_SETUP rocprofv3-test-hip-stream-reuse
     DISABLED $<NOT:$<TARGET_EXISTS:hip-stream-reuse>>)
 

@@ -25,7 +25,7 @@ foreach(_OUTPUT_FORMAT csv json)
         DEPENDS scratch-memory
         TIMEOUT 45
         LABELS "integration-tests"
-        PRELOAD "${PRELOAD_ENV}"
+        ENVIRONMENT "${PRELOAD_ENV}"
         FIXTURES_SETUP rocprofv3-test-scratch-memory-tracing-${_OUTPUT_FORMAT})
 endforeach()
 

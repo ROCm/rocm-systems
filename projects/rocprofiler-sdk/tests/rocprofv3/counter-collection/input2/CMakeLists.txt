@@ -23,7 +23,7 @@ rocprofiler_add_integration_execute_test(
     DEPENDS vector-ops
     TIMEOUT 45
     LABELS "integration-tests"
-    PRELOAD "${PRELOAD_ENV}"
+    ENVIRONMENT "${PRELOAD_ENV}"
     FIXTURES_SETUP rocprofv3-test-counter-collection-txt-pmc2)
 
 rocprofiler_add_integration_validate_test(

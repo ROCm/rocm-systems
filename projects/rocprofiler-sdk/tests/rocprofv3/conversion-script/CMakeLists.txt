@@ -46,7 +46,7 @@ rocprofiler_add_integration_execute_test(
     DEPENDS vector-ops
     LABELS "integration-tests"
     TIMEOUT 45
-    PRELOAD "${PRELOAD_ENV}"
+    ENVIRONMENT "${PRELOAD_ENV}"
     FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
     FIXTURES_SETUP rocprofv3-test-conversion-script)
 
@@ -95,7 +95,7 @@ foreach(i RANGE 0 ${convert_test_length})
         DEPENDS rocprofiler-sdk::convert-counters-collection-format
         TIMEOUT 45
         LABELS "integration-tests"
-        PRELOAD "${PRELOAD_ENV}"
+        ENVIRONMENT "${PRELOAD_ENV}"
         FIXTURES_REQUIRED rocprofv3-test-conversion-script
         FIXTURES_SETUP ${test_name})
 

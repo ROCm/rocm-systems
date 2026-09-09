@@ -45,7 +45,7 @@ rocprofiler_add_integration_execute_test(
     DEPENDS simple-transpose
     TIMEOUT 45
     LABELS "integration-tests"
-    PRELOAD "${PRELOAD_ENV}"
+    ENVIRONMENT "${PRELOAD_ENV}"
     FIXTURES_SETUP rocprofv3-test-counter-collection-multiplex)
 
 rocprofiler_add_integration_validate_test(
@@ -71,7 +71,7 @@ rocprofiler_add_integration_execute_test(
     DEPENDS simple-transpose
     TIMEOUT 45
     LABELS "integration-tests"
-    PRELOAD "${PRELOAD_ENV}"
+    ENVIRONMENT "${PRELOAD_ENV}"
     FIXTURES_SETUP rocprofv3-test-counter-collection-multiple-yaml)
 
 rocprofiler_add_integration_validate_test(

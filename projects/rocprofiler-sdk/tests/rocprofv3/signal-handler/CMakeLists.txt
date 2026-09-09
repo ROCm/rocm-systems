@@ -68,7 +68,7 @@ function(add_signal_handler_test NAME)
         DEPENDS signal-handler-test
         TIMEOUT ${CTEST_TIMEOUT}
         LABELS "integration-tests;signal-handler"
-        PRELOAD "${PRELOAD_ENV}"
+        ENVIRONMENT "${PRELOAD_ENV}"
         PASS_REGULAR_EXPRESSION "${arg_PASS_REGEX}"
         FIXTURES_REQUIRED ${_name}-clean
         FIXTURES_SETUP ${_name})
