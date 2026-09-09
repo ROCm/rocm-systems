@@ -188,10 +188,22 @@ rocprofiler_configure_callback_tracing_service(rocprofiler_context_id_t         
         if(claimed_replay) rocprofiler::kernel_replay::release_replay_service_claim();
     }};
 
-    // Range replay is single-subscriber for the same reason: one plan per range.
-    if(kind == ROCPROFILER_CALLBACK_TRACING_RANGE_REPLAY &&
-       rocprofiler::range_replay::has_registered_range_replay_context())
-        return ROCPROFILER_STATUS_ERROR_SERVICE_ALREADY_CONFIGURED;
+    // Range replay is single-subscriber for the same reason: one plan per range. Same atomic
+    // claim, same reason it cannot be a plain registered-context check.
+    bool claimed_range_replay = false;
+    if(kind == ROCPROFILER_CALLBACK_TRACING_RANGE_REPLAY)
+    {
+        if(rocprofiler::range_replay::has_registered_range_replay_context() ||
+           !rocprofiler::range_replay::try_claim_range_replay_service())
+            return ROCPROFILER_STATUS_ERROR_SERVICE_ALREADY_CONFIGURED;
+        claimed_range_replay = true;
+    }
+
+    auto _range_replay_claim_guard =
+        rocprofiler::common::scope_destructor{[&claimed_range_replay]() {
+            if(claimed_range_replay)
+                rocprofiler::range_replay::release_range_replay_service_claim();
+        }};
 
     RETURN_STATUS_ON_FAIL(rocprofiler::context::add_domain(ctx->callback_tracer->domains, kind));
 
@@ -218,7 +230,8 @@ rocprofiler_configure_callback_tracing_service(rocprofiler_context_id_t         
     if(kind == ROCPROFILER_CALLBACK_TRACING_RANGE_REPLAY)
     {
         rocprofiler::kernel_replay::memory_tracker::set_tracking_enabled(true);
-        rocprofiler::range_replay::set_range_replay_service_configured(true);
+        // Configuration succeeded: keep the claim taken above.
+        claimed_range_replay = false;
     }
 
     return ROCPROFILER_STATUS_SUCCESS;

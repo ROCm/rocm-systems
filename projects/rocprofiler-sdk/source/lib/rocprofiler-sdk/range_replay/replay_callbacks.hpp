@@ -79,17 +79,28 @@ struct pass_context_state_t
     tracing::external_correlation_id_map_t external_correlation_ids = {};
 };
 
-// Set once when a tool configures a RANGE_REPLAY callback-tracing service. A cheap process-global
-// gate so the dispatch path does not walk the active-context list when range replay is never used.
-void
-set_range_replay_service_configured(bool enabled);
-
+// True while a tool owns range replay and at least one of its contexts is active. The service
+// claim below doubles as a cheap process-global gate, so the dispatch path does not walk the
+// active-context list when range replay is never used.
 bool
 has_active_range_replay_contexts();
 
+// Take ownership of range replay for this process, or fail because someone already holds it. A
+// range runs a single plan, so exactly one context may own the service. This is one atomic
+// operation rather than "check has_registered_range_replay_context(), then set the flag": those
+// are two steps, and two threads configuring RANGE_REPLAY concurrently could both observe no
+// owner and both register, leaving pass_count_cb last-writer-wins across tools.
+bool
+try_claim_range_replay_service();
+
+// Hand the claim back when a configuration fails after taking it, so a rejected attempt does not
+// leave range replay owned by nobody for the rest of the process.
+void
+release_range_replay_service_claim();
+
 // True if any registered context already configured a RANGE_REPLAY service. Checked at
-// configuration time to reject a second subscriber: a range runs a single plan, so exactly one
-// context may own range replay process-wide.
+// configuration time alongside the claim: the claim alone cannot see a context that registered
+// before this one and is still registered.
 bool
 has_registered_range_replay_context();
 

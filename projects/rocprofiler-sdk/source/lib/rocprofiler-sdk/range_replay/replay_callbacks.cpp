@@ -67,12 +67,22 @@ make_data(uint64_t range_id, rocprofiler_agent_id_t agent_id, uint64_t dispatch_
 }
 }  // namespace
 
-void
-set_range_replay_service_configured(bool enabled)
+bool
+try_claim_range_replay_service()
 {
     // Skip during finalization: the flag is a static_object that may already be destroyed.
+    if(registration::get_fini_status() > 0) return false;
+
+    bool expected = false;
+    return range_replay_service_configured_flag().compare_exchange_strong(
+        expected, true, std::memory_order_acq_rel, std::memory_order_acquire);
+}
+
+void
+release_range_replay_service_claim()
+{
     if(registration::get_fini_status() > 0) return;
-    range_replay_service_configured_flag().store(enabled, std::memory_order_relaxed);
+    range_replay_service_configured_flag().store(false, std::memory_order_release);
 }
 
 bool
