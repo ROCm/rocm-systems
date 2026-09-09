@@ -22,37 +22,62 @@
 
 # Pre-configuration file for pre-commit hooks
 # This is optional. To run pre-commit, see CONTRIBUTING.md
+#
+# Hooks shared with the rest of the monorepo (clang-format, gersemi, black,
+# whitespace fixers) are NOT duplicated here. They live in the repository-root
+# .pre-commit-config.yaml and are pulled in by the `shared-root-hooks` hook
+# below. pre-commit has no config inheritance, so delegating is the only way to
+# keep a single set of pinned tool versions. Only hooks that are specific to
+# this project belong in this file.
+#
+# Install this config as the git hook (note the -c flag):
+#   pre-commit install -c projects/rocprofiler-systems/.pre-commit-config.yaml
 
-exclude: \.(svg)$|(^|/)\.gitignore$ # Exclude files with these extensions
+# Paths excluded from every hook in this file, including the delegated root
+# hooks. Regexes are matched against paths relative to the *repository* root.
+exclude: |
+  (?x)
+    \.(svg)$
+    | (^|/)\.gitignore$
+    # vendored web fonts/CSS shipped with the GUI; not ours to reformat
+    | ^projects/rocprofiler-systems/source/python/gui/source/assets/
 default_stages: [pre-commit]
 repos:
 
+  # Delegate to the repository-root config so that this project uses exactly
+  # the same pinned versions of clang-format, gersemi, black, and the generic
+  # whitespace/YAML fixers as every other project in the monorepo.
+  #
+  # pre-commit runs hooks from the repository root, so the bare path below
+  # resolves to the root config. Only the files staged for this commit are
+  # forwarded, and the root config's own `exclude:` still applies on top.
+  - repo: local
+    hooks:
+      - id: shared-root-hooks
+        name: shared hooks (root .pre-commit-config.yaml)
+        entry: pre-commit run --config .pre-commit-config.yaml --files
+        language: system
+        require_serial: true
+
+  # JSON hooks: the root config has no JSON handling.
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v5.0.0
     hooks:
       - id: check-json # Check JSON files for syntax errors
-      - id: check-yaml # Check YAML files for syntax errors
-      - id: trailing-whitespace # Remove trailing whitespace
-      - id: end-of-file-fixer # Fix files to have a newline at the end
+        files: ^projects/rocprofiler-systems/
       - id: pretty-format-json # Pretty-format JSON files
         args: ['--indent', '4', '--autofix']
-
-  - repo: https://github.com/pre-commit/mirrors-clang-format
-    rev: v18.1.8 # Version 18 as specified in contributor guide
-    hooks:
-      - id: clang-format
-        files: \.(c|cpp|h.*)$
-
-  - repo: https://github.com/BlankSpruce/gersemi
-    rev: 0.25.1
-    hooks:
-      - id: gersemi
+        files: ^projects/rocprofiler-systems/
+        # Machine-generated CI input consumed by scripts/generate-ci-build-matrix.py
+        # and the workflow contract tests; its layout is not hand-maintained.
+        exclude: ^projects/rocprofiler-systems/\.github/ci-build-matrix\.json$
 
   - repo: https://github.com/DavidAnson/markdownlint-cli2
     rev: v0.22.1
     hooks:
       - id: markdownlint-cli2
-        exclude: ^external/
+        files: ^projects/rocprofiler-systems/
+        exclude: ^projects/rocprofiler-systems/external/
 
   - repo: local
     hooks:
@@ -61,12 +86,40 @@ repos:
         require_serial: true
         entry: ./projects/rocprofiler-systems/scripts/check-copyright.sh
         language: script
-        files: \.(c|h|txt|cpp|hpp|py|cmake)$
-        exclude: ^\.|^docs/|^examples/lulesh/|^examples/mpi/|^examples/openmp/|^external/|^cmake/
+        # `txt` here is for CMakeLists.txt; matching every *.txt swept in
+        # requirements files and sanitizer ignorelists, which have no header.
+        files: |
+          (?x)
+            ^projects/rocprofiler-systems/.*(
+                (^|/)CMakeLists\.txt
+              | \.(c|h|cpp|hpp|py|cmake)
+            )$
+        exclude: |
+          (?x)
+            ^projects/rocprofiler-systems/(
+                \.
+              | docs/
+              | examples/lulesh/
+              | examples/mpi/
+              | examples/openmp/
+              | examples/rccl/rccl-tests/
+              | external/
+              | cmake/
+              # vendored Dyninst runtime sources
+              | source/lib/rocprof-sys-rt/
+              # bundled third-party headers
+              | source/lib/rocprof-sys/library/tpls/
+            )
 
       - id: check-fixedwidth-types
         name: fixedwidth-type-consistency
         entry: ./projects/rocprofiler-systems/scripts/check-fixedwidth-types.sh
         language: script
-        files: \.(cpp|hpp)$
-        exclude: ^\.|^external/|^examples/
+        files: ^projects/rocprofiler-systems/.*\.(cpp|hpp)$
+        exclude: |
+          (?x)
+            ^projects/rocprofiler-systems/(
+                \.
+              | external/
+              | examples/
+            )
