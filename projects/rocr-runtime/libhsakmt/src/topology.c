@@ -38,7 +38,7 @@
 #include <sys/sysinfo.h>
 #include <xf86drm.h>
 #include <amdgpu.h>
-#include <amdgpu_drm.h>
+#include "hsakmt/drm/amdgpu_drm.h"
 
 #include "libhsakmt.h"
 #include "hsakmt/hsakmtmodel.h"

@@ -48,7 +48,7 @@
 #endif
 
 #if defined(__linux__)
-    #include <amdgpu_drm.h>
+    #include <hsakmt/drm/amdgpu_drm.h>
 #endif
 
 #include <unordered_set>
