@@ -308,7 +308,7 @@ trace context is stopped, at pass 1.
   count from the per-agent counter profiles, adding one when PC sampling is selected.
 - **Consolidated results keep the existing naming convention.**
 - **Results have unified structure across modes.**
-- **No separate pass-count option or environment value.**
+- **No separate pass-count environment varibale.**
 
 ```mermaid
 flowchart TD
