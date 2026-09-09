@@ -92,6 +92,10 @@ endforeach()
 set(PCI_FRONTEND_SOURCES
     lib/rocjitsu/src/rocjitsu/vm/amdgpu/pci/gpu_pci_device.h
     lib/rocjitsu/src/rocjitsu/vm/amdgpu/pci/gpu_pci_device.cpp
+    lib/rocjitsu/src/rocjitsu/vm/amdgpu/pci/mes_block_model.h
+    lib/rocjitsu/src/rocjitsu/vm/amdgpu/pci/mes_block_model.cpp
+    lib/rocjitsu/src/rocjitsu/vm/amdgpu/pci/sdma_block_model.h
+    lib/rocjitsu/src/rocjitsu/vm/amdgpu/pci/sdma_block_model.cpp
 )
 
 foreach(SOURCE_FILE IN LISTS PCI_FRONTEND_SOURCES)
