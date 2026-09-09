@@ -196,6 +196,11 @@ template std::pair<amd_dbgapi_dispatch_id_t * /* objects */,
 get_handle_list<dispatch_t> (const std::vector<process_t *> &processes,
                              amd_dbgapi_changed_t *changed);
 
+template std::pair<amd_dbgapi_cluster_id_t * /* objects */,
+                   size_t /* count */>
+get_handle_list<cluster_t> (const std::vector<process_t *> &processes,
+                            amd_dbgapi_changed_t *changed);
+
 template std::pair<amd_dbgapi_workgroup_id_t * /* objects */,
                    size_t /* count */>
 get_handle_list<workgroup_t> (const std::vector<process_t *> &processes,
