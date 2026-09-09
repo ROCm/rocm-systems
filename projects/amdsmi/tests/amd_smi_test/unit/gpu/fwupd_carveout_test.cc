@@ -25,6 +25,7 @@
 #include "fwupd_carveout_internal.h"
 
 using amd::smi::detail::BiosSetting;
+using amd::smi::detail::ClassifySetReply;
 using amd::smi::detail::FindCarveout;
 using amd::smi::detail::PopulateCarveoutInfo;
 using amd::smi::detail::ValidateCarveoutWrite;
@@ -151,6 +152,18 @@ TEST(GpuUnit, FwupdCarveoutValidateRejectsOutOfRangeIndex) {
   EXPECT_EQ(ValidateCarveoutWrite(s, 99u), AMDSMI_STATUS_INVAL);
 }
 
+TEST(GpuUnit, FwupdCarveoutValidateRejectsIndexBeyondMaxOptionsEvenWhenFwupdHasMore) {
+  // The getter clamps exposed options to AMDSMI_MAX_CARVEOUT_OPTIONS; the
+  // setter must reject any index the getter could never have advertised
+  std::vector<std::string> many;
+  for (int i = 0; i < AMDSMI_MAX_CARVEOUT_OPTIONS + 5; ++i) {
+    many.push_back("opt" + std::to_string(i));
+  }
+  const BiosSetting s = MakeCarveout("com.amd-gpu.uma_carveout", "", std::move(many));
+  EXPECT_EQ(ValidateCarveoutWrite(s, AMDSMI_MAX_CARVEOUT_OPTIONS - 1), AMDSMI_STATUS_SUCCESS);
+  EXPECT_EQ(ValidateCarveoutWrite(s, AMDSMI_MAX_CARVEOUT_OPTIONS), AMDSMI_STATUS_INVAL);
+}
+
 TEST(GpuUnit, FwupdCarveoutValidateRejectsEmptyName) {
   BiosSetting s = MakeCarveout("com.amd-gpu.uma_carveout", "", {"a"});
   s.name = "";
@@ -160,4 +173,36 @@ TEST(GpuUnit, FwupdCarveoutValidateRejectsEmptyName) {
 TEST(GpuUnit, FwupdCarveoutValidateAcceptsWritableInRange) {
   const BiosSetting s = MakeCarveout("com.amd-gpu.uma_carveout", "(1 GB)", {"(1 GB)", "(2 GB)"});
   EXPECT_EQ(ValidateCarveoutWrite(s, 1), AMDSMI_STATUS_SUCCESS);
+}
+
+// --- SetBiosSettings reply classification (pure, no D-Bus) -------------------
+
+TEST(GpuUnit, ClassifySetReplyTreatsNothingToDoAsSuccess) {
+  EXPECT_EQ(ClassifySetReply(/*error_is_set=*/true, "org.freedesktop.fwupd.NothingToDo", "",
+                             /*got_reply=*/false),
+            AMDSMI_STATUS_SUCCESS);
+}
+
+TEST(GpuUnit, ClassifySetReplyTreatsAccessDeniedAsNoPerm) {
+  EXPECT_EQ(ClassifySetReply(/*error_is_set=*/true, "org.freedesktop.DBus.Error.AccessDenied", "",
+                             /*got_reply=*/false),
+            AMDSMI_STATUS_NO_PERM);
+}
+
+TEST(GpuUnit, ClassifySetReplyTreatsUnclassifiedErrorAsApiFailed) {
+  // The setting was already resolved through fwupd by the time this runs, so
+  // an unrelated D-Bus error must not be reported as NOT_SUPPORTED
+  EXPECT_EQ(ClassifySetReply(/*error_is_set=*/true, "org.freedesktop.DBus.Error.UnknownMethod",
+                             "Method \"SetBiosSettings\" not supported", /*got_reply=*/false),
+            AMDSMI_STATUS_API_FAILED);
+}
+
+TEST(GpuUnit, ClassifySetReplyTreatsMissingReplyWithNoErrorAsApiFailed) {
+  EXPECT_EQ(ClassifySetReply(/*error_is_set=*/false, "", "", /*got_reply=*/false),
+            AMDSMI_STATUS_API_FAILED);
+}
+
+TEST(GpuUnit, ClassifySetReplySucceedsOnAReply) {
+  EXPECT_EQ(ClassifySetReply(/*error_is_set=*/false, "", "", /*got_reply=*/true),
+            AMDSMI_STATUS_SUCCESS);
 }

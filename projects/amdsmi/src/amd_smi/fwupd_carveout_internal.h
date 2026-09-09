@@ -38,11 +38,23 @@ const BiosSetting* FindCarveout(const std::vector<BiosSetting>& settings);
 amdsmi_status_t PopulateCarveoutInfo(const BiosSetting& setting, amdsmi_uma_carveout_info_t* info);
 
 // Validate a requested write against a resolved carveout setting (pure; no
-// D-Bus). Returns AMDSMI_STATUS_NO_PERM when the setting is read-only,
-// AMDSMI_STATUS_INVAL when option_index is out of range, and
-// AMDSMI_STATUS_NOT_SUPPORTED when the setting has no usable name; otherwise
-// AMDSMI_STATUS_SUCCESS.
+// D-Bus). option_index is bounds-checked against the same
+// AMDSMI_MAX_CARVEOUT_OPTIONS clamp the getter applies, so a write can never
+// target an index the getter did not also expose. Returns AMDSMI_STATUS_NO_PERM
+// when the setting is read-only, AMDSMI_STATUS_INVAL when option_index is out
+// of range, and AMDSMI_STATUS_NOT_SUPPORTED when the setting has no usable
+// name; otherwise AMDSMI_STATUS_SUCCESS.
 amdsmi_status_t ValidateCarveoutWrite(const BiosSetting& setting, uint32_t option_index);
+
+// Classify a SetBiosSettings D-Bus outcome (pure; no D-Bus). Called only once
+// the setting has already been resolved through fwupd, so every branch here is
+// terminal -- never AMDSMI_STATUS_NOT_SUPPORTED -- so the caller never falls
+// through to a differently-ordered sysfs option list after committing to the
+// fwupd backend. error_is_set/error_name/error_message mirror a DBusError;
+// got_reply is false only when no error was set but the call still returned no
+// reply.
+amdsmi_status_t ClassifySetReply(bool error_is_set, const std::string& error_name,
+                                 const std::string& error_message, bool got_reply);
 
 }  // namespace detail
 }  // namespace smi

@@ -46,6 +46,10 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
   - This covers every subcommand that uses the standard human-readable renderer, not only the AI-NIC `RDMA_DEVICES` case that prompted it.
   - `monitor`, `partition`, `topology`, `xgmi`, and the default no-argument output print tables and are unchanged.
 
+- **Use fwupd daemon to read and write UMA carveout information**.  
+  - `amdsmi_get_gpu_uma_carveout_info()` / `amdsmi_set_gpu_uma_carveout()` (and therefore `amd-smi static/set --mem-carveout`) now read and write the carveout through the fwupd BIOS-settings interface on integrated GPUs and fallback to amdgpu `.../device/uma/carveout` sysfs node when the fwupd daemon is absent.
+  - Implemented in the AMD SMI library over the fwupd daemon's D-Bus BIOS-settings interface; the fwupd path is used only for the integrated (APU) GPU, and PolicyKit brokers authorization instead of requiring explicit root. Reading needs fwupd >= 1.8.4; writing needs fwupd >= 2.1.1 (Ubuntu 26.04+).
+
 ### Optimized
 
 ### Resolved Issues
@@ -237,10 +241,6 @@ GPU: 0
 - **Added an experimental, opt-in WSL (WDDM/dxg) GPU backend**.
   - Built only with `-DENABLE_WSL_BACKEND=ON` (off by default); native builds and packages are unchanged.
   - Reads real GPU telemetry through `librocdxg` (`rocdxg_smi_*` APIs); queries with no WDDM equivalent return `AMDSMI_STATUS_NOT_SUPPORTED`. See [Using AMD SMI under WSL](https://rocm.docs.amd.com/projects/amdsmi/en/latest/how-to/amdsmi-wsl-mode.html).
-
-- **Added a fwupd fallback for the UMA carveout on UEFI-HII platforms**.  
-  - `amdsmi_get_gpu_uma_carveout_info()` / `amdsmi_set_gpu_uma_carveout()` (and therefore `amd-smi static/set --mem-carveout`) now read and write the carveout through the fwupd BIOS-settings interface on integrated GPUs whose amdgpu `.../device/uma/carveout` sysfs node is absent (e.g. HP ZBook Ultra G1a, Z2 Mini G1a).
-  - Implemented in the AMD SMI library over the fwupd daemon's D-Bus BIOS-settings interface; the fwupd path is used only for the integrated (APU) GPU, and PolicyKit brokers authorization instead of requiring explicit root. Reading needs fwupd >= 1.8.4; writing needs fwupd >= 2.1.1 (Ubuntu 26.04+).
 
 - **Added NIC processor discovery and information API surface**.  
   - New C APIs: `amdsmi_get_nic_processor_handles()`, `amdsmi_get_nic_device_bdf()`, `amdsmi_get_nic_fw_info()`, `amdsmi_get_nic_port_statistics()`, and `amdsmi_get_nic_vendor_statistics()`.

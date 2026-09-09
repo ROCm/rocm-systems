@@ -4,7 +4,6 @@
 #include "fwupd_carveout.h"
 
 #include <dlfcn.h>
-#include <strings.h>
 
 #include <cstdint>
 #include <cstdlib>
@@ -58,6 +57,7 @@ constexpr int kTypeString = 's';
 constexpr int kTypeArray = 'a';
 constexpr int kTypeBoolean = 'b';
 constexpr int kTypeDictEntry = 'e';
+constexpr int kTypeVariant = 'v';
 
 constexpr const char* kService = "org.freedesktop.fwupd";
 constexpr const char* kPath = "/";
@@ -132,6 +132,9 @@ const Dbus* LoadDbus() {
 }
 
 void ReadVariant(const Dbus& d, DbusIter* kv, BiosSetting* s, const char* key) {
+  // The dict value must be a variant before we recurse into it or abort() inside
+  // libdbus could occur.
+  if (d.iter_get_arg_type(kv) != kTypeVariant) return;
   DbusIter var;
   d.iter_recurse(kv, &var);
   const int t = d.iter_get_arg_type(&var);
@@ -185,10 +188,13 @@ bool GetSettings(const Dbus& d, DBusConnection* conn, std::vector<BiosSetting>* 
       while (d.iter_get_arg_type(&dit) == kTypeDictEntry) {
         DbusIter kv;
         d.iter_recurse(&dit, &kv);
-        const char* key = nullptr;
-        d.iter_get_basic(&kv, &key);
-        d.iter_next(&kv);
-        ReadVariant(d, &kv, &s, key ? key : "");
+        if (d.iter_get_arg_type(&kv) == kTypeString) {
+          const char* key = nullptr;
+          d.iter_get_basic(&kv, &key);
+          if (d.iter_next(&kv)) {
+            ReadVariant(d, &kv, &s, key ? key : "");
+          }
+        }
         d.iter_next(&dit);
       }
       out->push_back(std::move(s));
@@ -228,52 +234,6 @@ void CloseBus(const Dbus& d, DBusConnection* conn) {
 
 namespace amd {
 namespace smi {
-namespace detail {
-
-// Select the carveout setting from a parsed list, preferring AMD's canonical
-// attribute id over HP's UEFI-HII naming.
-const BiosSetting* FindCarveout(const std::vector<BiosSetting>& settings) {
-  static const char* const kCarveoutIds[] = {"com.amd-gpu.uma_carveout",
-                                             "com.hp-bioscfg.Dedicated_Graphics_Memory"};
-  for (const char* want : kCarveoutIds) {
-    for (const auto& s : settings) {
-      if (strcasecmp(s.id.c_str(), want) == 0) return &s;
-    }
-  }
-  return nullptr;
-}
-
-// Map a resolved carveout setting into the public info struct: index the option
-// descriptions (truncated to fit), clamp the count to the array bound, and set
-// current_index to the matching option or to num_options ("unknown") when the
-// current value is empty (e.g. redacted for an unprivileged reader).
-amdsmi_status_t PopulateCarveoutInfo(const BiosSetting& setting, amdsmi_uma_carveout_info_t* info) {
-  if (info == nullptr) return AMDSMI_STATUS_INVAL;
-  if (setting.values.empty()) return AMDSMI_STATUS_NOT_SUPPORTED;
-  uint32_t count = static_cast<uint32_t>(setting.values.size());
-  if (count > AMDSMI_MAX_CARVEOUT_OPTIONS) count = AMDSMI_MAX_CARVEOUT_OPTIONS;
-  uint32_t current = count;  // sentinel: "unknown" == num_options
-  for (uint32_t i = 0; i < count; ++i) {
-    info->options[i].index = i;
-    std::strncpy(info->options[i].description, setting.values[i].c_str(),
-                 AMDSMI_MAX_STRING_LENGTH - 1);
-    info->options[i].description[AMDSMI_MAX_STRING_LENGTH - 1] = '\0';
-    if (!setting.current.empty() && setting.current == setting.values[i]) current = i;
-  }
-  info->num_options = count;
-  info->current_index = current;
-  return AMDSMI_STATUS_SUCCESS;
-}
-
-// Validate a requested write against a resolved carveout setting (pure; no D-Bus).
-amdsmi_status_t ValidateCarveoutWrite(const BiosSetting& setting, uint32_t option_index) {
-  if (setting.read_only) return AMDSMI_STATUS_NO_PERM;
-  if (option_index >= setting.values.size()) return AMDSMI_STATUS_INVAL;
-  if (setting.name.empty()) return AMDSMI_STATUS_NOT_SUPPORTED;
-  return AMDSMI_STATUS_SUCCESS;
-}
-
-}  // namespace detail
 
 amdsmi_status_t fwupd_get_carveout_info(amdsmi_uma_carveout_info_t* info) {
   if (info == nullptr) return AMDSMI_STATUS_INVAL;
@@ -308,10 +268,12 @@ amdsmi_status_t fwupd_set_carveout(uint32_t option_index) {
     CloseBus(*d, conn);
     return AMDSMI_STATUS_NOT_SUPPORTED;
   }
+  // fwupd now owns this write; report failures as terminal (never
+  // NOT_SUPPORTED) so the caller doesn't fall back to a differently-ordered sysfs list.
   const amdsmi_status_t valid = detail::ValidateCarveoutWrite(*c, option_index);
   if (valid != AMDSMI_STATUS_SUCCESS) {
     CloseBus(*d, conn);
-    return valid;
+    return valid == AMDSMI_STATUS_NOT_SUPPORTED ? AMDSMI_STATUS_API_FAILED : valid;
   }
   const std::string name = c->name;
   const std::string value = c->values[option_index];
@@ -325,7 +287,7 @@ amdsmi_status_t fwupd_set_carveout(uint32_t option_index) {
   DBusMessage* msg = d->msg_new_call(kService, kPath, kInterface, "SetBiosSettings");
   if (msg == nullptr) {
     CloseBus(*d, conn);
-    return AMDSMI_STATUS_NOT_SUPPORTED;
+    return AMDSMI_STATUS_API_FAILED;
   }
   DbusIter it;
   d->iter_init_append(msg, &it);
@@ -343,37 +305,17 @@ amdsmi_status_t fwupd_set_carveout(uint32_t option_index) {
   if (!built) {
     d->msg_unref(msg);
     CloseBus(*d, conn);
-    return AMDSMI_STATUS_NOT_SUPPORTED;
+    return AMDSMI_STATUS_API_FAILED;
   }
   DBusMessage* reply = d->send_block(conn, msg, 30000, &err);
   d->msg_unref(msg);
 
-  amdsmi_status_t status = AMDSMI_STATUS_SUCCESS;
-  if (d->error_is_set(&err)) {
-    const std::string ename = err.name ? err.name : "";
-    const std::string emsg = err.message ? err.message : "";
-    // Classify by the canonical D-Bus error name first (stable across fwupd
-    // versions and locales); the human-readable message substrings are only a
-    // best-effort fallback. fwupd returns NothingToDo when the value already
-    // matches -- an idempotent success for our purposes.
-    if (ename.find("NothingToDo") != std::string::npos ||
-        emsg.find("already set") != std::string::npos ||
-        emsg.find("no BIOS settings needed") != std::string::npos) {
-      status = AMDSMI_STATUS_SUCCESS;
-    } else if (ename.find("AccessDenied") != std::string::npos ||
-               ename.find("AuthFailed") != std::string::npos ||
-               ename.find("PermissionDenied") != std::string::npos ||
-               emsg.find("not authorized") != std::string::npos ||
-               emsg.find("permission") != std::string::npos) {
-      status = AMDSMI_STATUS_NO_PERM;
-    } else {
-      status = AMDSMI_STATUS_NOT_SUPPORTED;
-    }
-    d->error_free(&err);
-  } else if (reply == nullptr) {
-    // No error reported but also no reply: treat as failure, not success.
-    status = AMDSMI_STATUS_NOT_SUPPORTED;
-  }
+  const std::string ename = err.name ? err.name : "";
+  const std::string emsg = err.message ? err.message : "";
+  const bool error_is_set = d->error_is_set(&err);
+  const amdsmi_status_t status =
+      detail::ClassifySetReply(error_is_set, ename, emsg, reply != nullptr);
+  if (error_is_set) d->error_free(&err);
   if (reply != nullptr) d->msg_unref(reply);
   CloseBus(*d, conn);
   return status;

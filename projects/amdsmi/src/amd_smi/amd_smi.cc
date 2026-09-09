@@ -8581,15 +8581,11 @@ amdsmi_status_t amdsmi_get_gpu_uma_carveout_info(amdsmi_processor_handle process
 #endif
 
   // Prefer the fwupd path; the amdgpu sysfs node is the fallback when fwupd is
-  // unavailable, and also supplies the current value when fwupd redacts it for
-  // an unprivileged caller (below). The fwupd call itself touches no gpu_device
-  // state, so it runs without the device mutex; only the sysfs reads take it.
+  // unavailable or when fwupd redacts it for an unprivileged caller (below).
   if (gpu_handle_is_apu(processor_handle)) {
     amdsmi_status_t fwupd_ret = amd::smi::fwupd_get_carveout_info(info);
     if (fwupd_ret == AMDSMI_STATUS_SUCCESS) {
-      // fwupd redacts the current value for an unprivileged caller
-      // (current_index == num_options). When the world-readable amdgpu sysfs
-      // node is present, fill current_index from it so an unprivileged `static`
+      // fill current_index from it so an unprivileged `static`
       // still shows the active carveout without a PolicyKit prompt.
       if (info->current_index == info->num_options) {
         SMIGPUDEVICE_MUTEX(gpu_device->get_mutex());
@@ -8620,12 +8616,9 @@ amdsmi_status_t amdsmi_set_gpu_uma_carveout(amdsmi_processor_handle processor_ha
   if (gpu_device->backend()) return AMDSMI_STATUS_NOT_SUPPORTED;
 #endif
 
-  // Prefer the fwupd path for the write: fwupd brokers authorization through
-  // PolicyKit (an active desktop session is prompted; no explicit root needed),
-  // which the root-only amdgpu sysfs node cannot do. fwupd returns
-  // AMDSMI_STATUS_NOT_SUPPORTED when it cannot service the request (no libdbus,
-  // no daemon, or the setting is absent); fall back to the sysfs node then. Runs
-  // before the device mutex because the fwupd path never touches gpu_device.
+  // fwupd brokers PolicyKit auth (no root needed) instead of the root-only
+  // sysfs node; falls back to sysfs on NOT_SUPPORTED. Runs before the mutex
+  // since it never touches gpu_device.
   if (gpu_handle_is_apu(processor_handle)) {
     amdsmi_status_t fwupd_ret = amd::smi::fwupd_set_carveout(option_index);
     if (fwupd_ret != AMDSMI_STATUS_NOT_SUPPORTED) {

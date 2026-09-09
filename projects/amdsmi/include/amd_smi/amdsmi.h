@@ -9720,11 +9720,10 @@ amdsmi_status_t amdsmi_get_nic_vendor_statistics(amdsmi_processor_handle process
  *  depending on the driver package). No libdrm dependency is required for
  *  these APIs.
  *
- *  @note On platforms whose amdgpu build does not expose the UMA carveout
- *  sysfs node (for example some UEFI-HII systems), the carveout is read and
- *  written through the fwupd daemon over D-Bus instead. That fallback needs
- *  the fwupd daemon and libdbus present at runtime; writes are authorized by
- *  PolicyKit (or root).
+ *  @note UMA carveout is read and written through the fwupd daemon over
+ *  D-Bus. Therefore, the fwupd daemon and libdbus typically need to be present at
+ *  runtime; writes are authorized by PolicyKit (or root). When fwupd is unavailable,
+ *  these functions fall back to direct sysfs access.
  *
  *  @par Supported ASICs (UMA carveout)
  *  UMA carveout is only available on APU parts whose VBIOS exposes the
@@ -9778,7 +9777,8 @@ typedef struct {
  * @cond @tag{gpu_bm_linux} @endcond
  */
 typedef struct {
-  uint32_t current_index; /**< Currently active carveout index */
+  uint32_t current_index; /**< Currently active carveout index; equals num_options
+                                when unknown (e.g. redacted for an unprivileged caller) */
   uint32_t num_options;   /**< Number of available options */
   amdsmi_uma_carveout_option_t
       options[AMDSMI_MAX_CARVEOUT_OPTIONS]; /**< Available carveout options */
@@ -9800,9 +9800,10 @@ typedef struct {
  *  configuration for the specified GPU. UMA carveout controls dedicated GPU memory
  *  allocation on APU systems.
  *
- *  @note This prefers the amdgpu sysfs interface (not libdrm); where that
- *  sysfs node is absent it falls back to the fwupd daemon over D-Bus, which
- *  is brokered by PolicyKit.
+ *  @note reads and writes through the fwupd daemon over D-Bus, which is
+ *  brokered by PolicyKit. Falls back to sysfs when fwupd is unavailable
+ *  or redacts the information for an unprivileged caller. Reading
+ *  requires fwupd >= 1.8.4; writing requires fwupd >= 2.1.1 (Ubuntu 26.04+).
  *
  *  @ingroup tagMemConfig
  *
@@ -9825,9 +9826,10 @@ amdsmi_status_t amdsmi_get_gpu_uma_carveout_info(amdsmi_processor_handle process
  *  This function sets the UMA carveout configuration for the specified GPU.
  *  The system must be rebooted for changes to take effect.
  *
- *  @note This prefers the amdgpu sysfs interface (not libdrm); where that
- *  sysfs node is absent it falls back to the fwupd daemon over D-Bus, which
- *  is brokered by PolicyKit.
+ *  @note reads and writes through the fwupd daemon over D-Bus, which is
+ *  brokered by PolicyKit. Falls back to sysfs when fwupd is unavailable
+ *  or redacts the information for an unprivileged caller. Reading
+ *  requires fwupd >= 1.8.4; writing requires fwupd >= 2.1.1 (Ubuntu 26.04+).
  *
  *  @ingroup tagMemConfig
  *

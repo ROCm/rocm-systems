@@ -1673,7 +1673,7 @@ interfaces (sysfs / modprobe.d) and do **not** require libdrm.
 ### Prerequisites
 
 - **UMA carveout:** Linux kernel >= 7.0 (upstream commit [`685b711`](https://github.com/torvalds/linux/commit/685b711); some distros backport it to earlier kernels), an APU VBIOS that advertises ATCS 0xA + IGP info table v2.3, root, and a reboot after changing the index.
-- **UMA carveout (UEFI-HII platforms, via fwupd):** on integrated GPUs whose amdgpu `.../device/uma/carveout` sysfs node is absent, the AMD SMI library reads and writes the carveout through the fwupd daemon's D-Bus BIOS-settings interface. Reading needs fwupd >= 1.8.4; writing needs fwupd >= 2.1.1 (Ubuntu 26.04+). PolicyKit brokers authorization (no explicit `sudo`), and a reboot applies the new size.
+- **UMA carveout (UEFI-HII platforms, via fwupd):**AMD SMI library reads and writes the carveout through the fwupd daemon's D-Bus BIOS-settings interface. Reading needs fwupd >= 1.8.4; writing needs fwupd >= 2.1.1 (Ubuntu 26.04+). PolicyKit brokers authorization (no explicit `sudo`) for writes, and a reboot applies the new size.
 - **GTT (TTM `pages_limit`):** root (to write `/etc/modprobe.d/<module>.conf`), optionally `dracut` (the tool will rebuild the initramfs automatically when `dracut` is present), and a reboot to apply the new limit. amd-smi auto-detects the TTM kernel module name (`ttm`, `amdttm`, or `amd-ttm`) and writes the matching `.conf`.
 
 ### Troubleshooting: `MEM_CARVEOUT: N/A`
