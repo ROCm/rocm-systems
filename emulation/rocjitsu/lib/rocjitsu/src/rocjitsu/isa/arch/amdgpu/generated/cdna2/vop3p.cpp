@@ -27,10 +27,10 @@ uint32_t mfma_src2_encoding(uint32_t value, bool acc_cd) {
 VPkMadI16Vop3p::VPkMadI16Vop3p(const MachineInst *inst)
     : Vop3p("v_pk_mad_i16", reinterpret_cast<const OpEncoding *>(inst),
             selected_exec_fn(InstructionExecutionId::VPkMadI16Vop3p)),
-      vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(16, OperandType::OPR_SRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(16, OperandType::OPR_SRC_SIMPLE, reinterpret_cast<const OpEncoding *>(inst)->src1),
-      src2(16, OperandType::OPR_SRC_SIMPLE, reinterpret_cast<const OpEncoding *>(inst)->src2) {
+      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      src0(32, OperandType::OPR_SRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->src0),
+      src1(32, OperandType::OPR_SRC_SIMPLE, reinterpret_cast<const OpEncoding *>(inst)->src1),
+      src2(32, OperandType::OPR_SRC_SIMPLE, reinterpret_cast<const OpEncoding *>(inst)->src2) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   src_operands_[1] = &src1;
@@ -53,18 +53,12 @@ DecodeResult decodeVPkMadI16Vop3p(const MachineInst *opcode, const DecodeErrorEm
 }
 } // namespace detail
 
-void VPkMadI16Vop3p::implicit_uses(RegisterSet &uses) const {
-  Vop3p::implicit_uses(uses);
-  if (auto r = vdst.to_register_ref())
-    uses.expand(*r);
-}
-
 VPkMulLoU16Vop3p::VPkMulLoU16Vop3p(const MachineInst *inst)
     : Vop3p("v_pk_mul_lo_u16", reinterpret_cast<const OpEncoding *>(inst),
             selected_exec_fn(InstructionExecutionId::VPkMulLoU16Vop3p)),
-      vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(16, OperandType::OPR_SRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(16, OperandType::OPR_SRC_SIMPLE, reinterpret_cast<const OpEncoding *>(inst)->src1) {
+      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      src0(32, OperandType::OPR_SRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->src0),
+      src1(32, OperandType::OPR_SRC_SIMPLE, reinterpret_cast<const OpEncoding *>(inst)->src1) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   src_operands_[1] = &src1;
@@ -86,18 +80,12 @@ DecodeResult decodeVPkMulLoU16Vop3p(const MachineInst *opcode,
 }
 } // namespace detail
 
-void VPkMulLoU16Vop3p::implicit_uses(RegisterSet &uses) const {
-  Vop3p::implicit_uses(uses);
-  if (auto r = vdst.to_register_ref())
-    uses.expand(*r);
-}
-
 VPkAddI16Vop3p::VPkAddI16Vop3p(const MachineInst *inst)
     : Vop3p("v_pk_add_i16", reinterpret_cast<const OpEncoding *>(inst),
             selected_exec_fn(InstructionExecutionId::VPkAddI16Vop3p)),
-      vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(16, OperandType::OPR_SRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(16, OperandType::OPR_SRC_SIMPLE, reinterpret_cast<const OpEncoding *>(inst)->src1) {
+      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      src0(32, OperandType::OPR_SRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->src0),
+      src1(32, OperandType::OPR_SRC_SIMPLE, reinterpret_cast<const OpEncoding *>(inst)->src1) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   src_operands_[1] = &src1;
@@ -118,18 +106,12 @@ DecodeResult decodeVPkAddI16Vop3p(const MachineInst *opcode, const DecodeErrorEm
 }
 } // namespace detail
 
-void VPkAddI16Vop3p::implicit_uses(RegisterSet &uses) const {
-  Vop3p::implicit_uses(uses);
-  if (auto r = vdst.to_register_ref())
-    uses.expand(*r);
-}
-
 VPkSubI16Vop3p::VPkSubI16Vop3p(const MachineInst *inst)
     : Vop3p("v_pk_sub_i16", reinterpret_cast<const OpEncoding *>(inst),
             selected_exec_fn(InstructionExecutionId::VPkSubI16Vop3p)),
-      vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(16, OperandType::OPR_SRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(16, OperandType::OPR_SRC_SIMPLE, reinterpret_cast<const OpEncoding *>(inst)->src1) {
+      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      src0(32, OperandType::OPR_SRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->src0),
+      src1(32, OperandType::OPR_SRC_SIMPLE, reinterpret_cast<const OpEncoding *>(inst)->src1) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   src_operands_[1] = &src1;
@@ -149,12 +131,6 @@ DecodeResult decodeVPkSubI16Vop3p(const MachineInst *opcode, const DecodeErrorEm
   return std::make_unique<VPkSubI16Vop3p>(opcode);
 }
 } // namespace detail
-
-void VPkSubI16Vop3p::implicit_uses(RegisterSet &uses) const {
-  Vop3p::implicit_uses(uses);
-  if (auto r = vdst.to_register_ref())
-    uses.expand(*r);
-}
 
 VPkLshlrevB16Vop3p::VPkLshlrevB16Vop3p(const MachineInst *inst)
     : Vop3p("v_pk_lshlrev_b16", reinterpret_cast<const OpEncoding *>(inst),
@@ -240,9 +216,9 @@ DecodeResult decodeVPkAshrrevI16Vop3p(const MachineInst *opcode,
 VPkMaxI16Vop3p::VPkMaxI16Vop3p(const MachineInst *inst)
     : Vop3p("v_pk_max_i16", reinterpret_cast<const OpEncoding *>(inst),
             selected_exec_fn(InstructionExecutionId::VPkMaxI16Vop3p)),
-      vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(16, OperandType::OPR_SRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(16, OperandType::OPR_SRC_SIMPLE, reinterpret_cast<const OpEncoding *>(inst)->src1) {
+      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      src0(32, OperandType::OPR_SRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->src0),
+      src1(32, OperandType::OPR_SRC_SIMPLE, reinterpret_cast<const OpEncoding *>(inst)->src1) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   src_operands_[1] = &src1;
@@ -263,18 +239,12 @@ DecodeResult decodeVPkMaxI16Vop3p(const MachineInst *opcode, const DecodeErrorEm
 }
 } // namespace detail
 
-void VPkMaxI16Vop3p::implicit_uses(RegisterSet &uses) const {
-  Vop3p::implicit_uses(uses);
-  if (auto r = vdst.to_register_ref())
-    uses.expand(*r);
-}
-
 VPkMinI16Vop3p::VPkMinI16Vop3p(const MachineInst *inst)
     : Vop3p("v_pk_min_i16", reinterpret_cast<const OpEncoding *>(inst),
             selected_exec_fn(InstructionExecutionId::VPkMinI16Vop3p)),
-      vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(16, OperandType::OPR_SRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(16, OperandType::OPR_SRC_SIMPLE, reinterpret_cast<const OpEncoding *>(inst)->src1) {
+      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      src0(32, OperandType::OPR_SRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->src0),
+      src1(32, OperandType::OPR_SRC_SIMPLE, reinterpret_cast<const OpEncoding *>(inst)->src1) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   src_operands_[1] = &src1;
@@ -295,19 +265,13 @@ DecodeResult decodeVPkMinI16Vop3p(const MachineInst *opcode, const DecodeErrorEm
 }
 } // namespace detail
 
-void VPkMinI16Vop3p::implicit_uses(RegisterSet &uses) const {
-  Vop3p::implicit_uses(uses);
-  if (auto r = vdst.to_register_ref())
-    uses.expand(*r);
-}
-
 VPkMadU16Vop3p::VPkMadU16Vop3p(const MachineInst *inst)
     : Vop3p("v_pk_mad_u16", reinterpret_cast<const OpEncoding *>(inst),
             selected_exec_fn(InstructionExecutionId::VPkMadU16Vop3p)),
-      vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(16, OperandType::OPR_SRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(16, OperandType::OPR_SRC_SIMPLE, reinterpret_cast<const OpEncoding *>(inst)->src1),
-      src2(16, OperandType::OPR_SRC_SIMPLE, reinterpret_cast<const OpEncoding *>(inst)->src2) {
+      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      src0(32, OperandType::OPR_SRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->src0),
+      src1(32, OperandType::OPR_SRC_SIMPLE, reinterpret_cast<const OpEncoding *>(inst)->src1),
+      src2(32, OperandType::OPR_SRC_SIMPLE, reinterpret_cast<const OpEncoding *>(inst)->src2) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   src_operands_[1] = &src1;
@@ -330,18 +294,12 @@ DecodeResult decodeVPkMadU16Vop3p(const MachineInst *opcode, const DecodeErrorEm
 }
 } // namespace detail
 
-void VPkMadU16Vop3p::implicit_uses(RegisterSet &uses) const {
-  Vop3p::implicit_uses(uses);
-  if (auto r = vdst.to_register_ref())
-    uses.expand(*r);
-}
-
 VPkAddU16Vop3p::VPkAddU16Vop3p(const MachineInst *inst)
     : Vop3p("v_pk_add_u16", reinterpret_cast<const OpEncoding *>(inst),
             selected_exec_fn(InstructionExecutionId::VPkAddU16Vop3p)),
-      vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(16, OperandType::OPR_SRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(16, OperandType::OPR_SRC_SIMPLE, reinterpret_cast<const OpEncoding *>(inst)->src1) {
+      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      src0(32, OperandType::OPR_SRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->src0),
+      src1(32, OperandType::OPR_SRC_SIMPLE, reinterpret_cast<const OpEncoding *>(inst)->src1) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   src_operands_[1] = &src1;
@@ -362,18 +320,12 @@ DecodeResult decodeVPkAddU16Vop3p(const MachineInst *opcode, const DecodeErrorEm
 }
 } // namespace detail
 
-void VPkAddU16Vop3p::implicit_uses(RegisterSet &uses) const {
-  Vop3p::implicit_uses(uses);
-  if (auto r = vdst.to_register_ref())
-    uses.expand(*r);
-}
-
 VPkSubU16Vop3p::VPkSubU16Vop3p(const MachineInst *inst)
     : Vop3p("v_pk_sub_u16", reinterpret_cast<const OpEncoding *>(inst),
             selected_exec_fn(InstructionExecutionId::VPkSubU16Vop3p)),
-      vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(16, OperandType::OPR_SRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(16, OperandType::OPR_SRC_SIMPLE, reinterpret_cast<const OpEncoding *>(inst)->src1) {
+      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      src0(32, OperandType::OPR_SRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->src0),
+      src1(32, OperandType::OPR_SRC_SIMPLE, reinterpret_cast<const OpEncoding *>(inst)->src1) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   src_operands_[1] = &src1;
@@ -394,18 +346,12 @@ DecodeResult decodeVPkSubU16Vop3p(const MachineInst *opcode, const DecodeErrorEm
 }
 } // namespace detail
 
-void VPkSubU16Vop3p::implicit_uses(RegisterSet &uses) const {
-  Vop3p::implicit_uses(uses);
-  if (auto r = vdst.to_register_ref())
-    uses.expand(*r);
-}
-
 VPkMaxU16Vop3p::VPkMaxU16Vop3p(const MachineInst *inst)
     : Vop3p("v_pk_max_u16", reinterpret_cast<const OpEncoding *>(inst),
             selected_exec_fn(InstructionExecutionId::VPkMaxU16Vop3p)),
-      vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(16, OperandType::OPR_SRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(16, OperandType::OPR_SRC_SIMPLE, reinterpret_cast<const OpEncoding *>(inst)->src1) {
+      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      src0(32, OperandType::OPR_SRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->src0),
+      src1(32, OperandType::OPR_SRC_SIMPLE, reinterpret_cast<const OpEncoding *>(inst)->src1) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   src_operands_[1] = &src1;
@@ -426,18 +372,12 @@ DecodeResult decodeVPkMaxU16Vop3p(const MachineInst *opcode, const DecodeErrorEm
 }
 } // namespace detail
 
-void VPkMaxU16Vop3p::implicit_uses(RegisterSet &uses) const {
-  Vop3p::implicit_uses(uses);
-  if (auto r = vdst.to_register_ref())
-    uses.expand(*r);
-}
-
 VPkMinU16Vop3p::VPkMinU16Vop3p(const MachineInst *inst)
     : Vop3p("v_pk_min_u16", reinterpret_cast<const OpEncoding *>(inst),
             selected_exec_fn(InstructionExecutionId::VPkMinU16Vop3p)),
-      vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(16, OperandType::OPR_SRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(16, OperandType::OPR_SRC_SIMPLE, reinterpret_cast<const OpEncoding *>(inst)->src1) {
+      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      src0(32, OperandType::OPR_SRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->src0),
+      src1(32, OperandType::OPR_SRC_SIMPLE, reinterpret_cast<const OpEncoding *>(inst)->src1) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   src_operands_[1] = &src1;
@@ -458,19 +398,13 @@ DecodeResult decodeVPkMinU16Vop3p(const MachineInst *opcode, const DecodeErrorEm
 }
 } // namespace detail
 
-void VPkMinU16Vop3p::implicit_uses(RegisterSet &uses) const {
-  Vop3p::implicit_uses(uses);
-  if (auto r = vdst.to_register_ref())
-    uses.expand(*r);
-}
-
 VPkFmaF16Vop3p::VPkFmaF16Vop3p(const MachineInst *inst)
     : Vop3p("v_pk_fma_f16", reinterpret_cast<const OpEncoding *>(inst),
             selected_exec_fn(InstructionExecutionId::VPkFmaF16Vop3p)),
-      vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(16, OperandType::OPR_SRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(16, OperandType::OPR_SRC_SIMPLE, reinterpret_cast<const OpEncoding *>(inst)->src1),
-      src2(16, OperandType::OPR_SRC_SIMPLE, reinterpret_cast<const OpEncoding *>(inst)->src2) {
+      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      src0(32, OperandType::OPR_SRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->src0),
+      src1(32, OperandType::OPR_SRC_SIMPLE, reinterpret_cast<const OpEncoding *>(inst)->src1),
+      src2(32, OperandType::OPR_SRC_SIMPLE, reinterpret_cast<const OpEncoding *>(inst)->src2) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   src_operands_[1] = &src1;
@@ -493,18 +427,12 @@ DecodeResult decodeVPkFmaF16Vop3p(const MachineInst *opcode, const DecodeErrorEm
 }
 } // namespace detail
 
-void VPkFmaF16Vop3p::implicit_uses(RegisterSet &uses) const {
-  Vop3p::implicit_uses(uses);
-  if (auto r = vdst.to_register_ref())
-    uses.expand(*r);
-}
-
 VPkAddF16Vop3p::VPkAddF16Vop3p(const MachineInst *inst)
     : Vop3p("v_pk_add_f16", reinterpret_cast<const OpEncoding *>(inst),
             selected_exec_fn(InstructionExecutionId::VPkAddF16Vop3p)),
-      vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(16, OperandType::OPR_SRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(16, OperandType::OPR_SRC_SIMPLE, reinterpret_cast<const OpEncoding *>(inst)->src1) {
+      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      src0(32, OperandType::OPR_SRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->src0),
+      src1(32, OperandType::OPR_SRC_SIMPLE, reinterpret_cast<const OpEncoding *>(inst)->src1) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   src_operands_[1] = &src1;
@@ -525,18 +453,12 @@ DecodeResult decodeVPkAddF16Vop3p(const MachineInst *opcode, const DecodeErrorEm
 }
 } // namespace detail
 
-void VPkAddF16Vop3p::implicit_uses(RegisterSet &uses) const {
-  Vop3p::implicit_uses(uses);
-  if (auto r = vdst.to_register_ref())
-    uses.expand(*r);
-}
-
 VPkMulF16Vop3p::VPkMulF16Vop3p(const MachineInst *inst)
     : Vop3p("v_pk_mul_f16", reinterpret_cast<const OpEncoding *>(inst),
             selected_exec_fn(InstructionExecutionId::VPkMulF16Vop3p)),
-      vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(16, OperandType::OPR_SRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(16, OperandType::OPR_SRC_SIMPLE, reinterpret_cast<const OpEncoding *>(inst)->src1) {
+      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      src0(32, OperandType::OPR_SRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->src0),
+      src1(32, OperandType::OPR_SRC_SIMPLE, reinterpret_cast<const OpEncoding *>(inst)->src1) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   src_operands_[1] = &src1;
@@ -557,18 +479,12 @@ DecodeResult decodeVPkMulF16Vop3p(const MachineInst *opcode, const DecodeErrorEm
 }
 } // namespace detail
 
-void VPkMulF16Vop3p::implicit_uses(RegisterSet &uses) const {
-  Vop3p::implicit_uses(uses);
-  if (auto r = vdst.to_register_ref())
-    uses.expand(*r);
-}
-
 VPkMinF16Vop3p::VPkMinF16Vop3p(const MachineInst *inst)
     : Vop3p("v_pk_min_f16", reinterpret_cast<const OpEncoding *>(inst),
             selected_exec_fn(InstructionExecutionId::VPkMinF16Vop3p)),
-      vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(16, OperandType::OPR_SRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(16, OperandType::OPR_SRC_SIMPLE, reinterpret_cast<const OpEncoding *>(inst)->src1) {
+      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      src0(32, OperandType::OPR_SRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->src0),
+      src1(32, OperandType::OPR_SRC_SIMPLE, reinterpret_cast<const OpEncoding *>(inst)->src1) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   src_operands_[1] = &src1;
@@ -589,18 +505,12 @@ DecodeResult decodeVPkMinF16Vop3p(const MachineInst *opcode, const DecodeErrorEm
 }
 } // namespace detail
 
-void VPkMinF16Vop3p::implicit_uses(RegisterSet &uses) const {
-  Vop3p::implicit_uses(uses);
-  if (auto r = vdst.to_register_ref())
-    uses.expand(*r);
-}
-
 VPkMaxF16Vop3p::VPkMaxF16Vop3p(const MachineInst *inst)
     : Vop3p("v_pk_max_f16", reinterpret_cast<const OpEncoding *>(inst),
             selected_exec_fn(InstructionExecutionId::VPkMaxF16Vop3p)),
-      vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(16, OperandType::OPR_SRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(16, OperandType::OPR_SRC_SIMPLE, reinterpret_cast<const OpEncoding *>(inst)->src1) {
+      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      src0(32, OperandType::OPR_SRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->src0),
+      src1(32, OperandType::OPR_SRC_SIMPLE, reinterpret_cast<const OpEncoding *>(inst)->src1) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   src_operands_[1] = &src1;
@@ -620,12 +530,6 @@ DecodeResult decodeVPkMaxF16Vop3p(const MachineInst *opcode, const DecodeErrorEm
   return std::make_unique<VPkMaxF16Vop3p>(opcode);
 }
 } // namespace detail
-
-void VPkMaxF16Vop3p::implicit_uses(RegisterSet &uses) const {
-  Vop3p::implicit_uses(uses);
-  if (auto r = vdst.to_register_ref())
-    uses.expand(*r);
-}
 
 VMadMixF32Vop3p::VMadMixF32Vop3p(const MachineInst *inst)
     : Vop3p("v_mad_mix_f32", reinterpret_cast<const OpEncoding *>(inst),
@@ -944,10 +848,10 @@ DecodeResult decodeVDot8U32U4Vop3p(const MachineInst *opcode,
 VPkFmaF32Vop3p::VPkFmaF32Vop3p(const MachineInst *inst)
     : Vop3p("v_pk_fma_f32", reinterpret_cast<const OpEncoding *>(inst),
             selected_exec_fn(InstructionExecutionId::VPkFmaF32Vop3p)),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(32, OperandType::OPR_SRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(32, OperandType::OPR_SRC_SIMPLE, reinterpret_cast<const OpEncoding *>(inst)->src1),
-      src2(32, OperandType::OPR_SRC_SIMPLE, reinterpret_cast<const OpEncoding *>(inst)->src2) {
+      vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      src0(64, OperandType::OPR_SRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->src0),
+      src1(64, OperandType::OPR_SRC_SIMPLE, reinterpret_cast<const OpEncoding *>(inst)->src1),
+      src2(64, OperandType::OPR_SRC_SIMPLE, reinterpret_cast<const OpEncoding *>(inst)->src2) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   src_operands_[1] = &src1;
@@ -973,9 +877,9 @@ DecodeResult decodeVPkFmaF32Vop3p(const MachineInst *opcode, const DecodeErrorEm
 VPkMulF32Vop3p::VPkMulF32Vop3p(const MachineInst *inst)
     : Vop3p("v_pk_mul_f32", reinterpret_cast<const OpEncoding *>(inst),
             selected_exec_fn(InstructionExecutionId::VPkMulF32Vop3p)),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(32, OperandType::OPR_SRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(32, OperandType::OPR_SRC_SIMPLE, reinterpret_cast<const OpEncoding *>(inst)->src1) {
+      vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      src0(64, OperandType::OPR_SRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->src0),
+      src1(64, OperandType::OPR_SRC_SIMPLE, reinterpret_cast<const OpEncoding *>(inst)->src1) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   src_operands_[1] = &src1;
@@ -999,9 +903,9 @@ DecodeResult decodeVPkMulF32Vop3p(const MachineInst *opcode, const DecodeErrorEm
 VPkAddF32Vop3p::VPkAddF32Vop3p(const MachineInst *inst)
     : Vop3p("v_pk_add_f32", reinterpret_cast<const OpEncoding *>(inst),
             selected_exec_fn(InstructionExecutionId::VPkAddF32Vop3p)),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(32, OperandType::OPR_SRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(32, OperandType::OPR_SRC_SIMPLE, reinterpret_cast<const OpEncoding *>(inst)->src1) {
+      vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      src0(64, OperandType::OPR_SRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->src0),
+      src1(64, OperandType::OPR_SRC_SIMPLE, reinterpret_cast<const OpEncoding *>(inst)->src1) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   src_operands_[1] = &src1;

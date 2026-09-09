@@ -6,8 +6,10 @@
 #include "simdojo/sim/simulation.h"
 #include "simdojo/sim/topology.h"
 
+#include <algorithm>
 #include <memory>
 #include <string>
+#include <vector>
 
 namespace rocjitsu {
 
@@ -84,6 +86,29 @@ void SoC::set_plugin_group(std::shared_ptr<ExecutionPluginGroup> plugin_group) {
     xcd->set_plugin_group(plugin_group_);
 }
 
+void SoC::set_dispatch_threads(uint32_t threads) {
+  requested_dispatch_threads_ = std::max(threads, 1u);
+  apply_dispatch_threads();
+}
+
+void SoC::apply_dispatch_threads() {
+  uint32_t effective_threads = requested_dispatch_threads_;
+  if (exec_mode_ != simdojo::ExecMode::FUNCTIONAL)
+    effective_threads = 1;
+
+  std::unique_ptr<amdgpu::CpuDispatchPool> new_pool;
+  if (effective_threads > 1)
+    new_pool = std::make_unique<amdgpu::CpuDispatchPool>(effective_threads);
+
+  auto *pool = new_pool.get();
+  for_each_cp([pool, effective_threads](auto *cp) {
+    cp->set_shared_dispatch_pool(pool);
+    cp->set_dispatch_threads(effective_threads);
+  });
+  dispatch_pool_ = std::move(new_pool);
+  dispatch_threads_ = effective_threads;
+}
+
 void SoC::flush_all() {
   // Flush all per-CU L1 caches (invalidate, since L1 is write-through).
   for (auto *x : xcds_) {
@@ -104,6 +129,21 @@ void SoC::flush_all() {
 }
 
 void SoC::initialize() {
+  // Let every XCD's command processor see its siblings, so a queue marked for
+  // fan-out can split its dispatches across the whole device. Each CP's rank is
+  // its own XCD index, which fixes the workgroup-to-XCD mapping independently of
+  // which XCD a given queue happened to be assigned to.
+  {
+    std::vector<amdgpu::CommandProcessor *> cps;
+    cps.reserve(xcds_.size());
+    for (auto *xcd_ptr : xcds_)
+      cps.push_back(xcd_ptr->command_processor());
+    if (std::find(cps.begin(), cps.end(), nullptr) == cps.end()) {
+      for (uint32_t i = 0; i < cps.size(); ++i)
+        cps[i]->set_xcd_topology(i, cps);
+    }
+  }
+
   if (iods_.empty()) {
     // No IOD modeling: wire each L2's req port directly to the standalone HBM controller.
     // Create the HBM controller lazily if set_memory() was called but the

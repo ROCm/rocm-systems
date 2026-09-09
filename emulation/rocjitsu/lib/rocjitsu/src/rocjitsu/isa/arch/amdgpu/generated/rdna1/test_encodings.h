@@ -508,7 +508,6 @@ inline constexpr TestEncoding ENCODINGS[] = {
     {"v_cmpx_nlt_f16", {0x7DFC0000U, 0x00000000U}},
     {"v_cmpx_tru_f16", {0x7DFE0000U, 0x00000000U}},
     {"v_cndmask_b32", {0x02000000U, 0x00000000U}},
-    {"v_dot2c_f32_f16", {0x04000000U, 0x00000000U}},
     {"v_add_f32", {0x06000000U, 0x00000000U}},
     {"v_sub_f32", {0x08000000U, 0x00000000U}},
     {"v_subrev_f32", {0x0A000000U, 0x00000000U}},
@@ -519,7 +518,6 @@ inline constexpr TestEncoding ENCODINGS[] = {
     {"v_mul_hi_i32_i24", {0x14000000U, 0x00000000U}},
     {"v_mul_u32_u24", {0x16000000U, 0x00000000U}},
     {"v_mul_hi_u32_u24", {0x18000000U, 0x00000000U}},
-    {"v_dot4c_i32_i8", {0x1A000000U, 0x00000000U}},
     {"v_min_f32", {0x1E000000U, 0x00000000U}},
     {"v_max_f32", {0x20000000U, 0x00000000U}},
     {"v_min_i32", {0x22000000U, 0x00000000U}},
@@ -612,9 +610,6 @@ inline constexpr TestEncoding ENCODINGS[] = {
     {"v_frexp_mant_f32", {0xD5C00000U, 0x00000000U}},
     {"v_clrexcp", {0xD5C10000U, 0x00000000U}},
     {"v_movreld_b32", {0xD5C20000U, 0x00000000U}},
-    {"v_movrels_b32", {0xD5C30000U, 0x00000000U}},
-    {"v_movrelsd_b32", {0xD5C40000U, 0x00000000U}},
-    {"v_movrelsd_2_b32", {0xD5C80000U, 0x00000000U}},
     {"v_cvt_f16_u16", {0xD5D00000U, 0x00000000U}},
     {"v_cvt_f16_i16", {0xD5D10000U, 0x00000000U}},
     {"v_cvt_u16_f16", {0xD5D20000U, 0x00000000U}},
@@ -637,7 +632,6 @@ inline constexpr TestEncoding ENCODINGS[] = {
     {"v_cvt_norm_i16_f16", {0xD5E30000U, 0x00000000U}},
     {"v_cvt_norm_u16_f16", {0xD5E40000U, 0x00000000U}},
     {"v_cndmask_b32", {0xD5010000U, 0x00000000U}},
-    {"v_dot2c_f32_f16", {0xD5020000U, 0x00000000U}},
     {"v_add_f32", {0xD5030000U, 0x00000000U}},
     {"v_sub_f32", {0xD5040000U, 0x00000000U}},
     {"v_subrev_f32", {0xD5050000U, 0x00000000U}},
@@ -648,7 +642,6 @@ inline constexpr TestEncoding ENCODINGS[] = {
     {"v_mul_hi_i32_i24", {0xD50A0000U, 0x00000000U}},
     {"v_mul_u32_u24", {0xD50B0000U, 0x00000000U}},
     {"v_mul_hi_u32_u24", {0xD50C0000U, 0x00000000U}},
-    {"v_dot4c_i32_i8", {0xD50D0000U, 0x00000000U}},
     {"v_min_f32", {0xD50F0000U, 0x00000000U}},
     {"v_max_f32", {0xD5100000U, 0x00000000U}},
     {"v_min_i32", {0xD5110000U, 0x00000000U}},
@@ -993,13 +986,6 @@ inline constexpr TestEncoding ENCODINGS[] = {
     {"v_pk_mul_f16", {0xCC100000U, 0x00000000U}},
     {"v_pk_min_f16", {0xCC110000U, 0x00000000U}},
     {"v_pk_max_f16", {0xCC120000U, 0x00000000U}},
-    {"v_dot2_f32_f16", {0xCC130000U, 0x00000000U}},
-    {"v_dot2_i32_i16", {0xCC140000U, 0x00000000U}},
-    {"v_dot2_u32_u16", {0xCC150000U, 0x00000000U}},
-    {"v_dot4_i32_i8", {0xCC160000U, 0x00000000U}},
-    {"v_dot4_u32_u8", {0xCC170000U, 0x00000000U}},
-    {"v_dot8_i32_i4", {0xCC180000U, 0x00000000U}},
-    {"v_dot8_u32_u4", {0xCC190000U, 0x00000000U}},
     {"v_fma_mix_f32", {0xCC200000U, 0x00000000U}},
     {"v_fma_mixlo_f16", {0xCC210000U, 0x00000000U}},
     {"v_fma_mixhi_f16", {0xCC220000U, 0x00000000U}},
@@ -1400,7 +1386,7 @@ inline constexpr TestEncoding ENCODINGS[] = {
     {"flat_atomic_fmax_x2", {0xDD800000U, 0x00000000U}},
 };
 
-inline constexpr size_t NUM_ENCODINGS = 1379;
+inline constexpr size_t NUM_ENCODINGS = 1365;
 
 } // namespace rocjitsu::rdna1::test_data
 

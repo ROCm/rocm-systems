@@ -382,7 +382,11 @@ int ARSMI_get_fw_version(uint32_t /*dv_ind*/, uint64_t* fw_version) {
 
 // Find the DRM card number whose PCI slot name matches the given BDF.
 // Returns the card number on success, -1 if not found.
-static int findCardForBdf(uint32_t domain, uint8_t bus, uint8_t device, uint8_t function) {
+//
+// HIP/KFD may encode a DPX/XCP partition as PCI function N when the only
+// physical endpoint is function 0. If the exact BDF is missing, retry with
+// the function field stripped.
+static int findCardForBdfExact(uint32_t domain, uint8_t bus, uint8_t device, uint8_t function) {
   for (uint32_t card = 0; card < 128; card++) {
     char path[256];
     snprintf(path, sizeof(path), "%s/card%u/device/uevent", kDrmClassRoot, card);
@@ -401,6 +405,13 @@ static int findCardForBdf(uint32_t domain, uint8_t bus, uint8_t device, uint8_t 
     fclose(fp);
     if (found) return (int)card;
   }
+  return -1;
+}
+
+static int findCardForBdf(uint32_t domain, uint8_t bus, uint8_t device, uint8_t function) {
+  int card = findCardForBdfExact(domain, bus, device, function);
+  if (card >= 0) return card;
+  if (function != 0) return findCardForBdfExact(domain, bus, device, 0);
   return -1;
 }
 

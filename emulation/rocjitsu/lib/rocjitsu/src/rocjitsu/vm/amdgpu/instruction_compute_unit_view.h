@@ -22,6 +22,7 @@ template <typename Isa> class AmdgpuIsaOperand;
 
 namespace amdgpu {
 class ComputeUnitCore;
+class InstructionCache;
 class L1ScalarCache;
 class L1VectorCache;
 class L2Cache;
@@ -37,8 +38,9 @@ class Wavefront;
 /// should reach registers through Operand or RegisterAccess.
 class InstructionComputeUnitView {
 public:
-  explicit InstructionComputeUnitView(ComputeUnitCore &cu) : cu_(&cu) {}
+  InstructionComputeUnitView(ComputeUnitCore &cu, Wavefront &wf) : cu_(&cu), wf_(&wf) {}
 
+  InstructionCache &instruction_cache();
   L1ScalarCache &l1_scalar();
   L1VectorCache &l1_vector();
   L2Cache *l2() const;
@@ -57,17 +59,18 @@ public:
   bool signal_queue_exception(uint32_t queue_id, uint32_t process_id, uint64_t status);
 
 private:
-  uint32_t read_sgpr(uint32_t reg_idx) const;
-  void write_sgpr(uint32_t reg_idx, uint32_t value);
-
   ComputeUnitCore &raw_cu() { return *cu_; }
   const ComputeUnitCore &raw_cu() const { return *cu_; }
+  Wavefront &raw_wavefront() { return *wf_; }
+  const Wavefront &raw_wavefront() const { return *wf_; }
 
   ComputeUnitCore *cu_ = nullptr;
+  Wavefront *wf_ = nullptr;
 
-  // RegisterAccess unwraps the view so instruction helpers can use the same
-  // observed physical-register facade whether they were passed a full CU or an
-  // instruction-facing CU view.
+  // RegisterAccess unwraps both the CU and the owning wave. This keeps legacy
+  // instruction helpers that accept a CU-shaped service view wave-bound:
+  // physical register indices are validated against the executing wave rather
+  // than re-attributed through the CU's reverse ownership maps.
   friend class RegisterAccess;
 
   // The non-split ISA operand fallback and the execution-only access key are

@@ -1,47 +1,34 @@
-/*
- * Copyright (c) Advanced Micro Devices, Inc. All rights reserved.
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- * THE SOFTWARE.
- */
+// Copyright Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
 
 #ifndef PCI_UTIL_H
 #define PCI_UTIL_H
 
-#include "include/amd_cuid.h"
 #include <cstdint>
 #include <string>
 #include <vector>
 
+#include "include/amd_cuid.h"
+
+/// Size of a PCIe extended configuration space, in bytes.
+constexpr size_t kPciConfigSpaceSize = 4096;
+
 class PciUtil {
-public:
-  static amdcuid_status_t read_pci_config_space(std::string bdf,
-                                                uint8_t *buffer,
-                                                size_t buffer_size,
-                                                uint16_t offset);
-  static amdcuid_status_t get_pci_dsn_cap_offset(std::string bdf,
-                                                 uint16_t &offset);
-  static amdcuid_status_t get_pci_vsec_cap_offset(std::string bdf,
-                                                  uint16_t &offset);
+ public:
+  static amdcuid_status_t read_pci_config_space(std::string bdf, uint8_t* buffer,
+                                                size_t buffer_size, uint16_t offset);
+  static amdcuid_status_t get_pci_dsn_cap_offset(std::string bdf, uint16_t& offset);
+  static amdcuid_status_t get_pci_vsec_cap_offset(std::string bdf, uint16_t& offset);
+
+  // Load a 16-bit little-endian config-space field. Use this instead of
+  // casting the buffer to uint16_t*, which violates alignment and aliasing.
+  static uint16_t load_le16(const uint8_t bytes[2]) {
+    return static_cast<uint16_t>(static_cast<uint16_t>(bytes[0]) |
+                                 (static_cast<uint16_t>(bytes[1]) << 8));
+  }
 
   // Endianness conversion utilities
-  static uint16_t le16_to_be16(uint16_t value);
   static uint64_t le64_to_be64(uint64_t value);
 };
 
-#endif // PCI_UTIL_H
+#endif  // PCI_UTIL_H

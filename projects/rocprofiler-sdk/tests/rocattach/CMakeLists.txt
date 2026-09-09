@@ -1,7 +1,7 @@
 #
 # rocprofv3 tool test
 #
-cmake_minimum_required(VERSION 3.21.0 FATAL_ERROR)
+cmake_minimum_required(VERSION 3.24 FATAL_ERROR)
 
 project(
     rocprofiler-sdk-tests-rocattach
@@ -31,6 +31,12 @@ else()
     set(LOG_LEVEL "trace")
 endif()
 
+set(DEFAULT_TOOL_SONAME_TEST_DISABLED ${IS_DISABLED})
+if(ROCPROFILER_MEMCHECK STREQUAL "LeakSanitizer")
+    # This test requires trace output, which is intentionally disabled under LSan.
+    set(DEFAULT_TOOL_SONAME_TEST_DISABLED ON)
+endif()
+
 set(rocattach-test-env
     "ROCP_TOOL_ATTACH=1"
     "ROCPROFILER_REGISTER_LOG_LEVEL=${LOG_LEVEL}"
@@ -53,6 +59,14 @@ target_link_libraries(
     rocattach-tool-path-validation-test
     PRIVATE rocprofiler-sdk::tests-build-flags
             rocprofiler-sdk::rocprofiler-sdk-rocattach-shared-library)
+
+add_executable(rocattach-register-library-alias-test)
+target_sources(rocattach-register-library-alias-test
+               PRIVATE register_library_alias_test.cpp)
+target_link_libraries(
+    rocattach-register-library-alias-test
+    PRIVATE rocprofiler-sdk::rocprofiler-sdk-shared-library
+            rocprofiler-sdk::tests-build-flags)
 
 if(TARGET rocprofiler-sdk::rocprofiler-sdk-build-flags
    AND TARGET rocprofiler-sdk::rocprofiler-sdk-common-library)
@@ -170,6 +184,35 @@ rocprofiler_add_integration_execute_test(
     PASS_REGULAR_EXPRESSION
         "Attachment test observed ROCPROFILER_TEST_FORWARDING=preserved"
     FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
+
+rocprofiler_add_integration_execute_test(
+    rocattach-equivalent-register-library-test-execute
+    TARGET rocattach-register-library-alias-test
+    ARGS $<TARGET_FILE:rocprofiler-sdk::rocprofiler-sdk-shared-library>
+    TIMEOUT 10
+    LABELS "attachment"
+    ENVIRONMENT
+        "ROCPROFILER_LIBRARY_CTOR=0"
+        "ROCPROFILER_LOG_LEVEL=${LOG_LEVEL}"
+        "LD_LIBRARY_PATH=$<TARGET_FILE_DIR:rocprofiler-sdk::rocprofiler-sdk-shared-library>:$ENV{LD_LIBRARY_PATH}"
+    PRELOAD "${ROCPROFILER_MEMCHECK_PRELOAD_ENV_VALUE}"
+    PASS_REGULAR_EXPRESSION
+        "Test PASSED: equivalent ROCPROFILER_REGISTER_LIBRARY alias accepted"
+    FAIL_REGULAR_EXPRESSION
+        "${ROCPROFILER_DEFAULT_FAIL_REGEX}|ROCPROFILER_REGISTER_LIBRARY is already set|Test FAILED"
+    )
+
+rocprofiler_add_integration_execute_test(
+    rocattach-default-tool-soname-test-execute
+    TARGET rocattach-tool-path-validation-test
+    ARGS --default
+    TIMEOUT 5
+    LABELS "attachment"
+    ENVIRONMENT "${rocattach-test-env}"
+    DISABLED ${DEFAULT_TOOL_SONAME_TEST_DISABLED}
+    PRELOAD "${ROCPROFILER_MEMCHECK_PRELOAD_ENV_VALUE}"
+    PASS_REGULAR_EXPRESSION "Tool library path: librocprofiler-sdk-tool\\.so\\.[0-9]+"
+    FAIL_REGULAR_EXPRESSION "Test FAILED")
 
 # Verify absolute tool library paths fail early when target-side dlopen could not resolve
 # them from the target mount namespace.

@@ -62,33 +62,6 @@ RJ_NOINLINE void VCndmaskB32Vop2::execute_modifier_impl(amdgpu::Wavefront &wf) {
   dpp_write_mask_scope_.restore();
 }
 
-void VDot2cF32F16Vop2::execute_impl(amdgpu::Wavefront &wf) {
-  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0)) {
-    execute_modifier_impl(wf);
-    return;
-  }
-  amdgpu::execute_v_dot2c_f32_f16_vop2(*this, wf);
-}
-
-RJ_NOINLINE void VDot2cF32F16Vop2::execute_modifier_impl(amdgpu::Wavefront &wf) {
-  std::optional<StagedOperand> dpp_src0_;
-  amdgpu::dpp::DppPlan dpp_plan_;
-  if (inst_.src0 == amdgpu::SRC_DPP)
-    dpp_plan_ = amdgpu::dpp::make_dpp_plan(wf.wf_size(), dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
-                                           dpp_bound_ctrl_, dpp_fi_, wf.exec(), false);
-  if (inst_.src0 == amdgpu::SRC_DPP)
-    amdgpu::dpp::apply_dpp(vdst, dpp_plan_, wf.exec(), dpp_src0_, wf);
-  if (amdgpu::dpp::is_src_dpp8(inst_.src0))
-    amdgpu::dpp::apply_dpp8(vdst, dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf);
-  ScopedOperandDelegate dpp_src0_binding_(vdst, dpp_src0_ ? &*dpp_src0_ : nullptr);
-  amdgpu::dpp::ScopedVgprWriteMask dpp_write_mask_scope_;
-  if (inst_.src0 == amdgpu::SRC_DPP)
-    dpp_write_mask_scope_.bind(wf,
-                               wf.exec() & dpp_plan_.row_bank_mask & dpp_plan_.source_write_mask);
-  amdgpu::execute_v_dot2c_f32_f16_vop2(*this, wf);
-  dpp_write_mask_scope_.restore();
-}
-
 void VAddF32Vop2::execute_impl(amdgpu::Wavefront &wf) {
   if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0) ||
       inst_.src0 == amdgpu::SRC_SDWA) {
@@ -451,33 +424,6 @@ RJ_NOINLINE void VMulHiU32U24Vop2::execute_modifier_impl(amdgpu::Wavefront &wf) 
     dpp_write_mask_scope_.bind(wf,
                                wf.exec() & dpp_plan_.row_bank_mask & dpp_plan_.source_write_mask);
   amdgpu::execute_v_mul_hi_u32_u24_vop2(*this, wf);
-  dpp_write_mask_scope_.restore();
-}
-
-void VDot4cI32I8Vop2::execute_impl(amdgpu::Wavefront &wf) {
-  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0)) {
-    execute_modifier_impl(wf);
-    return;
-  }
-  amdgpu::execute_v_dot4c_i32_i8_vop2(*this, wf);
-}
-
-RJ_NOINLINE void VDot4cI32I8Vop2::execute_modifier_impl(amdgpu::Wavefront &wf) {
-  std::optional<StagedOperand> dpp_src0_;
-  amdgpu::dpp::DppPlan dpp_plan_;
-  if (inst_.src0 == amdgpu::SRC_DPP)
-    dpp_plan_ = amdgpu::dpp::make_dpp_plan(wf.wf_size(), dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
-                                           dpp_bound_ctrl_, dpp_fi_, wf.exec(), false);
-  if (inst_.src0 == amdgpu::SRC_DPP)
-    amdgpu::dpp::apply_dpp(vdst, dpp_plan_, wf.exec(), dpp_src0_, wf);
-  if (amdgpu::dpp::is_src_dpp8(inst_.src0))
-    amdgpu::dpp::apply_dpp8(vdst, dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf);
-  ScopedOperandDelegate dpp_src0_binding_(vdst, dpp_src0_ ? &*dpp_src0_ : nullptr);
-  amdgpu::dpp::ScopedVgprWriteMask dpp_write_mask_scope_;
-  if (inst_.src0 == amdgpu::SRC_DPP)
-    dpp_write_mask_scope_.bind(wf,
-                               wf.exec() & dpp_plan_.row_bank_mask & dpp_plan_.source_write_mask);
-  amdgpu::execute_v_dot4c_i32_i8_vop2(*this, wf);
   dpp_write_mask_scope_.restore();
 }
 
@@ -1003,10 +949,10 @@ RJ_NOINLINE void VMacF32Vop2::execute_modifier_impl(amdgpu::Wavefront &wf) {
     dpp_plan_ = amdgpu::dpp::make_dpp_plan(wf.wf_size(), dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
                                            dpp_bound_ctrl_, dpp_fi_, wf.exec(), false);
   if (inst_.src0 == amdgpu::SRC_DPP)
-    amdgpu::dpp::apply_dpp(vdst, dpp_plan_, wf.exec(), dpp_src0_, wf);
+    amdgpu::dpp::apply_dpp(src0, dpp_plan_, wf.exec(), dpp_src0_, wf);
   if (amdgpu::dpp::is_src_dpp8(inst_.src0))
-    amdgpu::dpp::apply_dpp8(vdst, dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf);
-  ScopedOperandDelegate dpp_src0_binding_(vdst, dpp_src0_ ? &*dpp_src0_ : nullptr);
+    amdgpu::dpp::apply_dpp8(src0, dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf);
+  ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_ ? &*dpp_src0_ : nullptr);
   amdgpu::dpp::ScopedVgprWriteMask dpp_write_mask_scope_;
   if (inst_.src0 == amdgpu::SRC_DPP)
     dpp_write_mask_scope_.bind(wf,
@@ -1311,10 +1257,10 @@ RJ_NOINLINE void VFmacF32Vop2::execute_modifier_impl(amdgpu::Wavefront &wf) {
     dpp_plan_ = amdgpu::dpp::make_dpp_plan(wf.wf_size(), dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
                                            dpp_bound_ctrl_, dpp_fi_, wf.exec(), false);
   if (inst_.src0 == amdgpu::SRC_DPP)
-    amdgpu::dpp::apply_dpp(vdst, dpp_plan_, wf.exec(), dpp_src0_, wf);
+    amdgpu::dpp::apply_dpp(src0, dpp_plan_, wf.exec(), dpp_src0_, wf);
   if (amdgpu::dpp::is_src_dpp8(inst_.src0))
-    amdgpu::dpp::apply_dpp8(vdst, dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf);
-  ScopedOperandDelegate dpp_src0_binding_(vdst, dpp_src0_ ? &*dpp_src0_ : nullptr);
+    amdgpu::dpp::apply_dpp8(src0, dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf);
+  ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_ ? &*dpp_src0_ : nullptr);
   amdgpu::dpp::ScopedVgprWriteMask dpp_write_mask_scope_;
   if (inst_.src0 == amdgpu::SRC_DPP)
     dpp_write_mask_scope_.bind(wf,
@@ -1541,10 +1487,10 @@ RJ_NOINLINE void VFmacF16Vop2::execute_modifier_impl(amdgpu::Wavefront &wf) {
     dpp_plan_ = amdgpu::dpp::make_dpp_plan(wf.wf_size(), dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
                                            dpp_bound_ctrl_, dpp_fi_, wf.exec(), false);
   if (inst_.src0 == amdgpu::SRC_DPP)
-    amdgpu::dpp::apply_dpp(vdst, dpp_plan_, wf.exec(), dpp_src0_, wf);
+    amdgpu::dpp::apply_dpp(src0, dpp_plan_, wf.exec(), dpp_src0_, wf);
   if (amdgpu::dpp::is_src_dpp8(inst_.src0))
-    amdgpu::dpp::apply_dpp8(vdst, dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf);
-  ScopedOperandDelegate dpp_src0_binding_(vdst, dpp_src0_ ? &*dpp_src0_ : nullptr);
+    amdgpu::dpp::apply_dpp8(src0, dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf);
+  ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_ ? &*dpp_src0_ : nullptr);
   amdgpu::dpp::ScopedVgprWriteMask dpp_write_mask_scope_;
   if (inst_.src0 == amdgpu::SRC_DPP)
     dpp_write_mask_scope_.bind(wf,
@@ -1693,10 +1639,10 @@ RJ_NOINLINE void VPkFmacF16Vop2::execute_modifier_impl(amdgpu::Wavefront &wf) {
     dpp_plan_ = amdgpu::dpp::make_dpp_plan(wf.wf_size(), dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
                                            dpp_bound_ctrl_, dpp_fi_, wf.exec(), false);
   if (inst_.src0 == amdgpu::SRC_DPP)
-    amdgpu::dpp::apply_dpp(vdst, dpp_plan_, wf.exec(), dpp_src0_, wf);
+    amdgpu::dpp::apply_dpp(src0, dpp_plan_, wf.exec(), dpp_src0_, wf);
   if (amdgpu::dpp::is_src_dpp8(inst_.src0))
-    amdgpu::dpp::apply_dpp8(vdst, dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf);
-  ScopedOperandDelegate dpp_src0_binding_(vdst, dpp_src0_ ? &*dpp_src0_ : nullptr);
+    amdgpu::dpp::apply_dpp8(src0, dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf);
+  ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_ ? &*dpp_src0_ : nullptr);
   amdgpu::dpp::ScopedVgprWriteMask dpp_write_mask_scope_;
   if (inst_.src0 == amdgpu::SRC_DPP)
     dpp_write_mask_scope_.bind(wf,

@@ -11,6 +11,7 @@
 #include "rocjitsu/config/checkpoint.h"
 #include "rocjitsu/config/config_loader.h"
 #include "rocjitsu/config/dbt_guest_config.h"
+#include "rocjitsu/config/pci_device_config.h"
 #include "rocjitsu/isa/arch/amdgpu/cdna3/isa.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/accvgpr_layout.h"
 #include "rocjitsu/kmd/linux/amdgpu_properties.h"
@@ -27,6 +28,7 @@ RJ_DIAGNOSTIC_IGNORE_PEDANTIC
 #include "hsa/AMDHSAKernelDescriptor.h"
 RJ_DIAGNOSTIC_POP
 
+#include <gmock/gmock.h>
 #include <gtest/gtest.h>
 
 #include <cstdint>
@@ -39,10 +41,33 @@ RJ_DIAGNOSTIC_POP
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
+
+namespace rocjitsu::test {
+
+class SoCTestAccess {
+public:
+  static uint32_t dispatch_pool_threads(const SoC &soc) {
+    return soc.dispatch_pool_ ? soc.dispatch_pool_->thread_count() : 0;
+  }
+
+  static const amdgpu::CpuDispatchPool *dispatch_pool(const SoC &soc) {
+    return soc.dispatch_pool_.get();
+  }
+};
+
+} // namespace rocjitsu::test
+
 namespace {
 
 const std::string CONFIG_DIR_PATH = CONFIG_DIR;
+
+class SerializedHotHookPlugin final : public rocjitsu::ExecutionPlugin {
+public:
+  SerializedHotHookPlugin() : rocjitsu::ExecutionPlugin("serialized_hot_hook") {}
+  bool requires_serial_hot_hooks() const override { return true; }
+};
 
 // \NPI new GPU: add a config-load test for its configs/<gpu>.json here.
 using namespace rocjitsu;
@@ -58,6 +83,115 @@ std::vector<uint8_t> read_binary_file(const std::string &path) {
   return {std::istreambuf_iterator<char>(stream), std::istreambuf_iterator<char>()};
 }
 
+TEST(ConfigLoaderTest, LoadCdna2Config) {
+  auto loaded =
+      config::load_config(CONFIG_DIR_PATH + "/gfx90a_mi210_kmd.json", rocjitsu::kEmbeddedSchema);
+  auto *soc = loaded.soc();
+
+  EXPECT_EQ(soc->arch(), ROCJITSU_CODE_ARCH_CDNA2);
+  EXPECT_EQ(loaded.device.gpu_id, 50149u);
+  EXPECT_EQ(loaded.device.device_id, 0x740fu);
+  EXPECT_EQ(loaded.device.family_id, 0x8du);
+  EXPECT_EQ(loaded.device.gfx_target_version, 90010u);
+  EXPECT_EQ(loaded.device.revision_id, 1u);
+  EXPECT_EQ(loaded.device.pci_revision_id, 2u);
+  EXPECT_EQ(loaded.device.wave_front_size, 64u);
+  EXPECT_EQ(loaded.device.max_waves_per_simd, 8u);
+  EXPECT_EQ(loaded.device.lds_size_kb, 64u);
+
+  // Aldebaran is a single-die part: one XCD of 8 SEs, 14 CUs per SE. MI210
+  // exposes 104 active CUs through simd_count but has capacity of 112
+  EXPECT_EQ(soc->num_xcds(), 1u);
+  EXPECT_EQ(loaded.device.num_shader_engines, 8u);
+  EXPECT_EQ(loaded.device.num_shader_arrays_per_engine, 1u);
+  EXPECT_EQ(loaded.device.num_cu_per_sh, 14u);
+  EXPECT_EQ(loaded.device.simd_per_cu, 4u);
+  EXPECT_EQ(loaded.device.simd_count, 416u);
+  EXPECT_EQ(soc->xcd(0)->num_shader_engines(), 8u);
+  EXPECT_EQ(soc->xcd(0)->shader_engine(0)->num_compute_units(), 14u);
+  EXPECT_EQ(kmd::drm_cu_active_number(loaded.device.simd_count, loaded.device.simd_per_cu), 104u);
+  EXPECT_LE(loaded.device.simd_count, loaded.device.num_shader_engines *
+                                          loaded.device.num_shader_arrays_per_engine *
+                                          loaded.device.num_cu_per_sh * loaded.device.simd_per_cu);
+}
+
+std::pair<uint32_t, uint32_t> run_two_spi_dispatch() {
+  const char *json = R"({"max_ticks":10000,"num_threads":1,
+    "vm":{"arch":"cdna3"},
+    "topology":{
+      "root":{
+        "name":"soc","type":"soc",
+        "children":[
+          {"name":"vram","type":"gpu_memory"},
+          {"name":"xcd0","type":"xcd","children":[
+            {"name":"l2","type":"l2_cache"},
+            {"name":"cp","type":"command_processor"},
+            {"name":"se0","type":"shader_engine","children":[
+              {"name":"cu0","type":"compute_unit","config":[
+                {"key":"num_wf_slots","value":"10"},
+                {"key":"sgprs_per_wf","value":"104"},
+                {"key":"vgprs_per_wf","value":"256"},
+                {"key":"lds_size_kb","value":"64"}
+              ]}
+            ]},
+            {"name":"se1","type":"shader_engine","children":[
+              {"name":"cu0","type":"compute_unit","config":[
+                {"key":"num_wf_slots","value":"10"},
+                {"key":"sgprs_per_wf","value":"104"},
+                {"key":"vgprs_per_wf","value":"256"},
+                {"key":"lds_size_kb","value":"64"}
+              ]}
+            ]}
+          ]}
+        ]
+      },
+      "links":[
+        {"src":"xcd0.cp.req_0","dst":"xcd0.se0.cu0.cpl","latency":1,"weight":2},
+        {"src":"xcd0.cp.req_1","dst":"xcd0.se1.cu0.cpl","latency":1,"weight":2},
+        {"src":"xcd0.se0.cu0.req","dst":"xcd0.l2.cpl_0","latency":1,"weight":10},
+        {"src":"xcd0.se1.cu0.req","dst":"xcd0.l2.cpl_1","latency":1,"weight":10}
+      ]
+    }
+  })";
+
+  auto loaded = config::load_config_from_string(json, rocjitsu::kEmbeddedSchema);
+  auto *soc = loaded.soc();
+
+  simdojo::SimulationEngine engine(loaded.engine_config);
+  engine.topology().set_root(loaded.take_root());
+  loaded.wire_links(engine.topology());
+  engine.create();
+
+  rocjitsu::test::DispatchCountPlugin *dispatch_count = nullptr;
+  soc->set_plugin_group(rocjitsu::test::make_dispatch_count_group(&dispatch_count));
+
+  using namespace rocr::llvm::amdhsa;
+  kernel_descriptor_t kd{};
+  kd.kernel_code_entry_byte_offset = sizeof(kernel_descriptor_t);
+  AMDHSA_BITS_SET(kd.compute_pgm_rsrc1, COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT,
+                  ((256 / 8) - 1));
+  AMDHSA_BITS_SET(kd.compute_pgm_rsrc1, COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT,
+                  ((104 / 8) - 1));
+  AMDHSA_BITS_SET(kd.compute_pgm_rsrc2, COMPUTE_PGM_RSRC2_USER_SGPR_COUNT, 2);
+
+  constexpr uint64_t KD_ADDR = 0x1000;
+  soc->memory()->load_image(reinterpret_cast<const uint8_t *>(&kd), sizeof(kd), KD_ADDR);
+  soc->memory()->write32(KD_ADDR + sizeof(kernel_descriptor_t), 0xFFFFFFFF);
+
+  auto *xcd = soc->xcd(0);
+  auto *cp = xcd->command_processor();
+  cp->set_dispatch_threads(2);
+  assert(cp->dispatch_threads() == 2);
+
+  test::AqlQueue queue(soc->memory(), cp);
+  queue.dispatch(KD_ADDR, 128, 64);
+
+  engine.step();
+
+  return {dispatch_count->for_cu(xcd->shader_engine(0)->compute_unit(0)),
+          dispatch_count->for_cu(xcd->shader_engine(1)->compute_unit(0))};
+}
+
 TEST(ConfigLoaderTest, LoadCdna4Config) {
   std::string json = CONFIG_DIR_PATH + "/gfx950_mi355x.json";
   auto loaded = config::load_config(json, rocjitsu::kEmbeddedSchema);
@@ -67,13 +201,112 @@ TEST(ConfigLoaderTest, LoadCdna4Config) {
   // The part exposes 256 active CUs through simd_count but has capacity for 288.
   EXPECT_EQ(soc->num_xcds(), 8u);
   EXPECT_EQ(soc->num_iods(), 2u);
+  EXPECT_EQ(loaded.device.num_sdma_queues_per_engine, 8u);
   auto *xcd = soc->xcd(0);
   EXPECT_EQ(xcd->num_shader_engines(), 4u);
   EXPECT_EQ(xcd->shader_engine(0)->num_compute_units(), 9u);
   EXPECT_EQ(kmd::drm_cu_active_number(loaded.device.simd_count, loaded.device.simd_per_cu), 256u);
-  EXPECT_EQ(soc->assign_queue_cp(0), soc->xcd(0)->command_processor());
-  EXPECT_EQ(soc->assign_queue_cp(1), soc->xcd(1)->command_processor());
-  EXPECT_EQ(soc->assign_queue_cp(soc->num_xcds()), soc->xcd(0)->command_processor());
+  EXPECT_EQ(soc->assign_queue_owner_cp(0), soc->xcd(0)->command_processor());
+  EXPECT_EQ(soc->assign_queue_owner_cp(1), soc->xcd(1)->command_processor());
+  EXPECT_EQ(soc->assign_queue_owner_cp(soc->num_xcds()), soc->xcd(0)->command_processor());
+}
+
+// The VMM reads the bus shape through these two entry points, and nothing else
+// in the suite does: the device tests build a PciDeviceConfig by hand, so a
+// field dropped in the loader, or a wrong default for an omitted section, would
+// leave every test green while a guest saw the wrong device.
+TEST(ConfigLoaderTest, LoadsThePciSectionThroughBothEntryPoints) {
+  const auto identity = config::load_device_identity(CONFIG_DIR_PATH + "/gfx1250_mi455x.json",
+                                                     rocjitsu::kEmbeddedSchema);
+  EXPECT_EQ(identity.pci.vram_aperture_bytes, 268435456u);
+  EXPECT_EQ(identity.device.vendor_id, 0x1002u)
+      << "the identity must come from the same file as the bus shape";
+
+  const auto loaded =
+      config::load_config(CONFIG_DIR_PATH + "/gfx1250_mi455x.json", rocjitsu::kEmbeddedSchema);
+  EXPECT_EQ(loaded.pci.vram_aperture_bytes, identity.pci.vram_aperture_bytes)
+      << "the two entry points disagree about the same file";
+}
+
+// A config with no bus section still has to yield a usable one, because most
+// parts do not describe a bus at all.
+TEST(ConfigLoaderTest, DefaultsThePciSectionWhenTheFileOmitsIt) {
+  const auto identity =
+      config::load_device_identity(CONFIG_DIR_PATH + "/gfx1151.json", rocjitsu::kEmbeddedSchema);
+  const config::PciDeviceConfig fallback;
+  EXPECT_EQ(identity.pci.class_code, fallback.class_code);
+  EXPECT_EQ(identity.pci.doorbell_aperture_bytes, fallback.doorbell_aperture_bytes);
+  EXPECT_EQ(identity.pci.register_aperture_bytes, fallback.register_aperture_bytes);
+  EXPECT_EQ(identity.pci.vram_aperture_bytes, fallback.vram_aperture_bytes);
+}
+
+TEST(ConfigLoaderTest, LoadFourGpuMi455xKmdConfig) {
+  auto loaded = config::load_config(CONFIG_DIR_PATH + "/gfx1250_mi455x_kmd_4gpu.json",
+                                    rocjitsu::kEmbeddedSchema);
+  auto standalone =
+      config::load_config(CONFIG_DIR_PATH + "/gfx1250_mi455x.json", rocjitsu::kEmbeddedSchema);
+
+  EXPECT_EQ(loaded.num_gpus, 4u);
+  ASSERT_EQ(loaded.devices.size(), 4u);
+  ASSERT_EQ(loaded.extra_gpu_builds.size(), 3u);
+
+  EXPECT_EQ(loaded.device.revision_id, standalone.device.revision_id);
+  EXPECT_EQ(loaded.device.simd_count, standalone.device.simd_count);
+  EXPECT_EQ(loaded.device.num_shader_engines, standalone.device.num_shader_engines);
+  EXPECT_EQ(loaded.device.num_shader_arrays_per_engine,
+            standalone.device.num_shader_arrays_per_engine);
+  EXPECT_EQ(loaded.device.num_cu_per_sh, standalone.device.num_cu_per_sh);
+  EXPECT_EQ(loaded.device.simd_per_cu, standalone.device.simd_per_cu);
+  EXPECT_EQ(loaded.device.l1_size_kb, standalone.device.l1_size_kb);
+  EXPECT_EQ(loaded.device.l1_line_size, standalone.device.l1_line_size);
+  EXPECT_EQ(loaded.device.l1_assoc, standalone.device.l1_assoc);
+  EXPECT_EQ(loaded.device.l2_size_kb, standalone.device.l2_size_kb);
+  EXPECT_EQ(loaded.device.l2_line_size, standalone.device.l2_line_size);
+  EXPECT_EQ(loaded.device.l2_assoc, standalone.device.l2_assoc);
+
+  for (uint32_t i = 0; i < loaded.num_gpus; ++i) {
+    SCOPED_TRACE(i);
+    EXPECT_EQ(loaded.devices[i].gpu_id, 1250u + i);
+    EXPECT_EQ(loaded.devices[i].location_id, 0x0300u + (i << 8));
+    EXPECT_EQ(loaded.devices[i].drm_render_minor, 128u + i);
+    EXPECT_EQ(loaded.devices[i].unique_id, 1250u + i);
+    EXPECT_EQ(loaded.devices[i].revision_id, 1u);
+  }
+
+  for (const auto &build : loaded.extra_gpu_builds)
+    EXPECT_NE(dynamic_cast<SoC *>(build.root.get()), nullptr);
+}
+
+TEST(ConfigLoaderTest, DispatchPoolBudgetIsSharedAcrossProductionTopology) {
+  auto loaded =
+      config::load_config(CONFIG_DIR_PATH + "/gfx950_mi355x.json", rocjitsu::kEmbeddedSchema);
+  auto *soc = loaded.soc();
+
+  soc->set_dispatch_threads(8);
+  EXPECT_EQ(soc->dispatch_threads(), 8u);
+  EXPECT_EQ(test::SoCTestAccess::dispatch_pool_threads(*soc), 8u);
+  soc->for_each_cp([](auto *cp) { EXPECT_EQ(cp->dispatch_threads(), 8u); });
+
+  soc->set_dispatch_threads(1);
+  EXPECT_EQ(test::SoCTestAccess::dispatch_pool_threads(*soc), 0u);
+}
+
+TEST(ConfigLoaderTest, SerializedHotHookPluginKeepsSharedPoolAcrossProductionTopology) {
+  auto loaded =
+      config::load_config(CONFIG_DIR_PATH + "/gfx950_mi355x.json", rocjitsu::kEmbeddedSchema);
+  auto *soc = loaded.soc();
+  soc->set_dispatch_threads(8);
+  const auto *pool = test::SoCTestAccess::dispatch_pool(*soc);
+  ASSERT_NE(pool, nullptr);
+
+  auto group = std::make_shared<ExecutionPluginGroup>(PluginSinkConfig{});
+  ASSERT_TRUE(group->add(std::make_unique<SerializedHotHookPlugin>()));
+  soc->set_plugin_group(group);
+
+  EXPECT_EQ(soc->dispatch_threads(), 8u);
+  EXPECT_EQ(test::SoCTestAccess::dispatch_pool_threads(*soc), 8u);
+  EXPECT_EQ(test::SoCTestAccess::dispatch_pool(*soc), pool);
+  soc->for_each_cp([](auto *cp) { EXPECT_EQ(cp->dispatch_threads(), 8u); });
 }
 
 TEST(ConfigLoaderTest, LoadRdnaKmdConfigs) {
@@ -91,6 +324,7 @@ TEST(ConfigLoaderTest, LoadRdnaKmdConfigs) {
   EXPECT_EQ(rdna4.device.num_shader_arrays_per_engine, 2u);
   EXPECT_EQ(rdna4.device.num_cu_per_sh, 8u);
   EXPECT_EQ(rdna4.device.simd_per_cu, 2u);
+  EXPECT_EQ(rdna4.device.num_sdma_queues_per_engine, 6u);
   EXPECT_EQ(rdna4.device.vram_type, kmd::kAmdgpuVramTypeGddr6);
   EXPECT_EQ(rdna4.device.simd_count, rdna4.device.num_shader_engines *
                                          rdna4.device.num_shader_arrays_per_engine *
@@ -107,6 +341,8 @@ TEST(ConfigLoaderTest, LoadRdnaKmdConfigs) {
   EXPECT_EQ(kmd::gfx_target_version_from_name("gfx1201"), rdna4.device.gfx_target_version);
   EXPECT_EQ(kmd::gfx_target_name(90010), "gfx90a");
   EXPECT_EQ(kmd::gfx_target_version_from_name("gfx90a"), 90010u);
+  EXPECT_EQ(kmd::gfx_target_name(120501u), "gfx1251");
+  EXPECT_EQ(kmd::gfx_target_version_from_name("gfx1251"), 120501u);
   EXPECT_FALSE(kmd::gfx_target_version_from_name("cdna4"));
   EXPECT_EQ(kmd::gb_addr_config_for_arch(ROCJITSU_CODE_ARCH_RDNA3_5), 0u);
   EXPECT_EQ(kmd::gb_addr_config_for_gfx_target_version(110500), 0u);
@@ -137,6 +373,7 @@ TEST(ConfigLoaderTest, LoadRdnaKmdConfigs) {
   EXPECT_EQ(rdna3.device.num_shader_arrays_per_engine, 2u);
   EXPECT_EQ(rdna3.device.num_cu_per_sh, 8u);
   EXPECT_EQ(rdna3.device.simd_per_cu, 2u);
+  EXPECT_EQ(rdna3.device.num_sdma_queues_per_engine, 6u);
   EXPECT_EQ(rdna3.device.vram_type, kmd::kAmdgpuVramTypeGddr6);
   EXPECT_EQ(rdna3.device.simd_count, rdna3.device.num_shader_engines *
                                          rdna3.device.num_shader_arrays_per_engine *
@@ -171,6 +408,7 @@ TEST(ConfigLoaderTest, LoadRdnaKmdConfigs) {
   EXPECT_EQ(rdna35.device.num_shader_arrays_per_engine, 2u);
   EXPECT_EQ(rdna35.device.num_cu_per_sh, 8u);
   EXPECT_EQ(rdna35.device.simd_per_cu, 2u);
+  EXPECT_EQ(rdna35.device.num_sdma_queues_per_engine, 2u);
   EXPECT_EQ(rdna35.device.vram_type, kmd::kAmdgpuVramTypeGddr6);
   EXPECT_EQ(rdna35.device.simd_count, rdna35.device.num_shader_engines *
                                           rdna35.device.num_shader_arrays_per_engine *
@@ -216,7 +454,8 @@ TEST(ConfigLoaderTest, BuildFromJsonString) {
                     { "key": "num_wf_slots", "value": "20" },
                     { "key": "sgprs_per_wf", "value": "104" },
                     { "key": "vgprs_per_wf", "value": "256" },
-                    { "key": "lds_size_kb", "value": "64" }
+                    { "key": "lds_size_kb", "value": "64" },
+                    { "key": "functional_quantum", "value": "7" }
                   ]
                 }]
               },
@@ -261,6 +500,7 @@ TEST(ConfigLoaderTest, BuildFromJsonString) {
   EXPECT_EQ(xcd->num_shader_engines(), 2u);
   EXPECT_EQ(xcd->shader_engine(0)->num_compute_units(), 3u);
   EXPECT_EQ(xcd->shader_engine(1)->num_compute_units(), 3u);
+  EXPECT_EQ(xcd->shader_engine(0)->compute_unit(0)->config().functional_quantum, 7u);
 }
 
 TEST(ConfigLoaderTest, DeviceCapabilityFieldsDefaultToAutoCompute) {
@@ -269,7 +509,10 @@ TEST(ConfigLoaderTest, DeviceCapabilityFieldsDefaultToAutoCompute) {
     "num_threads": 1,
     "vm": {
       "arch": "cdna3",
-      "gpu": { "device": { "gfx_target_version": 90500 } }
+      "gpu": { "device": {
+        "gfx_target_version": 90500,
+        "num_sdma_queues_per_engine": 8
+      } }
     },
     "topology": {
       "root": {
@@ -308,6 +551,7 @@ TEST(ConfigLoaderTest, DeviceCapabilityFieldsRoundTripFromJson) {
       "arch": "cdna3",
       "gpu": { "device": {
         "gfx_target_version": 90500,
+        "num_sdma_queues_per_engine": 8,
         "capability": 268468354,
         "capability2": 3,
         "debug_prop": 3119
@@ -362,7 +606,8 @@ TEST(ConfigLoaderTest, LoadsDbtOnlyConfigWithoutVmOrTopology) {
           "num_shader_engines": 2,
           "num_shader_arrays_per_engine": 2,
           "num_cu_per_sh": 4,
-          "local_mem_size": 309237645312
+          "local_mem_size": 309237645312,
+          "num_sdma_queues_per_engine": 8
         }
       }
     })");
@@ -386,9 +631,157 @@ TEST(ConfigLoaderTest, LoadsDbtOnlyConfigWithoutVmOrTopology) {
                 dbt.guest_device.num_cu_per_sh * dbt.guest_device.simd_per_cu);
   EXPECT_EQ(dbt.guest_device.num_shader_arrays_per_engine, 2u);
   EXPECT_EQ(dbt.guest_device.local_mem_size, 309237645312ULL);
+  EXPECT_EQ(dbt.guest_device.num_sdma_queues_per_engine, 8u);
   // Revisions default to Unspecified when the config omits them.
   EXPECT_EQ(dbt.guest_revision, config::DbtSiliconRevision::Unspecified);
   EXPECT_EQ(dbt.host_revision, config::DbtSiliconRevision::Unspecified);
+}
+
+TEST(ConfigLoaderTest, RejectsMissingOrZeroSdmaQueuesWhenRegularEnginesArePresent) {
+  const auto missing = write_temp_config(R"({
+      "dbt_guest": {
+        "guest_device": {
+          "num_sdma_engines": 1
+        }
+      }
+    })");
+  const auto zero = write_temp_config(R"({
+      "dbt_guest": {
+        "guest_device": {
+          "num_sdma_engines": 1,
+          "num_sdma_queues_per_engine": 0
+        }
+      }
+    })");
+
+  for (const auto &path : {missing.path(), zero.path()})
+    EXPECT_THAT([&] { (void)config::load_dbt_guest_config_from_file(path); },
+                testing::ThrowsMessage<std::runtime_error>(
+                    testing::AllOf(testing::HasSubstr("dbt_guest.guest_device."),
+                                   testing::HasSubstr("num_sdma_queues_per_engine"))));
+}
+
+TEST(ConfigLoaderTest, SdmaQueueValidationIdentifiesVmDevicePath) {
+  const char *json = R"({
+    "max_ticks": 1,
+    "num_threads": 1,
+    "vm": {
+      "arch": "cdna3",
+      "gpu": { "device": { "num_sdma_engines": 1 } }
+    },
+    "topology": {
+      "root": {
+        "name": "soc", "type": "soc",
+        "children": [
+          { "name": "vram", "type": "gpu_memory" },
+          {
+            "name": "xcd0", "type": "xcd",
+            "children": [
+              { "name": "l2", "type": "l2_cache" },
+              { "name": "cp", "type": "command_processor" },
+              { "name": "se0", "type": "shader_engine",
+                "children": [{ "name": "cu0", "type": "compute_unit" }] }
+            ]
+          }
+        ]
+      },
+      "links": []
+    }
+  })";
+
+  EXPECT_THAT(
+      [&] { (void)config::load_config_from_string(json, rocjitsu::kEmbeddedSchema); },
+      testing::ThrowsMessage<std::runtime_error>(testing::AllOf(
+          testing::HasSubstr("vm.gpu.device."), testing::HasSubstr("num_sdma_queues_per_engine"))));
+}
+
+TEST(ConfigLoaderTest, AllowsZeroSdmaQueuesWithoutRegularEngines) {
+  const auto file = write_temp_config(R"({
+      "dbt_guest": {
+        "guest_device": {
+          "num_sdma_engines": 0,
+          "num_sdma_queues_per_engine": 0
+        }
+      }
+    })");
+
+  auto dbt = config::load_dbt_guest_config_from_file(file.path());
+
+  ASSERT_TRUE(dbt.guest_device.present);
+  EXPECT_EQ(dbt.guest_device.num_sdma_engines, 0u);
+  EXPECT_EQ(dbt.guest_device.num_sdma_queues_per_engine, 0u);
+}
+
+TEST(ConfigLoaderTest, DefaultKfdDeviceHasNoRegularSdmaEngines) {
+  const config::KfdDeviceConfig device;
+
+  EXPECT_EQ(device.num_sdma_engines, 0u);
+  EXPECT_EQ(device.num_sdma_queues_per_engine, 0u);
+}
+
+TEST(ConfigLoaderTest, ShippedDevicesDeclareSdmaQueues) {
+  unsigned checked = 0;
+  for (const auto &entry : std::filesystem::directory_iterator(CONFIG_DIR_PATH)) {
+    if (entry.path().extension() != ".json")
+      continue;
+
+    const std::string name = entry.path().filename().string();
+    SCOPED_TRACE(name);
+    if (name.rfind("guest_", 0) == 0) {
+      auto dbt = config::load_dbt_guest_config_from_file(entry.path().string());
+      ASSERT_TRUE(dbt.guest_device.present);
+      ASSERT_NE(dbt.guest_device.num_sdma_engines, 0u);
+      EXPECT_NE(dbt.guest_device.num_sdma_queues_per_engine, 0u);
+    } else {
+      auto loaded = config::load_config(entry.path().string(), rocjitsu::kEmbeddedSchema);
+      ASSERT_TRUE(loaded.device.present);
+      ASSERT_NE(loaded.device.num_sdma_engines, 0u);
+      EXPECT_NE(loaded.device.num_sdma_queues_per_engine, 0u);
+    }
+    ++checked;
+  }
+
+  EXPECT_GE(checked, 12u) << "expected every shipped device config to be discovered";
+}
+
+#if defined(RJ_DAEMON_LOGGING_CONFIG_PATH) && defined(RJ_LOGGING_CONFIG_PATH) &&                   \
+    defined(RJ_INSTALLED_LOGGING_CONFIG_PATH)
+TEST(ConfigLoaderTest, GeneratedDeviceConfigsDeclareSdmaQueues) {
+  const std::string paths[] = {
+      RJ_DAEMON_LOGGING_CONFIG_PATH,
+      RJ_LOGGING_CONFIG_PATH,
+      RJ_INSTALLED_LOGGING_CONFIG_PATH,
+  };
+
+  for (const std::string &path : paths) {
+    SCOPED_TRACE(path);
+    auto loaded = config::load_config(path, rocjitsu::kEmbeddedSchema);
+    ASSERT_TRUE(loaded.device.present);
+    ASSERT_NE(loaded.device.num_sdma_engines, 0u);
+    EXPECT_NE(loaded.device.num_sdma_queues_per_engine, 0u);
+  }
+}
+#endif
+
+TEST(ConfigLoaderTest, ShippedGfx950GuestsUseCapturedSdmaQueueCount) {
+  unsigned checked = 0;
+  for (const auto &entry : std::filesystem::directory_iterator(CONFIG_DIR_PATH)) {
+    if (entry.path().extension() != ".json" ||
+        entry.path().filename().string().rfind("guest_", 0) != 0)
+      continue;
+
+    auto dbt = config::load_dbt_guest_config_from_file(entry.path().string());
+    if (dbt.guest_isa != "gfx950")
+      continue;
+
+    SCOPED_TRACE(entry.path().filename().string());
+    ASSERT_TRUE(dbt.guest_device.present);
+    EXPECT_EQ(dbt.guest_device.device_id, 30112u);
+    EXPECT_EQ(dbt.guest_device.num_sdma_queues_per_engine, 8u);
+    ++checked;
+  }
+
+  EXPECT_GE(checked, 3u) << "expected every shipped gfx950 guest config to be discovered";
 }
 
 TEST(ConfigLoaderTest, LoadsDbtGuestSiliconRevisions) {
@@ -427,7 +820,8 @@ TEST(ConfigLoaderTest, RejectsDbtGuestDeviceWithInconsistentSimdCount) {
           "simd_count": 1024,
           "num_shader_engines": 4,
           "num_cu_per_sh": 4,
-          "simd_per_cu": 4
+          "simd_per_cu": 4,
+          "num_sdma_queues_per_engine": 8
         }
       }
     })");
@@ -462,7 +856,8 @@ TEST(ConfigLoaderTest, LoadsDbtGuestThroughFullConfigLoader) {
         "num_shader_engines": 2,
         "num_shader_arrays_per_engine": 2,
         "num_cu_per_sh": 4,
-        "local_mem_size": 309237645312
+        "local_mem_size": 309237645312,
+        "num_sdma_queues_per_engine": 8
       }
     },
   )");
@@ -891,6 +1286,25 @@ TEST(ConfigLoaderTest, Gfx1250ComputeUnitDefaultsCoverTtmpAndHighVgprs) {
   EXPECT_EQ(cu->config().vgprs_per_wf, 1024u);
 }
 
+TEST(ConfigLoaderTest, RejectsTargetFromDifferentArchitecture) {
+  const char *json = R"({"vm":{"arch":"cdna4","target":"gfx1250"}})";
+  EXPECT_THROW(config::load_config_from_string(json, rocjitsu::kEmbeddedSchema),
+               std::runtime_error);
+}
+
+TEST(ConfigLoaderTest, RejectsTargetVersionMismatch) {
+  const char *json = R"({"vm":{"arch":"cdna5","target":"gfx1250","gpu":{
+    "device":{"gfx_target_version":120501}}}})";
+  EXPECT_THROW(config::load_config_from_string(json, rocjitsu::kEmbeddedSchema),
+               std::runtime_error);
+}
+
+TEST(ConfigLoaderTest, RejectsGfx1251SimulationUntilExecutionIsImplemented) {
+  const char *json = R"({"vm":{"arch":"cdna5","target":"gfx1251"}})";
+  EXPECT_THROW(config::load_config_from_string(json, rocjitsu::kEmbeddedSchema),
+               std::runtime_error);
+}
+
 TEST(ConfigLoaderTest, DispatchDistributesAcrossCUs) {
   const char *json = R"({"max_ticks":10000,"num_threads":1,
     "vm":{"arch":"cdna3"},
@@ -962,6 +1376,13 @@ TEST(ConfigLoaderTest, DispatchDistributesAcrossCUs) {
   auto *se = soc->xcd(0)->shader_engine(0);
   EXPECT_EQ(dispatch_count->for_cu(se->compute_unit(0)), 1u);
   EXPECT_EQ(dispatch_count->for_cu(se->compute_unit(1)), 1u);
+}
+
+TEST(ConfigLoaderTest, DispatchPlacementDoesNotFollowHostThreadCount) {
+  auto [se0_wfs, se1_wfs] = run_two_spi_dispatch();
+
+  EXPECT_EQ(se0_wfs, 2u);
+  EXPECT_EQ(se1_wfs, 0u);
 }
 
 TEST(CheckpointTest, SaveAndRestoreMemory) {
@@ -1436,6 +1857,71 @@ TEST(CApiTest, CreateAndDestroyFromString) {
   EXPECT_EQ(rj_vm_create_from_string(json, RJ_VM_MODE_DEFAULT, &handle), ROCJITSU_STATUS_SUCCESS);
   ASSERT_NE(handle, nullptr);
   rj_vm_destroy(handle);
+}
+
+TEST(CApiTest, ClockedDispatchStaysEventDriven) {
+  const char *json = R"({"max_ticks":10000,"num_threads":1,
+    "exec_mode":"clocked",
+    "vm":{"arch":"cdna3"},
+    "topology":{
+      "root":{
+        "name":"soc","type":"soc",
+        "children":[
+          {"name":"vram","type":"gpu_memory"},
+          {"name":"xcd0","type":"xcd","children":[
+            {"name":"l2","type":"l2_cache"},
+            {"name":"cp","type":"command_processor"},
+            {"name":"se0","type":"shader_engine","children":[
+              {"name":"cu[0:1]","type":"compute_unit","config":[
+                {"key":"num_wf_slots","value":"10"},
+                {"key":"sgprs_per_wf","value":"104"},
+                {"key":"vgprs_per_wf","value":"256"},
+                {"key":"lds_size_kb","value":"64"}
+              ]}
+            ]}
+          ]}
+        ]
+      },
+      "links":[
+        {"src":"xcd0.cp.req_0","dst":"xcd0.se0.cu0.cpl","latency":1,"weight":2},
+        {"src":"xcd0.se0.cu0.req","dst":"xcd0.l2.cpl_0","latency":1,"weight":10}
+      ]
+    }
+  })";
+  rj_vm_t *raw = nullptr;
+  ASSERT_EQ(rj_vm_create_from_string(json, RJ_VM_MODE_DEFAULT, &raw), ROCJITSU_STATUS_SUCCESS);
+  ASSERT_NE(raw, nullptr);
+  std::unique_ptr<rj_vm_t, decltype(&rj_vm_destroy)> handle(raw, &rj_vm_destroy);
+  auto *cp = handle->soc->xcd(0)->command_processor();
+  cp->set_dispatch_threads(8);
+  EXPECT_EQ(cp->dispatch_threads(), 1u);
+
+  using namespace rocr::llvm::amdhsa;
+  kernel_descriptor_t kd{};
+  kd.kernel_code_entry_byte_offset = sizeof(kernel_descriptor_t);
+  AMDHSA_BITS_SET(kd.compute_pgm_rsrc1, COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT,
+                  ((256 / 8) - 1));
+  AMDHSA_BITS_SET(kd.compute_pgm_rsrc1, COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT,
+                  ((104 / 8) - 1));
+  AMDHSA_BITS_SET(kd.compute_pgm_rsrc2, COMPUTE_PGM_RSRC2_USER_SGPR_COUNT, 2);
+
+  constexpr uint64_t kKernelAddress = 0x1000;
+  constexpr uint32_t kCode[] = {0xBF800000u, 0xBF810000u}; // s_nop; s_endpgm
+  handle->soc->memory()->load_image(reinterpret_cast<const uint8_t *>(&kd), sizeof(kd),
+                                    kKernelAddress);
+  handle->soc->memory()->load_image(reinterpret_cast<const uint8_t *>(kCode), sizeof(kCode),
+                                    kKernelAddress + sizeof(kd));
+
+  test::AqlQueue queue(handle->soc->memory(), cp);
+  queue.dispatch(kKernelAddress, /*grid_size=*/64, /*workgroup_size=*/64);
+
+  int active = 0;
+  const auto tick_before_doorbell = handle->engine->global_time();
+  EXPECT_EQ(rj_vm_step(handle.get(), &active), ROCJITSU_STATUS_SUCCESS);
+  EXPECT_EQ(handle->engine->global_time(), tick_before_doorbell);
+  auto *cu = handle->soc->xcd(0)->shader_engine(0)->compute_unit(0);
+  ASSERT_NE(cu->wf(0), nullptr);
+  EXPECT_EQ(cu->wf(0)->trace_inst_count_, 0u);
 }
 
 TEST(CApiTest, CheckpointRoundTrip) {

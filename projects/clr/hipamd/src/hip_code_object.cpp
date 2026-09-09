@@ -534,14 +534,17 @@ hipError_t StatCO::GetFunc(hipFunction_t* hfunc, const void* hostFunction, int d
 
   // Lazy load
   FatBinaryInfo** module = it->second->ModuleInfo();
-  if (module != nullptr) {
+  if (module == nullptr) {
+    return hipErrorInvalidDeviceFunction;
+  }
+
+  // Only take sclock_ when the module has not been loaded yet. Once loaded the
+  // fast path avoids the lock entirely.
+  if (*(module) == nullptr) {
     std::scoped_lock lock(sclock_);
     if (*(module) == nullptr) {
      IHIP_RETURN_ONFAIL(DigestFatBinary(module_to_hostModule_[module], *module));
     }
-  } else {
-    // Module was nullptr
-    return hipErrorInvalidDeviceFunction;
   }
 
   return it->second->GetStatFunc(hfunc, deviceId);
@@ -615,6 +618,13 @@ hipError_t StatCO::RegisterManagedVar(Var* var) {
 // ================================================================================================
 void StatCO::ResizeForDevices(size_t device_count) {
   std::scoped_lock lock(sclock_);
+  managedVarsDevicePtrInitialized_ = std::make_unique<std::atomic<bool>[]>(device_count);
+  // Explicitly initialize each per-device flag to false before it can be read by
+  // the lock-free fast path in InitManagedVarDevicePtr.
+  for (size_t i = 0; i < device_count; ++i) {
+    managedVarsDevicePtrInitialized_[i].store(false, std::memory_order_relaxed);
+  }
+  managedVarsDevicePtrInitializedSize_ = device_count;
   for (const auto& it : vars_) {
     it.second->ResizeDVar(device_count);
   }
@@ -630,10 +640,16 @@ void StatCO::ResizeForDevices(size_t device_count) {
 
 // ================================================================================================
 hipError_t StatCO::InitManagedVarDevicePtr(int deviceId) {
+  // Fast lock free path
+  if (deviceId >= 0 && static_cast<size_t>(deviceId) < managedVarsDevicePtrInitializedSize_ &&
+      managedVarsDevicePtrInitialized_[deviceId].load(std::memory_order_acquire)) {
+    return hipSuccess;
+  }
+
   std::scoped_lock lock(sclock_);
   hipError_t err = hipSuccess;
-  if (managedVarsDevicePtrInitalized_.find(deviceId) == managedVarsDevicePtrInitalized_.end() ||
-      !managedVarsDevicePtrInitalized_[deviceId]) {
+  // Re-check under the lock in case another thread initialized this device while we waited.
+  if (!managedVarsDevicePtrInitialized_[deviceId].load(std::memory_order_relaxed)) {
     for (auto& vecIter : managedVars_) {
       for (auto& var : vecIter.second) {
         // Lazy load
@@ -655,7 +671,7 @@ hipError_t StatCO::InitManagedVarDevicePtr(int deviceId) {
                          mem->getSize(), hipMemcpyHostToDevice, *stream);
       }
     }
-    managedVarsDevicePtrInitalized_[deviceId] = true;
+    managedVarsDevicePtrInitialized_[deviceId].store(true, std::memory_order_release);
   }
   return err;
 }

@@ -11,9 +11,9 @@
 #include <cstddef>
 #include <cstdint>
 
+#include <fmt/format.h>
 #include <map>
 #include <memory>
-#include <spdlog/fmt/fmt.h>
 #include <vector>
 
 namespace rocprofsys::pmc::collectors::nic

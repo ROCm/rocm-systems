@@ -3,6 +3,10 @@
 
 #include "cdna5_sim_test_common.h"
 
+#include <sys/mman.h>
+
+#include <limits>
+
 namespace {
 
 using namespace rocjitsu;
@@ -12,6 +16,8 @@ constexpr uint32_t kSdmaOpCopy = 1;
 constexpr uint32_t kSdmaOpFence = 5;
 constexpr uint32_t kSdmaOpPollRegmem = 8;
 constexpr uint32_t kSdmaOpConstFill = 11;
+constexpr uint32_t kSdmaOpWrite = 2;
+constexpr uint32_t kSdmaOpAtomic = 10;
 constexpr uint32_t kSdmaOpTimestamp = 13;
 constexpr uint32_t kSdmaOpGcr = 17;
 constexpr uint32_t kSdmaSubopCopyLinear = 0;
@@ -20,7 +26,9 @@ constexpr uint32_t kSdmaSubopPollMem64 = 5;
 
 class HostSdmaQueueForTest {
 public:
-  explicit HostSdmaQueueForTest(Gfx1250Sim &sim) : sim_(sim) {
+  explicit HostSdmaQueueForTest(Gfx1250Sim &sim, uint64_t initial_doorbell = 0,
+                                uint64_t last_doorbell = 0)
+      : sim_(sim), doorbells_{initial_doorbell} {
     sim_.memory->set_passthrough(true);
 
     amdgpu::HwQueue queue{};
@@ -32,6 +40,7 @@ public:
     queue.write_ptr_va = reinterpret_cast<uint64_t>(&write_idx_);
     queue.doorbell_base = doorbells_.data();
     queue.doorbell_offset = 0;
+    queue.last_doorbell = last_doorbell;
     queue.host_accessible = true;
     queue.is_sdma = true;
     sim_.cp()->register_queue(std::move(queue));
@@ -77,12 +86,16 @@ public:
     process_.map_pages(kSignalVa, signal_.data(), signal_.size() * sizeof(signal_[0]));
     process_.map_pages(kPollVa, poll_.data(), poll_.size() * sizeof(poll_[0]));
 
+    register_queue(kQueueStateVa);
+  }
+
+  void register_queue(uint64_t read_ptr_va) {
     amdgpu::HwQueue queue{};
     queue.process_id = kProcessId;
     queue.queue_id = kQueueId;
     queue.ring_base_va = kRingVa;
     queue.ring_size = static_cast<uint32_t>(ring_.size() * sizeof(ring_[0]));
-    queue.read_ptr_va = kQueueStateVa;
+    queue.read_ptr_va = read_ptr_va;
     queue.write_ptr_va = kQueueStateVa + sizeof(queue_state_[0]);
     queue.doorbell_base = doorbells_.data();
     queue.doorbell_offset = 0;
@@ -101,6 +114,8 @@ public:
   uint8_t *dst() { return dst_.data(); }
   uint8_t *dst2() { return dst2_.data(); }
   int64_t &signal_value() { return signal_[0]; }
+  /// @brief The signal word at @p index, for layouts other than value-at-zero.
+  int64_t &signal_word(size_t index) { return signal_[index]; }
   uint64_t &poll_value() { return poll_[0]; }
 
   uint64_t src_va() const { return kSrcVa; }
@@ -108,6 +123,12 @@ public:
   uint64_t dst2_va() const { return kDst2Va; }
   uint64_t signal_va() const { return kSignalVa; }
   uint64_t poll_va() const { return kPollVa; }
+
+  /// @brief Leave the signal value mapped but drop the metadata behind it.
+  void clip_signal_mapping_after_value() {
+    process_.unmap_pages(kSignalVa, signal_.size() * sizeof(signal_[0]));
+    process_.map_pages(kSignalVa, signal_.data(), 2 * sizeof(signal_[0]));
+  }
 
   void clip_dst_mapping(size_t size) {
     process_.unmap_pages(kDstVa, dst_.size());
@@ -136,6 +157,12 @@ public:
 
   uint64_t read_idx() const {
     return std::atomic_ref<const uint64_t>(queue_state_[0]).load(std::memory_order_acquire);
+  }
+
+  /// @brief Repoint the queue's read pointer, for tests that make it unwritable.
+  void set_read_ptr_va(uint64_t va) {
+    sim_.cp()->unregister_queue(kQueueId, kProcessId);
+    register_queue(va);
   }
 
 private:
@@ -169,6 +196,20 @@ void write_sdma_qword_va(uint32_t *packet, uint32_t lo_dw, uint32_t hi_dw, uint6
 void write_sdma_qword_address(uint32_t *packet, uint32_t lo_dw, uint32_t hi_dw, const void *addr) {
   write_sdma_qword_va(packet, lo_dw, hi_dw, reinterpret_cast<uintptr_t>(addr));
 }
+
+TEST(Gfx1250SdmaTest, UnrungDoorbellSentinelDoesNotAdvanceAnEmptyQueue) {
+  Gfx1250Sim sim;
+  constexpr uint64_t kUnrungDoorbell = std::numeric_limits<uint64_t>::max();
+  HostSdmaQueueForTest queue(sim, kUnrungDoorbell, kUnrungDoorbell);
+  // Make accidental packet consumption terminate quickly instead of scanning
+  // the all-ones producer range indefinitely.
+  queue.ring()[0] = 0xFFu;
+
+  sim.engine->schedule_event_now(sim.cp()->doorbell_event());
+  ASSERT_TRUE(sim.engine->step());
+  EXPECT_EQ(queue.read_idx(), 0u);
+}
+
 TEST(Gfx1250SdmaTest, PollMem64WaitsForFull64BitCondition) {
   Gfx1250Sim sim;
   HostSdmaQueueForTest queue(sim);
@@ -318,6 +359,166 @@ TEST(Gfx1250SdmaTest, ConstFillWritesMappedPrefixAndAdvances) {
     EXPECT_EQ(queue.dst()[i], pattern[i % pattern.size()]);
   EXPECT_TRUE(std::all_of(queue.dst() + kMappedBytes, queue.dst() + kFillBytes,
                           [](uint8_t value) { return value == kInitialByte; }));
+}
+
+// A byte count that runs past the end of the address space is a malformed
+// packet, not one waiting on a mapping. Retrying it re-runs the same packet on
+// every doorbell and the queue never drains, and the page walk underneath adds
+// the offset without rechecking, so a wrapped range resumes at address zero and
+// modifies unrelated low memory while reporting that it completed. Each packet
+// type is followed by a fence that must never run.
+// A completion signal is decremented and then announced. Everything that can
+// refuse therefore has to be settled first: once the value drops, the waiter may
+// already have observed it, and faulting afterwards leaves a signal that fired
+// with nothing behind it. Page-table entries carry sub-page extents by design,
+// so the metadata record can straddle the end of its backing -- which reads back
+// part fabricated, and a half-read event id names some other event.
+TEST(Gfx1250SdmaTest, ClippedSignalMetadataHaltsWithoutDecrementing) {
+  Gfx1250Sim sim;
+  TranslatedSdmaQueueForTest queue(sim);
+  constexpr int64_t kSignalStart = 5;
+
+  std::atomic<uint32_t> notified{0};
+  sim.cp()->set_interrupt_callback(
+      [&](uint32_t, uint32_t event_id) { notified.store(event_id, std::memory_order_release); });
+
+  // Back the signal value but stop the mapping before the mailbox and event id,
+  // so the record the completion path must read is clipped.
+  queue.clip_signal_mapping_after_value();
+  // The packet addresses the value field, and the record's base is eight bytes
+  // below it, so the value is the second word and the mailbox and event id are
+  // the third and fourth -- the ones the clipped mapping drops.
+  queue.signal_word(1) = kSignalStart;
+
+  auto *packet = queue.ring();
+  packet[0] = kSdmaOpAtomic | (47u << 25); // SDMA_ATOMIC_ADD64
+  write_sdma_qword_va(packet, 1, 2, queue.signal_va() + 8);
+  packet[3] = static_cast<uint32_t>(-1);
+  packet[4] = 0xFFFFFFFFu;
+
+  queue.submit(5);
+  ASSERT_TRUE(sim.engine->step());
+
+  EXPECT_EQ(queue.signal_word(1), kSignalStart)
+      << "the signal was decremented before its metadata was known to be readable";
+  EXPECT_EQ(notified.load(std::memory_order_acquire), 0u) << "an event was notified from a "
+                                                             "clipped record";
+}
+
+TEST(Gfx1250SdmaTest, WrappingCopyHaltsInsteadOfRetrying) {
+  Gfx1250Sim sim;
+  TranslatedSdmaQueueForTest queue(sim);
+  sim.memory->set_passthrough(true);
+  constexpr uint64_t kNearTop = std::numeric_limits<uint64_t>::max() - 15;
+  constexpr uint32_t kCopyBytes = 128;
+  queue.signal_value() = 5;
+
+  auto *packet = queue.ring();
+  packet[0] = kSdmaOpCopy | (kSdmaSubopCopyLinear << 8);
+  packet[1] = kCopyBytes - 1;
+  packet[2] = 0;
+  write_sdma_qword_va(packet, 3, 4, queue.src_va());
+  write_sdma_qword_va(packet, 5, 6, kNearTop);
+  packet[7] = kSdmaOpFence;
+  write_sdma_qword_va(packet, 8, 9, queue.signal_va());
+  packet[10] = 0xDEADBEEFu;
+
+  queue.submit(11);
+  ASSERT_TRUE(sim.engine->step());
+  EXPECT_EQ(queue.signal_value(), 5) << "a fence behind a wrapping copy ran";
+
+  // Parking the read pointer looks identical whether the queue faulted or is
+  // retrying, so replace the malformed packet with a valid one. A retrying
+  // queue re-reads the ring at the same position and would run it; a faulted
+  // queue is over.
+  packet[0] = kSdmaOpFence;
+  write_sdma_qword_va(packet, 1, 2, queue.signal_va());
+  packet[3] = 0xDEADBEEFu;
+  queue.submit(4);
+  for (int i = 0; i < 4; ++i)
+    sim.engine->step();
+  EXPECT_EQ(queue.signal_value(), 5) << "the queue retried after a wrapping copy";
+}
+
+TEST(Gfx1250SdmaTest, WrappingConstFillHaltsInsteadOfRetrying) {
+  class RecordingReporter : public amdgpu::MemoryFaultReporter {
+  public:
+    void report_memory_fault(uint32_t, uint64_t addr, amdgpu::MemoryFaultCause cause) override {
+      addresses.push_back(addr);
+      causes.push_back(cause);
+    }
+    std::vector<uint64_t> addresses;
+    std::vector<amdgpu::MemoryFaultCause> causes;
+  };
+
+  Gfx1250Sim sim;
+  TranslatedSdmaQueueForTest queue(sim);
+  sim.memory->set_passthrough(true);
+  constexpr uint64_t kNearTop = std::numeric_limits<uint64_t>::max() - 15;
+  queue.signal_value() = 5;
+
+  // The fill resolves and walks the range itself, so if it rejected a malformed
+  // one on its own the queue would halt with nothing to explain it and a
+  // workload waiting on the fence behind it would hang silently.
+  RecordingReporter reporter;
+  sim.memory->set_memory_fault_reporter(&reporter);
+
+  auto *packet = queue.ring();
+  packet[0] = kSdmaOpConstFill | (0x2u << 30);
+  write_sdma_qword_va(packet, 1, 2, kNearTop);
+  packet[3] = 0x44332211;
+  packet[4] = 127;
+  packet[5] = kSdmaOpFence;
+  write_sdma_qword_va(packet, 6, 7, queue.signal_va());
+  packet[8] = 0xDEADBEEFu;
+
+  queue.submit(9);
+  ASSERT_TRUE(sim.engine->step());
+  EXPECT_EQ(queue.signal_value(), 5) << "a fence behind a wrapping fill ran";
+  ASSERT_EQ(reporter.addresses.size(), 1u) << "the queue halted without reporting why";
+  EXPECT_EQ(reporter.addresses.front(), kNearTop);
+  EXPECT_EQ(reporter.causes.front(), amdgpu::MemoryFaultCause::NotPresent);
+
+  // As above: swap in a valid packet, which only a retrying queue would run.
+  packet[0] = kSdmaOpFence;
+  write_sdma_qword_va(packet, 1, 2, queue.signal_va());
+  packet[3] = 0xDEADBEEFu;
+  queue.submit(4);
+  for (int i = 0; i < 4; ++i)
+    sim.engine->step();
+  EXPECT_EQ(queue.signal_value(), 5) << "the queue retried after a wrapping fill";
+
+  sim.memory->set_memory_fault_reporter(nullptr);
+}
+
+TEST(Gfx1250SdmaTest, WrappingWriteHaltsInsteadOfLandingInLowMemory) {
+  Gfx1250Sim sim;
+  TranslatedSdmaQueueForTest queue(sim);
+  sim.memory->set_passthrough(true);
+  constexpr uint32_t kProcessId = 1251; // matches TranslatedSdmaQueueForTest.
+  constexpr uint64_t kNearTop = std::numeric_limits<uint64_t>::max() - 15;
+  // Inside the bytes a wrapped walk would resume over.
+  constexpr uint64_t kWrapTarget = 0x10;
+  constexpr uint32_t kSentinel = 0xFEEDFACEu;
+  sim.memory->write32(kWrapTarget, kSentinel, kProcessId);
+  queue.signal_value() = 5;
+
+  constexpr uint32_t kDwords = 8;
+  auto *packet = queue.ring();
+  packet[0] = kSdmaOpWrite;
+  write_sdma_qword_va(packet, 1, 2, kNearTop);
+  packet[3] = kDwords - 1;
+  for (uint32_t i = 0; i < kDwords; ++i)
+    packet[4 + i] = 0xA5A5A5A5u;
+  packet[4 + kDwords] = kSdmaOpFence;
+  write_sdma_qword_va(packet, 5 + kDwords, 6 + kDwords, queue.signal_va());
+  packet[7 + kDwords] = 0xDEADBEEFu;
+
+  queue.submit(8 + kDwords);
+  ASSERT_TRUE(sim.engine->step());
+  EXPECT_EQ(sim.memory->read32(kWrapTarget, kProcessId), kSentinel)
+      << "a wrapping write reached low memory";
+  EXPECT_EQ(queue.signal_value(), 5) << "a fence behind a wrapping write ran";
 }
 
 TEST(Gfx1250SdmaTest, ConstFillUnmappedTailDoesNotAdvance) {
@@ -528,6 +729,289 @@ TEST(Gfx1250SdmaTest, CopyWaitSignalResolvesTranslatedAddresses) {
   EXPECT_EQ(queue.read_idx(), 19u * sizeof(uint32_t));
   EXPECT_EQ(std::memcmp(queue.dst(), queue.src(), kCopyBytes), 0);
   EXPECT_EQ(queue.signal_value(), 4);
+}
+
+// An endpoint that does not resolve YET is worth retrying, and
+// ConstFillUnmappedTailDoesNotAdvance pins that. An endpoint that does not
+// exist is not: the violation has already been reported to the process, and
+// leaving the packet pending would wedge the queue behind work that can never
+// land. This asserts the queue drains instead.
+// The signal on a copy packet asserts that the destination now holds the copied
+// bytes. A faulted copy deliberately leaves the destination alone, so raising
+// the signal anyway hands a waiter a green light over stale data -- and it does
+// so before the reported fault reaches the runtime, which is exactly the window
+// where the wrong answer gets used.
+// Suppressing the signal embedded in one packet is not enough: a plain
+// COPY_LINEAR followed by an ordinary FENCE would still run the fence and
+// publish completion for a copy that never landed. Hardware halts the engine on
+// a VM fault and leaves it for the driver, so nothing queued behind the faulted
+// packet may run.
+// The read pointer is how the owner learns which packets are done. If it cannot
+// be published the queue must stop: leaving a stale value visible means the next
+// doorbell re-runs copies, fences and atomics that already executed.
+TEST(Gfx1250SdmaTest, UnpublishableReadPointerHaltsInsteadOfReplayingPackets) {
+  Gfx1250Sim sim;
+  TranslatedSdmaQueueForTest queue(sim);
+  sim.memory->set_passthrough(true);
+
+  constexpr uint32_t kCopyBytes = 64;
+  for (uint32_t i = 0; i < kCopyBytes; ++i) {
+    queue.src()[i] = static_cast<uint8_t>(i + 1);
+    queue.dst()[i] = 0;
+  }
+
+  // A read pointer whose page cannot be reached at all. PROT_NONE rather than
+  // an unmapped hole: both are Inaccessible to the writability probe and both
+  // arrive as MemoryFaultCause::NotPresent, so this is the same classification
+  // reaching the queue the same way. Leaving an actual hole in the address
+  // space for the remainder of the process instead crashes LeakSanitizer's
+  // exit-time tracer inside its own thread-scanning code -- with a bare
+  // SYS_munmap as readily as with munmap(3), so nothing in rocjitsu is on that
+  // path. Reserving the page keeps the case testable under ASan.
+  void *raw = mmap(nullptr, KfdProcess::kPageSize, PROT_READ | PROT_WRITE,
+                   MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+  ASSERT_NE(raw, MAP_FAILED);
+  queue.set_read_ptr_va(reinterpret_cast<uint64_t>(raw));
+  ASSERT_EQ(mprotect(raw, KfdProcess::kPageSize, PROT_NONE), 0);
+
+  auto *packet = queue.ring();
+  packet[0] = kSdmaOpCopy | (kSdmaSubopCopyLinear << 8);
+  packet[1] = kCopyBytes - 1;
+  packet[2] = 0;
+  write_sdma_qword_va(packet, 3, 4, queue.src_va());
+  write_sdma_qword_va(packet, 5, 6, queue.dst_va());
+
+  queue.submit(7);
+  ASSERT_TRUE(sim.engine->step());
+  EXPECT_EQ(std::memcmp(queue.dst(), queue.src(), kCopyBytes), 0) << "the copy itself must run";
+
+  // Ring again: a queue that could not publish its progress must not replay.
+  std::memset(queue.dst(), 0, kCopyBytes);
+  queue.submit(7);
+  for (int i = 0; i < 4; ++i)
+    sim.engine->step();
+  for (uint32_t i = 0; i < kCopyBytes; ++i)
+    ASSERT_EQ(queue.dst()[i], 0u) << "packet replayed after an unpublishable read pointer, byte "
+                                  << i;
+
+  ASSERT_EQ(mprotect(raw, KfdProcess::kPageSize, PROT_READ | PROT_WRITE), 0);
+  munmap(raw, KfdProcess::kPageSize);
+}
+
+// The read pointer is how the owner learns which packets are done. If it cannot
+// be published the queue must stop: leaving a stale value visible means the next
+// doorbell re-runs copies, fences and atomics that already executed.
+TEST(Gfx1250SdmaTest, UnwritableReadPointerHaltsInsteadOfReplayingPackets) {
+  Gfx1250Sim sim;
+  TranslatedSdmaQueueForTest queue(sim);
+  sim.memory->set_passthrough(true);
+
+  constexpr uint32_t kCopyBytes = 64;
+  for (uint32_t i = 0; i < kCopyBytes; ++i) {
+    queue.src()[i] = static_cast<uint8_t>(i + 1);
+    queue.dst()[i] = 0;
+  }
+
+  // A read pointer the queue can read but not write.
+  void *raw = mmap(nullptr, KfdProcess::kPageSize, PROT_READ | PROT_WRITE,
+                   MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+  ASSERT_NE(raw, MAP_FAILED);
+  queue.set_read_ptr_va(reinterpret_cast<uint64_t>(raw));
+  ASSERT_EQ(mprotect(raw, KfdProcess::kPageSize, PROT_READ), 0);
+
+  auto *packet = queue.ring();
+  packet[0] = kSdmaOpCopy | (kSdmaSubopCopyLinear << 8);
+  packet[1] = kCopyBytes - 1;
+  packet[2] = 0;
+  write_sdma_qword_va(packet, 3, 4, queue.src_va());
+  write_sdma_qword_va(packet, 5, 6, queue.dst_va());
+
+  queue.submit(7);
+  ASSERT_TRUE(sim.engine->step());
+  EXPECT_EQ(std::memcmp(queue.dst(), queue.src(), kCopyBytes), 0) << "the copy itself must run";
+
+  // Ring again: a queue that could not publish its progress must not replay.
+  std::memset(queue.dst(), 0, kCopyBytes);
+  queue.submit(7);
+  for (int i = 0; i < 4; ++i)
+    sim.engine->step();
+  for (uint32_t i = 0; i < kCopyBytes; ++i)
+    ASSERT_EQ(queue.dst()[i], 0u) << "packet replayed after an unpublishable read pointer, byte "
+                                  << i;
+
+  mprotect(raw, KfdProcess::kPageSize, PROT_READ | PROT_WRITE);
+  munmap(raw, KfdProcess::kPageSize);
+}
+
+/// @brief A poll on a faulted address must halt rather than spin forever.
+/// @details A poll that cannot read its address is normally right to retry --
+/// waiting for a value to appear is the entire point of the packet. But a
+/// faulted address never becomes readable, so the retry re-reports the same
+/// violation on every doorbell and the queue never drains: an unattributable
+/// hang plus an unbounded stream of faults.
+TEST(Gfx1250SdmaTest, PollOnFaultedAddressHaltsInsteadOfSpinning) {
+  Gfx1250Sim sim;
+  TranslatedSdmaQueueForTest queue(sim);
+  sim.memory->set_passthrough(true);
+
+  void *raw = mmap(nullptr, KfdProcess::kPageSize, PROT_NONE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+  ASSERT_NE(raw, MAP_FAILED);
+  const uint64_t faulted_va = reinterpret_cast<uint64_t>(raw);
+
+  queue.signal_value() = 5;
+
+  auto *packet = queue.ring();
+  packet[0] = kSdmaOpPollRegmem | (kSdmaSubopPollMem64 << 8) | (3u << 28); // 64-bit equal poll.
+  write_sdma_qword_va(packet, 1, 2, faulted_va);
+  packet[3] = 0;
+  packet[4] = 0;
+  packet[5] = 0xFFFFFFFFu;
+  packet[6] = 0xFFFFFFFFu;
+  // A fence behind it that must never run.
+  packet[7] = kSdmaOpFence;
+  write_sdma_qword_va(packet, 8, 9, queue.signal_va());
+  packet[10] = 0xDEADBEEFu;
+
+  queue.submit(11);
+  ASSERT_TRUE(sim.engine->step());
+  EXPECT_EQ(queue.signal_value(), 5) << "a packet behind a faulted poll ran";
+
+  // Parking the read pointer looks the same whether the queue faulted or is
+  // merely waiting, so make the address satisfy the poll and ring again. A
+  // waiting queue would proceed; a faulted one is over.
+  ASSERT_EQ(mprotect(raw, KfdProcess::kPageSize, PROT_READ | PROT_WRITE), 0);
+  const uint64_t read_idx_after_fault = queue.read_idx();
+  queue.submit(11);
+  for (int i = 0; i < 4; ++i)
+    sim.engine->step();
+  EXPECT_EQ(queue.signal_value(), 5) << "a faulted queue resumed once its address became readable";
+  EXPECT_EQ(queue.read_idx(), read_idx_after_fault) << "the queue advanced after faulting";
+
+  munmap(raw, KfdProcess::kPageSize);
+}
+
+TEST(Gfx1250SdmaTest, FaultedCopyHaltsTheQueueBeforeLaterPackets) {
+  Gfx1250Sim sim;
+  TranslatedSdmaQueueForTest queue(sim);
+  sim.memory->set_passthrough(true);
+
+  void *raw = mmap(nullptr, KfdProcess::kPageSize, PROT_NONE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+  ASSERT_NE(raw, MAP_FAILED);
+  const uint64_t faulted_va = reinterpret_cast<uint64_t>(raw);
+
+  constexpr uint32_t kCopyBytes = 128;
+  constexpr uint8_t kSentinel = 0xC7;
+  std::memset(queue.dst(), kSentinel, kCopyBytes);
+  queue.signal_value() = 5;
+
+  auto *packet = queue.ring();
+  // A plain copy from an address that does not exist.
+  packet[0] = kSdmaOpCopy | (kSdmaSubopCopyLinear << 8);
+  packet[1] = kCopyBytes - 1;
+  packet[2] = 0;
+  write_sdma_qword_va(packet, 3, 4, faulted_va);
+  write_sdma_qword_va(packet, 5, 6, queue.dst_va());
+  // Followed by a separate fence that would announce it completed.
+  packet[7] = kSdmaOpFence;
+  write_sdma_qword_va(packet, 8, 9, queue.signal_va());
+  packet[10] = 0xDEADBEEFu;
+
+  queue.submit(11);
+  ASSERT_TRUE(sim.engine->step());
+
+  for (uint32_t i = 0; i < kCopyBytes; ++i)
+    ASSERT_EQ(queue.dst()[i], kSentinel) << "destination byte " << i;
+  EXPECT_EQ(queue.signal_value(), 5)
+      << "a packet behind a faulted copy must not run and publish completion";
+
+  // The halt has to persist. One pass proves only that this servicing stopped;
+  // ring the doorbell again and the queue must still refuse to run the fence.
+  const uint64_t read_idx_after_fault = queue.read_idx();
+  queue.submit(11);
+  for (int i = 0; i < 4; ++i)
+    sim.engine->step();
+  EXPECT_EQ(queue.signal_value(), 5) << "the queue resumed after faulting";
+  EXPECT_EQ(queue.read_idx(), read_idx_after_fault) << "the queue advanced after faulting";
+}
+
+TEST(Gfx1250SdmaTest, FaultedCopyDoesNotPublishItsCompletionSignal) {
+  Gfx1250Sim sim;
+  TranslatedSdmaQueueForTest queue(sim);
+  sim.memory->set_passthrough(true);
+
+  void *raw = mmap(nullptr, KfdProcess::kPageSize, PROT_NONE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+  ASSERT_NE(raw, MAP_FAILED);
+  const uint64_t faulted_va = reinterpret_cast<uint64_t>(raw);
+
+  constexpr uint32_t kCopyBytes = 128;
+  constexpr uint8_t kSentinel = 0xC7;
+  std::memset(queue.dst(), kSentinel, kCopyBytes);
+  queue.poll_value() = 0;
+  queue.signal_value() = 5;
+
+  auto *packet = queue.ring();
+  packet[0] = kSdmaOpCopy | (kSdmaSubopCopyLinear << 8) | (1u << 30) | (1u << 31);
+  packet[1] = 3;
+  write_sdma_qword_va(packet, 2, 3, queue.poll_va());
+  packet[4] = 0;
+  packet[5] = 0;
+  packet[6] = 0xFFFFFFFFu;
+  packet[7] = 0xFFFFFFFFu;
+  packet[8] = kCopyBytes - 1;
+  write_sdma_qword_va(packet, 10, 11, faulted_va);
+  write_sdma_qword_va(packet, 12, 13, queue.dst_va());
+  packet[14] = 0x70;
+  write_sdma_qword_va(packet, 15, 16, queue.signal_va());
+  packet[17] = 1;
+  packet[18] = 0;
+
+  queue.submit(19);
+  ASSERT_TRUE(sim.engine->step());
+  EXPECT_EQ(queue.read_idx(), 19u * sizeof(uint32_t))
+      << "a faulted endpoint must still retire the packet";
+  EXPECT_EQ(queue.signal_value(), 5)
+      << "a faulted copy must not publish completion over a destination it never wrote";
+  for (uint32_t i = 0; i < kCopyBytes; ++i) {
+    ASSERT_EQ(queue.dst()[i], kSentinel) << "destination byte " << i;
+  }
+
+  munmap(raw, KfdProcess::kPageSize);
+}
+
+TEST(Gfx1250SdmaTest, CopyFromFaultedAddressRetiresPacketInsteadOfWedgingQueue) {
+  Gfx1250Sim sim;
+  TranslatedSdmaQueueForTest queue(sim);
+  // Passthrough is what makes an unresolved address resolvable as a host
+  // address at all, so it is required to reach the faulting path.
+  sim.memory->set_passthrough(true);
+
+  void *raw = mmap(nullptr, KfdProcess::kPageSize, PROT_NONE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+  ASSERT_NE(raw, MAP_FAILED);
+  const uint64_t faulted_va = reinterpret_cast<uint64_t>(raw);
+
+  constexpr uint32_t kCopyBytes = 128;
+  // A sentinel, so the destination can prove it was left alone. Zero would be
+  // indistinguishable from the fabricated bytes a faulted read leaves behind.
+  constexpr uint8_t kSentinel = 0xC7;
+  std::memset(queue.dst(), kSentinel, kCopyBytes);
+
+  auto *packet = queue.ring();
+  packet[0] = kSdmaOpCopy | (kSdmaSubopCopyLinear << 8);
+  packet[1] = kCopyBytes - 1;
+  packet[2] = 0;
+  write_sdma_qword_va(packet, 3, 4, faulted_va);
+  write_sdma_qword_va(packet, 5, 6, queue.dst_va());
+
+  queue.submit(7);
+  ASSERT_TRUE(sim.engine->step());
+  EXPECT_EQ(queue.read_idx(), 7u * sizeof(uint32_t))
+      << "a faulted endpoint must retire the packet, not hold the queue for a retry";
+  for (uint32_t i = 0; i < kCopyBytes; ++i) {
+    ASSERT_EQ(queue.dst()[i], kSentinel)
+        << "a faulted source must not overwrite the destination with fabricated bytes, byte " << i;
+  }
+
+  munmap(raw, KfdProcess::kPageSize);
 }
 
 TEST(Gfx1250SdmaTest, CompactCopyWaitPacketCopies) {

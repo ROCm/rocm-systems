@@ -42,6 +42,7 @@ done
 : "${ROCSHMEM_INSTALL_DIR:?run-gin-ci.sh: ROCSHMEM_INSTALL_DIR unset (run build-rocshmem.sh)}"
 : "${RCCL_INSTALL_PREFIX:?run-gin-ci.sh: RCCL_INSTALL_PREFIX unset (set by gin.sbatch)}"
 : "${RCCL_TESTS_BIN_DIR:?run-gin-ci.sh: RCCL_TESTS_BIN_DIR unset (set by gin.sbatch)}"
+: "${RCCL_FIXTURES_BIN_DIR:?run-gin-ci.sh: RCCL_FIXTURES_BIN_DIR unset (set by gin.sbatch)}"
 # build-rocshmem.sh records where the test binary landed (bin/ vs share/rocshmem/);
 # fall back to bin/ for older env fragments.
 ROCSHMEM_TESTS_BIN_DIR="${ROCSHMEM_TESTS_BIN_DIR:-${ROCSHMEM_INSTALL_DIR}/bin}"
@@ -67,6 +68,7 @@ echo "==> MPI_HOME             = ${MPI_HOME}"
 echo "==> ROCSHMEM_INSTALL_DIR = ${ROCSHMEM_INSTALL_DIR}"
 echo "==> RCCL_INSTALL_PREFIX  = ${RCCL_INSTALL_PREFIX}"
 echo "==> RCCL_TESTS_BIN_DIR   = ${RCCL_TESTS_BIN_DIR}"
+echo "==> RCCL_FIXTURES_BIN_DIR= ${RCCL_FIXTURES_BIN_DIR}"
 echo "==> NP=${NP} MSG_SIZE=${MSG_SIZE} (E=NP*MSG_SIZE=${E})"
 echo "==> test matrix          = ${CONFIG}"
 
@@ -75,7 +77,7 @@ DEBUG_ENV=""
 TEST_NAMES=() TEST_KINDS=() TEST_BINS=() TEST_ENVS=() TEST_ARGS=()
 CONFIG_TSV="$(python3 "${PARSER}" "${CONFIG}")" || {
   echo "ERROR: failed to parse test matrix ${CONFIG}" >&2; exit 1; }
-while IFS=$'\t' read -r kind f1 f2 f3 f4 f5; do
+while IFS=$'\x1f' read -r kind f1 f2 f3 f4 f5; do
   case "${kind}" in
     mca)        MCA="${f1}" ;;
     debug_env)  DEBUG_ENV="${f1}" ;;
@@ -107,6 +109,7 @@ run_test() {
   case "${kind}" in
     rocshmem)   bin_path="${ROCSHMEM_TESTS_BIN_DIR}/${bin}" ;;
     rccl-tests) bin_path="${RCCL_TESTS_BIN_DIR}/${bin}" ;;
+    fixtures)   bin_path="${RCCL_FIXTURES_BIN_DIR}/${bin}" ;;
     *) echo "  SKIP ${name}: unknown kind '${kind}'"; FAILED_RUNS+=("${name} (unknown kind)"); return ;;
   esac
   if [[ ! -x "${bin_path}" ]]; then
@@ -120,9 +123,15 @@ run_test() {
   fi
   echo "=== ${name}: ${bin} ${args} ==="
   set +e
-  timeout --kill-after="${BENCH_KILL_AFTER}" "${BENCH_TIMEOUT}" \
-    mpirun -np "${NP}" ${MCA} ${env_flags} -x LD_LIBRARY_PATH \
-      "${bin_path}" ${args}
+  if [[ "${kind}" == "fixtures" ]]; then
+    timeout --kill-after="${BENCH_KILL_AFTER}" "${BENCH_TIMEOUT}" \
+      env LD_LIBRARY_PATH="${LD_LIBRARY_PATH}" \
+        "${bin_path}" ${args}
+  else
+    timeout --kill-after="${BENCH_KILL_AFTER}" "${BENCH_TIMEOUT}" \
+      mpirun -np "${NP}" ${MCA} ${env_flags} -x LD_LIBRARY_PATH \
+        "${bin_path}" ${args}
+  fi
   local rc=$?
   set -e
   if [[ ${rc} -ne 0 ]]; then

@@ -14,7 +14,7 @@ namespace cdna2 {
 SNopSopp::SNopSopp(const MachineInst *inst)
     : Sopp("s_nop", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::SNopSopp)),
-      simm16(32, OperandType::OPR_SIMM16, reinterpret_cast<const OpEncoding *>(inst)->simm16) {
+      simm16(16, OperandType::OPR_SIMM16, reinterpret_cast<const OpEncoding *>(inst)->simm16) {
   src_operands_[0] = &simm16;
   num_src_ = 1;
   num_dst_ = 0;
@@ -51,7 +51,7 @@ DecodeResult decodeSEndpgmSopp(const MachineInst *opcode, const DecodeErrorEmitt
 SBranchSopp::SBranchSopp(const MachineInst *inst)
     : Sopp("s_branch", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::SBranchSopp)),
-      simm16(32, OperandType::OPR_LABEL, reinterpret_cast<const OpEncoding *>(inst)->simm16) {
+      simm16(16, OperandType::OPR_LABEL, reinterpret_cast<const OpEncoding *>(inst)->simm16) {
   src_operands_[0] = &simm16;
   num_src_ = 1;
   num_dst_ = 0;
@@ -94,7 +94,7 @@ DecodeResult decodeSWakeupSopp(const MachineInst *opcode, const DecodeErrorEmitt
 SCbranchScc0Sopp::SCbranchScc0Sopp(const MachineInst *inst)
     : Sopp("s_cbranch_scc0", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::SCbranchScc0Sopp)),
-      simm16(32, OperandType::OPR_LABEL, reinterpret_cast<const OpEncoding *>(inst)->simm16),
+      simm16(16, OperandType::OPR_LABEL, reinterpret_cast<const OpEncoding *>(inst)->simm16),
       scc(1, OperandType::OPR_SSRC_SPECIAL_SCC, 253) {
   src_operands_[0] = &simm16;
   src_operands_[1] = &scc;
@@ -124,7 +124,7 @@ std::optional<int64_t> SCbranchScc0Sopp::branch_offset_bytes() const {
 SCbranchScc1Sopp::SCbranchScc1Sopp(const MachineInst *inst)
     : Sopp("s_cbranch_scc1", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::SCbranchScc1Sopp)),
-      simm16(32, OperandType::OPR_LABEL, reinterpret_cast<const OpEncoding *>(inst)->simm16),
+      simm16(16, OperandType::OPR_LABEL, reinterpret_cast<const OpEncoding *>(inst)->simm16),
       scc(1, OperandType::OPR_SSRC_SPECIAL_SCC, 253) {
   src_operands_[0] = &simm16;
   src_operands_[1] = &scc;
@@ -154,7 +154,7 @@ std::optional<int64_t> SCbranchScc1Sopp::branch_offset_bytes() const {
 SCbranchVcczSopp::SCbranchVcczSopp(const MachineInst *inst)
     : Sopp("s_cbranch_vccz", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::SCbranchVcczSopp)),
-      simm16(32, OperandType::OPR_LABEL, reinterpret_cast<const OpEncoding *>(inst)->simm16),
+      simm16(16, OperandType::OPR_LABEL, reinterpret_cast<const OpEncoding *>(inst)->simm16),
       vcc(64, OperandType::OPR_VCC, 0) {
   src_operands_[0] = &simm16;
   src_operands_[1] = &vcc;
@@ -184,7 +184,7 @@ std::optional<int64_t> SCbranchVcczSopp::branch_offset_bytes() const {
 SCbranchVccnzSopp::SCbranchVccnzSopp(const MachineInst *inst)
     : Sopp("s_cbranch_vccnz", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::SCbranchVccnzSopp)),
-      simm16(32, OperandType::OPR_LABEL, reinterpret_cast<const OpEncoding *>(inst)->simm16),
+      simm16(16, OperandType::OPR_LABEL, reinterpret_cast<const OpEncoding *>(inst)->simm16),
       vcc(64, OperandType::OPR_VCC, 0) {
   src_operands_[0] = &simm16;
   src_operands_[1] = &vcc;
@@ -214,7 +214,7 @@ std::optional<int64_t> SCbranchVccnzSopp::branch_offset_bytes() const {
 SCbranchExeczSopp::SCbranchExeczSopp(const MachineInst *inst)
     : Sopp("s_cbranch_execz", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::SCbranchExeczSopp)),
-      simm16(32, OperandType::OPR_LABEL, reinterpret_cast<const OpEncoding *>(inst)->simm16),
+      simm16(16, OperandType::OPR_LABEL, reinterpret_cast<const OpEncoding *>(inst)->simm16),
       sdst_exec(64, OperandType::OPR_SDST_EXEC, 126) {
   src_operands_[0] = &simm16;
   src_operands_[1] = &sdst_exec;
@@ -244,7 +244,7 @@ std::optional<int64_t> SCbranchExeczSopp::branch_offset_bytes() const {
 SCbranchExecnzSopp::SCbranchExecnzSopp(const MachineInst *inst)
     : Sopp("s_cbranch_execnz", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::SCbranchExecnzSopp)),
-      simm16(32, OperandType::OPR_LABEL, reinterpret_cast<const OpEncoding *>(inst)->simm16),
+      simm16(16, OperandType::OPR_LABEL, reinterpret_cast<const OpEncoding *>(inst)->simm16),
       sdst_exec(64, OperandType::OPR_SDST_EXEC, 126) {
   src_operands_[0] = &simm16;
   src_operands_[1] = &sdst_exec;
@@ -292,7 +292,7 @@ DecodeResult decodeSBarrierSopp(const MachineInst *opcode, const DecodeErrorEmit
 SSetkillSopp::SSetkillSopp(const MachineInst *inst)
     : Sopp("s_setkill", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::SSetkillSopp)),
-      simm16(32, OperandType::OPR_SIMM16, reinterpret_cast<const OpEncoding *>(inst)->simm16) {
+      simm16(16, OperandType::OPR_SIMM16, reinterpret_cast<const OpEncoding *>(inst)->simm16) {
   src_operands_[0] = &simm16;
   num_src_ = 1;
   num_dst_ = 0;
@@ -311,7 +311,7 @@ DecodeResult decodeSSetkillSopp(const MachineInst *opcode, const DecodeErrorEmit
 SWaitcntSopp::SWaitcntSopp(const MachineInst *inst)
     : Sopp("s_waitcnt", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::SWaitcntSopp)),
-      simm16(32, OperandType::OPR_WAITCNT, reinterpret_cast<const OpEncoding *>(inst)->simm16) {
+      simm16(16, OperandType::OPR_WAITCNT, reinterpret_cast<const OpEncoding *>(inst)->simm16) {
   src_operands_[0] = &simm16;
   num_src_ = 1;
   num_dst_ = 0;
@@ -331,7 +331,7 @@ DecodeResult decodeSWaitcntSopp(const MachineInst *opcode, const DecodeErrorEmit
 SSethaltSopp::SSethaltSopp(const MachineInst *inst)
     : Sopp("s_sethalt", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::SSethaltSopp)),
-      simm16(32, OperandType::OPR_SIMM16, reinterpret_cast<const OpEncoding *>(inst)->simm16) {
+      simm16(16, OperandType::OPR_SIMM16, reinterpret_cast<const OpEncoding *>(inst)->simm16) {
   src_operands_[0] = &simm16;
   num_src_ = 1;
   num_dst_ = 0;
@@ -350,7 +350,7 @@ DecodeResult decodeSSethaltSopp(const MachineInst *opcode, const DecodeErrorEmit
 SSleepSopp::SSleepSopp(const MachineInst *inst)
     : Sopp("s_sleep", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::SSleepSopp)),
-      simm16(32, OperandType::OPR_SIMM16, reinterpret_cast<const OpEncoding *>(inst)->simm16) {
+      simm16(16, OperandType::OPR_SIMM16, reinterpret_cast<const OpEncoding *>(inst)->simm16) {
   src_operands_[0] = &simm16;
   num_src_ = 1;
   num_dst_ = 0;
@@ -369,7 +369,7 @@ DecodeResult decodeSSleepSopp(const MachineInst *opcode, const DecodeErrorEmitte
 SSetprioSopp::SSetprioSopp(const MachineInst *inst)
     : Sopp("s_setprio", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::SSetprioSopp)),
-      simm16(32, OperandType::OPR_SIMM16, reinterpret_cast<const OpEncoding *>(inst)->simm16) {
+      simm16(16, OperandType::OPR_SIMM16, reinterpret_cast<const OpEncoding *>(inst)->simm16) {
   src_operands_[0] = &simm16;
   num_src_ = 1;
   num_dst_ = 0;
@@ -388,7 +388,7 @@ DecodeResult decodeSSetprioSopp(const MachineInst *opcode, const DecodeErrorEmit
 SSendmsgSopp::SSendmsgSopp(const MachineInst *inst)
     : Sopp("s_sendmsg", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::SSendmsgSopp)),
-      simm16(32, OperandType::OPR_SENDMSG, reinterpret_cast<const OpEncoding *>(inst)->simm16),
+      simm16(16, OperandType::OPR_SENDMSG, reinterpret_cast<const OpEncoding *>(inst)->simm16),
       m0(32, OperandType::OPR_SDST_M0, 124) {
   src_operands_[0] = &simm16;
   src_operands_[1] = &m0;
@@ -410,7 +410,7 @@ DecodeResult decodeSSendmsgSopp(const MachineInst *opcode, const DecodeErrorEmit
 SSendmsghaltSopp::SSendmsghaltSopp(const MachineInst *inst)
     : Sopp("s_sendmsghalt", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::SSendmsghaltSopp)),
-      simm16(32, OperandType::OPR_SENDMSG, reinterpret_cast<const OpEncoding *>(inst)->simm16),
+      simm16(16, OperandType::OPR_SENDMSG, reinterpret_cast<const OpEncoding *>(inst)->simm16),
       m0(32, OperandType::OPR_SDST_M0, 124) {
   src_operands_[0] = &simm16;
   src_operands_[1] = &m0;
@@ -433,7 +433,7 @@ DecodeResult decodeSSendmsghaltSopp(const MachineInst *opcode,
 STrapSopp::STrapSopp(const MachineInst *inst)
     : Sopp("s_trap", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::STrapSopp)),
-      simm16(32, OperandType::OPR_SIMM16, reinterpret_cast<const OpEncoding *>(inst)->simm16) {
+      simm16(16, OperandType::OPR_SIMM16, reinterpret_cast<const OpEncoding *>(inst)->simm16) {
   src_operands_[0] = &simm16;
   num_src_ = 1;
   num_dst_ = 0;
@@ -469,7 +469,7 @@ DecodeResult decodeSIcacheInvSopp(const MachineInst *opcode, const DecodeErrorEm
 SIncperflevelSopp::SIncperflevelSopp(const MachineInst *inst)
     : Sopp("s_incperflevel", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::SIncperflevelSopp)),
-      simm16(32, OperandType::OPR_SIMM16, reinterpret_cast<const OpEncoding *>(inst)->simm16) {
+      simm16(16, OperandType::OPR_SIMM16, reinterpret_cast<const OpEncoding *>(inst)->simm16) {
   src_operands_[0] = &simm16;
   num_src_ = 1;
   num_dst_ = 0;
@@ -489,7 +489,7 @@ DecodeResult decodeSIncperflevelSopp(const MachineInst *opcode,
 SDecperflevelSopp::SDecperflevelSopp(const MachineInst *inst)
     : Sopp("s_decperflevel", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::SDecperflevelSopp)),
-      simm16(32, OperandType::OPR_SIMM16, reinterpret_cast<const OpEncoding *>(inst)->simm16) {
+      simm16(16, OperandType::OPR_SIMM16, reinterpret_cast<const OpEncoding *>(inst)->simm16) {
   src_operands_[0] = &simm16;
   num_src_ = 1;
   num_dst_ = 0;
@@ -530,7 +530,7 @@ DecodeResult decodeSTtracedataSopp(const MachineInst *opcode,
 SCbranchCdbgsysSopp::SCbranchCdbgsysSopp(const MachineInst *inst)
     : Sopp("s_cbranch_cdbgsys", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::SCbranchCdbgsysSopp)),
-      simm16(32, OperandType::OPR_LABEL, reinterpret_cast<const OpEncoding *>(inst)->simm16) {
+      simm16(16, OperandType::OPR_LABEL, reinterpret_cast<const OpEncoding *>(inst)->simm16) {
   src_operands_[0] = &simm16;
   num_src_ = 1;
   num_dst_ = 0;
@@ -550,7 +550,7 @@ DecodeResult decodeSCbranchCdbgsysSopp(const MachineInst *opcode,
 SCbranchCdbguserSopp::SCbranchCdbguserSopp(const MachineInst *inst)
     : Sopp("s_cbranch_cdbguser", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::SCbranchCdbguserSopp)),
-      simm16(32, OperandType::OPR_LABEL, reinterpret_cast<const OpEncoding *>(inst)->simm16) {
+      simm16(16, OperandType::OPR_LABEL, reinterpret_cast<const OpEncoding *>(inst)->simm16) {
   src_operands_[0] = &simm16;
   num_src_ = 1;
   num_dst_ = 0;
@@ -570,7 +570,7 @@ DecodeResult decodeSCbranchCdbguserSopp(const MachineInst *opcode,
 SCbranchCdbgsysOrUserSopp::SCbranchCdbgsysOrUserSopp(const MachineInst *inst)
     : Sopp("s_cbranch_cdbgsys_or_user", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::SCbranchCdbgsysOrUserSopp)),
-      simm16(32, OperandType::OPR_LABEL, reinterpret_cast<const OpEncoding *>(inst)->simm16) {
+      simm16(16, OperandType::OPR_LABEL, reinterpret_cast<const OpEncoding *>(inst)->simm16) {
   src_operands_[0] = &simm16;
   num_src_ = 1;
   num_dst_ = 0;
@@ -590,7 +590,7 @@ DecodeResult decodeSCbranchCdbgsysOrUserSopp(const MachineInst *opcode,
 SCbranchCdbgsysAndUserSopp::SCbranchCdbgsysAndUserSopp(const MachineInst *inst)
     : Sopp("s_cbranch_cdbgsys_and_user", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::SCbranchCdbgsysAndUserSopp)),
-      simm16(32, OperandType::OPR_LABEL, reinterpret_cast<const OpEncoding *>(inst)->simm16) {
+      simm16(16, OperandType::OPR_LABEL, reinterpret_cast<const OpEncoding *>(inst)->simm16) {
   src_operands_[0] = &simm16;
   num_src_ = 1;
   num_dst_ = 0;
@@ -647,7 +647,7 @@ DecodeResult decodeSSetGprIdxOffSopp(const MachineInst *opcode,
 SSetGprIdxModeSopp::SSetGprIdxModeSopp(const MachineInst *inst)
     : Sopp("s_set_gpr_idx_mode", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::SSetGprIdxModeSopp)),
-      simm16(32, OperandType::OPR_SIMM16, reinterpret_cast<const OpEncoding *>(inst)->simm16),
+      simm16(16, OperandType::OPR_SIMM16, reinterpret_cast<const OpEncoding *>(inst)->simm16),
       m0(32, OperandType::OPR_SDST_M0, 124), m0_in(32, OperandType::OPR_SDST_M0, 124) {
   src_operands_[0] = &simm16;
   dst_operands_[0] = &m0;
