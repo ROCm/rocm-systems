@@ -101,7 +101,7 @@ main()
         return EXIT_FAILURE;
     }
 
-    // 0 -> 1 -> 6 -> 21
+    // 0 -> 1 -> 5 -> 18
     for(uint64_t add = 1; add <= kRangeDispatches; ++add)
     {
         step<<<1, 1>>>(acc, static_cast<int>(add));
@@ -137,8 +137,15 @@ main()
     printf("[app] mode=%s acc=%d\n", mode.c_str(), acc_h);
 
     // The application must see exactly the value its own execution of the range produced, whether
-    // the range was replayed or declined. A replayed range that leaks a pass's result would show
-    // up here as 64/195/588 (the chain continued from 21) rather than 21.
+    // the range was replayed or declined: the replay window has to be transparent to the
+    // application that opened it. The executor restores the range-exit state after the last pass,
+    // so this is a check on that restore and on the window not corrupting device memory along the
+    // way -- a replay that left a pass's state behind, or wrote outside the regions it captured,
+    // shows up here.
+    //
+    // It is deliberately not a check on the passes being repeatable: the exit restore runs last
+    // and would hide a broken between-pass rewind. That is what divergence checking is for, and
+    // why the basic sample runs with ROCPROF_RANGE_REPLAY_VERIFY=1.
     if(acc_h != kExpectedResult)
     {
         fprintf(stderr,

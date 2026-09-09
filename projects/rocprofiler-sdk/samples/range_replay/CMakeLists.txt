@@ -69,7 +69,13 @@ function(add_range_replay_sample NAME CLIENT_SRC)
                    FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
 endfunction()
 
-add_range_replay_sample(range-replay-basic basic_client.cpp)
+# Divergence checking is what makes this sample a check on repeatability rather than just
+# on the callback sequence. It compares the state the application's own execution left
+# behind against the state after the final replayed pass, so a between-pass rewind that
+# did not happen, or a recording replayed out of order, shows up as a non-zero divergence
+# count at CLOSE. Without it the range-exit restore would hide both.
+add_range_replay_sample(range-replay-basic basic_client.cpp ENVIRONMENT
+                        "ROCPROF_RANGE_REPLAY_VERIFY=1")
 add_range_replay_sample(range-replay-opt-out opt_out_client.cpp)
 
 # GPU_MAX_HW_QUEUES is what makes the decline deterministic. HIP pools hardware queues and

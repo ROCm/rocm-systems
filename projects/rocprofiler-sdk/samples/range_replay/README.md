@@ -30,16 +30,21 @@ report `hipErrorInvalidDeviceFunction` on the first kernel launch on gfx942.
 `main.cpp` runs three dispatches of one kernel inside a range:
 
 ```
-acc = 0  ->  acc*3+1  ->  acc*3+2  ->  acc*3+3   ==  21
+acc = 0  ->  acc*3+1  ->  acc*3+2  ->  acc*3+3   ==  18
 ```
 
 Each dispatch reads what its predecessor wrote, so the chain is order-dependent and not
-idempotent. Three properties fall out of checking `acc == 21` at the end:
+idempotent. Two separate checks use it, and they verify different things:
 
-- the SDK rewound device memory between passes (otherwise the chain continues from 21 and the
-  final value is 64, 195 or 588 depending on how many passes ran)
-- it handed the application back its **own** result, not a pass's
-- the recording preserved the dispatch order, and ran each dispatch exactly once per pass
+- **`acc == 18` in the application** says the replay window was **transparent**: the application
+  saw exactly the value its own execution produced. The executor restores the range-exit state
+  after the last pass, so this covers that restore and the window not corrupting device memory
+  along the way. All three samples check it, including the two where no pass runs.
+- **`divergence_count == 0` at `CLOSE`** says the range was **repeatable**: the state after the
+  final replayed pass matched the state the application's own execution left behind. This is the
+  check that a between-pass rewind actually happened and that the recording replayed in order —
+  the range-exit restore runs last and would otherwise hide both. It needs
+  `ROCPROF_RANGE_REPLAY_VERIFY=1`, which the `range-replay-basic` CTest target sets.
 
 The three dispatches share a kernel object but differ in their kernargs, so the replay has to
 stage a distinct kernarg slot for each of them.
@@ -59,7 +64,7 @@ streams would share a queue and the range would be replayed rather than declined
 
 | Sample | Asks for | CLOSE status | Shows |
 |---|---|---|---|
-| `range-replay-basic` | 4 passes | `REPLAYED` | The whole loop: one CONFIG, three PASS callbacks (passes 1-3), one CLOSE. |
+| `range-replay-basic` | 4 passes | `REPLAYED` | The whole loop: one CONFIG, three PASS callbacks (passes 1-3), one CLOSE, and a zero divergence count. |
 | `range-replay-opt-out` | nothing | `NO_PASS_COUNT` | Leaving `pass_count_cb` NULL is the per-range opt-out: the range is still opened, tracked and closed, but no pass runs. |
 | `range-replay-decline` | 4 passes | `MULTI_QUEUE` | A range the SDK refuses. CLOSE names the reason, and the application's result is untouched. |
 
@@ -79,6 +84,11 @@ and compare them against the state the application's own execution produced. CLO
 `divergence_count`: the number of regions that differed. A non-zero count means the range is not
 self-contained under the snapshot's coverage, so per-pass measurements describe different inputs.
 It is off by default because it costs an extra snapshot and a full hash of it.
+
+`range-replay-basic` runs with it on, because it is the only way the sample can tell a repeatable
+replay from a replay that merely finished. Everything else a tool observes — the pass callbacks,
+the `REPLAYED` status, and the application's own result — looks identical whether or not the
+between-pass rewind worked.
 
 ## Run
 

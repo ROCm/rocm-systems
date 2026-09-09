@@ -109,7 +109,11 @@ tool_fini(void*)
     ok = ok && g_status.load() == ROCPROFILER_RANGE_REPLAY_STATUS_REPLAYED;
     ok = ok && g_dispatch_count.load() == kRangeDispatches;
     ok = ok && g_agent_bound.load();
-    // Verification is off by default, so nothing should be reported as divergent.
+    // The CTest target runs with ROCPROF_RANGE_REPLAY_VERIFY=1, so this is the repeatability
+    // check: the SDK compares what the application's own execution left in device memory against
+    // what the final replayed pass left there. Any region that differs means the range did not
+    // re-execute to the same result -- a between-pass rewind that did not happen, a recording
+    // replayed out of order, or state the snapshot does not cover.
     ok = ok && g_divergence.load() == 0;
 
     if(!ok)

@@ -20,7 +20,7 @@ constexpr uint64_t kRangeId = 0xABCD01;
 // Dispatches main.cpp submits inside the range, on the range's own queue.
 constexpr uint64_t kRangeDispatches = 3;
 
-// What main.cpp's chain of dispatches produces from a zeroed buffer: 0 -> 1 -> 6 -> 21. Each
-// dispatch reads what its predecessor wrote, so this pins the recording's order as well as its
-// contents.
-constexpr int kExpectedResult = 21;
+// What main.cpp's chain of dispatches produces from a zeroed buffer, under acc = acc*3 + add for
+// add = 1, 2, 3: 0 -> 1 -> 5 -> 18. Each dispatch reads what its predecessor wrote, so this pins
+// the recording's order as well as its contents.
+constexpr int kExpectedResult = 18;
