@@ -675,8 +675,38 @@ run fails to find an emulator — see [`building.md`](building.md).
 
 ## `mirage profile`
 
-Profiles are reusable emulator presets stored in
-`$XDG_CONFIG_HOME/mirage/profile/<name>.json`.
+Profiles are reusable emulator presets. The ones you write are stored in
+`$XDG_CONFIG_HOME/mirage/profile/<name>.json`; the builtin ones are not
+stored at all.
+
+Mirage ships one builtin profile per GPU RocJITsu has a config for, and
+**generates it on demand rather than writing it to disk** — there is no
+file for `mi350x`, and `mirage profile show mi350x` works anyway. Each is
+named after the agent it pins, targets `rocjitsu`, and describes one GPU
+on one node; `--num-nodes` and `--gpus-per-node` widen that per run.
+
+Writing your own profile under a builtin's name still works: the file
+shadows the builtin, and deleting the file hands the name back to the
+builtin, immediately and with nothing to re-seed. Deleting a builtin that
+has no file of its own is refused — there is nothing to remove, and the
+name would still resolve afterwards.
+
+```sh
+$ mirage profile list -l
+NAME                     EMULATOR         DESCRIPTION
+gfx1100_w7900            rocjitsu         AMD Radeon Pro W7900 (rdna3), from RocJITsu's configs/gfx1100_w7900.json
+gfx1151                  rocjitsu         AMD Radeon Graphics (rdna3_5), from RocJITsu's configs/gfx1151.json
+gfx1201_r9700            rocjitsu         AMD Radeon AI PRO R9700 (rdna4), from RocJITsu's configs/gfx1201_r9700.json
+gfx90a_mi210_kmd         rocjitsu         AMD Instinct MI210 (cdna2), from RocJITsu's configs/gfx90a_mi210_kmd.json
+mi300x                   rocjitsu         AMD Instinct MI300X (cdna3), from RocJITsu's configs/gfx942_cdna3.json
+mi350x                   rocjitsu         AMD Instinct MI350X (cdna4), from RocJITsu's configs/gfx950_mi355x.json
+mi450x                   rocjitsu         AMD Instinct MI455X (cdna5), from RocJITsu's configs/gfx1250_mi455x.json
+```
+
+Under `--json`, `profile list --long` carries a `builtin` field, because
+a script can no longer tell a builtin from a profile you wrote by looking
+for the file. It is also what says whether `mirage profile delete` will
+work on that name.
 
 ```text
 mirage profile list [-l|--long]
@@ -706,13 +736,17 @@ mirage profile delete <name> [-f|--force]
   there. These files are the only copy, and a profile someone tuned is
   not recoverable once it has been written over — so a name that is taken
   is an error naming the path, and `mirage profile delete <name>` is how
-  you say you meant it. An untouched builtin is the one exception: mirage
-  wrote it, so replacing it destroys nothing.
+  you say you meant it. A builtin is the one exception: mirage generates
+  it and holds no file, so taking its name destroys nothing. Mirage says
+  so on stderr when it happens, and `mirage profile delete <name>` gives
+  the builtin the name back.
 
 ## `mirage topology`
 
 Topologies describe a rack/node/GPU layout and reference an agent. Builtin
-topologies are written on first run.
+topologies are written on first run. They cover the MI300X and MI350X
+layouts; for any other agent, `--gpus-per-node` and `--num-nodes` on
+`mirage run` widen its profile without a stored topology.
 
 ```text
 mirage topology list
@@ -724,8 +758,15 @@ mirage topology delete <name> [-f|--force]
 
 ## `mirage agent`
 
-Agents are hardware GPU definitions (e.g. `MI300X`, `MI350X`, `MI450X`).
-Builtin agents are written on first run.
+Agents are hardware GPU definitions. Mirage ships one per GPU RocJITsu
+has a config for — `mi300x`, `mi350x`, `mi450x`, `gfx90a_mi210_kmd`,
+`gfx1100_w7900`, `gfx1151`, `gfx1201_r9700` — each being the `vm` and
+`topology` of the matching `rocjitsu/configs/*.json`, and each written to
+disk on first run. Where RocJITsu ships several configs for one GPU (a
+`_kmd` variant, an `_Ngpu` one), mirage takes the plainest: the GPU count
+is a mirage topology setting (`--gpus-per-node`) and would be overwritten
+anyway. `mirage agent list` is therefore a list of machines, not of
+files. Names are case-insensitive.
 
 ```text
 mirage agent list
@@ -789,17 +830,23 @@ all three kinds, and the profiles read by `run` and `exec`.
 ## `mirage state`
 
 ```text
-mirage state builtins                 # (re)write builtin agents/topologies/profiles
+mirage state builtins                 # (re)write builtin agents/topologies
 mirage state purge [-f|--force] [--all]
 ```
 
-mirage writes any *missing* builtin agent, topology and profile on every
-command, so the shipped set is always there. `state builtins` additionally
+mirage writes any *missing* builtin agent and topology on every command,
+so the shipped set is always there. `state builtins` additionally
 refreshes the ones that exist, which is what you want after upgrading —
 but it refreshes only the ones you have not touched. A builtin whose file
 differs from the shipped version is *your* document that happens to share
 a name, and rewriting it would discard your edits with no way back, so
 that one is left alone and everything else is still refreshed.
+
+Builtin **profiles** are not in this at all. Mirage generates them from
+the RocJITsu configs it ships and writes none, so they are current by
+construction and there is nothing here to refresh — a profile file is
+always one you wrote, and refreshing it is exactly what this command must
+not do.
 
 It reports both halves, one line per document, so the two outcomes are
 told apart at a glance rather than inferred from what is missing:
@@ -815,12 +862,11 @@ mirage: 1 builtin document differs from the one mirage ships and was left alone:
 mirage: rewriting one would discard your edits, and everything else was refreshed. To take the shipped version of one after all, delete it (`mirage <kind> delete <name>`) and run `mirage state builtins` again.
 ```
 
-The list of edited documents covers **all three kinds at once**, on
-stderr, after the report of what did land — so a script reading the list
-of what changed does not have to filter it out, and repairing an edited
-agent, an edited topology and an edited profile takes one run rather
-than three. Take the shipped version of one by deleting the file and
-running the command again.
+The list of edited documents covers **both kinds at once**, on stderr,
+after the report of what did land — so a script reading the list of what
+changed does not have to filter it out, and repairing an edited agent and
+an edited topology takes one run rather than two. Take the shipped
+version of one by deleting the file and running the command again.
 
 **Having edited a builtin is not a failure**, and `state builtins` exits
 0 on it. Every document that could be refreshed was, nothing was lost,
@@ -839,12 +885,19 @@ Deleting follows from the same fact, in both directions:
   reset one: it really does remove your version, and the shipped document
   takes its place. That is the round trip — edit to customise, delete to
   revert.
+* A **builtin profile** is refused for the neighbouring reason: mirage
+  generates it and never wrote a file, so there is nothing to remove and
+  the name would still resolve. The round trip is the same shape —
+  `mirage profile create <builtin-name>` to take the name, delete to give
+  it back.
 
 `state purge` is the blunt tool:
 
 * It does everything `mirage cleanup` does, below, and then removes the
   runtime directory. The config directory (profiles, topologies, agents)
-  is left alone unless `--all` is given.
+  is left alone unless `--all` is given. `--all` takes the profiles you
+  wrote with it; the builtin profiles are generated rather than stored
+  and are still there afterwards.
 * It refuses while any `mirage run` is live, and tells you which.
   Killing someone else's foreground command from a state-cleanup
   subcommand would be a surprise; stop it with Ctrl-C in its own terminal
@@ -1141,6 +1194,10 @@ the invocation — pass `--force`, or correct the flag.
 ```sh
 $ mirage --json profile list
 [
+  "gfx1100_w7900",
+  "gfx1151",
+  "gfx1201_r9700",
+  "gfx90a_mi210_kmd",
   "mi300x",
   "mi350x",
   "mi450x"

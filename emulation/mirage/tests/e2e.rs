@@ -333,14 +333,28 @@ fn incomplete_profiles_warn_without_losing_extra_fields() {
     );
 }
 
+/// The agents mirage ships, as mirage itself reports them.
+///
+/// Every one has a builtin profile of the same name pinning it, so this
+/// doubles as the list of builtin profiles.
+fn builtin_agents() -> Vec<String> {
+    let env = Env::new();
+    serde_json::from_str(&env.ok(&["--json", "agent", "list"])).unwrap()
+}
+
 #[test]
 fn every_builtin_agent_starts_the_rocjitsu_daemon() {
     if skip_without_emulator() {
         return;
     }
-    for agent in ["mi300x", "mi350x", "mi450x"] {
+    // Every builtin, asked for rather than listed here: mirage takes its
+    // agents from the RocJITsu configs it ships, so a GPU added there
+    // becomes a builtin without anybody editing this file — and the
+    // point of this test is that a builtin starts. A hardcoded three
+    // would have gone on passing while four new ones went unexercised.
+    for agent in builtin_agents() {
         let env = Env::new();
-        let output = env.run(&["run", "--profile", agent, "--", "/bin/true"]);
+        let output = env.run(&["run", "--profile", &agent, "--", "/bin/true"]);
         let stderr = String::from_utf8_lossy(&output.stderr);
         assert!(output.status.success(), "{agent}: {stderr}");
         assert!(!stderr.contains("missing field"), "{agent}: {stderr}");
@@ -353,17 +367,17 @@ fn builtin_agents_without_sdma_queue_counts_are_upgraded() {
     if skip_without_emulator() {
         return;
     }
-    for agent in ["mi300x", "mi350x", "mi450x"] {
+    for agent in builtin_agents() {
         let env = Env::new();
         let mut old: serde_json::Value =
-            serde_json::from_str(&env.ok(&["agent", "show", agent])).unwrap();
+            serde_json::from_str(&env.ok(&["agent", "show", &agent])).unwrap();
         old["vm"]["gpu"]["device"]
             .as_object_mut()
             .unwrap()
             .remove("num_sdma_queues_per_engine");
         let path = env.root().join(format!("config/mirage/agent/{agent}.json"));
         std::fs::write(&path, serde_json::to_vec_pretty(&old).unwrap()).unwrap();
-        env.ok(&["run", "--profile", agent, "--", "/bin/true"]);
+        env.ok(&["run", "--profile", &agent, "--", "/bin/true"]);
         let upgraded: serde_json::Value =
             serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
         assert!(
@@ -1454,12 +1468,20 @@ fn state_builtins_writes_every_shipped_document_and_names_where() {
     let env = Env::new();
 
     let text = env.ok(&["state", "builtins"]);
-    for kind in ["agent", "topology", "profile"] {
+    // The two kinds that have files. Builtin profiles are generated from
+    // the RocJITsu configs mirage ships and never written, so this
+    // command has nothing to say about them — and must not name a path
+    // for one, which the loop below would then go looking for.
+    for kind in ["agent", "topology"] {
         assert!(
             text.contains(kind),
             "no {kind} in the builtins report: {text}"
         );
     }
+    assert!(
+        !text.contains("profile"),
+        "builtin profiles are generated, not written: {text}"
+    );
 
     let json: serde_json::Value =
         serde_json::from_str(&env.ok(&["--json", "state", "builtins"])).unwrap();
@@ -1487,7 +1509,13 @@ fn state_builtins_writes_every_shipped_document_and_names_where() {
     // Everything the report claims exists is loadable through the store,
     // not merely present as bytes.
     env.ok(&["agent", "show", "mi350x"]);
+    // And the profile it does not claim is there all the same, without a
+    // file: that is what generating them means.
     env.ok(&["profile", "show", "mi350x"]);
+    assert!(
+        !env.profile_dir().join("mi350x.json").exists(),
+        "a builtin profile must not be written to disk"
+    );
 }
 
 /// `mirage emulators` is how a user finds out what this build can do.

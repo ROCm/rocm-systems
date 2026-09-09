@@ -14,6 +14,16 @@
 //!
 //! A *write* asks two more questions, below.
 //!
+//! # Not every document is a file
+//!
+//! Mirage's builtin profiles are generated rather than stored: each is
+//! derived from a rocjitsu config the binary carries, on demand, and
+//! nothing is written to `<config>/profile/` ([`BuiltinProfiles`]). So a
+//! profile that resolves is not necessarily a profile with a file, and
+//! every profile file that *does* exist is the user's own. Builtin
+//! agents and topologies are still seeded onto disk, because those are
+//! documents a user edits and refers to by name.
+//!
 //! # Writes never destroy the user's work
 //!
 //! These files are the user's, and this module is the one door every
@@ -37,7 +47,9 @@
 //!   every missing builtin on the next command — the file would come
 //!   straight back and the "deleted" would have been a lie. Deleting one
 //!   the user *has* changed is allowed, and is how a customised builtin
-//!   is reset to the shipped version.
+//!   is reset to the shipped version. A *generated* builtin is refused
+//!   for the neighbouring reason: there is no file to remove, and the
+//!   name would still resolve afterwards.
 //! * A profile is checked before it lands, not when a session later tries
 //!   to use it: its name, the topology and agent references inside it,
 //!   and whether its emulator backend will accept it at all. A topology
@@ -140,15 +152,22 @@ impl DocKind {
 pub enum Stored {
     /// The name was free, and now holds this document.
     Created,
-    /// The name held an untouched builtin, which this replaced. Nothing
-    /// the user wrote was lost — the replaced copy is still compiled into
-    /// the binary — but the shipped definition is no longer on disk, and
-    /// deleting this document is what brings it back.
+    /// The name resolved to a builtin, and now resolves to this. Nothing
+    /// the user wrote was lost — the replaced definition is still
+    /// compiled into the binary — but it is no longer what the name
+    /// means, and deleting this document is what brings it back.
+    ///
+    /// Covers both ways a builtin is taken over: an agent or topology
+    /// mirage seeded and had left untouched on disk, and a profile
+    /// mirage generates and never wrote at all.
     ReplacedBuiltin,
 }
 
 /// The documents a linked-in provider seeds into a fresh config
 /// directory, and re-seeds whenever one goes missing.
+///
+/// Agents and topologies only. Builtin profiles are generated rather
+/// than written and travel in [`BuiltinProfiles`] instead.
 ///
 /// `mirage_builtin` submits exactly one of these; the core cannot depend
 /// on it (the dependency runs the other way), so the list arrives at link
@@ -162,6 +181,59 @@ pub struct BuiltinDocuments {
 }
 
 inventory::collect!(BuiltinDocuments);
+
+/// The profiles a linked-in provider generates, rather than seeds.
+///
+/// Mirage's builtin profiles are not documents at all until somebody
+/// asks for one: each is derived from a rocjitsu config the binary
+/// carries, on demand, and nothing is ever written to
+/// `<config>/profile/`. So they cannot travel in [`BuiltinDocuments`],
+/// which is specifically the set mirage *writes* and therefore the set
+/// [`is_pristine_builtin`] answers about — a generated profile has no
+/// file, so no file of that name can be mirage's own untouched seed, and
+/// every one that exists is the user's.
+///
+/// [`profile_get`] and [`profile_list`] fall back to this registry, so a
+/// builtin profile is visible on a fresh machine — and on one whose
+/// config directory mirage cannot write, which used to read as a machine
+/// with no profiles.
+///
+/// Registered at link time exactly as [`BuiltinDocuments`] is, and for
+/// the same reason: the core cannot depend on `mirage_builtin`. A build
+/// without the provider simply has no builtin profiles.
+#[derive(Debug)]
+pub struct BuiltinProfiles {
+    /// Every profile the provider generates, as its name and its
+    /// definition.
+    pub profiles: fn() -> Vec<(String, ProfileDef)>,
+}
+
+inventory::collect!(BuiltinProfiles);
+
+/// Every builtin profile, by canonical name.
+fn builtin_profiles() -> &'static BTreeMap<String, ProfileDef> {
+    static INDEX: OnceLock<BTreeMap<String, ProfileDef>> = OnceLock::new();
+    INDEX.get_or_init(|| {
+        let mut out = BTreeMap::new();
+        for provider in inventory::iter::<BuiltinProfiles> {
+            for (name, profile) in (provider.profiles)() {
+                out.insert(DocKind::Profile.canonical(&name), profile);
+            }
+        }
+        out
+    })
+}
+
+/// The builtin profile called `name`, if mirage generates one.
+///
+/// Public because "is this name a builtin?" is a question the CLI has to
+/// ask for itself: a profile with no file is not necessarily a profile
+/// that does not exist, and `mirage profile delete` and the
+/// shipped-version-restored report both turn on the difference.
+#[must_use]
+pub fn builtin_profile(name: &str) -> Option<&'static ProfileDef> {
+    builtin_profiles().get(&DocKind::Profile.canonical(name))
+}
 
 /// The content mirage ships for `name`, if it ships one at all.
 ///
@@ -386,8 +458,11 @@ pub fn referrers_to(target: DocKind, name: &str) -> Vec<Reference> {
 
     if matches!(target, DocKind::Agent | DocKind::Topology) {
         for profile in profile_list().unwrap_or_default() {
-            let Ok(def) = crate::state::read_json::<ProfileDef>(&DocKind::Profile.path(&profile))
-            else {
+            // Through `profile_get` rather than off disk: a builtin
+            // profile has no file and pins an agent all the same, so
+            // reading the directory would miss exactly the referrers a
+            // user is least able to repoint.
+            let Ok(def) = profile_get(&profile) else {
                 continue;
             };
             // A profile reaches an agent through the topology it carries
@@ -636,26 +711,52 @@ pub fn dangling_ref(referrer: Referrer<'_>, missing: DocKind, name: &str) -> Mir
 
 /// List every profile name, sorted.
 ///
+/// Both the ones on disk and the builtins mirage generates
+/// ([`BuiltinProfiles`]), which have no file. A builtin whose name a
+/// file has taken is listed once, under the name the file is addressed
+/// by: the file is the profile that will be used, and listing the same
+/// name twice would say there were two.
+///
 /// # Errors
 ///
 /// Returns an error if the profile directory exists but cannot be read.
 pub fn profile_list() -> Result<Vec<String>> {
-    list_json_stems(&crate::paths::profile_root())
+    let mut names = list_json_stems(&crate::paths::profile_root())?;
+    let on_disk: std::collections::BTreeSet<String> = names
+        .iter()
+        .map(|name| DocKind::Profile.canonical(name))
+        .collect();
+    names.extend(
+        builtin_profiles()
+            .keys()
+            .filter(|name| !on_disk.contains(*name))
+            .cloned(),
+    );
+    names.sort();
+    Ok(names)
 }
 
 /// Read one profile.
 ///
+/// The file wins where there is one, so writing a profile under a
+/// builtin's name shadows the builtin — and deleting that file brings
+/// the builtin back, with nothing to re-seed and nothing to go stale.
+///
 /// # Errors
 ///
-/// Returns [`MirageError::ProfileNotFound`] if there is no such profile,
-/// or a parse error if it is malformed.
+/// Returns [`MirageError::ProfileNotFound`] if there is no such profile
+/// on disk and mirage generates none of that name, or a parse error if
+/// the file is malformed.
 pub fn profile_get(name: &str) -> Result<ProfileDef> {
     validate_name(DocKind::Profile, name)?;
     let path = crate::paths::profile_path(name);
-    if !path.exists() {
-        return Err(MirageError::not_found(DocKind::Profile, name));
+    if path.exists() {
+        return crate::state::read_json(&path);
     }
-    crate::state::read_json(&path)
+    if let Some(builtin) = builtin_profile(name) {
+        return Ok(builtin.clone());
+    }
+    Err(MirageError::not_found(DocKind::Profile, name))
 }
 
 /// Write a new profile.
@@ -679,20 +780,49 @@ pub fn profile_put(profile: &ProfileDef) -> Result<Stored> {
     profile
         .validate()
         .map_err(|e| MirageError::other(format!("profile {}: {e}", shown(&profile.name))))?;
-    put_document(DocKind::Profile, &profile.name, profile)
+    let stored = put_document(DocKind::Profile, &profile.name, profile)?;
+    // A builtin profile has no file, so `put_document` sees a free name
+    // and reports `Created`. It is not free: the name resolved to
+    // mirage's own definition a moment ago and resolves to this one now,
+    // which is the fact `ReplacedBuiltin` exists to have said out loud.
+    // Nothing was destroyed — the builtin is generated, so deleting this
+    // file brings it straight back.
+    Ok(match stored {
+        Stored::Created if builtin_profile(&profile.name).is_some() => Stored::ReplacedBuiltin,
+        stored => stored,
+    })
 }
 
 /// Delete a profile.
 ///
+/// Deleting a file that shadows a builtin is allowed and is how a
+/// customised builtin is reset: the generated profile is what the name
+/// resolves to again afterwards. Deleting the builtin *itself* is
+/// refused — mirage generates it, so there is no file to remove and it
+/// would still be there. That is [`guard_delete`]'s rule reached by the
+/// other road: one refuses a delete that a re-seed would undo, this one
+/// a delete with nothing to undo. Both are still here, because whether a
+/// provider seeds its profiles or generates them is the provider's
+/// business and not this module's.
+///
 /// # Errors
 ///
 /// Returns [`MirageError::ProfileNotFound`] if there is no such profile,
-/// or a rejection if it is an untouched builtin (which mirage would
-/// simply write back — see `guard_delete`).
+/// or a rejection if the name is a builtin mirage generates.
 pub fn profile_delete(name: &str) -> Result<()> {
     validate_name(DocKind::Profile, name)?;
     let path = crate::paths::profile_path(name);
     if !path.exists() {
+        if builtin_profile(name).is_some() {
+            return Err(MirageError::other(format!(
+                "profile {name:?} is a builtin: mirage generates it from a RocJITsu \
+                 config it ships rather than storing it, so there is no file to \
+                 delete and it would still be there afterwards. To use your own in \
+                 its place, write one under that name (`mirage profile create \
+                 {name} ...`) \u{2014} it shadows the builtin, and deleting it later \
+                 restores the builtin."
+            )));
+        }
         return Err(MirageError::not_found(DocKind::Profile, name));
     }
     guard_delete(DocKind::Profile, name)?;
@@ -917,6 +1047,142 @@ mod tests {
         BuiltinDocuments { documents: seeded_documents }
     }
 
+    /// A [`BuiltinProfiles`] provider standing in for the generated half
+    /// of `mirage_builtin`: a profile that resolves with no file behind
+    /// it. Its topology is inline and names an agent, because a
+    /// generated profile refers to documents like any other and
+    /// [`referrers_to`] has to see it.
+    const GENERATED_PROFILE: &str = "generated";
+
+    fn generated_profile() -> ProfileDef {
+        profile_referring_to(
+            GENERATED_PROFILE,
+            MaybeRef::Owned(TopologyDef {
+                num_nodes: 1,
+                gpus_per_node: 1,
+                agent: MaybeRef::Ref("generated-gpu".to_string()),
+            }),
+        )
+    }
+
+    fn generated_profiles() -> Vec<(String, ProfileDef)> {
+        vec![(GENERATED_PROFILE.to_string(), generated_profile())]
+    }
+
+    inventory::submit! {
+        BuiltinProfiles { profiles: generated_profiles }
+    }
+
+    /// Every profile on disk: [`profile_list`] minus the builtin this
+    /// module generates.
+    ///
+    /// That builtin is in every list on every machine, so the tests
+    /// about *storing* profiles would each have to name it, and would
+    /// then be asserting the registry rather than the store. The two
+    /// tests that are about the union say so explicitly instead.
+    fn stored_profiles() -> Vec<String> {
+        profile_list()
+            .unwrap()
+            .into_iter()
+            .filter(|name| name != GENERATED_PROFILE)
+            .collect()
+    }
+
+    /// A generated builtin is a profile on a machine with no profile
+    /// directory at all — which is the point of generating it: a config
+    /// directory mirage cannot write used to read as a machine with no
+    /// profiles, and `--profile mi350x` then blamed a missing profile
+    /// that mirage itself would have written.
+    #[test]
+    fn a_generated_profile_resolves_without_a_file() {
+        let _g = crate::paths::test_env_lock();
+        let dir = tempfile::tempdir().unwrap();
+        crate::paths::set_test_root(dir.path());
+
+        assert_eq!(profile_list().unwrap(), vec![GENERATED_PROFILE]);
+        assert_eq!(profile_get(GENERATED_PROFILE).unwrap(), generated_profile());
+        assert_eq!(
+            builtin_profile("GENERATED").cloned(),
+            Some(generated_profile()),
+            "builtins are addressed case-insensitively, like every profile"
+        );
+        assert!(!crate::paths::profile_path(GENERATED_PROFILE).exists());
+        assert!(!crate::paths::profile_root().exists());
+
+        crate::paths::clear_test_root();
+    }
+
+    /// Writing over a generated builtin's name shadows it and says so;
+    /// deleting the file hands the name straight back.
+    #[test]
+    fn a_file_shadows_a_generated_profile_and_deleting_it_gives_the_name_back() {
+        let _g = crate::paths::test_env_lock();
+        let dir = tempfile::tempdir().unwrap();
+        crate::paths::set_test_root(dir.path());
+
+        let mut mine = generated_profile();
+        mine.description = Some("mine now".to_string());
+        // `Created` would be true of the filesystem and false of what the
+        // name meant a moment ago, which is the half the user needs.
+        assert_eq!(profile_put(&mine).unwrap(), Stored::ReplacedBuiltin);
+        assert_eq!(profile_get(GENERATED_PROFILE).unwrap(), mine);
+        // Shadowed, not duplicated: one name, one profile.
+        assert_eq!(profile_list().unwrap(), vec![GENERATED_PROFILE]);
+        // And it is the user's now, so a second write is refused like any
+        // other document of theirs.
+        let err = profile_put(&mine).unwrap_err().to_string();
+        assert!(err.contains("already exists"), "{err}");
+
+        profile_delete(GENERATED_PROFILE).unwrap();
+        assert_eq!(profile_get(GENERATED_PROFILE).unwrap(), generated_profile());
+
+        crate::paths::clear_test_root();
+    }
+
+    /// The builtin itself cannot be deleted — there is no file, and the
+    /// name would still resolve, so "deleted" would be a lie. Same rule
+    /// as a seeded builtin, reached the other way.
+    #[test]
+    fn deleting_a_generated_profile_is_refused_rather_than_faked() {
+        let _g = crate::paths::test_env_lock();
+        let dir = tempfile::tempdir().unwrap();
+        crate::paths::set_test_root(dir.path());
+
+        let err = profile_delete(GENERATED_PROFILE).unwrap_err().to_string();
+        assert!(err.contains("is a builtin"), "{err}");
+        assert!(err.contains(GENERATED_PROFILE), "{err}");
+        // And it is not the same complaint as a name nobody ships.
+        assert!(matches!(
+            profile_delete("ghost"),
+            Err(MirageError::ProfileNotFound { .. })
+        ));
+
+        crate::paths::clear_test_root();
+    }
+
+    /// A generated profile refers to an agent like any other, so
+    /// deleting that agent has to name it. Reading the profile directory
+    /// would miss it — it has no file — and it is exactly the referrer a
+    /// user cannot repoint by hand.
+    #[test]
+    fn a_generated_profile_is_a_referrer_to_the_agent_it_pins() {
+        let _g = crate::paths::test_env_lock();
+        let dir = tempfile::tempdir().unwrap();
+        crate::paths::set_test_root(dir.path());
+
+        assert_eq!(
+            referrers_to(DocKind::Agent, "GENERATED-GPU"),
+            vec![Reference {
+                kind: DocKind::Profile,
+                name: GENERATED_PROFILE.to_string(),
+            }],
+            "an agent reference is matched case-insensitively, file or no file"
+        );
+        assert!(referrers_to(DocKind::Agent, "some-other-gpu").is_empty());
+
+        crate::paths::clear_test_root();
+    }
+
     /// Write the shipped copy of [`SEEDED_PROFILE`] to disk the way
     /// `mirage_builtin` does on startup — around the store, so the store's
     /// own guards do not get a say.
@@ -934,14 +1200,14 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         crate::paths::set_test_root(dir.path());
 
-        assert!(profile_list().unwrap().is_empty());
+        assert!(stored_profiles().is_empty());
         assert_eq!(profile_put(&profile("a")).unwrap(), Stored::Created);
         profile_put(&profile("b")).unwrap();
-        assert_eq!(profile_list().unwrap(), vec!["a", "b"]);
+        assert_eq!(stored_profiles(), vec!["a", "b"]);
         assert_eq!(profile_get("a").unwrap().name, "a");
 
         profile_delete("a").unwrap();
-        assert_eq!(profile_list().unwrap(), vec!["b"]);
+        assert_eq!(stored_profiles(), vec!["b"]);
         assert!(matches!(
             profile_get("a"),
             Err(MirageError::ProfileNotFound { .. })
@@ -956,7 +1222,7 @@ mod tests {
         crate::paths::set_test_root(dir.path());
 
         profile_put(&profile("mixedcase")).unwrap();
-        assert_eq!(profile_list().unwrap(), vec!["mixedcase"]);
+        assert_eq!(stored_profiles(), vec!["mixedcase"]);
         assert_eq!(profile_get("MIXEDCASE").unwrap().name, "mixedcase");
         crate::paths::clear_test_root();
     }
@@ -974,7 +1240,7 @@ mod tests {
         let err = profile_put(&profile("MyProfile")).unwrap_err().to_string();
         assert!(err.contains("\"MyProfile\""), "{err}");
         assert!(err.contains("\"myprofile\""), "{err}");
-        assert!(profile_list().unwrap().is_empty(), "nothing may be stored");
+        assert!(stored_profiles().is_empty(), "nothing may be stored");
 
         let err = agent_put("MI350X", &AgentDef::default())
             .unwrap_err()
@@ -1118,7 +1384,7 @@ mod tests {
         let inline = profile_referring_to("trav", MaybeRef::Owned(escaping.clone()));
         let err = profile_put(&inline).unwrap_err().to_string();
         assert!(err.contains("../../outside/evil"), "{err}");
-        assert!(profile_list().unwrap().is_empty());
+        assert!(stored_profiles().is_empty());
 
         let by_name = profile_referring_to("trav", MaybeRef::Ref("../../etc/passwd".to_string()));
         assert!(profile_put(&by_name).is_err());
@@ -1146,7 +1412,7 @@ mod tests {
         let err = profile_put(&p).unwrap_err().to_string();
         assert!(err.contains("no-such-emulator"), "{err}");
         assert!(err.contains("mirage emulators"), "{err}");
-        assert!(profile_list().unwrap().is_empty());
+        assert!(stored_profiles().is_empty());
         crate::paths::clear_test_root();
     }
 
@@ -1201,7 +1467,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         crate::paths::set_test_root(dir.path());
         // A fresh machine has written nothing yet; that is not an error.
-        assert!(profile_list().unwrap().is_empty());
+        assert!(stored_profiles().is_empty());
         assert!(agent_list().unwrap().is_empty());
         crate::paths::clear_test_root();
     }

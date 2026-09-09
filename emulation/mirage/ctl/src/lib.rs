@@ -292,27 +292,30 @@ fn emulators_cmd(long: bool, json: bool) {
     println!("\n* = default emulator for new profiles");
 }
 
-/// Best-effort: materialise all builtin state on disk — agents,
-/// topologies, and profiles — writing only what's missing. Not fatal;
-/// the user can always force a full rewrite with `mirage state
-/// builtins`.
+/// Best-effort: materialise the builtin state that lives on disk —
+/// agents and topologies — writing only what's missing. Not fatal; the
+/// user can always force a full rewrite with `mirage state builtins`.
+///
+/// Not profiles. Mirage generates those from the rocjitsu configs it
+/// ships, on demand, and writes none — so there is nothing here to
+/// unpack and nothing that can fail to be unpacked. See
+/// [`mirage_builtin::profiles`].
 ///
 /// Shared by the CLI ([`dispatch`]) and the daemon so both surfaces
 /// auto-unpack the builtins the first time they run, instead of
 /// requiring the user to invoke `mirage state builtins` by hand.
 ///
 /// A failure here is said out loud rather than only `tracing::warn!`ed,
-/// because it is never local to the builtins. Everything mirage knows
-/// about profiles, agents and topologies is files in one directory, so a
-/// directory it cannot write reads as a machine with no configuration at
-/// all: `profile list` prints nothing and exits 0, and `run` then blames
-/// a missing `mi350x` — which exists, and would have been written here.
-/// `config_dir_hint` turns that into the sentence the user needs.
+/// because it is never local to the builtins. What mirage knows about
+/// agents and topologies is files in one directory, so a directory it
+/// cannot write reads as a machine with no hardware at all: `agent list`
+/// prints nothing and exits 0, and `run` then blames a topology whose
+/// agent reference dangles. `config_dir_hint` turns that into the
+/// sentence the user needs.
 pub fn ensure_builtins_present() {
     let outcome = [
         mirage_builtin::ensure_agents(false).map(|_| ()),
         mirage_builtin::ensure_topologies(false).map(|_| ()),
-        mirage_builtin::ensure_profiles(false).map(|_| ()),
     ]
     .into_iter()
     .find_map(Result::err);
@@ -708,7 +711,7 @@ pub struct ExecArgsCli {
 
 #[derive(Subcommand, Debug)]
 pub enum StateCmd {
-    /// (Re)write the builtin agents, topologies and profiles under
+    /// (Re)write the builtin agents and topologies under
     /// `<MIRAGE_CONFIG>`.
     ///
     /// Every command writes back any builtin that has gone missing, so
@@ -719,6 +722,10 @@ pub enum StateCmd {
     /// replacing it would destroy the only copy. Delete it first if you
     /// want the shipped version back — that is what a delete of an
     /// edited builtin is for.
+    ///
+    /// Builtin profiles are not written at all: mirage generates them
+    /// from the RocJITsu configs it ships, so they are always current and
+    /// there is nothing to refresh.
     Builtins,
     /// Remove mirage's runtime directory and reclaim orphaned containers.
     ///
@@ -732,8 +739,9 @@ pub enum StateCmd {
         force: bool,
         /// Also remove the mirage config directory: every agent,
         /// topology and profile, including the ones you wrote. Mirage
-        /// writes its own builtin agents, topologies and profiles back
-        /// the next time it runs; nothing else comes back.
+        /// writes its own builtin agents and topologies back the next
+        /// time it runs, and its builtin profiles never left; nothing
+        /// else comes back.
         #[arg(long)]
         all: bool,
     },
@@ -1100,6 +1108,13 @@ fn long_profiles(names: &[String]) -> Vec<serde_json::Value> {
                 "name": p.name,
                 "emulator": p.emulator.emulator,
                 "description": p.description,
+                // Mirage generates its builtin profiles rather than
+                // writing them, so a script can no longer tell one from
+                // a profile the user wrote by looking for the file —
+                // there is no file. It is also what says whether `mirage
+                // profile delete` will work on this name.
+                "builtin": mirage_core::store::builtin_profile(n).is_some()
+                    && !mirage_core::paths::profile_path(n).exists(),
             }),
             // The text form prints "(unreadable)" for one of these. A
             // reader of the JSON needs the same fact, and needs it as a
@@ -1131,9 +1146,9 @@ fn report_replaced_builtin(kind: DocKind, name: &str, stored: Stored) {
     }
     let kind = kind.as_str();
     eprintln!(
-        "mirage: {name} was a builtin {kind} mirage ships, and this replaced it. \
-         Nothing you wrote was lost; `mirage {kind} delete {name}` restores the \
-         shipped version."
+        "mirage: {name} was a builtin {kind}, and this took its name. Nothing you \
+         wrote was lost; `mirage {kind} delete {name}` gives the name back to the \
+         builtin."
     );
 }
 
@@ -1288,6 +1303,16 @@ fn delete_document(
     // bad name it is rather than probed for on disk.
     mirage_core::store::validate_name(kind, name)?;
     if !kind.path(name).exists() {
+        // No file is not always no document: a builtin profile is
+        // generated at run time and never written, so `mirage profile
+        // list` shows it and this used to answer "no such profile" for a
+        // name the user had just read out of that list. The store knows
+        // the difference and refuses with the reason, so let it — it has
+        // nothing to remove either way, which is why there is no prompt
+        // to skip here.
+        if kind == DocKind::Profile {
+            mirage_core::store::profile_delete(name)?;
+        }
         return Err(mirage_core::error::MirageError::not_found(kind, name).into());
     }
     if !force && !confirm(&format!("delete {word} {name}?"))? {
@@ -1349,6 +1374,14 @@ fn delete_document(
 /// config directory mirage cannot write is exactly the case where the
 /// old claim was worst, and it is the case where this one says no.
 fn restore_shipped(kind: DocKind, name: &str) -> bool {
+    // A builtin profile is generated rather than seeded, so removing the
+    // file that shadowed it *is* the restore — there is nothing to write
+    // and nothing that can fail to be written. Reading it back off disk
+    // like the other two kinds would report `false` for the one case
+    // that is always true.
+    if kind == DocKind::Profile {
+        return mirage_core::store::builtin_profile(name).is_some();
+    }
     if mirage_core::store::shipped(kind, name).is_none() {
         return false;
     }
@@ -2946,12 +2979,18 @@ async fn state_cmd(cmd: StateCmd, json: bool) -> anyhow::Result<ExitCode> {
 
 /// `mirage state builtins`: refresh every builtin document on disk.
 ///
-/// All three kinds, always. This used to be three `?`-chained calls, so
-/// the first kind holding an edited builtin abandoned the other two — and
-/// then said "Every other builtin was refreshed", which was false, and
-/// under `--json` threw away the report of everything that *had* been
-/// refreshed. Repairing an edited agent, topology and profile therefore
-/// took three runs to even discover.
+/// Both kinds that have a file, always. This used to be three
+/// `?`-chained calls, so the first kind holding an edited builtin
+/// abandoned the others — and then said "Every other builtin was
+/// refreshed", which was false, and under `--json` threw away the report
+/// of everything that *had* been refreshed. Repairing an edited agent
+/// and topology therefore took two runs to even discover.
+///
+/// Builtin profiles are not here because they are not on disk: mirage
+/// generates each one from the rocjitsu config it ships, every time it
+/// is asked for, so there is no stale copy for this command to refresh.
+/// A profile *file* is the user's own, and refreshing it is exactly what
+/// this command must not do.
 ///
 /// Exit 0 when nothing failed, edited builtins included. `--help`
 /// presents "a builtin you have edited is left alone and named" as the
@@ -2965,7 +3004,6 @@ fn builtins_cmd(json: bool) -> anyhow::Result<ExitCode> {
     let kinds = [
         (DocKind::Agent, mirage_builtin::ensure_agents(true)?),
         (DocKind::Topology, mirage_builtin::ensure_topologies(true)?),
-        (DocKind::Profile, mirage_builtin::ensure_profiles(true)?),
     ];
 
     if json {
@@ -4174,18 +4212,17 @@ exit 0
 
     #[test]
     fn state_builtins_refreshes_every_kind_and_survives_an_edited_one() {
-        // The three kinds were `?`-chained, so the first one holding an
-        // edited builtin abandoned the other two — and then claimed
-        // "Every other builtin was refreshed", which was false. Repairing
-        // an edited agent, topology and profile took three runs to even
-        // discover.
+        // The kinds were `?`-chained, so the first one holding an edited
+        // builtin abandoned the rest — and then claimed "Every other
+        // builtin was refreshed", which was false. Repairing an edited
+        // agent and topology took two runs to even discover.
         let _lock = mirage_core::paths::test_env_lock();
         let root = tempfile::tempdir().unwrap();
         mirage_core::paths::set_test_root(root.path());
 
         ensure_builtins_present();
         // Edit one of each kind, in the order the command visits them, so
-        // that stopping at the first would hide the other two.
+        // that stopping at the first would hide the second.
         let mut agent = mirage_core::store::agent_get("mi300x").unwrap();
         agent.vm.gpu.num_xcds = 1;
         mirage_core::state::write_json(&mirage_core::paths::agent_path("mi300x"), &agent).unwrap();
@@ -4193,6 +4230,9 @@ exit 0
         topology.num_nodes = 3;
         mirage_core::state::write_json(&mirage_core::paths::topology_path("MI350X-2x8"), &topology)
             .unwrap();
+        // And a profile written over a builtin's name. This one is not a
+        // builtin at all any more — mirage generates its own and writes
+        // nothing — so the command must not so much as look at it.
         let mut profile = mirage_core::store::profile_get("mi450x").unwrap();
         profile.description = Some("mine".to_string());
         mirage_core::state::write_json(&mirage_core::paths::profile_path("mi450x"), &profile)
@@ -4200,9 +4240,9 @@ exit 0
 
         let code = builtins_cmd(false).unwrap();
 
-        // All three survived, which is only possible if all three kinds
-        // ran, and the run is not a failure: nothing was lost and every
-        // other document was refreshed.
+        // All three survived, which is only possible if both kinds ran,
+        // and the run is not a failure: nothing was lost and every other
+        // document was refreshed.
         assert_eq!(
             mirage_core::store::agent_get("mi300x")
                 .unwrap()
@@ -4222,6 +4262,17 @@ exit 0
                 .unwrap()
                 .description,
             Some("mine".to_string())
+        );
+        // Deleting it hands the name back to the generated profile,
+        // without `state builtins` having to put anything there.
+        mirage_core::store::profile_delete("mi450x").unwrap();
+        assert!(
+            !mirage_core::paths::profile_path("mi450x").exists(),
+            "a builtin profile is never written"
+        );
+        assert_eq!(
+            mirage_core::store::profile_get("mi450x").unwrap(),
+            mirage_builtin::profile_named("mi450x").unwrap()
         );
         mirage_core::paths::clear_test_root();
         assert_eq!(
