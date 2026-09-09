@@ -1680,10 +1680,13 @@ pub struct AmdsmiDriverInfoT {
     pub driver_version: [::std::os::raw::c_char; 256usize],
     pub driver_date: [::std::os::raw::c_char; 256usize],
     pub driver_name: [::std::os::raw::c_char; 256usize],
+    pub driver_kernel_version: [::std::os::raw::c_char; 256usize],
+    pub driver_build_version: [::std::os::raw::c_char; 256usize],
+    pub driver_full_version: [::std::os::raw::c_char; 256usize],
 }
 #[allow(clippy::unnecessary_operation, clippy::identity_op)]
 const _: () = {
-    ["Size of AmdsmiDriverInfoT"][::std::mem::size_of::<AmdsmiDriverInfoT>() - 768usize];
+    ["Size of AmdsmiDriverInfoT"][::std::mem::size_of::<AmdsmiDriverInfoT>() - 1536usize];
     ["Alignment of AmdsmiDriverInfoT"][::std::mem::align_of::<AmdsmiDriverInfoT>() - 1usize];
     ["Offset of field: AmdsmiDriverInfoT::driver_version"]
         [::std::mem::offset_of!(AmdsmiDriverInfoT, driver_version) - 0usize];
@@ -1691,6 +1694,12 @@ const _: () = {
         [::std::mem::offset_of!(AmdsmiDriverInfoT, driver_date) - 256usize];
     ["Offset of field: AmdsmiDriverInfoT::driver_name"]
         [::std::mem::offset_of!(AmdsmiDriverInfoT, driver_name) - 512usize];
+    ["Offset of field: AmdsmiDriverInfoT::driver_kernel_version"]
+        [::std::mem::offset_of!(AmdsmiDriverInfoT, driver_kernel_version) - 768usize];
+    ["Offset of field: AmdsmiDriverInfoT::driver_build_version"]
+        [::std::mem::offset_of!(AmdsmiDriverInfoT, driver_build_version) - 1024usize];
+    ["Offset of field: AmdsmiDriverInfoT::driver_full_version"]
+        [::std::mem::offset_of!(AmdsmiDriverInfoT, driver_full_version) - 1280usize];
 };
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]

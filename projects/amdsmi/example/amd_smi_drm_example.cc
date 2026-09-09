@@ -1225,7 +1225,10 @@ int main() {
         CHK_AMDSMI_RET(ret)
         printf("    Output of amdsmi_get_gpu_driver_info:\n");
         printf("\tDriver name: %s\n", driver_info.driver_name);
+        printf("\tKernel version: %s\n", driver_info.driver_kernel_version);
         printf("\tDriver version: %s\n", driver_info.driver_version);
+        printf("\tBuild version: %s\n", driver_info.driver_build_version);
+        printf("\tFull version: %s\n", driver_info.driver_full_version);
         printf("\tDriver date: %s\n\n", driver_info.driver_date);
       } else {
         printf("\tamdsmi_get_gpu_driver_info(): not available on this device.\n");
@@ -1554,8 +1557,7 @@ int main() {
         CHK_AMDSMI_RET(ret)
       }
       printf("    Output of  amdsmi_get_temp_metric:\n");
-      std::cout << "\t\tTemperature: " << std::dec << val_i64 << "C"
-                << "\n\n";
+      std::cout << "\t\tTemperature: " << std::dec << val_i64 << "C" << "\n\n";
 
       // Get frame buffer
       amdsmi_vram_usage_t vram_usage = {};
@@ -2029,8 +2031,7 @@ int main() {
 
         std::cout << "\n";
         std::cout << " ** Note: Values MAX'ed out "
-                  << "(UINTX MAX are unsupported for the version in question) ** "
-                  << "\n\n";
+                  << "(UINTX MAX are unsupported for the version in question) ** " << "\n\n";
       }  // END GPU METRICS OUTPUTS
 
       // Get nearest GPUs
