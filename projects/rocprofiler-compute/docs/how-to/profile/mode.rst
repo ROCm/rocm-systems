@@ -897,6 +897,8 @@ which operators contribute to specific performance counter values.
    markers that map the collected kernel performance counters to their originating PyTorch
    operators.
 
+.. _torch-trace-requirements:
+
 Requirements
 ------------
 
@@ -1071,6 +1073,19 @@ The Torch trace feature currently has the following limitations:
 
 * This feature adds instrumentation overhead to track operator boundaries. For performance-critical measurements, consider profiling without this option first.
 
+If PyTorch and ROCm come from different installations, the workload aborts while
+loading ROCm libraries and profiling fails with output such as:
+
+.. code-block:: text
+
+   : CommandLine Error: Option 'spirv-expand-step' registered more than once!
+   LLVM ERROR: inconsistency in registered CommandLine options
+   ERROR The workload and the profiler loaded two different ROCm installations in the same
+   process. Duplicate ROCm libraries abort at startup. Install PyTorch and rocm[profiler]
+   from the same package index: <link to the requirements above>
+
+This means the install requirement above was not met.
+
 
 .. _torch-operator-profiling:
 
@@ -1156,8 +1171,8 @@ Requirements
 ------------
 
 Triton trace has the same requirements and limitations as Torch trace (see
-:ref:`torch-trace-limitations`), with a valid Triton installation required in
-place of PyTorch.
+:ref:`torch-trace-requirements` and :ref:`torch-trace-limitations`), with a
+valid Triton installation required in place of PyTorch.
 
 Usage
 -----
@@ -1204,6 +1219,45 @@ single option.
 The output is identical to enabling each framework's trace flag individually.
 Captured kernels are attributed in the ``Backend`` column and analyzed with the
 corresponding per-framework operator options (see :doc:`../analyze/cli`).
+
+.. _profile-vllm-workloads:
+
+Profile vLLM workloads
+======================
+
+vLLM V1 runs GPU kernels in a worker process separate from the vLLM entry
+process. ROCm Compute Profiler profiles that worker process and records its
+kernel dispatches, but vLLM terminates the worker with a signal on shutdown,
+and counter data is only written when a process exits normally. The profiling
+run therefore reports success while leaving no GPU kernel dispatch or
+performance counter data.
+
+To profile vLLM V1 workloads on a single GPU, set
+``VLLM_ENABLE_V1_MULTIPROCESSING=0`` before launching ROCm Compute Profiler.
+The vLLM workload then inherits the setting and runs the model in the profiled
+process, which exits normally and writes its counter data. For example:
+
+.. code-block:: shell-session
+
+   $ VLLM_ENABLE_V1_MULTIPROCESSING=0 \
+       rocprof-compute profile \
+       --iteration-multiplexing \
+       --no-roof \
+       --name vllm-offline -- \
+       python offline_inference.py
+
+.. important::
+
+   This workaround applies to single-GPU runs. When the model is split across
+   several GPUs, vLLM starts a separate worker process for each GPU, and a
+   profiling run still completes without performance counter data.
+
+.. note::
+
+   Disabling vLLM V1 multiprocessing does not change the model or the kernels
+   it runs, so the collected counter data remains representative. It does
+   affect end-to-end throughput, because work that normally overlaps across two
+   processes is serialized into one.
 
 .. _iteration-multiplexing:
 

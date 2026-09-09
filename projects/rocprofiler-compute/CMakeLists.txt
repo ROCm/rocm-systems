@@ -757,6 +757,49 @@ add_test(
 )
 
 # -----------------------------------
+# Memory bandwidth analysis unit tests
+# -----------------------------------
+
+add_test(
+    NAME test_membw_tree_spec
+    COMMAND
+        ${PYTHON_TEST_COMMAND} -m pytest --junitxml=tests/test_membw_tree_spec.xml
+        ${COV_OPTION} tests/unit/membw_analysis/test_membw_tree_spec.py
+        ${WORKING_DIR_OPTION}
+)
+
+add_test(
+    NAME test_membw_metric_extract
+    COMMAND
+        ${PYTHON_TEST_COMMAND} -m pytest --junitxml=tests/test_membw_metric_extract.xml
+        ${COV_OPTION} tests/unit/membw_analysis/test_membw_metric_extract.py
+        ${WORKING_DIR_OPTION}
+)
+
+add_test(
+    NAME test_membw_engine
+    COMMAND
+        ${PYTHON_TEST_COMMAND} -m pytest --junitxml=tests/test_membw_engine.xml
+        ${COV_OPTION} tests/unit/membw_analysis/test_membw_engine.py ${WORKING_DIR_OPTION}
+)
+
+add_test(
+    NAME test_membw_guidance
+    COMMAND
+        ${PYTHON_TEST_COMMAND} -m pytest --junitxml=tests/test_membw_guidance.xml
+        ${COV_OPTION} tests/unit/membw_analysis/test_membw_guidance.py
+        ${WORKING_DIR_OPTION}
+)
+
+add_test(
+    NAME test_membw_pipeline
+    COMMAND
+        ${PYTHON_TEST_COMMAND} -m pytest --junitxml=tests/test_membw_pipeline.xml
+        ${COV_OPTION} tests/unit/membw_analysis/test_membw_pipeline.py
+        ${WORKING_DIR_OPTION}
+)
+
+# -----------------------------------
 # CLI options unit tests
 # -----------------------------------
 
@@ -1060,6 +1103,11 @@ if(${ENABLE_COVERAGE})
         test_mem_chart_gfx9
         test_mem_chart_gfx11
         test_mem_chart_gfx1250
+        test_membw_engine
+        test_membw_guidance
+        test_membw_metric_extract
+        test_membw_pipeline
+        test_membw_tree_spec
         test_roofline_calc
         test_roofline_analyze
         test_roofline_main
@@ -1190,6 +1238,13 @@ install(
 # src/rocprof_compute_profile
 install(
     DIRECTORY src/rocprof_compute_profile
+    DESTINATION ${CMAKE_INSTALL_LIBEXECDIR}/${PROJECT_NAME}
+    COMPONENT main
+    PATTERN "__pycache__" EXCLUDE
+)
+# src/membw_analysis
+install(
+    DIRECTORY src/membw_analysis
     DESTINATION ${CMAKE_INSTALL_LIBEXECDIR}/${PROJECT_NAME}
     COMPONENT main
     PATTERN "__pycache__" EXCLUDE

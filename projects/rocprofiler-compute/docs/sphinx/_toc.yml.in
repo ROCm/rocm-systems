@@ -44,6 +44,8 @@ subtrees:
       - file: conceptual/cdna/cdna-performance-model.rst
         title: CDNA-CDNA4
         entries:
+        - file: conceptual/cdna/compute-memory-partition.rst
+          title: Compute and memory partition modes
         - file: conceptual/cdna/system-speed-of-light.rst
           title: System Speed-of-Light
         - file: conceptual/cdna/compute-unit.rst

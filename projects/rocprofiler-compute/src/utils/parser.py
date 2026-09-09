@@ -53,6 +53,7 @@ def build_dfs(
     sys_info: pd.Series,
     profiling_config: dict[str, Any],
     arch: Optional[str] = None,
+    membw_analysis: bool = False,
 ) -> None:
     """Build a dataframe template for each table in each panel. Analyze-mode
     filter_metrics overrides profile-mode filter_blocks; tables that fail the
@@ -86,11 +87,18 @@ def build_dfs(
             profiling_config.get("filter_blocks", []), arch
         )
 
+    # --membw-analysis asks for block 30, so keep it even when -b narrows.
+    if membw_analysis and user_metric_filter:
+        user_metric_filter = [*user_metric_filter, "30"]
+
     arch_configs.panel_configs = expand_placeholder_ranges(
         arch_configs.panel_configs, sys_info
     )
 
     for panel_id, panel in arch_configs.panel_configs.items():
+        if panel_id == 3000 and not membw_analysis:
+            continue
+
         for data_source in panel["data source"]:
             for table_type, data_config in data_source.items():
                 table_id = data_config["id"]
@@ -391,6 +399,7 @@ def apply_dispatch_filter(df: pd.DataFrame, workload: schema.Workload) -> pd.Dat
 def _build_pc_sampling_partial_frame(
     method: str,
     tool_data: dict[str, Any],
+    sys_info: dict[str, Any],
     kernel_name: Optional[str] = None,
 ) -> pd.DataFrame:
     """Build one process's enriched sampling frame for an optional kernel."""
@@ -415,6 +424,7 @@ def _build_pc_sampling_partial_frame(
     aggregated_df = aggregate_pc_sample_records(
         records_df,
         group_by=["code_object_id", "code_object_offset", "kernel_id"],
+        sys_info=sys_info,
     )
     df = enrich_with_metadata(
         aggregated_df,
@@ -480,8 +490,16 @@ def _format_pc_sampling_display_frame(
         "code_object_id",
         "offset",
         "count",
+        "active_thread_percent",
     ]
-    stochastic_only_columns = ["count_issued", "count_stalled", "stall_reason"]
+    # wave_occupancy_percent is stochastic-only: a host_trap record has no
+    # wave count to derive it from.
+    stochastic_only_columns = [
+        "count_issued",
+        "count_stalled",
+        "wave_occupancy_percent",
+        "stall_reason",
+    ]
     columns_to_return = shared_columns + (
         stochastic_only_columns if method == "stochastic" else []
     )
@@ -554,10 +572,13 @@ def load_pc_sampling_data(
 
         kernel_name = kernel_top_df.iloc[kernel_index]["Kernel_Name"]
 
+    sys_info = (
+        workload.sys_info.iloc[0].to_dict() if not workload.sys_info.empty else {}
+    )
     process_frames = []
     for tool_data in tool_data_records:
         frame = _build_pc_sampling_partial_frame(
-            pc_sampling_method, tool_data, kernel_name
+            pc_sampling_method, tool_data, sys_info, kernel_name
         )
         if not frame.empty:
             process_frames.append(frame)
