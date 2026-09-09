@@ -22,9 +22,17 @@
 
 #if defined(__HIPCC__) || defined(__HIP_PLATFORM_AMD__)
 #define NCCL_HIP_PLATFORM 1
-#define NCCL_DEVICE_COMPILE 1
 #elif defined(__CUDACC__)
 #define NCCL_CUDA_PLATFORM 1
+#endif
+// Key device-compile on the device translation unit (compiled by hipcc/nvcc),
+// not the HIP *platform* macro. A pure host-only build defines __HIP_PLATFORM_AMD__
+// to get AMD types but is NOT compiled by hipcc, so it must not pull in device
+// template bodies. __HIPCC__ / __CUDACC__ are set for BOTH the host and device
+// passes of a real device compile, so real builds -- including the device-TU host
+// pass that declares device-only types (ncclGin, ncclCoopCta, barrier sessions) --
+// are unaffected.
+#if defined(__HIPCC__) || defined(__CUDACC__)
 #define NCCL_DEVICE_COMPILE 1
 #else
 #define NCCL_DEVICE_COMPILE 0
@@ -216,6 +224,50 @@ struct atomic_ref {
     } else {
       return __atomic_fetch_add(ptr, val, order);
     }
+  }
+
+  NCCL_DEVICE_INLINE bool compare_exchange_weak(T& expected, T desired, memory_order success,
+                                                memory_order failure) const {
+    if constexpr (sizeof(T) == 4) {
+      return __hip_atomic_compare_exchange_weak(reinterpret_cast<unsigned int*>(ptr),
+                                                reinterpret_cast<unsigned int*>(&expected),
+                                                *reinterpret_cast<unsigned int*>(&desired), success, failure,
+                                                toHipMemoryScope(Scope));
+    } else if constexpr (sizeof(T) == 8) {
+      return __hip_atomic_compare_exchange_weak(reinterpret_cast<unsigned long long*>(ptr),
+                                                reinterpret_cast<unsigned long long*>(&expected),
+                                                *reinterpret_cast<unsigned long long*>(&desired), success, failure,
+                                                toHipMemoryScope(Scope));
+    } else {
+      return __atomic_compare_exchange_n(ptr, &expected, desired, /*weak=*/true, success, failure);
+    }
+  }
+
+  NCCL_DEVICE_INLINE bool compare_exchange_weak(T& expected, T desired,
+                                                memory_order order = memory_order_seq_cst) const {
+    return compare_exchange_weak(expected, desired, order, order);
+  }
+
+  NCCL_DEVICE_INLINE bool compare_exchange_strong(T& expected, T desired, memory_order success,
+                                                  memory_order failure) const {
+    if constexpr (sizeof(T) == 4) {
+      return __hip_atomic_compare_exchange_strong(reinterpret_cast<unsigned int*>(ptr),
+                                                  reinterpret_cast<unsigned int*>(&expected),
+                                                  *reinterpret_cast<unsigned int*>(&desired), success, failure,
+                                                  toHipMemoryScope(Scope));
+    } else if constexpr (sizeof(T) == 8) {
+      return __hip_atomic_compare_exchange_strong(reinterpret_cast<unsigned long long*>(ptr),
+                                                  reinterpret_cast<unsigned long long*>(&expected),
+                                                  *reinterpret_cast<unsigned long long*>(&desired), success, failure,
+                                                  toHipMemoryScope(Scope));
+    } else {
+      return __atomic_compare_exchange_n(ptr, &expected, desired, /*weak=*/false, success, failure);
+    }
+  }
+
+  NCCL_DEVICE_INLINE bool compare_exchange_strong(T& expected, T desired,
+                                                  memory_order order = memory_order_seq_cst) const {
+    return compare_exchange_strong(expected, desired, order, order);
   }
 };
 

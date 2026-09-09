@@ -46,7 +46,7 @@ ddp_mlp_ok
 
 ```mermaid
 flowchart LR
-  subgraph host["mirage host (1 emulated node)"]
+  subgraph host["mirage run (1 emulated node)"]
     tr["torchrun --nproc_per_node=2"]
     subgraph r0["rank 0"]
       p0["python ddp_mlp.py"] --> g0["emulated GPU 0"]
@@ -77,12 +77,17 @@ Three things make this work:
    multi-node you can point `torchrun --rdzv-endpoint` at
    `$MASTER_ADDR:$MASTER_PORT`.
 
-3. **The daemon emulator (default).** mirage runs the emulator as a
-   separate daemon process by default, so the rank processes share GPU
-   memory through it — which is what lets RCCL set up its transports
-   across ranks. Pass `mirage run --in-process` to instead give every
-   process its own in-process emulator (no shared GPU memory; multi-GPU
-   RCCL cannot work in that mode).
+3. **One emulator shared by every rank (default).** mirage hosts a single
+   emulator daemon that every rank talks to over a socket, so the rank
+   processes share GPU memory through it — which is what lets RCCL set up
+   its transports across ranks. It is *out of the workload's* process,
+   not a service of its own: the daemon is `dlopen`ed into the `mirage
+   run` process itself, so there is nothing else to start, nothing to
+   leave behind, and the session lives and dies with that one command. The mode is the
+   default; `--daemon` asks for it explicitly (and is the spelling the
+   `rocjitsu` drop-in accepts). Pass `mirage run --in-process` to instead
+   give every process its own in-process emulator (no shared GPU memory;
+   multi-GPU RCCL cannot work in that mode).
 
 ## Step by step
 
@@ -120,10 +125,27 @@ cargo run --quiet -- run \
 
 The first `--` ends `cargo run`'s arguments; the second ends mirage's,
 so everything after it is the workload `torchrun` launches once per
-rank. mirage already runs the shared-memory daemon emulator by default
+rank. mirage already runs the shared out-of-process emulator by default
 (pass `--in-process` to opt out).
 
+The command runs in the foreground and *is* the session: mirage prints
+`mirage: session <id>` on stderr as it comes up, and everything it
+brought up is gone when the command returns.
+
 ### 3. Read the output
+
+By default the workload inherits this terminal. Its processes write to
+your stdout and stderr directly — mirage never sees the bytes — so
+redirection behaves exactly as it would without mirage (`> train.log`
+captures stdout and leaves the emulator's warnings on stderr), and rank 0
+also inherits stdin, which is what makes `mirage run -- bash` an
+interactive shell.
+
+That is the right default here: `torchrun` is what forks the ranks, so
+mirage is supervising a single process, and the fixture tags its own
+lines with `[rank N]`. As soon as *mirage* is the thing launching several
+ranks — the multi-node case below — mirage labels every rank's lines
+itself.
 
 Each rank logs the loss it started and ended with, and rank 0 confirms
 that every replica converged to identical weights before printing
@@ -184,8 +206,46 @@ mirage run --profile mi350x --num-nodes 2 --gpus-per-node 2 \
   per rank, with distinct `RANK`s.
 - `--gpus-per-node 2` exposes two GPUs so each rank can pin to a distinct
   device (`rank % device_count`).
+- Every rank's output is piped through mirage, which prefixes
+  each line with the rank that wrote it.
 - The `NCCL_*` variables force RCCL onto its loopback socket transport,
-  which is what the daemon emulator supports.
+  which is what the shared emulator supports.
+
+### Why the output is labelled here
+
+Without it, every rank writes straight to the terminal. That is what
+keeps output byte-exact and a shell interactive, but two ranks writing at
+once interleave with nothing to say which wrote what — and "which rank
+stopped printing" is the single most useful fact when a collective
+stalls. Capturing labels every line:
+
+```text
+[0] [rank 0] joined process group: world_size=2 device=cuda:0 master=127.0.0.1:29500
+[1] [rank 1] joined process group: world_size=2 device=cuda:1 master=127.0.0.1:29500
+[0] [rank 0] loss: 30.5666 -> 0.2634 over 50 steps
+[1] [rank 1] loss: 28.9142 -> 0.2571 over 50 steps
+[0] [rank 0] all ranks converged with identical replicas
+[0] ddp_mlp_ok
+```
+
+The outer `[0]`/`[1]` is mirage's label — the global rank of the process
+it read the line from. The inner `[rank 0]` is the fixture printing its
+own `RANK`; they agree here because each node runs one process.
+
+Two properties are worth knowing before you reach for it:
+
+- **stdout and stderr stay separate.** Lines are labelled on the way
+  through and written back to the stream they came from, so `2>` still
+  splits them.
+- **No rank gets stdin.** Capturing costs you the terminal, so
+  a multi-rank job is not something you can be interactive with — use
+  `mirage exec --node N -- bash` for a terminal on one of its nodes.
+
+Increase `--nproc-per-node` and the labels keep counting globally:
+`--num-nodes 2 --nproc-per-node 2` gives `WORLD_SIZE == 4` and ranks
+`[0]` through `[3]`, with ranks 0–1 on node 0 and 2–3 on node 1. Give
+each node at least `--nproc-per-node` GPUs so every process can pin its
+own device.
 
 ### Quick connectivity check
 
@@ -203,11 +263,37 @@ mirage run --profile mi350x --num-nodes 2 --gpus-per-node 2 \
 A successful run shows each rank on its own device and the reduced sum:
 
 ```text
-[rank 0] current device = 0 (cuda:0)
-[rank 1] current device = 1 (cuda:1)
-[rank 0] post all_reduce: tensor = 3.0
-dist_smoke_ok
+[0] [rank 0] current device = 0 (cuda:0)
+[1] [rank 1] current device = 1 (cuda:1)
+[0] [rank 0] post all_reduce: tensor = 3.0
+[0] dist_smoke_ok
 ```
+
+If it stalls instead, the mirage label tells you which rank went quiet,
+and the fixture's own timestamps tell you where.
+
+### Poking at a live run from another terminal
+
+A session exists exactly as long as the `mirage run` that created it. For
+as long as one is up, another terminal can start a process inside it:
+
+```sh
+# terminal 1: owns the session for the length of the training run
+mirage run --profile mi350x --num-nodes 2 --gpus-per-node 2 \
+  -- .venv-mi350/bin/python3 tests/fixtures/ml/ddp_mlp.py
+
+# terminal 2: joins it while it runs
+mirage exec -- .venv-mi350/bin/python3 -c \
+  'import torch; print(torch.cuda.device_count())'
+```
+
+`mirage exec` needs no session id while exactly one run is live; name one
+with `-s <id>` (the id `mirage run` printed) when several are. It takes
+the same `--node`, `--env`, `--nproc-per-node` and `--workdir`
+flags as `run`, and the process it starts is a child of *terminal 2*, on
+terminal 2's streams — so `mirage exec -- bash` really is an interactive
+shell inside the emulated node. When the training in terminal 1 exits,
+the session goes with it and further execs fail.
 
 ## Troubleshooting
 
@@ -217,17 +303,29 @@ dist_smoke_ok
 - **A rank SIGSEGV/SIGABRTs immediately with `--nproc_per_node > 1`.**
   You are likely in `--in-process` mode, where each rank has its own
   emulator and cannot share GPU memory. Drop `--in-process` so the
-  default daemon emulator is used.
+  default shared, out-of-process emulator is used.
+- **Several ranks' lines are interleaved and you cannot tell them
+  apart.** When mirage is the thing launching the ranks it already
+  labels every line with the rank that wrote it. A job `torchrun` forks
+  is a single process as far as mirage can see, so any labels there are
+  the fixture's own — launch the ranks with `--num-nodes` /
+  `--nproc-per-node` instead if you want mirage's. There is no flag
+  either way: the shape of the job decides it, and the price of the
+  labels is that no rank gets stdin.
 - **`Duplicate GPU detected` / `ncclInvalidUsage` at the first
   collective.** Two ranks pinned to the same emulated GPU. Give the
-  session at least as many GPUs as ranks (`--gpus-per-node N`) so each
+  run at least as many GPUs as ranks (`--gpus-per-node N`) so each
   rank can own a distinct device (the fixtures use
   `rank % torch.cuda.device_count()`).
 - **Multi-GPU run hangs / times out after a few steps.** Known
   limitation: RCCL initializes and a single collective completes (the
   `dist_smoke.py` smoke test passes), but DDP's repeated, bucketed
-  collectives stall on a later one over the daemon emulator. Single-rank
-  runs train end to end.
+  collectives stall on a later one over the shared emulator. Single-rank
+  runs train end to end. The `[rank]` labels show which rank
+  stopped first.
+- **`no mirage run is running` from `mirage exec`.** Nothing owns a
+  session: there is no background service to fall back on, so a run has
+  to be live in another terminal before you can exec into it.
 - **`KMD preload library not found`.** You are running an installed
   `mirage` from `PATH` instead of the workspace build. Run via
   `cargo run --` from `emulation/mirage` (see

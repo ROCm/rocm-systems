@@ -49,6 +49,8 @@
 #include "core/inc/signal.h"
 #include "core/inc/default_signal.h"
 #include "core/util/locks.h"
+#include "core/util/os.h"
+#include "core/util/utils.h"
 
 namespace rocr {
 namespace core {
@@ -69,7 +71,7 @@ class SharedMemory {
 /// @brief Container for ipc signal abi block.
 class SharedMemorySignal {
  public:
-  explicit SharedMemorySignal(const hsa_amd_ipc_memory_t* handle) : signal_(handle, 4096) {
+  explicit SharedMemorySignal(const hsa_amd_ipc_memory_t* handle) : signal_(handle, AlignUp(sizeof(SharedSignal), os::PageSize())) {
     if (!signal()->IsValid())
       throw AMD::hsa_exception(HSA_STATUS_ERROR_INVALID_ARGUMENT, "IPC Signal handle is invalid.");
   }

@@ -1,5 +1,8 @@
 //! Integration tests for the shared in-process RocJitsu daemon API.
 //!
+//! The safe RAII wrapper lives in `rocjitsu_sys`, the one crate allowed
+//! to write `unsafe`, so these tests drive it without any of their own.
+//!
 //! Stands up the `librocjitsu` daemon through the Rust lifecycle wrapper,
 //! connects a client speaking the daemon RPC protocol, performs the
 //! handshake the KMD interposer would, and verifies the daemon serves a
@@ -7,14 +10,16 @@
 //! library is discoverable on this machine (install rocjitsu under
 //! `$ROCM_HOME` or a sibling monorepo build to exercise it).
 
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+
 use std::io::{Read, Write};
 use std::os::unix::net::UnixStream;
 
 use mirage_core::common::MaybeRef;
-use mirage_core::emulator::{EmulatorDaemon, EmulatorDef, ExecMode};
-use mirage_rocjitsu::daemon::Daemon;
+use mirage_core::emulator::{EmulatorDef, ExecMode};
 use mirage_rocjitsu::{kmd_config, kmd_preload};
 use rocjitsu_sys::RjDaemonStatus;
+use rocjitsu_sys::daemon::Daemon;
 
 /// Build the 16-byte RPC header the wire protocol uses.
 fn header(opcode: u16, request_id: u32, payload_bytes: u32, result: i32) -> [u8; 16] {
@@ -28,6 +33,29 @@ fn header(opcode: u16, request_id: u32, payload_bytes: u32, result: i32) -> [u8;
 
 fn read_exact(stream: &mut UnixStream, buf: &mut [u8]) {
     stream.read_exact(buf).expect("read response");
+}
+
+/// Start a daemon, or `None` when this machine's `librocjitsu.so` cannot
+/// provide one.
+///
+/// A library that is *present but does not export the daemon API* — a
+/// stale sibling build, or one configured without the daemon — is
+/// indistinguishable, for these tests, from one that is not installed at
+/// all, and must skip for the same reason. Only a load failure counts as
+/// "not available"; anything else is a real failure and still panics.
+fn start_or_skip(
+    lib: &std::path::Path,
+    config: &std::path::Path,
+    runtime_dir: &std::path::Path,
+) -> Option<Daemon> {
+    match Daemon::start(lib, config, runtime_dir) {
+        Ok(daemon) => Some(daemon),
+        Err(e @ rocjitsu_sys::daemon::DaemonError::Load { .. }) => {
+            eprintln!("rocjitsu KMD library cannot host a daemon ({e}); skipping");
+            None
+        }
+        Err(e) => panic!("daemon should start: {e}"),
+    }
 }
 
 #[test]
@@ -61,10 +89,12 @@ fn daemon_serves_handshake() {
             agent: MaybeRef::Ref(agent_name),
         }),
     };
-    let config = kmd_config(&def, None).expect("sim config should materialise");
+    let config = kmd_config(&def, tmp.path()).expect("sim config should materialise");
 
     let runtime_dir = tmp.path().join("rt");
-    let daemon = Daemon::start(&lib, &config, &runtime_dir).expect("daemon should start");
+    let Some(daemon) = start_or_skip(&lib, &config, &runtime_dir) else {
+        return;
+    };
     assert_eq!(daemon.status(), RjDaemonStatus::Running);
     assert!(
         daemon.socket_path().exists(),
@@ -111,10 +141,53 @@ fn daemon_serves_handshake() {
 
     // Shutting the daemon down removes its socket.
     let socket_path = daemon.socket_path().to_path_buf();
-    Box::new(daemon).stop();
+    daemon.stop();
     assert!(
         !socket_path.exists(),
         "daemon socket should be removed on shutdown"
+    );
+}
+
+/// Dropping the handle must tear the daemon down just as `stop` does, so
+/// an unwind past the owner cannot leak the simulated device or leave a
+/// stale socket behind.
+#[test]
+fn dropping_the_handle_stops_the_daemon() {
+    let _g = mirage_core::paths::test_env_lock();
+    let tmp = tempfile::tempdir().unwrap();
+    mirage_core::paths::set_test_root(tmp.path());
+
+    let Some(lib) = kmd_preload() else {
+        eprintln!("rocjitsu KMD library not found; skipping daemon test");
+        return;
+    };
+    let agent_report = mirage_builtin::ensure_agents(false).unwrap();
+    let agent_name = agent_report.iter().map(|(n, _)| n.clone()).next().unwrap();
+    let def = EmulatorDef {
+        emulator: "rocjitsu".to_string(),
+        plugins: Default::default(),
+        exec_mode: ExecMode::Functional,
+        options: Default::default(),
+        topology: MaybeRef::Owned(mirage_core::topology::TopologyDef {
+            num_nodes: 1,
+            gpus_per_node: 1,
+            agent: MaybeRef::Ref(agent_name),
+        }),
+    };
+    let config = kmd_config(&def, tmp.path()).unwrap();
+    let runtime_dir = tmp.path().join("rt");
+
+    let socket_path = {
+        let Some(daemon) = start_or_skip(&lib, &config, &runtime_dir) else {
+            return;
+        };
+        let path = daemon.socket_path().to_path_buf();
+        assert!(path.exists());
+        path
+    };
+    assert!(
+        !socket_path.exists(),
+        "dropping the daemon handle must remove its socket"
     );
 }
 
@@ -145,9 +218,11 @@ fn daemon_serves_multiple_clients() {
             agent: MaybeRef::Ref(agent_name),
         }),
     };
-    let config = kmd_config(&def, None).unwrap();
+    let config = kmd_config(&def, tmp.path()).unwrap();
     let runtime_dir = tmp.path().join("rt");
-    let daemon = Daemon::start(&lib, &config, &runtime_dir).expect("daemon should start");
+    let Some(daemon) = start_or_skip(&lib, &config, &runtime_dir) else {
+        return;
+    };
     assert_eq!(daemon.status(), RjDaemonStatus::Running);
 
     for req_id in 0..3u32 {

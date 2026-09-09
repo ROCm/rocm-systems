@@ -3,7 +3,11 @@ test_categories:
     description: "Fast sanity checks - Run pre-commit (target: < 5 min)"
     test_patterns:
       - test_profile_misc
-      - test_metric_utils
+      - test_aggregation
+      - test_expression
+      - test_evaluation_pipeline
+      - test_metric_evaluator
+      - test_utils_counter_defs
       - test_parser
       - test_argparser
       - test_profile_section
@@ -11,29 +15,49 @@ test_categories:
       - test_analyze_workloads
       - test_profile_iteration_multiplexing_1
       - test_profile_sets_func
-      - test_utils
+      - test_utils_common
+      - test_utils_analysis
+      - test_utils_profile
+      - test_common
+      - test_amdsmi_interface
+      - test_noise_clamper
+      - test_benchmark_base
+      - test_analysis_cli
+      - test_pattern_matching
+      - test_list_metrics_cli
       - test_pc_sampling_analysis
-      - test_tui_components
+      - test_pc_sampling_analyze_cli
+      - test_instant_button
+      - test_menu_bar
+      - test_tui_utils
+      - test_collapsibles
       - test_analysis_db
+      - test_analysis_base
       - test_analysis_orm
       - test_code_object_analysis
-      - test_torch_trace_analysis
+      - test_source_snapshot_analysis
+      - test_per_kernel_isa_export
+      - test_rocpd_data
       - test_torch_trace_coverage
       - test_L1_cache_counters
-      - test_data_imputation
       - test_roofline_calc
       - test_roofline_analyze
       - test_roofline_main
       - test_num_xcds_spec_class
       - test_profiler_base
       - test_pc_sampling_profile
+      - test_rocprofv3_avail_interface
       - test_num_xcds_cli_output
+      - test_specs
       - test_mi_gpu_spec
+      - test_file_io
       - test_utils_profile_csv
+      - test_csv_compression
       - test_inject_roctx_package
       - test_torch_cpp_loader
-      - test_import_guard
-      - test_mem_chart
+      - test_conftest
+      - test_mem_chart_gfx9
+      - test_mem_chart_gfx11
       - test_native_tool_finder
       - test_metrics_common
       - test_tty
@@ -53,10 +77,8 @@ test_categories:
   standard:
     description: "Core functionality - Run on every PR (target: < 30 min)"
     test_patterns:
-      - test_data_imputation
       - test_profile_dispatch
       - test_profile_kernel_execution
-      - test_profile_join
       - test_profile_misc
       - test_profile_path
       - test_pc_sampling
@@ -70,34 +92,59 @@ test_categories:
       - test_profile_iteration_multiplexing_1
       - test_profile_iteration_multiplexing_2
       - test_profile_iteration_multiplexing_stochastic
-      - test_metric_utils
+      - test_aggregation
+      - test_expression
+      - test_evaluation_pipeline
+      - test_metric_evaluator
+      - test_utils_counter_defs
       - test_parser
       - test_argparser
       - test_analyze_commands
       - test_analyze_workloads
       - test_num_xcds_cli_output
+      - test_specs
       - test_num_xcds_spec_class
       - test_mi_gpu_spec
-      - test_utils
+      - test_utils_common
+      - test_utils_analysis
+      - test_utils_profile
+      - test_common
+      - test_amdsmi_interface
+      - test_noise_clamper
+      - test_benchmark_base
+      - test_analysis_cli
+      - test_pattern_matching
+      - test_list_metrics_cli
       - test_L1_cache_counters
       - test_roofline_calc
       - test_roofline_analyze
       - test_roofline_main
-      - test_torch_trace_analysis
+      - test_rocpd_data
       - test_torch_trace_coverage
-      - test_tui_components
-      - test_import_guard
+      - test_instant_button
+      - test_menu_bar
+      - test_tui_utils
+      - test_collapsibles
+      - test_conftest
       - test_profile_multi_rank
       - test_analysis_db
+      - test_analysis_base
       - test_analysis_orm
       - test_code_object_analysis
+      - test_source_snapshot_analysis
+      - test_per_kernel_isa_export
       - test_pc_sampling_analysis
+      - test_pc_sampling_analyze_cli
+      - test_file_io
       - test_utils_profile_csv
+      - test_csv_compression
       - test_inject_roctx_package
       - test_torch_cpp_loader
       - test_profiler_base
       - test_pc_sampling_profile
-      - test_mem_chart
+      - test_rocprofv3_avail_interface
+      - test_mem_chart_gfx9
+      - test_mem_chart_gfx11
       - test_native_tool_finder
       - test_metrics_common
       - test_tty
@@ -120,10 +167,8 @@ test_categories:
   comprehensive:
     description: "Extended testing - Run nightly (target: < 2 hours)"
     test_patterns:
-      - test_data_imputation
       - test_profile_dispatch
       - test_profile_kernel_execution
-      - test_profile_join
       - test_profile_misc
       - test_profile_path
       - test_pc_sampling
@@ -138,34 +183,59 @@ test_categories:
       - test_profile_iteration_multiplexing_1
       - test_profile_iteration_multiplexing_2
       - test_profile_iteration_multiplexing_stochastic
-      - test_metric_utils
+      - test_aggregation
+      - test_expression
+      - test_evaluation_pipeline
+      - test_metric_evaluator
+      - test_utils_counter_defs
       - test_parser
       - test_argparser
       - test_analyze_commands
       - test_analyze_workloads
       - test_num_xcds_cli_output
+      - test_specs
       - test_num_xcds_spec_class
       - test_mi_gpu_spec
-      - test_utils
+      - test_utils_common
+      - test_utils_analysis
+      - test_utils_profile
+      - test_common
+      - test_amdsmi_interface
+      - test_noise_clamper
+      - test_benchmark_base
+      - test_analysis_cli
+      - test_pattern_matching
+      - test_list_metrics_cli
       - test_L1_cache_counters
       - test_roofline_calc
       - test_roofline_analyze
       - test_roofline_main
-      - test_torch_trace_analysis
+      - test_rocpd_data
       - test_torch_trace_coverage
-      - test_tui_components
-      - test_import_guard
+      - test_instant_button
+      - test_menu_bar
+      - test_tui_utils
+      - test_collapsibles
+      - test_conftest
       - test_profile_multi_rank
       - test_analysis_db
+      - test_analysis_base
       - test_analysis_orm
       - test_code_object_analysis
+      - test_source_snapshot_analysis
+      - test_per_kernel_isa_export
       - test_pc_sampling_analysis
+      - test_pc_sampling_analyze_cli
+      - test_file_io
       - test_utils_profile_csv
+      - test_csv_compression
       - test_inject_roctx_package
       - test_torch_cpp_loader
       - test_profiler_base
       - test_pc_sampling_profile
-      - test_mem_chart
+      - test_rocprofv3_avail_interface
+      - test_mem_chart_gfx9
+      - test_mem_chart_gfx11
       - test_native_tool_finder
       - test_metrics_common
       - test_tty
@@ -188,10 +258,8 @@ test_categories:
   full:
     description: "Full testing - Run weekly (target: < 4 hours)"
     test_patterns:
-      - test_data_imputation
       - test_profile_dispatch
       - test_profile_kernel_execution
-      - test_profile_join
       - test_profile_misc
       - test_profile_path
       - test_pc_sampling
@@ -206,34 +274,59 @@ test_categories:
       - test_profile_iteration_multiplexing_1
       - test_profile_iteration_multiplexing_2
       - test_profile_iteration_multiplexing_stochastic
-      - test_metric_utils
+      - test_aggregation
+      - test_expression
+      - test_evaluation_pipeline
+      - test_metric_evaluator
+      - test_utils_counter_defs
       - test_parser
       - test_argparser
       - test_analyze_commands
       - test_analyze_workloads
       - test_num_xcds_cli_output
+      - test_specs
       - test_num_xcds_spec_class
       - test_mi_gpu_spec
-      - test_utils
+      - test_utils_common
+      - test_utils_analysis
+      - test_utils_profile
+      - test_common
+      - test_amdsmi_interface
+      - test_noise_clamper
+      - test_benchmark_base
+      - test_analysis_cli
+      - test_pattern_matching
+      - test_list_metrics_cli
       - test_L1_cache_counters
       - test_roofline_calc
       - test_roofline_analyze
       - test_roofline_main
-      - test_torch_trace_analysis
+      - test_rocpd_data
       - test_torch_trace_coverage
-      - test_tui_components
-      - test_import_guard
+      - test_instant_button
+      - test_menu_bar
+      - test_tui_utils
+      - test_collapsibles
+      - test_conftest
       - test_profile_multi_rank
       - test_analysis_db
+      - test_analysis_base
       - test_analysis_orm
       - test_code_object_analysis
+      - test_source_snapshot_analysis
+      - test_per_kernel_isa_export
       - test_pc_sampling_analysis
+      - test_pc_sampling_analyze_cli
+      - test_file_io
       - test_utils_profile_csv
+      - test_csv_compression
       - test_inject_roctx_package
       - test_torch_cpp_loader
       - test_profiler_base
       - test_pc_sampling_profile
-      - test_mem_chart
+      - test_rocprofv3_avail_interface
+      - test_mem_chart_gfx9
+      - test_mem_chart_gfx11
       - test_native_tool_finder
       - test_metrics_common
       - test_tty

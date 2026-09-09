@@ -111,7 +111,7 @@ jobs:
         shell: bash
         run: |
           apt-get update
-          apt-get install -y libdw-dev pkg-config
+          apt-get install -y pkg-config
           echo "✅ Dependencies Installed!"
 
       - name: Install latest nightly ROCm

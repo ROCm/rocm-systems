@@ -54,6 +54,34 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  notify-ci-start:
+    name: "CI status: mark run in progress"
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+      pull-requests: write
+    steps:
+      - name: Checkout summary comment action
+        uses: actions/checkout@v6
+        with:
+          sparse-checkout: |
+            .github/actions/upsert-ci-summary-comment
+          sparse-checkout-cone-mode: false
+
+      - name: Write "in progress" placeholder
+        shell: bash
+        run: |
+          RUN_URL="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          echo "⏳ **CI run in progress** — [view run](${RUN_URL}). The results below are from a previous run until this one finishes." > ci-run-in-progress.md
+          : > ci-run-in-progress-empty.md
+
+      - name: Post placeholder on the sticky CI summary comment
+        uses: ./.github/actions/upsert-ci-summary-comment
+        with:
+          build-content-file: ci-run-in-progress.md
+          sanitizer-content-file: ci-run-in-progress-empty.md
+
   matrix-setup:
     name: Matrix setup
     runs-on: ubuntu-latest
@@ -322,11 +350,12 @@ jobs:
       issues: write
       pull-requests: write
     steps:
-      - name: Checkout summary script
+      - name: Checkout summary tooling
         uses: actions/checkout@v6
         with:
           sparse-checkout: |
             projects/rocprofiler-systems/scripts/summarize-junit-results.py
+            .github/actions/upsert-ci-summary-comment
           sparse-checkout-cone-mode: false
 
       - name: Download build JUnit artifacts
@@ -376,53 +405,7 @@ jobs:
 
       - name: Update PR CI result summary
         if: github.event_name == 'pull_request'
-        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9
+        uses: ./.github/actions/upsert-ci-summary-comment
         with:
-          script: |
-            const fs = require('fs');
-            const marker = '<!-- rocprofiler-systems-ci-summary -->';
-            const start = '<!-- rocprofiler-systems-build-summary:start -->';
-            const end = '<!-- rocprofiler-systems-build-summary:end -->';
-            const sanitizerStart = '<!-- rocprofiler-systems-sanitizer-summary:start -->';
-            const sanitizerEnd = '<!-- rocprofiler-systems-sanitizer-summary:end -->';
-            const buildSection = `${start}\n${fs.readFileSync('junit-summary.md', 'utf8').trim()}\n${end}`;
-            const sanitizerSection = `${sanitizerStart}\n${fs.readFileSync('sanitizer-summary.md', 'utf8').trim()}\n${sanitizerEnd}`;
-
-            function replaceSection(body, sectionStart, sectionEnd, replacement) {
-              const begin = body.indexOf(sectionStart);
-              const finish = body.indexOf(sectionEnd);
-              if (begin !== -1 && finish !== -1 && finish > begin) {
-                return `${body.slice(0, begin)}${replacement}${body.slice(finish + sectionEnd.length)}`;
-              }
-              return `${body.trim()}\n\n${replacement}`;
-            }
-
-            const { owner, repo } = context.repo;
-            const issue_number = context.issue.number;
-            const comments = await github.paginate(github.rest.issues.listComments, {
-              owner,
-              repo,
-              issue_number,
-              per_page: 100,
-            });
-            const comment = comments.find((item) =>
-              item.user.type === 'Bot' && item.body && item.body.includes(marker)
-            );
-
-            if (comment) {
-              let body = replaceSection(comment.body, start, end, buildSection);
-              body = replaceSection(body, sanitizerStart, sanitizerEnd, sanitizerSection);
-              await github.rest.issues.updateComment({
-                owner,
-                repo,
-                comment_id: comment.id,
-                body,
-              });
-            } else {
-              await github.rest.issues.createComment({
-                owner,
-                repo,
-                issue_number,
-                body: `${marker}\n# rocprofiler-systems CI Summary\n\n${buildSection}\n\n${sanitizerSection}`,
-              });
-            }
+          build-content-file: junit-summary.md
+          sanitizer-content-file: sanitizer-summary.md

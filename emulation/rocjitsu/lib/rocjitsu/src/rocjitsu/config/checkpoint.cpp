@@ -3,12 +3,15 @@
 
 #include "rocjitsu/config/checkpoint.h"
 #include "rocjitsu/config/config_loader.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/shared/isa_properties.h"
 #include "rocjitsu/vm/virtual_machine.h"
 
 #include "checkpoint_generated.h"
 #include "flatbuffers/flatbuffers.h"
 
-#include <cstring>
+#include <algorithm>
+#include <array>
+#include <cstddef>
 #include <fstream>
 #include <stdexcept>
 #include <vector>
@@ -17,6 +20,69 @@ namespace rocjitsu {
 namespace config {
 
 namespace {
+
+/// @brief First scalar selector that named a TTMP before TTMPs became their own
+/// register file.
+/// @details The decoder used to alias selectors 108..123 into the wavefront SGPR
+/// block on every architecture, so in a checkpoint written then those slots hold
+/// exactly the TTMP file. Selectors that high are unreachable as ordinary SGPR
+/// operands, so reading them back as TTMPs needs no per-architecture test.
+constexpr uint32_t kLegacyTtmpSgprBase = 108;
+
+flatbuffers::Offset<flatbuffers::Vector<uint8_t>>
+serialize_vgpr_block(flatbuffers::FlatBufferBuilder &builder, const amdgpu::ComputeUnitCore &cu,
+                     uint32_t base, uint32_t lane_count) {
+  if ((lane_count != 32 && lane_count != 64) || lane_count > cu.vgpr_storage_lane_count())
+    throw std::runtime_error("Invalid VGPR checkpoint lane count");
+  const size_t register_bytes = static_cast<size_t>(lane_count) * sizeof(uint32_t);
+  const size_t block_bytes = static_cast<size_t>(cu.vgpr_allocation_block_size()) * register_bytes;
+  uint8_t *serialized = nullptr;
+  const auto offset = builder.CreateUninitializedVector<uint8_t>(block_bytes, &serialized);
+  size_t offset_bytes = 0;
+  cu.for_each_raw_vgpr(base, cu.vgpr_allocation_block_size(), [&](std::span<const uint32_t> lanes) {
+    if (lanes.size() < lane_count)
+      throw std::runtime_error("VGPR storage is narrower than the checkpoint wave");
+    std::copy_n(reinterpret_cast<const uint8_t *>(lanes.data()), register_bytes,
+                serialized + offset_bytes);
+    offset_bytes += register_bytes;
+  });
+  return offset;
+}
+
+/// Restore sparse checkpoint data into a freshly allocated, zeroed VGPR block.
+/// Zero source registers are skipped to preserve lazy backing; this is a full
+/// restore, rather than a merge, only while the destination begins entirely
+/// zeroed.
+void restore_vgpr_block_into_zeroed_storage(amdgpu::ComputeUnitCore &cu, uint32_t base,
+                                            const flatbuffers::Vector<uint8_t> &stored,
+                                            uint32_t stored_lane_count,
+                                            uint32_t architectural_wave_size) {
+  const auto bytes = std::span(reinterpret_cast<const std::byte *>(stored.data()), stored.size());
+  const uint32_t register_count = cu.vgpr_allocation_block_size();
+
+  uint32_t lane_count = stored_lane_count;
+  if (lane_count == 0) {
+    const uint32_t candidates[] = {architectural_wave_size, cu.vgpr_storage_lane_count(),
+                                   cu.wf_size()};
+    for (uint32_t candidate : candidates) {
+      const size_t candidate_bytes =
+          static_cast<size_t>(register_count) * candidate * sizeof(uint32_t);
+      if ((candidate == 32 || candidate == 64) && stored.size() == candidate_bytes) {
+        lane_count = candidate;
+        break;
+      }
+    }
+  }
+  if ((lane_count != 32 && lane_count != 64) || lane_count > cu.vgpr_storage_lane_count())
+    throw std::runtime_error("Invalid VGPR checkpoint lane count");
+  const size_t register_bytes = static_cast<size_t>(lane_count) * sizeof(uint32_t);
+  if (stored.size() != static_cast<size_t>(register_count) * register_bytes)
+    throw std::runtime_error("Invalid VGPR checkpoint payload size");
+  for (uint32_t reg = 0; reg < register_count; ++reg) {
+    cu.restore_raw_vgprs_into_zeroed_storage(
+        base + reg, 1, bytes.subspan(static_cast<size_t>(reg) * register_bytes, register_bytes));
+  }
+}
 
 /// @brief Serialize the SoC configuration into a FlatBuffer SimulationConfig.
 flatbuffers::Offset<fb::SimulationConfig>
@@ -119,17 +185,50 @@ void save_checkpoint(const std::string &path, const SoC &soc, uint64_t tick,
           if (w->is_halted())
             continue;
 
+          // The record holds the architectural registers and the TTMPs, but
+          // none of the trap/debug state around them: in_trap_handler, the
+          // saved EXEC and STATUS the handler will restore, TRAPSTS, and the
+          // halted/suspended reasons. Restoring a wave captured mid-handler
+          // from such a record would skip the EXEC restore and the privileged
+          // STATUS write on the way out and resume the application with the
+          // handler's state installed -- silently wrong, and hard to trace
+          // back here. Refuse instead of writing a checkpoint that cannot be
+          // restored faithfully.
+          //
+          // debug_stopped(), not debug_paused(): a wave whose only pause reason
+          // is the runtime's (queue_percentage 0) carries no trap or debugger
+          // state, and the CP re-derives queue suspension on restore. Refusing
+          // it would make an ordinary throttled queue unable to checkpoint, and
+          // blame a debugger that is not attached.
+          if (w->in_trap_handler() || w->debug_stopped())
+            throw std::runtime_error(
+                "Cannot checkpoint " + cu->name() + " wf" + std::to_string(w->wf_id()) +
+                ": the wave is in a trap handler or stopped for a debugger, and that state "
+                "is not part of the checkpoint format");
+
           auto sgprs_vec =
               builder.CreateVector(cu->sgpr_data(w->sgpr_alloc().base), w->num_sgprs());
-          size_t vgpr_bytes = static_cast<size_t>(cu->vgpr_allocation_block_size()) *
-                              static_cast<size_t>(w->wf_size()) * sizeof(uint32_t);
-          auto vgprs_vec =
-              builder.CreateVector(cu->raw_vgpr_data(w->vgpr_alloc().base), vgpr_bytes);
+          auto vgprs_vec = serialize_vgpr_block(builder, *cu, w->vgpr_alloc().base, w->wf_size());
+
+          // TTMPs are their own file, so they are not covered by sgprs_vec.
+          std::array<uint32_t, 16> ttmps{};
+          for (uint32_t t = 0; t < ttmps.size(); ++t)
+            ttmps[t] = w->ttmp(t);
+          auto ttmps_vec = builder.CreateVector(ttmps.data(), ttmps.size());
+
+          // Dispatch identity. The flat wg_id above cannot stand in for it --
+          // unflattening needs the grid dimensions, which belong to the
+          // dispatch packet and are not checkpointed -- and trap entry publishes
+          // exactly these three values in TTMP8/9/10 for the CWSR record to
+          // match.
+          const auto &wg_coord = w->wg_coord();
+          auto wg_coord_vec = builder.CreateVector(wg_coord.data(), wg_coord.size());
 
           auto wfs = fb::CreateWavefrontState(builder, w->wf_id(), w->wg_id(), w->pc, w->exec_raw(),
                                               w->vcc(), w->m0(), w->is_halted(), w->status_raw(),
                                               sgprs_vec, vgprs_vec, w->mode_raw(),
-                                              w->wave_sched_mode_raw());
+                                              w->wave_sched_mode_raw(), ttmps_vec, wg_coord_vec,
+                                              w->kernel_wave_size(), w->wf_size());
           wf_offsets.push_back(wfs);
         }
 
@@ -239,13 +338,15 @@ LoadedConfig restore_checkpoint(const std::string &path) {
               wf_state->sgprs() ? wf_state->sgprs()->size() : cu->config().sgprs_per_wf;
           uint32_t num_vgprs = cu->config().vgprs_per_wf;
 
+          const uint32_t wave_size =
+              wf_state->kernel_wave_size() == 0 ? cu->wf_size() : wf_state->kernel_wave_size();
           auto *wf = cu->dispatch_wf_at(wf_state->wf_id(), wf_state->wg_id(), wf_state->pc(),
-                                        num_sgprs, num_vgprs);
+                                        num_sgprs, num_vgprs, wave_size);
           if (!wf)
             throw std::runtime_error("Failed to restore wavefront into its recorded slot");
 
           wf->set_exec_raw(wf_state->exec());
-          wf->set_vcc(wf_state->vcc());
+          wf->set_vcc_raw(wf_state->vcc());
           wf->set_m0(wf_state->m0());
           // Halted wavefronts are never saved (see save_checkpoint skip above),
           // so halted() is always false here. Keep the branch for future-proofing.
@@ -253,20 +354,50 @@ LoadedConfig restore_checkpoint(const std::string &path) {
           wf->set_status_raw(wf_state->status());
           wf->set_mode_raw(wf_state->mode());
           wf->set_wave_sched_mode_raw(wf_state->wave_sched_mode());
-
-          if (auto *sgprs = wf_state->sgprs()) {
+          const auto *sgprs = wf_state->sgprs();
+          if (sgprs != nullptr) {
             for (size_t r = 0; r < sgprs->size() && r < wf->num_sgprs(); ++r) {
               cu->write_sgpr(wf->sgpr_alloc().base + static_cast<uint32_t>(r),
                              sgprs->Get(static_cast<unsigned>(r)));
             }
           }
 
-          if (auto *vgprs = wf_state->vgprs()) {
-            size_t vgpr_bytes = static_cast<size_t>(cu->vgpr_allocation_block_size()) *
-                                static_cast<size_t>(wf->wf_size()) * sizeof(uint32_t);
-            size_t copy_size = std::min<size_t>(vgprs->size(), vgpr_bytes);
-            std::memcpy(cu->raw_vgpr_data(wf->vgpr_alloc().base), vgprs->data(), copy_size);
+          if (auto *ttmps = wf_state->ttmps()) {
+            for (uint32_t t = 0; t < ttmps->size() && t < 16; ++t)
+              wf->set_ttmp(t, ttmps->Get(t));
+          } else if (sgprs != nullptr && sgprs->size() > kLegacyTtmpSgprBase) {
+            // Written before TTMPs were split out of the SGPR file. Back then
+            // the decoder aliased scalar selectors 108..123 into the SGPR block
+            // on every architecture, so those slots are exactly the TTMP file
+            // and the migration needs no per-arch test. Leaving them behind
+            // loses real launch state: RDNA4 and GFX1250 seed TTMP6/7/9 with
+            // workgroup ids at dispatch, and TTMP operands no longer read the
+            // SGPR slots the old checkpoint restores them into.
+            const uint32_t available = std::min<uint32_t>(16, sgprs->size() - kLegacyTtmpSgprBase);
+            for (uint32_t t = 0; t < available; ++t)
+              wf->set_ttmp(t, sgprs->Get(kLegacyTtmpSgprBase + t));
           }
+
+          // Dispatch identity. A record written before this field existed has
+          // to fall back to something defined, and the only other place the
+          // coordinate appears is the TTMP file: on the architectures that do
+          // not carry workgroup ids in TTMP6/7/9, trap entry writes x/y/z into
+          // TTMP8/9/10 and the CWSR codec reads them from there, so those slots
+          // are authoritative for any wave that reached a trap handler. Waves
+          // that never trapped leave them zero, which is what the coordinate
+          // restored to before this field was added; nothing else in an old
+          // record can improve on that.
+          if (auto *wg_coord = wf_state->wg_coord(); wg_coord != nullptr && wg_coord->size() >= 3) {
+            wf->set_wg_coord(wg_coord->Get(0), wg_coord->Get(1), wg_coord->Get(2));
+          } else if (!isa_properties(cu->arch()).uses_ttmp_workgroup_ids) {
+            wf->set_wg_coord(wf->ttmp(8), wf->ttmp(9), wf->ttmp(10));
+          }
+
+          // dispatch_wf_at() has just allocated this block, so RegisterFile::allocate()'s
+          // zero-state postcondition satisfies the sparse restore helper's precondition.
+          if (auto *vgprs = wf_state->vgprs())
+            restore_vgpr_block_into_zeroed_storage(*cu, wf->vgpr_alloc().base, *vgprs,
+                                                   wf_state->vgpr_lane_count(), wf->wf_size());
         }
       }
     }

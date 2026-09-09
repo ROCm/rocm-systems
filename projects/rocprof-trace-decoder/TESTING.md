@@ -9,9 +9,8 @@ SPDX-License-Identifier: MIT
 
 Tests are enabled with `-DBUILD_TESTS=ON` and run through CTest. The suite
 includes GoogleTest unit tests, Python and fixture-based integration tests,
-AddressSanitizer and UndefinedBehaviorSanitizer variants, and optional SQTT
-marker tests when `BUILD_MARKERS=ON`. The project CI builds and runs the full
-suite.
+and AddressSanitizer and UndefinedBehaviorSanitizer variants. The project CI
+builds and runs the full suite.
 
 ## Building and running tests
 
@@ -41,9 +40,8 @@ ctest --test-dir build/test -R "ubsan/" -j$(nproc)
 ## Code coverage
 
 Code coverage is generated locally with the CMake `coverage` target using
-gcov, lcov, and genhtml. Sanitizer tests are excluded from coverage runs, and
-reports include the decoder sources plus marker sources when markers are
-enabled. We aim for 90% line coverage across the project.
+gcov, lcov, and genhtml. Sanitizer tests are excluded from coverage runs. We
+aim for 90% line coverage across the project.
 
 ```bash
 # Requires gcov, lcov, and genhtml

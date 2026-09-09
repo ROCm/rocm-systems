@@ -10,6 +10,8 @@ This directory contains automated tests for RCCL (ROCm Communication Collectives
 
 3. **Inspector Plugin**: Validates the inspector plugin that produces structured JSONL output for collective operations. Tests cover schema correctness, per-rank output files, timing source validation, and verbose event trace fields across single-node and multi-node configurations.
 
+4. **Mixed Plugin**: Validates that a single shared object can export multiple plugin types. It builds `plugins/mixed/example/libnccl-mixed.so` (net + tuner), checks that both plugin symbols are exported, and runs a collective to confirm RCCL loads both the net and tuner plugins from the same object (`ext-mixed`, marker `ext_mixed`).
+
 The tests are written in Python using the pytest framework, making it easy to run, maintain, and extend the test coverage.
 
 ## Directory Structure
@@ -216,6 +218,7 @@ pytest -m sendrecv --cache-clear       # SendRecv tests (profiler only)
 pytest -m "ext_profiler and allreduce" --cache-clear    # Profiler AllReduce tests only
 pytest -m "ext_tuner and broadcast" --cache-clear       # Tuner Broadcast tests only
 pytest -m "ext_inspector and allreduce" --cache-clear   # Inspector AllReduce tests only
+pytest -m inspector_regression --cache-clear            # NCCL #2000 teardown regression tests
 ```
 
 ### Run Tests with Log Output
@@ -246,3 +249,31 @@ pytest --verbose --tb=short
 - **Profiler Output**: Profiler plugin tests generate JSON trace files in the `profiler_dumps/` directory. These files contain detailed event traces that can be analyzed for debugging or performance analysis. The directory is automatically cleaned before each test session by the pytest fixture.
 
 - **Inspector Output**: Inspector plugin tests generate JSONL log files in the `inspector_dumps/` directory, with one file per rank per test. Each line is a self-contained JSON record containing header, metadata, and collective performance data. The directory is automatically cleaned before each test session.
+
+### NCCL Issue #2000 regression tests
+
+Regression coverage for inspector plugin deadlock/UAF teardown (NCCL issue #2000):
+
+**Native unit test** (no GPU required):
+
+```bash
+make -C rccl/plugins/profiler/inspector/test test
+```
+
+**Functional comm lifecycle stress** (requires RCCL, MPI, rccl-tests, and GPUs):
+
+Each pytest iteration launches a fresh `mpirun` job that performs comm init → collectives → destroy.
+
+```bash
+pytest -m inspector_regression tests/ext-inspector/test_lifecycle_stress.py --cache-clear
+```
+
+**Optional ASAN regression** (native tests always; functional stress when `RUN_FUNCTIONAL=1`):
+
+```bash
+./scripts/run_inspector_asan_stress.sh
+RUN_FUNCTIONAL=1 RCCL_INSTALL_DIR=... OMPI_INSTALL_DIR=... RCCL_TESTS_DIR=... \
+  ./scripts/run_inspector_asan_stress.sh
+```
+
+CI: `.github/workflows/rccl-inspector-regression.yml` runs the native lifecycle tests (including ASAN) on PRs touching inspector code.

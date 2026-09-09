@@ -17,7 +17,7 @@
 
 TEST(recording_sink, default_state_is_empty_and_unfinalized)
 {
-    rocprofsys::core::recording_sink sink;
+    const rocprofsys::core::recording_sink sink;
     EXPECT_TRUE(sink.records().empty());
     EXPECT_FALSE(sink.finalized());
 }

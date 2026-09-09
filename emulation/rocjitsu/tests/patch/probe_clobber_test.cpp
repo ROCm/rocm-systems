@@ -74,6 +74,14 @@ TEST(ProbeClobber, NopProbeSummaryIsEmpty) {
   EXPECT_FALSE(summary->uses_private_segment);
 }
 
+TEST(ProbeClobber, ReportsRejectedEncodingAndWordOffset) {
+  const auto callable = make_callable({0xffffffffu, kSSetpcS30S31});
+  std::string err;
+  EXPECT_FALSE(build_probe_clobber_summary(callable, &err).has_value());
+  EXPECT_NE(err.find("word 0"), std::string::npos) << err;
+  EXPECT_NE(err.find("Invalid instruction opcode"), std::string::npos) << err;
+}
+
 // The summary is decode-derived, not declared: a body that writes s5 reports s5
 // (and only s5) as an ordinary clobber.
 TEST(ProbeClobber, DerivesOrdinaryClobberFromBody) {
@@ -168,6 +176,21 @@ TEST(ProbeClobber, DetectsExplicitFlatScratchWrite) {
   EXPECT_FALSE(summary->touches_exec);
   EXPECT_FALSE(summary->touches_vcc);
   EXPECT_FALSE(summary->touches_m0);
+}
+
+// A body that writes both an ordinary SGPR (s5) and EXEC (via the s_mov_b32
+// exec_lo selector). ordinary_clobbers is built from InstDefUse's ordinary
+// projection, so s5 appears there while no special member does. The
+// selector-encoded EXEC write is not surfaced by InstDefUse; it is caught
+// separately by scan_special_state and reported via touches_exec.
+TEST(ProbeClobber, SpecialWritesDoNotLeakIntoOrdinaryClobbers) {
+  const auto callable = make_callable({kSMovS5_0, kSMovExecLo_0, kSSetpcS30S31});
+  std::string err;
+  const auto summary = build_probe_clobber_summary(callable, &err);
+  ASSERT_TRUE(summary.has_value()) << err;
+  EXPECT_TRUE(has_sgpr(summary->ordinary_clobbers, 5));
+  EXPECT_FALSE(summary->ordinary_clobbers.has_specials());
+  EXPECT_TRUE(summary->touches_exec);
 }
 
 } // namespace

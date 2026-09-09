@@ -18,10 +18,11 @@
 /// computed from the inputs, identical in both runs, so both skip the same
 /// lanes. In-process inactive lanes must keep the sentinel.
 
+#include "decode_test_util.h"
 #include "util/simd_test_hooks.h"
 
 #include "rocjitsu/code/rj_code.h"
-#include "rocjitsu/isa/arch/amdgpu/shared/execute_shared.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/shared/execute_shared.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
@@ -181,7 +182,7 @@ void check_case(const Case &c, uint64_t exec, uint32_t neg, uint32_t neg_hi) {
                            neg, words);
     else
       vop3p_encode_binary(c.opcode, kDstVgpr, neg_hi, /*src0=*/256, /*src1=*/257, neg, words);
-    Instruction *inst = fx.decoder->decode(words);
+    Instruction *inst = decode_valid(*fx.decoder, words);
     EXPECT_NE(inst, nullptr) << c.name << " decode failed";
     auto out = fx.run(inst, rot, exec);
     delete inst;

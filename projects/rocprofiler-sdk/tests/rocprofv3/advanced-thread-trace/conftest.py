@@ -85,6 +85,11 @@ def pytest_addoption(parser):
         action="store",
         help="Path to ATT no-intercept output directory.",
     )
+    parser.addoption(
+        "--att-no-detail-out-dir",
+        action="store",
+        help="Path to ATT no-detail output directory.",
+    )
 
 
 @pytest.fixture
@@ -162,4 +167,12 @@ def att_no_intercept_out_dir_path(request):
     output_dir_path = request.config.getoption("--att-no-intercept-out-dir")
     if not output_dir_path:
         pytest.skip("--att-no-intercept-out-dir not provided")
+    return output_dir_path
+
+
+@pytest.fixture
+def att_no_detail_out_dir_path(request):
+    output_dir_path = request.config.getoption("--att-no-detail-out-dir")
+    if not output_dir_path:
+        pytest.skip("--att-no-detail-out-dir not provided")
     return output_dir_path

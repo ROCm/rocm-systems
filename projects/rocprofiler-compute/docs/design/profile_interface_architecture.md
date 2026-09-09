@@ -1,6 +1,6 @@
 # Profile Interface Architecture
 
-Status: proposal
+Status: proposal (Phases A and B implemented)
 
 This document describes the architecture for profile data storage and access in
 rocprofiler-compute, and records the decisions made in the design review so the
@@ -76,8 +76,9 @@ If there is future strong request to return CSV support, we may implement it und
 Gzip is short-term storage-size reduction for CSV artifacts that still exist
 after CSV profile backend removal.
 
-We introduce gzip streaming for two separate csv artifacts, written through its own compression interface used by both python and backend:
- - the results_*.csv(s), written by compute's Python side (rocpd_data.py) at the end of a pass, when the merged result DB is converted to csv and is the artifact analyze reads today.
+We introduce gzip streaming for three csv artifacts, written through its own compression interface used by both python and backend:
+ - the results_*.csv(s), written by compute's Python side (utils_profile.stream_csv_to_file) at the end of a pass, and the artifact analyze reads today.
+ - the per-pass out/pmc_1/*_counter_collection.csv
  - the native tool counter output (countersData), written by the native tool / backend (rocprofiler-compute-tool.so via the counters writer) during in-process collection. This is an early per-process intermediate.
 
 Compression belongs at CSV read/write, where profile writes compressed CSV
@@ -237,6 +238,8 @@ sequenceDiagram
 
 ## Phase A: Remove the CSV Profile Backend
 
+Status: implemented.
+
 Phase A deletes the csv format choice and the csv-format analyze branch, but
 keeps the rocpd read path (`results_*.csv` -> `pmc_perf.csv`). Phase A changes nothing visible in the above sequence diagram.
 
@@ -284,21 +287,23 @@ flowchart LR
     subgraph disk["On-Disk"]
         db["ROCPD .db (transient)"]
         res["results_*.csv"]
+        pmc["pmc_perf.csv"]
     end
     uprof -->|"writes via"| urocpd
     urocpd -->|"writes"| db
     urocpd -->|"converted to (via csv helper)"| res
     uprof -->|"writes via"| ucsv
     ucsv -->|"writes"| res
-    abase -->|"reads"| res
-    fio -->|"reads"| res
+    abase -->|"concatenates"| res
+    abase -->|"writes"| pmc
+    fio -->|"reads, pivots"| pmc
 ```
 
 Removed in this phase:
 
 - the `if csv` branch in `utils_profile.py` and related csv-only conversion helpers
 - the `--format-rocprof-output` flag and its uses (default and only output becomes rocpd)
-  - while this phase results in a single format output being rocpd, we still keep the variable _PROFILE_OUTPUT_FORMAT to align with the Phase B boundary to leave the door open for future formats.
+  - while this phase results in a single format output being rocpd, we still keep the variable PROFILE_OUTPUT_FORMAT to align with the Phase B boundary to leave the door open for future formats. Profile mode stamps it into `profiling_config.yaml`; analyze reads it only to reject a workload written by a removed backend.
 - related csv-only test functions
 - analyze no longer supports csv-shaped workload directories.
 
@@ -311,13 +316,17 @@ Intentionally **kept** in this phase:
 - `utils_profile_csv.py`. It is still a necessary csv helper file used by the
   rocpd path, `sysinfo.csv`, and marker-trace augmentation. It is removed as csv intermediates are eliminated in later phases.
 
-Note: Two workloads in rocprof-compute /vcopy/MI350 currently store csv intermediates, and were generated before rocpd support was added. These workloads must be regenerated to match the other workloads, all of which have rocpd intermediates.
+Note: the MI350 `no_roof` and `vcopy` golden workloads stored csv intermediates,
+having been generated before rocpd support was added. They are regenerated in this phase so that every golden workload carries rocpd intermediates.
 
 ### Phase A-2: Remove the now-dead `--join-type` option
+
+Status: implemented.
 
 `--join-type {kernel,grid}` only ever fed the csv-format wide merge in
 `join_prof`. With that merge removed in Phase A, nothing
 in `src/` reads it, and `grid` vs `kernel` now produce identical output
+
 Removing it is a small follow-up to Phase A rather than part of the csv-output
 removal itself because it also deletes user-facing surface, the dedicated
 `join_type_grid` / `join_type_kernel` golden workloads, their related tests,
@@ -325,16 +334,12 @@ and the `--join-type` references in the docs.
 
 ## Phase B: Add Compression at CSV Read/Write
 
-We are to introduce gzip streaming to provide a size reduction to csv files.
-Phase B does not change the shape of
-the profile/analyze contract yet, profile still produces the per-pass CSV result
-and analyze still reads it.
+Status: implemented.
 
-The change goes through one
-compression interface shared by both the native/backend counter writer
-and the Python result-CSV writer. Compression is applied at two write points, the
-native counter output and the result CSV, and decompressed on read
-(during merge in analyze).
+Gzip streaming reduces size of the two large counter CSV intermediates from AD-2.
+Phase B does not change the profile/analyze contract shape. Python and the native
+tool each compress at CSV read/write over a shared format contract; analyze accepts
+plain `.csv` for backward compatibility.
 
 ```mermaid
 sequenceDiagram
@@ -614,7 +619,8 @@ sequenceDiagram
 ## Success Criteria
 
 - Profile mode cannot produce the legacy CSV profile output format.
-- Remaining CSV artifacts are compressed while they still exist.
+- Counter CSV artifacts are compressed while they still exist, apart from the
+  `pmc_perf.csv` that Phase D removes (see AD-2).
 - SDK kernel data and native counter data can be read independently by analyze.
 - Analyze gets the DataFrame through the profile data interface.
 - `pmc_perf.csv` is not an analyze input.

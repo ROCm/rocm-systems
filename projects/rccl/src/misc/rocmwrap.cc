@@ -72,27 +72,24 @@ static int ncclCuMemFunctionalProbe(CUdevice dev, int devOrdinal) {
   prop.requestedHandleTypes = ncclCuMemHandleType;
 
   // Smallest legal allocation: one granularity unit.
-  if (CUPFN(cuMemGetAllocationGranularity(&granularity, &prop,
-            CU_MEM_ALLOC_GRANULARITY_MINIMUM)) != hipSuccess || granularity == 0)
+  if (CUPFN(cuMemGetAllocationGranularity(&granularity, &prop, CU_MEM_ALLOC_GRANULARITY_MINIMUM)) != hipSuccess ||
+      granularity == 0)
     goto done;
 
   if (CUPFN(cuMemCreate(&handle, granularity, &prop, 0)) != hipSuccess)
-    goto done;                       // 7.0.2.2-without-backport fails here
+    goto done; // 7.0.2.2-without-backport fails here
   created = true;
 
-  if (CUPFN(cuMemAddressReserve(&ptr, granularity, granularity, 0, 0)) != hipSuccess)
-    goto cleanup;
+  if (CUPFN(cuMemAddressReserve(&ptr, granularity, granularity, 0, 0)) != hipSuccess) goto cleanup;
   reserved = true;
 
-  if (CUPFN(cuMemMap(ptr, granularity, 0, handle, 0)) != hipSuccess)
-    goto cleanup;
+  if (CUPFN(cuMemMap(ptr, granularity, 0, handle, 0)) != hipSuccess) goto cleanup;
   mapped = true;
 
   accessDesc.location.type = CU_MEM_LOCATION_TYPE_DEVICE;
   accessDesc.location.id = devOrdinal;
   accessDesc.flags = CU_MEM_ACCESS_FLAGS_PROT_READWRITE;
-  if (CUPFN(cuMemSetAccess(ptr, granularity, &accessDesc, 1)) != hipSuccess)
-    goto cleanup;
+  if (CUPFN(cuMemSetAccess(ptr, granularity, &accessDesc, 1)) != hipSuccess) goto cleanup;
 
   // register.cc queries: LEGACY_IPC is the op 7.0.2.2 rejects even though alloc/map above succeed.
   {
@@ -100,30 +97,29 @@ static int ncclCuMemFunctionalProbe(CUdevice dev, int devOrdinal) {
     size_t baseSize = 0;
     CUmemorytype memType;
     int legacyIpcCap = 0;
-    if (CUPFN(cuMemGetAddressRange(&base, &baseSize, ptr)) != hipSuccess)
-      goto cleanup;
-    if (CUPFN(cuPointerGetAttribute(&memType, CU_POINTER_ATTRIBUTE_MEMORY_TYPE, ptr)) != hipSuccess)
-      goto cleanup;
-    if (CUPFN(cuPointerGetAttribute((void*)&legacyIpcCap,
-              CU_POINTER_ATTRIBUTE_IS_LEGACY_CUDA_IPC_CAPABLE, base)) != hipSuccess)
+    if (CUPFN(cuMemGetAddressRange(&base, &baseSize, ptr)) != hipSuccess) goto cleanup;
+    if (CUPFN(cuPointerGetAttribute(&memType, CU_POINTER_ATTRIBUTE_MEMORY_TYPE, ptr)) != hipSuccess) goto cleanup;
+    if (CUPFN(cuPointerGetAttribute((void*)&legacyIpcCap, CU_POINTER_ATTRIBUTE_IS_LEGACY_CUDA_IPC_CAPABLE, base)) !=
+        hipSuccess)
       goto cleanup;
   }
 
   ok = 1;
 
 cleanup:
-  if (mapped)   CUCHECKIGNORE(cuMemUnmap(ptr, granularity));
+  if (mapped) CUCHECKIGNORE(cuMemUnmap(ptr, granularity));
   if (reserved) CUCHECKIGNORE(cuMemAddressFree(ptr, granularity));
-  if (created)  CUCHECKIGNORE(cuMemRelease(handle));
-  (void)hipGetLastError();           // clear any sticky error from the probe
+  if (created) CUCHECKIGNORE(cuMemRelease(handle));
+  (void)hipGetLastError(); // clear any sticky error from the probe
 done:
-  if (!ok)
-    INFO(NCCL_INIT, "cuMem functional probe failed on device %d; disabling cuMem", devOrdinal);
+  if (!ok) INFO(NCCL_INIT, "cuMem functional probe failed on device %d; disabling cuMem", devOrdinal);
   return ok;
 }
 
-// Determine whether CUMEM & VMM RDMA is supported on this platform
-int ncclIsCuMemSupported() {
+// Returns 1 when the platform can run the cuMem VMM path at runtime.
+// When requireGfx1250ForAutoEnable is set, also enforces the gfx1250 gate used
+// by NCCL_CUMEM_ENABLE=-2 auto-detect; NCCL_CUMEM_ENABLE=1 bypasses that gate.
+static int ncclCuMemCapabilityCheck(int requireGfx1250ForAutoEnable) {
   CUdevice currentDev;
   int cudaDev;
   int cudaDriverVersion;
@@ -132,13 +128,13 @@ int ncclIsCuMemSupported() {
   ncclResult_t ret = ncclSuccess;
   char gcnArch[256] = "unknown";
 
-  // Auto-detect (NCCL_CUMEM_ENABLE=-2) only turns cuMem on where the VMM path is
-  // required; NCCL_CUMEM_ENABLE=1 bypasses this gate.
   CUDACHECKGOTO(cudaGetDevice(&cudaDev), ret, error);
-  if (GetGcnArchName(cudaDev, gcnArch) != 0 || !IsArchMatch(gcnArch, "gfx1250")) {
-    INFO(NCCL_INIT, "cuMem auto-enable is limited to gfx1250 (detected %s); set NCCL_CUMEM_ENABLE=1 to override",
-         gcnArch);
-    return 0;
+  if (requireGfx1250ForAutoEnable) {
+    if (GetGcnArchName(cudaDev, gcnArch) != 0 || !IsArchMatch(gcnArch, "gfx1250")) {
+      INFO(NCCL_INIT, "cuMem auto-enable is limited to gfx1250 (detected %s); set NCCL_CUMEM_ENABLE=1 to override",
+           gcnArch);
+      return 0;
+    }
   }
 
   if (ncclGetKernelVersionCode() < KERNEL_VERSION_CODE(6, 8)) {
@@ -165,12 +161,22 @@ int ncclIsCuMemSupported() {
   }
 
   // Cheap gates passed — confirm the driver actually implements the VMM path at runtime.
-  if (supported && !ncclCuMemFunctionalProbe(currentDev, cudaDev))
-    supported = 0;
+  if (supported && !ncclCuMemFunctionalProbe(currentDev, cudaDev)) supported = 0;
 
   return supported;
 error:
   return (ret == ncclSuccess);
+}
+
+// Determine whether CUMEM & VMM RDMA is supported on this platform
+int ncclIsCuMemSupported() {
+  return ncclCuMemCapabilityCheck(/*requireGfx1250ForAutoEnable=*/1);
+}
+
+// Runtime cuMem capability without the gfx1250 auto-enable gate. Used when
+// NCCL_CUMEM_ENABLE=1 forces the VMM path on non-gfx1250 platforms.
+int ncclCuMemRuntimeSupported() {
+  return ncclCuMemCapabilityCheck(/*requireGfx1250ForAutoEnable=*/0);
 }
 
 int ncclCuMemEnable() {
@@ -275,9 +281,9 @@ static void initOnceFunc() {
   INFO(NCCL_INIT, "ROCr version %d.%d", version_major, version_minor);
 
   // if (hsaDriverVersion < ROCR_DRIVER_MIN_VERSION) {
-    // WARN("ROCr Driver version found is %d. Minimum requirement is %d", hsaDriverVersion, ROCR_DRIVER_MIN_VERSION);
-    // Silently ignore version check mismatch for backwards compatibility
-    // goto error;
+  // WARN("ROCr Driver version found is %d. Minimum requirement is %d", hsaDriverVersion, ROCR_DRIVER_MIN_VERSION);
+  // Silently ignore version check mismatch for backwards compatibility
+  // goto error;
   //}
 
   // Determine whether we support the cuMem APIs or not

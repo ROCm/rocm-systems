@@ -126,9 +126,9 @@ def load_expectations(path: Path) -> dict[str, int]:
         if not isinstance(entry, dict):
             raise ValueError(f"{path} test '{test}' must contain an object")
         changed = entry.get("instructions_requiring_rewrite")
-        if isinstance(changed, bool) or not isinstance(changed, int) or changed <= 0:
+        if isinstance(changed, bool) or not isinstance(changed, int) or changed < 0:
             raise ValueError(
-                f"{path} test '{test}' must require a positive rewrite count"
+                f"{path} test '{test}' must use a non-negative rewrite count"
             )
         expectations[test] = changed
     return expectations

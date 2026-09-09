@@ -40,6 +40,7 @@ void ncclOsAlignedFree(void* ptr);
 std::tm* ncclOsLocaltime(const time_t* timer, std::tm* buf);
 
 void ncclOsSetEnv(const char* name, const char* value);
+char* ncclOsStrSep(char** stringp, const char* delim);
 
 /* Dynamic library loading */
 typedef void* ncclOsLibraryHandle;
@@ -76,8 +77,29 @@ ncclAffinity ncclOsCpuAnd(const ncclAffinity& a, const ncclAffinity& b);
 ncclResult_t ncclOsGetAffinity(ncclAffinity* affinity);
 ncclResult_t ncclOsSetAffinity(const ncclAffinity& affinity);
 int ncclOsGetCpu();
+
+ncclResult_t ncclOsGetNumaNodeAffinity(unsigned int numaId, char* affinityStr, size_t maxLen);
+
+ncclResult_t ncclOsGetPciDeviceClassByBusId(const char* busId, char* deviceClass, size_t maxLen);
+
+// Compute partition mode of an AMD GPU ("SPX", "DPX", "CPX", ...). Yields an empty string where the
+// platform does not report one, which callers must read as "unknown", not as "not partitioned".
+ncclResult_t ncclOsGetPciDeviceComputePartitionByBusId(const char* busId, char* partition, size_t maxLen);
+
+#if NCCL_OS_WINDOWS
+// Forward declare nvmlDevice_t to avoid including nvml.h
+struct nvmlDevice_st;
+typedef struct nvmlDevice_st* nvmlDevice_t;
+ncclResult_t ncclOsGetPciDeviceParent(nvmlDevice_t device, char** parentBusId);
+#endif
+
 /* Path resolution */
 char* ncclOsRealpath(const char* path, char* resolved_path);
+
+/* Topology/PCI detection functions */
+ncclResult_t ncclOsGetPciPath(const char* busId, char** path);
+ncclResult_t ncclOsTopoGetStrFromSys(const char* path, const char* fileName, char* strValue, int maxLen);
+ncclResult_t ncclOsGetBcmLinks(const char* busId, int* nlinks, char** peers);
 
 /* Shared memory functions - platform-specific implementations in os/linux.cc and os/windows.cc */
 #include <stddef.h>

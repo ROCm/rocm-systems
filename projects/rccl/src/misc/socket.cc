@@ -9,6 +9,7 @@
 #include "utils.h"
 #include "os.h"
 #include <stdlib.h>
+#include <cstdlib>
 
 #if defined(NCCL_OS_LINUX)
 #include <unistd.h>
@@ -19,6 +20,7 @@
 #include "param.h"
 #include <time.h>
 #include <atomic>
+#include <mutex>
 
 NCCL_PARAM(RetryCnt, "SOCKET_RETRY_CNT", 34);
 NCCL_PARAM(RetryTimeOut, "SOCKET_RETRY_SLEEP_MSEC", 100);
@@ -28,6 +30,28 @@ NCCL_PARAM(SocketMaxSendBuff, "SOCKET_SNDBUF", -1);
 
 RCCL_PARAM(SocketReuseAddr, "SOCKET_REUSEADDR", 0);
 RCCL_PARAM(SocketLinger, "SOCKET_LINGER", -1);
+uint64_t ncclSocketDefaultMagic(void) {
+  /* Default is the historical constant; env may override on first init. */
+  static uint64_t cached = NCCL_SOCKET_MAGIC;
+  static std::once_flag once;
+  std::call_once(once, []() {
+    const char* env = ncclGetEnv("NCCL_SOCKET_MAGIC");
+    bool fromEnv = false;
+    if (env != NULL && env[0] != '\0') {
+      char* endptr = NULL;
+      unsigned long long v = std::strtoull(env, &endptr, 0);
+      if (endptr != env && endptr != NULL && *endptr == '\0') {
+        cached = (uint64_t)v;
+        fromEnv = true;
+      } else {
+        INFO(NCCL_ENV, "NCCL_SOCKET_MAGIC invalid value \"%s\", using built-in default", env);
+      }
+    }
+    INFO(NCCL_ENV, "Socket handshake magic 0x%016llx (%s)", (unsigned long long)cached,
+         fromEnv ? "NCCL_SOCKET_MAGIC" : "built-in default");
+  });
+  return cached;
+}
 
 static ncclResult_t socketProgress(int op, struct ncclSocket* sock, void* ptr, int size, int* offset,
                                    int* pclosed = NULL) {
@@ -314,6 +338,8 @@ static ncclResult_t socketFinalizeAccept(struct ncclSocket* sock) {
     if (sock->asyncFlag == 0) {
       received = 0;
       if (socketWait(NCCL_SOCKET_RECV, sock, &magic, sizeof(magic), &received) != ncclSuccess) {
+        INFO(NCCL_NET | NCCL_INIT, "socketFinalizeAccept: handshake receive from %s failed, discarding peer connection",
+             ncclSocketToString(&sock->addr, line));
         ncclOsSocketResetAccept(sock);
         return ncclSuccess;
       }
@@ -324,6 +350,8 @@ static ncclResult_t socketFinalizeAccept(struct ncclSocket* sock) {
       sock->finalizeCounter = received;
       if (received < sizeof(magic)) {
         if (closed) {
+          INFO(NCCL_NET | NCCL_INIT, "socketFinalizeAccept: peer %s closed before magic handshake, discarding",
+               ncclSocketToString(&sock->addr, line));
           ncclOsSocketResetAccept(sock);
         }
         return ncclSuccess;
@@ -331,8 +359,12 @@ static ncclResult_t socketFinalizeAccept(struct ncclSocket* sock) {
       memcpy(&magic, sock->finalizeBuffer, sizeof(magic));
     }
     if (magic != sock->magic) {
+      INFO(NCCL_NET | NCCL_INIT,
+           "socketFinalizeAccept from %s: socket magic mismatch (peer 0x%016llx != expected 0x%016llx), discarding "
+           "peer connection",
+           ncclSocketToString(&sock->addr, line), (unsigned long long)magic, (unsigned long long)sock->magic);
       ncclOsSocketResetAccept(sock);
-      sock->state = ncclSocketStateBadMagic;
+      sock->state = ncclSocketStateBadHandshake;
       return ncclSuccess;
     }
   }
@@ -347,10 +379,12 @@ static ncclResult_t socketFinalizeAccept(struct ncclSocket* sock) {
     memcpy(&type, sock->finalizeBuffer, sizeof(type));
   }
   if (type != sock->type) {
-    WARN("socketFinalizeAccept from %s: wrong type %d != %d", ncclSocketToString(&sock->addr, line), type, sock->type);
-    (void)ncclSocketClose(sock);
-    sock->state = ncclSocketStateError;
-    return ncclInternalError;
+    INFO(NCCL_NET | NCCL_INIT,
+         "socketFinalizeAccept from %s: wrong socket type (peer %d != expected %d -- peer connected to wrong NCCL "
+         "socket), discarding peer connection",
+         ncclSocketToString(&sock->addr, line), (int)type, (int)sock->type);
+    ncclOsSocketResetAccept(sock);
+    return ncclSuccess;
   } else {
     sock->state = ncclSocketStateReady;
   }
@@ -390,10 +424,10 @@ static ncclResult_t socketFinalizeConnect(struct ncclSocket* sock) {
 }
 
 static ncclResult_t socketProgressState(struct ncclSocket* sock) {
-  // BadMagic is set by socketFinalizeAccept on magic mismatch. The reset in
+  // BadHandshake is set by socketFinalizeAccept on magic mismatch. The reset in
   // ncclSocketAccept's do-while only fires while that loop runs; this covers
-  // the path where a caller re-enters via ncclSocketReady with state=BadMagic.
-  if (sock->state == ncclSocketStateBadMagic) {
+  // the path where a caller re-enters via ncclSocketReady with state=BadHandshake.
+  if (sock->state == ncclSocketStateBadHandshake) {
     sock->state = ncclSocketStateAccepting;
   }
   if (sock->state == ncclSocketStateAccepting) {
@@ -426,6 +460,7 @@ ncclResult_t ncclSocketReady(struct ncclSocket* sock, int* running) {
   *running = (sock->state == ncclSocketStateReady) ? 1 : 0;
   if (*running == 0) {
     NCCLCHECK(socketProgressState(sock));
+    if (sock->state == ncclSocketStateBadHandshake) sock->state = ncclSocketStateAccepting;
     *running = (sock->state == ncclSocketStateReady) ? 1 : 0;
   }
   return ncclSuccess;
@@ -476,7 +511,7 @@ ncclResult_t ncclSocketConnect(struct ncclSocket* sock) {
   }
 }
 
-ncclResult_t ncclSocketAccept(struct ncclSocket* sock, struct ncclSocket* listenSock, bool retryOnBadMagic) {
+ncclResult_t ncclSocketAccept(struct ncclSocket* sock, struct ncclSocket* listenSock, bool retry) {
   ncclResult_t ret = ncclSuccess;
 
   if (listenSock == NULL || sock == NULL) {
@@ -500,8 +535,10 @@ ncclResult_t ncclSocketAccept(struct ncclSocket* sock, struct ncclSocket* listen
 
   do {
     NCCLCHECKGOTO(socketProgressState(sock), ret, exit);
-    if (sock->state == ncclSocketStateBadMagic && retryOnBadMagic) {
+    if (sock->state == ncclSocketStateBadHandshake) {
+      // Most likely some issue with magic.  We will retry from the beginning, unless the caller requested not to.
       sock->state = ncclSocketStateAccepting;
+      if (!retry) break;
     }
   } while (sock->asyncFlag == 0 &&
            (sock->abortFlag == NULL || COMPILER_ATOMIC_LOAD(sock->abortFlag, std::memory_order_acquire) == 0) &&
@@ -513,7 +550,6 @@ ncclResult_t ncclSocketAccept(struct ncclSocket* sock, struct ncclSocket* listen
   case ncclSocketStateAccepting:
   case ncclSocketStateAccepted:
   case ncclSocketStateReady:
-  case ncclSocketStateBadMagic:
     ret = ncclSuccess;
     break;
   case ncclSocketStateError:
@@ -560,7 +596,8 @@ ncclResult_t ncclSocketInit(struct ncclSocket* sock, const union ncclSocketAddre
       goto exit;
     }
     sock->salen = (family == AF_INET) ? sizeof(struct sockaddr_in) : sizeof(struct sockaddr_in6);
-    // in case of error, we close the fd before returning as it's unclear if the caller has to use ncclSocketClose for cleanup
+    // in case of error, we close the descriptor before returning as it's unclear if the caller has to
+    // use ncclSocketClose for cleanup
     NCCLCHECKGOTO(ncclOsSocketResetFd(sock), ret, fail);
 
     // [RCCL] Runtime socket options

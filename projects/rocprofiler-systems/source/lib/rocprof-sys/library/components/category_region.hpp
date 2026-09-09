@@ -34,8 +34,8 @@
 
 #include "logger/debug.hpp"
 
-#include <spdlog/fmt/ostr.h>
-#include <spdlog/fmt/ranges.h>
+#include <fmt/ostream.h>
+#include <fmt/ranges.h>
 
 #include <string>
 #include <string_view>
@@ -386,8 +386,8 @@ struct category_region
 
     void cache_stop(const char* name, std::string_view category)
     {
-        entry_key key{ name, std::string{ category } };
-        auto      x = map_name_to_args.find(key);
+        const entry_key key{ name, std::string{ category } };
+        auto            x = map_name_to_args.find(key);
         if(x != map_name_to_args.end() && !x->second.empty())
         {
             auto entry = std::move(x->second.back());

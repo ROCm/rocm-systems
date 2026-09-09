@@ -317,6 +317,32 @@ def test_occupancy_event_tracing_fields(att_occupancy_event_trace_out_dir_path):
     assert found_dispatch, "No dispatch records found in occupancy.json"
 
 
+def test_att_no_detail(att_no_detail_out_dir_path):
+    occupancy_files = find_occupancy_files(att_no_detail_out_dir_path)
+    assert (
+        occupancy_files
+    ), f"No occupancy.json files found under {att_no_detail_out_dir_path}"
+
+    for occupancy_file in occupancy_files:
+        with open(occupancy_file, "r", encoding="utf-8") as f:
+            validate_occupancy_rows(json.load(f), occupancy_file)
+
+    wave_files = sorted(
+        Path(att_no_detail_out_dir_path).glob("ui_output_*/se*_sm*_sl*_wv*.json")
+    )
+    for wave_file in wave_files:
+        with open(wave_file, "r", encoding="utf-8") as f:
+            wave_data = json.load(f)
+
+        instructions = wave_data.get("wave", {}).get("instructions") or []
+        assert len(instructions) <= 2, (
+            f"Received a wave record with {len(instructions)} instructions "
+            f"in {wave_file}"
+        )
+        assert wave_data.get("num_insts") <= 2
+        assert wave_data.get("num_stitched") <= 2
+
+
 def test_realtime_clock(output_path):
 
     def verify_sorted(timestamps):

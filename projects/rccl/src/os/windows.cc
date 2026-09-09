@@ -5,11 +5,11 @@
  * See LICENSE.txt for more license information
  *************************************************************************/
 
-/* Force Vista+ so IP Helper API is declared (project may set lower _WIN32_WINNT) */
+/* Force Win7+ so IP Helper and NUMA APIs are declared (project may set lower _WIN32_WINNT) */
 #ifdef _WIN32_WINNT
 #undef _WIN32_WINNT
 #endif
-#define _WIN32_WINNT 0x0600
+#define _WIN32_WINNT 0x0601
 
 /* GetAdaptersAddresses and IP_ADAPTER_ADDRESSES require winsock2 before iphlpapi */
 #ifndef _WINSOCKAPI_
@@ -21,6 +21,7 @@
 #include <Iphlpapi.h>
 #pragma comment(lib, "iphlpapi.lib")
 
+#include <windows.h>
 #include "os.h"
 #include <cstring>
 #include <cstdbool>
@@ -28,11 +29,20 @@
 #include "utils.h"
 #include "checks.h"
 #include "param.h"
+#include "core.h"
+#include "nvmlwrap.h"
 #include <atomic>
 #include <chrono>
 #include <thread>
 #include <nmmintrin.h>
 #include <cstdint>
+#include <setupapi.h>
+#include <cfgmgr32.h>
+#include <devguid.h>
+#include <initguid.h>
+#include <devpkey.h>
+#pragma comment(lib, "setupapi.lib")
+#pragma comment(lib, "cfgmgr32.lib")
 
 // WSAEAGAIN not in winsock2.h; use WSAEWOULDBLOCK equivalent
 #ifndef WSAEAGAIN
@@ -128,6 +138,19 @@ void ncclOsSetEnv(const char* name, const char* value) {
       WARN("Failed to set environment variable %s to %s: error %lu", name, value, GetLastError());
     }
   }
+}
+
+char* ncclOsStrSep(char** stringp, const char* delim) {
+  if (*stringp == NULL) return NULL;
+  char* start = *stringp;
+  char* found = strpbrk(start, delim);
+  if (found) {
+    *found = '\0';
+    *stringp = found + 1;
+  } else {
+    *stringp = NULL;
+  }
+  return start;
 }
 
 ncclResult_t ncclOsInitialize() {
@@ -241,13 +264,10 @@ fail:
 }
 
 void ncclOsSocketResetAccept(struct ncclSocket* sock) {
-  char line[SOCKET_NAME_MAXLEN + 1];
-  INFO(NCCL_NET | NCCL_INIT, "socketFinalizeAccept: didn't receive a valid magic from %s",
-       ncclSocketToString(&sock->addr, line));
-  // Ignore spurious connection and accept again
+  // Close the accepted peer and return to listening for another connection (see socketFinalizeAccept logging).
   (void)closesocket(sock->socketDescriptor);
   sock->socketDescriptor = NCCL_INVALID_SOCKET;
-  sock->state = ncclSocketStateAccepting;
+  sock->state = ncclSocketStateBadHandshake;
   sock->finalizeCounter = 0;
 }
 
@@ -481,6 +501,7 @@ ncclResult_t ncclOsFindInterfaces(const char* prefixList, char* names, union ncc
       if (!duplicate) {
         // Store the interface name
         strncpy(names + (*found) * maxIfNameSize, adapterName, maxIfNameSize);
+        names[(*found) * maxIfNameSize + maxIfNameSize - 1] = '\0';
         // Store the IP address
         int salen = (family == AF_INET) ? sizeof(struct sockaddr_in) : sizeof(struct sockaddr_in6);
         memset(addrs + *found, '\0', sizeof(*addrs));
@@ -795,6 +816,9 @@ ncclResult_t ncclOsShmOpen(char* shmPath, size_t shmPathSize, size_t shmSize, vo
   char* hptr = NULL;
   void* dptr = NULL;
   ncclResult_t ret = ncclSuccess;
+  cudaStreamCaptureMode mode = cudaStreamCaptureModeRelaxed;
+  bool captureModeSet = false;
+  bool registered = false;
   struct ncclShmHandleInternal* tmphandle;
   bool create = refcount > 0 ? true : false;
   const size_t refSize = sizeof(uint64_t);
@@ -890,6 +914,20 @@ exit:
   if (devShmPtr) *devShmPtr = dptr;
   *handle = tmphandle;
   return ret;
+fail_cuda:
+  if (registered) {
+    cudaError_t unregRes = cudaHostUnregister((void*)hptr);
+    if (unregRes != cudaSuccess) {
+      WARN("SHM legacy: cudaHostUnregister after setup failure failed: %s", cudaGetErrorString(unregRes));
+    }
+  }
+  if (captureModeSet) {
+    cudaError_t modeRes = cudaThreadExchangeStreamCaptureMode(&mode);
+    if (modeRes != cudaSuccess) {
+      WARN("SHM legacy: failed to restore CUDA stream capture mode: %s", cudaGetErrorString(modeRes));
+    }
+  }
+  dptr = NULL;
 fail:
   WARN("Error while %s shared memory segment %s (size %ld)", create ? "creating" : "attaching to", shmPath, shmSize);
   if (tmphandle) {
@@ -906,7 +944,7 @@ ncclResult_t ncclOsShmClose(struct ncclShmHandleInternal* handle) {
   ncclResult_t ret = ncclSuccess;
   if (handle) {
     if (handle->shmPtr) {
-      // if (handle->devShmPtr) CUDACHECK(cudaHostUnregister(handle->shmPtr));
+      if (handle->devShmPtr) CUDACHECK(cudaHostUnregister(handle->shmPtr));
       if (!UnmapViewOfFile(handle->shmPtr)) {
         WARN("UnmapViewOfFile of shared memory %p size %ld failed, error code: %lu", handle->shmPtr,
              handle->realShmSize, GetLastError());
@@ -954,4 +992,592 @@ int gettimeofday(struct timeval* tv, void* tz) {
   tv->tv_sec = (long)(ns100 / 10000000ULL);
   tv->tv_usec = (int)((ns100 % 10000000ULL) / 10ULL);
   return 0;
+}
+
+/* Topology/PCI detection functions */
+#define BUSID_SIZE 13 // "0000:00:00.0" + null terminator
+
+// Helper function to parse PCI bus ID format and convert to Windows format
+static bool parsePciBusId(const char* busId, DWORD* bus, DWORD* device, DWORD* function) {
+  // Expected format: DDDD:BB:DD.F (domain:bus:device.function)
+  unsigned int domain, b, d, f;
+  if (sscanf(busId, "%x:%x:%x.%x", &domain, &b, &d, &f) == 4) {
+    *bus = b;
+    *device = d;
+    *function = f;
+    return true;
+  }
+  return false;
+}
+
+// Structure to cache device information
+struct DeviceInfo {
+  char deviceInstanceId[MAX_PATH];
+  DEVINST devInst;
+  char hwId[MAX_PATH];
+};
+
+// Helper to get device info from SetupAPI
+static ncclResult_t getDeviceInfo(DWORD bus, DWORD device, DWORD function, DeviceInfo* devInfo) {
+  HDEVINFO deviceInfoSet = SetupDiGetClassDevs(NULL, "PCI", NULL, DIGCF_PRESENT | DIGCF_ALLCLASSES);
+  if (deviceInfoSet == INVALID_HANDLE_VALUE) {
+    return ncclSystemError;
+  }
+
+  SP_DEVINFO_DATA deviceInfoData;
+  deviceInfoData.cbSize = sizeof(SP_DEVINFO_DATA);
+
+  bool found = false;
+  for (DWORD i = 0; SetupDiEnumDeviceInfo(deviceInfoSet, i, &deviceInfoData); i++) {
+    // Get device instance ID
+    if (CM_Get_Device_ID(deviceInfoData.DevInst, devInfo->deviceInstanceId, MAX_PATH, 0) != CR_SUCCESS) {
+      continue;
+    }
+
+    // Get hardware ID which contains VEN/DEV/SUBSYS/REV
+    if (SetupDiGetDeviceRegistryPropertyA(deviceInfoSet, &deviceInfoData, SPDRP_HARDWAREID, NULL, (PBYTE)devInfo->hwId,
+                                          MAX_PATH, NULL)) {
+      // Use CM_Get_DevNode_Registry_Property to get bus number
+      ULONG busNumber = 0, addressNumber = 0;
+      ULONG bufferSize = sizeof(ULONG);
+
+      // Get bus number from device node
+      if (CM_Get_DevNode_Registry_Property(deviceInfoData.DevInst, CM_DRP_BUSNUMBER, NULL, &busNumber, &bufferSize,
+                                           0) == CR_SUCCESS) {
+        bufferSize = sizeof(ULONG);
+        // Get device address (device << 16 | function)
+        if (CM_Get_DevNode_Registry_Property(deviceInfoData.DevInst, CM_DRP_ADDRESS, NULL, &addressNumber, &bufferSize,
+                                             0) == CR_SUCCESS) {
+          unsigned int dev = (addressNumber >> 16) & 0xFFFF;
+          unsigned int func = addressNumber & 0xFFFF;
+
+          if (busNumber == bus && dev == device && func == function) {
+            devInfo->devInst = deviceInfoData.DevInst;
+            found = true;
+            break;
+          }
+        }
+      }
+    }
+  }
+
+  SetupDiDestroyDeviceInfoList(deviceInfoSet);
+  return found ? ncclSuccess : ncclSystemError;
+}
+
+// Helper to get PCI bus ID string from DEVINST
+static bool getPciBusIdFromDevInst(DEVINST devInst, char* busIdOut, size_t bufSize) {
+  ULONG busNumber = 0, addressNumber = 0;
+  ULONG bufferSize = sizeof(ULONG);
+
+  // Get bus number from device node
+  if (CM_Get_DevNode_Registry_Property(devInst, CM_DRP_BUSNUMBER, NULL, (PVOID)&busNumber, &bufferSize, 0) !=
+      CR_SUCCESS) {
+    return false;
+  }
+
+  // Get device address (device << 16 | function)
+  bufferSize = sizeof(ULONG);
+  if (CM_Get_DevNode_Registry_Property(devInst, CM_DRP_ADDRESS, NULL, (PVOID)&addressNumber, &bufferSize, 0) !=
+      CR_SUCCESS) {
+    return false;
+  }
+
+  DWORD device = (addressNumber >> 16) & 0xFFFF;
+  DWORD function = addressNumber & 0xFFFF;
+
+  // Format as standard PCI bus ID (e.g., "0000:3b:00.0")
+  // Domain is always 0 on Windows
+  snprintf(busIdOut, bufSize, "%04x:%02x:%02x.%x", 0, (unsigned int)busNumber, device, function);
+  return true;
+}
+
+// BCM switch link detection is not supported on Windows.
+ncclResult_t ncclOsGetBcmLinks(const char* busId, int* nlinks, char** peers) {
+  *nlinks = 0;
+  *peers = NULL;
+  return ncclSuccess;
+}
+
+ncclResult_t ncclOsGetPciPath(const char* busId, char** path) {
+  DWORD bus, device, function;
+  if (!parsePciBusId(busId, &bus, &device, &function)) {
+    WARN("Invalid PCI bus ID format: %s", busId);
+    *path = NULL;
+    return ncclSystemError;
+  }
+
+  DeviceInfo devInfo;
+  if (getDeviceInfo(bus, device, function, &devInfo) != ncclSuccess) {
+    *path = NULL;
+    INFO(NCCL_GRAPH, "Could not find PCI device with bus ID %s", busId);
+    return ncclSystemError;
+  }
+
+  // Return device instance ID as the "path"
+  *path = _strdup(devInfo.deviceInstanceId);
+  return *path ? ncclSuccess : ncclSystemError;
+}
+
+// Helper to extract hex value from hardware ID string (e.g., "VEN_10DE" -> "0x10de")
+static bool extractHexFromHwId(const char* hwId, const char* prefix, char* output, int maxLen) {
+  const char* pos = strstr(hwId, prefix);
+  if (pos != NULL) {
+    pos += strlen(prefix);
+    // Extract hex digits until we hit & or end
+    char hexStr[16];
+    int i = 0;
+    while (i < 15 && pos[i] && pos[i] != '&' && pos[i] != '\\') {
+      hexStr[i] = pos[i];
+      i++;
+    }
+    hexStr[i] = '\0';
+    snprintf(output, maxLen, "0x%s", hexStr);
+    return true;
+  }
+  return false;
+}
+
+// Helper to get device registry key path
+static bool getDeviceRegPath(const char* deviceInstanceId, char* regPath, int maxLen) {
+  // Convert device instance ID to registry path
+  // Device instance: PCI\VEN_10DE&DEV_1234...\4&1234abcd&0&00
+  // Registry path: SYSTEM\CurrentControlSet\Enum\PCI\VEN_10DE&DEV_1234...\4&1234abcd&0&00
+  snprintf(regPath, maxLen, "SYSTEM\\CurrentControlSet\\Enum\\%s", deviceInstanceId);
+  return true;
+}
+
+// Helper to read PCI configuration space from registry
+static bool readPciConfigSpace(DEVINST devInst, BYTE* configData, DWORD maxSize, DWORD* actualSize) {
+  char deviceInstanceId[MAX_PATH];
+  if (CM_Get_Device_ID(devInst, deviceInstanceId, MAX_PATH, 0) != CR_SUCCESS) {
+    return false;
+  }
+
+  char regPath[PATH_MAX];
+  getDeviceRegPath(deviceInstanceId, regPath, PATH_MAX);
+
+  HKEY hKey;
+  if (RegOpenKeyExA(HKEY_LOCAL_MACHINE, regPath, 0, KEY_READ, &hKey) == ERROR_SUCCESS) {
+    DWORD configSize = maxSize;
+    LONG result = RegQueryValueExA(hKey, "ConfigData", NULL, NULL, configData, &configSize);
+    RegCloseKey(hKey);
+
+    if (result == ERROR_SUCCESS && configSize > 0) {
+      if (actualSize) *actualSize = configSize;
+      return true;
+    }
+  }
+  return false;
+}
+
+// Helper to find PCIe capability in config space and read max link width
+// Reads from Link Capabilities Register (PCIe Cap + 0x0C), bits 9:4
+static bool getPcieMaxLinkWidth(DEVINST devInst, char* strValue, int maxLen) {
+  BYTE configData[256];
+  DWORD configSize = 0;
+
+  if (!readPciConfigSpace(devInst, configData, sizeof(configData), &configSize)) {
+    return false;
+  }
+
+  // Verify we have enough data for capability pointer
+  if (configSize < 0x40) {
+    return false;
+  }
+
+  // Get capabilities pointer from PCI header (offset 0x34)
+  BYTE capPtr = configData[0x34];
+
+  // Walk the capability list to find PCIe capability (ID = 0x10)
+  while (capPtr != 0 && capPtr < 0xFC && capPtr < configSize - 16) {
+    BYTE capId = configData[capPtr];
+
+    if (capId == 0x10) {
+      // PCIe capability found
+      // Verify we have enough space to read Link Capabilities Register
+      if (capPtr + 0x0F < configSize) {
+        // Read Link Capabilities Register (4 bytes at offset cap_base + 0x0C)
+        DWORD linkCap = *(DWORD*)(configData + capPtr + 0x0C);
+
+        // Extract Maximum Link Width from bits 9:4
+        BYTE maxWidth = (linkCap >> 4) & 0x3F;
+
+        snprintf(strValue, maxLen, "%u", maxWidth);
+        return true;
+      }
+      break;
+    }
+
+    // Move to next capability (next pointer is at offset +1)
+    if (capPtr + 1 < configSize) {
+      capPtr = configData[capPtr + 1];
+    } else {
+      break;
+    }
+  }
+
+  return false;
+}
+
+constexpr const char* pcieGenSpeedStr[] = {"",          "2.5 GT/s",  "5.0 GT/s", "8.0 GT/s",
+                                           "16.0 GT/s", "32.0 GT/s", "64.0 GT/s"};
+constexpr size_t pcieGenSpeedsCount = sizeof(pcieGenSpeedStr) / sizeof(pcieGenSpeedStr[0]);
+
+// Helper to find PCIe capability and read current link speed
+// Reads from Link Capabilities Register (PCIe Cap + 0x0C), bits 3:0
+static bool getPcieMaxLinkSpeed(DEVINST devInst, char* strValue, int maxLen) {
+  BYTE configData[256];
+  DWORD configSize = 0;
+
+  if (!readPciConfigSpace(devInst, configData, sizeof(configData), &configSize)) {
+    return false;
+  }
+
+  if (configSize < 0x40) {
+    return false;
+  }
+
+  BYTE capPtr = configData[0x34];
+
+  while (capPtr != 0 && capPtr < 0xFC && capPtr < configSize - 16) {
+    BYTE capId = configData[capPtr];
+
+    if (capId == 0x10) {
+      // PCIe capability found
+      if (capPtr + 0x0F < configSize) {
+        // Read Link Capabilities Register
+        DWORD linkCap = *(DWORD*)(configData + capPtr + 0x0C);
+
+        // Extract Max Link Speed from bits 3:0
+        BYTE maxSpeed = linkCap & 0x0F;
+        const char* speedStr = maxSpeed < 1 || maxSpeed >= pcieGenSpeedsCount ? "Unknown" : pcieGenSpeedStr[maxSpeed];
+        snprintf(strValue, maxLen, "%s", speedStr);
+        return true;
+      }
+      break;
+    }
+
+    if (capPtr + 1 < configSize) {
+      capPtr = configData[capPtr + 1];
+    } else {
+      break;
+    }
+  }
+
+  return false;
+}
+
+ncclResult_t ncclOsTopoGetStrFromSys(const char* path, const char* fileName, char* strValue, int maxLen) {
+  // Initialize to empty
+  strValue[0] = '\0';
+
+  // Open device info set to get device properties
+  HDEVINFO deviceInfoSet = SetupDiGetClassDevs(NULL, "PCI", NULL, DIGCF_PRESENT | DIGCF_ALLCLASSES);
+  if (deviceInfoSet == INVALID_HANDLE_VALUE) {
+    WARN("SetupDiGetClassDevs failed: %lu", GetLastError());
+    return ncclSystemError;
+  }
+
+  SP_DEVINFO_DATA deviceInfoData;
+  deviceInfoData.cbSize = sizeof(SP_DEVINFO_DATA);
+
+  // Find the device with matching instance ID
+  bool deviceFound = false;
+  for (DWORD i = 0; SetupDiEnumDeviceInfo(deviceInfoSet, i, &deviceInfoData); i++) {
+    char deviceInstanceId[MAX_PATH];
+    if (CM_Get_Device_ID(deviceInfoData.DevInst, deviceInstanceId, MAX_PATH, 0) == CR_SUCCESS) {
+      if (strcmp(deviceInstanceId, path) == 0) {
+        deviceFound = true;
+        break;
+      }
+    }
+  }
+
+  if (!deviceFound) {
+    INFO(NCCL_GRAPH, "ncclOsTopoGetStrFromSys: device %s not found in SetupAPI enumeration", path);
+    SetupDiDestroyDeviceInfoList(deviceInfoSet);
+    return ncclSystemError;
+  }
+
+  // Handle different property queries
+  if (strcmp(fileName, "class") == 0) {
+    // Get PCI class code from Configuration Space (offset 0x08-0x0B)
+    // Read directly from device registry
+    ULONG bufferSize = sizeof(ULONG);
+
+    // Read PCI configuration space to get class code
+    BYTE configData[256];
+    DWORD configSize = 0;
+    if (readPciConfigSpace(deviceInfoData.DevInst, configData, sizeof(configData), &configSize)) {
+      // PCI class code is at offset 0x09-0x0B in config space
+      if (configSize >= 12) {
+        // Extract class code: Base (0x0B), Sub (0x0A), Prog IF (0x09)
+        DWORD baseClass = configData[11];
+        DWORD subClass = configData[10];
+        DWORD progIF = configData[9];
+        snprintf(strValue, maxLen, "0x%02x%02x%02x", (unsigned int)baseClass, (unsigned int)subClass,
+                 (unsigned int)progIF);
+      }
+    }
+  } else if (strcmp(fileName, "vendor") == 0) {
+    char hwId[MAX_PATH];
+    if (SetupDiGetDeviceRegistryPropertyA(deviceInfoSet, &deviceInfoData, SPDRP_HARDWAREID, NULL, (PBYTE)hwId, MAX_PATH,
+                                          NULL)) {
+      extractHexFromHwId(hwId, "VEN_", strValue, maxLen);
+    }
+  } else if (strcmp(fileName, "device") == 0) {
+    char hwId[MAX_PATH];
+    if (SetupDiGetDeviceRegistryPropertyA(deviceInfoSet, &deviceInfoData, SPDRP_HARDWAREID, NULL, (PBYTE)hwId, MAX_PATH,
+                                          NULL)) {
+      extractHexFromHwId(hwId, "DEV_", strValue, maxLen);
+    }
+  } else if (strcmp(fileName, "subsystem_vendor") == 0) {
+    char hwId[MAX_PATH];
+    if (SetupDiGetDeviceRegistryPropertyA(deviceInfoSet, &deviceInfoData, SPDRP_HARDWAREID, NULL, (PBYTE)hwId, MAX_PATH,
+                                          NULL)) {
+      // SUBSYS format: SUBSYS_12345678 where first 4 hex = device, next 4 = vendor
+      const char* subsys = strstr(hwId, "SUBSYS_");
+      if (subsys != NULL && strlen(subsys) >= 15) {
+        char subsysVendor[16];
+        // Extract last 4 hex digits (vendor)
+        snprintf(subsysVendor, sizeof(subsysVendor), "0x%.4s", subsys + 11);
+        snprintf(strValue, maxLen, "%s", subsysVendor);
+      }
+    }
+  } else if (strcmp(fileName, "subsystem_device") == 0) {
+    char hwId[MAX_PATH];
+    if (SetupDiGetDeviceRegistryPropertyA(deviceInfoSet, &deviceInfoData, SPDRP_HARDWAREID, NULL, (PBYTE)hwId, MAX_PATH,
+                                          NULL)) {
+      // SUBSYS format: SUBSYS_12345678 where first 4 hex = device, next 4 = vendor
+      const char* subsys = strstr(hwId, "SUBSYS_");
+      if (subsys != NULL && strlen(subsys) >= 15) {
+        char subsysDevice[16];
+        // Extract first 4 hex digits (device)
+        snprintf(subsysDevice, sizeof(subsysDevice), "0x%.4s", subsys + 7);
+        snprintf(strValue, maxLen, "%s", subsysDevice);
+      }
+    }
+  } else if (strcmp(fileName, "max_link_speed") == 0 || strcmp(fileName, "../max_link_speed") == 0) {
+    // Determine target device (self or parent)
+    DEVINST targetDevInst = deviceInfoData.DevInst;
+
+    // Check if we need to query parent device (upstream port)
+    if (strncmp(fileName, "../", 3) == 0) {
+      DEVINST parentDevInst;
+      if (CM_Get_Parent(&parentDevInst, deviceInfoData.DevInst, 0) == CR_SUCCESS) {
+        targetDevInst = parentDevInst;
+      } else {
+        INFO(NCCL_GRAPH, "ncclOsTopoGetStrFromSys: could not get parent device for %s", path);
+        SetupDiDestroyDeviceInfoList(deviceInfoSet);
+        return ncclSystemError;
+      }
+    }
+
+    // Read from PCIe capability structure
+    getPcieMaxLinkSpeed(targetDevInst, strValue, maxLen);
+  } else if (strcmp(fileName, "max_link_width") == 0 || strcmp(fileName, "../max_link_width") == 0) {
+    // Determine target device (self or parent)
+    DEVINST targetDevInst = deviceInfoData.DevInst;
+
+    // Check if we need to query parent device (upstream port)
+    if (strncmp(fileName, "../", 3) == 0) {
+      DEVINST parentDevInst;
+      if (CM_Get_Parent(&parentDevInst, deviceInfoData.DevInst, 0) == CR_SUCCESS) {
+        targetDevInst = parentDevInst;
+      } else {
+        INFO(NCCL_GRAPH, "ncclOsTopoGetStrFromSys: could not get parent device for %s", path);
+        SetupDiDestroyDeviceInfoList(deviceInfoSet);
+        return ncclSystemError;
+      }
+    }
+
+    // Read from PCIe capability structure
+    getPcieMaxLinkWidth(targetDevInst, strValue, maxLen);
+  } else if (strcmp(fileName, "numa_node") == 0) {
+    ULONG nodeNumber = 0;
+    DEVPROPTYPE propertyType;
+    DWORD propertySize = sizeof(nodeNumber);
+    if (SetupDiGetDevicePropertyW(deviceInfoSet, &deviceInfoData, &DEVPKEY_Device_Numa_Node, &propertyType,
+                                  (PBYTE)&nodeNumber, propertySize, &propertySize, 0)) {
+      snprintf(strValue, maxLen, "%lu", nodeNumber);
+    } else {
+      // Default: Assume node 0 (safest default for single-socket or non-NUMA systems)
+      snprintf(strValue, maxLen, "0");
+    }
+  }
+
+  SetupDiDestroyDeviceInfoList(deviceInfoSet);
+  return ncclSuccess;
+}
+
+/* NUMA and PCI device class functions */
+ncclResult_t ncclOsGetNumaNodeAffinity(unsigned int numaId, char* affinityStr, size_t maxLen) {
+  GROUP_AFFINITY groupAffinity = {};
+  if (GetNumaNodeProcessorMaskEx((USHORT)numaId, &groupAffinity)) {
+    KAFFINITY mask = groupAffinity.Mask;
+    uint32_t hi = (uint32_t)((uint64_t)mask >> 32);
+    uint32_t lo = (uint32_t)((uint64_t)mask & 0xFFFFFFFF);
+    if (hi) snprintf(affinityStr, maxLen, "%08x,%08x", hi, lo);
+    else snprintf(affinityStr, maxLen, "%08x", lo);
+  } else {
+    // Fallback: all CPUs set (64-bit mask as two 32-bit hex chunks)
+    snprintf(affinityStr, maxLen, "ffffffff,ffffffff");
+  }
+  return ncclSuccess;
+}
+
+// Get device class by busId (works for any PCI device - GPUs, switches, bridges, etc.)
+ncclResult_t ncclOsGetPciDeviceClassByBusId(const char* busId, char* deviceClass, size_t maxLen) {
+  // Parse the bus ID to extract bus, device, and function numbers
+  DWORD bus, dev, func;
+  if (!parsePciBusId(busId, &bus, &dev, &func)) {
+    WARN("ncclOsGetPciDeviceClassByBusId: Failed to parse PCI bus ID: %s", busId);
+    deviceClass[0] = '\0';
+    return ncclSystemError;
+  }
+
+  // Get device info using SetupAPI
+  DeviceInfo devInfo;
+  ncclResult_t ret = getDeviceInfo(bus, dev, func, &devInfo);
+  if (ret != ncclSuccess) {
+    // Device not found, return empty class
+    deviceClass[0] = '\0';
+    return ncclSystemError;
+  }
+
+  // Try to get class code from Configuration Manager registry.
+  // The PCI class code is stored in the device's registry under the Enum key.
+  char registryPath[512];
+  snprintf(registryPath, sizeof(registryPath), "SYSTEM\\CurrentControlSet\\Enum\\%s", devInfo.deviceInstanceId);
+
+  HKEY hKey;
+  if (RegOpenKeyExA(HKEY_LOCAL_MACHINE, registryPath, 0, KEY_READ, &hKey) == ERROR_SUCCESS) {
+    // Try to read ClassGUID first to determine device class
+    char classGuid[MAX_PATH];
+    DWORD dataSize = sizeof(classGuid);
+    DWORD dataType;
+
+    if (RegQueryValueExA(hKey, "ClassGUID", NULL, &dataType, (LPBYTE)classGuid, &dataSize) == ERROR_SUCCESS) {
+      INFO(NCCL_INIT, "ncclOsGetPciDeviceClassByBusId: ClassGUID: %s", classGuid);
+    }
+
+    // Try to read CompatibleIDs which might have CC_ field
+    char compatIds[1024];
+    dataSize = sizeof(compatIds);
+    if (RegQueryValueExA(hKey, "CompatibleIDs", NULL, &dataType, (LPBYTE)compatIds, &dataSize) == ERROR_SUCCESS) {
+      // CompatibleIDs is a multi-string, search for CC_ in any of them
+      for (DWORD i = 0; i < dataSize - 3; i++) {
+        if (compatIds[i] == 'C' && compatIds[i + 1] == 'C' && compatIds[i + 2] == '_') {
+          if (i + 9 < dataSize && strlen(&compatIds[i]) >= 9) {
+            char classStr[16];
+            snprintf(classStr, sizeof(classStr), "0x%.2s", &compatIds[i + 3]);
+            snprintf(deviceClass, maxLen, "%s", classStr);
+            INFO(NCCL_INIT, "ncclOsGetPciDeviceClassByBusId: Extracted class %s for %s", deviceClass, busId);
+            RegCloseKey(hKey);
+            return ncclSuccess;
+          }
+        }
+      }
+    }
+
+    RegCloseKey(hKey);
+  }
+
+  // Fallback: use the hardware ID already cached by getDeviceInfo
+  const char* classCode = strstr(devInfo.hwId, "CC_");
+  if (classCode != NULL && strlen(classCode) >= 9) {
+    char classStr[16];
+    snprintf(classStr, sizeof(classStr), "0x%.2s", classCode + 3);
+    snprintf(deviceClass, maxLen, "%s", classStr);
+    INFO(NCCL_INIT, "ncclOsGetPciDeviceClassByBusId: Extracted class %s for %s", deviceClass, busId);
+    return ncclSuccess;
+  }
+
+  // If still no class, try to infer from vendor/device ID
+  // NVIDIA GPUs (VEN_10DE) -> class 0x03 (display)
+  // Mellanox switches (VEN_15B3) -> class 0x06 (bridge) for DEV_1979 and similar
+  if (strstr(devInfo.deviceInstanceId, "VEN_10DE") != NULL) {
+    snprintf(deviceClass, maxLen, "0x03");
+  } else if (strstr(devInfo.deviceInstanceId, "VEN_15B3") != NULL &&
+             strstr(devInfo.deviceInstanceId, "DEV_1979") != NULL) {
+    snprintf(deviceClass, maxLen, "0x06");
+  } else {
+    deviceClass[0] = '\0';
+  }
+  return ncclSuccess;
+}
+
+ncclResult_t ncclOsGetPciDeviceClass(nvmlDevice_t device, char* deviceClass, size_t maxLen) {
+  // Get PCI bus ID from NVML device
+  nvmlPciInfo_t pciInfo;
+  ncclResult_t ret = ncclNvmlDeviceGetPciInfo(device, &pciInfo);
+  if (ret != ncclSuccess) {
+    WARN("Failed to get PCI info from NVML device");
+    return ret;
+  }
+
+  // Use the helper function with the busId
+  ncclResult_t classRet = ncclOsGetPciDeviceClassByBusId(pciInfo.busId, deviceClass, maxLen);
+  if (classRet != ncclSuccess) return classRet;
+  return ncclSuccess;
+}
+
+// Windows exposes no compute-partition attribute; report "unknown" so callers fall back.
+ncclResult_t ncclOsGetPciDeviceComputePartitionByBusId(const char* /*busId*/, char* partition, size_t maxLen) {
+  if (partition && maxLen > 0) partition[0] = '\0';
+  return ncclSystemError;
+}
+
+ncclResult_t ncclOsGetPciDeviceParent(nvmlDevice_t device, char** parentBusId) {
+  *parentBusId = NULL;
+
+  // Get PCI bus ID from NVML device
+  nvmlPciInfo_t pciInfo;
+  ncclResult_t ret = ncclNvmlDeviceGetPciInfo(device, &pciInfo);
+  if (ret != ncclSuccess) {
+    INFO(NCCL_INIT, "ncclOsGetPciDeviceParent: Failed to get PCI info from NVML device");
+    return ret;
+  }
+
+  INFO(NCCL_INIT, "ncclOsGetPciDeviceParent: Getting parent for device %s", pciInfo.busId);
+
+  // Parse the bus ID to extract bus, device, and function numbers
+  DWORD bus, dev, func;
+  if (!parsePciBusId(pciInfo.busId, &bus, &dev, &func)) {
+    WARN("ncclOsGetPciDeviceParent: Failed to parse PCI bus ID: %s", pciInfo.busId);
+    return ncclSystemError;
+  }
+
+  // Get device info using SetupAPI
+  DeviceInfo devInfo;
+  ret = getDeviceInfo(bus, dev, func, &devInfo);
+  if (ret != ncclSuccess) {
+    INFO(NCCL_INIT, "ncclOsGetPciDeviceParent: Could not find device %s", pciInfo.busId);
+    return ncclSystemError;
+  }
+
+  // Get parent device instance
+  DEVINST parentDevInst;
+  if (CM_Get_Parent(&parentDevInst, devInfo.devInst, 0) != CR_SUCCESS) {
+    INFO(NCCL_INIT, "ncclOsGetPciDeviceParent: No parent found for device %s", pciInfo.busId);
+    return ncclSystemError;
+  }
+
+  // Convert parent device instance to PCI bus ID
+  char parentBusIdBuf[BUSID_SIZE];
+  if (!getPciBusIdFromDevInst(parentDevInst, parentBusIdBuf, sizeof(parentBusIdBuf))) {
+    INFO(NCCL_INIT, "ncclOsGetPciDeviceParent: Could not get bus ID for parent device");
+    return ncclSystemError;
+  }
+
+  // Allocate and copy the parent bus ID
+  *parentBusId = _strdup(parentBusIdBuf);
+  if (*parentBusId == NULL) {
+    WARN("ncclOsGetPciDeviceParent: Failed to allocate memory for parent bus ID");
+    return ncclSystemError;
+  }
+
+  INFO(NCCL_INIT, "ncclOsGetPciDeviceParent: Device %s has parent %s", pciInfo.busId, *parentBusId);
+  return ncclSuccess;
 }

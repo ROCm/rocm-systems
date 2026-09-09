@@ -1,24 +1,6 @@
-/*
- * Copyright (c) Advanced Micro Devices, Inc. All rights reserved.
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- * THE SOFTWARE.
- */
+// Copyright Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
+
 #include "gpu_metrics_read.h"
 
 #include <gtest/gtest.h>
@@ -262,6 +244,20 @@ void TestGpuMetricsRead::Run(void) {
                   << "\n\t\t** XCD Counter Value: " << temp_xcd_counter_value << "\n";
       }
       CHK_ERR_ASRT(err);
+
+      // Verify XCD count is stable across multiple calls regardless of clock state
+      if (ret_xcd == AMDSMI_STATUS_SUCCESS && temp_xcd_counter_value > 0) {
+        auto xcd_count_verify = uint16_t(0);
+        auto ret_verify = amdsmi_get_gpu_xcd_counter(processor_handles_[i], &xcd_count_verify);
+        ASSERT_EQ(ret_verify, AMDSMI_STATUS_SUCCESS);
+        ASSERT_EQ(temp_xcd_counter_value, xcd_count_verify)
+            << "XCD count must be stable across calls (was " << temp_xcd_counter_value << ", now "
+            << xcd_count_verify << "). Count should not vary with GPU idle/clock-gated state.";
+        IF_VERB(STANDARD) {
+          std::cout << "\t\t** XCD counter stability verified: " << xcd_count_verify
+                    << " (current_gfxclk=" << smu.current_gfxclks[0] << " MHz)\n";
+        }
+      }
       amdsmi_asic_info_t asic_info = {};
       err = amdsmi_get_gpu_asic_info(processor_handles_[i], &asic_info);
       ASSERT_EQ(err, AMDSMI_STATUS_SUCCESS);

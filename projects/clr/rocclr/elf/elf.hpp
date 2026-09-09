@@ -299,6 +299,10 @@ class Elf {
   /* Return segment at index */
   bool getSegment(const unsigned int index, segment*& seg) const;
 
+  /* Pass as getElfSize()'s `size` when the buffer length is unknown, e.g.
+     hipModuleLoadData, which takes a pointer with no length. */
+  static constexpr size_t kUnknownSize = static_cast<size_t>(-1);
+
   /* Return size of elf file */
   static uint64_t getElfSize(const void* emi, const size_t size);
 

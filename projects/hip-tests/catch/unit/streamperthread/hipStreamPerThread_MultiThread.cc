@@ -13,17 +13,20 @@ static void Copy_to_device() {
   int* A_h = nullptr;
   int* A_d = nullptr;
 
-  HIP_CHECK(hipHostMalloc(&A_h, ele_size * sizeof(int)));
-  HIP_CHECK(hipMalloc(&A_d, ele_size * sizeof(int)));
+  // Threads are detached (no join), so there is no point to call
+  // HIP_CHECK_THREAD_FINALIZE. Use the abort-based HIPCHECK which does not touch
+  // thread-unsafe Catch2 state.
+  HIPCHECK(hipHostMalloc(&A_h, ele_size * sizeof(int)));
+  HIPCHECK(hipMalloc(&A_d, ele_size * sizeof(int)));
 
   for (unsigned int i = 0; i < ele_size; ++i) {
     A_h[i] = 123;
   }
-  HIP_CHECK(
+  HIPCHECK(
       hipMemcpyAsync(A_d, A_h, ele_size * sizeof(int), hipMemcpyHostToDevice, hipStreamPerThread));
   // Clean up
-  HIP_CHECK(hipHostFree(A_h));
-  HIP_CHECK(hipFree(A_d));
+  HIPCHECK(hipHostFree(A_h));
+  HIPCHECK(hipFree(A_d));
 }
 
 /*

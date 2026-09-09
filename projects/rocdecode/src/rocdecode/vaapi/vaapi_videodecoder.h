@@ -32,6 +32,7 @@ THE SOFTWARE.
 #include <dirent.h>
 #include <sys/stat.h>
 #include <cstring>
+#include <memory>
 #include <mutex>
 #include <algorithm>
 #include <unordered_map>
@@ -40,6 +41,9 @@ THE SOFTWARE.
 #include <va/va.h>
 #include <va/va_drm.h>
 #include <va/va_drmcommon.h>
+#ifdef ROCDECODE_USE_DLOPEN_VA
+#include "vaapi_loader.h"
+#endif
 #include "../../commons.h"
 #include "../../../api/rocdecode/rocdecode.h"
 
@@ -162,6 +166,13 @@ private:
     VaContext(const VaContext&) = delete;
     VaContext& operator = (const VaContext) = delete;
     ~VaContext();
+
+#ifdef ROCDECODE_USE_DLOPEN_VA
+    // Exclusively owns the dlopen handle and VA function pointer table.
+    // VaContext is a singleton so there is exactly one instance; unique_ptr
+    // is correct here. Outlives all VADisplay handles.
+    std::unique_ptr<VaapiLoader> va_loader_;
+#endif
 
     rocDecStatus InitHIP(int device_id, hipDeviceProp_t& hip_dev_prop);
     rocDecStatus InitVAAPI(int va_ctx_idx, std::string drm_node);
