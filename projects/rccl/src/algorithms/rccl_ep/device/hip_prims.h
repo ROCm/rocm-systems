@@ -67,12 +67,12 @@ __device__ __forceinline__ T warp_exclusive_sum(T v) {
 
 template <typename T>
 __device__ __forceinline__ T ld_acquire_sys(const T* p) {
-  return __hip_atomic_load(p, __ATOMIC_ACQUIRE, __HIP_MEMORY_SCOPE_SYSTEM);
+  return __scoped_atomic_load_n(p, __ATOMIC_ACQUIRE, __MEMORY_SCOPE_SYSTEM);
 }
 
 template <typename T>
 __device__ __forceinline__ void st_release_sys(T* p, T v) {
-  __hip_atomic_store(p, v, __ATOMIC_RELEASE, __HIP_MEMORY_SCOPE_SYSTEM);
+  __scoped_atomic_store_n(p, v, __ATOMIC_RELEASE, __MEMORY_SCOPE_SYSTEM);
 }
 
 }  // namespace rccl_ep

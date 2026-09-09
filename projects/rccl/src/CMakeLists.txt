@@ -1216,6 +1216,26 @@ if(RCCL_ROCPROFILER_REGISTER)
   target_link_libraries(
       rccl PRIVATE rocprofiler-register::rocprofiler-register)
 endif()
+
+# Poison the __hip_atomic_* builtins
+#==================================================================================================
+# RCCL spells device atomics with the Clang scoped-atomic builtins so that memory
+# scope is explicit at every call site. Force-include (rather than #include) the
+# poison header so it also covers hipified and generated sources, and set it here,
+# before DeviceLinker.cmake snapshots COMPILE_OPTIONS, so the per-kernel device
+# compiles inherit it too. See src/include/poison_hip_atomics.h for the coverage
+# this does and does not give.
+if(RCCL_POISON_HIP_ATOMICS)
+  # Joined --include=<file> rather than separate-argument -include <file>: as a
+  # single token it needs no cooperation from anything that forwards flags one
+  # at a time, so it survives rccl-device-compile's catch-all for unrecognized
+  # `-*` tokens as-is. That script also parses the separate-argument spelling
+  # (see the -include/-imacros branch in parse_compiler_flags), so either form
+  # works today; the joined one is used because it does not depend on that.
+  target_compile_options(rccl PRIVATE --include=${RCCL_SOURCE_DIR}/src/include/poison_hip_atomics.h)
+  message(STATUS "RCCL_POISON_HIP_ATOMICS enabled - __hip_atomic_* builtins rejected in RCCL sources")
+endif()
+
 # Device Linker: include pipeline and wire up dependencies
 # (placed after all target_compile_definitions so DeviceLinker.cmake
 #  can read the rccl target's definitions directly)

@@ -123,6 +123,7 @@ function display_help()
     echo "    -DENABLE_IFC=ON                       Enable indirect function call (default: OFF)"
     echo "    -DENABLE_RCCL_EP_IN_LIBRCCL=ON        Compile rccl_ep into librccl.so instead of the standalone librccl_ep.so; gfx9 only (default: OFF)"
     echo "    -DFAULT_INJECTION=OFF                 Disable fault injection (default: ON)"
+    echo "    -DRCCL_POISON_HIP_ATOMICS=OFF         Allow __hip_atomic_* builtins in RCCL sources (default: ON)"
     echo "    -DRCCL_ROCPROFILER_REGISTER=OFF       Disable rocprofiler-register support (default: ON)"
     echo "    -DTIMETRACE=ON                        Enable time-trace during compilation (default: OFF)"
     echo ""
