@@ -1353,11 +1353,7 @@ HSAKMT_STATUS WDDMDevice::WaitOnMultipleEvents(HsaEvent* events[], uint32_t num_
     if (remaining_ms < 0) remaining_ms = 0;
 
     int ret = poll(pfds, num_elems, remaining_ms);
-    if (ret < 0) {
-      if (errno == EINTR) continue;
-      pr_err("poll() failed: %d\n", errno);
-      return HSAKMT_STATUS_WAIT_FAILURE;
-    }
+    if (ret < 0) return HSAKMT_STATUS_WAIT_FAILURE;
     if (ret > 0) {
       for (uint32_t i = 0; i < num_elems; ++i) {
         if ((pfds[i].revents & POLLIN) && !signaled[i]) {
