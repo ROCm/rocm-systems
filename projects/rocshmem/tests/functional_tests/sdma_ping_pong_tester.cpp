@@ -114,15 +114,17 @@ __global__ void SdmaPingPongTest(int loop, int skip,
         if (pe == 0) {
           sdma_anvil::put(*handle, remote_r_buf, my_s, size);
           sdma_anvil::quiet(*handle);
-          __hip_atomic_fetch_add(remote_sig, 1ULL, __ATOMIC_RELAXED,
-                                 __HIP_MEMORY_SCOPE_SYSTEM);
+          detail::atomic::fetch_add<uint64_t, uint64_t,
+              detail::atomic::memory_scope_system>(
+              remote_sig, 1ULL, detail::atomic::memory_order_relaxed);
           sdma_anvil::waitSignal(my_sig, expected);
         } else {
           sdma_anvil::waitSignal(my_sig, expected);
           sdma_anvil::put(*handle, remote_r_buf, my_s, size);
           sdma_anvil::quiet(*handle);
-          __hip_atomic_fetch_add(remote_sig, 1ULL, __ATOMIC_RELAXED,
-                                 __HIP_MEMORY_SCOPE_SYSTEM);
+          detail::atomic::fetch_add<uint64_t, uint64_t,
+              detail::atomic::memory_scope_system>(
+              remote_sig, 1ULL, detail::atomic::memory_order_relaxed);
         }
       }
     }

@@ -145,8 +145,8 @@ class NotifierBlockTestFixture : public NotifierBase {
 };
 
 class NotifierAgentTestFixture : public NotifierBase {
-    using NotifierT = Notifier<detail::atomic::memory_scope_agent>;
-    using NotifierProxyT = NotifierProxy<detail::atomic::memory_scope_agent>;
+    using NotifierT = Notifier<detail::atomic::memory_scope_device>;
+    using NotifierProxyT = NotifierProxy<detail::atomic::memory_scope_device>;
 
   public:
     void
