@@ -51,9 +51,18 @@ embedded in the code object, determines the grid and workgroup
 dimensions, and dispatches workgroups to available CUs across the shader
 engines within its XCD.
 
-The CP also handles SDMA packets for host-to-device and device-to-device
-copy, fill, GCR (global cache request), and HDP flush operations. A
-completion tracker inside each XCD monitors per-dispatch workgroup
+AQL, PM4, and SDMA use a common compile-time packet-processor contract but
+retain distinct concrete processors. The command processor owns the AQL and
+PM4 processors; the SoC-owned SDMA scheduler owns the SDMA processor. Queue
+owners, rather than packet processors or PCI/VFIO adapters, retain ring cursors,
+VM snapshots, retry state (including SDMA's opaque typed continuation), and
+scheduling policy. They also retain a VM binding lease until detach, preventing
+address-space teardown while future snapshots can still be created without
+conflating execution lifetime with frontend references.
+
+SDMA queues use the separate SoC-owned SDMA scheduler, ring consumer, and
+packet processor; no SDMA packet logic is part of the CP. A completion tracker
+inside each XCD monitors per-dispatch workgroup
 retirement and fires completion signals in submission order. When a
 hardware queue becomes idle, the tracker writes the queue-inactive
 signal.

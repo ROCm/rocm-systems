@@ -15,14 +15,29 @@ execution.
 | `kmd/linux/simulated_kfd.h/cpp` | SimulatedKfd: the KMD interface, serving the KFD ioctl surface |
 | `amdgpu/iod.h/cpp` | IOD: I/O die with memory-side cache and HBM controllers |
 | `amdgpu/memory_side_cache.h/cpp` | Memory-side cache component between L2 and HBM |
-| `amdgpu/hbm_controller.h` | HBM memory controller wrapping GpuMemory |
+| `amdgpu/hbm_controller.h` | HBM request adapter that routes VM-tagged traffic through GpuVm before accessing GpuMemory |
 | `rj_vm.cpp` | C API: create, step, run, checkpoint |
 | `amdgpu/command_processor.h/cpp` | CP: dispatch packets, doorbell loop |
 | `amdgpu/compute_unit.h/cpp` | CU: wavefront slots, register files, execution |
 | `amdgpu/shader_engine.h/cpp` | SE: container of compute units |
 | `amdgpu/xcd.h/cpp` | XCD: CP + shader engines |
 | `amdgpu/wavefront.h/cpp` | Wavefront: ISA-specific thread state |
-| `amdgpu/gpu_memory.h` | GpuMemory: flat address space wrapper |
+| `amdgpu/gpu_vm.h/cpp` | GpuVm: address-space identity, translation, permissions, lifetime, and physical-access routing |
+| `kmd/linux/legacy_gpu_vm.h/cpp` | LegacyGpuVmAdapter: KFD-owned compatibility bindings registered with GpuVm |
+| `amdgpu/legacy_address_space.h` | LegacyAddressSpace: interposer compatibility translation, passthrough, faults, and client-process access |
+| `amdgpu/gpu_memory.h` | GpuMemory: physical sparse backing bytes only |
+| `amdgpu/sdma_queue_scheduler.h/cpp` | SdmaQueueScheduler: SoC-owned SDMA queue scheduler and worker lifetime |
+| `amdgpu/sdma_queue_binding_factory.h/cpp` | Reusable `GpuQueueRegistry` binding factory shared by KFD and PCI/MES SDMA frontends |
+| `amdgpu/sdma_ring_consumer.h/cpp` | `SdmaRingConsumer`: per-queue ring cursor, fetch, retry, execution, and retirement publication |
+| `amdgpu/sdma_packet_processor.h/cpp` | SdmaPacketProcessor: SDMA packet decoding and effects over caller-owned typed continuation state |
+| `amdgpu/packet_processor.h` | Shared compile-time one-packet contract and validated protocol-independent result envelope |
+| `amdgpu/aql_packet_processor.h/cpp` | AqlPacketProcessor: fixed-size AQL decode and durable CP admission |
+| `amdgpu/pm4_packet_processor.h/cpp` | Pm4PacketProcessor: PM4 framing, validation, and supported packet effects |
+| `amdgpu/pm4_ring_consumer.h/cpp` | `Pm4RingConsumer`: per-queue ring traversal, retry, and cursor publication owned by the CP |
+| `amdgpu/pm4_queue_controller.h/cpp` | Pm4QueueController: CP-owned PM4 queue, VM snapshot, retry, and cursor-publication state |
+| `amdgpu/pm4_queue_binding_factory.h/cpp` | Thin PM4 lifetime/notification adapter from GpuQueueRegistry to the owning CP |
+| `amdgpu/gpu_queue_registry.h/cpp` | Frontend-neutral queue admission, lifetime, routing, and generation-safe handles |
+| `amdgpu/aql_queue_binding_factory.h/cpp` | Reusable binding adapter from GpuQueueRegistry to the AQL command processor |
 
 ---
 
@@ -40,7 +55,9 @@ SimulationEngine                           (simdojo - owns topology)
             │                                "soc", and find_child returns the first
             │                                match, so the wrapper is what keeps the
             │                                paths unique)
-            ├── GpuMemory ("memory")        (shared across all XCDs)
+            ├── GpuVm                       (shared address-space service)
+            ├── GpuMemory ("memory")        (physical sparse backing only)
+            ├── SdmaQueueScheduler          (shared queue worker and scheduler)
             ├── Iod[0..I] ("iod0"..)       (CompositeComponent - memory-side cache + HBM controllers)
             └── Xcd[0..N] ("xcd0"..)       (CompositeComponent)
                 ├── CommandProcessor ("cp") (Component - event-driven dispatch)
@@ -52,6 +69,138 @@ The `VirtualMachine` is a `simdojo::CompositeComponent` set as the topology root
 and it owns the simulated KFD alongside its SoCs. The simulation infrastructure
 (engine, topology, partitioning) is managed by `SimulationEngine`; the SoC
 represents the hardware being modeled.
+
+## Address spaces, translation, and backing
+
+`GpuVm` is the frontend-neutral address-space authority. It owns identity,
+generation, invalidation epochs, immutable access snapshots, translation,
+permissions, and fault policy, but it does not own KFD process state or a
+transport session. The KFD-owned `LegacyGpuVmAdapter` creates one isolated
+`LegacyAddressSpace` compatibility binding per process registration and supplies
+it to `GpuVm` as both translator and backing. The PCI path instead registers a
+GFX12 page-table translator and a `PhysicalMemoryAccess` backing supplied by the
+active PCI transport session. Both receive an `AddressSpaceHandle`, and queues,
+dispatches, and wavefronts carry that handle rather than treating a numeric
+VMID/PASID as lifetime identity.
+
+An address-space slot generation changes when a slot is destroyed and reused.
+Its translation epoch changes when a root is replaced or invalidated. A
+`GpuVmAccess` captures the handle, epoch, translator, and physical backing under
+one lock for the duration of an operation. This prevents a multi-page access
+from combining an old root with a replacement backing and provides
+`VmCacheNamespace` for virtually indexed clean caches. Access results are
+typed as complete, temporarily unavailable, faulted, or malformed; transport
+availability is not encoded as a fake mapping in `GpuMemory`.
+
+Queue execution owners separately retain a move-only `GpuVmBindingLease` for as
+long as they may begin new access transactions. Unregister, reset, and GART-root
+removal reject a binding while such a lease exists. This execution-lifetime pin
+does not alter frontend-visible queue-reference counts: a frontend owns its
+registry binding, while the CP or SDMA scheduler independently owns the right to
+take future VM snapshots until queue detach completes.
+
+`GpuMemory` owns only sparse physical bytes. It has no VMID-aware request port,
+translation state, process mapping, or frontend policy. HBM controllers are the
+simdojo memory-protocol adapters: they resolve VM-tagged requests through
+`GpuVm` and issue VMID-zero physical requests directly to `GpuMemory`. The
+generic simdojo message header carries an optional typed completion status, and
+the HBM controller maps complete, unavailable, faulted, and malformed VM
+outcomes into that response while preserving the existing response opcode.
+
+Standalone model queues use a SoC-owned, handle-only identity address space.
+`IdentityAddressSpaceTranslator` preserves their flat addresses, while
+`GpuMemoryPhysicalAccess` adapts translated physical operations to the sparse
+backing store. The binding is deliberately absent from numeric VMID routing, so
+it can coexist with a frontend-owned VMID-0 GART binding. Command processors
+substitute this handle only when an internal queue omits one; all packet fetch,
+dependency, dispatch, cursor, and completion accesses then follow the same
+`GpuVmAccess` path as frontend-created queues. `SoC::set_memory()` installs this
+backing during configuration; it may reinstall the same backing after an
+explicit VM reset, but it does not replace one live backing object with another.
+
+PCI and VFIO remain transport and MMIO layers. They publish address-space and
+queue operations to the shared `GpuVm`, queue registry, and queue-owner services and do not duplicate
+translation, TLB/MMU policy, CP, MES, SDMA, or memory-backing behavior.
+
+### Translated PCI cache boundary
+
+The existing scalar, vector, and L2 caches are keyed by numeric VMID and virtual
+address, and L2 writeback targets `GpuMemory`. They are therefore valid only for
+the legacy compatibility binding today. Translated PCI/VFIO scalar and vector
+loads, stores, and atomics intentionally bypass those caches and operate through
+one `GpuVmAccess` snapshot per instruction. Contiguous lanes are still grouped
+into block accesses, and atomics use the backing's indivisible load and
+compare/exchange operations rather than synthesized read/write pairs.
+
+The instruction cache is clean-only, so translated instruction fetch can use it
+safely: its tag includes the full address-space handle generation and
+translation epoch. Root replacement or slot reuse consequently misses without
+allowing stale code from the prior namespace to alias.
+
+This bypass is a safe intermediate state, not the final physical-cache model. A
+future translated data-cache implementation must key lines by physical
+backing/domain identity plus translated line address and retain the backing
+snapshot needed for eviction. Until that contract exists, routing translated
+data through the legacy caches would permit dirty lines from an old binding to
+write into a replacement backing and is prohibited.
+
+### SDMA queue execution
+
+`SdmaQueueScheduler` is owned by the SoC and runs one dedicated worker for all SDMA
+queues. It owns scheduling, bounded root-packet turns, temporary-failure retries,
+terminal queue state, and detach quiescence. Producer submission only raises the
+monotonic service target; it does not transfer retry ownership back to a frontend.
+`GpuQueueRegistry` provides generation-checked frontend lifetime, while the shared
+SDMA binding factory translates frontend-neutral queue operations into scheduler operations.
+Long-running copy, fill, or indirect packets retain resumable continuation state,
+but the current functional model does not preempt them with an intra-packet work quantum.
+
+Each scheduler-owned `SdmaRingConsumer` is the sole owner of one root ring's
+transport-independent execution state. It captures one `GpuVmAccess` snapshot
+for the head-packet transaction, fetches the one-dword framing prefix and only
+the additional bytes requested by the processor, owns the typed SDMA
+continuation supplied to `SdmaPacketProcessor`, resumes at the first uncommitted
+packet effect without transferring the VM snapshot, and atomically publishes
+the retired byte cursor. A packet such as `COND_EXE` may determine a retirement
+extent larger than its decoded header; the consumer retains that completed
+decision without re-evaluating it, but does not advance beyond the producer-visible
+ring extent. An unavailable access retains the snapshot and exact progress for a
+later retry; faulted or malformed work becomes terminal after any required cursor
+publication.
+
+KFD and PCI/MES only adapt queue creation, producer notifications, interrupts,
+and reset into `GpuQueueRegistry`. MES may supply the initial device cursor captured
+from an MQD. KFD supplies the zero cursor it establishes during queue creation.
+A legacy or restored queue without an explicit device cursor initializes from
+its published read pointer. These front ends must not duplicate scheduling,
+ring fetch, packet decoding, retry, or cursor-publication state. The command
+processor serves compute queues only and has no SDMA implementation or state.
+
+The AQL command processor, restricted PM4 compute-queue path, and SDMA
+scheduler use the same compile-time packet-processor interface and
+`PacketProcessResult` envelope, not a common execution engine. SDMA may suspend
+after a partial effect, so its ring consumer owns an opaque typed continuation
+that only `SdmaPacketProcessor`
+interprets; AQL and PM4 block only before committing an effect and can restart
+the same request. The common `required_bytes` field requests more head-packet
+input; `retirement_bytes` reports the eventual cursor advance and can include a
+protocol-defined skipped extent, which the ring owner must bound against its ring
+and producer cursor. Ring ownership, VM snapshots, scheduling, consumer publication,
+and completion remain outside packet processors. Guest-controlled AQL validation failures are
+reported through the typed packet/admission result and fault only their queue;
+internal invariant violations remain exceptions.
+The firmware-free PM4 path supports a restricted compute-queue packet subset,
+rather than general PM4. MES maps its MQD and address space, but submits the
+queue through `GpuQueueRegistry` to a selected command processor. The binding
+retains only a CP registration token; the CP-owned queue controller retains the
+VM snapshot, ring traversal, packet processor, and retry-safe cursor publication.
+The PCI/MMIO layer supplies only the narrow register-write sink. PM4 service runs
+outside the AQL queue lock and uses bounded queue turns for event-loop fairness.
+
+Graceful AQL removal is a publication barrier. The CP retains the registration
+while a consumed ring cursor, dispatch completion, or queue-idle signal still
+needs retry, and reports a terminal publication failure instead of silently
+dropping it. Reset and rollback use a distinct force-cancel operation.
 
 ---
 
@@ -88,10 +237,10 @@ returns *owns* the queue: it alone reads the ring, advances the read pointer, an
 holds each dispatch's completion signal. It is not the only XCD that runs the
 work.
 
-`HwQueue::xcd_fanout` is the switch. A queue that sets it is replicated onto
+`AqlQueueConfig::xcd_fanout` is the switch. A queue that sets it is replicated onto
 every XCD at registration; a queue that does not keeps the whole grid on the CP
-it was registered against. The KFD path sets it for compute queues and leaves it
-clear for SDMA, which belongs to one engine; a test queue opts in through
+it was registered against. The KFD path sets it for supported AQL compute queues;
+SDMA queues instead belong to the SoC scheduler. A test queue opts in through
 `AqlQueue(..., xcd_fanout=true)` and leaves it clear otherwise. The creation path
 is not itself the switch — either path can produce either kind of queue.
 
@@ -169,10 +318,11 @@ the grid does wake every XCD, but that wake travels the engine's cross-thread
 async queue, which neither contributes to LBTS nor counts as outstanding work
 when the engine tests for termination: with one partition per XCD, every
 partition can go quiescent in the same epoch the wake is deposited, and the run
-ends before the next epoch delivers it. The re-check keeps the waiting
-partition's next-event time finite, which leaves the wake an optimization rather
-than the only thing standing between the grid retiring and the signal being
-written.
+ends before the next epoch delivers it. Unbounded one-tick polling also creates
+unnecessary scheduler traffic. The re-check therefore uses bounded backoff to
+keep the waiting partition's next-event time finite while leaving the wake an
+optimization rather than the only thing standing between grid retirement and
+signal publication.
 
 A peer shard carries no completion signal and does not report the queue idle. The
 packet-scoped plugin callbacks are emitted once for the packet rather than once per
@@ -206,7 +356,7 @@ replicas in XCD order while a later owner is still registered.
 The CP is event-driven, and work reaches it only through a registered queue --
 there is no submit entry point on the CP itself:
 
-- `register_queue(HwQueue)` / `unregister_queue(...)` - attach and detach a HW
+- `register_queue(AqlQueueConfig)` / `unregister_queue(...)` - attach and detach an AQL
   queue. A host-accessible queue also starts the doorbell poll thread -- unless it
   is a fan-out replica. Peer copies of a fanned-out queue are host-accessible too,
   but their work arrives as dispatch shards from the owning XCD; a replica that read
@@ -267,6 +417,13 @@ is no separate lazy retirement pass). When a CU has no resident
 wavefronts it stops scheduling and fires its `on_idle` callback. When all
 CUs are idle and no packets remain, the CP signals completion via
 `engine()->primary_release()`.
+
+Completion-signal and queue-inactive writes are durable per-queue journals.
+An unavailable translated backing pauses admission and advancement only for
+the queue whose journal is incomplete; the CP continues fetching, dispatching,
+and retiring independent queues. A later retry resumes at the first uncommitted
+publication stage, so callbacks, signal updates, mailbox writes, and interrupts
+are not replayed.
 
 ---
 
