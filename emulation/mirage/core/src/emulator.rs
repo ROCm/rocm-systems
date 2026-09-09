@@ -224,6 +224,30 @@ pub trait EmulatorBackend: Sync + Send + std::fmt::Debug {
     /// check if the emulator is supported on this host, i.e. meets the hardware/environment requirements to run. This is a stronger condition than `installed`: an emulator can be installed but unsupported (e.g. HotSwap installed on a machine with no compatible physical GPU), or supported but not installed.
     fn supported(&self) -> SupportStatus;
 
+    /// The GPU ISA the ROCm runtime will be asked to recognise when this
+    /// backend runs `def`, as a conventional gfx name (`gfx1250`).
+    ///
+    /// Only for a backend that makes a device appear which is not the
+    /// host's own. That device is enumerated by `libhsa-runtime64.so`
+    /// like any other, which means it is also *skipped* like any other
+    /// whose ISA that runtime was not built for — silently, leaving a
+    /// session that starts, a workload that runs and an exit status of 0
+    /// with no GPU behind any of it. Answering here is what lets mirage
+    /// check the emulated target against the runtime before the session
+    /// costs anything; see [`crate::rocr`].
+    ///
+    /// The default is `None`, which is the right answer for every
+    /// backend that runs on real hardware — `hotswap` and `rocjitsu-dbt`
+    /// retarget code *onto* the host's own GPU, so the agent ROCr
+    /// enumerates is one it already supports and the profile's own
+    /// target says nothing about whether the session will work. `None`
+    /// is also the right answer when the backend cannot tell, which
+    /// leaves mirage quiet rather than guessing.
+    fn emulated_isa(&self, def: &ProfileDef) -> Option<String> {
+        let _ = def;
+        None
+    }
+
     /// Discovers available plugins for the emulator.
     fn discover_plugins(&self) -> Vec<PluginsDef>;
 

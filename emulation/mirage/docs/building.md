@@ -285,6 +285,24 @@ test suite.
 - **`no mirage run is serving session <id>`** — the run that owned the
   session has exited. A session exists exactly as long as its `mirage
   run` does; start one in another terminal and `mirage exec` into that.
+- **The workload sees no GPU, and exits 0 anyway** — `rocminfo` reports
+  only the CPU agent, the session came up normally and nothing failed.
+  Almost always this is a ROCm that predates the GPU the profile
+  emulates: `libhsa-runtime64.so` enumerates agents by looking their ISA
+  up in the table it was compiled with, and one it does not recognise is
+  skipped without a word. mirage checks for it before the session starts
+  and warns —
+
+  > `mirage: the ROCm runtime this session will load does not support
+  > gfx1250, which is the GPU this profile emulates. …`
+
+  — naming the runtime it read and the ROCm version beside it. Run the
+  workload under a newer ROCm (`mirage run --image <a newer ROCm image>`
+  is the usual way) or pick a profile whose target this ROCm supports.
+  The check is best-effort — it reads the target list out of the
+  runtime's own binary, because there is no API to ask — and says
+  nothing at all when it cannot reach a verdict, so its silence does not
+  rule the cause out.
 - **A backend reported as not installed** — run `mirage emulators -l`
   first. It prints every path that was searched for that backend's
   library and the environment variables that would resolve it, which is
