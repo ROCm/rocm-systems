@@ -201,7 +201,7 @@ void ComputeQueue::HandleError(hsa_status_t status) {
 }
 
 void ComputeQueue::FaultMonitorThread(ComputeQueue* queue) {
-  constexpr int kStallTimeoutMs = 5000;
+  constexpr int kStallTimeoutMs = 30000;
   uint64_t last_rptr = 0;
   auto last_progress = std::chrono::steady_clock::now();
 
@@ -211,24 +211,29 @@ void ComputeQueue::FaultMonitorThread(ComputeQueue* queue) {
         queue->error_code_->load(std::memory_order_acquire) != 0) {
       int64_t code = queue->error_code_->load(std::memory_order_relaxed);
       pr_err("GPU fault detected via error_reason: 0x%" PRIx64 "\n", static_cast<uint64_t>(code));
+      queue->thread_stop_ = true;
       queue->HandleError(static_cast<hsa_status_t>(HSA_STATUS_ERROR_MEMORY_APERTURE_VIOLATION));
       return;
     }
 
     // Stall detection: rptr hasn't advanced while work is pending.
-    uint64_t current_rptr = queue->ring_rptr->load(std::memory_order_relaxed);
-    uint64_t current_wptr = queue->ring_wptr->load(std::memory_order_relaxed);
-    if (current_rptr != last_rptr) {
-      last_rptr = current_rptr;
-      last_progress = std::chrono::steady_clock::now();
-    } else if (current_wptr > current_rptr) {
-      auto stall_duration = std::chrono::steady_clock::now() - last_progress;
-      if (stall_duration > std::chrono::milliseconds(kStallTimeoutMs)) {
-        pr_err("GPU stall detected: rptr=%" PRIu64 " wptr=%" PRIu64
-               " stalled for %dms — possible device memory fault\n",
-               current_rptr, current_wptr, kStallTimeoutMs);
-        queue->HandleError(static_cast<hsa_status_t>(HSA_STATUS_ERROR_MEMORY_APERTURE_VIOLATION));
-        return;
+    // Skipped when disable_wait_timeout_ is set (user opt-out for long-running kernels).
+    if (!dxg_runtime->disable_wait_timeout_) {
+      uint64_t current_rptr = queue->ring_rptr->load(std::memory_order_relaxed);
+      uint64_t current_wptr = queue->ring_wptr->load(std::memory_order_relaxed);
+      if (current_rptr != last_rptr) {
+        last_rptr = current_rptr;
+        last_progress = std::chrono::steady_clock::now();
+      } else if (current_wptr > current_rptr) {
+        auto stall_duration = std::chrono::steady_clock::now() - last_progress;
+        if (stall_duration > std::chrono::milliseconds(kStallTimeoutMs)) {
+          pr_err("GPU stall detected: rptr=%" PRIu64 " wptr=%" PRIu64
+                 " stalled for %dms — possible device memory fault\n",
+                 current_rptr, current_wptr, kStallTimeoutMs);
+          queue->thread_stop_ = true;
+          queue->HandleError(static_cast<hsa_status_t>(HSA_STATUS_ERROR_MEMORY_APERTURE_VIOLATION));
+          return;
+        }
       }
     }
 
@@ -248,9 +253,12 @@ void ComputeQueue::AqlToPm4Thread(ComputeQueue* queue) {
 
   while (true) {
     // Poll error_reason for trap handler fault codes (DXG lacks KFD event path).
+    if (queue->thread_stop_) break;
     if (queue->error_code_ && queue->error_code_->load(std::memory_order_acquire) != 0) {
+      if (queue->thread_stop_) break;
       int64_t code = queue->error_code_->load(std::memory_order_relaxed);
       pr_err("GPU fault detected via error_reason: 0x%" PRIx64 "\n", static_cast<uint64_t>(code));
+      queue->thread_stop_ = true;
       queue->HandleError(static_cast<hsa_status_t>(HSA_STATUS_ERROR_MEMORY_APERTURE_VIOLATION));
       break;
     }
@@ -1147,11 +1155,11 @@ hsa_status_t ComputeQueue::Process(void) {
 
     // CPU wait for GPU fence, and cpu update the signal.
     if (!platform_atomic_support_ && signal_addr_) {
-      // Poll fence with timeout — CpuWait has no timeout parameter.
-      constexpr int kFaultTimeoutMs = 10000;
+      constexpr int kFaultTimeoutMs = 30000;
       auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(kFaultTimeoutMs);
       while (*sync_addr < cmdbuf_aql_frame_write_index) {
-        if (std::chrono::steady_clock::now() >= deadline) {
+        if (!dxg_runtime->disable_wait_timeout_ &&
+            std::chrono::steady_clock::now() >= deadline) {
           pr_err("GPU fence timeout after %dms — possible device fault (sync_addr=%" PRIu64
                  " expected=%" PRIu64 ")\n", kFaultTimeoutMs, *sync_addr, cmdbuf_aql_frame_write_index);
           return static_cast<hsa_status_t>(HSA_STATUS_ERROR_MEMORY_APERTURE_VIOLATION);

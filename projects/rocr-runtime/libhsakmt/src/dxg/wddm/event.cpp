@@ -133,7 +133,7 @@ static void* FdToHandle(int fd) { return reinterpret_cast<void*>(static_cast<int
 Event::~Event() {
   if (os_event_ == nullptr) return;
   int fd = EventFd(os_event_);
-  if (fd >= 0) {
+  if (fd >= 0 && !is_reference_) {
     WDDMDevice* device = WddmDevice(0);
     if (device && EventId != 0) {
       device->UnregisterEvent(EventId, os_event_);
