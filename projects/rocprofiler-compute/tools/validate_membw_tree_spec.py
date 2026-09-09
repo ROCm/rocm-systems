@@ -18,7 +18,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 ANALYSIS_DIR = PROJECT_ROOT / "src" / "rocprof_compute_soc" / "analysis_configs"
 sys.path.insert(0, str(PROJECT_ROOT / "src"))
 
-from membw_analysis.guidance import _PLACEHOLDER_RE  # noqa: E402
+from membw_analysis.guidance import _METRIC_THRESHOLD_RE  # noqa: E402
 from membw_analysis.models import MEMBW_TABLE_IDS  # noqa: E402
 from membw_analysis.tree_spec import (  # noqa: E402
     collect_metric_keys,
@@ -68,6 +68,11 @@ def validate() -> list[str]:
             errors.append(f"[{arch}] tree spec failed to load")
             continue
 
+        print(
+            f"[{arch}] schema hash: {tree_spec.schema_hash}",
+            file=sys.stderr,
+        )
+
         tree_keys = collect_metric_keys(tree_spec)
         analysis_metrics = load_analysis_metrics(arch)
 
@@ -95,7 +100,7 @@ def validate() -> list[str]:
                 )
 
         for gid, template in tree_spec.guidance_templates.items():
-            for match in _PLACEHOLDER_RE.finditer(template):
+            for match in _METRIC_THRESHOLD_RE.finditer(template):
                 kind, key = match.group(1), match.group(2)
                 if kind == "metric" and key not in analysis_metrics:
                     errors.append(

@@ -18,6 +18,11 @@ from rich.text import Text
 
 from utils.utils_analysis import format_bw_human_readable
 
+CachePanelRow = Union[
+    tuple[str, Any, str, str],
+    tuple[str, Any, str, str, bool],
+]
+
 COLORS = {
     "kernel": "green",
     "block": "blue",
@@ -232,12 +237,7 @@ def build_kernel_panel(
 
 def build_cache_panel(
     title: str,
-    rows: list[
-        Union[
-            tuple[str, Any, str, str],
-            tuple[str, Any, str, str, bool],
-        ]
-    ],
+    rows: list[CachePanelRow],
     width: int,
     height: int,
     border_style: str = COLORS["block"],
