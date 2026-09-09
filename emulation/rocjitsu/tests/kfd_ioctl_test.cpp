@@ -91,7 +91,7 @@ TEST(CommandProcessorTest, InterruptCallbackRemovalWaitsForActiveCall) {
   cp.shutdown();
 }
 
-TEST(CommandProcessorTest, InterruptCallbackCanRemoveItself) {
+int run_interrupt_callback_self_removal() {
   rocjitsu::amdgpu::CommandProcessor cp("cp");
   std::promise<void> callback_removed_itself;
   std::promise<void> release_callback;
@@ -103,14 +103,8 @@ TEST(CommandProcessorTest, InterruptCallbackCanRemoveItself) {
     release_callback.get_future().wait();
   });
 
-  auto callback_removed_itself_future = callback_removed_itself.get_future();
   std::jthread caller([&] { cp.invoke_interrupt_callback_for_test(1, 2); });
-  if (callback_removed_itself_future.wait_for(std::chrono::seconds(1)) !=
-      std::future_status::ready) {
-    release_callback.set_value();
-    caller.join();
-    FAIL() << "interrupt callback did not complete reentrant removal";
-  }
+  callback_removed_itself.get_future().wait();
   std::promise<void> drain_reached;
   cp.set_interrupt_callback_drain_hook_for_testing([&] { drain_reached.set_value(); });
   auto external_replacement =
@@ -123,17 +117,35 @@ TEST(CommandProcessorTest, InterruptCallbackCanRemoveItself) {
     release_callback.set_value();
     caller.join();
     external_replacement.wait();
-    FAIL() << "external callback replacement did not reach its generation drain";
+    return 1;
   }
-  EXPECT_EQ(external_replacement.wait_for(std::chrono::milliseconds(20)),
-            std::future_status::timeout);
+  if (external_replacement.wait_for(std::chrono::milliseconds(20)) != std::future_status::timeout) {
+    release_callback.set_value();
+    caller.join();
+    return 2;
+  }
 
   release_callback.set_value();
-  EXPECT_EQ(external_replacement.wait_for(std::chrono::seconds(1)), std::future_status::ready);
+  if (external_replacement.wait_for(std::chrono::seconds(1)) != std::future_status::ready) {
+    caller.join();
+    return 3;
+  }
   caller.join();
   cp.set_interrupt_callback_drain_hook_for_testing({});
   cp.invoke_interrupt_callback_for_test(1, 2);
-  EXPECT_EQ(calls.load(), 1u);
+  return calls.load() == 1 ? 0 : 4;
+}
+
+TEST(CommandProcessorTest, InterruptCallbackCanRemoveItself) {
+  GTEST_FLAG_SET(death_test_style, "threadsafe");
+  ASSERT_EXIT(
+      {
+        // Reentrant removal is itself the deadlock probe. Isolate it so the
+        // alarm terminates only this child and CTest reports a bounded failure.
+        alarm(5);
+        _exit(run_interrupt_callback_self_removal());
+      },
+      ::testing::ExitedWithCode(0), "");
 }
 
 const std::string CONFIG_PATH = std::string(CONFIG_DIR) + "/gfx950_mi355x.json";
