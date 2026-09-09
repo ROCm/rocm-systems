@@ -68,6 +68,7 @@ inline void
 on_kfd_event_dropped_events(typename SdkBackend::kfd_event_dropped_record* record,
                             void*                                          data)
 {
+    (void) data;
     if(!record)
     {
         return;
