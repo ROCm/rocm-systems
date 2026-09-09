@@ -156,8 +156,8 @@ def test_pc_sampling_analyze_database_output(
             ).fetchone()[0]
             db_pc_sampling = pd.read_sql_query(
                 "SELECT kernel_name, offset, instruction, source, count, "
-                "count_issue, count_stall, wave_occupancy_percent, "
-                "active_thread_percent, stall_reason "
+                "issue_count, stall_count, "
+                '"wave_occupancy(%)", "active_thread_rate(%)", stall_reason '
                 "FROM compute_pc_sampling_summary_view "
                 "ORDER BY kernel_name, offset",
                 conn,
@@ -304,9 +304,9 @@ def test_pc_sampling_analyze_csv_output(
         assert len(csv_pc_sampling) == 19
         assert csv_pc_sampling["count"].sum() == 857
         assert set(csv_pc_sampling["pid"]) == {698961}
-        assert csv_pc_sampling["active_thread_percent"].eq(100.0).all()
-        assert csv_pc_sampling["wave_occupancy_percent"].gt(0).all()
-        assert csv_pc_sampling["wave_occupancy_percent"].le(100).all()
+        assert csv_pc_sampling["active_thread_rate(%)"].eq(100.0).all()
+        assert csv_pc_sampling["wave_occupancy(%)"].gt(0).all()
+        assert csv_pc_sampling["wave_occupancy(%)"].le(100).all()
         assert csv_kernel.iloc[0]["dispatch_count"] == 3
         csv_source_lines = pd.read_csv(csv_dir / "source_lines.csv")
         assert set(csv_source_lines["file_path"]) == {

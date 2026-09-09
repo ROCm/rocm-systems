@@ -37,6 +37,7 @@ from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session, declarative_base, relationship, sessionmaker
 from sqlalchemy.pool import StaticPool
 from sqlalchemy.sql import Select
+from sqlalchemy.sql.elements import quoted_name
 from sqlalchemy.sql.expression import Subquery
 
 from pc_sampling.source_snapshot_analysis import (
@@ -834,10 +835,14 @@ class Database:
                 InstructionLine.code_object_offset.label("offset"),
                 InstructionLine.instruction,
                 PCSampleState.total_count.label("count"),
-                PCSampleState.issue_count.label("count_issue"),
-                PCSampleState.stall_count.label("count_stall"),
-                PCSampleState.wave_occupancy_percent,
-                PCSampleState.active_thread_percent,
+                PCSampleState.issue_count,
+                PCSampleState.stall_count,
+                PCSampleState.wave_occupancy_percent.label(
+                    quoted_name("wave_occupancy(%)", quote=True)
+                ),
+                PCSampleState.active_thread_percent.label(
+                    quoted_name("active_thread_rate(%)", quote=True)
+                ),
                 *stall_reason_columns,
                 source_chain_subquery.c.source.label("source"),
                 CodeObjectStore.code_object_id.label("code_object_id_cell"),
@@ -1029,10 +1034,14 @@ class Database:
                 InstructionLine.instruction,
                 source_chain_subquery.c.source.label("source"),
                 PCSampleState.total_count.label("count"),
-                PCSampleState.issue_count.label("count_issue"),
-                PCSampleState.stall_count.label("count_stall"),
-                PCSampleState.wave_occupancy_percent,
-                PCSampleState.active_thread_percent,
+                PCSampleState.issue_count,
+                PCSampleState.stall_count,
+                PCSampleState.wave_occupancy_percent.label(
+                    quoted_name("wave_occupancy(%)", quote=True)
+                ),
+                PCSampleState.active_thread_percent.label(
+                    quoted_name("active_thread_rate(%)", quote=True)
+                ),
                 stall_reason_json_subquery.c.stall_reason,
             )
             .select_from(PCSampleState)
