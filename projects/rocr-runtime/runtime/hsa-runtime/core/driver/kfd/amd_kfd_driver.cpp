@@ -721,9 +721,8 @@ hsa_status_t KfdDriver::CreateShareableHandle(core::DriverMemoryHandle* handle,
     return ret;
   assert(targetHandle.size == size);
 
-  const auto devhandle = static_cast<const GpuAgent&>(agent).libThunkDev();
-  const auto memhandle = reinterpret_cast<HsaMemoryObjectHandle>(targetHandle.handle);
-  if (HSAKMT_CALL(hsaKmtMemoryGetCpuAddr(devhandle, memhandle, &handle->mmap_offset)) != HSAKMT_STATUS_SUCCESS) {
+  handle->mmap_offset = targetHandle.mmap_offset;
+  if (handle->mmap_offset == 0) {
     DestroyMemoryHandle(&targetHandle);
     return HSA_STATUS_ERROR;
   }
