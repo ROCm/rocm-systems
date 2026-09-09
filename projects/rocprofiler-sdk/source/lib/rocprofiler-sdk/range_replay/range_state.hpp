@@ -93,9 +93,11 @@ public:
     uint64_t agent_key() const { return m_agent_key; }
     size_t   dispatch_count() const { return m_dispatches.size(); }
 
-    // Dispatches seen while the range was open, including those dropped when it was declined. This
-    // is what the range reports to the tool: for a declined range "how many dispatches were in the
-    // range" is still the useful number, while dispatch_count() drops to zero.
+    // Dispatches seen while the range was open and still eligible, up to and including the one
+    // whose arrival declined it. This is what the range reports to the tool: for a declined range
+    // "how many dispatches were in the range" is still the useful number, while dispatch_count()
+    // drops to zero. Recording stops at the decline, so for a range declined partway through this
+    // is a lower bound on the dispatches the range actually contained.
     size_t observed_dispatch_count() const { return m_observed; }
 
     // The recorded decline reason, or ROCPROFILER_RANGE_REPLAY_STATUS_REPLAYED when the range has

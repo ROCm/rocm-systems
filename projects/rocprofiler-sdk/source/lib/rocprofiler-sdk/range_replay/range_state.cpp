@@ -201,6 +201,10 @@ range_record_t::add_dispatch(recorded_dispatch_t&& dispatch)
 {
     if(!eligible()) return false;
 
+    // Counted before the budget check so that the dispatch which overruns the budget is included:
+    // it was in the range, it is simply not recorded.
+    ++m_observed;
+
     if(m_dispatches.size() >= kMaxRecordedDispatches)
     {
         decline(ROCPROFILER_RANGE_REPLAY_STATUS_PROGRAM_TOO_LARGE);
@@ -208,7 +212,6 @@ range_record_t::add_dispatch(recorded_dispatch_t&& dispatch)
     }
 
     m_dispatches.emplace_back(std::move(dispatch));
-    ++m_observed;
     return true;
 }
 

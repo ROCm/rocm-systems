@@ -159,6 +159,11 @@ TEST(range_replay_state, exceeding_the_dispatch_budget_declines)
 
     EXPECT_FALSE(record.add_dispatch(make_dispatch(0)));
     EXPECT_EQ(record.status(), ROCPROFILER_RANGE_REPLAY_STATUS_PROGRAM_TOO_LARGE);
+    EXPECT_EQ(record.dispatch_count(), 0U) << "the recording is released on decline";
+
+    // The dispatch that overran the budget was still in the range, so it is reported to the tool
+    // even though it was never recorded.
+    EXPECT_EQ(record.observed_dispatch_count(), range_replay::kMaxRecordedDispatches + 1);
 }
 
 TEST(range_replay_state, external_decline_is_folded_into_the_record)
