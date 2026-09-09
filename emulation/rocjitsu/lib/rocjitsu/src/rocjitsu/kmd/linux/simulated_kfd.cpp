@@ -39,6 +39,7 @@ RJ_DIAGNOSTIC_POP
 #include <poll.h>
 #include <sstream>
 #include <string_view>
+#include <sys/eventfd.h>
 #include <sys/mman.h>
 #include <sys/random.h>
 #include <sys/resource.h>
@@ -231,28 +232,28 @@ template <typename... Args> int safe_fcntl(int fd, int cmd, Args... args) {
 /// @brief Write one debugger wakeup without ever waiting for descriptor capacity.
 /// @returns Zero after a complete write, otherwise the negative errno (or EIO
 /// for a short write).
-int write_debug_notification(int fd) {
-  // poll(POLLOUT, 0) gives blocking descriptors the same bounded behavior as
-  // O_NONBLOCK without changing the caller's shared open-file description.
-  // Serialize our own check/write pairs so two engine callbacks cannot both
-  // consume the one readiness observation from a nearly-full notifier.
-  static std::mutex write_mutex;
-  std::lock_guard<std::mutex> lock(write_mutex);
-  pollfd pfd{fd, POLLOUT, 0};
-  int ready = 0;
+int write_debug_notification(int fd, const std::function<void()> &before_write = {}) {
+  // A readiness probe cannot make the subsequent write bounded: another
+  // holder can consume the last capacity between poll() and write(). Apply
+  // O_NONBLOCK to the shared open-file description instead, so the write
+  // itself is the atomic capacity check. Synthetic KFD descriptors are born
+  // nonblocking; this also repairs a notifier whose flag was later cleared.
+  int flags = 0;
   do {
-    ready = ::poll(&pfd, 1, 0);
-  } while (ready < 0 && errno == EINTR);
-  if (ready < 0)
+    flags = safe_fcntl(fd, F_GETFL);
+  } while (flags < 0 && errno == EINTR);
+  if (flags < 0)
     return -errno;
-  if (ready == 0)
-    return -EAGAIN;
-  if ((pfd.revents & POLLNVAL) != 0)
-    return -EBADF;
-  if ((pfd.revents & (POLLERR | POLLHUP)) != 0)
-    return -EIO;
-  if ((pfd.revents & POLLOUT) == 0)
-    return -EAGAIN;
+  if ((flags & O_NONBLOCK) == 0) {
+    int result = 0;
+    do {
+      result = safe_fcntl(fd, F_SETFL, flags | O_NONBLOCK);
+    } while (result < 0 && errno == EINTR);
+    if (result < 0)
+      return -errno;
+  }
+  if (before_write)
+    before_write();
 
   const uint64_t one = 1;
   ssize_t written = 0;
@@ -557,7 +558,7 @@ void SimulatedKfd::reap_exited_debug_sessions(std::stop_token stop) {
         }
         ++it;
       } else {
-        if (it->second.enabled)
+        if (it->second.enabled && it->second.notification_retry_needed)
           retry_notifications.push_back(it->first);
         ++it;
       }
@@ -695,12 +696,12 @@ void *SimulatedKfd::mmap_replacing_client_doorbell_views(void *addr, size_t leng
 bool SimulatedKfd::ensure_fd_created() {
   if (fd_.load(std::memory_order_acquire) >= 0)
     return true;
-  int new_fd = memfd_create("rocjitsu_kfd", 0);
+  int new_fd = eventfd(0, EFD_CLOEXEC | EFD_NONBLOCK);
   if (new_fd < 0)
     return false;
   int expected = -1;
-  // CAS so only one racing opener publishes the backing memfd; a loser closes
-  // its own memfd and adopts the winner's, avoiding a double create / fd leak.
+  // CAS so only one racing opener publishes the KFD eventfd; a loser closes
+  // its own descriptor and adopts the winner's, avoiding a double create / fd leak.
   if (!fd_.compare_exchange_strong(expected, new_fd, std::memory_order_acq_rel,
                                    std::memory_order_acquire))
     libc_passthrough().close(new_fd);
@@ -3317,6 +3318,7 @@ int SimulatedKfd::replace_debug_session_for_testing(pid_t target_pid, int dbg_fd
     session->second.exception_enable_mask = exception_mask;
     session->second.notified_process_exception_mask = 0;
     session->second.pending_process_exception_mask = 0;
+    session->second.notification_retry_needed = true;
   }
   return retry_debug_notifications(target_pid);
 }
@@ -3333,11 +3335,15 @@ int SimulatedKfd::retry_debug_notifications(pid_t target_pid, bool invoke_result
   uint64_t process_mask = 0;
   uint64_t session_generation = 0;
   std::function<void(bool)> result_hook;
+  std::function<void()> write_hook;
   {
     std::lock_guard<std::mutex> lock(debug_sessions_mutex_);
     auto session = debug_sessions_.find(target_pid);
     if (session == debug_sessions_.end() || !session->second.enabled || session->second.dbg_fd < 0)
       return 0;
+    // This invocation owns the outstanding retry. A failure or superseding
+    // generation below re-arms it; a successful or empty scan leaves it clear.
+    session->second.notification_retry_needed = false;
 
     proc = find_process_by_client_pid(target_pid);
     auto collect_queues = [&] {
@@ -3379,6 +3385,7 @@ int SimulatedKfd::retry_debug_notifications(pid_t target_pid, bool invoke_result
       return 0;
     notifier = UniqueDriverFd(duplicate_debug_notifier(session->second.dbg_fd));
     if (notifier.get() < 0) {
+      session->second.notification_retry_needed = true;
       debug_sessions_cv_.notify_one();
       return -errno;
     }
@@ -3390,8 +3397,10 @@ int SimulatedKfd::retry_debug_notifications(pid_t target_pid, bool invoke_result
     if (queues.empty() && process_mask == 0)
       return 0;
     session_generation = session->second.generation;
-    if (invoke_result_hook)
+    if (invoke_result_hook) {
       result_hook = debug_notification_result_hook_for_testing_;
+      write_hook = debug_notification_write_hook_for_testing_;
+    }
     session->second.pending_process_exception_mask |= process_mask;
     if (proc) {
       std::lock_guard<std::mutex> alloc_lock(proc->alloc_mutex_);
@@ -3403,7 +3412,7 @@ int SimulatedKfd::retry_debug_notifications(pid_t target_pid, bool invoke_result
     }
   }
 
-  const int result = write_debug_notification(notifier.get());
+  const int result = write_debug_notification(notifier.get(), write_hook);
   if (result_hook)
     result_hook(result == 0);
 
@@ -3412,6 +3421,8 @@ int SimulatedKfd::retry_debug_notifications(pid_t target_pid, bool invoke_result
     auto session = debug_sessions_.find(target_pid);
     if (session == debug_sessions_.end() || !session->second.enabled ||
         session->second.generation != session_generation) {
+      if (session != debug_sessions_.end() && session->second.enabled)
+        session->second.notification_retry_needed = true;
       debug_sessions_cv_.notify_one();
       return result;
     }
@@ -3419,6 +3430,8 @@ int SimulatedKfd::retry_debug_notifications(pid_t target_pid, bool invoke_result
     if (result == 0) {
       session->second.notified_process_exception_mask |=
           process_mask & session->second.exception_enable_mask;
+    } else {
+      session->second.notification_retry_needed = true;
     }
     if (proc) {
       std::lock_guard<std::mutex> alloc_lock(proc->alloc_mutex_);
@@ -3696,6 +3709,7 @@ bool SimulatedKfd::notify_debug_event(const std::shared_ptr<KfdProcess> &proc, u
   uint64_t session_generation = 0;
   bool notification_pending = false;
   std::function<void(bool)> result_hook;
+  std::function<void()> write_hook;
   {
     std::lock_guard<std::mutex> lk(debug_sessions_mutex_);
     auto session = debug_sessions_.find(target_pid);
@@ -3721,16 +3735,19 @@ bool SimulatedKfd::notify_debug_event(const std::shared_ptr<KfdProcess> &proc, u
       notification_pending = true;
       queue->second.begin_debug_notification(exception_mask, session_generation);
       result_hook = debug_notification_result_hook_for_testing_;
+      write_hook = debug_notification_write_hook_for_testing_;
     }
     if (!notification_pending && reserve_runtime_on_rejection)
       queue->second.begin_runtime_exception(exception_mask);
+    if (!notification_pending && retain_on_rejection && subscribed)
+      session->second.notification_retry_needed = true;
   }
   if (!notification_pending) {
     if (retain_on_rejection)
       debug_sessions_cv_.notify_one();
     return false;
   }
-  const bool delivered = write_debug_notification(notifier.get()) == 0;
+  const bool delivered = write_debug_notification(notifier.get(), write_hook) == 0;
   if (result_hook)
     result_hook(delivered);
 
@@ -3740,6 +3757,8 @@ bool SimulatedKfd::notify_debug_event(const std::shared_ptr<KfdProcess> &proc, u
     auto session = debug_sessions_.find(target_pid);
     if (session == debug_sessions_.end() || !session->second.enabled ||
         session->second.generation != session_generation) {
+      if (session != debug_sessions_.end() && session->second.enabled)
+        session->second.notification_retry_needed = true;
       if (reserve_runtime_on_rejection)
         reserve_runtime_queue_exception(proc, queue_id, exception_mask);
       debug_sessions_cv_.notify_one();
@@ -3753,9 +3772,11 @@ bool SimulatedKfd::notify_debug_event(const std::shared_ptr<KfdProcess> &proc, u
     const bool still_subscribed = (exception_mask & session->second.exception_enable_mask) != 0;
     queue->second.finish_debug_notification(exception_mask,
                                             delivered && still_subscribed ? exception_mask : 0);
-    if (!delivered && reserve_runtime_on_rejection)
+    accepted = delivered && still_subscribed;
+    if (!accepted && reserve_runtime_on_rejection)
       queue->second.begin_runtime_exception(exception_mask);
-    accepted = delivered;
+    if (!accepted && retain_on_rejection && still_subscribed)
+      session->second.notification_retry_needed = true;
   }
   if (!accepted && retain_on_rejection)
     debug_sessions_cv_.notify_one();

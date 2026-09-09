@@ -183,6 +183,8 @@ public:
     uint64_t notified_process_exception_mask = 0;
     /// Process/device exception bits reserved by a notifier write in flight.
     uint64_t pending_process_exception_mask = 0;
+    /// A failed or superseded publication still requires a background retry.
+    bool notification_retry_needed = false;
 
     /// @brief Previously configured process debug flags.
     uint32_t flags = 0;

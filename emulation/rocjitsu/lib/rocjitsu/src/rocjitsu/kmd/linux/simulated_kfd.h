@@ -225,6 +225,12 @@ public:
     debug_notification_result_hook_for_testing_ = std::move(hook);
   }
 
+  /// @brief Run after a notifier is made nonblocking and immediately before its write.
+  void set_debug_notification_write_hook_for_testing(std::function<void()> hook) {
+    std::lock_guard<std::mutex> lock(debug_sessions_mutex_);
+    debug_notification_write_hook_for_testing_ = std::move(hook);
+  }
+
   /// @brief Pause after ROCr decides queue-exception delivery and before ownership resolves.
   void set_runtime_exception_result_hook_for_testing(std::function<void(bool)> hook) {
     runtime_exception_result_hook_for_testing_ = std::move(hook);
@@ -245,9 +251,11 @@ public:
   /// @details This narrow seam exercises notifier transaction races and retained
   /// event re-notification through the same production helper.
   bool notify_debug_event_for_testing(uint32_t queue_id, uint64_t exception_mask,
-                                      bool retain_on_rejection) {
+                                      bool retain_on_rejection,
+                                      bool reserve_runtime_on_rejection = false) {
     auto proc = find_process(local_process_id_);
-    return proc && notify_debug_event(proc, queue_id, exception_mask, retain_on_rejection);
+    return proc && notify_debug_event(proc, queue_id, exception_mask, retain_on_rejection,
+                                      reserve_runtime_on_rejection);
   }
 
   /// @brief Release the local process's parked event waiters so a blocking
@@ -654,10 +662,10 @@ private:
   int get_tile_config_ioctl(void *arg);
   bool allocate_scratch_backing(uint32_t process_id, uint64_t gpu_va, size_t size);
 
-  /// @brief Lazily create the backing memfd exactly once across racing opens.
+  /// @brief Lazily create the pollable KFD event descriptor across racing opens.
   /// @details CAS-publishes fd_ so concurrent open()/open_process() callers agree
-  /// on a single memfd; losers close their own and adopt the winner's.
-  /// @retval true fd_ holds a valid descriptor. @retval false memfd_create failed.
+  /// on a single eventfd; losers close their own and adopt the winner's.
+  /// @retval true fd_ holds a valid descriptor. @retval false eventfd failed.
   [[nodiscard]] bool ensure_fd_created();
 
   /// @brief One-time per-GPU CP setup: apertures + interrupt/scratch callbacks.
@@ -757,6 +765,7 @@ private:
   std::unordered_map<uint64_t, std::shared_ptr<QueueExceptionLock>> queue_exception_locks_;
   std::function<void(bool)> queue_exception_cleanup_hook_for_testing_;
   std::function<void(bool)> debug_notification_result_hook_for_testing_;
+  std::function<void()> debug_notification_write_hook_for_testing_;
   std::function<void(bool)> runtime_exception_result_hook_for_testing_;
   std::optional<int> debug_notifier_dup_error_for_testing_;
   std::unordered_map<uint32_t, EventState *> event_dispatch_;
