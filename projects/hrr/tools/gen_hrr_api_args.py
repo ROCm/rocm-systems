@@ -745,7 +745,6 @@ NOOP_PLAYBACK_APIS: Set[str] = {
     "hipGraphReleaseUserObject",
     "hipGraphBatchMemOpNodeGetParams",
     "hipDrvGraphMemcpyNodeGetParams",
-    "hipDrvGraphMemcpyNodeSetParams",
     # Category 16: present in the internal dispatch table (hip_api_trace.hpp) but
     # NOT declared in the public HIP runtime headers the playback tool builds
     # against (hip::host / find_package(hip)). hip_playback_generated.cpp calls
