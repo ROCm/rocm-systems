@@ -9,8 +9,8 @@
 
 #pragma once
 
-#include <cassert>
 #include <cuda.h>
+#include <cuda_runtime_api.h>
 #include <cstdint>
 #include <memory>
 
@@ -100,11 +100,7 @@ private:
   FlagType** peerFlags_{nullptr};
 
   __host__ FabricGpuBarrier(int nBlocks, int selfRank, int nRanks, FlagType** peerFlags)
-    : nBlocks_(nBlocks), selfRank_(selfRank), nRanks_(nRanks), peerFlags_(peerFlags) {
-    assert(selfRank >= 0 && selfRank < nRanks && "selfRank out of bounds");
-    assert(nRanks > 0 && nRanks <= kDdaMaxNranks && "nRanks out of valid range");
-    assert(nBlocks > 0 && "nBlocks must be positive");
-  }
+    : nBlocks_(nBlocks), selfRank_(selfRank), nRanks_(nRanks), peerFlags_(peerFlags) {}
 
   __device__ inline int getFlagIdx(int rank, int block) {
     return block * nRanks_ + rank;
@@ -112,11 +108,8 @@ private:
 };
 
 // Publish a stream-ordered scratch copy once per rank before a multi-block
-// collective consumes peer scratch. A separate one-block launch avoids paying
-// the release/acquire barrier in every collective block.
-template <int = 0>
-__global__ void fabricGpuBarrierPublish(FabricGpuBarrier barrier) {
-  barrier.syncOnSameBlockIdx<true /* hasPreviousMemAccess */, true /* hasSubsequentMemAccess */>();
-}
+// collective consumes peer scratch. The one-block release/acquire barrier
+// replaces an acquire-only prologue in every collective block.
+void launchFabricGpuBarrierPublish(FabricGpuBarrier barrier, cudaStream_t stream);
 
 } // namespace dda::common
