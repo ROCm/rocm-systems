@@ -64,14 +64,29 @@ public:
                                 /*registers=*/{}, exec);
   }
 
-  /// Register a scalar load into SGPRs (tracked by lgkmcnt).
-  void scalarLoad(int wave, int sgprBase, int numRegs) {
-    std::vector<uint32_t> regs(numRegs);
-    for (int i = 0; i < numRegs; ++i) {
-      regs[i] = sgprBase + i;
-    }
-    waves_[wave]->registerEvent(pc_++, MemoryEventType::GLOBAL_TO_SGPR, std::move(regs),
-                                defaultExec_);
+  /// Register a scalar load into SGPRs with its architecture-specific counter.
+  void scalarLoad(int wave, int sgprBase, int numRegs,
+                  amdgpu::WaitCounterType waitCounterType = amdgpu::WaitCounterType::LGKMCNT) {
+    waves_[wave]->registerScalarLoad(
+        pc_++,
+        RegisterRef{RegClass::SGPR, static_cast<uint16_t>(sgprBase), static_cast<uint8_t>(numRegs)},
+        defaultExec_, waitCounterType);
+  }
+
+  /// Register a scalar load into TTMPs with its architecture-specific counter.
+  void ttmpLoad(int wave, int ttmpBase, int numRegs,
+                amdgpu::WaitCounterType waitCounterType = amdgpu::WaitCounterType::LGKMCNT) {
+    waves_[wave]->registerScalarLoad(
+        pc_++,
+        RegisterRef{RegClass::TTMP, static_cast<uint16_t>(ttmpBase), static_cast<uint8_t>(numRegs)},
+        defaultExec_, waitCounterType);
+  }
+
+  /// Register a scalar store so partial waits retain counter ordering.
+  void scalarStore(int wave,
+                   amdgpu::WaitCounterType waitCounterType = amdgpu::WaitCounterType::LGKMCNT) {
+    waves_[wave]->registerEvent(pc_++, MemoryEventType::SCALAR_TO_GLOBAL, {}, defaultExec_, 0xF,
+                                waitCounterType);
   }
 
   /// Register an LDS write and validate against outstanding reads.
@@ -87,21 +102,31 @@ public:
   /// Register an LDS read and validate against outstanding writes.
   /// byteMask: which bytes of the destination VGPR are written by this load
   /// (0xF=full, 0x3=lo D16, 0xC=hi D16). Used for byte-level race tracking.
-  void ldsRead(int wave, int lane, int addr, int bytes, int vgprDst, uint8_t byteMask = 0xF) {
+  void ldsRead(int wave, int lane, int addr, int bytes, int vgprDst, uint8_t byteMask = 0xF,
+               amdgpu::WaitCounterType waitCounterType = amdgpu::WaitCounterType::LGKMCNT) {
     detector_->validateRead(addr, WaveId{wave}, lane, bytes);
     std::vector<uint32_t> ldsAddrs(waveSize_, 0);
     ldsAddrs[lane] = addr;
     uint64_t laneMask = 1ULL << lane;
     std::vector<uint32_t> regs = {static_cast<uint32_t>(vgprDst)};
     waves_[wave]->registerLdsEvent(pc_++, MemoryEventType::LDS_TO_VGPR, std::move(regs), laneMask,
-                                   waveSize_, ldsAddrs, bytes, byteMask);
+                                   waveSize_, ldsAddrs, bytes, byteMask, waitCounterType);
   }
 
   // -- Sync --
 
   /// Dispatch s_waitcnt. -1 means "don't change this counter".
   void waitcnt(int wave, int vmcnt = -1, int lgkmcnt = -1) {
-    waves_[wave]->dispatch(PendingWaitCount{vmcnt, lgkmcnt});
+    PendingWaitCount wait;
+    wait.add(amdgpu::WaitCounterType::VMCNT, vmcnt);
+    wait.add(amdgpu::WaitCounterType::LGKMCNT, lgkmcnt);
+    waves_[wave]->dispatch(wait);
+  }
+
+  void waitKmcnt(int wave, int kmcnt) {
+    PendingWaitCount wait;
+    wait.add(amdgpu::WaitCounterType::KMCNT, kmcnt);
+    waves_[wave]->dispatch(wait);
   }
 
   /// Barrier: flush all waves' barrier-pending events (simulates s_barrier).
@@ -135,7 +160,24 @@ public:
     waves_[wave]->checkVgprWriteLanes(reg, laneMask, byteMask);
   }
 
-  void checkSgprRead(int wave, int reg) { waves_[wave]->checkSgprRead(reg); }
+  void checkSgprRead(int wave, int reg, int width = 1) {
+    waves_[wave]->checkScalarRead(
+        RegisterRef{RegClass::SGPR, static_cast<uint16_t>(reg), static_cast<uint8_t>(width)});
+  }
+
+  void checkSgprWrite(int wave, int reg, int width = 1) {
+    waves_[wave]->checkScalarWrite(
+        RegisterRef{RegClass::SGPR, static_cast<uint16_t>(reg), static_cast<uint8_t>(width)});
+  }
+
+  void checkTtmpRead(int wave, int reg) {
+    waves_[wave]->checkScalarRead(RegisterRef{RegClass::TTMP, static_cast<uint16_t>(reg), 1});
+  }
+
+  void checkTtmpWrite(int wave, int reg, int width = 1) {
+    waves_[wave]->checkScalarWrite(
+        RegisterRef{RegClass::TTMP, static_cast<uint16_t>(reg), static_cast<uint8_t>(width)});
+  }
 
   void checkLdsRead(int wave, int lane, int addr, int bytes) {
     detector_->validateRead(addr, WaveId{wave}, lane, bytes);
@@ -165,6 +207,14 @@ public:
       if (v.space == RaceViolation::Space::SGPR && v.index == reg) {
         return true;
       }
+    }
+    return false;
+  }
+
+  bool hasTtmpRace(int reg) const {
+    for (const auto &v : violations_) {
+      if (v.space == RaceViolation::Space::TTMP && v.index == reg)
+        return true;
     }
     return false;
   }

@@ -19,7 +19,9 @@ add_library(
 
 target_sources(
     rocprofiler-systems-policies-library
-    INTERFACE ${CMAKE_CURRENT_SOURCE_DIR}/thread_state_policy.hpp
+    INTERFACE
+        ${CMAKE_CURRENT_SOURCE_DIR}/thread_state_policy.hpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/rocprofiler-sdk/tracing-config.hpp
 )
 
 get_filename_component(

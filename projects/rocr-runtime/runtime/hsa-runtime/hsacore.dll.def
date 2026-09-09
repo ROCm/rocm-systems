@@ -242,3 +242,4 @@ EXPORTS
   hsa_amd_vmem_export_fabric_handle
   hsa_amd_vmem_import_fabric_handle
   hsa_amd_agent_preload
+  hsa_amd_svm_discard_and_prefetch_batch_async

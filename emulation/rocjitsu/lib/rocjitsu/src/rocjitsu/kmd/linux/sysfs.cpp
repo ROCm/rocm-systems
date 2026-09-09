@@ -164,11 +164,6 @@ void Sysfs::cleanup() {
   }
 }
 
-void Sysfs::release_after_fork() {
-  topology_dir_.clear();
-  drm_dir_.clear();
-}
-
 void Sysfs::setup_environment() {}
 
 void Sysfs::write_generation_id() { write_file(topology_dir_ + "/generation_id", "1\n"); }

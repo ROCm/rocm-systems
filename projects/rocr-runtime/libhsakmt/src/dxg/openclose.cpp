@@ -181,11 +181,25 @@ bool hsakmtRuntime::ReserveLocalHeapSpace() {
     if (device == nullptr) {
       return false;
     }
-    total_local_size += rocr::AlignUp(device->VramTotal(), align) * 2;
+    total_local_size += rocr::AlignUp(device->VramTotal(), align);
   }
-  local_heap_space_start_ = 0;
-  local_heap_space_size_ = total_local_size;
-  return ReserveSvmSpace(local_heap_space_start_, local_heap_space_size_, align);
+
+  /* Every kLocal allocation carves its VA out of this pool, including the pure
+   * VA reservations of the VMM API. CLR's VmHeapArray alone reserves 2x VRAM of
+   * VA, so a 2x pool leaves nothing for real allocations. VA costs no physical
+   * resource, so oversize the pool and shrink only if the range can't be reserved.
+   */
+  for (uint64_t scale : {8ull, 4ull, 2ull}) {
+    local_heap_space_start_ = 0;
+    local_heap_space_size_ = total_local_size * scale;
+    if (ReserveSvmSpace(local_heap_space_start_, local_heap_space_size_, align))
+      return true;
+
+    pr_warn("fail to reserve %" PRIu64 "x VRAM (%" PRIu64 " MB) of local heap VA, retry smaller\n",
+            scale, (total_local_size * scale) >> 20);
+  }
+
+  return false;
 }
 
 bool hsakmtRuntime::FreeSvmSpace(uint64_t &base, uint64_t &size) {
@@ -275,6 +289,17 @@ void hsakmtRuntime::InitSystemHeapMgr() {
                                           DEFAULT_GPU_PAGE_SIZE);
 }
 
+static void log_va_exhaustion(const char *heap, wsl::thunk::VaMgr *mgr, gpusize pool_size,
+                              gpusize size, gpusize align, gpusize hint_addr) {
+    uint64_t total_free = 0, largest_free = 0;
+    mgr->FreeStats(&total_free, &largest_free);
+
+    pr_err("%s heap VA exhausted: request %" PRIu64 " MB align %" PRIu64 " KB hint %#" PRIx64
+           "; pool %" PRIu64 " MB, free %" PRIu64 " MB, largest contiguous free %" PRIu64 " MB\n",
+           heap, size >> 20, align >> 10, static_cast<uint64_t>(hint_addr), pool_size >> 20,
+           total_free >> 20, largest_free >> 20);
+}
+
 ErrorCode hsakmtRuntime::ReserveGpuVirtualAddress(const Wkmi::AllocDomain domain,
         gpusize hit_base_addr, gpusize size,
         gpusize *out_gpu_virt_addr, gpusize alignment, bool lock) {
@@ -292,8 +317,11 @@ ErrorCode hsakmtRuntime::ReserveGpuVirtualAddress(const Wkmi::AllocDomain domain
         }
 
         gpu_addr = system_heap_mgr_->Alloc(size, align, hit_base_addr);
-        if (gpu_addr == 0)
+        if (gpu_addr == 0) {
+            log_va_exhaustion("system", system_heap_mgr_.get(), system_heap_space_size_, size,
+                              align, hit_base_addr);
             code = ErrorCode::OutOfMemory;
+        }
         else if (!CommitSystemHeapSpace((void*)gpu_addr, size, lock)) {
             system_heap_mgr_->Free(gpu_addr);
             code = ErrorCode::SyscallFail;
@@ -305,8 +333,11 @@ ErrorCode hsakmtRuntime::ReserveGpuVirtualAddress(const Wkmi::AllocDomain domain
         }
 
         gpu_addr = local_heap_mgr_->Alloc(size, align, hit_base_addr);
-        if (gpu_addr == 0)
+        if (gpu_addr == 0) {
+            log_va_exhaustion("local", local_heap_mgr_.get(), local_heap_space_size_, size, align,
+                              hit_base_addr);
             code = ErrorCode::OutOfGpuMemory;
+        }
     }
 
     *out_gpu_virt_addr = (code == ErrorCode::Success) ? gpu_addr : 0;
@@ -501,6 +532,17 @@ static void parent_fork_handler(void) { dxg_runtime->hsakmt_mutex.unlock(); }
 static void child_fork_handler(void) {
   dxg_runtime->is_forked = true;
 
+  /* Sever the references the child inherited but never took, before any public
+   * entry point can act on them. CHECK_DXG_OPEN() already rejects calls while
+   * is_forked is set, but zeroing the counts means that even a path that
+   * bypasses it cannot decrement the parent's bookkeeping. The inherited open
+   * count is cleared with a plain store and the snapshot count with a relaxed
+   * store on a lock-free atomic, so neither allocates nor takes a lock; heavier
+   * snapshot and object teardown waits for clear_after_fork().
+   */
+  dxg_runtime->dxg_open_count = 0;
+  topology_clear_snapshot_refs();
+
   /* prepare_fork_handler() locked hsakmt_mutex right before fork() so that
    * no other thread would be mid-operation during the fork snapshot. In the
    * child only this one thread survives, and its TID differs from whichever
@@ -524,6 +566,11 @@ static void child_fork_handler(void) {
 static void clear_after_fork(void) {
   reset_suballocator();
   clear_allocation_map();
+  /* The snapshot's WDDMDevices belong to the parent's DXCore session, which
+   * the runtime reset below discards. Let go of them rather than reusing or
+   * destroying them.
+   */
+  topology_abandon_after_fork();
 
   if (dxg_runtime->dxg_fd >= 0) {
 #if defined(__linux__)
@@ -638,14 +685,21 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtOpenKFD(void) {
   HsaSystemProperties sys_props;
   char *error;
 
-  std::lock_guard<std::recursive_mutex> lck(dxg_runtime->hsakmt_mutex);
-
   /* If the process has forked, the child process must re-initialize
    * it's connection to DXG. Any references tracked by dxg_open_count
-   * belong to the parent
+   * belong to the parent.
+   *
+   * This runs before the lock is taken, and must: clear_after_fork() replaces
+   * *dxg_runtime, so a lock_guard constructed on the old object would unlock
+   * freed memory when it went out of scope. Only the forking thread survives
+   * into the child and child_fork_handler() has already reinitialized the
+   * mutex, so there is nothing here to exclude. is_forked is only ever written
+   * in a single-threaded child, so reading it unlocked races with nothing.
    */
   if (is_forked_child())
     clear_after_fork();
+
+  std::lock_guard<std::recursive_mutex> lck(dxg_runtime->hsakmt_mutex);
 
   if (dxg_runtime->dxg_open_count == 0) {
     static bool atfork_installed = false;
@@ -680,7 +734,16 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtOpenKFD(void) {
 
 
 
-    dxg_runtime->dxg_open_count = 1;
+    dxg_runtime->dxg_open_count++;
+
+    /* Only the 0->1 transition owns the suballocator. A later open comes from
+     * a second in-process consumer (on WSL, rocprofiler-sdk reading the KMT
+     * topology alongside the HSA runtime) and the first one's allocations are
+     * still live - resetting the fragment allocator here would throw away the
+     * bookkeeping that tracks them. clear_after_fork() above resets it on the
+     * one path where the inherited bookkeeping really is meaningless.
+     */
+    reset_suballocator();
 
     if (!atfork_installed) {
       /* Atfork handlers cannot be uninstalled and
@@ -699,7 +762,6 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtOpenKFD(void) {
     result = HSAKMT_STATUS_KERNEL_ALREADY_OPENED;
   }
 
-  reset_suballocator();
   return result;
 dxcore_loader_failed:
 #if defined(__linux__)
@@ -716,6 +778,11 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtCloseKFD(void) {
 
   if (dxg_runtime->dxg_open_count > 0) {
     if (--dxg_runtime->dxg_open_count == 0) {
+      /* Before DXCore goes, and so before the WDDMDevice objects a snapshot
+       * names become pointers into a dead session.
+       */
+      topology_drop_snapshot_at_last_close();
+
       dxg_runtime->HeapFini();
 #if defined(__linux__)
       close(dxg_runtime->dxg_fd);

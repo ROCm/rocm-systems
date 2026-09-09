@@ -78,3 +78,12 @@ repos:
         language: system
         pass_filenames: false
         files: ^projects/amdsmi/tests/amd_smi_test/.*\.(cc|h)$
+    -   id: amdsmi-license-headers
+        name: amd-smi SPDX license headers
+        description: >-
+            Check AMD-owned sources carry the two-line SPDX MIT header
+            (see .github/CONTRIBUTING.md).
+        entry: python3 projects/amdsmi/tests/check_license_headers.py
+        language: system
+        pass_filenames: false
+        files: ^projects/amdsmi/.*\.(c|cc|cpp|cxx|cu|inc|h|hh|hpp|hxx|go|rs|py|cmake|sh|txt|in)$

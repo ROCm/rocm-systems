@@ -18,6 +18,7 @@ set(UNIT_TEST_SOURCE_FILES
 # and configured on the system.
 set(SYSTEM_TEST_SOURCE_FILES
     system/async.cpp
+    system/batch.cpp
     system/buffer.cpp
     system/config.cpp
     system/driver.cpp

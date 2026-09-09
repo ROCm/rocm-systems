@@ -69,6 +69,9 @@ extern std::function<hipError_t(hipDeviceProp_t* /*prop*/, int /*device*/)>
 extern std::function<hipError_t(void** /*ptr*/, std::size_t /*size*/,
                                 unsigned /*flags*/)>
     g_hipExtMallocWithFlags;
+extern std::function<hipError_t(void** /*ptr*/, std::size_t /*size*/,
+                                unsigned /*flags*/)>
+    g_hipHostMalloc;
 extern std::function<hipError_t(void* /*ptr*/)> g_hipFree;
 extern int g_deviceCount;
 extern int g_currentDevice;

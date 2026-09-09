@@ -20,6 +20,7 @@
 #include <fstream>
 #include <iterator>
 #include <memory>
+#include <set>
 #include <span>
 #include <stdexcept>
 #include <string>
@@ -371,12 +372,15 @@ TEST(XcdPartitioningTest, LoaderResolvesZeroThreadsAcrossExtraGpuBuilds) {
 }
 
 // The shipped topology configs take the default by omitting num_threads. Only
-// the 2-GPU KMD config pins it, because any multi-partition setting there hangs
-// RCCL collectives (see docs/configuration.md). Enforcing that here rather than
-// in a CI grep keeps every config covered as new ones are added.
+// the multi-GPU KMD configs pin it, because any multi-partition setting there
+// hangs RCCL collectives (see docs/configuration.md). Enforcing that here rather
+// than in a CI grep keeps every config covered as new ones are added.
 TEST(XcdPartitioningTest, ShippedConfigsOmitNumThreadsExceptTheDocumentedPin) {
-  const std::string kPinnedConfig = "gfx950_mi355x_kmd_2gpu.json";
-  bool saw_pinned_config = false;
+  const std::set<std::string> kPinnedConfigs = {
+      "gfx950_mi355x_kmd_2gpu.json",
+      "gfx1250_mi455x_kmd_4gpu.json",
+  };
+  std::set<std::string> saw_pinned_configs;
   uint32_t configs_checked = 0;
 
   for (const std::filesystem::directory_entry &entry :
@@ -391,9 +395,9 @@ TEST(XcdPartitioningTest, ShippedConfigsOmitNumThreadsExceptTheDocumentedPin) {
     const bool pins_num_threads = json.find("\"num_threads\"") != std::string::npos;
     ++configs_checked;
 
-    if (entry.path().filename() == kPinnedConfig) {
-      saw_pinned_config = true;
-      EXPECT_TRUE(pins_num_threads) << kPinnedConfig << " must keep its documented pin";
+    if (kPinnedConfigs.count(entry.path().filename().string()) != 0) {
+      saw_pinned_configs.insert(entry.path().filename().string());
+      EXPECT_TRUE(pins_num_threads) << entry.path().filename() << " must keep its documented pin";
     } else {
       EXPECT_FALSE(pins_num_threads)
           << entry.path().filename()
@@ -401,7 +405,8 @@ TEST(XcdPartitioningTest, ShippedConfigsOmitNumThreadsExceptTheDocumentedPin) {
     }
   }
 
-  EXPECT_TRUE(saw_pinned_config) << "expected " << kPinnedConfig << " in " << CONFIG_DIR;
+  EXPECT_EQ(saw_pinned_configs, kPinnedConfigs)
+      << "expected every documented pinned config in " << CONFIG_DIR;
   EXPECT_GT(configs_checked, 1u);
 }
 

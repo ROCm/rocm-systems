@@ -1303,10 +1303,10 @@ static ncclResult_t addP2pToPlan(struct ncclComm* comm, struct ncclKernelPlan* p
     if (bytes[dir] != -1) protoLatency[dir] &= bytes[dir] <= nChannels[dir] * latencyThreshold;
     protocol[dir] = protoLatency[dir] ? (useLL128SendRecv ? NCCL_PROTO_LL128 : NCCL_PROTO_LL) : NCCL_PROTO_SIMPLE;
 
-    // Emit the selected protocol so tests (and NCCL_DEBUG=INFO) can confirm the latency protocol
-    // was actually chosen rather than silently falling back to SIMPLE.
+    // Emit the selected protocol so tests (and NCCL_DEBUG=INFO with NCCL_DEBUG_SUBSYS=COLL) can confirm
+    // the latency protocol was actually chosen rather than silently falling back to SIMPLE.
     if (bytes[dir] != -1)
-      INFO(NCCL_INIT, "RCCL P2P SendRecv protocol=%s dir=%s bytes=%ld nChannels=%d", ncclProtoStr[protocol[dir]],
+      INFO(NCCL_COLL, "RCCL P2P SendRecv protocol=%s dir=%s bytes=%ld nChannels=%d", ncclProtoStr[protocol[dir]],
            dir ? "send" : "recv", (long)bytes[dir], nChannels[dir]);
 
     stepSize[dir] = comm->buffSizes[protocol[dir]] / NCCL_STEPS;
@@ -1985,6 +1985,10 @@ static void persistentDestructor(void* plans_) {
 NCCL_PARAM(LaunchOrderImplicit, "LAUNCH_ORDER_IMPLICIT", 0);
 NCCL_PARAM(GraphStreamOrdering, "GRAPH_STREAM_ORDERING", NCCL_CONFIG_UNDEF_INT);
 
+// Biased so the default stream (nullptr) tags as 1, leaving 0 free as the "no launch yet"
+// sentinel. See ncclComm::lastStreamTag.
+static inline uintptr_t ncclStreamTag(hipStream_t s) { return (uintptr_t)s + 1; }
+
 namespace {
 enum ncclImplicitOrder {
   ncclImplicitOrderNone,
@@ -2131,15 +2135,11 @@ ncclResult_t ncclLaunchPrepare(struct ncclComm* comm) {
       }
       // userStream[0] waits on deviceStream
       NCCLCHECKGOTO(ncclStreamWaitStream(launchStream, deviceStream, comm->sharedRes->scratchEvent), result, failure);
-    } else if (comm->lastStreamValid && comm->lastStream != launchStream) {
-      // Stream changed from last call. The new launchStream has no implicit edge to the
-      // previous kernel's completion; install a direct event-based dependency on doneEvent.
-      // Record lazily here on lastStream — HIP's per-stream FIFO guarantees the record
-      // sequences after the prior cuLaunchKernel — then wait on it from launchStream.
-      // Recording only on detected stream change (instead of after every ncclLaunchKernel)
-      // avoids a per-launch HIP runtime cost. Bypasses deviceStream, which the fast path
-      // leaves stale by skipping Finish-side advance.
-      CUDACHECKGOTO(hipEventRecord(comm->doneEvent, comm->lastStream), result, failure);
+    } else if (comm->lastStreamTag != 0 &&
+               comm->lastStreamTag != ncclStreamTag(launchStream)) {
+      // Stream changed. Wait on doneEvent, recorded by ncclLaunchKernel on the previous launch
+      // stream; deviceStream is stale here because the fast path skips the Finish-side advance.
+      // Don't record it here — that stream may already be destroyed (ROCM-29677).
       CUDACHECKGOTO(hipStreamWaitEvent(launchStream, comm->doneEvent, 0), result, failure);
     }
 
@@ -2250,14 +2250,21 @@ ncclResult_t ncclLaunchKernel(struct ncclComm* comm, struct ncclKernelPlan* plan
 
   if (planner->numStreams == 1 && !plan->persistent) {
     latency_profiler::collTraceRecordStartEvent(comm, launchStream, event.get());
+#if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
+    // Sizes are work-items (grid*block), not blocks. Passing doneEvent as stopEvent fuses the record into the
+    // dispatch, so no separate hipEventRecord. Fast path only: graph capture never binds a fused stopEvent.
+    CUDACHECKGOTO(hipExtModuleLaunchKernel(fn, grid.x * block.x, grid.y * block.y, grid.z * block.z, block.x, block.y,
+                                           block.z, smem, launchStream, nullptr, extra, /*startEvent=*/nullptr,
+                                           /*stopEvent=*/comm->doneEvent, /*flags=*/0),
+                  ret, do_return);
+#else
     CUCHECKGOTO(cuLaunchKernel(fn, grid.x, grid.y, grid.z, block.x, block.y, block.z, smem, launchStream, nullptr,
                                extra),
                 ret, do_return);
-    // doneEvent is recorded lazily by ncclLaunchPrepare on a detected stream change; no
-    // per-launch hipEventRecord is needed here. lastStream/lastStreamValid bookkeeping is
-    // still required so the next call's ncclLaunchPrepare can detect that change.
-    comm->lastStream = launchStream;
-    comm->lastStreamValid = true;
+    // Record while launchStream is guaranteed live; bookkeeping after, so a failed record leaves no false claim.
+    CUDACHECKGOTO(cudaEventRecord(comm->doneEvent, launchStream), ret, do_return);
+#endif
+    comm->lastStreamTag = ncclStreamTag(launchStream);
     latency_profiler::collTraceRecordEndEvent(comm, plan, launchStream, std::move(event));
     return ncclSuccess;
   }
@@ -2347,10 +2354,14 @@ ncclResult_t ncclLaunchKernel(struct ncclComm* comm, struct ncclKernelPlan* plan
   CUCHECKGOTO(cuLaunchKernel(fn, grid.x, grid.y, grid.z, block.x, block.y, block.z, smem, launchStream, nullptr, extra),
               ret, do_return);
   latency_profiler::collTraceRecordEndEvent(comm, plan, launchStream, std::move(event));
-  // Mirror fast-path bookkeeping so the next ncclLaunchPrepare can detect stream-change.
-  // doneEvent is recorded lazily by ncclLaunchPrepare in the stream-change branch.
-  comm->lastStream = launchStream;
-  comm->lastStreamValid = true;
+  // Mirror the fast path. Deliberately not fused into the launch: this path also serves graph-captured plans, where
+  // a stopEvent is silently dropped (never bound), while hipEventRecord still does its stream-capture bookkeeping.
+#if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
+  CUDACHECKGOTO(hipEventRecord(comm->doneEvent, launchStream), ret, do_return);
+#else
+  CUDACHECKGOTO(cudaEventRecord(comm->doneEvent, launchStream), ret, do_return);
+#endif
+  comm->lastStreamTag = ncclStreamTag(launchStream);
 
 do_return:
   NCCLCHECK(ncclProfilerStopKernelLaunchEvent(plan));
