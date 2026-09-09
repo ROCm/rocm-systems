@@ -15,6 +15,9 @@ on:
       - '!**/.spellcheck.local.yaml'
       - '!**/.wordlist.txt'
 
+permissions:
+  contents: read
+
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
@@ -163,6 +166,17 @@ jobs:
           echo -e "################"
           exit 1
         fi
+
+  banned-includes:
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v6
+      with:
+        sparse-checkout: projects/rocprofiler-systems
+    - name: check-banned-includes
+      working-directory: projects/rocprofiler-systems/
+      run: python3 scripts/check-banned-includes.py
 
   fixedwidth-types:
     runs-on: ubuntu-latest

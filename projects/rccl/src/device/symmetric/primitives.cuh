@@ -7,16 +7,28 @@
 #include "sym_kernels.h"
 #include "bitops.h"
 #include "collectives.h"
-#include "op128.h"
-#include "reduce_kernel.h"
-#include "common.h"
-#include "tma_ptx.h"
+#include "../op128.h"
+#include "../reduce_kernel.h"
+#if !defined(NCCL_OS_WINDOWS)
+#include "gin_scratch.h"
+#endif
+
+#if defined(CUDART_VERSION) && CUDART_VERSION >= 13010
+#include <cuda/std/ranges>
+#endif
+
+#if __CUDA_ARCH__ >= 1000
+#include <cuda/barrier>
+#include <cuda/ptx>
+
+namespace ptx = cuda::ptx;
 
 template <typename Pack, int UnrollPacks, int UnrollPeers = 1>
 struct tmaSmemStruct {
   alignas(16) Pack buff[UnrollPeers][UnrollPacks * WARP_SIZE];
-  alignas(8) __mbarrier_t bar;
+  cuda::barrier<cuda::thread_scope_block> bar;
 };
+#endif
 
 // HIP has no __isShared() (used only as a __builtin_assume hint); map it to the AMDGCN builtin.
 #if defined(__HIP_PLATFORM_AMD__) && !defined(NCCL_SYMK_HAVE_ISSHARED)
@@ -103,16 +115,17 @@ struct ncclSymkArgsHandler {
   ncclLLA2AHandle const& lsaLLA2A;
   ncclGinOutboxHandle const& ginOutbox;
   ncclGinInboxA2AHandle const& ginInboxRail;
-  ncclGinCounter_t ginCounterPerBlock;
   ncclGinSyncHandle const& ginSyncHandle;
+  ncclDevResourceHandle rsGinAccumBuf;
+  uint32_t rsGinAccumBytesPerBlock;
   struct ncclSymkChannelWorkRange* channelWorkRange;
   struct ncclSymkDevWork* devWork;
   uint32_t nRanks_rcp32;
 
   __device__ ncclSymkArgsHandler(ncclSymkDevWorkArgs const* args)
     : comm(args->kcomm.devComm), lsaLLA2A(args->kcomm.lsaLLA2A), ginOutbox(args->kcomm.ginOutbox),
-      ginInboxRail(args->kcomm.ginInboxRail), ginCounterPerBlock(args->kcomm.ginCounterPerBlock),
-      ginSyncHandle(args->kcomm.ginSyncHandle) {
+      ginInboxRail(args->kcomm.ginInboxRail), ginSyncHandle(args->kcomm.ginSyncHandle),
+      rsGinAccumBuf(args->kcomm.rsGinAccumBuf), rsGinAccumBytesPerBlock(args->kcomm.rsGinAccumBytesPerBlock) {
     channelWorkRange = args->getWorkRange();
 
     devWork = args->getWorks(args->nMaxChannels);
@@ -170,7 +183,7 @@ struct ncclSymkArgsHandler {
 
     getWorkRange<T>(blockIdx.x, workLo, indexLo, workHi, indexHi);
 
-#pragma unroll 1
+    NVCC_PRAGMA_UNROLL_DISABLED
     for (int w = workLo; w <= workHi; w++) {
       struct ncclSymkDevWork const& dw = devWork[w];
       size_t const& nAllElts = dw.nElts;
@@ -213,7 +226,7 @@ struct ncclSymkArgsHandler {
 
     getWorkRange<T>(blockIdx.x, workLo, indexLo, workHi, indexHi);
 
-#pragma unroll 1
+    NVCC_PRAGMA_UNROLL_DISABLED
     for (int w = workLo; w <= workHi; w++) {
       struct ncclSymkDevWork const& dw = devWork[w];
       size_t const& nAllElts = dw.nElts;
@@ -273,11 +286,23 @@ struct ncclSymkAccumType<FuncSumPostDiv, __nv_fp8_e5m2, false> {
 };
 #endif
 #if defined(__HIP_PLATFORM_AMD__)
-// The upstream bf16/fp8 specializations above are gated behind
+// [RCCL] The upstream bf16/fp8 specializations above are gated behind
 // __CUDA_{BF16,FP8}_TYPES_EXIST__ and keyed on CUDA type names; re-key them on the
 // RCCL device types. bf16 and fp8 both reduce in a float accumulator: the fp8
 // software type used on non-fp8 arches (e.g. gfx908) has no __half conversion, so
 // fp8 accumulates in float (which casts cleanly on every arch).
+template <>
+struct ncclSymkAccumType<FuncSum, hip_bfloat16, false> {
+  using Type = float;
+};
+template <>
+struct ncclSymkAccumType<FuncSum, rccl_float8, false> {
+  using Type = float;
+};
+template <>
+struct ncclSymkAccumType<FuncSum, rccl_bfloat8, false> {
+  using Type = float;
+};
 template <>
 struct ncclSymkAccumType<FuncSumPostDiv, hip_bfloat16, false> {
   using Type = float;
@@ -340,7 +365,7 @@ struct ncclSymkGinAccumType<FuncSumPostDiv, __nv_fp8_e5m2> {
 #endif
 
 #if defined(__HIP_PLATFORM_AMD__)
-// avg reduces in float on ROCm: raw bf16/fp8 have no FuncSumPostDiv, but FuncSumPostDiv<float> does.
+// [RCCL] avg reduces in float on ROCm: raw bf16/fp8 have no FuncSumPostDiv, but FuncSumPostDiv<float> does.
 template <>
 struct ncclSymkGinAccumType<FuncSumPostDiv, hip_bfloat16> {
   using Type = float;
@@ -355,16 +380,17 @@ struct ncclSymkGinAccumType<FuncSumPostDiv, rccl_bfloat8> {
 };
 #endif
 
-static __device__ __forceinline__ void tmaLoadStoreMc(void* dest, void* smem, void* source, size_t size,
-                                                      __mbarrier_t* bar) {
-  cp_async_bulk_global_to_shared(smem, source, bar, size);
-  __mbarrier_token_t token = barrier_arrive1_tx_relaxed(bar, size);
-  while (!barrier_try_wait_token_relaxed(bar, token)) {
-  }
-  multimem_cp_async_bulk_shared_to_global(dest, smem, size);
-  cp_async_bulk_commit_group();
-  cp_async_bulk_wait_all_read();
+#if __CUDA_ARCH__ >= 1000
+static __device__ __forceinline__ void tmaLoadStoreMc(char* dest, char* smem, char* source, size_t size,
+                                                      cuda::barrier<cuda::thread_scope_block>& bar) {
+  cuda::device::memcpy_async_tx((char*)smem, (const char*)source, cuda::aligned_size_t<16>(size), bar);
+  cuda::barrier<cuda::thread_scope_block>::arrival_token token = cuda::device::barrier_arrive_tx(bar, 1, size);
+  bar.wait(std::move(token));
+  ptx::cp_async_bulk(ptx::space_global, ptx::space_shared, dest, smem, size);
+  ptx::cp_async_bulk_commit_group();
+  ptx::cp_async_bulk_wait_group_read(ptx::n32_t<0>());
 }
+#endif
 
 // TODO: move this into data_ops.cuh
 template <typename T, bool EnableTma = false>
@@ -374,13 +400,20 @@ static __device__ void bcastMultimem(ncclSymkArgsHandler& handler, int tn, int t
   uintptr_t inputUptr = reinterpret_cast<uintptr_t>(input.localPtr());
   uintptr_t outputUptr = reinterpret_cast<uintptr_t>(output.multimemPtr(handler.comm.lsaMultimem));
   uint32_t alignment = uint32_t(inputUptr - outputUptr);
-  uint32_t nPreBytes = (EnableTma && alignment % 256 == 0) ? (256 - input.offset) % 256 : (16 - input.offset) % 16;
+  uint32_t nPreBytes =
+#if __CUDA_ARCH__ >= 1000
+    (EnableTma && alignment % 256 == 0) ? (256 - input.offset) % 256 :
+#endif
+                                          (16 - input.offset) % 16;
+
   nPreBytes = min((size_t)nPreBytes, nBytes);
   uintptr_t nSufBytes;
 
+#if __CUDA_ARCH__ >= 1000
   int lane = t % WARP_SIZE;
   int lw = threadIdx.x / WARP_SIZE;
   extern __shared__ char smemScratch[];
+#endif
 
   if (alignment % 16 == 0) {
     constexpr int BytePerPack = 16, UnrollPacks = 8;
@@ -389,32 +422,37 @@ static __device__ void bcastMultimem(ncclSymkArgsHandler& handler, int tn, int t
     uint32_t nChunks = (nBytes - cursor) / BytePerChunk;
     uintptr_t cursorAfter = cursor + uintptr_t(nChunks) * BytePerChunk;
 
+#if __CUDA_ARCH__ >= 1000
     // Initialize share memory pointer and barrier
     constexpr size_t tileSize = UnrollPacks * WARP_SIZE * BytePerPack;
     using tmaSmemStruct_t = tmaSmemStruct<BytePack<BytePerPack>, UnrollPacks>;
     constexpr int smemSizePerWarp = ncclTmaShmemScratchWarpSize();
     tmaSmemStruct_t* tmaSmem = reinterpret_cast<tmaSmemStruct_t*>(smemScratch + lw * smemSizePerWarp);
     if NCCL_IF_CONSTEXPR (EnableTma) {
-      if (lane == 0) __mbarrier_init(&tmaSmem->bar, 1);
+      if (lane == 0) init(&tmaSmem->bar, 1);
     }
+#endif
 
     nSufBytes = nBytes - cursorAfter;
     cursor += (t / WARP_SIZE) * UnrollPacks * WARP_SIZE * BytePerPack;
     cursor += (t % WARP_SIZE) * BytePerPack;
     int nIters = nChunks - t / WARP_SIZE;
-#pragma unroll 1
+    NVCC_PRAGMA_UNROLL_DISABLED
     while (0 < nIters) {
+#if __CUDA_ARCH__ >= 1000
       if NCCL_IF_CONSTEXPR (EnableTma) {
         if (lane == 0)
-          tmaLoadStoreMc((void*)(outputUptr + cursor), tmaSmem->buff[0], (void*)(inputUptr + cursor), tileSize,
-                         &tmaSmem->bar);
-      } else {
+          tmaLoadStoreMc((char*)(outputUptr + cursor), (char*)tmaSmem->buff[0], (char*)(inputUptr + cursor), tileSize,
+                         tmaSmem->bar);
+      } else
+#endif
+      {
         BytePack<BytePerPack> tmp[UnrollPacks];
-#pragma unroll
+        NVCC_PRAGMA_UNROLL_AUTO
         for (int u = 0; u < UnrollPacks; u++) {
           tmp[u] = *reinterpret_cast<BytePack<BytePerPack>*>(inputUptr + cursor + u * WARP_SIZE * BytePerPack);
         }
-#pragma unroll
+        NVCC_PRAGMA_UNROLL_AUTO
         for (int u = 0; u < UnrollPacks; u++) {
           multimem_st_global(outputUptr + cursor + u * WARP_SIZE * BytePerPack, tmp[u]);
         }
@@ -428,7 +466,7 @@ static __device__ void bcastMultimem(ncclSymkArgsHandler& handler, int tn, int t
   }
 
   // Get the prefix+suffix element one at a time.
-#pragma unroll 4
+  NVCC_PRAGMA_UNROLL(4)
   for (uintptr_t i = t * sizeof(T); i < nPreBytes + nSufBytes; i += tn * sizeof(T)) {
     uintptr_t cursor = i < nPreBytes ? i : nBytes - nSufBytes + (i - nPreBytes);
     BytePack<sizeof(T)> val = *reinterpret_cast<BytePack<sizeof(T)>*>(inputUptr + cursor);

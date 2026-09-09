@@ -75,14 +75,28 @@ static ncclResult_t ncclTopoSetPaths(struct ncclTopoNode* baseNode, struct ncclT
         // - the remNode is a GPU and the link type is PATH_LOC, or
         // - NVB is enabled and remNode is a DEV and link type is NVLink and the path isn't too long for NVB;
         // else, discard the path.
-
         int pathMaxLength = (baseNode->type == GPU) ? 2 : 1;
         ncclTopoNode* baseDevNode = (baseNode->type == GPU) ? baseNode->gpu.parent : baseNode;
         if (node != baseDevNode && node->type == DEV && (link->type != LINK_LOC || remNode->type != GPU) &&
             (ncclParamNvbDisable() || link->type != LINK_NVL || remNode->type != DEV || path->count > pathMaxLength))
           continue;
 
-        if ((remPath->bw == 0 || remPath->count > path->count) && remPath->bw < bw) {
+        // Start with path type = link type. PATH and LINK types are supposed to match.
+        // Don't consider LINK_NET as we only care about the NIC->GPU path.
+        int newType = link->type == LINK_NET ? LINK_LOC : link->type;
+        // Differentiate between one and multiple PCI switches
+        if (node->type == PCI && remNode->type == PCI) newType = PATH_PXB;
+        // Consider a path going through the CPU as PATH_PHB
+        if (link->type == LINK_PCI && (node->type == CPU || link->remNode->type == CPU)) newType = PATH_PHB;
+        // Set 1 hop NVLink as NVB.
+        if (node->type == DEV && path->type == PATH_NVL && newType == PATH_NVL && path->count == pathMaxLength)
+          newType = PATH_NVB;
+        newType = std::max(path->type, newType);
+
+        // Update if better path type, OR same type with higher bw, OR same type/bw with strickly fewer hops.
+        // Note: path->count +1 to account for the existing path + current candidate, see remPath->count update.
+        if (newType < remPath->type || (newType == remPath->type && remPath->bw < bw) ||
+            (newType == remPath->type && remPath->bw == bw && remPath->count > (path->count + 1))) {
           // Find reverse link
           for (int l = 0; l < remNode->nlinks; l++) {
             if (remNode->links[l].remNode == node && remNode->links[l].type == link->type) {
@@ -99,27 +113,14 @@ static ncclResult_t ncclTopoSetPaths(struct ncclTopoNode* baseNode, struct ncclT
           for (int i = 0; i < path->count; i++) remPath->list[i + 1] = path->list[i];
           remPath->count = path->count + 1;
           remPath->bw = bw;
-
-          // Start with path type = link type. PATH and LINK types are supposed to match.
-          // Don't consider LINK_NET as we only care about the NIC->GPU path.
-          int type = link->type == LINK_NET ? LINK_LOC : link->type;
-          // Differentiate between one and multiple PCI switches
-          if (node->type == PCI && remNode->type == PCI) type = PATH_PXB;
-          // Consider a path going through the CPU as PATH_PHB
-          if (link->type == LINK_PCI && (node->type == CPU || link->remNode->type == CPU)) type = PATH_PHB;
-          // Set 1 hop NVLink as NVB
-          // if (node->type == GPU && path->type == PATH_NVL && type == PATH_NVL && remPath->count > 1) type = PATH_NVB;
-
-          remPath->type = std::max(path->type, type);
+          remPath->type = newType;
 
           // Add to the list for the next iteration if not already in the list
-          // Disallow GPUs as intermediate steps for now
-          if (remNode->type != GPU) {
-            int i;
-            for (i = 0; i < nextNodeList.count; i++)
-              if (nextNodeList.list[i] == remNode) break;
-            if (i == nextNodeList.count) nextNodeList.list[nextNodeList.count++] = remNode;
+          int i;
+          for (i = 0; i < nextNodeList.count; i++) {
+            if (nextNodeList.list[i] == remNode) break;
           }
+          if (i == nextNodeList.count) nextNodeList.list[nextNodeList.count++] = remNode;
         }
       }
     }
@@ -177,6 +178,9 @@ ncclResult_t ncclTopoPrintPaths(struct ncclTopoSystem* system) {
   }
   for (int i = 0; i < system->nodes[GIN].count; i++) {
     printNodePaths(system, system->nodes[GIN].nodes + i);
+  }
+  for (int i = 0; i < system->nodes[RMA].count; i++) {
+    printNodePaths(system, system->nodes[RMA].nodes + i);
   }
   return ncclSuccess;
 }
@@ -489,6 +493,21 @@ const char* ncclTopoGdrModeStr[ncclTopoGdrModeNum] = {"Disabled", "Default", "PC
 
 // On C2C platforms use GDRDMA on NICs which are connected to the CPUs
 NCCL_PARAM(NetGdrC2c, "NET_GDR_C2C", 1);
+// MLOPart partitions reach a NIC over the physical device's single DMA path, so GDR is as available
+// to a partition as it is to the whole GPU. Set to 0 to opt every partition out of GDR again.
+NCCL_PARAM(NetGdrMloPart, "NET_GDR_MLOPART", 1);
+
+// Distance to NET n for the GDR decision. MLOPart partitions are HIP logical devices sharing one PCI
+// function, so their distance is a property of the physical device, not of the partition: read it
+// from the parent DEV node, which ncclTopoSetPaths derives from the physical PCI hierarchy and which
+// the no-GDR diversion below (addInterStep, which only rewrites GPU<->NET) never degrades. Reading
+// the partition's own entry instead would feed the decision back its own diverted path and let
+// partitions of one device disagree about GDR.
+static int ncclTopoGdrDistance(struct ncclTopoNode* gpu, int n) {
+  if (gpu->gpu.mloPart != NCCL_TOPO_UNDEF && gpu->gpu.parent != NULL && gpu->gpu.parent->paths[NET] != NULL)
+    return gpu->gpu.parent->paths[NET][n].type;
+  return gpu->paths[NET][n].type;
+}
 
 ncclResult_t ncclTopoCheckGdr(struct ncclTopoSystem* system, int rank, int64_t netId, int read,
                               enum ncclTopoGdrMode* gdrMode) {
@@ -509,8 +528,10 @@ ncclResult_t ncclTopoCheckGdr(struct ncclTopoSystem* system, int rank, int64_t n
   // Check that both the NIC and GPUs support it
   if (net->net.gdrSupport == 0) return ncclSuccess;
   if (gpu->gpu.gdrSupport == 0) return ncclSuccess;
+  if (gpu->gpu.mloPart != NCCL_TOPO_UNDEF && !ncclParamNetGdrMloPart()) return ncclSuccess;
 
-  if (read) { // For reads (sends) only enable under certain conditions
+  if (read) {
+    // For reads (sends) only enable under certain conditions
     int gdrReadParam = ncclParamNetGdrRead();
     if (gdrReadParam == 0) return ncclSuccess;
 #if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
@@ -555,14 +576,14 @@ ncclResult_t ncclTopoCheckGdr(struct ncclTopoSystem* system, int rank, int64_t n
     }
   }
 
-  int distance = gpu->paths[NET][n].type;
+  int distance = ncclTopoGdrDistance(gpu, n);
   if (distance == PATH_PXN) {
     // In case of PXN, use the intermediate GPU distance instead
     int proxyRank;
     NCCLCHECK(ncclTopoGetIntermediateRank(system, gpu->gpu.rank, netId, &proxyRank));
     NCCLCHECK(ncclTopoRankToIndex(system, proxyRank, &g, /*showWarn=*/true));
     gpu = system->nodes[GPU].nodes + g;
-    distance = gpu->paths[NET][n].type;
+    distance = ncclTopoGdrDistance(gpu, n);
 #ifdef ENABLE_TRACE
     snprintf(gpuNetMsg + strlen(gpuNetMsg), sizeof(gpuNetMsg) - strlen(gpuNetMsg), " using PXN via GPU/%ld-%ld, ",
              NCCL_TOPO_ID_SYSTEM_ID(gpu->id), NCCL_TOPO_ID_LOCAL_ID(gpu->id));
@@ -732,6 +753,10 @@ NCCL_PARAM(PxnDisable, "PXN_DISABLE", 1);
 // remote proxies without risking deadlocks
 int ncclPxnDisable(struct ncclComm* comm) {
 #if defined(NCCL_OS_LINUX)
+  // ncclTopoComputePaths() accepts comm==NULL when scoring a synthetic system
+  // (TopoTests). PXN needs a live communicator (plugin version, cached
+  // pxnDisable); without one, honour the env default and skip PXN.
+  if (comm == NULL) return ncclParamPxnDisable();
   if (comm->pxnDisable > RCCL_VALUE_INVALID) return comm->pxnDisable;
   if (comm->ncclNetVer == 4) {
     INFO(NCCL_INIT, "PXN Disabled as plugin is v4");
@@ -857,6 +882,11 @@ ncclResult_t ncclTopoComputePaths(struct ncclTopoSystem* system, struct ncclComm
     NCCLCHECK(ncclTopoSetPaths(system->nodes[GIN].nodes + n, system));
   }
 
+  // Set direct paths to RMA devices.
+  for (int n = 0; n < system->nodes[RMA].count; n++) {
+    NCCLCHECK(ncclTopoSetPaths(system->nodes[RMA].nodes + n, system));
+  }
+
   // Set direct paths to NVSwitches.
   for (int n = 0; n < system->nodes[NVS].count; n++) {
     NCCLCHECK(ncclTopoSetPaths(system->nodes[NVS].nodes + n, system));
@@ -924,7 +954,7 @@ ncclResult_t ncclTopoComputePaths(struct ncclTopoSystem* system, struct ncclComm
 
 #if !defined(TOPO_EXPL)
   char strValue[1024];
-  NCCLCHECK(ncclTopoGetStrFromSys("/sys/devices/virtual/dmi/id", "bios_version", strValue));
+  NCCLCHECK(ncclOsTopoGetStrFromSys("/sys/devices/virtual/dmi/id", "bios_version", strValue, sizeof(strValue)));
   if (strncmp("Hyper-V UEFI Release", strValue, 20) == 0) {
 #endif
     int arch, vendor, model;
@@ -967,11 +997,12 @@ ncclResult_t ncclTopoComputePaths(struct ncclTopoSystem* system, struct ncclComm
               /* and (3) is on the same node as us */
               NCCL_TOPO_ID_SYSTEM_ID(peerNode->id) == NCCL_TOPO_ID_SYSTEM_ID(gpu->id) &&
               /* and (4) has either higher bw to that NIC or avoid going through the CPU (path.type is > PATH_PXN)*/
-              (peerNode->paths[NET][n].bw > gpu->paths[NET][n].bw || gpu->paths[NET][n].type > PATH_PXN))
+              (peerNode->paths[NET][n].bw > gpu->paths[NET][n].bw || gpu->paths[NET][n].type > PATH_PXN)) {
             // We can use that GPU as relay to communicate with that NIC.
             // Only enabling it in the GPU->NIC direction for now to favor
             // receiving locally and sending remotely (consistent with net.cc)
             NCCLCHECK(addInterStep(system, GPU, localGpuIndex, GPU, g, NET, n));
+          }
         }
       }
       if (gpu->paths[NET] != NULL && gpu->paths[NET][n].type < PATH_PHB) {
@@ -1164,6 +1195,7 @@ static ncclResult_t ncclTopoGetNchannels(struct ncclComm* comm, int g /*local gp
                       2) *
                    std::max(1, (int)(path->bw / nvlBw));
     } else {
+      // PCIe connection
       *nChannels = 2;
     }
   } else {
@@ -1195,7 +1227,7 @@ static ncclResult_t ncclTopoGetNchannels(struct ncclComm* comm, int g /*local gp
     if (nNetChannels == NCCL_CONFIG_UNDEF_INT) {
       float netBw = 0.0;
       int netCount = 0;
-      NCCLCHECK(getLocalNetCountByBw(system, g, &netCount, &netBw));
+      NCCLCHECK(ncclTopoGetLocalNetCountByBw(system, g, &netCount, &netBw));
       // We use at least 1 channel per NIC, and more if needed to meet the bw requirement.
       nNetChannels = 2;
       if (netCount > 0) nNetChannels = std::max(netCount, divUp((int)netBw, (int)ncclParamP2pPerChannelNetBw()));
@@ -1206,7 +1238,35 @@ static ncclResult_t ncclTopoGetNchannels(struct ncclComm* comm, int g /*local gp
 }
 
 NCCL_PARAM(MinP2pNChannels, "MIN_P2P_NCHANNELS", 1);
-NCCL_PARAM(MaxP2pNChannels, "MAX_P2P_NCHANNELS", MAXCHANNELS);
+NCCL_PARAM(MaxP2pNChannels, "MAX_P2P_NCHANNELS", -2);
+
+int ncclMaxP2pNchannels() {
+  int maxP2pNchannels = MAXCHANNELS;
+  if (ncclParamMaxP2pNChannels() != -2) maxP2pNchannels = (int)ncclParamMaxP2pNChannels();
+  maxP2pNchannels = std::min(maxP2pNchannels, (int)MAXCHANNELS);
+  if (maxP2pNchannels < 1) {
+    INFO(NCCL_GRAPH | NCCL_ENV, "User asked for a maximum of %d P2P channels, setting it to 1", maxP2pNchannels);
+    maxP2pNchannels = 1;
+  }
+  return maxP2pNchannels;
+}
+
+int ncclP2pChannelsUpperBound(struct ncclComm* comm, bool* userOptedHigherOut) {
+  int64_t userMaxP2pParam = ncclParamMaxP2pNChannels();
+  // gfx1250 full pool on single node only; the NET path stays at the historical bound.
+  bool gfx1250SingleNode =
+    comm->nNodes == 1 && IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx1250");
+  // Clamp by CU count; pow2Down since ncclP2pChannelForPart masks with (n - 1).
+  // cu <= 0 means the topology never reported it: leave the pool unclamped.
+  int cu = comm->topo->nodes[GPU].nodes[0].gpu.cu;
+  int cuBound = (cu > 0) ? pow2Down(std::min(cu, (int)MAXCHANNELS)) : (int)MAXCHANNELS;
+  int defaultMax = gfx1250SingleNode ? cuBound : 4 * CHANNEL_LIMIT;
+  bool userOptedHigher = (userMaxP2pParam != -2 && userMaxP2pParam > defaultMax);
+  if (userOptedHigherOut != nullptr) *userOptedHigherOut = userOptedHigher;
+  // pow2Down: ncclP2pChannelForPart masks with (nP2pChannels - 1). defaultMax is pow2.
+  return userOptedHigher ? pow2Down(std::min((int)userMaxP2pParam, (int)MAXCHANNELS)) : defaultMax;
+}
+
 // When enabled, caps p2pnChannels to 16 on gfx950 (MI350) for large-scale jobs
 // (nNodes >= 16) to reduce P2P CU usage. Disabled by default.
 NCCL_PARAM(P2pCuReduceScaleEnable, "P2P_CU_REDUCE_SCALE_ENABLE", 0);
@@ -1214,7 +1274,8 @@ NCCL_PARAM(P2pCuReduceScaleEnable, "P2P_CU_REDUCE_SCALE_ENABLE", 0);
 // in the pool: ppp = pow2Down(p2pnChannels / nRanks). The pow2 step matters --
 // ncclP2pChannelForPart mods channel ids by the pool, so ppp*nRanks > pool
 // causes round bases to wrap and channels to collide.
-RCCL_PARAM(SaturateP2pNChannels, "SATURATE_P2P_NCHANNELS", 0);
+// Unset defaults to on for gfx1250, off elsewhere.
+RCCL_PARAM(SaturateP2pNChannels, "SATURATE_P2P_NCHANNELS", RCCL_VALUE_UNSET);
 extern int64_t ncclParamWorkArgsBytes();
 
 ncclResult_t ncclTopoComputeP2pChannelsPerPeer(struct ncclComm* comm) {
@@ -1236,16 +1297,17 @@ ncclResult_t ncclTopoComputeP2pChannelsPerPeer(struct ncclComm* comm) {
 ncclResult_t ncclTopoComputeP2pChannels(struct ncclComm* comm) {
   /* here we already honor comm->max/minCTAs for p2pnChannels. */
   if (comm->sharedRes->owner != comm) {
-    comm->p2pnChannels = std::min(comm->nChannels, (int)ncclParamMaxP2pNChannels());
+    comm->p2pnChannels = std::min(comm->nChannels, ncclMaxP2pNchannels());
     comm->p2pnChannels =
       std::min(std::max(comm->p2pnChannels, (int)ncclParamMinP2pNChannels()), comm->sharedRes->tpP2pNChannels);
   } else {
-    comm->p2pnChannels = std::min(comm->nChannels, (int)ncclParamMaxP2pNChannels());
+    comm->p2pnChannels = std::min(comm->nChannels, ncclMaxP2pNchannels());
     comm->p2pnChannels = std::max(comm->p2pnChannels, (int)ncclParamMinP2pNChannels());
   }
 
   // comm->p2pnChannelsPerPeer was set by ncclTopoComputeP2pChannelsPerPeer().
   int minChannels = comm->p2pnChannelsPerPeer;
+  const bool isGfx1250 = IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx1250");
 
   int arch, vendor, model;
   NCCLCHECK(ncclTopoCpuType(comm->topo, &arch, &vendor, &model));
@@ -1275,15 +1337,32 @@ ncclResult_t ncclTopoComputeP2pChannels(struct ncclComm* comm) {
     // (seen on MI455 2x1p1g alltoall when topology fallback yields 2 channels
     // but the gfx1250 single-node doubling above asks for 4 parts per peer).
     //
-    // When the user explicitly raises NCCL_MAX_P2P_NCHANNELS past 4*CHANNEL_LIMIT
-    // (=64), treat it as an opt-in to the extended upper bound (up to MAXCHANNELS).
-    // Otherwise keep the historical 64 cap and per-arch multi-node caps below.
+    // gfx1250 defaults to the full pool so P2P follows the collective channel count.
+    // Setting NCCL_MAX_P2P_NCHANNELS is an opt-in to a different upper bound (up to
+    // MAXCHANNELS). Otherwise keep the historical 64 cap and the per-arch caps below.
+    //
+    // Detect the opt-in from the environment, not from the value: the param default is
+    // MAXCHANNELS (kept in sync with NCCL), so a value test reads every unset run as an
+    // opt-in. pow2Down because ncclP2pChannelForPart masks with (nP2pChannels - 1).
     {
-      int userMaxP2p = (int)ncclParamMaxP2pNChannels();
-      int defaultMax = 4 * CHANNEL_LIMIT;
-      int upper = (userMaxP2p > defaultMax) ? std::min(userMaxP2p, (int)MAXCHANNELS) : defaultMax;
+      bool userOptedHigher = false;
+      int upper = ncclP2pChannelsUpperBound(comm, &userOptedHigher);
+      // When the user set MAX_P2P_NCHANNELS, it is also a downward cap. pow2Up(p2pnChannelsPerPeer)
+      // (single-node doubling on gfx942/950/1250) would otherwise raise the pool above a small
+      // request such as NCCL_MAX_P2P_NCHANNELS=1. pow2Up of the user max keeps the existing
+      // non-pow2 rounding (48 -> 64).
+      if (ncclParamMaxP2pNChannels() != -2) {
+        int userMax = pow2Up(std::max(1, ncclMaxP2pNchannels()));
+        int minP2p = (int)ncclParamMinP2pNChannels();
+        if (minP2p > userMax) {
+          INFO(NCCL_GRAPH | NCCL_ENV,
+               "NCCL_MAX_P2P_NCHANNELS=%d overrides NCCL_MIN_P2P_NCHANNELS=%d; using %d P2P channels",
+               (int)ncclParamMaxP2pNChannels(), minP2p, userMax);
+        }
+        upper = std::min(upper, userMax);
+      }
       comm->p2pnChannels = std::min(std::max(pow2Up(comm->p2pnChannels), pow2Up(comm->p2pnChannelsPerPeer)), upper);
-      if (upper == defaultMax) {
+      if (!userOptedHigher) {
         // p2pnChannelsPerPeer cannot be greater than MAXCHANNELS
         // Capping the comm->p2pnChannels to 32 for send/recv based collectives on multi-node MI350 (2 and 4 nodes)
         if (((comm->nNodes == 2 && comm->topo->nRanks == 16) || (comm->nNodes == 4 && comm->topo->nRanks == 32)) &&
@@ -1302,9 +1381,14 @@ ncclResult_t ncclTopoComputeP2pChannels(struct ncclComm* comm) {
     comm->p2pnChannelsPerPeer = std::min(comm->p2pnChannelsPerPeer, MAXCHANNELS);
   }
 
-  // Opt-in: pick p2pnChannelsPerPeer so a P2P plan tiles the channel pool
-  // without wrapping. Saturates gridDim.x for alltoall-style workloads.
-  if (rcclParamSaturateP2pNChannels() && comm->nRanks > 0) {
+  // Pick p2pnChannelsPerPeer so a P2P plan tiles the channel pool without wrapping.
+  // Saturates gridDim.x for alltoall-style workloads. On by default for gfx1250,
+  // which needs the larger per-peer count to use its full pool; opt-in elsewhere.
+  int saturateP2p = (int)rcclParamSaturateP2pNChannels();
+  if (saturateP2p == RCCL_VALUE_UNSET) {
+    saturateP2p = isGfx1250 ? 1 : 0;
+  }
+  if (saturateP2p && comm->nRanks > 0) {
     int target = std::max(1, comm->p2pnChannels / comm->nRanks);
     int newPpp = std::min(pow2Down(target), (int)MAXCHANNELS);
     INFO(NCCL_INIT | NCCL_TUNING,
@@ -1399,7 +1483,7 @@ ncclResult_t ncclTopoPathAllNVLink(struct ncclTopoSystem* system, int* allNvLink
 ncclResult_t ncclTopoPathAllDirectNVLink(struct ncclTopoSystem* system, bool* directNvlink) {
   int maxPath;
   NCCLCHECK(ncclTopoGetGpuMaxPath(system, GPU, &maxPath));
-  *directNvlink = maxPath == PATH_NVL;
+  *directNvlink = maxPath <= PATH_NVL;
   return ncclSuccess;
 }
 

@@ -334,7 +334,10 @@ class HostcallListener {
 #endif
   class Thread : public amd::Thread {
    public:
-    Thread() : amd::Thread("Hostcall Listener Thread", CQ_THREAD_STACK_SIZE) {}
+    // Take the system default stack: glibc allocates a thread's static TLS block inside the stack
+    // requested through pthread_attr_setstacksize() and refuses the request when the two do not
+    // fit, which is easy to hit from a process that links libraries with large PT_TLS segments.
+    Thread() : amd::Thread("Hostcall Listener Thread") {}
 
     //! The hostcall listener thread entry point.
     void run(void* data) {

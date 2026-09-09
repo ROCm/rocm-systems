@@ -5,6 +5,9 @@ on:
     types: [opened, synchronize, reopened]
     branches: [develop]
 
+permissions:
+  contents: read
+
 jobs:
   trigger-rocm-ci:
     runs-on: azure-vms

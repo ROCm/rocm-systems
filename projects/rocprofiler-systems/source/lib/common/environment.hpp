@@ -7,9 +7,7 @@
 #include "common/env_vars.hpp"
 #include "common/path.hpp"
 #include "logger/debug.hpp"
-#include <spdlog/fmt/fmt.h>
-
-#include <timemory/utility/filepath.hpp>
+#include <fmt/format.h>
 
 #include <algorithm>
 #include <array>
@@ -17,6 +15,7 @@
 #include <charconv>
 #include <cstdint>
 #include <cstdio>
+#include <optional>
 #include <set>
 #include <sstream>
 #include <stdexcept>
@@ -484,7 +483,7 @@ discover_llvm_libdir_for_ompt()
 
     auto has_libomptarget = [](const std::string& dir) {
         const std::string so = dir + "/libomptarget.so";
-        return ::tim::filepath::exists(so);
+        return path::is_regular_file(so);
     };
 
     // Pick the first candidate that contains libomptarget.so
@@ -539,7 +538,7 @@ discover_torch_libpath(const std::string& python_binary)
     const auto is_safe_executable_path = [](const std::string& path) {
         // Allow only a conservative set of characters in the executable path to
         // avoid injection when used in a shell command.
-        for(unsigned char c : path)
+        for(const unsigned char c : path)
         {
             if(std::isalnum(c) != 0) continue;
             switch(c)
@@ -581,7 +580,7 @@ discover_torch_libpath(const std::string& python_binary)
         if(!result.empty() && result.back() == '\n') break;
     }
 
-    int status = pclose(pipe);
+    const int status = pclose(pipe);
 
     if(status != 0 || result.empty())
     {

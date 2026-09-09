@@ -22,8 +22,6 @@ release(bool, AMD_LOG_ASYNC, true,                                            \
         "Async logging with in-memory buffer and background thread (set 0 to disable)")\
 debug(uint, DEBUG_GPU_FLAGS, 0,                                               \
         "The debug options for GPU device")                                   \
-release(size_t, CQ_THREAD_STACK_SIZE, 256*Ki, /* @todo: that much! */         \
-        "The default command queue thread stack size")                        \
 release(int, GPU_MAX_WORKGROUP_SIZE, 0,                                       \
         "Maximum number of workitems in a workgroup for GPU, 0 -use default") \
 debug(bool, CPU_MEMORY_GUARD_PAGES, false,                                    \
@@ -141,6 +139,8 @@ release(uint, GPU_MAX_COMMAND_BUFFERS, 8,                                     \
          "The maximum number of command buffers allocated per queue")         \
 release(uint, GPU_MAX_HW_QUEUES, 4,                                           \
          "The maximum number of HW queues allocated per device")              \
+release(bool, DEBUG_CLR_AQL_BARRIER_OPT, true,                                \
+        "Enable per-stream AQL barrier-bit optimization on shared HW queues") \
 release(bool, GPU_IMAGE_BUFFER_WAR, true,                                     \
         "Enables image buffer workaround")                                    \
 release(cstring, HIP_VISIBLE_DEVICES, "",                                     \
@@ -292,6 +292,8 @@ release(uint, DEBUG_CLR_AQL_DEV_QUEUE, 0,                                     \
 release(uint, DEBUG_CLR_USE_MOVDIR64B, 1,                                     \
         "Use MOVDIR64B full-packet writes for AQL + metadata rings"           \
         "(1=enabled (default), 0=non-temporal store path)")                   \
+release(bool, DEBUG_CLR_ENABLE_KDQ, true,                                     \
+        "Kernel dispatch metadata (prefetch) queue, 0 = disable")             \
 
 namespace amd {
 

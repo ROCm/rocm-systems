@@ -1026,6 +1026,8 @@ ncclResult_t ncclCommSuspend_impl(ncclComm_t comm, int flags) {
   }
 
   ncclResult_t ret = ncclSuccess;
+  ncclResult_t groupRet = ncclSuccess;
+  cudaError_t restoreErr = cudaSuccess;
   int saveDev;
   CUDACHECK(cudaGetDevice(&saveDev));
   NCCLCHECK(ncclGroupStartInternal());
@@ -1059,12 +1061,21 @@ ncclResult_t ncclCommSuspend_impl(ncclComm_t comm, int flags) {
   }
 
 exit:
+  // RCCL: the current device was switched to comm->cudaDev above and is switched
+  // back at the end of this block. Do not return in between: a rejected call comes
+  // back out of ncclGroupEndInternal and would skip the switch back.
   ncclGroupErrCheck(ret);
-  NCCLCHECK(ncclGroupEndInternal());
-  if (comm && !comm->config.blocking) {
-    NCCLCHECK(ncclCommGetAsyncError(comm, &ret));
+  groupRet = ncclGroupEndInternal();
+  if (ret == ncclSuccess) ret = groupRet;
+  if (ret == ncclSuccess && comm && !comm->config.blocking) {
+    const ncclResult_t asyncRet = ncclCommGetAsyncError(comm, &ret);
+    if (asyncRet != ncclSuccess) ret = asyncRet;
   }
-  CUDACHECK(cudaSetDevice(saveDev));
+  restoreErr = cudaSetDevice(saveDev);
+  if (restoreErr != cudaSuccess) {
+    const ncclResult_t restoreRet = rcclCudaErrorHandler(restoreErr);
+    if (ret == ncclSuccess) ret = restoreRet;
+  }
   return ret;
 fail:
   goto exit;
@@ -1077,6 +1088,8 @@ ncclResult_t ncclCommResume_impl(ncclComm_t comm) {
   NCCLCHECK(ncclCommEnsureReady(comm));
 
   ncclResult_t ret = ncclSuccess;
+  ncclResult_t groupRet = ncclSuccess;
+  cudaError_t restoreErr = cudaSuccess;
   int saveDev;
   CUDACHECK(cudaGetDevice(&saveDev));
   NCCLCHECK(ncclGroupStartInternal());
@@ -1108,12 +1121,21 @@ ncclResult_t ncclCommResume_impl(ncclComm_t comm) {
   ncclGroupCommJoin(comm, ncclGroupTaskTypeSymRegister); // Reuse to avoid creating a new task type
 
 exit:
+  // RCCL: the current device was switched to comm->cudaDev above and is switched
+  // back at the end of this block. Do not return in between: a rejected call comes
+  // back out of ncclGroupEndInternal and would skip the switch back.
   ncclGroupErrCheck(ret);
-  NCCLCHECK(ncclGroupEndInternal());
-  if (comm && !comm->config.blocking) {
-    NCCLCHECK(ncclCommGetAsyncError(comm, &ret));
+  groupRet = ncclGroupEndInternal();
+  if (ret == ncclSuccess) ret = groupRet;
+  if (ret == ncclSuccess && comm && !comm->config.blocking) {
+    const ncclResult_t asyncRet = ncclCommGetAsyncError(comm, &ret);
+    if (asyncRet != ncclSuccess) ret = asyncRet;
   }
-  CUDACHECK(cudaSetDevice(saveDev));
+  restoreErr = cudaSetDevice(saveDev);
+  if (restoreErr != cudaSuccess) {
+    const ncclResult_t restoreRet = rcclCudaErrorHandler(restoreErr);
+    if (ret == ncclSuccess) ret = restoreRet;
+  }
   return ret;
 fail:
   goto exit;

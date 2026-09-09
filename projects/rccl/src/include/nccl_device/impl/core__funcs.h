@@ -163,7 +163,7 @@ NCCL_DEVICE_INLINE ncclWindow_t ncclFindWindow(Coop coop, ncclDevComm const& com
   while (true) {
     bool found = false;
     int index = coalesced.thread_rank();
-#pragma unroll 1
+    NVCC_PRAGMA_UNROLL_DISABLED
     while (index < 32) {
       uintptr_t uptr = reinterpret_cast<uintptr_t>(ptr);
       ncclDevCommWindowTable::Entry e = loadConst(&t->entries[index]);
@@ -209,7 +209,7 @@ NCCL_DEVICE_INLINE void* ncclGetResourceBufferLsaPointer(ncclDevComm const& comm
 }
 #endif
 
-#if __CUDACC__
+#if NCCL_CHECK_CUDACC
 NCCL_DEVICE_INLINE void* ncclGetResourceBufferPeerPointer(ncclDevComm const& comm, ncclDevResourceHandle h,
                                                           ncclTeam team, int peer) {
   int r = comm.lsaRank + (peer - team.rank) * team.stride;
@@ -220,7 +220,7 @@ NCCL_DEVICE_INLINE void* ncclGetResourceBufferPeerPointer(ncclDevComm const& com
 }
 #endif
 
-#if __CUDACC__
+#if NCCL_CHECK_CUDACC
 NCCL_DEVICE_INLINE void* ncclGetResourceBufferMultimemPointer(ncclDevComm const& comm, ncclDevResourceHandle h,
                                                               ncclMultimemHandle mm) {
   void* ptr = mm.mcBasePtr;

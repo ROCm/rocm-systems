@@ -12,6 +12,7 @@ import re
 import subprocess
 import sys
 import time
+import platform
 
 # get current working directory
 CWD = os.path.dirname(os.path.realpath(__file__))
@@ -291,11 +292,12 @@ def main():
     """
     target_list = readFromTargetLstFile()
 
-    if len(target_list) == 0:
-      target_list = readFromKFD()
+    if platform.system() == "Linux":
+      if len(target_list) == 0:
+        target_list = readFromKFD()
 
-    if len(target_list) == 0:
-      target_list = readFromLSPCI()
+      if len(target_list) == 0:
+        target_list = readFromLSPCI()
 
     if len(target_list) == 0:
       target_list = readFromROCMINFO()

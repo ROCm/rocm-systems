@@ -57,6 +57,23 @@ TEST(VersionGateTests, CuMemHostIsNativeOnly)
     EXPECT_FALSE(NCCL_CUMEM_HOST_VERSION_SUPPORTED(ROCM_VER_7_0_3_0 - 1));
 }
 
+// The DMA-BUF export gate is a conjunction: the CMake symbol probe alone must not
+// turn it on, because hipMemGetHandleForAddressRange is declared in headers on
+// builds outside the supported version window too. All four input combinations,
+// using a version inside the window and one below it.
+static_assert(NCCL_CUMEM_DMABUF_EXPORT_GATE_FOR(1, ROCM_VER_7_12_60540), "probe + supported version must gate on");
+static_assert(!NCCL_CUMEM_DMABUF_EXPORT_GATE_FOR(1, ROCM_VER_7_12_0),
+              "probe must not override an unsupported version");
+static_assert(!NCCL_CUMEM_DMABUF_EXPORT_GATE_FOR(0, ROCM_VER_7_12_60540),
+              "a supported version must not override a failed probe");
+static_assert(!NCCL_CUMEM_DMABUF_EXPORT_GATE_FOR(0, ROCM_VER_7_12_0), "neither input holds");
+
+// The gate this build compiled with must still be the parameterized form instantiated
+// with this build's own inputs, or the combinations asserted above stop describing it.
+static_assert(NCCL_CUMEM_DMABUF_EXPORT_GATE ==
+                  NCCL_CUMEM_DMABUF_EXPORT_GATE_FOR(NCCL_CUMEM_DMABUF_EXPORT_PROBE, HIP_VERSION),
+              "the build's gate is no longer the parameterized gate for (probe, HIP_VERSION)");
+
 TEST(VersionGateTests, CeBatchAsyncWindow)
 {
     // Native 7.12+ (note: 7.12.0, lower than the cuMem milestone).

@@ -37,9 +37,9 @@ core::SharedQueue* AllocateSdmaSharedQueue(core::Agent* agent, uint64_t flags) {
         sizeof(core::SharedQueue),
         core::MemoryRegion::AllocateUncached | core::MemoryRegion::AllocateQueueObject));
   } else {
-    shared_queue = static_cast<core::SharedQueue*>(gpu_agent->system_allocator()(
-        sizeof(core::SharedQueue), MemoryRegion::GetPageSize(),
-        core::MemoryRegion::AllocateQueueObject));
+    shared_queue = static_cast<core::SharedQueue*>(
+        gpu_agent->system_allocator()(sizeof(core::SharedQueue), MemoryRegion::GetPageSize(),
+                                      core::MemoryRegion::AllocateQueueObject));
   }
 
   if (shared_queue == nullptr) {
@@ -83,9 +83,7 @@ SdmaQueue::~SdmaQueue() {
   }
 }
 
-AMD::GpuAgent* SdmaQueue::gpu_agent() const {
-  return static_cast<AMD::GpuAgent*>(agent_);
-}
+AMD::GpuAgent* SdmaQueue::gpu_agent() const { return static_cast<AMD::GpuAgent*>(agent_); }
 
 hsa_status_t SdmaQueue::AllocateQueueBuffer() {
   if (queue_start_addr_ != nullptr) {
@@ -96,12 +94,13 @@ hsa_status_t SdmaQueue::AllocateQueueBuffer() {
     if (!gpu_agent()->LargeBarEnabled()) {
       return HSA_STATUS_ERROR_INVALID_QUEUE_CREATION;
     }
-    queue_start_addr_ = reinterpret_cast<char*>(
-        gpu_agent()->coarsegrain_allocator()(queue_size_, core::MemoryRegion::AllocateExecutable));
+    queue_start_addr_ = reinterpret_cast<char*>(gpu_agent()->coarsegrain_allocator()(
+        queue_size_,
+        core::MemoryRegion::AllocateExecutable | core::MemoryRegion::AllocateUncached));
   } else {
-    queue_start_addr_ = reinterpret_cast<char*>(
-        gpu_agent()->system_allocator()(queue_size_, 0x1000,
-                                        core::MemoryRegion::AllocateExecutable));
+    queue_start_addr_ = reinterpret_cast<char*>(gpu_agent()->system_allocator()(
+        queue_size_, 0x1000,
+        core::MemoryRegion::AllocateExecutable | core::MemoryRegion::AllocateUncached));
   }
   if (queue_start_addr_ == nullptr) {
     return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
@@ -148,9 +147,8 @@ hsa_status_t SdmaQueue::Initialize() {
   // Resolve the engine: an explicit id is used as-is; automatic selection
   // rotates round-robin across all SDMA engines so concurrently created queues
   // spread across the hardware.
-  const uint32_t engine_id = (sdma_engine_id_ >= 0)
-                                 ? static_cast<uint32_t>(sdma_engine_id_)
-                                 : agent->NextSdmaUserQueueEngineId();
+  const uint32_t engine_id = (sdma_engine_id_ >= 0) ? static_cast<uint32_t>(sdma_engine_id_)
+                                                    : agent->NextSdmaUserQueueEngineId();
   sdma_engine_id_ = static_cast<int32_t>(engine_id);
 
   const uint32_t kQueuePercent = 100;  // Request the full KFD queue scheduling allocation.
@@ -214,6 +212,15 @@ hsa_status_t SdmaQueue::GetInfo(hsa_queue_info_attribute_t attribute, void* valu
     case HSA_AMD_QUEUE_INFO_SDMA_ENGINE_ID:
       *static_cast<uint32_t*>(value) = static_cast<uint32_t>(sdma_engine_id_);
       return HSA_STATUS_SUCCESS;
+    case HSA_AMD_QUEUE_INFO_DOORBELL_ID:
+      *static_cast<uint64_t*>(value) = reinterpret_cast<uint64_t>(queue_doorbell_);
+      return HSA_STATUS_SUCCESS;
+    case HSA_AMD_QUEUE_INFO_READ_POINTER:
+      *static_cast<uint64_t*>(value) = reinterpret_cast<uint64_t>(queue_rptr_);
+      return HSA_STATUS_SUCCESS;
+    case HSA_AMD_QUEUE_INFO_WRITE_POINTER:
+      *static_cast<uint64_t*>(value) = reinterpret_cast<uint64_t>(queue_wptr_);
+      return HSA_STATUS_SUCCESS;
     default:
       return HSA_STATUS_ERROR_INVALID_ARGUMENT;
   }
@@ -228,12 +235,8 @@ hsa_status_t SdmaQueue::RingDoorbell(uint64_t write_index) {
   // synchronized: by the time the doorbell is stored the caller must have
   // written complete packets into the ring and handled wrap/space checks.
   //
-  // This is the only place the hardware write pointer advances. Order matches
-  // BlitSdma::ReleaseWriteAddress: update the software mirror, then the KFD
-  // hardware write pointer (queue_wptr_) the SDMA engine reads, issue a release
-  // fence so the engine cannot observe the doorbell before the wptr/packets,
-  // and finally ring the doorbell with the new byte index.
-  atomic::Store(&amd_queue_.write_dispatch_id, write_index, std::memory_order_release);
+  // The public write-index operations use queue_wptr_ directly. Ensure the
+  // canonical write pointer and packet stores are visible before the doorbell.
   atomic::Store(queue_wptr_, write_index, std::memory_order_release);
   std::atomic_thread_fence(std::memory_order_release);
   *queue_doorbell_ = write_index;
@@ -246,13 +249,9 @@ hsa_status_t SdmaQueue::RingDoorbell(uint64_t write_index) {
   return HSA_STATUS_SUCCESS;
 }
 
-// Write-index accessors below operate on the *software* write index
-// (amd_queue_.write_dispatch_id), not the hardware write pointer. They back the
-// public hsa_queue_*_write_index helpers so a caller can stage a submission
-// (read index -> write packets -> advance index) without the SDMA engine
-// observing anything. The hardware write pointer (queue_wptr_) is published
-// only in RingDoorbell(). Read-index accessors mirror the hardware read pointer
-// (queue_rptr_) the engine advances as it consumes packets.
+// Public read/write-index operations use KFD's canonical hardware control
+// words. Updating the write pointer stages work; the engine is notified only
+// when the caller subsequently rings the doorbell.
 uint64_t SdmaQueue::LoadReadIndexAcquire() {
   return atomic::Load(queue_rptr_, std::memory_order_acquire);
 }
@@ -262,11 +261,11 @@ uint64_t SdmaQueue::LoadReadIndexRelaxed() {
 }
 
 uint64_t SdmaQueue::LoadWriteIndexAcquire() {
-  return atomic::Load(&amd_queue_.write_dispatch_id, std::memory_order_acquire);
+  return atomic::Load(queue_wptr_, std::memory_order_acquire);
 }
 
 uint64_t SdmaQueue::LoadWriteIndexRelaxed() {
-  return atomic::Load(&amd_queue_.write_dispatch_id, std::memory_order_relaxed);
+  return atomic::Load(queue_wptr_, std::memory_order_relaxed);
 }
 
 void SdmaQueue::StoreReadIndexRelaxed(uint64_t value) {
@@ -278,46 +277,46 @@ void SdmaQueue::StoreReadIndexRelease(uint64_t value) {
 }
 
 void SdmaQueue::StoreWriteIndexRelaxed(uint64_t value) {
-  atomic::Store(&amd_queue_.write_dispatch_id, value, std::memory_order_relaxed);
+  atomic::Store(queue_wptr_, value, std::memory_order_relaxed);
 }
 
 void SdmaQueue::StoreWriteIndexRelease(uint64_t value) {
-  atomic::Store(&amd_queue_.write_dispatch_id, value, std::memory_order_release);
+  atomic::Store(queue_wptr_, value, std::memory_order_release);
 }
 
 // SDMA is exposed as HSA_QUEUE_TYPE_SINGLE. The CAS/add operations are present
 // only because hsa_queue_t helpers dispatch through core::Queue; callers must
 // not treat them as a BlitSdma-style multi-producer reservation protocol.
 uint64_t SdmaQueue::CasWriteIndexAcqRel(uint64_t expected, uint64_t value) {
-  return atomic::Cas(&amd_queue_.write_dispatch_id, value, expected, std::memory_order_acq_rel);
+  return atomic::Cas(queue_wptr_, value, expected, std::memory_order_acq_rel);
 }
 
 uint64_t SdmaQueue::CasWriteIndexAcquire(uint64_t expected, uint64_t value) {
-  return atomic::Cas(&amd_queue_.write_dispatch_id, value, expected, std::memory_order_acquire);
+  return atomic::Cas(queue_wptr_, value, expected, std::memory_order_acquire);
 }
 
 uint64_t SdmaQueue::CasWriteIndexRelaxed(uint64_t expected, uint64_t value) {
-  return atomic::Cas(&amd_queue_.write_dispatch_id, value, expected, std::memory_order_relaxed);
+  return atomic::Cas(queue_wptr_, value, expected, std::memory_order_relaxed);
 }
 
 uint64_t SdmaQueue::CasWriteIndexRelease(uint64_t expected, uint64_t value) {
-  return atomic::Cas(&amd_queue_.write_dispatch_id, value, expected, std::memory_order_release);
+  return atomic::Cas(queue_wptr_, value, expected, std::memory_order_release);
 }
 
 uint64_t SdmaQueue::AddWriteIndexAcqRel(uint64_t value) {
-  return atomic::Add(&amd_queue_.write_dispatch_id, value, std::memory_order_acq_rel);
+  return atomic::Add(queue_wptr_, value, std::memory_order_acq_rel);
 }
 
 uint64_t SdmaQueue::AddWriteIndexAcquire(uint64_t value) {
-  return atomic::Add(&amd_queue_.write_dispatch_id, value, std::memory_order_acquire);
+  return atomic::Add(queue_wptr_, value, std::memory_order_acquire);
 }
 
 uint64_t SdmaQueue::AddWriteIndexRelaxed(uint64_t value) {
-  return atomic::Add(&amd_queue_.write_dispatch_id, value, std::memory_order_relaxed);
+  return atomic::Add(queue_wptr_, value, std::memory_order_relaxed);
 }
 
 uint64_t SdmaQueue::AddWriteIndexRelease(uint64_t value) {
-  return atomic::Add(&amd_queue_.write_dispatch_id, value, std::memory_order_release);
+  return atomic::Add(queue_wptr_, value, std::memory_order_release);
 }
 
 void SdmaQueue::StoreRelaxed(hsa_signal_value_t value) {

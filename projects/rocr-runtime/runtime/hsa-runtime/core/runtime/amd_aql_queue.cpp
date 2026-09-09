@@ -1585,7 +1585,22 @@ hsa_status_t AqlQueue::GetCUMasking(uint32_t num_cu_mask_count, uint32_t* cu_mas
 }
 
 void AqlQueue::SetProfiling(bool enabled) {
+  bool need_update = false;
+  const bool cur = AMD_HSA_BITS_GET(amd_queue_.queue_properties,
+    AMD_QUEUE_PROPERTIES_ENABLE_PROFILING) != 0;
+
+  if (cur != enabled && LoadWriteIndexRelaxed() != 0) {
+    // If the queue is already enabled/disabled, we need to update the queue properties and we have already submitted packets,
+    // then we need to unmap and remap the queue for CP FW to re-read the queue properties.
+    need_update = true;
+  }
+
   Queue::SetProfiling(enabled);
+
+  if (need_update) {
+    Suspend();
+    Resume();
+  }
 
   if (enabled) agent_->CheckClockTicks();
   return;

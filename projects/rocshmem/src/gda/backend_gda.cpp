@@ -81,8 +81,16 @@ void GDABackend::init() {
 
   type = BackendType::GDA_BACKEND;
 
-  // Initialize QP allocator to finegrained allocator
-  qp_allocator_ = new HIPAllocatorFinegrained();
+  // dmabuf mode: use host-pinned memory for QP/CQ control buffers.
+  // bnxt and mlx5 DV umem_reg only accepts host-accessible memory for these
+  // structures when dmabuf is enabled; device memory (finegrained) causes EIO
+  // from the kernel driver on create_cq/create_qp ioctls.
+  // Legacy peermem mode: retain finegrained device memory as before.
+  if (ibv.is_dmabuf_supported()) {
+    qp_allocator_ = new HIPAllocator(hipHostMalloc, hipFree, hipHostMallocDefault);
+  } else {
+    qp_allocator_ = new HIPAllocatorFinegrained();
+  }
 
   select_nics();
 
@@ -132,17 +140,20 @@ void GDABackend::init() {
   setup_team_world();
   rte_barrier();
 
-  setup_ipc();
-
-  /*
-   * setup_team_shared() must follow setup_ipc() because it uses
-   * ipcImpl.pes_with_ipc_avail to determine shared-memory membership.
-   */
-  setup_team_shared();
-
   setup_ibv();
   setup_heap_memory_rkey();
   setup_gpu_qps();
+
+  /*
+   * setup_ipc() exchanges IPC handles and creates SDMA queues for
+   * node-local peers. Skip when mixed IPC is disabled since GDA will
+   * use the NIC for all traffic.
+   * setup_team_shared() must follow setup_ipc() because it uses
+   * ipcImpl.pes_with_ipc_avail to determine shared-memory membership.
+   */
+  if (!envvar::disable_mixed_ipc)
+    setup_ipc();
+  setup_team_shared();
 
   /*
    * Allocate the symmetric-registration table before contexts are created so
@@ -177,7 +188,8 @@ GDABackend::~GDABackend() {
 
   cleanup_wrk_sync_buffer();
 
-  cleanup_ipc();
+  if (!envvar::disable_mixed_ipc)
+    cleanup_ipc();
 
   cleanup_gpu_qps();
   cleanup_heap_memory_rkey();

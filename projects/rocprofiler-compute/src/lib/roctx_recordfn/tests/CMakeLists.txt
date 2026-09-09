@@ -58,10 +58,7 @@ get_filename_component(_roctx_lib_dir "${ROCTX_LIB}" DIRECTORY)
 
 set_target_properties(
     ${target}
-    PROPERTIES
-        CXX_STANDARD 17
-        CXX_STANDARD_REQUIRED ON
-        INSTALL_RPATH "${_torch_lib_search_dirs};${_roctx_lib_dir}"
+    PROPERTIES INSTALL_RPATH "${_torch_lib_search_dirs};${_roctx_lib_dir}"
 )
 
 set(_rcfn_openblas_dir "")

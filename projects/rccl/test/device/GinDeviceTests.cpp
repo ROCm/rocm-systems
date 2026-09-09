@@ -163,6 +163,8 @@ TEST_F(GinDeviceTest, BuildGfd_PutOnly) {
 
   // Header qword: flag, size (op now lives in the headerExt qword).
   EXPECT_EQ(static_cast<uint64_t>(gfd.qword[ncclGinProxyGfdHeader].header.flag), 1ULL);
+  EXPECT_EQ(static_cast<uint64_t>(gfd.qword[ncclGinProxyGfdHeader].header.version),
+            static_cast<uint64_t>(NCCL_GIN_PROXY_GFD_VERSION));
   EXPECT_EQ(static_cast<uint64_t>(gfd.qword[ncclGinProxyGfdHeaderExt].headerExt.op),
             static_cast<uint64_t>(ncclGinProxyOpPut));
   EXPECT_EQ(static_cast<uint64_t>(gfd.qword[ncclGinProxyGfdHeader].header.size), kSize);
@@ -799,9 +801,14 @@ TEST_F(GinDeviceTest, PostGfd_PiCiOverflow) {
 }
 
 // ---------------------------------------------------------------------------
-// ResetSignal: ncclGinApi_ResetSignal<NCCL_NET_DEVICE_GIN_PROXY>::call writes
-//   0 to signals[signalId] via base + offset; verify only the targeted cell
-//   is touched and the rest of the pool stays intact.
+// ResetSignal: proxy signals use an offset/baseline model. The effective value
+//   of an indexed signal is signals[id] measured against a baseline held in
+//   signalOffsets[id] (see ncclGinApi_GetSignalPtr, which returns
+//   {signals + id, signalOffsets[id]}). "Reset" therefore does NOT zero the raw
+//   signals[] cell -- it snapshots the current signals[id] into signalOffsets[id]
+//   so the effective (relative) value becomes 0. Verify that only the targeted
+//   offset cell is updated, that signals[] is left completely untouched, and
+//   that the rest of the offset pool stays intact.
 // ---------------------------------------------------------------------------
 
 __global__ void kernelResetSignal(ncclGinCtx ctx, ncclGinSignal_t signalId) {
@@ -813,23 +820,30 @@ __global__ void kernelResetSignal(ncclGinCtx ctx, ncclGinSignal_t signalId) {
 }
 
 TEST_F(GinDeviceTest, ResetSignal) {
-  constexpr uint32_t        kNumSignals = 8;
-  constexpr ncclGinSignal_t kTargetId   = 3;
-  constexpr uint64_t        kPattern    = 0xA000ULL;   // signals[i] = 0xA000 + i
+  constexpr uint32_t        kNumSignals   = 8;
+  constexpr ncclGinSignal_t kTargetId     = 3;
+  constexpr uint64_t        kPattern      = 0xA000ULL;   // signals[i]       = 0xA000 + i
+  constexpr uint64_t        kOffsetSeed   = 0xC000ULL;   // signalOffsets[i] = 0xC000 + i
 
   DeviceBuffer<uint64_t>             d_signals(kNumSignals);
+  DeviceBuffer<uint64_t>             d_signalOffsets(kNumSignals);
   DeviceBuffer<ncclGinProxyGpuCtx_t> d_proxyCtx(1);
 
-  // Pre-fill with non-zero pattern so any spurious zeroing surfaces as a mismatch.
+  // Pre-fill signals with one pattern and offsets with a distinct one so we can
+  // tell exactly which array (and which cell) the reset touches.
   std::vector<uint64_t> hostSignals(kNumSignals);
+  std::vector<uint64_t> hostOffsets(kNumSignals);
   for (uint32_t i = 0; i < kNumSignals; i++) {
     hostSignals[i] = kPattern + i;
+    hostOffsets[i] = kOffsetSeed + i;
   }
   d_signals.copyFrom(hostSignals);
+  d_signalOffsets.copyFrom(hostOffsets);
 
-  // ResetSignal only reads proxyCtx->signals; the rest of the struct is untouched.
+  // ResetSignal (indexed) reads proxyCtx->signals and writes proxyCtx->signalOffsets.
   ncclGinProxyGpuCtx_t hostProxyCtx{};
-  hostProxyCtx.signals = d_signals.ptr;
+  hostProxyCtx.signals       = d_signals.ptr;
+  hostProxyCtx.signalOffsets = d_signalOffsets.ptr;
   d_proxyCtx.upload(hostProxyCtx);
 
   // Wrap the proxy ctx in an ncclGinCtx; the leaf only dereferences ctx.handle.
@@ -840,14 +854,23 @@ TEST_F(GinDeviceTest, ResetSignal) {
   kernelResetSignal<<<1, 1>>>(ctx, kTargetId);
   syncAndCheck();
 
-  std::vector<uint64_t> result = d_signals.copyTo();
+  std::vector<uint64_t> signals = d_signals.copyTo();
+  std::vector<uint64_t> offsets = d_signalOffsets.copyTo();
 
-  // Target cell zeroed; all other cells keep their pre-filled value.
-  EXPECT_EQ(result[kTargetId], 0ULL) << "target signal " << kTargetId << " must be zeroed";
+  // The raw signals[] array must be left completely untouched.
+  for (uint32_t i = 0; i < kNumSignals; i++) {
+    EXPECT_EQ(signals[i], kPattern + i)
+        << "signals[" << i << "] unexpectedly modified (expected 0x" << std::hex << (kPattern + i) << ")";
+  }
+
+  // The target offset cell is snapshotted to the current signal value (making the
+  // effective value 0); every other offset cell keeps its pre-filled value.
+  EXPECT_EQ(offsets[kTargetId], kPattern + kTargetId)
+      << "signalOffsets[" << kTargetId << "] must snapshot signals[" << kTargetId << "]";
   for (uint32_t i = 0; i < kNumSignals; i++) {
     if (i == kTargetId) continue;
-    EXPECT_EQ(result[i], kPattern + i)
-        << "signal " << i << " unexpectedly modified (expected 0x" << std::hex << (kPattern + i) << ")";
+    EXPECT_EQ(offsets[i], kOffsetSeed + i)
+        << "signalOffsets[" << i << "] unexpectedly modified (expected 0x" << std::hex << (kOffsetSeed + i) << ")";
   }
 }
 

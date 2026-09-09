@@ -98,7 +98,7 @@ static_assert(
 
 TEST_F(session_backend_policy_test, start_and_stop_sequence_is_mockable)
 {
-    int                  trace_cfg = 0;
+    const int            trace_cfg = 0;
     mock_session_backend backend{};
 
     auto session = std::unique_ptr<mock_trace_session>{
@@ -107,7 +107,7 @@ TEST_F(session_backend_policy_test, start_and_stop_sequence_is_mockable)
     auto* session_ptr = session.get();
 
     {
-        ::testing::InSequence seq;
+        const ::testing::InSequence seq;
         EXPECT_CALL(*g_mock_session_backend, new_trace())
             .WillOnce(::testing::Return(::testing::ByMove(std::move(session))));
         EXPECT_CALL(*session_ptr, SetOnErrorCallback(::testing::_));
@@ -119,7 +119,7 @@ TEST_F(session_backend_policy_test, start_and_stop_sequence_is_mockable)
         rocprofsys::core::start_tracing_session(backend, trace_cfg, 17, [](auto) {});
 
     {
-        ::testing::InSequence seq;
+        const ::testing::InSequence seq;
         EXPECT_CALL(*g_mock_session_backend, flush_track_events());
         EXPECT_CALL(*session_ptr, FlushBlocking());
         EXPECT_CALL(*session_ptr, StopBlocking());
@@ -216,7 +216,7 @@ TEST_F(perfetto_engine_backend_policy_test,
     rocprofsys::core::trace_sink sink{ rocprofsys::core::recording_sink{} };
 
     {
-        ::testing::InSequence seq;
+        const ::testing::InSequence seq;
         EXPECT_CALL(*g_mock_perfetto_backend, start_cached_session(::testing::_))
             .WillOnce(::testing::Return(&m_session));
         EXPECT_CALL(*g_mock_perfetto_backend, flush_and_stop(&m_session));
@@ -258,8 +258,8 @@ TEST(perfetto_engine, construct_from_config_literal_no_config_access)
     // Engine must be instantiable in unit tests with no global pollution:
     // construction must not touch rocprofsys::config::*. Passing a literal
     // engine_config exercises this.
-    rocprofsys::core::engine_config          cfg = make_test_config();
-    rocprofsys::core::cached_perfetto_engine engine{ cfg };
+    const rocprofsys::core::engine_config          cfg = make_test_config();
+    const rocprofsys::core::cached_perfetto_engine engine{ cfg };
 
     EXPECT_FALSE(engine.is_running());
 }
@@ -268,8 +268,8 @@ TEST(perfetto_engine, two_instances_no_shared_running_state)
 {
     // A second engine constructed after the first sees pristine state — no
     // hidden global handed between instances.
-    rocprofsys::core::cached_perfetto_engine first{ make_test_config() };
-    rocprofsys::core::cached_perfetto_engine second{ make_test_config() };
+    const rocprofsys::core::cached_perfetto_engine first{ make_test_config() };
+    const rocprofsys::core::cached_perfetto_engine second{ make_test_config() };
 
     EXPECT_FALSE(first.is_running());
     EXPECT_FALSE(second.is_running());
@@ -687,7 +687,7 @@ TEST(perfetto_engine_cached, concurrent_collect_packet_bytes_no_loss_or_bleed)
     std::atomic<bool>        go{ false };
     std::vector<std::thread> threads;
     threads.reserve(pid_count);
-    for(int pid : pids)
+    for(const int pid : pids)
     {
         threads.emplace_back([&, pid]() {
             ++ready;

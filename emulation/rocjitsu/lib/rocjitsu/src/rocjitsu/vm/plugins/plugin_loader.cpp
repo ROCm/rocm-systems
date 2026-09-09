@@ -3,10 +3,9 @@
 
 #include "rocjitsu/vm/plugins/plugin_loader.h"
 
-#include "rocjitsu/vm/plugins/plugin_abi.h"
 #include "rocjitsu/vm/plugins/plugin_config_resolver.h"
+#include "rocjitsu/vm/plugins/plugin_exports.h"
 #include "rocjitsu/vm/plugins/plugin_sink.h"
-#include "rocjitsu/vm/plugins/profiled_execution_plugin_group.h"
 
 #include "util/dynamic_loader.h"
 #include "util/log.h"
@@ -16,8 +15,8 @@
 #include <array>
 #include <filesystem>
 #include <memory>
-#include <stdexcept>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #if defined(__linux__)
@@ -36,6 +35,16 @@ using plugin_detail::resolve_config;
 std::vector<util::LibraryHandle> &open_handles() {
   static std::vector<util::LibraryHandle> handles;
   return handles;
+}
+
+bool map_has_key(const flexbuffers::Reference &root, std::string_view key) {
+  if (!root.IsMap())
+    return false;
+  auto keys = root.AsMap().Keys();
+  for (size_t i = 0; i < keys.size(); ++i)
+    if (std::string_view(keys[i].AsKey()) == key)
+      return true;
+  return false;
 }
 
 std::string resolve_plugin_path(const std::string &soname, const std::string &plugin_dir) {
@@ -92,15 +101,14 @@ bool load_one(const std::string &name, const flexbuffers::Reference &user_cfg,
   auto create_fn = util::lookup_symbol<PluginCreateFn>(handle, kPluginCreateSymbol);
   auto destroy_fn = util::lookup_symbol<PluginDestroyFn>(handle, kPluginDestroySymbol);
   if (!meta_fn || !create_fn || !destroy_fn) {
-    util::Logger::warn("plugin '", name, "': ", soname, " is missing required ABI exports");
+    util::Logger::warn("plugin '", name, "': ", soname, " is missing required exports");
     util::close_library(handle);
     return false;
   }
 
   const PluginMetadata *meta = meta_fn();
-  if (!meta || meta->abi != kPluginAbiVersion) {
-    util::Logger::warn("plugin '", name, "': ABI version mismatch (got ", meta ? meta->abi : -1,
-                       ", expected ", kPluginAbiVersion, ")");
+  if (!meta) {
+    util::Logger::warn("plugin '", name, "': metadata export returned null");
     util::close_library(handle);
     return false;
   }
@@ -123,7 +131,7 @@ bool load_one(const std::string &name, const flexbuffers::Reference &user_cfg,
   }
 
   // Own the instance through the plugin's own destroy export so allocation and
-  // deallocation stay on the same side of the ABI boundary. Keep `handle` open
+  // deallocation stay on the same side of the dynamic-library boundary. Keep `handle` open
   // for the whole lifetime of `owned`: on the rejection path the instance is
   // destroyed via its PluginDeleter (the plugin's destroy_fn), which lives in
   // this library, so the library must still be loaded when that happens.
@@ -139,8 +147,7 @@ bool load_one(const std::string &name, const flexbuffers::Reference &user_cfg,
   }
 
   open_handles().push_back(handle);
-  util::Logger::plugins("plugin '", name, "' loaded", (meta->version && *meta->version) ? " v" : "",
-                        (meta->version && *meta->version) ? meta->version : "");
+  util::Logger::plugins("plugin '", name, "' loaded");
   return true;
 }
 
@@ -221,27 +228,16 @@ int PluginLoader::load_from_config(const std::string &config_json, ExecutionPlug
 }
 
 std::shared_ptr<ExecutionPluginGroup>
-PluginLoader::configure_plugin_group(const std::string &config_json, const std::string &plugin_dir,
-                                     const simdojo::SimulationEngine::Config &engine_config) {
+PluginLoader::configure_plugin_group(const std::string &config_json,
+                                     const std::string &plugin_dir) {
   flexbuffers::Builder root_fbb;
   bool parsed = flexbuffer_from_json(config_json, root_fbb);
   auto root = parsed ? flexbuffers::GetRoot(root_fbb.GetBuffer()) : flexbuffers::Reference();
 
-  bool profiled =
-      root.IsMap() && root.AsMap()["profiled"].IsBool() && root.AsMap()["profiled"].AsBool();
-  if (profiled && engine_config.num_threads > 1) {
-    util::Logger::warn("profiled plugin execution requires num_threads=1 (got ",
-                       engine_config.num_threads, ")");
-    throw std::invalid_argument("profiled plugin execution requires num_threads=1");
-  }
+  if (map_has_key(root, "profiled"))
+    util::Logger::warn("hook profiling was removed; ignoring top-level 'profiled' config");
 
-  PluginSinkConfig sink_config = parse_sink_config(root);
-  std::shared_ptr<ExecutionPluginGroup> group;
-  if (profiled)
-    group = std::make_shared<ProfiledExecutionPluginGroup>(std::move(sink_config));
-  else
-    group = std::make_shared<ExecutionPluginGroup>(std::move(sink_config));
-
+  auto group = std::make_shared<ExecutionPluginGroup>(parse_sink_config(root));
   load_from_config(config_json, *group, plugin_dir);
   return group;
 }

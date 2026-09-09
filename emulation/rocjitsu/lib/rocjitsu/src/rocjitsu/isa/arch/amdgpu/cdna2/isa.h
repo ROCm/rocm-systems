@@ -4,8 +4,8 @@
 #ifndef ROCJITSU_ISA_ARCH_AMDGPU_CDNA2_ISA_H_
 #define ROCJITSU_ISA_ARCH_AMDGPU_CDNA2_ISA_H_
 
-#include "rocjitsu/isa/arch/amdgpu/cdna2/decoder.h"
-#include "rocjitsu/isa/arch/amdgpu/cdna2/operand_types.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna2/decoder.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna2/operand_types.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/cdna_isa_base.h"
 #include "rocjitsu/isa/isa_traits.h"
 

@@ -330,7 +330,7 @@ class TestConfigProcessor:
         # Fields that can have defaults at config level. is_pytest/test_dir/
         # python_bin/setup_venv/venv_dir/requirements drive pytest-harness suites.
         default_fields = [
-            "is_gtest", "binary", "num_ranks", "num_nodes", "num_gpus", "timeout",
+            "is_gtest", "binary", "test_binary_dir", "num_ranks", "num_nodes", "num_gpus", "timeout",
             "is_pytest", "test_dir", "python_bin", "setup_venv", "venv_dir", "requirements",
         ]
 
@@ -380,6 +380,7 @@ class TestConfigProcessor:
             config_defaults = {
                 "is_gtest": combined_config.get("is_gtest"),
                 "binary": combined_config.get("binary"),
+                "test_binary_dir": combined_config.get("test_binary_dir"),
                 "num_ranks": combined_config.get("num_ranks"),
                 "num_nodes": combined_config.get("num_nodes"),
                 "num_gpus": combined_config.get("num_gpus", "auto"),
@@ -398,6 +399,7 @@ class TestConfigProcessor:
             suite_defaults = {
                 "is_gtest": suite.get("is_gtest"),
                 "binary": suite.get("binary"),
+                "test_binary_dir": suite.get("test_binary_dir"),
                 "num_ranks": suite.get("num_ranks"),
                 "num_nodes": suite.get("num_nodes"),
                 "num_gpus": suite.get("num_gpus"),
@@ -432,10 +434,14 @@ class TestConfigProcessor:
                     _as_list(combined_config.get("mpi_args")) + _as_list(suite_mpi_args)
                 )
 
-            # Add suite-specific details
+            # Add suite-specific details. 'name' is optional: when omitted the
+            # config name is used as the suite identifier (used for reports and
+            # --suite-name filtering). 'smoke' marks membership in the fast
+            # subset selected by --scope smoke.
             combined_config["suite_details"] = {
-                "name": suite.get("name"),
-                "description": suite.get("description", ""),
+                "name": suite.get("name") or config_name,
+                "description": suite.get("description") or combined_config.get("description", ""),
+                "smoke": suite.get("smoke", False),
                 "num_nodes": suite.get("num_nodes", 1),
                 "num_ranks": suite.get("num_ranks", 1),
                 "num_gpus": suite.get("num_gpus", "auto"),
@@ -511,10 +517,12 @@ class TestConfigProcessor:
             raise ValueError("No test suites defined in configuration")
 
         for suite in test_suites:
-            if "name" not in suite:
-                raise ValueError("Test suite missing 'name' field")
+            # 'name' is optional; the 'config' name is used as the suite
+            # identifier when it is omitted.
             if "config" not in suite:
-                raise ValueError(f"Test suite '{suite['name']}' missing 'config' field")
+                raise ValueError(
+                    f"Test suite '{suite.get('name', '<unnamed>')}' missing 'config' field"
+                )
 
         return True
 

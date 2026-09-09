@@ -1,0 +1,24 @@
+# Exported ABI of the fixed-profile gfx1250 B0-to-A0 translator.
+#
+# Only the C API in rocjitsu/code/rj_gfx1250_b0_to_a0.h. The library is built
+# from object libraries that are not themselves compiled with hidden visibility,
+# so without this script it exports 126 symbols -- every rj_code_* entry point it
+# happens to link -- and those become an ABI nobody chose to promise.
+#
+# This matters more than tidiness now that the library is shared and installed:
+# its build id is the translation cache's identity, so it is a versioned artifact
+# whose surface has to be deliberate.
+{
+  global:
+    rj_gfx1250_b0_to_a0_translate;
+    rj_gfx1250_b0_to_a0_free;
+    # One deliberate C++ export beyond the C API: the in-tree library test drives
+    # the required-work fan-out directly, and the alternative -- a second target
+    # differing only in its version script, as the hook does -- costs more than a
+    # single named symbol is worth.
+    extern "C++" {
+      rocjitsu::emit_gfx1250_b0_to_a0_diagnostics*;
+    };
+  local:
+    *;
+};

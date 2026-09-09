@@ -71,7 +71,7 @@ NCCL_DEVICE_INLINE void ncclLsaBarrierSession<Coop>::arrive(Coop, cuda::memory_o
     if (this->team.nRanks > 1) {
       cuda::atomic_thread_fence(nccl::utility::releaseOrderOf(order));
     }
-#pragma unroll 1
+    NVCC_PRAGMA_UNROLL_DISABLED
     for (int i = this->coop.thread_rank(); i < this->team.nRanks - 1; i += this->coop.size()) {
       int peer = i + (this->team.rank <= i ? 1 : 0);
       cuda::atomic_ref<uint32_t> inbox(*this->ucInbox(peer, this->team.rank));
@@ -99,7 +99,7 @@ NCCL_DEVICE_INLINE ncclResult_t ncclLsaBarrierSession_internal<Coop>::waitIntern
 #if NCCL_ARCH_HAS_MULTIMEM
     if (this->coop.thread_rank() == 0) {
       cuda::atomic_ref<uint32_t> inbox(*this->mcInbox(/*multimem=*/false));
-#pragma unroll 1
+      NVCC_PRAGMA_UNROLL_DISABLED
       while (true) {
         uint32_t got = inbox.load(nccl::utility::acquireOrderOf(order));
         if (got - (this->epoch + this->team.nRanks) <= uint32_t(-1) >> 1) break;
@@ -117,11 +117,11 @@ NCCL_DEVICE_INLINE ncclResult_t ncclLsaBarrierSession_internal<Coop>::waitIntern
     }
 #endif
   } else {
-#pragma unroll 1
+    NVCC_PRAGMA_UNROLL_DISABLED
     for (int i = this->coop.thread_rank(); i < this->team.nRanks - 1; i += this->coop.size()) {
       int peer = i + (this->team.rank <= i ? 1 : 0);
       cuda::atomic_ref<uint32_t> inbox(*this->ucInbox(this->team.rank, peer));
-#pragma unroll 1
+      NVCC_PRAGMA_UNROLL_DISABLED
       while (true) {
         uint32_t got = inbox.load(nccl::utility::acquireOrderOf(order));
         if (got - (this->epoch + 1) <= uint32_t(-1) >> 1) break;

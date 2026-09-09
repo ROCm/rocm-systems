@@ -113,11 +113,46 @@ __forceinline HsaMemoryMapFlags mem_perm(hsa_access_permission_t perm) {
 KfdDriver::KfdDriver(std::string devnode_name)
     : core::Driver(core::DriverType::KFD, std::move(devnode_name)) {}
 
-hsa_status_t KfdDriver::Init() {
-  HSAKMT_STATUS ret =
-      HSAKMT_CALL(hsaKmtRuntimeEnable(&_amdgpu_r_debug, core::Runtime::runtime_singleton_->flag().debug()));
+hsa_status_t KfdDriver::AcquireTopologySnapshot() const {
+  if (topology_snapshot_acquired_) return HSA_STATUS_SUCCESS;
 
+  HsaSystemProperties props = {};
+  if (HSAKMT_CALL(hsaKmtAcquireSystemProperties(&props)) != HSAKMT_STATUS_SUCCESS)
+    return HSA_STATUS_ERROR;
+
+  sys_props_ = props;
+  topology_snapshot_acquired_ = true;
+  return HSA_STATUS_SUCCESS;
+}
+
+hsa_status_t KfdDriver::ReleaseTopologySnapshot() {
+  if (!topology_snapshot_acquired_) return HSA_STATUS_SUCCESS;
+
+  topology_snapshot_acquired_ = false;
+  return HSAKMT_CALL(hsaKmtReleaseSystemProperties()) == HSAKMT_STATUS_SUCCESS ? HSA_STATUS_SUCCESS
+                                                                               : HSA_STATUS_ERROR;
+}
+
+hsa_status_t KfdDriver::DisableRuntime() {
+  if (!runtime_enabled_) return HSA_STATUS_SUCCESS;
+
+  runtime_enabled_ = false;
+  const HSAKMT_STATUS ret = HSAKMT_CALL(hsaKmtRuntimeDisable());
+  return (ret == HSAKMT_STATUS_SUCCESS || ret == HSAKMT_STATUS_NOT_SUPPORTED) ? HSA_STATUS_SUCCESS
+                                                                              : HSA_STATUS_ERROR;
+}
+
+hsa_status_t KfdDriver::Init() {
+  // Own one snapshot from before the debug probe through BuildTopology().
+  if (AcquireTopologySnapshot() != HSA_STATUS_SUCCESS) return HSA_STATUS_ERROR;
+  MAKE_NAMED_SCOPE_GUARD(snapshot_guard, [this]() { ReleaseTopologySnapshot(); });
+
+  HSAKMT_STATUS ret = HSAKMT_CALL(
+      hsaKmtRuntimeEnable(&_amdgpu_r_debug, core::Runtime::runtime_singleton_->flag().debug()));
   if (ret != HSAKMT_STATUS_SUCCESS && ret != HSAKMT_STATUS_NOT_SUPPORTED) return HSA_STATUS_ERROR;
+
+  runtime_enabled_ = true;
+  MAKE_NAMED_SCOPE_GUARD(runtime_guard, [this]() { DisableRuntime(); });
 
   uint32_t caps_mask = 0;
   if (HSAKMT_CALL(hsaKmtGetRuntimeCapabilities(&caps_mask)) != HSAKMT_STATUS_SUCCESS) return HSA_STATUS_ERROR;
@@ -140,18 +175,19 @@ hsa_status_t KfdDriver::Init() {
   bool xnack_mode = BindXnackMode();
   core::Runtime::runtime_singleton_->XnackEnabled(xnack_mode);
 
+  runtime_guard.Dismiss();
+  snapshot_guard.Dismiss();
   return HSA_STATUS_SUCCESS;
 }
 
 hsa_status_t KfdDriver::ShutDown() {
-  HSAKMT_STATUS ret = HSAKMT_CALL(hsaKmtRuntimeDisable());
-  if (ret != HSAKMT_STATUS_SUCCESS && ret != HSAKMT_STATUS_NOT_SUPPORTED) return HSA_STATUS_ERROR;
+  const hsa_status_t disable_status = DisableRuntime();
+  const hsa_status_t release_status = ReleaseTopologySnapshot();
+  const hsa_status_t close_status = Close();
 
-  ret = HSAKMT_CALL(hsaKmtReleaseSystemProperties());
-
-  if (ret != HSAKMT_STATUS_SUCCESS) return HSA_STATUS_ERROR;
-
-  return Close();
+  if (disable_status != HSA_STATUS_SUCCESS) return disable_status;
+  if (release_status != HSA_STATUS_SUCCESS) return release_status;
+  return close_status;
 }
 
 hsa_status_t KfdDriver::DiscoverDriver(std::unique_ptr<core::Driver>& driver) {
@@ -170,23 +206,25 @@ hsa_status_t KfdDriver::QueryKernelModeDriver(core::DriverQuery query) {
 }
 
 hsa_status_t KfdDriver::Open() {
-  return HSAKMT_CALL(hsaKmtOpenKFD()) == HSAKMT_STATUS_SUCCESS ? HSA_STATUS_SUCCESS
-                                                  : HSA_STATUS_ERROR;
+  const HSAKMT_STATUS ret = HSAKMT_CALL(hsaKmtOpenKFD());
+  if (ret == HSAKMT_STATUS_SUCCESS ||
+      (ret == HSAKMT_STATUS_KERNEL_ALREADY_OPENED &&
+       core::Runtime::runtime_singleton_->thunkLoader()->IsDXG()))
+    return HSA_STATUS_SUCCESS;
+
+  return HSA_STATUS_ERROR;
 }
 
 hsa_status_t KfdDriver::Close() {
   return HSAKMT_CALL(hsaKmtCloseKFD()) == HSAKMT_STATUS_SUCCESS ? HSA_STATUS_SUCCESS
-                                                   : HSA_STATUS_ERROR;
+                                                                : HSA_STATUS_ERROR;
 }
 
 hsa_status_t KfdDriver::GetSystemProperties(HsaSystemProperties& sys_props) const {
-  // Note: We intentionally do NOT call hsaKmtReleaseSystemProperties() here.
-  // hsaKmtRuntimeEnable (called from Init) already acquired system properties.
-  // Releasing and re-acquiring would tear down FMM apertures and fail to
-  // re-acquire the VM because the kernel-side VM binding persists.
-  // hsaKmtAcquireSystemProperties handles the cached-snapshot case internally.
-  if (HSAKMT_CALL(hsaKmtAcquireSystemProperties(&sys_props)) != HSAKMT_STATUS_SUCCESS) return HSA_STATUS_ERROR;
+  const hsa_status_t status = AcquireTopologySnapshot();
+  if (status != HSA_STATUS_SUCCESS) return status;
 
+  sys_props = sys_props_;
   return HSA_STATUS_SUCCESS;
 }
 
@@ -241,6 +279,8 @@ hsa_status_t KfdDriver::AllocateMemory(const core::MemoryRegion& mem_region,
     handle->handle = reinterpret_cast<uint64_t>(mem);
     handle->vaddr = mem;
     handle->size = size;
+    handle->owner = this;
+    handle->owns_allocation = true;
   };
 
   kmt_alloc_flags.ui32.ExecuteAccess =
@@ -576,6 +616,9 @@ hsa_status_t KfdDriver::ImportMemoryHandle(const core::Agent& agent, core::Drive
     }
     handle->handle = reinterpret_cast<uint64_t>(res.buf_handle);
     handle->size = res.alloc_size;
+    handle->owner = this;
+    // hsaKmtHandleImport creates a distinct object per import, so this handle owns it.
+    handle->owns_allocation = true;
     return HSA_STATUS_SUCCESS;
   }
   case core::ShareType::FABRIC_HANDLE: {
@@ -600,6 +643,9 @@ hsa_status_t KfdDriver::ImportMemoryHandle(const core::Agent& agent, core::Drive
     handle->handle = reinterpret_cast<uint64_t>(res.buf_handle);
     if (rocr::os::DmaBufClose(&res.dmabuf_fd) != HSA_STATUS_SUCCESS) return HSA_STATUS_ERROR;
     handle->size = res.alloc_size;
+    handle->owner = this;
+    // hsaKmtHandleImport creates a distinct object per import, so this handle owns it.
+    handle->owns_allocation = true;
     return HSA_STATUS_SUCCESS;
   }
   default:
@@ -671,17 +717,6 @@ hsa_status_t KfdDriver::CreateShareableHandle(core::DriverMemoryHandle* handle,
     return ret;
   assert(targetHandle.size == size);
 
-#if defined(__linux__)
-  /*
-   * We converted mem into a driver handle. The driver handle will keep the reference count
-   * inside the KMD so we can free the original KFD allocation.
-   */
-  if (HSAKMT_CALL(hsaKmtFreeMemory(mem, size)) != HSAKMT_STATUS_SUCCESS) {
-    DestroyMemoryHandle(&targetHandle);
-    return HSA_STATUS_ERROR;
-  }
-#endif
-
   const auto devhandle = static_cast<const GpuAgent&>(agent).libThunkDev();
   const auto memhandle = reinterpret_cast<HsaMemoryObjectHandle>(targetHandle.handle);
   if (HSAKMT_CALL(hsaKmtMemoryGetCpuAddr(devhandle, memhandle, &handle->mmap_offset)) != HSAKMT_STATUS_SUCCESS) {
@@ -691,6 +726,22 @@ hsa_status_t KfdDriver::CreateShareableHandle(core::DriverMemoryHandle* handle,
 
   // handle->handle is replaced by the imported BO; handle->size carries over from allocation.
   handle->handle = targetHandle.handle;
+#if defined(__linux__)
+  /*
+   * Keep the original KFD allocation alive in handle->vaddr; DestroyMemoryHandle releases it.
+   *
+   * The DRM import alone keeps the buffer's reference count up, but a buffer that KFD no longer
+   * tracks is only revalidated from the command submission path. ROCr dispatches through KFD user
+   * mode queues and never submits through amdgpu_cs, so a peer dma-buf attach that migrates the
+   * buffer would leave the exporting agent with stale page table entries. While the KFD allocation
+   * exists the buffer carries KFD's eviction fence, so the migration goes through KFD
+   * evict/restore, which also revalidates the mappings KFD does not manage.
+   */
+  handle->vaddr = mem;
+#else
+  // Windows KFD and DRM handles are equivalent, so targetHandle already owns the allocation.
+  handle->vaddr = nullptr;
+#endif
   /*
    * Do not hold a shareable dmabuf_fd open for the lifetime of the handle. It is created lazily
    * (and closed again) when access is set in Runtime::VMemorySetAccessPerHandle.
@@ -702,13 +753,20 @@ hsa_status_t KfdDriver::CreateShareableHandle(core::DriverMemoryHandle* handle,
 hsa_status_t KfdDriver::DestroyMemoryHandle(core::DriverMemoryHandle* handle) {
   hsa_status_t ret = rocr::os::DmaBufClose(&handle->dmabuf_fd);
 
+  // Attempt every release even if an earlier one fails, so a failure to free the imported BO
+  // does not leak the KFD allocation retained by CreateShareableHandle.
   auto memhandle = reinterpret_cast<HsaMemoryObjectHandle>(handle->handle);
-  if (memhandle != nullptr) {
-    HSAKMT_STATUS status = HSAKMT_CALL(hsaKmtMemHandleFree(memhandle));
-    if (status != HSAKMT_STATUS_SUCCESS) {
-      return HSA_STATUS_ERROR;
-    }
+  if (memhandle != nullptr &&
+      HSAKMT_CALL(hsaKmtMemHandleFree(memhandle)) != HSAKMT_STATUS_SUCCESS) {
+    ret = HSA_STATUS_ERROR;
   }
+
+  // Release the KFD allocation retained by CreateShareableHandle, if any.
+  if (handle->vaddr != nullptr &&
+      HSAKMT_CALL(hsaKmtFreeMemory(handle->vaddr, handle->size)) != HSAKMT_STATUS_SUCCESS) {
+    ret = HSA_STATUS_ERROR;
+  }
+
   *handle = {};
   return ret;
 }

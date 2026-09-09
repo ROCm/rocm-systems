@@ -236,6 +236,22 @@ If your PR modifies **metric configurations** — panel YAMLs under `src/rocprof
 
 For full details, see the [metric config management README](./tools/config_management/README.md).
 
+## Analysis Database Schema Diagrams
+
+The two diagrams in the [analysis data dump docs](docs/how-to/analyze/cli.rst) are
+generated from [`src/utils/analysis_orm.py`](src/utils/analysis_orm.py), not drawn
+by hand. If your PR changes a table, column, foreign key, or a view definition in
+`Database._compile_view_sql`, regenerate them and commit the PNGs:
+
+```bash
+./tools/schema_visualizer.py
+```
+
+This requires the Graphviz `dot` binary (`apt install graphviz`). The tool reads
+the ORM metadata for the schema diagram, and materializes the views in a
+throwaway database to read back their real columns for the views diagram, so
+neither diagram can drift from the code. Do not edit the PNGs by hand.
+
 ## Vendoring External Dependencies
 
 rocprofiler-compute vendors certain Python dependencies (via git submodules) to eliminate external dependencies in profile mode. This improves portability and reliability on HPC systems.

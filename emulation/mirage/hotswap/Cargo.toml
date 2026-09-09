@@ -1,6 +1,6 @@
 [package]
 name = "mirage_hotswap"
-version = "0.1.0"
+version.workspace = true
 edition = "2024"
 
 [lib]
@@ -9,3 +9,6 @@ path = "src/lib.rs"
 [dependencies]
 mirage_core = { workspace = true }
 inventory = { workspace = true }
+
+[lints]
+workspace = true

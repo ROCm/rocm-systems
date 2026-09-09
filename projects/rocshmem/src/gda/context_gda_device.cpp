@@ -71,14 +71,8 @@ __host__ GDAContext::GDAContext(Backend *b, unsigned int ctx_id)
                       num_qps * sizeof(QueuePair),
                       hipMemcpyDefault));
 
-  ipcImpl_.ipc_bases = backend->ipcImpl.ipc_bases;
-  ipcImpl_.shm_size = backend->ipcImpl.shm_size;
-  ipcImpl_.shm_rank = backend->ipcImpl.shm_rank;
-  ipcImpl_.heap_size = backend->ipcImpl.heap_size;
-  ipcImpl_.pes_with_ipc_avail = backend->ipcImpl.pes_with_ipc_avail;
-  ipcImpl_.ipc_first_pe = backend->ipcImpl.ipc_first_pe;
-  ipcImpl_.ipc_stride = backend->ipcImpl.ipc_stride;
-  ipcImpl_.symm_table = backend->ipcImpl.symm_table;
+  ipcImpl_.initFrom(backend->ipcImpl);
+  ipcImpl_.assignSdmaChannel(ctx_id);
 }
 
 __host__ GDAContext::~GDAContext() {
@@ -91,7 +85,7 @@ __device__ void GDAContext::putmem(void *dest, const void *source, size_t nelems
   int local_pe{-1};
   char *remote{nullptr};
   if (ipcImpl_.isIpcAvailable(constmem.my_pe, pe, &local_pe) &&
-      (remote = ipc_peer_ptr(dest, local_pe)) != nullptr) {
+      (remote = ipcImpl_.ipcPeerPtr(dest, local_pe)) != nullptr) {
     ipcImpl_.ipcCopy<MemcpyKind::PutBlocking>(remote, const_cast<void *>(source), nelems, local_pe);
     return;
   }
@@ -106,7 +100,7 @@ __device__ void GDAContext::getmem(void *dest, const void *source, size_t nelems
   int local_pe{-1};
   char *remote{nullptr};
   if (ipcImpl_.isIpcAvailable(constmem.my_pe, pe, &local_pe) &&
-      (remote = ipc_peer_ptr(source, local_pe)) != nullptr) {
+      (remote = ipcImpl_.ipcPeerPtr(source, local_pe)) != nullptr) {
     ipcImpl_.ipcCopy<MemcpyKind::GetBlocking>(dest, remote, nelems, local_pe);
     return;
   }
@@ -123,8 +117,8 @@ __device__ void GDAContext::putmem_nbi(void *dest, const void *source,
   int local_pe{-1};
   char *remote{nullptr};
   if (ipcImpl_.isIpcAvailable(constmem.my_pe, pe, &local_pe) &&
-      (remote = ipc_peer_ptr(dest, local_pe)) != nullptr) {
-    sqtt_marker_exit("ipc_check");
+      (remote = ipcImpl_.ipcPeerPtr(dest, local_pe)) != nullptr) {
+      sqtt_marker_exit("ipc_check");
     ipcImpl_.ipcCopy<MemcpyKind::Put>(remote, const_cast<void *>(source), nelems, local_pe);
     sqtt_marker_exit("put_nbi_call");
     return;
@@ -143,7 +137,7 @@ __device__ void GDAContext::getmem_nbi(void *dest, const void *source,
   int local_pe{-1};
   char *remote{nullptr};
   if (ipcImpl_.isIpcAvailable(constmem.my_pe, pe, &local_pe) &&
-      (remote = ipc_peer_ptr(source, local_pe)) != nullptr) {
+      (remote = ipcImpl_.ipcPeerPtr(source, local_pe)) != nullptr) {
     ipcImpl_.ipcCopy<MemcpyKind::Get>(dest, remote, nelems, local_pe);
     return;
   }
@@ -240,7 +234,7 @@ __device__ void *GDAContext::shmem_ptr(const void *dest, int pe) {
    * IPC). NIC-only registered buffers and non-node-local peers return nullptr.
    */
   if (ipcImpl_.isIpcAvailable(constmem.my_pe, pe, &local_pe)) {
-    return ipc_peer_ptr(dest, local_pe);
+    return ipcImpl_.ipcPeerPtr(dest, local_pe);
   }
   return nullptr;
 }
@@ -250,7 +244,7 @@ __device__ void GDAContext::putmem_wg(void *dest, const void *source,
   int local_pe{-1};
   char *remote{nullptr};
   if (ipcImpl_.isIpcAvailable(constmem.my_pe, pe, &local_pe) &&
-      (remote = ipc_peer_ptr(dest, local_pe)) != nullptr) {
+      (remote = ipcImpl_.ipcPeerPtr(dest, local_pe)) != nullptr) {
     ipcImpl_.ipcCopy_wg<MemcpyKind::PutBlocking>(remote, const_cast<void *>(source), nelems, local_pe);
     return;
   }
@@ -267,7 +261,7 @@ __device__ void GDAContext::getmem_wg(void *dest, const void *source,
   int local_pe{-1};
   char *remote{nullptr};
   if (ipcImpl_.isIpcAvailable(constmem.my_pe, pe, &local_pe) &&
-      (remote = ipc_peer_ptr(source, local_pe)) != nullptr) {
+      (remote = ipcImpl_.ipcPeerPtr(source, local_pe)) != nullptr) {
     ipcImpl_.ipcCopy_wg<MemcpyKind::GetBlocking>(dest, remote, nelems, local_pe);
     return;
   }
@@ -284,7 +278,7 @@ __device__ void GDAContext::putmem_nbi_wg(void *dest, const void *source,
   int local_pe{-1};
   char *remote{nullptr};
   if (ipcImpl_.isIpcAvailable(constmem.my_pe, pe, &local_pe) &&
-      (remote = ipc_peer_ptr(dest, local_pe)) != nullptr) {
+      (remote = ipcImpl_.ipcPeerPtr(dest, local_pe)) != nullptr) {
     ipcImpl_.ipcCopy_wg<MemcpyKind::Put>(remote, const_cast<void *>(source), nelems, local_pe);
     return;
   }
@@ -300,7 +294,7 @@ __device__ void GDAContext::getmem_nbi_wg(void *dest, const void *source,
   int local_pe{-1};
   char *remote{nullptr};
   if (ipcImpl_.isIpcAvailable(constmem.my_pe, pe, &local_pe) &&
-      (remote = ipc_peer_ptr(source, local_pe)) != nullptr) {
+      (remote = ipcImpl_.ipcPeerPtr(source, local_pe)) != nullptr) {
     ipcImpl_.ipcCopy_wg<MemcpyKind::Get>(dest, remote, nelems, local_pe);
     return;
   }
@@ -316,7 +310,7 @@ __device__ void GDAContext::putmem_wave(void *dest, const void *source,
   int local_pe{-1};
   char *remote{nullptr};
   if (ipcImpl_.isIpcAvailable(constmem.my_pe, pe, &local_pe) &&
-      (remote = ipc_peer_ptr(dest, local_pe)) != nullptr) {
+      (remote = ipcImpl_.ipcPeerPtr(dest, local_pe)) != nullptr) {
     ipcImpl_.ipcCopy_wave<MemcpyKind::PutBlocking>(remote, const_cast<void *>(source), nelems, local_pe);
     return;
   }
@@ -333,7 +327,7 @@ __device__ void GDAContext::getmem_wave(void *dest, const void *source,
   int local_pe{-1};
   char *remote{nullptr};
   if (ipcImpl_.isIpcAvailable(constmem.my_pe, pe, &local_pe) &&
-      (remote = ipc_peer_ptr(source, local_pe)) != nullptr) {
+      (remote = ipcImpl_.ipcPeerPtr(source, local_pe)) != nullptr) {
     ipcImpl_.ipcCopy_wave<MemcpyKind::GetBlocking>(dest, remote, nelems, local_pe);
     return;
   }
@@ -350,7 +344,7 @@ __device__ void GDAContext::putmem_nbi_wave(void *dest, const void *source,
   int local_pe{-1};
   char *remote{nullptr};
   if (ipcImpl_.isIpcAvailable(constmem.my_pe, pe, &local_pe) &&
-      (remote = ipc_peer_ptr(dest, local_pe)) != nullptr) {
+      (remote = ipcImpl_.ipcPeerPtr(dest, local_pe)) != nullptr) {
     ipcImpl_.ipcCopy_wave<MemcpyKind::Put>(remote, const_cast<void *>(source), nelems, local_pe);
     return;
   }
@@ -366,7 +360,7 @@ __device__ void GDAContext::getmem_nbi_wave(void *dest, const void *source,
   int local_pe{-1};
   char *remote{nullptr};
   if (ipcImpl_.isIpcAvailable(constmem.my_pe, pe, &local_pe) &&
-      (remote = ipc_peer_ptr(source, local_pe)) != nullptr) {
+      (remote = ipcImpl_.ipcPeerPtr(source, local_pe)) != nullptr) {
     ipcImpl_.ipcCopy_wave<MemcpyKind::Get>(dest, remote, nelems, local_pe);
     return;
   }

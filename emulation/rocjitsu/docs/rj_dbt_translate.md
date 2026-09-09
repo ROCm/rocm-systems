@@ -48,11 +48,15 @@ Options:
   requests whose input and output architecture families differ. A second-pass
   failure or byte difference makes the command fail. This option cannot be
   combined with `--skip-failed-kernels` or `--list-code-objects`.
+- `--verify-rewrite-discharge`: scan the final gfx1250 B0-to-A0 output with the
+  applicability checks owned by its opcode and operand rewrite registry. The
+  command fails if any registered rewrite remains actionable. This option
+  cannot be combined with `--skip-failed-kernels` or `--list-code-objects`.
 - `--list-code-objects`: list extractable code objects and exit.
 - `--help`: print command-line help.
 
-Supported target names are `gfx942`, `gfx950`, `gfx1200`, `gfx1201`, and
-`gfx1250`.
+Supported target names are `gfx942`, `gfx950`, `gfx1200`, `gfx1201`, `gfx1250`,
+and `gfx1251`.
 
 ## Output
 
@@ -95,6 +99,92 @@ other ELF materialization are part of the result, so changes in any of them make
 verification fail. A failure does not by itself mean that the first output is
 invalid; it means the translation is not a byte-level fixed point. This mode is
 intended to expose such instability while developing or auditing the translator.
+
+## Rewrite-discharge Verification
+
+Use `--verify-rewrite-discharge` to check that gfx1250 B0-to-A0 translation
+discharged the applicability conditions of its registered opcode and operand
+rewrites:
+
+```sh
+rj_dbt_translate input.gfx1250.co \
+  --input-target gfx1250 --input-revision b0 \
+  --output-target gfx1250 --output-revision a0 \
+  --verify-rewrite-discharge --output-mode code-object > output.gfx1250-a0.co
+```
+
+The verifier decodes the final executable stream after all translation and ELF
+materialization have finished. It reconstructs executable entry boundaries and
+stream-checks instruction-local applicability predicates without retaining the
+complete decoded stream. If a candidate uses predecessor or successor context,
+the verifier reconstructs the full CFG and runs every predicate there instead.
+It reports any residual site as an error at its final `.text` offset. One profile
+registry supplies both opcode-keyed and operand-driven rewrites to lowering and
+verification. Every rule in an audited profile must explicitly register either
+a residual predicate and its required decode context, or a no-success contract;
+a no-success rule that later begins emitting output fails its registry contract
+instead of silently escaping verification.
+
+This is deliberately a registry-level guarantee. It does not certify separate
+pipeline augmentations that are not selected through the rewrite registry, such
+as WMMA completion-wait insertion; those remain covered by their existing
+implementation-specific tests.
+
+Translation and final verification require every runtime-loaded executable byte
+to reside in one `SHF_ALLOC | SHF_EXECINSTR` section named `.text`. Inputs with
+another allocated executable section, or with executable bytes only in a
+differently named section, fail closed instead of leaving an unaudited stream in
+the output object.
+
+Executable entries use the same preservation contract as translation and ELF
+patching: kernel descriptors, relocation-backed function tables, allocated
+target-less dynamic zero-addend `R_AMDGPU_ABS32_LO`, `R_AMDGPU_ABS32_HI`,
+`R_AMDGPU_ABS64`, and `R_AMDGPU_ABS32` relocations to ordinary text symbols, and
+`R_AMDGPU_RELATIVE64` addends into `.text`. The explicit-symbol forms store,
+respectively, the low 32 bits, high 32 bits, full 64 bits, or truncated 32 bits
+of the relocated symbol value.
+
+ROCr derives dynamic `STT_OBJECT`, `STT_AMDGPU_HSA_KERNEL`, and `STT_FUNC`
+addresses from `st_value`; only `STT_FUNC` is treated here as a
+relocation-backed executable entry. ROCr instead resolves `STT_NOTYPE` as an
+external agent symbol by name, so a text-defined `STT_NOTYPE` relocation is not
+accepted as a local code reference. Global or weak `STT_FUNC` symbols without a
+supported runtime reference remain symbol-table metadata rather than independent
+execution roots.
+
+ROCr skips explicit-target/static relocation sections for supported code objects,
+so they retain the translator's broader metadata-preservation policy rather than
+the dynamic-loader allowlist above. An allocated, zero-addend explicit-target
+`RELA` reference to a text `STT_FUNC` creates an executable entry for every
+non-`R_AMDGPU_NONE` relocation type. An explicit-target `STT_NOTYPE` reference
+also creates an entry for `R_AMDGPU_ABS64`; other ordinary non-section text
+symbols require only symbol remapping. Explicit-target `R_AMDGPU_NONE` records
+are ignored.
+
+An `ET_DYN` `SHT_RELA` section is malformed when its nonzero `sh_info` is out of
+range or names an `SHT_NULL` section. Translation rejects that section metadata
+before inspecting individual relocation records. The later `R_AMDGPU_NONE` and
+text-relocation compatibility checks therefore skip malformed sections; the
+earlier structural rejection owns the diagnostic.
+
+Relocation sections explicitly targeting non-allocated sections are likewise
+metadata and do not create executable entries. If a runtime-referenced source
+entry is emitted at multiple output placements, materialization fails closed:
+neither a named symbol nor a relative addend can safely select one kernel-local
+clone on behalf of every caller.
+
+This is an opt-in offline development audit. The implementation lives beside
+translation because it needs the final materialized ELF and decoded CFG, while
+`rj_dbt_translate` is the enabling consumer. Runtime translation leaves the
+check disabled; when explicitly requested, an unavailable profile or failed
+scan is reported as an ordinary translation error.
+
+This check proves only that the current rewrite payloads clear the conditions
+recognized by their corresponding applicability checks. It does not establish
+that those checks are complete or correct, prove semantic equivalence, or
+validate runtime prerequisites. `--verify-idempotence` can be enabled alongside
+this option when both the residual-trigger property and byte-level fixed-point
+property are desired.
 
 ### Generated Artifact Markers
 

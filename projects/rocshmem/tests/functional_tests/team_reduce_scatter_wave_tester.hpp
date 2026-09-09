@@ -53,12 +53,19 @@ class TeamReduceScatterWaveTester : public Tester {
 
   virtual void verifyResults(uint64_t size) override;
 
-  T1 *s_buf;  // source: n_pes * size elements per PE
-  T1 *r_buf;  // dest:   size elements per PE
+  T1 *s_buf;  // source: n_pes * size elements per wave
+  T1 *r_buf;  // dest:   size elements per wave
 
  private:
   int my_pe = 0;
   int n_pes = 0;
+
+  /**
+   * This constant should equal ROCSHMEM_MAX_NUM_TEAMS - 1.
+   * The default value for the maximum number of teams is 40.
+   */
+  int num_teams = 39;
+  rocshmem_team_t *team_reduce_scatter_wave_world_dup;
 
   std::function<void(T1 &, T1 &)> init_buf;
   std::function<std::pair<bool, std::string>(const T1 &, const T1 &)>

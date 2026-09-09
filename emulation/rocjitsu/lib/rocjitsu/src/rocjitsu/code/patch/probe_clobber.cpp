@@ -3,16 +3,19 @@
 
 #include "rocjitsu/code/patch/probe_clobber.h"
 
-#include "rocjitsu/analysis/def_use_chain.h"
+#include "rocjitsu/code/analysis/def_use_chain.h"
 #include "rocjitsu/code/patch/error_report.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
 #include "rocjitsu/isa/operand.h"
+#include "rocjitsu/isa/target_registry.h"
 
 #include <algorithm>
+#include <cctype>
 #include <cstdint>
 #include <memory>
 #include <optional>
+#include <string>
 #include <string_view>
 #include <vector>
 
@@ -54,24 +57,30 @@ void note_special_state(ProbeClobberSummary &summary, RegClass cls) {
 // present. We map the display name ("exec_lo", "m0", "vcc", ...), until
 // operands expose their special RegClass structurally.
 //
-// NOTE: this only sees *explicit* operands. Implicit special-state writes (e.g.
-// SCC from scalar ALU, VCC from v_cmp, EXEC from v_cmpx) have no operand and are
-// not modeled by the decoder, so they remain invisible here. SCC is exempt from
-// concern because the trampoline envelope always save/restores it.
+// NOTE: this sees any write the decoder exposes as a named operand, including
+// special-state results some ops write to a named "vcc"/"exec" dst. A truly
+// operand-less def (e.g. SCC from scalar ALU) stays invisible; SCC is covered by
+// the envelope's save/restore, and EXEC/VCC by the trampoline's unconditional
+// preserve.
+//
+// Matching is case-insensitive: operand display names are lowercase on some
+// arches (CDNA2) but uppercase on others (CDNA4: "EXEC_LO", "M0", ...).
 // TODO: drop this name fallback once the operand-type modeling work lands.
 std::optional<RegClass> special_class_from_name(std::string_view name) {
-  auto starts_with = [&](std::string_view prefix) {
-    return name.substr(0, prefix.size()) == prefix;
-  };
+  std::string lower(name);
+  std::transform(lower.begin(), lower.end(), lower.begin(),
+                 [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+  const std::string_view n = lower;
+  auto starts_with = [&](std::string_view prefix) { return n.substr(0, prefix.size()) == prefix; };
   if (starts_with("exec"))
     return RegClass::EXEC; // exec, exec_lo, exec_hi
   if (starts_with("vcc"))
     return RegClass::VCC; // vcc, vcc_lo, vcc_hi
   if (starts_with("flat_scratch"))
     return RegClass::FLAT_SCRATCH; // flat_scratch_lo/hi/all
-  if (name == "m0")
+  if (n == "m0")
     return RegClass::M0;
-  if (name == "scc" || name == "src_scc")
+  if (n == "scc" || n == "src_scc")
     return RegClass::SCC;
   return std::nullopt;
 }
@@ -109,7 +118,17 @@ void scan_special_state(const Instruction &inst, ProbeClobberSummary &summary) {
 
 std::optional<ProbeClobberSummary> build_probe_clobber_summary(const ProbeCallable &callable,
                                                                std::string *error_out) {
-  auto decoder = Decoder::create(callable.arch);
+  const auto &registry = default_isa_target_registry();
+  if (callable.target != ROCJITSU_CODE_TARGET_INVALID) {
+    const IsaTargetDescriptor *descriptor = registry.find(callable.target);
+    if (descriptor == nullptr || descriptor->architecture_id != callable.arch) {
+      report(error_out, "probe target does not match the probe architecture");
+      return std::nullopt;
+    }
+  }
+  auto decoder = callable.target == ROCJITSU_CODE_TARGET_INVALID
+                     ? Decoder::create(callable.arch)
+                     : Decoder::create(registry, callable.target);
   if (!decoder) {
     report(error_out, "no decoder available for the probe architecture");
     return std::nullopt;
@@ -130,11 +149,15 @@ std::optional<ProbeClobberSummary> build_probe_clobber_summary(const ProbeCallab
 
   size_t w = 0;
   while (w < num_words) {
-    std::unique_ptr<Instruction> inst(decoder->decode(&words[w]));
-    if (!inst) {
-      report(error_out, "failed to decode probe body while summarizing clobbers");
+    util::StringDiagnostic decode_error;
+    DecodeResult decoded = decoder->decode(&words[w], decode_error.emitter());
+    if (decoded.failed()) {
+      const std::string message = "failed to decode probe body at word " + std::to_string(w) +
+                                  " while summarizing clobbers: " + decode_error.message();
+      report(error_out, message.c_str());
       return std::nullopt;
     }
+    std::unique_ptr<Instruction> inst = std::move(decoded).value();
     const int size = inst->size();
     if (size != 4 && size != 8) {
       report(error_out, "probe body instruction has an unexpected size");
@@ -146,9 +169,11 @@ std::optional<ProbeClobberSummary> build_probe_clobber_summary(const ProbeCallab
       return std::nullopt;
     }
 
-    // Ordinary clobbers (SGPR/VGPR/AccVGPR), including implicit defs.
+    // Ordinary clobbers (SGPR/VGPR/AccVGPR), including implicit defs. Special
+    // singletons in du.defs are projected out — they are summarized separately
+    // via scan_special_state below and must not enter ordinary_clobbers.
     const InstDefUse du(*inst);
-    summary.ordinary_clobbers |= du.defs;
+    summary.ordinary_clobbers |= du.defs.ordinary_only();
 
     scan_special_state(*inst, summary);
 

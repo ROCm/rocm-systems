@@ -14,7 +14,7 @@
 #include <vector>
 
 #include "logger/debug.hpp"
-#include <spdlog/fmt/ranges.h>
+#include <fmt/ranges.h>
 
 namespace rocprofsys
 {
@@ -58,7 +58,7 @@ trace_control::handle_range_start(std::uint64_t range_id, const char* message)
 
     bool was_empty = false;
     {
-        std::scoped_lock const lk{ m_region_mutex };
+        const std::scoped_lock lk{ m_region_mutex };
         was_empty = m_active_range_ids.empty();
         m_active_range_ids.insert(range_id);
         m_active_region_count.store(static_cast<std::uint32_t>(m_active_range_ids.size()),
@@ -77,7 +77,7 @@ trace_control::handle_range_stop(std::uint64_t range_id)
     bool now_empty  = false;
     bool had_paused = false;
     {
-        std::scoped_lock const lk{ m_region_mutex };
+        const std::scoped_lock lk{ m_region_mutex };
         auto                   it = m_active_range_ids.find(range_id);
         if(it != m_active_range_ids.end())
         {
@@ -110,7 +110,7 @@ trace_control::handle_pause(std::uint64_t tid)
 {
     if(region_filter_active())
     {
-        std::scoped_lock const lk{ m_region_mutex };
+        const std::scoped_lock lk{ m_region_mutex };
         if(m_active_range_ids.empty())
         {
             LOG_WARNING("Pause requested outside of target region - ignoring");
@@ -140,7 +140,7 @@ trace_control::handle_resume(std::uint64_t tid)
 
     if(region_filter_active())
     {
-        std::scoped_lock const lk{ m_region_mutex };
+        const std::scoped_lock lk{ m_region_mutex };
         if(m_active_range_ids.empty())
         {
             LOG_WARNING("Resume requested outside of target region - ignoring");
@@ -157,13 +157,13 @@ void
 trace_control::shutdown()
 {
     {
-        std::scoped_lock const lk{ m_callback_mutex };
+        const std::scoped_lock lk{ m_callback_mutex };
         m_resume_callbacks.clear();
         m_pause_callbacks.clear();
     }
 
     {
-        std::scoped_lock const lk{ m_region_mutex };
+        const std::scoped_lock lk{ m_region_mutex };
         m_active_range_ids.clear();
         m_active_region_count.store(0, std::memory_order_relaxed);
         m_trace_regions.clear();
@@ -177,7 +177,7 @@ void
 trace_control::register_region_pause_resume_callbacks(callback_t resume_callback,
                                                       callback_t pause_callback)
 {
-    std::scoped_lock const lk{ m_callback_mutex };
+    const std::scoped_lock lk{ m_callback_mutex };
     m_resume_callbacks.push_back(std::move(resume_callback));
     m_pause_callbacks.push_back(std::move(pause_callback));
 }
@@ -201,7 +201,7 @@ trace_control::should_write_markers() const
 void
 trace_control::trigger_callbacks(const std::vector<callback_t>& callbacks)
 {
-    std::scoped_lock const lk{ m_callback_mutex };
+    const std::scoped_lock lk{ m_callback_mutex };
     for(const auto& cb : callbacks)
     {
         if(cb)

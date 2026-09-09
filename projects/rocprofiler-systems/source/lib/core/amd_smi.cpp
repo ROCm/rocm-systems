@@ -66,7 +66,7 @@ config_settings(const std::shared_ptr<settings>& _config)
     std::string pcie_support{};
     std::string sdma_support{};
 
-    size_t device_count = gpu::get_processor_count();
+    const size_t device_count = gpu::get_processor_count();
     for(size_t i = 0; i < device_count; i++)
     {
         if(gpu::vcn_is_device_level_only(i) || gpu::is_vcn_busy_supported(i))
