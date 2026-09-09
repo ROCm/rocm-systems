@@ -154,10 +154,10 @@
       "num_nodes": 2,
       "num_gpus": 4,
       "env_variables": {
-        "NCCL_MNNVL_ENABLE": "1",
+        "NCCL_MNNVL_ENABLE": "0",
         "NCCL_NET_SHARED_COMMS": "1",
         "NCCL_NET_SHARED_BUFFERS": "1",
-        "NCCL_IB_DISABLE": "0"
+        "NCCL_IB_DISABLE": "1"
       },
       "tests": [
         {
@@ -2758,15 +2758,15 @@
     },
     {
       "name": "NET Transport - Ethernet (Multi-Node)",
-      "description": "Network transport tests over Ethernet",
+      "description": "Network transport tests over Ethernet/Socket. MNNVL is disabled so 2-node SendRecv stays on NET/Socket instead of P2P/CUMEMMNNVL; IB is disabled because verbs userspace is not present.",
       "config": "net_transport_eth_multinode",
       "enabled": true
     },
     {
       "name": "GDR Flush - Whitebox ncclIbIflush (Single-Node, 2-Rank)",
-      "description": "Whitebox coverage of the NET/IB GDR flush fix: dma-buf and peermem RO=0 scratchpad reads, feature-disabled fallback, repeated-flush burst, and the fault-injection regression guard",
+      "description": "Whitebox coverage of the NET/IB GDR flush fix: dma-buf and peermem RO=0 scratchpad reads, feature-disabled fallback, repeated-flush burst, and the fault-injection regression guard. Disabled: Broadcom Thor Ultra has no matching OFED/verbs userspace.",
       "config": "net_ib_gdr_flush",
-      "enabled": true
+      "enabled": false
     },
     {
       "name": "GDR Flush - cuMem AllGather (Multi-Node)",
