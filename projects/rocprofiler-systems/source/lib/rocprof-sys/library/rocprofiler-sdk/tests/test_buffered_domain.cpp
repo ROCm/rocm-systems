@@ -163,8 +163,9 @@ protected:
 
         EXPECT_CALL(
             *g_mock,
-            create_buffer(Eq(context), Eq(k_default_buffer_properties.buffer_size),
-                          Eq(k_default_buffer_properties.buffer_watermark),
+            create_buffer(Eq(context),
+                          Eq(k_default_buffer_properties.buffer_size.to_bytes()),
+                          Eq(k_default_buffer_properties.buffer_watermark.to_bytes()),
                           Eq(mock_sdk::BUFFER_POLICY_LOSSLESS), Eq(&stub_on_records),
                           Eq(static_cast<void*>(nullptr)), NotNull()))
             .Times(1)

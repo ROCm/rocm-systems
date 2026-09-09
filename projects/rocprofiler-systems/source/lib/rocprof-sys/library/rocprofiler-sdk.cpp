@@ -2493,12 +2493,8 @@ flush()
         }
     }
 
-    // g_domain_service (kfd_events) owns its own buffers, created and tracked
-    // separately from tool_data->get_buffers() above -- flush them here too, or
-    // any records still sitting in them at shutdown are silently dropped.
     if(g_domain_service)
     {
-        LOG_DEBUG("kfd_events: flushing domain_service buffers");
         g_domain_service->flush();
     }
 }
@@ -2751,42 +2747,11 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* user_data)
 
     std::vector<domain_selection> domain_selection_list;
 
-    // // Initialize KFD event metadata
-    // if(_buffered_domain.count(ROCPROFILER_BUFFER_TRACING_KFD_PAGE_FAULT) > 0 ||
-    //    _buffered_domain.count(ROCPROFILER_BUFFER_TRACING_KFD_PAGE_MIGRATE) > 0 ||
-    //    _buffered_domain.count(ROCPROFILER_BUFFER_TRACING_KFD_QUEUE) > 0 ||
-    //    _buffered_domain.count(ROCPROFILER_BUFFER_TRACING_KFD_EVENT_QUEUE) > 0 ||
-    //    _buffered_domain.count(ROCPROFILER_BUFFER_TRACING_KFD_EVENT_UNMAP_FROM_GPU) > 0
-    //    || _buffered_domain.count(ROCPROFILER_BUFFER_TRACING_KFD_EVENT_DROPPED_EVENTS) >
-    //    0)
-    // {
-    //     rocprofiler_sdk::kfd_event_metadata_initialize(tool_data);
-    // }
-
-    LOG_DEBUG(
-        "kfd_events: buffered domain requested? page_fault={} page_migrate={} queue={} "
-        "event_queue={} event_unmap_from_gpu={} event_dropped_events={}",
-        _buffered_domain.contains(ROCPROFILER_BUFFER_TRACING_KFD_PAGE_FAULT),
-        _buffered_domain.contains(ROCPROFILER_BUFFER_TRACING_KFD_PAGE_MIGRATE),
-        _buffered_domain.contains(ROCPROFILER_BUFFER_TRACING_KFD_QUEUE),
-        _buffered_domain.contains(ROCPROFILER_BUFFER_TRACING_KFD_EVENT_QUEUE),
-        _buffered_domain.contains(ROCPROFILER_BUFFER_TRACING_KFD_EVENT_UNMAP_FROM_GPU),
-        _buffered_domain.contains(ROCPROFILER_BUFFER_TRACING_KFD_EVENT_DROPPED_EVENTS));
-
     if(_buffered_domain.contains(ROCPROFILER_BUFFER_TRACING_KFD_PAGE_FAULT))
     {
         domain_selection selection;
         selection.name = "kfd_page_fault";
         domain_selection_list.push_back(selection);
-
-        // ROCPROFILER_CALL(rocprofiler_create_buffer(
-        //     _data->primary_ctx, buffer_size, watermark,
-        //     ROCPROFILER_BUFFER_POLICY_LOSSLESS, tool_tracing_buffered, tool_data,
-        //     &_data->kfd_page_fault_buffer));
-
-        // ROCPROFILER_CALL(rocprofiler_configure_buffer_tracing_service(
-        //     _data->primary_ctx, ROCPROFILER_BUFFER_TRACING_KFD_PAGE_FAULT, nullptr, 0,
-        //     _data->kfd_page_fault_buffer));
     }
 
     if(_buffered_domain.contains(ROCPROFILER_BUFFER_TRACING_KFD_PAGE_MIGRATE))
@@ -2794,15 +2759,6 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* user_data)
         domain_selection selection;
         selection.name = "kfd_page_migrate";
         domain_selection_list.push_back(selection);
-
-        // ROCPROFILER_CALL(rocprofiler_create_buffer(
-        //     _data->primary_ctx, buffer_size, watermark,
-        //     ROCPROFILER_BUFFER_POLICY_LOSSLESS, tool_tracing_buffered, tool_data,
-        //     &_data->kfd_page_migrate_buffer));
-
-        // ROCPROFILER_CALL(rocprofiler_configure_buffer_tracing_service(
-        //     _data->primary_ctx, ROCPROFILER_BUFFER_TRACING_KFD_PAGE_MIGRATE, nullptr,
-        //     0, _data->kfd_page_migrate_buffer));
     }
 
     if(_buffered_domain.contains(ROCPROFILER_BUFFER_TRACING_KFD_QUEUE))
@@ -2810,15 +2766,6 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* user_data)
         domain_selection selection;
         selection.name = "kfd_queue";
         domain_selection_list.push_back(selection);
-
-        // ROCPROFILER_CALL(rocprofiler_create_buffer(
-        //     _data->primary_ctx, buffer_size, watermark,
-        //     ROCPROFILER_BUFFER_POLICY_LOSSLESS, tool_tracing_buffered, tool_data,
-        //     &_data->kfd_queue_buffer));
-
-        // ROCPROFILER_CALL(rocprofiler_configure_buffer_tracing_service(
-        //     _data->primary_ctx, ROCPROFILER_BUFFER_TRACING_KFD_QUEUE, nullptr, 0,
-        //     _data->kfd_queue_buffer));
     }
 
     if(_buffered_domain.contains(ROCPROFILER_BUFFER_TRACING_KFD_EVENT_QUEUE))
@@ -2828,23 +2775,6 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* user_data)
         selection.operations = { "ROCPROFILER_KFD_EVENT_QUEUE_RESTORE_RESCHEDULED" };
 
         domain_selection_list.push_back(selection);
-
-        // ROCPROFILER_CALL(rocprofiler_create_buffer(
-        //     _data->primary_ctx, buffer_size, watermark,
-        //     ROCPROFILER_BUFFER_POLICY_LOSSLESS, tool_tracing_buffered, tool_data,
-        //     &_data->kfd_event_queue_buffer));
-
-        // // The only KFD_EVENT_QUEUE operation we want to process is
-        // RESTORE_RESCHEDULED.
-        // // All others are captured within paired KFD_QUEUE operations
-        // auto kfd_event_queue_ops = std::array<rocprofiler_tracing_operation_t, 1>{
-        //     ROCPROFILER_KFD_EVENT_QUEUE_RESTORE_RESCHEDULED
-        // };
-
-        // ROCPROFILER_CALL(rocprofiler_configure_buffer_tracing_service(
-        //     _data->primary_ctx, ROCPROFILER_BUFFER_TRACING_KFD_EVENT_QUEUE,
-        //     kfd_event_queue_ops.data(), kfd_event_queue_ops.size(),
-        //     _data->kfd_event_queue_buffer));
     }
 
     if(_buffered_domain.contains(ROCPROFILER_BUFFER_TRACING_KFD_EVENT_UNMAP_FROM_GPU))
@@ -2853,15 +2783,6 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* user_data)
         selection.name = "kfd_event_unmap_from_gpu";
 
         domain_selection_list.push_back(selection);
-
-        // ROCPROFILER_CALL(rocprofiler_create_buffer(
-        //     _data->primary_ctx, buffer_size, watermark,
-        //     ROCPROFILER_BUFFER_POLICY_LOSSLESS, tool_tracing_buffered, tool_data,
-        //     &_data->kfd_event_unmap_buffer));
-
-        // ROCPROFILER_CALL(rocprofiler_configure_buffer_tracing_service(
-        //     _data->primary_ctx, ROCPROFILER_BUFFER_TRACING_KFD_EVENT_UNMAP_FROM_GPU,
-        //     nullptr, 0, _data->kfd_event_unmap_buffer));
     }
 
     if(_buffered_domain.contains(ROCPROFILER_BUFFER_TRACING_KFD_EVENT_DROPPED_EVENTS))
@@ -2870,23 +2791,6 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* user_data)
         selection.name = "kfd_event_dropped_events";
 
         domain_selection_list.push_back(selection);
-
-        // ROCPROFILER_CALL(rocprofiler_create_buffer(
-        //     _data->primary_ctx, buffer_size, watermark,
-        //     ROCPROFILER_BUFFER_POLICY_LOSSLESS, tool_tracing_buffered, tool_data,
-        //     &_data->kfd_event_dropped_buffer));
-
-        // ROCPROFILER_CALL(rocprofiler_configure_buffer_tracing_service(
-        //     _data->primary_ctx, ROCPROFILER_BUFFER_TRACING_KFD_EVENT_DROPPED_EVENTS,
-        //     nullptr, 0, _data->kfd_event_dropped_buffer));
-    }
-
-    LOG_DEBUG("kfd_events: {} domain selection(s) queued for domain_service::configure",
-              domain_selection_list.size());
-    for(const auto& selection : domain_selection_list)
-    {
-        LOG_DEBUG("kfd_events: queued domain selection '{}'",
-                  selection.name.has_value() ? *selection.name : "<group-based>");
     }
 
     try
@@ -2894,10 +2798,6 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* user_data)
         g_domain_service->configure(domain_selection_list);
     } catch(const std::exception& e)
     {
-        // An uncaught exception here would unwind across the rocprofiler-sdk C
-        // callback boundary (UB) with no diagnostic at all -- log critically
-        // (auto-flushed) before rethrowing so the failure is visible even if the
-        // process aborts immediately afterward.
         LOG_CRITICAL("domain_service::configure failed: {}", e.what());
         throw;
     }

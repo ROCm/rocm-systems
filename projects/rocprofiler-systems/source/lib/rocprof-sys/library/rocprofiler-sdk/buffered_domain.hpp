@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include "common/units/data_size.hpp"
 #include "library/rocprofiler-sdk/types.hpp"
 
 #include <memory>
@@ -55,26 +56,19 @@ public:
     {
         const auto& properties = m_definition.buffer;
 
-        SdkBackend::create_buffer(
-            m_context, properties.buffer_size, properties.buffer_watermark,
-            k_buffer_policy, m_definition.on_records, nullptr,
-            &m_buffer);  // create_buffer -> Add throw upon failure in SdkBackend
+        SdkBackend::create_buffer(m_context, properties.buffer_size.to_bytes(),
+                                  properties.buffer_watermark.to_bytes(), k_buffer_policy,
+                                  m_definition.on_records, nullptr, &m_buffer);
 
         const auto kind =
             static_cast<SdkBackend::buffer_tracing_kind_t>(m_definition.meta.id);
 
-        SdkBackend::configure_buffer_tracing_service(
-            m_context, kind, m_operations.data(), m_operations.size(),
-            m_buffer);  // configure_buffer_tracing_service -> Add throw upon failure in
-                        // SdkBackend
+        SdkBackend::configure_buffer_tracing_service(m_context, kind, m_operations.data(),
+                                                     m_operations.size(), m_buffer);
 
         typename SdkBackend::callback_thread_id_t thread{};
-        SdkBackend::create_callback_thread(
-            &thread);  // create_callback_thread -> Add throw upon failure in SdkBackend
-
-        SdkBackend::assign_callback_thread(
-            m_buffer,
-            thread);  // assign_callback_thread -> Add throw upon failure in SdkBackend
+        SdkBackend::create_callback_thread(&thread);
+        SdkBackend::assign_callback_thread(m_buffer, thread);
     }
 
     void flush() const
@@ -94,8 +88,7 @@ public:
     [[nodiscard]] SdkBackend::buffer_id_t buffer_id() const noexcept { return m_buffer; }
 
 private:
-    [[nodiscard]] static bool is_valid(
-        const typename SdkBackend::buffer_id_t& buf) noexcept
+    [[nodiscard]] static bool is_valid(const SdkBackend::buffer_id_t& buf) noexcept
     {
         return buf.handle != 0;
     }

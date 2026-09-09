@@ -3,6 +3,8 @@
 
 #pragma once
 
+#include "common/units/data_size.hpp"
+
 #include <compare>
 #include <cstddef>
 #include <cstdint>
@@ -11,8 +13,13 @@
 #include <string_view>
 #include <vector>
 
+#include <fmt/base.h>
+#include <fmt/format.h>
+#include <fmt/ranges.h>
+
 namespace rocprofsys::domains
 {
+using namespace units::literals;
 
 enum class collection_mode : std::uint8_t
 {
@@ -31,8 +38,8 @@ struct operation_info
 
 struct buffer_properties
 {
-    std::size_t buffer_size;
-    std::size_t buffer_watermark;
+    units::kibibytes buffer_size;
+    units::kibibytes buffer_watermark;
 };
 
 struct domain_key
@@ -51,20 +58,6 @@ struct domain_info
     std::optional<std::string_view> group;
 };
 
-template <typename SdkBackend>
-using buffer_tracing_cb_t = void (*)(typename SdkBackend::context_id_t      context,
-                                     typename SdkBackend::buffer_id_t       buffer_id,
-                                     typename SdkBackend::record_header_t** headers,
-                                     std::size_t num_headers, void* data,
-                                     std::uint64_t drop_count);
-
-template <typename SdkBackend>
-using callback_tracing_cb_t =
-    void (*)(typename SdkBackend::callback_tracing_record_t record,
-             typename SdkBackend::user_data_t* user_data, void* callback_data);
-
-using configure_cb_t = void (*)();
-
 struct domain_group
 {
     std::string_view name;
@@ -79,10 +72,23 @@ struct domain_descriptor
 };
 
 /// Matches the buffer sizing used by the rocprof-sys rocprofiler-sdk backend.
-inline constexpr buffer_properties k_default_buffer_properties{
-    .buffer_size      = static_cast<std::size_t>(16 * 4096),
-    .buffer_watermark = static_cast<std::size_t>(15 * 4096)
-};
+inline constexpr buffer_properties k_default_buffer_properties{ .buffer_size = 64_kib,
+                                                                .buffer_watermark =
+                                                                    63_kib };
+
+template <typename SdkBackend>
+using buffer_tracing_cb_t = void (*)(typename SdkBackend::context_id_t      context,
+                                     typename SdkBackend::buffer_id_t       buffer_id,
+                                     typename SdkBackend::record_header_t** headers,
+                                     std::size_t num_headers, void* data,
+                                     std::uint64_t drop_count);
+
+template <typename SdkBackend>
+using callback_tracing_cb_t =
+    void (*)(typename SdkBackend::callback_tracing_record_t record,
+             typename SdkBackend::user_data_t* user_data, void* callback_data);
+
+using configure_cb_t = void (*)();
 
 template <typename SdkBackend>
 struct buffered_domain_definition
@@ -134,3 +140,125 @@ struct buffered_callback_dispatcher
 };
 
 }  // namespace rocprofsys::domains
+
+template <>
+struct fmt::formatter<rocprofsys::domains::collection_mode>
+: fmt::formatter<std::string_view>
+{
+    template <typename FormatContext>
+    auto format(rocprofsys::domains::collection_mode mode, FormatContext& ctx) const
+    {
+        std::string_view str = "unknown";
+        switch(mode)
+        {
+            case rocprofsys::domains::collection_mode::callback: str = "callback"; break;
+            case rocprofsys::domains::collection_mode::buffered: str = "buffered"; break;
+        }
+        return fmt::formatter<std::string_view>::format(str, ctx);
+    }
+};
+
+template <>
+struct fmt::formatter<rocprofsys::domains::operation_info>
+: fmt::formatter<std::string_view>
+{
+    template <typename FormatContext>
+    auto format(const rocprofsys::domains::operation_info& op_info,
+                FormatContext&                             ctx) const
+    {
+        return fmt::format_to(ctx.out(), "operation_info [id: {} name: {}]", op_info.id,
+                              op_info.name);
+    }
+};
+
+template <>
+struct fmt::formatter<rocprofsys::domains::buffer_properties>
+: fmt::formatter<std::string_view>
+{
+    template <typename FormatContext>
+    auto format(const rocprofsys::domains::buffer_properties& buffer_props,
+                FormatContext&                                ctx) const
+    {
+        return fmt::format_to(ctx.out(), "buffer [size: {} watermark: {}]",
+                              buffer_props.buffer_size, buffer_props.buffer_watermark);
+    }
+};
+
+template <>
+struct fmt::formatter<rocprofsys::domains::domain_key> : fmt::formatter<std::string_view>
+{
+    template <typename FormatContext>
+    auto format(const rocprofsys::domains::domain_key& key, FormatContext& ctx) const
+    {
+        return fmt::format_to(ctx.out(), "domain_key [mode: {} value: {}]", key.mode,
+                              key.value);
+    }
+};
+
+template <>
+struct fmt::formatter<rocprofsys::domains::domain_group>
+: fmt::formatter<std::string_view>
+{
+    template <typename FormatContext>
+    auto format(const rocprofsys::domains::domain_group& group, FormatContext& ctx) const
+    {
+        return fmt::format_to(ctx.out(), "domain_group [name: {}]", group.name);
+    }
+};
+
+template <>
+struct fmt::formatter<rocprofsys::domains::domain_descriptor>
+: fmt::formatter<std::string_view>
+{
+    template <typename FormatContext>
+    auto format(const rocprofsys::domains::domain_descriptor& descriptor,
+                FormatContext&                                ctx) const
+    {
+        fmt::format_to(ctx.out(), "domain_descriptor [name: {} id: {} mode: {} group: ",
+                       descriptor.name, descriptor.id, descriptor.mode);
+        if(descriptor.group)
+        {
+            fmt::format_to(ctx.out(), "{}", *descriptor.group);
+        }
+        else
+        {
+            fmt::format_to(ctx.out(), "none");
+        }
+        return fmt::format_to(ctx.out(), "]");
+    }
+};
+
+template <>
+struct fmt::formatter<rocprofsys::domains::domain_info> : fmt::formatter<std::string_view>
+{
+    template <typename FormatContext>
+    auto format(const rocprofsys::domains::domain_info& info, FormatContext& ctx) const
+    {
+        fmt::format_to(ctx.out(),
+                       "domain_info [key: {} name: {} operations: [{}] group: ", info.key,
+                       info.name, fmt::join(info.operations, ", "));
+        if(info.group)
+        {
+            fmt::format_to(ctx.out(), "{}", *info.group);
+        }
+        else
+        {
+            fmt::format_to(ctx.out(), "none");
+        }
+        return fmt::format_to(ctx.out(), "]");
+    }
+};
+
+template <>
+struct fmt::formatter<rocprofsys::domains::domain_configuration>
+: fmt::formatter<std::string_view>
+{
+    template <typename FormatContext>
+    auto format(const rocprofsys::domains::domain_configuration& config,
+                FormatContext&                                   ctx) const
+    {
+        return fmt::format_to(ctx.out(),
+                              "domain_configuration [key: {} operations: [{}]]",
+                              config.key, fmt::join(config.operations, ", "));
+    }
+};
