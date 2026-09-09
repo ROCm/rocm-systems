@@ -311,6 +311,17 @@ in the following table.
         | ``2`` (default): Enabled if multi-node or gfx1250/MI450X and P2P not
           disabled.
 
+    * - | ``RCCL_USE_AMD_SMI_LIB``
+        | Selects which backend RCCL uses for GPU topology and UALoE/UALLink
+          fabric discovery. The default is RCCL's internal sysfs reader
+          (``alt_rsmi``), which remains sufficient for UALoE. Setting this
+          to ``1`` loads ``libamd_smi`` at runtime instead. The library path
+          defaults to off because ``amdsmi_init`` has had concurrency issues;
+          enable it only when you need the vendor library. Detected WSL2
+          environments skip both backends.
+      - | ``0``: Use the internal sysfs reader (default).
+        | ``1``: Use ``libamd_smi``.
+
 Logging and debugging
 =====================
 
