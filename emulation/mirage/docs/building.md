@@ -24,11 +24,23 @@ merely loads at runtime.
 
 ### Upgrading Existing Agents
 
-The complete builtin `vm` and component `topology` are read from the matching
-RocJITsu configs and validated at build time. MI300X, MI350X and MI450X
-use `gfx942_cdna3.json`, `gfx950_mi355x.json` and `gfx1250_mi455x.json`,
-respectively, including their 320, 288 and 256 CU topologies. Mirage no
-longer maintains separate hardware values or uniform 256-CU layouts.
+The complete builtin `vm` and component `topology` are read from the
+RocJITsu configs and validated at build time. Every GPU RocJITsu has a
+config for becomes one builtin agent: `mi300x`, `mi350x` and `mi450x`
+from `gfx942_cdna3.json`, `gfx950_mi355x.json` and `gfx1250_mi455x.json`
+(including their 320, 288 and 256 CU topologies), and `gfx90a_mi210_kmd`,
+`gfx1100_w7900`, `gfx1151` and `gfx1201_r9700` under their config's own
+name. Where RocJITsu ships several configs for one GPU — a `_kmd`
+variant, an `_Ngpu` one — Mirage takes the plainest, because the GPU
+count is a Mirage topology setting (`--gpus-per-node`) that would
+override a baked-in one anyway. Mirage no longer maintains separate
+hardware values or uniform 256-CU layouts.
+
+Builtin **profiles** are not read from disk or written to it. Each is
+derived from the agent it pins, whenever it is asked for, so there is
+nothing to seed and nothing to go stale on upgrade. A profile file is
+always one you wrote, and it shadows the builtin of that name until you
+delete it.
 
 RocJITsu refuses a device that has SDMA engines and no queues on them,
 and it refuses it while loading the config — so a session dies at daemon
@@ -122,8 +134,10 @@ cargo build --release    # optimized
 This builds the `mirage` binary at `target/debug/mirage` (or
 `target/release/mirage`). The build embeds:
 
-- the **builtin agents** from RocJITsu configs, validated by the `builtin`
-  build script, plus Mirage's system topologies and profiles, and
+- the **builtin agents**, one per GPU in `rocjitsu/configs/`, read from
+  that directory and validated by the `builtin` build script — plus
+  Mirage's system topologies, and the builtin profiles generated from
+  those agents at run time, and
 - the **third-party dependency manifest** that `mirage about` prints,
   distilled from `cargo metadata` by the root `build.rs`.
 
@@ -311,8 +325,10 @@ The release lane of [RocJITsu CI](../../../.github/workflows/rocjitsu-corpus-tes
 runs `cargo test --locked --workspace --no-fail-fast -- --test-threads=4 --nocapture`
 against that job's freshly built RocJITsu libraries, with missing-emulator
 skips disabled. Changes to either project trigger the workflow. This
-includes daemon startup for every builtin agent, legacy-agent upgrades,
-the container and lifecycle suites, and the software-emulator matrix.
+includes daemon startup for every builtin agent — the list is taken from
+`mirage agent list`, so a GPU added to RocJITsu is covered without
+editing a test — legacy-agent upgrades, the container and lifecycle
+suites, and the software-emulator matrix.
 Hardware-dependent DBT cases remain capability-gated.
 
 ## Linting
