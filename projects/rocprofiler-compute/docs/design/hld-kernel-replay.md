@@ -489,14 +489,12 @@ the signal available today. A structured detection mechanism remains an open que
 | 2 | **Completeness and identity** | For each admitted dispatch, including an admitted one-bucket dispatch, the observed counter-pass count equals the application-replay count, every counter appears exactly once, and all passes collapse to one `Dispatch_ID`. Incomplete results fail before analysis. |
 | 3 | **Filtering** | Kernels excluded by the kernel or dispatch filter are not profiled and no errors are thrown. The same `--dispatch` range selects the same dispatches in both replay modes. |
 | 4 | **Application-replay comparison** | Profile the same deterministic workload and multi-bucket counter request in both modes. Compare corresponding buckets for each logical dispatch; bucket membership, counter values, and final analysis results agree, and existing application replay is unchanged. |
-| 5 | **Kernel tracing** | Exactly one kernel dispatch record per logical dispatch, from pass 0, with the counter rows joining to it one-to-one and one resulting `Dispatch_ID`. That record supplies the kernel duration in analysis. |
+| 5 | **Kernel tracing** | Exactly one kernel dispatch record per logical dispatch, from pass 0. |
 | 6 | **PC sampling** | Each admitted dispatch replays *N*+1 times. Every bucket appears exactly once across passes 0 through *N*−1, and pass *N* produces PC sampling output and no counter rows. |
-| 7 | **Compatibility** | Every accepted option behaves as expected — PC sampling, roofline selection, a kernel-replay-specific multi-rank diagnostic that names the collective kernel risk, and default-off — and every rejected combination is rejected: iteration multiplexing, live attach. |
-| 8 | **Configuration rejection** | Each unmet condition on its own — no native tool, unsupported ROCm version, unresolvable library, each unsatisfied prerequisite — fails before profiling starts, with a diagnostic naming that specific condition. |
+| 7 | **Compatibility** | Every accepted option behaves as expected — PC sampling, roofline selection, a kernel-replay-specific multi-rank diagnostic that names the collective kernel risk, and default-off — and every rejected combination is rejected: iteration multiplexing, live attach-detach. |
+| 8 | **Configuration rejection** | Each unmet condition on its own — no native tool, unsupported ROCm version, unresolvable library, fails before profiling starts, with a diagnostic naming that specific condition. |
 | 9 | **Failure paths** | An unsupported SDK, a missing or unexpectedly empty profile vector when counters were requested, a declined snapshot, and an upstream abort each fail, and each proves no one-pass fallback happened. A zero-bucket request follows the existing bypass and is not misclassified as a missing-profile failure. |
-| 10 | **Diagnostics** | Every run identifies the replay mode, and every failure names its specific unmet condition. |
-| 11 | **Context lifecycle** | Every native context is created at tool initialization, started when the HSA runtime loads, and stopped at tool finalization. No local toggle is issued outside `PASS` `PHASE_ENTER`, and the kernel trace context is stopped exactly once. |
-| 12 | **Marker correction** | A marker region enclosing a replayed dispatch reports a duration within tolerance of the same region under application replay. |
+| 10 | **Marker correction** | A marker region enclosing a replayed dispatch reports a duration close to the duration without kernel replay. |
 
 ### Security
 
@@ -505,8 +503,6 @@ the signal available today. A structured detection mechanism remains an open que
   That snapshot holds application data and should stay inside the profiled process's trust
   boundary, and `rocprof-compute` must never persist its contents in result artifacts or print them
   in diagnostics.
-- Snapshot allocation and restore failures are availability failures, and follow the same fail-closed
-  rule as every other incomplete replay condition.
 
 ### Debuggability
 
