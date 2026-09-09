@@ -18,6 +18,8 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
+// Temporary change to trigger CI.
+
 #define GNU_SOURCE 1
 
 #include <rocprofiler-register/rocprofiler-register.h>
