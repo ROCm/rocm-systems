@@ -102,6 +102,8 @@ using consan_moi_detail::moi_has_runtime_hardware_dispatch_id;
       (capture.sgpr() && (*capture.sgpr() < 20u || *capture.sgpr() % 2u != 0u ||
                           static_cast<uint32_t>(*capture.sgpr()) + 2u > kMaxSgprs)) ||
       (capture.vgpr() && static_cast<uint32_t>(*capture.vgpr()) + 2u > kMaxVgprs) ||
+      (plan.identity_salt_sgpr &&
+       static_cast<uint32_t>(*plan.identity_salt_sgpr) + 2u > kMaxSgprs) ||
       static_cast<uint32_t>(plan.dispatch_id_sgpr) + 2u > kMaxSgprs) {
     errors.emplace_back("ConSan MOI dispatch-ID prologue has an invalid persistent or source pair");
     return false;
@@ -115,42 +117,53 @@ using consan_moi_detail::moi_has_runtime_hardware_dispatch_id;
                 words,
                 build_s_mov_b32(static_cast<uint16_t>(*capture.sgpr() + 1u),
                                 static_cast<uint16_t>(plan.dispatch_id_sgpr + 1u), arch),
-                arch) &&
-            // Hardware dispatch ID zero is valid (and common for the first packet),
-            // while ConSan reserves zero as the empty metadata sentinel. Store the
-            // injective modulo-2^64 successor used by every downstream comparison.
-            append_moi_entry_salu_write(words,
-                                        build_s_add_u32(*capture.sgpr(), *capture.sgpr(),
-                                                        scalar_positive_inline_u32(1), arch),
-                                        arch) &&
+                arch),
+        "ConSan MOI dispatch-ID prologue cannot encode its scalar capture");
+    if (plan.identity_salt_sgpr) {
+      const auto mix = instrumentation::build_s_xor_b64(
+          *capture.sgpr(), *capture.sgpr(), *plan.identity_salt_sgpr, arch);
+      require_emission(
+          mix && append_moi_entry_salu_write(words, *mix, arch),
+          "ConSan MOI dispatch-ID prologue cannot encode its launch-identity mix");
+    }
+    // Hardware dispatch ID zero is valid (and common for the first packet),
+    // while ConSan reserves zero as the empty metadata sentinel. Store the
+    // modulo-2^64 successor used by every downstream comparison.
+    require_emission(
+        append_moi_entry_salu_write(words,
+                                    build_s_add_u32(*capture.sgpr(), *capture.sgpr(),
+                                                    scalar_positive_inline_u32(1), arch),
+                                    arch) &&
             append_moi_entry_salu_write(
                 words,
                 build_s_addc_u32(static_cast<uint16_t>(*capture.sgpr() + 1u),
                                  static_cast<uint16_t>(*capture.sgpr() + 1u),
                                  scalar_positive_inline_u32(0), arch),
                 arch),
-        "ConSan MOI dispatch-ID prologue cannot encode its SALU dependency delay");
+        "ConSan MOI dispatch-ID prologue cannot encode its scalar successor");
   } else {
     require_emission.append(
-        "ConSan MOI dispatch-ID prologue cannot encode its persistent VGPR successor",
+        "ConSan MOI dispatch-ID prologue cannot encode its persistent VGPR capture",
         build_v_mov_b32_e32(*capture.vgpr(), plan.dispatch_id_sgpr, arch),
         build_v_mov_b32_e32(static_cast<uint16_t>(*capture.vgpr() + 1u),
-                            static_cast<uint16_t>(plan.dispatch_id_sgpr + 1u), arch),
+                            static_cast<uint16_t>(plan.dispatch_id_sgpr + 1u), arch));
+    if (plan.identity_salt_sgpr) {
+      require_emission.append(
+          "ConSan MOI dispatch-ID prologue cannot encode its launch-identity mix",
+          instrumentation::build_v_xor_b32(*capture.vgpr(), *plan.identity_salt_sgpr,
+                                           *capture.vgpr(), arch),
+          instrumentation::build_v_xor_b32(
+              static_cast<uint16_t>(*capture.vgpr() + 1u),
+              static_cast<uint16_t>(*plan.identity_salt_sgpr + 1u),
+              static_cast<uint16_t>(*capture.vgpr() + 1u), arch));
+    }
+    require_emission.append(
+        "ConSan MOI dispatch-ID prologue cannot encode its persistent VGPR successor",
         instrumentation::build_v_add_u64_literal(*capture.vgpr(), 1u, arch));
   }
-  uint32_t shifted_guest_end =
-      static_cast<uint32_t>(plan.first_shifted_guest_sgpr) + plan.shifted_guest_sgpr_count;
-  if (!restore_system_sgprs) {
-    // The ordinary preload plan describes the system SGPRs as the tail of one
-    // shifted guest range.  A full workgroup-payload plan restores that tail
-    // separately according to the guest's sparse X/Y/Z/info mask.  Stop this
-    // positional repair at the user-SGPR boundary so it neither duplicates
-    // nor destroys the authoritative full payload before the semantic copy.
-    shifted_guest_end = std::min<uint32_t>(shifted_guest_end, plan.original_user_sgpr_count);
-  }
-  for (uint16_t destination = plan.first_shifted_guest_sgpr; destination < shifted_guest_end;
-       ++destination) {
-    const auto source = consan_moi_dispatch_id_restore_source(plan, destination);
+  for (uint16_t restore_index = 0; restore_index < plan.guest_restore_count; ++restore_index) {
+    const uint16_t destination = plan.guest_restore_destinations[restore_index];
+    const std::optional<uint16_t> source = plan.guest_restore_sources[restore_index];
     if (!source || *source >= kMaxSgprs) {
       errors.emplace_back("ConSan MOI dispatch-ID prologue has an invalid guest restore source");
       return false;
@@ -173,7 +186,7 @@ using consan_moi_detail::moi_has_runtime_hardware_dispatch_id;
   }
   if (plan.requires_kernarg_reload()) {
     if (!consan_arch_supports_kernarg_preload_overflow_recovery(arch) ||
-        plan.kernarg_reload_count > 2u) {
+        plan.kernarg_reload_count > 4u) {
       errors.emplace_back("ConSan MOI dispatch-ID prologue has an unsupported kernarg reload");
       return false;
     }
@@ -665,10 +678,6 @@ build_owner_epoch_prologue_words(const MoiOwnerEpochPrologueEmissionPlan &plan, 
                            ? static_cast<size_t>(entry_scalar_backup->sgpr_count) * 4u + 1u
                            : 0u));
   InstructionSequence sequence(words);
-  if (entry_scalar_backup && !append_moi_entry_scalar_backup(words, *entry_scalar_backup,
-                                                             /*restore=*/false, arch, errors)) {
-    return std::nullopt;
-  }
   // A newly inserted dispatch-ID preload shifts CDNA system SGPRs upward. The
   // dispatch repair below copies those values back to the guest ABI locations
   // and therefore overwrites part of the shifted tuple. Persist the exact
@@ -686,6 +695,16 @@ build_owner_epoch_prologue_words(const MoiOwnerEpochPrologueEmissionPlan &plan, 
           words, *dispatch_plan, dispatch_capture,
           !workgroup_sources || !workgroup_sources->cdna_full_payload_base.has_value(), arch,
           errors)) {
+    return std::nullopt;
+  }
+  // The entry backup preserves the guest-visible ABI values borrowed by the
+  // remainder of this prologue.  When ConSan inserted queue/dispatch preloads,
+  // those values do not occupy their guest registers until the repair above
+  // has completed.  Saving earlier would capture the replacement ABI instead
+  // (for example, a queue pointer in the guest's kernarg slot) and restore it
+  // over the repaired value immediately before entering the guest kernel.
+  if (entry_scalar_backup && !append_moi_entry_scalar_backup(words, *entry_scalar_backup,
+                                                             /*restore=*/false, arch, errors)) {
     return std::nullopt;
   }
   if (workgroup_shadow && workgroup_shadow->visible_evidence_sgpr &&
@@ -1321,6 +1340,8 @@ template <typename Predicate>
   }
 
   if (plan.descriptor_change_required()) {
+    AMDHSA_BITS_SET(desc.kernel_code_properties, kd::KERNEL_CODE_PROPERTY_ENABLE_SGPR_QUEUE_PTR,
+                    1u);
     AMDHSA_BITS_SET(desc.kernel_code_properties, kd::KERNEL_CODE_PROPERTY_ENABLE_SGPR_DISPATCH_ID,
                     1u);
     AMDHSA_BITS_SET(desc.compute_pgm_rsrc2, kd::COMPUTE_PGM_RSRC2_USER_SGPR_COUNT,

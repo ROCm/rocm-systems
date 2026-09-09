@@ -9,6 +9,7 @@
 #include "consan_device_test_support.h"
 
 #include <array>
+#include <cstdio>
 
 namespace {
 
@@ -83,10 +84,12 @@ void run_graph_replay(bool synchronize) {
   }
 
   std::array<StreamState, kStreams> results{};
+  uint32_t completed_launches = 0u;
   for (uint32_t stream_id = 0u; stream_id < kStreams; ++stream_id) {
     HIP_ASSERT(hipMemcpy(&results[stream_id], device_states[stream_id], sizeof(StreamState),
                          hipMemcpyDeviceToHost));
     EXPECT_EQ(results[stream_id].launches, kReplays) << "stream=" << stream_id;
+    completed_launches += results[stream_id].launches;
     for (uint32_t replay = 0u; replay < kReplays; ++replay) {
       for (uint32_t tid = 0u; tid < thread_count; ++tid) {
         EXPECT_EQ(results[stream_id].control[replay][tid],
@@ -104,6 +107,10 @@ void run_graph_replay(bool synchronize) {
     HIP_ASSERT(hipStreamDestroy(graphs[stream_id].stream));
     HIP_ASSERT(hipFree(device_states[stream_id]));
   }
+
+  std::printf("CONSAN_HIP_INTEGRATION workload=graph_replay completed_launches=%u "
+              "underlying_hsa_queues=unobserved raw_dispatch_id_reuse=unobserved\n",
+              completed_launches);
 }
 
 TEST(ConSanDeviceGraphReplayTest, Correct) { run_graph_replay(true); }

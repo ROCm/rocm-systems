@@ -1269,11 +1269,11 @@ TEST(ConSanMoi, Gfx1100AutoRecordReplayCapturesDispatchIdentityInPersistentVgprs
       result.patches, ConSanPatchKind::KernelEntryMoiOwnerEpochPrologue, &ConSanPatchInfo::kind);
   ASSERT_NE(prologue, result.patches.end());
   ASSERT_TRUE(prologue->dispatch_id_prologue);
-  EXPECT_EQ(prologue->dispatch_id_prologue->preload.dispatch_id_sgpr, 2u);
+  EXPECT_EQ(prologue->dispatch_id_prologue->preload.dispatch_id_sgpr, 4u);
   EXPECT_EQ(prologue->dispatch_id_prologue->preload.original_user_sgpr_count, 15u);
   EXPECT_EQ(prologue->dispatch_id_prologue->preload.expanded_user_sgpr_count, 15u);
   EXPECT_EQ(prologue->dispatch_id_prologue->preload.kernarg_reload_count, 0u);
-  EXPECT_EQ(prologue->dispatch_id_prologue->preload.shifted_guest_sgpr_count, 0u);
+  EXPECT_EQ(prologue->dispatch_id_prologue->preload.shifted_guest_sgpr_count, 2u);
   EXPECT_EQ(prologue->dispatch_id_prologue->preload.shifted_system_sgpr_count, 0u);
   EXPECT_EQ(prologue->dispatch_id_prologue->preload.system_sgpr_shift, 0u);
 
@@ -1356,7 +1356,7 @@ TEST(ConSanMoi, Gfx1100FullVgprRecordReplayUsesPersistentScalarState) {
   ASSERT_TRUE(prologue->dispatch_id_prologue);
   EXPECT_EQ(prologue->dispatch_id_prologue->capture.sgpr(), test_moi_dispatch_id_sgpr(result));
   EXPECT_FALSE(prologue->dispatch_id_prologue->capture.vgpr());
-  EXPECT_EQ(prologue->dispatch_id_prologue->preload.dispatch_id_sgpr, 2u);
+  EXPECT_EQ(prologue->dispatch_id_prologue->preload.dispatch_id_sgpr, 4u);
 }
 
 TEST(ConSanMoi, Gfx1100RecordReplayRouteKeyDoesNotAliasPersistentEpoch) {
@@ -10148,8 +10148,14 @@ TEST(ConSanMoi, Gfx1250PrivateEpochBarrierPreservesGuestVgprMsbMode) {
       text_words_at_offset(patched, barrier->trampoline_offset, barrier->trampoline_size);
   const auto hwreg = build_hwreg_imm(amdgpu::MODE_HWREG, amdgpu::VGPR_MSB_MODE_SHIFT, 8u);
   ASSERT_TRUE(hwreg);
-  const uint16_t bank_save_sgpr = static_cast<uint16_t>(
-      test_moi_transient_sgpr_assignments(result).front().exec_save_sgpr + 5u);
+  ASSERT_TRUE(test_moi_exec_save_sgpr(result));
+  ASSERT_LE(test_moi_transient_sgpr_assignments(result).size(), 1u);
+  const uint16_t exec_save_sgpr = test_moi_transient_sgpr_assignments(result).empty()
+                                      ? *test_moi_exec_save_sgpr(result)
+                                      : test_moi_transient_sgpr_assignments(result)
+                                            .front()
+                                            .exec_save_sgpr;
+  const uint16_t bank_save_sgpr = static_cast<uint16_t>(exec_save_sgpr + 5u);
   const auto save =
       instrumentation::build_s_getreg_b32(bank_save_sgpr, *hwreg, ROCJITSU_CODE_ARCH_CDNA5);
   const auto restore =

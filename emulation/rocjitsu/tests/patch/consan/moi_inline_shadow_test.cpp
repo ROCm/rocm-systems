@@ -591,13 +591,13 @@ TEST(ConSanMoi, Cdna4InlineShadowRecoversFullWindowKernargPreloadTail) {
       result.patches, ConSanPatchKind::KernelEntryMoiOwnerEpochPrologue, &ConSanPatchInfo::kind);
   ASSERT_NE(prologue, result.patches.end());
   ASSERT_TRUE(prologue->dispatch_id_prologue);
-  EXPECT_EQ(prologue->dispatch_id_prologue->preload.dispatch_id_sgpr, 2u);
+  EXPECT_EQ(prologue->dispatch_id_prologue->preload.dispatch_id_sgpr, 4u);
   EXPECT_EQ(prologue->dispatch_id_prologue->preload.original_user_sgpr_count, 15u);
   EXPECT_EQ(prologue->dispatch_id_prologue->preload.expanded_user_sgpr_count, 16u);
-  EXPECT_EQ(prologue->dispatch_id_prologue->preload.kernarg_reload_sgpr, 14u);
-  EXPECT_EQ(prologue->dispatch_id_prologue->preload.kernarg_reload_base_sgpr, 0u);
-  EXPECT_EQ(prologue->dispatch_id_prologue->preload.kernarg_reload_offset_dwords, 15u);
-  EXPECT_EQ(prologue->dispatch_id_prologue->preload.kernarg_reload_count, 1u);
+  EXPECT_EQ(prologue->dispatch_id_prologue->preload.kernarg_reload_sgpr, 12u);
+  EXPECT_EQ(prologue->dispatch_id_prologue->preload.kernarg_reload_base_sgpr, 2u);
+  EXPECT_EQ(prologue->dispatch_id_prologue->preload.kernarg_reload_offset_dwords, 13u);
+  EXPECT_EQ(prologue->dispatch_id_prologue->preload.kernarg_reload_count, 3u);
   EXPECT_EQ(prologue->dispatch_id_prologue->preload.shifted_system_sgpr_count, 1u);
   EXPECT_EQ(prologue->dispatch_id_prologue->preload.system_sgpr_shift, 1u);
 
@@ -612,7 +612,7 @@ TEST(ConSanMoi, Cdna4InlineShadowRecoversFullWindowKernargPreloadTail) {
   EXPECT_EQ(AMDHSA_BITS_GET(descriptor.kernel_code_properties,
                             kd::KERNEL_CODE_PROPERTY_ENABLE_SGPR_DISPATCH_ID),
             1u);
-  EXPECT_EQ(AMDHSA_BITS_GET(descriptor.kernarg_preload, kd::KERNARG_PRELOAD_SPEC_LENGTH), 12u);
+  EXPECT_EQ(AMDHSA_BITS_GET(descriptor.kernarg_preload, kd::KERNARG_PRELOAD_SPEC_LENGTH), 10u);
   EXPECT_EQ(AMDHSA_BITS_GET(descriptor.kernarg_preload, kd::KERNARG_PRELOAD_SPEC_OFFSET), 3u);
 }
 
@@ -652,13 +652,13 @@ TEST(ConSanMoi, Cdna3InlineShadowRecoversFullWindowKernargPreloadTail) {
       result.patches, ConSanPatchKind::KernelEntryMoiOwnerEpochPrologue, &ConSanPatchInfo::kind);
   ASSERT_NE(prologue, result.patches.end());
   ASSERT_TRUE(prologue->dispatch_id_prologue);
-  EXPECT_EQ(prologue->dispatch_id_prologue->preload.dispatch_id_sgpr, 2u);
+  EXPECT_EQ(prologue->dispatch_id_prologue->preload.dispatch_id_sgpr, 4u);
   EXPECT_EQ(prologue->dispatch_id_prologue->preload.original_user_sgpr_count, 15u);
   EXPECT_EQ(prologue->dispatch_id_prologue->preload.expanded_user_sgpr_count, 16u);
-  EXPECT_EQ(prologue->dispatch_id_prologue->preload.kernarg_reload_sgpr, 14u);
-  EXPECT_EQ(prologue->dispatch_id_prologue->preload.kernarg_reload_base_sgpr, 0u);
-  EXPECT_EQ(prologue->dispatch_id_prologue->preload.kernarg_reload_offset_dwords, 15u);
-  EXPECT_EQ(prologue->dispatch_id_prologue->preload.kernarg_reload_count, 1u);
+  EXPECT_EQ(prologue->dispatch_id_prologue->preload.kernarg_reload_sgpr, 12u);
+  EXPECT_EQ(prologue->dispatch_id_prologue->preload.kernarg_reload_base_sgpr, 2u);
+  EXPECT_EQ(prologue->dispatch_id_prologue->preload.kernarg_reload_offset_dwords, 13u);
+  EXPECT_EQ(prologue->dispatch_id_prologue->preload.kernarg_reload_count, 3u);
   EXPECT_EQ(prologue->dispatch_id_prologue->preload.shifted_system_sgpr_count, 1u);
   EXPECT_EQ(prologue->dispatch_id_prologue->preload.system_sgpr_shift, 1u);
 
@@ -673,7 +673,7 @@ TEST(ConSanMoi, Cdna3InlineShadowRecoversFullWindowKernargPreloadTail) {
   EXPECT_EQ(AMDHSA_BITS_GET(descriptor.kernel_code_properties,
                             kd::KERNEL_CODE_PROPERTY_ENABLE_SGPR_DISPATCH_ID),
             1u);
-  EXPECT_EQ(AMDHSA_BITS_GET(descriptor.kernarg_preload, kd::KERNARG_PRELOAD_SPEC_LENGTH), 12u);
+  EXPECT_EQ(AMDHSA_BITS_GET(descriptor.kernarg_preload, kd::KERNARG_PRELOAD_SPEC_LENGTH), 10u);
   EXPECT_EQ(AMDHSA_BITS_GET(descriptor.kernarg_preload, kd::KERNARG_PRELOAD_SPEC_OFFSET), 3u);
 }
 
@@ -1759,6 +1759,8 @@ TEST(ConSanMoi, CdnaInlineEntryOwnerBackupReusesOrdinaryVgprBelowAccumulatorBoun
       AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc3, kd::COMPUTE_PGM_RSRC3_GFX90A_ACCUM_OFFSET, 7u);
       // Keep the borrowed owner scratch in the initialized entry window so
       // this test exercises its ordinary-VGPR backup carrier.
+      AMDHSA_BITS_SET(descriptor.kernel_code_properties,
+                      kd::KERNEL_CODE_PROPERTY_ENABLE_SGPR_KERNARG_SEGMENT_PTR, 1u);
       AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc2, kd::COMPUTE_PGM_RSRC2_USER_SGPR_COUNT, 8u);
     });
     append_kernel_metadata_note(bytes, kKernelName, /*uses_dynamic_stack=*/false,
@@ -1800,6 +1802,29 @@ TEST(ConSanMoi, CdnaInlineEntryOwnerBackupReusesOrdinaryVgprBelowAccumulatorBoun
     EXPECT_EQ(
         AMDHSA_BITS_GET(descriptor.compute_pgm_rsrc3, kd::COMPUTE_PGM_RSRC3_GFX90A_ACCUM_OFFSET),
         7u);
+    ASSERT_TRUE(prologue->dispatch_id_prologue);
+    const auto &preload = prologue->dispatch_id_prologue->preload;
+    ASSERT_GT(preload.guest_restore_count, 0u);
+    const auto dependency_delay = instrumentation::build_salu_dependency_delay(arch);
+    ASSERT_TRUE(dependency_delay);
+    std::vector<uint32_t> guest_restore;
+    for (uint16_t index = 0u; index < preload.guest_restore_count; ++index) {
+      guest_restore.push_back(build_s_mov_b32(preload.guest_restore_destinations[index],
+                                              preload.guest_restore_sources[index], arch));
+      guest_restore.push_back(*dependency_delay);
+    }
+    const auto first_save = instrumentation::build_v_writelane_b32(
+        prologue->entry_scalar_backup->vgpr, prologue->entry_scalar_backup->sgpr_base,
+        /*lane=*/0u, arch);
+    ASSERT_TRUE(first_save);
+    const std::vector<uint32_t> prologue_words =
+        text_words_at_offset(patched, prologue->trampoline_offset, prologue->trampoline_size);
+    const auto repair_position = std::ranges::search(prologue_words, guest_restore).begin();
+    const auto save_position = std::ranges::search(prologue_words, *first_save).begin();
+    ASSERT_NE(repair_position, prologue_words.end());
+    ASSERT_NE(save_position, prologue_words.end());
+    EXPECT_LT(repair_position, save_position)
+        << "the scalar backup must capture the repaired guest ABI, not inserted preloads";
     EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
   }
 }

@@ -331,6 +331,13 @@ TEST(ConSanMoiModePlanning, EachEngineOwnsItsDispatchIdentityPolicy) {
   EXPECT_TRUE(plan.fallback_replans_dispatch_only);
   EXPECT_FALSE(plan_moi_dispatch_identity(request, {.access_reports_need_explicit_identity = false})
                    .needs_dispatch_id);
+  request.moi_runtime_sample_stride = 1u;
+  EXPECT_TRUE(plan_moi_dispatch_identity(request, {.access_reports_need_explicit_identity = true,
+                                                   .has_access_or_atomic_consumer = true})
+                  .needs_dispatch_id);
+  EXPECT_FALSE(plan_moi_dispatch_identity(request, {.access_reports_need_explicit_identity = true,
+                                                    .has_access_or_atomic_consumer = false})
+                   .needs_dispatch_id);
 
   request.moi_engine = ConSanMoiEngine::InlineShadow;
   plan = plan_moi_dispatch_identity(request, {.has_access_or_atomic_consumer = true});

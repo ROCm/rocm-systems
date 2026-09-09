@@ -343,11 +343,24 @@ TEST(ConSanMoi, DirectSampledProbeWritesPackedWatchpointEntry) {
                               make_expected_literal_offset_store_words(
                                   offsetof(ConSanMoiSampledCausalWindow, first_entry), 0u, 8, 12)),
             1u);
+  ASSERT_TRUE(test_moi_dispatch_id_sgpr(result));
+  const uint16_t dispatch_sgpr = *test_moi_dispatch_id_sgpr(result);
+  const auto expect_dispatch_store = [&](uint32_t offset, uint16_t source_sgpr) {
+    std::vector<uint32_t> expected{
+        build_v_mov_b32_e32(/*vdst=*/12u, source_sgpr, ROCJITSU_CODE_ARCH_RDNA4)};
+    const std::vector<uint32_t> store =
+        make_expected_offset_store_words(offset, /*value_vgpr=*/12u, /*address_vgpr=*/8u);
+    expected.insert(expected.end(), store.begin(), store.end());
+    EXPECT_TRUE(contains_subsequence(rewritten_words, expected));
+  };
+  expect_dispatch_store(offsetof(ConSanMoiSampledCausalWindow, dispatch_id), dispatch_sgpr);
+  expect_dispatch_store(offsetof(ConSanMoiSampledCausalWindow, dispatch_id) + sizeof(uint32_t),
+                        static_cast<uint16_t>(dispatch_sgpr + 1u));
   EXPECT_EQ(
       count_subsequence(rewritten_words, make_expected_literal_offset_store_words(
                                              offsetof(ConSanMoiSampledCausalWindow, dispatch_id),
                                              0x55667788u, 8, 12)),
-      1u);
+      0u);
   const auto window_counter = build_flat_atomic_add_u32_vaddr_vsrc_vdst(
       /*vaddr=*/8, /*vsrc=*/12, /*vdst=*/12, /*return_old_value=*/true,
       /*scope=*/2, ROCJITSU_CODE_ARCH_RDNA4);
@@ -834,8 +847,7 @@ TEST(ConSanMoi, Cdna4DirectSampledProbeEmitsNativePublicationRecipes) {
   ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
   EXPECT_TRUE(test_moi_exact_workgroup_vgprs(result).complete());
   EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
-  EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
-  EXPECT_FALSE(test_moi_dispatch_id_sgpr(result));
+  ASSERT_TRUE(test_moi_dispatch_id_sgpr(result));
   const auto access = std::ranges::find(
       result.patches, ConSanPatchKind::TrampolineMoiSampledWatchpointStore, &ConSanPatchInfo::kind);
   ASSERT_NE(access, result.patches.end());
@@ -862,14 +874,13 @@ TEST(ConSanMoi, Cdna4DirectSampledProbeEmitsNativePublicationRecipes) {
   for (const bool high_word : {false, true}) {
     SCOPED_TRACE(high_word ? "dispatch high word" : "dispatch low word");
     const uint16_t value_vgpr = static_cast<uint16_t>(*options.scratch_vgpr + 4u);
-    const uint32_t literal = high_word
-                                 ? static_cast<uint32_t>(options.moi_report_dispatch_id >> 32u)
-                                 : static_cast<uint32_t>(options.moi_report_dispatch_id);
-    const auto materialize =
-        instrumentation::build_v_mov_b32_literal(value_vgpr, literal, ROCJITSU_CODE_ARCH_CDNA4);
-    ASSERT_TRUE(materialize);
-    EXPECT_TRUE(contains_subsequence(rewritten_words, *materialize))
-        << "expected=" << testing::PrintToString(*materialize)
+    const uint16_t source_sgpr = static_cast<uint16_t>(
+        *test_moi_dispatch_id_sgpr(result) + (high_word ? 1u : 0u));
+    const uint32_t materialize =
+        build_v_mov_b32_e32(value_vgpr, source_sgpr, ROCJITSU_CODE_ARCH_CDNA4);
+    EXPECT_NE(std::find(rewritten_words.begin(), rewritten_words.end(), materialize),
+              rewritten_words.end())
+        << "expected=" << materialize
         << " words=" << testing::PrintToString(rewritten_words);
   }
   EXPECT_GE(std::count(rewritten_words.begin(), rewritten_words.end(), 0xbf8c0f70u), 1);
@@ -3942,12 +3953,16 @@ TEST(ConSanMoi, CdnaStrideOnePrivateStateMirrorsKernargPreloadEntry) {
         << "warnings=" << testing::PrintToString(result.warnings)
         << " errors=" << testing::PrintToString(result.errors);
     ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
-    EXPECT_FALSE(test_moi_dispatch_id_sgpr(result));
+    ASSERT_TRUE(test_moi_dispatch_id_sgpr(result));
     EXPECT_FALSE(test_moi_dispatch_id_vgpr(result));
     const auto prologue =
         std::ranges::find(result.patches, ConSanPatchKind::KernelEntryMoiPrivateEpochPrologue,
                           &ConSanPatchInfo::kind);
     ASSERT_NE(prologue, result.patches.end());
+    ASSERT_TRUE(prologue->dispatch_id_prologue);
+    EXPECT_EQ(prologue->dispatch_id_prologue->capture.sgpr(),
+              test_moi_dispatch_id_sgpr(result));
+    EXPECT_TRUE(prologue->dispatch_id_prologue->preload.identity_salt_sgpr.has_value());
     ASSERT_TRUE(prologue->dispatch_id_primary_prologue_offset);
     ASSERT_TRUE(prologue->dispatch_id_secondary_prologue_offset);
 
@@ -4019,11 +4034,15 @@ TEST(ConSanMoi, CdnaStrideOneDynamicStackRedirectsBothKernargPreloadEntries) {
         << "warnings=" << testing::PrintToString(result.warnings)
         << " errors=" << testing::PrintToString(result.errors);
     ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
-    EXPECT_FALSE(test_moi_dispatch_id_sgpr(result));
+    ASSERT_TRUE(test_moi_dispatch_id_sgpr(result));
     EXPECT_FALSE(test_moi_dispatch_id_vgpr(result));
     const auto prologue = std::ranges::find(
         result.patches, ConSanPatchKind::KernelEntryMoiOwnerEpochPrologue, &ConSanPatchInfo::kind);
     ASSERT_NE(prologue, result.patches.end());
+    ASSERT_TRUE(prologue->dispatch_id_prologue);
+    EXPECT_EQ(prologue->dispatch_id_prologue->capture.sgpr(),
+              test_moi_dispatch_id_sgpr(result));
+    EXPECT_TRUE(prologue->dispatch_id_prologue->preload.identity_salt_sgpr.has_value());
     EXPECT_EQ(prologue->anchor_offset, original_entry);
     EXPECT_EQ(prologue->original_size, 0u);
     ASSERT_TRUE(prologue->dispatch_id_primary_prologue_offset);

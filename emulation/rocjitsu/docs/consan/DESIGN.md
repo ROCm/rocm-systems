@@ -275,9 +275,14 @@ The host reconstructs owner/epoch/order relationships and evaluates conflicts
 with the mode-owned shadow model. Its event history makes it the most
 inspectable engine.
 
-The ordinary report is not exhaustive. It uses exact dispatch,
-three-dimensional workgroup, wave-owner, and static-site identity, with
-explicit saturation when bounded hash probing cannot retain a new identity.
+The ordinary report is not exhaustive. It uses a validated 64-bit launch
+fingerprint plus exact three-dimensional workgroup, wave-owner, and static-site
+identity, with explicit saturation when bounded hash probing cannot retain a
+new identity. On targets whose AMDHSA dispatch ID is queue-local, the launch
+fingerprint includes both the queue pointer and absolute queue-local dispatch
+ID. That compact fingerprint is not an injective encoding of the full pair;
+its collision and queue-address-lifetime limits are documented in
+[VALIDATION.md](VALIDATION.md).
 Optional dynamic access append is also finite. Complete static instrumentation
 does not imply that every dynamic event survived.
 
@@ -296,6 +301,12 @@ apply a per-cell selector, and all eligible static sites stay represented.
 Sampling reduces dynamic evidence work; it does not reduce analysis, patching,
 or report planning in proportion to stride, and no proportional-overhead
 guarantee is made.
+
+Sampled owns a literal dispatch-identity fallback for scalar-pressure operating
+points. That fallback is intentionally weaker than the hardware launch
+fingerprint and cannot establish exact separation across concurrent launches;
+common placement and runtime trust preserve rather than conceal that mode
+choice.
 
 ### MOI Inline Shadow
 

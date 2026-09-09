@@ -155,7 +155,8 @@ endfunction()
 # properties here prevents the live-GPU matrix from drifting as cases are
 # added. ENVIRONMENT is a list of KEY=VALUE entries. Every instrumented case
 # supplies an environment; loading the hook enables ConSan, and the mode
-# selects the analysis.
+# selects the analysis. PASS_REGEX is the primary checked-output contract;
+# every ALSO_PASS_REGEX expression is an additional conjunctive requirement.
 function(rj_add_consan_hip_case)
     set(_options RUN_SERIAL)
     set(_one_value_args
@@ -169,7 +170,7 @@ function(rj_add_consan_hip_case)
         EXPECTED_EXIT
         RESOURCE_LOCK
     )
-    set(_multi_value_args ENVIRONMENT LABELS)
+    set(_multi_value_args ALSO_PASS_REGEX ENVIRONMENT LABELS)
     cmake_parse_arguments(
         PARSE_ARGV
         0
@@ -298,6 +299,12 @@ function(rj_add_consan_hip_case)
         )
     endif()
 
+    if(_case_ALSO_PASS_REGEX AND NOT _case_PASS_REGEX)
+        message(
+            FATAL_ERROR
+            "ConSan HIP case ${_case_NAME} supplies ALSO_PASS_REGEX without PASS_REGEX"
+        )
+    endif()
     if(_case_PASS_REGEX)
         # CMake list elements cannot safely carry every regex spelling (for
         # example, an element ending in an escaped parenthesis can absorb the
@@ -310,6 +317,27 @@ function(rj_add_consan_hip_case)
         file(WRITE "${_case_pass_regex_file}" "${_case_PASS_REGEX}")
         set(_case_checked_args
             "-DRJ_EXPECTED_REGEX_FILE=${_case_pass_regex_file}"
+        )
+        set(_additional_regex_index 0)
+        foreach(_additional_regex IN LISTS _case_ALSO_PASS_REGEX)
+            string(
+                MD5 _additional_regex_id
+                "${_case_NAME}|${_additional_regex_index}|${_additional_regex}"
+            )
+            set(
+                _additional_regex_file
+                "${CMAKE_CURRENT_BINARY_DIR}/consan-expected-${_additional_regex_id}.txt"
+            )
+            file(WRITE "${_additional_regex_file}" "${_additional_regex}")
+            list(
+                APPEND _case_checked_args
+                "-DRJ_ADDITIONAL_EXPECTED_REGEX_FILE_${_additional_regex_index}=${_additional_regex_file}"
+            )
+            math(EXPR _additional_regex_index "${_additional_regex_index} + 1")
+        endforeach()
+        list(
+            APPEND _case_checked_args
+            "-DRJ_ADDITIONAL_EXPECTED_REGEX_COUNT=${_additional_regex_index}"
         )
         if(_case_EXPECTED_EXIT)
             list(
@@ -668,6 +696,7 @@ function(rj_add_consan_device_conformance_cases)
         list(
             APPEND _device_workloads
             "DispatchIdSgprPressure|dispatch_id_sgpr_pressure|ConSanDeviceDispatchIdSgprPressureTest|record-replay-only"
+            "TwoQueueDispatchIdentity|two_queue_dispatch_identity|ConSanDeviceTwoQueueDispatchIdentityTest|moi-only"
             "CdnaTransposePublication|cdna_transpose_publication|ConSanDeviceCdnaTransposePublicationTest"
             "Gfx950LargeLdsPipeline|gfx950_large_lds_pipeline|ConSanDeviceGfx950LargeLdsPipelineTest"
         )
@@ -874,6 +903,12 @@ function(rj_add_consan_device_conformance_cases)
                 )
                     continue()
                 endif()
+                if(
+                    _workload_feature STREQUAL "moi-only"
+                    AND _mode_value STREQUAL "supercollider"
+                )
+                    continue()
+                endif()
             endif()
 
             set(_common_environment
@@ -906,12 +941,109 @@ function(rj_add_consan_device_conformance_cases)
                         APPEND _incorrect_environment
                         "RJ_CONSAN_MOI_REQUIRE_REPLAY_CONFLICT=1"
                     )
-                else()
+                elseif(
+                    NOT (
+                        _mode_value STREQUAL "sampled"
+                        AND _workload_name STREQUAL "TwoQueueDispatchIdentity"
+                    )
+                )
                     list(
                         APPEND _incorrect_environment
                         "RJ_CONSAN_MOI_REQUIRE_DIAGNOSTICS=1"
                     )
                 endif()
+            endif()
+
+            if(_workload_name STREQUAL "TwoQueueDispatchIdentity")
+                # The fixture itself asserts two distinct HSA queues, matching
+                # queue-local IDs in two rounds, and both reused and distinct
+                # kernarg allocations. Keep those launch preconditions visible
+                # in the CTest contract instead of relying on the test name.
+                list(
+                    APPEND _correct_pass_regex_args
+                    PASS_REGEX "raw_dispatch_ids=1,1 same_kernel=1 same_kernarg=0 round=1"
+                )
+                list(
+                    APPEND _incorrect_pass_regex_args
+                    PASS_REGEX "raw_dispatch_ids=1,1 same_kernel=1 same_kernarg=0 round=1"
+                )
+                if(_mode_value STREQUAL "record-replay")
+                    # Four submissions must remain four retained launch
+                    # identities. The former queue-blind path reported one.
+                    list(
+                        APPEND _correct_pass_regex_args
+                        ALSO_PASS_REGEX "dispatch_tokens=4/"
+                    )
+                    list(
+                        APPEND _incorrect_pass_regex_args
+                        ALSO_PASS_REGEX "dispatch_tokens=4/"
+                    )
+                endif()
+            endif()
+
+            # HIP does not expose its stream-to-HSA-queue mapping to this
+            # fixture. Keep the completed launch envelope observable without
+            # presenting streams as queue evidence. Record/Replay can also
+            # prove how many distinct retained launch fingerprints it saw.
+            set(_hip_launch_count)
+            if(_workload_name STREQUAL "RepeatedDispatchIdentity")
+                set(_hip_launch_count 8)
+            elseif(_workload_name STREQUAL "GraphReplay")
+                set(_hip_launch_count 6)
+            elseif(_workload_name STREQUAL "GraphParameterUpdate")
+                set(_hip_launch_count 2)
+            endif()
+            if(_hip_launch_count)
+                set(
+                    _hip_integration_regex
+                    "CONSAN_HIP_INTEGRATION workload=${_workload_target} completed_launches=${_hip_launch_count} underlying_hsa_queues=unobserved raw_dispatch_id_reuse=unobserved"
+                )
+                list(
+                    APPEND _correct_pass_regex_args
+                    PASS_REGEX "${_hip_integration_regex}"
+                )
+                list(
+                    APPEND _incorrect_pass_regex_args
+                    PASS_REGEX "${_hip_integration_regex}"
+                )
+                if(_mode_value STREQUAL "record-replay")
+                    list(
+                        APPEND _correct_pass_regex_args
+                        ALSO_PASS_REGEX "dispatch_tokens=${_hip_launch_count}/"
+                    )
+                    list(
+                        APPEND _incorrect_pass_regex_args
+                        ALSO_PASS_REGEX "dispatch_tokens=${_hip_launch_count}/"
+                    )
+                endif()
+            endif()
+
+            if(_workload_name STREQUAL "HistogramScatter")
+                # The behavioral oracle depends on the explicit native LDS
+                # publication helpers in this kernel. Require its normalized
+                # sites to survive compilation, admission, placement, and
+                # final validation instead of accepting an empty patch set
+                # from unrelated runtime kernels in the same object.
+                list(
+                    APPEND _correct_environment
+                    "RJ_CONSAN_TEST_KERNEL_FILTER=histogram_scatter_for_consan"
+                )
+                list(
+                    APPEND _incorrect_environment
+                    "RJ_CONSAN_TEST_KERNEL_FILTER=histogram_scatter_for_consan"
+                )
+                set(
+                    _histogram_coverage_regex
+                    "access_discovered=[1-9][0-9]* access_supported=[1-9][0-9]* access_selected=[1-9][0-9]* access_patched=[1-9][0-9]*"
+                )
+                list(
+                    APPEND _correct_pass_regex_args
+                    PASS_REGEX "${_histogram_coverage_regex}"
+                )
+                list(
+                    APPEND _incorrect_pass_regex_args
+                    PASS_REGEX "${_histogram_coverage_regex}"
+                )
             endif()
 
             if(_workload_field_count GREATER 3)
@@ -1685,6 +1817,79 @@ function(rj_add_consan_device_fixture_targets target)
         )
         add_dependencies(${_target}_target rocjitsu_dbi_hooks)
     endforeach()
+
+    if(target STREQUAL "gfx950")
+        set(_two_queue_kernel_source
+            "${CMAKE_CURRENT_SOURCE_DIR}/dbi/consan/device/gfx950_two_queue_dispatch_identity_kernels.hip"
+        )
+        set(_two_queue_hsaco
+            "${CMAKE_CURRENT_BINARY_DIR}/hip_consan_device_gfx950_two_queue_dispatch_identity.hsaco"
+        )
+        set(_two_queue_bundle
+            "${CMAKE_CURRENT_BINARY_DIR}/hip_consan_device_gfx950_two_queue_dispatch_identity.bundle"
+        )
+        find_program(
+            _two_queue_offload_bundler
+            clang-offload-bundler
+            REQUIRED
+            HINTS
+                "${ROCM_PATH}/lib/llvm/bin"
+                "${ROCM_PATH}/llvm/bin"
+                "${ROCM_PATH}/bin"
+        )
+        set(_two_queue_compiler_command ${AMDCXX})
+        if(CMAKE_HIP_COMPILER_LAUNCHER)
+            list(
+                PREPEND _two_queue_compiler_command
+                ${CMAKE_HIP_COMPILER_LAUNCHER}
+            )
+        endif()
+        add_custom_command(
+            OUTPUT "${_two_queue_bundle}"
+            COMMAND
+                ${_two_queue_compiler_command} -x hip --cuda-device-only
+                --offload-arch=gfx950 --rocm-path=${ROCM_PATH} -std=c++20 -O2
+                -o "${_two_queue_bundle}" "${_two_queue_kernel_source}"
+            DEPENDS "${_two_queue_kernel_source}"
+            COMMENT "Compiling gfx950 two-queue ConSan kernel bundle"
+            VERBATIM
+        )
+        add_custom_command(
+            OUTPUT "${_two_queue_hsaco}"
+            COMMAND
+                "${_two_queue_offload_bundler}" --type=o --unbundle
+                --targets=hipv4-amdgcn-amd-amdhsa--gfx950
+                --input=${_two_queue_bundle} --output=${_two_queue_hsaco}
+            DEPENDS "${_two_queue_bundle}"
+            COMMENT "Extracting gfx950 two-queue ConSan code object"
+            VERBATIM
+        )
+        add_custom_target(
+            hip_consan_device_gfx950_two_queue_dispatch_identity_kernels_target
+            ALL
+            DEPENDS "${_two_queue_hsaco}"
+        )
+        rj_add_hip_test(
+            hip_consan_device_two_queue_dispatch_identity_gfx950_test
+            ARCH gfx950
+            SOURCE dbi/consan/device/gfx950_two_queue_dispatch_identity_test.cpp
+            COMPILE_DEFINITIONS
+                "RJ_CONSAN_GFX950_TWO_QUEUE_HSACO=\"${_two_queue_hsaco}\""
+            EXTRA_DEPENDS "${_two_queue_hsaco}"
+            EXTRA_LIBS -lhsa-runtime64
+        )
+        add_dependencies(
+            hip_consan_device_two_queue_dispatch_identity_gfx950_test_target
+            hip_consan_device_gfx950_two_queue_dispatch_identity_kernels_target
+            rocjitsu_dbi_hooks
+        )
+        if(RJ_INSTALL_TESTS)
+            install(
+                FILES "${_two_queue_hsaco}"
+                DESTINATION "${RJ_INSTALL_TEST_BIN_DIR}"
+            )
+        endif()
+    endif()
 
     if(target STREQUAL "gfx1250")
         set(_cluster_kernel_source

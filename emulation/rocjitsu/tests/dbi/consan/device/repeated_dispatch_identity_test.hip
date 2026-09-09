@@ -9,6 +9,7 @@
 #include "consan_device_test_support.h"
 
 #include <array>
+#include <cstdio>
 
 namespace {
 
@@ -76,6 +77,11 @@ void run_repeated_dispatch_identity(bool synchronize) {
     if (synchronize)
       EXPECT_EQ(result[dispatch].observed, 0xd1500000u | dispatch) << "dispatch=" << dispatch;
   }
+
+  std::printf("CONSAN_HIP_INTEGRATION workload=repeated_dispatch_identity "
+              "completed_launches=%u underlying_hsa_queues=unobserved "
+              "raw_dispatch_id_reuse=unobserved\n",
+              kDispatches);
 }
 
 TEST(ConSanDeviceRepeatedDispatchIdentityTest, Correct) { run_repeated_dispatch_identity(true); }

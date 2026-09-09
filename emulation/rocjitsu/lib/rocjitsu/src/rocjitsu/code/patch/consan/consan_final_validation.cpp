@@ -1474,18 +1474,47 @@ void validate_entry_scalar_backup_semantics(const FinalValidationEnvironment &en
           body_index + 1u < body_offsets.size() ? body_offsets[body_index + 1u] : patch_end;
       const uint64_t save_bytes = expected_save.size() * sizeof(uint32_t);
       if (body_offset < patch.trampoline_offset || body_offset > body_end || body_end > patch_end ||
-          patch_end > replacement_text.size() || save_bytes > body_end - body_offset ||
-          std::memcmp(replacement_text.data() + body_offset, expected_save.data(), save_bytes) !=
-              0) {
+          patch_end > replacement_text.size() || save_bytes > body_end - body_offset) {
         errors.emplace_back("ConSan final validation found an invalid entry scalar backup save");
         continue;
       }
       const auto body_words = std::span<const uint32_t>(
           reinterpret_cast<const uint32_t *>(replacement_text.data() + body_offset),
           static_cast<size_t>((body_end - body_offset) / sizeof(uint32_t)));
-      if (std::search(body_words.begin() + static_cast<ptrdiff_t>(expected_save.size()),
-                      body_words.end(), expected_restore.begin(),
-                      expected_restore.end()) == body_words.end()) {
+      const auto save = std::search(body_words.begin(), body_words.end(), expected_save.begin(),
+                                    expected_save.end());
+      if (save == body_words.end()) {
+        errors.emplace_back("ConSan final validation found an invalid entry scalar backup save");
+        continue;
+      }
+      // If descriptor surgery moved guest inputs, the backup must capture the
+      // repaired guest ABI, not the replacement preload layout.  The dispatch
+      // validator independently proves that this exact restore is attached to
+      // the launch-identity capture; here we prove it precedes the save.
+      if (patch.dispatch_id_prologue &&
+          patch.dispatch_id_prologue->preload.guest_restore_count != 0u) {
+        const auto &preload = patch.dispatch_id_prologue->preload;
+        const auto dependency_delay = instrumentation::build_salu_dependency_delay(arch);
+        std::vector<uint32_t> guest_restore;
+        if (dependency_delay) {
+          for (uint16_t index = 0; index < preload.guest_restore_count; ++index) {
+            guest_restore.push_back(build_s_mov_b32(preload.guest_restore_destinations[index],
+                                                    preload.guest_restore_sources[index], arch));
+            guest_restore.push_back(*dependency_delay);
+          }
+        }
+        const auto repair =
+            guest_restore.empty()
+                ? body_words.end()
+                : std::search(body_words.begin(), save, guest_restore.begin(), guest_restore.end());
+        if (repair == save) {
+          errors.emplace_back(
+              "ConSan final validation found an entry scalar backup before guest ABI repair");
+          continue;
+        }
+      }
+      if (std::search(save + static_cast<ptrdiff_t>(expected_save.size()), body_words.end(),
+                      expected_restore.begin(), expected_restore.end()) == body_words.end()) {
         errors.emplace_back("ConSan final validation found an invalid entry scalar backup restore");
       }
     }
@@ -1521,21 +1550,20 @@ void validate_dispatch_id_prologue_semantics(const FinalValidationEnvironment &e
     }
     const uint32_t guest_input_count =
         static_cast<uint32_t>(preload.original_user_sgpr_count) + preload.system_sgpr_count;
-    if (preload.descriptor_change_required() && preload.dispatch_id_sgpr > guest_input_count) {
+    const bool invalid_restore =
+        preload.guest_restore_count > preload.guest_restore_sources.size() ||
+        std::ranges::any_of(
+            std::views::iota(uint16_t{0}, preload.guest_restore_count), [&](uint16_t index) {
+              return preload.guest_restore_destinations[index] >= guest_input_count ||
+                     preload.guest_restore_sources[index] >= preload.required_sgpr_count;
+            });
+    if (preload.descriptor_change_required() && invalid_restore) {
       errors.emplace_back(
           "ConSan final validation found invalid dispatch-ID restore bounds for kernel '" +
           std::string(kernel_name) + "'");
       return;
     }
-    uint32_t restore_count =
-        preload.descriptor_change_required() ? preload.shifted_guest_sgpr_count : 0u;
-    if (has_semantic_system_sgpr_restore) {
-      const uint32_t user_restore_capacity =
-          preload.original_user_sgpr_count > preload.dispatch_id_sgpr
-              ? preload.original_user_sgpr_count - preload.dispatch_id_sgpr
-              : 0u;
-      restore_count = std::min(restore_count, user_restore_capacity);
-    }
+    const uint32_t restore_count = preload.guest_restore_count;
     const uint32_t system_restore_count =
         has_semantic_system_sgpr_restore ? 0u : preload.shifted_system_sgpr_count;
     const uint64_t reload_words =
@@ -1555,6 +1583,17 @@ void validate_dispatch_id_prologue_semantics(const FinalValidationEnvironment &e
       append_salu(build_s_mov_b32(persistent, preload.dispatch_id_sgpr, arch));
       append_salu(build_s_mov_b32(static_cast<uint16_t>(persistent + 1u),
                                   static_cast<uint16_t>(preload.dispatch_id_sgpr + 1u), arch));
+      if (preload.identity_salt_sgpr) {
+        const auto mix = instrumentation::build_s_xor_b64(
+            persistent, persistent, *preload.identity_salt_sgpr, arch);
+        if (!mix) {
+          errors.emplace_back(
+              "ConSan final validation cannot encode the dispatch-ID identity mix for kernel '" +
+              std::string(kernel_name) + "'");
+          return;
+        }
+        append_salu(*mix);
+      }
       append_salu(build_s_add_u32(persistent, persistent, scalar_positive_inline_u32(1), arch));
       append_salu(build_s_addc_u32(static_cast<uint16_t>(persistent + 1u),
                                    static_cast<uint16_t>(persistent + 1u),
@@ -1565,6 +1604,22 @@ void validate_dispatch_id_prologue_semantics(const FinalValidationEnvironment &e
       capture_prefix.push_back(
           build_v_mov_b32_e32(static_cast<uint16_t>(persistent + 1u),
                               static_cast<uint16_t>(preload.dispatch_id_sgpr + 1u), arch));
+      if (preload.identity_salt_sgpr) {
+        const auto mix_low = instrumentation::build_v_xor_b32(
+            persistent, *preload.identity_salt_sgpr, persistent, arch);
+        const auto mix_high = instrumentation::build_v_xor_b32(
+            static_cast<uint16_t>(persistent + 1u),
+            static_cast<uint16_t>(*preload.identity_salt_sgpr + 1u),
+            static_cast<uint16_t>(persistent + 1u), arch);
+        if (!mix_low || !mix_high) {
+          errors.emplace_back(
+              "ConSan final validation cannot encode the dispatch-ID identity mix for kernel '" +
+              std::string(kernel_name) + "'");
+          return;
+        }
+        capture_prefix.push_back(*mix_low);
+        capture_prefix.push_back(*mix_high);
+      }
       const auto successor = instrumentation::build_v_add_u64_literal(persistent, 1u, arch);
       if (!successor) {
         errors.emplace_back(
@@ -1574,8 +1629,6 @@ void validate_dispatch_id_prologue_semantics(const FinalValidationEnvironment &e
       }
       capture_prefix.insert(capture_prefix.end(), successor->begin(), successor->end());
     }
-    const uint64_t scalar_backup_prefix_words =
-        patch.entry_scalar_backup ? 2u * patch.entry_scalar_backup->sgpr_count : 0u;
     const uint64_t patch_end = patch.trampoline_offset + patch.trampoline_size;
     if (entry_offset > patch_end || patch_end > replacement_text.size() ||
         (patch_end - entry_offset) % sizeof(uint32_t) != 0) {
@@ -1589,13 +1642,6 @@ void validate_dispatch_id_prologue_semantics(const FinalValidationEnvironment &e
     const auto entry_words = std::span<const uint32_t>(
         reinterpret_cast<const uint32_t *>(replacement_text.data() + entry_offset),
         static_cast<size_t>((patch_end - entry_offset) / sizeof(uint32_t)));
-    if (scalar_backup_prefix_words > entry_words.size()) {
-      errors.emplace_back(
-          "ConSan final validation found a truncated dispatch-ID entry prologue for kernel '" +
-          std::string(kernel_name) + "' (entry words=" + std::to_string(entry_words.size()) +
-          ", scalar backup words=" + std::to_string(scalar_backup_prefix_words) + ")");
-      return;
-    }
     std::vector<uint32_t> restore_words;
     restore_words.reserve(2u * (restore_count + system_restore_count));
     const auto append_restore = [&](uint16_t destination, uint16_t source) {
@@ -1603,24 +1649,23 @@ void validate_dispatch_id_prologue_semantics(const FinalValidationEnvironment &e
       restore_words.push_back(*dependency_delay);
     };
     for (uint32_t i = 0; i < restore_count; ++i) {
-      const uint16_t destination = static_cast<uint16_t>(preload.dispatch_id_sgpr + i);
-      append_restore(destination, static_cast<uint16_t>(destination + 2u));
+      append_restore(preload.guest_restore_destinations[i], preload.guest_restore_sources[i]);
     }
     for (uint16_t i = 0; i < system_restore_count; ++i) {
       const uint16_t destination = static_cast<uint16_t>(preload.original_user_sgpr_count + i);
       append_restore(destination, static_cast<uint16_t>(destination + preload.system_sgpr_shift));
     }
     // Exact CDNA workgroup identity can be captured before dispatch preload
-    // repair, so the dispatch transaction is not necessarily the first
-    // semantic operation after an optional scalar backup. Match capture and
+    // repair, and an entry scalar backup follows the repair when descriptor
+    // surgery moved guest inputs. Match capture and
     // the immediately following ABI repair as one sequence: matching either
     // half independently is ambiguous in a large generated prologue because
     // unrelated instrumentation can encode the same individual moves.
     std::vector<uint32_t> dispatch_repair = std::move(capture_prefix);
     dispatch_repair.insert(dispatch_repair.end(), restore_words.begin(), restore_words.end());
     const auto repair =
-        std::search(entry_words.begin() + static_cast<ptrdiff_t>(scalar_backup_prefix_words),
-                    entry_words.end(), dispatch_repair.begin(), dispatch_repair.end());
+        std::search(entry_words.begin(), entry_words.end(), dispatch_repair.begin(),
+                    dispatch_repair.end());
     if (repair == entry_words.end()) {
       errors.emplace_back(
           "ConSan final validation found no complete dispatch-ID capture and restore in kernel '" +
@@ -1990,10 +2035,16 @@ void validate_resource_and_metadata_deltas(const FinalValidationEnvironment &env
       const bool replacement_dispatch =
           AMDHSA_BITS_GET(replacement_descriptor.kernel_code_properties,
                           kd::KERNEL_CODE_PROPERTY_ENABLE_SGPR_DISPATCH_ID) != 0;
-      const bool expected_original_dispatch = !preload.descriptor_change_required();
+      const bool original_queue =
+          AMDHSA_BITS_GET(original_descriptor.kernel_code_properties,
+                          kd::KERNEL_CODE_PROPERTY_ENABLE_SGPR_QUEUE_PTR) != 0;
+      const bool replacement_queue =
+          AMDHSA_BITS_GET(replacement_descriptor.kernel_code_properties,
+                          kd::KERNEL_CODE_PROPERTY_ENABLE_SGPR_QUEUE_PTR) != 0;
       if (original_user_count != preload.original_user_sgpr_count ||
           replacement_user_count != preload.expanded_user_sgpr_count ||
-          original_dispatch != expected_original_dispatch || !replacement_dispatch) {
+          original_dispatch != preload.dispatch_id_was_enabled || !replacement_dispatch ||
+          original_queue != preload.queue_ptr_was_enabled || !replacement_queue) {
         errors.emplace_back(
             "ConSan final validation found an invalid dispatch-ID preload descriptor delta for "
             "kernel '" +
@@ -2045,6 +2096,10 @@ void validate_resource_and_metadata_deltas(const FinalValidationEnvironment &env
                       kd::KERNEL_CODE_PROPERTY_ENABLE_SGPR_DISPATCH_ID,
                       AMDHSA_BITS_GET(original_descriptor.kernel_code_properties,
                                       kd::KERNEL_CODE_PROPERTY_ENABLE_SGPR_DISPATCH_ID));
+      AMDHSA_BITS_SET(normalized.kernel_code_properties,
+                      kd::KERNEL_CODE_PROPERTY_ENABLE_SGPR_QUEUE_PTR,
+                      AMDHSA_BITS_GET(original_descriptor.kernel_code_properties,
+                                      kd::KERNEL_CODE_PROPERTY_ENABLE_SGPR_QUEUE_PTR));
       if (preload.original_kernarg_preload_length != 0) {
         AMDHSA_BITS_SET(normalized.kernarg_preload, kd::KERNARG_PRELOAD_SPEC_LENGTH,
                         preload.original_kernarg_preload_length);

@@ -8,6 +8,8 @@
 
 #include "consan_device_test_support.h"
 
+#include <cstdio>
+
 namespace {
 
 constexpr uint32_t kStates = 3u;
@@ -122,6 +124,9 @@ void run_graph_parameter_update(bool synchronize) {
     if (synchronize)
       EXPECT_EQ(result.observed, markers[update] | 0x5au) << "update=" << update;
   }
+
+  std::printf("CONSAN_HIP_INTEGRATION workload=graph_parameter_update completed_launches=2 "
+              "underlying_hsa_queues=unobserved raw_dispatch_id_reuse=unobserved\n");
 
   HIP_ASSERT(hipGraphExecDestroy(executable));
   HIP_ASSERT(hipGraphDestroy(graph));

@@ -740,6 +740,7 @@ TEST(ConSanMoi, DispatchCaptureSelectsOnePersistentRepresentation) {
 TEST(ConSanMoi, DispatchPrologueEffectCombinesPreloadAndCaptureSgprRequirements) {
   ConSanMoiDispatchIdPrologueEffect effect{
       .preload = {.support = ConSanMoiDispatchIdPreloadSupport::SupportedInsert,
+                  .identity_salt_sgpr = std::nullopt,
                   .required_sgpr_count = 96u},
       .capture = ConSanMoiDispatchIdCapture::in_sgprs(40u),
   };
@@ -2871,9 +2872,12 @@ TEST(ConSanMoi, DispatchPreloadDescriptorPermutationsUseExactAmdhsaPrefix) {
     ASSERT_NE(prologue, result.patches.end());
     ASSERT_TRUE(prologue->dispatch_id_prologue);
     ASSERT_TRUE(prologue->dispatch_id_prologue->capture.sgpr());
-    EXPECT_EQ(prologue->dispatch_id_prologue->preload.dispatch_id_sgpr, prefix);
+    const uint16_t queue_insertion = (mask & 4u) != 0u ? 0u : 2u;
+    EXPECT_EQ(prologue->dispatch_id_prologue->preload.dispatch_id_sgpr,
+              prefix + queue_insertion);
     EXPECT_EQ(prologue->dispatch_id_prologue->preload.original_user_sgpr_count, prefix + 2u);
-    EXPECT_EQ(prologue->dispatch_id_prologue->preload.expanded_user_sgpr_count, prefix + 4u);
+    EXPECT_EQ(prologue->dispatch_id_prologue->preload.expanded_user_sgpr_count,
+              prefix + 4u + queue_insertion);
     EXPECT_EQ(prologue->dispatch_id_prologue->preload.system_sgpr_count, 2u);
     EXPECT_TRUE(prologue->dispatch_id_prologue->preload.descriptor_change_required());
 
@@ -2886,8 +2890,11 @@ TEST(ConSanMoi, DispatchPreloadDescriptorPermutationsUseExactAmdhsaPrefix) {
     EXPECT_EQ(AMDHSA_BITS_GET(descriptor.kernel_code_properties,
                               kd::KERNEL_CODE_PROPERTY_ENABLE_SGPR_DISPATCH_ID),
               1u);
+    EXPECT_EQ(AMDHSA_BITS_GET(descriptor.kernel_code_properties,
+                              kd::KERNEL_CODE_PROPERTY_ENABLE_SGPR_QUEUE_PTR),
+              1u);
     EXPECT_EQ(AMDHSA_BITS_GET(descriptor.compute_pgm_rsrc2, kd::COMPUTE_PGM_RSRC2_USER_SGPR_COUNT),
-              prefix + 4u);
+              prefix + 4u + queue_insertion);
   }
 }
 
@@ -2978,13 +2985,20 @@ TEST(ConSanMoi, DispatchPrologueCapturesBeforeAscendingRestoreAtBothKernargEntri
     const uint16_t persistent = *prologue.dispatch_id_prologue->capture.sgpr();
     expect_write(build_s_mov_b32(persistent, 10u, kArch));
     expect_write(build_s_mov_b32(static_cast<uint16_t>(persistent + 1u), 11u, kArch));
+    ASSERT_TRUE(prologue.dispatch_id_prologue->preload.identity_salt_sgpr);
+    const auto mix = instrumentation::build_s_xor_b64(
+        persistent, persistent, *prologue.dispatch_id_prologue->preload.identity_salt_sgpr,
+        kArch);
+    ASSERT_TRUE(mix);
+    expect_write(*mix);
     expect_write(build_s_add_u32(persistent, persistent, scalar_positive_inline_u32(1), kArch));
     expect_write(build_s_addc_u32(static_cast<uint16_t>(persistent + 1u),
                                   static_cast<uint16_t>(persistent + 1u),
                                   scalar_positive_inline_u32(0), kArch));
-    for (uint16_t destination = 10u; destination < 18u; ++destination) {
-      expect_write(build_s_mov_b32(destination, static_cast<uint16_t>(destination + 2u), kArch));
-    }
+    const auto &preload = prologue.dispatch_id_prologue->preload;
+    for (uint16_t i = 0u; i < preload.guest_restore_count; ++i)
+      expect_write(build_s_mov_b32(preload.guest_restore_destinations[i],
+                                   preload.guest_restore_sources[i], kArch));
   };
   ASSERT_TRUE(prologue.dispatch_id_primary_prologue_offset);
   ASSERT_TRUE(prologue.dispatch_id_secondary_prologue_offset);
@@ -3014,10 +3028,10 @@ TEST(ConSanMoi, AlreadyEnabledDispatchPreloadIsCapturedWithoutGuestShuffle) {
     return patch.dispatch_id_prologue && patch.dispatch_id_prologue->capture.sgpr();
   });
   ASSERT_NE(prologue, result.patches.end());
-  EXPECT_EQ(prologue->dispatch_id_prologue->preload.dispatch_id_sgpr, 2u);
+  EXPECT_EQ(prologue->dispatch_id_prologue->preload.dispatch_id_sgpr, 4u);
   EXPECT_EQ(prologue->dispatch_id_prologue->preload.original_user_sgpr_count, 4u);
-  EXPECT_EQ(prologue->dispatch_id_prologue->preload.expanded_user_sgpr_count, 4u);
-  EXPECT_FALSE(prologue->dispatch_id_prologue->preload.descriptor_change_required());
+  EXPECT_EQ(prologue->dispatch_id_prologue->preload.expanded_user_sgpr_count, 6u);
+  EXPECT_TRUE(prologue->dispatch_id_prologue->preload.descriptor_change_required());
 
   AmdGpuCodeObject patched(result.replacement.data(), result.replacement.size());
   ASSERT_TRUE(patched.is_valid());
@@ -3026,7 +3040,7 @@ TEST(ConSanMoi, AlreadyEnabledDispatchPreloadIsCapturedWithoutGuestShuffle) {
               result.replacement.data() + patched.kernels().front().descriptor_file_offset,
               sizeof(descriptor));
   EXPECT_EQ(AMDHSA_BITS_GET(descriptor.compute_pgm_rsrc2, kd::COMPUTE_PGM_RSRC2_USER_SGPR_COUNT),
-            4u);
+            6u);
   const std::vector<uint32_t> prologue_words =
       text_words_at_offset(patched, prologue->trampoline_offset, prologue->trampoline_size);
   ASSERT_TRUE(test_moi_exec_save_sgpr(result));
@@ -3036,6 +3050,40 @@ TEST(ConSanMoi, AlreadyEnabledDispatchPreloadIsCapturedWithoutGuestShuffle) {
       build_s_getreg_b32(*test_moi_exec_save_sgpr(result), *hwreg, ROCJITSU_CODE_ARCH_RDNA4);
   ASSERT_TRUE(owner_init);
   EXPECT_NE(std::ranges::find(prologue_words, *owner_init), prologue_words.end());
+}
+
+TEST(ConSanMoi, AlreadyEnabledQueueAndDispatchPreloadsReuseExactAbiPositions) {
+  std::vector<uint8_t> bytes = make_rdna4_supported_lds_code_object();
+  mutate_first_kernel_descriptor(bytes, [](KD &descriptor) {
+    AMDHSA_BITS_SET(descriptor.kernel_code_properties,
+                    kd::KERNEL_CODE_PROPERTY_ENABLE_SGPR_QUEUE_PTR, 1u);
+    AMDHSA_BITS_SET(descriptor.kernel_code_properties,
+                    kd::KERNEL_CODE_PROPERTY_ENABLE_SGPR_KERNARG_SEGMENT_PTR, 1u);
+    AMDHSA_BITS_SET(descriptor.kernel_code_properties,
+                    kd::KERNEL_CODE_PROPERTY_ENABLE_SGPR_DISPATCH_ID, 1u);
+    AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc2, kd::COMPUTE_PGM_RSRC2_USER_SGPR_COUNT, 6u);
+    AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc2,
+                    kd::COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_ID_X, 1u);
+  });
+  MoiOptions options = moi_options(ConSanMoiEngine::InlineShadow);
+  options.moi_report_buffer_address = 0x100000000ull;
+  options.moi_report_buffer_size = kInlineShadowFullLdsReportBufferSize;
+  const ConSanTransformArtifacts result = test_lower_consan(bytes, options);
+
+  ASSERT_TRUE(consan_patch_succeeded(result));
+  ASSERT_TRUE(result.modified());
+  const auto prologue = std::ranges::find_if(result.patches, [](const ConSanPatchInfo &patch) {
+    return patch.dispatch_id_prologue && patch.dispatch_id_prologue->capture.sgpr();
+  });
+  ASSERT_NE(prologue, result.patches.end());
+  const auto &preload = prologue->dispatch_id_prologue->preload;
+  EXPECT_EQ(preload.support, ConSanMoiDispatchIdPreloadSupport::SupportedAlreadyEnabled);
+  EXPECT_EQ(preload.identity_salt_sgpr, 0u);
+  EXPECT_EQ(preload.dispatch_id_sgpr, 4u);
+  EXPECT_EQ(preload.original_user_sgpr_count, 6u);
+  EXPECT_EQ(preload.expanded_user_sgpr_count, 6u);
+  EXPECT_EQ(preload.guest_restore_count, 0u);
+  EXPECT_FALSE(preload.descriptor_change_required());
 }
 
 TEST(ConSanMoi, SharedHelperDispatchCaptureUsesPerKernelLayoutsAndOnePersistentPair) {
@@ -3081,7 +3129,7 @@ TEST(ConSanMoi, SharedHelperDispatchCaptureUsesPerKernelLayoutsAndOnePersistentP
   std::array<uint16_t, 2> sources = {prologues[0]->dispatch_id_prologue->preload.dispatch_id_sgpr,
                                      prologues[1]->dispatch_id_prologue->preload.dispatch_id_sgpr};
   std::ranges::sort(sources);
-  EXPECT_EQ(sources, (std::array<uint16_t, 2>{2u, 6u}));
+  EXPECT_EQ(sources, (std::array<uint16_t, 2>{4u, 6u}));
 
   AmdGpuCodeObject original(bytes.data(), bytes.size());
   AmdGpuCodeObject patched(result.replacement.data(), result.replacement.size());
@@ -3114,8 +3162,10 @@ TEST(ConSanMoi, SharedHelperDispatchCaptureUsesPerKernelLayoutsAndOnePersistentP
                     kd::KERNEL_CODE_PROPERTY_ENABLE_SGPR_KERNARG_SEGMENT_PTR, 1u);
     AMDHSA_BITS_SET(descriptor.kernel_code_properties,
                     kd::KERNEL_CODE_PROPERTY_ENABLE_SGPR_PRIVATE_SEGMENT_SIZE, 1u);
-    AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc2, kd::COMPUTE_PGM_RSRC2_USER_SGPR_COUNT, 15u);
-    AMDHSA_BITS_SET(descriptor.kernarg_preload, kd::KERNARG_PRELOAD_SPEC_LENGTH, 1u);
+    AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc2, kd::COMPUTE_PGM_RSRC2_USER_SGPR_COUNT, 16u);
+    AMDHSA_BITS_SET(descriptor.kernel_code_properties,
+                    kd::KERNEL_CODE_PROPERTY_ENABLE_SGPR_KERNARG_SEGMENT_PTR, 0u);
+    AMDHSA_BITS_SET(descriptor.kernarg_preload, kd::KERNARG_PRELOAD_SPEC_LENGTH, 5u);
   });
   const ConSanTransformArtifacts rejected = test_lower_consan(rejected_bytes, options);
   EXPECT_EQ(rejected.outcome, ConSanTransformOutcome::Unsupported);
@@ -3148,8 +3198,10 @@ TEST(ConSanMoi, DispatchPreloadUnsupportedLayoutsRollbackTransactionally) {
                     kd::KERNEL_CODE_PROPERTY_ENABLE_SGPR_FLAT_SCRATCH_INIT, 1u);
     AMDHSA_BITS_SET(descriptor.kernel_code_properties,
                     kd::KERNEL_CODE_PROPERTY_ENABLE_SGPR_PRIVATE_SEGMENT_SIZE, 1u);
-    AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc2, kd::COMPUTE_PGM_RSRC2_USER_SGPR_COUNT, 15u);
-    AMDHSA_BITS_SET(descriptor.kernarg_preload, kd::KERNARG_PRELOAD_SPEC_LENGTH, 1u);
+    AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc2, kd::COMPUTE_PGM_RSRC2_USER_SGPR_COUNT, 16u);
+    AMDHSA_BITS_SET(descriptor.kernel_code_properties,
+                    kd::KERNEL_CODE_PROPERTY_ENABLE_SGPR_KERNARG_SEGMENT_PTR, 0u);
+    AMDHSA_BITS_SET(descriptor.kernarg_preload, kd::KERNARG_PRELOAD_SPEC_LENGTH, 4u);
   });
   EXPECT_EQ(user_limit.outcome, ConSanTransformOutcome::Unsupported);
   EXPECT_FALSE(user_limit.modified());
@@ -3204,6 +3256,15 @@ TEST(ConSanMoi, FinalValidationPinsDispatchDescriptorAndCaptureSequence) {
               sizeof(descriptor));
   EXPECT_FALSE(validate_consan_modified_elf(bytes, descriptor_corruption).empty());
 
+  ConSanTransformArtifacts queue_descriptor_corruption = valid;
+  std::memcpy(&descriptor, queue_descriptor_corruption.replacement.data() + descriptor_offset,
+              sizeof(descriptor));
+  AMDHSA_BITS_SET(descriptor.kernel_code_properties,
+                  kd::KERNEL_CODE_PROPERTY_ENABLE_SGPR_QUEUE_PTR, 0u);
+  std::memcpy(queue_descriptor_corruption.replacement.data() + descriptor_offset, &descriptor,
+              sizeof(descriptor));
+  EXPECT_FALSE(validate_consan_modified_elf(bytes, queue_descriptor_corruption).empty());
+
   ConSanTransformArtifacts capture_corruption = valid;
   const auto prologue =
       std::ranges::find_if(capture_corruption.patches, [](const ConSanPatchInfo &patch) {
@@ -3220,6 +3281,28 @@ TEST(ConSanMoi, FinalValidationPinsDispatchDescriptorAndCaptureSequence) {
   std::memcpy(capture_corruption.replacement.data() + capture_file_offset, &wrong_capture,
               sizeof(wrong_capture));
   EXPECT_FALSE(validate_consan_modified_elf(bytes, capture_corruption).empty());
+
+  ConSanTransformArtifacts mix_corruption = valid;
+  const auto &effect = *prologue->dispatch_id_prologue;
+  ASSERT_TRUE(effect.preload.identity_salt_sgpr);
+  const auto expected_mix = instrumentation::build_s_xor_b64(
+      *effect.capture.sgpr(), *effect.capture.sgpr(), *effect.preload.identity_salt_sgpr,
+      ROCJITSU_CODE_ARCH_RDNA4);
+  ASSERT_TRUE(expected_mix);
+  AmdGpuCodeObject mix_object(mix_corruption.replacement.data(), mix_corruption.replacement.size());
+  ASSERT_TRUE(mix_object.is_valid());
+  std::vector<uint32_t> mix_words =
+      text_words_at_offset(mix_object, prologue->trampoline_offset, prologue->trampoline_size);
+  const auto mix = std::ranges::find(mix_words, *expected_mix);
+  ASSERT_NE(mix, mix_words.end());
+  const size_t mix_word_index = static_cast<size_t>(mix - mix_words.begin());
+  const size_t mix_file_offset =
+      mix_object.text_sections().front()->sectionOffset() + prologue->trampoline_offset +
+      mix_word_index * sizeof(uint32_t);
+  const uint32_t missing_mix = build_s_nop(0, ROCJITSU_CODE_ARCH_RDNA4);
+  std::memcpy(mix_corruption.replacement.data() + mix_file_offset, &missing_mix,
+              sizeof(missing_mix));
+  EXPECT_FALSE(validate_consan_modified_elf(bytes, mix_corruption).empty());
 }
 
 TEST(ConSanMoi, WarnsWhenReportBufferIsSmallerThanHeader) {

@@ -244,6 +244,9 @@ void run_cluster_workload(Workload workload, bool correct) {
   uint32_t *input = nullptr;
   uint32_t *observed = nullptr;
   uint32_t *control = nullptr;
+  uint32_t *input_staging = nullptr;
+  uint32_t *observed_staging = nullptr;
+  uint32_t *control_staging = nullptr;
   void *kernarg = nullptr;
   ASSERT_EQ(
       hsa_amd_memory_pool_allocate(gpu_pool, input_bytes, 0, reinterpret_cast<void **>(&input)),
@@ -260,12 +263,27 @@ void run_cluster_workload(Workload workload, bool correct) {
   ASSERT_EQ(hsa_amd_memory_pool_allocate(kernarg_pool, kernarg_bytes, 0, &kernarg),
             HSA_STATUS_SUCCESS);
   resources.remember(kernarg);
+  ASSERT_EQ(hsa_amd_memory_pool_allocate(kernarg_pool, input_bytes, 0,
+                                         reinterpret_cast<void **>(&input_staging)),
+            HSA_STATUS_SUCCESS);
+  resources.remember(input_staging);
+  ASSERT_EQ(hsa_amd_memory_pool_allocate(kernarg_pool, observed_bytes, 0,
+                                         reinterpret_cast<void **>(&observed_staging)),
+            HSA_STATUS_SUCCESS);
+  resources.remember(observed_staging);
+  ASSERT_EQ(hsa_amd_memory_pool_allocate(kernarg_pool, control_bytes, 0,
+                                         reinterpret_cast<void **>(&control_staging)),
+            HSA_STATUS_SUCCESS);
+  resources.remember(control_staging);
 
   const hsa_agent_t both[] = {agents.cpu, agents.gpu};
   ASSERT_EQ(hsa_amd_agents_allow_access(2, both, nullptr, input), HSA_STATUS_SUCCESS);
   ASSERT_EQ(hsa_amd_agents_allow_access(2, both, nullptr, observed), HSA_STATUS_SUCCESS);
   ASSERT_EQ(hsa_amd_agents_allow_access(2, both, nullptr, control), HSA_STATUS_SUCCESS);
   ASSERT_EQ(hsa_amd_agents_allow_access(2, both, nullptr, kernarg), HSA_STATUS_SUCCESS);
+  ASSERT_EQ(hsa_amd_agents_allow_access(2, both, nullptr, input_staging), HSA_STATUS_SUCCESS);
+  ASSERT_EQ(hsa_amd_agents_allow_access(2, both, nullptr, observed_staging), HSA_STATUS_SUCCESS);
+  ASSERT_EQ(hsa_amd_agents_allow_access(2, both, nullptr, control_staging), HSA_STATUS_SUCCESS);
   std::vector<uint32_t> host_input(group_count * kInputValuesPerGroup);
   for (uint32_t group = 0; group < group_count; ++group) {
     for (uint32_t lane = 0; lane < kLanesPerWave; ++lane) {
@@ -276,9 +294,16 @@ void run_cluster_workload(Workload workload, bool correct) {
   }
   const std::vector<uint32_t> zero_observed(group_count * kObservedValuesPerGroup, 0);
   const std::vector<uint32_t> zero_control(group_count * kWorkgroupSize, 0);
-  ASSERT_EQ(hsa_memory_copy(input, host_input.data(), input_bytes), HSA_STATUS_SUCCESS);
-  ASSERT_EQ(hsa_memory_copy(observed, zero_observed.data(), observed_bytes), HSA_STATUS_SUCCESS);
-  ASSERT_EQ(hsa_memory_copy(control, zero_control.data(), control_bytes), HSA_STATUS_SUCCESS);
+  // HSA copy endpoints must be runtime-tracked allocations. Native host
+  // stacks/heaps happen to work on some runtimes, but the simulator correctly
+  // rejects those unregistered addresses. Stage through the CPU agent's
+  // fine-grained pool so this direct-HSA fixture exercises portable behavior.
+  std::memcpy(input_staging, host_input.data(), input_bytes);
+  std::memcpy(observed_staging, zero_observed.data(), observed_bytes);
+  std::memcpy(control_staging, zero_control.data(), control_bytes);
+  ASSERT_EQ(hsa_memory_copy(input, input_staging, input_bytes), HSA_STATUS_SUCCESS);
+  ASSERT_EQ(hsa_memory_copy(observed, observed_staging, observed_bytes), HSA_STATUS_SUCCESS);
+  ASSERT_EQ(hsa_memory_copy(control, control_staging, control_bytes), HSA_STATUS_SUCCESS);
   std::memset(kernarg, 0, kernarg_bytes);
   struct __attribute__((packed)) Kernargs {
     const uint32_t *input;    // 0: user argument
@@ -355,8 +380,10 @@ void run_cluster_workload(Workload workload, bool correct) {
 
   std::vector<uint32_t> host_observed(group_count * kObservedValuesPerGroup);
   std::vector<uint32_t> host_control(group_count * kWorkgroupSize);
-  ASSERT_EQ(hsa_memory_copy(host_observed.data(), observed, observed_bytes), HSA_STATUS_SUCCESS);
-  ASSERT_EQ(hsa_memory_copy(host_control.data(), control, control_bytes), HSA_STATUS_SUCCESS);
+  ASSERT_EQ(hsa_memory_copy(observed_staging, observed, observed_bytes), HSA_STATUS_SUCCESS);
+  ASSERT_EQ(hsa_memory_copy(control_staging, control, control_bytes), HSA_STATUS_SUCCESS);
+  std::memcpy(host_observed.data(), observed_staging, observed_bytes);
+  std::memcpy(host_control.data(), control_staging, control_bytes);
   for (uint32_t group = 0; group < group_count; ++group) {
     if (correct && workload == Workload::ClusterSync)
       EXPECT_EQ(host_observed[group], 0x51000000u | group) << "group=" << group;

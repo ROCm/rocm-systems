@@ -28,8 +28,8 @@ The fixtures reduce device-level properties observed in attention, reduction,
 training, framework state machines, generated-model, and Stream-K-style
 workloads. They cover cross-wave LDS handoff, barrier and fence publication,
 shared helpers with multiple kernel owners, three-dimensional workgroup
-identity, queue-local dispatch identity across independent streams, dynamic
-private stacks, adjacent subword writes with overlapping
+identity, repeated queue-local dispatch identity across independent HIP
+streams, dynamic private stacks, adjacent subword writes with overlapping
 reads, fetch-add, atomic-OR, release-CAS publication, language-level
 release-store publication, four-wave mixed-precision backward reduction,
 runtime-computed indexed LDS addressing and zero-stride aliasing,
@@ -53,6 +53,49 @@ checks exact host-computed output and forbids diagnostics, while the incorrect
 member changes the intended ordering property and requires the applicable
 sanitizer evidence while retaining an independent control oracle wherever
 possible.
+
+HIP streams are integration coverage, not proof that multiple HSA queues were
+used. CDNA4 additionally has a direct-HSA `TwoQueueDispatchIdentity` fixture.
+It creates two queues, asserts distinct `hsa_queue_t::id` values, and submits
+the same kernel object at matching absolute packet indices zero and one on both
+queues. It runs once with a reused kernarg allocation and once with distinct
+kernarg allocations, printing those facts before checking the result. Its
+clean Record/Replay member is mutation-sensitive: a queue-blind identity
+merges equal-ID dispatches and produces a false LDS conflict; the racy member
+retains an independent positive diagnostic oracle. Inline Shadow applies its
+bounded first-N diagnostic contract. Sampled now requests per-launch hardware
+identity for access/atomic consumers even at runtime stride one; its racy
+member permits the mode's documented statistical miss while still requiring
+complete, trusted retained evidence.
+
+The HIP `RepeatedDispatchIdentity`, `GraphReplay`, and
+`GraphParameterUpdate` fixtures print their observed completed-launch count and
+explicitly report the underlying HSA queue count and raw dispatch-ID reuse as
+`unobserved`. Their Record/Replay CTest contracts conjunctively require that
+line and respectively 8, 6, and 2 retained dispatch fingerprints. Thus graph
+replay proves launch retention without being promoted into multi-queue proof;
+the direct-HSA fixture remains authoritative for that condition.
+
+At operating points that select automatic hardware entry identity, the current
+MOI path stores a 64-bit launch fingerprint formed from the AMDHSA queue-pointer
+preload and the queue-local absolute dispatch ID, with zero remapped away from
+the empty sentinel. This fixes equal dispatch IDs on simultaneously live queues
+and distinguishes later absolute IDs after AQL ring-slot reuse. It is not an
+exact 128-bit `(queue instance, dispatch ID)` identity: XOR composition has
+residual collisions, and a runtime that recycles the same queue-object address
+after destruction can recreate an earlier input. Clean reports must therefore
+not be documented as collision-free proof. An adapter-assigned non-recycling
+launch token, or retaining the complete pair in the MOI evidence ABI, remains
+the exact follow-up.
+
+Sampled owns a literal-identity fallback for operating points where its
+hardware pair overlaps guest scalar state. That fallback is a deliberately
+weaker, mode-visible operating point; it is not queue-aware and cannot qualify
+a clean multi-launch result as exact. The direct-HSA two-queue conformance case
+therefore proves that the hardware capture was selected. Runtime trust can
+certify capture, retention, and decoding of the selected representation, but
+cannot upgrade either the literal fallback or the compact fingerprint into an
+injective identity.
 
 The contract is deliberately independent of current implementation choices.
 Tests may require that the intended code object was instrumented, that semantic evidence
@@ -101,6 +144,78 @@ On a host with the matching physical device, run the native matrix with:
 ctest --test-dir /path/to/rocjitsu-build \
   -L consan-device -L physical --output-on-failure -j16
 ```
+
+For a TheRock virtual environment, configure and execute with only its SDK
+roots. One concrete layout is:
+
+```sh
+ROCM_SDK="$VIRTUAL_ENV/lib/python3.12/site-packages/_rocm_sdk_devel"
+cmake -S /path/to/rocm-systems/emulation/rocjitsu \
+  -B /path/to/rocjitsu-build -G Ninja \
+  -DCMAKE_C_COMPILER="$ROCM_SDK/lib/llvm/bin/clang" \
+  -DCMAKE_CXX_COMPILER="$ROCM_SDK/lib/llvm/bin/clang++" \
+  -DCMAKE_HIP_COMPILER="$ROCM_SDK/bin/hipcc" \
+  -DROCM_PATH="$ROCM_SDK"
+LD_LIBRARY_PATH="$ROCM_SDK/lib:$ROCM_SDK/lib/rocm_sysdeps/lib" \
+  ctest --test-dir /path/to/rocjitsu-build \
+  -L consan-device -L physical --output-on-failure -j1
+```
+
+Do not allow `/opt/rocm` or a system `hipcc` to enter this configuration.
+
+### Local ConSan-only qualification record (2026-09-09)
+
+The current uncommitted ConSan change set is based on source `ac2444f83e9b` on
+`users/bjacob/sanitizers`, with build directory
+`/home/benjacob/rocjitsu-build`. It resolved these TheRock paths:
+
+```text
+C compiler:   /home/benjacob/.venv/lib/python3.12/site-packages/_rocm_sdk_devel/lib/llvm/bin/clang
+C++ compiler: /home/benjacob/.venv/lib/python3.12/site-packages/_rocm_sdk_devel/lib/llvm/bin/clang++
+HIP compiler: /home/benjacob/.venv/lib/python3.12/site-packages/_rocm_sdk_devel/lib/llvm/bin/amdclang++
+ROCM_PATH:    /home/benjacob/.venv/lib/python3.12/site-packages/_rocm_sdk_devel
+```
+
+`ldd` resolved `libhsa-runtime64.so.1`, `libamdhip64.so.7`,
+`libamd_comgr.so.3`, LLVM, Clang, and ROCm sysdeps from that same venv SDK.
+The relevant gfx950 code-object hashes are:
+
+```text
+bfed3c14dbc498f925c76060d6e63f8a0e5608361204264ddd1fdbf4d375d3a0  hip_consan_device_gfx950_two_queue_dispatch_identity.hsaco
+e43dc0f0b97075279f0323d8eac5e2579661bca8952a90992256ab7d17e124d9  histogram_scatter gfx950 HSACO
+```
+
+The host command `./tests/rocjitsu_tests --gtest_filter='ConSan*'` passed
+1,573 of 1,575 tests; the remaining two are intentional benchmark skips. The
+two additional labeled host CTest contracts pass 2/2. The simulator command
+above passed 2,926/2,926 in 153.90 seconds, including all
+eight baseline/MOI two-queue cases and all ten gfx950 histogram cases. The
+histogram HSACO contains `ds_add_u32`, `ds_add_f32`, `ds_add_f64`, the explicit
+`ds_write_b32` publication, and the explicit `ds_read_b32` consumption; the
+instrumented tests additionally require nonzero discovered, supported,
+selected, and patched access counts for the filtered kernel.
+
+The venv Python discovery command passed all 343 ConSan validation-tool tests.
+The isolated venv does not itself contain the non-ROCm `PyYAML` dependency, so
+the run exposed the already-installed Ubuntu module without changing the ROCm
+stack:
+
+```sh
+PYTHONPATH=/usr/lib/python3/dist-packages \
+  /home/benjacob/.venv/bin/python -m unittest discover \
+  -s emulation/rocjitsu/tests/dbi/consan -p 'test_*.py'
+```
+
+An unsandboxed TheRock `rocminfo` identified the physical agent as `gfx950`,
+AMD Instinct MI350X. With the same venv `LD_LIBRARY_PATH`, the physical command
+above passed all 606/606 registered ConSan cases in 433.87 seconds. The eight
+direct-HSA two-queue cases passed, including the Record/Replay requirement for
+both the asserted equal queue-local IDs and four retained launch fingerprints.
+The strengthened repeated-dispatch and graph cases, all histogram cases, the
+scalar-pressure/spill cases, and the final post-instrumentation health probe
+also passed. The earlier `hsa_init` status 4104 came from the filesystem/device
+sandbox hiding `/dev/kfd`; it was not host or GPU state and is not physical
+validation evidence.
 
 Run every registered simulated target and the physical target, when present,
 in one invocation with:

@@ -28,7 +28,7 @@ are its own.
 | Mode | Device work | Retained evidence | Host work | Meaning of a positive result |
 | --- | --- | --- | --- | --- |
 | **SuperCollider** | Preserve an LDS access, delay, repeat/read back, compare. | Sticky mismatch marker. | Collect and report the marker. | A redundant observation changed; this is value-instability evidence, not a happens-before proof. |
-| **Record/Replay** | Publish bounded access, barrier, atomic, and fence records. | Bounded event snapshot keyed by exact dispatch/workgroup/owner/site identity. | Replay records through the MOI shadow and ordering model. | The retained records form an attributed conflict under that model. |
+| **Record/Replay** | Publish bounded access, barrier, atomic, and fence records. | Bounded event snapshot keyed by a validated launch fingerprint and exact workgroup/owner/site identity. | Replay records through the MOI shadow and ordering model. | The retained records form an attributed conflict under that model. |
 | **Sampled** | Select dynamic instances and publish bounded causal windows plus associated synchronization metadata. | Immutable sampled watchpoint banks and ordering state. | Scan retained causal windows. | A selected window exposes an attributed conflict. |
 | **Inline Shadow** | Update exact shadow/order state and evaluate supported conflicts immediately. | Shadow/order state and first-N attributed diagnostics. | Collect and summarize device decisions. | The GPU found a supported-form conflict against prior shadow state. |
 
@@ -52,7 +52,9 @@ SuperCollider deliberately does not reconstruct causality. The MOI modes share
 normalized owner, epoch, access, barrier, and atomic/fence semantics, but each
 owns its report ABI and conflict model. “Exact” always means exact within the
 declared supported forms and retained capacities—not proof about excluded ISA
-forms or dropped evidence.
+forms or dropped evidence. It also does not promote the current compact launch
+fingerprint into an injective queue-instance/dispatch identity; see
+[VALIDATION.md](VALIDATION.md).
 
 ## Shared setup before execution
 

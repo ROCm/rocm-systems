@@ -148,6 +148,19 @@ Inline Shadow can use a frozen report identity at operating points where their
 mode policy permits it. This can remove persistent pair pressure but does not
 solve transient scratch or router allocation.
 
+Automatic hardware identity is queue-aware: descriptor planning enables both
+the AMDHSA queue-pointer and absolute dispatch-ID preloads when they are not
+already present, then restores every displaced guest preload from an explicit
+source map. The persistent 64-bit value is presently a fingerprint, not an
+injective encoding of the full pair; see [VALIDATION.md](VALIDATION.md) for the
+residual collision and queue-lifetime limitation.
+
+Sampled's mode-owned literal fallback remains available when the hardware
+identity pair overlaps guest scalar state. It is not queue-aware, so a clean
+run at that operating point does not establish exact multi-launch separation.
+This limitation belongs to Sampled's evidence semantics and is not repaired or
+hidden by common placement, target emission, final validation, or runtime trust.
+
 SuperCollider's indirect route reserves disjoint return-PC and condition-code
 state and validates its entry/return encodings. MOI common planning similarly
 retains a single scalar-routing state that access, synchronization, prologue,

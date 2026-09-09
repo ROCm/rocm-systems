@@ -98,9 +98,20 @@ moi_descriptor_dispatch_id_preload_plan(const KD &desc, rj_code_arch_t arch) {
   const uint16_t properties = desc.kernel_code_properties;
   const uint16_t original_user_count = static_cast<uint16_t>(moi_descriptor_user_sgpr_count(desc));
   const uint16_t system_count = moi_descriptor_system_sgpr_count(desc);
+  const bool queue_enabled =
+      AMDHSA_BITS_GET(properties, kd::KERNEL_CODE_PROPERTY_ENABLE_SGPR_QUEUE_PTR) != 0;
   const bool dispatch_enabled =
       AMDHSA_BITS_GET(properties, kd::KERNEL_CODE_PROPERTY_ENABLE_SGPR_DISPATCH_ID) != 0;
-  const uint16_t prefix = moi_descriptor_dispatch_id_prefix_sgpr_count(desc);
+  const uint16_t private_and_dispatch_ptr = static_cast<uint16_t>(
+      (AMDHSA_BITS_GET(properties, kd::KERNEL_CODE_PROPERTY_ENABLE_SGPR_PRIVATE_SEGMENT_BUFFER) != 0
+           ? 4u
+           : 0u) +
+      (AMDHSA_BITS_GET(properties, kd::KERNEL_CODE_PROPERTY_ENABLE_SGPR_DISPATCH_PTR) != 0 ? 2u
+                                                                                           : 0u));
+  const bool kernarg_enabled =
+      AMDHSA_BITS_GET(properties, kd::KERNEL_CODE_PROPERTY_ENABLE_SGPR_KERNARG_SEGMENT_PTR) != 0;
+  const uint16_t prefix = static_cast<uint16_t>(private_and_dispatch_ptr + 2u +
+                                                (kernarg_enabled ? 2u : 0u));
   const uint16_t named_suffix = static_cast<uint16_t>(
       (AMDHSA_BITS_GET(properties, kd::KERNEL_CODE_PROPERTY_ENABLE_SGPR_FLAT_SCRATCH_INIT) != 0
            ? 2u
@@ -109,8 +120,10 @@ moi_descriptor_dispatch_id_preload_plan(const KD &desc, rj_code_arch_t arch) {
            ? 1u
            : 0u) +
       AMDHSA_BITS_GET(desc.kernarg_preload, kd::KERNARG_PRELOAD_SPEC_LENGTH));
-  const uint32_t minimum_declared_user_count =
-      static_cast<uint32_t>(prefix) + (dispatch_enabled ? 2u : 0u) + named_suffix;
+  const uint16_t original_named_count = static_cast<uint16_t>(
+      private_and_dispatch_ptr + (queue_enabled ? 2u : 0u) + (kernarg_enabled ? 2u : 0u) +
+      (dispatch_enabled ? 2u : 0u) + named_suffix);
+  const uint32_t minimum_declared_user_count = original_named_count;
   if (minimum_declared_user_count > original_user_count) {
     ConSanMoiDispatchIdPreloadPlan invalid;
     invalid.support = ConSanMoiDispatchIdPreloadSupport::InvalidDispatchPosition;
@@ -124,26 +137,16 @@ moi_descriptor_dispatch_id_preload_plan(const KD &desc, rj_code_arch_t arch) {
   const uint16_t user_sgpr_initialization_limit =
       profile ? profile->user_sgpr_initialization_limit : 16u;
   ConSanMoiDispatchIdPreloadPlan plan;
-  if (!dispatch_enabled && original_user_count <= user_sgpr_initialization_limit &&
-      minimum_declared_user_count + 2u <= original_user_count &&
-      static_cast<uint32_t>(original_user_count) + system_count <= kMaxSgprs) {
-    // Some producers reserve a larger user-SGPR window than their named
-    // preloads occupy. Insert dispatch ID into that padding and shift only the
-    // named suffix; neither the declared window nor the following system
-    // SGPRs need to move.
-    plan.support = ConSanMoiDispatchIdPreloadSupport::SupportedInsert;
-    plan.dispatch_id_sgpr = prefix;
-    plan.original_user_sgpr_count = original_user_count;
-    plan.expanded_user_sgpr_count = original_user_count;
-    plan.system_sgpr_count = system_count;
-    plan.first_shifted_guest_sgpr = prefix;
-    plan.shifted_guest_sgpr_count = named_suffix;
-    plan.required_sgpr_count = static_cast<uint16_t>(original_user_count + system_count);
-  } else {
-    plan = consan_moi_plan_dispatch_id_preload(original_user_count, system_count, prefix,
-                                               dispatch_enabled, kMaxSgprs,
-                                               user_sgpr_initialization_limit);
-  }
+  plan.queue_ptr_was_enabled = queue_enabled;
+  plan.dispatch_id_was_enabled = dispatch_enabled;
+  plan.dispatch_id_sgpr = prefix;
+  plan.identity_salt_sgpr = private_and_dispatch_ptr;
+  plan.original_user_sgpr_count = original_user_count;
+  plan.system_sgpr_count = system_count;
+  const uint16_t inserted = static_cast<uint16_t>((queue_enabled ? 0u : 2u) +
+                                                  (dispatch_enabled ? 0u : 2u));
+  const uint16_t desired_named_count = static_cast<uint16_t>(original_named_count + inserted);
+  uint16_t expanded_user_count = std::max(original_user_count, desired_named_count);
   const uint16_t preload_length =
       AMDHSA_BITS_GET(desc.kernarg_preload, kd::KERNARG_PRELOAD_SPEC_LENGTH);
   plan.original_kernarg_preload_length = preload_length;
@@ -155,29 +158,70 @@ moi_descriptor_dispatch_id_preload_plan(const KD &desc, rj_code_arch_t arch) {
   // still-live kernarg pointer in the entry prologue. System SGPRs move only
   // by the remaining user-window growth, so record that smaller repair
   // separately.
-  const uint16_t overflow =
-      original_user_count + 2u > user_sgpr_initialization_limit
-          ? static_cast<uint16_t>(original_user_count + 2u - user_sgpr_initialization_limit)
-          : 0u;
+  const uint16_t overflow = expanded_user_count > user_sgpr_initialization_limit
+                                ? static_cast<uint16_t>(expanded_user_count -
+                                                        user_sgpr_initialization_limit)
+                                : 0u;
   if (profile && profile->supports_kernarg_preload_overflow_recovery &&
-      plan.support == ConSanMoiDispatchIdPreloadSupport::UserSgprInitializationLimit &&
-      !dispatch_enabled && overflow >= 1u && overflow <= 2u && kernarg_ptr &&
-      preload_length > overflow && prefix + named_suffix == original_user_count) {
-    plan.support = ConSanMoiDispatchIdPreloadSupport::SupportedInsert;
-    plan.expanded_user_sgpr_count = user_sgpr_initialization_limit;
-    plan.first_shifted_guest_sgpr = prefix;
-    plan.shifted_guest_sgpr_count = static_cast<uint16_t>(original_user_count - prefix - overflow);
+      inserted != 0u && overflow >= 1u && overflow <= 4u && kernarg_ptr &&
+      preload_length > overflow && original_named_count == original_user_count) {
+    expanded_user_count = user_sgpr_initialization_limit;
     plan.kernarg_reload_sgpr = static_cast<uint16_t>(original_user_count - overflow);
-    plan.kernarg_reload_base_sgpr = *kernarg_ptr;
+    plan.kernarg_reload_base_sgpr = static_cast<uint16_t>(
+        *kernarg_ptr + (queue_enabled ? 0u : 2u));
     plan.kernarg_reload_offset_dwords = static_cast<uint16_t>(
         AMDHSA_BITS_GET(desc.kernarg_preload, kd::KERNARG_PRELOAD_SPEC_OFFSET) + preload_length -
         overflow);
     plan.kernarg_reload_count = overflow;
-    plan.system_sgpr_shift = static_cast<uint16_t>(2u - overflow);
-    plan.shifted_system_sgpr_count = plan.system_sgpr_shift != 0u ? system_count : 0u;
-    plan.original_kernarg_preload_length = preload_length;
     plan.replacement_kernarg_preload_length = static_cast<uint16_t>(preload_length - overflow);
-    plan.required_sgpr_count = static_cast<uint16_t>(plan.expanded_user_sgpr_count + system_count);
+  }
+  if (expanded_user_count > user_sgpr_initialization_limit) {
+    plan.support = ConSanMoiDispatchIdPreloadSupport::UserSgprInitializationLimit;
+    plan.expanded_user_sgpr_count = original_user_count;
+    return plan;
+  }
+  if (static_cast<uint32_t>(expanded_user_count) + system_count > kMaxSgprs) {
+    plan.support = ConSanMoiDispatchIdPreloadSupport::SgprAllocationLimit;
+    plan.expanded_user_sgpr_count = original_user_count;
+    return plan;
+  }
+  plan.support = inserted == 0u ? ConSanMoiDispatchIdPreloadSupport::SupportedAlreadyEnabled
+                                : ConSanMoiDispatchIdPreloadSupport::SupportedInsert;
+  plan.expanded_user_sgpr_count = expanded_user_count;
+  plan.system_sgpr_shift = static_cast<uint16_t>(expanded_user_count - original_user_count);
+  plan.shifted_system_sgpr_count = plan.system_sgpr_shift != 0u ? system_count : 0u;
+  plan.required_sgpr_count = static_cast<uint16_t>(expanded_user_count + system_count);
+
+  uint16_t original_pos = 0u;
+  uint16_t replacement_pos = 0u;
+  const auto map_segment = [&](uint16_t count) {
+    for (uint16_t i = 0u; i < count; ++i) {
+      if (original_pos != replacement_pos &&
+          original_pos < original_user_count - plan.kernarg_reload_count &&
+          plan.guest_restore_count < plan.guest_restore_sources.size()) {
+        plan.guest_restore_destinations[plan.guest_restore_count] = original_pos;
+        plan.guest_restore_sources[plan.guest_restore_count] = replacement_pos;
+        ++plan.guest_restore_count;
+      }
+      ++original_pos;
+      ++replacement_pos;
+    }
+  };
+  map_segment(private_and_dispatch_ptr);
+  if (queue_enabled)
+    map_segment(2u);
+  else
+    replacement_pos += 2u;
+  if (kernarg_enabled)
+    map_segment(2u);
+  if (dispatch_enabled)
+    map_segment(2u);
+  else
+    replacement_pos += 2u;
+  map_segment(static_cast<uint16_t>(named_suffix - plan.kernarg_reload_count));
+  if (plan.guest_restore_count != 0u) {
+    plan.first_shifted_guest_sgpr = plan.guest_restore_destinations[0];
+    plan.shifted_guest_sgpr_count = plan.guest_restore_count;
   }
   return plan;
 }

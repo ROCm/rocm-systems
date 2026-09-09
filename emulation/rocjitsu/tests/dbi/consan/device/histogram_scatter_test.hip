@@ -93,8 +93,7 @@ __global__ __launch_bounds__(128) void histogram_scatter_for_consan(DeviceState 
   // a deterministic behavioral race even when its prototype does not yet
   // model a particular atomic encoding.
   if (wave == 1u && lane == 0u) {
-    wave_total = warpSize;
-    asm volatile(RJ_CONSAN_DEVICE_LARGE_CAVE ::: "memory");
+    consan_device_test::store_lds_word(&wave_total, warpSize);
   }
 
   // The scatter atomics remain exact in both members and form an independent
@@ -103,7 +102,7 @@ __global__ __launch_bounds__(128) void histogram_scatter_for_consan(DeviceState 
   if (state->synchronize)
     __syncthreads();
   if (tid == 0u) {
-    state->published_wave_total = wave_total;
+    state->published_wave_total = consan_device_test::load_lds_word(&wave_total);
     asm volatile(RJ_CONSAN_DEVICE_LARGE_CAVE ::: "memory");
   }
   if (tid < kBinCount) {

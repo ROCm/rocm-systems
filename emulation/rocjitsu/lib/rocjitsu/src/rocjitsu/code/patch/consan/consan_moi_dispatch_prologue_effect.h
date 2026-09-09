@@ -6,14 +6,16 @@
 
 #pragma once
 
+#include <array>
 #include <cstdint>
 #include <optional>
 
 namespace rocjitsu {
 
-/// AMDHSA initializes at most 16 user SGPRs. Dispatch-ID insertion is allowed
-/// only when all original preloads, the new two-SGPR ID, and the following
-/// system SGPRs can be mapped without truncation or register overflow.
+/// AMDHSA initializes at most 16 user SGPRs on the targets using this path.
+/// Queue-pointer/dispatch-ID insertion is allowed only when all original
+/// preloads and following system SGPRs can be mapped without truncation or
+/// register overflow.
 enum class ConSanMoiDispatchIdPreloadSupport : uint8_t {
   SupportedAlreadyEnabled,
   SupportedInsert,
@@ -29,13 +31,23 @@ struct ConSanMoiDispatchIdPreloadPlan {
   ConSanMoiDispatchIdPreloadSupport support =
       ConSanMoiDispatchIdPreloadSupport::InvalidDispatchPosition;
   uint16_t dispatch_id_sgpr = 0;
+  /// AMDHSA queue-pointer source used to distinguish equal queue-local IDs.
+  std::optional<uint16_t> identity_salt_sgpr;
+  bool queue_ptr_was_enabled = false;
+  bool dispatch_id_was_enabled = false;
+  /// Exact source for each original guest SGPR that moved. This supplements
+  /// the legacy uniform dispatch-only shift for queue+dispatch insertion.
+  std::array<uint16_t, 32> guest_restore_destinations{};
+  std::array<uint16_t, 32> guest_restore_sources{};
+  uint16_t guest_restore_count = 0;
   uint16_t original_user_sgpr_count = 0;
   uint16_t expanded_user_sgpr_count = 0;
   uint16_t system_sgpr_count = 0;
   uint16_t first_shifted_guest_sgpr = 0;
   uint16_t shifted_guest_sgpr_count = 0;
-  /// Full user-SGPR windows can make room for dispatch ID by shortening the
-  /// hardware kernarg preload and reloading its final two dwords in software.
+  /// Full user-SGPR windows can make room for queue and dispatch identity by
+  /// shortening the hardware kernarg preload and reloading up to its final
+  /// four dwords in software.
   uint16_t kernarg_reload_sgpr = 0;
   uint16_t kernarg_reload_base_sgpr = 0;
   uint16_t kernarg_reload_offset_dwords = 0;
