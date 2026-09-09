@@ -260,12 +260,13 @@ function(rocprofiler_add_integration_execute_test NAME)
 
     # insert sanitizer libraries into LD_PRELOAD
     if(ROCPROFILER_MEMCHECK_PRELOAD_ENV_VALUE)
-        list(INSERT arg_PRELOAD 0 "${ROCPROFILER_MEMCHECK_PRELOAD_ENV_VALUE}")
+        list(PREPEND arg_PRELOAD "${ROCPROFILER_MEMCHECK_PRELOAD_ENV_VALUE}")
     endif()
 
     if(arg_PRELOAD)
+        list(REMOVE_DUPLICATES arg_PRELOAD)
         list(JOIN arg_PRELOAD ":" _preload)
-        set(arg_ENVIRONMENT "LD_PRELOAD=${_preload}" ${arg_ENVIRONMENT})
+        list(PREPEND arg_ENVIRONMENT "LD_PRELOAD=${_preload}")
     endif()
 
     # provide LD_LIBRARY_PATH by default if not specified
@@ -447,6 +448,12 @@ function(rocprofiler_add_integration_validate_test NAME)
     # the tests shouldn't be run when rocprofiler-sdk is built with code-coverage support
     if(ROCPROFILER_BUILD_CODECOV AND arg_DISABLED_CODECOV)
         set(arg_DISABLED ON)
+    endif()
+
+    if(arg_PRELOAD)
+        list(REMOVE_DUPLICATES arg_PRELOAD)
+        list(JOIN arg_PRELOAD ":" _preload)
+        list(PREPEND arg_ENVIRONMENT "LD_PRELOAD=${_preload}")
     endif()
 
     if(NOT "integration-tests" IN_LIST arg_LABELS)
