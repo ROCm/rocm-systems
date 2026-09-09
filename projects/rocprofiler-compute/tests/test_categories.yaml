@@ -57,6 +57,7 @@ test_categories:
       - test_conftest
       - test_mem_chart_gfx9
       - test_mem_chart_gfx11
+      - test_mem_chart_gfx1250
       - test_native_tool_finder
       - test_metrics_common
       - test_tty
@@ -146,6 +147,7 @@ test_categories:
       - test_rocprofv3_avail_interface
       - test_mem_chart_gfx9
       - test_mem_chart_gfx11
+      - test_mem_chart_gfx1250
       - test_native_tool_finder
       - test_metrics_common
       - test_tty
@@ -239,6 +241,7 @@ test_categories:
       - test_rocprofv3_avail_interface
       - test_mem_chart_gfx9
       - test_mem_chart_gfx11
+      - test_mem_chart_gfx1250
       - test_native_tool_finder
       - test_metrics_common
       - test_tty
@@ -332,6 +335,7 @@ test_categories:
       - test_rocprofv3_avail_interface
       - test_mem_chart_gfx9
       - test_mem_chart_gfx11
+      - test_mem_chart_gfx1250
       - test_native_tool_finder
       - test_metrics_common
       - test_tty

@@ -799,14 +799,6 @@ add_test(
 # -----------------------------------
 
 add_test(
-    NAME test_charts
-    COMMAND
-        ${PYTHON_TEST_COMMAND} -m pytest -m tui --junitxml=tests/test_charts.xml
-        ${COV_OPTION} tests/unit/rocprof_compute_tui/widgets/test_charts.py
-        ${WORKING_DIR_OPTION}
-)
-
-add_test(
     NAME test_instant_button
     COMMAND
         ${PYTHON_TEST_COMMAND} -m pytest -m tui --junitxml=tests/test_instant_button.xml
@@ -1071,7 +1063,6 @@ if(${ENABLE_COVERAGE})
         test_roofline_calc
         test_roofline_analyze
         test_roofline_main
-        test_charts
         test_instant_button
         test_menu_bar
         test_tui_utils
