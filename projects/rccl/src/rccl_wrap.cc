@@ -1274,7 +1274,10 @@ ncclResult_t rcclSelectAllReduce(struct ncclComm* comm, const void* sendbuff, vo
   const bool symkRequested =
     (op == ncclSum) &&
     isSymmetricKernelRequested(comm, ncclFuncAllReduce, (int)ncclDevSum, datatype, count, sendbuff, recvbuff);
-  const bool symEligible = symkRequested && !symSuppressedBySize;
+  const size_t arSymMinR2 = rcclSymMinR2Cap(comm, ncclFuncAllReduce);
+  // symSuppressedByMin: DDA wins below symMinR2[AR]; do not block it with symkRequested.
+  const bool symSuppressedByMin = symkRequested && arSymMinR2 > 0 && msgBytes < arSymMinR2;
+  const bool symEligible = symkRequested && !symSuppressedByMin && !symSuppressedBySize;
   INFO(NCCL_COLL,
        "rcclSelectAllReduce: graph=%d symkRequested=%d symSuppressedBySize=%d symEligible=%d symMaxR2=%zu",
        (int)ceCapturing, (int)symkRequested, (int)symSuppressedBySize, (int)symEligible, symMaxR2);
@@ -1312,7 +1315,8 @@ ncclResult_t rcclSelectAllReduce(struct ncclComm* comm, const void* sendbuff, vo
   // allowed for smaller symmetric AllReduces (otherwise they would hit the
   // symmetric kernel instead of DDA). FORCE_ENABLE=1 keeps the original
   // !symEligible gate because GIN already returned above for those sizes.
-  bool ddaSymEligible = symkRequested;
+  // symSuppressedByMin: DDA wins below symMinR2[AR]; do not block it with symkRequested.
+  bool ddaSymEligible = symkRequested && !symSuppressedByMin;
 #if defined(ENABLE_ROCSHMEM_GIN)
   if (ncclAllReduceGinSdmaYieldToDda(comm, sendbuff, recvbuff, count, datatype, op)) {
     ddaSymEligible = false;
@@ -1495,10 +1499,14 @@ ncclResult_t rcclSelectAllGather(struct ncclComm* comm, const void* sendbuff, vo
     isSymmetricKernelRequested(comm, ncclFuncAllGather, (int)ncclDevSum, datatype, sendcount, sendbuff, recvbuff);
   // symMaxR2[AG] withdraws symk above a size threshold so CE-registered can win
   // (mirrors the AllReduce symSuppressedBySize pattern).
-  const size_t agSymMaxR2 = rcclSymMaxR2Cap(comm, ncclFuncAllGather, ceCapturing);
+  // symMinR2[AG] withdraws symk below a size threshold so DDA wins small messages
+  // for R2 buffers, mirroring the AllReduce and ReduceScatter treatment.
+  const size_t agSymMaxR2  = rcclSymMaxR2Cap(comm, ncclFuncAllGather, ceCapturing);
+  const size_t agSymMinR2  = rcclSymMinR2Cap(comm, ncclFuncAllGather);
+  const bool agSymSuppressedByMin  = agSymkRequested && agSymMinR2 > 0 && totalBytes < agSymMinR2;
   const bool agSymSuppressedBySize = agSymkRequested && agRecvRegistered &&
                                      agSymMaxR2 > 0 && totalBytes > agSymMaxR2;
-  const bool symEligible = agSymkRequested && !agSymSuppressedBySize;
+  const bool symEligible = agSymkRequested && !agSymSuppressedByMin && !agSymSuppressedBySize;
   // symEligible gates DDA below; the symk report itself is deferred until after
   // the CE-registered check so it loses to CE exactly as dispatch does
   // (taskAppend appends the CE task before ncclMakeSymmetricTaskList runs, so

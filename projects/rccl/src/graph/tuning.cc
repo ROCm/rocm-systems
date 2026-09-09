@@ -1777,7 +1777,7 @@ static const rcclArchThresholds rcclArchThresholds_gfx1250 = {
   .ddaLL128Max = {
     0,                   // [0] Broadcast      -- not used
     0,                   // [1] Reduce          -- not used
-    512ULL*1024,         // [2] AllGather       -- 512 KiB (kernel hard cap kDdaLL128AgMaxPerRankBytes)
+    64ULL*1024*1024,     // [2] AllGather       -- 16 MiB per-rank (= 64 MiB total; DDA/LL128 wins 1M-64M per v6 data)
     512ULL*1024,            // [3] ReduceScatter   -- 512 KiB per-rank (kernel hard cap kDdaLL128RsMaxBytes; DDA/LL covers above)
     32ULL*1024*1024,     // [4] AllReduce       -- 32 MiB
     0,                   // [5] SendRecv        -- not used
@@ -1790,7 +1790,7 @@ static const rcclArchThresholds rcclArchThresholds_gfx1250 = {
   .ddaVmmMax = {
     0,                   // [0] Broadcast      -- not used
     0,                   // [1] Reduce          -- not used
-    1ULL*1024*1024,      // [2] AllGather       -- 1 MiB (DDA wins <=1M; Ring LL128 wins 4M-32M, Ring Simple 64M-128M)
+    0,                   // [2] AllGather       -- 0 = disabled; LL128 covers 1M-64M, Ring/Simple wins above
     0,                   // [3] ReduceScatter   -- 0 = disabled; Ring/LL128 wins 8M-128M, Ring/Simple above
     16ULL*1024*1024,     // [4] AllReduce       -- 16 MiB (Ring/Simple wins above; CE wins R2 4-256 MiB)
     0,                   // [5] SendRecv        -- not used
@@ -1807,7 +1807,7 @@ static const rcclArchThresholds rcclArchThresholds_gfx1250 = {
     0,                   // [1] Reduce          -- not used
     64ULL*1024,          // [2] AllGather       -- R2 AG: symEligible blocks DDA, override unused
     0,                   // [3] ReduceScatter   -- 0; symEligible=true for R2 blocks DDA regardless
-    1ULL*1024*1024,      // [4] AllReduce       -- R2 AR: symEligible blocks DDA, override unused
+    4ULL*1024*1024,      // [4] AllReduce       -- R2 AR: symEligible blocks DDA, override unused
     0,                   // [5] SendRecv        -- not used
     0,                   // [6] Send            -- not used
     0,                   // [7] Recv            -- not used
@@ -1835,7 +1835,7 @@ static const rcclArchThresholds rcclArchThresholds_gfx1250 = {
   .ceNonRegMin = {
     0,                    // [0] Broadcast      -- not used
     0,                    // [1] Reduce          -- not used
-    8ULL*1024*1024,       // [2] AllGather       -- CE-Scratch fires above 8 MiB (Ring/LL wins below)
+    0,                    // [2] AllGather       -- 0 = disabled; DDA/LL128 covers 1M-64M for R0
     0,                    // [3] ReduceScatter   -- not used
     0,                    // [4] AllReduce       -- floor enforced by rcclUseCeAllReduce, not this gate
     0,                    // [5] SendRecv        -- not used
@@ -1850,7 +1850,7 @@ static const rcclArchThresholds rcclArchThresholds_gfx1250 = {
   .ceNonRegMax = {
     0,                    // [0] Broadcast      -- not used
     0,                    // [1] Reduce          -- not used
-    32ULL*1024*1024,      // [2] AllGather       -- CE-Scratch upper bound 32 MiB
+    0,                    // [2] AllGather       -- 0 = disabled; DDA/LL128 covers 1M-64M (v6 data)
     0,                    // [3] ReduceScatter   -- not used
     0,                    // [4] AllReduce       -- 2-shot off (staging stays at default 256 MiB)
     0,                    // [5] SendRecv        -- not used
@@ -1879,9 +1879,9 @@ static const rcclArchThresholds rcclArchThresholds_gfx1250 = {
   .symMaxR2 = {
     0,                    // [0] Broadcast      -- not used
     0,                    // [1] Reduce          -- not used
-    2ULL*1024*1024,          // [2] AllGather  -- CE-registered wins above 2 MiB for R2 (suppress symk)
+    2ULL*1024*1024,       // [2] AllGather  -- CE-registered wins above 2 MiB for R2 (suppress symk)
     1ULL*1024,            // [3] ReduceScatter   -- no suppression (placeholder)
-    256ULL*1024,          // [4] AllReduce       -- CE-registered wins above 256 KiB for R2
+    1,                    // [4] AllReduce       -- CE-registered wins above 256 KiB for R2 (suppress symk)
     0,                    // [5] SendRecv        -- not used
     0,                    // [6] Send            -- not used
     0,                    // [7] Recv            -- not used
@@ -1893,7 +1893,7 @@ static const rcclArchThresholds rcclArchThresholds_gfx1250 = {
     0,                    // [1] Reduce          -- not used
     2ULL*1024*1024,                    // [2] AllGather       -- keep symk in graph mode
     1ULL*1024,                    // [3] ReduceScatter   -- keep symk in graph mode
-    256ULL*1024,            // [4] AllReduce       -- keep symk in graph mode (CE blocked)
+    1,            // [4] AllReduce       -- keep symk in graph mode (CE blocked)
     0,                    // [5] SendRecv        -- not used
     0,                    // [6] Send            -- not used
     0,                    // [7] Recv            -- not used
@@ -1904,9 +1904,9 @@ static const rcclArchThresholds rcclArchThresholds_gfx1250 = {
   .symMinR2 = {
     0,                    // [0] Broadcast      -- not used
     0,                    // [1] Reduce          -- not used
-    0,                    // [2] AllGather       -- no lower suppression
+    128ULL*1024,          // [2] AllGather       -- DDA/LL wins below 128 KiB for R2 (1KB-128KB range)
     2ULL*1024*1024,       // [3] ReduceScatter   -- DDA wins below 2 MiB for R2
-    0,                    // [4] AllReduce       -- no lower suppression (CE handles upper)
+    8ULL*1024*1024,       // [4] AllReduce       -- DDA wins below 1 MiB for R2 (tune from perf data)
     0,                    // [5] SendRecv        -- not used
     0,                    // [6] Send            -- not used
     0,                    // [7] Recv            -- not used
