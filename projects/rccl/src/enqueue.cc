@@ -1318,6 +1318,9 @@ static ncclResult_t addP2pToPlan(struct ncclComm* comm, struct ncclKernelPlan* p
       // Tune chunk size for the network
       if (protocol[dir] == NCCL_PROTO_SIMPLE && bytes[dir] < stepSize[dir]) chunkSize[dir] /= 4;
       else if (bytes[dir] < 8 * stepSize[dir]) chunkSize[dir] /= 2;
+      if (protocol[dir] == NCCL_PROTO_SIMPLE && p2pTasks[dir] &&
+          p2pTasks[dir]->collAPI == ncclFuncAlltoAll)
+        chunkSize[dir] = std::min(chunkSize[dir], comm->p2pAlltoAllChunkSize);
     }
 
     chunkDataSize[dir] = chunkSize[dir];
