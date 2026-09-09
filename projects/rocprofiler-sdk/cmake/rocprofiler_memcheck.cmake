@@ -20,10 +20,19 @@ function(rocprofiler_add_memcheck_flags _TYPE _LIB_BASE _FLAG)
     target_compile_options(
         rocprofiler-sdk-sanitizer
         INTERFACE $<BUILD_INTERFACE:-g3 -Og -fno-omit-frame-pointer
-                  -fno-optimize-sibling-calls -fno-inline-functions -fsanitize=${_FLAG}
-                  ${ARGN}>)
-    target_link_options(rocprofiler-sdk-sanitizer INTERFACE
-                        $<BUILD_INTERFACE:-fsanitize=${_FLAG}>)
+                  -fno-optimize-sibling-calls -fno-inline-functions>
+                  "$<BUILD_INTERFACE:$<$<COMPILE_LANGUAGE:C,CXX>:-fsanitize=${_FLAG}>>")
+    foreach(_OPTION IN LISTS ARGN)
+        target_compile_options(
+            rocprofiler-sdk-sanitizer
+            INTERFACE "$<BUILD_INTERFACE:$<$<COMPILE_LANGUAGE:C,CXX>:${_OPTION}>>")
+    endforeach()
+    # The sanitizer runtime is compiler-specific. C and CXX use the configured host
+    # compiler, while HIP uses the ROCm Clang driver. Passing -fsanitize through a HIP
+    # link would make Clang add compiler-rt in addition to the host compiler runtime.
+    target_link_options(
+        rocprofiler-sdk-sanitizer INTERFACE
+        "$<BUILD_INTERFACE:$<$<LINK_LANGUAGE:C,CXX>:-fsanitize=${_FLAG}>>")
     target_link_libraries(rocprofiler-sdk-memcheck
                           INTERFACE rocprofiler-sdk::rocprofiler-sdk-sanitizer)
     target_link_options(rocprofiler-sdk-memcheck INTERFACE
@@ -68,9 +77,14 @@ function(rocprofiler_set_memcheck_env _TYPE _LIB_BASE)
         endforeach()
     endif()
 
-    target_link_libraries(rocprofiler-sdk-sanitizer INTERFACE ${_LIB_BASE})
-
     if(${_TYPE}_LIBRARY)
+        # HIP-linked targets can contain objects instrumented by the CXX compiler. Link
+        # those targets to that compiler's runtime without passing -fsanitize to the HIP
+        # driver, which would select a second, incompatible compiler-rt runtime.
+        target_link_libraries(
+            rocprofiler-sdk-sanitizer
+            INTERFACE "$<BUILD_INTERFACE:$<$<LINK_LANGUAGE:HIP>:${${_TYPE}_LIBRARY}>>")
+
         set(ROCPROFILER_MEMCHECK_PRELOAD_ENV
             "LD_PRELOAD=${${_TYPE}_LIBRARY}"
             CACHE INTERNAL "LD_PRELOAD env variable for tests " FORCE)
