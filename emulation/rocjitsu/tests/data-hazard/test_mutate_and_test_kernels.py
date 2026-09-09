@@ -145,6 +145,14 @@ def _write_reports(report: ShaderReport, arch: str, out_dir: Path) -> None:
     write_csv_report([report], out_dir / "mutation_report.csv")
 
 
+# Mutants proven passing from redundant wait conditions
+_KNOWN_PASSING_MUTANTS: dict[str, dict[int, str]] = {
+    # This epilogue wait is already satisfied by an earlier s_wait_kmcnt on the
+    # K > 0 path the test runs, so removing it has no effect.
+    "wmma_rocwmma": {3: "s_wait_kmcnt 0x0"},
+}
+
+
 def _assert_mutation_ground_truth(report: ShaderReport, artifact_dir: Path) -> None:
     """
     Ground truth vs plugin using only the written JSON payload (see module docstring).
@@ -158,10 +166,19 @@ def _assert_mutation_ground_truth(report: ShaderReport, artifact_dir: Path) -> N
         f"for {report.shader!r}, got baseline_hazard_count={baseline_hazard_count}. "
         f"See {artifact_dir / 'mutation_report.json'}"
     )
+    known_passing = _KNOWN_PASSING_MUTANTS.get(report.shader, {})
     crashed: list[str] = []
     missed: list[str] = []
     for i, mutant in enumerate(report.mutants):
         assert mutant.ran, f"mutant {i} ({mutant.wait_instruction!r}) did not run"
+        if i in known_passing:
+            expected = known_passing[i]
+            assert mutant.wait_instruction == expected, (
+                f"{report.shader!r} mutant [{i}] is exempt for {expected!r} but the "
+                f"assembly now has {mutant.wait_instruction!r}; re-verify the "
+                "passing condition and update _KNOWN_PASSING_MUTANTS."
+            )
+            continue
         detail = (
             f"  [{i}] {mutant.wait_instruction!r}: "
             f"hazard_count={mutant.hazard_count}, baseline={baseline_hazard_count}"
