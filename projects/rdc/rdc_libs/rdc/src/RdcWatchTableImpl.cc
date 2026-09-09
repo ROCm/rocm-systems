@@ -439,16 +439,6 @@ std::vector<rdc_field_t> RdcWatchTableImpl::health_component_fields(unsigned int
   return field_ids;
 }
 
-bool RdcWatchTableImpl::is_health_field_watched(rdc_gpu_group_t group_id, uint32_t gpu_index,
-                                                rdc_field_t field) {
-  std::lock_guard<std::mutex> guard(watch_mutex_);
-  auto health = health_watch_table_.find(group_id);
-  if (health == health_watch_table_.end()) return false;
-
-  const auto& fields = health->second.fields;
-  return std::find(fields.begin(), fields.end(), RdcFieldKey{gpu_index, field}) != fields.end();
-}
-
 rdc_status_t RdcWatchTableImpl::rdc_health_set(rdc_gpu_group_t group_id, unsigned int components) {
   std::lock_guard<std::mutex> api_guard(health_api_mutex_);
 
@@ -611,7 +601,8 @@ bool RdcWatchTableImpl::add_health_incident(uint32_t gpu_index, rdc_health_syste
   return (result);
 }
 
-rdc_status_t RdcWatchTableImpl::get_start_end_values(rdc_gpu_group_t group_id, uint32_t gpu_index,
+rdc_status_t RdcWatchTableImpl::get_start_end_values(const HealthWatchedSet& watched,
+                                                     rdc_gpu_group_t group_id, uint32_t gpu_index,
                                                      rdc_field_t field, uint64_t start_timestamp,
                                                      rdc_field_value* start_value,
                                                      rdc_field_value* end_value) {
@@ -619,7 +610,7 @@ rdc_status_t RdcWatchTableImpl::get_start_end_values(rdc_gpu_group_t group_id, u
 
   // A field dropped at rdc_health_set (unsupported on this GPU) is skipped
   // without touching SMI or logging.
-  if (!is_health_field_watched(group_id, gpu_index, field)) return RDC_ST_NOT_FOUND;
+  if (0 == watched.count(RdcFieldKey{gpu_index, field})) return RDC_ST_NOT_FOUND;
 
   rdc_status_t result = RDC_ST_OK;
   if (nullptr != start_value) {
@@ -642,14 +633,16 @@ rdc_status_t RdcWatchTableImpl::get_start_end_values(rdc_gpu_group_t group_id, u
   return result;
 }
 
-rdc_status_t RdcWatchTableImpl::pcie_check(rdc_gpu_group_t group_id, uint32_t gpu_index,
+rdc_status_t RdcWatchTableImpl::pcie_check(const HealthWatchedSet& watched,
+                                           rdc_gpu_group_t group_id, uint32_t gpu_index,
                                            rdc_health_response_t* response) {
   // get field start/end values
   rdc_field_value start = {}, end = {};
   uint64_t start_timestamp = static_cast<uint64_t>(time(nullptr) - 60) * 1000;
   // get the history data last 1 minute
-  rdc_status_t result = get_start_end_values(group_id, gpu_index, RDC_HEALTH_PCIE_REPLAY_COUNT,
-                                             start_timestamp, &start, &end);
+  rdc_status_t result = get_start_end_values(watched, group_id, gpu_index,
+                                             RDC_HEALTH_PCIE_REPLAY_COUNT, start_timestamp, &start,
+                                             &end);
   if (result != RDC_ST_OK) return RDC_ST_OK;  // field unavailable on this GPU: skip component
 
   uint64_t pcie_replay_count = end.value.l_int - start.value.l_int;
@@ -671,11 +664,12 @@ rdc_status_t RdcWatchTableImpl::pcie_check(rdc_gpu_group_t group_id, uint32_t gp
   return RDC_ST_OK;
 }
 
-rdc_status_t RdcWatchTableImpl::xgmi_check(rdc_gpu_group_t group_id, uint32_t gpu_index,
+rdc_status_t RdcWatchTableImpl::xgmi_check(const HealthWatchedSet& watched,
+                                           rdc_gpu_group_t group_id, uint32_t gpu_index,
                                            rdc_health_response_t* response) {
   rdc_field_value end = {};
   rdc_status_t result =
-      get_start_end_values(group_id, gpu_index, RDC_HEALTH_XGMI_ERROR, 0, nullptr, &end);
+      get_start_end_values(watched, group_id, gpu_index, RDC_HEALTH_XGMI_ERROR, 0, nullptr, &end);
 
   uint32_t err_code = 0;
   std::string err_msg;
@@ -696,7 +690,8 @@ rdc_status_t RdcWatchTableImpl::xgmi_check(rdc_gpu_group_t group_id, uint32_t gp
     // XGMI_WAFL count) if one is defined.
     auto fallback = health_field_fallbacks().find(RDC_HEALTH_XGMI_ERROR);
     if (fallback == health_field_fallbacks().end()) return RDC_ST_OK;
-    result = get_start_end_values(group_id, gpu_index, fallback->second, 0, nullptr, &end);
+    result =
+        get_start_end_values(watched, group_id, gpu_index, fallback->second, 0, nullptr, &end);
     if (result != RDC_ST_OK) return RDC_ST_OK;  // neither source available: skip component
 
     uint64_t ue_count = end.value.l_int;
@@ -715,14 +710,15 @@ rdc_status_t RdcWatchTableImpl::xgmi_check(rdc_gpu_group_t group_id, uint32_t gp
   return RDC_ST_OK;
 }
 
-rdc_status_t RdcWatchTableImpl::memory_check(rdc_gpu_group_t group_id, uint32_t gpu_index,
+rdc_status_t RdcWatchTableImpl::memory_check(const HealthWatchedSet& watched,
+                                             rdc_gpu_group_t group_id, uint32_t gpu_index,
                                              rdc_health_response_t* response) {
   // get field start/end values
   rdc_field_value start = {}, end = {};
   // Each memory sub-check is evaluated independently: a field that cannot be
   // read on this GPU skips only its own incident, not the rest of the check.
-  rdc_status_t result =
-      get_start_end_values(group_id, gpu_index, RDC_FI_ECC_UNCORRECT_TOTAL, 0, nullptr, &end);
+  rdc_status_t result = get_start_end_values(watched, group_id, gpu_index,
+                                             RDC_FI_ECC_UNCORRECT_TOTAL, 0, nullptr, &end);
   uint64_t ecc_uncorrectable_count = (result == RDC_ST_OK) ? end.value.l_int : 0;
   if (ecc_uncorrectable_count > 0) {
     rdc_health_incidents_t* incident = &response->incidents[response->incidents_count];
@@ -737,7 +733,8 @@ rdc_status_t RdcWatchTableImpl::memory_check(rdc_gpu_group_t group_id, uint32_t 
       return RDC_ST_MAX_LIMIT;
   }
 
-  result = get_start_end_values(group_id, gpu_index, RDC_HEALTH_PENDING_PAGE_NUM, 0, nullptr, &end);
+  result = get_start_end_values(watched, group_id, gpu_index, RDC_HEALTH_PENDING_PAGE_NUM, 0,
+                                nullptr, &end);
   uint64_t num_pages = (result == RDC_ST_OK) ? end.value.l_int : 0;
   if (num_pages > 0) {
     rdc_health_incidents_t* incident = &response->incidents[response->incidents_count];
@@ -753,13 +750,14 @@ rdc_status_t RdcWatchTableImpl::memory_check(rdc_gpu_group_t group_id, uint32_t 
   }
 
   // get retired page number
-  result = get_start_end_values(group_id, gpu_index, RDC_HEALTH_RETIRED_PAGE_NUM, 0, nullptr, &end);
+  result = get_start_end_values(watched, group_id, gpu_index, RDC_HEALTH_RETIRED_PAGE_NUM, 0,
+                                nullptr, &end);
   if (result != RDC_ST_OK) return RDC_ST_OK;  // nothing further to evaluate
   uint64_t retired_page = end.value.l_int;
 
   // get retired page threshold; without it only the weekly-delta check runs
-  result =
-      get_start_end_values(group_id, gpu_index, RDC_HEALTH_RETIRED_PAGE_LIMIT, 0, nullptr, &end);
+  result = get_start_end_values(watched, group_id, gpu_index, RDC_HEALTH_RETIRED_PAGE_LIMIT, 0,
+                                nullptr, &end);
   bool has_threshold = (result == RDC_ST_OK);
   uint32_t retired_page_threshold = has_threshold ? end.value.l_int : 0;
 
@@ -783,8 +781,8 @@ rdc_status_t RdcWatchTableImpl::memory_check(rdc_gpu_group_t group_id, uint32_t 
   if (retired_page > 0) {
     uint64_t start_timestamp = static_cast<uint64_t>(time(nullptr) - 604800) * 1000;
     // get retired page number last 1 week
-    result = get_start_end_values(group_id, gpu_index, RDC_HEALTH_RETIRED_PAGE_NUM, start_timestamp,
-                                  &start, &end);
+    result = get_start_end_values(watched, group_id, gpu_index, RDC_HEALTH_RETIRED_PAGE_NUM,
+                                  start_timestamp, &start, &end);
     if (result != RDC_ST_OK) return RDC_ST_OK;
 
     retired_page = end.value.l_int - start.value.l_int;
@@ -806,11 +804,12 @@ rdc_status_t RdcWatchTableImpl::memory_check(rdc_gpu_group_t group_id, uint32_t 
   return RDC_ST_OK;
 }
 
-rdc_status_t RdcWatchTableImpl::eeprom_check(rdc_gpu_group_t group_id, uint32_t gpu_index,
+rdc_status_t RdcWatchTableImpl::eeprom_check(const HealthWatchedSet& watched,
+                                             rdc_gpu_group_t group_id, uint32_t gpu_index,
                                              rdc_health_response_t* response) {
   rdc_field_value end = {};
-  rdc_status_t result =
-      get_start_end_values(group_id, gpu_index, RDC_FI_ECC_UNCORRECT_TOTAL, 0, nullptr, &end);
+  rdc_status_t result = get_start_end_values(watched, group_id, gpu_index,
+                                             RDC_FI_ECC_UNCORRECT_TOTAL, 0, nullptr, &end);
   if (result != RDC_ST_OK && result != RDC_ST_CORRUPTED_EEPROM) return RDC_ST_OK;
 
   if (result == RDC_ST_CORRUPTED_EEPROM) {
@@ -827,14 +826,16 @@ rdc_status_t RdcWatchTableImpl::eeprom_check(rdc_gpu_group_t group_id, uint32_t 
   return RDC_ST_OK;
 }
 
-rdc_status_t RdcWatchTableImpl::thermal_check(rdc_gpu_group_t group_id, uint32_t gpu_index,
+rdc_status_t RdcWatchTableImpl::thermal_check(const HealthWatchedSet& watched,
+                                              rdc_gpu_group_t group_id, uint32_t gpu_index,
                                               rdc_health_response_t* response) {
   // get field start/end values
   rdc_field_value start = {}, end = {};
   uint64_t start_timestamp = static_cast<uint64_t>(time(nullptr) - 60) * 1000;
   // get the history data last 1 minute
-  rdc_status_t result = get_start_end_values(group_id, gpu_index, RDC_HEALTH_THERMAL_THROTTLE_TIME,
-                                             start_timestamp, &start, &end);
+  rdc_status_t result = get_start_end_values(watched, group_id, gpu_index,
+                                             RDC_HEALTH_THERMAL_THROTTLE_TIME, start_timestamp,
+                                             &start, &end);
   if (result != RDC_ST_OK) return RDC_ST_OK;  // field unavailable on this GPU: skip component
 
   uint64_t acc_socket_thrm = end.value.l_int - start.value.l_int;
@@ -854,14 +855,16 @@ rdc_status_t RdcWatchTableImpl::thermal_check(rdc_gpu_group_t group_id, uint32_t
   return RDC_ST_OK;
 }
 
-rdc_status_t RdcWatchTableImpl::power_check(rdc_gpu_group_t group_id, uint32_t gpu_index,
+rdc_status_t RdcWatchTableImpl::power_check(const HealthWatchedSet& watched,
+                                            rdc_gpu_group_t group_id, uint32_t gpu_index,
                                             rdc_health_response_t* response) {
   // get field start/end values
   rdc_field_value start = {}, end = {};
   uint64_t start_timestamp = static_cast<uint64_t>(time(nullptr) - 60) * 1000;
   // get the history data last 1 minute
-  rdc_status_t result = get_start_end_values(group_id, gpu_index, RDC_HEALTH_POWER_THROTTLE_TIME,
-                                             start_timestamp, &start, &end);
+  rdc_status_t result = get_start_end_values(watched, group_id, gpu_index,
+                                             RDC_HEALTH_POWER_THROTTLE_TIME, start_timestamp,
+                                             &start, &end);
   if (result != RDC_ST_OK) return RDC_ST_OK;  // field unavailable on this GPU: skip component
 
   uint64_t acc_ppt_pwr = end.value.l_int - start.value.l_int;
@@ -898,6 +901,10 @@ rdc_status_t RdcWatchTableImpl::rdc_health_check(rdc_gpu_group_t group_id,
   rdc_status_t result = group_settings_->rdc_group_gpu_get_info(group_id, &ginfo);
   if (result != RDC_ST_OK) return result;
 
+  // The checks consult this snapshot instead of re-taking watch_mutex_, which
+  // the 1 s updater may hold for the length of an SMI batch.
+  const HealthWatchedSet watched(fields_in_watch.begin(), fields_in_watch.end());
+
   for (auto fields = fields_in_watch.begin(); fields != fields_in_watch.end(); fields++) {
     // get current values
     rdc_field_value value;
@@ -917,37 +924,37 @@ rdc_status_t RdcWatchTableImpl::rdc_health_check(rdc_gpu_group_t group_id,
   for (uint32_t gindex = 0; gindex < ginfo.count; gindex++) {
     // PCIe
     if (components & RDC_HEALTH_WATCH_PCIE) {
-      result = pcie_check(group_id, ginfo.entity_ids[gindex], response);
+      result = pcie_check(watched, group_id, ginfo.entity_ids[gindex], response);
       if (result == RDC_ST_MAX_LIMIT) return result;
     }
 
     // XGMI
     if (components & RDC_HEALTH_WATCH_XGMI) {
-      result = xgmi_check(group_id, ginfo.entity_ids[gindex], response);
+      result = xgmi_check(watched, group_id, ginfo.entity_ids[gindex], response);
       if (result == RDC_ST_MAX_LIMIT) return result;
     }
 
     // Memory
     if (components & RDC_HEALTH_WATCH_MEM) {
-      result = memory_check(group_id, ginfo.entity_ids[gindex], response);
+      result = memory_check(watched, group_id, ginfo.entity_ids[gindex], response);
       if (result == RDC_ST_MAX_LIMIT) return result;
     }
 
     // EEPROM
     if (components & RDC_HEALTH_WATCH_EEPROM) {
-      result = eeprom_check(group_id, ginfo.entity_ids[gindex], response);
+      result = eeprom_check(watched, group_id, ginfo.entity_ids[gindex], response);
       if (result == RDC_ST_MAX_LIMIT) return result;
     }
 
     // Thermal
     if (components & RDC_HEALTH_WATCH_THERMAL) {
-      result = thermal_check(group_id, ginfo.entity_ids[gindex], response);
+      result = thermal_check(watched, group_id, ginfo.entity_ids[gindex], response);
       if (result == RDC_ST_MAX_LIMIT) return result;
     }
 
     // Power
     if (components & RDC_HEALTH_WATCH_POWER) {
-      result = power_check(group_id, ginfo.entity_ids[gindex], response);
+      result = power_check(watched, group_id, ginfo.entity_ids[gindex], response);
       if (result == RDC_ST_MAX_LIMIT) return result;
     }
   }  // end of for gindex
