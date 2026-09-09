@@ -439,6 +439,9 @@ add_executable(
     amdgpu_vm_test.cpp
     gpu_queue_registry_test.cpp
     gpu_vm_translation_test.cpp
+    aql_packet_processor_test.cpp
+    pm4_ring_consumer_test.cpp
+    pm4_packet_processor_test.cpp
     config_test.cpp
     daemon_api_test.cpp
     matmul_test.cpp
