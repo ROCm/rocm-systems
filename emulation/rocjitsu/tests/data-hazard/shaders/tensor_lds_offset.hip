@@ -45,7 +45,11 @@ __global__ void tensor_lds_offset_load(const v4i* __restrict__ d_group0,
     v8i group1 = d_group1[0];
 
     // The descriptor's lds_addr places the tile 128 bytes in, over sdata[32:63].
-    __builtin_amdgcn_tensor_load_to_lds_d2(group0, group1, 0);
+    // D# groups 2-4 are zero-initialized for this ≤2D descriptor; the trailing
+    // operand is the cachepolicy (bits[0-2]=th, bits[3-4]=scope).
+    const v4i zero4 = {0, 0, 0, 0};
+    const v8i zero8 = {0, 0, 0, 0, 0, 0, 0, 0};
+    __builtin_amdgcn_tensor_load_to_lds(group0, group1, zero4, zero4, zero8, 0);
 
     asm volatile("s_wait_tensorcnt 0" ::: "memory");
 
