@@ -363,6 +363,17 @@ thread_local auto thread_dispatch_rename_dtor = common::scope_destructor{[]() {
 // any context that needs to support pause/resume functionality should add itself to this list
 auto pause_resume_contexts = context_id_set_t{};
 
+// Kernel replay uses the SDK's authoritative pass index (delivered via the KERNEL_REPLAY PASS
+// callback) as the single source of truth. The dispatch callbacks run synchronously on the same
+// thread within a pass, so they read the pass from this thread-local. The (asynchronous) counter
+// record callback receives it through the per-pass user_data. tid and pass are packed together
+// because user_data is a single 64-bit slot -- Linux tids are pid_t (32-bit) and pass counts are
+// small, so this is lossless and preserves the thread id the record still carries.
+thread_local auto tl_current_replay_pass = std::optional<uint64_t>{};
+
+// Memoizes is_targeted_kernel() for the duration of one replay loop; see the comment there.
+thread_local auto tl_replay_dispatch_targeted = std::optional<bool>{};
+
 // Stores stream ids, graph attribution, and kernel region ids for the
 // kernel-rename, hip-stream-display, and hip-graph-display services.
 struct kernel_rename_and_stream_data
@@ -392,9 +403,25 @@ bool
 is_targeted_kernel(uint64_t                                        _kern_id,
                    common::Synchronized<kernel_iteration_t, true>& _kernel_iteration)
 {
+    // The iteration filter is stateful: every consultation advances the kernel's iteration count,
+    // and --kernel-iteration-range numbers the launches the application made. Kernel replay
+    // re-dispatches one launch once per counter group, and each pass reaches this function, so
+    // consulting the filter per pass would charge a single launch one iteration per pass and reject
+    // every pass past the end of the range -- the counter groups behind those passes are then never
+    // configured and their data is silently dropped.
+    //
+    // The answer therefore belongs to the dispatch, not the pass. Pass 0 consults the filter, which
+    // advances the count by the one launch that actually happened, and the rest of that dispatch's
+    // passes reuse it. Memoizing here rather than in a caller keeps the "consulted once per logical
+    // dispatch" invariant with the state it protects, so every caller gets it. Passes run
+    // synchronously and in order on the enqueuing thread, and tl_replay_dispatch_targeted is reset
+    // when each replay loop begins, so the cached answer cannot outlive its dispatch.
+    if(tl_current_replay_pass.value_or(0) > 0 && tl_replay_dispatch_targeted.has_value())
+        return *tl_replay_dispatch_targeted;
+
     // hold target_kernels around kernel_iteration so the range stays valid; both
     // are only locked here / in add_kernel_target(), so the nesting is safe
-    return target_kernels.rlock(
+    const auto _is_target = target_kernels.rlock(
         [&_kernel_iteration](const targeted_kernels_map_t& _targets_v, uint64_t _kern_id_v) {
             return _kernel_iteration.wlock(
                 [&_targets_v](kernel_iteration_t& _kernel_iter, uint64_t _kernel_id) {
@@ -407,6 +434,9 @@ is_targeted_kernel(uint64_t                                        _kern_id,
                 _kern_id_v);
         },
         _kern_id);
+
+    if(tl_current_replay_pass.has_value()) tl_replay_dispatch_targeted = _is_target;
+    return _is_target;
 }
 
 auto&
@@ -1638,24 +1668,6 @@ get_device_counting_service(rocprofiler_agent_id_t agent_id)
     return profiles->second[profile_pos % profiles->second.size()];
 }
 
-// Kernel replay uses the SDK's authoritative pass index (delivered via the KERNEL_REPLAY PASS
-// callback) as the single source of truth. The counter dispatch callback runs synchronously on the
-// same thread within a pass, so it reads the pass from this thread-local.
-// The (asynchronous) counter record callback receives it through the per-pass user_data. tid and
-// pass are packed together because user_data is a single 64-bit slot -- Linux tids are pid_t
-// (32-bit) and pass counts are small, so this is lossless and preserves the thread id the record
-// still carries.
-thread_local auto tl_current_replay_pass = std::optional<uint64_t>{};
-
-// The kernel iteration filter (--kernel-iteration-range) counts iterations per kernel, advancing
-// the count on every call. Replay dispatches the same kernel once per pass, so consulting the
-// filter on each pass would charge one user-visible launch several iterations and drop every pass
-// after the range is exhausted -- the first pass would be collected and the rest silently skipped.
-// The decision therefore belongs to the dispatch, not the pass: pass 0 consults the filter and the
-// remaining passes of that dispatch reuse the answer recorded here. Passes run synchronously and in
-// order on the enqueuing thread, so a thread-local is sufficient.
-thread_local auto tl_replay_dispatch_targeted = std::optional<bool>{};
-
 // The two 32-bit fields that share the single 64-bit user_data slot: the enqueuing thread id (a
 // Linux tid, i.e. 32-bit pid_t) and the replay pass index. Modeled as a struct so pack/unpack is a
 // plain field access instead of hand-rolled shifts and masks. The width of each field is asserted
@@ -2020,17 +2032,7 @@ counter_dispatch_callback(rocprofiler_dispatch_counting_service_data_t dispatch_
     auto kernel_id = dispatch_data.dispatch_info.kernel_id;
     auto agent_id  = dispatch_data.dispatch_info.agent_id;
 
-    // Ask the iteration filter once per dispatch rather than once per pass. Inside a replay loop
-    // only pass 0 consults it (which advances the kernel's iteration count by one, matching the
-    // single launch the application made); later passes reuse that answer so the filter cannot
-    // reject them and leave their counter groups uncollected.
-    const auto in_later_replay_pass =
-        tl_current_replay_pass.value_or(0) > 0 && tl_replay_dispatch_targeted.has_value();
-    const auto is_target = in_later_replay_pass ? *tl_replay_dispatch_targeted
-                                                : is_targeted_kernel(kernel_id, kernel_iteration);
-    if(tl_current_replay_pass.has_value()) tl_replay_dispatch_targeted = is_target;
-
-    if(!is_target)
+    if(!is_targeted_kernel(kernel_id, kernel_iteration))
     {
         return;
     }
