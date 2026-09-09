@@ -143,16 +143,16 @@ resolve to about 0.5 pp and show under 0.3% either way.
 - **The isolated-copy gain is the narrowest claim here.** It is significant at 96 and 128 MiB in
   every run, but the band's upper edge moves between runs, so its width is less certain than its
   existence. It is the claim most worth re-checking on production silicon.
+- **The numbers predate the current base.** They were taken before the branch was rebased
+  onto current `develop` and have not been re-run on it. The diff is byte-identical and
+  `remote/validate_kernel.sh` still confirms the shipped kernel emits
+  `global_store_b128 ... th:TH_STORE_NT` at full width.
 
 ## The change
 
-Commits `81e65d6bbb` and `ac583d3369` on `users/victzhan/AIRUNTIME-28-nt-blit`: 6 files, 60
-insertions. `blitcl.cpp` gains `__amd_rocclr_copyBufferNT`, the same kernel with
-`__builtin_nontemporal_store` on the store, selected by `DEBUG_CLR_BLIT_NONTEMPORAL`, default
-**false**; the PR has the rest. One caveat the PR does not show: the measurements above were
-taken at `563095dbca`, before the branch was rebased 335 commits onto `develop`, and have not
-been re-run on the new base — the diff is byte-identical and `remote/validate_kernel.sh` still
-confirms the shipped kernel emits `global_store_b128 ... th:TH_STORE_NT` at full width.
+`blitcl.cpp` gains `__amd_rocclr_copyBufferNT`: `__amd_rocclr_copyBuffer` with
+`__builtin_nontemporal_store` on the store, still `ulong2`, selected by a new
+`DEBUG_CLR_BLIT_NONTEMPORAL` flag that defaults to **false**. Six files, 60 insertions.
 
 ## Validation
 
