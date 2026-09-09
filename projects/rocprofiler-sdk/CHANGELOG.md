@@ -38,7 +38,7 @@ Full documentation for ROCprofiler-SDK is available at [rocm.docs.amd.com/projec
 
 ### Known issues
 
-- Dynamic attachment with `rocprofv3 --attach` can fail for some PyTorch workloads because `libtorch_cpu.so` exports `rocprofiler_configure`, which `rocprofiler-register` can interpret as an active profiling tool. This prevents the attachment listener from starting. There is currently no supported workaround for attaching to an affected running process. A fix is planned for a future release.
+- Dynamic attachment with `rocprofv3 --attach` can fail when the target process already exposes `rocprofiler_configure`. For example, some PyTorch workloads are affected because `libtorch_cpu.so` exports this symbol. `rocprofiler-register` can interpret the symbol as an active profiling tool, preventing the attachment listener from starting.
 
 ### Removed
 
