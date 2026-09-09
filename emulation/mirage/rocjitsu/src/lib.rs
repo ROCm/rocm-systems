@@ -231,6 +231,51 @@ impl EmulatorBackend for Rocjitsu {
             runtime_dir.display().to_string(),
         );
 
+        // Name the process hosting the daemon, so the interposer can tell
+        // that the peer answering its socket is the daemon mirage started
+        // for it and not merely *a* process of this user that got there
+        // first.
+        //
+        // The interposer asks the daemon for permission to be read out of
+        // (`PR_SET_PTRACER`) — pageable transfers the runtime registered
+        // through KFD SVM are serviced by the daemon reaching into the
+        // workload with process_vm_readv, and Yama refuses that to a
+        // non-descendant without the grant. `SO_PEERCRED` answers who is
+        // connected, which is weaker than it looks: the socket path is
+        // predictable, so any process of this user could be listening. So
+        // the interposer takes the launcher's word for which PID it
+        // should be talking to, from `$ROCJITSU_DAEMON_PID`, and where no
+        // launcher left one it trusts the peer anyway and warns — on the
+        // workload's stderr, at every single launch:
+        //
+        //     [rj warn] daemon: authorizing pid N to read this address
+        //     space; no launcher named a daemon for this client, ...
+        //
+        // Mirage *is* the launcher and has always known the answer: it
+        // hosts the daemon in-process (`start_daemon` calls
+        // `rj_daemon_start` on this very process, rather than forking a
+        // separate one the way the `rocjitsu` CLI does), so the PID the
+        // interposer should see is ours. Saying so silences the warning
+        // by making the claim true, rather than by hiding it — the grant
+        // stops resting on "whoever answered".
+        //
+        // Only in daemon mode. `--in-process` emulates inside the
+        // workload, connects to no socket, and would be told about a
+        // daemon that does not exist.
+        //
+        // A containerised workload is unaffected either way: its PID
+        // namespace does not contain this process, so `SO_PEERCRED`
+        // reports no usable peer there and the interposer never consults
+        // this variable. It is exported regardless, because a container
+        // that *does* share the namespace is then told the truth rather
+        // than nothing.
+        if ctx.daemon {
+            env.insert(
+                "ROCJITSU_DAEMON_PID".to_string(),
+                std::process::id().to_string(),
+            );
+        }
+
         // Default runtime tuning the emulated workload needs to behave
         // under rocjitsu. These mirror the environment the upstream
         // rocjitsu RCCL collective tests run with (see

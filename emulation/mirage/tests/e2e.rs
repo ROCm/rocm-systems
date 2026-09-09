@@ -971,6 +971,47 @@ fn the_rank_environment_is_injected() {
     assert_eq!(out.trim(), "0/0/1/0");
 }
 
+/// The workload is told which process hosts the emulator daemon.
+///
+/// The interposer inside the workload asks that daemon for permission to
+/// be read out of, and checks the peer answering its socket against
+/// `$ROCJITSU_DAEMON_PID`. With nothing there it trusts whoever answered
+/// and warns on the workload's own stderr, at every launch — the
+/// variable has to survive the whole way into the workload's
+/// environment, not merely be computed.
+///
+/// Which PID is correct is pinned in `mirage_rocjitsu`'s own tests,
+/// where "the process hosting the daemon" is checkable directly. This
+/// asserts the two facts that only a real run can: that it arrives, and
+/// that `--in-process` — which starts no daemon and connects to no
+/// socket — does not claim one.
+#[test]
+fn the_workload_is_told_which_process_hosts_the_daemon() {
+    let env = Env::new();
+    if skip_without_emulator() {
+        return;
+    }
+    env.create_profile("p");
+    let read_var = ["--", "/bin/sh", "-c", "echo ${ROCJITSU_DAEMON_PID:-unset}"];
+
+    let mut daemon = vec!["run", "--profile", "p"];
+    daemon.extend_from_slice(&read_var);
+    let named = env.ok(&daemon);
+    let named = named.trim();
+    assert!(
+        named.parse::<u32>().is_ok_and(|pid| pid > 0),
+        "a daemon-mode run must name the daemon's process, got {named:?}"
+    );
+
+    let mut local = vec!["run", "--in-process", "--profile", "p"];
+    local.extend_from_slice(&read_var);
+    assert_eq!(
+        env.ok(&local).trim(),
+        "unset",
+        "--in-process starts no daemon, so there is none to name"
+    );
+}
+
 #[test]
 fn a_multi_node_topology_runs_every_node() {
     let env = Env::new();
