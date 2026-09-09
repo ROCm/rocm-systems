@@ -1422,6 +1422,11 @@
         precisionMenu.hidden = !opening;
         precisionBtn.setAttribute("aria-expanded", String(opening));
       });
+      // Keep clicks inside the menu from reaching the close-on-outside-click
+      // handler below, so ticking a box does not shut the menu.
+      precisionMenu.addEventListener("click", function (e) {
+        e.stopPropagation();
+      });
       precisionMenu.addEventListener("change", function (e) {
         if (e.target.type !== "checkbox") {
           return;
