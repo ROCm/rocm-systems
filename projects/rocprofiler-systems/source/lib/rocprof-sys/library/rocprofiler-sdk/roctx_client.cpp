@@ -281,14 +281,14 @@ roctx_client<MarkerWriterPolicy>::handle_marker_control(
         rocprofiler_callback_phase_t        phase;
         user_action_fn                      action;
     };
-    static constexpr auto dispatch = std::array<control_op, 2>{
+    static constexpr auto k_dispatch = std::array<control_op, 2>{
         { { ROCPROFILER_MARKER_CONTROL_API_ID_roctxProfilerPause,
             ROCPROFILER_CALLBACK_PHASE_ENTER, &control::triggers::roctx::on_pause },
           { ROCPROFILER_MARKER_CONTROL_API_ID_roctxProfilerResume,
             ROCPROFILER_CALLBACK_PHASE_EXIT, &control::triggers::roctx::on_resume } }
     };
 
-    for(const auto& entry : dispatch)
+    for(const auto& entry : k_dispatch)
     {
         if(record.operation == entry.op && record.phase == entry.phase)
         {

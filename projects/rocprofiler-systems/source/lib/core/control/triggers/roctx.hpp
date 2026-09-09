@@ -51,7 +51,7 @@ private:
     std::mutex                         m_mutex;
     std::shared_ptr<session>           m_session;
 
-    static constexpr std::string_view trigger_name = "roctx";
+    static constexpr std::string_view k_trigger_name = "roctx";
 
     [[nodiscard]] action compute_action() const noexcept;
     [[nodiscard]] bool   compute_should_write() const noexcept;

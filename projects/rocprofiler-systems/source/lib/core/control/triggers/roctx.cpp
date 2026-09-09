@@ -64,10 +64,10 @@ roctx::roctx(std::shared_ptr<session> sess, std::string_view trace_regions)
     }
 
     m_should_write.store(compute_should_write(), std::memory_order_relaxed);
-    m_session->register_trigger(trigger_name, compute_action());
+    m_session->register_trigger(k_trigger_name, compute_action());
 }
 
-roctx::~roctx() { m_session->unregister_trigger(trigger_name); }
+roctx::~roctx() { m_session->unregister_trigger(k_trigger_name); }
 
 void
 roctx::on_range_start(std::uint64_t range_id, const char* message)
@@ -77,7 +77,7 @@ roctx::on_range_start(std::uint64_t range_id, const char* message)
         return;
     }
 
-    const auto       _thread_state_guard = state::thread::scoped(state::thread::Internal);
+    const auto       thread_state_guard = state::thread::scoped(state::thread::Internal);
     const scope_exit refresh{ [this] { refresh_state(); } };
     const std::scoped_lock notify_lk{ m_mutex };
     const bool             was_empty = m_active_range_ids.empty();
@@ -108,7 +108,7 @@ roctx::on_range_stop(std::uint64_t range_id)
 bool
 roctx::remove_active_range(std::uint64_t range_id)
 {
-    const auto _thread_state_guard = state::thread::scoped(state::thread::Internal);
+    const auto thread_state_guard = state::thread::scoped(state::thread::Internal);
     const std::scoped_lock notify_lk{ m_mutex };
     if(m_active_range_ids.erase(range_id) == 0)
     {
@@ -138,7 +138,7 @@ roctx::warn_if_paused_region_ended()
 void
 roctx::on_pause()
 {
-    const auto       _thread_state_guard = state::thread::scoped(state::thread::Internal);
+    const auto       thread_state_guard = state::thread::scoped(state::thread::Internal);
     const scope_exit refresh{ [this] { refresh_state(); } };
     if(filter_active())
     {
@@ -169,7 +169,7 @@ roctx::on_resume()
         return;
     }
 
-    const auto       _thread_state_guard = state::thread::scoped(state::thread::Internal);
+    const auto       thread_state_guard = state::thread::scoped(state::thread::Internal);
     const scope_exit refresh{ [this] { refresh_state(); } };
     if(filter_active())
     {
@@ -204,6 +204,6 @@ void
 roctx::refresh_state()
 {
     m_should_write.store(compute_should_write(), std::memory_order_relaxed);
-    m_session->set_action(trigger_name, compute_action());
+    m_session->set_action(k_trigger_name, compute_action());
 }
 }  // namespace rocprofsys::control::triggers
