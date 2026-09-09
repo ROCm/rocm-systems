@@ -750,8 +750,6 @@ class Roofline:
 
         if is_new_figure:
             self._apply_plotly_layout(fig, dtype, ops_flops, (x_lo, x_hi, y_lo, y_hi))
-        else:
-            self._extend_stacked_title(fig, dtype)
 
         return fig
 
@@ -968,7 +966,7 @@ class Roofline:
         fig.update_layout(
             template="plotly_white",
             title=dict(
-                text=f"Empirical Roofline Analysis ({dtype})",
+                text="Empirical Roofline Analysis",
                 x=0.5,
                 xanchor="center",
                 font=dict(size=15),
@@ -985,17 +983,6 @@ class Roofline:
                 font=dict(size=13, color="#1b1f24"),
             ),
         )
-
-    def _extend_stacked_title(self, fig: go.Figure, dtype: str) -> None:
-        """Extend an existing figure's title to list every stacked datatype."""
-        if not fig.layout.title.text:
-            return
-        title_text = fig.layout.title.text
-        if "(" in title_text and ")" in title_text:
-            prefix = title_text.split("(")[0]
-            existing_types = title_text.split("(")[1].split(")")[0]
-            if dtype not in existing_types.split(", "):
-                fig.layout.title.text = f"{prefix}({existing_types}, {dtype})"
 
     def cli_generate_plot(
         self,

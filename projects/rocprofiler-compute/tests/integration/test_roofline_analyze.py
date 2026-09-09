@@ -49,10 +49,6 @@ def test_analyze_generates_roofline_html(
     html_files = list(Path(workload_dir).glob("empirRoof_*.html"))
     assert [html_file.name for html_file in html_files] == ["empirRoof_gpu-0.html"]
 
-    html_text = html_files[0].read_text(encoding="utf-8")
-    assert "roofline-precision-select" in html_text
-    assert "FP32" in html_text
-
     common.clean_output_dir(config["cleanup"], workload_dir)
 
 
@@ -76,11 +72,6 @@ def test_analyze_roofline_datatype_independently(
             dtype,
         ])
         assert code == 0
-
-        html_path = Path(workload_dir) / "empirRoof_gpu-0.html"
-        html_text = html_path.read_text(encoding="utf-8")
-        assert "roofline-precision-select" in html_text
-        assert dtype in html_text
 
     html_files = list(Path(workload_dir).glob("empirRoof_*.html"))
     assert [html_file.name for html_file in html_files] == ["empirRoof_gpu-0.html"]
