@@ -42,7 +42,9 @@ namespace detail {
 
 enum class TrapInterruptSite { Unknown, Profiling, QueueException };
 
-constexpr bool uses_pre_gfx12_trap_interrupt_sites(rj_code_arch_t arch) {
+enum class TrapInterruptAbi { Unsupported, PreGfx12, Gfx12 };
+
+constexpr TrapInterruptAbi trap_interrupt_abi(rj_code_arch_t arch) {
   switch (arch) {
   case ROCJITSU_CODE_ARCH_CDNA1:
   case ROCJITSU_CODE_ARCH_CDNA2:
@@ -52,10 +54,20 @@ constexpr bool uses_pre_gfx12_trap_interrupt_sites(rj_code_arch_t arch) {
   case ROCJITSU_CODE_ARCH_RDNA2:
   case ROCJITSU_CODE_ARCH_RDNA3:
   case ROCJITSU_CODE_ARCH_RDNA3_5:
-    return true;
-  default:
-    return false;
+    return TrapInterruptAbi::PreGfx12;
+  case ROCJITSU_CODE_ARCH_RDNA4:
+  case ROCJITSU_CODE_ARCH_CDNA5:
+    return TrapInterruptAbi::Gfx12;
+  case ROCJITSU_CODE_ARCH_RV32I:
+  case ROCJITSU_CODE_ARCH_RV64I:
+  case ROCJITSU_CODE_ARCH_INVALID:
+    return TrapInterruptAbi::Unsupported;
   }
+  return TrapInterruptAbi::Unsupported;
+}
+
+constexpr bool uses_pre_gfx12_trap_interrupt_sites(rj_code_arch_t arch) {
+  return trap_interrupt_abi(arch) == TrapInterruptAbi::PreGfx12;
 }
 
 constexpr TrapInterruptSite
@@ -475,7 +487,9 @@ private:
   bool on_wave_single_step_complete(amdgpu::Wavefront &wf);
   void apply_debug_event_publication_hook_for_testing(const std::shared_ptr<KfdProcess> &proc);
   [[nodiscard]] bool notify_debug_event(const std::shared_ptr<KfdProcess> &proc, uint32_t queue_id,
-                                        uint64_t exception_mask = KFD_EC_MASK(EC_QUEUE_WAVE_TRAP));
+                                        uint64_t exception_mask = KFD_EC_MASK(EC_QUEUE_WAVE_TRAP),
+                                        bool retain_on_rejection = true);
+  static bool defer_wave_exception_to_runtime(amdgpu::Wavefront &wf, uint64_t exception_mask);
   /// @brief Publish a wave stop: serialize the queue, then wake the debugger.
   /// @returns True if the CWSR record was written and the event raised. On
   /// false nothing was published and the caller must undo the stop it claimed:
@@ -483,7 +497,8 @@ private:
   /// it and can never be resumed.
   [[nodiscard]] bool report_wave_stopped(const std::shared_ptr<KfdProcess> &proc, uint32_t queue_id,
                                          uint32_t gpu_id, uint64_t ctx_base, uint32_t ctx_size,
-                                         uint64_t exception_mask = KFD_EC_MASK(EC_QUEUE_WAVE_TRAP));
+                                         uint64_t exception_mask = KFD_EC_MASK(EC_QUEUE_WAVE_TRAP),
+                                         bool retain_on_rejection = true);
 
   /// @brief Whether a wave stop on @p gpu_id could be published to a debugger.
   /// @details Checked *before* a handler claims a stop. The CWSR codec models
@@ -669,7 +684,8 @@ private:
   /// @details Protected by interrupt_mutex_. Decoupled from process_mutex_
   /// to avoid ABBA deadlocks with hw_queue_mutex_ in the CP doorbell thread.
   mutable std::mutex interrupt_mutex_;
-  std::mutex queue_exception_mutex_;
+  std::mutex queue_exception_locks_mutex_;
+  std::unordered_map<uint64_t, std::weak_ptr<std::mutex>> queue_exception_locks_;
   std::unordered_map<uint32_t, EventState *> event_dispatch_;
 
   /// @brief Process ID for local-mode (interposer). Set once in open().

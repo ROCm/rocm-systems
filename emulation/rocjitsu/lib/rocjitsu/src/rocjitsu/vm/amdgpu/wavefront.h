@@ -751,6 +751,8 @@ public:
   bool debug_paused() const { return debug_stopped() || runtime_suspended_; }
   bool fatal_exception_pending() const { return fatal_exception_pending_; }
   void set_fatal_exception_pending(bool pending) { fatal_exception_pending_ = pending; }
+  bool fatal_exception_cwsr_valid() const { return fatal_exception_cwsr_valid_; }
+  void set_fatal_exception_cwsr_valid(bool valid) { fatal_exception_cwsr_valid_ = valid; }
 
   /// @brief Whether a future debugger resume should request single-step mode.
   bool debug_single_step() const { return single_step_; }
@@ -805,12 +807,14 @@ public:
     bool debug_halted = false;
     bool single_step = false;
     bool fatal_exception_pending = false;
+    bool fatal_exception_cwsr_valid = false;
   };
 
   /// @brief Capture the fields @ref restore_debug_stop_state puts back.
   DebugStopState debug_stop_state() const {
-    return DebugStopState{trapsts_,      mode_raw_,    gfx12_trap_ctrl_raw_,    trap_id_,
-                          debug_halted_, single_step_, fatal_exception_pending_};
+    return DebugStopState{
+        trapsts_,      mode_raw_,    gfx12_trap_ctrl_raw_,     trap_id_,
+        debug_halted_, single_step_, fatal_exception_pending_, fatal_exception_cwsr_valid_};
   }
 
   /// @brief Undo a debug stop captured by @ref debug_stop_state.
@@ -822,6 +826,7 @@ public:
     debug_halted_ = saved.debug_halted;
     single_step_ = saved.single_step;
     fatal_exception_pending_ = saved.fatal_exception_pending;
+    fatal_exception_cwsr_valid_ = saved.fatal_exception_cwsr_valid;
   }
 
   /// @brief Halt this wavefront and notify the CU for WG completion tracking.
@@ -920,6 +925,7 @@ public:
     debug_suspended_ = false;
     runtime_suspended_ = false;
     fatal_exception_pending_ = false;
+    fatal_exception_cwsr_valid_ = false;
     single_step_ = false;
     trap_id_ = 0;
     debug_wave_id_ = 0;
@@ -1019,6 +1025,7 @@ private:
   bool debug_suspended_ = false;   ///< Queue-suspended for a stable CWSR snapshot.
   bool runtime_suspended_ = false; ///< Queue-suspended by the runtime (queue_percentage 0).
   bool fatal_exception_pending_ = false;
+  bool fatal_exception_cwsr_valid_ = false;
   bool single_step_ = false;   ///< Execute one instruction on resume, then re-stop.
   uint32_t trap_id_ = 0;       ///< Trap id from the last s_trap (breakpoint = 1).
   uint64_t debug_wave_id_ = 0; ///< Stable debugger wave id (TTMP4:5); 0 until assigned.
