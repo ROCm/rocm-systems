@@ -437,8 +437,9 @@ ncclResult_t ncclAlltoAll_impl(const void* sendbuff, void* recvbuff, size_t coun
     if (ncclAllToAllGinSdmaEligible(comm, sendbuff, recvbuff, count, datatype)) {
       INFO(NCCL_COLL, "AllToAll: taking GIN-SDMA path: nRanks=%d count=%zu datatype=%d bytes=%zu inPlace=%d",
            comm->nRanks, count, (int)datatype, count * ncclTypeSize(datatype), sendbuff == recvbuff ? 1 : 0);
-      NCCLCHECK(ncclAllToAllGinSdma(sendbuff, recvbuff, count, datatype, comm, stream));
-      return ncclSuccess;
+      return rcclAddonLaunch(comm, stream, [&] {
+        return ncclAllToAllGinSdma(sendbuff, recvbuff, count, datatype, comm, stream);
+      });
     }
 #endif
     // alltoall does not need symEligible check as symmetric kernel is not supported for alltoall
@@ -662,8 +663,9 @@ ncclResult_t ncclAllReduce_impl(const void* sendbuff, void* recvbuff, size_t cou
   case RCCL_GIN_SDMA:
     INFO(NCCL_COLL, "AllReduce: taking GIN SDMA path: nRanks=%d count=%zu bytes=%zu", comm->nRanks, count,
          count * ncclTypeSize(datatype));
-    NCCLCHECK(ncclAllReduceGinSdma(sendbuff, recvbuff, count, datatype, op, comm, stream));
-    return ncclSuccess;
+    return rcclAddonLaunch(comm, stream, [&] {
+      return ncclAllReduceGinSdma(sendbuff, recvbuff, count, datatype, op, comm, stream);
+    });
 #endif
   case RCCL_CE_2SHOT:
     if (count == 0) return ncclSuccess;
