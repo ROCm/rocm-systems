@@ -27,6 +27,7 @@
 #include <optional>
 #include <stop_token>
 #include <thread>
+#include <unistd.h>
 
 namespace rocjitsu {
 namespace {
@@ -50,6 +51,38 @@ void drain_and_restore(const sigset_t &handled, const sigset_t &previous) {
   pthread_sigmask(SIG_SETMASK, &previous, nullptr);
 }
 
+/// @brief Block every signal the server handles before any worker can exist.
+class ServerSignalMask {
+public:
+  ServerSignalMask() {
+    sigemptyset(&handled_);
+    sigaddset(&handled_, SIGINT);
+    sigaddset(&handled_, SIGTERM);
+    sigaddset(&handled_, SIGUSR1);
+    active_ = pthread_sigmask(SIG_BLOCK, &handled_, &previous_) == 0;
+  }
+
+  ~ServerSignalMask() { restore(); }
+
+  ServerSignalMask(const ServerSignalMask &) = delete;
+  ServerSignalMask &operator=(const ServerSignalMask &) = delete;
+
+  [[nodiscard]] bool active() const { return active_; }
+  [[nodiscard]] const sigset_t &handled() const { return handled_; }
+
+  void restore() {
+    if (!active_)
+      return;
+    drain_and_restore(handled_, previous_);
+    active_ = false;
+  }
+
+private:
+  sigset_t handled_{};
+  sigset_t previous_{};
+  bool active_ = false;
+};
+
 /// @brief How often the waiting thread rechecks for a signal.
 constexpr long kSignalPollNanoseconds = 100'000'000;
 
@@ -67,6 +100,38 @@ constexpr long kSignalPollNanoseconds = 100'000'000;
 constexpr uint8_t kRequestedInterruptClient = 0x1a;
 constexpr uint8_t kRequestedInterruptSource = 0x00;
 
+/// @brief Own the launcher's readiness descriptor until startup succeeds.
+class ReadinessPipe {
+public:
+  explicit ReadinessPipe(int fd) : fd_(fd) {}
+  ~ReadinessPipe() {
+    if (fd_ >= 0) {
+      close(fd_);
+    }
+  }
+
+  ReadinessPipe(const ReadinessPipe &) = delete;
+  ReadinessPipe &operator=(const ReadinessPipe &) = delete;
+
+  [[nodiscard]] bool signal() {
+    if (fd_ < 0) {
+      return true;
+    }
+
+    constexpr uint8_t ready = 1;
+    ssize_t written = 0;
+    do {
+      written = write(fd_, &ready, sizeof(ready));
+    } while (written < 0 && errno == EINTR);
+    close(fd_);
+    fd_ = -1;
+    return written == static_cast<ssize_t>(sizeof(ready));
+  }
+
+private:
+  int fd_;
+};
+
 } // namespace
 
 ServerSignalAction action_for_signal(int signal) {
@@ -82,7 +147,16 @@ ServerSignalAction action_for_signal(int signal) {
 namespace {
 
 int run_vfio_server_impl(const std::string &config_path, const std::string &socket_path,
-                         std::optional<int> engine_exit_code_for_test) {
+                         int ready_fd, std::optional<int> engine_exit_code_for_test) {
+  ReadinessPipe readiness(ready_fd);
+  // Config loading and machine construction may create helper threads. Block
+  // before either one so every thread in the server inherits the mask and a
+  // process-directed shutdown signal can only be consumed by sigtimedwait().
+  ServerSignalMask signal_mask;
+  if (!signal_mask.active()) {
+    util::Logger::warn("vfu: cannot block the signals this server waits on");
+    return 1;
+  }
   config::LoadedConfig loaded;
   try {
     loaded = config::load_config(config_path, kEmbeddedSchema);
@@ -178,30 +252,6 @@ int run_vfio_server_impl(const std::string &config_path, const std::string &sock
   // a second one in front of the same hardware.
   engine.register_as_primary();
 
-  // Shutdown signals are blocked and then consumed synchronously, the way the
-  // daemon does it. Almost nothing is safe to touch from a signal handler, least
-  // of all the synchronization a stop request runs through.
-  //
-  // POSIX rather than std, deliberately and not for want of looking: C++ offers
-  // no per-thread signal mask and no synchronous signal wait. std::signal gives
-  // only an async handler, which is the thing being avoided here, and sigprocmask
-  // is unspecified in a process with threads -- which this one has, since serving
-  // runs on its own. pthread_sigmask is the correct call, and <csignal> declares
-  // it; it does not need <pthread.h>.
-  sigset_t handled_signals;
-  sigemptyset(&handled_signals);
-  sigaddset(&handled_signals, SIGINT);
-  sigaddset(&handled_signals, SIGTERM);
-  // Delivering an interrupt on request is a bring-up affordance, not a model of
-  // anything: the device has no event source yet, so the only way to show that
-  // the interrupt path works end to end is for something outside to ask.
-  sigaddset(&handled_signals, SIGUSR1);
-  sigset_t previous_signals;
-  if (pthread_sigmask(SIG_BLOCK, &handled_signals, &previous_signals) != 0) {
-    util::Logger::warn("vfu: cannot block the signals this server waits on");
-    return 1;
-  }
-
   int status = 0;
   // Started after the mask is in place so it inherits it: a shutdown signal must
   // reach the thread waiting for one below, not interrupt the engine.
@@ -245,27 +295,29 @@ int run_vfio_server_impl(const std::string &config_path, const std::string &sock
 
   if (!engine.wait_until_started()) {
     util::Logger::warn("vfu: the simulation engine did not start");
-    drain_and_restore(handled_signals, previous_signals);
     return 1;
   }
   if (engine_finished.load(std::memory_order_acquire)) {
     engine_run.stop();
     util::Logger::warn(std::format("vfu: simulation engine stopped before serving: {} (code {})",
                                    engine_status.message, engine_status.code));
-    drain_and_restore(handled_signals, previous_signals);
     return engine_status.code == 0 ? 1 : engine_status.code;
   }
 
   {
     VfioDeviceHost host(socket_path, device);
     if (!host.build()) {
-      // Drained on this path too: a request signal queued while the mask was on
-      // is still pending, and unmasking with one outstanding kills the process
-      // on the way out of a failure it has already reported.
-      drain_and_restore(handled_signals, previous_signals);
       return 1;
     }
 
+    // build() has bound and started listening on the AF_UNIX socket. Publish
+    // that state directly instead of making the launcher infer it by polling a
+    // path against a guessed deadline. Closing the pipe without this byte is
+    // the corresponding startup-failure notification.
+    if (!readiness.signal()) {
+      util::Logger::warn("vfu: cannot report server readiness to the launcher");
+      return 1;
+    }
     if (engine_exit_code_for_test.has_value()) {
       engine.request_exit("test-requested simulation failure", *engine_exit_code_for_test);
     }
@@ -284,13 +336,15 @@ int run_vfio_server_impl(const std::string &config_path, const std::string &sock
       serving_finished = true;
     });
 
-    // Waiting only for a signal would leave the process alive but serving
-    // nothing if the transport failed on its own: a supervisor would see a
-    // healthy process in front of a dead socket.
+    // A clean client disconnect does not own the server process lifetime. The
+    // launcher observes QEMU itself and sends the shutdown signal after QEMU
+    // exits, avoiding a timing-dependent grace period between disconnect and
+    // waitpid. A transport failure still ends the process immediately.
     bool engine_ended_while_serving = false;
-    while (!serving_finished.load() && !engine_finished.load(std::memory_order_acquire)) {
+    while ((!serving_finished.load() || !serving_failed.load()) &&
+           !engine_finished.load(std::memory_order_acquire)) {
       const timespec timeout{.tv_sec = 0, .tv_nsec = kSignalPollNanoseconds};
-      const int signal = sigtimedwait(&handled_signals, nullptr, &timeout);
+      const int signal = sigtimedwait(&signal_mask.handled(), nullptr, &timeout);
       const ServerSignalAction action = action_for_signal(signal);
       if (action == ServerSignalAction::Stop) {
         break;
@@ -337,7 +391,7 @@ int run_vfio_server_impl(const std::string &config_path, const std::string &sock
   // nothing can call into the device while the engine is stopped and joined.
   // The device outlives both, because the topology owns it and the engine owns
   // that.
-  drain_and_restore(handled_signals, previous_signals);
+  signal_mask.restore();
 
   // What the driver said about its interrupt ring. Reported next to the
   // unmodelled registers because it answers the same question -- how far the
@@ -361,13 +415,14 @@ int run_vfio_server_impl(const std::string &config_path, const std::string &sock
 
 } // namespace
 
-int run_vfio_server(const std::string &config_path, const std::string &socket_path) {
-  return run_vfio_server_impl(config_path, socket_path, std::nullopt);
+int run_vfio_server(const std::string &config_path, const std::string &socket_path, int ready_fd) {
+  return run_vfio_server_impl(config_path, socket_path, ready_fd, std::nullopt);
 }
 
 int run_vfio_server_with_engine_exit_for_test(const std::string &config_path,
-                                              const std::string &socket_path, int exit_code) {
-  return run_vfio_server_impl(config_path, socket_path, exit_code);
+                                              const std::string &socket_path, int ready_fd,
+                                              int exit_code) {
+  return run_vfio_server_impl(config_path, socket_path, ready_fd, exit_code);
 }
 
 } // namespace rocjitsu
