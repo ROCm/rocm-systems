@@ -32,18 +32,12 @@ measured here.
 
 ## Results
 
-One result set, `results/20260828_062133`, on `heliosr-1b114-a07-4` at a 1100 MHz clock
-ceiling. The machine has since been reconfigured to 2400 MHz, which moves every absolute figure
-below; re-measure before quoting these against current hardware.
-
-Negative is faster. `(noise)` means smaller than that run's resolution limit — the spread the
-rig shows when it measures the same kernel twice — so: no effect found.
+Negative is faster. `(noise)` = smaller than that run's resolution limit, the spread the rig
+shows measuring the same kernel twice, so: no effect found.
 
 ### Isolated streaming copy, 1 GiB
 
-Each row changes one thing from the variant it is measured against. Where that is not
-`plain-128`, the variant differs from production in two ways and comparing it to production
-would credit the wrong one.
+Each row changes one thing from the variant it is measured against.
 
 | change | measured against | effect [95% CI] |
 |---|---|---|
@@ -54,18 +48,15 @@ would credit the wrong one.
 | 64-bit instead of 128-bit | `plain-128` | **+77.26% [+76.75, +77.69]** |
 | 32-bit instead of 128-bit | `plain-128` | **+220.10% [+218.77, +220.62]** |
 
-Resolution limit 0.74 percentage points (pp); an effect must beat that in magnitude, it is not
-a plus-or-minus band. Baseline 0.5253 ms, 4088 GB/s.
+Resolution limit 0.74 percentage points (pp). Baseline 0.5253 ms, 4088 GB/s.
 
-No hint is separable from noise; width dominates by two orders of magnitude. That is also why
+No hint beats noise; width dominates by two orders of magnitude. That is why
 [PR 2616](https://github.com/ROCm/clr/pull/2616) reads as evidence against non-temporal stores
-when it is evidence about width: its kernel branches on `aligned_size == sizeof(ulong)` (8)
-while `shaderCopyBuffer` passes 16, so every aligned copy silently takes the 32-bit path.
+when it is really evidence about width — it branches on `aligned_size == sizeof(ulong)` while
+the host passes 16, so every aligned copy silently takes the 32-bit path. The other hint,
+`TH_STORE_NT_RT`, needs hand-written asm and measures -0.29% net of it: rejected.
 
-`TH_STORE_NT_RT` was tried and rejected: it needs hand-written gfx12 asm, and net of that
-hand-writing it measures -0.29%, noise.
-
-### Where in the size range the hint does anything
+### By copy size
 
 | copy size | nt-store-128 vs plain-128 | resolution limit |
 |---|---|---|
@@ -77,15 +68,13 @@ hand-writing it measures -0.29%, noise.
 | 256 - 512 MiB | -1.5%, -1.4%, both (noise) | 2.5, 2.4 pp |
 | 1 GiB | -0.38% (noise) | 1.2 pp |
 
-The band that pays is where the copy straddles GL2: 96 MiB copied touches 192 MiB against a
-~96-128 MiB cache. Below 64 MiB there is no eviction pressure to relieve, and below 4 MiB the
-dispatch costs more than the copy. Read it as roughly 3-5% from 96 to 192 MiB: across four runs
-96 and 128 MiB were always significant, 192 and 256 MiB moved in and out.
+The band that pays is where the copy straddles GL2 — 96 MiB copied touches 192 MiB against a
+~96-128 MiB cache. Call it 3-5% from 96 to 192 MiB: over four runs 96 and 128 MiB were always
+significant, 192 and 256 MiB moved in and out.
 
-### A copy alongside a cache-sensitive kernel
+### Alongside a cache-sensitive kernel
 
-Metric is the **victim kernel's** time, not the copy's. A 128 MiB copy repeats to cover the
-victim's ~5 ms run; the victim's working set is swept.
+Metric is the **victim kernel's** time, not the copy's, with a 128 MiB copy running against it.
 
 | victim working set | victim time vs plain-128 | codegen control |
 |---|---|---|
@@ -98,40 +87,27 @@ victim's ~5 ms run; the victim's working set is swept.
 | 96 MiB | **-2.40%** | (noise) |
 | 128 MiB | **-2.67%** | (noise) |
 
-**The only scenario where the change pays.** The control arm stays in noise throughout, so the
-effect is the hint and not codegen. It is also the most repeatable result here: four runs put
-the 32 MiB peak at -4.7% to -5.0% and the shelf at -2.4% to -2.9%.
-
-2 MiB is the one size with no effect — it survives in a ~96 MiB GL2 whatever the copy does, and
-it is the size the first version of this measurement used.
+**The only scenario where the change pays**, and the most repeatable result here: four runs put
+the peak at -4.7% to -5.0% and the shelf at -2.4% to -2.9%. The control stays in noise, so this
+is the hint and not codegen. 2 MiB is the one size with nothing to protect — and the size the
+first version of this measurement used.
 
 ### Nothing survives a kernel dispatch
 
-Dependent-load latency is the same whether the previous dispatch flushed the cache or walked
-the identical addresses (worst ratio 1.012x within GL2), while four laps inside one dispatch
-run 2.2x faster per hop. None of six allocation kinds changes it, and sweeping the flush over a
-16x range moves cold latency by 0.06%.
-
-So a copy cannot evict what a later kernel needs, because nothing survives to be evicted. The
-hint can neither help nor hurt a sequential consumer — which is why the adversarial search
-below comes back empty, and why only concurrent work benefits. Mechanism:
+Dependent-load latency is unchanged whether the previous dispatch flushed the cache or walked
+the identical addresses, while four laps inside one dispatch run 2.2x faster per hop, and no
+allocation kind changes that. So a copy cannot evict what a later kernel needs — nothing
+survives to be evicted — which is why the hint can neither help nor hurt a sequential consumer,
+and why only concurrent work benefits. Mechanism:
 [FINDING-gl2-residency.md](FINDING-gl2-residency.md).
 
 ### Attempts to make it lose
 
-Nine mechanisms that could plausibly cost something — reader of the destination, destination
-reused as a source, fan-out from one hot source, repeated overwrite, staging-buffer reuse, four
-concurrent copies, the narrow fallback path — each at three footprints: half of GL2, all of
-GL2, and 2.7x GL2. Twenty-seven cases.
-
-**None where the hint is significantly worse.** Most adverse: +1.19%, at a case whose own
-resolution limit was 6.1 pp. Five cases at the largest footprint show it significantly better,
-by 1.8% to 4.7%.
-
-The limit of that claim: the least sensitive case could not have detected a regression under
-6.1 pp. The cases that matter most — a reader of the destination at a GL2-resident footprint —
-resolve to about 0.5 pp and show under 0.3% either way.
-
+Nine mechanisms that could plausibly cost something — a reader of the destination, reuse as a
+source, fan-out, repeated overwrite, staging reuse, concurrent copies, the narrow path — each
+at half, all, and 2.7x of GL2. Twenty-seven cases, **none where the hint is significantly
+worse**; most adverse +1.19%. The least sensitive case could not have caught a regression under
+6.1 pp, but the ones that matter most resolve to ~0.5 pp and show under 0.3% either way.
 ## Risks and limits
 
 - **Absolute copy times in the 16-48 MiB band are not a smooth function of size.** They sit on
