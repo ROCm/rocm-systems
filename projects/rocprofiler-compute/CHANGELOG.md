@@ -9,12 +9,21 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 * Added the `LDS Utilization` metric to the gfx115x Memory Chart.
 
+* Added two wave utilization metrics to PC sampling analysis.
+  * `active_thread_percent` is the percent of a wave's lanes that were active at an instruction, so a low value points at control flow divergence. Both sampling methods report it.
+  * `wave_occupancy_percent` is the percent of the machine's wave slots that held a wave. Only stochastic sampling reports it, because a host-trap record carries no wave count.
+  * Both appear in the analyze terminal table and in each kernel's `per_kernel_pc_sampling/` CSV.
+
+* Added the two wave utilization metrics to the analysis database summary view, so `compute_pc_sampling_summary_view` and the `pc_sampling_summary.csv` export carry them alongside the sample counts.
+
 ### Changed
 
 * gfx115x Memory Chart improvements.
   * Renamed memory chart metric names for more clarity.
   * Each edge now reports the traffic measured at the interface it represents.
   * Updated arrows, labels, and the legend in the memory chart to better represent their meaning.
+
+* `--torch-trace` now requires PyTorch 2.13 or 2.14, installed alongside ROCm.
 
 * Redesigned the CDNA (gfx9) Memory Chart with a new Rich-based layout that improves readability in the terminal. Added Non-buffer/Buffer request breakdowns (Read/Write/Atomic wavefronts) and L2-Fabric bandwidth metrics across all CDNA architectures.
   * gfx908–gfx942: added HBM and remote traffic percentages.
@@ -30,9 +39,15 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 ### Optimized
 
+* HBM and remote traffic percentages are now more accurate, with all their counters collected in a single profiling pass.
+
+* Improved the profiling failure message when the workload and the profiler load different ROCm installations. The error now points to the PyTorch and `rocm[profiler]` install instructions instead of only showing the LLVM abort.
+
 ### Resolved issues
 
 * Fixed roofline axes changing between runs on the same GPU; initial bounds are now derived only from machine ceilings.
+
+* Fixed `L2 Cache (per Channel)` labels to use a `Metric` column and numbered `Channel` row labels in CLI, TUI, and analysis database output.
 
 * Fixed false `0` values in the gfx115x Memory Chart; missing counter data now reports `N/A`.
 
@@ -62,6 +77,8 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 * Added a profile-mode warning reporting the active compute and memory partition
   modes on partition-capable accelerators, noting that analysis derives logical
   XCD, L2 channel, and HBM channel counts from them.
+
+* Added a guide for profiling vLLM workloads and its caveats.
 
 ### Changed
 

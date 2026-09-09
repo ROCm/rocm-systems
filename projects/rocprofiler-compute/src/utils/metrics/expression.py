@@ -8,8 +8,6 @@ from __future__ import annotations
 import ast
 import re
 
-import astunparse
-
 from utils.logger import console_warning
 from utils.utils_common import SUPPORTED_FIELD
 from utils.utils_counter_defs import SUPPORTED_DENOM
@@ -224,7 +222,7 @@ def build_eval_string(equation: str) -> str:
     if not transform_expression(ast_node, equation):
         return ""
 
-    equation_string = astunparse.unparse(ast_node)
+    equation_string = ast.unparse(ast_node)
 
     # correct column name/label in df with [], such as TCC_HIT[0],
     # the target is df['TCC_HIT[0]']

@@ -129,6 +129,10 @@ There are three high-level GPU analysis views:
                       2.1.29 -> L1I Fetch Latency
       ...
 
+   On MI300 and MI350 series GPUs, block **1 (System Info)** also reports compute
+   and memory partition modes. See :doc:`/conceptual/cdna/compute-memory-partition`
+   for how those fields affect metric normalization.
+
 3. Choose your own customized subset of metrics with the ``-b`` (or ``--block``)
    option. Or, build your own configuration following
    `config_template <https://github.com/ROCm/rocm-systems/blob/develop/projects/rocprofiler-compute/src/rocprof_compute_soc/analysis_configs/panel_config_template.yaml>`_.
@@ -518,8 +522,7 @@ Roofline visualization options (available only in analyze mode):
 * ``--sort``: Overlay top kernels or top dispatches (default: kernels)
 * ``--mem-level``: Filter by memory level -- HBM, L2, vL1D, L0, LDS (default: ALL)
 * ``--roofline-data-type``: Choose datatypes for roofline visualization (default: FP32)
-   * Multiple data types are available from one generated HTML file through the
-     *Precision* selector.
+   * CLI only supports visualizing one precision at a time. Visualizing multiple data types on one plot is available in the Interactive Roofline HTML file.
 
 Example with multiple ``--mem-level`` and ``--roofline-data-type`` options:
 
@@ -530,7 +533,7 @@ Example with multiple ``--mem-level`` and ``--roofline-data-type`` options:
 Interactive Roofline HTML:
 
 * Use the *AI axis* selector to choose one memory level per kernel, or *All peaks* to plot every level at once. Isolating one kernel shows it across all available memory levels.
-* Use the *Precision* selector to switch between the datatypes requested with ``--roofline-data-type`` without opening another file or rerunning analysis.
+* Use the *Precision* selector to choose one or more arithmetic precision's peak roofline to display on the plot.
 * Use the *Kernels* and *Bandwidth rooflines* panels to isolate, multi-select, or reset plotted items. The *Runtime shown* slider filters to the heaviest kernels that reach the selected GPU resident-time cutoff.
 * Hover over kernel dots and rooflines to see arithmetic intensity, throughput, roofline percentage, limiter, runtime, bandwidth, and compute-peak details.
 * Drag to pan, scroll to zoom, double-click or use *Reset zoom* to re-frame the chart, use *Export PNG* to save the current view, and use *Theme toggle* to switch between light and dark modes.

@@ -6,12 +6,18 @@ import copy
 import math
 import shutil
 import textwrap
+from io import StringIO
 from typing import Any, Optional, TextIO
 
 import pandas as pd
+from rich.console import Console as RichConsole
+from rich.panel import Panel as RichPanel
+from rich.table import Table as RichTable
+from rich.text import Text as RichText
 from tabulate import tabulate
 
 import config
+from membw_analysis.models import BottleneckNode, MemBwAnalysisResult
 from utils import mem_chart_gfx9, mem_chart_gfx11, parser, schema
 from utils.logger import console_error, console_log, console_warning
 from utils.mem_chart_common import format_mem_chart_heading, strip_ansi
@@ -25,6 +31,8 @@ from utils.utils_analysis import (
 )
 from utils.utils_common import convert_filter_blocks_to_panel_ids, is_gfx9, is_gfx115x
 
+_GUIDANCE_PANEL_MIN_WIDTH = 100
+
 
 def _tty_view_is_table(args: argparse.Namespace) -> bool:
     """True when ``--view table`` was given (plain tables; ignore cli_style)."""
@@ -32,6 +40,13 @@ def _tty_view_is_table(args: argparse.Namespace) -> bool:
 
 
 KERNEL_NAME_WRAP_WIDTH = 40
+
+PC_SAMPLING_TABLE_ID = "21.1"
+
+PC_SAMPLING_STALL_REASON_REFERENCE = (
+    "Stall reason definitions: https://rocm.docs.amd.com/projects/"
+    "rocprofiler-sdk/en/latest/how-to/cdna3-cdna4-pc-sampling.html#stall-reasons"
+)
 
 
 def wrap_kernel_name(name: str) -> str:
@@ -750,7 +765,7 @@ def format_table_output(
 
     # Do not print the table if any column is empty. PC sampling table 21.1 is
     # exempt: its source column is all N/A when the workload lacks debug info.
-    if is_empty_columns_exist and table_id_str != "21.1":
+    if is_empty_columns_exist and table_id_str != PC_SAMPLING_TABLE_ID:
         title = table_config.get("title", "")
         console_log(f"Not showing table with empty column(s): {table_id_str} {title}")
         return content
@@ -762,6 +777,9 @@ def format_table_output(
     ) == "mem_chart" and not _tty_view_is_table(args)
     if "title" in table_config and table_config["title"] and not skip_mem_chart_title:
         content += f"{table_id_str} {table_config['title']}\n"
+
+    if table_id_str == PC_SAMPLING_TABLE_ID:
+        content += f"{PC_SAMPLING_STALL_REASON_REFERENCE}\n"
 
     # Only show top N kernels (as specified in --max-kernel-num)
     # in "Top Stats" section
@@ -839,14 +857,121 @@ def format_table_output(
             get_table_string(df, transpose=transpose, decimal=args.decimal) + "\n"
         )
 
-    if table_id_str == "21.1":
-        content += (
-            "Stall reason definitions: https://rocm.docs.amd.com/projects/"
-            "rocprofiler-sdk/en/latest/how-to/"
-            "cdna3-cdna4-pc-sampling.html#stall-reasons\n"
-        )
-
     return content
+
+
+def _max_line_width(rendered: str) -> int:
+    """Return the longest line width after stripping ANSI codes."""
+    stripped = strip_ansi(rendered)
+    if not stripped.strip():
+        return 0
+    return max(len(line) for line in stripped.splitlines())
+
+
+def _render_membw_guidance(
+    membw_result: MemBwAnalysisResult,
+    chart_width: int = 0,
+) -> str:
+    """Render membw guidance text to append below the memory chart."""
+    if not _has_active_nodes(membw_result.nodes):
+        return _render_membw_status_line(membw_result)
+    panel_output = _render_membw_guidance_panel(
+        membw_result.guidance_blocks,
+        chart_width=chart_width,
+    )
+    if panel_output:
+        return panel_output
+    return "Memory Bandwidth Analysis: Bottlenecks detected (see chart annotations).\n"
+
+
+def _has_active_nodes(nodes: tuple[BottleneckNode, ...]) -> bool:
+    """True when any node in the tree is active."""
+    for node in nodes:
+        if node.state == "active":
+            return True
+        if _has_active_nodes(node.children):
+            return True
+    return False
+
+
+def _all_nodes_indeterminate(
+    nodes: tuple[BottleneckNode, ...],
+) -> bool:
+    """True when every root node is indeterminate."""
+    return bool(nodes) and all(n.state == "indeterminate" for n in nodes)
+
+
+def _render_membw_status_line(
+    membw_result: MemBwAnalysisResult,
+) -> str:
+    """Render a single status line when no bottlenecks are active."""
+    if membw_result.availability == "unavailable":
+        return (
+            "Memory Bandwidth Analysis: Unavailable "
+            f"({membw_result.availability_reason or 'no data'}).\n"
+        )
+    if membw_result.availability == "partial":
+        return (
+            "Memory Bandwidth Analysis: Partial data "
+            f"({membw_result.availability_reason}).\n"
+        )
+    if _all_nodes_indeterminate(membw_result.nodes):
+        return "Memory Bandwidth Analysis: Inconclusive (insufficient counter data).\n"
+    return "Memory Bandwidth Analysis: No bottlenecks detected (GL1 / GL2 / EA).\n"
+
+
+def _style_guidance_block(block: str) -> RichText:
+    """Apply Rich styling to a single guidance block."""
+    text = RichText(block.rstrip())
+    first_newline = block.find("\n")
+    if first_newline > 0:
+        text.stylize("bold indian_red", 0, first_newline)
+    text.highlight_regex(
+        r"  (Condition|Measured|Impact)\s*:",
+        style="dim",
+    )
+    return text
+
+
+def _render_membw_guidance_panel(
+    guidance_blocks: tuple[str, ...],
+    chart_width: int = 0,
+) -> str:
+    """Render active guidance blocks in a styled Rich panel."""
+    sections = [_style_guidance_block(block) for block in guidance_blocks if block]
+    if not sections:
+        return ""
+
+    panel_width = max(chart_width, _GUIDANCE_PANEL_MIN_WIDTH)
+    col_gap = 4
+    # 2 border + 2*2 padding = 6; minus column gap
+    col_width = (panel_width - 6 - col_gap) // 2
+
+    grid = RichTable.grid(padding=(1, col_gap))
+    grid.add_column(width=col_width)
+    grid.add_column(width=col_width)
+
+    for i in range(0, len(sections), 2):
+        left = sections[i]
+        right = sections[i + 1] if i + 1 < len(sections) else RichText()
+        grid.add_row(left, right)
+
+    panel = RichPanel(
+        grid,
+        title="[bold]Memory Bandwidth Guided Analysis[/bold]",
+        border_style="indian_red",
+        width=panel_width,
+        padding=(1, 2),
+    )
+
+    buf = StringIO()
+    console = RichConsole(
+        file=buf,
+        force_terminal=True,
+        width=panel_width,
+    )
+    console.print(panel)
+    return buf.getvalue()
 
 
 def show_all(
@@ -893,11 +1018,6 @@ def show_all(
     )
 
     for panel_id, panel in arch_configs.panel_configs.items():
-        # NOTE: Experimental Feature Toggle
-        # HARD GATE: Block 30 (panel 3000) requires membw_analysis flag
-        if panel_id == 3000 and not args.membw_analysis:
-            continue
-
         # Skip panels that don't support baseline comparison
         if len(args.path) > 1 and panel_id in config.HIDDEN_SECTIONS:
             continue
@@ -1038,14 +1158,19 @@ def show_all(
                     + "\n"
                 )
             elif is_gfx9(gpu_arch):
-                panel_content += (
-                    mem_chart_gfx9.plot_mem_chart(
-                        mem_chart_data,
-                        chart_title=heading,
-                        gpu_arch=gpu_arch,
-                    )
-                    + "\n"
+                membw_result = getattr(first_run, "membw_result", None)
+                chart_output = mem_chart_gfx9.plot_mem_chart(
+                    mem_chart_data,
+                    chart_title=heading,
+                    gpu_arch=gpu_arch,
+                    membw=membw_result,
                 )
+                panel_content += chart_output + "\n"
+                if membw_result is not None:
+                    panel_content += _render_membw_guidance(
+                        membw_result,
+                        chart_width=_max_line_width(chart_output),
+                    )
 
         # Roofline printing is handled separately above in is_roofline_shown.
         # With --view table, roofline tables (401/402) render as normal tables.

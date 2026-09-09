@@ -1,0 +1,47 @@
+# CTest categories for the host-only src/enqueue.cc microtests.
+#
+# gtest's `*` does not match across the literal `.`, so a suite with no pattern
+# here builds and passes locally but never runs under CTest. Keep this in sync
+# with the TEST_F suite names in enqueue-test.cc.
+test_categories:
+  quick: &micro_enqueue_quick
+    description: "Smoke - host-only src/enqueue.cc micro-tests (tuning, chunking, plan packing), sub-second."
+    test_patterns:
+      - "EnqueueMicrotest.*"
+    exclude_windows:
+      - "*"
+    labels:
+      - "rccl"
+      - "quick"
+      - "smoke"
+      - "precheck"
+      - "microtest"
+  standard:
+    <<: *micro_enqueue_quick
+    labels:
+      - "rccl"
+      - "standard"
+      - "regression"
+      - "microtest"
+  comprehensive:
+    <<: *micro_enqueue_quick
+    labels:
+      - "rccl"
+      - "comprehensive"
+      - "comprehensive_regression"
+      - "microtest"
+  full:
+    <<: *micro_enqueue_quick
+    labels:
+      - "rccl"
+      - "full"
+      - "full_regression"
+      - "microtest"
+
+execution_settings:
+  timeout_multiplier: 1
+  category_timeouts:
+    quick: 600
+    standard: 600
+    comprehensive: 600
+    full: 600

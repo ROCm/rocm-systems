@@ -7,7 +7,6 @@ import warnings
 from pathlib import Path
 from typing import Any, NamedTuple, Optional
 
-import astunparse
 import numpy as np
 import pandas as pd
 
@@ -316,10 +315,11 @@ class db_analysis(OmniAnalyze_Base):
         workload_objs: list[orm.Workload] = []
         for workload_path in self._runs.keys():
             # Add workload
+            sys_info = self._runs[workload_path].sys_info.iloc[0].to_dict()
             workload_obj = orm.Workload(
                 name=workload_path.split("/")[-2],
                 sub_name=workload_path.split("/")[-1],
-                sys_info_extdata=self._runs[workload_path].sys_info.iloc[0].to_dict(),
+                sys_info_extdata=sys_info,
                 roofline_bench_extdata=self._roofline_ceilings_per_workload.get(
                     workload_path
                 ),
@@ -402,6 +402,7 @@ class db_analysis(OmniAnalyze_Base):
                 kernel_objs,
                 kernel_symbols,
                 source_frames,
+                sys_info,
             )
             self.add_code_object_isa(
                 workload_path,
@@ -628,6 +629,7 @@ class db_analysis(OmniAnalyze_Base):
         kernel_objs: dict[KernelKey, orm.Kernel],
         kernel_symbols: dict[KernelSymbolKey, orm.KernelSymbol],
         source_frames: SourceFrameCollector,
+        sys_info: dict[str, Any],
     ) -> dict[CodeObjectKey, orm.CodeObjectStore]:
         """Insert the normalized PC-sampling rows for one workload.
 
@@ -643,7 +645,7 @@ class db_analysis(OmniAnalyze_Base):
         for tool_data in tool_data_records:
             pid: int = tool_data["metadata"]["pid"]
 
-            for code_object in load_aggregated_pc_sampling(tool_data):
+            for code_object in load_aggregated_pc_sampling(tool_data, sys_info):
                 for line in code_object.instruction_lines:
                     kernel = kernel_objs.get(line.kernel_name)
                     if kernel is None:
@@ -727,6 +729,8 @@ class db_analysis(OmniAnalyze_Base):
             total_count=line.total_count,
             issue_count=line.issue_count,
             stall_count=line.stall_count,
+            active_thread_percent=line.active_thread_percent,
+            wave_occupancy_percent=line.wave_occupancy_percent,
             instruction_line=instruction_line,
         )
         Database.get_session().add(sample_state)
@@ -866,7 +870,7 @@ class db_analysis(OmniAnalyze_Base):
             ast_node = ast.parse(value)
             if not transform_expression(ast_node, original_value):
                 return None
-            value = astunparse.unparse(ast_node)
+            value = ast.unparse(ast_node)
             value = value.replace("raw_pmc_df", "pmc_df")
             value = value.replace("pmc_df['sys_info']", "sys_info")
         else:
@@ -1187,7 +1191,6 @@ class db_analysis(OmniAnalyze_Base):
 
         non_expression_columns = {
             "Metric",
-            "Channel",
             "Unit",
             "Description",
             "Type",
@@ -1221,12 +1224,12 @@ class db_analysis(OmniAnalyze_Base):
                 )
                 for table_id, metric_df in arch_config.dfs.items()
                 if table_id != 402  # roofline points handled in calc_roofline_data
-                if set(metric_df.columns).intersection({"Metric", "Channel"})
+                if "Metric" in metric_df.columns
             ]
 
             metric_info_rows = [
                 MetricInfoRow(
-                    name=row.get("Metric") or row["Channel"].strip(),
+                    name=row["Metric"],
                     metric_id=metric_id,
                     description=row.get("Description"),
                     unit=row.get("Unit"),

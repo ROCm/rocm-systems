@@ -764,8 +764,6 @@ class Roofline:
 
         if is_new_figure:
             self._apply_plotly_layout(fig, dtype, ops_flops, (x_lo, x_hi, y_lo, y_hi))
-        else:
-            self._extend_stacked_title(fig, dtype)
 
         return fig
 

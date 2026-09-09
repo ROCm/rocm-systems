@@ -112,9 +112,9 @@ def _prepare_ml_api_trace_injection(
     """Insert the inject_roctx launcher into the workload command.
 
     Modifies the ``remaining`` command list in place. The launcher is run by
-    absolute path, with the selected frameworks passed as ``--frameworks
-    <names>`` followed by ``--`` and the workload command. The rewrite depends
-    on the workload type:
+    absolute path, with the selected frameworks passed as ``--frameworks``
+    followed by each framework name, then ``--`` and the workload command. The
+    rewrite depends on the workload type:
       1. Python interpreter — insert the launcher before the script.
       2. Direct .py script  — prepend ``sys.executable`` and the launcher.
       3. Other executables  — leave the command unchanged and emit a warning.
@@ -131,7 +131,7 @@ def _prepare_ml_api_trace_injection(
     launcher = [
         str(launch_script),
         "--frameworks",
-        ",".join(sorted(frameworks)),
+        *sorted(frameworks),
         "--",
     ]
 
@@ -566,7 +566,7 @@ class RocProfCompute_Base:
             ):
                 compute_root_path = Path(__file__).resolve().parents[1]
                 native_tool_finder = NativeToolFinder(compute_root_path)
-                return str(native_tool_finder.get_collector_library_path())
+                return str(native_tool_finder.get_artifact_path())
             return None
         except Exception:
             console_error(

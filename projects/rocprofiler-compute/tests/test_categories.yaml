@@ -38,7 +38,6 @@ test_categories:
       - test_source_snapshot_analysis
       - test_per_kernel_isa_export
       - test_rocpd_data
-      - test_torch_trace_coverage
       - test_L1_cache_counters
       - test_roofline_calc
       - test_roofline_analyze
@@ -58,6 +57,11 @@ test_categories:
       - test_conftest
       - test_mem_chart_gfx9
       - test_mem_chart_gfx11
+      - test_membw_engine
+      - test_membw_guidance
+      - test_membw_metric_extract
+      - test_membw_pipeline
+      - test_membw_tree_spec
       - test_native_tool_finder
       - test_metrics_common
       - test_tty
@@ -65,6 +69,7 @@ test_categories:
       - test_soc_base
       - test-pc-sampling-collector
       - test-compression
+      - test-torch-trace-collector
     therock_ci_exclude:
       - test_profile_live_attach_detach
       - test_metric_validation
@@ -146,6 +151,11 @@ test_categories:
       - test_rocprofv3_avail_interface
       - test_mem_chart_gfx9
       - test_mem_chart_gfx11
+      - test_membw_engine
+      - test_membw_guidance
+      - test_membw_metric_extract
+      - test_membw_pipeline
+      - test_membw_tree_spec
       - test_native_tool_finder
       - test_metrics_common
       - test_tty
@@ -153,6 +163,7 @@ test_categories:
       - test_soc_base
       - test-pc-sampling-collector
       - test-compression
+      - test-torch-trace-collector
       - test_profile_torch_trace
       - test_profile_triton_trace
       - test_profile_live_attach_detach
@@ -238,6 +249,11 @@ test_categories:
       - test_rocprofv3_avail_interface
       - test_mem_chart_gfx9
       - test_mem_chart_gfx11
+      - test_membw_engine
+      - test_membw_guidance
+      - test_membw_metric_extract
+      - test_membw_pipeline
+      - test_membw_tree_spec
       - test_native_tool_finder
       - test_metrics_common
       - test_tty
@@ -245,6 +261,7 @@ test_categories:
       - test_soc_base
       - test-pc-sampling-collector
       - test-compression
+      - test-torch-trace-collector
       - test_profile_torch_trace
       - test_profile_triton_trace
       - test_profile_live_attach_detach
@@ -330,6 +347,11 @@ test_categories:
       - test_rocprofv3_avail_interface
       - test_mem_chart_gfx9
       - test_mem_chart_gfx11
+      - test_membw_engine
+      - test_membw_guidance
+      - test_membw_metric_extract
+      - test_membw_pipeline
+      - test_membw_tree_spec
       - test_native_tool_finder
       - test_metrics_common
       - test_tty
@@ -337,6 +359,7 @@ test_categories:
       - test_soc_base
       - test-pc-sampling-collector
       - test-compression
+      - test-torch-trace-collector
       - test_profile_torch_trace
       - test_profile_triton_trace
       - test_profile_live_attach_detach

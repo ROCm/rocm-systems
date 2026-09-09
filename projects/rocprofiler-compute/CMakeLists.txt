@@ -750,6 +750,49 @@ add_test(
 )
 
 # -----------------------------------
+# Memory bandwidth analysis unit tests
+# -----------------------------------
+
+add_test(
+    NAME test_membw_tree_spec
+    COMMAND
+        ${PYTHON_TEST_COMMAND} -m pytest --junitxml=tests/test_membw_tree_spec.xml
+        ${COV_OPTION} tests/unit/membw_analysis/test_membw_tree_spec.py
+        ${WORKING_DIR_OPTION}
+)
+
+add_test(
+    NAME test_membw_metric_extract
+    COMMAND
+        ${PYTHON_TEST_COMMAND} -m pytest --junitxml=tests/test_membw_metric_extract.xml
+        ${COV_OPTION} tests/unit/membw_analysis/test_membw_metric_extract.py
+        ${WORKING_DIR_OPTION}
+)
+
+add_test(
+    NAME test_membw_engine
+    COMMAND
+        ${PYTHON_TEST_COMMAND} -m pytest --junitxml=tests/test_membw_engine.xml
+        ${COV_OPTION} tests/unit/membw_analysis/test_membw_engine.py ${WORKING_DIR_OPTION}
+)
+
+add_test(
+    NAME test_membw_guidance
+    COMMAND
+        ${PYTHON_TEST_COMMAND} -m pytest --junitxml=tests/test_membw_guidance.xml
+        ${COV_OPTION} tests/unit/membw_analysis/test_membw_guidance.py
+        ${WORKING_DIR_OPTION}
+)
+
+add_test(
+    NAME test_membw_pipeline
+    COMMAND
+        ${PYTHON_TEST_COMMAND} -m pytest --junitxml=tests/test_membw_pipeline.xml
+        ${COV_OPTION} tests/unit/membw_analysis/test_membw_pipeline.py
+        ${WORKING_DIR_OPTION}
+)
+
+# -----------------------------------
 # CLI options unit tests
 # -----------------------------------
 
@@ -823,23 +866,25 @@ add_test(
         ${WORKING_DIR_OPTION}
 )
 
-# Build the roctx_recordfn pybind11 extension and its gtest.
-if(ENABLE_TESTS)
-    add_subdirectory(src/lib/roctx_recordfn)
-endif()
-
-if(TARGET test-roctx-recordfn)
+if(TARGET test-torch-trace-collector)
     if(TEST_FROM_INSTALL)
-        set(_rcfn_test_cmd tests/test-roctx-recordfn)
+        set(_ttc_test_cmd tests/test-torch-trace-collector)
     else()
-        set(_rcfn_test_cmd $<TARGET_FILE:test-roctx-recordfn>)
+        set(_ttc_test_cmd $<TARGET_FILE:test-torch-trace-collector>)
     endif()
-    add_test(NAME test-roctx-recordfn COMMAND ${_rcfn_test_cmd})
-    get_target_property(_rcfn_ld_path test-roctx-recordfn ROCPROF_TEST_LD_LIBRARY_PATH)
-    set(_rcfn_test_env "LD_LIBRARY_PATH=${_rcfn_ld_path}:$ENV{LD_LIBRARY_PATH}")
+    add_test(NAME test-torch-trace-collector COMMAND ${_ttc_test_cmd})
+    get_target_property(
+        _ttc_ld_path
+        test-torch-trace-collector
+        ROCPROF_TEST_LD_LIBRARY_PATH
+    )
+    set(_ttc_test_env "LD_LIBRARY_PATH=${_ttc_ld_path}:$ENV{LD_LIBRARY_PATH}")
     sanitizer_runtime_env(_san_env OFF)
-    list(APPEND _rcfn_test_env ${_san_env})
-    set_tests_properties(test-roctx-recordfn PROPERTIES ENVIRONMENT "${_rcfn_test_env}")
+    list(APPEND _ttc_test_env ${_san_env})
+    set_tests_properties(
+        test-torch-trace-collector
+        PROPERTIES LABELS "profile" ENVIRONMENT "${_ttc_test_env}"
+    )
 endif()
 
 # -----------------------------------
@@ -1050,6 +1095,11 @@ if(${ENABLE_COVERAGE})
         test_list_metrics_cli
         test_mem_chart_gfx9
         test_mem_chart_gfx11
+        test_membw_engine
+        test_membw_guidance
+        test_membw_metric_extract
+        test_membw_pipeline
+        test_membw_tree_spec
         test_roofline_calc
         test_roofline_analyze
         test_roofline_main
@@ -1163,17 +1213,6 @@ install(
     PATTERN "rooflines*" EXCLUDE
     PATTERN "__pycache__" EXCLUDE
 )
-# Install the roctx_recordfn sources so the runtime loader can build the
-# extension against the user's PyTorch environment on first use.
-install(
-    DIRECTORY src/lib/roctx_recordfn
-    DESTINATION ${CMAKE_INSTALL_LIBEXECDIR}/${PROJECT_NAME}/lib
-    COMPONENT main
-    PATTERN "_build" EXCLUDE
-    PATTERN "build" EXCLUDE
-    PATTERN "tests" EXCLUDE
-    PATTERN "__pycache__" EXCLUDE
-)
 # src/roofline
 install(
     DIRECTORY src/roofline
@@ -1191,6 +1230,13 @@ install(
 # src/rocprof_compute_profile
 install(
     DIRECTORY src/rocprof_compute_profile
+    DESTINATION ${CMAKE_INSTALL_LIBEXECDIR}/${PROJECT_NAME}
+    COMPONENT main
+    PATTERN "__pycache__" EXCLUDE
+)
+# src/membw_analysis
+install(
+    DIRECTORY src/membw_analysis
     DESTINATION ${CMAKE_INSTALL_LIBEXECDIR}/${PROJECT_NAME}
     COMPONENT main
     PATTERN "__pycache__" EXCLUDE
@@ -1276,11 +1322,20 @@ install(
     COMPONENT main
 )
 
-# install librocprofiler-compute-tool.so
+# install librocprofiler-compute-tool.so and
+# torch_trace_collector-<torch-version>.so
 install(
     TARGETS rocprofiler-compute-tool
     LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}/rocprofiler-compute COMPONENT main
 )
+# The collector is skipped when PyTorch is absent or an unsupported version.
+# The loader searches lib/rocprofiler-compute/ for the versioned artifact.
+if(TARGET torch-trace-collector-module)
+    install(
+        TARGETS torch-trace-collector-module
+        LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}/rocprofiler-compute COMPONENT main
+    )
+endif()
 
 # top-level bin/rocprof-compute launcher (re-execs into libexec entrypoint)
 configure_file(

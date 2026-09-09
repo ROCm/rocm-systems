@@ -83,7 +83,6 @@ SUPPORTED_FIELD: list[str] = [
     "Expression",
     "Percent of Peak",
     # Special keywords for L2 channel
-    "Channel",
     "L2 Cache Hit Rate",
     "Requests",
     "L2 Read",

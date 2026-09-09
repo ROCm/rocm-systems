@@ -1,26 +1,13 @@
 .. meta::
     :description: ROCm Compute Profiler FAQ and troubleshooting
     :keywords: ROCm Compute Profiler, FAQ, troubleshooting, ROCm, profiler, tool, Instinct,
-               accelerator, AMD, SSH, error, version, workaround, help
+               accelerator, AMD, SSH, error, version, workaround, help, vLLM
 
 ***
 FAQ
 ***
 
 Frequently asked questions and troubleshooting tips.
-
-python ast error: 'Constant' object has no attribute 'kind'
-===========================================================
-
-This error arises from a bug in the default ``astunparse 1.6.3`` with
-``python 3.8``. The error doesn't seem to occur with Python 3.7 or 3.9.
-
-Workaround:
-
-.. code-block:: shell
-
-   $ pip3 uninstall astunparse
-   $ pip3 astunparse
 
 Why does VALU utilization exceed the theoretical peak?
 ======================================================
@@ -56,6 +43,13 @@ Hardware performance counters are collected across multiple profiling passes. Wh
 * **Deviation > 5%**: Consider investigating profiling conditions (system load, thermal throttling, non-deterministic application behavior, etc.).
 
 This correction primarily affects L2 cache metrics where counter subtraction is used to derive values like remote read/write traffic, but run-to-run variations may impact the accuracy of a number of derived metrics in ROCm Compute Profiler.
+
+How do compute and memory partition modes affect metrics?
+=========================================================
+
+On AMD Instinct MI300 and MI350 series GPUs, the active partition modes change
+how counters are normalized and how percent-of-peak metrics are calculated. See
+:doc:`/conceptual/cdna/compute-memory-partition`.
 
 How can I SSH tunnel in MobaXterm?
 ==================================
@@ -108,3 +102,10 @@ launched on separate HIP streams on the same GPU will run one after
 another during profiling. Kernel duration and throughput metrics reflect
 this serialized execution rather than the concurrent behavior that may
 occur during normal execution.
+
+Why does profiling a vLLM workload produce empty performance counter data?
+==========================================================================
+
+vLLM V1 runs GPU kernels in a worker process that it terminates with a signal
+on shutdown, and counter data is only written when a process exits normally.
+See :ref:`profile-vllm-workloads` for the workaround and where it applies.
