@@ -216,6 +216,12 @@ public:
   void set_queue_debug_suspended(uint32_t queue_id, uint32_t process_id, bool suspended);
   bool signal_queue_exception(uint32_t queue_id, uint32_t process_id, uint64_t status,
                               bool publish_interrupt = true);
+  /// @brief Publish a prepared queue exception without entering any CU.
+  /// @details The caller must first stop every queue replica with
+  /// signal_queue_exception(..., false). This operation is safe to serialize
+  /// under a driver status-publication mutex because it cannot flush CU
+  /// notifications back into the driver.
+  bool publish_queue_exception(uint32_t queue_id, uint32_t process_id, uint64_t status);
   uint64_t read_process_memory64(uint64_t address, uint32_t process_id) const;
 
   void set_plugin_group(std::shared_ptr<ExecutionPluginGroup> pg) {

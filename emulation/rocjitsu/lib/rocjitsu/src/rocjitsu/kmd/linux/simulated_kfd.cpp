@@ -3244,10 +3244,10 @@ bool SimulatedKfd::signal_runtime_queue_exception(uint32_t gpu_id, uint32_t queu
   if (!gpu || !gpu->soc || exception_mask == 0)
     return false;
 
-  // Every XCD owns a replica of a fanned-out queue. Serialize the shared
-  // status-word update, stop every replica, and let only the first match
-  // publish the one runtime interrupt.
-  std::lock_guard<std::mutex> lock(queue_exception_mutex_);
+  // Every XCD owns a replica of a fanned-out queue. Stop every replica before
+  // publishing the shared status, but do not hold queue_exception_mutex_ while
+  // entering a CU: releasing its wave-state guard can flush another exception
+  // back through this function.
   amdgpu::CommandProcessor *publisher = nullptr;
   gpu->soc->for_each_cp([&](amdgpu::CommandProcessor *cp) {
     if (cp->signal_queue_exception(queue_id, process_id, exception_mask,
@@ -3255,9 +3255,13 @@ bool SimulatedKfd::signal_runtime_queue_exception(uint32_t gpu_id, uint32_t queu
         publisher == nullptr)
       publisher = cp;
   });
-  return publisher != nullptr &&
-         publisher->signal_queue_exception(queue_id, process_id, exception_mask,
-                                           /*publish_interrupt=*/true);
+  if (publisher == nullptr)
+    return false;
+
+  // Concurrent reports may share the ROCr status word. Serialize only its
+  // read-modify-write, interrupt, and acknowledgement wait.
+  std::lock_guard<std::mutex> lock(queue_exception_mutex_);
+  return publisher->publish_queue_exception(queue_id, process_id, exception_mask);
 }
 
 std::optional<amdgpu::ComputeUnitCore::TrapHandlerConfig>
@@ -4154,23 +4158,32 @@ int SimulatedKfd::suspend_debug_queues(KfdProcess *proc, uint32_t *queue_ids, ui
       continue;
     }
     std::vector<std::pair<amdgpu::ComputeUnitCore *, amdgpu::Wavefront *>> newly_suspended;
+    bool needs_serialization = false;
     gpu->soc->for_each_cp([&](amdgpu::CommandProcessor *cp) {
       cp->set_queue_debug_suspended(queue.queue_id, process_id, true);
       for (auto *cu : cp->compute_units()) {
         cu->with_wave_state_locked([&] {
           for (uint32_t slot = 0; slot < cu->num_wf_slots(); ++slot) {
             auto *wave = cu->wf(slot);
-            if (!wave->is_halted() && !wave->debug_suspended() &&
-                wave->process_id() == process_id && wave->queue_id() == queue.queue_id) {
-              wave->set_debug_suspended(true);
-              newly_suspended.emplace_back(cu, wave);
-            }
+            if (wave->is_halted() || wave->process_id() != process_id ||
+                wave->queue_id() != queue.queue_id)
+              continue;
+            // Runtime exception routing freezes the wave with debug_suspended
+            // so it cannot run, but it does not publish CWSR. A later debugger
+            // suspend must serialize that retained fatal stop even though it
+            // did not transition the suspension bit here.
+            needs_serialization |= wave->fatal_exception_pending();
+            if (wave->debug_suspended())
+              continue;
+            wave->set_debug_suspended(true);
+            newly_suspended.emplace_back(cu, wave);
+            needs_serialization = true;
           }
         });
       }
     });
-    bool serialized = newly_suspended.empty();
-    if (!newly_suspended.empty() && queue.info.ctx_save_restore_address != 0)
+    bool serialized = !needs_serialization;
+    if (needs_serialization && queue.info.ctx_save_restore_address != 0)
       serialized = serialize_queue_debug_waves(process_id, queue.queue_id, queue.info.gpu_id,
                                                queue.info.ctx_save_restore_address,
                                                queue.info.ctx_save_restore_area_size);

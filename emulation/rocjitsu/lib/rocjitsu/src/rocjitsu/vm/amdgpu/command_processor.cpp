@@ -927,8 +927,6 @@ void CommandProcessor::register_queue(HwQueue queue) {
 
 bool CommandProcessor::signal_queue_exception(uint32_t queue_id, uint32_t process_id,
                                               uint64_t status, bool publish_interrupt) {
-  uint64_t exception_status_va = 0;
-  uint32_t exception_event_id = 0;
   {
     std::lock_guard<std::recursive_mutex> lk(hw_queue_mutex_);
     auto queue = std::find_if(hw_queues_.begin(), hw_queues_.end(), [&](const HwQueue &candidate) {
@@ -937,8 +935,6 @@ bool CommandProcessor::signal_queue_exception(uint32_t queue_id, uint32_t proces
     if (queue == hw_queues_.end() || queue->exception_status_va == 0)
       return false;
     queue->exception_suspended = true;
-    exception_status_va = queue->exception_status_va;
-    exception_event_id = queue->exception_event_id;
   }
 
   for (auto *cu : cus_) {
@@ -955,6 +951,23 @@ bool CommandProcessor::signal_queue_exception(uint32_t queue_id, uint32_t proces
   }
   if (!publish_interrupt)
     return true;
+  return publish_queue_exception(queue_id, process_id, status);
+}
+
+bool CommandProcessor::publish_queue_exception(uint32_t queue_id, uint32_t process_id,
+                                               uint64_t status) {
+  uint64_t exception_status_va = 0;
+  uint32_t exception_event_id = 0;
+  {
+    std::lock_guard<std::recursive_mutex> lk(hw_queue_mutex_);
+    auto queue = std::find_if(hw_queues_.begin(), hw_queues_.end(), [&](const HwQueue &candidate) {
+      return candidate.queue_id == queue_id && candidate.process_id == process_id;
+    });
+    if (queue == hw_queues_.end() || queue->exception_status_va == 0)
+      return false;
+    exception_status_va = queue->exception_status_va;
+    exception_event_id = queue->exception_event_id;
+  }
 
   const uint64_t combined_status = memory_->read64(exception_status_va, process_id) | status;
   memory_->write64(exception_status_va, combined_status, process_id);

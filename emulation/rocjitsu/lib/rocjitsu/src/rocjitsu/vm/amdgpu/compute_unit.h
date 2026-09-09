@@ -594,6 +594,22 @@ public:
     return std::forward<F>(fn)();
   }
 
+  /// @brief Pause once after releasing the wave-state lock but before flushing
+  /// command-processor notifications.
+  /// @details Test-only seam for deterministic lock-order regressions. The hook
+  /// is consumed by the next outermost wave-state guard and invoked unlocked.
+  void set_notification_flush_hook_for_testing(std::function<void()> hook) {
+    std::lock_guard<std::recursive_mutex> lock(wave_state_mutex_);
+    notification_flush_hook_for_testing_ = std::move(hook);
+  }
+
+  /// @brief Queue one runtime exception and drive the normal unlocked flush path.
+  [[nodiscard]] bool defer_queue_exception_for_testing(uint32_t queue_id, uint32_t process_id,
+                                                       uint64_t status) {
+    return with_wave_state_locked(
+        [&] { return defer_queue_exception(queue_id, process_id, status); });
+  }
+
   bool has_active_wfs_for_process(uint32_t process_id) const {
     std::lock_guard<std::recursive_mutex> lock(wave_state_mutex_);
     for (const auto &w : wfs_)
@@ -1021,9 +1037,15 @@ protected:
     WaveStateGuard &operator=(const WaveStateGuard &) = delete;
     ~WaveStateGuard() {
       const bool outermost = --cu_.wave_state_depth_ == 0;
-      lock_.unlock();
+      std::function<void()> notification_flush_hook;
       if (outermost)
+        notification_flush_hook = std::exchange(cu_.notification_flush_hook_for_testing_, {});
+      lock_.unlock();
+      if (outermost) {
+        if (notification_flush_hook)
+          notification_flush_hook();
         cu_.flush_cp_notifications();
+      }
     }
 
   private:
@@ -1053,6 +1075,7 @@ protected:
   /// @details Drained before workgroup completions so an error cannot race a
   /// successful completion from a later instruction.
   std::vector<PendingQueueException> pending_queue_exceptions_;
+  std::function<void()> notification_flush_hook_for_testing_;
   std::unique_ptr<WavefrontScheduler> scheduler_ = std::make_unique<OldestFirstScheduler>();
   uint64_t cycle_counter_ = 0;
 

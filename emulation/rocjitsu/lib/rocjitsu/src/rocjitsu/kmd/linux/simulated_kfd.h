@@ -187,6 +187,13 @@ public:
     return debug_stop_publishable(gpu_id);
   }
 
+  /// @brief Exercise queue-wide runtime exception fan-out without executing a trap handler.
+  [[nodiscard]] bool signal_runtime_queue_exception_for_testing(uint32_t gpu_id, uint32_t queue_id,
+                                                                uint32_t process_id,
+                                                                uint64_t exception_mask) {
+    return signal_runtime_queue_exception(gpu_id, queue_id, process_id, exception_mask);
+  }
+
   /// @brief Release the local process's parked event waiters so a blocking
   /// WAIT_EVENTS returns and drops its driver snapshot before teardown.
   /// @details Fires EventState::begin_wait_cancel() on the local process: waiters
