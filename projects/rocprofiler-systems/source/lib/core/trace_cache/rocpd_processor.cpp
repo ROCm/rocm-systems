@@ -1282,30 +1282,25 @@ rocpd_processor_t::post_process_metadata()
     auto pmc_info_list = m_metadata->get_pmc_info_list();
     for(const auto& pmc_info : pmc_info_list)
     {
-        constexpr std::array<agent_type, 3> k_known_agent_types = {
-            agent_type::GPU,
-            agent_type::CPU,
-            agent_type::NIC,
-        };
-
-        const bool agent_type_found =
-            std::ranges::find(k_known_agent_types, pmc_info.type) !=
-            k_known_agent_types.end();
-
         const agent* pmc_agent_ptr = nullptr;
         try
         {
-            pmc_agent_ptr = agent_type_found
-                                ? &m_agent_manager->get_agent_by_type_index(
-                                      pmc_info.agent_type_index, pmc_info.type)
-                                : &m_agent_manager->get_agent_by_id(
-                                      pmc_info.agent_type_index, pmc_info.type);
-        } catch(const std::out_of_range& e)
+            pmc_agent_ptr = &m_agent_manager->get_agent_by_type_index(
+                pmc_info.agent_type_index, pmc_info.type);
+        } catch(const std::out_of_range&)
         {
-            LOG_WARNING("PMC info registration skipped: agent lookup failed for "
-                        "agent_type_index={}, type={}: {}",
-                        pmc_info.agent_type_index, to_string(pmc_info.type), e.what());
-            continue;
+            try
+            {
+                pmc_agent_ptr = &m_agent_manager->get_agent_by_id(
+                    pmc_info.agent_type_index, pmc_info.type);
+            } catch(const std::out_of_range& e)
+            {
+                LOG_WARNING("PMC info registration skipped: agent lookup failed for "
+                            "agent_type_index={}, type={}: {}",
+                            pmc_info.agent_type_index, to_string(pmc_info.type),
+                            e.what());
+                continue;
+            }
         }
 
         const auto& pmc_agent     = *pmc_agent_ptr;
@@ -1320,8 +1315,9 @@ rocpd_processor_t::post_process_metadata()
         uid.agent_id            = pmc_agent_uid;
         pmc_info_data.unique_id = uid;
         pmc_info_data.target_arch =
-            agent_type_found ? std::optional<std::string_view>{ pmc_info.target_arch }
-                             : std::nullopt;
+            pmc_info.target_arch.empty()
+                ? std::nullopt
+                : std::optional<std::string_view>{ pmc_info.target_arch };
         pmc_info_data.event_code       = pmc_info.event_code;
         pmc_info_data.instance_id      = pmc_info.instance_id;
         pmc_info_data.symbol           = pmc_info.symbol;
