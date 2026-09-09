@@ -1720,7 +1720,7 @@ static ncclResult_t initTransportsRank(struct ncclComm* comm, struct ncclComm* p
     if (isGfx1151 || intraGraphGen) {
       /**
       * GFX1151 (1 GPU/node): Uses Walecki + Greedy construction to generate 'nChannels'
-      * edge-disjoint Hamiltonian rings. For N nodes, N/2 perfect rings are guaranteed;
+      * edge-balanced Hamiltonian rings. For N nodes, N/2 perfect rings are guaranteed;
       * additional channels are balanced via greedy heuristics to saturate Fat-Tree/Clos fabrics.
       * Note: nNodes is only known AFTER bootstrapAllGather (Postset), but nChannels
       * is required during Preset. Therefore, nChannels cannot be auto-calculated
@@ -1729,7 +1729,7 @@ static ncclResult_t initTransportsRank(struct ncclComm* comm, struct ncclComm* p
       * optimal 4-node load balancing). Missing channel data is backfilled
       * by repairMissingChannels() during Postset.
       * 
-      * In isGfx_110x_120x ,defaultNumChannels = 56 is due to Minimum Edge disjoint Hamiltonian 
+      * In isGfx_110x_120x ,defaultNumChannels = 56 is due to Minimum edge-balanced Hamiltonian 
       * cycles in graph K8 (8 GPU case) = 14 , and 56 is 14*4.
       * */
       int initChannels = (int)rcclParamInitChannels();
