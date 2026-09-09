@@ -43,6 +43,11 @@ struct ConSanMoiAutoReportInventory {
   /// shadow slot per byte so mixed-width objects can use byte-granular
   /// provenance without a second report layout.
   uint64_t inline_lds_bytes = 0;
+  /// Zero lets automatic planning choose the largest power-of-two dispatch
+  /// fanout that fits the caller's report ceiling. Reconstructed inventories
+  /// retain the layout's selected fanout so validation against the smaller,
+  /// exact allocation does not adapt the geometry a second time.
+  uint64_t inline_exact_dispatch_bank_count = 0;
   uint64_t inline_atomic_release_count = 0;
   uint64_t inline_causal_snapshot_count = 0;
   uint64_t inline_acquired_epoch_token_count = 0;
@@ -68,7 +73,7 @@ using ConSanMoiAutoReportCapacityMember = uint64_t ConSanMoiAutoReportInventory:
 /// Canonical projection of every numeric report-capacity dimension. Keep
 /// capacity comparisons expressed through this list so a dimension cannot
 /// acquire a separate, silently incomplete comparison path.
-inline constexpr std::array<ConSanMoiAutoReportCapacityMember, 16>
+inline constexpr std::array<ConSanMoiAutoReportCapacityMember, 17>
     kConSanMoiAutoReportCapacityMembers = {
         &ConSanMoiAutoReportInventory::access_range_count,
         &ConSanMoiAutoReportInventory::barrier_event_count,
@@ -83,6 +88,7 @@ inline constexpr std::array<ConSanMoiAutoReportCapacityMember, 16>
         &ConSanMoiAutoReportInventory::sampled_sync_slot_count,
         &ConSanMoiAutoReportInventory::sampled_watchpoint_count,
         &ConSanMoiAutoReportInventory::inline_lds_bytes,
+        &ConSanMoiAutoReportInventory::inline_exact_dispatch_bank_count,
         &ConSanMoiAutoReportInventory::inline_atomic_release_count,
         &ConSanMoiAutoReportInventory::inline_causal_snapshot_count,
         &ConSanMoiAutoReportInventory::inline_acquired_epoch_token_count,

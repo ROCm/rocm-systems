@@ -2112,6 +2112,16 @@ build_inline_shadow_words(std::span<const uint8_t> bytes, const ConSanMoiCandida
         return std::nullopt;
       }
 
+      if (layout.inline_exact_dispatch_bank_count == 0u ||
+          (layout.inline_exact_dispatch_bank_count &
+           (layout.inline_exact_dispatch_bank_count - 1u)) != 0u ||
+          layout.exact_shadow_entry_capacity % layout.inline_exact_dispatch_bank_count) {
+        errors.emplace_back(
+            "ConSan MOI inline-shadow probe has invalid dispatch-bank geometry: banks=" +
+            std::to_string(layout.inline_exact_dispatch_bank_count) +
+            ", entries=" + std::to_string(layout.exact_shadow_entry_capacity));
+        return std::nullopt;
+      }
       const uint32_t entries_per_dispatch_bank =
           layout.exact_shadow_entry_capacity / layout.inline_exact_dispatch_bank_count;
       const uint32_t dispatch_bank_stride =
@@ -2132,10 +2142,7 @@ build_inline_shadow_words(std::span<const uint8_t> bytes, const ConSanMoiCandida
           return std::nullopt;
         }
       }
-      if (layout.inline_exact_dispatch_bank_count == 0u ||
-          (layout.inline_exact_dispatch_bank_count &
-           (layout.inline_exact_dispatch_bank_count - 1u)) != 0u ||
-          entries_per_dispatch_bank == 0u || dispatch_bank_stride == 0u ||
+      if (entries_per_dispatch_bank == 0u || dispatch_bank_stride == 0u ||
           !append_moi_report_dispatch_id_word(words, plan.dispatch_id, tmp_vgpr,
                                               /*high_word=*/false, arch) ||
           !sequence.emit_all(

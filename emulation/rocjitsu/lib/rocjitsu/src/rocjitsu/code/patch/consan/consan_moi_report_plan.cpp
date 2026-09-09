@@ -2,8 +2,8 @@
 // SPDX-License-Identifier: MIT
 
 #include "rocjitsu/checked_byte_budget.h"
-#include "rocjitsu/code/patch/consan/consan_moi_report_contract.h"
 #include "rocjitsu/code/patch/consan/consan_moi_mode_planning.h"
+#include "rocjitsu/code/patch/consan/consan_moi_report_contract.h"
 #include "rocjitsu/code/patch/consan/consan_moi_report_planning.h"
 #include "util/bit.h"
 
@@ -319,7 +319,11 @@ revalidate_consan_moi_report_layout(const ConSanMoiReportBufferLayout &candidate
       consan_moi_impl::moi_mode_operations(engine).reconstruct_report_inventory(candidate);
   if (!inventory)
     return {};
-  const ConSanMoiAutoReportPlan plan = plan_consan_moi_auto_report(*inventory);
+  // Reconstruct against the actual allocation. Adaptive geometry selected by
+  // the original plan is part of the reconstructed inventory, so validation
+  // checks that exact choice rather than adapting it again to this tighter
+  // ceiling.
+  const ConSanMoiAutoReportPlan plan = plan_consan_moi_auto_report(*inventory, report_buffer_size);
   if (!plan.complete() || candidate != plan.layout)
     return {};
   return plan.layout;

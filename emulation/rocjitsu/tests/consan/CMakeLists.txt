@@ -4910,6 +4910,7 @@ function(rj_add_consan_hip_tests)
                 TARGET hip_consan_moi_test
                 FILTER "ConSanMoiHipTest.RuntimeSampledBackendRetainsAllWavesForSelectedAddress"
                 TIMEOUT 30
+                RUN_SERIAL
                 ENVIRONMENT
                     "HSA_TOOLS_LIB=$<TARGET_FILE:rocjitsu_dbi_hooks>"
                     "RJ_CONSAN_MODE=sampled"

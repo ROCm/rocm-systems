@@ -22,8 +22,16 @@ bool plan_inline_shadow_report_layout(const ConSanMoiAutoReportInventory &invent
     plan.reason = ConSanMoiAutoReportPlanReason::AbiCapacityOverflow;
     return false;
   }
-  layout.inline_exact_dispatch_bank_count =
-      consan_moi_inline_exact_dispatch_bank_count_for_lds(inventory.inline_lds_bytes);
+  const uint64_t dispatch_bank_count = inventory.inline_exact_dispatch_bank_count != 0u
+                                           ? inventory.inline_exact_dispatch_bank_count
+                                           : consan_moi_inline_exact_dispatch_bank_count_for_lds(
+                                                 inventory.inline_lds_bytes, plan.ceiling_bytes);
+  if (dispatch_bank_count > kConSanMoiInlineMaximumDispatchBankCount ||
+      (dispatch_bank_count & (dispatch_bank_count - 1u)) != 0u) {
+    plan.reason = ConSanMoiAutoReportPlanReason::AbiGeometryCapacityOverflow;
+    return false;
+  }
+  layout.inline_exact_dispatch_bank_count = static_cast<uint32_t>(dispatch_bank_count);
   if (layout.inline_exact_dispatch_bank_count == 0u) {
     plan.outcome = ConSanMoiAutoReportPlanOutcome::InsufficientReportCapacity;
     plan.reason = ConSanMoiAutoReportPlanReason::PerBufferCeiling;
@@ -68,6 +76,7 @@ reconstruct_inline_shadow_report_inventory(const ConSanMoiReportBufferLayout &ca
   inventory.diagnostic_count = candidate.diagnostic_capacity;
   inventory.inline_lds_bytes = static_cast<uint64_t>(candidate.exact_shadow_entry_capacity) /
                                candidate.inline_exact_dispatch_bank_count;
+  inventory.inline_exact_dispatch_bank_count = candidate.inline_exact_dispatch_bank_count;
   inventory.inline_atomic_release_count = candidate.inline_atomic_release_capacity;
   inventory.inline_causal_snapshot_count = candidate.inline_causal_snapshot_capacity;
   inventory.inline_acquired_epoch_token_count = candidate.inline_acquired_epoch_token_capacity;
@@ -203,8 +212,10 @@ ConSanEvidenceRequirements consan_moi_impl::plan_inline_shadow_evidence_requirem
   inventory.inline_causal_snapshot_count = ordering_capacity;
   inventory.inline_acquired_epoch_token_count =
       std::max<uint64_t>(ordering_capacity, kConSanMoiInlineShadowAcquiredEpochTokenSlotCapacity);
-  const uint64_t inline_dispatch_banks =
-      consan_moi_inline_exact_dispatch_bank_count_for_lds(inventory.inline_lds_bytes);
+  const uint64_t inline_dispatch_banks = consan_moi_inline_exact_dispatch_bank_count_for_lds(
+      inventory.inline_lds_bytes, context.requested_report_buffer_size == 0u
+                                      ? kConSanMoiOrdinaryAutoReportBufferCeilingBytes
+                                      : context.requested_report_buffer_size);
   const uint64_t diagnostic_headroom = util::saturating_mul(
       util::saturating_mul(inventory.access_range_count, inline_dispatch_banks),
       static_cast<uint64_t>(kConSanMoiInlineShadowDiagnosticHeadroomPerAccess));

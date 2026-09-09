@@ -9,21 +9,23 @@ static_assert(sizeof(ConSanMoiInlineExactShadowSlot) == 24);
 static_assert(alignof(ConSanMoiInlineExactShadowSlot) == 8);
 
 /// Select the largest power-of-two dispatch fanout whose byte-addressable
-/// full-LDS exact shadow consumes at most three quarters of the automatic
+/// full-LDS exact shadow consumes at most three quarters of the effective
 /// report ceiling. This admits the complete 256-bank fanout for the common
-/// 16-KiB aperture while retaining one quarter for diagnostics and causal
-/// metadata. Subword objects need one independent slot per LDS byte so an
+/// 16-KiB aperture under the ordinary ceiling while adapting to smaller
+/// caller-provided buffers. The remaining quarter is retained for diagnostics
+/// and causal metadata. Subword objects need one independent slot per LDS byte so an
 /// access to one byte cannot erase provenance for an adjacent byte. Ordinary
 /// four-byte-cell objects use the same conservative allocation and simply
-/// leave the additional slots unused. The remaining quarter is available to the
-/// report header, diagnostics, atomic-release state, and causal metadata.
-[[nodiscard]] constexpr uint32_t
-consan_moi_inline_exact_dispatch_bank_count_for_lds(uint64_t max_lds_bytes) {
+/// leave the additional slots unused.
+[[nodiscard]] constexpr uint32_t consan_moi_inline_exact_dispatch_bank_count_for_lds(
+    uint64_t max_lds_bytes,
+    uint64_t report_ceiling_bytes = kConSanMoiOrdinaryAutoReportBufferCeilingBytes) {
   constexpr uint32_t kMaximumDispatchBankCount = 256u;
   const uint64_t exact_bytes_per_bank =
       static_cast<uint64_t>(max_lds_bytes) * sizeof(ConSanMoiInlineExactShadowSlot);
-  constexpr uint64_t exact_shadow_budget =
-      (kConSanMoiOrdinaryAutoReportBufferCeilingBytes / 4u) * 3u;
+  const uint64_t bounded_ceiling =
+      std::min(report_ceiling_bytes, kConSanMoiOrdinaryAutoReportBufferCeilingBytes);
+  const uint64_t exact_shadow_budget = (bounded_ceiling / 4u) * 3u;
   if (exact_bytes_per_bank > exact_shadow_budget)
     return 0u;
   uint32_t bank_count = 1u;

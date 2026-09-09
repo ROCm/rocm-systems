@@ -2393,16 +2393,37 @@ TEST(ConSanMoi, InlineExactDispatchBankSelectionCoversFitBoundaries) {
   // the 256 workgroups in the Stream-K device regression.
   EXPECT_EQ(consan_moi_inline_exact_dispatch_bank_count_for_lds(16u * 1024u), 256u);
   EXPECT_EQ(consan_moi_inline_exact_dispatch_bank_count_for_lds(64u * 1024u), 64u);
+  EXPECT_EQ(consan_moi_inline_exact_dispatch_bank_count_for_lds(64u * 1024u, 64u * 1024u * 1024u),
+            32u);
   EXPECT_EQ(consan_moi_inline_exact_dispatch_bank_count_for_lds(1024u * 1024u), 4u);
   EXPECT_EQ(consan_moi_inline_exact_dispatch_bank_count_for_lds(kLargestFittingLdsBytes), 1u);
   EXPECT_EQ(consan_moi_inline_exact_dispatch_bank_count_for_lds(kLargestFittingLdsBytes + 1u), 0u);
 }
 
+TEST(ConSanMoi, InlineExactDispatchBanksFitCallerProvidedReportBuffer) {
+  constexpr uint64_t kGfx1201LdsBytes = 64u * 1024u;
+  const ConSanMoiAutoReportInventory inventory{
+      .engine = ConSanMoiEngine::InlineShadow,
+      .diagnostic_count = kConSanMoiInlineShadowDefaultDiagnosticCapacity,
+      .inline_lds_bytes = kGfx1201LdsBytes,
+      .inline_atomic_release_count = kConSanMoiInlineShadowAtomicReleaseSlotCapacity,
+      .inline_causal_snapshot_count = kConSanMoiInlineShadowAtomicReleaseSlotCapacity,
+      .inline_acquired_epoch_token_count = kConSanMoiInlineShadowAcquiredEpochTokenSlotCapacity,
+  };
+
+  const ConSanMoiAutoReportPlan plan = plan_consan_moi_auto_report(inventory, 64u * 1024u * 1024u);
+
+  ASSERT_TRUE(plan.complete());
+  EXPECT_EQ(plan.layout.inline_exact_dispatch_bank_count, 32u);
+  EXPECT_LE(plan.layout.required_bytes, 64u * 1024u * 1024u);
+  EXPECT_EQ(revalidate_consan_moi_report_layout(plan.layout, ConSanMoiEngine::InlineShadow,
+                                                plan.required_bytes),
+            plan.layout);
+}
+
 TEST(ConSanMoi, InlineExactDispatchBanksTrackConfiguredLdsAperture) {
-  const uint64_t kConfiguredLdsBytes =
-      consan_moi_max_workgroup_lds_bytes(ROCJITSU_CODE_ARCH_CDNA5);
-  const uint64_t kExactBytesPerBank =
-      kConfiguredLdsBytes * sizeof(ConSanMoiInlineExactShadowSlot);
+  const uint64_t kConfiguredLdsBytes = consan_moi_max_workgroup_lds_bytes(ROCJITSU_CODE_ARCH_CDNA5);
+  const uint64_t kExactBytesPerBank = kConfiguredLdsBytes * sizeof(ConSanMoiInlineExactShadowSlot);
   constexpr uint64_t kExactShadowBudget =
       (kConSanMoiOrdinaryAutoReportBufferCeilingBytes / 4u) * 3u;
   const uint32_t kConfiguredDispatchBankCount =
