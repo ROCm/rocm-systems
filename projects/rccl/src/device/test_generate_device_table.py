@@ -56,7 +56,11 @@ def _generate(tmpdir, ifc="OFF", all_unrolls="OFF"):
 
 
 def _unroll_tables(header):
-    """Map unroll -> list of table entries, guarded slots reduced to their symbol."""
+    """Map generated unroll -> table entries, guarded slots reduced to their symbol.
+
+    A table is emitted for every NCCL_UNROLL_* enum value, so the empty ones are
+    dropped here: they were not generated for this build and no caller wants them.
+    """
     tables = {}
     for unroll, body in re.findall(
         r"ncclDevFuncTable_(\d+)\[\] = \{(.*?)nullptr\};", header, re.S
@@ -65,7 +69,8 @@ def _unroll_tables(header):
         # Guarded slots emit symbol + "#else" nullptr at the same index; keep the symbol.
         for m in re.finditer(r"/\*\s*(\d+)\*/ (\w+),", body):
             slots.setdefault(int(m.group(1)), m.group(2))
-        tables[unroll] = [slots[i] for i in sorted(slots)]
+        if slots:
+            tables[unroll] = [slots[i] for i in sorted(slots)]
     return tables
 
 
@@ -177,7 +182,8 @@ class DeviceTableGenerationTest(unittest.TestCase):
         # Every reg=1 (LL128) SendRecv declaration must sit inside the
         # gfx942/gfx950 + ENABLE_LL128 guard...
         guarded = re.findall(
-            r"#if \(defined\(__gfx942__\) \|\| defined\(__gfx950__\)\) && defined\(ENABLE_LL128\)\n"
+            r"#if \(defined\(__gfx942__\) \|\| defined\(__gfx950__\) \|\| defined\(__gfx1250__\)\)"
+            r" && defined\(ENABLE_LL128\)\n"
             r"__device__ void (ncclDevFunc_SendRecv\w*_1)\(\);\n#endif",
             self.header,
         )
@@ -194,7 +200,7 @@ class DeviceTableGenerationTest(unittest.TestCase):
         self.assertEqual(
             set(),
             ll128 - set(guarded),
-            "LL128 SendRecv kernels emitted without the gfx942/gfx950 guard: %s"
+            "LL128 SendRecv kernels emitted without the arch guard: %s"
             % sorted(ll128 - set(guarded)),
         )
         # The legacy LL kernel must stay unguarded (built on every arch): its
@@ -209,8 +215,7 @@ class DeviceTableGenerationTest(unittest.TestCase):
         # Skipping reg=1 on the gfx1250 unrolls leaves a hole that shifts every later
         # index in that table away from the host ids (derived from the first unroll).
         decls = self._sendrecv_decls()
-        # A table is emitted per enum value; only non-empty ones were generated.
-        generated = {u for u, t in _unroll_tables(self.header).items() if t}
+        generated = set(_unroll_tables(self.header))
         missing = sorted(
             u
             for u in generated
@@ -223,8 +228,8 @@ class DeviceTableGenerationTest(unittest.TestCase):
     def test_device_tables_are_index_aligned_across_unrolls(self):
         # Host ids come from the first generated unroll but index every
         # ncclDevFuncTable_*, so all tables must hold the same functions in order.
-        tables = {u: t for u, t in _unroll_tables(self.header).items() if t}
-        self.assertTrue(tables, "no non-empty unroll tables generated")
+        tables = _unroll_tables(self.header)
+        self.assertTrue(tables, "no unroll tables generated")
         base_unroll, base = sorted(tables.items())[0]
         base_shape = [_strip_unroll(s) for s in base]
         for unroll, entries in sorted(tables.items()):
@@ -239,11 +244,7 @@ class DeviceTableGenerationTest(unittest.TestCase):
         # BUILD_ALL_UNROLLS fills in the skipped unrolls and drops the gfx1250 restriction.
         with tempfile.TemporaryDirectory(prefix="rccl_devtable_all_") as tmpdir:
             header = _generate(tmpdir, all_unrolls="ON")
-        tables = _unroll_tables(header)
-        # Filter to non-empty: a table is emitted per enum value regardless.
-        self.assertEqual({"1", "2", "4", "8", "16", "32"}, {u for u, t in tables.items() if t})
-        for unroll, entries in tables.items():
-            self.assertTrue(entries, "ncclDevFuncTable_%s is empty under BUILD_ALL_UNROLLS" % unroll)
+        self.assertEqual({"1", "2", "4", "8", "16", "32"}, set(_unroll_tables(header)))
         self.assertNotIn("#if defined(__gfx1250__)\n", header)
 
     def test_no_obsolete_table_omit_macro(self):

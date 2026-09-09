@@ -499,12 +499,11 @@ ncclResult_t ncclTasksRegAndEnqueue(struct ncclComm* comm) {
       int regMode = (devWork.regUsed || devWork.netRegUsed) ? 1 : 2;
       int id = ncclDevFuncId(task->func, task->opDev.op, task->datatype, task->algorithm, task->protocol, accFlag,
                              task->pipeline, regMode);
-      if (id >= 0) task->devFuncId = id;
-      else {
-        WARN("Failed to get devFuncId for coll %d, op %d, type %d, algo %d, proto %d, accFlag %d, regMode %d", task->func,
-             task->opDev.op, task->datatype, task->algorithm, task->protocol, accFlag, regMode);
+      if (id < 0) {
+        WARN("%s: unsupported collective. Please ensure the collective has been enabled in build.", __func__);
         return ncclInvalidUsage;
       }
+      task->devFuncId = id;
     }
 
     if (task->regBufType & NCCL_NVLS_REG_BUFFER) {
@@ -1230,7 +1229,8 @@ static ncclResult_t addP2pToPlan(struct ncclComm* comm, struct ncclKernelPlan* p
   //     send/recv stays consistent with the collective protocol choice.
   //   - NCCL_ALLOC_P2P_NET_LL_BUFFERS=1: the P2P opt-in that also makes the LL128 staging buffer
   //     available on network connections.
-  //   - gfx942/gfx950: the only archs whose LL128 send/recv kernel is generated.
+  //   - gfx942/gfx950: the only archs that activate the LL128 send/recv kernel. gfx1250
+  //     builds it so its table slot is a real function, but nothing selects it there.
 #if defined(ENABLE_LL128)
   bool useLL128SendRecv =
     comm->allocP2pNetLLBuffers && comm->topo->ll128Enabled && (comm->cudaArch == 940 || comm->cudaArch == 950);

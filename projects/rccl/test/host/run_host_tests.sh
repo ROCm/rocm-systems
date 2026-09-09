@@ -195,9 +195,11 @@ do_host_tests() {
   return "$rc"
 }
 
-# Run the kernel-count guard pytest suite (test/kernel-count) in a local venv so
-# the lean host-test image needs no system pytest. See that dir's README.
+# Run the CPU-only generator guards: the kernel-count pytest suite (in a local venv
+# so the lean host-test image needs no system pytest) and the device-table unittests.
 do_guards() {
+  local rc=0
+
   echo "==> Kernel-count guards (pytest: test/kernel-count)"
   local gd="$RCCL_ROOT/test/kernel-count"
   local venv="$gd/venv"
@@ -205,7 +207,14 @@ do_guards() {
     python3 -m venv "$venv"
     "$venv/bin/pip" install -q --disable-pip-version-check -r "$gd/requirements.txt"
   fi
-  "$venv/bin/python" -m pytest "$gd/tests" -v
+  "$venv/bin/python" -m pytest "$gd/tests" -v || rc=1
+
+  # Kernel-count only tallies, never inspects order. This file carries the table-order
+  # assertion, and it is ctest-only, which nothing in RCCL CI runs.
+  echo "==> Device-table codegen guards (unittest: src/device/test_generate_device_table.py)"
+  python3 "$RCCL_ROOT/src/device/test_generate_device_table.py" -v || rc=1
+
+  return "$rc"
 }
 
 # Turn the per-binary profraw sets produced by the `run` phase into coverage

@@ -36,6 +36,10 @@ extern std::function<ncclResult_t(struct ncclComm*, ncclFunc_t, size_t, int&)>
     g_rcclOverrideChannels;
 extern int g_rcclOverrideChannelsCalls;
 extern bool g_rcclIsArchSupportedForFunc;  // UNDRIVEN
+
+// RCCL_PARAM(DirectReduceScatterThreshold). Only referenced once a test hooks
+// ncclRegisterCollBuffers: the aborting stub makes the rest of the loop unreachable.
+extern int64_t g_rcclParamDirectReduceScatterThreshold;
 // Call counters for the no-op tuning hooks: a no-op that was never called and one
 // that was look identical without these, so a dropped call site would be silent.
 extern int g_rcclUpdateCollectiveProtocolCalls;

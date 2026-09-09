@@ -93,9 +93,8 @@ ncclResult_t ncclScheduleBcastTasksToPlan(struct ncclComm* comm, struct ncclKern
 
     // Choose kernel for plan. Based on proto, algo=ring
     int funcIndex = ncclDevFuncId(ncclFuncAllGatherV, /*devRedOp,type=*/0, 0, NCCL_ALGO_RING, proto);
-    if(funcIndex < 0) {
-      WARN("Failed to get devFuncId for coll %d, op %d, type %d, algo %d, proto %d", ncclFuncAllGatherV,
-           /*devRedOp=*/0, /*type=*/0, NCCL_ALGO_RING, proto);
+    if (funcIndex < 0) {
+      WARN("%s: unsupported collective. Please ensure the collective has been enabled in build.", __func__);
       return ncclInvalidUsage;
     }
     if (!plan->kernelSpecialized) {

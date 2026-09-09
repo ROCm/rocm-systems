@@ -45,7 +45,7 @@ def reg_values_of(coll, proto):
   # SendRecv is generated as two latency-protocol kernel variants, selected on the
   # host by ncclDevFuncId_P2p(useLL128) (see src/enqueue.cc / src/include/device.h):
   #   reg "0" = legacy LL latency path (built on every arch; the default)
-  #   reg "1" = LL128 latency path (built for gfx942/gfx950 only; used when
+  #   reg "1" = LL128 latency path (activated on gfx942/gfx950 only; used when
   #             NCCL_ALLOC_P2P_NET_LL_BUFFERS=1). The reg value is threaded into the
   #             SendRecv RunWorkBatch specialization as UserRegMode to pick LL vs LL128.
   if coll == "SendRecv":
@@ -275,7 +275,7 @@ def calc_unroll_and_pipeline_for_local_arch():
       return (["2"], all_pipelines)
     elif "gfx1250" == gfx_name:
       # gfx1250 (MI450/MI455) runs unroll 32. Use --all_unrolls to build 8 and 16.
-      return (["32"], all_pipelines)
+      return (gfx1250_unrolls, all_pipelines)
     else:
       return (["4"], all_pipelines)
   else:
@@ -423,9 +423,9 @@ def get_arch_guard(fn):
   cond = None
 
   if fn.coll == "SendRecv" and fn.reg == "1":
-      # LL128 SendRecv latency kernel: only build (and only activate) on gfx942/gfx950.
-      # Every other arch keeps the legacy LL kernel (reg "0"), which has no guard.
-      cond = "(defined(__gfx942__) || defined(__gfx950__)) && defined(ENABLE_LL128)"
+      # LL128 SendRecv kernel. Only gfx942/gfx950 activate it, but gfx1250 builds it too
+      # or its unroll-32 slot would be a nullptr in the one table gfx1250 indexes.
+      cond = "(defined(__gfx942__) || defined(__gfx950__) || defined(__gfx1250__)) && defined(ENABLE_LL128)"
   elif fn.unroll in gfx1250_unrolls and not build_all_unrolls:
       cond = "defined(__gfx1250__)"
       if fn.proto == "LL128":

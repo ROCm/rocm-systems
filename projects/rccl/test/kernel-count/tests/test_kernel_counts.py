@@ -299,11 +299,16 @@ def test_all_unrolls_opt_in_adds_the_skipped_unrolls(tmp_path_factory, generated
     d = tmp_path_factory.mktemp("all_unrolls")
     _run_generator(str(d), "OFF", all_unrolls="ON")
     records, _, manifest_count = _parse(str(d))
-    assert manifest_count == len(records)
+    assert manifest_count == len(records), (
+        "--all_unrolls: specialized_files.txt lists %d kernels but %d were parsed"
+        % (manifest_count, len(records))
+    )
 
     counts = _count_by(records, "unroll")
-    assert set(counts) == {"1", "2", "4", "8", "16", "32"}
-    assert len(set(counts.values())) == 1, counts
+    assert set(counts) == {"1", "2", "4", "8", "16", "32"}, (
+        "--all_unrolls did not generate every unroll: %s" % sorted(counts)
+    )
+    assert len(set(counts.values())) == 1, "--all_unrolls broke unroll lockstep: %s" % counts
 
     baseline = _count_by(generated["OFF"]["records"], "unroll")
     assert set(counts.values()) == set(baseline.values()), (
