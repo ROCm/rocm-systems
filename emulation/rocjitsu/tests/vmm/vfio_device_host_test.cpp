@@ -30,6 +30,7 @@
 
 extern "C" {
 #include <libvfio-user.h>
+#include <pci_caps/px.h>
 }
 
 #include <sys/eventfd.h>
@@ -43,12 +44,14 @@ extern "C" {
 #include <chrono>
 #include <csignal>
 #include <cstdlib>
+#include <cstring>
 #include <filesystem>
 #include <format>
 #include <future>
 #include <stdexcept>
 #include <string>
 #include <thread>
+#include <vector>
 
 namespace {
 
@@ -165,6 +168,76 @@ TEST(VfioDeviceHost, PresentsTheDeclaredIdentityInConfigSpace) {
   EXPECT_EQ(byte_at(11), kTestId.cls) << "a guest driver binds on the class code";
 }
 
+TEST(VfioDeviceHost, PublishesASecondGenerationPcieEndpointCapability) {
+  ServedDevice served;
+  ASSERT_TRUE(served.built());
+  rocjitsu::test::VfioUserClient client;
+  ASSERT_TRUE(served.attach(client));
+
+  std::array<std::byte, PCI_CFG_SPACE_SIZE> config{};
+  ASSERT_TRUE(client.region_read(VFU_PCI_DEV_CFG_REGION_IDX, 0, config));
+
+  uint8_t capability = std::to_integer<uint8_t>(config[PCI_CAPABILITY_LIST]);
+  while (capability != 0 && std::to_integer<uint8_t>(config[capability]) != PCI_CAP_ID_EXP) {
+    capability = std::to_integer<uint8_t>(config[capability + PCI_CAP_LIST_NEXT]);
+  }
+  ASSERT_NE(capability, 0) << "an Express function must identify itself to the guest as one";
+
+  pxcap pcie{};
+  std::memcpy(&pcie, config.data() + capability, sizeof(pcie));
+  EXPECT_EQ(pcie.pxcaps.ver, 2u) << "Device Capabilities 2 is defined from PCIe version 2";
+  EXPECT_EQ(pcie.pxcaps.dpt, PCI_EXP_TYPE_ENDPOINT);
+  EXPECT_EQ(pcie.pxdcap2.aocs32, 0u);
+  EXPECT_EQ(pcie.pxdcap2.aocs64, 0u)
+      << "the transport must not invent AtomicOp completion for an ordinary device";
+}
+
+TEST(VfioDeviceHost, PublishesGpuAtomicCompletionCapabilities) {
+  const std::string socket_path =
+      std::format("/tmp/rj-vfu-test-atomics-{}.sock", static_cast<int>(::getpid()));
+  std::filesystem::remove(socket_path);
+
+  rocjitsu::config::KfdDeviceConfig identity;
+  identity.local_mem_size = 64 * 1024 * 1024;
+  identity.gfx_target_version = 120500;
+  rocjitsu::config::PciDeviceConfig pci;
+  pci.vram_aperture_bytes = rocjitsu::GpuPciDevice::kMinMemoryBarBytes;
+  pci.doorbell_aperture_bytes = rocjitsu::GpuPciDevice::kMinMemoryBarBytes;
+  rocjitsu::GpuPciDevice gpu("atomics", rocjitsu::gpu_pci_spec_from_config(identity, pci), nullptr);
+  ASSERT_TRUE(gpu.usable());
+
+  rocjitsu::VfioDeviceHost host(socket_path, gpu);
+  ASSERT_TRUE(host.build());
+  std::jthread serving([&host](std::stop_token stop) { (void)host.run(stop); });
+  rocjitsu::test::VfioUserClient client;
+  bool attached = false;
+  for (int attempt = 0; attempt < 200 && !attached; ++attempt) {
+    attached = client.connect(socket_path);
+    if (!attached) {
+      std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+  }
+  ASSERT_TRUE(attached);
+
+  std::array<std::byte, PCI_CFG_SPACE_SIZE> config{};
+  ASSERT_TRUE(client.region_read(VFU_PCI_DEV_CFG_REGION_IDX, 0, config));
+  uint8_t capability = std::to_integer<uint8_t>(config[PCI_CAPABILITY_LIST]);
+  while (capability != 0 && std::to_integer<uint8_t>(config[capability]) != PCI_CAP_ID_EXP) {
+    capability = std::to_integer<uint8_t>(config[capability + PCI_CAP_LIST_NEXT]);
+  }
+  ASSERT_NE(capability, 0);
+
+  pxcap pcie{};
+  std::memcpy(&pcie, config.data() + capability, sizeof(pcie));
+  EXPECT_EQ(pcie.pxdcap2.aocs32, 1u);
+  EXPECT_EQ(pcie.pxdcap2.aocs64, 1u);
+
+  serving.request_stop();
+  serving.join();
+  host.detach();
+  std::filesystem::remove(socket_path);
+}
+
 TEST(VfioDeviceHost, CarriesABarWriteAndReadBackToTheDevice) {
   ServedDevice served;
   ASSERT_TRUE(served.built());
@@ -213,6 +286,56 @@ TEST(VfioDeviceHost, AnnouncesAWindowTheClientSharesMappably) {
   ::close(backing);
 }
 
+TEST(VfioDeviceHost, PerformsTypedAtomicAccessOnlyOnLiveMappedGuestMemory) {
+  ServedDevice served;
+  ASSERT_TRUE(served.built());
+
+  constexpr uint64_t kGuestAddress = 0x180000;
+  constexpr uint64_t kWindowSize = 0x1000;
+  EXPECT_EQ(served.host().atomic_load(kGuestAddress, sizeof(uint64_t)).outcome,
+            simdojo::DmaAccessOutcome::Unavailable);
+  EXPECT_EQ(served.host().atomic_store(kGuestAddress + 1, sizeof(uint64_t), 1),
+            simdojo::DmaAccessOutcome::Malformed);
+
+  rocjitsu::test::VfioUserClient client;
+  ASSERT_TRUE(served.attach(client));
+  const int backing = ::memfd_create("rj-vfu-test-atomic-window", 0);
+  ASSERT_GE(backing, 0);
+  ASSERT_EQ(::ftruncate(backing, kWindowSize), 0);
+  void *mapping = ::mmap(nullptr, kWindowSize, PROT_READ | PROT_WRITE, MAP_SHARED, backing, 0);
+  ASSERT_NE(mapping, MAP_FAILED);
+  auto *value = static_cast<uint64_t *>(mapping);
+  std::atomic_ref<uint64_t>(*value).store(7, std::memory_order_release);
+  ASSERT_TRUE(client.dma_map(kGuestAddress, kWindowSize, backing, 0));
+
+  const simdojo::DmaAtomicLoadResult loaded =
+      served.host().atomic_load(kGuestAddress, sizeof(uint64_t));
+  EXPECT_EQ(loaded.outcome, simdojo::DmaAccessOutcome::Complete);
+  EXPECT_EQ(loaded.value, 7u);
+  EXPECT_EQ(served.host().atomic_store(kGuestAddress, sizeof(uint64_t), 11),
+            simdojo::DmaAccessOutcome::Complete);
+  EXPECT_EQ(std::atomic_ref<uint64_t>(*value).load(std::memory_order_acquire), 11u);
+
+  const simdojo::DmaAtomicCompareExchangeResult exchanged =
+      served.host().compare_exchange(kGuestAddress, sizeof(uint64_t), 11, 13);
+  EXPECT_EQ(exchanged.outcome, simdojo::DmaAccessOutcome::Complete);
+  EXPECT_EQ(exchanged.observed, 11u);
+  EXPECT_TRUE(exchanged.exchanged);
+  EXPECT_EQ(std::atomic_ref<uint64_t>(*value).load(std::memory_order_acquire), 13u);
+
+  const simdojo::DmaAtomicCompareExchangeResult mismatch =
+      served.host().compare_exchange(kGuestAddress, sizeof(uint64_t), 11, 17);
+  EXPECT_EQ(mismatch.outcome, simdojo::DmaAccessOutcome::Complete);
+  EXPECT_EQ(mismatch.observed, 13u);
+  EXPECT_FALSE(mismatch.exchanged);
+  EXPECT_EQ(served.host().atomic_load(kGuestAddress + kWindowSize, sizeof(uint64_t)).outcome,
+            simdojo::DmaAccessOutcome::Faulted);
+
+  ASSERT_TRUE(client.dma_unmap(kGuestAddress, kWindowSize));
+  ASSERT_EQ(::munmap(mapping, kWindowSize), 0);
+  ::close(backing);
+}
+
 // The transport serves only windows it can map. One shared without a descriptor
 // is accepted at the protocol level -- there is no way to refuse a single window
 // -- and then withheld from the device, so the device never holds a window whose
@@ -227,6 +350,107 @@ TEST(VfioDeviceHost, WithholdsAWindowSharedWithoutADescriptor) {
 
   EXPECT_EQ(served.device().mapped_regions(), 0u)
       << "the device must not be told about a window it could never read";
+}
+
+TEST(VfioDeviceHost, FailedReadAcrossAnUnreachableWindowLeavesTheDestinationUnchanged) {
+  ServedDevice served;
+  ASSERT_TRUE(served.built());
+  rocjitsu::test::VfioUserClient client;
+  ASSERT_TRUE(served.attach(client));
+
+  constexpr uint64_t kGuestAddress = 0x280000;
+  constexpr std::size_t kWindowSize = 0x1000;
+  constexpr std::size_t kTransferSize = 16;
+  const int backing = ::memfd_create("rj-vfu-test-atomic-read", 0);
+  ASSERT_GE(backing, 0);
+  ASSERT_EQ(::ftruncate(backing, kWindowSize), 0);
+  void *mapping = ::mmap(nullptr, kWindowSize, PROT_READ | PROT_WRITE, MAP_SHARED, backing, 0);
+  ASSERT_NE(mapping, MAP_FAILED);
+  std::memset(mapping, 0xa5, kWindowSize);
+
+  ASSERT_TRUE(client.dma_map(kGuestAddress, kWindowSize, backing, 0));
+  ASSERT_TRUE(client.dma_map(kGuestAddress + kWindowSize, kWindowSize, -1, 0));
+
+  std::array<std::byte, kTransferSize> destination{};
+  destination.fill(std::byte{0x5a});
+  const std::array<std::byte, kTransferSize> before = destination;
+  EXPECT_EQ(
+      served.host().read_outcome(kGuestAddress + kWindowSize - kTransferSize / 2, destination),
+      simdojo::DmaAccessOutcome::Faulted);
+  EXPECT_EQ(destination, before)
+      << "a failed physical read must not expose the prefix from the reachable window";
+
+  ASSERT_EQ(::munmap(mapping, kWindowSize), 0);
+  ::close(backing);
+}
+
+TEST(VfioDeviceHost, FailedWriteAcrossAnUnreachableWindowLeavesGuestMemoryUnchanged) {
+  ServedDevice served;
+  ASSERT_TRUE(served.built());
+  rocjitsu::test::VfioUserClient client;
+  ASSERT_TRUE(served.attach(client));
+
+  constexpr uint64_t kGuestAddress = 0x2a0000;
+  constexpr std::size_t kWindowSize = 0x1000;
+  constexpr std::size_t kTransferSize = 16;
+  const int backing = ::memfd_create("rj-vfu-test-atomic-write", 0);
+  ASSERT_GE(backing, 0);
+  ASSERT_EQ(::ftruncate(backing, kWindowSize), 0);
+  void *mapping = ::mmap(nullptr, kWindowSize, PROT_READ | PROT_WRITE, MAP_SHARED, backing, 0);
+  ASSERT_NE(mapping, MAP_FAILED);
+  std::memset(mapping, 0x3c, kWindowSize);
+
+  ASSERT_TRUE(client.dma_map(kGuestAddress, kWindowSize, backing, 0));
+  ASSERT_TRUE(client.dma_map(kGuestAddress + kWindowSize, kWindowSize, -1, 0));
+
+  const auto *bytes = static_cast<const std::byte *>(mapping);
+  const std::array<std::byte, kTransferSize / 2> before = {
+      bytes[kWindowSize - 8], bytes[kWindowSize - 7], bytes[kWindowSize - 6],
+      bytes[kWindowSize - 5], bytes[kWindowSize - 4], bytes[kWindowSize - 3],
+      bytes[kWindowSize - 2], bytes[kWindowSize - 1]};
+  std::array<std::byte, kTransferSize> source{};
+  source.fill(std::byte{0xc3});
+  EXPECT_EQ(served.host().write_outcome(kGuestAddress + kWindowSize - kTransferSize / 2, source),
+            simdojo::DmaAccessOutcome::Faulted);
+  EXPECT_TRUE(std::equal(before.begin(), before.end(), bytes + kWindowSize - before.size()))
+      << "a failed physical write must not modify the reachable window's prefix";
+
+  ASSERT_EQ(::munmap(mapping, kWindowSize), 0);
+  ::close(backing);
+}
+
+TEST(VfioDeviceHost, ReadsAcrossHundredsOfMappedWindows) {
+  ServedDevice served;
+  ASSERT_TRUE(served.built());
+  rocjitsu::test::VfioUserClient client;
+  ASSERT_TRUE(served.attach(client));
+
+  constexpr uint64_t kGuestAddress = 0x400000;
+  constexpr std::size_t kWindowSize = 0x1000;
+  // One more than the former streaming threshold keeps highly fragmented
+  // requests on the same all-or-nothing aggregate path as ordinary requests.
+  constexpr std::size_t kWindowCount = 257;
+  constexpr std::size_t kTransferSize = kWindowSize * kWindowCount;
+  const int backing = ::memfd_create("rj-vfu-test-many-windows", 0);
+  ASSERT_GE(backing, 0);
+  ASSERT_EQ(::ftruncate(backing, kTransferSize), 0);
+  void *mapping = ::mmap(nullptr, kTransferSize, PROT_READ | PROT_WRITE, MAP_SHARED, backing, 0);
+  ASSERT_NE(mapping, MAP_FAILED);
+  std::memset(mapping, 0x69, kTransferSize);
+
+  for (std::size_t index = 0; index < kWindowCount; ++index) {
+    ASSERT_TRUE(client.dma_map(kGuestAddress + index * kWindowSize, kWindowSize, backing,
+                               index * kWindowSize));
+  }
+
+  std::vector<std::byte> destination(kTransferSize);
+  ASSERT_EQ(served.host().read_outcome(kGuestAddress, destination),
+            simdojo::DmaAccessOutcome::Complete);
+  EXPECT_TRUE(
+      std::ranges::all_of(destination, [](std::byte value) { return value == std::byte{0x69}; }));
+
+  ASSERT_EQ(::munmap(mapping, kTransferSize), 0);
+  ::close(backing);
 }
 
 TEST(VfioDeviceHost, KeepsCountWhenTheSameWindowIsSharedTwice) {
@@ -254,17 +478,22 @@ TEST(VfioDeviceHostLifecycle, ServesAnotherClientWhenNothingWasShared) {
   ServedDevice served;
   ASSERT_TRUE(served.built());
 
+  uint64_t first_generation = 0;
   {
     rocjitsu::test::VfioUserClient first;
     ASSERT_TRUE(served.attach(first));
     auto written = std::bit_cast<std::array<std::byte, 4>>(uint32_t{0xa5a5a5a5});
     ASSERT_TRUE(first.region_write(VFU_PCI_DEV_BAR0_REGION_IDX, 0, written));
+    first_generation = served.device().transport_session_generation();
+    ASSERT_NE(first_generation, 0u);
   }
 
   rocjitsu::test::VfioUserClient second;
   ASSERT_TRUE(served.attach(second)) << "a trapped-only device must accept a replacement client";
   std::array<std::byte, 4> read{};
   EXPECT_TRUE(second.region_read(VFU_PCI_DEV_BAR0_REGION_IDX, 0, read));
+  EXPECT_NE(served.device().transport_session_generation(), first_generation)
+      << "the second client inherited the first client's transport generation";
 }
 
 // A device that shared video memory by descriptor cannot take that mapping back
@@ -402,7 +631,10 @@ public:
   void reset(simdojo::ResetKind) override {}
 
   /// @brief Raise vector zero, as an interrupt source eventually will.
-  [[nodiscard]] bool raise() { return irq_ != nullptr && irq_->trigger(0); }
+  [[nodiscard]] bool raise() {
+    simdojo::PciTransportSession::OperationLease transport = acquire_transport();
+    return transport && transport.trigger(0);
+  }
 };
 
 // The capability bytes only say the device *can* be signalled. This checks that
@@ -570,6 +802,31 @@ TEST(VfioServerSignals, MapsEachHandledSignalToItsAction) {
   EXPECT_EQ(rocjitsu::action_for_signal(-1), rocjitsu::ServerSignalAction::KeepServing);
   EXPECT_EQ(rocjitsu::action_for_signal(SIGUSR2), rocjitsu::ServerSignalAction::KeepServing)
       << "a signal this server does not handle must not stop it or fire an interrupt";
+}
+
+// A server that cannot serve must say so and exit, not hang. The engine runs on
+// its own thread and finishes only when asked to, so any early return that
+// forgets to ask joins a thread that never ends -- and the process then sits
+// there having already reported the failure, which a supervisor reads as a
+// healthy server in front of a dead socket.
+//
+// A directory is the cheapest unbindable path: it exists, so the socket cannot
+// be created there, and the failure lands in build() after the engine thread is
+// already running. That is the exact window a bare `return 1` left open.
+TEST(VfioServer, ReturnsRatherThanHangingWhenTheSocketCannotBeBound) {
+  const std::string config = RJ_VFU_TEST_CONFIG_PATH;
+  ASSERT_TRUE(std::filesystem::exists(config)) << "no config to build a machine from: " << config;
+
+  // Bounded by the test rather than by the server: a hang is the failure being
+  // checked for, so it must not be able to hang the suite too.
+  std::future<int> served = std::async(std::launch::async, [&config] {
+    return rocjitsu::run_vfio_server(config, std::filesystem::temp_directory_path().string());
+  });
+
+  ASSERT_EQ(served.wait_for(std::chrono::seconds(60)), std::future_status::ready)
+      << "the server did not return after failing to bind; the engine thread was never asked to "
+         "exit";
+  EXPECT_NE(served.get(), 0) << "a server that cannot bind its socket must report failure";
 }
 
 // An empty target is a caller's mistake, and the serving thread is the wrong

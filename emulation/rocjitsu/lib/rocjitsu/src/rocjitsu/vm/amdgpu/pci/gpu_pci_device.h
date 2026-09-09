@@ -14,23 +14,48 @@
 
 #pragma once
 
+#include "rocjitsu/vm/amdgpu/interrupt_sink.h"
 #include "rocjitsu/vm/amdgpu/pci/bar_access_trace.h"
+#include "rocjitsu/vm/amdgpu/pci/interrupt_block_model.h"
+#include "rocjitsu/vm/amdgpu/pci/interrupt_ring.h"
+#include "rocjitsu/vm/amdgpu/pci/ip_block_model.h"
 #include "rocjitsu/vm/amdgpu/pci/ip_discovery.h"
+#include "rocjitsu/vm/amdgpu/pci/register_aperture.h"
+#include "rocjitsu/vm/amdgpu/pci/vram_store.h"
 #include "simdojo/components/pci_device.h"
 #include "simdojo/components/register_file.h"
 
 #include <array>
+#include <condition_variable>
 #include <cstddef>
 #include <cstdint>
+#include <deque>
+#include <functional>
+#include <memory>
+#include <mutex>
 #include <optional>
 #include <span>
 #include <string>
+#include <thread>
+#include <utility>
 #include <vector>
 
 namespace rocjitsu {
 
+class SoC;
+class MesBlockModel;
+class SdmaBlockModel;
+
+namespace amdgpu {
+class SdmaPacketCallbacks;
+class SdmaQueueBindingFactory;
+struct SdmaQueueContext;
+struct SdmaQueueProgress;
+} // namespace amdgpu
+
 /// @brief The identity and bus shape a simulated GPU presents.
-struct GpuPciDeviceSpec {
+class GpuPciDeviceSpec {
+public:
   simdojo::PciId id;       ///< Identity to present in configuration space.
   uint64_t vram_bytes = 0; ///< Local memory, which the driver reads back.
   /// @brief Aperture onto that memory. Must be a power of two; derive it with
@@ -50,7 +75,7 @@ struct GpuPciDeviceSpec {
 };
 
 /// @brief PCI function presenting a simulated GPU to a guest driver.
-class GpuPciDevice final : public simdojo::PciDevice {
+class GpuPciDevice final : public simdojo::PciDevice, private PciMemoryAccess {
 public:
   /// @brief BAR carrying the video memory aperture.
   static constexpr int kVramBar = 0;
@@ -123,8 +148,18 @@ public:
   /// @param[in] spec Identity and bus shape, from the simulation config.
   /// @param[in] trace Access diagnostics to feed, or nullptr for none. Must
   ///                  outlive this device.
-  GpuPciDevice(std::string name, const GpuPciDeviceSpec &spec, BarAccessTrace *trace);
+  GpuPciDevice(std::string name, const GpuPciDeviceSpec &spec, BarAccessTrace *trace,
+               SoC *soc = nullptr);
   ~GpuPciDevice() override;
+
+  /// @brief Release every core and transport resource owned by this frontend.
+  ///
+  /// @details Must run while the referenced SoC is still alive. The operation
+  /// is idempotent and severs every borrowed core/model route before returning,
+  /// so a later owner-driven destruction needs no access to the SoC.
+  ///
+  /// @returns Whether every frontend-owned queue and VM binding was released.
+  [[nodiscard]] bool shutdown_frontend();
 
   [[nodiscard]] std::vector<simdojo::BarSpec> bars() const override;
 
@@ -161,61 +196,28 @@ public:
             .pending_offset = kMsixPendingOffset};
   }
 
+  /// @brief Advertise the PCIe AtomicOp completion widths KFD requires.
+  ///
+  /// @details The upstream driver enables 32- and 64-bit requests together and
+  /// declines this generation when either width cannot reach the function.
+  [[nodiscard]] simdojo::PcieSpec pcie() const override {
+    return {.atomic_completer_32 = true, .atomic_completer_64 = true};
+  }
+
   [[nodiscard]] int64_t bar_access(int bar, std::span<std::byte> buf, uint64_t offset,
                                    bool write) override;
   void dma_map(const simdojo::DmaRegion &region) override;
   void dma_unmap(const simdojo::DmaRegion &region) override;
   void reset(simdojo::ResetKind kind) override;
 
-  /// @brief Which address space an interrupt ring's addresses are in.
-  ///
-  /// @details The driver puts this in the same register as the ring's size and
-  /// its enable bit, and it decides what the addresses beside it *mean*. It
-  /// follows how firmware is loaded: a driver loading firmware through the
-  /// security processor allocates the ring through the translation tables and
-  /// programs virtual addresses, and every other way of loading gets a bus
-  /// address. So identical register values denote different memory depending on
-  /// a module parameter, and an address used in the wrong space does not fail --
-  /// it points somewhere real and wrong.
-  enum class InterruptRingSpace : uint8_t {
-    /// @brief Not one of the two values the driver writes; in practice, a ring
-    /// it has not programmed yet.
-    Unset = 0,
-    BusAddress = 2, ///< Guest physical, reachable through a shared window.
-    GpuVirtual = 4  ///< Behind translation tables this device does not walk.
-  };
-
-  /// @brief The interrupt ring as the driver has programmed it so far.
-  ///
-  /// @details The ring is the device's side of the interrupt path: the device
-  /// writes an entry into it, publishes a write pointer, and raises a message.
-  /// All of that needs to know where the driver put the ring, which the driver
-  /// says only by writing these registers -- so this is read back out of them
-  /// rather than tracked as they are written, because the driver writes them in
-  /// its own order and rewrites them on reset.
-  struct InterruptRing {
-    /// @brief Address of the ring in @ref space, or zero if it is not set.
-    uint64_t base = 0;
-    uint64_t bytes = 0;        ///< Its size, decoded from the size field.
-    uint64_t wptr_address = 0; ///< Where the device publishes the write pointer.
-    /// @brief What @ref base and @ref wptr_address are addresses in.
-    InterruptRingSpace space = InterruptRingSpace::Unset;
-    bool enabled = false;         ///< Whether the driver has switched the ring on.
-    bool raises_messages = false; ///< Whether it wants an interrupt per entry.
-
-    /// @brief Whether the driver has said anything at all about the ring.
-    ///
-    /// @details Every field, rather than the address and the enable bit alone:
-    /// a driver that sized a ring and named a write-pointer address but had not
-    /// switched it on yet has said a great deal, and reporting that as nothing
-    /// programmed would hide exactly the partial state worth seeing. These read
-    /// back as their defaults only while the registers are untouched.
-    /// @retval false Every field still holds what a reset left.
-    [[nodiscard]] bool programmed() const {
-      return base != 0 || bytes != 0 || wptr_address != 0 || space != InterruptRingSpace::Unset ||
-             enabled || raises_messages;
-    }
-  };
+  /// @brief Drain pending semantic doorbell work without a simulation engine.
+  /// @details Production callers schedule the same drain on this component's
+  /// owner thread. Topology-free unit tests call this explicitly so they do not
+  /// hide a synchronous transport-callback path that production must avoid.
+  void drain_doorbell_inbox_for_test();
+  [[nodiscard]] std::thread::id last_sdma_pci_effect_thread_for_test();
+  [[nodiscard]] uint64_t sdma_pci_effect_count_for_test();
+  void set_sdma_pci_effect_admitted_hook_for_test(std::function<void()> hook);
 
   /// @brief Read the interrupt ring out of the registers the driver wrote.
   ///
@@ -226,18 +228,6 @@ public:
   /// @returns What the driver has said about the ring so far.
   [[nodiscard]] InterruptRing interrupt_ring() const;
 
-  /// @brief One interrupt, as the ring carries it.
-  ///
-  /// @details The driver looks up a handler by the pair of identifiers and
-  /// passes the rest to it. Everything else an entry can carry -- timestamps,
-  /// process and node identifiers -- describes work this device does not run,
-  /// so it is left zero rather than invented.
-  struct InterruptEntry {
-    uint8_t client_id = 0;             ///< Which block is reporting.
-    uint8_t source_id = 0;             ///< What it is reporting.
-    std::array<uint32_t, 4> data = {}; ///< Whatever that source attaches.
-  };
-
   /// @brief Put one entry in the interrupt ring and raise the message for it.
   ///
   /// @details The whole delivery, because the parts are only meaningful
@@ -247,12 +237,11 @@ public:
   /// into its register, because the driver reads it from memory; it reads the
   /// register only when the pointer it read says an overflow happened.
   ///
-  /// **Nothing tracks how much of the ring the driver has consumed.** The
-  /// driver acknowledges entries by writing a doorbell, which this device
-  /// records and does not read, so a ring filled faster than it is drained
-  /// overwrites entries the driver has not seen, and reports no overflow. That
-  /// is survivable only while deliveries are occasional; anything raising
-  /// interrupts at a rate needs the read pointer followed first.
+  /// The driver's read-pointer doorbell bounds unread entries. When a delivery
+  /// would catch it, the device reports overflow in both write-pointer copies
+  /// and keeps that indication latched until the driver pulses the control
+  /// register's overflow-clear bit, matching the handler's acknowledgement
+  /// sequence.
   ///
   /// Must be called from the thread servicing register access, or with that
   /// thread stopped: it reads registers and reaches guest memory through the
@@ -265,17 +254,7 @@ public:
   ///               which the next delivery overwrites; a message the transport
   ///               would not take leaves the entry and the pointer in place,
   ///               for the next delivery's message to cover.
-  [[nodiscard]] bool deliver_interrupt(const InterruptEntry &entry);
-
-  /// @brief Render a ring for a diagnostic.
-  ///
-  /// @details A sentence fragment beginning "its interrupt ring at ...", meant
-  /// to follow a subject and verb naming who did what -- "the driver enabled",
-  /// "the driver left". Logged on its own it reads as though it lost a word.
-  ///
-  /// @param[in] ring The ring to describe.
-  /// @returns Where it is, how big, and in which address space.
-  [[nodiscard]] static std::string describe(const InterruptRing &ring);
+  [[nodiscard]] bool deliver_interrupt(const InterruptEntry &entry) override;
 
   /// @brief Whether the device is usable.
   /// @retval false The configuration was rejected or its memory could not be
@@ -283,68 +262,183 @@ public:
   [[nodiscard]] bool usable() const { return usable_; }
 
 private:
-  void define_register(uint64_t byte_offset, uint32_t value);
+  [[nodiscard]] std::shared_ptr<simdojo::PciTransportSession>
+  capture_transport_session() const override {
+    return transport_session();
+  }
+  [[nodiscard]] bool read_vram(uint64_t offset, std::span<std::byte> bytes) override;
+  [[nodiscard]] bool write_vram(uint64_t offset, std::span<const std::byte> bytes) override;
+  [[nodiscard]] amdgpu::AtomicLoadResult atomic_load_vram(uint64_t offset, uint32_t width) override;
+  [[nodiscard]] amdgpu::VmAccessOutcome atomic_store_vram(uint64_t offset, uint32_t width,
+                                                          uint64_t value) override;
+  [[nodiscard]] amdgpu::AtomicCompareExchangeResult
+  compare_exchange_vram(uint64_t offset, uint32_t width, uint64_t expected,
+                        uint64_t desired) override;
+  [[nodiscard]] bool read_register(uint64_t byte_offset, uint32_t &value) override;
+  [[nodiscard]] bool write_register(uint64_t byte_offset, uint32_t value) override;
+
   [[nodiscard]] int64_t access_registers(std::span<std::byte> buf, uint64_t offset, bool write);
   [[nodiscard]] int64_t access_memory(std::span<std::byte> buf, uint64_t offset, bool write,
                                       std::span<std::byte> backing);
 
-  void reset_registers();
+  class DoorbellNotification {
+  public:
+    DoorbellNotification(std::weak_ptr<simdojo::PciTransportSession> session, uint64_t generation,
+                         uint64_t reset_epoch, uint64_t byte_offset, uint64_t value,
+                         std::size_t width)
+        : session_(std::move(session)), generation_(generation), reset_epoch_(reset_epoch),
+          byte_offset_(byte_offset), value_(value), width_(width) {}
 
-  /// @brief One hub's invalidation engines, as three contiguous register blocks.
-  ///
-  /// @details A flush writes an engine's request register and polls its
-  /// acknowledge register for the bit of the VMID being flushed. Nothing else
-  /// reports the flush finishing, so an unanswered step is not a missing
-  /// register but a stall of the driver's whole timeout, once per flush.
-  ///
-  /// Older flush paths bracket that pair with an acquire and release of the
-  /// engine's semaphore. The one this device publishes today does not, so the
-  /// semaphore block is answered for the parts that take that path rather than
-  /// for this one.
-  ///
-  /// The three blocks are modelled together because they are laid out together
-  /// -- eighteen engines of each, back to back -- and because answering only
-  /// some of the handshake buys nothing: the driver waits just as long on
-  /// whichever step is unanswered.
-  struct InvalidationEngineBlocks {
-    uint32_t semaphore = 0;   ///< Engine 0's semaphore, in dwords from the segment.
-    uint32_t request = 0;     ///< Engine 0's request register, likewise.
-    uint32_t acknowledge = 0; ///< Engine 0's acknowledge register, likewise.
+  private:
+    friend class GpuPciDevice;
+    std::weak_ptr<simdojo::PciTransportSession> session_;
+    uint64_t generation_ = 0;
+    uint64_t reset_epoch_ = 0;
+    uint64_t byte_offset_ = 0;
+    uint64_t value_ = 0;
+    std::size_t width_ = 0;
   };
 
-  /// @brief Answer the invalidation engines of the hub based at @p segment.
-  /// @param[in] segment First register segment of the hub, from the published
-  ///                    discovery table.
-  /// @param[in] blocks Where each block starts, relative to that segment.
-  /// @returns True when every engine of the hub was defined.
-  [[nodiscard]] bool define_invalidation_engines(uint64_t segment,
-                                                 const InvalidationEngineBlocks &blocks);
+  class DoorbellRetry {
+  public:
+    DoorbellRetry(DoorbellNotification notification, IpBlockModel *model, simdojo::Tick backoff,
+                  simdojo::Tick ready_tick)
+        : notification_(std::move(notification)), model_(model), backoff_(backoff),
+          ready_tick_(ready_tick) {}
 
-  /// @brief The published block with @p id, or nullptr if the table omits it.
-  /// @details Returns instance 0. The version matters as much as the segment:
-  /// register offsets within a block move between versions of it.
-  [[nodiscard]] const IpBlock *published_block(IpHardwareId id) const;
+  private:
+    friend class GpuPciDevice;
+    DoorbellNotification notification_;
+    IpBlockModel *model_ = nullptr;
+    simdojo::Tick backoff_ = 1;
+    simdojo::Tick ready_tick_ = 0;
+  };
 
-  /// @brief Whether a published segment can be turned into a byte address.
-  /// @details One place rather than each caller: every caller computes
-  /// `(segment + register) * 4`, which a large enough segment wraps into a
-  /// small address that would pass a bounds test and land on an unrelated
-  /// register.
-  [[nodiscard]] bool segment_within_aperture(uint64_t segment) const;
+  class FrontendOperationLease {
+  public:
+    FrontendOperationLease() = default;
+    explicit FrontendOperationLease(GpuPciDevice *device) : device_(device) {}
+    ~FrontendOperationLease();
+
+    FrontendOperationLease(const FrontendOperationLease &) = delete;
+    FrontendOperationLease &operator=(const FrontendOperationLease &) = delete;
+    FrontendOperationLease(FrontendOperationLease &&other) noexcept;
+    FrontendOperationLease &operator=(FrontendOperationLease &&other) noexcept;
+
+    [[nodiscard]] explicit operator bool() const { return device_ != nullptr; }
+
+  private:
+    GpuPciDevice *device_ = nullptr;
+  };
+
+  enum class SdmaPciEffectKind : uint8_t { ReadRegister, WriteRegister, DeliverInterrupt };
+
+  class SdmaPciEffect {
+  public:
+    SdmaPciEffectKind kind = SdmaPciEffectKind::ReadRegister;
+    uint32_t address = 0;
+    uint32_t value = 0;
+    uint32_t process_id = 0;
+    uint32_t engine_id = 0;
+
+    friend bool operator==(const SdmaPciEffect &, const SdmaPciEffect &) = default;
+  };
+
+  struct SdmaPciEffectResult {
+    amdgpu::VmAccessOutcome outcome = amdgpu::VmAccessOutcome::Faulted;
+    uint32_t value = 0;
+  };
+
+  class SdmaPciCallbackState {
+  public:
+    [[nodiscard]] SdmaPciEffectResult request(const std::shared_ptr<SdmaPciCallbackState> &self,
+                                              const SdmaPciEffect &effect);
+    void complete(const SdmaPciEffect &effect, SdmaPciEffectResult result);
+    void cancel();
+
+  private:
+    friend class GpuPciDevice;
+    std::mutex mutex_;
+    std::optional<SdmaPciEffect> pending_;
+    std::optional<SdmaPciEffectResult> result_;
+    std::function<bool(const std::shared_ptr<SdmaPciCallbackState> &, const SdmaPciEffect &)>
+        enqueue_;
+    std::weak_ptr<simdojo::PciTransportSession> session_;
+    uint64_t generation_ = 0;
+    uint64_t reset_epoch_ = 0;
+    bool cancelled_ = false;
+  };
+
+  class SdmaPciEffectRequest {
+  public:
+    SdmaPciEffectRequest(std::weak_ptr<SdmaPciCallbackState> state, SdmaPciEffect effect,
+                         uint64_t reset_epoch)
+        : state_(std::move(state)), effect_(effect), reset_epoch_(reset_epoch) {}
+
+  private:
+    friend class GpuPciDevice;
+    std::weak_ptr<SdmaPciCallbackState> state_;
+    SdmaPciEffect effect_;
+    uint64_t reset_epoch_ = 0;
+  };
+
+  class SdmaQueueProgressRequest {
+  public:
+    std::weak_ptr<simdojo::PciTransportSession> session;
+    uint64_t generation = 0;
+    uint64_t reset_epoch = 0;
+    uint32_t queue_id = 0;
+    uint32_t engine_id = 0;
+    uint64_t consumer_cursor = 0;
+    bool terminal = false;
+  };
+
+  void enqueue_doorbell_notification(uint64_t byte_offset, uint64_t value, std::size_t width);
+  void drain_doorbell_inbox(simdojo::Tick now);
+  void drain_doorbell_retry_inbox(simdojo::Tick now, bool ignore_ready = false);
+  void enqueue_doorbell_retry(const DoorbellNotification &notification, IpBlockModel *model,
+                              simdojo::Tick now, simdojo::Tick backoff);
+  void discard_doorbell_retry(const DoorbellNotification &notification, IpBlockModel *model);
+  [[nodiscard]] static bool same_doorbell_retry_target(const DoorbellRetry &retry,
+                                                       const DoorbellNotification &notification,
+                                                       const IpBlockModel *model);
+  [[nodiscard]] FrontendOperationLease acquire_frontend_operation(uint64_t reset_epoch);
+  void finish_frontend_operation();
+  void close_doorbell_admission_for_reset();
+  void reopen_doorbell_admission_after_reset();
+  [[nodiscard]] bool enqueue_sdma_pci_effect(const std::shared_ptr<SdmaPciCallbackState> &state,
+                                             const SdmaPciEffect &effect);
+  void drain_sdma_pci_effects();
+  void cancel_sdma_pci_effects();
+  [[nodiscard]] bool teardown_frontend_queues();
+  [[nodiscard]] amdgpu::SdmaPacketCallbacks
+  make_sdma_callbacks(const amdgpu::SdmaQueueContext &context);
+  [[nodiscard]] std::function<void(const amdgpu::SdmaQueueProgress &)>
+  make_sdma_progress_observer(const amdgpu::SdmaQueueContext &context);
+
+  void reset_registers();
+
+  /// @brief Build a model for every published block whose version is known, and
+  ///        check that no two of them answer the same register.
+  ///
+  /// @details Once, at construction, because a model's identity follows the
+  /// discovery table and that does not change while the device is alive. A
+  /// reset returns each model's registers to their power-on values; it does not
+  /// rebuild the models, any more than a bus reset changes what a part contains.
+  ///
+  /// Every model's claims are resolved against the segments the table published
+  /// for its own block and laid into one absolute-dword map. Two claims landing
+  /// on one register is a construction-time error rather than a runtime
+  /// surprise, because the loser of that collision presents as a block that
+  /// stalls the driver on a register reading as somebody else's.
+  void build_block_models();
 
   /// @brief Whether every named hub's flush handshakes can be answered.
   bool flushes_answerable_ = false;
 
-  /// @brief Define a register that answers reads and ignores writes.
-  ///
-  /// @details For registers whose value is a property of the hardware rather
-  /// than state the driver owns. A semaphore the device always grants is the
-  /// case in point: the driver releases it by writing zero, and a register that
-  /// stored that write would grant the acquire once and then stall forever.
-  ///
-  /// @param[in] byte_offset Where the register sits in the aperture.
-  /// @param[in] value What it always reads as.
-  void define_read_only_register(uint64_t byte_offset, uint32_t value);
+  /// @brief Whether every block this device requires a model for got one, and
+  /// no two of them claimed the same register.
+  bool models_complete_ = false;
 
   /// @brief Address the index registers currently select.
   ///
@@ -352,8 +446,6 @@ private:
   /// as they are written, because the driver writes them in either order and
   /// updates the high half only when it changes.
   [[nodiscard]] uint64_t indirect_address() const;
-  [[nodiscard]] bool read_vram(uint64_t offset, uint32_t &value) const;
-  bool write_vram(uint64_t offset, uint32_t value);
 
   /// @brief Write the discovery table where the driver will look for it.
   /// @returns Whether the table was built, accepted and stored.
@@ -361,15 +453,34 @@ private:
 
   GpuPciDeviceSpec spec_;
   BarAccessTrace *trace_;
+  SoC *soc_ = nullptr;
+
+  /// One revocable route owned solely by this PCI frontend and its queues.
+  amdgpu::InterruptSubscription interrupt_subscription_;
+
+  /// @brief The blocks @ref spec_ publishes, looked up rather than scanned for.
+  ///
+  /// @details Points into @ref spec_, which is declared above it so it is built
+  /// second and destroyed first, and which nothing mutates afterwards.
+  IpBlockIndex blocks_;
 
   /// @brief Register storage, one entry per dword of the aperture.
-  /// @brief One dword per register in the aperture.
+  ///
   /// @details Plain dense storage rather than a simdojo::RegisterFile: that
   /// type is a shader register file, whose operator[] requires the index to
   /// fall in an allocated block, and this aperture allocates none -- every
   /// index would fail that precondition and abort an assertion-enabled build
   /// during construction.
-  std::vector<uint32_t> registers_;
+  ///
+  /// Sized once the configuration has been accepted, so a device that refuses
+  /// its own spec answers no register at all rather than indexing storage it
+  /// never allocated.
+  RegisterAperture registers_;
+
+  /// @brief Core SDMA queue binding factory shared by every PCI queue adapter.
+  /// @details Declared before the block models so it outlives every binding factory
+  /// pointer injected into them.
+  std::shared_ptr<amdgpu::SdmaQueueBindingFactory> sdma_queue_binding_factory_;
 
   /// @brief Memory capacity as the driver reads it, in megabytes.
   ///
@@ -378,27 +489,71 @@ private:
   /// capacity has a representation the driver would accept.
   uint32_t vram_megabytes_ = 0;
 
-  /// @brief Which of those registers the device actually models.
+  /// @brief One modelled block, and what its absence would mean.
+  class OwnedBlockModel {
+  public:
+    OwnedBlockModel(std::unique_ptr<IpBlockModel> model, bool required)
+        : model_(std::move(model)), required_(required) {}
+
+  private:
+    friend class GpuPciDevice;
+    /// @brief The model. Owned plain objects rather than components: a model
+    /// answers register reads on the thread that services them, and joining the
+    /// simulation graph would conscript every block into partitioning for no
+    /// benefit.
+    std::unique_ptr<IpBlockModel> model_;
+
+    /// @brief Whether a device that cannot answer these registers is unusable.
+    bool required_ = false;
+  };
+
+  /// @brief The blocks this device models, one per published record it can.
+  std::vector<OwnedBlockModel> models_;
+
+  /// @brief The interrupt block among them, or nullptr when the published table
+  /// names none this device knows how to model. Borrowed from @ref models_.
+  InterruptBlockModel *interrupts_ = nullptr;
+  /// @brief Queue-owning adapters, borrowed from @ref models_.
+  MesBlockModel *mes_ = nullptr;
+  SdmaBlockModel *sdma_ = nullptr;
+
+  /// @brief Video memory and the window onto it, owned as one thing.
   ///
-  /// @details Kept apart from the values because zero is a legitimate register
-  /// value as well as what absent hardware reads as, and telling the two apart
-  /// is the whole point of the unmodelled-register report.
-  std::vector<bool> modelled_;
-
-  /// @brief Which of the modelled registers ignore writes.
-  std::vector<bool> read_only_;
-
-  /// @brief Byte offset of the interrupt ring's control register, or nothing
-  /// when the published table names no block that has one. Not zero for that:
-  /// byte zero is the indirect window's own index register.
-  std::optional<uint64_t> ih_control_offset_;
-
-  /// @brief Whether the ring being switched on has already been reported.
-  bool announced_interrupt_ring_ = false;
-  int vram_fd_ = -1;
-  std::byte *vram_ = nullptr;
+  /// @details Optional because it is constructed only once the configuration
+  /// has been accepted: a device that refuses its own spec must not go on to
+  /// back gigabytes for it.
+  std::optional<VramStore> vram_;
 
   std::vector<std::byte> doorbells_;
+
+  /// @brief Serializes aperture copies without spanning model or transport work.
+  mutable std::mutex doorbell_storage_mutex_;
+
+  /// @brief FIFO crossing from transport callback threads to this component's
+  /// simulation-owner thread.
+  std::mutex doorbell_inbox_mutex_;
+  std::condition_variable doorbell_idle_;
+  std::deque<DoorbellNotification> doorbell_inbox_;
+  std::deque<DoorbellRetry> doorbell_retry_inbox_;
+  std::optional<simdojo::Tick> doorbell_retry_wake_tick_;
+  bool doorbell_wake_pending_ = false;
+  bool doorbell_admission_open_ = true;
+  uint64_t doorbell_reset_epoch_ = 1;
+  uint64_t active_frontend_operations_ = 0;
+  simdojo::Event doorbell_event_{this, simdojo::EventType::TIMER_CALLBACK};
+  simdojo::Event doorbell_retry_event_{this, simdojo::EventType::TIMER_CALLBACK};
+  static constexpr simdojo::Tick kMaximumDoorbellRetryBackoff = 4096;
+  std::mutex doorbell_reset_mutex_;
+
+  /// @brief Cross-thread mailbox keeping SDMA worker callbacks off PCI state.
+  std::mutex sdma_effect_mutex_;
+  std::deque<SdmaPciEffectRequest> sdma_effect_inbox_;
+  std::deque<SdmaQueueProgressRequest> sdma_progress_inbox_;
+  std::vector<std::weak_ptr<SdmaPciCallbackState>> sdma_callback_states_;
+  bool sdma_effect_admission_open_ = true;
+  std::function<void()> sdma_effect_admitted_hook_for_test_;
+  std::thread::id last_sdma_effect_thread_;
+  uint64_t sdma_effect_count_ = 0;
 
   /// @brief Backing for the message table and its pending bits.
   ///
@@ -406,6 +561,8 @@ private:
   /// meaning itself and delivers the message, so what the device has to do is
   /// hold the bytes and not lose them.
   std::vector<std::byte> msix_table_;
+  bool frontend_shutdown_ = false;
+  bool frontend_shutdown_complete_ = true;
   bool usable_ = false;
 };
 

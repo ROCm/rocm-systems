@@ -8,7 +8,10 @@
 #include "rocjitsu/vm/amdgpu/pci/gpu_pci_device.h"
 #include "rocjitsu/vm/amdgpu/pci/gpu_pci_device_spec.h"
 #include "rocjitsu/vm/amdgpu/pci/register_symbols.h"
+#include "rocjitsu/vm/soc.h"
+#include "rocjitsu/vm/virtual_machine.h"
 #include "rocjitsu/vmm/vfu/vfio_device_host.h"
+#include "simdojo/sim/simulation.h"
 #include "util/log.h"
 
 #include "embedded_schema.h"
@@ -19,6 +22,7 @@
 #include <ctime>
 #include <exception>
 #include <format>
+#include <memory>
 #include <stop_token>
 #include <thread>
 
@@ -74,23 +78,100 @@ ServerSignalAction action_for_signal(int signal) {
 }
 
 int run_vfio_server(const std::string &config_path, const std::string &socket_path) {
-  config::DeviceIdentityConfig identity;
+  config::LoadedConfig loaded;
   try {
-    identity = config::load_device_identity(config_path, kEmbeddedSchema);
+    loaded = config::load_config(config_path, kEmbeddedSchema);
   } catch (const std::exception &error) {
     util::Logger::warn(std::format("vfu: cannot read {}: {}", config_path, error.what()));
+    return 1;
+  }
+  SoC *soc = loaded.soc();
+  if (soc == nullptr) {
+    util::Logger::warn(std::format("vfu: {} describes no GPU to present", config_path));
+    return 1;
+  }
+  // One socket serves one function. A config describing several GPUs builds them
+  // all and would have every one but the first silently dropped, which reads to
+  // whoever wrote the config as a device that lost most of itself.
+  if (loaded.num_gpus > 1) {
+    util::Logger::warn(std::format("vfu: {} describes {} GPUs; serving presents one function",
+                                   config_path, loaded.num_gpus));
     return 1;
   }
   RegisterSymbols symbols;
   add_pre_discovery_symbols(symbols, GpuPciDevice::kRegisterBar);
   BarAccessTrace trace(symbols);
 
-  const std::string device_name =
-      identity.device.marketing_name.empty() ? "gpu" : identity.device.marketing_name;
-  GpuPciDevice device(device_name, gpu_pci_spec_from_config(identity.device, identity.pci), &trace);
+  // Named for what it is in the machine, not for what it is sold as. This string
+  // becomes the component's path, which link specs and per-block register models
+  // address it by, and a marketing name varies per config and per product.
+  constexpr const char *kPciFunctionName = "pci";
+
+  // The PCI function is a child of the machine it speaks for, alongside the SoC
+  // rather than in place of it. Until now this server had no engine at all,
+  // which was survivable only because the device answers register reads out of
+  // its own state and never asks the simulation for anything. A device that
+  // drives a command processor will, and a component outside the topology has no
+  // engine pointer and no partition: scheduling from it asserts in a debug build
+  // and is silently dropped in a release one.
+  //
+  // The whole machine is built here, not a placeholder for one. It costs what
+  // load_device_identity exists to avoid -- a large part's register files are
+  // gigabytes -- and that is the right trade: the hardware behind the bus face
+  // is what the next stages drive, and a function parented to a stand-in would
+  // have to be re-parented to reach any of it.
+  //
+  // Built before create(), because there is no hot-attach: the engine sizes its
+  // partitions and hands out engine pointers there, and a component added later
+  // gets neither.
+  simdojo::SimulationEngine::Config engine_config = loaded.engine_config;
+  engine_config.max_ticks = 0;
+  engine_config.await_primaries = true;
+  if (engine_config.num_threads != 1) {
+    // Partitioning assigns threads per XCD, and a PCI function is not one, so it
+    // would be left without a partition -- the exact defect this is fixing. It
+    // also wants to share a partition with whatever it eventually drives, so the
+    // placement is a decision to make with that, not ahead of it.
+    util::Logger::warn(std::format("vfu: serving single-threaded; {} asked for {} threads",
+                                   config_path, engine_config.num_threads));
+    engine_config.num_threads = 1;
+  }
+  simdojo::SimulationEngine engine(engine_config);
+
+  // The build result owns the SoC as its root; ownership moves to the machine.
+  std::unique_ptr<simdojo::CompositeComponent> built_root = loaded.take_root();
+  built_root.release();
+  auto machine = std::make_unique<VirtualMachine>(std::unique_ptr<SoC>(soc), /*daemon_mode=*/false);
+  VirtualMachine *machine_ptr = machine.get();
+  engine.topology().set_root(std::move(machine));
+  loaded.wire_links(engine.topology());
+  soc->wire_backing(engine.topology());
+
+  auto *device_ptr =
+      static_cast<GpuPciDevice *>(machine_ptr->add_child(std::make_unique<GpuPciDevice>(
+          kPciFunctionName, gpu_pci_spec_from_config(loaded.device, loaded.pci), &trace, soc)));
+  GpuPciDevice &device = *device_ptr;
+  class FrontendShutdown {
+  public:
+    explicit FrontendShutdown(GpuPciDevice &device) : device_(device) {}
+    ~FrontendShutdown() { (void)device_.shutdown_frontend(); }
+
+  private:
+    GpuPciDevice &device_;
+  } frontend_shutdown(device);
   if (!device.usable()) {
     return 1;
   }
+
+  engine.create();
+  // Without a primary the engine treats an idle machine as a finished one and
+  // returns from run() immediately. This machine is idle by construction between
+  // guest accesses, so it needs to be told that quiescence is not completion.
+  //
+  // The KFD driver the machine carries is deliberately never opened: under
+  // vfio-user the guest's own amdgpu is the driver, and opening ours would put
+  // a second one in front of the same hardware.
+  engine.register_as_primary();
 
   // Shutdown signals are blocked and then consumed synchronously, the way the
   // daemon does it. Almost nothing is safe to touch from a signal handler, least
@@ -117,6 +198,47 @@ int run_vfio_server(const std::string &config_path, const std::string &socket_pa
   }
 
   int status = 0;
+  // Started after the mask is in place so it inherits it: a shutdown signal must
+  // reach the thread waiting for one below, not interrupt the engine.
+  //
+  // run() blocks until request_exit, and latches readiness on the way out of the
+  // thread rather than only inside run(), so a failure before run() is entered
+  // cannot strand the wait below forever.
+  //
+  // The request to exit is tied to a destructor rather than written out at each
+  // return. run() finishes only when asked, and a jthread's stop token does not
+  // ask it -- the lambda has none to observe -- so a return that forgot would
+  // join a thread that never ends. A server that reports a failure and then
+  // hangs is worse than one that crashes, because a supervisor sees a live
+  // process in front of a dead socket, and it is exactly what happens when this
+  // is left to six separate exit paths to remember.
+  class EngineRun {
+  public:
+    EngineRun(simdojo::SimulationEngine &engine, std::jthread thread)
+        : engine_(engine), thread_(std::move(thread)) {}
+
+    ~EngineRun() {
+      engine_.request_exit("serving ended", 0);
+      if (thread_.joinable()) {
+        thread_.join();
+      }
+    }
+
+  private:
+    simdojo::SimulationEngine &engine_;
+    std::jthread thread_;
+  };
+  EngineRun engine_run(engine, std::jthread([&engine] {
+                         engine.run();
+                         engine.latch_startup_if_unlatched(/*failed=*/true);
+                       }));
+
+  if (!engine.wait_until_started()) {
+    util::Logger::warn("vfu: the simulation engine did not start");
+    drain_and_restore(handled_signals, previous_signals);
+    return 1;
+  }
+
   {
     VfioDeviceHost host(socket_path, device);
     if (!host.build()) {
@@ -127,7 +249,10 @@ int run_vfio_server(const std::string &config_path, const std::string &socket_pa
       return 1;
     }
 
-    util::Logger::warn(std::format("vfu: serving {} on {}", device.name(), socket_path));
+    util::Logger::warn(std::format(
+        "vfu: serving {} on {}",
+        loaded.device.marketing_name.empty() ? device.name() : loaded.device.marketing_name,
+        socket_path));
 
     // The serving thread inherits the blocked mask, so a shutdown signal is
     // delivered to the wait below and interrupts nothing mid-protocol.
@@ -167,7 +292,7 @@ int run_vfio_server(const std::string &config_path, const std::string &socket_pa
                                      "switched off by the driver");
           } else {
             util::Logger::warn(std::format("vfu: cannot deliver an interrupt: {}",
-                                           GpuPciDevice::describe(device.interrupt_ring())));
+                                           describe(device.interrupt_ring())));
           }
         });
         if (!accepted) {
@@ -192,19 +317,24 @@ int run_vfio_server(const std::string &config_path, const std::string &socket_pa
     }
   }
 
+  // Every external source of work is quiesced before the engine: the serving
+  // thread is stopped and joined above and the host is gone with the scope, so
+  // nothing can call into the device while its engine is torn down by
+  // ~EngineRun below. The device outlives both, because the topology owns it and
+  // the engine owns that.
   drain_and_restore(handled_signals, previous_signals);
 
   // What the driver said about its interrupt ring. Reported next to the
   // unmodelled registers because it answers the same question -- how far the
   // driver got before it stopped telling us anything -- and because the ring is
   // the one thing the device now knows that it cannot yet act on.
-  const GpuPciDevice::InterruptRing ring = device.interrupt_ring();
+  const InterruptRing ring = device.interrupt_ring();
   // Only when there is something to say. A reset or a disconnect clears these
   // registers, so a guest that detached cleanly has already taken the ring with
   // it, and warning about its absence would make an ordinary shutdown look like
   // a fault. What the driver said while attached is reported when it says it.
   if (ring.programmed()) {
-    util::Logger::warn(std::format("vfu: the driver left {}", GpuPciDevice::describe(ring)));
+    util::Logger::warn(std::format("vfu: the driver left {}", describe(ring)));
   }
 
   const std::string report = trace.unmodeled_report();
