@@ -25,12 +25,17 @@ namespace core
 class single_file_sink : public trace_sink
 {
 public:
+    // An empty output_filename_override defers to config::get_perfetto_output_filename(),
+    // resolved lazily in finalize() rather than at construction time.
     explicit single_file_sink(output_file_registry& registry,
                               std::string           output_filename_override = {});
 
     void on_source_drained(int source_id, std::vector<char> bytes) override;
     void finalize() override;
 
+    // Enables cross-process aggregation into one shared output file. seq_id_base
+    // gives this process's sources a disjoint trusted_packet_sequence_id range so
+    // concurrently-appending processes cannot collide on the same sequence IDs.
     void set_append_mode(append_mode_config config) noexcept;
 
     [[nodiscard]] const std::vector<char>& buffer_for_testing() const noexcept
