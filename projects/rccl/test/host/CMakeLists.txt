@@ -36,6 +36,8 @@ rccl_assert_source_line("${_rccl_src_root}/graph/connect.cc"
   "NCCL_PARAM(MaxNchannels, \"MAX_NCHANNELS\", -2)" "fakes/tuning_fakes.cc: ncclParamMaxNchannels()")
 rccl_assert_source_line("${_rccl_src_root}/enqueue/enqueue.cc"
   "RCCL_PARAM(ForceCe, \"FORCE_CE\", 1)" "fakes/wrap_fakes.cc: rcclParamForceCe()")
+rccl_assert_source_line("${_rccl_src_root}/enqueue/enqueue.cc"
+  "NCCL_PARAM(SymCeThreshold, \"SYM_CE_THRESHOLD\", 8 * 1024 * 1024)" "fakes/wrap_fakes.cc: ncclParamSymCeThreshold()")
 # src/enqueue/task_prep/*.cc declare these five but define none, and param_redirect.h only rewrites
 # NCCL_PARAM where it expands, so the hand-written bodies below are the only definitions on that link line.
 rccl_assert_source_line("${_rccl_src_root}/init.cc"
@@ -61,6 +63,8 @@ rccl_assert_source_line("${CMAKE_CURRENT_LIST_DIR}/fakes/tuning_fakes.cc"
   "int64_t g_paramMaxNchannels = -2;" "the MaxNchannels fake default")
 rccl_assert_source_line("${CMAKE_CURRENT_LIST_DIR}/fakes/wrap_fakes.cc"
   "static int64_t DefaultParamForceCe() { return 1; }" "the ForceCe fake default")
+rccl_assert_source_line("${CMAKE_CURRENT_LIST_DIR}/fakes/wrap_fakes.cc"
+  "static int64_t DefaultParamSymCeThreshold() { return 8 * 1024 * 1024; }" "the SymCeThreshold fake default")
 # gdr-probe-test.cc pins the GDR probe's registration flags to production's; these
 # keep its kRegAccessFlags and both reg.cc copies spelling the same set.
 set(_rccl_reg_access_flags
