@@ -149,10 +149,12 @@ jobs:
         # library against itself and post green on a PR it never measured -- a
         # gate that reports PASS when its own inputs are broken is worse than no
         # gate at all.
+        env:
+          _BASE: ${{ github.base_ref }}
         run: |
           set -o pipefail
-          if ! diff_out="$(git diff --name-only "origin/${{ github.base_ref }}...HEAD")"; then
-            echo "::error::Could not diff against origin/${{ github.base_ref }}. Refusing to guess whether RCCL changed — a wrong guess here produces a meaningless green gate."
+          if ! diff_out="$(git diff --name-only "origin/${_BASE}...HEAD")"; then
+            echo "::error::Could not diff against origin/${_BASE}. Refusing to guess whether RCCL changed — a wrong guess here produces a meaningless green gate."
             exit 1
           fi
           # Mirror the `paths` exclusions above, or a PR touching this workflow
@@ -163,7 +165,7 @@ jobs:
           # which is fine here. It must not reach the git diff above; that is
           # the swallowed failure this step exists to prevent.
           rccl_src="$(grep '^projects/rccl/' <<<"${diff_out}" \
-            | grep -vE '(\.md$|^projects/rccl/docs/|^projects/rccl/LICENSE|/CODEOWNERS$)' || true)"
+            | grep -vE '(\.md$|^projects/rccl/docs/|^projects/rccl/LICENSE[^/]*$|/CODEOWNERS$)' || true)"
           if [[ -n "${rccl_src}" ]]; then
             echo "rccl_changed=1" >> "$GITHUB_OUTPUT"
           else
@@ -355,7 +357,7 @@ jobs:
         # render step and the gate step below consume this answer, so they can
         # never disagree about whether this run measured anything.
         #
-        # Never fails: it only reports. `Gate on detector verdict` owns the
+        # Does not gate: it only reports. `Gate on detector verdict` owns the
         # failing, so that a report is still rendered and uploaded first.
         run: |
           REPORT="${_ART}/ab_regression_report.json"
@@ -366,22 +368,33 @@ jobs:
           fi
           echo "present=1" >> "$GITHUB_OUTPUT"
           python3 - "${REPORT}" >> "$GITHUB_OUTPUT" <<'PY'
-          import json, sys
+          import json, secrets, sys
           d = json.load(open(sys.argv[1]))
           reports = d.get("reports", {}) or {}
+          # An empty `reports` means nothing was measured, whichever way trust is
+          # expressed -- so require it on both paths. Trusting a bare
+          # "trustworthy": true with no reports would clear the gate and then
+          # announce "0 confirmed regression(s)" for a run that scored nothing.
           trust = d.get("trustworthy")
           if trust is None:
-              trust = bool(reports) and all(
+              trust = all(
                   r.get("summary", {}).get("trustworthy", False) for r in reports.values())
+          trust = bool(trust) and bool(reports)
           print(f"trustworthy={'true' if trust else 'false'}")
           print("regressions=%d" % sum(
               r.get("summary", {}).get("regressions", 0) for r in reports.values()))
           reasons = d.get("untrustworthy_reasons") or ["report predates the trustworthy flag"]
-          print("reasons<<EOR")
+          if not reports:
+              reasons = ["report contains no scored groups"]
+          # Random delimiter, per GitHub's own guidance: these lines come from the
+          # detector, and a reason equal to a fixed marker would close the block
+          # early and leave the rest to be parsed as further outputs.
+          eof = f"EOR_{secrets.token_hex(8)}"
+          print(f"reasons<<{eof}")
           if not trust:
               for why in reasons:
                   print(why)
-          print("EOR")
+          print(eof)
           prov = d.get("provenance") or {}
           print(f"provenance=cvs@{prov.get('cvs_sha')} thresholds={d.get('thresholds_source')}")
           PY
@@ -395,6 +408,12 @@ jobs:
           _REASONS: ${{ steps.verdict.outputs.reasons }}
         run: |
           REPORT="${_ART}/ab_regression_report.json"
+          # Clear any inherited report BEFORE deciding anything. The artifact dir
+          # is keyed on run_id, not run_attempt, so a re-run inherits attempt 1's
+          # rccl_report.md -- and every bail-out below deliberately leaves the
+          # file alone, which would hand `Upload artifacts` a stale verdict for
+          # `report` to post as this attempt's answer.
+          rm -f "${_ART}/rccl_report.md"
           # Deliberately do NOT write rccl_report.md on either bail-out below.
           # Its presence in the uploaded artifact is the `report` job's signal
           # that a real verdict exists, so writing a placeholder would make "the
@@ -486,7 +505,7 @@ jobs:
           # code we captured explicitly instead. An empty value means the step
           # was killed before it wrote one, which is also an infra failure.
           if [[ "${_CODE}" != "0" && "${_CODE}" != "1" ]]; then
-            echo "::error::Detector failed to run (SLURM submission/polling error or timeout, exit ${_CODE:-<none>}). Report on NFS may be stale — not gating on it."
+            echo "::error::Detector failed to run (missing cluster script, SLURM submission/polling error, or timeout; exit ${_CODE:-<none>}). Report on NFS may be stale — not gating on it."
             exit 2
           fi
           if [[ "${_PRESENT}" != "1" ]]; then
@@ -578,7 +597,7 @@ jobs:
               emit ":warning: **Not measured.** The detector job was skipped. This is an infrastructure result, not a statement about your change."
             fi
           elif [[ "${_DETECT}" == "cancelled" ]]; then
-            emit ":warning: **Not measured.** The detector job was cancelled before it produced a verdict."
+            emit ":warning: **Not measured.** The detector job was cancelled before it produced a verdict. This is an infrastructure result, not a statement about your change."
           else
             # detect writes this file only for a verdict it found trustworthy,
             # so presence is the signal. Do not substitute any other source: a
