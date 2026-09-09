@@ -4362,19 +4362,17 @@ void Runtime::ReleaseMemoryHandle(Runtime::MemoryHandle* handle) {
   memory_handles.erase(MemoryHandle::Convert(handle));
 }
 
-Agent* Runtime::KfdGttAnchorGpu() {
-  HSAuint32 node_id = 0;
-  HSAuint32 gpu_id = 0;
-  if (HSAKMT_CALL(hsaKmtGetDefaultHostGpu)(&node_id, &gpu_id) != HSAKMT_STATUS_SUCCESS) {
-    return nullptr;
+Agent* Runtime::LowestDrmMinorGpu() {
+  auto drm_minor = [](const core::Agent* a) {
+    return static_cast<const AMD::GpuAgent*>(a)->properties().DrmRenderMinor;
+  };
+  core::Agent* selected = nullptr;
+  for (const auto* pool : {&gpu_agents_, &disabled_gpu_agents_}) {
+    for (auto* candidate : *pool) {
+      if (selected == nullptr || drm_minor(candidate) < drm_minor(selected)) selected = candidate;
+    }
   }
-
-  auto it = agents_by_node_.find(node_id);
-  if (it == agents_by_node_.end() || it->second.empty()) {
-    return nullptr;
-  }
-
-  return it->second[0];
+  return selected;
 }
 
 hsa_status_t Runtime::VMemoryHandleCreate(const MemoryRegion* region, size_t size,
@@ -4395,12 +4393,13 @@ hsa_status_t Runtime::VMemoryHandleCreate(const MemoryRegion* region, size_t siz
     uint64_t offset;
     auto agentOwner = region->owner();
 
-    /* CPU-owned host memory: DRM import requires a GPU agent; use libhsakmt
-     * first_gpu_mem (KFD GTT anchor). Device-owned: use owner agent. */
+    /* For CPU-owned memory, DRM operations require a GPU agent. Select
+    the first available GPU agent before calling CreateShareableHandle.
+    For device memory, use owner agent. */
     core::Agent* agent_for_drm = agentOwner;
     core::Agent* drm_owner = nullptr;
     if (agentOwner->device_type() == core::Agent::DeviceType::kAmdCpuDevice) {
-      agent_for_drm = core::Runtime::runtime_singleton_->KfdGttAnchorGpu();
+      agent_for_drm = core::Runtime::runtime_singleton_->LowestDrmMinorGpu();
       if (agent_for_drm == nullptr) {
         region->Free(driver_handle);
         return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
@@ -4611,7 +4610,7 @@ hsa_status_t Runtime::MappedHandleAllowedAgent::EnableAccess(hsa_access_permissi
     /* For imported handles, we don't have a region/owner, but we can use any GPU agent for mmap.
      * The driver_handle created during import should have the correct mmap_offset. */
     if (mappedHandle->mem_handle->imported) {
-      core::Agent* drm_agent = core::Runtime::runtime_singleton_->KfdGttAnchorGpu();
+      core::Agent* drm_agent = core::Runtime::runtime_singleton_->LowestDrmMinorGpu();
       if (drm_agent != nullptr) {
         agent = drm_agent;
         agent->driver().GetDeviceFd(agent->node_id(), &mmap_fd);
