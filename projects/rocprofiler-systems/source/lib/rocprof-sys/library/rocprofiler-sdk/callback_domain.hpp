@@ -32,8 +32,7 @@ public:
 
         SdkBackend::configure_callback_tracing_service(
             m_context, kind, m_operations.data(), m_operations.size(),
-            m_definition.on_record, nullptr);  // configure_callback_tracing_service ->
-                                               // Add throw upon failure in SdkBackend
+            m_definition.on_record, nullptr);
     }
 
     [[nodiscard]] std::string_view name() const noexcept
