@@ -19,7 +19,8 @@ _VALID_LEVELS = frozenset({"GL1", "GL2", "EA"})
 
 # Structural edits (add/remove nodes, rename keys) change the hash
 # and require updating it here. Reordering and threshold-only edits are safe.
-_KNOWN_SCHEMA_HASHES: frozenset[str] = frozenset()
+# Regenerate: python tools/validate_membw_tree_spec.py (logs current hash)
+_KNOWN_SCHEMA_HASHES: frozenset[str] = frozenset({"130c7c02241037c3"})
 
 
 def load_tree_spec(arch: str) -> TreeSpec:
@@ -139,7 +140,8 @@ def _validate_tree_spec(spec: TreeSpec) -> None:
     if _KNOWN_SCHEMA_HASHES and spec.schema_hash not in _KNOWN_SCHEMA_HASHES:
         errors.append(
             f"Unknown schema hash {spec.schema_hash!r}. "
-            "The tree spec format may have changed."
+            "Tree spec structure changed -- update _KNOWN_SCHEMA_HASHES "
+            "(run tools/validate_membw_tree_spec.py to get the new hash)."
         )
 
     for root in spec.roots:
