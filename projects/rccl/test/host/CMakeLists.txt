@@ -71,6 +71,31 @@ function(apply_asan_if_enabled tgt)
   endif()
 endfunction()
 
+# register_micro_test_categories(<target> <yaml_basename>)
+#
+# Register <target> with CTest via RCCL's shared category mechanism, reading
+# <yaml_basename> from test/ (the parent of this directory). apply_test_category_labels
+# and INSTALL_TEST_FILE are provided by the parent test/CMakeLists.txt when building
+# inside rocm-systems; guard on COMMAND so a non-monorepo configure still succeeds
+# (the target is built but not category-registered). A missing yaml downgrades to a
+# warning rather than an error, matching the previous per-target blocks.
+function(register_micro_test_categories tgt yaml_basename)
+  if(COMMAND apply_test_category_labels)
+    set(_categories_yaml "${CMAKE_CURRENT_SOURCE_DIR}/../${yaml_basename}")
+    if(EXISTS "${_categories_yaml}")
+      message(STATUS "Applying test categories for ${tgt}")
+      apply_test_category_labels(
+        ${tgt}
+        "${_categories_yaml}"
+        "${PROJECT_BINARY_DIR}"
+        "${INSTALL_TEST_FILE}"
+      )
+    else()
+      message(WARNING "Skipping test categories for ${tgt}: missing ${_categories_yaml}")
+    endif()
+  endif()
+endfunction()
+
 if(BUILD_TESTS)
   # rccl-UnitTestsMicro: standalone unit-test binary compiled directly into
   # the test binary. This lets us use preprocessor and link-time substitution
@@ -144,20 +169,7 @@ if(BUILD_TESTS)
   # likewise set by the parent. Guard on COMMAND so a non-monorepo configure
   # (shared/ctest absent) still succeeds -- there, as with the other binaries,
   # the target is built but not category-registered.
-  if(COMMAND apply_test_category_labels)
-    set(_micro_categories_yaml "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro.yaml")
-    if(EXISTS "${_micro_categories_yaml}")
-      message(STATUS "Applying test categories for rccl-UnitTestsMicro")
-      apply_test_category_labels(
-        rccl-UnitTestsMicro
-        "${_micro_categories_yaml}"
-        "${PROJECT_BINARY_DIR}"
-        "${INSTALL_TEST_FILE}"
-      )
-    else()
-      message(WARNING "Skipping test categories for rccl-UnitTestsMicro: missing ${_micro_categories_yaml}")
-    endif()
-  endif()
+  register_micro_test_categories(rccl-UnitTestsMicro test_categories_micro.yaml)
 
   # ---------------------------------------------------------------------------
   # rccl-UnitTestsMicroInit(+-uncached): host-only microtests for src/init.cc
@@ -237,20 +249,7 @@ if(BUILD_TESTS)
       -Wl,--gc-sections)
     apply_asan_if_enabled(${_init_tgt})
     rocm_install(TARGETS ${_init_tgt} COMPONENT tests)
-    if(COMMAND apply_test_category_labels)
-      set(_init_categories_yaml "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro_init.yaml")
-      if(EXISTS "${_init_categories_yaml}")
-        message(STATUS "Applying test categories for ${_init_tgt}")
-        apply_test_category_labels(
-          ${_init_tgt}
-          "${_init_categories_yaml}"
-          "${PROJECT_BINARY_DIR}"
-          "${INSTALL_TEST_FILE}"
-        )
-      else()
-        message(WARNING "Skipping test categories for ${_init_tgt}: missing ${_init_categories_yaml}")
-      endif()
-    endif()
+    register_micro_test_categories(${_init_tgt} test_categories_micro_init.yaml)
   endforeach()
 
   # ---------------------------------------------------------------------------
@@ -347,21 +346,7 @@ if(BUILD_TESTS)
     -Wl,--gc-sections)
   apply_asan_if_enabled(rccl-UnitTestsMicroEnqueue)
   rocm_install(TARGETS rccl-UnitTestsMicroEnqueue COMPONENT tests)
-  if(COMMAND apply_test_category_labels)
-    set(_enqueue_categories_yaml
-        "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro_enqueue.yaml")
-    if(EXISTS "${_enqueue_categories_yaml}")
-      message(STATUS "Applying test categories for rccl-UnitTestsMicroEnqueue")
-      apply_test_category_labels(
-        rccl-UnitTestsMicroEnqueue
-        "${_enqueue_categories_yaml}"
-        "${PROJECT_BINARY_DIR}"
-        "${INSTALL_TEST_FILE}"
-      )
-    else()
-      message(WARNING "Skipping test categories for rccl-UnitTestsMicroEnqueue: missing ${_enqueue_categories_yaml}")
-    endif()
-  endif()
+  register_micro_test_categories(rccl-UnitTestsMicroEnqueue test_categories_micro_enqueue.yaml)
 
   # ---------------------------------------------------------------------------
   # rccl-UnitTestsMicroDevRuntime: host-only microtests for src/dev_runtime.cc
@@ -424,20 +409,7 @@ if(BUILD_TESTS)
 
     rocm_install(TARGETS rccl-UnitTestsMicroDevRuntime COMPONENT tests)
 
-    if(COMMAND apply_test_category_labels)
-      set(_devr_categories_yaml "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro_devruntime.yaml")
-      if(EXISTS "${_devr_categories_yaml}")
-        message(STATUS "Applying test categories for rccl-UnitTestsMicroDevRuntime")
-        apply_test_category_labels(
-          rccl-UnitTestsMicroDevRuntime
-          "${_devr_categories_yaml}"
-          "${PROJECT_BINARY_DIR}"
-          "${INSTALL_TEST_FILE}"
-        )
-      else()
-        message(WARNING "Skipping test categories for rccl-UnitTestsMicroDevRuntime: missing ${_devr_categories_yaml}")
-      endif()
-    endif()
+    register_micro_test_categories(rccl-UnitTestsMicroDevRuntime test_categories_micro_devruntime.yaml)
   endif()
   return()
 endif()
