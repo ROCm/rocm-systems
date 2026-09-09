@@ -618,6 +618,13 @@ add_test(
 )
 
 add_test(
+    NAME test_mem_chart_gfx1250
+    COMMAND
+        ${PYTHON_TEST_COMMAND} -m pytest --junitxml=tests/test_mem_chart_gfx1250.xml
+        ${COV_OPTION} tests/unit/utils/test_mem_chart_gfx1250.py ${WORKING_DIR_OPTION}
+)
+
+add_test(
     NAME test_roofline_calc
     COMMAND
         ${PYTHON_TEST_COMMAND} -m pytest --junitxml=tests/test_roofline_calc.xml
@@ -1095,6 +1102,7 @@ if(${ENABLE_COVERAGE})
         test_list_metrics_cli
         test_mem_chart_gfx9
         test_mem_chart_gfx11
+        test_mem_chart_gfx1250
         test_membw_engine
         test_membw_guidance
         test_membw_metric_extract
