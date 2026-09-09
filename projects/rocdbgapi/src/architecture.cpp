@@ -7681,6 +7681,7 @@ protected:
                     const std::vector<uint32_t> &compute_relaunch_state,
                     agent_address_t context_save_address) const override
   {
+    dbgapi_assert (compute_relaunch_state.size () == 2);
     return std::make_unique<cwsr_record_t> (
       queue, xcc_id, compute_relaunch_wave, compute_relaunch_state[0],
       compute_relaunch_state[1], context_save_address);
