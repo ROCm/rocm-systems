@@ -53,11 +53,6 @@ Panel Config:
           unit: GIOP/s
           peak: $max_sclk * $cu_per_gpu * 8192 / 1000
           pct_of_peak: true
-        Active CUs (deprecated):
-          value: $numActiveCUs
-          unit: CUs
-          peak: $cu_per_gpu
-          pct_of_peak: true
         SALU Utilization:
           value: 100 * SUM(SQ_ACTIVE_INST_SCA) / SUM($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu)
           unit: Percent
@@ -216,8 +211,6 @@ Panel Config:
       Note: this does not include any 8-bit integer operations from VALU instructions.
       This is also presented as a percent of the peak theoretical INT8 MFMA operations
       achievable on the specific accelerator.
-    Active CUs (deprecated): Total number of active compute units (CUs) on the accelerator during
-      the kernel execution. (Deprecated - See CU Utilization instead)
     SALU Utilization: Indicates what percent of the kernel's duration the SALU was
       busy executing instructions. Computed as the ratio of the total number of cycles
       spent by the scheduler issuing SALU or SMEM instructions over the total CU cycles.
