@@ -71,5 +71,10 @@ endfunction()
 
 add_range_replay_sample(range-replay-basic basic_client.cpp)
 add_range_replay_sample(range-replay-opt-out opt_out_client.cpp)
+
+# GPU_MAX_HW_QUEUES is what makes the decline deterministic. HIP pools hardware queues and
+# round-robins streams onto them, so with a pool of one the sample's two streams would
+# share a queue and the range would be replayed rather than declined. The default is 4,
+# but pinning it means the sample does not depend on that default.
 add_range_replay_sample(range-replay-decline decline_client.cpp ENVIRONMENT
-                        "RR_APP_MODE=multi-queue")
+                        "RR_APP_MODE=multi-queue" "GPU_MAX_HW_QUEUES=4")

@@ -51,6 +51,10 @@ stage a distinct kernarg slot for each of them.
 | `plain` (default) | Three dispatches on one stream |
 | `multi-queue` | The same, plus a dispatch on a second stream |
 
+`multi-queue` also needs `GPU_MAX_HW_QUEUES` to be at least 2 (the CTest target pins it to 4).
+HIP pools hardware queues and round-robins streams onto them, so with a pool of one the two
+streams would share a queue and the range would be replayed rather than declined.
+
 ## What each sample shows
 
 | Sample | Asks for | CLOSE status | Shows |
