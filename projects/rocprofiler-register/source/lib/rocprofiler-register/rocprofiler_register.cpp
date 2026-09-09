@@ -521,8 +521,8 @@ rocp_reg_scan_for_tools(bool _attachment_enabled, tool_load_context _load_contex
 
     // An ambient rocprofiler_configure symbol is not sufficient to choose startup
     // profiling when attachment was explicitly requested. Framework libraries can export
-    // a dormant configure entry point; loading the SDK for that symbol would prevent the
-    // lightweight attachment library from creating its listener. Explicit profiler
+    // a dormant configure entry point; loading the SDK for that symbol would prevent
+    // librocprofiler-sdk-attach from creating its listener. Explicit profiler
     // configuration still takes precedence over attachment.
     const auto _found_tool =
         (_tool_request == tool_request_kind::explicit_request ||
@@ -1135,11 +1135,10 @@ rocprofiler_register_library_api_table(
             _import_match->library_idx == ROCP_REG_HSA &&
             !is_attachment_library_registered())
     {
-        LOG(WARNING) << "Attachment is enabled, but rocprofiler-sdk was explicitly "
-                        "activated at "
-                        "startup. The attachment listener will not be initialized; use "
-                        "either startup "
-                        "profiling or attachment for this process.";
+        LOG(WARNING)
+            << "Attachment is enabled, but rocprofiler-sdk was explicitly activated at "
+               "startup. The attachment listener will not be initialized; use either "
+               "startup profiling or attachment for this process.";
     }
 
     auto* reginfo = rocp_add_registered_library_api_table(common_name,
