@@ -43,54 +43,6 @@ template <typename T, typename F> struct Cond_t<false, T, F> {
 #include "amd_hip_unsafe_atomics.h"
 #endif
 
-// Atomic expanders
-template <int mem_order = __ATOMIC_SEQ_CST, int mem_scope = __HIP_MEMORY_SCOPE_SYSTEM, typename T,
-          typename Op, typename F>
-inline __attribute__((always_inline, device)) T hip_cas_expander(T* p, T x, Op op, F f) noexcept {
-  using FP = __attribute__((address_space(0))) const void*;
-
-  __device__ extern bool is_shared_workaround(FP) asm("llvm.amdgcn.is.shared");
-
-  if (is_shared_workaround((FP)p)) return f();
-
-  using U =
-      typename Cond_t<sizeof(T) == sizeof(unsigned int), unsigned int, unsigned long long>::type;
-
-  auto q = reinterpret_cast<U*>(p);
-
-  U tmp0{__hip_atomic_load(q, mem_order, mem_scope)};
-  U tmp1;
-  do {
-    tmp1 = tmp0;
-
-    op(reinterpret_cast<T&>(tmp1), x);
-  } while (!__hip_atomic_compare_exchange_strong(q, &tmp0, tmp1, mem_order, mem_order, mem_scope));
-
-  return reinterpret_cast<const T&>(tmp0);
-}
-
-template <int mem_order = __ATOMIC_SEQ_CST, int mem_scope = __HIP_MEMORY_SCOPE_SYSTEM, typename T,
-          typename Cmp, typename F>
-inline __attribute__((always_inline, device)) T hip_cas_extrema_expander(T* p, T x, Cmp cmp,
-                                                                         F f) noexcept {
-  using FP = __attribute__((address_space(0))) const void*;
-
-  __device__ extern bool is_shared_workaround(FP) asm("llvm.amdgcn.is.shared");
-
-  if (is_shared_workaround((FP)p)) return f();
-
-  using U =
-      typename Cond_t<sizeof(T) == sizeof(unsigned int), unsigned int, unsigned long long>::type;
-
-  auto q = reinterpret_cast<U*>(p);
-
-  U tmp{__hip_atomic_load(q, mem_order, mem_scope)};
-  while (cmp(x, reinterpret_cast<const T&>(tmp)) &&
-         !__hip_atomic_compare_exchange_strong(q, &tmp, x, mem_order, mem_order, mem_scope));
-
-  return reinterpret_cast<const T&>(tmp);
-}
-
 __device__ inline unsigned short int atomicCAS(unsigned short int* address,
                                                unsigned short int compare, unsigned short int val) {
   __scoped_atomic_compare_exchange_n(address, &compare, val, 0, __ATOMIC_RELAXED, __ATOMIC_RELAXED,
