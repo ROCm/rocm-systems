@@ -226,9 +226,9 @@ def aggregate_pc_sample_records(
     # depends on the input, so force both to a nullable float type so that
     # NaN stays NaN through the cap.
     aggregated["wave_occupancy_percent"] = wave_occupancy_percent.astype("Float64")
-    aggregated["active_thread_percent"] = aggregated[
-        "active_thread_percent"
-    ].astype("Float64")
+    aggregated["active_thread_percent"] = aggregated["active_thread_percent"].astype(
+        "Float64"
+    )
     return aggregated
 
 
