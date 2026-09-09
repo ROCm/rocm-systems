@@ -7,9 +7,11 @@
 #include "core/config.hpp"
 #include "core/output_file_registry.hpp"
 #include "core/perfetto/engine.hpp"
+#include "core/perfetto/fwd.hpp"
 #include "core/perfetto/sinks/append_mode.hpp"
 #include "core/perfetto/sinks/per_pid_file_sink.hpp"
 #include "core/perfetto/sinks/single_file_sink.hpp"
+#include "core/perfetto/sinks/trace_sink.hpp"
 #include "core/trace_cache/post_processor.hpp"
 #include "core/track_registry.hpp"
 #include "logger/debug.hpp"
@@ -62,7 +64,7 @@ make_merged_append_sink(output_file_registry& registry, std::size_t source_count
     return sink;
 }
 
-std::unique_ptr<trace_sink>
+std::unique_ptr<trace_sink_interface>
 make_sink(output_file_registry& registry, pid_t root_pid, bool combine_traces,
           std::size_t source_count)
 {

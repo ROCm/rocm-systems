@@ -43,7 +43,7 @@ private:
     // m_sink must outlive m_engine: the engine only holds a weak_ptr to it (see
     // trace_sink.hpp) but still drains into it from its own destructor if
     // stop() was never called explicitly, so it must be destroyed first.
-    std::shared_ptr<trace_sink>             m_sink;
+    std::shared_ptr<trace_sink_interface>   m_sink;
     std::unique_ptr<cached_perfetto_engine> m_engine;
     std::unique_ptr<track_registry>         m_tracks;
     bool                                    m_started{ false };

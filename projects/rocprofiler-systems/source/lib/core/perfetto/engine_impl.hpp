@@ -6,9 +6,11 @@
 #include "engine.hpp"
 #include "logger/debug.hpp"
 #include "packet_framing.hpp"
+#include "sinks/trace_sink.hpp"
 
 #include <cstdint>
 #include <exception>
+#include <memory>
 #include <utility>
 
 namespace rocprofsys::core
@@ -47,7 +49,8 @@ basic_cached_perfetto_engine<Backend>::init_sdk()
 
 template <perfetto_backend Backend>
 void
-basic_cached_perfetto_engine<Backend>::start(const std::shared_ptr<trace_sink>& sink)
+basic_cached_perfetto_engine<Backend>::start(
+    const std::shared_ptr<trace_sink_interface>& sink)
 {
     if(is_system_backend())
     {
@@ -87,7 +90,10 @@ template <perfetto_backend Backend>
 void
 basic_cached_perfetto_engine<Backend>::stop()
 {
-    if(!m_running) return;
+    if(!m_running)
+    {
+        return;
+    }
 
     void* observed = nullptr;
     if(!clear_active_cached_engine(this, &observed) && observed != nullptr)

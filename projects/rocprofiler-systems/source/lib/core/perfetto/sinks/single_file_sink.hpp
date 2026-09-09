@@ -22,7 +22,7 @@ namespace core
 // Cached-mode sink: concatenates per-pid bytes into one .proto file.
 // Each source_id receives a disjoint trusted_packet_sequence_id range before
 // packets are appended, preserving Perfetto interned-data namespaces.
-class single_file_sink : public trace_sink
+class single_file_sink : public trace_sink_interface
 {
 public:
     // An empty output_filename_override defers to config::get_perfetto_output_filename(),
