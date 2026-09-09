@@ -6,9 +6,10 @@
 import re
 from pathlib import Path
 
+import yaml
+
 from utils import mem_chart_gfx1250
 from utils.mem_chart_common import strip_ansi
-from vendored import yaml
 
 DEFAULT_TITLE = "3. Memory Chart (Normalization: per_kernel)"
 
