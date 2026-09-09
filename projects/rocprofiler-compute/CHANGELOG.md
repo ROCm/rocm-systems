@@ -67,6 +67,7 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
   * Profile mode writes one PID-prefixed `<pid>_ps_file_results.json` per process.
   * Analyze mode reports every process in a single run, with a `pid` column
     identifying each one.
+* Added ``--ml-trace-with-params {off,shapes,values}`` to capture operator arguments during ML API tracing (Torch and Triton). When set to ``shapes`` or ``values``, the captured arguments are written to a new ``Args`` column in ``ml_api_trace/consolidated.csv``.
 
 * Redesigned the standalone roofline HTML to improve user experience and interactivity.
 
@@ -133,6 +134,10 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 * Profile mode now errors when the target workload directory is non-empty unless `--overwrite` is passed. `--bench-only` likewise requires `--overwrite` before replacing an existing `roofline.csv`.
 
 * Renamed `num_hbm_channels` to `num_memory_channels` in machine specifications to unify memory channel reporting across GPU families.
+
+* ML API trace analysis now displays the operator arguments collected via `--ml-trace-with-params {shapes,values}` in the operator call tree. An operator whose calls all passed the same arguments shows them inline as an `args=(...)` segment. An operator whose calls passed differing arguments lists each distinct set under an `args variants:` block, with the number of calls that used it. Long argument blobs are truncated for display.
+
+* The operator summary table in ML API trace analysis now reports one row per operator, aggregated over every source location the operator ran from. Previously an operator called from several locations produced a separate row for each. Totals, call counts and dispatch counts now cover the whole run; the call tree above the table shows the per-location breakdown.
 
 ### Removed
 
