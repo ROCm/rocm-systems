@@ -11,7 +11,6 @@
 #include <timemory/settings/settings.hpp>
 #include <timemory/variadic/macros.hpp>
 
-#include <algorithm>
 #include <array>
 #include <string>
 #include <string_view>
@@ -430,12 +429,8 @@ rocm_setting_name_for_domain(std::string_view _domain)
     std::string _result;
     _result.reserve(_rocm_op_prefix.size() + _domain.size() + _rocm_op_suffix.size());
     _result.append(_rocm_op_prefix);
-    _result.append(_domain);
+    _result.append(rocprofsys::utility::string::to_upper(_domain));
     _result.append(_rocm_op_suffix);
-    std::transform(_result.begin() + _rocm_op_prefix.size(),
-                   _result.end() - _rocm_op_suffix.size(),
-                   _result.begin() + _rocm_op_prefix.size(),
-                   [](unsigned char c) { return std::toupper(c); });
     return _result;
 }
 

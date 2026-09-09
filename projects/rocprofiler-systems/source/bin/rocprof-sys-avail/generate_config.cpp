@@ -211,12 +211,11 @@ generate_config(std::string _config_file, const std::set<std::string>& _config_f
     for(const std::string itr : { ".cfg", ".txt", ".json", ".xml" })
     {
         if(_config_file.length() <= itr.length()) continue;
-        auto _pos = _config_file.rfind(itr);
-        if(_pos == _config_file.length() - itr.length())
+        if(_config_file.ends_with(itr))
         {
             if(itr == ".cfg" || itr == ".txt") _txt_ext = itr;
             _fmts.emplace(itr.substr(1));
-            _config_file = _config_file.substr(0, _pos);
+            _config_file = _config_file.substr(0, _config_file.length() - itr.length());
         }
     }
 
@@ -297,11 +296,20 @@ generate_config(std::string _config_file, const std::set<std::string>& _config_f
         std::map<std::string, std::string> env_map;
         for(const auto& itr : *_settings)
         {
-            if(exclude_setting(itr.second->get_env_name())) continue;
-            if(itr.second->get_hidden()) continue;
+            if(exclude_setting(itr.second->get_env_name()))
+            {
+                continue;
+            }
+            if(itr.second->get_hidden())
+            {
+                continue;
+            }
 
             const auto& env_name = itr.second->get_env_name();
-            if(env_name.find("ROCPROFSYS_") != 0) continue;
+            if(!env_name.starts_with("ROCPROFSYS_"))
+            {
+                continue;
+            }
 
             // Include all vars, even empty ones — the schema function
             // handles empty values appropriately (e.g., empty string fields

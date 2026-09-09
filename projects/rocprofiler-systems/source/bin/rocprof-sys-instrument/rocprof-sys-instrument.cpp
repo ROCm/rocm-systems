@@ -1249,8 +1249,8 @@ main(int argc, char** argv)
             // there is no extension, assume it is an exe
             outfile = (_is_local) ? _cmd + ".inst" : _cmd;
         }
-        else if(_cmd.find("lib") == 0 || _cmd.find(".so") != std::string::npos ||
-                _cmd.find(".a") == _cmd.length() - 2)
+        else if(_cmd.starts_with("lib") || _cmd.find(".so") != std::string::npos ||
+                _cmd.ends_with(".a"))
         {
             // if it starts with lib, ends with .a, or contains .so (e.g. libfoo.so,
             // libfoo.so.2), assume it is a library and retain the name but put it in a
@@ -1692,17 +1692,24 @@ main(int argc, char** argv)
     auto get_library_ext = [=](const std::vector<string_t>& linput) {
         auto lnames           = linput;
         auto _get_library_ext = [](string_t lname) {
-            if(lname.find(".so") != string_t::npos ||
-               lname.find(".a") == lname.length() - 2)
+            if(lname.find(".so") != string_t::npos || lname.ends_with(".a"))
+            {
                 return lname;
+            }
             if(!prefer_library.empty())
+            {
                 return (lname +
                         ((prefer_library == "static" || is_static_exe) ? ".a" : ".so"));
+            }
             else
+            {
                 return (lname + ((is_static_exe) ? ".a" : ".so"));
+            }
         };
         for(auto& lname : lnames)
+        {
             lname = _get_library_ext(lname);
+        }
         ROCPROFSYS_ADD_LOG_ENTRY("Using library:",
                                  fmt::format("[{}]", fmt::join(lnames, ", ")));
         return lnames;
@@ -2498,7 +2505,7 @@ main(int argc, char** argv)
         if(success)
         {
             verbprintf(0, "\n");
-            if(outfile.find('/') != 0)
+            if(!outfile.starts_with('/'))
             {
                 verbprintf(0, "The instrumented executable image is stored in '%s/%s'\n",
                            get_cwd().c_str(), outfile.c_str());
@@ -2823,12 +2830,19 @@ get_absolute_filepath(std::string _name)
     auto _combine_paths = std::vector<strvec_t>{ bin_search_paths, lib_search_paths };
     auto _base_name     = path::filename(_name);
     // if the name looks like a library, put the lib_search_paths first
-    if(_base_name.find("lib") == 0 || _base_name.find(".so") != std::string::npos ||
+    if(_base_name.starts_with("lib") || _base_name.find(".so") != std::string::npos ||
        _base_name.find(".a") != std::string::npos)
+    {
         std::reverse(_combine_paths.begin(), _combine_paths.end());
+    }
     _search_paths.reserve(bin_search_paths.size() + lib_search_paths.size());
     for(const auto& pitr : _combine_paths)
+    {
         for(const auto& itr : pitr)
+        {
+            _search_paths.emplace_back(itr);
+        }
+    }
             _search_paths.emplace_back(itr);
 
     return get_absolute_filepath(std::move(_name), _search_paths);

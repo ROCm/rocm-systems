@@ -412,7 +412,10 @@ collect_resolved_settings(const std::vector<std::string>&        current_env,
         const std::string key(entry.substr(0, eq_pos));
         const std::string val(entry.substr(eq_pos + 1));
 
-        if(key.find("ROCPROFSYS_") != 0) continue;
+        if(!key.starts_with("ROCPROFSYS_"))
+        {
+            continue;
+        }
 
         auto match = initial_map.find(key);
         if(match == initial_map.end() || match->second != val)
