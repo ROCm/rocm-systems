@@ -25,7 +25,7 @@
 
 #include "libhsakmt.h"
 #include "kfd_ioctl.h"
-#include <amdgpu_drm.h>
+#include "hsakmt/drm/amdgpu_drm.h"
 
 int hsakmt_open_drm_render_device(HsaKFDContext *ctx, int minor);
 static HSAKMT_STATUS get_clock_counters_kfd(HsaKFDContext *ctx,

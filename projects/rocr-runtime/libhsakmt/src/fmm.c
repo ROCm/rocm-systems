@@ -47,7 +47,7 @@
 #include "rbtree.h"
 #include <amdgpu.h>
 #include "xf86drm.h"
-#include <amdgpu_drm.h>
+#include "hsakmt/drm/amdgpu_drm.h"
 
 #include <sys/ioctl.h>
 #include <sys/stat.h>
@@ -1480,6 +1480,27 @@ err_hsakmt_ioctl_failed:
 	return NULL;
 }
 
+/* DRM: fetch a BO's mmap offset via a raw GEM_MMAP ioctl. Replaces the libdrm
+ * amdgpu_bo_get_mmap_offset() wrapper, which UKI no longer adds to libdrm. */
+static int fmm_drm_bo_mmap_offset(amdgpu_device_handle dev, amdgpu_bo_handle bo,
+				  uint64_t *mmap_offset)
+{
+	union drm_amdgpu_gem_mmap mmap_arg = {0};
+	uint32_t kms_handle = 0;
+	int drm_fd = hsakmt_amdgpu_device_get_fd(dev);
+
+	if (drm_fd < 0 ||
+	    hsakmt_amdgpu_bo_export(bo, amdgpu_bo_handle_type_kms, &kms_handle) != 0)
+		return -1;
+
+	mmap_arg.in.handle = kms_handle;
+	if (hsakmt_ioctl(drm_fd, DRM_IOCTL_AMDGPU_GEM_MMAP, &mmap_arg) != 0)
+		return -1;
+
+	*mmap_offset = mmap_arg.out.addr_ptr;
+	return 0;
+}
+
 static vm_object_t *fmm_allocate_memory_object_drm(
 												struct hsa_kfd_fmm_context *ffm_ctx,
 												uint32_t gpu_id, void *mem,
@@ -1578,7 +1599,7 @@ static vm_object_t *fmm_allocate_memory_object_drm(
 			}
 
 			if (mmap_offset) {
-					if (amdgpu_bo_get_mmap_offset(handle.drm, mmap_offset) != 0) {
+					if (fmm_drm_bo_mmap_offset(device_handle, handle.drm, mmap_offset) != 0) {
 							pr_err("Failed to mmap BO!\n");
 							goto err_get_mmap_offset_failed;
 					}

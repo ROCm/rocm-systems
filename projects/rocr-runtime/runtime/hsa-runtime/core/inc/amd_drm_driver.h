@@ -11,7 +11,7 @@
 #include <unordered_map>
 
 #include <amdgpu.h>
-#include <amdgpu_drm.h>
+#include <hsakmt/drm/amdgpu_drm.h>
 
 #include "core/inc/amd_kfd_driver.h"
 #include "core/inc/runtime.h"
@@ -181,6 +181,11 @@ public:
   /// @param[out] info   A non-NULL pointer where the information requested will be stored.
   hsa_status_t GetUserQueueMetadata(core::Agent &agent, queue_type type, struct drm_amdgpu_info_uq_metadata *info);
 
+  /// @brief Query CWSR (compute wave save/restore) sizing for an agent.
+  /// @param[in]  agent  The GPU agent to query.
+  /// @param[out] info   A non-NULL pointer where the CWSR sizing will be stored.
+  hsa_status_t QueryCwsrInfo(core::Agent &agent, struct drm_amdgpu_info_cwsr *info);
+
   /// @brief Map HSA queue priority to hardware queue priority
   ///
   /// @param hsa_priority HSA priority value (range: -3 to +3)
@@ -251,6 +256,16 @@ public:
   /// per agent. Allocated lazily by SetTrapHandler when the runtime hands it a
   /// NULL TMA (exception-debugging path); freed in ReleaseResources. Mutable so
   /// the const SetTrapHandler override can cache it.
+  ///
+  /// Thread-safety: no lock needed. Every caller that reaches the null-TMA
+  /// branch (the only branch that touches this map) is serialized:
+  ///   - BindTrapHandler: called once per agent in the serial PostToolsInit
+  ///     loop during single-threaded runtime init.
+  ///   - UpdateTrapHandlerWithPCS (PCS enable/disable): always called under
+  ///     PcsRuntime::pc_sampling_lock_, which serializes all PCS operations
+  ///     globally — including across multiple agents. This holds for both the
+  ///     current KFD path and when PCS support is added to the DRM path.
+  ///   - ReleaseResources: called during single-threaded teardown.
   mutable std::unordered_map<core::Agent *, void *> trap_tma_by_agent_;
 
 };

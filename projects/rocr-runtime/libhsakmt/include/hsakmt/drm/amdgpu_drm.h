@@ -59,12 +59,24 @@ extern "C" {
 #define DRM_AMDGPU_USERQ_WAIT		0x18
 #define DRM_AMDGPU_GEM_LIST_HANDLES	0x19
 #define DRM_AMDGPU_PROC_OPTIONS     0x1A
-#define DRM_AMDGPU_UALINK_HANDLE	0x1B
+#define DRM_AMDGPU_CWSR			0x1B
+/* ROCr-local (NOT in kernel UAPI): 0x1C is the next free slot after the
+ * kernel's current range (0x1B = CWSR). SVM is a downstream kernel feature
+ * not yet merged upstream; this slot must be vacated if the kernel claims
+ * 0x1C for a different purpose.
+ */
+#define DRM_AMDGPU_GEM_SVM		0x1C
 /* not upstream */
 #define DRM_AMDGPU_GEM_DGMA		0x5c
 
 /* hybrid specific ioctls */
 #define DRM_AMDGPU_SEM			0x5b
+/* ROCr-local (NOT in kernel UAPI): UALINK is not in the kernel UAPI at any
+ * slot. Parked at 0x5D alongside existing non-upstream DGMA (0x5C) / SEM (0x5B)
+ * to keep it well clear of the kernel's active range. The FABRIC export/import
+ * path using this ioctl is inert on kernels that do not implement UALINK.
+ */
+#define DRM_AMDGPU_UALINK_HANDLE	0x5d
 
 #define DRM_IOCTL_AMDGPU_GEM_CREATE	DRM_IOWR(DRM_COMMAND_BASE + DRM_AMDGPU_GEM_CREATE, union drm_amdgpu_gem_create)
 #define DRM_IOCTL_AMDGPU_GEM_MMAP	DRM_IOWR(DRM_COMMAND_BASE + DRM_AMDGPU_GEM_MMAP, union drm_amdgpu_gem_mmap)
@@ -87,6 +99,9 @@ extern "C" {
 #define DRM_IOCTL_AMDGPU_USERQ_WAIT	DRM_IOWR(DRM_COMMAND_BASE + DRM_AMDGPU_USERQ_WAIT, struct drm_amdgpu_userq_wait)
 #define DRM_IOCTL_AMDGPU_GEM_LIST_HANDLES DRM_IOWR(DRM_COMMAND_BASE + DRM_AMDGPU_GEM_LIST_HANDLES, struct drm_amdgpu_gem_list_handles)
 #define DRM_IOCTL_AMDGPU_PROC_OPTIONS  DRM_IOWR(DRM_COMMAND_BASE + DRM_AMDGPU_PROC_OPTIONS, struct drm_amdgpu_proc_options)
+#define DRM_IOCTL_AMDGPU_CWSR		DRM_IOWR(DRM_COMMAND_BASE + DRM_AMDGPU_CWSR, union drm_amdgpu_cwsr)
+/* ROCr-local (NOT in kernel UAPI) */
+#define DRM_IOCTL_AMDGPU_GEM_SVM	DRM_IOWR(DRM_COMMAND_BASE + DRM_AMDGPU_GEM_SVM, struct drm_amdgpu_gem_svm)
 #define DRM_IOCTL_AMDGPU_UALINK_HANDLE DRM_IOWR(DRM_COMMAND_BASE + DRM_AMDGPU_UALINK_HANDLE, union drm_amdgpu_ualink_handle)
 
 #define DRM_IOCTL_AMDGPU_GEM_DGMA	DRM_IOWR(DRM_COMMAND_BASE + DRM_AMDGPU_GEM_DGMA, struct drm_amdgpu_gem_dgma)
@@ -365,6 +380,7 @@ union drm_amdgpu_ctx {
 /* user queue IOCTL operations */
 #define AMDGPU_USERQ_OP_CREATE	1
 #define AMDGPU_USERQ_OP_FREE	2
+#define AMDGPU_USERQ_OP_MODIFY 3
 
 /* queue priority levels */
 /* low < normal low < normal high < high */
@@ -376,6 +392,9 @@ union drm_amdgpu_ctx {
 #define AMDGPU_USERQ_CREATE_FLAGS_QUEUE_PRIORITY_HIGH 3 /* admin only */
 /* for queues that need access to protected content */
 #define AMDGPU_USERQ_CREATE_FLAGS_QUEUE_SECURE  (1 << 2)
+/* for compute queues that need AQL rather than PM4 packet format */
+#define AMDGPU_USERQ_CREATE_FLAGS_QUEUE_AQL_COMPUTE  (1 << 3)
+#define AMDGPU_USERQ_MAX_QUEUE_PERCENTAGE      100
 
 /*
  * This structure is a container to pass input configuration
@@ -495,6 +514,44 @@ struct drm_amdgpu_userq_mqd_compute_gfx11 {
 	 * to get the size.
 	 */
 	__u64   eop_va;
+	/**
+	 * @cu_mask_ptr: User-space pointer to CU (Compute Unit) mask array
+	 * Points to an array of __u32 values that define which CUs are enabled
+	 * for this queue (0 = disabled, 1 = enabled per bit)
+	 */
+	__u64 cu_mask_ptr;
+	/**
+	 * @cu_mask_count: Number of entries in the CU mask array
+	 * Total count of __u32 elements in the cu_mask_ptr array (each element
+	 * represents 32 CUs/WGPs)
+	 */
+	__u32 cu_mask_count;
+	/**
+	 * @queue_percentage: Queue resource allocation percentage (0-100)
+	 * Defines the percentage of GPU resources allocated to this queue
+	 */
+	__u32 queue_percentage;
+	/**
+	 * @hqd_queue_priority: Hqd Queue priority (0-15)
+	 * Higher values indicate higher scheduling priority for the queue
+	 */
+	__u32 hqd_queue_priority;
+	/**
+	 * @pm4_target_xcc: PM4 target XCC identifier (for gfx9/gfx12.1)
+	 * Specifies the target XCC (Cross Compute Complex) for PM4 commands
+	 */
+	__u32 pm4_target_xcc;
+	/**
+	 * @ctx_save_area_va: Virtual address of the GPU memory for save/restore buffer.
+	 * This must be from a separate GPU object, and use AMDGPU_INFO IOCTL
+	 * to get the size. This includes control stack, wave context and debugger memory.
+	 */
+	__u64 ctx_save_area_va;
+	/**
+	 * @ctx_save_area_size:  Total size (in bytes) allocated for save/restore buffer.
+	 * Use AMDGPU_INFO IOCTL to get the size.
+	 */
+	__u32 ctx_save_area_size;
 };
 
 /* userq signal/wait ioctl */
@@ -514,7 +571,9 @@ struct drm_amdgpu_userq_signal {
 	 * @num_syncobj_handles: A count that represents the number of syncobj handles in
 	 * @syncobj_handles.
 	 */
-	__u64	num_syncobj_handles;
+	__u16	num_syncobj_handles;
+	__u16	pad0;
+	__u32	pad1;
 	/**
 	 * @bo_read_handles: The list of BO handles that the submitted user queue job
 	 * is using for read only. This will update BO fences in the kernel.
@@ -598,7 +657,8 @@ struct drm_amdgpu_userq_wait {
 	 * @num_syncobj_handles: A count that represents the number of syncobj handles in
 	 * @syncobj_handles.
 	 */
-	__u32	num_syncobj_handles;
+	__u16	num_syncobj_handles;
+	__u16	pad0;
 	/**
 	 * @num_bo_read_handles: A count that represents the number of read BO handles in
 	 * @bo_read_handles.
@@ -888,6 +948,9 @@ union drm_amdgpu_wait_fences {
 #define AMDGPU_GEM_OP_GET_GEM_CREATE_INFO	0
 #define AMDGPU_GEM_OP_SET_PLACEMENT		1
 #define AMDGPU_GEM_OP_GET_MAPPING_INFO		2
+#define AMDGPU_GEM_OP_OPEN_GLOBAL		3
+
+#define AMDGPU_GEM_GLOBAL_MMIO_REMAP		0
 
 struct drm_amdgpu_gem_vm_entry {
 	/* Start of mapping (in bytes) */
@@ -1195,6 +1258,8 @@ struct drm_amdgpu_cs_chunk_cp_gfx_shadow {
 #define AMDGPU_INFO_HW_IP_COUNT			0x03
 /* timestamp for GL_ARB_timer_query */
 #define AMDGPU_INFO_TIMESTAMP			0x05
+/* get synchronized CPU and GPU clock counters */
+#define AMDGPU_INFO_CLOCK_COUNTERS		0x06
 /* Query the firmware version */
 #define AMDGPU_INFO_FW_VERSION			0x0e
 	/* Subquery id: Query VCE firmware version */
@@ -1354,6 +1419,8 @@ struct drm_amdgpu_cs_chunk_cp_gfx_shadow {
 #define AMDGPU_INFO_GPUVM_FAULT			0x23
 /* query FW object size and alignment */
 #define AMDGPU_INFO_UQ_FW_AREAS			0x24
+/* query CWSR (compute wave save/restore) sizing */
+#define AMDGPU_INFO_CWSR			0x25
 
 /* Hybrid Stack Specific Defs*/
 /* gpu capability */
@@ -1634,6 +1701,12 @@ struct drm_amdgpu_info_device {
 	/* Userq IP mask (1 << AMDGPU_HW_IP_*) */
 	__u32 userq_ip_mask;
 	__u32 pad;
+
+	/* Additional fields for memory aperture information */
+	__u64 lds_base;          /* LDS base */
+	__u64 lds_limit;         /* LDS limit */
+	__u64 scratch_base;      /* Scratch base */
+	__u64 scratch_limit;     /* Scratch limit */
 };
 
 struct drm_amdgpu_info_hw_ip {
@@ -1750,6 +1823,59 @@ struct drm_amdgpu_info_uq_metadata {
 	};
 };
 
+/**
+ * struct drm_amdgpu_info_clock_counters - Clock counter information
+ *
+ * Used to correlate timestamps between CPU and GPU with minimal skew.
+ * All counters are in nanoseconds for consistent comparison.
+ */
+struct drm_amdgpu_info_clock_counters {
+	/* GPU clock counter in nanoseconds */
+	__u64 gpu_clock_counter;
+	/* CPU clock counter (raw monotonic) in nanoseconds */
+	__u64 cpu_clock_counter;
+	/* System boottime clock counter in nanoseconds */
+	__u64 system_clock_counter;
+	/* System clock frequency in Hz (always 1GHz) */
+	__u64 system_clock_freq;
+};
+
+/**
+ * struct drm_amdgpu_info_cwsr - cwsr information
+ *
+ * Gives cwsr related size details. User needs to allocate buffer based on this.
+ */
+struct drm_amdgpu_info_cwsr {
+	/* Control stack size */
+	__u32 ctl_stack_size;
+	/* Debug memory area size */
+	__u32 dbg_mem_size;
+	/* Minimum save area size required */
+	__u32 min_save_area_size;
+};
+
+/* cwsr ioctl */
+#define AMDGPU_CWSR_OP_SET_L2_TRAP 1
+
+struct drm_amdgpu_cwsr_in {
+	/* AMDGPU_CWSR_OP_* */
+	__u32 op;
+	struct {
+		/* Level 2 trap handler base address */
+		__u64 tba_va;
+		/* Level 2 trap handler buffer size (in bytes) */
+		__u32 tba_sz;
+		/* Level 2 trap memory buffer address */
+		__u64 tma_va;
+		/* Level 2 trap memory buffer size (in bytes) */
+		__u32 tma_sz;
+	} l2trap;
+};
+
+union drm_amdgpu_cwsr {
+	struct drm_amdgpu_cwsr_in in;
+};
+
 /*
  * Supported GPU families
  */
@@ -1836,6 +1962,85 @@ union drm_amdgpu_ualink_handle_out {
 union drm_amdgpu_ualink_handle {
 	struct drm_amdgpu_ualink_handle_in in;
 	union drm_amdgpu_ualink_handle_out out;
+};
+
+/*
+ * ROCr-local (NOT in kernel UAPI): SVM (Shared Virtual Memory) attribute
+ * management via DRM_IOCTL_AMDGPU_GEM_SVM. Mirrors the downstream libdrm
+ * definitions ROCr's SVM code is written against.
+ */
+
+/**
+ * enum amdgpu_ioctl_svm_op - operation selector for DRM_IOCTL_AMDGPU_GEM_SVM.
+ * @AMDGPU_SVM_OP_SET_ATTR: apply the attributes in @attrs_ptr to the VA range.
+ * @AMDGPU_SVM_OP_GET_ATTR: read back the current value of each attribute
+ *                          listed in @attrs_ptr for the given VA range.
+ * @AMDGPU_SVM_OP_RESET_ATTR: reset all attributes for the VA range to their
+ *                            default values. @attrs_ptr and @nattr are ignored.
+ */
+enum amdgpu_ioctl_svm_op {
+	AMDGPU_SVM_OP_SET_ATTR = 0,
+	AMDGPU_SVM_OP_GET_ATTR = 1,
+	AMDGPU_SVM_OP_RESET_ATTR = 2,
+};
+
+/**
+ * enum amdgpu_ioctl_svm_access - values for AMDGPU_SVM_ATTR_ACCESS.
+ */
+enum amdgpu_ioctl_svm_access {
+	AMDGPU_SVM_ACCESS_INACCESSIBLE		= 0,
+	AMDGPU_SVM_ACCESS_IN_PLACE			= 1,
+	AMDGPU_SVM_ACCESS_ALLOW_MIGRATE		= 2,
+};
+
+/**
+ * enum amdgpu_ioctl_svm_location - values for AMDGPU_SVM_ATTR_PREFERRED_LOC /
+ *                                  AMDGPU_SVM_ATTR_PREFETCH_LOC.
+ */
+enum amdgpu_ioctl_svm_location {
+	AMDGPU_SVM_LOCATION_SYSMEM	= 0,
+	AMDGPU_SVM_LOCATION_UNDEFINED	= 0xffffffffU,
+};
+
+/**
+ * enum amdgpu_ioctl_svm_attr_type - attribute selector for
+ *                                   &drm_amdgpu_svm_attribute.type.
+ */
+enum amdgpu_ioctl_svm_attr_type {
+	AMDGPU_SVM_ATTR_PREFERRED_LOC		= 0,
+	AMDGPU_SVM_ATTR_PREFETCH_LOC		= 1,
+	AMDGPU_SVM_ATTR_ACCESS				= 2,
+	AMDGPU_SVM_ATTR_GRANULARITY			= 3,
+	/* Boolean attributes below: value must be 0 or 1. */
+	AMDGPU_SVM_ATTR_HOST_ACCESS			= 4,
+	AMDGPU_SVM_ATTR_COHERENT			= 5,
+	AMDGPU_SVM_ATTR_EXT_COHERENT		= 6,
+	AMDGPU_SVM_ATTR_HIVE_LOCAL			= 7,
+	AMDGPU_SVM_ATTR_GPU_RO				= 8,
+	AMDGPU_SVM_ATTR_GPU_EXEC			= 9,
+	AMDGPU_SVM_ATTR_GPU_READ_MOSTLY		= 10,
+};
+
+/* One (type, value) pair carried by DRM_IOCTL_AMDGPU_GEM_SVM. */
+struct drm_amdgpu_svm_attribute {
+	/** AMDGPU_SVM_ATTR_* */
+	__u32 type;
+	/** Attribute value; interpretation depends on @type */
+	__u32 value;
+};
+
+/* Argument for DRM_IOCTL_AMDGPU_GEM_SVM. */
+struct drm_amdgpu_gem_svm {
+	/** Start of the virtual address range */
+	__u64 start_addr;
+	/** Size of the range in bytes */
+	__u64 size;
+	/** AMDGPU_SVM_OP_* */
+	__u32 operation;
+	/** Number of struct drm_amdgpu_svm_attribute entries in @attrs_ptr */
+	__u32 nattr;
+	/** User pointer to an array of @nattr struct drm_amdgpu_svm_attribute */
+	__u64 attrs_ptr;
 };
 
 #if defined(__cplusplus)

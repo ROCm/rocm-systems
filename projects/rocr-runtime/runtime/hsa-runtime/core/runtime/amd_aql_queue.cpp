@@ -48,7 +48,7 @@
 #include <sys/stat.h>
 #include <sys/syscall.h>
 #include <unistd.h>
-#include <amdgpu_drm.h>
+#include <hsakmt/drm/amdgpu_drm.h>
 #endif
 
 #include <algorithm>
@@ -293,7 +293,7 @@ AqlQueue::AqlQueue(core::SharedQueue* shared_queue, GpuAgent* agent, size_t req_
         eop_buf_ = agent_->coarsegrain_allocator()(info.compute.eop_size, core::MemoryRegion::AllocateExecutable | core::MemoryRegion::AllocateUncached);
         if (!eop_buf_) break;
 
-        if (amdgpu_query_cwsr_info(agent_->libDrmDev(), &cwsr_info) != 0)
+        if (static_cast<DrmDriver &>(agent_->driver()).QueryCwsrInfo(*agent_, &cwsr_info) != HSA_STATUS_SUCCESS)
           break;
 
         cwsr_buf_ = agent_->coarsegrain_allocator()(cwsr_info.min_save_area_size, core::MemoryRegion::AllocateExecutable | core::MemoryRegion::AllocateUncached);
