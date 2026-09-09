@@ -10,6 +10,7 @@
 #include "gpu.hpp"
 #include "state.hpp"
 #include <cstdint>
+#include <tuple>
 
 #include <timemory/settings/types.hpp>
 
