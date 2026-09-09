@@ -20,6 +20,8 @@
 
 namespace dda::common {
 
+// Precondition: the host launcher has staged sendbuff to scratch and completed
+// launchFabricGpuBarrierPublish on the same stream.
 template <typename T, int NRANKS_CT>
 #if defined(USE_ROCM)
 __launch_bounds__(512)

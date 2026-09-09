@@ -88,7 +88,14 @@ inline int ddaMaxNBlocksForScratch() {
   return static_cast<int>(maxBlocks);
 }
 
-inline int ddaFabricMaxNBlocksForScratch(int cuCount, const char* overrideValue) {
+struct DdaFabricMaxBlocksOverride {
+  bool specified = false;
+  bool valid = false;
+  long requested = 0;
+};
+
+inline int ddaFabricMaxNBlocksForScratch(int cuCount, const char* overrideValue,
+                                        DdaFabricMaxBlocksOverride* parsedOverride = nullptr) {
   int maxBlocks = cuCount;
   if (maxBlocks < 1) {
     maxBlocks = 1;
@@ -97,20 +104,26 @@ inline int ddaFabricMaxNBlocksForScratch(int cuCount, const char* overrideValue)
     maxBlocks = DDA_FABRIC_MAXBLOCKS;
   }
 
+  DdaFabricMaxBlocksOverride parsed;
   if (overrideValue != nullptr && overrideValue[0] != '\0') {
+    parsed.specified = true;
     char* endptr = nullptr;
-    long val = strtol(overrideValue, &endptr, 10);
+    parsed.requested = strtol(overrideValue, &endptr, 10);
     // Only apply if the entire string was a valid integer
     if (endptr != overrideValue && *endptr == '\0') {
+      parsed.valid = true;
       // Clamp to [1, maxBlocks] while still a long to avoid int overflow
-      if (val < 1) {
+      if (parsed.requested < 1) {
         maxBlocks = 1;
-      } else if (val < maxBlocks) {
-        maxBlocks = static_cast<int>(val);
+      } else if (parsed.requested < maxBlocks) {
+        maxBlocks = static_cast<int>(parsed.requested);
       }
-      // val >= maxBlocks: keep maxBlocks unchanged (override cannot raise)
+      // requested >= maxBlocks: keep maxBlocks unchanged (override cannot raise)
     }
-    // Invalid input (non-numeric) is silently ignored, using cuCount-derived cap
+  }
+
+  if (parsedOverride != nullptr) {
+    *parsedOverride = parsed;
   }
 
   return maxBlocks;
