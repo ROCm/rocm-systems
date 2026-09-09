@@ -479,10 +479,6 @@ the signal available today. A structured detection mechanism remains an open que
 | **2. Native-tool kernel replay** | Coalesced counter groups delivered to the SDK invocation; the multi-group admission check extended to admit kernel replay; `pass_count_cb` implemented from the per-agent profile-vector size; both filters applied; and diagnosed failure on missing or unexpectedly empty counter profiles. | Replayed dispatches collect every bucket in one run, including valid one-bucket requests, while zero-bucket requests retain the existing bypass. Application replay keeps working throughout. |
 | **3. Consolidated output and dispatch ID** | Per-pass context positioning, one consolidated counter result using the existing naming convention, cross-pass timestamp and dispatch ID normalization, and marker duration correction. | Analysis consumes kernel-replay profiling output; Top Stats, dispatch information and marker regions report non-multiplied values. |
 
-Phases 2 and 3 assume the [prerequisites](#prerequisites) are already satisfied. Phase 1 does not:
-its rejections include the prerequisite check, so an unsatisfied prerequisite fails before any
-replay code runs.
-
 ## Validation, security and debuggability
 
 ### Validation
