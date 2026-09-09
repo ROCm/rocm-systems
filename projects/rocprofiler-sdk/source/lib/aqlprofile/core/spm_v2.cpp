@@ -222,6 +222,22 @@ GetCounter(aql_profile::Pm4Factory* pm4_factory, const aqlprofile_pmc_event_t& e
     const GpuBlockInfo* block_info = pm4_factory->GetBlockInfo(event.block_name);
     const block_des_t   block_des  = {block_info->id, event.block_index};
 
+    // Preserve current behavior, but make it obvious when callers enter paths
+    // we have intentionally not validated yet.
+    if(int(event.block_name) == AQLPROFILE_BLOCK_NAME_SP)
+        WARN_LOGGING("SP block used in SPM path without explicit validation coverage yet");
+
+    const bool is_sq_accum_counter =
+        event.flags.raw && event.block_name == HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_SQ &&
+        event.flags.sq_flags.accum != 0;
+    const bool is_sqg_accum_counter =
+        event.flags.raw &&
+        event.block_name ==
+            static_cast<hsa_ven_amd_aqlprofile_block_name_t>(AQLPROFILE_BLOCK_NAME_SQG) &&
+        event.flags.sq_flags.accum != 0;
+    if(is_sq_accum_counter || is_sqg_accum_counter)
+        WARN_LOGGING("ACCUM_PREV counter used in SPM path without explicit validation coverage yet");
+
     const auto resolve_spm_depth = [&]() {
         const auto requested_depth =
             static_cast<aqlprofile_spm_depth_t>(event.flags.spm_flags.depth);
