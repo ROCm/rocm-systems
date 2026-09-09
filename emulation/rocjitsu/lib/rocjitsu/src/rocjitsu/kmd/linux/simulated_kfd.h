@@ -212,6 +212,13 @@ public:
     return queue_exception_locks_.size();
   }
 
+  /// @brief Pause immediately before or after per-queue lock registry release.
+  /// @details The boolean is false before the release and true after it. Tests
+  /// install this hook before starting publishers and clear it after joining.
+  void set_queue_exception_cleanup_hook_for_testing(std::function<void(bool)> hook) {
+    queue_exception_cleanup_hook_for_testing_ = std::move(hook);
+  }
+
   /// @brief Release the local process's parked event waiters so a blocking
   /// WAIT_EVENTS returns and drops its driver snapshot before teardown.
   /// @details Fires EventState::begin_wait_cancel() on the local process: waiters
@@ -699,6 +706,7 @@ private:
   };
   std::mutex queue_exception_locks_mutex_;
   std::unordered_map<uint64_t, std::shared_ptr<QueueExceptionLock>> queue_exception_locks_;
+  std::function<void(bool)> queue_exception_cleanup_hook_for_testing_;
   std::unordered_map<uint32_t, EventState *> event_dispatch_;
 
   /// @brief Process ID for local-mode (interposer). Set once in open().

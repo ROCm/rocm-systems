@@ -3130,8 +3130,14 @@ void SimulatedKfd::on_wave_trap_complete(amdgpu::Wavefront &wave) {
   auto fall_back_to_runtime = [&] {
     const uint64_t unreported =
         wave.trap_queue_exception_status() & ~wave.trap_runtime_exception_status();
-    if (unreported != 0 && wave.cu().signal_queue_exception(queue_id, process_id, unreported))
-      wave.add_trap_runtime_exception_status(unreported);
+    if (unreported != 0) {
+      // Keep the retained debugger stop until ROCr actually accepts the
+      // deferred exception. Its completion clears HALT only after successful
+      // publication; failure leaves a future debugger able to claim the stop.
+      wave.cu().signal_queue_exception(queue_id, process_id, unreported,
+                                       /*clear_debug_stop_on_success=*/true);
+      return;
+    }
     wave.set_debug_halted(false);
     wave.set_status_halt(false);
   };
@@ -3140,14 +3146,6 @@ void SimulatedKfd::on_wave_trap_complete(amdgpu::Wavefront &wave) {
   const uint64_t debugger_status = kmd::detail::preserve_runtime_queue_exception_owner(
       queue_exception_status, wave.trap_runtime_exception_status(),
       debugger_queue_exception_mask(proc, queue_id, queue_exception_status));
-  if (queue_exception_status != 0) {
-    const uint64_t unreported =
-        queue_exception_status & ~debugger_status & ~wave.trap_runtime_exception_status();
-    if (unreported != 0) {
-      wave.cu().signal_queue_exception(queue_id, process_id, unreported);
-      wave.add_trap_runtime_exception_status(unreported);
-    }
-  }
   if (queue_exception_status != 0 && debugger_status == 0) {
     // The handler observed an attached debugger and requested HALT, but this
     // exception belongs to ROCr. Do not strand the wave as a debugger stop;
@@ -3277,6 +3275,8 @@ bool SimulatedKfd::signal_runtime_queue_exception(uint32_t gpu_id, uint32_t queu
     std::lock_guard<std::mutex> lock(publication_lock->publication_mutex);
     published = publisher->publish_queue_exception(queue_id, process_id, exception_mask);
   }
+  if (queue_exception_cleanup_hook_for_testing_)
+    queue_exception_cleanup_hook_for_testing_(false);
   // A publisher joins and leaves under the registry lock, so the last user
   // always observes zero and erases the entry. The identity check prevents a
   // stale releaser from erasing a replacement allocated for the same key.
@@ -3289,6 +3289,8 @@ bool SimulatedKfd::signal_runtime_queue_exception(uint32_t gpu_id, uint32_t queu
         queue_exception_locks_.erase(entry);
     }
   }
+  if (queue_exception_cleanup_hook_for_testing_)
+    queue_exception_cleanup_hook_for_testing_(true);
   return published;
 }
 
@@ -3398,9 +3400,8 @@ bool SimulatedKfd::on_wave_sendmsg(amdgpu::Wavefront &wave, uint32_t message) {
         debugger_queue_exception_mask(proc, wave.queue_id(), exception_status);
     const uint64_t unreported =
         exception_status & ~debugger_status & ~wave.trap_runtime_exception_status();
-    if (unreported != 0 &&
-        wave.cu().signal_queue_exception(wave.queue_id(), wave.process_id(), unreported))
-      wave.add_trap_runtime_exception_status(unreported);
+    if (unreported != 0)
+      wave.cu().signal_queue_exception(wave.queue_id(), wave.process_id(), unreported);
   }
 
   return true;
@@ -3459,6 +3460,7 @@ bool SimulatedKfd::notify_debug_event(const std::shared_ptr<KfdProcess> &proc, u
   // a later SET_EXCEPTIONS_ENABLED can still observe retained status.
   UniqueDriverFd notifier;
   bool subscribed = false;
+  uint64_t newly_latched = 0;
   {
     std::lock_guard<std::mutex> lk(debug_sessions_mutex_);
     auto session = debug_sessions_.find(target_pid);
@@ -3473,21 +3475,35 @@ bool SimulatedKfd::notify_debug_event(const std::shared_ptr<KfdProcess> &proc, u
     auto queue = proc->queue_snapshot_map_.find(queue_id);
     if (queue == proc->queue_snapshot_map_.end())
       return false;
+    newly_latched = exception_mask & ~queue->second.exception_status;
     queue->second.exception_status |= exception_mask;
   }
   if (!subscribed || notifier.get() < 0)
     return false;
   const uint64_t one = 1;
-  [[maybe_unused]] const ssize_t written = ::write(notifier.get(), &one, sizeof(one));
-  return true;
+  ssize_t written = 0;
+  do {
+    written = ::write(notifier.get(), &one, sizeof(one));
+  } while (written < 0 && errno == EINTR);
+  if (written == static_cast<ssize_t>(sizeof(one)))
+    return true;
+
+  // Synthetic debugger-only stops are rolled back when notification fails, so
+  // remove only status introduced by this attempt. Runtime-routable exceptions
+  // retain their status for a later notifier/subscription transition.
+  if (!retain_on_rejection && newly_latched != 0) {
+    std::lock_guard<std::mutex> lk(debug_sessions_mutex_);
+    std::lock_guard<std::mutex> alloc_lock(proc->alloc_mutex_);
+    auto queue = proc->queue_snapshot_map_.find(queue_id);
+    if (queue != proc->queue_snapshot_map_.end())
+      queue->second.exception_status &= ~newly_latched;
+  }
+  return false;
 }
 
 bool SimulatedKfd::defer_wave_exception_to_runtime(amdgpu::Wavefront &wave,
                                                    uint64_t exception_mask) {
-  if (!wave.cu().signal_queue_exception(wave.queue_id(), wave.process_id(), exception_mask))
-    return false;
-  wave.add_trap_runtime_exception_status(exception_mask);
-  return true;
+  return wave.cu().signal_queue_exception(wave.queue_id(), wave.process_id(), exception_mask);
 }
 
 void SimulatedKfd::set_debug_event_claim_mask_for_testing(uint64_t exception_mask) {

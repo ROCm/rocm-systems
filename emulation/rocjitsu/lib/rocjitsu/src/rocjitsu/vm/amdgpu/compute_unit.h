@@ -607,7 +607,7 @@ public:
   [[nodiscard]] bool defer_queue_exception_for_testing(uint32_t queue_id, uint32_t process_id,
                                                        uint64_t status) {
     return with_wave_state_locked(
-        [&] { return defer_queue_exception(queue_id, process_id, status); });
+        [&] { return defer_queue_exception(nullptr, queue_id, process_id, status); });
   }
 
   bool has_active_wfs_for_process(uint32_t process_id) const {
@@ -949,10 +949,12 @@ protected:
   /// @details Instruction callbacks run under @ref wave_state_mutex_. The command
   /// processor takes its queue lock before this lock, so reporting synchronously
   /// here would invert that order against queue dispatch and destruction.
-  bool defer_queue_exception(uint32_t queue_id, uint32_t process_id, uint64_t status) {
+  bool defer_queue_exception(Wavefront *wave, uint32_t queue_id, uint32_t process_id,
+                             uint64_t status, bool clear_debug_stop_on_success = false) {
     if (!cp_ || status == 0)
       return false;
-    pending_queue_exceptions_.push_back({queue_id, process_id, status});
+    pending_queue_exceptions_.push_back(
+        {queue_id, process_id, status, wave, clear_debug_stop_on_success});
     return true;
   }
 
@@ -1061,6 +1063,8 @@ protected:
     uint32_t queue_id;
     uint32_t process_id;
     uint64_t status;
+    Wavefront *wave;
+    bool clear_debug_stop_on_success;
   };
 
   mutable std::recursive_mutex wave_state_mutex_;

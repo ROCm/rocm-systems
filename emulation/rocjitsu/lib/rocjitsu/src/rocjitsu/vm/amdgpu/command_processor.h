@@ -409,6 +409,15 @@ public:
   void set_interrupt_callback_drain_hook_for_testing(std::function<void()> hook) {
     interrupt_callback_drain_hook_for_testing_ = std::move(hook);
   }
+  /// @brief Pause a callback lease after it reports itself drained.
+  /// @details The hook belongs to the immutable callback state, so a test can
+  /// destroy the command processor while a released lease remains paused
+  /// without making the lease touch the destroyed owner.
+  void set_interrupt_callback_release_hook_for_testing(std::function<void()> hook) {
+    std::lock_guard<std::mutex> lock(interrupt_cb_mutex_);
+    std::lock_guard<std::mutex> state_lock(interrupt_cb_state_->mutex);
+    interrupt_cb_state_->release_hook_for_testing = std::move(hook);
+  }
 
 private:
   struct InterruptCallbackState {
@@ -420,6 +429,7 @@ private:
     std::condition_variable cv;
     size_t active_calls = 0;
     std::unordered_map<std::thread::id, size_t> calls_by_thread;
+    std::function<void()> release_hook_for_testing;
   };
 
   class InterruptCallbackLease {
@@ -436,15 +446,22 @@ private:
     ~InterruptCallbackLease() {
       if (!state_)
         return;
+      // Any owner cleanup must precede publishing active_calls == 0. An
+      // external replacement may return as soon as it observes that value and
+      // its caller may immediately destroy the command processor.
+      owner_->prune_retired_interrupt_callbacks();
+      std::function<void()> release_hook;
       {
         std::lock_guard<std::mutex> lock(state_->mutex);
         --state_->active_calls;
         auto calls = state_->calls_by_thread.find(thread_id_);
         if (--calls->second == 0)
           state_->calls_by_thread.erase(calls);
+        release_hook = state_->release_hook_for_testing;
         state_->cv.notify_all();
       }
-      owner_->prune_retired_interrupt_callbacks();
+      if (release_hook)
+        release_hook();
     }
 
     explicit operator bool() const { return static_cast<bool>(state_); }
@@ -833,7 +850,7 @@ private:
   /// invoke it after unlocking. Replacement publishes its new generation first.
   /// External replacement then drains every retained older generation; reentrant
   /// replacement cannot wait for its own lease, so it leaves retirement to a
-  /// later external replacement or to the final lease release.
+  /// later external replacement or command-processor destruction.
   std::mutex interrupt_cb_mutex_;
   std::shared_ptr<InterruptCallbackState> interrupt_cb_state_ =
       std::make_shared<InterruptCallbackState>();

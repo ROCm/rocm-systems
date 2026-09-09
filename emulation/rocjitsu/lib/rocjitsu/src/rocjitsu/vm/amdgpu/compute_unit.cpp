@@ -34,8 +34,10 @@
 namespace rocjitsu {
 namespace amdgpu {
 bool InstructionComputeUnitView::signal_queue_exception(uint32_t queue_id, uint32_t process_id,
-                                                        uint64_t status) {
-  return raw_cu().defer_queue_exception(queue_id, process_id, status);
+                                                        uint64_t status,
+                                                        bool clear_debug_stop_on_success) {
+  return raw_cu().defer_queue_exception(&raw_wavefront(), queue_id, process_id, status,
+                                        clear_debug_stop_on_success);
 }
 
 uint32_t Wavefront::debug_read_sgpr(uint32_t reg) const {
@@ -305,10 +307,25 @@ void ComputeUnitCore::flush_cp_notifications() {
     if (!cp_)
       return;
     for (const auto &exception : exceptions) {
-      if (queue_exception_handler_)
-        queue_exception_handler_(exception.queue_id, exception.process_id, exception.status);
-      else
-        cp_->signal_queue_exception(exception.queue_id, exception.process_id, exception.status);
+      const bool delivered =
+          queue_exception_handler_
+              ? queue_exception_handler_(exception.queue_id, exception.process_id, exception.status)
+              : cp_->signal_queue_exception(exception.queue_id, exception.process_id,
+                                            exception.status);
+      if (delivered && exception.wave != nullptr) {
+        std::lock_guard<std::recursive_mutex> wave_state_lock(wave_state_mutex_);
+        // Queue teardown can reclaim this slot while the external handler is
+        // waiting for acknowledgement. Only commit ownership to the wave that
+        // originally queued the exception.
+        if (exception.wave->process_id() == exception.process_id &&
+            exception.wave->queue_id() == exception.queue_id) {
+          exception.wave->add_trap_runtime_exception_status(exception.status);
+          if (exception.clear_debug_stop_on_success) {
+            exception.wave->set_debug_halted(false);
+            exception.wave->set_status_halt(false);
+          }
+        }
+      }
     }
     for (const auto &[dispatch_id, wg_id] : ready)
       cp_->notify_wg_complete(dispatch_id, wg_id);
