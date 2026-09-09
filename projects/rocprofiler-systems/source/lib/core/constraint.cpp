@@ -21,6 +21,7 @@
 #include <string>
 #include <thread>
 #include <type_traits>
+#include <utility>
 
 using namespace std::chrono_literals;
 
@@ -63,11 +64,11 @@ find_clock_identifier(const Tp& _v)
     }
     else
     {
-        _descript        = "name";
-        auto _clock_name = utility::string::clock_name(_v);
+        _descript            = "name";
+        auto normalized_name = utility::string::clock_name(_v);
         for(const auto& itr : accepted_clock_ids)
         {
-            if(itr.name == _clock_name || itr.raw_name == _v ||
+            if(itr.name == normalized_name || itr.raw_name == _v ||
                std::to_string(itr.value) == _v)
             {
                 return itr;

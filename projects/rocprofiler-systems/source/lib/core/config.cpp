@@ -63,6 +63,7 @@
 #include <linux/capability.h>
 #include <numeric>
 #include <ostream>
+#include <set>
 #include <sstream>
 #include <string>
 #include <string_view>
