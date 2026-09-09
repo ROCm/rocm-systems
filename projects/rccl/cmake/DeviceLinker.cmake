@@ -477,7 +477,15 @@ if(GENERATE_SYM_KERNELS)
     #  2. llvm-link QP .bc files + constmem .bc into one module
     #  3. Strip @llvm.compiler.used and @__hip_cuid_ via text round-trip
     #     (these AMDGCN addrspace(1) appending globals clash with the
-    #     host-side addrspace(0) equivalents in fat-object compilation)
+    #     host-side addrspace(0) equivalents in fat-object compilation),
+    #     and weaken this module's externally_initialized __constant__
+    #     definitions (rocshmem::constmem, rocshmem::logd_constants) to
+    #     weak_odr. -mlink-builtin-bitcode copies them into every GIN
+    #     symmetric TU; those TUs used to land in separate fat binaries, but
+    #     now share one device.elf, so N strong definitions collide at the
+    #     ld.lld -shared step. Every copy comes from this same module and is
+    #     a zeroinitializer, so folding them to one is what the unified image
+    #     wants: a single symbol for the host to write at init.
     set(_cm_src "${CMAKE_SOURCE_DIR}/src/gin/gin_rocshmem_constmem.hip")
     set(_cm_bc  "${DEVICE_BUILD_DIR}/gin_rocshmem_constmem.bc")
     set(_qp_raw "${DEVICE_BUILD_DIR}/rocshmem_qp_raw.bc")
@@ -505,7 +513,9 @@ if(GENERATE_SYM_KERNELS)
         ${_cm_bc}
         -o ${_qp_raw}
       COMMAND ${_llvm_dis} -o ${_qp_raw}.ll ${_qp_raw}
-      COMMAND grep -v -E "@llvm[.]compiler[.]used|@__hip_cuid_"
+      COMMAND sed -E
+        -e "/@llvm[.]compiler[.]used|@__hip_cuid_/d"
+        -e "s/^(@[^ ]+ = )(protected |hidden )?addrspace\\(4\\) externally_initialized/\\1weak_odr \\2addrspace(4) externally_initialized/"
         ${_qp_raw}.ll > ${_qp_raw}.clean.ll
       COMMAND ${_llvm_as} ${_qp_raw}.clean.ll -o ${_qp_bc}
       DEPENDS ${_cm_bc}

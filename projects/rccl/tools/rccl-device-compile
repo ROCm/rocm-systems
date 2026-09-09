@@ -1083,10 +1083,12 @@ def parse_compiler_flags(argv):
         elif arg == '-I' and i + 1 < len(argv):
             forwarded.extend(['-I', argv[i + 1]])
             i += 1
-        elif arg in ('-MF', '-MT', '-MQ') and i + 1 < len(argv):
+        elif arg in ('-MF', '-MT', '-MQ', '-Xclang', '-mllvm', '-include') and i + 1 < len(argv):
             # These take a following value (path/target name) that doesn't
             # start with '-' and would otherwise be misparsed as a
-            # positional source/object file.
+            # positional source/object file. -Xclang in particular is how
+            # DeviceLinker.cmake passes -mlink-builtin-bitcode <file.bc> for
+            # the GIN symmetric kernels.
             forwarded.extend([arg, argv[i + 1]])
             i += 1
         elif arg.startswith('-'):

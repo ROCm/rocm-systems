@@ -51,6 +51,22 @@ class EmitDeviceObjFlagParsingTest(unittest.TestCase):
              "--keep-temps", "-o", "out.o"],
         )
 
+    def test_xclang_value_is_not_mistaken_for_the_source(self):
+        """-Xclang -mlink-builtin-bitcode -Xclang <file.bc> (how the GIN
+        symmetric kernels get the rocSHMEM QueuePair bitcode) must forward
+        whole; the .bc path does not start with '-' and would otherwise be
+        collected as a positional source."""
+        our_args, forwarded, sources = rdc.parse_compiler_flags([
+            "--emit-device-obj", "--arch=gfx950",
+            "-Xclang", "-mlink-builtin-bitcode", "-Xclang", "qp.bc",
+            "-o", "out.o", "in.cu.cpp",
+        ])
+        self.assertEqual(
+            forwarded,
+            ["-Xclang", "-mlink-builtin-bitcode", "-Xclang", "qp.bc"],
+        )
+        self.assertEqual(sources, ["in.cu.cpp"])
+
 
 class EmitDeviceObjModeDispatchTest(unittest.TestCase):
     """main() requires --arch/-o/a source for --emit-device-obj, same as --compile."""
