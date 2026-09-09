@@ -227,6 +227,9 @@ std::string GetAdjacentThunkLibraryPath(const std::string& library_name) {
       HSAKMT_PFN(hsaKmtAllocMemoryAlign) = (HSAKMT_DEF(hsaKmtAllocMemoryAlign)*)rocr::os::GetExportAddress(thunk_handle, "hsaKmtAllocMemoryAlign");
       if (HSAKMT_PFN(hsaKmtAllocMemoryAlign) == nullptr) goto LOAD_ERROR;
 
+      HSAKMT_PFN(hsaKmtAllocMemoryHostGtt) = (HSAKMT_DEF(hsaKmtAllocMemoryHostGtt)*)rocr::os::GetExportAddress(thunk_handle, "hsaKmtAllocMemoryHostGtt");
+      if (HSAKMT_PFN(hsaKmtAllocMemoryHostGtt) == nullptr) goto LOAD_ERROR;
+
       HSAKMT_PFN(hsaKmtFreeMemory) = (HSAKMT_DEF(hsaKmtFreeMemory)*)rocr::os::GetExportAddress(thunk_handle, "hsaKmtFreeMemory");
       if (HSAKMT_PFN(hsaKmtFreeMemory) == nullptr) goto LOAD_ERROR;
 
@@ -549,6 +552,7 @@ LOAD_ERROR:
       HSAKMT_PFN(hsaKmtSetMemoryPolicy) = (HSAKMT_DEF(hsaKmtSetMemoryPolicy)*)(&hsaKmtSetMemoryPolicy);
       HSAKMT_PFN(hsaKmtAllocMemory) = (HSAKMT_DEF(hsaKmtAllocMemory)*)(&hsaKmtAllocMemory);
       HSAKMT_PFN(hsaKmtAllocMemoryAlign) = (HSAKMT_DEF(hsaKmtAllocMemoryAlign)*)(&hsaKmtAllocMemoryAlign);
+      HSAKMT_PFN(hsaKmtAllocMemoryHostGtt) = (HSAKMT_DEF(hsaKmtAllocMemoryHostGtt)*)(&hsaKmtAllocMemoryHostGtt);
       HSAKMT_PFN(hsaKmtFreeMemory) = (HSAKMT_DEF(hsaKmtFreeMemory)*)(&hsaKmtFreeMemory);
       HSAKMT_PFN(hsaKmtAvailableMemory) = (HSAKMT_DEF(hsaKmtAvailableMemory)*)(&hsaKmtAvailableMemory);
       HSAKMT_PFN(hsaKmtRegisterMemory) = (HSAKMT_DEF(hsaKmtRegisterMemory)*)(&hsaKmtRegisterMemory);

@@ -487,6 +487,23 @@ hsaKmtAllocMemoryAlignCtx(
     );
 
 /**
+  Allocates host system memory with an explicit GTT anchor GPU.
+  PreferredNode selects the CPU NUMA node; GttAnchorNode selects the GPU
+  KFD node used for the GTT buffer object.
+*/
+
+HSAKMT_STATUS
+HSAKMTAPI
+hsaKmtAllocMemoryHostGttCtx(
+    HsaKFDContext     *ctx,                  //IN
+    HSAuint32         PreferredNode,          //IN (CPU NUMA node)
+    HSAuint32         GttAnchorNode,          //IN (GPU KFD node for GTT BO)
+    HSAuint64         SizeInBytes,            //IN  (multiple of page size)
+    HsaMemFlags       MemFlags,               //IN
+    void**            MemoryAddress           //IN/OUT (page-aligned)
+    );
+
+/**
   Frees a memory buffer
 */
 

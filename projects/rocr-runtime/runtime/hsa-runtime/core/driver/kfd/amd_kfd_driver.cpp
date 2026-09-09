@@ -366,14 +366,23 @@ hsa_status_t KfdDriver::AllocateMemory(const core::MemoryRegion& mem_region,
   const uint32_t node_id = has_agent_node_id && allocation_uses_agent_node
       ? agent_node_id
       : m_region.owner()->node_id();
+  // Host allocation anchored on a caller-selected GPU: node_id stays the CPU NUMA node.
+  const bool host_gtt_anchor =
+      has_agent_node_id && (alloc_flags & core::MemoryRegion::AllocateHostGttAnchor) != 0;
 
   //// Allocate memory.
   //// If it fails attempt to release memory from the block allocator and retry.
 
-  auto status = HSAKMT_CALL(hsaKmtAllocMemory(node_id, size, kmt_alloc_flags, &mem));
+  auto alloc_memory = [&]() {
+    return host_gtt_anchor ? HSAKMT_CALL(hsaKmtAllocMemoryHostGtt(node_id, agent_node_id, size,
+                                                                  kmt_alloc_flags, &mem))
+                           : HSAKMT_CALL(hsaKmtAllocMemory(node_id, size, kmt_alloc_flags, &mem));
+  };
+
+  auto status = alloc_memory();
   if (status == HSAKMT_STATUS_NO_MEMORY) {
     m_region.owner()->Trim();
-    status = HSAKMT_CALL(hsaKmtAllocMemory(node_id, size, kmt_alloc_flags, &mem));
+    status = alloc_memory();
   }
   if (status == HSAKMT_STATUS_SUCCESS) {
     if (kmt_alloc_flags.ui32.NoAddress) {

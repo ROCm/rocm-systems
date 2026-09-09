@@ -112,6 +112,9 @@ class MemoryRegion : public Checked<0x9C961F19EE175BB3> {
     AllocateExecutableBlitKernelObject = (1 << 12),
     AllocateQueueObject = (1 << 13),  // Allocates AQL queue object, KMD requires physical access for the fence update
     AllocateCodeObject = (1 << 14),
+    // CPU host VMM: pass GTT anchor GPU node_id via agent_node_id; PreferredNode
+    // stays the CPU NUMA node (see hsaKmtAllocMemoryHostGtt).
+    AllocateHostGttAnchor = (1 << 15),
   };
 
   typedef uint32_t AllocateFlags;

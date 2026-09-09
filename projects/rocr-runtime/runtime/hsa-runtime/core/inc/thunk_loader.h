@@ -153,6 +153,11 @@ class ThunkLoader {
                                       HSAuint64 Alignment, \
                                       HsaMemFlags emFlags, \
                                       void** MemoryAddress);
+    typedef HSAKMT_STATUS (HSAKMT_DEF(hsaKmtAllocMemoryHostGtt))(HSAuint32 PreferredNode, \
+                                      HSAuint32 GttAnchorNode, \
+                                      HSAuint64 SizeInBytes, \
+                                      HsaMemFlags MemFlags, \
+                                      void** MemoryAddress);
     typedef HSAKMT_STATUS (HSAKMT_DEF(hsaKmtFreeMemory))(void* MemoryAddress, \
                                       HSAuint64 SizeInBytes);
     typedef HSAKMT_STATUS (HSAKMT_DEF(hsaKmtAvailableMemory))(HSAuint32 Node, \
@@ -477,6 +482,7 @@ class ThunkLoader {
     HSAKMT_DEF(hsaKmtSetMemoryPolicy)* HSAKMT_PFN(hsaKmtSetMemoryPolicy);
     HSAKMT_DEF(hsaKmtAllocMemory)* HSAKMT_PFN(hsaKmtAllocMemory);
     HSAKMT_DEF(hsaKmtAllocMemoryAlign)* HSAKMT_PFN(hsaKmtAllocMemoryAlign);
+    HSAKMT_DEF(hsaKmtAllocMemoryHostGtt)* HSAKMT_PFN(hsaKmtAllocMemoryHostGtt);
     HSAKMT_DEF(hsaKmtFreeMemory)* HSAKMT_PFN(hsaKmtFreeMemory);
     HSAKMT_DEF(hsaKmtAvailableMemory)* HSAKMT_PFN(hsaKmtAvailableMemory);
     HSAKMT_DEF(hsaKmtRegisterMemory)* HSAKMT_PFN(hsaKmtRegisterMemory);

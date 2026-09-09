@@ -4387,25 +4387,28 @@ hsa_status_t Runtime::VMemoryHandleCreate(const MemoryRegion* region, size_t siz
   std::lock_guard<std::shared_mutex> lock(memory_lock_);
   core::DriverMemoryHandle driver_handle = {};
 
-  hsa_status_t status = region->Allocate(size, alloc_flags, 0, &driver_handle);
+  auto agentOwner = region->owner();
+
+  /* For CPU-owned memory, DRM operations require a GPU agent. Select
+  the first available GPU agent before calling CreateShareableHandle.
+  For device memory, use owner agent. */
+  core::Agent* agent_for_drm = agentOwner;
+  core::Agent* drm_owner = nullptr;
+  if (agentOwner->device_type() == core::Agent::DeviceType::kAmdCpuDevice) {
+    agent_for_drm = core::Runtime::runtime_singleton_->LowestDrmMinorGpu();
+    if (agent_for_drm == nullptr) {
+      return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
+    }
+    drm_owner = agent_for_drm;
+    /* Anchor the host GTT buffer object on the same GPU used for DRM import. */
+    alloc_flags |= MemoryRegion::AllocateHostGttAnchor;
+  }
+
+  hsa_status_t status = region->Allocate(size, alloc_flags,
+                                         drm_owner ? drm_owner->node_id() : 0, &driver_handle);
   if (status == HSA_STATUS_SUCCESS) {
     // TODO: Combine the Allocate and CreateShareableHandle into a single function.
     uint64_t offset;
-    auto agentOwner = region->owner();
-
-    /* For CPU-owned memory, DRM operations require a GPU agent. Select
-    the first available GPU agent before calling CreateShareableHandle.
-    For device memory, use owner agent. */
-    core::Agent* agent_for_drm = agentOwner;
-    core::Agent* drm_owner = nullptr;
-    if (agentOwner->device_type() == core::Agent::DeviceType::kAmdCpuDevice) {
-      agent_for_drm = core::Runtime::runtime_singleton_->LowestDrmMinorGpu();
-      if (agent_for_drm == nullptr) {
-        region->Free(driver_handle);
-        return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
-      }
-      drm_owner = agent_for_drm;
-    }
 
     // alloc_handle goes in as the allocation handle and is transformed in place into the shareable
     // memory handle. This lets the driver recover the allocation from its native id (no virtual

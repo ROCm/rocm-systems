@@ -39,6 +39,11 @@
 
 #include "fmm.h"
 
+/* Set by hsaKmtAllocMemoryHostGttCtx while calling hsaKmtAllocMemoryAlignCtx.
+ * Per-thread so a concurrent allocation on another thread is unaffected.
+ */
+static __thread uint32_t hsakmt_host_gtt_gpu_override;
+
 HSAKMT_STATUS HSAKMTAPI hsaKmtSetMemoryPolicyCtx(HsaKFDContext *ctx,
 						  HSAuint32 Node,
 					      HSAuint32 DefaultPolicy,
@@ -190,6 +195,9 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtAllocMemoryAlignCtx(HsaKFDContext *ctx,
 		/* If allocate VRAM under ZFB mode */
 		if (hsakmt_zfb_support && gpu_id && MemFlags.ui32.NonPaged == 1)
 			MemFlags.ui32.CoarseGrain = 1;
+
+		if (!gpu_id && hsakmt_host_gtt_gpu_override)
+			gpu_id = hsakmt_host_gtt_gpu_override;
 
 		*MemoryAddress = hsakmt_fmm_allocate_host(ctx, gpu_id, MemFlags.ui32.GTTAccess ? 0 : PreferredNode,
 						   *MemoryAddress, SizeInBytes, Alignment, MemFlags);
@@ -760,6 +768,49 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtAvailableMemory(HSAuint32 Node,
 					  HSAuint64 *AvailableBytes)
 {
 	return hsaKmtAvailableMemoryCtx(&hsakmt_primary_kfd_ctx, Node, AvailableBytes);
+}
+
+HSAKMT_STATUS HSAKMTAPI hsaKmtAllocMemoryHostGttCtx(HsaKFDContext *ctx,
+						    HSAuint32 PreferredNode,
+						    HSAuint32 GttAnchorNode,
+						    HSAuint64 SizeInBytes,
+						    HsaMemFlags MemFlags,
+						    void **MemoryAddress)
+{
+	HSAKMT_STATUS result;
+	uint32_t preferred_gpu_id = 0;
+	uint32_t gtt_gpu_id = 0;
+
+	if (!GttAnchorNode)
+		return HSAKMT_STATUS_INVALID_PARAMETER;
+
+	result = hsakmt_validate_nodeid(ctx, PreferredNode, &preferred_gpu_id);
+	if (result != HSAKMT_STATUS_SUCCESS)
+		return result;
+	if (preferred_gpu_id != 0)
+		return HSAKMT_STATUS_INVALID_PARAMETER;
+
+	result = hsakmt_validate_nodeid(ctx, GttAnchorNode, &gtt_gpu_id);
+	if (result != HSAKMT_STATUS_SUCCESS)
+		return result;
+	if (!gtt_gpu_id)
+		return HSAKMT_STATUS_INVALID_PARAMETER;
+
+	hsakmt_host_gtt_gpu_override = gtt_gpu_id;
+	result = hsaKmtAllocMemoryAlignCtx(ctx, PreferredNode, SizeInBytes, 0, MemFlags,
+					   MemoryAddress);
+	hsakmt_host_gtt_gpu_override = 0;
+	return result;
+}
+
+HSAKMT_STATUS HSAKMTAPI hsaKmtAllocMemoryHostGtt(HSAuint32 PreferredNode,
+						 HSAuint32 GttAnchorNode,
+						 HSAuint64 SizeInBytes,
+						 HsaMemFlags MemFlags,
+						 void **MemoryAddress)
+{
+	return hsaKmtAllocMemoryHostGttCtx(&hsakmt_primary_kfd_ctx, PreferredNode,
+					   GttAnchorNode, SizeInBytes, MemFlags, MemoryAddress);
 }
 
 HSAKMT_STATUS HSAKMTAPI hsaKmtRegisterMemory(void *MemoryAddress,

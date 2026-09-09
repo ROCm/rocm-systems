@@ -143,6 +143,19 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtAllocMemory(HSAuint32 PreferredNode,
                                 MemoryAddress);
 }
 
+HSAKMT_STATUS HSAKMTAPI hsaKmtAllocMemoryHostGtt(HSAuint32 PreferredNode,
+                                                 HSAuint32 GttAnchorNode,
+                                                 HSAuint64 SizeInBytes,
+                                                 HsaMemFlags MemFlags,
+                                                 void **MemoryAddress) {
+  CHECK_DXG_OPEN();
+
+  if (!GttAnchorNode || !MemoryAddress)
+    return HSAKMT_STATUS_INVALID_PARAMETER;
+
+  return HSAKMT_STATUS_NOT_SUPPORTED;
+}
+
 #define POWER_OF_2(x) ((x && (!(x & (x - 1)))) ? 1 : 0)
 
 bool isSystemMemoryAvailable(HSAuint64 SizeInBytes) {
