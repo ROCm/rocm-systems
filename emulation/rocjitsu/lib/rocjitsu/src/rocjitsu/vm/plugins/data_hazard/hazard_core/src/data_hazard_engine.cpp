@@ -1209,6 +1209,25 @@ void DataHazardEngine::handle_lds_access(EngineWaveState &wave, const EngineInst
   }
 
   if (event.is_write && local_write_wait == WaitCntType::TENSOR) {
+    // WAW: an earlier DScnt-tracked LDS write (e.g. a ds_store) to an overlapping
+    // address may still be in flight. It retires on a different counter than this
+    // tensor DMA, so without an intervening s_wait_dscnt the two writes are unordered
+    // and the ds_store can land after the DMA and clobber the tensor data. The read
+    // path scans both write FIFOs for RAW; the write path must do the same for WAW.
+    if (const auto *pending = hazard_core::find_pending_lds_write(&wave.core, address, size)) {
+      hazard_core::LdsHazardKey key{pending->instruction_id, current_id};
+      if (!wave.core.reported_lds_hazards.count(key)) {
+        wave.core.reported_lds_hazards.insert(key);
+        std::ostringstream resource;
+        resource << "LDS address 0x" << std::hex << address << " (size " << std::dec << size << ")";
+        const std::string message =
+            format_pending_message("WAW", resource.str(), "written", "write", *pending);
+        record_warning(ctx, event, HazardKind::WAW, ResourceKind::LocalMemory,
+                       HazardAccessKind::Write, 0, address, size, pending->wait_type, *pending,
+                       get_pending_raw_isa(wave, pending->instruction_id), pending->pc, message,
+                       lds_write_suggestion(instruction_formatter(), pending->wait_type));
+      }
+    }
     track_pending_raw_isa(wave, ctx);
     hazard_core::track_tensor_lds(&wave.core, current_id, ctx.pc, address, size);
   }
