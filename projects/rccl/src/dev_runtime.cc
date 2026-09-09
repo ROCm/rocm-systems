@@ -290,7 +290,8 @@ ncclResult_t ncclDevrFinalize(struct ncclComm* comm) {
       if (!rcclSkipLsaFlatAddressFree()) {
         CUCHECKGOTO(cuMemAddressFree(flatAddr, flatBytes), fatalRet, cleanup);
       } else {
-        INFO(NCCL_INIT, "ncclDevrFinalize: skipping lsaFlatBase cuMemAddressFree (temporary gfx1250/NCCL_CUMEM_SKIP_FREE; VA unreclaimed until exit)");
+        INFO(NCCL_INIT, "ncclDevrFinalize: skipping lsaFlatBase cuMemAddressFree "
+             "(temporary gfx1250/NCCL_CUMEM_SKIP_FREE; VA unreclaimed until exit)");
       }
     }
     ncclSpaceDestruct(&devr->bigSpace);

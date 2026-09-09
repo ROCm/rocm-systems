@@ -105,6 +105,7 @@ TEST_F(SymMemoryObtainTest, DestroyIsIdempotentWhileAnotherMemoryIsLinked) {
   EXPECT_EQ(second->next, nullptr);
   symMemoryDestroy(comm, first);
   EXPECT_EQ(comm->devrState.memHead, second);
+  EXPECT_EQ(second->next, nullptr);
 
   symMemoryDestroy(comm, second);
   EXPECT_EQ(comm->devrState.memHead, nullptr);
@@ -168,7 +169,9 @@ TEST_F(DevrFinalizeDrainTest, FinalizeDrainsLeftoverMemory) {
 TEST(SkipCuMemFreePolicy, IsolatedArchAndEnvBranches) {
   using RcclUnitTesting::ProcessIsolatedTestRunner;
 
-  auto drainAndCountAddressFree = []() {
+  // Return false on precondition failure so ASSERT_* does not return from this
+  // helper and skip the caller's AddressFree-count check.
+  auto drainAndCountAddressFree = []() -> bool {
     auto commStorage = std::make_unique<ncclComm>();
     auto peerStorage = std::make_unique<ncclPeerInfo>();
     ncclComm* comm = commStorage.get();
@@ -183,14 +186,17 @@ TEST(SkipCuMemFreePolicy, IsolatedArchAndEnvBranches) {
     peerStorage->totalGlobalMem = 1 << 20;
     comm->peerInfo = peerStorage.get();
 
-    ASSERT_EQ(ncclDevrInitOnce(comm), ncclSuccess);
+    if (ncclDevrInitOnce(comm) != ncclSuccess) return false;
     hipMemGenericAllocationHandle_t memHandle = reinterpret_cast<hipMemGenericAllocationHandle_t>(0x1);
     struct ncclDevrMemory* mem = nullptr;
-    ASSERT_EQ(symMemoryObtain(comm, &memHandle, 1, reinterpret_cast<void*>(0x100000), 4096, 0, &mem),
-              ncclSuccess);
+    if (symMemoryObtain(comm, &memHandle, 1, reinterpret_cast<void*>(0x100000), 4096, 0, &mem) !=
+        ncclSuccess) {
+      return false;
+    }
     rcclTestHipMemAddressFreeCount = 0;
-    ASSERT_EQ(ncclDevrFinalize(comm), ncclSuccess);
+    if (ncclDevrFinalize(comm) != ncclSuccess) return false;
     EXPECT_EQ(comm->devrState.memHead, nullptr);
+    return true;
   };
 
   RUN_ISOLATED_TESTS(
@@ -199,7 +205,7 @@ TEST(SkipCuMemFreePolicy, IsolatedArchAndEnvBranches) {
           [&]() {
             EXPECT_FALSE(rcclSkipCuMemFree());
             EXPECT_FALSE(rcclSkipLsaFlatAddressFree());
-            drainAndCountAddressFree();
+            ASSERT_TRUE(drainAndCountAddressFree());
             EXPECT_EQ(rcclTestHipMemAddressFreeCount, 1);
           })
           .setVariable("NCCL_CUMEM_SKIP_FREE", "0")
@@ -209,7 +215,7 @@ TEST(SkipCuMemFreePolicy, IsolatedArchAndEnvBranches) {
           [&]() {
             EXPECT_TRUE(rcclSkipCuMemFree());
             EXPECT_TRUE(rcclSkipLsaFlatAddressFree());
-            drainAndCountAddressFree();
+            ASSERT_TRUE(drainAndCountAddressFree());
             EXPECT_EQ(rcclTestHipMemAddressFreeCount, 0);
           })
           .setVariable("NCCL_CUMEM_SKIP_FREE", "1")
@@ -219,7 +225,7 @@ TEST(SkipCuMemFreePolicy, IsolatedArchAndEnvBranches) {
           [&]() {
             EXPECT_TRUE(rcclSkipCuMemFree());
             EXPECT_FALSE(rcclSkipLsaFlatAddressFree());
-            drainAndCountAddressFree();
+            ASSERT_TRUE(drainAndCountAddressFree());
             EXPECT_EQ(rcclTestHipMemAddressFreeCount, 1);
           })
           .setVariable("RCCL_TEST_GCN_ARCH", "gfx950")
@@ -229,7 +235,7 @@ TEST(SkipCuMemFreePolicy, IsolatedArchAndEnvBranches) {
           [&]() {
             EXPECT_TRUE(rcclSkipCuMemFree());
             EXPECT_TRUE(rcclSkipLsaFlatAddressFree());
-            drainAndCountAddressFree();
+            ASSERT_TRUE(drainAndCountAddressFree());
             EXPECT_EQ(rcclTestHipMemAddressFreeCount, 0);
           })
           .setVariable("RCCL_TEST_GCN_ARCH", "gfx1250")
@@ -239,7 +245,7 @@ TEST(SkipCuMemFreePolicy, IsolatedArchAndEnvBranches) {
           [&]() {
             EXPECT_FALSE(rcclSkipCuMemFree());
             EXPECT_FALSE(rcclSkipLsaFlatAddressFree());
-            drainAndCountAddressFree();
+            ASSERT_TRUE(drainAndCountAddressFree());
             EXPECT_EQ(rcclTestHipMemAddressFreeCount, 1);
           })
           .setVariable("RCCL_TEST_GCN_ARCH", "gfx900")

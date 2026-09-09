@@ -34,7 +34,6 @@
 #include <cstdarg>
 #include <cstdio>
 #include <cstdlib>
-#include <cstring>
 #include <sys/mman.h>
 
 // Count hipMemAddressFree for skip-on vs skip-off finalize tests.

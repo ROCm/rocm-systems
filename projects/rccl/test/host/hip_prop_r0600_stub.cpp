@@ -11,11 +11,10 @@
  * Override with RCCL_TEST_GCN_ARCH (e.g. gfx950, gfx1250).
  *************************************************************************/
 
-#include <hip/hip_runtime_api.h>
-
 #include <cstdio>
 #include <cstdlib>
-#include <cstring>
+
+#include <hip/hip_runtime_api.h>
 
 hipError_t hipGetDevicePropertiesR0600(hipDeviceProp_t* prop, int /*device*/) {
   if (prop == nullptr) return hipErrorInvalidValue;
