@@ -7,12 +7,9 @@
 #if defined(__clang__) && defined(__HIP__)
 typedef int v4i __attribute__((ext_vector_type(4)));
 typedef int v8i __attribute__((ext_vector_type(8)));
-__global__ void  TDM_load_store_tester([[maybe_unused]] const int* data,
-                                       [[maybe_unused]] int* result,
-                                       [[maybe_unused]] int sizex,
-                                       [[maybe_unused]] int sizey)
+__global__ void  TDM_load_store_tester(const int* data, int* result, int sizex, int sizey)
 {
-    #if defined(__gfx1250__) || defined(__gfx1251__)
+    if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_tensor_load_to_lds)) {
     __shared__ int shmem[10 * 10];
     auto* pShmem = static_cast<int*>(shmem);
     gfx1250_TDM_GROUP0 group0;
@@ -39,22 +36,18 @@ __global__ void  TDM_load_store_tester([[maybe_unused]] const int* data,
     group0.globalAddr((uintptr_t)result);
     __builtin_amdgcn_tensor_store_from_lds(group0.m_bitfield, group1.m_bitfield, v4i_zeros, v4i_zeros, v8i_zeros, 0);
     __builtin_amdgcn_s_wait_tensorcnt(0);
-
-    #endif // #if defined(__gfx1250__) || defined(__gfx1251__)
+    }
 }
 
 // General N-D (rank 2..5) load-to-LDS / store-from-LDS round trip. Rank is inferred by
 // hardware from the highest nonzero tile_dim field, so unused dims (e2/e3/e4 for lower
 // ranks) are simply left at their default-constructed zero value.
 template <int Rank, int TotalElems>
-__global__ void TDM_load_store_tester_nd([[maybe_unused]] const int* data,
-                                          [[maybe_unused]] int* result,
-                                          [[maybe_unused]] int e0, [[maybe_unused]] int e1,
-                                          [[maybe_unused]] int e2, [[maybe_unused]] int e3,
-                                          [[maybe_unused]] int e4)
+__global__ void TDM_load_store_tester_nd(const int* data, int* result, int e0, int e1, int e2,
+                                          int e3, int e4)
 {
     static_assert(Rank >= 2 && Rank <= 5, "Rank must be 2..5");
-    #if defined(__gfx1250__) || defined(__gfx1251__)
+    if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_tensor_load_to_lds)) {
     __shared__ int shmem[TotalElems];
     auto* pShmem = static_cast<int*>(shmem);
     gfx1250_TDM_GROUP0 group0;
@@ -100,8 +93,7 @@ __global__ void TDM_load_store_tester_nd([[maybe_unused]] const int* data,
     __builtin_amdgcn_tensor_store_from_lds(group0.m_bitfield, group1.m_bitfield, group2.m_bitfield,
                                             group3.m_bitfield, v8i_zeros, 0);
     __builtin_amdgcn_s_wait_tensorcnt(0);
-
-    #endif // #if defined(__gfx1250__) || defined(__gfx1251__)
+    }
 }
 
 // Verifies that stride setters spanning the 48-bit lo/hi split (GROUP1's dim0/dim1
@@ -109,13 +101,11 @@ __global__ void TDM_load_store_tester_nd([[maybe_unused]] const int* data,
 // correct SGPR without disturbing neighboring bitfields. Writes the raw SGPR words back
 // to global memory instead of issuing a real TDM op, since exercising the upper stride
 // bits with an actual transfer would require allocations spanning that address range.
-__global__ void TDM_stride_encoding_tester([[maybe_unused]] uint32_t* out,
-                                            [[maybe_unused]] uint64_t dim0_stride,
-                                            [[maybe_unused]] uint64_t dim1_stride,
-                                            [[maybe_unused]] uint64_t dim2_stride,
-                                            [[maybe_unused]] uint64_t dim3_stride)
+__global__ void TDM_stride_encoding_tester(uint32_t* out, uint64_t dim0_stride,
+                                            uint64_t dim1_stride, uint64_t dim2_stride,
+                                            uint64_t dim3_stride)
 {
-    #if defined(__gfx1250__) || defined(__gfx1251__)
+    if (__builtin_amdgcn_processor_is("gfx1250") || __builtin_amdgcn_processor_is("gfx1251")) {
     gfx1250_TDM_GROUP1 group1;
     group1.tensorDim0Stride(dim0_stride);
     group1.tensorDim1Stride(dim1_stride);
@@ -129,7 +119,7 @@ __global__ void TDM_stride_encoding_tester([[maybe_unused]] uint32_t* out,
     for (int i = 0; i < 8; ++i) out[i] = group1.m_bitfield[i];
     for (int i = 0; i < 4; ++i) out[8 + i] = group2.m_bitfield[i];
     for (int i = 0; i < 4; ++i) out[12 + i] = group3.m_bitfield[i];
-    #endif // #if defined(__gfx1250__) || defined(__gfx1251__)
+    }
 }
 
 static void SkipIfNotTDMCapable(const char* test_name) {
