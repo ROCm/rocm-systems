@@ -1611,6 +1611,53 @@ TEST_F(KfdIoctlTest, RuntimeDisableReportsProcessRuntimeTransition) {
   EXPECT_NE(queue_id & kQueueInvalid, 0u);
 }
 
+TEST_F(KfdIoctlTest, RuntimeEnableRetainsMaskedProcessEventUntilEnabled) {
+  const auto pid = static_cast<uint32_t>(getpid());
+  const int notifier = eventfd(0, EFD_CLOEXEC | EFD_NONBLOCK);
+  ASSERT_GE(notifier, 0);
+  debug_fds_.push_back(notifier);
+
+  kfd_ioctl_dbg_trap_args enable{};
+  enable.pid = pid;
+  enable.op = KFD_IOC_DBG_TRAP_ENABLE;
+  enable.enable.dbg_fd = notifier;
+  enable.enable.exception_mask = KFD_EC_MASK(EC_QUEUE_WAVE_ABORT);
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &enable), 0);
+
+  kfd_ioctl_runtime_enable_args runtime{};
+  runtime.mode_mask = KFD_RUNTIME_ENABLE_MODE_ENABLE_MASK;
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_RUNTIME_ENABLE, &runtime), 0);
+
+  uint64_t notifications = 0;
+  EXPECT_EQ(::read(notifier, &notifications, sizeof(notifications)), -1);
+  EXPECT_EQ(errno, EAGAIN);
+
+  kfd_ioctl_dbg_trap_args query{};
+  query.pid = pid;
+  query.op = KFD_IOC_DBG_TRAP_QUERY_DEBUG_EVENT;
+  EXPECT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &query), -EAGAIN);
+
+  kfd_ioctl_dbg_trap_args exceptions{};
+  exceptions.pid = pid;
+  exceptions.op = KFD_IOC_DBG_TRAP_SET_EXCEPTIONS_ENABLED;
+  exceptions.set_exceptions_enabled.exception_mask = KFD_EC_MASK(EC_PROCESS_RUNTIME);
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &exceptions), 0);
+
+  ASSERT_EQ(::read(notifier, &notifications, sizeof(notifications)),
+            static_cast<ssize_t>(sizeof(notifications)))
+      << strerror(errno);
+  EXPECT_EQ(notifications, 1u);
+
+  query.query_debug_event.exception_mask = KFD_EC_MASK(EC_PROCESS_RUNTIME);
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &query), 0);
+  EXPECT_NE(query.query_debug_event.exception_mask & KFD_EC_MASK(EC_PROCESS_RUNTIME), 0u);
+
+  kfd_ioctl_dbg_trap_args acknowledge{};
+  acknowledge.pid = pid;
+  acknowledge.op = KFD_IOC_DBG_TRAP_SEND_RUNTIME_EVENT;
+  EXPECT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &acknowledge), 0);
+}
+
 TEST_F(KfdIoctlTest, DbgTrapAttachDetachConfigOpsValidateAndResetState) {
   kfd_ioctl_runtime_enable_args rt{};
   rt.mode_mask = KFD_RUNTIME_ENABLE_MODE_ENABLE_MASK;
@@ -5057,8 +5104,8 @@ TEST_F(KfdIoctlCdna5Test, DbgTrapHandlerExceptionReportsExactMaskBeforeExplicitC
       << strerror(errno);
   EXPECT_EQ(notifications, 1u);
 
-  // Changing the subscription affects future exceptions, but cannot revoke
-  // the event that was already claimed and used to wake the debugger.
+  // Pending status is retained when its subscription is removed, but QUERY
+  // filters it until the matching bit is enabled again.
   kfd_ioctl_dbg_trap_args exceptions{};
   exceptions.pid = static_cast<uint32_t>(getpid());
   exceptions.op = KFD_IOC_DBG_TRAP_SET_EXCEPTIONS_ENABLED;
@@ -5069,6 +5116,17 @@ TEST_F(KfdIoctlCdna5Test, DbgTrapHandlerExceptionReportsExactMaskBeforeExplicitC
   query.pid = static_cast<uint32_t>(getpid());
   query.op = KFD_IOC_DBG_TRAP_QUERY_DEBUG_EVENT;
   query.query_debug_event.exception_mask = 0;
+  EXPECT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &query), -EAGAIN);
+
+  exceptions.set_exceptions_enabled.exception_mask = KFD_EC_MASK(EC_QUEUE_WAVE_ABORT);
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &exceptions), 0);
+  notifications = 0;
+  ASSERT_EQ(::read(notifier, &notifications, sizeof(notifications)),
+            static_cast<ssize_t>(sizeof(notifications)))
+      << strerror(errno);
+  EXPECT_EQ(notifications, 1u);
+
+  query.query_debug_event.exception_mask = kReportedExceptions;
   ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &query), 0);
   EXPECT_EQ(query.query_debug_event.queue_id, create.queue_id);
   EXPECT_EQ(query.query_debug_event.gpu_id, kCdna5GpuId);
@@ -5152,6 +5210,18 @@ TEST_F(KfdIoctlCdna5Test, DbgTrapHandlerExceptionReportsExactMaskBeforeExplicitC
   ASSERT_TRUE(runtime_notified.load(std::memory_order_acquire));
   exceptions.set_exceptions_enabled.exception_mask = KFD_EC_MASK(EC_QUEUE_WAVE_ABORT);
   ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &exceptions), 0);
+
+  notifications = 0;
+  ASSERT_EQ(::read(notifier, &notifications, sizeof(notifications)),
+            static_cast<ssize_t>(sizeof(notifications)))
+      << strerror(errno);
+  EXPECT_EQ(notifications, 1u);
+  const uint64_t runtime_reported_exceptions = kReportedExceptions | KFD_EC_MASK(EC_QUEUE_NEW);
+  query.query_debug_event.exception_mask = runtime_reported_exceptions;
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &query), 0);
+  EXPECT_EQ(query.query_debug_event.queue_id, runtime_queue.queue_id);
+  EXPECT_EQ(query.query_debug_event.exception_mask, runtime_reported_exceptions);
+
   cu->step();
 
   notifications = 0;
@@ -5174,9 +5244,9 @@ TEST_F(KfdIoctlCdna5Test, DbgTrapHandlerExceptionReportsExactMaskBeforeExplicitC
   ASSERT_NE(runtime_entry, runtime_entries.end());
   EXPECT_EQ(runtime_entry->exception_status & kReportedExceptions, 0u);
 
-  // Now force the enabled-to-disabled boundary inside trap completion. The
-  // sendmsg initially assigns the event to the debugger, then the one-shot
-  // hook removes its subscription immediately before publication validates it.
+  // Now remove the session inside trap completion. The sendmsg initially
+  // assigns the event to the debugger, but publication must fall back to ROCr
+  // after the detach wins the race.
   kfd_ioctl_create_queue_args rejected_queue = create;
   rejected_queue.ctx_save_restore_address = kRuntimeCwsrAddress;
   ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_CREATE_QUEUE, &rejected_queue), 0);
@@ -5187,7 +5257,7 @@ TEST_F(KfdIoctlCdna5Test, DbgTrapHandlerExceptionReportsExactMaskBeforeExplicitC
   runtime_notified.store(false, std::memory_order_release);
   exceptions.set_exceptions_enabled.exception_mask = KFD_EC_MASK(EC_QUEUE_WAVE_ABORT);
   ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &exceptions), 0);
-  driver_->set_debug_event_claim_mask_for_testing(0);
+  driver_->detach_debug_event_claim_for_testing();
   for (uint32_t i = 0; i < 8 && rejected_wave->pc != kTrapHandlerAddress + 5 * sizeof(uint32_t);
        ++i) {
     if (rejected_wave->pc == kTrapHandlerAddress + 4 * sizeof(uint32_t))
@@ -5202,6 +5272,9 @@ TEST_F(KfdIoctlCdna5Test, DbgTrapHandlerExceptionReportsExactMaskBeforeExplicitC
   EXPECT_EQ(::read(notifier, &notifications, sizeof(notifications)), -1);
   EXPECT_EQ(errno, EAGAIN);
   EXPECT_FALSE(rejected_wave->debug_halted());
+
+  enable.enable.exception_mask = KFD_EC_MASK(EC_QUEUE_WAVE_ABORT);
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &enable), 0);
 
   std::array<kfd_queue_snapshot_entry, 3> rejected_entries{};
   runtime_snapshot.queue_snapshot.snapshot_buf_ptr =
@@ -5904,6 +5977,16 @@ TEST_F(KfdIoctlTest, DbgTrapSingleStepReportsWhilePeerWaveRuns) {
 
   exceptions.set_exceptions_enabled.exception_mask = KFD_EC_MASK(EC_QUEUE_WAVE_TRAP);
   ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &exceptions), 0);
+
+  uint64_t retained_notifications = 0;
+  ASSERT_EQ(::read(notifier, &retained_notifications, sizeof(retained_notifications)),
+            static_cast<ssize_t>(sizeof(retained_notifications)))
+      << strerror(errno);
+  EXPECT_EQ(retained_notifications, 1u);
+  rejected_query.query_debug_event.exception_mask = KFD_EC_MASK(EC_QUEUE_WAVE_TRAP);
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &rejected_query), 0);
+  EXPECT_NE(rejected_query.query_debug_event.exception_mask & KFD_EC_MASK(EC_QUEUE_WAVE_TRAP), 0u);
+
   stepping->set_debug_single_step(true);
 
   for (uint32_t step = 0; step < kStepCount; ++step) {

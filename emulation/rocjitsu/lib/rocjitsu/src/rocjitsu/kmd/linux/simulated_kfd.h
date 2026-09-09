@@ -176,6 +176,11 @@ public:
   /// order that production event publication never takes.
   void set_debug_event_claim_mask_for_testing(uint64_t exception_mask);
 
+  /// @brief Remove the debug session at the next event-publication boundary.
+  /// @details One-shot test seam for detach racing trap completion after the
+  /// event was initially assigned to the debugger.
+  void detach_debug_event_claim_for_testing();
+
   /// @brief Exercise the CWSR-layout publication gate without constructing a wave.
   /// @details Used to drive concurrent unsupported-target checks under TSAN.
   [[nodiscard]] bool debug_stop_publishable_for_testing(uint32_t gpu_id) {
@@ -439,7 +444,7 @@ private:
   void reap_exited_debug_sessions(std::stop_token stop);
   int debug_device_snapshot(kfd_ioctl_dbg_trap_device_snapshot_args &args);
   int debug_queue_snapshot(KfdProcess *target, kfd_ioctl_dbg_trap_queue_snapshot_args &args);
-  int debug_query_event(pid_t target_pid, KfdProcess *target_proc,
+  int debug_query_event(pid_t target_pid, KfdProcess *target_proc, uint64_t enabled_mask,
                         kfd_ioctl_dbg_trap_query_debug_event_args &args);
   int debug_query_exception_info(pid_t target_pid,
                                  kfd_ioctl_dbg_trap_query_exception_info_args &args);
@@ -461,9 +466,8 @@ private:
                                       uint64_t exception_mask);
 
   bool on_wave_single_step_complete(amdgpu::Wavefront &wf);
-  void apply_debug_event_claim_mask_for_testing(pid_t target_pid);
+  void apply_debug_event_claim_mask_for_testing(const std::shared_ptr<KfdProcess> &proc);
   [[nodiscard]] bool notify_debug_event(const std::shared_ptr<KfdProcess> &proc, uint32_t queue_id,
-                                        uint32_t gpu_id,
                                         uint64_t exception_mask = KFD_EC_MASK(EC_QUEUE_WAVE_TRAP));
   /// @brief Publish a wave stop: serialize the queue, then wake the debugger.
   /// @returns True if the CWSR record was written and the event raised. On
@@ -627,13 +631,14 @@ private:
   std::unordered_map<pid_t, KfdProcess::DebugSession> debug_sessions_;
   DebugIdentityValidationHook debug_identity_validation_hook_;
   std::optional<uint64_t> debug_event_claim_mask_for_testing_;
+  bool debug_event_claim_detach_for_testing_ = false;
   std::condition_variable_any debug_sessions_cv_;
   std::jthread debug_session_reaper_;
 
-  /// @brief Pending debug exceptions per target, grouped by queue.
-  /// @details Populated by wave traps (engine thread) and drained by
-  /// KFD_IOC_DBG_TRAP_QUERY_DEBUG_EVENT (ioctl thread). Never held together
-  /// with debug_sessions_mutex_ by the wave-trap path (lock ordering).
+  /// @brief Pending non-queue debug exceptions per target and source.
+  /// @details Queue exceptions live in QueueSnapshotInfo::exception_status,
+  /// matching KFD's single authoritative status word. This table retains
+  /// process and device exceptions for KFD_IOC_DBG_TRAP_QUERY_DEBUG_EVENT.
   struct DebugQueueException {
     uint32_t gpu_id = 0;
     uint64_t mask = 0;
