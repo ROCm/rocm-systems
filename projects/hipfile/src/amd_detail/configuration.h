@@ -44,6 +44,10 @@ public:
     /// permitted (default)
     virtual bool unsupportedFileSystems() const noexcept;
 
+    /// @brief Gets the size of the async buffer used for I/O operations
+    /// @return the size of the async buffer in bytes
+    virtual size_t asyncBufferSize() const noexcept;
+
     /// @brief Checks if the host backend is enabled
     /// @return true if the host backend is enabled, false otherwise
     virtual bool host() const noexcept;

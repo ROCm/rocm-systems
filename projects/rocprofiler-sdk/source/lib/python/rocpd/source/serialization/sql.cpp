@@ -28,22 +28,26 @@
 
 namespace cereal
 {
-SQLite3InputArchive::SQLite3InputArchive(sqlite3*         conn,
-                                         std::string_view query,
-                                         int64_t          len,
-                                         int64_t          chunk_len)
+SQLite3InputArchive::SQLite3InputArchive(sqlite3*               conn,
+                                         std::string_view       query,
+                                         std::optional<int64_t> len,
+                                         int64_t                chunk_len,
+                                         bool                   expect_valid_query)
 : InputArchive<SQLite3InputArchive>{this}
 , m_conn{conn}
-, m_row_count{(len > 0) ? len : getRowCount(conn, query)}
+, m_row_count{(len.has_value()) ? len.value() : getRowCount(conn, query)}
 , m_chunk_size{chunk_len}
 , m_query{query}
 , m_iterator{this}
 {
-    ROCP_CI_LOG_IF(ERROR,
-                   sqlite3_prepare_v2(m_conn, m_query.c_str(), -1, &m_stmt, nullptr) != SQLITE_OK)
-        << "Error preparing select statement: " << sqlite3_errmsg(m_conn);
+    if(m_row_count > 0 || expect_valid_query)
+    {
+        ROCP_CI_LOG_IF(
+            ERROR, sqlite3_prepare_v2(m_conn, m_query.c_str(), -1, &m_stmt, nullptr) != SQLITE_OK)
+            << "Error preparing select statement: " << sqlite3_errmsg(m_conn);
 
-    ROCP_CI_LOG_IF(ERROR, m_stmt == nullptr) << "Error preparing statement: " << query;
+        ROCP_CI_LOG_IF(ERROR, m_stmt == nullptr) << "Error preparing statement: " << query;
+    }
 
     if(!m_stmt) return;
 
@@ -132,7 +136,7 @@ SQLite3InputArchive::search(std::string_view _col_name)
             _names.emplace_back(citr.first);
         auto _msg = fmt::format("SQL query '{}' does not contain a column named '{}'. Columns: {}",
                                 m_query,
-                                m_next_name,
+                                _col_name,
                                 fmt::join(_names.begin(), _names.end(), ", "));
         ROCP_WARNING << _msg;
         throw Exception(_msg);
@@ -141,13 +145,13 @@ SQLite3InputArchive::search(std::string_view _col_name)
 }
 
 int64_t
-SQLite3InputArchive::search(std::string_view _col_name, std::nothrow_t)
+SQLite3InputArchive::search(std::string_view _col_name, std::nothrow_t, bool quiet)
 {
     auto itr = m_column_names.find(_col_name.data());
     if(itr == m_column_names.end())
     {
-        ROCP_WARNING << fmt::format(
-            "SQL query '{}' does not contain a column named '{}'", m_query, m_next_name);
+        ROCP_WARNING_IF(!quiet) << fmt::format(
+            "SQL query '{}' does not contain a column named '{}'", m_query, _col_name);
         return -1;
     }
     return itr->second;
@@ -164,6 +168,6 @@ SQLite3InputArchive::search()
 int64_t
 SQLite3InputArchive::getRowCount(sqlite3* conn, std::string_view query)
 {
-    return impl::extract_row_count(conn, query);
+    return impl::extract_row_count<false>(conn, query);
 }
 }  // namespace cereal

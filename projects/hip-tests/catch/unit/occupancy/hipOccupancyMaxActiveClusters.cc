@@ -77,7 +77,7 @@ TEST_CASE("Unit_hipOccupancyMaxActiveClusters_Positive_RangeValidation") {
       hipOccupancyMaxActiveClusters(&clustersNoLDS, reinterpret_cast<const void*>(f1), &config));
   INFO("occupancy with no shared memory: " << clustersNoLDS);
 
-  numXCDs = 8;
+  HIP_CHECK(hipDeviceGetAttribute(&numXCDs, hipDeviceAttributeNumberOfXccs, 0));
   sePerXCD = 2;
   totalSE = numXCDs * sePerXCD;
   maxInFlightClusterPerSPI = 15;

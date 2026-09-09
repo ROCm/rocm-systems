@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
-# Copyright (C) Advanced Micro Devices. All rights reserved.
+# Copyright Advanced Micro Devices, Inc.
+# SPDX-License-Identifier: MIT
+
 """Start, supervise, and stop GPU Agent + Device Metrics Exporter.
 
 Replaces three inline ``run:`` blocks (start gpuagent, start DME,

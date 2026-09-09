@@ -28,9 +28,11 @@
 #include <rocprofiler-sdk/experimental/thread-trace/trace_decoder.h>
 
 #include <algorithm>
+#include <array>
 #include <fstream>
 #include <iostream>
 #include <map>
+#include <memory>
 #include <vector>
 
 namespace rocprofiler

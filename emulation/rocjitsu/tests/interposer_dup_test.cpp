@@ -21,9 +21,9 @@ RJ_DIAGNOSTIC_PUSH
 RJ_DIAGNOSTIC_IGNORE_PEDANTIC
 // Use the checked-in UAPI because older system libdrm headers do not expose the
 // GEM_VA timeline fields exercised by these tests.
-#include "linux/uapi/drm/amdgpu_drm.h"
-#include "linux/uapi/drm/drm.h"
 #include "linux/uapi/kfd_ioctl.h"
+#include <libdrm/amdgpu_drm.h>
+#include <libdrm/drm.h>
 RJ_DIAGNOSTIC_POP
 
 #include <gtest/gtest.h>

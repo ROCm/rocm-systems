@@ -13,17 +13,16 @@
 #include <string>
 #include <vector>
 
+#include "env_fakes.h"    // micro_getenv / SetMicroEnv / ClearMicroEnv (shared)
 #include "hip_fakes.h"
 #include "nccl_fakes.h"
 #include "os.h"  // ncclAffinity, for the initTransportsRank affinity seams below
+#include "rccl_wrap_fakes.h"  // src/rccl_wrap.cc seams (shared)
+#include "recorder_fakes.h"  // rccl::Recorder no-ops (shared)
+#include "transport_stubs.h"  // g_rcclUseAinic (shared)
+#include "tuning_fakes.h"  // g_tuningIndexValue / g_tuningIndexLastArch (shared)
 
 struct ncclTopoSystem;
-
-// Returns a pointer into the map's own std::string: re-scripting a name invalidates a pointer a caller may still hold.
-const char* micro_getenv(const char* name);
-void SetMicroEnv(const char* name, const char* value);
-void SetMicroEnvAbsent(const char* name);
-void ClearMicroEnv();
 
 void SetGethostnameFail(bool fail);
 void SetDladdrFail(bool fail);
@@ -43,6 +42,23 @@ extern int g_firmwareVersion;
 
 extern int g_gdrSupportValue;
 extern int g_gdrSupportCalls;
+
+// fillInfo's MLOPart PCI-function fallback (init.cc:1092) probes sysfs for the class of its own BDF.
+// The default is an accelerator class, i.e. what sysfs reports for a real GPU's own BDF; a test that
+// wants the HIP-alias shape (BDF absent from sysfs, so the probe yields nothing) must ask for "".
+// The call counter is the only way to see that the fn check short-circuited before the probe.
+// See kDefaultPciDeviceClass in init_fakes.cc for why the default is not "".
+extern std::string g_pciDeviceClass;
+extern int g_pciDeviceClassCalls;
+extern std::string g_lastPciDeviceClassBusId;
+
+// fillInfo asks the physical device for its compute partition mode before falling back to the class
+// probe above. The default is "SPX", i.e. an unpartitioned GPU. Set "CPX"/"DPX" for a partitioned
+// device, or "" for a platform that reports no mode at all. The recorded busId is how a test sees
+// that the probe targeted function 0 rather than the caller's own alias BDF.
+extern std::string g_pciComputePartition;
+extern int g_pciComputePartitionCalls;
+extern std::string g_lastPciComputePartitionBusId;
 
 extern bool g_bootstrapNetInitFail;
 
@@ -97,8 +113,8 @@ extern std::function<ncclResult_t(struct ncclComm*, struct ncclTopoSystem**, con
 // ncclTopoGetSystem played for rung 1. ncclTopoComputePaths gets a FailAt index rather than a result
 // because :1591 and :1596 call it twice and a single knob cannot separate them.
 // -------------------------------------------------------------------------
-extern int g_tuningIndexValue;
-extern std::string g_tuningIndexLastArch;  // :1577 forwards comm->archName; without this that is untested
+// g_tuningIndexValue / g_tuningIndexLastArch come from tuning_fakes.h: :1577
+// forwards comm->archName, and without the recorder that is untested.
 extern int g_ncclTopoComputePathsCalls;
 extern int g_ncclTopoComputePathsFailAt;   // -1 = never fail; 0 = the :1591 call, 1 = the :1596 one
 extern ncclResult_t g_ncclTopoTrimSystemResult;

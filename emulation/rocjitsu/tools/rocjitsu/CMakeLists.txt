@@ -48,6 +48,16 @@ target_link_libraries(
         rocjitsu_version
 )
 
+# The vfio-user front end is an optional mode of this CLI, so it is the only
+# consumer that pulls in the transport and its external library.
+if(ROCJITSU_ENABLE_VFIO)
+    target_link_libraries(
+        rocjitsu_bin
+        PRIVATE rocjitsu_pci rocjitsu_vmm_vfu libvfio-user::libvfio-user
+    )
+    target_compile_definitions(rocjitsu_bin PRIVATE RJ_ENABLE_VFIO_USER)
+endif()
+
 set_target_properties(rocjitsu_bin PROPERTIES OUTPUT_NAME rocjitsu)
 
 rj_configure_target(rocjitsu_bin TOOL)
