@@ -346,6 +346,48 @@ TEST_F(logger_test, logger_settings_monochrome)
     unsetenv(rocprofsys::env_vars::MONOCHROME);
 }
 
+TEST_F(logger_test, resolve_monochrome_neither_env_set)
+{
+    EXPECT_FALSE(rocprofsys::logger_settings_t::resolve_monochrome(nullptr, nullptr));
+}
+
+TEST_F(logger_test, resolve_monochrome_rocprofsys_env_only)
+{
+    EXPECT_TRUE(rocprofsys::logger_settings_t::resolve_monochrome("1", nullptr));
+    EXPECT_TRUE(rocprofsys::logger_settings_t::resolve_monochrome("true", nullptr));
+    EXPECT_FALSE(rocprofsys::logger_settings_t::resolve_monochrome("0", nullptr));
+    EXPECT_FALSE(rocprofsys::logger_settings_t::resolve_monochrome("false", nullptr));
+    EXPECT_FALSE(rocprofsys::logger_settings_t::resolve_monochrome("off", nullptr));
+}
+
+TEST_F(logger_test, resolve_monochrome_legacy_env_only)
+{
+    EXPECT_TRUE(rocprofsys::logger_settings_t::resolve_monochrome(nullptr, "1"));
+    EXPECT_TRUE(rocprofsys::logger_settings_t::resolve_monochrome(nullptr, "true"));
+    EXPECT_FALSE(rocprofsys::logger_settings_t::resolve_monochrome(nullptr, "0"));
+    EXPECT_FALSE(rocprofsys::logger_settings_t::resolve_monochrome(nullptr, "no"));
+}
+
+TEST_F(logger_test, resolve_monochrome_both_set_are_ored)
+{
+    // rocprofsys-prefixed var says "off", legacy var says "on" -> still monochrome.
+    EXPECT_TRUE(rocprofsys::logger_settings_t::resolve_monochrome("0", "1"));
+    // rocprofsys-prefixed var says "on", legacy var says "off" -> still monochrome.
+    EXPECT_TRUE(rocprofsys::logger_settings_t::resolve_monochrome("1", "0"));
+    // Both say "off" -> not monochrome.
+    EXPECT_FALSE(rocprofsys::logger_settings_t::resolve_monochrome("0", "false"));
+}
+
+TEST_F(logger_test, resolve_monochrome_widened_truthy_semantics)
+{
+    // to_bool() is a blacklist: any value other than off/false/no/n/f/0 is truthy.
+    // A value like "2" or "yolo" is truthy here even though the old whitelist-based
+    // parser (1/on/true/yes only) would have treated it as false.
+    EXPECT_TRUE(rocprofsys::logger_settings_t::resolve_monochrome("2", nullptr));
+    EXPECT_TRUE(rocprofsys::logger_settings_t::resolve_monochrome("yolo", nullptr));
+    EXPECT_TRUE(rocprofsys::logger_settings_t::resolve_monochrome(nullptr, "garbage"));
+}
+
 TEST_F(logger_test, fork_child_creates_log_file_with_child_pid)
 {
     const std::string test_log_base = "/tmp/test_fork_logger";

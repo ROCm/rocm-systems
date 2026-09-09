@@ -38,17 +38,26 @@ struct logger_settings_t
     logger_settings_t()
     : m_log_level(log_level_from_env(std::getenv(env_vars::LOG_LEVEL)))
     , m_log_file(std::getenv(env_vars::LOG_FILE))
+    , m_monochrome(
+          resolve_monochrome(std::getenv(env_vars::MONOCHROME), std::getenv("MONOCHROME")))
+    {}
+
+    // Combines the rocprofsys-prefixed and legacy MONOCHROME env vars: monochrome mode
+    // is enabled if either variable is set and parses as truthy (see
+    // utility::string::to_bool - any value other than off/false/no/n/f/0 is truthy).
+    // A null argument means the corresponding env var was not set and is ignored.
+    static bool resolve_monochrome(const char* rocprofsys_env, const char* legacy_env)
     {
-        const char* rocprofsys_monochrome_env = std::getenv(env_vars::MONOCHROME);
-        const char* monochrome_env            = std::getenv("MONOCHROME");
-        if(rocprofsys_monochrome_env)
+        bool monochrome = false;
+        if(rocprofsys_env)
         {
-            m_monochrome = utility::string::to_bool(rocprofsys_monochrome_env);
+            monochrome = utility::string::to_bool(rocprofsys_env);
         }
-        if(monochrome_env)
+        if(legacy_env)
         {
-            m_monochrome = m_monochrome || utility::string::to_bool(monochrome_env);
+            monochrome = monochrome || utility::string::to_bool(legacy_env);
         }
+        return monochrome;
     }
 
     spdlog::level::level_enum log_level_from_env(const char* env)
