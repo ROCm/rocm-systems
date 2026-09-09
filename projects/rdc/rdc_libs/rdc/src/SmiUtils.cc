@@ -89,8 +89,21 @@ bool is_capability_miss(rdc_status_t status) {
   }
 }
 
+const std::map<rdc_field_t, rdc_field_t>& health_field_fallbacks() {
+  static const std::map<rdc_field_t, rdc_field_t> fallbacks = {
+      // xgmi_error sysfs is unreadable on MI300-series and later (DF 4.x has no
+      // FICA access); XGMI faults surface as RAS errors on the XGMI_WAFL block.
+      {RDC_HEALTH_XGMI_ERROR, RDC_FI_ECC_XGMI_WAFL_UE},
+  };
+  return fallbacks;
+}
+
 bool is_health_field(rdc_field_t field_id) {
-  return field_id >= RDC_HEALTH_XGMI_ERROR && field_id < RDC_FI_CPU_FIRST;
+  if (field_id >= RDC_HEALTH_XGMI_ERROR && field_id < RDC_FI_CPU_FIRST) return true;
+  for (const auto& fb : health_field_fallbacks()) {
+    if (fb.second == field_id) return true;
+  }
+  return false;
 }
 
 amdsmi_status_t get_processor_handle_from_id(uint32_t gpu_id,

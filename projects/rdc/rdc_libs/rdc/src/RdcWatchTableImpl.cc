@@ -396,14 +396,6 @@ rdc_status_t RdcWatchTableImpl::rdc_field_unwatch(rdc_gpu_group_t group_id,
   return update_field_in_table_when_unwatch(ite->first);
 }
 
-// Health fields with an alternate source when the primary cannot be read on
-// this platform. The primary is tried first so existing platforms are unchanged.
-static const std::map<rdc_field_t, rdc_field_t> kHealthFieldFallbacks = {
-    // xgmi_error sysfs is unreadable on MI300-series and later (DF 4.x has no
-    // FICA access); XGMI faults surface as RAS errors on the XGMI_WAFL block.
-    {RDC_HEALTH_XGMI_ERROR, RDC_FI_ECC_XGMI_WAFL_UE},
-};
-
 std::vector<rdc_field_t> RdcWatchTableImpl::health_component_fields(unsigned int components) {
   std::vector<rdc_field_t> field_ids{};
   if (components & RDC_HEALTH_WATCH_PCIE) {
@@ -437,8 +429,8 @@ std::vector<rdc_field_t> RdcWatchTableImpl::health_component_fields(unsigned int
 
   // Add the fallback source for any candidate that has one, once.
   for (size_t i = 0, n = field_ids.size(); i < n; i++) {
-    auto fallback = kHealthFieldFallbacks.find(field_ids[i]);
-    if (fallback == kHealthFieldFallbacks.end()) continue;
+    auto fallback = health_field_fallbacks().find(field_ids[i]);
+    if (fallback == health_field_fallbacks().end()) continue;
     if (std::find(field_ids.begin(), field_ids.end(), fallback->second) == field_ids.end()) {
       field_ids.push_back(fallback->second);
     }
@@ -478,7 +470,7 @@ rdc_status_t RdcWatchTableImpl::rdc_health_set(rdc_gpu_group_t group_id, unsigne
   // 1 s fetch; other failures are transient and stay watched. A fallback is
   // probed, cached and watched only where its primary is unavailable.
   std::set<rdc_field_t> fallback_fields;
-  for (const auto& fb : kHealthFieldFallbacks) fallback_fields.insert(fb.second);
+  for (const auto& fb : health_field_fallbacks()) fallback_fields.insert(fb.second);
 
   std::vector<RdcFieldKey> supported_pairs;
   std::set<rdc_field_t> supported_fields;
@@ -500,7 +492,7 @@ rdc_status_t RdcWatchTableImpl::rdc_health_set(rdc_gpu_group_t group_id, unsigne
     for (auto field : candidates) {
       if (!fallback_fields.count(field)) probe_field(field);
     }
-    for (const auto& fb : kHealthFieldFallbacks) {
+    for (const auto& fb : health_field_fallbacks()) {
       auto primary = probe.find(fb.first);
       if (primary != probe.end() && is_capability_miss(primary->second)) probe_field(fb.second);
     }
@@ -511,9 +503,10 @@ rdc_status_t RdcWatchTableImpl::rdc_health_set(rdc_gpu_group_t group_id, unsigne
 
       rdc_status_t status = probed->second;
       if (is_capability_miss(status)) {
-        auto fallback = kHealthFieldFallbacks.find(field);
+        const auto& fallbacks = health_field_fallbacks();
+        auto fallback = fallbacks.find(field);
         auto fb_probe =
-            (fallback != kHealthFieldFallbacks.end()) ? probe.find(fallback->second) : probe.end();
+            (fallback != fallbacks.end()) ? probe.find(fallback->second) : probe.end();
         if (fb_probe != probe.end() && fb_probe->second == RDC_ST_OK) {
           RDC_LOG(RDC_ERROR, "Health field " << field_id_string(field)
                                              << " is not supported on GPU " << gpu_index
@@ -701,8 +694,8 @@ rdc_status_t RdcWatchTableImpl::xgmi_check(rdc_gpu_group_t group_id, uint32_t gp
   } else {
     // Primary unavailable on this GPU: read the RAS fallback (uncorrectable
     // XGMI_WAFL count) if one is defined.
-    auto fallback = kHealthFieldFallbacks.find(RDC_HEALTH_XGMI_ERROR);
-    if (fallback == kHealthFieldFallbacks.end()) return RDC_ST_OK;
+    auto fallback = health_field_fallbacks().find(RDC_HEALTH_XGMI_ERROR);
+    if (fallback == health_field_fallbacks().end()) return RDC_ST_OK;
     result = get_start_end_values(group_id, gpu_index, fallback->second, 0, nullptr, &end);
     if (result != RDC_ST_OK) return RDC_ST_OK;  // neither source available: skip component
 

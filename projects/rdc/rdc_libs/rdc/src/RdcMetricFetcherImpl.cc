@@ -180,6 +180,7 @@ void RdcMetricFetcherImpl::get_ecc(uint32_t gpu_index, rdc_field_t field_id,
   auto gpu_block = field_to_block_(field_id);
   if (gpu_block == AMDSMI_GPU_BLOCK_INVALID) {
     value->status = Smi2RdcError(AMDSMI_STATUS_INPUT_OUT_OF_BOUNDS);
+    return;
   }
 
   err = amdsmi_get_gpu_ecc_status(processor_handle, gpu_block, &err_state);
@@ -526,7 +527,7 @@ rdc_status_t RdcMetricFetcherImpl::bulk_fetch_smi_fields(
           value.field_value.value.l_int = static_cast<int64_t>(gpu_metrics.average_gfx_activity);
           break;
         default:
-          value.field_value.status = AMDSMI_STATUS_NOT_SUPPORTED;
+          value.field_value.status = RDC_ST_NOT_SUPPORTED;
           break;
       }
       if (value.field_value.status == AMDSMI_STATUS_SUCCESS) {
@@ -589,7 +590,7 @@ rdc_status_t RdcMetricFetcherImpl::fetch_gpu_field_(uint32_t gpu_index, rdc_fiel
     RdcFieldKey f_key(gpu_index, field_id);
     smi_data = get_smi_data(f_key);
     if (smi_data == nullptr) {
-      value->status = AMDSMI_STATUS_NOT_SUPPORTED;
+      value->status = RDC_ST_NOT_SUPPORTED;
       return;
     }
 
@@ -651,7 +652,7 @@ rdc_status_t RdcMetricFetcherImpl::fetch_gpu_field_(uint32_t gpu_index, rdc_fiel
                                << gpu_metrics_value_ite->second);
       }
     }
-    value->status = AMDSMI_STATUS_NOT_SUPPORTED;
+    value->status = RDC_ST_NOT_SUPPORTED;
   };
 
   switch (field_id) {
@@ -777,7 +778,7 @@ rdc_status_t RdcMetricFetcherImpl::fetch_gpu_field_(uint32_t gpu_index, rdc_fiel
         // Max value means not supported
         if (raw == std::numeric_limits<uint32_t>::max() ||
             raw == std::numeric_limits<uint64_t>::max()) {
-          value->status = AMDSMI_STATUS_NOT_SUPPORTED;
+          value->status = RDC_ST_NOT_SUPPORTED;
         } else {
           value->value.l_int = static_cast<int64_t>(raw);
         }
@@ -867,7 +868,7 @@ rdc_status_t RdcMetricFetcherImpl::fetch_gpu_field_(uint32_t gpu_index, rdc_fiel
         break;
       }
 
-      value->status = AMDSMI_STATUS_NOT_SUPPORTED;
+      value->status = RDC_ST_NOT_SUPPORTED;
       RDC_LOG(RDC_ERROR, "AMDSMI: cannot get POWER_USAGE");
       return RDC_ST_NO_DATA;
     }
@@ -996,7 +997,7 @@ rdc_status_t RdcMetricFetcherImpl::fetch_gpu_field_(uint32_t gpu_index, rdc_fiel
       if (field_id == RDC_FI_OAM_ID) {
         // 0xFFFF means not supported for OAM ID
         if (asic_info.oam_id == 0xFFFF) {
-          value->status = AMDSMI_STATUS_NOT_SUPPORTED;
+          value->status = RDC_ST_NOT_SUPPORTED;
         } else {
           value->value.l_int = asic_info.oam_id;
         }
@@ -1006,13 +1007,13 @@ rdc_status_t RdcMetricFetcherImpl::fetch_gpu_field_(uint32_t gpu_index, rdc_fiel
         value->value.l_int = asic_info.rev_id;
       } else if (field_id == RDC_FI_TARGET_GRAPHICS_VERSION) {
         if (asic_info.target_graphics_version == 0xFFFFFFFFFFFFFFFF) {
-          value->status = AMDSMI_STATUS_NOT_SUPPORTED;
+          value->status = RDC_ST_NOT_SUPPORTED;
         } else {
           value->value.l_int = asic_info.target_graphics_version;
         }
       } else if (field_id == RDC_FI_NUM_OF_COMPUTE_UNITS) {
         if (asic_info.num_of_compute_units == 0xFFFFFFFF) {
-          value->status = AMDSMI_STATUS_NOT_SUPPORTED;
+          value->status = RDC_ST_NOT_SUPPORTED;
         } else {
           value->value.l_int = asic_info.num_of_compute_units;
         }
@@ -1027,7 +1028,7 @@ rdc_status_t RdcMetricFetcherImpl::fetch_gpu_field_(uint32_t gpu_index, rdc_fiel
       break;
     }
     case RDC_FI_GPU_MM_ENC_UTIL: {
-      value->status = AMDSMI_STATUS_NOT_SUPPORTED;
+      value->status = RDC_ST_NOT_SUPPORTED;
       RDC_LOG(RDC_ERROR, "AMDSMI Not Supported: cannot get MM_ENC_ACTIVITY");
       return RDC_ST_NO_DATA;
     }
@@ -1339,7 +1340,7 @@ rdc_status_t RdcMetricFetcherImpl::fetch_gpu_field_(uint32_t gpu_index, rdc_fiel
                 break;
             }
             if (raw == not_sup) {
-              value->status = AMDSMI_STATUS_NOT_SUPPORTED;
+              value->status = RDC_ST_NOT_SUPPORTED;
             } else {
               value->value.l_int = static_cast<int64_t>(raw);
             }
@@ -1727,7 +1728,7 @@ rdc_status_t RdcMetricFetcherImpl::fetch_cpu_field_(uint32_t gpu_index, rdc_fiel
     }
 
     default:
-      value->status = AMDSMI_STATUS_NOT_SUPPORTED;
+      value->status = RDC_ST_NOT_SUPPORTED;
       RDC_LOG(RDC_DEBUG, "CPU field " << field_id << " not supported");
       break;
   }
@@ -1790,7 +1791,7 @@ rdc_status_t RdcMetricFetcherImpl::fetch_smi_field(uint32_t gpu_index, rdc_field
 
   value->ts = now();
   value->field_id = field_id;
-  value->status = AMDSMI_STATUS_NOT_SUPPORTED;
+  value->status = RDC_ST_NOT_SUPPORTED;
   if (info.device_type == RDC_DEVICE_TYPE_CPU) {
     // don't care about partition for CPUs
     status = fetch_cpu_field_(gpu_index, field_id, value);
