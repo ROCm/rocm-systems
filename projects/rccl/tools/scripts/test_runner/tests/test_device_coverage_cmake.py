@@ -61,6 +61,41 @@ class DeviceCoverageCMakeTest(unittest.TestCase):
             )
             return runtime, result_file.read_text()
 
+    def run_host_probe(self, create_runtime):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            runtime = root / "libclang_rt.profile_rocm.a"
+            if create_runtime:
+                runtime.touch()
+
+            compiler = root / "amdclang++"
+            compiler.write_text(
+                "#!/bin/sh\n"
+                f"printf '%s\\n' '{runtime if create_runtime else runtime.name}'\n"
+            )
+            compiler.chmod(0o755)
+
+            result_file = root / "result.txt"
+            script = root / "probe.cmake"
+            script.write_text(
+                f'include("{DEVICE_COVERAGE_MODULE}")\n'
+                "rccl_find_host_rocm_profile_runtime("
+                '"${COMPILER}" runtime)\n'
+                'file(WRITE "${RESULT_FILE}" "${runtime}")\n'
+            )
+            subprocess.run(
+                [
+                    "cmake",
+                    f"-DCOMPILER={compiler}",
+                    f"-DRESULT_FILE={result_file}",
+                    "-P",
+                    str(script),
+                ],
+                check=True,
+                env=os.environ.copy(),
+            )
+            return runtime, result_file.read_text()
+
     def test_probe_finds_selected_compiler_profile_runtime(self):
         runtime, result = self.run_probe(create_runtime=True)
 
@@ -90,6 +125,16 @@ class DeviceCoverageCMakeTest(unittest.TestCase):
 
         self.assertTrue(result.startswith("\nthe selected compiler"))
         self.assertIn("rejected device coverage flags", result)
+
+    def test_host_probe_finds_companion_rocm_profile_runtime(self):
+        runtime, result = self.run_host_probe(create_runtime=True)
+
+        self.assertEqual(result, str(runtime))
+
+    def test_host_probe_ignores_unresolved_runtime_name(self):
+        _, result = self.run_host_probe(create_runtime=False)
+
+        self.assertEqual(result, "")
 
 
 if __name__ == "__main__":

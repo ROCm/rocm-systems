@@ -359,6 +359,7 @@ else()
 endif()
 string(REGEX MATCH "([0-9]+)\\.([0-9]+)\\.([0-9]+)" rocm_version_matches ${rocm_version_string})
 set(RCCL_DEVICE_PROFILE_RT "")
+set(RCCL_HOST_ROCM_PROFILE_RT "")
 set(_device_coverage_capability_error "")
 if(NOT _enable_device_coverage_request STREQUAL "OFF")
   include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/DeviceCoverage.cmake")
@@ -366,6 +367,9 @@ if(NOT _enable_device_coverage_request STREQUAL "OFF")
     "${CMAKE_CXX_COMPILER}"
     RCCL_DEVICE_PROFILE_RT
     _device_coverage_capability_error)
+  rccl_find_host_rocm_profile_runtime(
+    "${CMAKE_CXX_COMPILER}"
+    RCCL_HOST_ROCM_PROFILE_RT)
 endif()
 
 if (rocm_version_matches)
@@ -409,6 +413,10 @@ if (rocm_version_matches)
           "Device coverage is supported by ROCm "
           "${ROCM_MAJOR_VERSION}.${ROCM_MINOR_VERSION}.${ROCM_PATCH_VERSION}; "
           "profile runtime: ${RCCL_DEVICE_PROFILE_RT}")
+        if(RCCL_HOST_ROCM_PROFILE_RT)
+          message(STATUS
+            "Host ROCm profile runtime: ${RCCL_HOST_ROCM_PROFILE_RT}")
+        endif()
       endif()
     elseif(ENABLE_DEVICE_COVERAGE AND ROCM_VERSION VERSION_LESS "71500")
       message(FATAL_ERROR
