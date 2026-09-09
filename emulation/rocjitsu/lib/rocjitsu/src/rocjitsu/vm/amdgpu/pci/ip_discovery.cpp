@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <cstring>
 #include <format>
+#include <iterator>
 #include <numeric>
 #include <optional>
 #include <span>
@@ -24,6 +25,15 @@ constexpr std::size_t kTableCount = 6;
 
 /// @brief Index of the block list within the table list.
 constexpr std::size_t kIpDiscoveryTableIndex = 0;
+
+/// @brief Index of the graphics-topology table within the table list.
+constexpr std::size_t kGraphicsTableIndex = 1;
+
+/// @brief Marks the GC-info table the driver uses to populate graphics topology.
+constexpr uint32_t kGraphicsTableId = 0x4347;
+
+/// @brief GC-info v2.0: a 12-byte header followed by seventeen 32-bit fields.
+constexpr std::size_t kGraphicsTableSize = 12 + 17 * sizeof(uint32_t);
 
 /// @brief Index of the table saying which blocks are disabled in this part.
 constexpr std::size_t kHarvestTableIndex = 2;
@@ -201,6 +211,66 @@ IpDiscoveryBuild build_ip_discovery_table(const IpDiscoverySpec &spec) {
   }
   put16(ip_table, kTableSizeOffset, static_cast<uint16_t>(ip_table.size()));
 
+  std::vector<std::byte> graphics_table;
+  const bool has_graphics = std::ranges::any_of(
+      spec.blocks, [](const IpBlock &block) { return block.hardware_id == IpHardwareId::Gc; });
+  const GraphicsDiscoveryInfo &graphics = spec.graphics;
+  const bool has_graphics_info =
+      graphics.shader_engines != 0 || graphics.compute_units_per_shader_array != 0 ||
+      graphics.shader_arrays_per_engine != 0 || graphics.render_backends_per_engine != 0 ||
+      graphics.texture_channel_caches != 0 || graphics.wavefront_size != 0 ||
+      graphics.max_waves_per_simd != 0 || graphics.max_scratch_slots_per_cu != 0 ||
+      graphics.lds_size_kb != 0 || graphics.shader_complexes_per_engine != 0 ||
+      graphics.packers_per_shader_complex != 0;
+  if (!has_graphics) {
+    return {.table = {}, .problem = "the block list has no graphics block"};
+  }
+  if (!has_graphics_info) {
+    return {.table = {}, .problem = "a graphics block has no graphics-topology table"};
+  }
+  {
+    if (graphics.shader_engines == 0 || graphics.compute_units_per_shader_array == 0 ||
+        graphics.shader_arrays_per_engine == 0 || graphics.render_backends_per_engine == 0 ||
+        graphics.texture_channel_caches == 0 || graphics.wavefront_size == 0 ||
+        graphics.max_waves_per_simd == 0 || graphics.max_scratch_slots_per_cu == 0 ||
+        graphics.lds_size_kb == 0 || graphics.shader_complexes_per_engine == 0 ||
+        graphics.packers_per_shader_complex == 0) {
+      return {.table = {}, .problem = "the graphics topology contains a zero field"};
+    }
+
+    // GC-info version 2 is the CU-oriented layout used by the compute family.
+    // Fields not represented by the simulator remain zero; the non-zero fields
+    // below are the ones the driver consumes for compute topology and its two
+    // divisions during graphics initialization.
+    graphics_table.assign(kGraphicsTableSize, std::byte{0});
+    put32(graphics_table, 0, kGraphicsTableId);
+    put16(graphics_table, 4, 2);
+    put16(graphics_table, 6, 0);
+    put32(graphics_table, 8, static_cast<uint32_t>(graphics_table.size()));
+    const uint32_t fields[] = {
+        graphics.shader_engines,
+        graphics.compute_units_per_shader_array,
+        graphics.shader_arrays_per_engine,
+        graphics.render_backends_per_engine,
+        graphics.texture_channel_caches,
+        0, // General-purpose registers; unused by the compute bring-up path.
+        0, // Maximum geometry-shader threads.
+        0, // Geometry table depth.
+        0, // Geometry primitive-buffer depth.
+        0, // Parameter-cache depth.
+        0, // Double off-chip LDS buffer.
+        graphics.wavefront_size,
+        graphics.max_waves_per_simd,
+        graphics.max_scratch_slots_per_cu,
+        graphics.lds_size_kb,
+        graphics.shader_complexes_per_engine,
+        graphics.packers_per_shader_complex,
+    };
+    for (std::size_t field_index = 0; field_index < std::size(fields); ++field_index) {
+      put32(graphics_table, 12 + field_index * sizeof(uint32_t), fields[field_index]);
+    }
+  }
+
   std::vector<std::byte> binary(kBinaryHeaderSize, std::byte{0});
   put32(binary, 0, kBinarySignature);
   put16(binary, 4, 1); // version major
@@ -223,9 +293,14 @@ IpDiscoveryBuild build_ip_discovery_table(const IpDiscoverySpec &spec) {
   };
 
   describe_table(kIpDiscoveryTableIndex, kBinaryHeaderSize, ip_table);
-  describe_table(kHarvestTableIndex, kBinaryHeaderSize + ip_table.size(), harvest_table);
+  if (!graphics_table.empty()) {
+    describe_table(kGraphicsTableIndex, kBinaryHeaderSize + ip_table.size(), graphics_table);
+  }
+  describe_table(kHarvestTableIndex, kBinaryHeaderSize + ip_table.size() + graphics_table.size(),
+                 harvest_table);
 
   binary.insert(binary.end(), ip_table.begin(), ip_table.end());
+  binary.insert(binary.end(), graphics_table.begin(), graphics_table.end());
   binary.insert(binary.end(), harvest_table.begin(), harvest_table.end());
   if (binary.size() > kMaxTableBytes) {
     return {.table = {},
@@ -304,6 +379,48 @@ IpDiscoveryValidation validate_ip_discovery_table(std::span<const std::byte> tab
     if (in.checksum(harvest_offset, kHarvestTableSize).value() != harvest_checksum) {
       return reject("the harvest table checksum does not match");
     }
+  }
+
+  const std::size_t graphics_info = kTableListOffset + kGraphicsTableIndex * kTableInfoSize;
+  const uint16_t graphics_offset = in.u16(graphics_info).value();
+  const uint16_t graphics_checksum = in.u16(graphics_info + 2).value();
+  const uint16_t graphics_size = in.u16(graphics_info + 4).value();
+  if (graphics_offset == 0 || graphics_size < 12 || !in.covers(graphics_offset, graphics_size)) {
+    return reject("describes no complete graphics-topology table");
+  }
+  if (in.u32(graphics_offset).value() != kGraphicsTableId) {
+    return reject("the graphics-topology table has the wrong identifier");
+  }
+  const uint32_t embedded_graphics_size = in.u32(graphics_offset + 8).value();
+  if (embedded_graphics_size != graphics_size) {
+    return reject(std::format("the graphics-topology table says it is {} bytes but the table "
+                              "list says {}",
+                              embedded_graphics_size, graphics_size));
+  }
+  if (in.checksum(graphics_offset, graphics_size).value() != graphics_checksum) {
+    return reject("the graphics-topology table checksum does not match");
+  }
+  const uint16_t graphics_major = in.u16(graphics_offset + 4).value();
+  const uint16_t graphics_minor = in.u16(graphics_offset + 6).value();
+  if (graphics_major != 2 || graphics_minor != 0 || graphics_size != kGraphicsTableSize) {
+    return reject(std::format("the graphics-topology table is unsupported version {}.{} with {} "
+                              "bytes",
+                              graphics_major, graphics_minor, graphics_size));
+  }
+  const uint32_t shader_engines = in.u32(graphics_offset + 12).value();
+  const uint32_t compute_units_per_shader_array = in.u32(graphics_offset + 16).value();
+  const uint32_t shader_arrays_per_engine = in.u32(graphics_offset + 20).value();
+  const uint32_t render_backends_per_engine = in.u32(graphics_offset + 24).value();
+  const uint32_t shader_complexes_per_engine = in.u32(graphics_offset + 72).value();
+  if (shader_engines == 0 || compute_units_per_shader_array == 0 || shader_arrays_per_engine == 0 ||
+      render_backends_per_engine == 0 || shader_complexes_per_engine == 0) {
+    return reject("the graphics-topology table contains a zero geometry field");
+  }
+  if (render_backends_per_engine % shader_arrays_per_engine != 0) {
+    return reject("render backends per engine are not divisible by shader arrays per engine");
+  }
+  if (shader_complexes_per_engine % shader_arrays_per_engine != 0) {
+    return reject("shader complexes per engine are not divisible by shader arrays per engine");
   }
 
   const std::size_t ip_info = kTableListOffset + kIpDiscoveryTableIndex * kTableInfoSize;

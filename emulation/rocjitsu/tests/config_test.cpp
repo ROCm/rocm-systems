@@ -18,6 +18,7 @@
 #include "rocjitsu/kmd/linux/rpc.h"
 #include "rocjitsu/vm/amdgpu/matrix_coexecution.h"
 #include "rocjitsu/vm/amdgpu/partitioning.h"
+#include "rocjitsu/vm/amdgpu/pci/gpu_pci_device_spec.h"
 #include "rocjitsu/vm/rj_vm.h"
 #include "rocjitsu/vm/rj_vm_impl.h"
 #include "rocjitsu/vm/soc.h"
@@ -230,6 +231,71 @@ TEST(ConfigLoaderTest, LoadsThePciSectionThroughBothEntryPoints) {
       config::load_config(CONFIG_DIR_PATH + "/gfx1250_mi455x.json", rocjitsu::kEmbeddedSchema);
   EXPECT_EQ(loaded.pci.vram_aperture_bytes, identity.pci.vram_aperture_bytes)
       << "the two entry points disagree about the same file";
+}
+
+TEST(ConfigLoaderTest, ResolvesGenerationTopologyThroughBothFileEntryPoints) {
+  const auto file = write_temp_config(R"({
+    "max_ticks": 1,
+    "num_threads": 1,
+    "vm": {
+      "arch": "cdna5",
+      "target": "gfx1250",
+      "gpu": {"device": {"gfx_target_version": 120500, "num_sdma_engines": 0}}
+    },
+    "topology": {
+      "root": {"name": "soc", "type": "soc", "children": [
+        {"name": "vram", "type": "gpu_memory"},
+        {"name": "xcd0", "type": "xcd", "children": [
+          {"name": "l2", "type": "l2_cache"},
+          {"name": "cp", "type": "command_processor"},
+          {"name": "se0", "type": "shader_engine", "children": [
+            {"name": "cu0", "type": "compute_unit"}
+          ]}
+        ]}
+      ]},
+      "links": []
+    }
+  })");
+
+  const auto identity = config::load_device_identity(file.path(), rocjitsu::kEmbeddedSchema);
+  const auto loaded = config::load_config(file.path(), rocjitsu::kEmbeddedSchema);
+  const auto identity_spec = gpu_pci_spec_from_config(identity.device, identity.pci);
+  const auto loaded_spec = gpu_pci_spec_from_config(loaded.device, loaded.pci);
+
+  for (const auto *device : {&identity.device, &loaded.device}) {
+    EXPECT_EQ(device->num_shader_engines, 2u);
+    EXPECT_EQ(device->num_shader_arrays_per_engine, 2u);
+    EXPECT_EQ(device->num_cu_per_sh, 8u);
+    EXPECT_EQ(device->wave_front_size, 32u);
+    EXPECT_EQ(device->max_waves_per_simd, 16u);
+    EXPECT_EQ(device->max_slots_scratch_cu, 32u);
+    EXPECT_EQ(device->lds_size_kb, 320u);
+  }
+  EXPECT_EQ(identity_spec.discovery.graphics.shader_engines, identity.device.num_shader_engines);
+  EXPECT_EQ(identity_spec.discovery.graphics.wavefront_size, identity.device.wave_front_size);
+  EXPECT_EQ(identity_spec.discovery.graphics.lds_size_kb, identity.device.lds_size_kb);
+  EXPECT_EQ(loaded_spec.discovery.graphics.shader_engines, loaded.device.num_shader_engines);
+  EXPECT_EQ(loaded_spec.discovery.graphics.wavefront_size, loaded.device.wave_front_size);
+  EXPECT_EQ(loaded_spec.discovery.graphics.lds_size_kb, loaded.device.lds_size_kb);
+}
+
+TEST(ConfigLoaderTest, ResolvesGenerationTopologyThroughDbtGuestFileEntryPoint) {
+  const auto file = write_temp_config(R"({
+    "dbt_guest": {
+      "guest_device": {"gfx_target_version": 120500, "num_sdma_engines": 0}
+    }
+  })");
+
+  const auto dbt = config::load_dbt_guest_config_from_file(file.path());
+
+  ASSERT_TRUE(dbt.guest_device.present);
+  EXPECT_EQ(dbt.guest_device.num_shader_engines, 2u);
+  EXPECT_EQ(dbt.guest_device.num_shader_arrays_per_engine, 2u);
+  EXPECT_EQ(dbt.guest_device.num_cu_per_sh, 8u);
+  EXPECT_EQ(dbt.guest_device.wave_front_size, 32u);
+  EXPECT_EQ(dbt.guest_device.max_waves_per_simd, 16u);
+  EXPECT_EQ(dbt.guest_device.max_slots_scratch_cu, 32u);
+  EXPECT_EQ(dbt.guest_device.lds_size_kb, 320u);
 }
 
 // A config with no bus section still has to yield a usable one, because most
