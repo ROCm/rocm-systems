@@ -53,12 +53,12 @@ context with nothing that must stay running. Neither condition holds today.
 The SDK's kernel replay service provides the mechanism this design relies on.
 `rocprofiler-sdk/experimental/kernel_replay.h` is the authoritative API.
 
-| Domain / operation | SDK | Profiling tool |
-| --- | --- | --- |
-| `KERNEL_REPLAY` `CONFIG` enter | Once per dispatch reaching the replay gate | Supply `pass_count_cb` (fixed-pass path). |
-| `pass_count_cb` | Once per dispatch, before any pass | Return the pass count. May consult the dispatch's agent information. |
-| `KERNEL_REPLAY` `PASS` enter / exit | Delimits each execution inside a replay window | Select the counter profile for this pass. |
-| `KERNEL_REPLAY` `CONFIG` exit | After the last pass | — |
+| Domain / operation | SDK |
+| --- | --- |
+| `KERNEL_REPLAY` `CONFIG` enter | Once per dispatch reaching the replay gate |
+| `pass_count_cb` | Once per dispatch, before any pass |
+| `KERNEL_REPLAY` `PASS` enter / exit | Delimits each execution inside a replay window |
+| `KERNEL_REPLAY` `CONFIG` exit | After the last pass |
 
 | `pass_count_cb` returns | SDK behavior |
 | --- | --- |
