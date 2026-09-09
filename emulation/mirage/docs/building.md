@@ -141,14 +141,17 @@ policy, so what works for one works for the others. For rocjitsu
 1. `$ROCJITSU_LIB`, which names the `.so` **file** itself rather than a
    directory;
 2. every directory on `$LD_LIBRARY_PATH`;
-3. a sibling monorepo build, found by walking up from the `mirage`
+3. an install layout — `<prefix>/lib` next to a `<prefix>/bin/mirage`.
+   This outranks everything below it on purpose: a prefix that ships its
+   own library must use it, even when the prefix happens to sit inside a
+   checkout whose `emulation/rocjitsu/build` also has one;
+4. a sibling monorepo build, found by walking up from the `mirage`
    binary and looking for a rocjitsu build under each ancestor — so an
    integration-test binary in `target/<profile>/deps/` finds it just as
    the CLI does, without anybody counting `..`s;
-4. `$ROCM_HOME/lib`, then `$ROCM_PATH/lib`;
-5. `$(rocm-sdk path --root)/lib` (present when a ROCm Python wheel venv
+5. `$ROCM_HOME/lib`, then `$ROCM_PATH/lib`;
+6. `$(rocm-sdk path --root)/lib` (present when a ROCm Python wheel venv
    is active);
-6. an install layout — `<prefix>/lib` next to a `<prefix>/bin/mirage`;
 7. the standard system directories: `/opt/rocm/lib`, `/usr/local/lib`,
    `/usr/lib`, `/usr/lib/x86_64-linux-gnu`;
 8. the in-container mount directory, for a containerised session where
@@ -167,8 +170,11 @@ opts out: it takes `HOTSWAP_HOME` (an install root, with
 
 Reach for the file overrides — `ROCJITSU_LIB`, `ROCJITSU_HOOKS_LIB` — when
 you have a library in a place no search would guess, or when you want to
-pin one build while another sits in the way. Reach for `ROCM_HOME` or
-`ROCM_PATH` for an ordinary install root.
+pin one build while another sits in the way. They are also what you need
+when the prefix itself is the problem: step 3 outranks
+`ROCM_HOME`/`ROCM_PATH`, so those two select an ordinary install root but
+cannot override a `<prefix>/lib` beside the `mirage` you are running —
+only `ROCJITSU_LIB` or `$LD_LIBRARY_PATH` can.
 
 You do not have to reason about any of this in the dark. `mirage
 emulators -l` prints, per backend, the library it resolved — or, when it
