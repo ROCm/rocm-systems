@@ -258,9 +258,25 @@ function(rocprofiler_add_integration_execute_test NAME)
         set(arg_DISABLED ON)
     endif()
 
-    # insert sanitizer libraries into LD_PRELOAD
     if(ROCPROFILER_MEMCHECK_PRELOAD_ENV_VALUE)
-        list(PREPEND arg_PRELOAD "${ROCPROFILER_MEMCHECK_PRELOAD_ENV_VALUE}")
+        # Do not preload the sanitizer into a launcher when it is explicitly forwarded to
+        # the launched process via ROCPROF_PRELOAD or a command-line argument.
+        set(_memcheck_preload_is_forwarded OFF)
+        foreach(_ENV IN LISTS arg_ENVIRONMENT)
+            if(_ENV STREQUAL "ROCPROF_PRELOAD=${ROCPROFILER_MEMCHECK_PRELOAD_ENV_VALUE}")
+                set(_memcheck_preload_is_forwarded ON)
+            endif()
+        endforeach()
+        if(ROCPROFILER_MEMCHECK_PRELOAD_ENV_VALUE IN_LIST arg_COMMAND
+           OR ROCPROFILER_MEMCHECK_PRELOAD_ENV_VALUE IN_LIST arg_ARGS)
+            set(_memcheck_preload_is_forwarded ON)
+        endif()
+
+        if(_memcheck_preload_is_forwarded)
+            list(REMOVE_ITEM arg_PRELOAD "${ROCPROFILER_MEMCHECK_PRELOAD_ENV_VALUE}")
+        else()
+            list(PREPEND arg_PRELOAD "${ROCPROFILER_MEMCHECK_PRELOAD_ENV_VALUE}")
+        endif()
     endif()
 
     if(arg_PRELOAD)
@@ -520,7 +536,7 @@ function(rocprofiler_add_integration_validate_test NAME)
         TRIM_FROM_FULL_NAME "${arg_TRIM_FROM_FULL_NAME}"
         LIBRARY_PATH_PREPEND ${arg_LIBRARY_PATH}
         PYTHON_PATH_PREPEND ${arg_PYTHON_PATH}
-        ENVIRONMENT "${arg_ENVIRONMENT}"
+        ENVIRONMENT ${arg_ENVIRONMENT}
         DEPENDS "${arg_DEPENDS}"
         EXTRA_ARGS ${arg_ARGS} --durations=20 -rA -s -vv
         DISCOVERY_EXTRA_ARGS ${arg_DISCOVERY_ARGS}

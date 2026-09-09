@@ -61,5 +61,6 @@ rocprofiler_add_integration_execute_test(
     TIMEOUT 45
     LABELS "integration-tests"
     WILL_FAIL
+    ENVIRONMENT "${PRELOAD_ENV}"
     FAIL_REGULAR_EXPRESSION
         "--selected-regions and --collection-period are mutually exclusive")

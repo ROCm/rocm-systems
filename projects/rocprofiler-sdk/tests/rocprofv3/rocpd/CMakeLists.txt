@@ -18,6 +18,9 @@ set(rocprofv3-rocpd-env
 find_package(MPI)
 find_package(Python3 REQUIRED)
 
+string(REPLACE "LD_PRELOAD=" "ROCPROF_PRELOAD=" PRELOAD_ENV
+               "${ROCPROFILER_MEMCHECK_PRELOAD_ENV}")
+
 if(MPI_FOUND)
     set(MULTIPROC_IS_DISABLED OFF)
     set(MULTIPROC_LAUNCHER ${MPIEXEC_EXECUTABLE} ${MPIEXEC_NUMPROC_FLAG} 2
@@ -47,7 +50,7 @@ rocprofiler_add_integration_execute_test(
     DEPENDS reproducible-dispatch-count
     TIMEOUT 120
     LABELS "integration-tests;rocpd"
-    PRELOAD "${PRELOAD_ENV}"
+    ENVIRONMENT "${PRELOAD_ENV}"
     FIXTURES_SETUP rocprofv3-test-rocpd)
 
 rocprofiler_add_integration_execute_test(
@@ -61,7 +64,7 @@ rocprofiler_add_integration_execute_test(
     DEPENDS reproducible-dispatch-count
     TIMEOUT 120
     LABELS "integration-tests;rocpd"
-    PRELOAD "${PRELOAD_ENV}"
+    ENVIRONMENT "${PRELOAD_ENV}"
     FIXTURES_SETUP rocprofv3-test-rocpd-multiproc
     DISABLED "${MULTIPROC_IS_DISABLED}")
 
@@ -77,7 +80,7 @@ rocprofiler_add_integration_execute_test(
     DEPENDS reproducible-dispatch-count
     TIMEOUT 120
     LABELS "integration-tests;rocpd"
-    ENVIRONMENT "${rocprofv3-rocpd-env}"
+    ENVIRONMENT "${PRELOAD_ENV}" "${rocprofv3-rocpd-env}"
     FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
     FIXTURES_SETUP rocprofv3-test-rocpd)
 

@@ -10,6 +10,9 @@ project(
 
 find_package(rocprofiler-sdk REQUIRED)
 
+string(REPLACE "LD_PRELOAD=" "ROCPROF_PRELOAD=" PRELOAD_ENV
+               "${ROCPROFILER_MEMCHECK_PRELOAD_ENV}")
+
 # These tests currently fail only on gfx1151. Detect the system architecture and disable
 # the tests there, while leaving them enabled elsewhere.
 rocprofiler_sdk_get_gfx_architectures(rocprofiler-sdk-hip-graph-bubbles-gfx-info ECHO)
@@ -19,6 +22,7 @@ if("gfx1151" IN_LIST rocprofiler-sdk-hip-graph-bubbles-gfx-info)
 endif()
 
 set(HIP_GRAPH_BUBBLES_ENVIRONMENT)
+list(APPEND HIP_GRAPH_BUBBLES_ENVIRONMENT "${PRELOAD_ENV}")
 if(DEFINED ENV{ROCM_PATH} AND EXISTS "$ENV{ROCM_PATH}/lib/rocm_sysdeps/lib")
     list(APPEND HIP_GRAPH_BUBBLES_ENVIRONMENT
          "LD_LIBRARY_PATH=$ENV{ROCM_PATH}/lib/rocm_sysdeps/lib:$ENV{LD_LIBRARY_PATH}")
