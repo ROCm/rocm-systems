@@ -2229,8 +2229,15 @@ print_settings(bool _include_env)
         std::stringstream _ss1{};
         tim::print_env(_ss1, [_is_rocprofsys_option](const std::string& _v) {
             auto _is_omni_opt = _is_rocprofsys_option(_v, std::set<std::string>{});
-            if(settings::verbose() >= 2 || settings::debug()) return _is_omni_opt;
-            return (_is_omni_opt && _v.find("ROCPROFSYS_SIGNAL_") != 0);
+            if(settings::verbose() >= 2 || settings::debug())
+            {
+                return _is_omni_opt;
+            }
+            if(_is_omni_opt && !_v.starts_with("ROCPROFSYS_SIGNAL_"))
+            {
+                return true;
+            }
+            return false;
         });
 
         LOG_INFO("{}", _ss1.str());
@@ -3701,10 +3708,11 @@ get_causal_output_filename()
     auto        _fname = static_cast<tim::tsettings<std::string>&>(*_v->second).get();
     for(auto&& itr : std::initializer_list<std::string>{ ".txt", ".json", ".xml" })
     {
-        auto _pos = _fname.find(itr);
         // if extension is found at end of string, remove
-        if(_pos != std::string::npos && (_pos + itr.length()) == _fname.length())
+        if(_fname.ends_with(itr))
+        {
             _fname = _fname.substr(0, _fname.length() - itr.length());
+        }
     }
     return _fname;
 }
