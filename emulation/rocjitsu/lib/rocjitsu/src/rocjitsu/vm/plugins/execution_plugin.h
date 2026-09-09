@@ -144,6 +144,9 @@ public:
   /// @param physical_reg Physical register index in the VGPR file.
   /// @param lane_mask Bit mask of lanes read by the instruction.
   /// @param byte_mask Sub-dword byte mask (kFullByteMask = full dword).
+  /// One callback may report multiple lanes of the same architectural access;
+  /// plugins must consume @p lane_mask rather than relying on callback count or
+  /// per-lane callback ordering.
   /// May run concurrently across simulation partitions unless
   /// requires_serial_hot_hooks() returns true.
   virtual void onAmdgpuReadVgprLanes(const amdgpu::Wavefront * /*wf*/, uint32_t /*physical_reg*/,
