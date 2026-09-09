@@ -131,16 +131,16 @@ static void* FdToHandle(int fd) { return reinterpret_cast<void*>(static_cast<int
 
 // ================================================================================================
 Event::~Event() {
-  // Force device 0, since KMD should handle multiple devices.
+  if (os_event_ == nullptr) return;
   int fd = EventFd(os_event_);
   if (fd >= 0) {
-    WDDMDevice* device = WddmDevice(0);  // Event->EventData.HWData3
+    WDDMDevice* device = WddmDevice(0);
     if (device && EventId != 0) {
       device->UnregisterEvent(EventId, os_event_);
     }
     close(fd);
   }
-  os_event_ = FdToHandle(-1);
+  os_event_ = nullptr;
 }
 
 // ================================================================================================

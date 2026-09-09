@@ -1328,11 +1328,13 @@ HSAKMT_STATUS WDDMDevice::WaitOnMultipleEvents(HsaEvent* events[], uint32_t num_
 #else
   // Linux: poll() on eventfds
   auto* pfds = reinterpret_cast<struct pollfd*>(alloca(sizeof(struct pollfd) * num_elems));
+  auto* signaled = reinterpret_cast<bool*>(alloca(sizeof(bool) * num_elems));
   for (uint32_t i = 0; i < num_elems; ++i) {
     void* handle = reinterpret_cast<Event*>(events[i])->GetHandle();
     pfds[i].fd = static_cast<int>(reinterpret_cast<intptr_t>(handle));
     pfds[i].events = POLLIN;
     pfds[i].revents = 0;
+    signaled[i] = false;
   }
 
   uint32_t kWaitTimeout = 6000;
@@ -1351,10 +1353,11 @@ HSAKMT_STATUS WDDMDevice::WaitOnMultipleEvents(HsaEvent* events[], uint32_t num_
     int ret = poll(pfds, num_elems, remaining_ms);
     if (ret > 0) {
       for (uint32_t i = 0; i < num_elems; ++i) {
-        if (pfds[i].revents & POLLIN) {
+        if ((pfds[i].revents & POLLIN) && !signaled[i]) {
           uint64_t val;
           read(pfds[i].fd, &val, sizeof(val));
           if (!wait_all) return HSAKMT_STATUS_SUCCESS;
+          signaled[i] = true;
           signaled_count++;
         }
       }

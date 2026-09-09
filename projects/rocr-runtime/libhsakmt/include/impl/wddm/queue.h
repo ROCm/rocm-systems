@@ -269,7 +269,7 @@ private:
   GpuMemoryHandle error_reason_mem_ = nullptr;
   std::thread aql_to_pm4_thread_;
   std::thread fault_monitor_thread_;
-  bool thread_stop_;
+  std::atomic<bool> thread_stop_;
   std::mutex thread_cond_lock_;
   std::condition_variable thread_cond_;
   static void AqlToPm4Thread(ComputeQueue *queue);

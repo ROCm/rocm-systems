@@ -210,7 +210,7 @@ void ComputeQueue::FaultMonitorThread(ComputeQueue* queue) {
     if (queue->error_code_ &&
         queue->error_code_->load(std::memory_order_acquire) != 0) {
       int64_t code = queue->error_code_->load(std::memory_order_relaxed);
-      pr_err("GPU fault detected via error_reason: 0x%" PRIx64 "\n", code);
+      pr_err("GPU fault detected via error_reason: 0x%" PRIx64 "\n", static_cast<uint64_t>(code));
       queue->HandleError(static_cast<hsa_status_t>(HSA_STATUS_ERROR_MEMORY_APERTURE_VIOLATION));
       return;
     }
@@ -250,7 +250,7 @@ void ComputeQueue::AqlToPm4Thread(ComputeQueue* queue) {
     // Poll error_reason for trap handler fault codes (DXG lacks KFD event path).
     if (queue->error_code_ && queue->error_code_->load(std::memory_order_acquire) != 0) {
       int64_t code = queue->error_code_->load(std::memory_order_relaxed);
-      pr_err("GPU fault detected via error_reason: 0x%" PRIx64 "\n", code);
+      pr_err("GPU fault detected via error_reason: 0x%" PRIx64 "\n", static_cast<uint64_t>(code));
       queue->HandleError(static_cast<hsa_status_t>(HSA_STATUS_ERROR_MEMORY_APERTURE_VIOLATION));
       break;
     }
