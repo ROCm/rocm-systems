@@ -57,8 +57,10 @@ would credit the wrong one.
 Resolution limit 0.74 percentage points (pp); an effect must beat that in magnitude, it is not
 a plus-or-minus band. Baseline 0.5253 ms, 4088 GB/s.
 
-No hint is separable from noise; width dominates by two orders of magnitude. That is why
-PR 2616 reads as evidence against non-temporal stores when it is evidence about width.
+No hint is separable from noise; width dominates by two orders of magnitude. That is also why
+[PR 2616](https://github.com/ROCm/clr/pull/2616) reads as evidence against non-temporal stores
+when it is evidence about width: its kernel branches on `aligned_size == sizeof(ulong)` (8)
+while `shaderCopyBuffer` passes 16, so every aligned copy silently takes the 32-bit path.
 
 `TH_STORE_NT_RT` was tried and rejected: it needs hand-written gfx12 asm, and net of that
 hand-writing it measures -0.29%, noise.
@@ -144,26 +146,13 @@ resolve to about 0.5 pp and show under 0.3% either way.
 
 ## The change
 
-Commits `81e65d6bbb` and `ac583d3369` on `users/victzhan/AIRUNTIME-28-nt-blit` — 6 files, 60
-insertions, 4 deletions. `blitcl.cpp` gains `__amd_rocclr_copyBufferNT`, identical to
-`__amd_rocclr_copyBuffer` except the store is `__builtin_nontemporal_store` and it still tests
-`aligned_size == sizeof(ulong2)` so it reaches its own wide path; `flags.hpp` gains
-`DEBUG_CLR_BLIT_NONTEMPORAL`, default **false**; the ROC and PAL blit managers select it when
-set. The PR has the rest. `airuntime28-nt-blit.patch` is generated from the branch by
-`remote/clr_patch.sh` — regenerate, never hand-edit.
-
-**Provenance caveat.** Measurements were taken against a CLR built at `563095dbca`, before the
-branch was rebased 335 commits onto `develop`. The diff content is byte-identical and
-`remote/validate_kernel.sh` confirms the shipped kernel still emits
-`global_store_b128 ... th:TH_STORE_NT` at full width, but the numbers have not been re-run on
-the new base.
-
-**For whoever owns [PR 2616](https://github.com/ROCm/clr/pull/2616): it never executes its own
-64-bit path.** Its kernel branches on `aligned_size == sizeof(ulong)` (8) while
-`shaderCopyBuffer` passes `kMaxAlignment` (16), so every aligned copy falls through to the
-`uint` branch and runs a *32-bit* non-temporal copy — 3.2x slower than baseline at 1 GiB. Any
-measurement of that PR as-is shows non-temporal stores as catastrophic, for unrelated reasons.
-
+Commits `81e65d6bbb` and `ac583d3369` on `users/victzhan/AIRUNTIME-28-nt-blit`: 6 files, 60
+insertions. `blitcl.cpp` gains `__amd_rocclr_copyBufferNT`, the same kernel with
+`__builtin_nontemporal_store` on the store, selected by `DEBUG_CLR_BLIT_NONTEMPORAL`, default
+**false**; the PR has the rest. One caveat the PR does not show: the measurements above were
+taken at `563095dbca`, before the branch was rebased 335 commits onto `develop`, and have not
+been re-run on the new base — the diff is byte-identical and `remote/validate_kernel.sh` still
+confirms the shipped kernel emits `global_store_b128 ... th:TH_STORE_NT` at full width.
 ## Validation
 
 **ISA.** All nine variants emit the instruction width and temporal hint they claim, checked
