@@ -8,6 +8,8 @@
 #include "TestChecks.hpp"
 #include "TransportMPIBase.hpp"
 
+#include <cstring>
+
 #ifdef MPI_TESTS_ENABLED
 
 // Import MPI test constants
@@ -304,8 +306,117 @@ public:
         }
     }
 
+    // Pair each rank with the same local rank on a partner node so every transfer
+    // crosses the network (real NET path), regardless of how many ranks run per node.
+    // This requires symmetric 1:1 matches, so we additionally require an even number of
+    // nodes and a uniform ranks-per-node layout.
+    //
+    // Use hostname Allgather instead of MPI_Comm_split_type: a second TYPE_SHARED split
+    // (validateTestPrerequisites already split once) hangs on this cluster, and any
+    // MPI_Comm_split after ncclCommInitRank deadlocks against NET/Socket progress threads.
+    void findCrossNodePeerRank(int* peer_rank_out)
+    {
+        if(config.world_rank == 0)
+        {
+            TEST_INFO("Computing cross-node SendRecv peers from hostnames");
+        }
+
+        char hostname[MPI_MAX_PROCESSOR_NAME];
+        int  hostname_len = 0;
+        ASSERT_MPI_SUCCESS(MPI_Get_processor_name(hostname, &hostname_len));
+
+        std::vector<char> all_names(
+            static_cast<size_t>(config.world_size) * MPI_MAX_PROCESSOR_NAME, '\0');
+        ASSERT_MPI_SUCCESS(MPI_Allgather(hostname,
+                                         MPI_MAX_PROCESSOR_NAME,
+                                         MPI_CHAR,
+                                         all_names.data(),
+                                         MPI_MAX_PROCESSOR_NAME,
+                                         MPI_CHAR,
+                                         MPI_COMM_WORLD));
+
+        auto hostOf = [&](int rank) -> const char* {
+            return all_names.data() + static_cast<size_t>(rank) * MPI_MAX_PROCESSOR_NAME;
+        };
+
+        std::vector<int> node_of_rank(config.world_size, -1);
+        std::vector<int> local_of_rank(config.world_size, 0);
+        std::vector<int> node_first_rank;
+        std::vector<int> node_rank_count;
+
+        for(int r = 0; r < config.world_size; ++r)
+        {
+            int node = -1;
+            for(size_t i = 0; i < node_first_rank.size(); ++i)
+            {
+                if(std::strcmp(hostOf(r), hostOf(node_first_rank[i])) == 0)
+                {
+                    node = static_cast<int>(i);
+                    break;
+                }
+            }
+            if(node < 0)
+            {
+                node = static_cast<int>(node_first_rank.size());
+                node_first_rank.push_back(r);
+                node_rank_count.push_back(0);
+            }
+            node_of_rank[r]   = node;
+            local_of_rank[r]  = node_rank_count[node];
+            node_rank_count[node]++;
+        }
+
+        const int num_nodes = static_cast<int>(node_first_rank.size());
+        int       min_ranks_per_node = node_rank_count.empty() ? 0 : node_rank_count[0];
+        int       max_ranks_per_node = min_ranks_per_node;
+        for(int count : node_rank_count)
+        {
+            min_ranks_per_node = std::min(min_ranks_per_node, count);
+            max_ranks_per_node = std::max(max_ranks_per_node, count);
+        }
+
+        if((num_nodes % 2) != 0 || min_ranks_per_node != max_ranks_per_node)
+        {
+            if(config.world_rank == 0)
+            {
+                TEST_WARN(
+                    "Skipping: MultipleBufferSizesTest requires an even number of nodes and a uniform ranks-per-node layout (nodes=%d, min_ranks_per_node=%d, max_ranks_per_node=%d)",
+                    num_nodes,
+                    min_ranks_per_node,
+                    max_ranks_per_node);
+            }
+            GTEST_SKIP() << "MultipleBufferSizesTest requires even node count and uniform ranks-per-node";
+            return;
+        }
+
+        const int my_node      = node_of_rank[config.world_rank];
+        const int my_local     = local_of_rank[config.world_rank];
+        const int partner_node = my_node ^ 1;
+
+        int peer_rank = -1;
+        for(int r = 0; r < config.world_size; ++r)
+        {
+            if(node_of_rank[r] == partner_node && local_of_rank[r] == my_local)
+            {
+                peer_rank = r;
+                break;
+            }
+        }
+        ASSERT_MPI_TRUE(peer_rank >= 0);
+
+        if(config.world_rank == 0)
+        {
+            TEST_INFO("Cross-node peer pairing ready (rank 0 -> rank %d, nodes=%d, ranks/node=%d)",
+                      peer_rank,
+                      num_nodes,
+                      min_ranks_per_node);
+        }
+
+        *peer_rank_out = peer_rank;
+    }
+
     // Test multiple buffer sizes with actual data transfer
-    void testMultipleBufferSizes()
+    void testMultipleBufferSizes(int peer_rank)
     {
         if(config.world_rank == 0)
         {
@@ -348,85 +459,6 @@ public:
             4 * 1024 * 1024 + 1 // 4MB + 1 (unaligned)
         };
 
-        // Pair each rank with the same local rank on a partner node so every transfer
-        // crosses the network (real NET path), regardless of how many ranks run per node.
-        // This requires symmetric 1:1 matches, so we additionally require an even number of
-        // nodes and a uniform ranks-per-node layout.
-        MPI_Comm node_comm = MPI_COMM_NULL;
-        ASSERT_MPI_SUCCESS(MPI_Comm_split_type(MPI_COMM_WORLD,
-                                              MPI_COMM_TYPE_SHARED,
-                                              /*key=*/config.world_rank,
-                                              MPI_INFO_NULL,
-                                              &node_comm));
-
-        int local_rank = 0;
-        int local_size = 0;
-        ASSERT_MPI_SUCCESS(MPI_Comm_rank(node_comm, &local_rank));
-        ASSERT_MPI_SUCCESS(MPI_Comm_size(node_comm, &local_size));
-
-        // Create a communicator of node leaders (local_rank==0) to assign stable node IDs.
-        MPI_Comm leader_comm = MPI_COMM_NULL;
-        ASSERT_MPI_SUCCESS(MPI_Comm_split(MPI_COMM_WORLD,
-                                          (local_rank == 0) ? 0 : MPI_UNDEFINED,
-                                          /*key=*/config.world_rank,
-                                          &leader_comm));
-
-        int node_id   = 0;
-        int num_nodes = 1;
-        if(local_rank == 0)
-        {
-            ASSERT_MPI_SUCCESS(MPI_Comm_rank(leader_comm, &node_id));
-            ASSERT_MPI_SUCCESS(MPI_Comm_size(leader_comm, &num_nodes));
-        }
-        ASSERT_MPI_SUCCESS(MPI_Bcast(&node_id, 1, MPI_INT, /*root=*/0, node_comm));
-        ASSERT_MPI_SUCCESS(MPI_Bcast(&num_nodes, 1, MPI_INT, /*root=*/0, node_comm));
-
-        int min_ranks_per_node = 0;
-        int max_ranks_per_node = 0;
-        ASSERT_MPI_SUCCESS(
-            MPI_Allreduce(&local_size, &min_ranks_per_node, 1, MPI_INT, MPI_MIN, MPI_COMM_WORLD));
-        ASSERT_MPI_SUCCESS(
-            MPI_Allreduce(&local_size, &max_ranks_per_node, 1, MPI_INT, MPI_MAX, MPI_COMM_WORLD));
-
-        if((num_nodes % 2) != 0 || min_ranks_per_node != max_ranks_per_node)
-        {
-            if(config.world_rank == 0)
-            {
-                TEST_WARN(
-                    "Skipping: MultipleBufferSizesTest requires an even number of nodes and a uniform ranks-per-node layout (nodes=%d, min_ranks_per_node=%d, max_ranks_per_node=%d)",
-                    num_nodes,
-                    min_ranks_per_node,
-                    max_ranks_per_node);
-            }
-            MPI_Comm_free(&node_comm);
-            if(leader_comm != MPI_COMM_NULL)
-                MPI_Comm_free(&leader_comm);
-            GTEST_SKIP() << "MultipleBufferSizesTest requires even node count and uniform ranks-per-node";
-        }
-
-        const int partner_node = node_id ^ 1;
-
-        // Find the world rank on partner_node with the same local_rank.
-        int loc[2] = {node_id, local_rank};
-        std::vector<int> all_locs(2 * config.world_size, -1);
-        ASSERT_MPI_SUCCESS(
-            MPI_Allgather(loc, 2, MPI_INT, all_locs.data(), 2, MPI_INT, MPI_COMM_WORLD));
-
-        int peer_rank = -1;
-        for(int r = 0; r < config.world_size; ++r)
-        {
-            if(all_locs[2 * r] == partner_node && all_locs[2 * r + 1] == local_rank)
-            {
-                peer_rank = r;
-                break;
-            }
-        }
-        ASSERT_MPI_TRUE(peer_rank >= 0);
-
-        MPI_Comm_free(&node_comm);
-        if(leader_comm != MPI_COMM_NULL)
-            MPI_Comm_free(&leader_comm);
-
         hipStream_t stream = getActiveStream();
         ASSERT_NE(stream, nullptr) << "Rank " << config.world_rank << ": Stream is null";
 
@@ -437,7 +469,8 @@ public:
                 TEST_INFO("  Testing size: %zu bytes with data transfer", size);
             }
 
-            // Allocate buffers with local guards (per-iteration cleanup)
+            // Allocate buffers with local guards (per-iteration cleanup).
+            // allocateAndInitBuffers already hipMemcpy's the rank/size send pattern.
             void* send_buffer = nullptr;
             void* recv_buffer = nullptr;
             auto [sendGuard, recvGuard]
@@ -448,20 +481,8 @@ public:
             ASSERT_NE(recv_buffer, nullptr) << "Rank " << config.world_rank
                                             << ": Recv buffer allocation failed for size " << size;
 
-            // Initialize send buffer with rank and size-specific pattern
-            uint8_t* send_data = static_cast<uint8_t*>(send_buffer);
-            for(size_t i = 0; i < size; i++)
-            {
-                send_data[i] = static_cast<uint8_t>(
-                    (config.world_rank * kDefaultPatternMultiplier + i) % kByteValueModulo);
-            }
-
-            // Initialize recv buffer with invalid pattern
-            uint8_t* recv_data = static_cast<uint8_t*>(recv_buffer);
-            for(size_t i = 0; i < size; i++)
-            {
-                recv_data[i] = 0xFF; // Invalid pattern to detect transfer
-            }
+            // Recv is device memory; poison it through HIP rather than host stores.
+            ASSERT_MPI_EQ(hipSuccess, hipMemset(recv_buffer, 0xFF, size));
 
             // Perform actual data transfer using NCCL Send/Recv
             // Use ASSERT_MPI_SUCCESS to ensure both ranks synchronize on NCCL errors
@@ -479,6 +500,11 @@ public:
             // Use ASSERT_MPI_EQ to ensure both ranks synchronize on HIP errors
             ASSERT_MPI_EQ(hipSuccess, hipStreamSynchronize(stream));
 
+            std::vector<uint8_t> recv_host(size);
+            ASSERT_MPI_EQ(
+                hipSuccess,
+                hipMemcpy(recv_host.data(), recv_buffer, size, hipMemcpyDeviceToHost));
+
             // Verify received data matches peer's send pattern
             int       errors              = 0;
             const int max_errors_to_print = 5;
@@ -486,13 +512,13 @@ public:
             {
                 uint8_t expected = static_cast<uint8_t>((peer_rank * kDefaultPatternMultiplier + i)
                                                         % kByteValueModulo);
-                if(recv_data[i] != expected)
+                if(recv_host[i] != expected)
                 {
                     TEST_WARN("Size %zu - Data mismatch at index %zu: expected %u, got %u",
                               size,
                               i,
                               expected,
-                              recv_data[i]);
+                              recv_host[i]);
                     errors++;
                 }
             }
@@ -586,14 +612,21 @@ TEST_F(NetTransportMPITest, MultipleBufferSizesTest)
                      << " ranks across at least " << kMinNodesForNET << " nodes";
     }
 
+    int peer_rank = -1;
+    findCrossNodePeerRank(&peer_rank);
+    if(HasFatalFailure() || IsSkipped())
+    {
+        return;
+    }
+
     ASSERT_MPI_SUCCESS(createTestCommunicator());
 
     if(config.world_rank == 0)
     {
-        TEST_INFO("Starting multiple buffer sizes test (multi-node)");
+        TEST_INFO("Starting multiple buffer sizes test (multi-node), peer rank %d", peer_rank);
     }
 
-    testMultipleBufferSizes();
+    testMultipleBufferSizes(peer_rank);
 
     if(config.world_rank == 0)
     {
