@@ -64,7 +64,14 @@ ncclResult_t ncclCeFinalize(struct ncclComm* comm) {
 }
 ncclResult_t ncclCheckMultiRank(struct ncclComm* comm) { ::abort(); }
 void ncclCudaContextDrop(struct ncclCudaContext* cxt) { ::abort(); }
-ncclResult_t ncclCudaContextTrack(struct ncclCudaContext** out) { ::abort(); }
+// Controllable (was fail-loud). init.cc:778, gated on NCCL_LAUNCH_ORDER_IMPLICIT.
+extern ncclResult_t g_ncclCudaContextTrackResult;
+extern int g_ncclCudaContextTrackCalls;
+ncclResult_t ncclCudaContextTrack(struct ncclCudaContext** out) {
+  g_ncclCudaContextTrackCalls++;
+  if (out) *out = nullptr;
+  return g_ncclCudaContextTrackResult;
+}
 ncclResult_t ncclDdaFabricCommFini(struct ncclComm* comm) { return ncclSuccess; }
 ncclResult_t ncclDdaFabricCommInit(struct ncclComm* comm) { ::abort(); }
 ncclResult_t ncclDdaIpcCommFini(struct ncclComm* comm) { return ncclSuccess; }
