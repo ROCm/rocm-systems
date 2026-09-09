@@ -84,7 +84,7 @@ jobs:
       # Step anchors: steps shared identically with the system-deps job are
       # anchored here (_step-*) and aliased below to avoid duplication.
       - &_step-checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           sparse-checkout: |
             projects/rocprofiler-systems/
