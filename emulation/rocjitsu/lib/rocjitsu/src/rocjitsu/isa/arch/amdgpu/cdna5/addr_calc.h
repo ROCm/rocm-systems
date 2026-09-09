@@ -14,7 +14,7 @@
 
 namespace rocjitsu::amdgpu {
 class Wavefront;
-struct VectorMemState;
+class VectorMemState;
 } // namespace rocjitsu::amdgpu
 
 namespace rocjitsu::cdna5 {
