@@ -74,6 +74,7 @@ class GpuSpmBuilder
 {
     typedef typename Primitives::mux_info_t mux_info_t;
     uint32_t                                wgp_per_sa_;
+    uint32_t                                grbm_index_value_last_;
 
     void DebugTrace(uint32_t value)
     {
@@ -84,11 +85,20 @@ class GpuSpmBuilder
 
     Builder builder;
 
+    void SetGrbmGfxIndex(CmdBuffer* cmd_buffer, uint32_t grbm_index_value)
+    {
+        if(grbm_index_value_last_ == grbm_index_value) return;
+        builder.BuildWriteUConfigRegPacket(
+            cmd_buffer, Primitives::GRBM_GFX_INDEX_ADDR, grbm_index_value);
+        grbm_index_value_last_ = grbm_index_value;
+    }
+
 public:
     explicit GpuSpmBuilder(const AgentInfo* agent_info)
     : SpmBuilder()
     , builder(acquire_ip_offset_table(agent_info))
     , wgp_per_sa_(1)
+    , grbm_index_value_last_(~uint32_t{0})
     {
         if constexpr(Primitives::GFXIP_LEVEL >= 11)
         {
@@ -126,8 +136,7 @@ public:
                 cmd_buffer, Primitives::RLC_PERFMON_CLK_CNTL_ADDR, 1);
 
         // Program Grbm to broadcast messages to all shader engines
-        builder.BuildWriteUConfigRegPacket(
-            cmd_buffer, Primitives::GRBM_GFX_INDEX_ADDR, Primitives::grbm_broadcast_value());
+        SetGrbmGfxIndex(cmd_buffer, Primitives::grbm_broadcast_value());
         // Issue a CSPartialFlush cmd including cache flush
         builder.BuildWriteWaitIdlePacket(cmd_buffer);
 
@@ -212,11 +221,11 @@ public:
         {
             if(!counter_info_even[i].empty())
             {
-                sort(counter_info_even[i].begin(), counter_info_even[i].end(), compare);
+                stable_sort(counter_info_even[i].begin(), counter_info_even[i].end(), compare);
             }
             if(!counter_info_odd[i].empty())
             {
-                sort(counter_info_odd[i].begin(), counter_info_odd[i].end(), compare);
+                stable_sort(counter_info_odd[i].begin(), counter_info_odd[i].end(), compare);
             }
         }
 
@@ -412,6 +421,9 @@ public:
                                                Primitives::RLC_SPM_PERFMON_SAMPLE_DELAY_MAX__ADDR,
                                                config->spm_sample_delay_max);
 
+        // Delay programming still uses direct GRBM_GFX_INDEX writes instead of SetGrbmGfxIndex().
+        // That block restores broadcast explicitly before returning, so the tracked helper state
+        // remains consistent with hardware when the main select-programming phase starts below.
         if constexpr(Primitives::SPM_DELAY_PROGRAMMING_REQUIRED)
         {
             for(size_t i = 0; i < Primitives::NUMBER_OF_BLOCKS; ++i)
@@ -464,7 +476,6 @@ public:
         //    followed by the actual register value. The first step may be to clear all counters of
         //    all instances to select zero (no counting). Then program the GRBM_GFX_INDEX, followed by
         //    the [BLK]_STRMPERFMON_SELECTx register.
-        uint32_t grbm_index_value_last = Primitives::grbm_broadcast_value();
         for(size_t i = 0; i < Primitives::NUMBER_OF_BLOCKS; ++i)
         {
             if(counter_info_even[i].empty()) continue;
@@ -491,13 +502,7 @@ public:
                     if(k == 0)
                     {
                         const uint32_t grbm_index_value = Primitives::grbm_broadcast_value();
-                        if(grbm_index_value_last != grbm_index_value)
-                        {
-                            builder.BuildWriteUConfigRegPacket(cmd_buffer,
-                                                               Primitives::GRBM_GFX_INDEX_ADDR,
-                                                               grbm_index_value);
-                            grbm_index_value_last = grbm_index_value;
-                        }
+                        SetGrbmGfxIndex(cmd_buffer, grbm_index_value);
                         if(!(Primitives::SQ_PERFCOUNTER_MASK_ADDR == Register()))
                         {
                             builder.BuildWriteUConfigRegPacket(cmd_buffer,
@@ -534,13 +539,7 @@ public:
                     if(je == 0)
                     {
                         const uint32_t grbm_index_value = Primitives::grbm_broadcast_value();
-                        if(grbm_index_value_last != grbm_index_value)
-                        {
-                            builder.BuildWriteUConfigRegPacket(cmd_buffer,
-                                                               Primitives::GRBM_GFX_INDEX_ADDR,
-                                                               grbm_index_value);
-                            grbm_index_value_last = grbm_index_value;
-                        }
+                        SetGrbmGfxIndex(cmd_buffer, grbm_index_value);
                         builder.BuildWriteUConfigRegPacket(cmd_buffer,
                                                            reg_info.control_addr,
                                                            Primitives::sq_control_value(counter_des_even));
@@ -581,12 +580,7 @@ public:
                         : Primitives::grbm_inst_index_value(
                               Primitives::decode_spm_instance_index(block_info,
                                                                     counter_des_0.block_des.index));
-                if(grbm_index_value_last != grbm_index_value)
-                {
-                    builder.BuildWriteUConfigRegPacket(
-                        cmd_buffer, Primitives::GRBM_GFX_INDEX_ADDR, grbm_index_value);
-                    grbm_index_value_last = grbm_index_value;
-                }
+                SetGrbmGfxIndex(cmd_buffer, grbm_index_value);
                 int je, jo;  // je & jo store even/odd array index
                 for(je = jo = 0; je < counter_info_even[i].size(); ++je)
                 {
@@ -626,36 +620,12 @@ public:
                     //   every SA/WGP/INST participating in that SE line.
                     // - Under that constraint, broadcast and explicit topology programming converge to the
                     //   same end result while keeping the PM4 programming path simple.
-#if PER_WGP_INST_SELECT
-                    if((block_info->attr & CounterBlockWgpAttr) && block_info->instance_count > 1)
-                    {
-                        for(int wgp = 0; wgp < wgp_per_sa_; wgp++)
-                        {
-                            const uint32_t grbm_index_value =
-                                Primitives::grbm_inst_index_value(
-                                    Primitives::decode_spm_instance_index(block_info,
-                                                                          counter_des.block_des.index) |
-                                    (wgp << 2));
-                            builder.BuildWriteUConfigRegPacket(
-                                cmd_buffer, Primitives::GRBM_GFX_INDEX_ADDR, grbm_index_value);
-                            builder.BuildWriteConfigRegPacket(
-                                cmd_buffer, spm_select_addr, spm_select_value);
-                            grbm_index_value_last = grbm_index_value;
-                        }
-                    }
-                    else
-#endif
                     {
                         if(je != 0 && !(block_info->attr & CounterBlockWgpAttr))
                             grbm_index_value = Primitives::grbm_inst_index_value(
                                 Primitives::decode_spm_instance_index(block_info,
                                                                       counter_des.block_des.index));
-                        if(grbm_index_value_last != grbm_index_value)
-                        {
-                            builder.BuildWriteUConfigRegPacket(
-                                cmd_buffer, Primitives::GRBM_GFX_INDEX_ADDR, grbm_index_value);
-                            grbm_index_value_last = grbm_index_value;
-                        }
+                        SetGrbmGfxIndex(cmd_buffer, grbm_index_value);
 
                         const uint64_t programmed_select_key =
                             (uint64_t(grbm_index_value) << 32) | spm_select_addr.offset;
@@ -682,9 +652,7 @@ public:
                 }
             }
         }
-        if(grbm_index_value_last != Primitives::grbm_broadcast_value())
-            builder.BuildWriteUConfigRegPacket(
-                cmd_buffer, Primitives::GRBM_GFX_INDEX_ADDR, Primitives::grbm_broadcast_value());
+        SetGrbmGfxIndex(cmd_buffer, Primitives::grbm_broadcast_value());
 
         // Set segment size
         uint32_t global_count = ss[0];

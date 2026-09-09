@@ -488,6 +488,12 @@ public:
         mxinfo.gfx.instance = instance;
         return mxinfo;
     }
+    static uint32_t encode_spm_block_index(uint32_t inst_index,
+                                           uint32_t sa_index,
+                                           uint32_t wgp_index)
+    {
+        return (sa_index << 5) | (wgp_index << 1) | inst_index;
+    }
     static uint32_t decode_spm_instance_index(const GpuBlockInfo* block_info, uint32_t block_index)
     {
         if(block_info && (block_info->attr & CounterBlockWgpAttr)) return block_index & 0x1;
