@@ -432,10 +432,7 @@ dispatch records too with exactly one dispatch record per logical dispatch.
 A marker region is emitted once by the host but encloses every pass, so its duration subsumes the
 replay overhead. That overhead is subtracted rather than tolerated.
 
-- The native tool derives each logical dispatch's replay overhead from the `KERNEL_REPLAY` `CONFIG`
-  and `PASS` callbacks it already receives: the replay window's wall time, less the single execution
-  the application would have performed without replay. This needs no per-pass kernel tracing, so
-  stopping the trace context at pass 1 does not affect it.
+- The native tool derives each logical dispatch's replay overhead from wall time between pass *1* and pass *N*.
 - Post-processing subtracts that overhead from any marker region enclosing the dispatch, so reported
   region durations approximate an unreplayed run.
 - **Residual limitation.** Overhead that cannot be attributed to a specific enclosed dispatch is not
