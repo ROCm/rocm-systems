@@ -157,14 +157,11 @@ https://github.com/ROCm/rocm-systems/pull/11054
 
 ## Validation
 
-- **ISA** — all nine variants emit the width and hint they claim (`remote/isa_check.sh`,
-  checked against expectations declared next to the code). Includes the real
-  `BlitLinearSourceCode` blob extracted from `blitcl.cpp`, not just the transcription.
-- **Byte-exact** — all nine variants, over a size that is not a multiple of 16 so the scalar
-  tail runs. Checked before any timing is trusted.
-- **Through the real path** — `hipMemcpyAsync` D2D, 10 sizes x 3 offsets, tail-exercising
-  sizes, unaligned offsets, guard byte past the end. 0 failures, flag off and on.
-- **Flag reaches the kernel** — `AMD_LOG_LEVEL=4` shows `copyBuffer` off, `copyBufferNT` on.
-- **hip-tests** — MemoryTest1/2 and DeviceMemoryTest abort at identical pre-existing points
-  either way. The one MemoryTest1 delta is `hipHostRegister.cc:754`, which this change cannot
-  reach: host-registered memory is excluded from the shader copy path.
+All nine variants emit the width and temporal hint they claim (`remote/isa_check.sh`, run
+against the real `BlitLinearSourceCode` blob as well as the transcription) and copy
+byte-exactly, both checked before any timing is trusted. Through the real path,
+`hipMemcpyAsync` D2D over 10 sizes x 3 offsets with a guard byte past the end gives 0 failures
+with the flag off and on, and `AMD_LOG_LEVEL=4` confirms the flag switches which kernel is
+dispatched. hip-tests MemoryTest1/2 and DeviceMemoryTest abort at identical pre-existing points
+either way; the one MemoryTest1 delta is `hipHostRegister.cc:754`, which this change cannot
+reach.
