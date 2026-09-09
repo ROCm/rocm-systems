@@ -49,16 +49,44 @@ class SurfaceNonSubtreePathsTest(unittest.TestCase):
         self.assertTrue(r.run_all_tests)
         self.assertEqual(r.changed_projects, "")
 
-    def test_unmapped_top_level_dir_is_not_surfaced(self):
-        # experimental/* has no TheRock mapping; surfacing it would hard-fail the
-        # selector, so it must fall through to the safe build-all default.
+    def test_unmapped_top_level_dir_runs_all(self):
+        # experimental/* has no TheRock mapping and is not a surfaced component;
+        # a non-skippable change there is unclassified, so run the full suite
+        # rather than narrow (erman-gurses' review on #11379).
         r = _run(["experimental/foo/bar.cpp"])
         self.assertEqual(r.changed_projects, "")
-        self.assertFalse(r.run_all_tests)
+        self.assertTrue(r.run_all_tests)
         self.assertFalse(r.skip_tests)
 
     def test_projects_still_surface(self):
         r = _run(["projects/rocm-core/CMakeLists.txt"])
+        self.assertEqual(r.changed_projects, "projects/rocm-core")
+
+    def test_mixed_recognized_and_unclassified_runs_all(self):
+        # A recognized project change alongside an unclassified non-skippable
+        # path must NOT narrow to just the recognized subtree (erman-gurses'
+        # review on #11379) -- the unclassified change's impact is unknown.
+        r = _run(
+            [
+                "projects/rocm-core/src/x.cpp",
+                "tools/rocm-build/helper.py",
+            ]
+        )
+        self.assertTrue(r.run_all_tests)
+        self.assertEqual(r.changed_projects, "")
+        self.assertFalse(r.skip_tests)
+
+    def test_top_level_nonskippable_file_runs_all(self):
+        # A root-level build file belongs to no subtree -> unclassified -> run all.
+        r = _run(["CMakeLists.txt"])
+        self.assertTrue(r.run_all_tests)
+        self.assertEqual(r.changed_projects, "")
+
+    def test_recognized_plus_skippable_still_narrows(self):
+        # Docs/skippable files alongside a recognized project must not force a
+        # full run -- they are classified as skippable, not unclassified.
+        r = _run(["projects/rocm-core/src/x.cpp", "README.md"])
+        self.assertFalse(r.run_all_tests)
         self.assertEqual(r.changed_projects, "projects/rocm-core")
 
     def test_every_surfaced_prefix_directory_exists(self):

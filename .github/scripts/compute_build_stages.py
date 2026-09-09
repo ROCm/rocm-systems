@@ -19,7 +19,8 @@ Stage selection is delegated to TheRock's build topology (the single source of
 truth), imported from the TheRock checkout so this script owns no dependency
 math and cannot drift from the actual build graph:
 
-    BuildTopology.get_stages_for_projects(projects)
+    BuildTopology.resolve_alias_to_artifact(project)  # project -> artifact
+    BuildTopology.get_stages_for_artifacts(artifacts)
         -> the minimal set of stages needed to BUILD the changed projects
            (impacted stages plus their upstream build dependencies).
 
