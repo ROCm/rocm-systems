@@ -55,6 +55,22 @@ function(apply_hip_compile_only tgt)
   endforeach()
 endfunction()
 
+# apply_asan_if_enabled(<target>)
+#
+# When BUILD_ADDRESS_SANITIZER is set, compile and link <target> with
+# AddressSanitizer (-shared-libasan so the host-only binaries pick up the ASan
+# runtime dynamically), adding an rpath to ASAN_RUNTIME_DIR when known. No-op
+# otherwise. Applied uniformly to every in-RCCL-build host-only micro binary.
+function(apply_asan_if_enabled tgt)
+  if(BUILD_ADDRESS_SANITIZER)
+    target_compile_options(${tgt} PRIVATE -fsanitize=address)
+    target_link_options(${tgt} PRIVATE -fsanitize=address -shared-libasan)
+    if(DEFINED ASAN_RUNTIME_DIR)
+      target_link_options(${tgt} PRIVATE "LINKER:-rpath,${ASAN_RUNTIME_DIR}")
+    endif()
+  endif()
+endfunction()
+
 if(BUILD_TESTS)
   # rccl-UnitTestsMicro: standalone unit-test binary compiled directly into
   # the test binary. This lets us use preprocessor and link-time substitution
@@ -113,13 +129,7 @@ if(BUILD_TESTS)
   target_link_options(rccl-UnitTestsMicro PRIVATE
     -fprofile-instr-generate -fcoverage-mapping)
 
-  if(BUILD_ADDRESS_SANITIZER)
-    target_compile_options(rccl-UnitTestsMicro PRIVATE -fsanitize=address)
-    target_link_options(rccl-UnitTestsMicro PRIVATE -fsanitize=address -shared-libasan)
-    if(DEFINED ASAN_RUNTIME_DIR)
-      target_link_options(rccl-UnitTestsMicro PRIVATE "LINKER:-rpath,${ASAN_RUNTIME_DIR}")
-    endif()
-  endif()
+  apply_asan_if_enabled(rccl-UnitTestsMicro)
 
   # Deliberately NOT linking librccl.so: this binary is for tests that compile
   # their unit-under-test source file(s) directly. Add files to
@@ -225,13 +235,7 @@ if(BUILD_TESTS)
       -no-hip-rt
       -fprofile-instr-generate -fcoverage-mapping
       -Wl,--gc-sections)
-    if(BUILD_ADDRESS_SANITIZER)
-      target_compile_options(${_init_tgt} PRIVATE -fsanitize=address)
-      target_link_options(${_init_tgt} PRIVATE -fsanitize=address -shared-libasan)
-      if(DEFINED ASAN_RUNTIME_DIR)
-        target_link_options(${_init_tgt} PRIVATE "LINKER:-rpath,${ASAN_RUNTIME_DIR}")
-      endif()
-    endif()
+    apply_asan_if_enabled(${_init_tgt})
     rocm_install(TARGETS ${_init_tgt} COMPONENT tests)
     if(COMMAND apply_test_category_labels)
       set(_init_categories_yaml "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro_init.yaml")
@@ -341,13 +345,7 @@ if(BUILD_TESTS)
     -no-hip-rt
     -fprofile-instr-generate -fcoverage-mapping
     -Wl,--gc-sections)
-  if(BUILD_ADDRESS_SANITIZER)
-    target_compile_options(rccl-UnitTestsMicroEnqueue PRIVATE -fsanitize=address)
-    target_link_options(rccl-UnitTestsMicroEnqueue PRIVATE -fsanitize=address -shared-libasan)
-    if(DEFINED ASAN_RUNTIME_DIR)
-      target_link_options(rccl-UnitTestsMicroEnqueue PRIVATE "LINKER:-rpath,${ASAN_RUNTIME_DIR}")
-    endif()
-  endif()
+  apply_asan_if_enabled(rccl-UnitTestsMicroEnqueue)
   rocm_install(TARGETS rccl-UnitTestsMicroEnqueue COMPONENT tests)
   if(COMMAND apply_test_category_labels)
     set(_enqueue_categories_yaml
@@ -422,13 +420,7 @@ if(BUILD_TESTS)
       -no-hip-rt
       -fprofile-instr-generate -fcoverage-mapping)
 
-    if(BUILD_ADDRESS_SANITIZER)
-      target_compile_options(rccl-UnitTestsMicroDevRuntime PRIVATE -fsanitize=address)
-      target_link_options(rccl-UnitTestsMicroDevRuntime PRIVATE -fsanitize=address -shared-libasan)
-      if(DEFINED ASAN_RUNTIME_DIR)
-        target_link_options(rccl-UnitTestsMicroDevRuntime PRIVATE "LINKER:-rpath,${ASAN_RUNTIME_DIR}")
-      endif()
-    endif()
+    apply_asan_if_enabled(rccl-UnitTestsMicroDevRuntime)
 
     rocm_install(TARGETS rccl-UnitTestsMicroDevRuntime COMPONENT tests)
 
