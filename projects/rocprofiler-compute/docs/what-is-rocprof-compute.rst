@@ -142,28 +142,55 @@ Key commands
 
 ROCm Compute Profiler exposes two primary modes on the ``rocprof-compute`` executable: ``profile`` to collect data, and ``analyze`` to read it back. See :ref:`modes` for the full list of modes and :ref:`basic-operations` for the required arguments per operation.
 
-.. list-table::
-   :header-rows: 1
-   :widths: 45 55
+The following are key ``profile`` and ``analyze`` commands:
 
-   * - Command
-     - Purpose
-   * - ``rocprof-compute profile -n my_run -- ./app``
-     - Profiles ``./app``, collecting all available counters for all kernels, and writes results to ``workloads/my_run/<SoC>/``.
-   * - ``rocprof-compute profile -n my_run -k vecCopy -- ./app``
-     - Profiles only kernels whose name matches ``vecCopy``.
-   * - ``rocprof-compute profile -n my_run -d 1 2 3 -- ./app``
-     - Profiles only the 1st, 2nd, and 3rd dispatch of each kernel.
-   * - ``rocprof-compute profile -n my_run -b 2 5 -- ./app``
-     - Profiles only the counters needed for the specified analysis report blocks, which speeds up the profiling run.
-   * - ``rocprof-compute profile -n my_run --roof-only -- ./app``
-     - Runs only the roofline micro-benchmarks, skipping standard counter collection.
-   * - ``rocprof-compute analyze -p workloads/my_run/MI300X/``
-     - Analyzes a profiled run in the terminal.
-   * - ``rocprof-compute analyze -p workloads/my_run/MI300X/ --output-format db``
-     - Writes the analysis to a SQLite analysis database instead of printing to the terminal.
-   * - ``rocprof-compute analyze -p run_a/MI300X/ run_b/MI300X/``
-     - Compares two profiled runs of the same SoC side by side.
+* To profile ``./app``, collecting all available counters for all kernels, and write results to ``workloads/my_run/<SoC>/``:
+
+  .. code-block:: shell-session
+
+     $ rocprof-compute profile -n my_run -- ./app
+
+* To profile only kernels whose name matches ``vecCopy``:
+
+  .. code-block:: shell-session
+
+     $ rocprof-compute profile -n my_run -k vecCopy -- ./app
+
+* To profile only the 1st, 2nd, and 3rd dispatch of each kernel:
+
+  .. code-block:: shell-session
+
+     $ rocprof-compute profile -n my_run -d 1 2 3 -- ./app
+
+* To profile only the counters needed for specific analysis report blocks, which speeds up the profiling run:
+
+  .. code-block:: shell-session
+
+     $ rocprof-compute profile -n my_run -b 2 5 -- ./app
+
+* To run only the roofline micro-benchmarks, skipping standard counter collection:
+
+  .. code-block:: shell-session
+
+     $ rocprof-compute profile -n my_run --roof-only -- ./app
+
+* To analyze a profiled run in the terminal:
+
+  .. code-block:: shell-session
+
+     $ rocprof-compute analyze -p workloads/my_run/MI300X/
+
+* To write the analysis to a SQLite analysis database instead of printing to the terminal:
+
+  .. code-block:: shell-session
+
+     $ rocprof-compute analyze -p workloads/my_run/MI300X/ --output-format db
+
+* To compare two profiled runs of the same SoC side by side:
+
+  .. code-block:: shell-session
+
+     $ rocprof-compute analyze -p run_a/MI300X/ run_b/MI300X/
 
 For full walkthroughs, see :doc:`how-to/profile/mode` and :doc:`how-to/analyze/cli`.
 
