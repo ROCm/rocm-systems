@@ -1146,6 +1146,77 @@ TEST(L2CacheTest, AliasedVasRequireCoherenceBoundary) {
   EXPECT_EQ(actual, dirty);
 }
 
+TEST(L2CacheTest, FullLineWriteMissDoesNotReadBacking) {
+  GpuMemory memory("memory");
+  L2Cache l2("l2");
+  l2.set_backing_memory(&memory);
+  constexpr uint64_t kAddr = 0x900000;
+  std::array<uint8_t, L2Cache::LINE_SIZE> replacement{};
+  std::array<uint8_t, L2Cache::LINE_SIZE> observed{};
+  replacement.fill(0x5A);
+
+  l2.write(kAddr, replacement.data(), replacement.size());
+  EXPECT_EQ(l2.backing_read_transactions(), 0u);
+  EXPECT_EQ(l2.backing_write_transactions(), 1u);
+  memory.read_block(kAddr, std::span<uint8_t>(observed));
+  EXPECT_EQ(observed, replacement);
+  observed.fill(0);
+  l2.read(kAddr, observed.data(), observed.size());
+  EXPECT_EQ(observed, replacement);
+  EXPECT_EQ(l2.backing_read_transactions(), 0u);
+}
+
+TEST(L2CacheTest, FullLineWriteMissPreservesDirtyEviction) {
+  GpuMemory memory("memory");
+  L2Cache l2("l2");
+  l2.set_backing_memory(&memory);
+  constexpr uint64_t kBase = 0x910000;
+  constexpr uint64_t kSetStride = static_cast<uint64_t>(L2Cache::LINE_SIZE) * L2Cache::NUM_SETS;
+  std::array<uint8_t, L2Cache::LINE_SIZE> dirty{};
+  std::array<uint8_t, L2Cache::LINE_SIZE> replacement{};
+  std::array<uint8_t, L2Cache::LINE_SIZE> observed{};
+  dirty.fill(0x3C);
+  replacement.fill(0xA5);
+
+  l2.writeback_line(kBase, dirty.data());
+  for (uint32_t way = 1; way < L2Cache::ASSOCIATIVITY; ++way)
+    l2.read(kBase + static_cast<uint64_t>(way) * kSetStride, observed.data(), observed.size());
+  l2.write(kBase + static_cast<uint64_t>(L2Cache::ASSOCIATIVITY) * kSetStride, replacement.data(),
+           replacement.size());
+
+  observed.fill(0);
+  memory.read_block(kBase, std::span<uint8_t>(observed));
+  EXPECT_EQ(observed, dirty);
+}
+
+TEST(L1VectorCacheTest, FullLineStoreMissDoesNotReadBacking) {
+  GpuMemory memory("memory");
+  L2Cache l2("l2");
+  l2.set_backing_memory(&memory);
+  L1VectorCache l1(&l2);
+  l1.set_memory(&memory);
+  constexpr uint64_t kAddr = 0x920000;
+  constexpr uint32_t kLanes = L1VectorCache::LINE_SIZE / sizeof(uint32_t);
+  std::array<uint64_t, kLanes> addresses{};
+  std::array<uint32_t, kLanes> replacement{};
+  std::array<uint32_t, kLanes> observed{};
+  for (uint32_t lane = 0; lane < kLanes; ++lane) {
+    addresses[lane] = kAddr + static_cast<uint64_t>(lane) * sizeof(uint32_t);
+    replacement[lane] = 0xCAFE0000u + lane;
+  }
+
+  l1.store(addresses.data(), (uint64_t{1} << kLanes) - 1, sizeof(uint32_t), 1,
+           reinterpret_cast<const uint8_t *>(replacement.data()), Mtype::RW,
+           /*non_temporal=*/false, kLanes);
+  EXPECT_EQ(l2.backing_read_transactions(), 0u);
+  EXPECT_EQ(l2.backing_write_transactions(), 1u);
+  l1.load(addresses.data(), (uint64_t{1} << kLanes) - 1, sizeof(uint32_t), 1,
+          reinterpret_cast<uint8_t *>(observed.data()), Mtype::RW,
+          /*non_temporal=*/false, /*request_l1_bypass=*/false, kLanes);
+  EXPECT_EQ(observed, replacement);
+  EXPECT_EQ(l2.backing_read_transactions(), 0u);
+}
+
 TEST(L2CacheThreadingTest, ConcurrentFlushAllPreservesDirtyWritebacks) {
   GpuMemory memory("memory");
   L2Cache l2("l2");
