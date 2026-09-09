@@ -154,6 +154,93 @@ fn injection_emits_rccl_env_defaults() {
     }
 }
 
+/// The injection names the process hosting the daemon, and only in
+/// daemon mode.
+///
+/// Without it the interposer has nothing to check the peer answering its
+/// socket against, so it trusts whoever answered and says so on the
+/// workload's stderr — at every launch, in front of the workload's own
+/// output:
+///
+/// ```text
+/// [rj warn] daemon: authorizing pid N to read this address space; no
+/// launcher named a daemon for this client, ...
+/// ```
+///
+/// The value is load-bearing rather than cosmetic in both directions. A
+/// *wrong* PID is worse than none: the interposer refuses the peer
+/// outright (`RefusedPeerMismatch`) and the pageable transfers that need
+/// `process_vm_readv` stop working. So this asserts the exact identity —
+/// this process, which is the one `start_daemon` calls
+/// `rj_daemon_start` on — and not merely that the variable is set.
+#[test]
+fn injection_names_the_daemon_hosting_process_in_daemon_mode() {
+    use mirage_core::emulator::get_emulator_backend;
+    use mirage_core::profile::ProfileDef;
+    use mirage_core::session::{SessionContext, SessionId};
+
+    let _g = mirage_core::paths::test_env_lock();
+    let tmp = tempfile::tempdir().unwrap();
+    mirage_core::paths::set_test_root(tmp.path());
+
+    if kmd_preload().is_none() {
+        return; // rocjitsu not installed on this host
+    }
+
+    let agent_report = mirage_builtin::ensure_agents(false).unwrap();
+    let agent_name = agent_report
+        .iter()
+        .map(|(n, _)| n.clone())
+        .next()
+        .expect("at least one builtin agent");
+
+    let backend = get_emulator_backend("rocjitsu").expect("rocjitsu backend registered");
+    let injection_for = |daemon: bool| {
+        let emulator = EmulatorDef {
+            extra: Default::default(),
+            emulator: "rocjitsu".to_string(),
+            plugins: Default::default(),
+            exec_mode: ExecMode::Functional,
+            options: Default::default(),
+            topology: MaybeRef::Owned(mirage_core::topology::TopologyDef {
+                num_nodes: 1,
+                gpus_per_node: 1,
+                agent: MaybeRef::Ref(agent_name.clone()),
+            }),
+        };
+        let runtime_dir = tmp.path().join(if daemon { "daemon" } else { "local" });
+        std::fs::create_dir_all(&runtime_dir).unwrap();
+        let ctx = SessionContext {
+            id: SessionId::new("daemon-pid-test").unwrap(),
+            profile: ProfileDef {
+                name: "daemon-pid-test".to_string(),
+                description: None,
+                emulator,
+                containerize: None,
+            },
+            runtime_dir,
+            daemon,
+        };
+        backend
+            .injection_def(&ctx)
+            .expect("injection should succeed with a discoverable KMD library")
+    };
+
+    assert_eq!(
+        injection_for(true).env.get("ROCJITSU_DAEMON_PID"),
+        Some(&std::process::id().to_string()),
+        "daemon mode must name this process, the one that hosts the daemon"
+    );
+
+    // `--in-process` connects to no socket. Naming a daemon there would
+    // describe one that was never started.
+    assert_eq!(
+        injection_for(false).env.get("ROCJITSU_DAEMON_PID"),
+        None,
+        "in-process mode has no daemon to name"
+    );
+}
+
 /// Drop-in `--config <path>` mode: the user's config file is used
 /// verbatim, but the rocjitsu runtime directory it implies belongs to
 /// the *session*, not to whatever directory the user keeps their config
