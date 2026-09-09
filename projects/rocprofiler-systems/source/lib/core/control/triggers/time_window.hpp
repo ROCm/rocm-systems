@@ -26,13 +26,13 @@ public:
     , m_delay{ delay }
     , m_duration{ duration }
     {
-        m_session->register_trigger(trigger_name, initial_action(delay, duration));
+        m_session->register_trigger(k_trigger_name, initial_action(delay, duration));
     }
 
     ~time_window()
     {
         stop();
-        m_session->unregister_trigger(trigger_name);
+        m_session->unregister_trigger(k_trigger_name);
     }
 
     time_window(const time_window&)            = delete;
@@ -46,7 +46,7 @@ public:
     /// serializing start()/stop() calls (guarded via m_lifecycle_mutex).
     void start()
     {
-        const auto _thread_state_guard = state::thread::scoped(state::thread::Internal);
+        const auto thread_state_guard = state::thread::scoped(state::thread::Internal);
         const std::scoped_lock window_lk{ m_lifecycle_mutex };
         if(!has_window())
         {
@@ -66,7 +66,7 @@ public:
     /// the destructor), never from worker().
     void stop() noexcept
     {
-        const auto _thread_state_guard = state::thread::scoped(state::thread::Internal);
+        const auto thread_state_guard = state::thread::scoped(state::thread::Internal);
         const std::scoped_lock window_lk{ m_lifecycle_mutex };
         if(!m_thread.joinable())
         {
@@ -77,7 +77,7 @@ public:
     }
 
 private:
-    static constexpr std::string_view trigger_name = "time_window";
+    static constexpr std::string_view k_trigger_name = "time_window";
 
     std::shared_ptr<session> m_session;
     Clock&                   m_clock;
@@ -107,7 +107,7 @@ private:
 
     void worker()
     {
-        const auto _thread_state_guard = state::thread::scoped(state::thread::Internal);
+        const auto thread_state_guard = state::thread::scoped(state::thread::Internal);
 
         const auto current_ts   = m_clock.now();
         const bool has_delay    = m_delay > clock_duration::zero();
@@ -119,7 +119,7 @@ private:
             {
                 return;  // interrupted
             }
-            m_session->set_action(trigger_name, action::trace);
+            m_session->set_action(k_trigger_name, action::trace);
         }
 
         if(has_duration)
@@ -129,7 +129,7 @@ private:
             {
                 return;  // interrupted
             }
-            m_session->set_action(trigger_name, action::pause);  // terminal
+            m_session->set_action(k_trigger_name, action::pause);  // terminal
         }
     }
 };
