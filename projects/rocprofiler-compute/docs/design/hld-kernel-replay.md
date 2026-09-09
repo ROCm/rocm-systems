@@ -509,7 +509,6 @@ the signal available today. A structured detection mechanism remains an open que
 A diagnostic must name the specific unmet condition. It must identify:
 
 - Selected replay mode and backend
-- Which contexts the native tool owns, and which prerequisite is unsatisfied when a run is rejected
 - Multi-rank detection under kernel replay
 - SDK capability and agent
 - Counter-to-pass mapping
@@ -524,4 +523,4 @@ A diagnostic must name the specific unmet condition. It must identify:
 | --- | --- | --- |
 | 1 | Should kernel replay exclude collective kernels? | This will make multi-rank profiling with kernel replay possible, but the metrics won't reflect the statistics for all kernel invocations. |
 | 2 | Are cache-related metrics trustworthy at all under kernel replay? | Nothing restores cache state between passes, so cache-related counters do not represent the true cache behavior. |
-| 3 | How should `rocprof-compute` detect a declined snapshot? | Today the only signal is classifying an upstream warning string, and the process status can still report success. |
+| 3 | How should `rocprof-compute` detect a declined snapshot? | Today the only signal is classifying an upstream warning string. |
