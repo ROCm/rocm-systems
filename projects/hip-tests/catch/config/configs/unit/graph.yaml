@@ -1372,6 +1372,9 @@ graph:
   Unit_hipGraphNodeSetEnabled_Functional_MemCpy:
     <<: *level_2
     tags: [node]
+  Unit_hipGraphNodeSetEnabled_Functional_DependencyOrdering:
+    <<: *level_2
+    tags: [node]
   Unit_hipGraphNodeSetEnabled_Negative_Functional:
     <<: *level_2
     tags: [node]
