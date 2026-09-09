@@ -275,16 +275,7 @@ build_consan_moi_atomic_address_materialization(const ConSanMoiAtomicAddressPlan
       plan.result_address_vgpr_count != 2u || plan.result_address_vgpr >= 255u ||
       vcc_save_sgpr >= 105u || scc_save_sgpr >= 106u || scc_save_sgpr == vcc_save_sgpr ||
       scc_save_sgpr == vcc_save_sgpr + 1u ||
-      (scalar_vector &&
-       (!plan.scalar_base_sgpr ||
-        (*plan.scalar_base_sgpr >= vcc_save_sgpr && *plan.scalar_base_sgpr <= vcc_save_sgpr + 1u) ||
-        (*plan.scalar_base_sgpr + 1u >= vcc_save_sgpr &&
-         *plan.scalar_base_sgpr + 1u <= vcc_save_sgpr + 1u) ||
-        scc_save_sgpr == *plan.scalar_base_sgpr || scc_save_sgpr == *plan.scalar_base_sgpr + 1u)) ||
-      (buffer_resource && plan.scalar_offset_sgpr &&
-       ((*plan.scalar_offset_sgpr >= vcc_save_sgpr &&
-         *plan.scalar_offset_sgpr <= vcc_save_sgpr + 1u) ||
-        scc_save_sgpr == *plan.scalar_offset_sgpr)))
+      (scalar_vector && !plan.scalar_base_sgpr))
     return std::nullopt;
 
   constexpr uint16_t kVccLo = 106u;
@@ -299,10 +290,49 @@ build_consan_moi_atomic_address_materialization(const ConSanMoiAtomicAddressPlan
 
   std::vector<uint32_t> words;
   words.reserve(16u);
+  std::optional<uint16_t> buffered_vector_offset_vgpr;
+  std::optional<uint16_t> buffered_scalar_offset_vgpr;
+  if (scalar_vector) {
+    // Snapshot every scalar address input before borrowing any SGPR for SCC
+    // or VCC preservation. A spill-backed Inline probe may intentionally use
+    // a window containing these inputs after reconstructing them from its
+    // already-committed spill transaction.
+    if (buffer_resource && plan.input_address_vgpr >= plan.result_address_vgpr &&
+        plan.input_address_vgpr < plan.result_address_vgpr + 2u) {
+      for (uint16_t candidate = plan.scratch_vgpr; candidate < plan.result_address_vgpr;
+           ++candidate) {
+        if (candidate != plan.input_address_vgpr) {
+          buffered_vector_offset_vgpr = candidate;
+          break;
+        }
+      }
+      if (!buffered_vector_offset_vgpr)
+        return std::nullopt;
+      words.push_back(build_v_mov_b32_e32(*buffered_vector_offset_vgpr,
+                                          vector_source_vgpr(plan.input_address_vgpr), arch));
+    }
+    if (buffer_resource && plan.scalar_offset_sgpr) {
+      for (uint16_t candidate = plan.scratch_vgpr; candidate < plan.result_address_vgpr;
+           ++candidate) {
+        if ((!buffered_vector_offset_vgpr || candidate != *buffered_vector_offset_vgpr) &&
+            candidate != plan.input_address_vgpr) {
+          buffered_scalar_offset_vgpr = candidate;
+          break;
+        }
+      }
+      if (!buffered_scalar_offset_vgpr)
+        return std::nullopt;
+      words.push_back(build_v_mov_b32_e32(*buffered_scalar_offset_vgpr,
+                                          *plan.scalar_offset_sgpr, arch));
+    }
+    words.push_back(build_v_mov_b32_e32(plan.result_address_vgpr, *plan.scalar_base_sgpr, arch));
+    words.push_back(build_v_mov_b32_e32(static_cast<uint16_t>(plan.result_address_vgpr + 1u),
+                                        static_cast<uint16_t>(*plan.scalar_base_sgpr + 1u), arch));
+  }
   words.push_back(*save_scc);
   words.push_back(*save_vcc);
   if (scalar_vector) {
-    uint16_t offset_vgpr = plan.input_address_vgpr;
+    uint16_t offset_vgpr = buffered_vector_offset_vgpr.value_or(plan.input_address_vgpr);
     if (plan.input_address_scale != 1u) {
       const uint16_t scaled_offset_vgpr = plan.scratch_vgpr;
       if (scaled_offset_vgpr >= plan.result_address_vgpr)
@@ -316,17 +346,6 @@ build_consan_moi_atomic_address_materialization(const ConSanMoiAtomicAddressPlan
       words.push_back(*scale);
       offset_vgpr = scaled_offset_vgpr;
     }
-    if (buffer_resource && plan.input_address_vgpr >= plan.result_address_vgpr &&
-        plan.input_address_vgpr < plan.result_address_vgpr + 2u) {
-      offset_vgpr = plan.scratch_vgpr;
-      if (offset_vgpr == plan.input_address_vgpr || offset_vgpr >= plan.result_address_vgpr)
-        return std::nullopt;
-      words.push_back(
-          build_v_mov_b32_e32(offset_vgpr, vector_source_vgpr(plan.input_address_vgpr), arch));
-    }
-    words.push_back(build_v_mov_b32_e32(plan.result_address_vgpr, *plan.scalar_base_sgpr, arch));
-    words.push_back(build_v_mov_b32_e32(static_cast<uint16_t>(plan.result_address_vgpr + 1u),
-                                        static_cast<uint16_t>(*plan.scalar_base_sgpr + 1u), arch));
     std::optional<std::vector<uint32_t>> add_vaddr;
     if (plan.sign_extend_vector_offset) {
       // The sign scratch needs two scratch words before the result pair. Keep
@@ -348,11 +367,12 @@ build_consan_moi_atomic_address_materialization(const ConSanMoiAtomicAddressPlan
       return std::nullopt;
     words.insert(words.end(), add_vaddr->begin(), add_vaddr->end());
     if (buffer_resource && plan.scalar_offset_sgpr) {
-      const uint16_t scalar_offset_vgpr = plan.scratch_vgpr;
+      if (!buffered_scalar_offset_vgpr)
+        return std::nullopt;
+      const uint16_t scalar_offset_vgpr = *buffered_scalar_offset_vgpr;
       if (scalar_offset_vgpr == plan.result_address_vgpr ||
           scalar_offset_vgpr == plan.result_address_vgpr + 1u)
         return std::nullopt;
-      words.push_back(build_v_mov_b32_e32(scalar_offset_vgpr, *plan.scalar_offset_sgpr, arch));
       const auto add_scalar_offset = instrumentation::build_v_add_u64_vgpr_offset(
           plan.result_address_vgpr, scalar_offset_vgpr, arch);
       if (!add_scalar_offset)

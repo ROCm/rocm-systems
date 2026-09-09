@@ -491,11 +491,12 @@ scalar_owner_cdna_physical_vcc_base(uint32_t decoded_sgpr_count) {
 }
 
 [[nodiscard]] bool scalar_owner_ranges_conflict_with_physical_vcc(
-    std::span<const consan_detail::ScalarOwnerSgprRange> ranges, uint32_t current_sgpr_count) {
+    std::span<const consan_detail::ScalarOwnerSgprRange> ranges, uint32_t current_sgpr_count,
+    uint32_t required_sgpr_count_floor) {
   const auto original_vcc = scalar_owner_cdna_physical_vcc_base(current_sgpr_count);
   if (!original_vcc || ranges.empty())
     return true;
-  uint32_t required_count = current_sgpr_count;
+  uint32_t required_count = std::max(current_sgpr_count, required_sgpr_count_floor);
   for (const consan_detail::ScalarOwnerSgprRange &range : ranges)
     required_count = std::max<uint32_t>(required_count, range.base + range.width);
   const auto grown_vcc = scalar_owner_cdna_physical_vcc_base(required_count);
@@ -515,12 +516,13 @@ scalar_owner_cdna_physical_vcc_base(uint32_t decoded_sgpr_count) {
 
 bool consan_detail::scalar_owner_contexts_conflict_with_physical_vcc(
     std::span<const ScalarOwnerContextSummary> contexts,
-    std::span<const ScalarOwnerSgprRange> ranges) {
+    std::span<const ScalarOwnerSgprRange> ranges, uint32_t required_sgpr_count_floor) {
   if (contexts.empty() || ranges.empty())
     return true;
   return std::ranges::any_of(contexts, [&](const ScalarOwnerContextSummary &context) {
     return !context.descriptor_valid ||
-           scalar_owner_ranges_conflict_with_physical_vcc(ranges, context.current_sgpr_count);
+           scalar_owner_ranges_conflict_with_physical_vcc(
+               ranges, context.current_sgpr_count, required_sgpr_count_floor);
   });
 }
 

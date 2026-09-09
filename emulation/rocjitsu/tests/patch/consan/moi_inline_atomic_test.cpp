@@ -3393,8 +3393,9 @@ TEST(ConSanMoi, AtomicAddressPlanFailsClosedForUnsupportedShapesAndAliases) {
       base, /*scratch_vgpr=*/8, /*scratch_vgpr_count=*/5, ConSanRegisterAllocationSource::Explicit,
       ROCJITSU_CODE_ARCH_RDNA4);
   ASSERT_TRUE(plan.supported());
-  // Save SGPRs may not overwrite the guest scalar address pair.
-  EXPECT_FALSE(build_consan_moi_atomic_address_materialization(
+  // Materialization snapshots the guest scalar address pair before borrowing
+  // an overlapping SGPR for VCC preservation.
+  EXPECT_TRUE(build_consan_moi_atomic_address_materialization(
       plan, /*vcc_save_sgpr=*/4, /*scc_save_sgpr=*/82, ROCJITSU_CODE_ARCH_RDNA4));
   EXPECT_EQ(
       consan_moi_atomic_address_support_name(ConSanMoiAtomicAddressSupport::ScratchOperandAlias),
@@ -5025,15 +5026,16 @@ TEST(ConSanMoi, InlineAtomicUsesAutomaticScalarSpillAtFullScalarPressure) {
   }
 }
 
-TEST(ConSanMoi, InlineAtomicScalarSpillRejectsAliasedGuestScalarAddress) {
+TEST(ConSanMoi, InlineAtomicScalarSpillPreservesAliasedGuestScalarAddress) {
   const std::vector<uint8_t> bytes = make_rdna4_ordered_global_atomic_release_acquire_code_object();
   ASSERT_FALSE(bytes.empty());
   MoiOptions options = moi_options(ConSanMoiEngine::InlineShadow);
   options.moi_track_atomics = true;
   options.scratch_vgpr = 82u;
   options.set_moi_owner_epoch_vgprs(80u, 81u);
-  // VGLOBAL reads its address from s[4:5]. An automatic scalar spill may
-  // surround a vector-only FLAT atomic, but it must not clobber this pair.
+  // VGLOBAL reads its address from s[4:5]. The spill transaction must make
+  // that pair available for address snapshotting even though the automatic
+  // Inline scalar window deliberately borrows it.
   options.moi_exec_save_sgpr = 4u;
   options.automatic_moi_scalar_spill_layout = ConSanMoiScalarSpillLayout::Inline;
   options.moi_scalar_spill_setup = ConSanMoiScalarSpillSetup{
@@ -5047,12 +5049,13 @@ TEST(ConSanMoi, InlineAtomicScalarSpillRejectsAliasedGuestScalarAddress) {
   const ConSanTransformArtifacts result = test_lower_consan(bytes, options);
 
   EXPECT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
-  EXPECT_EQ(std::ranges::find(result.patches, ConSanPatchKind::TrampolineMoiInlineAtomicOrdering,
-                              &ConSanPatchInfo::kind),
-            result.patches.end());
-  EXPECT_TRUE(std::ranges::any_of(result.warnings, [](const std::string &warning) {
-    return warning.find("spill-backed scalar window aliases a guest atomic address input") !=
-           std::string::npos;
+  EXPECT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
+  EXPECT_EQ(std::ranges::count(result.patches,
+                               ConSanPatchKind::TrampolineMoiInlineAtomicOrdering,
+                               &ConSanPatchInfo::kind),
+            2u);
+  EXPECT_FALSE(std::ranges::any_of(result.warnings, [](const std::string &warning) {
+    return warning.find("aliases a guest atomic address input") != std::string::npos;
   })) << testing::PrintToString(result.warnings);
 }
 

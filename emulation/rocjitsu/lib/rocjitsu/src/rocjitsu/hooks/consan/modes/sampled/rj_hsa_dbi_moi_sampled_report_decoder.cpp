@@ -325,9 +325,14 @@ AutoMoiSampledDecodedReport decode_auto_moi_sampled_report(
         ++summary.sampled_malformed_sync_count;
         entry.sync_snapshot_usable = false;
         break;
-      case ConSanMoiSampledPendingAcquireState::Malformed:
       case ConSanMoiSampledPendingAcquireState::IdentityMismatch:
       case ConSanMoiSampledPendingAcquireState::FutureEpoch:
+        // The pending table is hashed by selected slot and owner bank. A
+        // stable record for another workgroup/dispatch, or for a later epoch
+        // of this identity, is an ordinary non-match rather than malformed
+        // evidence for the visible window being decoded.
+        break;
+      case ConSanMoiSampledPendingAcquireState::Malformed:
         ++summary.sampled_malformed_sync_count;
         entry.sync_snapshot_usable = false;
         break;

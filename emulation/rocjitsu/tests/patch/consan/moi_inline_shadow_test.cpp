@@ -2383,13 +2383,17 @@ TEST(ConSanMoi, RuntimeLdsApertureOverridesConfiguredDefault) {
 }
 
 TEST(ConSanMoi, InlineExactDispatchBankSelectionCoversFitBoundaries) {
-  constexpr uint64_t kExactShadowBudget = kConSanMoiOrdinaryAutoReportBufferCeilingBytes / 2u;
+  constexpr uint64_t kExactShadowBudget =
+      (kConSanMoiOrdinaryAutoReportBufferCeilingBytes / 4u) * 3u;
   constexpr uint64_t kLargestFittingLdsBytes =
       kExactShadowBudget / sizeof(ConSanMoiInlineExactShadowSlot);
 
   EXPECT_EQ(consan_moi_inline_exact_dispatch_bank_count_for_lds(4u), 256u);
-  EXPECT_EQ(consan_moi_inline_exact_dispatch_bank_count_for_lds(64u * 1024u), 32u);
-  EXPECT_EQ(consan_moi_inline_exact_dispatch_bank_count_for_lds(1024u * 1024u), 2u);
+  // A 16-KiB gfx950 aperture must retain one independent bank for each of
+  // the 256 workgroups in the Stream-K device regression.
+  EXPECT_EQ(consan_moi_inline_exact_dispatch_bank_count_for_lds(16u * 1024u), 256u);
+  EXPECT_EQ(consan_moi_inline_exact_dispatch_bank_count_for_lds(64u * 1024u), 64u);
+  EXPECT_EQ(consan_moi_inline_exact_dispatch_bank_count_for_lds(1024u * 1024u), 4u);
   EXPECT_EQ(consan_moi_inline_exact_dispatch_bank_count_for_lds(kLargestFittingLdsBytes), 1u);
   EXPECT_EQ(consan_moi_inline_exact_dispatch_bank_count_for_lds(kLargestFittingLdsBytes + 1u), 0u);
 }
@@ -2399,7 +2403,8 @@ TEST(ConSanMoi, InlineExactDispatchBanksTrackConfiguredLdsAperture) {
       consan_moi_max_workgroup_lds_bytes(ROCJITSU_CODE_ARCH_CDNA5);
   const uint64_t kExactBytesPerBank =
       kConfiguredLdsBytes * sizeof(ConSanMoiInlineExactShadowSlot);
-  constexpr uint64_t kExactShadowBudget = kConSanMoiOrdinaryAutoReportBufferCeilingBytes / 2u;
+  constexpr uint64_t kExactShadowBudget =
+      (kConSanMoiOrdinaryAutoReportBufferCeilingBytes / 4u) * 3u;
   const uint32_t kConfiguredDispatchBankCount =
       consan_moi_inline_exact_dispatch_bank_count_for_lds(kConfiguredLdsBytes);
   const ConSanMoiAutoReportInventory inventory{

@@ -561,6 +561,7 @@ bool g_seed_auto_replay_overlimit_range = false;
 bool g_seed_auto_sampled_report_on_load = false;
 bool g_seed_auto_sampled_report_succeeded = false;
 bool g_seed_auto_sampled_pending_release_scale = false;
+bool g_seed_auto_sampled_pending_identity_collision = false;
 bool g_seed_auto_sampled_conflict_pair = false;
 bool g_seed_auto_sampled_distinct_dispatches = false;
 bool g_seed_auto_sampled_distinct_clusters = false;
@@ -1300,6 +1301,45 @@ hsa_status_t HSA_API fake_executable_load_agent_code_object(
       };
       header->sampled_pending_acquire_count = 1u;
     }
+    if (g_seed_auto_sampled_pending_identity_collision) {
+      const uint32_t owner_bank_count =
+          rocjitsu::consan_moi_sampled_pending_acquire_owner_bank_count(
+              layout.sampled_pending_acquire_capacity, layout.sampled_causal_window_capacity);
+      if (owner_bank_count == 0u)
+        return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
+      const uint32_t pending_index = 7u & (owner_bank_count - 1u);
+      if (pending_index >= layout.sampled_pending_acquire_capacity)
+        return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
+      const auto encoded = rocjitsu::encode_consan_moi_sampled_sync_metadata({
+          .address = 0x123456780000ull,
+          .byte_count = 4u,
+          .kind = rocjitsu::ConSanMoiSampledSyncKind::Atomic,
+          .role = rocjitsu::ConSanMoiSampledSyncRole::RmwAcquire,
+          .scope = rocjitsu::ConSanMoiSampledSyncScope::Agent,
+          .outcome = rocjitsu::ConSanMoiSampledSyncOutcome::RmwReturnsOld,
+          .epoch_before = 2u,
+          .epoch_after = 2u,
+      });
+      if (encoded.classification != rocjitsu::ConSanMoiSampledSyncClassification::Valid)
+        return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+      auto *const pending = reinterpret_cast<rocjitsu::ConSanMoiSampledPendingAcquireSlot *>(
+          report + layout.sampled_pending_acquires_offset);
+      pending[pending_index] = {
+          .version = 2u,
+          .selected_slot = 0u,
+          .generation = header->generation,
+          .dispatch_id = 0x1122334455667788ull,
+          // Same hash slot and owner bank, but a different workgroup: this is
+          // an expected table collision, not malformed evidence for window 0.
+          .workgroup_x = 99u,
+          .workgroup_y = 4u,
+          .workgroup_z = 5u,
+          .owner_id = 7u,
+          .source_epoch = 2u,
+          .metadata = encoded.packed,
+      };
+      header->sampled_pending_acquire_count = 1u;
+    }
     g_seed_auto_sampled_report_succeeded = true;
   }
   if (loaded_code_object != nullptr)
@@ -1892,6 +1932,7 @@ void reset_code_object_observations() {
   g_seed_auto_sampled_report_on_load = false;
   g_seed_auto_sampled_report_succeeded = false;
   g_seed_auto_sampled_pending_release_scale = false;
+  g_seed_auto_sampled_pending_identity_collision = false;
   g_seed_auto_sampled_conflict_pair = false;
   g_seed_auto_sampled_distinct_dispatches = false;
   g_seed_auto_sampled_distinct_clusters = false;
@@ -7484,6 +7525,45 @@ TEST(HsaHooksUnitTest, AutoSampledPendingReleaseScansEachRelevantOwnerBankOnce) 
             std::string::npos)
       << "report teardown must scan the relevant bank once, not once per visible access\n"
       << log;
+}
+
+TEST(HsaHooksUnitTest, AutoSampledIgnoresPendingAcquireIdentityCollision) {
+  ScopedEnvVar mode("RJ_CONSAN_MODE", "sampled");
+  ScopedEnvVar fail_closed("RJ_CONSAN_FAIL_CLOSED", "1");
+  ScopedEnvVar report_buffer("RJ_CONSAN_MOI_REPORT_BUFFER", nullptr);
+  ScopedEnvVar report_size("RJ_CONSAN_MOI_REPORT_BUFFER_SIZE", nullptr);
+  ScopedEnvVar auto_report_size("RJ_CONSAN_MOI_AUTO_REPORT_BUFFER_SIZE", "4194304");
+  ScopedEnvVar runtime_stride("RJ_CONSAN_MOI_RUNTIME_SAMPLE_STRIDE", "1");
+  ScopedEnvVar dynamic_records("RJ_CONSAN_MOI_DYNAMIC_ACCESS_RECORDS", "0");
+  ScopedEnvVar max_patches("RJ_CONSAN_MAX_PATCHES", nullptr);
+  ScopedEnvVar log_level("RJ_CONSAN_LOG", "1");
+  reset_code_object_observations();
+  reset_core_memory_observations();
+  g_transform_override_result = auto_report_sampled_transform_result();
+  g_seed_auto_sampled_report_on_load = true;
+  g_seed_auto_sampled_pending_identity_collision = true;
+
+  testing::internal::CaptureStderr();
+  {
+    FakeApiTable api;
+    InstalledDbiHook hook(api);
+    ASSERT_TRUE(hook.installed()) << hook.error();
+    constexpr std::array<uint8_t, 8> original = {0x7f, 'E', 'L', 'F', 1, 2, 3, 4};
+    hsa_code_object_reader_t reader{};
+    ASSERT_EQ(api.core.hsa_code_object_reader_create_from_memory_fn(original.data(),
+                                                                    original.size(), &reader),
+              HSA_STATUS_SUCCESS);
+    EXPECT_EQ(api.core.hsa_executable_load_agent_code_object_fn(hsa_executable_t{7}, kHostAgent,
+                                                                reader, nullptr, nullptr),
+              HSA_STATUS_SUCCESS);
+  }
+  const std::string log = testing::internal::GetCapturedStderr();
+
+  EXPECT_TRUE(g_seed_auto_sampled_report_succeeded) << log;
+  EXPECT_NE(log.find("visible_sampled=1"), std::string::npos) << log;
+  EXPECT_NE(log.find("sampled_pending_acquires=1"), std::string::npos) << log;
+  EXPECT_NE(log.find("sampled_malformed_sync=0"), std::string::npos) << log;
+  EXPECT_NE(log.find("dynamic_complete=true"), std::string::npos) << log;
 }
 
 TEST(HsaHooksUnitTest, AutoSampledConflictRequiresSameDispatchClusterAndKernelOwnerScope) {

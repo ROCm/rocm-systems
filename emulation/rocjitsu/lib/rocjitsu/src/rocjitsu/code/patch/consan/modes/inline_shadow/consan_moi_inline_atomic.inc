@@ -320,23 +320,12 @@ void try_apply_inline_atomic_ordering_patch(std::span<const uint8_t> bytes,
             candidate_point.moi_scalar_spill_setup->temporaries.frame_base_sgpr);
       }
     }
-    if (candidate_point.has_inline_moi_scalar_spill()) {
-      if (!candidate_point.moi_exec_save_sgpr) {
-        result.warnings.emplace_back(
-            "ConSan MOI inline atomic spill-backed scalar state has no SGPR window in " +
-            moi_evidence_container_name(result.program_inventory, candidate.source_site));
-        continue;
-      }
-      const uint16_t scalar_base = *candidate_point.moi_exec_save_sgpr;
-      const uint16_t scalar_count = kConSanMoiInlineExecSaveSgprCount;
-      if (inline_atomic_scalar_spill_aliases_guest_address(address_plan, scalar_base,
-                                                           scalar_count)) {
-        result.warnings.emplace_back(
-            "ConSan MOI inline atomic spill-backed scalar window aliases a guest atomic "
-            "address input in " +
-            moi_evidence_container_name(result.program_inventory, candidate.source_site));
-        continue;
-      }
+    if (candidate_point.has_inline_moi_scalar_spill() &&
+        !candidate_point.moi_exec_save_sgpr) {
+      result.warnings.emplace_back(
+          "ConSan MOI inline atomic spill-backed scalar state has no SGPR window in " +
+          moi_evidence_container_name(result.program_inventory, candidate.source_site));
+      continue;
     }
     auto emission = plan_inline_atomic_emission(
         active_bytes, candidate, *owner_descriptor, options, candidate_point,

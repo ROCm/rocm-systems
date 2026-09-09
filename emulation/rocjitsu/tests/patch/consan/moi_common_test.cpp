@@ -1544,6 +1544,22 @@ TEST(ConSanMoi, ScalarOwnerWindowQualificationUsesEveryTailAndPhysicalVcc) {
       direct_owners, dispatch_hits_second_vcc));
   EXPECT_TRUE(consan_detail::scalar_owner_contexts_conflict_with_physical_vcc(direct_owners,
                                                                               hits_second_vcc));
+  const std::array streamk_transient_state = {
+      Range{4u, 30u}, Range{34u, 2u}, Range{36u, 1u}, Range{76u, 1u}};
+  const std::array streamk_owner = {
+      Summary{.descriptor_file_offset = 0x30u,
+              .current_sgpr_count = 80u,
+              .max_referenced_sgpr_count = 74u,
+              .sgpr_reference_coverage_complete = true,
+              .descriptor_valid = true},
+  };
+  // A previously qualified dispatch pair at s80:s81 grows the allocation to
+  // 88 SGPRs and moves physical VCC to s82:s83.  The later transient search
+  // must use that same final allocation when qualifying its s76 latch.
+  EXPECT_TRUE(consan_detail::scalar_owner_contexts_conflict_with_physical_vcc(
+      streamk_owner, streamk_transient_state));
+  EXPECT_FALSE(consan_detail::scalar_owner_contexts_conflict_with_physical_vcc(
+      streamk_owner, streamk_transient_state, /*required_sgpr_count_floor=*/82u));
   EXPECT_TRUE(consan_detail::scalar_owner_contexts_admit_reserved_window(
       direct_owners, 12u, 2u, /*protect_physical_vcc=*/true));
 

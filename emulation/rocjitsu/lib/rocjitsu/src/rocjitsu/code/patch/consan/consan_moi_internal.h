@@ -1018,7 +1018,7 @@ struct ScalarOwnerSgprRange {
 /// closed.
 [[nodiscard]] bool scalar_owner_contexts_conflict_with_physical_vcc(
     std::span<const ScalarOwnerContextSummary> contexts,
-    std::span<const ScalarOwnerSgprRange> ranges);
+    std::span<const ScalarOwnerSgprRange> ranges, uint32_t required_sgpr_count_floor = 0u);
 
 /// Return whether every owner admits a persistent ordinary-SGPR window above
 /// its complete scalar tail. CDNA callers additionally request physical-VCC

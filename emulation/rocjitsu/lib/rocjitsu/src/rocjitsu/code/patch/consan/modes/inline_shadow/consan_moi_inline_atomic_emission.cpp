@@ -1795,8 +1795,20 @@ inline_atomic_scalar_spill_aliases_guest_address(const ConSanMoiAtomicAddressPla
       (scalar_spill ? scalar_spill->save_words.size() + scalar_spill->restore_words.size() : 0u));
   if (spill)
     words.insert(words.end(), spill->save_words.begin(), spill->save_words.end());
-  if (scalar_spill)
+  if (scalar_spill) {
     words.insert(words.end(), scalar_spill->save_words.begin(), scalar_spill->save_words.end());
+    // The borrowed scalar window is already durably saved. When it contains
+    // an address operand, reconstruct the guest values before address
+    // materialization snapshots them into the scratch VGPR tail. The cave is
+    // then free to reuse the same scalar window, and the ordinary epilogue
+    // restores its guest-visible contents a second time. This is deliberately
+    // conditional: most sites do not need the extra reload transaction.
+    if (inline_atomic_scalar_spill_aliases_guest_address(
+            address_plan, scalar_spill->sgpr_base, scalar_spill->sgpr_count)) {
+      words.insert(words.end(), scalar_spill->restore_words.begin(),
+                   scalar_spill->restore_words.end());
+    }
+  }
   const auto append_spill_restore = [&]() {
     // Scalar restore uses the scratch VGPR window, so restore application
     // VGPRs only after every spilled SGPR has been reconstructed.
