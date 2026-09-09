@@ -8,13 +8,11 @@
 
 #ifdef __cplusplus
 
-// Pass all options to one __HIP_ATOMICS_ATTR(...); separate [[clang::atomic]]
-// attributes do not combine (the last one wins).
-#pragma push_macro("__HIP_ATOMICS_ATTR")
+#pragma push_macro("__HIP_ATOMICS_IGNORE_DENORMAL_MODE")
 #if defined(__has_extension) && __has_extension(clang_atomic_attributes)
-#define __HIP_ATOMICS_ATTR(...) [[clang::atomic(__VA_ARGS__)]]
+#define __HIP_ATOMICS_IGNORE_DENORMAL_MODE [[clang::atomic(ignore_denormal_mode)]]
 #else
-#define __HIP_ATOMICS_ATTR(...)
+#define __HIP_ATOMICS_IGNORE_DENORMAL_MODE
 #endif
 
 /**
@@ -44,9 +42,30 @@
  * @return Original value contained in \p addr.
  */
 __device__ inline float unsafeAtomicAdd(float* addr, float value) {
-  __HIP_ATOMICS_ATTR(remote_memory, no_fine_grained_memory, ignore_denormal_mode) {
-    return __scoped_atomic_fetch_add(addr, value, __ATOMIC_RELAXED, __MEMORY_SCOPE_DEVICE);
+#if defined(__gfx90a__) && __has_builtin(__builtin_amdgcn_is_shared) &&                            \
+    __has_builtin(__builtin_amdgcn_is_private) &&                                                  \
+    __has_builtin(__builtin_amdgcn_ds_atomic_fadd_f32) &&                                          \
+    __has_builtin(__builtin_amdgcn_global_atomic_fadd_f32)
+  if (__builtin_amdgcn_is_shared((const __attribute__((address_space(0))) void*)addr)) {
+    if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_ds_atomic_fadd_f32))
+      return __builtin_amdgcn_ds_atomic_fadd_f32(addr, value);
+    return 0.0f;
+  } else if (__builtin_amdgcn_is_private((const __attribute__((address_space(0))) void*)addr)) {
+    float temp = *addr;
+    *addr = temp + value;
+    return temp;
+  } else {
+    if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_global_atomic_fadd_f32))
+      return __builtin_amdgcn_global_atomic_fadd_f32(addr, value);
+    return 0.0f;
   }
+#elif __has_builtin(__hip_atomic_fetch_add)
+  __HIP_ATOMICS_IGNORE_DENORMAL_MODE {
+    return __hip_atomic_fetch_add(addr, value, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT);
+  }
+#else
+  return __atomic_fetch_add(addr, value, __ATOMIC_RELAXED);
+#endif
 }
 
 /**
@@ -65,7 +84,7 @@ __device__ inline float unsafeAtomicAdd(float* addr, float value) {
  */
 __device__ inline float unsafeAtomicMax(float* addr, float val) {
 #if __has_builtin(__hip_atomic_load) && __has_builtin(__hip_atomic_compare_exchange_strong)
-  __HIP_ATOMICS_ATTR(ignore_denormal_mode) {
+  __HIP_ATOMICS_IGNORE_DENORMAL_MODE {
     float value = __hip_atomic_load(addr, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT);
     bool done = false;
     while (!done && value < val) {
@@ -102,7 +121,7 @@ __device__ inline float unsafeAtomicMax(float* addr, float val) {
  */
 __device__ inline float unsafeAtomicMin(float* addr, float val) {
 #if __has_builtin(__hip_atomic_load) && __has_builtin(__hip_atomic_compare_exchange_strong)
-  __HIP_ATOMICS_ATTR(ignore_denormal_mode) {
+  __HIP_ATOMICS_IGNORE_DENORMAL_MODE {
     float value = __hip_atomic_load(addr, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT);
     bool done = false;
     while (!done && value > val) {
@@ -150,9 +169,17 @@ __device__ inline float unsafeAtomicMin(float* addr, float val) {
  * @return Original value contained in \p addr.
  */
 __device__ inline double unsafeAtomicAdd(double* addr, double value) {
-  __HIP_ATOMICS_ATTR(remote_memory, no_fine_grained_memory, ignore_denormal_mode) {
-    return __scoped_atomic_fetch_add(addr, value, __ATOMIC_RELAXED, __MEMORY_SCOPE_DEVICE);
+#if defined(__gfx90a__) && __has_builtin(__builtin_amdgcn_flat_atomic_fadd_f64)
+  if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_flat_atomic_fadd_f64))
+    return __builtin_amdgcn_flat_atomic_fadd_f64(addr, value);
+  return 0.0;
+#elif __has_builtin(__hip_atomic_fetch_add)
+  __HIP_ATOMICS_IGNORE_DENORMAL_MODE {
+    return __hip_atomic_fetch_add(addr, value, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT);
   }
+#else
+  return __atomic_fetch_add(addr, value, __ATOMIC_RELAXED);
+#endif
 }
 
 /**
@@ -182,9 +209,33 @@ __device__ inline double unsafeAtomicAdd(double* addr, double value) {
  * @return Original value contained at \p addr.
  */
 __device__ inline double unsafeAtomicMax(double* addr, double val) {
-  __HIP_ATOMICS_ATTR(remote_memory, no_fine_grained_memory, ignore_denormal_mode) {
-    return __scoped_atomic_fetch_max(addr, val, __ATOMIC_RELAXED, __MEMORY_SCOPE_DEVICE);
+#if (defined(__gfx90a__) || defined(__gfx94plus_clr__)) &&                                         \
+    __has_builtin(__builtin_amdgcn_flat_atomic_fmax_f64)
+  if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_flat_atomic_fmax_f64))
+    return __builtin_amdgcn_flat_atomic_fmax_f64(addr, val);
+  return 0.0;
+#else
+#if __has_builtin(__hip_atomic_load) && __has_builtin(__hip_atomic_compare_exchange_strong)
+  __HIP_ATOMICS_IGNORE_DENORMAL_MODE {
+    double value = __hip_atomic_load(addr, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT);
+    bool done = false;
+    while (!done && value < val) {
+      done = __hip_atomic_compare_exchange_strong(addr, &value, val, __ATOMIC_RELAXED,
+                                                  __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT);
+    }
+    return value;
   }
+#else
+  unsigned long long* uaddr = (unsigned long long*)addr;
+  unsigned long long value = __atomic_load_n(uaddr, __ATOMIC_RELAXED);
+  bool done = false;
+  while (!done && __longlong_as_double(value) < val) {
+    done = __atomic_compare_exchange_n(uaddr, &value, __double_as_longlong(val), false,
+                                       __ATOMIC_RELAXED, __ATOMIC_RELAXED);
+  }
+  return __longlong_as_double(value);
+#endif
+#endif
 }
 
 /**
@@ -214,9 +265,33 @@ __device__ inline double unsafeAtomicMax(double* addr, double val) {
  * @return Original value contained at \p addr.
  */
 __device__ inline double unsafeAtomicMin(double* addr, double val) {
-  __HIP_ATOMICS_ATTR(remote_memory, no_fine_grained_memory, ignore_denormal_mode) {
-    return __scoped_atomic_fetch_min(addr, val, __ATOMIC_RELAXED, __MEMORY_SCOPE_DEVICE);
+#if (defined(__gfx90a__) || defined(__gfx94plus_clr__)) &&                                         \
+    __has_builtin(__builtin_amdgcn_flat_atomic_fmin_f64)
+  if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_flat_atomic_fmin_f64))
+    return __builtin_amdgcn_flat_atomic_fmin_f64(addr, val);
+  return 0.0;
+#else
+#if __has_builtin(__hip_atomic_load) && __has_builtin(__hip_atomic_compare_exchange_strong)
+  __HIP_ATOMICS_IGNORE_DENORMAL_MODE {
+    double value = __hip_atomic_load(addr, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT);
+    bool done = false;
+    while (!done && value > val) {
+      done = __hip_atomic_compare_exchange_strong(addr, &value, val, __ATOMIC_RELAXED,
+                                                  __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT);
+    }
+    return value;
   }
+#else
+  unsigned long long* uaddr = (unsigned long long*)addr;
+  unsigned long long value = __atomic_load_n(uaddr, __ATOMIC_RELAXED);
+  bool done = false;
+  while (!done && __longlong_as_double(value) > val) {
+    done = __atomic_compare_exchange_n(uaddr, &value, __double_as_longlong(val), false,
+                                       __ATOMIC_RELAXED, __ATOMIC_RELAXED);
+  }
+  return __longlong_as_double(value);
+#endif
+#endif
 }
 
 /**
@@ -242,7 +317,7 @@ __device__ inline float safeAtomicAdd(float* addr, float value) {
   // need to force a CAS loop here.
   float old_val;
 #if __has_builtin(__hip_atomic_load)
-  __HIP_ATOMICS_ATTR(ignore_denormal_mode) {
+  __HIP_ATOMICS_IGNORE_DENORMAL_MODE {
     old_val = __hip_atomic_load(addr, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT);
   }
 #else   // !__has_builtin(__hip_atomic_load)
@@ -253,7 +328,7 @@ __device__ inline float safeAtomicAdd(float* addr, float value) {
   do {
     temp = expected = old_val;
 #if __has_builtin(__hip_atomic_compare_exchange_strong)
-    __HIP_ATOMICS_ATTR(ignore_denormal_mode) {
+    __HIP_ATOMICS_IGNORE_DENORMAL_MODE {
       __hip_atomic_compare_exchange_strong(addr, &expected, old_val + value, __ATOMIC_RELAXED,
                                            __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT);
     }
@@ -269,11 +344,11 @@ __device__ inline float safeAtomicAdd(float* addr, float value) {
   // atomics will produce safe CAS loops, but are otherwise not different than
   // agent-scope atomics. This logic is only applicable for gfx90a, and should
   // not be assumed on other architectures.
-  __HIP_ATOMICS_ATTR(ignore_denormal_mode) {
+  __HIP_ATOMICS_IGNORE_DENORMAL_MODE {
     return __hip_atomic_fetch_add(addr, value, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_SYSTEM);
   }
 #elif __has_builtin(__hip_atomic_fetch_add)
-  __HIP_ATOMICS_ATTR(ignore_denormal_mode) {
+  __HIP_ATOMICS_IGNORE_DENORMAL_MODE {
     return __hip_atomic_fetch_add(addr, value, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT);
   }
 #else
@@ -297,7 +372,7 @@ __device__ inline float safeAtomicAdd(float* addr, float value) {
  */
 __device__ inline float safeAtomicMax(float* addr, float val) {
 #if __has_builtin(__hip_atomic_load) && __has_builtin(__hip_atomic_compare_exchange_strong)
-  __HIP_ATOMICS_ATTR(ignore_denormal_mode) {
+  __HIP_ATOMICS_IGNORE_DENORMAL_MODE {
     float value = __hip_atomic_load(addr, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT);
     bool done = false;
     while (!done && value < val) {
@@ -334,7 +409,7 @@ __device__ inline float safeAtomicMax(float* addr, float val) {
  */
 __device__ inline float safeAtomicMin(float* addr, float val) {
 #if __has_builtin(__hip_atomic_load) && __has_builtin(__hip_atomic_compare_exchange_strong)
-  __HIP_ATOMICS_ATTR(ignore_denormal_mode) {
+  __HIP_ATOMICS_IGNORE_DENORMAL_MODE {
     float value = __hip_atomic_load(addr, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT);
     bool done = false;
     while (!done && value > val) {
@@ -375,7 +450,7 @@ __device__ inline double safeAtomicAdd(double* addr, double value) {
   // atomics will produce safe CAS loops, but are otherwise not different than
   // agent-scope atomics. This logic is only applicable for gfx90a, and should
   // not be assumed on other architectures.
-  __HIP_ATOMICS_ATTR(ignore_denormal_mode) {
+  __HIP_ATOMICS_IGNORE_DENORMAL_MODE {
     return __hip_atomic_fetch_add(addr, value, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_SYSTEM);
   }
 #elif defined(__gfx90a__)
@@ -383,7 +458,7 @@ __device__ inline double safeAtomicAdd(double* addr, double value) {
   // force a CAS loop here.
   double old_val;
 #if __has_builtin(__hip_atomic_load)
-  __HIP_ATOMICS_ATTR(ignore_denormal_mode) {
+  __HIP_ATOMICS_IGNORE_DENORMAL_MODE {
     old_val = __hip_atomic_load(addr, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT);
   }
 #else   // !__has_builtin(__hip_atomic_load)
@@ -394,7 +469,7 @@ __device__ inline double safeAtomicAdd(double* addr, double value) {
   do {
     temp = expected = old_val;
 #if __has_builtin(__hip_atomic_compare_exchange_strong)
-    __HIP_ATOMICS_ATTR(ignore_denormal_mode) {
+    __HIP_ATOMICS_IGNORE_DENORMAL_MODE {
       __hip_atomic_compare_exchange_strong(addr, &expected, old_val + value, __ATOMIC_RELAXED,
                                            __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT);
     }
@@ -407,7 +482,7 @@ __device__ inline double safeAtomicAdd(double* addr, double value) {
   return old_val;
 #else   // !defined(__gfx90a__)
 #if __has_builtin(__hip_atomic_fetch_add)
-  __HIP_ATOMICS_ATTR(ignore_denormal_mode) {
+  __HIP_ATOMICS_IGNORE_DENORMAL_MODE {
     return __hip_atomic_fetch_add(addr, value, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT);
   }
 #else   // !__has_builtin(__hip_atomic_fetch_add)
@@ -439,7 +514,7 @@ __device__ inline double safeAtomicMax(double* addr, double val) {
   } else {
 #endif
 #if __has_builtin(__hip_atomic_load) && __has_builtin(__hip_atomic_compare_exchange_strong)
-    __HIP_ATOMICS_ATTR(ignore_denormal_mode) {
+    __HIP_ATOMICS_IGNORE_DENORMAL_MODE {
       double value = __hip_atomic_load(addr, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT);
       bool done = false;
       while (!done && value < val) {
@@ -486,7 +561,7 @@ __device__ inline double safeAtomicMin(double* addr, double val) {
   } else {
 #endif
 #if __has_builtin(__hip_atomic_load) && __has_builtin(__hip_atomic_compare_exchange_strong)
-    __HIP_ATOMICS_ATTR(ignore_denormal_mode) {
+    __HIP_ATOMICS_IGNORE_DENORMAL_MODE {
       double value = __hip_atomic_load(addr, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT);
       bool done = false;
       while (!done && value > val) {
@@ -510,6 +585,6 @@ __device__ inline double safeAtomicMin(double* addr, double val) {
 #endif
 }
 
-#pragma pop_macro("__HIP_ATOMICS_ATTR")
+#pragma pop_macro("__HIP_ATOMICS_IGNORE_DENORMAL_MODE")
 
 #endif
