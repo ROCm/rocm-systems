@@ -1850,89 +1850,6 @@ TEST_CASE("Unit_HRR_ExtMalloc_Direct", "[.][hrr-direct]") {
 }
 
 // ===========================================================================
-// Workload G4: hipStreamWaitEvent_spt cross-stream ordering
-//
-// hipStreamWaitEvent_spt (per-thread-default-stream variant) has no prior HRR
-// coverage; its generated handler translates both the stream and the event
-// handle.  Stream s1 waits (via _spt) on an event recorded on s0 after a memset,
-// then copies the result — a correct D2H (33) requires the recorded event
-// ordering to be reproduced at replay.
-// Final blob: h[i] == 33.
-// ===========================================================================
-TEST_CASE("Unit_HRR_StreamWaitEventSpt_Direct", "[.][hrr-direct]") {
-  HRR_HIP_CHECK(hipSetDevice(0));
-  constexpr int N = 256;
-  constexpr size_t SZ = N * sizeof(int);
-
-  hipStream_t s0, s1;
-  HRR_HIP_CHECK(hipStreamCreateWithFlags(&s0, hipStreamNonBlocking));
-  HRR_HIP_CHECK(hipStreamCreateWithFlags(&s1, hipStreamNonBlocking));
-  hipEvent_t ev;
-  HRR_HIP_CHECK(hipEventCreate(&ev));
-
-  int *d0, *d1;
-  HRR_HIP_CHECK(hipMalloc(&d0, SZ));
-  HRR_HIP_CHECK(hipMalloc(&d1, SZ));
-
-  HRR_HIP_CHECK(hipMemsetD32Async(reinterpret_cast<hipDeviceptr_t>(d0), 33, N, s0));
-  HRR_HIP_CHECK(hipEventRecord(ev, s0));
-  HRR_HIP_CHECK(hipStreamWaitEvent_spt(s1, ev, 0));
-  HRR_HIP_CHECK(hipMemcpyAsync(d1, d0, SZ, hipMemcpyDeviceToDevice, s1));
-
-  int* h = new int[N]();
-  HRR_HIP_CHECK(hipMemcpyAsync(h, d1, SZ, hipMemcpyDeviceToHost, s1));
-  HRR_HIP_CHECK(hipStreamSynchronize(s1));
-  for (int i = 0; i < N; ++i) REQUIRE(h[i] == 33);
-
-  HRR_HIP_CHECK(hipFree(d0)); HRR_HIP_CHECK(hipFree(d1));
-  HRR_HIP_CHECK(hipEventDestroy(ev));
-  HRR_HIP_CHECK(hipStreamDestroy(s0)); HRR_HIP_CHECK(hipStreamDestroy(s1));
-  delete[] h;
-}
-
-// ===========================================================================
-// Workload G5: hipGraphLaunch_spt
-//
-// hipGraphLaunch_spt (per-thread-default-stream graph launch) has no prior HRR
-// coverage.  The graph is built with the already-supported stream-capture path
-// (hipStreamBeginCapture / hipStreamEndCapture / hipGraphInstantiate) and
-// launched via the _spt variant, whose generated handler translates the
-// graph-exec handle recorded by the manual hipGraphInstantiate handler.
-// Final blob: h[i] == 77.
-// ===========================================================================
-TEST_CASE("Unit_HRR_GraphLaunchSpt_Direct", "[.][hrr-direct]") {
-  HRR_HIP_CHECK(hipSetDevice(0));
-  constexpr int N = 256;
-  constexpr size_t SZ = N * sizeof(int);
-
-  hipStream_t s;
-  HRR_HIP_CHECK(hipStreamCreateWithFlags(&s, hipStreamNonBlocking));
-  int* d = nullptr;
-  HRR_HIP_CHECK(hipMalloc(&d, SZ));
-
-  HRR_HIP_CHECK(hipStreamBeginCapture(s, hipStreamCaptureModeThreadLocal));
-  HRR_HIP_CHECK(hipMemsetD32Async(reinterpret_cast<hipDeviceptr_t>(d), 77, N, s));
-  hipGraph_t g;
-  HRR_HIP_CHECK(hipStreamEndCapture(s, &g));
-  hipGraphExec_t exec;
-  HRR_HIP_CHECK(hipGraphInstantiate(&exec, g, nullptr, nullptr, 0));
-
-  HRR_HIP_CHECK(hipGraphLaunch_spt(exec, s));
-  HRR_HIP_CHECK(hipStreamSynchronize(s));
-
-  int* h = new int[N]();
-  HRR_HIP_CHECK(hipMemcpyAsync(h, d, SZ, hipMemcpyDeviceToHost, s));
-  HRR_HIP_CHECK(hipStreamSynchronize(s));
-  for (int i = 0; i < N; ++i) REQUIRE(h[i] == 77);
-
-  HRR_HIP_CHECK(hipGraphExecDestroy(exec));
-  HRR_HIP_CHECK(hipGraphDestroy(g));
-  HRR_HIP_CHECK(hipFree(d));
-  HRR_HIP_CHECK(hipStreamDestroy(s));
-  delete[] h;
-}
-
-// ===========================================================================
 // Workload G6: hipExtModuleLaunchKernel (OpenCL-style module kernel launch)
 //
 // hipExtModuleLaunchKernel has a manual playback handler (replay_kernel_launch
@@ -2094,107 +2011,6 @@ TEST_CASE("Unit_HRR_Logging_Direct", "[.][hrr-direct]") {
 }
 
 // ===========================================================================
-// Workload G9: hipStreamIsCapturing_spt / hipStreamGetCaptureInfo_spt
-//
-// The per-thread-stream capture *query* APIs have real generated handlers that
-// only translate the stream and write to local outputs (safe).  They are
-// exercised INSIDE a MANUAL hipStreamBeginCapture/EndCapture frame: the manual
-// handlers set ctx.in_graph_capture and record the graph in graph_map, which the
-// generated _spt begin/end handlers omit.  The captured memset builds a graph
-// that is instantiated + launched, so a correct D2H proves the whole
-// capture->graph->replay path — with the two _spt queries mid-capture — works.
-// Final blob: h[i] == 0x5A5A5A5A.
-// ===========================================================================
-TEST_CASE("Unit_HRR_StreamCaptureQuerySpt_Direct", "[.][hrr-direct]") {
-  HRR_HIP_CHECK(hipSetDevice(0));
-  constexpr int    N  = 256;
-  constexpr size_t SZ = N * sizeof(int);
-  constexpr int    VAL = 0x5A5A5A5A;
-
-  hipStream_t s;
-  HRR_HIP_CHECK(hipStreamCreateWithFlags(&s, hipStreamNonBlocking));
-  int* d = nullptr;
-  HRR_HIP_CHECK(hipMalloc(&d, SZ));
-
-  HRR_HIP_CHECK(hipStreamBeginCapture(s, hipStreamCaptureModeThreadLocal));
-
-  // APIs under test: query capture state via the _spt variants.
-  hipStreamCaptureStatus st = hipStreamCaptureStatusNone;
-  HRR_HIP_CHECK(hipStreamIsCapturing_spt(s, &st));
-  REQUIRE(st == hipStreamCaptureStatusActive);
-
-  hipStreamCaptureStatus st2 = hipStreamCaptureStatusNone;
-  unsigned long long capId = 0;
-  HRR_HIP_CHECK(hipStreamGetCaptureInfo_spt(s, &st2, &capId));
-  REQUIRE(st2 == hipStreamCaptureStatusActive);
-
-  HRR_HIP_CHECK(hipMemsetD32Async(reinterpret_cast<hipDeviceptr_t>(d), VAL, N, s));
-
-  hipGraph_t g = nullptr;
-  HRR_HIP_CHECK(hipStreamEndCapture(s, &g));
-  hipGraphExec_t exec = nullptr;
-  HRR_HIP_CHECK(hipGraphInstantiate(&exec, g, nullptr, nullptr, 0));
-  HRR_HIP_CHECK(hipGraphLaunch(exec, s));
-  HRR_HIP_CHECK(hipStreamSynchronize(s));
-
-  int* h = new int[N]();
-  HRR_HIP_CHECK(hipMemcpyAsync(h, d, SZ, hipMemcpyDeviceToHost, s));
-  HRR_HIP_CHECK(hipStreamSynchronize(s));
-  for (int i = 0; i < N; ++i) REQUIRE(h[i] == VAL);
-
-  HRR_HIP_CHECK(hipGraphExecDestroy(exec));
-  HRR_HIP_CHECK(hipGraphDestroy(g));
-  HRR_HIP_CHECK(hipFree(d));
-  HRR_HIP_CHECK(hipStreamDestroy(s));
-  delete[] h;
-}
-
-// ===========================================================================
-// Workload G10: hipStreamBeginCapture_spt (GPU-VALIDATED)
-//
-// hipStreamBeginCapture_spt's generated handler translates the stream and starts
-// capture but (unlike the manual hipStreamBeginCapture) does NOT set
-// ctx.in_graph_capture.  That flag only gates timing / sync-after-launch /
-// zero-init memsets, none of which apply to a memset-only capture region with no
-// alloc or kernel launch inside it — so replay should still be correct.  Capture
-// is ended with the MANUAL hipStreamEndCapture (records the graph in graph_map;
-// the generated end_spt discards it, so end_spt stays R2).  This slice validates
-// begin_spt on GPU: green keeps it, red reclassifies it R2.
-// Final blob: h[i] == 0x33333333.
-// ===========================================================================
-TEST_CASE("Unit_HRR_StreamCaptureBeginSpt_Direct", "[.][hrr-direct]") {
-  HRR_HIP_CHECK(hipSetDevice(0));
-  constexpr int    N  = 256;
-  constexpr size_t SZ = N * sizeof(int);
-  constexpr int    VAL = 0x33333333;
-
-  hipStream_t s;
-  HRR_HIP_CHECK(hipStreamCreateWithFlags(&s, hipStreamNonBlocking));
-  int* d = nullptr;
-  HRR_HIP_CHECK(hipMalloc(&d, SZ));
-
-  // API under test: start capture via the _spt variant.
-  HRR_HIP_CHECK(hipStreamBeginCapture_spt(s, hipStreamCaptureModeThreadLocal));
-  HRR_HIP_CHECK(hipMemsetD32Async(reinterpret_cast<hipDeviceptr_t>(d), VAL, N, s));
-  hipGraph_t g = nullptr;
-  HRR_HIP_CHECK(hipStreamEndCapture(s, &g));
-  hipGraphExec_t exec = nullptr;
-  HRR_HIP_CHECK(hipGraphInstantiate(&exec, g, nullptr, nullptr, 0));
-  HRR_HIP_CHECK(hipGraphLaunch(exec, s));
-  HRR_HIP_CHECK(hipStreamSynchronize(s));
-
-  int* h = new int[N]();
-  HRR_HIP_CHECK(hipMemcpyAsync(h, d, SZ, hipMemcpyDeviceToHost, s));
-  HRR_HIP_CHECK(hipStreamSynchronize(s));
-  for (int i = 0; i < N; ++i) REQUIRE(h[i] == VAL);
-
-  HRR_HIP_CHECK(hipGraphExecDestroy(exec));
-  HRR_HIP_CHECK(hipGraphDestroy(g));
-  HRR_HIP_CHECK(hipFree(d));
-  HRR_HIP_CHECK(hipStreamDestroy(s));
-  delete[] h;
-}
-// ===========================================================================
 // Workload: hipConfigureCall (legacy execution-stack launch config)
 //
 // hipConfigureCall has a real (non-noop) generated playback handler that
@@ -2294,7 +2110,9 @@ TEST_CASE("Unit_HRR_MemcpyPeer_Direct", "[.][hrr-direct]") {
 // Workload N: Additional memset variants
 //
 // Exercises hipMemset3D, hipMemset3DAsync, hipMemsetD2D8/16/32 and Async,
-// hipMemsetMemPool, _spt stream memset variants.
+// hipMemsetMemPool.  The per-thread-default-stream memsets live in
+// hrr_spt_workload_test.cc, which is built with the compile option that reaches
+// them.
 // Final blob: d[i] == 9.
 // ===========================================================================
 TEST_CASE("Unit_HRR_MemsetExtra_Direct", "[.][hrr-direct]") {
@@ -2345,32 +2163,6 @@ TEST_CASE("Unit_HRR_MemsetExtra_Direct", "[.][hrr-direct]") {
   // hipMemsetMemPool — not in ROCm SDK 6.4, skip
   // hipMemPoolTrimTo tested in MemPoolExtended workload
 
-  // _spt variants (per-thread-default-stream): hipMemset_spt, hipMemsetAsync_spt,
-  // hipMemset2D_spt, hipMemset2DAsync_spt, hipMemset3D_spt, hipMemset3DAsync_spt
-  {
-    void* dp = nullptr;
-    HRR_HIP_CHECK(hipMalloc(&dp, SZ));
-    HRR_HIP_CHECK(hipMemset_spt(dp, 0xAA, SZ));
-    HRR_HIP_CHECK(hipMemsetAsync_spt(dp, 0x00, SZ, s));
-    HRR_HIP_CHECK(hipStreamSynchronize(s));
-
-    size_t pitch_s = 0;
-    void* dp2 = nullptr;
-    HRR_HIP_CHECK(hipMallocPitch(&dp2, &pitch_s, 32, 4));
-    HRR_HIP_CHECK(hipMemset2D_spt(dp2, pitch_s, 0xBB, 32, 4));
-    HRR_HIP_CHECK(hipMemset2DAsync_spt(dp2, pitch_s, 0x00, 32, 4, s));
-    HRR_HIP_CHECK(hipStreamSynchronize(s));
-
-    hipPitchedPtr pp3{};
-    hipExtent ext3 = make_hipExtent(16 * sizeof(int), 4, 2);
-    HRR_HIP_CHECK(hipMalloc3D(&pp3, ext3));
-    HRR_HIP_CHECK(hipMemset3D_spt(pp3, 0xCC, ext3));
-    HRR_HIP_CHECK(hipMemset3DAsync_spt(pp3, 0x00, ext3, s));
-    HRR_HIP_CHECK(hipStreamSynchronize(s));
-
-    HRR_HIP_CHECK(hipFree(dp)); HRR_HIP_CHECK(hipFree(dp2)); HRR_HIP_CHECK(hipFree(pp3.ptr));
-  }
-
   // D2H blob (value = 9)
   int* d = nullptr; int* h = new int[N]();
   HRR_HIP_CHECK(hipMalloc(&d, SZ));
@@ -2385,17 +2177,13 @@ TEST_CASE("Unit_HRR_MemsetExtra_Direct", "[.][hrr-direct]") {
 }
 
 // ===========================================================================
-// Device symbol used by the symbol _spt variants in Workload P.
-__device__ int g_hrr_symbol[256];
-
-// Workload P: Additional memcpy variants (array-based, param2D, _spt, symbol_spt)
+// Workload P: Additional memcpy variants (array-based, param2D)
 //
 // Exercises hipMemcpyToArray, hipMemcpyFromArray, hipMemcpy2DToArray,
 // hipMemcpy2DFromArray, hipMemcpyAtoH, hipMemcpyHtoA,
-// hipMemcpyParam2D, hipMemcpyParam2DAsync,
-// hipMemcpy_spt, hipMemcpyAsync_spt, hipMemcpy2D_spt, hipMemcpy2DAsync_spt,
-// hipMemcpyFromSymbol_spt, hipMemcpyToSymbol_spt,
-// hipMemcpyFromSymbolAsync_spt, hipMemcpyToSymbolAsync_spt.
+// hipMemcpyParam2D, hipMemcpyParam2DAsync.  The per-thread-default-stream and
+// symbol _spt copies live in hrr_spt_workload_test.cc, which is built with the
+// compile option that reaches them.
 // Final blob: h[i] == 55.
 // ===========================================================================
 TEST_CASE("Unit_HRR_MemcpyExtra_Direct", "[.][hrr-direct]") {
@@ -2411,30 +2199,10 @@ TEST_CASE("Unit_HRR_MemcpyExtra_Direct", "[.][hrr-direct]") {
   HRR_HIP_CHECK(hipMalloc(&d, SZ));
   int* h_src = new int[N];
   for (int i = 0; i < N; ++i) h_src[i] = 55;
-
-  // Load d with 55 via hipMemcpy (has blob → restored at playback before any _spt calls)
-  HRR_HIP_CHECK(hipMemcpy(d, h_src, SZ, hipMemcpyHostToDevice));
-
-  // hipMemcpy_spt (per-thread-default-stream H2D+D2H)
-  HRR_HIP_CHECK(hipMemcpy_spt(d, h_src, SZ, hipMemcpyHostToDevice));
   int* h_chk = new int[N]();
-  HRR_HIP_CHECK(hipMemcpy_spt(h_chk, d, SZ, hipMemcpyDeviceToHost));
-  for (int i = 0; i < N; ++i) REQUIRE(h_chk[i] == 55);
 
-  // hipMemcpyAsync_spt
-  HRR_HIP_CHECK(hipMemcpyAsync_spt(d, h_src, SZ, hipMemcpyHostToDevice, s));
-  HRR_HIP_CHECK(hipStreamSynchronize(s));
-  HRR_HIP_CHECK(hipMemcpyAsync_spt(h_chk, d, SZ, hipMemcpyDeviceToHost, s));
-  HRR_HIP_CHECK(hipStreamSynchronize(s));
-
-  // hipMemcpy2D_spt (1-row, H2D then D2H)
-  HRR_HIP_CHECK(hipMemcpy2D_spt(d, SZ, h_src, SZ, SZ, 1, hipMemcpyHostToDevice));
-  HRR_HIP_CHECK(hipMemcpy2D_spt(h_chk, SZ, d, SZ, SZ, 1, hipMemcpyDeviceToHost));
-  for (int i = 0; i < N; ++i) REQUIRE(h_chk[i] == 55);
-
-  // hipMemcpy2DAsync_spt
-  HRR_HIP_CHECK(hipMemcpy2DAsync_spt(d, SZ, h_src, SZ, SZ, 1, hipMemcpyHostToDevice, s));
-  HRR_HIP_CHECK(hipStreamSynchronize(s));
+  // Load d with 55 via hipMemcpy (has blob → restored at playback)
+  HRR_HIP_CHECK(hipMemcpy(d, h_src, SZ, hipMemcpyHostToDevice));
 
   // hipMemcpyParam2D — uses HIP_MEMCPY2D descriptor
   {
@@ -2501,17 +2269,6 @@ TEST_CASE("Unit_HRR_MemcpyExtra_Direct", "[.][hrr-direct]") {
 
       HRR_HIP_CHECK(hipFreeArray(arr));
     }
-  }
-
-  // Symbol _spt H2D variants — exercise capture path for symbol memcpy _spt APIs
-  {
-    int h_sym[N];
-    for (int i = 0; i < N; ++i) h_sym[i] = 55;
-    HRR_HIP_CHECK(hipMemcpyToSymbol_spt(HIP_SYMBOL(g_hrr_symbol), h_sym, SZ, 0,
-                                     hipMemcpyHostToDevice));
-    HRR_HIP_CHECK(hipMemcpyToSymbolAsync_spt(HIP_SYMBOL(g_hrr_symbol), h_sym, SZ, 0,
-                                          hipMemcpyHostToDevice, s));
-    HRR_HIP_CHECK(hipStreamSynchronize(s));
   }
 
   // Reload d with 55 via hipMemcpy (has blob → playback restores correctly)
@@ -2611,8 +2368,10 @@ TEST_CASE("Unit_HRR_DeviceExtra_Direct", "[.][hrr-direct]") {
 //
 // Exercises hipExtStreamCreateWithCUMask, hipExtStreamGetCUMask,
 // hipExtGetLinkTypeAndHopCount, hipStreamWaitValue32/64,
-// hipStreamWriteValue32/64, hipStreamAttachMemAsync, hipGetStreamDeviceId,
-// _spt stream/event variants.
+// hipStreamWriteValue32/64, hipStreamAttachMemAsync, hipGetStreamDeviceId.
+// The per-thread-default-stream stream and event variants live in
+// hrr_spt_workload_test.cc, which is built with the compile option that reaches
+// them.
 // Final blob: d[i] == 13.
 // ===========================================================================
 TEST_CASE("Unit_HRR_StreamAdvanced2_Direct", "[.][hrr-direct]") {
@@ -2703,35 +2462,6 @@ TEST_CASE("Unit_HRR_StreamAdvanced2_Direct", "[.][hrr-direct]") {
       HRR_HIP_CHECK(hipStreamSynchronize(s0));
       HRR_HIP_CHECK(hipFreeHost(flag64));
     }
-  }
-
-  // _spt stream variants — record events via per-thread-default-stream wrappers
-  {
-    hipError_t e;
-    hipStreamCaptureStatus st = hipStreamCaptureStatusNone;
-    e = hipStreamIsCapturing_spt(s0, &st);
-    REQUIRE((e == hipSuccess || e == hipErrorNotSupported));
-    e = hipStreamQuery_spt(s0);
-    REQUIRE((e == hipSuccess || e == hipErrorNotReady
-             || e == hipErrorNotSupported));
-    e = hipStreamSynchronize_spt(s0);
-    REQUIRE((e == hipSuccess || e == hipErrorNotSupported));
-    int prio = 0;
-    e = hipStreamGetPriority_spt(s0, &prio);
-    REQUIRE((e == hipSuccess || e == hipErrorNotSupported));
-    unsigned int fl = 0;
-    e = hipStreamGetFlags_spt(s0, &fl);
-    REQUIRE((e == hipSuccess || e == hipErrorNotSupported));
-  }
-
-  // hipEventRecord_spt / _spt event recording
-  {
-    hipEvent_t ev;
-    HRR_HIP_CHECK(hipEventCreate(&ev));
-    hipError_t e = hipEventRecord_spt(ev, s0);
-    REQUIRE((e == hipSuccess || e == hipErrorNotSupported));
-    HRR_HIP_CHECK(hipEventSynchronize(ev));
-    HRR_HIP_CHECK(hipEventDestroy(ev));
   }
 
   HRR_HIP_CHECK(hipDeviceSynchronize());
@@ -3061,6 +2791,12 @@ TEST_CASE("Unit_HRR_DrvMemcpy3D_Direct", "[.][hrr][direct]") {
     p.srcPitch = SZ; p.srcHeight = 1;
     p.dstPitch = SZ; p.dstHeight = 1;
     HRR_HIP_CHECK(hipDrvMemcpy3D(&p)); }
+  // hipDrvMemcpy3D is host-synchronous only when the copy touches host memory;
+  // ihipMemcpyParam3D() forces the D2D case asynchronous, so (3) is merely
+  // enqueued on the null stream.  s was created with hipStreamNonBlocking and so
+  // never joins the null stream, leaving the readback below unordered against
+  // the copy unless it is drained here.
+  HRR_HIP_CHECK(hipDeviceSynchronize());
 
   int* h = new int[N]();
   HRR_HIP_CHECK(hipMemcpyAsync(h, C, SZ, hipMemcpyDeviceToHost, s));
@@ -3171,6 +2907,10 @@ TEST_CASE("Unit_HRR_DrvMemcpy2DUnaligned_Direct", "[.][hrr][direct]") {
     p.dstMemoryType = hipMemoryTypeDevice; p.dstDevice = reinterpret_cast<hipDeviceptr_t>(B); p.dstPitch = SZ;
     p.WidthInBytes  = SZ; p.Height = 1;
     HRR_HIP_CHECK(hipDrvMemcpy2DUnaligned(&p)); }
+  // Same ordering hazard as the 3D workload above: hipDrvMemcpy2DUnaligned goes
+  // through ihipMemcpyParam3D(), which forces the D2D case asynchronous on the
+  // null stream, and s is non-blocking.
+  HRR_HIP_CHECK(hipDeviceSynchronize());
 
   int* h = new int[N]();
   HRR_HIP_CHECK(hipMemcpyAsync(h, B, SZ, hipMemcpyDeviceToHost, s));
@@ -3410,7 +3150,7 @@ TEST_CASE("Unit_HRR_GraphExplicit_Direct", "[.][hrr][direct]") {
 }
 
 // ---------------------------------------------------------------------------
-// Workload Y — hipHostRegister/Unregister + hipLaunchKernel + hipMemcpy3D_spt
+// Workload Y — hipHostRegister/Unregister + hipLaunchKernel
 // ---------------------------------------------------------------------------
 __global__ void hrr_fill(int* out, int val, int n) {
   int i = blockIdx.x * blockDim.x + threadIdx.x;
@@ -3446,19 +3186,6 @@ TEST_CASE("Unit_HRR_HostRegLaunch_Direct", "[.][hrr][direct]") {
     int blocks = (N + 255) / 256;
     HRR_HIP_CHECK(hipLaunchKernel(reinterpret_cast<const void*>(hrr_fill),
                               dim3(blocks), dim3(256), args, 0, s));
-    HRR_HIP_CHECK(hipStreamSynchronize(s));
-  }
-
-  // ---- hipMemcpy3D_spt / hipMemcpy3DAsync_spt -----------------------------
-  {
-    // Minimal 1-element D2D 3D copy just to exercise the path
-    hipMemcpy3DParms p{};
-    p.srcPtr = make_hipPitchedPtr(d, sizeof(float), 1, 1);
-    p.dstPtr = make_hipPitchedPtr(d, sizeof(float), 1, 1);
-    p.extent = make_hipExtent(sizeof(float), 1, 1);
-    p.kind   = hipMemcpyDeviceToDevice;
-    (void)hipMemcpy3D_spt(&p);
-    (void)hipMemcpy3DAsync_spt(&p, s);
     HRR_HIP_CHECK(hipStreamSynchronize(s));
   }
 
