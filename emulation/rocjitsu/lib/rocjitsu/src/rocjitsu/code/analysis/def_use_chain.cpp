@@ -20,6 +20,20 @@ namespace {
   return ref.cls == RegClass::VGPR || ref.cls == RegClass::ACC_VGPR;
 }
 
+// InstDefUse surfaces only ordinary register-file refs (SGPR/VGPR/AccVGPR)
+// through to_register_ref(). A generic selector operand can decode to a special
+// register (e.g. EXEC_LO/EXEC_HI in an OPR_SDST field), but that ref collapses
+// the LO/HI halves into one class-wide singleton, so it is dropped here rather
+// than recorded imprecisely. Genuinely
+// fieldless special operands are surfaced instead through to_special_reg_class().
+// See def_use_chain.h.
+[[nodiscard]] std::optional<RegisterRef> ordinary_register_ref(const Operand &op) {
+  auto ref = op.to_register_ref();
+  if (ref && is_special_reg_class(ref->cls))
+    return std::nullopt;
+  return ref;
+}
+
 /// @brief Distinguishes a use (may-read) expansion from a def (must-write) one.
 /// @details When the VGPR-MSB bank is unknown, a USE conservatively reads any of
 /// the four candidate tuples (a sound may-read over-approximation), but a DEF must
@@ -76,32 +90,46 @@ InstDefUse::InstDefUse(const Instruction &inst, const Gfx1250VgprMsbAnalysis *vg
     const auto *op = inst.dst_operand(i);
     if (op == nullptr)
       continue;
-    if (auto ref = op->to_register_ref()) {
+    if (auto ref = ordinary_register_ref(*op)) {
       expand_operand_register(defs, inst, *op, *ref, vgpr_msb, OperandExpansionKind::Def,
                               unknown_vgpr_defs);
       has_vector_def |= is_vector_def(*ref);
+    } else if (auto sc = op->to_special_reg_class()) {
+      defs.expand(RegisterRef{*sc, 0, 1}); // singleton special def
     }
   }
   has_exec_masked_vector_def = has_vector_def && !ignores_exec;
   // No generated instruction currently reports an implicit VGPR def. If one is
   // added for gfx1250, it must expose an operand with a VGPR-MSB role so global
   // usage can resolve the physical bank instead of recording only the raw low
-  // eight-bit index.
-  inst.implicit_defs(defs);
+  // eight-bit index. Merge only the ordinary projection: an implicit hook that
+  // surfaces a special via a generic selector (to_register_ref()) collapses it
+  // to a class-wide singleton, so it is dropped here for the same reason the
+  // explicit dst loop above drops selector-encoded specials.
+  RegisterSet implicit_defs_set;
+  inst.implicit_defs(implicit_defs_set);
+  defs |= implicit_defs_set.ordinary_only();
 
   for (int i = 0; i < inst.num_src_operands(); ++i) {
     const auto *op = inst.src_operand(i);
     if (op == nullptr)
       continue;
-    if (auto ref = op->to_register_ref())
+    if (auto ref = ordinary_register_ref(*op))
       expand_operand_register(uses, inst, *op, *ref, vgpr_msb, OperandExpansionKind::Use,
                               unknown_vgpr_defs);
+    else if (auto sc = op->to_special_reg_class())
+      uses.expand(RegisterRef{*sc, 0, 1}); // singleton special use
   }
 
   if (vgpr_msb == nullptr) {
     // No dynamic VGPR banking (non-gfx1250): the flat hook already reports every
-    // implicit read at its physical index.
-    inst.implicit_uses(uses);
+    // implicit read at its physical index. Merge only the ordinary projection so
+    // a selector-encoded special surfaced by the hook (e.g. an exec_lo
+    // preserve-read on a partial-write op) is dropped rather than recorded as an
+    // imprecise class-wide singleton — matching the explicit src loop above.
+    RegisterSet implicit_uses_set;
+    inst.implicit_uses(implicit_uses_set);
+    uses |= implicit_uses_set.ordinary_only();
     return;
   }
 
@@ -117,7 +145,7 @@ InstDefUse::InstDefUse(const Instruction &inst, const Gfx1250VgprMsbAnalysis *vg
   for (const Operand *op : implicit_use_operand_list) {
     if (op == nullptr)
       continue;
-    if (auto ref = op->to_register_ref())
+    if (auto ref = ordinary_register_ref(*op))
       expand_operand_register(uses, inst, *op, *ref, vgpr_msb, OperandExpansionKind::Use,
                               unknown_vgpr_defs);
   }
@@ -126,11 +154,12 @@ InstDefUse::InstDefUse(const Instruction &inst, const Gfx1250VgprMsbAnalysis *vg
   // operand (e.g. FLAT/GLOBAL saddr, an SGPR). Merge only those: the VGPR reads
   // it would add carry no bank, and the operand path above already resolved them
   // to the correct physical tuple, so re-adding the raw low-8 index would mark a
-  // wrong, unbanked register live.
+  // wrong, unbanked register live. Also drop any selector-encoded special the
+  // hook surfaces, for the same reason as the non-gfx1250 path above.
   RegisterSet flat_implicit;
   inst.implicit_uses(flat_implicit);
   flat_implicit.clear_class(RegClass::VGPR);
-  uses |= flat_implicit;
+  uses |= flat_implicit.ordinary_only();
 }
 
 } // namespace rocjitsu
