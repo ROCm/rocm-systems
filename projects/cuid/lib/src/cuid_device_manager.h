@@ -52,11 +52,25 @@ class CuidDeviceManager {
   amdcuid_status_t shutdown();  // no need for this function as actual shutdown function, may be
                                 // useful for unit testing
 
-  const std::vector<DevicePtr>& devices() const { return devices_; }
+  // Returns a snapshot by value, deliberately not a reference. discover_devices()
+  // replaces devices_ wholesale under manager_mutex_, so a caller iterating a
+  // reference to it can have the vector reallocated underneath its iterators by
+  // another thread. Copying a vector of shared_ptr is cheap and keeps every
+  // device alive for as long as the caller holds the snapshot.
+  std::vector<DevicePtr> devices() const {
+    std::lock_guard<std::mutex> lock(manager_mutex_);
+    return devices_;
+  }
   void get_grouped_devices(std::map<amdcuid_device_type_t, std::vector<DevicePtr>>& grouped);
   const amdcuid_device_type_set_t& device_types() const { return device_types_; }
 
   amdcuid_status_t add_device(DevicePtr device);
+
+  // Share an externally owned cuid_hmac so build_cuid_index() derives CUIDs
+  // with the same in-memory key amdcuid_set_hash_key() updates.
+  // Not owned; caller must outlive this manager. Pass nullptr to fall back to
+  // deriving without an HMAC.
+  void set_hmac(cuid_hmac* hmac) { hmac_ = hmac; }
 
   /**
    * @brief Discover all devices currently present on the system.
@@ -157,11 +171,15 @@ class CuidDeviceManager {
   std::map<amdcuid_id_t, DevicePtr, CuidComparator> cuid_index_;
 
   // Cuid Files
-  CuidFile unpriv_cuid_file_{CuidUtilities::cuid_file(), true};
-  CuidFile priv_cuid_file_{CuidUtilities::priv_cuid_file(), false};
+  // The second argument is is_privileged. CuidFile::save() uses it to decide
+  // whether to write primary_cuid/hardware_fingerprint and whether to chmod
+  // 0600 or 0644, so having these swapped would make the privileged file
+  // world-readable and strip the primary CUIDs from it.
+  CuidFile unpriv_cuid_file_{CuidUtilities::cuid_file(), false};
+  CuidFile priv_cuid_file_{CuidUtilities::priv_cuid_file(), true};
 
-  // cuid hmac for deriving cuids
-  cuid_hmac manager_hmac = cuid_hmac();
+  // Externally owned hmac shared via set_hmac(); see that method's comment.
+  cuid_hmac* hmac_ = nullptr;
 };
 
 #endif  // CUID_DEVICE_MANAGER_H

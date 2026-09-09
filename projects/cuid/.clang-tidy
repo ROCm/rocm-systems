@@ -51,6 +51,6 @@ Checks:
 #                   without internal linkage is exported to everything that
 #                   links it. Unnamed namespace is the idiom, per SF.22.
 #
-# Treat findings as advisory: fix what is real, do not silence what is not.
+# WarningsAsErrors is clean today; everything else is advisory.
 HeaderFilterRegex: 'projects/cuid/(lib|cli|daemon)/.*\.(h|hpp)$'
-WarningsAsErrors: ''
+WarningsAsErrors: 'bugprone-*,cert-*,concurrency-*,clang-analyzer-*,misc-use-internal-linkage,misc-use-anonymous-namespace'

@@ -9,6 +9,7 @@ Full documentation for RCCL is available at [https://rccl.readthedocs.io](https:
 * Added scalable AllGatherV pattern: grouped `ncclBroadcast` calls with distinct roots are fused into a single ring kernel, improving performance at large scale. Gated by `NCCL_ALLGATHERV_ENABLE` (default off).
 * Added GPU-only multi-segment registration for symmetric memory windows, enabling contiguous VA ranges backed by multiple physical segments (single-node validated).
 * Added Elastic Buffer support for symmetric windows spanning device and host/`HOST_NUMA` memory segments (`NCCL_ELASTIC_BUFFER_REGISTER`, `NCCL_SYM_REUSE_SYSMEM_HANDLES`). Single-node path validated; multi-node registration remains limited pending HIP/HSA multi-segment DMA-BUF export support.
+* Added an experimental gfx1250 (MI450) Tensor Data Mover path for copy-shaped SIMPLE-protocol transfers. All collectives can reach it, but reduction collectives only qualify on slices that carry no reduction operation. Excluded from the default build: it requires `--enable-tdm-simple` at build time and `RCCL_TDM_SIMPLE_ENABLE=1` at runtime. Reduction into LDS staging buffers and double buffering are not yet implemented.
 * Enabled hierarchical Copy Engine `ncclAllGather` and `ncclAlltoAll` on multi-node communicators: the intra-node phase runs over SDMA/CE across the LSA team and the inter-node phase over one-sided RMA through the CPU (GIN) proxy. Selected when `NCCL_CTA_POLICY=2` with symmetric send and receive windows, `NCCL_LOCAL_REGISTER=0`, `NCCL_CUMEM_ENABLE=1`, `NCCL_NUM_RMA_CTX` greater than zero, and a GIN backend available. Validated for correctness and path selection from 1 to 32 nodes.
 
 ### Changed
@@ -33,6 +34,7 @@ Full documentation for RCCL is available at [https://rccl.readthedocs.io](https:
 * Compatibility with NCCL 2.29.7.
 * Compatibility with NCCL 2.28.9.
 * Added proxytrace profiler plugin and core proxy-diagnostics hooks (`RCCL_PROXYTRACE`).
+* Added accl-profiler profiler plugin for per-collective timing decomposition (`ACCL_PROFILER_OUTPUT_DIR`, `ACCL_PROFILER_MIN_SIZE_BYTES`).
 * Added `ncclBarrierSession` LSA validation for barrier sessions.
 * Added GPU-Initiated Networking (GIN) InfiniBand proxy backend for device-initiated collectives on RDMA-capable NICs. Select with `NCCL_GIN_TYPE=2` (proxy). Requires symmetric window registration and Linux kernel ≥ 6.8 for expected performance.
 * Added symmetric-memory ReduceScatter kernel (`RailA2A_LsaLD`) on gfx942/gfx950.

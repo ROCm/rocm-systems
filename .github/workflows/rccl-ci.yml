@@ -22,7 +22,7 @@ on:
         description: 'ROCm/TheRock git ref for build_tools + setup_test_environment.'
         type: string
         required: false
-        default: 'b45a06045cbb29c85e221748e653ac2521c6e1bf'
+        default: '648a501e56a1e0919976d6f540b7853e63d44998'
       amdgpu_targets:
         description: 'GPU arch for rocSHMEM/RCCL/rccl-tests (must match the ROCm family ARCH).'
         type: string
@@ -60,7 +60,30 @@ jobs:
       timeout_minutes: 240
       artifact_group: ${{ inputs.artifact_group || 'gfx950-dcgpu' }}
       artifact_run_id: ${{ inputs.artifact_run_id || '' }}
-      therock_ref: ${{ inputs.therock_ref || 'b45a06045cbb29c85e221748e653ac2521c6e1bf' }}
+      # TheRock pinned ref committed 2026-09-02; bump when refreshing artifacts.
+      therock_ref: ${{ inputs.therock_ref || '648a501e56a1e0919976d6f540b7853e63d44998' }}
+      amdgpu_targets: ${{ inputs.amdgpu_targets || 'gfx950' }}
+
+  # ext-plugins suite on ruby: builds RCCL, a UCX-enabled OpenMPI, rccl-tests and
+  # the tuner example plugin, then runs test/ext-plugins pytest for the mixed and
+  # CSV-tuner suites. Non-gating for now so a new suite cannot block merges while
+  # it is validated on the runner.
+  rccl-ext-plugins:
+    name: rccl-ext-plugins
+    uses: ./.github/workflows/rccl-suite.yml
+    permissions:
+      contents: read
+      id-token: write
+    with:
+      suite: ext-plugins
+      runs_on: '["ruby-linux-slurm-scale-runner"]'
+      partition: interactive
+      timeout_minutes: 300
+      non_gating: true
+      artifact_group: ${{ inputs.artifact_group || 'gfx950-dcgpu' }}
+      artifact_run_id: ${{ inputs.artifact_run_id || '' }}
+      # TheRock pinned ref committed 2026-09-02; bump when refreshing artifacts.
+      therock_ref: ${{ inputs.therock_ref || '648a501e56a1e0919976d6f540b7853e63d44998' }}
       amdgpu_targets: ${{ inputs.amdgpu_targets || 'gfx950' }}
 
   # GIN suite (WIP) on Tensorwave. Failures show red with logs on this job.
@@ -82,7 +105,8 @@ jobs:
       non_gating: true
       artifact_group: ${{ inputs.artifact_group || 'gfx950-dcgpu' }}
       artifact_run_id: ${{ inputs.artifact_run_id || '' }}
-      therock_ref: ${{ inputs.therock_ref || 'b45a06045cbb29c85e221748e653ac2521c6e1bf' }}
+      # TheRock pinned ref committed 2026-09-02; bump when refreshing artifacts.
+      therock_ref: ${{ inputs.therock_ref || '648a501e56a1e0919976d6f540b7853e63d44998' }}
       amdgpu_targets: ${{ inputs.amdgpu_targets || 'gfx950' }}
 
   # Gates GIN on build/infra failures only; test failures stay non-gating (red

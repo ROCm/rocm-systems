@@ -70,3 +70,10 @@ repos:
         language: script
         files: \.(cpp|hpp)$
         exclude: ^\.|^external/|^examples/
+
+      - id: check-banned-includes
+        name: banned-includes
+        entry: ./projects/rocprofiler-systems/scripts/check-banned-includes.py
+        language: script
+        files: ^projects/rocprofiler-systems/(source|examples|tests)/.*\.(h|hpp|c|cpp)(\.in)?$
+        exclude: /(external|tpls)/
