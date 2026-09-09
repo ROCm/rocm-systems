@@ -149,35 +149,22 @@ resolve to about 0.5 pp and show under 0.3% either way.
   `global_store_b128 ... th:TH_STORE_NT` at full width.
 
 ## The change
+https://github.com/ROCm/rocm-systems/pull/11054
 
 `blitcl.cpp` gains `__amd_rocclr_copyBufferNT`: `__amd_rocclr_copyBuffer` with
 `__builtin_nontemporal_store` on the store, still `ulong2`, selected by a new
-`DEBUG_CLR_BLIT_NONTEMPORAL` flag that defaults to **false**. Six files, 60 insertions.
+`DEBUG_CLR_BLIT_NONTEMPORAL` flag that defaults to **false**.
 
 ## Validation
 
-**ISA.** All nine variants emit the instruction width and temporal hint they claim, checked
-against expectations declared in `src/common/variants.h` so the check cannot drift from the
-code (`remote/isa_check.sh`). Support kernels carry no temporal hints, so they are neutral
-probes. Separately, the real `BlitLinearSourceCode` blob is extracted from `blitcl.cpp` and
-compiled for gfx1250, so the shipped kernel is checked too, not only the transcription.
-
-**Byte-exactness.** All nine variants verified over a size that is not a multiple of 16, so
-the scalar remainder tail is exercised, before any timing is trusted — the check runs inside
-`isolated_copy` and fails the run if it fails.
-
-**Correctness through the real path.** `hipMemcpyAsync` D2D over 10 sizes x 3 base offsets,
-including sizes exercising the remainder tail (1, 7, 255, 4 KiB+3, 3 MiB+17), offsets forcing
-the unaligned `uint` path, and a guard byte past the end to catch overruns. 0 failures with
-the flag off and on.
-
-**Kernel selection.** Under `AMD_LOG_LEVEL=4` the same workload dispatches
-`__amd_rocclr_copyBuffer` with the flag off and `__amd_rocclr_copyBufferNT` with it on.
-
-**hip-tests memory suites**, patched runtime via `LD_LIBRARY_PATH`: MemoryTest1, MemoryTest2
-and DeviceMemoryTest abort at the same pre-existing points with the flag off and on, and
-MemoryTest2's failing sites are identical. The single MemoryTest1 delta is
-`hipHostRegister.cc:754`, whose assertion depends on transient free memory; host-registered
-memory is host-direct-access, which `useShaderCopyBufferPath` excludes from the shader copy
-path, so this change cannot reach it. Six runs each under flag-off, flag-on and stock ROCm
-give 0 failures every time.
+- **ISA** — all nine variants emit the width and hint they claim (`remote/isa_check.sh`,
+  checked against expectations declared next to the code). Includes the real
+  `BlitLinearSourceCode` blob extracted from `blitcl.cpp`, not just the transcription.
+- **Byte-exact** — all nine variants, over a size that is not a multiple of 16 so the scalar
+  tail runs. Checked before any timing is trusted.
+- **Through the real path** — `hipMemcpyAsync` D2D, 10 sizes x 3 offsets, tail-exercising
+  sizes, unaligned offsets, guard byte past the end. 0 failures, flag off and on.
+- **Flag reaches the kernel** — `AMD_LOG_LEVEL=4` shows `copyBuffer` off, `copyBufferNT` on.
+- **hip-tests** — MemoryTest1/2 and DeviceMemoryTest abort at identical pre-existing points
+  either way. The one MemoryTest1 delta is `hipHostRegister.cc:754`, which this change cannot
+  reach: host-registered memory is excluded from the shader copy path.
