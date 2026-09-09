@@ -149,9 +149,9 @@ record_replay_stop() {
   local rc="$1" log="$2"
   [[ -n "$log" ]] || return 0
   if [[ "$rc" == "124" ]]; then
-    echo "[triage] replay timed out after ${HRR_REPLAY_TIMEOUT:-1800}s" | tee -a "$log"
+    echo "[triage] replay timed out after ${HRR_REPLAY_TIMEOUT:-1800}s" | tee -a "$log" >&2
   elif (( rc > 128 )); then
-    echo "[triage] replay killed by signal $((rc - 128))" | tee -a "$log"
+    echo "[triage] replay killed by signal $((rc - 128))" | tee -a "$log" >&2
   fi
 }
 
