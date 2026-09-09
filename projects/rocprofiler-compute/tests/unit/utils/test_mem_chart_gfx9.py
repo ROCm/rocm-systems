@@ -34,10 +34,6 @@ DISCOVERED_GFX9_ARCHITECTURES = tuple(
     for path in sorted(ANALYSIS_CONFIGS.glob(f"gfx9*/{MEMORY_CHART_CONFIG_FILENAME}"))
 )
 
-GFX94X_ARCHITECTURES = frozenset({"gfx940", "gfx941", "gfx942"})
-
-GFX94X_MISSING_METRIC_KEYS = frozenset({"L2 Rd Lat", "L2 Wr Lat", "VL1 Lat"})
-
 GFX950_EXTRA_METRIC_KEYS = frozenset({
     "LDS Read",
     "LDS Write",
@@ -127,8 +123,6 @@ def expected_architecture_missing_metric_keys(
     architecture: str,
 ) -> frozenset[str]:
     missing = frozenset()
-    if architecture in GFX94X_ARCHITECTURES:
-        missing = missing | GFX94X_MISSING_METRIC_KEYS
     if architecture == "gfx950":
         missing = missing | GFX950_MISSING_METRIC_KEYS
     return missing

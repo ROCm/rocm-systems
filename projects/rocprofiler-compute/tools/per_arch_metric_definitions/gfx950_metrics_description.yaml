@@ -131,15 +131,6 @@ System Speed-of-Light:
     plain: The total number of 4-bit and 6-bit floating-point operations executed on MFMA units, per second. F6/F4 formats are supported in AMD Instinct MI350 series (gfx950) and later only.
     rst: The total number of 4-bit and 6-bit floating-point operations executed on MFMA units, per second. F6/F4 formats are supported in AMD Instinct MI350 series (gfx950) and later only.
     unit: GFLOPs
-  VL1 Lat:
-    plain: Calculated as the average number of cycles that a vL1D cache line request spent in the vL1D cache pipeline.
-    rst: Calculated as the average number of cycles that a vL1D cache line request spent in the vL1D cache pipeline.
-  L2 Rd Lat:
-    plain: Calculated as the average number of cycles that the vL1D cache took to issue and receive read requests from the L2 Cache. This number also includes requests for atomics with return values.
-    rst: Calculated as the average number of cycles that the vL1D cache took to issue and receive read requests from the L2 Cache. This number also includes requests for atomics with return values.
-  L2 Wr Lat:
-    plain: Calculated as the average number of cycles that the vL1D cache took to issue and receive acknowledgement of a write request to the L2 Cache. This number also includes requests for atomics without return values.
-    rst: Calculated as the average number of cycles that the vL1D cache took to issue and receive acknowledgement of a write request to the L2 Cache. This number also includes requests for atomics without return values.
 Roofline Performance Rates:
   VALU FLOPs (F16):
     plain: 'The total 16-bit floating-point operations executed per second on the VALU. This is presented with the value of the peak empirical F16 FLOPs achievable on the specific accelerator. Note: this does not include any F16 operations from MFMA instructions.'
