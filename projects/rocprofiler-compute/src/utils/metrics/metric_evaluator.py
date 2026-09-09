@@ -97,7 +97,7 @@ class MetricEvaluator:
                         f"Expression '{expr}' evaluated to None - explicitly specified."
                     )
                 elif not caught:
-                    console_warning(
+                    console_debug(
                         f"Expression '{expr}' evaluated to N/A "
                         "(divide-by-zero or empty counter data)."
                     )
@@ -107,22 +107,35 @@ class MetricEvaluator:
 
         except (TypeError, NameError, KeyError) as exception:
             if "empirical_peak" in str(exception):
-                console_warning(f"Missing empirical peak data: {exception}.")
+                console_warning(
+                    f"Missing empirical peak data: "
+                    f"{type(exception).__name__}: {exception}."
+                )
                 return "N/A"
             else:
-                console_warning(f"Failed to evaluate expression '{expr}': {exception}.")
+                console_warning(
+                    f"Failed to evaluate expression '{expr}': "
+                    f"{type(exception).__name__}: {exception}."
+                )
                 return "N/A"
 
         except AttributeError as attribute_error:
             console_warning(
-                f"Failed to evaluate expression '{expr}': {attribute_error}."
+                f"Failed to evaluate expression '{expr}': "
+                f"{type(attribute_error).__name__}: {attribute_error}."
             )
             return "N/A"
 
         except pd.errors.IntCastingNaNError as exception:
-            console_warning(f"Failed to evaluate expression '{expr}': {exception}.")
+            console_warning(
+                f"Failed to evaluate expression '{expr}': "
+                f"{type(exception).__name__}: {exception}."
+            )
             return "N/A"
 
         except ValueError as value_error:
-            console_warning(f"Failed to evaluate expression '{expr}': {value_error}.")
+            console_warning(
+                f"Failed to evaluate expression '{expr}': "
+                f"{type(value_error).__name__}: {value_error}."
+            )
             return "N/A"

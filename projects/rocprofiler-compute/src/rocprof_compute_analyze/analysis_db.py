@@ -87,6 +87,37 @@ KernelKey = str
 CodeObjectKey = tuple[int, int]
 KernelSymbolKey = tuple[int, int, str]  # (pid, code_object_id, kernel_name)
 
+# db_analysis.evaluate runs once per kernel, so the same expression problem is
+# hit again for every kernel. Collect the messages here and report each
+# distinct one once, at the end of pre_processing.
+_na_expression_messages: dict[str, str] = {}
+_failed_expression_messages: set[str] = set()
+
+
+def record_na_expression(metric_name: str, message: str) -> None:
+    """Record that an expression for metric_name evaluated to N/A."""
+    _na_expression_messages.setdefault(metric_name, message)
+
+
+def record_failed_expression(message: str) -> None:
+    """Record that an expression could not be evaluated."""
+    _failed_expression_messages.add(message)
+
+
+def report_evaluation_diagnostics() -> None:
+    """Report each collected evaluation message once and clear the collection.
+
+    N/A goes to debug because the N/A itself is already in the analyze output.
+    A failure stays a warning because output cannot tell a missing counter
+    apart from a counter that evaluated to nothing.
+    """
+    for message in _na_expression_messages.values():
+        console_debug(message)
+    for message in sorted(_failed_expression_messages):
+        console_warning(message)
+    _na_expression_messages.clear()
+    _failed_expression_messages.clear()
+
 
 def filter_dispatch_frame(
     dispatch_frame: pd.DataFrame,
@@ -295,6 +326,8 @@ class db_analysis(OmniAnalyze_Base):
             self._roofline_data_per_kernel,
             self._roofline_data_per_workload,
         ) = self.calc_roofline_data()
+
+        report_evaluation_diagnostics()
 
     @demarcate
     def run_analysis(self) -> None:
@@ -928,9 +961,10 @@ class db_analysis(OmniAnalyze_Base):
                         "None - explicitly specified."
                     )
                 elif not caught:
-                    console_warning(
+                    record_na_expression(
+                        name,
                         f"Expression for {name}: {value} evaluated to N/A "
-                        "(divide-by-zero or empty counter data)."
+                        "(divide-by-zero or empty counter data).",
                     )
                 return None
 
@@ -941,7 +975,10 @@ class db_analysis(OmniAnalyze_Base):
                 console_warning(f"Variance corrected for metric: {name}")
             return eval_result
         except Exception as e:
-            console_warning(f"Failed to evaluate expression for {name}: {value} - {e}")
+            record_failed_expression(
+                f"Failed to evaluate expression for {name}: {value} - "
+                f"{type(e).__name__}: {e}"
+            )
             return None
 
     @staticmethod
