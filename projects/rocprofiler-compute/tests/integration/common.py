@@ -76,7 +76,7 @@ ROOF_ONLY_FILES = sorted([
 ])
 
 METRIC_THRESHOLDS = {
-    "2.1.11": {"absolute": 0, "relative": 8},
+    "2.1.10": {"absolute": 0, "relative": 8},
     "3.1.1": {"absolute": 0, "relative": 10},
     "3.1.10": {"absolute": 0, "relative": 10},
     "3.1.11": {"absolute": 0, "relative": 1},
