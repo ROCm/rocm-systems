@@ -55,8 +55,8 @@ def _fake_topology(ais_check, monkeypatch, prefixes, slaves):
     realpath is stubbed to identity so nodes are addressed by plain strings.
     """
     monkeypatch.setattr(ais_check.os.path, "realpath", lambda p: p)
-    monkeypatch.setattr(ais_check, "dm_uuid_prefix", lambda node: prefixes.get(node))
-    monkeypatch.setattr(ais_check, "block_slaves", lambda node: slaves.get(node))
+    monkeypatch.setattr(ais_check, "dm_uuid_prefix", prefixes.get)
+    monkeypatch.setattr(ais_check, "block_slaves", slaves.get)
 
 
 def test_lvm_over_nvme_direct_on_nvme(ais_check, monkeypatch):
