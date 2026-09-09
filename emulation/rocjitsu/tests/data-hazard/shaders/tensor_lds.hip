@@ -49,9 +49,12 @@ __global__ void tensor_lds_load(const v4i* __restrict__ d_group0,
     v4i group0 = d_group0[0];
     v8i group1 = d_group1[0];
 
-    // Issue tensor_load_to_lds (D2 form for ≤2D tensors) — DMA from global
-    // tensor into LDS.
-    __builtin_amdgcn_tensor_load_to_lds_d2(group0, group1, 0);
+    // Issue tensor_load_to_lds — DMA from global tensor into LDS. For a ≤2D
+    // descriptor, D# groups 2-4 are zero-initialized; the trailing operand is
+    // the cachepolicy (bits[0-2]=th, bits[3-4]=scope).
+    const v4i zero4 = {0, 0, 0, 0};
+    const v8i zero8 = {0, 0, 0, 0, 0, 0, 0, 0};
+    __builtin_amdgcn_tensor_load_to_lds(group0, group1, zero4, zero4, zero8, 0);
 
     // Wait for the tensor DMA to complete before reading LDS.
     // The compiler's waitcnt insertion pass does not yet emit
