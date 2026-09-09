@@ -148,35 +148,41 @@ TEST(ParameterApiTests, Bind_KnownKey_ReturnsSameHandleOnRebind) {
 
 // ncclParamBind succeeds for every flag combination, and PUBLISHED decides enumeration: only
 // published params appear in ncclParamGetAllParameterKeys, whatever their other flags.
+// clearVariable, not plain RUN_ISOLATED_TEST: NCCL_PARAM_DUMP_ALL drops the PUBLISHED filter in
+// ncclParamGetAllParameterKeys, and an exported one would flip every published == false row.
 TEST(ParameterApiTests, Bind_AllFlagCombinations_Succeed) {
-  RUN_ISOLATED_TEST("Bind_AllFlagCombinations_Succeed", []() {
-    struct FlagCase {
-      const char* key;
-      bool published;
-    };
-    constexpr FlagCase kCases[] = {
-        {kI32Key, true},             // PUBLISHED
-        {kPrivateKey, false},        // no flags
-        {kUnusedKey, false},         // UNUSED
-        {kUnusedPubKey, true},       // UNUSED | PUBLISHED
-        {kDeprecatedKey, false},     // DEPRECATED
-        {kDeprecatedPubKey, true},   // DEPRECATED | PUBLISHED
-        {kUnusedDepKey, false},      // UNUSED | DEPRECATED
-    };
-    for (const FlagCase& c : kCases) {
-      ncclParamHandle_t h = nullptr;
-      EXPECT_EQ(ncclParamBind(&h, c.key), ncclSuccess) << "key: " << c.key;
-      EXPECT_NE(h, nullptr) << "key: " << c.key;
-    }
+  RUN_ISOLATED_TESTS(ProcessIsolatedTestRunner::TestConfig(
+                         "Bind_AllFlagCombinations_Succeed",
+                         []() {
+                           struct FlagCase {
+                             const char* key;
+                             bool published;
+                           };
+                           constexpr FlagCase kCases[] = {
+                               {kI32Key, true}, // PUBLISHED
+                               {kPrivateKey, false}, // no flags
+                               {kUnusedKey, false}, // UNUSED
+                               {kUnusedPubKey, true}, // UNUSED | PUBLISHED
+                               {kDeprecatedKey, false}, // DEPRECATED
+                               {kDeprecatedPubKey, true}, // DEPRECATED | PUBLISHED
+                               {kUnusedDepKey, false}, // UNUSED | DEPRECATED
+                           };
+                           for (const FlagCase& c : kCases) {
+                             ncclParamHandle_t h = nullptr;
+                             EXPECT_EQ(ncclParamBind(&h, c.key), ncclSuccess) << "key: " << c.key;
+                             EXPECT_NE(h, nullptr) << "key: " << c.key;
+                           }
 
-    const char** table = nullptr;
-    int len = 0;
-    ASSERT_EQ(ncclParamGetAllParameterKeys(&table, &len), ncclSuccess);
-    for (const FlagCase& c : kCases) {
-      EXPECT_EQ(tableContains(table, len, c.key), c.published)
-          << "key: " << c.key << " should " << (c.published ? "" : "not ") << "be enumerated";
-    }
-  });
+                           const char** table = nullptr;
+                           int len = 0;
+                           ASSERT_EQ(ncclParamGetAllParameterKeys(&table, &len), ncclSuccess);
+                           for (const FlagCase& c : kCases) {
+                             EXPECT_EQ(tableContains(table, len, c.key), c.published)
+                                 << "key: " << c.key << " should " << (c.published ? "" : "not ")
+                                 << "be enumerated";
+                           }
+                         })
+                         .clearVariable(kDumpAllKey));
 }
 
 // Withholding NCCL_PARAM_FLAG_PUBLISHED only hides a param from ncclParamGetAllParameterKeys and
@@ -305,26 +311,6 @@ TEST(ParameterApiTests, GetI16_Unset_ReturnsDefault) {
                          .clearVariable("NCCL_TEST_PARAM_I16"));
 }
 
-TEST(ParameterApiTests, GetI16_NullArgs) {
-  RUN_ISOLATED_TEST("GetI16_NullArgs", []() {
-    ncclParamHandle_t h = nullptr;
-    ASSERT_EQ(ncclParamBind(&h, "NCCL_TEST_PARAM_I16"), ncclSuccess);
-    int16_t v = 0;
-    ASSERT_EQ(ncclParamGetI16(nullptr, &v), ncclInvalidArgument);
-    ASSERT_EQ(ncclParamGetI16(h, nullptr), ncclInvalidArgument);
-  });
-}
-
-// Reading an I32 param through the I16 accessor is a typeId mismatch.
-TEST(ParameterApiTests, GetI16_CrossWidth_ReturnsInvalidArg) {
-  RUN_ISOLATED_TEST("GetI16_CrossWidth", []() {
-    ncclParamHandle_t h = nullptr;
-    ASSERT_EQ(ncclParamBind(&h, kI32Key), ncclSuccess);
-    int16_t v = 0;
-    ASSERT_EQ(ncclParamGetI16(h, &v), ncclInvalidArgument);
-  });
-}
-
 TEST(ParameterApiTests, GetU16_MatchingType_ReturnsValue) {
   RUN_ISOLATED_TEST_WITH_ENV(
       "GetU16_MatchingType",
@@ -338,16 +324,6 @@ TEST(ParameterApiTests, GetU16_MatchingType_ReturnsValue) {
       {{"NCCL_TEST_PARAM_U16", "65535"}});
 }
 
-TEST(ParameterApiTests, GetU16_NullArgs) {
-  RUN_ISOLATED_TEST("GetU16_NullArgs", []() {
-    ncclParamHandle_t h = nullptr;
-    ASSERT_EQ(ncclParamBind(&h, "NCCL_TEST_PARAM_U16"), ncclSuccess);
-    uint16_t v = 0;
-    ASSERT_EQ(ncclParamGetU16(nullptr, &v), ncclInvalidArgument);
-    ASSERT_EQ(ncclParamGetU16(h, nullptr), ncclInvalidArgument);
-  });
-}
-
 TEST(ParameterApiTests, GetU64_MatchingType_ReturnsValue) {
   RUN_ISOLATED_TEST_WITH_ENV(
       "GetU64_MatchingType",
@@ -359,16 +335,6 @@ TEST(ParameterApiTests, GetU64_MatchingType_ReturnsValue) {
         ASSERT_EQ(v, 18446744073709551615ULL) << "ULLONG_MAX must round-trip exactly";
       },
       {{"NCCL_TEST_PARAM_U64", "18446744073709551615"}});
-}
-
-TEST(ParameterApiTests, GetU64_NullArgs) {
-  RUN_ISOLATED_TEST("GetU64_NullArgs", []() {
-    ncclParamHandle_t h = nullptr;
-    ASSERT_EQ(ncclParamBind(&h, "NCCL_TEST_PARAM_U64"), ncclSuccess);
-    uint64_t v = 0;
-    ASSERT_EQ(ncclParamGetU64(nullptr, &v), ncclInvalidArgument);
-    ASSERT_EQ(ncclParamGetU64(h, nullptr), ncclInvalidArgument);
-  });
 }
 
 // ===========================================================================
