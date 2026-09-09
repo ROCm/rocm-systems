@@ -267,14 +267,12 @@ positioned differently across the pass loop.
 | PC sampling | PC sampling | Tool initialization | HSA runtime load | Stopped at pass 0 enter, started at pass *N* enter | Tool finalization |
 | Replay | The `KERNEL_REPLAY` `CONFIG` and `PASS` service | Tool initialization | HSA runtime load | Not applicable | Tool finalization |
 
-- **Created at tool initialization**, alongside the code-object and dispatch-counting services the
-  native tool already configures there.
-- **Globally started when the HSA runtime loads**, not at initialization. Starting a context spawns
-  HSA worker threads, which deadlock on `fork()` in non-GPU preloaded shells. The existing deferral
-  applies to every context, not only the current one.
+Contexts are:
+- **Created at tool initialization**.
+- **Globally started when the HSA runtime loads**.
 - **Globally stopped at tool finalization**, before output generation, so every buffered record is
   complete when the artifacts are written.
-- **Local toggles are issued once**, at the named pass boundary, and never re-issued or undone. The
+- **Local toggles are issued**, at the named boundary. The
   SDK restores each context's pre-replay position when the loop ends.
 
 ```mermaid
