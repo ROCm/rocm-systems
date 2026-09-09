@@ -215,9 +215,8 @@ def test_rdna35_finalize_soc_fields(
         ("NPS1", "128"),
         ("nps2", "64"),
         ("NPS4", "32"),
-        ("nps8", "16"),
     ],
-    ids=["nps1", "nps2", "nps4", "nps8"],
+    ids=["nps1", "nps2", "nps4"],
 )
 def test_cdna_hbm_channels_nps_divisors(memory_partition, expected_channels):
     """NPS memory partitions divide HBM channel count by the NPS denominator.

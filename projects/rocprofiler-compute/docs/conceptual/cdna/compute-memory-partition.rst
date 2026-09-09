@@ -121,7 +121,7 @@ channels from the memory mode. A common formulation is:
 
    num_hbm_channels = 128 / NPS_denominator
 
-where ``NPS_denominator`` is ``4`` for NPS4 and ``8`` for NPS8 on supported
+where ``NPS_denominator`` is ``2`` for NPS2 and ``4`` for NPS4 on supported
 parts. Theoretical HBM bandwidth is then:
 
 .. code-block:: text
