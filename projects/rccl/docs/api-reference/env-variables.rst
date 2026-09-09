@@ -322,6 +322,15 @@ in the following table.
       - | ``0``: Use the internal sysfs reader (default).
         | ``1``: Use ``libamd_smi``.
 
+    * - | ``RCCL_USE_ROCM_SMI_LIB``
+        | Legacy counterpart of ``RCCL_USE_AMD_SMI_LIB`` for RCCL builds that
+          still compile the ROCm SMI wrapper. When enabled, topology queries
+          go through ``librocm_smi`` instead of the internal sysfs reader.
+          Current RCCL builds compile the AMD SMI wrapper and do not consult
+          this variable; use ``RCCL_USE_AMD_SMI_LIB`` instead.
+      - | ``0``: Use the internal sysfs reader (default).
+        | ``1``: Use ``librocm_smi`` (legacy ROCm SMI wrapper builds only).
+
 Logging and debugging
 =====================
 
