@@ -9,6 +9,13 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 * Added the `LDS Utilization` metric to the gfx115x Memory Chart.
 
+* Added two wave utilization metrics to PC sampling analysis.
+  * `active_thread_percent` is the percent of a wave's lanes that were active at an instruction, so a low value points at control flow divergence. Both sampling methods report it.
+  * `wave_occupancy_percent` is the percent of the machine's wave slots that held a wave. Only stochastic sampling reports it, because a host-trap record carries no wave count.
+  * Both appear in the analyze terminal table and in each kernel's `per_kernel_pc_sampling/` CSV.
+
+* Added the two wave utilization metrics to the analysis database summary view, so `compute_pc_sampling_summary_view` and the `pc_sampling_summary.csv` export carry them alongside the sample counts.
+
 ### Changed
 
 * gfx115x Memory Chart improvements.
@@ -31,6 +38,8 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 * Removed the `SKIP_NATIVE_TOOL_BUILD` build option. The counter collection tool is always built, and its sources are no longer installed for runtime compilation.
 
 ### Optimized
+
+* HBM and remote traffic percentages are now more accurate, with all their counters collected in a single profiling pass.
 
 * Improved the profiling failure message when the workload and the profiler load different ROCm installations. The error now points to the PyTorch and `rocm[profiler]` install instructions instead of only showing the LLVM abort.
 
@@ -60,7 +69,6 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
   * Profile mode writes one PID-prefixed `<pid>_ps_file_results.json` per process.
   * Analyze mode reports every process in a single run, with a `pid` column
     identifying each one.
-* Added ``--ml-trace-with-params {off,shapes,values}`` to capture operator arguments during ML API tracing (Torch and Triton). When set to ``shapes`` or ``values``, the captured arguments are written to a new ``Args`` column in ``ml_api_trace/consolidated.csv``.
 
 * Redesigned the standalone roofline HTML to improve user experience and interactivity.
 
@@ -127,10 +135,6 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 * Profile mode now errors when the target workload directory is non-empty unless `--overwrite` is passed. `--bench-only` likewise requires `--overwrite` before replacing an existing `roofline.csv`.
 
 * Renamed `num_hbm_channels` to `num_memory_channels` in machine specifications to unify memory channel reporting across GPU families.
-
-* ML API trace analysis now displays the operator arguments collected via `--ml-trace-with-params {shapes,values}` in the operator call tree. An operator whose calls all passed the same arguments shows them inline as an `args=(...)` segment. An operator whose calls passed differing arguments lists each distinct set under an `args variants:` block, with the number of calls that used it. Long argument blobs are truncated for display.
-
-* The operator summary table in ML API trace analysis now reports one row per operator, aggregated over every source location the operator ran from. Previously an operator called from several locations produced a separate row for each. Totals, call counts and dispatch counts now cover the whole run; the call tree above the table shows the per-location breakdown.
 
 ### Removed
 
