@@ -328,7 +328,7 @@ producer_loop(
 
                 ROCP_TRACE << "Sending buffer swap for SE " << packet->shader_engine_id;
                 att_queue_submit(queue, &status->packet, nullptr);
-                buffers_requiring_swap.emplace_back(std::move(*status));
+                buffers_requiring_swap.emplace_back(*status);
 
                 ROCP_FATAL_IF(status->size > buffer_size)
                     << "GPU buffer overflow: " << status->size << " vs " << buffer_size;
