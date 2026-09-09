@@ -1,5 +1,32 @@
 # ConSan CDNA4 (`gfx950`) status
 
+Post-merge physical spot revalidation (2026-09-09) used rocm-systems
+`6022be69de07`, hip-moi `f15bf1b96124`, rocjitsu-test-corpus
+`c00e52c015f2`, and the TheRock-only runtime under
+`/home/benjacob/.venv/lib/python3.12/site-packages/_rocm_sdk_devel`. The
+official validator accepted the baseline and all four clean profiles for
+`d128-block`, `d128-pressure`, `wmma-attention`, `streamk-arrival`, and
+`hip-matmul-m128-n128-k128` on the physical MI350X.
+It also accepted baseline, SuperCollider, Sampled, and Inline Shadow for
+`tree-atomic-or`. Current hip-moi compiler output changes the complete access
+denominators from 128 to 122 for `d128-block`, from 252 to 236 for
+`d128-pressure`, and from 58 to 50 for `wmma-attention`. The current Sampled
+denominators are 119 barriers for `d128-block`, 28 for `d128-pressure`, and 14
+for `wmma-attention`, matching the other MOI engines rather than the older
+117, 24, and 12 counts. The `tree-atomic-or` Record/Replay row is a
+reproducible regression: two independent physical runs and one gfx950 emulator
+run completed strict transformation with 48/48 accesses, 6/6 barriers, 3/3
+atomics, and 5/5 fences, then aborted before the independent oracle and ConSan
+teardown verdict. Physical execution raised `HSA_STATUS_ERROR_MEMORY_FAULT`
+during `hipDeviceSynchronize`; emulation rejected accesses to a missing host
+page and terminated on an invalid signal handle. The ordered physical
+post-instrumentation health check passed after the failures. The primary
+artifacts, including the test-corpus row, are under
+`/tmp/consan-validation-gfx950-post-merge-6022be69`; the independent
+Record/Replay confirmation is under
+`/tmp/consan-validation-gfx950-tree-rr-confirm-6022be69`, and the emulator
+result is under `/tmp/consan-validation-gfx950-tree-rr-emulator-6022be69`.
+
 ConSan-only physical and simulator follow-up (2026-09-09): a
 direct-HSA two-queue regression now forces equal raw dispatch IDs with the same
 kernel across reused and distinct kernarg addresses and repeats the collision
@@ -70,13 +97,13 @@ Legend: 🩶 unseen · 🟥 broken before useful evidence · 🟧 below 80% aggr
 | Main E2E | P1 | Sharktank TP1 decode/combined (`tp1-decode-combined`) | 🟩 gfx950 emulation exact/complete; 352/352 accesses | 🟩 exact; 352/352 accesses and 62/62 barriers | 🟩 exact; 352/352 accesses and 56/56 barriers | 🟩 exact; 352/352 accesses and 62/62 barriers |
 | Main E2E | P2 | Sharktank TP2 prefill/decode/combined (`tp2-family`, `tp2-decode`, `tp2-combined`) | 🟩 gfx950 emulation exact/complete; three exact oracles; 1,632/1,632 accesses | 🟩 gfx950 emulation exact/complete under target-resolved bounded cadence; three exact oracles; each row has 544/544 accesses and 60/60 barriers | 🟩 three exact oracles; 1,524/1,524 accesses and 150/150 barriers | 🟨 split prefill exact/complete with zero diagnostics at 544/544 accesses and 60/60 barriers; heavier decode and combined rows pending scalable qualification |
 | Main E2E | P3 | Sharktank CLIP BF16 (`clip-bf16`) | 🟩 exact; 45/45 accesses | 🟩 exact; 45/45 accesses and 24/24 barriers | 🟩 exact; 45/45 accesses and 24/24 barriers | 🟩 exact; 45/45 accesses and 24/24 barriers |
-| Main E2E | P4 | hip-moi D128 block (`d128-block`) | 🟩 exact; 128/128 accesses | 🟩 exact; 128/128 accesses and 119/119 barriers | 🟩 exact; 128/128 accesses and 117/117 barriers | 🟩 exact; 128/128 accesses and 119/119 barriers |
-| Main E2E | P4 | hip-moi D128 pressure (`d128-pressure`) | 🟩 four exact oracles; 252/252 accesses; paired/fault bundle | 🟩 exact; 252/252 accesses and 28/28 barriers; paired/fault bundle | 🟩 exact; 252/252 accesses and 24/24 barriers; paired/fault bundle | 🟩 exact; 252/252 accesses and 28/28 barriers; paired/fault bundle |
-| Main E2E | P4 | hip-moi MFMA attention (`wmma-attention`) | 🟩 exact; 58/58 accesses | 🟩 exact; 58/58 accesses and 14/14 barriers; paired/fault bundle | 🟩 exact; 58/58 accesses and 12/12 barriers; paired/fault bundle | 🟩 exact; 58/58 accesses and 14/14 barriers; paired/fault bundle |
-| Main E2E | P4 | hip-moi Stream-K arrival (`streamk-arrival`) | 🟩 exact; 32/32 accesses | 🟩 gfx950 emulation exact/complete; 32/32 accesses, 6/6 barriers, 1/1 atomic, 2/2 fences | 🟩 gfx950 emulation exact/complete; 32/32 accesses, 6/6 barriers, 1/1 atomic, 2/2 fences | 🟩 gfx950 emulation exact/complete with zero forbidden diagnostics; 32/32 accesses, 6/6 barriers, 1/1 atomic, 2/2 fences |
-| Main E2E | P4 | hip-moi tree atomic-OR (`tree-atomic-or`) | 🟩 exact; 48/48 accesses | 🟩 gfx950 emulation exact/complete; 48/48 accesses, 6/6 barriers, 3/3 atomics, 5/5 fences | 🟩 gfx950 emulation exact/complete; 48/48 accesses, 6/6 barriers, 3/3 atomics, 5/5 fences | 🟩 gfx950 emulation exact/complete with zero forbidden diagnostics; 48/48 accesses, 6/6 barriers, 3/3 atomics, 5/5 fences |
+| Main E2E | P4 | hip-moi D128 block (`d128-block`) | 🟩 physical clean revalidated; exact; 122/122 accesses | 🟩 physical clean revalidated; exact; 122/122 accesses and 119/119 barriers | 🟩 physical clean revalidated; exact; 122/122 accesses and 119/119 barriers | 🟩 physical clean revalidated; exact; 122/122 accesses and 119/119 barriers |
+| Main E2E | P4 | hip-moi D128 pressure (`d128-pressure`) | 🟩 physical clean revalidated; four exact oracles; 236/236 accesses; retained paired/fault bundle | 🟩 physical clean revalidated; exact; 236/236 accesses and 28/28 barriers; retained paired/fault bundle | 🟩 physical clean revalidated; exact; 236/236 accesses and 28/28 barriers; retained paired/fault bundle | 🟩 physical clean revalidated; exact; 236/236 accesses and 28/28 barriers; retained paired/fault bundle |
+| Main E2E | P4 | hip-moi MFMA attention (`wmma-attention`) | 🟩 physical clean revalidated; exact; 50/50 accesses; retained paired/fault bundle | 🟩 physical clean revalidated; exact; 50/50 accesses and 14/14 barriers; retained paired/fault bundle | 🟩 physical clean revalidated; exact; 50/50 accesses and 14/14 barriers; retained paired/fault bundle | 🟩 physical clean revalidated; exact; 50/50 accesses and 14/14 barriers; retained paired/fault bundle |
+| Main E2E | P4 | hip-moi Stream-K arrival (`streamk-arrival`) | 🟩 physical clean revalidated; exact; 32/32 accesses | 🟩 physical clean revalidated; exact/complete; 32/32 accesses, 6/6 barriers, 1/1 atomic, 2/2 fences | 🟩 physical clean revalidated; exact/complete; 32/32 accesses, 6/6 barriers, 1/1 atomic, 2/2 fences | 🟩 physical clean revalidated; exact/complete with zero forbidden diagnostics; 32/32 accesses, 6/6 barriers, 1/1 atomic, 2/2 fences |
+| Main E2E | P4 | hip-moi tree atomic-OR (`tree-atomic-or`) | 🟩 physical clean revalidated; exact; 48/48 accesses | 🟥 physical and emulator clean regression: complete 48/48 accesses, 6/6 barriers, 3/3 atomics, and 5/5 fences, then memory failure before oracle/teardown | 🟩 physical clean revalidated; exact/complete; 48/48 accesses, 6/6 barriers, 3/3 atomics, 5/5 fences | 🟩 physical clean revalidated; exact/complete with zero forbidden diagnostics; 48/48 accesses, 6/6 barriers, 3/3 atomics, 5/5 fences |
 | Main E2E | P4 | hip-moi Jakub attention (`jakub-attention`) | 🟩 four exact oracles; 338/338 accesses | 🟩 exact; 338/338 accesses and 35/35 barriers | 🟩 exact; 338/338 accesses and 35/35 barriers | 🟩 exact; 338/338 accesses and 35/35 barriers |
-| Test corpus | P0 | HIP matmul 128 cubed (`hip-matmul-m128-n128-k128`) | 🟩 exact; 739/739 accesses; qualified exact-one FP16 tile-publication miss | 🟩 exact; 739/739 accesses and 109/109 barriers | 🟩 exact; 739/739 accesses and 109/109 barriers | 🟩 exact; 739/739 accesses and 109/109 barriers; exact-one FP16 tile-publication fault diagnosed |
+| Test corpus | P0 | HIP matmul 128 cubed (`hip-matmul-m128-n128-k128`) | 🟩 physical clean revalidated; exact; 739/739 accesses; retained qualified exact-one FP16 tile-publication miss | 🟩 physical clean revalidated; exact; 739/739 accesses and 109/109 barriers | 🟩 physical clean revalidated; exact; 739/739 accesses and 109/109 barriers | 🟩 physical clean revalidated; exact; 739/739 accesses and 109/109 barriers; retained exact-one FP16 tile-publication fault diagnosis |
 | Test corpus | P0 | HipKittens BF16 (`hipkittens-bf16fp32-16x32`) | 🟩 exact; 96/96 accesses; qualified exact-one prologue-publication miss | 🟩 exact; 128/128 accesses and 32/32 barriers | 🟩 exact; 128/128 accesses and 32/32 barriers | 🟩 exact; 128/128 accesses and 32/32 barriers; qualified exact-one prologue-publication miss |
 | Test corpus | P1 | HipKittens FP8 (`hipkittens-fp8fp32-4wave`) | 🟩 exact; 64/64 accesses; qualified exact-one prologue-publication miss | 🟩 exact; 96/96 accesses and 5/5 barriers | 🟩 exact; 96/96 accesses and 5/5 barriers | 🟩 exact; 96/96 accesses and 5/5 barriers; exact-one prologue-publication fault diagnosed |
 | Test corpus | P1 | HipKittens MXFP8 (`hipkittens-mxfp8-4wave`) | 🟩 exact; 64/64 accesses; qualified exact-one prologue-publication miss | 🟩 exact; 96/96 accesses and 5/5 barriers | 🟩 exact; 96/96 accesses and 5/5 barriers | 🟩 exact; 96/96 accesses and 5/5 barriers; exact-one prologue-publication fault diagnosed |
