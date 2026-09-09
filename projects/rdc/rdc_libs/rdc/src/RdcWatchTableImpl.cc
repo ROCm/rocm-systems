@@ -435,10 +435,13 @@ std::vector<rdc_field_t> RdcWatchTableImpl::health_component_fields(unsigned int
     field_ids.push_back(RDC_HEALTH_POWER_THROTTLE_TIME);
   }
 
-  // Add the fallback source for any candidate that has one.
+  // Add the fallback source for any candidate that has one, once.
   for (size_t i = 0, n = field_ids.size(); i < n; i++) {
     auto fallback = kHealthFieldFallbacks.find(field_ids[i]);
-    if (fallback != kHealthFieldFallbacks.end()) field_ids.push_back(fallback->second);
+    if (fallback == kHealthFieldFallbacks.end()) continue;
+    if (std::find(field_ids.begin(), field_ids.end(), fallback->second) == field_ids.end()) {
+      field_ids.push_back(fallback->second);
+    }
   }
 
   return field_ids;
@@ -455,8 +458,10 @@ bool RdcWatchTableImpl::is_health_field_watched(rdc_gpu_group_t group_id, uint32
 }
 
 rdc_status_t RdcWatchTableImpl::rdc_health_set(rdc_gpu_group_t group_id, unsigned int components) {
+  std::lock_guard<std::mutex> api_guard(health_api_mutex_);
+
   // remove old health for same group_id
-  rdc_health_clear(group_id);
+  health_clear_unlocked(group_id);
 
   std::vector<rdc_field_t> candidates = health_component_fields(components);
   if (candidates.empty()) {
@@ -470,39 +475,41 @@ rdc_status_t RdcWatchTableImpl::rdc_health_set(rdc_gpu_group_t group_id, unsigne
 
   // Probe every (gpu, field) once per watch set. A field the platform cannot
   // serve is reported here and left out of the watch instead of failing every
-  // 1 s fetch; other failures are transient and stay watched.
+  // 1 s fetch; other failures are transient and stay watched. A fallback is
+  // probed, cached and watched only where its primary is unavailable.
+  std::set<rdc_field_t> fallback_fields;
+  for (const auto& fb : kHealthFieldFallbacks) fallback_fields.insert(fb.second);
+
   std::vector<RdcFieldKey> supported_pairs;
   std::set<rdc_field_t> supported_fields;
   for (uint32_t gindex = 0; gindex < ginfo.count; gindex++) {
     uint32_t gpu_index = ginfo.entity_ids[gindex];
 
     std::map<rdc_field_t, rdc_status_t> probe;
-    for (auto field : candidates) {
+    auto probe_field = [&](rdc_field_t field) {
       rdc_field_value value = {};
-      result = metric_fetcher_->fetch_smi_field(gpu_index, field, &value);
+      rdc_status_t fetched = metric_fetcher_->fetch_smi_field(gpu_index, field, &value);
       // fetch_smi_field collapses SMI failures to RDC_ST_SMI_ERROR and keeps
       // the specific status in value.status.
       probe[field] =
-          (result == RDC_ST_SMI_ERROR) ? static_cast<rdc_status_t>(value.status) : result;
-      if (result == RDC_ST_OK) {
-        // set initial values to cache
-        cache_mgr_->rdc_health_set(group_id, gpu_index, value);
-      }
-    }
+          (fetched == RDC_ST_SMI_ERROR) ? static_cast<rdc_status_t>(value.status) : fetched;
+      // set initial values to cache
+      if (fetched == RDC_ST_OK) cache_mgr_->rdc_health_set(group_id, gpu_index, value);
+    };
 
-    // A fallback is only watched where its primary is unavailable.
-    std::set<rdc_field_t> unneeded_fallbacks;
+    for (auto field : candidates) {
+      if (!fallback_fields.count(field)) probe_field(field);
+    }
     for (const auto& fb : kHealthFieldFallbacks) {
       auto primary = probe.find(fb.first);
-      if (primary != probe.end() && primary->second == RDC_ST_OK) {
-        unneeded_fallbacks.insert(fb.second);
-      }
+      if (primary != probe.end() && is_capability_miss(primary->second)) probe_field(fb.second);
     }
 
     for (auto field : candidates) {
-      if (unneeded_fallbacks.count(field)) continue;
+      auto probed = probe.find(field);
+      if (probed == probe.end()) continue;  // fallback whose primary works here
 
-      rdc_status_t status = probe[field];
+      rdc_status_t status = probed->second;
       if (is_capability_miss(status)) {
         auto fallback = kHealthFieldFallbacks.find(field);
         auto fb_probe =
@@ -557,11 +564,21 @@ rdc_status_t RdcWatchTableImpl::rdc_health_set(rdc_gpu_group_t group_id, unsigne
   do {  //< lock guard for thread safe
     std::lock_guard<std::mutex> guard(watch_mutex_);
     HealthWatchTableEntry hentry{components, field_group_id, supported_pairs};
-    health_watch_table_.insert({group_id, hentry});
+    health_watch_table_.insert_or_assign(group_id, hentry);
   } while (0);
 
   // Start to watch the fields and update fields per 1 second.
-  return rdc_field_watch(group_id, field_group_id, 1000000, 1, 1);
+  result = rdc_field_watch(group_id, field_group_id, 1000000, 1, 1);
+  if (result != RDC_ST_OK) {
+    // Leave nothing behind that a later health_clear could not undo.
+    do {  //< lock guard for thread safe
+      std::lock_guard<std::mutex> guard(watch_mutex_);
+      health_watch_table_.erase(group_id);
+    } while (0);
+    group_settings_->rdc_group_field_destroy(field_group_id);
+    cache_mgr_->rdc_health_clear(group_id);
+  }
+  return result;
 }
 
 rdc_status_t RdcWatchTableImpl::rdc_health_get(rdc_gpu_group_t group_id, unsigned int* components) {
@@ -946,6 +963,11 @@ rdc_status_t RdcWatchTableImpl::rdc_health_check(rdc_gpu_group_t group_id,
 }
 
 rdc_status_t RdcWatchTableImpl::rdc_health_clear(rdc_gpu_group_t group_id) {
+  std::lock_guard<std::mutex> api_guard(health_api_mutex_);
+  return health_clear_unlocked(group_id);
+}
+
+rdc_status_t RdcWatchTableImpl::health_clear_unlocked(rdc_gpu_group_t group_id) {
   rdc_field_grp_t field_group_id;
 
   do {  //< lock guard for thread safe
