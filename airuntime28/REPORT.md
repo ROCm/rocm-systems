@@ -153,6 +153,7 @@ insertions. `blitcl.cpp` gains `__amd_rocclr_copyBufferNT`, the same kernel with
 taken at `563095dbca`, before the branch was rebased 335 commits onto `develop`, and have not
 been re-run on the new base — the diff is byte-identical and `remote/validate_kernel.sh` still
 confirms the shipped kernel emits `global_store_b128 ... th:TH_STORE_NT` at full width.
+
 ## Validation
 
 **ISA.** All nine variants emit the instruction width and temporal hint they claim, checked
