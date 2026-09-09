@@ -8,11 +8,10 @@
 ## Filtering
 
 Filter options match with **glob patterns** by default (`fnmatch`), not regex.
-Glob covers almost every filtering case and is much easier for users to write.
+Glob covers most filtering cases and is much easier for users to write.
 
 ```console
-rocprof-compute --select-kernel 'kernel-{debug,lts,rt}[0-9]*'
-```
+rocprof-compute --select-kernel '*my-kernel*'
 
 Regex may be offered **in addition** to glob where it is genuinely needed, never
 as the replacement.
