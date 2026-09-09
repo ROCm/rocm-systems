@@ -19,6 +19,10 @@ if(BUILD_TESTS)
 
   # CPU-only generator unit test: guards the -fgpu-rdc device-function dispatch
   # codegen in src/device/generate.py. Needs no GPU and no built library.
+  #
+  # Registered here for local `ctest` runs only. Nothing in RCCL CI runs ctest, so
+  # what actually gates this suite is the `guards` phase of
+  # test/host/run_host_tests.sh, which invokes it directly.
   find_package(Python3 COMPONENTS Interpreter REQUIRED)
   add_test(
     NAME rccl-generate-device-table

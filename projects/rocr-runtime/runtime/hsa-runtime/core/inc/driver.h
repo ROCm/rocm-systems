@@ -55,6 +55,7 @@
 namespace rocr {
 namespace core {
 
+class Driver;
 class Queue;
 
 enum class DriverQuery { GET_DRIVER_VERSION };
@@ -74,7 +75,7 @@ struct DriverMemoryHandle {
   /// - allocation address / thunk buffer handle for @ref KfdDriver
   /// - XDNA BO handle for @ref XdnaDriver
   uint64_t handle{};
-  /// Virtual address of this allocation, or nullptr if the driver exposes none.
+  /// @brief Virtual address of this allocation, or nullptr if the driver exposes none.
   /// Whether FreeMemory unmaps it is driver-defined: an allocation may borrow a
   /// mapping owned by something else, in which case FreeMemory leaves it intact.
   void* vaddr{};
@@ -82,9 +83,17 @@ struct DriverMemoryHandle {
   uint64_t mmap_offset{0};
   size_t size{0};
   hsa_fabric_handle_t fabric_handle{};
-
-  bool operator<(const DriverMemoryHandle& b) const { return handle < b.handle; }
-  bool operator==(const DriverMemoryHandle& b) const { return handle == b.handle; }
+  /// @brief Driver that created this handle.
+  ///
+  /// Native ids are only meaningful to their own driver and are not unique across drivers, so
+  /// this is what lets a driver recognize one of its own handles when one is passed back to it.
+  const Driver* owner{nullptr};
+  /// @brief False when the allocation is borrowed from the handle that owns it and so
+  /// must not be released when this handle is destroyed.
+  ///
+  /// Only @ref Driver::ImportMemoryHandle can produce a borrowed handle, and only when the
+  /// import resolves to an allocation the importing driver already owns.
+  bool owns_allocation{true};
 };
 
 /// @brief Format of a shareable memory handle for export and import.
