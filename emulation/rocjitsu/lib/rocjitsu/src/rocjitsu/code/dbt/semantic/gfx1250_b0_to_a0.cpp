@@ -250,7 +250,7 @@ constexpr uint16_t kGfx1250ScratchBaseSgprEnd = 104;
 /// high-bank scratch requires physicalizing this set first.
 [[nodiscard]] RegisterSet gfx1250_instruction_registers(const Instruction &inst) {
   const InstDefUse def_use(inst);
-  return def_use.uses | def_use.defs;
+  return (def_use.uses | def_use.defs).ordinary_only();
 }
 
 /// @brief Whether an ordinary SGPR window satisfies one scratch request.
