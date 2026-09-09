@@ -3,6 +3,7 @@
 
 #include "library/rocprofiler-sdk/buffered/kfd_queue.hpp"
 
+#include <gmock/gmock.h>
 #include <gtest/gtest.h>
 
 #include <cstddef>
@@ -17,6 +18,12 @@ namespace rocprofsys::domains::buffered
 {
 namespace
 {
+
+using ::testing::AllOf;
+using ::testing::Eq;
+using ::testing::Field;
+using ::testing::Return;
+using ::testing::StrictMock;
 
 // Self-contained stand-in for SdkBackend: kfd_queue<SdkBackend, Externals> and
 // on_kfd_queue<SdkBackend, Externals> only ever touch these members.
@@ -72,33 +79,48 @@ struct agent_t
     std::size_t device_type_index = 0;
 };
 
+struct pmc_info_data_t
+{
+    int           type             = 0;
+    std::size_t   agent_type_index = 0;
+    std::string   target_arch;
+    std::size_t   event_code  = 0;
+    std::size_t   instance_id = 0;
+    std::string   name;
+    std::string   symbol;
+    std::string   description;
+    std::string   long_description;
+    std::string   component;
+    std::string   units;
+    std::string   value_type;
+    std::string   block;
+    std::string   expression;
+    std::uint32_t is_constant = 0;
+    std::uint32_t is_derived  = 0;
+    std::string   extdata;
+};
+
+// on_kfd_queue_configure<Externals> calls exactly these three members
+// unconditionally-or-conditionally; mocked so tests can verify it ran correctly
+// instead of just not crashing.
+struct gmock_externals
+{
+    MOCK_METHOD(void, add_string, (std::string_view value));
+    MOCK_METHOD(std::vector<std::shared_ptr<agent_t>>, get_agents_by_type, (int type));
+    MOCK_METHOD(void, add_pmc_info, (const pmc_info_data_t& info));
+};
+
+std::unique_ptr<StrictMock<gmock_externals>> g_externals_mock;
+
 // Externals mirrors the real ExternalDeps policy surface used by on_kfd_queue and
-// on_kfd_queue_configure with no-op bodies -- these tests only assert the
-// callback runs without crashing on a default-constructed record.
+// on_kfd_queue_configure. The on_records-only members
+// (add_thread_info/add_track/buffer_storage_store) stay plain no-ops -- only
+// add_string/get_agents_by_type/add_pmc_info, which on_configure() exercises, are
+// mocked.
 struct externals
 {
-    using agent_t = buffered::agent_t;
-
-    struct pmc_info_t
-    {
-        int           type             = 0;
-        std::size_t   agent_type_index = 0;
-        std::string   target_arch;
-        std::size_t   event_code  = 0;
-        std::size_t   instance_id = 0;
-        std::string   name;
-        std::string   symbol;
-        std::string   description;
-        std::string   long_description;
-        std::string   component;
-        std::string   units;
-        std::string   value_type;
-        std::string   block;
-        std::string   expression;
-        std::uint32_t is_constant = 0;
-        std::uint32_t is_derived  = 0;
-        std::string   extdata;
-    };
+    using agent_t    = buffered::agent_t;
+    using pmc_info_t = pmc_info_data_t;
 
     struct thread_info_t
     {
@@ -136,9 +158,9 @@ struct externals
 
     struct agent_manager_t
     {
-        std::vector<std::shared_ptr<agent_t>> get_agents_by_type(int /*type*/)
+        std::vector<std::shared_ptr<agent_t>> get_agents_by_type(int type)
         {
-            return {};
+            return g_externals_mock->get_agents_by_type(type);
         }
 
         agent_t& get_agent_by_handle(std::uint64_t /*handle*/)
@@ -157,10 +179,16 @@ struct externals
         return manager;
     }
 
-    static void add_string(std::string_view /*value*/) {}
+    static void add_string(std::string_view value)
+    {
+        g_externals_mock->add_string(value);
+    }
     static void add_thread_info(const thread_info_t& /*info*/) {}
     static void add_track(const track_t& /*info*/) {}
-    static void add_pmc_info(const pmc_info_t& /*info*/) {}
+    static void add_pmc_info(const pmc_info_t& info)
+    {
+        g_externals_mock->add_pmc_info(info);
+    }
     static void buffer_storage_store(kfd_sample_t&& /*sample*/) {}
 
     static std::int32_t get_pid() { return 0; }
@@ -202,6 +230,52 @@ TEST(kfd_queue_test, on_kfd_queue_handles_empty_record_batch_without_crashing)
     mock_sdk::kfd_queue_record record{};
 
     on_kfd_queue<mock_sdk, externals>(&record, nullptr);
+}
+
+TEST(kfd_queue_test,
+     on_configure_registers_category_string_and_skips_pmc_info_without_gpu_agents)
+{
+    g_externals_mock = std::make_unique<StrictMock<gmock_externals>>();
+
+    EXPECT_CALL(*g_externals_mock, add_string(Eq(externals::kfd_queue_category_name)))
+        .Times(1);
+    EXPECT_CALL(*g_externals_mock, get_agents_by_type(Eq(externals::AGENT_TYPE_GPU)))
+        .Times(1)
+        .WillOnce(Return(std::vector<std::shared_ptr<agent_t>>{}));
+
+    on_kfd_queue_configure<externals>();
+
+    g_externals_mock.reset();
+}
+
+TEST(kfd_queue_test, on_configure_registers_pmc_info_for_each_gpu_agent)
+{
+    g_externals_mock = std::make_unique<StrictMock<gmock_externals>>();
+
+    auto gpu_agent = std::make_shared<agent_t>(
+        agent_t{ .type = externals::AGENT_TYPE_GPU, .device_type_index = 5 });
+
+    EXPECT_CALL(*g_externals_mock, add_string(Eq(externals::kfd_queue_category_name)))
+        .Times(1);
+    EXPECT_CALL(*g_externals_mock, get_agents_by_type(Eq(externals::AGENT_TYPE_GPU)))
+        .Times(1)
+        .WillOnce(Return(std::vector<std::shared_ptr<agent_t>>{ gpu_agent }));
+    EXPECT_CALL(
+        *g_externals_mock,
+        add_pmc_info(
+            AllOf(Field(&pmc_info_data_t::type, Eq(externals::AGENT_TYPE_GPU)),
+                  Field(&pmc_info_data_t::agent_type_index, Eq(std::size_t{ 5 })),
+                  Field(&pmc_info_data_t::target_arch, Eq(std::string{ "GPU" })),
+                  Field(&pmc_info_data_t::name,
+                        Eq(std::string{ externals::kfd_queue_category_name })),
+                  Field(&pmc_info_data_t::symbol, Eq(std::string{ "KFD Queue Events" })),
+                  Field(&pmc_info_data_t::description,
+                        Eq(std::string{ externals::kfd_queue_category_description })))))
+        .Times(1);
+
+    on_kfd_queue_configure<externals>();
+
+    g_externals_mock.reset();
 }
 
 }  // namespace rocprofsys::domains::buffered
