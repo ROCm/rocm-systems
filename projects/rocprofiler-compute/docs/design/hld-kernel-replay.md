@@ -409,10 +409,7 @@ written, every pass for a logical dispatch must be collapsed.
 | --- | --- |
 | 1. Correlate | Group the pass rows by logical-dispatch ID. |
 | 2. Normalize timestamps | Give the group one canonical start/end pair using pass 0's logical duration. |
-| 3. Hand off | The existing identity and pivot contracts see a single set per dispatch. |
-
-Pass identity survives transiently for normalization and diagnostics, but it does not reach
-the counter result output. Non-replay identity behavior is untouched.
+| 3. Hand off | The existing contracts see a single counter set per dispatch. |
 
 ### Co-active service composition
 
