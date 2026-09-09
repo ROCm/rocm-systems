@@ -502,8 +502,6 @@ class GraphNode : public hipGraphNodeDOTAttribute {
   }
   void SetDeviceId(int id) { dev_id_ = id; }
   int GetDeviceId() const { return dev_id_; }
-  bool GetWait() const { return wait_; }
-  void SetWait(bool wait) { wait_ = wait; }
 
  protected:
   // Declare Graph and GraphExecBase as friends of node for simpler access to GraphNode fields
@@ -536,7 +534,6 @@ class GraphNode : public hipGraphNodeDOTAttribute {
   size_t kernargSegmentAlignment_ = 256;  //!< Kernel arg segment alignment
   int dev_id_;  //!< Device Id when node is created(dev id from capture stream/current device
                 //!< when explicitly added)
-  bool wait_ = false;
 };
 
 class GraphEventWaitNode : public GraphNode {
