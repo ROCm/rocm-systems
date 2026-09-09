@@ -21,7 +21,7 @@ from dataclasses import dataclass, field, fields
 from datetime import datetime
 from math import ceil
 from pathlib import Path as path
-from typing import Any, Optional, TypeVar
+from typing import Any, Callable, Optional, TypeVar
 
 import config
 from utils import amdsmi_interface
@@ -181,14 +181,15 @@ def get_rocm_ver() -> str:
         if version_file_path.exists():
             return version_file_path.read_text(encoding="utf-8").strip()
 
-    fallback_probes: list[tuple[str, Optional[str]]] = [
-        ("ROCM_PATH suffix", _rocm_ver_from_versioned_path(rocm_base_path)),
-        ("core-* directory", _rocm_ver_from_core_dirs(rocm_base_path)),
-        ("versioned sibling path", _rocm_ver_from_sibling_paths(rocm_base_path)),
-        ("amd-smi version", _rocm_ver_from_amdsmi()),
-        ("package database", _rocm_ver_from_packages()),
+    fallback_probes: list[tuple[str, Callable[[], Optional[str]]]] = [
+        ("ROCM_PATH suffix", lambda: _rocm_ver_from_versioned_path(rocm_base_path)),
+        ("core-* directory", lambda: _rocm_ver_from_core_dirs(rocm_base_path)),
+        ("versioned sibling path", lambda: _rocm_ver_from_sibling_paths(rocm_base_path)),
+        ("amd-smi version", _rocm_ver_from_amdsmi),
+        ("package database", _rocm_ver_from_packages),
     ]
-    for source, detected_version in fallback_probes:
+    for source, probe in fallback_probes:
+        detected_version = probe()
         if detected_version:
             console_log(
                 "profiling",

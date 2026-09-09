@@ -6,15 +6,13 @@ from unittest import mock
 
 import pytest
 
-try:
-    import src.utils.specs as specs
-except Exception:
-    import utils.specs as specs
-
-get_rocm_ver = specs.get_rocm_ver
-_rocm_ver_from_core_dirs = specs._rocm_ver_from_core_dirs
-_rocm_ver_from_sibling_paths = specs._rocm_ver_from_sibling_paths
-_rocm_ver_from_versioned_path = specs._rocm_ver_from_versioned_path
+import utils.specs as specs
+from utils.specs import (
+    _rocm_ver_from_core_dirs,
+    _rocm_ver_from_sibling_paths,
+    _rocm_ver_from_versioned_path,
+    get_rocm_ver,
+)
 
 
 def test_rocm_ver_from_versioned_path():
@@ -46,6 +44,24 @@ def test_get_rocm_ver_uses_core_dir_fallback(tmp_path: Path, monkeypatch: pytest
         specs, "_rocm_ver_from_packages", return_value=None
     ):
         assert get_rocm_ver() == "10.1.0"
+
+
+def test_get_rocm_ver_short_circuits_before_subprocess_probes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    rocm_path = tmp_path / "rocm"
+    rocm_path.mkdir()
+    (rocm_path / "core-10.1.0").mkdir()
+
+    monkeypatch.setenv("ROCM_PATH", str(rocm_path))
+    monkeypatch.delenv("ROCM_VER", raising=False)
+
+    with mock.patch.object(specs, "_rocm_ver_from_amdsmi") as mock_amdsmi, mock.patch.object(
+        specs, "_rocm_ver_from_packages"
+    ) as mock_packages:
+        assert get_rocm_ver() == "10.1.0"
+        mock_amdsmi.assert_not_called()
+        mock_packages.assert_not_called()
 
 
 def test_get_rocm_ver_uses_rocm_ver_when_no_fallbacks(
