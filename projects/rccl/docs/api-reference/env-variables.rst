@@ -308,6 +308,19 @@ in the following table.
       - | ``PARALLEL`` (default): Use parallel launch mode.
         | ``GROUP``: Select grouped launch path for multi-GPU process management.
 
+    * - | ``NCCL_SET_STACK_SIZE``
+        | Sets the HIP kernel stack size to the maximum stack size required by
+          RCCL kernels during communicator initialization. This may avoid a HIP
+          memory reconfiguration on load. Set to ``1`` if you experience hangs
+          due to memory reconfiguration during initialization.
+      - | ``0``: Disable stack-size adjustment (default when RCCL is built
+          without indirect function call support).
+        | ``1``: Enable stack-size adjustment. Default when RCCL is built with
+          indirect function call support enabled (``ENABLE_IFC=ON``). On
+          gfx942/MI300X, gfx950/MI350X-MI355X, and gfx1250/MI450X, RCCL still
+          applies only the measured maximum kernel stack size and does not use
+          the indirect-function-call fallback sizes.
+
     * - | ``NCCL_MNNVL_ENABLE``
         | Controls the enabling of multi-node support over UALoE (Ultra Accelerator
           Link over Ethernet). Relies on AMD SMI APIs to query fabric-related
