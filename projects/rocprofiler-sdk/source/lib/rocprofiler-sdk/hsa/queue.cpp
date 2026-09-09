@@ -396,9 +396,9 @@ WriteInterceptor(const void* packets,
             range_replay::note_submission(queue, packets_arr, pkt_count, graph_launch_active);
             range_replay::ensure_entry_snapshot(*open_range, queue, writer);
         }
-        else
+        else if(const auto* rocp_agent = queue.get_agent().get_rocp_agent(); rocp_agent != nullptr)
         {
-            range_replay::note_foreign_dispatch(queue.get_agent().get_rocp_agent()->id.handle);
+            range_replay::note_foreign_dispatch(rocp_agent->id.handle);
         }
     }
 
