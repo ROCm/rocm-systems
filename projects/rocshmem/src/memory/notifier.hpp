@@ -37,11 +37,13 @@ class Notifier {
 
  public:
   __device__ uint64_t load() {
-    return detail::atomic::load<uint64_t, scope>(&value_, orders_);
+    return detail::atomic::load<uint64_t, scope>(
+        &value_, detail::atomic::memory_order_acquire);
   }
 
   __device__ void store(uint64_t val) {
-    detail::atomic::store<uint64_t, scope>(&value_, val, orders_);
+    detail::atomic::store<uint64_t, scope>(
+        &value_, val, detail::atomic::memory_order_release);
   }
 
   __device__ void fence() {
@@ -49,7 +51,7 @@ class Notifier {
   }
 
   __device__ void sync() {
-    if constexpr (scope == detail::atomic::memory_scope_thread ||
+    if constexpr (scope == detail::atomic::memory_scope_single ||
                   scope == detail::atomic::memory_scope_wavefront) {
       return;
     }
@@ -68,21 +70,25 @@ class Notifier {
     uint32_t retval {0};
     bool executor {!threadIdx.x && !threadIdx.y && !threadIdx.z};
     if (executor) {
-      retval = detail::atomic::fetch_add<uint32_t, uint32_t, scope>(&count_, 1, orders_);
+      retval = detail::atomic::fetch_add<uint32_t, uint32_t, scope>(
+          &count_, 1, detail::atomic::memory_order_acq_rel);
       fence();
     }
     __syncthreads();
 
     if (retval == ((gridDim.x * gridDim.y * gridDim.z) - 1)) {
       if (executor) {
-        detail::atomic::store<uint32_t, scope>(&count_, 0, orders_);
+        detail::atomic::store<uint32_t, scope>(
+            &count_, 0, detail::atomic::memory_order_release);
         fence();
-        detail::atomic::fetch_add<uint32_t, uint32_t, scope>(&signal_, 1, orders_);
+        detail::atomic::fetch_add<uint32_t, uint32_t, scope>(
+            &signal_, 1, detail::atomic::memory_order_acq_rel);
       }
     }
 
     if (executor) {
-      while (detail::atomic::load<uint32_t, scope>(&signal_, orders_) != done) {
+      while (detail::atomic::load<uint32_t, scope>(
+                 &signal_, detail::atomic::memory_order_acquire) != done) {
         ;
       }
     }
@@ -90,8 +96,6 @@ class Notifier {
   }
 
  private:
-  detail::atomic::rocshmem_memory_orders orders_{};
-
   uint64_t value_{};
 
   uint32_t signal_ {};

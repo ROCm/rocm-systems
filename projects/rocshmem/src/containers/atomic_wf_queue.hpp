@@ -238,23 +238,23 @@ class AtomicWFQueue {
  private:
 
   __device__ int atomic_load(const int* address) {
-    return __hip_atomic_load(address, __ATOMIC_SEQ_CST,
-                             __HIP_MEMORY_SCOPE_AGENT);
+    return detail::atomic::load<int, detail::atomic::memory_scope_device>(
+        address, detail::atomic::memory_order_seq_cst);
   }
 
   __device__ void atomic_store(int* address, const int val) {
-    __hip_atomic_store(address, val, __ATOMIC_SEQ_CST,
-                       __HIP_MEMORY_SCOPE_AGENT);
+    detail::atomic::store<int, detail::atomic::memory_scope_device>(
+        address, val, detail::atomic::memory_order_seq_cst);
   }
 
   __device__ void atomic_add(int* address, const int val) {
-    __hip_atomic_fetch_add(address, val, __ATOMIC_SEQ_CST,
-                           __HIP_MEMORY_SCOPE_AGENT);
+    detail::atomic::fetch_add<int, int, detail::atomic::memory_scope_device>(
+        address, val, detail::atomic::memory_order_seq_cst);
   }
 
   __device__ void atomic_sub(int* address, const int val) {
-    __hip_atomic_fetch_sub(address, val, __ATOMIC_SEQ_CST,
-                           __HIP_MEMORY_SCOPE_AGENT);
+    detail::atomic::fetch_sub<int, int, detail::atomic::memory_scope_device>(
+        address, val, detail::atomic::memory_order_seq_cst);
   }
 
   /**
