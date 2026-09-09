@@ -687,7 +687,10 @@ rdc_status_t RdcWatchTableImpl::xgmi_check(const HealthWatchedSet& watched,
     }
   } else {
     // Primary unavailable on this GPU: read the RAS fallback (uncorrectable
-    // XGMI_WAFL count) if one is defined.
+    // XGMI_WAFL count) if one is defined. Unlike xgmi_error this counter is
+    // cumulative since driver load and does not clear on read, so one
+    // uncorrectable keeps the component at FAIL until reset -- the same
+    // semantics memory_check applies to ECC_UNCORRECT_TOTAL.
     auto fallback = health_field_fallbacks().find(RDC_HEALTH_XGMI_ERROR);
     if (fallback == health_field_fallbacks().end()) return RDC_ST_OK;
     result =
@@ -759,7 +762,7 @@ rdc_status_t RdcWatchTableImpl::memory_check(const HealthWatchedSet& watched,
   result = get_start_end_values(watched, group_id, gpu_index, RDC_HEALTH_RETIRED_PAGE_LIMIT, 0,
                                 nullptr, &end);
   bool has_threshold = (result == RDC_ST_OK);
-  uint32_t retired_page_threshold = has_threshold ? end.value.l_int : 0;
+  uint64_t retired_page_threshold = has_threshold ? end.value.l_int : 0;
 
   if (has_threshold && retired_page > retired_page_threshold) {
     rdc_health_incidents_t* incident = &response->incidents[response->incidents_count];
@@ -810,9 +813,13 @@ rdc_status_t RdcWatchTableImpl::eeprom_check(const HealthWatchedSet& watched,
   rdc_field_value end = {};
   rdc_status_t result = get_start_end_values(watched, group_id, gpu_index,
                                              RDC_FI_ECC_UNCORRECT_TOTAL, 0, nullptr, &end);
-  if (result != RDC_ST_OK && result != RDC_ST_CORRUPTED_EEPROM) return RDC_ST_OK;
-
-  if (result == RDC_ST_CORRUPTED_EEPROM) {
+  // get_start_end_values() collapses fetch failures to RDC_ST_SMI_ERROR and
+  // leaves the specific status in end.status. AMDSMI has no EEPROM validation
+  // today (amdsmi_gpu_validate_ras_eeprom returns NOT_SUPPORTED), so this fires
+  // only if an SMI reports AMDSMI_STATUS_CORRUPTED_EEPROM from the ECC read.
+  bool corrupted =
+      (result != RDC_ST_OK) && (static_cast<rdc_status_t>(end.status) == RDC_ST_CORRUPTED_EEPROM);
+  if (corrupted) {
     rdc_health_incidents_t* incident = &response->incidents[response->incidents_count];
 
     std::string err_msg = "Detected a corrupt EEPROM since last GPU reset.";
