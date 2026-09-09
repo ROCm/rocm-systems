@@ -1152,6 +1152,13 @@ if(ENABLE_CODE_COVERAGE)
   # One reference anywhere in the process is sufficient — once librccl is
   # loaded, the atexit handler is registered for the whole process.
   if(ENABLE_DEVICE_COVERAGE)
+    # Newer compiler-rt packages keep the ROCm collector and its interception
+    # dependencies in a self-contained companion archive. Explicitly link it
+    # for this object-only host link; older packages leave this path empty and
+    # continue to use the generic profile runtime.
+    if(RCCL_HOST_ROCM_PROFILE_RT)
+      target_link_libraries(rccl PRIVATE "${RCCL_HOST_ROCM_PROFILE_RT}")
+    endif()
     target_link_options(rccl PRIVATE
       "LINKER:-u,__llvm_profile_hip_collect_device_data")
   endif()

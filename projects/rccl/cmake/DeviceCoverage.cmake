@@ -10,6 +10,9 @@ set(RCCL_DEVICE_PROFILE_RUNTIME_RELPATHS
     "lib/amdgcn-amd-amdhsa/libclang_rt.profile.a"
     "lib/linux/libclang_rt.profile-amdgcn.a")
 
+set(RCCL_HOST_ROCM_PROFILE_RUNTIME_NAME
+    "libclang_rt.profile_rocm.a")
+
 
 # Report whether <compiler> accepts the device coverage instrumentation flags.
 # Sets <output_supported> to TRUE/FALSE and, when FALSE, <output_reason> to a
@@ -78,4 +81,23 @@ function(rccl_find_device_profile_runtime compiler output_runtime output_reason)
   set(${output_reason}
     "the selected compiler '${compiler}' has no amdgcn profile runtime; searched: ${searched}"
     PARENT_SCOPE)
+endfunction()
+
+
+# Find the optional self-contained host ROCm profile runtime used by newer
+# compiler-rt packages. Older packages include the ROCm collection objects in
+# the generic profile runtime, so an absent archive is not an error.
+function(rccl_find_host_rocm_profile_runtime compiler output_runtime)
+  execute_process(
+    COMMAND "${compiler}" "-print-file-name=${RCCL_HOST_ROCM_PROFILE_RUNTIME_NAME}"
+    OUTPUT_VARIABLE runtime
+    ERROR_QUIET
+    OUTPUT_STRIP_TRAILING_WHITESPACE
+    RESULT_VARIABLE runtime_result)
+
+  if(runtime_result EQUAL 0 AND IS_ABSOLUTE "${runtime}" AND EXISTS "${runtime}")
+    set(${output_runtime} "${runtime}" PARENT_SCOPE)
+  else()
+    set(${output_runtime} "" PARENT_SCOPE)
+  endif()
 endfunction()
