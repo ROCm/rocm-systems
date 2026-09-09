@@ -366,8 +366,6 @@ flowchart TD
     Filtered["Do not profile<br/>the dispatched kernel"]
     Request{"Counter request has<br/>at least one bucket?"}
     Zero["Bypass kernel replay<br/>use existing non-counter path"]
-    Gate{"Dispatch reaches<br/>the replay gate?"}
-    Ordinary["Execute once outside replay<br/>retain ordinary dispatch handling"]
     Start["pass_count_cb runs once"]
     Vector{"Agent has the expected<br/>non-empty profile vector?"}
     Fatal["Fatal: agent/profile mismatch<br/>reject the whole profile"]
@@ -382,9 +380,7 @@ flowchart TD
     Range -- no --> Filtered
     Range -- yes --> Request
     Request -- no --> Zero
-    Request -- yes --> Gate
-    Gate -- no --> Ordinary
-    Gate -- yes --> Start --> Vector
+    Request -- yes --> Start --> Vector
     Vector -- no --> Fatal
     Vector -- yes --> PC
     PC -- yes --> NPlus
