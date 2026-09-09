@@ -25,6 +25,34 @@ def _args(**overrides):
 
 
 class CoverageReportingTest(unittest.TestCase):
+    def test_coverage_report_selects_debug_build_directory(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            executor = TestExecutor.__new__(TestExecutor)
+            executor.paths = {"workdir": temp_dir}
+            executor.build_config = {"install_flags": []}
+            executor.args = _args()
+
+            executor.setup_directories()
+
+            self.assertEqual(
+                executor.build_dir,
+                str(Path(temp_dir) / "build" / "debug"),
+            )
+
+    def test_non_coverage_run_selects_release_build_directory(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            executor = TestExecutor.__new__(TestExecutor)
+            executor.paths = {"workdir": temp_dir}
+            executor.build_config = {"install_flags": []}
+            executor.args = _args(coverage_report=False)
+
+            executor.setup_directories()
+
+            self.assertEqual(
+                executor.build_dir,
+                str(Path(temp_dir) / "build" / "release"),
+            )
+
     def test_workspace_isolates_profiles_and_removes_stale_data(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             workspace = Path(temp_dir) / "coverage-output"

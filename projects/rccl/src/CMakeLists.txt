@@ -1112,7 +1112,7 @@ if(ENABLE_CODE_COVERAGE)
   # differ only in whether the instrumentation is restricted to host code.
   # Device coverage (ROCm 7.15+) drops -Xarch_host so the flags also reach the
   # device compilation; host-only keeps -Xarch_host so device code is untouched.
-  if(ENABLE_DEVICE_COVERAGE)
+  if(ENABLE_FULL_COVERAGE)
     message(STATUS "Device-side coverage is enabled (host + device instrumented).")
     set(_coverage_instr_flags
       -fprofile-instr-generate
@@ -1151,7 +1151,7 @@ if(ENABLE_CODE_COVERAGE)
   # invocations; .o-only links from rccl-tests and friends don't qualify).
   # One reference anywhere in the process is sufficient — once librccl is
   # loaded, the atexit handler is registered for the whole process.
-  if(ENABLE_DEVICE_COVERAGE)
+  if(ENABLE_FULL_COVERAGE)
     # Newer compiler-rt packages keep the ROCm collector and its interception
     # dependencies in a self-contained companion archive. Explicitly link it
     # for this object-only host link; older packages leave this path empty and

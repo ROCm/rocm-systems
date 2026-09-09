@@ -493,7 +493,7 @@ python test_runner.py --config test_config_sample.json --no-build --skip-tests \
 
 ### Coverage Output
 
-`--coverage-report` always instruments host code. RCCL's CMake configuration adds device instrumentation on ROCm 7.15 or newer and prints a status message before falling back to host-only coverage on older releases. The runner generates:
+`--coverage-report` always instruments host code and requests `ENABLE_FULL_COVERAGE=AUTO`. CMake adds device instrumentation when the device linker, ROCm version, compiler, and profile runtime support it; otherwise AUTO falls back to host-only coverage. Direct builds can use the strict `./install.sh --debug --enable-full-coverage` option, which stops with an error instead of falling back when device coverage is unavailable. The runner generates:
 
 1. **HTML Report**: Visual coverage report in `<workspace>/report/`
    - View with: `firefox <workspace>/report/index.html`
@@ -1528,4 +1528,3 @@ python3 -m unittest discover -s tests -t . -v
 ```
 
 `pytest` also discovers them via `pytest.ini` (`pytest tests/`) if you prefer, but the `unittest discover` command above is the one contributors and CI should use so the two entry points never diverge.
-

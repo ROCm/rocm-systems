@@ -25,20 +25,7 @@
   ],
   "build_configuration": {
     "enabled": false,
-    "description": "perf binaries come from rccl_tests_build_configuration / external build"
-  },
-  "rccl_tests_build_configuration": {
-    "enabled": true,
-    "source_dir": "${RCCL_TESTS_DIR:-${WORKDIR}/../rccl-tests}",
-    "install_script": "install.sh",
-    "install_flags": [
-      "--mpi",
-      "--enable-device-api",
-      "--gpu_targets",
-      "gfx1250"
-    ],
-    "rccl_home": "${RCCL_HOME:-${WORKDIR}/build/debug}",
-    "env_variables": {}
+    "description": "perf binaries come from an external build"
   },
   "test_configurations": {
     "perf_base": {

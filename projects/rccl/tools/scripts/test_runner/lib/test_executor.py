@@ -79,7 +79,7 @@ def configure_coverage_build(install_flags, cmake_options, coverage_report):
     cmake_options = " ".join(
         tok for tok in cmake_options.split()
         if not tok.startswith("-DENABLE_CODE_COVERAGE=")
-        and not tok.startswith("-DENABLE_DEVICE_COVERAGE=")
+        and not tok.startswith("-DENABLE_FULL_COVERAGE=")
     )
 
     def append_cmake_option(option):
@@ -88,19 +88,30 @@ def configure_coverage_build(install_flags, cmake_options, coverage_report):
 
     if not coverage_report:
         remove_flag("--enable-code-coverage")
-        remove_flag("--enable-device-coverage")
+        remove_flag("--enable-full-coverage")
         append_cmake_option("-DENABLE_CODE_COVERAGE=OFF")
-        append_cmake_option("-DENABLE_DEVICE_COVERAGE=OFF")
+        append_cmake_option("-DENABLE_FULL_COVERAGE=OFF")
     else:
-        remove_flag("--enable-device-coverage")
+        remove_flag("--enable-full-coverage")
         if "--debug" not in install_flags and "--debug-fast" not in install_flags:
             install_flags.append("--debug")
         if "--enable-code-coverage" not in install_flags:
             install_flags.append("--enable-code-coverage")
         append_cmake_option("-DENABLE_CODE_COVERAGE=ON")
-        append_cmake_option("-DENABLE_DEVICE_COVERAGE=AUTO")
+        append_cmake_option("-DENABLE_FULL_COVERAGE=AUTO")
 
     return install_flags, cmake_options
+
+
+def rccl_build_type(build_config, args, using_custom_lib=False):
+    """Return the RCCL build type selected by the runner."""
+    if using_custom_lib:
+        return "custom"
+    install_flags = build_config.get("install_flags", [])
+    if (any(flag in install_flags for flag in ("--debug", "--debug-fast"))
+            or getattr(args, "coverage_report", False)):
+        return "debug"
+    return "release"
 
 
 class ExitCode(IntEnum):
@@ -391,13 +402,7 @@ class TestExecutor:
             # librccl.so / device-*.elf under build/release while install.sh
             # built them into build/debug.
             self.using_custom_lib = False
-            install_flags = self.build_config.get("install_flags", [])
-            coverage_forces_debug = getattr(self.args, "coverage_report", False)
-            if ("--debug" in install_flags or "--debug-fast" in install_flags
-                    or coverage_forces_debug):
-                build_type = "debug"
-            else:
-                build_type = "release"
+            build_type = rccl_build_type(self.build_config, self.args)
             self.build_dir = os.path.join(workdir, "build", build_type)
 
         # Set log and report directories under workspace
@@ -2235,9 +2240,10 @@ class TestExecutor:
             object_files.extend(["--object", device_elf])
             if self.args.verbose:
                 print(f"Found device object: {device_elf}")
-        if not device_elfs and self.args.verbose:
-            print("NOTE: no device-*.elf found next to librccl.so; device-side "
-                  "coverage will not appear (was the build ENABLE_DEVICE_COVERAGE=ON?)")
+        if not device_elfs:
+            if self.args.verbose:
+                print("NOTE: no device-*.elf found next to librccl.so; device-side "
+                      "coverage will not appear (was ENABLE_FULL_COVERAGE=ON?)")
 
         if not object_files:
             print("WARNING: No object files found for coverage report")
@@ -2550,13 +2556,12 @@ class TestExecutor:
             md = host_metadata.collect(rocm_version=re_mod._rocm_version(self._rocm_root()))
 
             # RCCL build type (perf configs should use a Release build).
-            install_flags = self.build_config.get("install_flags", []) if isinstance(self.build_config, dict) else []
-            if getattr(self, "using_custom_lib", False):
-                build_type = "custom"
-            elif any(f in install_flags for f in ("--debug", "--debug-fast")):
-                build_type = "debug"
-            else:
-                build_type = "release"
+            build_config = self.build_config if isinstance(self.build_config, dict) else {}
+            build_type = rccl_build_type(
+                build_config,
+                self.args,
+                getattr(self, "using_custom_lib", False),
+            )
             md["rccl_build_type"] = build_type
             md["mpi_impl"] = self.mpi_impl
             # Which librccl.so the tests actually loaded (and, if it came from a
@@ -2607,4 +2612,3 @@ class TestExecutor:
 
         if getattr(self.args, "db_push", False):
             emitter.push_postgres(timeout=getattr(self.args, "db_timeout", 10))
-
