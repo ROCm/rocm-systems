@@ -52,19 +52,23 @@ how counters are normalized and how percent-of-peak metrics are calculated. See
 :doc:`/conceptual/cdna/compute-memory-partition`.
 
 Why does the CLI memory chart look wrapped or garbled?
-=======================================================
+======================================================
 
-The visualized memory chart needs a terminal width of at least 240 columns.
-If the terminal is narrower or wraps long lines, the diagram breaks across
-lines:
+The chart is drawn at a fixed width and does not shrink to fit the terminal.
+When the window is too narrow, each chart line wraps onto the next row and the
+boxes and arrows stop lining up:
 
-.. image:: ../data/faq/mem_chart_wrapped.png
-   :align: center
-   :alt: Memory chart wrapped in a narrow terminal
-   :width: 800
+.. code-block:: text
 
-See :ref:`cli-memory-chart-viewing` for how to page the chart in a terminal
-(``less -RS``) or open it in Visual Studio Code.
+   ╭── Kernel ──╮Non-buffer Request╭─────── VL1D ───────╮Read BW     ╭───
+   ───── L2 ────────╮               ╭─── Data Fabric ────╮╭─────── UMC ──
+   ──────╮╭─────── HBM ────────╮
+   │            │Read   : 1.64e+04 │ Hit 50.0%          │881.2 GB/s  │ Hi
+   t 35.0%          │               │ To/From HBM (Req)  ││
+         ││                    │
+
+Widen the terminal until one chart line fits on a single row. If you cannot
+resize the window, see :ref:`cli-memory-chart-viewing`.
 
 How can I SSH tunnel in MobaXterm?
 ==================================

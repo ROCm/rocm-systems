@@ -63,28 +63,30 @@ There are three high-level GPU analysis views:
 
 .. _cli-memory-chart-viewing:
 
-The memory chart is a wide terminal diagram (at least 240 columns). If the
-terminal is narrower than the chart, or the terminal wraps long lines, the
-boxes, arrows, and bandwidth labels break across lines and the chart is hard to
-read.
+The memory chart is a wide diagram drawn at a fixed width. It does not shrink to
+fit the terminal, so in a narrow window every chart line wraps and the boxes,
+arrows, and bandwidth labels no longer line up. Widening the window until one
+chart line fits on a single row fixes this. If you cannot resize, use one of the
+following instead.
 
-To keep the original layout in a terminal, pipe the analyze command into
-``less`` with raw ANSI colors and no wrap. ``-R`` preserves color, and ``-S``
-chops long lines instead of wrapping them. Use the left and right arrow keys to
-scroll horizontally:
+Pipe the output into ``less``. ``-S`` cuts long lines instead of wrapping them,
+and ``-R`` shows the colored log lines above the chart as color rather than
+escape codes. Use the left and right arrow keys to scroll across the chart:
 
 .. code-block:: shell
 
    $ rocprof-compute analyze -p workloads/vcopy/MI200/ -b 3 | less -RS
 
-In Visual Studio Code, if you do not need terminal colors, pipe the output into
-the editor so you can scroll horizontally:
+You can also send the output to an editor, for example Visual Studio Code:
 
 .. code-block:: shell
 
    $ rocprof-compute analyze -p workloads/vcopy/MI200/ -b 3 | code -
 
-To print the same block as tables instead of the diagram, use ``--view table``.
+The chart is colored only when it is printed straight to a terminal, so it is
+plain text in both of the preceding commands.
+
+To print the block as tables instead of the diagram, see :ref:`cli-view-table`.
 
 **Empirical hierarchical roofline:**
 
@@ -98,7 +100,7 @@ To print the same block as tables instead of the diagram, use ``--view table``.
 
 .. note::
    * Visualized memory chart and Roofline chart are only supported in single run analysis. In multiple runs comparison mode, both are switched back to basic table view.
-   * Visualized memory chart requires a terminal width of at least 240 columns. See :ref:`cli-memory-chart-viewing` for how to page or open the chart without wrapping.
+   * Visualized memory chart is drawn at a fixed width and needs a wide terminal. See :ref:`cli-memory-chart-viewing` if it wraps.
    * Visualized Roofline chart is adapted to the initial terminal size only. If it is not clear, you may need to adjust the terminal size and regenerate it to check the display effect. Roofline analysis provides detailed, structured table output with measured empirical peak values for comparison.
 
 .. _cli-list-available-metrics:
@@ -373,6 +375,8 @@ More analysis options
 .. code-block:: shell
 
    $ rocprof-compute analyze -p workloads/vcopy/MI200/  --list-metrics gfx90a --include-cols Description
+
+.. _cli-view-table:
 
 **TTY output view (plain tables)**
 
