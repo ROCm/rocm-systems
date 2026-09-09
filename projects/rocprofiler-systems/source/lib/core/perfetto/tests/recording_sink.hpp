@@ -12,7 +12,7 @@ namespace rocprofsys::core
 {
 // Test-only sink: captures (source_id, bytes) tuples in arrival order so
 // unit tests can assert the engine's drain contract without touching disk.
-class recording_sink : public trace_sink
+class recording_sink : public trace_sink_interface
 {
 public:
     using record_t = std::pair<int, std::vector<char>>;
