@@ -38,6 +38,7 @@ pub mod profile;
 pub mod proto;
 pub mod reclaim;
 pub mod registry;
+pub mod rocr;
 pub mod session;
 pub mod state;
 pub mod store;
