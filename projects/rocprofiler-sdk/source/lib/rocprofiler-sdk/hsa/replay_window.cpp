@@ -122,10 +122,11 @@ replay_ring_submit(const Queue& queue, const rocprofiler_packet* packets, size_t
             std::this_thread::yield();
 
         const size_t offset = (write_idx % hsa_queue->size) * sizeof(rocprofiler_packet);
-        // The ring buffer is a flat array of 64-byte packet slots addressed by index.
-        // NOLINTNEXTLINE(performance-no-int-to-ptr)
+        // The ring buffer is a flat array of 64-byte packet slots addressed by index. Stepping a
+        // byte pointer rather than casting the base address through an integer keeps this a
+        // pointer-to-pointer cast, which is what it is.
         auto* slot =
-            reinterpret_cast<uint32_t*>(reinterpret_cast<size_t>(hsa_queue->base_address) + offset);
+            reinterpret_cast<uint32_t*>(static_cast<uint8_t*>(hsa_queue->base_address) + offset);
         const auto* src = reinterpret_cast<const uint32_t*>(&packets[i]);
 
         // Header last (release store): the packet processor must not see a slot whose header is
