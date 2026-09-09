@@ -25,6 +25,37 @@
 #    define PUBLIC_API __attribute__((visibility("default")))
 #endif
 
+static inline int
+encode_spm_shader_engine(uint32_t se_index, uint32_t sa_index = 0, uint32_t wgp_index = 0)
+{
+    return int((wgp_index << 24) | (sa_index << 16) | se_index);
+}
+
+static inline void
+decode_spm_shader_engine(int shader_engine, int* se_index, int* sa_index, int* wgp_index)
+{
+    if(shader_engine < 0)
+    {
+        *se_index  = -1;
+        *sa_index  = -1;
+        *wgp_index = -1;
+        return;
+    }
+
+    const uint32_t packed = static_cast<uint32_t>(shader_engine);
+    *se_index             = static_cast<int>(packed & 0xFFFF);
+    *sa_index             = static_cast<int>((packed >> 16) & 0xFF);
+    *wgp_index            = static_cast<int>((packed >> 24) & 0xFF);
+}
+
+PUBLIC_API hsa_status_t
+aqlprofile_spm_decode_shader_engine(int shader_engine, int* se_index, int* sa_index, int* wgp_index)
+{
+    if(!se_index || !sa_index || !wgp_index) return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+    decode_spm_shader_engine(shader_engine, se_index, sa_index, wgp_index);
+    return HSA_STATUS_SUCCESS;
+}
+
 PUBLIC_API hsa_status_t
 aqlprofile_spm_decode_query(aqlprofile_spm_buffer_desc_t  desc_bin,
                             aqlprofile_spm_decode_query_t query,
@@ -44,12 +75,6 @@ aqlprofile_spm_decode_query(aqlprofile_spm_buffer_desc_t  desc_bin,
         return HSA_STATUS_ERROR_INVALID_ARGUMENT;
 
     return HSA_STATUS_SUCCESS;
-}
-
-static inline int
-encode_spm_shader_engine(uint32_t se_index, uint32_t sa_index = 0, uint32_t wgp_index = 0)
-{
-    return int((wgp_index << 24) | (sa_index << 16) | se_index);
 }
 
 PUBLIC_API hsa_status_t
