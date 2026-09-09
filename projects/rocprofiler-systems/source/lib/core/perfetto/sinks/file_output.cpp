@@ -3,6 +3,7 @@
 
 #include "core/perfetto/sinks/file_output.hpp"
 
+#include "common/path.hpp"
 #include "core/output_file_registry.hpp"
 #include "logger/debug.hpp"
 
@@ -49,18 +50,21 @@ bool
 write_proto_to(const std::string& filename, const char* data, std::size_t size,
                output_file_registry& registry)
 {
-    if(!ensure_parent_directory(filename))
-    {
-        return false;
-    }
-
-    std::ofstream ofs{ filename, std::ios::out | std::ios::binary };
-    if(!ofs.is_open() || !ofs.good())
+    std::ofstream ofs{};
+    if(!path::create_parent_dirs_and_open_ofstream(ofs, filename,
+                                                   std::ios::out | std::ios::binary))
     {
         return false;
     }
 
     ofs.write(data, static_cast<std::streamsize>(size));
+    ofs.close();
+    if(ofs.fail())
+    {
+        LOG_ERROR("write_proto_to: write or close failed for '{}'", filename);
+        return false;
+    }
+
     registry.register_file(filename, output_format::perfetto);
     return true;
 }

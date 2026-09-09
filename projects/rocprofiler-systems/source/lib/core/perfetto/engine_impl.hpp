@@ -47,7 +47,7 @@ basic_cached_perfetto_engine<Backend>::init_sdk()
 
 template <perfetto_backend Backend>
 void
-basic_cached_perfetto_engine<Backend>::start(trace_sink& sink)
+basic_cached_perfetto_engine<Backend>::start(const std::shared_ptr<trace_sink>& sink)
 {
     if(is_system_backend())
     {
@@ -72,7 +72,7 @@ basic_cached_perfetto_engine<Backend>::start(trace_sink& sink)
     m_collected_bytes_frozen.store(false, std::memory_order_release);
 
     m_running     = true;
-    m_active_sink = &sink;
+    m_active_sink = sink;
 
     void* prev =
         activate_cached_engine(this, &basic_cached_perfetto_engine::collect_thunk);
@@ -114,14 +114,20 @@ basic_cached_perfetto_engine<Backend>::stop()
         drained.swap(m_collected_bytes);
     }
 
-    if(m_active_sink == nullptr)
+    auto sink = m_active_sink.lock();
+    m_active_sink.reset();
+
+    if(!sink)
     {
+        if(!drained.empty())
+        {
+            LOG_ERROR("cached_perfetto_engine::stop(): trace sink was destroyed before "
+                      "stop() could drain {} source(s); drained bytes discarded",
+                      drained.size());
+        }
         if(first_exc) std::rethrow_exception(first_exc);
         return;
     }
-
-    auto& sink    = *m_active_sink;
-    m_active_sink = nullptr;
 
     const auto dropped = m_dropped_packet_count.exchange(0, std::memory_order_relaxed);
     if(dropped > 0)
@@ -135,7 +141,7 @@ basic_cached_perfetto_engine<Backend>::stop()
         if(bytes.empty()) continue;
         try
         {
-            sink.on_source_drained(source_pid, std::move(bytes));
+            sink->on_source_drained(source_pid, std::move(bytes));
         } catch(...)
         {
             if(!first_exc) first_exc = std::current_exception();
@@ -144,7 +150,7 @@ basic_cached_perfetto_engine<Backend>::stop()
 
     try
     {
-        sink.finalize();
+        sink->finalize();
     } catch(...)
     {
         if(!first_exc) first_exc = std::current_exception();

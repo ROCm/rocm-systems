@@ -79,13 +79,13 @@ cached_perfetto_session::cached_perfetto_session(output_file_registry& registry,
                                                  pid_t root_pid, bool combine_traces,
                                                  const std::vector<int>&      source_pids,
                                                  trace_cache::post_processor& processor)
-: m_engine{ std::make_unique<cached_perfetto_engine>(
+: m_sink{ make_sink(registry, root_pid, combine_traces, source_pids.size()) }
+, m_engine{ std::make_unique<cached_perfetto_engine>(
       build_engine_config_from_settings()) }
-, m_sink{ make_sink(registry, root_pid, combine_traces, source_pids.size()) }
 , m_tracks{ std::make_unique<track_registry>() }
 {
     m_engine->init_sdk();
-    m_engine->start(*m_sink);
+    m_engine->start(m_sink);
     m_engine->preregister_pids(source_pids);
     processor.set_cached_perfetto_context(*m_engine, *m_tracks);
     m_started = true;
