@@ -165,6 +165,18 @@ in the following table.
           ``MAXCHANNELS`` are capped. RCCL may further reduce or ignore large
           requested values in specific topologies.
 
+    * - | ``RCCL_CHANNEL_TUNING_ENABLE``
+        | Enables RCCL's per-collective channel-count override on multi-node
+          jobs. When enabled, RCCL replaces the usual threadThreshold-based
+          channel count with architecture-specific byte-per-rank thresholds
+          (originally added for gfx950 ReduceScatter and AllGather). The
+          override is skipped for single-node communicators, for one GPU per
+          node except on gfx1151, and whenever the tuned count would violate
+          ``NCCL_MIN_NCHANNELS``, ``NCCL_MAX_NCHANNELS``, ``minCTAs``, or
+          ``maxCTAs``.
+      - | ``1``: Enable channel-count override (default).
+        | ``0``: Disable; keep RCCL's internal threadThreshold adjustments.
+
     * - | ``NCCL_NTHREADS``
         | Controls the number of GPU threads per block/workgroup that RCCL uses for
           tuned communication kernels. If unset or non-positive, RCCL uses its
