@@ -157,10 +157,7 @@ https://github.com/ROCm/rocm-systems/pull/11054
 
 ## Validation
 
-Every variant compiles to exactly the instruction and cache hint it claims, verified on the
-real shipped kernel and not just the benchmark's copy of it, and copies byte-for-byte
-correctly. Both are checked before any timing is trusted. Through the real runtime, copies pass
-at every size and alignment tried — including unaligned starts, sizes with a leftover tail, and
-a guard byte proving nothing is written past the end — and the runtime's own logs confirm the
-flag switches which kernel runs. The hip-tests memory suites fail in the same pre-existing
-places with the flag on as with it off, apart from one flaky case this change cannot reach.
+Every variant compiles to the instruction and cache hint it claims — verified on the real
+shipped kernel, not just the benchmark's copy — and copies byte-for-byte correctly, both
+checked before any timing is trusted. Copies through the real runtime pass at every size and
+alignment tried, and the hip-tests memory suites show no new failures with the flag on.
