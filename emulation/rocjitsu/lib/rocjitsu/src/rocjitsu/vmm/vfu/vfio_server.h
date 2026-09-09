@@ -39,4 +39,10 @@ enum class ServerSignalAction {
 /// the config, so a different part is a different config file.
 int run_vfio_server(const std::string &config_path, const std::string &socket_path);
 
+/// @brief Run the server and request a simulation failure after socket setup.
+/// @details Test-only entry point for proving that an engine failure after the
+/// socket is built terminates the server and propagates its status.
+int run_vfio_server_with_engine_exit_for_test(const std::string &config_path,
+                                              const std::string &socket_path, int exit_code);
+
 } // namespace rocjitsu

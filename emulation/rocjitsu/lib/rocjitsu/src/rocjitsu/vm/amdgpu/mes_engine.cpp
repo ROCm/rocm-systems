@@ -377,6 +377,14 @@ bool MesEngine::bind_process_address_space(Queue &queue,
   return true;
 }
 
+std::optional<AddressSpaceHandle>
+MesEngine::process_address_space_for_test(uint32_t process_id) const {
+  const auto address_space = address_spaces_.find(process_id);
+  return address_space == address_spaces_.end()
+             ? std::nullopt
+             : std::optional<AddressSpaceHandle>(address_space->second.handle);
+}
+
 bool MesEngine::update_process_address_space(uint64_t process_context_address,
                                              uint64_t page_table_base,
                                              std::shared_ptr<PhysicalMemoryAccess> memory) {
@@ -955,7 +963,7 @@ MesDoorbellDisposition MesEngine::notify_doorbell(uint64_t byte_offset, uint64_t
     if (mapped->queue_handle) {
       const amdgpu::QueueSubmissionResult result =
           queue_registry_.submit_producer(mapped->queue_handle, write_pointer);
-      if (!result)
+      if (!result.found)
         return MesDoorbellDisposition::Faulted;
       switch (result.status) {
       case amdgpu::QueueSubmissionStatus::Accepted:

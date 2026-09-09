@@ -171,6 +171,9 @@ public:
   [[nodiscard]] std::size_t active_queues() const { return mapped_queues_.size(); }
   /// @brief Return the number of process address spaces currently tracked by MES.
   [[nodiscard]] std::size_t active_address_spaces() const { return address_spaces_.size(); }
+  /// @brief Return the MES-owned handle for one process, for focused integration tests.
+  [[nodiscard]] std::optional<AddressSpaceHandle>
+  process_address_space_for_test(uint32_t process_id) const;
 
 private:
   enum class QueueKind : uint8_t { Mes, Compute, Sdma };
