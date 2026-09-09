@@ -31,6 +31,11 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 
 ### Changed
 
+- **Changed amdgpu driver version reporting** (breaking).
+  - ``amdsmi_get_gpu_driver_info()`` now separates ``/sys/module/amdgpu/version`` into ``driver_kernel_version`` and ``driver_version``, and reports the active DKMS build number in ``driver_build_version``. ``driver_full_version`` is ``kernel.driver-build`` when the build is present, otherwise ``kernel.driver``. The ``driver_version`` field now contains the final numeric component instead of the full module version string.
+  - ``amd-smi``, ``amd-smi version``, and ``amd-smi version --json`` now report Kernel Version, Driver Version, and Build Version in that order.
+  - ``amd-smi static --driver`` now reports ``KERNEL_VERSION``, ``VERSION``, ``BUILD_VERSION``, and ``FULL_VERSION``.
+
 - **`amdsmi_get_clock_info()` now returns `AMDSMI_STATUS_INPUT_OUT_OF_BOUNDS` for clock values that exceed `INT_MAX`**.  
   - Such values were previously narrowed to a negative number and returned as data.
   - The `UINT_MAX` "unavailable" sentinel is exempt: a domain with no minimum dpm level or no deep-sleep state keeps reporting the clock as unavailable instead of failing the call.
@@ -175,6 +180,9 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
   - See the [AMD SMI test design](docs/conceptual/test-design.md#naming-conventions) for the suite naming convention and `--gtest_filter` usage.
 
 ### Removed
+
+- **Removed ``amdsmi_get_amdgpu_dkms_version()`` from the C, Python, and Rust interfaces** (breaking).
+  - Use ``amdsmi_get_gpu_driver_info()`` and read ``driver_build_version`` instead.
 
 - **Removed the `amdsmi_gpu_driver_reload()` API and its Python binding** (breaking).  
   - Reload the amdgpu driver out of band with `sudo modprobe -r amdgpu && sudo modprobe amdgpu` to apply memory partition changes instead.

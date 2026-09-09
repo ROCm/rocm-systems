@@ -1249,21 +1249,15 @@ class AMDSMILogger:
         rocm_version = "N/A"
         if output["version_info"]["rocm version"][0]:
             rocm_version = str(output["version_info"]["rocm version"][1]).ljust(8)
-        driver_version = output["version_info"]["amdgpu version"]
-        if driver_version == "N/A":
-            amdgpu_version = "N/A".ljust(8)
+        driver_info = output["version_info"]["driver info"]
+        if driver_info == "N/A":
+            driver_kernel_version = "N/A"
+            driver_version = "N/A"
+            driver_build_version = "N/A"
         else:
-            # Example driver version string for amdgpu: 6.8.0-60 : 'Linuxversion6.8.0-60-generic(buildd@lcy02-amd64-098)(x86_64-linux-gnu-gcc-12(Ubuntu12.3.0-1ubuntu1~22.04)12.3.0,GNUld(GNUBinutilsforUbuntu)2.38)#63~22.04.1-UbuntuSMPPREEMPT_DYNAMICTueApr2219:00:15UTC2'
-            # Extract version before "-generic" if it exists
-            if "-generic" in driver_version["driver_version"]:
-                # Extract version using regex to find pattern like "6.8.0-60"
-                match = re.search(r"(\d+\.\d+\.\d+-\d+)", driver_version["driver_version"])
-                if match:
-                    amdgpu_version = match.group(1)[:80]
-                else:
-                    amdgpu_version = "N/A"
-            else:
-                amdgpu_version = str(driver_version["driver_version"])[:80]
+            driver_kernel_version = str(driver_info["driver_kernel_version"])
+            driver_version = str(driver_info["driver_version"])
+            driver_build_version = str(driver_info["driver_build_version"])
         fw_pldm_version = str(output["version_info"]["fw pldm version"])
         vbios_version = str(output["version_info"]["vbios version"])
         kernel_version = str(output["version_info"]["kernel version"])
@@ -1275,7 +1269,9 @@ class AMDSMILogger:
 
         amd_smi_version = _trunc(amd_smi_version)
         rocm_version = _trunc(rocm_version)
-        amdgpu_version = _trunc(amdgpu_version)
+        driver_kernel_version = _trunc(driver_kernel_version)
+        driver_version = _trunc(driver_version)
+        driver_build_version = _trunc(driver_build_version)
         fw_pldm_version = _trunc(fw_pldm_version)
         vbios_version = _trunc(vbios_version)
         kernel_version = _trunc(kernel_version)
@@ -1290,11 +1286,16 @@ class AMDSMILogger:
         print(default_line_1)
         print("| AMD-SMI            {0:<{w}s} |".format(amd_smi_version, w=_COL_WIDTH))
 
-        # Print amdgpu or kernel version based on availability, if neither then don't print
-        if amdgpu_version.strip() != "N/A":
-            print("| amdgpu Version:    {0:<{w}s} |".format(amdgpu_version, w=_COL_WIDTH))
-        elif kernel_version.strip() != "N/A":
+        if driver_kernel_version != "N/A":
+            print("| Kernel Version:    {0:<{w}s} |".format(driver_kernel_version, w=_COL_WIDTH))
+        elif kernel_version != "N/A":
             print("| OS kernel Version: {0:<{w}s} |".format(kernel_version, w=_COL_WIDTH))
+
+        if driver_version != "N/A":
+            print("| Driver Version:    {0:<{w}s} |".format(driver_version, w=_COL_WIDTH))
+
+        if driver_build_version != "N/A":
+            print("| Build Version:     {0:<{w}s} |".format(driver_build_version, w=_COL_WIDTH))
 
         if rocm_version != "N/A":
             print("| ROCm Version:      {0:<{w}s} |".format(rocm_version, w=_COL_WIDTH))

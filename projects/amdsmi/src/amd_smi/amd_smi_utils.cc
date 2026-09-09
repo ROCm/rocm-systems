@@ -19,6 +19,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <ctime>
+#include <filesystem>
 #include <fstream>
 #include <iostream>
 #include <iterator>
@@ -226,8 +227,7 @@ amdsmi_status_t smi_amdgpu_get_board_info(amd::smi::AMDSmiGPUDevice* device,
                                           AMDSMI_MAX_STRING_LENGTH, false);
 
   std::ostringstream ss;
-  ss << __PRETTY_FUNCTION__ << "[Before correction] "
-     << "Returning status = AMDSMI_STATUS_SUCCESS"
+  ss << __PRETTY_FUNCTION__ << "[Before correction] " << "Returning status = AMDSMI_STATUS_SUCCESS"
      << " | model_number_path = |" << model_number_path << "|\n"
      << "; info->model_number: |" << info->model_number << "|\n"
      << "; ret_mod = " << ret_mod << "|\n"
@@ -241,8 +241,8 @@ amdsmi_status_t smi_amdgpu_get_board_info(amd::smi::AMDSmiGPUDevice* device,
      << "; info->manufacturer_name: |" << info->manufacturer_name << "|\n"
      << "; ret_man = " << ret_man << "|\n"
      << "\n product_name_path = |" << product_name_path << "|\n"
-     << "; info->product_name: |" << info->product_name << "|"
-     << "; ret_prod = " << ret_prod << "|\n";
+     << "; info->product_name: |" << info->product_name << "|" << "; ret_prod = " << ret_prod
+     << "|\n";
   LOG_INFO(ss);
 
   return AMDSMI_STATUS_SUCCESS;
@@ -1477,4 +1477,410 @@ void init_asic_info_defaults(amdsmi_asic_info_t* info) {
   info->physical_acc_id = std::numeric_limits<uint32_t>::max();
   info->chip_rev_id = std::numeric_limits<uint32_t>::max();
   info->external_rev_id = std::numeric_limits<uint32_t>::max();
+}
+
+namespace {
+
+namespace fs = std::filesystem;
+
+/** DKMS registers amdgpu under /var/lib/dkms/amdgpu/<version>/; package
+ * metadata lives in source/dkms.conf behind the source symlink
+ */
+constexpr std::string_view kAmdgpuDkmsPackageName = "amdgpu";
+constexpr std::string_view kAmdgpuDkmsSourceSymlinkName = "source";
+constexpr std::string_view kDkmsAmdgpuKernelPrefix = "kernel-";
+constexpr std::string_view kDkmsAmdgpuDkmsConfName = "dkms.conf";
+constexpr std::string_view kDkmsAmdgpuDkmsConfPackageName = "PACKAGE_NAME";
+constexpr std::string_view kDkmsAmdgpuDkmsConfPackageVersion = "PACKAGE_VERSION";
+
+const auto kAmdgpuDkmsVersionDirRegex = std::regex{R"(^\d+\.\d+\.\d+-\d+\.\d+\.\d+$)"};
+const auto kAmdgpuModuleVersionRegex = std::regex{R"(^\d+\.\d+\.\d+\.\d+$)"};
+
+using smi_amdgpu_dkms_conf_t = std::pair<std::string, std::string>;
+
+auto log_dkms_debug(std::string_view caller, std::string_view message) -> void {
+  auto outstream = std::ostringstream{};
+  outstream << caller << " | " << message;
+  LOG_DEBUG(outstream);
+}
+
+auto is_kernel_dkms_symlink_name(std::string_view dir_name) -> bool {
+  return ((dir_name.size() >= kDkmsAmdgpuKernelPrefix.size()) &&
+          (dir_name.compare(0, kDkmsAmdgpuKernelPrefix.size(), kDkmsAmdgpuKernelPrefix) == 0));
+}
+
+auto is_amdgpu_dkms_version_dir_name(std::string_view dir_name) -> bool {
+  return std::regex_match(dir_name.begin(), dir_name.end(), kAmdgpuDkmsVersionDirRegex);
+}
+
+auto has_prefix(std::string_view str, std::string_view prefix) -> bool {
+  return ((str.size() >= prefix.size()) && (str.compare(0, prefix.size(), prefix) == 0));
+}
+
+auto make_expected_source_tree_path(const fs::path& source_tree_prefix, std::string_view dir_name)
+    -> fs::path {
+  return fs::path{source_tree_prefix.string() + std::string{dir_name}};
+}
+
+auto try_parse_dkms_conf_assignment(std::string_view line, std::string_view key)
+    -> std::optional<std::string_view> {
+  const auto trimmed_line = trim(line);
+  if ((trimmed_line.size() <= (key.size() + 1)) || (!has_prefix(trimmed_line, key))) {
+    return std::nullopt;
+  }
+
+  if (trimmed_line[key.size()] != '=') {
+    return std::nullopt;
+  }
+
+  const auto value_part = trim(trimmed_line.substr((key.size() + 1)));
+  if ((value_part.size() < 2) || (value_part.front() != '"') || (value_part.back() != '"')) {
+    return std::nullopt;
+  }
+
+  return value_part.substr(1, (value_part.size() - 2));
+}
+
+auto resolve_symlink_target_path(const fs::path& source_link, const fs::path& target,
+                                 std::error_code& err_code) -> fs::path {
+  if (target.is_absolute()) {
+    return fs::weakly_canonical(target, err_code);
+  }
+  return fs::weakly_canonical(source_link.parent_path() / target, err_code);
+}
+
+auto is_valid_source_symlink(std::string_view caller, const fs::path& version_dir,
+                             std::string_view dir_name, const fs::path& source_tree_prefix)
+    -> bool {
+  const auto source_link = (version_dir / kAmdgpuDkmsSourceSymlinkName);
+  auto err_code = std::error_code{};
+
+  if (fs::exists(source_link, err_code)) {
+    if (fs::is_symlink(source_link, err_code)) {
+      const auto target = fs::read_symlink(source_link, err_code);
+      if (err_code) {
+        auto outstream = std::ostringstream{};
+        outstream << "Cannot read source symlink at: " << source_link << ": " << err_code.message();
+        log_dkms_debug(caller, outstream.str());
+        return false;
+      }
+
+      const auto expected_target = make_expected_source_tree_path(source_tree_prefix, dir_name);
+      auto target_err = std::error_code{};
+      auto expected_err = std::error_code{};
+      const auto resolved_target = resolve_symlink_target_path(source_link, target, target_err);
+      const auto resolved_expected = fs::weakly_canonical(expected_target, expected_err);
+      if ((!target_err) && (!expected_err) && (resolved_target == resolved_expected)) {
+        return true;
+      }
+
+      auto outstream = std::ostringstream{};
+      outstream << "Source symlink at: " << source_link << " points to: " << target
+                << "; expected: " << expected_target;
+      log_dkms_debug(caller, outstream.str());
+      return false;
+    }
+
+    auto outstream = std::ostringstream{};
+    outstream << source_link << " exists but is not a symlink";
+    log_dkms_debug(caller, outstream.str());
+    return false;
+  }
+
+  auto outstream = std::ostringstream{};
+  outstream << "No source symlink at: " << source_link;
+  log_dkms_debug(caller, outstream.str());
+  return false;
+}
+
+auto read_dkms_conf(std::string_view caller, const fs::path& conf_path)
+    -> std::optional<smi_amdgpu_dkms_conf_t> {
+  auto instream = std::ifstream{conf_path};
+  if (instream.is_open()) {
+    auto package_name = std::string{};
+    auto package_version = std::string{};
+    auto line_str = std::string{};
+
+    while (std::getline(instream, line_str)) {
+      if ((!line_str.empty()) && (line_str.back() == '\r')) {
+        line_str.pop_back();
+      }
+
+      if (const auto parsed_name =
+              try_parse_dkms_conf_assignment(line_str, kDkmsAmdgpuDkmsConfPackageName)) {
+        package_name = std::string{*parsed_name};
+        continue;
+      }
+
+      if (const auto parsed_version =
+              try_parse_dkms_conf_assignment(line_str, kDkmsAmdgpuDkmsConfPackageVersion)) {
+        package_version = std::string{*parsed_version};
+      }
+    }
+
+    if ((!package_name.empty()) && (!package_version.empty())) {
+      return std::make_pair(package_name, package_version);
+    }
+
+    auto outstream = std::ostringstream{};
+    outstream << kDkmsAmdgpuDkmsConfName << " at: " << conf_path << " has no "
+              << kDkmsAmdgpuDkmsConfPackageName << " or " << kDkmsAmdgpuDkmsConfPackageVersion;
+    log_dkms_debug(caller, outstream.str());
+    return std::nullopt;
+  }
+
+  auto outstream = std::ostringstream{};
+  outstream << "Cannot open " << kDkmsAmdgpuDkmsConfName << " at: " << conf_path;
+  log_dkms_debug(caller, outstream.str());
+  return std::nullopt;
+}
+
+auto make_kernel_symlink_name(std::string_view release, std::string_view machine) -> std::string {
+  auto name = std::string{kDkmsAmdgpuKernelPrefix};
+  name.append(release);
+  name.push_back('-');
+  name.append(machine);
+  return name;
+}
+
+auto package_version_from_kernel_symlink(std::string_view caller, const fs::path& dkms_root,
+                                         const fs::path& kernel_link)
+    -> std::optional<std::string> {
+  auto err_code = std::error_code{};
+  if ((!fs::is_symlink(kernel_link, err_code)) || (err_code)) {
+    auto outstream = std::ostringstream{};
+    outstream << "No kernel symlink at: " << kernel_link;
+    log_dkms_debug(caller, outstream.str());
+    return std::nullopt;
+  }
+
+  const auto target = fs::read_symlink(kernel_link, err_code);
+  if ((err_code) || (target.empty())) {
+    auto outstream = std::ostringstream{};
+    outstream << "Cannot read kernel symlink at: " << kernel_link << ": " << err_code.message();
+    log_dkms_debug(caller, outstream.str());
+    return std::nullopt;
+  }
+
+  auto version = std::string{};
+  if (target.is_relative()) {
+    version = target.begin()->string();
+  } else {
+    const auto resolved = resolve_symlink_target_path(kernel_link, target, err_code);
+    if (err_code) {
+      auto outstream = std::ostringstream{};
+      outstream << "Cannot resolve kernel symlink at: " << kernel_link << ": "
+                << err_code.message();
+      log_dkms_debug(caller, outstream.str());
+      return std::nullopt;
+    }
+
+    const auto relative = fs::relative(resolved, dkms_root, err_code);
+    if ((err_code) || (relative.empty()) || (relative.has_root_path())) {
+      auto outstream = std::ostringstream{};
+      outstream << "Kernel symlink at: " << kernel_link
+                << " is outside the DKMS root: " << dkms_root;
+      log_dkms_debug(caller, outstream.str());
+      return std::nullopt;
+    }
+    version = relative.begin()->string();
+  }
+
+  if (!is_amdgpu_dkms_version_dir_name(version)) {
+    auto outstream = std::ostringstream{};
+    outstream << "Kernel symlink at: " << kernel_link
+              << " target is not version-shaped: " << target;
+    log_dkms_debug(caller, outstream.str());
+    return std::nullopt;
+  }
+  return version;
+}
+
+auto try_add_dkms_package_from_entry(std::string_view caller, const fs::path& version_dir,
+                                     std::string_view dir_name, const fs::path& source_tree_prefix,
+                                     smi_amdgpu_dkms_packages_t* packages) -> void {
+  if (!is_valid_source_symlink(caller, version_dir, dir_name, source_tree_prefix)) {
+    return;
+  }
+
+  // Open the checked /usr/src tree. Do not follow version_dir/source again; that
+  // symlink can change between the check and the open.
+  const auto dkms_conf_path =
+      (make_expected_source_tree_path(source_tree_prefix, dir_name) / kDkmsAmdgpuDkmsConfName);
+  auto err_code = std::error_code{};
+  if (!fs::exists(dkms_conf_path, err_code)) {
+    auto outstream = std::ostringstream{};
+    outstream << "No " << kDkmsAmdgpuDkmsConfName << " at: " << dkms_conf_path;
+    log_dkms_debug(caller, outstream.str());
+    return;
+  }
+
+  const auto package_info = read_dkms_conf(caller, dkms_conf_path);
+  if (!package_info.has_value()) {
+    return;
+  }
+
+  const auto& package_name = package_info->first;
+  const auto& package_version = package_info->second;
+  if (std::string_view{package_name} != kAmdgpuDkmsPackageName) {
+    auto outstream = std::ostringstream{};
+    outstream << kDkmsAmdgpuDkmsConfName << " at: " << dkms_conf_path
+              << " sets PACKAGE_NAME to: " << package_name
+              << "; expected: " << kAmdgpuDkmsPackageName;
+    log_dkms_debug(caller, outstream.str());
+    return;
+  }
+
+  if (package_version != dir_name) {
+    auto outstream = std::ostringstream{};
+    outstream << kDkmsAmdgpuDkmsConfName << " at: " << dkms_conf_path << " sets PACKAGE_VERSION to "
+              << package_version << "; directory name is " << dir_name;
+    log_dkms_debug(caller, outstream.str());
+    return;
+  }
+
+  packages->emplace(package_version, package_name);
+}
+
+auto collect_dkms_versions_from(std::string_view caller, const fs::path& root,
+                                const fs::path& source_tree_prefix,
+                                smi_amdgpu_dkms_packages_t* packages) -> amdsmi_status_t {
+  auto err_code = std::error_code{};
+  if (fs::exists(root, err_code) && fs::is_directory(root, err_code)) {
+    const auto dir_itr =
+        fs::directory_iterator{root, fs::directory_options::skip_permission_denied, err_code};
+    if (err_code) {
+      auto outstream = std::ostringstream{};
+      outstream << "Cannot list: " << root << ": " << err_code.message();
+      log_dkms_debug(caller, outstream.str());
+      return AMDSMI_STATUS_NOT_SUPPORTED;
+    }
+
+    for (const auto& entry : dir_itr) {
+      const auto dir_name = entry.path().filename().string();
+      if (is_kernel_dkms_symlink_name(dir_name)) {
+        continue;
+      }
+
+      if (!entry.is_directory(err_code)) {
+        auto outstream = std::ostringstream{};
+        outstream << "Ignoring: " << entry.path() << " (not a directory)";
+        log_dkms_debug(caller, outstream.str());
+        continue;
+      }
+
+      if (!is_amdgpu_dkms_version_dir_name(dir_name)) {
+        auto outstream = std::ostringstream{};
+        outstream << "Ignoring: " << entry.path() << " (not a version-shaped directory name)";
+        log_dkms_debug(caller, outstream.str());
+        continue;
+      }
+
+      try_add_dkms_package_from_entry(caller, entry.path(), dir_name, source_tree_prefix, packages);
+    }
+
+    return AMDSMI_STATUS_SUCCESS;
+  }
+
+  auto outstream = std::ostringstream{};
+  outstream << "DKMS tree not found at: " << root;
+  log_dkms_debug(caller, outstream.str());
+  return AMDSMI_STATUS_NOT_SUPPORTED;
+}
+
+}  // namespace
+
+auto smi_amdgpu_parse_driver_versions(std::string_view module_version,
+                                      std::string_view package_version, amdsmi_driver_info_t* info)
+    -> amdsmi_status_t {
+  if (info == nullptr) {
+    return AMDSMI_STATUS_INVAL;
+  }
+
+  info->driver_kernel_version[0] = '\0';
+  info->driver_version[0] = '\0';
+  info->driver_build_version[0] = '\0';
+  info->driver_full_version[0] = '\0';
+
+  const auto module_version_string = std::string{module_version};
+  if (!std::regex_match(module_version_string, kAmdgpuModuleVersionRegex)) {
+    return AMDSMI_STATUS_SUCCESS;
+  }
+
+  const auto separator = module_version.rfind('.');
+  const auto kernel_version = module_version.substr(0, separator);
+  const auto driver_version = module_version.substr((separator + 1));
+  auto build_version = std::string_view{};
+  if (is_amdgpu_dkms_version_dir_name(package_version)) {
+    const auto build_start = (package_version.find('-') + 1);
+    const auto build_end = package_version.find('.', build_start);
+    build_version = package_version.substr(build_start, (build_end - build_start));
+  }
+
+  smi_clear_char_and_reinitialize(info->driver_kernel_version, AMDSMI_MAX_STRING_LENGTH,
+                                  std::string{kernel_version});
+  smi_clear_char_and_reinitialize(info->driver_version, AMDSMI_MAX_STRING_LENGTH,
+                                  std::string{driver_version});
+  smi_clear_char_and_reinitialize(info->driver_build_version, AMDSMI_MAX_STRING_LENGTH,
+                                  std::string{build_version});
+
+  auto full_version = std::string{kernel_version};
+  full_version.push_back('.');
+  full_version.append(driver_version);
+  if (!build_version.empty()) {
+    full_version.push_back('-');
+    full_version.append(build_version);
+  }
+  smi_clear_char_and_reinitialize(info->driver_full_version, AMDSMI_MAX_STRING_LENGTH,
+                                  full_version);
+
+  return AMDSMI_STATUS_SUCCESS;
+}
+
+auto smi_amdgpu_get_active_dkms_version(std::string_view dkms_root,
+                                        std::string_view source_tree_prefix,
+                                        std::string_view release, std::string_view machine,
+                                        std::string* active_version) -> amdsmi_status_t {
+  if (active_version == nullptr) {
+    return AMDSMI_STATUS_INVAL;
+  }
+  active_version->clear();
+
+  if ((release.empty()) || (machine.empty())) {
+    return AMDSMI_STATUS_NOT_SUPPORTED;
+  }
+
+  const auto root = fs::path{std::string{dkms_root}};
+  const auto kernel_link = root / make_kernel_symlink_name(release, machine);
+  const auto selected = package_version_from_kernel_symlink(__func__, root, kernel_link);
+  if (!selected.has_value()) {
+    return AMDSMI_STATUS_NOT_SUPPORTED;
+  }
+
+  auto packages = smi_amdgpu_dkms_packages_t{};
+  try_add_dkms_package_from_entry(__func__, root / *selected, *selected,
+                                  fs::path{std::string{source_tree_prefix}}, &packages);
+  const auto package = packages.find(*selected);
+  if (package == packages.end()) {
+    auto outstream = std::ostringstream{};
+    outstream << "Kernel symlink package " << *selected << " is not a validated DKMS package";
+    log_dkms_debug(__func__, outstream.str());
+    return AMDSMI_STATUS_NOT_SUPPORTED;
+  }
+
+  *active_version = package->first;
+  return AMDSMI_STATUS_SUCCESS;
+}
+
+auto smi_amdgpu_get_dkms_versions_from(std::string_view dkms_root,
+                                       std::string_view source_tree_prefix,
+                                       smi_amdgpu_dkms_packages_t* packages) -> amdsmi_status_t {
+  if (packages == nullptr) {
+    return AMDSMI_STATUS_INVAL;
+  }
+  packages->clear();
+
+  const auto root = fs::path{dkms_root};
+  const auto source_tree_prefix_path = fs::path{std::string{source_tree_prefix}};
+  return collect_dkms_versions_from(__func__, root, source_tree_prefix_path, packages);
 }
