@@ -61,7 +61,7 @@ concurrency:
 
 jobs:
   setup:
-    uses: ROCm/TheRock/.github/workflows/setup_multi_arch.yml@users/raramakr/asan-presubmit-test # 2026-08-26
+    uses: ROCm/TheRock/.github/workflows/setup_multi_arch.yml@users/dravindr/host_asan_prs_test # 2026-09-09
     with:
       build_variant: "host-asan"
       # Only applies to workflow_dispatch; a pull_request trigger starts from
@@ -90,7 +90,7 @@ jobs:
       baseline_run_id: ${{ inputs.baseline_run_id || '' }}
       baseline_repository: ${{ inputs.baseline_repository || (inputs.baseline_run_id != '' && github.repository) || '' }}
       repository: ROCm/TheRock
-      ref: users/raramakr/asan-presubmit-test # 2026-08-26
+      ref: users/dravindr/host_asan_prs_test # 2026-09-09
       external_repo: '{"repository":"${{ github.repository }}","ref":"${{ github.sha }}"}'
 
   linux_build_and_test:
@@ -101,7 +101,7 @@ jobs:
         needs.setup.outputs.linux_build_config != '' &&
         needs.setup.outputs.enable_build_jobs == 'true'
       }}
-    uses: ROCm/TheRock/.github/workflows/multi_arch_ci_linux.yml@users/raramakr/asan-presubmit-test # 2026-08-26
+    uses: ROCm/TheRock/.github/workflows/multi_arch_ci_linux.yml@users/dravindr/host_asan_prs_test # 2026-09-09
     with:
       build_config: ${{ needs.setup.outputs.linux_build_config }}
       test_labels: ${{ needs.setup.outputs.linux_test_labels }}
@@ -111,7 +111,7 @@ jobs:
       test_type: ${{ needs.setup.outputs.test_type }}
       external_repo_config: ${{ needs.setup.outputs.external_repo_config }}
       repository: ROCm/TheRock
-      ref: users/raramakr/asan-presubmit-test # 2026-08-26
+      ref: users/dravindr/host_asan_prs_test # 2026-09-09
     permissions:
       contents: read
       id-token: write
@@ -129,7 +129,7 @@ jobs:
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           repository: "ROCm/TheRock"
-          ref: users/raramakr/asan-presubmit-test # 2026-08-26
+          ref: users/dravindr/host_asan_prs_test # 2026-09-09
           sparse-checkout: build_tools/github_actions
           sparse-checkout-cone-mode: true
 
