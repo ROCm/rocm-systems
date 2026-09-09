@@ -89,9 +89,9 @@ struct continue_call
 std::vector<continue_call>* g_continue_calls = nullptr;
 
 void
-record_continue_call(uint64_t range_id,
-                     uint64_t current_pass,
-                     uint64_t total_passes,
+record_continue_call(uint64_t                range_id,
+                     uint64_t                current_pass,
+                     uint64_t                total_passes,
                      rocprofiler_user_data_t user_data)
 {
     if(g_continue_calls)
@@ -161,7 +161,7 @@ struct observations
     uint64_t config_write     = CONFIG_ENTER_VALUE;  // value the tool writes in CONFIG PHASE_ENTER
     uint64_t config_exit_seen = SENTINEL_VALUE;
 
-    std::vector<pass_obs> passes{};
+    std::vector<pass_obs>        passes{};
     std::map<uint64_t, uint64_t> pass_enter_writes{};  // pass index -> value written at its ENTER
 
     uint64_t                          close_enter_seen  = SENTINEL_VALUE;
@@ -263,10 +263,10 @@ enable_range_replay_domains(ctxc::context& ctx, observations& obs)
                           ROCPROFILER_RANGE_REPLAY_PASS,
                           ROCPROFILER_RANGE_REPLAY_CLOSE})
     {
-        ASSERT_EQ(ctxc::add_domain_op(ctx.callback_tracer->domains,
-                                      ROCPROFILER_CALLBACK_TRACING_RANGE_REPLAY,
-                                      operation),
-                  ROCPROFILER_STATUS_SUCCESS);
+        ASSERT_EQ(
+            ctxc::add_domain_op(
+                ctx.callback_tracer->domains, ROCPROFILER_CALLBACK_TRACING_RANGE_REPLAY, operation),
+            ROCPROFILER_STATUS_SUCCESS);
     }
 
     ctx.callback_tracer->callback_data.at(ROCPROFILER_CALLBACK_TRACING_RANGE_REPLAY) = {
@@ -333,8 +333,8 @@ run_range(observations& obs, uint64_t n_passes, rocprofiler_range_replay_status_
 
     for(uint64_t pass = 1; pass <= n_passes; ++pass)
     {
-        auto pass_state     = rr::pass_context_state_t{};
-        pass_state.contexts = one_context(ctx);
+        auto pass_state                     = rr::pass_context_state_t{};
+        pass_state.contexts                 = one_context(ctx);
         pass_state.external_correlation_ids = one_correlation(ctx);
 
         // Re-seed from the CONFIG value every pass, as execute_pass_phase_enter does.
@@ -491,8 +491,8 @@ TEST(range_replay_phases, config_user_data_flows_to_every_pass_and_to_close)
 TEST(range_replay_phases, pass_user_data_write_is_scoped_to_its_own_pass)
 {
     observations obs{};
-    obs.config_write            = CONFIG_ENTER_VALUE;
-    obs.pass_enter_writes[1]    = PASS_1_ENTER_VALUE;
+    obs.config_write         = CONFIG_ENTER_VALUE;
+    obs.pass_enter_writes[1] = PASS_1_ENTER_VALUE;
 
     run_range(obs, /*n_passes=*/3, ROCPROFILER_RANGE_REPLAY_STATUS_REPLAYED);
 

@@ -131,10 +131,11 @@ TEST(range_replay_configure, single_subscriber_only)
     EXPECT_EQ(rocprofiler_force_configure(rocp_init), ROCPROFILER_STATUS_SUCCESS);
 }
 
-// The SDK reports a domain's operations through rocprofiler_iterate_callback_tracing_kind_operations
-// and names them through rocprofiler_query_callback_tracing_kind_operation_name. A domain added
-// without wiring both ends up reporting an empty operation set, which tools use to decide what to
-// subscribe to. This checks the RANGE_REPLAY entry is wired in both directions.
+// The SDK reports a domain's operations through
+// rocprofiler_iterate_callback_tracing_kind_operations and names them through
+// rocprofiler_query_callback_tracing_kind_operation_name. A domain added without wiring both ends
+// up reporting an empty operation set, which tools use to decide what to subscribe to. This checks
+// the RANGE_REPLAY entry is wired in both directions.
 TEST(range_replay_configure, domain_reports_its_operations)
 {
     auto operations = std::vector<int>{};

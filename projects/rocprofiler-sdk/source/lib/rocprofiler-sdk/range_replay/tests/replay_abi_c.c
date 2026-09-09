@@ -149,7 +149,7 @@ rocprofiler_test_c_range_status_enum_size(void)
 // Fill a CLOSE record the way the SDK does, from C, so the C++ side can verify it reads back the
 // same values through its own view of the struct.
 void
-rocprofiler_test_c_range_fill_close(void*   record,
+rocprofiler_test_c_range_fill_close(void*    record,
                                     uint64_t range_id,
                                     uint64_t dispatch_count,
                                     int      status,
