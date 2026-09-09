@@ -293,7 +293,10 @@ TEST_CASE("Unit_HRR_ZeroInitRead_Direct", "[.][hrr-direct]") {
   float* dsrc = nullptr;
 #ifndef _WIN32
   HRR_HIP_CHECK(hipMalloc(&dsrc, kSZ));
-  REQUIRE(hsa_amd_memory_fill(dsrc, 0, kN) == HSA_STATUS_SUCCESS);
+  // hsa_amd_memory_fill() counts in 32-bit words, not elements.  kN happens to
+  // be the same number here only because kSZ is float[kN]; spell out the unit
+  // so a change of element type cannot silently under- or over-fill.
+  REQUIRE(hsa_amd_memory_fill(dsrc, 0, kSZ / sizeof(uint32_t)) == HSA_STATUS_SUCCESS);
 #else
   // Native Windows has no ROCr/HSA runtime. Keep its deterministic oracle via
   // host stores; Linux retains coverage of the ordinary hipMalloc replay path.
