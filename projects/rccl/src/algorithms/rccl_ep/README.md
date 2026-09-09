@@ -48,6 +48,22 @@ at device-link time, which `python3` cannot do.
 The install step drops `librccl_ep.so` beside `python/rccl_ep/__init__.py`,
 which is where the package looks for it by default.
 
+### Or inside librccl.so
+
+Configuring RCCL itself with `-DENABLE_RCCL_EP_IN_LIBRCCL=ON` compiles this
+module through RCCL's device linker instead, exports the C ABI from
+`librccl.so`, and produces no standalone library. The Python package notices the
+absence and falls back to the RCCL named by `RCCL_EP_LIBRCCL`, so the same
+package works either way.
+
+It is off by default, and deliberately so: with it off, `librccl.so` exports
+exactly the symbols it would without this module -- verified identical, so the
+existing RCCL API and its consumers are unaffected. With it on, the
+kernels are compiled for the gfx9 entries in `GPU_TARGETS` only, because they are
+wave64 throughout and would compile without a diagnostic, and run wrong, on a
+wave32 target; a configure with no gfx9 target is an error rather than a silent
+empty build.
+
 ## Runtime contract
 
 Four things are not discoverable and must be set by the caller:
@@ -57,7 +73,7 @@ Four things are not discoverable and must be set by the caller:
 | `RCCL_EP_LIBRCCL` | Absolute path to the EP-capable `librccl.so.1`. Loaded `RTLD_GLOBAL` before the extension so that it and torch resolve to one library rather than two copies contending for one SONAME. Unset, the loader silently binds to whichever `librccl` arrived first -- usually torch's, which predates the device API this path needs. |
 | `NCCL_CUMEM_ENABLE=1` | Short-circuits RCCL's auto-detect, which is a ROCm version gate that torch's bundled HIP fails. |
 | `HSA_NO_SCRATCH_RECLAIM=1` | Required by the kernels' scratch usage. |
-| `RCCL_EP_LIB` | Optional. Overrides the co-located `librccl_ep.so`; unnecessary after `cmake --install`. |
+| `RCCL_EP_LIB` | Optional. Overrides the co-located `librccl_ep.so`; unnecessary after `cmake --install`, and unused when RCCL was built with `ENABLE_RCCL_EP_IN_LIBRCCL`. |
 
 `NCCL_DMABUF_ENABLE` is deliberately **not** set: torch's older RCCL is live in
 the same process and segfaults on it.

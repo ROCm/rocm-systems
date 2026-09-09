@@ -39,6 +39,8 @@ include-package-data = false
 include = ["rccl_ep*"]
 
 # librccl_ep.so is produced by ../CMakeLists.txt and installed beside
-# rccl_ep/__init__.py, which is where the package looks for it.
+# rccl_ep/__init__.py, which is where the package looks for it. A build that
+# set ENABLE_RCCL_EP_IN_LIBRCCL produces no such file and the package falls
+# back to RCCL_EP_LIBRCCL instead.
 [tool.setuptools.package-data]
 rccl_ep = ["librccl_ep.so"]

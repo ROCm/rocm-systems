@@ -33,10 +33,26 @@ def _lib():
         if rccl and os.path.exists(rccl):
             ctypes.CDLL(rccl, mode=ctypes.RTLD_GLOBAL)
 
-        path = os.environ.get(
-            "RCCL_EP_LIB",
-            os.path.join(os.path.dirname(os.path.abspath(__file__)), "librccl_ep.so"),
+        default = os.path.join(
+            os.path.dirname(os.path.abspath(__file__)), "librccl_ep.so"
         )
+        # `or default`: an empty RCCL_EP_LIB would otherwise reach ctypes.CDLL(""),
+        # which opens the main executable and fails with "undefined symbol: ep_create".
+        path = os.environ.get("RCCL_EP_LIB") or default
+        if path == default and not os.path.exists(default):
+            # Built with ENABLE_RCCL_EP_IN_LIBRCCL: the entry points are in
+            # librccl and no standalone library exists. Which layout you have
+            # is a property of how RCCL was built, not anything visible here,
+            # so the package handles both rather than making the caller say.
+            # Named explicitly, because the bare dlopen failure would report a
+            # missing librccl_ep.so to someone who deliberately did not build one.
+            if not rccl:
+                raise RuntimeError(
+                    f"no {default}, and RCCL_EP_LIBRCCL is unset. Either install "
+                    "the standalone library, or point RCCL_EP_LIBRCCL at an RCCL "
+                    "built with ENABLE_RCCL_EP_IN_LIBRCCL -- see README.md."
+                )
+            path = rccl
         # RTLD_LOCAL for the extension itself: it exports the same symbol
         # names as librccl, and there is no reason to put those in the global
         # namespace. RTLD_DEEPBIND is not an option -- it would also redirect

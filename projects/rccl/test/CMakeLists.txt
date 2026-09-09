@@ -864,7 +864,8 @@ if(BUILD_TESTS)
       SymmetricAbortCheckModeMPITests.cpp
     )
 
-    # rccl_ep has no library target, so the test binary compiles its C ABI directly.
+    # rccl_ep has no library target by default, so the test binary compiles its
+    # C ABI directly; that also keeps the tests independent of the option.
     if(ENABLE_RCCL_EP_TESTS)
       list(APPEND MPI_TEST_SOURCE_FILES
         RcclEpDispatchCombineMPITests.cpp

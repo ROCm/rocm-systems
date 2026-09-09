@@ -101,6 +101,10 @@ __global__ void k_capi_fill_views(ncclWindow_t w, EpWindowLayout l, int n, Windo
   }
 }
 
+// librccl is built -fvisibility=hidden. Without this the entry points below
+// become STB_LOCAL, the library still links, and the ctypes binding fails at
+// import with "undefined symbol: ep_create".
+#pragma GCC visibility push(default)
 extern "C" {
 
 int ep_unique_id_size() { return (int)sizeof(ncclUniqueId); }
@@ -486,3 +490,4 @@ int ep_combine(void* handle,
 }
 
 }  // extern "C"
+#pragma GCC visibility pop

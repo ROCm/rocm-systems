@@ -131,6 +131,7 @@ set(ROCSHMEM_CMAKE_OPTIONS "" CACHE STRING     "Extra cmake options passed to th
 option(GIN_ANVIL_UNIT_TESTS                    "Build GIN Anvil device-template unit tests (ENABLE_ROCSHMEM_GIN on Fixtures; no full librocshmem in librccl)" OFF)
 option(ENABLE_WARP_SPEED                       "Enable WARP_SPEED optimizations"               OFF)
 option(ENABLE_RCCL_EP_TESTS                    "Build rccl_ep multi-GPU tests; needs ENABLE_MPI_TESTS and a runtime with working cuMem symmetric memory" OFF)
+option(ENABLE_RCCL_EP_IN_LIBRCCL               "Compile rccl_ep into librccl.so instead of the standalone librccl_ep.so; gfx9 only" OFF)
 
 # Default GPU architectures to build
 #==================================================================================================
