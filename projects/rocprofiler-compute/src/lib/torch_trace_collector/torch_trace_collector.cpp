@@ -1,7 +1,6 @@
 // Copyright (c) Advanced Micro Devices, Inc.
 // SPDX-License-Identifier:  MIT
 
-#include "args_capture.h"
 #include "leaf_context.h"
 #include "marker_stack.h"
 #include "process_state.h"
@@ -19,7 +18,6 @@
 #include <cstdint>
 #include <cstdio>
 #include <exception>
-#include <iostream>
 #include <memory>
 #include <string>
 #include <string_view>
@@ -214,7 +212,6 @@ std::unique_ptr<at::ObserverContext> start_cb(const at::RecordFunction& record_f
         }
 
         std::string wire_string = build_marker_string(stack);
-        append_args_segment(wire_string, build_leaf_args(record_fn));
         wire_string += '|';
         wire_string += kRecordFnBackend;
         roctxRangePushA(wire_string.c_str());
@@ -300,10 +297,7 @@ std::string build_marker_string(const std::vector<StackEntry>& stack)
     return out;
 }
 
-void push_user_scope(const std::string& marker,
-                     const std::string& context,
-                     const std::string& backend,
-                     const std::string& args)
+void push_user_scope(const std::string& marker, const std::string& context, const std::string& backend)
 {
     ProcessState& state        = process_state();
     ThreadState&  thread       = thread_state();
@@ -321,7 +315,6 @@ void push_user_scope(const std::string& marker,
         pushed_guard = true;
 
         std::string wire_string = build_marker_string(thread.stack);
-        append_args_segment(wire_string, args);
         if (!backend.empty())
         {
             wire_string += '|';
@@ -369,33 +362,17 @@ void pop_user_scope()
     }
 }
 
-std::int64_t install(bool capture_args, bool capture_values)
+std::int64_t install()
 {
-    ProcessState& process = process_state();
-    return process.install.wlock(
-        [&process, capture_args, capture_values](InstallState& state)
+    return process_state().install.wlock(
+        [](InstallState& state)
         {
-            if (state.handle != at::INVALID_CALLBACK_HANDLE)
+            if (state.handle == at::INVALID_CALLBACK_HANDLE)
             {
-                if (process.capture_args.load() != capture_args ||
-                    process.capture_values.load() != capture_values)
-                {
-                    std::clog << "\033[33m[rocprofiler-compute] [" << __FUNCTION__
-                              << "] WARNING: torch_trace_collector is already installed; call "
-                                 "uninstall() before changing configuration\033[0m"
-                              << std::endl;
-                }
-                return static_cast<std::int64_t>(state.handle);
+                state.handle = at::addGlobalCallback(
+                    at::RecordFunctionCallback(start_cb, end_cb)
+                        .scopes({at::RecordScope::FUNCTION, at::RecordScope::BACKWARD_FUNCTION}));
             }
-            auto callback = at::RecordFunctionCallback(start_cb, end_cb)
-                                .scopes({at::RecordScope::FUNCTION, at::RecordScope::BACKWARD_FUNCTION});
-            if (capture_args)
-            {
-                callback.needsInputs(true);
-            }
-            process.capture_args.store(capture_args);
-            process.capture_values.store(capture_values);
-            state.handle = at::addGlobalCallback(callback);
             return static_cast<std::int64_t>(state.handle);
         });
 }
