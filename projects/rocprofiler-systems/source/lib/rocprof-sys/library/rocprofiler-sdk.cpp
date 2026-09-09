@@ -30,7 +30,6 @@
 #include "library/rocprofiler-sdk/counters.hpp"
 #include "library/rocprofiler-sdk/domain_selection.hpp"
 #include "library/rocprofiler-sdk/fwd.hpp"
-#include "library/rocprofiler-sdk/kfd_events.hpp"
 #include "library/rocprofiler-sdk/rccl.hpp"
 #include "library/rocprofiler-sdk/trace_control.hpp"
 #include "library/thread_info.hpp"
@@ -2186,55 +2185,6 @@ tool_tracing_buffered(rocprofiler_context_id_t /*context*/,
                 }
             }
 #endif
-            // #if (ROCPROFILER_VERSION >= 10202)
-            //             else if(header->kind ==
-            //             ROCPROFILER_BUFFER_TRACING_KFD_PAGE_FAULT)
-            //             {
-            //                 auto* record =
-            //                     static_cast<rocprofiler_buffer_tracing_kfd_page_fault_record_t*>(
-            //                         header->payload);
-            //                 tool_kfd_page_fault_callback(tool_data, record);
-            //             }
-            //             else if(header->kind ==
-            //             ROCPROFILER_BUFFER_TRACING_KFD_PAGE_MIGRATE)
-            //             {
-            //                 auto* record =
-            //                     static_cast<rocprofiler_buffer_tracing_kfd_page_migrate_record_t*>(
-            //                         header->payload);
-            //                 tool_kfd_page_migrate_callback(tool_data, record);
-            //             }
-            //             else if(header->kind == ROCPROFILER_BUFFER_TRACING_KFD_QUEUE)
-            //             {
-            //                 auto* record =
-            //                     static_cast<rocprofiler_buffer_tracing_kfd_queue_record_t*>(
-            //                         header->payload);
-            //                 tool_kfd_queue_callback(tool_data, record);
-            //             }
-            //             else if(header->kind ==
-            //             ROCPROFILER_BUFFER_TRACING_KFD_EVENT_QUEUE)
-            //             {
-            //                 auto* record =
-            //                     static_cast<rocprofiler_buffer_tracing_kfd_event_queue_record_t*>(
-            //                         header->payload);
-            //                 tool_kfd_event_queue_callback(tool_data, record);
-            //             }
-            //             else if(header->kind ==
-            //             ROCPROFILER_BUFFER_TRACING_KFD_EVENT_UNMAP_FROM_GPU)
-            //             {
-            //                 auto* record = static_cast<
-            //                     rocprofiler_buffer_tracing_kfd_event_unmap_from_gpu_record_t*>(
-            //                     header->payload);
-            //                 tool_kfd_event_unmap_from_gpu_callback(tool_data, record);
-            //             }
-            //             else if(header->kind ==
-            //             ROCPROFILER_BUFFER_TRACING_KFD_EVENT_DROPPED_EVENTS)
-            //             {
-            //                 auto* record = static_cast<
-            //                     rocprofiler_buffer_tracing_kfd_event_dropped_events_record_t*>(
-            //                     header->payload);
-            //                 tool_kfd_event_dropped_events_callback(tool_data, record);
-            //             }
-            // #endif
             else if(header->kind == ROCPROFILER_BUFFER_TRACING_HSA_CORE_API ||
                     header->kind == ROCPROFILER_BUFFER_TRACING_HSA_AMD_EXT_API)
             {

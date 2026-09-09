@@ -30,8 +30,6 @@ sdk_check(typename Wrapper::status_t status)
     if(status != Wrapper::STATUS_SUCCESS)
     {
         const char* msg = Wrapper::get_status_string(status);
-        LOG_DEBUG("rocprofiler-sdk call failed (status={}): {}", static_cast<int>(status),
-                  msg != nullptr ? msg : "<unknown status>");
         throw std::runtime_error{ std::string{ "rocprofiler-sdk error: " } +
                                   (msg != nullptr ? msg : "<unknown status>") };
     }
@@ -60,15 +58,13 @@ struct backend
     using device_counting_agent_cb_t   = Wrapper::device_counting_agent_cb_t;
     using device_counting_service_cb_t = Wrapper::device_counting_service_cb_t;
     using buffer_policy_t              = Wrapper::buffer_policy_t;
-    static constexpr buffer_policy_t BUFFER_POLICY_LOSSLESS =
-        Wrapper::BUFFER_POLICY_LOSSLESS;
-    using buffer_tracing_cb_t     = Wrapper::buffer_tracing_cb_t;
-    using callback_tracing_cb_t   = Wrapper::callback_tracing_cb_t;
-    using callback_tracing_kind_t = Wrapper::callback_tracing_kind;
-    using buffer_tracing_kind_t   = Wrapper::buffer_tracing_kind;
-    using tracing_operation_t     = Wrapper::tracing_operation;
-    using callback_thread_id_t    = Wrapper::callback_thread_id;
-    using runtime_library_t       = Wrapper::runtime_library_t;
+    using buffer_tracing_cb_t          = Wrapper::buffer_tracing_cb_t;
+    using callback_tracing_cb_t        = Wrapper::callback_tracing_cb_t;
+    using callback_tracing_kind_t      = Wrapper::callback_tracing_kind;
+    using buffer_tracing_kind_t        = Wrapper::buffer_tracing_kind;
+    using tracing_operation_t          = Wrapper::tracing_operation;
+    using callback_thread_id_t         = Wrapper::callback_thread_id;
+    using runtime_library_t            = Wrapper::runtime_library_t;
     using external_correlation_request_kind_t =
         Wrapper::external_correlation_request_kind;
     using external_correlation_id_request_cb_t =
@@ -92,6 +88,9 @@ struct backend
     static constexpr status_t       status_error         = Wrapper::STATUS_ERROR;
     static constexpr status_t       status_hsa_not_loaded =
         Wrapper::STATUS_ERROR_HSA_NOT_LOADED;
+
+    static constexpr buffer_policy_t BUFFER_POLICY_LOSSLESS =
+        Wrapper::BUFFER_POLICY_LOSSLESS;
 
     // ─── Callback tracing kind constants ─────────────────────────────────────────
     static constexpr callback_tracing_kind_t CALLBACK_TRACING_HSA_CORE_API =
