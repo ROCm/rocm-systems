@@ -41,6 +41,11 @@ GENERATE_PY = os.path.join(HERE, "generate.py")
 ONLY_FUNCS = "AllReduce RING SIMPLE Sum f32|AllReduce RING LL128 Sum f32|SendRecv"
 
 
+def _read_generated(tmpdir, name):
+    with open(os.path.join(tmpdir, name)) as f:
+        return f.read()
+
+
 def _generate(tmpdir, ifc="OFF", all_unrolls="OFF"):
     """Run generate.py into tmpdir and return the device_table.h contents."""
     # argv: gensrc, IFC, (unused), local_gpu_only, rocshmem, all_unrolls, ONLY_FUNCS
@@ -51,8 +56,7 @@ def _generate(tmpdir, ifc="OFF", all_unrolls="OFF"):
         capture_output=True,
         text=True,
     )
-    with open(os.path.join(tmpdir, "device_table.h")) as f:
-        return f.read()
+    return _read_generated(tmpdir, "device_table.h")
 
 
 def _unroll_tables(header):
@@ -88,6 +92,7 @@ class DeviceTableGenerationTest(unittest.TestCase):
             raise unittest.SkipTest("generate.py not found next to test")
         cls._dir = tempfile.mkdtemp(prefix="rccl_devtable_")
         cls.header = _generate(cls._dir)
+        cls.host_table = _read_generated(cls._dir, "host_table.cpp")
 
     def test_forward_declarations_are_plain(self):
         # noinline is applied only by DEFINE_ncclDevFunc (common.h), gated on
@@ -246,6 +251,137 @@ class DeviceTableGenerationTest(unittest.TestCase):
             header = _generate(tmpdir, all_unrolls="ON")
         self.assertEqual({"1", "2", "4", "8", "16", "32"}, set(_unroll_tables(header)))
         self.assertNotIn("#if defined(__gfx1250__)\n", header)
+
+    # ---- unroll arch restriction (host/device agreement) ---------------------
+    # commSetUnrollFactor rejects an RCCL_UNROLL_FACTOR whose device functions were
+    # not compiled for the running GPU, using ncclDevFuncUnrollArch[] emitted into
+    # host_table.cpp. That table is a claim about device_table.h, and nothing else
+    # checks the two agree: if it silently went all-nullptr the runtime check would
+    # degrade to the arch-blind behaviour that dispatched into an empty table and
+    # trapped. These tests hold host and device sides in lockstep.
+
+    _ARCH_MACRO = re.compile(r"__(gfx\w+)__")
+
+    def _unroll_table(self, name, value_pattern):
+        """Parse a `<name>[NCCL_NUM_UNROLLS]` initializer into {unroll: raw value}."""
+        block = re.search(
+            r"%s\[NCCL_NUM_UNROLLS\] = \{\n(.*?)\n\};" % re.escape(name),
+            self.host_table,
+            re.S,
+        )
+        self.assertIsNotNone(block, "%s[] not emitted into host_table.cpp" % name)
+        entries = re.findall(
+            r"^\s*(%s), // unroll (\d+)$" % value_pattern, block.group(1), re.M
+        )
+        self.assertTrue(entries, "no %s[] entries parsed" % name)
+        # The host indexes these tables by the NCCL_UNROLL_* ordinal, not by the
+        # trailing comment: unrollAvailability() subscripts them with comm->unroll,
+        # where NCCL_UNROLL_1 is 0 and each step doubles the factor. Keying the dict
+        # off the comment below would hide a reordered all_unrolls, which emits rows
+        # that read correctly but sit at the wrong ordinals.
+        order = [unroll for _, unroll in entries]
+        self.assertEqual(
+            [str(2 ** i) for i in range(len(order))],
+            order,
+            "%s[] rows are not in NCCL_UNROLL_* order (1, 2, 4, ...), so the "
+            "table is misaligned against the enum the host subscripts it with"
+            % name,
+        )
+        return {unroll: value for value, unroll in entries}
+
+    def _entry_guards(self, unroll):
+        """Enclosing #if condition of each real slot in ncclDevFuncTable_<unroll>[].
+
+        None for a slot that is not guarded, [] for a table with no slots (an unroll
+        this build did not generate), None if the table is absent entirely.
+        """
+        # Every table closes with a trailing "nullptr};" sentinel, and that is the
+        # only place that string appears -- guarded-out slots read "nullptr,". Stopping
+        # there is what keeps the match inside this table. Two anchors that look right
+        # are not: "\n};" ends nowhere in a table and runs on to the struct Caller
+        # close, and requiring a newline before the sentinel skips past an *empty*
+        # table (whose body is just "= {\nnullptr};") into the next one's slots.
+        block = re.search(
+            r"ncclDevFuncTable_%s\[\] = \{\n(.*?)nullptr\};" % unroll,
+            self.header,
+            re.S,
+        )
+        if block is None:
+            return None
+        guards, current, in_else = [], None, False
+        for line in block.group(1).splitlines():
+            if line.startswith("#if"):
+                current, in_else = line[len("#if"):].strip(), False
+            elif line.startswith("#else"):
+                in_else = True
+            elif line.startswith("#endif"):
+                current, in_else = None, False
+            elif "ncclDevFunc_" in line and not in_else:
+                guards.append(current)
+        return guards
+
+    def _restricted_arch(self, unroll):
+        """The single arch ncclDevFuncTable_<unroll>[] is compiled for, else None.
+
+        The archs that can run EVERY slot, i.e. the intersection of the per-slot arch
+        sets, with an unguarded slot counting as all archs. Per-slot rather than
+        requiring each slot to name one lone arch: a slot may legitimately be built
+        more widely than the unroll is dispatched (the LL128 SendRecv kernel is), and
+        that does not make the unroll usable on the extra archs, because the other
+        slots are still nullptr there. The base unrolls come out unrestricted, their
+        intersection being several archs wide.
+        """
+        guards = self._entry_guards(unroll)
+        if not guards:
+            return None
+        archs = None
+        for guard in guards:
+            if guard is None:
+                continue  # unguarded: every arch, so it narrows nothing
+            slot = set(self._ARCH_MACRO.findall(guard))
+            archs = slot if archs is None else archs & slot
+        return archs.pop() if archs is not None and len(archs) == 1 else None
+
+    def test_unroll_arch_matches_device_table_guards(self):
+        arch_table = self._unroll_table(
+            "ncclDevFuncUnrollArch", r'nullptr|"gfx\w+"'
+        )
+        checked = 0
+        for unroll, declared in arch_table.items():
+            # No slots means this build did not generate the unroll, and the arch
+            # table deliberately still names its arch (it never consults
+            # local_unroll), so there is nothing here to cross-check against.
+            if not self._entry_guards(unroll):
+                continue
+            restricted = self._restricted_arch(unroll)
+            expected = '"%s"' % restricted if restricted else "nullptr"
+            self.assertEqual(
+                expected,
+                declared,
+                "ncclDevFuncUnrollArch[unroll %s] is %s but ncclDevFuncTable_%s[] is %s"
+                % (
+                    unroll,
+                    declared,
+                    unroll,
+                    "compiled for %s only" % restricted
+                    if restricted
+                    else "built for every arch",
+                ),
+            )
+            checked += 1
+        self.assertTrue(checked, "no unroll tables were cross-checked")
+
+    def test_unroll_arch_flags_the_single_arch_unrolls(self):
+        # The cross-check above passes trivially if generate.py ever stops restricting
+        # any unroll. A multi-arch build must still single out the unrolls that only
+        # one arch compiles, or there is nothing for the runtime check to catch.
+        arch_table = self._unroll_table(
+            "ncclDevFuncUnrollArch", r'nullptr|"gfx\w+"'
+        )
+        self.assertTrue(
+            any(value != "nullptr" for value in arch_table.values()),
+            "no unroll factor is arch-restricted; ncclDevFuncUnrollArch[] is all nullptr",
+        )
 
     def test_no_obsolete_table_omit_macro(self):
         # RCCL_DEVICE_TABLE_OMIT was retired by the static-table change.

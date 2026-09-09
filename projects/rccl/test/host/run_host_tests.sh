@@ -195,10 +195,25 @@ do_host_tests() {
   return "$rc"
 }
 
-# Run the CPU-only generator guards: the kernel-count pytest suite (in a local venv
-# so the lean host-test image needs no system pytest) and the device-table unittests.
+# Run the CPU-only generator guards. The kernel-count suite (test/kernel-count)
+# runs under pytest in a local venv so the lean host-test image needs no system
+# pytest; see that dir's README. The device-table suite is plain unittest and
+# needs only python3.
+#
+# The device-table suite is also registered with add_test() in test/CMakeLists.txt,
+# but nothing in RCCL CI runs `ctest`, so that registration never gates. Running it
+# here is what actually makes it a guard.
+#
+# Both suites run even if the first fails, so one CI run reports every guard
+# failure, and the function returns non-zero if either did. Returning it
+# explicitly rather than leaning on `set -e` is what makes them gate: the `all`
+# phase invokes this as `do_run "$@" || run_rc=$?`, which suspends errexit for
+# the whole call.
 do_guards() {
   local rc=0
+
+  echo "==> Device-table guards (unittest: src/device/test_generate_device_table.py)"
+  python3 "$RCCL_ROOT/src/device/test_generate_device_table.py" -v || rc=1
 
   echo "==> Kernel-count guards (pytest: test/kernel-count)"
   local gd="$RCCL_ROOT/test/kernel-count"
@@ -208,11 +223,6 @@ do_guards() {
     "$venv/bin/pip" install -q --disable-pip-version-check -r "$gd/requirements.txt"
   fi
   "$venv/bin/python" -m pytest "$gd/tests" -v || rc=1
-
-  # Kernel-count only tallies, never inspects order. This file carries the table-order
-  # assertion, and it is ctest-only, which nothing in RCCL CI runs.
-  echo "==> Device-table codegen guards (unittest: src/device/test_generate_device_table.py)"
-  python3 "$RCCL_ROOT/src/device/test_generate_device_table.py" -v || rc=1
 
   return "$rc"
 }
@@ -377,8 +387,14 @@ do_coverage() {
 # do_host_tests runs first so the JUnit XML artifact is always produced before a
 # later guard can gate.
 do_run() {
-  do_host_tests "$@"
-  do_guards
+  # Accumulate instead of relying on `set -e`, for the same reason do_guards
+  # does: the `all` phase's `do_run "$@" || run_rc=$?` suspends errexit here, so
+  # a bare `do_host_tests "$@"` would leave its failure behind and return only
+  # whatever do_guards reported.
+  local rc=0
+  do_host_tests "$@" || rc=$?
+  do_guards || rc=1
+  return "$rc"
 }
 
 case "$PHASE" in
