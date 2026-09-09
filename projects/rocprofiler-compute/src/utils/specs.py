@@ -1025,7 +1025,7 @@ class MachineSpecsCDNA(MachineSpecs):
         whole_chip_xcds = mi_gpu_specs.get_num_xcds(
             self.gpu_arch, self.gpu_model or None, "SPX"
         )
-        divisor = {"nps4": 4, "nps8": 8}.get(partition, 1)
+        divisor = {"nps2": 2, "nps4": 4, "nps8": 8}.get(partition, 1)
         return str(int(self.l2_banks) * whole_chip_xcds // divisor)
 
     def finalize_soc_fields(self, gpu_info: dict[str, Any]) -> None:
