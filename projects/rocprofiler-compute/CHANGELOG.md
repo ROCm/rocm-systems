@@ -32,6 +32,8 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 ### Optimized
 
+* HBM and remote traffic percentages are now more accurate, with all their counters collected in a single profiling pass.
+
 * Improved the profiling failure message when the workload and the profiler load different ROCm installations. The error now points to the PyTorch and `rocm[profiler]` install instructions instead of only showing the LLVM abort.
 
 ### Resolved issues
