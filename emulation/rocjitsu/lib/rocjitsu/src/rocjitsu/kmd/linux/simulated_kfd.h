@@ -219,6 +219,20 @@ public:
     queue_exception_cleanup_hook_for_testing_ = std::move(hook);
   }
 
+  /// @brief Pause after a debugger-notifier write and before its state commit.
+  void set_debug_notification_result_hook_for_testing(std::function<void(bool)> hook) {
+    debug_notification_result_hook_for_testing_ = std::move(hook);
+  }
+
+  /// @brief Publish a queue debug event without constructing a wave stop.
+  /// @details This narrow seam exercises notifier transaction races and retained
+  /// event re-notification through the same production helper.
+  bool notify_debug_event_for_testing(uint32_t queue_id, uint64_t exception_mask,
+                                      bool retain_on_rejection) {
+    auto proc = find_process(local_process_id_);
+    return proc && notify_debug_event(proc, queue_id, exception_mask, retain_on_rejection);
+  }
+
   /// @brief Release the local process's parked event waiters so a blocking
   /// WAIT_EVENTS returns and drops its driver snapshot before teardown.
   /// @details Fires EventState::begin_wait_cancel() on the local process: waiters
@@ -493,7 +507,12 @@ private:
   bool on_wave_sendmsg(amdgpu::Wavefront &wf, uint32_t message);
   void on_wave_trap_complete(amdgpu::Wavefront &wf);
   uint64_t debugger_queue_exception_mask(const std::shared_ptr<KfdProcess> &proc, uint32_t queue_id,
-                                         uint64_t exception_mask);
+                                         uint64_t exception_mask,
+                                         bool reserve_runtime_if_unclaimed = false);
+  void reserve_runtime_queue_exception(const std::shared_ptr<KfdProcess> &proc, uint32_t queue_id,
+                                       uint64_t exception_mask);
+  void complete_runtime_queue_exception(uint32_t process_id, uint32_t queue_id,
+                                        uint64_t exception_mask, bool delivered);
   bool signal_runtime_queue_exception(uint32_t gpu_id, uint32_t queue_id, uint32_t process_id,
                                       uint64_t exception_mask);
 
@@ -501,8 +520,12 @@ private:
   void apply_debug_event_publication_hook_for_testing(const std::shared_ptr<KfdProcess> &proc);
   [[nodiscard]] bool notify_debug_event(const std::shared_ptr<KfdProcess> &proc, uint32_t queue_id,
                                         uint64_t exception_mask = KFD_EC_MASK(EC_QUEUE_WAVE_TRAP),
-                                        bool retain_on_rejection = true);
-  static bool defer_wave_exception_to_runtime(amdgpu::Wavefront &wf, uint64_t exception_mask);
+                                        bool retain_on_rejection = true,
+                                        bool reserve_runtime_on_rejection = false);
+  bool defer_wave_exception_to_runtime(amdgpu::Wavefront &wf, uint64_t exception_mask,
+                                       bool suspend_while_pending,
+                                       bool clear_debug_stop_on_success = false,
+                                       bool runtime_already_reserved = false);
   /// @brief Publish a wave stop: serialize the queue, then wake the debugger.
   /// @param retain_on_rejection Whether a serialized stop whose notification
   ///        loses its subscription or notifier should remain in the queue's
@@ -667,6 +690,7 @@ private:
   /// kernel creating the target kfd_process in the DBG_TRAP_ENABLE path.
   mutable std::mutex debug_sessions_mutex_;
   std::unordered_map<pid_t, KfdProcess::DebugSession> debug_sessions_;
+  uint64_t next_debug_session_generation_ = 1;
   DebugIdentityValidationHook debug_identity_validation_hook_;
   std::optional<uint64_t> debug_event_claim_mask_for_testing_;
   bool debug_event_claim_detach_for_testing_ = false;
@@ -707,6 +731,7 @@ private:
   std::mutex queue_exception_locks_mutex_;
   std::unordered_map<uint64_t, std::shared_ptr<QueueExceptionLock>> queue_exception_locks_;
   std::function<void(bool)> queue_exception_cleanup_hook_for_testing_;
+  std::function<void(bool)> debug_notification_result_hook_for_testing_;
   std::unordered_map<uint32_t, EventState *> event_dispatch_;
 
   /// @brief Process ID for local-mode (interposer). Set once in open().

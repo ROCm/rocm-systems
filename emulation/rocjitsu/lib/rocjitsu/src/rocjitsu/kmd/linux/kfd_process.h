@@ -162,6 +162,11 @@ public:
   /// | @ref dbg_fd            | @c struct @c file* @c dbg_ev_file (flattened to fd) |
   /// | @ref debugger_pid      | @c struct @c kfd_process* @c debugger_process (stored as pid) |
   struct DebugSession {
+    /// @brief Monotonic identity for this ENABLE lifetime.
+    /// @details Async notification completion uses this to avoid mutating a
+    /// replacement session after DISABLE followed by another ENABLE.
+    uint64_t generation = 0;
+
     /// @brief Mirrors @c kfd_process::debug_trap_enabled.
     /// Set when the device process is debug-attached with a reserved VMID.
     bool enabled = false;
@@ -679,6 +684,92 @@ public:
     uint32_t gpu_id = 0;
     uint32_t xcc_id = 0;
     uint64_t exception_status = 0; ///< Raised exceptions on this queue (KFD_EC_MASK bits).
+    /// Exception bits whose ROCr ownership decision is still in flight.
+    uint64_t runtime_exception_pending_status = 0;
+    /// Runtime publications per bit; identical concurrent events may overlap.
+    std::array<uint32_t, 64> runtime_exception_pending_counts{};
+    /// Pending runtime bits for which at least one publication failed.
+    uint64_t runtime_exception_failed_status = 0;
+    /// Session that owns the notification bookkeeping below.
+    uint64_t debug_notification_session_generation = 0;
+    /// Debugger notification writes currently in flight, counted per bit.
+    std::array<uint32_t, 64> debug_notification_pending_counts{};
+    /// Status hidden from QUERY until every corresponding write completes.
+    uint64_t debug_notification_pending_status = 0;
+    /// Status for which at least one notification write succeeded.
+    uint64_t debug_notification_delivered_status = 0;
+    /// Status retained for a later subscription even if notification fails.
+    uint64_t debug_notification_retained_status = 0;
+
+    /// @brief Return exception status that the debugger may currently consume.
+    uint64_t debugger_visible_exception_status() const {
+      return exception_status & ~runtime_exception_pending_status &
+             ~debug_notification_pending_status;
+    }
+
+    /// @brief Reserve queue-exception bits for an in-flight ROCr decision.
+    void begin_runtime_exception(uint64_t mask) {
+      exception_status |= mask;
+      for (uint32_t bit = 0; bit < 64; ++bit) {
+        const uint64_t bit_mask = uint64_t{1} << bit;
+        if ((mask & bit_mask) == 0)
+          continue;
+        ++runtime_exception_pending_counts[bit];
+        runtime_exception_pending_status |= bit_mask;
+      }
+    }
+
+    /// @brief Resolve one in-flight ROCr decision without losing overlaps.
+    void finish_runtime_exception(uint64_t mask, bool delivered) {
+      if (!delivered)
+        runtime_exception_failed_status |= mask;
+      for (uint32_t bit = 0; bit < 64; ++bit) {
+        const uint64_t bit_mask = uint64_t{1} << bit;
+        if ((mask & bit_mask) == 0)
+          continue;
+        if (runtime_exception_pending_counts[bit] == 0) {
+          // Session teardown may clear an in-flight reservation. Recreate only
+          // failed status so a later debugger can discover the frozen wave.
+          if (!delivered) {
+            exception_status |= bit_mask;
+            debug_notification_retained_status |= bit_mask;
+          }
+          continue;
+        }
+        if (--runtime_exception_pending_counts[bit] != 0)
+          continue;
+        runtime_exception_pending_status &= ~bit_mask;
+        if ((runtime_exception_failed_status & bit_mask) != 0) {
+          debug_notification_retained_status |= bit_mask;
+        } else if (((debug_notification_pending_status | debug_notification_delivered_status |
+                     debug_notification_retained_status) &
+                    bit_mask) == 0) {
+          exception_status &= ~bit_mask;
+        }
+        runtime_exception_failed_status &= ~bit_mask;
+      }
+    }
+
+    /// @brief Consume only status currently visible to the debugger.
+    void clear_debugger_exception_status(uint64_t mask) {
+      const uint64_t consumed = mask & debugger_visible_exception_status();
+      exception_status &= ~consumed;
+      debug_notification_delivered_status &= ~consumed;
+      debug_notification_retained_status &= ~consumed;
+    }
+
+    /// @brief Clear every debugger-session-owned exception field.
+    void clear_debugger_exception_state() {
+      exception_status = 0;
+      runtime_exception_pending_status = 0;
+      runtime_exception_pending_counts.fill(0);
+      runtime_exception_failed_status = 0;
+      debug_notification_session_generation = 0;
+      debug_notification_pending_counts.fill(0);
+      debug_notification_pending_status = 0;
+      debug_notification_delivered_status = 0;
+      debug_notification_retained_status = 0;
+    }
 
     /// @brief Area used by the XCC that owns this queue.
     uint64_t cwsr_xcc_address() const {
