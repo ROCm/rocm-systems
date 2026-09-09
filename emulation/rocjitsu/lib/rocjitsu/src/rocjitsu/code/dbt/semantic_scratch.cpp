@@ -3,7 +3,7 @@
 
 #include "rocjitsu/code/dbt/semantic_scratch.h"
 
-#include "rocjitsu/analysis/liveness.h"
+#include "rocjitsu/code/analysis/liveness.h"
 #include "rocjitsu/code/dbt/translation_rule.h"
 #include "util/bit.h"
 

@@ -29,15 +29,7 @@
 // alloc.h first, so its macros are visible to be #undef'd before init.cc's transitive includes see them.
 #include "alloc.h"
 
-#include "fakes/param_redirect.h"
-
-// The real RCCL_PARAM macros cache and declare a pthread_mutex_t global; redirect so params stay per-test controllable.
-#undef RCCL_PARAM
-#define RCCL_PARAM(name, env, deftVal) \
-  int64_t rcclParam##name() { return g_loadParam(("RCCL_" env), (deftVal)); }
-#undef RCCL_PARAM_NCCL_ALIAS
-#define RCCL_PARAM_NCCL_ALIAS(name, env, deftVal) \
-  int64_t rcclParam##name() { return g_loadParam(("RCCL_" env), (deftVal)); }
+#include "fakes/param_redirect.h"  // redirects NCCL_PARAM and both RCCL_PARAM spellings
 
 // TRAP: this #define is textual and TU-wide, so the index counts every ncclCalloc the TEST reaches, not just the UUT's.
 // TRAP: the reset lives in TearDown, not ResetInitFakes -- both statics are TU-local.

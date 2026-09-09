@@ -20,17 +20,20 @@
  * THE SOFTWARE.
  */
 
-// These are the vectors that pin the CUID derivation to the standard. The
-// library no longer links a certified crypto module, so the primitive it does
-// use has to demonstrate that it agrees with FIPS 180-4 / RFC 4231 bit for bit.
-// A regression here changes every CUID the fleet has ever been issued.
+// Pins the CUID derivation to FIPS 180-4 / RFC 4231. A regression here changes
+// every CUID ever issued.
 
 #include "unit/sha256_test.h"
 
 #include <gtest/gtest.h>
+#include <sys/stat.h>
+#include <sys/types.h>
+#include <unistd.h>
 
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
+#include <fstream>
 #include <string>
 #include <vector>
 
@@ -229,6 +232,114 @@ void TestHmacSha256Kat::Run() {
     EXPECT_EQ(AMDCUID_STATUS_HMAC_ERROR, hmac.set_hmac_algorithm("SHA512"));
     EXPECT_EQ(AMDCUID_STATUS_SUCCESS, hmac.set_hmac_algorithm("SHA-256"));
     EXPECT_EQ(AMDCUID_STATUS_SUCCESS, hmac.set_hmac_algorithm(nullptr));
+  }
+
+  // set_hmac_key is in-memory only: it must not create or touch a key file.
+  // store_key is what persists, atomically, at mode 0600.
+  {
+    const std::string dir = "/tmp/amdcuid_store_key_test";
+    const std::string path = dir + "/hmac_key.bin";
+    ::mkdir(dir.c_str(), 0755);
+    ::unlink(path.c_str());
+    ::setenv("AMDCUID_HMAC_KEY_PATH", path.c_str(), 1);
+
+    {
+      cuid_hmac hmac;  // no key file yet
+      // With nothing provisioned the object is usable, keyed with the public
+      // default seed, and says so.
+      EXPECT_TRUE(hmac.is_valid());
+      EXPECT_TRUE(hmac.is_using_default_key());
+      EXPECT_EQ(hmac.get_key_file_path(), path);
+
+      // The default seed must match the kernel's CUID_DEFAULT_SEED byte for
+      // byte, or an unprovisioned machine derives one secondary CUID from
+      // sysfs and a different one from this library.
+      {
+        static const char kKernelDefaultSeed[] = "AMD-CUID-DEFAULT-SEED-v1";
+        uint8_t via_lib[hash_length];
+        size_t via_lib_len = 0;
+        const uint8_t msg[16] = {1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16};
+        EXPECT_EQ(AMDCUID_STATUS_SUCCESS,
+                  hmac.generate_hmac_sha256(msg, sizeof(msg), via_lib, &via_lib_len));
+
+        uint8_t expected[rocm::sha2::SHA256_DIGEST_SIZE];
+        rocm::sha2::hmac_sha256(reinterpret_cast<const uint8_t*>(kKernelDefaultSeed),
+                                sizeof(kKernelDefaultSeed) - 1, msg, sizeof(msg), expected);
+        EXPECT_EQ(to_hex(via_lib, sizeof(via_lib)), to_hex(expected, sizeof(expected)));
+      }
+
+      uint8_t k[key_length];
+      std::memset(k, 0x5a, sizeof(k));
+      EXPECT_EQ(AMDCUID_STATUS_SUCCESS, hmac.set_hmac_key(k));
+      EXPECT_TRUE(hmac.is_valid());
+      EXPECT_FALSE(hmac.is_using_default_key());
+
+      // In-memory only: still nothing on disk.
+      struct stat st;
+      EXPECT_NE(0, ::stat(path.c_str(), &st));
+
+      EXPECT_EQ(AMDCUID_STATUS_SUCCESS, hmac.store_key(k));
+      ASSERT_EQ(0, ::stat(path.c_str(), &st));
+      EXPECT_EQ(static_cast<off_t>(key_length), st.st_size);
+      EXPECT_EQ(0600, st.st_mode & 07777);
+
+      // No temporary file left behind.
+      struct stat tst;
+      EXPECT_NE(0, ::stat((path + ".new").c_str(), &tst));
+
+      // Overwriting an existing key must succeed (the old code unlinked first).
+      std::memset(k, 0xa5, sizeof(k));
+      EXPECT_EQ(AMDCUID_STATUS_SUCCESS, hmac.store_key(k));
+      ASSERT_EQ(0, ::stat(path.c_str(), &st));
+      EXPECT_EQ(static_cast<off_t>(key_length), st.st_size);
+      EXPECT_EQ(0600, st.st_mode & 07777);
+    }
+
+    // A fresh instance must load exactly what was stored and derive the same
+    // MAC as an instance keyed directly.
+    {
+      uint8_t k[key_length];
+      std::memset(k, 0xa5, sizeof(k));
+      cuid_hmac from_file;
+      EXPECT_TRUE(from_file.is_valid());
+      EXPECT_FALSE(from_file.is_using_default_key());
+      cuid_hmac from_mem(k);
+
+      uint8_t a[hash_length], c[hash_length];
+      size_t la = 0, lc = 0;
+      const uint8_t msg[4] = {1, 2, 3, 4};
+      EXPECT_EQ(AMDCUID_STATUS_SUCCESS, from_file.generate_hmac_sha256(msg, sizeof(msg), a, &la));
+      EXPECT_EQ(AMDCUID_STATUS_SUCCESS, from_mem.generate_hmac_sha256(msg, sizeof(msg), c, &lc));
+      EXPECT_EQ(0, std::memcmp(a, c, sizeof(a)));
+    }
+
+    // A wrong-sized key file must be rejected rather than half-loaded.
+    {
+      std::ofstream short_key(path, std::ios::binary | std::ios::trunc);
+      short_key.write("\x01\x02\x03", 3);
+      short_key.close();
+      // Corruption is not absence: a wrong-sized key file must be refused
+      // rather than silently falling back to the default, which would change
+      // every CUID on the machine.
+      cuid_hmac bad;
+      EXPECT_FALSE(bad.is_valid());
+      EXPECT_FALSE(bad.is_using_default_key());
+      uint8_t out[hash_length];
+      size_t n = 0;
+      const uint8_t msg[1] = {0};
+      EXPECT_EQ(AMDCUID_STATUS_KEY_ERROR, bad.generate_hmac_sha256(msg, 1, out, &n));
+    }
+
+    ::unlink(path.c_str());
+    ::rmdir(dir.c_str());
+    ::unsetenv("AMDCUID_HMAC_KEY_PATH");
+  }
+
+  // Null arguments must be rejected, not memcpy'd.
+  {
+    cuid_hmac hmac;
+    EXPECT_EQ(AMDCUID_STATUS_INVALID_ARGUMENT, hmac.set_hmac_key(nullptr));
+    EXPECT_EQ(AMDCUID_STATUS_INVALID_ARGUMENT, hmac.store_key(nullptr));
   }
 
   // generate_key must return distinct, non-trivial key material.

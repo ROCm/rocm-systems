@@ -10,6 +10,9 @@
 
 #include "include/amd_cuid.h"
 
+/// Size of a PCIe extended configuration space, in bytes.
+constexpr size_t kPciConfigSpaceSize = 4096;
+
 class PciUtil {
  public:
   static amdcuid_status_t read_pci_config_space(std::string bdf, uint8_t* buffer,
@@ -17,8 +20,14 @@ class PciUtil {
   static amdcuid_status_t get_pci_dsn_cap_offset(std::string bdf, uint16_t& offset);
   static amdcuid_status_t get_pci_vsec_cap_offset(std::string bdf, uint16_t& offset);
 
+  // Load a 16-bit little-endian config-space field. Use this instead of
+  // casting the buffer to uint16_t*, which violates alignment and aliasing.
+  static uint16_t load_le16(const uint8_t bytes[2]) {
+    return static_cast<uint16_t>(static_cast<uint16_t>(bytes[0]) |
+                                 (static_cast<uint16_t>(bytes[1]) << 8));
+  }
+
   // Endianness conversion utilities
-  static uint16_t le16_to_be16(uint16_t value);
   static uint64_t le64_to_be64(uint64_t value);
 };
 
