@@ -10,7 +10,8 @@ regressions when the spec, extraction, or evaluation logic changes.
 import pandas as pd
 import pytest
 
-from membw_analysis.engine import evaluate_membw_tree
+from membw_analysis import engine
+from membw_analysis.engine import evaluate_membw_tree, run_membw_analysis
 from membw_analysis.metric_extract import extract_membw_metrics
 from membw_analysis.tree_spec import collect_metric_keys, load_tree_spec
 
@@ -176,3 +177,44 @@ class TestFullPipeline:
         states = collect_node_states(result.nodes)
         assert states["gl1_tcp_stall"] == "active"
         assert states["gl2_back_pressure"] == "indeterminate"
+
+
+class TestRunMembwAnalysis:
+    """Tests for the entry point the analyze pipeline calls."""
+
+    def test_end_to_end_from_panel_dfs(self):
+        """Chains extraction, spec loading, and evaluation into one result."""
+        result = run_membw_analysis(build_mock_dfs(UTCL1_HBM_WORKLOAD), "gfx950")
+
+        assert result is not None
+        assert result.arch == "gfx950"
+        assert result.availability == "full"
+
+        states = collect_node_states(result.nodes)
+        assert states["gl1_tcp_stall"] == "active"
+        assert states["gl1_tcp_utcl1_stall"] == "active"
+        assert states["gl2_hbm_bw_bound"] == "active"
+
+        guidance_text = "\n".join(result.guidance_blocks)
+        assert "UTCL1" in guidance_text
+
+    def test_returns_none_without_membw_tables(self):
+        """Tables outside MEMBW_TABLE_IDS do not trigger analysis."""
+        unrelated_df = pd.DataFrame({"Metric": ["Other"], "Avg": [1.0]})
+
+        assert run_membw_analysis({}, "gfx950") is None
+        assert run_membw_analysis({1701: unrelated_df}, "gfx950") is None
+
+    def test_returns_none_for_arch_without_tree_spec(self, monkeypatch):
+        """An arch with no tree spec warns and skips instead of failing."""
+        warnings = []
+        monkeypatch.setattr(
+            engine,
+            "console_warning",
+            lambda *argv, **kwargs: warnings.append(argv),
+        )
+
+        result = run_membw_analysis(build_mock_dfs(UTCL1_HBM_WORKLOAD), "gfx900")
+
+        assert result is None
+        assert any("gfx900" in str(argv) for argv in warnings)

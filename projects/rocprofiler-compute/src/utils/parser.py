@@ -87,6 +87,10 @@ def build_dfs(
             profiling_config.get("filter_blocks", []), arch
         )
 
+    # --membw-analysis asks for block 30, so keep it even when -b narrows.
+    if membw_analysis and user_metric_filter:
+        user_metric_filter = [*user_metric_filter, "30"]
+
     arch_configs.panel_configs = expand_placeholder_ranges(
         arch_configs.panel_configs, sys_info
     )
