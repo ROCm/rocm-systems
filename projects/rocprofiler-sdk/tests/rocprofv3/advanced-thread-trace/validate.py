@@ -776,7 +776,9 @@ def test_counter_collection_with_att(att_pmc_json_data):
     found_positive_value = False
     for entry in callbacks:
         dispatch = entry["dispatch_data"]
-        assert dispatch["dispatch_info"]["dispatch_id"] > 0
+        assert dispatch["dispatch_info"]["dispatch_id"] >= 1, (
+            f"Expected dispatch_id >= 1, got {dispatch['dispatch_info']['dispatch_id']}"
+        )
         assert dispatch["end_timestamp"] >= dispatch["start_timestamp"]
         assert entry["records"]
         for record in entry["records"]:
