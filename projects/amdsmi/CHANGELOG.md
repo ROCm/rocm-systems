@@ -9,19 +9,7 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 ### Added
 
 - **Exposed `BOOT_FIRMWARE` field in `amd-smi static --ifwi` output**.  
-  - The `boot_firmware` value returned by `amdsmi_get_gpu_vbios_info()` now appears under the `IFWI` section (`--vbios` remains available as a legacy alias).
-
-  ```shell
-  $ amd-smi static --ifwi
-  GPU: 0
-    IFWI:
-        NAME: XXXXXXXXXXXXXXXXXX
-        BUILD_DATE: 2024/06/05 12:13
-        PART_NUMBER: 113-D7190300-104
-        VERSION: 00106507
-        BOOT_FIRMWARE: 022.002.001.027.000001
-  ...
-  ```
+  - The `boot_firmware` value returned by `amdsmi_get_gpu_vbios_info()` now appears under the `IFWI` section alongside `NAME`, `BUILD_DATE`, `PART_NUMBER` and `VERSION` (`--vbios` remains available as a legacy alias).
 
 - **Added an experimental, opt-in WSL (WDDM/dxg) GPU backend**.  
   - Built only with `-DENABLE_WSL_BACKEND=ON` (off by default); native builds and packages are unchanged.
@@ -37,10 +25,9 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
   - Each `CACHE_<N>` entry now reports a short type label (`L1D`, `L1I`, `L2`, `L3`) and the total size across all instances at that level.
 
 - **Added `chip_rev_id` and `external_rev_id` to `amdsmi_get_gpu_asic_info()`**.  
-  - Reports the amdgpu `chip_rev` and `external_rev` values from the `AMDGPU_INFO_DEV_INFO` DRM query. Both are distinct from `rev_id`, which is the PCI config-space revision.
-  - `chip_rev_id` is the internal chip revision, or stepping, exactly as the driver reports it; AMD SMI does not decode it into a lifecycle label. `external_rev_id` is family-scoped, so the same value can appear on unrelated ASIC families; interpret it alongside `device_id`.
+  - Reports the amdgpu `chip_rev` and `external_rev` values from the `AMDGPU_INFO_DEV_INFO` DRM query, both distinct from `rev_id`, which is the PCI config-space revision. `external_rev_id` is family-scoped, so interpret it alongside `device_id`.
   - Exposed under the same names in the Python `amdsmi_get_gpu_asic_info()` dictionary and in `amd-smi static --asic`. The C fields report `0xFFFFFFFF` when unsupported; Python and the CLI render that as `N/A`.
-  - ABI-preserving: the two fields consume two `uint32_t` slots from `amdsmi_asic_info_t.reserved`, so the structure size and the offsets of every pre-existing named field except `reserved` are unchanged. `reserved` moves by two slots and shrinks from 17 to 15 entries.
+  - ABI-preserving: the fields take two `uint32_t` slots from `amdsmi_asic_info_t.reserved`, which shrinks from 17 to 15 entries. The structure size and all other field offsets are unchanged.
 
 ### Changed
 
@@ -59,10 +46,6 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 - **`container_name` in process info now reports the full container ID**.  
   - Previously only the first 16 characters were reported. The value is now the complete 64-character ID that `docker inspect`, `docker ps --no-trunc` and Kubernetes tooling use, so process output can be matched against them directly.
   - Nested LXC containers now report the outer container name rather than `<parent>/<child>`.
-
-- **`cper_decode()` in the internal header `amd_smi/impl/amd_smi_cper.h` takes a new `buf_size` argument**.  
-  - The function needs the caller's buffer length to bound the record it walks. It also now rejects a buffer that does not start with the `CPER` signature, so the record walk is safe for any pointer and size rather than depending on `amdsmi_get_afids_from_cper()` having validated first.
-  - The symbol is not exported: the version script's `amdsmi_*` glob does not match a mangled C++ name, and `libamd_smi_static.a` is not installed. Only an in-tree build that links the archive sees the new signature.
 
 - **`amd_smi/impl/amd_smi_cper.h` and `example/amd_smi_cper.cc` are no longer installed in the dev package**.  
   - Both functions the header declares are C++ symbols, which the version script's `amdsmi_*` export glob does not match, so including the header only ever led to a link error. It joins the `_test` and WSL impl headers that are already build-only.
@@ -112,12 +95,9 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
   - A process started from a path of 256 characters or more could report a corrupted process name.
 
 - **Fixed out-of-bounds reads and writes when parsing malformed CPER records**.  
-  - A record whose `record_length` is smaller than a CPER header is now dropped by the ring reader. Such a record was previously copied and then had a product serial number written past the end of the caller's buffer.
-  - `amdsmi_get_afids_from_cper` now returns `AMDSMI_STATUS_UNEXPECTED_SIZE` when `buf_size` is smaller than a CPER header, instead of reading header fields the caller never supplied.
-  - A section descriptor's `fru_id` and `fru_text` are now logged only up to their declared width. Neither field is required to carry a terminator, so logging one walked past the descriptor and printed whatever followed it, up to the first zero byte outside the record.
-  - A crashdump section's registers are now copied into an aligned buffer before decoding. The section sits at a record-supplied offset inside a packed struct, so an odd offset left the decoder loading a `uint64_t` from an address it was not aligned for.
-  - A non-standard error section whose `reg_arr_size` exceeds the fixed 128-byte register dump is now rejected and logged. In ACA register context (`reg_ctx_type` 1) that size already produced no AFID, so those records decode as before. In boot context (`reg_ctx_type` 9) the decoder previously read registers from past the end of `reg_dump`, and any AFID it derived from them is gone.
-  - A record whose `error_severity` is too large for the severity mask to select is now dropped. Such a value previously wrapped around the 32-bit mask and matched a bit belonging to a different severity, so the record was reported under a severity it never carried.
+  - The ring reader now drops a record whose `record_length` is smaller than a CPER header; such a record was previously copied and then had a product serial number written past the end of the caller's buffer. `amdsmi_get_afids_from_cper` likewise returns `AMDSMI_STATUS_UNEXPECTED_SIZE` for an undersized `buf_size` instead of reading header fields the caller never supplied.
+  - A section descriptor's `fru_id` and `fru_text` are now logged only up to their declared width, and a crashdump section's registers are copied into an aligned buffer before decoding. Neither field carries a terminator, and the section can sit at an unaligned record-supplied offset.
+  - A non-standard error section whose `reg_arr_size` exceeds the fixed 128-byte register dump, and a record whose `error_severity` overflows the severity mask, are now rejected. Both previously read or matched outside the record; in boot context (`reg_ctx_type` 9) any AFID derived from the over-long register read is gone.
 
 - **Fixed `amd-smi metric --clock` reporting FCLK `MAX_CLK` as 0 MHz**.  
   - The FCLK range came from `pp_od_clk_voltage`, which on some GPUs (e.g. MI45x) has no FCLK section, leaving the parsed maximum at 0. It now falls back to `pp_dpm_fclk` (and likewise `pp_dpm_sclk`/`pp_dpm_mclk`) when the overdrive file omits a domain.
@@ -134,7 +114,6 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 
 - **Fixed `amdsmi_get_gpu_asic_info()` reporting `rev_id` as a real revision when it is not available**.  
   - The WSL backend returned success with a zeroed structure, so `rev_id` read as `0x0`, and where it did report the not-supported value Python rendered it as the raw `0xffffffff`. Python and the CLI now render it as `N/A`.
-  - `rev_id` was also assigned from the device-info structure before the `AMDGPU_INFO_DEV_INFO` query populated it. Every such path already returned an error, so this was not observable through a checked return, but the value no longer contradicts the status.
   - `amdsmi_asic_info_t` is now reset through one shared initializer used by every backend, so a field a backend cannot supply keeps its not-supported value rather than a plausible zero.
 
 ### Upcoming Changes
