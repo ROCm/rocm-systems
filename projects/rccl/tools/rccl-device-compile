@@ -569,7 +569,7 @@ def do_compile(args, forwarded_flags):
 def build_link_cmd(lld, output, rsp_path, arch, profile_rt):
     """Assemble the ld.lld argv for the per-arch device.elf link.
 
-    When a device profile-runtime archive is given (ENABLE_DEVICE_COVERAGE), it
+    When a device profile-runtime archive is given (ENABLE_FULL_COVERAGE), it
     is appended together with --plugin-opt=mcpu=<arch> so lld's LTO codegen of
     the bitcode archive targets amdgcn-amd-amdhsa for this arch instead of the
     host triple (otherwise lld errors out with "incompatible mach").
@@ -641,7 +641,7 @@ def do_link(args, forwarded_flags):
     try:
         # Step 2: Compile dispatcher to assembly.
         # The debug-info level is inherited from DL_OPT_FLAGS in forwarded_flags
-        # (-g0 under ENABLE_DEVICE_COVERAGE, -g for a Debug build, none for
+        # (-g0 under ENABLE_FULL_COVERAGE, -g for a Debug build, none for
         # release). We deliberately do NOT force -gline-tables-only here: LLVM
         # source-based coverage lives in __llvm_covfun/__llvm_covmap (not DWARF),
         # and the coverage build intentionally drops DWARF (-g0) to keep the
@@ -705,7 +705,7 @@ def do_link(args, forwarded_flags):
             if rocshmem_obj:
                 f.write(rocshmem_obj + '\n')
 
-        # When ENABLE_DEVICE_COVERAGE=ON, CMake passes --profile-rt=<archive> so
+        # When ENABLE_FULL_COVERAGE=ON, CMake passes --profile-rt=<archive> so
         # lld can resolve __llvm_profile_runtime / __start___llvm_prf_* symbols
         # from the per-arch libclang_rt.profile.a (see build_link_cmd for the
         # --plugin-opt=mcpu rationale). lld pulls in only the members referenced

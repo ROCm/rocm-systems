@@ -1,6 +1,7 @@
 import tempfile
 import unittest
 from importlib.machinery import SourceFileLoader
+from importlib.util import module_from_spec, spec_from_loader
 from pathlib import Path
 
 
@@ -10,7 +11,10 @@ DRIVER_PATH = RCCL_ROOT / "tools" / "rccl-device-compile"
 # The driver has no .py suffix and executes nothing at import time (its only
 # module-level side effect is guarded by if __name__ == '__main__'), so loading
 # it by path is safe.
-driver = SourceFileLoader("rccl_device_compile", str(DRIVER_PATH)).load_module()
+_loader = SourceFileLoader("rccl_device_compile", str(DRIVER_PATH))
+_spec = spec_from_loader(_loader.name, _loader)
+driver = module_from_spec(_spec)
+_loader.exec_module(driver)
 
 
 class DropLocalNoDeadStripTest(unittest.TestCase):

@@ -88,15 +88,15 @@ option(BUILD_PROFILER_INSPECTOR                "Build the NCCL Inspector profile
 option(BUILD_PLUGIN_EXAMPLES                      "Build plugin example libraries (net, tuner, profiler, env)" OFF)
 option(DUMP_ASM                                "Disassemble and dump"                          OFF)
 option(ENABLE_CODE_COVERAGE                    "Enable code coverage"                          OFF)
-set(ENABLE_DEVICE_COVERAGE "OFF" CACHE STRING
-  "Enable device-side coverage: AUTO, ON, or OFF (implies ENABLE_CODE_COVERAGE)")
-set_property(CACHE ENABLE_DEVICE_COVERAGE PROPERTY STRINGS AUTO ON OFF)
-string(TOUPPER "${ENABLE_DEVICE_COVERAGE}" ENABLE_DEVICE_COVERAGE)
-set(_enable_device_coverage_request "${ENABLE_DEVICE_COVERAGE}")
-if(NOT ENABLE_DEVICE_COVERAGE MATCHES "^(AUTO|ON|OFF)$")
+set(ENABLE_FULL_COVERAGE "OFF" CACHE STRING
+  "Enable host and device coverage: AUTO, ON, or OFF")
+set_property(CACHE ENABLE_FULL_COVERAGE PROPERTY STRINGS AUTO ON OFF)
+string(TOUPPER "${ENABLE_FULL_COVERAGE}" ENABLE_FULL_COVERAGE)
+set(_enable_full_coverage_request "${ENABLE_FULL_COVERAGE}")
+if(NOT ENABLE_FULL_COVERAGE MATCHES "^(AUTO|ON|OFF)$")
   message(FATAL_ERROR
-    "ENABLE_DEVICE_COVERAGE must be AUTO, ON, or OFF; "
-    "received '${ENABLE_DEVICE_COVERAGE}'.")
+    "ENABLE_FULL_COVERAGE must be AUTO, ON, or OFF; "
+    "received '${ENABLE_FULL_COVERAGE}'.")
 endif()
 option(ENABLE_IFC                              "Enable indirect function call"                 OFF)
 option(ENABLE_DEVICE_LINKER                    "Build with assembly-extract device linker"     ON)
@@ -361,7 +361,7 @@ string(REGEX MATCH "([0-9]+)\\.([0-9]+)\\.([0-9]+)" rocm_version_matches ${rocm_
 set(RCCL_DEVICE_PROFILE_RT "")
 set(RCCL_HOST_ROCM_PROFILE_RT "")
 set(_device_coverage_capability_error "")
-if(NOT _enable_device_coverage_request STREQUAL "OFF")
+if(NOT _enable_full_coverage_request STREQUAL "OFF" AND ENABLE_DEVICE_LINKER)
   include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/DeviceCoverage.cmake")
   rccl_find_device_profile_runtime(
     "${CMAKE_CXX_COMPILER}"
@@ -395,53 +395,46 @@ if (rocm_version_matches)
       endif()
     endif()
 
-    if(ENABLE_DEVICE_COVERAGE STREQUAL "AUTO")
-      if(ROCM_VERSION VERSION_LESS "71500")
-        set(ENABLE_DEVICE_COVERAGE OFF)
-        message(STATUS
-          "Device coverage requires ROCm 7.15 or newer; "
-          "detected ROCm ${ROCM_MAJOR_VERSION}.${ROCM_MINOR_VERSION}.${ROCM_PATCH_VERSION}. "
-          "Falling back to host-only coverage.")
-      elseif(_device_coverage_capability_error)
-        set(ENABLE_DEVICE_COVERAGE OFF)
-        message(STATUS
-          "Device coverage is unavailable with the selected compiler: "
-          "${_device_coverage_capability_error}. Falling back to host-only coverage.")
-      else()
-        set(ENABLE_DEVICE_COVERAGE ON)
-        message(STATUS
-          "Device coverage is supported by ROCm "
-          "${ROCM_MAJOR_VERSION}.${ROCM_MINOR_VERSION}.${ROCM_PATCH_VERSION}; "
-          "profile runtime: ${RCCL_DEVICE_PROFILE_RT}")
-        if(RCCL_HOST_ROCM_PROFILE_RT)
-          message(STATUS
-            "Host ROCm profile runtime: ${RCCL_HOST_ROCM_PROFILE_RT}")
-        endif()
-      endif()
-    elseif(ENABLE_DEVICE_COVERAGE AND ROCM_VERSION VERSION_LESS "71500")
-      message(FATAL_ERROR
-        "ENABLE_DEVICE_COVERAGE=ON requires ROCm 7.15 or newer; "
-        "detected ROCm ${ROCM_MAJOR_VERSION}.${ROCM_MINOR_VERSION}.${ROCM_PATCH_VERSION}.")
-    elseif(ENABLE_DEVICE_COVERAGE AND _device_coverage_capability_error)
-      message(FATAL_ERROR
-        "ENABLE_DEVICE_COVERAGE=ON is unsupported by the selected compiler: "
-        "${_device_coverage_capability_error}.")
-    endif()
-else()
-    if(ENABLE_DEVICE_COVERAGE STREQUAL "AUTO")
-      set(ENABLE_DEVICE_COVERAGE OFF)
-      message(STATUS
-        "The ROCm version could not be parsed; falling back to host-only coverage.")
-    elseif(ENABLE_DEVICE_COVERAGE)
-      message(FATAL_ERROR
-        "ENABLE_DEVICE_COVERAGE=ON requires ROCm 7.15 or newer, but the ROCm version could not be parsed.")
-    endif()
-    message(WARNING "Failed to extract ROCm version.")
 endif()
 
-if((ENABLE_DEVICE_COVERAGE OR _enable_device_coverage_request STREQUAL "AUTO")
-   AND NOT ENABLE_CODE_COVERAGE)
-  message(STATUS "Device coverage request implies ENABLE_CODE_COVERAGE=ON")
+set(_full_coverage_blocker "")
+if(NOT ENABLE_DEVICE_LINKER)
+  set(_full_coverage_blocker "the device linker is disabled")
+elseif(NOT rocm_version_matches)
+  set(_full_coverage_blocker "the ROCm version could not be parsed")
+elseif(ROCM_VERSION VERSION_LESS "71500")
+  set(_full_coverage_blocker
+    "it requires ROCm 7.15 or newer, and this is ${ROCM_MAJOR_VERSION}.${ROCM_MINOR_VERSION}.${ROCM_PATCH_VERSION}")
+elseif(_device_coverage_capability_error)
+  set(_full_coverage_blocker
+    "the selected compiler does not support it: ${_device_coverage_capability_error}")
+endif()
+
+if(ENABLE_FULL_COVERAGE STREQUAL "AUTO")
+  if(_full_coverage_blocker)
+    set(ENABLE_FULL_COVERAGE OFF CACHE STRING
+      "Enable host and device coverage: AUTO, ON, or OFF" FORCE)
+    message(STATUS
+      "Full coverage is unavailable because ${_full_coverage_blocker}. "
+      "Falling back to host-only coverage.")
+  else()
+    set(ENABLE_FULL_COVERAGE ON CACHE STRING
+      "Enable host and device coverage: AUTO, ON, or OFF" FORCE)
+    message(STATUS
+      "Full coverage is supported by ROCm "
+      "${ROCM_MAJOR_VERSION}.${ROCM_MINOR_VERSION}.${ROCM_PATCH_VERSION}; "
+      "device profile runtime: ${RCCL_DEVICE_PROFILE_RT}")
+    if(RCCL_HOST_ROCM_PROFILE_RT)
+      message(STATUS "Host ROCm profile runtime: ${RCCL_HOST_ROCM_PROFILE_RT}")
+    endif()
+  endif()
+elseif(ENABLE_FULL_COVERAGE AND _full_coverage_blocker)
+  message(FATAL_ERROR
+    "ENABLE_FULL_COVERAGE=ON is unavailable because ${_full_coverage_blocker}.")
+endif()
+
+if(NOT _enable_full_coverage_request STREQUAL "OFF" AND NOT ENABLE_CODE_COVERAGE)
+  message(STATUS "Full coverage request implies ENABLE_CODE_COVERAGE=ON")
   set(ENABLE_CODE_COVERAGE ON CACHE BOOL "Enable code coverage" FORCE)
 endif()
 
