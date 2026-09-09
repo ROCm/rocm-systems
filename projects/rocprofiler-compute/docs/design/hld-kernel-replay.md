@@ -141,7 +141,7 @@ When a counter request produces *N* buckets and *N* is greater than one:
 | Host-side work | *N*× | 1× |
 | Executions of a replay-eligible dispatch | *N* (one per launch) | *N* (one per pass) |
 | Executions of every other dispatch | *N* | 1 |
-| Added cost | — | Snapshot, restore, queue drain, agent isolation |
+| Added cost | — | Snapshot, restore |
 
 Only the selected kernel needs profiling *N* times. For workloads with a large startup cost,
 application replay requires a lot of time.
@@ -149,8 +149,8 @@ application replay requires a lot of time.
 - **Iteration multiplexing does not close this gap.** It avoids the repeated launches, but collects
   counters from different dispatches and fills each dispatch's gaps during analysis. It cannot
   collect every counter from repeated executions of *one* logical dispatch in a single workload run.
-- **This is not free.** Kernel replay drops the repeated full-workload launches but adds snapshot,
-  restoration, dispatch replay, and isolation costs. It will not be faster for every workload.
+- **This is not free.** Kernel replay drops the repeated full-workload launches but adds memory snapshot
+  and restoration. It will not be faster for every workload.
 
 The flows below compare counter collection when *N* is greater than one. It does not include other
 services outside counter collection.
