@@ -117,14 +117,23 @@ jobs:
           fi
           echo "publishable=${PUBLISHABLE}" >> "${GITHUB_OUTPUT}"
 
+      - name: Stage benchmark diagnostics
+        if: always() && steps.validate.outputs.publishable == 'true'
+        shell: bash
+        run: |
+          DIAGNOSTICS_DIR="${GITHUB_WORKSPACE}/benchmark-diagnostics"
+          mkdir "${DIAGNOSTICS_DIR}"
+          cp "${ROCJITSU_RESULT_DIR}/run.json" "${DIAGNOSTICS_DIR}/"
+          if [[ -d "${ROCJITSU_RESULT_DIR}/cases" ]]; then
+            cp -R "${ROCJITSU_RESULT_DIR}/cases" "${DIAGNOSTICS_DIR}/"
+          fi
+
       - name: Upload benchmark diagnostics
         if: always() && steps.validate.outputs.publishable == 'true'
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: ${{ env.RESULTS_ARTIFACT }}
-          path: |
-            ${{ env.ROCJITSU_RESULT_DIR }}/run.json
-            ${{ env.ROCJITSU_RESULT_DIR }}/cases
+          path: benchmark-diagnostics
           if-no-files-found: error
           retention-days: 14
 
