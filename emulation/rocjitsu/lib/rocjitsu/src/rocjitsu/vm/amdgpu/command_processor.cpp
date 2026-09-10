@@ -2910,8 +2910,7 @@ void CommandProcessor::handle_doorbell_sync(simdojo::Tick now) {
       progress = false;
 
       for (size_t qi = 0; qi < hw_queues_.size(); ++qi) {
-        if (hw_queues_[qi].is_sdma || hw_queues_[qi].debug_suspended ||
-            hw_queues_[qi].runtime_suspended)
+        if (hw_queues_[qi].is_sdma || hw_queues_[qi].suspended())
           continue;
         auto &qs = new_queue_states_[qi];
 
