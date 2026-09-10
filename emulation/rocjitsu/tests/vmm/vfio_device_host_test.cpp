@@ -235,6 +235,15 @@ TEST(VfioDeviceHost, WithholdsAWindowSharedWithoutADescriptor) {
 
   EXPECT_EQ(served.device().mapped_regions(), 0u)
       << "the device must not be told about a window it could never read";
+
+  // The window stays protocol-mapped, so the data path itself must reject it:
+  // a transfer may not fall back to reading the region behind the transport's
+  // back just because the device was never told about it.
+  std::vector<std::byte> probe(4, std::byte{0});
+  EXPECT_FALSE(served.dma().read(0x200000, probe))
+      << "the device must not read through a window shared without a descriptor";
+  EXPECT_FALSE(served.dma().write(0x200000, probe))
+      << "the device must not write through a window shared without a descriptor";
 }
 
 TEST(VfioDeviceHost, KeepsCountWhenTheSameWindowIsSharedTwice) {
@@ -710,7 +719,11 @@ constexpr uint64_t kReconnectIova = 0x90000000;
 constexpr std::size_t kBoundaryHalfBytes = 64;
 constexpr std::size_t kStreamingRegionCount = 300;
 
-/// @brief A page-aligned, zero-filled anonymous file of @p pages pages.
+/// @brief A zero-filled anonymous file of at least @p bytes bytes, rounded up
+///        to a host-page boundary.
+/// @details The @p bytes parameter is a byte count, not a page count: a
+///          request of 3 * 0x1000 on a 64 KiB-page host yields one page, not
+///          three, because the size rounds up from 12288 to 65536.
 class BackingFile {
 public:
   explicit BackingFile(uint64_t bytes) {
@@ -738,14 +751,25 @@ private:
   int fd_ = -1;
 };
 
-/// @brief Bytes whose value depends on both @p seed and position.
-/// @details A repeating chunk of any size cannot match by accident, so a
-/// transfer that lands at the wrong offset or repeats one segment fails the
-/// comparison.
-std::vector<std::byte> byte_pattern(std::size_t length, uint8_t seed) {
+/// @brief Bytes whose value depends on @p seed, the position, and the page
+///        holding that position.
+/// @details The first two bytes of each page carry the page index, so two
+/// pages never hold the same bytes regardless of how many there are and a
+/// cursor bug that reuses one page for every region fails the comparison, as
+/// does a transfer that lands at the wrong offset. The remaining bytes vary
+/// with seed and position.
+std::vector<std::byte> byte_pattern(std::size_t length, uint8_t seed, uint64_t base = 0) {
   std::vector<std::byte> bytes(length);
+  const uint64_t page_size = static_cast<uint64_t>(::sysconf(_SC_PAGESIZE));
   for (std::size_t i = 0; i < length; ++i) {
-    bytes[i] = static_cast<std::byte>(static_cast<uint8_t>(seed + i * 131));
+    const uint64_t offset_in_page = (base + i) % page_size;
+    const uint64_t page = (base + i) / page_size;
+    if (offset_in_page < 2) {
+      // The page index, little-endian, in the first two bytes of the page.
+      bytes[i] = static_cast<std::byte>((page >> (offset_in_page * 8)) & 0xFF);
+    } else {
+      bytes[i] = static_cast<std::byte>(static_cast<uint8_t>(seed + i * 131));
+    }
   }
   return bytes;
 }
@@ -894,28 +918,31 @@ TEST(VfioDeviceHostDma, SplitsATransferAtRegistrationBoundaries) {
   EXPECT_EQ(read_back, read_pattern);
 }
 
-// A client-side IOMMU can reflect one large range as hundreds of page-sized
-// windows. Beyond the host's scatter-gather ceiling the transfer must stream
-// registration by registration instead of failing, so this test registers 300
-// adjacent windows -- above the 256-entry limit -- and moves the whole range
-// in both directions, comparing every byte of every page.
-TEST(VfioDeviceHostDma, StreamsAcrossMoreThanTheScatterGatherLimit) {
+// A client-side IOMMU can reflect one large range as many page-sized windows.
+// The host resolves a multi-window transfer by first asking the library how
+// many scatter-gather entries it needs: above the initial capacity the vector
+// is resized and the request retried, and above the 256-entry ceiling the
+// transfer streams registration by registration instead. This test covers
+// both with 16 windows -- past the initial capacity of 8, under the ceiling
+// -- and 300 windows -- past it -- moving the whole range in both directions
+// and comparing every byte of every page.
+void RunStreamingTransferTest(uint64_t iova_base, std::size_t window_count) {
   ServedDevice served;
   ASSERT_TRUE(served.built());
   rocjitsu::test::VfioUserClient client;
   ASSERT_TRUE(served.attach(client));
 
   const uint64_t page_size = static_cast<uint64_t>(::sysconf(_SC_PAGESIZE));
-  const uint64_t total = kStreamingRegionCount * page_size;
+  const uint64_t total = window_count * page_size;
   BackingFile backing(total);
-  for (uint64_t i = 0; i < kStreamingRegionCount; ++i) {
+  for (uint64_t i = 0; i < window_count; ++i) {
     ASSERT_TRUE(
-        client.dma_map(kStreamingIova + i * page_size, page_size, backing.fd(), i * page_size));
+        client.dma_map(iova_base + i * page_size, page_size, backing.fd(), i * page_size));
   }
-  ASSERT_EQ(served.device().mapped_regions(), kStreamingRegionCount);
+  ASSERT_EQ(served.device().mapped_regions(), window_count);
 
   const std::vector<std::byte> source = byte_pattern(total, 0x5a);
-  EXPECT_TRUE(served.dma().write(kStreamingIova, source));
+  EXPECT_TRUE(served.dma().write(iova_base, source));
 
   std::vector<std::byte> in_file(total);
   ASSERT_TRUE(read_all_at(backing.fd(), 0, in_file));
@@ -924,24 +951,52 @@ TEST(VfioDeviceHostDma, StreamsAcrossMoreThanTheScatterGatherLimit) {
   const std::vector<std::byte> second = byte_pattern(total, 0xc3);
   ASSERT_TRUE(write_all_at(backing.fd(), 0, second));
   std::vector<std::byte> read_back(total);
-  EXPECT_TRUE(served.dma().read(kStreamingIova, read_back));
+  EXPECT_TRUE(served.dma().read(iova_base, read_back));
   EXPECT_EQ(read_back, second) << "the streaming read lost or misplaced data";
+
+  // The pattern encodes the page index, so adjacent pages differ; this makes
+  // a cursor that reuses one page for every region fail the checks above.
+  for (uint64_t p = 0; p + 1 < window_count; ++p) {
+    ASSERT_NE(std::vector<std::byte>(source.begin() + p * page_size,
+                                     source.begin() + (p + 1) * page_size),
+              std::vector<std::byte>(source.begin() + (p + 1) * page_size,
+                                     source.begin() + (p + 2) * page_size))
+        << "pages " << p << " and " << p + 1 << " hold the same bytes";
+  }
+}
+
+TEST(VfioDeviceHostDma, ResizesTheScatterGatherListBetweenTheLimits) {
+  RunStreamingTransferTest(kStreamingIova, 16);
+}
+
+TEST(VfioDeviceHostDma, StreamsAcrossMoreThanTheScatterGatherLimit) {
+  RunStreamingTransferTest(kStreamingIova + 0x10000000ULL, kStreamingRegionCount);
 }
 
 // A hole between registrations is not memory the device may touch, whichever
-// side of the boundary a transfer starts from. The contract only promises
-// failure for the whole transfer, not that buffers stay untouched, so the
-// checks are on the return value alone.
+// side of the boundary a transfer starts from. The transport rejects these
+// before copying anything, so besides the return value the mapped windows'
+// contents must be untouched afterwards.
 TEST(VfioDeviceHostDma, RejectsTransfersThroughAnUnmappedGap) {
   ServedDevice served;
   ASSERT_TRUE(served.built());
   rocjitsu::test::VfioUserClient client;
   ASSERT_TRUE(served.attach(client));
 
-  BackingFile backing(3 * 0x1000);
-  const uint64_t page_size = backing.page_size();
+  const uint64_t page_size = static_cast<uint64_t>(::sysconf(_SC_PAGESIZE));
+  BackingFile backing(3 * page_size);
   ASSERT_TRUE(client.dma_map(kGapIova, page_size, backing.fd(), 0));
   ASSERT_TRUE(client.dma_map(kGapIova + 2 * page_size, page_size, backing.fd(), 2 * page_size));
+
+  // Non-zero sentinels, so an untouched window is distinguishable from a
+  // zeroed one and a partial copy shows up as a mismatch.
+  const std::vector<std::byte> first_sentinel = byte_pattern(page_size, 0x11);
+  const std::vector<std::byte> second_sentinel = byte_pattern(page_size, 0x22);
+  ASSERT_TRUE(write_all_at(backing.fd(), 0, first_sentinel));
+  ASSERT_TRUE(write_all_at(backing.fd(), 2 * page_size, second_sentinel));
+
+  const std::vector<std::byte> write_source = byte_pattern(kBoundaryHalfBytes * 2, 0x33);
+  std::vector<std::byte> read_destination(kBoundaryHalfBytes * 2, std::byte{0xEE});
 
   std::vector<std::byte> buffer(kBoundaryHalfBytes, std::byte{0});
   EXPECT_FALSE(served.dma().read(kGapIova + page_size, buffer))
@@ -949,18 +1004,27 @@ TEST(VfioDeviceHostDma, RejectsTransfersThroughAnUnmappedGap) {
   EXPECT_FALSE(served.dma().write(kGapIova + page_size, buffer))
       << "a write wholly inside the gap must fail";
 
-  std::vector<std::byte> crossing(kBoundaryHalfBytes * 2, std::byte{0});
-  EXPECT_FALSE(served.dma().read(kGapIova + page_size - kBoundaryHalfBytes, crossing))
+  EXPECT_FALSE(served.dma().read(kGapIova + page_size - kBoundaryHalfBytes, read_destination))
       << "a read crossing into the gap must fail";
-  EXPECT_FALSE(served.dma().write(kGapIova + page_size - kBoundaryHalfBytes, crossing))
+  EXPECT_FALSE(served.dma().write(kGapIova + page_size - kBoundaryHalfBytes, write_source))
       << "a write crossing into the gap must fail";
+
+  // Nothing was copied on either rejection: the windows keep their sentinels
+  // and the failed read left its destination alone.
+  std::vector<std::byte> unchanged(page_size);
+  ASSERT_TRUE(read_all_at(backing.fd(), 0, unchanged));
+  EXPECT_EQ(unchanged, first_sentinel) << "the rejected crossing write touched the first window";
+  ASSERT_TRUE(read_all_at(backing.fd(), 2 * page_size, unchanged));
+  EXPECT_EQ(unchanged, second_sentinel) << "the rejected crossing write touched the second window";
+  EXPECT_EQ(read_destination,
+            std::vector<std::byte>(kBoundaryHalfBytes * 2, std::byte{0xEE}))
+      << "the rejected crossing read modified its destination";
 }
 
-// The transport must enforce the direction a window was shared with. The
-// pinned library checks the write direction only: a write into a read-only
-// window fails, while a read from a write-only window is not rejected. The
-// test asserts the enforced direction and verifies against the backing file
-// that a rejected write changed nothing and a permitted one landed.
+// The transport must enforce the direction a window was shared with: a write
+// into a read-only window fails, and a read from it still works. Both are
+// checked against the backing file, so a rejected write is shown to have
+// changed nothing and a permitted one shown to land.
 TEST(VfioDeviceHostDma, EnforcesWriteProtection) {
   ServedDevice served;
   ASSERT_TRUE(served.built());
@@ -1003,10 +1067,8 @@ TEST(VfioDeviceHostDma, EnforcesWriteProtection) {
 }
 
 // The multi-entry path again, with the window set released afterwards. The
-// unmap checks are lifecycle coverage -- the device reports no mapped
-// windows once the client withdraws them -- not evidence about any internal
-// library call. The library exposes no way to observe that from outside, so
-// the data checks are what carry the regression value here.
+// data checks carry the regression value; the unmap checks below then verify
+// that withdrawal revokes access, not just the device's mapping count.
 TEST(VfioDeviceHostDma, CompletesMultiSegmentTransfersAndReleasesTheWindowSet) {
   ServedDevice served;
   ASSERT_TRUE(served.built());
@@ -1039,10 +1101,21 @@ TEST(VfioDeviceHostDma, CompletesMultiSegmentTransfersAndReleasesTheWindowSet) {
   EXPECT_TRUE(served.dma().read(kMultiSegmentIova + page_size - kBoundaryHalfBytes, read_back));
   EXPECT_EQ(read_back, read_pattern);
 
-  EXPECT_TRUE(client.dma_unmap(kMultiSegmentIova, page_size));
-  EXPECT_TRUE(client.dma_unmap(kMultiSegmentIova + page_size, page_size));
+  ASSERT_TRUE(client.dma_unmap(kMultiSegmentIova, page_size));
+  ASSERT_TRUE(client.dma_unmap(kMultiSegmentIova + page_size, page_size));
   EXPECT_EQ(served.device().mapped_regions(), 0u)
       << "withdrawn windows must leave the device with none";
+
+  // The device must not reach the withdrawn windows either: a transfer that
+  // the count alone cannot speak to, since it says nothing about the path a
+  // transfer takes, is rejected in both directions at both former addresses.
+  for (const uint64_t withdrawn : {kMultiSegmentIova, kMultiSegmentIova + page_size}) {
+    std::vector<std::byte> probe(4, std::byte{0});
+    EXPECT_FALSE(served.dma().read(withdrawn, probe))
+        << "a read of a withdrawn window must fail";
+    EXPECT_FALSE(served.dma().write(withdrawn, probe))
+        << "a write of a withdrawn window must fail";
+  }
 }
 
 // A client that goes away without unmapping takes its windows with it: the
