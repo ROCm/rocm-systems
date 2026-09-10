@@ -149,7 +149,8 @@ jobs:
         include:
           - { os: Ubuntu20,    package_format: deb, arch_suffix: _amd64.deb }
           - { os: Ubuntu22,    package_format: deb, arch_suffix: _amd64.deb }
-          - { os: Debian10,    package_format: deb, arch_suffix: _amd64.deb }
+          - { os: Debian12,    package_format: deb, arch_suffix: _amd64.deb }
+          - { os: Debian13,    package_format: deb, arch_suffix: _amd64.deb }
           - { os: SLES,        package_format: rpm, arch_suffix: .rpm }
           - { os: RHEL8,       package_format: rpm, arch_suffix: .rpm }
           - { os: RHEL9,       package_format: rpm, arch_suffix: .rpm }
@@ -191,8 +192,8 @@ jobs:
         run: |
           set -euo pipefail
           # The script autodetects package manager, format, and distro
-          # quirks (Debian10 archived repos, RHEL10/AlmaLinux8 QA_RPATHS,
-          # AzureLinux3 more_itertools, etc.) from /etc/os-release.
+          # quirks (RHEL10/AlmaLinux8 QA_RPATHS, AzureLinux3 more_itertools,
+          # etc.) from /etc/os-release.
           python3 "${{ env.PROJECT_DIR }}/tests/amdsmi_build/run_amdsmi_build.py" \
             --project-dir "${{ env.PROJECT_DIR }}" \
             --os-label "${{ matrix.os }}" \
