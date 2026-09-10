@@ -82,8 +82,10 @@ else()
       endif()
     endforeach()
     # Fallback: well-known package-manager install locations
-    list(APPEND _FFMPEG_ROOT_HINTS
+    file(GLOB _chocolatey_ffmpeg_roots
       "C:/ProgramData/chocolatey/lib/ffmpeg/tools/ffmpeg"
+      "C:/ProgramData/chocolatey/lib/ffmpeg/tools/ffmpeg-*")
+    list(APPEND _FFMPEG_ROOT_HINTS ${_chocolatey_ffmpeg_roots}
       "$ENV{USERPROFILE}/scoop/apps/ffmpeg/current"
       "$ENV{ProgramFiles}/ffmpeg"
       "C:/ffmpeg"
