@@ -17,6 +17,7 @@ from pathlib import Path
 from typing import Any, Callable, Optional
 
 from utils.inject_roctx import core
+from utils.inject_roctx._backends import torch_trace_collector
 from utils.inject_roctx.registry import register
 from utils.logger import console_error, console_log, console_warning
 
@@ -1183,12 +1184,13 @@ class TorchBackend:
         if not _resolve_torch():
             return
 
-        _emit_python_tier_fallback_warning()
+        if not torch_trace_collector.install():
+            _emit_python_tier_fallback_warning()
+            install_dispatcher_hook()
         patch_distributed_collectives()
         patch_process_group_methods()
         patch_cuda_graph()
         patch_compile_callable()
-        install_dispatcher_hook()
         install_tensor_backward_wrapper()
         inject_roctx_into_optimizer()
         install_function_apply_wrappers()
