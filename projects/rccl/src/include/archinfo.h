@@ -56,4 +56,17 @@ inline int rcclLL128ElemsPerThreadFromArch(char const* arch) {
   return linesPerThread * rcclLL128DataElemsFromArch(arch);
 }
 
+/* Host Code: Must match the rccl_float8 / rccl_bfloat8 typedef selection in
+ * rccl_float8.h for the same arch. Only the arches below take the OCP types
+ * there. gfx942 takes the explicit FNUZ typedef, and every other arch misses the
+ * hip_fp8.h arm entirely and falls back to the software implementation, which is
+ * FNUZ as well, so FNUZ is the default rather than the exception. */
+inline bool rcclFp8DeviceIsFnuz(char const* arch) {
+  // comm->archName is a char* that can be null (see init.cc), and an unknown arch
+  // is one that misses the hip_fp8.h arm, so it lands on the FNUZ fallback anyway.
+  if (arch == nullptr) return true;
+  return !(IsArchMatch(arch, "gfx950") || IsArchMatch(arch, "gfx1200") || IsArchMatch(arch, "gfx1201") ||
+           IsArchMatch(arch, "gfx1250"));
+}
+
 #endif // ARCHINFO_H

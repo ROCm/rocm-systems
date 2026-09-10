@@ -4140,15 +4140,21 @@ ncclResult_t ncclRedOpCreatePreMulSum_impl(ncclRedOp_t* op, void* scalar, ncclDa
     int size = ncclTypeSize(datatype);
     if (size < 1) return ncclInternalError;
     user->opFull.scalarArgIsPtr = false;
-#if defined(RCCL_FLOAT8)
-    // Match hostToDevRedOp: fp8 scalars are promoted to float, not copied as bits.
+#if defined(RCCL_FLOAT8) && defined(RCCL_FP8_HOST_DECODE)
     if (datatype == ncclFloat8e4m3 || datatype == ncclFloat8e5m2) {
-      float s = (datatype == ncclFloat8e4m3) ? (float)*(const rccl_float8*)scalar
-                                             : (float)*(const rccl_bfloat8*)scalar;
+      // Match hostToDevRedOp: fp8 scalars travel as float, not as bits. The user's
+      // byte is in the encoding the device uses for this arch, which is not the
+      // host typedef, so decode it the way the device would. Skipping that would
+      // leave this immediate and the device-resident scalar below disagreeing by a
+      // factor of two everywhere rccl_float8 is FNUZ.
+      float s = rcclFp8ByteToFloat(scalar, datatype == ncclFloat8e5m2, rcclFp8DeviceIsFnuz(comm->archName));
       std::memcpy(&user->opFull.scalarArg, &s, sizeof(s));
-    } else
-#endif
+    } else {
+      std::memcpy(&user->opFull.scalarArg, scalar, size);
+    }
+#else
     std::memcpy(&user->opFull.scalarArg, scalar, size);
+#endif
   } else {
     user->opFull.scalarArgIsPtr = true;
     user->opFull.scalarArg = reinterpret_cast<uint64_t>(scalar);

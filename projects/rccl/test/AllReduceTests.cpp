@@ -224,11 +224,21 @@ namespace RcclUnitTesting
   // The PreMulSum scalar for FP8 avg is packed as float on the host and decoded as
   // float on the device. If either side reverts to fp8 bits the two disagree and
   // every element comes out scaled wrong, which this catches numerically.
-  // E5M2 is deliberately not swept here: with two mantissa bits, pre-scaling by
-  // 1/nRanks and rounding back to fp8 differs from the harness reference, which
-  // sums and then divides. That mismatch predates this fix and reproduces on an
-  // unpatched build, so including e5m2 would only make the test fail for a reason
-  // the fix has nothing to do with.
+  //
+  // Which runners this guards: only those whose device rccl_float8 is FNUZ, since
+  // that is what makes the host and device encodings differ. gfx942 and any arch on
+  // the software fp8 fallback discriminate here; on gfx950 and gfx12xx both sides
+  // take the OCP typedef (rccl_float8.h) and the pre-fix and post-fix scalars differ
+  // only by rounding 1/nRanks to e4m3, so this test cannot fail there for the reason
+  // it exists. The arch-independent half is pinned in test/host/enqueue-test.cc.
+  //
+  // E5M2 is deliberately not swept here. With two mantissa bits, RCCL's pre-scale by
+  // 1/nRanks and round back to fp8 disagrees with ExpectedReduceFp8
+  // (test/common/DeviceDataOps.hpp:224), which accumulates in fp8 and divides last.
+  // That is a reference-model mismatch in the harness, tracked as AICOMRCCL-2321: it
+  // reproduces on an unpatched build, and rccl-tests passes the same case because
+  // ncclVerifiablePremulScalar models what RCCL actually does. Restore e5m2 here once
+  // 2321 is fixed.
   TEST(AllReduce, Fp8Avg)
   {
     TestBed testBed;

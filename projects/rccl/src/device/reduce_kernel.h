@@ -679,9 +679,13 @@ struct FuncPreMulSum<rccl_float8> {
   using EltType = rccl_float8;
   float scalar;
   __device__ FuncPreMulSum(uint64_t opArg = 0) {
+    // opArg carries float bits, not fp8 bits. Host rccl_float8 is OCP, while device
+    // rccl_float8 is FNUZ on gfx942 and on every arch that misses the hip_fp8.h arm
+    // and falls back to the software implementation (rccl_float8.h), so an fp8
+    // immediate packed on the host would not survive the trip.
     union {
       uint64_t u64;
-      float val; // opArg carries float bits: host fp8 is OCP, gfx942 device fp8 is FNUZ
+      float val;
     };
     u64 = opArg;
     scalar = (float)(val);
@@ -697,9 +701,10 @@ struct FuncPreMulSum<rccl_bfloat8> {
   using EltType = rccl_bfloat8;
   float scalar;
   __device__ FuncPreMulSum(uint64_t opArg = 0) {
+    // Float bits, for the same reason as FuncPreMulSum<rccl_float8> above.
     union {
       uint64_t u64;
-      float val; // opArg carries float bits: host fp8 is OCP, gfx942 device fp8 is FNUZ
+      float val;
     };
     u64 = opArg;
     scalar = (float)(val);
@@ -712,7 +717,10 @@ template <>
 struct RedOpArg<FuncPreMulSum<rccl_float8>> {
   static constexpr bool ArgUsed = true;
   __device__ __forceinline__ static uint64_t loadArg(void* ptr) {
-    union { uint64_t u64; float val; };
+    union {
+      uint64_t u64;
+      float val;
+    };
     u64 = 0;
     val = (float)(*(rccl_float8*)ptr);
     return u64;
@@ -723,7 +731,10 @@ template <>
 struct RedOpArg<FuncPreMulSum<rccl_bfloat8>> {
   static constexpr bool ArgUsed = true;
   __device__ __forceinline__ static uint64_t loadArg(void* ptr) {
-    union { uint64_t u64; float val; };
+    union {
+      uint64_t u64;
+      float val;
+    };
     u64 = 0;
     val = (float)(*(rccl_bfloat8*)ptr);
     return u64;

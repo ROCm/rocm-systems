@@ -52,6 +52,18 @@ typedef __hip_fp8_e4m3 rccl_float8;
 typedef __hip_fp8_e5m2 rccl_bfloat8;
 #endif
 
+/* The typedefs above are selected per *device* arch, so an fp8 byte means whatever
+ * the device that reduces it says it means. Host code that has to interpret such a
+ * byte on the device's behalf cannot use the host typedef, which is always OCP in
+ * this arm. Decode through the same tables the device uses instead, choosing the
+ * encoding with rcclFp8DeviceIsFnuz(arch) from archinfo.h. */
+#define RCCL_FP8_HOST_DECODE 1
+inline float rcclFp8ByteToFloat(void const* byte, bool isE5m2, bool deviceIsFnuz) {
+  if (isE5m2)
+    return deviceIsFnuz ? float(*(__hip_fp8_e5m2_fnuz const*)byte) : float(*(__hip_fp8_e5m2 const*)byte);
+  return deviceIsFnuz ? float(*(__hip_fp8_e4m3_fnuz const*)byte) : float(*(__hip_fp8_e4m3 const*)byte);
+}
+
 typedef _Float16 half_t;
 typedef _Float16 half2_t __attribute__((ext_vector_type(2)));
 
@@ -1012,6 +1024,14 @@ inline __host__ __device__ T explicit_downcast(Ta a, uint32_t rng) {
 }
 
 // =================================================================================================
+
+/* Counterpart to the decoder in the hip_fp8.h arm above. This fallback is FNUZ on
+ * both sides -- every cast_to_f8 / cast_from_f8 here passes negative_zero_nan=true --
+ * so host and device already agree and there is no encoding to choose. */
+#define RCCL_FP8_HOST_DECODE 1
+inline float rcclFp8ByteToFloat(void const* byte, bool isE5m2, bool /*deviceIsFnuz*/) {
+  return isE5m2 ? float(*(rccl_bfloat8 const*)byte) : float(*(rccl_float8 const*)byte);
+}
 
 #endif
 

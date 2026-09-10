@@ -20,6 +20,7 @@ Full documentation for RCCL is available at [https://rccl.readthedocs.io](https:
 ### Fixed
 * `NCCL_MAX_P2P_NCHANNELS` opt-in is now detected from the environment rather than from the parameter value. The value defaults to `MAXCHANNELS`, so every unset run was treated as an opt-in past the historical `4*CHANNEL_LIMIT` (64) bound. As a result, P2P channels on non-gfx1250 architectures were limited only by the collective channel count, and the gfx950 (MI350) multi-node P2P caps never applied. Set `NCCL_MAX_P2P_NCHANNELS` explicitly to restore a higher bound.
 * Fixed `NCCL_CHECK_MODE` having no effect. `commAlloc` reset `comm->checkMode` from the deprecated `NCCL_CHECK_POINTERS` after `NCCL_CHECK_MODE` had already been parsed, so `DEBUG_LOCAL` was only reachable through the deprecated variable and `DEBUG_GLOBAL`, which validates symmetric buffer registration across ranks, was unreachable entirely.
+* Fixed FP8 E4M3/E5M2 `ncclAvg` applying a scale two times too small, which made every element of every reduction collective wrong. The host packed `1/nRanks` as an OCP `rccl_float8` immediate, while device code decodes those bits as FNUZ on gfx942 and on every architecture that misses the `hip_fp8.h` path and falls back to the software fp8 implementation. The PreMulSum scalar now travels as `float`, matching both the accumulator and the symmetric kernels. `ncclRedOpCreatePreMulSum` scalars are promoted the same way, so a host-immediate and a device-resident scalar of the same value no longer disagree.
 
 ### Known issues
 * The improved AllGatherV support breaks the NCCL profiler support for ncclBroadcast operations, limiting visibility to API events. `NCCL_ALLGATHERV_ENABLE=0` can be used as a workaround until it is fixed in a future release.
@@ -69,7 +70,6 @@ Full documentation for RCCL is available at [https://rccl.readthedocs.io](https:
 * Parallelized communicator destruction across child processes to reduce teardown latency.
 
 ### Resolved issues
-* Fixed FP8 E4M3/E5M2 `ncclAvg` packing 1/nRanks as host `rccl_float8` while gfx942 device code decoded FNUZ.
 * Fixed `ncclCommGrow` channel-count divergence causing incorrect collective routing.
 * Fixed `ncclCommGrow` hang when growing to an 8-rank single-node communicator.
 * Fixed symmetric LDS under-reservation in legacy (non-device-linker) builds.
