@@ -887,13 +887,15 @@ InstrumentedCodeObjectDebug Instrumentor::patch_with_debug_summaries() {
       AmdGpuCodeObject::min_kernel_sgpr_count(arch_, kernels);
 
   // The kernel's VGPR allocation, decoded once: it depends only on the
-  // descriptor and the arch, both loop-invariant. Absent unless exactly one
-  // kernel was discovered, since with several there is no single allocation to
-  // name.
-  const std::optional<KernelVgprBounds> vgpr_bounds =
-      kernels.size() == 1
-          ? std::optional<KernelVgprBounds>(kernel_vgpr_bounds(arch_, kernels.front().descriptor))
-          : std::nullopt;
+  // descriptor and the arch, both loop-invariant. Stays all-zero unless exactly
+  // one kernel was discovered, since with several there is no single allocation
+  // to name; `kernels.size() != 1` is the guard every use tests. The zero state
+  // fails closed rather than silently widening a bound: `ordinary_bound == 0`
+  // leaves the SGPR bridge scan with nothing to pick, and `acc_count == 0`
+  // rejects every AccVGPR index.
+  const KernelVgprBounds vgpr_bounds = kernels.size() == 1
+                                           ? kernel_vgpr_bounds(arch_, kernels.front().descriptor)
+                                           : KernelVgprBounds{};
   std::optional<SpillManager> spills;
   uint64_t spill_descriptor_file_offset = 0;
 
@@ -997,10 +999,10 @@ InstrumentedCodeObjectDebug Instrumentor::patch_with_debug_summaries() {
       const RegisterSet spill = compute_spill_set(live, clobbers);
       if (!spill.none()) {
         // Single-kernel assumption: spilling needs exactly one kernel descriptor
-        // with non-zero fixed scratch to grow. vgpr_bounds is present on exactly
-        // that condition, so testing it here is what licenses the dereferences
-        // below.
-        if (!vgpr_bounds || kernels.front().descriptor.private_segment_fixed_size == 0) {
+        // with non-zero fixed scratch to grow. That is the same condition under
+        // which vgpr_bounds was decoded, so testing it here is what licenses the
+        // reads below.
+        if (kernels.size() != 1 || kernels.front().descriptor.private_segment_fixed_size == 0) {
           result.errors.push_back(
               "probe call at anchor_offset " + std::to_string(site.anchor_offset) +
               " must spill live registers, but the code object does not have a single kernel with "
@@ -1034,13 +1036,13 @@ InstrumentedCodeObjectDebug Instrumentor::patch_with_debug_summaries() {
         // The SGPR bridge must be an ordinary VGPR: an index in the accumulator
         // window would alias an AGPR that is not part of acc_spills.
         if (!sgpr_spill.none() &&
-            !plan_sgpr_spills(sgpr_spill, live, plan.vgpr_spills, vgpr_bounds->ordinary_bound,
+            !plan_sgpr_spills(sgpr_spill, live, plan.vgpr_spills, vgpr_bounds.ordinary_bound,
                               *spills, arch_, plan.sgpr_spills, plan.spill_bridge_vgpr, &err)) {
           result.errors.push_back(std::move(err));
           continue;
         }
         // AccVGPRs (CDNA only): reject an index past the allocated AGPR window.
-        if (!acc_spill.none() && !plan_acc_spills(acc_spill, vgpr_bounds->acc_count, *spills, arch_,
+        if (!acc_spill.none() && !plan_acc_spills(acc_spill, vgpr_bounds.acc_count, *spills, arch_,
                                                   plan.acc_spills, &err)) {
           result.errors.push_back(std::move(err));
           continue;
