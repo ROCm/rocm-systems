@@ -3060,6 +3060,8 @@ Field | Description | Units
 `status` | NPM status (AMDSMI_NPM_STATUS_ENABLED or AMDSMI_NPM_STATUS_DISABLED) | -
 `limit` | Node-level power limit | W
 `ubb_power_threshold` | UBB node power threshold | W
+`max_node_power_limit` | The platform max bound consumed by `amdsmi_set_npm_limit()`: callers should ensure any limit passed to that function does not exceed this value | W
+`current_node_power` | The current (instantaneous) node power (board/node_power), MI450+. Queried once per node rather than once per GPU | W
 
 Exceptions that can be thrown by `amdsmi_get_npm_info` function:
 
@@ -3086,6 +3088,76 @@ try:
         print(npm_info['status'])
         print(npm_info['limit'])
         print(npm_info['ubb_power_threshold'])
+        print(npm_info['max_node_power_limit'])
+        print(npm_info['current_node_power'])
+except amdsmi.AmdSmiException as e:
+    print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
+```
+
+### amdsmi_set_npm_limit
+
+Description: Set the NPM (Node Power Management) power limit for the node
+associated with `node_handle` by writing to the board's
+`cur_node_power_limit` sysfs interface.
+
+This function validates `limit` against the platform max bound
+(`amdsmi_get_npm_info()`'s `max_node_power_limit`, sourced from
+`board/max_node_power_limit`) internally before ever issuing the write,
+raising `AmdSmiLibraryException` with `AMDSMI_STATUS_INVAL` if `limit` is `0`
+or greater than that bound. If the platform max bound itself cannot be read
+(e.g. the sysfs interface is missing or returns unexpected data), this
+function fails closed and raises that underlying error rather than silently
+allowing an unbounded `limit` through. The amd-smi CLI's
+`set --node-power-limit` additionally performs the same range check itself
+ahead of calling this function, purely to fail fast and present a friendlier,
+earlier user-facing error message; it is not the only validation and is not
+required for correctness.
+
+Input parameters:
+
+* `node_handle` node handle obtained from `amdsmi_get_node_handle`
+* `limit` new NPM power limit value to request (units match the
+  `board/cur_node_power_limit` sysfs interface). Must satisfy
+  `0 < limit <= UINT64_MAX`; out-of-range values raise
+  `AmdSmiParameterException` rather than silently wrapping modulo 2**64 the
+  way a raw `ctypes.c_uint64()` conversion would. Values that pass this local
+  bound check but are `0` or exceed the platform max are rejected by the
+  underlying library call instead (see Exceptions below)
+
+Output: None. This function raises an exception if the call did not succeed
+(e.g. `AmdSmiLibraryException` with `AMDSMI_STATUS_INVAL` if `limit` is `0` or
+exceeds the platform max bound, `AMDSMI_STATUS_NOT_SUPPORTED` if the sysfs
+interface is unavailable, or `AMDSMI_STATUS_NO_PERM` if the write was
+rejected)
+
+Exceptions that can be thrown by `amdsmi_set_npm_limit` function:
+
+* `AmdSmiLibraryException`
+* `AmdSmiParameterException`
+
+#### Possible Library Exceptions
+
+- `AMDSMI_STATUS_INVAL` - Invalid parameters, including when `limit` is `0`
+  or exceeds the platform max bound (or when that bound itself cannot be
+  read)
+- `AMDSMI_STATUS_NOT_SUPPORTED` - Feature not supported
+- `AMDSMI_STATUS_NO_PERM` - Permission Denied (e.g. the write was rejected by
+  the driver for this guest context)
+
+Example:
+
+```python
+import amdsmi
+try:
+    amdsmi.amdsmi_init()
+    devices = amdsmi.amdsmi_get_processor_handles()
+    if len(devices) == 0:
+        print("No GPUs on machine")
+    else:
+        node_handle = amdsmi.amdsmi_get_node_handle(devices[0])
+        amdsmi.amdsmi_set_npm_limit(node_handle, 6000)
 except amdsmi.AmdSmiException as e:
     print(e)
 finally:

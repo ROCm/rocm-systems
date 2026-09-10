@@ -2709,10 +2709,16 @@ typedef enum {
  * @cond @tag{gpu_bm_linux} @tag{host} @endcond
  */
 typedef struct {
-  amdsmi_npm_status_t status;    //!< NPM status (enabled/disabled).
-  uint64_t limit;                //!< Node-level power limit in Watts.
-  uint32_t ubb_power_threshold;  //!< The UBB node power threshold in Watts.
-  uint64_t reserved[5];
+  amdsmi_npm_status_t status;     //!< NPM status (enabled/disabled).
+  uint64_t limit;                 //!< Node-level power limit in Watts.
+  uint32_t ubb_power_threshold;   //!< The UBB node power threshold in Watts.
+  uint64_t max_node_power_limit;  //!< Platform max node-level power limit in Watts
+                                  //!< (board/max_node_power_limit), used to bound
+                                  //!< amdsmi_set_npm_limit() requests.
+  uint32_t current_node_power;    //!< The current (instantaneous) node power in W
+                                  //!< {@linux_bm}, MI450+.
+  uint64_t reserved[3];           //!< Reduced from reserved[4] to accommodate
+                                  //!< current_node_power.
 } amdsmi_npm_info_t;
 
 /**
@@ -7691,7 +7697,14 @@ amdsmi_status_t amdsmi_get_gpu_xcd_counter(amdsmi_processor_handle processor_han
  *
  * @details This function queries the NPM controller for the given node and returns whether NPM is
  * enabled, along with the current node-level power limit in Watts. The NPM status and limit are set
- * out-of-band and reported via this API.
+ * out-of-band and reported via this API. The returned amdsmi_npm_info_t::max_node_power_limit is
+ * the platform max bound (sourced from board/max_node_power_limit) that ::amdsmi_set_npm_limit
+ * itself validates requests against internally before issuing the write (mirroring
+ * ::amdsmi_set_power_cap and ::amdsmi_get_power_cap_info); callers may still query it here ahead
+ * of time to fail fast / present a clean error without invoking the setter. The returned
+ * amdsmi_npm_info_t::current_node_power is the current (instantaneous) node-level power reading in
+ * Watts (sourced from board/node_power); it is node-handle scoped (queried once per node), unlike
+ * amdsmi_power_info_t, which is scoped per GPU handle.
  *
  * @param[in]  node_handle Handle to the Node to query.
  * @param[out] info Pointer to amdsmi_npm_info_t structure to receive NPM status and limit.
@@ -7723,6 +7736,38 @@ amdsmi_status_t amdsmi_get_npm_info(amdsmi_node_handle node_handle, amdsmi_npm_i
  *         non-zero on other failures.
  */
 amdsmi_status_t amdsmi_get_tray_info(amdsmi_node_handle node_handle, amdsmi_tray_info_t* info);
+
+/**
+ * @brief Sets the node power management (NPM) power limit for the specified node.
+ *
+ * @ingroup tagNodeInfo
+ *
+ * @platform{gpu_bm_linux} @platform{host}
+ *
+ * @details This function validates `limit` against the platform max bound
+ * (amdsmi_npm_info_t::max_node_power_limit, sourced from board/max_node_power_limit) before ever
+ * issuing a write, returning ::AMDSMI_STATUS_INVAL if `limit` is `0` or greater than that bound
+ * (this mirrors ::amdsmi_set_power_cap, whose analogous range check against
+ * ::amdsmi_get_power_cap_info's bounds is likewise enforced internally rather than left purely to
+ * the caller). If the platform max bound itself cannot be read (e.g. the sysfs interface is
+ * missing or returns unexpected data), this function fails closed and returns that underlying
+ * error rather than silently allowing an unbounded `limit` through. Once validated, this function
+ * issues a Set NPM Limit request to GPU PMFW via the amdgpu driver for the given node, requesting
+ * the value of `limit` verbatim. The write path is restricted to host / 1 permitted VM only; the
+ * enforcement of that restriction is done by the kernel driver, not by this function. When both
+ * SMI and BMC set limits, GPU PMFW arbitrates by taking the minimum of the two, bounded by the
+ * platform max.
+ *
+ * @param[in] node_handle Handle to the Node to set the limit on.
+ * @param[in] limit Node-level power limit in Watts to request.
+ *
+ * @return ::AMDSMI_STATUS_SUCCESS on success. ::AMDSMI_STATUS_INVAL if `limit` is `0` or exceeds
+ * the platform max bound. ::AMDSMI_STATUS_NOT_SUPPORTED if the sysfs interface
+ * (board/cur_node_power_limit or board/max_node_power_limit) is unavailable on this platform.
+ * Non-zero on other failure (e.g. ::AMDSMI_STATUS_NO_PERM if the driver rejects the write for this
+ * guest context).
+ */
+amdsmi_status_t amdsmi_set_npm_limit(amdsmi_node_handle node_handle, uint64_t limit);
 
 /** @} End tagNodeInfo */
 
