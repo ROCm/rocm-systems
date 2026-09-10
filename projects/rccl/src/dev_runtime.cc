@@ -2278,12 +2278,21 @@ void* ncclDevrGetRmaWin(struct ncclDevrWindow* winHost, int ctx) {
   if (ctx < 0 || ctx >= NCCL_GIN_MAX_CONNECTIONS) {
     return nullptr;
   }
-  // Non-symmetric proxy path stores rmaDevWins directly on the window struct
+  // Non-symmetric proxy path stores RMA handles directly on the window struct
   // (memory == nullptr in that case); symmetric path goes through memory.
+  // The host proxy consumes the handles produced by ncclRmaProxyRegister.
   if (winHost->memory == nullptr) {
-    return winHost->rmaDevWins[ctx];
+    return winHost->rmaHostWins[ctx];
   }
-  return winHost->memory->rmaDevWins[ctx];
+  return winHost->memory->rmaHostWins[ctx];
+}
+
+// Get the byte offset of a window within its backing memory allocation.
+size_t ncclDevrGetWinOffset(struct ncclDevrWindow* winHost) {
+  if (winHost == nullptr || winHost->memory == nullptr) {
+    return 0;
+  }
+  return winHost->bigOffset - winHost->memory->bigOffset;
 }
 
 // Get the multicast address for a given team

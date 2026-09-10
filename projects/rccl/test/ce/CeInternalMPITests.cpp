@@ -96,10 +96,10 @@ protected:
         debugGuard_.reset();
     }
 
-    // Batch buffer for ncclPrepUCSync: capacity = NCCL_CE_SYNC_OPS_PER_RANK_UC * nRanks.
+    // Batch buffer for ncclPrepUCSync: capacity is based on the LSA-local team.
     std::vector<hipStreamBatchMemOpParams> makePrepSyncBatch() const
     {
-        size_t batchSize = NCCL_CE_SYNC_OPS_PER_RANK_UC * ceComm->nRanks;
+        size_t batchSize = NCCL_CE_SYNC_OPS_PER_RANK_UC * ceComm->devrState.lsaSize;
         return std::vector<hipStreamBatchMemOpParams>(batchSize);
     }
 
@@ -108,6 +108,17 @@ protected:
     {
         if(ceComm->nRanks < n)
             GTEST_SKIP() << "Need >= " << n << " MPI ranks";
+    }
+
+    // Skip if the LSA team has fewer than n ranks. Assertions scoped to the LSA
+    // domain must guard on it: 2 nodes x 1 rank gives nRanks=2 but lsaSize=1,
+    // which would otherwise satisfy requireMinRanks(2) and then assert on an
+    // empty batch.
+    void requireMinLsaRanks(int n)
+    {
+        if(ceComm->devrState.lsaSize < n)
+            GTEST_SKIP() << "Need >= " << n << " ranks in the LSA team, have "
+                         << ceComm->devrState.lsaSize;
     }
 
     // Allocate a batch, call ncclPrepUCSync once, and return both for inspection.
@@ -357,22 +368,23 @@ TEST_F(CeInternalMPITest, PrepUCSyncIncrementsCeSeqNum)
     }
 }
 
-// SYNC-02: ncclPrepUCSync produces exactly 2*(nRanks-1) ops (one WRITE +
-//          one WAIT per remote rank).
+// SYNC-02: ncclPrepUCSync produces one WRITE and one WAIT per remote LSA rank.
 TEST_F(CeInternalMPITest, PrepUCSyncOpCount)
 {
     requireMinRanks(2);
-    const int nRanks = ceComm->nRanks;
+    requireMinLsaRanks(2);
+    const int lsaSize = ceComm->devrState.lsaSize;
     auto [batch, opIdx] = callPrepUCSync();
-    EXPECT_EQ(opIdx, static_cast<size_t>(2 * (nRanks - 1)))
-        << "expected 2*(nRanks-1) ops for nRanks=" << nRanks;
+    EXPECT_EQ(opIdx, static_cast<size_t>(2 * (lsaSize - 1)))
+        << "expected 2*(lsaSize-1) ops for lsaSize=" << lsaSize;
 }
 
 // SYNC-03: No WRITE_VALUE op targets the local rank's own ready slot.
 TEST_F(CeInternalMPITest, PrepUCSyncNoSelfTargetedOp)
 {
     requireMinRanks(2);
-    const int rank = ceComm->rank;
+    requireMinLsaRanks(2);
+    const int lsaRank = ceComm->devrState.lsaSelf;
 
     auto [batch, opIdx] = callPrepUCSync();
 
@@ -381,7 +393,7 @@ TEST_F(CeInternalMPITest, PrepUCSyncNoSelfTargetedOp)
     // on the host-side pointer is valid for comparison with batch op addresses,
     // which are also expressed as host-visible hipDeviceptr_t values.
     uint32_t*      readyPtrs = reinterpret_cast<uint32_t*>(ceComm->ceColl.baseUCSymReadyPtr);
-    hipDeviceptr_t selfReady = reinterpret_cast<hipDeviceptr_t>(&readyPtrs[rank]);
+    hipDeviceptr_t selfReady = reinterpret_cast<hipDeviceptr_t>(&readyPtrs[lsaRank]);
     int selfTargets = 0;
     for(size_t i = 0; i < opIdx; ++i)
     {
@@ -390,7 +402,7 @@ TEST_F(CeInternalMPITest, PrepUCSyncNoSelfTargetedOp)
             ++selfTargets;
     }
     EXPECT_EQ(selfTargets, 0)
-        << "A WRITE_VALUE op targeted rank " << rank << "'s own ready slot";
+        << "A WRITE_VALUE op targeted LSA rank " << lsaRank << "'s own ready slot";
 }
 
 // SYNC-04: ceSeqNum wraps correctly from UINT32_MAX → 0.
@@ -449,6 +461,42 @@ TEST_F(CeInternalMPITest, SeqNumWrapAroundCollective)
                           << " expected=" << errExp << " got=" << errAct;
         }
     }
+}
+
+// BATCH-01: ncclCeFreeBatchOpsParams is idempotent. Hierarchical AllGather frees
+// per-chunk scratch inside its chunk loop and once more at function exit, both on
+// the same object, so a release that does not clear the pointers double-frees.
+// Single-node, so this pins the invariant wherever the suite runs.
+TEST_F(CeInternalMPITest, FreeBatchOpsParamsIsIdempotent)
+{
+    ncclCeBatchOpsParams params{};
+    ASSERT_EQ(ncclCeInitBatchOpsParams(&params, 4), ncclSuccess);
+    ASSERT_NE(params.srcs, nullptr);
+#ifdef CE_BATCH_ASYNC_SUPPORTED
+    ASSERT_NE(params.attrs, nullptr);
+    ASSERT_NE(params.attrIdxs, nullptr);
+#endif
+
+    ncclCeFreeBatchOpsParams(&params);
+    EXPECT_EQ(params.srcs, nullptr);
+    EXPECT_EQ(params.dsts, nullptr);
+    EXPECT_EQ(params.sizes, nullptr);
+    EXPECT_EQ(params.numOps, 0);
+    EXPECT_FALSE(params.intraBatchSync);
+#ifdef CE_BATCH_ASYNC_SUPPORTED
+    // Also allocated by ncclCeInitBatchOpsParams, so the release has to clear them
+    // too or the second free in ncclHierCeAllGather passes dangling pointers.
+    EXPECT_EQ(params.attrs, nullptr);
+    EXPECT_EQ(params.attrIdxs, nullptr);
+    EXPECT_EQ(params.numAttrs, 0);
+#endif
+
+    // Must not double-free.
+    ncclCeFreeBatchOpsParams(&params);
+    EXPECT_EQ(params.srcs, nullptr);
+#ifdef CE_BATCH_ASYNC_SUPPORTED
+    EXPECT_EQ(params.attrs, nullptr);
+#endif
 }
 
 // ===========================================================================
