@@ -93,6 +93,7 @@ protected:
   std::unique_ptr<ncclComm> comm_;
   std::unique_ptr<ncclKernelPlan> plan_;
   LaunchLog log_;
+  ncclCudaStreamList streamNode_{};
 
   void SetUp() override {
     // Reset on entry as well as exit: a test that dies mid-body never reaches
@@ -106,10 +107,16 @@ protected:
     comm_->rmaState.rmaCeState.ceStream = kCeStream;
     comm_->rmaState.rmaCeState.ceEvent = kCeEvent;
 
+    // ncclLaunchRma dereferences comm->planner.streams unconditionally.
+    streamNode_.next = nullptr;
+    streamNode_.stream = kMainStream;
+    comm_->planner.streams = &streamNode_;
+
     plan_ = std::make_unique<ncclKernelPlan>();  // zeroed, so its queues are empty
   }
 
   void TearDown() override {
+    comm_->planner.streams = nullptr;  // borrowed from streamNode_
     ResetRmaFakes();
     ResetHipFakes();
   }
@@ -630,6 +637,119 @@ TEST_F(RmaPutTest, NoTasks_IsANoOp) {
 
   EXPECT_EQ(ncclRmaPut(comm_.get(), plan_.get(), kMainStream), ncclSuccess);
   EXPECT_TRUE(log_.entries.empty());
+}
+
+// --- ncclLaunchRma (rma.cc:90) ---------------------------------------------
+//
+// The switch on plan->rmaArgs->func, and the only place the stream comes from
+// comm->planner.streams rather than the caller. Each case is driven proxy-only
+// so it makes exactly one launcher call.
+
+class RmaLaunchTest : public RmaTestBase {
+protected:
+  ncclRmaArgs args_{};
+
+  void SetUp() override {
+    RmaTestBase::SetUp();
+    plan_->rmaArgs = &args_;
+    args_.nRmaTasksProxy = 1;
+    args_.nRmaTasksCe = 0;
+  }
+
+  // These arms run proxy-only, where the callee never dereferences comm, so a
+  // dispatcher that dropped it would otherwise go unnoticed.
+  void ExpectForwardedOurCommAndPlan() {
+    ASSERT_EQ(log_.entries.size(), 1u);
+    EXPECT_EQ(log_.entries[0].comm, comm_.get());
+    EXPECT_EQ(log_.entries[0].plan, plan_.get());
+  }
+};
+
+// ncclFuncPutSignal routes to ncclRmaPut, on the stream from comm->planner.streams.
+TEST_F(RmaLaunchTest, PutSignal_DispatchesToRmaPutOnPlannerStream) {
+  args_.func = ncclFuncPutSignal;
+  AllHooks hooks(log_);
+
+  ASSERT_EQ(ncclLaunchRma(comm_.get(), plan_.get()), ncclSuccess);
+
+  EXPECT_EQ(log_.Sequence(), (std::vector<LaunchLog::Which>{LaunchLog::kProxyPut}));
+  EXPECT_EQ(log_.StreamOf(LaunchLog::kProxyPut), kMainStream);
+  ExpectForwardedOurCommAndPlan();
+}
+
+// The stream really is read from the planner, not defaulted: a second node value
+// must reach the launcher.
+TEST_F(RmaLaunchTest, PutSignal_UsesWhicheverStreamThePlannerHolds) {
+  ncclCudaStreamList other{};
+  other.stream = kCeStream;  // any stream distinguishable from kMainStream
+  comm_->planner.streams = &other;
+  args_.func = ncclFuncPutSignal;
+  AllHooks hooks(log_);
+
+  ASSERT_EQ(ncclLaunchRma(comm_.get(), plan_.get()), ncclSuccess);
+
+  EXPECT_EQ(log_.StreamOf(LaunchLog::kProxyPut), kCeStream);
+}
+
+// ncclFuncSignal shares the PutSignal arm: a bare signal still launches as a put.
+TEST_F(RmaLaunchTest, Signal_DispatchesToRmaPut) {
+  args_.func = ncclFuncSignal;
+  AllHooks hooks(log_);
+
+  ASSERT_EQ(ncclLaunchRma(comm_.get(), plan_.get()), ncclSuccess);
+
+  EXPECT_EQ(log_.Sequence(), (std::vector<LaunchLog::Which>{LaunchLog::kProxyPut}));
+  ExpectForwardedOurCommAndPlan();
+}
+
+// ncclFuncWaitSignal is the only arm reaching ncclRmaWaitSignal.
+TEST_F(RmaLaunchTest, WaitSignal_DispatchesToRmaWaitSignal) {
+  args_.func = ncclFuncWaitSignal;
+  AllHooks hooks(log_);
+
+  ASSERT_EQ(ncclLaunchRma(comm_.get(), plan_.get()), ncclSuccess);
+
+  EXPECT_EQ(log_.Sequence(), (std::vector<LaunchLog::Which>{LaunchLog::kProxyWait}));
+  ExpectForwardedOurCommAndPlan();
+}
+
+// The default arm rejects an unsupported func without launching anything.
+TEST_F(RmaLaunchTest, UnsupportedFunc_ReturnsInvalidUsageWithoutLaunching) {
+  args_.func = ncclFuncAllReduce;
+  AllHooks hooks(log_);
+
+  EXPECT_EQ(ncclLaunchRma(comm_.get(), plan_.get()), ncclInvalidUsage);
+  EXPECT_TRUE(log_.entries.empty());
+}
+
+// A launcher failure surfaces through the switch unchanged.
+TEST_F(RmaLaunchTest, DispatchFailure_Propagates) {
+  args_.func = ncclFuncPutSignal;
+  AllHooks hooks(log_);
+  ScopedHook proxy(g_rmaProxyPutLaunch,
+                   [](ncclComm*, ncclKernelPlan*, hipStream_t) { return ncclInternalError; });
+
+  EXPECT_EQ(ncclLaunchRma(comm_.get(), plan_.get()), ncclInternalError);
+}
+
+// NCCLCHECKGOTO's ncclInProgress arm: non-blocking status survives the switch.
+TEST_F(RmaLaunchTest, PutDispatchInProgress_Propagates) {
+  args_.func = ncclFuncPutSignal;
+  AllHooks hooks(log_);
+  ScopedHook proxy(g_rmaProxyPutLaunch,
+                   [](ncclComm*, ncclKernelPlan*, hipStream_t) { return ncclInProgress; });
+
+  EXPECT_EQ(ncclLaunchRma(comm_.get(), plan_.get()), ncclInProgress);
+}
+
+// Same, through the WaitSignal arm.
+TEST_F(RmaLaunchTest, WaitSignalDispatchInProgress_Propagates) {
+  args_.func = ncclFuncWaitSignal;
+  AllHooks hooks(log_);
+  ScopedHook proxy(g_rmaProxyWaitLaunch,
+                   [](ncclComm*, ncclKernelPlan*, hipStream_t) { return ncclInProgress; });
+
+  EXPECT_EQ(ncclLaunchRma(comm_.get(), plan_.get()), ncclInProgress);
 }
 
 }  // namespace
