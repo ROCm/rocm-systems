@@ -1,0 +1,104 @@
+{
+  "benchmarkSuite": "smoke",
+  "configuration": {
+    "id": "plugins-none-v1",
+    "pluginProfile": "none",
+    "plugins": [],
+    "targetConfigSha256": {
+      "gfx950": "b60fd8845eba388602451ba82e8eb4407e9053858a3e202ce8a6f13b7a43f39c"
+    }
+  },
+  "environment": {
+    "cpu": "x86_64",
+    "hostname": "15bb761651a5",
+    "kernel": "6.17.0-1022-azure",
+    "platform": "Linux-6.17.0-1022-azure-x86_64-with-glibc2.39"
+  },
+  "finishedAt": "2026-09-10T04:05:24.710875Z",
+  "measurement": {
+    "samples": 3,
+    "timeoutSeconds": 60.0,
+    "warmups": 1
+  },
+  "provenance": {
+    "buildType": "Release",
+    "dirty": false,
+    "packages": {
+      "amd-torch-device-gfx1250": "2.14.0a0+rocm10.1.0a20260812",
+      "amd-torch-device-gfx950": "2.14.0a0+rocm10.1.0a20260812",
+      "rocm-sdk-devel": "10.1.0a20260812",
+      "rocm-sdk-device-gfx1250": "10.1.0a20260812",
+      "rocm-sdk-device-gfx950": "10.1.0a20260812",
+      "rocm-sdk-libraries": "10.1.0a20260812",
+      "torch": "2.14.0a0+rocm10.1.0a20260812",
+      "triton": "3.8.0+git675c5987.rocm10.1.0a20260812"
+    },
+    "pythonVersion": "3.12.14",
+    "rocjitsuCommitSha": "78576b91933f907320b449301f6d7822d39e79c4",
+    "rocjitsuCommitTimestamp": "2026-09-10T03:43:30Z",
+    "rocmSdkPath": "/__w/rocm-systems/rocm-systems/benchmark-venv/lib/python3.12/site-packages/_rocm_sdk_devel",
+    "rocmSdkVersion": "10.1.0a20260812",
+    "tensileLiteCommitSha": null,
+    "torchVersion": "2.14.0a0+rocm10.1.0a20260812",
+    "tritonCommitSha": null,
+    "tritonVersion": "3.8.0+git675c5987.rocm10.1.0a20260812"
+  },
+  "schemaVersion": 1,
+  "status": "completed",
+  "targets": [
+    "gfx950"
+  ],
+  "tests": [
+    {
+      "artifacts": {
+        "config": "cases/triton.rmsnorm_bf16/gfx950/config.json",
+        "pluginReports": {},
+        "stderr": "cases/triton.rmsnorm_bf16/gfx950/stderr.txt",
+        "stdout": "cases/triton.rmsnorm_bf16/gfx950/stdout.txt",
+        "workload": "cases/triton.rmsnorm_bf16/gfx950/workload.json"
+      },
+      "dataType": "bf16",
+      "durationSeconds": 0.210293403,
+      "error": null,
+      "execMode": "functional",
+      "exitCode": 0,
+      "logicalTestId": "triton.rmsnorm_bf16",
+      "name": "BF16 RMSNorm",
+      "numThreads": 1,
+      "operation": "RMSNorm",
+      "problem": {
+        "columns": 4096,
+        "dtype": "bf16",
+        "epsilon": 1e-05,
+        "inputPattern": "deterministic_nonzero_constant_by_phase",
+        "launch": {
+          "blockSize": 4096,
+          "grid": [
+            128
+          ],
+          "numStages": 1,
+          "numWarps": 8
+        },
+        "rows": 128
+      },
+      "status": "completed",
+      "suite": "Triton",
+      "target": "gfx950",
+      "testId": "gfx950:triton.rmsnorm_bf16",
+      "timedOut": false,
+      "timing": {
+        "maximum": 217645703,
+        "median": 210293403,
+        "minimum": 206806313,
+        "samples": [
+          206806313,
+          210293403,
+          217645703
+        ],
+        "unit": "ns"
+      }
+    }
+  ],
+  "timestamp": "2026-09-10T04:05:18.369390Z",
+  "wallTimeSeconds": 6.341504791000034
+}
