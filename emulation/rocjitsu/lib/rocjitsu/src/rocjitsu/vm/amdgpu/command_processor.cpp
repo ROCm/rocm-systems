@@ -1925,8 +1925,11 @@ void CommandProcessor::on_cu_pool_ready(ComputeUnitCore *cu) {
 
   std::lock_guard<std::recursive_mutex> lock(hw_queue_mutex_);
   const simdojo::Tick now = engine()->context(partition_id()).current_tick();
-  pooled_due_ticks_[cu] = now + 1;
-  arm_dispatch_continuation(now + 1);
+  // schedule_work() also runs when a new wave joins an already-active CU. Keep
+  // that CU's established due tick, just as the serial driver keeps its queued
+  // tick while executing_, rather than pulling resident work forward.
+  auto due = pooled_due_ticks_.try_emplace(cu, now + 1).first;
+  arm_dispatch_continuation(due->second);
 }
 
 bool CommandProcessor::step() {
