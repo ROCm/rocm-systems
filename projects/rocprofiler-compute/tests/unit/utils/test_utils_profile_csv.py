@@ -231,6 +231,14 @@ def test_group_id_assigner_reuses_ids_for_repeated_keys():
     assert assigner.apply({})["group_id"] == 2
 
 
+def test_group_id_assigner_honors_start():
+    assigner = csv_ops.GroupIdAssigner(["name"], "group_id", start=1)
+
+    assert assigner.apply({"name": "a"})["group_id"] == 1
+    assert assigner.apply({"name": "b"})["group_id"] == 2
+    assert assigner.apply({"name": "a"})["group_id"] == 1
+
+
 # =============================================================================
 # Compression
 #

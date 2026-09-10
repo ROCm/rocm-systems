@@ -355,7 +355,7 @@ def test_dispatch_1(binary_handler_analyze_rocprof_compute):
             "--path",
             workload_dir,
             "--dispatch",
-            "0",
+            "1",
         ])
         assert code == 0
 
@@ -371,7 +371,7 @@ def test_dispatch_2(binary_handler_analyze_rocprof_compute):
             "--path",
             workload_dir,
             "--dispatch",
-            "1",
+            "2",
         ])
         assert code == 0
 
@@ -387,7 +387,7 @@ def test_dispatch_3(binary_handler_analyze_rocprof_compute):
             "--path",
             workload_dir,
             "--dispatch",
-            "2",
+            "3",
         ])
         assert code == 0
 
@@ -403,8 +403,8 @@ def test_dispatch_4(binary_handler_analyze_rocprof_compute):
             "--path",
             workload_dir,
             "--dispatch",
-            "1",
-            "4",
+            "2",
+            "5",
         ])
         assert code == 1
 
@@ -420,8 +420,8 @@ def test_dispatch_5(binary_handler_analyze_rocprof_compute):
             "--path",
             workload_dir,
             "--dispatch",
-            "5",
             "6",
+            "7",
         ])
         assert code == 1
 
@@ -870,7 +870,7 @@ def test_iteration_multiplexing(binary_handler_analyze_rocprof_compute):
     code = binary_handler_analyze_rocprof_compute([
         "analyze",
         "--dispatch",
-        "0",
+        "1",
         "--path",
         workload_dir,
     ])
