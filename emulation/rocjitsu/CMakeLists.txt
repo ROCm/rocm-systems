@@ -56,18 +56,14 @@ if(
     AND CMAKE_CXX_COMPILER_VERSION VERSION_GREATER_EQUAL "14"
 )
     add_compile_options(-Wno-uninitialized)
+    if(CMAKE_SYSTEM_PROCESSOR MATCHES "ppc64")
+        add_compile_options(-Wno-maybe-uninitialized -Wno-stringop-overflow)
+    endif()
 endif()
 
 # HSA/KFD headers (local copies from rocr-runtime).
 set(HSA_INCLUDE_DIR
     "${PROJECT_SOURCE_DIR}/lib/rocjitsu/external_headers/hsa_headers"
-)
-
-# DRM/amdgpu UAPI headers (vendored kernel ABI, MIT-licensed). Lets the
-# interposer service the amdgpu DRM ioctl surface using the real kernel structs
-# instead of hand-mirrored copies, without depending on libdrm library types.
-set(DRM_INCLUDE_DIR
-    "${PROJECT_SOURCE_DIR}/lib/rocjitsu/external_headers/drm_headers/linux/uapi/drm"
 )
 
 include(rj_log)
@@ -105,6 +101,11 @@ option(
     OFF
 )
 option(RJ_INSTALL_TESTS "Install rocjitsu test binaries" OFF)
+option(
+    ROCJITSU_ENABLE_VFIO
+    "Build the vfio-user front end that serves rocjitsu as a PCIe device to a VMM"
+    OFF
+)
 option(
     LTO
     "Enable link-time optimization (IPO) for Release / RelWithDebInfo"
@@ -344,6 +345,16 @@ include(rj_flatbuffers)
 set(ROCJITSU_INCLUDE_DIR ${PROJECT_SOURCE_DIR}/lib/rocjitsu/include)
 set(ROCJITSU_SRC_DIR ${PROJECT_SOURCE_DIR}/lib/rocjitsu/src)
 
+if(ROCJITSU_ENABLE_VFIO)
+    if(NOT CMAKE_SYSTEM_NAME STREQUAL "Linux")
+        message(
+            FATAL_ERROR
+            "ROCJITSU_ENABLE_VFIO=ON is Linux-only: the vfio-user protocol reuses the Linux VFIO uapi definitions and the transport relies on AF_UNIX file-descriptor passing."
+        )
+    endif()
+    include(rj_libvfio_user)
+endif()
+
 # Libraries
 add_subdirectory(lib/util)
 add_subdirectory(lib/simdojo)
@@ -352,6 +363,10 @@ add_subdirectory(lib/rocjitsu/src/rocjitsu/vm/plugins)
 
 # Main shared library - assembles all object libraries.
 add_library(rocjitsu_shared SHARED)
+target_sources(
+    rocjitsu_shared
+    PRIVATE $<TARGET_OBJECTS:rocjitsu_version_objects>
+)
 set_target_properties(rocjitsu_shared PROPERTIES OUTPUT_NAME rocjitsu)
 target_link_libraries(
     rocjitsu_shared
@@ -371,6 +386,7 @@ target_link_libraries(
         rocjitsu_vm_risc_v
         rocjitsu_config
         rocjitsu_dbt_config
+        rocjitsu_drm_headers
         util
         flatbuffers
         Threads::Threads
@@ -387,7 +403,6 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
         rocjitsu_shared
         PRIVATE ${ROCJITSU_SRC_DIR}/rocjitsu/kmd/linux/interposer.cpp
     )
-    target_include_directories(rocjitsu_shared PRIVATE ${DRM_INCLUDE_DIR})
     target_compile_definitions(rocjitsu_shared PRIVATE _GNU_SOURCE)
     target_link_libraries(rocjitsu_shared PRIVATE dl)
 endif()
@@ -400,12 +415,12 @@ add_dependencies(rocjitsu_shared flatbuffers_schemas)
 
 # Developer and test workflow tools.
 add_subdirectory(tools)
+add_subdirectory(tools/rj-ip-discovery)
 add_subdirectory(fuzz/decode)
 
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     add_subdirectory(tools/rocjitsu)
 endif()
-# Tests and scaling tools.
 if(BUILD_TESTING)
     add_subdirectory(tests)
 endif()

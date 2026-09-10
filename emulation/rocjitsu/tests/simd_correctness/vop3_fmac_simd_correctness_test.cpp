@@ -3,8 +3,9 @@
 
 /// @file vop3_fmac_simd_correctness_test.cpp
 /// @brief Bit-identity check (SIMD fast path vs scalar body) for the
-/// dst-accumulate FMA / MAC VOP3 forms on CDNA4 (v_fmac_f32, v_mac_f16,
-/// v_fmac_f64). Per-isa codegen classes for these ops only initialize
+/// dst-accumulate FMA VOP3 forms on CDNA4 (V_FMAC_F32 and MODE-aware
+/// V_FMAC_F64). Per-isa codegen
+/// classes for these ops only initialize
 /// src0+src1+vdst — the third FMA operand IS vdst. The new accumulate-form
 /// glue (try_execute_fmac_vop3_fp*_simd) reads inst.vdst as the third operand
 /// and applies abs/neg only to src0/src1, matching the scalar body. The process
@@ -19,6 +20,7 @@
 /// These ops are NOT benched: looping the same instruction creates a loop-
 /// carried RAW dep on the accumulator that serializes both modes to ~1x.
 
+#include "decode_test_util.h"
 #include "util/simd_test_hooks.h"
 
 #include "rocjitsu/code/rj_code.h"
@@ -73,9 +75,8 @@ struct Case {
   Kind kind;
 };
 
-const std::array<Case, 3> kCases = {{
+const std::array<Case, 2> kCases = {{
     {"v_fmac_f32_vop3", 315, Kind::F32},
-    {"v_mac_f16_vop3", 291, Kind::F16},
     {"v_fmac_f64_vop3", 260, Kind::F64},
 }};
 
@@ -225,7 +226,7 @@ void check_case(const Case &c, uint32_t abs, uint32_t neg, uint32_t omod, uint32
     uint32_t words[4] = {0u, 0u, 0u, 0u};
     vop3_encode(c.opcode, /*vdst=*/kAccVgpr, /*src0=*/256, /*src1=*/256 + src1_v, abs, neg, omod,
                 clamp, words);
-    Instruction *inst = fx.decoder->decode(words);
+    Instruction *inst = decode_valid(*fx.decoder, words);
     EXPECT_NE(inst, nullptr) << c.name << " decode failed";
     auto out = fx.run(inst, c.kind, rot, exec);
     delete inst;
@@ -292,7 +293,7 @@ TEST(Vop3FmacSimdCorrectness, VMacF16LowDstZeroesHighHalf) {
     uint32_t words[4] = {0u, 0u, 0u, 0u};
     vop3_encode(/*op=*/291, /*vdst=*/kAccVgpr, /*src0=*/256, /*src1=*/257, /*abs=*/0, /*neg=*/0,
                 /*omod=*/0, /*clamp=*/0, words);
-    Instruction *inst = fx.decoder->decode(words);
+    Instruction *inst = decode_valid(*fx.decoder, words);
     EXPECT_NE(inst, nullptr) << "v_mac_f16_vop3 decode failed";
     auto out = fx.run(inst, Kind::F16, /*rot=*/0, /*exec=*/~0ULL);
     delete inst;

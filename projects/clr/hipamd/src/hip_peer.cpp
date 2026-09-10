@@ -173,6 +173,15 @@ hipError_t hipDeviceEnablePeerAccess(int peerDeviceId, unsigned int flags) {
   HIP_RETURN(hip::getCurrentDevice()->EnablePeerAccess(peerDeviceId));
 }
 
+// Serialize copyStream against all pending work on peer device's blocking streams.
+static void waitForPeerDevices(hip::Device* peerDevice, hip::Stream* copyStream) {
+  if (peerDevice == nullptr || peerDevice == copyStream->GetDevice()) {
+    // Same device as the copy stream, no need to wait on peer device's streams.
+    return;
+  }
+  peerDevice->WaitActiveStreams(copyStream);
+}
+
 hipError_t hipMemcpyPeer(void* dst, int dstDevice, const void* src, int srcDevice,
                          size_t sizeBytes) {
   HIP_INIT_API(hipMemcpyPeer, dst, dstDevice, src, srcDevice, sizeBytes);
@@ -182,8 +191,14 @@ hipError_t hipMemcpyPeer(void* dst, int dstDevice, const void* src, int srcDevic
     HIP_RETURN(hipErrorInvalidDevice);
   }
 
+  // Unlike hipMemcpyPeerAsync, hipMemcpyPeer is serialized with respect to all the pending
+  // work on the current device, srcDevice and dstDevice.
+  hip::Stream* copyStream = hip::getNullStream();
+  waitForPeerDevices(g_devices[srcDevice], copyStream);
+  waitForPeerDevices(g_devices[dstDevice], copyStream);
+
   HIP_RETURN(
-      ihipMemcpy(dst, src, sizeBytes, hipMemcpyDeviceToDevice, *hip::getNullStream(), true, false));
+      ihipMemcpy(dst, src, sizeBytes, hipMemcpyDeviceToDevice, *copyStream, true, false));
 }
 
 hipError_t hipMemcpyPeerAsync(void* dst, int dstDevice, const void* src, int srcDevice,

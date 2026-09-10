@@ -354,6 +354,11 @@ class Signal {
   virtual void StoreRelaxed(hsa_signal_value_t value) = 0;
   virtual void StoreRelease(hsa_signal_value_t value) = 0;
 
+  /// @brief Store with release semantics and notify the driver even when no
+  /// waiter is registered. Use on paths that must break a wait which may be
+  /// about to start; SetEvent() alone can skip the notification.
+  virtual void StoreReleaseAndNotify(hsa_signal_value_t value) { StoreRelease(value); }
+
   virtual hsa_signal_value_t WaitRelaxed(hsa_signal_condition_t condition,
                                          hsa_signal_value_t compare_value,
                                          uint64_t timeout,

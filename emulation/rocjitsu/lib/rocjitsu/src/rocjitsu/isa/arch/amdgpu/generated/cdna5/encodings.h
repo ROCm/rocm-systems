@@ -9,7 +9,9 @@
 
 #include "rocjitsu/isa/arch/amdgpu/cdna5/isa.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/machine_insts.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/gfx12_cache_flags.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/instruction_encoding.h"
+#include "rocjitsu/isa/decode_result.h"
 #include "rocjitsu/isa/instruction.h"
 #include <array>
 #include <cstdint>
@@ -378,8 +380,23 @@ enum class LiteralSupport : uint8_t {
 
 class Sop1 : public IsaInstruction<Isa> {
 public:
-  Sop1(std::string_view mnemonic, const Sop1MachineInst *inst, ExecuteFn exec_fn,
-       LiteralSupport literal_support = LiteralSupport::Both, int num_encoded_sources = 1);
+  Sop1(std::string_view mnemonic, const Sop1MachineInst *inst, ExecuteFn exec_fn);
+  bool has_encoded_literal64() const;
+  bool has_encoded_literal32() const;
+  static Result validate_encoding([[maybe_unused]] std::string_view mnemonic,
+                                  const Sop1MachineInst *inst,
+                                  const util::DiagnosticEmitter &emit_error,
+                                  LiteralSupport literal_support = LiteralSupport::Both,
+                                  int num_encoded_sources = 1) {
+    const auto &inst_ = *inst;
+    if (!supports_literal(literal_support, LiteralSupport::Literal32) &&
+        ((num_encoded_sources > 0 && inst_.ssrc0 == 255))) [[unlikely]]
+      return emit_error.emit() << mnemonic << " does not support 32-bit literals";
+    if (!supports_literal(literal_support, LiteralSupport::Literal64) &&
+        ((num_encoded_sources > 0 && inst_.ssrc0 == 254))) [[unlikely]]
+      return emit_error.emit() << mnemonic << " does not support 64-bit literals";
+    return Result::success();
+  }
   bool default_encoding();
   bool has_lit_0();
   bool has_lit64_0();
@@ -390,8 +407,25 @@ public:
 
 class Sopc : public IsaInstruction<Isa> {
 public:
-  Sopc(std::string_view mnemonic, const SopcMachineInst *inst, ExecuteFn exec_fn,
-       LiteralSupport literal_support = LiteralSupport::Both, int num_encoded_sources = 2);
+  Sopc(std::string_view mnemonic, const SopcMachineInst *inst, ExecuteFn exec_fn);
+  bool has_encoded_literal64() const;
+  bool has_encoded_literal32() const;
+  static Result validate_encoding([[maybe_unused]] std::string_view mnemonic,
+                                  const SopcMachineInst *inst,
+                                  const util::DiagnosticEmitter &emit_error,
+                                  LiteralSupport literal_support = LiteralSupport::Both,
+                                  int num_encoded_sources = 2) {
+    const auto &inst_ = *inst;
+    if (!supports_literal(literal_support, LiteralSupport::Literal32) &&
+        ((num_encoded_sources > 0 && inst_.ssrc0 == 255) ||
+         (num_encoded_sources > 1 && inst_.ssrc1 == 255))) [[unlikely]]
+      return emit_error.emit() << mnemonic << " does not support 32-bit literals";
+    if (!supports_literal(literal_support, LiteralSupport::Literal64) &&
+        ((num_encoded_sources > 0 && inst_.ssrc0 == 254) ||
+         (num_encoded_sources > 1 && inst_.ssrc1 == 254))) [[unlikely]]
+      return emit_error.emit() << mnemonic << " does not support 64-bit literals";
+    return Result::success();
+  }
   bool default_encoding();
   bool has_lit_0();
   bool has_lit_1();
@@ -425,8 +459,25 @@ public:
 
 class Sop2 : public IsaInstruction<Isa> {
 public:
-  Sop2(std::string_view mnemonic, const Sop2MachineInst *inst, ExecuteFn exec_fn,
-       LiteralSupport literal_support = LiteralSupport::Both, int num_encoded_sources = 2);
+  Sop2(std::string_view mnemonic, const Sop2MachineInst *inst, ExecuteFn exec_fn);
+  bool has_encoded_literal64() const;
+  bool has_encoded_literal32() const;
+  static Result validate_encoding([[maybe_unused]] std::string_view mnemonic,
+                                  const Sop2MachineInst *inst,
+                                  const util::DiagnosticEmitter &emit_error,
+                                  LiteralSupport literal_support = LiteralSupport::Both,
+                                  int num_encoded_sources = 2) {
+    const auto &inst_ = *inst;
+    if (!supports_literal(literal_support, LiteralSupport::Literal32) &&
+        ((num_encoded_sources > 0 && inst_.ssrc0 == 255) ||
+         (num_encoded_sources > 1 && inst_.ssrc1 == 255))) [[unlikely]]
+      return emit_error.emit() << mnemonic << " does not support 32-bit literals";
+    if (!supports_literal(literal_support, LiteralSupport::Literal64) &&
+        ((num_encoded_sources > 0 && inst_.ssrc0 == 254) ||
+         (num_encoded_sources > 1 && inst_.ssrc1 == 254))) [[unlikely]]
+      return emit_error.emit() << mnemonic << " does not support 64-bit literals";
+    return Result::success();
+  }
   bool default_encoding();
   bool has_lit_0();
   bool has_lit_1();
@@ -444,16 +495,48 @@ public:
 class Smem : public IsaInstruction<Isa> {
 public:
   Smem(std::string_view mnemonic, const SmemMachineInst *inst, ExecuteFn exec_fn);
-  void build_modifiers(std::string &out) const override;
+  void build_modifiers(std::string &out) const override {
+    auto *inst = &inst_;
+    (void)inst;
+    amdgpu::append_gfx12_cache_policy(out, inst->th, inst->scope,
+                                      amdgpu::Gfx12TemporalHintKind::Load);
+    if (inst->nv)
+      out += " nv";
+  }
   using OpEncoding = SmemMachineInst;
   const OpEncoding inst_;
 };
 
 class Vop1 : public IsaInstruction<Isa> {
 public:
-  Vop1(std::string_view mnemonic, const Vop1MachineInst *inst, ExecuteFn exec_fn,
-       LiteralSupport literal_support = LiteralSupport::Both, int num_encoded_sources = 1);
-  void build_modifiers(std::string &out) const override;
+  Vop1(std::string_view mnemonic, const Vop1MachineInst *inst, ExecuteFn exec_fn);
+  bool has_encoded_dpp() const;
+  bool has_encoded_dpp8() const;
+  void append_mnemonic(std::string &out) const override;
+  bool has_encoded_literal64() const;
+  bool has_encoded_literal32() const;
+  static Result validate_encoding([[maybe_unused]] std::string_view mnemonic,
+                                  const Vop1MachineInst *inst,
+                                  const util::DiagnosticEmitter &emit_error,
+                                  LiteralSupport literal_support = LiteralSupport::Both,
+                                  int num_encoded_sources = 1) {
+    const auto &inst_ = *inst;
+    if (!supports_literal(literal_support, LiteralSupport::Literal32) &&
+        ((num_encoded_sources > 0 && inst_.src0 == 255))) [[unlikely]]
+      return emit_error.emit() << mnemonic << " does not support 32-bit literals";
+    if (!supports_literal(literal_support, LiteralSupport::Literal64) &&
+        ((num_encoded_sources > 0 && inst_.src0 == 254))) [[unlikely]]
+      return emit_error.emit() << mnemonic << " does not support 64-bit literals";
+    return Result::success();
+  }
+  void build_modifiers(std::string &out) const override {
+    if (has_encoded_dpp())
+      amdgpu::dpp::append_dpp16_disassembly(out, dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
+                                            dpp_bound_ctrl_, dpp_fi_, true,
+                                            amdgpu::dpp::DppCtrlDialect::Gfx10Plus);
+    if (has_encoded_dpp8())
+      amdgpu::dpp::append_dpp8_disassembly(out, dpp8_lane_sel_, dpp_fi_);
+  }
   void implicit_uses(RegisterSet &uses) const override;
   void implicit_use_operands(std::vector<const ::rocjitsu::Operand *> &operands) const override;
   bool default_encoding();
@@ -470,8 +553,6 @@ public:
   uint32_t dpp_bound_ctrl_ = 0;
   uint32_t dpp_fi_ = 1;
   uint32_t dpp8_lane_sel_ = 0;
-  std::unique_ptr<StagedOperand> dpp_src0_;
-  std::unique_ptr<StagedOperand> dpp_src1_;
   uint32_t sdwa_src0_sel_ = amdgpu::sdwa::DWORD;
   bool sdwa_src0_sext_ = false;
   bool sdwa_src0_neg_ = false;
@@ -487,9 +568,35 @@ public:
 
 class Vopc : public IsaInstruction<Isa> {
 public:
-  Vopc(std::string_view mnemonic, const VopcMachineInst *inst, ExecuteFn exec_fn,
-       LiteralSupport literal_support = LiteralSupport::Both, int num_encoded_sources = 1);
-  void build_modifiers(std::string &out) const override;
+  Vopc(std::string_view mnemonic, const VopcMachineInst *inst, ExecuteFn exec_fn);
+  bool supports_dpp_opcode() const;
+  bool has_encoded_dpp() const;
+  bool has_encoded_dpp8() const;
+  void append_mnemonic(std::string &out) const override;
+  bool has_encoded_literal64() const;
+  bool has_encoded_literal32() const;
+  static Result validate_encoding([[maybe_unused]] std::string_view mnemonic,
+                                  const VopcMachineInst *inst,
+                                  const util::DiagnosticEmitter &emit_error,
+                                  LiteralSupport literal_support = LiteralSupport::Both,
+                                  int num_encoded_sources = 1) {
+    const auto &inst_ = *inst;
+    if (!supports_literal(literal_support, LiteralSupport::Literal32) &&
+        ((num_encoded_sources > 0 && inst_.src0 == 255))) [[unlikely]]
+      return emit_error.emit() << mnemonic << " does not support 32-bit literals";
+    if (!supports_literal(literal_support, LiteralSupport::Literal64) &&
+        ((num_encoded_sources > 0 && inst_.src0 == 254))) [[unlikely]]
+      return emit_error.emit() << mnemonic << " does not support 64-bit literals";
+    return Result::success();
+  }
+  void build_modifiers(std::string &out) const override {
+    if (has_encoded_dpp())
+      amdgpu::dpp::append_dpp16_disassembly(out, dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
+                                            dpp_bound_ctrl_, dpp_fi_, true,
+                                            amdgpu::dpp::DppCtrlDialect::Gfx10Plus);
+    if (has_encoded_dpp8())
+      amdgpu::dpp::append_dpp8_disassembly(out, dpp8_lane_sel_, dpp_fi_);
+  }
   bool default_encoding();
   bool has_lit();
   bool has_lit64();
@@ -504,8 +611,6 @@ public:
   uint32_t dpp_bound_ctrl_ = 0;
   uint32_t dpp_fi_ = 1;
   uint32_t dpp8_lane_sel_ = 0;
-  std::unique_ptr<StagedOperand> dpp_src0_;
-  std::unique_ptr<StagedOperand> dpp_src1_;
   uint32_t sdwa_src0_sel_ = amdgpu::sdwa::DWORD;
   bool sdwa_src0_sext_ = false;
   bool sdwa_src0_neg_ = false;
@@ -520,9 +625,34 @@ public:
 
 class Vop2 : public IsaInstruction<Isa> {
 public:
-  Vop2(std::string_view mnemonic, const Vop2MachineInst *inst, ExecuteFn exec_fn,
-       LiteralSupport literal_support = LiteralSupport::Both, int num_encoded_sources = 1);
-  void build_modifiers(std::string &out) const override;
+  Vop2(std::string_view mnemonic, const Vop2MachineInst *inst, ExecuteFn exec_fn);
+  bool has_encoded_dpp() const;
+  bool has_encoded_dpp8() const;
+  void append_mnemonic(std::string &out) const override;
+  bool has_encoded_literal64() const;
+  bool has_encoded_literal32() const;
+  static Result validate_encoding([[maybe_unused]] std::string_view mnemonic,
+                                  const Vop2MachineInst *inst,
+                                  const util::DiagnosticEmitter &emit_error,
+                                  LiteralSupport literal_support = LiteralSupport::Both,
+                                  int num_encoded_sources = 1) {
+    const auto &inst_ = *inst;
+    if (!supports_literal(literal_support, LiteralSupport::Literal32) &&
+        ((num_encoded_sources > 0 && inst_.src0 == 255))) [[unlikely]]
+      return emit_error.emit() << mnemonic << " does not support 32-bit literals";
+    if (!supports_literal(literal_support, LiteralSupport::Literal64) &&
+        ((num_encoded_sources > 0 && inst_.src0 == 254))) [[unlikely]]
+      return emit_error.emit() << mnemonic << " does not support 64-bit literals";
+    return Result::success();
+  }
+  void build_modifiers(std::string &out) const override {
+    if (has_encoded_dpp())
+      amdgpu::dpp::append_dpp16_disassembly(out, dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
+                                            dpp_bound_ctrl_, dpp_fi_, true,
+                                            amdgpu::dpp::DppCtrlDialect::Gfx10Plus);
+    if (has_encoded_dpp8())
+      amdgpu::dpp::append_dpp8_disassembly(out, dpp8_lane_sel_, dpp_fi_);
+  }
   void implicit_uses(RegisterSet &uses) const override;
   void implicit_use_operands(std::vector<const ::rocjitsu::Operand *> &operands) const override;
   bool default_encoding();
@@ -543,8 +673,6 @@ public:
   uint32_t dpp_bound_ctrl_ = 0;
   uint32_t dpp_fi_ = 1;
   uint32_t dpp8_lane_sel_ = 0;
-  std::unique_ptr<StagedOperand> dpp_src0_;
-  std::unique_ptr<StagedOperand> dpp_src1_;
   uint32_t sdwa_src0_sel_ = amdgpu::sdwa::DWORD;
   bool sdwa_src0_sext_ = false;
   bool sdwa_src0_neg_ = false;
@@ -560,11 +688,70 @@ public:
 
 class Vop3 : public IsaInstruction<Isa> {
 public:
-  Vop3(std::string_view mnemonic, const Vop3MachineInst *inst, ExecuteFn exec_fn,
-       LiteralSupport literal_support = LiteralSupport::Both, int num_encoded_sources = 3);
-  void build_modifiers(std::string &out) const override;
+  Vop3(std::string_view mnemonic, const Vop3MachineInst *inst, ExecuteFn exec_fn);
+  bool has_encoded_dpp() const;
+  bool has_encoded_dpp8() const;
+  void append_mnemonic(std::string &out) const override;
+  bool displays_vop3_op_sel() const;
+  uint32_t vop3_encoded_source_count() const;
+  int32_t vop3_encoded_source_index(uint8_t operand_index) const;
+  bool has_encoded_literal32() const;
+  static Result validate_encoding([[maybe_unused]] std::string_view mnemonic,
+                                  const Vop3MachineInst *inst,
+                                  const util::DiagnosticEmitter &emit_error,
+                                  LiteralSupport literal_support = LiteralSupport::Both,
+                                  int num_encoded_sources = 3) {
+    const auto &inst_ = *inst;
+    if (!supports_literal(literal_support, LiteralSupport::Literal32) &&
+        ((num_encoded_sources > 0 && inst_.src0 == 255) ||
+         (num_encoded_sources > 1 && inst_.src1 == 255) ||
+         (num_encoded_sources > 2 && inst_.src2 == 255))) [[unlikely]]
+      return emit_error.emit() << mnemonic << " does not support 32-bit literals";
+    if (!supports_literal(literal_support, LiteralSupport::Literal64) &&
+        ((num_encoded_sources > 0 && inst_.src0 == 254) ||
+         (num_encoded_sources > 1 && inst_.src1 == 254) ||
+         (num_encoded_sources > 2 && inst_.src2 == 254))) [[unlikely]]
+      return emit_error.emit() << mnemonic << " does not support 64-bit literals";
+    if ((inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0)) &&
+        (inst_.src0 == 255 || inst_.src1 == 255 || inst_.src2 == 255)) [[unlikely]]
+      return emit_error.emit() << "DPP and literal operands cannot be combined";
+    return Result::success();
+  }
+  void build_modifiers(std::string &out) const override {
+    auto *inst = &inst_;
+    (void)inst;
+    amdgpu::vop::append_vop3_disassembly(out, inst->opsel, inst->clamp, inst->omod,
+                                         vop3_encoded_source_count(), displays_vop3_op_sel());
+    if (has_encoded_dpp())
+      amdgpu::dpp::append_dpp16_disassembly(out, dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
+                                            dpp_bound_ctrl_, dpp_fi_, true,
+                                            amdgpu::dpp::DppCtrlDialect::Gfx10Plus);
+    if (has_encoded_dpp8())
+      amdgpu::dpp::append_dpp8_disassembly(out, dpp8_lane_sel_, dpp_fi_);
+  }
   void implicit_uses(RegisterSet &uses) const override;
   void implicit_use_operands(std::vector<const ::rocjitsu::Operand *> &operands) const override;
+  void append_src_operand(std::string &out, uint8_t operand_index) const override {
+    const ::rocjitsu::Operand *operand = src_operands_[operand_index];
+    const int32_t modifier_index = vop3_encoded_source_index(operand_index);
+    const auto reg = operand->to_register_ref();
+    const bool half_width = modifier_index >= 0 && true && operand->size_bits() == 16 && reg &&
+                            reg->cls == RegClass::VGPR;
+    if (modifier_index < 0) {
+      out += operand->name();
+      return;
+    }
+    amdgpu::vop::append_vop3_operand(out, operand->name(), (inst_.abs >> modifier_index) & 1,
+                                     (inst_.neg >> modifier_index) & 1, half_width,
+                                     (inst_.opsel >> modifier_index) & 1);
+  }
+  void append_dst_operand(std::string &out, uint8_t operand_index) const override {
+    const ::rocjitsu::Operand *operand = dst_operands_[operand_index];
+    const auto reg = operand->to_register_ref();
+    const bool half_width = true && operand->size_bits() == 16 && reg && reg->cls == RegClass::VGPR;
+    amdgpu::vop::append_vop3_operand(out, operand->name(), false, false, half_width,
+                                     (inst_.opsel >> 3) & 1);
+  }
   bool has_lit_0();
   bool has_lit_1();
   bool has_lit_0_and_has_lit_1();
@@ -583,17 +770,65 @@ public:
   uint32_t dpp_bound_ctrl_ = 0;
   uint32_t dpp_fi_ = 1;
   uint32_t dpp8_lane_sel_ = 0;
-  std::unique_ptr<StagedOperand> dpp_src0_;
-  std::unique_ptr<StagedOperand> dpp_src1_;
 };
 
 class Vop3p : public IsaInstruction<Isa> {
 public:
   enum class ExtensionDecodePolicy { Decode, Skip };
   Vop3p(std::string_view mnemonic, const Vop3pMachineInst *inst, ExecuteFn exec_fn,
-        LiteralSupport literal_support = LiteralSupport::Both, int num_encoded_sources = 3,
         ExtensionDecodePolicy extension_policy = ExtensionDecodePolicy::Decode);
-  void build_modifiers(std::string &out) const override;
+  bool supports_dpp_opcode() const;
+  bool has_encoded_dpp() const;
+  bool has_encoded_dpp8() const;
+  void append_mnemonic(std::string &out) const override;
+  uint32_t vop3p_encoded_source_count() const;
+  bool has_encoded_literal32() const;
+  static Result
+  validate_encoding([[maybe_unused]] std::string_view mnemonic, const Vop3pMachineInst *inst,
+                    const util::DiagnosticEmitter &emit_error,
+                    LiteralSupport literal_support = LiteralSupport::Both,
+                    int num_encoded_sources = 3,
+                    ExtensionDecodePolicy extension_policy = ExtensionDecodePolicy::Decode) {
+    const auto &inst_ = *inst;
+    if (extension_policy == ExtensionDecodePolicy::Decode) {
+      if ((num_encoded_sources > 0 && inst_.src0 == 254) ||
+          (num_encoded_sources > 1 && inst_.src1 == 254) ||
+          (num_encoded_sources > 2 && inst_.src2 == 254)) [[unlikely]]
+        return emit_error.emit() << "Vop3p does not support Literal64";
+      if (!supports_literal(literal_support, LiteralSupport::Literal32) &&
+          ((num_encoded_sources > 0 && inst_.src0 == 255) ||
+           (num_encoded_sources > 1 && inst_.src1 == 255) ||
+           (num_encoded_sources > 2 && inst_.src2 == 255))) [[unlikely]]
+        return emit_error.emit() << mnemonic << " does not support 32-bit literals";
+      if (!supports_literal(literal_support, LiteralSupport::Literal64) &&
+          ((num_encoded_sources > 0 && inst_.src0 == 254) ||
+           (num_encoded_sources > 1 && inst_.src1 == 254) ||
+           (num_encoded_sources > 2 && inst_.src2 == 254))) [[unlikely]]
+        return emit_error.emit() << mnemonic << " does not support 64-bit literals";
+      if ((inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0)) &&
+          (inst_.src0 == 255 || inst_.src1 == 255 || inst_.src2 == 255)) [[unlikely]]
+        return emit_error.emit() << "DPP and literal operands cannot be combined";
+    }
+    return Result::success();
+  }
+  void build_modifiers(std::string &out) const override {
+    auto *inst = &inst_;
+    (void)inst;
+    amdgpu::vop::append_vop3p_disassembly(
+        out, inst->opsel, inst->opsel_hi | (inst->opsel_hi_2 << 2), false ? 0 : inst->neg,
+        false ? 0 : inst->neg_hi, inst->clamp, vop3p_encoded_source_count(),
+        inst_.op <= 17 || (inst_.op >= 20 && inst_.op <= 21) ||
+            (inst_.op >= 27 && inst_.op <= 31) || inst_.op == 35 ||
+            (inst_.op >= 40 && inst_.op <= 50) || (inst_.op >= 54 && inst_.op <= 57) ||
+            (inst_.op >= 59 && inst_.op <= 60) || (inst_.op >= 75 && inst_.op <= 79) ||
+            inst_.op == 126);
+    if (has_encoded_dpp())
+      amdgpu::dpp::append_dpp16_disassembly(out, dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
+                                            dpp_bound_ctrl_, dpp_fi_, true,
+                                            amdgpu::dpp::DppCtrlDialect::Gfx10Plus);
+    if (has_encoded_dpp8())
+      amdgpu::dpp::append_dpp8_disassembly(out, dpp8_lane_sel_, dpp_fi_);
+  }
   void implicit_uses(RegisterSet &uses) const override;
   void implicit_use_operands(std::vector<const ::rocjitsu::Operand *> &operands) const override;
   bool has_lit_0();
@@ -614,8 +849,6 @@ public:
   uint32_t dpp_bound_ctrl_ = 0;
   uint32_t dpp_fi_ = 1;
   uint32_t dpp8_lane_sel_ = 0;
-  std::unique_ptr<StagedOperand> dpp_src0_;
-  std::unique_ptr<StagedOperand> dpp_src1_;
 };
 
 class Vds : public IsaInstruction<Isa> {
@@ -628,7 +861,72 @@ public:
 class Vbuffer : public IsaInstruction<Isa> {
 public:
   Vbuffer(std::string_view mnemonic, const VbufferMachineInst *inst, ExecuteFn exec_fn);
-  void build_modifiers(std::string &out) const override;
+  void build_modifiers(std::string &out) const override {
+    auto *inst = &inst_;
+    (void)inst;
+    if (inst->offen)
+      out += " offen";
+    if (inst->idxen)
+      out += " idxen";
+    if (inst->ioffset)
+      out += " offset:" + std::to_string(inst->ioffset);
+    amdgpu::Gfx12TemporalHintKind hint_kind = amdgpu::Gfx12TemporalHintKind::Load;
+    switch (inst->op) {
+    case 51:
+    case 52:
+    case 53:
+    case 54:
+    case 55:
+    case 56:
+    case 57:
+    case 58:
+    case 59:
+    case 60:
+    case 61:
+    case 62:
+    case 63:
+    case 64:
+    case 65:
+    case 66:
+    case 67:
+    case 68:
+    case 69:
+    case 70:
+    case 71:
+    case 72:
+    case 73:
+    case 74:
+    case 75:
+    case 76:
+    case 77:
+    case 80:
+    case 81:
+    case 82:
+    case 85:
+    case 86:
+    case 89:
+    case 90:
+    case 91:
+    case 92:
+      hint_kind = amdgpu::Gfx12TemporalHintKind::Atomic;
+      break;
+    case 24:
+    case 25:
+    case 26:
+    case 27:
+    case 28:
+    case 29:
+    case 36:
+    case 37:
+      hint_kind = amdgpu::Gfx12TemporalHintKind::Store;
+      break;
+    default:
+      break;
+    }
+    amdgpu::append_gfx12_cache_policy(out, inst->th, inst->scope, hint_kind);
+    if (inst->nv)
+      out += " nv";
+  }
   using OpEncoding = VbufferMachineInst;
   const OpEncoding inst_;
 };
@@ -636,6 +934,21 @@ public:
 class Vimage : public IsaInstruction<Isa> {
 public:
   Vimage(std::string_view mnemonic, const VimageMachineInst *inst, ExecuteFn exec_fn);
+  void build_modifiers(std::string &out) const override {
+    auto *inst = &inst_;
+    (void)inst;
+    amdgpu::Gfx12TemporalHintKind hint_kind = amdgpu::Gfx12TemporalHintKind::Load;
+    switch (inst->op) {
+    case 197:
+      hint_kind = amdgpu::Gfx12TemporalHintKind::Store;
+      break;
+    default:
+      break;
+    }
+    amdgpu::append_gfx12_cache_policy(out, inst->th, inst->scope, hint_kind);
+    if (inst->nv)
+      out += " nv";
+  }
   using OpEncoding = VimageMachineInst;
   const OpEncoding inst_;
 };
@@ -643,7 +956,66 @@ public:
 class Vflat : public IsaInstruction<Isa> {
 public:
   Vflat(std::string_view mnemonic, const VflatMachineInst *inst, ExecuteFn exec_fn);
-  void build_modifiers(std::string &out) const override;
+  void build_modifiers(std::string &out) const override {
+    auto *inst = &inst_;
+    (void)inst;
+    amdgpu::Gfx12TemporalHintKind hint_kind = amdgpu::Gfx12TemporalHintKind::Load;
+    switch (inst->op) {
+    case 51:
+    case 52:
+    case 53:
+    case 54:
+    case 55:
+    case 56:
+    case 57:
+    case 58:
+    case 59:
+    case 60:
+    case 61:
+    case 62:
+    case 63:
+    case 64:
+    case 65:
+    case 66:
+    case 67:
+    case 68:
+    case 69:
+    case 70:
+    case 71:
+    case 72:
+    case 73:
+    case 74:
+    case 75:
+    case 76:
+    case 77:
+    case 80:
+    case 81:
+    case 82:
+    case 85:
+    case 86:
+    case 89:
+    case 90:
+    case 91:
+    case 92:
+      hint_kind = amdgpu::Gfx12TemporalHintKind::Atomic;
+      break;
+    case 24:
+    case 25:
+    case 26:
+    case 27:
+    case 28:
+    case 29:
+    case 36:
+    case 37:
+      hint_kind = amdgpu::Gfx12TemporalHintKind::Store;
+      break;
+    default:
+      break;
+    }
+    amdgpu::append_gfx12_cache_policy(out, inst->th, inst->scope, hint_kind);
+    if (inst->nv)
+      out += " nv";
+  }
   using OpEncoding = VflatMachineInst;
   const OpEncoding inst_;
 };
@@ -651,7 +1023,29 @@ public:
 class Vscratch : public IsaInstruction<Isa> {
 public:
   Vscratch(std::string_view mnemonic, const VscratchMachineInst *inst, ExecuteFn exec_fn);
-  void build_modifiers(std::string &out) const override;
+  void build_modifiers(std::string &out) const override {
+    auto *inst = &inst_;
+    (void)inst;
+    amdgpu::Gfx12TemporalHintKind hint_kind = amdgpu::Gfx12TemporalHintKind::Load;
+    switch (inst->op) {
+    case 24:
+    case 25:
+    case 26:
+    case 27:
+    case 28:
+    case 29:
+    case 36:
+    case 37:
+    case 84:
+      hint_kind = amdgpu::Gfx12TemporalHintKind::Store;
+      break;
+    default:
+      break;
+    }
+    amdgpu::append_gfx12_cache_policy(out, inst->th, inst->scope, hint_kind);
+    if (inst->nv)
+      out += " nv";
+  }
   using OpEncoding = VscratchMachineInst;
   const OpEncoding inst_;
 };
@@ -659,18 +1053,141 @@ public:
 class Vglobal : public IsaInstruction<Isa> {
 public:
   Vglobal(std::string_view mnemonic, const VglobalMachineInst *inst, ExecuteFn exec_fn);
-  void build_modifiers(std::string &out) const override;
+  void build_modifiers(std::string &out) const override {
+    auto *inst = &inst_;
+    (void)inst;
+    amdgpu::Gfx12TemporalHintKind hint_kind = amdgpu::Gfx12TemporalHintKind::Load;
+    switch (inst->op) {
+    case 51:
+    case 52:
+    case 53:
+    case 54:
+    case 55:
+    case 56:
+    case 57:
+    case 58:
+    case 59:
+    case 60:
+    case 61:
+    case 62:
+    case 63:
+    case 64:
+    case 65:
+    case 66:
+    case 67:
+    case 68:
+    case 69:
+    case 70:
+    case 71:
+    case 72:
+    case 73:
+    case 74:
+    case 75:
+    case 76:
+    case 77:
+    case 80:
+    case 81:
+    case 82:
+    case 85:
+    case 86:
+    case 89:
+    case 90:
+    case 91:
+    case 92:
+      hint_kind = amdgpu::Gfx12TemporalHintKind::Atomic;
+      break;
+    case 24:
+    case 25:
+    case 26:
+    case 27:
+    case 28:
+    case 29:
+    case 36:
+    case 37:
+    case 41:
+    case 84:
+    case 99:
+    case 100:
+    case 101:
+    case 102:
+      hint_kind = amdgpu::Gfx12TemporalHintKind::Store;
+      break;
+    default:
+      break;
+    }
+    amdgpu::append_gfx12_cache_policy(out, inst->th, inst->scope, hint_kind);
+    if (inst->nv)
+      out += " nv";
+  }
   using OpEncoding = VglobalMachineInst;
   const OpEncoding inst_;
 };
 
 class Vop3SdstEnc : public IsaInstruction<Isa> {
 public:
-  Vop3SdstEnc(std::string_view mnemonic, const Vop3SdstEncMachineInst *inst, ExecuteFn exec_fn,
-              LiteralSupport literal_support = LiteralSupport::Both, int num_encoded_sources = 3);
-  void build_modifiers(std::string &out) const override;
+  Vop3SdstEnc(std::string_view mnemonic, const Vop3SdstEncMachineInst *inst, ExecuteFn exec_fn);
+  bool has_encoded_dpp() const;
+  bool has_encoded_dpp8() const;
+  void append_mnemonic(std::string &out) const override;
+  uint32_t vop3_encoded_source_count() const;
+  int32_t vop3_encoded_source_index(uint8_t operand_index) const;
+  bool has_encoded_literal32() const;
+  static Result validate_encoding([[maybe_unused]] std::string_view mnemonic,
+                                  const Vop3SdstEncMachineInst *inst,
+                                  const util::DiagnosticEmitter &emit_error,
+                                  LiteralSupport literal_support = LiteralSupport::Both,
+                                  int num_encoded_sources = 3) {
+    const auto &inst_ = *inst;
+    if (!supports_literal(literal_support, LiteralSupport::Literal32) &&
+        ((num_encoded_sources > 0 && inst_.src0 == 255) ||
+         (num_encoded_sources > 1 && inst_.src1 == 255) ||
+         (num_encoded_sources > 2 && inst_.src2 == 255))) [[unlikely]]
+      return emit_error.emit() << mnemonic << " does not support 32-bit literals";
+    if (!supports_literal(literal_support, LiteralSupport::Literal64) &&
+        ((num_encoded_sources > 0 && inst_.src0 == 254) ||
+         (num_encoded_sources > 1 && inst_.src1 == 254) ||
+         (num_encoded_sources > 2 && inst_.src2 == 254))) [[unlikely]]
+      return emit_error.emit() << mnemonic << " does not support 64-bit literals";
+    if ((inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0)) &&
+        (inst_.src0 == 255 || inst_.src1 == 255 || inst_.src2 == 255)) [[unlikely]]
+      return emit_error.emit() << "DPP and literal operands cannot be combined";
+    return Result::success();
+  }
+  void build_modifiers(std::string &out) const override {
+    auto *inst = &inst_;
+    (void)inst;
+    amdgpu::vop::append_vop3_disassembly(out, 0, inst->clamp, inst->omod,
+                                         vop3_encoded_source_count(), false);
+    if (has_encoded_dpp())
+      amdgpu::dpp::append_dpp16_disassembly(out, dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
+                                            dpp_bound_ctrl_, dpp_fi_, true,
+                                            amdgpu::dpp::DppCtrlDialect::Gfx10Plus);
+    if (has_encoded_dpp8())
+      amdgpu::dpp::append_dpp8_disassembly(out, dpp8_lane_sel_, dpp_fi_);
+  }
   void implicit_uses(RegisterSet &uses) const override;
   void implicit_use_operands(std::vector<const ::rocjitsu::Operand *> &operands) const override;
+  void append_src_operand(std::string &out, uint8_t operand_index) const override {
+    const ::rocjitsu::Operand *operand = src_operands_[operand_index];
+    const int32_t modifier_index = vop3_encoded_source_index(operand_index);
+    const auto reg = operand->to_register_ref();
+    const bool half_width = modifier_index >= 0 && false && operand->size_bits() == 16 && reg &&
+                            reg->cls == RegClass::VGPR;
+    if (modifier_index < 0) {
+      out += operand->name();
+      return;
+    }
+    amdgpu::vop::append_vop3_operand(out, operand->name(), (0 >> modifier_index) & 1,
+                                     (inst_.neg >> modifier_index) & 1, half_width,
+                                     (0 >> modifier_index) & 1);
+  }
+  void append_dst_operand(std::string &out, uint8_t operand_index) const override {
+    const ::rocjitsu::Operand *operand = dst_operands_[operand_index];
+    const auto reg = operand->to_register_ref();
+    const bool half_width =
+        false && operand->size_bits() == 16 && reg && reg->cls == RegClass::VGPR;
+    amdgpu::vop::append_vop3_operand(out, operand->name(), false, false, half_width, (0 >> 3) & 1);
+  }
   bool has_lit_0();
   bool has_lit_1();
   bool has_lit_0_and_has_lit_1();
@@ -689,8 +1206,6 @@ public:
   uint32_t dpp_bound_ctrl_ = 0;
   uint32_t dpp_fi_ = 1;
   uint32_t dpp8_lane_sel_ = 0;
-  std::unique_ptr<StagedOperand> dpp_src0_;
-  std::unique_ptr<StagedOperand> dpp_src1_;
 };
 
 } // namespace cdna5

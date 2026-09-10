@@ -155,7 +155,9 @@ void SSetGprIdxModeSopp::execute_impl(amdgpu::Wavefront &wf) {
 
 void SEndpgmOrderedPsDoneSopp::execute_impl(amdgpu::Wavefront &wf) { wf.end(); }
 
-void SSetValuCoexecModeSopp::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
+void SSetValuCoexecModeSopp::execute_impl(amdgpu::Wavefront &wf) {
+  amdgpu::execute_s_set_valu_coexec_mode_sopp(*this, wf);
+}
 
 } // namespace cdna3
 } // namespace rocjitsu

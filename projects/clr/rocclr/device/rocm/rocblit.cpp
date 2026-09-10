@@ -1017,7 +1017,9 @@ bool DmaBlitManager::rocrCopyBufferBatch(const std::vector<hsa_amd_memory_copy_o
         wait_events.size(), wait_events.data());
 
     if (status != HSA_STATUS_SUCCESS) {
-      gpu().Barriers().ResetCurrentSignal();
+      for (size_t s = 0; s < finalOps.size(); ++s) {
+        gpu().Barriers().ResetCurrentSignal();
+      }
       LogPrintfError("HSA batch copy failed with code %d for engine %d", status, engine);
       return false;
     }

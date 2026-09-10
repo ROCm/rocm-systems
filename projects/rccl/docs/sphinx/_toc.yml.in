@@ -16,15 +16,21 @@ subtrees:
 
 - caption: How to
   entries:
+  - file: how-to/device-api-gin
+    title: Use the device API and GIN
   - file: how-to/using-rccl-tuner-plugin-api
     title: Using the RCCL Tuner plugin
   - file: how-to/using-nccl
     title: Using the NCCL Net plugin
+  - file: how-to/using-rccl-inspector-plugin
+    title: Using the RCCL Inspector plugin
   - file: how-to/fault-tolerance
     title: Fault tolerance in RCCL
   - file: how-to/troubleshooting-rccl
     title: Troubleshoot RCCL
   - file: how-to/rccl-usage-tips
+  - file: how-to/network-telemetry
+    title: RCCL network telemetry
 
 - caption: Examples
   entries:

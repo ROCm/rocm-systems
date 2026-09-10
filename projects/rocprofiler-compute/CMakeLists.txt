@@ -73,6 +73,7 @@ set(COMP_TYPE "main")
 # version control info
 execute_process(
     COMMAND git log --pretty=format:%h -n 1
+    WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}
     OUTPUT_VARIABLE ROCPROFCOMPUTE_GIT_REV
     OUTPUT_STRIP_TRAILING_WHITESPACE
 )
@@ -1628,19 +1629,6 @@ message(STATUS "  Packaging Install Prefix: ${CPACK_PACKAGING_INSTALL_PREFIX}")
 message(STATUS "  Install Tests: ${INSTALL_TESTS}")
 message(STATUS "  Package Dependencies: ${PACKAGE_REQUIRES}")
 message(STATUS "  CPack Generator: ${CPACK_GENERATOR}")
-
-# Source tarball
-set(CPACK_SOURCE_GENERATOR "TGZ")
-set(CPACK_SOURCE_PACKAGE_FILE_NAME ${CMAKE_PROJECT_NAME}-${FULL_VERSION_STRING})
-set(CPACK_SOURCE_IGNORE_FILES
-    ".*~$"
-    \.git/
-    \.github
-    \.gitmodules
-    \.gitignore
-    /tests
-    /build
-)
 
 configure_pkg(${PACKAGE_NAME} ${COMP_TYPE} ${CPACK_PACKAGE_VERSION} ${PKG_MAINTAINER_NM} ${PKG_MAINTAINER_EMAIL})
 

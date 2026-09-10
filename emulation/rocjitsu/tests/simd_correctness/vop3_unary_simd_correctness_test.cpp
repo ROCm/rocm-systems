@@ -13,6 +13,7 @@
 /// (util::set_force_scalar_for_testing flips the gate in-process). In-process
 /// inactive lanes must stay preserved under full/partial EXEC.
 
+#include "decode_test_util.h"
 #include "util/simd_test_hooks.h"
 
 #include "rocjitsu/code/rj_code.h"
@@ -180,7 +181,7 @@ void check(const Case &c, uint32_t abs, uint32_t neg, uint32_t omod, uint32_t cl
     EXPECT_NE(fx.wf, nullptr);
     uint32_t words[4] = {0u, 0u, 0u, 0u};
     vop3_encode(c.opcode, /*vdst=*/kDstVgpr, /*src0=*/256, abs, neg, omod, clamp, words);
-    Instruction *inst = fx.decoder->decode(words);
+    Instruction *inst = decode_valid(*fx.decoder, words);
     EXPECT_NE(inst, nullptr) << c.name << " decode failed";
     auto out = fx.run(inst, c.kind, exec);
     delete inst;
@@ -276,7 +277,7 @@ TEST(Vop3UnarySimdCorrectness, MovB32_PreservesBits) {
     uint32_t words[4] = {0u, 0u, 0u, 0u};
     vop3_encode(/*op=v_mov_b32=*/321, /*vdst=*/kDstVgpr, /*src0=*/256, s.abs, s.neg, s.omod,
                 s.clamp, words);
-    Instruction *inst = fx.decoder->decode(words);
+    Instruction *inst = decode_valid(*fx.decoder, words);
     ASSERT_NE(inst, nullptr);
     uint32_t vb = fx.wf->vgpr_alloc().base;
     for (uint32_t lane = 0; lane < WF_SIZE; ++lane)

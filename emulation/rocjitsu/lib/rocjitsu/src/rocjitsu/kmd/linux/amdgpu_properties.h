@@ -189,8 +189,9 @@ constexpr uint32_t drm_shader_engine_count(uint32_t kfd_array_count, uint32_t ar
 
 constexpr uint32_t drm_quad_shader_pipe_count(uint32_t kfd_array_count) { return kfd_array_count; }
 
-constexpr uint32_t drm_cu_active_number(uint32_t kfd_array_count, uint32_t cu_per_shader_array) {
-  return kfd_array_count * cu_per_shader_array;
+/// Total active CUs exposed through DRM, derived from the KFD SIMD topology.
+constexpr uint32_t drm_cu_active_number(uint32_t simd_count, uint32_t simd_per_cu) {
+  return simd_per_cu == 0 ? 0 : simd_count / simd_per_cu;
 }
 
 } // namespace rocjitsu::kmd

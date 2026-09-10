@@ -65,9 +65,13 @@ int ifoe_nl_get_path_to_port_map(ualoe_handle_t handle, unsigned station_idx,
                                  unsigned accelerator_id, unsigned path_count, unsigned map[]);
 int ifoe_nl_get_netport_list(ualoe_handle_t handle, unsigned desc_count,
                              ifoe_netport_desc_t descs[]);
+int ifoe_nl_get_netport_list_v2(ualoe_handle_t handle, unsigned* desc_count,
+                                ifoe_netport_desc_t descs[]);
 int ifoe_nl_netport_ctrl(ualoe_handle_t handle, unsigned netport_idx, ifoe_netport_state_e state);
 int ifoe_nl_netport_set_accelerator_addr_map(ualoe_handle_t handle, unsigned netport_idx,
                                              ifoe_network_addr_type_e map_addr_type,
+                                             unsigned map_count, ifoe_accelerator_addr_map_t map[]);
+int ifoe_nl_netport_get_accelerator_addr_map(ualoe_handle_t handle, unsigned netport_idx,
                                              unsigned map_count, ifoe_accelerator_addr_map_t map[]);
 int ifoe_nl_netport_set_addr(ualoe_handle_t handle, unsigned netport_idx,
                              ifoe_network_addr_type_e addr_type, uint8_t mac_addr[],
@@ -80,14 +84,45 @@ int ifoe_nl_netport_config_link_manual(ualoe_handle_t handle, unsigned netport_i
                                        ualoe_netport_loopback_mode_e loopback_mode);
 int ifoe_nl_netport_get_state(ualoe_handle_t handle, unsigned netport_idx,
                               ifoe_netport_state_t* state);
+int ifoe_nl_ifcp_netport_get_state(ualoe_handle_t handle, unsigned netport_idx,
+                                   ifoe_ifcp_netport_state_t* state);
+int ifoe_nl_ifcp_netport_get_stats(ualoe_handle_t handle, unsigned netport_idx,
+                                   ifoe_ifcp_netport_stats_t* stats);
 int ifoe_nl_get_netport_properties(ualoe_handle_t handle, ualoe_netport_properties_t* properties);
+int ualoe_nl_get_scaleup_fabric_config(ualoe_handle_t handle,
+                                       ualoe_scaleup_fabric_config_t* config);
+int ualoe_nl_get_scaleup_fabric_vpod_config(ualoe_handle_t handle,
+                                            ualoe_scaleup_fabric_vpod_config_t* config);
+int ualoe_nl_get_scaleup_fabric_station_info(ualoe_handle_t handle,
+                                             ualoe_scaleup_fabric_station_info_t* info);
+int ualoe_nl_set_scaleup_fabric_config(ualoe_handle_t handle,
+                                       const ualoe_scaleup_fabric_config_t* config);
+int ualoe_nl_set_scaleup_fabric_vpod_config(ualoe_handle_t handle,
+                                            const ualoe_scaleup_fabric_vpod_config_t* config);
+int ualoe_nl_set_scaleup_fabric_station_info(ualoe_handle_t handle,
+                                             const ualoe_scaleup_fabric_station_info_t* info);
+int ualoe_nl_get_gpu_identity(ualoe_handle_t handle, ualoe_gpu_identity_t* identity);
 int ualoe_nl_telemetry_alloc(ualoe_handle_t handle, unsigned category_mask,
                              ualoe_telemetry_t** telemetry);
 int ualoe_nl_telemetry_get(ualoe_handle_t handle, ualoe_telemetry_t* telemetry);
 int ualoe_nl_telemetry_free(ualoe_handle_t handle, ualoe_telemetry_t* telemetry);
+int ualoe_nl_telemetry_get_category_mask(ualoe_handle_t handle, unsigned* category_mask);
 int ualoe_nl_l2ping_start(ualoe_handle_t handle, ualoe_ping_spec_t* spec, ualoe_ping_t** ping);
 int ualoe_nl_l2ping_update(ualoe_handle_t handle, ualoe_ping_t* ping);
 int ualoe_nl_l2ping_fini(ualoe_handle_t handle, ualoe_ping_t* ping);
 int ualoe_nl_register_event_callback(ualoe_handle_t handle, ualoe_event_callback_t callback,
                                      void* user_data);
+int ualoe_nl_diag_config_pma_lane(ualoe_handle_t handle, unsigned netport_idx, unsigned lane_idx,
+                                  bool enable, ualoe_pma_rate_e pma_rate,
+                                  ualoe_netport_loopback_mode_e loopback_mode,
+                                  ualoe_pma_polarity_e tx_polarity,
+                                  ualoe_pma_polarity_e rx_polarity);
+int ualoe_nl_diag_config_prbs_tx(ualoe_handle_t handle, unsigned netport_idx, unsigned lane_idx,
+                                 bool enable, ualoe_prbs_pattern_e pattern,
+                                 __uint128_t user_pattern);
+int ualoe_nl_diag_config_prbs_rx(ualoe_handle_t handle, unsigned netport_idx, unsigned lane_idx,
+                                 bool enable, bool resync, ualoe_prbs_pattern_e pattern,
+                                 __uint128_t user_pattern);
+int ualoe_nl_diag_get_prbs_results(ualoe_handle_t handle, unsigned netport_idx, unsigned lane_idx,
+                                   ualoe_prbs_results_t* results);
 #endif /* UALOE_NL_H */

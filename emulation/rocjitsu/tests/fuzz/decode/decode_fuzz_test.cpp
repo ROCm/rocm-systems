@@ -99,7 +99,7 @@ TEST_F(DecodeFuzzCoreTest, DecodesSopTwoWithLiteralWithoutAborting) {
 
 TEST_F(DecodeFuzzCoreTest, PreservesSixteenByteInstruction) {
   const auto input =
-      make_window(std::array<uint32_t, 4>{0xCC350000u, 0x02020900u, 0xCC330006u, 0x02026912u});
+      make_window(std::array<uint32_t, 4>{0xCC350000u, 0x04020900u, 0xCC330006u, 0x02026912u});
   const DecodeRecord record = decode_window(*decoder, input);
   ASSERT_TRUE(record.valid);
   EXPECT_EQ(record.size, 16);

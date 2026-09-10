@@ -17,6 +17,7 @@
 /// through the packed vs scalar FMA (accepted), so lanes with a NaN input are
 /// excluded identically in both runs (the skip is input-derived).
 
+#include "decode_test_util.h"
 #include "util/simd_test_hooks.h"
 
 #include "rocjitsu/code/rj_code.h"
@@ -163,7 +164,7 @@ void check_case(const FmaCase &c, uint64_t exec) {
     EXPECT_NE(fx.wf, nullptr);
     uint32_t enc = vop2_encode(c.opcode, /*vdst=*/2, /*vsrc1=*/1, /*src0=*/256);
     uint32_t words[4] = {enc, kLiteral, 0u, 0u};
-    Instruction *inst = fx.decoder->decode(words);
+    Instruction *inst = decode_valid(*fx.decoder, words);
     EXPECT_NE(inst, nullptr) << c.label << ": decode failed";
     fx.seed_inputs(SEED, exec, &nan_lane);
     fx.cu->execute_instruction(inst, *fx.wf);

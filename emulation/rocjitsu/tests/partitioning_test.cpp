@@ -26,8 +26,8 @@ namespace {
 
 using namespace rocjitsu;
 
-const std::string CONFIG_PATH = std::string(CONFIG_DIR) + "/gfx950_cdna4.json";
-const std::string CONFIG_2GPU_PATH = std::string(CONFIG_DIR) + "/gfx950_cdna4_kmd_2gpu.json";
+const std::string CONFIG_PATH = std::string(CONFIG_DIR) + "/gfx950_mi355x.json";
+const std::string CONFIG_2GPU_PATH = std::string(CONFIG_DIR) + "/gfx950_mi355x_kmd_2gpu.json";
 const std::string CONFIG_1XCD_PATH = std::string(CONFIG_DIR) + "/gfx1100_w7900.json";
 
 std::string config_json_with_num_threads(const std::string &path, uint32_t num_threads) {

@@ -126,9 +126,12 @@ enum : int32_t {
 // Compute program resource register 2. Must match hardware definition.
 #define COMPUTE_PGM_RSRC2(NAME, SHIFT, WIDTH)                                                      \
   AMDHSA_BITS_ENUM_ENTRY(COMPUTE_PGM_RSRC2_##NAME, SHIFT, WIDTH)
+#define COMPUTE_PGM_RSRC2_GFX125(NAME, SHIFT, WIDTH)                                               \
+  AMDHSA_BITS_ENUM_ENTRY(COMPUTE_PGM_RSRC2_GFX125_##NAME, SHIFT, WIDTH)
 enum : int32_t {
   COMPUTE_PGM_RSRC2(ENABLE_PRIVATE_SEGMENT, 0, 1),
   COMPUTE_PGM_RSRC2(USER_SGPR_COUNT, 1, 5),
+  COMPUTE_PGM_RSRC2_GFX125(USER_SGPR_COUNT, 1, 6),
   COMPUTE_PGM_RSRC2(ENABLE_TRAP_HANDLER, 6, 1),
   COMPUTE_PGM_RSRC2(ENABLE_SGPR_WORKGROUP_ID_X, 7, 1),
   COMPUTE_PGM_RSRC2(ENABLE_SGPR_WORKGROUP_ID_Y, 8, 1),
@@ -147,6 +150,7 @@ enum : int32_t {
   COMPUTE_PGM_RSRC2(ENABLE_EXCEPTION_INT_DIVIDE_BY_ZERO, 30, 1),
   COMPUTE_PGM_RSRC2(RESERVED0, 31, 1),
 };
+#undef COMPUTE_PGM_RSRC2_GFX125
 #undef COMPUTE_PGM_RSRC2
 
 // Compute program resource register 3 for GFX90A+. Must match hardware

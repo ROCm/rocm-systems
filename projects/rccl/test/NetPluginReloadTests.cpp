@@ -15,6 +15,14 @@
 // when a plugin inits but fails assignment (e.g. incompatible UNPACK version),
 // ncclNetPluginFinalize() must run before probing the next plugin; netName mismatch
 // must skip init entirely.
+//
+// NetPluginInitFail — AICOMRCCL-1891 (NCCL 2.29.7 net.cc fix): ncclNetPluginInit()
+// used to call finalize() unconditionally on its failure path, so a plugin whose
+// init() failed was finalized without ever having been initialized. For a v10 (or
+// older) plugin that crashes outright: the compat layer in src/plugin/net/net_v10.cc
+// only fills ncclNet.finalize once ncclNet_v10->init() has succeeded, so the call
+// went through a null function pointer. The guard must suppress finalize() after a
+// failed init() while still running it when init() succeeded and devices() failed.
 
 #include <gtest/gtest.h>
 #include <rccl/rccl.h>
@@ -196,6 +204,84 @@ TEST(NetPluginAssignFail, SurvivesMultipleCommCycles) {
         << "each comm cycle must init the external plugin once";
     EXPECT_EQ(countLines(finalizeFile.path()), kNumCommCycles)
         << "each failed assignment must finalize the external plugin once";
+  });
+}
+
+TEST(NetPluginInitFail, DoesNotFinalizeAfterFailedInit) {
+  RUN_ISOLATED_TEST("NetPluginInitFail.DoesNotFinalizeAfterFailedInit", []() {
+    if (auto reason = gpuSkipReason(); !reason.empty()) GTEST_SKIP() << reason;
+    ASSERT_EQ(hipSetDevice(0), hipSuccess);
+
+    ScopedTempFile initFile("/tmp/rccl_net_init_fail_init_XXXXXX");
+    ScopedTempFile finalizeFile("/tmp/rccl_net_init_fail_fin_XXXXXX");
+    ASSERT_TRUE(initFile.valid()) << "failed to create init counter file";
+    ASSERT_TRUE(finalizeFile.valid()) << "failed to create finalize counter file";
+
+    ASSERT_EQ(setenv("RCCL_NET_TEST_PLUGIN_MODE", "init_fail", 1), 0);
+    ASSERT_EQ(setenv("RCCL_NET_TEST_INIT_FILE", initFile.path().c_str(), 1), 0);
+    ASSERT_EQ(setenv("RCCL_NET_TEST_FINALIZE_FILE", finalizeFile.path().c_str(), 1), 0);
+    ASSERT_EQ(setenv("NCCL_NET_PLUGIN", "STATIC_PLUGIN", 1), 0);
+
+    // The comm must still come up: a plugin that fails init is disabled, and RCCL
+    // falls back to the internal IB/Socket plugins.
+    initAndDestroyComm();
+
+    EXPECT_EQ(countLines(initFile.path()), 1)
+        << "external plugin init must be attempted once";
+    EXPECT_EQ(countLines(finalizeFile.path()), 0)
+        << "finalize() must not run for an init() that failed";
+  });
+}
+
+TEST(NetPluginInitFail, FailedPluginIsNotRetriedOrFinalized) {
+  RUN_ISOLATED_TEST("NetPluginInitFail.FailedPluginIsNotRetriedOrFinalized", []() {
+    if (auto reason = gpuSkipReason(); !reason.empty()) GTEST_SKIP() << reason;
+    ASSERT_EQ(hipSetDevice(0), hipSuccess);
+
+    ScopedTempFile initFile("/tmp/rccl_net_init_fail_init_XXXXXX");
+    ScopedTempFile finalizeFile("/tmp/rccl_net_init_fail_fin_XXXXXX");
+    ASSERT_TRUE(initFile.valid());
+    ASSERT_TRUE(finalizeFile.valid());
+
+    ASSERT_EQ(setenv("RCCL_NET_TEST_PLUGIN_MODE", "init_fail", 1), 0);
+    ASSERT_EQ(setenv("RCCL_NET_TEST_INIT_FILE", initFile.path().c_str(), 1), 0);
+    ASSERT_EQ(setenv("RCCL_NET_TEST_FINALIZE_FILE", finalizeFile.path().c_str(), 1), 0);
+    ASSERT_EQ(setenv("NCCL_NET_PLUGIN", "STATIC_PLUGIN", 1), 0);
+
+    for (int cycle = 0; cycle < kNumCommCycles; ++cycle) initAndDestroyComm();
+
+    // netPluginLibs[] is process-global, so the failure marks the plugin disabled
+    // for good: later comms skip it instead of re-running init.
+    EXPECT_EQ(countLines(initFile.path()), 1)
+        << "a plugin disabled by a failed init must not be re-inited by later comms";
+    EXPECT_EQ(countLines(finalizeFile.path()), 0)
+        << "no comm cycle may finalize a plugin that was never initialized";
+  });
+}
+
+TEST(NetPluginInitFail, FinalizesWhenDevicesFailsAfterInit) {
+  RUN_ISOLATED_TEST("NetPluginInitFail.FinalizesWhenDevicesFailsAfterInit", []() {
+    if (auto reason = gpuSkipReason(); !reason.empty()) GTEST_SKIP() << reason;
+    ASSERT_EQ(hipSetDevice(0), hipSuccess);
+
+    ScopedTempFile initFile("/tmp/rccl_net_dev_fail_init_XXXXXX");
+    ScopedTempFile finalizeFile("/tmp/rccl_net_dev_fail_fin_XXXXXX");
+    ASSERT_TRUE(initFile.valid());
+    ASSERT_TRUE(finalizeFile.valid());
+
+    ASSERT_EQ(setenv("RCCL_NET_TEST_PLUGIN_MODE", "devices_fail", 1), 0);
+    ASSERT_EQ(setenv("RCCL_NET_TEST_INIT_FILE", initFile.path().c_str(), 1), 0);
+    ASSERT_EQ(setenv("RCCL_NET_TEST_FINALIZE_FILE", finalizeFile.path().c_str(), 1), 0);
+    ASSERT_EQ(setenv("NCCL_NET_PLUGIN", "STATIC_PLUGIN", 1), 0);
+
+    initAndDestroyComm();
+
+    // Same failure path as above, but init() did succeed, so the context exists and
+    // has to be released. This is what keeps the guard from becoming a leak.
+    EXPECT_EQ(countLines(initFile.path()), 1)
+        << "external plugin init must run before devices() is probed";
+    EXPECT_EQ(countLines(finalizeFile.path()), 1)
+        << "finalize() must release the context when devices() fails after a good init()";
   });
 }
 

@@ -12,7 +12,7 @@
 #include "log.hpp"
 #include "module_function.hpp"
 
-#include <spdlog/fmt/ranges.h>
+#include <fmt/ranges.h>
 
 #include <dlfcn.h>
 #include <string>
@@ -149,9 +149,7 @@ rocprofsys_get_is_executable(const std::string& _cmd, bool _default_v)
         if(Dyninst::SymtabAPI::Symtab::openFile(_symtab, _cmd.data()))
         {
             _is_executable = _symtab->isExecutable() && _symtab->isExec();
-            // Workaround introduced in ROCm/rocm-systems#10171
-            // Tracking with JIRA AIPROFSYST-730
-            // Dyninst::SymtabAPI::Symtab::closeSymtab(_symtab);
+            Dyninst::SymtabAPI::Symtab::closeSymtab(_symtab);
         }
     }
     return _is_executable;

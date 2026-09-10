@@ -173,6 +173,18 @@ int Device::agentGlobalIndex(hsa_agent_t agent) {
   return -1;
 }
 
+// Query HSA_AMD_MEMORY_PROPERTY_AGENT_IS_APU (MI300A reports true despite BASE profile).
+bool Device::agentIsAPU(hsa_agent_t agent) {
+  uint8_t memory_properties[8] = {0};
+  if (HSA_STATUS_SUCCESS !=
+      Hsa::agent_get_info(agent, (hsa_agent_info_t)HSA_AMD_AGENT_INFO_MEMORY_PROPERTIES,
+                          memory_properties)) {
+    LogError("HSA_AGENT_INFO_AMD_MEMORY_PROPERTIES query failed");
+    return false;
+  }
+  return hsa_flag_isset64(memory_properties, HSA_AMD_MEMORY_PROPERTY_AGENT_IS_APU);
+}
+
 void Device::setupCpuAgent() {
   int32_t numaDistance = std::numeric_limits<int32_t>::max();
   uint32_t index = 0;  // 0 as default
@@ -658,13 +670,16 @@ bool Device::create() {
   info_.hdpMemFlushCntl = hdpInfo.HDP_MEM_FLUSH_CNTL;
   info_.hdpRegFlushCntl = hdpInfo.HDP_REG_FLUSH_CNTL;
 
+  // Query before Settings::create() since the threshold selection depends on it.
+  isAPU_ = agentIsAPU(bkendDevice_);
+
   // Create HSA settings
   assert(!settings_);
   roc::Settings* hsaSettings = new roc::Settings();
   settings_ = hsaSettings;
   if (!hsaSettings || !hsaSettings->create((agent_profile_ == HSA_PROFILE_FULL), *isa,
                                            isa->xnack() == amd::Isa::Feature::Enabled, coop_groups,
-                                           isXgmi_)) {
+                                           isXgmi_, isAPU_)) {
     LogPrintfError("Unable to create settings for HSA device %s (PCI ID %x)", agent_name,
                    pciDeviceId_);
     return false;
@@ -1282,16 +1297,7 @@ bool Device::populateOCLDeviceConstants() {
 
   info_.maxWorkItemDimensions_ = 3;
 
-  uint8_t memory_properties[8];
-  // Get the memory property from ROCr.
-  if (HSA_STATUS_SUCCESS !=
-      Hsa::agent_get_info(bkendDevice_, (hsa_agent_info_t)HSA_AMD_AGENT_INFO_MEMORY_PROPERTIES,
-                         memory_properties)) {
-    LogError("HSA_AGENT_INFO_AMD_MEMORY_PROPERTIES query failed");
-  }
-
-  // Check if the device is APU
-  if (hsa_flag_isset64(memory_properties, HSA_AMD_MEMORY_PROPERTY_AGENT_IS_APU)) {
+  if (isAPU_) {
     info_.hostUnifiedMemory_ = 1;
   }
 
@@ -1732,6 +1738,22 @@ bool Device::populateOCLDeviceConstants() {
       (amd::device::getValueFromIsaMeta(isaName, "AddressableNumSGPRs", sgprValue))
       ? (atoi(sgprValue.c_str()))
       : 0;
+
+  std::string sgprAllocGranule, trapHandlerEnabled;
+  info_.sgprAllocGranularity_ =
+      amd::device::getValueFromIsaMeta(isaName, "SGPRAllocGranule", sgprAllocGranule)
+      ? atoi(sgprAllocGranule.c_str())
+      : 0;
+  // Comgr reports whether a trap handler is present, but not the size of the
+  // SGPR block it reserves per wave, which is arch-independent.
+  constexpr uint32_t kTrapNumSgprs = 16;  // LLVM IsaInfo::TRAP_NUM_SGPRS
+  info_.sgprTrapHandlerReserve_ =
+      (amd::device::getValueFromIsaMeta(isaName, "TrapHandlerEnabled", trapHandlerEnabled) &&
+       atoi(trapHandlerEnabled.c_str()) != 0)
+      ? kTrapNumSgprs
+      : 0;
+  ClPrint(amd::LOG_INFO, amd::LOG_INIT, "sgprAllocGranule=%u, sgprTrapHandlerReserve=%u",
+          info_.sgprAllocGranularity_, info_.sgprTrapHandlerReserve_);
   std::string imageSupport;
   if (amd::device::getValueFromIsaMeta(isaName, "ImageSupport", imageSupport)) {
     info_.imageSupport_ =
@@ -3573,8 +3595,12 @@ hsa_queue_t* Device::acquireQueue(uint32_t queue_size_hint, bool coop_queue,
     QueueExtras extras;
     extras.deviceMemRingBuf = (desc.flags & HSA_AMD_QUEUE_CREATE_DEVICE_MEM_RING_BUF) != 0;
     extras.largestAqlBarrierBitSlot = std::make_shared<std::atomic<uint64_t>>(kInvalidAqlSlot);
-    hsa_amd_queue_get_info(queue, HSA_AMD_QUEUE_INFO_PREFETCH_METADATA_RING_BUFFER,
-                           &extras.metadataRingBuffer);
+    // Leaving the ring base null makes MetaDataPreloader::HasMetadataQueue() false,
+    // which is the single gate every metadata path already checks.
+    if (DEBUG_CLR_ENABLE_KDQ) {
+      hsa_amd_queue_get_info(queue, HSA_AMD_QUEUE_INFO_PREFETCH_METADATA_RING_BUFFER,
+                             &extras.metadataRingBuffer);
+    }
     if (DEBUG_CLR_DIRECT_DOORBELL) {
       uint64_t db_id = 0;
       if (hsa_amd_queue_get_info(queue, HSA_AMD_QUEUE_INFO_DOORBELL_ID, &db_id) ==
@@ -3917,8 +3943,7 @@ hsa_status_t Device::BackendErrorCallBackHandler(const hsa_amd_event_t* event, v
             std::string kernelName = vgpu->AnalyzeAqlQueue();
             const char* kname = kernelName.c_str();
             ClPrint(amd::LOG_NONE, amd::LOG_ALWAYS,
-                    "Memory Fault Error [%sGPU index: %u, "
-                    "faulting addr: 0x%" PRIx64 ", kernel: %s]",
+                    "[%sGPU index: %u, faulting addr: 0x%" PRIx64 ", kernel: %s]",
                     host_tag.c_str(), roc_dev->index(),
                     event->memory_fault.virtual_address, kname);
           }
@@ -4095,26 +4120,10 @@ void Device::ApplyHwEventPatches(const std::vector<HwEventPatch>& patches,
       auto* pkt = reinterpret_cast<hsa_barrier_and_packet_t*>(raw);
       pkt->completion_signal = sig;
 
-      // Prepare this signal for profiling: mark it as active and classify
-      // the packet type so checkGpuTime → addTimestamps only fires for
-      // kernel dispatches (not synthetic barriers).
+      // Prepare this signal for profiling. The dispatch path assigns this
+      // launch's slot only when the actual carrier is a kernel dispatch.
       ps->flags_.done_ = false;
-      // Record the queue this patched dispatch signal runs on (resolved from the
-      // owning segment's stream at launch) so profiling attributes it to the
-      // right stream rather than the graph launch stream.
-      ps->queue_index_ = patch.queue_index;
-      uint16_t hdr;
-      memcpy(&hdr, patch.packet, sizeof(hdr));
-      uint8_t pktType = hdr & ((1 << HSA_PACKET_HEADER_WIDTH_TYPE) - 1);
-      // A kernel dispatch could be a vendor-specific ext-kernel-dispatch
-      // packet, identified by amd_format (byte 2).  Classify it as a dispatch so
-      // the patched last-node completion signal contributes its GPU timing like
-      // every other graph kernel node.
-      const uint8_t amdFormat = patch.packet[2];
-      ps->flags_.isPacketDispatch_ =
-          (pktType == HSA_PACKET_TYPE_KERNEL_DISPATCH) ||
-          (pktType == HSA_PACKET_TYPE_VENDOR_SPECIFIC &&
-           amdFormat == HSA_AMD_PACKET_TYPE_EXT_KERNEL_DISPATCH);
+      ps->dispatch_slot_ = ProfilingSignal::kNoDispatchSlot;
     } else {
       // dep_slot >= 0: patch a barrier's dependency signal slot (cross-segment wait)
       auto* pkt = reinterpret_cast<hsa_barrier_and_packet_t*>(raw);
@@ -4214,43 +4223,7 @@ uint32_t Device::SdmaEngineAllocator::AllocateEngine(VirtualGPU* vgpu, HwQueueEn
                               ? device_.maxSdmaReadMask_
                               : device_.maxSdmaWriteMask_;
 
-  // Simple round-robin path if all engines have equal bandwidth
-  // Disabled by default - use preferred engine logic for current GPUs
-  constexpr bool kUseSimpleRR = false;
-
-  if (kUseSimpleRR) {
-    // Simple round-robin: just cycle through valid engines
-    // This will be enabled for future GPUs where engine selection doesn't matter
-    if (validEngineMask == 0) {
-      ClPrint(amd::LOG_WARNING, amd::LOG_COPY,
-              "No valid SDMA engines for VirtualGPU %p", vgpu);
-      return 0;
-    }
-
-    // Cycle through bit positions, find next valid engine
-    uint32_t start_bit = next_rr_engine_.fetch_add(1, std::memory_order_relaxed);
-    uint32_t selected_mask = 0;
-
-    // Try up to 32 positions to find a valid engine
-    for (uint32_t i = 0; i < 32; ++i) {
-      uint32_t bit = (start_bit + i) % 32;
-      uint32_t mask = 1u << bit;
-      if (validEngineMask & mask) {
-        selected_mask = mask;
-        break;
-      }
-    }
-
-    vgpu_to_engine_[vgpu] = selected_mask;
-
-    ClPrint(amd::LOG_INFO, amd::LOG_COPY,
-            "Assigned SDMA engine (simple RR) to VirtualGPU %p: mask=0x%x, engine_type=%d",
-            vgpu, selected_mask, engine_type);
-
-    return selected_mask;
-  }
-
-  // Current path: Query HSA for engine status and preferences
+  // Query HSA for engine status and preferences
   uint32_t freeEngineMask = 0;
   uint32_t preferredMask = 0;
   hsa_status_t status = HSA_STATUS_SUCCESS;

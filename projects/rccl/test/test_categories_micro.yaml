@@ -10,11 +10,14 @@
 
 test_categories:
   quick: &micro_quick
-    description: "Smoke — host-only micro-tests (p2p ipcRegisterBuffer seams), sub-second."
+    description: "Smoke — host-only micro-tests, sub-second."
     test_patterns:
       - "P2pMicrotest.*"
       - "FreshRegistrationMicrotest.*"
       - "FreshRegistrationLegacyIpcSucceedsFixture.*"
+      - "RmaProxyProgressTest.*"
+      - "GroupEndInternalTest.*"
+      - "Devcomm*"
     exclude_windows:
       - "*"
     labels:
