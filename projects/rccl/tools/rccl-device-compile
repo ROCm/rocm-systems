@@ -566,6 +566,27 @@ def do_compile(args, forwarded_flags):
 # Link mode: objects -> device.elf
 # ---------------------------------------------------------------------------
 
+def dispatcher_compile_cmd(clang, arch, forwarded_flags, disp_asm, dispatcher):
+    """Device-only dispatcher compile to assembly.
+
+    -gline-tables-only is placed before forwarded_flags so it matches the
+    per-kernel compile. Clang takes the last debug-info option, so coverage's
+    -g0 in DL_OPT_FLAGS still wins (see the ENABLE_FULL_COVERAGE branch of
+    DL_OPT_FLAGS in cmake/DeviceLinker.cmake) while Release (bare -O3) keeps
+    line tables.
+    """
+    return [
+        clang,
+        '-x', 'hip',
+        '--offload-device-only',
+        f'--offload-arch={arch}',
+        '-gline-tables-only',
+        '-w',
+    ] + list(forwarded_flags) + [
+        '-S', '-o', disp_asm, dispatcher,
+    ]
+
+
 def build_link_cmd(lld, output, rsp_path, arch, profile_rt):
     """Assemble the ld.lld argv for the per-arch device.elf link.
 
@@ -640,22 +661,8 @@ def do_link(args, forwarded_flags):
 
     try:
         # Step 2: Compile dispatcher to assembly.
-        # The debug-info level is inherited from DL_OPT_FLAGS in forwarded_flags
-        # (-g0 under ENABLE_FULL_COVERAGE, -g for a Debug build, none for
-        # release). We deliberately do NOT force -gline-tables-only here: LLVM
-        # source-based coverage lives in __llvm_covfun/__llvm_covmap (not DWARF),
-        # and the coverage build intentionally drops DWARF (-g0) to keep the
-        # per-arch device.elf under the ~2 GB unbundling limit
-        # (see cmake/DeviceLinker.cmake:121-133).
-        disp_compile_cmd = [
-            clang,
-            '-x', 'hip',
-            '--offload-device-only',
-            f'--offload-arch={arch}',
-            '-w',
-        ] + forwarded_flags + [
-            '-S', '-o', disp_asm, dispatcher,
-        ]
+        disp_compile_cmd = dispatcher_compile_cmd(
+            clang, arch, forwarded_flags, disp_asm, dispatcher)
         run(disp_compile_cmd, f"compile dispatcher for {arch}")
 
         # Step 3: Patch dispatcher with aggregated resources
