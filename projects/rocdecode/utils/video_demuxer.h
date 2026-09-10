@@ -149,18 +149,49 @@ public:
 };
 
 
+/**
+ * \ingroup group_amd_rocdecode_videodemuxer
+ * \brief Demultiplexes a video stream into elementary packets that are passed to the rocDecode parser.
+ */
 // Video Demuxer Interface class
 class VideoDemuxer {
     public:
+        /**
+         * \brief Abstract interface that feeds a custom stream of bytes to the demuxer.
+         *
+         * Implement this to demux from a source other than a file path, such as an
+         * in-memory buffer or a network stream.
+         */
         class StreamProvider {
             public:
                 virtual ~StreamProvider() {}
+                /**
+                 * \brief Reads up to \p buf_size bytes of stream data into \p buf.
+                 * \return The number of bytes read, or a negative value at end of stream.
+                 */
                 virtual int GetData(uint8_t *buf, int buf_size) = 0;
+                /**
+                 * \brief Returns the preferred buffer size to use for \ref GetData reads.
+                 */
                 virtual size_t GetBufferSize() = 0;
         };
+        /**
+         * \brief Returns the FFmpeg codec ID of the demultiplexed video stream.
+         */
         AVCodecID GetCodecID() { return av_video_codec_id_; };
+        /**
+         * \brief Constructs a demuxer that reads the video stream from a file path.
+         * \param input_file_path Path to the input video file.
+         */
         VideoDemuxer(const char *input_file_path) : VideoDemuxer(CreateFmtContextUtil(input_file_path)) {}
+        /**
+         * \brief Constructs a demuxer that reads the video stream from a custom \ref StreamProvider.
+         * \param stream_provider The stream provider to demux from.
+         */
         VideoDemuxer(StreamProvider *stream_provider) : VideoDemuxer(CreateFmtContextUtil(stream_provider)) {av_io_ctx_ = av_fmt_input_ctx_->pb;}
+        /**
+         * \brief Destroys the demuxer and releases the underlying FFmpeg resources.
+         */
         ~VideoDemuxer() {
             if (!av_fmt_input_ctx_) {
                 return;
@@ -183,6 +214,14 @@ class VideoDemuxer {
                 av_free(data_with_header_);
             }
         }
+        /**
+         * \brief Extracts the next elementary video packet from the stream, starting at the beginning.
+         *
+         * \param video Set to a pointer to the extracted packet data.
+         * \param video_size Set to the size, in bytes, of the extracted packet.
+         * \param pts Optional; if non-null, set to the packet's presentation timestamp.
+         * \return \c true if a packet was extracted, \c false at end of stream or on error.
+         */
         bool Demux(uint8_t **video, int *video_size, int64_t *pts = nullptr) {
             if (!av_fmt_input_ctx_) {
                 return false;
@@ -259,6 +298,15 @@ class VideoDemuxer {
             frame_count_++;
             return true;
         }
+        /**
+         * \brief Seeks to a frame identified by \p seek_ctx and demuxes it, instead of demuxing sequentially.
+         *
+         * \param seek_ctx Describes the frame to seek to (by frame number or timestamp) and the seek mode;
+         * also receives the presentation timestamp, duration, and decoded frame count for the found frame.
+         * \param pp_video Set to a pointer to the demuxed packet data at the sought frame.
+         * \param video_size Set to the size, in bytes, of the demuxed packet.
+         * \return \c true on success.
+         */
         bool Seek(VideoSeekContext& seek_ctx, uint8_t** pp_video, int* video_size) {
             /* !!! IMPORTANT !!!
                 * Across this function, packet decode timestamp (DTS) values are used to
@@ -385,14 +433,27 @@ class VideoDemuxer {
 
             return true;
         }
+        /** \brief Returns the width, in pixels, of the demultiplexed video stream. */
         const uint32_t GetWidth() const { return width_;}
+        /** \brief Returns the height, in pixels, of the demultiplexed video stream. */
         const uint32_t GetHeight() const { return height_;}
+        /** \brief Returns the chroma plane height, in pixels, for the stream's chroma format. */
         const uint32_t GetChromaHeight() const { return chroma_height_;}
+        /** \brief Returns the bit depth of the demultiplexed video stream. */
         const uint32_t GetBitDepth() const { return bit_depth_;}
+        /** \brief Returns the number of bytes per pixel for the stream's chroma format. */
         const uint32_t GetBytePerPixel() const { return byte_per_pixel_;}
+        /** \brief Returns the bit rate, in bits per second, reported by the input stream. */
         const uint32_t GetBitRate() const { return bit_rate_;}
+        /** \brief Returns the real (base) frame rate of the demultiplexed video stream. */
         const double GetFrameRate() const {return frame_rate_;};
+        /** \brief Returns \c true if the stream is variable frame rate (its real and average frame rates differ). */
         bool IsVFR() const { return frame_rate_ != avg_frame_rate_; };
+        /**
+         * \brief Converts a timestamp in seconds to the stream's internal time base units.
+         * \param ts_sec Timestamp, in seconds.
+         * \return The equivalent timestamp in the stream's time base units.
+         */
         int64_t TsFromTime(double ts_sec) {
             // Convert integer timestamp representation to AV_TIME_BASE and switch to fixed_point
             auto const ts_tbu = llround(ts_sec * AV_TIME_BASE);
@@ -401,6 +462,11 @@ class VideoDemuxer {
             return av_rescale_q(ts_tbu, time_factor, av_fmt_input_ctx_->streams[av_stream_]->time_base);
         }
 
+        /**
+         * \brief Converts a frame number to the stream's internal time base units, using the stream's frame rate.
+         * \param frame_num Frame number.
+         * \return The equivalent timestamp in the stream's time base units.
+         */
         int64_t TsFromFrameNumber(int64_t frame_num) {
             auto const ts_sec = static_cast<double>(frame_num) / frame_rate_;
             return TsFromTime(ts_sec);
