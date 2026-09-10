@@ -2,60 +2,22 @@
 // SPDX-License-Identifier: MIT
 
 /// @file cache.h
-/// @brief Set-associative cache data structure with LRU replacement and MOESI coherence tags.
+/// @brief Set-associative cache data structure with MOESI coherence tags, built
+///        on the shared tag store in tag_array.h.
 
 #ifndef SIMDOJO_COMPONENTS_CACHE_H_
 #define SIMDOJO_COMPONENTS_CACHE_H_
 
+#include "simdojo/components/tag_array.h"
 #include "util/bit.h"
 
-#include <algorithm>
+#include <bit>
 #include <cassert>
 #include <cstdint>
 #include <cstring>
-#include <functional>
 #include <vector>
 
 namespace simdojo {
-
-/// @brief Least Recently Used (LRU) replacement policy for a set-associative cache.
-///
-/// @details Maintains per-set recency order using a compact array of way indices.
-/// access() promotes a way to Most Recently Used (MRU) position; victim()
-/// returns the LRU way for eviction.
-///
-/// @tparam NumSets Number of sets in the cache (must be a power of 2).
-/// @tparam Associativity Number of ways per set.
-template <uint32_t NumSets, uint32_t Associativity> class LRUPolicy {
-public:
-  LRUPolicy() : order_(NumSets * Associativity) {
-    for (uint32_t s = 0; s < NumSets; ++s)
-      for (uint32_t w = 0; w < Associativity; ++w)
-        order_[s * Associativity + w] = w;
-  }
-
-  /// @brief Promote a way to MRU position within a set.
-  /// @param set Set index.
-  /// @param way Way index within the set.
-  void access(uint32_t set, uint32_t way) {
-    uint32_t *o = &order_[set * Associativity];
-    uint32_t pos = 0;
-    for (; pos < Associativity; ++pos)
-      if (o[pos] == way)
-        break;
-    for (uint32_t i = pos; i + 1 < Associativity; ++i)
-      o[i] = o[i + 1];
-    o[Associativity - 1] = way;
-  }
-
-  /// @brief Return the LRU way index for a set (eviction candidate).
-  /// @param set Set index.
-  /// @returns Way index of the least recently used entry.
-  uint32_t victim(uint32_t set) const { return order_[set * Associativity]; }
-
-private:
-  std::vector<uint32_t> order_;
-};
 
 /// @brief Coherence state for a cache line (MOESI protocol).
 enum class CoherenceState : uint8_t {
@@ -70,7 +32,9 @@ enum class CoherenceState : uint8_t {
 ///
 /// @details @c vmid identifies the owning process address space. Lines with the
 /// same line address but different vmids are distinct entries, because guest VAs
-/// are per-process and may alias across processes.
+/// are per-process and may alias across processes. @c tag, @c vmid and @c valid
+/// are the fields the tag store matches on; the rest are the controller's, and
+/// start from their defaults whenever a line is allocated.
 struct CacheTag {
   uint64_t tag = 0;
   uint64_t coherence_epoch = 0; ///< Controller-defined lazy-invalidation generation.
@@ -80,19 +44,21 @@ struct CacheTag {
   CoherenceState coherence = CoherenceState::INVALID;
 };
 
-/// @brief Set-associative cache data structure with configurable geometry and replacement policy.
+/// @brief Set-associative cache data structure with configurable geometry.
 ///
 /// @details Pure data structure, not a simulation Component. Cache controllers wrap
 /// this to implement protocol-specific behavior (write-back, write-through,
 /// coherence transitions).
 ///
+/// Tag matching and LRU replacement are BasicTagArray's, shared with the
+/// timing model's TagArray; this adds a data array indexed by the same ways.
+/// The geometry is fixed at compile time, which is what lets controllers use
+/// set_index() and tag_bits() as constants.
+///
 /// @tparam LineSizeBits Log2 of the cache line size in bytes.
 /// @tparam NumSets Number of sets in the cache.
 /// @tparam Associativity Number of ways per set.
-/// @tparam Policy Replacement policy (default: LRU).
-template <uint32_t LineSizeBits, uint32_t NumSets, uint32_t Associativity,
-          typename Policy = LRUPolicy<NumSets, Associativity>>
-class Cache {
+template <uint32_t LineSizeBits, uint32_t NumSets, uint32_t Associativity> class Cache {
 public:
   static constexpr uint32_t LINE_SIZE = 1u << LineSizeBits;
   static constexpr uint32_t LINE_MASK = LINE_SIZE - 1;
@@ -106,12 +72,12 @@ public:
   };
 
   Cache()
-      : tags_(static_cast<size_t>(NumSets) * Associativity),
+      : tags_(NumSets, Associativity, LINE_SIZE),
         data_(static_cast<size_t>(LINE_SIZE) * NumSets * Associativity, 0) {
     static_assert(util::is_power_of_2(NumSets), "NumSets must be a power of 2");
   }
 
-  /// @brief Look up an address in the cache.
+  /// @brief Look up an address in the cache, counting a hit as a use.
   ///
   /// @param addr The memory address to look up.
   /// @param tag_out If non-null and hit, set to point at the matching tag.
@@ -119,18 +85,13 @@ public:
   /// @retval true Cache hit.
   /// @retval false Cache miss.
   bool lookup(uint64_t addr, CacheTag **tag_out = nullptr, uint32_t vmid = 0) {
-    uint32_t set = set_index(addr);
-    uint64_t tag = tag_bits(addr);
-    for (uint32_t w = 0; w < Associativity; ++w) {
-      auto &t = tag_at(set, w);
-      if (t.valid && t.tag == tag && t.vmid == vmid) {
-        policy_.access(set, w);
-        if (tag_out)
-          *tag_out = &t;
-        return true;
-      }
-    }
-    return false;
+    const auto way = tags_.find(addr, vmid);
+    if (way == tags_.npos())
+      return false;
+    tags_.touch(way);
+    if (tag_out)
+      *tag_out = &tags_.entry(way);
+    return true;
   }
 
   /// @brief Allocate a cache line for an address, evicting the LRU victim if needed.
@@ -152,87 +113,25 @@ public:
   /// directly from a backing level, avoiding a second tag scan in fill_line().
   Allocation allocate_with_data(uint64_t addr, uint32_t vmid = 0, CacheTag *evicted_tag = nullptr,
                                 uint8_t *evicted_data = nullptr) {
-    uint32_t set = set_index(addr);
-    uint64_t tag = tag_bits(addr);
-
-    // Check for an invalid way first.
-    for (uint32_t w = 0; w < Associativity; ++w) {
-      auto &t = tag_at(set, w);
-      if (!t.valid) {
-        t.tag = tag;
-        t.coherence_epoch = 0;
-        t.vmid = vmid;
-        t.valid = true;
-        t.dirty = false;
-        t.coherence = CoherenceState::INVALID;
-        policy_.access(set, w);
-        if (evicted_tag)
-          *evicted_tag = {};
-        return {&t, line_data(set, w)};
-      }
-    }
-
-    // Evict LRU victim.
-    uint32_t victim_way = policy_.victim(set);
-    auto &vt = tag_at(set, victim_way);
+    const auto fill = tags_.fill(addr, vmid);
     if (evicted_tag)
-      *evicted_tag = vt;
-    if (evicted_data)
-      std::memcpy(evicted_data, line_data(set, victim_way), LINE_SIZE);
-
-    vt.tag = tag;
-    vt.coherence_epoch = 0;
-    vt.vmid = vmid;
-    vt.valid = true;
-    vt.dirty = false;
-    vt.coherence = CoherenceState::INVALID;
-    policy_.access(set, victim_way);
-    return {&vt, line_data(set, victim_way)};
+      *evicted_tag = fill.evicted.valid ? fill.evicted : CacheTag{};
+    if (evicted_data && fill.evicted.valid)
+      std::memcpy(evicted_data, line_data(fill.index), LINE_SIZE);
+    return {&tags_.entry(fill.index), line_data(fill.index)};
   }
 
   /// @brief Invalidate the cache line for an address (if present).
   /// @param addr The memory address whose cache line to invalidate.
   /// @param vmid Owning process address space.
-  void invalidate(uint64_t addr, uint32_t vmid = 0) {
-    uint32_t set = set_index(addr);
-    uint64_t tag = tag_bits(addr);
-    for (uint32_t w = 0; w < Associativity; ++w) {
-      auto &t = tag_at(set, w);
-      if (t.valid && t.tag == tag && t.vmid == vmid) {
-        t.coherence_epoch = 0;
-        t.valid = false;
-        t.dirty = false;
-        t.coherence = CoherenceState::INVALID;
-        return;
-      }
-    }
-  }
+  void invalidate(uint64_t addr, uint32_t vmid = 0) { tags_.invalidate(addr, vmid); }
 
   /// @brief Invalidate all cache lines for an address across all address spaces.
   /// @param addr The memory address whose cache line to invalidate.
-  void invalidate_all_vmids(uint64_t addr) {
-    uint32_t set = set_index(addr);
-    uint64_t tag = tag_bits(addr);
-    for (uint32_t w = 0; w < Associativity; ++w) {
-      auto &t = tag_at(set, w);
-      if (t.valid && t.tag == tag) {
-        t.coherence_epoch = 0;
-        t.valid = false;
-        t.dirty = false;
-        t.coherence = CoherenceState::INVALID;
-      }
-    }
-  }
+  void invalidate_all_vmids(uint64_t addr) { tags_.invalidate_all_vmids(addr); }
 
   /// @brief Invalidate all cache lines.
-  void invalidate_all() {
-    for (auto &t : tags_) {
-      t.coherence_epoch = 0;
-      t.valid = false;
-      t.dirty = false;
-      t.coherence = CoherenceState::INVALID;
-    }
-  }
+  void invalidate_all() { tags_.invalidate_all(); }
 
   /// @brief Read from a cache line (must be a hit - caller ensures via lookup).
   /// @param addr The memory address identifying the cache line.
@@ -241,34 +140,19 @@ public:
   /// @param size Number of bytes to read.
   void read_line(uint64_t addr, uint8_t *dst, uint32_t offset, uint32_t size,
                  uint32_t vmid = 0) const {
-    uint32_t set = set_index(addr);
-    uint64_t tag = tag_bits(addr);
-    for (uint32_t w = 0; w < Associativity; ++w) {
-      const auto &t = tag_at(set, w);
-      if (t.valid && t.tag == tag && t.vmid == vmid) {
-        assert(offset + size <= LINE_SIZE);
-        std::memcpy(dst, line_data(set, w) + offset, size);
-        return;
-      }
-    }
-    assert(false && "read_line called on a miss");
+    const auto way = tags_.find(addr, vmid);
+    assert(way != tags_.npos() && "read_line called on a miss");
+    assert(offset + size <= LINE_SIZE);
+    std::memcpy(dst, line_data(way) + offset, size);
   }
 
-  /// @brief Return a const pointer to the data for a cache line.
+  /// @brief Return a const pointer to the data for a cache line, counting a
+  ///        hit as a use.
   ///
   /// @param addr The memory address identifying the cache line.
   /// @returns Pointer to the line data, or nullptr if not found.
   const uint8_t *line_data_for_read(uint64_t addr, uint32_t vmid = 0) {
-    uint32_t set = set_index(addr);
-    uint64_t tag = tag_bits(addr);
-    for (uint32_t w = 0; w < Associativity; ++w) {
-      auto &t = tag_at(set, w);
-      if (t.valid && t.tag == tag && t.vmid == vmid) {
-        policy_.access(set, w);
-        return line_data(set, w);
-      }
-    }
-    return nullptr;
+    return line_data_for_write(addr, vmid);
   }
 
   /// @brief Write to a cache line (must be a hit - caller ensures via lookup/allocate).
@@ -278,66 +162,43 @@ public:
   /// @param size Number of bytes to write.
   void write_line(uint64_t addr, const uint8_t *src, uint32_t offset, uint32_t size,
                   uint32_t vmid = 0) {
-    uint32_t set = set_index(addr);
-    uint64_t tag = tag_bits(addr);
-    for (uint32_t w = 0; w < Associativity; ++w) {
-      auto &t = tag_at(set, w);
-      if (t.valid && t.tag == tag && t.vmid == vmid) {
-        assert(offset + size <= LINE_SIZE);
-        std::memcpy(line_data(set, w) + offset, src, size);
-        return;
-      }
-    }
-    assert(false && "write_line called on a miss");
+    const auto way = tags_.find(addr, vmid);
+    assert(way != tags_.npos() && "write_line called on a miss");
+    assert(offset + size <= LINE_SIZE);
+    std::memcpy(line_data(way) + offset, src, size);
   }
 
   /// @brief Fill an entire cache line with data (used after allocate on a miss).
   /// @param addr The memory address identifying the cache line.
   /// @param data Source buffer containing a full cache line of data.
   void fill_line(uint64_t addr, const uint8_t *data, uint32_t vmid = 0) {
-    uint32_t set = set_index(addr);
-    uint64_t tag = tag_bits(addr);
-    for (uint32_t w = 0; w < Associativity; ++w) {
-      auto &t = tag_at(set, w);
-      if (t.valid && t.tag == tag && t.vmid == vmid) {
-        std::memcpy(line_data(set, w), data, LINE_SIZE);
-        return;
-      }
-    }
-    assert(false && "fill_line called on a miss");
+    const auto way = tags_.find(addr, vmid);
+    assert(way != tags_.npos() && "fill_line called on a miss");
+    std::memcpy(line_data(way), data, LINE_SIZE);
   }
 
-  /// @brief Return a mutable pointer to the data for a cache line (must be a hit).
+  /// @brief Return a mutable pointer to the data for a cache line, counting a
+  ///        hit as a use.
   ///
   /// Used by atomic RMW operations that need to read-modify-write in place.
   /// @param addr The memory address identifying the cache line.
   /// @returns Pointer to the line data, or nullptr if not found.
   uint8_t *line_data_for_write(uint64_t addr, uint32_t vmid = 0) {
-    uint32_t set = set_index(addr);
-    uint64_t tag = tag_bits(addr);
-    for (uint32_t w = 0; w < Associativity; ++w) {
-      auto &t = tag_at(set, w);
-      if (t.valid && t.tag == tag && t.vmid == vmid) {
-        policy_.access(set, w);
-        return line_data(set, w);
-      }
-    }
-    return nullptr;
+    const auto way = tags_.find(addr, vmid);
+    if (way == tags_.npos())
+      return nullptr;
+    tags_.touch(way);
+    return line_data(way);
   }
 
   /// @brief Iterate over all dirty lines, calling fn(tag, line_addr, data_ptr) for each.
   /// @tparam F Callable with signature void(CacheTag&, uint64_t, uint8_t*).
   /// @param fn Callback invoked for each dirty cache line.
   template <typename F> void for_each_dirty(F &&fn) {
-    for (uint32_t s = 0; s < NumSets; ++s)
-      for (uint32_t w = 0; w < Associativity; ++w) {
-        auto &t = tag_at(s, w);
-        if (t.valid && t.dirty) {
-          uint64_t line_addr =
-              (t.tag << (LineSizeBits + log2_sets())) | (static_cast<uint64_t>(s) << LineSizeBits);
-          fn(t, line_addr, line_data(s, w));
-        }
-      }
+    tags_.for_each_valid([&](CacheTag &tag, uint64_t line_addr, size_t way) {
+      if (tag.dirty)
+        fn(tag, line_addr, line_data(way));
+    });
   }
 
   /// @brief Reconstruct the line-aligned address from a tag entry and set index.
@@ -359,38 +220,17 @@ public:
 
   /// @brief Return the tag bits for an address.
   /// @param addr The memory address.
-  /// @returns Tag bits.
-  static uint64_t tag_bits(uint64_t addr) { return addr >> (LineSizeBits + log2_sets()); }
+  /// @returns Tag bits. The same value the tag store keeps in CacheTag::tag.
+  static uint64_t tag_bits(uint64_t addr) {
+    return addr >> (LineSizeBits + std::countr_zero(NumSets));
+  }
 
 private:
-  static constexpr uint32_t log2_sets() {
-    uint32_t n = NumSets, bits = 0;
-    while (n > 1) {
-      n >>= 1;
-      ++bits;
-    }
-    return bits;
-  }
+  uint8_t *line_data(size_t way) { return &data_[way * LINE_SIZE]; }
+  const uint8_t *line_data(size_t way) const { return &data_[way * LINE_SIZE]; }
 
-  CacheTag &tag_at(uint32_t set, uint32_t way) {
-    return tags_[static_cast<size_t>(set) * Associativity + way];
-  }
-
-  const CacheTag &tag_at(uint32_t set, uint32_t way) const {
-    return tags_[static_cast<size_t>(set) * Associativity + way];
-  }
-
-  uint8_t *line_data(uint32_t set, uint32_t way) {
-    return &data_[(static_cast<size_t>(set) * Associativity + way) * LINE_SIZE];
-  }
-
-  const uint8_t *line_data(uint32_t set, uint32_t way) const {
-    return &data_[(static_cast<size_t>(set) * Associativity + way) * LINE_SIZE];
-  }
-
-  std::vector<CacheTag> tags_;
+  BasicTagArray<CacheTag> tags_;
   std::vector<uint8_t> data_;
-  Policy policy_;
 };
 
 } // namespace simdojo
