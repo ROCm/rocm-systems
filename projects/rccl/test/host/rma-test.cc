@@ -1267,4 +1267,254 @@ TEST_F(RmaScheduleTest, Batching_LeavesOtherContextsUntouched) {
   EXPECT_EQ(comm_->planner.nTasksRma, 1);
 }
 
+// The debug states that change which arm of a log predicate is taken. INFO is
+// `(level >= INFO && (flags & mask)) || level < 0`, and NCCLCHECKGOTO wraps its
+// backtrace in `if (ncclDebugNoWarn == 0)`, so covering both arms of each needs
+// the mask off and the "debug not yet initialised" level as well as the obvious
+// enabled state.
+struct DebugState {
+  int level;
+  uint64_t mask;
+  int noWarn;
+};
+const DebugState kDebugStates[] = {
+  {NCCL_LOG_INFO, ~0ULL, 0},  // logging on, backtrace printed
+  {NCCL_LOG_INFO, ~0ULL, 1},  // logging on, backtrace suppressed
+  {NCCL_LOG_INFO, 0ULL, 0},   // level passes, subsystem mask does not
+  {-1, ~0ULL, 0},             // debug not yet initialised
+};
+
+// Which call in a repeated seam should fail; 1 = the first call.
+struct FailAt {
+  int eventRecord = 0;
+  int streamWait = 0;
+  bool proxyLaunch = false;
+  bool ceLaunch = false;
+};
+
+// --- debug-logging configuration -------------------------------------------
+//
+// Everything above runs at the default NCCL_LOG_NONE, which short-circuits both
+// the INFO in scheduleRmaTasksToPlan and the backtrace INFO inside
+// NCCLCHECKGOTO, so their format strings are never evaluated. That matters:
+// rma.cc's plan summary passes six arguments, and a mismatch there would only
+// ever fault for a user running NCCL_DEBUG=INFO.
+//
+// The env var cannot drive this here (the real ncclDebugInit is not linked in),
+// so the fakes' debug globals are set directly. They are process-wide, so the
+// fixture saves and restores them.
+
+class RmaDebugLoggingTest : public RmaScheduleTest {
+protected:
+  int savedLevel_ = 0;
+  uint64_t savedMask_ = 0;
+  int savedNoWarn_ = 0;
+
+  void SetUp() override {
+    RmaScheduleTest::SetUp();
+    savedLevel_ = ncclDebugLevel;
+    savedMask_ = ncclDebugMask;
+    savedNoWarn_ = ncclDebugNoWarn;
+    ncclDebugLevel = NCCL_LOG_INFO;
+    ncclDebugMask = ~0ULL;  // every subsystem, so NCCL_COLL passes the mask test
+  }
+
+  void SetDebug(const DebugState& d) {
+    ncclDebugLevel = d.level;
+    ncclDebugMask = d.mask;
+    ncclDebugNoWarn = d.noWarn;
+  }
+
+  // Run one mixed-path call with a chosen check site forced to fail.
+  ncclResult_t RunMixed(bool put, const FailAt& f) {
+    int records = 0, waits = 0;
+    ScopedHook rec(g_hipEventRecord, [&](hipEvent_t, hipStream_t) {
+      return ++records == f.eventRecord ? hipErrorInvalidValue : hipSuccess;
+    });
+    ScopedHook wt(g_hipStreamWaitEvent, [&](hipStream_t, hipEvent_t, unsigned int) {
+      return ++waits == f.streamWait ? hipErrorInvalidValue : hipSuccess;
+    });
+    using LaunchFn = std::function<ncclResult_t(ncclComm*, ncclKernelPlan*, hipStream_t)>;
+    LaunchFn fail = [](ncclComm*, ncclKernelPlan*, hipStream_t) { return ncclInternalError; };
+    LaunchFn ok = [](ncclComm*, ncclKernelPlan*, hipStream_t) { return ncclSuccess; };
+    ScopedHook pp(g_rmaProxyPutLaunch, f.proxyLaunch ? fail : ok);
+    ScopedHook cp(g_rmaCePutLaunch, f.ceLaunch ? fail : ok);
+    ScopedHook pw(g_rmaProxyWaitLaunch, f.proxyLaunch ? fail : ok);
+    ScopedHook cw(g_rmaCeWaitLaunch, f.ceLaunch ? fail : ok);
+
+    ncclRmaArgs args{};
+    args.func = put ? ncclFuncPutSignal : ncclFuncWaitSignal;
+    args.nRmaTasksProxy = 1;
+    args.nRmaTasksCe = 1;
+    plan_->rmaArgs = &args;
+    return put ? ncclRmaPut(comm_.get(), plan_.get(), kMainStream)
+               : ncclRmaWaitSignal(comm_.get(), plan_.get(), kMainStream);
+  }
+
+  void TearDown() override {
+    ncclDebugLevel = savedLevel_;
+    ncclDebugMask = savedMask_;
+    ncclDebugNoWarn = savedNoWarn_;
+    RmaScheduleTest::TearDown();
+  }
+};
+
+// The plan-summary INFO fires and its six-argument format string is evaluated.
+TEST_F(RmaDebugLoggingTest, SchedulePlanSummaryIsLoggedWithoutChangingResult) {
+  EnqueuePut(0, 1);
+  EnqueuePut(0, 12);
+
+  ASSERT_EQ(scheduleRmaTasksToPlan(comm_.get(), plan_.get()), ncclSuccess);
+
+  EXPECT_EQ(plan_->rmaArgs->nRmaTasks, 2);
+  EXPECT_EQ(plan_->rmaArgs->nRmaTasksCe, 1);
+  EXPECT_EQ(plan_->rmaArgs->nRmaTasksProxy, 1);
+}
+
+// The same INFO reached with the split's counters rather than the batch loop's.
+TEST_F(RmaDebugLoggingTest, WaitSignalSplitSummaryIsLogged) {
+  EnqueueWait(/*ctx=*/0, {2, 9});
+
+  ASSERT_EQ(scheduleRmaTasksToPlan(comm_.get(), plan_.get()), ncclSuccess);
+
+  EXPECT_EQ(plan_->rmaArgs->nRmaTasks, 2);
+  ReleaseProxyWaitArrays(plan_.get());
+}
+
+// NCCLCHECKGOTO's `ncclDebugNoWarn == 0` guard, taken on a launcher failure.
+TEST_F(RmaDebugLoggingTest, LaunchFailureLogsBacktraceAndStillReturnsError) {
+  ncclRmaArgs args{};
+  args.func = ncclFuncPutSignal;
+  args.nRmaTasksProxy = 1;
+  plan_->rmaArgs = &args;
+  ScopedHook proxy(g_rmaProxyPutLaunch,
+                   [](ncclComm*, ncclKernelPlan*, hipStream_t) { return ncclInternalError; });
+
+  EXPECT_EQ(ncclLaunchRma(comm_.get(), plan_.get()), ncclInternalError);
+  EXPECT_EQ(proxy.calls, 1);
+}
+
+// The other arm of that guard: suppressing the backtrace must not change the error.
+TEST_F(RmaDebugLoggingTest, LaunchFailureWithNoWarnSuppressesLogButKeepsError) {
+  ncclDebugNoWarn = 1;
+  ncclRmaArgs args{};
+  args.func = ncclFuncPutSignal;
+  args.nRmaTasksProxy = 1;
+  plan_->rmaArgs = &args;
+  ScopedHook proxy(g_rmaProxyPutLaunch,
+                   [](ncclComm*, ncclKernelPlan*, hipStream_t) { return ncclInternalError; });
+
+  EXPECT_EQ(ncclLaunchRma(comm_.get(), plan_.get()), ncclInternalError);
+}
+
+// Every check site in the two mixed paths, driven to failure under each debug
+// state, so the log predicates inside CUDACHECKGOTO and NCCLCHECKGOTO are taken
+// both ways at every site rather than only where a dedicated test happens to fail.
+TEST_F(RmaDebugLoggingTest, EveryMixedPathCheckSiteUnwindsUnderEveryDebugState) {
+  const FailAt sites[] = {
+    {1, 0, false, false}, {2, 0, false, false},
+    {0, 1, false, false}, {0, 2, false, false},
+    {0, 0, true, false},  {0, 0, false, true},
+  };
+  for (const DebugState& d : kDebugStates) {
+    for (const FailAt& f : sites) {
+      SetDebug(d);
+      EXPECT_NE(RunMixed(/*put=*/false, f), ncclSuccess);
+      EXPECT_NE(RunMixed(/*put=*/true, f), ncclSuccess);
+    }
+  }
+}
+
+// The same sites returning ncclInProgress instead, which NCCLCHECKGOTO must treat
+// as non-fatal at each launcher rather than only where a dedicated test checks.
+TEST_F(RmaDebugLoggingTest, EveryLauncherInProgressIsNonFatalUnderEveryDebugState) {
+  for (const DebugState& d : kDebugStates) {
+    SetDebug(d);
+    for (bool put : {false, true}) {
+      for (bool proxy : {false, true}) {
+        LaunchLog log;
+        AllHooks hooks(log);
+        auto inProgress = [](ncclComm*, ncclKernelPlan*, hipStream_t) { return ncclInProgress; };
+        ncclRmaArgs args{};
+        args.func = put ? ncclFuncPutSignal : ncclFuncWaitSignal;
+        args.nRmaTasksProxy = 1;
+        args.nRmaTasksCe = 1;
+        plan_->rmaArgs = &args;
+        if (put && proxy)        { ScopedHook h(g_rmaProxyPutLaunch, inProgress);
+                                   EXPECT_EQ(ncclRmaPut(comm_.get(), plan_.get(), kMainStream), ncclSuccess); }
+        else if (put)            { ScopedHook h(g_rmaCePutLaunch, inProgress);
+                                   EXPECT_EQ(ncclRmaPut(comm_.get(), plan_.get(), kMainStream), ncclInProgress); }
+        else if (proxy)          { ScopedHook h(g_rmaProxyWaitLaunch, inProgress);
+                                   EXPECT_EQ(ncclRmaWaitSignal(comm_.get(), plan_.get(), kMainStream), ncclSuccess); }
+        else                     { ScopedHook h(g_rmaCeWaitLaunch, inProgress);
+                                   EXPECT_EQ(ncclRmaWaitSignal(comm_.get(), plan_.get(), kMainStream), ncclInProgress); }
+      }
+    }
+  }
+}
+
+// The single-transport arms, which the mixed-path matrix above never reaches.
+TEST_F(RmaDebugLoggingTest, SingleTransportArmsUnwindUnderEveryDebugState) {
+  using LaunchFn = std::function<ncclResult_t(ncclComm*, ncclKernelPlan*, hipStream_t)>;
+  LaunchFn fail = [](ncclComm*, ncclKernelPlan*, hipStream_t) { return ncclInternalError; };
+  for (const DebugState& d : kDebugStates) {
+    for (bool put : {false, true}) {
+      for (bool proxyOnly : {false, true}) {
+        SetDebug(d);
+        LaunchLog log;
+        AllHooks hooks(log);
+        ncclRmaArgs args{};
+        args.func = put ? ncclFuncPutSignal : ncclFuncWaitSignal;
+        args.nRmaTasksProxy = proxyOnly ? 1 : 0;
+        args.nRmaTasksCe = proxyOnly ? 0 : 1;
+        plan_->rmaArgs = &args;
+        ScopedHook pp(g_rmaProxyPutLaunch, fail);
+        ScopedHook cp(g_rmaCePutLaunch, fail);
+        ScopedHook pw(g_rmaProxyWaitLaunch, fail);
+        ScopedHook cw(g_rmaCeWaitLaunch, fail);
+        EXPECT_EQ(put ? ncclRmaPut(comm_.get(), plan_.get(), kMainStream)
+                      : ncclRmaWaitSignal(comm_.get(), plan_.get(), kMainStream),
+                  ncclInternalError);
+      }
+    }
+  }
+}
+
+// ncclLaunchRma's three dispatch arms, failing and in-progress, under each state.
+TEST_F(RmaDebugLoggingTest, EveryDispatchArmUnwindsUnderEveryDebugState) {
+  const ncclFunc_t funcs[] = {ncclFuncPutSignal, ncclFuncSignal, ncclFuncWaitSignal};
+  for (const DebugState& d : kDebugStates) {
+    for (ncclFunc_t fn : funcs) {
+      for (ncclResult_t r : {ncclInternalError, ncclInProgress}) {
+        SetDebug(d);
+        LaunchLog log;
+        AllHooks hooks(log);
+        ncclRmaArgs args{};
+        args.func = fn;
+        args.nRmaTasksProxy = 1;
+        plan_->rmaArgs = &args;
+        auto ret = [r](ncclComm*, ncclKernelPlan*, hipStream_t) { return r; };
+        ScopedHook put(g_rmaProxyPutLaunch, ret);
+        ScopedHook wait(g_rmaProxyWaitLaunch, ret);
+        EXPECT_EQ(ncclLaunchRma(comm_.get(), plan_.get()), r);
+      }
+    }
+  }
+}
+
+// Both ncclCalloc arms of the split, under each debug state.
+TEST_F(RmaDebugLoggingTest, BothCallocFailuresUnwindUnderEveryDebugState) {
+  for (const DebugState& d : kDebugStates) {
+    for (int which : {0, 1}) {
+      SetDebug(d);
+      auto plan = std::make_unique<ncclKernelPlan>();
+      SetNumRmaCtx(4);
+      EnqueueWait(/*ctx=*/0, {7});
+      g_rmaCallocFailAt = g_rmaCallocCallIndex + which;
+      EXPECT_EQ(scheduleRmaTasksToPlan(comm_.get(), plan.get()), ncclSystemError);
+      g_rmaCallocFailAt = -1;
+    }
+  }
+}
+
 }  // namespace
