@@ -78,7 +78,7 @@ add_test(NAME rdc_diag_kernel_tests COMMAND rdc_diag_kernel_tests)
 # rdc_unit_tests: hardware-aware SmiUtils tests. Links librdc (flat table,
 # partition helpers) and amd_smi. Provides its own main() to init amdsmi once.
 # Hardware-dependent tests self-skip when no AMD GPU is present.
-add_executable(${RDC_UNIT_TESTS} ${SRC_DIR}/test_smi_utils.cc)
+add_executable(${RDC_UNIT_TESTS} ${SRC_DIR}/test_smi_utils.cc ${SRC_DIR}/test_health_fields.cc)
 target_include_directories(
     ${RDC_UNIT_TESTS}
     PRIVATE ${PROJECT_SOURCE_DIR}/include ${AMD_SMI_INCLUDE_DIR}

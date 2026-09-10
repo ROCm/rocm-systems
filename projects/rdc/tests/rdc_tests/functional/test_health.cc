@@ -20,7 +20,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 */
 
-#include "rdc_tests/functional/rdci_health.h"
+#include "rdc_tests/functional/test_health.h"
 
 #include <gtest/gtest.h>
 #include <stddef.h>
