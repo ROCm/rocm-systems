@@ -300,7 +300,7 @@ configure(bool _setup, std::int64_t _tid)
         _causal->set_verbose(_verbose);
         _causal->set_offload(&causal_offload_buffer);
 
-        if(get_causal_backend() == state::process::CausalBackend::Perf)
+        if(get_causal_backend() == state::process::CausalBackend::perf)
         {
             auto _perf_error = _activate_perf_backend();
             if(_perf_error)
@@ -310,7 +310,7 @@ configure(bool _setup, std::int64_t _tid)
                 std::exit(1);
             }
         }
-        else if(get_causal_backend() == state::process::CausalBackend::Timer)
+        else if(get_causal_backend() == state::process::CausalBackend::timer)
         {
             if(!_activate_timer_backend())
             {
@@ -318,7 +318,7 @@ configure(bool _setup, std::int64_t _tid)
                 std::exit(1);
             }
         }
-        else if(get_causal_backend() == state::process::CausalBackend::Auto)
+        else if(get_causal_backend() == state::process::CausalBackend::automatic)
         {
             auto _perf_error = _activate_perf_backend();
             if(!_perf_error)

@@ -184,7 +184,7 @@ pthread_create_gotcha::wrapper::operator()() const
     auto         _is_sampling = false;
     auto         _bundle      = std::shared_ptr<bundle_t>{};
     auto         _signals     = std::set<int>{};
-    auto         _coverage    = (get_mode() == state::process::Mode::Coverage);
+    auto         _coverage    = (get_mode() == state::process::Mode::coverage);
     const auto&  _parent_info = thread_info::get(m_config.parent_tid, InternalTID);
     const auto&  _info        = thread_info::init(m_config.offset);
     if(!_info)
@@ -606,7 +606,7 @@ pthread_create_gotcha::operator()(pthread_t* thread, const pthread_attr_t* attr,
 
     auto _thread_state_guard = state::thread::scoped(state::thread::Internal);
 
-    auto _coverage     = (_mode == state::process::Mode::Coverage);
+    auto _coverage     = (_mode == state::process::Mode::coverage);
     auto _use_sampling = config::get_use_sampling();
     auto _use_causal   = config::get_use_causal();
     auto _offset       = (!_enabled || !_active || _info->is_offset);

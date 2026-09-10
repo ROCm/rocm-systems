@@ -65,7 +65,7 @@ using rocprofsys::common::update_mode;
 template <typename Tp>
 void
 update_env(parser_data& _data, std::string_view _env_var, Tp&& _env_val,
-           update_mode _mode = update_mode::REPLACE, std::string_view _join_delim = ":")
+           update_mode _mode = update_mode::replace, std::string_view _join_delim = ":")
 {
     rocprofsys::common::update_env(_data.env.current, _env_var,
                                    std::forward<Tp>(_env_val), _mode, _join_delim,
@@ -109,10 +109,10 @@ init_parser(parser_data& _data)
         path::realpath(path::get_internal_libpath("librocprof-sys.so").c_str());
 
     auto _libexecpath = path::realpath(path::get_internal_script_path());
-    update_env(_data, env_vars::SCRIPT_PATH, _libexecpath, update_mode::REPLACE);
+    update_env(_data, env_vars::SCRIPT_PATH, _libexecpath, update_mode::replace);
 
     auto _rootpath = path::realpath(path::get_rocprofsys_root());
-    update_env(_data, env_vars::ROOT, _rootpath, update_mode::REPLACE);
+    update_env(_data, env_vars::ROOT, _rootpath, update_mode::replace);
 
     return _data;
 }
@@ -120,7 +120,7 @@ init_parser(parser_data& _data)
 parser_data&
 add_ld_preload(parser_data& _data)
 {
-    update_env(_data, "LD_PRELOAD", _data.env.dl_libpath, update_mode::APPEND);
+    update_env(_data, "LD_PRELOAD", _data.env.dl_libpath, update_mode::append);
     return _data;
 }
 
@@ -130,7 +130,7 @@ add_ld_library_path(parser_data& _data)
     auto libdir = path::parent_path(_data.env.dl_libpath);
     if(path::is_directory(libdir))
     {
-        update_env(_data, "LD_LIBRARY_PATH", libdir, update_mode::APPEND);
+        update_env(_data, "LD_LIBRARY_PATH", libdir, update_mode::append);
     }
     return _data;
 }
@@ -380,9 +380,9 @@ add_core_arguments(parser_t& _parser, parser_data& _data)
                 if(!_modes.empty())
                 {
                     update_env(_data, env_vars::SAMPLING_CPUTIME,
-                               _modes.count("cputime") > 0, update_mode::WEAK);
+                               _modes.count("cputime") > 0, update_mode::weak);
                     update_env(_data, env_vars::SAMPLING_REALTIME,
-                               _modes.count("realtime") > 0, update_mode::WEAK);
+                               _modes.count("realtime") > 0, update_mode::weak);
                 }
             });
 
@@ -439,11 +439,11 @@ add_core_arguments(parser_t& _parser, parser_data& _data)
             .dtype("seconds")
             .action([&](parser_t& p) {
                 update_env(_data, env_vars::TRACE_DELAY, p.get<double>("wait"),
-                           update_mode::WEAK);
+                           update_mode::weak);
                 update_env(_data, env_vars::SAMPLING_DELAY, p.get<double>("wait"),
-                           update_mode::WEAK);
+                           update_mode::weak);
                 update_env(_data, env_vars::CAUSAL_DELAY, p.get<double>("wait"),
-                           update_mode::WEAK);
+                           update_mode::weak);
             });
 
         _data.reg.processed_environs.emplace("wait");
@@ -460,11 +460,11 @@ add_core_arguments(parser_t& _parser, parser_data& _data)
             .dtype("seconds")
             .action([&](parser_t& p) {
                 update_env(_data, env_vars::TRACE_DURATION, p.get<double>("duration"),
-                           update_mode::WEAK);
+                           update_mode::weak);
                 update_env(_data, env_vars::SAMPLING_DURATION, p.get<double>("duration"),
-                           update_mode::WEAK);
+                           update_mode::weak);
                 update_env(_data, env_vars::CAUSAL_DURATION, p.get<double>("duration"),
-                           update_mode::WEAK);
+                           update_mode::weak);
             });
 
         _data.reg.processed_environs.emplace("duration");
@@ -482,7 +482,7 @@ add_core_arguments(parser_t& _parser, parser_data& _data)
             .action([&](parser_t& p) {
                 update_env(_data, env_vars::TRACE_PERIODS,
                            fmt::format("{}", fmt::join(p.get<strvec_t>("periods"), " ")),
-                           update_mode::WEAK);
+                           update_mode::weak);
             });
 
         _data.reg.processed_environs.emplace("periods");
@@ -593,7 +593,7 @@ add_core_arguments(parser_t& _parser, parser_data& _data)
 
                 if(_v.count("all") > 0 || _v.count("kokkosp") > 0)
                     update_env(_data, "KOKKOS_TOOLS_LIBS", _data.env.omni_libpath,
-                               update_mode::PREPEND);
+                               update_mode::prepend);
             });
 
         _data.reg.processed_environs.emplace("include");

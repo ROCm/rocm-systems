@@ -46,7 +46,7 @@ metadata_initialize_counters_pmc(size_t dev_id, const std::string& name,
     const auto*  TARGET_ARCH      = "GPU";
 
     trace_cache::get_metadata_registry().add_pmc_info(
-        { agent_type::GPU, dev_id, TARGET_ARCH, EVENT_CODE, INSTANCE_ID, name.c_str(),
+        { agent_type::gpu, dev_id, TARGET_ARCH, EVENT_CODE, INSTANCE_ID, name.c_str(),
           name.c_str(), metric_description.c_str(), LONG_DESCRIPTION, COMPONENT,
           "Unit Count", rocprofsys::trace_cache::ABSOLUTE, BLOCK, EXPRESSION, 0, 0,
           "{}" });
@@ -198,7 +198,7 @@ counter_storage::write_zero(rocprofiler_timestamp_t timestamp) const
     trace_cache::get_buffer_storage().store(trace_cache::pmc_event_with_sample{
         static_cast<size_t>(category_enum_id<category::rocm_counter_collection>::value),
         track_name.c_str(), timestamp, "{}", 0, 0, 0, "{}", "{}", device_type_index,
-        static_cast<std::uint8_t>(agent_type::GPU), track_name.c_str(), 0.0,
+        static_cast<std::uint8_t>(agent_type::gpu), track_name.c_str(), 0.0,
         std::nullopt });
 }
 

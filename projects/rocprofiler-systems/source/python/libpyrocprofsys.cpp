@@ -131,7 +131,7 @@ PYBIND11_MODULE(libpyrocprofsys, omni)
             _is_initialized = true;
             _register_pause_callbacks();
             rocprofsys_set_instrumented(
-                static_cast<int>(rocprofsys::dl::InstrumentMode::PythonProfile));
+                static_cast<int>(rocprofsys::dl::instrument_mode::python_profile));
             rocprofsys_set_mpi(_get_use_mpi());
             std::string _cmd      = {};
             std::string _cmd_line = {};

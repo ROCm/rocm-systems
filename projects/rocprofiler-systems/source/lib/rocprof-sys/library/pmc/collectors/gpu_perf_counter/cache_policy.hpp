@@ -53,7 +53,7 @@ struct cache_policy
 
             registry.add_track({ track_name, std::nullopt, "{}" });
 
-            registry.add_pmc_info({ agent_type::GPU, gpu_id, target_arch, event_code,
+            registry.add_pmc_info({ agent_type::gpu, gpu_id, target_arch, event_code,
                                     instance_id, qname, qname,
                                     meta.description.empty() ? "SDK PMC hardware counter"
                                                              : meta.description,

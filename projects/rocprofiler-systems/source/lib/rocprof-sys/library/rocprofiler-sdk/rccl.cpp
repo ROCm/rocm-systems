@@ -81,7 +81,7 @@ struct production_pmc_registrar
             const std::string label =
                 fmt::format("{} GPU {}", direction_label, rccl_device_idx);
             trace_cache::get_metadata_registry().add_pmc_info(
-                { agent_type::GPU, rccl_device_idx, TARGET_ARCH, EVENT_CODE, INSTANCE_ID,
+                { agent_type::gpu, rccl_device_idx, TARGET_ARCH, EVENT_CODE, INSTANCE_ID,
                   label.c_str(), description,
                   trait::name<category::comm_data>::description, LONG_DESCRIPTION,
                   COMPONENT, MSG, trace_cache::ABSOLUTE, BLOCK, EXPRESSION, 0, 0, "{}" });
@@ -229,7 +229,7 @@ cache_rccl_comm_data_events(std::uint32_t rccl_device_idx, size_t bytes,
         static_cast<size_t>(category_enum_id<category::comm_data>::value), Track::label,
         timestamp_ns, event_metadata.c_str(), stack_id, parent_stack_id, correlation_id,
         call_stack, line_info, rccl_device_idx,
-        static_cast<std::uint8_t>(agent_type::GPU), pmc_label.c_str(),
+        static_cast<std::uint8_t>(agent_type::gpu), pmc_label.c_str(),
         static_cast<double>(cumulative), std::nullopt });
 }
 

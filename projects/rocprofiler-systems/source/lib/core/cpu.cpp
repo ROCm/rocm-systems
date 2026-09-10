@@ -176,7 +176,7 @@ query_cpu_agents()
     {
         const auto node_id     = node_count++;
         const auto device_name = "CPU" + std::to_string(socket_id);
-        auto       cur_agent   = agent{ agent_type::CPU,
+        auto       cur_agent   = agent{ agent_type::cpu,
                                 0,
                                 static_cast<std::uint32_t>(socket_id),
                                 node_id,

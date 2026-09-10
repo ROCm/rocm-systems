@@ -103,23 +103,23 @@ metadata_initialize_comm_data_pmc()
 
 #if defined(ROCPROFSYS_USE_MPI)
     trace_cache::get_metadata_registry().add_pmc_info(
-        { agent_type::CPU, DEVICE_ID, TARGET_ARCH, EVENT_CODE, INSTANCE_ID,
+        { agent_type::cpu, DEVICE_ID, TARGET_ARCH, EVENT_CODE, INSTANCE_ID,
           comm_data::mpi_send::label, "Tracks MPI communication data sizes",
           trait::name<category::mpi>::description, LONG_DESCRIPTION, COMPONENT, MSG,
           rocprofsys::trace_cache::ABSOLUTE, BLOCK, EXPRESSION, 0, 0, "{}" });
     trace_cache::get_metadata_registry().add_pmc_info(
-        { agent_type::CPU, DEVICE_ID, TARGET_ARCH, EVENT_CODE, INSTANCE_ID,
+        { agent_type::cpu, DEVICE_ID, TARGET_ARCH, EVENT_CODE, INSTANCE_ID,
           comm_data::mpi_recv::label, "Tracks MPI communication data sizes",
           trait::name<category::mpi>::description, LONG_DESCRIPTION, COMPONENT, MSG,
           rocprofsys::trace_cache::ABSOLUTE, BLOCK, EXPRESSION, 0, 0, "{}" });
 #endif
     trace_cache::get_metadata_registry().add_pmc_info(
-        { agent_type::CPU, DEVICE_ID, TARGET_ARCH, EVENT_CODE, INSTANCE_ID,
+        { agent_type::cpu, DEVICE_ID, TARGET_ARCH, EVENT_CODE, INSTANCE_ID,
           comm_data::ucx_send::label, "Tracks UCX communication data sizes",
           trait::name<category::ucx>::description, LONG_DESCRIPTION, COMPONENT, MSG,
           rocprofsys::trace_cache::ABSOLUTE, BLOCK, EXPRESSION, 0, 0, "{}" });
     trace_cache::get_metadata_registry().add_pmc_info(
-        { agent_type::CPU, DEVICE_ID, TARGET_ARCH, EVENT_CODE, INSTANCE_ID,
+        { agent_type::cpu, DEVICE_ID, TARGET_ARCH, EVENT_CODE, INSTANCE_ID,
           comm_data::ucx_recv::label, "Tracks UCX communication data sizes",
           trait::name<category::ucx>::description, LONG_DESCRIPTION, COMPONENT, MSG,
           rocprofsys::trace_cache::ABSOLUTE, BLOCK, EXPRESSION, 0, 0, "{}" });
@@ -150,7 +150,7 @@ cache_comm_data_events(const std::uint32_t device_id, int bytes)
         static_cast<size_t>(category_enum_id<category::comm_data>::value),
         track_name.c_str(), timestamp_ns, event_metadata.c_str(), stack_id,
         parent_stack_id, correlation_id, call_stack.c_str(), line_info.c_str(), device_id,
-        static_cast<std::uint8_t>(agent_type::CPU), track_name.c_str(),
+        static_cast<std::uint8_t>(agent_type::cpu), track_name.c_str(),
         static_cast<double>(value), std::nullopt });
 }
 
