@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "library/rocprofiler-sdk/buffered/kfd_queue.hpp"
+#include "library/rocprofiler-sdk/buffered/tests/mock_domain_service.hpp"
 
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
@@ -9,9 +10,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <memory>
-#include <optional>
 #include <string>
-#include <string_view>
 #include <vector>
 
 namespace rocprofsys::domains::buffered
@@ -25,179 +24,12 @@ using ::testing::Field;
 using ::testing::Return;
 using ::testing::StrictMock;
 
-// Self-contained stand-in for SdkBackend: kfd_queue<SdkBackend, Externals> and
-// on_kfd_queue<SdkBackend, Externals> only ever touch these members.
-struct mock_sdk
-{
-    struct context_id_t
-    {
-        std::uint64_t handle = 0;
-    };
-    struct buffer_id_t
-    {
-        std::uint64_t handle = 0;
-    };
-    struct record_header_t
-    {
-        std::uint32_t category = 0;
-        std::uint32_t kind     = 0;
-        void*         payload  = nullptr;
-    };
-
-    static constexpr std::size_t BUFFER_TRACING_KFD_QUEUE = 31;
-
-    struct agent_id_t
-    {
-        std::uint64_t handle = 0;
-    };
-
-    struct kfd_queue_record
-    {
-        std::uint32_t operation = 0;
-        std::int32_t  pid       = 0;
-        agent_id_t    agent_id{};
-        std::uint64_t start_timestamp = 0;
-        std::uint64_t end_timestamp   = 0;
-    };
-
-    struct buffer_tracing_names_t
-    {
-        std::string_view at(std::size_t /*kind*/, std::uint32_t /*operation*/) const
-        {
-            return "operation";
-        }
-    };
-
-    static buffer_tracing_names_t get_buffer_tracing_names() { return {}; }
-};
-
-// Minimal stand-in for the agent/trace_cache::info shapes that
-// on_kfd_queue<mock_sdk, externals> touches through Externals.
-struct agent_t
-{
-    int         type              = 0;
-    std::size_t device_type_index = 0;
-};
-
-struct pmc_info_data_t
-{
-    int           type             = 0;
-    std::size_t   agent_type_index = 0;
-    std::string   target_arch;
-    std::size_t   event_code  = 0;
-    std::size_t   instance_id = 0;
-    std::string   name;
-    std::string   symbol;
-    std::string   description;
-    std::string   long_description;
-    std::string   component;
-    std::string   units;
-    std::string   value_type;
-    std::string   block;
-    std::string   expression;
-    std::uint32_t is_constant = 0;
-    std::uint32_t is_derived  = 0;
-    std::string   extdata;
-};
-
-// on_kfd_queue_configure<Externals> calls exactly these three members
-// unconditionally-or-conditionally; mocked so tests can verify it ran correctly
-// instead of just not crashing.
-struct gmock_externals
-{
-    MOCK_METHOD(void, add_string, (std::string_view value));
-    MOCK_METHOD(std::vector<std::shared_ptr<agent_t>>, get_agents_by_type, (int type));
-    MOCK_METHOD(void, add_pmc_info, (const pmc_info_data_t& info));
-};
-
-std::unique_ptr<StrictMock<gmock_externals>> g_externals_mock;
-
-// Externals mirrors the real ExternalDeps policy surface used by on_kfd_queue and
-// on_kfd_queue_configure. The on_records-only members
-// (add_thread_info/add_track/buffer_storage_store) stay plain no-ops -- only
-// add_string/get_agents_by_type/add_pmc_info, which on_configure() exercises, are
-// mocked.
-struct externals
-{
-    using agent_t    = buffered::agent_t;
-    using pmc_info_t = pmc_info_data_t;
-
-    struct thread_info_t
-    {
-        std::int32_t  parent_process_id = 0;
-        std::int32_t  process_id        = 0;
-        std::uint64_t thread_id         = 0;
-        std::uint32_t start             = 0;
-        std::uint32_t end               = 0;
-        std::string   extdata;
-    };
-
-    struct track_t
-    {
-        std::string   track_name;
-        std::uint64_t thread_id = 0;
-        std::string   extdata;
-    };
-
-    struct kfd_sample_t
-    {
-        std::uint64_t               thread_id = 0;
-        std::string                 name;
-        std::uint64_t               start_timestamp = 0;
-        std::uint64_t               end_timestamp   = 0;
-        std::string                 args_str;
-        std::string                 category;
-        std::string                 track_name;
-        std::string                 event_metadata;
-        std::uint32_t               device_id   = 0;
-        std::uint8_t                device_type = 0;
-        std::string                 pmc_info_name;
-        double                      value = 0.0;
-        std::optional<std::int64_t> system_tid;
-    };
-
-    struct agent_manager_t
-    {
-        std::vector<std::shared_ptr<agent_t>> get_agents_by_type(int type)
-        {
-            return g_externals_mock->get_agents_by_type(type);
-        }
-
-        agent_t& get_agent_by_handle(std::uint64_t /*handle*/)
-        {
-            static agent_t placeholder{};
-            return placeholder;
-        }
-    };
-
-    static constexpr int AGENT_TYPE_GPU = 1;
-    static constexpr int AGENT_TYPE_CPU = 0;
-
-    static agent_manager_t& get_agent_manager()
-    {
-        static agent_manager_t manager;
-        return manager;
-    }
-
-    static void add_string(std::string_view value)
-    {
-        g_externals_mock->add_string(value);
-    }
-    static void add_thread_info(const thread_info_t& /*info*/) {}
-    static void add_track(const track_t& /*info*/) {}
-    static void add_pmc_info(const pmc_info_t& info)
-    {
-        g_externals_mock->add_pmc_info(info);
-    }
-    static void buffer_storage_store(kfd_sample_t&& /*sample*/) {}
-
-    static std::int32_t get_pid() { return 0; }
-    static std::int32_t get_ppid() { return 0; }
-
-    static constexpr std::string_view pmc_value_type_absolute        = "ABS";
-    static constexpr std::string_view kfd_queue_category_name        = "rocm_kfd_queue";
-    static constexpr std::string_view kfd_queue_category_description = "KFD Queue Events";
-};
+using test_support::agent_t;
+using test_support::externals;
+using test_support::g_externals_mock;
+using test_support::gmock_externals;
+using test_support::mock_sdk;
+using test_support::pmc_info_data_t;
 
 }  // namespace
 

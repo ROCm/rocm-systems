@@ -5,6 +5,7 @@
 
 #include "common/units/data_size.hpp"
 #include "library/rocprofiler-sdk/types.hpp"
+#include "policies/rocprofiler-sdk/domain_service.hpp"
 
 #include <memory>
 #include <stdexcept>
@@ -15,7 +16,7 @@
 namespace rocprofsys::domains
 {
 
-template <typename SdkBackend>
+template <policies::rocprofiler_sdk::domain_service_backend SdkBackend>
 class buffered_domain
 {
 public:

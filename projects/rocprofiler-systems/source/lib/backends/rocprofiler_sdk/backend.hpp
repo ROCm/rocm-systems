@@ -60,6 +60,8 @@ struct backend
     using buffer_policy_t              = Wrapper::buffer_policy_t;
     using buffer_tracing_cb_t          = Wrapper::buffer_tracing_cb_t;
     using callback_tracing_cb_t        = Wrapper::callback_tracing_cb_t;
+    using on_records_cb_t              = buffer_tracing_cb_t;
+    using on_record_cb_t               = callback_tracing_cb_t;
     using callback_tracing_kind_t      = Wrapper::callback_tracing_kind;
     using buffer_tracing_kind_t        = Wrapper::buffer_tracing_kind;
     using tracing_operation_t          = Wrapper::tracing_operation;

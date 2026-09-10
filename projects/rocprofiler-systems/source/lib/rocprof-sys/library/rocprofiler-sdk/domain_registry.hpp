@@ -17,6 +17,7 @@
 #include "library/rocprofiler-sdk/callback/code_object.hpp"
 
 #include "library/rocprofiler-sdk/types.hpp"
+#include "policies/rocprofiler-sdk/domain_service.hpp"
 
 #include <fmt/format.h>
 
@@ -29,7 +30,8 @@
 namespace rocprofsys::domains
 {
 
-template <typename SdkBackend, typename Externals>
+template <policies::rocprofiler_sdk::domain_service_backend   SdkBackend,
+          policies::rocprofiler_sdk::domain_service_externals Externals>
 struct registry
 {
     [[nodiscard]] static const domain_descriptor* find_descriptor(

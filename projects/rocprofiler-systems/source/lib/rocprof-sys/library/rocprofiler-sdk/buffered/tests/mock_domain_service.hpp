@@ -1,28 +1,25 @@
 // Copyright (c) Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-#include "library/rocprofiler-sdk/domain_registry.hpp"
+#pragma once
 
-#include <gtest/gtest.h>
+#include <gmock/gmock.h>
 
 #include <cstddef>
 #include <cstdint>
 #include <memory>
 #include <optional>
-#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <vector>
 
-namespace rocprofsys::domains
-{
-namespace
+namespace rocprofsys::domains::buffered::test_support
 {
 
-// registry<SdkBackend, Externals> instantiates every buffered/callback domain
-// definition in library/rocprofiler-sdk/{buffered,callback}/*.hpp, so this fake must
-// satisfy the union of everything those headers touch on SdkBackend and Externals --
-// not just what a single domain needs.
+// Shared stand-in for SdkBackend, satisfying domain_service_backend for every kfd_*
+// buffered domain test. Each on_kfd_*<SdkBackend, Externals> only ever touches its own
+// record type, but k_kfd_*<SdkBackend, Externals> requires SdkBackend to satisfy the
+// full concept, so this mock carries every domain's record type and constant.
 struct mock_sdk
 {
     struct context_id_t
@@ -35,7 +32,9 @@ struct mock_sdk
     };
     struct record_header_t
     {
-        void* payload = nullptr;
+        std::uint32_t category = 0;
+        std::uint32_t kind     = 0;
+        void*         payload  = nullptr;
     };
     struct callback_thread_id_t
     {
@@ -64,15 +63,14 @@ struct mock_sdk
     static constexpr std::size_t     BUFFER_TRACING_KFD_PAGE_FAULT           = 25;
     static constexpr std::size_t     BUFFER_TRACING_KFD_PAGE_MIGRATE         = 26;
     static constexpr std::size_t     BUFFER_TRACING_KFD_QUEUE                = 27;
-    static constexpr std::size_t     CALLBACK_TRACING_CODE_OBJECT            = 1;
 
+    struct agent_id_t
+    {
+        std::uint64_t handle = 0;
+    };
     struct address_t
     {
         std::uint64_t value = 0;
-    };
-    struct agent_handle_t
-    {
-        std::uint64_t handle = 0;
     };
 
     struct kfd_event_dropped_record
@@ -88,49 +86,52 @@ struct mock_sdk
     {};
     struct kfd_event_queue_record
     {
-        std::uint32_t  operation = 0;
-        std::int32_t   pid       = 0;
-        agent_handle_t agent_id  = {};
-        std::uint64_t  timestamp = 0;
+        std::uint32_t operation = 0;
+        std::int32_t  pid       = 0;
+        agent_id_t    agent_id{};
+        std::uint64_t timestamp = 0;
     };
     struct kfd_event_unmap_record
     {
-        std::uint32_t  operation     = 0;
-        std::int32_t   pid           = 0;
-        agent_handle_t agent_id      = {};
-        std::uint64_t  timestamp     = 0;
-        address_t      start_address = {};
-        address_t      end_address   = {};
+        std::uint32_t operation = 0;
+        std::int32_t  pid       = 0;
+        agent_id_t    agent_id{};
+        std::uint64_t timestamp = 0;
+        address_t     start_address{};
+        address_t     end_address{};
     };
     struct kfd_page_fault_record
     {
-        std::uint32_t  operation       = 0;
-        std::int32_t   pid             = 0;
-        agent_handle_t agent_id        = {};
-        std::uint64_t  start_timestamp = 0;
-        std::uint64_t  end_timestamp   = 0;
-        address_t      address         = {};
+        std::uint32_t operation = 0;
+        std::int32_t  pid       = 0;
+        agent_id_t    agent_id{};
+        address_t     address{};
+        std::uint64_t start_timestamp = 0;
+        std::uint64_t end_timestamp   = 0;
     };
     struct kfd_page_migrate_record
     {
-        std::uint32_t  operation       = 0;
-        std::int32_t   pid             = 0;
-        agent_handle_t src_agent       = {};
-        agent_handle_t dst_agent       = {};
-        std::uint64_t  start_timestamp = 0;
-        std::uint64_t  end_timestamp   = 0;
-        address_t      start_address   = {};
-        address_t      end_address     = {};
+        std::uint32_t operation = 0;
+        std::int32_t  pid       = 0;
+        agent_id_t    src_agent{};
+        agent_id_t    dst_agent{};
+        address_t     start_address{};
+        address_t     end_address{};
+        std::uint64_t start_timestamp = 0;
+        std::uint64_t end_timestamp   = 0;
     };
     struct kfd_queue_record
     {
-        std::uint32_t  operation       = 0;
-        std::int32_t   pid             = 0;
-        agent_handle_t agent_id        = {};
-        std::uint64_t  start_timestamp = 0;
-        std::uint64_t  end_timestamp   = 0;
+        std::uint32_t operation = 0;
+        std::int32_t  pid       = 0;
+        agent_id_t    agent_id{};
+        std::uint64_t start_timestamp = 0;
+        std::uint64_t end_timestamp   = 0;
     };
 
+    // Satisfies domain_service_backend's requirement that get_{buffer,callback}_
+    // tracing_names() return a std::ranges::range of entries exposing
+    // name/operations/value; no test in this suite iterates it, so it stays empty.
     struct buffer_tracing_names_t
     {
         struct entry_t
@@ -158,14 +159,15 @@ struct mock_sdk
                                      std::size_t, void*, std::uint64_t);
     using on_record_cb_t  = void (*)(callback_tracing_record_t, user_data_t*, void*);
 
-    // domain_service_backend requires these; registry<> never calls them, so the
-    // bodies are unreachable no-ops.
+    // domain_service_backend requires these members to exist and be callable with
+    // the signatures below; no test in this suite exercises domain_service itself, so
+    // the bodies are unreachable no-ops.
     static void create_context(context_id_t* /*context*/) {}
     static void start_context(context_id_t /*context*/) {}
     static void create_buffer(context_id_t /*context*/, std::size_t /*buffer_size*/,
-                              std::size_t /*buffer_watermark*/,
-                              buffer_policy_t /*policy*/, on_records_cb_t /*callback*/,
-                              void* /*callback_data*/, buffer_id_t* /*buffer_out*/)
+                              std::size_t /*buffer_watermark*/, int /*policy*/,
+                              on_records_cb_t /*callback*/, void* /*callback_data*/,
+                              buffer_id_t* /*buffer_out*/)
     {}
     static void configure_buffer_tracing_service(context_id_t /*context*/,
                                                  buffer_tracing_kind_t /*kind*/,
@@ -188,12 +190,10 @@ struct mock_sdk
     {}
 };
 
-// Minimal stand-in for the agent/trace_cache::info shapes touched through Externals by
-// the on_record callbacks. These callbacks are never invoked by registry<>, only
-// address-taken, but address-of still requires the function bodies to compile.
-// Every field beyond type/device_type_index exists solely so agent_t satisfies
-// policies::agent_policy (required transitively by domain_service_externals's
-// agent_manager_policy check); registry<> never reads them.
+// Stand-in for the agent/trace_cache::info shapes every on_kfd_*<...> touches through
+// Externals. Every field beyond type/device_type_index exists solely so agent_t
+// satisfies policies::agent_policy (required transitively by
+// domain_service_externals's agent_manager_policy check); the tests never read them.
 struct agent_t
 {
     int           type                 = 0;
@@ -213,28 +213,51 @@ struct agent_t
     bool          hip_visible = true;
 };
 
+struct pmc_info_data_t
+{
+    int           type             = 0;
+    std::size_t   agent_type_index = 0;
+    std::string   target_arch;
+    std::size_t   event_code  = 0;
+    std::size_t   instance_id = 0;
+    std::string   name;
+    std::string   symbol;
+    std::string   description;
+    std::string   long_description;
+    std::string   component;
+    std::string   units;
+    std::string   value_type;
+    std::string   block;
+    std::string   expression;
+    std::uint32_t is_constant = 0;
+    std::uint32_t is_derived  = 0;
+    std::string   extdata;
+};
+
+// Every production on_configure() body calls exactly these members
+// unconditionally-or-conditionally; mocked so tests can verify they ran correctly
+// instead of just not crashing.
+struct gmock_externals
+{
+    MOCK_METHOD(void, add_string, (std::string_view value));
+    MOCK_METHOD(std::vector<std::shared_ptr<agent_t>>, get_agents_by_type, (int type));
+    MOCK_METHOD(void, add_pmc_info, (const pmc_info_data_t& info));
+};
+
+inline std::unique_ptr<::testing::StrictMock<gmock_externals>> g_externals_mock;
+
+// Externals mirrors the real ExternalDeps policy surface used by every on_kfd_* and
+// on_kfd_*_configure. The on_records-only members
+// (add_thread_info/add_track/buffer_storage_store) stay plain no-ops -- only
+// add_string/get_agents_by_type/add_pmc_info, which on_configure() exercises, are
+// mocked. Category name/description constants for every kfd_* domain are carried
+// here since domain_service_externals requires the full set regardless of which
+// single domain a given test file exercises.
 struct externals
 {
-    struct pmc_info_t
-    {
-        int           type             = 0;
-        std::size_t   agent_type_index = 0;
-        std::string   target_arch;
-        std::size_t   event_code  = 0;
-        std::size_t   instance_id = 0;
-        std::string   name;
-        std::string   symbol;
-        std::string   description;
-        std::string   long_description;
-        std::string   component;
-        std::string   units;
-        std::string   value_type;
-        std::string   block;
-        std::string   expression;
-        std::uint32_t is_constant = 0;
-        std::uint32_t is_derived  = 0;
-        std::string   extdata;
-    };
+    using agent_t      = test_support::agent_t;
+    using pmc_info_t   = pmc_info_data_t;
+    using agent_type_t = int;
 
     struct thread_info_t
     {
@@ -270,12 +293,10 @@ struct externals
         std::optional<std::int64_t> system_tid;
     };
 
-    using agent_t      = rocprofsys::domains::agent_t;
-    using agent_type_t = int;
-
     // Satisfies policies::agent_manager_policy (required transitively by
-    // domain_service_externals); registry<> never calls any of these, so the bodies
-    // are unreachable stubs.
+    // domain_service_externals); only get_agents_by_type and the single-argument
+    // get_agent_by_handle are ever exercised by these tests, so the rest are
+    // unreachable stubs.
     struct agent_manager_t
     {
         agent_manager_t() = default;
@@ -284,9 +305,9 @@ struct externals
 
         void insert_agent(agent_t& /*agent*/) {}
 
-        std::vector<std::shared_ptr<agent_t>> get_agents_by_type(int /*type*/) const
+        std::vector<std::shared_ptr<agent_t>> get_agents_by_type(int type) const
         {
-            return {};
+            return g_externals_mock->get_agents_by_type(type);
         }
 
         const agent_t& get_agent_by_type_index(std::size_t /*type_index*/,
@@ -329,10 +350,16 @@ struct externals
         return manager;
     }
 
-    static void add_string(std::string_view /*value*/) {}
+    static void add_string(std::string_view value)
+    {
+        g_externals_mock->add_string(value);
+    }
     static void add_thread_info(const thread_info_t& /*info*/) {}
     static void add_track(const track_t& /*info*/) {}
-    static void add_pmc_info(const pmc_info_t& /*info*/) {}
+    static void add_pmc_info(const pmc_info_t& info)
+    {
+        g_externals_mock->add_pmc_info(info);
+    }
     static void buffer_storage_store(kfd_sample_t&& /*sample*/) {}
 
     static std::int32_t get_pid() { return 0; }
@@ -355,73 +382,13 @@ struct externals
     static constexpr std::string_view kfd_page_fault_category_name =
         "rocm_kfd_page_fault";
     static constexpr std::string_view kfd_page_fault_category_description =
-        "KFD Page Fault";
+        "KFD Page Fault Events";
     static constexpr std::string_view kfd_page_migrate_category_name =
         "rocm_kfd_page_migrate";
     static constexpr std::string_view kfd_page_migrate_category_description =
-        "KFD Page Migrate";
+        "KFD Page Migrate Events";
     static constexpr std::string_view kfd_queue_category_name        = "rocm_kfd_queue";
-    static constexpr std::string_view kfd_queue_category_description = "KFD Queue";
+    static constexpr std::string_view kfd_queue_category_description = "KFD Queue Events";
 };
 
-using sut_t = registry<mock_sdk, externals>;
-
-TEST(domain_registry_test, find_descriptor_finds_buffered_domain_case_insensitively)
-{
-    const domain_descriptor* descriptor = sut_t::find_descriptor("KfD_QuEuE");
-
-    ASSERT_NE(descriptor, nullptr);
-    EXPECT_EQ(descriptor->name, "kfd_queue");
-    EXPECT_EQ(descriptor->id, mock_sdk::BUFFER_TRACING_KFD_QUEUE);
-    EXPECT_EQ(descriptor->mode, collection_mode::buffered);
-}
-
-TEST(domain_registry_test, find_descriptor_finds_callback_domain_case_insensitively)
-{
-    const domain_descriptor* descriptor = sut_t::find_descriptor("CODE_OBJECT");
-
-    ASSERT_NE(descriptor, nullptr);
-    EXPECT_EQ(descriptor->name, "code_object");
-    EXPECT_EQ(descriptor->id, mock_sdk::CALLBACK_TRACING_CODE_OBJECT);
-    EXPECT_EQ(descriptor->mode, collection_mode::callback);
-}
-
-TEST(domain_registry_test, find_descriptor_returns_nullptr_for_unknown_name)
-{
-    EXPECT_EQ(sut_t::find_descriptor("not_a_real_domain"), nullptr);
-}
-
-TEST(domain_registry_test, get_buffered_returns_definition_matching_domain_id)
-{
-    const auto& definition = sut_t::get_buffered(mock_sdk::BUFFER_TRACING_KFD_PAGE_FAULT);
-
-    EXPECT_EQ(definition.meta.name, "kfd_page_fault");
-    EXPECT_EQ(definition.meta.id, mock_sdk::BUFFER_TRACING_KFD_PAGE_FAULT);
-}
-
-TEST(domain_registry_test, get_buffered_throws_runtime_error_for_unknown_domain_id)
-{
-    constexpr domain_id_t k_unknown_id = 9999;
-
-    EXPECT_THROW(
-        { static_cast<void>(sut_t::get_buffered(k_unknown_id)); }, std::runtime_error);
-}
-
-TEST(domain_registry_test, get_callback_returns_definition_matching_domain_id)
-{
-    const auto& definition = sut_t::get_callback(mock_sdk::CALLBACK_TRACING_CODE_OBJECT);
-
-    EXPECT_EQ(definition.meta.name, "code_object");
-    EXPECT_EQ(definition.meta.id, mock_sdk::CALLBACK_TRACING_CODE_OBJECT);
-}
-
-TEST(domain_registry_test, get_callback_throws_runtime_error_for_unknown_domain_id)
-{
-    constexpr domain_id_t k_unknown_id = 9999;
-
-    EXPECT_THROW(
-        { static_cast<void>(sut_t::get_callback(k_unknown_id)); }, std::runtime_error);
-}
-
-}  // namespace
-}  // namespace rocprofsys::domains
+}  // namespace rocprofsys::domains::buffered::test_support

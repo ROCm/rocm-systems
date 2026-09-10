@@ -4,13 +4,13 @@
 #pragma once
 
 #include "common/string_utility.hpp"
-
 #include "library/rocprofiler-sdk/buffered_domain.hpp"
 #include "library/rocprofiler-sdk/callback_domain.hpp"
 #include "library/rocprofiler-sdk/domain_registry.hpp"
 #include "library/rocprofiler-sdk/domain_selection.hpp"
 #include "library/rocprofiler-sdk/types.hpp"
 #include "logger/debug.hpp"
+#include "policies/rocprofiler-sdk/domain_service.hpp"
 
 #include <fmt/format.h>
 
@@ -21,7 +21,8 @@
 namespace rocprofsys
 {
 
-template <typename SdkBackend, typename Externals>
+template <policies::rocprofiler_sdk::domain_service_backend   SdkBackend,
+          policies::rocprofiler_sdk::domain_service_externals Externals>
 class domain_service
 {
 public:

@@ -4,6 +4,7 @@
 #pragma once
 
 #include "library/rocprofiler-sdk/types.hpp"
+#include "policies/rocprofiler-sdk/domain_service.hpp"
 
 #include <memory>
 #include <string_view>
@@ -12,8 +13,7 @@
 namespace rocprofsys::domains
 {
 
-// TODO: Add concept for SDK Backend
-template <typename SdkBackend>
+template <policies::rocprofiler_sdk::domain_service_backend SdkBackend>
 class callback_domain
 {
 public:

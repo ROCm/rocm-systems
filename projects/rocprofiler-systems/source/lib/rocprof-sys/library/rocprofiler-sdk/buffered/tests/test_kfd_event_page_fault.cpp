@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "library/rocprofiler-sdk/buffered/kfd_event_page_fault.hpp"
+#include "library/rocprofiler-sdk/buffered/tests/mock_domain_service.hpp"
 
 #include <gtest/gtest.h>
 
@@ -13,34 +14,8 @@ namespace rocprofsys::domains::buffered
 namespace
 {
 
-// Self-contained stand-in for SdkBackend: kfd_event_page_fault<SdkBackend, Externals> and
-// on_kfd_event_page_fault<SdkBackend, Externals> only ever touch these members.
-struct mock_sdk
-{
-    struct context_id_t
-    {
-        std::uint64_t handle = 0;
-    };
-    struct buffer_id_t
-    {
-        std::uint64_t handle = 0;
-    };
-    struct record_header_t
-    {
-        std::uint32_t category = 0;
-        std::uint32_t kind     = 0;
-        void*         payload  = nullptr;
-    };
-
-    static constexpr std::size_t BUFFER_TRACING_KFD_EVENT_PAGE_FAULT = 24;
-
-    struct kfd_event_page_fault_record
-    {};
-};
-
-// Externals is unused by this domain today; any type satisfies the template parameter.
-struct externals
-{};
+using test_support::externals;
+using test_support::mock_sdk;
 
 using mock_dispatcher =
     buffered_callback_dispatcher<mock_sdk, mock_sdk::kfd_event_page_fault_record,

@@ -5,6 +5,7 @@
 
 #include "library/rocprofiler-sdk/types.hpp"
 #include "logger/debug.hpp"
+#include "policies/rocprofiler-sdk/domain_service.hpp"
 
 #include <fmt/format.h>
 
@@ -15,7 +16,7 @@
 namespace rocprofsys::domains::buffered
 {
 
-template <typename Externals>
+template <policies::rocprofiler_sdk::domain_service_externals Externals>
 inline void
 on_kfd_queue_configure()
 {
@@ -59,7 +60,8 @@ on_kfd_queue_configure()
     }
 }
 
-template <typename SdkBackend, typename Externals>
+template <policies::rocprofiler_sdk::domain_service_backend   SdkBackend,
+          policies::rocprofiler_sdk::domain_service_externals Externals>
 inline void
 on_kfd_queue(typename SdkBackend::kfd_queue_record* record, void* data)
 {
@@ -73,16 +75,8 @@ on_kfd_queue(typename SdkBackend::kfd_queue_record* record, void* data)
         SdkBackend::BUFFER_TRACING_KFD_QUEUE, record->operation) };
     const auto tid  = static_cast<std::uint64_t>(record->pid);
 
-    const typename Externals::agent_t* agent = nullptr;
-    try
-    {
-        agent =
-            &Externals::get_agent_manager().get_agent_by_handle(record->agent_id.handle);
-    } catch(const std::exception& e)
-    {
-        LOG_DEBUG("kfd_queue: agent lookup failed for handle {} ({})",
-                  record->agent_id.handle, e.what());
-    }
+    const typename Externals::agent_t* agent =
+        &Externals::get_agent_manager().get_agent_by_handle(record->agent_id.handle);
 
     Externals::add_thread_info(typename Externals::thread_info_t{
         Externals::get_ppid(), Externals::get_pid(), tid, 0, 0, "{}" });
@@ -110,7 +104,8 @@ on_kfd_queue(typename SdkBackend::kfd_queue_record* record, void* data)
         std::optional<std::int64_t>(record->pid) });
 }
 
-template <typename SdkBackend, typename Externals>
+template <policies::rocprofiler_sdk::domain_service_backend   SdkBackend,
+          policies::rocprofiler_sdk::domain_service_externals Externals>
 inline constexpr auto k_kfd_queue = buffered_domain_definition<SdkBackend>{
     .meta =
         domain_descriptor{

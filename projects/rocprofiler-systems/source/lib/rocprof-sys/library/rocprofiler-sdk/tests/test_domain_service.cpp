@@ -69,17 +69,18 @@ struct mock_sdk
     using tracing_operation_t     = std::size_t;
     using buffer_tracing_kind_t   = std::size_t;
     using callback_tracing_kind_t = std::size_t;
+    using buffer_policy_t         = int;
 
-    static constexpr int         BUFFER_POLICY_LOSSLESS                  = 1;
-    static constexpr std::size_t BUFFER_TRACING_KFD_EVENT_DROPPED_EVENTS = 20;
-    static constexpr std::size_t BUFFER_TRACING_KFD_EVENT_PAGE_FAULT     = 21;
-    static constexpr std::size_t BUFFER_TRACING_KFD_EVENT_PAGE_MIGRATE   = 22;
-    static constexpr std::size_t BUFFER_TRACING_KFD_EVENT_QUEUE          = 23;
-    static constexpr std::size_t BUFFER_TRACING_KFD_EVENT_UNMAP_FROM_GPU = 24;
-    static constexpr std::size_t BUFFER_TRACING_KFD_PAGE_FAULT           = 25;
-    static constexpr std::size_t BUFFER_TRACING_KFD_PAGE_MIGRATE         = 26;
-    static constexpr std::size_t BUFFER_TRACING_KFD_QUEUE                = 27;
-    static constexpr std::size_t CALLBACK_TRACING_CODE_OBJECT            = 1;
+    static constexpr buffer_policy_t BUFFER_POLICY_LOSSLESS                  = 1;
+    static constexpr std::size_t     BUFFER_TRACING_KFD_EVENT_DROPPED_EVENTS = 20;
+    static constexpr std::size_t     BUFFER_TRACING_KFD_EVENT_PAGE_FAULT     = 21;
+    static constexpr std::size_t     BUFFER_TRACING_KFD_EVENT_PAGE_MIGRATE   = 22;
+    static constexpr std::size_t     BUFFER_TRACING_KFD_EVENT_QUEUE          = 23;
+    static constexpr std::size_t     BUFFER_TRACING_KFD_EVENT_UNMAP_FROM_GPU = 24;
+    static constexpr std::size_t     BUFFER_TRACING_KFD_PAGE_FAULT           = 25;
+    static constexpr std::size_t     BUFFER_TRACING_KFD_PAGE_MIGRATE         = 26;
+    static constexpr std::size_t     BUFFER_TRACING_KFD_QUEUE                = 27;
+    static constexpr std::size_t     CALLBACK_TRACING_CODE_OBJECT            = 1;
 
     struct address_t
     {
@@ -204,10 +205,26 @@ struct mock_sdk
 // the on_record callbacks. These callbacks are never invoked by domain_service in
 // these tests, only address-taken, but address-of still requires the bodies to
 // compile; on_configure() callbacks, in contrast, ARE invoked by domain_service.
+// Every field beyond type/device_type_index exists solely so agent_t satisfies
+// policies::agent_policy (required transitively by domain_service_externals's
+// agent_manager_policy check); the tests never read them.
 struct agent_t
 {
-    int         type              = 0;
-    std::size_t device_type_index = 0;
+    int           type                 = 0;
+    std::uint64_t handle               = 0;
+    std::uint64_t device_id            = 0;
+    std::uint32_t node_id              = 0;
+    std::int32_t  logical_node_id      = 0;
+    std::int32_t  logical_node_type_id = 0;
+    std::string   name;
+    std::string   model_name;
+    std::string   vendor_name;
+    std::string   product_name;
+    std::size_t   device_type_index = 0;
+    std::string   agent_info;
+    std::uint32_t location_id = 0;
+    std::uint32_t domain      = 0;
+    bool          hip_visible = true;
 };
 
 // Every production on_configure() body calls exactly these two Externals members
@@ -223,6 +240,8 @@ std::unique_ptr<StrictMock<gmock_externals>> g_externals_mock;
 
 struct externals
 {
+    using agent_type_t = int;
+
     struct pmc_info_t
     {
         int           type             = 0;
@@ -280,18 +299,52 @@ struct externals
 
     using agent_t = rocprofsys::agent_t;
 
+    // Satisfies policies::agent_manager_policy (required transitively by
+    // domain_service_externals); only get_agents_by_type and the single-argument
+    // get_agent_by_handle are ever exercised by these tests, so the rest are
+    // unreachable stubs.
     struct agent_manager_t
     {
-        std::vector<std::shared_ptr<agent_t>> get_agents_by_type(int type)
+        agent_manager_t() = default;
+        explicit agent_manager_t(const std::vector<std::shared_ptr<agent_t>>& /*agents*/)
+        {}
+
+        void insert_agent(agent_t& /*agent*/) {}
+
+        std::vector<std::shared_ptr<agent_t>> get_agents_by_type(int type) const
         {
             return g_externals_mock->get_agents_by_type(type);
         }
 
-        agent_t& get_agent_by_handle(std::uint64_t /*handle*/)
+        const agent_t& get_agent_by_type_index(std::size_t /*type_index*/,
+                                               int /*type*/) const
         {
             static agent_t placeholder{};
             return placeholder;
         }
+
+        const agent_t& get_agent_by_id(std::size_t /*device_id*/, int /*type*/) const
+        {
+            static agent_t placeholder{};
+            return placeholder;
+        }
+
+        const agent_t& get_agent_by_handle(std::size_t /*handle*/, int /*type*/) const
+        {
+            static agent_t placeholder{};
+            return placeholder;
+        }
+
+        const agent_t& get_agent_by_handle(std::uint64_t /*handle*/) const
+        {
+            static agent_t placeholder{};
+            return placeholder;
+        }
+
+        std::vector<std::shared_ptr<agent_t>> get_agents() const { return {}; }
+
+        std::size_t get_gpu_agents_count() const { return 0; }
+        std::size_t get_cpu_agents_count() const { return 0; }
     };
 
     static constexpr int AGENT_TYPE_GPU = 1;
