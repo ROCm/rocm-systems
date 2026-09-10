@@ -128,6 +128,13 @@ jobs:
               results = find_latest_artifacts(
                   artifact_groups=['${{ inputs.artifact_group }}'],
                   github_repository_name='ROCm/TheRock',
+                  # Split artifacts need both the host library and GPU kernels.
+                  # Older family archives contain both. Other gfx950 libraries
+                  # can finish before RCCL, so GPU-family availability is insufficient.
+                  required_artifact_patterns=[
+                      r'^rccl_lib_(generic|gfx950-dcgpu)[.]tar[.](zst|xz)$',
+                      r'^rccl_lib_(gfx950|gfx950-dcgpu)[.]tar[.](zst|xz)$',
+                  ],
                   verbose=True,
               )
           if not results:
@@ -150,6 +157,17 @@ jobs:
             --artifact-group="${{ inputs.artifact_group }}" \
             --output-dir="${OUTPUT_ARTIFACTS_DIR}" \
             --rccl
+
+          # The downloader filters available archives without requiring each
+          # requested component. Validate explicit run IDs as well as discovery.
+          PYTHONPATH=rocm-systems/projects/rccl/ci/scripts python3 - <<'PY'
+          import os
+          from pathlib import Path
+          from rccl_ci_utils import find_rccl_library
+
+          library = find_rccl_library(Path(os.environ['OUTPUT_ARTIFACTS_DIR']))
+          print(f'Validated downloaded RCCL library: {library}')
+          PY
 
       - name: Run MADEngine workload
         timeout-minutes: 210
