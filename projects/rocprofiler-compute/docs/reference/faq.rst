@@ -56,16 +56,7 @@ Why does the CLI memory chart look wrapped or garbled?
 
 The chart is drawn at a fixed width and does not shrink to fit the terminal.
 When the window is too narrow, each chart line wraps onto the next row and the
-boxes and arrows stop lining up:
-
-.. code-block:: text
-
-   ╭── Kernel ──╮Non-buffer Request╭─────── VL1D ───────╮Read BW     ╭───
-   ───── L2 ────────╮               ╭─── Data Fabric ────╮╭─────── UMC ──
-   ──────╮╭─────── HBM ────────╮
-   │            │Read   : 1.64e+04 │ Hit 50.0%          │881.2 GB/s  │ Hi
-   t 35.0%          │               │ To/From HBM (Req)  ││
-         ││                    │
+boxes and arrows stop lining up.
 
 Widen the terminal until one chart line fits on a single row. If you cannot
 resize the window, see :ref:`cli-memory-chart-viewing`.
