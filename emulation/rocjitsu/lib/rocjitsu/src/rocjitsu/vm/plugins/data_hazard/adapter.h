@@ -61,11 +61,14 @@ struct WaitInfo {
   WaitKind kind = WaitKind::None;
   /// Depth for the counter the mnemonic names, and for the two waits naming a
   /// pair, the memory one: vmcnt for s_waitcnt, loadcnt or storecnt for the
-  /// split waits.
-  uint32_t count = 0;
+  /// split waits. Empty when the instruction leaves that counter parked at its
+  /// no-op maximum — which the disassembler prints by omitting the field, not by
+  /// spelling a zero — so make_wait_action drains it only when a depth is set.
+  std::optional<uint32_t> count;
   /// Depth for the second counter of those pairs — lgkmcnt for s_waitcnt,
-  /// dscnt for the split waits. The single-counter kinds leave it alone.
-  uint32_t paired_count = 0;
+  /// dscnt for the split waits. Empty on the single-counter kinds, and on a pair
+  /// whose second field the instruction left parked.
+  std::optional<uint32_t> paired_count;
 };
 
 struct InstructionView {

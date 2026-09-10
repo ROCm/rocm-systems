@@ -890,6 +890,43 @@ TEST(DataHazardAdapterTest, PartialLegacyWaitcntKeepsNewestVmemLoad) {
   EXPECT_EQ(warnings[0].finding.source_instruction.instruction_id, 2u);
 }
 
+// The disassembler prints only the s_waitcnt fields that are not parked at their
+// no-op maximum, so a single-counter s_waitcnt arrives with the other field
+// absent. Parsing must leave that counter undrained: inventing a keep-0 for it
+// clears pending ops the instruction never waited on, hiding a real hazard.
+TEST(DataHazardAdapterTest, LegacyWaitcntVmcntOnlyDoesNotDrainLgkm) {
+  const auto action = dh::make_wait_action(dh::make_wait_info(dh::WaitKind::Waitcnt, "vmcnt(0)"));
+
+  const auto *vmem = find_counter(action, WaitCntType::VMEM);
+  ASSERT_NE(vmem, nullptr);
+  EXPECT_EQ(vmem->keep_count, 0u);
+  EXPECT_EQ(find_counter(action, WaitCntType::LGKM), nullptr)
+      << "s_waitcnt vmcnt(0) leaves lgkmcnt at its maximum and must not drain LGKM";
+}
+
+TEST(DataHazardAdapterTest, LegacyWaitcntLgkmcntOnlyDoesNotDrainVmem) {
+  const auto action = dh::make_wait_action(dh::make_wait_info(dh::WaitKind::Waitcnt, "lgkmcnt(0)"));
+
+  const auto *lgkm = find_counter(action, WaitCntType::LGKM);
+  ASSERT_NE(lgkm, nullptr);
+  EXPECT_EQ(lgkm->keep_count, 0u);
+  EXPECT_EQ(find_counter(action, WaitCntType::VMEM), nullptr)
+      << "s_waitcnt lgkmcnt(0) leaves vmcnt at its maximum and must not drain VMEM";
+}
+
+// Guards the fix from overcorrecting: when both fields are spelled, both drain.
+TEST(DataHazardAdapterTest, LegacyWaitcntBothFieldsDrainBothCounters) {
+  const auto action =
+      dh::make_wait_action(dh::make_wait_info(dh::WaitKind::Waitcnt, "vmcnt(0) lgkmcnt(2)"));
+
+  const auto *vmem = find_counter(action, WaitCntType::VMEM);
+  const auto *lgkm = find_counter(action, WaitCntType::LGKM);
+  ASSERT_NE(vmem, nullptr);
+  ASSERT_NE(lgkm, nullptr);
+  EXPECT_EQ(vmem->keep_count, 0u);
+  EXPECT_EQ(lgkm->keep_count, 2u);
+}
+
 TEST(DataHazardAdapterTest, SplitLoadcntDoesNotClearSmem) {
   AdapterHarness h;
 
@@ -1004,7 +1041,10 @@ TEST(DataHazardAdapterTest, SplitStorecntDscntClearsStoreSourceAndLocalWrite) {
 
   dh::InstructionView wait = h.instruction(3, 0x108);
   wait.wait.kind = dh::WaitKind::WaitStorecntDscnt;
+  // storecnt(0) dscnt(0): the mnemonic names both counters, so both drain. In
+  // production decode_paired_wait always fills both fields; set them alike here.
   wait.wait.count = 0;
+  wait.wait.paired_count = 0;
   h.adapter.on_instruction(wait);
 
   h.adapter.on_instruction(h.instruction(4, 0x10c));
@@ -2062,10 +2102,11 @@ TEST(DataHazardAdapterTest, ReadsWaitCountsFromTheDisassembledOperand) {
   EXPECT_EQ(split.count, 2u);
   EXPECT_EQ(split.paired_count, 5u);
 
-  // A wait naming one counter prints the count on its own.
+  // A wait naming one counter prints the count on its own; the paired field
+  // stays absent so make_wait_action drains only the counter it names.
   const dh::WaitInfo single = dh::make_wait_info(dh::WaitKind::WaitDscnt, "4");
   EXPECT_EQ(single.count, 4u);
-  EXPECT_EQ(single.paired_count, 0u);
+  EXPECT_FALSE(single.paired_count.has_value());
 }
 
 // The emulator's decoder prints a combined wait as the bare immediate
@@ -2147,7 +2188,7 @@ TEST(DataHazardAdapterTest, PerCounterWaitsStateTheirCountAfterARegisterOperand)
 
   const dh::WaitInfo vmcnt = dh::make_wait_info(dh::WaitKind::WaitVmcnt, "1");
   EXPECT_EQ(vmcnt.count, 1u);
-  EXPECT_EQ(vmcnt.paired_count, 0u);
+  EXPECT_FALSE(vmcnt.paired_count.has_value());
 
   // A store wait that keeps two operations outstanding has to reach the engine
   // as written. Read from the register operand it would drain to zero, retiring

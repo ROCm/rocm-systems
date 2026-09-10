@@ -7,6 +7,7 @@
 
 #include <algorithm>
 #include <charconv>
+#include <optional>
 #include <system_error>
 
 namespace rocjitsu::plugins::data_hazard {
@@ -68,19 +69,21 @@ uint32_t first_decimal(std::string_view text, uint32_t fallback = 0) {
 }
 
 /// The count @p field names in @p text, as in the `lgkmcnt(` of
-/// `vmcnt(1) expcnt(0) lgkmcnt(3)`.
-uint32_t parse_waitcnt_field(std::string_view text, std::string_view field, uint32_t fallback) {
+/// `vmcnt(1) expcnt(0) lgkmcnt(3)`. Empty when the field is absent: the
+/// disassembler omits a counter parked at its no-op maximum, so an absent field
+/// means "not waited on," which callers must keep distinct from a depth of zero.
+std::optional<uint32_t> parse_waitcnt_field(std::string_view text, std::string_view field) {
   const size_t field_pos = text.find(field);
   if (field_pos == std::string_view::npos)
-    return fallback;
+    return std::nullopt;
   const size_t begin = field_pos + field.size();
   const size_t end = text.find(')', begin);
   if (end == std::string_view::npos || end <= begin)
-    return fallback;
+    return std::nullopt;
 
-  uint32_t value = fallback;
+  uint32_t value = 0;
   const auto result = std::from_chars(text.data() + begin, text.data() + end, value);
-  return result.ec == std::errc{} ? value : fallback;
+  return result.ec == std::errc{} ? std::optional<uint32_t>{value} : std::nullopt;
 }
 
 constexpr std::string_view kDscntField = "dscnt(";
@@ -96,8 +99,11 @@ WaitInfo decode_paired_wait(WaitKind kind, std::string_view text, std::string_vi
 
   if (text.find(memory_field) != std::string_view::npos ||
       text.find(kDscntField) != std::string_view::npos) {
-    wait.count = parse_waitcnt_field(text, memory_field, 0);
-    wait.paired_count = parse_waitcnt_field(text, kDscntField, 0);
+    // TODO: the paired split waits still fall back to 0 for a parked field, the
+    // same over-drain fixed for legacy s_waitcnt below. Left in scope for a
+    // follow-up once its disassembly form is confirmed.
+    wait.count = parse_waitcnt_field(text, memory_field).value_or(0);
+    wait.paired_count = parse_waitcnt_field(text, kDscntField).value_or(0);
     return wait;
   }
 
@@ -153,6 +159,14 @@ WaitAction make_wait_action(const WaitInfo &wait) {
   WaitAction action;
   action.is_wait_instruction = wait.kind != WaitKind::None;
 
+  // Drain a counter only when the instruction gave it a depth. An empty field
+  // was left parked at its no-op maximum, and adding a keep-0 for it would clear
+  // pending ops the wait never named — hiding a real hazard behind it.
+  const auto drain = [&action](WaitCntType type, const std::optional<uint32_t> &depth) {
+    if (depth)
+      add_counter(action, type, *depth);
+  };
+
   switch (wait.kind) {
   case WaitKind::None:
     break;
@@ -161,46 +175,46 @@ WaitAction make_wait_action(const WaitInfo &wait) {
     // on this same counter. gfx10 and gfx11 kept the s_waitcnt mnemonic but
     // count stores on vscnt, drained by the separate s_waitcnt_vscnt, and
     // their stores are tracked against that counter instead.
-    add_counter(action, WaitCntType::VMEM, wait.count);
+    drain(WaitCntType::VMEM, wait.count);
     // lgkmcnt is one counter over scalar memory and LDS together, so it drains
     // them as one sequence. Draining each to the same count would keep an old
     // scalar load that a later LDS operation has already counted past.
-    add_counter(action, WaitCntType::LGKM, wait.paired_count);
+    drain(WaitCntType::LGKM, wait.paired_count);
     break;
   case WaitKind::WaitLoadcnt:
-    add_counter(action, WaitCntType::VMEM, wait.count);
+    drain(WaitCntType::VMEM, wait.count);
     break;
   case WaitKind::WaitStorecnt:
   case WaitKind::WaitVscnt:
-    add_counter(action, WaitCntType::STORE, wait.count);
+    drain(WaitCntType::STORE, wait.count);
     break;
   case WaitKind::WaitVmcnt:
     // The vmcnt half of s_waitcnt as an instruction of its own, draining loads
     // alone: the targets that have it count stores on the separate vscnt.
-    add_counter(action, WaitCntType::VMEM, wait.count);
+    drain(WaitCntType::VMEM, wait.count);
     break;
   case WaitKind::WaitLgkmcnt:
-    add_counter(action, WaitCntType::LGKM, wait.count);
+    drain(WaitCntType::LGKM, wait.count);
     break;
   case WaitKind::WaitKmcnt:
-    add_counter(action, WaitCntType::SMEM, wait.count);
+    drain(WaitCntType::SMEM, wait.count);
     break;
   case WaitKind::WaitDscnt:
-    add_counter(action, WaitCntType::LDS, wait.count);
+    drain(WaitCntType::LDS, wait.count);
     break;
   case WaitKind::WaitLoadcntDscnt:
-    add_counter(action, WaitCntType::VMEM, wait.count);
-    add_counter(action, WaitCntType::LDS, wait.paired_count);
+    drain(WaitCntType::VMEM, wait.count);
+    drain(WaitCntType::LDS, wait.paired_count);
     break;
   case WaitKind::WaitStorecntDscnt:
-    add_counter(action, WaitCntType::STORE, wait.count);
-    add_counter(action, WaitCntType::LDS, wait.paired_count);
+    drain(WaitCntType::STORE, wait.count);
+    drain(WaitCntType::LDS, wait.paired_count);
     break;
   case WaitKind::WaitIdle:
     action.waits_for_idle = true;
     break;
   case WaitKind::WaitTensorcnt:
-    add_counter(action, WaitCntType::TENSOR, wait.count);
+    drain(WaitCntType::TENSOR, wait.count);
     break;
   case WaitKind::BarrierWait:
     // Deliberately not a completed workgroup barrier: this runs before the
@@ -224,8 +238,8 @@ WaitInfo make_wait_info(WaitKind kind, std::string_view operand_text) {
   case WaitKind::None:
     break;
   case WaitKind::Waitcnt:
-    wait.count = parse_waitcnt_field(operand_text, "vmcnt(", 0);
-    wait.paired_count = parse_waitcnt_field(operand_text, "lgkmcnt(", 0);
+    wait.count = parse_waitcnt_field(operand_text, "vmcnt(");
+    wait.paired_count = parse_waitcnt_field(operand_text, "lgkmcnt(");
     break;
   case WaitKind::WaitLoadcntDscnt:
     return decode_paired_wait(kind, operand_text, "loadcnt(");
@@ -235,6 +249,7 @@ WaitInfo make_wait_info(WaitKind kind, std::string_view operand_text) {
     wait.count = first_decimal(operand_text);
     break;
   }
+
   return wait;
 }
 
