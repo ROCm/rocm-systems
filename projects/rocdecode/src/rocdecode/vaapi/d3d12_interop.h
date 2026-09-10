@@ -49,6 +49,7 @@ THE SOFTWARE.
     if (FAILED(hres)) {\
         std::ostringstream hres_oss_; hres_oss_ << std::hex << static_cast<uint32_t>(hres);\
         CriticalLog(g_rocdec_logger, ROCDEC_STR("D3D12 failure: ") + #call + " failed with 'HRESULT: 0x" + hres_oss_.str() + "' at " + __FILE__ + ":" + ROCDEC_TOSTR(__LINE__));\
+        FunctionExitLog(g_rocdec_logger);\
         return ROCDEC_RUNTIME_ERROR;\
     }\
 }
