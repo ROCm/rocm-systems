@@ -114,17 +114,11 @@ endif()
 
 set(CMAKE_INSTALL_LIBDIR lib CACHE STRING "Define install directory for libraries" FORCE)
 
-# Vendored {fmt} 10.2.1 (header-only). Prefer a system package when it exports
-# fmt::fmt-header-only so distro builds can share one fmt; otherwise use the
-# in-tree copy (no network FetchContent).
-find_package(fmt QUIET)
+# {fmt} 10.2.1, header-only, vendored under external/fmt. This is the only fmt
+# RCCL builds against; a system package is never used, so every build compiles
+# the same known-good version. This file is included twice, hence the guard.
 if(NOT TARGET fmt::fmt-header-only)
-    message(STATUS "Using vendored fmt 10.2.1 (header-only)")
     add_subdirectory("${PROJECT_SOURCE_DIR}/external/fmt" "${CMAKE_BINARY_DIR}/external/fmt")
-else()
-    message(STATUS "Using system fmt")
-    get_target_property(FMT_INCLUDE_DIRS fmt::fmt-header-only INTERFACE_INCLUDE_DIRECTORIES)
-    message(STATUS "fmt include directories: ${FMT_INCLUDE_DIRS}")
 endif()
 
 # Find available local ROCM targets

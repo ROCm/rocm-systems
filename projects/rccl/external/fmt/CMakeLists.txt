@@ -1,7 +1,7 @@
 # {fmt} 10.2.1 header-only — https://github.com/fmtlib/fmt/tree/10.2.1
 #
-# Provides fmt::fmt-header-only so RCCL does not need a system fmt package
-# or a FetchContent download.
+# Provides fmt::fmt-header-only. RCCL always builds against this copy, so it
+# needs neither a system fmt package nor a FetchContent download.
 
 if(TARGET fmt::fmt-header-only)
   return()

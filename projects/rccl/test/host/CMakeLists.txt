@@ -471,10 +471,8 @@ if(TARGET GTest::gtest AND NOT TARGET GTest::GTest)
   add_library(GTest::GTest ALIAS GTest::gtest)
 endif()
 
-# --- Resolve fmt: system -> in-tree header-only copy ---
-find_package(fmt QUIET)
+# --- fmt: the RCCL-vendored header-only copy (already defined for in-tree builds) ---
 if(NOT TARGET fmt::fmt-header-only)
-  message(STATUS "Using vendored fmt 10.2.1 (header-only)")
   add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/../../external/fmt"
                    "${CMAKE_BINARY_DIR}/external/fmt")
 endif()

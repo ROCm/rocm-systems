@@ -4,9 +4,9 @@
 #   1. Standalone:   cmake -S . -B build && cmake --build build
 #   2. As part of the main RCCL build via add_subdirectory(plugins/profiler/proxytrace)
 #
-# Either way, fmt is resolved through the fmt::fmt-header-only target, which
-# provides the include path and FMT_HEADER_ONLY. In-tree builds inherit the
-# target from the main RCCL CMake; standalone builds use the vendored copy.
+# Either way, fmt comes from the vendored header-only copy in external/fmt
+# through the fmt::fmt-header-only target, which supplies both the include
+# path and FMT_HEADER_ONLY.
 
 # Detect standalone vs. in-tree configuration.
 if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
@@ -20,11 +20,8 @@ endif()
 # RCCL source root (this file lives at plugins/profiler/proxytrace).
 get_filename_component(RCCL_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../../.." ABSOLUTE)
 
-# fmt::fmt-header-only is already available when built in-tree. For standalone
-# builds, prefer a system fmt, then the vendored header-only copy.
-if(NOT TARGET fmt::fmt-header-only)
-    find_package(fmt QUIET)
-endif()
+# fmt::fmt-header-only is already defined when built in-tree; a standalone
+# build pulls in the same vendored copy.
 if(NOT TARGET fmt::fmt-header-only)
     add_subdirectory("${RCCL_ROOT}/external/fmt" "${CMAKE_BINARY_DIR}/external/fmt")
 endif()
