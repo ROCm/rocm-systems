@@ -179,11 +179,19 @@ public:
     /// Bitmask of exception classes that are forwarded to the debugger.
     uint64_t exception_enable_mask = 0;
 
-    /// Monotonic revisions of the individual bits in @ref exception_enable_mask.
-    /// In-flight notifier writes capture these values for the exception classes
-    /// they publish. This rejects an unsubscribe/re-subscribe ABA for those bits
-    /// without invalidating a successful wake when only an unrelated class changes.
-    std::array<uint64_t, 64> exception_bit_generations{};
+    struct NotificationClaim {
+      /// Complete exception event represented by an in-flight notifier write.
+      uint64_t exception_mask = 0;
+      /// False once a mask update leaves none of the event subscribed.
+      bool continuously_subscribed = true;
+    };
+
+    /// Active whole-event ownership decisions, keyed by a local monotonic id.
+    /// A SET_EXCEPTIONS_ENABLED transition invalidates a claim only when the
+    /// complete event becomes unsubscribed, preserving ownership while one
+    /// subscribed bit atomically replaces another.
+    uint64_t next_notification_claim_id = 1;
+    std::unordered_map<uint64_t, NotificationClaim> notification_claims;
 
     /// Process/device exception bits already used to wake this session.
     uint64_t notified_process_exception_mask = 0;
