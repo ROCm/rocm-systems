@@ -35,8 +35,7 @@ namespace net {
  * CQ (verbs), one tx-context + counter (OFI), or one device (LCI). Using
  * lane = ctx * num_pes + pe gives each (context, destination) its own ordered
  * stream and its own completion counter, so quiet(ctx) drains only the lanes
- * that context posted to rather than flushing every peer (the O(PEs)-per-put
- * cost of the MPI window path).
+ * that context posted to rather than flushing every peer.
  *
  * Transport-neutral: pure integer arithmetic, no NIC headers.
  */
