@@ -198,6 +198,7 @@ def test_rdna35_finalize_soc_fields(
         "num_compute_units": 0,
         "gpu_cache_info": {},
         "vram_bit_width": vram_bit_width,
+        "perf_level": "AUTO",
     }
     with patch.object(specs, "set_cache_sizes", return_value={}), patch.object(
         specs.mi_gpu_specs, "get_num_dies", return_value=1
@@ -206,6 +207,7 @@ def test_rdna35_finalize_soc_fields(
 
     assert spec.num_gl1c == expected_gl1c
     assert spec.num_memory_channels == expected_channels
+    assert spec.perf_level == "AUTO"
 
 
 @pytest.mark.misc
