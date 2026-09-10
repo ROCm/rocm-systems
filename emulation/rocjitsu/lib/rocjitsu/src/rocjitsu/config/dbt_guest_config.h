@@ -112,6 +112,14 @@ DbtGuestConfig load_dbt_guest_config_from_file(const std::string &path);
 /// @throws std::runtime_error when @p value is not a nonzero KFD gpu_id.
 void apply_resolved_dbt_host_gpu_id(DbtGuestConfig &config, std::string_view value);
 
+/// @brief Atomically write a runtime config handoff into @p runtime_dir.
+/// @details The one writer of the handoff format, shared by the in-tree launcher below and by the
+/// `rj_dbt_write_handoff` public C entry point an out-of-tree launcher uses. A @p host_gpu_id of
+/// zero writes no GPU line, which is the shape a non-DBT invocation publishes.
+/// @returns false when the directory cannot be created or the handoff cannot be published.
+bool write_dbt_runtime_config_handoff(const std::string &runtime_dir,
+                                      const std::string &config_path, uint32_t host_gpu_id);
+
 /// @brief Atomically write the per-invocation runtime config handoff.
 /// @returns false when enabled DBT lacks a resolved host GPU or the handoff cannot be published.
 bool write_dbt_runtime_config_handoff(const std::string &config_path, const DbtGuestConfig &config,

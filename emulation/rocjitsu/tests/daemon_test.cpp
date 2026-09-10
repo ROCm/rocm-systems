@@ -2,27 +2,33 @@
 // SPDX-License-Identifier: MIT
 
 /// @file daemon_test.cpp
-/// @brief Runs HIP kernel tests through the rocjitsu daemon via RPC.
+/// @brief Runs HIP kernel tests against a shared rocjitsu daemon via the CLI.
 ///
-/// Each test starts a daemon process, runs the HIP test binary with
-/// LD_PRELOAD as a subprocess, verifies the result, and tears down the
-/// daemon. Paths are injected via CMake compile definitions.
+/// Each fixture starts one session with `rocjitsu session start --daemon`,
+/// which brings the emulator daemon up and holds it there, then runs each
+/// workload into that same session with `rocjitsu exec --session <id>` and
+/// stops it again. Paths are injected via CMake compile definitions.
+///
+/// The daemon is what these cases are about: several client processes
+/// sharing one emulated machine's GPU memory. Everything the fixture used
+/// to do by hand — forking a launcher, waiting for a socket to appear
+/// under a runtime directory it had chosen, and LD_PRELOADing the
+/// interposer onto each client — is now the CLI's job, and going through
+/// it means these tests exercise the same path a user takes.
 
 #include <gtest/gtest.h>
 
 #include <array>
+#include <cctype>
 #include <cerrno>
 #include <chrono>
-#include <csignal>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <filesystem>
 #include <fstream>
+#include <sstream>
 #include <string>
-#include <sys/socket.h>
-#include <sys/stat.h>
-#include <sys/un.h>
 #include <sys/wait.h>
 #include <system_error>
 #include <thread>
@@ -36,23 +42,10 @@ struct ProcessResult {
   int exit_code = -1;
 };
 
-bool daemon_ready(const std::string &path) {
-  int fd = socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0);
-  if (fd < 0)
-    return false;
-  sockaddr_un addr{};
-  addr.sun_family = AF_UNIX;
-  path.copy(addr.sun_path, sizeof(addr.sun_path) - 1);
-  bool ok = connect(fd, reinterpret_cast<sockaddr *>(&addr), sizeof(addr)) == 0;
-  close(fd);
-  return ok;
-}
-
 struct TestPaths {
-  std::string daemon_bin = RJ_DAEMON_BIN;
+  std::string cli_bin = RJ_CLI_BIN;
   std::string daemon_config = RJ_DAEMON_CONFIG;
   std::string daemon_config_2gpu = RJ_DAEMON_CONFIG_2GPU;
-  std::string sanitizer_preload = RJ_DAEMON_SANITIZER_PRELOAD;
   std::string preload_lib = RJ_PRELOAD_LIB;
   std::string hip_vector_add_bin = RJ_HIP_VECTOR_ADD_BIN;
   std::string hip_memcpy_bin = RJ_HIP_MEMCPY_BIN;
@@ -83,8 +76,7 @@ bool installed_paths_exist(const TestPaths &paths) {
   // that use it) are built/registered only when RCCL_LIB is found at configure
   // time, so requiring it would make this check fail on non-RCCL installs and
   // wrongly fall back to build-tree paths that a pure install does not have.
-  return std::filesystem::exists(paths.daemon_bin) &&
-         std::filesystem::exists(paths.daemon_config) &&
+  return std::filesystem::exists(paths.cli_bin) && std::filesystem::exists(paths.daemon_config) &&
          std::filesystem::exists(paths.daemon_config_2gpu) &&
          std::filesystem::exists(paths.preload_lib) &&
          std::filesystem::exists(paths.hip_vector_add_bin) &&
@@ -95,10 +87,9 @@ bool installed_paths_exist(const TestPaths &paths) {
 
 TestPaths installed_paths(const std::filesystem::path &exe_dir) {
   return {
-      resolve_relative_to_exe(exe_dir, RJ_INSTALLED_DAEMON_BIN).string(),
+      resolve_relative_to_exe(exe_dir, RJ_INSTALLED_CLI_BIN).string(),
       resolve_relative_to_exe(exe_dir, RJ_INSTALLED_DAEMON_CONFIG).string(),
       resolve_relative_to_exe(exe_dir, RJ_INSTALLED_DAEMON_CONFIG_2GPU).string(),
-      RJ_DAEMON_SANITIZER_PRELOAD,
       resolve_relative_to_exe(exe_dir, RJ_INSTALLED_PRELOAD_LIB).string(),
       resolve_relative_to_exe(exe_dir, RJ_INSTALLED_HIP_VECTOR_ADD_BIN).string(),
       resolve_relative_to_exe(exe_dir, RJ_INSTALLED_HIP_MEMCPY_BIN).string(),
@@ -121,13 +112,11 @@ TestPaths &test_paths() {
   return paths;
 }
 
-const char *daemon_bin() { return test_paths().daemon_bin.c_str(); }
+const char *cli_bin() { return test_paths().cli_bin.c_str(); }
 
 const char *daemon_config() { return test_paths().daemon_config.c_str(); }
 
 const char *daemon_config_2gpu() { return test_paths().daemon_config_2gpu.c_str(); }
-
-const char *sanitizer_preload() { return test_paths().sanitizer_preload.c_str(); }
 
 const char *preload_lib() { return test_paths().preload_lib.c_str(); }
 
@@ -140,168 +129,226 @@ const char *hip_rccl_bin() { return test_paths().hip_rccl_bin.c_str(); }
 const char *daemon_logging_config() { return test_paths().daemon_logging_config.c_str(); }
 const char *interposer_dup_bin() { return test_paths().interposer_dup_bin.c_str(); }
 
-TEST(RocjitsuCliDaemon, LaunchesApplicationAfterDaemonIsReady) {
+/// A path as a single shell word.
+std::string quoted(const std::string &path) { return "'" + path + "'"; }
+
+/// Run a shell command and collect what it wrote.
+///
+/// `merge_stderr` is what a failing case wants — the CLI's diagnostics
+/// are on stderr, and a bare exit code says nothing — but it is wrong
+/// wherever the output is read rather than reported: `session list`
+/// writes ids to stdout and "no sessions are up" to stderr, and merging
+/// the two turns "no sessions" into a session named `no`.
+ProcessResult capture(const std::string &command, bool merge_stderr = true) {
+  ProcessResult result;
+  std::array<char, 4096> buf;
+  FILE *pipe = popen((command + (merge_stderr ? " 2>&1" : " 2>/dev/null")).c_str(), "r");
+  if (!pipe) {
+    result.exit_code = -1;
+    return result;
+  }
+  while (fgets(buf.data(), buf.size(), pipe) != nullptr)
+    result.output += buf.data();
+  int status = pclose(pipe);
+  result.exit_code = WIFEXITED(status) ? WEXITSTATUS(status) : -1;
+  return result;
+}
+
+/// One test's private view of the CLI's state.
+///
+/// Each case gets its own runtime and config roots, so `session list`
+/// sees exactly the session this test started even when ctest runs the
+/// suite with -j. ROCJITSU_LIB pins the interposer to the library this
+/// build produced; without it the CLI would search the ROCm install
+/// locations and could find an older one.
+struct CliEnv {
+  std::string tmp_dir;
+
+  std::string prefix() const {
+    std::string e = "env";
+    e += " XDG_RUNTIME_DIR=" + quoted(tmp_dir);
+    e += " ROCJITSU_CLI_RUNTIME_DIR=" + quoted(tmp_dir + "/runtime");
+    e += " ROCJITSU_CLI_CONFIG_DIR=" + quoted(tmp_dir + "/config");
+    e += " ROCJITSU_LIB=" + quoted(preload_lib());
+    return e;
+  }
+
+  /// Apply the same variables to this process, for a forked child that
+  /// goes on to exec the CLI directly.
+  void apply() const {
+    setenv("XDG_RUNTIME_DIR", tmp_dir.c_str(), 1);
+    setenv("ROCJITSU_CLI_RUNTIME_DIR", (tmp_dir + "/runtime").c_str(), 1);
+    setenv("ROCJITSU_CLI_CONFIG_DIR", (tmp_dir + "/config").c_str(), 1);
+    setenv("ROCJITSU_LIB", preload_lib(), 1);
+  }
+};
+
+/// A private temporary directory, removed with the fixture.
+std::string make_temp_dir(const char *stem) {
   const char *xdg = std::getenv("XDG_RUNTIME_DIR");
-  std::string tmp_dir = std::string(xdg ? xdg : "/tmp") + "/rocjitsu-launch-XXXXXX";
-  ASSERT_NE(mkdtemp(tmp_dir.data()), nullptr) << "mkdtemp failed: " << strerror(errno);
+  std::string tmpl = std::string(xdg ? xdg : "/tmp") + "/" + stem + "-XXXXXX";
+  if (mkdtemp(tmpl.data()) == nullptr)
+    return {};
+  return tmpl;
+}
+
+/// The ids `rocjitsu session list` reports, one per line.
+std::vector<std::string> live_sessions(const CliEnv &env) {
+  ProcessResult r =
+      capture(env.prefix() + " " + quoted(cli_bin()) + " session list", /*merge_stderr=*/false);
+  std::vector<std::string> ids;
+  if (r.exit_code != 0)
+    return ids;
+  std::istringstream lines(r.output);
+  for (std::string line; std::getline(lines, line);) {
+    while (!line.empty() && std::isspace(static_cast<unsigned char>(line.back())))
+      line.pop_back();
+    if (!line.empty())
+      ids.push_back(line);
+  }
+  return ids;
+}
+
+TEST(RocjitsuCliDaemon, LaunchesApplicationAfterDaemonIsReady) {
+  if (!std::filesystem::exists(cli_bin()))
+    GTEST_SKIP() << "no rocjitsu CLI at " << cli_bin();
+
+  CliEnv env{make_temp_dir("rocjitsu-launch")};
+  ASSERT_FALSE(env.tmp_dir.empty()) << "mkdtemp failed: " << strerror(errno);
   struct TempCleanup {
     std::string path;
     ~TempCleanup() {
       std::error_code error;
       std::filesystem::remove_all(path, error);
     }
-  } cleanup{tmp_dir};
-  const std::string runtime_dir = tmp_dir + "/rocjitsu";
-  const std::string socket_path = runtime_dir + "/daemon.sock";
+  } cleanup{env.tmp_dir};
 
-  const pid_t launcher = fork();
-  ASSERT_GE(launcher, 0) << "fork failed: " << strerror(errno);
-  if (launcher == 0) {
-    setenv("XDG_RUNTIME_DIR", tmp_dir.c_str(), 1);
-    setenv("ROCJITSU_RUNTIME_DIR", runtime_dir.c_str(), 1);
-    execl(daemon_bin(), daemon_bin(), "--daemon", "--config", daemon_config(), "--",
-          hip_vector_add_bin(), "--gtest_filter=HipVectorAddTest.CorrectResult", nullptr);
-    _exit(127);
-  }
+  // The one-shot shape: bring the daemon up, run the workload against it,
+  // and take the whole session away again on the way out.
+  ProcessResult r = capture(env.prefix() + " " + quoted(cli_bin()) + " --daemon --config " +
+                            quoted(daemon_config()) + " -- " + quoted(hip_vector_add_bin()) +
+                            " --gtest_filter=HipVectorAddTest.CorrectResult");
+  EXPECT_EQ(r.exit_code, 0) << r.output;
 
-  int status = 0;
-  ASSERT_EQ(waitpid(launcher, &status, 0), launcher);
-  EXPECT_TRUE(WIFEXITED(status));
-  EXPECT_EQ(WEXITSTATUS(status), 0);
-
-  const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
-  while (std::filesystem::exists(socket_path) && std::chrono::steady_clock::now() < deadline)
-    std::this_thread::sleep_for(std::chrono::milliseconds(20));
-  EXPECT_FALSE(std::filesystem::exists(socket_path));
+  // Nothing survives the command that owned it. This is the assertion the
+  // socket-file check used to stand in for, asked of the CLI rather than
+  // of a path the test had to know.
+  EXPECT_TRUE(live_sessions(env).empty());
 }
 
+/// One daemon-backed session, held open for the lifetime of one test.
 class DaemonTest : public ::testing::Test {
 protected:
-  // Config the daemon is launched with. The base fixture uses the plain KMD
+  // Config the session is started with. The base fixture uses the plain KMD
   // config; subclasses can synthesize a config (e.g. to enable plugins) into
   // tmp_dir_ and return its path.
   virtual std::string daemon_config_for_test() { return daemon_config(); }
 
+  /// How many emulated GPUs the session has. Overridden by the RCCL
+  /// fixture, which needs two.
+  virtual std::string session_config() { return daemon_config_for_test(); }
+
   void SetUp() override {
-    // Each test gets its own unique subdirectory under XDG_RUNTIME_DIR
-    // for the daemon socket, preventing conflicts when tests run in parallel.
-    const char *xdg = std::getenv("XDG_RUNTIME_DIR");
-    std::string base = xdg ? xdg : "/tmp";
-    std::string tmpl = base + "/rocjitsu-test-XXXXXX";
-    ASSERT_NE(mkdtemp(tmpl.data()), nullptr) << "mkdtemp failed: " << strerror(errno);
-    tmp_dir_ = tmpl;
-    runtime_dir_ = tmp_dir_ + "/rocjitsu";
-    sock_path_ = runtime_dir_ + "/daemon.sock";
+    if (!std::filesystem::exists(cli_bin()))
+      GTEST_SKIP() << "no rocjitsu CLI at " << cli_bin();
 
-    ASSERT_NO_FATAL_FAILURE(config_path_ = daemon_config_for_test());
-    ASSERT_FALSE(config_path_.empty()) << "daemon config unavailable";
+    env_.tmp_dir = make_temp_dir("rocjitsu-test");
+    ASSERT_FALSE(env_.tmp_dir.empty()) << "mkdtemp failed: " << strerror(errno);
+    tmp_dir_ = env_.tmp_dir;
 
-    daemon_pid_ = fork();
-    ASSERT_GE(daemon_pid_, 0) << "fork failed: " << strerror(errno);
+    ASSERT_NO_FATAL_FAILURE(config_path_ = session_config());
+    ASSERT_FALSE(config_path_.empty()) << "session config unavailable";
 
-    if (daemon_pid_ == 0) {
-      setenv("XDG_RUNTIME_DIR", tmp_dir_.c_str(), 1);
-      setenv("ROCJITSU_RUNTIME_DIR", runtime_dir_.c_str(), 1);
-      execl(daemon_bin(), daemon_bin(), "--daemon", "--config", config_path_.c_str(), nullptr);
+    // `session start` owns the session for as long as it runs, so it is a
+    // child of this process rather than a command that returns. It exits
+    // when `session stop` asks it to, in TearDown.
+    owner_pid_ = fork();
+    ASSERT_GE(owner_pid_, 0) << "fork failed: " << strerror(errno);
+    if (owner_pid_ == 0) {
+      env_.apply();
+      execl(cli_bin(), cli_bin(), "session", "start", "--daemon", "--config", config_path_.c_str(),
+            nullptr);
       _exit(127);
     }
 
-    auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(30);
+    // A run answers its socket from before bring-up finishes — that is
+    // deliberate, so `rocjitsu exec` can say "not ready (pulling)" rather
+    // than time out — which means `session list` naming the session is
+    // not yet permission to use it. What settles it is an exec that the
+    // session accepts, so that is what is waited for: the session is
+    // ready exactly when it can run something, asked through the same
+    // interface the cases themselves use.
+    auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(60);
+    std::string last;
     while (std::chrono::steady_clock::now() < deadline) {
-      if (daemon_ready(sock_path_))
-        return;
+      std::vector<std::string> ids = live_sessions(env_);
+      if (!ids.empty()) {
+        session_ = ids.front();
+        ProcessResult probe = run_in_session("/bin/true", nullptr);
+        if (probe.exit_code == 0)
+          return;
+        last = probe.output;
+      }
       int status = 0;
-      if (waitpid(daemon_pid_, &status, WNOHANG) > 0) {
-        daemon_pid_ = -1;
-        FAIL() << "daemon exited before creating socket";
+      if (waitpid(owner_pid_, &status, WNOHANG) > 0) {
+        owner_pid_ = -1;
+        FAIL() << "`session start` exited before the session came up";
       }
       std::this_thread::sleep_for(std::chrono::milliseconds(50));
     }
-    FAIL() << "daemon socket not created after 30s";
+    FAIL() << "no session was ready within 60s. Last attempt:\n" << last;
   }
 
   void TearDown() override {
-    if (daemon_pid_ > 0) {
-      EXPECT_EQ(kill(daemon_pid_, SIGTERM), 0);
+    if (owner_pid_ > 0) {
+      ProcessResult stopped =
+          capture(env_.prefix() + " " + quoted(cli_bin()) + " session stop " + session_);
+      EXPECT_EQ(stopped.exit_code, 0) << stopped.output;
+
       int status = 0;
-      EXPECT_EQ(waitpid(daemon_pid_, &status, 0), daemon_pid_);
+      EXPECT_EQ(waitpid(owner_pid_, &status, 0), owner_pid_);
       EXPECT_TRUE(WIFEXITED(status));
       EXPECT_EQ(WEXITSTATUS(status), 0);
-      EXPECT_FALSE(std::filesystem::exists(sock_path_));
-      daemon_pid_ = -1;
+      owner_pid_ = -1;
+
+      // Teardown removed it: the daemon is stopped and its scratch
+      // directory is gone, which is what an empty list means here.
+      EXPECT_TRUE(live_sessions(env_).empty());
     }
-    std::filesystem::remove_all(tmp_dir_);
+    if (!tmp_dir_.empty())
+      std::filesystem::remove_all(tmp_dir_);
+  }
+
+  /// Run one workload in this session.
+  ///
+  /// The environment the emulated workload needs — SDMA copies, no
+  /// scratch reclaim, RCCL kept off transports the simulated topology
+  /// does not model — is injected by the CLI's rocjitsu backend, so only
+  /// what is specific to a case is passed here.
+  ProcessResult run_in_session(const char *binary, const char *gtest_filter,
+                               const std::vector<std::string> &envs = {},
+                               const std::vector<std::string> &args = {}) {
+    std::string cmd = env_.prefix() + " " + quoted(cli_bin()) + " exec --session " + session_;
+    for (const std::string &kv : envs)
+      cmd += " --env " + quoted(kv);
+    cmd += " -- " + quoted(binary);
+    for (const std::string &arg : args)
+      cmd += " " + quoted(arg);
+    if (gtest_filter && gtest_filter[0])
+      cmd += " --gtest_filter=" + std::string(gtest_filter);
+    return capture(cmd);
   }
 
   ProcessResult run_hip_test(const char *binary, const char *gtest_filter) {
-    // CTest sets ROCJITSU_RUNTIME_DIR for isolation and the RPC layer prefers it
-    // over XDG_RUNTIME_DIR. Override both here so the daemon and all client
-    // subprocesses agree on the same socket and config-path directory.
-    std::string cmd = "ROCJITSU_RUNTIME_DIR=";
-    cmd += runtime_dir_;
-    cmd += " XDG_RUNTIME_DIR=";
-    cmd += tmp_dir_;
-    cmd += " LD_PRELOAD=";
-    cmd += sanitizer_preload();
-    cmd += preload_lib();
-    cmd += " HSA_ENABLE_SDMA=1 ";
-    cmd += binary;
-    if (gtest_filter && gtest_filter[0]) {
-      cmd += " --gtest_filter=";
-      cmd += gtest_filter;
-    }
-    cmd += " 2>&1";
-
-    ProcessResult result;
-    std::array<char, 4096> buf;
-    FILE *pipe = popen(cmd.c_str(), "r");
-    if (!pipe) {
-      result.exit_code = -1;
-      return result;
-    }
-    while (fgets(buf.data(), buf.size(), pipe) != nullptr)
-      result.output += buf.data();
-    int status = pclose(pipe);
-    result.exit_code = WIFEXITED(status) ? WEXITSTATUS(status) : -1;
-    return result;
+    return run_in_session(binary, gtest_filter);
   }
 
   ProcessResult run_rccl_rank(int rank, int world_size, const std::string &shared_dir,
                               const char *gtest_filter) {
-    std::string cmd = "ROCJITSU_RUNTIME_DIR=";
-    cmd += runtime_dir_;
-    cmd += " XDG_RUNTIME_DIR=";
-    cmd += tmp_dir_;
-    cmd += " ";
-    cmd += daemon_bin();
-    cmd += " --attach --config ";
-    cmd += daemon_config();
-    cmd += " -- ";
-    cmd += hip_rccl_bin();
-    cmd += " --rank=";
-    cmd += std::to_string(rank);
-    cmd += " --world-size=";
-    cmd += std::to_string(world_size);
-    cmd += " --shared-dir=";
-    cmd += shared_dir;
-    if (gtest_filter && gtest_filter[0]) {
-      cmd += " --gtest_filter=";
-      cmd += gtest_filter;
-    }
-    cmd += " 2>&1";
-
-    ProcessResult result;
-    std::array<char, 4096> buf;
-    FILE *pipe = popen(cmd.c_str(), "r");
-    if (!pipe) {
-      result.exit_code = -1;
-      return result;
-    }
-    while (fgets(buf.data(), buf.size(), pipe) != nullptr)
-      result.output += buf.data();
-    int status = pclose(pipe);
-    result.exit_code = WIFEXITED(status) ? WEXITSTATUS(status) : -1;
-    return result;
+    return run_in_session(
+        hip_rccl_bin(), gtest_filter, {"HIP_VISIBLE_DEVICES=" + std::to_string(rank)},
+        {"--rank=" + std::to_string(rank), "--world-size=" + std::to_string(world_size),
+         "--shared-dir=" + shared_dir});
   }
 
   void run_collective(const char *filter, int world_size = 2) {
@@ -324,10 +371,10 @@ protected:
     std::filesystem::remove_all(shared_dir);
   }
 
-  pid_t daemon_pid_ = -1;
+  CliEnv env_;
+  pid_t owner_pid_ = -1;
   std::string tmp_dir_;
-  std::string runtime_dir_;
-  std::string sock_path_;
+  std::string session_;
   std::string config_path_;
 };
 
@@ -338,23 +385,16 @@ TEST_F(DaemonTest, HipVectorAdd) {
   EXPECT_EQ(r.exit_code, 0) << r.output;
 }
 
-TEST_F(DaemonTest, AttachExecFailurePreservesDaemonSocket) {
-  const pid_t client = fork();
-  ASSERT_GE(client, 0) << "fork failed: " << strerror(errno);
-  if (client == 0) {
-    setenv("XDG_RUNTIME_DIR", tmp_dir_.c_str(), 1);
-    setenv("ROCJITSU_RUNTIME_DIR", runtime_dir_.c_str(), 1);
-    execl(daemon_bin(), daemon_bin(), "--attach", "--config", daemon_config(), "--",
-          "/does/not/exist", nullptr);
-    _exit(127);
-  }
+TEST_F(DaemonTest, ExecFailureLeavesTheSessionUsable) {
+  // A workload that cannot be started must not take the daemon with it.
+  // The old form of this asserted that the daemon's socket file was still
+  // there; running a second workload afterwards asserts the stronger and
+  // more useful thing, that the daemon still serves.
+  auto failed = run_in_session("/does/not/exist", nullptr);
+  EXPECT_NE(failed.exit_code, 0) << failed.output;
 
-  int status = 0;
-  ASSERT_EQ(waitpid(client, &status, 0), client);
-  EXPECT_TRUE(WIFEXITED(status));
-  EXPECT_EQ(WEXITSTATUS(status), 1);
-  EXPECT_TRUE(std::filesystem::is_socket(sock_path_));
-  EXPECT_TRUE(daemon_ready(sock_path_));
+  auto ok = run_hip_test(hip_vector_add_bin(), "HipVectorAddTest.CorrectResult");
+  EXPECT_EQ(ok.exit_code, 0) << ok.output;
 }
 
 // --- hip_memcpy_test ---
@@ -405,7 +445,7 @@ TEST_F(DaemonTest, TwoIndependentClients) {
 class DaemonPluginTest : public DaemonTest {
 protected:
   // Rewrite the logging-plugin config template's placeholder sink dir to a
-  // private, writable directory for this test, then run the daemon on it.
+  // private, writable directory for this test, then run the session on it.
   std::string daemon_config_for_test() override {
     sink_dir_ = tmp_dir_ + "/plugin_sink";
     std::error_code ec;
@@ -493,122 +533,14 @@ TEST_F(DaemonTest, InterposerProcMapsNamesRemoteKfdMarker) {
 }
 
 // --- RCCL collective tests (2-GPU daemon) ---
+//
+// The same fixture on the two-GPU config: each rank is its own
+// `rocjitsu exec` into the one session, which is how several processes
+// come to share the daemon's emulated machine.
 
-class RcclDaemonTest : public ::testing::Test {
+class RcclDaemonTest : public DaemonTest {
 protected:
-  void SetUp() override {
-    const char *xdg = std::getenv("XDG_RUNTIME_DIR");
-    std::string base = xdg ? xdg : "/tmp";
-    std::string tmpl = base + "/rocjitsu-rccl-XXXXXX";
-    ASSERT_NE(mkdtemp(tmpl.data()), nullptr) << "mkdtemp failed: " << strerror(errno);
-    tmp_dir_ = tmpl;
-    runtime_dir_ = tmp_dir_ + "/rocjitsu";
-    sock_path_ = runtime_dir_ + "/daemon.sock";
-
-    daemon_pid_ = fork();
-    ASSERT_GE(daemon_pid_, 0) << "fork failed: " << strerror(errno);
-
-    if (daemon_pid_ == 0) {
-      setenv("XDG_RUNTIME_DIR", tmp_dir_.c_str(), 1);
-      setenv("ROCJITSU_RUNTIME_DIR", runtime_dir_.c_str(), 1);
-      execl(daemon_bin(), daemon_bin(), "--daemon", "--config", daemon_config_2gpu(), nullptr);
-      _exit(127);
-    }
-
-    auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(30);
-    while (std::chrono::steady_clock::now() < deadline) {
-      if (daemon_ready(sock_path_))
-        return;
-      int status = 0;
-      if (waitpid(daemon_pid_, &status, WNOHANG) > 0) {
-        daemon_pid_ = -1;
-        FAIL() << "daemon exited before creating socket";
-      }
-      std::this_thread::sleep_for(std::chrono::milliseconds(50));
-    }
-    FAIL() << "daemon socket not created after 30s";
-  }
-
-  void TearDown() override {
-    if (daemon_pid_ > 0) {
-      EXPECT_EQ(kill(daemon_pid_, SIGTERM), 0);
-      int status = 0;
-      EXPECT_EQ(waitpid(daemon_pid_, &status, 0), daemon_pid_);
-      EXPECT_TRUE(WIFEXITED(status));
-      EXPECT_EQ(WEXITSTATUS(status), 0);
-      EXPECT_FALSE(std::filesystem::exists(sock_path_));
-      daemon_pid_ = -1;
-    }
-    std::filesystem::remove_all(tmp_dir_);
-    std::this_thread::sleep_for(std::chrono::milliseconds(500));
-  }
-
-  ProcessResult run_rccl_rank(int rank, int world_size, const std::string &shared_dir,
-                              const char *gtest_filter) {
-    std::string cmd = "timeout 150 env ROCJITSU_RUNTIME_DIR=";
-    cmd += runtime_dir_;
-    cmd += " XDG_RUNTIME_DIR=";
-    cmd += tmp_dir_;
-    cmd += " HIP_VISIBLE_DEVICES=";
-    cmd += std::to_string(rank);
-    cmd += " NCCL_P2P_DISABLE=1 NCCL_SHM_DISABLE=1 HSA_NO_SCRATCH_RECLAIM=1"
-           " NCCL_SOCKET_NTHREADS=1 NCCL_NSOCKS_PERTHREAD=1"
-           " NCCL_SOCKET_IFNAME=lo ";
-    cmd += daemon_bin();
-    cmd += " --attach --config ";
-    cmd += daemon_config_2gpu();
-    cmd += " -- ";
-    cmd += hip_rccl_bin();
-    cmd += " --rank=";
-    cmd += std::to_string(rank);
-    cmd += " --world-size=";
-    cmd += std::to_string(world_size);
-    cmd += " --shared-dir=";
-    cmd += shared_dir;
-    if (gtest_filter && gtest_filter[0]) {
-      cmd += " --gtest_filter=";
-      cmd += gtest_filter;
-    }
-    cmd += " 2>&1";
-
-    ProcessResult result;
-    std::array<char, 4096> buf;
-    FILE *pipe = popen(cmd.c_str(), "r");
-    if (!pipe) {
-      result.exit_code = -1;
-      return result;
-    }
-    while (fgets(buf.data(), buf.size(), pipe) != nullptr)
-      result.output += buf.data();
-    int status = pclose(pipe);
-    result.exit_code = WIFEXITED(status) ? WEXITSTATUS(status) : -1;
-    return result;
-  }
-
-  void run_collective(const char *filter, int world_size = 2) {
-    std::string shared_tmpl = tmp_dir_ + "/coll-XXXXXX";
-    ASSERT_NE(mkdtemp(shared_tmpl.data()), nullptr) << strerror(errno);
-    std::string shared_dir = shared_tmpl;
-
-    std::vector<std::thread> threads(world_size);
-    std::vector<ProcessResult> results(world_size);
-
-    for (int r = 0; r < world_size; ++r)
-      threads[r] =
-          std::thread([&, r] { results[r] = run_rccl_rank(r, world_size, shared_dir, filter); });
-    for (auto &t : threads)
-      t.join();
-
-    for (int r = 0; r < world_size; ++r)
-      EXPECT_EQ(results[r].exit_code, 0) << "Rank " << r << " failed:\n" << results[r].output;
-
-    std::filesystem::remove_all(shared_dir);
-  }
-
-  pid_t daemon_pid_ = -1;
-  std::string tmp_dir_;
-  std::string runtime_dir_;
-  std::string sock_path_;
+  std::string session_config() override { return daemon_config_2gpu(); }
 };
 
 TEST_F(RcclDaemonTest, AllReduce) { run_collective("RcclTest.AllReduce"); }

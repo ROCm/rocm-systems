@@ -1,0 +1,24 @@
+[package]
+name = "rj_backend_rocjitsu"
+version.workspace = true
+edition = "2024"
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+rj_core = { workspace = true }
+rocjitsu_sys = { workspace = true }
+inventory = { workspace = true }
+chrono = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tracing = { workspace = true }
+thiserror = { workspace = true }
+
+[dev-dependencies]
+rj_builtin = { workspace = true }
+tempfile = { workspace = true }
+
+[lints]
+workspace = true

@@ -6,6 +6,7 @@
 
 #include "rocjitsu/base/api.h"
 #include "rocjitsu/code/api.h"
+#include "rocjitsu/config/api.h"
 #include "rocjitsu/daemon/api.h"
 #include "rocjitsu/vm/api.h"
 
