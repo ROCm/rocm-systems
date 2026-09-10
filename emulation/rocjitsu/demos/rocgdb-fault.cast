@@ -8,7 +8,7 @@
 [1.136021, "o", "\u001b[1m/home/arosa/rocm-systems/emulation/rocjitsu/demos/../tests/rocgdb/bad_access.hip:29:3: \u001b[0m\u001b[0;1;35mwarning: \u001b[0m\u001b[1mignoring return value of type 'hipError_t' declared with 'nodiscard' attribute [-Wunused-value]\u001b[0m\r\n   29 |   hipFree(d);\u001b[0m\r\n      | \u001b[0;1;32m  ^~~~~~~~~~\r\n\u001b[0m"]
 [1.189941, "o", "1 warning generated when compiling for host.\r\n"]
 [1.221753, "o", "\r\n\u001b[1;36m# Run it under ROCgdb — the emulator faults the wave on the wild store:\u001b[0m\r\n"]
-[1.222347, "o", "+ /home/arosa/rocm-systems/emulation/mirage/target/debug/mirage run --profile mi350x --gdb --gdb-ex run --gdb-ex backtrace --gdb-ex 'info registers pc' -- /tmp/tmp.wtWfqkbt4t/bad_access\r\n"]
+[1.222347, "o", "+ /home/arosa/rocm-systems/emulation/rocjitsu/cli/target/debug/rocjitsu run --profile mi350x --gdb --gdb-ex run --gdb-ex backtrace --gdb-ex 'info registers pc' -- /tmp/tmp.wtWfqkbt4t/bad_access\r\n"]
 [2.484295, "o", "[Thread debugging using libthread_db enabled]\r\nUsing host libthread_db library \"/lib/x86_64-linux-gnu/libthread_db.so.1\".\r\n"]
 [2.633349, "o", "[New Thread 0x7ffff27ff6c0 (LWP 1839316)]\r\n[New Thread 0x7fffebfff6c0 (LWP 1839317)]\r\n[New Thread 0x7ffff1ffe6c0 (LWP 1839319)]\r\n[Thread 0x7ffff1ffe6c0 (LWP 1839319) exited]\r\n"]
 [2.883424, "o", "[New Thread 0x7ffff17fd6c0 (LWP 1839399)]\r\n[Thread 0x7ffff17fd6c0 (LWP 1839399) exited]\r\n[New Thread 0x7ffff2d7e6c0 (LWP 1839400)]\r\n"]

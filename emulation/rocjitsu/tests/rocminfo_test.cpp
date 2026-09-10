@@ -91,8 +91,11 @@ ProcessResult run_command(const std::string &cmd) {
 const ProcessResult &rocminfo_output() {
   const TestPaths &paths = test_paths();
   const char *rocminfo_path = std::getenv("ROCMINFO_PATH");
+  // `--in-process` for the reason `cmake/rj_run_filtered_gtest.cmake` gives:
+  // what is asked here is what rocminfo sees through an interposer in its
+  // own process, not what it sees through a daemon's remote driver.
   static const ProcessResult result =
-      run_command(paths.rocjitsu_bin + " --config " + paths.config_path + " -- " +
+      run_command(paths.rocjitsu_bin + " --in-process --config " + paths.config_path + " -- " +
                   (rocminfo_path ? rocminfo_path : ROCMINFO_PATH));
   return result;
 }
