@@ -4,6 +4,7 @@
 #ifndef INCLUDE_ROCM_SMI_ROCM_SMI_KFD_H_
 #define INCLUDE_ROCM_SMI_ROCM_SMI_KFD_H_
 
+#include <cstdint>
 #include <map>
 #include <memory>
 #include <string>
@@ -15,6 +16,10 @@
 #include "rocm_smi/rocm_smi_io_link.h"
 
 namespace amd::smi {
+
+// Sentinel for KFDNode::numa_node_* when no CPU io_link was found.
+constexpr uint32_t kInvalidNumaNode = UINT32_MAX;
+constexpr uint64_t kInvalidNumaNodeWeight = UINT64_MAX;
 
 class KFDNode {
  public:
