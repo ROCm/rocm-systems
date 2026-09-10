@@ -14,6 +14,15 @@
 
 namespace rocprofsys::utility::string
 {
+/// @brief Convert a string to lowercase (ASCII) in place.
+/// @param value The string which will be modified.
+inline void
+to_lower_in_place(std::string& value)
+{
+    std::ranges::transform(value, value.begin(), [](unsigned char chr) {
+        return static_cast<char>(std::tolower(chr));
+    });
+}
 
 /// @brief Convert a string to lowercase (ASCII).
 /// @param value The string to convert.
@@ -22,12 +31,18 @@ namespace rocprofsys::utility::string
 to_lower(std::string_view value)
 {
     std::string str_copy{ value };
-
-    std::ranges::transform(str_copy, str_copy.begin(), [](unsigned char chr) {
-        return static_cast<char>(std::tolower(chr));
-    });
-
+    to_lower_in_place(str_copy);
     return str_copy;
+}
+
+/// @brief Convert a string to uppercase (ASCII) in place.
+/// @param value The string which will be modified.
+inline void
+to_upper_in_place(std::string& value)
+{
+    std::ranges::transform(value, value.begin(), [](unsigned char chr) {
+        return static_cast<char>(std::toupper(chr));
+    });
 }
 
 /// @brief Convert a string to uppercase (ASCII).
@@ -37,11 +52,7 @@ to_lower(std::string_view value)
 to_upper(std::string_view value)
 {
     std::string str_copy{ value };
-
-    std::ranges::transform(str_copy, str_copy.begin(), [](unsigned char chr) {
-        return static_cast<char>(std::toupper(chr));
-    });
-
+    to_upper_in_place(str_copy);
     return str_copy;
 }
 
@@ -75,10 +86,18 @@ rtrim(std::string_view value) noexcept
 /// @param value The string to trim.
 /// @return A copy of @p value with leading/trailing whitespace removed; empty
 ///         if @p value is empty or all whitespace.
-[[nodiscard]] inline std::string
+[[nodiscard]] inline std::string_view
 trim(std::string_view value)
 {
-    return std::string{ rtrim(ltrim(value)) };
+    return rtrim(ltrim(value));
+}
+
+[[nodiscard]] constexpr bool
+equals_ignore_case(std::string_view lhs, std::string_view rhs) noexcept
+{
+    return std::ranges::equal(lhs, rhs, [](char left, char right) {
+        return std::tolower(left) == std::tolower(right);
+    });
 }
 
 /// @brief Parse a string into a boolean.
@@ -162,4 +181,5 @@ strip_rocprofsys_prefix(std::string_view value)
     }
     return name;
 }
+
 }  // namespace rocprofsys::utility::string

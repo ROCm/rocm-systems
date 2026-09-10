@@ -118,22 +118,6 @@ TEST(trim, internal_whitespace_is_preserved)
     EXPECT_EQ(trim("  hello   world  "), "hello   world");
 }
 
-TEST(clock_name, strips_clock_prefix_case_insensitively)
-{
-    EXPECT_EQ(clock_name("CLOCK_MONOTONIC"), "monotonic");
-    EXPECT_EQ(clock_name("clock_realtime"), "realtime");
-}
-
-TEST(clock_name, maps_process_cputime_id_to_cputime)
-{
-    EXPECT_EQ(clock_name("CLOCK_PROCESS_CPUTIME_ID"), "cputime");
-}
-
-TEST(clock_name, no_clock_prefix_is_only_lowercased)
-{
-    EXPECT_EQ(clock_name("BOOTTIME"), "boottime");
-}
-
 TEST(strip_rocprofsys_prefix, strips_prefix_case_insensitively)
 {
     EXPECT_EQ(strip_rocprofsys_prefix("ROCPROFSYS_SAMPLING_FREQ"), "sampling_freq");

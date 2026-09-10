@@ -167,9 +167,8 @@ clock_identifier::operator==(std::string _rhs) const
 std::string
 clock_identifier::as_string() const
 {
-    auto lower_name = utility::string::to_lower(name);
-    auto oss        = std::stringstream{};
-    oss << lower_name << "(id=" << raw_name << ", value=" << value << ")";
+    auto oss = std::stringstream{};
+    oss << name << "(id=" << raw_name << ", value=" << value << ")";
     return oss.str();
 }
 

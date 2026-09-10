@@ -199,18 +199,13 @@ struct settings_policy
             return gpu_perf_counter::gpu_perf_counter_settings{};
         }
 
-        std::string trimmed;
-        trimmed.reserve(value_str.size());
-        for(auto chr : value_str)
-        {
-            if(chr != '\t' && chr != ' ') trimmed.push_back(chr);
-        }
+        auto trimmed = utility::string::trim(value_str);
 
         gpu_perf_counter::gpu_perf_counter_settings result;
 
         constexpr auto device_qualifier = std::string_view{ ":device=" };
 
-        std::stringstream stream(trimmed);
+        std::stringstream stream(std::string{ trimmed });
         std::string       token;
         while(std::getline(stream, token, ','))
         {
@@ -257,15 +252,7 @@ struct settings_policy
 private:
     static cpu::enabled_metrics parse_cpu_enabled_metrics(const std::string& input)
     {
-        std::string filtered;
-        filtered.reserve(input.size());
-        std::ranges::for_each(input, [&filtered](char chr) {
-            if(chr != '\t' && chr != ' ')
-            {
-                filtered.push_back(chr);
-            }
-        });
-        auto trimmed = rocprofsys::utility::string::to_lower(filtered);
+        auto trimmed = utility::string::to_lower(utility::string::trim(input));
 
         if(trimmed.empty() || trimmed == "all")
         {
@@ -321,24 +308,16 @@ private:
 
     static gpu::enabled_metrics parse_enabled_metrics(const std::string& input)
     {
-        std::string settings_filtered;
-        settings_filtered.reserve(input.size());
-        std::ranges::for_each(input, [&settings_filtered](char chr) {
-            if(chr != '\t' && chr != ' ')
-            {
-                settings_filtered.push_back(chr);
-            }
-        });
-        auto settings_trimmed = rocprofsys::utility::string::to_lower(settings_filtered);
+        auto trimmed = utility::string::to_lower(utility::string::trim(input));
 
-        if(settings_trimmed.empty() || settings_trimmed == "all")
+        if(trimmed.empty() || trimmed == "all")
         {
             gpu::enabled_metrics result;
             result.value = ENABLE_ALL_METRICS;
             return result;
         }
 
-        if(settings_trimmed == "none")
+        if(trimmed == "none")
         {
             gpu::enabled_metrics result;
             result.value = DISABLE_ALL_METRICS;
@@ -350,7 +329,7 @@ private:
             R"()(?:[,;](?:temp|power|busy|mem_usage|vcn_activity|jpeg_activity|xgmi|pcie|sdma_usage|gfx_clock|mem_clock))*$)"
         };
 
-        if(!std::regex_match(settings_trimmed, validator))
+        if(!std::regex_match(trimmed, validator))
         {
             LOG_INFO("Invalid metrics settings '{}'. Enabling all metrics.", input);
             gpu::enabled_metrics result;
@@ -387,8 +366,7 @@ private:
         gpu::enabled_metrics metrics;
         metrics.value = DISABLE_ALL_METRICS;
         const std::regex           tokenizer{ R"(\w+)" };
-        std::sregex_iterator       it(settings_trimmed.begin(), settings_trimmed.end(),
-                                      tokenizer);
+        std::sregex_iterator       it(trimmed.begin(), trimmed.end(), tokenizer);
         const std::sregex_iterator end;
 
         for(; it != end; ++it)
@@ -470,7 +448,7 @@ private:
                 auto trimmed = rocprofsys::utility::string::trim(subtoken);
                 if(!trimmed.empty())
                 {
-                    result.insert(std::move(trimmed));
+                    result.insert(std::string{ trimmed });
                 }
             }
         }

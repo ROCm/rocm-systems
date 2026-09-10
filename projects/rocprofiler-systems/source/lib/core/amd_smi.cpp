@@ -25,8 +25,8 @@ namespace
 #define ROCPROFSYS_CONFIG_SETTING(TYPE, ENV_NAME, DESCRIPTION, INITIAL_VALUE, ...)       \
     [&]() {                                                                              \
         auto _ret = _config->insert<TYPE, TYPE>(                                         \
-            ENV_NAME, utility::string::strip_rocprofsys_prefix(ENV_NAME), DESCRIPTION,   \
-            TYPE{ INITIAL_VALUE },                                                       \
+            ENV_NAME, std::string{ utility::string::strip_rocprofsys_prefix(ENV_NAME) }, \
+            DESCRIPTION, TYPE{ INITIAL_VALUE },                                          \
             std::set<std::string>{ "custom", "rocprofsys", "librocprof-sys",             \
                                    __VA_ARGS__ });                                       \
         if(!_ret.second)                                                                 \

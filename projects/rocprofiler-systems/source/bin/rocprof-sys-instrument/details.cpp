@@ -25,7 +25,7 @@
 #include <string>
 #include <vector>
 
-static int expect_error = NO_ERROR;
+static int expect_error = -1;
 static int error_print  = 0;
 
 // set of whole function names to exclude

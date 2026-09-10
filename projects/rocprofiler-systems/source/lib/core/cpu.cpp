@@ -99,12 +99,12 @@ process_cpu_info_data()
 
         const std::string key =
             utility::string::to_lower(utility::string::trim(line.substr(0, colon_pos)));
-        const std::string value = utility::string::trim(line.substr(colon_pos + 1));
+        const auto value = utility::string::trim(line.substr(colon_pos + 1));
 
         auto it = field_parsers.find(key);
         if(it != field_parsers.end())
         {
-            it->second(current_cpu, value);
+            it->second(current_cpu, std::string{ value });
             if(key == "processor")
             {
                 has_processor_entry = true;

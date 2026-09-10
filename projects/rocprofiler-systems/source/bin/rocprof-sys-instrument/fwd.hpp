@@ -60,10 +60,7 @@
 #include <unordered_map>
 #include <vector>
 
-#define MUTNAMELEN 1024
 inline constexpr std::size_t k_funcnamelen = 32UL * 1024UL;
-#define NO_ERROR         -1
-#define TIMEMORY_BIN_DIR "bin"
 
 #if !defined(PATH_MAX)
 #    define PATH_MAX std::numeric_limits<int>::max();
