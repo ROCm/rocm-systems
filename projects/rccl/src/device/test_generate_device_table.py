@@ -251,14 +251,16 @@ class DeviceTableGenerationTest(unittest.TestCase):
             host = _read_generated(tmpdir, "host_table.cpp")
         self.assertEqual({"1", "2", "4", "8", "16", "32"}, set(_unroll_tables(header)))
         # Both host tables flip under the flag, and no other test reads them on this path.
+        generated = self._unroll_table("ncclDevFuncUnrollGenerated", r"true|false", host)
         self.assertEqual(
             ["true"] * 6,
-            re.findall(r"(true|false), // unroll", host),
+            list(generated.values()),
             "BUILD_ALL_UNROLLS must mark every unroll generated",
         )
+        pinned = self._unroll_table("ncclDevFuncUnrollArch", r'nullptr|"gfx\w+"', host)
         self.assertEqual(
             ["nullptr"] * 6,
-            re.findall(r'(nullptr|"gfx\w+"), // unroll', host),
+            list(pinned.values()),
             "BUILD_ALL_UNROLLS compiles every unroll for the target, so none stays pinned",
         )
         self.assertNotIn("#if defined(__gfx1250__)\n", header)
@@ -273,11 +275,11 @@ class DeviceTableGenerationTest(unittest.TestCase):
 
     _ARCH_MACRO = re.compile(r"__(gfx\w+)__")
 
-    def _unroll_table(self, name, value_pattern):
+    def _unroll_table(self, name, value_pattern, host_table=None):
         """Parse a `<name>[NCCL_NUM_UNROLLS]` initializer into {unroll: raw value}."""
         block = re.search(
             r"%s\[NCCL_NUM_UNROLLS\] = \{\n(.*?)\n\};" % re.escape(name),
-            self.host_table,
+            self.host_table if host_table is None else host_table,
             re.S,
         )
         self.assertIsNotNone(block, "%s[] not emitted into host_table.cpp" % name)
@@ -393,6 +395,27 @@ class DeviceTableGenerationTest(unittest.TestCase):
             any(value != "nullptr" for value in arch_table.values()),
             "no unroll factor is arch-restricted; ncclDevFuncUnrollArch[] is all nullptr",
         )
+
+    def test_manifest_guard_matches_the_shard_it_guards(self):
+        # cmake/DeviceLinker.cmake filters shards on the manifest column while the compiler
+        # obeys the #if, so any drift drops a symbol the dispatch table still declares.
+        rows = []
+        with open(os.path.join(self._dir, "specialized_files.txt")) as f:
+            for line in f:
+                if line.strip():
+                    parts = line.rstrip("\n").split(" ", 2)
+                    rows.append((parts[0], parts[2] if len(parts) > 2 else ""))
+        self.assertTrue(rows, "generator wrote no specialized_files.txt rows")
+        for filename, guard in rows:
+            with open(os.path.join(self._dir, "specialized", filename)) as f:
+                shard = f.read()
+            emitted = re.findall(r"^#if (.*)$", shard, re.M)
+            self.assertEqual(
+                [guard] if guard else [],
+                emitted,
+                "%s: manifest guard %r does not match the #if in the shard %r"
+                % (filename, guard, emitted),
+            )
 
     def test_no_obsolete_table_omit_macro(self):
         # RCCL_DEVICE_TABLE_OMIT was retired by the static-table change.

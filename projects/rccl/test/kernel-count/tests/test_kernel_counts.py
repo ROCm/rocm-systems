@@ -182,6 +182,26 @@ def _parse(out_dir):
     return records, len(files), manifest_count
 
 
+def _unroll_tables(header):
+    """Map generated unroll -> table entries, guarded slots reduced to their symbol."""
+    tables = {}
+    for unroll, body in re.findall(
+        r"ncclDevFuncTable_(\d+)\[\] = \{(.*?)nullptr\};", header, re.S
+    ):
+        slots = {}
+        for m in re.finditer(r"/\*\s*(\d+)\*/ (\w+),", body):
+            slots.setdefault(int(m.group(1)), m.group(2))
+        if slots:
+            tables[unroll] = [slots[i] for i in sorted(slots)]
+    return tables
+
+
+def _strip_unroll(sym):
+    parts = sym.split("_")
+    del parts[8]
+    return "_".join(parts)
+
+
 def _count_by(records, dim):
     """Tally records by one DIMENSIONS axis, e.g. "coll" or "unroll"."""
     counts = {}
@@ -246,8 +266,11 @@ def generated(tmp_path_factory):
         d = tmp_path_factory.mktemp("main_%s" % rocshmem.lower())
         _run_generator(str(d), rocshmem)
         records, num_files, manifest_count = _parse(str(d))
+        with open(os.path.join(str(d), "device_table.h")) as f:
+            device_table = f.read()
         out[rocshmem] = {
             "records": records,
+            "device_table": device_table,
             "num_files": num_files,
             "manifest_count": manifest_count,
         }
@@ -290,6 +313,23 @@ def test_unroll_tables_have_equal_kernel_counts(generated, rocshmem):
     assert len(set(counts.values())) == 1, (
         "unroll tables are not generated in lockstep (host ids would misindex): %s" % counts
     )
+
+
+@pytest.mark.main_generator
+@pytest.mark.parametrize("rocshmem", ["OFF", "ON"])
+def test_unroll_tables_are_index_aligned(generated, rocshmem):
+    # The counts above cannot see a reorder that preserves them, and the ordering assertion
+    # in test_generate_device_table.py runs under an ONLY_FUNCS slice that excludes the four
+    # collectives this guards: AlltoAllPivot, AlltoAllGda, AlltoAllvGda and AllGatherV.
+    tables = _unroll_tables(generated[rocshmem]["device_table"])
+    assert tables, "no unroll tables generated"
+    base_unroll, base = sorted(tables.items())[0]
+    base_shape = [_strip_unroll(s) for s in base]
+    for unroll, entries in sorted(tables.items()):
+        assert base_shape == [_strip_unroll(s) for s in entries], (
+            "ncclDevFuncTable_%s is not index-aligned with ncclDevFuncTable_%s"
+            % (unroll, base_unroll)
+        )
 
 
 @pytest.mark.main_generator
