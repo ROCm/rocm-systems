@@ -654,8 +654,6 @@ void ComputeUnitCore::tick_pipelines() {
 
 void ComputeUnitCore::route_memory_inst(Instruction *inst, Wavefront &wf) {
   std::unique_ptr<Instruction> owned_inst(inst);
-  plugin_group_->onAmdgpuRouteMemoryInstruction(*inst, wf);
-
   const uint8_t decoded_route_tag = inst->data()->tag();
   bool normalized_to_local = false;
   uint64_t flat_local_lane_mask = 0;
@@ -682,8 +680,11 @@ void ComputeUnitCore::route_memory_inst(Instruction *inst, Wavefront &wf) {
         }
       }
     }
-    // FLAT ops targeting the shared aperture are routed to LDS (LGKMCNT,
-    // not VMCNT).  Scratch-targeting FLATs stay on the global path.
+    // Under the current uniform-address-space assumption, FLAT operations
+    // targeting the shared aperture use the LDS pipeline. Scratch-targeting
+    // FLATs stay on the global path. Architectural wait-counter obligations
+    // remain properties of the decoded instruction; this route selects only
+    // the memory path used by the emulator.
     const uint64_t request_lanes = transpose_request_lane_mask(d, wf_size);
     const uint32_t first_lane =
         request_lanes == 0 ? wf_size : static_cast<uint32_t>(std::countr_zero(request_lanes));
@@ -699,10 +700,20 @@ void ComputeUnitCore::route_memory_inst(Instruction *inst, Wavefront &wf) {
       }
       inst->data()->set_tag(LOCAL_MEM);
       d.wait_counter_type = WaitCounterType::LGKMCNT;
+      const auto *issue = inst->amdgpu_memory_issue_info();
+      if (issue) {
+        for (const auto obligation : issue->counter_obligations()) {
+          if (obligation.completion_class() == MemoryCompletionClass::LDS) {
+            d.wait_counter_type = obligation.wait_counter_type();
+            break;
+          }
+        }
+      }
       normalized_to_local = true;
     }
   }
 
+  plugin_group_->onAmdgpuRouteMemoryInstruction(*inst, wf);
   const uint8_t route_tag = inst->data()->tag();
   // After the aperture rewrite, before the pipeline takes the instruction:
   // this is the one point at which the space, the counter, and the addresses

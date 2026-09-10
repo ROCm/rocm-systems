@@ -28,13 +28,16 @@ void RaceDetector::setProfiler(ProfilerInterface &p) {
   }
 }
 
-EventId RaceDetector::allocateEventId(WaveId waveId, uint64_t pc, MemoryEventType type,
-                                      std::vector<uint32_t> registers, uint64_t execMask,
-                                      uint8_t byteMask, IntervalSet ldsIntervals,
-                                      amdgpu::WaitCounterType waitCounterType) {
+EventId
+RaceDetector::allocateEventId(WaveId waveId, uint64_t pc, MemoryEventType type,
+                              std::vector<uint32_t> registers, uint64_t execMask, uint8_t byteMask,
+                              IntervalSet ldsIntervals, amdgpu::WaitCounterType waitCounterType,
+                              MemoryOrderClass memoryOrder,
+                              std::optional<amdgpu::WaitCounterType> additionalWaitCounterType) {
   bool hasLds = !ldsIntervals.empty();
-  EventId eid = events_.add(waveId, pc, type, std::move(registers), execMask, byteMask,
-                            std::move(ldsIntervals), waitCounterType);
+  EventId eid =
+      events_.add(waveId, pc, type, std::move(registers), execMask, byteMask,
+                  std::move(ldsIntervals), waitCounterType, memoryOrder, additionalWaitCounterType);
   if (hasLds) {
     const auto &ivs = events_.ldsIntervals(eid);
     if (isToLds(type)) {
@@ -49,6 +52,10 @@ EventId RaceDetector::allocateEventId(WaveId waveId, uint64_t pc, MemoryEventTyp
 }
 
 void RaceDetector::markEventWaveComplete(EventId eventId) { events_.markComplete(eventId); }
+
+bool RaceDetector::satisfyEventWaitCounter(EventId eventId, amdgpu::WaitCounterType waitCounter) {
+  return events_.satisfyWaitCounter(eventId, waitCounter);
+}
 
 void RaceDetector::retireEvent(EventId eventId) {
   auto type = events_.type(eventId);
