@@ -79,16 +79,18 @@ class GroupIdAssigner:
     Ids are handed out one row at a time so a CSV never has to be held in
     memory.
 
-    The first id is ``start``, and each new combination gets the next one.
+    The first id is ``start`` (default ``0``, used for kernel IDs). Profile
+    mode passes ``start=1`` for ``Dispatch_ID`` so those ids match rocprofv3.
+    Each new combination gets the next id.
 
     Example:
         assigner = GroupIdAssigner(["name", "value"], "group_id")
-        assigner.apply({"name": "A", "value": 1})  # group_id 0
+        assigner.apply({"name": "A", "value": 1})  # group_id 0 (kernel-style)
         assigner.apply({"name": "B", "value": 2})  # group_id 1
         assigner.apply({"name": "A", "value": 1})  # group_id 0 again
 
         assigner = GroupIdAssigner(["name"], "group_id", start=1)
-        assigner.apply({"name": "A"})  # group_id 1
+        assigner.apply({"name": "A"})  # group_id 1 (Dispatch_ID-style)
     """
 
     def __init__(
