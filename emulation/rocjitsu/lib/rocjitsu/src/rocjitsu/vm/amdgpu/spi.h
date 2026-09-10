@@ -10,8 +10,7 @@
 /// AQL queue) and selects the oldest ready WG from the least recently used queue
 /// for dispatch. All wavefronts of a workgroup land on the same CU.
 
-#ifndef ROCJITSU_VM_AMDGPU_SPI_H_
-#define ROCJITSU_VM_AMDGPU_SPI_H_
+#pragma once
 
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/dispatch_entry.h"
@@ -116,6 +115,7 @@ public:
         wf->set_lds_size(util::align_up(wg.entry->group_segment_fixed_size, 256u));
         wf->set_lds(placement->lds);
         wf->set_dispatch_id(wg.entry->dispatch_id);
+        wf->set_address_space(wg.entry->address_space);
         wf->set_process_id(wg.entry->process_id);
         wf->set_queue_id(wg.entry->queue_id);
         wf->set_exec(initial_exec_mask_for_wave(*wg.entry, wg.global_wg_id, w, wf->wf_size()));
@@ -312,5 +312,3 @@ private:
 
 } // namespace amdgpu
 } // namespace rocjitsu
-
-#endif // ROCJITSU_VM_AMDGPU_SPI_H_

@@ -41,6 +41,7 @@
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
 #include "rocjitsu/kmd/linux/kfd_process.h"
+#include "rocjitsu/kmd/linux/legacy_gpu_vm.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"
 #include "rocjitsu/vm/amdgpu/l2_cache.h"
@@ -3691,7 +3692,11 @@ TEST(ExecutionPluginTest, DispatchPacketNameResolvesForVmidMappedCodeObject) {
   std::memcpy(image_host, image.data(), image.size());
 
   KfdProcess process(process_id);
-  f.mem->register_process(process_id, &process.page_table_, &process.page_table_mutex_);
+  amdgpu::LegacyGpuVmAdapter legacy_vm(f.soc->gpu_vm(), f.soc->memory());
+  const amdgpu::AddressSpaceHandle address_space =
+      legacy_vm.register_address_space(process_id, &process.page_table_, &process.page_table_mutex_,
+                                       process.page_table_generation());
+  ASSERT_TRUE(address_space);
   process.map_pages(code_object_va, image_host, image.size());
 
   std::vector<uint8_t> ring(4096, 0);
@@ -3718,7 +3723,8 @@ TEST(ExecutionPluginTest, DispatchPacketNameResolvesForVmidMappedCodeObject) {
   std::memcpy(ring.data(), &packet, sizeof(packet));
 
   constexpr uint32_t queue_id = 7;
-  amdgpu::HwQueue queue{};
+  amdgpu::AqlQueueConfig queue{};
+  queue.address_space = address_space;
   queue.queue_id = queue_id;
   queue.process_id = process_id;
   queue.ring_base_va = ring_va;
@@ -3726,7 +3732,8 @@ TEST(ExecutionPluginTest, DispatchPacketNameResolvesForVmidMappedCodeObject) {
   queue.read_ptr_va = read_ptr_va;
   queue.write_ptr_va = write_ptr_va;
   queue.doorbell_base = &doorbell;
-  queue.host_accessible = true;
+  queue.doorbell_mode = amdgpu::QueueDoorbellMode::HostPolled;
+  queue.uses_kfd_queue_abi = true;
   f.cp()->register_queue(std::move(queue));
   f.cp()->engine()->schedule_event_now(f.cp()->doorbell_event());
   f.run_until_idle();
@@ -3740,7 +3747,7 @@ TEST(ExecutionPluginTest, DispatchPacketNameResolvesForVmidMappedCodeObject) {
 
   f.cp()->unregister_queue(queue_id, process_id);
   f.shutdown();
-  f.mem->unregister_process(process_id);
+  EXPECT_TRUE(legacy_vm.unregister_address_space(address_space));
 
   ASSERT_TRUE(found_dispatch);
   EXPECT_EQ(kernel_name, "vmid_dispatch_kernel");

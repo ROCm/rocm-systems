@@ -3,6 +3,8 @@
 
 #include "cdna5_sim_test_common.h"
 #include "decode_test_util.h"
+#include "rocjitsu/kmd/linux/kfd_process.h"
+#include "rocjitsu/kmd/linux/legacy_gpu_vm.h"
 
 namespace {
 
@@ -48,13 +50,22 @@ TEST(Gfx1250ExecutionTest, TensorDmaUsesWaveProcessPageTable) {
   std::array<uint32_t, kElements> store_storage{};
   process.map_pages(kLoadGlobal, load_storage.data(), sizeof(load_storage));
   process.map_pages(kStoreGlobal, store_storage.data(), sizeof(store_storage));
-  sim.memory->register_process(kProcessId, &process.page_table_, &process.page_table_mutex_,
-                               process.page_table_generation());
+  amdgpu::LegacyGpuVmAdapter legacy_vm(sim.soc->gpu_vm(), sim.soc->memory());
+  const amdgpu::AddressSpaceHandle address_space =
+      legacy_vm.register_address_space(kProcessId, &process.page_table_, &process.page_table_mutex_,
+                                       process.page_table_generation());
+  ASSERT_TRUE(address_space);
+  wf->set_address_space(address_space);
 
   // The same GPU VA intentionally resolves to different storage for VMID zero
   // and for the dispatched process. Tensor DMA must use the wave's process ID.
   EXPECT_EQ(sim.memory->read32(kLoadGlobal), 0u);
-  EXPECT_EQ(sim.memory->read32(kLoadGlobal, kProcessId), kLoadValues[0]);
+  const auto access = sim.soc->gpu_vm().snapshot(address_space);
+  ASSERT_TRUE(access);
+  uint32_t translated_value = 0;
+  ASSERT_EQ(access->read(kLoadGlobal, std::as_writable_bytes(std::span(&translated_value, 1))),
+            amdgpu::VmAccessOutcome::Complete);
+  EXPECT_EQ(translated_value, kLoadValues[0]);
 
   write_tensor_dma_d0(*cu, *wf, 0, kLoadGlobal);
   write_wave_sgpr(*cu, *wf, 12, 2u << 16);        // i32 elements.
@@ -83,7 +94,7 @@ TEST(Gfx1250ExecutionTest, TensorDmaUsesWaveProcessPageTable) {
   store->execute(*store, wf);
   EXPECT_EQ(store_storage, kStoreValues);
 
-  sim.memory->unregister_process(kProcessId);
+  EXPECT_TRUE(legacy_vm.unregister_address_space(address_space));
 }
 
 TEST(Gfx1250ExecutionTest, TensorDmaD2CopiesGlobalAndLds) {

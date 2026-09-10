@@ -19,7 +19,7 @@
 namespace rocjitsu {
 namespace amdgpu {
 class Wavefront;
-struct VectorMemState;
+class VectorMemState;
 } // namespace amdgpu
 
 namespace cdna4 {

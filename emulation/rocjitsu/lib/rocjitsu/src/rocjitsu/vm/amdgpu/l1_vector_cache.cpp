@@ -3,7 +3,6 @@
 
 #include "rocjitsu/vm/amdgpu/l1_vector_cache.h"
 
-#include "rocjitsu/vm/amdgpu/device_cache_coherence.h"
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"
 #include "rocjitsu/vm/amdgpu/l2_cache.h"
 #include "rocjitsu/vm/amdgpu/request_mtype_resolver.h"
@@ -64,23 +63,24 @@ uint64_t fully_valid_lane_mask(std::span<const uint64_t> element_lane_masks, uin
 } // namespace
 
 L1VectorCache::L1VectorCache(L2Cache *l2)
-    : l2_(l2), coherence_epoch_(DeviceCacheCoherence::instance().current_epoch()) {}
+    : l2_(l2), coherence_epoch_(l2_ ? l2_->coherence_domain()->current_epoch() : 0) {}
 
 L1VectorCache::~L1VectorCache() = default;
 
 void L1VectorCache::set_l2(L2Cache *l2) {
-  synchronize_epoch();
+  invalidate_all_lines();
   l2_ = l2;
+  coherence_epoch_ = l2_ ? l2_->coherence_domain()->current_epoch() : 0;
 }
 
-void L1VectorCache::set_memory(GpuMemory *mem) {
-  synchronize_epoch();
-  memory_ = mem;
+void L1VectorCache::set_gpu_vm(GpuVm *gpu_vm) {
+  invalidate_all_lines();
+  gpu_vm_ = gpu_vm;
 }
 
-void L1VectorCache::ensure_line(uint64_t addr, uint32_t vmid) {
+VmAccessOutcome L1VectorCache::ensure_line(uint64_t addr, uint32_t vmid) {
   if (cache_.lookup(addr, nullptr, vmid))
-    return;
+    return VmAccessOutcome::Complete;
 
   uint64_t line_addr = CacheStore::line_address(addr);
   simdojo::CacheTag evicted;
@@ -90,16 +90,21 @@ void L1VectorCache::ensure_line(uint64_t addr, uint32_t vmid) {
   assert(!evicted.dirty && "L1 V$ is write-through; lines should never be dirty");
 
   uint8_t line_buf[LINE_SIZE];
-  l2_->fetch_line(line_addr, line_buf, vmid);
+  const VmAccessOutcome outcome = l2_->fetch_line(line_addr, line_buf, vmid);
+  if (outcome != VmAccessOutcome::Complete) {
+    cache_.invalidate(addr, vmid);
+    return outcome;
+  }
   cache_.fill_line(addr, line_buf, vmid);
+  return VmAccessOutcome::Complete;
 }
 
 // Per-line CC invalidation is sufficient: the CP serializes dispatch N's cache
 // management before dispatch N+1 begins execution, so no blanket invalidation
 // at dispatch boundaries is needed.
-void L1VectorCache::read_bytes(uint64_t addr, uint8_t *dst, uint32_t size, bool non_temporal,
-                               bool request_l1_bypass, uint32_t vmid,
-                               RequestMtypeResolver &mtypes) {
+VmAccessOutcome L1VectorCache::read_bytes(uint64_t addr, uint8_t *dst, uint32_t size,
+                                          bool non_temporal, bool request_l1_bypass, uint32_t vmid,
+                                          RequestMtypeResolver &mtypes) {
   const Mtype effective = mtypes.at(addr);
 
   util::Logger::cp([&](auto &os) {
@@ -125,26 +130,34 @@ void L1VectorCache::read_bytes(uint64_t addr, uint8_t *dst, uint32_t size, bool 
 
     if (chunk_mtype == Mtype::UC || non_temporal || request_l1_bypass) {
       cache_.invalidate(ea, vmid);
-      l2_->read(ea, dst + copied, chunk, chunk_mtype, vmid);
+      const VmAccessOutcome outcome = l2_->read(ea, dst + copied, chunk, chunk_mtype, vmid);
+      if (outcome != VmAccessOutcome::Complete)
+        return outcome;
       copied += chunk;
       continue;
     }
 
     if (chunk_mtype == Mtype::CC) {
       cache_.invalidate(ea, vmid);
-      l2_->read(ea, dst + copied, chunk, chunk_mtype, vmid);
+      const VmAccessOutcome outcome = l2_->read(ea, dst + copied, chunk, chunk_mtype, vmid);
+      if (outcome != VmAccessOutcome::Complete)
+        return outcome;
       copied += chunk;
       continue;
     }
 
-    ensure_line(ea, vmid);
+    const VmAccessOutcome outcome = ensure_line(ea, vmid);
+    if (outcome != VmAccessOutcome::Complete)
+      return outcome;
     cache_.read_line(ea, dst + copied, line_offset, chunk, vmid);
     copied += chunk;
   }
+  return VmAccessOutcome::Complete;
 }
 
-void L1VectorCache::write_bytes(uint64_t addr, const uint8_t *src, uint32_t size, bool non_temporal,
-                                uint32_t vmid, RequestMtypeResolver &mtypes) {
+VmAccessOutcome L1VectorCache::write_bytes(uint64_t addr, const uint8_t *src, uint32_t size,
+                                           bool non_temporal, uint32_t vmid,
+                                           RequestMtypeResolver &mtypes) {
   const Mtype effective = mtypes.at(addr);
 
   util::Logger::vm([&](auto &os) {
@@ -172,19 +185,26 @@ void L1VectorCache::write_bytes(uint64_t addr, const uint8_t *src, uint32_t size
 
     if (chunk_mtype == Mtype::UC || non_temporal) {
       cache_.invalidate(ea, vmid);
-      l2_->write(ea, src + copied, chunk, chunk_mtype, vmid);
+      const VmAccessOutcome outcome = l2_->write(ea, src + copied, chunk, chunk_mtype, vmid);
+      if (outcome != VmAccessOutcome::Complete)
+        return outcome;
       copied += chunk;
       continue;
     }
 
-    ensure_line(ea, vmid);
-    cache_.write_line(ea, src + copied, line_offset, chunk, vmid);
+    const VmAccessOutcome fill_outcome = ensure_line(ea, vmid);
+    if (fill_outcome != VmAccessOutcome::Complete)
+      return fill_outcome;
 
     // Write through to L2 for all cacheable stores. This ensures partial writes
     // from different CUs sharing the same L2 are properly merged at byte
     // granularity via L2::write(), rather than full-line replacement via
     // writeback_line() during L1 eviction/flush.
-    l2_->write(ea, src + copied, chunk, chunk_mtype, vmid);
+    const VmAccessOutcome write_outcome = l2_->write(ea, src + copied, chunk, chunk_mtype, vmid);
+    if (write_outcome != VmAccessOutcome::Complete)
+      return write_outcome;
+
+    cache_.write_line(ea, src + copied, line_offset, chunk, vmid);
 
     simdojo::CacheTag *tag = nullptr;
     cache_.lookup(ea, &tag, vmid);
@@ -196,15 +216,16 @@ void L1VectorCache::write_bytes(uint64_t addr, const uint8_t *src, uint32_t size
     tag->dirty = false;
     copied += chunk;
   }
+  return VmAccessOutcome::Complete;
 }
 
-void L1VectorCache::load(const uint64_t *addrs, uint64_t lane_mask, uint32_t elem_size,
-                         uint32_t num_elems, uint8_t *dst, Mtype mtype, bool non_temporal,
-                         bool request_l1_bypass, uint32_t wf_size, uint32_t vmid,
-                         uint32_t addr_stride, uint32_t addr_base_offset,
-                         std::span<const uint64_t> element_lane_masks) {
+VmAccessOutcome L1VectorCache::load(const uint64_t *addrs, uint64_t lane_mask, uint32_t elem_size,
+                                    uint32_t num_elems, uint8_t *dst, Mtype mtype,
+                                    bool non_temporal, bool request_l1_bypass, uint32_t wf_size,
+                                    uint32_t vmid, uint32_t addr_stride, uint32_t addr_base_offset,
+                                    std::span<const uint64_t> element_lane_masks) {
   synchronize_epoch();
-  RequestMtypeResolver mtypes(memory_, vmid, mtype);
+  RequestMtypeResolver mtypes(gpu_vm_, vmid, mtype);
   uint32_t stride = num_elems * elem_size;
   // Scratch swizzle: consecutive dwords of one lane's private space sit
   // addr_stride bytes apart, the hardware dword-interleaved layout rocm-dbgapi
@@ -232,46 +253,58 @@ void L1VectorCache::load(const uint64_t *addrs, uint64_t lane_mask, uint32_t ele
           const uint32_t chunk = std::min(elem_end - copied, 4 - byte_in_dword);
           const uint64_t ea =
               base - first_byte_in_dword + logical_byte / 4 * astride + byte_in_dword;
-          read_bytes(ea, dst + lane * stride + copied, chunk, non_temporal, request_l1_bypass, vmid,
-                     mtypes);
+          const VmAccessOutcome outcome = read_bytes(ea, dst + lane * stride + copied, chunk,
+                                                     non_temporal, request_l1_bypass, vmid, mtypes);
+          if (outcome != VmAccessOutcome::Complete)
+            return outcome;
           copied += chunk;
         }
       }
     }
-    return;
+    return VmAccessOutcome::Complete;
   }
   if (!all_elements_use_lane_mask(element_lane_masks, lane_mask, num_elems)) {
     uint64_t full_lane_mask = fully_valid_lane_mask(element_lane_masks, lane_mask);
+    VmAccessOutcome outcome = VmAccessOutcome::Complete;
     for_each_coalesced_lane_run(
         addrs, full_lane_mask, wf_size, stride, [&](uint32_t first_lane, uint32_t run_lanes) {
-          read_bytes(addrs[first_lane], dst + first_lane * stride, run_lanes * stride, non_temporal,
-                     request_l1_bypass, vmid, mtypes);
+          if (outcome == VmAccessOutcome::Complete)
+            outcome = read_bytes(addrs[first_lane], dst + first_lane * stride, run_lanes * stride,
+                                 non_temporal, request_l1_bypass, vmid, mtypes);
         });
+    if (outcome != VmAccessOutcome::Complete)
+      return outcome;
     for (uint32_t elem = 0; elem < num_elems; ++elem) {
       uint64_t mask = element_lane_masks[elem] & lane_mask & ~full_lane_mask;
       while (mask) {
         const uint32_t lane = std::countr_zero(mask);
         mask &= ~(uint64_t{1} << lane);
-        read_bytes(addrs[lane] + static_cast<uint64_t>(elem) * elem_size,
-                   dst + lane * stride + elem * elem_size, elem_size, non_temporal,
-                   request_l1_bypass, vmid, mtypes);
+        outcome = read_bytes(addrs[lane] + static_cast<uint64_t>(elem) * elem_size,
+                             dst + lane * stride + elem * elem_size, elem_size, non_temporal,
+                             request_l1_bypass, vmid, mtypes);
+        if (outcome != VmAccessOutcome::Complete)
+          return outcome;
       }
     }
-    return;
+    return VmAccessOutcome::Complete;
   }
+  VmAccessOutcome outcome = VmAccessOutcome::Complete;
   for_each_coalesced_lane_run(
       addrs, lane_mask, wf_size, stride, [&](uint32_t first_lane, uint32_t run_lanes) {
-        read_bytes(addrs[first_lane], dst + first_lane * stride, run_lanes * stride, non_temporal,
-                   request_l1_bypass, vmid, mtypes);
+        if (outcome == VmAccessOutcome::Complete)
+          outcome = read_bytes(addrs[first_lane], dst + first_lane * stride, run_lanes * stride,
+                               non_temporal, request_l1_bypass, vmid, mtypes);
       });
+  return outcome;
 }
 
-void L1VectorCache::store(const uint64_t *addrs, uint64_t lane_mask, uint32_t elem_size,
-                          uint32_t num_elems, const uint8_t *src, Mtype mtype, bool non_temporal,
-                          uint32_t wf_size, uint32_t vmid, uint32_t addr_stride,
-                          uint32_t addr_base_offset, std::span<const uint64_t> element_lane_masks) {
+VmAccessOutcome L1VectorCache::store(const uint64_t *addrs, uint64_t lane_mask, uint32_t elem_size,
+                                     uint32_t num_elems, const uint8_t *src, Mtype mtype,
+                                     bool non_temporal, uint32_t wf_size, uint32_t vmid,
+                                     uint32_t addr_stride, uint32_t addr_base_offset,
+                                     std::span<const uint64_t> element_lane_masks) {
   synchronize_epoch();
-  RequestMtypeResolver mtypes(memory_, vmid, mtype);
+  RequestMtypeResolver mtypes(gpu_vm_, vmid, mtype);
   uint32_t stride = num_elems * elem_size;
   const uint32_t active_lanes = std::popcount(lane_mask);
   ++store_count_;
@@ -304,37 +337,50 @@ void L1VectorCache::store(const uint64_t *addrs, uint64_t lane_mask, uint32_t el
           const uint32_t chunk = std::min(elem_end - copied, 4 - byte_in_dword);
           const uint64_t ea =
               base - first_byte_in_dword + logical_byte / 4 * astride + byte_in_dword;
-          write_bytes(ea, src + lane * stride + copied, chunk, non_temporal, vmid, mtypes);
+          const VmAccessOutcome outcome =
+              write_bytes(ea, src + lane * stride + copied, chunk, non_temporal, vmid, mtypes);
+          if (outcome != VmAccessOutcome::Complete)
+            return outcome;
           copied += chunk;
         }
       }
     }
-    return;
+    return VmAccessOutcome::Complete;
   }
   if (!all_elements_use_lane_mask(element_lane_masks, lane_mask, num_elems)) {
     uint64_t full_lane_mask = fully_valid_lane_mask(element_lane_masks, lane_mask);
+    VmAccessOutcome outcome = VmAccessOutcome::Complete;
     store_l2_writes_ += for_each_coalesced_lane_run(
         addrs, full_lane_mask, wf_size, stride, [&](uint32_t first_lane, uint32_t run_lanes) {
-          write_bytes(addrs[first_lane], src + first_lane * stride, run_lanes * stride,
-                      non_temporal, vmid, mtypes);
+          if (outcome == VmAccessOutcome::Complete)
+            outcome = write_bytes(addrs[first_lane], src + first_lane * stride, run_lanes * stride,
+                                  non_temporal, vmid, mtypes);
         });
+    if (outcome != VmAccessOutcome::Complete)
+      return outcome;
     for (uint32_t elem = 0; elem < num_elems; ++elem) {
       uint64_t mask = element_lane_masks[elem] & lane_mask & ~full_lane_mask;
       store_l2_writes_ += std::popcount(mask);
       while (mask) {
         const uint32_t lane = std::countr_zero(mask);
         mask &= ~(uint64_t{1} << lane);
-        write_bytes(addrs[lane] + static_cast<uint64_t>(elem) * elem_size,
-                    src + lane * stride + elem * elem_size, elem_size, non_temporal, vmid, mtypes);
+        outcome = write_bytes(addrs[lane] + static_cast<uint64_t>(elem) * elem_size,
+                              src + lane * stride + elem * elem_size, elem_size, non_temporal, vmid,
+                              mtypes);
+        if (outcome != VmAccessOutcome::Complete)
+          return outcome;
       }
     }
-    return;
+    return VmAccessOutcome::Complete;
   }
+  VmAccessOutcome outcome = VmAccessOutcome::Complete;
   store_l2_writes_ += for_each_coalesced_lane_run(
       addrs, lane_mask, wf_size, stride, [&](uint32_t first_lane, uint32_t run_lanes) {
-        write_bytes(addrs[first_lane], src + first_lane * stride, run_lanes * stride, non_temporal,
-                    vmid, mtypes);
+        if (outcome == VmAccessOutcome::Complete)
+          outcome = write_bytes(addrs[first_lane], src + first_lane * stride, run_lanes * stride,
+                                non_temporal, vmid, mtypes);
       });
+  return outcome;
 }
 
 void L1VectorCache::invalidate(uint64_t addr, uint32_t vmid) {
@@ -355,7 +401,8 @@ void L1VectorCache::flush_all() {
 void L1VectorCache::invalidate_all_lines() { cache_.invalidate_all(); }
 
 void L1VectorCache::synchronize_epoch() {
-  const uint64_t current_epoch = DeviceCacheCoherence::instance().current_epoch();
+  assert(l2_ != nullptr && "L1 vector cache requires an L2 cache");
+  const uint64_t current_epoch = l2_->coherence_domain()->current_epoch();
   if (coherence_epoch_ == current_epoch)
     return;
   invalidate_all_lines();

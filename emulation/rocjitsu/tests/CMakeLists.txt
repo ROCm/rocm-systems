@@ -373,6 +373,19 @@ add_test(
         ${Python3_EXECUTABLE}
         ${CMAKE_CURRENT_SOURCE_DIR}/tools/test_pretranslate.py -v
 )
+add_test(
+    NAME CommandProcessorSdmaBoundaryTest
+    COMMAND
+        ${CMAKE_COMMAND} -DROCJITSU_SOURCE_DIR=${CMAKE_SOURCE_DIR} -P
+        ${CMAKE_CURRENT_SOURCE_DIR}/check_cp_sdma_boundary.cmake
+)
+
+add_test(
+    NAME GpuMemoryBackingBoundaryTest
+    COMMAND
+        ${CMAKE_COMMAND} -DROCJITSU_SOURCE_DIR=${CMAKE_SOURCE_DIR} -P
+        ${CMAKE_CURRENT_SOURCE_DIR}/check_gpu_memory_boundary.cmake
+)
 
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     set(PLUGIN_LOADER_FIXTURE_DIR
@@ -417,9 +430,9 @@ add_executable(
     rocjitsu_tests
     rvsim_test.cpp
     amdgpu_vm_test.cpp
+    gpu_vm_pipeline_test.cpp
+    gpu_vm_service_test.cpp
     gpu_vm_translation_test.cpp
-    pm4_ring_consumer_test.cpp
-    pm4_packet_processor_test.cpp
     config_test.cpp
     daemon_api_test.cpp
     matmul_test.cpp
@@ -433,6 +446,15 @@ add_executable(
     cdna5_execution_test.cpp
     cdna5_instruction_test.cpp
     cdna5_sdma_test.cpp
+    completion_tracker_test.cpp
+    mes_engine_test.cpp
+    aql_packet_processor_test.cpp
+    pm4_ring_consumer_test.cpp
+    pm4_packet_processor_test.cpp
+    pm4_queue_controller_test.cpp
+    sdma_queue_scheduler_test.cpp
+    sdma_packet_processor_test.cpp
+    sdma_ring_consumer_test.cpp
     cdna5_tensor_dma_test.cpp
     lds_test.cpp
     l2_cache_test.cpp
@@ -592,6 +614,13 @@ if(ROCJITSU_ENABLE_VFIO)
     target_link_libraries(
         rocjitsu_tests
         PRIVATE rocjitsu_vmm_vfu libvfio-user::libvfio-user
+    )
+    # Serving now builds a whole machine, so a test that drives the server end to
+    # end needs a real config rather than a synthesized one.
+    target_compile_definitions(
+        rocjitsu_tests
+        PRIVATE
+            RJ_VFU_TEST_CONFIG_PATH="${CMAKE_SOURCE_DIR}/configs/gfx1250_mi455x.json"
     )
 endif()
 if(RJ_ENABLE_EXPENSIVE_CHECKS)

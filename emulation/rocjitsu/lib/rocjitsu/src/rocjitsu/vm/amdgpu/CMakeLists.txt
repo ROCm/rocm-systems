@@ -10,9 +10,18 @@ rj_add_object_library(rocjitsu_vm_amdgpu
     memory_pipeline.cpp
     circular_ring_reader.cpp
     command_processor.cpp
+    aql_queue_binding_factory.cpp
     consumer_cursor_journal.cpp
+    mes_engine.cpp
     pm4_ring_consumer.cpp
     pm4_packet_processor.cpp
+    pm4_queue_controller.cpp
+    pm4_queue_binding_factory.cpp
+    sdma_packet_processor.cpp
+    sdma_queue_scheduler.cpp
+    sdma_queue_binding_factory.cpp
+    sdma_ring_consumer.cpp
+    gpu_memory_access.cpp
     gpu_vm.cpp
     gpu_queue_registry.cpp
     completion_tracker.cpp

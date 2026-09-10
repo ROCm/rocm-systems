@@ -1,13 +1,16 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-#ifndef ROCJITSU_VM_AMDGPU_INSTRUCTION_CACHE_H_
-#define ROCJITSU_VM_AMDGPU_INSTRUCTION_CACHE_H_
+#pragma once
 
+#include "rocjitsu/vm/amdgpu/device_cache_coherence.h"
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"
+#include "rocjitsu/vm/amdgpu/gpu_vm.h"
+#include "rocjitsu/vm/amdgpu/l2_cache.h"
 
 #include <cstdint>
 #include <cstring>
+#include <memory>
 #include <span>
 
 namespace rocjitsu {
@@ -31,12 +34,14 @@ namespace amdgpu {
 /// and code that rewrites itself must issue s_icache_inv. The cache is
 /// invalidated where the driver would issue one -- once per dispatch at kernel
 /// launch, on s_icache_inv itself, at CU cache maintenance, and at the command
-/// processor's device-wide maintenance around direct backing writes. It is
+/// device-wide maintenance around direct backing writes. It is
 /// bypassed entirely while a debugger is attached, because breakpoint writes
 /// reach code memory without any of those, and dropped on every attach and
 /// detach so a session cannot leave a stale line behind either way.
 class InstructionCache {
 public:
+  InstructionCache() : coherence_(std::make_shared<DeviceCacheCoherence>()) {}
+
   /// @name Cache geometry
   /// @details Chosen for host speed, not copied from an ISA profile, and
   /// deliberately not derived from one. The CDNA5 manual gives a 64 KiB
@@ -63,11 +68,11 @@ public:
   /// @brief Read @ref kFetchBytes at @p pc, filling from @p memory on a miss.
   /// @param memory Backing GPU memory.
   /// @param pc Program counter; four-byte aligned.
-  /// @param vmid Owning process address space.
   /// @param[out] dst Buffer of at least @ref kFetchBytes bytes.
-  void fetch(const GpuMemory &memory, uint64_t pc, uint32_t vmid, uint8_t *dst) {
+  void fetch(const GpuMemory &memory, uint64_t pc, uint8_t *dst) {
+    synchronize_coherence_epoch();
     const uint32_t offset = static_cast<uint32_t>(pc) & (kLineSize - 1);
-    const uint8_t *line = line_for(memory, pc, vmid);
+    const uint8_t *line = line_for(memory, pc);
 
     if (offset + kFetchBytes <= kLineSize) {
       std::memcpy(dst, line + offset, kFetchBytes);
@@ -80,40 +85,114 @@ public:
     const uint32_t head = kLineSize - offset;
     std::memcpy(dst, line + offset, head);
     const uint64_t next = (pc & ~uint64_t{kLineSize - 1}) + kLineSize;
-    std::memcpy(dst + head, line_for(memory, next, vmid), kFetchBytes - head);
+    std::memcpy(dst + head, line_for(memory, next), kFetchBytes - head);
   }
+
+  /// @brief Fetch through a retained VM binding and generation-safe namespace.
+  ///
+  /// This path is used by translated PCI/VFIO address spaces.  Lines from a
+  /// replaced root or a reused address-space slot cannot alias because both
+  /// the handle generation and translation epoch participate in the tag.
+  [[nodiscard]] VmAccessOutcome fetch(const GpuVmAccess &access, uint64_t pc, uint8_t *dst) {
+    synchronize_coherence_epoch();
+    const uint32_t offset = static_cast<uint32_t>(pc) & (kLineSize - 1);
+    const uint8_t *line = nullptr;
+    VmAccessOutcome outcome = line_for(access, pc, line);
+    if (outcome != VmAccessOutcome::Complete)
+      return outcome;
+
+    if (offset + kFetchBytes <= kLineSize) {
+      std::memcpy(dst, line + offset, kFetchBytes);
+      return VmAccessOutcome::Complete;
+    }
+
+    const uint32_t head = kLineSize - offset;
+    std::memcpy(dst, line + offset, head);
+    const uint64_t next = (pc & ~uint64_t{kLineSize - 1}) + kLineSize;
+    outcome = line_for(access, next, line);
+    if (outcome != VmAccessOutcome::Complete)
+      return outcome;
+    std::memcpy(dst + head, line, kFetchBytes - head);
+    return VmAccessOutcome::Complete;
+  }
+
+  /// @brief Bind instruction invalidation to the same domain as the CU's L2.
+  void set_l2(const L2Cache *l2) {
+    coherence_ = l2 ? l2->coherence_domain() : std::make_shared<DeviceCacheCoherence>();
+    invalidate_all();
+  }
+
+  const std::shared_ptr<DeviceCacheCoherence> &coherence_domain() const { return coherence_; }
 
   /// @brief Discard every cached line (s_icache_inv).
   void invalidate_all() {
     for (Line &line : lines_)
       line.valid = false;
+    coherence_epoch_ = coherence_->current_instruction_epoch();
   }
 
 private:
+  void synchronize_coherence_epoch() {
+    const uint64_t current_epoch = coherence_->current_instruction_epoch();
+    if (coherence_epoch_ != current_epoch)
+      invalidate_all();
+  }
+
   struct Line {
     uint64_t addr = 0;
     uint32_t vmid = 0;
+    VmCacheNamespace cache_namespace;
+    bool translated = false;
     bool valid = false;
     uint8_t data[kLineSize] = {};
   };
 
-  const uint8_t *line_for(const GpuMemory &memory, uint64_t addr, uint32_t vmid) {
+  const uint8_t *line_for(const GpuMemory &memory, uint64_t addr) {
     const uint64_t line_addr = addr & ~uint64_t{kLineSize - 1};
     Line &line = lines_[(line_addr / kLineSize) & (kNumLines - 1)];
-    if (line.valid && line.addr == line_addr && line.vmid == vmid)
+    if (line.valid && !line.translated && line.addr == line_addr)
       return line.data;
 
-    memory.read_block(line_addr, std::span<uint8_t>(line.data, kLineSize), vmid);
+    memory.read_block(line_addr, std::span<uint8_t>(line.data, kLineSize));
     line.addr = line_addr;
-    line.vmid = vmid;
+    line.vmid = 0;
+    line.cache_namespace = {};
+    line.translated = false;
     line.valid = true;
     return line.data;
   }
 
+  VmAccessOutcome line_for(const GpuVmAccess &access, uint64_t addr, const uint8_t *&data) {
+    const uint64_t line_addr = addr & ~uint64_t{kLineSize - 1};
+    const VmCacheNamespace cache_namespace = access.cache_namespace();
+    Line &line = lines_[(line_addr / kLineSize) & (kNumLines - 1)];
+    if (line.valid && line.translated && line.addr == line_addr &&
+        line.cache_namespace == cache_namespace) {
+      data = line.data;
+      return VmAccessOutcome::Complete;
+    }
+
+    const VmAccessOutcome outcome = access.read(
+        line_addr, std::span<std::byte>(reinterpret_cast<std::byte *>(line.data), kLineSize),
+        VmAccessKind::Execute);
+    if (outcome != VmAccessOutcome::Complete) {
+      line.valid = false;
+      data = nullptr;
+      return outcome;
+    }
+    line.addr = line_addr;
+    line.vmid = 0;
+    line.cache_namespace = cache_namespace;
+    line.translated = true;
+    line.valid = true;
+    data = line.data;
+    return VmAccessOutcome::Complete;
+  }
+
   Line lines_[kNumLines];
+  std::shared_ptr<DeviceCacheCoherence> coherence_;
+  uint64_t coherence_epoch_ = 0;
 };
 
 } // namespace amdgpu
 } // namespace rocjitsu
-
-#endif // ROCJITSU_VM_AMDGPU_INSTRUCTION_CACHE_H_

@@ -171,6 +171,7 @@ void flat_global_calculate_addresses(const Inst &inst, amdgpu::Wavefront &wf,
       if (decode_flat_private_address(wf, addr, &translated)) {
         addr = translated;
         d.scratch_swizzle = true;
+        d.requires_scratch_backing = true;
         d.scratch_addr_stride = wf.wf_size() * sizeof(uint32_t);
         d.scratch_lane_mask |= uint64_t{1} << lane;
       }
@@ -273,6 +274,7 @@ void flat_calculate_addresses(const VscratchMachineInst &inst, amdgpu::Wavefront
   constexpr uint32_t kScratchInterleave = sizeof(uint32_t);
   const uint32_t lane_count = wf.wf_size();
   d.scratch_swizzle = true;
+  d.requires_scratch_backing = true;
   d.scratch_lane_mask = exec;
   d.scratch_addr_stride = lane_count * kScratchInterleave;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {

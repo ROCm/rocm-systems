@@ -15,16 +15,16 @@ RJ_DIAGNOSTIC_POP
 #include "util/log.h"
 
 #include <algorithm>
-#include <atomic>
-#include <cstring>
 #include <format>
+#include <optional>
 #include <set>
+#include <span>
 
 namespace rocjitsu {
 namespace amdgpu {
 
 void CompletionTracker::notify_wg_complete(uint32_t dispatch_id, uint32_t wg_id,
-                                           std::vector<HwQueueState> &queues) {
+                                           std::vector<AqlQueueRecord> &queues) {
   for (auto &qs : queues) {
     for (auto &entry : qs.entries) {
       if (entry.dispatch_id == dispatch_id) {
@@ -42,53 +42,141 @@ void CompletionTracker::notify_wg_complete(uint32_t dispatch_id, uint32_t wg_id,
   }
 }
 
-void CompletionTracker::drain_completions(std::vector<HwQueueState> &queues) {
+CompletionDrainResult CompletionTracker::drain_completions(std::vector<AqlQueueRecord> &queues) {
+  CompletionDrainResult result;
+  for (auto &qs : queues)
+    qs.publication_retry_pending = false;
+
   for (auto &qs : queues) {
-    bool had_entries = !qs.entries.empty();
+    const bool idle_generation_stale =
+        qs.idle_publication.active() &&
+        (!qs.entries.empty() || qs.idle_publication.activity_generation != qs.activity_generation);
+    const bool idle_publication_cancelable =
+        qs.idle_publication.phase == QueueIdlePublicationPhase::CaptureAccess ||
+        qs.idle_publication.phase == QueueIdlePublicationPhase::ReadSignalHandle ||
+        qs.idle_publication.phase == QueueIdlePublicationPhase::StoreIdleStatus;
+    if (idle_generation_stale && idle_publication_cancelable) {
+      // Before the status CAS commits, new work invalidates the prior empty
+      // transition. After it commits, the status is externally observable and
+      // its mailbox/interrupt tail must finish; ROCr clears the signal when its
+      // handler consumes that notification.
+      qs.idle_publication.reset();
+    }
+    if (qs.idle_publication.active()) {
+      const VmAccessOutcome outcome = advance_queue_idle_publication(qs.idle_publication);
+      if (outcome == VmAccessOutcome::Unavailable) {
+        qs.publication_retry_pending = true;
+        result.retry_pending = true;
+        continue;
+      }
+      if (outcome != VmAccessOutcome::Complete) {
+        result.terminal_fault = CompletionDrainFault{
+            .queue_id = qs.idle_publication.queue_id,
+            .process_id = qs.idle_publication.process_id,
+            .outcome = outcome,
+            .queue_idle = true,
+        };
+        qs.idle_publication.reset();
+        return result;
+      }
+      qs.idle_publication.reset();
+      result.progress_made = true;
+    }
+
+    const bool had_entries = !qs.entries.empty();
     uint32_t last_process_id = 0;
+    uint32_t last_queue_id = 0;
+    AddressSpaceHandle last_address_space;
+    bool publication_stalled = false;
     while (!qs.entries.empty() && qs.entries.front().fully_completed()) {
       auto &entry = qs.entries.front();
       last_process_id = entry.process_id;
+      last_queue_id = entry.queue_id;
+      last_address_space = entry.address_space;
+
+      // A peer may publish the shared terminal-fault latch before this CP has
+      // drained its fault inbox. Leave the entry at the head for that path.
+      if (entry.grid_faulted())
+        break;
 
       util::Logger::vm([&](auto &os) {
         os << std::format("CT: drain d={} completed={}/{} sig={:#x}", entry.dispatch_id,
                           entry.completed_wgs, entry.total_wgs, entry.completion_signal);
       });
 
-      deliver_completion(entry);
+      const VmAccessOutcome outcome = deliver_completion(entry);
+      if (outcome == VmAccessOutcome::Unavailable) {
+        qs.publication_retry_pending = true;
+        result.retry_pending = true;
+        publication_stalled = true;
+        break;
+      }
+      if (outcome != VmAccessOutcome::Complete) {
+        entry.terminal_faulted = true;
+        if (entry.grid_completion)
+          entry.grid_completion->mark_faulted();
+        result.terminal_fault = CompletionDrainFault{
+            .queue_id = entry.queue_id,
+            .process_id = entry.process_id,
+            .dispatch_id = entry.dispatch_id,
+            .outcome = outcome,
+        };
+        return result;
+      }
       if (!entry.completion_notified)
         break;
       if (dispatch_retired_cb_)
         dispatch_retired_cb_(entry);
-
       if (qs.next_dispatch_idx > 0)
         --qs.next_dispatch_idx;
-
       qs.entries.pop_front();
+      result.progress_made = true;
     }
-    // HQD idle: write the queue's inactive signal and fire the interrupt.
-    // On real hardware the CP writes the HQD status to amd_signal_t::value
-    // and kfd_signal_event_interrupt broadcasts to all type-0 events.
-    // A fan-out replica does not own the queue and must not report it idle: its
-    // shards drain ahead of the owning XCD's, so it would signal idle while the
-    // dispatch is still running elsewhere.
+
+    if (publication_stalled)
+      continue;
+
+    // The queue-inactive notification has its own journal because its dispatch
+    // entry no longer exists after retirement.
     if (had_entries && qs.entries.empty() && last_process_id != 0 && !qs.fanout_replica) {
-      if (qs.queue_desc_va != 0)
-        fire_queue_idle_signal(qs.queue_desc_va, last_process_id);
-      if (interrupt_cb_)
-        interrupt_cb_(last_process_id, 0);
+      qs.idle_publication.reset();
+      qs.idle_publication.phase = QueueIdlePublicationPhase::CaptureAccess;
+      qs.idle_publication.address_space = qs.address_space ? qs.address_space : last_address_space;
+      qs.idle_publication.interrupt_sink = qs.interrupt_sink;
+      qs.idle_publication.queue_desc_va = qs.queue_desc_va;
+      qs.idle_publication.process_id = last_process_id;
+      qs.idle_publication.queue_id = last_queue_id;
+      qs.idle_publication.activity_generation = qs.activity_generation;
+      const VmAccessOutcome outcome = advance_queue_idle_publication(qs.idle_publication);
+      if (outcome == VmAccessOutcome::Unavailable) {
+        qs.publication_retry_pending = true;
+        result.retry_pending = true;
+        continue;
+      }
+      if (outcome != VmAccessOutcome::Complete) {
+        result.terminal_fault = CompletionDrainFault{
+            .queue_id = last_queue_id,
+            .process_id = last_process_id,
+            .outcome = outcome,
+            .queue_idle = true,
+        };
+        qs.idle_publication.reset();
+        return result;
+      }
+      qs.idle_publication.reset();
+      result.progress_made = true;
     }
   }
+  return result;
 }
 
-void CompletionTracker::complete_non_kernel(DispatchEntry &entry) {
-  if (entry.is_non_kernel())
-    deliver_completion(entry);
+VmAccessOutcome CompletionTracker::complete_non_kernel(DispatchEntry &entry) {
+  return entry.is_non_kernel() ? deliver_completion(entry) : VmAccessOutcome::Malformed;
 }
 
-void CompletionTracker::deliver_completion(DispatchEntry &entry) {
+VmAccessOutcome CompletionTracker::deliver_completion(DispatchEntry &entry) {
   if (entry.completion_notified)
-    return;
+    return VmAccessOutcome::Complete;
 
   // Publish this XCD's share only after its own caches are flushed. The release
   // in publish_share() pairs with the acquire in grid_retired(), so the signal
@@ -103,71 +191,115 @@ void CompletionTracker::deliver_completion(DispatchEntry &entry) {
 
   // A completed local shard remains queued until all peer XCD shares retire.
   if (!entry.grid_fully_completed())
-    return;
+    return VmAccessOutcome::Complete;
 
-  // Only the XCD that read the packet reports completion and fires its signal.
+  // Only the XCD that read the packet advances guest-visible publication.
   if (!entry.fanout_peer) {
-    plugin_group_->onAmdgpuDispatchExecutionEnd(entry.dispatch_id);
-    if (entry.completion_signal != 0)
-      fire_signal(entry);
+    const VmAccessOutcome outcome = advance_signal_publication(entry);
+    if (outcome != VmAccessOutcome::Complete)
+      return outcome;
   }
   entry.completion_notified = true;
+  return VmAccessOutcome::Complete;
 }
 
-void CompletionTracker::fire_queue_idle_signal(uint64_t queue_desc_va, uint32_t process_id) {
-  if (!memory_)
-    return;
-
-  constexpr uint64_t kQueueInactiveSigOff = offsetof(amd_queue_t, queue_inactive_signal);
-  constexpr uint32_t MAILBOX_PTR_OFF = 16;
-  constexpr uint32_t EVENT_ID_OFF = 24;
-
-  uint64_t sig_handle_va = queue_desc_va + kQueueInactiveSigOff;
-  auto *sig_handle = memory_->resolve_host_ptr(sig_handle_va, process_id, sizeof(uint64_t));
-  if (!sig_handle)
-    return;
-
-  uint64_t sig_addr = 0;
-  std::memcpy(&sig_addr, sig_handle, sizeof(sig_addr));
-  if (sig_addr == 0)
-    return;
-
-  if ((sig_addr & 0x3F) != 0)
-    return;
-  auto *sig_base = memory_->resolve_host_ptr(sig_addr, process_id, EVENT_ID_OFF + sizeof(uint32_t));
-  if (!sig_base)
-    return;
-
-  constexpr uint32_t SIG_VAL_OFF = 8;
+VmAccessOutcome
+CompletionTracker::advance_queue_idle_publication(QueueIdlePublicationState &state) {
+  constexpr uint64_t kQueueInactiveSignalOffset = offsetof(amd_queue_t, queue_inactive_signal);
+  constexpr uint32_t kSignalValueOffset = 8;
+  constexpr uint32_t kMailboxPointerOffset = 16;
+  constexpr uint32_t kEventIdOffset = 24;
   constexpr uint64_t kIdleStatus = 0x10;
 
-  // CAS: write the idle status only if the value is currently 0. This
-  // prevents clobbering ROCR's destructor sentinel (0x8000000000000000)
-  // which the handler must see to complete the shutdown handshake.
-  auto *val_ptr = reinterpret_cast<uint64_t *>(sig_base + SIG_VAL_OFF);
-  uint64_t expected = 0;
-  std::atomic_ref<uint64_t>(*val_ptr).compare_exchange_strong(
-      expected, kIdleStatus, std::memory_order_release, std::memory_order_relaxed);
+  for (;;) {
+    switch (state.phase) {
+    case QueueIdlePublicationPhase::Inactive:
+    case QueueIdlePublicationPhase::Complete:
+      return VmAccessOutcome::Complete;
 
-  // Always fire the mailbox write and event-specific interrupt regardless
-  // of whether we wrote the value. During shutdown ROCR's destructor has
-  // already stored 0x8000… but the handler may be in the pending list and
-  // needs the event age advance to trigger the merge.
-  uint32_t event_id = 0;
-  std::memcpy(&event_id, sig_base + EVENT_ID_OFF, sizeof(event_id));
+    case QueueIdlePublicationPhase::CaptureAccess:
+      if (state.queue_desc_va == 0) {
+        state.phase = QueueIdlePublicationPhase::DeliverGenericInterrupt;
+        continue;
+      }
+      if (!state.address_space)
+        return VmAccessOutcome::Faulted;
+      if (std::optional<GpuVmAccess> access = gpu_vm_.snapshot(state.address_space))
+        state.access = std::make_shared<GpuVmAccess>(std::move(*access));
+      else
+        return VmAccessOutcome::Faulted;
+      state.phase = QueueIdlePublicationPhase::ReadSignalHandle;
+      continue;
 
-  uint64_t mailbox_ptr = 0;
-  std::memcpy(&mailbox_ptr, sig_base + MAILBOX_PTR_OFF, sizeof(mailbox_ptr));
-  if (mailbox_ptr != 0) {
-    auto *mb_ptr = reinterpret_cast<uint64_t *>(
-        memory_->resolve_host_ptr(mailbox_ptr, process_id, sizeof(uint64_t)));
-    if (mb_ptr) {
-      std::atomic_ref<uint64_t>(*mb_ptr).store(uint64_t(event_id), std::memory_order_release);
+    case QueueIdlePublicationPhase::ReadSignalHandle: {
+      const uint64_t address = state.queue_desc_va + kQueueInactiveSignalOffset;
+      const VmAccessOutcome outcome =
+          read_gpu(*state.access, address, &state.signal_address, sizeof(state.signal_address));
+      if (outcome != VmAccessOutcome::Complete)
+        return outcome;
+      if (state.signal_address == 0) {
+        state.phase = QueueIdlePublicationPhase::DeliverGenericInterrupt;
+        continue;
+      }
+      if ((state.signal_address & 0x3f) != 0)
+        return VmAccessOutcome::Malformed;
+      state.phase = QueueIdlePublicationPhase::StoreIdleStatus;
+      continue;
+    }
+
+    case QueueIdlePublicationPhase::StoreIdleStatus: {
+      // Preserve ROCR's destructor sentinel: a completed mismatch still needs
+      // the mailbox and event-age notification below.
+      const AtomicCompareExchangeResult idle =
+          compare_exchange_gpu(*state.access, state.signal_address + kSignalValueOffset,
+                               sizeof(uint64_t), 0, kIdleStatus);
+      if (idle.outcome != VmAccessOutcome::Complete)
+        return idle.outcome;
+      state.phase = QueueIdlePublicationPhase::ReadMailboxPointer;
+      continue;
+    }
+
+    case QueueIdlePublicationPhase::ReadMailboxPointer: {
+      const VmAccessOutcome outcome =
+          read_gpu(*state.access, state.signal_address + kMailboxPointerOffset,
+                   &state.mailbox_pointer, sizeof(state.mailbox_pointer));
+      if (outcome != VmAccessOutcome::Complete)
+        return outcome;
+      state.phase = QueueIdlePublicationPhase::ReadEventId;
+      continue;
+    }
+
+    case QueueIdlePublicationPhase::ReadEventId: {
+      const VmAccessOutcome outcome = read_gpu(*state.access, state.signal_address + kEventIdOffset,
+                                               &state.event_id, sizeof(state.event_id));
+      if (outcome != VmAccessOutcome::Complete)
+        return outcome;
+      state.phase = QueueIdlePublicationPhase::StoreMailbox;
+      continue;
+    }
+
+    case QueueIdlePublicationPhase::StoreMailbox:
+      if (state.mailbox_pointer != 0) {
+        const VmAccessOutcome outcome = atomic_store_gpu(
+            *state.access, state.mailbox_pointer, sizeof(uint64_t), uint64_t(state.event_id));
+        if (outcome != VmAccessOutcome::Complete)
+          return outcome;
+      }
+      state.phase = QueueIdlePublicationPhase::DeliverEventInterrupt;
+      continue;
+
+    case QueueIdlePublicationPhase::DeliverEventInterrupt:
+      if (state.event_id != 0)
+        state.interrupt_sink.deliver(state.process_id, state.event_id);
+      state.phase = QueueIdlePublicationPhase::DeliverGenericInterrupt;
+      continue;
+
+    case QueueIdlePublicationPhase::DeliverGenericInterrupt:
+      state.interrupt_sink.deliver(state.process_id, 0);
+      state.phase = QueueIdlePublicationPhase::Complete;
+      return VmAccessOutcome::Complete;
     }
   }
-
-  if (interrupt_cb_ && event_id != 0)
-    interrupt_cb_(process_id, event_id);
 }
 
 void CompletionTracker::flush_caches(uint32_t vmid) {
@@ -183,104 +315,144 @@ void CompletionTracker::flush_caches(uint32_t vmid) {
   }
 }
 
-bool CompletionTracker::all_complete(const std::vector<HwQueueState> &queues) const {
+bool CompletionTracker::all_complete(const std::vector<AqlQueueRecord> &queues) const {
   for (const auto &qs : queues) {
-    if (!qs.entries.empty())
+    if (!qs.entries.empty() || qs.idle_publication.active())
       return false;
   }
   return true;
 }
 
-void CompletionTracker::fire_signal(const DispatchEntry &entry) {
-  util::Logger::vm([&](auto &os) {
-    os << std::format("CT: fire_signal d={} sig={:#x}", entry.dispatch_id, entry.completion_signal);
-  });
-  util::Logger::cp([&](auto &os) {
-    os << std::format("FIRE_SIGNAL d={} sig={:#x} pid={} cus={}", entry.dispatch_id,
-                      entry.completion_signal, entry.process_id, cus_.size());
-  });
-  constexpr uint32_t SIG_VAL_OFF = 8;
-  constexpr uint32_t MAILBOX_PTR_OFF = 16;
-  constexpr uint32_t EVENT_ID_OFF = 24;
-  // amd_signal_t::start_ts and ::end_ts. The vendored minimal HSA headers omit
-  // amd_hsa_signal.h, but ROCR's profiling APIs read these fixed ABI fields.
-  constexpr uint32_t START_TS_OFF = 32;
-  constexpr uint32_t END_TS_OFF = 40;
+VmAccessOutcome CompletionTracker::advance_signal_publication(DispatchEntry &entry) {
+  constexpr uint32_t kSignalValueOffset = 8;
+  constexpr uint32_t kMailboxPointerOffset = 16;
+  constexpr uint32_t kEventIdOffset = 24;
+  constexpr uint32_t kStartTimestampOffset = 32;
+  constexpr uint32_t kEndTimestampOffset = 40;
 
-  if (memory_) {
-    auto *sig_base = memory_->resolve_host_ptr(entry.completion_signal, entry.process_id,
-                                               END_TS_OFF + sizeof(uint64_t));
-    uint64_t start_ts = entry.profiling_start_timestamp;
-    if (start_ts == 0)
-      start_ts = hsa_system_timestamp();
-    uint64_t end_ts = std::max(hsa_system_timestamp(), start_ts + 1);
+  CompletionPublicationState &state = entry.completion_publication;
+  for (;;) {
+    switch (state.phase) {
+    case CompletionPublicationPhase::ExecutionEnd:
+      plugin_group_->onAmdgpuDispatchExecutionEnd(entry.dispatch_id);
+      state.phase = entry.completion_signal == 0 ? CompletionPublicationPhase::Complete
+                                                 : CompletionPublicationPhase::CaptureAccess;
+      continue;
 
-    util::Logger::cp([&](auto &os) {
-      uint64_t kind_raw = 0, val_raw = 0, mbx_raw = 0;
-      uint32_t eid_raw = 0;
-      if (sig_base) {
-        std::memcpy(&kind_raw, sig_base, sizeof(kind_raw));
-        std::memcpy(&val_raw, sig_base + SIG_VAL_OFF, sizeof(val_raw));
-        std::memcpy(&mbx_raw, sig_base + MAILBOX_PTR_OFF, sizeof(mbx_raw));
-        std::memcpy(&eid_raw, sig_base + EVENT_ID_OFF, sizeof(eid_raw));
-      } else {
-        kind_raw = memory_->read64(entry.completion_signal, entry.process_id);
-        val_raw = memory_->read64(entry.completion_signal + SIG_VAL_OFF, entry.process_id);
-        mbx_raw = memory_->read64(entry.completion_signal + MAILBOX_PTR_OFF, entry.process_id);
-        eid_raw = memory_->read32(entry.completion_signal + EVENT_ID_OFF, entry.process_id);
-      }
-      os << std::format("SIGNAL_DUMP d={} sig={:#x} pid={} host_page={} kind={:#x} val={} "
-                        "mailbox={:#x} event_id={}",
-                        entry.dispatch_id, entry.completion_signal, entry.process_id,
-                        sig_base != nullptr, kind_raw, static_cast<int64_t>(val_raw), mbx_raw,
-                        eid_raw);
-    });
+    case CompletionPublicationPhase::CaptureAccess:
+      if (!entry.address_space)
+        return VmAccessOutcome::Faulted;
+      if (std::optional<GpuVmAccess> access = gpu_vm_.snapshot(entry.address_space))
+        state.access = std::make_shared<GpuVmAccess>(std::move(*access));
+      else
+        return VmAccessOutcome::Faulted;
+      state.start_timestamp = entry.profiling_start_timestamp;
+      if (state.start_timestamp == 0)
+        state.start_timestamp = hsa_system_timestamp();
+      state.end_timestamp = std::max(hsa_system_timestamp(), state.start_timestamp + 1);
+      state.phase = CompletionPublicationPhase::ReadMailboxPointer;
+      continue;
 
-    int64_t old = 0;
-    uint64_t new_val = 0;
-    if (sig_base) {
-      auto *start_ptr = reinterpret_cast<uint64_t *>(sig_base + START_TS_OFF);
-      auto *end_ptr = reinterpret_cast<uint64_t *>(sig_base + END_TS_OFF);
-      std::atomic_ref<uint64_t>(*start_ptr).store(start_ts, std::memory_order_relaxed);
-      std::atomic_ref<uint64_t>(*end_ptr).store(end_ts, std::memory_order_release);
-
-      auto *sig_ptr = reinterpret_cast<uint64_t *>(sig_base + SIG_VAL_OFF);
-      old =
-          static_cast<int64_t>(std::atomic_ref<uint64_t>(*sig_ptr).load(std::memory_order_relaxed));
-      new_val = static_cast<uint64_t>(old - 1);
-      std::atomic_ref<uint64_t>(*sig_ptr).store(new_val, std::memory_order_release);
-    } else {
-      memory_->write64(entry.completion_signal + START_TS_OFF, start_ts, entry.process_id);
-      memory_->write64(entry.completion_signal + END_TS_OFF, end_ts, entry.process_id);
-      old = static_cast<int64_t>(
-          memory_->read64(entry.completion_signal + SIG_VAL_OFF, entry.process_id));
-      new_val = static_cast<uint64_t>(old - 1);
-      memory_->write64(entry.completion_signal + SIG_VAL_OFF, new_val, entry.process_id);
+    case CompletionPublicationPhase::ReadMailboxPointer: {
+      const VmAccessOutcome outcome =
+          read_gpu(*state.access, entry.completion_signal + kMailboxPointerOffset,
+                   &state.mailbox_pointer, sizeof(state.mailbox_pointer));
+      if (outcome != VmAccessOutcome::Complete)
+        return outcome;
+      state.phase = CompletionPublicationPhase::ReadEventId;
+      continue;
     }
 
-    auto mailbox_ptr = memory_->read64(entry.completion_signal + MAILBOX_PTR_OFF, entry.process_id);
-    uint32_t event_id = memory_->read32(entry.completion_signal + EVENT_ID_OFF, entry.process_id);
-
-    util::Logger::cp([&](auto &os) {
-      os << std::format("FIRE_SIGNAL_RESULT d={} old_val={} new_val={} mailbox={:#x} event_id={} "
-                        "has_interrupt_cb={}",
-                        entry.dispatch_id, old, static_cast<int64_t>(new_val), mailbox_ptr,
-                        event_id, interrupt_cb_ != nullptr);
-    });
-
-    if (mailbox_ptr != 0) {
-      auto *mb_ptr = reinterpret_cast<uint64_t *>(
-          memory_->resolve_host_ptr(mailbox_ptr, entry.process_id, sizeof(uint64_t)));
-      if (mb_ptr) {
-        std::atomic_ref<uint64_t>(*mb_ptr).store(uint64_t(event_id), std::memory_order_release);
-      } else {
-        memory_->write64(mailbox_ptr, uint64_t(event_id), entry.process_id);
-      }
+    case CompletionPublicationPhase::ReadEventId: {
+      const VmAccessOutcome outcome =
+          read_gpu(*state.access, entry.completion_signal + kEventIdOffset, &state.event_id,
+                   sizeof(state.event_id));
+      if (outcome != VmAccessOutcome::Complete)
+        return outcome;
+      state.phase = CompletionPublicationPhase::StoreStartTimestamp;
+      continue;
     }
 
-    if (interrupt_cb_)
-      interrupt_cb_(entry.process_id, event_id);
+    case CompletionPublicationPhase::StoreStartTimestamp: {
+      const VmAccessOutcome outcome =
+          atomic_store_gpu(*state.access, entry.completion_signal + kStartTimestampOffset,
+                           sizeof(uint64_t), state.start_timestamp);
+      if (outcome != VmAccessOutcome::Complete)
+        return outcome;
+      state.phase = CompletionPublicationPhase::StoreEndTimestamp;
+      continue;
+    }
+
+    case CompletionPublicationPhase::StoreEndTimestamp: {
+      const VmAccessOutcome outcome =
+          atomic_store_gpu(*state.access, entry.completion_signal + kEndTimestampOffset,
+                           sizeof(uint64_t), state.end_timestamp);
+      if (outcome != VmAccessOutcome::Complete)
+        return outcome;
+      state.phase = CompletionPublicationPhase::DecrementSignal;
+      continue;
+    }
+
+    case CompletionPublicationPhase::DecrementSignal:
+      for (;;) {
+        const uint64_t desired = state.compare_expected - 1;
+        const AtomicCompareExchangeResult decremented =
+            compare_exchange_gpu(*state.access, entry.completion_signal + kSignalValueOffset,
+                                 sizeof(uint64_t), state.compare_expected, desired);
+        if (decremented.outcome != VmAccessOutcome::Complete)
+          return decremented.outcome;
+        if (decremented.exchanged) {
+          state.signal_old_value = state.compare_expected;
+          state.signal_new_value = desired;
+          state.phase = CompletionPublicationPhase::StoreMailbox;
+          break;
+        }
+        state.compare_expected = decremented.observed;
+      }
+      util::Logger::cp([&](auto &os) {
+        os << std::format("FIRE_SIGNAL_RESULT d={} old_val={} new_val={} mailbox={:#x} event_id={} "
+                          "has_interrupt_sink={}",
+                          entry.dispatch_id, static_cast<int64_t>(state.signal_old_value),
+                          static_cast<int64_t>(state.signal_new_value), state.mailbox_pointer,
+                          state.event_id, static_cast<bool>(entry.interrupt_sink));
+      });
+      continue;
+
+    case CompletionPublicationPhase::StoreMailbox:
+      if (state.mailbox_pointer != 0) {
+        const VmAccessOutcome outcome = atomic_store_gpu(
+            *state.access, state.mailbox_pointer, sizeof(uint64_t), uint64_t(state.event_id));
+        if (outcome != VmAccessOutcome::Complete)
+          return outcome;
+      }
+      state.phase = CompletionPublicationPhase::DeliverInterrupt;
+      continue;
+
+    case CompletionPublicationPhase::DeliverInterrupt:
+      entry.interrupt_sink.deliver(entry.process_id, state.event_id);
+      state.phase = CompletionPublicationPhase::Complete;
+      return VmAccessOutcome::Complete;
+
+    case CompletionPublicationPhase::Complete:
+      return VmAccessOutcome::Complete;
+    }
   }
+}
+
+VmAccessOutcome CompletionTracker::read_gpu(const GpuVmAccess &access, uint64_t address,
+                                            void *destination, size_t size) const {
+  return access.read(address, std::span<std::byte>(static_cast<std::byte *>(destination), size));
+}
+
+VmAccessOutcome CompletionTracker::atomic_store_gpu(const GpuVmAccess &access, uint64_t address,
+                                                    uint32_t width, uint64_t value) {
+  return access.atomic_store(address, width, value);
+}
+
+AtomicCompareExchangeResult
+CompletionTracker::compare_exchange_gpu(const GpuVmAccess &access, uint64_t address, uint32_t width,
+                                        uint64_t expected, uint64_t desired) {
+  return access.compare_exchange(address, width, expected, desired);
 }
 
 } // namespace amdgpu

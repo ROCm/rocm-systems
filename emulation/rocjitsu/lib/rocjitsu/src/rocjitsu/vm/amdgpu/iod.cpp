@@ -6,18 +6,22 @@
 #include "simdojo/sim/exec_mode.h"
 
 #include <memory>
+#include <stdexcept>
 #include <string>
 
 namespace rocjitsu {
 namespace amdgpu {
 
-Iod::Iod(std::string name, const Config &config, GpuMemory *memory)
-    : simdojo::CompositeComponent(std::move(name)) {
+Iod::Iod(std::string name, const Config &config, GpuMemory *memory,
+         std::shared_ptr<DeviceCacheCoherence> coherence)
+    : simdojo::CompositeComponent(std::move(name)), coherence_(std::move(coherence)) {
+  if (!coherence_)
+    throw std::invalid_argument("IOD requires a cache-coherence domain");
   auto hbm = std::make_unique<HbmController>("hbm", memory);
   hbm_ = hbm.get();
   add_child(std::move(hbm));
 
-  auto msc = std::make_unique<MemorySideCache>("msc");
+  auto msc = std::make_unique<MemorySideCache>("msc", coherence_, memory);
   msc_ = msc.get();
   add_child(std::move(msc));
 
@@ -41,6 +45,13 @@ Iod::Iod(std::string name, const Config &config, GpuMemory *memory)
                                         simdojo::PortDirection::OUT, simdojo::PortProtocol::MEMORY);
     req_ports_.push_back(add_port(std::move(port)));
   }
+}
+
+void Iod::set_coherence_domain(std::shared_ptr<DeviceCacheCoherence> coherence) {
+  if (!coherence)
+    throw std::invalid_argument("IOD requires a cache-coherence domain");
+  coherence_ = std::move(coherence);
+  msc_->set_coherence_domain(coherence_);
 }
 
 simdojo::Port *Iod::create_cpl_port(const std::string &xcd_name) {

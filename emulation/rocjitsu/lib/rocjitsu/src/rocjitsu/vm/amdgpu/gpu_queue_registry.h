@@ -8,6 +8,7 @@
 
 #include "rocjitsu/vm/amdgpu/gpu_handles.h"
 #include "rocjitsu/vm/amdgpu/interrupt_sink.h"
+#include "rocjitsu/vm/amdgpu/queue_doorbell.h"
 
 #include <condition_variable>
 #include <cstddef>
@@ -122,11 +123,11 @@ struct QueueRingLayout {
 
 /// @brief Doorbell mapping used by host-polled and explicitly notified queues.
 struct QueueDoorbellBinding {
+  QueueDoorbellMode mode = QueueDoorbellMode::Explicit;
   uint32_t offset = 0;
   void *host_base = nullptr;
   uint64_t address = 0;
   uint64_t last_value = 0;
-  bool host_accessible = false;
 };
 
 /// @brief Queue state accepted by a reconfiguration operation.

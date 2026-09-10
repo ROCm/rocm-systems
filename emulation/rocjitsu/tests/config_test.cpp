@@ -358,7 +358,7 @@ TEST(ConfigLoaderTest, LoadRdnaKmdConfigs) {
   EXPECT_EQ(rdna4.soc()->xcd(0)->num_shader_engines(), 4u);
   EXPECT_EQ(rdna4.soc()->xcd(0)->shader_engine(0)->num_compute_units(), 16u);
   EXPECT_TRUE(rdna4.soc()->xcd(0)->command_processor()->packed_tid());
-  EXPECT_EQ(rdna4.soc()->xcd(0)->command_processor()->sdma_packet_dialect(),
+  EXPECT_EQ(rdna4.soc()->sdma_queue_scheduler().packet_dialect(),
             amdgpu::SdmaPacketDialect::Gfx11Plus);
 
   auto rdna3 =
@@ -394,7 +394,7 @@ TEST(ConfigLoaderTest, LoadRdnaKmdConfigs) {
   EXPECT_EQ(rdna3.soc()->xcd(0)->num_shader_engines(), 6u);
   EXPECT_EQ(rdna3.soc()->xcd(0)->shader_engine(0)->num_compute_units(), 16u);
   EXPECT_TRUE(rdna3.soc()->xcd(0)->command_processor()->packed_tid());
-  EXPECT_EQ(rdna3.soc()->xcd(0)->command_processor()->sdma_packet_dialect(),
+  EXPECT_EQ(rdna3.soc()->sdma_queue_scheduler().packet_dialect(),
             amdgpu::SdmaPacketDialect::Gfx11Plus);
 
   auto rdna35 = config::load_config(CONFIG_DIR_PATH + "/gfx1151.json", rocjitsu::kEmbeddedSchema);
@@ -429,7 +429,7 @@ TEST(ConfigLoaderTest, LoadRdnaKmdConfigs) {
   EXPECT_EQ(rdna35.soc()->xcd(0)->num_shader_engines(), 2u);
   EXPECT_EQ(rdna35.soc()->xcd(0)->shader_engine(0)->num_compute_units(), 16u);
   EXPECT_TRUE(rdna35.soc()->xcd(0)->command_processor()->packed_tid());
-  EXPECT_EQ(rdna35.soc()->xcd(0)->command_processor()->sdma_packet_dialect(),
+  EXPECT_EQ(rdna35.soc()->sdma_queue_scheduler().packet_dialect(),
             amdgpu::SdmaPacketDialect::Gfx11Plus);
 }
 
@@ -770,7 +770,7 @@ TEST(ConfigLoaderTest, AllowsZeroSdmaQueuesWithoutRegularEngines) {
   EXPECT_EQ(dbt.guest_device.num_sdma_queues_per_engine, 0u);
 }
 
-TEST(ConfigLoaderTest, DefaultKfdDeviceHasNoRegularSdmaEngines) {
+TEST(ConfigLoaderTest, DefaultKfdDeviceHasNoRegularSdmaQueueSchedulers) {
   const config::KfdDeviceConfig device;
 
   EXPECT_EQ(device.num_sdma_engines, 0u);
@@ -1803,7 +1803,8 @@ TEST(CheckpointTest, SaveAndRestoreRdnaWave64State) {
   ASSERT_NE(restored_soc, nullptr);
   auto *restored_cp = restored_soc->xcd(0)->command_processor();
   ASSERT_NE(restored_cp, nullptr);
-  EXPECT_EQ(restored_cp->sdma_packet_dialect(), amdgpu::SdmaPacketDialect::Gfx11Plus);
+  EXPECT_EQ(restored_soc->sdma_queue_scheduler().packet_dialect(),
+            amdgpu::SdmaPacketDialect::Gfx11Plus);
   auto *restored_cu = restored_soc->xcd(0)->shader_engine(0)->compute_unit(0);
   ASSERT_NE(restored_cu, nullptr);
   auto *restored_wf = restored_cu->wf(0);
