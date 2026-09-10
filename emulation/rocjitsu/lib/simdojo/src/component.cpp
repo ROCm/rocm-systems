@@ -5,6 +5,8 @@
 
 #include "simdojo/sim/simulation.h"
 
+#include <cassert>
+
 namespace simdojo {
 
 void Component::schedule_event(Event *event, Tick timestamp, std::unique_ptr<Message> message) {
@@ -90,41 +92,85 @@ bool Link::is_cross_partition() const {
   return src_->owner()->partition_id() != dst_->owner()->partition_id();
 }
 
-void Link::send(std::unique_ptr<Message> msg) {
+util::Result Link::send_at(std::unique_ptr<Message> msg, Tick ready_tick) {
+  // Validated before either delivery path, so a functional link refuses what a
+  // clocked one refuses.
+  const util::FailureOr<Tick> arrival = stamp_for_send(*msg, ready_tick);
+  if (arrival.failed())
+    return util::Result::failure();
+
   if (exec_mode_ == ExecMode::FUNCTIONAL) {
-    // FUNCTIONAL mode: call the destination handler synchronously and return.
-    // This bypasses LBTS and cross-partition ordering — correct for single-
-    // partition functional simulation, but must not be used across partitions
-    // in future clocked-mode configurations where LBTS synchronization is needed.
-    msg->set_latency(latency_);
-    Event *port_event = dst_->recv_event();
-    if (port_event->has_handler())
-      port_event->execute(/*timestamp=*/0, msg.get());
+    // Delivered synchronously, so there is no simulated time on this path: the
+    // message departs and is handled at tick zero, whatever tick the sender
+    // named. The header says so before the handler reads it.
+    msg->set_timestamp(0);
+  }
+  dst_->recv(std::move(msg), arrival.value(), src_->owner()->partition_id());
+  return util::Result::success();
+}
+
+void Port::recv(std::unique_ptr<Message> msg, Tick arrival, PartitionID from) {
+  if (link_->exec_mode() == ExecMode::FUNCTIONAL) {
+    // Calls the handler synchronously. This bypasses LBTS and cross-partition
+    // ordering -- correct for single-partition functional simulation, but not
+    // across partitions in clocked configurations where LBTS synchronization is
+    // needed. Nor is an engine required: bare links between engineless
+    // components are used in functional tests.
+    if (recv_event_.has_handler())
+      recv_event_.execute(/*timestamp=*/0, msg.get());
     return;
   }
 
+  SimulationEngine *engine = owner_->engine();
+  const PartitionID here = owner_->partition_id();
+  if (from != here)
+    engine->send_cross_partition(from, here, &recv_event_, arrival, std::move(msg));
+  else
+    engine->schedule_event(&recv_event_, arrival, std::move(msg));
+}
+
+Tick Link::depart_now() const {
   SimulationEngine *engine = src_->owner()->engine();
-  assert(engine != nullptr);
+  const PartitionID pid = src_->owner()->partition_id();
+  // Whether the partition context exists, not whether create() has finished:
+  // create() runs every component's initialize() hook before it marks the
+  // engine created, and a component priming a link from that hook has a
+  // perfectly good tick to depart at. This still catches a send against the
+  // freed contexts shutdown() leaves, which is the case that matters.
+  assert(engine != nullptr && pid < engine->num_contexts() &&
+         "a clocked link requires a component attached to a live engine");
+  return engine->context(pid).current_tick();
+}
 
-  // Stamp the message with the partition's local processing tick (not GVT).
-  // Using GVT would be stale in multi-threaded mode, potentially causing
-  // cross-partition messages to arrive before what neighbors have processed.
-  // TICK_MAX is the "not yet stamped" sentinel (default in MessageHeader).
-  if (msg->header().timestamp == TICK_MAX) {
-    PartitionID pid = src_->owner()->partition_id();
-    msg->set_timestamp(engine->context(pid).current_tick());
-  }
-  msg->set_latency(latency_);
-  Tick arrival = msg->arrival_tick();
+Tick Link::depart_now_or_zero() const {
+  // Settled here rather than inside depart_now() so that a functional link --
+  // which never schedules -- needs no engine at all.
+  return exec_mode_ == ExecMode::FUNCTIONAL ? Tick{0} : depart_now();
+}
 
-  Event *port_event = dst_->recv_event();
+util::FailureOr<Tick> Link::stamp_for_send(Message &message, Tick ready_tick) const {
+  // A saturated deadline is the "no such tick" value: the sender has computed
+  // a completion it cannot meet, and delivering the message now, which is what
+  // the unstamped sentinel used to mean, would turn "never" into "immediately".
+  if (ready_tick == TICK_MAX)
+    return util::Result::failure();
+  assert(ready_tick >= depart_now_or_zero() &&
+         "a link cannot carry a message departing before the sender's tick");
 
-  if (is_cross_partition()) {
-    engine->send_cross_partition(src_->owner()->partition_id(), dst_->owner()->partition_id(),
-                                 port_event, arrival, std::move(msg));
-  } else {
-    engine->schedule_event(port_event, arrival, std::move(msg));
-  }
+  // Overwritten, not consulted: a forwarded message still holds the departure
+  // stamp of the hop it arrived on, and that is a fact about the past rather
+  // than a request about this send.
+  message.set_timestamp(ready_tick);
+  message.set_latency(latency_);
+
+  // The departure was representable but the crossing may not be. A message
+  // landing on TICK_MAX is indistinguishable from no message at all: LBTS
+  // advances straight past it, and a buffered one strands itself at the head
+  // of a queue its owner has been told is empty.
+  const Tick arrival = message.arrival_tick();
+  if (arrival == TICK_MAX)
+    return util::Result::failure();
+  return arrival;
 }
 
 } // namespace simdojo

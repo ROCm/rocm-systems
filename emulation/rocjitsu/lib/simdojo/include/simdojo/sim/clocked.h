@@ -171,9 +171,14 @@ public:
   /// delay gets into a model at all -- a request arriving behind others is
   /// served late because this pushes its start out.
   ///
-  /// Independent of the clock: reserving does not schedule anything. A
-  /// component that wants to act at the completion tick asks for it with
-  /// wake_at().
+  /// Independent of the clock: reserving does not schedule anything. What to
+  /// do at the completion tick depends on who has to act then:
+  ///   - To answer a request, send the response with Port::send_at() at the
+  ///     returned tick. That is one event, the response's arrival, and this
+  ///     component is not woken.
+  ///   - Use wake_at() only when this component itself must run again at the
+  ///     completion tick. Waking just to send the response costs a second
+  ///     event per request for nothing.
   /// @param ready Earliest tick the work could start.
   /// @param cycles Duration of the work in this domain's cycles.
   /// @returns The tick the work completes, or TICK_MAX if that is beyond
