@@ -23,7 +23,7 @@ Pre-built configurations ship in the `configs/` directory:
 | `gfx950_mi355x.json` | Single CDNA4 GPU (standalone simulation) |
 | `gfx950_mi355x_kmd.json` | Single CDNA4 GPU (daemon or KFD mode) |
 | `gfx950_mi355x_kmd_2gpu.json` | Two CDNA4 GPUs (multi-GPU daemon mode) |
-| `gfx1250_mi455x.json` | Single CDNA5 GPU (standalone simulation, no KMD) |
+| `gfx1250_mi455x.json` | Single CDNA5 GPU (standalone simulation) |
 | `gfx1250_mi455x_kmd_4gpu.json` | Four CDNA5 GPUs (multi-GPU daemon mode) |
 | `gfx1100_w7900.json` | Single RDNA3 GPU (standalone simulation) |
 | `gfx1151.json` | Single RDNA3.5 GPU (standalone simulation) |
@@ -56,7 +56,7 @@ The number of worker threads the PDES simulation engine uses. Set to `1` for sin
 ### `exec_mode`
 
 The execution model for compute units. Accepted values are `"functional"`
-(instruction-accurate, no timing) and `"clocked"` (event-driven timing).
+(instruction-accurate, no timing) and `"clocked"` (cycle-accurate timing).
 
 ### `vm.arch`
 
