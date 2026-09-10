@@ -1770,6 +1770,11 @@ ib_recv:
                           0;
 
   NCCLCHECKGOTO(IbCastReceiverQpsCreateToRts(rComm, &remMeta, &meta, channelId), ret, fail);
+  if (rComm->base.recvMatchingScheme == BY_ORDER && rComm->prepostReceiveWorkRequests) {
+    WARN("NET/IB: %s: BY_ORDER matching is incompatible with pre-posted receive work requests; disabling "
+         "pre-posting.", __func__);
+    rComm->prepostReceiveWorkRequests = false;
+  }
   if (rComm->prepostReceiveWorkRequests) {
     NCCLCHECKGOTO(IbCastReceiverPrePostReceiveWorkRequests(rComm), ret, fail);
   }
