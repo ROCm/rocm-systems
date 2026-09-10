@@ -129,7 +129,7 @@ get_filters(const std::set<binary::scope_filter::filter_scope>& _scopes = {
                                   .scope = sf::BINARY_FILTER,
                                   .expression =
                                       "lib(rocprof-sys[-\\.]|dyninst|"
-                                      "tbbmalloc|gotcha\\.|unwind\\.so\\.99)" });
+                                      "gotcha\\.|unwind\\.so\\.99)" });
     }
 
     // in function mode, it generally doesn't help to experiment on main function since
