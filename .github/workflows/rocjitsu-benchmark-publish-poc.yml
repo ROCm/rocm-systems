@@ -1,0 +1,206 @@
+name: "rocjitsu-benchmark-publish-poc"
+
+on:
+  push:
+    branches:
+      - "users/IanWood1/rocjitsu-benchmark-ci-poc"
+  workflow_dispatch:
+
+# Each job grants only the access it needs.
+permissions: {}
+
+env:
+  ROCJITSU_SOURCE_DIR: ${{ github.workspace }}/rocm-systems/emulation/rocjitsu
+  ROCJITSU_BUILD_DIR: ${{ github.workspace }}/build
+  ROCJITSU_VENV: ${{ github.workspace }}/benchmark-venv
+  ROCJITSU_RESULT_DIR: ${{ github.workspace }}/benchmark-results
+  RESULTS_BRANCH: users/IanWood1/rocjitsu-benchmark-results
+  RESULTS_ARTIFACT: rocjitsu-benchmark-${{ github.run_id }}-${{ github.run_attempt }}
+
+jobs:
+  benchmark:
+    name: Run smoke benchmark
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    outputs:
+      publishable: ${{ steps.validate.outputs.publishable }}
+    container:
+      image: ghcr.io/rocm/no_rocm_image_ubuntu24_04@sha256:4150afe4759d14822f0e3f8930e1124f26e11f68b5c7b91ec9a02b20b1ebbb98
+      options: --user 0:0
+      env:
+        DEBIAN_FRONTEND: noninteractive
+
+    steps:
+      - name: Install base dependencies
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends \
+            build-essential \
+            ca-certificates \
+            clang \
+            cmake \
+            git \
+            jq \
+            libclang-rt-dev \
+            libdrm-dev \
+            ninja-build
+
+      - name: Checkout rocm-systems
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          path: rocm-systems
+
+      - name: Set up Python
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        with:
+          python-version: "3.12"
+
+      - name: Install benchmark dependencies
+        shell: bash
+        run: |
+          python -m venv "${ROCJITSU_VENV}"
+          "${ROCJITSU_VENV}/bin/python" -m pip install \
+            --disable-pip-version-check \
+            -r "${ROCJITSU_SOURCE_DIR}/benchmarks/requirements.txt"
+
+          ROCM_PATH="$("${ROCJITSU_VENV}/bin/python" -c \
+            'import pathlib, _rocm_sdk_devel; print(pathlib.Path(_rocm_sdk_devel.__file__).parent)')"
+          echo "ROCM_PATH=${ROCM_PATH}" >> "${GITHUB_ENV}"
+          echo "LD_LIBRARY_PATH=${ROCM_PATH}/lib:${LD_LIBRARY_PATH:-}" >> "${GITHUB_ENV}"
+
+      - name: Build rocjitsu benchmark workloads
+        shell: bash
+        run: |
+          cmake -S "${ROCJITSU_SOURCE_DIR}" -B "${ROCJITSU_BUILD_DIR}" -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DBUILD_TESTING=ON \
+            -DRJ_BUILD_BENCHMARKS=ON \
+            -DLTO=OFF \
+            -DRJ_ENABLE_ASAN=OFF \
+            -DRJ_ENABLE_MSAN=OFF \
+            -DRJ_ENABLE_TSAN=OFF \
+            -DRJ_ENABLE_UBSAN=OFF \
+            -DROCM_PATH="${ROCM_PATH}" \
+            -DPython3_EXECUTABLE="${ROCJITSU_VENV}/bin/python"
+          cmake --build "${ROCJITSU_BUILD_DIR}" \
+            --target rocjitsu_benchmark_workloads
+
+      - name: Run smoke suite
+        id: benchmark
+        continue-on-error: true
+        working-directory: ${{ env.ROCJITSU_SOURCE_DIR }}
+        shell: bash
+        run: |
+          "${ROCJITSU_VENV}/bin/python" -m benchmarks.runner \
+            --build-dir "${ROCJITSU_BUILD_DIR}" \
+            --manifest benchmarks/suites/smoke.toml \
+            --output "${ROCJITSU_RESULT_DIR}"
+
+      - name: Validate finalized run
+        id: validate
+        if: always()
+        shell: bash
+        run: |
+          RUN_JSON="${ROCJITSU_RESULT_DIR}/run.json"
+          PUBLISHABLE=false
+          if [[ -f "${RUN_JSON}" && ! -L "${RUN_JSON}" ]] &&
+            jq -e --arg sha "${GITHUB_SHA}" '
+              .schemaVersion == 1 and
+              .benchmarkSuite == "smoke" and
+              .finishedAt != null and
+              (.status == "completed" or .status == "failed") and
+              .provenance.rocjitsuCommitSha == $sha and
+              .provenance.dirty == false and
+              (.tests | type == "array")
+            ' "${RUN_JSON}" >/dev/null; then
+            PUBLISHABLE=true
+          fi
+          echo "publishable=${PUBLISHABLE}" >> "${GITHUB_OUTPUT}"
+
+      - name: Upload benchmark diagnostics
+        if: always() && steps.validate.outputs.publishable == 'true'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ${{ env.RESULTS_ARTIFACT }}
+          path: |
+            ${{ env.ROCJITSU_RESULT_DIR }}/run.json
+            ${{ env.ROCJITSU_RESULT_DIR }}/cases
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Preserve benchmark failure
+        if: always() && steps.benchmark.outcome != 'success'
+        run: exit 1
+
+  publish:
+    name: Publish raw result
+    needs: benchmark
+    if: always() && needs.benchmark.outputs.publishable == 'true'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+
+    steps:
+      - name: Download benchmark diagnostics
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: ${{ env.RESULTS_ARTIFACT }}
+          path: incoming
+
+      - name: Validate raw result
+        shell: bash
+        run: |
+          RUN_JSON="${GITHUB_WORKSPACE}/incoming/run.json"
+          [[ -f "${RUN_JSON}" && ! -L "${RUN_JSON}" ]]
+          jq -e --arg sha "${GITHUB_SHA}" '
+            .schemaVersion == 1 and
+            .benchmarkSuite == "smoke" and
+            .finishedAt != null and
+            (.status == "completed" or .status == "failed") and
+            .provenance.rocjitsuCommitSha == $sha and
+            .provenance.dirty == false and
+            (.tests | type == "array")
+          ' "${RUN_JSON}" >/dev/null
+
+      - name: Checkout repository for publication
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          path: publication
+          fetch-depth: 1
+
+      - name: Append result to results branch
+        working-directory: publication
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          if git fetch --no-tags origin \
+            "+refs/heads/${RESULTS_BRANCH}:refs/remotes/origin/${RESULTS_BRANCH}"; then
+            git switch --create "${RESULTS_BRANCH}" \
+              --track "origin/${RESULTS_BRANCH}"
+          else
+            git switch --orphan "${RESULTS_BRANCH}"
+            git rm -rf --ignore-unmatch .
+          fi
+
+          mkdir -p raw-runs
+          DESTINATION="raw-runs/github-${GITHUB_RUN_ID}-attempt-${GITHUB_RUN_ATTEMPT}.json"
+          [[ ! -e "${DESTINATION}" ]]
+          cp "${GITHUB_WORKSPACE}/incoming/run.json" "${DESTINATION}"
+          git add "${DESTINATION}"
+          git commit --signoff \
+            -m "Publish rocjitsu benchmark run ${GITHUB_RUN_ID}.${GITHUB_RUN_ATTEMPT}"
+
+          for ATTEMPT in 1 2 3; do
+            if git push origin "HEAD:refs/heads/${RESULTS_BRANCH}"; then
+              exit 0
+            fi
+            if [[ "${ATTEMPT}" == 3 ]]; then
+              exit 1
+            fi
+            git fetch --no-tags origin \
+              "+refs/heads/${RESULTS_BRANCH}:refs/remotes/origin/${RESULTS_BRANCH}"
+            git rebase "origin/${RESULTS_BRANCH}"
+          done

@@ -3,8 +3,9 @@
 The in-tree benchmark suite runs a fixed workload matrix through rocjitsu on
 `gfx950` and `gfx1250`. It is intended for nightly performance tracking and
 manual evaluation of changes. The first version writes local JSON artifacts;
-CI scheduling, historical storage, comparison policy, and dashboard publishing
-are follow-on work.
+the CI proof of concept below exercises publication of those artifacts.
+Historical storage policy, comparisons, and dashboard integration remain
+follow-on work.
 
 Use the controls and sampling protocol in
 [Benchmarking rocjitsu](benchmarking.md) for official performance comparisons.
@@ -143,6 +144,38 @@ reported median is always one of the observed integer-nanosecond samples.
 Each cell has a 300-second default timeout. A cell failure is recorded and does
 not discard results from other cells. The command returns failure when any
 selected cell fails.
+
+## CI publication proof of concept
+
+`.github/workflows/rocjitsu-benchmark-publish-poc.yml` runs `smoke.toml` when
+`users/IanWood1/rocjitsu-benchmark-ci-poc` is pushed. The trigger makes the
+workflow usable before it exists on the repository's default branch; once it
+does, `workflow_dispatch` also supports manual runs.
+
+The benchmark job has read-only repository access. It builds the selected
+checkout, runs the smoke suite, and uploads `run.json` plus `cases/` as a
+14-day Actions artifact. The Triton cache is deliberately excluded. A separate
+publisher job is the only job with `contents: write`. It validates the
+schema-v1 result again and uses the workflow's `GITHUB_TOKEN` to append only
+`run.json` to the orphan branch
+`users/IanWood1/rocjitsu-benchmark-results`, at:
+
+```text
+raw-runs/github-<run-id>-attempt-<attempt>.json
+```
+
+The results branch is created automatically if it does not exist. Publication
+uses a signed-off `github-actions[bot]` commit and a non-force push with retries
+for concurrent updates. A finalized partial result is still published when a
+benchmark cell fails, while the benchmark job remains failed. Setup failures
+that do not produce a finalized result are not published. Repository policy
+must allow Actions to request `contents: write`, and any branch rules must allow
+the bot to create and update the temporary results branch.
+
+This lane proves the same-repository `GITHUB_TOKEN` write path and artifact
+shape. Its GitHub-hosted runner is not the reserved, tuned benchmark machine,
+so its timings must not be mixed into the official performance history. It
+does not deploy GitHub Pages or generate dashboard indexes.
 
 ## Plugin overhead
 
