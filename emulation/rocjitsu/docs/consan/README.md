@@ -81,11 +81,12 @@ or GPU reset is not by itself a ConSan diagnostic.
   boundaries.
 - [CAPABILITIES.md](CAPABILITIES.md): normative target-by-engine access,
   barrier, atomic, fence, and typed-exclusion matrix.
-- Target qualification ledgers: [CDNA3 / gfx942](STATUS_CDNA3.md),
-  [CDNA4 / gfx950](STATUS_CDNA4.md), [RDNA3 / gfx1100](STATUS_RDNA3.md),
-  [RDNA4 / gfx1201](STATUS_RDNA4.md), and
-  [CDNA5 / gfx1250](STATUS_GFX1250.md).
-- [VALIDATION.md](VALIDATION.md): reproducible physical, simulator, and offline
+- Target qualification ledgers: [CDNA3 / gfx942](validation/STATUS_CDNA3.md),
+  [CDNA4 / gfx950](validation/STATUS_CDNA4.md),
+  [RDNA3 / gfx1100](validation/STATUS_RDNA3.md),
+  [RDNA4 / gfx1201](validation/STATUS_RDNA4.md), and
+  [CDNA5 / gfx1250](validation/STATUS_GFX1250.md).
+- [VALIDATION.md](validation/VALIDATION.md): reproducible physical, simulator, and offline
   gates behind those ledgers.
 - [EMPIRICAL_METHODOLOGY.md](EMPIRICAL_METHODOLOGY.md): the reusable admission,
   GPU-timing, fault-detection, provenance, and recommendation contract.

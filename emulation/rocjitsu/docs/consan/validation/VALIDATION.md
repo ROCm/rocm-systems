@@ -2,7 +2,7 @@
 
 This guide describes the maintained validation interfaces for ConSan. The
 executable authority for external-workload campaigns is
-[`consan_validation.py`](../../tests/dbi/consan/consan_validation.py); its
+[`consan_validation.py`](../../../tests/dbi/consan/consan_validation.py); its
 manifest owns workload commands, timeouts, profile environments, correctness
 oracles, and fault policy. Use `--help`, `manifest`, and `explain` instead of
 copying workload-specific commands into this document.
@@ -73,7 +73,7 @@ synchronization, selected atomic/fence ordering, multiple execution owners,
 multidimensional and repeated dispatch identity, private spilling and dynamic
 stacks, code-object lifecycle, graph replay, and high-pressure placement.
 Target-specific fixtures cover only semantic forms admitted by the generated
-[capability contract](CAPABILITIES.md), including CDNA5 cluster operations.
+[capability contract](../CAPABILITIES.md), including CDNA5 cluster operations.
 
 CDNA3 and CDNA4 can additionally run the target-native hip-moi simulator corpus
 when their build directories are supplied at configure time:
@@ -236,7 +236,7 @@ then baseline-after. `summary.json` reports raw samples, paired baseline, and
 mode ratios. Do not compare cold first-operation ratios with warm steady-state
 ratios; the manifest and result artifacts identify which protocol a row uses.
 For statistically controlled performance studies, follow
-[EMPIRICAL_METHODOLOGY.md](EMPIRICAL_METHODOLOGY.md) and use `study`.
+[EMPIRICAL_METHODOLOGY.md](../EMPIRICAL_METHODOLOGY.md) and use `study`.
 
 ### Fault inventory and review
 

@@ -54,7 +54,7 @@ owns its report ABI and conflict model. “Exact” always means exact within th
 declared supported forms and retained capacities—not proof about excluded ISA
 forms or dropped evidence. It also does not promote the current compact launch
 fingerprint into an injective queue-instance/dispatch identity; see
-[VALIDATION.md](VALIDATION.md).
+[VALIDATION.md](validation/VALIDATION.md).
 
 ## Shared setup before execution
 

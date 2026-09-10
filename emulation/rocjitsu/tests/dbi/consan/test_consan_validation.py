@@ -922,7 +922,9 @@ class ConSanValidationTest(unittest.TestCase):
         self.assertEqual(workloads["llama-rdna4-rms-norm"]["targets"], ("gfx1201",))
 
     def test_status_ledgers_are_single_tables_matching_manifests(self) -> None:
-        status_root = Path(validation.__file__).resolve().parents[3] / "docs/consan"
+        status_root = (
+            Path(validation.__file__).resolve().parents[3] / "docs/consan/validation"
+        )
         status_files = {
             "gfx942": "STATUS_CDNA3.md",
             "gfx950": "STATUS_CDNA4.md",

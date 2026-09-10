@@ -18,7 +18,7 @@ python3 -m unittest discover \
   -s emulation/rocjitsu/tests/dbi/consan -p 'test_consan*.py'
 ```
 
-See [`VALIDATION.md`](../../../docs/consan/VALIDATION.md) for live-GPU workspace
+See [`VALIDATION.md`](../../../docs/consan/validation/VALIDATION.md) for live-GPU workspace
 requirements and the reproducible workload contract.
 
 The empirical campaign runner supports physical `gfx950` and `gfx1201`.

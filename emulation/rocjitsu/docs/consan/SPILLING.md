@@ -152,7 +152,7 @@ Automatic hardware identity is queue-aware: descriptor planning enables both
 the AMDHSA queue-pointer and absolute dispatch-ID preloads when they are not
 already present, then restores every displaced guest preload from an explicit
 source map. The persistent 64-bit value is presently a fingerprint, not an
-injective encoding of the full pair; see [VALIDATION.md](VALIDATION.md) for the
+injective encoding of the full pair; see [VALIDATION.md](validation/VALIDATION.md) for the
 residual collision and queue-lifetime limitation.
 
 Sampled's mode-owned literal fallback remains available when the hardware

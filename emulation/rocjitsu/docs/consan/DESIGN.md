@@ -297,7 +297,7 @@ new identity. On targets whose AMDHSA dispatch ID is queue-local, the launch
 fingerprint includes both the queue pointer and absolute queue-local dispatch
 ID. That compact fingerprint is not an injective encoding of the full pair;
 its collision and queue-address-lifetime limits are documented in
-[VALIDATION.md](VALIDATION.md).
+[VALIDATION.md](validation/VALIDATION.md).
 Optional dynamic access append is also finite. Complete static instrumentation
 does not imply that every dynamic event survived.
 
