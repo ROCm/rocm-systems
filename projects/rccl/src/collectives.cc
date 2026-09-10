@@ -385,8 +385,10 @@ ncclResult_t ncclAllGather_impl(const void* sendbuff, void* recvbuff, size_t sen
   // actually ran. Symmetric-registered buffers are extracted downstream, so DDA is
   // gated on !symEligible inside the decision, exactly as before.
   struct rcclCollDecision decision;
+  struct ncclCudaGraph graph;
+  NCCLCHECK(ncclCudaGetCapturingGraph(&graph, stream, comm->config.graphUsageMode));
   NCCLCHECK(rcclSelectAllGather(comm, sendbuff, recvbuff, sendcount, datatype, /*query=*/false,
-                                /*graphCapturingHint=*/false, &decision));
+                                /*graphCapturingHint=*/ncclCudaGraphValid(graph), &decision));
 
   // Canonical selection line for addon backends (CE / DDA / Direct / Hier /
   // symmetric). Native kernels report via the enqueue.cc channel{Lo..Hi} tuning

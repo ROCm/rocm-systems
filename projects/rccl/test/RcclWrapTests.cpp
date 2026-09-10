@@ -1424,12 +1424,9 @@ TEST(Rcclwrap, RcclUseHierarchicalAllGatherTests)
         // ROCM-29579: per-rank lower bound, default 1 KB/rank.
         //
         // CreateMockComm below sets nRanks = 8 * nNodes, so the total gathered
-        // size for a given per-rank contribution scales with the job. The
-        // bootstrap AllGather PyTorch DDP issues from
-        // verify_params_across_processes contributes 8 B per rank, which gathers
-        // to 512 B at 8 nodes, 1 KB at 16 and 2 KB at 32 -- a floor on the total
-        // would stop excluding it as the job grows, so these three cases are the
-        // ones that pin the bound to per-rank semantics rather than total bytes.
+        // size for a given per-rank contribution scales with the job. These
+        // startup-sized cases pin the bound to per-rank semantics rather than
+        // total bytes.
         {"Bootstrap_8Nodes_8BPerRank",      8,  true, 8ULL * 64,           false, {}},
         {"Bootstrap_16Nodes_8BPerRank",     16, true, 8ULL * 128,          false, {}},
         {"Bootstrap_32Nodes_8BPerRank",     32, true, 8ULL * 256,          false, {}},

@@ -647,6 +647,7 @@ if(BUILD_TESTS)
       PluginCompatV11_test.cpp
       ProxyTests.cpp
       PatAlgorithmTests.cpp
+      HierarchicalCollectives_test.cpp
       RcclWrapTests.cpp
       SocketPollTests.cpp
       TransportTests.cpp
