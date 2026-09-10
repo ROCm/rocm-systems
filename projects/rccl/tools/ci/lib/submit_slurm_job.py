@@ -388,7 +388,12 @@ def main(argv: list[str]) -> int:
     result = wait_result
     if result is None:
         result = JobResult(state="", exit_code="")
-        if job_id:
+        # wait_result is only None when sbatch_rc != 0 (empty job id, a
+        # cancel before wait_for_job ran, or wait_for_job itself giving up);
+        # evaluate() discards result in all of those cases, so querying sacct
+        # here would just be wasted time -- up to 30s on top of the 600s
+        # wait_for_job already spent if this is the missing-row-timeout path.
+        if sbatch_rc == 0 and job_id:
             result = query_job(job_id, args.poll_retries, args.poll_interval)
 
     return evaluate(sbatch_rc, job_id, result)

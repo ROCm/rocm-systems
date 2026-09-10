@@ -200,9 +200,15 @@ class SubmitCommandTest(unittest.TestCase):
 
         cancel_requested can flip true before job_id is known; submit_and_wait
         must still refuse to return success once the id shows up afterward.
+        This isolates submit_and_wait's own `if cancel_requested:` guard by
+        mocking wait_for_job: without the guard, execution would fall through
+        into wait_for_job, which the mock forces to report a fake success, so
+        deleting the guard would flip both the (rc, result) assertion below
+        and the "wait_for_job must never be called" assertion.
         """
         scancelled = []
         handlers = {}
+        wait_for_job_calls = []
 
         def fake_signal(sig, handler):
             handlers[sig] = handler
@@ -216,19 +222,27 @@ class SubmitCommandTest(unittest.TestCase):
             )
             return mock.Mock(returncode=0, stdout="19010\n", stderr="")
 
+        def fake_wait_for_job(*a, **k):
+            wait_for_job_calls.append((a, k))
+            return (0, JobResult(state="COMPLETED", exit_code="0:0"))
+
         with mock.patch.object(submit_slurm_job.signal, "signal", fake_signal):
             with mock.patch.object(submit_slurm_job.subprocess, "run", fake_run):
                 with mock.patch.object(
                     submit_slurm_job, "scancel_job", scancelled.append
                 ):
-                    rc, job_id, result = submit_slurm_job.submit_and_wait(
-                        submit_slurm_job.Path("job.sbatch"), "ALL", None, None
-                    )
+                    with mock.patch.object(
+                        submit_slurm_job, "wait_for_job", fake_wait_for_job
+                    ):
+                        rc, job_id, result = submit_slurm_job.submit_and_wait(
+                            submit_slurm_job.Path("job.sbatch"), "ALL", None, None
+                        )
 
         self.assertEqual((rc, job_id, result), (1, "19010", None))
         # Once from the signal handler (job_id still unknown), once more from
         # the post-sbatch cancel_requested check now that it is known.
         self.assertEqual(scancelled, ["", "19010"])
+        self.assertEqual(wait_for_job_calls, [])
 
     def test_submit_returns_wait_for_jobs_terminal_result(self) -> None:
         """submit_and_wait must hand back the JobResult wait_for_job saw.
