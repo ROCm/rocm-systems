@@ -33,6 +33,13 @@ bool rcclUseIbCastQpSched() {
     return enabled;
   }
 
+  if (IbCastByOrderRequested()) {
+    WARN("NET/IB: BY_ORDER matching requested (NCCL_IB_RECEIVER_SIDE_MATCHING_SCHEME=%d): disabling the QP "
+         "scheduler, split-data and WRR",
+         BY_ORDER);
+    return false;
+  }
+
   const char* netEnv = ncclGetEnv("NCCL_NET");
   if (netEnv && strcasecmp(netEnv, "ib-cast") == 0) {
     INFO(NCCL_NET|NCCL_ENV, "(IB-CAST) NCCL_NET=ib-cast: forcing QP scheduler enabled");
@@ -196,6 +203,7 @@ ncclResult_t IbCastQpSchedInitParms(struct ncclIbQpSchedParms *parms) {
   }
 
 void IbCastUpdateSchedParmsTry(struct ncclIbNetCommBase *base, int nreqs, int size) {
+  if (base->recvMatchingScheme == BY_ORDER) return;
   if (!base->schedParmsInit) {
     base->schedParms = castGlobalQpSchedParms;
     base->schedParmsInit = true;
