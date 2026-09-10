@@ -70,6 +70,7 @@ namespace {
     case ConSanSyncMemoryRole::None:
       return "atomic-order-unknown";
     }
+    return "atomic-order-unknown";
   case ConSanSyncOperation::OrdinaryLoad:
     return sequence->memory_role == ConSanSyncMemoryRole::Acquire ? "ordinary-acquire-load"
                                                                   : "ordinary-load";
@@ -86,8 +87,7 @@ namespace {
 [[nodiscard]] constexpr const char *patch_diagnostic_kind_name(ConSanPatchKind kind) {
   using E = ConSanPatchKind;
   constexpr auto vocabulary = make_consan_enum_vocabulary(
-      "unknown",
-      consan_enum(E::LdsLoadCheckTrap, "inline-lds-load-check-trap"),
+      "unknown", consan_enum(E::LdsLoadCheckTrap, "inline-lds-load-check-trap"),
       consan_enum(E::LdsStoreCheckTrap, "inline-lds-store-check-trap"),
       consan_enum(E::FlatLoadCheckTrap, "inline-flat-load-check-trap"),
       consan_enum(E::FlatStoreCheckTrap, "inline-flat-store-check-trap"),

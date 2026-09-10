@@ -90,7 +90,9 @@ function(rj_configure_target target)
             )
                 target_compile_options(
                     ${target}
-                    PRIVATE -Wno-error=maybe-uninitialized
+                    PRIVATE
+                        -Wno-error=dangling-reference
+                        -Wno-error=maybe-uninitialized
                 )
             endif()
         endif()

@@ -32,7 +32,7 @@ struct ConSanPatchedImageGrowthLimit {
 
 /// Resolve a configured policy without overflowing size_t. An invalid enum
 /// value is rejected instead of silently selecting a fallback.
-[[nodiscard]] inline std::optional<size_t>
+[[nodiscard]] inline constexpr std::optional<size_t>
 consan_patched_image_growth_limit_bytes(const ConSanPatchedImageGrowthLimit &policy,
                                         size_t input_image_bytes) {
   static_assert(sizeof(size_t) >= sizeof(uint64_t),

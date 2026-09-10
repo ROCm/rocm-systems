@@ -89,19 +89,19 @@ struct MoiAppendedBodyOptions {
   bool wrap_embedded_guest_vgpr_bank = false;
 };
 
-[[nodiscard]] constexpr bool
+[[nodiscard]] inline bool
 moi_appended_body_uses_selectable_vgpr_bank(rj_code_arch_t arch,
                                             std::optional<uint16_t> incoming_vgpr_bank_mode) {
   return consan_arch_has_selectable_vgpr_bank(arch) && incoming_vgpr_bank_mode.value_or(0u) != 0u;
 }
 
-[[nodiscard]] constexpr bool
+[[nodiscard]] inline bool
 moi_appended_body_vgpr_bank_mode_is_valid(rj_code_arch_t arch,
                                           std::optional<uint16_t> incoming_vgpr_bank_mode) {
   return incoming_vgpr_bank_mode.value_or(0u) == 0u || consan_arch_has_selectable_vgpr_bank(arch);
 }
 
-[[nodiscard]] constexpr size_t
+[[nodiscard]] inline size_t
 moi_appended_body_vgpr_bank_transition_word_count(rj_code_arch_t arch,
                                                   std::optional<uint16_t> incoming_vgpr_bank_mode,
                                                   bool has_vgpr_spill, bool wraps_embedded_guest) {

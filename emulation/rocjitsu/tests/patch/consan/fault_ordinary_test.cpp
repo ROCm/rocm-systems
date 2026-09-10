@@ -331,13 +331,12 @@ TEST(ConSan, AssociatesGeneratedGfx1250BufferPollLoopShape) {
   ASSERT_NE(sequence, nullptr);
   EXPECT_EQ(sequence->memory_role, ConSanSyncMemoryRole::Acquire);
   EXPECT_EQ(sequence->member_event_ids.size(), 2u);
-  ASSERT_EQ(result.program_inventory.sync().moi_fence_candidates.size(), 1u);
-  const ConSanMoiFenceCandidate &fence =
-      result.program_inventory.sync().moi_fence_candidates.front();
+  const SynchronizationInventoryView sync = result.program_inventory.sync();
+  ASSERT_EQ(sync.moi_fence_candidates.size(), 1u);
+  const ConSanMoiFenceCandidate &fence = sync.moi_fence_candidates.front();
   EXPECT_TRUE(fence.eligible());
   ASSERT_TRUE(fence.communication_event);
-  const ConSanSyncEvent *communication =
-      result.program_inventory.sync().find_event(*fence.communication_event);
+  const ConSanSyncEvent *communication = sync.find_event(*fence.communication_event);
   ASSERT_NE(communication, nullptr);
   EXPECT_EQ(communication->address_source, ConSanSyncAddressSource::BufferResource);
 }

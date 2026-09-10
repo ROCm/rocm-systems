@@ -1306,11 +1306,15 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes,
       }
       relocated_guest_size = static_cast<uint32_t>(sequence_size);
       leading_guest_words.resize((site.text_offset - physical_anchor_offset) / sizeof(uint32_t));
-      std::memcpy(leading_guest_words.data(), old_text.data() + physical_anchor_offset,
-                  leading_guest_words.size() * sizeof(uint32_t));
+      if (!leading_guest_words.empty()) {
+        std::memcpy(leading_guest_words.data(), old_text.data() + physical_anchor_offset,
+                    leading_guest_words.size() * sizeof(uint32_t));
+      }
       trailing_guest_words.resize((sequence_end - site.text_offset - site.size) / sizeof(uint32_t));
-      std::memcpy(trailing_guest_words.data(), old_text.data() + site.text_offset + site.size,
-                  trailing_guest_words.size() * sizeof(uint32_t));
+      if (!trailing_guest_words.empty()) {
+        std::memcpy(trailing_guest_words.data(), old_text.data() + site.text_offset + site.size,
+                    trailing_guest_words.size() * sizeof(uint32_t));
+      }
     }
     std::optional<uint16_t> polling_loop_entry_vgpr_bank_mode;
     if (relocates_polling_loop && target_profile->has_selectable_vgpr_bank) {

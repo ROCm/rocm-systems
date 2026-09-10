@@ -26,7 +26,9 @@ function(_rj_configure_object_library name)
         )
             target_compile_options(
                 ${name}
-                PRIVATE -Wno-error=maybe-uninitialized
+                PRIVATE
+                    -Wno-error=dangling-reference
+                    -Wno-error=maybe-uninitialized
             )
         endif()
     endif()

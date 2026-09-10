@@ -3961,7 +3961,7 @@ TEST(BinaryTranslator, ClientRewriteExhaustedSgprsFallsBackToLongBranchIslands) 
   const uint32_t marker =
       build_s_nop(kBranchIslandPoolMarkerNopImmediate, ROCJITSU_CODE_ARCH_CDNA4);
   EXPECT_NE(std::ranges::find(translated_words, marker), translated_words.end());
-  for (uint16_t pair = 0; pair + 1 < kCdna4OrdinarySgprLimit; pair += 2) {
+  for (uint16_t pair = 0; static_cast<uint32_t>(pair) + 1u < kCdna4OrdinarySgprLimit; pair += 2) {
     EXPECT_EQ(
         std::ranges::find(translated_words, build_s_getpc_b64(pair, ROCJITSU_CODE_ARCH_CDNA4)),
         translated_words.end());

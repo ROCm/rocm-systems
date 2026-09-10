@@ -706,8 +706,7 @@ TEST(ConSanMoi, Gfx1100VglobalAtomicRejectsInvalidScalarBase) {
   EXPECT_EQ(inline_atomic_exact_ordering_reason(*site, ConSanMoiAtomicEventKind::Acquire,
                                                 ROCJITSU_CODE_ARCH_RDNA3),
             ConSanAtomicClassifierReason::UnsupportedEncoding);
-  EXPECT_EQ(std::ranges::count(result.patches,
-                               ConSanPatchKind::TrampolineMoiInlineAtomicOrdering,
+  EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiInlineAtomicOrdering,
                                &ConSanPatchInfo::kind),
             0u);
 }
@@ -3643,20 +3642,17 @@ TEST(ConSanMoi, RecordReplayCapturesAliasedOrdinaryAcquireAddressBeforeGuestAcro
     const ConSanTransformArtifacts result = test_lower_consan(bytes, options);
 
     ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
-    ASSERT_EQ(result.program_inventory.sync().moi_fence_candidates.size(), 1u);
-    ASSERT_TRUE(result.program_inventory.sync().moi_fence_candidates.front().eligible());
-    const ConSanMoiFenceCandidate &semantic_fence =
-        result.program_inventory.sync().moi_fence_candidates.front();
+    const SynchronizationInventoryView sync = result.program_inventory.sync();
+    ASSERT_EQ(sync.moi_fence_candidates.size(), 1u);
+    ASSERT_TRUE(sync.moi_fence_candidates.front().eligible());
+    const ConSanMoiFenceCandidate &semantic_fence = sync.moi_fence_candidates.front();
     ASSERT_TRUE(semantic_fence.communication_event);
-    const ConSanSyncEvent *communication =
-        result.program_inventory.sync().find_event(*semantic_fence.communication_event);
+    const ConSanSyncEvent *communication = sync.find_event(*semantic_fence.communication_event);
     ASSERT_NE(communication, nullptr);
-    ASSERT_FALSE(result.program_inventory.sync().execution_owners(*communication).empty());
-    const ConSanSyncEvent *fence_event =
-        result.program_inventory.sync().find_event(semantic_fence.fence_event);
+    ASSERT_FALSE(sync.execution_owners(*communication).empty());
+    const ConSanSyncEvent *fence_event = sync.find_event(semantic_fence.fence_event);
     ASSERT_NE(fence_event, nullptr);
-    const ConSanSyncSequence *candidate_sequence =
-        result.program_inventory.sync().find_sequence(semantic_fence.sequence);
+    const ConSanSyncSequence *candidate_sequence = sync.find_sequence(semantic_fence.sequence);
     ASSERT_NE(candidate_sequence, nullptr);
     EXPECT_EQ(candidate_sequence->kind, ConSanSyncKind::OrdinaryMemory);
     EXPECT_EQ(candidate_sequence->memory_role, ConSanSyncMemoryRole::Acquire);
@@ -5280,8 +5276,9 @@ TEST(ConSanMoi, InlineAtomicRelocatesFarHelpersWithoutIndirectIslands) {
   EXPECT_TRUE(patched.is_valid());
   ASSERT_TRUE(result.text_relocation);
   for (const ConSanPatchInfo &patch : result.patches) {
-    if (patch.kind == ConSanPatchKind::TrampolineMoiInlineAtomicOrdering)
+    if (patch.kind == ConSanPatchKind::TrampolineMoiInlineAtomicOrdering) {
       EXPECT_TRUE(patch.relocated_guest_instruction_offset);
+    }
   }
 }
 
