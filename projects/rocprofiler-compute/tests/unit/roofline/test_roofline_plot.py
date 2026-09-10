@@ -633,13 +633,14 @@ function rangeCalls(controller) {
   precisionMenu.dispatchEvent(eventOf("change", { target: fp64 }));
   fp32.checked = false;
   precisionMenu.dispatchEvent(eventOf("change", { target: fp32 }));
-  const low = roofUpdates().at(-1).update;
+  const lowUpdates = roofUpdates();
+  const low = lowUpdates[lowUpdates.length - 1].update;
   const lowX = Array.from(low.x[0]);
   const lowY = Array.from(low.y[0]);
   assert.deepEqual(lowX, [0.1, 2, 4]);
   assert.deepEqual(lowY, [1, 20, 40]);
   assert.ok(lowY.every((value) => value <= 40));
-  assert.deepEqual([lowX.at(-1), lowY.at(-1)], [4, 40]);
+  assert.deepEqual([lowX[lowX.length - 1], lowY[lowY.length - 1]], [4, 40]);
   assert.ok(lowX.every((value, index) => index === 0 || value > lowX[index - 1]));
   assert.ok(lowY.every((value, index) => index === 0 || value > lowY[index - 1]));
 
@@ -647,7 +648,8 @@ function rangeCalls(controller) {
   precisionMenu.dispatchEvent(eventOf("change", { target: fp32 }));
   fp64.checked = false;
   precisionMenu.dispatchEvent(eventOf("change", { target: fp64 }));
-  const restored = roofUpdates().at(-1).update;
+  const restoredUpdates = roofUpdates();
+  const restored = restoredUpdates[restoredUpdates.length - 1].update;
   assert.deepEqual(Array.from(restored.x[0]), [0.1, 2, 8, 10]);
   assert.deepEqual(Array.from(restored.y[0]), [1, 20, 80, 100]);
 }
@@ -698,7 +700,8 @@ function rangeCalls(controller) {
   assert.equal(click.propagationStopped, true);
   assert.equal(row.classList.contains("selected"), false);
   assert.equal(rangeCalls(controller).length, rangesBeforeZoom + 1);
-  const badgeZoom = rangeCalls(controller).at(-1);
+  const badgeZoomCalls = rangeCalls(controller);
+  const badgeZoom = badgeZoomCalls[badgeZoomCalls.length - 1];
   assert.deepEqual(Array.from(badgeZoom["xaxis.range"]), [-2.5, 3.5]);
   assert.deepEqual(Array.from(badgeZoom["yaxis.range"]), [0.5, 3.5]);
   badge.dispatchEvent(eventOf("keydown", { key: "Enter" }));
