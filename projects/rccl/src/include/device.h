@@ -39,6 +39,12 @@ typedef __hip_bfloat16 hip_bfloat16;
 #ifdef ENABLE_ROCSHMEM
 #include <rocshmem/rocshmem.hpp>
 #endif
+#if SQTT_ENABLED
+#include <rocprof-trace-decoder/rocprof_trace_decoder/cxx/markers.hpp>
+#else
+#define sqtt_marker_enter(name) do {} while(0)
+#define sqtt_marker_exit(name) do {} while(0)
+#endif
 
 extern const char* ncclFuncStr[NCCL_NUM_FUNCTIONS + 4];
 
@@ -852,6 +858,14 @@ inline int ncclDevFuncLL128RegMode(bool regUsed, bool netRegUsed) {
 // Which unroll-factor tables were generated in this build, indexed by the
 // NCCL_UNROLL_* enum. Generated in host_table.cpp by generate.py.
 extern bool const ncclDevFuncUnrollGenerated[NCCL_NUM_UNROLLS];
+
+// Arch each unroll factor's device functions were compiled for, or nullptr when
+// the unroll carries no arch restriction. This is independent of what the build
+// generated: an entry still names its arch for an unroll this build left out, so
+// neither table implies the other and both have to be consulted. A multi-arch
+// build generates all unrolls, so together they are what distinguish "built"
+// from "usable on the running GPU".
+extern char const* const ncclDevFuncUnrollArch[NCCL_NUM_UNROLLS];
 
 // `ncclDevFuncId()` needs to be in sync with 'all_colls' in generate.py
 // `reg` is the user-buffer registration mode (0=n/a, 1=registered, 2=non-registered)

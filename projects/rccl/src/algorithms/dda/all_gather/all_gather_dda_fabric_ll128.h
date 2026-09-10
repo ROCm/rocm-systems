@@ -2,10 +2,8 @@
  * Copyright (c) 2026, Advanced Micro Devices, Inc. All rights reserved.
  *
  * LL128-protocol all-gather device kernel for the DDA fabric path (gfx1250).
- * Each 128B line holds 120B of payload (15 x uint64) + a trailing flag word;
- * 16 lanes cooperatively write one coalesced line, flag-last and unfenced (see
- * CollCommon_ll128.h). No GPU barrier; staging uses comm->ddaScratch reached via
- * comm->ddaPeerPtrsDev.
+ * A warp owns one 2 KiB slice: eight uint64 registers per lane. 
+ * No GPU barrier; staging uses comm->ddaScratch reached via comm->ddaPeerPtrsDev.
  *
  * See LICENSE.txt for license information.
  ************************************************************************/
@@ -26,19 +24,10 @@
 
 namespace dda::common {
 
-// Per-rank hard cap for the LL128 all-gather slot and the resulting fixed slot
-// stride in 128B lines (compile-time, so the double-buffered layout is identical
-// on every rank and call). The effective size gate is the runtime LL128
-// threshold (see collectives.cc); this cap bounds the scratch footprint.
-constexpr size_t kDdaLL128AgMaxPerRankBytes = 524288;                 // 512 KiB
-constexpr size_t kDdaLL128AgSlotStrideLines =
-  (kDdaLL128AgMaxPerRankBytes / 8 + (size_t)kDdaLL128DataElems - 1) / (size_t)kDdaLL128DataElems; // ceil(nWords/15)
-
-// LL128 all-gather kernel. 2D grid: grid.x == nRanks selects the peer column;
-// grid.y == blocksPerPeer splits that peer's line range into gridDim.y chunks.
-// The self column copies sendbuff -> recvbuff[self] locally; other columns
-// scatter this rank's chunk into peer b's slot (warp-cooperative 128B writes),
-// then poll their own slot b for peer b's chunk and unpack into recvbuff[b].
+// LL128 all-gather. 2D grid: grid.x == nRanks - 1 places one column per remote
+// peer; grid.y splits that peer's slices across blocks, one
+// warp per slice. Each column packs this rank's payload into its peer's slot,
+// then polls its own slot for that peer's payload and unpacks it.
 template <typename T, int NRANKS_CT>
 #if defined(USE_ROCM)
 __launch_bounds__(1024)
@@ -49,96 +38,78 @@ __launch_bounds__(1024)
                                           size_t perRankBytes, // per-rank payload; multiple of 16
                                           int selfRank, int nRanksRt,
                                           uint32_t* __restrict__ epochDev, // per-block LL epoch cells
-                                          int epochLen) { // number of cells in epochDev
+                                          int epochLen, // number of cells in epochDev
+                                          size_t slicesTotal, // slices this call uses
+                                          size_t slotWords) { // per-rank slot stride, in 8B words
 
   const int nRanks = NRANKS_CT ? NRANKS_CT : nRanksRt;
-  const int peer = blockIdx.x; // grid.x == nRanks: one column/peer
-  if (peer >= nRanks) return; // safety if grid.x > nRanks
-  const int chunk = blockIdx.y; // grid.y == blocksPerPeer
-  const int nChunks = gridDim.y; // >= 1
+
+  const int nPeers = (int)blockIdx.x;
+  const int peer = (selfRank + nPeers + 1) % nRanks;
+
   const int tid = threadIdx.x;
   const int nthreads = blockDim.x;
+  const int lane = tid % kDdaLL128Warp;
+  const int warp = tid / kDdaLL128Warp;
+  const int nwarps = nthreads / kDdaLL128Warp;
+  const bool flagLane = ddaLL128IsFlagLane(lane);
 
-  const size_t nWords = perRankBytes >> 3; // 8B payload words
-  const size_t numLines = ddaLL128NumLines(nWords); // 128B lines this size
-  const size_t slot = kDdaLL128AgSlotStrideLines; // lines per slot
+  const int flatBlockId = (int)(blockIdx.x * gridDim.y + blockIdx.y);
+  const int total = (int)(gridDim.x * gridDim.y);
+  const uint32_t flag32 = ddaGetLLEpochInc(epochDev, flatBlockId, 1);
+  const uint64_t flag = ((uint64_t)flag32 << 32) | (uint64_t)flag32;
+  const uint64_t bankWords = (uint64_t)(flag32 & 1u) * (uint64_t)nRanks * (uint64_t)slotWords;
 
-  // On-device, graph-safe flag/bank derivation.
-  const int flatBlockId = blockIdx.x * gridDim.y + blockIdx.y;
-  const int total = gridDim.x * gridDim.y;
-  __shared__ uint32_t s_flag;
-  const uint32_t flag = ddaLLEpochBegin(epochDev, flatBlockId, s_flag);
-  const size_t bankOffsetLines = (size_t)(flag & 1u) * (size_t)nRanks * slot;
+  // Slices stride by warp within this peer's column only.
+  const size_t gwarp = (size_t)blockIdx.y * (size_t)nwarps + (size_t)warp;
+  const size_t wstride = (size_t)gridDim.y * (size_t)nwarps;
 
-  // This block's line range [lnBegin, lnEnd); [0, numLines) when nChunks == 1.
-  const size_t lnPerChunk = (numLines + (size_t)nChunks - 1) / (size_t)nChunks;
-  const size_t lnBegin = (size_t)chunk * lnPerChunk;
-  size_t lnEnd = lnBegin + lnPerChunk;
-  if (lnEnd > numLines) lnEnd = numLines;
+  const int8_t* srcBytes = reinterpret_cast<const int8_t*>(sendbuff);
+  uint64_t* scatterSlot = reinterpret_cast<uint64_t*>(peerScratch[peer]) + bankWords +
+    (uint64_t)selfRank * (uint64_t)slotWords;
+  const uint64_t* gatherSlot = reinterpret_cast<const uint64_t*>(peerScratch[selfRank]) + bankWords +
+    (uint64_t)peer * (uint64_t)slotWords;
+  int8_t* dstBytes = reinterpret_cast<int8_t*>(recvbuff) + (size_t)peer * perRankBytes;
 
-  if (peer == selfRank) {
-    // self column: local copy sendbuff -> recvbuff[self] (16B nontemporal).
-    const uint4* s4 = reinterpret_cast<const uint4*>(sendbuff);
-    uint4* d4 = reinterpret_cast<uint4*>(reinterpret_cast<char*>(recvbuff) + (size_t)selfRank * perRankBytes);
-    const size_t nVec = perRankBytes >> 4; // number of 16B chunks
-    // split the copy across this peer's blocks too, proportional to lines.
-    const size_t vecPerChunk = (nVec + (size_t)nChunks - 1) / (size_t)nChunks;
-    const size_t vBegin = (size_t)chunk * vecPerChunk;
-    size_t vEnd = vBegin + vecPerChunk;
-    if (vEnd > nVec) vEnd = nVec;
-    for (size_t i = vBegin + tid; i < vEnd; i += nthreads) {
-      const uint4* p = &s4[i];
-      uint4 v;
-      v.x = __builtin_nontemporal_load(&p->x);
-      v.y = __builtin_nontemporal_load(&p->y);
-      v.z = __builtin_nontemporal_load(&p->z);
-      v.w = __builtin_nontemporal_load(&p->w);
-      uint4* q = &d4[i];
-      __builtin_nontemporal_store(v.x, &q->x);
-      __builtin_nontemporal_store(v.y, &q->y);
-      __builtin_nontemporal_store(v.z, &q->z);
-      __builtin_nontemporal_store(v.w, &q->w);
-    }
-  } else {
-    // 16 lanes cooperate on one 128B line.
-    const int group = tid / kDdaLL128Lanes;
-    const int lane = tid % kDdaLL128Lanes;
-    const int groups = nthreads / kDdaLL128Lanes;
-    const uint64_t* sw = reinterpret_cast<const uint64_t*>(sendbuff);
+  // Phase 1: pack and push this column's slices to the one peer it owns.
+  for (size_t s = gwarp; s < slicesTotal; s += wstride) {
+    const size_t dataByte = s * (size_t)kDdaLL128DataBytesPerSlice;
+    const size_t rem = perRankBytes - dataByte;
+    const int eltInSlice =
+      rem < (size_t)kDdaLL128DataBytesPerSlice ? (int)rem : kDdaLL128DataBytesPerSlice;
+    uint64_t regs[kDdaLL128WordsPerThread];
+    ddaLL128LoadRegs<int8_t>(regs, srcBytes + dataByte, eltInSlice, lane, flagLane);
+    ddaLL128StoreWire(
+      scatterSlot + s * (size_t)kDdaLL128WireWordsPerSlice + 2 * lane, regs, flag, flagLane);
+  }
 
-    // scatter: write my payload into peer's slot (== selfRank), flag-last.
-    LLLine128* dst = reinterpret_cast<LLLine128*>(peerScratch[peer]) + (size_t)selfRank * slot + bankOffsetLines;
-    for (size_t ln = lnBegin + group; ln < lnEnd; ln += groups) {
-      const size_t base = ln * (size_t)kDdaLL128DataElems;
-      if (lane < kDdaLL128DataElems) {
-        const size_t e = base + (size_t)lane;
-        const uint64_t v = (e < nWords) ? sw[e] : 0ull;
-        ddaLL128StoreWord(&dst[ln].w[lane], v);
-      }
-      // Unfenced: the payload-store instruction above precedes this flag store
-      // in warp program order; gfx1250 preserves the visibility order.
-      if (lane == kDdaLL128FlagElem) {
-        ddaLL128StoreWord(&dst[ln].w[kDdaLL128FlagElem], (uint64_t)flag);
-      }
-    }
-
-    // gather: poll my slot for peer, unpack into recvbuff[peer].
-    LLLine128* src = reinterpret_cast<LLLine128*>(peerScratch[selfRank]) + bankOffsetLines + (size_t)peer * slot;
-    uint64_t* out = reinterpret_cast<uint64_t*>(reinterpret_cast<char*>(recvbuff) + (size_t)peer * perRankBytes);
-    for (size_t ln = lnBegin + group; ln < lnEnd; ln += groups) {
-      const size_t base = ln * (size_t)kDdaLL128DataElems;
-      // all 16 lanes poll the shared flag word (broadcast); unfenced.
-      while (ddaLL128LoadWord(&src[ln].w[kDdaLL128FlagElem]) != (uint64_t)flag) {
-      }
-      if (lane < kDdaLL128DataElems) {
-        const size_t e = base + (size_t)lane;
-        const uint64_t v = ddaLL128LoadWord(&src[ln].w[lane]);
-        if (e < nWords) out[e] = v;
-      }
+  // Local copy sendbuff -> recvbuff[selfRank].
+  {
+    v4u_gptr s4 = (v4u_gptr)sendbuff;
+    v4u_gptr d4 = (v4u_gptr)(reinterpret_cast<char*>(recvbuff) + (size_t)selfRank * perRankBytes);
+    const size_t nVec = perRankBytes >> 4; // 16B chunks
+    const size_t gtid = (size_t)flatBlockId * (size_t)nthreads + (size_t)tid;
+    const size_t stride = (size_t)total * (size_t)nthreads;
+    for (size_t i = gtid; i < nVec; i += stride) {
+      d4[i] = s4[i];
     }
   }
 
-  ddaLLEpochEnd(epochDev, flatBlockId, total, epochLen, flag);
+  // Phase 2: poll the same slices in that peer's slot and unpack.
+  for (size_t s = gwarp; s < slicesTotal; s += wstride) {
+    const size_t dataByte = s * (size_t)kDdaLL128DataBytesPerSlice;
+    const size_t rem = perRankBytes - dataByte;
+    const int eltInSlice =
+      rem < (size_t)kDdaLL128DataBytesPerSlice ? (int)rem : kDdaLL128DataBytesPerSlice;
+    uint64_t vr[kDdaLL128WordsPerThread];
+    ddaLL128PollWire(gatherSlot + s * (size_t)kDdaLL128WireWordsPerSlice + 2 * lane, vr, flag, lane);
+    ddaLL128StoreRegs<int8_t>(dstBytes + dataByte, vr, eltInSlice, lane, flagLane);
+  }
+#if defined(__gfx1250__)
+  asm volatile("s_wait_storecnt 0x0" ::: "memory");
+#endif
+  __syncthreads();
+  ddaSetLLEpoch(epochDev, epochLen, flatBlockId, total, flag32);
 }
 
 } // namespace dda::common
