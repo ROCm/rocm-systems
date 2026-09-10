@@ -2158,23 +2158,52 @@ TEST_F(KfdIoctlTest, DbgTrapCompetingNotifierWriterCannotBlockPublisher) {
   // The hook clears O_NONBLOCK and consumes the capacity immediately before
   // delivery. The helper writer blocks, but its deadline must keep the caller
   // bounded even though the shared open-file description is now blocking.
-  // Run the same call in a death-test subprocess first: the alarm makes a
-  // regression in either the deadline or kill/reap path a bounded test failure
-  // instead of hanging the complete test binary before the elapsed check below.
-  GTEST_FLAG_SET(death_test_style, "threadsafe");
-  ASSERT_EXIT(
-      {
-        alarm(2);
-        const bool delivered = driver_->notify_debug_event_for_testing(
-            create.queue_id, kException, /*retain_on_rejection=*/true);
-        _exit(delivered ? 1 : 0);
-      },
-      ::testing::ExitedWithCode(0), "");
+  // Run the call in a subprocess first and enforce its deadline from the
+  // parent, so a regression cannot hang the complete test binary before the
+  // elapsed check below. Force the child through the asynchronous reap branch
+  // to model waitpid(WNOHANG) observing a still-live notification writer.
+  driver_->set_debug_notification_deferred_reap_for_testing(true);
+  const pid_t probe = ::fork();
+  ASSERT_GE(probe, 0);
+  if (probe == 0) {
+    const bool delivered = driver_->notify_debug_event_for_testing(create.queue_id, kException,
+                                                                   /*retain_on_rejection=*/true);
+    _exit(delivered ? 1 : 0);
+  }
+  ChildProcessGuard probe_guard(probe);
+  int probe_status = 0;
+  pid_t waited = 0;
+  const auto probe_deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
+  do {
+    do {
+      waited = ::waitpid(probe, &probe_status, WNOHANG);
+    } while (waited < 0 && errno == EINTR);
+    if (waited != 0)
+      break;
+    static_cast<void>(::poll(nullptr, 0, 10));
+  } while (std::chrono::steady_clock::now() < probe_deadline);
+  if (waited == 0) {
+    static_cast<void>(::kill(probe, SIGKILL));
+    do {
+      waited = ::waitpid(probe, &probe_status, WNOHANG);
+    } while (waited < 0 && errno == EINTR);
+    probe_guard.release();
+    FAIL() << "notification publisher exceeded its parent-enforced deadline";
+  }
+  ASSERT_EQ(waited, probe);
+  probe_guard.release();
+  ASSERT_TRUE(WIFEXITED(probe_status));
+  ASSERT_EQ(WEXITSTATUS(probe_status), 0);
+  uint64_t probe_sentinel = 0;
+  ASSERT_EQ(::read(notifier, &probe_sentinel, sizeof(probe_sentinel)),
+            static_cast<ssize_t>(sizeof(probe_sentinel)));
+  ASSERT_EQ(probe_sentinel, saturated);
 
   const auto start = std::chrono::steady_clock::now();
   EXPECT_FALSE(driver_->notify_debug_event_for_testing(create.queue_id, kException,
                                                        /*retain_on_rejection=*/true));
   EXPECT_LT(std::chrono::steady_clock::now() - start, std::chrono::seconds(1));
+  driver_->set_debug_notification_deferred_reap_for_testing(false);
   driver_->set_debug_notification_write_hook_for_testing({});
   EXPECT_TRUE(competing_write_ran);
   EXPECT_EQ(::fcntl(notifier, F_GETFL) & O_NONBLOCK, 0);

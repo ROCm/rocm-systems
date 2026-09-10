@@ -237,6 +237,12 @@ public:
     debug_notification_clone3_error_for_testing_ = error;
   }
 
+  /// @brief Force timed-out writers through the asynchronous reap path in tests.
+  void set_debug_notification_deferred_reap_for_testing(bool defer) {
+    std::lock_guard<std::mutex> lock(debug_sessions_mutex_);
+    debug_notification_deferred_reap_for_testing_ = defer;
+  }
+
   /// @brief Pause after ROCr decides queue-exception delivery and before ownership resolves.
   void set_runtime_exception_result_hook_for_testing(std::function<void(bool)> hook) {
     runtime_exception_result_hook_for_testing_ = std::move(hook);
@@ -773,6 +779,7 @@ private:
   std::function<void(bool)> debug_notification_result_hook_for_testing_;
   std::function<void()> debug_notification_write_hook_for_testing_;
   std::optional<int> debug_notification_clone3_error_for_testing_;
+  bool debug_notification_deferred_reap_for_testing_ = false;
   std::function<void(bool)> runtime_exception_result_hook_for_testing_;
   std::optional<int> debug_notifier_dup_error_for_testing_;
   std::unordered_map<uint32_t, EventState *> event_dispatch_;
