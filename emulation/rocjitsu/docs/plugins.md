@@ -300,6 +300,30 @@ every high-frequency callback, serializing it with the infrequent callbacks
 without a per-instruction scan of the plugin list. Plugins that protect their
 own shared state should retain the parallel default.
 
+### Observing memory accesses
+
+There are two memory hooks, and they see different things.
+`onAmdgpuRouteMemoryInstruction` fires before routing decides anything: the
+instruction still carries the address space it decoded as and the addresses it
+computed. `onAmdgpuMemoryAccessRouted` fires once routing has settled and
+reports a `MemoryAccessObservation` describing the access the memory system is
+actually about to be asked for — the pipeline it was issued to, the wait
+counter it will post to, and the addresses it was issued with. The difference is
+not cosmetic: a FLAT access into the shared aperture decodes as global and is
+issued to the LDS pipeline with its addresses rewritten and its counter changed,
+so an observer using the earlier hook charges it against the wrong cache at an
+address the memory system never uses.
+
+Building the observation is real work on the per-instruction path, so it is
+skipped entirely unless a contained plugin asks for it. A plugin that overrides
+`onAmdgpuMemoryAccessRouted` must also override `observes_memory_routing()` to
+return `true`; the group samples this policy when each plugin is added, and its
+conservative default is `false`. Overriding the hook alone is silent — the
+plugin simply never sees an access.
+
+The observation's spans point into the instruction's own state and are valid
+only for the duration of the callback. A plugin that keeps one must copy them.
+
 SGPR owner resolution is skipped when no contained plugin observes scalar
 register reads. Plugins that consume neither `onAmdgpuReadScalarRegister` nor
 `onAmdgpuReadSgpr` should override
@@ -327,6 +351,7 @@ concurrently.
    `requires_serial_hot_hooks()` when that state cannot be protected within the
    plugin.
 6. Override `observes_sgpr_reads()` to return `false` when the plugin does not
-   consume `onAmdgpuReadSgpr`.
+   consume `onAmdgpuReadSgpr`, and `observes_memory_routing()` to return `true`
+   when it does consume `onAmdgpuMemoryAccessRouted`.
 7. Enable it by adding `"myname": { ... }` to the `plugins` section of
    the config file.
