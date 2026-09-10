@@ -109,7 +109,7 @@ protected:
     pt.anchor_offset = 4; // v_mov_b32 v1, v0 -> reads v0 (v0 live at the anchor).
     pt.probe_obj = &probe_obj;
     pt.probe_symbol = "rj_test_arg_probe";
-    pt.probe_args = {kArgSentinel};
+    pt.probe_args = {probe_arg_imm(kArgSentinel)};
     instr.add_point(pt);
 
     auto result = instr.patch_with_debug_summaries();

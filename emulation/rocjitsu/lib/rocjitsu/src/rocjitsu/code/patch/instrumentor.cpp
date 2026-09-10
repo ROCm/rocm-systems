@@ -718,14 +718,24 @@ Instrumentor::ResolvedPoints Instrumentor::resolve_points() {
   };
   const rj_code_target_id_t destination_target = effective_target(obj_);
 
-  // Store probe objects, symbols, and declared argument counts together in
-  // probe_keys. The count is part of the convention the body was verified
-  // against, so two sites calling one probe with different counts get distinct
-  // ProbeCallables. The argument values stay per-site and are not in the key.
+  // Store probe objects, symbols, and declared argument sources together in
+  // probe_keys. The shape of the call is a property of the probe: its arity is
+  // part of the convention the body was verified against, and which slots the
+  // framework sources from EXEC decides what the body may assume it received. So
+  // two sites calling one probe with different shapes get distinct
+  // ProbeCallables. Only the immediate *values* stay per-site.
   struct ProbeKey {
     const AmdGpuCodeObject *obj;
     std::string symbol;
-    size_t num_args;
+    std::vector<ProbeArgSource> arg_sources;
+  };
+  // The shape half of a point's argument list: the part that keys the registry.
+  auto arg_sources_of = [](const InstrumentationPoint &pt) {
+    std::vector<ProbeArgSource> sources;
+    sources.reserve(pt.probe_args.size());
+    for (const ProbeArgValue &arg : pt.probe_args)
+      sources.push_back(arg.source);
+    return sources;
   };
   std::vector<ProbeKey> probe_keys;
   // Helper function to get a probe index for a given InstrumentationPoint
@@ -733,9 +743,10 @@ Instrumentor::ResolvedPoints Instrumentor::resolve_points() {
   // probe_keys and out.probes.
   auto resolve_probe_index = [&](const InstrumentationPoint &pt,
                                  std::string &perr) -> std::optional<size_t> {
+    const std::vector<ProbeArgSource> sources = arg_sources_of(pt);
     for (size_t i = 0; i < probe_keys.size(); ++i) {
       if (probe_keys[i].obj == pt.probe_obj && probe_keys[i].symbol == pt.probe_symbol &&
-          probe_keys[i].num_args == pt.probe_args.size())
+          probe_keys[i].arg_sources == sources)
         return i;
     }
     // Bounded before the narrowing cast below, which would wrap a large count
@@ -773,7 +784,7 @@ Instrumentor::ResolvedPoints Instrumentor::resolve_points() {
       return std::nullopt;
     }
     out.probes.push_back(std::move(*callable));
-    probe_keys.push_back({pt.probe_obj, pt.probe_symbol, pt.probe_args.size()});
+    probe_keys.push_back({pt.probe_obj, pt.probe_symbol, sources});
     return out.probes.size() - 1;
   };
 
@@ -990,6 +1001,21 @@ InstrumentedCodeObjectDebug Instrumentor::patch_with_debug_summaries() {
                                   std::to_string(probe.abi.arg_vgpr_base) + "..v" +
                                   std::to_string(last) + " but the kernel allocates only " +
                                   std::to_string(vgpr_bounds.ordinary_bound) + " ordinary VGPRs");
+          continue;
+        }
+        // A Wave32 kernel's EXEC is one dword; exec_hi is not part of the mask
+        // the guest ran under, so handing it to a probe would deliver whatever
+        // the register happens to hold. The probe's own signature is already
+        // wave-size specific (uint32_t or uint64_t at compile time), so this is
+        // the caller declaring the wrong one, not a gap to paper over.
+        if (kernel_wavefront_size(arch_, kernels.front().descriptor) == 32 &&
+            std::any_of(site.probe_args.begin(), site.probe_args.end(), [](const ProbeArgValue &a) {
+              return a.source == ProbeArgSource::AnchorExecHi;
+            })) {
+          result.errors.push_back(
+              "probe call at anchor_offset " + std::to_string(site.anchor_offset) +
+              " passes the high dword of the anchor EXEC mask, but the kernel is Wave32 and "
+              "has no such dword");
           continue;
         }
       }

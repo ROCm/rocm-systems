@@ -94,12 +94,16 @@ struct TrampolinePlan {
   /// the patched kernel's actual count.
   uint32_t kernel_sgpr_count = REGISTER_SET_ALLOCATABLE_SGPRS;
 
-  /// Immediate argument dwords to materialize into the ABI's argument VGPRs
-  /// before the call, in order from arg_vgpr_base. An emit-time input rather
-  /// than a resource decision: plan_probe_call only counts the words it takes
-  /// and reserves the registers, and requires the size to match the ABI's
-  /// declared count. Empty for a probe called with no arguments.
-  std::vector<uint32_t> probe_args;
+  /// Argument dwords to materialize into the ABI's argument VGPRs before the
+  /// call, in order from arg_vgpr_base. Mostly an emit-time input rather than a
+  /// resource decision: plan_probe_call counts the words each source takes and
+  /// reserves the registers, and requires the size to match the ABI's declared
+  /// count. Empty for a probe called with no arguments.
+  ///
+  /// A source is not purely emit-time in one respect: an EXEC-sourced argument
+  /// reads the saved anchor mask, so it obliges the planner to reserve an EXEC
+  /// temp even at a site that would not otherwise need one.
+  std::vector<ProbeArgValue> probe_args;
 
   bool is_probe_call = false;    ///< True once plan_probe_call() populated these.
   uint16_t link_pair_base = 30;  ///< Return-link pair, derived from the probe cc.
