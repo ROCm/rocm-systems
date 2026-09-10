@@ -4051,12 +4051,13 @@ TEST_F(NetIbMPITest, FaultInjectionShimsAbsentUnlessRequested) {
     constexpr size_t kMsgSize = 1024;
     std::vector<char> buf(kMsgSize, 0);
     void* comm    = (rank == 0) ? recvComm : sendComm;
-    // Checked, because the assertions inside SetupCastConnection return from the
-    // helper rather than from this test: a cross-node accept that fails leaves this
-    // rank holding a null communicator, and registering against one crashes inside
-    // the plugin (IbCastRegMrDmaBufInternal dereferences it), which then takes the
-    // rest of the suite down with it -- every later test in the same run could not
-    // connect. Both ranks agree so neither is left waiting at the barrier below.
+    // Checked, because SetupCastConnection reports a failed accept or connect
+    // without asserting fatally: this rank can come back holding a null
+    // communicator, and registering against one crashes inside the plugin
+    // (IbCastRegMrDmaBufInternal dereferences it), which then takes the rest of the
+    // suite down with it -- every later test in the same run could not connect. The
+    // helper leaves both ranks at the same point, so this agreement is reached on
+    // both of them and neither is left waiting at the barrier below.
     int localUp = comm != nullptr ? 1 : 0;
     int bothUp = 0;
     if (MPI_Allreduce(&localUp, &bothUp, 1, MPI_INT, MPI_MIN, MPI_COMM_WORLD) != MPI_SUCCESS)
