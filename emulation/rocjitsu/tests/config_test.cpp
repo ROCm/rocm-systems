@@ -1517,6 +1517,19 @@ TEST(CheckpointTest, LegacyAbsentFunctionalQuantumUsesNativeDefault) {
   EXPECT_EQ(cu->config().functional_quantum, amdgpu::ComputeUnitCore::kFunctionalQuantum);
 }
 
+TEST(CheckpointTest, LegacyAbsentCpuDispatchThreadsStaysSerial) {
+  auto checkpoint_file = write_legacy_quantum_checkpoint();
+  auto bytes = read_binary_file(checkpoint_file.path());
+  const auto *checkpoint = fb::GetSimulationCheckpoint(bytes.data());
+  ASSERT_NE(checkpoint, nullptr);
+  ASSERT_NE(checkpoint->config(), nullptr);
+  EXPECT_FALSE(flatbuffers::IsFieldPresent(checkpoint->config(),
+                                           fb::SimulationConfig::VT_CPU_DISPATCH_THREADS));
+
+  auto restored = config::restore_checkpoint(checkpoint_file.path());
+  EXPECT_EQ(restored.cpu_dispatch_threads, 1u);
+}
+
 TEST(CheckpointTest, RoundTripsExplicitUnboundedFunctionalQuantum) {
   const std::string json = functional_quantum_checkpoint_config(0, 0);
   auto source = config::load_config_from_string(json, rocjitsu::kEmbeddedSchema);
@@ -1524,7 +1537,8 @@ TEST(CheckpointTest, RoundTripsExplicitUnboundedFunctionalQuantum) {
   ASSERT_EQ(source_se->compute_unit(0)->config().functional_quantum, 0u);
 
   test::ScopedTempFile checkpoint_file("rocjitsu-zero-quantum-checkpoint-");
-  config::save_checkpoint(checkpoint_file.path(), *source.soc(), 0, source.engine_config);
+  config::save_checkpoint(checkpoint_file.path(), *source.soc(), 0, source.engine_config,
+                          source.cpu_dispatch_threads);
 
   auto bytes = read_binary_file(checkpoint_file.path());
   const auto *checkpoint = fb::GetSimulationCheckpoint(bytes.data());
@@ -1556,7 +1570,8 @@ TEST(CheckpointTest, RoundTripsHeterogeneousFunctionalQuantum) {
   ASSERT_EQ(source_se->compute_unit(1)->config().functional_quantum, 37u);
 
   test::ScopedTempFile checkpoint_file("rocjitsu-heterogeneous-quantum-checkpoint-");
-  config::save_checkpoint(checkpoint_file.path(), *source.soc(), 0, source.engine_config);
+  config::save_checkpoint(checkpoint_file.path(), *source.soc(), 0, source.engine_config,
+                          source.cpu_dispatch_threads);
 
   auto restored = config::restore_checkpoint(checkpoint_file.path());
   auto *restored_se = restored.soc()->xcd(0)->shader_engine(0);
@@ -1604,7 +1619,8 @@ TEST(CheckpointTest, SaveAndRestoreMemory) {
   soc->memory()->write64(0x2000, 0x0123456789ABCDEFULL);
 
   test::ScopedTempFile checkpoint("rocjitsu-checkpoint-");
-  config::save_checkpoint(checkpoint.path(), *soc, 42, loaded.engine_config);
+  config::save_checkpoint(checkpoint.path(), *soc, 42, loaded.engine_config,
+                          loaded.cpu_dispatch_threads);
   ASSERT_TRUE(std::filesystem::exists(checkpoint.path()));
 
   auto restored = config::restore_checkpoint(checkpoint.path());
@@ -1665,7 +1681,8 @@ TEST(CheckpointTest, SaveAndRestoreAccVgprs) {
   cu->write_vgpr(acc_last, 63, 0xFEEDFACEu);
 
   test::ScopedTempFile checkpoint("rocjitsu-checkpoint-");
-  config::save_checkpoint(checkpoint.path(), *loaded.soc(), 42, loaded.engine_config);
+  config::save_checkpoint(checkpoint.path(), *loaded.soc(), 42, loaded.engine_config,
+                          loaded.cpu_dispatch_threads);
   ASSERT_TRUE(std::filesystem::exists(checkpoint.path()));
 
   const auto checkpoint_bytes = read_binary_file(checkpoint.path());
@@ -1761,7 +1778,8 @@ TEST(CheckpointTest, SaveAndRestoreRdnaWave64State) {
   cu->write_vgpr(vgpr_last, 31, 0x9ABC001Fu);
 
   test::ScopedTempFile checkpoint("rocjitsu-checkpoint-");
-  config::save_checkpoint(checkpoint.path(), *loaded.soc(), 42, loaded.engine_config);
+  config::save_checkpoint(checkpoint.path(), *loaded.soc(), 42, loaded.engine_config,
+                          loaded.cpu_dispatch_threads);
   ASSERT_TRUE(std::filesystem::exists(checkpoint.path()));
 
   const auto checkpoint_bytes = read_binary_file(checkpoint.path());
@@ -1846,7 +1864,8 @@ TEST(CheckpointTest, SaveAndRestoreHwregState) {
   ASSERT_TRUE(wf->fp16_ovfl());
 
   test::ScopedTempFile checkpoint("rocjitsu-checkpoint-");
-  config::save_checkpoint(checkpoint.path(), *loaded.soc(), 42, loaded.engine_config);
+  config::save_checkpoint(checkpoint.path(), *loaded.soc(), 42, loaded.engine_config,
+                          loaded.cpu_dispatch_threads);
   ASSERT_TRUE(std::filesystem::exists(checkpoint.path()));
 
   const auto checkpoint_bytes = read_binary_file(checkpoint.path());
@@ -1918,21 +1937,24 @@ TEST(CheckpointTest, RefusesToSaveTrappedOrDebuggerStoppedWaves) {
 
   test::ScopedTempFile checkpoint("rocjitsu-checkpoint-");
   // A plain running wave still checkpoints.
-  EXPECT_NO_THROW(
-      config::save_checkpoint(checkpoint.path(), *loaded.soc(), 1, loaded.engine_config));
+  EXPECT_NO_THROW(config::save_checkpoint(checkpoint.path(), *loaded.soc(), 1, loaded.engine_config,
+                                          loaded.cpu_dispatch_threads));
 
   wf->set_in_trap_handler(true);
-  EXPECT_THROW(config::save_checkpoint(checkpoint.path(), *loaded.soc(), 2, loaded.engine_config),
+  EXPECT_THROW(config::save_checkpoint(checkpoint.path(), *loaded.soc(), 2, loaded.engine_config,
+                                       loaded.cpu_dispatch_threads),
                std::runtime_error);
   wf->set_in_trap_handler(false);
 
   wf->set_debug_halted(true);
-  EXPECT_THROW(config::save_checkpoint(checkpoint.path(), *loaded.soc(), 3, loaded.engine_config),
+  EXPECT_THROW(config::save_checkpoint(checkpoint.path(), *loaded.soc(), 3, loaded.engine_config,
+                                       loaded.cpu_dispatch_threads),
                std::runtime_error);
   wf->set_debug_halted(false);
 
   wf->set_debug_suspended(true);
-  EXPECT_THROW(config::save_checkpoint(checkpoint.path(), *loaded.soc(), 4, loaded.engine_config),
+  EXPECT_THROW(config::save_checkpoint(checkpoint.path(), *loaded.soc(), 4, loaded.engine_config,
+                                       loaded.cpu_dispatch_threads),
                std::runtime_error);
   wf->set_debug_suspended(false);
 
@@ -1941,8 +1963,8 @@ TEST(CheckpointTest, RefusesToSaveTrappedOrDebuggerStoppedWaves) {
   // above exist to protect, so it must stay checkpointable -- this is the one
   // assertion that tells debug_stopped() apart from debug_paused().
   wf->set_runtime_suspended(true);
-  EXPECT_NO_THROW(
-      config::save_checkpoint(checkpoint.path(), *loaded.soc(), 5, loaded.engine_config));
+  EXPECT_NO_THROW(config::save_checkpoint(checkpoint.path(), *loaded.soc(), 5, loaded.engine_config,
+                                          loaded.cpu_dispatch_threads));
   wf->set_runtime_suspended(false);
 }
 
@@ -1991,8 +2013,8 @@ TEST(CheckpointTest, RoundTripsWorkgroupCoordinates) {
   wf->set_wg_coord(3, 5, 7);
 
   test::ScopedTempFile checkpoint("rocjitsu-wg-coord-checkpoint-");
-  ASSERT_NO_THROW(
-      config::save_checkpoint(checkpoint.path(), *loaded.soc(), 1, loaded.engine_config));
+  ASSERT_NO_THROW(config::save_checkpoint(checkpoint.path(), *loaded.soc(), 1, loaded.engine_config,
+                                          loaded.cpu_dispatch_threads));
 
   auto restored = config::restore_checkpoint(checkpoint.path());
   auto *restored_cu = restored.soc()->xcd(0)->shader_engine(0)->compute_unit(0);
@@ -2090,9 +2112,16 @@ TEST(CApiTest, AutoFunctionalDispatchThreadsClampToSingleCuCapacity) {
 }
 
 TEST(CApiTest, AutoFunctionalDispatchBudgetAppliesToEveryGpu) {
+  std::ifstream base(CONFIG_DIR_PATH + "/gfx1250_mi455x_kmd_4gpu.json");
+  ASSERT_TRUE(base.is_open());
+  std::string json((std::istreambuf_iterator<char>(base)), std::istreambuf_iterator<char>());
+  const size_t insert_pos = json.find('{');
+  ASSERT_NE(insert_pos, std::string::npos);
+  json.insert(insert_pos + 1, R"(
+    "cpu_dispatch_threads": 0,)");
+
   rj_vm_t *raw = nullptr;
-  ASSERT_EQ(rj_vm_create((CONFIG_DIR_PATH + "/gfx1250_mi455x_kmd_4gpu.json").c_str(),
-                         RJ_VM_MODE_DEFAULT, &raw),
+  ASSERT_EQ(rj_vm_create_from_string(json.c_str(), RJ_VM_MODE_DEFAULT, &raw),
             ROCJITSU_STATUS_SUCCESS);
   ASSERT_NE(raw, nullptr);
   std::unique_ptr<rj_vm_t, decltype(&rj_vm_destroy)> handle(raw, &rj_vm_destroy);
@@ -2206,12 +2235,13 @@ TEST(CApiTest, ClockedDispatchStaysEventDriven) {
 }
 
 TEST(CApiTest, CheckpointRoundTrip) {
+  const std::string json = functional_dispatch_threads_config(/*threads=*/2);
   rj_vm_t *raw_source = nullptr;
-  ASSERT_EQ(rj_vm_create((CONFIG_DIR_PATH + "/gfx942_cdna3.json").c_str(), RJ_VM_MODE_DEFAULT,
-                         &raw_source),
+  ASSERT_EQ(rj_vm_create_from_string(json.c_str(), RJ_VM_MODE_DEFAULT, &raw_source),
             ROCJITSU_STATUS_SUCCESS);
   ASSERT_NE(raw_source, nullptr);
   std::unique_ptr<rj_vm_t, decltype(&rj_vm_destroy)> source(raw_source, &rj_vm_destroy);
+  ASSERT_EQ(source->soc->dispatch_threads(), 2u);
 
   constexpr uint64_t kCodeAddress = 0x1000;
   constexpr uint32_t kSEndpgm = 0xBF810000u;
@@ -2235,10 +2265,43 @@ TEST(CApiTest, CheckpointRoundTrip) {
   auto *restored_cu = restored->soc->xcd(0)->shader_engine(0)->compute_unit(0);
   ASSERT_NE(restored_cu, nullptr);
   ASSERT_EQ(restored_cu->num_wfs(), 1u);
+  EXPECT_EQ(restored->soc->dispatch_threads(), 2u);
+  EXPECT_TRUE(restored_cu->pool_driven());
 
   int active = 1;
   EXPECT_EQ(rj_vm_step(restored.get(), &active), ROCJITSU_STATUS_SUCCESS);
   EXPECT_EQ(restored_cu->num_wfs(), 0u);
+}
+
+TEST(CApiTest, CheckpointRoundTripPreservesAutomaticFunctionalDispatch) {
+  const std::string json = functional_dispatch_threads_config(/*threads=*/0);
+  rj_vm_t *raw_source = nullptr;
+  ASSERT_EQ(rj_vm_create_from_string(json.c_str(), RJ_VM_MODE_DEFAULT, &raw_source),
+            ROCJITSU_STATUS_SUCCESS);
+  ASSERT_NE(raw_source, nullptr);
+  std::unique_ptr<rj_vm_t, decltype(&rj_vm_destroy)> source(raw_source, &rj_vm_destroy);
+  ASSERT_EQ(source->loaded.cpu_dispatch_threads, 0u);
+  const uint32_t effective_threads = source->soc->dispatch_threads();
+
+  test::ScopedTempFile checkpoint_file("rocjitsu-auto-dispatch-checkpoint-");
+  ASSERT_EQ(rj_vm_save_checkpoint(source.get(), checkpoint_file.path().c_str(), 42),
+            ROCJITSU_STATUS_SUCCESS);
+
+  auto bytes = read_binary_file(checkpoint_file.path());
+  const auto *checkpoint = fb::GetSimulationCheckpoint(bytes.data());
+  ASSERT_NE(checkpoint, nullptr);
+  ASSERT_NE(checkpoint->config(), nullptr);
+  EXPECT_TRUE(flatbuffers::IsFieldPresent(checkpoint->config(),
+                                          fb::SimulationConfig::VT_CPU_DISPATCH_THREADS));
+  EXPECT_EQ(checkpoint->config()->cpu_dispatch_threads(), 0u);
+
+  rj_vm_t *raw_restored = nullptr;
+  ASSERT_EQ(rj_vm_restore_checkpoint(checkpoint_file.path().c_str(), &raw_restored),
+            ROCJITSU_STATUS_SUCCESS);
+  ASSERT_NE(raw_restored, nullptr);
+  std::unique_ptr<rj_vm_t, decltype(&rj_vm_destroy)> restored(raw_restored, &rj_vm_destroy);
+  EXPECT_EQ(restored->loaded.cpu_dispatch_threads, 0u);
+  EXPECT_EQ(restored->soc->dispatch_threads(), effective_threads);
 }
 
 TEST(CApiTest, CheckpointRoundTripPreservesFunctionalDispatchControls) {

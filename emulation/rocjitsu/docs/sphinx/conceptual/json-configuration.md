@@ -43,7 +43,7 @@ objects for the virtual machine and the topology.
 |-------|------|-------------|
 | `max_ticks` | int | Maximum simulation ticks. A value of `0` means unlimited. |
 | `num_threads` | int | Simdojo engine partitions, clamped to the aggregate XCD count. |
-| `cpu_dispatch_threads` | int | Requested functional CU-dispatch width. `0` selects an automatic host-wide budget capped at 32 and split across SoCs; a nonzero value is applied per SoC; `1` is serial. Each effective SoC width is capped at its largest per-CP CU count. |
+| `cpu_dispatch_threads` | int | Requested functional CU-dispatch width. `1` is serial and the default when omitted; `0` explicitly selects an automatic host-wide budget capped at 32 and split across SoCs; other values apply per SoC. Each effective SoC width is capped at its largest per-CP CU count. |
 | `exec_mode` | string | Execution mode: `"functional"` or `"clocked"`. |
 | `vm.arch` | string | Target architecture, such as `cdna3`, `cdna4`, or `rdna4`. |
 
@@ -51,8 +51,9 @@ objects for the virtual machine and the topology.
 `num_threads` partitions whole XCD subtrees across Simdojo engine threads. A
 single XCD is never split between engine partitions. In functional mode,
 `cpu_dispatch_threads` controls the host parallelism used to execute accepted
-CU work. Its budget is shared by all command processors in a SoC and does not
-change queue ownership or XCD fan-out. After either automatic or explicit
+CU work. Its omitted-field default is serial; set it explicitly to `0` to use
+automatic sizing. Its budget is shared by all command processors in a SoC and
+does not change queue ownership or XCD fan-out. After either automatic or explicit
 selection, the effective width is capped at the largest number of CUs owned by
 any one command processor in that SoC. In clocked mode its effective value is
 always 1.

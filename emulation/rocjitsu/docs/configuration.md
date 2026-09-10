@@ -75,7 +75,7 @@ The example above is intentionally minimal and single-threaded.
 |---|---|---|
 | `max_ticks` | int | Maximum simulation ticks (0 = unlimited) |
 | `num_threads` | int | Simdojo engine partitions (one per XCD when partitioned) |
-| `cpu_dispatch_threads` | int | Requested functional CU-dispatch width (0 = automatic host-wide budget capped at 32 and split across SoCs; nonzero = per-SoC width; 1 = serial). Each effective SoC width is capped at its largest per-CP CU count. |
+| `cpu_dispatch_threads` | int | Requested functional CU-dispatch width (`1` = serial and the default when omitted; `0` = explicit automatic host-wide budget capped at 32 and split across SoCs; other values = per-SoC width). Each effective SoC width is capped at its largest per-CP CU count. |
 | `exec_mode` | string | Execution mode. Use `"clocked"` for clocked execution; `"functional"` is the default/fallback. |
 | `vm.arch` | string | Architecture: `cdna3`, `cdna4`, etc. |
 
@@ -115,16 +115,17 @@ that owns the queue -- so in the two-GPU example above, one dispatch occupies at
 most the partitions covering its own GPU.
 
 `cpu_dispatch_threads` controls how much accepted CU work can execute in
-parallel on host threads. A nonzero value is applied to every SoC and shared by
-all command processors within that SoC. The default value, 0, selects one
-host-wide automatic budget based on the available hardware threads, capped at
-32, and divides it as evenly as possible across the SoCs. If there are fewer
-available threads than SoCs, each SoC remains serial. After either selection,
-each SoC's effective width is capped at the largest number of CUs owned by any
-one of its command processors, so the pool does not create workers that cannot
-run additional CU tasks. This setting does not change queue ownership, XCD
-fan-out, or which SPI or CU accepts the next workgroup. In clocked mode the
-effective value is always 1.
+parallel on host threads. The default value, 1, keeps dispatch serial. A
+nonzero value is applied to every SoC and shared by all command processors
+within that SoC. Setting the field explicitly to 0 selects one host-wide
+automatic budget based on the available hardware threads, capped at 32, and
+divides it as evenly as possible across the SoCs. If there are fewer available
+threads than SoCs, each SoC remains serial. After either selection, each SoC's
+effective width is capped at the largest number of CUs owned by any one of its
+command processors, so the pool does not create workers that cannot run
+additional CU tasks. This setting does not change queue ownership, XCD fan-out,
+or which SPI or CU accepts the next workgroup. In clocked mode the effective
+value is always 1.
 
 ### Topology
 

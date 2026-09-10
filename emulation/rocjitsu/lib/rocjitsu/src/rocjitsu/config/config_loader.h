@@ -82,7 +82,7 @@ struct LoadedConfig {
   rj_code_target_id_t target = ROCJITSU_CODE_TARGET_INVALID;
   /// Requested functional dispatch width. Automatic mode uses a host-wide
   /// budget capped at 32; each SoC's effective width is CU-capacity-clamped.
-  uint32_t cpu_dispatch_threads = 0;
+  uint32_t cpu_dispatch_threads = 1;
 
   /// @brief Return the SoC from the topology root.
   SoC *soc();

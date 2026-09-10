@@ -119,10 +119,10 @@ TEST(CpuDispatchBudgetTest, ExplicitWidthRemainsPerSoc) {
             (std::vector<uint32_t>{7, 7, 7}));
 }
 
-TEST(CpuDispatchBudgetTest, ProductionMultiGpuOverrideTargetsTwoGpuConfig) {
+TEST(CpuDispatchBudgetTest, ProductionConfigsDefaultToSerialDispatch) {
   {
     auto loaded = config::load_config(CONFIG_KMD_PATH, rocjitsu::kEmbeddedSchema);
-    EXPECT_EQ(loaded.cpu_dispatch_threads, 0u);
+    EXPECT_EQ(loaded.cpu_dispatch_threads, 1u);
   }
   {
     auto loaded = config::load_config(CONFIG_2GPU_PATH, rocjitsu::kEmbeddedSchema);

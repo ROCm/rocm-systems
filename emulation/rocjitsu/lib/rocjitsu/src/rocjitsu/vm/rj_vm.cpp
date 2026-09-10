@@ -389,7 +389,8 @@ rj_status_t rj_vm_save_checkpoint(const rj_vm_t *vm, const char *path, uint64_t 
   if (!vm->soc)
     return ROCJITSU_STATUS_ERROR;
   try {
-    config::save_checkpoint(path, *vm->soc, tick, vm->engine_config);
+    config::save_checkpoint(path, *vm->soc, tick, vm->engine_config,
+                            vm->loaded.cpu_dispatch_threads);
     return ROCJITSU_STATUS_SUCCESS;
   } catch (const std::exception &) {
     return ROCJITSU_STATUS_ERROR;
