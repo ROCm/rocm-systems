@@ -76,8 +76,7 @@ private:
     [[nodiscard]] bool should_write() const
     {
         return m_trigger->should_write_markers() &&
-               m_session->is_active_without(
-                   control::triggers::roctx::k_trigger_name);
+               m_session->is_active_without(control::triggers::roctx::k_trigger_name);
     }
 
     void handle_marker_core_enter(rocprofiler_callback_tracing_record_t record,

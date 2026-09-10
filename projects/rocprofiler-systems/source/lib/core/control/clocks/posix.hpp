@@ -80,21 +80,21 @@ public:
 
     void interrupt()
     {
-        const auto _thread_state_guard = state::thread::scoped(state::thread::Internal);
+        const auto thread_state_guard = state::thread::scoped(state::thread::Internal);
         const std::scoped_lock notify_lk{ m_mutex };
         m_interrupted = true;
     }
 
     void reset()
     {
-        const auto _thread_state_guard = state::thread::scoped(state::thread::Internal);
+        const auto thread_state_guard = state::thread::scoped(state::thread::Internal);
         const std::scoped_lock notify_lk{ m_mutex };
         m_interrupted = false;
     }
 
 private:
-    static constexpr std::int64_t nsec_per_sec = 1'000'000'000;
-    static constexpr std::int64_t chunk_ns     = 1'000'000;  // 1 ms
+    static constexpr std::int64_t k_nsec_per_sec = 1'000'000'000;
+    static constexpr std::int64_t k_chunk_ns     = 1'000'000;  // 1 ms
 
     [[nodiscard]] bool is_interrupted()
     {
@@ -104,7 +104,7 @@ private:
 
     void sleep_one_chunk(clock_time_point current, std::int64_t remaining_ns)
     {
-        const auto this_chunk_ns    = std::min(remaining_ns, chunk_ns);
+        const auto this_chunk_ns    = std::min(remaining_ns, k_chunk_ns);
         const auto next_ns          = current.time_since_epoch().count() + this_chunk_ns;
         const struct timespec specs = to_timespec(next_ns);
         if(const auto sleep_status =
@@ -119,14 +119,14 @@ private:
     [[nodiscard]] static std::int64_t to_nanoseconds(
         const struct timespec& specs) noexcept
     {
-        return (static_cast<std::int64_t>(specs.tv_sec) * nsec_per_sec) + specs.tv_nsec;
+        return (static_cast<std::int64_t>(specs.tv_sec) * k_nsec_per_sec) + specs.tv_nsec;
     }
 
     [[nodiscard]] static struct timespec to_timespec(std::int64_t nanoseconds) noexcept
     {
         struct timespec specs = {};
-        specs.tv_sec          = static_cast<time_t>(nanoseconds / nsec_per_sec);
-        specs.tv_nsec         = static_cast<long>(nanoseconds % nsec_per_sec);
+        specs.tv_sec          = static_cast<time_t>(nanoseconds / k_nsec_per_sec);
+        specs.tv_nsec         = static_cast<long>(nanoseconds % k_nsec_per_sec);
         return specs;
     }
 
