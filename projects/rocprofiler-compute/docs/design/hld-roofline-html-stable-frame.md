@@ -32,9 +32,44 @@ Data-fitted axes prevent visual comparison:
 
 The design explored in
 [#11103](https://github.com/ROCm/rocm-systems/pull/11103) sought to make the
-frame independent of kernel data. This design follows that direction while
-applying it to the post-[#10723](https://github.com/ROCm/rocm-systems/pull/10723)
-single-document precision selector and excluding unrelated Dash changes.
+frame independent of kernel data. That direction is correct, but the branch did
+not land cleanly on current develop. This design and
+[#11418](https://github.com/ROCm/rocm-systems/pull/11418) port the same goal
+onto post-[#10723](https://github.com/ROCm/rocm-systems/pull/10723) standalone
+HTML and close the blocking defects found in review.
+
+## Why PR 11103 was not sufficient
+
+PR 11103 identified the right invariant — axes must not depend on kernel
+points — but several implementation and integration defects prevented merge.
+The table below contrasts the earlier branch with this design.
+
+| Area | PR 11103 | PR 11418 (this design) |
+| --- | --- | --- |
+| Integration base | Built through older develop merges while [#10723](https://github.com/ROCm/rocm-systems/pull/10723) precision work was still landing | Rebased on current `rocprofiler-compute-develop` with the one-file Precision selector already present |
+| Standalone HTML loads | **Blocking:** `buildOffPlotBadge()` in `roofline_plot.js` is missing a closing `}`; `node --check` fails and the controller never runs | Controller passes syntax checks and is exercised by a Node harness with Plotly stubs |
+| Precision selector | Dead first `buildPrecisionOptions()` helper; lowering the selected compute cap could leave bandwidth-roof samples above the new knee | Immutable per-roof source coordinates; every precision change rebuilds roofs without exceeding the selected cap |
+| `roofline.csv` device rows | `machine_ceilings()` and `calc_ceilings()` could resolve different rows when device IDs are sparse or reordered | Shared `RooflineCsvData` parsing; one semantic device ID → row index used everywhere |
+| CSV validation | Device ID treated as a row index in roof construction | Semantic device-ID match; reject malformed row widths, duplicate headers, and duplicate device IDs |
+| Invalid ceiling cells | Sanitized when collecting ceilings, but `calc_ceilings()` still called `float()` on `N/A`, `nan`, and `inf` | `sanitize_ai_value()` applied consistently in ceiling collection and roof construction |
+| Stacked datatype titles | `_extend_stacked_title()` defined but never called; stacked figures kept only the first datatype in the title | One combined FLOP+OP HTML document (post-10723); one canonical frame and subtitle for the whole page |
+| Dash / WebUI | Regressed `roofline_data_type` wiring; WebUI compute peaks could be empty and mis-label limiters | Dash explicitly out of scope; standalone HTML is the supported path |
+| Fallback subtitle | Still said “Axes fixed to this GPU” when `DEFAULT_AXIS_BOUNDS` was used | Tracks whether the frame came from machine ceilings and uses neutral fallback copy |
+| Off-plot badge zoom | Zoomed only the current memory-level kernel points | Zooms all valid kernel points across memory levels |
+| Kernel panel controls | Off-plot badge nested inside a row `role="button"` | Separate primary row action and off-plot badge controls for keyboard and screen readers |
+| Async frame races | No guard against stale `Plotly.relayout` callbacks clearing a newer frame apply | Operation counter invalidates superseded relayout work |
+| Browser behavior tests | No executable JS tests for reset, resize, Fit to data, or precision changes | `tests/unit/roofline/test_roofline_plot.py` runs the real controller in Node |
+| Scope | Precision-selector documentation mixed into an axis-scaling change | Design doc, scope exclusions, and deferred kernel comparison-precision control documented explicitly |
+
+Shared limitations that remain open in both efforts:
+
+- Decade snapping can still move a bound by one decade when benchmark inputs sit
+  near a power-of-ten cliff.
+- One combined frame still pools FLOP and OP peaks, which can leave unused
+  vertical space for lower-precision views.
+- View-model trace indices remain coupled to Plotly trace insertion order.
+- Terminal `plotext` output still data-fits axes; only standalone HTML is
+  stabilized here.
 
 ## Requirements
 
