@@ -179,11 +179,11 @@ public:
     /// Bitmask of exception classes that are forwarded to the debugger.
     uint64_t exception_enable_mask = 0;
 
-    /// Monotonic revision of @ref exception_enable_mask.
-    /// In-flight notifier writes capture this value so an unsubscribe/re-subscribe
-    /// ABA cannot commit against a different subscription that happens to have the
-    /// same final mask.
-    uint64_t exception_mask_generation = 0;
+    /// Monotonic revisions of the individual bits in @ref exception_enable_mask.
+    /// In-flight notifier writes capture these values for the exception classes
+    /// they publish. This rejects an unsubscribe/re-subscribe ABA for those bits
+    /// without invalidating a successful wake when only an unrelated class changes.
+    std::array<uint64_t, 64> exception_bit_generations{};
 
     /// Process/device exception bits already used to wake this session.
     uint64_t notified_process_exception_mask = 0;

@@ -240,6 +240,64 @@ template <typename... Args> int safe_fcntl(int fd, int cmd, Args... args) {
 
 constexpr auto kDebugNotificationWriteTimeout = std::chrono::milliseconds(250);
 
+/// @brief Reap notification helpers that had not exited when their deadline expired.
+/// @details A timed-out writer must never make the engine thread wait indefinitely
+/// after SIGKILL: a task in uninterruptible kernel sleep can remain alive until the
+/// operation completes. The engine performs one nonblocking wait and transfers any
+/// still-live child here. This process-owned thread uses only WNOHANG, so shutdown is
+/// bounded even if the host operation never returns.
+class NotificationWriterReaper {
+public:
+  NotificationWriterReaper()
+      : worker_([this](std::stop_token stop) { reap_until_stopped(stop); }) {}
+
+  void adopt(pid_t writer) {
+    {
+      std::lock_guard<std::mutex> lock(mutex_);
+      writers_.push_back(writer);
+    }
+    cv_.notify_one();
+  }
+
+private:
+  void reap_until_stopped(std::stop_token stop) {
+    while (!stop.stop_requested()) {
+      std::vector<pid_t> writers;
+      {
+        std::unique_lock<std::mutex> lock(mutex_);
+        cv_.wait(lock, stop, [this] { return !writers_.empty(); });
+        if (stop.stop_requested())
+          break;
+        writers.swap(writers_);
+      }
+
+      std::vector<pid_t> pending;
+      for (pid_t writer : writers) {
+        int status = 0;
+        const pid_t result = ::waitpid(writer, &status, WNOHANG | __WCLONE);
+        if (result == 0 || (result < 0 && errno == EINTR))
+          pending.push_back(writer);
+      }
+      if (!pending.empty()) {
+        static_cast<void>(::poll(nullptr, 0, 10));
+        std::lock_guard<std::mutex> lock(mutex_);
+        writers_.insert(writers_.end(), pending.begin(), pending.end());
+      }
+    }
+  }
+
+  std::mutex mutex_;
+  std::condition_variable_any cv_;
+  std::vector<pid_t> writers_;
+  // Declared last so it stops and joins before the state it accesses is destroyed.
+  std::jthread worker_;
+};
+
+NotificationWriterReaper &notification_writer_reaper() {
+  static NotificationWriterReaper reaper;
+  return reaper;
+}
+
 int reap_notification_writer(pid_t writer, int pidfd, int *status) {
   const auto deadline = std::chrono::steady_clock::now() + kDebugNotificationWriteTimeout;
   bool exited = false;
@@ -274,7 +332,18 @@ int reap_notification_writer(pid_t writer, int pidfd, int *status) {
 
   if (!exited) {
     static_cast<void>(::kill(writer, SIGKILL));
-    while (::waitpid(writer, status, __WCLONE) < 0 && errno == EINTR) {
+    pid_t result = -1;
+    do {
+      result = ::waitpid(writer, status, WNOHANG | __WCLONE);
+    } while (result < 0 && errno == EINTR);
+    if (result == 0) {
+      try {
+        notification_writer_reaper().adopt(writer);
+      } catch (...) {
+        // The child remains owned by this process and will be reparented at
+        // process exit. Allocation failure must not turn a bounded engine path
+        // back into a blocking one.
+      }
     }
     return failure != 0 ? -failure : -EAGAIN;
   }
@@ -290,18 +359,22 @@ int reap_notification_writer(pid_t writer, int pidfd, int *status) {
 /// @details File-status flags belong to the shared open-file description, so a
 /// competing holder can clear O_NONBLOCK after any defensive F_SETFL and make a
 /// write block. Perform the write in a disposable child and kill it at a bounded
-/// deadline instead. A raw clone3 with no exit signal keeps the internal child
-/// out of the application's SIGCHLD and ordinary waitpid(-1) contract, and
-/// CLONE_PIDFD publishes its private pidfd atomically. The child executes only
-/// async-signal-safe operations; it never reaches inherited simulator state or
-/// locks.
+/// deadline instead. A raw clone with no exit signal keeps the internal child
+/// out of the application's SIGCHLD and ordinary waitpid(-1) contract.
+/// CLONE_UNTRACED also keeps it out of a debugger attached to the host process.
+/// Prefer clone3's atomic pidfd result, but fall back to the legacy clone syscall
+/// on older kernels and seccomp profiles; its CLONE_PIDFD form is atomic too, and
+/// a final no-pidfd form is bounded by nonblocking waitpid polling. The child
+/// executes only async-signal-safe operations; it never reaches inherited
+/// simulator state or locks.
 ///
 /// KFD's userspace test debugger uses an O_RDWR FIFO and consumes one byte per
 /// wakeup. The synthetic primary KFD descriptor is an eventfd, whose ABI requires
 /// an eight-byte counter write. Preserve both framing contracts.
 /// @returns Zero after a complete write, otherwise the negative errno (EIO for a
 /// short write, EAGAIN after the delivery deadline).
-int write_debug_notification(int fd, const std::function<void()> &before_write = {}) {
+int write_debug_notification(int fd, const std::function<void()> &before_write = {},
+                             std::optional<int> clone3_error_for_testing = std::nullopt) {
   struct stat descriptor_stat {};
   if (safe_fstat(fd, &descriptor_stat) != 0)
     return -errno;
@@ -312,9 +385,24 @@ int write_debug_notification(int fd, const std::function<void()> &before_write =
 
   int raw_pidfd = -1;
   clone_args clone{};
-  clone.flags = CLONE_PIDFD;
+  clone.flags = CLONE_PIDFD | CLONE_UNTRACED;
   clone.pidfd = reinterpret_cast<uintptr_t>(&raw_pidfd);
-  const pid_t writer = static_cast<pid_t>(::syscall(SYS_clone3, &clone, sizeof(clone)));
+  pid_t writer = -1;
+  if (clone3_error_for_testing) {
+    errno = *clone3_error_for_testing;
+  } else {
+    writer = static_cast<pid_t>(::syscall(SYS_clone3, &clone, sizeof(clone)));
+  }
+  if (writer < 0 && (errno == ENOSYS || errno == EPERM)) {
+    raw_pidfd = -1;
+    writer = static_cast<pid_t>(
+        ::syscall(SYS_clone, CLONE_PIDFD | CLONE_UNTRACED, nullptr, &raw_pidfd, nullptr, nullptr));
+    if (writer < 0 && (errno == EINVAL || errno == EPERM)) {
+      raw_pidfd = -1;
+      writer = static_cast<pid_t>(
+          ::syscall(SYS_clone, CLONE_UNTRACED, nullptr, nullptr, nullptr, nullptr));
+    }
+  }
   if (writer < 0)
     return -errno;
   if (writer == 0) {
@@ -336,6 +424,24 @@ int write_debug_notification(int fd, const std::function<void()> &before_write =
   if (!WIFEXITED(status))
     return -EIO;
   return WEXITSTATUS(status) == 0 ? 0 : -WEXITSTATUS(status);
+}
+
+bool exception_subscriptions_unchanged(const KfdProcess::DebugSession &session,
+                                       const std::array<uint64_t, 64> &captured_generations,
+                                       uint64_t exception_mask) {
+  for (size_t bit = 0; bit < captured_generations.size(); ++bit) {
+    if ((exception_mask & (uint64_t{1} << bit)) != 0 &&
+        session.exception_bit_generations[bit] != captured_generations[bit])
+      return false;
+  }
+  return true;
+}
+
+void advance_exception_subscription_generations(KfdProcess::DebugSession &session,
+                                                uint64_t changed_mask) {
+  for (size_t bit = 0; bit < session.exception_bit_generations.size(); ++bit)
+    if ((changed_mask & (uint64_t{1} << bit)) != 0)
+      ++session.exception_bit_generations[bit];
 }
 
 int pidfd_is_exited(int pidfd) {
@@ -3389,6 +3495,7 @@ int SimulatedKfd::replace_debug_session_for_testing(pid_t target_pid, int dbg_fd
     session->second.generation = next_debug_session_generation_++;
     session->second.dbg_fd = dbg_fd;
     session->second.exception_enable_mask = exception_mask;
+    session->second.exception_bit_generations.fill(0);
     session->second.notified_process_exception_mask = 0;
     session->second.pending_process_exception_mask = 0;
     session->second.notification_retry_needed = true;
@@ -3407,7 +3514,8 @@ int SimulatedKfd::retry_debug_notifications(pid_t target_pid, bool invoke_result
   UniqueDriverFd notifier;
   uint64_t process_mask = 0;
   uint64_t session_generation = 0;
-  uint64_t exception_mask_generation = 0;
+  std::array<uint64_t, 64> exception_bit_generations{};
+  std::optional<int> clone3_error_for_testing;
   std::function<void(bool)> result_hook;
   std::function<void()> write_hook;
   {
@@ -3471,7 +3579,8 @@ int SimulatedKfd::retry_debug_notifications(pid_t target_pid, bool invoke_result
     if (queues.empty() && process_mask == 0)
       return 0;
     session_generation = session->second.generation;
-    exception_mask_generation = session->second.exception_mask_generation;
+    exception_bit_generations = session->second.exception_bit_generations;
+    clone3_error_for_testing = debug_notification_clone3_error_for_testing_;
     if (invoke_result_hook) {
       result_hook = debug_notification_result_hook_for_testing_;
       write_hook = debug_notification_write_hook_for_testing_;
@@ -3487,10 +3596,11 @@ int SimulatedKfd::retry_debug_notifications(pid_t target_pid, bool invoke_result
     }
   }
 
-  const int result = write_debug_notification(notifier.get(), write_hook);
+  const int result = write_debug_notification(notifier.get(), write_hook, clone3_error_for_testing);
   if (result_hook)
     result_hook(result == 0);
 
+  bool retry_needed = false;
   {
     std::lock_guard<std::mutex> lock(debug_sessions_mutex_);
     auto session = debug_sessions_.find(target_pid);
@@ -3502,12 +3612,12 @@ int SimulatedKfd::retry_debug_notifications(pid_t target_pid, bool invoke_result
       return result;
     }
     session->second.pending_process_exception_mask &= ~process_mask;
-    const bool subscription_unchanged =
-        session->second.exception_mask_generation == exception_mask_generation;
-    if (result == 0 && subscription_unchanged) {
+    const bool process_subscription_unchanged =
+        exception_subscriptions_unchanged(session->second, exception_bit_generations, process_mask);
+    if (result == 0 && process_subscription_unchanged) {
       session->second.notified_process_exception_mask |=
           process_mask & session->second.exception_enable_mask;
-    } else {
+    } else if ((process_mask & session->second.exception_enable_mask) != 0) {
       session->second.notification_retry_needed = true;
     }
     if (proc) {
@@ -3515,14 +3625,22 @@ int SimulatedKfd::retry_debug_notifications(pid_t target_pid, bool invoke_result
       for (const auto &pending : queues) {
         auto queue = proc->queue_snapshot_map_.find(pending.queue_id);
         if (queue != proc->queue_snapshot_map_.end() &&
-            queue->second.debug_notification_session_generation == session_generation)
-          queue->second.finish_debug_notification(
-              pending.mask,
-              result == 0 && subscription_unchanged ? session->second.exception_enable_mask : 0);
+            queue->second.debug_notification_session_generation == session_generation) {
+          const bool queue_subscription_unchanged = exception_subscriptions_unchanged(
+              session->second, exception_bit_generations, pending.mask);
+          queue->second.finish_debug_notification(pending.mask,
+                                                  result == 0 && queue_subscription_unchanged
+                                                      ? session->second.exception_enable_mask
+                                                      : 0);
+          if ((result != 0 || !queue_subscription_unchanged) &&
+              (pending.mask & session->second.exception_enable_mask) != 0)
+            session->second.notification_retry_needed = true;
+        }
       }
     }
+    retry_needed = session->second.notification_retry_needed;
   }
-  if (result != 0)
+  if (retry_needed)
     debug_sessions_cv_.notify_one();
   return result;
 }
@@ -3785,7 +3903,8 @@ bool SimulatedKfd::notify_debug_event(const std::shared_ptr<KfdProcess> &proc, u
   UniqueDriverFd notifier;
   bool subscribed = false;
   uint64_t session_generation = 0;
-  uint64_t exception_mask_generation = 0;
+  std::array<uint64_t, 64> exception_bit_generations{};
+  std::optional<int> clone3_error_for_testing;
   bool notification_pending = false;
   std::function<void(bool)> result_hook;
   std::function<void()> write_hook;
@@ -3798,7 +3917,8 @@ bool SimulatedKfd::notify_debug_event(const std::shared_ptr<KfdProcess> &proc, u
       return false;
     }
     session_generation = session->second.generation;
-    exception_mask_generation = session->second.exception_mask_generation;
+    exception_bit_generations = session->second.exception_bit_generations;
+    clone3_error_for_testing = debug_notification_clone3_error_for_testing_;
     subscribed = (session->second.exception_enable_mask & exception_mask) != 0;
     if (subscribed && session->second.dbg_fd >= 0)
       notifier = UniqueDriverFd(duplicate_debug_notifier(session->second.dbg_fd));
@@ -3827,7 +3947,8 @@ bool SimulatedKfd::notify_debug_event(const std::shared_ptr<KfdProcess> &proc, u
       debug_sessions_cv_.notify_one();
     return false;
   }
-  const bool delivered = write_debug_notification(notifier.get(), write_hook) == 0;
+  const bool delivered =
+      write_debug_notification(notifier.get(), write_hook, clone3_error_for_testing) == 0;
   if (result_hook)
     result_hook(delivered);
 
@@ -3850,8 +3971,8 @@ bool SimulatedKfd::notify_debug_event(const std::shared_ptr<KfdProcess> &proc, u
         queue->second.debug_notification_session_generation != session_generation)
       return false;
     const bool still_subscribed = (exception_mask & session->second.exception_enable_mask) != 0;
-    const bool subscription_unchanged =
-        session->second.exception_mask_generation == exception_mask_generation;
+    const bool subscription_unchanged = exception_subscriptions_unchanged(
+        session->second, exception_bit_generations, exception_mask);
     queue->second.finish_debug_notification(
         exception_mask,
         delivered && still_subscribed && subscription_unchanged ? exception_mask : 0);
@@ -5393,7 +5514,7 @@ int SimulatedKfd::debug_trap_ioctl(KfdProcess &caller, void *arg, int *target_me
   }
   case KFD_IOC_DBG_TRAP_SET_EXCEPTIONS_ENABLED: {
     const uint64_t enabled_mask = args->set_exceptions_enabled.exception_mask;
-    const bool mask_changed = session_it->second.exception_enable_mask != enabled_mask;
+    const uint64_t changed_mask = session_it->second.exception_enable_mask ^ enabled_mask;
     const uint64_t disabled_mask = session_it->second.exception_enable_mask & ~enabled_mask;
     if (target_proc != nullptr && disabled_mask != 0) {
       std::lock_guard<std::mutex> alloc_lock(target_proc->alloc_mutex_);
@@ -5402,8 +5523,7 @@ int SimulatedKfd::debug_trap_ioctl(KfdProcess &caller, void *arg, int *target_me
       }
     }
     session_it->second.exception_enable_mask = enabled_mask;
-    if (mask_changed)
-      ++session_it->second.exception_mask_generation;
+    advance_exception_subscription_generations(session_it->second, changed_mask);
     session_it->second.notified_process_exception_mask &= enabled_mask;
     lk.unlock();
     const int result = retry_debug_notifications(target_pid, /*invoke_result_hook=*/true);
