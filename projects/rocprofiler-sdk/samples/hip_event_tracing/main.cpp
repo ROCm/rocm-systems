@@ -69,7 +69,7 @@ constexpr int block_size = 64;
 
 // stream B's kernel is deliberately shorter than stream A's, so that in the deferred-wait
 // case the long kernel on A, and not the work on B, is what the barrier is waiting for
-constexpr uint64_t follower_divisor = 16;
+constexpr int64_t follower_divisor = 16;
 
 void
 check_hip_error(void);
@@ -81,7 +81,7 @@ say(const std::string& msg)
 }
 
 // Wait for the tool to observe another HIP_EVENT_WAIT barrier completion. The completion
-// callback is delivered on the tool's barrier signal handler thread, so it can lag the
+// callback is delivered on the HSA async signal handler thread, so it can lag the
 // hipStreamSynchronize that guarantees the barrier itself has run; polling avoids reporting
 // a false negative just because the callback has not landed yet.
 bool
@@ -137,7 +137,7 @@ namespace
 {
 // Case 1: the event is recorded behind a long-running kernel, so it has not completed when
 // stream B asks to wait on it. HIP must schedule a real wait barrier on stream B, and the
-// tracer reports a HIP_EVENT WAIT whose source_queue_id is stream A's queue.
+// tracer reports a HIP_EVENT_WAIT whose source_queue_id is stream A's queue.
 void
 run_deferred_wait(int         iteration,
                   int         iterations,
@@ -173,8 +173,7 @@ run_deferred_wait(int         iteration,
     HIP_API_CALL(hipStreamSynchronize(stream_b));
 
     // This case only demonstrates what it claims to if spin_kernel was still running when
-    // the host reached hipStreamWaitEvent. That is a timing property, not a guarantee, so
-    // say so plainly rather than letting the run look like a successful demonstration.
+    // the host reached hipStreamWaitEvent. That is a timing property, not a guarantee.
     if(!await_wait_barrier(waits_before))
     {
         say("NOTE: no HIP_EVENT_WAIT barrier completed on stream B this iteration. "
@@ -235,9 +234,9 @@ main(int argc, char** argv)
 
     auto* exe_name = basename(argv[0]);
 
-    int      n          = 1024;
-    int      iterations = 2;
-    uint64_t spin_iters = 5000000;
+    int     n          = 1024;
+    int     iterations = 2;
+    int64_t spin_iters = 5000000;
 
     for(int i = 1; i < argc; ++i)
     {
@@ -249,15 +248,15 @@ main(int argc, char** argv)
         else if(arg == "--iterations")
             iterations = static_cast<int>(val());
         else if(arg == "--spin-iters")
-            spin_iters = static_cast<uint64_t>(val());
+            spin_iters = val();
         else if(arg == "?" || arg == "-h" || arg == "--help")
         {
             fprintf(stderr,
-                    "usage: %s [--size %i] [--iterations %i] [--spin-iters %lu]\n",
+                    "usage: %s [--size %i] [--iterations %i] [--spin-iters %li]\n",
                     exe_name,
                     n,
                     iterations,
-                    static_cast<unsigned long>(spin_iters));
+                    static_cast<long>(spin_iters));
             fprintf(stderr, "  --size        elements per scale_kernel launch\n");
             fprintf(stderr, "  --iterations  iterations of each case\n");
             fprintf(stderr,
@@ -271,8 +270,8 @@ main(int argc, char** argv)
     {
         fprintf(stderr,
                 "error: --size and --iterations must be positive and --spin-iters must be at "
-                "least %lu\n",
-                static_cast<unsigned long>(follower_divisor));
+                "least %li\n",
+                static_cast<long>(follower_divisor));
         return EXIT_FAILURE;
     }
 
@@ -315,11 +314,6 @@ main(int argc, char** argv)
         say(msg.str());
     }
 
-    // The first touch of each stream and kernel drags in one-time work: the
-    // fillBufferAligned blits behind hipMemset, the code object load, queue creation. Its
-    // dispatch records would otherwise be delivered in the middle of the first traced
-    // iteration. Run one of everything, synchronize, and flush so the cases below start
-    // from a quiet state.
     client::banner("WARM-UP: running one of each kernel so that one-time setup work does not "
                    "land in the middle of the first traced iteration");
 
@@ -344,8 +338,6 @@ main(int argc, char** argv)
         run_deferred_wait(
             i, iterations, stream_a, stream_b, deferred_event, spin_out, follower_out, spin_iters);
 
-    // Nothing above forced the buffer to deliver, so every barrier record from every
-    // iteration of this case has been accumulating.
     say("all case 1 iterations are complete; flushing the buffer to take delivery of every "
         "barrier record collected across them at once");
     client::flush();

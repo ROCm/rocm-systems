@@ -11,12 +11,14 @@ enqueued and as they complete.
 - HIP event buffer tracing (`ROCPROFILER_BUFFER_TRACING_HIP_EVENT`)
 - Kernel dispatch callback tracing (`ROCPROFILER_CALLBACK_TRACING_KERNEL_DISPATCH`, the `COMPLETE`
   operation only), so the barriers can be read against the kernels they order
+- Kernel dispatch buffer tracing (`ROCPROFILER_BUFFER_TRACING_KERNEL_DISPATCH`), reporting those
+  same dispatches a second time through the buffered path
 - Code object callback tracing for mapping kernel IDs to kernel names
 
 ## Properties
 
-- Every record is printed as it arrives, as a two-line entry: a timestamped explainer line saying
-  in prose what happened, then one line carrying all of the record's raw fields
+- Every record is printed as it arrives, as an entry of at most two lines: a timestamped explainer
+  line saying in prose what happened, then one line carrying all of the record's raw fields
 - Timestamps are a `+N us` offset taken from `rocprofiler_get_timestamp()`; the same clock as
   the `start_timestamp`/`end_timestamp` fields inside the records. These timestamps show when the
   CPU processed a record, including buffer flushing.
@@ -24,8 +26,16 @@ enqueued and as they complete.
   stream, so its `APP ::` lines interleave in order with the records they produce
 - The same entries are also accumulated and written to `hip_event_trace.log` at finalization
   (override with `ROCPROFILER_SAMPLE_OUTPUT_FILE`)
+- Buffer size of 4096 bytes which is automatically flushed once >= 87.5% of buffer is filled (3584 bytes)
 - Creation of dedicated thread for buffer callback delivery
 - Receives notifications for internal thread creation
+
+## Options
+
+- `--size N`: elements per `scale_kernel` launch (default 1024)
+- `--iterations N`: iterations of each case (default 2)
+- `--spin-iters N`: loop count of the long kernel that keeps a record barrier in flight
+  (default 5000000); raise it if case 1 reports that no `HIP_EVENT_WAIT` barrier completed
 
 ## Callback tracing
 
@@ -41,33 +51,36 @@ Because the enqueue phases carry no timestamps at all, the sample omits the `sta
 columns from those entries rather than printing empty ones. The buffer record is emitted only at
 completion and always carries timestamps.
 
-This sample makes use of all three phases.
-
 ## Buffer tracing
 
 Buffered records are also available for HIP event tracing and are in this sample to show their
-usage. Note that the CPU timestamps provided are when the buffer record is received by the sample.
+usage. The CPU timestamps provided are when the buffer record is received by the sample.
 Internally, the records are appended to a ring buffer and handed to the buffer callback thread only
 once the buffer passes its watermark or something flushes it.
 
+Kernel dispatch is traced through both services, so each dispatch is reported twice: once inline
+by the callback service as `DISPATCH`, and once through the buffer as `DISP BUF`. Both kinds of
+buffered record go into the same buffer, so a single flush delivers them together.
+
 The sample flushes once per case, after every iteration of that case has finished, rather than
-after each iteration. Every barrier record from every iteration of the case then arrives together:
+after each iteration. Every buffered record from every iteration of the case then arrives as one
+batch, barrier records and dispatch records intermixed:
 
 ```
-[+ 732527.793 us] APP       :: all case 1 iterations are complete; flushing the buffer ...
-[+ 732602.516 us] EVENT BUF :: HIP_EVENT_RECORD barrier on queue 1 delivered via the buffered service ...
-[+ 732636.878 us] EVENT BUF :: HIP_EVENT_WAIT   barrier on queue 2 delivered via the buffered service ...
-[+ 732648.636 us] EVENT BUF :: HIP_EVENT_RECORD barrier on queue 1 delivered via the buffered service ...
-[+ 732658.852 us] EVENT BUF :: HIP_EVENT_WAIT   barrier on queue 2 delivered via the buffered service ...
+[+ 745828.749 us] APP       :: all case 1 iterations are complete; flushing the buffer ...
+[+ 745916.882 us] DISP BUF  :: _Z11spin_kernelPfm.kd dispatch on queue 1 delivered via the buffered service ...
+[+ 745946.747 us] EVENT BUF :: HIP_EVENT_RECORD barrier on queue 1 delivered via the buffered service ...
+[+ 745960.067 us] EVENT BUF :: HIP_EVENT_WAIT   barrier on queue 2 delivered via the buffered service ...
+[+ 745972.216 us] DISP BUF  :: _Z15follower_kernelPfm.kd dispatch on queue 2 delivered via the buffered service ...
 ```
+
+The sample does not sort them. Records come out in the order they were appended to the buffer,
+which is not guaranteed to match their `start`/`end` timestamps; compare the fields rather than
+reading the batch top to bottom. The inline `DISPATCH` and `EVENT CB` entries earlier in the log
+are the ones that appear in true chronological order.
 
 With a large enough `--iterations` the buffer will reach its watermark before the explicit flush
 and deliver some records early on its own, which is the same mechanism seen from the other side.
-
-Kernel dispatch offers a buffered service too, but this sample takes it through the callback
-service instead so that dispatch completions interleave with the barrier completions in true
-chronological order. Buffering them would report every dispatch after the barriers it actually
-preceded, purely as an artifact of when the buffer was flushed.
 
 ## What the workload shows
 
@@ -109,16 +122,3 @@ all is traced for the wait; the narration is followed directly by stream B's ker
 This shows the documented behavior of `rocprofiler_hip_event_operation_t`: not every
 `hipStreamWaitEvent` call produces a barrier, and when none is produced no enqueue or completion
 callback is generated.
-
-## Notes
-
-Case 1 relies on the long kernel still being in flight when the host reaches
-`hipStreamWaitEvent`. That is a timing property, not a guarantee, so each iteration checks whether
-a `HIP_EVENT_WAIT` barrier actually completed and prints a `NOTE:` recommending a larger
-`--spin-iters` if none did.
-
-The check polls `client::wait_barriers_completed()` rather than sampling it once: the completion
-callback is delivered on the tool's barrier signal handler thread, so it can lag the
-`hipStreamSynchronize` that guarantees the barrier itself has run.
-
-The sample also uses kernel dispatch callbacks to track the spin kernel and follow kernel completions for the log. These are provided for clarity and function independently of HIP event tracing.

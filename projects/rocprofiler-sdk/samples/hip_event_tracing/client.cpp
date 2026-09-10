@@ -76,24 +76,24 @@ callback_name_info            client_cb_names  = {};
 buffer_name_info              client_buf_names = {};
 kernel_symbol_map_t           client_kernels   = {};
 
-// Every line of output -- whether it originates from a tracing callback, from the buffer
-// callback thread, or from the application via client::narrate() -- is serialized through
-// this mutex, and guards `client_call_stack` as well. The HIP event enqueue callbacks fire
+// Every line of output, whether it originates from a tracing callback, from the buffer
+// callback thread, or from the application via client::narrate(), is serialized through
+// this mutex, which guards client_call_stack as well. The HIP event enqueue callbacks fire
 // from whichever thread submits to the HSA queue, the barrier-completion callback fires
-// from the completion signal handler thread, the buffer callback fires from the dedicated
+// from the HSA async signal handler thread, the buffer callback fires from the dedicated
 // rocprofiler callback thread, and narrate() fires from the application thread.
 std::mutex    output_mutex;
 call_stack_t* client_call_stack = nullptr;
 
-// Counts HIP_EVENT_WAIT barrier completions. Incremented on the barrier signal handler
+// Counts HIP_EVENT_WAIT barrier completions. Incremented on the HSA async signal handler
 // thread and read by the application thread, hence the atomic.
 std::atomic<uint64_t> wait_completion_count{0};
 
 // Output layout. Every entry is at most two lines: a timestamped explainer line saying in
 // prose what happened, then one line carrying the record's raw fields, indented to the
 // right edge of the timestamp column. The field line uses fixed-width columns so that
-// records of the same type line up vertically and can be scanned down the page.
-constexpr size_t prefix_width = 18;  // "[+" + 11 digits + " us] "
+// records of the same type line up vertically.
+constexpr size_t prefix_width = 18;  // "[+" + 11-wide value + " us] "
 constexpr size_t tag_width    = 9;
 
 // column widths for the field line
@@ -107,7 +107,7 @@ constexpr int w_time      = 16;
 constexpr int w_elapsed   = 12;
 constexpr int w_handle    = 12;  // 48-bit user-space pointer
 
-// the field line is offset a couple of columns past the timestamp so that it is visually
+// the field line is offset two columns past the timestamp so that it is visually
 // subordinate to the explainer line above it
 constexpr size_t field_indent = prefix_width + 2;
 
@@ -162,11 +162,13 @@ elapsed_prefix()
     return ss.str();
 }
 
-// Emit one entry: the explainer line, then -- if the entry has any -- the field line. Both
+// Emit one entry: the explainer line, then, if the entry has any, the field line. Both
 // are assembled and written under a single lock so the two halves of an entry can never be
 // separated by another thread's output, and the timestamp is read inside that lock so the
 // printed order and the printed times agree. Written live to stdout for the interleaved
 // view, and into the call stack so that tool_fini can write the conventional sample log.
+// The enqueue callbacks run on the AQL submit path, where this I/O can add latency to GPU
+// work submission; the sample writes directly anyway, for simplicity.
 void
 emit(const char*        func,
      const char*        file,
@@ -215,7 +217,7 @@ phase_name(rocprofiler_callback_phase_t phase)
 {
     switch(phase)
     {
-        // note: ROCPROFILER_CALLBACK_PHASE_LOAD/UNLOAD alias ENTER/EXIT
+        // ROCPROFILER_CALLBACK_PHASE_LOAD/UNLOAD alias ENTER/EXIT
         case ROCPROFILER_CALLBACK_PHASE_ENTER: return "ENTER";
         case ROCPROFILER_CALLBACK_PHASE_EXIT: return "EXIT";
         case ROCPROFILER_CALLBACK_PHASE_NONE: return "NONE";
@@ -224,7 +226,7 @@ phase_name(rocprofiler_callback_phase_t phase)
     return "UNKNOWN";
 }
 
-// The three phases of a HIP event barrier, spelled out. See the documentation on
+// The three phases of a HIP event barrier. See the documentation on
 // ::rocprofiler_hip_event_operation_t: ENTER/EXIT bracket the moment the barrier packet is
 // enqueued (no GPU timestamps yet), and PHASE_NONE fires once the barrier has completed on
 // the GPU (timestamps populated).
@@ -308,8 +310,8 @@ tool_hip_event_callback(rocprofiler_callback_tracing_record_t record,
     explainer << op_name << " barrier " << phase_meaning(record.phase) << " on queue "
               << data->queue_id.handle;
 
-    // For a wait barrier the source queue is where the event was recorded, so this is the
-    // cross-stream dependency the barrier encodes.
+    // For a wait barrier the source queue is where the event was recorded; only worth
+    // calling out when it differs from the queue the barrier is on.
     if(record.operation == ROCPROFILER_HIP_EVENT_WAIT &&
        data->source_queue_id.handle != data->queue_id.handle)
     {
@@ -328,11 +330,13 @@ tool_hip_event_callback(rocprofiler_callback_tracing_record_t record,
     if(record.phase == ROCPROFILER_CALLBACK_PHASE_NONE)
         fields << " " << timestamps_field(data->start_timestamp, data->end_timestamp);
 
+    emit(EMIT_ARGS, "EVENT CB", explainer.str(), fields.str());
+
+    // published after the record is emitted so that an application thread waking on this count
+    // cannot narrate past the line that reports the completion it is waiting for
     if(record.operation == ROCPROFILER_HIP_EVENT_WAIT &&
        record.phase == ROCPROFILER_CALLBACK_PHASE_NONE)
-        wait_completion_count.fetch_add(1, std::memory_order_relaxed);
-
-    emit(EMIT_ARGS, "EVENT CB", explainer.str(), fields.str());
+        wait_completion_count.fetch_add(1, std::memory_order_release);
 
     (void) user_data;
     (void) callback_data;
@@ -353,15 +357,14 @@ tool_kernel_dispatch_callback(rocprofiler_callback_tracing_record_t record,
     const auto* data =
         static_cast<rocprofiler_callback_tracing_kernel_dispatch_data_t*>(record.payload);
 
-    if(data->start_timestamp > data->end_timestamp)
-        throw std::runtime_error("kernel dispatch: start > end");
+    assert(data->start_timestamp <= data->end_timestamp && "kernel dispatch: start > end");
 
     auto kernel_id   = data->dispatch_info.kernel_id;
     auto kernel_name = std::string{"??"};
     {
-        auto lk = std::unique_lock<std::mutex>{output_mutex};
-        if(client_kernels.count(kernel_id) > 0)
-            kernel_name = std::string{client_kernels.at(kernel_id).kernel_name};
+        auto lk  = std::unique_lock<std::mutex>{output_mutex};
+        auto itr = client_kernels.find(kernel_id);
+        if(itr != client_kernels.end()) kernel_name = std::string{itr->second.kernel_name};
     }
 
     auto explainer = std::stringstream{};
@@ -428,6 +431,46 @@ tool_buffer_callback(rocprofiler_context_id_t      context,
                    << timestamps_field(record->start_timestamp, record->end_timestamp);
 
             emit(EMIT_ARGS, "EVENT BUF", explainer.str(), fields.str());
+        }
+        else if(header->category == ROCPROFILER_BUFFER_CATEGORY_TRACING &&
+                header->kind == ROCPROFILER_BUFFER_TRACING_KERNEL_DISPATCH)
+        {
+            // The same dispatches already arrived inline through the callback service. They
+            // are collected here as well so that the buffered service can be seen carrying
+            // more than one record kind: a single flush of this buffer delivers the barrier
+            // records and the dispatch records together, in the order they were appended
+            // rather than in timestamp order.
+            auto* record =
+                static_cast<rocprofiler_buffer_tracing_kernel_dispatch_record_t*>(header->payload);
+
+            if(record->start_timestamp > record->end_timestamp)
+                throw std::runtime_error("kernel dispatch: start > end");
+
+            auto kernel_id   = record->dispatch_info.kernel_id;
+            auto kernel_name = std::string{"??"};
+            {
+                auto lk  = std::unique_lock<std::mutex>{output_mutex};
+                auto itr = client_kernels.find(kernel_id);
+                if(itr != client_kernels.end()) kernel_name = std::string{itr->second.kernel_name};
+            }
+
+            auto explainer = std::stringstream{};
+            explainer << kernel_name << " dispatch on queue "
+                      << record->dispatch_info.queue_id.handle
+                      << " delivered via the buffered service (context=" << context.handle
+                      << ", buffer=" << buffer_id.handle << ")";
+
+            // the operation name is KERNEL_DISPATCH_COMPLETE, too wide for the op column, so
+            // this matches the label the callback path prints and lets op_id disambiguate
+            auto fields = std::stringstream{};
+            fields << "op=" << txt("KERNEL_DISPATCH", w_op) << " kind=" << num(record->kind, w_kind)
+                   << " op_id=" << num(record->operation, w_kind)
+                   << " cid=" << num(record->correlation_id.internal, w_cid)
+                   << " queue=" << num(record->dispatch_info.queue_id.handle, w_queue)
+                   << " kernel_id=" << num(kernel_id, w_kernel_id) << " "
+                   << timestamps_field(record->start_timestamp, record->end_timestamp);
+
+            emit(EMIT_ARGS, "DISP BUF", explainer.str(), fields.str());
         }
         else
         {
@@ -504,7 +547,7 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
                                                        nullptr),
         "code object tracing service configure");
 
-    // both HIP event operations (record and wait)
+    // nullptr/0 subscribes to every operation in the domain, which here is record and wait
     ROCPROFILER_CALL(
         rocprofiler_configure_callback_tracing_service(client_ctx,
                                                        ROCPROFILER_CALLBACK_TRACING_HIP_EVENT,
@@ -545,6 +588,14 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
         rocprofiler_configure_buffer_tracing_service(
             client_ctx, ROCPROFILER_BUFFER_TRACING_HIP_EVENT, nullptr, 0, client_buffer),
         "hip event buffer tracing service configure");
+
+    // Kernel dispatch is traced through both services. The callback above reports each
+    // dispatch inline; this reports the same dispatches through the buffer, into the same
+    // buffer as the barrier records so that one flush delivers both kinds together.
+    ROCPROFILER_CALL(
+        rocprofiler_configure_buffer_tracing_service(
+            client_ctx, ROCPROFILER_BUFFER_TRACING_KERNEL_DISPATCH, nullptr, 0, client_buffer),
+        "kernel dispatch buffer tracing service configure");
 
     auto client_thread = rocprofiler_callback_thread_t{};
     ROCPROFILER_CALL(rocprofiler_create_callback_thread(&client_thread),
@@ -608,7 +659,10 @@ shutdown()
 {
     if(client_id)
     {
-        ROCPROFILER_CALL(rocprofiler_flush_buffer(client_buffer), "buffer flush");
+        auto flush_status = rocprofiler_flush_buffer(client_buffer);
+        // the buffer is already being flushed elsewhere; not an error here
+        if(flush_status != ROCPROFILER_STATUS_ERROR_BUFFER_BUSY)
+            ROCPROFILER_CALL(flush_status, "buffer flush");
         client_fini_func(*client_id);
     }
 }
@@ -637,7 +691,7 @@ flush()
 uint64_t
 wait_barriers_completed()
 {
-    return wait_completion_count.load(std::memory_order_relaxed);
+    return wait_completion_count.load(std::memory_order_acquire);
 }
 
 void
@@ -650,7 +704,7 @@ void
 banner(const char* msg)
 {
     // deliberately taller than a record entry: this is the separator between the major
-    // phases of the run, and there are only a handful of them
+    // phases of the run
     const auto rule  = std::string(prefix_width, ' ') + std::string(72, '=');
     auto       lk    = std::unique_lock<std::mutex>{output_mutex};
     auto       entry = std::stringstream{};
