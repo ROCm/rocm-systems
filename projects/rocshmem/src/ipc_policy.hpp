@@ -41,6 +41,8 @@
 
 namespace rocshmem {
 
+namespace atomic = detail::atomic;
+
 class Backend;
 class Context;
 
@@ -270,109 +272,93 @@ class IpcOnImpl {
     memcpy_wave<Kind>(dst, src, size);
   }
 
-  template <detail::atomic::rocshmem_memory_scope scope = detail::atomic::memory_scope_system,
-            detail::atomic::rocshmem_memory_order order = detail::atomic::memory_order_release>
+  template <atomic::memory_scope scope = atomic::memory_scope::system,
+            atomic::memory_order order = atomic::memory_order::release>
   __device__ __forceinline__ void ipcFence() {
-    detail::atomic::threadfence<scope, order>();
+    atomic::threadfence<scope, order>();
   }
 
-  template <detail::atomic::rocshmem_memory_scope scope = detail::atomic::memory_scope_system,
-            detail::atomic::rocshmem_memory_order order = detail::atomic::memory_order_release>
+  template <atomic::memory_scope scope = atomic::memory_scope::system,
+            atomic::memory_order order = atomic::memory_order::release>
   __device__ __forceinline__ void ipcFence([[maybe_unused]] int local_pe) {
-    detail::atomic::threadfence<scope, order>();
+    atomic::threadfence<scope, order>();
   }
 
   __device__ void ipcQuiet() {
-    detail::atomic::threadfence<detail::atomic::memory_scope_system,
-                                detail::atomic::memory_order_release>();
+    atomic::threadfence<atomic::memory_scope::system,
+                        atomic::memory_order::release>();
   }
 
   __device__ void ipcQuiet([[maybe_unused]] int local_pe) {
-    detail::atomic::threadfence<detail::atomic::memory_scope_system,
-                                detail::atomic::memory_order_release>();
+    atomic::threadfence<atomic::memory_scope::system,
+                        atomic::memory_order::release>();
   }
 
   template <typename T>
   __device__ void ipcAMOAdd(T *val, T value) {
-    detail::atomic::fetch_add<T, T, detail::atomic::memory_scope_system>(
-        val, value, detail::atomic::memory_order_seq_cst);
+    atomic::fetch_add(val, value);
   }
 
   template <typename T>
   __device__ T ipcAMOFetchAdd(T *val, T value) {
-    return detail::atomic::fetch_add<T, T, detail::atomic::memory_scope_system>(
-        val, value, detail::atomic::memory_order_seq_cst);
+    return atomic::fetch_add(val, value);
   }
 
   template <typename T>
   __device__ void ipcAMOCas(T *val, T cond, T value) {
-    detail::atomic::compare_exchange_strong<T, detail::atomic::memory_scope_system>(
-        val, cond, value, detail::atomic::memory_order_seq_cst,
-        detail::atomic::memory_order_seq_cst);
+    atomic::compare_exchange_strong(val, cond, value);
   }
 
   template <typename T>
   __device__ T ipcAMOFetchCas(T *val, T cond, T value) {
-    detail::atomic::compare_exchange_strong<T, detail::atomic::memory_scope_system>(
-        val, cond, value, detail::atomic::memory_order_seq_cst,
-        detail::atomic::memory_order_seq_cst);
+    atomic::compare_exchange_strong(val, cond, value);
     return cond;
   }
 
   template <typename T>
   __device__ void ipcAMOSet(T *val, T value) {
-    detail::atomic::store<T, detail::atomic::memory_scope_system>(
-        val, value, detail::atomic::memory_order_seq_cst);
+    atomic::store(val, value);
   }
 
   template <typename T>
   __device__ T ipcAMOSwap(T *val, T value) {
-    return detail::atomic::exchange<T, detail::atomic::memory_scope_system>(
-        val, value, detail::atomic::memory_order_seq_cst);
+    return atomic::exchange(val, value);
   }
 
   template <typename T>
   __device__ void ipcAMOAnd(T *val, T value) {
-    detail::atomic::fetch_and<T, T, detail::atomic::memory_scope_system>(
-        val, value, detail::atomic::memory_order_seq_cst);
+    atomic::fetch_and(val, value);
   }
 
   template <typename T>
   __device__ T ipcAMOFetchAnd(T *val, T value) {
-    return detail::atomic::fetch_and<T, T, detail::atomic::memory_scope_system>(
-        val, value, detail::atomic::memory_order_seq_cst);
+    return atomic::fetch_and(val, value);
   }
 
   template <typename T>
   __device__ void ipcAMOOr(T *val, T value) {
-    detail::atomic::fetch_or<T, T, detail::atomic::memory_scope_system>(
-        val, value, detail::atomic::memory_order_seq_cst);
+    atomic::fetch_or(val, value);
   }
 
   template <typename T>
   __device__ T ipcAMOFetchOr(T *val, T value) {
-    return detail::atomic::fetch_or<T, T, detail::atomic::memory_scope_system>(
-        val, value, detail::atomic::memory_order_seq_cst);
+    return atomic::fetch_or(val, value);
   }
 
   template <typename T>
   __device__ void ipcAMOXor(T *val, T value) {
-    detail::atomic::fetch_xor<T, T, detail::atomic::memory_scope_system>(
-        val, value, detail::atomic::memory_order_seq_cst);
+    atomic::fetch_xor(val, value);
   }
 
   template <typename T>
   __device__ T ipcAMOFetchXor(T *val, T value) {
-    return detail::atomic::fetch_xor<T, T, detail::atomic::memory_scope_system>(
-        val, value, detail::atomic::memory_order_seq_cst);
+    return atomic::fetch_xor(val, value);
   }
 
   __device__ void zero_byte_read(int pe) {
     int local_pe = pe % shm_size;
     uint32_t *pe_ipc_base = reinterpret_cast<uint32_t *>(ipc_bases[local_pe]);
-    [[maybe_unused]] volatile uint32_t read_value =
-        detail::atomic::load<uint32_t, detail::atomic::memory_scope_system>(
-            pe_ipc_base, detail::atomic::memory_order_seq_cst);
+    [[maybe_unused]] volatile uint32_t read_value = atomic::load(pe_ipc_base);
   }
 };
 
@@ -445,48 +431,51 @@ class IpcSdmaImpl : public IpcOnImpl {
     memcpy_wave<Kind>(dst, src, size);
   }
 
-  template <detail::atomic::rocshmem_memory_scope scope = detail::atomic::memory_scope_system,
-            detail::atomic::rocshmem_memory_order order = detail::atomic::memory_order_release>
+  template <atomic::memory_scope scope = atomic::memory_scope::system,
+            atomic::memory_order order = atomic::memory_order::release>
   __device__ __forceinline__ void ipcFence() {
     if (sdmaImpl_.sdmaEnabled &&
-        detail::atomic::load<uint64_t, detail::atomic::memory_scope_device>(
-            &sdmaImpl_.sdmaDirty, detail::atomic::memory_order_relaxed) != 0)
+        atomic::load<atomic::memory_scope::device,
+                     atomic::memory_order::relaxed>(&sdmaImpl_.sdmaDirty) != 0)
       sdmaImpl_.sdmaQuietAll();
-    detail::atomic::threadfence<scope, order>();
+    atomic::threadfence<scope, order>();
   }
 
-  template <detail::atomic::rocshmem_memory_scope scope = detail::atomic::memory_scope_system,
-            detail::atomic::rocshmem_memory_order order = detail::atomic::memory_order_release>
+  template <atomic::memory_scope scope = atomic::memory_scope::system,
+            atomic::memory_order order = atomic::memory_order::release>
   __device__ __forceinline__ void ipcFence(int local_pe) {
     if (sdmaImpl_.sdmaEnabled) {
       uint64_t pe_mask = ((1ULL << sdmaImpl_.numChannels) - 1) <<
                          (local_pe * sdmaImpl_.numChannels);
-      if (detail::atomic::load<uint64_t, detail::atomic::memory_scope_device>(
-              &sdmaImpl_.sdmaDirty, detail::atomic::memory_order_relaxed) & pe_mask)
+      if (atomic::load<atomic::memory_scope::device,
+                       atomic::memory_order::relaxed>(
+                        &sdmaImpl_.sdmaDirty) & pe_mask)
         sdmaImpl_.sdmaQuiet(local_pe);
     }
-    detail::atomic::threadfence<scope, order>();
+    atomic::threadfence<scope, order>();
   }
 
   __device__ void ipcQuiet() {
     if (sdmaImpl_.sdmaEnabled &&
-        detail::atomic::load<uint64_t, detail::atomic::memory_scope_device>(
-            &sdmaImpl_.sdmaDirty, detail::atomic::memory_order_relaxed) != 0)
+          atomic::load<atomic::memory_scope::device,
+                       atomic::memory_order::relaxed>(
+                         &sdmaImpl_.sdmaDirty) != 0)
       sdmaImpl_.sdmaQuietAll();
-    detail::atomic::threadfence<detail::atomic::memory_scope_system,
-                                detail::atomic::memory_order_acq_rel>();
+    atomic::threadfence<atomic::memory_scope::system,
+                        atomic::memory_order::acq_rel>();
   }
 
   __device__ void ipcQuiet(int local_pe) {
     if (sdmaImpl_.sdmaEnabled) {
       uint64_t pe_mask = ((1ULL << sdmaImpl_.numChannels) - 1) <<
                          (local_pe * sdmaImpl_.numChannels);
-      if (detail::atomic::load<uint64_t, detail::atomic::memory_scope_device>(
-              &sdmaImpl_.sdmaDirty, detail::atomic::memory_order_relaxed) & pe_mask)
+      if (atomic::load<atomic::memory_scope::device,
+                       atomic::memory_order::relaxed>(
+                         &sdmaImpl_.sdmaDirty) & pe_mask)
         sdmaImpl_.sdmaQuiet(local_pe);
     }
-    detail::atomic::threadfence<detail::atomic::memory_scope_system,
-                                detail::atomic::memory_order_acq_rel>();
+    atomic::threadfence<atomic::memory_scope::system,
+                        atomic::memory_order::acq_rel>();
   }
 };
 #endif  // USE_SDMA
@@ -551,12 +540,12 @@ class IpcOffImpl {
 
   __device__ void ipcQuiet(int) {}
 
-  template <detail::atomic::rocshmem_memory_scope scope = detail::atomic::memory_scope_system,
-            detail::atomic::rocshmem_memory_order order = detail::atomic::memory_order_release>
+  template <atomic::memory_scope scope = atomic::memory_scope::system,
+            atomic::memory_order order = atomic::memory_order::release>
   __device__ __forceinline__ void ipcFence() {}
 
-  template <detail::atomic::rocshmem_memory_scope scope = detail::atomic::memory_scope_system,
-            detail::atomic::rocshmem_memory_order order = detail::atomic::memory_order_release>
+  template <atomic::memory_scope scope = atomic::memory_scope::system,
+            atomic::memory_order order = atomic::memory_order::release>
   __device__ __forceinline__ void ipcFence(int) {}
 
   template <typename T>

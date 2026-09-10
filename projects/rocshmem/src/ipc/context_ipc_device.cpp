@@ -35,6 +35,8 @@
 
 namespace rocshmem {
 
+namespace atomic = detail::atomic;  // readability alias for rocshmem::detail::atomic
+
 __host__ IPCContext::IPCContext(Backend *b, unsigned int ctx_id)
     : Context(b) {
   IPCBackend *backend{static_cast<IPCBackend *>(b)};
@@ -77,8 +79,8 @@ __device__ void IPCContext::fence() {
 }
 
 __device__ void IPCContext::fence(int pe) {
-  ipcImpl_.ipcFence<detail::atomic::memory_scope_system,
-                    detail::atomic::memory_order_release>(pe);
+  ipcImpl_.ipcFence<atomic::memory_scope::system,
+                    atomic::memory_order::release>(pe);
 }
 
 __device__ void IPCContext::quiet() {

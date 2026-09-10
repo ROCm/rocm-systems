@@ -27,6 +27,8 @@
 
 namespace rocshmem {
 
+namespace atomic = detail::atomic;
+
 __device__ static inline struct bnxt_re_msns* bnxt_re_pull_psn_buff(struct bnxt_device_sq *sq) {
   return (struct bnxt_re_msns*)(((char *) sq->msntbl) + ((sq->msn) << sq->psn_sz_log2));
 }
@@ -101,15 +103,15 @@ __device__ static inline void lock(uint32_t *lock) {
 
   do {
     expected = 0;
-  } while (0 == detail::atomic::compare_exchange_strong<uint32_t,
-                    detail::atomic::memory_scope_system>(
-                    lock, expected, 1, detail::atomic::memory_order_acquire,
-                    detail::atomic::memory_order_acquire));
+  } while (0 == atomic::compare_exchange_strong<
+                  atomic::memory_scope::system,
+                  atomic::memory_order::acquire,
+                  atomic::memory_order::acquire>(lock, expected, 1));
 }
 
 __device__ static inline void unlock(uint32_t *lock) {
-  detail::atomic::store<uint32_t, detail::atomic::memory_scope_system>(
-      lock, 0, detail::atomic::memory_order_release);
+  atomic::store<atomic::memory_scope::system,
+                atomic::memory_order::release>(lock, 0);
 }
 
 __device__ void QueuePair::bnxt_ring_doorbell(uint32_t slot_idx) {
@@ -129,8 +131,8 @@ __device__ void QueuePair::bnxt_ring_doorbell(uint32_t slot_idx) {
   hdr.typ_qid_indx = (key_lo | (key_hi << 32));
 
   __threadfence_system();
-  detail::atomic::store<uint64_t, detail::atomic::memory_scope_system>(
-      bnxt_dbr, hdr.typ_qid_indx, detail::atomic::memory_order_seq_cst);
+  atomic::store<atomic::memory_scope::system,
+                atomic::memory_order::seq_cst>(bnxt_dbr, hdr.typ_qid_indx);
 }
 
 [[maybe_unused]] __attribute__((noinline))
@@ -190,11 +192,12 @@ __device__ void QueuePair::bnxt_poll_cq_until(uint32_t requested_available_slots
 
 #ifdef BUILD_DEBUG_DEVICE
     {
-      uint32_t flg_val = detail::atomic::load<uint32_t,
-          detail::atomic::memory_scope_system>(
+      uint32_t flg_val = atomic::load<
+        atomic::memory_scope::system,
+        atomic::memory_order::relaxed>(
           static_cast<uint32_t*>(__builtin_assume_aligned(
-              (char*)cqe + sizeof(struct bnxt_re_req_cqe) + offsetof(struct bnxt_re_bcqe, flg_st_typ_ph), 4)),
-          detail::atomic::memory_order_relaxed);
+            (char*)cqe + sizeof(struct bnxt_re_req_cqe) +
+            offsetof(struct bnxt_re_bcqe, flg_st_typ_ph), 4)));
       uint8_t status = (flg_val >> BNXT_RE_BCQE_STATUS_SHIFT) & BNXT_RE_BCQE_STATUS_MASK;
       if (status != BNXT_RE_REQ_ST_OK)
         bnxt_print_cqe_error(status);
@@ -207,8 +210,9 @@ __device__ void QueuePair::bnxt_poll_cq_until(uint32_t requested_available_slots
     sq_head = (((cqe->con_indx & 0xFFFF) * GDA_BNXT_WQE_SLOT_COUNT) % sq_depth);
     bnxt_sq.head = sq_head;
 
-    sq_tail = detail::atomic::load<uint32_t, detail::atomic::memory_scope_device>(
-        &bnxt_sq.tail, detail::atomic::memory_order_seq_cst);
+    sq_tail = atomic::load<
+      atomic::memory_scope::device,
+      atomic::memory_order::seq_cst>(&bnxt_sq.tail);
 
     consumed_slots  = (sq_tail - sq_head + sq_depth) % sq_depth;
     available_slots = sq_depth - consumed_slots;
