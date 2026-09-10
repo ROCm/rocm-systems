@@ -2440,6 +2440,27 @@ class TestDeriveDsSwizzle:
         assert block is not None
 
 
+@pytest.mark.parametrize('dtype', ['f16', 'bf16'])
+@pytest.mark.parametrize(
+    ('prefix', 'encoding', 'semantic_class'),
+    [
+        ('GLOBAL_ATOMIC_PK_ADD_', 'ENC_VGLOBAL', 'flat_atomic'),
+        ('FLAT_ATOMIC_PK_ADD_', 'ENC_VFLAT', 'flat_atomic'),
+        ('BUFFER_ATOMIC_PK_ADD_', 'ENC_VBUFFER', 'buffer_atomic'),
+        ('DS_PK_ADD_', 'ENC_VDS', 'ds_atomic'),
+        ('DS_PK_ADD_RTN_', 'ENC_VDS', 'ds_atomic'),
+    ],
+)
+def test_packed_atomic_add_keeps_component_type(
+    dtype, prefix, encoding, semantic_class
+):
+    sem = derive_semantics(prefix + dtype.upper(), encoding)
+    assert sem is not None
+    assert sem.operation == 'pk_add_' + dtype
+    assert sem.semantic_class == semantic_class
+    assert sem.num_elems == 1
+
+
 class TestDeriveMemoryLowerAll:
     def test_all_memory_classes_lower(self):
         classes = [

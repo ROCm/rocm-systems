@@ -335,6 +335,47 @@ inline uint16_t packed_mul_bf16(float a, float b, bool fp16_ovfl) {
   return packed_fma_bf16(a, b, zero, fp16_ovfl);
 }
 
+/// @brief Add packed F16/BF16 components using float-memory-atomic policy.
+/// @details CDNA5 ISA chapter 12 fixes rounding to nearest-even and specifies
+/// NaN selection. FP16_OVFL applies to VALU results, not memory atomics. The
+/// caller supplies DS input/output denormal controls, or 3 for no flushing.
+inline uint32_t atomic_add_packed_16(uint32_t old_val, uint32_t src_val, bool bf16,
+                                     uint32_t denorm_mode) {
+  detail::ScopedFenv nearest_environment(0);
+  const uint16_t exponent_mask = bf16 ? 0x7f80u : 0x7c00u;
+  auto flush_denorm = [&](uint16_t bits) -> uint16_t {
+    return (bits & exponent_mask) == 0 ? bits & 0x8000u : bits;
+  };
+  uint32_t result = 0;
+  for (uint32_t shift : {0u, 16u}) {
+    uint16_t a = static_cast<uint16_t>(old_val >> shift);
+    uint16_t b = static_cast<uint16_t>(src_val >> shift);
+    if (!(denorm_mode & 1u)) {
+      a = flush_denorm(a);
+      b = flush_denorm(b);
+    }
+    const uint16_t quiet_bit = bf16 ? 0x0040u : 0x0200u;
+    auto is_nan = [&](uint16_t bits) { return (bits & 0x7fffu) > exponent_mask; };
+    uint16_t sum;
+    // Float memory add propagates the first NaN, quieting it without changing
+    // the sign or payload. Invalid infinity addition produces negative QNaN.
+    if (is_nan(a))
+      sum = a | quiet_bit;
+    else if (is_nan(b))
+      sum = b | quiet_bit;
+    else if ((a & 0x7fffu) == exponent_mask && (b & 0x7fffu) == exponent_mask && (a ^ b) == 0x8000u)
+      sum = 0x8000u | exponent_mask | quiet_bit;
+    else
+      sum = bf16 ? detail::fma_f32_to_bf16_nearest_environment(
+                       util::bf16_to_f32(a), 1.0f, util::bf16_to_f32(b), 0, false, false)
+                 : util::f32_to_f16(util::f16_to_f32(a) + util::f16_to_f32(b));
+    if (!(denorm_mode & 2u))
+      sum = flush_denorm(sum);
+    result |= uint32_t{sum} << shift;
+  }
+  return result;
+}
+
 inline float finalize_omod_f32(float value, uint32_t omod) {
   if (omod == 0)
     return value;
