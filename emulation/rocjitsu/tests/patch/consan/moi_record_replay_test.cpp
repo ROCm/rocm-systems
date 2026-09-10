@@ -1925,8 +1925,9 @@ TEST(ConSanMoi, RecordReplayRuntimeGateCoversBarrierRecords) {
       /*sdst=*/84u, scalar_positive_inline_u32(1u), scalar_positive_inline_u32(0u),
       ROCJITSU_CODE_ARCH_RDNA4);
   ASSERT_TRUE(gate_entry);
-  ASSERT_FALSE(words.empty());
-  EXPECT_EQ(words.front(), *gate_entry);
+  ASSERT_GE(words.size(), 2u);
+  EXPECT_EQ(words.front(), kBarrierWait);
+  EXPECT_EQ(words[1], *gate_entry);
   const std::vector<uint32_t> all_words = text_words_at_offset(
       patched, /*text_offset=*/0u, static_cast<uint32_t>(patched.text_sections().front()->size()));
   EXPECT_EQ(std::ranges::count(all_words, kBarrierWait), 2u);
@@ -7195,8 +7196,8 @@ TEST(ConSanMoi, BarrierRecordPatchTrampolinesBarrierAndWritesRecord) {
   expect_record_replay_text_transaction(result);
 }
 
-TEST(ConSanMoi, Gfx1201BarrierRecordSuspendsGuestExpertScheduling) {
-  constexpr uint32_t kBarrierWait = 0xBF94FFFFu;
+TEST(ConSanMoi, Gfx1201BarrierRecordSuspendsDistantGuestExpertScheduling) {
+  constexpr uint32_t kBarrierSignal = 0xBE804EC1u;
   const auto sched_hwreg = build_hwreg_imm(/*reg_id=*/26u, /*offset=*/0u, /*size_bits=*/2u);
   ASSERT_TRUE(sched_hwreg);
   const auto enable_expert =
@@ -7204,11 +7205,15 @@ TEST(ConSanMoi, Gfx1201BarrierRecordSuspendsGuestExpertScheduling) {
   const auto normal =
       build_s_setreg_imm32_b32(*sched_hwreg, /*literal=*/0u, ROCJITSU_CODE_ARCH_RDNA4);
   ASSERT_TRUE(enable_expert && normal);
-  const std::vector<uint32_t> text_words = {
-      (*enable_expert)[0], (*enable_expert)[1],
-      0xBFC60000u, // s_wait_dscnt 0
-      kBarrierWait,        build_s_endpgm(ROCJITSU_CODE_ARCH_RDNA4),
-  };
+  std::vector<uint32_t> text_words = {(*enable_expert)[0], (*enable_expert)[1]};
+  // Tensile keeps expert scheduling active across a long loop body. Keep the
+  // enabling instruction beyond the former 32-byte look-behind so this test
+  // exercises the state at the barrier, not textual adjacency.
+  text_words.insert(text_words.end(), 16u, 0xBF800000u); // s_nop 0
+  text_words.push_back(0xBFC60000u);                     // s_wait_dscnt 0
+  const uint64_t barrier_offset = text_words.size() * sizeof(uint32_t);
+  text_words.push_back(kBarrierSignal);
+  text_words.push_back(build_s_endpgm(ROCJITSU_CODE_ARCH_RDNA4));
 
   MoiOptions options = moi_options();
   options.moi_track_barriers = true;
@@ -7222,7 +7227,7 @@ TEST(ConSanMoi, Gfx1201BarrierRecordSuspendsGuestExpertScheduling) {
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
   const ConSanPatchInfo &patch = only_non_entry_prologue_patch(result);
-  EXPECT_EQ(patch.anchor_offset, 3u * sizeof(uint32_t));
+  EXPECT_EQ(patch.anchor_offset, barrier_offset);
   ASSERT_TRUE(patch.relocated_guest_instruction_offset);
   AmdGpuCodeObject patched(result.replacement.data(), result.replacement.size());
   ASSERT_TRUE(patched.is_valid());
@@ -7236,7 +7241,100 @@ TEST(ConSanMoi, Gfx1201BarrierRecordSuspendsGuestExpertScheduling) {
   ASSERT_LT(guest_word, trampoline.size());
   EXPECT_TRUE(std::equal(enable_expert->begin(), enable_expert->end(),
                          trampoline.begin() + static_cast<ptrdiff_t>(guest_word - 2u)));
-  EXPECT_EQ(trampoline[guest_word], kBarrierWait);
+  EXPECT_EQ(trampoline[guest_word], kBarrierSignal);
+}
+
+TEST(ConSanMoi, Gfx1201AccessRecordSuspendsDistantGuestExpertScheduling) {
+  constexpr std::array<uint32_t, 2> kLdsLoad = {
+      0xDBFC00A0u,
+      0x9C000083u, // ds_load_b128 v[156:159], v131 offset:160
+  };
+  const auto sched_hwreg = build_hwreg_imm(/*reg_id=*/26u, /*offset=*/0u, /*size_bits=*/2u);
+  ASSERT_TRUE(sched_hwreg);
+  const auto normal =
+      build_s_setreg_imm32_b32(*sched_hwreg, /*literal=*/0u, ROCJITSU_CODE_ARCH_RDNA4);
+  const auto expert =
+      build_s_setreg_imm32_b32(*sched_hwreg, /*literal=*/2u, ROCJITSU_CODE_ARCH_RDNA4);
+  ASSERT_TRUE(normal && expert);
+  std::vector<uint32_t> text_words = {(*expert)[0], (*expert)[1]};
+  text_words.insert(text_words.end(), 16u, 0xBF800000u); // s_nop 0
+  const uint64_t access_offset = text_words.size() * sizeof(uint32_t);
+  text_words.insert(text_words.end(), kLdsLoad.begin(), kLdsLoad.end());
+  text_words.push_back(build_s_endpgm(ROCJITSU_CODE_ARCH_RDNA4));
+
+  MoiOptions options = moi_options();
+  options.scratch_vgpr = 1;
+  options.moi_exec_save_sgpr = 30;
+  options.set_moi_owner_epoch_vgprs(14, 15);
+  options.moi_report_buffer_address = 0x123456780000ull;
+  options.moi_report_buffer_size = consan_moi_report_buffer_min_bytes(1, 0, 0, 0);
+  options.moi_runtime_sample_stride = 2;
+
+  const auto result =
+      test_lower_consan(make_rdna4_lds_code_object(text_words, "expert_scheduled_access",
+                                                   kRdna4Wave64AllVgprsGranulated),
+                        options);
+
+  ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
+  const auto access = std::ranges::find_if(result.patches, [&](const ConSanPatchInfo &patch) {
+    return patch.kind == ConSanPatchKind::TrampolineMoiAccessRecordStore &&
+           patch.anchor_offset == access_offset;
+  });
+  ASSERT_NE(access, result.patches.end());
+  ASSERT_TRUE(access->relocated_guest_instruction_offset);
+  AmdGpuCodeObject patched(result.replacement.data(), result.replacement.size());
+  ASSERT_TRUE(patched.is_valid());
+  const std::vector<uint32_t> trampoline =
+      text_words_at_offset(patched, access->trampoline_offset, access->trampoline_size);
+  const size_t guest_word =
+      (*access->relocated_guest_instruction_offset - access->trampoline_offset) / sizeof(uint32_t);
+  ASSERT_GE(guest_word, expert->size());
+  ASSERT_EQ(guest_word + kLdsLoad.size(), trampoline.size());
+  EXPECT_TRUE(std::equal(expert->begin(), expert->end(),
+                         trampoline.begin() + static_cast<ptrdiff_t>(guest_word - expert->size())));
+  EXPECT_TRUE(std::equal(kLdsLoad.begin(), kLdsLoad.end(),
+                         trampoline.begin() + static_cast<ptrdiff_t>(guest_word)));
+  EXPECT_FALSE(std::ranges::search(std::span(trampoline).first(guest_word), *normal).empty());
+}
+
+TEST(ConSanMoi, Gfx1201BarrierWaitRecordsAfterGuestCompletion) {
+  constexpr uint32_t kBarrierWait = 0xBF94FFFFu;
+  constexpr uint64_t kWaitOffset = 2u * sizeof(uint32_t);
+  const std::vector<uint32_t> text_words = {
+      0xD8340000u, // ds_write_b32 v0, v0
+      0x00000000u,
+      kBarrierWait,
+      build_s_endpgm(ROCJITSU_CODE_ARCH_RDNA4),
+  };
+
+  MoiOptions options = moi_options();
+  options.moi_track_barriers = true;
+  options.scratch_vgpr = 8;
+  options.moi_exec_save_sgpr = 30;
+  options.set_moi_owner_epoch_vgprs(14, 15);
+  options.moi_report_buffer_address = 0x123456780000ull;
+  options.moi_report_buffer_size = consan_moi_report_buffer_min_bytes(1, 0, 0, 0, 1);
+  options.moi_runtime_sample_stride = 2;
+
+  const auto result = test_lower_consan(make_rdna4_lds_code_object(text_words), options);
+
+  ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
+  ASSERT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiBarrierRecord,
+                               &ConSanPatchInfo::kind),
+            1u);
+  const auto wait = std::ranges::find_if(result.patches, [&](const ConSanPatchInfo &patch) {
+    return patch.kind == ConSanPatchKind::TrampolineMoiBarrierRecord &&
+           patch.anchor_offset == kWaitOffset;
+  });
+  ASSERT_NE(wait, result.patches.end());
+  ASSERT_TRUE(wait->relocated_guest_instruction_offset);
+  EXPECT_EQ(*wait->relocated_guest_instruction_offset, wait->trampoline_offset);
+
+  AmdGpuCodeObject patched(result.replacement.data(), result.replacement.size());
+  ASSERT_TRUE(patched.is_valid());
+  EXPECT_EQ(
+      text_words_at_offset(patched, *wait->relocated_guest_instruction_offset, sizeof(uint32_t)),
+      std::vector<uint32_t>{kBarrierWait});
 }
 
 TEST(ConSanMoi, Cdna4AdjacentFullBarriersShareOneRecordProbe) {

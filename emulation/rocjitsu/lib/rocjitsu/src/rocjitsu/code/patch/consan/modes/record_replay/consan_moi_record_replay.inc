@@ -259,6 +259,31 @@ void try_stage_first_light_access_fragments(std::span<const uint8_t> bytes,
         guest_words * static_cast<uint32_t>(sizeof(uint32_t)));
     if (!fragment)
       return;
+    const ConSanProgramContainer *container =
+        result.program_inventory.container(candidate.site().container);
+    const bool suspend_expert_scheduling =
+        container != nullptr &&
+        consan_wave_sched_mode_at(target.arch, active_bytes, container->text_file_offset,
+                                  container->entry_text_offset,
+                                  container->text_file_offset + candidate.anchor()) == 2u;
+    if (suspend_expert_scheduling) {
+      constexpr uint16_t kWaveSchedModeHwreg = 26u | ((2u - 1u) << 11u);
+      const auto normal =
+          build_s_setreg_imm32_b32(kWaveSchedModeHwreg, /*literal=*/0u, target.arch);
+      const auto expert =
+          build_s_setreg_imm32_b32(kWaveSchedModeHwreg, /*literal=*/2u, target.arch);
+      if (!normal || !expert) {
+        result.errors.emplace_back(
+            "ConSan MOI first-light probe could not suspend expert scheduling");
+        return;
+      }
+      fragment->before_words.insert(fragment->before_words.begin(), normal->begin(), normal->end());
+      fragment->before_words.insert(fragment->before_words.end(), expert->begin(), expert->end());
+      if (!fragment->after_words.empty()) {
+        fragment->after_words.insert(fragment->after_words.begin(), normal->begin(), normal->end());
+        fragment->after_words.insert(fragment->after_words.end(), expert->begin(), expert->end());
+      }
+    }
     if (entry.runtime_gate && entry.runtime_sources) {
       if (!prepend_moi_runtime_workgroup_gate(*fragment, *entry.runtime_gate,
                                               *entry.runtime_sources, target.arch, result.errors,

@@ -12,6 +12,7 @@
 #include "rocjitsu/code/patch/consan/consan_moi_report_emission.h"
 #include "rocjitsu/code/patch/consan/consan_moi_runtime_workgroup_gate.h"
 #include "rocjitsu/code/patch/consan/targets/consan_vgpr_bank_state.h"
+#include "rocjitsu/code/patch/consan/targets/consan_wave_sched_state.h"
 #include "rocjitsu/code/patch/instruction_sequence.h"
 #include "rocjitsu/code/patch/instrumentation_builder.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/vgpr_msb.h"
@@ -36,28 +37,6 @@ using consan_moi_detail::DynamicRecordEmitter;
 using consan_moi_detail::kAtomicRecordLayout;
 using consan_moi_detail::kBarrierRecordLayout;
 using consan_moi_detail::kFenceRecordLayout;
-
-[[nodiscard]] bool
-rdna4_expert_scheduling_enabled_immediately_before(std::span<const uint8_t> bytes,
-                                                   uint64_t site_file_offset) {
-  constexpr uint16_t kWaveSchedModeHwreg = 26u | ((2u - 1u) << 11u);
-  constexpr uint32_t kSetreg = pack_sopk(/*op=*/19u, /*sdst=*/0u, kWaveSchedModeHwreg);
-  constexpr uint64_t kSearchBytes = 32u;
-  const uint64_t begin = site_file_offset > kSearchBytes ? site_file_offset - kSearchBytes : 0u;
-  for (uint64_t offset = site_file_offset; offset >= begin + sizeof(uint32_t);) {
-    offset -= sizeof(uint32_t);
-    if (offset + 2u * sizeof(uint32_t) > site_file_offset)
-      continue;
-    uint32_t word = 0u;
-    std::memcpy(&word, bytes.data() + offset, sizeof(word));
-    if (word != kSetreg)
-      continue;
-    uint32_t literal = 0u;
-    std::memcpy(&literal, bytes.data() + offset + sizeof(uint32_t), sizeof(literal));
-    return (literal & 0x3u) == 2u;
-  }
-  return false;
-}
 
 [[nodiscard]] std::optional<std::vector<uint32_t>> build_barrier_record_cave_words(
     std::span<const uint8_t> bytes, const ConSanBarrierSite &site,
@@ -112,8 +91,8 @@ rdna4_expert_scheduling_enabled_immediately_before(std::span<const uint8_t> byte
   const uint16_t lane_rank_vgpr = static_cast<uint16_t>(*options.scratch_vgpr + 5u);
   constexpr uint16_t kScalarInlineMinusOne = 0xC1;
   const bool suspend_expert_scheduling =
-      arch == ROCJITSU_CODE_ARCH_RDNA4 &&
-      rdna4_expert_scheduling_enabled_immediately_before(bytes, site.file_offset);
+      consan_wave_sched_mode_at(arch, bytes, container.text_file_offset,
+                                container.entry_text_offset, site.file_offset) == 2u;
   const auto wave_sched_hwreg = build_hwreg_imm(/*reg_id=*/26u, /*offset=*/0u, /*size_bits=*/2u);
   const auto normal_scheduling =
       suspend_expert_scheduling && wave_sched_hwreg
@@ -228,12 +207,20 @@ rdna4_expert_scheduling_enabled_immediately_before(std::span<const uint8_t> byte
   }
   if (expert_scheduling)
     words.insert(words.end(), expert_scheduling->begin(), expert_scheduling->end());
-  const uint32_t staged_guest_instruction_offset =
-      static_cast<uint32_t>(words.size() * sizeof(uint32_t));
-  words.push_back(original_barrier_word);
-
   if (!sequence.finish())
     return std::nullopt;
+  uint32_t staged_guest_instruction_offset = 0u;
+  if (site.operation == ConSanBarrierSite::Operation::Wait) {
+    // A split barrier's wait must remain immediately after its signal. Run
+    // the acquire-side reporting only after the guest wait has completed.
+    // Prepending one word shifts every internal branch source and target by
+    // the same amount, so the already-encoded relative displacements remain
+    // valid.
+    words.insert(words.begin(), original_barrier_word);
+  } else {
+    staged_guest_instruction_offset = static_cast<uint32_t>(words.size() * sizeof(uint32_t));
+    words.push_back(original_barrier_word);
+  }
   if (guest_instruction_offset)
     *guest_instruction_offset = staged_guest_instruction_offset;
   return words;

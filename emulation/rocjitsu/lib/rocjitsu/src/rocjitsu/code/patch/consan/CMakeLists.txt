@@ -31,6 +31,7 @@ rj_add_object_library(
         targets/rdna3/consan_program_analysis_rdna3_target_ops.cpp
         targets/rdna3/consan_supercollider_rdna3_target_ops.cpp
         targets/rdna4/consan_program_analysis_rdna4_target_ops.cpp
+        targets/rdna4/consan_rdna4_wave_sched_state.cpp
         targets/rdna4/consan_supercollider_rdna4_target_ops.cpp
         targets/cdna5/consan_cdna5_lds_target_ops.cpp
         targets/cdna5/consan_cdna5_vgpr_bank_state.cpp

@@ -160,9 +160,16 @@ void try_stage_record_replay_barrier_fragments(std::span<const uint8_t> bytes,
     if (!fragment)
       return;
     if (accesses_are_runtime_gated && planned.emission.runtime_workgroup_gate) {
-      if (!prepend_moi_runtime_workgroup_gate(*fragment, *planned.emission.runtime_workgroup_gate,
-                                              planned.emission.workgroup_sources, arch,
-                                              result.errors, "MOI barrier record patch"))
+      const bool gated = site.operation == ConSanBarrierSite::Operation::Wait
+                             ? prepend_moi_runtime_workgroup_gate_to_after_words(
+                                   *fragment, *planned.emission.runtime_workgroup_gate,
+                                   planned.emission.workgroup_sources, arch, result.errors,
+                                   "MOI barrier record patch")
+                             : prepend_moi_runtime_workgroup_gate(
+                                   *fragment, *planned.emission.runtime_workgroup_gate,
+                                   planned.emission.workgroup_sources, arch, result.errors,
+                                   "MOI barrier record patch");
+      if (!gated)
         return;
     }
     fragments.push_back(std::move(*fragment));
