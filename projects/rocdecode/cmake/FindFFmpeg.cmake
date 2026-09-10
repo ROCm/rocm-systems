@@ -62,21 +62,25 @@ else()
   endif()
 
   # Collect hints from FFMPEG_ROOT (CMake var or env var).
-  set(_FFMPEG_ROOT_HINTS
-    ${FFMPEG_ROOT}
-    $ENV{FFMPEG_ROOT}
-  )
+  set(_FFMPEG_ROOT_HINTS ${FFMPEG_ROOT} $ENV{FFMPEG_ROOT})
+  list(FILTER _FFMPEG_ROOT_HINTS EXCLUDE REGEX "^$")
 
-  # On Windows, if no root was given, probe PATH for ffmpeg.exe and derive the
-  # prefix from it (bin/../).  All common Windows FFmpeg distributions — winget,
-  # Chocolatey, Scoop, and manual extracts — put their bin/ on PATH.
-  if(WIN32 AND NOT _FFMPEG_ROOT_HINTS)
-    find_program(_FFMPEG_EXECUTABLE NAMES ffmpeg ffmpeg.exe)
-    if(_FFMPEG_EXECUTABLE)
-      get_filename_component(_FFMPEG_BIN "${_FFMPEG_EXECUTABLE}" DIRECTORY)
-      get_filename_component(_FFMPEG_ROOT_FROM_PATH "${_FFMPEG_BIN}" DIRECTORY)
-      list(APPEND _FFMPEG_ROOT_HINTS "${_FFMPEG_ROOT_FROM_PATH}")
-    endif()
+  # On Windows, if no root was explicitly given, try to locate an FFmpeg/libav
+  # install automatically. We probe PATH for the libav runtime libraries
+  # (avcodec/avformat/avutil DLLs) and derive the install prefix from their
+  # directory (bin/../), then add well-known package-manager / manual install
+  # locations. Headers and import libraries are resolved by the
+  # find_path/find_library calls below.
+  if(WIN32 AND "${_FFMPEG_ROOT_HINTS}" STREQUAL "")
+    foreach(_dir $ENV{PATH})
+      file(GLOB _avcodec_dll "${_dir}/avcodec*.dll")
+      file(GLOB _avformat_dll "${_dir}/avformat*.dll")
+      file(GLOB _avutil_dll "${_dir}/avutil*.dll")
+      if(_avcodec_dll AND _avformat_dll AND _avutil_dll)
+        get_filename_component(_FFMPEG_ROOT_FROM_PATH "${_dir}" DIRECTORY)
+        list(APPEND _FFMPEG_ROOT_HINTS "${_FFMPEG_ROOT_FROM_PATH}")
+      endif()
+    endforeach()
     # Fallback: well-known package-manager install locations
     list(APPEND _FFMPEG_ROOT_HINTS
       "C:/ProgramData/chocolatey/lib/ffmpeg/tools/ffmpeg"
@@ -155,7 +159,7 @@ else()
   if(AVCODEC_LIBRARY AND AVFORMAT_LIBRARY)
     set(FFMPEG_FOUND TRUE)
   endif()
-  
+
   if(NOT WIN32 AND (_FFMPEG_AVCODEC_VERSION VERSION_LESS 58.18.100 OR _FFMPEG_AVFORMAT_VERSION VERSION_LESS 58.12.100 OR _FFMPEG_AVUTIL_VERSION VERSION_LESS 56.14.100))
     if(FFMPEG_FOUND)
       message("-- ${White}FFMPEG   required min version - 4.0.4 Found:${FFMPEG_VERSION}")
@@ -166,7 +170,7 @@ else()
     set(FFMPEG_FOUND FALSE)
     message( "-- ${Yellow}NOTE: FindFFmpeg failed to find -- FFMPEG${ColourReset}" )
   endif()
-  
+
   # When pkg-config is not available (e.g. Windows), parse the version from headers
   if(FFMPEG_FOUND AND NOT _FFMPEG_AVCODEC_VERSION AND AVCODEC_INCLUDE_DIR)
     file(STRINGS "${AVCODEC_INCLUDE_DIR}/libavcodec/version_major.h" _avcodec_major_line
@@ -199,4 +203,3 @@ else()
     endif()
   endif()
 endif()
-
