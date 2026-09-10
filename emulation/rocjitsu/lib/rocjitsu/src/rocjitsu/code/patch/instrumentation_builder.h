@@ -532,6 +532,20 @@ build_valu_to_salu_dependency_wait(rj_code_arch_t arch) {
   return rocjitsu::build_s_wait_alu_va_sdst0(arch);
 }
 
+/// @brief Separate a VALU-produced VCC value from a scalar VCC consumer.
+[[nodiscard]] inline constexpr std::optional<uint32_t>
+build_valu_vcc_to_salu_dependency_wait(rj_code_arch_t arch) {
+  if (arch == ROCJITSU_CODE_ARCH_CDNA4)
+    return build_cdna4_salu_dependency_delay(arch);
+  if (arch == ROCJITSU_CODE_ARCH_CDNA3)
+    return build_s_nop(0, arch);
+  if (arch == ROCJITSU_CODE_ARCH_RDNA3)
+    return rocjitsu::build_s_delay_alu(kDelayAluSaluDep1, arch);
+  if (!is_rdna4_family_arch(arch))
+    return std::nullopt;
+  return rocjitsu::build_s_wait_alu_va_vcc0(arch);
+}
+
 [[nodiscard]] inline constexpr std::optional<uint32_t> build_s_trap(uint16_t simm16,
                                                                     rj_code_arch_t arch) {
   if (arch == ROCJITSU_CODE_ARCH_RDNA3)

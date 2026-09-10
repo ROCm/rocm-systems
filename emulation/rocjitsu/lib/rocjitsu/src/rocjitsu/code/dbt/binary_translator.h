@@ -278,6 +278,16 @@ struct BinaryTranslatorOptions {
   bool preserve_source_descriptor_resources = false;
   /// @brief Optional explicit executable ranges; empty retains whole-section decoding.
   std::vector<SourceTextCodeRange> source_text_code_ranges;
+
+  /// @brief Optional kernel descriptors whose bodies should be relocated.
+  ///
+  /// This partial-translation mode is valid only for identity-ISA translation
+  /// with `preserve_source_text_prefix`: unselected descriptors continue to
+  /// enter their unchanged bodies in that retained prefix. It lets an
+  /// instrumentation client relocate a proven subset of a large solution
+  /// library without decoding or cloning every independent sibling kernel.
+  /// Each requested descriptor offset must identify a translated descriptor.
+  std::vector<uint64_t> source_kernel_descriptor_offsets;
 };
 
 /// @brief Result of translating a code object.

@@ -1648,20 +1648,59 @@ void prune_unreachable_inferred_ranges(const AmdGpuCodeObject &code_object, Deco
                                        std::span<const ConSanPreappliedCodeRange> preapplied_ranges,
                                        ProgramInventoryBuilder &inventory) {
   const std::span<ConSanProgramContainer> containers = inventory.containers();
-  const bool needs_pruning =
-      std::ranges::any_of(containers, &ConSanProgramContainer::code_size_inferred_from_zero);
+  const bool needs_pruning = std::ranges::any_of(containers, [](const auto &container) {
+    return container.decoded && container.code_size_inferred_from_zero;
+  });
   if (!needs_pruning)
     return;
 
-  const consan_detail::ConSanCfgBuildInputs cfg =
-      consan_detail::build_consan_cfg_inputs(code_object, containers, preapplied_ranges);
+  const bool has_undecoded_container =
+      std::ranges::any_of(containers, [](const auto &container) { return !container.decoded; });
+  consan_detail::ConSanCfgBuildInputs cfg;
+  if (!has_undecoded_container) {
+    // Preserve the established whole-program proof exactly for an unscoped
+    // inventory, including aliased function-symbol range semantics.
+    cfg = consan_detail::build_consan_cfg_inputs(code_object, containers, preapplied_ranges);
+  } else {
+    // An allowlist deliberately leaves sibling kernel containers undecoded.
+    // They have no sites to prune, so including their inferred symbol ranges
+    // would turn this local reachability cleanup back into whole-library
+    // analysis. Use the decoded inventory as the authority for executable
+    // ranges while still retaining every kernel entry as an ownership boundary.
+    cfg.leaders.reserve(containers.size() + 2u * preapplied_ranges.size());
+    cfg.kernel_entries.reserve(containers.size());
+    cfg.code_ranges.reserve(containers.size() + preapplied_ranges.size());
+    for (const ConSanProgramContainer &container : containers) {
+      if (container.is_kernel() && container.has_text_range)
+        cfg.kernel_entries.push_back(container.entry_text_offset);
+      if (!container.decoded || !container.has_text_range)
+        continue;
+      cfg.leaders.push_back(container.entry_text_offset);
+      if (container.code_size != 0u)
+        cfg.code_ranges.push_back(
+            {.start_offset = container.entry_text_offset, .size = container.code_size});
+    }
+    for (const ConSanPreappliedCodeRange &range : preapplied_ranges) {
+      cfg.leaders.push_back(range.text_offset);
+      if (range.continuation_text_offset)
+        cfg.leaders.push_back(*range.continuation_text_offset);
+      if (range.size != 0u)
+        cfg.code_ranges.push_back({.start_offset = range.text_offset, .size = range.size});
+    }
+    std::ranges::sort(cfg.leaders);
+    cfg.leaders.erase(std::ranges::unique(cfg.leaders).begin(), cfg.leaders.end());
+    std::ranges::sort(cfg.kernel_entries);
+    cfg.kernel_entries.erase(std::ranges::unique(cfg.kernel_entries).begin(),
+                             cfg.kernel_entries.end());
+    std::ranges::sort(cfg.code_ranges, {}, &BasicBlock::CodeRange::start_offset);
+  }
   auto blocks = BasicBlock::build(code_object, decoder, arch, cfg.leaders, cfg.code_ranges);
   const BlockOffsetIndex block_index = build_block_offset_index(blocks);
   CodeObjectPatcher patcher(code_object);
   const std::span<const uint8_t> text = patcher.text_bytes();
   std::unordered_set<const BasicBlock *> owned_blocks;
   for (const ConSanProgramContainer &kernel : containers) {
-    if (!kernel.is_kernel())
+    if (!kernel.is_kernel() || (has_undecoded_container && !kernel.decoded))
       continue;
     if (!kernel.has_text_range)
       continue;
@@ -1722,6 +1761,14 @@ void relay_flat_pointer_provenance_across_calls(std::span<const uint8_t> code_ob
                                                 std::span<ConSanProgramContainer> functions,
                                                 ConSanProgramSiteArena &sites,
                                                 std::vector<std::string> &warnings) {
+  // This refinement only re-decodes and replaces function-site inventory;
+  // kernel sites remain owned by the primary decode. With no non-kernel
+  // function container there is consequently no output this relay can
+  // change. Avoid constructing a whole-object CFG merely because the ELF
+  // function-symbol view also lists thousands of independent kernel entries.
+  if (functions.empty())
+    return;
+
   std::unique_ptr<Decoder> relay_decoder = Decoder::create(arch);
   if (!relay_decoder)
     return;

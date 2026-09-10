@@ -83,4 +83,49 @@ build_consan_cfg_inputs(const AmdGpuCodeObject &code_object,
   return result;
 }
 
+/// Derive CFG inputs scoped to selected kernel ranges when ownership proves
+/// that no separately symbolized helper can be shared with another kernel.
+///
+/// The complete kernel-entry set remains in `kernel_entries`, preserving scope
+/// boundaries. When function containers exist, or no selection was requested,
+/// this returns the ordinary complete input set: ownership through a shared
+/// helper must be established before any sibling kernel can be discarded.
+[[nodiscard]] inline ConSanCfgBuildInputs build_consan_cfg_inputs_for_selection(
+    const AmdGpuCodeObject &code_object, std::span<const ConSanProgramContainer> containers,
+    std::span<const ConSanPreappliedCodeRange> preapplied_ranges, const ConSanRequest &request,
+    const ConSanDebugOverrides &debug) {
+  ConSanCfgBuildInputs result = build_consan_cfg_inputs(code_object, containers, preapplied_ranges);
+  const bool has_selection =
+      !request.kernel_name_allowlist.empty() || !debug.test_kernel_name_filter.empty();
+  const bool has_function_container =
+      std::ranges::any_of(containers, [](const auto &container) { return !container.is_kernel(); });
+  if (!has_selection || has_function_container)
+    return result;
+
+  result.leaders.clear();
+  result.code_ranges.clear();
+  result.leaders.reserve(containers.size() + 2u * preapplied_ranges.size());
+  result.code_ranges.reserve(containers.size() + preapplied_ranges.size());
+  for (const ConSanProgramContainer &kernel : containers) {
+    if (!kernel.is_kernel() || !kernel.has_text_range ||
+        !consan_container_selected(request, debug, kernel.name)) {
+      continue;
+    }
+    result.leaders.push_back(kernel.entry_text_offset);
+    if (kernel.code_size != 0u)
+      result.code_ranges.push_back(
+          {.start_offset = kernel.entry_text_offset, .size = kernel.code_size});
+  }
+  for (const ConSanPreappliedCodeRange &range : preapplied_ranges) {
+    result.leaders.push_back(range.text_offset);
+    if (range.continuation_text_offset)
+      result.leaders.push_back(*range.continuation_text_offset);
+    if (range.size != 0u)
+      result.code_ranges.push_back({.start_offset = range.text_offset, .size = range.size});
+  }
+  std::ranges::sort(result.leaders);
+  result.leaders.erase(std::ranges::unique(result.leaders).begin(), result.leaders.end());
+  return result;
+}
+
 } // namespace rocjitsu::consan_detail

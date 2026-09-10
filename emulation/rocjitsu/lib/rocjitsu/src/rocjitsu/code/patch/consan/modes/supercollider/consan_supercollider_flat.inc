@@ -36,8 +36,22 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object,
 
   const auto original_bytes = std::span<const uint8_t>(
       reinterpret_cast<const uint8_t *>(code_object.image_data()), code_object.image_size());
-  ScOwnerAnalysis owner_analysis(code_object, result.program_inventory, arch,
-                                 /*restrict_to_preflight_candidates=*/false);
+  // With no shared function containers, an allowlist proves that CFG and
+  // liveness state for sibling kernel ranges cannot contribute to a selected
+  // site's ownership. Avoid materializing the whole solution library merely
+  // because its selected kernels share one ELF image.
+  const ScOwnerCfgRestriction cfg_restriction =
+      !options.kernel_name_allowlist.empty() && result.program_inventory.functions().empty()
+          ? ScOwnerCfgRestriction::AllowlistedKernels
+          : ScOwnerCfgRestriction::None;
+  std::vector<uint64_t> liveness_query_offsets;
+  liveness_query_offsets.reserve(admitted_sites.size());
+  for (const auto &[file_offset, site] : admitted_sites) {
+    (void)file_offset;
+    liveness_query_offsets.push_back(site->physical_id.original_text_offset);
+  }
+  ScOwnerAnalysis owner_analysis(code_object, result.program_inventory, arch, cfg_restriction,
+                                 options.kernel_name_allowlist, liveness_query_offsets);
 
   struct FlatCheckTrapCandidate {
     const ConSanProgramSite *site = nullptr;
@@ -155,10 +169,9 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object,
             ? std::optional<ConSanScalarVccSpill>{ConSanScalarVccSpill{
                   .vcc_save_sgpr = *vcc_save,
                   .reservoir_vgpr = static_cast<uint16_t>(*scratch + instrumentation_scratch_vgprs),
-                  .reservoir = dynamic_stack_spill
-                                   ? ConSanScalarVccReservoir::DynamicStackBootstrap
-                               : vgpr_spill ? ConSanScalarVccReservoir::PrivateSpill
-                                            : ConSanScalarVccReservoir::PackedLanes,
+                  .reservoir = dynamic_stack_spill ? ConSanScalarVccReservoir::DynamicStackBootstrap
+                               : vgpr_spill        ? ConSanScalarVccReservoir::PrivateSpill
+                                                   : ConSanScalarVccReservoir::PackedLanes,
               }}
             : std::nullopt;
     ++scratchable_candidate_count;
@@ -475,9 +488,8 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object,
     }
     if (candidate.vgpr_spill || candidate.dynamic_stack_spill) {
       if (candidate.dynamic_stack_spill) {
-        if (!candidate.scalar_vcc_spill ||
-            candidate.scalar_vcc_spill->reservoir !=
-                ConSanScalarVccReservoir::DynamicStackBootstrap) {
+        if (!candidate.scalar_vcc_spill || candidate.scalar_vcc_spill->reservoir !=
+                                               ConSanScalarVccReservoir::DynamicStackBootstrap) {
           result.errors.emplace_back(
               "ConSan flat check/trap proof lost its dynamic scalar spill window");
           return;
@@ -497,8 +509,8 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object,
         planned.words = std::move(wrapped);
       } else {
         const bool spills_scalar_pair = candidate.scalar_vcc_spill.has_value();
-        if (spills_scalar_pair && candidate.scalar_vcc_spill->reservoir !=
-                                      ConSanScalarVccReservoir::PrivateSpill) {
+        if (spills_scalar_pair &&
+            candidate.scalar_vcc_spill->reservoir != ConSanScalarVccReservoir::PrivateSpill) {
           result.errors.emplace_back(
               "ConSan flat check/trap proof has an invalid scalar spill window");
           return;
@@ -553,8 +565,7 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object,
         planned.words = std::move(wrapped);
       }
     } else if (candidate.scalar_vcc_spill) {
-      if (candidate.scalar_vcc_spill->reservoir !=
-          ConSanScalarVccReservoir::PackedLanes) {
+      if (candidate.scalar_vcc_spill->reservoir != ConSanScalarVccReservoir::PackedLanes) {
         result.errors.emplace_back(
             "ConSan flat check/trap proof has an invalid fixed-lane scalar spill window");
         return;

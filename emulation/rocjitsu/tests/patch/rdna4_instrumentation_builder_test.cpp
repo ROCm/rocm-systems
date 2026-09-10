@@ -107,19 +107,32 @@ TEST(InstructionBuilder, BuildSplitScratchWaits) {
 TEST(InstructionBuilder, BuildScalarDestinationDependencyWaits) {
   const auto salu = build_s_wait_alu_sa_sdst0(ROCJITSU_CODE_ARCH_RDNA4);
   const auto valu = build_s_wait_alu_va_sdst0(ROCJITSU_CODE_ARCH_RDNA4);
+  const auto vcc = build_s_wait_alu_va_vcc0(ROCJITSU_CODE_ARCH_RDNA4);
   const auto gfx1250_salu = build_s_wait_alu_sa_sdst0(ROCJITSU_CODE_ARCH_CDNA5);
   const auto gfx1250_valu = build_s_wait_alu_va_sdst0(ROCJITSU_CODE_ARCH_CDNA5);
   ASSERT_TRUE(salu);
   ASSERT_TRUE(valu);
+  ASSERT_TRUE(vcc);
   ASSERT_TRUE(gfx1250_salu);
   ASSERT_TRUE(gfx1250_valu);
   EXPECT_EQ(*salu, 0xbf88ff9eu);
   // va_sdst=0 with every other depctr field at its no-wait maximum.
   EXPECT_EQ(*valu, 0xbf88f19fu);
+  EXPECT_EQ(*vcc, 0xbf88ff9du);
   EXPECT_EQ(*gfx1250_salu, 0xbf88ff9eu);
   EXPECT_EQ(*gfx1250_valu, 0xbf88f19fu);
   EXPECT_FALSE(build_s_wait_alu_sa_sdst0(ROCJITSU_CODE_ARCH_CDNA4));
   EXPECT_FALSE(build_s_wait_alu_va_sdst0(ROCJITSU_CODE_ARCH_CDNA4));
+  EXPECT_FALSE(build_s_wait_alu_va_vcc0(ROCJITSU_CODE_ARCH_CDNA4));
+}
+
+TEST(InstructionBuilder, BuildImmediateSetreg) {
+  const auto hwreg = build_hwreg_imm(/*reg_id=*/26u, /*offset=*/0u, /*size_bits=*/2u);
+  ASSERT_TRUE(hwreg);
+  const auto set = build_s_setreg_imm32_b32(*hwreg, /*literal=*/2u, ROCJITSU_CODE_ARCH_RDNA4);
+  ASSERT_TRUE(set);
+  EXPECT_EQ(*set, (std::array<uint32_t, 2>{0xb980081au, 2u}));
+  EXPECT_FALSE(build_s_setreg_imm32_b32(*hwreg, 2u, ROCJITSU_CODE_ARCH_CDNA4));
 }
 
 TEST(InstructionBuilder, BuildVLshrrevB32E32) {

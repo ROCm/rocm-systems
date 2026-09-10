@@ -37,6 +37,28 @@ using consan_moi_detail::kAtomicRecordLayout;
 using consan_moi_detail::kBarrierRecordLayout;
 using consan_moi_detail::kFenceRecordLayout;
 
+[[nodiscard]] bool
+rdna4_expert_scheduling_enabled_immediately_before(std::span<const uint8_t> bytes,
+                                                   uint64_t site_file_offset) {
+  constexpr uint16_t kWaveSchedModeHwreg = 26u | ((2u - 1u) << 11u);
+  constexpr uint32_t kSetreg = pack_sopk(/*op=*/19u, /*sdst=*/0u, kWaveSchedModeHwreg);
+  constexpr uint64_t kSearchBytes = 32u;
+  const uint64_t begin = site_file_offset > kSearchBytes ? site_file_offset - kSearchBytes : 0u;
+  for (uint64_t offset = site_file_offset; offset >= begin + sizeof(uint32_t);) {
+    offset -= sizeof(uint32_t);
+    if (offset + 2u * sizeof(uint32_t) > site_file_offset)
+      continue;
+    uint32_t word = 0u;
+    std::memcpy(&word, bytes.data() + offset, sizeof(word));
+    if (word != kSetreg)
+      continue;
+    uint32_t literal = 0u;
+    std::memcpy(&literal, bytes.data() + offset + sizeof(uint32_t), sizeof(literal));
+    return (literal & 0x3u) == 2u;
+  }
+  return false;
+}
+
 [[nodiscard]] std::optional<std::vector<uint32_t>> build_barrier_record_cave_words(
     std::span<const uint8_t> bytes, const ConSanBarrierSite &site,
     const ConSanProgramContainer &container, const MoiRecordEventEmissionPlan &options,
@@ -89,6 +111,22 @@ using consan_moi_detail::kFenceRecordLayout;
   const uint16_t slot_vgpr = static_cast<uint16_t>(*options.scratch_vgpr + 2u);
   const uint16_t lane_rank_vgpr = static_cast<uint16_t>(*options.scratch_vgpr + 5u);
   constexpr uint16_t kScalarInlineMinusOne = 0xC1;
+  const bool suspend_expert_scheduling =
+      arch == ROCJITSU_CODE_ARCH_RDNA4 &&
+      rdna4_expert_scheduling_enabled_immediately_before(bytes, site.file_offset);
+  const auto wave_sched_hwreg = build_hwreg_imm(/*reg_id=*/26u, /*offset=*/0u, /*size_bits=*/2u);
+  const auto normal_scheduling =
+      suspend_expert_scheduling && wave_sched_hwreg
+          ? build_s_setreg_imm32_b32(*wave_sched_hwreg, /*literal=*/0u, arch)
+          : std::nullopt;
+  const auto expert_scheduling =
+      suspend_expert_scheduling && wave_sched_hwreg
+          ? build_s_setreg_imm32_b32(*wave_sched_hwreg, /*literal=*/2u, arch)
+          : std::nullopt;
+  if (suspend_expert_scheduling && (!normal_scheduling || !expert_scheduling)) {
+    errors.emplace_back("ConSan MOI barrier record patch could not suspend expert scheduling");
+    return std::nullopt;
+  }
 
   const ConSanTargetProfile *target = consan_target_profile(arch);
   const bool preserve_vgpr_bank_dynamically =
@@ -111,6 +149,8 @@ using consan_moi_detail::kFenceRecordLayout;
   words.reserve(
       190 + (spill ? spill->save_words.size() + spill->restore_words.size() : 0u) +
       (scalar_spill ? scalar_spill->save_words.size() + scalar_spill->restore_words.size() : 0u));
+  if (normal_scheduling)
+    words.insert(words.end(), normal_scheduling->begin(), normal_scheduling->end());
   if (preserve_vgpr_bank_dynamically) {
     require_emission.append("ConSan MOI barrier record patch could not preserve MODE.VGPR_MSB",
                             instrumentation::build_s_getreg_b32(
@@ -133,6 +173,7 @@ using consan_moi_detail::kFenceRecordLayout;
       instrumentation::build_v_mbcnt_hi_u32_b32(lane_rank_vgpr, kScalarInlineMinusOne,
                                                 vector_source_vgpr(lane_rank_vgpr), arch),
       instrumentation::build_v_cmp_eq_u32_vcc(scalar_positive_inline_u32(0), lane_rank_vgpr, arch),
+      instrumentation::build_valu_vcc_to_salu_dependency_wait(arch),
       instrumentation::build_s_and_saveexec_b64(*options.moi_exec_save_sgpr, kAmdGpuVccLo, arch));
 
   const uint16_t value_vgpr = static_cast<uint16_t>(*options.scratch_vgpr + 5u);
@@ -185,6 +226,8 @@ using consan_moi_detail::kFenceRecordLayout;
     words.push_back(*instrumentation::build_s_set_vgpr_msb_transition(
         0u, static_cast<uint8_t>(*vgpr_msb_mode), arch));
   }
+  if (expert_scheduling)
+    words.insert(words.end(), expert_scheduling->begin(), expert_scheduling->end());
   const uint32_t staged_guest_instruction_offset =
       static_cast<uint32_t>(words.size() * sizeof(uint32_t));
   words.push_back(original_barrier_word);

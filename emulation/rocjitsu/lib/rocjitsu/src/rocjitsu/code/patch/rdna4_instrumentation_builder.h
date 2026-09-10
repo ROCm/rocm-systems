@@ -65,6 +65,14 @@ build_s_setreg_b32(uint16_t ssrc, uint16_t hwreg, rj_code_arch_t arch) {
   return pack_sopk(/*op=*/18, ssrc, hwreg);
 }
 
+/// @brief Encode RDNA4-class `s_setreg_imm32_b32 hwreg, literal`.
+[[nodiscard]] inline constexpr std::optional<std::array<uint32_t, 2>>
+build_s_setreg_imm32_b32(uint16_t hwreg, uint32_t literal, rj_code_arch_t arch) {
+  if (arch != ROCJITSU_CODE_ARCH_RDNA4 && arch != ROCJITSU_CODE_ARCH_CDNA5)
+    return std::nullopt;
+  return std::array<uint32_t, 2>{pack_sopk(/*op=*/19, /*sdst=*/0, hwreg), literal};
+}
+
 /// @brief Encode v_mov_b32_e32 for the given target ISA.
 ///
 /// @param vdst  Destination VGPR.
@@ -684,6 +692,18 @@ build_s_wait_alu_va_sdst0(rj_code_arch_t arch) {
   if (!is_rdna4_family_arch(arch))
     return std::nullopt;
   return pack_sopp(rdna4::kSWaitAlu, 0xf19fu);
+}
+
+/// @brief Encode gfx12 `s_wait_alu depctr_va_vcc(0)`.
+///
+/// A VALU comparison can define VCC immediately before a scalar instruction
+/// such as `s_and_saveexec_b64` consumes it. Drain that cross-pipeline result
+/// independently of ordinary VGPR-to-SGPR destinations.
+[[nodiscard]] inline constexpr std::optional<uint32_t>
+build_s_wait_alu_va_vcc0(rj_code_arch_t arch) {
+  if (!is_rdna4_family_arch(arch))
+    return std::nullopt;
+  return pack_sopp(rdna4::kSWaitAlu, 0xff9du);
 }
 
 /// @brief Encode RDNA4 `flat_atomic_add_u32 vdst, v[vaddr:vaddr+1], vsrc`.

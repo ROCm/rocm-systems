@@ -2490,6 +2490,13 @@ TranslatedCodeObject BinaryTranslator::translate_impl(const AmdGpuCodeObject &ob
                  "preserving source descriptor resources requires identity-ISA translation");
     return leave_unchanged();
   }
+  if (!options_.source_kernel_descriptor_offsets.empty() &&
+      (!options_.preserve_source_text_prefix || guest_arch_ != host_arch_)) {
+    append_error(result.diagnostics, DiagnosticKind::Legalization,
+                 "partial kernel translation requires identity-ISA translation with the source "
+                 "text prefix preserved");
+    return leave_unchanged();
+  }
 
   if (obj.image_size() < sizeof(Elf64_Ehdr)) {
     append_error(result.diagnostics, DiagnosticKind::ResourceLimit,
@@ -2610,6 +2617,18 @@ TranslatedCodeObject BinaryTranslator::translate_impl(const AmdGpuCodeObject &ob
   auto descriptor_translations = descriptor_translator.translate_image(
       patcher.image_bytes(), patcher.text_offset(), patcher.text_size(), initial_descriptor_options,
       obj.text_sections().front()->sectionHeaderIndex());
+  if (!options_.source_kernel_descriptor_offsets.empty()) {
+    std::unordered_set<uint64_t> requested(options_.source_kernel_descriptor_offsets.begin(),
+                                           options_.source_kernel_descriptor_offsets.end());
+    std::erase_if(descriptor_translations, [&](const KdTranslation &translation) {
+      return !requested.erase(translation.descriptor_file_offset);
+    });
+    if (!requested.empty()) {
+      append_error(result.diagnostics, DiagnosticKind::KernelDescriptor,
+                   "partial kernel translation requested an unknown kernel descriptor");
+      return leave_unchanged();
+    }
+  }
   bool descriptors_supported = true;
   for (const auto &translation : descriptor_translations) {
     if (translation.supported || !skip_failed_kernels)

@@ -464,9 +464,11 @@ canonicalize_sync_events_by_physical_site(SynchronizationInventoryBuildView inve
 
 [[nodiscard]] std::vector<std::unique_ptr<BasicBlock>>
 build_sync_basic_blocks(const AmdGpuCodeObject &code_object, Decoder &decoder, rj_code_arch_t arch,
-                        const ProgramInventory &program_inventory) {
+                        const ProgramInventory &program_inventory, const ConSanRequest &request,
+                        const ConSanDebugOverrides &debug) {
   const consan_detail::ConSanCfgBuildInputs cfg =
-      consan_detail::build_consan_cfg_inputs(code_object, program_inventory.containers());
+      consan_detail::build_consan_cfg_inputs_for_selection(
+          code_object, program_inventory.containers(), {}, request, debug);
   return BasicBlock::build(code_object, decoder, arch, cfg.leaders, cfg.code_ranges);
 }
 
@@ -2159,11 +2161,13 @@ void annotate_execution_owners(const AmdGpuCodeObject &code_object, Decoder &dec
                                rj_code_arch_t arch,
                                const std::vector<std::unique_ptr<BasicBlock>> *reusable_blocks,
                                SynchronizationInventoryBuildView inventory,
-                               ConSanProgramAnalysisResult &result) {
+                               ConSanProgramAnalysisResult &result, const ConSanRequest &request,
+                               const ConSanDebugOverrides &debug) {
   const std::span<const ConSanPreappliedCodeRange> preapplied_ranges =
       result.program_inventory.preapplied_mutation().code_ranges;
-  const consan_detail::ConSanCfgBuildInputs cfg = consan_detail::build_consan_cfg_inputs(
-      code_object, result.program_inventory.containers(), preapplied_ranges);
+  const consan_detail::ConSanCfgBuildInputs cfg =
+      consan_detail::build_consan_cfg_inputs_for_selection(
+          code_object, result.program_inventory.containers(), preapplied_ranges, request, debug);
   std::vector<std::unique_ptr<BasicBlock>> rebuilt_blocks;
   if (reusable_blocks == nullptr || !preapplied_ranges.empty()) {
     rebuilt_blocks = BasicBlock::build(code_object, decoder, arch, cfg.leaders, cfg.code_ranges);
@@ -2235,7 +2239,7 @@ bool analyze_consan_semantic_inventory(std::span<const uint8_t> code_object_byte
       // synchronization semantics. Shared-function sites still need kernel
       // ownership, while kernel-local sites carry their descriptor directly.
       annotate_execution_owners(code_object, decoder, arch, nullptr, synchronization_inventory,
-                                result);
+                                result, request, debug);
     }
     result.program_inventory = inventory_builder.view();
     return true;
@@ -2251,7 +2255,7 @@ bool analyze_consan_semantic_inventory(std::span<const uint8_t> code_object_byte
 
   const SynchronizationInventoryView sync_events = synchronization_inventory.view();
   const auto sync_blocks =
-      build_sync_basic_blocks(code_object, decoder, arch, result.program_inventory);
+      build_sync_basic_blocks(code_object, decoder, arch, result.program_inventory, request, debug);
   build_singleton_sync_sequences(sync_blocks, synchronization_inventory);
   associate_barrier_sync_sequences(sync_blocks,
                                    consan_requires_extended_barrier_pairs(request, debug, mutation),
@@ -2264,7 +2268,7 @@ bool analyze_consan_semantic_inventory(std::span<const uint8_t> code_object_byte
                                              synchronization_inventory.sync_sequences, result);
   }
   annotate_execution_owners(code_object, decoder, arch, &sync_blocks, synchronization_inventory,
-                            result);
+                            result, request, debug);
   associate_ordinary_release_sync_sequences(sync_blocks, arch, sync_events,
                                             synchronization_inventory);
   associate_ordinary_acquire_sync_sequences(sync_blocks, sync_events, arch,

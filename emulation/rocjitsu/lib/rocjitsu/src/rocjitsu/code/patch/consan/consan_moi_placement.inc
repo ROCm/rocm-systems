@@ -110,8 +110,8 @@ moi_descriptor_dispatch_id_preload_plan(const KD &desc, rj_code_arch_t arch) {
                                                                                            : 0u));
   const bool kernarg_enabled =
       AMDHSA_BITS_GET(properties, kd::KERNEL_CODE_PROPERTY_ENABLE_SGPR_KERNARG_SEGMENT_PTR) != 0;
-  const uint16_t prefix = static_cast<uint16_t>(private_and_dispatch_ptr + 2u +
-                                                (kernarg_enabled ? 2u : 0u));
+  const uint16_t prefix =
+      static_cast<uint16_t>(private_and_dispatch_ptr + 2u + (kernarg_enabled ? 2u : 0u));
   const uint16_t named_suffix = static_cast<uint16_t>(
       (AMDHSA_BITS_GET(properties, kd::KERNEL_CODE_PROPERTY_ENABLE_SGPR_FLAT_SCRATCH_INIT) != 0
            ? 2u
@@ -143,8 +143,8 @@ moi_descriptor_dispatch_id_preload_plan(const KD &desc, rj_code_arch_t arch) {
   plan.identity_salt_sgpr = private_and_dispatch_ptr;
   plan.original_user_sgpr_count = original_user_count;
   plan.system_sgpr_count = system_count;
-  const uint16_t inserted = static_cast<uint16_t>((queue_enabled ? 0u : 2u) +
-                                                  (dispatch_enabled ? 0u : 2u));
+  const uint16_t inserted =
+      static_cast<uint16_t>((queue_enabled ? 0u : 2u) + (dispatch_enabled ? 0u : 2u));
   const uint16_t desired_named_count = static_cast<uint16_t>(original_named_count + inserted);
   uint16_t expanded_user_count = std::max(original_user_count, desired_named_count);
   const uint16_t preload_length =
@@ -158,13 +158,13 @@ moi_descriptor_dispatch_id_preload_plan(const KD &desc, rj_code_arch_t arch) {
   // still-live kernarg pointer in the entry prologue. System SGPRs move only
   // by the remaining user-window growth, so record that smaller repair
   // separately.
-  const uint16_t overflow = expanded_user_count > user_sgpr_initialization_limit
-                                ? static_cast<uint16_t>(expanded_user_count -
-                                                        user_sgpr_initialization_limit)
-                                : 0u;
-  if (profile && profile->supports_kernarg_preload_overflow_recovery &&
-      inserted != 0u && overflow >= 1u && overflow <= 4u && kernarg_ptr &&
-      preload_length > overflow && original_named_count == original_user_count) {
+  const uint16_t overflow =
+      expanded_user_count > user_sgpr_initialization_limit
+          ? static_cast<uint16_t>(expanded_user_count - user_sgpr_initialization_limit)
+          : 0u;
+  if (profile && profile->supports_kernarg_preload_overflow_recovery && inserted != 0u &&
+      overflow >= 1u && overflow <= 4u && kernarg_ptr && preload_length > overflow &&
+      original_named_count == original_user_count) {
     expanded_user_count = user_sgpr_initialization_limit;
     plan.kernarg_reload_sgpr = static_cast<uint16_t>(original_user_count - overflow);
     // Reload executes after the explicit guest-SGPR repair.  At that point
@@ -797,9 +797,11 @@ struct MoiResourcePlanningState {
     if (!code_object.is_valid() || !decoder)
       return;
 
-    const consan_detail::ConSanCfgBuildInputs cfg = consan_detail::build_consan_cfg_inputs(
-        code_object, problem.inventory().containers(),
-        problem.inventory().preapplied_mutation().code_ranges);
+    const consan_detail::ConSanCfgBuildInputs cfg =
+        consan_detail::build_consan_cfg_inputs_for_selection(
+            code_object, problem.inventory().containers(),
+            problem.inventory().preapplied_mutation().code_ranges, problem.request(),
+            ConSanDebugOverrides{});
     blocks = BasicBlock::build(code_object, *decoder, arch, cfg.leaders, cfg.code_ranges);
     block_index = build_block_offset_index(blocks);
     CodeObjectPatcher patcher(code_object);
@@ -1442,9 +1444,8 @@ public:
     std::vector<consan_detail::ScalarOwnerSgprRange> combined = selected_;
     combined.push_back({base, width});
     return owner_contexts_.empty() ||
-           !consan_detail::scalar_owner_contexts_conflict_with_physical_vcc(owner_contexts_,
-                                                                            combined,
-                                                                            required_sgpr_count_floor_);
+           !consan_detail::scalar_owner_contexts_conflict_with_physical_vcc(
+               owner_contexts_, combined, required_sgpr_count_floor_);
   }
 
   [[nodiscard]] std::optional<uint16_t>

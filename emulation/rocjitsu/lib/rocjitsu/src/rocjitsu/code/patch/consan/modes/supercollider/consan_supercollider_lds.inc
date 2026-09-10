@@ -59,8 +59,17 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object,
       result.program_inventory.functions().empty() && !options.fault_dry_run &&
       options.sc_perturb_kind == ConSanPerturbationKind::None &&
       executable_text_bytes >= kScBoundedCfgMinimumTextBytes;
-  ScOwnerAnalysis owner_analysis(code_object, result.program_inventory, arch,
-                                 restrict_to_preflight_candidates);
+  const ScOwnerCfgRestriction cfg_restriction = restrict_to_preflight_candidates
+                                                    ? ScOwnerCfgRestriction::PreflightCandidates
+                                                    : ScOwnerCfgRestriction::None;
+  std::vector<uint64_t> liveness_query_offsets;
+  liveness_query_offsets.reserve(admitted_sites.size());
+  for (const auto &[file_offset, site] : admitted_sites) {
+    (void)file_offset;
+    liveness_query_offsets.push_back(site->physical_id.original_text_offset);
+  }
+  ScOwnerAnalysis owner_analysis(code_object, result.program_inventory, arch, cfg_restriction,
+                                 options.kernel_name_allowlist, liveness_query_offsets);
 
   struct LdsCheckTrapCandidate {
     const ConSanProgramSite *site = nullptr;

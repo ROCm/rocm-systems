@@ -69,25 +69,43 @@ struct ScSiteOwnerFacts {
   bool every_owner_can_grow_ordinary_vgprs = true;
 };
 
+enum class ScOwnerCfgRestriction {
+  None,
+  PreflightCandidates,
+  AllowlistedKernels,
+};
+
 class ScOwnerAnalysis {
 public:
   ScOwnerAnalysis(const AmdGpuCodeObject &code_object, const ProgramInventory &inventory,
-                  rj_code_arch_t arch, bool restrict_to_preflight_candidates)
+                  rj_code_arch_t arch, ScOwnerCfgRestriction restriction,
+                  std::span<const std::string> kernel_name_allowlist,
+                  std::span<const uint64_t> liveness_query_offsets)
       : inventory_(inventory), arch_(arch),
         original_bytes_(reinterpret_cast<const uint8_t *>(code_object.image_data()),
                         code_object.image_size()),
         decoder_(Decoder::create(arch)) {
+    liveness_query_offsets_.insert(liveness_query_offsets.begin(), liveness_query_offsets.end());
     if (!decoder_)
       return;
 
     consan_detail::ConSanCfgBuildInputs cfg =
         consan_detail::build_consan_cfg_inputs(code_object, inventory.containers());
-    if (restrict_to_preflight_candidates) {
+    if (restriction != ScOwnerCfgRestriction::None) {
       cfg.leaders.clear();
       cfg.kernel_entries.clear();
       cfg.code_ranges.clear();
       for (const ConSanProgramContainer &kernel : inventory.kernels()) {
-        if (!kernel.has_text_range || kernel.preflight_action != ConSanPreflightAction::Candidate)
+        if (!kernel.has_text_range)
+          continue;
+        if (restriction == ScOwnerCfgRestriction::PreflightCandidates &&
+            kernel.preflight_action != ConSanPreflightAction::Candidate)
+          continue;
+        if (!kernel_name_allowlist.empty() &&
+            !std::ranges::any_of(kernel_name_allowlist, [&](std::string_view allowed) {
+              return consan_normalize_kernel_name(allowed) ==
+                     consan_normalize_kernel_name(kernel.name);
+            }))
           continue;
         cfg.leaders.push_back(kernel.entry_text_offset);
         cfg.kernel_entries.push_back(kernel.entry_text_offset);
@@ -137,9 +155,19 @@ public:
     }
     ScOwnerContext &built = contexts_[id.ordinal].emplace(ScOwnerContext{
         .kernel = owner, .scope = std::move(*scope), .liveness = nullptr, .max_refs = {}});
-    built.liveness =
-        std::make_unique<LivenessAnalysis>(KernelBlockScope(built.scope.blocks),
-                                           LivenessAnalysisOptions{}, built.scope.liveness_edges);
+    std::vector<const Instruction *> liveness_queries;
+    for (BasicBlock *block : built.scope.blocks) {
+      if (block == nullptr)
+        continue;
+      for (const Instruction &instruction : block->instructions())
+        if (liveness_query_offsets_.contains(instruction.src_loc()))
+          liveness_queries.push_back(&instruction);
+    }
+    LivenessAnalysisOptions liveness_options;
+    liveness_options.restrict_live_before_to_instructions = true;
+    liveness_options.live_before_instructions = liveness_queries;
+    built.liveness = std::make_unique<LivenessAnalysis>(
+        KernelBlockScope(built.scope.blocks), liveness_options, built.scope.liveness_edges);
     built.max_refs = max_register_refs_in_kernel(*owner, KernelBlockScope(built.scope.blocks));
     return &built;
   }
@@ -210,6 +238,7 @@ private:
   std::span<const uint8_t> pristine_text_;
   std::vector<std::optional<ScOwnerContext>> contexts_;
   std::vector<bool> failed_contexts_;
+  std::unordered_set<uint64_t> liveness_query_offsets_;
 };
 
 [[nodiscard]] std::optional<uint16_t> choose_sc_access_scratch_vgpr(

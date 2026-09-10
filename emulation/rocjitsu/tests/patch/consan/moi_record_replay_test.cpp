@@ -106,6 +106,10 @@ TEST(ConSanMoi, KernelAllowlistUsesExactEntryNamesAndLeavesOtherKernelsUntouched
   const auto unrelated = std::ranges::find(selected.program_inventory.kernels(), "unrelated_kernel",
                                            &ConSanProgramContainer::name);
   ASSERT_NE(unrelated, selected.program_inventory.kernels().end());
+  EXPECT_TRUE(unrelated->decoded);
+  EXPECT_TRUE(std::ranges::none_of(selected.program_inventory.kernels(), [](const auto &kernel) {
+    return kernel.name != "unrelated_kernel" && kernel.decoded;
+  }));
   const auto access_patch = std::ranges::find(
       selected.patches, ConSanPatchKind::TrampolineMoiAccessRecordStore, &ConSanPatchInfo::kind);
   ASSERT_NE(access_patch, selected.patches.end());
@@ -2235,6 +2239,23 @@ TEST(ConSanMoi, RecordReplayExcludesUnreachableTailOfBoundedZeroSizedSymbol) {
   EXPECT_EQ(test_admitted_accesses(result).front().physical_id.original_text_offset, 0u);
   ASSERT_EQ(result.resource_plans.size(), 1u);
   EXPECT_EQ(result.resource_plans.front().reason, ConSanRegisterPlanReason::None);
+
+  MoiOptions scoped_options = moi_options(ConSanMoiEngine::RecordReplay);
+  scoped_options.kernel_name_allowlist = {"lds_probe"};
+  const ConSanTransformArtifacts scoped = test_lower_consan(bytes, scoped_options);
+
+  ASSERT_TRUE(consan_patch_succeeded(scoped)) << testing::PrintToString(scoped.errors);
+  ASSERT_EQ(scoped.program_inventory.kernels().size(), 2u);
+  const auto scoped_first = std::ranges::find(scoped.program_inventory.kernels(), "lds_probe",
+                                              &ConSanProgramContainer::name);
+  ASSERT_NE(scoped_first, scoped.program_inventory.kernels().end());
+  EXPECT_TRUE(scoped_first->decoded);
+  EXPECT_TRUE(scoped_first->code_size_inferred_from_zero);
+  EXPECT_TRUE(std::ranges::none_of(scoped.program_inventory.kernels(), [](const auto &kernel) {
+    return kernel.name != "lds_probe" && kernel.decoded;
+  }));
+  ASSERT_EQ(test_admitted_accesses(scoped).size(), 1u);
+  EXPECT_EQ(test_admitted_accesses(scoped).front().physical_id.original_text_offset, 0u);
 }
 
 TEST(ConSanMoi, RecordReplayDoesNotPruneExplicitSizedUnreachableTail) {
@@ -7119,6 +7140,8 @@ TEST(ConSanMoi, BarrierRecordPatchTrampolinesBarrierAndWritesRecord) {
       /*vdst=*/13, /*src0=*/0xC1, vector_source_vgpr(13), ROCJITSU_CODE_ARCH_RDNA4);
   const auto first_active_lane = build_v_cmp_eq_u32_e32_vcc(scalar_positive_inline_u32(0),
                                                             /*vsrc1=*/13, ROCJITSU_CODE_ARCH_RDNA4);
+  const auto wait_vcc =
+      instrumentation::build_valu_vcc_to_salu_dependency_wait(ROCJITSU_CODE_ARCH_RDNA4);
   const auto save_exec =
       build_s_and_saveexec_b64(/*sdst=*/30, /*ssrc0=*/kAmdGpuVccLo, ROCJITSU_CODE_ARCH_RDNA4);
   const auto restore_exec = build_s_mov_b64(/*sdst=*/126, /*ssrc0=*/30, ROCJITSU_CODE_ARCH_RDNA4);
@@ -7133,6 +7156,7 @@ TEST(ConSanMoi, BarrierRecordPatchTrampolinesBarrierAndWritesRecord) {
   ASSERT_TRUE(mbcnt_lo);
   ASSERT_TRUE(mbcnt_hi);
   ASSERT_TRUE(first_active_lane);
+  ASSERT_TRUE(wait_vcc);
   ASSERT_TRUE(save_exec);
   ASSERT_TRUE(restore_exec);
   ASSERT_TRUE(save_scc);
@@ -7142,8 +7166,8 @@ TEST(ConSanMoi, BarrierRecordPatchTrampolinesBarrierAndWritesRecord) {
   ASSERT_TRUE(skip_overflow);
   EXPECT_TRUE(contains_subsequence(trampoline_words, *mbcnt_lo));
   EXPECT_TRUE(contains_subsequence(trampoline_words, *mbcnt_hi));
-  EXPECT_TRUE(contains_subsequence(trampoline_words,
-                                   std::array<uint32_t, 2>{*first_active_lane, *save_exec}));
+  EXPECT_TRUE(contains_subsequence(
+      trampoline_words, std::array<uint32_t, 3>{*first_active_lane, *wait_vcc, *save_exec}));
   EXPECT_TRUE(std::find(trampoline_words.begin(), trampoline_words.end(),
                         build_v_mov_b32_e32(/*vdst=*/13, /*src0=*/30, ROCJITSU_CODE_ARCH_RDNA4)) !=
               trampoline_words.end());
@@ -7169,6 +7193,50 @@ TEST(ConSanMoi, BarrierRecordPatchTrampolinesBarrierAndWritesRecord) {
   EXPECT_TRUE(contains_subsequence(trampoline_words, *mov_barrier_count_lo));
   EXPECT_GT(only_non_entry_prologue_patch(result).trampoline_size, 0u);
   expect_record_replay_text_transaction(result);
+}
+
+TEST(ConSanMoi, Gfx1201BarrierRecordSuspendsGuestExpertScheduling) {
+  constexpr uint32_t kBarrierWait = 0xBF94FFFFu;
+  const auto sched_hwreg = build_hwreg_imm(/*reg_id=*/26u, /*offset=*/0u, /*size_bits=*/2u);
+  ASSERT_TRUE(sched_hwreg);
+  const auto enable_expert =
+      build_s_setreg_imm32_b32(*sched_hwreg, /*literal=*/2u, ROCJITSU_CODE_ARCH_RDNA4);
+  const auto normal =
+      build_s_setreg_imm32_b32(*sched_hwreg, /*literal=*/0u, ROCJITSU_CODE_ARCH_RDNA4);
+  ASSERT_TRUE(enable_expert && normal);
+  const std::vector<uint32_t> text_words = {
+      (*enable_expert)[0], (*enable_expert)[1],
+      0xBFC60000u, // s_wait_dscnt 0
+      kBarrierWait,        build_s_endpgm(ROCJITSU_CODE_ARCH_RDNA4),
+  };
+
+  MoiOptions options = moi_options();
+  options.moi_track_barriers = true;
+  options.scratch_vgpr = 8;
+  options.moi_exec_save_sgpr = 30;
+  options.set_moi_owner_epoch_vgprs(14, 15);
+  options.moi_report_buffer_address = 0x123456780000ull;
+  options.moi_report_buffer_size = consan_moi_report_buffer_min_bytes(1, 0, 0, 0, 1);
+
+  const auto result = test_lower_consan(make_rdna4_lds_code_object(text_words), options);
+
+  ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
+  const ConSanPatchInfo &patch = only_non_entry_prologue_patch(result);
+  EXPECT_EQ(patch.anchor_offset, 3u * sizeof(uint32_t));
+  ASSERT_TRUE(patch.relocated_guest_instruction_offset);
+  AmdGpuCodeObject patched(result.replacement.data(), result.replacement.size());
+  ASSERT_TRUE(patched.is_valid());
+  const std::vector<uint32_t> trampoline =
+      text_words_at_offset(patched, patch.trampoline_offset, patch.trampoline_size);
+  ASSERT_GE(trampoline.size(), normal->size() + enable_expert->size() + 1u);
+  EXPECT_TRUE(std::equal(normal->begin(), normal->end(), trampoline.begin()));
+  const size_t guest_word =
+      (*patch.relocated_guest_instruction_offset - patch.trampoline_offset) / sizeof(uint32_t);
+  ASSERT_GE(guest_word, enable_expert->size());
+  ASSERT_LT(guest_word, trampoline.size());
+  EXPECT_TRUE(std::equal(enable_expert->begin(), enable_expert->end(),
+                         trampoline.begin() + static_cast<ptrdiff_t>(guest_word - 2u)));
+  EXPECT_EQ(trampoline[guest_word], kBarrierWait);
 }
 
 TEST(ConSanMoi, Cdna4AdjacentFullBarriersShareOneRecordProbe) {
@@ -8630,8 +8698,7 @@ TEST(ConSanMoi, Cdna4PrivateEntryScalarSpillSavesRepairedGuestAbi) {
   mutate_first_kernel_descriptor(bytes, [](KD &descriptor) {
     AMDHSA_BITS_SET(descriptor.kernel_code_properties,
                     kd::KERNEL_CODE_PROPERTY_ENABLE_SGPR_KERNARG_SEGMENT_PTR, 1u);
-    AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc2,
-                    kd::COMPUTE_PGM_RSRC2_USER_SGPR_COUNT, 2u);
+    AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc2, kd::COMPUTE_PGM_RSRC2_USER_SGPR_COUNT, 2u);
     AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc1,
                     kd::COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT, 12u);
   });
@@ -8655,9 +8722,8 @@ TEST(ConSanMoi, Cdna4PrivateEntryScalarSpillSavesRepairedGuestAbi) {
   ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
   EXPECT_TRUE(result.moi_operating_point.moi_dispatch_identity.private_fallback());
 
-  const auto prologue =
-      std::ranges::find(result.patches, ConSanPatchKind::KernelEntryMoiPrivateEpochPrologue,
-                        &ConSanPatchInfo::kind);
+  const auto prologue = std::ranges::find(
+      result.patches, ConSanPatchKind::KernelEntryMoiPrivateEpochPrologue, &ConSanPatchInfo::kind);
   ASSERT_NE(prologue, result.patches.end());
   ASSERT_TRUE(prologue->dispatch_id_prologue);
   ASSERT_TRUE(prologue->entry_scalar_backup);
@@ -10231,11 +10297,10 @@ TEST(ConSanMoi, Gfx1250PrivateEpochBarrierPreservesGuestVgprMsbMode) {
   ASSERT_TRUE(hwreg);
   ASSERT_TRUE(test_moi_exec_save_sgpr(result));
   ASSERT_LE(test_moi_transient_sgpr_assignments(result).size(), 1u);
-  const uint16_t exec_save_sgpr = test_moi_transient_sgpr_assignments(result).empty()
-                                      ? *test_moi_exec_save_sgpr(result)
-                                      : test_moi_transient_sgpr_assignments(result)
-                                            .front()
-                                            .exec_save_sgpr;
+  const uint16_t exec_save_sgpr =
+      test_moi_transient_sgpr_assignments(result).empty()
+          ? *test_moi_exec_save_sgpr(result)
+          : test_moi_transient_sgpr_assignments(result).front().exec_save_sgpr;
   const uint16_t bank_save_sgpr = static_cast<uint16_t>(exec_save_sgpr + 5u);
   const auto save =
       instrumentation::build_s_getreg_b32(bank_save_sgpr, *hwreg, ROCJITSU_CODE_ARCH_CDNA5);

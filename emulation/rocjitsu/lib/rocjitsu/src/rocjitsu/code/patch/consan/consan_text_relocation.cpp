@@ -542,10 +542,42 @@ relocate_consan_text(std::span<const uint8_t> descriptor_patched_image, rj_code_
   translator_options.preserve_source_text_prefix = true;
   translator_options.preserve_source_descriptor_resources = true;
   const auto &preapplied_code_ranges = result.program_inventory.preapplied_mutation().code_ranges;
-  translator_options.source_text_code_ranges.reserve(
-      source.functions().size() + preapplied_code_ranges.size() + result.patches.size());
-  for (const AmdGpuFunctionInfo &function : source.functions()) {
-    if (function.code_size != 0u) {
+  const bool every_fragment_has_owners =
+      std::ranges::all_of(fragments, [](const ConSanTextFragment &fragment) {
+        return !fragment.patch.owner_descriptor_file_offsets.empty();
+      });
+  const bool has_undecoded_container = std::ranges::any_of(
+      result.program_inventory.containers(),
+      [](const ConSanProgramContainer &container) { return !container.decoded; });
+  const bool use_partial_translation = every_fragment_has_owners && has_undecoded_container;
+  if (use_partial_translation) {
+    for (const ConSanTextFragment &fragment : fragments) {
+      translator_options.source_kernel_descriptor_offsets.insert(
+          translator_options.source_kernel_descriptor_offsets.end(),
+          fragment.patch.owner_descriptor_file_offsets.begin(),
+          fragment.patch.owner_descriptor_file_offsets.end());
+    }
+    std::ranges::sort(translator_options.source_kernel_descriptor_offsets);
+    translator_options.source_kernel_descriptor_offsets.erase(
+        std::ranges::unique(translator_options.source_kernel_descriptor_offsets).begin(),
+        translator_options.source_kernel_descriptor_offsets.end());
+  }
+  translator_options.source_text_code_ranges.reserve(result.program_inventory.containers().size() +
+                                                     preapplied_code_ranges.size() +
+                                                     result.patches.size());
+  if (use_partial_translation) {
+    for (const ConSanProgramContainer &container : result.program_inventory.containers()) {
+      if (container.decoded && container.has_text_range && container.code_size != 0u) {
+        translator_options.source_text_code_ranges.push_back(
+            {.start_offset = container.entry_text_offset, .size = container.code_size});
+      }
+    }
+  } else {
+    // Ownerless development/fault fragments retain the established full-object
+    // transaction until they acquire an exact descriptor ownership contract.
+    for (const AmdGpuFunctionInfo &function : source.functions()) {
+      if (function.code_size == 0u)
+        continue;
       translator_options.source_text_code_ranges.push_back(
           {.start_offset = function.entry_text_offset, .size = function.code_size});
     }

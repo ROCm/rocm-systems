@@ -90,6 +90,7 @@ bool append_select_first_lane_in_exec_mask(std::vector<uint32_t> &words, uint16_
                                                 static_cast<uint16_t>(active_exec_sgpr + 1u),
                                                 vector_source_vgpr(lane_rank_vgpr), arch),
       instrumentation::build_v_cmp_eq_u32_vcc(scalar_positive_inline_u32(0), lane_rank_vgpr, arch),
+      instrumentation::build_valu_vcc_to_salu_dependency_wait(arch),
       instrumentation::build_s_and_saveexec_b64(saved_exec_sgpr, kAmdGpuVccLo, arch));
   return sequence.finish();
 }

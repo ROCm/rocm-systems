@@ -3,10 +3,10 @@
 
 #include "rocjitsu/code/patch/consan/consan_program_analysis.h"
 
+#include "rocjitsu/code/amdgpu_code_object.h"
 #include "rocjitsu/code/analysis/def_use_chain.h"
 #include "rocjitsu/code/analysis/kernel_scope.h"
 #include "rocjitsu/code/analysis/liveness.h"
-#include "rocjitsu/code/amdgpu_code_object.h"
 #include "rocjitsu/code/basic_block.h"
 #include "rocjitsu/code/builders/instruction_builder.h"
 #include "rocjitsu/code/major_image_ownership.h"
@@ -202,9 +202,18 @@ bool analyze_consan_program_inventory(
   }
 
   ConSanProgramSiteArena kernel_sites;
-  for (ConSanProgramContainer &kernel : inventory_builder.kernels())
+  for (ConSanProgramContainer &kernel : inventory_builder.kernels()) {
+    // The production allowlist names dispatchable kernel entries and can
+    // therefore bound semantic decoding. The test-only filter may instead
+    // name a shared function; it is a candidate filter, not a proof that its
+    // owning kernel bodies may be omitted from the program inventory.
+    if (!request.kernel_name_allowlist.empty() &&
+        !consan_container_selected(request, debug, kernel.name)) {
+      continue;
+    }
     decode_container_stats(code_object_bytes, *decoder, arch, kernel, kernel_sites,
                            result.warnings);
+  }
   ConSanProgramSiteArena function_sites;
   for (ConSanProgramContainer &function : inventory_builder.functions())
     decode_container_stats(code_object_bytes, *decoder, arch, function, function_sites,
@@ -237,8 +246,13 @@ bool analyze_consan_program_inventory(
   publish_access_inventory();
   if (request.flavor == ConSanFlavor::SuperCollider && !mutation.fault_dry_run &&
       mutation.sc_perturb_kind == ConSanPerturbationKind::None) {
-    for (ConSanProgramContainer &kernel : inventory_builder.kernels())
+    for (ConSanProgramContainer &kernel : inventory_builder.kernels()) {
+      if (!request.kernel_name_allowlist.empty() &&
+          !consan_container_selected(request, debug, kernel.name)) {
+        continue;
+      }
       preflight_kernel(kernel, result.warnings);
+    }
   }
   reattribute_preapplied_code_ranges(code_object_bytes, *decoder, arch, inventory_builder, result);
   if (!result.errors.empty())
