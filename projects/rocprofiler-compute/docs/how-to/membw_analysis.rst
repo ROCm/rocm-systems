@@ -31,7 +31,6 @@ Supported hardware
 
 Memory Bandwidth Analysis is currently available for:
 
-* AMD Instinct MI350 Series (gfx950)
 
 Profiling
 =========
