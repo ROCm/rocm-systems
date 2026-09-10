@@ -42,6 +42,8 @@
 
 namespace rocshmem {
 
+namespace atomic = detail::atomic;
+
 #define LIKELY(X)   __builtin_expect(X, 1)
 #define UNLIKELY(X) __builtin_expect(X, 0)
 
@@ -304,13 +306,13 @@ __device__ __forceinline__ bool is_last_active_lane() {
   __threadfence();
   __syncthreads();
   if (threadIdx.x == 0) {
-    detail::atomic::fetch_add<int, int, detail::atomic::memory_scope_device>(
-        &global_counter[0], 1, detail::atomic::memory_order_relaxed);
+    atomic::fetch_add<atomic::memory_scope::device,
+                      atomic::memory_order::relaxed>(&global_counter[0], 1);
   }
   __syncthreads();
   if (threadIdx.x == 0) {
-    while (detail::atomic::load<int, detail::atomic::memory_scope_device>(
-               global_counter, detail::atomic::memory_order_relaxed) != num_blocks);
+    while (atomic::load<atomic::memory_scope::device,
+           atomic::memory_order::relaxed>(global_counter) != num_blocks);
   }
   __syncthreads();
 }
@@ -325,9 +327,10 @@ __device__ __forceinline__ bool is_last_active_lane() {
 [[maybe_unused]] __device__ __forceinline__ bool spin_lock_try_acquire_unique(uint32_t *lock) {
   uint32_t lock_val = SPIN_LOCK_UNLOCKED;
 
-  detail::atomic::compare_exchange_strong<uint32_t, detail::atomic::memory_scope_device>(
-      lock, lock_val, SPIN_LOCK_LOCKED,
-      detail::atomic::memory_order_acquire, detail::atomic::memory_order_acquire);
+  atomic::compare_exchange_strong<
+    atomic::memory_scope::device,
+    atomic::memory_order::acquire,
+    atomic::memory_order::acquire>(lock, lock_val, SPIN_LOCK_LOCKED);
 
   return lock_val == SPIN_LOCK_UNLOCKED;
 }
@@ -346,8 +349,8 @@ __device__ __forceinline__ bool is_last_active_lane() {
  * Each thread in wave releases a different lock.
  */
 [[maybe_unused]] __device__ __forceinline__ void spin_lock_release_unique(uint32_t *lock) {
-  detail::atomic::store<uint32_t, detail::atomic::memory_scope_device>(
-      lock, SPIN_LOCK_UNLOCKED, detail::atomic::memory_order_release);
+  atomic::store<atomic::memory_scope::device,
+                atomic::memory_order::release>(lock, SPIN_LOCK_UNLOCKED);
 }
 
 /*
@@ -358,9 +361,10 @@ __device__ __forceinline__ bool is_last_active_lane() {
 
   if (is_first_active_lane(activemask)) {
     lock_val = SPIN_LOCK_UNLOCKED;
-    detail::atomic::compare_exchange_strong<uint32_t, detail::atomic::memory_scope_device>(
-        lock, lock_val, SPIN_LOCK_LOCKED,
-        detail::atomic::memory_order_acquire, detail::atomic::memory_order_acquire);
+    atomic::compare_exchange_strong<
+      atomic::memory_scope::device,
+      atomic::memory_order::acquire,
+      atomic::memory_order::acquire>(lock, lock_val, SPIN_LOCK_LOCKED);
   }
   lock_val = __shfl(lock_val, get_first_active_lane_id(activemask));
 
@@ -381,8 +385,8 @@ __device__ __forceinline__ bool is_last_active_lane() {
  */
 [[maybe_unused]] __device__ __forceinline__ void spin_lock_release_shared(uint32_t *lock, uint64_t activemask) {
   if (is_first_active_lane(activemask)) {
-    detail::atomic::store<uint32_t, detail::atomic::memory_scope_device>(
-        lock, SPIN_LOCK_UNLOCKED, detail::atomic::memory_order_release);
+    atomic::store<atomic::memory_scope::device,
+                  atomic::memory_order::release>(lock, SPIN_LOCK_UNLOCKED);
   }
 }
 
@@ -498,8 +502,8 @@ template <MemcpyKind Kind = MemcpyKind::Put>
     // Many threads, large transfer: use cached Standard policy.
     // Fences are direction-specific to maintain system-scope coherence.
     if constexpr (!is_put(Kind)) {
-      detail::atomic::threadfence<detail::atomic::memory_scope_system,
-                                  detail::atomic::memory_order_acquire>();
+      atomic::threadfence<atomic::memory_scope::system,
+                          atomic::memory_order::acquire>();
     }
 
     if (n_chunks > 0) {
@@ -511,8 +515,8 @@ template <MemcpyKind Kind = MemcpyKind::Put>
         static_cast<uint8_t*>(src) + n_chunks * ChunkSize, remainder);
 
     if constexpr (is_put(Kind)) {
-      detail::atomic::threadfence<detail::atomic::memory_scope_system,
-                                  detail::atomic::memory_order_release>();
+      atomic::threadfence<atomic::memory_scope::system,
+                          atomic::memory_order::release>();
     }
   } else {
     // Small transfer or single-lane: cache-bypass policy provides direct
