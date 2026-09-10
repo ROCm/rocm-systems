@@ -6,6 +6,7 @@ include(rj_configure_target)
 set(RJ_TOOL_OBJECT_LIBS
     rocjitsu_analysis
     rocjitsu_code
+    rocjitsu_code_object
     rocjitsu_isa
     rocjitsu_amdgpu_isa_registry
     simdojo
@@ -36,9 +37,9 @@ rj_configure_target(rj_dbt_translate TOOL)
 add_executable(rj_decode_benchmark rj_decode_benchmark.cpp)
 target_link_libraries(
     rj_decode_benchmark
-    PRIVATE ${RJ_TOOL_OBJECT_LIBS} util flatbuffers Threads::Threads
+    PRIVATE rocjitsu_analysis_internal rocjitsu_amdgpu_isa_model_registry
 )
-rj_configure_target(rj_decode_benchmark TOOL)
+rj_configure_target(rj_decode_benchmark PRIVATE_INCLUDES WARNINGS)
 
 # Ahead-of-time population of the shared translation tier.
 #
