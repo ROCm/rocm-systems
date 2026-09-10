@@ -1392,9 +1392,9 @@ def test_run_analysis_scopes_pc_sampling_uuids_by_process(db_session):
     assert [
         (dispatch.dispatch_id, dispatch.kernel.kernel_name) for dispatch in dispatches
     ] == [
-        (0, "vecCopy"),
         (1, "vecCopy"),
         (2, "vecCopy"),
+        (3, "vecCopy"),
     ]
     assert len({dispatch.kernel_uuid for dispatch in dispatches}) == 1
     assert len({dispatch.dispatch_uuid for dispatch in dispatches}) == 3
@@ -1459,8 +1459,8 @@ def test_run_analysis_materialized_views_keep_pc_sampling_origins(
     assert [
         (dispatch.dispatch_id, dispatch.kernel.kernel_name) for dispatch in dispatches
     ] == [
-        (0, "vecCopy"),
         (1, "vecCopy"),
+        (2, "vecCopy"),
     ]
     assert len({dispatch.dispatch_uuid for dispatch in dispatches}) == 2
     assert len({dispatch.kernel_uuid for dispatch in dispatches}) == 1
@@ -1896,10 +1896,12 @@ def make_source_workload_tool_data_records(
     workload_path,
     snapshot_sources,
     sampled_sources,
+    source_path_map=None,
 ):
     """Create PC-sampling inputs whose comments point at snapshot sources.
 
     A path named only in sampled_sources is absent from the snapshot.
+    source_path_map pairs raw DWARF paths with canonical ones.
     """
     workload_path.mkdir(parents=True, exist_ok=True)
     for original_source_path, content in snapshot_sources.items():
@@ -1908,6 +1910,13 @@ def make_source_workload_tool_data_records(
         )
         snapshot_path.parent.mkdir(parents=True, exist_ok=True)
         snapshot_path.write_text(content, encoding="utf-8")
+
+    if source_path_map:
+        map_path = workload_path / "src" / "42_source_map.json"
+        map_path.parent.mkdir(parents=True, exist_ok=True)
+        map_path.write_text(
+            json.dumps({"source_paths": source_path_map}), encoding="utf-8"
+        )
 
     tool_data = make_pc_sampling_tool_data()
     tool_data["strings"]["pc_sample_comments"] = list(sampled_sources)
@@ -2172,6 +2181,33 @@ def test_run_analysis_records_source_file_missing_from_snapshot(db_session, tmp_
             "int present;",
         ),
     ]
+
+
+def test_run_analysis_resolves_raw_dwarf_path_to_canonical_path(db_session, tmp_path):
+    """A file whose raw DWARF path is not canonical is read from its copy."""
+    workload_path = tmp_path / "workload"
+    raw_dwarf_path = "/home/u/app/build/../include/vcopy.hpp"
+    canonical_path = "/home/u/app/include/vcopy.hpp"
+    tool_data_records = make_source_workload_tool_data_records(
+        workload_path,
+        {canonical_path: "int first;\nint second;\n"},
+        [f"{raw_dwarf_path}:2"],
+        source_path_map={raw_dwarf_path: canonical_path},
+    )
+    analyzer = make_pc_sampling_database_analyzer({
+        str(workload_path): tool_data_records
+    })
+
+    run_analysis_with_materialized_views(analyzer)
+
+    source_file = db_session.query(orm.SourceFile).one()
+    assert source_file.file_path == canonical_path
+    # A checksum at all means the snapshot copy was found.
+    assert source_file.md5_checksum is not None
+    assert [
+        (source_line.line_number, source_line.content)
+        for source_line in source_file.source_lines
+    ] == [(1, "int first;"), (2, "int second;")]
 
 
 def test_run_analysis_records_line_past_end_of_source_file(db_session, tmp_path):
@@ -3063,7 +3099,7 @@ def test_run_analysis_kernel_filter_reaches_a_sampling_only_workload(tmp_path):
     ]
 
 
-@pytest.mark.parametrize("filter_dispatch_ids", [["1"], [">0"], ["> 0"]])
+@pytest.mark.parametrize("filter_dispatch_ids", [["2"], [">1"], ["> 1"]])
 def test_run_analysis_dispatch_filter_reaches_a_sampling_only_workload(
     tmp_path, filter_dispatch_ids
 ):

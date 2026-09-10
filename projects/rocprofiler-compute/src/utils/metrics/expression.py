@@ -83,7 +83,7 @@ SUPPORTED_CALL: dict[str, str] = {
     "ROUND": "to_round",
     "QUANTILE": "to_quantile",
     "MOD": "to_mod",
-    # Concat operation from the memory chart "active cus"
+    # String concatenation operation
     "CONCAT": "to_concat",
     # Threshold-based clamping for multi-pass profiling noise
     "NOISE_CLAMP": "to_noise_clamp",

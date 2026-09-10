@@ -11,16 +11,20 @@ source snapshot, and exports captured source files with CSV analysis results.
 """
 
 import hashlib
+import json
 import shutil
 from collections.abc import Iterable
 from pathlib import Path
 from typing import NamedTuple, Optional
 
-from utils.logger import console_debug
+from utils.logger import console_debug, console_warning
 
 SOURCE_FRAME_SEPARATOR = " -> "
 UNKNOWN_SOURCE_LINE_TOKEN = "?"
 SOURCE_EXPORT_DIRECTORY_NAME = "source"
+SOURCE_SNAPSHOT_DIRECTORY_NAME = "src"
+SOURCE_PATH_MAP_FILE_PATTERN = "*_source_map.json"
+SOURCE_PATH_MAP_KEY = "source_paths"
 
 SourceFrame = tuple[str, Optional[int]]
 
@@ -38,31 +42,64 @@ class WorkloadSourceSnapshot(NamedTuple):
     absolute_source_paths: tuple[str, ...]
 
 
-def parse_source_frames(source: Optional[str]) -> list[SourceFrame]:
-    """Split an instruction comment into its frames, innermost first."""
+def parse_source_frames(
+    source: Optional[str],
+    source_path_map: dict[str, str],
+) -> list[SourceFrame]:
+    """Split an instruction comment into its frames, innermost first.
+
+    Each frame names the canonical path of the file it came from, so two raw
+    DWARF paths for one file yield the same path.
+    """
     if not source:
         return []
 
-    return [parse_source_frame(frame) for frame in source.split(SOURCE_FRAME_SEPARATOR)]
+    return [
+        parse_source_frame(frame, source_path_map)
+        for frame in source.split(SOURCE_FRAME_SEPARATOR)
+    ]
 
 
-def parse_source_frame(source_frame: str) -> SourceFrame:
-    """Split one frame into its path and line number.
+def parse_source_frame(
+    source_frame: str,
+    source_path_map: dict[str, str],
+) -> SourceFrame:
+    """Split one frame into its canonical path and line number.
 
     The line number is null for a ":?" frame and for a frame carrying no
-    recognizable line token, which keeps its whole text as the path.
+    recognizable line token, which keeps its whole text as the path. A path
+    the map does not name is kept as the disassembly spells it.
     """
     source_path, separator, line_token = source_frame.rpartition(":")
     if not separator or not is_source_line_token(line_token):
-        return source_frame, None
+        return source_path_map.get(source_frame, source_frame), None
+
+    canonical_path = source_path_map.get(source_path, source_path)
     if line_token == UNKNOWN_SOURCE_LINE_TOKEN:
-        return source_path, None
-    return source_path, int(line_token)
+        return canonical_path, None
+    return canonical_path, int(line_token)
 
 
 def is_source_line_token(token: str) -> bool:
     """Return whether a token is a source line or an unknown line."""
     return token == UNKNOWN_SOURCE_LINE_TOKEN or (token.isascii() and token.isdigit())
+
+
+def load_source_path_map(workload_path: Path) -> dict[str, str]:
+    """Return one workload's map of raw DWARF path to canonical path.
+
+    Every process of a run writes its own map, so they are merged here.
+    Unreadable maps and malformed source-path objects warn and are skipped; a
+    missing source-path member is accepted as an empty map.
+    """
+    source_path_map: dict[str, str] = {}
+    snapshot_directory = workload_path / SOURCE_SNAPSHOT_DIRECTORY_NAME
+    for map_path in sorted(snapshot_directory.glob(SOURCE_PATH_MAP_FILE_PATTERN)):
+        source_paths = _read_source_paths(map_path)
+        if source_paths is not None:
+            source_path_map.update(source_paths)
+
+    return source_path_map
 
 
 def resolve_snapshot_path(workload_path: Path, absolute_path: str) -> Path:
@@ -71,7 +108,11 @@ def resolve_snapshot_path(workload_path: Path, absolute_path: str) -> Path:
     The snapshot mirrors absolute paths beneath the workload's "src", so
     /a/b.cpp is copied to <workload>/src/a/b.cpp.
     """
-    return workload_path / "src" / Path(absolute_path).relative_to("/")
+    return (
+        workload_path
+        / SOURCE_SNAPSHOT_DIRECTORY_NAME
+        / Path(absolute_path).relative_to("/")
+    )
 
 
 def read_source_file_digest_and_lines(
@@ -136,3 +177,48 @@ def export_source_snapshot_files(
             f"Exported {len(workload_source_snapshot.absolute_source_paths)} "
             f"source files for workload {workload_source_snapshot.workload_path}."
         )
+
+
+def _read_source_paths(map_path: Path) -> Optional[dict[str, str]]:
+    """Return one validated process map, or null when it cannot be used."""
+    try:
+        with map_path.open(encoding="utf-8") as map_file:
+            payload = json.load(map_file)
+    except (OSError, ValueError) as error:
+        console_warning(f"Could not read source path map: {map_path}: {error}")
+        return None
+
+    source_paths, validation_error = _validate_source_paths_payload(payload)
+    if validation_error is not None:
+        console_warning(
+            f"Could not read source path map: {map_path}: {validation_error}"
+        )
+    return source_paths
+
+
+def _validate_source_paths_payload(
+    payload: object,
+) -> tuple[Optional[dict[str, str]], Optional[str]]:
+    """Return validated source paths and an error message when malformed."""
+    if not isinstance(payload, dict):
+        return None, "root is not an object"
+
+    source_paths = payload.get(SOURCE_PATH_MAP_KEY, {})
+    if not isinstance(source_paths, dict):
+        return None, f"{SOURCE_PATH_MAP_KEY!r} is not an object"
+
+    invalid_path = next(
+        (
+            raw_path
+            for raw_path, canonical_path in source_paths.items()
+            if not isinstance(canonical_path, str)
+        ),
+        None,
+    )
+    if invalid_path is not None:
+        return (
+            None,
+            f"entry for {invalid_path!r} must map strings to strings",
+        )
+
+    return source_paths, None

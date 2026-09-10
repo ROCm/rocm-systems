@@ -121,7 +121,7 @@ channels from the memory mode. A common formulation is:
 
    num_hbm_channels = 128 / NPS_denominator
 
-where ``NPS_denominator`` is ``4`` for NPS4 and ``8`` for NPS8 on supported
+where ``NPS_denominator`` is ``2`` for NPS2 and ``4`` for NPS4 on supported
 parts. Theoretical HBM bandwidth is then:
 
 .. code-block:: text
@@ -181,7 +181,7 @@ Example: CPX on MI300X
 
 **How to read results:**
 
-* **Active CUs**, VALU utilization, and L2 metrics describe **one XCD** (38 CUs
+* **CU Utilization**, VALU utilization, and L2 metrics describe **one XCD** (38 CUs
   on MI300X), not all 304 CUs on the package.
 * **L2 Cache BW** peaks use the **partition** L2 channel count (one XCD), not
   the full eight-XCD total.

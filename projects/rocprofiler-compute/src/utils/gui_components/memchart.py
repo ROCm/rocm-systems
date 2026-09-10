@@ -131,15 +131,6 @@ def insert_chart_data(mem_data: list[dict[str, Any]], base_data: schema.Workload
             # ----------------------------------------
             # Exec Block
             Text(
-                x="480",
-                y="99",
-                id="active_cu",
-                fill="#FFFF33",
-                fontSize="20px",
-                fontWeight="bold",
-                children=format_value_for_display(memchart_values.get("Active CUs")),
-            ),  # x=454
-            Text(
                 x="580",
                 y="154",
                 id="vgpr",
@@ -1722,13 +1713,6 @@ def get_memchart(
                                                 fill="#FFFFFF",
                                                 fontSize="14px",
                                                 children="Wave N-1 Instr buff",
-                                            ),
-                                            Text(
-                                                x="442",
-                                                y="69",
-                                                fill="#FFFFFF",
-                                                fontSize="20px",
-                                                children="Active CUs",
                                             ),
                                             Text(
                                                 x="868",

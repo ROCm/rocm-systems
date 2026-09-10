@@ -16,7 +16,19 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 * Added the two wave utilization metrics to the analysis database summary view, so `compute_pc_sampling_summary_view` and the `pc_sampling_summary.csv` export carry them alongside the sample counts.
 
+* Added a profile-mode warning on gfx115x when the `AUTO` performance level can gate the perfmon clock and zero PMC counters such as `TCP_REQ`, with a link to the ROCprofiler-SDK `STABLE_STD` workaround.
+
+* Added CLI guidance for viewing the wide memory chart without line wrapping (`less -RS` or `code -`).
+
+* Added Python 3.14 support.
+
 ### Changed
+
+* Dispatch IDs now start at 1 instead of 0.
+
+* Renamed the profile-mode dispatch filter to `--kernel-iteration-range`, matching the rocprofv3 option it drives. Update any profile command by replacing `-d/--dispatch` with `--kernel-iteration-range` to select dispatches.
+  * `--dispatch` is no longer accepted in profile-mode.
+  * `-d` is now the short form of `--output-directory` in profile-mode, also matching rocprofv3.
 
 * gfx115x Memory Chart improvements.
   * Renamed memory chart metric names for more clarity.
@@ -37,6 +49,8 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 * Removed the `SKIP_NATIVE_TOOL_BUILD` build option. The counter collection tool is always built, and its sources are no longer installed for runtime compilation.
 
+* Removed the deprecated `Active CUs` metric from the System Speed-of-Light panel and the Memory Chart SVG for all CDNA architectures (gfx908, gfx90a, gfx940, gfx941, gfx942, gfx950). Use `CU Utilization` instead.
+
 ### Optimized
 
 * HBM and remote traffic percentages are now more accurate, with all their counters collected in a single profiling pass.
@@ -49,6 +63,10 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 * Fixed `L2 Cache (per Channel)` labels to use a `Metric` column and numbered `Channel` row labels in CLI, TUI, and analysis database output.
 
+* Fixed `--set` running the roofline microbenchmark, which is never part of a metric set.
+
+* Fixed PC sampling source snapshots to use canonical paths and include source contents and checksums in analysis exports.
+
 * Fixed false `0` values in the gfx115x Memory Chart; missing counter data now reports `N/A`.
 
 * Fixed `GL2-Fabric Write BW` understating write bandwidth on gfx115x in the System Speed-of-Light and Memory Chart panels.
@@ -56,6 +74,8 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 ### Upcoming changes
 
 ### Known issues
+
+* On gfx115x, `TCP_REQ*` counters and the `GL0` metrics derived from them can read zero because the perfmon clock is power-gated at the `AUTO` performance level.
 
 ## ROCm Compute Profiler 3.9.0 for ROCm 10.1.0
 
