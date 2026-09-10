@@ -36,12 +36,17 @@
 #include <dlfcn.h>
 #include <unistd.h>
 
+#include <algorithm>
 #include <cstdint>
+#include <cstdlib>
 #include <cstring>
+#include <filesystem>
+#include <fstream>
 #include <limits>
 #include <memory>
 #include <random>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace rocprofiler
@@ -334,6 +339,146 @@ struct DxcoreHandle
                close_adapter != nullptr;
     }
 };
+
+// The HSA runtime enumerates one CPU agent per NUMA node ahead of the GPU
+// agents, and construct_agent_cache() pairs HSA agents with ours by
+// logical_node_id. DXCore only enumerates display adapters, so emitting GPUs
+// alone leaves every HSA CPU agent unmatched and places the GPUs on node ids
+// the runtime assigned to CPUs. Enumerate the host CPU agents from sysfs first
+// so both the node id space and the agent count line up with HSA.
+
+// Counts the entries in a sysfs cpulist: a comma separated list of indices and
+// inclusive ranges, e.g. "0-15,32-47". Returns 0 if the file is unreadable.
+uint64_t
+read_cpu_cores(const std::filesystem::path& node_dir)
+{
+    auto ifs  = std::ifstream{node_dir / "cpulist"};
+    auto spec = std::string{};
+    if(!ifs || !std::getline(ifs, spec)) return 0;
+
+    uint64_t count = 0;
+    size_t   pos   = 0;
+    while(pos <= spec.size())
+    {
+        auto comma = spec.find(',', pos);
+        auto token = spec.substr(pos, (comma == std::string::npos) ? comma : comma - pos);
+        auto dash  = token.find('-');
+
+        if(token.empty())
+        {
+            // tolerate stray separators
+        }
+        else if(dash == std::string::npos)
+        {
+            count += 1;
+        }
+        else
+        {
+            auto lo = std::strtoull(token.substr(0, dash).c_str(), nullptr, 10);
+            auto hi = std::strtoull(token.substr(dash + 1).c_str(), nullptr, 10);
+            if(hi >= lo) count += (hi - lo) + 1;
+        }
+
+        if(comma == std::string::npos) break;
+        pos = comma + 1;
+    }
+    return count;
+}
+
+std::string
+read_cpu_model_name()
+{
+    constexpr auto key = std::string_view{"model name"};
+
+    auto ifs  = std::ifstream{"/proc/cpuinfo"};
+    auto line = std::string{};
+    while(ifs && std::getline(ifs, line))
+    {
+        if(line.compare(0, key.size(), key) != 0) continue;
+        auto colon = line.find(':');
+        if(colon == std::string::npos) continue;
+        auto value = line.find_first_not_of(" \t", colon + 1);
+        if(value == std::string::npos) break;
+        return line.substr(value);
+    }
+    return "CPU";
+}
+
+// Emits one CPU agent per NUMA node and returns how many were emitted, i.e.
+// the logical node id the first GPU should take.
+uint64_t
+enumerate_cpu_agents(std::vector<unique_agent_t>& out, uint64_t offset)
+{
+    auto node_dirs = std::vector<std::filesystem::path>{};
+    auto ec        = std::error_code{};
+
+    for(const auto& entry : std::filesystem::directory_iterator{"/sys/devices/system/node", ec})
+    {
+        const auto name = entry.path().filename().string();
+        if(name.rfind("node", 0) == 0 &&
+           name.find_first_not_of("0123456789", 4) == std::string::npos && name.size() > 4)
+            node_dirs.emplace_back(entry.path());
+    }
+    // directory_iterator yields entries in an unspecified order; node ids must
+    // ascend to match the order HSA reports them in.
+    std::sort(node_dirs.begin(), node_dirs.end());
+
+    const auto model   = read_cpu_model_name();
+    uint64_t   logical = 0;
+
+    for(const auto& node_dir : node_dirs)
+    {
+        const auto cores = read_cpu_cores(node_dir);
+        if(cores == 0) continue;
+
+        auto info                 = common::init_public_api_struct(rocprofiler_agent_t{});
+        info.type                 = ROCPROFILER_AGENT_TYPE_CPU;
+        info.logical_node_id      = logical;
+        info.node_id              = static_cast<uint32_t>(logical);
+        info.id.handle            = logical + offset;
+        info.logical_node_type_id = logical;
+
+        info.cpu_cores_count = static_cast<uint32_t>(cores);
+        info.simd_count      = 0;
+        info.num_xcc         = 1;
+
+        info.product_name = common::get_string_entry(model)->c_str();
+        info.vendor_name  = common::get_string_entry("CPU")->c_str();
+        info.name         = info.product_name;
+        info.model_name   = common::get_string_entry("")->c_str();
+
+        info.mem_banks_count = 0;
+        info.caches_count    = 0;
+        info.io_links_count  = 0;
+        info.mem_banks       = nullptr;
+        info.caches          = nullptr;
+        info.io_links        = nullptr;
+
+        std::memset(&info.uuid.bytes, 0, sizeof(info.uuid.bytes));
+
+        update_agent_runtime_visibility(info);
+
+        ROCP_INFO << fmt::format(
+            "wsl::enumerate: enumerated cpu node {} cores={} '{}'", logical, cores, model);
+
+        ++logical;
+        out.emplace_back(new rocprofiler_agent_t{info}, [](rocprofiler_agent_t* p) {
+            if(p)
+            {
+                delete[] p->mem_banks;
+                delete[] p->caches;
+                delete[] p->io_links;
+            }
+            delete p;
+        });
+    }
+
+    ROCP_WARNING_IF(logical == 0) << "wsl::enumerate: no usable NUMA nodes under "
+                                     "/sys/devices/system/node; GPU node ids will not align "
+                                     "with the HSA runtime";
+
+    return logical;
+}
 }  // namespace
 
 bool
@@ -347,10 +492,18 @@ enumerate()
 {
     std::vector<unique_agent_t> out;
 
+    const auto offset = get_agent_offset();
+    // CPU agents occupy the low node ids, exactly as they do under the KFD
+    // topology the HSA runtime reports; GPUs continue the numbering from there.
+    // Emitted before the adapter queries so that a topology missing its GPUs
+    // still accounts for the CPU agents HSA reports.
+    uint64_t logical = enumerate_cpu_agents(out, offset);
+
     DxcoreHandle dxc;
     if(!dxc.handle)
     {
-        ROCP_WARNING << "wsl::enumerate: libdxcore.so not available; returning empty topology";
+        ROCP_WARNING
+            << "wsl::enumerate: libdxcore.so not available; no GPU agents will be reported";
         return out;
     }
     if(!dxc.ready())
@@ -388,10 +541,9 @@ enumerate()
         return out;
     }
 
-    const auto offset = get_agent_offset();
-    // Every adapter enumerated through DXCore is a GPU, so the logical node
-    // id and the per-type id move in lockstep.
-    uint64_t logical = 0;
+    // Every adapter enumerated through DXCore is a GPU, so the per-type id is
+    // just the count of GPUs emitted so far.
+    uint64_t gpucount = 0;
 
     for(uint32_t i = 0; i < e.NumAdapters; ++i)
     {
@@ -476,7 +628,7 @@ enumerate()
         info.logical_node_id      = logical;
         info.node_id              = static_cast<uint32_t>(logical);
         info.id.handle            = logical + offset;
-        info.logical_node_type_id = logical;
+        info.logical_node_type_id = gpucount++;
         ++logical;
 
         info.vendor_id   = devids.DeviceIds.VendorID;
