@@ -303,12 +303,22 @@ HIP_TEST_CASE(Unit_Multi_Grid_Group_Getters_Positive_Base_Type) {
   }
 
   const auto test_case = GENERATE(range(0, 20));
+#if HT_AMD
+  const auto is_valid_getter = multi_grid_group_is_valid_getter<cg::thread_group>;
+#else
+  const auto is_valid_getter = multi_grid_group_is_valid_getter<cg::multi_grid_group>;
+#endif
   std::vector<dim3> grid_dims(num_devices);
   std::vector<dim3> block_dims(num_devices);
   for (int i = 0; i < num_devices; i++) {
     get_multi_grid_dims(grid_dims[i], block_dims[i], i, test_case);
-    if (!CheckDimensions(i, multi_grid_group_size_getter<cg::multi_grid_group>, grid_dims[i],
-                         block_dims[i]))
+    // Occupancy is a per kernel property, so the grid has to fit every kernel launched below and
+    // not just the first one.
+    if (!CheckDimensions(i, multi_grid_group_size_getter<cg::thread_group>, grid_dims[i],
+                         block_dims[i]) ||
+        !CheckDimensions(i, multi_grid_group_thread_rank_getter<cg::thread_group>, grid_dims[i],
+                         block_dims[i]) ||
+        !CheckDimensions(i, is_valid_getter, grid_dims[i], block_dims[i]))
       return;
     INFO("Grid dimensions dev " << i << " : x " << grid_dims[i].x << ", y " << grid_dims[i].y
                                 << ", z " << grid_dims[i].z);
@@ -370,13 +380,7 @@ HIP_TEST_CASE(Unit_Multi_Grid_Group_Getters_Positive_Base_Type) {
                         multi_grid.grids_[i].thread_count_ * sizeof(*uint_arr[i].ptr()),
                         hipMemcpyDeviceToHost));
     HIP_CHECK(hipDeviceSynchronize());
-#if HT_AMD
-    launchParamsList[i].func =
-        reinterpret_cast<void*>(multi_grid_group_is_valid_getter<cg::thread_group>);
-#else
-    launchParamsList[i].func =
-        reinterpret_cast<void*>(multi_grid_group_is_valid_getter<cg::multi_grid_group>);
-#endif
+    launchParamsList[i].func = reinterpret_cast<void*>(is_valid_getter);
   }
   HIP_CHECK(hipLaunchCooperativeKernelMultiDevice(launchParamsList.data(), num_devices, 0));
 
