@@ -380,6 +380,7 @@ public:
   void set_plugin_group(std::shared_ptr<ExecutionPluginGroup> pg) {
     plugin_group_ = pg ? std::move(pg) : ExecutionPluginGroup::empty_group();
     observes_sgpr_reads_ = plugin_group_->observes_sgpr_reads();
+    observes_memory_routing_ = plugin_group_->observes_memory_routing();
   }
 
   /// @brief Return the execution plugin group.
@@ -967,6 +968,15 @@ protected:
   /// @param wf The issuing wavefront.
   void route_memory_inst(Instruction *inst, Wavefront &wf);
 
+  /// @brief Tell the plugin group what the memory system is about to be asked
+  ///        for, once routing has settled.
+  /// @param inst The routed instruction.
+  /// @param wf The issuing wavefront.
+  /// @param route_tag The pipeline tag the instruction ended up with.
+  /// @param normalized_to_local Whether a FLAT access was rewritten into LDS.
+  void report_routed_access(const Instruction &inst, const Wavefront &wf, uint8_t route_tag,
+                            bool normalized_to_local);
+
   /// @brief Fire the on_idle callback if registered.
   void notify_idle() {
     if (on_idle_)
@@ -1087,6 +1097,7 @@ protected:
   std::shared_ptr<ExecutionPluginGroup> plugin_group_ = ExecutionPluginGroup::empty_group();
   bool observes_sgpr_reads_ = false;
   bool pool_driven_ = false;
+  bool observes_memory_routing_ = false;
 
   /// @brief Resolve the owner of a physical SGPR from its allocation block.
   /// @details Power-of-two block sizes use a shift on the instruction read path;

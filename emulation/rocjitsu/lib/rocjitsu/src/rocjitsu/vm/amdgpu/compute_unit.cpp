@@ -17,11 +17,13 @@
 #include "rocjitsu/isa/arch/amdgpu/rdna3_5/isa.h"
 #include "rocjitsu/isa/arch/amdgpu/rdna4/isa.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/alu_exceptions.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/ds_transpose.h"
 #include "rocjitsu/isa/instruction.h"
 #include "rocjitsu/isa/target_registry.h"
 #include "rocjitsu/vm/amdgpu/hwreg.h"
 #include "rocjitsu/vm/amdgpu/mem_state.h"
 #include "rocjitsu/vm/amdgpu/register_access.h"
+#include "rocjitsu/vm/plugins/memory_access_observation.h"
 #include "util/except.h"
 #include "util/log.h"
 
@@ -29,6 +31,7 @@
 #include <cassert>
 #include <limits>
 #include <memory>
+#include <span>
 #include <stdexcept>
 
 namespace rocjitsu {
@@ -623,10 +626,15 @@ void ComputeUnitCore::tick_pipelines() {
 void ComputeUnitCore::route_memory_inst(Instruction *inst, Wavefront &wf) {
   plugin_group_->onAmdgpuRouteMemoryInstruction(*inst, wf);
 
+  bool normalized_to_local = false;
   if (inst->data()->tag() == GLOBAL_MEM && shared_aperture_base_ != 0) {
     auto &d = *inst->data_as<VectorMemState>();
+    // The wavefront is the authority on its own width. VectorMemState::wf_size
+    // is set by whoever built the state, and the DS paths leave it at its
+    // default until the local pipeline backfills it -- which is after this.
+    const uint32_t wf_size = wf.wf_size();
     uint64_t probe = 0;
-    for (uint32_t lane = 0; lane < d.wf_size; ++lane) {
+    for (uint32_t lane = 0; lane < wf_size; ++lane) {
       if (d.lane_mask & (1ULL << lane)) {
         probe = d.per_lane_addr[lane];
         break;
@@ -635,18 +643,26 @@ void ComputeUnitCore::route_memory_inst(Instruction *inst, Wavefront &wf) {
     // FLAT ops targeting the shared aperture are routed to LDS (LGKMCNT,
     // not VMCNT).  Scratch-targeting FLATs stay on the global path.
     if (probe >= shared_aperture_base_ && probe <= shared_aperture_limit_) {
-      for (uint32_t lane = 0; lane < d.wf_size; ++lane) {
+      for (uint32_t lane = 0; lane < wf_size; ++lane) {
         if (d.lane_mask & (1ULL << lane))
           d.per_lane_addr[lane] = (d.per_lane_addr[lane] - shared_aperture_base_) + wf.lds_base();
       }
       inst->data()->set_tag(LOCAL_MEM);
       d.wait_counter_type = WaitCounterType::LGKMCNT;
-      local_mem_pipeline_.issue(inst, wf);
-      return;
+      normalized_to_local = true;
     }
   }
 
   const uint8_t route_tag = inst->data()->tag();
+  // After the aperture rewrite, before the pipeline takes the instruction:
+  // this is the one point at which the space, the counter, and the addresses
+  // are all the ones the memory system is about to use. Gated on a plugin that
+  // wants it rather than on any plugin at all, because building the
+  // observation is real work on the per-instruction path and most plugins have
+  // no use for it.
+  if (observes_memory_routing_)
+    report_routed_access(*inst, wf, route_tag, normalized_to_local);
+
   switch (route_tag) {
   case SCALAR_MEM:
     scalar_mem_pipeline_.issue(inst, wf);
@@ -658,8 +674,87 @@ void ComputeUnitCore::route_memory_inst(Instruction *inst, Wavefront &wf) {
     global_mem_pipeline_.issue(inst, wf);
     break;
   default:
+    // No pipeline adopts it, so nothing downstream will free it.
+    delete inst;
     break;
   }
+}
+
+// The observation's route is MemPipelineTag under another name; keep the two
+// numberings pinned so a new tag cannot pick up an existing route's value.
+static_assert(static_cast<uint8_t>(MemoryRoute::SCALAR) == SCALAR_MEM);
+static_assert(static_cast<uint8_t>(MemoryRoute::GLOBAL) == GLOBAL_MEM);
+static_assert(static_cast<uint8_t>(MemoryRoute::LOCAL) == LOCAL_MEM);
+
+void ComputeUnitCore::report_routed_access(const Instruction &inst, const Wavefront &wf,
+                                           uint8_t route_tag, bool normalized_to_local) {
+  MemoryAccessObservation access;
+  access.mnemonic = inst.mnemonic();
+  access.pc = wf.pc;
+  access.compute_unit_id = id();
+  access.dispatch_id = wf.dispatch_id();
+  access.queue_id = wf.queue_id();
+  access.workgroup_id = wf.wg_id();
+  access.wavefront_id = wf.wf_id();
+  access.process_id = wf.process_id();
+  access.normalized_to_local = normalized_to_local;
+
+  switch (route_tag) {
+  case SCALAR_MEM: {
+    const auto &state = *inst.data_as<ScalarMemState>();
+    access.route = MemoryRoute::SCALAR;
+    access.is_load = state.is_load;
+    access.mtype = state.mtype;
+    access.wait_counter = state.wait_counter_type;
+    access.element_size_bytes = state.elem_size;
+    access.elements_per_lane = state.num_dwords;
+    // A scalar access is one address, so it is a one-lane wavefront as far as
+    // the memory system is concerned. Saying so lets a consumer treat both
+    // routes with the same per-lane arithmetic.
+    access.wavefront_size = 1;
+    access.active_lane_mask = 1;
+    access.valid_lane_mask = 1;
+    access.request_lane_mask = 1;
+    access.addresses = std::span<const uint64_t>(&state.addr, 1);
+    break;
+  }
+  case GLOBAL_MEM:
+  case LOCAL_MEM: {
+    const auto &state = *inst.data_as<VectorMemState>();
+    const uint32_t wf_size = wf.wf_size();
+    access.route = route_tag == LOCAL_MEM ? MemoryRoute::LOCAL : MemoryRoute::GLOBAL;
+    access.is_load = state.is_load;
+    access.atomic_op = state.atomic_op;
+    access.mtype = state.mtype;
+    access.wait_counter = state.wait_counter_type;
+    access.wavefront_size = wf_size;
+    access.element_size_bytes = state.elem_size;
+    access.elements_per_lane = state.num_elems;
+    access.active_lane_mask = state.exec_mask;
+    access.valid_lane_mask = state.lane_mask;
+    access.request_lane_mask = transpose_request_lane_mask(state, wf_size);
+    // Intersected with the requesting lanes, which is how the global pipeline
+    // splits the wave: a swizzled lane that never requests costs nothing.
+    access.scratch_lane_mask =
+        state.scratch_swizzle ? state.scratch_lane_mask & access.request_lane_mask : 0;
+    access.scratch_element_stride_bytes = state.scratch_swizzle ? state.scratch_addr_stride : 0;
+    access.non_temporal = state.non_temporal;
+    access.force_l1_bypass = state.request_force_l1_bypass;
+    access.lds_destination = state.lds_dst;
+    access.addresses = std::span<const uint64_t>(state.per_lane_addr.data(), wf_size);
+    access.element_lane_masks = state.element_lane_masks.view();
+    if (state.ds2_active)
+      access.secondary_addresses =
+          std::span<const uint64_t>(state.ds2_per_lane_addr.data(), wf_size);
+    break;
+  }
+  default:
+    // Left UNKNOWN, so a consumer counting the kernel's memory traffic sees an
+    // access it cannot account for rather than never hearing about it.
+    break;
+  }
+
+  plugin_group_->onAmdgpuMemoryAccessRouted(access);
 }
 
 void ComputeUnitCore::update_wf_states() {
