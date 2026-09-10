@@ -9,12 +9,12 @@
 # and the pipelines are in the order the generator tries them.
 #
 # repo, commit: the llvm-project checkout the mnemonics were read from.
-# rules.flags: TableGen encoding flag -> pipeline.
+# rules.encodings: LLVM compiler encoding type -> pipeline.
 # rules.prefixes: pipeline -> the mnemonic prefixes assigned to it.
 repo: https://github.com/ROCm/llvm-project
-commit: a7525a1bd6f3bf2a8eb8a8ce35fd75ed1fd6a2ca
+commit: d19dd10a11f406ce6a49e75414b226618a3d40b0
 rules:
-  flags:
+  encodings:
     IsMAI: MATRIX
     IsWMMA: MATRIX
     IsSWMMAC: MATRIX

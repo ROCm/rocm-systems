@@ -43,7 +43,7 @@ def test_branch_wins_over_scalar():
     assert Rules.classify("s_cbranch_scc1", {"isBranch", "SALU"}) == "BRANCH"
 
 
-def test_every_flag_reaches_its_pipeline():
+def test_every_encoding_reaches_its_pipeline():
     assert Rules.classify("v_add_f32_e32", {"VALU"}) == "VALU"
     assert Rules.classify("s_add_i32", {"SALU"}) == "SCALAR"
     assert Rules.classify("s_load_dwordx4", {"SMRD"}) == "SCALAR"
@@ -63,7 +63,7 @@ def test_prefixes_split_the_flat_encoding():
 
 
 def test_prefixes_split_the_scalar_encoding():
-    """Barrier, message and wait instructions have no flag of their own."""
+    """Barrier, message and wait instructions have no encoding of their own."""
     assert Rules.classify("s_barrier", {"SALU"}) == "BARRIER"
     assert Rules.classify("s_wakeup_barrier", {"SALU"}) == "BARRIER"
     assert Rules.classify("s_sendmsg", {"SALU"}) == "EXP"
@@ -93,7 +93,7 @@ def test_mnemonics_cover_every_printed_form():
     }
 
 
-def test_flags_merge_across_records_sharing_a_mnemonic():
+def test_encodings_merge_across_records_sharing_a_mnemonic():
     """The variant carrying IsMAI decides the pipeline for all of them."""
     dump = make_dump({
         "V_MFMA_F32_e64_vgprcd": {
@@ -130,7 +130,7 @@ def test_corpus_mnemonics_come_from_the_disassembly_lines():
     assert Corpus.parse_mnemonics(disassembly) == {"s_load_dword", "s_endpgm"}
 
 
-def test_record_flags_ignore_fields_that_are_not_pipeline_flags():
+def test_record_encodings_ignore_fields_that_are_not_pipeline_encodings():
     dump = make_dump({
         "V_ADD_F32_e32": {"Mnemonic": "v_add_f32", "VALU": 1, "isCodeGenOnly": 1}
     })
@@ -139,7 +139,7 @@ def test_record_flags_ignore_fields_that_are_not_pipeline_flags():
         InstructionRecord(
             record_name="V_ADD_F32_e32",
             mnemonics=frozenset({"v_add_f32", "v_add_f32_e32"}),
-            flags=frozenset({"VALU"}),
+            encodings=frozenset({"VALU"}),
         )
     ]
 
@@ -151,7 +151,7 @@ def test_document_groups_mnemonics_and_records_the_rules():
     )
 
     assert document["pipelines"] == {"VALU": ["v_add_f32", "v_add_f32_e32"]}
-    produced_by_flags = set(document["rules"]["flags"].values())
+    produced_by_encodings = set(document["rules"]["encodings"].values())
     produced_by_prefixes = set(document["rules"]["prefixes"])
-    assert produced_by_flags | produced_by_prefixes == {p.value for p in Pipeline}
+    assert produced_by_encodings | produced_by_prefixes == {p.value for p in Pipeline}
     assert "s_wait" in document["rules"]["prefixes"]["INTERNAL"]
