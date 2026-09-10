@@ -239,6 +239,12 @@ rtc:
   Unit_RTC_BUNDLE_FROM_FILE:
     <<: *level_2
     tags: [link]
+  Unit_hiprtc_fp4_simple:
+    <<: *level_2
+    tags: [compile]
+  Unit_hiprtc_fp6_simple:
+    <<: *level_2
+    tags: [compile]
   Unit_hiprtc_fp8_simple:
     <<: *level_2
     tags: [compile]
