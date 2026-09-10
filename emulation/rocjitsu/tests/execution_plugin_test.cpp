@@ -3749,7 +3749,8 @@ TEST(ExecutionPluginTest, DispatchPacketNameResolvesForVmidMappedCodeObject) {
 
 TEST(ExecutionPluginTest, HotHookSerializationDoesNotSetCpuDispatchPolicy) {
   {
-    PluginFixture f;
+    PluginFixture f(/*num_wf_slots=*/10, /*arch=*/"cdna4", /*wavefront_size=*/64,
+                    /*sgprs_per_wf=*/104, /*vgprs_per_wf=*/256, /*num_cus=*/8);
     f.soc->set_dispatch_threads(8);
     auto pg = std::make_shared<ExecutionPluginGroup>(PluginSinkConfig{});
     pg->add(std::make_unique<SerialHotHookPlugin>());
