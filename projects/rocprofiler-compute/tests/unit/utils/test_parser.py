@@ -547,6 +547,19 @@ class TestApplyFilters:
         assert "0 is an invalid dispatch id" in str(error_calls[0])
         assert "from 1 to 4" in str(error_calls[0])
 
+    def test_dispatch_greater_than_zero_keeps_all(self) -> None:
+        """'> 0' skips nothing and keeps every dispatch."""
+        workload = _filter_workload()
+        workload.filter_dispatch_ids = [">0"]
+        filtered = apply_filters(workload, "/tmp", False, False)
+        assert list(filtered["Dispatch_ID"]) == [1, 2, 3, 4]
+
+    def test_dispatch_greater_than_dispatch_count_keeps_none(self) -> None:
+        """'> n' where n is the number of dispatches skips all of them."""
+        workload = _filter_workload()
+        workload.filter_dispatch_ids = [">4"]
+        assert apply_filters(workload, "/tmp", False, False).empty
+
     def test_gpu_integer_list_filter(self) -> None:
         """A GPU filter given as a list of integers keeps all matching rows."""
         workload = _filter_workload()

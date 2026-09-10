@@ -347,23 +347,6 @@ def test_filter_kernel_3(binary_handler_analyze_rocprof_compute):
 
 
 @pytest.mark.serial
-def test_dispatch_0_rejected(binary_handler_analyze_rocprof_compute):
-    """Analyze --dispatch 0 is invalid now that dispatch ids start at 1."""
-    for dir in indirs:
-        workload_dir = integration_common.setup_workload_dir(dir)
-        code = binary_handler_analyze_rocprof_compute([
-            "analyze",
-            "--path",
-            workload_dir,
-            "--dispatch",
-            "0",
-        ])
-        assert code == 1
-
-        common.clean_output_dir(config["cleanup"], workload_dir)
-
-
-@pytest.mark.serial
 def test_dispatch_1(binary_handler_analyze_rocprof_compute):
     for dir in indirs:
         workload_dir = integration_common.setup_workload_dir(dir)
