@@ -686,6 +686,12 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
         PROGRAMS scripts/rocjitsu-pretranslate.py
         DESTINATION ${CMAKE_INSTALL_BINDIR}
     )
+    # This converter is the user-facing second half of rocprofv3-based ConSan
+    # dispatch discovery; install it with the hook whose allowlist it feeds.
+    install(
+        PROGRAMS scripts/rocjitsu_consan_allowlist.py
+        DESTINATION ${CMAKE_INSTALL_BINDIR}
+    )
 endif()
 
 # Config files and schemas: share/rocjitsu/

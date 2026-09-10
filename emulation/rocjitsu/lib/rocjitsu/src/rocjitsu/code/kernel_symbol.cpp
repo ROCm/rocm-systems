@@ -196,6 +196,19 @@ std::string demangle_kernel_symbol(std::string_view symbol) {
   return std::string(demangled.get());
 }
 
+bool kernel_symbol_names_match(std::string_view left, std::string_view right) {
+  const auto canonical = [](std::string_view name) {
+    if (name.ends_with(" [clone .kd]"))
+      name.remove_suffix(std::string_view(" [clone .kd]").size());
+    if (name.ends_with(".kd"))
+      name.remove_suffix(3);
+    if (name.starts_with("void "))
+      name.remove_prefix(5);
+    return demangle_kernel_symbol(name);
+  };
+  return canonical(left) == canonical(right);
+}
+
 std::string kernel_display_name(std::string_view symbol) {
   std::string result = demangle_kernel_symbol(symbol);
   size_t parenthesis_position = find_outer_argument_list(result);

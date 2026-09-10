@@ -520,6 +520,17 @@ TEST(KernelSymbolTest, DemanglesMangledKernelSymbol) {
   EXPECT_EQ(demangle_kernel_symbol("_Z11racy_kernelPKfPf"), "racy_kernel(float const*, float*)");
 }
 
+TEST(KernelSymbolTest, MatchesExactElfAndProfilerSpellings) {
+  constexpr std::string_view mangled = "_Z11racy_kernelPKfPf";
+  constexpr std::string_view demangled = "racy_kernel(float const*, float*)";
+
+  EXPECT_TRUE(kernel_symbol_names_match(mangled, demangled));
+  EXPECT_TRUE(kernel_symbol_names_match(std::string(mangled) + ".kd",
+                                        "void racy_kernel(float const*, float*) [clone .kd]"));
+  EXPECT_FALSE(kernel_symbol_names_match(mangled, "racy_kernel(float*, float*)"));
+  EXPECT_FALSE(kernel_symbol_names_match(mangled, "racy_kernel"));
+}
+
 TEST(KernelSymbolTest, DisplayNameIsHeaderSafe) {
   constexpr std::string_view tensile_symbol =
       "Cijk_Ailk_Bjlk_S_B_UserArgs_MT8x8x8_SN_LDSB0_ISA1151_WG8_8_1_WGMXCC1";

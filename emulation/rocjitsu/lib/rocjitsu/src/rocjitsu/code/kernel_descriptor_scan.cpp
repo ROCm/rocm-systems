@@ -4,6 +4,7 @@
 #include "rocjitsu/code/kernel_descriptor_scan.h"
 
 #include "rocjitsu/code/amdgpu_elf.h"
+#include "rocjitsu/code/kernel_symbol.h"
 #include "rocjitsu/isa/isa_traits.h"
 
 #include <algorithm>
@@ -159,8 +160,9 @@ KernelNameIndexMatch match_kernel_name_index(std::span<const uint8_t> image,
       if (!name.ends_with(".kd"))
         continue;
       name.remove_suffix(3);
-      if (std::ranges::any_of(exact_kernel_names,
-                              [&](const std::string &expected) { return name == expected; })) {
+      if (std::ranges::any_of(exact_kernel_names, [&](const std::string &expected) {
+            return kernel_symbol_names_match(name, expected);
+          })) {
         return KernelNameIndexMatch::Matched;
       }
     }

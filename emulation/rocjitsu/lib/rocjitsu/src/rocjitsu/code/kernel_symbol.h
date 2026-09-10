@@ -31,6 +31,14 @@ std::string find_kernel_symbol(const uint8_t *kernel_object_ptr, const uint8_t *
 /// the original symbol otherwise.
 std::string demangle_kernel_symbol(std::string_view symbol);
 
+/// Compare exact kernel identities across ELF and profiler spellings.
+///
+/// ELF metadata normally uses an Itanium ABI symbol while dispatch profilers
+/// commonly emit its demangled form, optionally decorated with a leading
+/// `void ` and trailing ` [clone .kd]`. The AMDHSA descriptor `.kd` suffix is
+/// also presentation-only. No substring or argument-list elision is performed.
+[[nodiscard]] bool kernel_symbol_names_match(std::string_view left, std::string_view right);
+
 /// Return a compact kernel name suitable for key=value logs.
 ///
 /// This strips the demangled argument list and whitespace so report headers can

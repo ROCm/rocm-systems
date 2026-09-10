@@ -145,9 +145,8 @@ bool consan_site_matches_kernel_allowlist(const ProgramInventory &inventory,
   if (kernel_name_allowlist.empty())
     return true;
   const auto selected_name = [&](std::string_view candidate) {
-    const std::string_view normalized = consan_normalize_kernel_name(candidate);
     return std::ranges::any_of(kernel_name_allowlist, [&](std::string_view allowed) {
-      return consan_normalize_kernel_name(allowed) == normalized;
+      return consan_kernel_name_matches(allowed, candidate);
     });
   };
   if (!owner_descriptor_file_offsets.empty()) {
@@ -201,8 +200,7 @@ assemble_consan_observation_product(const ProgramInventory &inventory,
 
   if (request.include_atomic_fence_policy) {
     std::vector<ConSanDirectionalAccessAvailability> directional_access_windows;
-    const ConSanEngineProbeVocabulary *vocabulary =
-        consan_engine_probe_vocabulary(request.engine);
+    const ConSanEngineProbeVocabulary *vocabulary = consan_engine_probe_vocabulary(request.engine);
     if (vocabulary && vocabulary->ordering_requires_directional_access_window) {
       for (const ConSanProbeIntent &intent : plan.probe_intents) {
         if (intent.kind != vocabulary->access)
@@ -211,16 +209,16 @@ assemble_consan_observation_product(const ProgramInventory &inventory,
           if (site.physical_id != intent.physical_site)
             continue;
           for (ConSanProgramContainerId owner : inventory.execution_owner_kernels(site)) {
-            auto availability = std::ranges::find(
-                directional_access_windows, owner, &ConSanDirectionalAccessAvailability::owner);
+            auto availability = std::ranges::find(directional_access_windows, owner,
+                                                  &ConSanDirectionalAccessAvailability::owner);
             if (availability == directional_access_windows.end()) {
               directional_access_windows.push_back({.owner = owner});
               availability = std::prev(directional_access_windows.end());
             }
             availability->read |=
                 site.kind == ConSanLdsAccessKind::Read || site.kind == ConSanLdsAccessKind::Atomic;
-            availability->write |= site.kind == ConSanLdsAccessKind::Write ||
-                                   site.kind == ConSanLdsAccessKind::Atomic;
+            availability->write |=
+                site.kind == ConSanLdsAccessKind::Write || site.kind == ConSanLdsAccessKind::Atomic;
           }
         }
       }

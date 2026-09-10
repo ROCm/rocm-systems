@@ -4158,6 +4158,36 @@ TEST(HsaHooksUnitTest, ConSanAllowlistRetainsMatchedObjectWaitcheckAndTransform)
   EXPECT_NE(log.find("ConSan patch begin"), std::string::npos) << log;
 }
 
+TEST(HsaHooksUnitTest, ConSanAllowlistMatchesDemangledProfilerKernelName) {
+  ScopedEnvVar log_level("RJ_CONSAN_LOG", "1");
+  ScopedEnvVar allowlist("RJ_CONSAN_KERNEL_ALLOWLIST", "selected_kernel()");
+  reset_code_object_observations();
+  configure_consan_profile(kConSanHookProfiles[1], false);
+  g_transform_override_result.outcome = rocjitsu::ConSanTransformOutcome::Unchanged;
+
+  FakeApiTable api;
+  InstalledDbiHook hook(api);
+  ASSERT_TRUE(hook.installed()) << hook.error();
+
+  const std::vector<uint8_t> original =
+      rocjitsu::waitcheck_test::make_gfx1201_multi_kernel_code_object(
+          {{"_Z15selected_kernelv", {0xBFB00000u}}});
+  hsa_code_object_reader_t reader{};
+  ASSERT_EQ(api.core.hsa_code_object_reader_create_from_memory_fn(original.data(), original.size(),
+                                                                  &reader),
+            HSA_STATUS_SUCCESS);
+
+  testing::internal::CaptureStderr();
+  const hsa_status_t status = api.core.hsa_executable_load_agent_code_object_fn(
+      hsa_executable_t{7}, kHostAgent, reader, nullptr, nullptr);
+  const std::string log = testing::internal::GetCapturedStderr();
+
+  EXPECT_EQ(status, HSA_STATUS_SUCCESS);
+  expect_transform_profile(kConSanHookProfiles[1]);
+  EXPECT_EQ(log.find("outcome=skipped reason=no-matching-entry"), std::string::npos) << log;
+  EXPECT_NE(log.find("ConSan patch begin"), std::string::npos) << log;
+}
+
 TEST(HsaHooksUnitTest, ConSanRejectsEmptyKernelAllowlistEntry) {
   reset_code_object_observations();
   configure_consan_profile(kConSanHookProfiles[1], false);

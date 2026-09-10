@@ -219,12 +219,6 @@ hsa_status_t HSA_API collect_runtime_capability_region(hsa_region_t region, void
 
 enum class WaitcheckPreflightOutcome { NotApplicable, Passed, HazardReported, AnalysisFailed };
 
-[[nodiscard]] std::string_view normalized_kernel_name(std::string_view name) {
-  if (name.ends_with(".kd"))
-    name.remove_suffix(3);
-  return name;
-}
-
 void print_waitcheck_issue(uint64_t reader, const rocjitsu::AmdGpuCodeObject &code_object,
                            const rocjitsu::WaitcheckReport &report) {
   std::lock_guard lock(log_mutex());
@@ -313,9 +307,8 @@ run_waitcheck_preflight(std::span<const uint8_t> bytes, uint64_t reader,
       kernels_discovered = kernels.size();
       std::vector<rocjitsu::WaitcheckKernelInfo> selected_kernels;
       std::ranges::copy_if(kernels, std::back_inserter(selected_kernels), [&](const auto &kernel) {
-        const std::string_view name = normalized_kernel_name(kernel.name);
         return std::ranges::any_of(kernel_name_allowlist, [&](const std::string &allowlisted) {
-          return name == normalized_kernel_name(allowlisted);
+          return rocjitsu::kernel_symbol_names_match(kernel.name, allowlisted);
         });
       });
 
@@ -1680,7 +1673,7 @@ public:
     allowlist_.clear();
     allowlist_.reserve(kernel_names.size());
     for (const std::string &kernel_name : kernel_names)
-      allowlist_.push_back({std::string(normalize_kernel_name(kernel_name))});
+      allowlist_.push_back({kernel_name});
   }
 
   void note_code_object(const rocjitsu::TransformResult &result) {
@@ -1688,7 +1681,7 @@ public:
     for (AllowlistEntry &entry : allowlist_) {
       entry.loaded |=
           std::ranges::any_of(result.program_inventory.kernels(), [&](const auto &kernel) {
-            return normalize_kernel_name(kernel.name) == normalize_kernel_name(entry.kernel_name);
+            return rocjitsu::kernel_symbol_names_match(kernel.name, entry.kernel_name);
           });
     }
   }
@@ -1698,8 +1691,7 @@ public:
     std::lock_guard lock(mutex_);
     for (const rocjitsu::ConSanKernelDispatchRequirement &requirement : requirements.kernels) {
       const auto allowlisted = std::ranges::find_if(allowlist_, [&](const AllowlistEntry &entry) {
-        return normalize_kernel_name(entry.kernel_name) ==
-               normalize_kernel_name(requirement.kernel_name);
+        return rocjitsu::kernel_symbol_names_match(entry.kernel_name, requirement.kernel_name);
       });
       if (allowlisted != allowlist_.end())
         allowlisted->instrumented |= requirement.has_instrumented_probe;
@@ -1729,13 +1721,12 @@ public:
     if (original_get_info == nullptr)
       return;
     std::lock_guard lock(mutex_);
-    const std::string_view normalized = normalize_kernel_name(symbol_name);
     const auto pending = std::ranges::find_if(pending_, [&](const Pending &candidate) {
       return candidate.executable == executable.handle &&
-             normalize_kernel_name(candidate.kernel_name) == normalized;
+             rocjitsu::kernel_symbol_names_match(candidate.kernel_name, symbol_name);
     });
     const auto allowlisted = std::ranges::find_if(allowlist_, [&](const AllowlistEntry &entry) {
-      return normalize_kernel_name(entry.kernel_name) == normalized;
+      return rocjitsu::kernel_symbol_names_match(entry.kernel_name, symbol_name);
     });
     if (pending == pending_.end() && allowlisted == allowlist_.end())
       return;
@@ -1897,12 +1888,6 @@ private:
     bool has_instrumented_probe = false;
     std::string allowlisted_kernel_name;
   };
-
-  [[nodiscard]] static std::string_view normalize_kernel_name(std::string_view name) {
-    if (name.ends_with(".kd"))
-      name.remove_suffix(3);
-    return name;
-  }
 
   mutable std::mutex mutex_;
   std::vector<Pending> pending_;

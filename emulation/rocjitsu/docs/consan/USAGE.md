@@ -195,81 +195,35 @@ diagnostic and runtime sampling settings.
 
 ## Two-pass dispatched-kernel workflow
 
-Large applications commonly load solution libraries containing hundreds or
-thousands of kernels while one invocation dispatches only a small subset.
-Instrumenting the complete library can make load-time analysis, code-object
-growth, and device overhead unrepresentative of that invocation. The preferred
-workflow is therefore:
+First run the complete workload natively with rocprofv3 kernel tracing, then
+convert the trace to an allowlist:
 
-1. run the complete workload natively under a kernel-dispatch profiler;
-2. collect and deduplicate every exact GPU kernel entry name that was
-   dispatched;
-3. write those names, one per line, to an allowlist file; and
-4. repeat the same workload with ConSan and
-   `RJ_CONSAN_KERNEL_ALLOWLIST_FILE` pointing to that file.
+```sh
+rocprofv3 --kernel-trace --output-format csv \
+  --output-directory "$PWD/consan-profile" -- ./application
 
-For example, after a native profiler has produced `kernels.txt`:
+rocjitsu_consan_allowlist.py \
+  --output "$PWD/consan-kernels.txt" "$PWD/consan-profile"
+```
+
+The generator recursively finds rocprofv3 `*kernel_trace.csv` files,
+deduplicates their exact dispatched kernel names, and writes one name per line.
+Both the profiler's mangled and demangled exact spellings are accepted.
+Run every application path and input shape that the ConSan pass must cover, and
+regenerate the file when the workload, target, or software stack changes.
+
+Then run the same workload with ConSan and the generated allowlist:
 
 ```sh
 env \
   HSA_TOOLS_LIB="$CONSAN_HOOK" \
-  RJ_CONSAN_KERNEL_ALLOWLIST_FILE="$PWD/kernels.txt" \
+  RJ_CONSAN_KERNEL_ALLOWLIST_FILE="$PWD/consan-kernels.txt" \
   RJ_CONSAN_LOG=1 \
   ./application
 ```
 
-`kernels.txt` is plain text, must be nonempty, and contains exactly one kernel
-name on every line. Blank lines and comments are not accepted. Leading and
-trailing whitespace is ignored, duplicate names are harmless, and the optional
-`.kd` suffix is normalized away. Prefer the file interface over the comma-list
-environment variable for generated lists: a demangled kernel name may itself
-contain commas.
-
-The discovery pass must exercise every application path, input shape, warmup,
-JIT compilation path, and optional feature intended to be checked in the
-instrumented pass. The allowlist represents the dispatches observed during
-that run, not every kernel the application might dispatch. Regenerate it when
-the application, libraries, compiler, workload configuration, or target
-changes. Reusing an allowlist across materially different runs can silently
-leave newly dispatched kernels uninstrumented.
-
-This is selected eager instrumentation, not runtime-lazy instrumentation.
-ConSan uses the exact names before semantic analysis: unmatched code objects
-are passed through cheaply, and selected independent kernel bodies in a large
-library can be decoded and relocated without cloning their unrelated siblings.
-When selected kernels share a separately symbolized helper with unselected
-kernels, ConSan conservatively retains the wider ownership analysis and does
-not instrument the helper unless all of its reachable kernel owners are
-selected.
-
-Always inspect the unload records before accepting a scoped run. For every
-requested name, the desired state is normally
-`status=instrumented-dispatched`, with nonzero `dispatches`. A
-`not-loaded`, `loaded-not-instrumented`, or `instrumented-not-dispatched`
-status usually means that discovery and instrumented runs differed, the name
-did not match the loaded object, or no supported site was available. Also
-inspect the ordinary coverage and analysis-verdict records; an exact allowlist
-does not by itself prove complete static or dynamic evidence.
-
-The in-tree Aorta benchmark runner is a concrete automated implementation of
-this workflow. It performs a native PyTorch-profiler discovery pass, writes a
-`<workload>--kernel-allowlist.txt` artifact, and reuses that file for every
-ConSan mode:
-
-```sh
-export CONSAN_BENCHMARK_AORTA_DIR=/path/to/aorta
-export CONSAN_BENCHMARK_PYTHON=/path/to/python-with-rocm-pytorch
-export CONSAN_BENCHMARK_HOOK="$CONSAN_HOOK"
-
-python3 emulation/rocjitsu/tests/dbi/consan/consan_benchmark.py \
-  --target gfx1201 \
-  --output-dir /tmp/consan-benchmark \
-  --workload pytorch-dense-prefill
-```
-
-Applications need not use Aorta or PyTorch. Any profiler or application-level
-dispatch inventory is suitable if it reports the exact HSA kernel entry names
-and the native discovery run faithfully covers the subsequent ConSan run.
+At unload, check that each requested kernel reports
+`status=instrumented-dispatched` and a nonzero `dispatches` count.
 
 The three process controls are independent. The concurrent-transform control is
 acquired before semantic inventory. It is a conservative admission unit for

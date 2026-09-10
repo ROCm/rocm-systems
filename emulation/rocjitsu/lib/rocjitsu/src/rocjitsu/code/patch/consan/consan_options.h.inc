@@ -868,6 +868,11 @@ struct ConSanOptions : ConSanRequest,
   return name;
 }
 
+[[nodiscard]] inline bool consan_kernel_name_matches(std::string_view left,
+                                                     std::string_view right) {
+  return kernel_symbol_names_match(left, right);
+}
+
 [[nodiscard]] inline bool consan_container_selected(const ConSanRequest &request,
                                                     const ConSanDebugOverrides &debug,
                                                     std::string_view container_name) {
@@ -876,9 +881,8 @@ struct ConSanOptions : ConSanRequest,
     return false;
   if (request.kernel_name_allowlist.empty())
     return true;
-  const std::string_view normalized = consan_normalize_kernel_name(container_name);
   return std::ranges::any_of(request.kernel_name_allowlist, [&](std::string_view allowed) {
-    return consan_normalize_kernel_name(allowed) == normalized;
+    return consan_kernel_name_matches(allowed, container_name);
   });
 }
 

@@ -103,8 +103,7 @@ public:
           continue;
         if (!kernel_name_allowlist.empty() &&
             !std::ranges::any_of(kernel_name_allowlist, [&](std::string_view allowed) {
-              return consan_normalize_kernel_name(allowed) ==
-                     consan_normalize_kernel_name(kernel.name);
+              return consan_kernel_name_matches(allowed, kernel.name);
             }))
           continue;
         cfg.leaders.push_back(kernel.entry_text_offset);
