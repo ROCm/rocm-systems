@@ -6,6 +6,8 @@
 /// communication, async causality, termination, pacing, spinlock, and stress.
 
 #include "simdojo/components/cache.h"
+#include "simdojo/sim/clocked.h"
+#include "simdojo/sim/functional.h"
 #include "simdojo/sim/pacing_controller.h"
 #include "simdojo/sim/simulation.h"
 #include "util/spinlock.h"
@@ -1427,4 +1429,464 @@ TEST(CacheVmidTest, LineDataForReadReturnsMatchingVmidData) {
   for (uint32_t i = 0; i < TestCache::LINE_SIZE; ++i)
     EXPECT_EQ(line[i], static_cast<uint8_t>(i ^ 0x5A));
   EXPECT_EQ(cache.line_data_for_read(kAddr, /*vmid=*/5), nullptr);
+}
+
+// ============================================================================
+// ClockDomain arithmetic
+// ============================================================================
+
+namespace {
+
+/// @brief A 1 GHz domain: period 1000 ticks at the 1 ps tick resolution.
+ClockDomain ghz(Tick phase = 0) { return ClockDomain("test", 1'000'000'000ULL, phase); }
+
+} // namespace
+
+TEST(ClockDomainArithmeticTest, NextEdgeRoundsUpOntoTheGrid) {
+  const ClockDomain domain = ghz();
+  EXPECT_EQ(domain.next_edge(1000), 1000u);
+  EXPECT_EQ(domain.next_edge(1001), 2000u);
+  EXPECT_EQ(domain.next_edge(1999), 2000u);
+  EXPECT_EQ(domain.next_edge(2000), 2000u);
+  // Idempotent, and specifically not by being constant: the two inputs below
+  // are on different edges, so a next_edge() that always answered first_edge()
+  // would fail here even though it would pass a bare double-application check.
+  EXPECT_EQ(domain.next_edge(domain.next_edge(1001)), 2000u);
+  EXPECT_EQ(domain.next_edge(domain.next_edge(5001)), 6000u);
+}
+
+TEST(ClockDomainArithmeticTest, NextEdgeClampsUpToTheFirstEdge) {
+  // A domain has no edges before first_edge(), so every tick below it resolves
+  // there. Anything else would hand out a tick the framework does not treat as
+  // an edge: startup() schedules the first one at first_edge().
+  const ClockDomain domain = ghz(/*phase=*/250);
+  EXPECT_EQ(domain.first_edge(), 1250u);
+  EXPECT_EQ(domain.next_edge(0), 1250u);
+  EXPECT_EQ(domain.next_edge(1249), 1250u);
+  EXPECT_EQ(domain.next_edge(1250), 1250u);
+  EXPECT_EQ(domain.next_edge(1251), 2250u);
+  EXPECT_EQ(domain.next_edge(2250), 2250u);
+}
+
+TEST(ClockDomainArithmeticTest, NextEdgeHandlesAPhaseWiderThanThePeriod) {
+  // The phase is an absolute tick, not a sub-period offset, so it may exceed
+  // the period. The modulus is taken against the distance from the phase, not
+  // from zero, which is the case a "% period" written against the wrong origin
+  // gets wrong.
+  const ClockDomain domain = ghz(/*phase=*/7'400);
+  EXPECT_EQ(domain.first_edge(), 8'400u);
+  EXPECT_EQ(domain.next_edge(8'401), 9'400u);
+  EXPECT_EQ(domain.next_edge(9'400), 9'400u);
+  EXPECT_EQ(domain.next_edge(12'000), 12'400u);
+}
+
+TEST(ClockDomainArithmeticTest, EdgeAfterIsOnePeriodOn) {
+  const ClockDomain domain = ghz(/*phase=*/250);
+  EXPECT_EQ(domain.edge_after(1250), 2250u);
+  EXPECT_EQ(domain.edge_after(2250), 3250u);
+  // Agrees with the general form on every edge, which is the precondition
+  // under which the clock handler is allowed to use the cheap one.
+  for (Tick edge = domain.first_edge(); edge < 20'000; edge = domain.edge_after(edge))
+    EXPECT_EQ(domain.edge_after(edge), domain.next_edge(edge + 1));
+}
+
+TEST(ClockDomainArithmeticTest, EdgeAlignmentSaturatesRatherThanWrapping) {
+  const ClockDomain domain = ghz();
+  EXPECT_EQ(domain.next_edge(TICK_MAX - 1), TICK_MAX);
+  EXPECT_EQ(domain.next_edge(TICK_MAX), TICK_MAX);
+  EXPECT_EQ(domain.edge_after(TICK_MAX - 1), TICK_MAX);
+  EXPECT_EQ(domain.edge_after(TICK_MAX), TICK_MAX);
+  // The last representable edge still aligns to itself rather than saturating.
+  const Tick last = TICK_MAX - (TICK_MAX % 1000);
+  EXPECT_EQ(domain.next_edge(last), last);
+}
+
+TEST(ClockDomainArithmeticTest, CyclesToTicksSaturatesOnlyWhereItMust) {
+  const ClockDomain domain = ghz();
+  EXPECT_EQ(domain.cycles_to_ticks(0), 0u);
+  EXPECT_EQ(domain.cycles_to_ticks(5), 5000u);
+  // The largest representable duration, pinned so that a boundary slip which
+  // turned legitimate long durations into "never" would be visible.
+  EXPECT_EQ(domain.cycles_to_ticks(TICK_MAX / 1000), (TICK_MAX / 1000) * 1000);
+  EXPECT_EQ(domain.cycles_to_ticks(TICK_MAX / 1000 + 1), TICK_MAX);
+  EXPECT_EQ(domain.cycles_to_ticks(TICK_MAX), TICK_MAX);
+}
+
+TEST(ClockDomainArithmeticTest, DeadlineSaturatesTheSumRatherThanTheDuration) {
+  const ClockDomain domain = ghz();
+  EXPECT_EQ(domain.deadline(1000, 3), 4000u);
+  EXPECT_EQ(domain.deadline(0, 0), 0u);
+  // The whole reason deadline() exists: `start + cycles_to_ticks(n)` written
+  // by hand wraps back into the past here, and this must not.
+  EXPECT_EQ(domain.deadline(5000, TICK_MAX), TICK_MAX);
+  EXPECT_EQ(domain.deadline(TICK_MAX - 500, 1), TICK_MAX);
+  EXPECT_GE(domain.deadline(TICK_MAX - 500, 1), TICK_MAX - 500);
+}
+
+TEST(ClockDomainArithmeticTest, TicksToCyclesTruncatesTowardZero) {
+  const ClockDomain domain = ghz();
+  EXPECT_EQ(domain.ticks_to_cycles(0), 0u);
+  EXPECT_EQ(domain.ticks_to_cycles(999), 0u);
+  EXPECT_EQ(domain.ticks_to_cycles(1000), 1u);
+  EXPECT_EQ(domain.ticks_to_cycles(1999), 1u);
+}
+
+TEST(ClockDomainArithmeticTest, AFrequencyThatDoesNotDivideTheResolutionRoundsDown) {
+  // 2.1 GHz is the shape of a real shader clock and does not divide a
+  // picosecond resolution. The period rounds down, so the domain runs slightly
+  // fast, and the two frequency accessors must not agree about it.
+  const ClockDomain domain("shader", 2'100'000'000ULL);
+  EXPECT_EQ(domain.period(), 476u);
+  EXPECT_EQ(domain.frequency(), 2'100'000'000u);
+  EXPECT_EQ(domain.effective_frequency(), 2'100'840'336u);
+  EXPECT_EQ(domain.cycles_to_ticks(1'000'000'000ULL), 476'000'000'000ULL);
+  // A domain whose frequency divides the resolution has nothing to disagree
+  // about.
+  EXPECT_EQ(ghz().frequency(), ghz().effective_frequency());
+}
+
+TEST(ClockDomainArithmeticTest, AnUnrepresentableClockIsRejected) {
+  EXPECT_THROW(ClockDomain("stopped", 0), std::invalid_argument);
+  // Above the tick resolution the period rounds to zero, and a zero period is
+  // a division by zero in every conversion below rather than a fast clock.
+  EXPECT_THROW(ClockDomain("too_fast", TICKS_PER_SECOND + 1), std::invalid_argument);
+  EXPECT_NO_THROW(ClockDomain("at_resolution", TICKS_PER_SECOND));
+  // A phase that leaves no representable first edge would wrap first_edge(),
+  // and every alignment is computed from it.
+  EXPECT_THROW(ClockDomain("late", 1'000'000'000ULL, TICK_MAX - 999), std::invalid_argument);
+  // TICK_MAX - 1000 is the interesting case: first_edge() lands exactly on
+  // TICK_MAX, which does not wrap but is the empty-queue sentinel, and
+  // startup() arms the clock at first_edge() with no further check.
+  EXPECT_THROW(ClockDomain("on_the_sentinel", 1'000'000'000ULL, TICK_MAX - 1000),
+               std::invalid_argument);
+  // One tick earlier is the last phase that yields a real edge.
+  EXPECT_NO_THROW(ClockDomain("just_in_time", 1'000'000'000ULL, TICK_MAX - 1001));
+  EXPECT_EQ(ClockDomain("just_in_time", 1'000'000'000ULL, TICK_MAX - 1001).first_edge(),
+            TICK_MAX - 1);
+}
+
+TEST(ClockDomainArithmeticTest, ADerivedDomainsEdgesAreASubsetOfItsParents) {
+  // 3 GHz does not divide the tick resolution: its period is 333, so a
+  // quarter-rate child derived from the frequency would get 1333 and drift off
+  // the parent's grid without bound.
+  const ClockDomain parent("parent", 3'000'000'000ULL);
+  EXPECT_EQ(parent.period(), 333u);
+  const ClockDomain child = parent.derive("child", 4);
+  EXPECT_EQ(child.period(), 1332u);
+  EXPECT_EQ(child.frequency(), 750'000'000u);
+
+  for (Tick edge = child.first_edge(); edge < 100'000; edge = child.edge_after(edge))
+    EXPECT_EQ(parent.next_edge(edge), edge) << "child edge " << edge << " is not a parent edge";
+}
+
+TEST(ClockDomainArithmeticTest, DeriveRejectsWhatItCannotRepresent) {
+  const ClockDomain parent = ghz();
+  EXPECT_THROW(parent.derive("zero", 0), std::invalid_argument);
+  EXPECT_THROW(parent.derive("phased", 2, TICK_MAX), std::invalid_argument);
+  EXPECT_NO_THROW(parent.derive("half", 2));
+
+  // derive()'s own phase-sum guard is unreachable from a zero-phase parent:
+  // the throw above comes from the first-edge check instead.
+  const ClockDomain late = ghz(/*phase=*/TICK_MAX / 2);
+  EXPECT_THROW(late.derive("wrapped", 2, TICK_MAX / 2 + 2), std::invalid_argument);
+
+  // Deriving must not be a way past the constructor's zero-frequency check.
+  EXPECT_THROW(parent.derive("stopped", 2'000'000'000u), std::invalid_argument);
+  EXPECT_NO_THROW(parent.derive("slowest", 1'000'000'000u));
+  EXPECT_EQ(parent.derive("slowest", 1'000'000'000u).frequency(), 1u);
+
+  // A phase that is not a whole number of parent periods leaves the grid.
+  EXPECT_THROW(parent.derive("off_grid", 2, 500), std::invalid_argument);
+  EXPECT_NO_THROW(parent.derive("on_grid", 2, 2000));
+}
+
+TEST(ClockDomainArithmeticTest, ADerivedDomainsPhaseStaysOnTheParentGrid) {
+  const ClockDomain parent("parent", 3'000'000'000ULL);
+  const ClockDomain child = parent.derive("child", 4, /*phase_offset=*/parent.period() * 3);
+  for (Tick edge = child.first_edge(); edge < 100'000; edge = child.edge_after(edge))
+    EXPECT_EQ(parent.next_edge(edge), edge)
+        << "phased child edge " << edge << " is not a parent edge";
+}
+
+namespace {
+
+/// @brief A clocked component that records the edges it was advanced on.
+class EdgeRecorder : public Clocked<Component> {
+public:
+  EdgeRecorder(const ClockDomain &domain, uint32_t edges)
+      : Clocked<Component>("edge_recorder", domain), remaining_(edges) {}
+
+  bool advance(Tick now) override {
+    // Recorded before the budget check, so a spent recorder still witnesses
+    // any edge handed to it -- which is what lets the resume tests see the
+    // edge after the clock halted.
+    edges.push_back(now);
+    if (remaining_ > 0)
+      --remaining_;
+    return remaining_ > 0;
+  }
+
+  /// @brief Resume from @p after on the next step, from outside advance().
+  void resume_from(Tick after) { resume_clock(after); }
+
+  /// @brief Give the recorder @p edges more edges before it halts again.
+  void grant(uint32_t edges) { remaining_ = edges; }
+
+  std::vector<Tick> edges;
+
+private:
+  uint32_t remaining_;
+};
+
+/// @brief An engine holding one EdgeRecorder, stepped under a hard cap.
+class EdgeRig {
+public:
+  EdgeRig(const ClockDomain &domain, uint32_t edges) {
+    auto root = std::make_unique<CompositeComponent>("root");
+    recorder =
+        static_cast<EdgeRecorder *>(root->add_child(std::make_unique<EdgeRecorder>(domain, edges)));
+    engine.topology().set_root(std::move(root));
+    engine.create();
+  }
+
+  /// @brief Step until the recorder's clock stops, or the cap trips.
+  ///
+  /// @details Stops on the component rather than on step(), because an engine
+  /// stepped past an empty queue terminates and cannot be resumed, and these
+  /// tests resume it.
+  /// @returns Whether the clock went quiet on its own.
+  bool run(uint32_t max_steps = 64) {
+    for (uint32_t i = 0; i < max_steps; ++i) {
+      // step() has to come first: the clock arms itself in startup(), which the
+      // engine defers to the first step, so running() is false before then.
+      if (!engine.step()) {
+        // An empty queue with running() still true means nothing was ever
+        // armed, which must not read as the clock going quiet.
+        return !recorder->running();
+      }
+      if (!recorder->running())
+        return true;
+    }
+    return false;
+  }
+
+  SimulationEngine engine{{}};
+  EdgeRecorder *recorder = nullptr;
+};
+
+} // namespace
+
+TEST(ClockedEdgeTest, EdgesFollowThePhaseOffset) {
+  const ClockDomain domain("phased", 1'000'000'000ULL, /*phase=*/250);
+  EdgeRig rig(domain, 3);
+
+  ASSERT_TRUE(rig.run());
+  EXPECT_EQ(rig.recorder->edges, (std::vector<Tick>{1250, 2250, 3250}));
+}
+
+TEST(ClockedEdgeTest, ResumeClockLandsOnAnEdge) {
+  // resume_clock() is the call whose control flow this commit changed: it lost
+  // an open-coded modulus and a special case for ticks below the first edge.
+  const ClockDomain domain("phased", 1'000'000'000ULL, /*phase=*/250);
+  EdgeRig rig(domain, 1);
+
+  ASSERT_TRUE(rig.run());
+  EXPECT_EQ(rig.recorder->edges, (std::vector<Tick>{1250}));
+  EXPECT_FALSE(rig.recorder->running());
+
+  // Mid-period rounds up to the next edge.
+  rig.recorder->resume_from(4000);
+  EXPECT_TRUE(rig.recorder->running());
+  ASSERT_TRUE(rig.run());
+  EXPECT_EQ(rig.recorder->edges.back(), 4250u);
+
+  // Exactly on an edge stays on it rather than skipping a period.
+  rig.recorder->resume_from(9250);
+  ASSERT_TRUE(rig.run());
+  EXPECT_EQ(rig.recorder->edges.back(), 9250u);
+
+  // Below the first edge clamps up to it rather than taking a modulus against
+  // a distance that has not elapsed yet.
+  EXPECT_EQ(domain.next_edge(0), 1250u);
+
+  // And a resume while already running is refused, so the one reusable clock
+  // event cannot be queued twice. Fresh budget first: a spent recorder halts on
+  // the very first edge, so a stray second entry would never be popped and the
+  // check would pass even with the guard deleted.
+  rig.recorder->grant(3);
+  const size_t before = rig.recorder->edges.size();
+  rig.recorder->resume_from(20'000);
+  EXPECT_TRUE(rig.recorder->running());
+  rig.recorder->resume_from(30'000);
+  ASSERT_TRUE(rig.run());
+  // Three edges from 20'250 on, one period apart. A second queued entry would
+  // show up as a duplicate 20'250 or as an off-grid 30'250.
+  EXPECT_EQ(std::vector<Tick>(rig.recorder->edges.begin() + before, rig.recorder->edges.end()),
+            (std::vector<Tick>{20'250, 21'250, 22'250}));
+}
+
+TEST(ClockedEdgeTest, ResumeClockRefusesWhenNoEdgeIsLeft) {
+  // next_edge() saturates at TICK_MAX, the empty-queue sentinel; resume_clock
+  // has to decline exactly as the edge handler does rather than arm there.
+  const ClockDomain domain("late", 1'000'000'000ULL, TICK_MAX - 3000);
+  EdgeRig rig(domain, /*edges=*/1);
+
+  ASSERT_TRUE(rig.run());
+  ASSERT_FALSE(rig.recorder->running());
+
+  rig.recorder->resume_from(TICK_MAX - 500);
+  EXPECT_FALSE(rig.recorder->running()) << "the clock was armed at the empty-queue sentinel";
+}
+
+TEST(ClockedEdgeTest, AClockWithNoRepresentableEdgeLeftStops) {
+  // next_edge()/edge_after() saturate at TICK_MAX, which is not an edge and is
+  // also the queue's empty sentinel. Scheduling it would re-enqueue the clock
+  // event at the tick it is already on and spin the engine with time frozen,
+  // so the handler has to stop instead.
+  const ClockDomain domain("late", 1'000'000'000ULL, TICK_MAX - 3000);
+  EdgeRig rig(domain, /*edges=*/16);
+
+  EXPECT_TRUE(rig.run()) << "the clock did not stop at the end of representable time";
+  ASSERT_FALSE(rig.recorder->edges.empty());
+  // The grid's last member would be TICK_MAX itself, which is not an edge.
+  EXPECT_EQ(rig.recorder->edges.back(), TICK_MAX - 1000);
+  EXPECT_FALSE(rig.recorder->running());
+}
+
+TEST(ClockedEdgeTest, AClockedComponentOwnsItsDomain) {
+  // The contract, stated where a mutation cannot slip past it. Whether the
+  // component copied the domain or bound a reference to the caller's is not a
+  // question about behaviour on any particular schedule -- both answer every
+  // query identically while the original is alive -- so it is asked directly,
+  // of the address. The test below is the one that shows why it matters.
+  const ClockDomain domain("ghz", 1'000'000'000ULL, /*phase=*/250);
+  const EdgeRecorder recorder(domain, /*edges=*/1);
+
+  EXPECT_NE(&recorder.clock_domain(), &domain) << "the component borrowed the caller's domain";
+  EXPECT_EQ(recorder.clock_domain().period(), domain.period());
+  EXPECT_EQ(recorder.clock_domain().phase_offset(), domain.phase_offset());
+  EXPECT_EQ(recorder.clock_domain().frequency(), domain.frequency());
+  EXPECT_EQ(recorder.clock_domain().first_edge(), domain.first_edge());
+}
+
+TEST(ClockedEdgeTest, AComponentOutlivesTheDomainItWasBuiltFrom) {
+  // A clocked component owns its domain rather than borrowing one, because
+  // borrowing could not be enforced. Deleting the rvalue constructor guards
+  // this class's own signature, and no concrete component is constructed
+  // through it: each has its own constructor taking `const ClockDomain &`,
+  // which forwards a *named* parameter -- an lvalue. A temporary therefore
+  // bound straight past the guard, and every edge computation afterwards read
+  // a destroyed object.
+  //
+  // The domain here is a temporary that is gone before the engine is even
+  // created. Borrowing makes this a use-after-scope on every edge; because a
+  // domain is nothing but integers the read usually succeeds, so the symptom
+  // is a silently wrong schedule rather than a crash, and only the edge list
+  // below says which it was.
+  EdgeRig rig(ClockDomain("temporary", 1'000'000'000ULL, /*phase=*/250), 3);
+
+  ASSERT_TRUE(rig.run());
+  EXPECT_EQ(rig.recorder->edges, (std::vector<Tick>{1250, 2250, 3250}));
+}
+
+TEST(ClockedEdgeTest, ADerivedDomainCanBeConstructedInPlace) {
+  // Owning the domain is what makes a divided clock expressible at the point
+  // of use: derive() returns by value, so the borrowing design rejected the
+  // one call every clocked component with a divided clock wants to write.
+  const ClockDomain parent("parent", 4'000'000'000ULL);
+  EdgeRig rig(parent.derive("half", 2), 3);
+
+  ASSERT_TRUE(rig.run());
+  // A 4 GHz parent has a 250-tick period, so the half-rate child's edges are
+  // 500 ticks apart and each is also a parent edge.
+  EXPECT_EQ(rig.recorder->edges, (std::vector<Tick>{500, 1000, 1500}));
+}
+
+TEST(ClockedEdgeTest, AnInterruptedClockRestartsCleanlyAfterRecreate) {
+  // SimulationEngine::create() rebuilds after shutdown(), and startup() then
+  // arms the one reusable clock event again. Nothing else clears the flag that
+  // says the clock is already running, so a component still clocking when the
+  // previous generation ended is the case that decides whether the flag is
+  // lifecycle state or a leak: a debug build aborts on startup()'s
+  // precondition, and an NDEBUG build double-arms the event and advances the
+  // component twice on every edge for the rest of the run.
+  const ClockDomain domain("ghz", 1'000'000'000ULL);
+  EdgeRig rig(domain, /*edges=*/64); // far more than the steps below take
+
+  ASSERT_TRUE(rig.engine.step());
+  ASSERT_TRUE(rig.recorder->running()) << "the clock stopped before it could be interrupted";
+
+  rig.engine.shutdown();
+  // The flag is the whole defect: nothing else cleared it, so startup() saw a
+  // component that was already clocking and refused to arm the rebuild.
+  EXPECT_FALSE(rig.recorder->running()) << "teardown left the clock marked running";
+  rig.engine.create();
+
+  rig.recorder->edges.clear();
+  rig.recorder->grant(3);
+  ASSERT_TRUE(rig.run());
+
+  // One advance per edge. A second queue entry would repeat each edge.
+  EXPECT_EQ(rig.recorder->edges, (std::vector<Tick>{1000, 2000, 3000}));
+}
+
+namespace {
+
+/// @brief A functional component that records the invocations it was given.
+class StepRecorder : public Functional<Component> {
+public:
+  explicit StepRecorder(uint32_t steps)
+      : Functional<Component>("step_recorder"), remaining_(steps) {}
+
+  bool advance(Tick now) override {
+    steps.push_back(now);
+    if (remaining_ > 0)
+      --remaining_;
+    return remaining_ > 0;
+  }
+
+  /// @brief Give the recorder @p steps more invocations before it halts again.
+  void grant(uint32_t steps) { remaining_ = steps; }
+
+  std::vector<Tick> steps;
+
+private:
+  uint32_t remaining_;
+};
+
+} // namespace
+
+TEST(FunctionalLifecycleTest, AnActiveComponentRestartsCleanlyAfterRecreate) {
+  // The same rebuild question as the clocked case, for the sibling mixin. Its
+  // flag guards the same single reusable event, so a stale one costs two
+  // advances per tick -- and a functional component advances once per
+  // picosecond, so the doubling is not a subtle drift.
+  SimulationEngine engine{{}};
+  auto root = std::make_unique<CompositeComponent>("root");
+  auto *recorder = static_cast<StepRecorder *>(root->add_child(std::make_unique<StepRecorder>(64)));
+  engine.topology().set_root(std::move(root));
+  engine.create();
+
+  ASSERT_TRUE(engine.step());
+  ASSERT_TRUE(recorder->active()) << "the component halted before it could be interrupted";
+
+  engine.shutdown();
+  EXPECT_FALSE(recorder->active()) << "teardown left the component marked advancing";
+  engine.create();
+
+  recorder->steps.clear();
+  recorder->grant(3);
+  // step() has to come first: the component arms itself in startup(), which
+  // the engine defers to the first step, so active() is false before then.
+  for (uint32_t i = 0; i < 8; ++i) {
+    engine.step();
+    if (!recorder->active())
+      break;
+  }
+
+  // Three invocations, counted once each, from a counter that resumed rather
+  // than restarted -- the counter is the component's own and teardown has no
+  // business resetting it.
+  EXPECT_EQ(recorder->steps.size(), 3u);
+  EXPECT_FALSE(recorder->active());
 }
