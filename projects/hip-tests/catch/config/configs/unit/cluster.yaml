@@ -7,3 +7,11 @@ cluster:
     <<: *level_2
   Unit_hipClusterLaunch_LaunchApi_Basic:
     <<: *level_2
+  Unit_hipOccupancyMaxActiveClusters_Basic:
+    <<: *level_2
+  Unit_hipOccupancyMaxPotentialClusterSize_Basic:
+    <<: *level_2
+  Unit_hipClusterLaunch_MaxClusterSize:
+    <<: *level_2
+  Unit_hipClusterLaunch_MaxActiveClustersAndSize:
+    <<: *level_2
