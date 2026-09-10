@@ -2229,7 +2229,8 @@ TEST_F(KfdIoctlTest, DbgTrapNotificationWriterStaysOutsidePtraceDomain) {
       static_cast<void>(::ptrace(PTRACE_DETACH, tracee, nullptr, nullptr));
     }
     const int observed = saw_helper ? 1 : 0;
-    static_cast<void>(::write(control[1], &observed, sizeof(observed)));
+    if (::write(control[1], &observed, sizeof(observed)) != sizeof(observed))
+      _exit(5);
     ::close(control[1]);
     _exit(parent_done ? 0 : 4);
   }
@@ -2387,15 +2388,6 @@ TEST_F(KfdIoctlTest, DbgTrapCompetingNotifierWriterCannotBlockPublisher) {
                                                        /*retain_on_rejection=*/true));
   EXPECT_LT(std::chrono::steady_clock::now() - start, std::chrono::seconds(1));
 
-  // Initializing the deferred reaper must not leave a joinable static thread
-  // that a later fork child tries to destroy. Use exit(), not _exit(), so the
-  // child runs process-lifetime destructors under a second bounded wait.
-  const pid_t exit_probe = ::fork();
-  ASSERT_GE(exit_probe, 0);
-  if (exit_probe == 0)
-    std::exit(0);
-  EXPECT_EQ(wait_for_child_with_timeout(exit_probe, std::chrono::seconds(2)), 0);
-
   driver_->set_debug_notification_deferred_reap_for_testing(false);
   driver_->set_debug_notification_write_hook_for_testing({});
   EXPECT_TRUE(competing_write_ran);
@@ -2410,6 +2402,22 @@ TEST_F(KfdIoctlTest, DbgTrapCompetingNotifierWriterCannotBlockPublisher) {
   ASSERT_EQ(::read(notifier, &notifications, sizeof(notifications)),
             static_cast<ssize_t>(sizeof(notifications)));
   EXPECT_EQ(notifications, 1u);
+
+  // Stop fixture threads before fork so their temporary allocations are not
+  // orphaned in the child. The process-lifetime notification reaper stays alive.
+  driver_->close();
+  driver_ = nullptr;
+  engine_.reset();
+  soc_ = nullptr;
+
+  // Initializing the deferred reaper must not leave a joinable static thread
+  // that a later fork child tries to destroy. Use exit(), not _exit(), so the
+  // child runs process-lifetime destructors under a second bounded wait.
+  const pid_t exit_probe = ::fork();
+  ASSERT_GE(exit_probe, 0);
+  if (exit_probe == 0)
+    std::exit(0);
+  EXPECT_EQ(wait_for_child_with_timeout(exit_probe, std::chrono::seconds(2)), 0);
 }
 
 TEST_F(KfdIoctlTest, DbgTrapSubscriptionLossAfterWriteRejectsClaim) {

@@ -264,27 +264,23 @@ public:
 private:
   void reap_until_stopped(std::stop_token stop) {
     while (!stop.stop_requested()) {
-      std::vector<pid_t> writers;
       {
         std::unique_lock<std::mutex> lock(mutex_);
         cv_.wait(lock, stop, [this] { return !writers_.empty(); });
         if (stop.stop_requested())
           break;
-        writers.swap(writers_);
-      }
 
-      std::vector<pid_t> pending;
-      for (pid_t writer : writers) {
-        int status = 0;
-        const pid_t result = ::waitpid(writer, &status, WNOHANG | __WCLONE);
-        if (result == 0 || (result < 0 && errno == EINTR))
-          pending.push_back(writer);
+        // Keep allocations owned by the process-lifetime reaper: a fork child
+        // loses this worker's stack and cannot reclaim thread-local vectors.
+        std::erase_if(writers_, [](pid_t writer) {
+          int status = 0;
+          const pid_t result = ::waitpid(writer, &status, WNOHANG | __WCLONE);
+          return result != 0 && !(result < 0 && errno == EINTR);
+        });
+        if (writers_.empty())
+          continue;
       }
-      if (!pending.empty()) {
-        static_cast<void>(::poll(nullptr, 0, 10));
-        std::lock_guard<std::mutex> lock(mutex_);
-        writers_.insert(writers_.end(), pending.begin(), pending.end());
-      }
+      static_cast<void>(::poll(nullptr, 0, 10));
     }
   }
 
