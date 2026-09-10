@@ -26,6 +26,7 @@ import json
 import logging
 import os
 import re
+import shlex
 import shutil
 import subprocess
 import sys
@@ -364,6 +365,63 @@ def patch_madengine_for_cluster(
             )
         else:
             log.info("run_orchestrator.py already patched or yum string not found")
+
+
+def distribute_overlay_via_shared_fs(
+    madengine_dir: Path, work_dir: Path, overlay_image: str,
+) -> None:
+    """Save an overlay on shared storage and load it on every allocated node."""
+    template = madengine_dir / "src/madengine/deployment/templates/slurm/job.sh.j2"
+    content = template.read_text()
+    marker = "# Load required modules"
+    if content.count(marker) != 1:
+        raise RuntimeError("Cannot insert overlay distribution into SLURM template")
+
+    # Keep the large archive outside the directory copied to node-local /tmp.
+    # The caller must place work_dir on storage shared with the compute nodes.
+    archive = work_dir.resolve().with_name(work_dir.name + ".overlay.tar")
+    partial = archive.with_suffix(".tar.partial")
+    image_id = subprocess.run(
+        ["docker", "image", "inspect", "--format", "{{.Id}}", overlay_image],
+        check=True, capture_output=True, text=True,
+    ).stdout.strip()
+    log.info("Saving overlay %s (%s) to %s", overlay_image, image_id, archive)
+    try:
+        subprocess.run(
+            ["docker", "save", "--output", str(partial), overlay_image], check=True,
+        )
+        partial.replace(archive)
+    finally:
+        partial.unlink(missing_ok=True)
+
+    loader = work_dir.resolve() / "load_rccl_overlay.sh"
+    loader.write_text("#!/bin/bash\nset -euo pipefail\n" +
+        f"image={shlex.quote(overlay_image)}\n"
+        f"expected={shlex.quote(image_id)}\n"
+        f"archive={shlex.quote(str(archive))}\n" + """
+echo "[$(hostname)] Preparing RCCL overlay $image"
+actual=$(docker image inspect --format '{{.Id}}' "$image" 2>/dev/null || true)
+if [ "$actual" != "$expected" ]; then
+    test -r "$archive" || { echo "Shared overlay archive unreadable: $archive" >&2; exit 1; }
+    docker load --input "$archive"
+fi
+actual=$(docker image inspect --format '{{.Id}}' "$image")
+if [ "$actual" != "$expected" ]; then
+    echo "Overlay image mismatch: expected $expected, got $actual" >&2
+    exit 1
+fi
+echo "[$(hostname)] RCCL overlay verified: $actual"
+""")
+    preload = (
+        "# Load the overlay on every allocated node before any workload starts.\n"
+        "if ! srun --ntasks=\"$SLURM_JOB_NUM_NODES\" --ntasks-per-node=1 "
+        "--kill-on-bad-exit=1 bash " + shlex.quote(str(loader)) + "; then\n"
+        '    echo "RCCL overlay distribution failed" >&2\n'
+        "    exit 1\n"
+        "fi\n\n"
+    )
+    template.write_text(content.replace(marker, preload + marker))
+    log.info("Configured SLURM to load and verify the overlay on every node")
 
 
 def get_rccl_commit(rccl_lib: Path | None = None) -> str:
@@ -1136,7 +1194,8 @@ def main() -> None:
         "--work-dir",
         type=Path,
         default=None,
-        help="Working directory for madengine install, overlay build, etc.",
+        help="Working directory for madengine; must be on shared storage "
+             "visible to compute nodes when no registry is configured",
     )
     parser.add_argument(
         "--timeout-minutes",
@@ -1219,22 +1278,10 @@ def main() -> None:
             registry=args.registry,
         )
 
-    # Step 4: Generate manifest
-    # When no registry is configured, the overlay image only exists on the
-    # node that built it. Pin the SLURM job to that node so madengine can
-    # find the image locally.
-    nodelist = ""
-    if args.nodes == 1 and not args.registry:
-        nodelist = os.environ.get("SLURM_NODELIST", "")
-        if not nodelist:
-            hostname = subprocess.run(
-                ["hostname", "-s"], capture_output=True, text=True,
-            ).stdout.strip()
-            if hostname:
-                nodelist = hostname
-        if nodelist:
-            log.info("No registry — pinning SLURM job to build node: %s", nodelist)
+    if not args.registry:
+        distribute_overlay_via_shared_fs(madengine_dir, work_dir, overlay_image)
 
+    # Step 4: Generate manifest
     manifest_path = generate_manifest(
         args.workload,
         workload_config,
@@ -1242,7 +1289,6 @@ def main() -> None:
         overlay_image,
         args.nodes,
         work_dir,
-        nodelist=nodelist,
         registry=args.registry,
         rccl_lib=rccl_lib if args.skip_overlay_build else None,
     )

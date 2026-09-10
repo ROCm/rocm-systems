@@ -197,3 +197,4 @@ jobs:
         if: always()
         run: |
           rm -rf "${WORK_DIR}/madengine" "${WORK_DIR}/MAD" "${WORK_DIR}/venv" "${WORK_DIR}/rccl_libs"
+          rm -f "${WORK_DIR}.overlay.tar" "${WORK_DIR}.overlay.tar.partial"
