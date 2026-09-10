@@ -108,10 +108,6 @@ env HSA_TOOLS_LIB="$CONSAN_HOOK" \
   ./application
 ```
 
-On physical gfx1201, the current empirical recommendation is to use Sampled
-for ordinary barrier/LDS triage and reserve Record/Replay for expert
-synchronization-history work.
-
 ### Different flavor: SuperCollider
 
 SuperCollider is a separate ConSan flavor. Select it with the same mode
@@ -129,16 +125,16 @@ support and allocate registers and reports. The MOI engines also enable
 supported barrier and atomic tracking; Sampled chooses its runtime sampling
 parameters automatically.
 
-## 5. Require complete instrumentation
+## 5. Require effective instrumentation
 
 An ordinary run reports instrumentation problems in its log. For a focused
-test, ConSan can instead treat those problems as failures. These self-checks
-prevent an ineffective run from looking reassuringly clean:
+test, ConSan can turn several ineffective-run conditions into failures:
 
-`RJ_CONSAN_POLICY=strict` combines the usual instrumentation-health checks: it
-rejects unsupported transforms, requires real instrumentation patches and MOI
-runtime evidence, and rejects report overflow. Enable it alongside the default
-analysis:
+`RJ_CONSAN_POLICY=strict` defaults the usual instrumentation-health checks on:
+fail closed for unsupported or invalid transforms, require real
+instrumentation patches, require visible evidence from HSA-tool-owned
+automatic MOI reports, and forbid report overflow. Individual controls can
+still override those defaults. Enable it alongside the default analysis:
 
 ```sh
 env HSA_TOOLS_LIB="$CONSAN_HOOK" \
@@ -148,16 +144,19 @@ env HSA_TOOLS_LIB="$CONSAN_HOOK" \
 ```
 
 Strict policy describes the health of ConSan instrumentation, not whether the
-program is race-free, and diagnostics remain non-fatal. If a known-correct
-test should also produce no ConSan diagnostic, add this expert expected-result
-assertion before `./application`:
+program is race-free, and diagnostics remain non-fatal. It requires at least
+one relevant patch, not complete static coverage; inspect the coverage summary
+or use the validation runner when complete coverage is required. If a
+known-correct test should also produce no ConSan diagnostic, add this expert
+expected-result assertion before `./application`:
 
 ```sh
   RJ_CONSAN_MOI_FORBID_DIAGNOSTICS=1 \
 ```
 
-Apply strict policy first to a focused test or kernel. It can be too strict for
-a large application that also loads unsupported or irrelevant helper code.
+Apply strict policy first to a focused test or kernel. It applies to every code
+object observed by the hook, so a large application that loads unsupported or
+irrelevant helper code can be rejected.
 
 ## 6. Validate detection with fault injection
 

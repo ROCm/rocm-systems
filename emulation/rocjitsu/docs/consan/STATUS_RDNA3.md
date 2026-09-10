@@ -1,6 +1,9 @@
 # ConSan RDNA3 (`gfx1100`) status
 
-Status snapshot: 2026-08-24. Physical evidence uses native gfx1100 code objects on the Radeon Pro W7900 selected by agent UUID; simulator prerequisites use RocJitsu `configs/gfx1100_w7900.json`.
+Physical evidence uses native `gfx1100` code objects on a matching GPU;
+simulator prerequisites use RocJITsu `configs/gfx1100_w7900.json`. Exact counts
+belong to the binaries used for qualification and must be refreshed after
+relevant source, toolchain, workload, emulator, or runtime changes.
 
 Legend: 🩶 unseen or simulator-prerequisite-only · 🟥 broken before useful evidence · 🟧 below 80% aggregate applicable-site support or another substantial gap · 🟨 timeout-only blocker or at least 80% aggregate applicable-site support · 🟩 accepted workload/profile contract.
 

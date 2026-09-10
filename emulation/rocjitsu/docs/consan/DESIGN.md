@@ -189,21 +189,26 @@ native LDS dialect, workgroup-shadow clear, resident-wave identity, atomic
 address support, and normalized memory operations.
 
 Profiles contain no mode choice, per-kernel allocation, report address, or
-mutable lowering result. Exact-target providers hide native decoding and
-emission behind normalized contracts for program analysis, fault mutation,
-SuperCollider, final validation, LDS operations, and special state such as
-CDNA5 selectable VGPR banks.
+mutable lowering result. Exact-target providers own target-specific decoding,
+validation, fault mutation, LDS operations, SuperCollider mechanics, and
+special state such as CDNA5 selectable VGPR banks. Mode emitters consume a
+normalized `ConSanTargetProfile` and common architecture-aware instruction
+builders; they may account for a target capability but do not select behavior
+by concrete product ID.
 
-Architecture code lives under `targets/rdna3`, `targets/rdna4`,
-`targets/cdna3`, `targets/cdna4`, or `targets/cdna5`. A provider shared by a
-real subset lives under `targets/shared` and names that subset. Exact product
-IDs remain in profile filenames—such as `consan_gfx1250_target_profile.h.inc`—
-because a profile describes one admitted target, not all CDNA5 products.
+Exact-target and target-family providers live under `targets/rdna3`,
+`targets/rdna4`, `targets/cdna3`, `targets/cdna4`, or `targets/cdna5`. A
+provider shared by a real subset lives under `targets/shared` and names that
+subset. Common code can consume normalized architectural facts or generic
+instruction builders, but concrete target dispatch remains under `targets`.
+Exact product IDs remain in profile filenames—such as
+`consan_gfx1250_target_profile.h.inc`—because a profile describes one admitted
+target, not all CDNA5 products.
 
 The boundary follows two rules:
 
-1. A mode consumes normalized target facts and never switches on a concrete
-   target.
+1. A mode consumes normalized target facts and common native builders and
+   never switches on a concrete target ID.
 2. A target provider supplies architecture mechanics and never consumes
    `ConSanOptions`, selects a mode, or defines report policy.
 
@@ -240,10 +245,29 @@ state and transient scalar ABI; spill and dynamic-stack policy; dispatch
 identity and fallback; evidence planning; automatic report ceiling and runtime
 sampling default; report layout; and report-inventory reconstruction.
 
-Mode policy and emission live in the mode directory. Mechanisms shared by two
-or three modes stay common when they operate on normalized plans rather than
-switch on concrete modes. Mode locality must not duplicate a dispatcher,
-placement planner, spill transaction, or publication protocol.
+Mode-specific planning and emission live in the mode directory. Cross-mode
+semantic admission remains centralized in the common access, barrier, and
+atomic/fence policy functions when it compares how the closed engine set
+treats the same normalized inventory. Mechanisms shared by two or three modes
+also stay common when they operate on normalized plans. Mode locality must not
+duplicate a dispatcher, placement planner, spill transaction, or publication
+protocol.
+
+The physical source boundary has two kinds of exceptions today. Registry and
+orchestration selection points, plus common ABI, report-layout, and
+report-contract headers, deliberately aggregate the closed set of
+mode-specific variants so the pipeline and runtime can carry a mode-neutral
+sum type. Those are explicit facades, not shared implementations.
+
+Three non-facade exceptions remain. `consan_moi_record_planning.*` and
+`consan_moi_record_event_emission.*` are consumed only by Record/Replay and
+belong physically under `modes/record_replay`. In addition,
+`consan_moi_internal.h` includes the Sampled report contract to define
+`SampledAtomicSemantics`, while `consan_moi_sync_emission.*` implements that
+Sampled-only source projection. The latter is also a dependency peephole, not
+just a misplaced file. It should move under `modes/sampled` or sit behind a
+mode-neutral contract. Until these are corrected, mode locality is the
+intended ownership rule rather than a completely realized physical invariant.
 
 The hook mirrors this split. Record/Replay, Sampled, and Inline Shadow own
 their decoder, analyzer, and renderer under `hooks/consan/modes/<mode>`.

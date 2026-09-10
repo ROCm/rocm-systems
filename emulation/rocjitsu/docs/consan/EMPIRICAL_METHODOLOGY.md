@@ -57,7 +57,7 @@ Before timing or fault trials, each workload/mode pair must:
 
 A pair that fails any condition remains an explicit rejected result. It is not
 timed, dropped from the corpus, replaced by an easier kernel, or made admissible
-by weakening strict coverage.
+by weakening the full-coverage requirement.
 
 ## Frozen provenance
 
@@ -221,20 +221,13 @@ python3 emulation/rocjitsu/tests/dbi/consan/consan_validation.py \
   --artifact-root "$CONSAN_ARTIFACT_ROOT"
 ```
 
-The external workload locations used by the gfx1201 study are explicit:
+The external workload locations used by the gfx1201 study are explicit when
+those workload families are selected:
 
 ```sh
 export CONSAN_VALIDATION_RDNA4_MATMUL_DIR=/path/to/rdna4_matmul
 export CONSAN_VALIDATION_LLAMA_BUILD_DIR=/path/to/llama/build
 export CONSAN_VALIDATION_LLVM_READELF=/path/to/llvm-readelf
-```
-
-Build the external production matmul from its pinned clean checkout through its
-project-owned interface:
-
-```sh
-VENV=/path/to/therock-venv PRODUCTION_ONLY=1 \
-  /path/to/rdna4_matmul/build_and_test.sh --help
 ```
 
 The artifact root contains frozen provenance, clean admission rows, original

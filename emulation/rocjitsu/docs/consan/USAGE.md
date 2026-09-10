@@ -40,11 +40,12 @@ Loading the hook is itself the activation action and defaults to MOI
 Record/Replay; no separate enable variable is required. `RJ_CONSAN_LOG=1` is
 optional.
 
-Every valid code object on a waitcheck-supported target is checked for missing
-AMDGPU waits at load time before ConSan allocates runtime state or runs its DBI
-transform. Hazards and analysis failures are reported first, then ConSan still
-instruments the suspect code so it can diagnose its memory-ordering behavior.
-This preflight is part of the ConSan hook and is not controlled by
+Every valid code object on a waitcheck-supported target that is not excluded
+by the kernel allowlist is checked for missing AMDGPU waits at load time before
+ConSan allocates runtime state or runs its DBI transform. Hazards and analysis
+failures are reported first, then ConSan still instruments the suspect code so
+it can diagnose its memory-ordering behavior. This preflight is part of the
+ConSan hook and is not controlled by
 `ROCJITSU_WAITCHECK`, `ROCJITSU_WAITCHECK_MODE`, or
 `ROCJITSU_WAITCHECK_FAIL`; ordinary ConSan runs do not load the separate
 waitcheck HSA tool.
@@ -122,7 +123,7 @@ env HSA_TOOLS_LIB="$CONSAN_HOOK" \
   ./application
 ```
 
-For focused tests, require complete instrumentation and report collection:
+For focused tests, require an effective transform and report collection:
 
 ```sh
 export RJ_CONSAN_POLICY=strict
@@ -149,7 +150,7 @@ continues to return the HSA error to callers that correctly handle it.
 | Variable | Default | Meaning |
 | --- | --- | --- |
 | `RJ_CONSAN_MODE=record-replay|inline-shadow|sampled|supercollider` | `record-replay` | Select the analysis. Loading the hook activates ConSan. |
-| `RJ_CONSAN_POLICY=default|strict` | `default` | `strict` rejects unsupported or incomplete instrumentation, requires real patches and MOI evidence, and rejects report overflow. A load-time rejection terminates with exit code 92; race diagnostics remain nonfatal. |
+| `RJ_CONSAN_POLICY=default|strict` | `default` | `strict` defaults fail-closed and require-patch guards to true; for MOI it also defaults automatic-record and forbid-overflow guards to true. It does not require complete static coverage or make race diagnostics fatal. A load-time rejection terminates with exit code 92. |
 | `RJ_CONSAN_LOG=N` | disabled | Enable compact logs at `1`; larger values add inventory detail. |
 | `RJ_CONSAN_FAIL_CLOSED=0|1` | `0` | Reject unsupported/invalid transformation outcomes instead of loading the original. |
 | `RJ_CONSAN_REQUIRE_PATCH=0|1` | `0` | Reject an applicable code object when no real access/barrier/atomic/fence instrumentation patch is emitted. Prologues and metadata-only changes do not satisfy it. |
@@ -223,11 +224,9 @@ tables.
 Admission uses the largest phase value and reports the governing phase and
 coefficients. The parser rejects aggregate copied section payload or
 section-name bytes larger than its backing image, and conservatively charged
-symbol- and metadata-derived state larger than its three-unit budget. These
-coefficients supersede the earlier `I + 10*M`, `I + 11*M`, and
-`7*I + 8*M` model, which did not fully account for section-object, vector-slot,
-or dense per-symbol state. Deployments with a tuned concurrent-transform
-ceiling should rederive it from the current coefficients. The patcher
+symbol- and metadata-derived state larger than its three-unit budget.
+Deployments with a tuned concurrent-transform ceiling should derive it from
+the reported phase and current coefficients. The patcher
 preallocates every file insertion, commits same-size rewrites directly, moves
 every emitted image, and avoids a separate padding buffer so vector growth
 cannot add an unmodelled geometric full-image allocation. The two retained-
@@ -400,8 +399,8 @@ The public raw workflow has two steps:
 
 The final `ConSan fault summary` must report
 `requested=1 planned=1 applied=1`. Identities belong to the exact native binary
-and must be rediscovered after a relevant rebuild. Prefer identities over the
-legacy numeric index selectors.
+and must be rediscovered after a relevant rebuild. Prefer identities over
+numeric index selectors.
 
 Supported mutation families are:
 
@@ -496,7 +495,7 @@ cannot attest complete process accounting; its retained reservation evidence
 is invalid and the run must be repeated. Pair summaries report this as
 `reservation_evidence_invalid`, separately from `fault_not_applied` and
 `reservation_contended`. A workload/profile with no applicable mutation site
-remains `unsupported` even when historical reservation evidence is absent.
+remains `unsupported`.
 
 Fault injection is intentionally disruptive. Apply one mutation at a time,
 use an external timeout, and check device health before and after the run.

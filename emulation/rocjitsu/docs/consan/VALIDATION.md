@@ -1,300 +1,128 @@
-# ConSan Validation
+# ConSan validation
 
-This guide explains the reproducible experiment behind the per-target support
-ledgers: [gfx942](STATUS_CDNA3.md), [gfx950](STATUS_CDNA4.md),
-[gfx1100](STATUS_RDNA3.md), [gfx1201](STATUS_RDNA4.md), and
-[gfx1250](STATUS_GFX1250.md). The executable authority is
-[`consan_validation.py`](../../tests/dbi/consan/consan_validation.py): it owns the
-workload manifest, instrumentation profiles, commands, timeouts, knob hygiene,
-coverage gates, overhead calculation, and fault-containment policy. Prefer a
-script change with tests over copying another command into this document.
+This guide describes the maintained validation interfaces for ConSan. The
+executable authority for external-workload campaigns is
+[`consan_validation.py`](../../tests/dbi/consan/consan_validation.py); its
+manifest owns workload commands, timeouts, profile environments, correctness
+oracles, and fault policy. Use `--help`, `manifest`, and `explain` instead of
+copying workload-specific commands into this document.
 
-[USAGE.md](USAGE.md) remains the complete setting reference,
-[SPILLING.md](SPILLING.md) explains ConSan's resource-policy integration, the
-reusable backend is documented in
-[AMDGPU register spilling](../spilling.md), and
-the target-specific status files above are the published result ledgers.
+The target ledgers record qualification state for
+[CDNA3 / gfx942](STATUS_CDNA3.md), [CDNA4 / gfx950](STATUS_CDNA4.md),
+[RDNA3 / gfx1100](STATUS_RDNA3.md), [RDNA4 / gfx1201](STATUS_RDNA4.md), and
+[CDNA5 / gfx1250](STATUS_GFX1250.md). A ledger is not a substitute for rerunning
+the gates after a relevant source, toolchain, workload, or runtime change.
 
-## Checked-in device conformance
+## Validation layers
 
-The `consan-device` CTest tier is the bounded bridge between host unit tests
-and the external end-to-end campaigns. It compiles small HIP programs into
-real target code objects, passes them through the production interception and
-instrumentation path, and executes them on RocJitsu or a matching physical
-GPU. It needs no model, data set, external workload repository, or prebuilt
-test artifact.
+ConSan uses four complementary layers:
 
-The fixtures reduce device-level properties observed in attention, reduction,
-training, framework state machines, generated-model, and Stream-K-style
-workloads. They cover cross-wave LDS handoff, barrier and fence publication,
-shared helpers with multiple kernel owners, three-dimensional workgroup
-identity, repeated queue-local dispatch identity across independent HIP
-streams, dynamic private stacks, adjacent subword writes with overlapping
-reads, fetch-add, atomic-OR, release-CAS publication, language-level
-release-store publication, four-wave mixed-precision backward reduction,
-runtime-computed indexed LDS addressing and zero-stride aliasing,
-deterministic in-place state restore/replay, module load/unload/reload, two
-independent graph streams and packed graph/executable parameter updates,
-compiler-generated kernarg preloads, mixed private owners, long-range live-SCC
-control, reusable RCCL-style partial barriers, full-low-bank Stream-K,
-large-text relay pressure, live-SCC subword traffic, tied-address/result LDS
-loads, E2E-derived adjacent and stride-64 dual-address B64 LDS transfers,
-target-native FLAT-atomic release/acquire publication, and multi-stage
-selection/reduction shapes. The Top-K reservation
-contract now spans wave64 and wave32 targets. Target extensions include native
-96-bit LDS tuple publication on CDNA3/CDNA4 and RDNA3/RDNA4/CDNA5, including an
-address/destination alias distilled from framework kernels; native CDNA4
-b64-to-b16 transpose reads; and CDNA5 clustered dispatch, high-bank LDS,
-sparse/scaled matrix pipelines, native K=32 FP16 WMMA with 32-byte per-lane
-fragments, 160-KiB LDS, and asynchronous transfer in both global-to-LDS and
-B8/B32/B64/B128 LDS-to-global directions. Every semantic
-scenario has adjacent correct and incorrect workloads: the correct member
-checks exact host-computed output and forbids diagnostics, while the incorrect
-member changes the intended ordering property and requires the applicable
-sanitizer evidence while retaining an independent control oracle wherever
-possible.
+1. Host unit tests exercise parsing, inventory, policy, planning, native
+   emission, placement, spilling, report models, final validation, hook
+   configuration, and validation-script behavior.
+2. Target-native simulator tests execute real code objects for all five
+   supported targets through RocJITsu.
+3. Physical tests execute the matching target-native fixtures on hardware and
+   finish with an uninstrumented health check.
+4. External-workload campaigns qualify unmodified production-shaped programs,
+   overhead, and reviewed fault injection.
 
-HIP streams are integration coverage, not proof that multiple HSA queues were
-used. CDNA4 additionally has a direct-HSA `TwoQueueDispatchIdentity` fixture.
-It creates two queues, asserts distinct `hsa_queue_t::id` values, and submits
-the same kernel object at matching absolute packet indices zero and one on both
-queues. It runs once with a reused kernarg allocation and once with distinct
-kernarg allocations, printing those facts before checking the result. Its
-clean Record/Replay member is mutation-sensitive: a queue-blind identity
-merges equal-ID dispatches and produces a false LDS conflict; the racy member
-retains an independent positive diagnostic oracle. Inline Shadow applies its
-bounded first-N diagnostic contract. Sampled now requests per-launch hardware
-identity for access/atomic consumers even at runtime stride one; its racy
-member permits the mode's documented statistical miss while still requiring
-complete, trusted retained evidence.
+Simulator success proves behavior under the emulator. It does not promote a
+physical cell. Physical and destructive fault tests are serialized.
 
-The HIP `RepeatedDispatchIdentity`, `GraphReplay`, and
-`GraphParameterUpdate` fixtures print their observed completed-launch count and
-explicitly report the underlying HSA queue count and raw dispatch-ID reuse as
-`unobserved`. Their Record/Replay CTest contracts conjunctively require that
-line and respectively 8, 6, and 2 retained dispatch fingerprints. Thus graph
-replay proves launch retention without being promoted into multi-queue proof;
-the direct-HSA fixture remains authoritative for that condition.
+## Checked-in CTest gates
 
-At operating points that select automatic hardware entry identity, the current
-MOI path stores a 64-bit launch fingerprint formed from the AMDHSA queue-pointer
-preload and the queue-local absolute dispatch ID, with zero remapped away from
-the empty sentinel. This fixes equal dispatch IDs on simultaneously live queues
-and distinguishes later absolute IDs after AQL ring-slot reuse. It is not an
-exact 128-bit `(queue instance, dispatch ID)` identity: XOR composition has
-residual collisions, and a runtime that recycles the same queue-object address
-after destruction can recreate an earlier input. Clean reports must therefore
-not be documented as collision-free proof. An adapter-assigned non-recycling
-launch token, or retaining the complete pair in the MOI evidence ABI, remains
-the exact follow-up.
+The `consan` label includes the maintained host and device contracts. The
+`consan-device` label identifies target-native executable tests; those tests
+also carry `simulator` or `physical` as applicable.
 
-Sampled owns a literal-identity fallback for operating points where its
-hardware pair overlaps guest scalar state. That fallback is a deliberately
-weaker, mode-visible operating point; it is not queue-aware and cannot qualify
-a clean multi-launch result as exact. The direct-HSA two-queue conformance case
-therefore proves that the hardware capture was selected. Runtime trust can
-certify capture, retention, and decoding of the selected representation, but
-cannot upgrade either the literal fallback or the compact fingerprint into an
-injective identity.
+Build the test dependencies before running CTest:
 
-The contract is deliberately independent of current implementation choices.
-Tests may require that the intended code object was instrumented, that semantic evidence
-is complete, and that diagnostics match the declared clean or racy outcome.
-They do not assert patch counts, instruction encodings, code-cave use, helper
-layout, register allocation, or any other implementation choice. This lets the
-same suite remain an oracle across architectural changes.
+```sh
+cmake --build /path/to/rocjitsu-build -j16
+```
 
-Every fixture runs as an uninstrumented baseline and under SuperCollider,
-Record/Replay, Sampled, and Inline Shadow. The common matrix is registered for
-CDNA3 (`gfx942`), CDNA4 (`gfx950`), CDNA5 (`gfx1250`), RDNA3 (`gfx1100`), and
-RDNA4 (`gfx1201`). All five simulated targets use RocJitsu directly; no FFM
-path is part of this tier. A matching physical target runs the same contract,
-followed by an ordered uninstrumented health check. Current qualification
-results are maintained in the per-target status ledgers linked above.
+Run the complete nonphysical ConSan gate with bounded host parallelism:
 
-The initial target-capability disposition is:
+```sh
+ctest --test-dir /path/to/rocjitsu-build \
+  -L consan -LE physical --output-on-failure -j16
+```
 
-| Capability | Device disposition |
-| --- | --- |
-| Native LDS and group-FLAT loads/stores | Covered on all five targets by compiler-native forms, including adjacent CDNA3/4 `ds_read2_b64`/`ds_write2_b64` and RDNA3/4 `ds_load_2addr_b64`/`ds_store_2addr_b64`, plus each family's stride-64 forms, under one four-value exact publication contract. CDNA4 additionally executes exact B32/B128 MUBUF direct-to-LDS delivery with implicit M0/physical-lane destinations in simulation and hardware; CDNA3 transports the applicable B32 form. |
-| Target-native workgroup barriers | Covered on all five targets by the handoff and reduction workloads; exact opcode selection is intentionally not pinned. |
-| 8-, 16-, and 32-bit LDS overlap | Covered by the subword and word fixtures on all five targets. |
-| Native 96-bit LDS tuples | Covered by correct/incorrect pairs on CDNA3/CDNA4 and RDNA3/RDNA4/CDNA5, including address/destination aliasing. |
-| Multi-owner helpers, multidimensional dispatch identity, dynamic private stacks, and module lifecycle | Covered on all five targets and physical CDNA4, including compiler-generated kernarg-preload and mixed-owner variants. |
-| Agent-scope atomic release/acquire and fence inventory | Covered on all five targets by fetch-add arrival, fence/barrier publication, release-CAS plus language-level acquire load, language-level release store plus acquire-CAS, and a target-native FLAT-atomic publication pair. The latter retains CDNA3/4 `flat_atomic_add`, RDNA3 `flat_atomic_add_u32`, and RDNA4/CDNA5 instruction-scoped `flat_atomic_add_u32` release/add and returning/acquire forms in the final objects. |
-| Top-K prefix and permutation | Covered on all five targets: RDNA3/RDNA4/CDNA5 use wave32 atomic-return reservation and broadcast with paired LDS loads, while CDNA3/CDNA4 use the corresponding wave64 ballot/rank and paired-read form under the same exact prefix/payload oracle. |
-| Native CDNA4 transpose publication | Covered in gfx950 simulation and on the physical GPU by `ds_read_b64_tr_b16` with the exact 16-lane transpose oracle. The instruction is not native gfx942. |
-| CDNA5 clustered dispatch, transfer, and matrix staging | Covered by real extended dispatch packets for two- and four-CTA cluster barriers, two-cluster identity/isolation, Composable Kernel-derived B8/B32/B64/B128 direct-to-LDS cluster loads followed by one async-count wait, ordinary and multicast delivery, sparse SWMMAC, scaled WMMA, and native K=32 FP16 WMMA consuming a 32-byte per-lane LDS fragment. The cluster correct members compare every delivered byte/word exactly; their incorrect members retain the transfers and remove only the cluster publication edge. AsyncDataCopier reductions independently cover every supported width in both ordinary global-to-LDS and LDS-to-global directions plus `s_wait_asynccnt`. The PyTorch/Triton reduction executes two native `tensor_load_to_lds`, one `tensor_store_from_lds`, and three tensor-count waits in an exact three-wave add pipeline. Its explicit LDS marker/read owns the incorrect member's diagnostic; it does not overclaim descriptor-sized TDM-range instrumentation. Synchronous `cluster_load_b*` reads global address space and returns a workgroup broadcast rather than touching LDS, so it is outside ConSan's general race model and is not a missing device contract. |
-| Remaining wider target-specific LDS forms and native VGLOBAL forms | Extend when an implementation-independent device oracle can be reduced from an end-to-end workload; B96 tuples are covered on every architecture where ConSan admits them. |
-
-“Tracked gap” is preferable to a fixture that merely recognizes the current
-patcher. Add an extension when its program can state a portable workload or
-sanitizer-semantic oracle, and cross-pollinate it to every applicable target.
-
-Run the complete simulator matrix with:
+Run the simulator device matrix explicitly when isolating that layer:
 
 ```sh
 ctest --test-dir /path/to/rocjitsu-build \
   -L consan-device -L simulator --output-on-failure -j16
 ```
 
-On a host with the matching physical device, run the native matrix with:
+On a host with the matching GPU, run the physical device matrix serially:
 
 ```sh
 ctest --test-dir /path/to/rocjitsu-build \
-  -L consan-device -L physical --output-on-failure -j16
+  -L consan-device -L physical --output-on-failure -j1
 ```
 
-For a TheRock virtual environment, configure and execute with only its SDK
-roots. One concrete layout is:
+These fixtures use the production hook and transform path. They check portable
+semantic outcomes—correct output, applicability, coverage, completeness,
+diagnostic policy, and device health—without pinning patch counts, register
+numbers, code-cave choices, or native instruction sequences.
+
+The common matrix covers native LDS and group-FLAT access, workgroup
+synchronization, selected atomic/fence ordering, multiple execution owners,
+multidimensional and repeated dispatch identity, private spilling and dynamic
+stacks, code-object lifecycle, graph replay, and high-pressure placement.
+Target-specific fixtures cover only semantic forms admitted by the generated
+[capability contract](CAPABILITIES.md), including CDNA5 cluster operations.
+
+CDNA3 and CDNA4 can additionally run the target-native hip-moi simulator corpus
+when their build directories are supplied at configure time:
+
+```sh
+cmake -S /path/to/rocm-systems/emulation/rocjitsu \
+  -B /path/to/rocjitsu-build \
+  -DRJ_CONSAN_GFX942_HIP_MOI_BUILD_DIR=/path/to/hip-moi-build-gfx942-tests \
+  -DRJ_CONSAN_GFX950_HIP_MOI_BUILD_DIR=/path/to/hip-moi-build-gfx950-tests
+
+ctest --test-dir /path/to/rocjitsu-build \
+  -R '^ConSanGfx(942|950)HipMoiSim\.' --output-on-failure -j1
+```
+
+## Building against TheRock
+
+Use one coherent SDK for configuration, compilation, and execution. For an
+installed TheRock development package:
 
 ```sh
 ROCM_SDK="$VIRTUAL_ENV/lib/python3.12/site-packages/_rocm_sdk_devel"
+
 cmake -S /path/to/rocm-systems/emulation/rocjitsu \
   -B /path/to/rocjitsu-build -G Ninja \
   -DCMAKE_C_COMPILER="$ROCM_SDK/lib/llvm/bin/clang" \
   -DCMAKE_CXX_COMPILER="$ROCM_SDK/lib/llvm/bin/clang++" \
   -DCMAKE_HIP_COMPILER="$ROCM_SDK/bin/hipcc" \
   -DROCM_PATH="$ROCM_SDK"
+
 LD_LIBRARY_PATH="$ROCM_SDK/lib:$ROCM_SDK/lib/rocm_sysdeps/lib" \
   ctest --test-dir /path/to/rocjitsu-build \
-  -L consan-device -L physical --output-on-failure -j1
+  -L consan -LE physical --output-on-failure -j16
 ```
 
-Do not allow `/opt/rocm` or a system `hipcc` to enter this configuration.
+For a source-built TheRock tree, use its `dist/rocm` directory consistently.
+Do not mix it with `/opt/rocm` compilers or libraries.
 
-### Local ConSan-only qualification record (2026-09-09)
+## External-workload runner
 
-The current uncommitted ConSan change set is based on source `ac2444f83e9b` on
-`users/bjacob/sanitizers`, with build directory
-`/home/benjacob/rocjitsu-build`. It resolved these TheRock paths:
-
-```text
-C compiler:   /home/benjacob/.venv/lib/python3.12/site-packages/_rocm_sdk_devel/lib/llvm/bin/clang
-C++ compiler: /home/benjacob/.venv/lib/python3.12/site-packages/_rocm_sdk_devel/lib/llvm/bin/clang++
-HIP compiler: /home/benjacob/.venv/lib/python3.12/site-packages/_rocm_sdk_devel/lib/llvm/bin/amdclang++
-ROCM_PATH:    /home/benjacob/.venv/lib/python3.12/site-packages/_rocm_sdk_devel
-```
-
-`ldd` resolved `libhsa-runtime64.so.1`, `libamdhip64.so.7`,
-`libamd_comgr.so.3`, LLVM, Clang, and ROCm sysdeps from that same venv SDK.
-The relevant gfx950 code-object hashes are:
-
-```text
-bfed3c14dbc498f925c76060d6e63f8a0e5608361204264ddd1fdbf4d375d3a0  hip_consan_device_gfx950_two_queue_dispatch_identity.hsaco
-e43dc0f0b97075279f0323d8eac5e2579661bca8952a90992256ab7d17e124d9  histogram_scatter gfx950 HSACO
-```
-
-The host command `./tests/rocjitsu_tests --gtest_filter='ConSan*'` passed
-1,573 of 1,575 tests; the remaining two are intentional benchmark skips. The
-two additional labeled host CTest contracts pass 2/2. The simulator command
-above passed 2,926/2,926 in 153.90 seconds, including all
-eight baseline/MOI two-queue cases and all ten gfx950 histogram cases. The
-histogram HSACO contains `ds_add_u32`, `ds_add_f32`, `ds_add_f64`, the explicit
-`ds_write_b32` publication, and the explicit `ds_read_b32` consumption; the
-instrumented tests additionally require nonzero discovered, supported,
-selected, and patched access counts for the filtered kernel.
-
-The venv Python discovery command passed all 343 ConSan validation-tool tests.
-The isolated venv does not itself contain the non-ROCm `PyYAML` dependency, so
-the run exposed the already-installed Ubuntu module without changing the ROCm
-stack:
-
-```sh
-PYTHONPATH=/usr/lib/python3/dist-packages \
-  /home/benjacob/.venv/bin/python -m unittest discover \
-  -s emulation/rocjitsu/tests/dbi/consan -p 'test_*.py'
-```
-
-An unsandboxed TheRock `rocminfo` identified the physical agent as `gfx950`,
-AMD Instinct MI350X. With the same venv `LD_LIBRARY_PATH`, the physical command
-above passed all 606/606 registered ConSan cases in 433.87 seconds. The eight
-direct-HSA two-queue cases passed, including the Record/Replay requirement for
-both the asserted equal queue-local IDs and four retained launch fingerprints.
-The strengthened repeated-dispatch and graph cases, all histogram cases, the
-scalar-pressure/spill cases, and the final post-instrumentation health probe
-also passed. The earlier `hsa_init` status 4104 came from the filesystem/device
-sandbox hiding `/dev/kfd`; it was not host or GPU state and is not physical
-validation evidence.
-
-Run every registered simulated target and the physical target, when present,
-in one invocation with:
-
-```sh
-ctest --test-dir /path/to/rocjitsu-build \
-  -L consan-device --output-on-failure -j16
-```
-
-Every test has an isolated `ROCJITSU_RUNTIME_DIR`, so simulator cases and
-architectures have no CTest serialization constraint. Physical cases share a
-target-specific CTest resource lock because they use the same GPU and include
-fault-injection paths. The post-instrumentation physical health test also
-depends on all instrumented physical cases, but neither that dependency nor
-the physical resource lock prevents simulator work from running concurrently.
-
-Individual target, engine, clean/racy, baseline, and health labels can be
-combined with these commands. Failures remain ordinary visible CTest failures;
-known implementation defects are not encoded as expected passes. End-to-end
-campaigns remain the final qualification authority and the source of focused
-regressions.
-
-The compact physical gfx1100 bring-up gate is registered separately from the
-application campaign:
-
-```sh
-ctest --test-dir "$CONSAN_VALIDATION_WORKSPACE_DIR/rocjitsu-build" \
-  -R '^ConSanGfx1100Physical\.' --output-on-failure -j1
-```
-
-Configuration discovers the gfx1100 agent UUID through `rocminfo`; the tests
-do not assume a device ordinal. This gate covers exact output, all four
-engines, a no-filter SuperCollider pass over every supported site in the
-fixture code object, required Inline Shadow conflict attribution, cleanup, and
-ordered post-run device health. Broader workload status remains in
-[STATUS_RDNA3.md](STATUS_RDNA3.md).
-
-The complementary target-native simulator gate uses the selected W7900 JSON
-as its offline source of truth:
-
-```sh
-ctest --test-dir "$CONSAN_VALIDATION_WORKSPACE_DIR/rocjitsu-build" \
-  -R '^ConSanGfx1100Sim\.' --output-on-failure -j1
-```
-
-It covers the no-filter SuperCollider path, clean execution through all three
-MOI engines, and required Inline Shadow conflict attribution. Simulator and
-physical results remain separate evidence because only the physical path gets
-LDS capacity from the active runtime agent. This deliberately compact,
-target-native smoke slice does not duplicate the common cross-family
-high-half-D16, forced-spill, shared-helper, or exact-byte simulator fixtures;
-the complete host suite retains that broad transformation coverage.
-
-The status table began as a cumulative ledger: its rows were promoted at
-different frozen checkpoints and some predated today's stronger completeness
-and overhead wording. These scripts define one-tip requalification; they do
-not manufacture old colors. The 2026-07-16 campaign demonstrated that rule by
-temporarily demoting five cells when stronger evidence contradicted them, then
-restoring them only after focused fixes and exact-tip reruns.
-
-The latest gfx1201 Record/Replay audit uses executable commit `5af82ade33` and
-hook SHA-256
-`0edfe1985a2ee4512b65185a6ad625fe1160e0d080be5edd160d2a12b75dd82b`.
-It accepts all 19 clean rows and all 57 baseline-before, Record/Replay, and
-baseline-after overhead rows.  The reviewed-fault campaign accepts 17/19 rows;
-the two corrected fault-sensitivity gaps and repeated-trial evidence are
-published in [STATUS_RDNA4.md](STATUS_RDNA4.md).  Unrounded ratios, raw
-commands, and source/hook provenance remain in the generated artifacts.
-
-## Workspace contract
-
-Set one root containing the external projects and build outputs:
+Set a workspace containing RocJITsu and whichever external projects the chosen
+manifest rows require:
 
 ```sh
 export CONSAN_VALIDATION_WORKSPACE_DIR=/path/to/workspace
 export CONSAN_VALIDATION_TARGET=gfx1201
 ```
 
-The runner expects these paths beneath that root:
+The runner recognizes `rocm-systems/` and `TheRock/rocm-systems/` source
+layouts. Its common workspace names are:
 
 ```text
 iree-test-suites/
@@ -305,379 +133,69 @@ rocjitsu-test-corpus-build/
 rocjitsu-build/
 ```
 
-The `rocm-systems` source corpus may be either
-`$CONSAN_VALIDATION_WORKSPACE_DIR/rocm-systems` in a standalone checkout or
-`$CONSAN_VALIDATION_WORKSPACE_DIR/TheRock/rocm-systems` in a TheRock
-workspace. The runner resolves both layouts without a compatibility symlink.
-
-For hip-moi rows, the runner requires the exact target-resolved executable
-reported by `manifest` and `doctor`; it does not require a generic
-`hip-moi-build/` alias. Current manifests use `hip-moi-build/` for gfx1201,
-`hip-moi-build-gfx942-tests/` for gfx942,
-`hip-moi-build-gfx950-tests/` for gfx950, and
-`hip-moi-build-gfx1250-tests/` for gfx1250.
-
-### CDNA hip-moi simulator smoke
-
-The gfx942 and gfx950 target-native hip-moi executables share a compact
-simulator gate. Each target has 13 binaries totaling 35 tests: one reference
-binary plus all 12 shared CDNA instrumented sources. The offline suite registry
-owns their exact target-specific executable names and cross-checks the six
-campaign workload roles against the validation manifest. The runner rejects
-missing, failed, timed-out, or miscounted suites:
+Additional paths are workload-dependent and are reported by `doctor`. IREE
+command-line tools and `rocminfo` are resolved from `PATH`. Workload-specific
+Python interpreters may be selected with:
 
 ```sh
-for target in gfx942 gfx950; do
-  python3 \
-    "$CONSAN_VALIDATION_WORKSPACE_DIR/rocm-systems/emulation/rocjitsu/tests/dbi/consan/consan_cdna_hip_moi_sim.py" \
-    --target "$target" \
-    --rocjitsu "$CONSAN_VALIDATION_WORKSPACE_DIR/rocjitsu-build/tools/rocjitsu/rocjitsu" \
-    --hip-moi-build "$CONSAN_VALIDATION_WORKSPACE_DIR/hip-moi-build-$target-tests"
-done
+export CONSAN_VALIDATION_SHARKTANK_PYTHON=/path/to/python
+export CONSAN_VALIDATION_PYTORCH_PYTHON=/path/to/python
+export CONSAN_VALIDATION_TENSILE_PYTHON=/path/to/python
 ```
 
-To expose both gates as independently reported CTest entries, configure
-RocJITsu with the exact build trees:
+The runner exposes these subcommands:
+
+| Command | Purpose |
+| --- | --- |
+| `doctor` | Validate the selected workspace, tools, artifacts, runtime target, and hook mapping. |
+| `manifest` | Print the target's executable workload matrix. |
+| `prepare` | Build a canonical generated artifact; currently used for `qwen-prefill`. |
+| `explain` | Expand workload commands, profile settings, implicit defaults, and reviewed fault policy without executing the workload. |
+| `run` | Execute `clean` correctness/coverage rows or `overhead` rows. |
+| `study` | Run the reproducible physical-gfx1201 empirical timing protocol. |
+| `inventory` | Discover target- and binary-specific fault sites without mutation. |
+| `fault` | Execute one reviewed fault specification with containment and health checks. |
+
+Discover the exact current choices through the executable interface:
 
 ```sh
-cmake -S "$CONSAN_VALIDATION_WORKSPACE_DIR/rocm-systems/emulation/rocjitsu" \
-  -B "$CONSAN_VALIDATION_WORKSPACE_DIR/rocjitsu-build" \
-  -DRJ_CONSAN_GFX942_HIP_MOI_BUILD_DIR="$CONSAN_VALIDATION_WORKSPACE_DIR/hip-moi-build-gfx942-tests" \
-  -DRJ_CONSAN_GFX950_HIP_MOI_BUILD_DIR="$CONSAN_VALIDATION_WORKSPACE_DIR/hip-moi-build-gfx950-tests"
-```
-
-Then run all 26 entries, or narrow the regular expression to one target:
-
-```sh
-ctest --test-dir "$CONSAN_VALIDATION_WORKSPACE_DIR/rocjitsu-build" \
-  -R '^ConSanGfx(942|950)HipMoiSim\.' --output-on-failure -j1
-```
-
-For compatibility with the original gfx1201 workspace,
-`consan_validation.py` also recognizes `rocjitsu-main-gpu-build/` as the
-rocJITsu build name. The hook must be at
-`lib/rocjitsu/src/rocjitsu/hooks/librocjitsu_dbi_hooks.so` inside that build.
-
-`iree-run-module`, `iree-benchmark-module`, and `rocminfo` are resolved from
-`PATH`; IREE is not vendored or found through a machine-specific build path.
-`rocminfo` is required by mixed and non-PyTorch campaigns.  A PyTorch-only
-doctor or row instead verifies the target through its stronger in-process
-numeric dispatch, device-architecture, and exact-hook mapping probe, so a
-prebuilt-wheel setup does not need a separate `rocminfo` installation.
-When the launcher Python is not the workload environment, select the exact
-interpreters explicitly:
-
-```sh
-export CONSAN_VALIDATION_SHARKTANK_PYTHON=/path/to/iree-venv/bin/python
-export CONSAN_VALIDATION_PYTORCH_PYTHON=/path/to/pytorch-venv/bin/python
-export CONSAN_VALIDATION_TENSILE_PYTHON=/path/to/tensile-venv/bin/python
-```
-
-The Sharktank interpreter must import the IREE Python bindings plus `pytest`,
-`numpy`, and `ml_dtypes`; the other two variables are needed only when those
-workload families are selected.
-
-The gfx1250 Tensile runner resolves the TensileLite checkout, packaged ROCm
-SDK, prebuilt client, RocJITsu launcher/config, checked-in launcher wrapper,
-and `llvm-readelf` as one toolchain.  The doctor also imports the Tensile
-driver with the selected interpreter, so missing Python dependencies fail
-readiness instead of failing a validation row after artifact creation.
-`doctor --workload
-tensile-sk-sgemm-runtime-smoke` prints every resolved path. Nonstandard layouts
-can override individual components with
-`CONSAN_VALIDATION_TENSILELITE_ROOT`, `CONSAN_VALIDATION_ROCM_ROOT`,
-`CONSAN_VALIDATION_TENSILE_CLIENT`, `CONSAN_VALIDATION_TENSILE_WRAPPER`,
-`CONSAN_VALIDATION_ROCJITSU_EXE`, `CONSAN_VALIDATION_ROCJITSU_CONFIG`, and
-`CONSAN_VALIDATION_LLVM_READELF`.
-The bounded checked-in smoke row has a 55-second inner Tensile execution
-budget. It requires exactly one numeric row, verifies the selected Stream-K
-mode and every emitted gfx1250 object, and refuses the fixed-grid request if
-the resolved TensileLite checkout no longer exposes its runtime control.
-
-The complete `tensile-sk-mxf4gemm-tdm`, `tensile-sk-mxf8gemm-tdm`, and
-`tensile-sk-mxf8f4gemm-tdm` rows are deliberately sharded by their declared
-Exact problem sizes. Every shard retains all generated solutions (16 for MXF4
-and 6 for each MXF8 family), has an independent numeric oracle and ConSan
-teardown/coverage gate, and executes through RocJitsu. The six-size MXF4 and
-MXF8 rows execute with up to four shards concurrent; MXF4 has a 1,200-second
-inner and 1,260-second enclosing bound, while MXF8 has a 120-second inner and
-180-second enclosing bound. The three-size mixed MXF8/F4 row executes with up
-to three shards concurrent and has a 300-second inner and 360-second enclosing
-bound for its larger 512-square problem. The runner verifies each source YAML
-still contains exactly its expected sizes before writing any filtered
-configuration, so a corpus addition, deletion, reorder, duplicate, or
-non-Exact problem form fails closed instead of silently narrowing the 96-row,
-36-row, or 18-row denominator.
-
-The two-block `tensile-sk-sgemm-quick` row is likewise sharded by its six
-shared Exact sizes. Every shard retains both distinct solution spaces,
-requires both generated clients and every emitted numerical row to pass, and
-has an independent ConSan coverage and teardown verdict. Three shards execute
-concurrently with 300-second inner and 360-second enclosing bounds. The source
-inventories must remain identical and exactly match the manifest, preventing
-the former execution-bound monolithic process from being replaced by a
-partial first-block claim.
-
-The two-client `tensile-sk-hgemm-quick` row deliberately has asymmetric Exact
-inventories. Both clients contain the 127, 128, and 129 square shapes, while
-only the first contains 511, 512, and 513. Its six one-size shards therefore
-retain and require both clients for the first three shapes, then prune the
-empty second client and require one client for the last three. The manifest
-records each source client inventory independently; the runner verifies their
-order and exact contents before filtering, verifies that each configured
-client owns exactly one `ProblemSizes` block, and fails closed if the source
-structure changes. This preserves the full asymmetric denominator without
-requiring empty benchmark clients to execute. Three shards run concurrently
-with 300-second inner and 360-second enclosing bounds.
-
-The single-client `tensile-sk-f8gemm-quick` row is sharded across all nine of
-its Exact sizes. Every leaf retains and requires all 12 generated solutions,
-an independent numerical oracle, and an independent ConSan coverage and
-teardown verdict. Four leaves execute concurrently with 300-second inner and
-360-second enclosing bounds. The complete source inventory is checked before
-filtering, so the gate fails closed if a size is added, removed, reordered, or
-changed instead of silently validating a stale subset.
-
-The eight-block `tensile-spmm-f8-ml` row uses the same contract for the three
-Exact sizes repeated identically by every block. The filtered YAML must retain
-all eight blocks and selects one size in each; differing block inventories
-fail closed. Each shard requires all eight generated clients to exit `PASS`,
-every emitted numerical row to pass, and at least one such row. The count of
-printed winning rows is deliberately not frozen because Tensile may reject a
-different subset of generated solutions while retaining the same source
-problem denominator. The three shards execute concurrently with 900-second
-inner and 960-second enclosing bounds. Each leaf process proves a positive
-one-millisecond timing canary, while the parent result aggregates all three
-processes before enforcing the ordinary workload-level timing minimum. Thus
-sharding cannot turn a full-row empirical gate into three artificially equal
-timing quotas.
-
-Fault inventory and contained exact-one mutation use the manifest-selected
-first shard and retain its complete numerical oracle: 16 fixed rows for the
-MXF4 workload and all eight generated clients for sparse F8. This keeps the
-fault gate bounded while clean and paired
-overhead continue to cover every declared size, benchmark block, and generated
-row. The representative fault shard is explicit in the executable manifest; a
-missing or out-of-range selection fails closed.
-
-PyTorch validation deliberately uses a separate, prebuilt-wheel interpreter;
-the workspace `pytorch/` checkout is for workload discovery and source
-provenance, not for building PyTorch.  Point the runner at that interpreter:
-
-```sh
-python3 -m venv "$CONSAN_VALIDATION_WORKSPACE_DIR/consan-pytorch-venv"
-"$CONSAN_VALIDATION_WORKSPACE_DIR/consan-pytorch-venv/bin/python" -m pip \
-  install 'torch==2.14.0.dev20260720+rocm7.1' 'numpy==2.5.1' \
-  --index-url https://download.pytorch.org/whl/nightly/rocm7.1
-export CONSAN_VALIDATION_PYTORCH_PYTHON="$CONSAN_VALIDATION_WORKSPACE_DIR/consan-pytorch-venv/bin/python"
-```
-
-The final export is optional when the environment uses that standard workspace
-path: the runner discovers
-`$CONSAN_VALIDATION_WORKSPACE_DIR/consan-pytorch-venv/bin/python`
-automatically.  Set `CONSAN_VALIDATION_PYTORCH_PYTHON` only to select a
-different prebuilt-wheel environment.  The doctor imports both `torch` and
-`triton`, performs a numeric GPU dispatch, checks the reported gfx target, and
-verifies from the process mappings that PyTorch's HSA runtime loaded the exact
-ConSan hook selected from the workspace.  It records the runtime versions and
-device identity.  Thus an existing but unusable environment, a wrong device,
-or a wheel runtime that silently skips `HSA_TOOLS_LIB` fails before a
-validation row is accepted.
-
-Freeze the exact wheel and bundled Triton versions in the campaign artifacts.
-The example index matches the current ROCm 7.1 validation stack; choose an
-official prebuilt wheel compatible with the machine's runtime and target when
-reproducing elsewhere.  The doctor requires this interpreter only when the
-selected target manifest contains a PyTorch workload.
-
-Official PyTorch ROCm wheels and the native llama.cpp clients use a modern HSA
-runtime. After successful rocprofiler registration that runtime does not consult legacy
-`HSA_TOOLS_LIB` tooling unless `HSA_TOOLS_ROCPROFILER_V1_TOOLS=1` is present.
-The runner therefore sets and audits that variable automatically for
-instrumented PyTorch and llama.cpp rows and removes it from baseline rows. It is classified
-as `runtime-plumbing`, never as workload tuning; users should not have to
-discover or manually preserve it.  The doctor tests this behavior with a real
-dispatch.  Its linkage-only canary uses a deliberately nonmatching internal
-kernel filter to avoid instrumenting PyTorch's large bundled kernel object;
-that filter is never inherited by validation rows, whose ordinary environment
-and complete-coverage gates remain unchanged.
-
-Run the preflight before GPU work:
-
-```sh
-python3 emulation/rocjitsu/tests/dbi/consan/consan_validation.py \
-  --target "$CONSAN_VALIDATION_TARGET" doctor
-```
-
-The doctor reports every missing checkout, artifact, workload executable,
-hook, and tool.  When a PyTorch workload is selected, it also performs one
-small numeric GPU dispatch and verifies that the process loaded the exact
-ConSan hook.  Other workload kinds remain filesystem/tooling-only preflight.
-For a software target, pass the same exact `--launcher-json` used by `run`; the
-doctor applies it to the PyTorch dispatch so that the architecture and hook
-checks observe the emulated target. The runner removes legacy FFM/software-model
-environment variables for every target, including `gfx1250`.
-
-### Native llama.cpp corpus clients
-
-The gfx1201 manifest includes `llama-rdna4-mul-mat-vec-q` and
-`llama-rdna4-rms-norm` from `rocjitsu-test-corpus`. Build its kernels project
-out of source at
-`$CONSAN_VALIDATION_WORKSPACE_DIR/rocjitsu-test-corpus-build/kernels/gfx1201`
-with `CMAKE_HIP_ARCHITECTURES=gfx1201`, `KERNEL_CORPUS_ENABLE_ALL=OFF`, and
-`KERNEL_CORPUS_ENABLE_LLAMA_HIP=ON`. The resulting executables are expected at
-`cases/llama.cpp/llama_cpp_mul_mat_vec_q` and
-`cases/llama.cpp/llama_cpp_rms_norm` beneath that directory. The runner also
-recognizes the target's pytest build artifact while migrating an existing
-workspace, but the stable out-of-source path is the reproducible contract.
-
-These clients require HIP, rocBLAS, and hipBLAS. For a source-built TheRock
-workspace, configure TheRock with `THEROCK_ENABLE_BLAS=ON`, build its focused
-`hipBLAS+stage` target, use `TheRock-build/dist/rocm` as `ROCM_PATH`, and add
-the hipBLAS and hipBLAS-common `dist` prefixes to the corpus
-`CMAKE_PREFIX_PATH`. This is build/runtime enablement, not an instrumentation
-knob. The exact local paths and retained gfx1201 setup evidence are recorded in
-[STATUS_RDNA4.md](STATUS_RDNA4.md).
-
-The corpus executable's `--validate` option selects its CPU backend; it does
-not validate a GPU execution. The checked-in
-[`consan_llama_validation.py`](../../tests/dbi/consan/consan_llama_validation.py)
-therefore launches two processes for every repetition: an instrumented GPU
-process without `--validate`, and an uninstrumented CPU process with
-`--validate` after scrubbing all ConSan/HSA-tool settings. Both write binary
-F32 results. RMSNorm uses the corpus's compact 128-element shape and requires
-a maximum absolute error of `1e-5`. Quantized matvec uses a still-compact but
-fault-sensitive 1,024-element embedding: the corpus's 128-element setup smoke
-schedule-masks its synchronization fault. The 1,024-element clean GPU/CPU
-baseline requires a maximum absolute error of `2e-2`; its independently
-reviewed exact barrier deletion exceeds that bound by roughly 40 orders of
-magnitude. The wrapper emits the GPU timing and oracle result as JSON for the
-normal paired-overhead machinery.
-
-## Inspecting the executable contract
-
-The checked-in prose does not duplicate commands or fault expectations that
-can drift away from the runner. `manifest` gives the compact matrix, while
-`explain` derives an audit view from the same command, environment, and fault
-policy functions used during execution:
-
-```sh
+python3 emulation/rocjitsu/tests/dbi/consan/consan_validation.py --help
 python3 emulation/rocjitsu/tests/dbi/consan/consan_validation.py \
   --target "$CONSAN_VALIDATION_TARGET" manifest
-
 python3 emulation/rocjitsu/tests/dbi/consan/consan_validation.py \
-  --target "$CONSAN_VALIDATION_TARGET" manifest --json > manifest.json
-
+  --target "$CONSAN_VALIDATION_TARGET" doctor --workload all
 python3 emulation/rocjitsu/tests/dbi/consan/consan_validation.py \
   --target "$CONSAN_VALIDATION_TARGET" explain \
-  --workload all --profile all
+  --workload qwen-prefill --profile all
 ```
 
-The JSON contains all north-star workloads, four canonical profiles, admitted
-fault families, row-declared timeouts, forbidden exploratory controls, and the maximum
-GPU parallelism. Review it before starting a campaign and retain it with the
-results. Its `usability_audit.fault_qualification_exceptions` list is the
-machine-readable authority for workloads whose reviewed-fault rows are
-deliberately withheld; each entry carries the reason and owning bead.
-
-For an exact, machine-readable pre-run audit, include the reviewed fault spec:
+For an emulated target, pass the same JSON argv prefix to `doctor`, `run`,
+`inventory`, and `fault`:
 
 ```sh
-python3 emulation/rocjitsu/tests/dbi/consan/consan_validation.py \
-  --target "$CONSAN_VALIDATION_TARGET" explain \
-  --workload all --profile all \
-  --spec /path/to/reviewed-faults.json --json > validation-audit.json
+--launcher-json '["rocjitsu", "--config", "gfx1250_mi455x.json", "--"]'
 ```
 
-For every selected workload, `validation-audit.json` contains:
+The prefix is retained in the artifacts. The exact config name is deployment
+specific; use one whose target matches `--target`.
 
-- the exact argument arrays used for clean correctness and overhead, plus the
-  top-level validator invocation template and process/repetition count;
-- every harness-supplied setting for each profile, with inherited shell
-  settings excluded and each setting classified, plus the ordinary runtime
-  defaults on which the command deliberately relies;
-- every admitted injection from the reviewed spec, including its exact machine
-  selector and fault payload command;
-- the precommitted detector and independent-oracle outcome for each flavor;
-- the human-readable diagnostic requirement, deterministic or statistical
-  trial count, trial overrides, policy overrides and unsets; and
-- the fully merged effective setting set for every fault trial.
+### Preparing Qwen
 
-The human form intentionally summarizes long identities. `--json` is the
-authority for exact selectors and per-trial environments. Actual `result.json`
-files remain the post-run authority for what executed.
-
-Settings are classified in a totally explicit way:
-
-| Category | Meaning | Usability interpretation |
-|---|---|---|
-| `runtime-plumbing` | Locates the hook or target | Required setup, not coverage tuning |
-| `instrumentation-selection` | Selects flavor or engine; can explicitly override synchronization defaults | Ordinary MOI automatically enables barrier and atomic tracking |
-| `acceptance-assertion` | Turns missing records, incomplete patching, unexpected diagnostics, or overflow into failure | Cannot help a row pass |
-| `workload-tuning` | Changes a workload-specific operating point | Marked `usability_exception: true` |
-| `fault-injection` | Selects an exact deliberate mutation | Experiment control, not an ordinary user setting |
-| `fault-containment` | Serializes destructive GPU work | Experiment safety control |
-
-The audit also repeats the forbidden ordinary controls. A qualifying clean row
-must not use a site cap, kernel filter, manually selected temporary register,
-scratch register, MOI metadata register, or force-spill setting. Consequently,
-a reviewer can distinguish instrumentation selection from settings that would
-artificially make a difficult workload smaller.
-
-The top-level `usability_audit` makes that conclusion queryable. It lists any
-forbidden coverage-limiting control that actually appeared, workload-specific
-tuning, automatic event-family defaults, explicit expert overrides, and
-fault-only acceptance guards relaxed by a reviewed policy. An empty
-`coverage_limiting_controls_present` is evidence that the clean profiles did
-not qualify by narrowing patch coverage. An empty
-`explicit_event_family_overrides` confirms that qualification relied on the
-ordinary MOI defaults: both barrier and atomic tracking are enabled without a
-user setting.
-
-Without `--spec`, `explain` shows inventory templates and prints
-`REVIEW_REQUIRED` instead of pretending that detector outcomes have been
-chosen.
-
-The current gfx1201 manifest covers Qwen3-0.6B prefill; native
-PyTorch/Inductor compact and split online-softmax clients, collision-heavy
-scatter-reduce, large-object mode selection, Qwen-vocabulary top-k, and
-histogram;
-native llama.cpp quantized matvec and RMSNorm; Sharktank TP1 prefill and
-decode/combined, TP2, and CLIP BF16; and the hip-moi D128, WMMA, Stream-K,
-tree-atomic-OR, and Jakub workloads. The profile IDs are `supercollider`,
-`record-replay`, `sampled`, and `inline-shadow`.
-
-On `gfx1250`, TP2 keeps all three source modes but gives each a fresh process
-and report lifetime: `tp2-family` is the fault-qualified prefill row,
-`tp2-decode` is the exact decode row, and `tp2-combined` is the exact combined
-row. Their union is the same prefill/decode/combined denominator as the
-ordinary all-mode TP2 row retained on the other targets. This process
-partition is emulator readiness policy; it does not reduce model inputs,
-parameters, tensor shapes, or numerical oracles.
-
-### Canonical Qwen artifact preparation
-
-Qwen validation must not reuse an untracked VMFB whose compiler pipeline and
-target options are unknown. Build the full model from the unchanged
-`iree-test-suites` MLIR with the validator before `doctor` or `run`:
+The Qwen row requires a generated VMFB with recorded compiler and input
+provenance:
 
 ```sh
 python3 emulation/rocjitsu/tests/dbi/consan/consan_validation.py \
   --target "$CONSAN_VALIDATION_TARGET" prepare --workload qwen-prefill
 ```
 
-`prepare` runs `iree-compile` with the HIP target, the selected gfx target,
-`-O3`, and parameter-overlay encoding. It atomically installs
-`qwen3-600m.vmfb` in the generated test-suite tree and writes a sidecar
-manifest containing the source, compiler, option, and VMFB hashes. `doctor`
-rejects a missing manifest, a source or VMFB changed after preparation, or a
-manifest that does not name the canonical options. The external parameter,
-input, and expected-output files remain unchanged; preparation does not reduce
-the model or weaken its 151,936-logit oracle.
+`doctor` rejects a missing or stale preparation manifest. Do not substitute an
+untracked VMFB or weaken the output oracle.
 
-## Clean correctness and coverage
+### Clean qualification
 
-Choose a new artifact root. A row directory must not already exist:
+Use a new artifact root for each source, binary, runtime, settings, or manifest
+state:
 
 ```sh
 export CONSAN_ARTIFACT_ROOT="$CONSAN_VALIDATION_WORKSPACE_DIR/consan-validation/run-001"
@@ -688,88 +206,23 @@ python3 emulation/rocjitsu/tests/dbi/consan/consan_validation.py \
   --include-baseline --artifact-root "$CONSAN_ARTIFACT_ROOT"
 ```
 
-Replace `qwen-prefill` with any ID printed by `manifest`. Each process starts
-after removing inherited `HSA_TOOLS_LIB` and every `RJ_CONSAN_*` setting. The
-runner then applies only the named canonical profile. Every instrumented
-profile records its explicit `RJ_CONSAN_MODE` and strict completeness policy,
-so provenance does not depend on selection defaults. This
-prevents a coverage-limiting setting, kernel filter, explicit temporary register,
-force-spill control, or stale sampling setting from silently qualifying a cell.
-If a strict transform cannot be installed, the hook emits a typed
-`ConSan load rejection` record and terminates that contained workload process
-with exit code 92. The runner preserves the rejection fields in `result.json`;
-it does not misreport the result as a missing teardown verdict or allow a HIP
-client to launch through a null symbol after ignoring the HSA load error.
+The runner scrubs inherited `HSA_TOOLS_LIB` and `RJ_CONSAN_*` variables before
+constructing each profile. A clean instrumented row is accepted only when the
+independent workload oracle passes, the expected code object is applicable,
+all selected supported sites are instrumented, static and dynamic evidence is
+complete, no forbidden overflow or unexpected diagnostic appears, and the
+process completes within its manifest deadline.
 
-An instrumented clean row is accepted only when:
+Strict load rejection is a typed outcome with exit code 92. The runner retains
+its reason rather than converting it into a missing teardown verdict.
 
-- the workload's independent numerical or semantic oracle passes;
-- ConSan reports an applicable code object and no dynamic-incomplete result;
-- every supported access, barrier, atomic, and fence site is patched;
-- every `clean` row emits no unexpected MOI diagnostic and no forbidden
-  overflow; and
-- every repeated process satisfies the same coverage gate.
+`--timeout` is a diagnostic override. Changing it changes the execution
+contract and requires a new artifact root. A missing workload/profile pair is
+an incomplete campaign, not an omitted result.
 
-Every Record/Replay process also carries a structured
-`coverage.diagnostics` verdict in `result.json`, including the clean policy,
-normalized reader summaries, and normalized diagnostic records. The validator requires
-the producer's pre-replay report, replay summary, and diagnostic-detail
-identities to agree. It also checks code-object identity across those records,
-contiguous retained diagnostic indices, the fixed replay-detail capacity,
-conflict and metadata flags, and resolved provenance accounting. A zero-
-diagnostic clean row therefore cannot pass with a missing or malformed replay
-summary. A report with no visible access or synchronization evidence
-legitimately has no replay summary and is still represented by the structural
-verdict. A replay skipped because its required shadow exceeds the producer's
-bounded allocation remains an incomplete structural result and fails with one
-explicit skip reason.
+### Overhead
 
-The Record/Replay log parser classifies object-independent diagnostic
-signatures into a normalized model of records, counts, source fingerprints,
-and structural reasons. Replay-only capacity, metadata, provenance, and
-producer-degradation checks stay inside that profile parser. The policy
-evaluator applies the ordinary zero-output clean contract.
-
-`coverage.diagnostics` is an additive validation artifact introduced under
-top-level result schema version 2. Its nested representation is descriptive
-rather than a separately versioned interchange schema; consumers should use
-the normalized policy, counts, reasons, source summaries, and records by field
-name instead of depending on an older internal value type.
-
-No clean profile currently has a workload-specific tuning exception. In
-particular, Qwen Sampled relies on the ordinary `standard-v1` runtime profile:
-stride 256 and offset zero are automatic runtime defaults, not environment
-settings supplied by the validation harness. `explain --json` records those
-values under `implicit_runtime_defaults`, while `workload_specific_tuning`
-remains empty.
-
-The Qwen-vocabulary top-k Record/Replay row is a strict clean gate. Automatic
-banked Record/Replay captures the exact 32-bit
-`(workgroup_x, workgroup_y, workgroup_z)` tuple at kernel entry and publishes
-those stable components from persistent state. This path no longer inherits
-Inline Shadow's compact-key dimensional bounds.
-
-The ordinary process deadline is 30 seconds. The Qwen-vocabulary top-k row
-declares 120 seconds because its complete Record/Replay transform patches
-418,292 accesses and 50,458 barriers and takes about 73 seconds on this
-machine; that execution bound does not change instrumentation coverage,
-diagnostic reporting, or semantics. An explicit `--timeout` overrides the
-manifest only for diagnosis. The `torch.mode` 4/4 evidence consists of four
-separate physical-host runner invocations, each under its explicit 30-second
-manifest bound; it is not four iterations sharing one deadline.
-
-Campaign consumers must enumerate the manifest's workload/profile pairs and
-use `explain --json` `profile_artifact_roots` (or the persisted `phase` field)
-to locate each result. A missing `clean` pair is an incomplete campaign, not
-an omitted row. Each result references the shared
-`$ARTIFACT_ROOT/<workload>/provenance.json`, rather than a provenance file
-under the requested phase. Reusing that workload root is accepted only when
-the hook, workload inputs, source identities, and manifest match byte for byte;
-drift fails instead of silently relabeling existing results.
-
-## Correct-workload overhead
-
-Overhead is measured without fault injection:
+Run overhead without fault injection:
 
 ```sh
 python3 emulation/rocjitsu/tests/dbi/consan/consan_validation.py \
@@ -778,39 +231,18 @@ python3 emulation/rocjitsu/tests/dbi/consan/consan_validation.py \
   --include-baseline --artifact-root "$CONSAN_ARTIFACT_ROOT"
 ```
 
-With `--include-baseline`, the execution order is baseline-before, the selected
-instrumented profiles, then baseline-after. `summary.json` reports the paired
-baseline as the mean of the two baseline medians, each mode-specific slowdown,
-and the maximum mode ratio used for the support-table cell:
+With `--include-baseline`, the order is baseline-before, selected profiles,
+then baseline-after. `summary.json` reports raw samples, paired baseline, and
+mode ratios. Do not compare cold first-operation ratios with warm steady-state
+ratios; the manifest and result artifacts identify which protocol a row uses.
+For statistically controlled performance studies, follow
+[EMPIRICAL_METHODOLOGY.md](EMPIRICAL_METHODOLOGY.md) and use `study`.
 
-```text
-slowdown = instrumented median / paired baseline median
-```
+### Fault inventory and review
 
-The active `gfx950` and `gfx1250` campaigns use one benchmark repetition per
-process for Qwen, Sharktank, PyTorch, and Tensile.  These results qualify the
-order of magnitude rather than providing statistically smoothed performance
-numbers.  Sharktank still performs its untimed warmup, while CLIP and hip-moi
-rows use fresh processes as declared by the manifest. Raw samples, commands,
-complete controlled environment, hook hash, source revisions, and unrounded
-ratios remain in the artifact tree.
-
-Physical `gfx1201` PyTorch workloads that declare multiple overhead processes
-collect fresh one-repetition processes and aggregate their reported medians.
-This keeps every timing sample within one bounded report-buffer lifetime;
-repeated dispatches in one process are a state-capacity stress test, not an
-independent overhead sample. Those rows report cold end-to-end first-operation
-latency, including code-object transformation, because a warm second dispatch
-can exceed bounded report capacity on sufficiently large Record/Replay
-objects. Smaller PyTorch rows retain warm in-process repetitions. Cold and
-warm ratios are not comparable and must be labeled at the status-table cell
-that reports them.
-
-## Fault inventory and reviewed specs
-
-Fault identities contain code-object hashes, kernel names, PCs, mnemonics, and
-occurrences. They are intentionally not hard-coded into the portable manifest.
-Regenerate them after changing a target, compiler, workload, or binary:
+Fault identities include the code-object hash, kernel, PC, mnemonic, and
+occurrence. Rediscover them after any target, compiler, source, or binary
+change:
 
 ```sh
 python3 emulation/rocjitsu/tests/dbi/consan/consan_validation.py \
@@ -818,174 +250,62 @@ python3 emulation/rocjitsu/tests/dbi/consan/consan_validation.py \
   --workload tp1-prefill --artifact-root "$CONSAN_ARTIFACT_ROOT"
 ```
 
-Software targets may add `--launcher-json` with the same exact argv prefix used
-by `run`. Inventory applies it to the workload process. `fault` applies it to
-the mutation payload and, unless explicit paired health overrides are present,
-to the default discovery and target-smoke commands as well. All retained
-commands record the prefix verbatim wherever it was applied. For example:
+Inventory sets dry-run fault controls and applies no mutation. Review the
+generated inventory and copy its template before editing. A reviewed spec must
+replace every placeholder, precommit the expected detector outcome and
+independent oracle for every applicable profile, declare any statistical trial
+matrix, and set `review_required` to false. Do not choose a different site or
+expected result after observing a live trial.
 
-```bash
-python3 emulation/rocjitsu/tests/dbi/consan/consan_validation.py \
-  --target gfx1250 inventory --workload jakub-attention \
-  --artifact-root "$CONSAN_ARTIFACT_ROOT" \
-  --launcher-json '["rocjitsu", "--config", "gfx1250_mi455x.json", "--"]'
-```
+### Contained fault execution
 
-This runs each admitted fault family separately with
-`RJ_CONSAN_FAULT_DRY_RUN=1`. Family-specific analysis is enabled, but no site
-identity is selected and no mutation is applied. Inventory is a static-analysis
-operation: after observing a relevant fault site and the matching code object's
-coverage record, the collector deliberately stops the process instead of
-waiting for the unmodified workload to execute. A timeout before that matching
-record is a failure. It retains each raw log as
-`command-<family>.log` and records per-family plus deduplicated aggregate
-sites, synchronization sequences, and barrier destinations in
-`inventory.json`. It also creates
-`fault-spec.template.json` for the workload's admitted fault families.
-
-Review the inventory before mutation. In the copied spec:
-
-1. replace every `REPLACE_FROM_INVENTORY` value with an exact compatible
-   identity;
-2. precommit `detector` as `detected`, `not_detected`, or `statistical` for
-   every profile; a statistical policy also sets `minimum_detections`;
-3. precommit the workload `oracle` as `pass`, `fail`, or `any`;
-4. add a `trials` list under a profile when a statistical campaign requires
-   predeclared overrides, such as Qwen Sampled offsets; and
-5. set top-level `review_required` to `false` only after that review.
-
-A profile may instead have `"disposition": "not-applicable"` when the
-inventory proves the fault family is semantically absent. This is recorded as
-typed N/A and performs no mutation. Do not choose a different site or expected
-outcome after observing a run.
-
-Profile policy can also contain an `environment` object or an `unset` list.
-These are retained as part of the experiment, not hidden shell tuning. The
-gfx1201 policy uses `RJ_CONSAN_MOI_REQUIRE_DIAGNOSTICS=1` for deterministic
-Inline catches and unsets the clean overflow guard only for the two accepted
-fault rows whose useful diagnostic is intentionally retained in a bounded
-buffer with disclosed duplicate-report drops.
-
-Example reviewed profile policy:
-
-```json
-{
-  "sampled": {
-    "detector": "statistical",
-    "minimum_detections": 1,
-    "oracle": "any",
-    "trials": [
-      {"RJ_CONSAN_MOI_RUNTIME_SAMPLE_OFFSET": "0"},
-      {"RJ_CONSAN_MOI_RUNTIME_SAMPLE_OFFSET": "1"}
-    ]
-  }
-}
-```
-
-## Contained fault execution
-
-Fault runs are serialized and require an explicit destructive acknowledgement:
+Fault runs are destructive experiments. Run them one at a time and acknowledge
+that explicitly:
 
 ```sh
 python3 emulation/rocjitsu/tests/dbi/consan/consan_validation.py \
   --target "$CONSAN_VALIDATION_TARGET" fault \
   --workload tp1-prefill --profile all \
-  --spec /path/to/reviewed-tp1-faults.json --fault barrier-drop \
+  --spec /path/to/reviewed-faults.json --fault barrier-drop \
   --artifact-root "$CONSAN_ARTIFACT_ROOT" --allow-destructive
 ```
 
-The top-level runner delegates each trial to
-[`consan_fault_runner.py`](../../tests/dbi/consan/consan_fault_runner.py). That runner
-creates a process group, holds the global destructive-GPU lock, enforces the
-deadline, captures original/patched code objects, runs a device-discovery
-command plus a target-dispatch smoke before and after, and quarantines the
-artifact root if health fails.  The defaults are `rocminfo` and the portable
-workload smoke, with a 30-second probe deadline.  Slow software devices may
-set a larger retained `--health-timeout`.  Environments where either default
-cannot terminate may pass
-the paired `--health-command-json` and `--smoke-command-json` overrides.  Both
-exact commands are retained in every row manifest and replayed verbatim; the
-smoke must still execute target code and check an independent result.  A
-target runtime that emits that result but cannot complete process teardown may
-use `consan_marker_smoke.py` as the smoke command.  The adapter requires an
-exact caller-specified success marker and only then terminates the smoke's
-process group; it does not apply to the workload or mutation command.
+The runner holds the global destructive-GPU lock, uses a separate process
+group, enforces the deadline, and runs discovery plus a target-dispatch smoke
+before and after each trial. `--health-command-json` and
+`--smoke-command-json` can replace both commands when the defaults are not
+usable; the exact replacements are retained.
 
-Promotion requires all of the following to match the reviewed spec:
+A qualifying applied trial requires exactly-one planning and installation,
+complete per-reader and per-process reservation evidence, a matching reviewed
+detector result, a matching independent oracle when required, normal bounded
+completion, and healthy pre/post probes. A timeout, signal, trap, wrong output,
+or device reset is not a ConSan detection.
 
-- mutation accounting is exactly `requested=1 planned=1 applied=1`;
-- accounting schema v2 also requires a matching `ConSan fault install` record
-  proving that each applied mutation reached the loaded replacement. Historical
-  schema-v1 logs do not contain this evidence and must be rerun rather than
-  re-parsed for current fault qualification;
-- reservation schema v1 requires one complete process-teardown summary for
-  every process represented by reader or installation evidence. It checks the
-  producer's `attempts` total against typed `reserved`,
-  `mutation_already_installed`, `contention_timeout`, and
-  `reentrant_contention` counts and retains any reservation attempt that exited
-  before an ordinary reader summary. A qualifying applied row needs at least
-  one reserved attempt, no unattributed attempts, and zero timeout or reentry
-  outcomes. `not_requested_records` separately identifies readers that never
-  planned the selected mutation. Required teardown evidence is independent of
-  `RJ_CONSAN_LOG`; repeated HSA tool lifetimes in one process are aggregated.
-  Runs that bypass `OnUnload` cannot qualify and are reported as
-  `reservation_evidence_invalid`, while a workload/profile with no matching
-  mutation site remains `unsupported`;
-- automatic report capacity is planned from a pristine dry-run semantic
-  inventory. A live fault mutation and its final instrumentation composition
-  run only after the report buffer has been allocated, so sizing cannot consume
-  or duplicate the process-global mutation;
-- exact-one mutation selection is process-global. Concurrent code-object loads
-  reserve the single installation through the underlying HSA load because only
-  its success proves installation. A contender waits at most 30 seconds by
-  default; `RJ_CONSAN_FAULT_RESERVATION_TIMEOUT_MS` sets a larger positive
-  bound for campaigns whose individual code-object load can take longer.
-  Timeout or same-thread reentry is emitted as a warning with a typed
-  reservation outcome and loads without mutation, so reservation schema v1
-  rejects the trial even if another concurrent reader installed the one
-  requested mutation. A transform claiming more than one
-  applied mutation is rejected before its replacement can be installed;
-- schema-v2 mutation reader records carry both `process` and `reader`
-  identities. The nested per-process view removes the repeated process field,
-  but the top-level `mutation.readers` list retains it so reader handles from
-  different processes cannot be conflated;
-- the detector result is the precommitted deterministic value, or a
-  statistical campaign reaches its precommitted minimum detection count;
-- the independent oracle matches its precommitted result when not `any`;
-- the process does not time out; and
-- both device-health gates pass.
+## Evidence and campaign discipline
 
-A timeout, trap, crash, output mismatch, or GPU reset is not a ConSan
-detection. The fault runner retains these as distinct execution outcomes.
-GoogleTest assertions, IREE expected-output checks, and the Sharktank wrapper
-are converted into explicit oracle evidence rather than inferred from ConSan.
+Keep source state, dirty-tree state, toolchain/runtime identity, executable and
+code-object hashes, commands, environment, workload inputs, timeouts, target
+identity, raw output, coverage, report completeness, and health results
+together under the artifact root. Do not merge exploratory and accepted roots
+or reuse a root after its stable contract changes.
 
-## Campaign discipline and porting
+The hardware-entry MOI path uses a 64-bit fingerprint of queue pointer and
+absolute queue-local dispatch ID. It distinguishes the tested simultaneous
+queues and ring-slot reuse but is not an injective encoding of the full pair:
+collisions and queue-address reuse remain possible. Sampled also has a weaker
+literal fallback under scalar pressure. Qualification must report which
+representation was used; runtime trust cannot upgrade either representation
+into exact global launch identity.
 
-Run no more than four GPU jobs concurrently. Fault rows are always serialized.
-Use a new artifact root after any source, hook, workload, manifest, settings,
-or reviewed fault-spec change. Never merge exploratory output into an accepted
-campaign.
+Fault qualification additionally separates mutation attempted, installed, and
+reached. Process completion alone is not proof that the selected instruction
+executed. Preserve oracle manifestations, ConSan diagnostics, timeouts,
+signals, and health failures as different outcomes.
 
-For a new gfx architecture:
+## Testing the validation runner
 
-1. implement and test its instruction builder, branch forms, waits, descriptor
-   growth, register allocation, and spill backend;
-2. build target-native versions of every applicable workload;
-3. run `doctor`, retain `manifest --json`, and pass clean rows;
-4. inventory every fault family and review new target-specific specs;
-5. run overhead and contained fault rows against one frozen commit; and
-6. update that target's status ledger only from the generated results.
-
-Do not copy gfx1201 coverage denominators, machine-code identities, or timing
-factors to another target. A port is credible when another engineer can use
-the same scripts to distinguish an ISA-backend failure, a spill/resource
-failure, a workload-oracle failure, a stale fault selector, a detector miss,
-and infrastructure/device loss.
-
-## Testing the validation scripts
-
-The orchestration and containment logic has CPU-only unit coverage:
+The runner's orchestration and containment behavior has CPU-only unit tests:
 
 ```sh
 cd emulation/rocjitsu/tests/dbi/consan
@@ -997,6 +317,7 @@ python3 -m unittest \
   test_consan_validation.py
 ```
 
-These tests do not qualify a GPU cell. They protect the executable protocol:
-environment scrubbing, profile isolation, workload commands, overhead math,
-identity inventory, fault-spec validation, and workload-oracle parsing.
+These tests validate environment scrubbing, manifest/profile isolation,
+provenance, workload commands and oracles, coverage gates, overhead math,
+identity inventory, fault-spec validation, reservation accounting, and health
+containment. They do not qualify a simulator or physical target cell.

@@ -45,15 +45,17 @@ Loading the hook is itself the activation action; no separate enable variable
 is required. It selects MOI Record/Replay by default. Add `RJ_CONSAN_LOG=1` for
 instrumentation and completeness summaries.
 
-When enabled, the same hook always runs waitcheck over each supported original
-code object before ConSan DBI. It reports missing waits or analysis failures,
-then continues into ConSan so suspect kernels are still instrumented. No
-separate waitcheck HSA tool or waitcheck environment settings are needed for a
-ConSan run.
+For code objects not excluded by the kernel allowlist, the same hook runs
+waitcheck over each supported original code object before ConSan DBI. It
+reports missing waits or analysis failures, then continues into ConSan so
+suspect kernels are still instrumented. No separate waitcheck HSA tool or
+waitcheck environment settings are needed for a ConSan run.
 
 For a focused program known to contain supported sites,
-`RJ_CONSAN_POLICY=strict` prevents ineffective or incomplete instrumentation
-from looking clean. It does not make race diagnostics fatal.
+`RJ_CONSAN_POLICY=strict` defaults fail-closed and require-patch checks on; for
+MOI it also defaults automatic-record and forbid-overflow checks on. It does
+not make race diagnostics fatal or replace inspection of the static coverage
+summary.
 
 Look for transformed-byte, coverage, and completeness records:
 
@@ -79,9 +81,10 @@ or GPU reset is not by itself a ConSan diagnostic.
   boundaries.
 - [CAPABILITIES.md](CAPABILITIES.md): normative target-by-engine access,
   barrier, atomic, fence, and typed-exclusion matrix.
-- Target qualification ledgers: [gfx942](STATUS_CDNA3.md),
-  [gfx950](STATUS_CDNA4.md), [gfx1100](STATUS_RDNA3.md),
-  [gfx1201](STATUS_RDNA4.md), and [gfx1250](STATUS_GFX1250.md).
+- Target qualification ledgers: [CDNA3 / gfx942](STATUS_CDNA3.md),
+  [CDNA4 / gfx950](STATUS_CDNA4.md), [RDNA3 / gfx1100](STATUS_RDNA3.md),
+  [RDNA4 / gfx1201](STATUS_RDNA4.md), and
+  [CDNA5 / gfx1250](STATUS_GFX1250.md).
 - [VALIDATION.md](VALIDATION.md): reproducible physical, simulator, and offline
   gates behind those ledgers.
 - [EMPIRICAL_METHODOLOGY.md](EMPIRICAL_METHODOLOGY.md): the reusable admission,

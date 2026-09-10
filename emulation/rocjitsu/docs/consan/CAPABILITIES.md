@@ -66,7 +66,7 @@ therefore intentional and are not target-parity gaps.
 
 ## Cross-target equivalent forms
 
-| Semantic form | `gfx942` / CDNA3 | `gfx950` / CDNA4 | `gfx1100` / RDNA3 | `gfx1201` / RDNA4 | `gfx1250` |
+| Semantic form | `gfx942` / CDNA3 | `gfx950` / CDNA4 | `gfx1100` / RDNA3 | `gfx1201` / RDNA4 | `gfx1250` / CDNA5 |
 | --- | --- | --- | --- | --- | --- |
 | Native LDS single-range read/write | 8, 16, 32, 64, 96, and 128-bit admitted forms | 8, 16, 32, 64, 96, and 128-bit admitted forms | 8, 16, 32, 64, 96, and 128-bit admitted forms | 16, 32, 64, 96, and 128-bit admitted forms | 8, 16, 32, 64, and 128-bit admitted forms; 96-bit load extension (SuperCollider also admits the store readback) |
 | Native LDS dual-range read/write | 32/64-bit adjacent and stride-64 forms | 32/64-bit adjacent and stride-64 forms | 32/64-bit adjacent and stride-64 forms | 32/64-bit adjacent and stride-64 forms | 32/64-bit adjacent and stride-64 forms |
@@ -143,7 +143,7 @@ HSA hook:
 - the CDNA3/CDNA4/RDNA4/gfx1250 Inline release transaction:
   `ConSanMoi.SupportedTargetsInlineAtomicReleaseCarriesClaimedPredecessor`; and
 - the complete gfx1100 compiler acquire sequence:
-  `ConSanMoi.Gfx1100InlineAtomicAcquireUsesCompleteGfx11CacheSequence`, with
+  `ConSanMoi.Gfx1100InlineAtomicAcquireUsesCompleteRdna3CacheSequence`, with
   missing, reversed, and intervened cache-operation rejection coverage; and
 - gfx1100 vector-only and scalar-base VGLOBAL address forms plus invalid-scalar
   rejection:

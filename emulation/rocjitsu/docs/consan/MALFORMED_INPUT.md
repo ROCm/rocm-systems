@@ -37,8 +37,9 @@ report what is and is not rejected today.
 
 `RJ_CONSAN_REQUIRE_PATCH=1` is a separate hook policy. It can reject an
 applicable `Unchanged` result even though the transform's fail-closed install
-action alone is “load original.” `RJ_CONSAN_POLICY=strict` enables both
-fail-closed and require-patch behavior.
+action alone is “load original.” `RJ_CONSAN_POLICY=strict` defaults both
+fail-closed and require-patch behavior on; an explicit per-control setting can
+override either default.
 
 ## Input and report-state boundaries
 

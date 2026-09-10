@@ -58,7 +58,8 @@ fingerprint into an injective queue-instance/dispatch identity; see
 
 ## Shared setup before execution
 
-Before an instrumented kernel runs, every mode uses the same broad pipeline:
+Before an admitted instrumented kernel runs, every mode uses the same broad
+pipeline (a bounded kernel allowlist may exclude a code object before step 2):
 
 1. Intercept and identify the native code object.
 2. Run waitcheck on the original object.
