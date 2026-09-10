@@ -1292,6 +1292,12 @@ install(
     TARGETS rocprofiler-compute-tool
     LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}/rocprofiler-compute COMPONENT main
 )
+if(TARGET torch-trace-collector-module)
+    install(
+        TARGETS torch-trace-collector-module
+        LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}/rocprofiler-compute COMPONENT main
+    )
+endif()
 
 # top-level bin/rocprof-compute launcher (re-execs into libexec entrypoint)
 configure_file(
