@@ -483,6 +483,20 @@ pub fn kmd_preload() -> Option<PathBuf> {
     runtime_location().path().map(std::path::Path::to_path_buf)
 }
 
+/// Return the formatted build identity exported by the installed RocJITsu library.
+///
+/// The native RocJITsu CLI prints this exact string, so Mirage never maintains
+/// a second repository stamp or output format.
+///
+/// # Errors
+///
+/// Returns a diagnostic when the library is absent, predates the version API,
+/// or cannot be loaded.
+pub fn version_string() -> std::result::Result<String, String> {
+    let path = kmd_preload().ok_or_else(|| format!("{LIB_NAME} not found"))?;
+    rocjitsu_sys::version_string(&path)
+}
+
 /// Where `librocjitsu.so` is on this machine, or — when it is not here —
 /// every location [`kmd_preload`] probed for it and the environment
 /// variables that would change the answer.

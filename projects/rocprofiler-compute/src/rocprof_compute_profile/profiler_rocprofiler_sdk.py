@@ -20,8 +20,8 @@ from utils.utils_profile import pc_sampling_unit
 def _resolve_sdk_roctx_library(rocprofiler_sdk_tool_path: str) -> Optional[str]:
     """Locate the rocprofiler-sdk ROCTX library for LD_PRELOAD.
 
-    src/lib/roctx_recordfn links it in CMake, but framework runtimes load the
-    legacy libroctx64 first and win the symbol lookup.
+    src/lib/torch_trace_collector links it in CMake, but framework runtimes load
+    the legacy libroctx64 first and win the symbol lookup.
     """
     return resolve_rocm_library_path(
         str(

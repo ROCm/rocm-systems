@@ -67,4 +67,4 @@ jobs:
             --base "origin/${{ github.base_ref }}" \
             --build-path build/debug-mpi \
             -j $(nproc) \
-            --timeout 120
+            --timeout 600

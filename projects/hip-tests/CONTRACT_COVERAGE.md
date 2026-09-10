@@ -1,786 +1,235 @@
 # HIP Contract Test Coverage Tracker
 
-This document tracks the public HIP API semantic contract coverage in `projects/hip-tests/catch/contract`.
+This document is a compact status snapshot for the HIP public-API contract tier in
+[`projects/hip-tests/catch/contract`](catch/contract/). It complements the generated
+[`catch/TEST_PLAN.md`](catch/TEST_PLAN.md), which is the detailed per-test inventory of
+`// @asserts:` invariants.
 
-The percentages below are approximate API-name coverage against declarations parsed from `projects/hip/include/hip/hip_runtime_api.h`. They are not behavioral coverage: one API can have many modes and edge cases, and the contract layer intentionally covers only small, portable semantic guarantees.
+The coverage percentage is approximate **API-name coverage** against declarations parsed
+from [`projects/hip/include/hip/hip_runtime_api.h`](../hip/include/hip/hip_runtime_api.h).
+It is not behavioral coverage: one API can have many modes and edge cases, and the
+contract tier intentionally pins only small, portable semantic guarantees.
 
 ## Snapshot
 
+<!-- contract-coverage-snapshot
+contract_tests: 608
+contract_domains: 118
+declared_apis: 497
+covered_apis: 486
+uncovered_allowlisted: 11
+coverage_pct: 97.8
+-->
+
+- Snapshot date: 2026-08-26
+- Snapshot commit: `920418c484`
 - Contract tests: 608
+- Contract domains: 118
 - Declared HIP runtime APIs parsed from `hip_runtime_api.h`: 497
 - Declared HIP runtime APIs directly exercised by contract tests: 486
+- Intentionally uncovered, allowlisted APIs: 11
 - Approximate declared API-name coverage: 97.8%
 - Additional public macro exercised: `hipLaunchKernelGGL`
-- Additional non-runtime-header APIs exercised: HIPRTC (`hiprtcCreateProgram`, `hiprtcCompileProgram`, `hiprtcGetCodeSize`, `hiprtcGetCode`, `hiprtcGetProgramLogSize`, `hiprtcGetProgramLog`, `hiprtcDestroyProgram`); and the OpenGL interop entry points declared in `hip/hip_gl_interop.h` (`hipGLGetDevices`, `hipGraphicsGLRegisterBuffer`, `hipGraphicsGLRegisterImage`), which are AMD-gated because the NVIDIA header pulls in `<GL/gl.h>` (a headless CUDA node need not have it). These are not declared in `hip_runtime_api.h` and are excluded from the coverage denominator and covered counts.
+- Additional non-runtime-header APIs exercised: HIPRTC (`hiprtcCreateProgram`,
+  `hiprtcCompileProgram`, `hiprtcGetCodeSize`, `hiprtcGetCode`,
+  `hiprtcGetProgramLogSize`, `hiprtcGetProgramLog`, `hiprtcDestroyProgram`) and
+  OpenGL interop entry points declared in `hip/hip_gl_interop.h` (`hipGLGetDevices`,
+  `hipGraphicsGLRegisterBuffer`, `hipGraphicsGLRegisterImage`). These are excluded
+  from the `hip_runtime_api.h` denominator.
+
+## Relationship to generated artifacts
+
+- [`catch/TEST_PLAN.md`](catch/TEST_PLAN.md) is the detailed, generated inventory. It
+  lists each test case, the API it asserts, and the one-line invariant extracted from
+  the source `// @asserts:` tag.
+- [`catch/contract/uncovered_apis.txt`](catch/contract/uncovered_apis.txt) is the
+  source of truth for APIs that are deliberately not covered by the device-only
+  contract harness.
+- [`catch/contract/tools/check_contract_coverage.py`](catch/contract/tools/check_contract_coverage.py)
+  is the static drift checker. It recomputes the declared, covered, uncovered, and
+  stale-allowlist sets, verifies the numeric snapshot block above, and is run by the
+  HIP contract-test coverage workflow.
+
+Keep this file short and human-readable. Do not duplicate the complete generated test
+plan or the full covered-API listing here.
+
+## Current allowlisted gaps
+
+The checker currently reports these 11 uncovered declared APIs, all intentionally
+allowlisted:
+
+### External-semaphore graph nodes
+
+These APIs require a valid external semaphore node. The device-only contract harness
+cannot construct such a node without an external producer, and the add path faults when
+fed an invalid handle on some runtime paths.
+
+- `hipGraphAddExternalSemaphoresSignalNode`
+- `hipGraphAddExternalSemaphoresWaitNode`
+- `hipGraphExecExternalSemaphoresSignalNodeSetParams`
+- `hipGraphExecExternalSemaphoresWaitNodeSetParams`
+- `hipGraphExternalSemaphoresSignalNodeGetParams`
+- `hipGraphExternalSemaphoresSignalNodeSetParams`
+- `hipGraphExternalSemaphoresWaitNodeGetParams`
+- `hipGraphExternalSemaphoresWaitNodeSetParams`
+
+### Deprecated texture-reference border color
+
+The AMD runtime currently implements these entry points with an unconditional
+`assert(false)` after the image-support check, so calling them aborts assert-enabled test
+binaries instead of exposing portable state to assert.
+
+- `hipTexRefGetBorderColor`
+- `hipTexRefSetBorderColor`
+
+### Windows-only deprecated texture-reference bind
+
+- `hipBindTextureToMipmappedArray` — the AMD Linux runtime rejects the device-side bind
+  with `hipErrorInvalidTexture`; the positive path is Windows-only, matching the in-tree
+  unit-test guard.
 
 ## Contract domains
 
 | Contract domain | Tests |
 |---|---:|
-| `memory` | 5 |
-| `transfer` | 4 |
-| `driver_memcpy` | 6 |
-| `driver_memcpy_2d` | 5 |
-| `runtime` | 10 |
-| `device` | 7 |
-| `device_identity` | 9 |
-| `device_texture_query` | 6 |
-| `peer_query` | 5 |
-| `peer_access` | 6 |
-| `peer_copy` | 5 |
-| `device_config` | 6 |
-| `device_lifecycle` | 7 |
-| `device_reset` | 1 |
-| `green_context` | 5 |
-| `stream_event` | 7 |
-| `stream_props` | 7 |
-| `stream_callbacks` | 5 |
-| `stream_attributes` | 5 |
-| `stream_memory_ops` | 6 |
-| `stream_cu_mask` | 4 |
-| `stream_attach` | 5 |
-| `async_transfer` | 4 |
-| `mem_batch_copy` | 3 |
-| `mem_batch_copy_3d` | 4 |
-| `mem_batch_discard` | 6 |
-| `memset` | 6 |
-| `driver_memset_async` | 6 |
-| `driver_memset_2d` | 6 |
-| `driver_memset_async_2d3d` | 5 |
-| `error_api` | 6 |
-| `driver_error` | 6 |
-| `extension` | 6 |
-| `logging` | 2 |
-| `profiler` | 3 |
-| `driver_entry_point` | 5 |
-| `kernel` | 4 |
-| `call_config` | 2 |
-| `kernel_launch` | 7 |
-| `multi_device_launch` | 3 |
-| `driver_launch_ex` | 3 |
-| `kernel_name_ref` | 2 |
-| `graphics_interop` | 8 |
-| `func_attributes` | 8 |
-| `graph` | 5 |
-| `occupancy` | 3 |
-| `occupancy_ext` | 4 |
-| `occupancy_variable` | 4 |
-| `graph_capture` | 4 |
-| `stream_capture_mode` | 6 |
-| `capture_to_graph` | 3 |
-| `graph_kernel` | 3 |
-| `graph_event` | 3 |
-| `graph_topology` | 5 |
-| `graph_clone` | 3 |
-| `graph_update` | 9 |
-| `graph_exec_lifecycle` | 5 |
-| `graph_node_types` | 5 |
-| `graph_child` | 3 |
-| `graph_host` | 3 |
-| `graph_mem_nodes` | 7 |
-| `graph_generic_node` | 3 |
-| `graph_memcpy3d_node` | 4 |
-| `graph_batch_mem_op` | 4 |
-| `driver_graph_node` | 5 |
-| `graph_instantiate_params` | 2 |
-| `graph_debug` | 2 |
-| `graph_node_attributes` | 3 |
-| `graph_node_params` | 7 |
-| `graph_node_setters` | 5 |
-| `graph_symbol_copy_nodes` | 3 |
-| `graph_node_find` | 3 |
-| `graph_user_objects` | 4 |
-| `graph_node_enabled` | 3 |
-| `host_memory` | 5 |
-| `host_alloc_aliases` | 7 |
-| `pitched_memory` | 4 |
-| `driver_pitched_memory` | 7 |
-| `array_memory` | 4 |
+| `array3d` | 3 |
 | `array_copy` | 5 |
 | `array_copy_ext` | 8 |
+| `array_memory` | 4 |
+| `async_copy3d` | 6 |
+| `async_transfer` | 4 |
+| `call_config` | 3 |
+| `capture_to_graph` | 3 |
+| `context` | 6 |
+| `context_config` | 6 |
+| `context_mutation` | 5 |
+| `copy3d` | 4 |
+| `device` | 7 |
+| `device_config` | 6 |
+| `device_identity` | 9 |
+| `device_lifecycle` | 7 |
+| `device_reset` | 1 |
+| `device_texture_query` | 6 |
 | `driver_array` | 6 |
-| `mipmapped_array` | 4 |
+| `driver_copy3d` | 5 |
+| `driver_entry_point` | 5 |
+| `driver_error` | 6 |
+| `driver_graph_node` | 5 |
+| `driver_launch_ex` | 3 |
+| `driver_memcpy` | 6 |
+| `driver_memcpy_2d` | 5 |
+| `driver_memset_2d` | 6 |
+| `driver_memset_async` | 6 |
+| `driver_memset_async_2d3d` | 5 |
+| `driver_pitched_memory` | 7 |
+| `driver_texture_object` | 6 |
+| `error_api` | 6 |
+| `extension` | 6 |
+| `external_resource` | 8 |
+| `func_attributes` | 8 |
+| `graph` | 5 |
+| `graph_batch_mem_op` | 4 |
+| `graph_capture` | 4 |
+| `graph_child` | 3 |
+| `graph_clone` | 3 |
+| `graph_debug` | 2 |
+| `graph_event` | 3 |
+| `graph_exec_lifecycle` | 5 |
+| `graph_generic_node` | 3 |
+| `graph_host` | 3 |
+| `graph_instantiate_params` | 2 |
+| `graph_kernel` | 3 |
+| `graph_mem_nodes` | 7 |
+| `graph_memcpy3d_node` | 4 |
+| `graph_node_attributes` | 3 |
+| `graph_node_enabled` | 3 |
+| `graph_node_find` | 3 |
+| `graph_node_params` | 7 |
+| `graph_node_setters` | 5 |
+| `graph_node_types` | 5 |
+| `graph_symbol_copy_nodes` | 3 |
+| `graph_topology` | 5 |
+| `graph_update` | 9 |
+| `graph_user_objects` | 4 |
+| `graphics_interop` | 8 |
+| `green_context` | 6 |
+| `host_alloc_aliases` | 7 |
+| `host_memory` | 5 |
+| `ipc` | 5 |
+| `jit_link` | 7 |
+| `kernel` | 4 |
+| `kernel_launch` | 7 |
+| `kernel_name_ref` | 3 |
+| `kernel_object_attributes` | 3 |
+| `library` | 14 |
+| `library_file` | 3 |
+| `logging` | 3 |
 | `managed_memory` | 5 |
 | `mem_advise` | 6 |
 | `mem_advise_v2` | 4 |
-| `pointer_info` | 7 |
-| `pointer_query` | 6 |
-| `memory_pool` | 6 |
-| `memory_pool_lifecycle` | 4 |
-| `memory_pool_access` | 3 |
-| `mem_location_pool` | 3 |
-| `mempool_shareable_handle` | 3 |
-| `vmm` | 5 |
-| `vmm_handle` | 4 |
+| `mem_batch_copy` | 3 |
+| `mem_batch_copy_3d` | 4 |
+| `mem_batch_discard` | 7 |
+| `mem_location_pool` | 4 |
 | `mem_map_array` | 2 |
-| `copy3d` | 4 |
-| `async_copy3d` | 6 |
-| `driver_copy3d` | 5 |
-| `array3d` | 3 |
-| `texture` | 8 |
-| `driver_texture_object` | 6 |
-| `texture_reference` | 5 |
-| `texture_reference_symbol` | 9 |
-| `context` | 6 |
-| `context_mutation` | 5 |
-| `context_config` | 6 |
-| `ipc` | 5 |
-| `external_resource` | 8 |
+| `memory` | 5 |
+| `memory_pool` | 6 |
+| `memory_pool_access` | 3 |
+| `memory_pool_lifecycle` | 4 |
+| `mempool_shareable_handle` | 3 |
+| `memset` | 6 |
+| `mipmapped_array` | 4 |
 | `module` | 7 |
 | `module_exec` | 8 |
 | `module_load_ex` | 4 |
 | `module_load_file` | 6 |
-| `jit_link` | 6 |
-| `library` | 14 |
-| `kernel_object_attributes` | 3 |
-| `library_file` | 3 |
+| `multi_device_launch` | 4 |
+| `occupancy` | 3 |
+| `occupancy_ext` | 4 |
+| `occupancy_variable` | 6 |
+| `peer_access` | 6 |
+| `peer_copy` | 5 |
+| `peer_query` | 5 |
+| `pitched_memory` | 4 |
+| `pointer_info` | 7 |
+| `pointer_query` | 6 |
+| `profiler` | 3 |
+| `runtime` | 10 |
+| `stream_attach` | 5 |
+| `stream_attributes` | 5 |
+| `stream_callbacks` | 5 |
+| `stream_capture_mode` | 6 |
+| `stream_cu_mask` | 5 |
+| `stream_event` | 7 |
+| `stream_memory_ops` | 6 |
+| `stream_props` | 7 |
 | `symbol_copy` | 6 |
-
-## Coverage by API category
-
-| Category | Covered | Total parsed | Approx. coverage |
-|---|---:|---:|---:|
-| Error handling | 5 | 5 | 100.0% |
-| Event | 8 | 8 | 100.0% |
-| Occupancy | 13 | 13 | 100.0% |
-| Graph / capture | 100 | 100 | 100.0% |
-| Stream | 23 | 23 | 100.0% |
-| Runtime / device | 42 | 47 | 89.4% |
-| Kernel launch / function attrs | 19 | 19 | 100.0% |
-| Memory / copy / memset | 134 | 137 | 97.8% |
-| Other runtime APIs | 33 | 56 | 58.9% |
-| Module / library loading | 29 | 29 | 100.0% |
-| Texture / surface | 51 | 54 | 94.4% |
-| Context / driver | 16 | 16 | 100.0% |
-| Extension / proc address | 11 | 13 | 84.6% |
-| IPC | 5 | 5 | 100.0% |
-
-These category buckets overlap (some APIs count under more than one category), so the "Total parsed" column sums to more than the 494-name denominator and the "Covered" column is **not** expected to equal the Snapshot's directly-exercised total. The authoritative covered count is the Snapshot figure, cross-checked against the "Covered APIs" code blocks below; this table is a per-category approximation only. In particular, `Texture / surface` is 51/54, not 54/54: the three uncovered texture APIs are `hipTexRefSetBorderColor`/`hipTexRefGetBorderColor` (the runtime `assert(false)`s, aborting the binary) and `hipBindTextureToMipmappedArray` (Windows-only positive path).
-
-## Covered APIs
-
-### Memory / copy / memset
-
-```text
-hipMalloc
-hipFree
-hipMemcpy
-hipMemcpyAsync
-hipMemcpyWithStream
-hipMemcpyHtoD
-hipMemcpyDtoH
-hipMemcpyDtoD
-hipMemcpyHtoDAsync
-hipMemcpyDtoHAsync
-hipMemcpyDtoDAsync
-hipMemset
-hipMemsetAsync
-hipMemsetD8
-hipMemsetD16
-hipMemsetD32
-hipMemsetD8Async
-hipMemsetD16Async
-hipMemsetD32Async
-hipMemset2D
-hipMemsetD2D8
-hipMemsetD2D16
-hipMemsetD2D32
-hipMemsetD2D8Async
-hipMemsetD2D16Async
-hipMemsetD2D32Async
-hipMemset2DAsync
-hipMemset3D
-hipMemset3DAsync
-hipHostMalloc
-hipHostAlloc
-hipMallocHost
-hipMemAllocHost
-hipHostFree
-hipFreeHost
-hipHostRegister
-hipHostUnregister
-hipHostGetDevicePointer
-hipHostGetFlags
-hipMallocPitch
-hipMemAllocPitch
-hipMemcpy2D
-hipMemcpy2DAsync
-hipMemcpyParam2D
-hipMemcpyParam2DAsync
-hipDrvMemcpy2DUnaligned
-hipMalloc3D
-hipMemcpy3D
-hipMemcpy3DAsync
-hipDrvMemcpy3D
-hipDrvMemcpy3DAsync
-hipMallocArray
-hipFreeArray
-hipMemcpy2DToArray
-hipMemcpy2DFromArray
-hipMemcpyToArray
-hipMemcpyFromArray
-hipMemcpyHtoA
-hipMemcpyAtoH
-hipMemcpyDtoA
-hipMemcpyAtoD
-hipMemcpyHtoAAsync
-hipMemcpyAtoHAsync
-hipMemcpy2DArrayToArray
-hipMemcpyAtoA
-hipMemcpy2DToArrayAsync
-hipMemcpy2DFromArrayAsync
-hipMalloc3DArray
-hipArrayGetInfo
-hipArrayCreate
-hipArrayDestroy
-hipArrayGetDescriptor
-hipArray3DCreate
-hipArray3DGetDescriptor
-hipMallocManaged
-hipMemPrefetchAsync
-hipMemPrefetchAsync_v2
-hipMemAdvise
-hipMemAdvise_v2
-hipMemRangeGetAttribute
-hipMemRangeGetAttributes
-hipMallocAsync
-hipFreeAsync
-hipMemPoolGetAttribute
-hipMemPoolSetAttribute
-hipMemPoolCreate
-hipMemPoolDestroy
-hipMemPoolTrimTo
-hipMallocFromPoolAsync
-hipMemPoolSetAccess
-hipMemPoolGetAccess
-hipMemGetMemPool
-hipMemSetMemPool
-hipMemGetAccess
-hipMemPoolExportToShareableHandle
-hipMemPoolImportFromShareableHandle
-hipMemPoolExportPointer
-hipMemPoolImportPointer
-hipExtMallocWithFlags
-hipPointerGetAttributes
-hipPointerGetAttribute
-hipDrvPointerGetAttributes
-hipPointerSetAttribute
-hipMemGetAddressRange
-hipMemGetInfo
-hipMemPtrGetInfo
-hipMemcpyToSymbol
-hipMemcpyFromSymbol
-hipMemcpyToSymbolAsync
-hipMemcpyFromSymbolAsync
-hipMemcpyPeer
-hipMemcpyPeerAsync
-hipMemcpy3DPeer
-hipMemcpy3DPeerAsync
-hipMemcpyBatchAsync
-hipMemDiscardBatchAsync
-hipMemDiscardAndPrefetchBatchAsync
-hipDrvMemDiscardBatchAsync
-hipDrvMemDiscardAndPrefetchBatchAsync
-hipMemPrefetchBatchAsync
-hipMemcpy3DBatchAsync
-```
-
-### Virtual memory management
-
-```text
-hipMemGetAllocationGranularity
-hipMemAddressReserve
-hipMemAddressFree
-hipMemCreate
-hipMemRelease
-hipMemMap
-hipMemUnmap
-hipMemSetAccess
-hipMemRetainAllocationHandle
-hipMemGetAllocationPropertiesFromHandle
-hipMemGetHandleForAddressRange
-hipMemExportToShareableHandle
-hipMemImportFromShareableHandle
-hipMemMapArrayAsync
-```
-
-### Runtime / device
-
-```text
-hipInit
-hipGetDeviceCount
-hipGetDevice
-hipSetDevice
-hipDeviceGetAttribute
-hipGetDeviceProperties
-hipDeviceSynchronize
-hipRuntimeGetVersion
-hipDriverGetVersion
-hipDeviceGetDefaultMemPool
-hipDeviceGetMemPool
-hipDeviceSetMemPool
-hipDeviceGet
-hipDeviceGetName
-hipDeviceComputeCapability
-hipDeviceTotalMem
-hipDeviceGetUuid
-hipDeviceGetLuid
-hipDeviceGetPCIBusId
-hipDeviceGetByPCIBusId
-hipChooseDevice
-hipDeviceCanAccessPeer
-hipDeviceGetP2PAttribute
-hipDeviceEnablePeerAccess
-hipDeviceDisablePeerAccess
-hipDevicePrimaryCtxRetain
-hipDevicePrimaryCtxGetState
-hipDevicePrimaryCtxRelease
-hipDeviceGetCacheConfig
-hipDeviceSetCacheConfig
-hipDeviceGetSharedMemConfig
-hipDeviceGetLimit
-hipDeviceSetLimit
-hipGetDeviceFlags
-hipDeviceGetStreamPriorityRange
-hipSetDeviceFlags
-hipInitDevice
-hipSetValidDevices
-hipDeviceSetSharedMemConfig
-hipDevicePrimaryCtxSetFlags
-hipDevicePrimaryCtxReset
-hipDeviceReset
-```
-
-### Context / driver
-
-```text
-hipCtxGetCurrent
-hipCtxGetDevice
-hipCtxCreate
-hipCtxDestroy
-hipCtxSetCurrent
-hipCtxPushCurrent
-hipCtxPopCurrent
-hipCtxSynchronize
-hipCtxGetApiVersion
-hipCtxGetCacheConfig
-hipCtxSetCacheConfig
-hipCtxGetSharedMemConfig
-hipCtxSetSharedMemConfig
-hipCtxGetFlags
-hipCtxEnablePeerAccess
-hipCtxDisablePeerAccess
-```
-
-### Texture / surface
-
-```text
-hipCreateTextureObject
-hipDestroyTextureObject
-hipGetTextureObjectResourceDesc
-hipGetTextureObjectTextureDesc
-hipTexObjectCreate
-hipTexObjectDestroy
-hipTexObjectGetResourceDesc
-hipTexObjectGetTextureDesc
-hipTexObjectGetResourceViewDesc
-hipDeviceGetTexture1DLinearMaxWidth
-hipCreateSurfaceObject
-hipDestroySurfaceObject
-hipGetChannelDesc
-hipGetTextureObjectResourceViewDesc
-hipMallocMipmappedArray
-hipFreeMipmappedArray
-hipMipmappedArrayCreate
-hipMipmappedArrayDestroy
-hipGetMipmappedArrayLevel
-hipMipmappedArrayGetLevel
-hipMipmappedArrayGetMemoryRequirements
-hipTexRefSetAddressMode
-hipTexRefGetAddressMode
-hipTexRefSetFilterMode
-hipTexRefGetFilterMode
-hipTexRefSetFlags
-hipTexRefGetFlags
-hipTexRefSetFormat
-hipTexRefGetFormat
-hipTexRefSetMaxAnisotropy
-hipTexRefGetMaxAnisotropy
-hipGetTextureReference
-hipBindTexture
-hipBindTexture2D
-hipBindTextureToArray
-hipUnbindTexture
-hipGetTextureAlignmentOffset
-hipModuleGetTexRef
-hipTexRefSetAddress
-hipTexRefGetAddress
-hipTexRefSetArray
-hipTexRefGetArray
-hipTexRefGetMipmapFilterMode
-hipTexRefGetMipmapLevelBias
-hipTexRefGetMipmapLevelClamp
-hipTexRefSetMipmappedArray
-hipTexRefGetMipMappedArray
-hipTexRefSetAddress2D
-hipTexRefSetMipmapFilterMode
-hipTexRefSetMipmapLevelBias
-hipTexRefSetMipmapLevelClamp
-```
-
-### Error handling
-
-```text
-hipGetErrorName
-hipGetErrorString
-hipDrvGetErrorName
-hipDrvGetErrorString
-hipGetLastError
-hipPeekAtLastError
-```
-
-### Stream / event
-
-```text
-hipStreamCreate
-hipStreamCreateWithFlags
-hipStreamCreateWithPriority
-hipStreamDestroy
-hipStreamSynchronize
-hipStreamQuery
-hipStreamWaitEvent
-hipStreamGetFlags
-hipStreamGetPriority
-hipStreamGetDevice
-hipStreamGetId
-hipStreamAddCallback
-hipStreamGetAttribute
-hipStreamSetAttribute
-hipStreamCopyAttributes
-hipStreamWriteValue32
-hipStreamWriteValue64
-hipStreamWaitValue32
-hipStreamWaitValue64
-hipStreamBatchMemOp
-hipStreamAttachMemAsync
-hipExtStreamCreateWithCUMask
-hipExtStreamGetCUMask
-hipEventCreate
-hipEventCreateWithFlags
-hipEventDestroy
-hipEventRecord
-hipEventRecordWithFlags
-hipEventSynchronize
-hipEventQuery
-hipEventElapsedTime
-```
-
-### Kernel launch / function attrs
-
-```text
-hipLaunchKernel
-hipLaunchHostFunc
-hipLaunchKernelGGL
-hipLaunchCooperativeKernel
-hipExtLaunchKernel
-hipGetSymbolAddress
-hipGetSymbolSize
-hipFuncGetAttribute
-hipFuncGetAttributes
-hipFuncSetAttribute
-hipFuncSetCacheConfig
-hipFuncSetSharedMemConfig
-hipGetFuncBySymbol
-hipConfigureCall
-hipSetupArgument
-hipLaunchByPtr
-hipLaunchCooperativeKernelMultiDevice
-hipExtLaunchMultiKernelMultiDevice
-hipModuleLaunchCooperativeKernelMultiDevice
-hipLaunchKernelExC
-hipDrvLaunchKernelEx
-```
-
-### Module / library loading
-
-```text
-hipModuleLoad
-hipModuleLoadFatBinary
-hipModuleLoadData
-hipModuleLoadDataEx
-hipModuleUnload
-hipModuleGetFunction
-hipModuleGetFunctionCount
-hipModuleGetGlobal
-hipModuleLaunchKernel
-hipModuleLaunchCooperativeKernel
-hipLinkCreate
-hipLinkAddData
-hipLinkAddFile
-hipLinkComplete
-hipLinkDestroy
-hipLibraryLoadData
-hipLibraryUnload
-hipLibraryGetKernel
-hipLibraryGetKernelCount
-hipLibraryEnumerateKernels
-hipLibraryGetGlobal
-hipKernelGetFunction
-hipKernelGetLibrary
-hipKernelGetName
-hipKernelGetAttribute
-hipKernelSetAttribute
-hipKernelGetParamInfo
-hipLibraryLoadFromFile
-hipLibraryGetManaged
-```
-
-### Graph / capture / graph nodes
-
-```text
-hipGraphCreate
-hipGraphDestroy
-hipGraphInstantiate
-hipGraphInstantiateWithFlags
-hipGraphUpload
-hipGraphLaunch
-hipGraphExecGetFlags
-hipGraphExecDestroy
-hipGraphAddEmptyNode
-hipGraphAddMemcpyNode1D
-hipGraphAddMemsetNode
-hipGraphAddKernelNode
-hipGraphAddEventRecordNode
-hipGraphAddEventWaitNode
-hipGraphAddChildGraphNode
-hipGraphChildGraphNodeGetGraph
-hipGraphAddHostNode
-hipGraphHostNodeGetParams
-hipGraphNodeGetType
-hipGraphAddDependencies
-hipGraphRemoveDependencies
-hipGraphExecMemcpyNodeSetParams1D
-hipGraphExecMemsetNodeSetParams
-hipGraphExecKernelNodeSetParams
-hipGraphExecHostNodeSetParams
-hipGraphExecChildGraphNodeSetParams
-hipGraphExecEventRecordNodeSetEvent
-hipGraphExecEventWaitNodeSetEvent
-hipGraphExecUpdate
-hipGraphKernelNodeGetParams
-hipGraphMemcpyNodeGetParams
-hipGraphMemcpyNodeSetParams
-hipGraphMemsetNodeGetParams
-hipGraphMemsetNodeSetParams
-hipGraphEventRecordNodeGetEvent
-hipGraphEventWaitNodeGetEvent
-hipGraphDestroyNode
-hipGraphGetNodes
-hipGraphGetRootNodes
-hipGraphGetEdges
-hipGraphNodeGetDependencies
-hipGraphNodeGetDependentNodes
-hipGraphClone
-hipGraphNodeFindInClone
-hipGraphAddMemAllocNode
-hipGraphMemAllocNodeGetParams
-hipGraphAddMemFreeNode
-hipGraphMemFreeNodeGetParams
-hipDeviceGetGraphMemAttribute
-hipDeviceGraphMemTrim
-hipStreamBeginCapture
-hipStreamBeginCaptureToGraph
-hipStreamEndCapture
-hipStreamIsCapturing
-hipStreamGetCaptureInfo
-hipStreamGetCaptureInfo_v2
-hipStreamUpdateCaptureDependencies
-hipThreadExchangeStreamCaptureMode
-hipUserObjectCreate
-hipUserObjectRetain
-hipUserObjectRelease
-hipGraphRetainUserObject
-hipGraphReleaseUserObject
-hipGraphNodeSetEnabled
-hipGraphNodeGetEnabled
-hipGraphKernelNodeSetAttribute
-hipGraphKernelNodeGetAttribute
-hipGraphKernelNodeSetParams
-hipGraphHostNodeSetParams
-hipGraphMemcpyNodeSetParams1D
-hipGraphEventRecordNodeSetEvent
-hipGraphEventWaitNodeSetEvent
-hipGraphKernelNodeCopyAttributes
-hipGraphAddMemcpyNodeToSymbol
-hipGraphAddMemcpyNodeFromSymbol
-hipGraphMemcpyNodeSetParamsToSymbol
-hipGraphMemcpyNodeSetParamsFromSymbol
-hipGraphExecMemcpyNodeSetParamsToSymbol
-hipGraphExecMemcpyNodeSetParamsFromSymbol
-hipGraphAddNode
-hipGraphNodeSetParams
-hipGraphExecNodeSetParams
-hipGraphAddMemcpyNode
-hipGraphExecMemcpyNodeSetParams
-hipDrvGraphAddMemcpyNode
-hipDrvGraphAddMemsetNode
-hipDrvGraphMemcpyNodeGetParams
-hipDrvGraphMemcpyNodeSetParams
-hipDrvGraphExecMemcpyNodeSetParams
-hipDrvGraphExecMemsetNodeSetParams
-hipGraphInstantiateWithParams
-hipGraphDebugDotPrint
-hipDeviceSetGraphMemAttribute
-hipDrvGraphAddMemFreeNode
-hipGraphAddBatchMemOpNode
-hipGraphBatchMemOpNodeGetParams
-hipGraphBatchMemOpNodeSetParams
-hipGraphExecBatchMemOpNodeSetParams
-```
-
-### Occupancy
-
-```text
-hipOccupancyMaxActiveBlocksPerMultiprocessor
-hipOccupancyMaxActiveBlocksPerMultiprocessorWithFlags
-hipOccupancyMaxPotentialBlockSize
-hipOccupancyAvailableDynamicSMemPerBlock
-hipOccupancyMaxActiveClusters
-hipOccupancyMaxPotentialClusterSize
-hipModuleOccupancyMaxPotentialBlockSize
-hipModuleOccupancyMaxPotentialBlockSizeWithFlags
-hipModuleOccupancyMaxActiveBlocksPerMultiprocessor
-hipModuleOccupancyMaxActiveBlocksPerMultiprocessorWithFlags
-hipOccupancyMaxPotentialBlockSizeWithFlags
-hipOccupancyMaxPotentialBlockSizeVariableSMem
-hipOccupancyMaxPotentialBlockSizeVariableSMemWithFlags
-```
-
-### Extension / proc address
-
-```text
-hipGetProcAddress
-hipGetDriverEntryPoint
-hipApiName
-hipGetStreamDeviceId
-hipExtGetLastError
-hipExtGetLinkTypeAndHopCount
-hipExtEnableLogging
-hipExtDisableLogging
-hipExtSetLoggingParams
-hipKernelNameRef
-hipKernelNameRefByPtr
-```
-
-### IPC
-
-```text
-hipIpcGetMemHandle
-hipIpcOpenMemHandle
-hipIpcCloseMemHandle
-hipIpcGetEventHandle
-hipIpcOpenEventHandle
-```
-
-### Profiler
-
-```text
-hipProfilerStart
-hipProfilerStop
-```
-
-### Green context / device resources
-
-```text
-hipDeviceGetDevResource
-hipStreamGetDevResource
-hipDevSmResourceSplitByCount
-hipDevSmResourceSplit
-hipDevResourceGenerateDesc
-hipGreenCtxCreate
-hipDeviceGetExecutionCtx
-hipExecutionCtxStreamCreate
-hipExecutionCtxGetDevice
-hipExecutionCtxGetId
-hipExecutionCtxGetDevResource
-hipExecutionCtxSynchronize
-hipExecutionCtxRecordEvent
-hipExecutionCtxWaitEvent
-hipExecutionCtxDestroy
-```
-
-### External resource interop
-
-```text
-hipImportExternalMemory
-hipDestroyExternalMemory
-hipExternalMemoryGetMappedBuffer
-hipImportExternalSemaphore
-hipDestroyExternalSemaphore
-hipSignalExternalSemaphoresAsync
-hipWaitExternalSemaphoresAsync
-hipExternalMemoryGetMappedMipmappedArray
-```
-
-### Graphics interop
-
-```text
-hipGraphicsMapResources
-hipGraphicsUnmapResources
-hipGraphicsUnregisterResource
-hipGraphicsResourceGetMappedPointer
-hipGraphicsSubResourceGetMappedArray
-```
-
-## Largest remaining gaps
-
-1. Memory surface beyond current basics: advanced VMM operations (multi-device access descriptors and protection-mode matrices; POSIX-fd shareable-handle export/import round-trips via `hipMemExportToShareableHandle`/`hipMemImportFromShareableHandle` are now covered, gated to discrete GPUs because the export faults on an integrated local runtime), and remaining advanced memory-pool operations (multi-device access descriptors; shareable-handle export/import and pointer export/import are now covered via a same-process POSIX-fd round-trip in `mempool_shareable_handle`). Host allocation/registration and alternate host/device allocation entry points (`hipHostAlloc`, `hipMallocHost`, `hipMemAllocHost`, `hipFreeHost`, `hipExtMallocWithFlags`), directed driver-style 1D and struct-based 2D copies (`hipMemcpyHtoD`, `hipMemcpyDtoH`, `hipMemcpyDtoD`, `hipMemcpyParam2D`, plus async variants), directed async byte/word/dword memset (`hipMemsetD8Async`, `hipMemsetD16Async`, `hipMemsetD32Async`), directed 2D/3D memset (`hipMemset2D`, `hipMemset2DAsync`, `hipMemset3D`, `hipMemset3DAsync`, `hipMemsetD2D8`, `hipMemsetD2D16`, `hipMemsetD2D32`, and D2D async variants), runtime and driver-style pitched allocation with 2D copies (including the unaligned driver-style 2D copy `hipDrvMemcpy2DUnaligned` with an observable host-to-device round-trip and a null-inner-pointer rejection), basic array allocation with 2D array copies plus legacy, driver-style, and async array-copy entry points (`hipMemcpyToArray`, `hipMemcpyFromArray`, `hipMemcpyHtoA`, `hipMemcpyAtoH`, `hipMemcpyDtoA`, `hipMemcpyAtoD`, `hipMemcpyHtoAAsync`, `hipMemcpyAtoHAsync`, `hipMemcpy2DArrayToArray`, `hipMemcpy2DToArrayAsync`, `hipMemcpy2DFromArrayAsync`), 3D pitched allocation with runtime and driver-style host-device 3D copies, 3D array allocation with 3D copy-to/from-array, driver-style array create/destroy and descriptor queries (`hipArrayCreate`, `hipArrayDestroy`, `hipArrayGetDescriptor`, `hipArray3DCreate`, `hipArray3DGetDescriptor`), managed allocation with prefetch, managed-memory advice and range attribute queries (set/unset read-mostly, preferred-location, and accessed-by advice via `hipMemAdvise`, plus single-attribute and multi-attribute range queries via `hipMemRangeGetAttribute` and `hipMemRangeGetAttributes`), location-based managed-memory advice and prefetch (`hipMemAdvise_v2` read-mostly and set/unset preferred-location accepted-or-unsupported with a null-range rejection, and `hipMemPrefetchAsync_v2` accepted-or-unsupported), default memory pools with stream-ordered allocation, location-based memory-pool set/get and access queries (`hipMemSetMemPool`, `hipMemGetMemPool`, `hipMemGetAccess` for a device `hipMemLocation`), basic virtual memory management (granularity, address reserve/free, allocation handle create/release, map/unmap, and single-device access), VMM allocation-handle queries on a mapped allocation (retain-by-address, allocation-property round-trip from handle, and dma-buf address-range export: `hipMemRetainAllocationHandle`, `hipMemGetAllocationPropertiesFromHandle`, `hipMemGetHandleForAddressRange`), explicit memory-pool lifecycle (create/destroy, release-threshold, trim, and pool-specific async allocation), current-device memory-pool access control, pointer and memory-capacity queries (`hipPointerGetAttributes`, `hipPointerGetAttribute`, `hipDrvPointerGetAttributes`, `hipPointerSetAttribute`, `hipMemGetAddressRange`, `hipMemGetInfo`, `hipMemPtrGetInfo`), and device-global symbol copies (synchronous and stream-ordered copy-to/from-symbol with byte-offset placement and invalid/out-of-bounds rejection: `hipMemcpyToSymbol`, `hipMemcpyFromSymbol`, `hipMemcpyToSymbolAsync`, `hipMemcpyFromSymbolAsync`) are now covered. Single-device peer copies are now covered too: synchronous and async 1D peer copy plus 3D peer copy (`hipMemcpyPeer`, `hipMemcpyPeerAsync`, `hipMemcpy3DPeer`, `hipMemcpy3DPeerAsync`), exercised via self-device (dst==src) round-trips that behave like ordinary device-to-device copies, plus an invalid-device-ordinal rejection; cross-device peer transfers require multi-GPU hosts and remain uncovered. Batch async copy is now covered as well (`hipMemcpyBatchAsync` via a multi-operation device-to-device round-trip, a per-copy `hipMemcpyAttributes` stream-access-order variant, and a null-destination rejection). The batch discard and discard-and-prefetch operations are now covered as accepted-or-unsupported contracts (`hipMemDiscardBatchAsync`, `hipMemDiscardAndPrefetchBatchAsync`, `hipDrvMemDiscardBatchAsync`, `hipDrvMemDiscardAndPrefetchBatchAsync`), each requiring XNACK plus managed or system-allocated memory and reporting `hipErrorNotSupported` where that path is unavailable, plus a null-range rejection. The batch prefetch operation is now covered too (`hipMemPrefetchBatchAsync` accepted-or-unsupported), gated to discrete GPUs because it rejects well-formed inputs with an invalid-value error on an integrated local runtime while the single-range `hipMemPrefetchAsync_v2` and the combined `hipMemDiscardAndPrefetchBatchAsync` accept the identical location; on discrete datacenter GPUs it is accepted. The batch 3D copy is now covered too (`hipMemcpy3DBatchAsync` via a pointer-operand host-device-host round-trip with a byte-scaled single-row/layer extent, accepted-or-unsupported, plus zero-op, null-op-list, and non-zero-flags rejections); the `failIdx` out-parameter is not asserted on because the NVIDIA backend drops it on CUDA 13+. Remaining memory gaps are the driver-style/2D symbol-copy families and array-operand 3D-batch copies not exercised in this harness.
-2. Texture and surface APIs beyond current basics: runtime and driver-style texture object create/destroy with resource, texture, and resource-view descriptor round-trips, image-gated device texture-width queries, surface object create/destroy, and channel-descriptor queries are now covered; mipmapped arrays are now covered too (`hipMallocMipmappedArray`/`hipFreeMipmappedArray`, driver-style `hipMipmappedArrayCreate`/`hipMipmappedArrayDestroy`, level retrieval via `hipGetMipmappedArrayLevel` and `hipMipmappedArrayGetLevel` with an out-of-range rejection, and `hipMipmappedArrayGetMemoryRequirements`), image-gated so they skip where image support is absent (as on the local WSL2 iGPU) and are exercised on datacenter arches. The scalar per-reference state of the deprecated texture-reference API family is now covered too, image-gated so it skips where image support is absent and runs on image-capable datacenter GPUs: set/get round-trips for address mode, filter mode, flags, format, and max anisotropy (`hipTexRefSetAddressMode`/`hipTexRefGetAddressMode`, `hipTexRefSetFilterMode`/`hipTexRefGetFilterMode`, `hipTexRefSetFlags`/`hipTexRefGetFlags`, `hipTexRefSetFormat`/`hipTexRefGetFormat`, `hipTexRefSetMaxAnisotropy`/`hipTexRefGetMaxAnisotropy`), verified on image-capable datacenter GPUs (gfx908). The symbol-backed texture-reference entry points are now covered too (the `texture_reference_symbol` domain), image-gated and verified on gfx908. These reject a bare stack `textureReference` with `hipErrorInvalidSymbol` but accept a reference backed by a real device texture symbol: the static route uses a file-scope `texture<>` global (auto-registered by the compiler) for `hipGetTextureReference`, `hipBindTexture`, `hipBindTexture2D`, `hipBindTextureToArray`, `hipUnbindTexture`, and `hipGetTextureAlignmentOffset`; the module route uses an HIPRTC-compiled `texture<>` resolved via `hipModuleGetTexRef` to give a reference that round-trips a device address (`hipTexRefSetAddress`/`hipTexRefGetAddress`) and a HIP array (`hipTexRefSetArray`/`hipTexRefGetArray`). The deprecated mipmap-parameter getters are covered as documented-stub contracts: `hipTexRefGetMipmapFilterMode`/`hipTexRefGetMipmapLevelBias`/`hipTexRefGetMipmapLevelClamp` return `hipErrorInvalidValue` by backend design. The matching mipmap-parameter setters are covered too (`hipTexRefSetMipmapFilterMode`/`hipTexRefSetMipmapLevelBias`/`hipTexRefSetMipmapLevelClamp`): each writes its value into a bare stack `textureReference` and returns success on an image-capable device (a null reference is rejected with `hipErrorInvalidValue` before the image gate, so that check is backend-neutral), and the written value round-trips through the matching getter's out-parameter, which the runtime populates before returning its documented `hipErrorInvalidValue` sentinel; verified on gfx908. The border-color entry points `hipTexRefSetBorderColor`/`hipTexRefGetBorderColor` are intentionally NOT covered: the AMD runtime implements both with an unconditional `assert(false)` after the image-support check (`clr/hipamd/src/hip_texture.cpp`), so calling them aborts the test binary in assert-enabled builds; there is no defined contract to assert until the runtime stores border-color state on the reference. The mipmapped-array set/get texture-reference entry points are now covered too: a 2D module-backed reference round-trips a float mipmapped array through the deprecated pair (`hipTexRefSetMipmappedArray`/`hipTexRefGetMipMappedArray`), setting normalized coordinates before the bind (the runtime rejects the bind as an invalid texture otherwise), image-gated and skipping where mipmapped arrays are unsupported. The pitched 2D address bind is now covered too (`hipTexRefSetAddress2D`): a 2D module-backed reference binds a `hipMallocPitch` allocation through a `HIP_ARRAY_DESCRIPTOR` as an accepted structural contract, cross-checking the recorded base address through `hipTexRefGetAddress` (there is no `hipTexRefGetAddress2D` getter). The remaining uncovered texture-reference entry points are `hipTexRefSetBorderColor`/`hipTexRefGetBorderColor` (above) and `hipBindTextureToMipmappedArray` (the AMD Linux runtime rejects a device-side bind with `hipErrorInvalidTexture`; its positive path is Windows-only, as the in-tree unit test guards behind `#if defined(_WIN32)`).
-3. Module, library, and code-loading APIs: module load from file/fat-binary, HIPRTC-backed module load-from-data, load-from-data-with-options (`hipModuleLoadDataEx`, including JIT option handling), unload, function and global lookup, module kernel launch (with `hipFuncGetAttribute`), function-count queries, cooperative module launch, and module occupancy helpers (max potential block size and max active blocks per multiprocessor, including both with-flags variants), and JIT linker lifecycle and invalid-input paths are now covered; the HIPRTC-backed library-loading family is now covered too (library load-from-data, unload, kernel lookup, kernel count, kernel enumeration, global lookup, and the `hipKernel*` accessors for function/library/name), plus the `hipKernel_t` attribute accessors and parameter-info query (`hipKernelGetAttribute`, `hipKernelSetAttribute` accepted-or-unsupported, `hipKernelGetParamInfo` first-parameter layout), and the library load-from-file and managed-symbol accessors (`hipLibraryLoadFromFile` with kernel resolution and missing-file rejection, `hipLibraryGetManaged` unknown-symbol rejection). This brings the module/library-loading API family to full name coverage.
-4. Context and driver-style APIs beyond current basics: device-handle, name, compute-capability, total-memory, UUID, and PCI bus-id queries, primary-context retain/get-state/release, current-context/device queries, device cache-config get/set, shared-memory-config query, device-limit get/set, device-flag query, and stream-priority-range query are now covered; driver-style context lifecycle and current-context mutation are now covered too (context create/destroy, set-current, push/pop-current, context synchronize, and API-version query). Driver-style context configuration and peer access are now covered as well: per-context cache-config get/set (`hipCtxGetCacheConfig`, `hipCtxSetCacheConfig`), shared-memory-config get/set (`hipCtxGetSharedMemConfig`, `hipCtxSetSharedMemConfig`), the context flag query (`hipCtxGetFlags`), and context peer access enable/disable (`hipCtxEnablePeerAccess`, `hipCtxDisablePeerAccess`). This brings the driver-style context (`hipCtx*`) API family to full name coverage. PCI bus-id-to-device round-trips, device selection (`hipChooseDevice`), single-device peer-access queries (`hipDeviceCanAccessPeer`), peer-attribute queries (`hipDeviceGetP2PAttribute`), and peer-access enable/disable contracts (`hipDeviceEnablePeerAccess`, `hipDeviceDisablePeerAccess`) are now covered too. The remaining device-management lifecycle entry points are now covered as well: the device flag setter (`hipSetDeviceFlags` accepts the currently-active flags), the deprecated shared-memory bank configuration setter (`hipDeviceSetSharedMemConfig` round-trips the current config), the deprecated valid-device selector (`hipSetValidDevices` accepts the full visible-device list), and the deprecated primary-context flag setter and reset (`hipDevicePrimaryCtxSetFlags` accepted-or-already-in-use, `hipDevicePrimaryCtxReset` leaves the device usable via a post-reset alloc/free round-trip). This brings the driver-style device-management family to full name coverage, including `hipDeviceReset` (covered in its own single-test-case `device_reset` domain; see gap 11). The deprecated profiler control entry points (`hipProfilerStart`, `hipProfilerStop`) are covered too, as an accepted-or-unsupported pair with a start/stop capability-consistency check.
-5. Advanced graph APIs: node type queries, explicit add/remove dependencies, child graph nodes with sub-graph retrieval, host nodes with param round-trips, node find in clone, stream capture-mode exchange and v2 capture-info queries, capture into a caller-provided graph with mid-capture dependency-set updates (`hipStreamBeginCaptureToGraph`, `hipStreamUpdateCaptureDependencies`), memory alloc/free nodes with param round-trips plus device graph-memory attribute and trim helpers, user objects (create/retain/release and graph retain/release), per-node enable/disable state (set/get), kernel-node attribute set/get round-trips (cooperative and access-policy-window) with invalid-input rejection, graph node parameter get/set round-trips and event getter contracts, graph node destruction, executable-graph instantiate-with-flags/upload/flag query paths, and executable-graph update paths (whole-graph `hipGraphExecUpdate` with topology-change reporting plus per-node exec setters for host, child-graph, event-record, and event-wait nodes) are now covered; the pre-instantiation node parameter setters are covered too (`hipGraphKernelNodeSetParams`, `hipGraphHostNodeSetParams`, `hipGraphMemcpyNodeSetParams1D`, `hipGraphEventRecordNodeSetEvent`, `hipGraphEventWaitNodeSetEvent`, and kernel-node attribute propagation via `hipGraphKernelNodeCopyAttributes`), verified by set-then-get round-trips and launched observable effects. The device-global symbol-copy graph nodes are now covered as well (`hipGraphAddMemcpyNodeToSymbol`, `hipGraphAddMemcpyNodeFromSymbol`, their graph-node set-params variants `hipGraphMemcpyNodeSetParamsToSymbol`/`hipGraphMemcpyNodeSetParamsFromSymbol`, and the executable-graph set-params variants `hipGraphExecMemcpyNodeSetParamsToSymbol`/`hipGraphExecMemcpyNodeSetParamsFromSymbol`), verified by to/from-symbol round-trips through a device global with node and exec-node re-parameterization. The graph memory free node is now covered too (`hipGraphAddMemFreeNode` with an alloc-node dependency and `hipGraphMemFreeNodeGetParams` device-pointer round-trip; the alloc/free-pair launch is intentionally structural-only because launching a graph memory free node aborts with SIGSEGV on some runtime paths). The unified generic node entry points are now covered (`hipGraphAddNode`, `hipGraphNodeSetParams`, `hipGraphExecNodeSetParams`) via a memset node whose value is set pre- and post-instantiation and verified by launched observable effect, as are the struct-based 3D memcpy graph nodes (`hipGraphAddMemcpyNode` with `hipMemcpy3DParms`, `hipGraphMemcpyNodeGetParams`/`hipGraphMemcpyNodeSetParams`, and `hipGraphExecMemcpyNodeSetParams`) via full-extent host-to-device 3D copy round-trips with pre- and post-instantiation source retargeting. This brings the graph node-parameter API family to full name coverage. The AMD-gated driver-style graph nodes are now covered too (`hipDrvGraphAddMemcpyNode` and `hipDrvGraphAddMemsetNode` bound to the current `hipCtx_t`, `hipDrvGraphMemcpyNodeGetParams`/`hipDrvGraphMemcpyNodeSetParams`, and the executable setters `hipDrvGraphExecMemcpyNodeSetParams`/`hipDrvGraphExecMemsetNodeSetParams`), verified by launched `HIP_MEMCPY3D` host-to-device 3D copy and pitched-row memset round-trips with post-instantiation re-parameterization. The params-struct graph instantiation and debug dot export are now covered too (`hipGraphInstantiateWithParams` reports `hipGraphInstantiateSuccess` with a cleared error node and launches, including the upload-flag/upload-stream path; `hipGraphDebugDotPrint` writes a non-empty dot file to a temporary path, including the verbose flag). The graph memory attribute setter and the driver-style memory free node are covered as well (`hipDeviceSetGraphMemAttribute` resets the used-memory high watermark to zero and rejects a write to the read-only current-usage attribute; `hipDrvGraphAddMemFreeNode` is added structurally with a memory-free node-type check, AMD-gated and not launched for the same abort-avoidance reason as the runtime free node). This brings the graph/capture API family to full name coverage. The batch memory operation graph node is now covered too (`hipGraphAddBatchMemOpNode`, `hipGraphBatchMemOpNodeGetParams`/`hipGraphBatchMemOpNodeSetParams`, `hipGraphExecBatchMemOpNodeSetParams`), verified by a launched write-value-32 operation and executable re-parameterization, gated on the stream wait-value capability. The remaining graph-adjacent entry points are the external-semaphore graph nodes, whose add path dereferences the semaphore handle (a valid external semaphore cannot be constructed in a device-only harness).
-6. IPC memory and event handle round-trips (get/open/close for memory, get/open for events) are now covered; peer access and multigpu APIs remain. The external memory and semaphore interop APIs are now covered as invalid-input rejection contracts (`hipImportExternalMemory`, `hipImportExternalSemaphore`, `hipExternalMemoryGetMappedBuffer`, `hipDestroyExternalMemory`, `hipDestroyExternalSemaphore`, `hipSignalExternalSemaphoresAsync`, `hipWaitExternalSemaphoresAsync`): each must reject an invalid file descriptor or null handle with a defined error rather than crashing or silently succeeding. Their success paths require a valid handle exported by an external producer (Vulkan, a DMA-buf producer, D3D/NvSci), which a device-only harness cannot construct, so only the rejection invariant is exercised. `hipExternalMemoryGetMappedMipmappedArray` is covered too, as a null-handle rejection contract.
-7. Extension and proc-address APIs beyond current basics: dynamic API-name lookup, driver-entry-point lookup, API-name-to-string mapping, per-stream device-id queries, thread-local extended error state, and the AMD extended logging controls (`hipExtEnableLogging`, `hipExtDisableLogging`, `hipExtSetLoggingParams` accepted-or-unsupported with enable/disable capability consistency) are now covered; the AMD kernel-name reflection entry points are now covered too (`hipKernelNameRefByPtr` resolves a host function pointer and `hipKernelNameRef` resolves a `hipFunction_t` from `hipGetFuncBySymbol`, each asserting the returned name mentions the kernel identifier). External memory/semaphore import/export remain.
-8. Occupancy APIs: the occupancy API family is now at full name coverage. Beyond the earlier basics — max-active-blocks-per-multiprocessor (with the module variants and their with-flags forms), the non-module with-flags variant (`hipOccupancyMaxActiveBlocksPerMultiprocessorWithFlags`), max-potential-block-size, available-dynamic-shared-memory-per-block, and the cluster occupancy helpers (`hipOccupancyMaxActiveClusters`, `hipOccupancyMaxPotentialClusterSize`) — the non-module with-flags potential-block-size variant (`hipOccupancyMaxPotentialBlockSizeWithFlags`) and the variable-shared-memory potential-block-size helpers (`hipOccupancyMaxPotentialBlockSizeVariableSMem`, `hipOccupancyMaxPotentialBlockSizeVariableSMemWithFlags`) are now covered too, exercising the with-flags/plain equivalence and a zero-dynamic-shared-memory functor.
-9. Stream and event APIs beyond current basics: stream creation with flags and priority, flag/priority/device/id property round-trips, event timing (`hipEventElapsedTime`, `hipEventRecordWithFlags`), host-side stream callbacks (`hipStreamAddCallback`), stream attribute get/set/copy (`hipStreamGetAttribute`, `hipStreamSetAttribute`, `hipStreamCopyAttributes`), and stream memory operations (32/64-bit write-value `hipStreamWriteValue32`/`64`, 32/64-bit wait-value `hipStreamWaitValue32`/`64`, and batch memory ops `hipStreamBatchMemOp`, all gated on `hipDeviceAttributeCanUseStreamWaitValue`) are now covered, bringing the event API family to full name coverage; CU-mask stream create/query variants and memory-attach (`hipStreamAttachMemAsync`) are now covered, bringing the stream API family to full name coverage; device-resource queries (`hipStreamGetDevResource`) and the capture-to-graph/update-dependencies variants remain.
-10. Kernel launch and function-attribute APIs beyond current basics: the function-attribute family is now covered, including the struct-form attribute query (`hipFuncGetAttributes`), the scalar attribute query (`hipFuncGetAttribute`), per-function attribute and hint setters (`hipFuncSetAttribute`, `hipFuncSetCacheConfig`, `hipFuncSetSharedMemConfig`), and symbol-to-function resolution (`hipGetFuncBySymbol`); host-pointer kernel launch (`hipLaunchKernel`) and host-function launch (`hipLaunchHostFunc`) are covered too. Cooperative launch (`hipLaunchCooperativeKernel`), the AMD extended launch entry point (`hipExtLaunchKernel`), and the device-global symbol address/size queries (`hipGetSymbolAddress`, `hipGetSymbolSize`) are now covered as well. The extended-launch contract exercises the `hipLaunchKernelEx` C++ template wrapper, but that name is not declared in `hip_runtime_api.h` (the header declares the underlying `hipLaunchKernelExC` entry point), so it does not count toward name coverage under the header-parse method. The legacy call-configuration helpers (`hipConfigureCall`, `hipSetupArgument`, `hipLaunchByPtr`) are now covered too, via a configure/setup/launch-by-pointer round-trip that writes an expected value plus a repeated-staging independence check; the null-function-pointer negative is intentionally omitted because `hipLaunchByPtr(nullptr)` corrupts the runtime heap on this backend (returns an error but aborts at teardown with `free(): invalid pointer`). The cooperative multi-device launch family is now covered as well (`hipLaunchCooperativeKernelMultiDevice`, `hipExtLaunchMultiKernelMultiDevice`, `hipModuleLaunchCooperativeKernelMultiDevice`), each as a functional per-device write round-trip gated to discrete GPUs with at least two devices advertising cooperative multi-device launch; these skip on single-GPU or integrated hosts and are verified on 2x datacenter GPUs (gfx90a). The driver-style extended launch entry points are now covered too: `hipLaunchKernelExC` as a functional single-device driver-style launch round-trip, and `hipDrvLaunchKernelEx` as a functional launch through a driver `hipFunction_t` resolved from an HIPRTC-compiled module (write-value read back), both gated to discrete GPUs. This brings the kernel-launch family to full name coverage.
-11. Green context and device-resource APIs: the device and stream SM resource queries, SM resource splitting, resource-descriptor generation, green execution context creation, and the execution-context accessors and operations are now covered (`hipDeviceGetDevResource`, `hipStreamGetDevResource`, `hipDevSmResourceSplitByCount`, `hipDevResourceGenerateDesc`, `hipGreenCtxCreate`, `hipDeviceGetExecutionCtx`, `hipExecutionCtxStreamCreate`, `hipExecutionCtxGetDevice`, `hipExecutionCtxGetId`, `hipExecutionCtxGetDevResource`, `hipExecutionCtxSynchronize`, `hipExecutionCtxRecordEvent`, `hipExecutionCtxWaitEvent`, `hipExecutionCtxDestroy`), verified by an SM-count subset check on a split green context plus an observable memset launched on a green-context stream. The caller-sized group-split variant `hipDevSmResourceSplit` is now covered too (via a bounded-group SM-count assertion, gated to discrete GPUs), accepted-or-unsupported: CDNA arches accept the group-params split and the bounded-subset invariant is asserted, while RDNA arches support only the count-based split and reject the group-params configuration with `hipErrorInvalidResourceConfiguration`, which the test treats as a capability skip. The remaining device-resource gap is the workqueue resource types. The graphics interop entry points are now covered as invalid-input rejection contracts (`hipGraphicsMapResources`, `hipGraphicsUnmapResources`, `hipGraphicsUnregisterResource`, `hipGraphicsResourceGetMappedPointer`, `hipGraphicsSubResourceGetMappedArray`): each must reject a null resource array/handle with a defined error rather than crashing or silently succeeding. Their success paths require a resource registered from a graphics API (OpenGL, Vulkan, D3D), which a device-only harness cannot construct, so only the rejection invariant is exercised. The three OpenGL-specific interop entry points declared in `hip/hip_gl_interop.h` are now covered too as headless-rejection contracts (`hipGLGetDevices`, `hipGraphicsGLRegisterBuffer`, `hipGraphicsGLRegisterImage`): with no current GL context each must report a defined error rather than crash or silently succeed (the AMD runtime returns `hipErrorInvalidValue` for "no GL context is current", checked before any GL handle is dereferenced). These three are AMD-gated: the NVIDIA `hip_gl_interop.h` includes `<cuda_gl_interop.h>`, which includes `<GL/gl.h>`, so pulling in the header on a headless CUDA node fails to compile the translation unit; they are excluded from the coverage denominator because they are not declared in `hip_runtime_api.h`. The sparse array map/unmap entry point is now covered as invalid-input rejection contracts (`hipMemMapArrayAsync`): a null map-info list and a zero operation count must each be rejected with a defined error. A real sparse map requires CUDA-driver-only descriptor flags (`CUDA_ARRAY3D_SPARSE` and the tile-pool allocation usage) that the HIP public headers do not define, and the AMD runtime returns `hipErrorNotSupported` for a well-formed map, so only the portable rejection invariants are exercised. The device-reset entry point is now covered too (`hipDeviceReset`): allocating a buffer, resetting the device, asserting the pre-reset allocation is invalidated, and proving the device is still usable through a fresh allocate/memset/copy round-trip. Because the reset is process-global for the device, this lives in its own single-test-case `device_reset` domain, so a direct binary run is identical to the ctest one-process-per-test model and the reset cannot disturb a sibling case. The remaining "Other runtime APIs" gap is the external-semaphore graph nodes, whose add path dereferences the semaphore handle and faults on a device-only harness.
+| `texture` | 8 |
+| `texture_reference` | 6 |
+| `texture_reference_symbol` | 10 |
+| `transfer` | 4 |
+| `vmm` | 5 |
+| `vmm_handle` | 4 |
 
 ## Keeping coverage honest
 
-Coverage drift is guarded automatically. `catch/contract/tools/check_contract_coverage.py`
-parses the declared public APIs from `projects/hip/include/hip/hip_runtime_api.h`, the APIs
-exercised by the contract sources, and the intentionally-uncovered allowlist
-`catch/contract/uncovered_apis.txt`, and reports any declared API that has neither a test nor
-an allowlist entry. The `HIP contract-test coverage` GitHub Actions workflow
-(`.github/workflows/hip-contract-coverage.yml`) runs it with `--check` on every PR that touches
-the HIP headers or the contract suite and **fails** on any such gap. It is pure static analysis
-(no ROCm/GPU/build), so it is a fast, always-on gate.
+Coverage drift is guarded automatically. The checker parses the declared public APIs
+from `hip_runtime_api.h`, scans the contract sources for API calls, loads the explicit
+allowlist, and fails when any declared API has neither a test nor a justification. It
+also fails on stale allowlist entries so the allowlist stays truthful.
 
-To add a new contract test — or to justifiably mark an API uncovered — follow
-`catch/contract/AUTHORING.md`. When a newly-added HIP API genuinely cannot be covered by a
-device-only harness, add it to `uncovered_apis.txt` with a reason (the checker flags stale and
-now-redundant entries so the allowlist stays truthful).
+When adding a HIP API or changing contract coverage:
 
-Note: the checker's covered count is *name-level against `hip_runtime_api.h` only* (currently
-483/494), so it does not count the additional non-runtime-header APIs the suite also exercises
-(HIPRTC and the `hip_gl_interop.h` OpenGL entry points), which the Snapshot lists separately.
+1. Add a contract test under [`catch/contract/`](catch/contract/) when the API has a
+   portable device-only invariant.
+2. If the API genuinely cannot be covered in this harness, add it to
+   [`catch/contract/uncovered_apis.txt`](catch/contract/uncovered_apis.txt) with a
+   specific reason.
+3. Run:
 
-A companion inventory, `catch/TEST_PLAN.md`, lists **what each test case asserts** (its API and a
-one-line invariant, taken from the `// @asserts:` tag above each case), grouped by tier and
-domain. It is generated by `catch/tools/gen_test_plan.py` and staleness-checked by the same CI
-workflow, and exists to spot redundant coverage as the wider `catch/*` suite is organized into
-tiers (contract, unit, integration, system, performance, stress). It lives at the `catch/` level
-(not under `contract/`) because it spans all tiers, not just contract.
+   ```bash
+   python3 projects/hip-tests/catch/contract/tools/check_contract_coverage.py --check
+   python3 projects/hip-tests/catch/tools/gen_test_plan.py --check
+   ```
 
-## Update procedure
-
-When adding or removing contract tests:
-
-1. Recompute the contract-domain test counts from `catch/contract/*/test_hip_*_contract.cc`.
-2. Recompute directly exercised `hip*` APIs from the contract sources (run
-   `catch/contract/tools/check_contract_coverage.py` — it prints the declared, covered, and
-   uncovered counts to copy).
-3. Recompute the public API denominator from `projects/hip/include/hip/hip_runtime_api.h`.
-4. Update this document in the same branch as the contract-test change.
-5. Keep percentages labeled as approximate API-name coverage, not behavioral coverage.
+4. Update this snapshot only when the counts or intentionally-uncovered rationale change.

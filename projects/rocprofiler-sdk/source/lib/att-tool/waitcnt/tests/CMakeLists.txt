@@ -17,6 +17,7 @@ target_link_libraries(
             rocprofiler-sdk::rocprofiler-sdk-common-library
             rocprofiler-sdk::rocprofiler-sdk-abseil
             rocprofiler-sdk::rocprofiler-sdk-static-library
+            rocprofiler-sdk::rocprofiler-sdk-amd-comgr
             GTest::gtest
             GTest::gtest_main)
 

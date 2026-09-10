@@ -373,6 +373,66 @@ body {
   white-space: nowrap;
 }
 
+.roofline-precision-dropdown {
+  position: relative;
+  display: inline-block;
+}
+
+.roofline-precision-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--roofline-text);
+  padding: 4px 8px;
+  border: 1px solid var(--roofline-border);
+  border-radius: 6px;
+  background: var(--roofline-surface);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.roofline-precision-btn:hover {
+  border-color: var(--roofline-accent);
+  color: var(--roofline-accent);
+}
+
+.roofline-precision-menu {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  z-index: 200;
+  min-width: 120px;
+  background: var(--roofline-surface);
+  border: 1px solid var(--roofline-border);
+  border-radius: 6px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  padding: 4px 0;
+}
+
+.roofline-precision-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 5px 10px;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--roofline-text);
+  cursor: pointer;
+  user-select: none;
+}
+
+.roofline-precision-item:hover {
+  background: var(--roofline-bg-soft);
+}
+
+.roofline-precision-item input[type="checkbox"] {
+  accent-color: var(--roofline-accent);
+  cursor: pointer;
+}
+
 @media (max-width: 900px) {
   .roofline-body {
     flex-direction: column;

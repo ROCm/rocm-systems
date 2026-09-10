@@ -46,6 +46,15 @@ _FLAG_TO_FRAMEWORKS: dict[str, tuple[str, ...]] = {
     "ml_api_trace": KNOWN_ML_API_BACKENDS,
 }
 
+# Only the specs classes that can be power-gated carry a perf_level, so seeing
+# AUTO here is enough to warn.
+_PMC_POWER_GATING_WARNING = (
+    "AUTO performance level can gate the perfmon clock, so counters such as "
+    "TCP_REQ may report zero even when the kernel issues global memory traffic. "
+    "See: https://rocm.docs.amd.com/projects/rocprofiler-sdk/en/latest/"
+    "how-to/using-rocprofv3.html#setting-gpu-performance-level-for-pmc-profiling"
+)
+
 
 def _partition_warning_messages(mspec: MachineSpecs) -> list[str]:
     """Return notices on how active partition modes shape analysis metrics."""
@@ -112,9 +121,9 @@ def _prepare_ml_api_trace_injection(
     """Insert the inject_roctx launcher into the workload command.
 
     Modifies the ``remaining`` command list in place. The launcher is run by
-    absolute path, with the selected frameworks passed as ``--frameworks
-    <names>`` followed by ``--`` and the workload command. The rewrite depends
-    on the workload type:
+    absolute path, with the selected frameworks passed as ``--frameworks``
+    followed by each framework name, then ``--`` and the workload command. The
+    rewrite depends on the workload type:
       1. Python interpreter — insert the launcher before the script.
       2. Direct .py script  — prepend ``sys.executable`` and the launcher.
       3. Other executables  — leave the command unchanged and emit a warning.
@@ -131,7 +140,7 @@ def _prepare_ml_api_trace_injection(
     launcher = [
         str(launch_script),
         "--frameworks",
-        ",".join(sorted(frameworks)),
+        *sorted(frameworks),
         "--",
     ]
 
@@ -315,6 +324,9 @@ class RocProfCompute_Base:
             args.remaining = ""
 
         self._filter_blocks = self._soc.profiling_setup()
+        # --set and --roof-only resolve to block ids here, so store them back on
+        # the args every later stage reads.
+        self.__args.filter_blocks = self._filter_blocks
 
         # Write profiling configuration as yaml file
         with open(
@@ -323,8 +335,6 @@ class RocProfCompute_Base:
             encoding="utf-8",
         ) as f:
             args_dict = dict(vars(self.__args))
-            # Override filter_blocks when writing profiling config yaml
-            args_dict["filter_blocks"] = self._filter_blocks
             args_dict["config_dir"] = str(args_dict["config_dir"])
             args_dict["format_rocprof_output"] = PROFILE_OUTPUT_FORMAT
             yaml.dump(args_dict, f)
@@ -346,6 +356,10 @@ class RocProfCompute_Base:
 
         for message in _partition_warning_messages(self._soc._mspec):
             console_warning(message)
+
+        perf_level = getattr(self._soc._mspec, "perf_level", None)
+        if perf_level and perf_level.upper().endswith("AUTO"):
+            console_warning(_PMC_POWER_GATING_WARNING)
 
     def profile(
         self,
@@ -566,7 +580,7 @@ class RocProfCompute_Base:
             ):
                 compute_root_path = Path(__file__).resolve().parents[1]
                 native_tool_finder = NativeToolFinder(compute_root_path)
-                return str(native_tool_finder.get_collector_library_path())
+                return str(native_tool_finder.get_artifact_path())
             return None
         except Exception:
             console_error(

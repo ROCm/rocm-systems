@@ -27,37 +27,16 @@ enum class IoType;
 
 using namespace hipFile;
 
-static void
-hipHostDeleter(void *buffer)
-{
-    try {
-        Context<Hip>::get()->hipHostFree(buffer);
-    }
-    catch (...) {
-        Context<Sys>::get()->syslog(LOG_CRIT, "Error freeing pinned host memory.");
-    }
-}
-
 AsyncOpFallback::AsyncOpFallback(IoType _io_type, std::shared_ptr<IFile> _file,
                                  std::shared_ptr<IBuffer> _buffer, std::shared_ptr<IStream> _stream,
                                  size_t *_size, hoff_t *_file_offset, hoff_t *_buffer_offset,
                                  ssize_t *_bytes_transferred)
     : AsyncOp{_io_type, std::move(_file), std::move(_buffer), std::move(_stream),
               _size,    _file_offset,     _buffer_offset,     _bytes_transferred},
-      submitted_size{std::min(*_size, hipFile::getMaxRwCount())}, gpu_buffer{buffer->getBuffer()},
-      bounce_buffer_dev_ptr{nullptr}, bounce_buffer{nullptr, [](void *addr) { (void)addr; }}
+      submitted_size{std::min(*_size, hipFile::getMaxRwCount())}, chunk_bytes_copied{},
+      gpu_buffer{buffer->getBuffer()}, bounce_buffer_host_ptr{stream->asyncBufferHostPtr()},
+      bounce_buffer_dev_ptr{stream->asyncBufferDevPtr()}, bounce_buffer_size{stream->asyncBufferSize()}
 {
-    void *host_ptr = Context<Hip>::get()->hipHostMalloc(submitted_size, 0);
-    std::unique_ptr<void, decltype(&hipHostDeleter)> _bounce_buffer{host_ptr, hipHostDeleter};
-    std::swap(bounce_buffer, _bounce_buffer);
-    void *dev_ptr         = Context<Hip>::get()->hipHostGetDevicePointer(bounce_buffer.get(), 0);
-    bounce_buffer_dev_ptr = dev_ptr;
-}
-
-void *
-AsyncOpFallback::bounceBufferHostPtr()
-{
-    return bounce_buffer.get();
 }
 
 void *

@@ -172,10 +172,6 @@ def test_pc_sampling_stochastic(binary_handler_profile_rocprof_compute, monkeypa
 
 
 @pytest.mark.parametrize("sampling_method", ["host_trap", "stochastic"])
-@pytest.mark.skip(
-    reason="ROCM-28219: rocprofiler-sdk aborts in get_host_symbols() with a "
-    "second code-object client, which hangs the profiler instead of failing"
-)
 def test_multiprocess_pc_sampling_distinct_code_objects(
     binary_handler_profile_rocprof_compute,
     binary_handler_analyze_rocprof_compute,

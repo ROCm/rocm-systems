@@ -698,6 +698,50 @@ def test_pre_processing_persists_membw_analysis_config(
     assert profiling_config["filter_blocks"] == effective_filter_blocks
 
 
+@pytest.mark.parametrize(
+    "perf_level, expect_warning",
+    [
+        pytest.param("AUTO", True, id="auto"),
+        pytest.param("AmdSmiDevPerfLevel.AUTO", True, id="enum_repr"),
+        pytest.param("STABLE_STD", False, id="stable_std"),
+        pytest.param("AmdSmiDevPerfLevel.STABLE_PEAK", False, id="stable_peak"),
+        pytest.param(None, False, id="unreadable_or_unaffected_arch"),
+    ],
+)
+def test_pre_processing_pmc_power_gating_warning(
+    tmp_path: Path, perf_level, expect_warning
+) -> None:
+    """Warn about perfmon gating only when the GPU profiled at AUTO."""
+    profiling_args = argparse.Namespace(
+        attach_pid=None,
+        config_dir=tmp_path / "analysis_configs",
+        experimental=True,
+        filter_blocks=[],
+        membw_analysis=False,
+        no_roof=True,
+        output_directory=str(tmp_path),
+        remaining="./app",
+    )
+    mock_soc = Mock()
+    mock_soc._mspec = SimpleNamespace(perf_level=perf_level)
+    mock_soc.profiling_setup.return_value = []
+    mock_soc.get_compatible_profilers.return_value = ["rocprofv3"]
+    profiler = rocprof_v3_profiler(
+        profiling_args,
+        profiler_mode="rocprofv3",
+        soc=mock_soc,
+    )
+
+    with patch("rocprof_compute_profile.profiler_base.gen_sysinfo"), patch(
+        "rocprof_compute_profile.profiler_base.console_warning"
+    ) as warning_mock:
+        profiler.pre_processing()
+
+    warnings = [str(call.args[0]) for call in warning_mock.call_args_list]
+    gating_warnings = [message for message in warnings if "TCP_REQ" in message]
+    assert bool(gating_warnings) is expect_warning
+
+
 # ---------------------------------------------------------------------------
 # run_profiling(): PC sampling gating / increment / delegation
 # ---------------------------------------------------------------------------
@@ -970,9 +1014,9 @@ def _make_sdk_run_profiling_profiler(
     mock_finder_cls = Mock()
     finder_instance = mock_finder_cls.return_value
     if native_finder_raises:
-        finder_instance.get_collector_library_path.side_effect = RuntimeError("boom")
+        finder_instance.get_artifact_path.side_effect = RuntimeError("boom")
     else:
-        finder_instance.get_collector_library_path.return_value = "/n/native.so"
+        finder_instance.get_artifact_path.return_value = "/n/native.so"
 
     mock_profile = Mock(return_value=0.0)
 

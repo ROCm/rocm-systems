@@ -11,18 +11,20 @@ The core ROCm Compute Profiler application requires the following basic software
 dependencies. As of ROCm 6.2, the core ROCm Compute Profiler is included with your ROCm
 installation.
 
-* Python ``>= 3.8``
+* Python (see the Python version support table in :doc:`/install/quickstart`)
 * CMake ``>= 3.19``
 * ROCm ``>= 5.7.1``
 
 .. note::
 
    ROCm Compute Profiler will use the first version of ``python3`` found in your system's
-   ``PATH``. If the default version of Python is older than 3.8, you may need to
-   update your system's ``PATH`` to point to a newer version.
+   ``PATH``. If that version is too old for the mode you want to run, update your
+   system's ``PATH`` to point to a newer version.
 
-ROCm Compute Profiler depends on a number of Python packages documented in the top-level
-``requirements.txt`` file. Install these *before* configuring ROCm Compute Profiler.
+Analyze mode depends on a number of Python packages documented in the top-level
+``requirements.txt`` file. Profile mode uses only the standard library and needs
+none of them. Install these *before* configuring ROCm Compute Profiler, into a
+virtual environment separate from the one your profiled application uses.
 
 .. tip::
 
@@ -36,9 +38,6 @@ ROCm Compute Profiler depends on a number of Python packages documented in the t
 
        * - ``requirements-test.txt``
          - Python packages required to run ROCm Compute Profiler's CI suite using PyTest.
-
-   When building with ``ENABLE_TESTS=ON``, ``TORCH_TRACE_PYTHON`` selects the Python
-   interpreter for the ``roctx_recordfn`` test build.
 
 The recommended procedure for ROCm Compute Profiler usage is to install into a shared file
 system so that multiple users can access the final installation. The

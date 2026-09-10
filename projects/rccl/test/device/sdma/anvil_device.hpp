@@ -3,8 +3,7 @@
 
 #include "sdma_opcodes.h"
 
-namespace gin_anvil {
-namespace sdma {
+namespace sdma_anvil {
 
 struct SdmaQueueDeviceHandle {
   int tag;
@@ -35,5 +34,4 @@ __device__ __forceinline__ void putSignal(SdmaQueueDeviceHandle& handle, void* d
 
 __device__ __forceinline__ void quiet(SdmaQueueDeviceHandle& handle) { (void)handle; }
 
-}  // namespace sdma
-}  // namespace gin_anvil
+}  // namespace sdma_anvil
