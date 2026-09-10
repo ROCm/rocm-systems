@@ -8,8 +8,10 @@
 #include <cerrno>
 #include <cstdio>
 #include <cstdlib>
+#include <fstream>
 #include <initializer_list>
 #include <limits>
+#include <string>
 #include <utility>
 
 namespace rocjitsu::consan_hook {
@@ -64,32 +66,78 @@ struct BoolEnvBinding {
   });
 }
 
+[[nodiscard]] bool append_kernel_allowlist_name(std::string_view item, const char *source,
+                                                std::vector<std::string> *out) {
+  while (!item.empty() && std::isspace(static_cast<unsigned char>(item.front())))
+    item.remove_prefix(1);
+  while (!item.empty() && std::isspace(static_cast<unsigned char>(item.back())))
+    item.remove_suffix(1);
+  if (item.empty()) {
+    std::fprintf(stderr, "[rocjitsu-dbi-hooks] invalid %s; expected nonempty exact kernel names\n",
+                 source);
+    return false;
+  }
+  std::string normalized(item);
+  if (normalized.ends_with(".kd"))
+    normalized.resize(normalized.size() - 3u);
+  if (std::ranges::find(*out, normalized) == out->end())
+    out->push_back(std::move(normalized));
+  return true;
+}
+
 [[nodiscard]] bool parse_kernel_allowlist_env(std::vector<std::string> *out) {
   out->clear();
   const char *value = std::getenv("RJ_CONSAN_KERNEL_ALLOWLIST");
-  if (value == nullptr || *value == '\0')
+  const char *file_path = std::getenv("RJ_CONSAN_KERNEL_ALLOWLIST_FILE");
+  const bool has_value = value != nullptr && *value != '\0';
+  const bool has_file = file_path != nullptr && *file_path != '\0';
+  if (has_value && has_file) {
+    std::fprintf(stderr, "[rocjitsu-dbi-hooks] RJ_CONSAN_KERNEL_ALLOWLIST and "
+                         "RJ_CONSAN_KERNEL_ALLOWLIST_FILE are mutually exclusive\n");
+    return false;
+  }
+  if (has_file) {
+    std::ifstream input(file_path);
+    if (!input) {
+      std::fprintf(stderr,
+                   "[rocjitsu-dbi-hooks] could not read "
+                   "RJ_CONSAN_KERNEL_ALLOWLIST_FILE='%s'\n",
+                   file_path);
+      return false;
+    }
+    std::string line;
+    size_t line_number = 0;
+    while (std::getline(input, line)) {
+      ++line_number;
+      if (!line.empty() && line.back() == '\r')
+        line.pop_back();
+      const std::string source = "RJ_CONSAN_KERNEL_ALLOWLIST_FILE='" + std::string(file_path) +
+                                 "' line " + std::to_string(line_number);
+      if (!append_kernel_allowlist_name(line, source.c_str(), out)) {
+        out->clear();
+        return false;
+      }
+    }
+    if (!input.eof() || out->empty()) {
+      std::fprintf(stderr,
+                   "[rocjitsu-dbi-hooks] invalid RJ_CONSAN_KERNEL_ALLOWLIST_FILE='%s'; "
+                   "expected one exact kernel name per line\n",
+                   file_path);
+      out->clear();
+      return false;
+    }
+    return true;
+  }
+  if (!has_value)
     return true;
   std::string_view remaining(value);
   while (!remaining.empty()) {
     const size_t comma = remaining.find(',');
-    std::string_view item = remaining.substr(0, comma);
-    while (!item.empty() && std::isspace(static_cast<unsigned char>(item.front())))
-      item.remove_prefix(1);
-    while (!item.empty() && std::isspace(static_cast<unsigned char>(item.back())))
-      item.remove_suffix(1);
-    if (item.empty()) {
-      std::fprintf(stderr,
-                   "[rocjitsu-dbi-hooks] invalid RJ_CONSAN_KERNEL_ALLOWLIST='%s'; "
-                   "expected comma-separated nonempty exact kernel names\n",
-                   value);
+    const std::string_view item = remaining.substr(0, comma);
+    if (!append_kernel_allowlist_name(item, "RJ_CONSAN_KERNEL_ALLOWLIST", out)) {
       out->clear();
       return false;
     }
-    std::string normalized(item);
-    if (normalized.ends_with(".kd"))
-      normalized.resize(normalized.size() - 3u);
-    if (std::ranges::find(*out, normalized) == out->end())
-      out->push_back(std::move(normalized));
     if (comma == std::string_view::npos)
       break;
     remaining.remove_prefix(comma + 1u);

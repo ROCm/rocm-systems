@@ -42,6 +42,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <exception>
+#include <iterator>
 #include <limits>
 #include <memory>
 #include <mutex>
@@ -218,6 +219,12 @@ hsa_status_t HSA_API collect_runtime_capability_region(hsa_region_t region, void
 
 enum class WaitcheckPreflightOutcome { NotApplicable, Passed, HazardReported, AnalysisFailed };
 
+[[nodiscard]] std::string_view normalized_kernel_name(std::string_view name) {
+  if (name.ends_with(".kd"))
+    name.remove_suffix(3);
+  return name;
+}
+
 void print_waitcheck_issue(uint64_t reader, const rocjitsu::AmdGpuCodeObject &code_object,
                            const rocjitsu::WaitcheckReport &report) {
   std::lock_guard lock(log_mutex());
@@ -269,8 +276,9 @@ void print_waitcheck_exception(uint64_t reader, const std::exception *error) {
   std::fprintf(stderr, "\n");
 }
 
-[[nodiscard]] WaitcheckPreflightOutcome run_waitcheck_preflight(std::span<const uint8_t> bytes,
-                                                                uint64_t reader) {
+[[nodiscard]] WaitcheckPreflightOutcome
+run_waitcheck_preflight(std::span<const uint8_t> bytes, uint64_t reader,
+                        std::span<const std::string> kernel_name_allowlist = {}) {
   bool recognized_code_object = false;
   try {
     rocjitsu::AmdGpuCodeObject code_object(bytes.data(), bytes.size());
@@ -294,7 +302,32 @@ void print_waitcheck_exception(uint64_t reader, const std::exception *error) {
 
     rocjitsu::WaitcheckOptions options;
     options.max_diagnostics = 32;
-    const rocjitsu::WaitcheckReport report = rocjitsu::analyze_waitcnts(code_object, arch, options);
+    size_t kernels_discovered = 0;
+    rocjitsu::WaitcheckReport report;
+    if (kernel_name_allowlist.empty()) {
+      report = rocjitsu::analyze_waitcnts(code_object, arch, options);
+      kernels_discovered = report.kernels_discovered;
+    } else {
+      const std::vector<rocjitsu::WaitcheckKernelInfo> kernels =
+          rocjitsu::waitcheck_kernels(code_object);
+      kernels_discovered = kernels.size();
+      std::vector<rocjitsu::WaitcheckKernelInfo> selected_kernels;
+      std::ranges::copy_if(kernels, std::back_inserter(selected_kernels), [&](const auto &kernel) {
+        const std::string_view name = normalized_kernel_name(kernel.name);
+        return std::ranges::any_of(kernel_name_allowlist, [&](const std::string &allowlisted) {
+          return name == normalized_kernel_name(allowlisted);
+        });
+      });
+
+      // Kernel-name indexing and waitcheck descriptor discovery intentionally
+      // use independent ELF readers. Preserve the conservative full-object
+      // preflight if their views ever disagree instead of silently skipping it.
+      report = selected_kernels.empty() ? rocjitsu::analyze_waitcnts(code_object, arch, options)
+                                        : rocjitsu::analyze_waitcnts_for_kernels(
+                                              code_object, arch, selected_kernels, options);
+      if (selected_kernels.empty())
+        kernels_discovered = report.kernels_discovered;
+    }
     if (!report.supported) {
       print_waitcheck_issue(reader, code_object, report);
       return WaitcheckPreflightOutcome::AnalysisFailed;
@@ -309,7 +342,7 @@ void print_waitcheck_exception(uint64_t reader, const std::exception *error) {
                 "memory_events=%zu kernels=%zu/%zu",
                 static_cast<unsigned long long>(reader),
                 rj_code_target_name(code_object.target_id()), report.instructions_analyzed,
-                report.memory_events_tracked, report.kernels_analyzed, report.kernels_discovered);
+                report.memory_events_tracked, report.kernels_analyzed, kernels_discovered);
     return WaitcheckPreflightOutcome::Passed;
   } catch (const std::exception &error) {
     if (!recognized_code_object) {
@@ -2111,9 +2144,8 @@ public:
                                               : "fault-drop-barrier")
         : config.probe_lds_check_trap && config.probe_flat_check_trap ? "proof-check-trap-all"
         : config.probe_lds_check_trap                                 ? "proof-lds-check-trap"
-        : config.probe_flat_check_trap
-            ? "proof-flat-check-trap"
-            : "pass-through");
+        : config.probe_flat_check_trap                                ? "proof-flat-check-trap"
+                                                                      : "pass-through");
     if (config.fault_allow_destructive_incomplete_barrier_drop) {
       log_message(kLogInfo, "ConSan destructive control incomplete_barrier_drop=true "
                             "containment=external-runner-required");
@@ -3331,7 +3363,8 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
                            std::span<const uint8_t>(bytes, size));
 
     const auto waitcheck_begin = std::chrono::steady_clock::now();
-    (void)run_waitcheck_preflight(std::span<const uint8_t>(bytes, size), code_object_reader.handle);
+    (void)run_waitcheck_preflight(std::span<const uint8_t>(bytes, size), code_object_reader.handle,
+                                  config->kernel_name_allowlist);
     log_message(kLogInfo, "ConSan waitcheck timing reader=%llu elapsed_ms=%.3f",
                 static_cast<unsigned long long>(code_object_reader.handle),
                 std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() -
@@ -4611,8 +4644,7 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
           patch.persistent_epoch_private_offset
               ? std::to_string(*patch.persistent_epoch_private_offset)
               : "-";
-      const auto *scalar_vcc_spill =
-          patch.scalar_vcc_spill ? &*patch.scalar_vcc_spill : nullptr;
+      const auto *scalar_vcc_spill = patch.scalar_vcc_spill ? &*patch.scalar_vcc_spill : nullptr;
       const std::string scalar_vcc_spill_vgpr =
           scalar_vcc_spill ? std::to_string(scalar_vcc_spill->reservoir_vgpr) : "-";
       const std::string scalar_vcc_spill_sgpr =

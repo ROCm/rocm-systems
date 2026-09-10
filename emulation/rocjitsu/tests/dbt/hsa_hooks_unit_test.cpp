@@ -4055,6 +4055,32 @@ TEST(HsaHooksUnitTest, ConSanParsesAndNormalizesExactKernelAllowlist) {
             (std::vector<std::string>{"selected_kernel", "second_kernel"}));
 }
 
+TEST(HsaHooksUnitTest, ConSanParsesExactKernelAllowlistFileWithoutCommaAmbiguity) {
+  reset_code_object_observations();
+  configure_consan_profile(kConSanHookProfiles[1], false);
+  rocjitsu::test::ScopedTempFile names("rocjitsu-consan-kernel-allowlist-");
+  names.write("void templated_kernel<int, float>(int).kd\nsecond_kernel.kd\n");
+  ScopedEnvVar inline_allowlist("RJ_CONSAN_KERNEL_ALLOWLIST", nullptr);
+  ScopedEnvVar allowlist_file("RJ_CONSAN_KERNEL_ALLOWLIST_FILE", names.path().c_str());
+  g_transform_override_result.outcome = rocjitsu::ConSanTransformOutcome::Unchanged;
+
+  FakeApiTable api;
+  InstalledDbiHook hook(api);
+  ASSERT_TRUE(hook.installed()) << hook.error();
+
+  constexpr std::array<uint8_t, 8> original = {0x7f, 'E', 'L', 'F', 1, 2, 3, 4};
+  hsa_code_object_reader_t reader{};
+  ASSERT_EQ(api.core.hsa_code_object_reader_create_from_memory_fn(original.data(), original.size(),
+                                                                  &reader),
+            HSA_STATUS_SUCCESS);
+  ASSERT_EQ(api.core.hsa_executable_load_agent_code_object_fn(hsa_executable_t{7}, kHostAgent,
+                                                              reader, nullptr, nullptr),
+            HSA_STATUS_SUCCESS);
+  ASSERT_EQ(g_transform_override_kernel_allowlists.size(), 1u);
+  EXPECT_EQ(g_transform_override_kernel_allowlists.front(),
+            (std::vector<std::string>{"void templated_kernel<int, float>(int)", "second_kernel"}));
+}
+
 TEST(HsaHooksUnitTest, ConSanAllowlistSkipsUnmatchedObjectBeforeWaitcheckAndTransform) {
   ScopedEnvVar log_level("RJ_CONSAN_LOG", "1");
   ScopedEnvVar allowlist("RJ_CONSAN_KERNEL_ALLOWLIST", "selected_kernel");
@@ -4099,9 +4125,15 @@ TEST(HsaHooksUnitTest, ConSanAllowlistRetainsMatchedObjectWaitcheckAndTransform)
   InstalledDbiHook hook(api);
   ASSERT_TRUE(hook.installed()) << hook.error();
 
+  std::vector<uint32_t> hazardous_unrelated_kernel;
+  rocjitsu::waitcheck_test::append_inst(hazardous_unrelated_kernel,
+                                        rocjitsu::waitcheck_test::global_load_b32(0));
+  rocjitsu::waitcheck_test::append_inst(hazardous_unrelated_kernel,
+                                        rocjitsu::waitcheck_test::v_mov_b32(1, 0));
   const std::vector<uint8_t> original =
       rocjitsu::waitcheck_test::make_gfx1201_multi_kernel_code_object(
-          {{"selected_kernel", {0xBFB00000u}}, {"unrelated_kernel", {0xBFB00000u}}});
+          {{"selected_kernel", {0xBFB00000u}},
+           {"hazardous_unrelated_kernel", hazardous_unrelated_kernel}});
   hsa_code_object_reader_t reader{};
   ASSERT_EQ(api.core.hsa_code_object_reader_create_from_memory_fn(original.data(), original.size(),
                                                                   &reader),
@@ -4119,6 +4151,9 @@ TEST(HsaHooksUnitTest, ConSanAllowlistRetainsMatchedObjectWaitcheckAndTransform)
             std::vector<std::string>{"selected_kernel"});
   EXPECT_EQ(g_loaded_code_object_readers, std::vector<uint64_t>{reader.handle});
   EXPECT_EQ(log.find("outcome=skipped reason=no-matching-entry"), std::string::npos) << log;
+  EXPECT_NE(log.find("outcome=passed"), std::string::npos) << log;
+  EXPECT_NE(log.find("kernels=1/2"), std::string::npos) << log;
+  EXPECT_EQ(log.find("reason=wait-hazard"), std::string::npos) << log;
   EXPECT_NE(log.find("ConSan waitcheck timing"), std::string::npos) << log;
   EXPECT_NE(log.find("ConSan patch begin"), std::string::npos) << log;
 }

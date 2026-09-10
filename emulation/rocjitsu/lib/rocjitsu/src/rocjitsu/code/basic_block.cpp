@@ -20,6 +20,7 @@
 #include <optional>
 #include <set>
 #include <span>
+#include <string>
 #include <string_view>
 #include <unordered_map>
 #include <unordered_set>
@@ -42,6 +43,13 @@ bool has_no_static_successor(const Instruction &inst) {
 
 bool is_unconditional_branch(const Instruction &inst) {
   return (inst.flags() & BRANCH) && !(inst.flags() & COND_BRANCH);
+}
+
+bool uses_zero_filled_text_padding(rj_code_arch_t arch) {
+  // Zero is not an instruction in these ISAs. Both toolchains use zero-filled
+  // alignment after bodies whose symbol-derived range extends to the next
+  // aligned body.
+  return arch == ROCJITSU_CODE_ARCH_RDNA4 || arch == ROCJITSU_CODE_ARCH_CDNA5;
 }
 
 uint32_t first_word(const Instruction &inst) {
@@ -153,10 +161,13 @@ std::vector<std::unique_ptr<BasicBlock>> BasicBlock::build(const CodeObject &co,
                                                            std::span<const uint64_t> extra_leaders,
                                                            ExternalEntryPolicy entry_policy,
                                                            std::span<const CodeRange> code_ranges) {
-  auto result = build_impl(co, decoder, arch, DecodeErrorEmitter{}, extra_leaders, entry_policy, {},
-                           code_ranges, {});
-  if (result.failed())
-    throw util::InvalidInst("instruction decode failed", "Invalid CFG: ");
+  util::StringDiagnostic decode_error;
+  auto result = build_impl(co, decoder, arch, decode_error.emitter(), extra_leaders, entry_policy,
+                           {}, code_ranges, {});
+  if (result.failed()) {
+    const std::string &detail = decode_error.message();
+    throw util::InvalidInst(detail.empty() ? "instruction decode failed" : detail, "Invalid CFG: ");
+  }
   return std::move(result).value();
 }
 
@@ -216,9 +227,10 @@ FailureOr<std::vector<std::unique_ptr<BasicBlock>>> BasicBlock::build_impl(
       const uint64_t range_end = range.start_offset + range.size;
       while (byte_offset < range_end) {
         const size_t pc = static_cast<size_t>(byte_offset / sizeof(uint32_t));
-        // gfx1250 code objects place zero-filled alignment holes between function
-        // bodies. Zero is not an instruction, so skip it before decoding.
-        if (arch == ROCJITSU_CODE_ARCH_CDNA5 && inst_data[pc] == 0) {
+        // Some code objects place zero-filled alignment holes between function
+        // bodies. Zero is not an instruction on these architectures, so skip it
+        // before decoding.
+        if (uses_zero_filled_text_padding(arch) && inst_data[pc] == 0) {
           byte_offset += sizeof(uint32_t);
           continue;
         }
@@ -363,16 +375,16 @@ FailureOr<std::vector<std::unique_ptr<BasicBlock>>> BasicBlock::build_impl(
         const bool can_fall_through = !is_program_path_terminator(last) &&
                                       !is_unconditional_branch(last) &&
                                       (last.flags() & INDIRECT_BRANCH) == 0;
-        const bool reaches_gfx1250_zero = decode_gap && arch == ROCJITSU_CODE_ARCH_CDNA5 &&
+        const bool reaches_zero_padding = decode_gap && uses_zero_filled_text_padding(arch) &&
                                           next_offset < section_end &&
                                           inst_data[next_offset / sizeof(uint32_t)] == 0;
         // Running off the end of `.text` is the same boundary as running into padding: there is no
         // next instruction either way. Requiring padding to be present would make the result
         // depend on whether the linker happened to align the section, so an unterminated tail
         // would be translated verbatim in one build and given a terminator in the next.
-        const bool reaches_section_end =
-            arch == ROCJITSU_CODE_ARCH_CDNA5 && i >= decoded.size() && next_offset >= section_end;
-        if (can_fall_through && (reaches_gfx1250_zero || reaches_section_end)) {
+        const bool reaches_section_end = uses_zero_filled_text_padding(arch) &&
+                                         i >= decoded.size() && next_offset >= section_end;
+        if (can_fall_through && (reaches_zero_padding || reaches_section_end)) {
           current->has_terminator_ = true;
           current->has_implicit_terminator_ = true;
         }
