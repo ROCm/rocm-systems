@@ -529,6 +529,7 @@ TEST(KernelSymbolTest, MatchesExactElfAndProfilerSpellings) {
                                         "void racy_kernel(float const*, float*) [clone .kd]"));
   EXPECT_FALSE(kernel_symbol_names_match(mangled, "racy_kernel(float*, float*)"));
   EXPECT_FALSE(kernel_symbol_names_match(mangled, "racy_kernel"));
+  EXPECT_EQ(kernel_symbol_match_key(mangled), kernel_symbol_match_key(demangled));
 }
 
 TEST(KernelSymbolTest, DisplayNameIsHeaderSafe) {

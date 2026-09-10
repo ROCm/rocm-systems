@@ -196,17 +196,18 @@ std::string demangle_kernel_symbol(std::string_view symbol) {
   return std::string(demangled.get());
 }
 
+std::string kernel_symbol_match_key(std::string_view symbol) {
+  if (symbol.ends_with(" [clone .kd]"))
+    symbol.remove_suffix(std::string_view(" [clone .kd]").size());
+  if (symbol.ends_with(".kd"))
+    symbol.remove_suffix(3);
+  if (symbol.starts_with("void "))
+    symbol.remove_prefix(5);
+  return demangle_kernel_symbol(symbol);
+}
+
 bool kernel_symbol_names_match(std::string_view left, std::string_view right) {
-  const auto canonical = [](std::string_view name) {
-    if (name.ends_with(" [clone .kd]"))
-      name.remove_suffix(std::string_view(" [clone .kd]").size());
-    if (name.ends_with(".kd"))
-      name.remove_suffix(3);
-    if (name.starts_with("void "))
-      name.remove_prefix(5);
-    return demangle_kernel_symbol(name);
-  };
-  return canonical(left) == canonical(right);
+  return kernel_symbol_match_key(left) == kernel_symbol_match_key(right);
 }
 
 std::string kernel_display_name(std::string_view symbol) {

@@ -122,6 +122,11 @@ KernelNameIndexMatch match_kernel_name_index(std::span<const uint8_t> image,
     return value;
   };
 
+  std::unordered_set<std::string> expected_keys;
+  expected_keys.reserve(exact_kernel_names.size());
+  for (const std::string &expected : exact_kernel_names)
+    expected_keys.insert(kernel_symbol_match_key(expected));
+
   bool indeterminate = false;
   for (size_t section_index = 0; section_index < header.e_shnum; ++section_index) {
     const Elf64_Shdr symbols = *section(section_index);
@@ -160,9 +165,7 @@ KernelNameIndexMatch match_kernel_name_index(std::span<const uint8_t> image,
       if (!name.ends_with(".kd"))
         continue;
       name.remove_suffix(3);
-      if (std::ranges::any_of(exact_kernel_names, [&](const std::string &expected) {
-            return kernel_symbol_names_match(name, expected);
-          })) {
+      if (expected_keys.contains(kernel_symbol_match_key(name))) {
         return KernelNameIndexMatch::Matched;
       }
     }

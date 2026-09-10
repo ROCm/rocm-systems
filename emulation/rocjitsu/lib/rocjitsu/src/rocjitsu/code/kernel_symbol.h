@@ -31,6 +31,14 @@ std::string find_kernel_symbol(const uint8_t *kernel_object_ptr, const uint8_t *
 /// the original symbol otherwise.
 std::string demangle_kernel_symbol(std::string_view symbol);
 
+/// Return the exact identity key shared by ELF and profiler spellings.
+///
+/// This preserves the complete demangled argument list while removing only
+/// AMDHSA/profiler presentation decorations. Callers matching a collection
+/// should compute each key once rather than repeatedly demangling a Cartesian
+/// product of names.
+std::string kernel_symbol_match_key(std::string_view symbol);
+
 /// Compare exact kernel identities across ELF and profiler spellings.
 ///
 /// ELF metadata normally uses an Itanium ABI symbol while dispatch profilers

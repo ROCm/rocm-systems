@@ -3322,6 +3322,9 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
     const uint8_t *bytes = reader_bytes.bytes;
     const size_t size = reader_bytes.size;
     if (!config->kernel_name_allowlist.empty()) {
+      log_message(kLogInfo,
+                  "ConSan kernel allowlist prefilter reader=%llu bytes=%zu outcome=begin",
+                  static_cast<unsigned long long>(code_object_reader.handle), size);
       const rocjitsu::KernelNameIndexMatch match = rocjitsu::match_kernel_name_index(
           std::span<const uint8_t>(bytes, size), config->kernel_name_allowlist);
       if (match == rocjitsu::KernelNameIndexMatch::NoMatch) {
