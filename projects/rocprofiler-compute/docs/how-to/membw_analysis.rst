@@ -19,7 +19,7 @@ Memory bandwidth analysis identifies bottlenecks in the GPU memory
 subsystem. It evaluates stall metrics collected from the
 :doc:`L1 cache (GL1) </conceptual/cdna/vector-l1-cache>`,
 :doc:`L2 cache (GL2) </conceptual/cdna/l2-cache>`, and Efficiency
-Arbiter (EA) levels, then reports which components are under pressure
+Arbiter (EA) levels, and then reports which components are under pressure
 and why.
 
 When bottlenecks are detected, the analysis overlays stall annotations
