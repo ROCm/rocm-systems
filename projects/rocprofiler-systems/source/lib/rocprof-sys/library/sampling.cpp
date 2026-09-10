@@ -59,6 +59,7 @@
 
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <csignal>
 #include <cstring>
 #include <ctime>
@@ -477,7 +478,7 @@ get_sampler_running(std::int64_t _tid)
 // Hoisted ahead of configure() so the new-sampler guard can consult it.
 // pause_intervals / pause_mutex / pending_pause_ts stay near the pause/resume
 // implementation below since only those touch them.
-auto sampling_paused = std::atomic<bool>{ false };
+auto g_sampling_paused = std::atomic<bool>{ false };
 
 auto&
 get_offload_file()
@@ -664,7 +665,10 @@ configure(bool _setup, std::int64_t _tid)
 
     if(_setup && !_sampler && !_is_running && !_signal_types->empty())
     {
-        if(sampling_paused.load(std::memory_order_relaxed)) return std::set<int>{};
+        if(g_sampling_paused.load(std::memory_order_relaxed))
+        {
+            return std::set<int>{};
+        }
 
         // if this thread has an offset ID, that means it was created internally
         // and is probably here bc it called a function which was instrumented.
@@ -1032,14 +1036,21 @@ set_sampler_timers(timer_state state)
 {
     for(std::int64_t i = 0; i < ROCPROFSYS_MAX_THREADS; ++i)
     {
-        auto& _sampler = get_sampler(i);
-        auto& _running = get_sampler_running(i);
-        if(!_sampler || !_running || !*_running) continue;
+        auto&       sampler = get_sampler(i);
+        const auto& running = get_sampler_running(i);
+        if(!sampler || !running || !*running)
+        {
+            continue;
+        }
 
         if(state == timer_state::running)
-            _sampler->start();
+        {
+            sampler->start();
+        }
         else
-            _sampler->stop();
+        {
+            sampler->stop();
+        }
     }
 }
 
@@ -1915,7 +1926,7 @@ void
 pause()
 {
     bool _expected = false;
-    if(!sampling_paused.compare_exchange_strong(_expected, true))
+    if(!g_sampling_paused.compare_exchange_strong(_expected, true))
     {
         LOG_WARNING("sampling::pause() called but sampling is already paused");
         return;
@@ -1931,7 +1942,7 @@ void
 resume()
 {
     bool _expected = true;
-    if(!sampling_paused.compare_exchange_strong(_expected, false))
+    if(!g_sampling_paused.compare_exchange_strong(_expected, false))
     {
         LOG_WARNING("sampling::resume() called but sampling is not paused");
         return;
