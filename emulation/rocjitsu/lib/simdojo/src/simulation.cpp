@@ -638,6 +638,14 @@ void SimulationEngine::schedule_event(Event *event, Tick timestamp,
   contexts_[pid]->event_queue.push(EventQueueEntry{timestamp, 0, event, std::move(message)});
 }
 
+bool SimulationEngine::deschedule(Event *event, Tick timestamp) {
+  Component *target = event->target();
+  assert(target != nullptr && "deschedule: event has no target component");
+  PartitionID pid = target->partition_id();
+  assert(pid < contexts_.size() && "deschedule: target partition ID out of range");
+  return contexts_[pid]->event_queue.remove(event, timestamp);
+}
+
 void SimulationEngine::send_cross_partition(PartitionID src_partition, PartitionID dst_partition,
                                             Event *event, Tick timestamp,
                                             std::unique_ptr<Message> message) {

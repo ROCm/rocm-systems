@@ -135,6 +135,28 @@ public:
     return entry;
   }
 
+  /// @brief Remove the entry for @p event at @p timestamp, if one is queued.
+  ///
+  /// @details Linear in the queue size, and meant for the uncommon case of a
+  /// component taking back an event it scheduled -- a clock armed for a later
+  /// edge that is needed sooner. An event may have several entries queued;
+  /// only the first one found at @p timestamp is removed.
+  /// @param event The event whose entry to remove.
+  /// @param timestamp The tick that entry was scheduled for.
+  /// @retval true An entry was found and removed.
+  /// @retval false No entry for @p event is queued at @p timestamp.
+  bool remove(const Event *event, Tick timestamp) {
+    auto it = std::find_if(entries_.begin(), entries_.end(), [&](const EventQueueEntry &entry) {
+      return entry.event == event && entry.timestamp == timestamp;
+    });
+    if (it == entries_.end())
+      return false;
+    *it = std::move(entries_.back());
+    entries_.pop_back();
+    std::make_heap(entries_.begin(), entries_.end(), std::greater<>{});
+    return true;
+  }
+
   /// @brief Peek at the earliest entry's timestamp without removing it.
   /// @returns Timestamp of the next entry, or TICK_MAX if empty.
   Tick next_event_time() const { return entries_.empty() ? TICK_MAX : entries_.front().timestamp; }

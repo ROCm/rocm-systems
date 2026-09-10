@@ -11,6 +11,10 @@ void Component::schedule_event(Event *event, Tick timestamp, std::unique_ptr<Mes
   engine_->schedule_event(event, timestamp, std::move(message));
 }
 
+bool Component::deschedule_event(Event *event, Tick timestamp) {
+  return engine_->deschedule(event, timestamp);
+}
+
 Tick Component::current_tick() const {
   // shutdown() clears the partition contexts but leaves every component holding
   // its engine, so a non-null engine_ alone does not mean the context exists.

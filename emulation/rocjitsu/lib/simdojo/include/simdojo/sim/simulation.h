@@ -417,6 +417,16 @@ public:
   /// @param message Optional message payload (ownership transferred).
   void schedule_event(Event *event, Tick timestamp, std::unique_ptr<Message> message = nullptr);
 
+  /// @brief Remove an entry previously enqueued with schedule_event().
+  ///
+  /// @details The inverse of schedule_event(), with the same owner-thread-only
+  /// contract. Linear in the partition's queue size.
+  /// @param event The event whose entry to remove.
+  /// @param timestamp The tick that entry was scheduled for.
+  /// @retval true An entry was found and removed.
+  /// @retval false No entry for @p event is queued at @p timestamp.
+  bool deschedule(Event *event, Tick timestamp);
+
 private:
   /// @brief Worker loop executed by each partition thread.
   void worker_loop(PartitionID partition_id);

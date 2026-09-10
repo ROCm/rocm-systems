@@ -186,6 +186,16 @@ protected:
   /// thread during event processing.
   void schedule_event(Event *event, Tick timestamp, std::unique_ptr<Message> message = nullptr);
 
+  /// @brief Take back an entry scheduled with schedule_event().
+  ///
+  /// @details Convenience method for subclasses. Delegates to
+  /// SimulationEngine::deschedule(), with the same owner-thread-only contract.
+  /// @param event The event whose entry to remove.
+  /// @param timestamp The tick that entry was scheduled for.
+  /// @retval true An entry was found and removed.
+  /// @retval false No entry for @p event is queued at @p timestamp.
+  bool deschedule_event(Event *event, Tick timestamp);
+
   /// @brief The current simulation tick of the partition that owns this
   ///        component.
   ///
