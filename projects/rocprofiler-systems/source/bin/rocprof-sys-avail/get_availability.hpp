@@ -12,7 +12,6 @@
 
 #include <timemory/components/metadata.hpp>
 #include <timemory/components/properties.hpp>
-#include <timemory/defines.h>
 #include <timemory/enum.h>
 #include <timemory/mpl/type_traits.hpp>
 #include <timemory/utility/type_list.hpp>

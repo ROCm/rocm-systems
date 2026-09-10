@@ -20,7 +20,6 @@
 #include <cstdint>
 
 #include <timemory/backends/threading.hpp>
-#include <timemory/macros/language.hpp>
 
 #include <memory>
 #include <set>
