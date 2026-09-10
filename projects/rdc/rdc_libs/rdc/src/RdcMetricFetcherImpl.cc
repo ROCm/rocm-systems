@@ -384,26 +384,27 @@ void RdcMetricFetcherImpl::get_ecc_deferred(uint32_t gpu_index, rdc_field_t fiel
   };
 
   auto gpu_block = field_to_block_de(field_id);
+  // value->status carries an rdc_status_t, as in get_ecc() and every other fetch path.
   if (gpu_block == AMDSMI_GPU_BLOCK_INVALID) {
-    value->status = AMDSMI_STATUS_INPUT_OUT_OF_BOUNDS;
+    value->status = Smi2RdcError(AMDSMI_STATUS_INPUT_OUT_OF_BOUNDS);
     return;
   }
 
   amdsmi_ras_err_state_t err_state = AMDSMI_RAS_ERR_STATE_INVALID;
   err = amdsmi_get_gpu_ecc_status(processor_handle, gpu_block, &err_state);
   if (err != AMDSMI_STATUS_SUCCESS) {
-    value->status = err;
+    value->status = Smi2RdcError(err);
     return;
   }
 
   amdsmi_error_count_t ec;
   err = amdsmi_get_gpu_ecc_count(processor_handle, gpu_block, &ec);
   if (err != AMDSMI_STATUS_SUCCESS) {
-    value->status = err;
+    value->status = Smi2RdcError(err);
     return;
   }
 
-  value->status = AMDSMI_STATUS_SUCCESS;
+  value->status = RDC_ST_OK;
   value->type = INTEGER;
   value->value.l_int = ec.deferred_count;
 }
