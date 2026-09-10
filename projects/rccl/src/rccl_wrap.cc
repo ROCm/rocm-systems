@@ -741,46 +741,53 @@ inline size_t ddaThresholdFromTable(const size_t* caps, ncclFunc_t func) {
 // R2 symmetric-kernel size cap. Graph capture uses symMaxR2Graph; eager uses
 // symMaxR2. 0 in the arch table means no suppression (SIZE_MAX returned);
 // non-zero values are literal byte thresholds.
-inline size_t rcclSymMaxR2Cap(const ncclComm* comm, ncclFunc_t func, bool graphMode) {
-  const rcclArchThresholds* table = extAlgoArchTable(comm);
+inline size_t rcclSymMaxR2CapTab(const rcclArchThresholds* table, ncclFunc_t func, bool graphMode) {
   if (table == nullptr) return SIZE_MAX;
   const size_t* caps = graphMode ? table->symMaxR2Graph : table->symMaxR2;
   const size_t v = ddaThresholdFromTable(caps, func);
   return v == 0 ? SIZE_MAX : v;
 }
+inline size_t rcclSymMaxR2Cap(const ncclComm* comm, ncclFunc_t func, bool graphMode) {
+  return rcclSymMaxR2CapTab(extAlgoArchTable(comm), func, graphMode);
+}
 
 // R2 symmetric-kernel lower-bound per collective.  Below this size DDA is
 // faster than symk; symk is suppressed so DDA can win.  0 = no suppression.
-inline size_t rcclSymMinR2Cap(const ncclComm* comm, ncclFunc_t func) {
-  const rcclArchThresholds* table = extAlgoArchTable(comm);
+inline size_t rcclSymMinR2CapTab(const rcclArchThresholds* table, ncclFunc_t func) {
   if (table == nullptr) return 0;
   return ddaThresholdFromTable(table->symMinR2, func);
 }
+inline size_t rcclSymMinR2Cap(const ncclComm* comm, ncclFunc_t func) {
+  return rcclSymMinR2CapTab(extAlgoArchTable(comm), func);
+}
 } // namespace
 
-inline size_t rcclCeRegMax(const ncclComm* comm, ncclFunc_t func) {
+inline size_t rcclCeRegMaxTab(const rcclArchThresholds* table, ncclFunc_t func) {
   const int64_t param = (func == ncclFuncAllReduce) ? rcclParamCeArRegMaxMsgBytes() : -1;
   if (param >= 0) return (size_t)param;
-  const rcclArchThresholds* table = extAlgoArchTable(comm);
   if (table == nullptr) return 0;
   return (size_t)func < RCCL_DDA_FUNC_COUNT ? table->ceRegMax[(size_t)func] : 0;
 }
+inline size_t rcclCeRegMax(const ncclComm* comm, ncclFunc_t func) {
+  return rcclCeRegMaxTab(extAlgoArchTable(comm), func);
+}
 
-inline size_t rcclCeNonRegMax(const ncclComm* comm, ncclFunc_t func) {
-  const rcclArchThresholds* table = extAlgoArchTable(comm);
+inline size_t rcclCeNonRegMaxTab(const rcclArchThresholds* table, ncclFunc_t func) {
   if (table == nullptr) return 0;
   return (size_t)func < RCCL_DDA_FUNC_COUNT ? table->ceNonRegMax[(size_t)func] : 0;
 }
+inline size_t rcclCeNonRegMax(const ncclComm* comm, ncclFunc_t func) {
+  return rcclCeNonRegMaxTab(extAlgoArchTable(comm), func);
+}
 
-inline size_t rcclCeAr2ShotMax(const ncclComm* comm) {
+inline size_t rcclCeAr2ShotMaxTab(const rcclArchThresholds* table) {
   const int64_t param = rcclParamCeArMaxMsgBytes();
   if (param >= 0) return (size_t)param;
-  const rcclArchThresholds* table = extAlgoArchTable(comm);
-  // Null table (unknown arch or RCCL_IGNORE_ARCH_TABLE): restore the pre-table
-  // 256 MiB 2-shot window, which matches the default staging allocation. A
-  // present table with 0 means 2-shot is tuned off (gfx1250).
   if (table == nullptr) return NCCL_CE_AR_TMPBUF_DEFAULT_BYTES;
   return table->ceNonRegMax[ncclFuncAllReduce];
+}
+inline size_t rcclCeAr2ShotMax(const ncclComm* comm) {
+  return rcclCeAr2ShotMaxTab(extAlgoArchTable(comm));
 }
 
 // CE AllReduce is only tuned on gfx1250, so it is default-on there and stays off
@@ -791,35 +798,44 @@ static inline bool rcclCeAllReduceArchDefault(const ncclComm* comm) {
   return comm != nullptr && IsArchMatch(comm->archName, "gfx1250");
 }
 
-inline bool rcclCeAllReduceEnabled(const ncclComm* comm) {
+inline bool rcclCeAllReduceEnabledDef(bool archDefault) {
   const int64_t param = rcclParamCeAllReduce();
   if (param >= 0) return param != 0;
-  return rcclCeAllReduceArchDefault(comm);
+  return archDefault;
+}
+inline bool rcclCeAllReduceEnabled(const ncclComm* comm) {
+  return rcclCeAllReduceEnabledDef(rcclCeAllReduceArchDefault(comm));
 }
 
-inline bool rcclForceCeAllReduceEnabled(const ncclComm* comm) {
+inline bool rcclForceCeAllReduceEnabledDef(bool archDefault) {
   const int64_t param = rcclParamForceCeAllReduce();
   if (param >= 0) return param != 0;
-  return rcclCeAllReduceArchDefault(comm);
+  return archDefault;
+}
+inline bool rcclForceCeAllReduceEnabled(const ncclComm* comm) {
+  return rcclForceCeAllReduceEnabledDef(rcclCeAllReduceArchDefault(comm));
 }
 
-inline size_t rcclCeNonRegMin(const ncclComm* comm, ncclFunc_t func) {
-  const rcclArchThresholds* table = extAlgoArchTable(comm);
+inline size_t rcclCeNonRegMinTab(const rcclArchThresholds* table, ncclFunc_t func) {
   if (table == nullptr) return 0;
   return (size_t)func < RCCL_DDA_FUNC_COUNT ? table->ceNonRegMin[(size_t)func] : 0;
 }
+inline size_t rcclCeNonRegMin(const ncclComm* comm, ncclFunc_t func) {
+  return rcclCeNonRegMinTab(extAlgoArchTable(comm), func);
+}
 
-inline bool rcclAllGatherCeRegisteredWindow(const ncclComm* comm, size_t totalBytes, ncclSymRegType_t winRegType,
-                                     bool graphMode) {
-  // CE-registered copies through the user's symmetric windows, so recv must be registered.
-  const bool recvRegistered = (winRegType == ncclSymSendRegRecvReg || winRegType == ncclSymSendNonregRecvReg);
-  if (!recvRegistered) return false;
-  // symMaxR2[AG] is the symk/CE crossover: at or below it the symmetric kernel keeps
-  // the message. 0 means never withdraw symk, same convention as AllReduce.
-  const size_t symMax = rcclSymMaxR2Cap(comm, ncclFuncAllGather, graphMode);
+inline bool rcclAllGatherCeRegisteredWindowTab(const rcclArchThresholds* table, size_t totalBytes,
+                                               ncclSymRegType_t winRegType, bool graphMode) {
+  const bool recvReg = (winRegType == ncclSymSendRegRecvReg || winRegType == ncclSymSendNonregRecvReg);
+  if (!recvReg) return false;
+  const size_t symMax = rcclSymMaxR2CapTab(table, ncclFuncAllGather, graphMode);
   if (symMax == 0 || totalBytes <= symMax) return false;
-  const size_t regMax = rcclCeRegMax(comm, ncclFuncAllGather);
+  const size_t regMax = rcclCeRegMaxTab(table, ncclFuncAllGather);
   return regMax == 0 || totalBytes <= regMax;
+}
+inline bool rcclAllGatherCeRegisteredWindow(const ncclComm* comm, size_t totalBytes,
+                                            ncclSymRegType_t winRegType, bool graphMode) {
+  return rcclAllGatherCeRegisteredWindowTab(extAlgoArchTable(comm), totalBytes, winRegType, graphMode);
 }
 
 // Keep old name as a shim for callers that have not been updated yet.
@@ -827,28 +843,34 @@ inline size_t rcclCeArRegisteredMax(const ncclComm* comm) {
   return rcclCeRegMax(comm, ncclFuncAllReduce);
 }
 
-inline size_t rcclDdaLLThreshold(const ncclComm* comm, ncclFunc_t func) {
+inline size_t rcclDdaLLThresholdTab(const rcclArchThresholds* table, ncclFunc_t func) {
   size_t threshold;
   if (ddaThresholdFromEnv(rcclParamDdaLLThreshold(), &threshold)) return threshold;
-  const rcclArchThresholds* table = extAlgoArchTable(comm);
   if (table == nullptr) return kDdaLLBaseDefault;
   return ddaThresholdFromTable(table->ddaLLMax, func);
 }
+inline size_t rcclDdaLLThreshold(const ncclComm* comm, ncclFunc_t func) {
+  return rcclDdaLLThresholdTab(extAlgoArchTable(comm), func);
+}
 
-inline size_t rcclDdaLL128Threshold(const ncclComm* comm, ncclFunc_t func) {
+inline size_t rcclDdaLL128ThresholdTab(const rcclArchThresholds* table, ncclFunc_t func) {
   size_t threshold;
   if (ddaThresholdFromEnv(rcclParamDdaLL128Threshold(), &threshold)) return threshold;
-  const rcclArchThresholds* table = extAlgoArchTable(comm);
   if (table == nullptr) return kDdaLL128BaseDefault;
   return ddaThresholdFromTable(table->ddaLL128Max, func);
 }
+inline size_t rcclDdaLL128Threshold(const ncclComm* comm, ncclFunc_t func) {
+  return rcclDdaLL128ThresholdTab(extAlgoArchTable(comm), func);
+}
 
-inline size_t rcclDdaVmmThreshold(const ncclComm* comm, ncclFunc_t func) {
+inline size_t rcclDdaVmmThresholdTab(const rcclArchThresholds* table, ncclFunc_t func) {
   size_t threshold;
   if (ddaThresholdFromEnv(rcclParamDdaThreshold(), &threshold)) return threshold;
-  const rcclArchThresholds* table = extAlgoArchTable(comm);
   if (table == nullptr) return kDdaVmmBaseDefault;
   return ddaThresholdFromTable(table->ddaVmmMax, func);
+}
+inline size_t rcclDdaVmmThreshold(const ncclComm* comm, ncclFunc_t func) {
+  return rcclDdaVmmThresholdTab(extAlgoArchTable(comm), func);
 }
 
 // Widest window any enabled DDA tier can serve for this collective. The entry
@@ -859,11 +881,14 @@ inline size_t rcclDdaVmmThreshold(const ncclComm* comm, ncclFunc_t func) {
 // RCCL_DDA_LL128 = 0 drop their tier so disabling one cannot widen the gate.
 // Each tier still applies its own cap at the call site, including the VMM/IPC
 // branch, which checks rcclDdaVmmThreshold() there.
-inline size_t rcclDdaEntryThreshold(const ncclComm* comm, ncclFunc_t func) {
-  size_t cap = rcclDdaVmmThreshold(comm, func);
-  if (rcclParamDdaLL()) cap = std::max(cap, rcclDdaLLThreshold(comm, func));
-  if (rcclParamDdaLL128()) cap = std::max(cap, rcclDdaLL128Threshold(comm, func));
+inline size_t rcclDdaEntryThresholdTab(const rcclArchThresholds* table, ncclFunc_t func) {
+  size_t cap = rcclDdaVmmThresholdTab(table, func);
+  if (rcclParamDdaLL())    cap = std::max(cap, rcclDdaLLThresholdTab(table, func));
+  if (rcclParamDdaLL128()) cap = std::max(cap, rcclDdaLL128ThresholdTab(table, func));
   return cap;
+}
+inline size_t rcclDdaEntryThreshold(const ncclComm* comm, ncclFunc_t func) {
+  return rcclDdaEntryThresholdTab(extAlgoArchTable(comm), func);
 }
 
 size_t rcclDdaScratchPayloadCap(const ncclComm* comm) {
@@ -922,19 +947,15 @@ size_t rcclDdaScratchPayloadCap(const ncclComm* comm) {
 // When inside a graph capture (graphMode=true) and the table has a non-zero
 // graph-mode override, that cap wins.  Graph-mode is checked first.
 // Env var (RCCL_DDA_THRESHOLD) always wins over all context variants.
-size_t rcclDdaVmmThresholdCtx(const ncclComm* comm, ncclFunc_t func,
-                               ncclSymRegType_t winRegType, bool graphMode) {
-  // Env var wins unconditionally -- same as rcclDdaVmmThreshold().
+inline size_t rcclDdaVmmThresholdCtxTab(const rcclArchThresholds* table, ncclFunc_t func,
+                                        ncclSymRegType_t winRegType, bool graphMode) {
   size_t threshold;
   if (ddaThresholdFromEnv(rcclParamDdaThreshold(), &threshold)) return threshold;
-  const rcclArchThresholds* table = extAlgoArchTable(comm);
   if (table == nullptr) return kDdaVmmBaseDefault;
-  // Graph-mode override: CE AR is blocked during captures; let DDA extend further.
   if (graphMode) {
     size_t graphCap = ddaThresholdFromTable(table->ddaVmmMaxGraph, func);
     if (graphCap != 0) return graphCap;
   }
-  // R2 override: recv buffer registered; only recv registration shifts the cap.
   const bool recvReg = (winRegType == ncclSymSendNonregRecvReg ||
                          winRegType == ncclSymSendRegRecvReg);
   if (recvReg) {
@@ -942,6 +963,10 @@ size_t rcclDdaVmmThresholdCtx(const ncclComm* comm, ncclFunc_t func,
     if (r2Cap != 0) return r2Cap;
   }
   return ddaThresholdFromTable(table->ddaVmmMax, func);
+}
+size_t rcclDdaVmmThresholdCtx(const ncclComm* comm, ncclFunc_t func,
+                               ncclSymRegType_t winRegType, bool graphMode) {
+  return rcclDdaVmmThresholdCtxTab(extAlgoArchTable(comm), func, winRegType, graphMode);
 }
 
 // Apply the per-size unroll factor from the arch table for `func` and `msgBytes`.
@@ -1238,6 +1263,8 @@ ncclResult_t rcclSelectAllReduce(struct ncclComm* comm, const void* sendbuff, vo
     ncclDevrWindowHasSysmemSegment(sendWin) || ncclDevrWindowHasSysmemSegment(recvWin);
   ncclSymRegType_t winRegType;
   NCCLCHECK(ncclGetSymRegType(sendWin, recvWin, &winRegType));
+  const rcclArchThresholds* const archTable = extAlgoArchTable(comm);
+  const bool ceArArchDefault = rcclCeAllReduceArchDefault(comm);
 
   // CE AllReduce graph state. CE is graph-unsafe, so capture disables it.
   // Probed before the symMaxR2 gate so graph mode can pick symMaxR2Graph.
@@ -1271,12 +1298,12 @@ ncclResult_t rcclSelectAllReduce(struct ncclComm* comm, const void* sendbuff, vo
   // size, letting CE-registered win instead.  0 means no suppression.
   const bool recvRegistered = (winRegType == ncclSymSendRegRecvReg ||
                                 winRegType == ncclSymSendNonregRecvReg);
-  const size_t symMaxR2 = rcclSymMaxR2Cap(comm, ncclFuncAllReduce, ceCapturing);
+  const size_t symMaxR2 = rcclSymMaxR2CapTab(archTable, ncclFuncAllReduce, ceCapturing);
   const bool symSuppressedBySize = recvRegistered && msgBytes > symMaxR2;
   const bool symkRequested =
     (op == ncclSum) &&
     isSymmetricKernelRequestedWin(comm, ncclFuncAllReduce, (int)ncclDevSum, datatype, count, sendWin, recvWin);
-  const size_t arSymMinR2 = rcclSymMinR2Cap(comm, ncclFuncAllReduce);
+  const size_t arSymMinR2 = rcclSymMinR2CapTab(archTable, ncclFuncAllReduce);
   // symSuppressedByMin: DDA wins below symMinR2[AR]; do not block it with symkRequested.
   const bool symSuppressedByMin = symkRequested && arSymMinR2 > 0 && msgBytes < arSymMinR2;
   const bool symEligible = symkRequested && !symSuppressedByMin && !symSuppressedBySize;
@@ -1287,7 +1314,7 @@ ncclResult_t rcclSelectAllReduce(struct ncclComm* comm, const void* sendbuff, vo
   // develop's single "will CE AllReduce service this call" gate (collectives.cc
   // ncclAllReduce_impl). force = RCCL_FORCE_CE_ALLREDUCE; symReg probes whether the
   // buffers are CE-registrable symmetric windows (uses ncclDevSum, matching develop).
-  const bool force = rcclForceCeAllReduceEnabled(comm);
+  const bool force = rcclForceCeAllReduceEnabledDef(ceArArchDefault);
   const bool symReg = ncclCeAvailable(comm, ncclFuncAllReduce, (int)ncclDevSum, datatype, winRegType);
   // This call site never carries a bias buffer (ncclAllReduceWithBias_impl bypasses it entirely
   // and goes straight to taskAppend), so /*acc=*/nullptr here is always correct.
@@ -1325,11 +1352,11 @@ ncclResult_t rcclSelectAllReduce(struct ncclComm* comm, const void* sendbuff, vo
   }
 #endif
   const bool ddaFabricArch1250 = IsArchMatch(comm->archName, "gfx1250");
-  const size_t arDdaVmmMax = rcclDdaVmmThresholdCtx(comm, ncclFuncAllReduce, winRegType, ceCapturing);
+  const size_t arDdaVmmMax = rcclDdaVmmThresholdCtxTab(archTable, ncclFuncAllReduce, winRegType, ceCapturing);
   if (rcclAllReduceShouldTakeDdaPath(comm, count, datatype, ddaSymEligible, ceAllReduceAllowed)) {
     if (ddaFabricArch1250) {
-      const size_t arDdaLLMax    = rcclDdaLLThreshold(comm, ncclFuncAllReduce);
-      const size_t arDdaLL128Max = rcclDdaLL128Threshold(comm, ncclFuncAllReduce);
+      const size_t arDdaLLMax    = rcclDdaLLThresholdTab(archTable, ncclFuncAllReduce);
+      const size_t arDdaLL128Max = rcclDdaLL128ThresholdTab(archTable, ncclFuncAllReduce);
       // Small-message fast lane: LL protocol (no GPU barrier).
       if (rcclParamDdaLL() && msgBytes <= arDdaLLMax &&
           ncclAllReduceDdaFabricLLEligible(comm, sendbuff, recvbuff, count, datatype, op)) {
@@ -1371,14 +1398,14 @@ ncclResult_t rcclSelectAllReduce(struct ncclComm* comm, const void* sendbuff, vo
   bool ceAvailable = !ceCapturing && ncclCeAvailable(comm, ncclFuncAllReduce, (int)op, datatype, winRegType);
   const bool ceAllReduceOpSupported = (op == ncclSum || op == ncclProd || op == ncclMin || op == ncclMax);
   if (!ceArGraphAllowed || !ceAllReduceOpSupported || (count % (size_t)comm->nRanks != 0) ||
-      !rcclCeAllReduceEnabled(comm)) {
+      !rcclCeAllReduceEnabledDef(ceArArchDefault)) {
     ceAvailable = false;
   }
   // Tuning cap only: registered CE has no staging allocation, so this does not
   // size a buffer. 0 (or unset table) means no upper bound. Independent of the
   // 2-shot selector (table/env cap, 0 = off). Independent of the allocated
   // ceARTmpBuf size used by registered CE.
-  const size_t ceArRegMax = rcclCeRegMax(comm, ncclFuncAllReduce);
+  const size_t ceArRegMax = rcclCeRegMaxTab(archTable, ncclFuncAllReduce);
   const bool ceRegInWindow = ceArRegMax == 0 || msgBytes <= ceArRegMax;
   if (!symEligible && ceRegInWindow && ceAvailable && !hasSysmemSegment &&
       ((comm->config.CTAPolicy & NCCL_CTA_POLICY_ZERO) || force)) {
@@ -1492,6 +1519,7 @@ ncclResult_t rcclSelectAllGather(struct ncclComm* comm, const void* sendbuff, vo
   ncclDevrFindWindow(comm, recvbuff, &recvWin);
   ncclSymRegType_t winRegType;
   NCCLCHECK(ncclGetSymRegType(sendWin, recvWin, &winRegType));
+  const rcclArchThresholds* const archTable = extAlgoArchTable(comm);
   const bool agRecvRegistered = (winRegType == ncclSymSendRegRecvReg ||
                                   winRegType == ncclSymSendNonregRecvReg);
 
@@ -1503,8 +1531,8 @@ ncclResult_t rcclSelectAllGather(struct ncclComm* comm, const void* sendbuff, vo
   // (mirrors the AllReduce symSuppressedBySize pattern).
   // symMinR2[AG] withdraws symk below a size threshold so DDA wins small messages
   // for R2 buffers, mirroring the AllReduce and ReduceScatter treatment.
-  const size_t agSymMaxR2  = rcclSymMaxR2Cap(comm, ncclFuncAllGather, ceCapturing);
-  const size_t agSymMinR2  = rcclSymMinR2Cap(comm, ncclFuncAllGather);
+  const size_t agSymMaxR2  = rcclSymMaxR2CapTab(archTable, ncclFuncAllGather, ceCapturing);
+  const size_t agSymMinR2  = rcclSymMinR2CapTab(archTable, ncclFuncAllGather);
   const bool agSymSuppressedByMin  = agSymkRequested && agSymMinR2 > 0 && totalBytes < agSymMinR2;
   const bool agSymSuppressedBySize = agSymkRequested && agRecvRegistered &&
                                      totalBytes > agSymMaxR2;
@@ -1513,11 +1541,11 @@ ncclResult_t rcclSelectAllGather(struct ncclComm* comm, const void* sendbuff, vo
   // the CE-registered check so it loses to CE exactly as dispatch does
   // (taskAppend appends the CE task before ncclMakeSymmetricTaskList runs, so
   // symk never reclaims it), mirroring rcclSelectAllReduce.
-  const size_t agDdaVmmMax = rcclDdaVmmThresholdCtx(comm, ncclFuncAllGather, winRegType, ceCapturing);
-  if (!symEligible && rcclDdaEnabled(comm, totalBytes, rcclDdaEntryThreshold(comm, ncclFuncAllGather))) {
+  const size_t agDdaVmmMax = rcclDdaVmmThresholdCtxTab(archTable, ncclFuncAllGather, winRegType, ceCapturing);
+  if (!symEligible && rcclDdaEnabled(comm, totalBytes, rcclDdaEntryThresholdTab(archTable, ncclFuncAllGather))) {
     if (IsArchMatch(comm->archName, "gfx1250")) {
-      const size_t agDdaLLMax    = rcclDdaLLThreshold(comm, ncclFuncAllGather);
-      const size_t agDdaLL128Max = rcclDdaLL128Threshold(comm, ncclFuncAllGather);
+      const size_t agDdaLLMax    = rcclDdaLLThresholdTab(archTable, ncclFuncAllGather);
+      const size_t agDdaLL128Max = rcclDdaLL128ThresholdTab(archTable, ncclFuncAllGather);
       if (rcclParamDdaLL() && msgSize <= agDdaLLMax &&
           ncclAllGatherDdaFabricLLEligible(comm, sendbuff, recvbuff, sendcount, datatype)) {
         decision->algo = RCCL_DDA_FABRIC_LL;
@@ -1603,8 +1631,8 @@ ncclResult_t rcclSelectAllGather(struct ncclComm* comm, const void* sendbuff, vo
     // must be large enough to hold the receive (ddaScratchBytes >= totalBytes).
     const bool ceScratch =
       !ceCapturing && ncclCeScratchAvailable(comm, ncclFuncAllGather, (int)ncclSum, datatype, winRegType);
-    const size_t agCeNonRegMax = rcclCeNonRegMax(comm, ncclFuncAllGather);
-    const size_t agCeNonRegMin = rcclCeNonRegMin(comm, ncclFuncAllGather);
+    const size_t agCeNonRegMax = rcclCeNonRegMaxTab(archTable, ncclFuncAllGather);
+    const size_t agCeNonRegMin = rcclCeNonRegMinTab(archTable, ncclFuncAllGather);
     const bool agCeNonRegWindow = agCeNonRegMax > 0 &&
                                    totalBytes >= agCeNonRegMin &&
                                    totalBytes <= agCeNonRegMax;
@@ -1622,7 +1650,7 @@ ncclResult_t rcclSelectAllGather(struct ncclComm* comm, const void* sendbuff, vo
       !ceCapturing && ncclCeAvailable(comm, ncclFuncAllGather, (int)ncclSum, datatype, winRegType);
     if (ceAvailable && !hasSysmemSegment &&
         ((comm->config.CTAPolicy & NCCL_CTA_POLICY_ZERO) ||
-         rcclAllGatherCeRegisteredWindow(comm, totalBytes, winRegType, ceCapturing))) {
+         rcclAllGatherCeRegisteredWindowTab(archTable, totalBytes, winRegType, ceCapturing))) {
       decision->algo = RCCL_CE_REGISTERED;
       return ncclSuccess;
     }
@@ -1738,15 +1766,16 @@ ncclResult_t rcclSelectReduceScatter(struct ncclComm* comm, const void* sendbuff
   ncclDevrFindWindow(comm, recvbuff, &rsRecvWin);
   ncclSymRegType_t rsWinRegType;
   NCCLCHECK(ncclGetSymRegType(rsSendWin, rsRecvWin, &rsWinRegType));
+  const rcclArchThresholds* const archTable = extAlgoArchTable(comm);
   const bool symkRequested =
     (op == ncclSum || op == ncclAvg) &&
     isSymmetricKernelRequestedWin(comm, ncclFuncReduceScatter, (op == ncclAvg) ? (int)ncclDevSumPostDiv : (int)ncclDevSum,
                                   datatype, recvcount, rsSendWin, rsRecvWin);
-  const size_t rsSymMinR2 = rcclSymMinR2Cap(comm, ncclFuncReduceScatter);
+  const size_t rsSymMinR2 = rcclSymMinR2CapTab(archTable, ncclFuncReduceScatter);
   const bool symSuppressedByMin = symkRequested && rsSymMinR2 > 0 && totalBytes < rsSymMinR2;
   const bool rsRecvRegistered = (rsWinRegType == ncclSymSendRegRecvReg ||
                                   rsWinRegType == ncclSymSendNonregRecvReg);
-  const size_t rsSymMaxR2 = rcclSymMaxR2Cap(comm, ncclFuncReduceScatter, /*graphMode=*/false);
+  const size_t rsSymMaxR2 = rcclSymMaxR2CapTab(archTable, ncclFuncReduceScatter, /*graphMode=*/false);
   const bool symSuppressedBySize = symkRequested && rsRecvRegistered &&
                                    totalBytes > rsSymMaxR2;
   const bool symEligible = symkRequested && !symSuppressedByMin && !symSuppressedBySize;
@@ -1754,12 +1783,12 @@ ncclResult_t rcclSelectReduceScatter(struct ncclComm* comm, const void* sendbuff
   // (2) DDA fast paths. Symmetric wins when buffers are registered (-R 2); DDA
   // enters only when symk is unavailable. No Blocks helpers -> nMaxChannels 0.
   const bool ddaFabricArch = IsArchMatch(comm->archName, "gfx1250");
-  const size_t rsDdaVmmMax = rcclDdaVmmThresholdCtx(comm, ncclFuncReduceScatter, rsWinRegType, /*graphMode=*/false);
+  const size_t rsDdaVmmMax = rcclDdaVmmThresholdCtxTab(archTable, ncclFuncReduceScatter, rsWinRegType, /*graphMode=*/false);
   if (!symEligible &&
-      rcclDdaEnabled(comm, totalBytes, rcclDdaEntryThreshold(comm, ncclFuncReduceScatter))) {
+      rcclDdaEnabled(comm, totalBytes, rcclDdaEntryThresholdTab(archTable, ncclFuncReduceScatter))) {
     if (ddaFabricArch) {
-      const size_t rsDdaLLMax    = rcclDdaLLThreshold(comm, ncclFuncReduceScatter);
-      const size_t rsDdaLL128Max = rcclDdaLL128Threshold(comm, ncclFuncReduceScatter);
+      const size_t rsDdaLLMax    = rcclDdaLLThresholdTab(archTable, ncclFuncReduceScatter);
+      const size_t rsDdaLL128Max = rcclDdaLL128ThresholdTab(archTable, ncclFuncReduceScatter);
       if (rcclParamDdaLL() && rsShardBytes <= rsDdaLLMax &&
           ncclReduceScatterDdaFabricLLEligible(comm, sendbuff, recvbuff, recvcount, datatype, op)) {
         decision->algo = RCCL_DDA_FABRIC_LL;
@@ -1926,23 +1955,24 @@ ncclResult_t rcclSelectAlltoAll(struct ncclComm* comm, const void* sendbuff, voi
   ncclDevrFindWindow(comm, recvbuff, &a2aRecvWin);
   ncclSymRegType_t a2aWinRegType;
   NCCLCHECK(ncclGetSymRegType(a2aSendWin, a2aRecvWin, &a2aWinRegType));
+  const rcclArchThresholds* const archTable = extAlgoArchTable(comm);
   const bool a2aRecvRegistered = (a2aWinRegType == ncclSymSendRegRecvReg ||
                                    a2aWinRegType == ncclSymSendNonregRecvReg);
   // symMaxR2[A2A] withdraws symk above threshold so CE-registered can win.
   const bool a2aSymkRequested =
     isSymmetricKernelRequestedWin(comm, ncclFuncAlltoAll, (int)ncclDevSum, datatype, count, a2aSendWin, a2aRecvWin);
-  const size_t a2aSymMaxR2 = rcclSymMaxR2Cap(comm, ncclFuncAlltoAll, /*graphMode=*/false);
+  const size_t a2aSymMaxR2 = rcclSymMaxR2CapTab(archTable, ncclFuncAlltoAll, /*graphMode=*/false);
   const bool a2aSymSuppressedBySize = a2aSymkRequested && a2aRecvRegistered &&
                                       totalBytes > a2aSymMaxR2;
   const bool a2aSymEligible = a2aSymkRequested && !a2aSymSuppressedBySize;
 
   // (3) DDA fast paths. gfx1250 uses fabric tiers; other archs use IPC.
   // Symmetric-registered buffers defer to the symmetric kernel; DDA gated on !a2aSymEligible.
-  const size_t a2aDdaMax = rcclDdaVmmThreshold(comm, ncclFuncAlltoAll);
-  if (!a2aSymEligible && rcclDdaEnabled(comm, totalBytes, rcclDdaEntryThreshold(comm, ncclFuncAlltoAll))) {
+  const size_t a2aDdaMax = rcclDdaVmmThresholdTab(archTable, ncclFuncAlltoAll);
+  if (!a2aSymEligible && rcclDdaEnabled(comm, totalBytes, rcclDdaEntryThresholdTab(archTable, ncclFuncAlltoAll))) {
     if (IsArchMatch(comm->archName, "gfx1250")) {
-      const size_t llThresh   = rcclDdaLLThreshold(comm, ncclFuncAlltoAll);
-      const size_t ll128Thresh = rcclDdaLL128Threshold(comm, ncclFuncAlltoAll);
+      const size_t llThresh   = rcclDdaLLThresholdTab(archTable, ncclFuncAlltoAll);
+      const size_t ll128Thresh = rcclDdaLL128ThresholdTab(archTable, ncclFuncAlltoAll);
       if (rcclParamDdaLL() && llThresh > 0 && totalBytes <= llThresh &&
           ncclAllToAllDdaFabricLLEligible(comm, sendbuff, recvbuff, count, datatype)) {
         decision->algo = RCCL_DDA_FABRIC_LL;
