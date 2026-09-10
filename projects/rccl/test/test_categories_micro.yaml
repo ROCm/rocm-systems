@@ -18,6 +18,8 @@ test_categories:
       - "RmaProxyProgressTest.*"
       - "GroupEndInternalTest.*"
       - "Devcomm*"
+      - "WrapMicrotest.*"
+      - "WrapMicrotestIsolated.*"
     exclude_windows:
       - "*"
     labels:
