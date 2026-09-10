@@ -13,6 +13,7 @@
 #include <string>
 #include <vector>
 
+#include "bootstrap_stubs.h"   // g_bootstrapInit / g_bootstrapSplit / g_bootstrapCreateRoot (shared)
 #include "env_fakes.h"         // micro_getenv / SetMicroEnv / ClearMicroEnv (shared)
 #include "hip_fakes.h"
 #include "nccl_fakes.h"
@@ -28,7 +29,9 @@ struct ncclTopoSystem;
 // hipified copy init.cc includes, and the two enum definitions collide.
 struct ncclBootstrapHandle;
 
+struct ncclTopoRanks;
 struct amdsmiFabricDeviceInfo;
+struct ncclComm;
 
 // fillInfo's UALoE/MNNVL probe. The default answers -1, i.e. what a host with no fabric device reports.
 ncclResult_t DefaultAmdSmiGetDeviceIndexByPciBusId(const char* busId, uint32_t* deviceIndex);
@@ -83,6 +86,8 @@ extern ncclResult_t g_ncclNetInitResult;
 extern ncclResult_t g_ncclGinInitResult;
 extern ncclResult_t g_ncclStrongStreamResult;
 extern ncclResult_t g_ncclMemManagerInitResult;
+// The fake writes nothing to comm->memManager, so the call count is the only proof init.cc:806 ran.
+extern int g_ncclMemManagerInitCalls;
 extern ncclResult_t g_amdSmiInitResult;
 
 // A std::function, not a result code: tests must write the allgathered (color, key) table into allData.
@@ -107,6 +112,10 @@ extern ncclResult_t g_ncclOsTopoGetStrFromSysResult;
 extern int g_ncclOsTopoGetStrFromSysCalls;
 
 // g_recorderResult and the ncclGetUniqueId_impl argument recorder come from recorder_fakes.h.
+
+// A std::function on top of the result code: the grow path validates the magic the coordinator broadcast back.
+ncclResult_t DefaultBcastGrowHandle(struct ncclBootstrapHandle* handle, struct ncclComm* parent, bool isRoot);
+extern std::function<ncclResult_t(struct ncclBootstrapHandle*, struct ncclComm*, bool)> g_bcastGrowHandle;
 
 // The fake initChannel does NOT allocate ring->userRanks/rankToIndex like the real one; callers must supply storage.
 extern ncclResult_t g_initChannelResult;
@@ -192,6 +201,32 @@ extern ncclResult_t g_ncclTopoComputeP2pChannelsPerPeerResult;
 extern std::vector<std::string> g_cleanupCallOrder;
 extern ncclResult_t g_ncclCeFinalizeResult;
 extern struct ncclComm* g_ncclTunerPluginUnloadLastComm;
+// AllGather3 seams (:1786-2213), rung 4; ncclTopoPostset ends it with ncclInvalidUsage, not rung 3's ncclTimeout.
+extern std::function<ncclResult_t(struct ncclComm*, bool*)> g_ncclTopoCheckNicFused;
+extern std::function<ncclResult_t(struct ncclTopoSystem*, int, float*)> g_ncclTopoGetMinNetBw;
+extern std::function<ncclResult_t(struct ncclTopoSystem*, int, int*, float*)> g_ncclTopoGetLocalNetCountByBw;
+extern std::function<ncclResult_t(struct ncclTopoSystem*, int*)> g_ncclTopoPathAllNVLink;
+extern std::function<ncclResult_t(struct ncclComm*, struct ncclTopoRanks*)> g_ncclTopoPreset;
+extern ncclResult_t g_rcclCheckRomeTopoModelIdxConsensusResult;
+extern int g_rcclCheckRomeTopoModelIdxConsensusCalls;
+// What :1999's three lambdas answer for rank 0, i.e. the romeTopoModelIdx and hostname :1974-1975 marshalled.
+extern int g_rcclRomeConsensusNranks;
+extern int g_rcclRomeConsensusIdx0;
+extern std::string g_rcclRomeConsensusHost0;
+extern ncclResult_t g_ncclCudaContextTrackResult;
+extern int g_ncclCudaContextTrackCalls;
+extern ncclResult_t g_ncclNvlsTuningResult;
+extern int g_ncclNvlsTuningCalls;
+extern ncclResult_t g_ncclTreeBasePostsetResult;
+extern int g_ncclTreeBasePostsetCalls;
+// The graph :2215 passed. Only the tree graph is correct here, and a result-only seam cannot see a swap.
+extern struct ncclTopoGraph* g_ncclTreeBasePostsetGraph;
+extern ncclResult_t g_ncclTopoPostsetResult;
+extern int g_ncclTopoPostsetCalls;
+// The seven graph slots :2213 passed, in order; the aliasing between them is part of the contract.
+extern std::vector<struct ncclTopoGraph*> g_ncclTopoPostsetGraphs;
+// The `nc` :2213 passed, i.e. the min over every rank's allGather3Data[].nc. -1 until postset runs.
+extern int g_ncclTopoPostsetNc;
 
 void InstallCommAllocSuccess();
 

@@ -9,6 +9,7 @@
 #ifndef RCCL_TEST_HOST_NCCL_STUBS_H_
 #define RCCL_TEST_HOST_NCCL_STUBS_H_
 
+#include <cstddef>
 #include <functional>
 
 #include "nccl.h"
@@ -20,6 +21,12 @@ struct ncclComm;
 extern std::function<ncclResult_t(struct ncclAsyncJob*, ncclResult_t (*)(struct ncclAsyncJob*),
                                   void (*)(struct ncclAsyncJob*), void (*)(void*), struct ncclComm*)>
     g_ncclAsyncLaunch;
+
+// src/init.cc's device bringup reaches src/enqueue.cc through this. Fail-loud by default; script it to reach past it.
+#ifndef RCCL_STUBS_OMIT_ncclInitKernelsForDevice
+extern std::function<ncclResult_t(int /*cudaArch*/, int /*maxSharedMem*/, size_t* /*maxStackSize*/)>
+    g_ncclInitKernelsForDevice;
+#endif
 
 // src/misc/coll_trace.cc: comm teardown tears the trace ring down through this.
 extern std::function<ncclResult_t(struct ncclComm*)> g_collTraceDestroy;
