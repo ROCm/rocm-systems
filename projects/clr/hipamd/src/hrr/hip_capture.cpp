@@ -2179,10 +2179,10 @@ hipError_t capture_hipGraphExecBatchMemOpNodeSetParams(
 // Install / uninstall (build_table functions live in hip_capture_generated.cpp)
 // ---------------------------------------------------------------------------
 
-void hip_capture_install() {
+void hip_capture_install(HipDispatchTable* target) {
   if (g_installed.exchange(true)) return;
-  std::memcpy(const_cast<HipDispatchTable*>(hip::GetHipDispatchTable()),
-              &g_cap_table, sizeof(HipDispatchTable));
+  if (!target) target = const_cast<HipDispatchTable*>(hip::GetHipDispatchTable());
+  std::memcpy(target, &g_cap_table, sizeof(HipDispatchTable));
 }
 
 void hip_capture_uninstall() {
@@ -2239,16 +2239,49 @@ static void record_registered_var(const void* host_var, const char* name,
   hrr_cap::writer::write_event_raw(HRR_API_HIPREGISTERVAR, &a.hdr, sizeof(a));
 }
 
-// Runtime dispatch-table capture is installed only from hip_capture_init()
-// (after hip::init() has built the live HipDispatchTable).  We intentionally
-// do NOT hook at libamdhip64 static-init time when HIP_HRR_CAPTURE_OUTPUT is set:
-// early install ran before amd::Runtime::init() / Flag::init(), forced every
-// HIP API through capture shims from the moment the DSO loaded, and pulled host
-// stacks (e.g. Python import torch → multiprocessing spawn) into ordering where
-// the GPU runtime appeared "already initialized" before child processes start.
-// Events before writer::open() were dropped anyway (write_event_raw no-ops when
-// g_events_fd < 0), so deferring install loses no recorded events for that
-// window while restoring a normal pre-init load path.
+// ---------------------------------------------------------------------------
+// Where runtime dispatch-table capture gets installed, and why it is here.
+//
+// The exported entry points in hip_table_interface.cpp read the table and then
+// call through it:
+//
+//     return hip::GetHipDispatchTable()->hipMalloc_fn(ptr, size);
+//
+// hip::init() — and with it hip_capture_init() — does not run until the callee
+// is already executing, inside HIP_INIT_API. Installing from hip_capture_init()
+// therefore always misses the process's first HIP call: its slot was loaded
+// before the shims existed. When that first call is a hipMalloc the allocation
+// is absent from the archive and replay aborts translating a pointer it never
+// saw.
+//
+// Installing from UpdateDispatchTable() closes that window. It is the point
+// where every slot has just been given its real function pointer, and it runs
+// inside the initialiser of the function-local static that GetHipDispatchTable()
+// returns, so no caller can have loaded a slot yet.
+//
+// This is deliberately not the static-init hook that used to live here. That
+// one ran a DSO constructor which called GetHipDispatchTable() at library load,
+// forcing the table build and rocprofiler registration to happen before
+// amd::Runtime::init() / Flag::init() and pulling host stacks (Python import
+// torch, then multiprocessing spawn) into an ordering where the GPU runtime
+// looked "already initialized" before child processes started. The hook below
+// forces nothing early: it runs only when something already asked for the
+// table, so a process that never touches HIP still never builds one.
+//
+// The compiler table stays in hip_capture_init(). Installing it this early
+// races compiler-table setup and leaves ModuleInfo() null, which surfaces as
+// hipErrorInvalidDeviceFunction on the first kernel launch.
+// ---------------------------------------------------------------------------
+void hip_capture_install_early(HipDispatchTable* table) {
+  // Flag::init() has not run, so HIP_HRR_CAPTURE_OUTPUT is not populated yet and
+  // hip_capture_enabled() cannot be trusted here. getenv is safe this early and
+  // reads the same variable the flag is later initialised from.
+  const char* out = std::getenv("HIP_HRR_CAPTURE_OUTPUT");
+  if (!out || out[0] == '\0') return;
+
+  hip_capture_build_table(table);
+  hip_capture_install(table);
+}
 
 // ---------------------------------------------------------------------------
 // Crash-time finalize through CLR exception handling.

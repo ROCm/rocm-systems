@@ -7861,12 +7861,15 @@ extern hipError_t capture___hipPushCallConfiguration(dim3 gridDim, dim3 blockDim
 extern void** capture___hipRegisterFatBinary(const void* data);
 extern void capture___hipUnregisterFatBinary(void** modules);
 
-void hip_capture_build_table() {
+void hip_capture_build_table(const HipDispatchTable* live) {
   // Guard: safe to call only once. A second call after shims are installed
   // would snapshot shim ptrs into g_real_table, causing infinite recursion.
   if (g_table_built.exchange(true)) return;
-  // Snapshot the live real table; copy all slots as pass-through base
-  g_real_table = *hip::GetHipDispatchTable();
+  // Snapshot the live real table; copy all slots as pass-through base.
+  // The early install passes the table directly because it runs inside the
+  // initialiser of the function-local static GetHipDispatchTable() returns,
+  // so calling that here would re-enter it.
+  g_real_table = live ? *live : *hip::GetHipDispatchTable();
   g_cap_table  = g_real_table;
 
   // Override every runtime slot with its capture shim

@@ -480,16 +480,15 @@ static void hrr_require_recorded_apis(const fs::path& cap_path,
  *     REQUIRE the D2H validates — i.e. the very first allocation was captured
  *     and translated.
  *
- *   Hidden ([.]) because it reproduces the known dropped-first-hipMalloc
- *   limitation: capture shims are installed from hip_capture_init() (run inside
- *   hip::init()), which is the in-flight first HIP API call, so that first call
- *   itself is not recorded.  When the first call is a hipMalloc the allocation
- *   is missing and replay aborts with "H2D dst ... not mapped".  The accepted
- *   workaround is a warm-up allocation before the real work.  Run explicitly by
- *   name; this case PASSES once first-call capture is fixed (the warm-up is no
- *   longer required), so it doubles as the regression guard for that fix.
+ *   This is the regression guard for first-call capture.  Capture shims used
+ *   to be installed from hip_capture_init(), which runs inside hip::init() and
+ *   so inside the in-flight first HIP API call, leaving that call unrecorded.
+ *   With a hipMalloc first the allocation never reached the archive and replay
+ *   aborted with "H2D dst ... not mapped", and the workaround was a warm-up
+ *   allocation.  The shims now go in from UpdateDispatchTable(), before any
+ *   caller can load a slot, so no warm-up is required and this case passes.
  */
-TEST_CASE("Unit_HRR_FirstMallocRoundtrip", "[.][hrr-repro]") {
+TEST_CASE("Unit_HRR_FirstMallocRoundtrip", "[hrr-repro]") {
   ScopedDir cap{fs::temp_directory_path() / "hrr_roundtrip_firstmalloc"};
   hrr_run_roundtrip("Unit_HRR_FirstMalloc_Direct", cap.path);
 }
@@ -605,7 +604,7 @@ HRR_TEST_CASE(Unit_HRR_DivergenceAbortRoundtrip) {
  *   which can destabilise a shared runner.  Run explicitly by name to validate
  *   the guard converts the fault class into a clean exit.
  */
-TEST_CASE("Unit_HRR_NullOptionalPtrRoundtrip", "[.][hrr-repro]") {
+TEST_CASE("Unit_HRR_NullOptionalPtrRoundtrip", "[hrr-repro]") {
   ScopedDir cap{fs::temp_directory_path() / "hrr_roundtrip_nulloptional"};
   hrr_capture_direct("Unit_HRR_NullOptionalPtr_Direct", cap.path);
 
