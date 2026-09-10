@@ -68,19 +68,19 @@ table KfdDeviceInfo {
 
   // Compute organization (from kfd_topology.c kfd_fill_gpu_properties)
   simd_count: uint32;             // Total SIMD units (CUs * SIMDs/CU).
-  max_waves_per_simd: uint32 = 10;
-  num_shader_engines: uint32;    // Shader engines per XCC, matching the SoC's se[] count.
+  max_waves_per_simd: uint32 = null;
+  num_shader_engines: uint32 = null; // Shader engines per XCC, matching the SoC's se[] count.
                                  // KFD array_count is derived (times arrays/SE, and times
                                  // num_xcc for the sysfs node property).
-  num_shader_arrays_per_engine: uint32 = 1;
-  num_cu_per_sh: uint32;
+  num_shader_arrays_per_engine: uint32 = null;
+  num_cu_per_sh: uint32 = null;
   simd_per_cu: uint32 = 4;       // 4 for CDNA, 2 for RDNA.
-  wave_front_size: uint32 = 64;  // 64 for CDNA, 32 for RDNA.
-  max_slots_scratch_cu: uint32 = 32;
+  wave_front_size: uint32 = null; // 64 for CDNA, 32 for RDNA.
+  max_slots_scratch_cu: uint32 = null;
 
   // Memory (from kfd_topology.c and amdgpu_amdkfd.c)
   local_mem_size: uint64;         // VRAM size in bytes.
-  lds_size_kb: uint32 = 64;      // 64 for CDNA1/2, 128 for CDNA3/4 and RDNA2+.
+  lds_size_kb: uint32 = null;    // 64 for CDNA1/2, 128 for CDNA3/4 and RDNA2+.
   mem_width: uint32 = 4096;      // HBM interface width in bits.
   mem_clk_max: uint32 = 1200;    // Max memory clock (MHz).
 

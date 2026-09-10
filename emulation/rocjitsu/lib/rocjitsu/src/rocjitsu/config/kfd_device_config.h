@@ -8,9 +8,21 @@
 #define ROCJITSU_CONFIG_KFD_DEVICE_CONFIG_H_
 
 #include <cstdint>
+#include <optional>
 #include <string>
 
 namespace rocjitsu::config {
+
+/// @brief Per-field topology values explicitly supplied by configuration.
+struct KfdDiscoveryOverrides {
+  std::optional<uint32_t> max_waves_per_simd;
+  std::optional<uint32_t> num_shader_engines;
+  std::optional<uint32_t> num_shader_arrays_per_engine;
+  std::optional<uint32_t> num_cu_per_sh;
+  std::optional<uint32_t> wave_front_size;
+  std::optional<uint32_t> max_slots_scratch_cu;
+  std::optional<uint32_t> lds_size_kb;
+};
 
 /// @brief KFD device identity extracted from vm.gpu.device or dbt_guest.guest_device.
 ///
@@ -63,6 +75,7 @@ struct KfdDeviceConfig {
   uint64_t debug_prop = 0;                   ///< KFD debug_prop bits, or 0 to derive.
   bool present = false;                      ///< True if device section existed in config.
   uint32_t num_sdma_queues_per_engine = 0;   ///< Regular SDMA queues per engine.
+  KfdDiscoveryOverrides discovery_overrides; ///< Explicit PCI discovery topology overrides.
 };
 
 } // namespace rocjitsu::config
