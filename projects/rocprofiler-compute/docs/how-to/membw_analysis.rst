@@ -131,7 +131,7 @@ metrics exceed threshold simultaneously.
    All Memory Bandwidth Analysis metrics are stall-cycle ratios (for
    example, ``100 * SUM(stall_cycles) / SUM(busy_cycles)``). These
    percentages are not affected by the normalization mode shown in the
-   memory chart title (per_kernel, per_wave, etc.).
+   memory chart title (per_kernel, per_wave, and so on).
 
 .. note::
 
