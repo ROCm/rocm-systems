@@ -2,23 +2,21 @@
 // SPDX-License-Identifier: MIT
 
 /// @file vop3_ternary_fp_simd_correctness_test.cpp
-/// @brief Bit-identity check (SIMD fast path vs scalar body) for the f32 / f16 /
-/// f64 ternary VOP3 ops on CDNA4 (FMA + MAD family, non-accumulate). The new
-/// ternary fp glue applies per-source abs/neg and result omod/clamp in the f32 /
-/// f64 domain; f16 widens each src then operates in f32 then narrows. NaN-result
-/// lanes are an accepted divergence (gcc-13 packed FMA quiets a different NaN
-/// operand). Each (case, mods, rot) runs TWICE in the same process -- once
+/// @brief Bit-identity check (SIMD fast path vs scalar body) for F16/F32/F64
+/// ternary VOP3 operations on CDNA4, including MODE-aware fused F16/F64 FMA.
+/// NaN-result lanes are an accepted divergence for the older generic packed
+/// paths. Each (case, mods, rot) runs TWICE in the same process -- once
 /// forcing the scalar body, once the SIMD fast path, with identical inputs/EXEC
 /// -- and the dst results are asserted equal per active, non-skipped lane
 /// (util::set_force_scalar_for_testing flips the gate in-process). NaN-result
 /// lanes are excluded from the comparison — NaN-ness is deterministic from the
 /// inputs, so both runs skip the same lanes.
 ///
-/// The dst-accumulate variants (v_fmac_f32 / v_mac_f32 / v_fmac_f16 / v_mac_f16
-/// / v_fmac_f64) are NOT exercised here: their per-isa codegen classes only
-/// initialize src0+src1+vdst (the third FMA arg comes from vdst, no src2
-/// member), so they need a separate accumulate-form glue path.
+/// F32 and F64 dst-accumulate FMAC are covered by the separate
+/// vop3_fmac_simd_correctness_test.cpp suite. F16 FMAC is exercised by the
+/// GFX1250 execution-policy tests because CDNA4 exposes V_MAC_F16 instead.
 
+#include "decode_test_util.h"
 #include "util/simd_test_hooks.h"
 
 #include "rocjitsu/code/rj_code.h"
@@ -80,8 +78,8 @@ struct Case {
 const std::array<Case, 10> kCases = {{
     {"v_fma_f32_vop3", 459, Kind::F32},
     {"v_fma_f16_vop3", 518, Kind::F16},
-    {"v_mad_f16_vop3", 515, Kind::F16},
     {"v_fma_f64_vop3", 460, Kind::F64},
+    {"v_mad_f16_vop3", 515, Kind::F16},
     // min3/max3/med3: fmax/fmin compositions. Inputs are finite non-zero
     // normals, so the fmax/fmin NaN-payload / signed-zero-tie carve-out never
     // triggers — bit-exact vs scalar on every lane.
@@ -244,7 +242,7 @@ void check_case(const Case &c, uint32_t abs, uint32_t neg, uint32_t omod, uint32
     uint32_t words[4] = {0u, 0u, 0u, 0u};
     vop3_encode(c.opcode, vdst, /*src0=*/256, /*src1=*/256 + src1_v, /*src2=*/256 + src2_v, abs,
                 neg, omod, clamp, words);
-    Instruction *inst = fx.decoder->decode(words);
+    Instruction *inst = decode_valid(*fx.decoder, words);
     EXPECT_NE(inst, nullptr) << c.name << " decode failed";
     auto out = fx.run(inst, c.kind, rot, exec);
     delete inst;

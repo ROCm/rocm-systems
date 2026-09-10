@@ -3,7 +3,9 @@ astunparse==1.6.2
 dash-bootstrap-components==2.0.4
 dash-svg==0.0.12
 dash==3.4.0
-numpy==1.26.4
+numpy==1.26.4; python_version < "3.13"
+# numpy 1.26.4 publishes no cp313 wheel; 2.x is required from Python 3.13 on.
+numpy==2.5.2; python_version >= "3.13"
 pandas==2.2.3
 plotext==5.3.2
 plotille==5.0.0

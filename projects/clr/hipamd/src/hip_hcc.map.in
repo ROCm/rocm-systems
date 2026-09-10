@@ -198,22 +198,6 @@ global:
     hipGetStreamDeviceId;
     hipProfilerStart;
     hipProfilerStop;
-    hiprtcCompileProgram;
-    hiprtcCreateProgram;
-    hiprtcDestroyProgram;
-    hiprtcGetLoweredName;
-    hiprtcGetProgramLog;
-    hiprtcGetProgramLogSize;
-    hiprtcGetCode;
-    hiprtcGetCodeSize;
-    hiprtcGetErrorString;
-    hiprtcAddNameExpression;
-    hiprtcVersion;
-    hiprtcLinkCreate;
-    hiprtcLinkAddFile;
-    hiprtcLinkAddData;
-    hiprtcLinkComplete;
-    hiprtcLinkDestroy;
     hipBindTexture;
     hipBindTexture2D;
     hipBindTextureToArray;
@@ -472,8 +456,6 @@ local:
 hip_5.3 {
 global:
     hipDeviceSetLimit;
-    hiprtcGetBitcode;
-    hiprtcGetBitcodeSize;
     hipGraphLaunch_spt;
     hipStreamBeginCapture_spt;
     hipStreamEndCapture_spt;
@@ -706,3 +688,11 @@ global:
 local:
     *;
 } hip_7.14;
+
+hip_10.1 {
+global:
+    hipDeviceGetLuid;
+    hipInitDevice;
+local:
+    *;
+} hip_7.15;

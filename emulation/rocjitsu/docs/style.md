@@ -148,10 +148,11 @@ Foo foo = static_cast<Foo>(bar); // OK but could use auto instead to avoid repet
 
 ## Error Handling
 
-- Exceptions are only for unrecoverable errors: initialization/configuration
-  failures (`ConfigError`) and invalid or unimplemented instructions during
-  code-object parsing (`InvalidInst`, `UnimplementedInst`). All exception types
-  live in `util/except.h`.
+- Expected failures such as a rejected instruction encoding return `Result` or
+  `FailureOr<T>`. Accept a `DiagnosticEmitter` when the caller needs the reason;
+  its sink is non-owning and must not outlive its callable.
+- Exceptions are only for unrecoverable initialization, configuration, or
+  execution failures. Exception types live in `util/except.h`.
 - Do not throw in simulation hot paths (event handlers, instruction execution,
   cache lookups).
 - Do not add `try`/`catch` except at a boundary that must translate an error

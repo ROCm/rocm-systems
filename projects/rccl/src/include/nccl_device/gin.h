@@ -20,30 +20,85 @@ struct ncclGinDescriptorSmem; // A type user allocates in __shared__ memory
 // Used as completion actions for ncclGinSession::put
 struct ncclGin_None {};
 
+// Strong VA signal: visibility implies all preceding puts are settled.
+struct ncclGin_StrongVASignalInc {
+  ncclWindow_t signalWindow;
+  size_t signalOffset;
+};
+// Weak VA signal: guarantees only the bundled put is settled.
+struct ncclGin_WeakVASignalInc {
+  ncclWindow_t signalWindow;
+  size_t signalOffset;
+};
+// Deprecated: use ncclGin_StrongVASignalInc or ncclGin_WeakVASignalInc.
 struct ncclGin_VASignalInc {
   ncclWindow_t signalWindow;
   size_t signalOffset;
 };
+
+// Strong VA add signal: visibility implies all preceding puts are settled.
+struct ncclGin_StrongVASignalAdd {
+  ncclWindow_t signalWindow;
+  size_t signalOffset;
+  uint64_t value;
+};
+// Weak VA add signal: guarantees only the bundled put is settled.
+struct ncclGin_WeakVASignalAdd {
+  ncclWindow_t signalWindow;
+  size_t signalOffset;
+  uint64_t value;
+};
+// Deprecated: use ncclGin_StrongVASignalAdd or ncclGin_WeakVASignalAdd.
 struct ncclGin_VASignalAdd {
   ncclWindow_t signalWindow;
   size_t signalOffset;
   uint64_t value;
 };
 
+// Strong add signal: visibility implies all preceding puts are settled.
+struct ncclGin_StrongSignalAdd {
+  ncclGinSignal_t signal;
+  uint64_t value;
+};
+// Weak add signal: guarantees only the bundled put is settled.
+struct ncclGin_WeakSignalAdd {
+  ncclGinSignal_t signal;
+  uint64_t value;
+};
+// Deprecated: use ncclGin_StrongSignalAdd or ncclGin_WeakSignalAdd.
 struct ncclGin_SignalAdd {
   ncclGinSignal_t signal;
   uint64_t value;
 };
-// SignalInc: equivalent to SignalAdd{+1} except it may not be mixed with any
-// other signal operator without intervening signal reset(). Formally: for a
-// given signal, all operations between successive reset()'s of that signal must
-// either all be SignalInc or all not SignalInc.
+
+// Strong signal: visibility implies all preceding puts are settled.
+// Inc may not be mixed with other signal operators without an intervening reset().
+struct ncclGin_StrongSignalInc {
+  ncclGinSignal_t signal;
+};
+
+// Weak signal: guarantees only the bundled put is settled.
+// Inc may not be mixed with other signal operators without an
+// intervening reset().
+struct ncclGin_WeakSignalInc {
+  ncclGinSignal_t signal;
+};
+
+// Deprecated: use ncclGin_StrongSignalInc or ncclGin_WeakSignalInc explicitly.
 struct ncclGin_SignalInc {
   ncclGinSignal_t signal;
 };
+
 // Support deferred:
 // struct ncclGin_SignalSet { ncclGinSignal_t signal; uint64_t value; };
+
+// Deprecated: use ncclGin_WeakCounterInc.
 struct ncclGin_CounterInc {
+  ncclGinCounter_t counter;
+};
+
+// Weak counter increment: only guarantees that the bundled put is locally complete.
+struct ncclGin_WeakCounterInc {
   ncclGinCounter_t counter;
 };
 
@@ -159,9 +214,10 @@ struct ncclGin_BackendMask {
     ncclDevComm const&, int contextIndex,
     ncclGinResourceSharingMode resourceSharingMode_ = NCCL_GIN_RESOURCE_SHARING_GPU);
 
-  template <typename Coop = ncclCoopThread>
+  template <typename Coop = ncclCoopThread, typename DescriptorSmem = ncclGin_None>
   NCCL_DEVICE_INLINE void flushAsync(ncclTeam team, uint32_t peer, ncclGinRequest_t* outRequest,
-                                     Coop coop = ncclCoopThread{}, uint32_t optFlags = ncclGinOptFlagsDefault) const;
+                                     Coop coop = ncclCoopThread{}, uint32_t optFlags = ncclGinOptFlagsDefault,
+                                     DescriptorSmem descriptor = ncclGin_None{}) const;
 
   template <typename Coop = ncclCoopThread, typename DescriptorSmem = ncclGin_None>
   NCCL_DEVICE_INLINE void wait(ncclGinRequest_t& outRequest, Coop coop = ncclCoopThread{},
@@ -176,12 +232,14 @@ struct ncclGin_BackendMask {
                               SegmentType bufType = ncclGin_SegmentDevice{}) const;
 
   template <
-    // Action to take on peer when put completes. If a signalling action is used
-    // then that signal will be visible only after the payload of this put as well as
-    // the payloads of preceding puts on this netContext to the same peer are settled.
-    typename RemoteAction = ncclGin_None, // one of ncclGin_{None|SignalInc|SignalAdd|SignalSet}
+    // Action to take on peer when put completes.
+    // For strong signals: guarantees this put AND all
+    // preceding puts on this context to the same peer are settled.
+    // For weak signals: only guarantees the bundled put is settled.
+    typename RemoteAction = ncclGin_None, // one of ncclGin_{None|StrongVASignal[Inc|Add]|WeakVASignal[Inc|Add],
+                                          // StrongSignal[Inc|Add]|WeakSignal[Inc|Add]}
     // Action to take locally when source has been consumed.
-    typename LocalAction = ncclGin_None, // one of ncclGin_{None|CounterInc}
+    typename LocalAction = ncclGin_None, // one of ncclGin_{None|WeakCounterInc}
     // Set of threads participating in this put. Must be a subset of Coop.
     typename Coop = ncclCoopThread,
     // Optional smem descriptor space to use. Either ncclGin_{None|DescriptorSmem}
@@ -198,17 +256,19 @@ struct ncclGin_BackendMask {
 
   template <
     typename T,
-    // Action to take on peer when put completes. If a signalling action is used
-    // then that signal will be visible only after the payload of this put as well as
-    // the payloads of preceding puts on this context to the same peer are settled.
-    typename RemoteAction = ncclGin_None, // one of ncclGin_{None|SignalInc|SignalAdd|SignalSet}
+    // Action to take on peer when put completes.
+    // For strong signals: guarantees this put AND all preceding puts on this context to the same peer are settled.
+    // For weak signals: only guarantees the bundled put is settled.
+    typename RemoteAction = ncclGin_None, // one of ncclGin_{None|StrongVASignal[Inc|Add]|WeakVASignal[Inc|Add],
+                                          // StrongSignal[Inc|Add]|WeakSignal[Inc|Add]}
     // Action to take locally when source has been consumed.
-    typename LocalAction = ncclGin_None, // one of ncclGin_{None|CounterInc}
+    typename LocalAction = ncclGin_None, // one of ncclGin_{None|ncclGin_WeakCounterInc}
     // Set of threads participating in this put. Must be a subset of Coop.
     typename Coop = ncclCoopThread,
     // Optional smem descriptor space to use. Either ncclGin_{None|DescriptorSmem}
     typename DescriptorSmem = ncclGin_None,
-    // One of ncclGin_{SegmentDevice|SegmentMixed|SegmentHostNuma}; use a non-Device tag when the VA contains CPU-backed (HOST_NUMA) segments
+    // One of ncclGin_{SegmentDevice|SegmentMixed|SegmentHostNuma}; use a non-Device tag when the VA contains
+    // CPU-backed (HOST_NUMA) segments
     typename SegmentType = ncclGin_SegmentDevice>
   NCCL_DEVICE_INLINE void put(ncclTeam, int peer, ncclSymPtr<T> dstElts, ncclSymPtr<T> srcElts, size_t nElts,
                               RemoteAction remoteAction = ncclGin_None{}, LocalAction localAction = ncclGin_None{},
@@ -249,8 +309,9 @@ struct ncclGin_BackendMask {
 
   // All source buffers from put's from any thread in this coop will be safe to reuse.
   // Flush does not guarantee that data has settled in remote memory.
-  template <typename Coop>
-  NCCL_DEVICE_INLINE void flush(Coop, cuda::memory_order ord = cuda::memory_order_acquire) const;
+  template <typename Coop, typename DescriptorSmem = ncclGin_None>
+  NCCL_DEVICE_INLINE void flush(Coop coop, cuda::memory_order ord = cuda::memory_order_acquire,
+                                DescriptorSmem descriptor = ncclGin_None{}) const;
 
   // Counter and signal wait use "rolling" comparison logic of a given bit-width
   // such that unsigned overflow does not disturb the property that: x < x+1.

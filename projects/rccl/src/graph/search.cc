@@ -111,7 +111,8 @@ static ncclResult_t followPath(struct ncclTopoLinkList* path, struct ncclTopoNod
       revBw += fwBw;
     }
     // Coverity thinks that revLink could be NULL below.  However, we access it only if revBw is non-0, and the
-    // logic of the code is that revBw can become non-0 only if revLink is non-NULL (see the "if" statement right above).
+    // logic of the code is that revBw can become non-0 only if revLink is non-NULL (see the "if" statement right
+    // above).
     // coverity[var_deref_op]
     if (link->bw < fwBw || (revBw && revLink->bw < revBw)) {
       *steps = step;
@@ -451,7 +452,8 @@ ncclResult_t ncclTopoSearchTryNvls(struct ncclTopoSystem* system, struct ncclTop
     } while (nvs && d1 < system->nodes[GPU].count);
     if (nvs == NULL) {
       d1--;
-    } else { // Both directions worked. Move on to the next path.
+    } else {
+      // Both directions worked. Move on to the next path.
       NCCLCHECK(ncclTopoSearchRecGpu(system, graph, saveGraph, NULL, ngpus, -1, -1, 0, time));
     }
     while (d1) {
@@ -575,7 +577,8 @@ static ncclResult_t ncclTopoPrefNetsChannelFirst(struct ncclTopoSystem* system, 
 //
 // The list is built the following way:
 // 1. First gather the preferred NETs for each of the GPU(s), based on the NETDEVS_POLICY and the connection.
-// 2. If the NETDEV_policy allows it, add all the other NETs satisfying typeInter but not already in the list of preferred NETs.
+// 2. If the NETDEV_policy allows it, add all the other NETs satisfying typeInter but not already in
+//    the list of preferred NETs.
 NCCL_PARAM(ScatterEnable, "MNNVL_SCATTER_NETS_ENABLE", 1);
 ncclResult_t ncclTopoSelectNets(struct ncclTopoSystem* system, int typeInter, int gpu, int nets[NCCL_TOPO_MAX_NODES],
                                 int* netCountRet) {
@@ -634,11 +637,18 @@ NCCL_PARAM(MnnvlRailPerHost, "MNNVL_RAIL_PER_HOST", 0);
 static bool ncclTopoSearchCheckNet(struct ncclTopoSystem* system, struct ncclTopoGraph* graph,
                                    struct ncclTopoNode* startNet, int n, int step) {
   struct ncclTopoNode* net = system->nodes[NET].nodes + n;
+  // always forbid connections between different networking planes (if both planes are defined).
+  if (net->net.planeId != NCCL_TOPO_UNDEF && startNet->net.planeId != NCCL_TOPO_UNDEF &&
+      net->net.planeId != startNet->net.planeId) {
+    return false;
+  }
   if (graph->pattern == NCCL_TOPO_PATTERN_TREE && net->id != startNet->id) return false; // Trees are symmetric
   if (graph->pattern == NCCL_TOPO_PATTERN_RING && graph->crossNic == 2) {
     if (graph->nChannels & 1 && net->id != graph->inter[(graph->nChannels - 1) * 2]) return false;
   } else if (graph->crossNic == 0) {
-    if (ncclParamMnnvlRailPerHost() && NCCL_TOPO_ID_SYSTEM_ID(net->id) != NCCL_TOPO_ID_SYSTEM_ID(startNet->id)) {
+    if (net->net.railId != NCCL_TOPO_UNDEF && startNet->net.railId != NCCL_TOPO_UNDEF) {
+      if (net->net.railId != startNet->net.railId) return false;
+    } else if (ncclParamMnnvlRailPerHost() && NCCL_TOPO_ID_SYSTEM_ID(net->id) != NCCL_TOPO_ID_SYSTEM_ID(startNet->id)) {
       // Different hosts in an MNNVL system: rail are per host and identified with the PCI id.
       if (net->net.pciId != startNet->net.pciId || net->net.port != startNet->net.port) return false;
     } else {
@@ -721,7 +731,8 @@ ncclResult_t ncclTopoSearchRecGpu(struct ncclTopoSystem* system, struct ncclTopo
     if (forcedOrder == FORCED_ORDER_PCI) { // Try the PCI order
       next[0] = step + 1;
       count = 1;
-    } else if (forcedOrder == FORCED_ORDER_REPLAY) { // Try last channel order
+    } else if (forcedOrder == FORCED_ORDER_REPLAY) {
+      // Try last channel order
       NCCLCHECK(ncclTopoReplayGetGpu(system, graph, step, next));
       count = 1;
     } else { // Normal search

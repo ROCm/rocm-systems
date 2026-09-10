@@ -21,7 +21,7 @@
 #
 # ##############################################################################
 
-cmake_minimum_required(VERSION 3.10)
+cmake_minimum_required(VERSION 3.15)
 
 # ROCM Path
 if(DEFINED ENV{ROCM_PATH})
@@ -56,7 +56,7 @@ endif()
 
 # rocjpeg Version
 # NOTE: package version and rocjpeg_version.h is generated with this version
-set(VERSION "1.7.0")
+set(VERSION "1.9.0")
 
 # Set Project Version and Language
 project(rocjpeg VERSION ${VERSION} LANGUAGES CXX)
@@ -158,10 +158,17 @@ endif()
 if(HIP_FOUND AND Libva_FOUND AND Libdrm_amdgpu_FOUND AND Threads_FOUND)
   # HIP
   set(LINK_LIBRARY_LIST ${LINK_LIBRARY_LIST} hip::device)
-  # LibVA
+  # LibVA - headers always needed for VA-API type definitions.
+  # On Linux TheRock builds, libva is loaded at runtime via dlopen with
+  # RTLD_LOCAL | RTLD_DEEPBIND (see rocjpeg_vaapi_loader.cpp) to prevent symbol
+  # collision with any system libva.so.2 in the same process; no direct
+  # link-time dependency is needed in that case.
+  # On non-TheRock builds, link directly as before.
   include_directories(${LIBVA_INCLUDE_DIR})
-  set(LINK_LIBRARY_LIST ${LINK_LIBRARY_LIST} ${LIBVA_LIBRARY})
-  set(LINK_LIBRARY_LIST ${LINK_LIBRARY_LIST} ${LIBVA_DRM_LIBRARY})
+  if(NOT (USING_THE_ROCK AND UNIX))
+    set(LINK_LIBRARY_LIST ${LINK_LIBRARY_LIST} ${LIBVA_LIBRARY})
+    set(LINK_LIBRARY_LIST ${LINK_LIBRARY_LIST} ${LIBVA_DRM_LIBRARY})
+  endif()
   # DRM_AMDGPU
   include_directories(${LIBDRM_AMDGPU_INCLUDE_DIR})
   set(LINK_LIBRARY_LIST ${LINK_LIBRARY_LIST} ${LIBDRM_AMDGPU_LIBRARY})
@@ -204,6 +211,12 @@ if(HIP_FOUND AND Libva_FOUND AND Libdrm_amdgpu_FOUND AND Threads_FOUND)
 
   if(USING_THE_ROCK)
     set_target_properties(${PROJECT_NAME} PROPERTIES INSTALL_RPATH "$ORIGIN;$ORIGIN/rocm_sysdeps/lib" BUILD_WITH_INSTALL_RPATH TRUE)
+    if(UNIX)
+      # Enable dlopen-based VA isolation and link against libdl for dlopen/dlsym/dlclose.
+      # dlopen is Linux-only.
+      target_compile_definitions(${PROJECT_NAME} PRIVATE ROCJPEG_USE_DLOPEN_VA)
+      target_link_libraries(${PROJECT_NAME} dl)
+    endif()
   endif()
 
   # rocprofiler
@@ -267,6 +280,7 @@ if(HIP_FOUND AND Libva_FOUND AND Libdrm_amdgpu_FOUND AND Threads_FOUND)
   install(FILES samples/jpegDecodePerf/CMakeLists.txt samples/jpegDecodePerf/jpegdecodeperf.cpp samples/jpegDecodePerf/README.md DESTINATION ${CMAKE_INSTALL_DATADIR}/${PROJECT_NAME}/samples/jpegDecodePerf)
   install(FILES samples/jpegDecodeBatched/CMakeLists.txt samples/jpegDecodeBatched/jpegdecodebatched.cpp samples/jpegDecodeBatched/README.md DESTINATION ${CMAKE_INSTALL_DATADIR}/${PROJECT_NAME}/samples/jpegDecodeBatched)
   install(FILES samples/jpegDecodeAsync/CMakeLists.txt samples/jpegDecodeAsync/jpegdecodeasync.cpp samples/jpegDecodeAsync/README.md DESTINATION ${CMAKE_INSTALL_DATADIR}/${PROJECT_NAME}/samples/jpegDecodeAsync)
+  install(FILES samples/jpegDecodeBatchedAsync/CMakeLists.txt samples/jpegDecodeBatchedAsync/jpegdecodebatchedasync.cpp samples/jpegDecodeBatchedAsync/README.md DESTINATION ${CMAKE_INSTALL_DATADIR}/${PROJECT_NAME}/samples/jpegDecodeBatchedAsync)
   install(FILES samples/rocjpeg_samples_utils.h DESTINATION ${CMAKE_INSTALL_DATADIR}/${PROJECT_NAME}/samples)
   install(DIRECTORY data/images DESTINATION ${CMAKE_INSTALL_DATADIR}/${PROJECT_NAME})
   # install license information - {ROCM_PATH}/share/doc/rocjpeg
@@ -322,6 +336,113 @@ if(HIP_FOUND AND Libva_FOUND AND Libdrm_amdgpu_FOUND AND Threads_FOUND)
     NAMESPACE ${PROJECT_NAME}::
     DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/${PROJECT_NAME}"
   )
+
+  # Option to build test binaries during the main build (without running them)
+  option(BUILD_TESTS "Build test binaries and install to share/${PROJECT_NAME}/bin" OFF)
+
+  if(BUILD_TESTS)
+    include(ExternalProject)
+    set(ROCJPEG_TEST_BIN_DIR ${CMAKE_INSTALL_DATADIR}/${PROJECT_NAME}/bin)
+    set(ROCJPEG_STAGE_DIR ${CMAKE_BINARY_DIR}/stage)
+
+    # Stage-install the library and its cmake/include artifacts into the build
+    # tree so ExternalProject find_package() works without requiring a prior
+    # sudo make install. cmake --install --prefix rewrites all install paths,
+    # and configure_package_config_file generates relocatable relative paths,
+    # so the staged config correctly resolves headers and libs.
+    add_custom_target(stage_${PROJECT_NAME}
+      COMMAND ${CMAKE_COMMAND} --install ${CMAKE_BINARY_DIR} --prefix ${ROCJPEG_STAGE_DIR}
+      DEPENDS ${PROJECT_NAME}
+      COMMENT "Staging ${PROJECT_NAME} into build tree for test builds"
+    )
+
+    # Assemble the search prefix for the nested test configures.
+    #
+    # In a standalone build this is just the stage dir (so find_package(rocjpeg)
+    # resolves the freshly staged config), and ROCM_PATH covers HIP, libva, etc.
+    #
+    # Under TheRock, ROCM_PATH is empty and every dependency lives in the
+    # super-project build tree. TheRock injects a dependency provider into the
+    # parent configure (via CMAKE_PROJECT_TOP_LEVEL_INCLUDES), but that provider
+    # errors on any find_package() for a package it knows about yet that was not
+    # declared as a dependency -- which includes rocjpeg itself -- so it cannot
+    # be forwarded to the test configures. Instead forward the toolchain (for the
+    # HIP-aware compiler and flags) and turn the provider's package map
+    # (THEROCK_PACKAGE_DIR_<pkg>) into an ordinary CMAKE_PREFIX_PATH so the nested
+    # configures find HIP and friends by normal config search. These variables are
+    # undefined in a standalone build, leaving the prefix at just the stage dir.
+    set(ROCJPEG_TEST_PREFIX_PATH "${ROCJPEG_STAGE_DIR}")
+    foreach(_therock_pkg IN LISTS THEROCK_PROVIDED_PACKAGES)
+      if(DEFINED THEROCK_PACKAGE_DIR_${_therock_pkg})
+        list(APPEND ROCJPEG_TEST_PREFIX_PATH "${THEROCK_PACKAGE_DIR_${_therock_pkg}}")
+      endif()
+    endforeach()
+    # ExternalProject_Add splits CMAKE_ARGS on ';', so pass the multi-entry prefix
+    # through a custom LIST_SEPARATOR that the sub-build restores to ';'.
+    string(REPLACE ";" "|" ROCJPEG_TEST_PREFIX_PATH_ALT "${ROCJPEG_TEST_PREFIX_PATH}")
+
+    # Forward the toolchain only when the top-level build set one, and as an
+    # absolute path: a relative CMAKE_TOOLCHAIN_FILE is resolved against the
+    # top-level build dir, but each ExternalProject configures in its own build
+    # dir where that relative path would not resolve. Empty expands to no argument.
+    set(ROCJPEG_TEST_TOOLCHAIN_ARG "")
+    if(CMAKE_TOOLCHAIN_FILE)
+      get_filename_component(ROCJPEG_TEST_TOOLCHAIN_FILE
+        "${CMAKE_TOOLCHAIN_FILE}" ABSOLUTE BASE_DIR "${CMAKE_BINARY_DIR}")
+      set(ROCJPEG_TEST_TOOLCHAIN_ARG
+        "-DCMAKE_TOOLCHAIN_FILE=${ROCJPEG_TEST_TOOLCHAIN_FILE}")
+    endif()
+
+    # RPATH for the installed test binaries. They install under
+    # share/<project>/bin while librocjpeg, HIP and the bundled sysdeps install
+    # to the lib dir -- so at runtime they must load the installed librocjpeg
+    # (whose own RPATH resolves its sysdeps), not the build-tree stage copy the
+    # nested configure links against. Derive the $ORIGIN-relative hop from the bin
+    # dir to the lib dir so the RPATH tracks either path if it changes instead of
+    # hard-coding '../../..'. Use GNUInstallDirs' absolute CMAKE_INSTALL_FULL_*
+    # forms (not prefix + CMAKE_INSTALL_*, which is wrong if a *DIR is overridden
+    # with an absolute path) so file(RELATIVE_PATH) gets two real absolute paths.
+    # This keeps the tree relocatable as a whole -- the same $ORIGIN scheme
+    # librocjpeg itself uses; relocating an individual binary out of the tree is
+    # unsupported, as for any $ORIGIN-relative ROCm binary. BUILD_WITH_INSTALL_RPATH
+    # bakes it into the built binary, which the macro copies verbatim
+    # (install(PROGRAMS) does no RPATH rewriting). '|' is the LIST_SEPARATOR
+    # restored to ';' in the sub-build.
+    file(RELATIVE_PATH ROCJPEG_TEST_BIN_TO_LIB
+      "${CMAKE_INSTALL_FULL_DATADIR}/${PROJECT_NAME}/bin"
+      "${CMAKE_INSTALL_FULL_LIBDIR}")
+    set(ROCJPEG_TEST_INSTALL_RPATH
+      "$ORIGIN/${ROCJPEG_TEST_BIN_TO_LIB}|$ORIGIN/${ROCJPEG_TEST_BIN_TO_LIB}/rocm_sysdeps/lib")
+
+    # Helper macro to add one ExternalProject test and register its install.
+    macro(rocjpeg_add_test_ext TEST_EXE TEST_SOURCE_DIR)
+      ExternalProject_Add(test_${TEST_EXE}
+        SOURCE_DIR ${TEST_SOURCE_DIR}
+        LIST_SEPARATOR "|"
+        CMAKE_ARGS -DROCM_PATH=${ROCM_PATH}
+                   ${ROCJPEG_TEST_TOOLCHAIN_ARG}
+                   "-DCMAKE_PREFIX_PATH=${ROCJPEG_TEST_PREFIX_PATH_ALT}"
+                   -DCMAKE_BUILD_TYPE=${CMAKE_BUILD_TYPE}
+                   -DCMAKE_CXX_COMPILER=${CMAKE_CXX_COMPILER}
+                   -DCMAKE_BUILD_WITH_INSTALL_RPATH=ON
+                   "-DCMAKE_INSTALL_RPATH=${ROCJPEG_TEST_INSTALL_RPATH}"
+        BUILD_ALWAYS ON
+        INSTALL_COMMAND ""
+        DEPENDS stage_${PROJECT_NAME}
+      )
+      ExternalProject_Get_Property(test_${TEST_EXE} BINARY_DIR)
+      install(PROGRAMS ${BINARY_DIR}/${TEST_EXE} DESTINATION ${ROCJPEG_TEST_BIN_DIR} OPTIONAL)
+    endmacro()
+
+    # Sample tests
+    rocjpeg_add_test_ext(jpegdecode             ${CMAKE_CURRENT_SOURCE_DIR}/samples/jpegDecode)
+    rocjpeg_add_test_ext(jpegdecodebatched       ${CMAKE_CURRENT_SOURCE_DIR}/samples/jpegDecodeBatched)
+    rocjpeg_add_test_ext(jpegdecodeperf          ${CMAKE_CURRENT_SOURCE_DIR}/samples/jpegDecodePerf)
+    rocjpeg_add_test_ext(jpegdecodeasync         ${CMAKE_CURRENT_SOURCE_DIR}/samples/jpegDecodeAsync)
+    rocjpeg_add_test_ext(jpegdecodebatchedasync  ${CMAKE_CURRENT_SOURCE_DIR}/samples/jpegDecodeBatchedAsync)
+    # Negative API test (source under test/)
+    rocjpeg_add_test_ext(rocjpegnegativetest     ${CMAKE_CURRENT_SOURCE_DIR}/test/rocjpeg_negative_api_tests)
+  endif()
 
   # make test with CTest
   set(BUILD_FROM_SOURCE ON)

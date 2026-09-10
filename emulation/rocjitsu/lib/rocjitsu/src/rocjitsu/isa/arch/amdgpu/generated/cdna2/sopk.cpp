@@ -6,7 +6,7 @@
 
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna2/sopk.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna2/execution_backend.h"
-#include "util/except.h"
+#include <memory>
 
 namespace rocjitsu {
 namespace cdna2 {
@@ -15,18 +15,28 @@ SMovkI32Sopk::SMovkI32Sopk(const MachineInst *inst)
     : Sopk("s_movk_i32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::SMovkI32Sopk)),
       sdst(32, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
-      simm16(32, OperandType::OPR_SIMM16, reinterpret_cast<const OpEncoding *>(inst)->simm16) {
+      simm16(16, OperandType::OPR_SIMM16, reinterpret_cast<const OpEncoding *>(inst)->simm16) {
   dst_operands_[0] = &sdst;
   src_operands_[0] = &simm16;
   num_src_ = 1;
   num_dst_ = 1;
 }
 
+namespace detail {
+DecodeResult decodeSMovkI32Sopk(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Sopk::validate_encoding(
+      "s_movk_i32", reinterpret_cast<const Sopk::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<SMovkI32Sopk>(opcode);
+}
+} // namespace detail
+
 SCmovkI32Sopk::SCmovkI32Sopk(const MachineInst *inst)
     : Sopk("s_cmovk_i32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::SCmovkI32Sopk)),
       sdst(32, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
-      simm16(32, OperandType::OPR_SIMM16, reinterpret_cast<const OpEncoding *>(inst)->simm16),
+      simm16(16, OperandType::OPR_SIMM16, reinterpret_cast<const OpEncoding *>(inst)->simm16),
       scc(1, OperandType::OPR_SSRC_SPECIAL_SCC, 253) {
   src_operands_[0] = &sdst;
   dst_operands_[0] = &sdst;
@@ -38,11 +48,21 @@ SCmovkI32Sopk::SCmovkI32Sopk(const MachineInst *inst)
   flags_ |= PREDICATED_DEF;
 }
 
+namespace detail {
+DecodeResult decodeSCmovkI32Sopk(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Sopk::validate_encoding(
+      "s_cmovk_i32", reinterpret_cast<const Sopk::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<SCmovkI32Sopk>(opcode);
+}
+} // namespace detail
+
 SCmpkEqI32Sopk::SCmpkEqI32Sopk(const MachineInst *inst)
     : Sopk("s_cmpk_eq_i32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::SCmpkEqI32Sopk)),
       sdst(32, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
-      simm16(32, OperandType::OPR_SIMM16, reinterpret_cast<const OpEncoding *>(inst)->simm16),
+      simm16(16, OperandType::OPR_SIMM16, reinterpret_cast<const OpEncoding *>(inst)->simm16),
       scc(1, OperandType::OPR_SSRC_SPECIAL_SCC, 253) {
   src_operands_[0] = &sdst;
   src_operands_[1] = &simm16;
@@ -51,12 +71,22 @@ SCmpkEqI32Sopk::SCmpkEqI32Sopk(const MachineInst *inst)
   num_dst_ = 1;
   scc.apply_fieldless_caps(false, false, false);
 }
+
+namespace detail {
+DecodeResult decodeSCmpkEqI32Sopk(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Sopk::validate_encoding(
+      "s_cmpk_eq_i32", reinterpret_cast<const Sopk::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<SCmpkEqI32Sopk>(opcode);
+}
+} // namespace detail
 
 SCmpkLgI32Sopk::SCmpkLgI32Sopk(const MachineInst *inst)
     : Sopk("s_cmpk_lg_i32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::SCmpkLgI32Sopk)),
       sdst(32, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
-      simm16(32, OperandType::OPR_SIMM16, reinterpret_cast<const OpEncoding *>(inst)->simm16),
+      simm16(16, OperandType::OPR_SIMM16, reinterpret_cast<const OpEncoding *>(inst)->simm16),
       scc(1, OperandType::OPR_SSRC_SPECIAL_SCC, 253) {
   src_operands_[0] = &sdst;
   src_operands_[1] = &simm16;
@@ -65,12 +95,22 @@ SCmpkLgI32Sopk::SCmpkLgI32Sopk(const MachineInst *inst)
   num_dst_ = 1;
   scc.apply_fieldless_caps(false, false, false);
 }
+
+namespace detail {
+DecodeResult decodeSCmpkLgI32Sopk(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Sopk::validate_encoding(
+      "s_cmpk_lg_i32", reinterpret_cast<const Sopk::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<SCmpkLgI32Sopk>(opcode);
+}
+} // namespace detail
 
 SCmpkGtI32Sopk::SCmpkGtI32Sopk(const MachineInst *inst)
     : Sopk("s_cmpk_gt_i32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::SCmpkGtI32Sopk)),
       sdst(32, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
-      simm16(32, OperandType::OPR_SIMM16, reinterpret_cast<const OpEncoding *>(inst)->simm16),
+      simm16(16, OperandType::OPR_SIMM16, reinterpret_cast<const OpEncoding *>(inst)->simm16),
       scc(1, OperandType::OPR_SSRC_SPECIAL_SCC, 253) {
   src_operands_[0] = &sdst;
   src_operands_[1] = &simm16;
@@ -79,12 +119,22 @@ SCmpkGtI32Sopk::SCmpkGtI32Sopk(const MachineInst *inst)
   num_dst_ = 1;
   scc.apply_fieldless_caps(false, false, false);
 }
+
+namespace detail {
+DecodeResult decodeSCmpkGtI32Sopk(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Sopk::validate_encoding(
+      "s_cmpk_gt_i32", reinterpret_cast<const Sopk::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<SCmpkGtI32Sopk>(opcode);
+}
+} // namespace detail
 
 SCmpkGeI32Sopk::SCmpkGeI32Sopk(const MachineInst *inst)
     : Sopk("s_cmpk_ge_i32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::SCmpkGeI32Sopk)),
       sdst(32, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
-      simm16(32, OperandType::OPR_SIMM16, reinterpret_cast<const OpEncoding *>(inst)->simm16),
+      simm16(16, OperandType::OPR_SIMM16, reinterpret_cast<const OpEncoding *>(inst)->simm16),
       scc(1, OperandType::OPR_SSRC_SPECIAL_SCC, 253) {
   src_operands_[0] = &sdst;
   src_operands_[1] = &simm16;
@@ -93,12 +143,22 @@ SCmpkGeI32Sopk::SCmpkGeI32Sopk(const MachineInst *inst)
   num_dst_ = 1;
   scc.apply_fieldless_caps(false, false, false);
 }
+
+namespace detail {
+DecodeResult decodeSCmpkGeI32Sopk(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Sopk::validate_encoding(
+      "s_cmpk_ge_i32", reinterpret_cast<const Sopk::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<SCmpkGeI32Sopk>(opcode);
+}
+} // namespace detail
 
 SCmpkLtI32Sopk::SCmpkLtI32Sopk(const MachineInst *inst)
     : Sopk("s_cmpk_lt_i32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::SCmpkLtI32Sopk)),
       sdst(32, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
-      simm16(32, OperandType::OPR_SIMM16, reinterpret_cast<const OpEncoding *>(inst)->simm16),
+      simm16(16, OperandType::OPR_SIMM16, reinterpret_cast<const OpEncoding *>(inst)->simm16),
       scc(1, OperandType::OPR_SSRC_SPECIAL_SCC, 253) {
   src_operands_[0] = &sdst;
   src_operands_[1] = &simm16;
@@ -107,12 +167,22 @@ SCmpkLtI32Sopk::SCmpkLtI32Sopk(const MachineInst *inst)
   num_dst_ = 1;
   scc.apply_fieldless_caps(false, false, false);
 }
+
+namespace detail {
+DecodeResult decodeSCmpkLtI32Sopk(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Sopk::validate_encoding(
+      "s_cmpk_lt_i32", reinterpret_cast<const Sopk::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<SCmpkLtI32Sopk>(opcode);
+}
+} // namespace detail
 
 SCmpkLeI32Sopk::SCmpkLeI32Sopk(const MachineInst *inst)
     : Sopk("s_cmpk_le_i32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::SCmpkLeI32Sopk)),
       sdst(32, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
-      simm16(32, OperandType::OPR_SIMM16, reinterpret_cast<const OpEncoding *>(inst)->simm16),
+      simm16(16, OperandType::OPR_SIMM16, reinterpret_cast<const OpEncoding *>(inst)->simm16),
       scc(1, OperandType::OPR_SSRC_SPECIAL_SCC, 253) {
   src_operands_[0] = &sdst;
   src_operands_[1] = &simm16;
@@ -121,12 +191,22 @@ SCmpkLeI32Sopk::SCmpkLeI32Sopk(const MachineInst *inst)
   num_dst_ = 1;
   scc.apply_fieldless_caps(false, false, false);
 }
+
+namespace detail {
+DecodeResult decodeSCmpkLeI32Sopk(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Sopk::validate_encoding(
+      "s_cmpk_le_i32", reinterpret_cast<const Sopk::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<SCmpkLeI32Sopk>(opcode);
+}
+} // namespace detail
 
 SCmpkEqU32Sopk::SCmpkEqU32Sopk(const MachineInst *inst)
     : Sopk("s_cmpk_eq_u32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::SCmpkEqU32Sopk)),
       sdst(32, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
-      simm16(32, OperandType::OPR_SIMM16, reinterpret_cast<const OpEncoding *>(inst)->simm16),
+      simm16(16, OperandType::OPR_SIMM16, reinterpret_cast<const OpEncoding *>(inst)->simm16),
       scc(1, OperandType::OPR_SSRC_SPECIAL_SCC, 253) {
   src_operands_[0] = &sdst;
   src_operands_[1] = &simm16;
@@ -135,12 +215,22 @@ SCmpkEqU32Sopk::SCmpkEqU32Sopk(const MachineInst *inst)
   num_dst_ = 1;
   scc.apply_fieldless_caps(false, false, false);
 }
+
+namespace detail {
+DecodeResult decodeSCmpkEqU32Sopk(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Sopk::validate_encoding(
+      "s_cmpk_eq_u32", reinterpret_cast<const Sopk::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<SCmpkEqU32Sopk>(opcode);
+}
+} // namespace detail
 
 SCmpkLgU32Sopk::SCmpkLgU32Sopk(const MachineInst *inst)
     : Sopk("s_cmpk_lg_u32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::SCmpkLgU32Sopk)),
       sdst(32, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
-      simm16(32, OperandType::OPR_SIMM16, reinterpret_cast<const OpEncoding *>(inst)->simm16),
+      simm16(16, OperandType::OPR_SIMM16, reinterpret_cast<const OpEncoding *>(inst)->simm16),
       scc(1, OperandType::OPR_SSRC_SPECIAL_SCC, 253) {
   src_operands_[0] = &sdst;
   src_operands_[1] = &simm16;
@@ -149,12 +239,22 @@ SCmpkLgU32Sopk::SCmpkLgU32Sopk(const MachineInst *inst)
   num_dst_ = 1;
   scc.apply_fieldless_caps(false, false, false);
 }
+
+namespace detail {
+DecodeResult decodeSCmpkLgU32Sopk(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Sopk::validate_encoding(
+      "s_cmpk_lg_u32", reinterpret_cast<const Sopk::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<SCmpkLgU32Sopk>(opcode);
+}
+} // namespace detail
 
 SCmpkGtU32Sopk::SCmpkGtU32Sopk(const MachineInst *inst)
     : Sopk("s_cmpk_gt_u32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::SCmpkGtU32Sopk)),
       sdst(32, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
-      simm16(32, OperandType::OPR_SIMM16, reinterpret_cast<const OpEncoding *>(inst)->simm16),
+      simm16(16, OperandType::OPR_SIMM16, reinterpret_cast<const OpEncoding *>(inst)->simm16),
       scc(1, OperandType::OPR_SSRC_SPECIAL_SCC, 253) {
   src_operands_[0] = &sdst;
   src_operands_[1] = &simm16;
@@ -163,12 +263,22 @@ SCmpkGtU32Sopk::SCmpkGtU32Sopk(const MachineInst *inst)
   num_dst_ = 1;
   scc.apply_fieldless_caps(false, false, false);
 }
+
+namespace detail {
+DecodeResult decodeSCmpkGtU32Sopk(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Sopk::validate_encoding(
+      "s_cmpk_gt_u32", reinterpret_cast<const Sopk::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<SCmpkGtU32Sopk>(opcode);
+}
+} // namespace detail
 
 SCmpkGeU32Sopk::SCmpkGeU32Sopk(const MachineInst *inst)
     : Sopk("s_cmpk_ge_u32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::SCmpkGeU32Sopk)),
       sdst(32, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
-      simm16(32, OperandType::OPR_SIMM16, reinterpret_cast<const OpEncoding *>(inst)->simm16),
+      simm16(16, OperandType::OPR_SIMM16, reinterpret_cast<const OpEncoding *>(inst)->simm16),
       scc(1, OperandType::OPR_SSRC_SPECIAL_SCC, 253) {
   src_operands_[0] = &sdst;
   src_operands_[1] = &simm16;
@@ -177,12 +287,22 @@ SCmpkGeU32Sopk::SCmpkGeU32Sopk(const MachineInst *inst)
   num_dst_ = 1;
   scc.apply_fieldless_caps(false, false, false);
 }
+
+namespace detail {
+DecodeResult decodeSCmpkGeU32Sopk(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Sopk::validate_encoding(
+      "s_cmpk_ge_u32", reinterpret_cast<const Sopk::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<SCmpkGeU32Sopk>(opcode);
+}
+} // namespace detail
 
 SCmpkLtU32Sopk::SCmpkLtU32Sopk(const MachineInst *inst)
     : Sopk("s_cmpk_lt_u32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::SCmpkLtU32Sopk)),
       sdst(32, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
-      simm16(32, OperandType::OPR_SIMM16, reinterpret_cast<const OpEncoding *>(inst)->simm16),
+      simm16(16, OperandType::OPR_SIMM16, reinterpret_cast<const OpEncoding *>(inst)->simm16),
       scc(1, OperandType::OPR_SSRC_SPECIAL_SCC, 253) {
   src_operands_[0] = &sdst;
   src_operands_[1] = &simm16;
@@ -191,12 +311,22 @@ SCmpkLtU32Sopk::SCmpkLtU32Sopk(const MachineInst *inst)
   num_dst_ = 1;
   scc.apply_fieldless_caps(false, false, false);
 }
+
+namespace detail {
+DecodeResult decodeSCmpkLtU32Sopk(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Sopk::validate_encoding(
+      "s_cmpk_lt_u32", reinterpret_cast<const Sopk::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<SCmpkLtU32Sopk>(opcode);
+}
+} // namespace detail
 
 SCmpkLeU32Sopk::SCmpkLeU32Sopk(const MachineInst *inst)
     : Sopk("s_cmpk_le_u32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::SCmpkLeU32Sopk)),
       sdst(32, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
-      simm16(32, OperandType::OPR_SIMM16, reinterpret_cast<const OpEncoding *>(inst)->simm16),
+      simm16(16, OperandType::OPR_SIMM16, reinterpret_cast<const OpEncoding *>(inst)->simm16),
       scc(1, OperandType::OPR_SSRC_SPECIAL_SCC, 253) {
   src_operands_[0] = &sdst;
   src_operands_[1] = &simm16;
@@ -206,11 +336,21 @@ SCmpkLeU32Sopk::SCmpkLeU32Sopk(const MachineInst *inst)
   scc.apply_fieldless_caps(false, false, false);
 }
 
+namespace detail {
+DecodeResult decodeSCmpkLeU32Sopk(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Sopk::validate_encoding(
+      "s_cmpk_le_u32", reinterpret_cast<const Sopk::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<SCmpkLeU32Sopk>(opcode);
+}
+} // namespace detail
+
 SAddkI32Sopk::SAddkI32Sopk(const MachineInst *inst)
     : Sopk("s_addk_i32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::SAddkI32Sopk)),
       sdst(32, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
-      simm16(32, OperandType::OPR_SIMM16, reinterpret_cast<const OpEncoding *>(inst)->simm16),
+      simm16(16, OperandType::OPR_SIMM16, reinterpret_cast<const OpEncoding *>(inst)->simm16),
       scc(1, OperandType::OPR_SSRC_SPECIAL_SCC, 253) {
   src_operands_[0] = &sdst;
   dst_operands_[0] = &sdst;
@@ -221,11 +361,21 @@ SAddkI32Sopk::SAddkI32Sopk(const MachineInst *inst)
   scc.apply_fieldless_caps(false, false, false);
 }
 
+namespace detail {
+DecodeResult decodeSAddkI32Sopk(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Sopk::validate_encoding(
+      "s_addk_i32", reinterpret_cast<const Sopk::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<SAddkI32Sopk>(opcode);
+}
+} // namespace detail
+
 SMulkI32Sopk::SMulkI32Sopk(const MachineInst *inst)
     : Sopk("s_mulk_i32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::SMulkI32Sopk)),
       sdst(32, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
-      simm16(32, OperandType::OPR_SIMM16, reinterpret_cast<const OpEncoding *>(inst)->simm16) {
+      simm16(16, OperandType::OPR_SIMM16, reinterpret_cast<const OpEncoding *>(inst)->simm16) {
   src_operands_[0] = &sdst;
   dst_operands_[0] = &sdst;
   src_operands_[1] = &simm16;
@@ -233,32 +383,63 @@ SMulkI32Sopk::SMulkI32Sopk(const MachineInst *inst)
   num_dst_ = 1;
 }
 
+namespace detail {
+DecodeResult decodeSMulkI32Sopk(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Sopk::validate_encoding(
+      "s_mulk_i32", reinterpret_cast<const Sopk::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<SMulkI32Sopk>(opcode);
+}
+} // namespace detail
+
 SCbranchIForkSopk::SCbranchIForkSopk(const MachineInst *inst)
     : Sopk("s_cbranch_i_fork", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::SCbranchIForkSopk)),
       sdst(64, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
-      simm16(32, OperandType::OPR_LABEL, reinterpret_cast<const OpEncoding *>(inst)->simm16) {
+      simm16(16, OperandType::OPR_LABEL, reinterpret_cast<const OpEncoding *>(inst)->simm16) {
   src_operands_[0] = &sdst;
   src_operands_[1] = &simm16;
   num_src_ = 2;
   num_dst_ = 0;
 }
 
+namespace detail {
+DecodeResult decodeSCbranchIForkSopk(const MachineInst *opcode,
+                                     const DecodeErrorEmitter &emit_error) {
+  Result validation = Sopk::validate_encoding(
+      "s_cbranch_i_fork", reinterpret_cast<const Sopk::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<SCbranchIForkSopk>(opcode);
+}
+} // namespace detail
+
 SGetregB32Sopk::SGetregB32Sopk(const MachineInst *inst)
     : Sopk("s_getreg_b32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::SGetregB32Sopk)),
       sdst(32, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
-      simm16(32, OperandType::OPR_HWREG, reinterpret_cast<const OpEncoding *>(inst)->simm16) {
+      simm16(16, OperandType::OPR_HWREG, reinterpret_cast<const OpEncoding *>(inst)->simm16) {
   dst_operands_[0] = &sdst;
   src_operands_[0] = &simm16;
   num_src_ = 1;
   num_dst_ = 1;
 }
 
+namespace detail {
+DecodeResult decodeSGetregB32Sopk(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Sopk::validate_encoding(
+      "s_getreg_b32", reinterpret_cast<const Sopk::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<SGetregB32Sopk>(opcode);
+}
+} // namespace detail
+
 SSetregB32Sopk::SSetregB32Sopk(const MachineInst *inst)
     : Sopk("s_setreg_b32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::SSetregB32Sopk)),
-      simm16(32, OperandType::OPR_HWREG, reinterpret_cast<const OpEncoding *>(inst)->simm16),
+      simm16(16, OperandType::OPR_HWREG, reinterpret_cast<const OpEncoding *>(inst)->simm16),
       sdst(32, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst) {
   dst_operands_[0] = &simm16;
   src_operands_[0] = &sdst;
@@ -266,24 +447,56 @@ SSetregB32Sopk::SSetregB32Sopk(const MachineInst *inst)
   num_dst_ = 1;
 }
 
+namespace detail {
+DecodeResult decodeSSetregB32Sopk(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Sopk::validate_encoding(
+      "s_setreg_b32", reinterpret_cast<const Sopk::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<SSetregB32Sopk>(opcode);
+}
+} // namespace detail
+
+void SSetregB32Sopk::implicit_uses(RegisterSet &uses) const {
+  Sopk::implicit_uses(uses);
+  if (auto r = simm16.to_register_ref())
+    uses.expand(*r);
+}
+
 SSetregImm32B32Sopk::SSetregImm32B32Sopk(const MachineInst *inst)
     : Sopk("s_setreg_imm32_b32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::SSetregImm32B32Sopk)),
-      simm16(32, OperandType::OPR_HWREG, reinterpret_cast<const OpEncoding *>(inst)->simm16),
+      simm16(16, OperandType::OPR_HWREG, reinterpret_cast<const OpEncoding *>(inst)->simm16),
       simm32(32, OperandType::OPR_SIMM32, 0) {
   dst_operands_[0] = &simm16;
   src_operands_[0] = &simm32;
   num_src_ = 1;
   num_dst_ = 1;
   simm32 = Operand(32, OperandType::OPR_SIMM32, static_cast<int>(literal_));
-  simm32.apply_fieldless_caps(true, false, false);
+}
+
+namespace detail {
+DecodeResult decodeSSetregImm32B32Sopk(const MachineInst *opcode,
+                                       const DecodeErrorEmitter &emit_error) {
+  Result validation = Sopk::validate_encoding(
+      "s_setreg_imm32_b32", reinterpret_cast<const Sopk::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<SSetregImm32B32Sopk>(opcode);
+}
+} // namespace detail
+
+void SSetregImm32B32Sopk::implicit_uses(RegisterSet &uses) const {
+  Sopk::implicit_uses(uses);
+  if (auto r = simm16.to_register_ref())
+    uses.expand(*r);
 }
 
 SCallB64Sopk::SCallB64Sopk(const MachineInst *inst)
     : Sopk("s_call_b64", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::SCallB64Sopk)),
       sdst(64, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
-      simm16(32, OperandType::OPR_LABEL, reinterpret_cast<const OpEncoding *>(inst)->simm16),
+      simm16(16, OperandType::OPR_LABEL, reinterpret_cast<const OpEncoding *>(inst)->simm16),
       pc(64, OperandType::OPR_PC, 0), pc_in(64, OperandType::OPR_PC, 0) {
   dst_operands_[0] = &sdst;
   src_operands_[0] = &simm16;
@@ -295,6 +508,16 @@ SCallB64Sopk::SCallB64Sopk(const MachineInst *inst)
   pc_in.apply_fieldless_caps(false, false, false);
   flags_ |= INDIRECT_CALL;
 }
+
+namespace detail {
+DecodeResult decodeSCallB64Sopk(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Sopk::validate_encoding(
+      "s_call_b64", reinterpret_cast<const Sopk::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<SCallB64Sopk>(opcode);
+}
+} // namespace detail
 
 std::optional<int64_t> SCallB64Sopk::branch_offset_bytes() const {
   // AMDGPU PC-relative branch immediates are signed instruction-count deltas.

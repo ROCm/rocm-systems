@@ -169,7 +169,8 @@ static ncclResult_t rasRanksConvertToPeers(struct rasRankInit* ranks, int nranks
     }
     if (cmp < 0) {
       (*newNRasPeers)++;
-    } else { // cmp == 0.  Duplicates between the rank array and the peers array will be merged.
+    } else {
+      // cmp == 0.  Duplicates between the rank array and the peers array will be merged.
       if (rank->pid != rasPeer->pid) {
         INFO(NCCL_RAS, "RAS pid mismatch for the same address %s: rank->pid %d, rasPeer->pid %d -- internal error?",
              ncclSocketToString(&rank->addr, rasLine), rank->pid, rasPeer->pid);
@@ -220,8 +221,10 @@ static ncclResult_t rasPeersUpdate(struct rasPeerInfo* rankPeers, int* nRankPeer
 
         if (cmp == 0) break;
       }
-      if (cmp > 0) // No more rasPeer entries -- rankPeer will go at the end.
+      if (cmp > 0) {
+        // No more rasPeer entries -- rankPeer will go at the end.
         newNRasPeers++;
+      }
     }
   }
 
@@ -268,7 +271,8 @@ static ncclResult_t rasPeersUpdate(struct rasPeerInfo* rankPeers, int* nRankPeer
                  ncclSocketToString(&rankPeer->addr, rasLine), newNRasPeers, nRasPeers);
           }
           rankPeerIdx++;
-        } else { // cmp >= 0
+        } else {
+          // cmp >= 0
           // Start by copying peer to newRasPeer, if needed.
           if (newRasPeers != rasPeers) {
             if (newPeerIdx < newNRasPeers) {
@@ -280,7 +284,8 @@ static ncclResult_t rasPeersUpdate(struct rasPeerInfo* rankPeers, int* nRankPeer
                    ncclSocketToString(&rasPeer->addr, rasLine), newPeerIdx, newNRasPeers, nRasPeers);
               break;
             }
-          } else { // in-place
+          } else {
+            // in-place
             if (newPeerIdx != peerIdx) {
               // Should never happen -- both indexes should advance at the same pace.
               INFO(NCCL_RAS,
@@ -307,7 +312,8 @@ static ncclResult_t rasPeersUpdate(struct rasPeerInfo* rankPeers, int* nRankPeer
           if (myPeerIdx == peerIdx) newMyPeerIdx = newPeerIdx;
           peerIdx++;
         } // cmp >= 0
-      } else { // peerIdx == nRasPeers
+      } else {
+        // peerIdx == nRasPeers
         // No more rasPeers -- add a new entry based on rank.
         if (newPeerIdx < newNRasPeers) {
           memcpy(newRasPeer, rankPeer, sizeof(*newRasPeer));
@@ -321,11 +327,13 @@ static ncclResult_t rasPeersUpdate(struct rasPeerInfo* rankPeers, int* nRankPeer
         }
         // If this is the first time this function is run, myPeerIdx will need to be set.  It's more work in that
         // case as we need to compare the addresses of each peer until we find one.
-        if (myPeerIdx == -1 && memcmp(&newRasPeer->addr, &rasNetListeningSocket.addr, sizeof(newRasPeer->addr)) == 0)
+        if (myPeerIdx == -1 && memcmp(&newRasPeer->addr, &rasNetListeningSocket.addr, sizeof(newRasPeer->addr)) == 0) {
           newMyPeerIdx = newPeerIdx;
+        }
         rankPeerIdx++;
       }
-    } else { // rankPeerIdx == *nRankPeers
+    } else {
+      // rankPeerIdx == *nRankPeers
       // No more rankPeers -- copy the rasPeer over if needed.
       if (newRasPeers != rasPeers) {
         if (newPeerIdx < newNRasPeers) {
@@ -679,7 +687,8 @@ static ncclResult_t rasLinkReinitConns(struct rasLink* link) {
     }
     memset(link->conns, '\0', sizeof(*link->conns));
     link->lastUpdatePeersTime = 0;
-  } else { // link->conns == nullptr
+  } else {
+    // link->conns == nullptr
     NCCLCHECK(ncclCalloc(&link->conns, 1));
   }
 
@@ -794,7 +803,8 @@ ncclResult_t rasPeerDeclareDead(const union ncclSocketAddress* addr) {
   return ncclSuccess;
 }
 
-// Formats a peer description from a rasPeerInfo struct (format: "Process <pid> on node <host> managing GPU[s] <gpus>").
+// Formats a peer description from a rasPeerInfo struct (format: "Process <pid> on node <host> managing GPU[s]
+// <gpus>").
 const char* rasPeerInfoToString(const struct rasPeerInfo* peer, char* buf, size_t size) {
   char hostBuf[SOCKET_NAME_MAXLEN + 1];
   char gpuBuf[1024];
@@ -917,8 +927,10 @@ static int rasRanksCompare(const void* e1, const void* e2) {
   const struct rasRankInit* r2 = (const struct rasRankInit*)e2;
   int cmp = ncclSocketsCompare(&r1->addr, &r2->addr);
   if (cmp == 0) {
-    if (r1->addr.sa.sa_family == 0) // Bail out in case of empty addresses...
+    if (r1->addr.sa.sa_family == 0) {
+      // Bail out in case of empty addresses...
       return 0;
+    }
     if (r1->pid != r2->pid) {
       // Should never happen.
       INFO(NCCL_RAS, "RAS ranks discrepancy for same address %s: r1->pid %d, r2->pid %d -- internal error?",

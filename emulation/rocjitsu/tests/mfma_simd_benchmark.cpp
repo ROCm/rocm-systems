@@ -9,17 +9,22 @@
 /// Both modes run in the same process; the `amdgpu::simd_force_scalar()`
 /// thread-local flag flips the kernel between its dense native-width matmul
 /// (SIMD) and the per-output scalar triple-loop. The benchmark drives the
-/// execute kernels directly (no decode) so it isolates the matmul body, then
-/// reports ns/MFMA and speedup and checks SIMD-vs-scalar agreement:
+/// execute kernels directly so they isolate the matmul body, then report
+/// ns/MFMA and speedup and check SIMD-vs-scalar agreement. The generated
+/// block-scale benchmark decodes once up front and invokes the generated
+/// instruction implementation in the timed loop:
 ///   - i32/i8 output: integer MAC is exact, bit-identical.
 ///   - f32/f64 output: SIMD uses fused FMA (matching GFX9 MFMA hardware) while
 ///     the scalar reference is non-fused, so results agree to a small relative
 ///     tolerance, not bit-exactly.
 
+#include "decode_test_util.h"
 #include "mma_test_util.h"
 #include "rocjitsu/code/rj_code.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/mma_exec.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/simd_glue.h"
+#include "rocjitsu/isa/decoder.h"
+#include "rocjitsu/isa/instruction.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"
 #include "rocjitsu/vm/amdgpu/l2_cache.h"
@@ -30,6 +35,7 @@
 
 #include <gtest/gtest.h>
 
+#include <array>
 #include <bit>
 #include <chrono>
 #include <cmath>
@@ -57,6 +63,8 @@ constexpr uint32_t S0_OFF = 0;
 constexpr uint32_t S1_OFF = 64;
 constexpr uint32_t DST_OFF = 128;
 constexpr uint32_t OUT_REGS = 32; // dst window read back for the correctness check.
+
+constexpr uint32_t vgpr_src(uint32_t reg) { return 256u + reg; }
 
 struct BenchFixture {
   amdgpu::GpuMemory gpu_mem;
@@ -499,26 +507,32 @@ TEST(MfmaSimdBenchmark, I32_32x32x32_i8_Specialized) {
   bench("v_mfma_i32_32x32x32_i8 [specialized]", fx, run, double(M) * N * K * B, /*is_int=*/true);
 }
 
-// v_mfma_scale_f32_16x16x128_f8f6f4: MX-scaled fp8 path (exec_f32_scaled),
-// in_bits=8, K=128 (4 K-blocks), N=16. Scales seeded to e8m0 127 (factor 1).
+// v_mfma_scale_f32_16x16x128_f8f6f4: MX-scaled fp8 path through the generated
+// CDNA4 instruction implementation. Scales are e8m0 127 (factor 1).
 TEST(MfmaSimdBenchmark, F32Scaled_16x16x128_fp8) {
   SKIP_IF_NO_SIMD();
   BenchFixture fx;
-  constexpr uint32_t M = 16, N = 16, K = 128, B = 1, bits = 8;
+  constexpr uint32_t M = 16, N = 16, K = 128, B = 1;
   constexpr uint32_t SCALE_A = 192, SCALE_B = 200;
-  fx.seed(S0_OFF, 8, bits, mma_test::SmallGen(13));
-  fx.seed(S1_OFF, 8, bits, mma_test::SmallGen(14));
+  fx.seed(S0_OFF, 8, /*bit_width=*/8, mma_test::SmallGen(13));
+  fx.seed(S1_OFF, 8, /*bit_width=*/8, mma_test::SmallGen(14));
   for (uint32_t lane = 0; lane < WF_SIZE; ++lane) {
     fx.cu->write_vgpr(fx.vbase + SCALE_A, lane, 0x7F7F7F7Fu); // e8m0 = 127 per block
     fx.cu->write_vgpr(fx.vbase + SCALE_B, lane, 0x7F7F7F7Fu);
   }
-  auto run = [&] {
-    amdgpu::exec_f32_scaled(*fx.cu, M, N, K, B, bits, fx.vbase + DST_OFF, fx.vbase + S0_OFF,
-                            fx.vbase + S1_OFF, 0, amdgpu::extract_fp8, amdgpu::extract_fp8,
-                            /*const_acc=*/0, /*cbsz=*/0, /*abid=*/0, /*blgp=*/0, fx.vbase + SCALE_A,
-                            fx.vbase + SCALE_B);
-  };
-  bench("v_mfma_scale_f32_16x16x128_fp8", fx, run, double(M) * N * K * B, /*is_int=*/false);
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
+  ASSERT_NE(decoder, nullptr);
+  const auto words = mma_test::make_cdna4_mfma_scale_words(
+      45, /*abid=*/1, vgpr_src(SCALE_A), vgpr_src(SCALE_B), /*a_byte=*/0,
+      /*b_byte=*/0, /*cbsz=*/0, /*blgp=*/0, DST_OFF, vgpr_src(S0_OFF), vgpr_src(S1_OFF),
+      vgpr_src(32));
+  std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
+  ASSERT_NE(inst, nullptr);
+  ASSERT_EQ(std::string_view(inst->mnemonic()), "v_mfma_scale_f32_16x16x128_f8f6f4");
+
+  auto run = [&] { fx.cu->execute_instruction(inst.get(), *fx.wf); };
+  bench("v_mfma_scale_f32_16x16x128_f8f6f4 [generated]", fx, run, double(M) * N * K * B,
+        /*is_int=*/false);
 }
 
 // v_mfma_f64_16x16x4_f64: f64 path (native<double> == 8 lanes, N=16).

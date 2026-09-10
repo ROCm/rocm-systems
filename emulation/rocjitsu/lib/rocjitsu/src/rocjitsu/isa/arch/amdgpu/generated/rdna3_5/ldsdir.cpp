@@ -6,7 +6,7 @@
 
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna3_5/ldsdir.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna3_5/execution_backend.h"
-#include "util/except.h"
+#include <memory>
 
 namespace rocjitsu {
 namespace rdna3_5 {
@@ -27,6 +27,17 @@ LdsParamLoadLdsdir::LdsParamLoadLdsdir(const MachineInst *inst)
   m0.apply_fieldless_caps(false, false, false);
 }
 
+namespace detail {
+DecodeResult decodeLdsParamLoadLdsdir(const MachineInst *opcode,
+                                      const DecodeErrorEmitter &emit_error) {
+  Result validation = Ldsdir::validate_encoding(
+      "lds_param_load", reinterpret_cast<const Ldsdir::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<LdsParamLoadLdsdir>(opcode);
+}
+} // namespace detail
+
 LdsDirectLoadLdsdir::LdsDirectLoadLdsdir(const MachineInst *inst)
     : Ldsdir("lds_direct_load", reinterpret_cast<const OpEncoding *>(inst),
              selected_exec_fn(InstructionExecutionId::LdsDirectLoadLdsdir)),
@@ -40,6 +51,17 @@ LdsDirectLoadLdsdir::LdsDirectLoadLdsdir(const MachineInst *inst)
   dsmem.apply_fieldless_caps(false, false, false);
   m0.apply_fieldless_caps(false, false, false);
 }
+
+namespace detail {
+DecodeResult decodeLdsDirectLoadLdsdir(const MachineInst *opcode,
+                                       const DecodeErrorEmitter &emit_error) {
+  Result validation = Ldsdir::validate_encoding(
+      "lds_direct_load", reinterpret_cast<const Ldsdir::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<LdsDirectLoadLdsdir>(opcode);
+}
+} // namespace detail
 
 } // namespace rdna3_5
 } // namespace rocjitsu

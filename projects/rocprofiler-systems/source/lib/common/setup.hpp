@@ -5,7 +5,7 @@
 
 #include "common/environment.hpp"
 #include "common/path.hpp"
-#include <spdlog/fmt/fmt.h>
+#include <fmt/format.h>
 
 #include <cstdlib>
 #include <dlfcn.h>
@@ -85,8 +85,8 @@ get_environ(int _verbose, std::string _search_paths = {},
         _search_paths = get_default_lib_search_paths();
     }
 
-    _omnilib    = common::path::find_path(_omnilib, _verbose, _search_paths);
-    _omnilib_dl = common::path::find_path(_omnilib_dl, _verbose, _search_paths);
+    _omnilib    = common::path::find_library(_omnilib, _verbose, _search_paths);
+    _omnilib_dl = common::path::find_library(_omnilib_dl, _verbose, _search_paths);
 
     return _data;
 }

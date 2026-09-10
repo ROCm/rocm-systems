@@ -1,6 +1,7 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
+#include "decode_test_util.h"
 #include "rocjitsu/code/amdgpu_code_object.h"
 #include "rocjitsu/code/amdgpu_elf.h"
 #include "rocjitsu/code/basic_block.h"
@@ -14,6 +15,7 @@
 #include <algorithm>
 #include <array>
 #include <bit>
+#include <cstddef>
 #include <cstdint>
 #include <cstring>
 #include <functional>
@@ -344,6 +346,35 @@ void edit_first_relative64(std::vector<uint8_t> &image,
   FAIL() << "no R_AMDGPU_RELATIVE64 relocation found to edit";
 }
 
+void append_nonallocated_relocations(std::vector<uint8_t> &image,
+                                     std::span<const Elf64_Rela> relocations) {
+  Elf64_Ehdr ehdr{};
+  std::memcpy(&ehdr, image.data(), sizeof(ehdr));
+  std::vector<Elf64_Shdr> sections(ehdr.e_shnum);
+  std::memcpy(sections.data(), image.data() + ehdr.e_shoff, sections.size() * sizeof(Elf64_Shdr));
+
+  const uint64_t relocation_offset = ehdr.e_shoff;
+  const auto *bytes = reinterpret_cast<const uint8_t *>(relocations.data());
+  image.insert(image.begin() + static_cast<std::ptrdiff_t>(relocation_offset), bytes,
+               bytes + relocations.size_bytes());
+
+  Elf64_Shdr metadata_relocations{};
+  metadata_relocations.sh_type = SHT_RELA;
+  metadata_relocations.sh_offset = relocation_offset;
+  metadata_relocations.sh_size = relocations.size_bytes();
+  metadata_relocations.sh_link = 4;
+  metadata_relocations.sh_info = ehdr.e_shstrndx;
+  metadata_relocations.sh_addralign = alignof(Elf64_Rela);
+  metadata_relocations.sh_entsize = sizeof(Elf64_Rela);
+  sections.push_back(metadata_relocations);
+
+  ehdr.e_shoff += relocations.size_bytes();
+  ehdr.e_shnum = static_cast<uint16_t>(sections.size());
+  image.resize(ehdr.e_shoff + sections.size() * sizeof(Elf64_Shdr));
+  std::memcpy(image.data(), &ehdr, sizeof(ehdr));
+  std::memcpy(image.data() + ehdr.e_shoff, sections.data(), sections.size() * sizeof(Elf64_Shdr));
+}
+
 TEST(RelocationFunctionTable, DiscoversGotReferencedRelativeTextPointers) {
   const auto image = make_relocation_function_table_elf();
   const AmdGpuCodeObject object(image.data(), image.size());
@@ -359,6 +390,26 @@ TEST(RelocationFunctionTable, DiscoversGotReferencedRelativeTextPointers) {
   EXPECT_EQ(tables[0].entries[0].target_text_offset, 4u);
   EXPECT_EQ(tables[0].entries[1].slot_vaddr, 0x2010u);
   EXPECT_EQ(tables[0].entries[1].target_text_offset, 12u);
+}
+
+TEST(RelocationFunctionTable, IgnoresExplicitNonAllocatedRelocations) {
+  auto image = make_relocation_function_table_elf();
+  const std::array<Elf64_Rela, 2> metadata_relocations = {
+      Elf64_Rela{.r_offset = 0x2008u,
+                 .r_info = relocation_info(0, R_AMDGPU_RELATIVE64),
+                 .r_addend = 0x1008},
+      Elf64_Rela{.r_offset = 0x3008u, .r_info = relocation_info(1, R_AMDGPU_ABS64), .r_addend = 0},
+  };
+  append_nonallocated_relocations(image, metadata_relocations);
+  const AmdGpuCodeObject object(image.data(), image.size());
+  ASSERT_TRUE(object.is_valid());
+
+  const auto tables = discover_relocation_function_tables(object);
+  ASSERT_EQ(tables.size(), 1u);
+  EXPECT_EQ(tables[0].got_slot_vaddrs, std::vector<uint64_t>{0x3000u});
+  ASSERT_EQ(tables[0].entries.size(), 2u);
+  EXPECT_EQ(tables[0].entries[0].slot_vaddr, 0x2000u);
+  EXPECT_EQ(tables[0].entries[1].slot_vaddr, 0x2010u);
 }
 
 TEST(RelocationFunctionTable, DiscoveryRejectsMisalignedTableSlot) {
@@ -485,10 +536,10 @@ TEST(RelocationFunctionTable, ResolvesDynamicDispatchThroughGotAndTableLoads) {
   const auto tables = discover_relocation_function_tables(object);
   ASSERT_EQ(tables.size(), 1u);
 
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
   ASSERT_NE(decoder, nullptr);
   std::array<uint64_t, 1> leaders{40};
-  const auto blocks = BasicBlock::build(object, *decoder, ROCJITSU_CODE_ARCH_GFX1250, leaders);
+  const auto blocks = build_valid_blocks(object, *decoder, ROCJITSU_CODE_ARCH_CDNA5, leaders);
   const auto dispatches = analyze_relocation_pairs(blocks, tables, 0x1000).dispatches;
   ASSERT_EQ(dispatches.size(), 1u);
   EXPECT_EQ(dispatches[0].table_index, 0u);
@@ -510,10 +561,10 @@ TEST(RelocationFunctionTable, ResolvesRcclDirectIndexedTableDispatch) {
   ASSERT_EQ(tables.size(), 1u);
   EXPECT_TRUE(tables[0].got_slot_vaddrs.empty());
 
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
   ASSERT_NE(decoder, nullptr);
   std::array<uint64_t, 1> leaders{32};
-  const auto blocks = BasicBlock::build(object, *decoder, ROCJITSU_CODE_ARCH_GFX1250, leaders);
+  const auto blocks = build_valid_blocks(object, *decoder, ROCJITSU_CODE_ARCH_CDNA5, leaders);
   const auto analysis = analyze_relocation_pairs(blocks, tables, 0x1000);
   const auto &dispatches = analysis.dispatches;
   ASSERT_EQ(dispatches.size(), 1u);
@@ -549,10 +600,10 @@ TEST(RelocationFunctionTable, RejectsChainedAddressAddDispatch) {
   const auto tables = discover_relocation_function_tables(object);
   ASSERT_EQ(tables.size(), 1u);
 
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
   ASSERT_NE(decoder, nullptr);
   std::array<uint64_t, 1> leaders{44};
-  const auto blocks = BasicBlock::build(object, *decoder, ROCJITSU_CODE_ARCH_GFX1250, leaders);
+  const auto blocks = build_valid_blocks(object, *decoder, ROCJITSU_CODE_ARCH_CDNA5, leaders);
   const auto dispatches = analyze_relocation_pairs(blocks, tables, 0x1000).dispatches;
   // The base is built with two literal adds; only one add offset can be relocated,
   // so the dispatch must fail closed rather than resolve to a value whose first
@@ -578,10 +629,10 @@ TEST(RelocationFunctionTable, ResolvesBackwardTableAddress) {
   const auto tables = discover_relocation_function_tables(object);
   ASSERT_EQ(tables.size(), 1u);
 
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
   ASSERT_NE(decoder, nullptr);
   std::array<uint64_t, 1> leaders{32};
-  const auto blocks = BasicBlock::build(object, *decoder, ROCJITSU_CODE_ARCH_GFX1250, leaders);
+  const auto blocks = build_valid_blocks(object, *decoder, ROCJITSU_CODE_ARCH_CDNA5, leaders);
   const auto dispatches = analyze_relocation_pairs(blocks, tables, kAssumedTextVaddr).dispatches;
   ASSERT_EQ(dispatches.size(), 1u);
   EXPECT_EQ(dispatches[0].table_index, 0u);

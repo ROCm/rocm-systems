@@ -1019,6 +1019,7 @@ static const float nvlsEfficiency[NCCL_NUM_COMPCAPS] = {
 #endif
 
 // Default tuner constants (positional initializers for C++17 compatibility)
+// clang-format off
 static const ncclTunerConstants_t ncclTunerConstantsDefaults = {
   // baseLatencies
   {
@@ -1099,6 +1100,7 @@ static const ncclTunerConstants_t ncclTunerConstantsDefaults = {
     {0.0, 96.0, 43.1} /* Blackwell (N1/N2/N4) */
   }
 };
+// clang-format on
 
 NCCL_PARAM(PatEnable, "PAT_ENABLE", 0);
 static int ncclPatEnable(struct ncclComm* comm) {
@@ -1449,6 +1451,7 @@ ncclResult_t ncclTopoTuneModel(struct ncclComm* comm, int minCompCap, int maxCom
       if (comm->config.collnetEnable == 0 &&
           (a == NCCL_ALGO_COLLNET_DIRECT || a == NCCL_ALGO_COLLNET_CHAIN || (a == NCCL_ALGO_NVLS && comm->nNodes > 1)))
         disable = 1;
+      if (comm->config.collnetEnable && a == NCCL_ALGO_COLLNET_CHAIN && comm->collNetChainSupport == 0) disable = 1;
       // Disable CollNet+Direct if not on an NVSwitch system
       if (nvsCount == 0 && a == NCCL_ALGO_COLLNET_DIRECT) disable = 1;
       if (disable) algoEnable[f * NCCL_NUM_ALGORITHMS + a] = 0;

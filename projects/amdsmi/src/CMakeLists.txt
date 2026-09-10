@@ -1,3 +1,6 @@
+# Copyright Advanced Micro Devices, Inc.
+# SPDX-License-Identifier: MIT
+
 message("&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&")
 message("                  CMake AMD SMI C/C++ Library                      ")
 message("&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&")
@@ -58,6 +61,10 @@ set(SRC_LIST
     "${CMN_SRC_LIST}"
     "${NIC_SOURCES}"
 )
+
+if(ENABLE_WSL_BACKEND)
+    list(APPEND SRC_LIST "${SRC_DIR}/amd_smi_wsl_device.cc")
+endif()
 
 # CONFIGURE_DEPENDS re-evaluates the glob at build time so adding or removing an
 # impl header triggers a regenerate instead of going unnoticed until a clean build.
@@ -138,7 +145,6 @@ if(BUILD_CUID)
         HINTS ${ROCM_DIR_CORE}/include/amdcuid ${CMAKE_PREFIX_PATH}/include/amdcuid
         REQUIRED
     )
-    find_package(OpenSSL REQUIRED)
 endif(BUILD_CUID)
 #
 #   --- When BUILD_BOTH_LIBS: build shared and static; tests/examples link to static ---
@@ -167,6 +173,21 @@ function(amdsmi_configure_common_target _TARGET)
         ${_TARGET}
         PRIVATE rt Threads::Threads ${CMAKE_DL_LIBS} amdsminic ${FILESYSTEM_LIB} ${UALOE_LINK_LIBRARIES}
     )
+
+    if(ENABLE_WSL_BACKEND)
+        target_compile_definitions(${_TARGET} PRIVATE ENABLE_WSL_BACKEND)
+        set(_WSL_HSAKMT_INC "${PROJECT_SOURCE_DIR}/../rocr-runtime/libhsakmt/include")
+        if(NOT EXISTS "${_WSL_HSAKMT_INC}/hsakmt/rocdxg_smi.h")
+            message(
+                FATAL_ERROR
+                "ENABLE_WSL_BACKEND=ON requires ${_WSL_HSAKMT_INC}/hsakmt/rocdxg_smi.h "
+                "(built from rocr-runtime/libhsakmt's WIN_SDK/dxg path). "
+                "Check out and build the matching libhsakmt tree before enabling this flag."
+            )
+        endif()
+        target_include_directories(${_TARGET} PRIVATE ${_WSL_HSAKMT_INC})
+    endif()
+
     target_include_directories(
         ${_TARGET}
         PRIVATE
@@ -189,7 +210,7 @@ function(amdsmi_configure_common_target _TARGET)
 
     if(BUILD_CUID)
         target_compile_definitions(${_TARGET} PRIVATE BUILD_CUID)
-        target_link_libraries(${_TARGET} PRIVATE ${AMDCUID_LIB} OpenSSL::Crypto)
+        target_link_libraries(${_TARGET} PRIVATE ${AMDCUID_LIB})
         target_include_directories(${_TARGET} PRIVATE ${AMDCUID_INCLUDE_DIR})
     endif()
 
@@ -313,15 +334,18 @@ install(
     COMPONENT dev
 )
 
-# Test-only impl headers (those with "_test" in the name: the CPER read seam and
-# the internal test helpers/flags) are build-only. Production and the unit tests
-# include them from the source tree, but their symbols are hidden from
-# libamd_smi.so by the version script (cper_set_read_fn_for_testing has no
-# amdsmi_ prefix; amdsmi_test_sleep is a C++ symbol the amdsmi_* export glob does
-# not match), so a dev-package consumer that included them would hit a link
-# error. Build them, but keep them out of the installed dev headers.
+# Impl headers declaring nothing libamd_smi.so exports are build-only: a
+# dev-package consumer that included one would hit a link error. Production and
+# the unit tests include them from the source tree instead. The version script
+# exports the amdsmi_* glob, which matches neither an unprefixed symbol
+# (cper_set_read_fn_for_testing) nor a mangled C++ one (amdsmi_test_sleep, and
+# both of amd_smi_cper.h's declarations).
 set(INSTALL_IMPL_HEADERS ${IMPL_HEADERS})
 list(FILTER INSTALL_IMPL_HEADERS EXCLUDE REGEX "_test")
+list(FILTER INSTALL_IMPL_HEADERS EXCLUDE REGEX "amd_smi_container_id_parser")
+list(FILTER INSTALL_IMPL_HEADERS EXCLUDE REGEX "amd_smi_cper")
+list(FILTER INSTALL_IMPL_HEADERS EXCLUDE REGEX "amd_smi_wsl_device")
+list(FILTER INSTALL_IMPL_HEADERS EXCLUDE REGEX "amd_smi_wsl_syms")
 install(FILES ${INSTALL_IMPL_HEADERS} DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/amd_smi/impl/ COMPONENT dev)
 
 install(FILES ${NIC_INCLUDES} DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/amd_smi/impl/nic/ COMPONENT dev)

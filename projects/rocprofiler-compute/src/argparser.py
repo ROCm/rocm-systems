@@ -443,18 +443,6 @@ Examples:
         ),
     )
     profile_group.add_argument(
-        "--join-type",
-        metavar="",
-        required=False,
-        choices=["kernel", "grid"],
-        default="grid",
-        help=(
-            "\t\t\tChoose how to join rocprof runs: (DEFAULT: grid)\n"
-            "\t\t\t   kernel (i.e. By unique kernel name dispatches)\n"
-            "\t\t\t   grid (i.e. By unique kernel name + grid size dispatches)"
-        ),
-    )
-    profile_group.add_argument(
         "--no-roof",
         required=False,
         default=False,
@@ -467,15 +455,6 @@ Examples:
         default=None,
         nargs=argparse.REMAINDER,
         help="\t\t\tProvide command for profiling after double dash.",
-    )
-    profile_group.add_argument(
-        "--format-rocprof-output",
-        required=False,
-        metavar="",
-        dest="format_rocprof_output",
-        choices=["csv", "rocpd"],
-        default="rocpd",
-        help=("\t\t\tSet the format of output file of rocprof."),
     )
     profile_group.add_argument(
         "--rocprofiler-sdk-tool-path",
@@ -511,7 +490,6 @@ Examples:
         help=(
             "\t\t\t(DEPRECATED) Retain the large raw rocpd database "
             "in workload directory.\n"
-            "\t\t\tThis option requires --format-rocprof-output rocpd.\n"
             "\t\t\t --retain-rocpd-output is deprecated. .db files "
             "will be retained by default in a future release."
         ),
@@ -645,9 +623,11 @@ Examples:
         experimental_enabled=experimental_enabled,
         feature_label="PC Sampling",
         help=(
-            "\t\t\tSet the interval of pc sampling.\n"
-            "\t\t\t  For stochastic sampling, the interval is in cycles; it "
-            "must be a power of 2 and at least 65536 (DEFAULT: 1048576).\n"
+            "\t\t\tSet the interval of pc sampling. The accepted range is "
+            "read from the device; see 'rocprofv3-avail info --pc-sampling'. "
+            "When the device cannot be queried, 1 to 1048576 is accepted.\n"
+            "\t\t\t  For stochastic sampling, the interval is in cycles and "
+            "must be a power of 2 (DEFAULT: 1048576).\n"
             "\t\t\t  For host_trap sampling, the interval is in microseconds "
             "(DEFAULT: 512)."
         ),
@@ -832,11 +812,11 @@ Examples:
             "\t\t  stdout - print report to the terminal (no file/folder created).\n"
             "\t\t  txt    - write report to <name>.txt; disables terminal output.\n"
             "\t\t  csv    - write one CSV per analysis view into a folder <name>/.\n"
-            "\t\t           Requires profiles collected with\n"
-            "\t\t           --format-rocprof-output rocpd. Disables terminal output.\n"
+            "\t\t           Requires profiles collected in rocpd format. "
+            "Disables terminal output.\n"
             "\t\t  db     - write a SQLite database <name>.db (see analysis\n"
             "\t\t           database schema in the docs). Requires profiles\n"
-            "\t\t           collected with --format-rocprof-output rocpd.\n"
+            "\t\t           collected in rocpd format.\n"
             "\t\t           Disables terminal output.\n"
             "\t\tDefault <name> is rocprof_compute_<uuid>; override with"
             " --output-name.\n"

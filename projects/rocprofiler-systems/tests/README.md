@@ -65,12 +65,22 @@ For example, in a venv, passing `ROCPROFSYS_TEST_EXECUTABLE=$(which python3)` sh
 | `ROCPROFSYS_DISABLE_TEST_CACHE` | Disables caching used by the tests | `OFF` |
 | `ROCM_PATH` | Path to ROCm installation | `/opt/rocm` |
 
-#### Perfetto GLIBC Issue
+#### Trace Processor Shell
 
-If Perfetto validation fails due to GLIBC version mismatch (this may occur on RHEL 8.x or SUSE 15.5), download a compatible `trace_processor_shell` binary and set `ROCPROFSYS_TRACE_PROC_SHELL`:
+Perfetto validation needs a `trace_processor_shell` binary. The build downloads a pinned copy and
+stages it in the build tree, where the validation script picks it up automatically. If none was
+staged, or the staged one cannot run on the host, the Perfetto Python API downloads one on demand
+instead, which needs network access at test time.
+
+Set `ROCPROFSYS_TRACE_PROC_SHELL` to use a specific binary in preference to both:
 
 ```bash
 curl -L https://commondatastorage.googleapis.com/perfetto-luci-artifacts/v47.0/linux-amd64/trace_processor_shell -o /tmp/$USER/trace_processor_shell
 chmod +x /tmp/$USER/trace_processor_shell
 export ROCPROFSYS_TRACE_PROC_SHELL=/tmp/$USER/trace_processor_shell
 ```
+
+Configure with `-DROCPROFSYS_TRACE_PROCESSOR_SHELL=<path>` to stage an existing binary,
+`-DROCPROFSYS_DOWNLOAD_TRACE_PROCESSOR_SHELL=OFF` to skip the download, or
+`-DROCPROFSYS_TRACE_PROCESSOR_SHELL_URL=<url>` and
+`-DROCPROFSYS_TRACE_PROCESSOR_SHELL_SHA256=<sha256>` to fetch a different build.

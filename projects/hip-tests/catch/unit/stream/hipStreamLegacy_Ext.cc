@@ -500,14 +500,14 @@ HIP_TEST_CASE(Unit_hipStreamLegacy_MultiDeviceMultiOperation) {
  * Local helper function to copy data from host to device
  */
 static void copyFromHostToDevice(int* hostArr, int* devArr) {
-  HIP_CHECK(hipMemcpyAsync(devArr, hostArr, getNBytes(), hipMemcpyHostToDevice, hipStreamLegacy));
+  HIP_CHECK_THREAD(hipMemcpyAsync(devArr, hostArr, getNBytes(), hipMemcpyHostToDevice, hipStreamLegacy));
 }
 
 /*
  * Local helper function to copy data from device to host
  */
 static void copyFromDeviceToHost(int* devArr, int* hostArr) {
-  HIP_CHECK(hipMemcpyAsync(hostArr, devArr, getNBytes(), hipMemcpyDeviceToHost, hipStreamLegacy));
+  HIP_CHECK_THREAD(hipMemcpyAsync(hostArr, devArr, getNBytes(), hipMemcpyDeviceToHost, hipStreamLegacy));
 }
 
 /**
@@ -553,6 +553,7 @@ HIP_TEST_CASE(Unit_hipStreamLegacy_TwoThreadsEachOneDiffOperation) {
 
   std::thread D2H_Thread(copyFromDeviceToHost, devArr, hostArrDst);
   D2H_Thread.join();
+  HIP_CHECK_THREAD_FINALIZE();
   HIP_CHECK(hipStreamSynchronize(hipStreamLegacy));
 
   for (int i = 0; i < getN(); i++) {
@@ -634,8 +635,8 @@ HIP_TEST_CASE(Unit_hipStreamLegacy_TwoDevicesEachOneDiffOperation) {
  * Local helper function to copy data from device 0 to device 1
  */
 static void operationsInDev0(int* devArrDev0, int* devArrDev1) {
-  HIP_CHECK(hipSetDevice(0));
-  HIP_CHECK(hipMemcpyPeerAsync(devArrDev1, 1,  // des
+  HIP_CHECK_THREAD(hipSetDevice(0));
+  HIP_CHECK_THREAD(hipMemcpyPeerAsync(devArrDev1, 1,  // des
                                devArrDev0, 0,  // src
                                getNBytes(), hipStreamLegacy));
 }
@@ -644,8 +645,8 @@ static void operationsInDev0(int* devArrDev0, int* devArrDev1) {
  * Local helper function to copy data from device to host
  */
 static void operationsInDev1(int* devArrDev1, int* hostArrDst) {
-  HIP_CHECK(hipSetDevice(1));
-  HIP_CHECK(hipMemcpyAsync(hostArrDst, devArrDev1, getNBytes(), hipMemcpyDeviceToHost, hipStreamLegacy));
+  HIP_CHECK_THREAD(hipSetDevice(1));
+  HIP_CHECK_THREAD(hipMemcpyAsync(hostArrDst, devArrDev1, getNBytes(), hipMemcpyDeviceToHost, hipStreamLegacy));
 }
 
 /**
@@ -696,6 +697,7 @@ HIP_TEST_CASE(Unit_hipStreamLegacy_TwoThreadsInTwoDevicesEachOneDiffOperation) {
   dev0Thread.join();
   std::thread dev1Thread(operationsInDev1, devArrDev1, hostArrDst);
   dev1Thread.join();
+  HIP_CHECK_THREAD_FINALIZE();
   HIP_CHECK(hipStreamSynchronize(hipStreamLegacy));
 
   for (int i = 0; i < getN(); i++) {

@@ -129,8 +129,8 @@ rewrite_trace_packet_checked(std::vector<char>& output, const char* packet,
     std::size_t offset = 0;
     while(offset < size)
     {
-        std::size_t   field_start = offset;
-        std::uint64_t field_tag   = 0;
+        const std::size_t field_start = offset;
+        std::uint64_t     field_tag   = 0;
         if(!read_varint(packet, size, offset, field_tag))
             return rewrite_trace_packet_status::malformed_input;
         const std::uint32_t wire_type = field_tag & WIRE_TYPE_MASK;

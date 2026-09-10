@@ -596,7 +596,7 @@ When profiling communication-intensive applications, consider the following reco
 
 **Leverage Visualization**
 
-* Use the `Rocm Optiq <https://rocm.docs.amd.com/projects/roc-optiq/en/latest/what-is-optiq.html>`_ for rocpd database output and the Perfetto UI for perfetto traces, to visualize communication timelines and identify bottlenecks
+* Use the `ROCm Optiq <https://rocm.docs.amd.com/projects/roc-optiq/en/latest/what-is-optiq.html>`_ for rocpd database output and the Perfetto UI for perfetto traces, to visualize communication timelines and identify bottlenecks
 * Look for communication/computation overlap opportunities
 * Identify load imbalance by comparing traces across ranks
 

@@ -1,7 +1,7 @@
 #
 #
 #
-cmake_minimum_required(VERSION 3.21.0 FATAL_ERROR)
+cmake_minimum_required(VERSION 3.24 FATAL_ERROR)
 
 if(NOT CMAKE_HIP_COMPILER)
     find_program(
@@ -40,8 +40,8 @@ target_sources(exec-mask-manipulation PRIVATE exec_mask_manipulation.cpp)
 # vector rather than scalar, causing assembly errors. -O2 ensures the compiler correctly
 # resolves these operands as scalar registers. Debug symbols (-g) are still required for
 # PC sampling decoding validation.
-target_compile_options(exec-mask-manipulation PRIVATE -O2 -W -Wall -Wextra -Wpedantic
-                                                      -Wshadow -Werror -g)
+target_compile_options(exec-mask-manipulation PRIVATE -O2 -Wpedantic -g)
 
 find_package(Threads REQUIRED)
-target_link_libraries(exec-mask-manipulation PRIVATE Threads::Threads)
+target_link_libraries(exec-mask-manipulation PRIVATE Threads::Threads
+                                                     rocprofiler-sdk::tests-build-flags)

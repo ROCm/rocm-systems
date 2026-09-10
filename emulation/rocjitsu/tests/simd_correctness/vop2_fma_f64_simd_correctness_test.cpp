@@ -2,26 +2,13 @@
 // SPDX-License-Identifier: MIT
 
 /// @file vop2_fma_f64_simd_correctness_test.cpp
-/// @brief Bit-identity check (SIMD fast path vs scalar body) for the only f64
-/// VOP2 op reachable on CDNA4, v_fmac_f64 (dst = fma(src0, vsrc1, dst), all
-/// f64). This is the first user of the 64-bit-lane SIMD infra: a per-lane f64
-/// lives as two 32-bit VGPRs at the same lane index (lo = reg N, hi = reg N+1),
-/// so the SIMD path reads/writes through the split lo/hi pointer pair
-/// (util::load64 / masked_store64). The first test directly validates that
-/// layout assumption (write_lane64 round-trips through load64 via the operand's
-/// 64-bit lane pointers). The v_fmac_f64 check runs TWICE in the same process
-/// -- once forcing the scalar body, once the SIMD fast path, with identical
-/// inputs/EXEC -- and the destination f64 results are asserted equal per
-/// non-skipped lane (util::set_force_scalar_for_testing flips the gate
-/// in-process). util::stdx::fma over native<double> is bit-exact to std::fma for
-/// finite/Inf inputs; NaN-result lanes may diverge in NaN payload (accepted), so
-/// those lanes are excluded from the comparison — NaN-ness of the result is
-/// deterministic from the inputs, so both runs skip the same lanes.
+/// @brief CDNA4 V_FMAC_F64 decode, split-register, partial-EXEC, and MODE-aware
+/// SIMD regressions.
 
+#include "decode_test_util.h"
 #include "util/simd_test_hooks.h"
 
 #include "rocjitsu/code/rj_code.h"
-#include "rocjitsu/isa/arch/amdgpu/generated/shared/execute_shared.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
@@ -33,226 +20,195 @@
 
 #include <array>
 #include <bit>
-#include <cmath>
 #include <cstdint>
 #include <memory>
-#include <vector>
 
 namespace {
 
 using namespace rocjitsu;
 
-constexpr uint32_t WF_SIZE = 64;
-constexpr uint32_t SGPRS_PER_WF = 106;
-constexpr uint32_t VGPRS_PER_WF = 256;
-[[maybe_unused]] constexpr uint64_t LO_SENTINEL = 0xDEADBEEFu;
-[[maybe_unused]] constexpr uint64_t HI_SENTINEL = 0xFEEDFACEu;
+constexpr uint32_t kWaveSize = 64;
+constexpr uint32_t kSgprsPerWave = 106;
+constexpr uint32_t kVgprsPerWave = 256;
 
-// CDNA4 VOP2: opcode[30:25], vdst[24:17], vsrc1[16:9], src0[8:0]. Bit 31 = 0.
 constexpr uint32_t vop2_encode(uint32_t opcode, uint32_t vdst, uint32_t vsrc1, uint32_t src0) {
-  return ((opcode & 0x3F) << 25) | ((vdst & 0xFF) << 17) | ((vsrc1 & 0xFF) << 9) | (src0 & 0x1FF);
+  return ((opcode & 0x3fu) << 25) | ((vdst & 0xffu) << 17) | ((vsrc1 & 0xffu) << 9) |
+         (src0 & 0x1ffu);
 }
 
-// f64 edge values whose fma combinations cover ±0, ±Inf, denormal, large, and
-// ordinary normals. NaN is excluded from the seeded set (its payload may diverge
-// between packed and scalar fma); a few NaN lanes are still exercised via the RNG
-// tail and skipped explicitly when comparing.
-const std::array<double, 12> kEdge = {{
-    +0.0,
-    -0.0,
-    1.0,
-    -1.0,
-    2.0,
-    0.5,
-    std::numeric_limits<double>::infinity(),
-    -std::numeric_limits<double>::infinity(),
-    std::numeric_limits<double>::denorm_min(),
-    std::numeric_limits<double>::max(),
-    3.141592653589793,
-    -2.718281828459045,
-}};
+class ForceScalarGuard {
+public:
+  ForceScalarGuard() : original_(util::force_scalar()) {}
+  ~ForceScalarGuard() { util::set_force_scalar_for_testing(original_); }
 
-bool is_f64_nan(uint64_t bits) { return std::isnan(std::bit_cast<double>(bits)); }
+private:
+  bool original_;
+};
 
-struct Fixture {
-  amdgpu::GpuMemory gpu_mem;
-  amdgpu::L2Cache l2;
+class Vop2FmaF64Fixture {
+public:
+  amdgpu::GpuMemory gpu_memory{"vop2_fma_f64_simd_memory"};
+  amdgpu::L2Cache l2{"vop2_fma_f64_simd_l2"};
   std::unique_ptr<amdgpu::ComputeUnitCore> cu;
   std::unique_ptr<Decoder> decoder;
   amdgpu::Wavefront *wf = nullptr;
 
-  Fixture() : gpu_mem("vop2_fma_f64_simd_mem"), l2("vop2_fma_f64_simd_l2") {
-    amdgpu::ComputeUnitCore::Config cfg{};
-    cfg.arch = ROCJITSU_CODE_ARCH_CDNA4;
-    cfg.num_wf_slots = 1;
-    cfg.sgprs_per_wf = SGPRS_PER_WF;
-    cfg.vgprs_per_wf = VGPRS_PER_WF;
-    cfg.lds_size_kb = 64;
-    cu = amdgpu::ComputeUnitCore::create("cu_vop2_fma_f64_simd", cfg, &gpu_mem, &l2);
+  Vop2FmaF64Fixture() {
+    amdgpu::ComputeUnitCore::Config config{};
+    config.arch = ROCJITSU_CODE_ARCH_CDNA4;
+    config.num_wf_slots = 1;
+    config.sgprs_per_wf = kSgprsPerWave;
+    config.vgprs_per_wf = kVgprsPerWave;
+    config.lds_size_kb = 64;
+    cu = amdgpu::ComputeUnitCore::create("vop2_fma_f64_simd_cu", config, &gpu_memory, &l2);
     decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
-    wf = cu->dispatch_wf(0, 0, SGPRS_PER_WF, VGPRS_PER_WF);
+    wf = cu->dispatch_wf(0, 0, kSgprsPerWave, kVgprsPerWave);
   }
 
-  // Write a 64-bit value to a VGPR pair (reg = lo, reg+1 = hi) at `lane`.
-  void write64(uint32_t reg, uint32_t lane, uint64_t v) {
-    cu->write_vgpr(reg, lane, static_cast<uint32_t>(v));
-    cu->write_vgpr(reg + 1, lane, static_cast<uint32_t>(v >> 32));
-  }
-  uint64_t read64(uint32_t reg, uint32_t lane) {
-    return static_cast<uint64_t>(cu->read_vgpr(reg + 1, lane)) << 32 | cu->read_vgpr(reg, lane);
+  void write64(uint32_t reg, uint32_t lane, uint64_t value) {
+    const uint32_t base = wf->vgpr_alloc().base;
+    cu->write_vgpr(base + reg, lane, static_cast<uint32_t>(value));
+    cu->write_vgpr(base + reg + 1, lane, static_cast<uint32_t>(value >> 32));
   }
 
-  // src0 = v0:v1, vsrc1 = v2:v3, vdst = v4:v5 (relative to the alloc base).
-  void seed_inputs(uint64_t exec) {
-    uint32_t vb = wf->vgpr_alloc().base;
-    for (uint32_t lane = 0; lane < WF_SIZE; ++lane) {
-      double a = kEdge[lane % kEdge.size()];
-      double b = kEdge[(lane / kEdge.size() + 1) % kEdge.size()];
-      double d = kEdge[(lane * 7 + 3) % kEdge.size()];
-      write64(vb + 0, lane, std::bit_cast<uint64_t>(a));
-      write64(vb + 2, lane, std::bit_cast<uint64_t>(b));
-      write64(vb + 4, lane, std::bit_cast<uint64_t>(d));
-    }
-    wf->set_exec(exec);
-  }
-
-  std::array<uint64_t, WF_SIZE> run(Instruction *inst, uint64_t exec) {
-    seed_inputs(exec);
-    // Mark the dst lanes so an inactive-lane clobber is visible. The accumulate
-    // source is the seeded value above; re-stamp the unused high words is not
-    // needed — fmac reads/writes the same pair.
-    cu->execute_instruction(inst, *wf);
-    std::array<uint64_t, WF_SIZE> out{};
-    uint32_t vb = wf->vgpr_alloc().base;
-    for (uint32_t lane = 0; lane < WF_SIZE; ++lane)
-      out[lane] = read64(vb + 4, lane);
-    return out;
+  uint64_t read64(uint32_t reg, uint32_t lane) const {
+    const uint32_t base = wf->vgpr_alloc().base;
+    return static_cast<uint64_t>(cu->read_vgpr(base + reg, lane)) |
+           (static_cast<uint64_t>(cu->read_vgpr(base + reg + 1, lane)) << 32);
   }
 };
 
-// Directly validate the two-array f64 storage layout assumption the 64-bit infra
-// is built on: a value written via the VGPR pair (lo=reg, hi=reg+1) must read
-// back identically through util::load64 fed by the operand's 64-bit lane
-// pointers. Exercised here without the SIMD/scalar A/B so a layout regression is
-// isolated from the fma functor.
-TEST(Vop2FmaF64SimdCorrectness, LaneLayoutRoundTrip) {
-  if constexpr (!util::has_stdx_simd) {
-    GTEST_SKIP() << "<experimental/simd> unavailable — scalar fallback in use";
-    return;
-  }
-  Fixture fx;
-  ASSERT_NE(fx.cu, nullptr);
-  ASSERT_NE(fx.wf, nullptr);
-  uint32_t vb = fx.wf->vgpr_alloc().base;
-  std::vector<uint64_t> expected(WF_SIZE);
-  for (uint32_t lane = 0; lane < WF_SIZE; ++lane) {
-    uint64_t v = (static_cast<uint64_t>(0xA5A50000u | lane) << 32) | (0x1234'0000u + lane);
-    expected[lane] = v;
-    fx.write64(vb + 0, lane, v);
-  }
-  const uint32_t *lo = reinterpret_cast<const uint32_t *>(fx.cu->raw_vgpr_data(vb + 0));
-  const uint32_t *hi = reinterpret_cast<const uint32_t *>(fx.cu->raw_vgpr_data(vb + 1));
-  constexpr std::size_t W = util::native_width64;
-  for (uint32_t base = 0; base < WF_SIZE; base += static_cast<uint32_t>(W)) {
-    util::native<uint64_t> v = util::load64<uint64_t>(lo + base, hi + base);
-    for (std::size_t i = 0; i < W; ++i)
-      EXPECT_EQ(v[i], expected[base + i]) << "load64 mismatch at lane " << (base + i);
-  }
-}
-
-// Restores the process force-scalar gate on scope exit so flipping it for an
-// in-process A/B comparison cannot leak into later tests in the same process.
-struct ForceScalarGuard {
-  bool orig;
-  ForceScalarGuard() : orig(util::force_scalar()) {}
-  ~ForceScalarGuard() { util::set_force_scalar_for_testing(orig); }
+struct RunResult {
+  std::array<uint64_t, kWaveSize> output{};
+  std::array<uint64_t, kWaveSize> accumulator{};
 };
 
-void check_fmac_literal_src0(bool force_scalar) {
-  ForceScalarGuard gate_guard;
+using RawInputs = std::array<std::array<uint64_t, 3>, kWaveSize>;
+
+RunResult run_fmac(bool force_scalar, uint64_t exec, uint32_t mode, bool literal_src0 = false,
+                   const RawInputs *raw_inputs = nullptr) {
   util::set_force_scalar_for_testing(force_scalar);
+  Vop2FmaF64Fixture fixture;
+  EXPECT_NE(fixture.cu, nullptr);
+  EXPECT_NE(fixture.wf, nullptr);
+  fixture.wf->set_exec(exec);
+  fixture.wf->set_mode_raw(mode);
 
-  Fixture fx;
-  ASSERT_NE(fx.cu, nullptr);
-  ASSERT_NE(fx.wf, nullptr);
-
-  constexpr uint32_t kLiteralHighWord = 0x3DF00000u;
-  constexpr uint64_t kLiteralBits = static_cast<uint64_t>(kLiteralHighWord) << 32;
-  const double literal = std::bit_cast<double>(kLiteralBits);
-  const double multiplier = 3.0;
-  const uint64_t multiplier_bits = std::bit_cast<uint64_t>(multiplier);
-  const uint64_t expected = std::bit_cast<uint64_t>(std::fma(literal, multiplier, literal));
-
-  uint32_t vb = fx.wf->vgpr_alloc().base;
-  for (uint32_t lane = 0; lane < WF_SIZE; ++lane) {
-    fx.write64(vb + 2, lane, multiplier_bits);
-    fx.write64(vb + 4, lane, kLiteralBits);
+  RunResult result;
+  constexpr uint64_t kLiteralBits = uint64_t{0x3df00000u} << 32;
+  for (uint32_t lane = 0; lane < kWaveSize; ++lane) {
+    const double source0 = 1.0 + static_cast<double>(lane & 7u) * 0.125;
+    const double source1 = literal_src0 ? 3.0 : 0x1p-53;
+    const double accumulator =
+        literal_src0 ? std::bit_cast<double>(kLiteralBits) : 1.0 + static_cast<double>(lane) * 0.25;
+    const uint64_t source0_bits =
+        raw_inputs ? (*raw_inputs)[lane][0] : std::bit_cast<uint64_t>(source0);
+    const uint64_t source1_bits =
+        raw_inputs ? (*raw_inputs)[lane][1] : std::bit_cast<uint64_t>(source1);
+    fixture.write64(0, lane, source0_bits);
+    fixture.write64(2, lane, source1_bits);
+    result.accumulator[lane] =
+        raw_inputs ? (*raw_inputs)[lane][2] : std::bit_cast<uint64_t>(accumulator);
+    fixture.write64(4, lane, result.accumulator[lane]);
   }
-  fx.wf->set_exec(~0ULL);
 
-  uint32_t enc = vop2_encode(/*opcode=*/4, /*vdst=*/4, /*vsrc1=*/2, /*src0=*/255);
-  uint32_t words[4] = {enc, kLiteralHighWord, 0u, 0u};
-  Instruction *inst = fx.decoder->decode(words);
-  ASSERT_NE(inst, nullptr) << "v_fmac_f64 literal decode failed";
-  fx.cu->execute_instruction(inst, *fx.wf);
-  delete inst;
-
-  for (uint32_t lane = 0; lane < WF_SIZE; ++lane)
-    EXPECT_EQ(fx.read64(vb + 4, lane), expected) << "lane " << lane;
+  const uint32_t src0 = literal_src0 ? 255u : 256u;
+  const uint32_t encoded = vop2_encode(/*opcode=*/4, /*vdst=*/4, /*vsrc1=*/2, src0);
+  const uint32_t literal_high = static_cast<uint32_t>(kLiteralBits >> 32);
+  uint32_t words[4] = {encoded, literal_src0 ? literal_high : 0u, 0u, 0u};
+  std::unique_ptr<Instruction> instruction(decode_valid(*fixture.decoder, words));
+  EXPECT_NE(instruction, nullptr);
+  fixture.cu->execute_instruction(instruction.get(), *fixture.wf);
+  for (uint32_t lane = 0; lane < kWaveSize; ++lane)
+    result.output[lane] = fixture.read64(4, lane);
+  return result;
 }
 
-TEST(Vop2FmaF64SimdCorrectness, InlineLiteralSrc0UsesDoubleHighBits) {
-  check_fmac_literal_src0(/*force_scalar=*/true);
-  check_fmac_literal_src0(/*force_scalar=*/false);
+TEST(Vop2FmaF64SimdCorrectness, InlineLiteralUsesEncodedHighWord) {
+  if constexpr (!util::has_stdx_simd)
+    GTEST_SKIP() << "<experimental/simd> unavailable";
+  ForceScalarGuard guard;
+  const RunResult scalar = run_fmac(true, ~uint64_t{0}, /*mode=*/3u << 6, true);
+  const RunResult simd = run_fmac(false, ~uint64_t{0}, /*mode=*/3u << 6, true);
+  EXPECT_EQ(simd.output, scalar.output);
+  EXPECT_EQ(simd.output[0], 0x3e10000000000000ULL);
 }
 
-void check_fmac(uint64_t exec) {
-  ForceScalarGuard gate_guard;
-
-  auto run_mode = [&](bool force_scalar) -> std::array<uint64_t, WF_SIZE> {
-    util::set_force_scalar_for_testing(force_scalar);
-    Fixture fx;
-    EXPECT_NE(fx.cu, nullptr);
-    EXPECT_NE(fx.wf, nullptr);
-    // v_fmac_f64 = VOP2 op 4. src0 = v0:v1 (enc 256), vsrc1 = v2:v3, vdst = v4:v5.
-    uint32_t enc = vop2_encode(/*opcode=*/4, /*vdst=*/4, /*vsrc1=*/2, /*src0=*/256);
-    uint32_t words[4] = {enc, 0u, 0u, 0u};
-    Instruction *inst = fx.decoder->decode(words);
-    EXPECT_NE(inst, nullptr) << "v_fmac_f64 decode failed";
-    auto out = fx.run(inst, exec);
-    delete inst;
-    return out;
-  };
-
-  const auto scalar_out = run_mode(/*force_scalar=*/true);
-  const auto simd_out = run_mode(/*force_scalar=*/false);
-
-  // Core A/B equivalence per non-skipped lane. NaN-result lanes carry a
-  // possibly-different NaN payload and are excluded identically in both runs
-  // (NaN-ness of the result is deterministic from the inputs).
-  for (uint32_t lane = 0; lane < WF_SIZE; ++lane) {
-    if (is_f64_nan(scalar_out[lane]) || is_f64_nan(simd_out[lane]))
-      continue;
-    EXPECT_EQ(scalar_out[lane], simd_out[lane])
-        << "v_fmac_f64 lane " << lane << ": SIMD path diverged from scalar body";
+TEST(Vop2FmaF64SimdCorrectness, PartialExecPreservesBothInactiveVgprWords) {
+  if constexpr (!util::has_stdx_simd)
+    GTEST_SKIP() << "<experimental/simd> unavailable";
+  ForceScalarGuard guard;
+  constexpr uint64_t kExec = 0xa5a5f0f012348001ULL;
+  const RunResult scalar = run_fmac(true, kExec, /*mode=*/3u << 6);
+  const RunResult simd = run_fmac(false, kExec, /*mode=*/3u << 6);
+  EXPECT_EQ(simd.output, scalar.output);
+  for (uint32_t lane = 0; lane < kWaveSize; ++lane) {
+    if ((kExec & (uint64_t{1} << lane)) == 0) {
+      EXPECT_EQ(simd.output[lane], simd.accumulator[lane]) << "inactive lane " << lane;
+    }
   }
 }
 
-TEST(Vop2FmaF64SimdCorrectness, FullExecMask) {
-  if constexpr (!util::has_stdx_simd) {
-    GTEST_SKIP() << "<experimental/simd> unavailable — scalar fallback in use";
-    return;
+TEST(Vop2FmaF64SimdCorrectness, AllRoundAndDenormModesMatchScalar) {
+  if constexpr (!util::has_stdx_simd)
+    GTEST_SKIP() << "<experimental/simd> unavailable";
+  ForceScalarGuard guard;
+  for (uint32_t round = 0; round < 4; ++round) {
+    for (uint32_t denorm = 0; denorm < 4; ++denorm) {
+      const uint32_t mode = (round << 2) | (denorm << 6);
+      const RunResult scalar = run_fmac(true, ~uint64_t{0}, mode);
+      const RunResult simd = run_fmac(false, ~uint64_t{0}, mode);
+      EXPECT_EQ(simd.output, scalar.output) << "round=" << round << " denorm=" << denorm;
+    }
   }
-  check_fmac(/*exec=*/~0ULL);
 }
 
-TEST(Vop2FmaF64SimdCorrectness, PartialExecMask) {
-  if constexpr (!util::has_stdx_simd) {
-    GTEST_SKIP() << "<experimental/simd> unavailable — scalar fallback in use";
-    return;
+TEST(Vop2FmaF64SimdCorrectness, SpecialValuesAndDenormBoundariesMatchScalarExactly) {
+  if constexpr (!util::has_stdx_simd)
+    GTEST_SKIP() << "<experimental/simd> unavailable";
+  ForceScalarGuard guard;
+
+  constexpr uint64_t kPositiveZero = 0x0000'0000'0000'0000ULL;
+  constexpr uint64_t kNegativeZero = 0x8000'0000'0000'0000ULL;
+  constexpr uint64_t kOne = 0x3FF0'0000'0000'0000ULL;
+  constexpr uint64_t kTwo = 0x4000'0000'0000'0000ULL;
+  constexpr uint64_t kHalf = 0x3FE0'0000'0000'0000ULL;
+  constexpr uint64_t kMinSubnormal = 0x0000'0000'0000'0001ULL;
+  constexpr uint64_t kNegativeMinSubnormal = 0x8000'0000'0000'0001ULL;
+  constexpr uint64_t kMaxSubnormal = 0x000F'FFFF'FFFF'FFFFULL;
+  constexpr uint64_t kMinNormal = 0x0010'0000'0000'0000ULL;
+  constexpr uint64_t kMaxFinite = 0x7FEF'FFFF'FFFF'FFFFULL;
+  constexpr uint64_t kInfinity = 0x7FF0'0000'0000'0000ULL;
+  constexpr uint64_t kQuietNan = 0x7FF8'0000'0000'0001ULL;
+  constexpr uint64_t kSignalingNan = 0x7FF0'0000'0000'0001ULL;
+  constexpr uint64_t kNegativeOneAndHalf = 0xBFF8'0000'0000'0000ULL;
+
+  constexpr std::array<std::array<uint64_t, 3>, 12> cases = {{
+      {kMinSubnormal, kOne, kPositiveZero},
+      {kNegativeMinSubnormal, kOne, kPositiveZero},
+      {kMaxSubnormal, kOne, kPositiveZero},
+      {kMinNormal, kHalf, kPositiveZero},
+      {kQuietNan, kOne, kPositiveZero},
+      {kOne, kSignalingNan, kPositiveZero},
+      {kInfinity, kPositiveZero, kPositiveZero},
+      {kNegativeZero, kOne, kPositiveZero},
+      {kMaxFinite, kTwo, kPositiveZero},
+      {kNegativeOneAndHalf, kTwo, kOne},
+      {kOne, kOne, kNegativeZero},
+      {kMinNormal, kOne, kMinNormal | (uint64_t{1} << 63)},
+  }};
+  RawInputs inputs{};
+  for (uint32_t lane = 0; lane < kWaveSize; ++lane)
+    inputs[lane] = cases[lane % cases.size()];
+
+  for (uint32_t round = 0; round < 4; ++round) {
+    for (uint32_t denorm = 0; denorm < 4; ++denorm) {
+      const uint32_t mode = (round << 2) | (denorm << 6);
+      const RunResult scalar = run_fmac(true, ~uint64_t{0}, mode, false, &inputs);
+      const RunResult simd = run_fmac(false, ~uint64_t{0}, mode, false, &inputs);
+      EXPECT_EQ(simd.output, scalar.output) << "round=" << round << " denorm=" << denorm;
+    }
   }
-  // Pattern crossing the 8-wide f64 chunk boundaries on a wave64.
-  check_fmac(/*exec=*/0xA5A5'F0F0'1234'8001ULL);
 }
 
 } // namespace

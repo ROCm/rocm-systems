@@ -44,6 +44,10 @@ error:
 #endif
 }
 
+int ncclCuMemRuntimeSupported() {
+  return ncclIsCuMemSupported();
+}
+
 int ncclCuMemEnable() {
   // NCCL_CUMEM_ENABLE=-2 means auto-detect CUMEM support
   int param = ncclParamCuMemEnable();
@@ -110,6 +114,7 @@ error:
 /* CUDA Driver functions loaded with cuGetProcAddress for versioning */
 DECLARE_CUDA_PFN(cuDeviceGet, 2000);
 DECLARE_CUDA_PFN(cuDeviceGetAttribute, 2000);
+DECLARE_CUDA_PFN(cuDeviceGetUuid, 9020);
 DECLARE_CUDA_PFN(cuGetErrorString, 6000);
 DECLARE_CUDA_PFN(cuGetErrorName, 6000);
 /* enqueue.cc */
@@ -215,6 +220,7 @@ static ncclResult_t cudaPfnFuncLoader(void) {
   LOAD_SYM(cuGetErrorName, 6000, 0);
   LOAD_SYM(cuDeviceGet, 2000, 0);
   LOAD_SYM(cuDeviceGetAttribute, 2000, 0);
+  LOAD_SYM(cuDeviceGetUuid, 9020, 0);
   LOAD_SYM(cuMemGetAddressRange, 3020, 1);
   LOAD_SYM(cuCtxCreate, 11040, 1);
   LOAD_SYM(cuCtxDestroy, 4000, 1);

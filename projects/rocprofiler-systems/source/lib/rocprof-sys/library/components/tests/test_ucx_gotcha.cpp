@@ -179,7 +179,7 @@ protected:
 
 TEST_F(ucx_gotcha_test, test_static_labels)
 {
-    ucx_gotcha_under_test_t g;
+    const ucx_gotcha_under_test_t g;
     EXPECT_EQ(g.label(), "ucx_gotcha");
     EXPECT_EQ(g.gotcha_capacity, GOTCHA_CAPACITY);
 }
@@ -318,7 +318,7 @@ TEST_F(ucx_gotcha_test, test_audit_outgoing_int)
     MockedGotchaData data;
     data.tool_id = "ucp_put";
 
-    int ret = 7;
+    const int ret = 7;
 
     EXPECT_CALL(*test_globals::g_category_region_gmock, stop_int)
         .Times(1)
@@ -336,7 +336,7 @@ TEST_F(ucx_gotcha_test, test_audit_outgoing_unsigned)
     data.tool_id = "ucp_worker_progress";
 
     // Progress APIs (e.g. ucp_worker_progress, uct_iface_progress) return unsigned
-    unsigned ret = 3;
+    const unsigned ret = 3;
 
     EXPECT_CALL(*test_globals::g_category_region_gmock, stop_unsigned)
         .Times(1)
@@ -354,7 +354,7 @@ TEST_F(ucx_gotcha_test, test_audit_outgoing_long)
     data.tool_id = "uct_ep_am_bcopy";
 
     // ssize_t-returning UCT APIs decay to long; the value must not be truncated to int.
-    long ret = 5000000000L;
+    const long ret = 5000000000L;
 
     EXPECT_CALL(*test_globals::g_category_region_gmock, stop_long)
         .Times(1)

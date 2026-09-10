@@ -86,6 +86,59 @@ def pytest_addoption(parser):
         help="Path to CSV file.",
     )
 
+    parser.addoption(
+        "--input-csv-iteration-range",
+        action="store",
+        help="Path to CSV file.",
+    )
+
+    parser.addoption(
+        "--input-json-iteration-range",
+        action="store",
+        help="Path to JSON file.",
+    )
+
+    parser.addoption(
+        "--kernel-iteration-range",
+        action="store",
+        help="Kernel iteration range passed on the command line.",
+    )
+
+    parser.addoption(
+        "--iteration-config",
+        action="store",
+        help="Path to the input config (JSON/YAML) whose per-pass "
+        "kernel_iteration_range is used to check captured dispatch counts.",
+    )
+
+    parser.addoption(
+        "--input-csv-file",
+        action="store",
+        help="Path to a generic CSV file (used by the CLI filter tests).",
+    )
+
+    parser.addoption(
+        "--input-json-file",
+        action="store",
+        help="Path to a generic JSON file (used by the CLI filter tests).",
+    )
+
+
+def tokenize(kernel_iteration_range):
+    range_str = kernel_iteration_range.replace("[", "").replace("]", "")
+    split_list = range_str.split(",")
+    _range = []
+    for split_string in split_list:
+        if "-" in split_string:
+            interval = split_string.split("-")
+            [
+                _range.append(i)
+                for i in list(range((int)(interval[0]), (int)(interval[1]) + 1))
+            ]
+        else:
+            _range.append(int(split_string))
+    return _range
+
 
 @pytest.fixture
 def input_csv_pass1(request):
@@ -120,6 +173,73 @@ def input_csv_pmc1(request):
     filename = request.config.getoption("--input-csv-pmc1")
     with open(filename, "r") as inp:
         return pd.read_csv(inp)
+
+
+@pytest.fixture
+def input_csv_iteration_range(request):
+    filename = request.config.getoption("--input-csv-iteration-range")
+    with open(filename, "r") as inp:
+        return pd.read_csv(inp)
+
+
+@pytest.fixture
+def input_csv_file(request):
+    filename = request.config.getoption("--input-csv-file")
+    with open(filename, "r") as inp:
+        return pd.read_csv(inp)
+
+
+@pytest.fixture
+def input_json_file(request):
+    filename = request.config.getoption("--input-json-file")
+    with open(filename, "r") as inp:
+        return dotdict(collapse_dict_list(json.load(inp)))
+
+
+@pytest.fixture
+def input_json_iteration_range(request):
+    filename = request.config.getoption("--input-json-iteration-range")
+    with open(filename, "r") as inp:
+        return dotdict(collapse_dict_list(json.load(inp)))
+
+
+@pytest.fixture
+def iteration_range(request):
+    kernel_iteration_range = request.config.getoption("--kernel-iteration-range")
+    return tokenize(kernel_iteration_range.strip())
+
+
+def _load_config_jobs(config_path):
+    if config_path.endswith((".yml", ".yaml")):
+        import yaml
+
+        with open(config_path, "r") as inp:
+            return yaml.safe_load(inp)["jobs"]
+    with open(config_path, "r") as inp:
+        return json.load(inp)["jobs"]
+
+
+def _iteration_range_for_pass(config_path, pass_index):
+    # match rocprofv3: a YAML list of ranges joins with ", " like the CLI
+    kernel_iteration_range = _load_config_jobs(config_path)[pass_index].get(
+        "kernel_iteration_range", ""
+    )
+    if isinstance(kernel_iteration_range, list):
+        kernel_iteration_range = ", ".join(kernel_iteration_range)
+    kernel_iteration_range = kernel_iteration_range.strip()
+    if not kernel_iteration_range:
+        return None
+    return tokenize(kernel_iteration_range)
+
+
+@pytest.fixture
+def iteration_range_pass1(request):
+    return _iteration_range_for_pass(request.config.getoption("--iteration-config"), 0)
+
+
+@pytest.fixture
+def iteration_range_pass2(request):
+    return _iteration_range_for_pass(request.config.getoption("--iteration-config"), 1)
 
 
 @pytest.fixture

@@ -7,11 +7,11 @@
 #include "common/DdaAlltoAllTestHelpers.hpp"
 #include "common/DdaIpcTestHelpers.hpp"
 
-#include "dda_all_gather.h"
-#include "dda_alltoall.h"
-#include "dda_reduce_scatter.h"
+#include "algorithms/dda/all_gather/dda_all_gather.h"
+#include "algorithms/dda/alltoall/dda_alltoall.h"
+#include "algorithms/dda/reduce_scatter/dda_reduce_scatter.h"
 #include "gtest/gtest.h"
-#include "dda_init_detail.h"
+#include "algorithms/dda/dda_init_detail.h"
 
 namespace RcclUnitTesting
 {

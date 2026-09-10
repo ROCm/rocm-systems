@@ -676,6 +676,10 @@ struct Info : public amd::EmbeddedObject {
   uint32_t driverNodeId_;
   //! Number of Physical SGPRs per SIMD
   uint32_t sgprsPerSimd_;
+  //! SGPR allocation granularity. Zero if the backend does not report it.
+  uint32_t sgprAllocGranularity_;
+  //! Per-wave SGPRs reserved by the trap handler. Zero if absent or unreported.
+  uint32_t sgprTrapHandlerReserve_;
 
   uint32_t numSDMAengines_;  //!< Number of available SDMA engines
 
@@ -692,6 +696,7 @@ struct Info : public amd::EmbeddedObject {
   bool hasExpertSchedMode_;  //! Device supports expert scheduling mode
 
   bool dmabufSupported_;  //!< DMABuf support flag
+  bool hostAllocDmabufSupported_;  //!< Host-alloc DMABuf support flag
   bool gpuDirectRdmaWithHipVmmSupported_;  //!< GPU Direct RDMA with HIP VMM (DMA-Buf + HIP VMM)
 
   uint32_t maxDynDataPrefetchRegions_;  //!< Max L2 prefetch regions (0 if unsupported)
@@ -1765,7 +1770,7 @@ class Device : public RuntimeObject {
   static constexpr size_t kP2PStagingSize = 4 * Mi;
   static constexpr size_t kMGSyncDataSize = sizeof(MGSyncData);
   static constexpr size_t kMGInfoSizePerDevice = kMGSyncDataSize + sizeof(MGSyncInfo);
-  static constexpr size_t kSGInfoSize = kMGSyncDataSize;
+  static constexpr size_t kSGInfoSize = sizeof(MGSyncInfo);
 
   // Max Scratch size is based on ISA and thus per device.
   // Def value is as per GFX9 being the least among supported devices.
@@ -2256,12 +2261,6 @@ class Device : public RuntimeObject {
     uint8_t* flat_packet; // pointer into flatPacketData (patched directly at launch)
     int hw_event_index;
     int dep_slot;  // kCompletionSignal, kExtDispatchDepSignal, or 0-4 for barrier dep_signal[slot]
-    // Segment that owns this patch (set at BuildSyncPlan time). At launch the
-    // graph layer resolves it to the actual stream's vGPU index into queue_index.
-    int segment_id = -1;
-    // vGPU (queue) index resolved at launch from segment_id. Read by
-    // ApplyHwEventPatches to attribute the signal to its execution stream.
-    uint32_t queue_index = std::numeric_limits<uint32_t>::max();
   };
 
   virtual uint8_t* CreateBarrierPacket() const { return nullptr; }

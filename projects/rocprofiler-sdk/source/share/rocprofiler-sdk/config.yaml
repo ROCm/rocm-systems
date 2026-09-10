@@ -280,7 +280,6 @@ rocprofiler-sdk:
             - gfx1150
             - gfx1151
             - gfx1152
-            - gfx1250
           block: CPC
           event: 24
     - name: CPC_ALWAYS_COUNT
@@ -569,6 +568,51 @@ rocprofiler-sdk:
             - gfx942
             - gfx950
           expression: simd_count/simd_per_cu
+    - name: GL1C_ARB_RET_LEVEL
+      description: "The sum of the number of requests sent to the GL1A for output arbitration in flight.
+        Average GL1A return arbitration latency = GL1C_PERF_SEL_GL1A_RET_LEVEL/GL1C_PERF_SEL_REQ"
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+            - gfx1153
+          block: GL1C
+          event: 3
+    - name: GL1C_REQ_READ_128B
+      description: "Count of read requests for 128B of data"
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+            - gfx1153
+          block: GL1C
+          event: 22
+    - name: GL1C_REQ_READ_32B
+      description: "Count of read requests for 32B of data"
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+            - gfx1153
+          block: GL1C
+          event: 23
+    - name: GL1C_REQ_READ_64B
+      description: "Count of read requests for 64B of data"
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+            - gfx1153
+          block: GL1C
+          event: 24
     - name: SIMD_NUM
       description: SIMD Number
       properties: []
@@ -1678,7 +1722,6 @@ rocprofiler-sdk:
             - gfx1150
             - gfx1151
             - gfx1152
-            - gfx1250
           block: GRBM
           event: 31
     - name: GRBM_CP_BUSY
@@ -1722,7 +1765,6 @@ rocprofiler-sdk:
             - gfx1150
             - gfx1151
             - gfx1152
-            - gfx1250
           block: GRBM
           event: 35
     - name: GRBM_GDS_BUSY
@@ -1827,7 +1869,6 @@ rocprofiler-sdk:
             - gfx1150
             - gfx1151
             - gfx1152
-            - gfx1250
           block: GRBM
           event: 13
     - name: GRBM_TC_BUSY
@@ -1841,7 +1882,6 @@ rocprofiler-sdk:
             - gfx941
             - gfx942
             - gfx950
-            - gfx1250
           block: GRBM
           event: 28
     - name: GRBM_UTCL2_BUSY
@@ -5402,6 +5442,19 @@ rocprofiler-sdk:
             - gfx950
           block: SQ
           event: 55
+    - name: SQ_INST_LEVEL_TEX_LOAD
+      description: "Number of in-flight buffer load, image load, sample, or atomic (with return) instructions.
+        Set next counter to ACCUM_PREV and divide by INST_TEX_LOAD for average latency. Includes FLAT
+        instructions. {level, nondeterministic, C2}"
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+            - gfx1153
+          block: SQ
+          event: 90
     - name: SQ_VALU_MFMA_COEXEC_CYCLES
       description: Number of cycles in which MFMA VALU was busy and a normal VALU instruction was 
         issued (co-execution) (per-simd, nondeterministic)
@@ -6282,6 +6335,40 @@ rocprofiler-sdk:
             - gfx950
           block: SQ
           event: 93
+    - name: SQ_VALU_STARVE
+      description: "Number of cycles VALU is starved while waves are present (cycles in which no sq_sp_cmd
+        credits are in use). {nondeterministic, C1}"
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+            - gfx1153
+          block: SQ
+          event: 115
+    - name: SQ_VMEM_BUS_ACTIVE
+      description: "Cycles sending address/data to LDS/TA, not windowed by perf_en"
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+            - gfx1153
+          block: SQ
+          event: 119
+    - name: SQ_VMEM_BUS_STALL
+      description: "Cycles stalled from sending address/data to LDS/TA"
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+            - gfx1153
+          block: SQ
+          event: 120
     - name: SQ_WAIT_ANY
       description: Number of wave-cycles spent waiting for anything (per-simd, nondeterministic). 
         Units in quad-cycles(4 cycles)
@@ -6331,6 +6418,42 @@ rocprofiler-sdk:
             - gfx950
           block: SQ
           event: 106
+    - name: SQ_WAIT_CNT_LGKM
+      description: "Number of clock cycles spent waiting for LGKM counter. In units of cycles. {nondeterministic,
+        C1}"
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+            - gfx1153
+          block: SQ
+          event: 38
+    - name: SQ_WAIT_CNT_VMVS
+      description: "Number of clock cycles spent waiting for VM or VS counter. In units of cycles. {nondeterministic,
+        C1}"
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+            - gfx1153
+          block: SQ
+          event: 37
+    - name: SQ_WAIT_DELAY_ALU
+      description: "Number of clock cycles spent waiting for s_delay_alu to finish. {nondeterministic,
+        C1}"
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+            - gfx1153
+          block: SQ
+          event: 45
     - name: SQ_WAIT_INST_ANY
       description: Number of wave-cycles spent waiting for any instruction issue. Units in 
         quad-cycles(4 cycles).
@@ -6428,6 +6551,41 @@ rocprofiler-sdk:
             - gfx950
           block: SQ
           event: 112
+    - name: SQ_WAIT_INST_SCA
+      description: "Number of clock cycles spent waiting for SALU or SMEM instruction issue. In units
+        of cycles. {nondeterministic, C1}"
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+            - gfx1153
+          block: SQ
+          event: 28
+    - name: SQ_WAIT_INST_VALU
+      description: "Number of clock cycles spent waiting for VALU instruction issue. In units of cycles.
+        {nondeterministic, C1}"
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+            - gfx1153
+          block: SQ
+          event: 27
+    - name: SQ_WAIT_INST_VMEM
+      description: "Sum of wait_inst_tex + wait_inst_flat + wait_inst_lds {nondeterministic}"
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+            - gfx1153
+          block: SQ
+          event: 32
     - name: SQ_WAVE32_INSTS
       description: Number of instructions issued by wave32 waves. Skipped instructions are not 
         counted. {emulated}
@@ -7201,6 +7359,40 @@ rocprofiler-sdk:
         - architectures:
             - gfx90a
           expression: 100*reduce(GRBM_SPI_BUSY,max)/reduce(GRBM_GUI_ACTIVE,max)
+    - name: TA_ADDRESSER_BUSY
+      description: "Cycles addresser subblock is busy. Perf_Windowing not supported for this counter."
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+            - gfx1153
+          block: TA
+          event: 11
+    - name: TA_ADDRESSER_FIFO_BUSY
+      description: "Cycles sampler addresser ping-ping buffer, non-sampler balancing RAM, or aligner state
+        machine are busy. Perf_Windowing not supported for this counter."
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+            - gfx1153
+          block: TA
+          event: 12
+    - name: TA_ADDRESSER_STALLED_CYCLES
+      description: "Cycles Addresser stalled. Perf_Windowing not supported for this counter."
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+            - gfx1153
+          block: TA
+          event: 58
     - name: TA_ADDR_STALLED_BY_TC_CYCLES
       description: Number of cycles addr path stalled by TC. Perf_Windowing not supported for this 
         counter.
@@ -7269,6 +7461,28 @@ rocprofiler-sdk:
             - gfx942
             - gfx950
           expression: reduce(TA_ADDR_STALLED_BY_TD_CYCLES,sum)
+    - name: TA_ALIGNER_BUSY
+      description: "Cycles aligner subblock is busy. Perf_Windowing not supported for this counter."
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+            - gfx1153
+          block: TA
+          event: 13
+    - name: TA_ALIGNER_CYCLES
+      description: "Cycles issued by the aligner state machine."
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+            - gfx1153
+          block: TA
+          event: 35
     - name: TA_BUFFER_ATOMIC_WAVEFRONTS
       description: Number of buffer atomic wavefronts processed by TA.
       properties: []
@@ -7559,6 +7773,9 @@ rocprofiler-sdk:
             - gfx942
             - gfx950
           expression: reduce(TA_TA_BUSY,avr)
+        - architectures:
+            - gfx1250
+          expression: reduce(TX_VCA_VCA_BUSY,avr)
     - name: TA_BUSY_max
       description: TA block is busy. Max over TA instances.
       properties: []
@@ -7763,6 +7980,17 @@ rocprofiler-sdk:
             - gfx1031
             - gfx1032
           expression: reduce(TA_FLAT_STORE_WAVEFRONTS,sum)
+    - name: TA_FLAT_TOTAL_CYCLES
+      description: "Flat cycles issued to TC."
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+            - gfx1153
+          block: TA
+          event: 42
     - name: TA_FLAT_WAVEFRONTS
       description: Number of flat opcode wavfronts processed by the TA.
       properties: []
@@ -7825,6 +8053,28 @@ rocprofiler-sdk:
             - gfx942
             - gfx950
           expression: reduce(TA_FLAT_WRITE_WAVEFRONTS,sum)
+    - name: TA_STORE_WRITE_DATA_INPUT_CYCLES
+      description: "Cycles received by write datapath from ta_input for store ops."
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+            - gfx1153
+          block: TA
+          event: 98
+    - name: TA_STORE_WRITE_DATA_OUTPUT_CYCLES
+      description: "Cycles sent from write datapath to TC for store ops."
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+            - gfx1153
+          block: TA
+          event: 99
     - name: TA_TA_BUSY
       description: TA block is busy. Perf_Windowing not supported for this counter.
       properties: []
@@ -7979,6 +8229,39 @@ rocprofiler-sdk:
         - architectures:
             - gfx950
           expression: reduce(TA_FLAT_COALESCEABLE_WAVEFRONTS, sum)
+    - name: TA_VMEMCMD_CYCLES
+      description: "Vmemcmd cycles destined for TA. Perf_Windowing not supported for this counter."
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+            - gfx1153
+          block: TA
+          event: 144
+    - name: TA_VMEMREQ_CYCLES
+      description: "Vmemreq cycles destined for TA. Perf_Windowing not supported for this counter."
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+            - gfx1153
+          block: TA
+          event: 145
+    - name: TA_WRITE_PATH_BUSY
+      description: "Cycles write datapath subblock is busy. Perf_Windowing not supported for this counter."
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+            - gfx1153
+          block: TA
+          event: 14
     - name: TX_VCA_ADDR_STALLED_BY_VMW_CYCLES
       description: Cycles any row addr path stalled by TC. Perf_windowing not supported for this 
         counter.
@@ -10725,6 +11008,13 @@ rocprofiler-sdk:
             - gfx950
           block: TCP
           event: 21
+        - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+            - gfx1153
+          block: TCP
+          event: 54
     - name: TCP_PENDING_STALL_CYCLES_sum
       description: Stall due to data pending from L2. Sum over TCP instances.
       properties: []
@@ -10765,6 +11055,17 @@ rocprofiler-sdk:
             - gfx942
             - gfx950
           expression: reduce(TCP_READ_TAGCONFLICT_STALL_CYCLES,sum)
+    - name: TCP_TA_REQ
+      description: Total requests from TA into TCP (L0). Tracks TA aligner throughput.
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+            - gfx1153
+          block: TCP
+          event: 2
     - name: TCP_TA_TCP_STATE_READ
       description: Number of state reads
       properties: []
@@ -14093,14 +14394,6 @@ rocprofiler-sdk:
             - gfx1250
           block: GL2C
           event: 180
-    - name: GL2C_BUBBLE
-      description: Total number of bubble requests sent to the GL2A
-      properties: []
-      definitions:
-        - architectures:
-            - gfx1250
-          block: GL2C
-          event: 46
     - name: GL2C_BYPASS_REQ
       description: total number of client bypass requests. This is measured at tag block.
       properties: []
