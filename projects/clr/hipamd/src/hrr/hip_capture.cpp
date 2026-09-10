@@ -862,6 +862,19 @@ hipError_t capture_hipModuleLoad(hipModule_t* module, const char* fname) {
       const uint8_t* image = nullptr;
       size_t size = 0;
       program_binary_span(prog, image, size);
+      // The file snapshot is the preferred hash, but it is not always
+      // available: fname can be null, unreadable, or truncated. Seeding {0,0}
+      // would be worse than not seeding at all — replay refuses a module event
+      // with no hash, and the seed itself stops the launch path from ever
+      // hashing this program again. Fall back to the extracted device image,
+      // which is what the LoadData/LoadDataEx shims record.
+      if (!h.lo && !h.hi) {
+        h = hash_program_image(prog, image, size);
+        if (h.lo || h.hi)
+          LogPrintfWarning("[HRR capture] hipModuleLoad(\"%s\"): could not snapshot the file;"
+                           " recorded the module's extracted device image instead",
+                           fname ? fname : "(null)");
+      }
       remember_program_hash(prog, image, size, h);
     }
     hrr_args_hipModuleLoad a{};
