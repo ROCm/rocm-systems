@@ -85,7 +85,7 @@ else()
     list(APPEND _FFMPEG_ROOT_HINTS
       "C:/ProgramData/chocolatey/lib/ffmpeg/tools/ffmpeg"
       "$ENV{USERPROFILE}/scoop/apps/ffmpeg/current"
-      "C:/Program Files/ffmpeg"
+      "$ENV{ProgramFiles}/ffmpeg"
       "C:/ffmpeg"
     )
   endif()
