@@ -734,7 +734,7 @@ inline bool ddaThresholdFromEnv(int64_t param, size_t* threshold) {
 }
 
 // Table entry for `func`. Collectives past AlltoAll have no slot and stay 0.
-inline size_t ddaThresholdFromTable(const size_t* caps, ncclFunc_t func) {
+inline size_t funcThresholdFromTable(const size_t* caps, ncclFunc_t func) {
   return (unsigned)func < RCCL_DDA_FUNC_COUNT ? caps[func] : 0;
 }
 
@@ -744,7 +744,7 @@ inline size_t ddaThresholdFromTable(const size_t* caps, ncclFunc_t func) {
 inline size_t rcclSymMaxR2CapTab(const rcclArchThresholds* table, ncclFunc_t func, bool graphMode) {
   if (table == nullptr) return SIZE_MAX;
   const size_t* caps = graphMode ? table->symMaxR2Graph : table->symMaxR2;
-  const size_t v = ddaThresholdFromTable(caps, func);
+  const size_t v = funcThresholdFromTable(caps, func);
   return v == 0 ? SIZE_MAX : v;
 }
 inline size_t rcclSymMaxR2Cap(const ncclComm* comm, ncclFunc_t func, bool graphMode) {
@@ -755,7 +755,7 @@ inline size_t rcclSymMaxR2Cap(const ncclComm* comm, ncclFunc_t func, bool graphM
 // faster than symk; symk is suppressed so DDA can win.  0 = no suppression.
 inline size_t rcclSymMinR2CapTab(const rcclArchThresholds* table, ncclFunc_t func) {
   if (table == nullptr) return 0;
-  return ddaThresholdFromTable(table->symMinR2, func);
+  return funcThresholdFromTable(table->symMinR2, func);
 }
 inline size_t rcclSymMinR2Cap(const ncclComm* comm, ncclFunc_t func) {
   return rcclSymMinR2CapTab(extAlgoArchTable(comm), func);
@@ -847,7 +847,7 @@ inline size_t rcclDdaLLThresholdTab(const rcclArchThresholds* table, ncclFunc_t 
   size_t threshold;
   if (ddaThresholdFromEnv(rcclParamDdaLLThreshold(), &threshold)) return threshold;
   if (table == nullptr) return kDdaLLBaseDefault;
-  return ddaThresholdFromTable(table->ddaLLMax, func);
+  return funcThresholdFromTable(table->ddaLLMax, func);
 }
 inline size_t rcclDdaLLThreshold(const ncclComm* comm, ncclFunc_t func) {
   return rcclDdaLLThresholdTab(extAlgoArchTable(comm), func);
@@ -857,7 +857,7 @@ inline size_t rcclDdaLL128ThresholdTab(const rcclArchThresholds* table, ncclFunc
   size_t threshold;
   if (ddaThresholdFromEnv(rcclParamDdaLL128Threshold(), &threshold)) return threshold;
   if (table == nullptr) return kDdaLL128BaseDefault;
-  return ddaThresholdFromTable(table->ddaLL128Max, func);
+  return funcThresholdFromTable(table->ddaLL128Max, func);
 }
 inline size_t rcclDdaLL128Threshold(const ncclComm* comm, ncclFunc_t func) {
   return rcclDdaLL128ThresholdTab(extAlgoArchTable(comm), func);
@@ -867,7 +867,7 @@ inline size_t rcclDdaVmmThresholdTab(const rcclArchThresholds* table, ncclFunc_t
   size_t threshold;
   if (ddaThresholdFromEnv(rcclParamDdaThreshold(), &threshold)) return threshold;
   if (table == nullptr) return kDdaVmmBaseDefault;
-  return ddaThresholdFromTable(table->ddaVmmMax, func);
+  return funcThresholdFromTable(table->ddaVmmMax, func);
 }
 inline size_t rcclDdaVmmThreshold(const ncclComm* comm, ncclFunc_t func) {
   return rcclDdaVmmThresholdTab(extAlgoArchTable(comm), func);
@@ -953,16 +953,16 @@ inline size_t rcclDdaVmmThresholdCtxTab(const rcclArchThresholds* table, ncclFun
   if (ddaThresholdFromEnv(rcclParamDdaThreshold(), &threshold)) return threshold;
   if (table == nullptr) return kDdaVmmBaseDefault;
   if (graphMode) {
-    size_t graphCap = ddaThresholdFromTable(table->ddaVmmMaxGraph, func);
+    size_t graphCap = funcThresholdFromTable(table->ddaVmmMaxGraph, func);
     if (graphCap != 0) return graphCap;
   }
   const bool recvReg = (winRegType == ncclSymSendNonregRecvReg ||
                          winRegType == ncclSymSendRegRecvReg);
   if (recvReg) {
-    size_t r2Cap = ddaThresholdFromTable(table->ddaVmmMaxR2, func);
+    size_t r2Cap = funcThresholdFromTable(table->ddaVmmMaxR2, func);
     if (r2Cap != 0) return r2Cap;
   }
-  return ddaThresholdFromTable(table->ddaVmmMax, func);
+  return funcThresholdFromTable(table->ddaVmmMax, func);
 }
 size_t rcclDdaVmmThresholdCtx(const ncclComm* comm, ncclFunc_t func,
                                ncclSymRegType_t winRegType, bool graphMode) {
