@@ -49,6 +49,11 @@ table ComputeUnitState {
   name: string;
   wavefronts: [WavefrontState];
   next_wf: uint64; // Round-robin scheduling index.
+  // Raw configured functional quantum for this CU (0 = unbounded). The
+  // presence marker distinguishes an explicit zero from checkpoints written
+  // before per-CU execution controls were serialized.
+  functional_quantum: uint32;
+  functional_quantum_present: bool;
 }
 
 /// Serialized state of a command processor.
