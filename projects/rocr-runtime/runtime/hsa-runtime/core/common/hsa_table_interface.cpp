@@ -2842,6 +2842,31 @@ hsa_status_t HSA_API hsa_amd_svm_discard_batch_async(void** ptrs, size_t* sizes,
                                                       dep_signals, completion_signal));
 }
 
+hsa_status_t HSA_API hsa_amd_svm_discard_and_prefetch_batch_async(
+    void** ptrs, size_t* sizes, uint32_t count, const hsa_agent_t* dst_agents,
+    uint32_t num_dst_agents, uint32_t num_dep_signals, const hsa_signal_t* dep_signals,
+    hsa_signal_t completion_signal) {
+  auto const __rocm_in_ptrs = ptrs;
+  auto const __rocm_in_sizes = sizes;
+  auto const __rocm_in_count = count;
+  auto const __rocm_in_dst_agents = dst_agents;
+  auto const __rocm_in_num_dst_agents = num_dst_agents;
+  auto const __rocm_in_num_dep_signals = num_dep_signals;
+  auto const __rocm_in_dep_signals = dep_signals;
+  auto const __rocm_in_completion_signal = completion_signal;
+  rocm_trace_emit_hsa_amd_svm_discard_and_prefetch_batch_async_enter(
+      (const void*)(uintptr_t)(__rocm_in_ptrs), (const void*)(uintptr_t)(__rocm_in_sizes),
+      (__rocm_in_count), (const void*)(uintptr_t)(__rocm_in_dst_agents), (__rocm_in_num_dst_agents),
+      (__rocm_in_num_dep_signals), (const void*)(uintptr_t)(__rocm_in_dep_signals),
+      (uint64_t)((__rocm_in_completion_signal)
+                     .handle)); /* __ROCM_CURATED__: hsa_amd_svm_discard_and_prefetch_batch_async */
+  ROCR_TRACE_API_RET_STATUS_CURATED_HSA_NOARGS(
+      hsa_amd_svm_discard_and_prefetch_batch_async,
+      amdExtTable->hsa_amd_svm_discard_and_prefetch_batch_async_fn(ptrs, sizes, count, dst_agents,
+                                                                   num_dst_agents, num_dep_signals,
+                                                                   dep_signals, completion_signal));
+}
+
 hsa_status_t HSA_API hsa_amd_signal_get_event_id(hsa_signal_t signal, uint32_t* event_id) {
   auto const __rocm_in_signal = signal;
   auto const __rocm_in_event_id = event_id;
@@ -2899,16 +2924,6 @@ hsa_status_t HSA_API hsa_amd_queue_wait_external_semaphore(hsa_queue_t* queue,
       (uint64_t)((__rocm_in_sem).handle),
       (__rocm_in_value)); /* __ROCM_CURATED__: hsa_amd_queue_wait_external_semaphore */
   ROCR_TRACE_API_RET_STATUS_CURATED_HSA_NOARGS(hsa_amd_queue_wait_external_semaphore, amdExtTable->hsa_amd_queue_wait_external_semaphore_fn(queue, sem, value));
-}
-
-hsa_status_t HSA_API hsa_amd_svm_discard_and_prefetch_batch_async(
-    void** ptrs, size_t* sizes, uint32_t count,
-    const hsa_agent_t* dst_agents, uint32_t num_dst_agents,
-    uint32_t num_dep_signals, const hsa_signal_t* dep_signals,
-    hsa_signal_t completion_signal) {
-  return amdExtTable->hsa_amd_svm_discard_and_prefetch_batch_async_fn(
-      ptrs, sizes, count, dst_agents, num_dst_agents,
-      num_dep_signals, dep_signals, completion_signal);
 }
 
 // Tools only table interfaces.

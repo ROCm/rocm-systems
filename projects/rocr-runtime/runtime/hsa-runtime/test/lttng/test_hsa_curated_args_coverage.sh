@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Runtime smoke test for representative HSA curated _args events.
 #
-# Full 217-API wrapper coverage is enforced statically by
+# Full 218-API wrapper coverage is enforced statically by
 # scripts/lttng_coverage_gate.sh. This runtime test intentionally calls only
 # the lifecycle/memory subset below: many remaining exported APIs require
 # caller-owned code objects, IPC objects, VM handles, or callbacks and cannot
