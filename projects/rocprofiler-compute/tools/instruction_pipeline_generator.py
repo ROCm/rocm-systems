@@ -53,7 +53,7 @@ HEADER = """\
 # and the pipelines are in the order the generator tries them.
 #
 # repo, commit: the llvm-project checkout the mnemonics were read from.
-# rules.flags: TableGen encoding flag -> pipeline.
+# rules.encodings: LLVM compiler encoding type -> pipeline.
 # rules.prefixes: pipeline -> the mnemonic prefixes assigned to it.
 """
 
@@ -83,7 +83,7 @@ class InstructionRecord(NamedTuple):
 
     record_name: str
     mnemonics: frozenset[str]
-    flags: frozenset[str]
+    encodings: frozenset[str]
 
 
 def run_git(repository_path: Path, *arguments: str) -> str:
@@ -175,8 +175,8 @@ class TableGen:
         """Reduce a tblgen JSON dump to one InstructionRecord per instruction.
 
         A dump record reads ``{"Mnemonic": "v_add_f32", "VALU": 1, "VOP3": 1}``,
-        with a field per property LLVM tracks. Only the mnemonic and the flags
-        Rules classifies on are kept.
+        with a field per property LLVM tracks. Only the mnemonic and the
+        encodings Rules classifies on are kept.
         """
         records: list[InstructionRecord] = []
         for record_name in dump.get("!instanceof", {}).get("Instruction", []):
@@ -188,8 +188,10 @@ class TableGen:
                 InstructionRecord(
                     record_name=record_name,
                     mnemonics=frozenset(mnemonics),
-                    flags=frozenset(
-                        flag for flag in Rules.flag_to_pipeline if record.get(flag)
+                    encodings=frozenset(
+                        encoding
+                        for encoding in Rules.encoding_to_pipeline
+                        if record.get(encoding)
                     ),
                 )
             )
@@ -249,9 +251,9 @@ class TableGen:
 class Rules:
     """Decides which pipeline runs an instruction."""
 
-    # TableGen encoding-class flag -> execution pipeline. SCALAR covers scalar
+    # LLVM compiler encoding type -> execution pipeline. SCALAR covers scalar
     # ALU and scalar memory because the hardware serves both from one pipeline.
-    flag_to_pipeline = {
+    encoding_to_pipeline = {
         "IsMAI": Pipeline.MATRIX,
         "IsWMMA": Pipeline.MATRIX,
         "IsSWMMAC": Pipeline.MATRIX,
@@ -268,7 +270,7 @@ class Rules:
         "VALU": Pipeline.VALU,
     }
 
-    # Mnemonic prefixes, for the pipelines no TableGen flag can tell apart.
+    # Mnemonic prefixes, for the pipelines no encoding type can tell apart.
     mnemonic_prefixes = {
         Pipeline.BARRIER: ("s_barrier", "s_wakeup_barrier", "s_get_barrier_state"),
         Pipeline.EXP: ("s_sendmsg",),
@@ -299,22 +301,24 @@ class Rules:
     }
 
     @staticmethod
-    def classify(mnemonic: str, flags: Iterable[str]) -> Optional[Pipeline]:
-        """Return the execution pipeline for a mnemonic and its merged flags.
+    def classify(mnemonic: str, encodings: Iterable[str]) -> Optional[Pipeline]:
+        """Return the execution pipeline for a mnemonic and its merged encodings.
 
-        Each pipeline in turn claims the instruction if either its flags or its
-        prefixes match, so the enum order is the only thing deciding who wins.
+        Each pipeline in turn claims the instruction if either its encodings or
+        its prefixes match, so the enum order is the only thing deciding who
+        wins.
 
         Returns None when no rule matches, which leaves the type unset rather
         than guessing a pipeline.
         """
-        flag_set = set(flags)
+        encoding_set = set(encodings)
         for pipeline in Pipeline:
-            by_flag = any(
-                Rules.flag_to_pipeline.get(flag) == pipeline for flag in flag_set
+            by_encoding = any(
+                Rules.encoding_to_pipeline.get(encoding) == pipeline
+                for encoding in encoding_set
             )
             by_prefix = mnemonic.startswith(Rules.mnemonic_prefixes.get(pipeline, ()))
-            if by_flag or by_prefix:
+            if by_encoding or by_prefix:
                 return pipeline
         return None
 
@@ -322,19 +326,19 @@ class Rules:
     def build_table(records: Iterable[InstructionRecord]) -> dict[str, Pipeline]:
         """Classify every mnemonic, dropping the ones no rule claims.
 
-        The flags of all records printing a mnemonic are merged first. One
+        The encodings of all records printing a mnemonic are merged first. One
         mnemonic has many records, one per encoding variant per GPU family, and
-        a variant carrying no flags of its own would otherwise classify as
+        a variant carrying no encoding of its own would otherwise classify as
         something weaker than the instruction really is.
         """
-        merged_flags: dict[str, set[str]] = {}
+        merged_encodings: dict[str, set[str]] = {}
         for record in records:
             for mnemonic in record.mnemonics:
-                merged_flags.setdefault(mnemonic, set()).update(record.flags)
+                merged_encodings.setdefault(mnemonic, set()).update(record.encodings)
 
         table: dict[str, Pipeline] = {}
-        for mnemonic, flags in merged_flags.items():
-            pipeline = Rules.classify(mnemonic, flags)
+        for mnemonic, encodings in merged_encodings.items():
+            pipeline = Rules.classify(mnemonic, encodings)
             if pipeline is not None:
                 table[mnemonic] = pipeline
         return table
@@ -386,7 +390,7 @@ class Table:
     def build_document(commit: str, table: dict[str, Pipeline]) -> dict:
         """Group the mnemonics under their pipeline, with the rules behind them.
 
-        Every rule the classifier applies is recorded, the flag ones and the
+        Every rule the classifier applies is recorded, the encoding ones and the
         prefix ones alike, so a reader can tell where any entry came from and a
         regenerated file shows in its diff what moved.
         """
@@ -399,9 +403,9 @@ class Table:
             "repo": TableGen.llvm_repo,
             "commit": commit,
             "rules": {
-                "flags": {
-                    flag: pipeline.value
-                    for flag, pipeline in Rules.flag_to_pipeline.items()
+                "encodings": {
+                    encoding: pipeline.value
+                    for encoding, pipeline in Rules.encoding_to_pipeline.items()
                 },
                 "prefixes": {
                     pipeline.value: list(prefixes)
