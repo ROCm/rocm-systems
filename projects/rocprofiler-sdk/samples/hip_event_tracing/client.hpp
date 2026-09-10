@@ -52,9 +52,8 @@ void
 flush() CLIENT_API;
 
 /// Emit a line of application narration into the same timestamped, line-atomic output
-/// stream used for the trace records. Sharing the stream (and its lock) with the tracer is
-/// what makes the interleaved stdout of this sample readable: the application's account of
-/// what it is about to do lands in order relative to the records that result from it.
+/// stream used for the trace records. Sharing the stream and its lock with the tracer is
+/// what puts narration in order relative to the records it produces.
 void
 narrate(const char* msg) CLIENT_API;
 
@@ -66,9 +65,9 @@ banner(const char* msg) CLIENT_API;
 /// the tool has observed. The deferred-wait case uses this to notice that its long kernel
 /// finished too early for a wait barrier to have been needed at all.
 ///
-/// Note that the completion callback is delivered on the tool's barrier signal handler
-/// thread, so this count can lag the hipStreamSynchronize that guarantees the barrier
-/// itself has run. Poll it rather than sampling it once.
+/// The completion callback is delivered on the HSA async signal handler thread, so this
+/// count can lag the hipStreamSynchronize that guarantees the barrier itself has run.
+/// Poll it rather than sampling it once.
 uint64_t
 wait_barriers_completed() CLIENT_API;
 }  // namespace client
