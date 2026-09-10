@@ -4,6 +4,7 @@
 #include "rocjitsu/config/dbt_guest_config.h"
 
 #include "rocjitsu/config/config_common.h"
+#include "rocjitsu/config/rj_dbt.h"
 #include "rocjitsu/kmd/linux/rpc.h"
 
 #include "embedded_schema.h"
@@ -170,24 +171,21 @@ void apply_resolved_dbt_host_gpu_id(DbtGuestConfig &config, std::string_view val
   config.host.gpu_id = gpu_id;
 }
 
-bool write_dbt_runtime_config_handoff(const std::string &config_path, const DbtGuestConfig &config,
-                                      pid_t pid) {
-  if (config.enabled && config.host.gpu_id == 0)
-    return false;
-
-  const std::string handoff_file = rpc_invocation_config_file_path(pid);
+bool write_dbt_runtime_config_handoff(const std::string &runtime_dir,
+                                      const std::string &config_path, uint32_t host_gpu_id) {
   std::error_code directory_error;
-  std::filesystem::create_directories(std::filesystem::path(handoff_file).parent_path(),
-                                      directory_error);
+  std::filesystem::create_directories(runtime_dir, directory_error);
   if (directory_error)
     return false;
+
+  const std::string handoff_file = runtime_dir + "/config_path";
   const std::string temp_file = handoff_file + ".tmp";
   std::ofstream output(temp_file);
   if (!output)
     return false;
   output << config_path << '\n';
-  if (config.enabled)
-    output << config.host.gpu_id << '\n';
+  if (host_gpu_id != 0)
+    output << host_gpu_id << '\n';
   output.close();
   if (!output.good()) {
     std::filesystem::remove(temp_file);
@@ -199,6 +197,14 @@ bool write_dbt_runtime_config_handoff(const std::string &config_path, const DbtG
   if (rename_error)
     std::filesystem::remove(temp_file);
   return !rename_error;
+}
+
+bool write_dbt_runtime_config_handoff(const std::string &config_path, const DbtGuestConfig &config,
+                                      pid_t pid) {
+  if (config.enabled && config.host.gpu_id == 0)
+    return false;
+  return write_dbt_runtime_config_handoff(rpc_invocation_runtime_dir(pid), config_path,
+                                          config.enabled ? config.host.gpu_id : 0);
 }
 
 std::optional<DbtRuntimeConfigHandoff> parse_dbt_runtime_config_handoff(std::string_view contents) {
@@ -267,3 +273,13 @@ std::optional<DbtGuestConfig> load_dbt_guest_config_from_runtime_config() {
 
 } // namespace config
 } // namespace rocjitsu
+
+extern "C" rj_status_t rj_dbt_write_handoff(const char *runtime_dir, const char *config_path,
+                                            uint32_t host_gpu_id) {
+  if (runtime_dir == nullptr || *runtime_dir == '\0' || config_path == nullptr ||
+      *config_path == '\0')
+    return ROCJITSU_STATUS_INVALID_ARGUMENT;
+  return rocjitsu::config::write_dbt_runtime_config_handoff(runtime_dir, config_path, host_gpu_id)
+             ? ROCJITSU_STATUS_SUCCESS
+             : ROCJITSU_STATUS_ERROR;
+}

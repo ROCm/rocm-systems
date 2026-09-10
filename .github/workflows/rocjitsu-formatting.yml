@@ -61,3 +61,27 @@ jobs:
           echo "Checking files:"
           echo "$FILES"
           pre-commit run --files $FILES
+
+  # Clippy is a lint, not a formatter, so it is its own job: it needs the
+  # workspace to compile, which pre-commit's per-file model cannot express.
+  # The same check runs as a ctest case, but that suite needs a full C++
+  # build, and a lint should not wait on one.
+  clippy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: emulation/rocjitsu/cli
+
+      - name: Install Rust
+        run: |
+          rustup toolchain install stable --profile minimal --component clippy
+          rustup default stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: emulation/rocjitsu/cli
+
+      - name: cargo clippy
+        working-directory: emulation/rocjitsu/cli
+        run: cargo clippy --workspace --all-targets --all-features -- -D warnings
