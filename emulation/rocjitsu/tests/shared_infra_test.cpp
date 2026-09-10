@@ -202,6 +202,12 @@ static_assert(isa_properties(ROCJITSU_CODE_ARCH_RDNA4).descriptor_vgpr_count_gra
 static_assert(isa_properties(ROCJITSU_CODE_ARCH_RDNA4).descriptor_vgpr_count_granule_wave64 == 4);
 static_assert(isa_properties(ROCJITSU_CODE_ARCH_CDNA5).descriptor_vgpr_count_granule_wave32 == 16);
 static_assert(isa_properties(ROCJITSU_CODE_ARCH_CDNA5).descriptor_vgpr_count_granule_wave64 == 0);
+static_assert(isa_properties(ROCJITSU_CODE_ARCH_CDNA4).vmcnt_capacity == 63);
+static_assert(isa_properties(ROCJITSU_CODE_ARCH_CDNA4).lgkmcnt_capacity == 15);
+static_assert(isa_properties(ROCJITSU_CODE_ARCH_RDNA3_5).vmcnt_capacity == 63);
+static_assert(isa_properties(ROCJITSU_CODE_ARCH_RDNA3_5).lgkmcnt_capacity == 63);
+static_assert(isa_properties(ROCJITSU_CODE_ARCH_RDNA4).vmcnt_capacity == 0);
+static_assert(isa_properties(ROCJITSU_CODE_ARCH_RDNA4).lgkmcnt_capacity == 0);
 
 // RDNA3/3.5 retain monolithic S_WAITCNT (GFX11 layout).
 static_assert(HasMonolithicWaitcnt<rdna3::Isa>);
