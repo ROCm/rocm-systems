@@ -15,7 +15,6 @@ from rocprof_compute_base import RocProfCompute
 from rocprof_compute_profile.profiler_base import (
     RocProfCompute_Base,
     _partition_warning_messages,
-    _pmc_power_gating_warning,
 )
 from rocprof_compute_profile.profiler_rocprof_v3 import rocprof_v3_profiler
 from rocprof_compute_profile.profiler_rocprofiler_sdk import rocprofiler_sdk_profiler
@@ -93,32 +92,6 @@ def test_partition_warning_messages(
     )
 
     assert len(_partition_warning_messages(mspec)) == expected
-
-
-@pytest.mark.parametrize(
-    "gpu_arch, perf_level, affected",
-    [
-        pytest.param("gfx1150", None, True, id="gfx1150"),
-        pytest.param("gfx1151", "AUTO", True, id="gfx1151_auto"),
-        pytest.param("gfx1152", "AMDSMI_DEV_PERF_LEVEL_AUTO", True, id="gfx1152"),
-        pytest.param("gfx1151", "STABLE_STD", False, id="gfx1151_stable"),
-        pytest.param("gfx1151", "AmdSmiDevPerfLevel.STABLE_PEAK", False, id="peak"),
-        pytest.param("gfx942", None, False, id="cdna"),
-        pytest.param("gfx1100", "AUTO", False, id="rdna3"),
-        pytest.param("gfx1250", None, False, id="gfx1250"),
-        pytest.param(None, None, False, id="unknown_arch"),
-    ],
-)
-def test_pmc_power_gating_warning(gpu_arch, perf_level, affected):
-    """Warn on gfx115x at AUTO; stay silent on other archs or non-AUTO."""
-    message = _pmc_power_gating_warning(SimpleNamespace(gpu_arch=gpu_arch), perf_level)
-
-    if not affected:
-        assert message is None
-    else:
-        assert "TCP_REQ" in message
-        assert "rocprofiler-sdk" in message
-        assert "amd-smi set" not in message
 
 
 # ---------------------------------------------------------------------------
@@ -723,6 +696,50 @@ def test_pre_processing_persists_membw_analysis_config(
     )
     assert profiling_config["membw_analysis"] is True
     assert profiling_config["filter_blocks"] == effective_filter_blocks
+
+
+@pytest.mark.parametrize(
+    "perf_level, expect_warning",
+    [
+        pytest.param("AUTO", True, id="auto"),
+        pytest.param("AmdSmiDevPerfLevel.AUTO", True, id="enum_repr"),
+        pytest.param("STABLE_STD", False, id="stable_std"),
+        pytest.param("AmdSmiDevPerfLevel.STABLE_PEAK", False, id="stable_peak"),
+        pytest.param(None, False, id="unreadable_or_unaffected_arch"),
+    ],
+)
+def test_pre_processing_pmc_power_gating_warning(
+    tmp_path: Path, perf_level, expect_warning
+) -> None:
+    """Warn about perfmon gating only when the GPU profiled at AUTO."""
+    profiling_args = argparse.Namespace(
+        attach_pid=None,
+        config_dir=tmp_path / "analysis_configs",
+        experimental=True,
+        filter_blocks=[],
+        membw_analysis=False,
+        no_roof=True,
+        output_directory=str(tmp_path),
+        remaining="./app",
+    )
+    mock_soc = Mock()
+    mock_soc._mspec = SimpleNamespace(perf_level=perf_level)
+    mock_soc.profiling_setup.return_value = []
+    mock_soc.get_compatible_profilers.return_value = ["rocprofv3"]
+    profiler = rocprof_v3_profiler(
+        profiling_args,
+        profiler_mode="rocprofv3",
+        soc=mock_soc,
+    )
+
+    with patch("rocprof_compute_profile.profiler_base.gen_sysinfo"), patch(
+        "rocprof_compute_profile.profiler_base.console_warning"
+    ) as warning_mock:
+        profiler.pre_processing()
+
+    warnings = [str(call.args[0]) for call in warning_mock.call_args_list]
+    gating_warnings = [message for message in warnings if "TCP_REQ" in message]
+    assert bool(gating_warnings) is expect_warning
 
 
 # ---------------------------------------------------------------------------

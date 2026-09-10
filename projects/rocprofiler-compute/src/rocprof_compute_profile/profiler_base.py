@@ -13,7 +13,6 @@ from typing import Any, Optional, Union
 
 from pc_sampling.pc_sampling_profile import PCSamplingProfile
 from rocprof_compute_soc.soc_base import OmniSoC_Base
-from utils import amdsmi_interface
 from utils.inject_roctx.constants import KNOWN_ML_API_BACKENDS
 from utils.logger import (
     console_debug,
@@ -47,45 +46,14 @@ _FLAG_TO_FRAMEWORKS: dict[str, tuple[str, ...]] = {
     "ml_api_trace": KNOWN_ML_API_BACKENDS,
 }
 
-# startswith() prefix for the gfx115x family (gfx1150, gfx1151, gfx1152, ...).
-_GFX115X_ARCH_PREFIX = "gfx115"
-
-_PMC_POWER_GATING_DOC_URL = (
-    "https://rocm.docs.amd.com/projects/rocprofiler-sdk/en/latest/"
+# Only the specs classes that can be power-gated carry a perf_level, so seeing
+# AUTO here is enough to warn.
+_PMC_POWER_GATING_WARNING = (
+    "AUTO performance level can gate the perfmon clock, so counters such as "
+    "TCP_REQ may report zero even when the kernel issues global memory traffic. "
+    "See: https://rocm.docs.amd.com/projects/rocprofiler-sdk/en/latest/"
     "how-to/using-rocprofv3.html#setting-gpu-performance-level-for-pmc-profiling"
 )
-
-
-def _perf_level_is_auto(perf_level: Optional[str]) -> bool:
-    """Return True when the GPU is in AUTO, or the level could not be read."""
-    if not perf_level:
-        return True
-    token = str(perf_level).rsplit(".", 1)[-1].upper().replace("-", "_")
-    return token in {"AUTO", "AMDSMI_DEV_PERF_LEVEL_AUTO"}
-
-
-def _pmc_power_gating_warning(
-    mspec: MachineSpecs, perf_level: Optional[str] = None
-) -> Optional[str]:
-    """Return the PMC gating notice for gfx115x GPUs still at AUTO.
-
-    AUTO can gate the perfmon clock on this family, so counters such as
-    TCP_REQ report zero even when the kernel issues global memory traffic.
-    There is no ASIC capability bit for that gating; the family is the
-    known-affected set, and the current performance level is read from
-    the device. Unknown/unreadable levels still warn.
-    """
-    gpu_arch = getattr(mspec, "gpu_arch", None)
-    if not gpu_arch or not gpu_arch.startswith(_GFX115X_ARCH_PREFIX):
-        return None
-    if not _perf_level_is_auto(perf_level):
-        return None
-
-    return (
-        f"{gpu_arch}: AUTO performance level can gate the perfmon clock, so "
-        "counters such as TCP_REQ may report zero even when the kernel issues "
-        f"global memory traffic. See: {_PMC_POWER_GATING_DOC_URL}"
-    )
 
 
 def _partition_warning_messages(mspec: MachineSpecs) -> list[str]:
@@ -389,13 +357,9 @@ class RocProfCompute_Base:
         for message in _partition_warning_messages(self._soc._mspec):
             console_warning(message)
 
-        gpu_arch = getattr(self._soc._mspec, "gpu_arch", None)
-        perf_level = None
-        if gpu_arch and gpu_arch.startswith(_GFX115X_ARCH_PREFIX):
-            perf_level = amdsmi_interface.get_gpu_perf_level()
-        power_gating_warning = _pmc_power_gating_warning(self._soc._mspec, perf_level)
-        if power_gating_warning:
-            console_warning(power_gating_warning)
+        perf_level = getattr(self._soc._mspec, "perf_level", None)
+        if perf_level and perf_level.upper().endswith("AUTO"):
+            console_warning(_PMC_POWER_GATING_WARNING)
 
     def profile(
         self,
