@@ -175,4 +175,4 @@ Check your terminal width with:
    * Guidance text is in its preliminary stages and may not cover all bottleneck scenarios.
    * The analysis evaluates per-dispatch averages. Bottlenecks that occur in only a subset of dispatches may not be visible.
    * Guidance output is capped at 5 blocks. Additional bottlenecks beyond the cap are noted but not expanded.
-   * When block 30 counters are missing or incomplete, the guidance panel shows "Unavailable", "Partial data", or "Inconclusive" status lines instead of bottleneck details.
+   * When Block 30 counters are missing or incomplete, the guidance panel shows "Unavailable", "Partial data", or "Inconclusive" status lines instead of bottleneck details.
