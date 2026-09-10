@@ -227,6 +227,7 @@ if(CLANG_OFFLOAD_BUNDLER)
                 ${KERNEL_OUTPUT_DIR}/rj_nop_probe_gfx90a.hsaco
                 ${KERNEL_OUTPUT_DIR}/rj_nop_probe_gfx950.hsaco
                 ${KERNEL_OUTPUT_DIR}/rj_nop_probe_gfx1201.hsaco
+                ${KERNEL_OUTPUT_DIR}/rj_arg_probe_gfx90a.hsaco
                 ${KERNEL_OUTPUT_DIR}/callable_sgpr_probe_gfx950.hsaco
             DESTINATION ${CMAKE_INSTALL_DATADIR}/rocjitsu/tests/kernels
         )
