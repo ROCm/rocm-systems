@@ -14,7 +14,7 @@
 // so the eight ranks have to share a node.
 //
 // Build and run:
-//   ./install.sh --debug -t --enable-mpi-tests --rccl-ep-tests
+//   ./install.sh --debug -t --enable-mpi-tests --enable-rccl-ep-tests
 //   NCCL_CUMEM_ENABLE=1 mpirun -np 8 --bind-to none \
 //     ./build/debug/test/rccl-UnitTestsMPI --gtest_filter=RcclEpDispatchCombineTest.*
 //
@@ -125,9 +125,8 @@ protected:
         MPITestBase::TearDown();
     }
 
-    // Mirrors SymmetricWindowMPITests' setupForSymmetric: refuse rather than fail on a
-    // runtime without symmetric memory. ep_configure is the real probe -- it is what
-    // allocates and registers the window.
+    // Refuse rather than fail on a runtime without symmetric memory. ep_configure is
+    // the real probe: it allocates and registers the window.
     bool SetupEp()
     {
         if (!validateTestPrerequisites(kRanks, kNoProcessLimit, kNoPowerOfTwoRequired,
@@ -140,9 +139,8 @@ protected:
         rank_   = MPIEnvironment::world_rank;
         nRanks_ = MPIEnvironment::world_size;
 
-        // MPIEnvironment has already bound this rank to its local device; adopt that
-        // instead of re-deriving one from the global rank. This is a per-rank condition
-        // and the collectives below are not, so disagreement is resolved before the first.
+        // MPIEnvironment already bound this rank to its local device; adopt that rather
+        // than re-deriving from the global rank. Per-rank, so agree before the collectives.
         int localOk = (hipGetDevice(&device_) == hipSuccess) ? 1 : 0;
         int deviceOk = 0;
         if (MPI_Allreduce(&localOk, &deviceOk, 1, MPI_INT, MPI_MIN, MPI_COMM_WORLD) != MPI_SUCCESS) return false;
@@ -152,9 +150,8 @@ protected:
         // index / experts_per_rank.
         numExperts_ = nRanks_ * kExpertsPerRank;
 
-        // Every rank must reach the same decision. A rank-0-only early return here would
-        // leave the others blocked in the collective below, hanging the job instead of
-        // failing it, so the outcome is agreed with an Allreduce.
+        // Every rank must reach the same decision: a rank-0-only early return would leave
+        // the others blocked in the Bcast below, hanging the job instead of failing it.
         std::vector<char> uid(static_cast<size_t>(ep_unique_id_size()), 0);
         int ok = 1;
         if (rank_ == 0 && ep_get_unique_id(uid.data()) != 0) ok = 0;

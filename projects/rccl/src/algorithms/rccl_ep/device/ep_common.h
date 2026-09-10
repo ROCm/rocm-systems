@@ -99,9 +99,12 @@ __device__ __forceinline__ void wave_copy_bf16(bf16_t* __restrict__ dst, const b
   for (int i = nvec * kPerVec + lane; i < n; i += kWarpSize) dst[i] = src[i];
 }
 
-// Cross-rank rendezvous, device side. Must be launched with exactly
-// `lsaBarrierCount` CTAs so every rank presents the same shape; a mismatch
-// deadlocks. Replaces the host barrier.
+// CTA count for k_ep_lsa_barrier. Must equal the ncclDevCommRequirements::
+// lsaBarrierCount set in ep_configure and be used at every launch site; a
+// mismatch deadlocks the rendezvous rather than failing to compile.
+constexpr int kEpBarrierCtas = 8;
+
+// Cross-rank rendezvous, device side. Replaces the host barrier.
 __global__ void k_ep_lsa_barrier(ncclDevComm devComm) {
   ncclLsaBarrierSession<ncclCoopCta> bar{ncclCoopCta(), devComm, ncclTeamLsa(devComm), devComm.lsaBarrier,
                                          (uint32_t)blockIdx.x};
@@ -121,8 +124,9 @@ __global__ void k_ep_scan_counts(EpConfig cfg, WindowView self, int32_t* __restr
   *total_recv = acc;
 }
 
-// FP8 dispatch. Same routing as bf16; payload is 1 byte per element and each
-// token additionally carries hidden_sf per-block scales.
+// Vectorised copy of `n` BYTES, one wave cooperating: dwordx4 per lane plus a
+// scalar tail. The fp8 payload path. `dst` and `src` must be 16B aligned, as
+// wave_copy_bf16 above requires.
 __device__ __forceinline__ void wave_copy_bytes(uint8_t* __restrict__ dst, const uint8_t* __restrict__ src, int n) {
   const int lane = get_lane_idx();
   const int nvec = n / 16;

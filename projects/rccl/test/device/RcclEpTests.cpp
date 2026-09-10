@@ -303,7 +303,7 @@ TEST(RcclEpLayoutTest, GrowsWithRanksTokensHiddenAndTopk) {
 TEST(RcclEpLayoutTest, ExpertAndScaleFactorArithmetic) {
   const rccl_ep::EpConfig c = makeConfig(8, 128, 7168, 6);
 
-  EXPECT_EQ(c.experts_per_rank(), c.num_experts / c.num_ranks);
+  EXPECT_EQ(c.experts_per_rank(), 32);
   EXPECT_EQ(c.expert_begin(0), 0);
   EXPECT_EQ(c.expert_end(c.num_ranks - 1), c.num_experts);
   for (int r = 1; r < c.num_ranks; ++r) EXPECT_EQ(c.expert_begin(r), c.expert_end(r - 1));

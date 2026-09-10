@@ -49,6 +49,11 @@ struct EpHandle {
   WindowView* d_views{};
   WindowView self_view{};
   int32_t *d_recvoff{}, *d_total{};
+  // The HIP device ordinal, kept separately from cfg.rank: the caller is free to
+  // map ranks onto devices any way it likes, so querying device properties by
+  // rank reads the wrong GPU on every non-identity mapping.
+  int device{-1};
+  bool devcomm{false};
   bool configured{false};
 };
 
@@ -68,16 +73,35 @@ inline int ctas_per_rank(int num_sms, int dflt, int num_ranks) {
   return per > 0 ? per : 1;
 }
 
-// Release the symmetric window. ep_configure's failure paths run with
-// `configured` still false, so ep_destroy would never reach a window they had
-// already taken; they have to hand it back themselves.
+// Release the device communicator and the symmetric window. ep_configure's
+// failure paths run with `configured` still false, so ep_destroy would never
+// reach resources they had already taken; they have to hand them back
+// themselves. Every step is guarded by its own flag, so a partially built
+// handle unwinds through the same path as a fully built one.
+//
+// The devComm is torn down first: it holds the LSA barrier state that lives in
+// the window, so deregistering the window under it would leave it dangling.
 inline void release_window(EpHandle* h, bool registered) {
+  if (h->devcomm) {
+    ncclDevCommDestroy(h->comm, &h->devComm);
+    h->devcomm = false;
+  }
   if (registered) ncclCommWindowDeregister(h->comm, h->win);
   if (h->win_buf) {
     ncclMemFree(h->win_buf);
     h->win_buf = nullptr;
   }
 }
+
+// Every data-path entry point is reachable without the Python layer -- the unit
+// tests include this ABI directly -- so an unconfigured handle has to say so
+// rather than fault on a null window or an uninitialised devComm.
+#define REQUIRE_CONFIGURED(h, fn) do {                                        \
+    if (!(h)->configured) {                                                   \
+      fprintf(stderr, "[rccl_ep] " fn " before a successful ep_configure\n"); \
+      return -1;                                                              \
+    }                                                                         \
+  } while (0)
 
 // Waves per block for every kernel that moves payload. The parallelism these
 // kernels get is CTAs x waves, and only the CTA count follows the caller's
@@ -146,6 +170,7 @@ void* ep_create(int rank, int num_ranks, const char* unique_id,
   h->cfg.rank = rank;
   h->cfg.hidden = hidden;
   h->cfg.num_max_tokens_per_rank = max_tokens_per_rank;
+  h->device = device;
 
   ncclUniqueId id;
   memcpy(&id, unique_id, sizeof(id));
@@ -219,13 +244,14 @@ int ep_configure(void* handle, int num_experts, int num_topk) {
   }
 
   ncclDevCommRequirements reqs = NCCL_DEV_COMM_REQUIREMENTS_INITIALIZER;
-  reqs.lsaBarrierCount = 8;   // LSA only: no GIN contexts on the intranode path
+  reqs.lsaBarrierCount = kEpBarrierCtas;  // LSA only: no GIN contexts on the intranode path
   nr = ncclDevCommCreate(h->comm, &reqs, &h->devComm);
   if (nr != ncclSuccess) {
     fprintf(stderr, "[rccl_ep] ncclDevCommCreate: %s\n", ncclGetErrorString(nr));
     release_window(h, true);
     return -1;
   }
+  h->devcomm = true;
 
   hipLaunchKernelGGL(k_capi_fill_views, dim3(1), dim3(1), 0, 0,
                      h->win, h->lay, h->cfg.num_ranks, h->d_views);
@@ -244,7 +270,7 @@ int ep_configure(void* handle, int num_experts, int num_topk) {
   // ep_create because it travels over the LSA window, which does not exist
   // until now.
   char err[256];
-  if (check_uniform_arch(h->cfg, h->cfg.rank, h->d_views, h->self_view,
+  if (check_uniform_arch(h->cfg, h->device, h->d_views, h->self_view,
                          h->devComm, err, sizeof(err)) != 0) {
     fprintf(stderr, "[rccl_ep] %s\n", err);
     release_window(h, true);
@@ -262,7 +288,10 @@ size_t ep_window_bytes(void* handle) {
 void ep_destroy(void* handle) {
   auto* h = static_cast<EpHandle*>(handle);
   if (!h) return;
-  if (h->configured) release_window(h, true);
+  // Unconditional rather than gated on `configured`: a handle whose ep_configure
+  // failed part-way has already handed back what it took, and release_window is
+  // a no-op on the flags it cleared, so this covers both without double-freeing.
+  release_window(h, h->configured);
   hipFree(h->d_recvoff);
   hipFree(h->d_total);
   hipFree(h->d_views);
@@ -272,8 +301,9 @@ void ep_destroy(void* handle) {
 
 int ep_barrier(void* handle, uintptr_t stream) {
   auto* h = static_cast<EpHandle*>(handle);
+  REQUIRE_CONFIGURED(h, "ep_barrier");
   hipStream_t s = (hipStream_t)stream;
-  hipLaunchKernelGGL(k_ep_lsa_barrier, dim3(8), dim3(kWarpSize), 0, s, h->devComm);
+  hipLaunchKernelGGL(k_ep_lsa_barrier, dim3(kEpBarrierCtas), dim3(kWarpSize), 0, s, h->devComm);
   HC(hipStreamSynchronize(s));
   return 0;
 }
@@ -284,6 +314,7 @@ int ep_plan(void* handle, uintptr_t topk_idx, int num_tokens,
             uintptr_t out_slot, uintptr_t out_list, uintptr_t out_sendc,
             uintptr_t stream) {
   auto* h = static_cast<EpHandle*>(handle);
+  REQUIRE_CONFIGURED(h, "ep_plan");
   hipStream_t s = (hipStream_t)stream;
   hipLaunchKernelGGL(k_ep_plan, dim3(h->cfg.num_ranks), dim3(kWarpSize), 0, s,
                      h->cfg, (const int32_t*)topk_idx, num_tokens,
@@ -303,13 +334,7 @@ int ep_dispatch(void* handle,
   auto* h = static_cast<EpHandle*>(handle);
   const EpConfig& c = h->cfg;
   hipStream_t s = (hipStream_t)stream;
-  // The C ABI is reachable without the Python layer -- the unit tests include
-  // these headers directly -- so an unconfigured handle has to say so rather
-  // than fault on a null window.
-  if (!h->configured) {
-    fprintf(stderr, "[rccl_ep] ep_dispatch before a successful ep_configure\n");
-    return -1;
-  }
+  REQUIRE_CONFIGURED(h, "ep_dispatch");
   // fp8 payload is 1 byte/element, so the 16B vector copies need hidden % 16 == 0;
   // ep_create's hidden % 8 guard only covers bf16 (2 bytes/element).
   if (use_fp8 && c.hidden % 16 != 0) {
@@ -333,7 +358,7 @@ int ep_dispatch(void* handle,
 
   HC(hipMemsetAsync((uint8_t*)h->win_buf + h->lay.off_counts, 0, c.num_ranks * sizeof(int32_t), s));
 
-  hipLaunchKernelGGL(k_ep_lsa_barrier, dim3(8), dim3(kWarpSize), 0, s, h->devComm);
+  hipLaunchKernelGGL(k_ep_lsa_barrier, dim3(kEpBarrierCtas), dim3(kWarpSize), 0, s, h->devComm);
   if (use_fp8) {
     hipLaunchKernelGGL(dispatch_impl, dim3(c.num_ranks, cta), dim3(kEpWaves * kWarpSize), 0, s,
                        c, (const fp8_t*)x, (const float*)x_sf, (const int32_t*)topk_idx,
@@ -344,7 +369,7 @@ int ep_dispatch(void* handle,
                        c, (const bf16_t*)x, (const int32_t*)topk_idx, (const float*)topk_w,
                        num_tokens, (const int32_t*)send_list, (const int32_t*)sendc, h->d_views);
   }
-  hipLaunchKernelGGL(k_ep_lsa_barrier, dim3(8), dim3(kWarpSize), 0, s, h->devComm);
+  hipLaunchKernelGGL(k_ep_lsa_barrier, dim3(kEpBarrierCtas), dim3(kWarpSize), 0, s, h->devComm);
   hipLaunchKernelGGL(k_ep_scan_counts, dim3(1), dim3(1), 0, s,
                      c, h->self_view, h->d_recvoff, h->d_total);
 
@@ -371,6 +396,7 @@ int ep_dispatch(void* handle,
 // Per-source received counts, so the caller can report the per-rank prefix sum.
 int ep_recv_counts(void* handle, uintptr_t out_counts, uintptr_t stream) {
   auto* h = static_cast<EpHandle*>(handle);
+  REQUIRE_CONFIGURED(h, "ep_recv_counts");
   hipStream_t s = (hipStream_t)stream;
   // No sync: the destination is a caller tensor read back on the same stream.
   HC(hipMemcpyAsync((void*)out_counts, (uint8_t*)h->win_buf + h->lay.off_counts,
@@ -381,6 +407,7 @@ int ep_recv_counts(void* handle, uintptr_t out_counts, uintptr_t stream) {
 int ep_expert_counts(void* handle, uintptr_t recv_topk, int num_recv, uintptr_t out_counts,
                      uintptr_t stream) {
   auto* h = static_cast<EpHandle*>(handle);
+  REQUIRE_CONFIGURED(h, "ep_expert_counts");
   hipStream_t s = (hipStream_t)stream;
   hipLaunchKernelGGL(k_expand_count, dim3(h->cfg.experts_per_rank()), dim3(256), 0, s,
                      h->cfg, (const int32_t*)recv_topk, num_recv, (int32_t*)out_counts);
@@ -393,6 +420,7 @@ int ep_expand_build(void* handle, uintptr_t recv_topk, int num_recv, int expert_
                     uintptr_t counts, uintptr_t offsets, uintptr_t psum,
                     uintptr_t hist, uintptr_t row_map, uintptr_t stream) {
   auto* h = static_cast<EpHandle*>(handle);
+  REQUIRE_CONFIGURED(h, "ep_expand_build");
   const EpConfig& c = h->cfg;
   hipStream_t s = (hipStream_t)stream;
   const int epr = c.experts_per_rank();
@@ -427,6 +455,7 @@ int ep_expand_scatter(void* handle, int use_fp8,
                       int zero_pad, int expert_alignment,
                       uintptr_t counts, uintptr_t offsets, int num_sms, uintptr_t stream) {
   auto* h = static_cast<EpHandle*>(handle);
+  REQUIRE_CONFIGURED(h, "ep_expand_scatter");
   const EpConfig& c = h->cfg;
   hipStream_t s = (hipStream_t)stream;
   const int cta = sms_or(num_sms, 64);
@@ -464,10 +493,7 @@ int ep_combine(void* handle,
   auto* h = static_cast<EpHandle*>(handle);
   const EpConfig& c = h->cfg;
   hipStream_t s = (hipStream_t)stream;
-  if (!h->configured) {
-    fprintf(stderr, "[rccl_ep] ep_combine before a successful ep_configure\n");
-    return -1;
-  }
+  REQUIRE_CONFIGURED(h, "ep_combine");
   // Two different grids. The transport is (num_ranks, per_rank) so a CTA owns
   // one peer; the reduce epilogue is purely local and 1-D over tokens, so it
   // takes the whole budget. Sharing one value silently starved the epilogue of
@@ -475,12 +501,12 @@ int ep_combine(void* handle,
   const int cta = ctas_per_rank(num_sms, 128, c.num_ranks);
   const int cta_reduce = sms_or(num_sms, 128);
 
-  hipLaunchKernelGGL(k_ep_lsa_barrier, dim3(8), dim3(kWarpSize), 0, s, h->devComm);
+  hipLaunchKernelGGL(k_ep_lsa_barrier, dim3(kEpBarrierCtas), dim3(kWarpSize), 0, s, h->devComm);
   hipLaunchKernelGGL(combine_impl, dim3(c.num_ranks, cta), dim3(kEpWaves * kWarpSize), 0, s,
                      c, (const bf16_t*)y, (const float*)in_w, (const int32_t*)row_map,
                      (const int32_t*)recv_topk, (const int32_t*)recv_src, num_recv,
                      grouped, h->self_view, h->d_views);
-  hipLaunchKernelGGL(k_ep_lsa_barrier, dim3(8), dim3(kWarpSize), 0, s, h->devComm);
+  hipLaunchKernelGGL(k_ep_lsa_barrier, dim3(kEpBarrierCtas), dim3(kWarpSize), 0, s, h->devComm);
   hipLaunchKernelGGL(combine_reduce_epilogue_impl, dim3(cta_reduce), dim3(kEpWaves * kWarpSize), 0, s,
                      c, h->self_view, (const int32_t*)topk_idx, num_tokens,
                      (const bf16_t*)bias0, (const bf16_t*)bias1, grouped,

@@ -22,7 +22,7 @@
 #include <nccl.h>
 #include <nccl_device.h>
 
-#include "device/dispatch.h"
+#include "device/ep_common.h"
 #include "include/ep_layout.h"
 
 namespace rccl_ep {
@@ -60,11 +60,16 @@ inline int check_uniform_arch(const EpConfig& cfg, int device, WindowView* d_vie
     snprintf(err, err_len, "hipMalloc for the arch check failed");
     return -1;
   }
-  hipMemcpy(d_mine, mine, kArchLen, hipMemcpyHostToDevice);
+  hipError_t ce = hipMemcpy(d_mine, mine, kArchLen, hipMemcpyHostToDevice);
+  if (ce != hipSuccess) {
+    snprintf(err, err_len, "arch upload: %s", hipGetErrorString(ce));
+    hipFree(d_mine);
+    return -1;
+  }
 
-  hipLaunchKernelGGL(k_ep_lsa_barrier, dim3(8), dim3(kWarpSize), 0, 0, devComm);
+  hipLaunchKernelGGL(k_ep_lsa_barrier, dim3(kEpBarrierCtas), dim3(kWarpSize), 0, 0, devComm);
   hipLaunchKernelGGL(k_ep_publish_arch, dim3(cfg.num_ranks), dim3(kArchLen), 0, 0, cfg, d_views, d_mine);
-  hipLaunchKernelGGL(k_ep_lsa_barrier, dim3(8), dim3(kWarpSize), 0, 0, devComm);
+  hipLaunchKernelGGL(k_ep_lsa_barrier, dim3(kEpBarrierCtas), dim3(kWarpSize), 0, 0, devComm);
   hipError_t he = hipDeviceSynchronize();
   hipFree(d_mine);
   if (he != hipSuccess) {
@@ -75,7 +80,16 @@ inline int check_uniform_arch(const EpConfig& cfg, int device, WindowView* d_vie
   // WindowView's accessors are device-side, so the offset is applied here
   // rather than calling self.arch().
   char* all = (char*)malloc((size_t)cfg.num_ranks * kArchLen);
-  hipMemcpy(all, self.base + self.l.off_arch, (size_t)cfg.num_ranks * kArchLen, hipMemcpyDeviceToHost);
+  if (all == nullptr) {
+    snprintf(err, err_len, "malloc for the arch table failed");
+    return -1;
+  }
+  ce = hipMemcpy(all, self.base + self.l.off_arch, (size_t)cfg.num_ranks * kArchLen, hipMemcpyDeviceToHost);
+  if (ce != hipSuccess) {
+    snprintf(err, err_len, "arch readback: %s", hipGetErrorString(ce));
+    free(all);
+    return -1;
+  }
 
   int rc = 0;
   for (int r = 0; r < cfg.num_ranks; ++r) {

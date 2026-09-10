@@ -318,10 +318,19 @@ class ElasticBuffer:
         stream = torch.cuda.current_stream().cuda_stream
 
         if cached:
-            topk_idx = handle.topk_idx if topk_idx is None else topk_idx
+            # A cached call replays the handle's plan verbatim, so everything the
+            # plan encodes has to come from the handle. The routing in particular:
+            # combine() reads it back as handle.topk_idx_i32, so re-deriving it
+            # here from a caller-supplied tensor would let dispatch and combine
+            # disagree about which rank owns a token, with no shape change and no
+            # error to signal it.
+            if topk_idx is not None and topk_idx is not handle.topk_idx:
+                raise ValueError(
+                    "cached dispatch replays the handle's routing; pass "
+                    "topk_idx=None")
+            topk_idx = handle.topk_idx
             num_experts = self.num_experts
-            # A cached call replays the handle's plan verbatim, so the alignment
-            # it was built with is the only one that keeps the replay exact.
+            # Same reasoning for the alignment it was built with.
             expert_alignment = handle.expert_alignment
         if num_experts is None:
             num_experts = self.num_experts
@@ -331,6 +340,16 @@ class ElasticBuffer:
                     "ElasticBuffer constructor")
 
         num_tokens = x.shape[0]
+        # The plan tensors are shaped (num_ranks, plan-time num_tokens) and the
+        # dispatch kernel strides send_list by the num_tokens it is passed, so a
+        # replay at a different token count reads the wrong rows -- and combine()
+        # would then size its output from the handle's count, not this call's.
+        # Refreshing handle.num_tokens would not help; the stride is already baked
+        # into the plan, so the only sound answer is to refuse.
+        if cached and num_tokens != handle.num_tokens:
+            raise ValueError(
+                f"cached dispatch has {num_tokens} tokens, but its handle was "
+                f"built for {handle.num_tokens}")
         if num_tokens > self.num_max_tokens_per_rank:
             raise ValueError(
                 f"num_tokens {num_tokens} exceeds num_max_tokens_per_rank "
@@ -341,7 +360,10 @@ class ElasticBuffer:
 
         x = x.contiguous()
         x_sf = x_sf.contiguous().float() if x_sf is not None else None
-        ti32 = topk_idx.to(torch.int32).contiguous()
+        # Cached: the handle's own int32 copy, so dispatch pushes exactly the
+        # routing combine() will reduce against. Also saves a cast per replay.
+        ti32 = (handle.topk_idx_i32 if cached
+                else topk_idx.to(torch.int32).contiguous())
         tw = (topk_weights if topk_weights is not None
               else torch.zeros(topk_idx.shape, dtype=torch.float32,
                                device=x.device)).to(torch.float32).contiguous()

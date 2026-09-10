@@ -128,7 +128,7 @@ __global__ void dispatch_impl(EpConfig cfg, const fp8_t* __restrict__ x,
 
     wave_copy_bytes((uint8_t*)(w.x_fp8() + slot * cfg.hidden), (const uint8_t*)(x + (size_t)t * cfg.hidden),
                     cfg.hidden);
-    for (int i = lane; i < nsf; i += kWarpSize) w.sf()[slot * nsf + i] = sf[(size_t)t * nsf + i];
+    for (int j = lane; j < nsf; j += kWarpSize) w.sf()[slot * nsf + j] = sf[(size_t)t * nsf + j];
     for (int k = lane; k < cfg.num_topk; k += kWarpSize) {
       const int e = topk_idx[(size_t)t * cfg.num_topk + k];
       w.topk_idx()[slot * cfg.num_topk + k] = (e >= lo && e < hi) ? e : -1;
