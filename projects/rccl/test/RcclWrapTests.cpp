@@ -10,13 +10,16 @@
 #include <cstdlib>
 #include <cstring>
 #include <memory>
+#include <string>
 
+#include "archinfo.h"
 #include "ce_coll.h"
 #include "comm.h"
 #include "common/ErrCode.hpp"
 #include "common/MockComm.hpp"
 #include "common/ProcessIsolatedTestRunner.hpp"
 #include "debug.h"
+#include "device.h"
 #include "enqueue.h"
 #include "graph.h"
 #include "graph/topo.h"
@@ -2668,6 +2671,103 @@ TEST(SkipPresetTopoMatching, Gfx1250_SkipsRomeModelMatching)
 
         ASSERT_EQ(ncclCommDestroy(commHandle), ncclSuccess);
     });
+}
+
+// ---------------------------------------------------------------------------
+// commSetUnrollFactor: RCCL_UNROLL_FACTOR validation against the running arch.
+//
+// Unroll factors 8, 16 and 32 are compiled for gfx1250 only (see
+// unroll_arch_requirement in src/device/generate.py). Requesting one on any
+// other GPU used to be accepted and then dispatched into a device function
+// table whose entries are all nullptr, which faults on the device.
+//
+// These assert the return code rather than which rejection branch ran, so they
+// hold for a multi-arch build (where the factor is generated but arch-locked)
+// and for a local-arch build (where it is not generated at all).
+//
+// commSetUnrollFactor reads only archName, nNodes and cuCount, so no GPU is
+// needed. RCCL_PARAM caches RCCL_UNROLL_FACTOR in a function-local static,
+// which is what the process isolation is for.
+//
+// They belong to the Rcclwrap suite because the fixtures-debug CI selection
+// enumerates suite prefixes with no catch-all (test_categories_fixtures_debug
+// .yaml and the unit_tests_fixtures_debug blocks under tools/scripts/
+// test_runner/configs), and Rcclwrap.* is the only listed pattern this file
+// matches. A suite of their own would never be run.
+// ---------------------------------------------------------------------------
+TEST(Rcclwrap, UnrollFactor_RejectsArchRestrictedUnrollOnOtherArch)
+{
+    RUN_ISOLATED_TEST_WITH_ENV("UnrollFactor_RejectsArchRestrictedUnrollOnOtherArch",
+      []() {
+        ncclComm comm{};
+        comm.archName = const_cast<char*>("gfx1200");
+        comm.nNodes   = 1;
+        comm.cuCount  = 32;
+
+        EXPECT_EQ(ncclInvalidArgument, commSetUnrollFactor(&comm))
+          << "RCCL_UNROLL_FACTOR=5 (unroll 32) must be refused on gfx1200: its "
+             "device function table has no entries for this arch";
+      },
+      {{"RCCL_UNROLL_FACTOR", "5"}}
+    );
+}
+
+TEST(Rcclwrap, UnrollFactor_RejectsOutOfRangeUnroll)
+{
+    RUN_ISOLATED_TEST_WITH_ENV("UnrollFactor_RejectsOutOfRangeUnroll",
+      []() {
+        ncclComm comm{};
+        comm.archName = const_cast<char*>("gfx942");
+        comm.nNodes   = 1;
+        comm.cuCount  = 304;
+
+        EXPECT_EQ(ncclInvalidArgument, commSetUnrollFactor(&comm))
+          << "RCCL_UNROLL_FACTOR=99 is outside the unroll enum and must be refused";
+      },
+      {{"RCCL_UNROLL_FACTOR", "99"}}
+    );
+}
+
+// At file scope so the isolated lambda below can name it without a capture.
+constexpr char kUsableUnrollArch[] = "gfx942";
+
+// The counterpart to the two rejections above: a validation that refused every
+// value would satisfy them both. The factor cannot be hardcoded, because which
+// unrolls exist depends on the build -- a local-arch build narrows the set to
+// one or two (generate.py's calc_unroll_and_pipeline_for_local_arch), and none
+// of them is common to every arch. So ask the tables which factor is usable
+// here and assert that commSetUnrollFactor honors exactly that one.
+TEST(Rcclwrap, UnrollFactor_AcceptsUsableUnroll)
+{
+    int usable = -1;
+    for(int u = NCCL_UNROLL_1; u < NCCL_NUM_UNROLLS; ++u)
+    {
+        if(!ncclDevFuncUnrollGenerated[u]) continue;
+        const char* requiredArch = ncclDevFuncUnrollArch[u];
+        if(requiredArch != nullptr && !IsArchMatch(kUsableUnrollArch, requiredArch)) continue;
+        usable = u;
+        break;
+    }
+    if(usable < 0)
+    {
+        GTEST_SKIP() << "no unroll factor in this build is usable on " << kUsableUnrollArch;
+    }
+
+    RUN_ISOLATED_TEST_WITH_ENV("UnrollFactor_AcceptsUsableUnroll",
+      [usable]() {
+        ncclComm comm{};
+        comm.archName = const_cast<char*>(kUsableUnrollArch);
+        comm.nNodes   = 1;
+        comm.cuCount  = 304;
+
+        EXPECT_EQ(ncclSuccess, commSetUnrollFactor(&comm))
+          << "unroll " << usable << " is generated and carries no arch restriction "
+             "conflicting with " << kUsableUnrollArch << ", so it must be accepted";
+        EXPECT_EQ(usable, comm.unroll)
+          << "an accepted RCCL_UNROLL_FACTOR must be the factor actually installed";
+      },
+      {{"RCCL_UNROLL_FACTOR", std::to_string(usable)}}
+    );
 }
 
 } // namespace RcclUnitTesting
