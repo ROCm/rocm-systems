@@ -22,8 +22,6 @@
 #include <rccl/rccl.h>
 
 #include <chrono>
-#include <cstdlib>
-#include <sstream>
 #include <string>
 #include <vector>
 
@@ -83,32 +81,12 @@ bool isGfx1250(int device)
   return std::string(prop.gcnArchName).rfind("gfx1250", 0) == 0;
 }
 
-// HIP_VISIBLE_DEVICES lists physical indices; hipGetDeviceCount() is logical.
-std::vector<int> hipVisiblePhysicalIds()
-{
-  const char* hvd = std::getenv("HIP_VISIBLE_DEVICES");
-  std::vector<int> ids;
-  if (hvd && *hvd) {
-    std::stringstream ss(hvd);
-    std::string tok;
-    while (std::getline(ss, tok, ',')) {
-      if (!tok.empty()) ids.push_back(std::stoi(tok));
-    }
-    return ids;
-  }
-  int n = 0;
-  if (hipGetDeviceCount(&n) != hipSuccess) return {};
-  ids.resize(static_cast<size_t>(n));
-  for (int i = 0; i < n; ++i) ids[static_cast<size_t>(i)] = i;
-  return ids;
-}
-
 // Sibling DPX partitions share PCI domain:bus (writeup / hang matrix).
-// Returns physical device indices suitable for HIP_VISIBLE_DEVICES.
-bool findSiblingPair(int* physA, int* physB)
+// Returns logical device indices within the current HIP visibility.
+bool findSiblingPair(int* devA, int* devB)
 {
-  const std::vector<int> phys = hipVisiblePhysicalIds();
-  const int n = static_cast<int>(phys.size());
+  int n = 0;
+  if (hipGetDeviceCount(&n) != hipSuccess) return false;
   if (n < 2) return false;
   for (int i = 0; i < n; ++i) {
     hipDeviceProp_t pi{};
@@ -117,9 +95,10 @@ bool findSiblingPair(int* physA, int* physB)
       hipDeviceProp_t pj{};
       if (hipGetDeviceProperties(&pj, j) != hipSuccess) continue;
       if (pi.pciDomainID == pj.pciDomainID && pi.pciBusID == pj.pciBusID &&
-          std::string(pi.gcnArchName).rfind("gfx1250", 0) == 0) {
-        *physA = phys[static_cast<size_t>(i)];
-        *physB = phys[static_cast<size_t>(j)];
+          std::string(pi.gcnArchName).rfind("gfx1250", 0) == 0 &&
+          std::string(pj.gcnArchName).rfind("gfx1250", 0) == 0) {
+        *devA = i;
+        *devB = j;
         return true;
       }
     }
@@ -205,18 +184,17 @@ TEST_F(DeviceTestBase, FifoLineSysScopeRoundtrip)
 
 TEST(LlFifoSysScope, SiblingBroadcastSlotReuse)
 {
-  // Hang gate: skip unless gfx1250 DPX siblings; that is the only config that hung.
-  int a = 0, b = 1;
-  if (!findSiblingPair(&a, &b)) {
-    GTEST_SKIP() << "needs two gfx1250 devices that share PCI domain:bus (DPX siblings)";
-  }
-
-  const std::string hvd = std::to_string(a) + "," + std::to_string(b);
   RUN_ISOLATED_TESTS(
     ProcessIsolatedTestRunner::TestConfig("LlFifoSysScope.SiblingBroadcastSlotReuse",
-                                          []() { runSiblingBroadcastSlotReuse(0, 1); })
+                                          []() {
+                                            int a = 0, b = 1;
+                                            if (!findSiblingPair(&a, &b)) {
+                                              GTEST_SKIP()
+                                                << "needs visible gfx1250 DPX sibling devices";
+                                            }
+                                            runSiblingBroadcastSlotReuse(a, b);
+                                          })
       .withEnvironment({
-        {"HIP_VISIBLE_DEVICES", hvd},
         {"NCCL_PROTO", "LL"},
         {"NCCL_ALGO", "Ring"},
         {"RCCL_DDA_THRESHOLD", "0"},
@@ -224,7 +202,7 @@ TEST(LlFifoSysScope, SiblingBroadcastSlotReuse)
         {"NCCL_SOCKET_IFNAME", "lo"},
       })
       .withTimeout(std::chrono::seconds(60))
-      .withNumGpus(ProcessIsolatedTestRunner::TestConfig::kCpuOnly));
+      .withNumGpus(2));
 }
 
 } // namespace RcclUnitTesting
