@@ -51,6 +51,16 @@ On AMD Instinct MI300 and MI350 series GPUs, the active partition modes change
 how counters are normalized and how percent-of-peak metrics are calculated. See
 :doc:`/conceptual/cdna/compute-memory-partition`.
 
+Why does the CLI memory chart look wrapped or garbled?
+======================================================
+
+The chart is drawn at a fixed width and does not shrink to fit the terminal.
+When the window is too narrow, each chart line wraps onto the next row and the
+boxes and arrows stop lining up.
+
+Widen the terminal until one chart line fits on a single row. If you cannot
+resize the window, see :ref:`cli-memory-chart-viewing`.
+
 How can I SSH tunnel in MobaXterm?
 ==================================
 
