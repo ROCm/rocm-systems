@@ -429,14 +429,12 @@ void GraphExecSegmented::BuildSyncPlan() {
     collapsed_to_single_stream_ = true;
   }
 
-  // Flag producers of an uncaptured SDMA memcpy. The copy runs on an engine the compute
-  // queue does not order, and waits on whichever signal the queue's pool cursor points at
-  // -- a positional lookup, so it is the producer's only by luck.
+  // A same-stream successor that begins with an uncaptured SDMA memcpy runs on an engine the
+  // compute queue does not order, so it needs a real signal to wait on. Give its producer a
+  // completion signal from the graph pool; the consumer picks up the slot at dispatch.
   {
     for (auto& seg : segments_) {
-      seg.feeds_uncaptured_sdma = false;
-    }
-    for (auto& seg : segments_) {
+      seg.sdma_wait_producers.clear();
       auto cbIt = segmentBatches_.find(seg.id);
       if (cbIt == segmentBatches_.end()) continue;
       const auto& cs = cbIt->second.node_capture_status;
@@ -450,9 +448,10 @@ void GraphExecSegmented::BuildSyncPlan() {
       for (int dep_id : seg.segment_ids_dependencies) {
         if (dep_id < 0 || dep_id >= static_cast<int>(segments_.size())) continue;
         auto& p = segments_[dep_id];
-        // Cross-stream successors already get a signal via needs_completion_signal.
+        // Cross-stream successors already set this via ComputeCompletionSignalFlags.
         if (p.dev_id != seg.dev_id || p.stream_id != seg.stream_id) continue;
-        p.feeds_uncaptured_sdma = true;
+        p.needs_completion_signal = true;
+        seg.sdma_wait_producers.push_back(dep_id);
       }
     }
   }
@@ -2634,7 +2633,7 @@ amd::Command* GraphExecSegmented::EnqueueSegmentedGraph(hip::Stream* launch_stre
       const auto& segment = segments_[segment_id];
       hip::Stream* current_stream = resolveSegmentStream(segment);
 
-      status = EnqueueSegment(segment, current_stream, graph_accumulate);
+      status = EnqueueSegment(segment, current_stream, segment_hw_events, graph_accumulate);
 
       if (status != hipSuccess) {
         graph_accumulate->release();
@@ -2670,7 +2669,8 @@ amd::Command* GraphExecSegmented::EnqueueSegmentedGraph(hip::Stream* launch_stre
 // ================================================================================================
 // Graph segment to queue dispatch matching
 hipError_t GraphExecSegmented::EnqueueSegment(const Segment& segment, hip::Stream* stream,
-                                     amd::AccumulateCommand* accumulate) {
+                                              const std::vector<void*>& hw_events,
+                                              amd::AccumulateCommand* accumulate) {
   hipError_t status = hipSuccess;
 
   // Find the SegmentBatch for this segment using O(1) map lookup
@@ -2838,6 +2838,18 @@ hipError_t GraphExecSegmented::EnqueueSegment(const Segment& segment, hip::Strea
       node->SetStream(stream);
       status = node->CreateCommand(node->GetQueue());
       if (status != hipSuccess) return status;
+
+      // Wait on the producers' graph pool signals; otherwise the copy takes whatever the
+      // queue's pool cursor holds. Only the leading node is the recorded SDMA memcpy.
+      // Queued last: the list lives on the queue until the next WaitingSignal() drains it.
+      if (i == 0) {
+        for (int dep_id : segment.sdma_wait_producers) {
+          const int slot = sync_plan_.seg_to_hw_event[dep_id];
+          if (slot >= 0 && slot < static_cast<int>(hw_events.size())) {
+            stream->vdev()->addGraphDependencyWait(hw_events[slot]);
+          }
+        }
+      }
       status = node->EnqueueCommands(stream);
       if (status != hipSuccess) return status;
     }
@@ -2850,11 +2862,6 @@ hipError_t GraphExecSegmented::EnqueueSegment(const Segment& segment, hip::Strea
       status = dispatchCurrentBatch();
       if (status != hipSuccess) return status;
     }
-  }
-
-  // Publish a completion signal into that slot, picked up by the Compute->SDMA engine switch.
-  if (segment.feeds_uncaptured_sdma) {
-    stream->vdev()->fenceQueueForSdmaConsumer();
   }
 
   return status;

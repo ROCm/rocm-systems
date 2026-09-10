@@ -73,7 +73,7 @@ HIP_TEST_CASE(Unit_hipGraphLaunch_SdmaMemcpyOrderedAfterProducer) {
 }
 
 HIP_TEST_CASE(Unit_hipGraphLaunch_SdmaMemcpyOrderedAfterProducer_Child) {
-  const auto kCopyOnSdma = static_cast<hipMemcpyKind>(1024);  // hipMemcpyDeviceToDeviceNoCU
+  const hipMemcpyKind kCopyOnSdma = hipMemcpyDeviceToDeviceNoCU;
   const size_t bytes = kElems * sizeof(unsigned);
 
   hipStream_t root = nullptr;
