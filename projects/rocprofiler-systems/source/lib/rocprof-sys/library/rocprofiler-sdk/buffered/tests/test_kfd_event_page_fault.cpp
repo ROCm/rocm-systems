@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "library/rocprofiler-sdk/buffered/kfd_event_page_fault.hpp"
-#include "library/rocprofiler-sdk/buffered/tests/mock_domain_service.hpp"
+#include "library/rocprofiler-sdk/tests/mock_domain_service.hpp"
 
 #include <gtest/gtest.h>
 
