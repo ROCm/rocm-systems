@@ -7060,8 +7060,9 @@ TEST(ConSanMoi, Gfx1250DenseInlineShadowBarriersShareTextTransaction) {
   ASSERT_TRUE(result.text_relocation);
   for (const ConSanPatchInfo &patch : result.patches) {
     if (patch.kind == ConSanPatchKind::TrampolineMoiExactShadowStore ||
-        patch.kind == ConSanPatchKind::TrampolineMoiInlineEpochBarrier)
+        patch.kind == ConSanPatchKind::TrampolineMoiInlineEpochBarrier) {
       EXPECT_TRUE(patch.relocated_guest_instruction_offset);
+    }
   }
 }
 
@@ -7426,7 +7427,8 @@ TEST(ConSanMoi, Gfx1250InlineUsesComponentLocalScalarSpillForMixedPressureOwners
   ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
   ASSERT_TRUE(test_moi_exec_save_sgpr(result));
   EXPECT_FALSE(*test_moi_exec_save_sgpr(result) < 106u &&
-               102u < *test_moi_exec_save_sgpr(result) + kConSanMoiInlineExecSaveSgprCount)
+               102u < static_cast<uint32_t>(*test_moi_exec_save_sgpr(result) +
+                                            kConSanMoiInlineExecSaveSgprCount))
       << "automatic global scalar state must not alias gfx1250 architectural pairs";
   ASSERT_EQ(test_moi_transient_sgpr_assignments(result).size(), 1u)
       << testing::PrintToString(result.warnings);

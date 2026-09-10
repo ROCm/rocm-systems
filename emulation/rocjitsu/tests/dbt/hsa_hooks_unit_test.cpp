@@ -801,8 +801,9 @@ hsa_status_t HSA_API fake_amd_queue_create(hsa_agent_t agent, hsa_amd_queue_crea
   g_fake_batch_queue_packets = {};
   g_fake_batch_queue = {};
   g_fake_batch_queue.type = desc.engine.compute.type;
-  g_fake_batch_queue.features =
-      desc.engine_type == HSA_AMD_QUEUE_ENGINE_COMPUTE ? HSA_QUEUE_FEATURE_KERNEL_DISPATCH : 0u;
+  g_fake_batch_queue.features = desc.engine_type == HSA_AMD_QUEUE_ENGINE_COMPUTE
+                                    ? static_cast<uint32_t>(HSA_QUEUE_FEATURE_KERNEL_DISPATCH)
+                                    : 0u;
   g_fake_batch_queue.base_address = g_fake_batch_queue_packets.data();
   g_fake_batch_queue.doorbell_signal = hsa_signal_t{78};
   g_fake_batch_queue.size = desc.engine_type == HSA_AMD_QUEUE_ENGINE_COMPUTE
@@ -5926,8 +5927,9 @@ rocjitsu::ConSanTransformArtifacts auto_report_replay_transform_result(
         result.observation_plan(), intent_ids, locations,
         rocjitsu::ConSanLoweringOutcomeKind::Instrumented, {}, std::move(runtime_mapping));
     EXPECT_TRUE(commit.has_value());
-    if (commit)
+    if (commit) {
       EXPECT_TRUE(result.coverage_ledger.publish_lowering_commit(std::move(*commit)));
+    }
   }
   return result;
 }
@@ -5982,8 +5984,9 @@ rocjitsu::ConSanTransformArtifacts auto_report_sampled_transform_result(
         result.observation_plan(), intent_ids, locations,
         rocjitsu::ConSanLoweringOutcomeKind::Instrumented, {}, std::move(runtime_mapping));
     EXPECT_TRUE(commit.has_value());
-    if (commit)
+    if (commit) {
       EXPECT_TRUE(result.coverage_ledger.publish_lowering_commit(std::move(*commit)));
+    }
   }
   return result;
 }

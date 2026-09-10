@@ -755,8 +755,9 @@ TEST(ConSanMoi, Gfx1250SampledScalarSpillRestoresInInstrumentationBank) {
   EXPECT_EQ(std::ranges::count(cave, select_low), 3u);
   EXPECT_EQ(std::ranges::count(cave, restore_guest), 3u);
   for (size_t index = 1u; index < cave.size(); ++index) {
-    if (cave[index] == select_low || cave[index] == restore_guest)
+    if (cave[index] == select_low || cave[index] == restore_guest) {
       EXPECT_NE(cave[index], cave[index - 1u]);
+    }
   }
   ASSERT_TRUE(patch->relocated_guest_instruction_offset);
   const size_t guest_word = static_cast<size_t>(
