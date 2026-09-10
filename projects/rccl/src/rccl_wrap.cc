@@ -94,7 +94,7 @@ RCCL_PARAM(IgnoreArchTable, "IGNORE_ARCH_TABLE", 0);
 // Returns true when the user has restricted the algorithm set via NCCL_ALGO.
 // When true, CE / DDA / Symmetric dispatch is skipped so getAlgoInfo() reaches
 // Ring/Tree exactly as the user requested.  Cached to avoid repeated getenv().
-bool rcclNcclAlgoEnvIsSet() {
+inline bool rcclNcclAlgoEnvIsSet() {
   static int cached = -1;
   if (cached == -1) cached = (ncclGetEnv("NCCL_ALGO") != nullptr) ? 1 : 0;
   return cached == 1;
@@ -758,7 +758,7 @@ inline size_t rcclSymMinR2Cap(const ncclComm* comm, ncclFunc_t func) {
 }
 } // namespace
 
-size_t rcclCeRegMax(const ncclComm* comm, ncclFunc_t func) {
+inline size_t rcclCeRegMax(const ncclComm* comm, ncclFunc_t func) {
   const int64_t param = (func == ncclFuncAllReduce) ? rcclParamCeArRegMaxMsgBytes() : -1;
   if (param >= 0) return (size_t)param;
   const rcclArchThresholds* table = extAlgoArchTable(comm);
@@ -766,13 +766,13 @@ size_t rcclCeRegMax(const ncclComm* comm, ncclFunc_t func) {
   return (size_t)func < RCCL_DDA_FUNC_COUNT ? table->ceRegMax[(size_t)func] : 0;
 }
 
-size_t rcclCeNonRegMax(const ncclComm* comm, ncclFunc_t func) {
+inline size_t rcclCeNonRegMax(const ncclComm* comm, ncclFunc_t func) {
   const rcclArchThresholds* table = extAlgoArchTable(comm);
   if (table == nullptr) return 0;
   return (size_t)func < RCCL_DDA_FUNC_COUNT ? table->ceNonRegMax[(size_t)func] : 0;
 }
 
-size_t rcclCeAr2ShotMax(const ncclComm* comm) {
+inline size_t rcclCeAr2ShotMax(const ncclComm* comm) {
   const int64_t param = rcclParamCeArMaxMsgBytes();
   if (param >= 0) return (size_t)param;
   const rcclArchThresholds* table = extAlgoArchTable(comm);
@@ -787,29 +787,29 @@ size_t rcclCeAr2ShotMax(const ncclComm* comm) {
 // everywhere else. Without this gate the arch tables for gfx942/gfx950 (which set
 // ceNonRegMax[AR] = 256 MiB) would let unregistered 2-shot, and -- via force --
 // registered CE, service AllReduce on arches that were never measured for it.
-static bool rcclCeAllReduceArchDefault(const ncclComm* comm) {
+static inline bool rcclCeAllReduceArchDefault(const ncclComm* comm) {
   return comm != nullptr && IsArchMatch(comm->archName, "gfx1250");
 }
 
-bool rcclCeAllReduceEnabled(const ncclComm* comm) {
+inline bool rcclCeAllReduceEnabled(const ncclComm* comm) {
   const int64_t param = rcclParamCeAllReduce();
   if (param >= 0) return param != 0;
   return rcclCeAllReduceArchDefault(comm);
 }
 
-bool rcclForceCeAllReduceEnabled(const ncclComm* comm) {
+inline bool rcclForceCeAllReduceEnabled(const ncclComm* comm) {
   const int64_t param = rcclParamForceCeAllReduce();
   if (param >= 0) return param != 0;
   return rcclCeAllReduceArchDefault(comm);
 }
 
-size_t rcclCeNonRegMin(const ncclComm* comm, ncclFunc_t func) {
+inline size_t rcclCeNonRegMin(const ncclComm* comm, ncclFunc_t func) {
   const rcclArchThresholds* table = extAlgoArchTable(comm);
   if (table == nullptr) return 0;
   return (size_t)func < RCCL_DDA_FUNC_COUNT ? table->ceNonRegMin[(size_t)func] : 0;
 }
 
-bool rcclAllGatherCeRegisteredWindow(const ncclComm* comm, size_t totalBytes, ncclSymRegType_t winRegType,
+inline bool rcclAllGatherCeRegisteredWindow(const ncclComm* comm, size_t totalBytes, ncclSymRegType_t winRegType,
                                      bool graphMode) {
   // CE-registered copies through the user's symmetric windows, so recv must be registered.
   const bool recvRegistered = (winRegType == ncclSymSendRegRecvReg || winRegType == ncclSymSendNonregRecvReg);
@@ -823,11 +823,11 @@ bool rcclAllGatherCeRegisteredWindow(const ncclComm* comm, size_t totalBytes, nc
 }
 
 // Keep old name as a shim for callers that have not been updated yet.
-size_t rcclCeArRegisteredMax(const ncclComm* comm) {
+inline size_t rcclCeArRegisteredMax(const ncclComm* comm) {
   return rcclCeRegMax(comm, ncclFuncAllReduce);
 }
 
-size_t rcclDdaLLThreshold(const ncclComm* comm, ncclFunc_t func) {
+inline size_t rcclDdaLLThreshold(const ncclComm* comm, ncclFunc_t func) {
   size_t threshold;
   if (ddaThresholdFromEnv(rcclParamDdaLLThreshold(), &threshold)) return threshold;
   const rcclArchThresholds* table = extAlgoArchTable(comm);
@@ -835,7 +835,7 @@ size_t rcclDdaLLThreshold(const ncclComm* comm, ncclFunc_t func) {
   return ddaThresholdFromTable(table->ddaLLMax, func);
 }
 
-size_t rcclDdaLL128Threshold(const ncclComm* comm, ncclFunc_t func) {
+inline size_t rcclDdaLL128Threshold(const ncclComm* comm, ncclFunc_t func) {
   size_t threshold;
   if (ddaThresholdFromEnv(rcclParamDdaLL128Threshold(), &threshold)) return threshold;
   const rcclArchThresholds* table = extAlgoArchTable(comm);
@@ -843,7 +843,7 @@ size_t rcclDdaLL128Threshold(const ncclComm* comm, ncclFunc_t func) {
   return ddaThresholdFromTable(table->ddaLL128Max, func);
 }
 
-size_t rcclDdaVmmThreshold(const ncclComm* comm, ncclFunc_t func) {
+inline size_t rcclDdaVmmThreshold(const ncclComm* comm, ncclFunc_t func) {
   size_t threshold;
   if (ddaThresholdFromEnv(rcclParamDdaThreshold(), &threshold)) return threshold;
   const rcclArchThresholds* table = extAlgoArchTable(comm);
@@ -859,7 +859,7 @@ size_t rcclDdaVmmThreshold(const ncclComm* comm, ncclFunc_t func) {
 // RCCL_DDA_LL128 = 0 drop their tier so disabling one cannot widen the gate.
 // Each tier still applies its own cap at the call site, including the VMM/IPC
 // branch, which checks rcclDdaVmmThreshold() there.
-size_t rcclDdaEntryThreshold(const ncclComm* comm, ncclFunc_t func) {
+inline size_t rcclDdaEntryThreshold(const ncclComm* comm, ncclFunc_t func) {
   size_t cap = rcclDdaVmmThreshold(comm, func);
   if (rcclParamDdaLL()) cap = std::max(cap, rcclDdaLLThreshold(comm, func));
   if (rcclParamDdaLL128()) cap = std::max(cap, rcclDdaLL128Threshold(comm, func));
@@ -975,7 +975,7 @@ void rcclApplyUnrollForSize(ncclComm* comm, ncclFunc_t func, size_t msgBytes) {
   }
   }
 
-bool rcclDdaEnabled(const ncclComm* comm, size_t totalBytes, size_t threshold) {
+inline bool rcclDdaEnabled(const ncclComm* comm, size_t totalBytes, size_t threshold) {
   if (!rcclParamDdaEnable() || ncclParamLaunchOrderImplicit() || ncclGroupDepth != 0) {
     return false;
   }
@@ -1170,7 +1170,7 @@ void rcclCeAllReduceGraphLatchTick(struct ncclComm* comm, bool ceCapturing) {
   }
 }
 
-bool rcclCeAllReduceAllowed(struct ncclComm* comm) {
+inline bool rcclCeAllReduceAllowed(struct ncclComm* comm) {
   return !comm->ceColl.graphModeSeen;
 }
 
