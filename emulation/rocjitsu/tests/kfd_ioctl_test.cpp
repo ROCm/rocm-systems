@@ -2807,6 +2807,77 @@ TEST_F(KfdIoctlTest, RuntimeEnableRetainsMaskedProcessEventUntilEnabled) {
   EXPECT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &acknowledge), 0);
 }
 
+TEST_F(KfdIoctlTest, DbgTrapProcessRetryPreservesCombinedEventOwnershipAcrossBitReplacement) {
+  constexpr uint64_t kRuntime = KFD_EC_MASK(EC_PROCESS_RUNTIME);
+  constexpr uint64_t kDeviceRemove = KFD_EC_MASK(EC_PROCESS_DEVICE_REMOVE);
+  constexpr uint64_t kCombined = kRuntime | kDeviceRemove;
+  const auto pid = static_cast<uint32_t>(getpid());
+  const int notifier = eventfd(0, EFD_CLOEXEC | EFD_NONBLOCK);
+  ASSERT_GE(notifier, 0);
+  debug_fds_.push_back(notifier);
+
+  kfd_ioctl_dbg_trap_args enable{};
+  enable.pid = pid;
+  enable.op = KFD_IOC_DBG_TRAP_ENABLE;
+  enable.enable.dbg_fd = notifier;
+  enable.enable.exception_mask = kRuntime;
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &enable), 0);
+
+  driver_->set_debug_notifier_dup_error_for_testing(EMFILE);
+  driver_->raise_process_debug_event_for_testing(pid, kCombined);
+
+  auto write_entered = std::make_shared<std::promise<void>>();
+  auto write_entered_future = write_entered->get_future();
+  auto release_write = std::make_shared<std::promise<void>>();
+  auto release_write_future = release_write->get_future().share();
+  driver_->set_debug_notification_write_hook_for_testing([write_entered, release_write_future] {
+    write_entered->set_value();
+    release_write_future.wait();
+  });
+  driver_->set_debug_notifier_dup_error_for_testing(std::nullopt);
+  if (write_entered_future.wait_for(std::chrono::seconds(2)) != std::future_status::ready) {
+    release_write->set_value();
+    driver_->set_debug_notification_write_hook_for_testing({});
+    FAIL() << "background process notification retry did not reach the writer";
+    return;
+  }
+
+  kfd_ioctl_dbg_trap_args exceptions{};
+  exceptions.pid = pid;
+  exceptions.op = KFD_IOC_DBG_TRAP_SET_EXCEPTIONS_ENABLED;
+  exceptions.set_exceptions_enabled.exception_mask = kDeviceRemove;
+  const int mask_update_result = driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &exceptions);
+  release_write->set_value();
+
+  pollfd ready{notifier, POLLIN, 0};
+  const int poll_result = ::poll(&ready, 1, 2000);
+  driver_->set_debug_notification_write_hook_for_testing({});
+  ASSERT_EQ(mask_update_result, 0);
+  ASSERT_EQ(poll_result, 1);
+  uint64_t notifications = 0;
+  ASSERT_EQ(::read(notifier, &notifications, sizeof(notifications)),
+            static_cast<ssize_t>(sizeof(notifications)));
+  EXPECT_EQ(notifications, 1u);
+
+  kfd_ioctl_dbg_trap_args query{};
+  query.pid = pid;
+  query.op = KFD_IOC_DBG_TRAP_QUERY_DEBUG_EVENT;
+  int query_result = -EAGAIN;
+  for (int attempt = 0; attempt < 200 && query_result == -EAGAIN; ++attempt) {
+    query.query_debug_event.exception_mask = kCombined;
+    query_result = driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &query);
+    if (query_result == -EAGAIN)
+      static_cast<void>(::poll(nullptr, 0, 10));
+  }
+  ASSERT_EQ(query_result, 0);
+  EXPECT_EQ(query.query_debug_event.queue_id, 0u);
+  EXPECT_EQ(query.query_debug_event.exception_mask, kCombined);
+  EXPECT_EQ(::poll(&ready, 1, 100), 0);
+
+  query.query_debug_event.exception_mask = kCombined;
+  EXPECT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &query), -EAGAIN);
+}
+
 TEST_F(KfdIoctlTest, DbgTrapAttachDetachConfigOpsValidateAndResetState) {
   kfd_ioctl_runtime_enable_args rt{};
   rt.mode_mask = KFD_RUNTIME_ENABLE_MODE_ENABLE_MASK;

@@ -276,6 +276,13 @@ public:
                                       reserve_runtime_on_rejection);
   }
 
+  /// @brief Publish a process/device debug event without a runtime transition.
+  /// @details This narrow seam exercises retained process-event notification
+  /// and subscription races through the production retry helper.
+  void raise_process_debug_event_for_testing(pid_t target_pid, uint64_t exception_mask) {
+    raise_process_debug_event(target_pid, exception_mask);
+  }
+
   /// @brief Release the local process's parked event waiters so a blocking
   /// WAIT_EVENTS returns and drops its driver snapshot before teardown.
   /// @details Fires EventState::begin_wait_cancel() on the local process: waiters
