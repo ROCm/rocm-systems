@@ -10,7 +10,7 @@ Using memory bandwidth analysis
 .. warning::
 
    Memory Bandwidth Analysis is an experimental feature. Enable it by
-   passing ``--experimental --membw-analysis`` in both ``profile`` and
+   pass ``--experimental --membw-analysis`` in both ``profile`` and
    ``analyze`` modes. This feature is in its preliminary stages —
    guidance text will be refined in future releases. Behavior and
    command-line surface may change.
