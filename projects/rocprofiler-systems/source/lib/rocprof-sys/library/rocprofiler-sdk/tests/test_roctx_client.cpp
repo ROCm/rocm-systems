@@ -993,7 +993,7 @@ TEST_F(roctx_push_pop_region_test, push_pop_no_filter_always_active)
     EXPECT_TRUE(client->get_trigger().should_write_markers());
 }
 
-class roctx_marker_gating_test : public mock_cleanup_base
+class roctx_marker_gating_test_interface : public mock_cleanup_base
 {
 protected:
     using roctx_client_t = rocprofsys::rocprofiler_sdk::roctx_client<mock_marker_policy>;
@@ -1005,15 +1005,16 @@ protected:
     class other_trigger
     {
     public:
-        static constexpr std::string_view trigger_name = "other";
+        static constexpr std::string_view k_trigger_name = "other";
 
         explicit other_trigger(rocprofsys::control::session& sess)
         : m_session{ sess }
         {
-            m_session.register_trigger(trigger_name, rocprofsys::control::action::trace);
+            m_session.register_trigger(k_trigger_name,
+                                       rocprofsys::control::action::trace);
         }
 
-        ~other_trigger() { m_session.unregister_trigger(trigger_name); }
+        ~other_trigger() { m_session.unregister_trigger(k_trigger_name); }
 
         other_trigger(const other_trigger&)            = delete;
         other_trigger& operator=(const other_trigger&) = delete;
@@ -1022,7 +1023,7 @@ protected:
 
         void set_action(rocprofsys::control::action act) const
         {
-            m_session.set_action(trigger_name, act);
+            m_session.set_action(k_trigger_name, act);
         }
 
     private:
@@ -1050,13 +1051,14 @@ protected:
     }
 };
 
-TEST_F(roctx_marker_gating_test, should_write_true_when_session_fully_active)
+TEST_F(roctx_marker_gating_test_interface, should_write_true_when_session_fully_active)
 {
     const auto client = make_client();
     EXPECT_TRUE(observed_should_write(*client));
 }
 
-TEST_F(roctx_marker_gating_test, should_write_false_when_session_paused_by_other_trigger)
+TEST_F(roctx_marker_gating_test_interface,
+       should_write_false_when_session_paused_by_other_trigger)
 {
     auto        client  = make_client();
     const auto& session = client->get_session();
@@ -1072,7 +1074,7 @@ TEST_F(roctx_marker_gating_test, should_write_false_when_session_paused_by_other
         << "should_write() must respect other triggers' votes, not just its own";
 }
 
-TEST_F(roctx_marker_gating_test,
+TEST_F(roctx_marker_gating_test_interface,
        should_write_false_when_own_trigger_has_no_matching_region_active)
 {
     auto client = make_client("Region1");

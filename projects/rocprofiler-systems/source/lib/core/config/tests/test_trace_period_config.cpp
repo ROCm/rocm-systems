@@ -13,8 +13,8 @@ using rocprofsys::config::trace_period_settings;
 
 namespace
 {
-constexpr double SAMPLE_DURATION_SECONDS   = 2.0;
-constexpr double SAMPLE_DELAY_ONLY_SECONDS = 3.0;
+constexpr double k_sample_duration_seconds   = 2.0;
+constexpr double k_sample_delay_only_seconds = 3.0;
 
 // Function-local static so initialization happens on first use rather than
 // before main - avoids static initialization order concerns for a
@@ -22,8 +22,8 @@ constexpr double SAMPLE_DELAY_ONLY_SECONDS = 3.0;
 trace_period_settings&
 mock_settings()
 {
-    static trace_period_settings g_settings{};
-    return g_settings;
+    static trace_period_settings s_settings{};
+    return s_settings;
 }
 
 enum class externals_tag : int
@@ -53,7 +53,7 @@ struct mock_externals
 template <externals_tag Tag>
 using config_for = trace_config<mock_externals<Tag>>;
 
-class trace_period_config_test : public ::testing::Test
+class trace_period_config_test_interface : public ::testing::Test
 {
 protected:
     void SetUp() override { mock_settings() = trace_period_settings{}; }
@@ -61,12 +61,13 @@ protected:
 };
 }  // namespace
 
-TEST_F(trace_period_config_test, get_trace_specs_without_configuration_yields_no_periods)
+TEST_F(trace_period_config_test_interface,
+       get_trace_specs_without_configuration_yields_no_periods)
 {
     EXPECT_TRUE(config_for<externals_tag::nothing_configured>::get_trace_specs().empty());
 }
 
-TEST_F(trace_period_config_test, get_trace_specs_splits_multiple_period_entries)
+TEST_F(trace_period_config_test_interface, get_trace_specs_splits_multiple_period_entries)
 {
     mock_settings().periods = "1:2 3:4;5:6";
 
@@ -81,36 +82,37 @@ TEST_F(trace_period_config_test, get_trace_specs_splits_multiple_period_entries)
     EXPECT_DOUBLE_EQ(parsed[2].duration, 6.0);
 }
 
-TEST_F(trace_period_config_test,
+TEST_F(trace_period_config_test_interface,
        get_trace_specs_empty_periods_yields_only_delay_duration_window)
 {
     mock_settings().delay    = 1.0;
-    mock_settings().duration = SAMPLE_DURATION_SECONDS;
+    mock_settings().duration = k_sample_duration_seconds;
 
     const auto parsed = config_for<externals_tag::empty_periods>::get_trace_specs();
 
     ASSERT_EQ(parsed.size(), 1u);
     EXPECT_DOUBLE_EQ(parsed[0].delay, 1.0);
-    EXPECT_DOUBLE_EQ(parsed[0].duration, SAMPLE_DURATION_SECONDS);
+    EXPECT_DOUBLE_EQ(parsed[0].duration, k_sample_duration_seconds);
     EXPECT_EQ(parsed[0].repeat, 1u);
 }
 
-TEST_F(trace_period_config_test, get_trace_specs_emits_window_when_only_delay_is_set)
+TEST_F(trace_period_config_test_interface,
+       get_trace_specs_emits_window_when_only_delay_is_set)
 {
-    mock_settings().delay = SAMPLE_DELAY_ONLY_SECONDS;
+    mock_settings().delay = k_sample_delay_only_seconds;
 
     const auto parsed = config_for<externals_tag::delay_only>::get_trace_specs();
 
     ASSERT_EQ(parsed.size(), 1u);
-    EXPECT_DOUBLE_EQ(parsed[0].delay, SAMPLE_DELAY_ONLY_SECONDS);
+    EXPECT_DOUBLE_EQ(parsed[0].delay, k_sample_delay_only_seconds);
     EXPECT_DOUBLE_EQ(parsed[0].duration, 0.0);
 }
 
-TEST_F(trace_period_config_test,
+TEST_F(trace_period_config_test_interface,
        get_trace_specs_throws_when_delay_duration_and_periods_are_both_set)
 {
     mock_settings().delay    = 1.0;
-    mock_settings().duration = SAMPLE_DURATION_SECONDS;
+    mock_settings().duration = k_sample_duration_seconds;
     mock_settings().periods  = "5";
 
     EXPECT_THROW(
@@ -118,7 +120,7 @@ TEST_F(trace_period_config_test,
         std::runtime_error);
 }
 
-TEST_F(trace_period_config_test, get_trace_specs_throws_on_negative_delay)
+TEST_F(trace_period_config_test_interface, get_trace_specs_throws_on_negative_delay)
 {
     mock_settings().delay = -1.0;
 
@@ -126,7 +128,7 @@ TEST_F(trace_period_config_test, get_trace_specs_throws_on_negative_delay)
                  std::runtime_error);
 }
 
-TEST_F(trace_period_config_test, get_trace_specs_throws_on_negative_duration)
+TEST_F(trace_period_config_test_interface, get_trace_specs_throws_on_negative_duration)
 {
     mock_settings().duration = -1.0;
 
@@ -134,7 +136,8 @@ TEST_F(trace_period_config_test, get_trace_specs_throws_on_negative_duration)
                  std::runtime_error);
 }
 
-TEST_F(trace_period_config_test, get_trace_specs_ignores_period_fields_past_the_third)
+TEST_F(trace_period_config_test_interface,
+       get_trace_specs_ignores_period_fields_past_the_third)
 {
     mock_settings().periods = "5:10:3:99";
 
@@ -147,27 +150,28 @@ TEST_F(trace_period_config_test, get_trace_specs_ignores_period_fields_past_the_
     EXPECT_EQ(parsed[0].repeat, 3u);
 }
 
-TEST_F(trace_period_config_test, get_trace_period_clock_id_maps_realtime)
+TEST_F(trace_period_config_test_interface, get_trace_period_clock_id_maps_realtime)
 {
     mock_settings().period_clock = "realtime";
     EXPECT_EQ(config_for<externals_tag::clock_realtime>::get_trace_period_clock_id(),
               CLOCK_REALTIME);  // NOLINT(misc-include-cleaner)
 }
 
-TEST_F(trace_period_config_test, get_trace_period_clock_id_maps_cputime)
+TEST_F(trace_period_config_test_interface, get_trace_period_clock_id_maps_cputime)
 {
     mock_settings().period_clock = "cputime";
     EXPECT_EQ(config_for<externals_tag::clock_cputime>::get_trace_period_clock_id(),
               CLOCK_PROCESS_CPUTIME_ID);  // NOLINT(misc-include-cleaner)
 }
 
-TEST_F(trace_period_config_test, get_trace_period_clock_id_defaults_to_realtime)
+TEST_F(trace_period_config_test_interface, get_trace_period_clock_id_defaults_to_realtime)
 {
     EXPECT_EQ(config_for<externals_tag::clock_default>::get_trace_period_clock_id(),
               CLOCK_REALTIME);
 }
 
-TEST_F(trace_period_config_test, get_trace_period_clock_id_throws_on_unrecognized_value)
+TEST_F(trace_period_config_test_interface,
+       get_trace_period_clock_id_throws_on_unrecognized_value)
 {
     mock_settings().period_clock = "bogus";
     EXPECT_THROW(

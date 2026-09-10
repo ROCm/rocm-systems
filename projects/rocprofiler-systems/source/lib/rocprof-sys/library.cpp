@@ -470,13 +470,16 @@ std::unique_ptr<trace_window_t>                   g_sampling_dur_window;
 void
 stop_time_windows()
 {
-    auto _stop_and_reset = [](auto& _window) {
-        if(_window) _window->stop();
-        _window.reset();
+    const auto stop_and_reset = [](auto& window) {
+        if(window)
+        {
+            window->stop();
+        }
+        window.reset();
     };
-    _stop_and_reset(g_sampling_dur_window);
-    _stop_and_reset(g_trace_window);
-    _stop_and_reset(g_posix_trace_window);
+    stop_and_reset(g_sampling_dur_window);
+    stop_and_reset(g_trace_window);
+    stop_and_reset(g_posix_trace_window);
 }
 }  // namespace
 
@@ -760,49 +763,53 @@ rocprofsys_init_tooling_hidden(void)
             // constructed below: a trigger's registration broadcasts a
             // pause/resume transition immediately, so a subscriber added
             // afterward would miss it.
-            if(auto _trace_specs = trace_config_t::get_trace_specs();
-               !_trace_specs.empty())
+            if(auto trace_specs = trace_config_t::get_trace_specs(); !trace_specs.empty())
             {
-                const auto& _spec  = _trace_specs.front();
-                const auto  _delay = std::chrono::duration_cast<std::chrono::nanoseconds>(
-                    std::chrono::duration<double>{ _spec.delay });
-                const auto _dur = std::chrono::duration_cast<std::chrono::nanoseconds>(
-                    std::chrono::duration<double>{ _spec.duration });
+                const auto& spec  = trace_specs.front();
+                const auto  delay = std::chrono::duration_cast<std::chrono::nanoseconds>(
+                    std::chrono::duration<double>{ spec.delay });
+                const auto dur = std::chrono::duration_cast<std::chrono::nanoseconds>(
+                    std::chrono::duration<double>{ spec.duration });
 
                 // Safety-net subscriber for category-traited recording paths
                 // (timemory storage, perfetto trace_events from callbacks not
                 // covered by a subsystem pause subscriber).
                 get_control_session()->subscribe(
-                    { []() {
-                         categories::disable_categories(config::get_enabled_categories());
-                     },
-                      []() {
-                          categories::enable_categories(config::get_enabled_categories());
-                      },
-                      "trace_categories",
-                      { control::scope::global } });
+                    { .on_pause =
+                          []() {
+                              categories::disable_categories(
+                                  config::get_enabled_categories());
+                          },
+                      .on_resume =
+                          []() {
+                              categories::enable_categories(
+                                  config::get_enabled_categories());
+                          },
+                      .name   = "trace_categories",
+                      .scopes = { control::scope::global } });
 
                 if(trace_config_t::get_trace_period_clock_id() ==
                    CLOCK_PROCESS_CPUTIME_ID)
                 {
                     g_posix_window_clock.emplace(CLOCK_PROCESS_CPUTIME_ID);
-                    g_posix_trace_window = make_time_window(
-                        get_control_session(), *g_posix_window_clock, { _delay, _dur });
+                    g_posix_trace_window =
+                        make_time_window(get_control_session(), *g_posix_window_clock,
+                                         { .delay = delay, .duration = dur });
                 }
                 else
                 {
-                    g_trace_window = make_time_window(
-                        get_control_session(), g_trace_window_clock, { _delay, _dur });
+                    g_trace_window =
+                        make_time_window(get_control_session(), g_trace_window_clock,
+                                         { .delay = delay, .duration = dur });
                 }
             }
 
-            if(const auto _samp_dur = config::get_sampling_duration(); _samp_dur > 0.0)
+            if(const auto samp_dur = config::get_sampling_duration(); samp_dur > 0.0)
             {
                 g_sampling_dur_window = make_time_window(
                     get_control_session(), g_sampling_dur_window_clock,
-                    { {},
-                      std::chrono::duration_cast<std::chrono::nanoseconds>(
-                          std::chrono::duration<double>{ _samp_dur }) },
+                    { .duration = std::chrono::duration_cast<std::chrono::nanoseconds>(
+                          std::chrono::duration<double>{ samp_dur }) },
                     control::scope::sampling);
             }
 
@@ -812,9 +819,18 @@ rocprofsys_init_tooling_hidden(void)
         state::process::set(
             state::process::Active);  // set to active as very last operation
 
-        if(g_trace_window) g_trace_window->start();
-        if(g_posix_trace_window) g_posix_trace_window->start();
-        if(g_sampling_dur_window) g_sampling_dur_window->start();
+        if(g_trace_window)
+        {
+            g_trace_window->start();
+        }
+        if(g_posix_trace_window)
+        {
+            g_posix_trace_window->start();
+        }
+        if(g_sampling_dur_window)
+        {
+            g_sampling_dur_window->start();
+        }
     } };
 
     ROCPROFSYS_SCOPED_SAMPLING_ON_CHILD_THREADS(false);
