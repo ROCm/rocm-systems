@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #
 # Build and run the RCCL CPU-only host unit tests: rccl-HostUnitTests plus the
-# host-only microtests (rccl-UnitTestsMicro, rccl-UnitTestsMicroInit[-uncached],
+# host-only microtests (rccl-UnitTestsMicro, rccl-UnitTestsMicroInit[-uncached|-faultinj],
 # rccl-UnitTestsMicroEnqueue[-devlinker]).
 #
 # Single source of truth for every command the host-test pipeline needs, so the
@@ -150,6 +150,10 @@ do_host_tests() {
     "rccl-UnitTestsMicro:$SCRIPT_DIR/host_tests_micro.xml"
     "rccl-UnitTestsMicroInit:$SCRIPT_DIR/host_tests_micro_init.xml"
     "rccl-UnitTestsMicroInit-uncached:$SCRIPT_DIR/host_tests_micro_init_uncached.xml"
+    # FAULT_INJECTION defaults ON, so this variant is the arm that ships; init.cc
+    # gates its fault-mask blocks on ENABLE_FAULT_INJECTION at the preprocessor,
+    # so one compile cannot cover both. See test/host/CMakeLists.txt.
+    "rccl-UnitTestsMicroInit-faultinj:$SCRIPT_DIR/host_tests_micro_init_faultinj.xml"
     "rccl-UnitTestsMicroEnqueue:$SCRIPT_DIR/host_tests_micro_enqueue.xml"
     # ENABLE_DEVICE_LINKER defaults ON, so this variant is the arm that ships;
     # enqueue.cc gates rcclShmemDynamicSize on RCCL_DEVICE_LINKER at the
