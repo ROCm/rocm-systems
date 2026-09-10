@@ -29,7 +29,7 @@ per-bottleneck details.
 Supported hardware
 ==================
 
-Memory Bandwidth Analysis is currently available for:
+The memory bandwidth analysis feature is currently available for AMD Instinct MI350 Series GPUs (gfx950).
 
 
 Profiling
