@@ -16,6 +16,7 @@ from functools import wraps
 from pathlib import Path
 from typing import Any, Callable, Optional
 
+
 from utils.inject_roctx import core
 from utils.inject_roctx._backends import torch_trace_collector
 from utils.inject_roctx.registry import register
@@ -24,26 +25,8 @@ from utils.logger import console_error, console_log, console_warning
 _BACKEND_NAME = "torch"
 
 
-class _RecordFnHook:
-    def active(self) -> bool:
-        return _STATE.using_c_tier and _STATE.torch_trace_collector is not None
-
-    def push(self, marker: str, context: str, backend: str) -> bool:
-        try:
-            _STATE.torch_trace_collector.push_user_scope(marker, context, backend)
-            return True
-        except Exception:
-            return False
-
-    def pop(self) -> None:
-        try:
-            _STATE.torch_trace_collector.pop_user_scope()
-        except Exception:
-            pass
-
-
 class _TorchState:
-    """Resolved torch modules, collector, and active tracing tier."""
+    """Resolved torch modules used by the instrumentation wrappers."""
 
     def __init__(self) -> None:
         self.torch: Any = None
@@ -56,11 +39,6 @@ class _TorchState:
         self.function: Any = None
         self.nn: Any = None
         self.torch_root: str = ""
-
-        self.torch_trace_collector: Any = None
-        self.using_c_tier: bool = False
-        self.c_tier_initialized: bool = False
-        self.native_hook: Optional[_RecordFnHook] = None
 
         self.active_dispatch_mode: Any = None
 
@@ -124,65 +102,12 @@ PROCESS_GROUP_METHODS = (
 )
 
 
-# The native C++ RecordFunction tier is installed by _initialize_c_tier().
-
-
-def _get_tier_stack() -> list[bool]:
-    # Per-frame record of the tier that handled each push: True for the native
-    # C++ RecordFunction tier, False for the Python tier.
-    if not hasattr(_thread_local, "tier_stack"):
-        _thread_local.tier_stack = []
-    return _thread_local.tier_stack
-
-
 def _push_scope(marker: str, context: str, backend: str = "") -> None:
-    """Push a scope, routing through the native C++ RecordFunction tier when
-    active and otherwise emitting on the Python tier.
-    """
-    marker_stack = core.get_marker_stack()
-    context_stack = core.get_context_stack()
-    tier_stack = _get_tier_stack()
-
-    used_native = False
-    hook = _STATE.native_hook
-    if hook is not None and hook.active():
-        try:
-            used_native = bool(hook.push(marker, context, backend))
-        except Exception:
-            used_native = False
-
-    if not used_native:
-        full = core.compose_marker(marker, context, backend)
-        range_push, _ = core.get_python_tier_io()
-        range_push(full)
-
-    tier_stack.append(used_native)
-    marker_stack.append(marker)
-    context_stack.append(context)
+    core._push_scope(marker, context, backend)
 
 
 def _pop_scope() -> None:
-    """Pop a scope, routing to the tier that handled its push."""
-    marker_stack = core.get_marker_stack()
-    context_stack = core.get_context_stack()
-    tier_stack = _get_tier_stack()
-
-    # Unmatched pop: no-op.
-    if not tier_stack:
-        return
-
-    used_native = tier_stack.pop()
-    try:
-        if used_native and _STATE.native_hook is not None:
-            _STATE.native_hook.pop()
-        else:
-            _, range_pop = core.get_python_tier_io()
-            range_pop()
-    finally:
-        if marker_stack:
-            marker_stack.pop()
-        if context_stack:
-            context_stack.pop()
+    core._pop_scope()
 
 
 # Structural wrappers for entry points the ATen dispatcher does not record.
@@ -246,8 +171,6 @@ def _walk_subclasses(cls: type, fn: Callable[[type], None]) -> None:
 
 def _emit_python_tier_fallback_warning() -> None:
     """Emit one warning when the C++ tier is unavailable."""
-    if _STATE.using_c_tier:
-        return
     console_warning(
         "ml api trace",
         "Coverage tier: Python-only injector (the C++ RecordFunction tier is "
@@ -558,15 +481,7 @@ def dispatcher_marker_name_for(func: Callable[..., Any]) -> str:
 
 
 def install_dispatcher_hook() -> str:
-    """C++ tier: no-op. Python tier: enter TorchDispatchMode on this thread."""
-    if _STATE.using_c_tier:
-        console_log(
-            "ml api trace",
-            "Operator coverage: C++ RecordFunction callback "
-            "(FUNCTION + BACKWARD_FUNCTION).",
-        )
-        return "c_tier"
-
+    """Enter TorchDispatchMode on this thread."""
     torch_dispatch_mode = _STATE.torch_dispatch_mode
     if torch_dispatch_mode is None:
         console_warning(
@@ -579,23 +494,10 @@ def install_dispatcher_hook() -> str:
     def start_disp(op_name: str) -> None:
         idx = next_dispatcher_index(op_name)
         location = core.resolve_user_caller_location()
-        marker_stack = core.get_marker_stack()
-        context_stack = core.get_context_stack()
-        context = f"#{idx}@{location}"
-        rangePush(core.compose_marker(op_name, context, _BACKEND_NAME))
-        marker_stack.append(op_name)
-        context_stack.append(context)
+        _push_scope(op_name, f"#{idx}@{location}", backend=_BACKEND_NAME)
 
     def end_disp() -> None:
-        marker_stack = core.get_marker_stack()
-        context_stack = core.get_context_stack()
-        try:
-            rangePop()
-        finally:
-            if marker_stack:
-                marker_stack.pop()
-            if context_stack:
-                context_stack.pop()
+        _pop_scope()
 
     class RoctxDispatchMode(torch_dispatch_mode):
         def __torch_dispatch__(
@@ -1065,21 +967,6 @@ def inject_roctx_into_model() -> None:
         console_warning("ml api trace", f"Could not patch nn.Module.__call__: {exc}")
     if did_wrap:
         console_log("ml api trace", "Wrapped nn.Module forward() with ROCTX markers\n")
-
-
-def using_c_tier() -> bool:
-    """Return True if the C++ RecordFunction tier is active."""
-    return _STATE.using_c_tier
-
-
-def dump_torch_trace_stats() -> Optional[dict[str, object]]:
-    """Return the collector counters, or None when the C++ module is not loaded."""
-    if _STATE.torch_trace_collector is None:
-        return None
-    try:
-        return _STATE.torch_trace_collector.dump_stats()
-    except Exception:
-        return None
 
 
 def _resolve_torch() -> bool:
