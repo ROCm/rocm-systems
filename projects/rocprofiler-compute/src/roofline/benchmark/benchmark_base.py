@@ -705,7 +705,7 @@ class Bench_base(ABC):
         if type == "F32":
             src = self.matrix_f32_src
         elif type == "F8":
-            src = self.matrix_f8_src
+            src = self.matrix_f8f6f4_src
         elif type == "F16":
             src = self.matrix_f16_src
         elif type == "BF16":
