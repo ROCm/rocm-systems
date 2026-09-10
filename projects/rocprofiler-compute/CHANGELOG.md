@@ -20,6 +20,8 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 * Added CLI guidance for viewing the wide memory chart without line wrapping (`less -RS` or `code -`).
 
+* Added Python 3.14 support.
+
 ### Changed
 
 * Dispatch IDs now start at 1 instead of 0.
