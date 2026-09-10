@@ -136,6 +136,26 @@ def test_descriptor_sgpr_count_encoded(profile, expected):
 
 
 @pytest.mark.parametrize(
+    ('profile', 'vmcnt_capacity', 'lgkmcnt_capacity'),
+    [
+        (Cdna1Profile(), 63, 15),
+        (Cdna2Profile(), 63, 15),
+        (CdnaProfile(), 63, 15),
+        (Cdna4Profile(), 63, 15),
+        (Rdna1Profile(), 63, 63),
+        (Rdna2Profile(), 63, 63),
+        (Rdna3Profile(), 63, 63),
+        (Rdna3_5Profile(), 63, 63),
+        (Rdna4Profile(), 0, 0),
+        (Cdna5Profile(), 0, 0),
+    ],
+)
+def test_wait_counter_capacities(profile, vmcnt_capacity, lgkmcnt_capacity):
+    assert profile.vmcnt_capacity == vmcnt_capacity
+    assert profile.lgkmcnt_capacity == lgkmcnt_capacity
+
+
+@pytest.mark.parametrize(
     ('profile', 'expected'),
     [
         (CdnaProfile(), 256),
@@ -490,6 +510,8 @@ def test_isa_properties_codegen_uses_profile_values(tmp_path):
     assert 'uint32_t compute_tmpring_wavesize_bits = 0;' in output
     assert 'uint32_t wave_size = 0;' in output
     assert 'uint32_t wave_size_max = 0;' in output
+    assert 'uint8_t vmcnt_capacity = 0;' in output
+    assert 'uint8_t lgkmcnt_capacity = 0;' in output
     assert 'uint32_t descriptor_vgpr_count_granule_wave32 = 0;' in output
     assert 'uint32_t descriptor_vgpr_count_granule_wave64 = 0;' in output
     assert 'MAX_SUPPORTED_ADDRESSABLE_VGPRS_PER_WF = 1024;' in output
@@ -506,6 +528,8 @@ def test_isa_properties_codegen_uses_profile_values(tmp_path):
         '        .compute_tmpring_wavesize_bits = 13,\n'
         '        .wave_size = 64,\n'
         '        .wave_size_max = 64,\n'
+        '        .vmcnt_capacity = 63,\n'
+        '        .lgkmcnt_capacity = 15,\n'
         '        .max_addressable_vgprs_per_wf = 256,\n'
         '        .descriptor_vgpr_count_granule_wave32 = 0,\n'
         '        .descriptor_vgpr_count_granule_wave64 = 8,\n'
@@ -524,6 +548,8 @@ def test_isa_properties_codegen_uses_profile_values(tmp_path):
         '        .compute_tmpring_wavesize_bits = 18,\n'
         '        .wave_size = 32,\n'
         '        .wave_size_max = 64,\n'
+        '        .vmcnt_capacity = 0,\n'
+        '        .lgkmcnt_capacity = 0,\n'
         '        .max_addressable_vgprs_per_wf = 256,\n'
         '        .descriptor_vgpr_count_granule_wave32 = 8,\n'
         '        .descriptor_vgpr_count_granule_wave64 = 4,\n'
@@ -542,6 +568,8 @@ def test_isa_properties_codegen_uses_profile_values(tmp_path):
         '        .compute_tmpring_wavesize_bits = 18,\n'
         '        .wave_size = 32,\n'
         '        .wave_size_max = 32,\n'
+        '        .vmcnt_capacity = 0,\n'
+        '        .lgkmcnt_capacity = 0,\n'
         '        .max_addressable_vgprs_per_wf = 1024,\n'
         '        .descriptor_vgpr_count_granule_wave32 = 16,\n'
         '        .descriptor_vgpr_count_granule_wave64 = 0,\n'
