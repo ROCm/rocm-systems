@@ -10,10 +10,40 @@ the loader contract that `py-interface/amdsmi_wrapper.py` implements.
 | Path | Native library (`.so`) | Python module | How the module finds the `.so` |
 | ---- | ---------------------- | ------------- | ------------------------------ |
 | System package (deb/rpm) | `/opt/rocm/lib/libamd_smi.so.<MAJOR>` (+ `ld.so.conf.d` entry) | Installed into the system interpreter's `site-packages`/`dist-packages` **and** `share/amd_smi` | SONAME via the dynamic linker |
-| Tarball | Present in the extracted tree | Not installed | n/a — CLI and `.so` work; `import amdsmi` is not provided |
+| Tarball | `<root>/lib/libamd_smi.so.<MAJOR>` in the extracted tree | Staged at `<root>/share/amd_smi/amdsmi` — **shipped, not installed** | Resolved relative to the wrapper (`../../../lib`), once you put the module on `sys.path` |
 | ROCm via pip (TheRock `rocm_sdk_core`) | `<root>/lib/libamd_smi.so.<MAJOR>` | `<root>/share/amd_smi/amdsmi` | Resolved relative to the wrapper (`../../../lib`) |
 | ROCm via pip in a venv | Same as above, inside the venv | Same as above, inside the venv | Same as above |
 | PyPI wheel | Bundled `libamd_smi_python.so` next to the wrapper | Interpreter `site-packages` | The bundled `.so`; system fallback is disabled |
+
+### Shipped vs installed
+
+Every path above makes the `.so` and the `amd-smi` CLI usable as soon as the
+files are on disk. The Python module is different — only some paths *install*
+it, meaning they place it where a plain `import amdsmi` finds it with no further
+action:
+
+| Path | Module on `sys.path` out of the box? |
+| ---- | ------------------------------------ |
+| System package (deb/rpm) | Yes — the package payload writes it into the system interpreter's `site-packages`/`dist-packages` |
+| ROCm via pip (± venv) | Yes — pip installs it into the environment |
+| PyPI wheel | Yes — pip installs it into the environment |
+| Tarball | **No** — the files are only staged in the extracted tree |
+
+A tarball is an archive of a build tree, not a package: extracting it runs no
+package manager, no `ldconfig`, and no pip, so it cannot register a module with
+any interpreter. It hands you the module and leaves the install to you.
+`<root>/share/amd_smi/amdsmi` is a plain importable directory with no
+`pyproject.toml`, `setup.py`, or `.dist-info`, so it is **not** pip-installable
+either — you make it importable by pointing an interpreter at its parent:
+`PYTHONPATH=<root>/share/amd_smi`, a `.pth` file in a venv, or `sys.path.insert()`.
+See {ref}`Install from a tarball <install_tarball>` for the procedure.
+
+The `amd-smi` CLI needs none of that. At startup it puts a `share/amd_smi`
+directory on `sys.path` itself — `$ROCM_PATH/share/amd_smi` when that variable
+is set, otherwise the copy alongside its own install — so the CLI runs from an
+extracted tarball with no user setup. It inserts that entry at position 0, so
+the CLI keeps using the module it shipped with even when `PYTHONPATH` or a pip
+wheel would point a user script elsewhere.
 
 ## The loader
 
@@ -21,8 +51,9 @@ the loader contract that `py-interface/amdsmi_wrapper.py` implements.
 
 1. `AMDSMI_LIB_OVERRIDE` — explicit path, for ABI tests.
 2. A bundled `libamd_smi_python.so` next to the wrapper — the PyPI wheel.
-3. The SONAME resolved relative to the wrapper (`parents[3]/lib`) — the TheRock
-   `share/amd_smi` layout, where a venv has no `ld.so.conf.d` entry.
+3. The SONAME resolved relative to the wrapper (`parents[3]/lib`) — the
+   `share/amd_smi` layout, used by TheRock (where a venv has no `ld.so.conf.d`
+   entry) and by an extracted tarball at any prefix.
 4. The bare SONAME via the dynamic linker — the system deb/rpm.
 
 Steps 3 and 4 are skipped when `_AMDSMI_ALLOW_SYSTEM_FALLBACK` is `False`. The
@@ -79,7 +110,7 @@ Legend: ✅ supported and tested · 🟡 supported, pick one recommended · ⛔ 
 | Path | `amd-smi` CLI | `import amdsmi` |
 | ---- | ------------- | --------------- |
 | deb/rpm | ✅ | ✅ |
-| tarball | ✅ | ⛔ (module not installed) |
+| tarball | ✅ | ✅ shipped, not installed — you add `<root>/share/amd_smi` to `sys.path` |
 | ROCm pip | ✅ | ✅ |
 | ROCm pip in venv | ✅ | ✅ |
 | PyPI wheel | ⛔ (Python bindings only) | ✅ |
@@ -91,13 +122,12 @@ Legend: ✅ supported and tested · 🟡 supported, pick one recommended · ⛔ 
 | deb/rpm + PyPI wheel | ✅ (wheel wins; package uninstall keeps the wheel) |
 | deb/rpm + ROCm pip, same interpreter | 🟡 (discouraged; two library families) |
 | PyPI wheel + ROCm pip | 🟡 (discouraged) |
-| tarball + any pip/wheel | ✅ (module comes from pip; tarball `.so` unused by the module) |
+| tarball + any pip/wheel | ✅ (the tarball installs nothing, so pip wins unless you point `PYTHONPATH` at the tarball) |
 | ROCm pip + ROCm pip venv | ✅ (venv wins while active) |
 
 ### Unsupported
 
 - Two system packages of different major SOVERSION on one prefix.
-- Relying on the tarball to provide `import amdsmi`.
 - A wheel loading a system `/opt/rocm` library (blocked by design).
 
 ## Upgrade and downgrade (deb/rpm)

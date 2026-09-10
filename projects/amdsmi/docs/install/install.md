@@ -187,6 +187,79 @@ Nightly builds of the ROCm Core SDK (including AMD SMI) are published by
    amd-smi version
    ```
 
+(install_tarball)=
+## Install from a tarball
+
+A tarball is an unpacked ROCm tree rather than a managed package: nothing runs
+`ldconfig` and nothing is added to `sys.path`, so you point at the tree yourself.
+Both the `amd-smi` CLI and the `amdsmi` Python module ship inside it and work
+from any prefix.
+
+1. Extract the tarball. The examples below use `$AMDSMI_ROOT` for the directory
+   that contains `bin/`, `lib/`, and `share/`.
+
+   ```bash
+   mkdir -p ~/rocm-tarball
+   tar -xf <rocm-tarball>.tar.gz -C ~/rocm-tarball
+   export AMDSMI_ROOT=~/rocm-tarball
+   ```
+
+   If the archive expands into a versioned top-level directory, set
+   `AMDSMI_ROOT` to that directory instead.
+
+2. Confirm the layout. These two paths are what the CLI and the Python loader
+   key on.
+
+   ```bash
+   ls "$AMDSMI_ROOT/lib/libamd_smi.so."*
+   ls "$AMDSMI_ROOT/share/amd_smi/amdsmi/amdsmi_wrapper.py"
+   ```
+
+3. Run the CLI. It resolves its Python modules relative to its own location, so
+   only `PATH` is needed.
+
+   ```bash
+   export PATH="$AMDSMI_ROOT/bin${PATH:+:${PATH}}"
+   amd-smi version
+   ```
+
+4. Use the Python library. Add the module directory to `PYTHONPATH`.
+
+   ```bash
+   export PYTHONPATH="$AMDSMI_ROOT/share/amd_smi${PYTHONPATH:+:${PYTHONPATH}}"
+   python3 -c "import amdsmi; print(amdsmi.amdsmi_get_lib_version())"
+   ```
+
+   `LD_LIBRARY_PATH` is not required. The wrapper loads
+   `<root>/lib/libamd_smi.so.<MAJOR>` by a path relative to itself, and the
+   library's `RUNPATH` is `$ORIGIN`-relative, so its ROCm dependencies resolve
+   from the same extracted tree.
+
+   To persist either variable across shells, append the `export` line to your
+   `~/.bashrc` (or equivalent shell config).
+
+:::{note}
+`PYTHONPATH` takes precedence over every install location, so setting it makes
+the tarball's copy win over an installed `amd-smi-lib` package or a pip
+`amdsmi` wheel in the same shell. Set it only in the shells that should use the
+tarball. To scope it to one environment instead, drop a `.pth` file into a
+virtual environment:
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+python3 -c "import sysconfig, pathlib, os
+p = pathlib.Path(sysconfig.get_paths()['purelib']) / 'amdsmi-tarball.pth'
+p.write_text(os.environ['AMDSMI_ROOT'] + '/share/amd_smi\n')"
+python3 -c "import amdsmi; print(amdsmi.amdsmi_get_lib_version())"
+```
+
+The tarball ships the module as a plain directory with no packaging metadata,
+so `pip install` cannot consume it directly. See
+[Packaging and install paths](../packaging.md) for the full precedence and
+coexistence rules.
+:::
+
 ## Optional and advanced installation
 
 Use these optional procedures for CLI autocompletion and advanced setups, such
