@@ -1126,8 +1126,6 @@ def gen_dot2_true16(dst: list[str], src: list[str], cls: str) -> str:
         narrow = 'util::f32_to_f16_mode'
     elif cls == 'dot2_bf16_bf16':
         widen = 'util::bf16_to_f32'
-        # DOT2_BF16_BF16 is a packed arithmetic op, not a data conversion.
-        narrow = 'util::f32_to_bf16'
     else:
         raise ValueError(f'unhandled true16 dot2 class: {cls}')
 
@@ -1156,11 +1154,14 @@ def gen_dot2_true16(dst: list[str], src: list[str], cls: str) -> str:
     L.extend(vop3_src_mod('b0', 1, True))
     L.extend(vop3_src_mod('b1', 1, True))
     L.extend(vop3_src_mod('acc', 2, True))
-    L.append('    float result = a0 * b0 + a1 * b1 + acc;')
     if cls == 'dot2_f16_f16':
+        L.append('    float result = a0 * b0 + a1 * b1 + acc;')
         L.append(f'    uint32_t result_bits = {narrow}(result, wf.fp16_ovfl());')
     else:
-        L.append(f'    uint32_t result_bits = {narrow}(result);')
+        # RDNA3 7.2.4 / RDNA4 7.2.4: fixed RNE and no input/output denormals.
+        L.append(
+            '    uint32_t result_bits = amdgpu::fp_mode::dot2_bf16(a0, b0, a1, b1, acc);'
+        )
     L.append(
         f'    ::rocjitsu::amdgpu::write_vop3_true16_dst({d}, wf, lane, opsel, result_bits, true);'
     )

@@ -376,6 +376,32 @@ inline uint32_t atomic_add_packed_16(uint32_t old_val, uint32_t src_val, bool bf
   return result;
 }
 
+/// @brief Apply RDNA BF16 DOT2 rounding and denormal policy to the F32 evaluation.
+/// @details RDNA3 section 7.2.4 (also used by RDNA3.5) and RDNA4 section 7.2.4 require
+/// fixed RNE and flushed input/output denormals independently of MODE. This retains
+/// the existing F32 accumulation, with RNE for its operations and final BF16 narrowing;
+/// the accumulation precision and association are unchanged by this policy helper.
+inline uint16_t dot2_bf16(float left_low, float right_low, float left_high, float right_high,
+                          float accumulator) {
+  detail::ScopedFenv nearest_environment(0);
+  auto flush_input = [](float value) {
+    uint32_t bits = std::bit_cast<uint32_t>(value);
+    if ((bits & 0x7f800000u) == 0)
+      bits &= 0x80000000u;
+    return std::bit_cast<float>(bits);
+  };
+  left_low = flush_input(left_low);
+  right_low = flush_input(right_low);
+  left_high = flush_input(left_high);
+  right_high = flush_input(right_high);
+  accumulator = flush_input(accumulator);
+  const float result = left_low * right_low + left_high * right_high + accumulator;
+  uint16_t result_bits = detail::f32_to_bf16_round(result, 0);
+  if ((result_bits & 0x7f80u) == 0)
+    result_bits &= 0x8000u;
+  return result_bits;
+}
+
 inline float finalize_omod_f32(float value, uint32_t omod) {
   if (omod == 0)
     return value;
