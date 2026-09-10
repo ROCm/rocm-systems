@@ -65,13 +65,16 @@ subtrees:
   - file: reference/rocDecode-env-vars.rst
     title: Environment variables
   - file: reference/rocDecode-formats-and-architectures.rst
-    title: rocDecode supported codecs and architectures
-  - file: doxygen/html/files
-    title: rocDecode API library
-  - file: doxygen/html/globals
-    title: rocDecode functions
-  - file: doxygen/html/annotated
-    title: rocDecode data structures
+    title: Supported codecs and architectures
+  - file: reference/rocDecode-api-reference.rst
+    title: API reference
+    subtrees:
+    - entries:
+      - file: reference/rocDecode-api-core-decode.rst
+      - file: reference/rocDecode-api-parser.rst
+      - file: reference/rocDecode-api-parser-structs.rst
+      - file: reference/rocDecode-api-video-decoder.rst
+      - file: reference/rocDecode-api-video-demuxer.rst
 
 - caption: About
   entries:

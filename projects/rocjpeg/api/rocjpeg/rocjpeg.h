@@ -30,7 +30,7 @@ THE SOFTWARE.
 /**
  * @file rocjpeg.h
  * @brief The AMD rocJPEG Library.
- * @defgroup group_amd_rocjepg rocJPEG: AMD ROCm JPEG Decode API
+ * @defgroup group_amd_rocjpeg rocJPEG: AMD ROCm JPEG Decode API
  * @brief rocJPEG API is a toolkit to decode JPEG images using a hardware-accelerated JPEG decoder on AMD’s GPUs.
 */
 
@@ -45,7 +45,6 @@ extern "C" {
 #define ROCJPEG_MAX_COMPONENT 4
 
 /**
- * @enum RocJpegStatus
  * @ingroup group_amd_rocjpeg
  * @brief Enumeration representing the status codes for the rocJPEG library.
  */
@@ -67,7 +66,6 @@ typedef enum {
 } RocJpegStatus;
 
 /**
- * @enum RocJpegChromaSubsampling
  * @ingroup group_amd_rocjpeg
  * @brief Enum representing the chroma subsampling options for JPEG encoding/decoding.
  *
@@ -107,7 +105,6 @@ typedef struct {
 } RocJpegImage;
 
 /**
- * @enum RocJpegOutputFormat
  * @ingroup group_amd_rocjpeg
  * @brief Enum representing the output format options for the RocJpegImage.
  *
@@ -166,7 +163,6 @@ typedef struct {
 } RocJpegDecodeParams;
 
 /**
- * @enum RocJpegBackend
  * @ingroup group_amd_rocjpeg
  * @brief The backend options for the rocJpeg library.
  *
@@ -187,7 +183,6 @@ typedef enum {
 typedef void* RocJpegStreamHandle;
 
 /**
- * @fn RocJpegStatus ROCJPEGAPI rocJpegStreamCreate(RocJpegStreamHandle *jpeg_stream_handle);
  * @ingroup group_amd_rocjpeg
  * @brief Creates a RocJpegStreamHandle for JPEG stream processing.
  *
@@ -204,7 +199,6 @@ typedef void* RocJpegStreamHandle;
 RocJpegStatus ROCJPEGAPI rocJpegStreamCreate(RocJpegStreamHandle *jpeg_stream_handle);
 
 /**
- * @fn RocJpegStatus ROCJPEGAPI rocJpegStreamParse(const unsigned char *data, size_t length, RocJpegStreamHandle jpeg_stream_handle);
  * @ingroup group_amd_rocjpeg
  * @brief Parses a JPEG stream.
  *
@@ -219,7 +213,6 @@ RocJpegStatus ROCJPEGAPI rocJpegStreamCreate(RocJpegStreamHandle *jpeg_stream_ha
 RocJpegStatus ROCJPEGAPI rocJpegStreamParse(const unsigned char *data, size_t length, RocJpegStreamHandle jpeg_stream_handle);
 
 /**
- * @fn RocJpegStatus ROCJPEGAPI rocJpegStreamDestroy(RocJpegStreamHandle jpeg_stream_handle);
  * @ingroup group_amd_rocjpeg
  * @brief Destroys a RocJpegStreamHandle object and releases associated resources.
  *
@@ -242,7 +235,6 @@ RocJpegStatus ROCJPEGAPI rocJpegStreamDestroy(RocJpegStreamHandle jpeg_stream_ha
 typedef void *RocJpegHandle;
 
 /**
- * @fn RocJpegStatus ROCJPEGAPI rocJpegCreate(RocJpegBackend backend, int device_id, RocJpegHandle *handle);
  * @ingroup group_amd_rocjpeg
  * @brief Creates a RocJpegHandle for JPEG decoding.
  *
@@ -258,7 +250,6 @@ typedef void *RocJpegHandle;
 RocJpegStatus ROCJPEGAPI rocJpegCreate(RocJpegBackend backend, int device_id, RocJpegHandle *handle);
 
 /**
- * @fn RocJpegStatus ROCJPEGAPI rocJpegDestroy(RocJpegHandle handle);
  * @ingroup group_amd_rocjpeg
  * @brief Destroys a RocJpegHandle object.
  *
@@ -273,7 +264,6 @@ RocJpegStatus ROCJPEGAPI rocJpegCreate(RocJpegBackend backend, int device_id, Ro
 RocJpegStatus ROCJPEGAPI rocJpegDestroy(RocJpegHandle handle);
 
 /**
- * @fn RocJpegStatus ROCJPEGAPI rocJpegGetImageInfo(RocJpegHandle handle, RocJpegStreamHandle jpeg_stream_handle, uint8_t *num_components, RocJpegChromaSubsampling *subsampling, uint32_t *widths, uint32_t *heights);
  * @ingroup group_amd_rocjpeg
  * @brief Retrieves information about the JPEG image.
  *
@@ -296,7 +286,6 @@ RocJpegStatus ROCJPEGAPI rocJpegDestroy(RocJpegHandle handle);
 RocJpegStatus ROCJPEGAPI rocJpegGetImageInfo(RocJpegHandle handle, RocJpegStreamHandle jpeg_stream_handle, uint8_t *num_components, RocJpegChromaSubsampling *subsampling, uint32_t *widths, uint32_t *heights);
 
 /**
- * @fn RocJpegStatus ROCJPEGAPI rocJpegDecode(RocJpegHandle handle, RocJpegStreamHandle jpeg_stream_handle, const RocJpegDecodeParams *decode_params, RocJpegImage *destination);
  * @ingroup group_amd_rocjpeg
  * @brief Decodes a JPEG image using the rocJPEG library.
  *
@@ -315,7 +304,6 @@ RocJpegStatus ROCJPEGAPI rocJpegDecode(RocJpegHandle handle, RocJpegStreamHandle
 
 
 /**
- * @fn RocJpegStatus ROCJPEGAPI rocJpegDecodeBatched(RocJpegHandle handle, RocJpegStreamHandle *jpeg_stream_handles, int batch_size, const RocJpegDecodeParams *decode_params, RocJpegImage *destinations);
  * @ingroup group_amd_rocjpeg
  * @brief Decodes a batch of JPEG images using the rocJPEG library.
  *
@@ -331,7 +319,6 @@ RocJpegStatus ROCJPEGAPI rocJpegDecode(RocJpegHandle handle, RocJpegStreamHandle
 RocJpegStatus ROCJPEGAPI rocJpegDecodeBatched(RocJpegHandle handle, RocJpegStreamHandle *jpeg_stream_handles, int batch_size, const RocJpegDecodeParams *decode_params, RocJpegImage *destinations);
 
 /**
- * @fn extern const char* ROCDECAPI rocJpegGetErrorName(RocJpegStatus rocjpeg_status);
  * @ingroup group_amd_rocjpeg
  * @brief Retrieves the name of the error associated with the given RocJpegStatus.
  *
