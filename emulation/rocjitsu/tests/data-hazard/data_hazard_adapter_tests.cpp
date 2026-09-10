@@ -2133,6 +2133,58 @@ TEST(DataHazardAdapterTest, SplitsTheBareImmediateOfACombinedWait) {
   EXPECT_EQ(find_counter(action, WaitCntType::LDS)->keep_count, 3u);
 }
 
+// The named-field form of a combined wait omits a counter it leaves parked,
+// exactly as legacy s_waitcnt omits vmcnt or lgkmcnt. A parked field must stay
+// absent so make_wait_action drains only the counter the instruction named;
+// falling back to zero clears pending ops the wait never counted, hiding a real
+// hazard behind the counter it should not have touched.
+TEST(DataHazardAdapterTest, PairedLoadcntDscntLoadcntOnlyDoesNotDrainDscnt) {
+  const auto action =
+      dh::make_wait_action(dh::make_wait_info(dh::WaitKind::WaitLoadcntDscnt, "loadcnt(0)"));
+
+  const auto *vmem = find_counter(action, WaitCntType::VMEM);
+  ASSERT_NE(vmem, nullptr);
+  EXPECT_EQ(vmem->keep_count, 0u);
+  EXPECT_EQ(find_counter(action, WaitCntType::LDS), nullptr)
+      << "s_wait_loadcnt_dscnt loadcnt(0) leaves dscnt parked and must not drain LDS";
+}
+
+TEST(DataHazardAdapterTest, PairedLoadcntDscntDscntOnlyDoesNotDrainLoadcnt) {
+  const auto action =
+      dh::make_wait_action(dh::make_wait_info(dh::WaitKind::WaitLoadcntDscnt, "dscnt(0)"));
+
+  const auto *lds = find_counter(action, WaitCntType::LDS);
+  ASSERT_NE(lds, nullptr);
+  EXPECT_EQ(lds->keep_count, 0u);
+  EXPECT_EQ(find_counter(action, WaitCntType::VMEM), nullptr)
+      << "s_wait_loadcnt_dscnt dscnt(0) leaves loadcnt parked and must not drain VMEM";
+}
+
+TEST(DataHazardAdapterTest, PairedStorecntDscntStorecntOnlyDoesNotDrainDscnt) {
+  const auto action =
+      dh::make_wait_action(dh::make_wait_info(dh::WaitKind::WaitStorecntDscnt, "storecnt(0)"));
+
+  const auto *store = find_counter(action, WaitCntType::STORE);
+  ASSERT_NE(store, nullptr);
+  EXPECT_EQ(store->keep_count, 0u);
+  EXPECT_EQ(find_counter(action, WaitCntType::LDS), nullptr)
+      << "s_wait_storecnt_dscnt storecnt(0) leaves dscnt parked and must not drain LDS";
+}
+
+// Guards the fix from overcorrecting: when the named form spells both fields,
+// both still drain.
+TEST(DataHazardAdapterTest, PairedLoadcntDscntBothFieldsDrainBothCounters) {
+  const auto action =
+      dh::make_wait_action(dh::make_wait_info(dh::WaitKind::WaitLoadcntDscnt, "loadcnt(0) dscnt(2)"));
+
+  const auto *vmem = find_counter(action, WaitCntType::VMEM);
+  const auto *lds = find_counter(action, WaitCntType::LDS);
+  ASSERT_NE(vmem, nullptr);
+  ASSERT_NE(lds, nullptr);
+  EXPECT_EQ(vmem->keep_count, 0u);
+  EXPECT_EQ(lds->keep_count, 2u);
+}
+
 // The RDNA families count lgkmcnt in six bits where CDNA uses four. A count
 // above fifteen has to reach the engine as written: shortened, it would drain
 // operations the wait never named and hide the hazards behind them.
