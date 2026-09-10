@@ -59,7 +59,6 @@ namespace rocshmem {
  * @brief CRTP base class for Provider-specific Queue Pair implementations.
  */
 template <typename Provider>
-//class QueuePairDevice : public QueuePairSHMEM<Provider> {
 class alignas(ALIGNMENT) QueuePairDevice : public QueuePairSHMEM<Provider> {
 /**
  * @name Provider-Defined Members
