@@ -306,7 +306,7 @@ bool VfioUserClient::dma_map(uint64_t iova, uint64_t size, int fd, uint64_t fd_o
   if (protection == DmaProtection::ReadOnly || protection == DmaProtection::ReadWrite) {
     request_body.flags |= VFIO_USER_F_DMA_REGION_READ;
   }
-  if (protection == DmaProtection::WriteOnly || protection == DmaProtection::ReadWrite) {
+  if (protection == DmaProtection::ReadWrite) {
     request_body.flags |= VFIO_USER_F_DMA_REGION_WRITE;
   }
   if (fd >= 0) {
