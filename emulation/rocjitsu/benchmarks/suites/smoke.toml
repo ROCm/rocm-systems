@@ -3,5 +3,5 @@ targets = ["gfx950"]
 cases = ["triton.rmsnorm_bf16"]
 warmups = 1
 samples = 3
-num_threads = 8
+num_threads = 1
 timeout_seconds = 60

@@ -33,10 +33,11 @@ query heads, 8 key/value heads, head dimension 64, sequence/window 128).
 
 This produces 32 case/target cells in a full run. Inputs and launch
 configurations are fixed, and measured runs do not autotune. The cells execute
-sequentially, while each simulation uses eight worker partitions--one for each
-XCD in both target configurations. Changing that count creates a different
-benchmark configuration and its results must not be compared directly with
-the eight-thread series.
+sequentially, with `num_threads = 1` in all checked-in suites. Multiple simulator
+partitions currently cause some workloads to stall and time out, including
+vector addition on gfx950. Keep a single partition until that issue is fixed.
+Changing the thread count creates a different benchmark configuration; do not
+compare these results directly with the earlier eight-thread runs.
 
 MXFP4 MoE projections are not included. Although the pinned hipBLASLt API
 defines `HIP_R_4F_E2M1` and VEC32 UE8M0 scale metadata, its installed gfx950

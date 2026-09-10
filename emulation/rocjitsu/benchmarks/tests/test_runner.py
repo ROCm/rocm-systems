@@ -163,7 +163,7 @@ class RunnerTest(unittest.TestCase):
         )
         self.assertEqual(self.suite.warmups, 3)
         self.assertEqual(self.suite.samples, 21)
-        self.assertEqual(self.suite.num_threads, 8)
+        self.assertEqual(self.suite.num_threads, 1)
         self.assertEqual(self.suite.timeout_seconds, 300)
 
     def test_smoke_manifest_has_single_triton_case(self) -> None:
@@ -173,7 +173,7 @@ class RunnerTest(unittest.TestCase):
         self.assertEqual(smoke.cases, ("triton.rmsnorm_bf16",))
         self.assertEqual(smoke.warmups, 1)
         self.assertEqual(smoke.samples, 3)
-        self.assertEqual(smoke.num_threads, 8)
+        self.assertEqual(smoke.num_threads, 1)
         self.assertEqual(smoke.timeout_seconds, 60)
 
     def test_manifest_rejects_extra_fields(self) -> None:
@@ -189,7 +189,7 @@ class RunnerTest(unittest.TestCase):
         for value in ("0", "-1", "true"):
             with self.subTest(value=value):
                 manifest.write_text(
-                    text.replace("num_threads = 8", f"num_threads = {value}"),
+                    text.replace("num_threads = 1", f"num_threads = {value}"),
                     encoding="utf-8",
                 )
                 with self.assertRaisesRegex(
@@ -465,7 +465,7 @@ class RunnerTest(unittest.TestCase):
         self.assertEqual(test["dataType"], "bf16")
         self.assertEqual(test["problem"], {"fixture": True})
         self.assertEqual(test["execMode"], "functional")
-        self.assertEqual(test["numThreads"], 8)
+        self.assertEqual(test["numThreads"], 1)
         self.assertEqual(test["durationSeconds"], 2 / 1_000_000_000)
         self.assertEqual(
             test["timing"],
@@ -513,7 +513,7 @@ class RunnerTest(unittest.TestCase):
         self.assertEqual(
             messages[0],
             "[rocjitsu-benchmark] START suite=nightly cells=1 "
-            "warmups=3 samples=1 threads=8 plugin=none",
+            "warmups=3 samples=1 threads=1 plugin=none",
         )
         self.assertEqual(
             messages[1],
@@ -648,7 +648,7 @@ class RunnerTest(unittest.TestCase):
             hashlib.sha256(configuration.read_bytes()).hexdigest(),
         )
         self.assertEqual(result["tests"][0]["execMode"], "parallel")
-        self.assertEqual(result["tests"][0]["numThreads"], 8)
+        self.assertEqual(result["tests"][0]["numThreads"], self.suite.num_threads)
         self.assertEqual(
             result["configuration"]["targetConfigSha256"]["gfx950"],
             effective_metadata.config_sha256,
