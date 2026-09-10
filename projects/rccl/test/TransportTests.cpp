@@ -20,24 +20,22 @@ namespace {
 // ncclComm is several MiB, so keep it on the heap rather than the stack.
 using CommPtr = std::unique_ptr<ncclComm>;
 
-CommPtr MakeSetupComm(int nRanks, int nNodes, ncclPeerInfo* peerInfo)
-{
+CommPtr MakeSetupComm(int nRanks, int nNodes, ncclPeerInfo* peerInfo) {
   auto comm = std::make_unique<ncclComm>();
-  comm->rank     = 0;
-  comm->nRanks   = nRanks;
-  comm->nNodes   = nNodes;
-  comm->node     = 0;
+  comm->rank = 0;
+  comm->nRanks = nRanks;
+  comm->nNodes = nNodes;
+  comm->node = 0;
   comm->peerInfo = peerInfo;
   return comm;
 }
 
-CommPtr MakeCheckComm(int* localRankToRank, ncclBootstrap* bootstrap)
-{
+CommPtr MakeCheckComm(int* localRankToRank, ncclBootstrap* bootstrap) {
   auto comm = std::make_unique<ncclComm>();
-  comm->localRank       = 0;
-  comm->localRanks      = 1;
+  comm->localRank = 0;
+  comm->localRanks = 1;
   comm->localRankToRank = localRankToRank;
-  comm->bootstrap       = bootstrap;
+  comm->bootstrap = bootstrap;
   return comm;
 }
 
@@ -101,7 +99,8 @@ TEST(TransportTest, CollNetRecvSetup) {
   int type = collNetRecv;
 
   // --- Run the function ---
-  bool failed = ncclTransportCollNetSetup(comm.get(), topoGraph.get(), &channel, masterRank, masterPeer, channelId, type, &connect);
+  bool failed = ncclTransportCollNetSetup(comm.get(), topoGraph.get(), &channel, masterRank, masterPeer, channelId,
+                                          type, &connect);
 
   // --- Assert: function should succeed (return false) ---
   ASSERT_FALSE(failed);
@@ -165,7 +164,8 @@ TEST(TransportTest, CollNetSendSetup) {
   int type = collNetSend;
 
   // --- Run the function ---
-  bool failed = ncclTransportCollNetSetup(comm.get(), topoGraph.get(), &channel, masterRank, masterPeer, channelId, type, &connect);
+  bool failed = ncclTransportCollNetSetup(comm.get(), topoGraph.get(), &channel, masterRank, masterPeer, channelId,
+                                          type, &connect);
 
   // --- Assert: function should succeed (return false) ---
   ASSERT_FALSE(failed);
