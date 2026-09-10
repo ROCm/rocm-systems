@@ -2740,6 +2740,18 @@ void VirtMemoryTestBasic::TestFabricExportAcceleratorReadiness(void) {
   }
 }
 
+// Fabric handles need both a runtime that knows the query and a system that supports them.
+// Runtimes predating the query report an error rather than false, so treat any failure as
+// unsupported instead of failing the test.
+static bool FabricHandlesSupported() {
+  bool supported = false;
+  if (hsa_system_get_info(HSA_AMD_SYSTEM_INFO_FABRIC_HANDLES_SUPPORTED, &supported) !=
+      HSA_STATUS_SUCCESS) {
+    return false;
+  }
+  return supported;
+}
+
 // Queries hsa_amd_pointer_info() on a mapped VMM address. Both variants are exercised:
 // without an accessible-agent list, and with one, which is what rocprofiler-sdk's copy
 // interceptor uses when it attributes a hipMemcpyAsync.
@@ -2760,6 +2772,13 @@ static void QueryVmemPointerInfo(void* addr) {
 
 void VirtMemoryTestBasic::FabricImportedHandlePointerInfo(hsa_agent_t gpu_agent,
                                                           hsa_amd_memory_pool_t pool) {
+  if (!FabricHandlesSupported()) {
+    if (verbosity() > 0) {
+      std::cout << "    Fabric handles not supported on this system - Skipping." << std::endl;
+    }
+    return;
+  }
+
   rocrtst::pool_info_t pool_i;
   ASSERT_SUCCESS(rocrtst::AcquirePoolInfo(pool, &pool_i));
   if (!pool_i.alloc_allowed || pool_i.segment != HSA_AMD_SEGMENT_GLOBAL) return;
@@ -2865,9 +2884,7 @@ void VirtMemoryTestBasic::TestImportedHandlePointerInfo(void) {
     return;
   }
 
-  bool fabric_supported = false;
-  ASSERT_SUCCESS(
-      hsa_system_get_info(HSA_AMD_SYSTEM_INFO_FABRIC_HANDLES_SUPPORTED, &fabric_supported));
+  const bool fabric_supported = FabricHandlesSupported();
   if (!fabric_supported && verbosity() > 0) {
     std::cout << "    Fabric handles not supported on this system - dmabuf import only."
               << std::endl;
