@@ -7,6 +7,8 @@
 #include <unistd.h>
 
 #include <algorithm>
+#include <iostream>
+#include <sstream>
 #include <system_error>
 
 using namespace rocprofiler_compute_tool;
@@ -296,6 +298,22 @@ TEST_F(test_source_snapshotter_t, ProvidedNoCopiedSource_WritesNoSourcePathMap)
     m_snapshotter->snapshot({"/sources/missing.cpp"}, m_destination_root);
 
     expect_no_source_path_map();
+}
+
+TEST_F(test_source_snapshotter_t, ProvidedSourceMapWriteError_DoesNotThrow)
+{
+    const std::filesystem::path source_path = "/sources/app/kernel.cpp";
+    set_regular_source(source_path);
+    m_filesystem->set_write_file_error(permission_denied_error());
+    std::ostringstream captured_log;
+    auto* const        original_log_buffer = std::clog.rdbuf(captured_log.rdbuf());
+
+    EXPECT_NO_THROW(m_snapshotter->snapshot({source_path}, m_destination_root));
+    std::clog.rdbuf(original_log_buffer);
+
+    EXPECT_EQ(m_filesystem->get_copy_file_calls().size(), 1);
+    EXPECT_EQ(written_source_path_map(), source_path_map_json({{source_path, source_path}}));
+    EXPECT_NE(captured_log.str().find("Failed to write source map"), std::string::npos);
 }
 
 TEST_F(test_source_snapshotter_t, ProvidedSameBasenameDifferentDirectories_CopiesBoth)

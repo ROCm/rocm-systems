@@ -62,8 +62,8 @@ void source_snapshotter_impl_t::snapshot(const std::set<std::filesystem::path>& 
         if (!canonical_source_path)
             continue;
 
-        const auto destination_path =
-            destination_root / m_filesystem->relative_path(*canonical_source_path);
+        const auto destination_path = destination_root /
+                                      m_filesystem->relative_path(*canonical_source_path);
         if (!copy_source(source_path, destination_path))
             continue;
 
@@ -87,8 +87,7 @@ void source_snapshotter_impl_t::write_source_path_map(const source_path_map_t&  
         source_paths[raw_path.string()] = canonical_path.string();
 
     // A non-empty map means a file was copied, so the root already exists.
-    const auto output_file_path =
-        destination_root / (std::to_string(getpid()) + kSourceMapFileSuffix);
+    const auto output_file_path = destination_root / (std::to_string(getpid()) + kSourceMapFileSuffix);
 
     std::error_code error;
     m_filesystem->write_file(output_file_path,

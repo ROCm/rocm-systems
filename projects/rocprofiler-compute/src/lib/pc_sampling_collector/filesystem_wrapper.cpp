@@ -72,6 +72,7 @@ void filesystem_wrapper_impl_t::write_file(const std::filesystem::path& path,
                                            const std::string&           contents,
                                            std::error_code&             error)
 {
+    error.clear();
     std::ofstream output_file(path, std::ios::out);
     if (!output_file.is_open())
     {
@@ -80,4 +81,7 @@ void filesystem_wrapper_impl_t::write_file(const std::filesystem::path& path,
     }
 
     output_file << contents;
+    output_file.close();
+    if (!output_file)
+        error = std::make_error_code(std::errc::io_error);
 }
