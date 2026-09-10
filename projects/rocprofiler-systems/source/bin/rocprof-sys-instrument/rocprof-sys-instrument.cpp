@@ -2843,7 +2843,6 @@ get_absolute_filepath(std::string _name)
             _search_paths.emplace_back(itr);
         }
     }
-            _search_paths.emplace_back(itr);
 
     return get_absolute_filepath(std::move(_name), _search_paths);
 }
