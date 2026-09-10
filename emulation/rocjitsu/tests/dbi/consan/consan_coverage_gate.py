@@ -145,6 +145,7 @@ _SITE_REASONS = {
     "non_group_address_space",
     "flat_provenance_policy_excluded",
     "runtime_kernel_excluded",
+    "container_filter_excluded",
     "non_flat_atomic_address",
     "missing_atomic_operands",
     "missing_ordering_metadata",
@@ -519,14 +520,33 @@ def parse_coverage_evidence(log_text: str) -> CoverageEvidence:
             retained = tuple(
                 site for site in reader_sites if site.kind == kind
             )
+            # The semantic ledger may contain several decisions for one physical
+            # instruction. The hook's aggregate collapses them by kind and offset.
+            physical_sites: dict[int, list[CoverageSiteRecord]] = {}
+            for site in retained:
+                physical_sites.setdefault(site.text_offset, []).append(site)
+            discovered = tuple(
+                site_records
+                for site_records in physical_sites.values()
+                # Filter exclusions remain in the verbose inventory but are not
+                # instrumentation sites and therefore do not enter the aggregate.
+                if any(
+                    site.disposition != "not_applicable" for site in site_records
+                )
+            )
             expected_discovered = coverage_record.counts[f"{kind}_discovered"]
-            if len(retained) != expected_discovered:
+            if len(discovered) != expected_discovered:
                 raise CoverageParseError(
                     f"reader {coverage_record.reader} {kind} coverage_site count "
-                    f"does not match discovered: {len(retained)} != {expected_discovered}"
+                    f"does not match discovered: {len(discovered)} != {expected_discovered}"
                 )
-            supported = sum(site.disposition == "supported" for site in retained)
-            unsupported = sum(site.disposition == "unsupported" for site in retained)
+            supported_sites = tuple(
+                site_records
+                for site_records in discovered
+                if any(site.disposition == "supported" for site in site_records)
+            )
+            supported = len(supported_sites)
+            unsupported = len(discovered) - supported
             if supported != coverage_record.counts[f"{kind}_supported"]:
                 raise CoverageParseError(
                     f"reader {coverage_record.reader} {kind} retained supported count mismatch"
@@ -536,18 +556,36 @@ def parse_coverage_evidence(log_text: str) -> CoverageEvidence:
                     f"reader {coverage_record.reader} {kind} retained unsupported count mismatch"
                 )
             if not coverage_record.expert_limit:
-                for outcome, counter in (
-                    ("patched", "patched"),
-                    ("resource_failed", "resource_failed"),
-                    (
-                        "placement_or_lowering_failed",
-                        "placement_or_lowering_failed",
-                    ),
+                patched = sum(
+                    all(
+                        site.outcome == "patched"
+                        for site in site_records
+                        if site.disposition == "supported"
+                    )
+                    for site_records in supported_sites
+                )
+                resource_failed = sum(
+                    not all(
+                        site.outcome == "patched"
+                        for site in site_records
+                        if site.disposition == "supported"
+                    )
+                    and any(
+                        site.outcome == "resource_failed" for site in site_records
+                    )
+                    for site_records in supported_sites
+                )
+                placement_or_lowering_failed = (
+                    supported - patched - resource_failed
+                )
+                for retained_count, counter in (
+                    (patched, "patched"),
+                    (resource_failed, "resource_failed"),
+                    (placement_or_lowering_failed, "placement_or_lowering_failed"),
                 ):
-                    retained_count = sum(site.outcome == outcome for site in retained)
                     if retained_count != coverage_record.counts[f"{kind}_{counter}"]:
                         raise CoverageParseError(
-                            f"reader {coverage_record.reader} {kind} retained {outcome} "
+                            f"reader {coverage_record.reader} {kind} retained {counter} "
                             "count mismatch"
                         )
 

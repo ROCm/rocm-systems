@@ -32,6 +32,60 @@ class ConSanCoverageGateTest(unittest.TestCase):
         self.assertEqual(decision.evidence.coverage[0].reader, 7)
         self.assertEqual(decision.evidence.verdict.patched_supported["access"], (20, 20))
 
+    def test_accepts_allowlist_excluded_and_duplicate_semantic_site_evidence(self) -> None:
+        empty_counts = {
+            f"{kind}_{counter}": "0"
+            for kind in ("access", "barrier", "atomic", "fence")
+            for counter in (
+                "discovered",
+                "supported",
+                "selected",
+                "patched",
+                "unsupported",
+                "resource_failed",
+                "placement_or_lowering_failed",
+                "expert_limit_omitted",
+            )
+        }
+        active_counts = dict(empty_counts)
+        for counter in ("discovered", "supported", "selected", "patched"):
+            active_counts[f"access_{counter}"] = "1"
+        decision = acceptance_decision(
+            log(
+                coverage(**empty_counts),
+                coverage(reader=8, **active_counts),
+                coverage_site(
+                    disposition="not_applicable",
+                    reason="container_filter_excluded",
+                    outcome="not_applicable",
+                    lowering_reason="semantic_not_applicable",
+                    mnemonic="unknown",
+                ),
+                coverage_site(
+                    reader="8",
+                    disposition="supported",
+                    reason="none",
+                    outcome="patched",
+                    lowering_reason="none",
+                    mnemonic="global_load_dword",
+                ),
+                coverage_site(
+                    reader="8",
+                    disposition="supported",
+                    reason="none",
+                    outcome="patched",
+                    lowering_reason="none",
+                    mnemonic="global_load_dword",
+                ),
+                verdict(access="1/1", barrier="0/0", atomic="0/0", fence="0/0"),
+                synthesize_sites=False,
+            )
+        )
+        self.assertTrue(decision.accepted, decision.reasons)
+        self.assertEqual(
+            decision.evidence.sites[0].reason, "container_filter_excluded"
+        )
+
     def test_accepts_supercollider_aggregate_without_site_rows(self) -> None:
         aggregate = coverage(
             flavor="supercollider",
