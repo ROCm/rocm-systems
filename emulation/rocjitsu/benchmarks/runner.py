@@ -25,7 +25,7 @@ import sys
 import time
 import tomllib
 from collections.abc import Mapping, Sequence
-from typing import Any
+from typing import Any, TextIO
 
 BENCHMARK_ROOT = Path(__file__).resolve().parent
 ROCJITSU_ROOT = BENCHMARK_ROOT.parent
@@ -701,6 +701,11 @@ def _captured_text(value: str | bytes | None) -> str:
     return value
 
 
+def _progress(stream: TextIO | None, message: str) -> None:
+    if stream is not None:
+        print(f"[rocjitsu-benchmark] {message}", file=stream, flush=True)
+
+
 def _run_command(
     argv: Sequence[str],
     *,
@@ -801,6 +806,7 @@ def run_suite(
     warmups: int | None = None,
     samples: int | None = None,
     plugin_profile: str = "none",
+    progress: TextIO | None = None,
 ) -> dict[str, Any]:
     """Run all selected cells, preserving partial results after failures."""
 
@@ -824,6 +830,13 @@ def run_suite(
     source = _source_info()
     environment = _environment_info()
     output_path.mkdir(parents=True)
+    total_cells = len(matrix)
+    _progress(
+        progress,
+        f"START suite={suite.name} cells={total_cells} "
+        f"warmups={selected_warmups} samples={selected_samples} "
+        f"threads={suite.num_threads} plugin={plugin_profile}",
+    )
     run: dict[str, Any] = {
         "schemaVersion": 1,
         "timestamp": timestamp,
@@ -854,7 +867,14 @@ def run_suite(
     _write_run(output_path, run)
 
     try:
-        for cell in matrix:
+        for position, cell in enumerate(matrix, start=1):
+            cell_started = time.monotonic()
+            _progress(
+                progress,
+                f"START [{position}/{total_cells}] case={cell.case} "
+                f"target={cell.target} provider={cell.provider} "
+                f"timeout_seconds={suite.timeout_seconds:g}",
+            )
             command = prepare_command(
                 build,
                 output_path,
@@ -929,11 +949,25 @@ def run_suite(
             run["tests"].append(result)
             run["wallTimeSeconds"] = time.monotonic() - started
             _write_run(output_path, run)
+            detail = ""
+            if result["status"] == "completed":
+                detail = f" median_ns={result['timing']['median']}"
+            _progress(
+                progress,
+                f"DONE  [{position}/{total_cells}] case={cell.case} "
+                f"target={cell.target} status={result['status']} "
+                f"elapsed_seconds={time.monotonic() - cell_started:.1f}{detail}",
+            )
     except BaseException:
         run["status"] = "failed"
         run["finishedAt"] = _utc_now()
         run["wallTimeSeconds"] = time.monotonic() - started
         _write_run(output_path, run)
+        _progress(
+            progress,
+            f"ABORT suite={suite.name} completed={len(run['tests'])}/{total_cells} "
+            f"elapsed_seconds={run['wallTimeSeconds']:.1f}",
+        )
         raise
 
     run["status"] = (
@@ -944,6 +978,17 @@ def run_suite(
     run["finishedAt"] = _utc_now()
     run["wallTimeSeconds"] = time.monotonic() - started
     _write_run(output_path, run)
+    status_counts = {
+        status: sum(test["status"] == status for test in run["tests"])
+        for status in ("completed", "failed", "timeout")
+    }
+    _progress(
+        progress,
+        f"DONE suite={suite.name} status={run['status']} "
+        f"completed={status_counts['completed']} failed={status_counts['failed']} "
+        f"timeout={status_counts['timeout']} "
+        f"elapsed_seconds={run['wallTimeSeconds']:.1f}",
+    )
     return run
 
 
@@ -993,6 +1038,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             warmups=arguments.warmups,
             samples=arguments.samples,
             plugin_profile=arguments.plugin_profile,
+            progress=sys.stdout,
         )
         artifact = arguments.output.expanduser().resolve() / "run.json"
         print(f"run {run['status']}: {artifact}")

@@ -101,6 +101,7 @@ class RunnerTest(unittest.TestCase):
         process=None,
         samples=None,
         plugin_profile: str = "none",
+        progress=None,
     ):
         output = self.root / name
         packages = {
@@ -143,6 +144,7 @@ class RunnerTest(unittest.TestCase):
                 output=output,
                 samples=samples,
                 plugin_profile=plugin_profile,
+                progress=progress,
             )
         return output, result
 
@@ -497,6 +499,37 @@ class RunnerTest(unittest.TestCase):
         self.assertEqual(
             (output / "cases/triton.rmsnorm_bf16/gfx950/stdout.txt").read_text(),
             "out",
+        )
+
+    def test_progress_reports_suite_and_cell_status(self) -> None:
+        progress = io.StringIO()
+        self._run(
+            self._matrix("triton.rmsnorm_bf16"),
+            "progress",
+            samples=1,
+            progress=progress,
+        )
+        messages = progress.getvalue().splitlines()
+        self.assertEqual(
+            messages[0],
+            "[rocjitsu-benchmark] START suite=nightly cells=1 "
+            "warmups=3 samples=1 threads=8 plugin=none",
+        )
+        self.assertEqual(
+            messages[1],
+            "[rocjitsu-benchmark] START [1/1] case=triton.rmsnorm_bf16 "
+            "target=gfx950 provider=triton timeout_seconds=300",
+        )
+        self.assertRegex(
+            messages[2],
+            r"^\[rocjitsu-benchmark\] DONE  \[1/1\] "
+            r"case=triton\.rmsnorm_bf16 target=gfx950 status=completed "
+            r"elapsed_seconds=\d+\.\d median_ns=1$",
+        )
+        self.assertRegex(
+            messages[3],
+            r"^\[rocjitsu-benchmark\] DONE suite=nightly status=completed "
+            r"completed=1 failed=0 timeout=0 elapsed_seconds=\d+\.\d$",
         )
 
     def test_initial_checkpoint_is_a_running_v1_run(self) -> None:

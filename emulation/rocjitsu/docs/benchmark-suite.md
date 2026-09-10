@@ -147,7 +147,10 @@ reported median is always one of the observed integer-nanosecond samples.
 
 Each cell has a 300-second default timeout. A cell failure is recorded and does
 not discard results from other cells. The command returns failure when any
-selected cell fails.
+selected cell fails. The runner flushes a progress line when the suite and each
+cell start and finish. Cell messages include matrix position, case, target,
+status, elapsed wall time, and the median for a successful measurement, so a
+long sequential run remains observable in local terminals and GitHub Actions.
 
 ## CI publication proof of concept
 
