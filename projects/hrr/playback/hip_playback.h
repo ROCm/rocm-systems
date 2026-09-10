@@ -648,7 +648,12 @@ struct PlaybackContext {
     // reuses one buffer instead of growing a new one per event.
     std::unordered_map<uint64_t, std::vector<uint8_t>> host_landing_buffers;
 
+    // A recorded key of 0 is a null host pointer the capturing process passed,
+    // and the call it belonged to failed there. Handing back a real buffer
+    // would turn that into a success at replay, so the sentinel is preserved
+    // and the caller's null check reports it.
     void* host_landing_buffer(uint64_t rec, size_t sz) {
+        if (!rec) return nullptr;
         std::unique_lock lk(map_mutex);
         auto& buf = host_landing_buffers[rec];
         if (buf.size() < sz) buf.resize(sz);
