@@ -444,6 +444,29 @@ def test_rocprofv3_live_attach_uses_sync_output():
     assert "--" not in options
 
 
+def test_kernel_iteration_range_translated_for_both_backends(tmp_path):
+    """Both backends turn '3:5' into '3-5' and bracket the joined tokens."""
+    args = _make_sanitize_args(
+        ["/bin/true"],
+        kernel_iteration_range=["1", "3:5"],
+        output_directory=str(tmp_path),
+        rocprofiler_sdk_tool_path="sdk_tool",
+        kokkos_trace=False,
+    )
+    args.remaining = "-- /bin/true"
+
+    v3_profiler = rocprof_v3_profiler(args, profiler_mode="rocprofv3", soc=None)
+    v3_options = v3_profiler.get_profiler_options()
+    range_idx = v3_options.index("--kernel-iteration-range")
+    assert v3_options[range_idx + 1] == "[1,3-5]"
+
+    sdk_profiler = rocprofiler_sdk_profiler(
+        args, profiler_mode="rocprofiler-sdk", soc=None
+    )
+    sdk_options = sdk_profiler.get_profiler_options()
+    assert sdk_options["ROCPROF_KERNEL_FILTER_RANGE"] == "[1,3-5]"
+
+
 # ---------------------------------------------------------------------------
 # get_pc_sampling_profiler_options(): sdk + v3 backends
 # ---------------------------------------------------------------------------

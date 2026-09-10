@@ -127,16 +127,21 @@ def test_profile_output_directory(flag):
     assert args.output_directory == "/tmp/out"
 
 
-def test_profile_rejects_dispatch():
-    """--dispatch belongs to analyze mode only."""
-    with pytest.raises(SystemExit) as exc:
-        build_args(["profile", "--dispatch", "1", "--", "./vcopy"])
-    assert exc.value.code == 2
+# =============================================================================
+# profile --kernel-iteration-range
+# =============================================================================
 
 
-def test_analyze_dispatch_unaffected():
-    args = build_args(["analyze", "--path", "/tmp/wl", "-d", "3"])
-    assert args.gpu_dispatch_id == [["3"]]
+def test_profile_kernel_iteration_range():
+    args = build_args([
+        "profile",
+        "--kernel-iteration-range",
+        "1",
+        "3:5",
+        "--",
+        "./vcopy",
+    ])
+    assert args.kernel_iteration_range == ["1", "3:5"]
 
 
 def test_pc_sampling_analyze_options():

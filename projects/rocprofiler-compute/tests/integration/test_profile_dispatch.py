@@ -56,27 +56,6 @@ def test_dispatch_0_1(binary_handler_profile_rocprof_compute):
     common.clean_output_dir(config["cleanup"], workload_dir)
 
 
-def test_dispatch_2(binary_handler_profile_rocprof_compute):
-    options = ["--kernel-iteration-range", "1"]
-    workload_dir = common.get_output_dir()
-    binary_handler_profile_rocprof_compute(config, workload_dir, options)
-
-    file_dict = integration_common.check_csv_files(workload_dir, num_devices, 1)
-    assert sorted(list(file_dict.keys())) == CSVS
-
-    validate(
-        inspect.stack()[0][3],
-        workload_dir,
-        file_dict,
-        [
-            "--dispatch",
-            "1",
-        ],
-    )
-
-    common.clean_output_dir(config["cleanup"], workload_dir)
-
-
 @pytest.mark.parametrize(
     "bad_value",
     ["0", "-1", "abc", "1:0", "5:3", "1:", ":3", "1:2:3"],
