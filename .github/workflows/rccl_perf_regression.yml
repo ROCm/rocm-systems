@@ -132,9 +132,17 @@ jobs:
             JOB_ID=""
             cleanup_build() {
               trap - EXIT INT TERM HUP
-              if [[ -n "${JOB_ID}" ]]; then
-                echo "==> cancelling sp_build job ${JOB_ID}"
-                scancel "${JOB_ID}" 2>/dev/null || true
+              # Normalize here too: a signal can land after the sbatch
+              # assignment below but before the ;cluster strip that follows
+              # it, in which case JOB_ID still holds the raw `<id>;<cluster>`
+              # value and a bare scancel on it would silently no-op into
+              # 2>/dev/null, orphaning the allocation.
+              local id="${JOB_ID}"
+              id="${id##*$'\n'}"
+              id="${id%%;*}"
+              if [[ -n "${id}" ]]; then
+                echo "==> cancelling sp_build job ${id}"
+                scancel "${id}" 2>/dev/null || true
               fi
             }
             # A bash trap *returns* to where the signal interrupted, so a
@@ -156,15 +164,39 @@ jobs:
             # parse_parsable_job_id() in submit_slurm_job.py.
             JOB_ID="${JOB_ID##*$'\n'}"
             JOB_ID="${JOB_ID%%;*}"
+            if [[ -z "${JOB_ID}" ]]; then
+              # sbatch exited 0 but printed nothing parsable: there is nothing
+              # to wait on or scancel. Fail loud instead of persisting an
+              # empty id that sacct/scancel would silently no-op on below.
+              echo "ERROR: sbatch succeeded (rc=0) but printed no parsable job id"
+              exit 1
+            fi
             # Persist for the `if: cancelled()` backup step below: GitHub
             # SIGKILLs the step ~2.5s after SIGTERM, which can beat the trap.
             printf '%s\n' "${JOB_ID}" > "${RUNNER_TEMP}/sp_build-slurm-job-id"
             echo "Submitted sp_build job ${JOB_ID}"
+            # Bound a *continuously* empty sacct answer the same way
+            # submit_slurm_job.py's MISSING_ROW_TIMEOUT does: sacct should
+            # produce a row for this id within seconds, and the case below has
+            # no arm for "", so without this a broken sacct would otherwise
+            # spin here until the job's own timeout-minutes, reservation still
+            # held. The deadline resets on any non-empty answer (including a
+            # real PENDING/RUNNING), so a queue that is just slow is not
+            # penalized -- only a state that never comes back is.
+            missing_row_deadline=$(( $(date +%s) + 600 ))
             while true; do
               state="$(sacct -j "${JOB_ID}" -X -n -P --format=State 2>/dev/null | awk '{print $1; exit}')"
               case "${state}" in
                 COMPLETED|FAILED|CANCELLED|TIMEOUT|NODE_FAIL|PREEMPTED|OUT_OF_MEMORY|BOOT_FAIL|DEADLINE)
                   break ;;
+                "")
+                  if (( $(date +%s) >= missing_row_deadline )); then
+                    echo "ERROR: sacct reported no state for job ${JOB_ID} for 600s; giving up and cancelling it"
+                    exit 1
+                  fi
+                  ;;
+                *)
+                  missing_row_deadline=$(( $(date +%s) + 600 )) ;;
               esac
               # Sleep in 1s slices: bash does not run a trap while a foreground
               # external command is executing, so a single `sleep 15` would
@@ -173,7 +205,9 @@ jobs:
               for _ in $(seq 15); do sleep 1; done
             done
             trap - EXIT INT TERM HUP
-            state="$(sacct -j "${JOB_ID}" -X -n -P --format=State | awk '{print $1; exit}')"
+            # `state` already holds the terminal value the loop above broke
+            # on -- re-querying sacct here can only lose information (a flaky
+            # follow-up call reading empty would fail a job that COMPLETED).
             if [[ "${state}" != COMPLETED ]]; then
               echo "ERROR: sp_build job ${JOB_ID} ended in ${state:-unknown}"
               exit 1

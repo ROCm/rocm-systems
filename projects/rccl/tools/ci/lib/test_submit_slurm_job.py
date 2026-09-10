@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Unit tests for submit_slurm_job.py helpers."""
 
+import tempfile
 import unittest
 from unittest import mock
 
@@ -126,6 +127,109 @@ class SubmitCommandTest(unittest.TestCase):
         self.assertNotIn("--wait", seen["cmd"])
         self.assertIn("--parsable", seen["cmd"])
 
+    def test_submit_writes_job_id_file_when_chdir_given(self) -> None:
+        """Argus flagged that no test ever exercised the slurm-job-id write.
+
+        That file is what the `if: cancelled()` backup step reads to scancel a
+        SIGKILL'd process, so a real chdir must actually end up on disk with
+        the job id in it.
+        """
+
+        def fake_run(cmd, **kwargs):
+            return mock.Mock(returncode=0, stdout="19010\n", stderr="")
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            chdir = submit_slurm_job.Path(tmpdir)
+            with mock.patch.object(submit_slurm_job.subprocess, "run", fake_run):
+                with mock.patch.object(
+                    submit_slurm_job, "wait_for_job", lambda *a, **k: (0, None)
+                ):
+                    rc, job_id, result = submit_slurm_job.submit_and_wait(
+                        submit_slurm_job.Path("job.sbatch"), "ALL", chdir, None
+                    )
+
+            self.assertEqual((rc, job_id, result), (0, "19010", None))
+            self.assertEqual((chdir / "slurm-job-id").read_text(), "19010\n")
+
+    def test_empty_job_id_is_hard_failure(self) -> None:
+        """sbatch rc=0 with no parsable id must not be read as success.
+
+        Nothing was submitted to wait on or scancel, so trusting rc=0 here
+        would report a queued-but-unknown job as a pass.
+        """
+
+        def fake_run(cmd, **kwargs):
+            return mock.Mock(returncode=0, stdout="\n", stderr="")
+
+        with mock.patch.object(submit_slurm_job.subprocess, "run", fake_run):
+            rc, job_id, result = submit_slurm_job.submit_and_wait(
+                submit_slurm_job.Path("job.sbatch"), "ALL", None, None
+            )
+
+        self.assertEqual((rc, job_id, result), (1, "", None))
+
+    def test_unexpected_exception_scancels_before_reraising(self) -> None:
+        """An unexpected crash after a job id exists must not leak the node.
+
+        The `if: cancelled()` backup step only fires on an actual GitHub
+        cancellation, not on an ordinary exception, so submit_and_wait itself
+        is the last chance to release the allocation.
+        """
+        scancelled = []
+
+        def fake_run(cmd, **kwargs):
+            return mock.Mock(returncode=0, stdout="19010\n", stderr="")
+
+        def fake_wait_for_job(*a, **k):
+            raise RuntimeError("sacct vanished from PATH")
+
+        with mock.patch.object(submit_slurm_job.subprocess, "run", fake_run):
+            with mock.patch.object(submit_slurm_job, "wait_for_job", fake_wait_for_job):
+                with mock.patch.object(
+                    submit_slurm_job, "scancel_job", scancelled.append
+                ):
+                    with self.assertRaises(RuntimeError):
+                        submit_slurm_job.submit_and_wait(
+                            submit_slurm_job.Path("job.sbatch"), "ALL", None, None
+                        )
+
+        self.assertEqual(scancelled, ["19010"])
+
+    def test_cancel_during_submission_does_not_report_success(self) -> None:
+        """A signal arriving while sbatch itself is still running must not win.
+
+        cancel_requested can flip true before job_id is known; submit_and_wait
+        must still refuse to return success once the id shows up afterward.
+        """
+        scancelled = []
+        handlers = {}
+
+        def fake_signal(sig, handler):
+            handlers[sig] = handler
+            return None
+
+        def fake_run(cmd, **kwargs):
+            # Simulate a SIGTERM landing while sbatch is in flight, before
+            # this process knows the job id yet.
+            handlers[submit_slurm_job.signal.SIGTERM](
+                submit_slurm_job.signal.SIGTERM, None
+            )
+            return mock.Mock(returncode=0, stdout="19010\n", stderr="")
+
+        with mock.patch.object(submit_slurm_job.signal, "signal", fake_signal):
+            with mock.patch.object(submit_slurm_job.subprocess, "run", fake_run):
+                with mock.patch.object(
+                    submit_slurm_job, "scancel_job", scancelled.append
+                ):
+                    rc, job_id, result = submit_slurm_job.submit_and_wait(
+                        submit_slurm_job.Path("job.sbatch"), "ALL", None, None
+                    )
+
+        self.assertEqual((rc, job_id, result), (1, "19010", None))
+        # Once from the signal handler (job_id still unknown), once more from
+        # the post-sbatch cancel_requested check now that it is known.
+        self.assertEqual(scancelled, ["", "19010"])
+
     def test_submit_returns_wait_for_jobs_terminal_result(self) -> None:
         """submit_and_wait must hand back the JobResult wait_for_job saw.
 
@@ -149,6 +253,57 @@ class SubmitCommandTest(unittest.TestCase):
 
         self.assertEqual((rc, job_id), (0, "19010"))
         self.assertIs(result, failed)
+
+
+class MainRegressionTest(unittest.TestCase):
+    """Regression test through main() itself, per Argus's ask.
+
+    The unit tests above pin submit_and_wait/wait_for_job in isolation, but
+    Argus's own probing found that removing id persistence, the timer reset,
+    or reintroducing main()'s unconditional re-query all still passed those.
+    This drives the real main() with a fake sbatch/sacct and pins all three at
+    once.
+    """
+
+    def test_main_end_to_end_uses_wait_result_without_requery(self) -> None:
+        check_output_calls = []
+
+        def fake_run(cmd, **kwargs):
+            return mock.Mock(returncode=0, stdout="19010\n", stderr="")
+
+        def fake_check_output(cmd, **kwargs):
+            check_output_calls.append(cmd)
+            return "COMPLETED|0:0\n"
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp = submit_slurm_job.Path(tmpdir)
+            script = tmp / "job.sbatch"
+            script.write_text("#!/bin/bash\necho hi\n")
+            chdir = tmp / "run"
+
+            with mock.patch.object(submit_slurm_job.subprocess, "run", fake_run):
+                with mock.patch.object(
+                    submit_slurm_job.subprocess, "check_output", fake_check_output
+                ):
+                    rc = submit_slurm_job.main(
+                        [
+                            "--script",
+                            str(script),
+                            "--chdir",
+                            str(chdir),
+                            "--poll-interval",
+                            "0",
+                            "--wait-poll-interval",
+                            "0",
+                        ]
+                    )
+
+            self.assertEqual(rc, 0)
+            # id persistence: the backup-cancel step reads this file.
+            self.assertEqual((chdir / "slurm-job-id").read_text(), "19010\n")
+        # wait_for_job already saw the terminal COMPLETED row; main() must
+        # trust it rather than re-querying sacct a second time.
+        self.assertEqual(len(check_output_calls), 1)
 
 
 if __name__ == "__main__":

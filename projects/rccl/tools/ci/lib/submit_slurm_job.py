@@ -161,8 +161,11 @@ def submit_and_wait(
         if proc.returncode != 0:
             return proc.returncode, job_id, None
         if not job_id:
-            log("WARNING: sbatch succeeded but printed no job id")
-            return proc.returncode, job_id, None
+            # sbatch exited 0 but printed nothing parsable: there is nothing
+            # to wait on or scancel, so trusting rc=0 here would report a
+            # queued-but-unknown job as success. Fail loud instead.
+            log("ERROR: sbatch succeeded (rc=0) but printed no parsable job id")
+            return 1, job_id, None
         if cancel_requested:
             scancel_job(job_id)
             return 1, job_id, None
@@ -176,6 +179,13 @@ def submit_and_wait(
         cancel_requested = True
         scancel_job(job_id)
         return 130, job_id, None
+    except Exception:
+        # An unexpected failure here (e.g. sacct/scancel vanishing from PATH
+        # mid-run) must not leave the allocation running: the `if: cancelled()`
+        # backup step only fires on an actual GitHub cancellation, not on an
+        # ordinary crash, so this is the last chance to release the node.
+        scancel_job(job_id)
+        raise
     finally:
         for sig, handler in previous.items():
             signal.signal(sig, handler)
