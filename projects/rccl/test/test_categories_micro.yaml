@@ -19,6 +19,8 @@ test_categories:
       - "FreshRegistrationLegacyIpcSucceedsFixture.*"
       - "RasClientMicrotest.*"
       - "RmaProxyProgressTest.*"
+      # Covers every rma-test.cc suite; new ones must keep the Rma...Test name.
+      - "Rma*Test.*"
       - "GroupEndInternalTest.*"
       - "WrapMicrotest.*"
       - "WrapMicrotestIsolated.*"
