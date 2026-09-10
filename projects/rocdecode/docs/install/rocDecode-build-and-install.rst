@@ -124,6 +124,7 @@ Build on Windows
       * Set ``VAON12_ROOT`` to the vaon12 NuGet package or custom build directory.
       * Set ``ROCM_PATH`` to the TheRock build output directory.
       * FFmpeg support (samples and the host decoder) is detected automatically from your ``PATH`` and common install locations. Add ``-DFFMPEG_ROOT=<path-to-ffmpeg>`` only to override that search or point to a non-standard install.
+      * The detected FFmpeg libraries are used for linking only. At run time, the FFmpeg ``bin`` directory (containing ``avcodec``, ``avformat``, and ``avutil`` DLLs) must be on ``PATH``, otherwise the samples and host decoder fail to launch with missing DLL errors.
 
 4. To verify the build, run a sample:
 

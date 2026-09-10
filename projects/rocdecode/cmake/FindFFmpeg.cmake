@@ -112,7 +112,7 @@ else()
   find_path(AVCODEC_INCLUDE_DIR
     NAMES libavcodec/avcodec.h
     HINTS ${_FFMPEG_ROOT_HINTS}
-    PATH_SUFFIXES include ffmpeg libav
+    PATH_SUFFIXES include include/ffmpeg include/libav ffmpeg libav
     PATHS ${_FFMPEG_SEARCH_INCLUDE}
   )
   mark_as_advanced(AVCODEC_INCLUDE_DIR)
@@ -128,7 +128,7 @@ else()
   find_path(AVFORMAT_INCLUDE_DIR
     NAMES libavformat/avformat.h
     HINTS ${_FFMPEG_ROOT_HINTS}
-    PATH_SUFFIXES include ffmpeg libav
+    PATH_SUFFIXES include include/ffmpeg include/libav ffmpeg libav
     PATHS ${_FFMPEG_SEARCH_INCLUDE}
   )
   mark_as_advanced(AVFORMAT_INCLUDE_DIR)
@@ -144,7 +144,7 @@ else()
   find_path(AVUTIL_INCLUDE_DIR
     NAMES libavutil/avutil.h
     HINTS ${_FFMPEG_ROOT_HINTS}
-    PATH_SUFFIXES include ffmpeg libav
+    PATH_SUFFIXES include include/ffmpeg include/libav ffmpeg libav
     PATHS ${_FFMPEG_SEARCH_INCLUDE}
   )
   mark_as_advanced(AVUTIL_INCLUDE_DIR)
@@ -197,6 +197,14 @@ else()
 
   if(FFMPEG_FOUND)
     message("-- ${White}Using FFMPEG -- \n\tLibraries:${FFMPEG_LIBRARIES} \n\tIncludes:${FFMPEG_INCLUDE_DIR}${ColourReset}")
+    if(WIN32)
+      # The import libraries above only satisfy link time. At run time the
+      # matching avcodec/avformat/avutil DLLs must be resolvable, so the FFmpeg
+      # bin directory needs to be on PATH (or the DLLs copied next to the exe).
+      get_filename_component(_FFMPEG_LIB_DIR "${AVCODEC_LIBRARY}" DIRECTORY)
+      get_filename_component(_FFMPEG_BIN_DIR "${_FFMPEG_LIB_DIR}/../bin" ABSOLUTE)
+      message("-- ${Yellow}NOTE: at run time the FFmpeg DLLs must be on PATH, e.g. add \"${_FFMPEG_BIN_DIR}\" to PATH${ColourReset}")
+    endif()
   else()
     if(FFmpeg_FIND_REQUIRED)
       message(FATAL_ERROR "{Red}FindFFmpeg -- libavcodec or libavformat or libavutil NOT FOUND${ColourReset}")
