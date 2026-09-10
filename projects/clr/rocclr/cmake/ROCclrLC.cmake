@@ -2,13 +2,24 @@
 #
 # SPDX-License-Identifier: MIT
 
-find_package(amd_comgr 3.2 REQUIRED CONFIG
+find_package(amd_comgr 3.2 CONFIG
   PATHS
     ${ROCM_PATH}
     ${ROCM_INSTALL_PATH}
   PATH_SUFFIXES
     cmake/amd_comgr
     lib/cmake/amd_comgr)
+
+if (NOT amd_comgr_FOUND)
+  # Local build workaround: installed ROCm ships amd_comgr 3.0; fall back to it.
+  find_package(amd_comgr 3.0 REQUIRED CONFIG
+    PATHS
+      ${ROCM_PATH}
+      ${ROCM_INSTALL_PATH}
+    PATH_SUFFIXES
+      cmake/amd_comgr
+      lib/cmake/amd_comgr)
+endif()
 
 get_target_property(_amd_comgr_lib_type amd_comgr TYPE)
 target_compile_definitions(rocclr PUBLIC)

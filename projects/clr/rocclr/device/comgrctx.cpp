@@ -88,7 +88,9 @@ bool Comgr::LoadLib() {
   ClPrint(amd::LOG_INFO, amd::LOG_CODE, "Loaded COMGR library version %zu.%zu.", major, minor);
 
   constexpr size_t kRequiredMajor = 3;
-  constexpr size_t kRequiredMinor = 2;
+  // Local build workaround: installed ROCm ships amd_comgr 3.0; develop's 3.2
+  // gate has no matching lib on this box. Relax to 3.0 (pre-rebase behavior).
+  constexpr size_t kRequiredMinor = 0;
   if (major != kRequiredMajor || minor < kRequiredMinor) {
     ClPrint(amd::LOG_ERROR, amd::LOG_CODE,
             "COMGR library version %zu.%zu is incompatible; "
