@@ -11,7 +11,7 @@ Using memory bandwidth analysis
 
    Memory bandwidth analysis is an experimental feature. To enable it
    pass ``--experimental --membw-analysis`` in both ``profile`` and
-   ``analyze`` modes. This feature is in its preliminary stages —
+   ``analyze`` modes. Guidance text, feature behavior, and command-line options might change in future releases.
    guidance text will be refined in future releases. Behavior and
    command-line surface may change.
 
