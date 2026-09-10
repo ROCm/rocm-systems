@@ -6,21 +6,23 @@ separate from correctness qualification in
 validation cell, and validation status does not carry latency or overhead
 claims.
 
-Target-specific results belong to
-[gfx942](STATUS_GFX942.md), [gfx950](STATUS_GFX950.md),
-[gfx1100](STATUS_GFX1100.md), [gfx1201](STATUS_GFX1201.md), and
-[gfx1250](STATUS_GFX1250.md). Unlike correctness ledgers, these are specific to
-one concrete target because performance does not generalize across all products
-implementing an architecture family.
+The active benchmark targets are [gfx950](STATUS_GFX950.md) and
+[gfx1201](STATUS_GFX1201.md). The [gfx942](STATUS_GFX942.md),
+[gfx1100](STATUS_GFX1100.md), and [gfx1250](STATUS_GFX1250.md) ledgers are
+placeholders for future expansion, not part of the current required matrix.
+Unlike correctness ledgers, benchmark ledgers are specific to one concrete
+target because performance does not generalize across all products implementing
+an architecture family.
 
 ## Contract
 
 The benchmark suite must be automatic, reproducible with one command, and take
-less than 30 minutes over the complete baseline-plus-ConSan matrix on a warm
-machine with one supported GPU and at least 16 GiB of device memory. That bound
-includes setup performed on every ordinary run; preinstallation and a populated
-model cache may be documented prerequisites, but hidden manual preparation may
-not be.
+less than 30 minutes over the complete default audited baseline-plus-ConSan
+matrix on a warm machine with one supported GPU and at least 16 GiB of device
+memory. That bound includes the paired audit-on/audit-off work needed to measure
+the site-audit cost and setup performed on every ordinary run;
+preinstallation and a populated model cache may be documented prerequisites,
+but hidden manual preparation may not be.
 
 Every workload must:
 
@@ -39,11 +41,27 @@ from Torch, Triton, Gluon, rocBLAS, hipBLASLt, or Tensile.
 
 ## Coverage-audited and quick runs
 
-The procedure has two modes:
+Checking site instrumentation is optional, but **enabled by default**. The
+runner interface must expose an ordinary boolean pair such as:
 
-- **Audited** verifies that every selected supported site was instrumented and
-  that static and dynamic analysis completed. Timing from this run is discarded
-  if coverage collection perturbs execution.
+```text
+--audit-sites       verify site instrumentation (default)
+--no-audit-sites    skip that verification for a quick run
+```
+
+The exact spelling may follow the runner's established option conventions, but
+disabling the check must require only one documented option. An environment
+variable, source edit, or manually modified recipe is not an acceptable user
+interface.
+
+The procedure therefore has two modes:
+
+- **Audited (default)** verifies that every site supported and selected by the
+  ordinary policy was instrumented, with no hidden coverage cap, and that
+  static and dynamic analysis completed. It also runs a matched audit-disabled
+  control so the cost of checking instrumentation can be reported. The
+  audit-enabled sample is not used as the ordinary ConSan performance result
+  when audit collection perturbs execution.
 - **Quick** measures the same binaries, inputs, kernel selection, and ConSan
   modes while omitting the expensive coverage cross-check and its detailed
   logging.
@@ -53,6 +71,24 @@ selects or instruments. A quick result is admissible only when an audited run of
 the identical workload and binary identity already passed. The committed
 audited suite itself must remain below the 30-minute ceiling so a new binary can
 be qualified without an unbounded preliminary campaign.
+
+For each workload/ConSan-mode pair, the audited report must include:
+
+- audit-enabled and audit-disabled total wall latency;
+- the audit delta in milliseconds and as a percentage of the matched
+  audit-disabled latency;
+- audit-enabled and audit-disabled transformation/load latency when the phases
+  can be separated;
+- audit-enabled and audit-disabled warm workload latency when dynamic checking
+  can affect execution; and
+- the site counts selected, instrumented, checked, unsupported, and missed.
+
+Use the audit-disabled sample as the denominator. Label the result
+`site-audit overhead`; do not fold it into ConSan's instrumentation overhead.
+The audit-on and audit-off samples must use the same workload, binary, input,
+mode, site-selection policy, and instrumentation. Only collection,
+cross-checking, and detailed audit logging may differ. A native baseline has no
+ConSan sites, so its site-audit overhead is reported as not applicable.
 
 Native and instrumented samples should be interleaved, with warmup separated
 from measurement. Report absolute values as well as paired ratios. Keep
@@ -85,7 +121,7 @@ Aorta currently exposes two materially different model paths.
 | `workload: inference`, `num_experts > 1` | Synthetic top-1 MoE decoder | PyTorch eager with argmax, boolean masks, indexed gather/write, GLU experts, and backend GEMMs. | Good at small expert and hidden sizes. | A different routing/indexing and sparse-expert kernel mix from the dense path. |
 | `workload: training` or `llm_determinism` | Synthetic dense or top-1 MoE repeated-block model | PyTorch eager, including backward and optionally AdamW or FSDP/RCCL paths. | Single-rank bounded shapes fit, but distributed variants are not portable to a one-GPU 16 GiB contract. | Backward/optimizer kernels if the inference-only core leaves a meaningful ISA gap. |
 | `workload: tokenspeed_serve` | Qwen3 0.6B, 1.7B, 4B, and 8B | TokenSpeed serving. Its registered provider set includes Gluon, Triton, and Torch paths; the provider actually selected must be captured from each run. | Not an all-target candidate as written: the pinned container accepts only `gfx950` and `gfx1250` and supplies its own ROCm stack. The 8B recipe was measured only on a 309 GiB device and is not a safe 16 GiB commitment. | Real Qwen prefill/decode and production TokenSpeed kernel selection. The 0.6B through 4B variants are the plausible size candidates once portability and local-runtime integration exist. |
-| `workload: tokenspeed_serve` | `openai/gpt-oss-20b` | TokenSpeed's dedicated MXFP4 MoE path and Gluon JIT. | Exclude from the portable suite. Aorta requires a roughly 40 GB snapshot, has only measured it on a 309 GiB GPU, and startup alone takes minutes. | Valuable future large-MoE stress, but incompatible with the present memory and total-latency contract. |
+| `workload: tokenspeed_serve` | `openai/gpt-oss-20b` | TokenSpeed's dedicated MXFP4 MoE path and Gluon JIT. | Exclude from the initial suite. Its MXFP4 checkpoint is designed for 16 GiB systems, but Aorta has only measured this exact stack on a 309 GiB GPU, requires a roughly 40 GB complete repository snapshot on disk, and spends minutes in startup. | Valuable future large-MoE stress, but its exact Aorta-plus-ConSan memory use and total-matrix latency are not yet qualified. |
 
 Two useful Aorta facilities are not end-to-end model candidates:
 
@@ -115,16 +151,20 @@ The useful starting set is therefore:
    PyTorch decode;
 3. a small `num_experts > 1` `inference` cell for PyTorch top-1 MoE routing;
 4. a Qwen3-0.6B prefill cell and a Qwen3-0.6B decode cell through
-   `tokenspeed_serve`, after that path runs on every target against the selected
-   local ROCm stack; and
-5. a small pinned-hipBLASLt/Tensile end-to-end cell and a portable Gluon
-   end-to-end cell, once those missing Aorta adapters exist.
+   `tokenspeed_serve` on gfx950, and on gfx1201 only if that external stack can
+   be enabled without substantial porting; and
+5. a small pinned-hipBLASLt/Tensile end-to-end cell and a Gluon end-to-end cell
+   on each target where those paths work naturally.
 
 Items 1--3 are immediately portable candidates, not yet frozen benchmark
 shapes. Items 4--5 are required diversity work, not claims about what the
-current Aorta checkout can execute on every target. The exact-provider kernel
-smokes may supplement this corpus as ISA probes, but cannot satisfy an
-end-to-end slot.
+current Aorta checkout can execute on both targets. The suite is a
+target-specific union, not a requirement that every workload run on every
+target. Record a difficult external-framework path as `not selected on this
+target` rather than making its port a prerequisite; in particular, TokenSpeed
+may be omitted on gfx1201 while remaining in the gfx950 suite. The
+exact-provider kernel smokes may supplement this corpus as ISA probes, but
+cannot satisfy an end-to-end slot.
 
 The final shapes must be chosen from audited runs. Prefer the smallest shape
 that retains the intended kernel mix and amortizes launch noise; reject any
