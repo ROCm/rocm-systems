@@ -65,7 +65,7 @@ jobs:
         with:
           repository: "ROCm/TheRock"
           path: "TheRock"
-          ref: f86222e7032f1f2a45720fa396a8cf69eac3291f # 2026-09-08
+          ref: release/therock-10.1
 
       - name: Install python deps
         run: |
