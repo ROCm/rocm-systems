@@ -80,7 +80,9 @@
 #include "algorithms/dda/all_reduce/dda_all_reduce.h"
 #include "algorithms/dda/ipc/ipc_init.h"
 #include "algorithms/dda/fabric/fabric_init.h"
+#if defined(__x86_64__) || defined(_M_X64)
 #include <cpuid.h>
+#endif
 #include <stdio.h>
 #include <stdlib.h>
 #include "kernel_config.h"
@@ -308,8 +310,12 @@ static ncclResult_t ncclInit() {
   }
   INFO(NCCL_INIT, "Kernel version: %s", verStr);
   if (strstr(verStr, "cray") == NULL) {
+#if defined(__x86_64__) || defined(_M_X64)
     unsigned int eax, ebx, ecx, edx;
     if (!__get_cpuid(1, &eax, &ebx, &ecx, &edx)) ecx = 0; // cpuid not supported
+#else
+    unsigned int ecx = 0;
+#endif
     NCCLCHECK(ncclOsTopoGetStrFromSys("/sys/devices/virtual/dmi/id", "bios_version", strValue, sizeof(strValue)));
     // Check BIOS string and hypervisor presence on ecx bit 31
     if (strncmp("Hyper-V UEFI Release", strValue, 20) != 0 && (ecx & (1u << 31)) == 0) {

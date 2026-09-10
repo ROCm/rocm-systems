@@ -859,6 +859,14 @@ inline int ncclDevFuncLL128RegMode(bool regUsed, bool netRegUsed) {
 // NCCL_UNROLL_* enum. Generated in host_table.cpp by generate.py.
 extern bool const ncclDevFuncUnrollGenerated[NCCL_NUM_UNROLLS];
 
+// Arch each unroll factor's device functions were compiled for, or nullptr when
+// the unroll carries no arch restriction. This is independent of what the build
+// generated: an entry still names its arch for an unroll this build left out, so
+// neither table implies the other and both have to be consulted. A multi-arch
+// build generates all unrolls, so together they are what distinguish "built"
+// from "usable on the running GPU".
+extern char const* const ncclDevFuncUnrollArch[NCCL_NUM_UNROLLS];
+
 // `ncclDevFuncId()` needs to be in sync with 'all_colls' in generate.py
 // `reg` is the user-buffer registration mode (0=n/a, 1=registered, 2=non-registered)
 // and is only used to distinguish the LL128 reg-variant collectives.
