@@ -28,8 +28,9 @@ namespace rocjitsu::test {
 
 /// @brief What a shared memory window lets the device do.
 /// @details Translated to the protocol's DMA region flags, so a test can
-/// advertise exactly one direction and check that the transport enforces it.
-enum class DmaProtection { ReadOnly, WriteOnly, ReadWrite };
+/// advertise a narrower direction than the default and check that the
+/// transport enforces it.
+enum class DmaProtection { ReadOnly, ReadWrite };
 
 /// @brief A client connection to a vfio-user server.
 class VfioUserClient {
