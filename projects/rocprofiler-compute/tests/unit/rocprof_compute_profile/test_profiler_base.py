@@ -44,7 +44,7 @@ def _make_sanitize_args(remaining, torch_trace=False, **overrides):
         attach_duration_msec=None,
         remaining=["--"] + remaining,
         torch_trace=torch_trace,
-        dispatch=None,
+        kernel_iteration_range=None,
         kernel=None,
     )
     defaults.update(overrides)
@@ -348,7 +348,7 @@ def test_attach_library_resolution_with_fallback():
         attach_duration_msec=None,
         kokkos_trace=False,
         kernel=None,
-        dispatch=None,
+        kernel_iteration_range=None,
         torch_trace=False,
     )
     profiler = rocprofiler_sdk_profiler(args, profiler_mode="rocprofiler-sdk", soc=None)
@@ -400,7 +400,7 @@ def test_sdk_profiler_options_preserve_ld_preload_and_set_env(tmp_path, monkeypa
         attach_duration_msec=None,
         kokkos_trace=False,
         kernel=None,
-        dispatch=None,
+        kernel_iteration_range=None,
         torch_trace=False,
     )
     profiler = rocprofiler_sdk_profiler(args, profiler_mode="rocprofiler-sdk", soc=None)
@@ -442,6 +442,29 @@ def test_rocprofv3_live_attach_uses_sync_output():
     duration_idx = options.index("--attach-duration-msec")
     assert options[duration_idx + 1] == "500"
     assert "--" not in options
+
+
+def test_kernel_iteration_range_translated_for_both_backends(tmp_path):
+    """Both backends turn '3:5' into '3-5' and bracket the joined tokens."""
+    args = _make_sanitize_args(
+        ["/bin/true"],
+        kernel_iteration_range=["1", "3:5"],
+        output_directory=str(tmp_path),
+        rocprofiler_sdk_tool_path="sdk_tool",
+        kokkos_trace=False,
+    )
+    args.remaining = "-- /bin/true"
+
+    v3_profiler = rocprof_v3_profiler(args, profiler_mode="rocprofv3", soc=None)
+    v3_options = v3_profiler.get_profiler_options()
+    range_idx = v3_options.index("--kernel-iteration-range")
+    assert v3_options[range_idx + 1] == "[1,3-5]"
+
+    sdk_profiler = rocprofiler_sdk_profiler(
+        args, profiler_mode="rocprofiler-sdk", soc=None
+    )
+    sdk_options = sdk_profiler.get_profiler_options()
+    assert sdk_options["ROCPROF_KERNEL_FILTER_RANGE"] == "[1,3-5]"
 
 
 # ---------------------------------------------------------------------------
