@@ -154,8 +154,13 @@ elseif(ROCM_PATH)
   target_include_directories(rccl_device_defs SYSTEM INTERFACE "${ROCM_PATH}/include")
 endif()
 
-# fmt headers: FetchContent provides fmt_SOURCE_DIR; find_package provides the target.
-if(fmt_SOURCE_DIR)
+# fmt headers for host-side device-compile includes. Prefer the vendored
+# copy; otherwise take a plain path from fmt::fmt-header-only (generator
+# expressions such as $<BUILD_INTERFACE:...> are not usable here).
+if(EXISTS "${PROJECT_SOURCE_DIR}/external/fmt/include/fmt/format.h")
+  target_include_directories(rccl_device_defs SYSTEM INTERFACE
+    "${PROJECT_SOURCE_DIR}/external/fmt/include")
+elseif(fmt_SOURCE_DIR)
   target_include_directories(rccl_device_defs SYSTEM INTERFACE "${fmt_SOURCE_DIR}/include")
 elseif(TARGET fmt::fmt-header-only)
   get_target_property(_fmt_inc fmt::fmt-header-only INTERFACE_INCLUDE_DIRECTORIES)

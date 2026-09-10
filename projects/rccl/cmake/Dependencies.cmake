@@ -32,8 +32,6 @@
 # For downloading, building, and installing required dependencies
 include(cmake/DownloadProject.cmake)
 
-include(FetchContent)
-
 if(NOT INSTALL_DEPENDENCIES)
     find_package(GTest 1.11)
 endif()
@@ -116,17 +114,13 @@ endif()
 
 set(CMAKE_INSTALL_LIBDIR lib CACHE STRING "Define install directory for libraries" FORCE)
 
-# Find or download/install fmt
+# Vendored {fmt} 10.2.1 (header-only). Prefer a system package when it exports
+# fmt::fmt-header-only so distro builds can share one fmt; otherwise use the
+# in-tree copy (no network FetchContent).
 find_package(fmt QUIET)
-if(NOT fmt_FOUND)
-    set(FMT_INSTALL OFF)
-    message(STATUS "fmt not found, fetching from source...")
-    FetchContent_Declare(
-        fmt
-        GIT_REPOSITORY https://github.com/fmtlib/fmt
-        GIT_TAG        e69e5f977d458f2650bb346dadf2ad30c5320281 # 10.2.1
-    )
-    FetchContent_MakeAvailable(fmt)
+if(NOT TARGET fmt::fmt-header-only)
+    message(STATUS "Using vendored fmt 10.2.1 (header-only)")
+    add_subdirectory("${PROJECT_SOURCE_DIR}/external/fmt" "${CMAKE_BINARY_DIR}/external/fmt")
 else()
     message(STATUS "Using system fmt")
     get_target_property(FMT_INCLUDE_DIRS fmt::fmt-header-only INTERFACE_INCLUDE_DIRECTORIES)
