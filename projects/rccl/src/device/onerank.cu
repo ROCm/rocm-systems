@@ -35,16 +35,13 @@ __global__ __launch_bounds__(512, 1) void oneRankReduce(void* dst, void* src, vo
   i0 = min(i0, nElts);
   i1 = min(i1, nElts);
 
-  if (redOpArgIsPtr) {
-    if (redOpArg % 2 != 0) {
-      redOpArg = *reinterpret_cast<uint8_t*>(redOpArg);
-    } else if (redOpArg % 4 != 0) {
-      redOpArg = *reinterpret_cast<uint16_t*>(redOpArg);
-    } else if (redOpArg % 8 != 0) {
-      redOpArg = *reinterpret_cast<uint32_t*>(redOpArg);
-    } else {
-      redOpArg = *reinterpret_cast<uint64_t*>(redOpArg);
-    }
+  // Same conversion RunWorkBatch does in common.h: the scalar in user memory is
+  // the narrow element type, and only RedOpArg knows how to widen it into the
+  // form the RedOp constructor expects. Loading a size chosen from the pointer's
+  // alignment instead would hand FuncPreMulSum<T> raw bytes for any T whose
+  // opArg is not simply its own bits, fp8 included.
+  if (RedOpArg<RedOp>::ArgUsed && redOpArgIsPtr) {
+    redOpArg = RedOpArg<RedOp>::loadArg(reinterpret_cast<void*>(redOpArg));
   }
 
   if (acc != nullptr) {

@@ -632,6 +632,53 @@ TEST_F(EnqueueMicrotest, HostToDevRedOp_AvgFloat64_UsesPreMulSumWithReciprocal) 
   EXPECT_EQ(wantBits, out.scalarArg);
 }
 
+TEST_F(EnqueueMicrotest, HostToDevRedOp_AvgFloat8_PacksFloatBitsNotFp8Bits) {
+  // The fp8 arms pack the reciprocal as float. Packing it as fp8 instead is
+  // AICOMRCCL-1945: host rccl_float8 is OCP, device rccl_float8 is FNUZ on gfx942
+  // and on the software fallback, and the two biases differ by one, so the device
+  // decoded a scale half as large and every element came out half as large. This
+  // is the host half of that fix, and it is the arm no GPU in CI can discriminate.
+  AvgComm comm(8);
+  float want = float(1.0 / 8);
+  uint32_t wantBits;
+  std::memcpy(&wantBits, &want, sizeof(wantBits));
+  for (auto dt : {ncclFloat8e4m3, ncclFloat8e5m2}) {
+    auto out = MakeRedOpOut();
+    ASSERT_EQ(ncclSuccess, hostToDevRedOp(&out, ncclAvg, dt, comm.get())) << "dtype=" << int(dt);
+    EXPECT_EQ(ncclDevPreMulSum, out.op) << "dtype=" << int(dt);
+    EXPECT_EQ(wantBits, uint32_t(out.scalarArg & 0xFFFFFFFFull)) << "dtype=" << int(dt);
+    EXPECT_FALSE(out.scalarArgIsPtr) << "the scalar is inline, not a pointer; dtype=" << int(dt);
+  }
+}
+
+TEST_F(EnqueueMicrotest, Fp8HostDecode_FollowsTheEncodingTheDeviceWillUse) {
+  // Byte 0x38 is 1.0 read as OCP e4m3 and 0.5 read as FNUZ e4m3, so it separates the
+  // two encodings. ncclRedOpCreatePreMulSum decodes a host-immediate scalar with this
+  // helper; if it used the host typedef instead, that immediate and the equivalent
+  // ncclScalarDevice pointer, which the device decodes itself, would disagree by 2x.
+  const uint8_t byte = 0x38;
+  EXPECT_EQ(1.0f, rcclFp8ByteToFloat(&byte, /*isE5m2=*/false, /*deviceIsFnuz=*/false));
+  EXPECT_EQ(0.5f, rcclFp8ByteToFloat(&byte, /*isE5m2=*/false, /*deviceIsFnuz=*/true));
+  EXPECT_EQ(0.5f, rcclFp8ByteToFloat(&byte, /*isE5m2=*/true, /*deviceIsFnuz=*/false));
+  EXPECT_EQ(0.25f, rcclFp8ByteToFloat(&byte, /*isE5m2=*/true, /*deviceIsFnuz=*/true));
+}
+
+TEST_F(EnqueueMicrotest, Fp8DeviceIsFnuz_MirrorsTheTypedefSelection) {
+  // Mirrors rccl_float8.h: only these four take the OCP typedef in a device compile.
+  EXPECT_FALSE(rcclFp8DeviceIsFnuz("gfx950"));
+  EXPECT_FALSE(rcclFp8DeviceIsFnuz("gfx1200"));
+  EXPECT_FALSE(rcclFp8DeviceIsFnuz("gfx1201"));
+  EXPECT_FALSE(rcclFp8DeviceIsFnuz("gfx1250"));
+  EXPECT_TRUE(rcclFp8DeviceIsFnuz("gfx942")) << "explicit FNUZ typedef";
+  EXPECT_TRUE(rcclFp8DeviceIsFnuz("gfx90a")) << "misses the hip_fp8.h arm, software fallback is FNUZ";
+  // comm->archName is a char* that can be null (init.cc:1584 guards it the same
+  // way), and the null branch is a real branch, so pin it rather than assuming.
+  EXPECT_TRUE(rcclFp8DeviceIsFnuz(nullptr)) << "unknown arch is not one of the OCP four";
+  // archName carries feature suffixes, and IsArchMatch is a prefix compare.
+  EXPECT_FALSE(rcclFp8DeviceIsFnuz("gfx950:sramecc+:xnack-"));
+  EXPECT_TRUE(rcclFp8DeviceIsFnuz("gfx942:sramecc+:xnack-"));
+}
+
 TEST_F(EnqueueMicrotest, HostToDevRedOp_AvgScalesWithRankCount) {
   // Differential: a mutant hardcoding a divisor passes one rank count only.
   AvgComm c4(4);
@@ -1724,6 +1771,65 @@ TEST_F(EnqueueMicrotest, RedOpCreate_HostImmediate_CopiesScalarBytesInline) {
   std::memcpy(&want, &scalar, sizeof(want));
   EXPECT_EQ(want, uint32_t(u.opFull.scalarArg & 0xFFFFFFFFull));
   EXPECT_EQ(ncclFloat32, u.datatype);
+}
+
+TEST_F(EnqueueMicrotest, RedOpCreate_HostImmediateFp8_PromotesToFloatUsingTheDeviceEncoding) {
+  // The fp8 arm does not memcpy the byte, it promotes it to float, because
+  // FuncPreMulSum<fp8> reads float bits. Which float depends on the arch: byte 0x38
+  // is 1.0 in OCP e4m3 and 0.5 in FNUZ e4m3. Decoding with the host typedef instead
+  // would make this immediate disagree with the ncclScalarDevice pointer below,
+  // which the device decodes for itself, by a factor of two on every FNUZ arch.
+  const uint8_t byte = 0x38;
+  const struct { const char* arch; float want; } kCases[] = {
+      {"gfx950", 1.0f}, {"gfx942", 0.5f}, {"gfx90a", 0.5f}, {"gfx1201:xnack-", 1.0f}};
+  for (auto c : kCases) {
+    RedOpComm rc;
+    rc.get()->archName = const_cast<char*>(c.arch);
+    ncclRedOp_t op = ncclSum;
+    ASSERT_EQ(ncclSuccess, ncclRedOpCreatePreMulSum_impl(&op, const_cast<uint8_t*>(&byte), ncclFloat8e4m3,
+                                                         ncclScalarHostImmediate, rc.get()))
+        << "arch=" << c.arch;
+    const int ix = int(ncclUserRedOpMangle(rc.get(), op)) - int(ncclNumOps);
+    const ncclUserRedOp& u = rc.get()->userRedOps[ix];
+    EXPECT_FALSE(u.opFull.scalarArgIsPtr) << "arch=" << c.arch;
+    uint32_t want;
+    std::memcpy(&want, &c.want, sizeof(want));
+    EXPECT_EQ(want, uint32_t(u.opFull.scalarArg & 0xFFFFFFFFull))
+        << "arch=" << c.arch << ": expected the byte decoded as " << c.want;
+    rc.get()->archName = nullptr;  // not owned here; the real comm frees this
+  }
+}
+
+TEST_F(EnqueueMicrotest, RedOpCreate_HostImmediateFp8_E5m2UsesItsOwnTables) {
+  // Same byte, different exponent width: 0x38 is 0.5 in OCP e5m2 and 0.25 in FNUZ.
+  // Reading e5m2 through the e4m3 tables would give 1.0 or 0.5 instead.
+  const uint8_t byte = 0x38;
+  const struct { const char* arch; float want; } kCases[] = {{"gfx950", 0.5f}, {"gfx942", 0.25f}};
+  for (auto c : kCases) {
+    RedOpComm rc;
+    rc.get()->archName = const_cast<char*>(c.arch);
+    ncclRedOp_t op = ncclSum;
+    ASSERT_EQ(ncclSuccess, ncclRedOpCreatePreMulSum_impl(&op, const_cast<uint8_t*>(&byte), ncclFloat8e5m2,
+                                                         ncclScalarHostImmediate, rc.get()))
+        << "arch=" << c.arch;
+    const int ix = int(ncclUserRedOpMangle(rc.get(), op)) - int(ncclNumOps);
+    uint32_t want;
+    std::memcpy(&want, &c.want, sizeof(want));
+    EXPECT_EQ(want, uint32_t(rc.get()->userRedOps[ix].opFull.scalarArg & 0xFFFFFFFFull)) << "arch=" << c.arch;
+    rc.get()->archName = nullptr;
+  }
+}
+
+TEST_F(EnqueueMicrotest, RedOpCreate_NonFp8_StillCopiesRawBytes) {
+  // The fp8 arm must not swallow the general case: float16 is still copied as bits,
+  // since FuncPreMulSum<half> reads half bits out of opArg.
+  RedOpComm rc;
+  ncclRedOp_t op = ncclSum;
+  uint16_t scalar = 0x3C00;  // 1.0 in IEEE half
+  ASSERT_EQ(ncclSuccess, ncclRedOpCreatePreMulSum_impl(&op, &scalar, ncclFloat16,
+                                                       ncclScalarHostImmediate, rc.get()));
+  const int ix = int(ncclUserRedOpMangle(rc.get(), op)) - int(ncclNumOps);
+  EXPECT_EQ(uint64_t(0x3C00), rc.get()->userRedOps[ix].opFull.scalarArg & 0xFFFFull);
 }
 
 TEST_F(EnqueueMicrotest, RedOpCreate_DeviceResidence_StoresPointerNotBytes) {

@@ -221,6 +221,33 @@ namespace RcclUnitTesting
     testBed.Finalize();
   }
 
+  // The PreMulSum scalar for FP8 avg is packed as float on the host and decoded as
+  // float on the device. If either side reverts to fp8 bits the two disagree and
+  // every element comes out scaled wrong, which this catches numerically.
+  //
+  // Which runners this guards: only those whose device rccl_float8 is FNUZ, since
+  // that is what makes the host and device encodings differ. gfx942 and any arch on
+  // the software fp8 fallback discriminate here; on gfx950 and gfx12xx both sides
+  // take the OCP typedef (rccl_float8.h) and the pre-fix and post-fix scalars differ
+  // only by rounding 1/nRanks to e4m3, so this test cannot fail there for the reason
+  // it exists. The arch-independent half is pinned in test/host/enqueue-test.cc.
+  //
+  // E5M2 is deliberately not swept here. With two mantissa bits, RCCL's pre-scale by
+  // 1/nRanks and round back to fp8 disagrees with ExpectedReduceFp8
+  // (test/common/DeviceDataOps.hpp:224), which accumulates in fp8 and divides last.
+  // That is a reference-model mismatch in the harness, tracked as AICOMRCCL-2321: it
+  // reproduces on an unpatched build, and rccl-tests passes the same case because
+  // ncclVerifiablePremulScalar models what RCCL actually does. Restore e5m2 here once
+  // 2321 is fixed.
+  TEST(AllReduce, Fp8Avg)
+  {
+    TestBed testBed;
+    testBed.RunSimpleSweep({ncclCollAllReduce}, {ncclFloat8e4m3}, {ncclAvg},
+                           /*roots=*/{0}, /*numElements=*/{384, 1024}, /*inPlaceList=*/{false},
+                           /*managedMemList=*/{false}, /*useHipGraphList=*/{false});
+    testBed.Finalize();
+  }
+
   TEST(AllReduce, UserBufferRegistration)
   {
     const int nranks = 8;
@@ -735,7 +762,13 @@ namespace RcclUnitTesting
       GTEST_SKIP() << "Requires at least 1 GPU";
 
     ncclFunc_t                  const funcType      = ncclCollAllReduce;
-    std::vector<ncclDataType_t> const dataTypes     = {ncclFloat32, ncclFloat64, ncclBfloat16};
+    // FP8 is swept here even though AllReduce.Fp8Avg restricts itself to E4M3: at one
+    // rank the avg scalar is exactly 1.0, so pre-scaling then summing and summing then
+    // dividing agree bit for bit, and the AICOMRCCL-2321 reference mismatch cannot
+    // fire. This is also the only test that runs FuncPreMulSum<fp8> on the
+    // oneRankReduce kernel, which is a separate kernel from the ring path.
+    std::vector<ncclDataType_t> const dataTypes     = {ncclFloat32, ncclFloat64, ncclBfloat16,
+                                                       ncclFloat8e4m3, ncclFloat8e5m2};
     bool                        const inPlace       = false; // out-of-place: tail of separate output buffer must be written
     bool                        const useManagedMem = false;
 

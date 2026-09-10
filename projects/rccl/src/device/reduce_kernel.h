@@ -679,9 +679,13 @@ struct FuncPreMulSum<rccl_float8> {
   using EltType = rccl_float8;
   float scalar;
   __device__ FuncPreMulSum(uint64_t opArg = 0) {
+    // opArg carries float bits, not fp8 bits. Host rccl_float8 is OCP, while device
+    // rccl_float8 is FNUZ on gfx942 and on every arch that misses the hip_fp8.h arm
+    // and falls back to the software implementation (rccl_float8.h), so an fp8
+    // immediate packed on the host would not survive the trip.
     union {
       uint64_t u64;
-      rccl_float8 val;
+      float val;
     };
     u64 = opArg;
     scalar = (float)(val);
@@ -697,12 +701,48 @@ struct FuncPreMulSum<rccl_bfloat8> {
   using EltType = rccl_bfloat8;
   float scalar;
   __device__ FuncPreMulSum(uint64_t opArg = 0) {
+    // Float bits, for the same reason as FuncPreMulSum<rccl_float8> above.
     union {
       uint64_t u64;
-      rccl_bfloat8 val;
+      float val;
     };
     u64 = opArg;
     scalar = (float)(val);
+  }
+};
+
+// A device-resident scalar is still the narrow type in user memory, so promote it
+// here too or the pointer path would disagree with the immediate path above. Reading
+// it with the device typedef is what defines such a scalar to be in the device's
+// encoding. No GPU test covers these two yet: the unit-test harness builds scalars on
+// the host and copies them down, and host and device encodings differ by 2x wherever
+// rccl_float8 is FNUZ, so the test would pass on gfx950 and fail on gfx942 for a
+// reason unrelated to this code. Tracked as AICOMRCCL-2322.
+template <>
+struct RedOpArg<FuncPreMulSum<rccl_float8>> {
+  static constexpr bool ArgUsed = true;
+  __device__ __forceinline__ static uint64_t loadArg(void* ptr) {
+    union {
+      uint64_t u64;
+      float val;
+    };
+    u64 = 0;
+    val = (float)(*(rccl_float8*)ptr);
+    return u64;
+  }
+};
+
+template <>
+struct RedOpArg<FuncPreMulSum<rccl_bfloat8>> {
+  static constexpr bool ArgUsed = true;
+  __device__ __forceinline__ static uint64_t loadArg(void* ptr) {
+    union {
+      uint64_t u64;
+      float val;
+    };
+    u64 = 0;
+    val = (float)(*(rccl_bfloat8*)ptr);
+    return u64;
   }
 };
 #endif
