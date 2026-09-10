@@ -1337,6 +1337,8 @@
       }
     });
     return badge;
+  }
+
   function updatePrecisionLabel() {
     if (!precisionLabel) {
       return;
