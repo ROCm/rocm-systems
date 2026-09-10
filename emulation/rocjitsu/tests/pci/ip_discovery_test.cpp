@@ -639,3 +639,49 @@ TEST(GpuGenerations, RefuseDescriptorsThatClaimOneTargetTwice) {
   };
   EXPECT_FALSE(rocjitsu::GpuGenerationRegistry(kNoFactory).ok());
 }
+
+// published_block() answered instance 0 by scanning every record on each call,
+// which put a linear walk of the whole table on the interrupt-ring read path --
+// once per delivery, with a guest waiting at the end of it. The index is built
+// once, and unlike the scan it can be asked about a copy other than the first:
+// a table naming several graphics instances describes several blocks, and a
+// lookup that could only ever return one of them is not a lookup.
+TEST(IpBlockIndex, AnswersForEachInstanceAndNotForBlocksWithNoRegisters) {
+  rocjitsu::IpDiscoverySpec spec;
+  spec.blocks.push_back({.hardware_id = rocjitsu::IpHardwareId::Gc,
+                         .instance = 0,
+                         .major = 12,
+                         .minor = 1,
+                         .revision = 0,
+                         .register_bases = {0x1260}});
+  spec.blocks.push_back({.hardware_id = rocjitsu::IpHardwareId::Gc,
+                         .instance = 1,
+                         .major = 12,
+                         .minor = 1,
+                         .revision = 0,
+                         .register_bases = {0x2260}});
+  // Named but given no registers, which is how a table says the driver will
+  // instantiate a block it can never address.
+  spec.blocks.push_back({.hardware_id = rocjitsu::IpHardwareId::Hdp,
+                         .instance = 0,
+                         .major = 7,
+                         .minor = 0,
+                         .revision = 0,
+                         .register_bases = {}});
+
+  const rocjitsu::IpBlockIndex index(spec);
+
+  const rocjitsu::IpBlock *first = index.find(rocjitsu::IpHardwareId::Gc, 0);
+  ASSERT_NE(first, nullptr);
+  EXPECT_EQ(first->register_bases.front(), 0x1260u);
+
+  const rocjitsu::IpBlock *second = index.find(rocjitsu::IpHardwareId::Gc, 1);
+  ASSERT_NE(second, nullptr) << "the second graphics instance was not addressable";
+  EXPECT_EQ(second->register_bases.front(), 0x2260u)
+      << "instance 1 was answered with instance 0's segments";
+
+  EXPECT_EQ(index.find(rocjitsu::IpHardwareId::Gc, 2), nullptr) << "a copy the table never named";
+  EXPECT_EQ(index.find(rocjitsu::IpHardwareId::Hdp, 0), nullptr)
+      << "a block with no register bases has nothing to answer for";
+  EXPECT_EQ(index.find(rocjitsu::IpHardwareId::MmHub, 0), nullptr);
+}

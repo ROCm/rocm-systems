@@ -3,9 +3,17 @@
 
 #include "rocjitsu/vm/amdgpu/pci/gpu_pci_device.h"
 
+#include "rocjitsu/vm/amdgpu/pci/graphics_block_model.h"
+#include "rocjitsu/vm/amdgpu/pci/interrupt_block_model.h"
 #include "rocjitsu/vm/amdgpu/pci/ip_discovery.h"
 #include "rocjitsu/vm/amdgpu/pci/ip_discovery_profile.h"
+#include "rocjitsu/vm/amdgpu/pci/memory_hub_block_model.h"
+#include "rocjitsu/vm/amdgpu/pci/mes_block_model.h"
 #include "rocjitsu/vm/amdgpu/pci/mmio_registers.h"
+#include "rocjitsu/vm/amdgpu/pci/sdma_block_model.h"
+#include "rocjitsu/vm/amdgpu/sdma_queue_binding_factory.h"
+#include "rocjitsu/vm/soc.h"
+#include "simdojo/sim/simulation.h"
 #include "util/log.h"
 
 #include <fcntl.h>
@@ -17,11 +25,13 @@
 #include <atomic>
 #include <bit>
 #include <cerrno>
+#include <chrono>
 #include <cstring>
 #include <format>
 #include <limits>
 #include <optional>
 #include <span>
+#include <stdexcept>
 #include <utility>
 
 namespace rocjitsu {
@@ -32,6 +42,10 @@ bool is_supported_width(std::size_t width) {
 }
 
 bool is_power_of_two(uint64_t value) { return value != 0 && (value & (value - 1)) == 0; }
+
+simdojo::Tick add_ticks_saturated(simdojo::Tick now, simdojo::Tick delay) {
+  return delay > simdojo::TICK_MAX - now ? simdojo::TICK_MAX : now + delay;
+}
 
 /// @brief Address bits carried by the low index register.
 ///
@@ -45,216 +59,121 @@ constexpr uint32_t kIndirectMemorySelect = 0x80000000;
 /// @brief Address bit at which the high index register begins.
 constexpr unsigned kIndirectHighShift = 31;
 
-/// @brief Write a whole buffer at an offset, resuming after a short write.
+/// @brief Where an HDP flush is issued, per NBIF version.
 ///
-/// @details A single pwrite is permitted to transfer fewer bytes than asked
-/// for, and a discovery table is large enough that a partial store would leave
-/// the driver reading a truncated table rather than none at all: the signature
-/// at the front would be intact, so the failure would surface as a malformed
-/// record rather than as an absent table.
-/// @param[in] fd File to write to.
-/// @param[in] bytes Buffer to store.
-/// @param[in] at Byte offset within @p fd.
-/// @retval true The whole buffer was stored.
-/// @retval false The write failed or the file would take no more.
-[[nodiscard]] bool write_all_at(int fd, std::span<const std::byte> bytes, uint64_t at) {
-  std::size_t done = 0;
-  while (done < bytes.size()) {
-    const ssize_t wrote =
-        ::pwrite(fd, bytes.data() + done, bytes.size() - done, static_cast<off_t>(at + done));
-    if (wrote < 0) {
-      if (errno == EINTR) {
-        continue;
-      }
-      return false;
-    }
-    if (wrote == 0) {
-      return false;
-    }
-    done += static_cast<std::size_t>(wrote);
-  }
-  return true;
-}
-
-/// @brief Where an HDP flush is issued, as a byte offset into the register BAR.
-///
-/// @details Not a register of any IP block but a hole the bus reserves, which
-/// `nbio_v7_11_set_reg_remap` points the driver at on any non-virtualized
-/// function with pages of 4 KiB or less. A flush is a write of zero here
-/// followed by an unrelated register read to order it, so answering the write
-/// is the whole of the model: nothing reads this back.
-constexpr uint64_t kHdpFlushHoleOffset = 0x44000;
-
-/// @brief Invalidation engines each memory hub has.
-///
-/// @details The driver picks one by index and reaches it by stride, so the
-/// device answers all of them rather than guessing which. Engine 17 is the one
-/// the GART flush uses, but that is a driver convention rather than a property
-/// of the hardware.
-constexpr uint32_t kInvalidationEngines = 18;
-
-/// @brief Registers between one invalidation engine and the next.
-constexpr uint32_t kInvalidationEngineStride = 1;
-
-/// @brief Value a semaphore reads as when the acquire has been granted.
-///
-/// @details The GC 12.0 flush path acquires an engine's semaphore before
-/// writing its request and releases it by writing zero, so this has to answer
-/// reads and ignore writes: one that stored the release would grant the first
-/// acquire and stall every flush after it. That path takes the semaphore for
-/// MMHUB only; both hubs are answered anyway, because eighteen more registers
-/// cost nothing and a hub that answered half a handshake would be the harder
-/// thing to explain.
-///
-/// The GC 12.1 path this device publishes today does not take the semaphore at
-/// all -- it writes the request and polls the acknowledge -- so these registers
-/// are answered for the profile rather than for the boot, and are untouched on
-/// gfx1250. They are still worth answering: this class is deliberately not
-/// specific to one part, and every other GC 12.x takes the path that does.
-///
-/// Granting unconditionally is right only while nothing else acquires. The
-/// device does not execute rings, so the driver's own lock is all that
-/// serializes flushes; a device that ran packets would have a second acquirer
-/// and this register would stop meaning what it means on hardware.
-constexpr uint32_t kInvalidationSemaphoreHeld = 0x1;
-
-/// @brief One hub's invalidation-register layout, and the version it describes.
-///
-/// @details These offsets move between versions of the same block -- GC 12.0
-/// puts the three at 0x1635/0x1647/0x1659 where 12.1 puts them at
-/// 0x1645/0x1657/0x1669 -- so the hardware ID alone does not identify a layout.
-/// Matching on the version the published table actually declares is what stops
-/// a profile for one version being answered with another's addresses, which
-/// would leave the driver polling registers this device never defined.
-///
-/// One row per layout that has been read out of a header and checked. A block
-/// whose version matches no row is refused rather than guessed at: there is no
-/// safe default, because a wrong offset is indistinguishable from hardware that
-/// never completes a flush.
-struct HubInvalidationLayout {
-  IpHardwareId id;      ///< Block the layout belongs to.
-  uint16_t major;       ///< Block major version it was read from.
-  uint16_t minor;       ///< Block minor version it was read from.
-  uint32_t semaphore;   ///< Engine 0's semaphore, in dwords from the block's first segment.
-  uint32_t request;     ///< Engine 0's request, likewise.
-  uint32_t acknowledge; ///< Engine 0's acknowledge, likewise.
+/// @details The hole is not a register of any block but an address the bus
+/// reserves, and which address that is depends on the bus.
+/// `nbio_v7_11_set_reg_remap` points a gfx1250-class driver at this one; another
+/// NBIF version has its own remap function and its own answer, so this is keyed
+/// rather than applied to whatever bus the published table happens to describe.
+struct HdpFlushHole {
+  uint16_t major;       ///< NBIF major version.
+  uint16_t minor;       ///< NBIF minor version.
+  uint16_t revision;    ///< NBIF revision.
+  uint64_t byte_offset; ///< Byte offset into the register BAR.
 };
 
-/// @details GC from `regGCVM_INVALIDATE_ENG0_{SEM,REQ,ACK}` of
-/// `gc_12_1_0_offset.h`, MMHUB from `regMMVM_INVALIDATE_ENG0_{SEM,REQ,ACK}` of
-/// `mmhub_4_1_0_offset.h`; all `_BASE_IDX 0`, so all relative to the block's
-/// first register segment.
-constexpr HubInvalidationLayout kHubInvalidationLayouts[] = {
-    {IpHardwareId::Gc, 12, 1, 0x1645, 0x1657, 0x1669},
-    {IpHardwareId::MmHub, 4, 1, 0x0575, 0x0587, 0x0599},
+constexpr HdpFlushHole kHdpFlushHoles[] = {
+    {.major = 7, .minor = 11, .revision = 0, .byte_offset = 0x44000},
+    {.major = 7, .minor = 11, .revision = 1, .byte_offset = 0x44000},
+    {.major = 7, .minor = 11, .revision = 2, .byte_offset = 0x44000},
+    {.major = 7, .minor = 11, .revision = 3, .byte_offset = 0x44000},
 };
 
-/// @brief The interrupt ring's registers within OSSSYS, in dwords.
+/// @brief A block the device knows how to model, and what to do without it.
 ///
-/// @details `regIH_RB_{CNTL,RPTR,WPTR,BASE,BASE_HI,WPTR_ADDR_HI,WPTR_ADDR_LO}`
-/// and `regIH_DOORBELL_RPTR` of `osssys_7_1_0_offset.h`, all `_BASE_IDX 0`.
-/// The last matters more than it looks: the ring is created with doorbells
-/// unconditionally on, so the driver acknowledges entries by writing a doorbell
-/// rather than the read-pointer register. The driver programs them in
-/// `ih_v7_0_enable_ring` and reads the pointers back on every interrupt, so
-/// they are ordinary storage rather than answers fixed at reset.
-constexpr uint32_t kIhRingControl = 0x0080;
-constexpr uint32_t kIhRingReadPointer = 0x0081;
-constexpr uint32_t kIhRingWritePointer = 0x0082;
-constexpr uint32_t kIhRingBase = 0x0083;
-constexpr uint32_t kIhRingBaseHigh = 0x0084;
-constexpr uint32_t kIhRingWritePointerAddressHigh = 0x0085;
-constexpr uint32_t kIhRingWritePointerAddressLow = 0x0086;
-constexpr uint32_t kIhRingDoorbell = 0x0087;
+/// @details Bound by hardware id here and by version inside the factory, which
+/// is how the driver arranges it: `amdgpu_discovery_set_ih_ip_blocks` is
+/// reached because the table names an OSSSYS block at all, and it then picks an
+/// implementation by that block's version. Keeping the two separate is what
+/// lets a version table live beside the registers it describes rather than in
+/// the device.
+struct BlockModelBinding {
+  /// @brief Builds the model for one published record, or reports nullptr.
+  using Factory = std::unique_ptr<IpBlockModel> (*)(const IpBlock &, const IpDiscoverySpec &,
+                                                    IpRegisterWindow);
 
-/// @brief Bits the driver shifts the ring's address down by before writing it.
+  IpHardwareId id; ///< Which published block this models.
+  Factory make;    ///< How to build it. Never null.
+  bool required;   ///< Whether being unable to model it makes the device unusable.
+};
+
+/// @details The hubs are required because a device whose flush handshakes
+/// cannot be answered looks correct right up until the driver waits on one, and
+/// then stalls with every register it read beforehand reporting success. The
+/// interrupt block is not: a device without one boots and stays quiet, which is
+/// worth having and is diagnosable from the message its factory leaves.
 ///
-/// @details The base register holds bits 39:8, so the low eight are implied
-/// zero and the ring is at least 256-byte aligned. The address itself does not
-/// stop at 39: the high register below continues it from bit 40, and the two
-/// together carry 48 bits.
-constexpr unsigned kIhRingBaseShift = 8;
+/// Both hubs bind the same model because they are the same hardware at
+/// different versions; `gfxhub_v12_1` and `mmhub_v4_1_0` differ in where their
+/// registers sit and in nothing else this device answers.
+const BlockModelBinding kBlockModels[] = {
+    {IpHardwareId::Gc,
+     [](const IpBlock &block, const IpDiscoverySpec &,
+        IpRegisterWindow registers) -> std::unique_ptr<IpBlockModel> {
+       return MemoryHubBlockModel::create(block, std::move(registers));
+     },
+     true},
+    {IpHardwareId::Gc,
+     [](const IpBlock &block, const IpDiscoverySpec &discovery,
+        IpRegisterWindow registers) -> std::unique_ptr<IpBlockModel> {
+       return GraphicsBlockModel::create(block, discovery.graphics, std::move(registers));
+     },
+     true},
+    {IpHardwareId::Gc,
+     [](const IpBlock &block, const IpDiscoverySpec &,
+        IpRegisterWindow registers) -> std::unique_ptr<IpBlockModel> {
+       return MesBlockModel::create(block, std::move(registers));
+     },
+     true},
+    {IpHardwareId::MmHub,
+     [](const IpBlock &block, const IpDiscoverySpec &,
+        IpRegisterWindow registers) -> std::unique_ptr<IpBlockModel> {
+       return MemoryHubBlockModel::create(block, std::move(registers));
+     },
+     true},
+    {IpHardwareId::OssSys,
+     [](const IpBlock &block, const IpDiscoverySpec &,
+        IpRegisterWindow registers) -> std::unique_ptr<IpBlockModel> {
+       return InterruptBlockModel::create(block, std::move(registers));
+     },
+     false},
+    {IpHardwareId::Sdma0,
+     [](const IpBlock &block, const IpDiscoverySpec &,
+        IpRegisterWindow registers) -> std::unique_ptr<IpBlockModel> {
+       return SdmaBlockModel::create(block, std::move(registers));
+     },
+     true},
+};
 
-/// @brief Address bit at which the high half of the base register continues.
-constexpr unsigned kIhRingBaseHighShift = 40;
-
-/// @brief Bits of the write-pointer address carried by its high register.
-constexpr uint64_t kIhWritePointerAddressHighMask = 0xffff;
-
-/// @brief Bit selecting the ring within the control register.
-constexpr uint32_t kIhRingEnableMask = 1U << 0;
-
-/// @brief Bit asking for an interrupt per entry.
-constexpr uint32_t kIhRingInterruptEnableMask = 1U << 17;
-
-/// @brief Where the size field sits within the control register.
+/// @brief The instance of each block this device models.
 ///
-/// @details The driver stores the base-two logarithm of the ring's size in
-/// dwords, so a size of `4 << field` bytes.
-constexpr unsigned kIhRingSizeShift = 1;
+/// @details One. Every block a published table names today publishes one
+/// record, and the two that could name more -- graphics, and the SDMA engine
+/// derived from it -- publish identical register segments per instance, which
+/// no absolute-address model can tell apart. Raising this needs a profile whose
+/// instances have segments of their own, and the claim map below is what would
+/// refuse one that does not.
+constexpr uint8_t kModelledInstance = 0;
 
-/// @brief Its width, once shifted down: the field mask is `0x3e`.
-constexpr uint32_t kIhRingSizeMask = 0x1f;
-
-/// @brief Where the address-space field sits within the control register.
-constexpr unsigned kIhRingSpaceShift = 28;
-
-/// @brief Its width, once shifted down: the field mask is `0x70000000`.
-constexpr uint32_t kIhRingSpaceMask = 0x7;
-
-/// @brief Bits of the ring's base carried by its high register.
-///
-/// @details Narrower than the register's own field, which is seventeen bits,
-/// because the driver only ever writes eight of them.
-constexpr uint64_t kIhRingBaseHighMask = 0xff;
-
-/// @brief Dwords one interrupt entry occupies, and the bytes that comes to.
-///
-/// @details The driver advances its read pointer by this much per entry and
-/// decodes exactly this many dwords, so an entry of any other size would put
-/// every later entry at an offset it does not look at.
-constexpr uint32_t kInterruptEntryDwords = 8;
-constexpr uint32_t kInterruptEntryBytes = kInterruptEntryDwords * 4;
-
-/// @brief Bits of the write-pointer register that carry the offset.
-///
-/// @details `IH_RB_WPTR__OFFSET_MASK`. The offset occupies bits 17:2; bits 1:0
-/// are the overflow flag, so the register does not carry the low two bits of an
-/// address at all. Anything above the field is not part of one either.
-constexpr uint32_t kIhWritePointerOffsetMask = 0x0003fffc;
-
-/// @brief Largest ring whose every entry the write-pointer register can name.
-///
-/// @details The offset field is sixteen bits wide, so it addresses exactly one
-/// 256 KiB ring. A larger one would have entries the device could never point
-/// at, and worse, the device would wrap at the field width while the driver
-/// wrapped at the ring size -- the two would disagree about which entry a
-/// pointer names, and the driver would decode the never-written remainder as
-/// entries. The size field is five bits and guest-writable, so it can ask for
-/// far more than this.
-constexpr uint64_t kLargestAddressableRingBytes =
-    (uint64_t{kIhWritePointerOffsetMask} & ~uint64_t{kInterruptEntryBytes - 1}) +
-    kInterruptEntryBytes;
-
-/// @brief The message vector an entry is announced on.
-///
-/// @details The device advertises one, so this is it. A second would need the
-/// capability to advertise it before anything could be delivered on it.
-constexpr uint32_t kInterruptVector = 0;
-
-/// @brief Acknowledge value reporting every VMID's flush already complete.
-///
-/// @details The driver polls for `1 << vmid` and this device has no translation
-/// to invalidate, so every flush is finished before it is asked for. Answering
-/// per-VMID instead would mean modelling which VMIDs exist, to no end: the
-/// alternative to "already done" is not "done later" but the driver giving up
-/// after its timeout and continuing anyway.
-constexpr uint32_t kInvalidationComplete = 0xffffffff;
+/// @brief GFX CP end-of-pipe interrupt identifiers consumed by KFD.
+constexpr uint8_t kGraphicsInterruptClient = 0x14;
+constexpr uint8_t kCpEndOfPipeSource = 181;
+constexpr uint8_t kSdmaInterruptClient = 0x0a;
+constexpr uint8_t kSdmaTrapSource = 49;
+constexpr uint8_t kFirstComputeVmid = 1;
+constexpr uint8_t kFirstXccInterruptNode = 2;
 
 } // namespace
 
-GpuPciDevice::GpuPciDevice(std::string name, const GpuPciDeviceSpec &spec, BarAccessTrace *trace)
-    : simdojo::PciDevice(std::move(name), spec.id), spec_(spec), trace_(trace) {
+GpuPciDevice::GpuPciDevice(std::string name, const GpuPciDeviceSpec &spec, BarAccessTrace *trace,
+                           SoC *soc)
+    : simdojo::PciDevice(std::move(name), spec.id), spec_(spec), trace_(trace), soc_(soc),
+      blocks_(spec_.discovery), registers_(this->name(), 0) {
+  doorbell_event_.set_handler(
+      [this](simdojo::Tick now, simdojo::Message *) { drain_doorbell_inbox(now); });
+  doorbell_retry_event_.set_handler(
+      [this](simdojo::Tick now, simdojo::Message *) { drain_doorbell_retry_inbox(now); });
   if (spec_.vram_bytes == 0) {
     // A device with no memory has nothing to present; an aperture cannot stand
     // in for a capacity that was never described.
@@ -323,35 +242,45 @@ GpuPciDevice::GpuPciDevice(std::string name, const GpuPciDeviceSpec &spec, BarAc
   // The whole of memory is backed, sparsely, because the driver reaches past
   // the window through the indirect registers; only the window is shared with
   // the guest.
-  vram_fd_ = ::memfd_create("rocjitsu-vram", MFD_CLOEXEC | MFD_ALLOW_SEALING);
-  if (vram_fd_ < 0 || ::ftruncate(vram_fd_, static_cast<off_t>(spec_.vram_bytes)) != 0) {
-    util::Logger::warn(std::format("{}: cannot back the video memory aperture", this->name()));
-    return;
-  }
-  void *mapped =
-      ::mmap(nullptr, spec_.vram_aperture_bytes, PROT_READ | PROT_WRITE, MAP_SHARED, vram_fd_, 0);
-  if (mapped == MAP_FAILED) {
-    util::Logger::warn(std::format("{}: cannot map the video memory aperture", this->name()));
-    ::close(vram_fd_);
-    vram_fd_ = -1;
-    return;
-  }
-  vram_ = static_cast<std::byte *>(mapped);
-
-  // The descriptor is shared with a client that could otherwise resize it and
-  // leave the server touching memory past the end of the file.
-  if (::fcntl(vram_fd_, F_ADD_SEALS, F_SEAL_SHRINK | F_SEAL_GROW | F_SEAL_SEAL) != 0) {
-    util::Logger::warn(std::format("{}: cannot seal the video memory backing", this->name()));
+  vram_.emplace(this->name(), spec_.vram_bytes, spec_.vram_aperture_bytes);
+  if (!vram_->usable()) {
     return;
   }
   doorbells_.resize(spec_.doorbell_aperture_bytes);
   msix_table_.resize(kMsixBarBytes);
 
+  if (soc_ != nullptr) {
+    sdma_queue_binding_factory_ = std::make_shared<amdgpu::SdmaQueueBindingFactory>(
+        soc_->sdma_queue_scheduler(),
+        [this](const amdgpu::SdmaQueueContext &context) { return make_sdma_callbacks(context); },
+        [this](const amdgpu::SdmaQueueContext &context) {
+          return make_sdma_progress_observer(context);
+        });
+    interrupt_subscription_ =
+        amdgpu::InterruptSubscription([this](uint32_t process_id, uint32_t event_id) {
+          if (process_id == 0 || process_id > std::numeric_limits<uint16_t>::max()) {
+            util::Logger::warn(std::format("{}: cannot deliver a CP interrupt for PASID {}",
+                                           this->name(), process_id));
+            return;
+          }
+          if (!deliver_interrupt({.client_id = kGraphicsInterruptClient,
+                                  .source_id = kCpEndOfPipeSource,
+                                  .vmid = kFirstComputeVmid,
+                                  .pasid = static_cast<uint16_t>(process_id),
+                                  .node_id = kFirstXccInterruptNode,
+                                  .data = {event_id}})) {
+            util::Logger::warn(std::format("{}: could not deliver CP event {} for PASID {}",
+                                           this->name(), event_id, process_id));
+          }
+        });
+  }
+
   // One entry per dword of the aperture.
-  const auto register_count = static_cast<uint32_t>(spec_.register_aperture_bytes / 4);
-  registers_.assign(register_count, 0);
-  modelled_.assign(register_count, false);
-  read_only_.assign(register_count, false);
+  registers_ = RegisterAperture(this->name(), spec_.register_aperture_bytes);
+  // Built once, before anything asks a block to answer: which blocks this
+  // device models follows the discovery table, and that does not change while
+  // the device is alive.
+  build_block_models();
   reset_registers();
 
   // A device that answers every pre-discovery register and then has nothing at
@@ -370,6 +299,11 @@ GpuPciDevice::GpuPciDevice(std::string name, const GpuPciDeviceSpec &spec, BarAc
         "{}: this device cannot answer the VM flush handshakes the driver waits on", this->name()));
     return;
   }
+  if (soc_ != nullptr && !soc_->gpu_vm().initialize_gart_address_space()) {
+    util::Logger::warn(std::format(
+        "{}: the device-global VMID-0 address space could not be initialized", this->name()));
+    return;
+  }
   usable_ = true;
 }
 
@@ -377,7 +311,7 @@ bool GpuPciDevice::publish_discovery_table() {
   // Guarded rather than left to pwrite returning EBADF, because this is now
   // reachable from the public reset() as well as from a device whose memory
   // never came up, and because reading and writing memory guard the same way.
-  if (vram_fd_ < 0) {
+  if (!vram_.has_value() || !vram_->usable()) {
     util::Logger::warn(
         std::format("{}: no video memory to publish a discovery table into", name()));
     return false;
@@ -425,7 +359,7 @@ bool GpuPciDevice::publish_discovery_table() {
   }
 
   const uint64_t at = reported_bytes - kDiscoveryOffsetFromTopOfVram;
-  if (!write_all_at(vram_fd_, built.table, at)) {
+  if (!vram_->write_all(built.table, at)) {
     util::Logger::warn(std::format("{}: cannot store the {}-byte discovery table at {:#x}: {}",
                                    name(), built.table.size(), at, std::strerror(errno)));
     return false;
@@ -433,13 +367,52 @@ bool GpuPciDevice::publish_discovery_table() {
   return true;
 }
 
-GpuPciDevice::~GpuPciDevice() {
-  if (vram_ != nullptr) {
-    ::munmap(vram_, spec_.vram_aperture_bytes);
+GpuPciDevice::~GpuPciDevice() { (void)shutdown_frontend(); }
+
+bool GpuPciDevice::shutdown_frontend() {
+  const std::lock_guard reset_lock(doorbell_reset_mutex_);
+  if (frontend_shutdown_)
+    return frontend_shutdown_complete_;
+
+  close_doorbell_admission_for_reset();
+  const bool queues_released = teardown_frontend_queues();
+  const bool gart_cleared = soc_ == nullptr || soc_->gpu_vm().clear_gart_binding();
+  if (!queues_released || !gart_cleared) {
+    util::Logger::warn(
+        std::format("{}: PCI frontend state was not fully released during shutdown", name()));
   }
-  if (vram_fd_ >= 0) {
-    ::close(vram_fd_);
+  // Keep the route live until queue teardown has drained already-admitted
+  // operations, so a terminal completion is not dropped. Then drain interrupt
+  // callbacks while every field they capture is still alive.
+  interrupt_subscription_.reset();
+  // GpuVm snapshots retain PciPhysicalMemoryAccess objects whose local-memory
+  // path points back into this device. Revoke the captured transport generation
+  // and drain admitted operations before any device storage is destroyed. A
+  // stale snapshot then fails its session lease without dereferencing this.
+  shutdown_transport();
+
+  // The models are frontend-owned, but their routes into the core are borrowed.
+  // Sever those routes while the core is known to be alive; the topology may
+  // destroy that core before it later destroys this sibling PCI component.
+  for (const OwnedBlockModel &owned : models_) {
+    if (auto *hub = dynamic_cast<MemoryHubBlockModel *>(owned.model_.get()); hub != nullptr)
+      hub->attach_soc(nullptr);
   }
+  if (mes_ != nullptr) {
+    if (!mes_->detach_engine())
+      util::Logger::warn(std::format("{}: MES frontend callbacks could not be detached", name()));
+  }
+  if (sdma_ != nullptr) {
+    sdma_->attach_queue_binding_factory(nullptr);
+    sdma_->attach_soc(nullptr);
+  }
+  interrupts_ = nullptr;
+  mes_ = nullptr;
+  sdma_ = nullptr;
+  soc_ = nullptr;
+  frontend_shutdown_complete_ = queues_released && gart_cleared;
+  frontend_shutdown_ = true;
+  return frontend_shutdown_complete_;
 }
 
 std::vector<simdojo::BarSpec> GpuPciDevice::bars() const {
@@ -449,8 +422,8 @@ std::vector<simdojo::BarSpec> GpuPciDevice::bars() const {
   vram.mem = true;
   vram.prefetch = true;
   vram.is_64bit = true;
-  vram.backing_fd = vram_fd_;
-  if (vram_fd_ >= 0) {
+  vram.backing_fd = vram_.has_value() ? vram_->fd() : -1;
+  if (vram.backing_fd >= 0) {
     vram.mmap_areas.push_back({.offset = 0, .length = spec_.vram_aperture_bytes});
   }
 
@@ -488,379 +461,466 @@ std::vector<simdojo::BarSpec> GpuPciDevice::bars() const {
 void GpuPciDevice::reset_registers() {
   // The registers the driver reads before it can locate the IP discovery table.
   // Reporting no memory, or all-ones, makes it give up before it starts.
-  define_register(byte_offset_of(MmioRegister::RccConfigMemsize), vram_megabytes_);
-  define_register(byte_offset_of(MmioRegister::Mp0SmnC2pmsg33), kFirmwareInitDoneBit);
+  registers_.define(byte_offset_of(MmioRegister::RccConfigMemsize), vram_megabytes_);
+  registers_.define(byte_offset_of(MmioRegister::Mp0SmnC2pmsg33), kFirmwareInitDoneBit);
   // Zero says this is a physical function with virtualization disabled, which is
   // what lets the driver treat the device as passed through to it whole. The
   // alternative would be to model the SR-IOV mailbox a virtual function reaches
   // its host through, which this device does not have.
-  define_register(byte_offset_of(MmioRegister::RccIovFuncIdentifier), 0);
+  registers_.define(byte_offset_of(MmioRegister::RccIovFuncIdentifier), 0);
   // Zero here tells the driver the discovery table is not published through
   // these registers, so it looks for it at the top of video memory instead.
-  define_register(byte_offset_of(MmioRegister::DriverScratch0), 0);
-  define_register(byte_offset_of(MmioRegister::DriverScratch1), 0);
-  define_register(byte_offset_of(MmioRegister::DriverScratch2), 0);
+  registers_.define(byte_offset_of(MmioRegister::DriverScratch0), 0);
+  registers_.define(byte_offset_of(MmioRegister::DriverScratch1), 0);
+  registers_.define(byte_offset_of(MmioRegister::DriverScratch2), 0);
   // The indirect window and its data register are how memory outside the
   // aperture is reached, so they are modelled rather than reading as absent.
-  define_register(byte_offset_of(MmioRegister::MmIndex), 0);
-  define_register(byte_offset_of(MmioRegister::MmIndexHi), 0);
-  define_register(byte_offset_of(MmioRegister::MmData), 0);
+  registers_.define(byte_offset_of(MmioRegister::MmIndex), 0);
+  registers_.define(byte_offset_of(MmioRegister::MmIndexHi), 0);
+  registers_.define(byte_offset_of(MmioRegister::MmData), 0);
   // Readable before discovery, like the registers above: it is inside the
   // pre-discovery aperture and is named, so leaving it undefined would report it
   // as a register this device does not model when in fact it has an answer.
-  define_register(byte_offset_of(MmioRegister::IpDiscoveryVersion), kIpDiscoveryVersion);
+  registers_.define(byte_offset_of(MmioRegister::IpDiscoveryVersion), kIpDiscoveryVersion);
 
   // Accepting the flush is the whole model; the driver orders it with a read of
-  // a different register and never reads this one back.
-  define_register(kHdpFlushHoleOffset, 0);
-
-  // Both hubs, at the segments the published table gave them, so the addresses
-  // the driver computes and the ones answered here cannot drift apart. A hub
-  // the table does not name has no registers to answer.
-  //
-  // Offsets are from gc_12_1_0_offset.h and mmhub_4_1_0_offset.h. Which driver
-  // consumes them takes two steps to answer: GC 12.1.0 adds gmc_v12_0's ip
-  // block -- which is the name the guest logs -- and that block's early_init
-  // then installs gmc_v12_1's flush functions for this version. The hub
-  // register offsets come from gfxhub_v12_1 and mmhub_v4_1_0 either way, since
-  // those are set outside that switch.
-  flushes_answerable_ = true;
-  for (const IpHardwareId id : {IpHardwareId::Gc, IpHardwareId::MmHub}) {
-    const IpBlock *hub = published_block(id);
-    if (hub == nullptr) {
-      // A hub the table does not name has no registers to answer, and the
-      // driver will not look for them either.
-      continue;
-    }
-    const HubInvalidationLayout *layout = nullptr;
-    for (const HubInvalidationLayout &candidate : kHubInvalidationLayouts) {
-      if (candidate.id == id && candidate.major == hub->major && candidate.minor == hub->minor) {
-        layout = &candidate;
+  // a different register and never reads this one back. Which address the flush
+  // is issued at follows the bus, so it comes from the NBIF version the table
+  // declares; a bus with no known hole simply has none answered, and the driver
+  // for it would be reaching somewhere this device has not modelled.
+  if (const IpBlock *nbif = blocks_.find(IpHardwareId::Nbif, kModelledInstance); nbif != nullptr) {
+    bool holed = false;
+    for (const HdpFlushHole &hole : kHdpFlushHoles) {
+      if (hole.major == nbif->major && hole.minor == nbif->minor &&
+          hole.revision == nbif->revision) {
+        registers_.define(hole.byte_offset, 0);
+        holed = true;
         break;
       }
     }
-    if (layout == nullptr) {
+    if (!holed) {
       util::Logger::warn(std::format(
-          "{}: no invalidation-register layout is known for hardware id {} version {}.{}, and "
-          "answering with another version's addresses would leave the driver polling registers "
-          "this device never defined",
-          name(), static_cast<uint16_t>(id), hub->major, hub->minor));
+          "{}: no HDP flush hole is known for NBIF {}.{}.{}, so a flush issued through the bus "
+          "remap will not be answered",
+          name(), nbif->major, nbif->minor, nbif->revision));
+    }
+  }
+
+  // Every block this device models, back to its power-on values.
+  //
+  // A hub that cannot reach its own registers is what makes the whole device
+  // unusable: a flush is issued and then waited for, and nothing else reports
+  // it finishing, so an unanswered acknowledge is not a quiet gap in the
+  // register model but a stall of the driver's full timeout, once per flush.
+  // Whether the model exists at all was settled when the models were built.
+  flushes_answerable_ = models_complete_;
+  for (const OwnedBlockModel &owned : models_) {
+    if (!owned.model_->reset() && owned.required_) {
       flushes_answerable_ = false;
+    }
+  }
+}
+
+void GpuPciDevice::build_block_models() {
+  std::vector<ClaimedRegisters> claimed;
+  models_complete_ = true;
+  for (const BlockModelBinding &binding : kBlockModels) {
+    const IpBlock *block = blocks_.find(binding.id, kModelledInstance);
+    if (block == nullptr) {
+      // A block the table does not name has no registers to answer, and the
+      // driver will not look for them either.
       continue;
     }
-    if (!define_invalidation_engines(hub->register_bases.front(),
-                                     {.semaphore = layout->semaphore,
-                                      .request = layout->request,
-                                      .acknowledge = layout->acknowledge})) {
-      flushes_answerable_ = false;
+    const IpRegisterWindow window(registers_, block->register_bases, name());
+    std::unique_ptr<IpBlockModel> model = binding.make(*block, spec_.discovery, window);
+    if (model == nullptr) {
+      // The version has no known layout, and the factory has said so.
+      if (binding.required) {
+        models_complete_ = false;
+      }
+      continue;
     }
-  }
 
-  // The interrupt ring's registers answer as plain storage: the driver writes
-  // where it put the ring and reads its own pointers back, so anything the
-  // device invented here would be a fact the driver did not state.
-  ih_control_offset_.reset();
-  if (const IpBlock *osssys = published_block(IpHardwareId::OssSys);
-      osssys != nullptr && segment_within_aperture(osssys->register_bases.front())) {
-    const uint64_t segment = osssys->register_bases.front();
-    for (const uint32_t reg :
-         {kIhRingControl, kIhRingReadPointer, kIhRingWritePointer, kIhRingBase, kIhRingBaseHigh,
-          kIhRingWritePointerAddressHigh, kIhRingWritePointerAddressLow, kIhRingDoorbell}) {
-      const uint64_t at = (segment + reg) * 4;
-      if (at + 4 <= spec_.register_aperture_bytes) {
-        define_register(at, 0);
+    // Resolved here rather than inside the model, which is the point of a claim:
+    // a model names registers the way its own offset header names them and never
+    // learns what byte that is. A claim the aperture cannot reach is left out
+    // rather than refused -- the model's own reset reports that, and reports it
+    // per register.
+    for (const RegisterClaim &claim : model->claims()) {
+      const std::optional<uint64_t> at = window.resolve(claim.segment_index, claim.first_dword);
+      if (at.has_value()) {
+        claimed.push_back(
+            {.owner = model->what(), .first_dword = dword_index_of(*at), .count = claim.count});
       }
     }
-    // Recorded only when the dword it names was actually modelled. Recording it
-    // for a control register that fell outside the aperture would have every
-    // later read of it answer out of an index this device never defined.
-    const uint64_t control_at = (segment + kIhRingControl) * 4;
-    if (control_at + 4 <= spec_.register_aperture_bytes) {
-      ih_control_offset_ = control_at;
+
+    // The interrupt block is the one model the device itself talks to, because
+    // delivering an interrupt is something the device is asked to do from
+    // outside. Recognised by its type rather than by its binding, so the two
+    // cannot be wired to different blocks by a later edit.
+    if (auto *interrupts = dynamic_cast<InterruptBlockModel *>(model.get());
+        interrupts != nullptr) {
+      interrupts_ = interrupts;
     }
-    // Cleared with the registers it describes: a reset discards what the driver
-    // said, so the next programming has to be reported as freshly as the first.
-    announced_interrupt_ring_ = false;
+    if (auto *mes = dynamic_cast<MesBlockModel *>(model.get()); mes != nullptr) {
+      if (soc_ != nullptr && !mes->attach_engine(soc_->mes_engine(), sdma_queue_binding_factory_,
+                                                 interrupt_subscription_.sink())) {
+        util::Logger::warn(std::format("{}: cannot attach the MES core engine", name()));
+        models_complete_ = false;
+      }
+      mes_ = mes;
+    }
+    if (auto *hub = dynamic_cast<MemoryHubBlockModel *>(model.get()); hub != nullptr) {
+      hub->attach_soc(soc_);
+    }
+    if (auto *sdma = dynamic_cast<SdmaBlockModel *>(model.get()); sdma != nullptr) {
+      sdma->attach_soc(soc_);
+      sdma->attach_queue_binding_factory(sdma_queue_binding_factory_);
+      sdma_ = sdma;
+    }
+    models_.emplace_back(std::move(model), binding.required);
+  }
+
+  // One absolute-dword map over every claim, checked once. Blocks legitimately
+  // share register segments on this family -- GC and SDMA0 publish identical
+  // bases, as do the two management processors -- and stay apart only in the
+  // offsets they claim within them, so an overlap is never a shared segment
+  // showing through; it is two models about to answer one register, with
+  // whichever defined it last winning silently.
+  if (const std::string overlap = overlapping_claim(std::move(claimed)); !overlap.empty()) {
+    util::Logger::warn(std::format("{}: {}", name(), overlap));
+    models_complete_ = false;
   }
 }
 
-const IpBlock *GpuPciDevice::published_block(IpHardwareId id) const {
-  for (const IpBlock &block : spec_.discovery.blocks) {
-    if (block.hardware_id == id && !block.register_bases.empty()) {
-      return &block;
-    }
-  }
-  return nullptr;
+bool GpuPciDevice::teardown_frontend_queues() {
+  // Destroy MES-owned queues first so GpuQueueRegistry drains their admitted
+  // queue bindings and releases their GpuVm references. Independently tear
+  // down register-backed SDMA queues even if MES could not release every
+  // process binding; either adapter may retain callbacks into this frontend.
+  const bool mes_complete = mes_ == nullptr || mes_->teardown_queues();
+  if (sdma_ != nullptr)
+    sdma_->teardown_queues();
+  return mes_complete;
 }
 
-bool GpuPciDevice::segment_within_aperture(uint64_t segment) const {
-  // Checked at the one place a segment becomes an address rather than by each
-  // caller: every one turns it into `(segment + register) * 4`, and a large
-  // enough segment wraps that multiply into a small address that passes an
-  // aperture bounds test and lands on an unrelated register.
-  //
-  // A segment equal to the aperture's dword count already names the dword one
-  // past the end, so this is not a `>`.
-  if (segment >= spec_.register_aperture_bytes / 4) {
-    util::Logger::warn(
-        std::format("{}: the block at segment {:#x} is not within a {}-byte register aperture, "
-                    "so its registers cannot be answered",
-                    name(), segment, spec_.register_aperture_bytes));
-    return false;
+GpuPciDevice::SdmaPciEffectResult
+GpuPciDevice::SdmaPciCallbackState::request(const std::shared_ptr<SdmaPciCallbackState> &self,
+                                            const SdmaPciEffect &effect) {
+  const std::lock_guard lock(mutex_);
+  if (cancelled_)
+    return {};
+  if (pending_) {
+    if (*pending_ != effect)
+      return {.outcome = amdgpu::VmAccessOutcome::Malformed};
+    if (!result_)
+      return {.outcome = amdgpu::VmAccessOutcome::Unavailable};
+    const SdmaPciEffectResult result = *result_;
+    pending_.reset();
+    result_.reset();
+    return result;
   }
+  if (!enqueue_)
+    return {};
+  pending_ = effect;
+  if (!enqueue_(self, effect)) {
+    pending_.reset();
+    return {};
+  }
+  return {.outcome = amdgpu::VmAccessOutcome::Unavailable};
+}
+
+void GpuPciDevice::SdmaPciCallbackState::complete(const SdmaPciEffect &effect,
+                                                  SdmaPciEffectResult result) {
+  const std::lock_guard lock(mutex_);
+  if (!cancelled_ && pending_ && *pending_ == effect && !result_)
+    result_ = result;
+}
+
+void GpuPciDevice::SdmaPciCallbackState::cancel() {
+  const std::lock_guard lock(mutex_);
+  cancelled_ = true;
+  enqueue_ = {};
+  pending_.reset();
+  result_.reset();
+}
+
+bool GpuPciDevice::enqueue_sdma_pci_effect(const std::shared_ptr<SdmaPciCallbackState> &state,
+                                           const SdmaPciEffect &effect) {
+  {
+    const std::lock_guard lock(sdma_effect_mutex_);
+    if (!sdma_effect_admission_open_)
+      return false;
+    sdma_effect_inbox_.emplace_back(state, effect, state->reset_epoch_);
+  }
+  if (engine() != nullptr)
+    engine()->schedule_event_now(&doorbell_event_);
   return true;
+}
+
+void GpuPciDevice::drain_sdma_pci_effects() {
+  std::deque<SdmaPciEffectRequest> requests;
+  std::deque<SdmaQueueProgressRequest> progress_updates;
+  {
+    const std::lock_guard lock(sdma_effect_mutex_);
+    requests.swap(sdma_effect_inbox_);
+    progress_updates.swap(sdma_progress_inbox_);
+  }
+
+  for (const SdmaPciEffectRequest &request : requests) {
+    const std::shared_ptr<SdmaPciCallbackState> state = request.state_.lock();
+    if (state == nullptr)
+      continue;
+    {
+      const std::lock_guard lock(sdma_effect_mutex_);
+      last_sdma_effect_thread_ = std::this_thread::get_id();
+      ++sdma_effect_count_;
+    }
+    std::shared_ptr<simdojo::PciTransportSession> session;
+    uint64_t generation = 0;
+    {
+      const std::lock_guard state_lock(state->mutex_);
+      if (state->cancelled_ || !state->pending_ || *state->pending_ != request.effect_ ||
+          state->result_) {
+        continue;
+      }
+      session = state->session_.lock();
+      generation = state->generation_;
+    }
+
+    SdmaPciEffectResult result;
+    simdojo::PciTransportSession::OperationLease lease =
+        session != nullptr ? session->acquire() : simdojo::PciTransportSession::OperationLease{};
+    FrontendOperationLease frontend = acquire_frontend_operation(request.reset_epoch_);
+    if (frontend && lease && session->generation() == generation &&
+        transport_session() == session) {
+      std::function<void()> admitted_hook;
+      {
+        const std::lock_guard lock(sdma_effect_mutex_);
+        admitted_hook = sdma_effect_admitted_hook_for_test_;
+      }
+      if (admitted_hook)
+        admitted_hook();
+      {
+        const std::lock_guard state_lock(state->mutex_);
+        if (state->cancelled_ || !state->pending_ || *state->pending_ != request.effect_ ||
+            state->result_) {
+          continue;
+        }
+      }
+      switch (request.effect_.kind) {
+      case SdmaPciEffectKind::ReadRegister: {
+        uint32_t value = 0;
+        if (!read_register(request.effect_.address, value)) {
+          result.outcome = amdgpu::VmAccessOutcome::Faulted;
+          break;
+        }
+        result.outcome = amdgpu::VmAccessOutcome::Complete;
+        result.value = value;
+        break;
+      }
+      case SdmaPciEffectKind::WriteRegister:
+        result.outcome = write_register(request.effect_.address, request.effect_.value)
+                             ? amdgpu::VmAccessOutcome::Complete
+                             : amdgpu::VmAccessOutcome::Faulted;
+        break;
+      case SdmaPciEffectKind::DeliverInterrupt: {
+        const uint32_t process_id = request.effect_.process_id;
+        const uint32_t engine_id = request.effect_.engine_id;
+        if (process_id > UINT16_MAX) {
+          result.outcome = amdgpu::VmAccessOutcome::Malformed;
+          break;
+        }
+        const bool delivered = deliver_interrupt({.client_id = kSdmaInterruptClient,
+                                                  .source_id = kSdmaTrapSource,
+                                                  .ring_id = static_cast<uint8_t>(engine_id << 4),
+                                                  .vmid = process_id == 0 ? uint8_t{0} : uint8_t{1},
+                                                  .pasid = static_cast<uint16_t>(process_id),
+                                                  .node_id = kFirstXccInterruptNode,
+                                                  .data = {request.effect_.value}});
+        result.outcome =
+            delivered ? amdgpu::VmAccessOutcome::Complete : amdgpu::VmAccessOutcome::Faulted;
+        break;
+      }
+      }
+    }
+    state->complete(request.effect_, result);
+  }
+
+  for (const SdmaQueueProgressRequest &progress : progress_updates) {
+    const std::shared_ptr<simdojo::PciTransportSession> session = progress.session.lock();
+    if (session == nullptr || session->generation() != progress.generation)
+      continue;
+    simdojo::PciTransportSession::OperationLease lease = session->acquire();
+    FrontendOperationLease frontend = acquire_frontend_operation(progress.reset_epoch);
+    if (!lease || transport_session() != session || !frontend || sdma_ == nullptr)
+      continue;
+    if (progress.queue_id != (0xffff0000u | progress.engine_id))
+      continue;
+    sdma_->update_queue_progress(progress.engine_id, progress.consumer_cursor, progress.terminal);
+  }
+}
+
+std::thread::id GpuPciDevice::last_sdma_pci_effect_thread_for_test() {
+  const std::lock_guard lock(sdma_effect_mutex_);
+  return last_sdma_effect_thread_;
+}
+
+uint64_t GpuPciDevice::sdma_pci_effect_count_for_test() {
+  const std::lock_guard lock(sdma_effect_mutex_);
+  return sdma_effect_count_;
+}
+
+void GpuPciDevice::set_sdma_pci_effect_admitted_hook_for_test(std::function<void()> hook) {
+  const std::lock_guard lock(sdma_effect_mutex_);
+  sdma_effect_admitted_hook_for_test_ = std::move(hook);
+}
+
+void GpuPciDevice::cancel_sdma_pci_effects() {
+  std::vector<std::shared_ptr<SdmaPciCallbackState>> states;
+  {
+    const std::lock_guard lock(sdma_effect_mutex_);
+    sdma_effect_admission_open_ = false;
+    sdma_effect_inbox_.clear();
+    sdma_progress_inbox_.clear();
+    for (const std::weak_ptr<SdmaPciCallbackState> &weak_state : sdma_callback_states_)
+      if (std::shared_ptr<SdmaPciCallbackState> state = weak_state.lock())
+        states.push_back(std::move(state));
+    sdma_callback_states_.clear();
+  }
+  for (const std::shared_ptr<SdmaPciCallbackState> &state : states)
+    state->cancel();
+}
+
+amdgpu::SdmaPacketCallbacks
+GpuPciDevice::make_sdma_callbacks(const amdgpu::SdmaQueueContext &context) {
+  const std::shared_ptr<simdojo::PciTransportSession> session = transport_session();
+  std::shared_ptr<SdmaPciCallbackState> state = std::make_shared<SdmaPciCallbackState>();
+  state->session_ = session;
+  state->generation_ = session != nullptr ? session->generation() : 0;
+  {
+    const std::lock_guard lock(doorbell_inbox_mutex_);
+    state->reset_epoch_ = doorbell_reset_epoch_;
+  }
+  state->enqueue_ = [this](const std::shared_ptr<SdmaPciCallbackState> &callback_state,
+                           const SdmaPciEffect &effect) {
+    return enqueue_sdma_pci_effect(callback_state, effect);
+  };
+  {
+    const std::lock_guard lock(sdma_effect_mutex_);
+    if (!sdma_effect_admission_open_)
+      state->cancelled_ = true;
+    std::erase_if(sdma_callback_states_, [](const std::weak_ptr<SdmaPciCallbackState> &candidate) {
+      return candidate.expired();
+    });
+    sdma_callback_states_.push_back(state);
+  }
+
+  amdgpu::SdmaPacketCallbacks callbacks;
+  callbacks.read_register = [state](uint32_t address) {
+    const SdmaPciEffectResult result =
+        state->request(state, {.kind = SdmaPciEffectKind::ReadRegister, .address = address});
+    return amdgpu::SdmaPacketRegisterReadResult{.outcome = result.outcome, .value = result.value};
+  };
+  callbacks.write_register = [state](uint32_t address, uint32_t value) {
+    return state
+        ->request(state,
+                  {.kind = SdmaPciEffectKind::WriteRegister, .address = address, .value = value})
+        .outcome;
+  };
+  callbacks.deliver_interrupt = [state, process_id = context.process_id,
+                                 engine_id = context.engine_id](uint32_t data) {
+    return state
+        ->request(state, {.kind = SdmaPciEffectKind::DeliverInterrupt,
+                          .value = data,
+                          .process_id = process_id,
+                          .engine_id = engine_id})
+        .outcome;
+  };
+  callbacks.timestamp = [] {
+    const std::chrono::steady_clock::duration now =
+        std::chrono::steady_clock::now().time_since_epoch();
+    return static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(now).count());
+  };
+  return callbacks;
+}
+
+std::function<void(const amdgpu::SdmaQueueProgress &)>
+GpuPciDevice::make_sdma_progress_observer(const amdgpu::SdmaQueueContext &context) {
+  // MES-created queues share this binding factory but do not have an SDMA register
+  // shadow. Their consumer pointer is already published through GPU memory.
+  if (context.queue_id != (0xffff0000u | context.engine_id))
+    return {};
+  const std::shared_ptr<simdojo::PciTransportSession> session = transport_session();
+  const uint64_t generation = session != nullptr ? session->generation() : 0;
+  uint64_t reset_epoch = 0;
+  {
+    const std::lock_guard lock(doorbell_inbox_mutex_);
+    reset_epoch = doorbell_reset_epoch_;
+  }
+  return [this, weak_session = std::weak_ptr<simdojo::PciTransportSession>(session), generation,
+          reset_epoch, queue_id = context.queue_id,
+          engine_id = context.engine_id](const amdgpu::SdmaQueueProgress &progress) {
+    {
+      const std::lock_guard lock(sdma_effect_mutex_);
+      if (!sdma_effect_admission_open_)
+        return;
+      sdma_progress_inbox_.push_back({.session = weak_session,
+                                      .generation = generation,
+                                      .reset_epoch = reset_epoch,
+                                      .queue_id = queue_id,
+                                      .engine_id = engine_id,
+                                      .consumer_cursor = progress.consumer_cursor,
+                                      .terminal = progress.terminal});
+    }
+    if (engine() != nullptr)
+      engine()->schedule_event_now(&doorbell_event_);
+  };
 }
 
 bool GpuPciDevice::deliver_interrupt(const InterruptEntry &entry) {
-  const IpBlock *osssys = published_block(IpHardwareId::OssSys);
-  if (osssys == nullptr || !segment_within_aperture(osssys->register_bases.front())) {
+  if (interrupts_ == nullptr) {
     return false;
   }
-  const uint64_t wptr_register = (osssys->register_bases.front() + kIhRingWritePointer) * 4;
-  if (wptr_register + 4 > spec_.register_aperture_bytes) {
+  // Taken once and used for the whole delivery. Re-reading it per use would make
+  // every step its own chance to observe a detach, and a delivery interrupted
+  // between the ring write and the pointer write leaves an entry the driver is
+  // never told about -- worse than declining before anything was written.
+  simdojo::PciTransportSession::OperationLease transport = acquire_transport();
+  if (!transport || transport.dma() == nullptr || transport.irq() == nullptr) {
     return false;
   }
-
-  const InterruptRing ring = interrupt_ring();
-  if (!ring.enabled || ring.bytes < kInterruptEntryBytes ||
-      ring.bytes > kLargestAddressableRingBytes) {
-    return false;
+  const InterruptRing programmed = interrupts_->ring();
+  std::optional<uint32_t> consumed;
+  {
+    const std::lock_guard lock(doorbell_storage_mutex_);
+    consumed = interrupts_->read_pointer(doorbells_, programmed);
   }
-  // An address in a space this device cannot resolve would be written to
-  // whatever guest page happens to sit at that number. That is worse than
-  // declining: the driver would carry on waiting while memory it owns was
-  // quietly changed underneath it.
-  if (ring.space != InterruptRingSpace::BusAddress) {
-    return false;
-  }
-  if (dma_ == nullptr || irq_ == nullptr) {
-    return false;
-  }
-
-  // Publishing to nowhere is not publishing: the driver reads the pointer from
-  // memory, so a ring switched on before that address was given has no way to
-  // be told anything, and guest-physical zero is a real page to write over.
-  //
-  // The ring's own base is the same question and the same answer. A driver may
-  // set the enable bit before it has written the base -- the registers are
-  // separate and it writes them in its own order -- and zero there means unset,
-  // not "the ring is at address zero". Writing entries into guest-physical zero
-  // would corrupt whatever the guest keeps in its first page.
-  if (ring.base == 0 || ring.wptr_address == 0) {
-    return false;
-  }
-
-  // The pointers are byte offsets into the ring and wrap with it. Taking the
-  // current one from the register rather than from a member keeps the device's
-  // idea of it and the driver's the same object rather than two that drift --
-  // every driver-side re-init writes this register back to zero.
-  //
-  // It is a *guest-writable* register, though, and this is where its value
-  // becomes an address. So it is put through the field mask the hardware
-  // defines and then aligned down to an entry, because the driver's own write-
-  // and read-pointer shadows sit immediately after the ring: an entry placed
-  // at an unaligned offset would run off the end and overwrite exactly the two
-  // words the interrupt protocol depends on.
-  const uint64_t stated =
-      registers_[static_cast<uint32_t>(wptr_register / 4)] & kIhWritePointerOffsetMask;
-  const auto at =
-      static_cast<uint32_t>((stated & ~uint64_t{kInterruptEntryBytes - 1}) % ring.bytes);
-
-  std::array<uint32_t, kInterruptEntryDwords> words = {};
-  words[0] = static_cast<uint32_t>(entry.client_id) | (static_cast<uint32_t>(entry.source_id) << 8);
-  words[4] = entry.data[0];
-  words[5] = entry.data[1];
-  words[6] = entry.data[2];
-  words[7] = entry.data[3];
-
-  std::array<std::byte, kInterruptEntryBytes> raw = {};
-  std::memcpy(raw.data(), words.data(), raw.size());
-  if (!dma_->write(ring.base + at, raw)) {
-    return false;
-  }
-
-  // Only now is there something to point at. Publishing the pointer first would
-  // invite the driver to read an entry that is not yet there -- the driver orders
-  // its read of the ring against its read of this pointer with a barrier, so the
-  // device owes it the matching store order.
-  //
-  // That order is DmaEngine::write()'s to keep, not this function's: it returns
-  // only once the bytes are guest-visible, and writes become visible in the order
-  // they return. A fence here would not have been enough anyway, since it cannot
-  // order stores an implementation has only queued.
-  const auto next = static_cast<uint32_t>((uint64_t{at} + kInterruptEntryBytes) % ring.bytes);
-  const auto published = std::bit_cast<std::array<std::byte, sizeof(uint32_t)>>(next);
-  if (!dma_->write(ring.wptr_address, published)) {
-    return false;
-  }
-  define_register(wptr_register, next);
-
-  // The ring can be switched on while messages for it are switched off, in
-  // which case entries accumulate and the driver finds them when it next looks.
-  // The driver moves the two bits together, so this is a state it never asks
-  // for -- but the field is decoded, and decoding a field and then ignoring it
-  // is how a model starts disagreeing with itself.
-  if (!ring.raises_messages) {
-    return true;
-  }
-  return irq_->trigger(kInterruptVector);
+  return interrupts_->deliver(entry, programmed, consumed, *transport.dma(), *transport.irq());
 }
 
-std::string GpuPciDevice::describe(const InterruptRing &ring) {
-  // Initialised to the fallback and switched without a default: a fourth space
-  // added later is a compiler warning here, while a value cast in from outside
-  // the enumerators still renders as something rather than as a null pointer.
-  const char *space = "an unstated address space";
-  switch (ring.space) {
-  case InterruptRingSpace::BusAddress:
-    space = "a bus address";
-    break;
-  case InterruptRingSpace::GpuVirtual:
-    space = "a translated address";
-    break;
-  case InterruptRingSpace::Unset:
-    space = "an unstated address space";
-    break;
-  }
-  // Whether it was switched on is part of the state, not a detail: a sized and
-  // addressed ring that the driver never enabled is a different situation from
-  // a running one, and reading the two the same way sends whoever is
-  // diagnosing a silent guest looking in the wrong place.
-  return std::format("its interrupt ring at {:#x}, {} bytes, {}, publishing its write pointer to "
-                     "{:#x}; it {} an interrupt per entry, and it is {}",
-                     ring.base, ring.bytes, space, ring.wptr_address,
-                     ring.raises_messages ? "asks for" : "does not ask for",
-                     ring.enabled ? "enabled" : "not yet enabled");
-}
-
-GpuPciDevice::InterruptRing GpuPciDevice::interrupt_ring() const {
-  InterruptRing ring;
-  const IpBlock *osssys = published_block(IpHardwareId::OssSys);
-  if (osssys == nullptr || !segment_within_aperture(osssys->register_bases.front())) {
-    return ring;
-  }
-  const auto value = [this, base = osssys->register_bases.front()](uint32_t reg) -> uint32_t {
-    const uint64_t at = (base + reg) * 4;
-    if (at + 4 > spec_.register_aperture_bytes) {
-      return 0;
-    }
-    return registers_[static_cast<uint32_t>(at / 4)];
-  };
-
-  ring.base =
-      (static_cast<uint64_t>(value(kIhRingBase)) << kIhRingBaseShift) |
-      (static_cast<uint64_t>(value(kIhRingBaseHigh) & kIhRingBaseHighMask) << kIhRingBaseHighShift);
-  ring.wptr_address = static_cast<uint64_t>(value(kIhRingWritePointerAddressLow)) |
-                      ((static_cast<uint64_t>(value(kIhRingWritePointerAddressHigh)) &
-                        kIhWritePointerAddressHighMask)
-                       << 32);
-
-  const uint32_t control = value(kIhRingControl);
-  ring.enabled = (control & kIhRingEnableMask) != 0;
-  ring.raises_messages = (control & kIhRingInterruptEnableMask) != 0;
-  // The field beside them saying what the addresses above are addresses in.
-  // Anything the driver has not written yet reads as zero, which is neither of
-  // the two values it uses and is reported as such rather than guessed at.
-  switch ((control >> kIhRingSpaceShift) & kIhRingSpaceMask) {
-  case static_cast<uint32_t>(InterruptRingSpace::BusAddress):
-    ring.space = InterruptRingSpace::BusAddress;
-    break;
-  case static_cast<uint32_t>(InterruptRingSpace::GpuVirtual):
-    ring.space = InterruptRingSpace::GpuVirtual;
-    break;
-  default:
-    ring.space = InterruptRingSpace::Unset;
-    break;
-  }
-  // The field is the logarithm of the size in dwords, so the size is four bytes
-  // shifted up by it. A ring the driver has not sized yet reads as zero rather
-  // than as the four bytes that shift would otherwise imply.
-  const uint32_t size_log = (control >> kIhRingSizeShift) & kIhRingSizeMask;
-  ring.bytes = size_log == 0 ? 0 : uint64_t{4} << size_log;
-  return ring;
-}
-
-bool GpuPciDevice::define_invalidation_engines(uint64_t segment,
-                                               const InvalidationEngineBlocks &blocks) {
-  // The blocks sit back to back, so a wrong engine count does not overrun the
-  // aperture -- it silently writes one block's registers over the next one's,
-  // and the flush the overwritten register served stalls again.
-  const uint32_t span = kInvalidationEngines * kInvalidationEngineStride;
-  if (blocks.semaphore + span > blocks.request || blocks.request + span > blocks.acknowledge) {
-    util::Logger::warn(
-        std::format("{}: {} invalidation engines do not fit between the semaphore, request and "
-                    "acknowledge blocks of the hub at register segment {:#x} (byte {:#x})",
-                    name(), kInvalidationEngines, segment, segment * 4));
-    return false;
-  }
-
-  for (uint32_t engine = 0; engine < kInvalidationEngines; ++engine) {
-    const uint32_t offset = engine * kInvalidationEngineStride;
-    const uint64_t semaphore = (segment + blocks.semaphore + offset) * 4;
-    const uint64_t request = (segment + blocks.request + offset) * 4;
-    const uint64_t acknowledge = (segment + blocks.acknowledge + offset) * 4;
-    // A hub whose registers fall outside the aperture is reached through an
-    // indirect window this device does not model, so there is nothing to define
-    // and defining it would corrupt an unrelated register. Addresses rise with
-    // the engine, so no later engine is in range once one is not.
-    if (acknowledge + 4 > spec_.register_aperture_bytes) {
-      util::Logger::warn(std::format(
-          "{}: invalidation engine {} of the hub at register segment {:#x} acknowledges at byte "
-          "{:#x}, outside the {}-byte register aperture, so its flushes cannot be answered",
-          name(), engine, segment, acknowledge, spec_.register_aperture_bytes));
-      return false;
-    }
-    define_read_only_register(semaphore, kInvalidationSemaphoreHeld);
-    define_register(request, 0);
-    define_read_only_register(acknowledge, kInvalidationComplete);
-  }
-  return true;
+InterruptRing GpuPciDevice::interrupt_ring() const {
+  // A published table naming no interrupt block this device knows how to model
+  // has said nothing about a ring, which is what a default one reports.
+  return interrupts_ == nullptr ? InterruptRing{} : interrupts_->ring();
 }
 
 uint64_t GpuPciDevice::indirect_address() const {
-  const auto low = registers_[static_cast<uint32_t>(byte_offset_of(MmioRegister::MmIndex) / 4)];
-  const auto high = registers_[static_cast<uint32_t>(byte_offset_of(MmioRegister::MmIndexHi) / 4)];
+  const uint32_t low = registers_.value(byte_offset_of(MmioRegister::MmIndex));
+  const uint32_t high = registers_.value(byte_offset_of(MmioRegister::MmIndexHi));
   return (static_cast<uint64_t>(low) & kIndirectLowMask) |
          (static_cast<uint64_t>(high) << kIndirectHighShift);
 }
 
-bool GpuPciDevice::read_vram(uint64_t offset, uint32_t &value) const {
-  if (vram_fd_ < 0 || offset + sizeof(value) > spec_.vram_bytes) {
-    return false;
-  }
-  return ::pread(vram_fd_, &value, sizeof(value), static_cast<off_t>(offset)) ==
-         static_cast<ssize_t>(sizeof(value));
-}
-
-bool GpuPciDevice::write_vram(uint64_t offset, uint32_t value) {
-  if (vram_fd_ < 0 || offset + sizeof(value) > spec_.vram_bytes) {
-    return false;
-  }
-  return ::pwrite(vram_fd_, &value, sizeof(value), static_cast<off_t>(offset)) ==
-         static_cast<ssize_t>(sizeof(value));
-}
-
-void GpuPciDevice::define_register(uint64_t byte_offset, uint32_t value) {
-  const auto index = static_cast<uint32_t>(byte_offset / 4);
-  registers_[index] = value;
-  modelled_[index] = true;
-  read_only_[index] = false;
-}
-
-void GpuPciDevice::define_read_only_register(uint64_t byte_offset, uint32_t value) {
-  define_register(byte_offset, value);
-  read_only_[static_cast<uint32_t>(byte_offset / 4)] = true;
-}
-
 int64_t GpuPciDevice::access_registers(std::span<std::byte> buf, uint64_t offset, bool write) {
   // Registers are 32 bits wide and naturally aligned; anything else is a driver
-  // bug or a transport bug, and answering it would hide which.
-  if (buf.size() != 4 || (offset % 4) != 0 || offset + 4 > spec_.register_aperture_bytes) {
+  // bug or a transport bug, and answering it would hide which. A device that
+  // refused its own configuration has no aperture at all, and holds() says so.
+  if (buf.size() != kRegisterBytes || !registers_.holds(offset)) {
     return -1;
   }
 
-  const auto index = static_cast<uint32_t>(offset / 4);
-  const bool modelled = modelled_[index];
+  const bool modelled = registers_.modelled(offset);
   if (trace_ != nullptr) {
     trace_->record(kRegisterBar, offset, buf.size(), write, modelled);
   }
@@ -873,8 +933,7 @@ int64_t GpuPciDevice::access_registers(std::span<std::byte> buf, uint64_t offset
     // refused rather than quietly answered out of the framebuffer -- which
     // would hand the driver bytes from an unrelated address and look like
     // working hardware.
-    if ((registers_[static_cast<uint32_t>(byte_offset_of(MmioRegister::MmIndex) / 4)] &
-         kIndirectMemorySelect) == 0) {
+    if ((registers_.value(byte_offset_of(MmioRegister::MmIndex)) & kIndirectMemorySelect) == 0) {
       if (trace_ != nullptr) {
         trace_->record_rejected(kRegisterBar, offset, buf.size(), write);
       }
@@ -883,9 +942,9 @@ int64_t GpuPciDevice::access_registers(std::span<std::byte> buf, uint64_t offset
     uint32_t value = 0;
     if (write) {
       std::memcpy(&value, buf.data(), sizeof(value));
-      (void)write_vram(indirect_address(), value);
+      (void)vram_->write(indirect_address(), value);
     } else {
-      (void)read_vram(indirect_address(), value);
+      (void)vram_->read(indirect_address(), value);
       std::memcpy(buf.data(), &value, sizeof(value));
     }
     return 4;
@@ -897,37 +956,25 @@ int64_t GpuPciDevice::access_registers(std::span<std::byte> buf, uint64_t offset
     // echoing back whatever the driver put there. A read-only register keeps
     // its value for the same reason: what it reports is a property of the
     // hardware, not state the driver owns.
-    if (modelled && !read_only_[index]) {
+    if (modelled && !registers_.read_only(offset)) {
       uint32_t value = 0;
       std::memcpy(&value, buf.data(), sizeof(value));
-      registers_[index] = value;
-      // Switching the interrupt ring on is the moment the device learns where
-      // to deliver, and it is worth saying once rather than being read back
-      // later: a reset clears these registers, so anything asked afterwards
-      // finds a device that was never told.
-      if (ih_control_offset_ && offset == *ih_control_offset_ && (value & kIhRingEnableMask) != 0 &&
-          !announced_interrupt_ring_) {
-        announced_interrupt_ring_ = true;
-        const InterruptRing ring = interrupt_ring();
-        util::Logger::warn(std::format("{}: the driver enabled {}", name(), describe(ring)));
-        // An address the device cannot translate is worth saying plainly now
-        // rather than leaving for whoever wonders why no interrupt arrived.
-        if (ring.space == InterruptRingSpace::GpuVirtual) {
-          util::Logger::warn(
-              std::format("{}: that ring is behind translation tables this device does not walk, "
-                          "so it cannot be reached; the driver places it there whenever firmware "
-                          "is loaded through the security processor",
-                          name()));
-        } else if (ring.space != InterruptRingSpace::BusAddress) {
-          util::Logger::warn(std::format(
-              "{}: that ring names no address space, so where it is cannot be acted on", name()));
-        }
+      (void)registers_.store(offset, value);
+      // The blocks learn what the driver said from the registers themselves,
+      // after the write has landed. Told where rather than what, because a model
+      // that was handed the value would be deciding what a field means twice --
+      // once here and once when it reads the register back.
+      if (interrupts_ != nullptr) {
+        interrupts_->observe_write(offset);
+      }
+      for (const OwnedBlockModel &owned : models_) {
+        owned.model_->observe_register_write(offset, *this);
       }
     }
     return 4;
   }
 
-  const uint32_t value = modelled ? registers_[index] : 0;
+  const uint32_t value = modelled ? registers_.value(offset) : 0;
   std::memcpy(buf.data(), &value, sizeof(value));
   return 4;
 }
@@ -959,17 +1006,35 @@ int64_t GpuPciDevice::bar_access(int bar, std::span<std::byte> buf, uint64_t off
   switch (bar) {
   case kRegisterBar:
     return access_registers(buf, offset, write);
-  case kDoorbellBar:
-    return access_memory(buf, offset, write, doorbells_);
+  case kDoorbellBar: {
+    int64_t result = 0;
+    {
+      const std::lock_guard lock(doorbell_storage_mutex_);
+      result = access_memory(buf, offset, write, doorbells_);
+    }
+    if (result < 0 || !write) {
+      return result;
+    } else {
+      uint64_t value = 0;
+      std::memcpy(&value, buf.data(), buf.size());
+      enqueue_doorbell_notification(offset, value, buf.size());
+      return result;
+    }
+  }
   case kMsixBar:
     return access_memory(buf, offset, write, msix_table_);
   case kVramBar:
     // Reached only for a guest that did not map the aperture; a mapped one
     // never traps here.
-    if (vram_ == nullptr) {
+    if (!vram_.has_value()) {
       return -1;
     }
-    return access_memory(buf, offset, write, {vram_, spec_.vram_aperture_bytes});
+    if (write) {
+      return vram_->write_all(std::span<const std::byte>(buf), offset)
+                 ? static_cast<int64_t>(buf.size())
+                 : -1;
+    }
+    return vram_->read_all(buf, offset) ? static_cast<int64_t>(buf.size()) : -1;
   default:
     break;
   }
@@ -984,23 +1049,402 @@ void GpuPciDevice::dma_map(const simdojo::DmaRegion & /*region*/) {}
 
 void GpuPciDevice::dma_unmap(const simdojo::DmaRegion & /*region*/) {}
 
-void GpuPciDevice::reset(simdojo::ResetKind kind) {
-  util::Logger::warn(std::format("{}: reset requested, kind {}", name(), static_cast<int>(kind)));
-  // Everything a client could have changed goes back to power-on state. Video
-  // memory is not cleared here: a mapping already handed out cannot be taken
-  // back, which is why a device that exports one is served to a single client.
-  std::ranges::fill(doorbells_, std::byte{0});
-  std::ranges::fill(msix_table_, std::byte{0});
-  reset_registers();
-  // The table is restored rather than assumed intact. On real hardware it lives
-  // in memory the security processor reserves and the driver cannot write; here
-  // it is ordinary video memory, reachable through MM_DATA, so a guest that
-  // scribbles over it once would otherwise make every later bind fail.
-  if (!publish_discovery_table()) {
-    util::Logger::warn(std::format("{}: the discovery table could not be restored, so a driver "
-                                   "binding after this reset will refuse the device",
-                                   name()));
+void GpuPciDevice::enqueue_doorbell_notification(uint64_t byte_offset, uint64_t value,
+                                                 std::size_t width) {
+  const std::shared_ptr<simdojo::PciTransportSession> session = transport_session();
+  bool wake = false;
+  {
+    const std::lock_guard lock(doorbell_inbox_mutex_);
+    if (!doorbell_admission_open_)
+      return;
+    doorbell_inbox_.emplace_back(session, session != nullptr ? session->generation() : 0,
+                                 doorbell_reset_epoch_, byte_offset, value, width);
+    if (engine() != nullptr && !doorbell_wake_pending_) {
+      doorbell_wake_pending_ = true;
+      wake = true;
+    }
   }
+  if (wake)
+    engine()->schedule_event_now(&doorbell_event_);
+}
+
+GpuPciDevice::FrontendOperationLease::~FrontendOperationLease() {
+  if (device_ != nullptr)
+    device_->finish_frontend_operation();
+}
+
+GpuPciDevice::FrontendOperationLease::FrontendOperationLease(
+    FrontendOperationLease &&other) noexcept
+    : device_(std::exchange(other.device_, nullptr)) {}
+
+GpuPciDevice::FrontendOperationLease &
+GpuPciDevice::FrontendOperationLease::operator=(FrontendOperationLease &&other) noexcept {
+  if (this == &other)
+    return *this;
+  if (device_ != nullptr)
+    device_->finish_frontend_operation();
+  device_ = std::exchange(other.device_, nullptr);
+  return *this;
+}
+
+GpuPciDevice::FrontendOperationLease
+GpuPciDevice::acquire_frontend_operation(uint64_t reset_epoch) {
+  const std::lock_guard lock(doorbell_inbox_mutex_);
+  if (!doorbell_admission_open_ || reset_epoch != doorbell_reset_epoch_)
+    return {};
+  ++active_frontend_operations_;
+  return FrontendOperationLease(this);
+}
+
+void GpuPciDevice::finish_frontend_operation() {
+  const std::lock_guard lock(doorbell_inbox_mutex_);
+  if (active_frontend_operations_ == 0)
+    return;
+  --active_frontend_operations_;
+  if (active_frontend_operations_ == 0)
+    doorbell_idle_.notify_all();
+}
+
+bool GpuPciDevice::same_doorbell_retry_target(const DoorbellRetry &retry,
+                                              const DoorbellNotification &notification,
+                                              const IpBlockModel *model) {
+  return retry.model_ == model && retry.notification_.generation_ == notification.generation_ &&
+         retry.notification_.reset_epoch_ == notification.reset_epoch_ &&
+         retry.notification_.byte_offset_ == notification.byte_offset_;
+}
+
+void GpuPciDevice::enqueue_doorbell_retry(const DoorbellNotification &notification,
+                                          IpBlockModel *model, simdojo::Tick now,
+                                          simdojo::Tick backoff) {
+  if (model == nullptr)
+    return;
+  if (now == simdojo::TICK_MAX)
+    return;
+  const simdojo::Tick bounded_backoff = std::min(backoff, kMaximumDoorbellRetryBackoff);
+  const simdojo::Tick ready_tick = add_ticks_saturated(now, bounded_backoff);
+  simdojo::Tick scheduled_tick = ready_tick;
+  bool wake = false;
+  {
+    const std::lock_guard lock(doorbell_inbox_mutex_);
+    if (!doorbell_admission_open_ || notification.reset_epoch_ != doorbell_reset_epoch_)
+      return;
+    const std::deque<DoorbellRetry>::iterator duplicate =
+        std::ranges::find_if(doorbell_retry_inbox_, [&](const DoorbellRetry &retry) {
+          return same_doorbell_retry_target(retry, notification, model);
+        });
+    simdojo::Tick candidate_tick = ready_tick;
+    if (duplicate != doorbell_retry_inbox_.end()) {
+      duplicate->notification_.value_ =
+          std::max(duplicate->notification_.value_, notification.value_);
+      duplicate->notification_.width_ = notification.width_;
+      duplicate->backoff_ = std::min(duplicate->backoff_, bounded_backoff);
+      duplicate->ready_tick_ = std::min(duplicate->ready_tick_, ready_tick);
+      candidate_tick = duplicate->ready_tick_;
+    } else {
+      doorbell_retry_inbox_.emplace_back(notification, model, bounded_backoff, ready_tick);
+    }
+    if (engine() != nullptr &&
+        (!doorbell_retry_wake_tick_ || candidate_tick < *doorbell_retry_wake_tick_)) {
+      doorbell_retry_wake_tick_ = candidate_tick;
+      scheduled_tick = candidate_tick;
+      wake = true;
+    }
+  }
+  if (wake)
+    schedule_event(&doorbell_retry_event_, scheduled_tick);
+}
+
+void GpuPciDevice::discard_doorbell_retry(const DoorbellNotification &notification,
+                                          IpBlockModel *model) {
+  const std::lock_guard lock(doorbell_inbox_mutex_);
+  std::erase_if(doorbell_retry_inbox_, [&](const DoorbellRetry &retry) {
+    return same_doorbell_retry_target(retry, notification, model);
+  });
+}
+
+void GpuPciDevice::drain_doorbell_inbox(simdojo::Tick now) {
+  drain_sdma_pci_effects();
+  std::deque<DoorbellNotification> notifications;
+  {
+    const std::lock_guard lock(doorbell_inbox_mutex_);
+    notifications.swap(doorbell_inbox_);
+    doorbell_wake_pending_ = false;
+  }
+
+  for (const DoorbellNotification &notification : notifications) {
+    const std::shared_ptr<simdojo::PciTransportSession> session = notification.session_.lock();
+    if (session == nullptr || session->generation() != notification.generation_)
+      continue;
+    simdojo::PciTransportSession::OperationLease lease = session->acquire();
+    FrontendOperationLease frontend = acquire_frontend_operation(notification.reset_epoch_);
+    if (!lease || transport_session() != session || !frontend)
+      continue;
+
+    try {
+      for (const OwnedBlockModel &owned : models_) {
+        const DoorbellDisposition disposition = owned.model_->observe_doorbell_write(
+            notification.byte_offset_, notification.value_, notification.width_, *this);
+        if (disposition == DoorbellDisposition::Retry) {
+          enqueue_doorbell_retry(notification, owned.model_.get(), now, 1);
+        } else if (disposition != DoorbellDisposition::Ignored) {
+          discard_doorbell_retry(notification, owned.model_.get());
+        }
+      }
+    } catch (const std::exception &error) {
+      util::Logger::warn(
+          std::format("{}: deferred doorbell handling failed: {}", name(), error.what()));
+    } catch (...) {
+      util::Logger::warn(std::format("{}: deferred doorbell handling failed", name()));
+    }
+  }
+}
+
+void GpuPciDevice::drain_doorbell_retry_inbox(simdojo::Tick now, bool ignore_ready) {
+  drain_sdma_pci_effects();
+  std::deque<DoorbellRetry> retries;
+  {
+    const std::lock_guard lock(doorbell_inbox_mutex_);
+    if (doorbell_retry_wake_tick_ && *doorbell_retry_wake_tick_ <= now)
+      doorbell_retry_wake_tick_.reset();
+    retries.swap(doorbell_retry_inbox_);
+  }
+
+  std::deque<DoorbellRetry> deferred;
+  for (DoorbellRetry &retry : retries) {
+    if (!ignore_ready && retry.ready_tick_ > now) {
+      deferred.push_back(std::move(retry));
+      continue;
+    }
+
+    const DoorbellNotification &notification = retry.notification_;
+    const std::shared_ptr<simdojo::PciTransportSession> session = notification.session_.lock();
+    if (session == nullptr || session->generation() != notification.generation_)
+      continue;
+    simdojo::PciTransportSession::OperationLease lease = session->acquire();
+    FrontendOperationLease frontend = acquire_frontend_operation(notification.reset_epoch_);
+    if (!lease || transport_session() != session || !frontend)
+      continue;
+
+    DoorbellDisposition disposition = DoorbellDisposition::Faulted;
+    try {
+      disposition = retry.model_->observe_doorbell_write(
+          notification.byte_offset_, notification.value_, notification.width_, *this);
+    } catch (const std::exception &error) {
+      util::Logger::warn(
+          std::format("{}: deferred doorbell retry failed: {}", name(), error.what()));
+    } catch (...) {
+      util::Logger::warn(std::format("{}: deferred doorbell retry failed", name()));
+    }
+    if (disposition == DoorbellDisposition::Retry) {
+      if (now == simdojo::TICK_MAX)
+        continue;
+      retry.backoff_ = std::min(retry.backoff_ * 2, kMaximumDoorbellRetryBackoff);
+      retry.ready_tick_ = add_ticks_saturated(now, retry.backoff_);
+      deferred.push_back(std::move(retry));
+    }
+  }
+
+  if (deferred.empty())
+    return;
+
+  simdojo::Tick next_tick = simdojo::TICK_MAX;
+  bool wake = false;
+  {
+    const std::lock_guard lock(doorbell_inbox_mutex_);
+    if (!doorbell_admission_open_)
+      return;
+    for (DoorbellRetry &retry : deferred) {
+      if (retry.notification_.reset_epoch_ != doorbell_reset_epoch_)
+        continue;
+      const std::deque<DoorbellRetry>::iterator duplicate =
+          std::ranges::find_if(doorbell_retry_inbox_, [&](const DoorbellRetry &candidate) {
+            return same_doorbell_retry_target(candidate, retry.notification_, retry.model_);
+          });
+      if (duplicate == doorbell_retry_inbox_.end()) {
+        next_tick = std::min(next_tick, retry.ready_tick_);
+        doorbell_retry_inbox_.push_back(std::move(retry));
+        continue;
+      }
+      duplicate->notification_.value_ =
+          std::max(duplicate->notification_.value_, retry.notification_.value_);
+      duplicate->notification_.width_ = retry.notification_.width_;
+      duplicate->backoff_ = std::min(duplicate->backoff_, retry.backoff_);
+      duplicate->ready_tick_ = std::min(duplicate->ready_tick_, retry.ready_tick_);
+      next_tick = std::min(next_tick, duplicate->ready_tick_);
+    }
+    if (engine() != nullptr && next_tick != simdojo::TICK_MAX &&
+        (!doorbell_retry_wake_tick_ || next_tick < *doorbell_retry_wake_tick_)) {
+      doorbell_retry_wake_tick_ = next_tick;
+      wake = true;
+    }
+  }
+  if (wake)
+    schedule_event(&doorbell_retry_event_, next_tick);
+}
+
+void GpuPciDevice::drain_doorbell_inbox_for_test() {
+  if (engine() != nullptr)
+    return;
+  bool normal_work = false;
+  {
+    const std::lock_guard lock(doorbell_inbox_mutex_);
+    normal_work = !doorbell_inbox_.empty();
+  }
+  if (normal_work)
+    drain_doorbell_inbox(0);
+  else
+    drain_doorbell_retry_inbox(0, true);
+
+  if (soc_ == nullptr || soc_->sdma_queue_scheduler().active_queues() == 0)
+    return;
+
+  // Let the asynchronous SDMA owner post packet side effects and final queue
+  // progress, then apply both on this owner thread. The scheduler, not this
+  // frontend, retries a retained packet after an unavailable side effect.
+  const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(50);
+  uint32_t idle_rounds = 0;
+  bool observed_sdma_message = false;
+  while (std::chrono::steady_clock::now() < deadline) {
+    bool has_message = false;
+    {
+      const std::lock_guard lock(sdma_effect_mutex_);
+      has_message = !sdma_effect_inbox_.empty() || !sdma_progress_inbox_.empty();
+    }
+    if (has_message) {
+      observed_sdma_message = true;
+      idle_rounds = 0;
+      drain_sdma_pci_effects();
+      continue;
+    }
+    if (observed_sdma_message && ++idle_rounds >= 20)
+      break;
+    std::this_thread::sleep_for(std::chrono::microseconds(50));
+  }
+}
+
+void GpuPciDevice::close_doorbell_admission_for_reset() {
+  std::unique_lock lock(doorbell_inbox_mutex_);
+  doorbell_admission_open_ = false;
+  ++doorbell_reset_epoch_;
+  if (doorbell_reset_epoch_ == 0)
+    ++doorbell_reset_epoch_;
+  doorbell_inbox_.clear();
+  doorbell_retry_inbox_.clear();
+  doorbell_retry_wake_tick_.reset();
+  doorbell_wake_pending_ = false;
+  cancel_sdma_pci_effects();
+  doorbell_idle_.wait(lock, [this]() { return active_frontend_operations_ == 0; });
+}
+
+void GpuPciDevice::reopen_doorbell_admission_after_reset() {
+  {
+    const std::lock_guard lock(doorbell_inbox_mutex_);
+    doorbell_admission_open_ = true;
+  }
+  const std::lock_guard lock(sdma_effect_mutex_);
+  sdma_effect_admission_open_ = true;
+}
+
+bool GpuPciDevice::read_vram(uint64_t offset, std::span<std::byte> bytes) {
+  return vram_.has_value() && vram_->read_all(bytes, offset);
+}
+
+bool GpuPciDevice::write_vram(uint64_t offset, std::span<const std::byte> bytes) {
+  return vram_.has_value() && vram_->write_all(bytes, offset);
+}
+
+amdgpu::AtomicLoadResult GpuPciDevice::atomic_load_vram(uint64_t offset, uint32_t width) {
+  if (!vram_.has_value())
+    return {.outcome = amdgpu::VmAccessOutcome::Unavailable};
+  const std::optional<VramAtomicLoadResult> result = vram_->atomic_load(offset, width);
+  if (!result.has_value())
+    return {.outcome = amdgpu::VmAccessOutcome::Faulted};
+  return {.outcome = amdgpu::VmAccessOutcome::Complete, .value = result->value};
+}
+
+amdgpu::VmAccessOutcome GpuPciDevice::atomic_store_vram(uint64_t offset, uint32_t width,
+                                                        uint64_t value) {
+  if (!vram_.has_value())
+    return amdgpu::VmAccessOutcome::Unavailable;
+  return vram_->atomic_store(offset, width, value) ? amdgpu::VmAccessOutcome::Complete
+                                                   : amdgpu::VmAccessOutcome::Faulted;
+}
+
+amdgpu::AtomicCompareExchangeResult GpuPciDevice::compare_exchange_vram(uint64_t offset,
+                                                                        uint32_t width,
+                                                                        uint64_t expected,
+                                                                        uint64_t desired) {
+  if (!vram_.has_value())
+    return {.outcome = amdgpu::VmAccessOutcome::Unavailable};
+  const std::optional<VramAtomicCompareExchangeResult> result =
+      vram_->compare_exchange(offset, width, expected, desired);
+  if (!result.has_value())
+    return {.outcome = amdgpu::VmAccessOutcome::Faulted};
+  return {.outcome = amdgpu::VmAccessOutcome::Complete,
+          .observed = result->observed,
+          .exchanged = result->exchanged};
+}
+
+bool GpuPciDevice::read_register(uint64_t byte_offset, uint32_t &value) {
+  if (!registers_.holds(byte_offset)) {
+    return false;
+  }
+  value = registers_.value(byte_offset);
+  return true;
+}
+
+bool GpuPciDevice::write_register(uint64_t byte_offset, uint32_t value) {
+  if (!registers_.holds(byte_offset)) {
+    return false;
+  }
+  if (registers_.modelled(byte_offset) && !registers_.read_only(byte_offset)) {
+    if (!registers_.store(byte_offset, value))
+      return false;
+    for (const OwnedBlockModel &owned : models_) {
+      owned.model_->observe_register_write(byte_offset, *this);
+    }
+  }
+  return true;
+}
+
+void GpuPciDevice::reset(simdojo::ResetKind kind) {
+  const std::lock_guard reset_lock(doorbell_reset_mutex_);
+  close_doorbell_admission_for_reset();
+  util::Logger::warn(std::format("{}: reset requested, kind {}", name(), static_cast<int>(kind)));
+  try {
+    const bool queues_released = teardown_frontend_queues();
+    if (!queues_released)
+      throw std::runtime_error("PCI queue state could not be cleared");
+    if (soc_ != nullptr) {
+      // Preserve the device-global VMID-0 identity, but drop the translator
+      // and its retained transport backing. A later hub invalidation publishes
+      // the replacement frontend's coherent GART configuration.
+      if (!soc_->gpu_vm().clear_gart_binding())
+        throw std::runtime_error("VMID-0 GART binding could not be cleared");
+    }
+    // Everything a client could have changed goes back to power-on state. Video
+    // memory is not cleared here: a mapping already handed out cannot be taken
+    // back, which is why a device that exports one is served to a single client.
+    {
+      const std::lock_guard lock(doorbell_storage_mutex_);
+      std::ranges::fill(doorbells_, std::byte{0});
+    }
+    std::ranges::fill(msix_table_, std::byte{0});
+    reset_registers();
+    // The table is restored rather than assumed intact. On real hardware it lives
+    // in memory the security processor reserves and the driver cannot write; here
+    // it is ordinary video memory, reachable through MM_DATA, so a guest that
+    // scribbles over it once would otherwise make every later bind fail.
+    if (!publish_discovery_table()) {
+      util::Logger::warn(std::format("{}: the discovery table could not be restored, so a driver "
+                                     "binding after this reset will refuse the device",
+                                     name()));
+    }
+  } catch (...) {
+    reopen_doorbell_admission_after_reset();
+    throw;
+  }
+  reopen_doorbell_admission_after_reset();
 }
 
 } // namespace rocjitsu

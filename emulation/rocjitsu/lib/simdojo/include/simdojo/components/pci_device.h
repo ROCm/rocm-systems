@@ -33,8 +33,12 @@
 
 #include "simdojo/sim/component.h"
 
+#include <atomic>
+#include <condition_variable>
 #include <cstddef>
 #include <cstdint>
+#include <memory>
+#include <mutex>
 #include <span>
 #include <string>
 #include <utility>
@@ -170,6 +174,17 @@ struct InterruptSpec {
   uint64_t pending_offset = 0; ///< Byte offset of the pending-bit array, likewise.
 };
 
+/// @brief PCI Express capabilities implemented by a device.
+///
+/// @details These are properties of the function, not of the transport carrying
+/// its configuration space. In particular, a transport must not advertise
+/// AtomicOp completion merely because it can forward ordinary DMA: software
+/// uses these bits to decide whether the device may issue atomic requests.
+struct PcieSpec {
+  bool atomic_completer_32 = false; ///< Completes 32-bit PCIe AtomicOps.
+  bool atomic_completer_64 = false; ///< Completes 64-bit PCIe AtomicOps.
+};
+
 /// @brief Sink through which a device raises interrupts toward the guest.
 ///
 /// @details Implemented by the transport and injected into the device so the
@@ -184,6 +199,30 @@ public:
   /// @retval true The interrupt was handed to the transport.
   /// @retval false Delivery failed, for example because no guest is attached.
   [[nodiscard]] virtual bool trigger(uint32_t vector) = 0;
+};
+
+/// @brief Result of one transport-mediated DMA access.
+///
+/// @details Kept transport-neutral so PCI devices can preserve why an access
+/// failed without depending on a device-family VM result type.
+enum class DmaAccessOutcome : uint8_t {
+  Complete,    ///< The complete range was transferred.
+  Unavailable, ///< No live peer or transport endpoint can service the request.
+  Faulted,     ///< The peer rejected or did not map the requested range.
+  Malformed,   ///< The request itself cannot describe a valid transfer.
+};
+
+/// @brief Result of one strong compare/exchange through a DMA transport.
+struct DmaAtomicCompareExchangeResult {
+  DmaAccessOutcome outcome = DmaAccessOutcome::Faulted;
+  uint64_t observed = 0;
+  bool exchanged = false;
+};
+
+/// @brief Result of one indivisible 4- or 8-byte DMA load.
+struct DmaAtomicLoadResult {
+  DmaAccessOutcome outcome = DmaAccessOutcome::Faulted;
+  uint64_t value = 0;
 };
 
 /// @brief Engine through which a device reaches guest memory.
@@ -220,6 +259,199 @@ public:
   /// them, so an implementation that buffers has to flush here to hold up its
   /// side -- an implementation that cannot must fail rather than return true.
   [[nodiscard]] virtual bool write(uint64_t guest_phys, std::span<const std::byte> src) = 0;
+
+  /// @brief Typed form of @ref read used by revocable backing sessions.
+  /// @details Existing transports retain their boolean API through the default
+  /// implementation. Transports that can distinguish absence, address faults,
+  /// and malformed requests override this method.
+  [[nodiscard]] virtual DmaAccessOutcome read_outcome(uint64_t guest_phys,
+                                                      std::span<std::byte> dst) {
+    return read(guest_phys, dst) ? DmaAccessOutcome::Complete : DmaAccessOutcome::Faulted;
+  }
+
+  /// @brief Typed form of @ref write used by revocable backing sessions.
+  [[nodiscard]] virtual DmaAccessOutcome write_outcome(uint64_t guest_phys,
+                                                       std::span<const std::byte> src) {
+    return write(guest_phys, src) ? DmaAccessOutcome::Complete : DmaAccessOutcome::Faulted;
+  }
+
+  /// @brief Perform one acquire load from naturally aligned guest memory.
+  [[nodiscard]] virtual DmaAtomicLoadResult atomic_load(uint64_t guest_phys, uint32_t width) {
+    (void)guest_phys;
+    (void)width;
+    return {};
+  }
+
+  /// @brief Perform one release store to naturally aligned guest memory.
+  [[nodiscard]] virtual DmaAccessOutcome atomic_store(uint64_t guest_phys, uint32_t width,
+                                                      uint64_t value) {
+    (void)guest_phys;
+    (void)width;
+    (void)value;
+    return DmaAccessOutcome::Faulted;
+  }
+
+  /// @brief Perform one non-spurious atomic compare/exchange in guest memory.
+  /// @details The default rejects the request; synthesizing it from read/write
+  /// would falsely claim atomicity. Only naturally aligned widths 4 and 8 are
+  /// valid for implementations that support it.
+  [[nodiscard]] virtual DmaAtomicCompareExchangeResult
+  compare_exchange(uint64_t guest_phys, uint32_t width, uint64_t expected, uint64_t desired) {
+    (void)guest_phys;
+    (void)width;
+    (void)expected;
+    (void)desired;
+    return {};
+  }
+};
+
+/// @brief The two endpoints supplied by one PCI transport owner.
+struct PciTransport {
+  IrqSink *irq = nullptr;   ///< Where the device raises interrupts, or nullptr.
+  DmaEngine *dma = nullptr; ///< How the device reaches guest memory, or nullptr.
+};
+
+/// @brief One generation of access to a transport's downstream peer.
+///
+/// @details A transport owner can serve several peers over its lifetime. Each
+/// peer receives a distinct session so device state retained from an earlier
+/// peer can never migrate to a later one. Revocation first refuses new leases,
+/// then waits for admitted operations before endpoint storage may be destroyed.
+class PciTransportSession final : public std::enable_shared_from_this<PciTransportSession> {
+public:
+  enum class State : uint8_t { Open, Closing, Revoked };
+
+  class OperationLease {
+  public:
+    OperationLease() = default;
+    OperationLease(const OperationLease &) = delete;
+    OperationLease &operator=(const OperationLease &) = delete;
+
+    OperationLease(OperationLease &&other) noexcept
+        : session_(std::move(other.session_)), endpoints_(other.endpoints_) {
+      other.endpoints_ = {};
+    }
+
+    OperationLease &operator=(OperationLease &&other) noexcept {
+      if (this == &other)
+        return *this;
+      release();
+      session_ = std::move(other.session_);
+      endpoints_ = other.endpoints_;
+      other.endpoints_ = {};
+      return *this;
+    }
+
+    ~OperationLease() { release(); }
+
+    [[nodiscard]] explicit operator bool() const { return session_ != nullptr; }
+    [[nodiscard]] DmaEngine *dma() const { return endpoints_.dma; }
+    [[nodiscard]] IrqSink *irq() const { return endpoints_.irq; }
+
+    [[nodiscard]] DmaAccessOutcome read(uint64_t guest_phys, std::span<std::byte> dst) const {
+      return endpoints_.dma != nullptr ? endpoints_.dma->read_outcome(guest_phys, dst)
+                                       : DmaAccessOutcome::Unavailable;
+    }
+
+    [[nodiscard]] DmaAccessOutcome write(uint64_t guest_phys,
+                                         std::span<const std::byte> src) const {
+      return endpoints_.dma != nullptr ? endpoints_.dma->write_outcome(guest_phys, src)
+                                       : DmaAccessOutcome::Unavailable;
+    }
+
+    [[nodiscard]] DmaAtomicCompareExchangeResult compare_exchange(uint64_t guest_phys,
+                                                                  uint32_t width, uint64_t expected,
+                                                                  uint64_t desired) const {
+      return endpoints_.dma != nullptr
+                 ? endpoints_.dma->compare_exchange(guest_phys, width, expected, desired)
+                 : DmaAtomicCompareExchangeResult{.outcome = DmaAccessOutcome::Unavailable};
+    }
+
+    [[nodiscard]] DmaAtomicLoadResult atomic_load(uint64_t guest_phys, uint32_t width) const {
+      return endpoints_.dma != nullptr
+                 ? endpoints_.dma->atomic_load(guest_phys, width)
+                 : DmaAtomicLoadResult{.outcome = DmaAccessOutcome::Unavailable};
+    }
+
+    [[nodiscard]] DmaAccessOutcome atomic_store(uint64_t guest_phys, uint32_t width,
+                                                uint64_t value) const {
+      return endpoints_.dma != nullptr ? endpoints_.dma->atomic_store(guest_phys, width, value)
+                                       : DmaAccessOutcome::Unavailable;
+    }
+
+    [[nodiscard]] bool trigger(uint32_t vector) const {
+      return endpoints_.irq != nullptr && endpoints_.irq->trigger(vector);
+    }
+
+  private:
+    friend class PciTransportSession;
+    OperationLease(std::shared_ptr<PciTransportSession> session, PciTransport endpoints)
+        : session_(std::move(session)), endpoints_(endpoints) {}
+
+    void release() {
+      if (session_ == nullptr)
+        return;
+      session_->release_operation();
+      session_.reset();
+      endpoints_ = {};
+    }
+
+    std::shared_ptr<PciTransportSession> session_;
+    PciTransport endpoints_;
+  };
+
+  [[nodiscard]] OperationLease acquire() {
+    std::lock_guard lock(mutex_);
+    if (state_ != State::Open)
+      return {};
+    ++active_operations_;
+    return OperationLease(shared_from_this(), endpoints_);
+  }
+
+  /// @brief Refuse future leases without waiting for admitted operations.
+  /// @retval true This call changed the state from open to closing.
+  bool begin_revoke() {
+    std::lock_guard lock(mutex_);
+    if (state_ != State::Open)
+      return false;
+    state_ = State::Closing;
+    return true;
+  }
+
+  /// @brief Wait for admitted operations and permanently clear the endpoints.
+  void wait_until_drained() {
+    std::unique_lock lock(mutex_);
+    if (state_ == State::Open)
+      state_ = State::Closing;
+    drained_.wait(lock, [this]() { return active_operations_ == 0; });
+    endpoints_ = {};
+    state_ = State::Revoked;
+  }
+
+  [[nodiscard]] uint64_t generation() const { return generation_; }
+
+  [[nodiscard]] State state() const {
+    std::lock_guard lock(mutex_);
+    return state_;
+  }
+
+private:
+  friend class PciDevice;
+  PciTransportSession(uint64_t generation, PciTransport endpoints)
+      : generation_(generation), endpoints_(endpoints) {}
+
+  void release_operation() {
+    std::lock_guard lock(mutex_);
+    if (--active_operations_ == 0)
+      drained_.notify_all();
+  }
+
+  const uint64_t generation_;
+  mutable std::mutex mutex_;
+  std::condition_variable drained_;
+  PciTransport endpoints_;
+  State state_ = State::Open;
+  uint64_t active_operations_ = 0;
 };
 
 /// @brief A simulated PCI function: a component with a transport-agnostic bus face.
@@ -254,15 +486,121 @@ public:
   /// @returns The specification; the default advertises no interrupts.
   [[nodiscard]] virtual InterruptSpec interrupts() const { return {}; }
 
-  /// @brief Inject the sink the device raises interrupts through.
-  /// @param[in] sink Transport-owned sink, or nullptr to detach.
-  /// @details The transport must detach its sinks before it is destroyed, since
-  /// the device holds them as non-owning pointers.
-  void set_irq_sink(IrqSink *sink) { irq_ = sink; }
+  /// @brief Return the PCI Express capabilities implemented by this device.
+  /// @returns The specification; the default advertises no optional features.
+  [[nodiscard]] virtual PcieSpec pcie() const { return {}; }
 
-  /// @brief Inject the engine the device reaches guest memory through.
-  /// @param[in] engine Transport-owned engine, or nullptr to detach.
-  void set_dma_engine(DmaEngine *engine) { dma_ = engine; }
+  /// @brief The two sinks a transport gives a device, as one object.
+  ///
+  /// @details Grouped rather than installed separately because they arrive from
+  /// the same transport, share its lifetime, and are used together: an interrupt
+  /// is delivered by writing the ring through the engine and *then* raising the
+  /// sink. Two independently-published pointers make a half-attached device
+  /// representable, and a device with a thread of its own can observe that state.
+  ///
+  /// Owned by the transport and immutable once published, so a device that has
+  /// taken a pointer to one holds a consistent pair for as long as it uses it.
+  using Transport = PciTransport;
+
+  /// @brief Claim this device for @p transport.
+  ///
+  /// @details A device serves one transport at a time. The claim is a single
+  /// compare-and-exchange rather than a test followed by a store, because the
+  /// two are not the same promise: with a gap between them, two transports both
+  /// find the device free, both believe they own it, and both will later detach
+  /// it. Publishing one pointer also means there is no moment at which a reader
+  /// can see half a transport.
+  ///
+  /// Either sink inside @p transport may be null, which claims the device for a
+  /// transport that cannot do that half of the job; the device declines the
+  /// operations needing it rather than dereferencing null.
+  ///
+  /// A transport whose detach is draining still occupies the device. A new
+  /// owner may attach only after that drain finishes, so endpoint generations
+  /// cannot overlap even though detach waits without holding the device mutex.
+  ///
+  /// @param[in] transport Transport-owned record; must outlive the attachment.
+  /// @retval true The device is now attached to @p transport.
+  /// @retval false Another transport holds it; this one was not installed.
+  [[nodiscard]] bool attach_transport(const Transport *transport) {
+    if (transport == nullptr)
+      return false;
+    std::lock_guard lock(transport_mutex_);
+    if (transport_ != nullptr || closing_transport_session_ != nullptr)
+      return false;
+    std::shared_ptr<PciTransportSession> session = make_transport_session_locked(*transport);
+    transport_ = transport;
+    transport_session_ = std::move(session);
+    return true;
+  }
+
+  /// @brief Start a fresh downstream-peer generation for the owning transport.
+  /// @details The previous generation must have been revoked first. This split
+  /// lets a long-lived transport host serve sequential clients without letting
+  /// state captured for one client reach the next.
+  [[nodiscard]] std::shared_ptr<PciTransportSession>
+  activate_transport_session(const Transport *transport) {
+    std::lock_guard lock(transport_mutex_);
+    if (transport_ != transport || transport_session_ != nullptr ||
+        (closing_transport_session_ != nullptr &&
+         closing_transport_session_->state() != PciTransportSession::State::Revoked))
+      return {};
+    closing_transport_session_.reset();
+    transport_session_ = make_transport_session_locked(*transport);
+    return transport_session_;
+  }
+
+  /// @brief Unpublish and begin revoking the current downstream-peer session.
+  /// @returns The closing session for its owner to quiesce and drain, or null.
+  [[nodiscard]] std::shared_ptr<PciTransportSession>
+  revoke_transport_session(const Transport *transport) {
+    std::lock_guard lock(transport_mutex_);
+    if (transport_ != transport || transport_session_ == nullptr)
+      return {};
+    std::shared_ptr<PciTransportSession> closing = std::move(transport_session_);
+    (void)closing->begin_revoke();
+    closing_transport_session_ = closing;
+    return closing;
+  }
+
+  /// @brief Release this device, if @p transport is what holds it.
+  ///
+  /// @details Takes the claimant rather than nothing, so releasing is checked
+  /// the way claiming is. An unchecked release lets a transport that never won
+  /// the device evict the one that did -- which is how a refused second
+  /// transport turns into a broken first one.
+  ///
+  /// Stopping *later* calls is all this does. A device thread already inside
+  /// @ref IrqSink::trigger or @ref DmaEngine::write is unaffected, so a device
+  /// with threads of its own must be quiesced before its transport is destroyed;
+  /// this is the second half of that, not a substitute for it.
+  ///
+  /// @param[in] transport The transport releasing its claim.
+  /// @retval true The device was held by @p transport and is now free.
+  /// @retval false Something else holds it; nothing was changed.
+  bool detach_transport(const Transport *transport) {
+    std::shared_ptr<PciTransportSession> closing;
+    {
+      std::lock_guard lock(transport_mutex_);
+      if (transport_ != transport)
+        return false;
+      closing = take_transport_session_for_shutdown_locked();
+    }
+    drain_transport_session(std::move(closing));
+    return true;
+  }
+
+  /// @brief Whether a transport currently holds this device.
+  [[nodiscard]] bool transport_attached() const {
+    std::lock_guard lock(transport_mutex_);
+    return transport_ != nullptr || closing_transport_session_ != nullptr;
+  }
+
+  /// @brief Generation of the currently active downstream peer, or zero.
+  [[nodiscard]] uint64_t transport_session_generation() const {
+    std::lock_guard lock(transport_mutex_);
+    return transport_session_ != nullptr ? transport_session_->generation() : 0;
+  }
 
   /// @brief Service a guest read or write to a BAR.
   /// @param[in] bar BAR index the access targets.
@@ -290,11 +628,72 @@ public:
   virtual void reset(ResetKind /*kind*/) {}
 
 protected:
-  IrqSink *irq_ = nullptr;   ///< Transport-injected interrupt sink, or nullptr when detached.
-  DmaEngine *dma_ = nullptr; ///< Transport-injected DMA engine, or nullptr when detached.
+  /// @brief Revoke the current transport while a derived device is still alive.
+  ///
+  /// @details Retained device state may hold a @ref PciTransportSession and a
+  /// non-owning pointer back into the derived device. A derived destructor must
+  /// call this before destroying that state. Revocation refuses new leases and
+  /// waits for every admitted operation, so a retained session cannot reach
+  /// either the transport endpoints or the derived device after this returns.
+  void shutdown_transport() {
+    std::shared_ptr<PciTransportSession> closing;
+    {
+      std::lock_guard lock(transport_mutex_);
+      closing = take_transport_session_for_shutdown_locked();
+    }
+    drain_transport_session(std::move(closing));
+  }
+
+  /// @brief Acquire the current peer generation for one complete operation.
+  [[nodiscard]] PciTransportSession::OperationLease acquire_transport() const {
+    std::shared_ptr<PciTransportSession> session;
+    {
+      std::lock_guard lock(transport_mutex_);
+      session = transport_session_;
+    }
+    return session != nullptr ? session->acquire() : PciTransportSession::OperationLease{};
+  }
+
+  /// @brief Capture the exact current peer generation for retained device state.
+  [[nodiscard]] std::shared_ptr<PciTransportSession> transport_session() const {
+    std::lock_guard lock(transport_mutex_);
+    return transport_session_;
+  }
 
 private:
+  [[nodiscard]] std::shared_ptr<PciTransportSession> take_transport_session_for_shutdown_locked() {
+    if (transport_session_ != nullptr) {
+      (void)transport_session_->begin_revoke();
+      closing_transport_session_ = std::move(transport_session_);
+    }
+    transport_ = nullptr;
+    return closing_transport_session_;
+  }
+
+  void drain_transport_session(std::shared_ptr<PciTransportSession> closing) {
+    if (closing == nullptr)
+      return;
+    closing->wait_until_drained();
+    const std::lock_guard lock(transport_mutex_);
+    if (closing_transport_session_ == closing)
+      closing_transport_session_.reset();
+  }
+
+  [[nodiscard]] std::shared_ptr<PciTransportSession>
+  make_transport_session_locked(const Transport &transport) {
+    uint64_t generation = next_transport_generation_++;
+    if (generation == 0) {
+      generation = next_transport_generation_++;
+    }
+    return std::shared_ptr<PciTransportSession>(new PciTransportSession(generation, transport));
+  }
+
   PciId id_;
+  mutable std::mutex transport_mutex_;
+  const Transport *transport_ = nullptr;
+  std::shared_ptr<PciTransportSession> transport_session_;
+  std::shared_ptr<PciTransportSession> closing_transport_session_;
+  uint64_t next_transport_generation_ = 1;
 };
 
 } // namespace simdojo
