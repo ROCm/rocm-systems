@@ -117,7 +117,6 @@ string_t prefer_library = {};
 //  global variables
 //
 patch_pointer_t  bpatch                        = {};
-call_expr_t*     terminate_expr                = nullptr;
 snippet_vec_t    init_names                    = {};
 snippet_vec_t    fini_names                    = {};
 fmodset_t        available_module_functions    = {};
