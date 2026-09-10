@@ -18,6 +18,8 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 * Added a profile-mode warning on gfx115x when the `AUTO` performance level can gate the perfmon clock and zero PMC counters such as `TCP_REQ`, with a link to the ROCprofiler-SDK `STABLE_STD` workaround.
 
+* Added CLI guidance for viewing the wide memory chart without line wrapping (`less -RS` or `code -`).
+
 ### Changed
 
 * gfx115x Memory Chart improvements.
@@ -50,6 +52,10 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 ### Resolved issues
 
 * Fixed `L2 Cache (per Channel)` labels to use a `Metric` column and numbered `Channel` row labels in CLI, TUI, and analysis database output.
+
+* Fixed `--set` running the roofline microbenchmark, which is never part of a metric set.
+
+* Fixed PC sampling source snapshots to use canonical paths and include source contents and checksums in analysis exports.
 
 * Fixed false `0` values in the gfx115x Memory Chart; missing counter data now reports `N/A`.
 
