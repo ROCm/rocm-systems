@@ -413,16 +413,25 @@ typedef struct hsa_amd_ext_kernel_dispatch_packet_s {
   void* kernarg_address;
 
   /**
-   * Dependent signal object. This signal is read in the launch phase.​
+   * Format-dependent field (DW 14:13).
+   * Interpretation depends on amd_format:
    *
-   * The packet processor does not exit the launch phase for this packet, and
-   * thus does not perform the requested acquire fence scope’s actions, until
-   * the signal has been observed with the value 0.​
+   * Format 3 (HSA_AMD_PACKET_TYPE_EXT_KERNEL_DISPATCH):
+   *   - dep_signal: Dependent signal object read in the launch phase.
+   *     The packet processor waits until the signal value is 0 before
+   *     exiting the launch phase. A signal handle value of 0 is allowed
+   *     and is interpreted as a satisfied dependency.
    *
-   * A signal handle value of 0 is allowed and is interpreted by the packet
-   * processor as a satisfied dependency.​
+   * Format 4 (HSA_AMD_PACKET_TYPE_EXT_KERNEL_DISPATCH_LD):
+   *   - launch_descriptor: Opaque handle to amd_launch_descriptor_t
+   *     providing advanced scheduling control (CU enable, wave limiter,
+   *     L2 prefetch, etc.). A handle value of 0 indicates no launch descriptor
+   *     is used. Dependencies must be handled via barrier packets.
    */
-  hsa_signal_t dep_signal;
+  union {
+    hsa_signal_t dep_signal;                      // Format 3: signal-based dependency
+    amd_launch_descriptor_t launch_descriptor;    // Format 4: opaque handle
+  };
 
   /**
    * Signal used to indicate completion of the job. The application can use the
