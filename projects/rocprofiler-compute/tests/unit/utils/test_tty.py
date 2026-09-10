@@ -4,6 +4,7 @@
 """Unit tests for src/utils/tty.py."""
 
 import argparse
+import sys
 from io import StringIO
 from types import SimpleNamespace
 
@@ -54,9 +55,45 @@ def build_summary_from_dataframe(rows):
     return build_operator_summary(call_trees)
 
 
-def make_args() -> argparse.Namespace:
-    """Minimal args for the plain-table render path."""
-    return argparse.Namespace(decimal=2, view=None, normal_unit="per_wave")
+def make_args(**overrides) -> argparse.Namespace:
+    """Minimal args for the plain-table render path, plus any overrides."""
+    defaults = {"decimal": 2, "view": None, "normal_unit": "per_wave"}
+    return argparse.Namespace(**{**defaults, **overrides})
+
+
+def make_membw_panel(*, include_panel: bool = True) -> SimpleNamespace:
+    """Arch configs and runs holding the single EA Interface table of panel 3000."""
+    metric_dataframe = pd.DataFrame({
+        "Metric": ["EA read request fraction - HBM"],
+        "Avg": [50.0],
+        "Unit": ["Percent"],
+    })
+    table_config = {
+        "id": 3013,
+        "title": "EA Interface",
+        "header": {"metric": "Metric", "value": "Avg", "unit": "Unit"},
+    }
+    panel_configs = (
+        {
+            3000: {
+                "id": 3000,
+                "title": "Memory Bandwidth Analysis",
+                "data source": [{"metric_table": table_config}],
+            }
+        }
+        if include_panel
+        else {}
+    )
+    arch_configs = SimpleNamespace(panel_configs=panel_configs)
+    runs = {
+        "fixture": SimpleNamespace(
+            dfs={3013: metric_dataframe},
+            sys_info=pd.DataFrame([{"gpu_arch": "gfx950"}]),
+        )
+    }
+    return SimpleNamespace(
+        metric_dataframe=metric_dataframe, arch_configs=arch_configs, runs=runs
+    )
 
 
 def sample_time_data() -> pd.DataFrame:
@@ -367,49 +404,19 @@ def test_show_all_membw_analysis_panel_gate(
     membw_analysis: bool,
 ) -> None:
     """Panel 3000 is rendered only when present in arch_configs."""
-    args = argparse.Namespace(
-        decimal=2,
+    args = make_args(
         filter_metrics=None,
         include_cols=None,
         membw_analysis=membw_analysis,
-        normal_unit="per_wave",
         path=[["fixture"]],
         time_unit="ns",
-        view=None,
     )
-    metric_dataframe = pd.DataFrame({
-        "Metric": ["EA read request fraction - HBM"],
-        "Avg": [50.0],
-        "Unit": ["Percent"],
-    })
-    table_config = {
-        "id": 3013,
-        "title": "EA Interface",
-        "header": {"metric": "Metric", "value": "Avg", "unit": "Unit"},
-    }
-    panel_configs = (
-        {
-            3000: {
-                "id": 3000,
-                "title": "Memory Bandwidth Analysis",
-                "data source": [{"metric_table": table_config}],
-            }
-        }
-        if membw_analysis
-        else {}
-    )
-    arch_configs = SimpleNamespace(panel_configs=panel_configs)
-    runs = {
-        "fixture": SimpleNamespace(
-            dfs={3013: metric_dataframe},
-            sys_info=pd.DataFrame([{"gpu_arch": "gfx950"}]),
-        )
-    }
+    panel = make_membw_panel(include_panel=membw_analysis)
     actual_calls: list[str] = []
 
     def record_process_table_data(*_args, **_kwargs):
         actual_calls.append("process_table_data")
-        return metric_dataframe
+        return panel.metric_dataframe
 
     def record_format_table_output(*args, **kwargs):
         actual_calls.append("format_table_output")
@@ -421,8 +428,8 @@ def test_show_all_membw_analysis_panel_gate(
 
     show_all(
         args,
-        runs,
-        arch_configs,
+        panel.runs,
+        panel.arch_configs,
         rendered_output,
         profiling_config={"filter_blocks": []},
     )
@@ -512,6 +519,46 @@ def test_show_all_dispatches_gfx1250_memory_chart(
         )
     ]
     assert "rendered gfx1250 memory chart" in rendered_output.getvalue()
+
+
+def test_show_all_renders_identically_to_file_and_stdout(
+    tmp_path, monkeypatch: pytest.MonkeyPatch, capsys
+) -> None:
+    """A report is the same whether analyze writes it to a .txt file or stdout."""
+    args = make_args(
+        filter_metrics=None,
+        include_cols=None,
+        membw_analysis=True,
+        path=[["fixture"]],
+        time_unit="ns",
+    )
+    panel = make_membw_panel()
+    monkeypatch.setattr(
+        "utils.tty.process_table_data", lambda *_args, **_kwargs: panel.metric_dataframe
+    )
+
+    report_path = tmp_path / "analysis_report.txt"
+    with open(report_path, "w", encoding="utf-8") as report_file:
+        show_all(
+            args,
+            panel.runs,
+            panel.arch_configs,
+            report_file,
+            profiling_config={"filter_blocks": []},
+        )
+
+    capsys.readouterr()
+    show_all(
+        args,
+        panel.runs,
+        panel.arch_configs,
+        sys.stdout,
+        profiling_config={"filter_blocks": []},
+    )
+
+    file_report = report_path.read_text(encoding="utf-8")
+    assert file_report == capsys.readouterr().out
+    assert "30. Memory Bandwidth Analysis" in file_report
 
 
 def test_edge_cases_and_error_handling() -> None:
