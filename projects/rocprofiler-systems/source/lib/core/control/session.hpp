@@ -32,10 +32,10 @@ enum class scope : std::size_t
 {
     global = 0,
     sampling,
-    count_,  // sentinel: number of scopes
+    count,  // sentinel: number of scopes
 };
 
-inline constexpr std::size_t SCOPE_COUNT = static_cast<std::size_t>(scope::count_);
+inline constexpr std::size_t k_scope_count = static_cast<std::size_t>(scope::count);
 
 class scope_set
 {
@@ -58,7 +58,7 @@ public:
     template <typename Predicate>
     [[nodiscard]] bool all_of(Predicate&& pred) const
     {
-        for(std::size_t i = 0; i < SCOPE_COUNT; ++i)
+        for(std::size_t i = 0; i < k_scope_count; ++i)
         {
             if(m_bits.test(i) && !pred(static_cast<scope>(i)))
             {
@@ -71,7 +71,7 @@ public:
     template <typename Predicate>
     [[nodiscard]] bool any_of(Predicate&& pred) const
     {
-        for(std::size_t i = 0; i < SCOPE_COUNT; ++i)
+        for(std::size_t i = 0; i < k_scope_count; ++i)
         {
             if(m_bits.test(i) && pred(static_cast<scope>(i)))
             {
@@ -82,7 +82,7 @@ public:
     }
 
 private:
-    std::bitset<SCOPE_COUNT> m_bits;
+    std::bitset<k_scope_count> m_bits;
 };
 
 struct subscriber
@@ -126,7 +126,7 @@ public:
 
     [[nodiscard]] bool is_active(scope event_scope = scope::global) const noexcept
     {
-        assert(static_cast<std::size_t>(event_scope) < SCOPE_COUNT);
+        assert(static_cast<std::size_t>(event_scope) < k_scope_count);
         return m_scope_tracing[static_cast<std::size_t>(event_scope)].load(
             std::memory_order_relaxed);
     }
@@ -140,9 +140,9 @@ public:
 private:
     using scoped_actions = std::unordered_map<std::string, action>;
 
-    std::array<scoped_actions, SCOPE_COUNT>    m_actions;
-    std::vector<subscriber>                    m_subscribers;
-    std::array<std::atomic<bool>, SCOPE_COUNT> m_scope_tracing{};
+    std::array<scoped_actions, k_scope_count>    m_actions;
+    std::vector<subscriber>                      m_subscribers;
+    std::array<std::atomic<bool>, k_scope_count> m_scope_tracing{};
 
     mutable std::mutex m_actions_mutex;
     std::mutex         m_subscribers_mutex;

@@ -27,8 +27,8 @@ using time_window_t = rocprofsys::control::triggers::time_window<posix>;
 bool
 wait_until_active(session& sess, bool expected)
 {
-    constexpr auto timeout  = std::chrono::seconds{ 2 };
-    const auto     deadline = std::chrono::steady_clock::now() + timeout;
+    constexpr auto k_timeout = std::chrono::seconds{ 2 };
+    const auto     deadline  = std::chrono::steady_clock::now() + k_timeout;
     while(sess.is_active() != expected)
     {
         if(std::chrono::steady_clock::now() > deadline)
@@ -92,9 +92,9 @@ TEST(posix_clock_test, time_window_with_posix_clock_drives_session)
     // jitter. Don't shrink the timeout to "tighten" this; shrink the
     // windows if faster tests are needed instead.
     posix          clk{ CLOCK_REALTIME };
-    constexpr auto delay = clock_duration{ 20'000'000 };  // 20 ms
-    constexpr auto dur   = clock_duration{ 40'000'000 };  // 40 ms
-    time_window_t  window{ s_ptr, clk, { delay, dur } };
+    constexpr auto k_delay = clock_duration{ 20'000'000 };  // 20 ms
+    constexpr auto k_dur   = clock_duration{ 40'000'000 };  // 40 ms
+    time_window_t  window{ s_ptr, clk, { .delay = k_delay, .duration = k_dur } };
 
     EXPECT_FALSE(sess.is_active()) << "initial action should be paused when delay > 0";
 
