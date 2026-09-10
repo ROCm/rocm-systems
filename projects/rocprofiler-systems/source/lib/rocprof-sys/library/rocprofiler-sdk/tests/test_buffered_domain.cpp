@@ -11,6 +11,7 @@
 #include <cstdint>
 #include <memory>
 #include <optional>
+#include <string_view>
 #include <vector>
 
 namespace rocprofsys::domains
@@ -51,10 +52,23 @@ struct record_header_t
     void* payload = nullptr;
 };
 
-using tracing_operation_t   = std::size_t;
-using buffer_tracing_kind_t = std::size_t;
-using on_records_cb_t       = void (*)(context_id_t, buffer_id_t, record_header_t**,
+struct user_data_t
+{
+    std::uint64_t value = 0;
+};
+
+struct callback_tracing_record_t
+{
+    std::uint64_t kind = 0;
+};
+
+using tracing_operation_t     = std::size_t;
+using buffer_tracing_kind_t   = std::size_t;
+using callback_tracing_kind_t = std::size_t;
+using buffer_policy_t         = int;
+using on_records_cb_t         = void (*)(context_id_t, buffer_id_t, record_header_t**,
                                  std::size_t, void*, std::uint64_t);
+using on_record_cb_t          = void (*)(callback_tracing_record_t, user_data_t*, void*);
 
 void
 stub_on_records(context_id_t, buffer_id_t, record_header_t**, std::size_t, void*,
@@ -82,14 +96,55 @@ std::unique_ptr<StrictMock<gmock_sdk_backend>> g_mock;
 
 struct mock_sdk
 {
-    using context_id_t          = rocprofsys::domains::context_id_t;
-    using buffer_id_t           = rocprofsys::domains::buffer_id_t;
-    using tracing_operation_t   = rocprofsys::domains::tracing_operation_t;
-    using callback_thread_id_t  = rocprofsys::domains::callback_thread_id_t;
-    using record_header_t       = rocprofsys::domains::record_header_t;
-    using buffer_tracing_kind_t = rocprofsys::domains::buffer_tracing_kind_t;
+    using context_id_t              = rocprofsys::domains::context_id_t;
+    using buffer_id_t               = rocprofsys::domains::buffer_id_t;
+    using tracing_operation_t       = rocprofsys::domains::tracing_operation_t;
+    using callback_thread_id_t      = rocprofsys::domains::callback_thread_id_t;
+    using record_header_t           = rocprofsys::domains::record_header_t;
+    using buffer_tracing_kind_t     = rocprofsys::domains::buffer_tracing_kind_t;
+    using callback_tracing_kind_t   = rocprofsys::domains::callback_tracing_kind_t;
+    using user_data_t               = rocprofsys::domains::user_data_t;
+    using callback_tracing_record_t = rocprofsys::domains::callback_tracing_record_t;
+    using buffer_policy_t           = rocprofsys::domains::buffer_policy_t;
+    using on_record_cb_t            = rocprofsys::domains::on_record_cb_t;
+    using on_records_cb_t           = rocprofsys::domains::on_records_cb_t;
 
-    static constexpr int BUFFER_POLICY_LOSSLESS = 1;
+    static constexpr buffer_policy_t BUFFER_POLICY_LOSSLESS = 1;
+
+    // domain_service_backend requires these; buffered_domain<SdkBackend> never calls
+    // them, so the bodies are unreachable no-ops.
+    static void create_context(context_id_t* /*context*/) {}
+    static void start_context(context_id_t /*context*/) {}
+    static void configure_callback_tracing_service(context_id_t /*context*/,
+                                                   callback_tracing_kind_t /*kind*/,
+                                                   tracing_operation_t* /*operations*/,
+                                                   std::size_t /*num_operations*/,
+                                                   on_record_cb_t /*on_record*/,
+                                                   void* /*callback_data*/)
+    {}
+
+    struct tracing_names_t
+    {
+        struct entry_t
+        {
+            std::string_view              name;
+            std::vector<std::string_view> operations;
+            std::size_t                   value = 0;
+        };
+
+        std::vector<entry_t> entries;
+
+        auto begin() const { return entries.begin(); }
+        auto end() const { return entries.end(); }
+
+        std::string_view at(std::size_t /*kind*/, std::uint32_t /*operation*/) const
+        {
+            return "operation";
+        }
+    };
+
+    static tracing_names_t get_buffer_tracing_names() { return {}; }
+    static tracing_names_t get_callback_tracing_names() { return {}; }
 
     static void create_buffer(context_id_t context, std::size_t buffer_size,
                               std::size_t buffer_watermark, int policy,

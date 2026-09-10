@@ -4,6 +4,7 @@
 #pragma once
 
 #include "library/rocprofiler-sdk/types.hpp"
+#include "policies/rocprofiler-sdk/domain_service.hpp"
 
 #include <cstddef>
 #include <cstdint>
@@ -11,7 +12,8 @@
 namespace rocprofsys::domains::buffered
 {
 
-template <typename SdkBackend, typename Externals>
+template <policies::rocprofiler_sdk::domain_service_backend   SdkBackend,
+          policies::rocprofiler_sdk::domain_service_externals Externals>
 inline void
 on_kfd_event_page_migrate(typename SdkBackend::kfd_event_page_migrate_record* record,
                           void*                                               data)
@@ -20,7 +22,8 @@ on_kfd_event_page_migrate(typename SdkBackend::kfd_event_page_migrate_record* re
     (void) data;
 }
 
-template <typename SdkBackend, typename Externals>
+template <policies::rocprofiler_sdk::domain_service_backend   SdkBackend,
+          policies::rocprofiler_sdk::domain_service_externals Externals>
 inline constexpr auto k_kfd_event_page_migrate = buffered_domain_definition<SdkBackend>{
     .meta =
         domain_descriptor{

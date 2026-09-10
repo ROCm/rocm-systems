@@ -5,6 +5,7 @@
 
 #include "library/rocprofiler-sdk/types.hpp"
 #include "logger/debug.hpp"
+#include "policies/rocprofiler-sdk/domain_service.hpp"
 
 #include <fmt/format.h>
 
@@ -15,7 +16,7 @@
 namespace rocprofsys::domains::buffered
 {
 
-template <typename Externals>
+template <policies::rocprofiler_sdk::domain_service_externals Externals>
 inline void
 on_kfd_page_migrate_configure()
 {
@@ -88,7 +89,8 @@ on_kfd_page_migrate_configure()
     }
 }
 
-template <typename SdkBackend, typename Externals>
+template <policies::rocprofiler_sdk::domain_service_backend   SdkBackend,
+          policies::rocprofiler_sdk::domain_service_externals Externals>
 inline void
 on_kfd_page_migrate(typename SdkBackend::kfd_page_migrate_record* record, void* data)
 {
@@ -154,7 +156,8 @@ on_kfd_page_migrate(typename SdkBackend::kfd_page_migrate_record* record, void* 
         std::optional<std::int64_t>(record->pid) });
 }
 
-template <typename SdkBackend, typename Externals>
+template <policies::rocprofiler_sdk::domain_service_backend   SdkBackend,
+          policies::rocprofiler_sdk::domain_service_externals Externals>
 inline constexpr auto k_kfd_page_migrate = buffered_domain_definition<SdkBackend>{
     .meta =
         domain_descriptor{
