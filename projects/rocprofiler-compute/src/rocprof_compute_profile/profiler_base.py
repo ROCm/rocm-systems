@@ -46,6 +46,15 @@ _FLAG_TO_FRAMEWORKS: dict[str, tuple[str, ...]] = {
     "ml_api_trace": KNOWN_ML_API_BACKENDS,
 }
 
+# Only the specs classes that can be power-gated carry a perf_level, so seeing
+# AUTO here is enough to warn.
+_PMC_POWER_GATING_WARNING = (
+    "AUTO performance level can gate the perfmon clock, so counters such as "
+    "TCP_REQ may report zero even when the kernel issues global memory traffic. "
+    "See: https://rocm.docs.amd.com/projects/rocprofiler-sdk/en/latest/"
+    "how-to/using-rocprofv3.html#setting-gpu-performance-level-for-pmc-profiling"
+)
+
 
 def _partition_warning_messages(mspec: MachineSpecs) -> list[str]:
     """Return notices on how active partition modes shape analysis metrics."""
@@ -347,6 +356,10 @@ class RocProfCompute_Base:
 
         for message in _partition_warning_messages(self._soc._mspec):
             console_warning(message)
+
+        perf_level = getattr(self._soc._mspec, "perf_level", None)
+        if perf_level and perf_level.upper().endswith("AUTO"):
+            console_warning(_PMC_POWER_GATING_WARNING)
 
     def profile(
         self,

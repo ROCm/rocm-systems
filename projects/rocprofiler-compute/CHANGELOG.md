@@ -16,6 +16,8 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 * Added the two wave utilization metrics to the analysis database summary view, so `compute_pc_sampling_summary_view` and the `pc_sampling_summary.csv` export carry them alongside the sample counts.
 
+* Added a profile-mode warning on gfx115x when the `AUTO` performance level can gate the perfmon clock and zero PMC counters such as `TCP_REQ`, with a link to the ROCprofiler-SDK `STABLE_STD` workaround.
+
 * Added CLI guidance for viewing the wide memory chart without line wrapping (`less -RS` or `code -`).
 
 ### Changed
@@ -62,6 +64,8 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 ### Upcoming changes
 
 ### Known issues
+
+* On gfx115x, `TCP_REQ*` counters and the `GL0` metrics derived from them can read zero because the perfmon clock is power-gated at the `AUTO` performance level.
 
 ## ROCm Compute Profiler 3.9.0 for ROCm 10.1.0
 
