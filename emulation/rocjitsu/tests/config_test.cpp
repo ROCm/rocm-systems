@@ -2073,8 +2073,8 @@ TEST(CApiTest, FunctionalDispatchThreadsPropagateExplicitAndAutoValues) {
   };
 
   run_case(/*configured=*/7, /*expected=*/7);
-  const auto auto_budget = detail::resolve_cpu_dispatch_thread_budgets(
-      /*configured_threads=*/0, std::thread::hardware_concurrency(), /*soc_count=*/1);
+  const auto auto_budget = config::resolve_cpu_dispatch_thread_budgets(
+      /*requested_threads=*/0, std::thread::hardware_concurrency(), /*soc_count=*/1);
   ASSERT_EQ(auto_budget.size(), 1u);
   run_case(/*configured=*/0, /*expected=*/std::min(auto_budget.front(), 7u));
 }
@@ -2128,8 +2128,8 @@ TEST(CApiTest, AutoFunctionalDispatchBudgetAppliesToEveryGpu) {
 
   ASSERT_NE(handle->vm, nullptr);
   ASSERT_EQ(handle->vm->num_socs(), 4u);
-  const auto expected = detail::resolve_cpu_dispatch_thread_budgets(
-      /*configured_threads=*/0, std::thread::hardware_concurrency(), handle->vm->num_socs());
+  const auto expected = config::resolve_cpu_dispatch_thread_budgets(
+      /*requested_threads=*/0, std::thread::hardware_concurrency(), handle->vm->num_socs());
   ASSERT_EQ(expected.size(), handle->vm->num_socs());
   for (uint32_t i = 0; i < handle->vm->num_socs(); ++i)
     EXPECT_EQ(handle->vm->soc(i)->dispatch_threads(), expected[i]) << "SoC " << i;
@@ -2294,6 +2294,25 @@ TEST(CApiTest, CheckpointRoundTripPreservesAutomaticFunctionalDispatch) {
   EXPECT_TRUE(flatbuffers::IsFieldPresent(checkpoint->config(),
                                           fb::SimulationConfig::VT_CPU_DISPATCH_THREADS));
   EXPECT_EQ(checkpoint->config()->cpu_dispatch_threads(), 0u);
+
+  // The checkpoint retains the automatic request rather than freezing the
+  // source host's effective width. Reapplying the restored policy against a
+  // smaller host or cap must therefore produce the corresponding new width.
+  {
+    auto restored_for_host = config::restore_checkpoint(checkpoint_file.path());
+    ASSERT_EQ(restored_for_host.cpu_dispatch_threads, 0u);
+    restored_for_host.apply_cpu_dispatch_threads(/*hardware_threads=*/2);
+    ASSERT_NE(restored_for_host.soc(), nullptr);
+    EXPECT_EQ(restored_for_host.soc()->dispatch_threads(), 2u);
+  }
+  {
+    auto restored_for_cap = config::restore_checkpoint(checkpoint_file.path());
+    ASSERT_EQ(restored_for_cap.cpu_dispatch_threads, 0u);
+    restored_for_cap.apply_cpu_dispatch_threads(/*hardware_threads=*/128,
+                                                /*automatic_thread_cap=*/5);
+    ASSERT_NE(restored_for_cap.soc(), nullptr);
+    EXPECT_EQ(restored_for_cap.soc()->dispatch_threads(), 5u);
+  }
 
   rj_vm_t *raw_restored = nullptr;
   ASSERT_EQ(rj_vm_restore_checkpoint(checkpoint_file.path().c_str(), &raw_restored),

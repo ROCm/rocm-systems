@@ -15,6 +15,7 @@
 #include "simdojo/sim/simulation.h"
 #include "simdojo/sim/topology.h"
 
+#include <cstddef>
 #include <cstdint>
 #include <memory>
 #include <string>
@@ -29,6 +30,31 @@ class Xcd;
 } // namespace amdgpu
 
 namespace config {
+
+/// Default host-wide thread cap for automatic functional CU dispatch.
+///
+/// This conservative policy limit bounds persistent worker allocation on
+/// large hosts while retaining substantial CU parallelism. It is not a
+/// hardware limit; embedding callers can override it.
+inline constexpr uint32_t kDefaultCpuDispatchThreadCap = 32;
+
+/// Resolve the requested functional CU-dispatch width for each SoC.
+///
+/// A nonzero request is applied independently to every SoC. Zero selects one
+/// capped host-wide budget that is divided as evenly as possible across the
+/// SoCs. Every SoC retains a minimum width of one (serial dispatch).
+/// A zero SoC count returns an empty vector. This is a defensive path for an
+/// empty or already-consumed LoadedConfig; VM creation rejects a missing
+/// primary SoC before applying the policy.
+///
+/// @code
+/// resolve_cpu_dispatch_thread_budgets(0, 128, 4, 12); // {3, 3, 3, 3}
+/// resolve_cpu_dispatch_thread_budgets(7, 2, 3, 12);   // {7, 7, 7}
+/// @endcode
+std::vector<uint32_t>
+resolve_cpu_dispatch_thread_budgets(uint32_t requested_threads, uint32_t hardware_threads,
+                                    size_t soc_count,
+                                    uint32_t automatic_thread_cap = kDefaultCpuDispatchThreadCap);
 
 /// @brief Result of building a declarative topology.
 ///
@@ -56,6 +82,7 @@ struct TopologyBuildResult {
 ///
 ///   auto loaded = load_config("config.json", kEmbeddedSchema);
 ///   auto *soc = loaded.soc();
+///   loaded.apply_cpu_dispatch_threads();
 ///   loaded.engine_config.num_threads =
 ///       rocjitsu::amdgpu::clamp_xcd_partition_count(
 ///           soc, loaded.engine_config.num_threads);
@@ -83,6 +110,21 @@ struct LoadedConfig {
   /// Requested functional dispatch width. Automatic mode uses a host-wide
   /// budget capped at 32; each SoC's effective width is CU-capacity-clamped.
   uint32_t cpu_dispatch_threads = 1;
+
+  /// @brief Apply the requested functional dispatch policy to every loaded SoC.
+  ///
+  /// Call this before transferring topology ownership with take_root(). The
+  /// no-argument overload detects the current host's hardware-thread count.
+  void apply_cpu_dispatch_threads();
+
+  /// @brief Apply the dispatch policy using supplied automatic-mode inputs.
+  /// @details This overload makes host-dependent policy explicit for embedding
+  /// callers and deterministic tests.
+  /// @param hardware_threads Host-thread count available for automatic sizing.
+  /// @param automatic_thread_cap Maximum host-wide width in automatic mode;
+  /// values below one are treated as one.
+  void apply_cpu_dispatch_threads(uint32_t hardware_threads,
+                                  uint32_t automatic_thread_cap = kDefaultCpuDispatchThreadCap);
 
   /// @brief Return the SoC from the topology root.
   SoC *soc();

@@ -16,18 +16,21 @@
 #include "rocjitsu/vm/amdgpu/memory_side_cache.h"
 #include "rocjitsu/vm/amdgpu/shader_engine.h"
 #include "rocjitsu/vm/amdgpu/xcd.h"
+#include "rocjitsu/vm/soc.h"
 
 #include "flatbuffers/idl.h"
 #include "simdojo/sim/exec_mode.h"
 #include "simdojo/sim/topology.h"
 #include "simulation_config_generated.h"
 
+#include <algorithm>
 #include <cassert>
 #include <cctype>
 #include <regex>
 #include <sstream>
 #include <stdexcept>
 #include <string>
+#include <thread>
 #include <unordered_map>
 #include <utility>
 #include <vector>
@@ -35,7 +38,54 @@
 namespace rocjitsu {
 namespace config {
 
+std::vector<uint32_t> resolve_cpu_dispatch_thread_budgets(uint32_t requested_threads,
+                                                          uint32_t hardware_threads,
+                                                          size_t soc_count,
+                                                          uint32_t automatic_thread_cap) {
+  if (soc_count == 0)
+    return {};
+  if (requested_threads != 0)
+    return std::vector<uint32_t>(soc_count, requested_threads);
+
+  const uint32_t host_width = hardware_threads ? hardware_threads : 1u;
+  const uint32_t host_budget = std::min(host_width, std::max(automatic_thread_cap, 1u));
+  if (host_budget < soc_count)
+    return std::vector<uint32_t>(soc_count, 1);
+
+  const uint32_t base = static_cast<uint32_t>(host_budget / soc_count);
+  const size_t remainder = host_budget % soc_count;
+  std::vector<uint32_t> budgets(soc_count, base);
+  for (size_t i = 0; i < remainder; ++i)
+    ++budgets[i];
+  return budgets;
+}
+
 SoC *LoadedConfig::soc() { return dynamic_cast<SoC *>(build_result.root.get()); }
+
+void LoadedConfig::apply_cpu_dispatch_threads() {
+  apply_cpu_dispatch_threads(std::thread::hardware_concurrency());
+}
+
+void LoadedConfig::apply_cpu_dispatch_threads(uint32_t hardware_threads,
+                                              uint32_t automatic_thread_cap) {
+  std::vector<SoC *> socs;
+  socs.reserve(extra_gpu_builds.size() + 1);
+  if (auto *primary = soc())
+    socs.push_back(primary);
+  if (num_gpus > 1) {
+    for (auto &extra : extra_gpu_builds) {
+      if (auto *extra_soc = dynamic_cast<SoC *>(extra.root.get()))
+        socs.push_back(extra_soc);
+    }
+  }
+
+  const uint32_t requested_threads =
+      exec_mode == simdojo::ExecMode::FUNCTIONAL ? cpu_dispatch_threads : 1u;
+  const auto budgets = resolve_cpu_dispatch_thread_budgets(requested_threads, hardware_threads,
+                                                           socs.size(), automatic_thread_cap);
+  for (size_t i = 0; i < socs.size(); ++i)
+    socs[i]->set_dispatch_threads(budgets[i]);
+}
 
 namespace {
 
