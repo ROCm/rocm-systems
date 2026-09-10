@@ -315,6 +315,9 @@ class RocProfCompute_Base:
             args.remaining = ""
 
         self._filter_blocks = self._soc.profiling_setup()
+        # --set and --roof-only resolve to block ids here, so store them back on
+        # the args every later stage reads.
+        self.__args.filter_blocks = self._filter_blocks
 
         # Write profiling configuration as yaml file
         with open(
@@ -323,8 +326,6 @@ class RocProfCompute_Base:
             encoding="utf-8",
         ) as f:
             args_dict = dict(vars(self.__args))
-            # Override filter_blocks when writing profiling config yaml
-            args_dict["filter_blocks"] = self._filter_blocks
             args_dict["config_dir"] = str(args_dict["config_dir"])
             args_dict["format_rocprof_output"] = PROFILE_OUTPUT_FORMAT
             yaml.dump(args_dict, f)
