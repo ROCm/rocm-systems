@@ -12,8 +12,6 @@ Using memory bandwidth analysis
    Memory bandwidth analysis is an experimental feature. To enable it
    pass ``--experimental --membw-analysis`` in both ``profile`` and
    ``analyze`` modes. Guidance text, feature behavior, and command-line options might change in future releases.
-   guidance text will be refined in future releases. Behavior and
-   command-line surface may change.
 
 Memory bandwidth analysis identifies bottlenecks in the GPU memory
 subsystem. It evaluates stall metrics collected from the
@@ -31,12 +29,11 @@ Supported hardware
 
 The memory bandwidth analysis feature is currently available for AMD Instinct MI350 Series GPUs (gfx950).
 
-
 Profiling
 =========
 
 Collect memory bandwidth counters by adding ``--membw-analysis`` to
-the ``profile`` command. This enables block 30, which contains the
+the ``profile`` command. Adding ``--membw-analysis`` enables Block 30, which contains the
 stall and pressure metrics used by the analysis.
 
 .. code-block:: shell
@@ -63,11 +60,11 @@ use the block filter:
 
    $ rocprof-compute analyze --experimental --membw-analysis -p workloads/my_workload/MI350/ -b 3 30
 
-Here, ``-b 3`` selects the memory chart and ``-b 30`` includes the
+In this command, ``-b 3`` selects the memory chart and ``-b 30`` includes the
 memory bandwidth analysis tables.
 
 .. image:: ../data/analyze/cli/membw_mem_chart.png
-   :alt: Memory chart with Memory Bandwidth Analysis annotations and guidance panel
+   :alt: Memory chart with memory bandwidth analysis annotations and guidance panel
 
 Reading the output
 ==================
@@ -91,17 +88,17 @@ Guidance panel
 A guidance panel appears below the memory chart. Each entry describes
 one bottleneck:
 
-* **Condition**: what was checked (for example,
+* **Condition**: What was checked (for example,
   "TCP stalled by UTCL1 >= 10%")
-* **Measured**: the actual value from the profiled workload and the
+* **Measured**: The actual value from the profiled workload and the
   threshold it was compared against
-* **Impact**: a brief explanation of what this stall means for your
+* **Impact**: A brief explanation of what this stall means for your
   workload
 
 .. image:: ../data/analyze/cli/membw_guidance_panel.png
    :alt: Guidance panel showing active bottlenecks with condition, measurement, and impact
 
-When no bottlenecks are found, a single status line is shown instead
+When bottlenecks are not found, a single status line is shown instead
 (for example, "Memory Bandwidth Analysis: No bottlenecks detected").
 
 Understanding the results
@@ -123,20 +120,14 @@ A bottleneck is reported when a stall metric exceeds its threshold
 threshold but no specific child does, a "balanced" or "other" entry
 explains that the pressure is distributed rather than concentrated in
 one path. Multiple bottlenecks can appear together when several stall
-metrics exceed threshold simultaneously.
+metrics exceed the threshold simultaneously.
 
 .. note::
 
-   All Memory Bandwidth Analysis metrics are stall-cycle ratios (for
+   All memory bandwidth analysis metrics are stall-cycle ratios (for
    example, ``100 * SUM(stall_cycles) / SUM(busy_cycles)``). These
    percentages are not affected by the normalization mode shown in the
    memory chart title (per_kernel, per_wave, and so on).
-
-.. note::
-
-   The guidance text is preliminary and will be improved in future
-   releases. Use it as a starting point for investigation, not as a
-   definitive diagnosis.
 
 Further resources
 =================
@@ -170,8 +161,6 @@ Check your terminal width with:
 
 .. note::
 
-   * Only AMD Instinct MI350 Series (gfx950) is supported. Other architectures will be added in future releases.
-   * Guidance text is in its preliminary stages and may not cover all bottleneck scenarios.
    * The analysis evaluates per-dispatch averages. Bottlenecks that occur in only a subset of dispatches may not be visible.
    * Guidance output is capped at 5 blocks. Additional bottlenecks beyond the cap are noted but not expanded.
    * When Block 30 counters are missing or incomplete, the guidance panel shows "Unavailable", "Partial data", or "Inconclusive" status lines instead of bottleneck details.
