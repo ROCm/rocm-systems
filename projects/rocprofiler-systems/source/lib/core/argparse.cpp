@@ -62,15 +62,16 @@ get_clock_id_choices()
 
 using rocprofsys::common::update_mode;
 
+// NOLINTBEGIN - ignore argument number issue
 template <typename Tp>
 void
-update_env(parser_data& _data, std::string_view _env_var, Tp&& _env_val,
-           update_mode _mode = update_mode::replace, std::string_view _join_delim = ":")
+update_env(parser_data& data, std::string_view env_var, Tp&& env_val,
+           update_mode mode = update_mode::replace, std::string_view join_delim = ":")
 {
-    rocprofsys::common::update_env(_data.env.current, _env_var,
-                                   std::forward<Tp>(_env_val), _mode, _join_delim,
-                                   _data.env.updated, _data.env.initial);
+    rocprofsys::common::update_env(data.env.current, env_var, std::forward<Tp>(env_val),
+                                   mode, join_delim, data.env.updated, data.env.initial);
 }
+// NOLINTEND
 
 }  // namespace
 
@@ -380,9 +381,9 @@ add_core_arguments(parser_t& _parser, parser_data& _data)
                 if(!_modes.empty())
                 {
                     update_env(_data, env_vars::SAMPLING_CPUTIME,
-                               _modes.count("cputime") > 0, update_mode::weak);
+                               _modes.contains("cputime"), update_mode::weak);
                     update_env(_data, env_vars::SAMPLING_REALTIME,
-                               _modes.count("realtime") > 0, update_mode::weak);
+                               _modes.contains("realtime"), update_mode::weak);
                 }
             });
 

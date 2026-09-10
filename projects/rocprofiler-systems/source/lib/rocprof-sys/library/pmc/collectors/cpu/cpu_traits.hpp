@@ -152,7 +152,10 @@ struct cpu_traits
 private:
     static void warn_invalid_indices(const device_filter& filter, size_t max_index)
     {
-        if(filter.mode != device_selection_mode::specific) return;
+        if(filter.mode != device_selection_mode::specific)
+        {
+            return;
+        }
         for(const auto idx : filter.indices)
         {
             if(idx >= max_index)

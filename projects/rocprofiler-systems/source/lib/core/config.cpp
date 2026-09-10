@@ -3675,31 +3675,35 @@ get_causal_mode()
 {
     if(!settings_are_configured())
     {
-        auto _mode = rocprofsys::get_env_choice<std::string>(
+        auto mode = rocprofsys::get_env_choice<std::string>(
             env_vars::CAUSAL_MODE, "function", { "line", "function" });
-        if(_mode == "line") return state::process::CausalMode::line;
+        if(mode == "line")
+        {
+            return state::process::CausalMode::line;
+        }
         return state::process::CausalMode::function;
     }
-    static auto _causal_mode = []() {
-        auto _m = std::unordered_map<std::string_view, state::process::CausalMode>{
+    static auto s_causal_mode = [function_name = __FUNCTION__]() {
+        auto map = std::unordered_map<std::string_view, state::process::CausalMode>{
             { "line", state::process::CausalMode::line },
             { "func", state::process::CausalMode::function },
             { "function", state::process::CausalMode::function }
         };
-        auto _v = get_config()->find(std::string{ env_vars::CAUSAL_MODE });
+        auto value = get_config()->find(std::string{ env_vars::CAUSAL_MODE });
         try
         {
-            return _m.at(static_cast<tim::tsettings<std::string>&>(*_v->second).get());
-        } catch(std::runtime_error& _e)
+            return map.at(
+                static_cast<tim::tsettings<std::string>&>(*value->second).get());
+        } catch(std::runtime_error& error)
         {
-            auto _mode = static_cast<tim::tsettings<std::string>&>(*_v->second).get();
+            auto mode = static_cast<tim::tsettings<std::string>&>(*value->second).get();
             throw std::runtime_error(
-                fmt::format("[{}] invalid causal mode {}. Choices: {}", __FUNCTION__,
-                            _mode, fmt::join(_v->second->get_choices(), ", ")));
+                fmt::format("[{}] invalid causal mode {}. Choices: {}", function_name,
+                            mode, fmt::join(value->second->get_choices(), ", ")));
         }
         return state::process::CausalMode::function;
     }();
-    return _causal_mode;
+    return s_causal_mode;
 }
 
 bool

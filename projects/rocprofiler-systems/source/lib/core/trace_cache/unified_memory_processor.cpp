@@ -106,12 +106,17 @@ unified_memory_processor_t::unified_memory_processor_t(
     const auto& all_agents = m_agent_manager->get_agents();
     for(const auto& agent_ptr : all_agents)
     {
-        if(!agent_ptr) continue;
+        if(!agent_ptr)
+        {
+            continue;
+        }
 
         m_node_type_cache[agent_ptr->node_id] = agent_ptr->type;
 
         if(agent_ptr->type == agent_type::gpu)
+        {
             m_gpu_name_cache[agent_ptr->node_id] = agent_ptr->name;
+        }
     }
 }
 
@@ -314,7 +319,10 @@ unified_memory_processor_t::classify_direction(const std::string& src_label,
                                                const std::string& dst_label) const
 {
     auto ids = parse_node_id_pair(src_label, dst_label);
-    if(!ids.has_value()) return migration_direction::unknown;
+    if(!ids.has_value())
+    {
+        return migration_direction::unknown;
+    }
     const auto [src_node_id, dst_node_id] = *ids;
 
     auto src_it = m_node_type_cache.find(src_node_id);

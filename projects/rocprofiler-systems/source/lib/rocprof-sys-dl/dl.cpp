@@ -560,8 +560,9 @@ get_thread_status()
 instrument_mode&
 get_instrumented()
 {
-    static auto _v = get_env(env_vars::INSTRUMENT_MODE, instrument_mode::none);
-    return _v;
+    static auto s_instrumented =
+        get_env(env_vars::INSTRUMENT_MODE, instrument_mode::none);
+    return s_instrumented;
 }
 
 // ensure finalization is called
@@ -636,7 +637,7 @@ extern "C"
                               fmt::format(R"("{}", "{}", "{}")", a, b, c).c_str());
             return;
         }
-        else if(dl::get_inited() && dl::get_active())
+        if(dl::get_inited() && dl::get_active())
         {
             ROCPROFSYS_DL_LOG(2, "%s(%s) ignored :: already initialized and active\n",
                               __FUNCTION__,
@@ -645,12 +646,14 @@ extern "C"
         }
 
         if(dl::get_instrumented() < dl::instrument_mode::python_profile)
+        {
             dl::rocprofsys_preinit();
+        }
 
-        bool _invoked = false;
-        ROCPROFSYS_DL_INVOKE_STATUS(_invoked, get_indirect().rocprofsys_init_f, a, b, c);
+        bool invoked = false;
+        ROCPROFSYS_DL_INVOKE_STATUS(invoked, get_indirect().rocprofsys_init_f, a, b, c);
 
-        if(_invoked)
+        if(invoked)
         {
             dl::get_active()           = true;
             dl::get_inited()           = true;
@@ -672,16 +675,17 @@ extern "C"
                               __FUNCTION__);
             return;
         }
-        else if(dl::get_finied() && !dl::get_active())
+
+        if(dl::get_finied() && !dl::get_active())
         {
             ROCPROFSYS_DL_LOG(2, "%s() ignored :: already finalized but not active\n",
                               __FUNCTION__);
             return;
         }
 
-        bool _invoked = false;
-        ROCPROFSYS_DL_INVOKE_STATUS(_invoked, get_indirect().rocprofsys_finalize_f);
-        if(_invoked)
+        bool invoked = false;
+        ROCPROFSYS_DL_INVOKE_STATUS(invoked, get_indirect().rocprofsys_finalize_f);
+        if(invoked)
         {
             dl::get_active() = false;
             dl::get_finied() = true;
@@ -690,7 +694,10 @@ extern "C"
 
     void rocprofsys_push_trace(const char* name)
     {
-        if(!dl::get_active()) return;
+        if(!dl::get_active())
+        {
+            return;
+        }
         if(dl::get_thread_enabled())
         {
             ROCPROFSYS_DL_INVOKE(get_indirect().rocprofsys_push_trace_f, name);

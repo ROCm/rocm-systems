@@ -1450,8 +1450,8 @@ main(int argc, char** argv)
     //----------------------------------------------------------------------------------//
 
     // prioritize the user environment arguments
-    auto instr_mode_v     = (binary_rewrite) ? InstrumentMode::binary_rewrite
-                                             : InstrumentMode::process_create;
+    auto instr_mode_v =
+        binary_rewrite ? InstrumentMode::binary_rewrite : InstrumentMode::process_create;
     auto instr_mode_v_int = static_cast<int>(instr_mode_v);
     auto env_vars         = parser.get<strvec_t>("env");
     env_vars.reserve(env_vars.size() + env_config_variables.size());

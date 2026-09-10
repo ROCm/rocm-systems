@@ -188,7 +188,10 @@ struct nic_traits
     static void warn_invalid_names(const nic_device_filter&     filter,
                                    const std::set<std::string>& available_names)
     {
-        if(filter.mode != device_selection_mode::specific) return;
+        if(filter.mode != device_selection_mode::specific)
+        {
+            return;
+        }
         if(available_names.empty())
         {
             LOG_WARNING("No AI NIC devices were discovered.");

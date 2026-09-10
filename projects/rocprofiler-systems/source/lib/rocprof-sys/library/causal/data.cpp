@@ -800,7 +800,9 @@ sample_selection(size_t _nitr, size_t _wait_ns)
             eligible_pc_history[_addr] += 1;
 
             if(get_causal_mode() == state::process::CausalMode::function)
+            {
                 _sym_addr = (_dl_info.symbol) ? _dl_info.symbol.address() : _addr;
+            }
 
             // lookup the PC line info at either the address or the symbol address
             auto linfo = get_line_info(_lookup_addr, false);
