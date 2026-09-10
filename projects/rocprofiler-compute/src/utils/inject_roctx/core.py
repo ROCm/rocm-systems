@@ -1,11 +1,7 @@
 # Copyright (c) Advanced Micro Devices, Inc.
 # SPDX-License-Identifier:  MIT
 
-"""Backend-agnostic core for ROCTX scope tracking.
-
-Maintains the per-thread marker and context stacks and the Python-tier
-rangePush/rangePop callbacks shared by all backends.
-"""
+"""Backend-agnostic core for ROCTX range push/pop shared by all backends."""
 
 import importlib.util
 import inspect
@@ -109,20 +105,7 @@ def add_framework_root(path: str) -> None:
         _STATE.framework_roots.append(root)
 
 
-# Per-thread stacks shared by all backends so nested scopes compose correctly.
 _thread_local = threading.local()
-
-
-def get_marker_stack() -> list[str]:
-    if not hasattr(_thread_local, "marker_stack"):
-        _thread_local.marker_stack = []
-    return _thread_local.marker_stack
-
-
-def get_context_stack() -> list[str]:
-    if not hasattr(_thread_local, "context_stack"):
-        _thread_local.context_stack = []
-    return _thread_local.context_stack
 
 
 def resolve_user_caller_location() -> str:
@@ -138,55 +121,30 @@ def resolve_user_caller_location() -> str:
     return "python.dispatch:0"
 
 
-# Wire format: "<op_path>:#N@file:line/...[|<backend>]". The optional
-# "|<backend>" suffix attributes the scope to its backend.
-
-
 def encode_marker_name(name: str) -> str:
-    """Percent-encode a marker segment so an embedded '/' is not read as the
-    frame separator.
-    """
     return name.replace("%", "%25").replace("/", "%2F")
 
 
 def compose_marker(marker: str, context: str, backend: str = "") -> str:
-    """Return the wire-format string for a scope nested under the current
-    marker and context stacks. Marker segments are percent-encoded.
-    """
-    marker_stack = get_marker_stack()
-    context_stack = get_context_stack()
-    op_path = "/".join(encode_marker_name(name) for name in [*marker_stack, marker])
-    full = op_path + ":" + "/".join([*context_stack, context])
+    full = encode_marker_name(marker) + ":" + context
     if backend:
         full = f"{full}|{backend}"
     return full
 
 
 def _push_scope(marker: str, context: str, backend: str = "") -> None:
-    marker_stack = get_marker_stack()
-    context_stack = get_context_stack()
-
     _STATE.range_push(compose_marker(marker, context, backend))
-
-    marker_stack.append(marker)
-    context_stack.append(context)
+    _thread_local.depth = getattr(_thread_local, "depth", 0) + 1
 
 
 def _pop_scope() -> None:
-    marker_stack = get_marker_stack()
-    context_stack = get_context_stack()
-
-    # Unmatched pop: no-op.
-    if not marker_stack:
+    depth = getattr(_thread_local, "depth", 0)
+    if depth <= 0:
         return
-
     try:
         _STATE.range_pop()
     finally:
-        if marker_stack:
-            marker_stack.pop()
-        if context_stack:
-            context_stack.pop()
+        _thread_local.depth = depth - 1
 
 
 def install_global_wraps(backends: Iterable[str] = ()) -> None:
