@@ -15,6 +15,21 @@ all_algos     = ["TREE","RING", "", "", "", "", "PAT"]
 all_accs      = ["0", "1"]
 all_pipelines = ["0", "1"]
 all_unrolls   = ["1", "2", "4", "8", "16", "32"]
+# Unroll factors whose device functions are compiled for one arch only. This is the
+# single source of truth for that restriction. Its consumers are get_arch_guard(),
+# func_validate(), the specialized_files.txt guard the device linker filters on, the
+# local_unroll set for a local-arch build, and the ncclDevFuncUnrollArch[] table the
+# host reads at runtime. On any other arch these tables are all-nullptr, so accepting
+# the unroll would trap on the device.
+unroll_arch_requirement = {
+  "8":  "gfx1250",
+  "16": "gfx1250",
+  "32": "gfx1250",
+}
+
+def unrolls_requiring_arch(arch):
+  return [u for u in all_unrolls if unroll_arch_requirement.get(u) == arch]
+
 # User-buffer registration mode (compile-time UserRegMode template parameter):
 #   "0" = runtime / not-applicable (single kernel, current behavior)
 #   "1" = registered user buffer   (LL128 Direct path bypasses cache)
@@ -266,8 +281,9 @@ def calc_unroll_and_pipeline_for_local_arch():
       return (["2"], all_pipelines)
     elif "gfx1250" == gfx_name:
       # gfx1250 (MI450) benefits from larger unrolls; Unroll 8 required for FP8 launch;
-      # 32 is the default (commSetUnrollFactor).
-      return (["8", "16", "32"], all_pipelines)
+      # 32 is the default (commSetUnrollFactor). These are exactly the unrolls
+      # get_arch_guard() restricts to gfx1250, so take them from that one table.
+      return (unrolls_requiring_arch("gfx1250"), all_pipelines)
     else:
       return (["4"], all_pipelines)
   else:
@@ -286,11 +302,14 @@ def func_validate(coll, algo, proto, redop, ty, acc,  pipeline, unroll, reg):
     return False
   if coll == "" or algo == "":
     return False
-  # The LL128 SendRecv variant (reg=1) is only built/activated on gfx942/gfx950, which never
-  # use the gfx1250-only unroll factors (8/16/32). Don't emit those nonsensical variants: the
-  # device linker would skip compiling them for gfx942 while the dispatch table still expected
-  # them (undefined-symbol link error).
-  if coll == "SendRecv" and reg == "1" and unroll in ("8", "16", "32"):
+  # The LL128 SendRecv variant (reg=1) is only built/activated on gfx942/gfx950, and
+  # get_arch_guard() stamps it with that arch set rather than with the unroll's. For an
+  # arch-pinned unroll the two predicates can never agree: specialized_files.txt guards
+  # the shard on the pinned arch (see where it is written near the end of this file)
+  # while the dispatch table still expects the symbol on gfx942/gfx950, so the device
+  # linker leaves it undefined. Don't emit the combination at all, whichever arch the
+  # unroll is pinned to.
+  if coll == "SendRecv" and reg == "1" and unroll in unroll_arch_requirement:
     return False
   if not is_rocshmem and coll in gda_colls:
     return False
@@ -420,8 +439,8 @@ def get_arch_guard(fn):
       # LL128 SendRecv latency kernel: only build (and only activate) on gfx942/gfx950.
       # Every other arch keeps the legacy LL kernel (reg "0"), which has no guard.
       cond = "(defined(__gfx942__) || defined(__gfx950__)) && defined(ENABLE_LL128)"
-  elif fn.unroll in ("8", "16", "32"):
-      cond = "defined(__gfx1250__)"
+  elif fn.unroll in unroll_arch_requirement:
+      cond = "defined(__%s__)" % unroll_arch_requirement[fn.unroll]
   elif fn.proto == "LL128" and fn.acc == "1":
       cond = "(defined(__gfx942__) || defined(__gfx950__) || defined(__gfx1250__)) && defined(ENABLE_LL128)"
   elif fn.proto == "LL128":
@@ -617,6 +636,19 @@ with open(os.path.join(gensrc, "host_table.cpp"), "w") as f:
     out("  %s, // unroll %s\n" % ("true" if u in local_unroll else "false", u))
   out("};\n")
 
+  # Being generated is not sufficient: a multi-arch build generates every unroll
+  # while get_arch_guard() still compiles some of them for one arch only. The
+  # host must additionally match the running GPU against this table, otherwise
+  # it dispatches into an all-nullptr table and traps on the device.
+  out("\n")
+  out("// Arch required by each unroll factor's device functions, or nullptr when\n")
+  out("// the unroll is built for every arch. Mirrors unroll_arch_requirement.\n")
+  out("char const* const ncclDevFuncUnrollArch[NCCL_NUM_UNROLLS] = {\n")
+  for u in all_unrolls:
+    arch = unroll_arch_requirement.get(u)
+    out("  %s, // unroll %s\n" % ('"%s"' % arch if arch else "nullptr", u))
+  out("};\n")
+
 # Maps to .cu filename which implements this func. The only constraint is that
 # "coll" is reflected in the name: formally that no two funcs having different
 # coll's map to the same filename.
@@ -758,8 +790,19 @@ specialized_filelist.sort(key=_compile_cost_key)
 # Write the list of specialized files for CMake consumption
 with open(os.path.join(gensrc, "specialized_files.txt"), "w") as f:
   for filename, func_name, guard, fn in specialized_filelist:
-    if fn.unroll in ("8", "16", "32"):
-      cmake_guard = "defined(__gfx1250__)"
+    # cmake/DeviceLinker.cmake drops a .cpp from a GPU target when this predicate is
+    # false, so it has to stay in step with the #if get_arch_guard() emits. Derive the
+    # arch test from the same table.
+    #
+    # The ENABLE_LL128 term makes this predicate stricter than that #if, which drops
+    # the term for an arch-pinned unroll because the unroll branch wins ahead of the
+    # LL128 branches. With LL128 off, these shards would leave the target while
+    # device_table.h still declares them. Unreachable today: LL128 is only disabled
+    # below HIP 6.1.33591 (see the top-level CMakeLists), which no gfx1250-capable
+    # toolchain is. It would become live if an unroll were ever pinned to an arch old
+    # enough to pair with such a toolchain.
+    if fn.unroll in unroll_arch_requirement:
+      cmake_guard = "defined(__%s__)" % unroll_arch_requirement[fn.unroll]
       if fn.proto == "LL128":
         cmake_guard += " && defined(ENABLE_LL128)"
     else:

@@ -143,6 +143,7 @@ jobs:
             projects/rocr-runtime
             projects/clr
             projects/hip
+            projects/hrr
           submodules: false
           set-safe-directory: true
 
