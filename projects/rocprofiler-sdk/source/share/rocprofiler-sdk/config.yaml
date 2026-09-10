@@ -2560,6 +2560,7 @@ rocprofiler-sdk:
             - gfx1150
             - gfx1151
             - gfx1152
+            - gfx1250
           block: SPI
           event: 179
     - name: SPI_RA_BULKY_CU_FULL_CSN
@@ -2581,6 +2582,14 @@ rocprofiler-sdk:
             - gfx1152
           block: SPI
           event: 181
+    - name: SPI_RA_BULKY_FULL_CSN
+      description: Number of clocks where BULKY can't take csn wave when !fits.
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1250
+          block: SPI
+          event: 325
     - name: SPI_RA_LDS_CU_FULL_CSN
       description: Sum of CU where LDS can't take csn wave when !fits. Source is RA0
       properties: []
@@ -2638,12 +2647,26 @@ rocprofiler-sdk:
             - gfx1150
             - gfx1151
             - gfx1152
+            - gfx1250
           block: SPI
           event: 149
+    - name: SPI_RA_NAMED_BAR_FULL_CSN
+      description: Sum of cycles where named barrier can't take csn wave when !fits.
+      properties: []
+      definitions:
         - architectures:
             - gfx1250
           block: SPI
-          event: 148
+          event: 190
+    - name: SPI_RA_PRE_ALLOC_STALL
+      description: Number of clocks csn is stalled because pre alloc buffer is full or wave count > 
+        DEDICATED_PREALLOCATION_BUFFER_LIMIT
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1250
+          block: SPI
+          event: 194
     - name: SPI_RA_RES_STALL_CSN
       description: Arb cycles with CSn req and no CSn fits. Source is RA0
       properties: []
@@ -2712,6 +2735,7 @@ rocprofiler-sdk:
             - gfx1150
             - gfx1151
             - gfx1152
+            - gfx1250
           block: SPI
           event: 159
     - name: SPI_RA_VGPR_SIMD_FULL_CSN
@@ -2731,6 +2755,7 @@ rocprofiler-sdk:
             - gfx1150
             - gfx1151
             - gfx1152
+            - gfx1250
           block: SPI
           event: 169
     - name: SPI_RA_WAVE_SIMD_FULL_CSN
@@ -2750,6 +2775,7 @@ rocprofiler-sdk:
             - gfx1150
             - gfx1151
             - gfx1152
+            - gfx1250
           block: SPI
           event: 164
     - name: SPI_RA_WVLIM_STALL_CSN
@@ -14851,15 +14877,176 @@ rocprofiler-sdk:
             - gfx1152
           expression: reduce(GRBM_GUI_ACTIVE,sum)
     - name: SPI_BUSY
-      description: ''
+      description: Number of clocks SPI is busy.
       properties: []
       definitions:
         - architectures:
             - gfx1150
             - gfx1151
             - gfx1152
+            - gfx1250
           block: SPI
           event: 283
+    - name: SPI_ALL_WAVE
+      description: Number of clocks where any wave is launched
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1250
+          block: SPI
+          event: 286
+    - name: SPI_ALL_WAVE_IN_FLIGHT
+      description: Sum of number of all waves in flight per clk
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1250
+          block: SPI
+          event: 287
+    - name: SPI_ALL_WAVE_ITEMS
+      description: Number of active threads according to launching EXEC_MASK per clk
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1250
+          block: SPI
+          event: 300
+    - name: SPI_ALL_WAVE_RESTORED
+      description: Number of clocks where an ACE restore wave was sent to SPI_RA
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1250
+          block: SPI
+          event: 296
+    - name: SPI_ALL_WAVE_SAVED
+      description: Number of clocks where an ACE wave was saved
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1250
+          block: SPI
+          event: 297
+    - name: SPI_RA_WR_CTL_FULL
+      description: Arb cycles where RA is stalled due to wave launch fifo_full.
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1250
+          block: SPI
+          event: 143
+    - name: SPI_WAVE_DISPATCH_RATE
+      description: Wave dispatch rate
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1250
+          expression: reduce(SPI_ALL_WAVE,sum)/SPI_BUSY_sum
+    - name: SPI_THREAD_DISPATCH_RATE
+      description: Thread dispatch rate
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1250
+          expression: reduce(SPI_ALL_WAVE_ITEMS,sum)/SPI_BUSY_sum
+    - name: SPI_PER_SE_WAVE_OCCUPANCY
+      description: Per-SE wave occupancy
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1250
+          expression: SPI_ALL_WAVE_IN_FLIGHT/SPI_BUSY
+    - name: SPI_PER_SE_WAVE_LIFE
+      description: Per-SE wave life
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1250
+          expression: SPI_ALL_WAVE_IN_FLIGHT/SPI_CSN_WAVE
+    - name: SPI_CONTEXT_SAVE_RATE
+      description: Context Save rate
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1250
+          expression: 100*reduce(SPI_ALL_WAVE_SAVED,sum)/SPI_BUSY_sum
+    - name: SPI_CONTEXT_RESTORE_RATE
+      description: Context restore rate
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1250
+          expression: 100*reduce(SPI_ALL_WAVE_RESTORED,sum)/SPI_BUSY_sum
+    - name: SPI_WAVE_DISPATCH_FIFO_FULL_RATE
+      description: Wave dispatch FIFO full rate
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1250
+          expression: 100*reduce(SPI_RA_WR_CTL_FULL,sum)/SPI_BUSY_sum
+    - name: SPI_RA_NO_ALLOC_RATE
+      description: Resource no-allocation rate
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1250
+          expression: 100*reduce(SPI_RA_REQ_NO_ALLOC_CSN,sum)/SPI_BUSY_sum
+    - name: SPI_RA_FAIL_RATE_LDS_FULL
+      description: Resource allocation failure rate - LDS full
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1250
+          expression: 100*reduce(SPI_RA_LDS_CU_FULL_CSN,sum)/SPI_BUSY_sum
+    - name: SPI_RA_FAIL_RATE_WAVESLOTS_FULL
+      description: Resource allocation failure rate - Waveslots full
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1250
+          expression: 100*reduce(SPI_RA_WAVE_SIMD_FULL_CSN,sum)/SPI_BUSY_sum
+    - name: SPI_RA_FAIL_RATE_VGPR_FULL
+      description: Resource allocation failure rate - VGPR full
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1250
+          expression: 100*reduce(SPI_RA_VGPR_SIMD_FULL_CSN,sum)/SPI_BUSY_sum
+    - name: SPI_RA_FAIL_RATE_BARRIER_FULL
+      description: Resource allocation failure rate - Barrier full
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1250
+          expression: 100*reduce(SPI_RA_BAR_CU_FULL_CSN,sum)/SPI_BUSY_sum
+    - name: SPI_RA_FAIL_RATE_BULKY_FULL
+      description: Resource allocation failure rate - Bulky full
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1250
+          expression: 100*reduce(SPI_RA_BULKY_FULL_CSN,sum)/SPI_BUSY_sum
+    - name: SPI_RA_FAIL_RATE_NAMED_BARRIERS_FULL
+      description: Resource allocation failure rate - Named barriers full
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1250
+          expression: 100*reduce(SPI_RA_NAMED_BAR_FULL_CSN,sum)/SPI_BUSY_sum
+    - name: SPI_RA_FAIL_RATE_TEMP_SPACE_FULL
+      description: Resource allocation failure rate - Temp space full
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1250
+          expression: 100*reduce(SPI_RA_TMP_STALL_CSN,sum)/SPI_BUSY_sum
+    - name: SPI_BUSY_sum
+      description: Number of clocks SPI is busy, summed over all shader engines (SE).
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1250
+          expression: reduce(SPI_BUSY,sum)
     - name: SPI_CSN_WAVE_sum
       description: ''
       properties: []
