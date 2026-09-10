@@ -56,7 +56,7 @@ detection and the guidance overlay:
 
    $ rocprof-compute analyze --experimental --membw-analysis -p workloads/my_workload/MI350/
 
-To view only the memory chart and Memory Bandwidth Analysis tables,
+To view only the memory chart and memory bandwidth analysis tables,
 use the block filter:
 
 .. code-block:: shell
