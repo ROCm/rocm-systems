@@ -49,6 +49,8 @@ def emit_isa_properties(output_dir: str, specs) -> Path:
         compute_tmpring_wavesize_bits = profile.compute_tmpring_wavesize_bits
         wave_size = profile.wave_size
         wave_size_max = profile.wave_size_max
+        vmcnt_capacity = profile.vmcnt_capacity
+        lgkmcnt_capacity = profile.lgkmcnt_capacity
         addressable_vgprs = profile.max_addressable_vgprs_per_wf
         vgpr_count_granule_wave32 = profile.descriptor_vgpr_count_granule_wave32
         vgpr_count_granule_wave64 = profile.descriptor_vgpr_count_granule_wave64
@@ -68,6 +70,8 @@ def emit_isa_properties(output_dir: str, specs) -> Path:
             f'        .compute_tmpring_wavesize_bits = {compute_tmpring_wavesize_bits},',
             f'        .wave_size = {wave_size},',
             f'        .wave_size_max = {wave_size_max},',
+            f'        .vmcnt_capacity = {vmcnt_capacity},',
+            f'        .lgkmcnt_capacity = {lgkmcnt_capacity},',
             f'        .max_addressable_vgprs_per_wf = {addressable_vgprs},',
             f'        .descriptor_vgpr_count_granule_wave32 = {vgpr_count_granule_wave32},',
             f'        .descriptor_vgpr_count_granule_wave64 = {vgpr_count_granule_wave64},',
@@ -108,6 +112,8 @@ def emit_isa_properties(output_dir: str, specs) -> Path:
         '  uint32_t compute_tmpring_wavesize_bits = 0;',
         '  uint32_t wave_size = 0;',
         '  uint32_t wave_size_max = 0;',
+        '  uint8_t vmcnt_capacity = 0;   ///< Zero when VMCNT is absent.',
+        '  uint8_t lgkmcnt_capacity = 0; ///< Zero when LGKMCNT is absent.',
         '  uint32_t max_addressable_vgprs_per_wf = 0;',
         '  uint32_t descriptor_vgpr_count_granule_wave32 = 0;',
         '  uint32_t descriptor_vgpr_count_granule_wave64 = 0;',
