@@ -28,43 +28,26 @@
    ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
    DEALINGS WITH THE SOFTWARE.  */
 
-#ifndef _ROCM_DEBUG_AGENT_LOGGING_H
-#define _ROCM_DEBUG_AGENT_LOGGING_H 1
-
-#include "log_level.h"
-
-#include <fstream>
+#ifndef _ROCM_DEBUG_AGENT_LOG_LEVEL_H
+#define _ROCM_DEBUG_AGENT_LOG_LEVEL_H 1
 
 namespace amd::debug_agent
 {
 
-extern log_level_t log_level;
-
-extern std::ofstream agent_out;
-
-namespace detail
+enum class log_level_t
 {
-
-/* A macro instead of a variadic template so that the __VAR_ARGS__ are not
-   evaluated unless the log level indicated they are needed.  */
-extern void log (log_level_t level, const char *format, ...)
-#if defined(__GNUC__)
-    __attribute__ ((format (printf, 2, 3)))
-#endif /* defined (__GNUC__) */
-    ;
-
-} /* namespace detail */
-
-#define agent_log(level, format, ...)                                         \
-  do                                                                          \
-    {                                                                         \
-      if (level <= amd::debug_agent::log_level)                               \
-        amd::debug_agent::detail::log (level, format, ##__VA_ARGS__);         \
-    }                                                                         \
-  while (0)
-
-void set_log_level (log_level_t level);
+  /* Print no messages.  */
+  none = 0,
+  /* Print error messages.  */
+  error = 1,
+  /* Print error, and warning messages.  */
+  warning = 2,
+  /* Print error, warning, and info messages.  */
+  info = 3,
+  /* Print error, warning, info, and verbose  messages.  */
+  verbose = 4
+};
 
 } /* namespace amd::debug_agent */
 
-#endif /* _ROCM_DEBUG_AGENT_LOGGING_H */
+#endif /* _ROCM_DEBUG_AGENT_LOG_LEVEL_H */

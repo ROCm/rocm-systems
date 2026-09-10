@@ -4,7 +4,7 @@
 #ifndef ROCM_DEBUG_AGENT_UTILS_H
 #define ROCM_DEBUG_AGENT_UTILS_H
 
-#include "logging.h"
+#include "log_level.h"
 
 #include <amd-dbgapi/amd-dbgapi.h>
 

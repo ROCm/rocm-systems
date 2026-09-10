@@ -5,11 +5,13 @@
 # rocm-debug-agent unit tests have the following dependencies:
 #
 # GoogleTest (gtest)
-# amd-dbgapi (headers only, via pkg-config)
+# amd-dbgapi (headers only for type definitions)
 # Threads
 #
 # Unit tests are pure logic tests with no GPU/HIP runtime dependencies.
 # They can run on any machine without GPU hardware.
+# The log_level.h header provides logging enum without requiring
+# the logging implementation or amd-dbgapi library linkage.
 
 cmake_minimum_required(VERSION 3.21)
 
@@ -57,15 +59,15 @@ if(NOT GTest_FOUND)
     return()
 endif()
 
-# Find amd-dbgapi library.
+# Find amd-dbgapi headers for type definitions.
 #
 # TheRock: CMAKE_PREFIX_PATH automatically includes build/dist/rocm
 # Standalone: Set CMAKE_PREFIX_PATH=/opt/rocm or custom install prefix
 #
-# Unit tests need to link amd-dbgapi because:
-# - agent_utils.cpp calls logging functions (log_level, detail::log)
-# - logging.cpp calls amd_dbgapi_set_log_level()
-# Therefore headers-only dependency is insufficient.
+# Unit tests only need amd-dbgapi headers (not the library) because:
+# - agent_utils.cpp only uses log_level_t enum (now in log_level.h)
+# - logging.cpp is excluded from unit test build
+# - No calls to amd_dbgapi_* functions in unit-tested code
 
 find_package(
     amd-dbgapi
@@ -73,7 +75,7 @@ find_package(
     CONFIG
 )
 
-message(STATUS "Found amd-dbgapi: ${amd-dbgapi_DIR}")
+message(STATUS "Found amd-dbgapi headers: ${amd-dbgapi_DIR}")
 
 # Create unit test executable.
 add_executable(
@@ -82,14 +84,15 @@ add_executable(
     test_uri.cpp
     test_options.cpp
     test_exceptions.cpp
+    test_logging_stub.cpp
 )
 
 # Link directly to source files (not the .so).
+# Note: logging.cpp excluded - test_logging_stub.cpp provides no-op implementations.
 target_sources(
     rocm-debug-agent-unit-tests
     PRIVATE
         ${PROJECT_SOURCE_DIR}/../src/agent_utils.cpp
-        ${PROJECT_SOURCE_DIR}/../src/logging.cpp
 )
 
 # Include directories.
@@ -99,13 +102,27 @@ target_include_directories(
         ${PROJECT_SOURCE_DIR}/../src
 )
 
+# Add amd-dbgapi include directories (headers only, no library linking).
+if(TARGET amd-dbgapi)
+    get_target_property(
+        DBGAPI_INCLUDE_DIRS
+        amd-dbgapi
+        INTERFACE_INCLUDE_DIRECTORIES
+    )
+    target_include_directories(
+        rocm-debug-agent-unit-tests
+        PRIVATE
+            ${DBGAPI_INCLUDE_DIRS}
+    )
+endif()
+
 # Link libraries.
+# Note: amd-dbgapi library excluded - unit tests only need headers for type definitions.
 target_link_libraries(
     rocm-debug-agent-unit-tests
     PRIVATE
         GTest::gtest
         GTest::gtest_main
-        amd-dbgapi
         Threads::Threads
 )
 
