@@ -1111,7 +1111,7 @@ bool rcclUseAllGatherDirect(struct ncclComm* comm, size_t& msgSize) {
   return (comm->enableCustColl && (msgSize <= threshold) && (threshold != -1) && !rankMultiple);
 }
 
-bool rcclUseCeAllReduce(struct ncclComm* comm, size_t count, ncclDataType_t datatype, ncclRedOp_t op,
+bool rcclUseCeAr2Shot(struct ncclComm* comm, size_t count, ncclDataType_t datatype, ncclRedOp_t op,
                         const void* acc) {
   const bool enabled = rcclCeAllReduceEnabled(comm);
   const bool force = rcclForceCeAllReduceEnabled(comm);
@@ -1319,7 +1319,7 @@ ncclResult_t rcclSelectAllReduce(struct ncclComm* comm, const void* sendbuff, vo
   // This call site never carries a bias buffer (ncclAllReduceWithBias_impl bypasses it entirely
   // and goes straight to taskAppend), so /*acc=*/nullptr here is always correct.
   const bool ceAllReduceAllowed = ncclGroupDepth == 0 && ceArGraphAllowed &&
-                                  rcclUseCeAllReduce(comm, count, datatype, op, /*acc=*/nullptr) && (force || symReg);
+                                  rcclUseCeAr2Shot(comm, count, datatype, op, /*acc=*/nullptr) && (force || symReg);
 
   // (3) Eager CE 2-shot (staging buffer). Requires !symkRequested and an
   // initialized ceARTmpBuf (first call, before init, falls through to enqueue).

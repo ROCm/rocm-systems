@@ -1830,14 +1830,14 @@ static const rcclArchThresholds rcclArchThresholds_gfx1250 = {
   },
   // ceNonRegMin: lower bound for CE-Scratch window per collective.
   // AG: CE-Scratch wins 8-32 MiB; Ring/LL is faster below 8 MiB.
-  // AR: no lower bound today -- rcclUseCeAllReduce() only enforces the upper cap,
+  // AR: no lower bound today -- rcclUseCeAr2Shot() only enforces the upper cap,
   // so 2-shot covers everything up to ceNonRegMax[AR] once CE AllReduce is enabled.
   .ceNonRegMin = {
     0,                    // [0] Broadcast      -- not used
     0,                    // [1] Reduce          -- not used
     0,                    // [2] AllGather       -- 0 = disabled; DDA/LL128 covers 1M-64M for R0
     0,                    // [3] ReduceScatter   -- not used
-    0,                    // [4] AllReduce       -- floor enforced by rcclUseCeAllReduce, not this gate
+    0,                    // [4] AllReduce       -- floor enforced by rcclUseCeAr2Shot, not this gate
     0,                    // [5] SendRecv        -- not used
     0,                    // [6] Send            -- not used
     0,                    // [7] Recv            -- not used

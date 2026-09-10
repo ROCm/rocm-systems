@@ -185,7 +185,7 @@ static ncclResult_t rcclDirectAllGather(const void* sendbuff, void* recvbuff, si
 // logic is identical to the guard at the AllReduce call site below.
 //
 // `ceAllReduceAllowed` is the caller's single source of truth for "will CE AllReduce actually service
-// this call" -- computed once at the call site from rcclUseCeAllReduce() plus whatever additional
+// this call" -- computed once at the call site from rcclUseCeAr2Shot() plus whatever additional
 // gating the CE AllReduce implementation requires (graph latch, ncclGroupDepth, force/symReg
 // eligibility, etc). This helper does not re-derive CE eligibility itself: threading the same boolean
 // through both the early CE return and this guard keeps the two decisions from silently drifting apart
