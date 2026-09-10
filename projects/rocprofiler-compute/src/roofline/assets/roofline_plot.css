@@ -11,6 +11,9 @@
   --roofline-muted: #5b6472;
   --roofline-selected-bg: rgba(0, 114, 178, 0.12);
   --roofline-swatch-border: rgba(0, 0, 0, 0.25);
+  --roofline-warning: #8a4b00;
+  --roofline-warning-bg: #fff3cd;
+  --roofline-warning-border: #d69e2e;
   --roofline-dim-opacity: 0.4;
   --roofline-panel-basis: clamp(280px, 26vw, 440px);
 
@@ -30,6 +33,9 @@
   --roofline-muted: #9aa4b2;
   --roofline-selected-bg: rgba(88, 166, 255, 0.18);
   --roofline-swatch-border: rgba(255, 255, 255, 0.35);
+  --roofline-warning: #ffd580;
+  --roofline-warning-bg: #402d08;
+  --roofline-warning-border: #d69e2e;
   --roofline-plot-area: #000000;
   --roofline-plot-grid: rgba(255, 255, 255, 0.14);
   --roofline-marker-outline: rgba(255, 255, 255, 0.7);
@@ -133,6 +139,14 @@ body {
   opacity: 0.45;
   cursor: default;
   color: var(--roofline-muted);
+}
+
+.roofline-btn:focus-visible,
+.roofline-precision-btn:focus-visible,
+.roofline-panel-action:focus-visible,
+.roofline-kernel-offplot:focus-visible {
+  outline: 2px solid var(--roofline-accent);
+  outline-offset: 2px;
 }
 
 .roofline-btn-sm {
@@ -295,20 +309,40 @@ body {
 .roofline-panel-item {
   display: flex;
   align-items: flex-start;
-  gap: 8px;
+  gap: 4px;
   width: 100%;
   min-width: 0;
   max-width: 100%;
-  padding: 5px 8px;
+  padding: 0;
   overflow: hidden;
   border-radius: 6px;
-  cursor: pointer;
   font-size: 12px;
   line-height: 1.3;
 }
 
-.roofline-panel-item:hover {
+.roofline-panel-action {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 5px 8px;
+  border: 0;
+  border-radius: 6px;
+  color: inherit;
+  background: transparent;
+  font: inherit;
+  line-height: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.roofline-panel-action:hover {
   background: var(--roofline-bg-soft);
+}
+
+.roofline-panel-item.selected .roofline-panel-action:hover {
+  background: transparent;
 }
 
 .roofline-panel-item.selected {
@@ -352,6 +386,38 @@ body {
   color: var(--roofline-muted);
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
+}
+
+.roofline-kernel-offplot {
+  flex: 0 0 auto;
+  margin: 5px 8px 0 0;
+  padding: 1px 5px;
+  border: 1px solid var(--roofline-warning-border);
+  border-radius: 999px;
+  color: var(--roofline-warning);
+  background: var(--roofline-warning-bg);
+  font: inherit;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1.3;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.roofline-kernel-offplot:hover {
+  box-shadow: 0 0 0 1px var(--roofline-warning-border);
+}
+
+.roofline-kernel-offplot[hidden],
+.roofline-offplot-count[hidden] {
+  display: none;
+}
+
+.roofline-offplot-count {
+  margin-left: 4px;
+  color: var(--roofline-warning);
+  font-size: 11px;
+  font-weight: 700;
 }
 
 .roofline-roof-swatch {

@@ -3,8 +3,9 @@
 
 import argparse
 import math
+from copy import deepcopy
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
 import plotext as plt
@@ -12,7 +13,7 @@ import plotly.colors as pcolors
 import plotly.graph_objects as go
 from dash import dcc, html
 
-from roofline.roofline_frame import FrameAnchors, frame_bounds
+from roofline.roofline_frame import canonical_frame, points_outside_frame
 from roofline.roofline_hover import (
     build_compute_peak_hover,
     build_kernel_hover_template,
@@ -44,6 +45,7 @@ from utils.roofline_calc import (
     XMIN,
     OpsSupport,
     construct_roof,
+    machine_ceilings,
     sanitize_mem_level,
 )
 from utils.specs import MachineSpecs
@@ -51,7 +53,7 @@ from utils.utils_analysis import get_matrix_ops_type
 
 _KERNEL_PALETTE: list[str] = pcolors.qualitative.Dark24 + pcolors.qualitative.Light24
 DEFAULT_PEAK = "HBM"
-DEFAULT_AXIS_BOUNDS = (XMIN, XMAX_DEFAULT, 1.0, 100000.0)
+DEFAULT_AXIS_BOUNDS = (XMIN, XMAX_DEFAULT, 1.0, 1000000.0)
 ROOF_DENSE_PAD_FACTOR = 1e3
 TRACE_COLORS: dict[str, dict[str, str]] = {
     "l0": {"html": "#F0E442", "cli": "brown+"},
@@ -94,6 +96,57 @@ def _roof_sample_count(low_ai: float, high_ai: float) -> int:
     return int(min(max(samples, _ROOF_SAMPLES_MIN), _ROOF_SAMPLES_MAX))
 
 
+def _decade_label(value: float) -> str:
+    """Format a positive decade bound compactly and exactly."""
+    return f"1e{int(round(math.log10(value)))}"
+
+
+def _off_plot_phrase(
+    point: Dict[str, Any], x_overflow: float, y_overflow: float
+) -> str:
+    """Describe one kernel point's signed overflow relative to the frame."""
+    assert x_overflow != 0.0 or y_overflow != 0.0
+    parts: List[str] = []
+    if x_overflow != 0.0:
+        if math.isfinite(x_overflow):
+            direction = "below" if x_overflow < 0 else "above"
+            parts.append(
+                f"{point['ai']:g} sits {abs(x_overflow):.2f} decades "
+                f"{direction} the arithmetic intensity axis"
+            )
+        else:
+            parts.append(
+                f"{point['ai']:g} cannot be placed on the arithmetic intensity axis"
+            )
+    if y_overflow != 0.0:
+        if math.isfinite(y_overflow):
+            direction = "below" if y_overflow < 0 else "above"
+            parts.append(
+                f"{point['perf']:g} sits {abs(y_overflow):.2f} decades "
+                f"{direction} the performance axis"
+            )
+        else:
+            parts.append(f"{point['perf']:g} cannot be placed on the performance axis")
+    return f"at {point['peak']}, " + "; ".join(parts)
+
+
+def _frame_subtitle(
+    bounds: Tuple[float, float, float, float], is_machine_frame: bool
+) -> str:
+    """Name the source and bounds of the frame shown by both axes."""
+    x_lo, x_hi, y_lo, y_hi = bounds
+    source = (
+        "Axes fixed to this GPU"
+        if is_machine_frame
+        else "Default axes - benchmark ceilings unavailable"
+    )
+    return (
+        f"{source} - "
+        f"AI {_decade_label(x_lo)} to {_decade_label(x_hi)} - "
+        f"performance {_decade_label(y_lo)} to {_decade_label(y_hi)}"
+    )
+
+
 class Roofline:
     def __init__(
         self,
@@ -109,6 +162,8 @@ class Roofline:
         self.__view_models: dict[str, RooflineViewModel] = {}
         self.__compute_peaks: dict[str, list[tuple[str, float]]] = {}
         self.__ceiling_by_dtype: dict[str, dict[str, Any]] = {}
+        self.__frame_bounds: Optional[Tuple[float, float, float, float]] = None
+        self.__frame_from_machine_ceilings: Optional[bool] = None
 
     def _ceiling_for_dtype(self, dtype: str) -> dict[str, Any]:
         if dtype not in self.__ceiling_by_dtype:
@@ -116,9 +171,18 @@ class Roofline:
                 roofline_parameters=self.__run_parameters,
                 dtype=dtype,
                 mspec=self.__mspec,
-                ai_data=self.__ai_data,
             )
         return self.__ceiling_by_dtype[dtype]
+
+    def _canonical_frame_bounds(self) -> Tuple[float, float, float, float]:
+        """Return this machine's shared frame, computing it only once."""
+        if self.__frame_bounds is None:
+            machine_frame = canonical_frame(
+                *machine_ceilings(self.__run_parameters, self.__mspec)
+            )
+            self.__frame_from_machine_ceilings = machine_frame is not None
+            self.__frame_bounds = machine_frame or DEFAULT_AXIS_BOUNDS
+        return self.__frame_bounds
 
     def roof_setup(self) -> None:
         workload_dir_val = self.__run_parameters.get("workload_dir")
@@ -200,51 +264,6 @@ class Roofline:
         if cap == float("inf") or not bandwidth > 0:
             return None
         return (cap / bandwidth, cap)
-
-    def _frame_anchors(
-        self,
-        sanitized_cache_hierarchy: list[str],
-        compute_peaks: list[tuple[str, float]],
-        ops_flops: str,
-    ) -> FrameAnchors:
-        """What the opening frame has to hold, read off the geometry this figure
-        draws: the knee each diagonal is really capped at, every stacked
-        datatype's ceiling, and the kernel dots the page opens with."""
-        anchors = FrameAnchors()
-        cap, _ = self._envelope_compute_cap(compute_peaks)
-        for level in sanitized_cache_hierarchy:
-            bandwidth = self._peak_value(self.__ceiling_data, level.lower())
-            if not bandwidth or bandwidth <= 0:
-                continue
-            anchors.bandwidths.append(bandwidth)
-            knee = self._roof_knee(bandwidth, cap)
-            if knee:
-                anchors.points.append(knee)
-        anchors.throughputs.extend(peak for _, peak in compute_peaks if peak > 0)
-        anchors.points.extend(self._opening_kernel_points(ops_flops))
-        return anchors
-
-    def _opening_kernel_points(self, ops_flops: str) -> list[tuple[float, float]]:
-        """The kernel dots the page opens with: one memory level's points, or
-        every level's when the kernel panel opens on all peaks."""
-        peak = self.__view_models[ops_flops].default_peak
-        levels = (
-            [f"ai_{peak.lower()}"]
-            if peak and peak != ALL_PEAKS_VALUE
-            else list(CACHE_LEVELS)
-        )
-        ai_data = self.__ai_data or {}
-        points: list[tuple[float, float]] = []
-        for level in levels:
-            level_points = ai_data.get(level)
-            if not level_points or len(level_points) < 2:
-                continue
-            points.extend(
-                (float(ai), float(perf))
-                for ai, perf in zip(level_points[0], level_points[1])
-                if ai is not None and perf is not None
-            )
-        return points
 
     def _add_compute_ceiling(
         self,
@@ -494,6 +513,9 @@ class Roofline:
         supported by the profiled GPU architecture.
         """
         self.roof_setup()
+        self.__frame_bounds = None
+        self.__frame_from_machine_ceilings = None
+        self._canonical_frame_bounds()
         self.__view_models = {}
         self.__compute_peaks = {}
         self.__ceiling_by_dtype = {}
@@ -604,6 +626,7 @@ class Roofline:
             roofline_traces=list(source_model.roofline_traces),
             compute_traces=list(source_model.compute_traces),
             compute_overlay_traces=list(source_model.compute_overlay_traces),
+            frame=deepcopy(source_model.frame),
         )
 
         if source_key == "FLOP" and ops_figure is not None:
@@ -714,6 +737,11 @@ class Roofline:
                 },
                 default_peak=ALL_PEAKS_VALUE,
             )
+        x_lo, x_hi, y_lo, y_hi = self._canonical_frame_bounds()
+        self.__view_models[ops_flops].frame = {
+            "x": [x_lo, x_hi],
+            "y": [y_lo, y_hi],
+        }
         compute_peaks = self._figure_compute_peaks(ops_flops)
 
         if plot_kernels:
@@ -723,11 +751,11 @@ class Roofline:
                 ops_flops,
                 compute_peaks,
             )
+            self._warn_off_plot_kernels(
+                self.__view_models[ops_flops].kernels,
+                (x_lo, x_hi, y_lo, y_hi),
+            )
 
-        bounds = frame_bounds(
-            self._frame_anchors(sanitized_cache_hierarchy, compute_peaks, ops_flops)
-        )
-        x_lo, x_hi, y_lo, y_hi = bounds if bounds else DEFAULT_AXIS_BOUNDS
         # Roofs are densely sampled across so they stay hoverable
         # throughout the visible range.
         roof_dense_lo = x_lo / ROOF_DENSE_PAD_FACTOR
@@ -752,6 +780,29 @@ class Roofline:
             self._apply_plotly_layout(fig, dtype, ops_flops, (x_lo, x_hi, y_lo, y_hi))
 
         return fig
+
+    @staticmethod
+    def _warn_off_plot_kernels(
+        kernels_model: List[Dict[str, Any]],
+        frame: Tuple[float, float, float, float],
+    ) -> None:
+        """Warn when kernel points fall outside the canonical frame."""
+        for kernel in kernels_model:
+            points = kernel.get("points", [])
+            outside = points_outside_frame(
+                frame, [(point["ai"], point["perf"]) for point in points]
+            )
+            if not outside:
+                continue
+            details = "; ".join(
+                _off_plot_phrase(points[index], x_overflow, y_overflow)
+                for index, x_overflow, y_overflow in outside
+            )
+            console_warning(
+                f"Roofline kernel '{kernel['name']}' falls outside the current "
+                f"fixed roofline frame: {details}. Drawn at its true position; "
+                "axes remain fixed to the current roofline frame."
+            )
 
     def _add_kernel_traces(
         self,
@@ -953,6 +1004,9 @@ class Roofline:
     ) -> None:
         """Apply log axes, initial framing, and shared styling to a new figure."""
         view_x_lo, view_x_hi, view_y_lo, view_y_hi = view_bounds
+        frame_subtitle = _frame_subtitle(
+            view_bounds, self.__frame_from_machine_ceilings is True
+        )
         fig.update_xaxes(
             type="log",
             range=[float(np.log10(view_x_lo)), float(np.log10(view_x_hi))],
@@ -966,7 +1020,7 @@ class Roofline:
         fig.update_layout(
             template="plotly_white",
             title=dict(
-                text="Empirical Roofline Analysis",
+                text=(f"Empirical Roofline Analysis<br><sup>{frame_subtitle}</sup>"),
                 x=0.5,
                 xanchor="center",
                 font=dict(size=15),
@@ -974,7 +1028,7 @@ class Roofline:
             autosize=True,
             dragmode="pan",
             hovermode="closest",
-            margin=dict(l=82, r=40, b=62, t=62, pad=4, autoexpand=False),
+            margin=dict(l=82, r=40, b=62, t=80, pad=4, autoexpand=False),
             showlegend=True,
             hoverlabel=dict(
                 bgcolor="white",

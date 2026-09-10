@@ -47,6 +47,10 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 ### Resolved issues
 
+* Fixed standalone roofline HTML opening axes to derive from machine ceilings
+  instead of kernel data. **Fit to data** and off-plot kernel badges provide
+  recovery when kernel points fall outside the stable comparison frame.
+
 * Fixed `L2 Cache (per Channel)` labels to use a `Metric` column and numbered `Channel` row labels in CLI, TUI, and analysis database output.
 
 * Fixed false `0` values in the gfx115x Memory Chart; missing counter data now reports `N/A`.

@@ -1,96 +1,145 @@
 # Copyright (c) Advanced Micro Devices, Inc.
 # SPDX-License-Identifier:  MIT
 
-"""Translate a figure's data (kernel dots, roof knees, compute
-ceilings, bandwidths) into the log-log axes it opens on.
-"""
+"""Translate machine ceilings into the log-log axes a roofline opens on."""
 
 import math
-from dataclasses import dataclass, field
-from typing import List, Optional, Tuple
+import sys
+from typing import Iterable, List, Optional, Tuple
 
-FRAME_PAD = 1.6
-FRAME_MIN_DECADES = 2.5
-FRAME_SLOPE_SKEW = 2.0
-FRAME_NOMINAL_ASPECT = 1.5
+FRAME_X_MIN = 1e-2
 
-
-@dataclass
-class FrameAnchors:
-    """Points, throughputs, and bandwidths that bound the opening frame."""
-
-    points: List[Tuple[float, float]] = field(default_factory=list)
-    throughputs: List[float] = field(default_factory=list)
-    bandwidths: List[float] = field(default_factory=list)
+_OVERFLOW_EPSILON = sys.float_info.epsilon
 
 
-def frame_bounds(
-    anchors: FrameAnchors,
-    aspect: float = FRAME_NOMINAL_ASPECT,
+def canonical_frame(
+    bandwidths: List[float], peaks: List[float]
 ) -> Optional[Tuple[float, float, float, float]]:
-    """Return (x_lo, x_hi, y_lo, y_hi) in data coordinates, or None."""
-    points = [(ai, perf) for ai, perf in anchors.points if ai > 0 and perf > 0]
-    xs = [ai for ai, _ in points]
-    ys = [perf for _, perf in points]
-    ys += [perf for perf in anchors.throughputs if perf > 0]
-    if not xs or not ys:
+    """Return decade-aligned bounds derived only from machine ceilings."""
+    valid_bandwidths = [bw for bw in bandwidths if math.isfinite(bw) and bw > 0]
+    valid_peaks = [peak for peak in peaks if math.isfinite(peak) and peak > 0]
+    if not valid_bandwidths or not valid_peaks:
         return None
 
-    # Frame on roof foot at perf_lo, not just the knee.
-    perf_lo = min(ys)
-    slopes = [math.log10(bw) for bw in anchors.bandwidths if bw > 0]
-    xs += [perf_lo / bandwidth for bandwidth in anchors.bandwidths if bandwidth > 0]
+    minimum_bandwidth = min(valid_bandwidths)
+    maximum_peak = max(valid_peaks)
 
-    x_range = _padded_log_span(min(xs), max(xs))
-    y_range = _padded_log_span(min(ys), max(ys))
-    x_range = _widened_to(x_range, FRAME_MIN_DECADES)
-    x_range, y_range = _shaped_to_aspect(x_range, y_range, aspect)
-    x_range, y_range = _pinned_to_slopes(x_range, y_range, slopes, aspect)
-    return (10 ** x_range[0], 10 ** x_range[1], 10 ** y_range[0], 10 ** y_range[1])
+    log_minimum_bandwidth = math.log10(minimum_bandwidth)
+    log_maximum_peak = math.log10(maximum_peak)
+    log_frame_x_min = math.log10(FRAME_X_MIN)
+    log_y_low_target = log_frame_x_min + log_minimum_bandwidth
+
+    x_high_exponent = int(math.ceil(log_maximum_peak - log_minimum_bandwidth))
+    y_low_exponent = int(math.floor(log_y_low_target))
+    y_high_exponent = int(math.ceil(log_maximum_peak))
+
+    min_x_high_exponent = int(log_frame_x_min + 1.0)
+    if x_high_exponent <= int(math.floor(log_frame_x_min)):
+        x_high_exponent = min_x_high_exponent
+    if y_high_exponent <= y_low_exponent:
+        y_high_exponent = y_low_exponent + 1
+
+    while not _x_high_covers_peak(
+        x_high_exponent, minimum_bandwidth, log_minimum_bandwidth, maximum_peak
+    ):
+        x_high_exponent += 1
+        if _decade_bound(float(x_high_exponent)) is None:
+            return None
+
+    while not _y_high_covers_peak(y_high_exponent, maximum_peak):
+        y_high_exponent += 1
+        if _decade_bound(float(y_high_exponent)) is None:
+            return None
+
+    while not _y_low_within_target(y_low_exponent, minimum_bandwidth, log_y_low_target):
+        y_low_exponent -= 1
+        if _decade_bound(float(y_low_exponent)) is None:
+            return None
+
+    x_high = _decade_bound(float(x_high_exponent))
+    y_low = _decade_bound(float(y_low_exponent))
+    y_high = _decade_bound(float(y_high_exponent))
+    if x_high is None or y_low is None or y_high is None:
+        return None
+
+    return (FRAME_X_MIN, x_high, y_low, y_high)
 
 
-def _padded_log_span(lo: float, hi: float) -> Tuple[float, float]:
-    pad = math.log10(FRAME_PAD)
-    return (math.log10(lo) - pad, math.log10(hi) + pad)
+def points_outside_frame(
+    frame: Tuple[float, float, float, float],
+    points: Iterable[Tuple[float, float]],
+) -> List[Tuple[int, float, float]]:
+    """Return signed decade overflow for each point outside the frame."""
+    x_lo, x_hi, y_lo, y_hi = frame
+    outside: List[Tuple[int, float, float]] = []
+    for index, (x_value, y_value) in enumerate(points):
+        x_overflow = _axis_overflow(x_value, x_lo, x_hi)
+        y_overflow = _axis_overflow(y_value, y_lo, y_hi)
+        if x_overflow != 0.0 or y_overflow != 0.0:
+            outside.append((index, x_overflow, y_overflow))
+    return outside
 
 
-def _widened_to(span: Tuple[float, float], decades: float) -> Tuple[float, float]:
-    lo, hi = span
-    if hi - lo >= decades:
-        return (lo, hi)
-    mid = 0.5 * (lo + hi)
-    return (mid - 0.5 * decades, mid + 0.5 * decades)
+def _decade_bound(exponent: float) -> Optional[float]:
+    """Return 10**exponent when it is a positive finite float."""
+    if not math.isfinite(exponent):
+        return None
+    try:
+        value = math.pow(10.0, exponent)
+    except OverflowError:
+        return None
+    if value <= 0.0 or not math.isfinite(value):
+        return None
+    return value
 
 
-def _pinned_to_slopes(
-    x_range: Tuple[float, float],
-    y_range: Tuple[float, float],
-    slopes: List[float],
-    aspect: float,
-) -> Tuple[Tuple[float, float], Tuple[float, float]]:
-    if not slopes:
-        return x_range, y_range
-    x_range = (min(x_range[0], y_range[0] - max(slopes)), x_range[1])
-    if not aspect > 0:
-        return x_range, y_range
-    room_for_slope = (x_range[1] - x_range[0]) / (aspect * FRAME_SLOPE_SKEW)
-    if room_for_slope > y_range[1] - y_range[0]:
-        y_range = (y_range[0], y_range[0] + room_for_slope)
-    return x_range, y_range
+def _x_high_covers_peak(
+    x_high_exponent: int,
+    minimum_bandwidth: float,
+    log_minimum_bandwidth: float,
+    maximum_peak: float,
+) -> bool:
+    x_high = _decade_bound(float(x_high_exponent))
+    if x_high is None:
+        return False
+    product = x_high * minimum_bandwidth
+    if math.isfinite(product) and product > 0.0:
+        return product >= maximum_peak
+    return (float(x_high_exponent) + log_minimum_bandwidth) >= math.log10(maximum_peak)
 
 
-def _shaped_to_aspect(
-    x_range: Tuple[float, float],
-    y_range: Tuple[float, float],
-    aspect: float,
-) -> Tuple[Tuple[float, float], Tuple[float, float]]:
-    x_span = x_range[1] - x_range[0]
-    y_span = y_range[1] - y_range[0]
-    if not (x_span > 0 and y_span > 0 and aspect > 0):
-        return x_range, y_range
-    screen_slope = x_span / (aspect * y_span)
-    if screen_slope > FRAME_SLOPE_SKEW:
-        return x_range, _widened_to(y_range, x_span / (aspect * FRAME_SLOPE_SKEW))
-    if screen_slope < 1 / FRAME_SLOPE_SKEW:
-        return _widened_to(x_range, (aspect * y_span) / FRAME_SLOPE_SKEW), y_range
-    return x_range, y_range
+def _y_high_covers_peak(y_high_exponent: int, maximum_peak: float) -> bool:
+    y_high = _decade_bound(float(y_high_exponent))
+    if y_high is None:
+        return False
+    return y_high >= maximum_peak
+
+
+def _y_low_within_target(
+    y_low_exponent: int,
+    minimum_bandwidth: float,
+    log_y_low_target: float,
+) -> bool:
+    y_low = _decade_bound(float(y_low_exponent))
+    if y_low is None:
+        return False
+    target = FRAME_X_MIN * minimum_bandwidth
+    if math.isfinite(target) and target > 0.0:
+        return y_low <= target
+    return float(y_low_exponent) <= math.floor(log_y_low_target)
+
+
+def _axis_overflow(value: float, lo: float, hi: float) -> float:
+    if not math.isfinite(value) or value <= 0:
+        return -math.inf
+    if value < lo:
+        overflow = math.log10(value) - math.log10(lo)
+        if overflow == 0.0:
+            return -_OVERFLOW_EPSILON
+        return overflow
+    if value > hi:
+        overflow = math.log10(value) - math.log10(hi)
+        if overflow == 0.0:
+            return _OVERFLOW_EPSILON
+        return overflow
+    return 0.0
