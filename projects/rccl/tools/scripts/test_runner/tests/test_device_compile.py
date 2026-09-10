@@ -83,5 +83,53 @@ class BuildLinkCmdTest(unittest.TestCase):
                                   "gfx942", "/nonexistent/lib.a")
 
 
+class DispatcherCompileCmdTest(unittest.TestCase):
+    def test_gline_tables_only_precedes_forwarded_g0(self):
+        cmd = driver.dispatcher_compile_cmd(
+            "clang", "gfx942", ["-O1", "-g0"], "disp.s", "common.cu.cpp"
+        )
+
+        self.assertIn("-gline-tables-only", cmd)
+        self.assertLess(cmd.index("-gline-tables-only"), cmd.index("-g0"))
+
+    def test_release_flags_keep_gline_tables_only(self):
+        cmd = driver.dispatcher_compile_cmd(
+            "clang", "gfx942", ["-O3"], "disp.s", "common.cu.cpp"
+        )
+
+        self.assertIn("-gline-tables-only", cmd)
+        self.assertNotIn("-g0", cmd)
+
+
+class PatchDispatcherNoDeadStripTest(unittest.TestCase):
+    def test_patch_dispatcher_drops_local_no_dead_strip(self):
+        lines = [
+            "\t.text\n",
+            "\t.no_dead_strip\t.L__profc_foo\n",
+            "\t.globl\tkernel\n",
+        ]
+
+        result = driver.patch_dispatcher(lines, {})
+
+        self.assertEqual(result, [
+            "\t.text\n",
+            "\t.globl\tkernel\n",
+        ])
+
+
+class ExtractDeviceFunctionNoDeadStripTest(unittest.TestCase):
+    def test_extract_device_function_drops_local_no_dead_strip(self):
+        lines = [
+            "\t.type\t_Z13ncclDevFunc_fooPv, @function\n",
+            "\t.no_dead_strip\t.L__profc_foo\n",
+            "\t.text\n",
+        ]
+
+        extracted, resources = driver.extract_device_function(lines)
+
+        self.assertNotIn("\t.no_dead_strip\t.L__profc_foo\n", extracted)
+        self.assertEqual(resources["function_name"], "ncclDevFunc_fooPv")
+
+
 if __name__ == "__main__":
     unittest.main()

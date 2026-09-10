@@ -39,6 +39,9 @@ function(rccl_compiler_supports_device_coverage compiler output_supported output
 endfunction()
 
 
+# Locate the amdgcn LLVM profile runtime archive for <compiler>. Sets
+# <output_runtime> to the archive path (empty when unavailable) and, when it is
+# empty, <output_reason> to a human-readable diagnostic.
 function(rccl_find_device_profile_runtime compiler output_runtime output_reason)
   rccl_compiler_supports_device_coverage("${compiler}" supported reason)
   if(NOT supported)
@@ -100,4 +103,50 @@ function(rccl_find_host_rocm_profile_runtime compiler output_runtime)
   else()
     set(${output_runtime} "" PARENT_SCOPE)
   endif()
+endfunction()
+
+
+# Resolve ENABLE_FULL_COVERAGE=AUTO|ON|OFF against the availability blockers.
+# Sets <output_resolved> to ON or OFF and <output_blocker> to the reason the
+# request cannot be honoured (empty when it can). ON plus a blocker is a
+# FATAL_ERROR; AUTO plus a blocker resolves to OFF so the caller can fall back.
+# The caller FORCEs AUTO's answer into the ENABLE_FULL_COVERAGE cache entry so
+# cmake -LAH matches the build; this function does not write the cache.
+function(rccl_resolve_full_coverage
+    request
+    device_linker_enabled
+    rocm_version_ok
+    rocm_version
+    rocm_pretty
+    capability_error
+    output_resolved
+    output_blocker)
+  set(_blocker "")
+  if(NOT device_linker_enabled)
+    set(_blocker "the device linker is disabled")
+  elseif(NOT rocm_version_ok)
+    set(_blocker "the ROCm version could not be parsed")
+  elseif(rocm_version VERSION_LESS "71500")
+    set(_blocker
+      "it requires ROCm 7.15 or newer, and this is ${rocm_pretty}")
+  elseif(capability_error)
+    set(_blocker
+      "the selected compiler does not support it: ${capability_error}")
+  endif()
+
+  if(request STREQUAL "AUTO")
+    if(_blocker)
+      set(_resolved OFF)
+    else()
+      set(_resolved ON)
+    endif()
+  elseif(request STREQUAL "ON" AND _blocker)
+    message(FATAL_ERROR
+      "ENABLE_FULL_COVERAGE=ON is unavailable because ${_blocker}.")
+  else()
+    set(_resolved "${request}")
+  endif()
+
+  set(${output_resolved} "${_resolved}" PARENT_SCOPE)
+  set(${output_blocker} "${_blocker}" PARENT_SCOPE)
 endfunction()

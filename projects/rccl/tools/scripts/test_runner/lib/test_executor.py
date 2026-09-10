@@ -436,6 +436,42 @@ class TestExecutor:
             "rccl_tests_%h_%p_%m.profraw",
         )
 
+    def _apply_coverage_profile_env(self, env):
+        """Export LLVM_PROFILE_FILE when this run is collecting coverage.
+
+        Returns the absolute pattern, or None when coverage is off, so the MPI
+        argv can forward the same value to remote ranks.
+        """
+        if not self.args.coverage_report:
+            return None
+        pattern = self._coverage_profile_pattern()
+        env["LLVM_PROFILE_FILE"] = pattern
+        return pattern
+
+    def _cmake_cache_value(self, name):
+        """Return the CMake cache VALUE for <name>, or None if absent."""
+        cache_path = os.path.join(self.build_dir, "CMakeCache.txt")
+        prefix = name + ":"
+        try:
+            with open(cache_path, encoding="utf-8") as cache:
+                for line in cache:
+                    if line.startswith(prefix):
+                        return line.rstrip("\n").split("=", 1)[-1]
+        except OSError:
+            return None
+        return None
+
+    def _full_coverage_resolved(self):
+        """True when this build's CMakeCache resolved ENABLE_FULL_COVERAGE to ON.
+
+        AUTO is FORCEd to ON or OFF in the cache, so the cache holds the answer.
+        device-*.elf is produced for every device-linker build, including the
+        host-only AUTO fallback, and llvm-cov fails on objects with no
+        __llvm_covmap.
+        """
+        value = self._cmake_cache_value("ENABLE_FULL_COVERAGE")
+        return value is not None and value.upper() == "ON"
+
     def _emit_log_path(self, test_name):
         """Unique per-test captured-log path under log_dir (used when result
         emission is enabled)."""
@@ -1309,8 +1345,7 @@ class TestExecutor:
         #        test as a separate process, so each gets its own file).
         # %m  — binary/module signature (keeps test-binary and librccl.so
         #        profiles in separate files since each has its own runtime).
-        if self.args.coverage_report:
-            env['LLVM_PROFILE_FILE'] = self._coverage_profile_pattern()
+        profile_pattern = self._apply_coverage_profile_env(env)
 
         # Add test-specific env vars.  LD_LIBRARY_PATH is already merged above.
         for key, value in merged_env.items():
@@ -1452,9 +1487,9 @@ class TestExecutor:
                 mpi_args += " " + env_fmt.format(key=key, value=value)
 
             mpi_args += " " + env_fmt.format(key="LD_LIBRARY_PATH", value=env['LD_LIBRARY_PATH'])
-            if self.args.coverage_report:
+            if profile_pattern:
                 mpi_args += " " + env_fmt.format(
-                    key="LLVM_PROFILE_FILE", value=self._coverage_profile_pattern()
+                    key="LLVM_PROFILE_FILE", value=profile_pattern
                 )
 
             # Forward LD_PRELOAD so UCX core libraries are preloaded with
@@ -1711,8 +1746,7 @@ class TestExecutor:
             ld_parts.append(os.path.join(mpi_path, "lib"))
         env["LD_LIBRARY_PATH"] = ":".join(ld_parts)
         env.setdefault("RCCL_BUILD", self.build_dir)
-        if self.args.coverage_report:
-            env["LLVM_PROFILE_FILE"] = self._coverage_profile_pattern()
+        self._apply_coverage_profile_env(env)
         for key, value in merged_env.items():
             if key != "LD_LIBRARY_PATH":
                 env[key] = str(value)
@@ -2233,17 +2267,22 @@ class TestExecutor:
                     if self.args.verbose:
                         print(f"Found perf binary: {perf_binary}")
 
-        # Add device code objects: device kernels' coverage mapping lives in the
-        # per-arch amdgcn ELF (device-<arch>.elf), not in the host librccl.so.
-        device_elfs = sorted(glob.glob(os.path.join(self.build_dir, "device-*.elf")))
-        for device_elf in device_elfs:
-            object_files.extend(["--object", device_elf])
-            if self.args.verbose:
-                print(f"Found device object: {device_elf}")
-        if not device_elfs:
-            if self.args.verbose:
+        # Add device code objects only when the build actually resolved full
+        # coverage. DeviceLinker.cmake creates device-*.elf for every
+        # device-linker build, including AUTO's host-only fallback, and those
+        # uninstrumented ELFs make llvm-cov show fail.
+        if self._full_coverage_resolved():
+            device_elfs = sorted(glob.glob(os.path.join(self.build_dir, "device-*.elf")))
+            for device_elf in device_elfs:
+                object_files.extend(["--object", device_elf])
+                if self.args.verbose:
+                    print(f"Found device object: {device_elf}")
+            if not device_elfs and self.args.verbose:
                 print("NOTE: no device-*.elf found next to librccl.so; device-side "
-                      "coverage will not appear (was ENABLE_FULL_COVERAGE=ON?)")
+                      "coverage will not appear")
+        elif self.args.verbose:
+            print("NOTE: skipping device-*.elf; CMakeCache ENABLE_FULL_COVERAGE "
+                  "did not resolve to ON (host-only coverage)")
 
         if not object_files:
             print("WARNING: No object files found for coverage report")

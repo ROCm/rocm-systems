@@ -361,15 +361,17 @@ string(REGEX MATCH "([0-9]+)\\.([0-9]+)\\.([0-9]+)" rocm_version_matches ${rocm_
 set(RCCL_DEVICE_PROFILE_RT "")
 set(RCCL_HOST_ROCM_PROFILE_RT "")
 set(_device_coverage_capability_error "")
-if(NOT _enable_full_coverage_request STREQUAL "OFF" AND ENABLE_DEVICE_LINKER)
+if(NOT _enable_full_coverage_request STREQUAL "OFF")
   include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/DeviceCoverage.cmake")
-  rccl_find_device_profile_runtime(
-    "${CMAKE_CXX_COMPILER}"
-    RCCL_DEVICE_PROFILE_RT
-    _device_coverage_capability_error)
-  rccl_find_host_rocm_profile_runtime(
-    "${CMAKE_CXX_COMPILER}"
-    RCCL_HOST_ROCM_PROFILE_RT)
+  if(ENABLE_DEVICE_LINKER)
+    rccl_find_device_profile_runtime(
+      "${CMAKE_CXX_COMPILER}"
+      RCCL_DEVICE_PROFILE_RT
+      _device_coverage_capability_error)
+    rccl_find_host_rocm_profile_runtime(
+      "${CMAKE_CXX_COMPILER}"
+      RCCL_HOST_ROCM_PROFILE_RT)
+  endif()
 endif()
 
 if (rocm_version_matches)
@@ -395,31 +397,35 @@ if (rocm_version_matches)
       endif()
     endif()
 
+else()
+    message(WARNING "Failed to extract ROCm version.")
 endif()
 
+set(_full_coverage_resolved "${ENABLE_FULL_COVERAGE}")
 set(_full_coverage_blocker "")
-if(NOT ENABLE_DEVICE_LINKER)
-  set(_full_coverage_blocker "the device linker is disabled")
-elseif(NOT rocm_version_matches)
-  set(_full_coverage_blocker "the ROCm version could not be parsed")
-elseif(ROCM_VERSION VERSION_LESS "71500")
-  set(_full_coverage_blocker
-    "it requires ROCm 7.15 or newer, and this is ${ROCM_MAJOR_VERSION}.${ROCM_MINOR_VERSION}.${ROCM_PATCH_VERSION}")
-elseif(_device_coverage_capability_error)
-  set(_full_coverage_blocker
-    "the selected compiler does not support it: ${_device_coverage_capability_error}")
+if(NOT _enable_full_coverage_request STREQUAL "OFF")
+  rccl_resolve_full_coverage(
+    "${_enable_full_coverage_request}"
+    "${ENABLE_DEVICE_LINKER}"
+    "${rocm_version_matches}"
+    "${ROCM_VERSION}"
+    "${ROCM_MAJOR_VERSION}.${ROCM_MINOR_VERSION}.${ROCM_PATCH_VERSION}"
+    "${_device_coverage_capability_error}"
+    _full_coverage_resolved
+    _full_coverage_blocker)
 endif()
 
 if(ENABLE_FULL_COVERAGE STREQUAL "AUTO")
+  # FORCE the resolved ON/OFF into the cache so cmake -LAH matches the build.
+  # Keep AUTO in _enable_full_coverage_request; a later cmake on this tree
+  # without -DENABLE_FULL_COVERAGE=AUTO reads the answer, not the request.
+  set(ENABLE_FULL_COVERAGE "${_full_coverage_resolved}" CACHE STRING
+    "Enable host and device coverage: AUTO, ON, or OFF" FORCE)
   if(_full_coverage_blocker)
-    set(ENABLE_FULL_COVERAGE OFF CACHE STRING
-      "Enable host and device coverage: AUTO, ON, or OFF" FORCE)
     message(STATUS
       "Full coverage is unavailable because ${_full_coverage_blocker}. "
       "Falling back to host-only coverage.")
   else()
-    set(ENABLE_FULL_COVERAGE ON CACHE STRING
-      "Enable host and device coverage: AUTO, ON, or OFF" FORCE)
     message(STATUS
       "Full coverage is supported by ROCm "
       "${ROCM_MAJOR_VERSION}.${ROCM_MINOR_VERSION}.${ROCM_PATCH_VERSION}; "
@@ -428,9 +434,6 @@ if(ENABLE_FULL_COVERAGE STREQUAL "AUTO")
       message(STATUS "Host ROCm profile runtime: ${RCCL_HOST_ROCM_PROFILE_RT}")
     endif()
   endif()
-elseif(ENABLE_FULL_COVERAGE AND _full_coverage_blocker)
-  message(FATAL_ERROR
-    "ENABLE_FULL_COVERAGE=ON is unavailable because ${_full_coverage_blocker}.")
 endif()
 
 if(NOT _enable_full_coverage_request STREQUAL "OFF" AND NOT ENABLE_CODE_COVERAGE)

@@ -10,7 +10,7 @@ class CoverageBuildFlagsTest(unittest.TestCase):
             with self.subTest(seed_flag=seed_flag):
                 flags, cmake_options = configure_coverage_build(
                     [seed_flag, "--no_clean"],
-                    "-DFOO=ON -DENABLE_FULL_COVERAGE=OFF",
+                    "-DFOO=ON -DENABLE_CODE_COVERAGE=OFF -DENABLE_FULL_COVERAGE=OFF",
                     coverage_report=True,
                 )
 
@@ -21,6 +21,7 @@ class CoverageBuildFlagsTest(unittest.TestCase):
                     "-DENABLE_CODE_COVERAGE=ON -DENABLE_FULL_COVERAGE=AUTO"
                 ))
                 self.assertNotIn("-DENABLE_FULL_COVERAGE=OFF", cmake_options)
+                self.assertNotIn("-DENABLE_CODE_COVERAGE=OFF", cmake_options)
 
     def test_non_coverage_build_disables_cached_coverage_options(self):
         original_flags = [
