@@ -11,8 +11,15 @@
 // targets link the real hipified utils.cc as an oracle TU, so a fake definition
 // there is a duplicate symbol at link time rather than an unused one.
 
+#include "fail_loud.h"
 #include "utils.h"
 
 // Per-thread wait signal referenced by the inline MPSC-callback drain helpers
 // in utils.h.
 thread_local struct ncclThreadSignal ncclThreadSignalLocalInstance = {};
+
+// Link floor: compiling rma.cc in references this via ncclMemoryStackAlloc, but
+// nothing drives it until scheduleRmaTasksToPlan is covered.
+void* ncclMemoryStack::allocateSpilled(struct ncclMemoryStack*, size_t, size_t) {
+  FailLoudUnfaked("utils_fakes", "ncclMemoryStack::allocateSpilled");
+}

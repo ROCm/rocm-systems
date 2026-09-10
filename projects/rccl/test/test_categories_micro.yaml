@@ -16,6 +16,8 @@ test_categories:
       - "FreshRegistrationMicrotest.*"
       - "FreshRegistrationLegacyIpcSucceedsFixture.*"
       - "RmaProxyProgressTest.*"
+      # Covers every rma-test.cc suite; new ones must keep the Rma...Test name.
+      - "Rma*Test.*"
       - "GroupEndInternalTest.*"
       - "Devcomm*"
     exclude_windows:
