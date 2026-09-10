@@ -189,9 +189,7 @@ def add_pc_sampling_state(
 
 def fetch_pc_sampling_summary_rows(session: Session) -> list[dict[str, object]]:
     """Fetch sampling summary rows with decoded stall-reason JSON."""
-    selected_columns = ", ".join(
-        f'"{col}"' if "%" in col else col for col in PC_SAMPLING_SUMMARY_VIEW_COLUMNS
-    )
+    selected_columns = ", ".join(PC_SAMPLING_SUMMARY_VIEW_COLUMNS)
     rows = session.execute(
         text(
             f"SELECT {selected_columns} FROM compute_pc_sampling_summary_view "
