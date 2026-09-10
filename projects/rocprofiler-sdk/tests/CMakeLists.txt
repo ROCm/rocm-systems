@@ -113,6 +113,7 @@ add_subdirectory(environment)
 add_subdirectory(rocpd)
 add_subdirectory(rocpd-api)
 add_subdirectory(rocpd-back-compat)
+add_subdirectory(rocpd-kernel-replay-schema)
 
 # rocattach validation tests
 add_subdirectory(rocattach)
