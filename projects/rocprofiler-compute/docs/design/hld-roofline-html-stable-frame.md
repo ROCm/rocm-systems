@@ -56,6 +56,7 @@ The table below contrasts the earlier branch with this design.
 | Dash / WebUI | Regressed `roofline_data_type` wiring; WebUI compute peaks could be empty and mis-label limiters | Dash explicitly out of scope; standalone HTML is the supported path |
 | Fallback subtitle | Still said “Axes fixed to this GPU” when `DEFAULT_AXIS_BOUNDS` was used | Tracks whether the frame came from machine ceilings and uses neutral fallback copy |
 | Off-plot badge zoom | Zoomed only the current memory-level kernel points | Zooms all valid kernel points across memory levels |
+| Zoom aspect | Fits each axis to the target points independently, so the angle where a bandwidth roof meets a compute ceiling changes with the zoom target | Zooms keep the canonical frame's decade ratio and only widen, so that angle holds |
 | Kernel panel controls | Off-plot badge nested inside a row `role="button"` | Separate primary row action and off-plot badge controls for keyboard and screen readers |
 | Async frame races | No guard against stale `Plotly.relayout` callbacks clearing a newer frame apply | Operation counter invalidates superseded relayout work |
 | Browser behavior tests | No executable JS tests for reset, resize, Fit to data, or precision changes | `tests/unit/roofline/test_roofline_plot.py` runs the real controller in Node |
@@ -87,6 +88,8 @@ Shared limitations that remain open in both efforts:
 - Keep off-frame kernel points at their true coordinates.
 - Warn about off-frame kernels and add a kernel-panel badge that zooms to one.
 - Add a one-shot **Fit to data** action. Reset must undo that zoom.
+- Keep the canonical frame's decade ratio in every zoom, so the angle between a
+  bandwidth roof and a compute ceiling does not change with the zoom target.
 - Include the canonical bounds in the plot subtitle so exported images identify
   the comparison frame.
 - Preserve the post-[#10723](https://github.com/ROCm/rocm-systems/pull/10723)
@@ -162,6 +165,13 @@ Two explicit one-shot zoom operations are separate from canonical framing:
 
 These operations mark the view as manually framed. A resize preserves them.
 Reset or double-click restores the canonical frame.
+
+Both zoom operations keep the canonical frame's ratio of x decades to y
+decades, widening whichever axis is too narrow. A roof is drawn as a slope, so
+that ratio decides the angle at which a bandwidth roof meets a compute ceiling.
+Fitting each axis to the points independently would redraw that knee whenever a
+kernel moved further in performance than in intensity. Because the adjustment
+only widens, the zoomed points stay in view.
 
 Off-plot status is measured against the canonical frame, not viewport padding,
 so badges and counts do not change with window size.

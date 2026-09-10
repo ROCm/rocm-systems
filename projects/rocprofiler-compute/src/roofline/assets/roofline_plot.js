@@ -702,6 +702,28 @@
     return widenTo(range, ZOOM_MIN_DECADES);
   }
 
+  // A roof reads as a slope on screen, so the angle where a bandwidth roof
+  // meets a compute ceiling depends on the decades each axis spends. Zooming
+  // keeps the frame's decade ratio, and only ever widens, so the knee looks
+  // the way it does on the full plot and the zoomed points stay in view.
+  function matchFrameAspect(range) {
+    var frame = currentFrame();
+    if (!frame) {
+      return range;
+    }
+    var frameX = frame.x[1] - frame.x[0];
+    var frameY = frame.y[1] - frame.y[0];
+    var xSpan = range.x[1] - range.x[0];
+    var ySpan = range.y[1] - range.y[0];
+    if (!(frameX > 0) || !(frameY > 0) || !(xSpan > 0) || !(ySpan > 0)) {
+      return range;
+    }
+    return {
+      x: widenTo(range.x, (ySpan * frameX) / frameY),
+      y: widenTo(range.y, (xSpan * frameY) / frameX),
+    };
+  }
+
   function zoomToPoints(points) {
     var validPoints = (points || []).filter(pointIsPlottable);
     if (!plotlyReady() || !validPoints.length) {
@@ -718,7 +740,7 @@
       })
     );
     if (x && y) {
-      applyRange({ x: x, y: y }, false);
+      applyRange(matchFrameAspect({ x: x, y: y }), false);
     }
   }
 

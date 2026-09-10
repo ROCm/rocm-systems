@@ -703,10 +703,38 @@ function rangeCalls(controller) {
   const badgeZoomCalls = rangeCalls(controller);
   const badgeZoom = badgeZoomCalls[badgeZoomCalls.length - 1];
   assert.deepEqual(Array.from(badgeZoom["xaxis.range"]), [-2.5, 3.5]);
-  assert.deepEqual(Array.from(badgeZoom["yaxis.range"]), [0.5, 3.5]);
+  assert.deepEqual(Array.from(badgeZoom["yaxis.range"]), [-1, 5]);
   badge.dispatchEvent(eventOf("keydown", { key: "Enter" }));
   assert.equal(row.classList.contains("selected"), false);
   assert.equal(rangeCalls(controller).length, rangesBeforeZoom + 2);
+}
+
+{
+  const controller = makeController({
+    frame: { x: [1e-2, 1e2], y: [1, 1e6] },
+    kernels: [
+      {
+        name: "tall frame kernel",
+        color: "#123456",
+        points: [{ ai: 10, perf: 100, peak: "HBM", hoverCells: [] }],
+      },
+    ],
+    kernelTraceIndices: [0],
+  });
+  controller.elements["roofline-fit-data"].dispatchEvent(eventOf("click"));
+  const zoomCalls = rangeCalls(controller);
+  const zoom = zoomCalls[zoomCalls.length - 1];
+  const zoomX = Array.from(zoom["xaxis.range"]);
+  const zoomY = Array.from(zoom["yaxis.range"]);
+  assert.deepEqual(zoomX, [0.5, 1.5]);
+  assert.deepEqual(zoomY, [1.25, 2.75]);
+  assert.ok(zoomX[0] <= 1 && zoomX[1] >= 1, "zoom cropped the kernel intensity");
+  assert.ok(zoomY[0] <= 2 && zoomY[1] >= 2, "zoom cropped the kernel performance");
+  const frameAspect = (2 - -2) / (6 - 0);
+  assert.ok(
+    Math.abs((zoomX[1] - zoomX[0]) / (zoomY[1] - zoomY[0]) - frameAspect) < 1e-12,
+    "zoom changed the decades-per-axis ratio a roof knee is drawn with"
+  );
 }
 
 {
