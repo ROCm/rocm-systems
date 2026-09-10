@@ -305,6 +305,14 @@ RegisterKind make_register_kind(RegisterClass reg_class) {
   return RegisterKind::None;
 }
 
+ResourceKind scalar_memory_resource_kind(bool is_load) {
+  // A scalar load reads global memory, so track it there: on_memory_route then
+  // routes the read to cross-workgroup race detection, while the destination
+  // SGPR stays tracked because the route keeps register_class = Scalar. A scalar
+  // store has no global-shadow slot plumbing yet, so it stays register-only.
+  return is_load ? ResourceKind::GlobalMemory : ResourceKind::ScalarRegister;
+}
+
 InstructionDescriptor make_instruction_descriptor(const InstructionView &instruction,
                                                   EntityId fallback_id) {
   InstructionDescriptor descriptor;
