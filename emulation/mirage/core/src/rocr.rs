@@ -17,54 +17,56 @@
 //! and expensive: it cost about a day of investigation, and was very
 //! nearly filed as an emulator bug (issue #11361).
 //!
-//! So mirage asks the question before the session starts. Which ROCm
-//! runtime will this workload load, and does it know the ISA the profile
-//! emulates?
+//! So mirage asks the question before each workload starts. Which ROCm
+//! runtime does this command's dynamic loader resolve, and can its image
+//! rule out the ISA the profile emulates?
 //!
 //! # Why the answer is read out of the library's own image
 //!
-//! There is no API for it. `hsa_isa_from_name` would answer exactly this
-//! question and cannot be called: it needs `hsa_init()` first, which
-//! needs the KFD device that does not exist yet, inside the session that
-//! has not started. What there *is* is the table itself — ROCr carries
-//! every ISA name it supports as a string in its own binary, which is
-//! how the ISA list on a host is read in practice — so that is what this
-//! reads.
+//! There is no side-effect-free API for it. `hsa_isa_from_name` would
+//! answer exactly this question but needs `hsa_init()` first, which would
+//! initialise ROCr in mirage's own process rather than inspect the
+//! library and environment selected for the workload. What the binary
+//! does guarantee is one-way: every ISA in the registry leaves its
+//! target name in the image. Other ROCr subsystems leave target names
+//! there too, so presence is inconclusive, but absence from a
+//! recognisably complete ROCr image rules support out.
 //!
 //! That is evidence rather than an interface, and this module is built
-//! to fail towards silence because of it. Three outcomes, not two: the
-//! target is named, the target is absent from a table that plainly *is*
-//! a table, or no verdict at all — no runtime found, unreadable, or a
-//! set of names too small to be ROCr's list. Only the middle one says
-//! anything, and even then it warns rather than refuses, because a
-//! wrong "unsupported" must never be able to block a run that would have
-//! worked.
+//! to fail towards silence because of it. A target name appearing in
+//! the image proves nothing: ROCr also embeds names used only for legacy
+//! code-object conversion. Only absence from a recognisably complete
+//! image is a verdict. A missing loader answer, an unreadable runtime, a
+//! target mention, or too few target references all yield no verdict.
+//! Even a verdict warns rather than refuses, because this diagnostic
+//! must never block a run that would have worked.
 
 use std::collections::BTreeSet;
+use std::ffi::{OsStr, OsString};
+use std::os::unix::fs::MetadataExt;
 use std::path::{Path, PathBuf};
 
-use crate::discovery::{self, LibSearch};
+use goblin::Object;
+use nix::unistd::{AccessFlags, eaccess};
+use rustix::fs::getxattr;
+use rustix::io::Errno;
 
-/// The ROCm runtime, under the SONAME the dynamic loader actually
-/// resolves. This is the file a workload ends up with; the unversioned
-/// name below is a development symlink beside it that a runtime-only
-/// install need not have.
+/// The ROCm runtime SONAME the dynamic loader actually resolves. Unlike
+/// the unversioned development symlink, this name exists in a
+/// runtime-only install and is what a workload's `DT_NEEDED` requests.
 pub const ROCR_SONAME: &str = "libhsa-runtime64.so.1";
-
-/// The unversioned development name for [`ROCR_SONAME`], tried second.
-pub const ROCR_LIB: &str = "libhsa-runtime64.so";
 
 /// How many plausible ISA names must be found in a library's image
 /// before the absence of one more is worth reporting.
 ///
 /// The floor is what separates "this runtime does not support the
-/// target" from "this scan did not find ROCr's table". A stripped,
-/// packed, or simply unexpected build yields a handful of fragments at
-/// most; a real ROCm runtime carries every target it was built for, and
-/// that has been dozens for as long as there have been dozens — the
-/// ROCm 7.0.2.2 the bug was found on names forty-five. Ten is far below
-/// any real table and far above any accident.
-const MIN_PLAUSIBLE_TABLE: usize = 10;
+/// target" from "this scan did not find ROCr's target-bearing image". A
+/// stripped, packed, or simply unexpected build yields a handful of
+/// fragments at most; a real ROCm runtime references dozens of targets
+/// across its ISA registry and code-object conversion support — ROCm
+/// 7.0.2.2 references forty-five. Ten is far below a real image and far
+/// above an accident.
+const MIN_PLAUSIBLE_TARGET_REFERENCES: usize = 10;
 
 /// The shortest run of characters after `gfx` that can be a whole
 /// target name.
@@ -72,25 +74,25 @@ const MIN_PLAUSIBLE_TABLE: usize = 10;
 /// `gfx942`, `gfx90a` and `gfx1250` are three and four; `gfx9`, `gfx11`
 /// and `gfx1f` are the architecture-family prefixes and wildcard
 /// patterns ROCr also carries, and are not targets anybody emulates.
-/// Dropping them keeps the count in [`MIN_PLAUSIBLE_TABLE`] honest.
+/// Dropping them keeps the count in
+/// [`MIN_PLAUSIBLE_TARGET_REFERENCES`] honest.
 const MIN_TARGET_DIGITS: usize = 3;
 
 /// What the ROCm runtime on this host has to say about one GPU target.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TargetSupport {
-    /// The located runtime names this target, so it will enumerate the
-    /// emulated device.
-    Supported,
-    /// The located runtime carries a target table and this target is not
-    /// in it. The workload will see no GPU.
+    /// The resolved runtime is recognisably ROCr and contains no
+    /// reference to this target. The workload will see no GPU.
     Unsupported(Box<UnsupportedTarget>),
-    /// No verdict: no ROCm runtime was found where mirage looked, it
-    /// could not be read, or what was read does not look like a target
-    /// table. Nothing is said to the user on this path.
+    /// No verdict: the command's loader did not identify one runtime,
+    /// loader-affecting state makes the answer ambiguous, the runtime
+    /// could not be read, its image is not recognisably ROCr, or it
+    /// mentions the target without proving that the ISA registry
+    /// contains it. Nothing is said to the user on this path.
     Unknown,
 }
 
-/// A target the ROCm runtime a session will load does not know about,
+/// A target the ROCm runtime a workload will load does not know about,
 /// with everything needed to say so usefully.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct UnsupportedTarget {
@@ -101,11 +103,10 @@ pub struct UnsupportedTarget {
     pub runtime: PathBuf,
     /// The ROCm version recorded beside that runtime, when there is one.
     pub version: Option<String>,
-    /// How many targets the runtime does name. Quoting it is what makes
-    /// the claim checkable: a user who reads "names forty-five targets"
-    /// knows a real table was found and one entry was missing from it,
-    /// not that a scan came up empty and blamed their profile.
-    pub known: usize,
+    /// How many distinct target names the runtime image references.
+    /// Quoting it makes the heuristic checkable without claiming that
+    /// every reference is an ISA-registry entry.
+    pub references: usize,
 }
 
 impl UnsupportedTarget {
@@ -125,124 +126,344 @@ impl UnsupportedTarget {
             .as_deref()
             .map_or_else(String::new, |v| format!(" (ROCm {v})"));
         format!(
-            "the ROCm runtime this session will load does not support {target}, which is \
-             the GPU this profile emulates. {runtime}{version} names {known} targets and \
-             {target} is not one of them, so it will skip the emulated device: the \
+            "the ROCm runtime this workload will load does not support {target}, which is \
+             the GPU this profile emulates. {runtime}{version} contains references to \
+             {references} GPU targets but none to {target}, so it will skip the emulated device: the \
              workload will see no GPU at all and is likely to still exit 0. Run it under \
              a ROCm that knows {target} — `--image <a newer ROCm image>` is the usual \
              way — or use a profile whose target this ROCm supports.",
             target = self.target,
             runtime = self.runtime.display(),
-            known = self.known,
+            references = self.references,
         )
     }
 }
 
-/// Whether the ROCm runtime this host would load knows `target`.
+/// Whether the ROCm runtime resolved for one host process rules out
+/// `target`.
 ///
-/// `target` is a conventional gfx name as
-/// [`crate::hardware::gfx_name`] renders one, e.g. `gfx1250`.
+/// `env` and `inherit_env` are the exact environment delta and
+/// inheritance policy the process spawner will use. The command is
+/// resolved through that effective `PATH` and inspected statically,
+/// without loading or executing any object. A verdict is produced only
+/// for a trusted system executable that directly needs ROCr and resolves
+/// it through an unambiguous modern `DT_RUNPATH`.
+///
+/// Legacy `DT_RPATH`, transitive or `dlopen` dependencies, cache-only
+/// resolution, hardware-capability alternatives, mutable executables,
+/// privileged executables, and loader overrides all produce
+/// [`TargetSupport::Unknown`]. These deliberate false negatives keep
+/// warnings trustworthy. Extending coverage requires a bounded,
+/// loader-equivalent static resolver and can be done later without
+/// weakening the rule that preflight never executes workload code or
+/// emits a guess.
 #[must_use]
-pub fn check_target(target: &str) -> TargetSupport {
-    let Some(runtime) = locate() else {
+pub fn check_target_for_process(
+    target: &str,
+    command: &str,
+    workdir: Option<&Path>,
+    env: &[(OsString, OsString)],
+    inherit_env: bool,
+) -> TargetSupport {
+    let effective = merged_environment(std::env::vars_os(), env, inherit_env);
+    if loader_state_is_ambiguous(&effective) {
         return TargetSupport::Unknown;
-    };
-    let Ok(image) = std::fs::read(&runtime) else {
-        return TargetSupport::Unknown;
-    };
-    verdict(target, &runtime, rocm_version_beside(&runtime), &image)
-}
-
-/// The ROCm runtime a workload started here would load, as far as mirage
-/// can tell.
-///
-/// This is the shared discovery policy — `$LD_LIBRARY_PATH`,
-/// `$ROCM_HOME`/`$ROCM_PATH`, the ROCm SDK root, the standard system
-/// directories — which is the loader's search as closely as anything
-/// that is not the loader can be. It is not the loader, and the gap is
-/// why every caller treats a miss as [`TargetSupport::Unknown`] and why
-/// the message names the file that was actually read.
-#[must_use]
-pub fn locate() -> Option<PathBuf> {
-    // The SONAME first: that is the name a `DT_NEEDED` resolves and so
-    // the file a workload really gets. The unversioned symlink is a
-    // development convenience that a runtime-only install may not ship,
-    // and looking for it alone would report no ROCm on a host that has
-    // one.
-    discovery::find_emulator_lib(&search(ROCR_SONAME))
-        .or_else(|| discovery::find_emulator_lib(&search(ROCR_LIB)))
-}
-
-/// The environment variables that decide which ROCm runtime [`locate`]
-/// finds, and therefore which one any verdict here is about.
-///
-/// Derived from the search rather than written down, so a change to the
-/// discovery policy cannot leave a stale list behind.
-///
-/// For a caller that is about to hand the workload a *different* value
-/// for one of these — `mirage run --env LD_LIBRARY_PATH=…` outranks what
-/// mirage itself inherited — because then the runtime this process can
-/// reach is not the runtime the workload will load, and the honest
-/// answer is [`TargetSupport::Unknown`].
-#[must_use]
-pub fn search_vars() -> Vec<String> {
-    search(ROCR_SONAME)
-        .env_hints()
-        .into_iter()
-        .map(|hint| hint.name)
-        .collect()
-}
-
-/// The discovery policy for the ROCm runtime.
-///
-/// No override variables of its own: this is not a mirage backend a user
-/// installs and points at, it is whatever ROCm the workload's loader will
-/// find, and inventing a `MIRAGE_ROCR_LIB` would let the two disagree.
-/// `system_fallbacks` is what makes the search the loader's.
-fn search(lib_name: &'static str) -> LibSearch<'static> {
-    LibSearch {
-        file_env: &[],
-        dir_env: &[],
-        home_env: &[],
-        lib_name,
-        binary_relative_dirs: &[],
-        system_fallbacks: true,
     }
+    let Some(runtime) = locate_for_process(command, workdir, &effective) else {
+        return TargetSupport::Unknown;
+    };
+    check_target_at(target, &runtime)
+}
+
+/// Whether one already-resolved ROCm runtime rules out `target`.
+#[must_use]
+pub fn check_target_at(target: &str, runtime: &Path) -> TargetSupport {
+    let Ok(image) = std::fs::read(runtime) else {
+        return TargetSupport::Unknown;
+    };
+    verdict(target, runtime, rocm_version_beside(runtime), &image)
+}
+
+fn merged_environment(
+    inherited: impl IntoIterator<Item = (OsString, OsString)>,
+    explicit: &[(OsString, OsString)],
+    inherit_env: bool,
+) -> std::collections::BTreeMap<OsString, OsString> {
+    let mut effective = if inherit_env {
+        inherited.into_iter().collect()
+    } else {
+        std::collections::BTreeMap::new()
+    };
+    effective.extend(explicit.iter().cloned());
+    effective
+}
+
+/// State that can replace ROCr or change the ISA ROCr evaluates without
+/// changing the loader's ordinary SONAME answer.
+fn loader_state_is_ambiguous(env: &std::collections::BTreeMap<OsString, OsString>) -> bool {
+    env.iter().any(|(key, value)| {
+        if value.is_empty() {
+            return false;
+        }
+        let Some(key) = key.to_str() else {
+            return false;
+        };
+        ambiguous_probe_env_var(key) || loader_resolution_env_var(key)
+    })
+}
+
+/// Whether changing `key` can change this process probe's answer.
+///
+/// Used by the multi-rank caller to deduplicate only specs that resolve
+/// the same command and runtime. Keep the exact loader inputs, the
+/// variables that force an unknown verdict, and `PATH`, which selects
+/// the command whose dependencies are traced.
+#[must_use]
+pub fn affects_process_probe(key: &str) -> bool {
+    key == "PATH" || loader_resolution_env_var(key) || ambiguous_probe_env_var(key)
+}
+
+fn ambiguous_probe_env_var(key: &str) -> bool {
+    matches!(key, "LD_PRELOAD" | "LD_AUDIT" | "HSA_OVERRIDE_GFX_VERSION")
+        || key.starts_with("HSA_OVERRIDE_GFX_VERSION_")
+}
+
+fn loader_resolution_env_var(key: &str) -> bool {
+    matches!(
+        key,
+        "LD_LIBRARY_PATH"
+            | "LD_ORIGIN_PATH"
+            | "LD_HWCAP_MASK"
+            | "LD_ASSUME_KERNEL"
+            | "GLIBC_TUNABLES"
+    )
+}
+
+fn locate_for_process(
+    command: &str,
+    workdir: Option<&Path>,
+    effective: &std::collections::BTreeMap<OsString, OsString>,
+) -> Option<PathBuf> {
+    let workdir = absolute_workdir(workdir)?;
+    let executable = resolve_command(command, Some(&workdir), effective)?;
+    let executable = trusted_system_file(&executable)?;
+    unprivileged_executable(&executable)?;
+    let metadata = executable.metadata().ok()?;
+    (metadata.len() <= 256 * 1024 * 1024).then_some(())?;
+    let image = std::fs::read(&executable).ok()?;
+    let runtime = direct_runpath_runtime(&executable, &image, true)?;
+    trusted_system_file(&runtime)
+}
+
+fn direct_runpath_runtime(
+    executable: &Path,
+    image: &[u8],
+    require_trusted_paths: bool,
+) -> Option<PathBuf> {
+    let Object::Elf(elf) = Object::parse(image).ok()? else {
+        return None;
+    };
+    if !elf.rpaths.is_empty() || !elf.libraries.contains(&ROCR_SONAME) {
+        return None;
+    }
+
+    let origin = executable.parent()?.display().to_string();
+    for entry in &elf.runpaths {
+        for directory in entry.split(':') {
+            if directory.is_empty() {
+                return None;
+            }
+            let directory = directory
+                .replace("${ORIGIN}", &origin)
+                .replace("$ORIGIN", &origin);
+            if directory.contains('$') {
+                return None;
+            }
+            let mut directory = PathBuf::from(directory);
+            if !directory.is_absolute() {
+                return None;
+            }
+            if require_trusted_paths {
+                directory = trusted_system_directory(&directory)?;
+            }
+            if nested_runtime_exists(&directory, require_trusted_paths)? {
+                return None;
+            }
+            let mut candidate = directory.join(ROCR_SONAME);
+            if candidate.is_file() {
+                if require_trusted_paths {
+                    candidate = trusted_system_file(&candidate)?;
+                }
+                (candidate.metadata().ok()?.len() <= 512 * 1024 * 1024).then_some(())?;
+                let candidate_image = std::fs::read(&candidate).ok()?;
+                let Object::Elf(candidate_elf) = Object::parse(&candidate_image).ok()? else {
+                    return None;
+                };
+                if candidate_elf.header.e_machine != elf.header.e_machine
+                    || candidate_elf.is_64 != elf.is_64
+                {
+                    return None;
+                }
+                return std::fs::canonicalize(candidate).ok();
+            }
+        }
+    }
+    None
+}
+
+fn nested_runtime_exists(directory: &Path, require_trusted_paths: bool) -> Option<bool> {
+    let mut pending = vec![(directory.to_path_buf(), 0_u8)];
+    let mut visited = BTreeSet::new();
+    let mut entries = 0_usize;
+    while let Some((directory, depth)) = pending.pop() {
+        let canonical = std::fs::canonicalize(&directory).ok()?;
+        if !visited.insert(canonical) {
+            continue;
+        }
+        for entry in std::fs::read_dir(directory).ok()? {
+            let entry = entry.ok()?;
+            entries += 1;
+            if entries > 4096 {
+                return None;
+            }
+            let path = entry.path();
+            if depth > 0 && path.is_file() && entry.file_name() == OsStr::new(ROCR_SONAME) {
+                if require_trusted_paths {
+                    trusted_system_file(&path)?;
+                }
+                return Some(true);
+            }
+            if path.is_dir() && depth < 4 {
+                if require_trusted_paths {
+                    trusted_system_directory(&path)?;
+                }
+                pending.push((path, depth + 1));
+            }
+        }
+    }
+    Some(false)
+}
+
+fn trusted_system_file(path: &Path) -> Option<PathBuf> {
+    trusted_system_path(path, true)
+}
+
+fn unprivileged_executable(path: &Path) -> Option<()> {
+    let metadata = path.metadata().ok()?;
+    (metadata.mode() & 0o6000 == 0).then_some(())?;
+    let mut capabilities = [0_u8; 64];
+    match getxattr(path, "security.capability", &mut capabilities[..]) {
+        Ok(0) | Err(Errno::NODATA) => Some(()),
+        Ok(_) | Err(_) => None,
+    }
+}
+
+fn trusted_system_directory(path: &Path) -> Option<PathBuf> {
+    trusted_system_path(path, false)
+}
+
+fn trusted_system_path(path: &Path, require_file: bool) -> Option<PathBuf> {
+    trusted_path_chain(path, require_file)?;
+    let path = std::fs::canonicalize(path).ok()?;
+    trusted_path_chain(&path, require_file)?;
+    Some(path)
+}
+
+fn trusted_path_chain(path: &Path, require_file: bool) -> Option<()> {
+    for (index, component) in path.ancestors().enumerate() {
+        let metadata = component.metadata().ok()?;
+        if metadata.uid() != 0 || metadata.mode() & 0o022 != 0 {
+            return None;
+        }
+        if index == 0 {
+            let expected_kind = if require_file {
+                metadata.is_file()
+            } else {
+                metadata.is_dir()
+            };
+            expected_kind.then_some(())?;
+        }
+    }
+    Some(())
+}
+
+fn resolve_command(
+    command: &str,
+    workdir: Option<&Path>,
+    env: &std::collections::BTreeMap<OsString, OsString>,
+) -> Option<PathBuf> {
+    let base = absolute_workdir(workdir)?;
+    if command.contains('/') {
+        let path = PathBuf::from(command);
+        let path = if path.is_absolute() {
+            path
+        } else {
+            base.join(path)
+        };
+        return is_executable_file(&path).then_some(path);
+    }
+    let path = env.get(OsStr::new("PATH"))?;
+    std::env::split_paths(path).find_map(|dir| {
+        let dir = if dir.is_absolute() {
+            dir.to_path_buf()
+        } else {
+            base.join(dir)
+        };
+        let candidate = dir.join(command);
+        is_executable_file(&candidate).then_some(candidate)
+    })
+}
+
+fn absolute_workdir(workdir: Option<&Path>) -> Option<PathBuf> {
+    match workdir {
+        Some(path) if path.is_absolute() => Some(path.to_path_buf()),
+        Some(path) => Some(std::env::current_dir().ok()?.join(path)),
+        None => std::env::current_dir().ok(),
+    }
+}
+
+fn is_executable_file(path: &Path) -> bool {
+    path.metadata().is_ok_and(|metadata| metadata.is_file())
+        && eaccess(path, AccessFlags::X_OK).is_ok()
 }
 
 /// Decide what `image` says about `target`, given where it came from.
 ///
-/// Split from [`check_target`] so the rule can be tested against a
-/// fabricated library: the question is about the ROCm on the host, which
-/// a test cannot choose, and a test that could only assert about the
-/// machine it happened to run on would assert nothing on most of them.
+/// Split from [`check_target_for_process`] so the rule can be tested
+/// against a fabricated library: the question is about the ROCm on the
+/// host, which a test cannot choose, and a test that could only assert
+/// about the machine it happened to run on would assert nothing on most
+/// of them.
 fn verdict(target: &str, runtime: &Path, version: Option<String>, image: &[u8]) -> TargetSupport {
     let known = target_names(image);
-    if known.len() < MIN_PLAUSIBLE_TABLE {
-        // Whatever this file is, its target table is not what was read,
-        // and a "your ROCm does not support this GPU" drawn from a failed
-        // scan would be a confident lie.
+    if known.len() < MIN_PLAUSIBLE_TARGET_REFERENCES {
+        // Whatever this file is, a recognisable ROCr image is not what
+        // was read, and a "your ROCm does not support this GPU" drawn
+        // from a failed scan would be a confident lie.
         return TargetSupport::Unknown;
     }
     if mentions(image, target) {
-        return TargetSupport::Supported;
+        // ROCr contains names that its ISA registry does not: notably
+        // gfx600/601/602 for legacy code-object conversion. A mention is
+        // therefore not proof of support. Absence is still proof of
+        // non-support once the image is recognisably complete.
+        return TargetSupport::Unknown;
     }
     TargetSupport::Unsupported(Box::new(UnsupportedTarget {
         target: target.to_string(),
         runtime: runtime.to_path_buf(),
         version,
-        known: known.len(),
+        references: known.len(),
     }))
 }
 
 /// Every plausible gfx target name in `image`.
 ///
-/// Used for the count in the report and for the sanity floor, and
-/// deliberately *not* for the membership test — see [`mentions`], which
-/// is the forgiving half of the pair. This half is the strict one: a
-/// name is only counted when it starts a word and is `gfx` followed by
-/// nothing but lowercase hex digits, so the fragments a binary scan
-/// inevitably turns up cannot inflate the table it is judged against.
+/// Used for the count in the report and for the sanity floor. This is
+/// the strict half of the scan: a name is only counted when it starts a
+/// word and is `gfx` followed by nothing but lowercase hex digits, so
+/// the fragments a binary scan inevitably turns up cannot inflate the
+/// image it is judged against.
 fn target_names(image: &[u8]) -> BTreeSet<String> {
     const TAG: &[u8] = b"gfx";
     let mut out = BTreeSet::new();
@@ -284,12 +505,11 @@ fn plausible_target(digits: &[u8]) -> Option<String> {
 
 /// Whether `image` names `target` anywhere at all.
 ///
-/// The membership test, and deliberately looser than [`target_names`].
-/// Being wrong here in the generous direction costs nothing — mirage
-/// stays quiet about a session that was going to work anyway — while
-/// being wrong in the strict direction warns a user off a run that was
-/// fine. So the only thing insisted on is that the match is not the
-/// prefix of a longer target: `gfx1200` must not answer for `gfx120`.
+/// Deliberately looser than [`target_names`]. Any mention makes the
+/// result inconclusive, because a binary string does not say whether it
+/// belongs to the ISA registry. The only thing insisted on is that the
+/// match is not the prefix of a longer target: `gfx1200` must not answer
+/// for `gfx120`.
 fn mentions(image: &[u8], target: &str) -> bool {
     let needle = target.as_bytes();
     if needle.is_empty() {
@@ -327,6 +547,8 @@ fn rocm_version_beside(lib: &Path) -> Option<String> {
 mod tests {
     #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
+    use std::os::unix::fs::PermissionsExt;
+
     use super::*;
 
     /// A stand-in for a ROCm runtime's image: the targets it was built
@@ -335,8 +557,8 @@ mod tests {
     /// Interleaved with the architecture-family prefixes and the
     /// wildcard patterns a real `libhsa-runtime64.so` carries beside the
     /// real names, because those are what a naive scan miscounts as
-    /// targets and the floor in [`MIN_PLAUSIBLE_TABLE`] exists to be
-    /// judged against real names only.
+    /// targets and the floor in [`MIN_PLAUSIBLE_TARGET_REFERENCES`]
+    /// exists to be judged against real names only.
     fn rocr_image(targets: &[&str]) -> Vec<u8> {
         let mut out: Vec<u8> = b"\x7fELF\0\0\0\0some other rodata\0".to_vec();
         for noise in ["gfx9", "gfx10", "gfx11", "gfx12", "gfx9f", "gfx1f"] {
@@ -354,9 +576,9 @@ mod tests {
 
     /// A slice of what a ROCm 7.0 runtime names — every target the seven
     /// builtin profiles ask for, plus enough of the rest to clear
-    /// [`MIN_PLAUSIBLE_TABLE`]. The real list is longer (forty-five on
-    /// the host the bug was found on); the point of the fixture is which
-    /// names are in it and which one is not.
+    /// [`MIN_PLAUSIBLE_TARGET_REFERENCES`]. The real list is longer
+    /// (forty-five on the host the bug was found on); the point of the
+    /// fixture is which names are in it and which one is not.
     const ROCM_7: &[&str] = &[
         "gfx900", "gfx902", "gfx904", "gfx906", "gfx908", "gfx90a", "gfx90c", "gfx942", "gfx950",
         "gfx1010", "gfx1030", "gfx1100", "gfx1101", "gfx1151", "gfx1200", "gfx1201",
@@ -372,26 +594,44 @@ mod tests {
     }
 
     /// The regression, in the shape it actually happened: seven profiles
-    /// on a ROCm 7.0 host, and the only one that enumerates no GPU is the
-    /// only one whose target the runtime was not built for.
+    /// on a ROCm 7.0 host, and only the absent target can be condemned.
+    /// A present string stays inconclusive because it may be conversion
+    /// metadata rather than an ISA-registry entry.
     #[test]
     fn the_one_target_the_runtime_does_not_name_is_the_one_reported() {
         let image = rocr_image(ROCM_7);
-        for supported in [
+        for mentioned in [
             "gfx90a", "gfx942", "gfx950", "gfx1100", "gfx1151", "gfx1201",
         ] {
             assert_eq!(
-                check(supported, &image),
-                TargetSupport::Supported,
-                "{supported} is in the table and must not be warned about"
+                check(mentioned, &image),
+                TargetSupport::Unknown,
+                "{mentioned} is mentioned, but a raw string cannot prove registry support"
             );
         }
 
         let TargetSupport::Unsupported(problem) = check("gfx1250", &image) else {
-            panic!("gfx1250 is not in the table and must be reported");
+            panic!("gfx1250 is absent from the image and must be reported");
         };
         assert_eq!(problem.target, "gfx1250");
-        assert_eq!(problem.known, ROCM_7.len());
+        assert_eq!(problem.references, ROCM_7.len());
+    }
+
+    /// ROCr carries these full target names for legacy code-object
+    /// conversion but does not register the corresponding ISAs. They
+    /// are the concrete counterexample to treating a binary-string hit
+    /// as support.
+    #[test]
+    fn legacy_conversion_names_do_not_count_as_registry_support() {
+        let mut image = rocr_image(ROCM_7);
+        for legacy in ["gfx600", "gfx601", "gfx602"] {
+            image.extend_from_slice(format!("amdgcn-amd-amdhsa--{legacy}\0").as_bytes());
+            assert_eq!(
+                check(legacy, &image),
+                TargetSupport::Unknown,
+                "{legacy} is conversion metadata, not proof of ISA support"
+            );
+        }
     }
 
     /// The message is the whole of the fix, so it is asserted on rather
@@ -438,7 +678,8 @@ mod tests {
         assert!(!message.contains("()"), "{message}");
     }
 
-    /// Anything that is not recognisably a target table says nothing.
+    /// Anything that is not recognisably a ROCr target-bearing image
+    /// says nothing.
     ///
     /// This is the half that keeps a heuristic honest. The verdict is
     /// read out of a binary rather than asked of an API, so the scan can
@@ -447,11 +688,12 @@ mod tests {
     /// this GPU" drawn from a failed scan would send a user to fix
     /// something that was never wrong.
     #[test]
-    fn a_file_with_no_target_table_yields_no_verdict() {
+    fn an_unrecognisable_image_yields_no_verdict() {
         for image in [
             &b""[..],
             &b"\x7fELF not really a runtime"[..],
-            // A couple of real names is not a table: ROCr carries dozens.
+            // A couple of real names is not a recognisable image: ROCr
+            // carries dozens.
             &rocr_image(&["gfx942", "gfx950"])[..],
             // Neither are the family prefixes and wildcards on their own,
             // which is exactly what a scan that counted everything
@@ -461,7 +703,7 @@ mod tests {
             assert_eq!(
                 check("gfx1250", image),
                 TargetSupport::Unknown,
-                "a scan that found no table must not produce a verdict"
+                "an unrecognisable image must not produce a verdict"
             );
         }
     }
@@ -489,7 +731,7 @@ mod tests {
     }
 
     /// The membership test must not let a longer target answer for a
-    /// shorter one. `gfx1200` in the table says nothing about `gfx120`.
+    /// shorter one. A `gfx1200` mention says nothing about `gfx120`.
     #[test]
     fn a_longer_target_does_not_answer_for_a_shorter_one() {
         let image = rocr_image(ROCM_7);
@@ -498,61 +740,243 @@ mod tests {
         assert!(!mentions(&image, ""));
     }
 
-    /// The two names are tried in the order the loader would care about:
-    /// the SONAME is the file a `DT_NEEDED` actually resolves, and the
-    /// unversioned one is a development symlink a runtime-only install
-    /// need not ship.
+    /// PATH lookup has to follow executable candidates, as `execvp`
+    /// does. Stopping at an earlier non-executable file could inspect a
+    /// different program from the one the workload will run.
     #[test]
-    fn the_soname_is_what_is_looked_for_first() {
-        assert_eq!(search(ROCR_SONAME).lib_name, ROCR_SONAME);
-        assert!(
-            search(ROCR_SONAME).system_fallbacks,
-            "the search must be the loader's, not mirage's own"
+    fn command_resolution_skips_non_executable_path_entries() {
+        let tmp = tempfile::tempdir().unwrap();
+        let blocked_dir = tmp.path().join("blocked");
+        let runnable_dir = tmp.path().join("runnable");
+        std::fs::create_dir_all(&blocked_dir).unwrap();
+        std::fs::create_dir_all(&runnable_dir).unwrap();
+        let blocked = blocked_dir.join("workload");
+        let runnable = runnable_dir.join("workload");
+        std::fs::write(&blocked, b"not executable").unwrap();
+        std::fs::write(&runnable, b"executable").unwrap();
+        // The group execute bit is set, but the file's owner is this
+        // process and the owner execute bit is not. A raw mode-bit check
+        // would accept it even though execvp gets EACCES.
+        std::fs::set_permissions(&blocked, std::fs::Permissions::from_mode(0o410)).unwrap();
+        std::fs::set_permissions(&runnable, std::fs::Permissions::from_mode(0o755)).unwrap();
+
+        let env = [(
+            OsString::from("PATH"),
+            std::env::join_paths([blocked_dir, runnable_dir]).unwrap(),
+        )]
+        .into_iter()
+        .collect();
+        assert_eq!(resolve_command("workload", None, &env), Some(runnable));
+        assert_eq!(
+            resolve_command(blocked.to_str().unwrap(), None, &env),
+            None,
+            "a command containing a slash must fail rather than fall through PATH"
         );
-        assert!(
-            search(ROCR_SONAME).file_env.is_empty(),
-            "an override here could only ever disagree with the loader"
-        );
-        // Both names are searched, and the versioned one is the primary.
-        assert_eq!(ROCR_SONAME, format!("{ROCR_LIB}.1"));
     }
 
-    /// The variables a caller has to watch for are the ones the search
-    /// honours, and they are the loader's rather than mirage's own — a
-    /// run that sets one of these is loading a different ROCm than this
-    /// process would, and a verdict about the wrong library is worse
-    /// than none.
     #[test]
-    fn the_variables_that_redirect_the_search_are_the_loaders() {
-        let vars = search_vars();
-        for expected in ["LD_LIBRARY_PATH", "ROCM_HOME", "ROCM_PATH"] {
-            assert!(vars.iter().any(|v| v == expected), "{vars:?}");
-        }
-        // And nothing of mirage's own invention, which is the same rule
-        // `search` is written to: an override here could only ever
-        // disagree with the loader.
-        assert!(!vars.iter().any(|v| v.starts_with("MIRAGE_")), "{vars:?}");
+    fn only_immutable_system_files_can_produce_a_warning() {
+        assert!(trusted_system_file(Path::new("/bin/true")).is_some());
+
+        let tmp = tempfile::tempdir().unwrap();
+        let executable = tmp.path().join("workload");
+        std::fs::copy("/bin/true", &executable).unwrap();
+        assert_eq!(trusted_system_file(&executable), None);
+
+        std::fs::set_permissions(&executable, std::fs::Permissions::from_mode(0o4755)).unwrap();
+        assert_eq!(unprivileged_executable(&executable), None);
     }
 
-    /// Whatever this host has, asking must be safe and must agree with
-    /// itself. The verdict is not asserted on: it is a fact about the
-    /// machine the test runs on.
     #[test]
-    fn asking_about_this_host_is_harmless() {
-        let located = locate();
-        let support = check_target("gfx1250");
-        if located.is_none() {
-            assert_eq!(support, TargetSupport::Unknown);
+    fn dependency_analysis_does_not_execute_transitive_audit_code() {
+        use std::process::Command;
+
+        if Command::new("cc").arg("--version").output().is_err() {
+            return;
         }
-        // A target no ROCm will ever name, on a host that has one, must
-        // be reported rather than passed over.
-        if let Some(path) = located
-            && matches!(check_target("gfx942"), TargetSupport::Supported)
-        {
-            let TargetSupport::Unsupported(problem) = check_target("gfx0ff") else {
-                panic!("a target no runtime names must be reported");
-            };
-            assert_eq!(problem.runtime, path);
+        let tmp = tempfile::tempdir().unwrap();
+        let marker = tmp.path().join("audit-ran");
+        let audit_source = tmp.path().join("audit.c");
+        let audit = tmp.path().join("libaudit.so");
+        std::fs::write(
+            &audit_source,
+            format!(
+                "#include <stdio.h>\n\
+                 __attribute__((constructor)) static void run(void) {{ \
+                 FILE *f = fopen(\"{}\", \"w\"); if (f) fclose(f); }}\n",
+                marker.display()
+            ),
+        )
+        .unwrap();
+        let built_audit = Command::new("cc")
+            .args(["-shared", "-fPIC"])
+            .arg(&audit_source)
+            .arg("-o")
+            .arg(&audit)
+            .status()
+            .unwrap();
+        if !built_audit.success() {
+            return;
+        }
+
+        let runtime_source = tmp.path().join("runtime.c");
+        let runtime = tmp.path().join(ROCR_SONAME);
+        std::fs::write(&runtime_source, "int hsa_stub(void) { return 0; }\n").unwrap();
+        let built_runtime = Command::new("cc")
+            .args(["-shared", "-fPIC"])
+            .arg(&runtime_source)
+            .arg(format!("-Wl,-soname,{ROCR_SONAME}"))
+            .arg(format!("-Wl,--audit,{}", audit.display()))
+            .arg("-o")
+            .arg(&runtime)
+            .status()
+            .unwrap();
+        if !built_runtime.success() {
+            return;
+        }
+
+        let workload_source = tmp.path().join("workload.c");
+        let workload = tmp.path().join("workload");
+        std::fs::write(
+            &workload_source,
+            "extern int hsa_stub(void); int main(void) { return hsa_stub(); }\n",
+        )
+        .unwrap();
+        let built_workload = Command::new("cc")
+            .arg(&workload_source)
+            .arg("-L")
+            .arg(tmp.path())
+            .arg(format!("-l:{ROCR_SONAME}"))
+            .arg("-Wl,--enable-new-dtags")
+            .arg("-Wl,-rpath,$ORIGIN")
+            .arg("-o")
+            .arg(&workload)
+            .status()
+            .unwrap();
+        if !built_workload.success() {
+            return;
+        }
+
+        let workload_image = std::fs::read(&workload).unwrap();
+        assert_eq!(
+            direct_runpath_runtime(&workload, &workload_image, false),
+            Some(runtime.canonicalize().unwrap())
+        );
+        assert!(
+            !marker.exists(),
+            "static dependency analysis must not load an audit module"
+        );
+
+        let hwcap = tmp.path().join("glibc-hwcaps").join("x86-64-v3");
+        std::fs::create_dir_all(&hwcap).unwrap();
+        std::os::unix::fs::symlink(&runtime, hwcap.join(ROCR_SONAME)).unwrap();
+        assert_eq!(
+            direct_runpath_runtime(&workload, &workload_image, false),
+            None,
+            "a symlinked hardware-capability alternative makes the selected runtime ambiguous"
+        );
+    }
+
+    #[test]
+    fn a_relative_workdir_is_resolved_before_the_loader_changes_directory() {
+        let current = std::env::current_dir().unwrap();
+        assert_eq!(
+            absolute_workdir(Some(Path::new("relative/work"))),
+            Some(current.join("relative/work"))
+        );
+    }
+
+    /// `--clear-env-vars` means ambient loader state cannot leak into
+    /// the diagnostic any more than it can leak into the workload.
+    #[test]
+    fn a_cleared_environment_drops_ambient_loader_state() {
+        let inherited = [
+            (OsString::from("PATH"), OsString::from("/ambient/bin")),
+            (
+                OsString::from("LD_LIBRARY_PATH"),
+                OsString::from("/ambient/rocm/lib"),
+            ),
+        ];
+        let explicit = [(OsString::from("PATH"), OsString::from("/clean/bin"))];
+
+        let inherited_env = merged_environment(inherited.clone(), &explicit, true);
+        assert_eq!(
+            inherited_env.get(OsStr::new("LD_LIBRARY_PATH")),
+            Some(&OsString::from("/ambient/rocm/lib"))
+        );
+
+        let clean_env = merged_environment(inherited, &explicit, false);
+        assert_eq!(clean_env.get(OsStr::new("LD_LIBRARY_PATH")), None);
+        assert_eq!(
+            clean_env.get(OsStr::new("PATH")),
+            Some(&OsString::from("/clean/bin"))
+        );
+    }
+
+    /// Preloads can replace the runtime's symbols, HSA overrides change
+    /// which ISA is looked up, and loader-selection variables can
+    /// select user-controlled transitive dependencies. None permits a
+    /// safe verdict from a loader trace.
+    #[test]
+    fn preload_and_hsa_overrides_make_the_answer_ambiguous() {
+        for key in [
+            "LD_PRELOAD",
+            "LD_AUDIT",
+            "HSA_OVERRIDE_GFX_VERSION",
+            "HSA_OVERRIDE_GFX_VERSION_0",
+            "HSA_OVERRIDE_GFX_VERSION_17",
+        ] {
+            let env = [(OsString::from(key), OsString::from("set"))]
+                .into_iter()
+                .collect();
+            assert!(
+                loader_state_is_ambiguous(&env),
+                "{key} must suppress a loader verdict"
+            );
+        }
+        let unrelated = [(OsString::from("HSA_ENABLE_SDMA"), OsString::from("0"))]
+            .into_iter()
+            .collect();
+        assert!(!loader_state_is_ambiguous(&unrelated));
+    }
+
+    #[test]
+    fn every_loader_input_is_deduplicated_and_redirects_are_ambiguous() {
+        for key in [
+            "PATH",
+            "LD_LIBRARY_PATH",
+            "LD_ORIGIN_PATH",
+            "LD_HWCAP_MASK",
+            "LD_ASSUME_KERNEL",
+            "GLIBC_TUNABLES",
+            "LD_PRELOAD",
+            "LD_AUDIT",
+            "HSA_OVERRIDE_GFX_VERSION_0",
+        ] {
+            assert!(
+                affects_process_probe(key),
+                "{key} can change the probe answer"
+            );
+        }
+        assert!(
+            !affects_process_probe("BASH_ENV"),
+            "unrelated workload setup must not split deduplication"
+        );
+
+        for key in [
+            "LD_LIBRARY_PATH",
+            "LD_ORIGIN_PATH",
+            "LD_HWCAP_MASK",
+            "LD_ASSUME_KERNEL",
+            "GLIBC_TUNABLES",
+        ] {
+            let effective = [(OsString::from(key), OsString::from("set"))]
+                .into_iter()
+                .collect();
+            assert!(
+                loader_state_is_ambiguous(&effective),
+                "{key} can select a transitive object whose audit tags have not been inspected"
+            );
         }
     }
 }
