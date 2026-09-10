@@ -1735,6 +1735,15 @@ write_rocpd(
 
                 // Every pass of a replayed dispatch reports the same dispatch_id, so the pass
                 // index is what routes these counters to the execution that produced them.
+                if(!dispatch_evt_ids.contains(dispatch_id, record.replay_pass))
+                {
+                    ROCP_WARNING_IF(true) << fmt::format(
+                        "missing kernel dispatch id {} :: pass={} for counter collection",
+                        dispatch_id,
+                        record.replay_pass);
+                    continue;
+                }
+
                 auto evt_id = dispatch_evt_ids.get(dispatch_id, record.replay_pass);
                 for(const auto& count : record.read())
                 {

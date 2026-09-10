@@ -402,7 +402,7 @@ def write_counters_csv(importData, config) -> None:
     has_replay_passes = (
         "replay_pass" in importData.supported_features
         and importData.execute(
-            'SELECT EXISTS (SELECT 1 FROM "counters_collection" WHERE replay_pass IS NOT NULL)'
+            'SELECT EXISTS (SELECT 1 FROM "rocpd_kernel_dispatch" WHERE replay_pass IS NOT NULL)'
         ).fetchone()[0]
     )
 
