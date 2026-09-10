@@ -12,6 +12,7 @@ RJ_DIAGNOSTIC_IGNORE_PEDANTIC
 #include <hsa/hsa_ext_amd.h>
 RJ_DIAGNOSTIC_POP
 
+#include "../elf_test_support.h"
 #include "../test_paths.h"
 #include "rocjitsu/code/amdgpu_code_object.h"
 #include "rocjitsu/code/amdgpu_elf.h"
@@ -21,7 +22,6 @@ RJ_DIAGNOSTIC_POP
 #include "rocjitsu/code/patch/kernarg_extension.h"
 #include "rocjitsu/code/patch/sidecar_metadata.h"
 #include "rocjitsu/code/rj_code.h"
-#include "support/elf_test_support.h"
 #include "util/data_types.h"
 
 #include <gtest/gtest.h>

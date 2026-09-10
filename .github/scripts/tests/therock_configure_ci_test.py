@@ -352,6 +352,24 @@ class ConfigureCITest(unittest.TestCase):
         self.assertGreaterEqual(len(projects), 1)
         self.assertEqual(outputs["run_linux_rccl_ci"], "false")
 
+    @patch("therock_configure_ci.get_modified_paths")
+    def test_rccl_ci_not_triggered_by_docs_only_change_pull_request(
+        self, mock_get_modified
+    ):
+        """PR with only skippable RCCL doc paths should skip both regular and RCCL CI."""
+        args = {"is_pull_request": True, "base_ref": "HEAD^", "platform": "linux"}
+    
+        mock_get_modified.return_value = [
+            "projects/rccl/README.md",
+            "projects/rccl/docs/install/building-installing.rst",
+            "projects/rccl/.readthedocs.yaml",
+        ]
+    
+        outputs = therock_configure_ci.run(args)
+        projects = json.loads(outputs["projects"])
+        self.assertEqual(len(projects), 0)
+        self.assertEqual(outputs["run_linux_rccl_ci"], "false")
+
     def test_rccl_ci_triggered_nightly(self):
         """A nightly event should run both regular and RCCL CI."""
         args = {"is_nightly": True, "base_ref": "HEAD^", "platform": "linux"}
@@ -453,8 +471,8 @@ class ConfigureCITest(unittest.TestCase):
         self.assertEqual(outputs["run_linux_rccl_ci"], "false")
 
     @patch("therock_configure_ci.get_modified_paths")
-    def test_hipfile_pr_triggers_storage_libs_linux_ci(self, mock_get_modified):
-        """PR with hipfile changes should trigger storage_libs build with THEROCK_ENABLE_STORAGE_LIBS=ON."""
+    def test_hipfile_pr_builds_storage_libs_and_rocprofiler_sdk(self, mock_get_modified):
+        """PR with hipfile changes should build storage_libs and rocprofiler-sdk."""
         args = {
             "is_pull_request": True,
             "base_ref": "HEAD^",
@@ -470,6 +488,7 @@ class ConfigureCITest(unittest.TestCase):
         self.assertEqual(len(project_to_run), 1)
         cmake_options = project_to_run[0]["cmake_options"]
         self.assertIn("DTHEROCK_ENABLE_STORAGE_LIBS=ON", cmake_options)
+        self.assertIn("DTHEROCK_ENABLE_ROCPROFV3=ON", cmake_options)
         self.assertNotIn("DTHEROCK_ENABLE_ALL=ON", cmake_options)
 
     @patch("therock_configure_ci.get_modified_paths")

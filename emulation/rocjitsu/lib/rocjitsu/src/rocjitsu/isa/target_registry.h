@@ -20,6 +20,16 @@ namespace rocjitsu {
 
 class Decoder;
 
+/// @brief Immutable semantic capabilities of one concrete GPU target.
+///
+/// Capability bits are defined by the ISA family that consumes them. They
+/// describe instruction/encoding legality, rather than naming a GPU revision.
+struct IsaTargetCapabilities {
+  uint64_t instruction_features = 0;
+  /// Whether the selected provider implements execution for this target.
+  bool execution_implemented = false;
+};
+
 /// @brief Non-owning code-object identity published by an AMDGPU ISA target.
 struct IsaGpuTargetDescription {
   rj_code_target_id_t public_id;
@@ -27,11 +37,17 @@ struct IsaGpuTargetDescription {
   std::string_view code_object_id;
   /// ELF ``e_flags & EF_AMDGPU_MACH`` value for standalone code objects.
   uint32_t elf_machine;
+  /// KFD packed target version (for example 120501 for gfx1251), or zero.
+  uint32_t gfx_target_version = 0;
+  /// Semantic capabilities selected by this concrete target.
+  IsaTargetCapabilities capabilities = {};
 };
 
 /// @brief Static, non-owning description contributed by one ISA target.
 struct IsaTargetDescriptor {
   using DecoderFactory = std::unique_ptr<Decoder> (*)();
+  using VariantDecoderFactory =
+      std::unique_ptr<Decoder> (*)(const IsaGpuTargetDescription &gpu_target);
 
   /// Canonical target identity (for example ``gfx1250``).
   std::string_view id;
@@ -41,8 +57,13 @@ struct IsaTargetDescriptor {
   rj_code_arch_t architecture_id = ROCJITSU_CODE_ARCH_INVALID;
   /// Public GPU target keys and the code-object identities bound to them.
   std::span<const IsaGpuTargetDescription> gpu_targets = {};
+  /// Concrete target selected by architecture-only lookup, or INVALID when
+  /// this provider does not have target-specific decoder behavior.
+  rj_code_target_id_t default_gpu_target = ROCJITSU_CODE_TARGET_INVALID;
   /// Factory used to construct this target's decoder.
   DecoderFactory decoder_factory = nullptr;
+  /// Optional factory used when lookup selected a concrete GPU binding.
+  VariantDecoderFactory variant_decoder_factory = nullptr;
   /// Whether decoded instructions include execution callbacks in this image.
   bool supports_execution = false;
 };
@@ -98,6 +119,11 @@ public:
   const IsaGpuTargetDescription *find_gpu_target_by_elf_machine(uint32_t elf_machine) const;
   /// @brief Look up the binding for a Clang offload bundle processor ID.
   const IsaGpuTargetDescription *find_gpu_target_by_code_object_id(std::string_view id) const;
+  /// @brief Look up a binding by its public target enum.
+  const IsaGpuTargetDescription *find_gpu_target(rj_code_target_id_t gpu_target_id) const;
+  /// @brief Resolve a descriptor's explicit architecture-only default binding.
+  const IsaGpuTargetDescription *
+  find_default_gpu_target(const IsaTargetDescriptor &descriptor) const;
 
 private:
   explicit IsaTargetRegistry(std::span<const IsaTargetDescriptor> targets);

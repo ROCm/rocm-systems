@@ -35,6 +35,9 @@ THE SOFTWARE.
 #include "algorithms/dda/all_reduce/dda_all_reduce.h"
 #include "algorithms/dda/all_gather/dda_all_gather.h"
 #include "algorithms/dda/reduce_scatter/dda_reduce_scatter.h"
+#if defined(ENABLE_ROCSHMEM_GIN)
+#include "algorithms/gin/gin_all_reduce.h"
+#endif
 #include "group.h"
 #include "sym_kernels.h"
 #include "dev_runtime.h"
@@ -67,11 +70,11 @@ RCCL_PARAM(ForceCeAllReduce, "FORCE_CE_ALLREDUCE", 0);
 RCCL_PARAM(DdaEnable, "DDA_ENABLE", 1);
 RCCL_PARAM(DdaThreshold, "DDA_THRESHOLD", (size_t)(134217728));           // 128 MiB
 RCCL_PARAM(DdaLL, "DDA_LL", 1);
-RCCL_PARAM(DdaLLThreshold, "DDA_LL_THRESHOLD", (size_t)(32768));          // 32 KiB
+RCCL_PARAM(DdaLLThreshold, "DDA_LL_THRESHOLD", (size_t)(65536));          // 64 KiB
 RCCL_PARAM(DdaLLOneShotThreshold, "DDA_LL_ONESHOT_THRESHOLD", (size_t)(1) * 1024 * 1024); // 1 MiB
 RCCL_PARAM(DdaLLTwoShotThreshold, "DDA_LL_TWOSHOT_THRESHOLD", (size_t)(16) * 1024 * 1024); // 16 MiB
 RCCL_PARAM(DdaLL128, "DDA_LL128", 0);
-RCCL_PARAM(DdaLL128Threshold, "DDA_LL128_THRESHOLD", (size_t)(33554432)); // 32 MiB
+RCCL_PARAM(DdaLL128Threshold, "DDA_LL128_THRESHOLD", (size_t)(67108864)); // 64 MiB
 #ifdef ENABLE_WARP_SPEED
 RCCL_PARAM(WarpSpeedCuCount, "WARP_SPEED_CU_COUNT", 0);
 RCCL_PARAM(WarpSpeedAutoMode, "WARP_SPEED_AUTO", 1);
@@ -626,6 +629,9 @@ ncclResult_t rcclGetAlgoName(int algo, const char** algoName) {
     case rcclAddonAlgos_t::RCCL_DDA_IPC:
       *algoName = "DDA-IPC";
       break;
+    case rcclAddonAlgos_t::RCCL_GIN_SDMA:
+      *algoName = "GIN-SDMA";
+      break;
     default:
       WARN("Invalid algorithm value: %d", algo);
       return ncclInvalidArgument;
@@ -859,7 +865,7 @@ bool rcclCeAllReduceAllowed(struct ncclComm* comm) {
 // Single source of truth for AllReduce implementation selection. See the header
 // comment on rcclSelectAllReduce(). The priority chain and every gate below are a
 // faithful consolidation of what was previously split between ncclAllReduce_impl()
-// (symmetric / CE 2-shot / DDA) and taskAppend() (CE registered / kernel); the
+// (GIN-SDMA / symmetric / CE 2-shot / DDA) and taskAppend() (CE registered / kernel); the
 // outcome for any given operands is identical.
 ncclResult_t rcclSelectAllReduce(struct ncclComm* comm, const void* sendbuff, void* recvbuff, size_t count,
                                  ncclDataType_t datatype, ncclRedOp_t op, cudaStream_t stream, bool query,
@@ -870,6 +876,18 @@ ncclResult_t rcclSelectAllReduce(struct ncclComm* comm, const void* sendbuff, vo
   decision->nMaxChannels = 0;
 
   const size_t msgBytes = count * ncclTypeSize(datatype);
+
+#if defined(ENABLE_ROCSHMEM_GIN)
+  // GIN-SDMA scaleup AllReduce. Same gates as the previous early return in
+  // ncclAllReduce_impl (group depth 0 + eligibility). Graph-capture-safe: init
+  // runs off a private stream in relaxed mode; kernels re-read signal baselines.
+  // Must beat CE / DDA / symmetric so rcclGetCollImplInfo names the backend that ran.
+  if (ncclGroupDepth == 0 && ncclAllReduceGinSdmaEligible(comm, sendbuff, recvbuff, count, datatype, op)) {
+    decision->algo = RCCL_GIN_SDMA;
+    decision->nMaxChannels = kGinAllReduceLsaCtas;
+    return ncclSuccess;
+  }
+#endif
 
   // (1) Symmetric-window kernel eligibility takes priority over CE / DDA, exactly
   // as the pre-refactor collectives.cc path did.
@@ -929,8 +947,20 @@ ncclResult_t rcclSelectAllReduce(struct ncclComm* comm, const void* sendbuff, vo
   // (4) DDA fast paths. develop's shared gate: !symEligible, and either gfx1250
   // (fabric, full range) or CE is not going to service this call (!ceAllReduceAllowed),
   // subject to rcclDdaEnabled thresholds -- all folded into the helper.
+  //
+  // GIN AllReduce is selected first in this function and requires symmetric
+  // windows. By default it only claims messages >= 256 MiB, so DDA must still be
+  // allowed for smaller symmetric AllReduces (otherwise they would hit the
+  // symmetric kernel instead of DDA). FORCE_ENABLE=1 keeps the original
+  // !symEligible gate because GIN already returned above for those sizes.
+  bool ddaSymEligible = symEligible;
+#if defined(ENABLE_ROCSHMEM_GIN)
+  if (ncclAllReduceGinSdmaYieldToDda(comm, sendbuff, recvbuff, count, datatype, op)) {
+    ddaSymEligible = false;
+  }
+#endif
   const bool ddaFabricArch1250 = IsArchMatch(comm->archName, "gfx1250");
-  if (rcclAllReduceShouldTakeDdaPath(comm, count, datatype, symEligible, ceAllReduceAllowed)) {
+  if (rcclAllReduceShouldTakeDdaPath(comm, count, datatype, ddaSymEligible, ceAllReduceAllowed)) {
     if (ddaFabricArch1250) {
       // Small-message fast lane: LL protocol (no GPU barrier).
       if (ncclAllReduceDdaFabricLLEligible(comm, sendbuff, recvbuff, count, datatype, op)) {
@@ -1050,15 +1080,13 @@ ncclResult_t rcclSelectAllGather(struct ncclComm* comm, const void* sendbuff, vo
   // symk never reclaims it), mirroring rcclSelectAllReduce.
   if (!symEligible && rcclDdaEnabled(comm, totalBytes, 8388608)) {
     if (IsArchMatch(comm->archName, "gfx1250")) {
-      if (rcclParamDdaLL() && msgSize <= (size_t)rcclParamDdaLLThreshold() &&
-          ncclAllGatherDdaFabricLLEligible(comm, sendbuff, recvbuff, sendcount, datatype)) {
+      if (ncclAllGatherDdaFabricLLEligible(comm, sendbuff, recvbuff, sendcount, datatype)) {
         decision->algo = RCCL_DDA_FABRIC_LL;
         decision->protocol = NCCL_PROTO_LL;
         decision->nMaxChannels = ncclAllGatherDdaFabricLLBlocks(comm, sendcount, datatype);
         return ncclSuccess;
       }
-      if (rcclParamDdaLL128() && msgSize <= (size_t)rcclParamDdaLL128Threshold() &&
-          ncclAllGatherDdaFabricLL128Eligible(comm, sendbuff, recvbuff, sendcount, datatype)) {
+      if (ncclAllGatherDdaFabricLL128Eligible(comm, sendbuff, recvbuff, sendcount, datatype)) {
         decision->algo = RCCL_DDA_FABRIC_LL128;
         decision->protocol = NCCL_PROTO_LL128;
         decision->nMaxChannels = ncclAllGatherDdaFabricLL128Blocks(comm, sendcount, datatype);
@@ -1263,8 +1291,10 @@ ncclResult_t rcclSelectReduceScatter(struct ncclComm* comm, const void* sendbuff
   }
 
   // (4) Direct ReduceScatter (per-peer Send/Recv, native kernel finishes the reduce).
+  // That reduce runs with PreOpSrcs=0 / postOp=false, an unscaled sum, so ncclAvg and
+  // user-defined PreMulSum (op >= ncclNumOps) fall through to the ring kernel instead.
   size_t directMsgSize = totalBytes;
-  if (!symEligible && ncclGroupDepth == 0 && rcclUseReduceScatterDirect(comm, directMsgSize)) {
+  if (!symEligible && ncclGroupDepth == 0 && op < ncclAvg && rcclUseReduceScatterDirect(comm, directMsgSize)) {
     decision->algo = RCCL_DIRECT_REDUCESCATTER;
     decision->protocol = NCCL_PROTO_SIMPLE;
     decision->nMaxChannels = comm->p2pnChannels;
@@ -1411,6 +1441,33 @@ void rcclSetP2pNetChunkSize(struct ncclComm* comm, int& rcclP2pNetChunkSize) {
   comm->p2pNetChunkSize = p2pNetChunkSize;
   rcclP2pNetChunkSize = p2pNetChunkSize;
 }
+
+// An unroll factor is usable only if its device function table was generated in
+// this build AND compiled for the running arch. generate.py guards some unrolls
+// behind a single arch (see ncclDevFuncUnrollArch), and a multi-arch build marks
+// every unroll as generated, so checking ncclDevFuncUnrollGenerated alone lets a
+// gfx1250-only unroll through on other GPUs and traps on the device.
+//
+// The two failure modes are kept apart because only one of them is a build choice:
+// an unroll that was never generated can be enabled by rebuilding, while one that
+// generate.py restricts to another arch cannot run here no matter how it is built.
+enum ncclUnrollAvailability {
+  ncclUnrollUsable,
+  ncclUnrollNotGenerated,
+  ncclUnrollWrongArch,
+};
+
+// Test the arch restriction first. The two conditions overlap -- a local-arch build
+// narrows the generated set, so an unroll pinned to another arch is usually also
+// ungenerated -- and the arch is the more useful answer, because no build of any
+// matrix can make that unroll run on this GPU.
+static ncclUnrollAvailability unrollAvailability(int unroll, char const* archName) {
+  char const* requiredArch = ncclDevFuncUnrollArch[unroll];
+  if (requiredArch != nullptr && !IsArchMatch(archName, requiredArch)) return ncclUnrollWrongArch;
+  if (!ncclDevFuncUnrollGenerated[unroll]) return ncclUnrollNotGenerated;
+  return ncclUnrollUsable;
+}
+
 #ifdef ENABLE_WARP_SPEED
 void rcclSetWarpSpeedCUs(struct ncclComm* comm, int algo, int threadsPerBlock, int& rcclWarpSpeedChannels) {
   static int userChannelControlInput = RCCL_VALUE_UNSET;
@@ -1502,6 +1559,19 @@ ncclResult_t validChannelsForWarpSpeed(struct ncclComm* comm, struct ncclTaskCol
   return ncclSuccess;
 }
 
+// Apply a tuning preference for `unroll`, but only when this build can dispatch it
+// on the running GPU. Callers here are overriding a value commSetUnrollFactor()
+// already validated, so declining to change it leaves a working unroll in place;
+// assigning unconditionally would install an all-nullptr table and trap.
+static void rcclPreferUnrollFactor(struct ncclComm* comm, int unroll) {
+  if (unrollAvailability(unroll, comm->archName) != ncclUnrollUsable) {
+    INFO(NCCL_TUNING, "Keeping RCCL unroll factor %d: preferred %d is not usable on arch %s",
+         (int)(pow(2.0, (double)comm->unroll)), (int)(pow(2.0, (double)unroll)), comm->archName);
+    return;
+  }
+  comm->unroll = unroll;
+}
+
 ncclResult_t rcclSetWarpSpeedAuto(struct ncclComm* comm, struct ncclTaskColl* info, size_t nBytes) {
   info->useWarpSpeed = false;
   static bool unrollFactorSet = getenv("RCCL_UNROLL_FACTOR") != nullptr;
@@ -1516,7 +1586,7 @@ ncclResult_t rcclSetWarpSpeedAuto(struct ncclComm* comm, struct ncclTaskColl* in
       info->algorithm = NCCL_ALGO_RING; // Force Ring when WarpSpeed is enabled in manual mode as it only supports Ring
     }
     // TODO: Remove unroll update when all collectives are optimized
-    if (!unrollFactorSet) comm->unroll = NCCL_UNROLL_2;
+    if (!unrollFactorSet) rcclPreferUnrollFactor(comm, NCCL_UNROLL_2);
     info->useWarpSpeed = true;
   } else if (rcclCanUseWarpSpeedAuto(comm, comm->nNodes)) { // Auto performance mode
     // No early return based on the algorithm at the start of the function
@@ -1528,7 +1598,7 @@ ncclResult_t rcclSetWarpSpeedAuto(struct ncclComm* comm, struct ncclTaskColl* in
     if (info->func == ncclFuncAllReduce || info->func == ncclFuncAllGather || info->func == ncclFuncReduceScatter) {
       // allReduce now benefits from unroll factor of 2 in all modes due to changing its slicing strategy
       // TODO: Remove unroll update when all collectives are optimized
-      if (!unrollFactorSet) comm->unroll = NCCL_UNROLL_2;
+      if (!unrollFactorSet) rcclPreferUnrollFactor(comm, NCCL_UNROLL_2);
     }
     if (rcclIsAboveWarpSpeedThreshold(comm, info, nBytes)) {
       // Skip WarpSpeed when the comm exceeds its channel limit (e.g. RCCL_ENABLE_INTRANET=1 drives
@@ -1666,12 +1736,22 @@ ncclResult_t commSetUnrollFactor(struct ncclComm* comm) {
            comm->unroll, NCCL_NUM_UNROLLS - 1);
       return ncclInvalidArgument;
     }
-    if (!ncclDevFuncUnrollGenerated[comm->unroll]) {
-      WARN("RCCL_UNROLL_FACTOR %d (unroll %d) was not built for arch %s; its device function table is empty and "
-           "dispatching to it would crash. "
-           "Rebuild with this unroll factor, or select one that was generated for this build.",
+    switch (unrollAvailability(comm->unroll, comm->archName)) {
+    case ncclUnrollNotGenerated:
+      WARN("RCCL_UNROLL_FACTOR %d (unroll %d) was not generated by this build for arch %s; its device function "
+           "table is empty and dispatching to it would crash. "
+           "Rebuild with this unroll factor, or select one this build generated.",
            comm->unroll, (int)(pow(2.0, (double)comm->unroll)), comm->archName);
       return ncclInvalidArgument;
+    case ncclUnrollWrongArch:
+      WARN("RCCL_UNROLL_FACTOR %d (unroll %d) is compiled for %s only, so its device function table is empty on "
+           "arch %s and dispatching to it would crash. "
+           "This unroll factor is unavailable on this GPU regardless of the build; select a different one.",
+           comm->unroll, (int)(pow(2.0, (double)comm->unroll)), ncclDevFuncUnrollArch[comm->unroll],
+           comm->archName);
+      return ncclInvalidArgument;
+    case ncclUnrollUsable:
+      break;
     }
     INFO(NCCL_INIT, "RCCL Unroll Factor (user set): %d", (int)(pow(2.0, (double)comm->unroll)));
     return ncclSuccess;
@@ -1684,21 +1764,22 @@ ncclResult_t commSetUnrollFactor(struct ncclComm* comm) {
   else if (IsArchMatch(comm->archName, "gfx1250")) comm->unroll = NCCL_UNROLL_32;
   else comm->unroll = NCCL_UNROLL_4;
 
-  // Guard against a default that wasn't built for this arch (e.g. the generation
-  // matrix was narrowed). Fall back to any generated unroll rather than segfault.
-  if (!ncclDevFuncUnrollGenerated[comm->unroll]) {
+  // Guard against a default that isn't usable here (e.g. the generation matrix was
+  // narrowed, or the heuristic picked an unroll restricted to another arch). Fall
+  // back to the highest usable unroll rather than segfault.
+  if (unrollAvailability(comm->unroll, comm->archName) != ncclUnrollUsable) {
     int fallback = -1;
     for (int u = NCCL_NUM_UNROLLS - 1; u >= NCCL_UNROLL_1; u--) {
-      if (ncclDevFuncUnrollGenerated[u]) {
+      if (unrollAvailability(u, comm->archName) == ncclUnrollUsable) {
         fallback = u;
         break;
       }
     }
     if (fallback < 0) {
-      WARN("No unroll-factor device function tables were generated for arch %s.", comm->archName);
+      WARN("No unroll-factor device function tables are usable on arch %s.", comm->archName);
       return ncclInvalidUsage;
     }
-    WARN("Default RCCL unroll factor %d was not built for arch %s; falling back to %d. Set RCCL_UNROLL_FACTOR to "
+    WARN("Default RCCL unroll factor %d is not usable on arch %s; falling back to %d. Set RCCL_UNROLL_FACTOR to "
          "override.",
          (int)(pow(2.0, (double)comm->unroll)), comm->archName, (int)(pow(2.0, (double)fallback)));
     comm->unroll = fallback;

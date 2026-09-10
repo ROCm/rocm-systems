@@ -26,7 +26,7 @@
 // data ring. It sets up the KFD session, then poll()s one control eventfd plus
 // every live stream fd (with a 10 ms timeout as the sparse-tail / lost-interrupt
 // watchdog), drains firmware records, pairs dispatch_start + eop, and deposits
-// paired timings into the ResultsMap. wptr != rptr is the sole drain authority;
+// paired timings into the DispatchHub. wptr != rptr is the sole drain authority;
 // poll wakes are only hints. Finalization uses nudge_reader() +
 // wait_for_reader_quiesce() so the poll timeout never delays teardown.
 //
@@ -59,6 +59,12 @@ stop_kfd_reader();
 // this process. Used to verify flag-off inertness. Never constructs it.
 bool
 kfd_reader_state_constructed();
+
+// True when the reader can never serve a session (dead/stopping), as opposed to a
+// single GPU failing to arm. N1's fence short-circuits to abandon on this: a
+// reader that is gone will not quiesce within the budget. Non-constructing.
+bool
+reader_unavailable();
 
 // Ensure a dispatch-log session exists for the given gpu_id. Returns true only
 // when a live session belongs to THIS gpu_id; callers must otherwise leave the

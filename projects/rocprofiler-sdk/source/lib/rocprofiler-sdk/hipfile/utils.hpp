@@ -22,6 +22,7 @@
 
 #pragma once
 
+#include "lib/common/mpl.hpp"
 #include "lib/common/stringize_arg.hpp"
 #include "lib/rocprofiler-sdk/hipfile/details/format.hpp"
 
@@ -67,7 +68,9 @@ stringize_impl(const Tp& _v)
     }
     else
     {
-        return std::string{"<unformatted>"};
+        static_assert(common::mpl::assert_false<Tp>::value,
+                      "Provide fmt::formatter template specialization for this type in "
+                      "source/lib/rocprofiler-sdk/hipfile/details/format.hpp");
     }
 }
 
