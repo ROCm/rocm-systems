@@ -26,17 +26,15 @@ file(GLOB NEGATIVE_TEST_SRC
 file(COPY ${NEGATIVE_TEST_SRC} DESTINATION ${CMAKE_CURRENT_BINARY_DIR}/src)
 set_property(GLOBAL APPEND PROPERTY G_INSTALL_SRC_FILES ${NEGATIVE_TEST_SRC})
 
-#if(HIP_PLATFORM MATCHES "nvidia")
+# Both platforms report two errors now that __launch_bounds__(0) is accepted.
 # set(EXPECTED_ERRORS 2)
-#elseif(HIP_PLATFORM MATCHES "amd")
-# set(EXPECTED_ERRORS 3)
-#endif()
 #
 #add_test(NAME Unit_Kernel_Launch_bounds_Negative_Parameters_CompilerError
 #         COMMAND ${Python3_EXECUTABLE} ../compileAndCaptureOutput.py
 #         ./src ${HIP_PLATFORM} ${HIP_PATH}
 #         launch_bounds_compiler_error_kernels.cc ${EXPECTED_ERRORS})
 #
+# Stale: negative arguments now warn (-Wcuda-compat) once per compilation pass.
 #if(HIP_PLATFORM MATCHES "amd")
 #	add_test(NAME Unit_Kernel_Launch_bounds_Negative_Parameters_ParseError
 #        COMMAND ${Python3_EXECUTABLE} ../compileAndCaptureOutput.py
