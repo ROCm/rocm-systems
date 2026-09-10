@@ -3286,10 +3286,10 @@ GraphSignalManager::~GraphSignalManager() {
       // Pooled signals rest armed (value 1); mark them idle before destroy so
       // ~ProfilingSignal does not block waiting on an armed-but-idle signal.
       device->QuiesceHwEvents(set);
-      for (void* sig : set) {
-        if (sig != nullptr) {
+      for (void* signal : set) {
+        if (signal != nullptr) {
           // Pair with CreateHwEvents() so non-ROCm devices can hook teardown.
-          device->DestroyHwEvent(sig);
+          device->DestroyHwEvent(signal);
         }
       }
     }
@@ -3311,9 +3311,9 @@ bool GraphSignalManager::Prepopulate(amd::Device* device, int count, int num_set
   if (!pool.empty() && static_cast<int>(pool.back().size()) != count) {
     for (auto& set : pool) {
       device->QuiesceHwEvents(set);
-      for (void* sig : set) {
-        if (sig != nullptr) {
-          device->DestroyHwEvent(sig);
+      for (void* signal : set) {
+        if (signal != nullptr) {
+          device->DestroyHwEvent(signal);
         }
       }
     }
@@ -3343,15 +3343,15 @@ bool GraphSignalManager::AcquireSet(amd::Device* device, int count,
     std::lock_guard<std::mutex> lock(lock_);
     auto& pool = free_sets_[device];
     if (!pool.empty()) {
-      // Hot path: just hand out a ready (already-armed) set, then patch it.
+      // Cached sets are rearmed before they enter the free pool.
       out_set = std::move(pool.back());
       pool.pop_back();
       return true;
     }
   }
 
-  // Fallback only: more launches in flight than pre-created sets. Create one
-  // (armed to 1 by CreateHwEvents); it joins the pool when released.
+  // More launches are in flight than cached sets. Create an armed set now; it
+  // joins the cache when the launch completes.
   return device->CreateHwEvents(count, out_set);
 }
 

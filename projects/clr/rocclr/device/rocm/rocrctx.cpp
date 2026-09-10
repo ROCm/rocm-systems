@@ -69,6 +69,7 @@ bool Hsa::LoadLib() {
   GET_ROCR_SYMBOL(hsa_amd_profiling_async_copy_enable)
   GET_ROCR_SYMBOL(hsa_amd_profiling_get_dispatch_time)
   GET_ROCR_SYMBOL(hsa_amd_profiling_get_async_copy_time)
+  GET_ROCR_SYMBOL(hsa_amd_profiling_convert_tick_to_system_domain)
   GET_ROCR_SYMBOL(hsa_amd_signal_async_handler)
   GET_ROCR_SYMBOL(hsa_amd_queue_cu_set_mask)
   GET_ROCR_SYMBOL(hsa_amd_memory_pool_get_info)
