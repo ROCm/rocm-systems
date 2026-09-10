@@ -88,8 +88,10 @@ or GPU reset is not by itself a ConSan diagnostic.
   [CDNA5 / gfx1250](validation/STATUS_GFX1250.md).
 - [VALIDATION.md](validation/VALIDATION.md): reproducible physical, simulator, and offline
   gates behind those ledgers.
-- [EMPIRICAL_METHODOLOGY.md](EMPIRICAL_METHODOLOGY.md): the reusable admission,
-  GPU-timing, fault-detection, provenance, and recommendation contract.
+- [BENCHMARK.md](benchmark/BENCHMARK.md): the separate reproducible performance
+  contract, Aorta workload survey, and target-specific benchmark ledgers.
+- [EMPIRICAL_METHODOLOGY.md](EMPIRICAL_METHODOLOGY.md): cross-cutting corpus,
+  provenance, fault-detection, and recommendation principles.
 - [SPILLING.md](SPILLING.md): ConSan register selection, ownership, private
   layout, and runtime integration.
 - [AMDGPU register spilling](../spilling.md): reusable RocJitsu allocation and

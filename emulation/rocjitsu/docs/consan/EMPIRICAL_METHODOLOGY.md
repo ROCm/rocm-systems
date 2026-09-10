@@ -1,15 +1,15 @@
-# ConSan empirical evaluation methodology
+# ConSan empirical correctness and detection methodology
 
-This document defines the reusable contract for comparing ConSan
-instrumentation modes on real AMDGPU kernels. Target studies own their frozen
-corpus, identities, results, and recommendation; this document owns the rules
-that make those results comparable.
+This document defines cross-cutting corpus, provenance, fault-detection, and
+recommendation rules for ConSan evaluation on real AMDGPU kernels. Correctness
+qualification is owned by [VALIDATION.md](validation/VALIDATION.md), while all
+performance measurement is owned by the separate
+[BENCHMARK.md](benchmark/BENCHMARK.md).
 
-The methodology answers three separate questions:
+The methodology answers two separate questions:
 
 1. Can the mode instrument and run an unmodified real workload completely?
-2. What GPU execution cost and retained state does that admitted mode add?
-3. Which precommitted concurrency defects does it diagnose, and with what
+2. Which precommitted concurrency defects does it diagnose, and with what
    uncertainty?
 
 A mode is never tuned around a selected fault and then presented as an ordinary
@@ -46,7 +46,7 @@ sensitivity experiments, separately from the ordinary result.
 
 ## Clean admission gate
 
-Before timing or fault trials, each workload/mode pair must:
+Before fault trials, each workload/mode pair must:
 
 1. pass the independent workload oracle;
 2. report an applicable code object and expected kernel identity;
@@ -82,48 +82,6 @@ Create a new artifact root after any source, hook, binary, input, fault,
 methodology, schema, or failed-preparation change. Never merge samples from
 different checkpoints into one result. Resume may reuse complete rows only
 when every stable identity and campaign setting still matches.
-
-## Performance protocol
-
-Performance runs never inject a fault. Native and instrumented rows use the
-same workload binary, input, launch shape, and oracle.
-
-Three costs may be retained:
-
-1. transformation and cold first-operation cost;
-2. warm end-to-end host-observed cost; and
-3. warm device-kernel cost.
-
-Only warm device-kernel time qualifies for the overhead recommendation. It must
-come from HIP events, PyTorch HIP events, or another project-owned mechanism
-backed by device timestamps around the exact kernel sequence. CPU wall time is
-useful operational evidence but not a substitute.
-
-The normal final collection uses at least ten accepted independent process
-rounds. Each round brackets randomized instrumented modes with native
-baseline-before and baseline-after samples. The random seed is recorded. Warm
-samples use a correctness-preserving warmup and enough iterations to exceed
-250 ms of aggregate GPU work; native calibration fixes one iteration count for
-all modes in that workload campaign.
-
-If bounded detector state makes repeated dispatches invalid, one GPU-timed
-operation per fresh process is allowed as an explicit exception. The result is
-labeled single-dispatch and is not generalized to steady-state throughput.
-
-For each metric, baseline drift is the absolute difference between the two
-bracketing native samples divided by their mean. Reject the metric sample when
-either baseline fails its oracle or drift exceeds 5 percent. The campaign
-passes only after every reported mode/metric cell has ten accepted rounds.
-
-Retain every raw sample. Report absolute GPU time, the median paired slowdown,
-interquartile range, and a 95-percent bootstrap confidence interval using
-10,000 resamples. Interpolate the paired native baseline by the mode's execution
-position between the two brackets.
-
-Record structural costs beside timing: original and patched object bytes,
-transformation latency, patch counts, resource metadata, spills, relays,
-unsupported placements, report allocations, high-water marks, saturation, and
-overflow state.
 
 ## Detection protocol
 
@@ -194,53 +152,14 @@ into one score.
 - **Ordinary mode:** clean and complete across the required corpus, low
   false-positive risk, useful detection on important real faults, and acceptable
   operational and maintenance cost.
-- **Supported opt-in:** unique useful evidence with materially higher cost,
-  nondeterminism, or operational complexity.
+- **Supported opt-in:** unique useful evidence with materially higher
+  operational complexity or nondeterminism.
 - **Narrowed mode:** useful only for precisely stated semantic families,
   workload scales, or diagnostic workflows.
 - **Remove from ordinary support:** dominated in actionable detection and cost,
   or unable to meet correctness and completeness without workload-specific
   controls.
 
-An expensive mode is not rejected solely for cost if it uniquely detects a
-high-value class. Conversely, low overhead does not justify an ordinary mode
-that produces no actionable evidence. Preserve uncertainty and qualified misses
-rather than tuning a mode until it detects the chosen fault.
-
-## Runner interface
-
-The checked-in `study` subcommand implements this contract. From the repository
-root, a target campaign has the form:
-
-```sh
-python3 emulation/rocjitsu/tests/dbi/consan/consan_validation.py \
-  --target gfx1201 study \
-  --workload pytorch-rdna4-compiled-softmax --profile all \
-  --rounds 10 --seed 20260802 \
-  --timeout 120 \
-  --artifact-root "$CONSAN_ARTIFACT_ROOT"
-```
-
-The external workload locations used by the gfx1201 study are explicit when
-those workload families are selected:
-
-```sh
-export CONSAN_VALIDATION_RDNA4_MATMUL_DIR=/path/to/rdna4_matmul
-export CONSAN_VALIDATION_LLAMA_BUILD_DIR=/path/to/llama/build
-export CONSAN_VALIDATION_LLVM_READELF=/path/to/llvm-readelf
-```
-
-The artifact root contains frozen provenance, clean admission rows, original
-and patched code objects, native timing calibration, deterministically scheduled
-rounds, raw host/device samples, and the campaign summary. Passing `--resume`
-may reuse complete matching rows; an interrupted row is preserved before retry.
-
-Generated result documents remain the sole owner of exact measurement tables.
-Interpretation documents may quote headline findings, but per-cell values and
-artifact inventories are generated from a frozen manifest and checked against
-the retained roots.
-
-Raw roots must remain intact through review, landing, and any decision based on
-the study. Before cleaning a study workspace, copy every root without renaming
-to a durable project-selected store so the generated report can still be
-independently verified.
+Operational cost may inform a support recommendation, but performance claims
+and thresholds come only from the benchmark contract. Preserve uncertainty and
+qualified misses rather than tuning a mode until it detects the chosen fault.

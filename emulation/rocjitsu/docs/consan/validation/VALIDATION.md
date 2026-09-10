@@ -24,8 +24,12 @@ ConSan uses four complementary layers:
    supported targets through RocJITsu.
 3. Physical tests execute the matching target-native fixtures on hardware and
    finish with an uninstrumented health check.
-4. External-workload campaigns qualify unmodified production-shaped programs,
-   overhead, and reviewed fault injection.
+4. External-workload campaigns qualify unmodified production-shaped programs
+   and reviewed fault injection.
+
+Performance measurement is outside this contract. Use the separate
+[benchmark procedure](../benchmark/BENCHMARK.md); benchmark evidence never
+promotes a correctness cell.
 
 Simulator success proves behavior under the emulator. It does not promote a
 physical cell. Physical and destructive fault tests are serialized.
@@ -151,8 +155,7 @@ The runner exposes these subcommands:
 | `manifest` | Print the target's executable workload matrix. |
 | `prepare` | Build a canonical generated artifact; currently used for `qwen-prefill`. |
 | `explain` | Expand workload commands, profile settings, implicit defaults, and reviewed fault policy without executing the workload. |
-| `run` | Execute `clean` correctness/coverage rows or `overhead` rows. |
-| `study` | Run the reproducible physical-gfx1201 empirical timing protocol. |
+| `run` | Execute clean correctness and coverage rows. |
 | `inventory` | Discover target- and binary-specific fault sites without mutation. |
 | `fault` | Execute one reviewed fault specification with containment and health checks. |
 
@@ -219,24 +222,6 @@ its reason rather than converting it into a missing teardown verdict.
 `--timeout` is a diagnostic override. Changing it changes the execution
 contract and requires a new artifact root. A missing workload/profile pair is
 an incomplete campaign, not an omitted result.
-
-### Overhead
-
-Run overhead without fault injection:
-
-```sh
-python3 emulation/rocjitsu/tests/dbi/consan/consan_validation.py \
-  --target "$CONSAN_VALIDATION_TARGET" run \
-  --workload tp1-prefill --profile all --phase overhead \
-  --include-baseline --artifact-root "$CONSAN_ARTIFACT_ROOT"
-```
-
-With `--include-baseline`, the order is baseline-before, selected profiles,
-then baseline-after. `summary.json` reports raw samples, paired baseline, and
-mode ratios. Do not compare cold first-operation ratios with warm steady-state
-ratios; the manifest and result artifacts identify which protocol a row uses.
-For statistically controlled performance studies, follow
-[EMPIRICAL_METHODOLOGY.md](../EMPIRICAL_METHODOLOGY.md) and use `study`.
 
 ### Fault inventory and review
 
@@ -318,6 +303,6 @@ python3 -m unittest \
 ```
 
 These tests validate environment scrubbing, manifest/profile isolation,
-provenance, workload commands and oracles, coverage gates, overhead math,
-identity inventory, fault-spec validation, reservation accounting, and health
-containment. They do not qualify a simulator or physical target cell.
+provenance, workload commands and oracles, coverage gates, identity inventory,
+fault-spec validation, reservation accounting, and health containment. They do
+not qualify a simulator or physical target cell.

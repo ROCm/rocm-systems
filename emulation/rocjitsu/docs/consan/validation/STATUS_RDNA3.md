@@ -9,7 +9,7 @@ Legend: 🩶 unseen or simulator-prerequisite-only · 🟥 broken before useful 
 
 | Set | Priority | Workload / validation ID | SuperCollider | Record/Replay | Sampled | Inline Shadow |
 |---|---:|---|---|---|---|---|
-| Physical compact gate | P0 | native two-wave LDS fixture (`ConSanGfx1100Physical.*`) | 🟨 exact clean/all-sites rows and mutation containment; broad E2E fault/overhead campaign missing | 🟨 exact clean output, visible records, zero diagnostics; reviewed conflict and broad campaign missing | 🟨 exact clean output, visible records, zero diagnostics; reviewed conflict and broad campaign missing | 🟨 exact clean output plus attributed two-wave conflict; broad E2E overhead/fault campaign missing |
+| Physical compact gate | P0 | native two-wave LDS fixture (`ConSanGfx1100Physical.*`) | 🟨 exact clean/all-sites rows and mutation containment; broad E2E fault campaign missing | 🟨 exact clean output, visible records, zero diagnostics; reviewed conflict and broad campaign missing | 🟨 exact clean output, visible records, zero diagnostics; reviewed conflict and broad campaign missing | 🟨 exact clean output plus attributed two-wave conflict; broad E2E fault campaign missing |
 | Simulator prerequisite | P0 | native two-wave LDS fixture (`ConSanGfx1100Sim.*`) | 🩶 prerequisite passes | 🩶 prerequisite passes | 🩶 prerequisite passes | 🩶 clean and conflict prerequisites pass |
 | Broad E2E | P0 | Qwen3-0.6B prefill (`qwen-prefill`) | 🩶 unassessed | 🩶 unassessed | 🩶 unassessed | 🩶 unassessed |
 | Broad E2E | P1 | Sharktank TP1 prefill (`tp1-prefill`) | 🩶 unassessed | 🩶 unassessed | 🩶 unassessed | 🩶 unassessed |
