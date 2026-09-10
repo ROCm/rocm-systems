@@ -80,8 +80,11 @@ bool has_routed_memory_state(const Instruction &inst) {
 /// encoded field layout differs across GFX generations.
 WaitInfo parse_wait(const Instruction &inst) {
   const WaitKind kind = make_wait_kind(inst.mnemonic());
-  if (kind == WaitKind::None || inst.num_src_operands() == 0)
-    return WaitInfo{kind, 0, 0};
+  if (kind == WaitKind::None || inst.num_src_operands() == 0) {
+    WaitInfo info;
+    info.kind = kind;
+    return info;
+  }
 
   const int index = wait_count_follows_register(kind) && inst.num_src_operands() > 1 ? 1 : 0;
   const auto *op = inst.src_operand(index);
