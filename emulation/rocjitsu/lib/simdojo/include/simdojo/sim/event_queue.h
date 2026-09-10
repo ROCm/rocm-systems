@@ -156,6 +156,14 @@ public:
   /// @param t New current tick value.
   void set_current_tick(Tick t) { current_tick_ = t; }
 
+  /// @brief Drop every enqueued entry.
+  ///
+  /// @details An entry owns the message it carries, so this is how the engine
+  /// releases what is still in flight when it stops. The sequence counter is
+  /// deliberately left alone: it exists to break timestamp ties, and restarting
+  /// it would let a later entry sort ahead of one already queued.
+  void clear() { entries_.clear(); }
+
 private:
   std::vector<EventQueueEntry> entries_; ///< Min-heap of entries by timestamp.
   uint64_t next_sequence_ = 0;           ///< Monotonic counter for deterministic tie-breaking.
@@ -210,6 +218,13 @@ public:
   size_t size() const {
     std::lock_guard<util::Spinlock> guard(lock_);
     return entries_.size();
+  }
+
+  /// @brief Drop every pending entry, releasing the messages they carry
+  ///        (thread-safe).
+  void clear() {
+    std::lock_guard<util::Spinlock> guard(lock_);
+    entries_.clear();
   }
 
 private:

@@ -53,11 +53,35 @@ public:
   /// @returns The tick of the last event processed by this partition.
   Tick current_tick() const { return event_queue.current_tick(); }
 
+  /// @brief Return the number of event handlers this partition has run.
+  ///
+  /// @details Counts handlers that ran to completion: an entry with no handler
+  /// is not counted, and neither is one whose handler threw. This measures work
+  /// done, which is what a model asserting that an idle component costs nothing
+  /// needs. The engine's own max-ticks sentinel has a handler and so is counted
+  /// -- an engine configured with max_ticks reports one event it did not model.
+  /// Readable from any thread, so a test or a progress readout can sample it
+  /// while the partition's own worker is still processing.
+  /// @returns Cumulative count since create().
+  uint64_t events_processed() const { return events_processed_.load(std::memory_order_relaxed); }
+
 private:
   friend class SimulationEngine;
 
   PartitionID partition_id; ///< This partition's ID.
   EventQueue event_queue;   ///< Thread-local event priority queue.
+
+  /// @brief Events this partition has executed.
+  /// @details Written only by the owning worker thread; atomic because
+  /// foreign threads read it. Relaxed on both sides, which is enough because
+  /// nothing is inferred from the count: no reader uses it to decide that some
+  /// other state is ready to read, so there is nothing for acquire/release to
+  /// order. A reader that needs the exact final count gets it through a
+  /// synchronization it already has -- reading on the thread that drove the
+  /// run, or after run() joins the workers -- and a concurrent progress
+  /// readout that sees a slightly stale count is in the same position as one
+  /// that read a moment earlier.
+  std::atomic<uint64_t> events_processed_{0};
 
   /// @brief Min timestamp of outgoing cross-partition events in this epoch.
   /// @details Only accessed by the owning worker thread during event processing
@@ -78,6 +102,20 @@ private:
 
   /// @brief Drain all incoming queues into the local event queue.
   void drain_incoming();
+
+  /// @brief Drop everything still queued for this partition.
+  ///
+  /// @details A queued entry owns the message it carries, so this is what
+  /// actually releases work in flight when the engine stops. It is separate
+  /// from destroying the context because the two have different deadlines: the
+  /// memory has to be released the moment shutdown() returns, and the context
+  /// itself cannot be, because a driver above shutdown() on the stack is still
+  /// holding a reference to it. See SimulationEngine::retired_contexts_.
+  ///
+  /// Emptying the queue is also what stops those drivers: a loop that reads
+  /// next_event_time() on the way out sees TICK_MAX and ends rather than
+  /// popping from a generation the engine has given up.
+  void release_pending();
 };
 
 /// @brief The main simulation engine.
@@ -171,7 +209,8 @@ public:
   /// simulation starts running, the topology is frozen and only const access is
   /// permitted (enforced by assertion in debug builds).
   Topology &topology() {
-    assert(!running_ && "topology is read-only while the simulation is running");
+    assert(!executing_.load(std::memory_order_relaxed) &&
+           "topology is read-only while the simulation is running");
     return topology_;
   }
   const Topology &topology() const { return topology_; }
@@ -182,6 +221,60 @@ public:
   /// then enters the PDES epoch loop. Components are shut down on return.
   /// @returns An ExitStatus describing why the simulation stopped.
   ExitStatus run();
+
+  /// @brief Run every queued event at or before @p limit, then return without
+  ///        ending the simulation.
+  ///
+  /// @details run() treats an empty queue as the end of the simulation: it
+  /// checks primaries, latches an exit, and returns once. That is right for a
+  /// simulation that owns its own stimulus. It is wrong for a model embedded in
+  /// something else -- the timing plane is handed memory accesses by the
+  /// emulator one at a time, has to run until it knows when each one
+  /// completes, and is then handed the next one. An empty queue there means
+  /// "waiting for the host", not "finished", and run() would end the
+  /// simulation after the first access. step() is resumable but advances one
+  /// tick per call, so every caller would re-implement this loop around it.
+  ///
+  /// So this is run() without the termination decision: no primary check, no
+  /// exit latched on an empty queue, and no wall-clock pacing. It stops when
+  /// the next event is later than @p limit or nothing is queued, and a later
+  /// call picks up where it stopped. Async events are merged as it goes, so it
+  /// never returns "idle" with a doorbell still invisible to the queue.
+  ///
+  /// The engine can still end underneath it -- on max_ticks, on
+  /// request_exit(), or on shutdown() -- and is_done() is how a caller tells
+  /// that apart from having nothing to do. A max_ticks sentinel is an ordinary
+  /// queued entry, so run_until_idle() on such an engine runs to max_ticks.
+  ///
+  /// Single-threaded engines only.
+  /// @param limit Latest event timestamp to process, inclusive.
+  /// @returns The tick of the last event processed, or the previous tick if
+  ///          nothing ran. Time is not advanced to @p limit.
+  /// @throws std::logic_error if this engine is already executing.
+  /// @throws std::invalid_argument if the engine has more than one partition.
+  Tick run_until(Tick limit);
+
+  /// @brief Run every queued event, leaving the engine resumable.
+  /// @returns run_until(TICK_MAX); nothing is ever queued at TICK_MAX.
+  /// @throws Whatever run_until() throws.
+  Tick run_until_idle() { return run_until(TICK_MAX); }
+
+  /// @brief Whether the engine has exited and will process no further events.
+  ///
+  /// @details Latched by max_ticks, by request_exit(), and by shutdown(). A
+  /// drive loop around run_until() has to test it, because a finished engine
+  /// is otherwise indistinguishable from one with nothing to do.
+  /// @retval true The simulation has ended; see last_exit() for why.
+  /// @retval false The engine will still process events.
+  bool is_done() const { return done_.load(std::memory_order_acquire); }
+
+  /// @brief Number of event handlers run since create(), across all partitions.
+  ///
+  /// @details Zero after shutdown(), because the counters live in the
+  /// partition contexts and those are the generation. Safe to call from any
+  /// thread: it takes the same lock shutdown() clears the contexts under.
+  /// @returns Cumulative count of entries whose handler ran.
+  uint64_t events_processed() const;
 
   /// @brief Block until run() (or step()'s first call) has completed component
   /// startup.
@@ -431,6 +524,26 @@ private:
   /// @brief Set up partition contexts, async queues, and engine pointers.
   void setup_partitions();
 
+  /// @brief Start components and arm the max-ticks sentinel, once per create().
+  ///
+  /// @details Not new behaviour: run() and step() each carried their own copy
+  /// of this lazy-startup block, and this is that block, moved so run_until()
+  /// can share it instead of becoming a third copy. Whichever entry point
+  /// reaches the engine first starts it; the others find it started.
+  ///
+  /// Keyed on startup_complete_, not on "executing right now", because run()
+  /// clears the latter on return: keyed on it, `run_until_idle(); run();`
+  /// would start every component twice, double-scheduling their first events
+  /// and double-registering primaries.
+  /// @param propagate_failure Whether to rethrow a component's startup()
+  ///        exception. True for the foreground entry points; false for run(),
+  ///        which may be on a background thread whose lambda has no catch and
+  ///        which converts the failure into an ExitStatus instead.
+  /// @retval true The engine is started and may process events.
+  /// @retval false A startup() threw; this create() generation is terminal and
+  ///         the caller must shutdown() + create() to retry.
+  bool ensure_started(bool propagate_failure);
+
   /// @brief Wake an idle single-threaded worker so it re-checks its exit and event state.
   ///
   /// @details No-op outside single-threaded mode, or once the partition is gone.
@@ -456,9 +569,21 @@ private:
   /// own (the host thread calling request_exit(), the doorbell monitor releasing a
   /// primary) and can overlap shutdown() clearing these vectors. Those readers take a
   /// shared lock; shutdown() takes it exclusively around the clear.
-  std::shared_mutex contexts_mutex_;
+  mutable std::shared_mutex contexts_mutex_;
   std::vector<std::unique_ptr<PartitionContext>>
-      contexts_;                      ///< Per-partition state (one per thread).
+      contexts_; ///< Per-partition state (one per thread).
+  /// @brief The previous generation's partition contexts, kept alive past the
+  /// shutdown() that retired them.
+  ///
+  /// @details shutdown() is reachable from a component handler, and every driver
+  /// of the queue -- step(), run_until(), worker_loop() -- holds a
+  /// PartitionContext reference across the handler call and reads it again on the
+  /// way out, starting with the event counter process_event() bumps once the
+  /// handler returns. Destroying the contexts inside shutdown() pulls those frames
+  /// out from under the call that asked for the shutdown. Retiring them instead
+  /// costs one dead generation of per-partition state until create() or
+  /// ~SimulationEngine(), neither of which can run underneath a handler.
+  std::vector<std::unique_ptr<PartitionContext>> retired_contexts_;
   std::vector<std::jthread> workers_; ///< Worker threads (multi-threaded mode).
   std::atomic<Tick> current_time_{0}; ///< Current simulation time (latest processed tick).
   PacingController pacer_;            ///< PI-controlled wall-clock pacing.
@@ -471,7 +596,19 @@ private:
   std::atomic<bool> has_primaries_{false}; ///< Set on first register_as_primary().
   ExitStatus exit_status_;                 ///< Exit information from the last run/step.
   bool created_ = false; ///< Whether create() has completed (components initialized).
-  bool running_ = false; ///< True while running; also guards step() first-call startup.
+  /// @brief Set while any entry point is driving this engine's queue.
+  ///
+  /// @details A runtime guard rather than an assert, unlike this class's other
+  /// preconditions. Re-entering -- run() or step() or run_until() from
+  /// inside a handler -- has the inner loop popping from the very queue the
+  /// outer process_event() frame is iterating and rewriting the partition tick
+  /// underneath it. That corrupts a run rather than merely misbehaving, and a
+  /// release build would do it in silence. Atomic because the entry points can
+  /// be called from different threads: a host polling step() while run() drives
+  /// the engine on a background thread is exactly the collision this refuses.
+  /// It is also the flag topology() asserts on, so "an execution loop is in
+  /// progress" has one definition that every entry point restores on unwind.
+  std::atomic<bool> executing_{false};
   /// @brief Latched true once startup() has run for every component (or thrown);
   /// reset by create(). Read by wait_until_started() from an embedding thread.
   std::atomic<bool> startup_complete_{false};
