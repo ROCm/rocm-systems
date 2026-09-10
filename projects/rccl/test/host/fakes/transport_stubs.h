@@ -18,10 +18,19 @@
 #ifndef RCCL_TEST_HOST_TRANSPORT_STUBS_H_
 #define RCCL_TEST_HOST_TRANSPORT_STUBS_H_
 
+#include <functional>
+
+#include "nccl.h"
+
+struct ncclComm;
+
 // rcclUseAinic (src/transport/net.cc:343) queries whether an AINIC is present.
 // A host-only binary has no device, so `false` is the honest answer rather than
 // a steering choice; override it to exercise the AINIC arm.
 extern bool g_rcclUseAinic;
+
+// ncclProxyStop (src/proxy.cc): comm teardown stops the proxy through this.
+extern std::function<ncclResult_t(struct ncclComm*)> g_ncclProxyStop;
 
 void ResetTransportStubs();
 

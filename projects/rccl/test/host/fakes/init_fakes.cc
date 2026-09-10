@@ -76,7 +76,9 @@ ncclResult_t ncclGetUniqueId(ncclUniqueId* id) {
   return ncclSuccess;
 }
 
-ncclResult_t ncclGroupJobAbort(struct ncclGroupJob*) { return ncclSuccess; }
+static ncclResult_t DefaultNcclGroupJobAbort(struct ncclGroupJob*) { return ncclSuccess; }
+std::function<ncclResult_t(struct ncclGroupJob*)> g_ncclGroupJobAbort = DefaultNcclGroupJobAbort;
+ncclResult_t ncclGroupJobAbort(struct ncclGroupJob* job) { return g_ncclGroupJobAbort(job); }
 ncclResult_t ncclGroupJobComplete(struct ncclGroupJob*) { return ncclSuccess; }
 
 bool g_ginHasError = false;
@@ -185,7 +187,10 @@ void initEnv() {}
 ncclResult_t ncclOsInitialize() { return ncclSuccess; }
 void initNvtxRegisteredEnums() {}
 ncclResult_t g_ncclEnvPluginInitResult = ncclSuccess;
-ncclResult_t ncclEnvPluginInit(void) { return g_ncclEnvPluginInitResult; }
+// Default reads the plain result seam so both styles work: set g_ncclEnvPluginInitResult, or ScopedHook the functor.
+static ncclResult_t DefaultNcclEnvPluginInit() { return g_ncclEnvPluginInitResult; }
+std::function<ncclResult_t()> g_ncclEnvPluginInit = DefaultNcclEnvPluginInit;
+ncclResult_t ncclEnvPluginInit(void) { return g_ncclEnvPluginInit(); }
 bool ncclIommuPassthroughOk(const char*) { return true; }
 // ncclInit() strtok_r()s the /proc version read, so it must have >= 3 whitespace tokens.
 ncclResult_t ncclTopoGetStrFromSys(const char* /*path*/, const char* fileName, char* strValue) {
@@ -204,6 +209,7 @@ ncclResult_t g_ncclNetInitResult        = ncclSuccess;
 ncclResult_t g_ncclGinInitResult        = ncclSuccess;
 ncclResult_t g_ncclStrongStreamResult   = ncclSuccess;
 ncclResult_t g_ncclMemManagerInitResult = ncclSuccess;
+int g_ncclMemManagerInitCalls = 0;
 ncclResult_t g_amdSmiInitResult         = ncclSuccess;
 // Defaults to failure so the bootstrapAllGather call sites no test reaches stay fail-fast.
 std::function<ncclResult_t(void*, void*, int)> g_bootstrapAllGather =
@@ -215,6 +221,12 @@ uint64_t g_bootstrapHandleMagic           = 0xB007ULL;
 int g_bcastGrowHandleCalls                = 0;
 bool g_bcastGrowHandleIsRoot              = false;
 int g_bootstrapGetUniqueIdCalls           = 0;
+
+ncclResult_t DefaultBcastGrowHandle(struct ncclBootstrapHandle*, struct ncclComm*, bool) {
+  return g_bcastGrowHandleResult;
+}
+std::function<ncclResult_t(struct ncclBootstrapHandle*, struct ncclComm*, bool)> g_bcastGrowHandle =
+    DefaultBcastGrowHandle;
 
 ncclResult_t g_initChannelResult        = ncclSuccess;
 int g_initChannelLastId                 = -1;
@@ -282,19 +294,49 @@ int g_ncclTopoDumpGraphsNgraphs             = -1;
 std::vector<struct ncclTopoGraph*> g_ncclTopoDumpGraphsArray;
 ncclResult_t g_ncclTopoComputeP2pChannelsPerPeerResult = ncclTimeout;  // rung-3 terminator
 
+// AllGather3 seams (:1786-2213), rung 4. Each default is deterministic: the UUT marshals it into allGather3Data.
+std::function<ncclResult_t(struct ncclComm*, bool*)> g_ncclTopoCheckNicFused =
+    [](struct ncclComm*, bool* fused) { *fused = false; return ncclSuccess; };
+std::function<ncclResult_t(struct ncclTopoSystem*, int, float*)> g_ncclTopoGetMinNetBw =
+    [](struct ncclTopoSystem*, int, float* bw) { *bw = 0.0f; return ncclSuccess; };
+std::function<ncclResult_t(struct ncclTopoSystem*, int, int*, float*)> g_ncclTopoGetLocalNetCountByBw =
+    [](struct ncclTopoSystem*, int, int* count, float* bw) { *count = 0; *bw = 0.0f; return ncclSuccess; };
+std::function<ncclResult_t(struct ncclTopoSystem*, int*)> g_ncclTopoPathAllNVLink =
+    [](struct ncclTopoSystem*, int* allNvLink) { *allNvLink = 0; return ncclSuccess; };
+std::function<ncclResult_t(struct ncclComm*, struct ncclTopoRanks*)> g_ncclTopoPreset =
+    [](struct ncclComm*, struct ncclTopoRanks*) { return ncclSuccess; };
+ncclResult_t g_rcclCheckRomeTopoModelIdxConsensusResult = ncclSuccess;
+int g_rcclCheckRomeTopoModelIdxConsensusCalls = 0;
+int g_rcclRomeConsensusNranks               = -1;
+int g_rcclRomeConsensusIdx0                 = -1;
+std::string g_rcclRomeConsensusHost0;
+ncclResult_t g_ncclCudaContextTrackResult   = ncclSuccess;
+int g_ncclCudaContextTrackCalls             = 0;
+ncclResult_t g_ncclNvlsTuningResult         = ncclSuccess;
+int g_ncclNvlsTuningCalls                   = 0;
+ncclResult_t g_ncclTreeBasePostsetResult    = ncclSuccess;
+int g_ncclTreeBasePostsetCalls              = 0;
+struct ncclTopoGraph* g_ncclTreeBasePostsetGraph = nullptr;
+ncclResult_t g_ncclTopoPostsetResult        = ncclInvalidUsage;  // rung-4 terminator
+int g_ncclTopoPostsetCalls                  = 0;
+std::vector<struct ncclTopoGraph*> g_ncclTopoPostsetGraphs;
+int g_ncclTopoPostsetNc                     = -1;
+
 ncclResult_t ncclGinInit(struct ncclComm*) { return g_ncclGinInitResult; }
 ncclResult_t ncclGinInitFromParent(struct ncclComm*, struct ncclComm*) { return g_ncclGinInitResult; }
 ncclResult_t ncclStrongStreamConstruct(struct ncclStrongStream*) { return g_ncclStrongStreamResult; }
 ncclResult_t amd_smi_init() { return g_amdSmiInitResult; }
 size_t ncclOsGetPageSize() { return 4096; }
-extern "C" ncclResult_t ncclMemManagerInit(struct ncclComm*) { return g_ncclMemManagerInitResult; }
+extern "C" ncclResult_t ncclMemManagerInit(struct ncclComm*) {
+  g_ncclMemManagerInitCalls++;
+  return g_ncclMemManagerInitResult;
+}
 
 ncclResult_t ncclStrongStreamSynchronize(struct ncclStrongStream*) { return g_ncclStrongStreamResult; }
 
 // commCleanup ordering oracle; the fakes that append to it live in nccl_stubs.cc. See init_fakes.h.
 std::vector<std::string> g_cleanupCallOrder;
 ncclResult_t g_ncclCeFinalizeResult = ncclSuccess;
-ncclResult_t g_ncclTunerPluginUnloadResult = ncclSuccess;
 struct ncclComm* g_ncclTunerPluginUnloadLastComm = nullptr;
 
 void InstallCommAllocSuccess() {
@@ -320,10 +362,14 @@ void ResetInitFakes() {
   ResetNcclFakes();
   ResetRecorderFakes();
   ResetRcclWrapFakes();
+  ResetNcclStubs();
+  ResetBootstrapStubs();
   ResetTransportStubs();
   ResetTuningFakes();
   ResetEnvFakes();
   g_ginHasError = false;
+  g_ncclEnvPluginInit = DefaultNcclEnvPluginInit;
+  g_ncclGroupJobAbort = DefaultNcclGroupJobAbort;
   g_bootstrapNetInitFail = false;
   g_validHsaScratch = true;
   g_lastHsaScratchEnv = nullptr;
@@ -343,6 +389,7 @@ void ResetInitFakes() {
   g_ncclGinInitResult = ncclSuccess;
   g_ncclStrongStreamResult = ncclSuccess;
   g_ncclMemManagerInitResult = ncclSuccess;
+  g_ncclMemManagerInitCalls = 0;
   g_amdSmiInitResult = ncclSuccess;
   g_initChannelResult = ncclSuccess;
   g_initChannelLastId = -1;
@@ -356,6 +403,7 @@ void ResetInitFakes() {
   g_ncclEnvPluginInitResult = ncclSuccess;
   g_ncclOsTopoGetStrFromSysResult = ncclSuccess;
   g_ncclOsTopoGetStrFromSysCalls = 0;
+  g_bcastGrowHandle = DefaultBcastGrowHandle;
   g_bootstrapAllGather = [](void*, void*, int) { return ncclInternalError; };
   g_gethostnameFail = false;
   g_dladdrFail = false;
@@ -396,6 +444,30 @@ void ResetInitFakes() {
   g_ncclTopoComputeP2pChannelsPerPeerResult = ncclTimeout;
   g_cleanupCallOrder.clear();
   g_ncclCeFinalizeResult = ncclSuccess;
-  g_ncclTunerPluginUnloadResult = ncclSuccess;
   g_ncclTunerPluginUnloadLastComm = nullptr;
+  g_ncclTopoCheckNicFused = [](struct ncclComm*, bool* fused) { *fused = false; return ncclSuccess; };
+  g_ncclTopoGetMinNetBw = [](struct ncclTopoSystem*, int, float* bw) { *bw = 0.0f; return ncclSuccess; };
+  g_ncclTopoGetLocalNetCountByBw = [](struct ncclTopoSystem*, int, int* count, float* bw) {
+    *count = 0;
+    *bw = 0.0f;
+    return ncclSuccess;
+  };
+  g_ncclTopoPathAllNVLink = [](struct ncclTopoSystem*, int* allNvLink) { *allNvLink = 0; return ncclSuccess; };
+  g_ncclTopoPreset = [](struct ncclComm*, struct ncclTopoRanks*) { return ncclSuccess; };
+  g_rcclCheckRomeTopoModelIdxConsensusResult = ncclSuccess;
+  g_rcclCheckRomeTopoModelIdxConsensusCalls = 0;
+  g_rcclRomeConsensusNranks = -1;
+  g_rcclRomeConsensusIdx0 = -1;
+  g_rcclRomeConsensusHost0.clear();
+  g_ncclCudaContextTrackResult = ncclSuccess;
+  g_ncclCudaContextTrackCalls = 0;
+  g_ncclNvlsTuningResult = ncclSuccess;
+  g_ncclNvlsTuningCalls = 0;
+  g_ncclTreeBasePostsetResult = ncclSuccess;
+  g_ncclTreeBasePostsetCalls = 0;
+  g_ncclTreeBasePostsetGraph = nullptr;
+  g_ncclTopoPostsetResult = ncclInvalidUsage;
+  g_ncclTopoPostsetCalls = 0;
+  g_ncclTopoPostsetGraphs.clear();
+  g_ncclTopoPostsetNc = -1;
 }
