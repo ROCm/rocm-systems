@@ -2,10 +2,12 @@
 // SPDX-License-Identifier: MIT
 
 /// @file simdojo_sim_test.cpp
-/// @brief Tests for simdojo simulation engine: LBTS correctness, cross-partition
-/// communication, async causality, termination, pacing, spinlock, and stress.
+/// @brief Tests for simdojo: the simulation engine (LBTS correctness,
+/// cross-partition communication, async causality, termination, pacing,
+/// spinlock, stress) and the components built on it (Cache, TagArray).
 
 #include "simdojo/components/cache.h"
+#include "simdojo/components/tag_array.h"
 #include "simdojo/sim/clocked.h"
 #include "simdojo/sim/functional.h"
 #include "simdojo/sim/pacing_controller.h"
@@ -17,13 +19,16 @@
 #include <algorithm>
 #include <array>
 #include <atomic>
+#include <bit>
 #include <chrono>
 #include <cstdint>
 #include <limits>
 #include <memory>
+#include <random>
 #include <stdexcept>
 #include <string>
 #include <thread>
+#include <utility>
 #include <vector>
 
 using namespace simdojo;
@@ -2904,4 +2909,415 @@ TEST(ClockedOnDemandTest, AWakeArmedBeforeStartupIsReportedAsRunning) {
 
   engine.run_until_idle();
   EXPECT_EQ(block->advanced, (std::vector<Tick>{5000}));
+}
+
+// ============================================================================
+// TagArray
+// ============================================================================
+
+namespace {
+
+/// @brief The byte address of line @p line in set @p set of a @p sets-set array
+///        with @p line_bytes lines.
+///
+/// @details The line size is a parameter rather than a literal: an address
+/// computed for 64-byte lines and handed to a 128-byte-line array is not the
+/// line the caller named, and the test would go on asserting something else.
+uint64_t line_address(uint64_t sets, uint64_t set, uint64_t line, uint64_t line_bytes = 64) {
+  return ((line * sets) + set) * line_bytes;
+}
+
+/// @brief An independent least-recently-used model, written the obvious way.
+///
+/// @details Deliberately not the implementation's algorithm: one recency list
+/// per set, most recent at the back. If both agree on a long access sequence,
+/// the stamp-based version is LRU rather than something that merely passes the
+/// handful of cases a test would think to write.
+class ReferenceLru {
+public:
+  ReferenceLru(uint64_t sets, uint64_t ways, uint64_t line_bytes)
+      : sets_(sets), ways_(ways), line_shift_(static_cast<uint32_t>(std::countr_zero(line_bytes))),
+        order_(static_cast<std::size_t>(sets)) {}
+
+  /// @returns Whether the line was already resident.
+  bool access(uint64_t byte_address, uint32_t vmid = 0) {
+    const uint64_t line = byte_address >> line_shift_;
+    auto &set = order_[static_cast<std::size_t>(line & (sets_ - 1))];
+    const auto key = std::make_pair(line, vmid);
+    auto it = std::find(set.begin(), set.end(), key);
+    if (it != set.end()) {
+      set.erase(it);
+      set.push_back(key);
+      return true;
+    }
+    if (set.size() == ways_)
+      set.erase(set.begin());
+    set.push_back(key);
+    return false;
+  }
+
+  bool contains(uint64_t byte_address, uint32_t vmid = 0) const {
+    const uint64_t line = byte_address >> line_shift_;
+    const auto &set = order_[static_cast<std::size_t>(line & (sets_ - 1))];
+    return std::find(set.begin(), set.end(), std::make_pair(line, vmid)) != set.end();
+  }
+
+private:
+  uint64_t sets_;
+  uint64_t ways_;
+  uint32_t line_shift_;
+  std::vector<std::vector<std::pair<uint64_t, uint32_t>>> order_;
+};
+
+} // namespace
+
+TEST(TagArrayTest, AllocatesOnAMissAndHitsAfterwards) {
+  constexpr uint64_t kSets = 16;
+  TagArray tags(kSets, /*ways=*/4, /*line_bytes=*/64);
+
+  EXPECT_FALSE(tags.access(0x1000));
+  EXPECT_TRUE(tags.access(0x1000));
+  // Every byte of a line is the same line, and the byte after it is not.
+  EXPECT_TRUE(tags.access(0x103F));
+  EXPECT_FALSE(tags.access(0x1040));
+  // A line that indexes into the same set is a different line too.
+  EXPECT_FALSE(tags.access(0x1000 + kSets * 64));
+  EXPECT_TRUE(tags.access(0x1000));
+}
+
+TEST(TagArrayTest, ContainsDoesNotAllocateOrDisturbRecency) {
+  TagArray tags(/*sets=*/1, /*ways=*/2, /*line_bytes=*/64);
+
+  EXPECT_FALSE(tags.contains(0x2000));
+  EXPECT_FALSE(tags.access(0x2000));
+  EXPECT_TRUE(tags.contains(0x2000));
+  // Still one way in use: contains() did not fill anything.
+  EXPECT_FALSE(tags.access(0x3000));
+  EXPECT_TRUE(tags.contains(0x2000));
+
+  // A probe of the older line must not save it from eviction, or a
+  // non-allocating access would silently act like an allocating one.
+  EXPECT_TRUE(tags.contains(0x2000));
+  EXPECT_FALSE(tags.access(0x4000));
+  EXPECT_FALSE(tags.contains(0x2000));
+  EXPECT_TRUE(tags.contains(0x3000));
+}
+
+TEST(TagArrayTest, EvictsTheLeastRecentlyUsedWay) {
+  constexpr uint64_t kSets = 8;
+  TagArray tags(kSets, /*ways=*/2, /*line_bytes=*/64);
+
+  const uint64_t kept = line_address(kSets, /*set=*/3, /*line=*/0);
+  const uint64_t evicted = line_address(kSets, /*set=*/3, /*line=*/1);
+  const uint64_t filler = line_address(kSets, /*set=*/3, /*line=*/2);
+
+  EXPECT_FALSE(tags.access(kept));
+  EXPECT_FALSE(tags.access(evicted));
+  EXPECT_TRUE(tags.access(kept)); // kept is now the more recent of the two
+  EXPECT_FALSE(tags.access(filler));
+
+  EXPECT_FALSE(tags.contains(evicted)) << "the least recently used way should have gone";
+  EXPECT_TRUE(tags.contains(kept));
+  EXPECT_TRUE(tags.contains(filler));
+}
+
+TEST(TagArrayTest, OnlyTheIndexedSetIsDisturbed) {
+  constexpr uint64_t kSets = 8;
+  TagArray tags(kSets, /*ways=*/1, /*line_bytes=*/64);
+
+  for (uint64_t set = 0; set < kSets; ++set)
+    EXPECT_FALSE(tags.access(line_address(kSets, set, /*line=*/0)));
+  // A direct-mapped array holds one line per set, and eight of them fit.
+  for (uint64_t set = 0; set < kSets; ++set)
+    EXPECT_TRUE(tags.contains(line_address(kSets, set, /*line=*/0)));
+
+  // A conflicting line evicts only its own set's occupant.
+  EXPECT_FALSE(tags.access(line_address(kSets, /*set=*/2, /*line=*/1)));
+  EXPECT_FALSE(tags.contains(line_address(kSets, /*set=*/2, /*line=*/0)));
+  for (uint64_t set = 0; set < kSets; ++set) {
+    if (set != 2) {
+      EXPECT_TRUE(tags.contains(line_address(kSets, set, /*line=*/0))) << "set " << set;
+    }
+  }
+}
+
+TEST(TagArrayTest, AgreesWithAnIndependentLruOverALongSequence) {
+  // Enough conflict to evict constantly: four sets of three ways against
+  // sixteen lines per set, in an order that revisits at irregular distances.
+  constexpr uint64_t kSets = 4;
+  constexpr uint64_t kWays = 3;
+  constexpr uint64_t kLineBytes = 128;
+  TagArray tags(kSets, kWays, kLineBytes);
+  ReferenceLru reference(kSets, kWays, kLineBytes);
+
+  // A fixed-seed Mersenne twister rather than a hand-rolled LCG: an LCG modulo
+  // a power of two has short-period low bits, and the two bits that select the
+  // set would repeat every 1024 draws, so a four-thousand-step sequence would
+  // explore a quarter of the interleavings its length suggests.
+  std::mt19937_64 rng(0x9E3779B9u);
+  std::uniform_int_distribution<uint64_t> line_of(0, 63);
+  std::uniform_int_distribution<uint32_t> vmid_of(0, 1);
+  uint32_t misses = 0;
+  for (uint32_t step = 0; step < 4000; ++step) {
+    const uint32_t vmid = vmid_of(rng);
+    const uint64_t address = line_of(rng) * kLineBytes;
+    const bool hit = tags.access(address, vmid);
+    ASSERT_EQ(hit, reference.access(address, vmid)) << "diverged at step " << step;
+    misses += hit ? 0u : 1u;
+  }
+  // Guards the guard: a sequence that never evicted would agree trivially.
+  EXPECT_GT(misses, 2000u) << "the working set fit; nothing was ever evicted";
+
+  // And the residency they arrived at is the same, not just the hit sequence.
+  for (uint64_t line = 0; line < 64; ++line) {
+    for (uint32_t vmid = 0; vmid < 2; ++vmid) {
+      const uint64_t address = line * kLineBytes;
+      EXPECT_EQ(tags.contains(address, vmid), reference.contains(address, vmid))
+          << "line " << line << " vmid " << vmid;
+    }
+  }
+}
+
+TEST(TagArrayTest, AFreeWayIsFilledBeforeAResidentOneIsEvicted) {
+  TagArray tags(/*sets=*/1, /*ways=*/2, /*line_bytes=*/64);
+
+  EXPECT_FALSE(tags.access(0x0));
+  EXPECT_FALSE(tags.access(0x40));
+  EXPECT_FALSE(tags.invalidate(0x80)) << "nothing resident to drop";
+  // The *newer* line, so that the freed way is the one a stamp-ordered victim
+  // search would pick last. It is only picked first if invalidate() reset the
+  // stamp rather than just clearing the valid flag.
+  EXPECT_TRUE(tags.invalidate(0x40));
+
+  EXPECT_FALSE(tags.access(0x80));
+  EXPECT_TRUE(tags.contains(0x0)) << "a resident line was evicted while a way was free";
+  EXPECT_TRUE(tags.contains(0x80));
+}
+
+TEST(TagArrayTest, AddressSpacesDoNotAliasEachOther) {
+  TagArray tags(/*sets=*/1, /*ways=*/2, /*line_bytes=*/64);
+
+  EXPECT_FALSE(tags.access(0x8000, /*vmid=*/1));
+  // Same virtual address, different guest: not the same line, and it occupies
+  // a way of its own.
+  EXPECT_FALSE(tags.access(0x8000, /*vmid=*/2));
+  EXPECT_TRUE(tags.access(0x8000, /*vmid=*/2));
+  // Guest 1 last, so it is the more recent way *and* the first-filled one.
+  // Evicting by arrival order and evicting by recency now disagree, and only
+  // one of them keeps guest 1.
+  EXPECT_TRUE(tags.access(0x8000, /*vmid=*/1));
+  EXPECT_FALSE(tags.contains(0x8000, /*vmid=*/3));
+
+  EXPECT_FALSE(tags.access(0x8000, /*vmid=*/3));
+  EXPECT_TRUE(tags.contains(0x8000, /*vmid=*/1)) << "evicted by arrival order, not by recency";
+  EXPECT_FALSE(tags.contains(0x8000, /*vmid=*/2));
+
+  EXPECT_TRUE(tags.invalidate(0x8000, /*vmid=*/1));
+  EXPECT_FALSE(tags.contains(0x8000, /*vmid=*/1));
+  EXPECT_TRUE(tags.contains(0x8000, /*vmid=*/3));
+}
+
+TEST(TagArrayTest, AssociativityNeedNotBeAPowerOfTwo) {
+  // Ways index by multiplication rather than by a shift, so a three-way array
+  // is a real geometry and has to behave like one.
+  constexpr uint64_t kSets = 2;
+  TagArray tags(kSets, /*ways=*/3, /*line_bytes=*/64);
+
+  for (uint64_t line = 0; line < 3; ++line)
+    EXPECT_FALSE(tags.access(line_address(kSets, /*set=*/1, line)));
+  for (uint64_t line = 0; line < 3; ++line)
+    EXPECT_TRUE(tags.contains(line_address(kSets, /*set=*/1, line))) << "line " << line;
+  // The other set is untouched by all of it.
+  EXPECT_FALSE(tags.contains(line_address(kSets, /*set=*/0, /*line=*/0)));
+
+  // A fourth line evicts the oldest of the three.
+  EXPECT_FALSE(tags.access(line_address(kSets, /*set=*/1, /*line=*/3)));
+  EXPECT_FALSE(tags.contains(line_address(kSets, /*set=*/1, /*line=*/0)));
+  EXPECT_TRUE(tags.contains(line_address(kSets, /*set=*/1, /*line=*/1)));
+}
+
+TEST(TagArrayTest, InvalidateAllDropsEverythingAndKeepsRecencyOrdered) {
+  constexpr uint64_t kSets = 1;
+  TagArray tags(kSets, /*ways=*/2, /*line_bytes=*/64);
+
+  EXPECT_FALSE(tags.access(0x0));
+  EXPECT_FALSE(tags.access(0x40));
+  tags.invalidate_all();
+  EXPECT_FALSE(tags.contains(0x0));
+  EXPECT_FALSE(tags.contains(0x40));
+  EXPECT_EQ(tags.sets(), 1u);
+  EXPECT_EQ(tags.ways(), 2u);
+
+  // Replacement still works on the emptied array.
+  EXPECT_FALSE(tags.access(0x80));
+  EXPECT_FALSE(tags.access(0xC0));
+  EXPECT_TRUE(tags.access(0x80));
+  EXPECT_FALSE(tags.access(0x100));
+  EXPECT_TRUE(tags.contains(0x80)) << "the more recently used line was evicted";
+  EXPECT_FALSE(tags.contains(0xC0));
+}
+
+TEST(TagArrayTest, ADroppedLineDoesNotReorderTheOnesThatSurvive) {
+  // The recency counter is never reset, and this is the case that can tell:
+  // a partial invalidate leaves a resident line behind, so a reset would make
+  // it look newer than everything filled afterwards and invert replacement.
+  // invalidate_all() cannot witness it -- it leaves nothing resident, and its
+  // assertions pass whether or not the counter is reset.
+  TagArray tags(/*sets=*/1, /*ways=*/2, /*line_bytes=*/64);
+
+  EXPECT_FALSE(tags.access(0x0)); // the survivor, and the oldest line there is
+  EXPECT_FALSE(tags.access(0x40));
+  EXPECT_TRUE(tags.invalidate(0x40));
+
+  EXPECT_FALSE(tags.access(0x80));
+  // 0x0 predates 0x80, so it is what the next fill must take.
+  EXPECT_FALSE(tags.access(0xC0));
+  EXPECT_FALSE(tags.contains(0x0)) << "the survivor was treated as newer than a later fill";
+  EXPECT_TRUE(tags.contains(0x80));
+  EXPECT_TRUE(tags.contains(0xC0));
+}
+
+TEST(TagArrayTest, GeometryIsReportedAndReconfigurable) {
+  TagArray tags;
+  EXPECT_FALSE(tags.configured());
+
+  tags.configure(/*sets=*/64, /*ways=*/8, /*line_bytes=*/128);
+  EXPECT_TRUE(tags.configured());
+  EXPECT_EQ(tags.sets(), 64u);
+  EXPECT_EQ(tags.ways(), 8u);
+  EXPECT_EQ(tags.line_bytes(), 128u);
+  EXPECT_EQ(tags.line_shift(), 7u);
+
+  // Same sets and line size, so 0x400 still decodes to the same line of the
+  // same set: only a reconfigure that actually dropped the entries can miss.
+  EXPECT_FALSE(tags.access(0x400));
+  tags.configure(/*sets=*/64, /*ways=*/2, /*line_bytes=*/128);
+  EXPECT_FALSE(tags.contains(0x400)) << "reconfiguring must not leave stale residency";
+
+  tags.configure(/*sets=*/2, /*ways=*/1, /*line_bytes=*/64);
+  EXPECT_EQ(tags.line_shift(), 6u);
+}
+
+TEST(TagArrayTest, ARejectedReconfigureLeavesTheArrayAsItWas) {
+  TagArray tags(/*sets=*/64, /*ways=*/8, /*line_bytes=*/128);
+  ASSERT_FALSE(tags.access(0x400));
+
+  EXPECT_THROW(tags.configure(/*sets=*/3, /*ways=*/4, /*line_bytes=*/64), std::invalid_argument);
+
+  EXPECT_EQ(tags.sets(), 64u);
+  EXPECT_EQ(tags.ways(), 8u);
+  EXPECT_EQ(tags.line_bytes(), 128u);
+  EXPECT_TRUE(tags.contains(0x400)) << "a rejected geometry destroyed a live array";
+}
+
+TEST(TagArrayTest, AGeometryTheHardwareCouldNotIndexIsRejected) {
+  TagArray tags;
+  // Rounded rather than rejected, a geometry silently becomes a different
+  // cache from the one the configuration asked for.
+  EXPECT_THROW(tags.configure(/*sets=*/3, /*ways=*/4, /*line_bytes=*/64), std::invalid_argument);
+  EXPECT_THROW(tags.configure(/*sets=*/4, /*ways=*/4, /*line_bytes=*/96), std::invalid_argument);
+  EXPECT_THROW(tags.configure(/*sets=*/0, /*ways=*/4, /*line_bytes=*/64), std::invalid_argument);
+  EXPECT_THROW(tags.configure(/*sets=*/4, /*ways=*/0, /*line_bytes=*/64), std::invalid_argument);
+  EXPECT_THROW(tags.configure(/*sets=*/4, /*ways=*/4, /*line_bytes=*/0), std::invalid_argument);
+  EXPECT_FALSE(tags.configured()) << "a rejected geometry must leave nothing half-built";
+
+  // Ways need not be a power of two: a three-way cache is a real thing.
+  EXPECT_NO_THROW(tags.configure(/*sets=*/4, /*ways=*/3, /*line_bytes=*/64));
+}
+
+TEST(TagArrayTest, AnArrayTooLargeToBeRealIsRejectedRatherThanAllocated) {
+  TagArray tags;
+  // The product overflows, so no allocation is even described.
+  EXPECT_THROW(tags.configure(/*sets=*/1ULL << 62, /*ways=*/1ULL << 62, /*line_bytes=*/64),
+               std::length_error);
+  // And the case that does not overflow: a plausible units mistake in a
+  // configuration file, which would otherwise pass every arithmetic check and
+  // ask the operating system for hundreds of terabytes.
+  EXPECT_THROW(tags.configure(/*sets=*/1ULL << 40, /*ways=*/16, /*line_bytes=*/64),
+               std::length_error);
+  EXPECT_FALSE(tags.configured());
+
+  // The entry limit is checked, not materialised: configuring at kMaxEntries
+  // would really allocate 2^26 entries -- a gigabyte and a half of zeroed host
+  // memory in a unit test -- to assert something the rejection side already
+  // shows. One entry past the limit is what has to throw.
+  EXPECT_THROW(tags.configure(TagArray::kMaxEntries, /*ways=*/2, /*line_bytes=*/64),
+               std::length_error);
+  EXPECT_THROW(tags.configure(TagArray::kMaxEntries / 2, /*ways=*/3, /*line_bytes=*/64),
+               std::length_error);
+  EXPECT_FALSE(tags.configured());
+
+  // Comfortably under it, and the array is usable: 2^21 entries, 50 MiB.
+  EXPECT_NO_THROW(tags.configure(TagArray::kMaxEntries / 32, /*ways=*/1, /*line_bytes=*/64));
+  EXPECT_FALSE(tags.access(0x1000));
+}
+
+TEST(TagArrayTest, ACacheTooLargeToBeRealIsRejectedEvenWhenItsTagsWouldFit) {
+  TagArray tags;
+  // sets * ways is small, so the entry limit sees nothing wrong; only the line
+  // size is absurd. Left unchecked, every address in a normal virtual range
+  // collapses onto one or two lines and the array reports a hit for almost
+  // everything, with nothing thrown to point at.
+  EXPECT_THROW(tags.configure(/*sets=*/64, /*ways=*/4, /*line_bytes=*/1ULL << 40),
+               std::length_error);
+  // And the geometry that stays inside the entry limit while claiming a
+  // 256 GiB cache.
+  EXPECT_THROW(tags.configure(/*sets=*/1ULL << 22, /*ways=*/16, /*line_bytes=*/4096),
+               std::length_error);
+  EXPECT_FALSE(tags.configured());
+
+  // A large but real cache is still fine: 256 MiB at 128-byte lines.
+  EXPECT_NO_THROW(tags.configure(/*sets=*/1ULL << 17, /*ways=*/16, /*line_bytes=*/128));
+}
+
+TEST(TagArrayTest, AGeometryRejectedForItsSizeAlsoLeavesTheArrayAsItWas) {
+  // The counterpart of ARejectedReconfigureLeavesTheArrayAsItWas for the
+  // length_error path, which rejects after the arithmetic checks rather than
+  // before them.
+  TagArray tags(/*sets=*/64, /*ways=*/8, /*line_bytes=*/128);
+  ASSERT_FALSE(tags.access(0x400));
+
+  EXPECT_THROW(tags.configure(/*sets=*/1ULL << 40, /*ways=*/16, /*line_bytes=*/64),
+               std::length_error);
+
+  EXPECT_EQ(tags.sets(), 64u);
+  EXPECT_EQ(tags.ways(), 8u);
+  EXPECT_EQ(tags.line_bytes(), 128u);
+  EXPECT_TRUE(tags.contains(0x400)) << "an oversized geometry destroyed a live array";
+}
+
+TEST(TagArrayTest, AMovedFromArrayReportsNoGeometryRatherThanAStaleOne) {
+  // The default move would take the entries and leave the geometry behind, so
+  // the source would answer sets()/line_bytes() with numbers it no longer has
+  // while every operation on it threw -- a plausible answer from an unusable
+  // object, which is worse than no answer.
+  TagArray source(/*sets=*/64, /*ways=*/8, /*line_bytes=*/128);
+  ASSERT_FALSE(source.access(0x400));
+
+  TagArray moved = std::move(source);
+  EXPECT_TRUE(moved.configured());
+  EXPECT_TRUE(moved.contains(0x400));
+
+  EXPECT_FALSE(source.configured()); // NOLINT(bugprone-use-after-move)
+  EXPECT_EQ(source.sets(), 0u);
+  EXPECT_EQ(source.ways(), 0u);
+  EXPECT_EQ(source.line_bytes(), 0u);
+  EXPECT_EQ(source.line_shift(), 0u);
+  EXPECT_THROW((void)source.contains(0x400), std::logic_error);
+
+  // And it is reusable, not merely inert.
+  source.configure(/*sets=*/2, /*ways=*/1, /*line_bytes=*/64);
+  EXPECT_FALSE(source.access(0x400));
+}
+
+TEST(TagArrayTest, EveryOperationRefusesAnArrayWithNoGeometry) {
+  // One contract, not four. A model that probes before its configuration has
+  // been parsed would otherwise be told "not resident", which is
+  // indistinguishable from a cold miss, and only find out later when a real
+  // access threw from inside the simulation loop.
+  TagArray tags;
+  EXPECT_THROW((void)tags.access(0x100), std::logic_error);
+  EXPECT_THROW((void)tags.contains(0x100), std::logic_error);
+  EXPECT_THROW((void)tags.invalidate(0x100), std::logic_error);
+  EXPECT_THROW(tags.invalidate_all(), std::logic_error);
 }
