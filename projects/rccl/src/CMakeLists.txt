@@ -971,7 +971,7 @@ endif()
 
 if (ENABLE_ROCSHMEM_GIN)
   # Ensure we see our copied headers before rocSHMEM's
-  target_include_directories(rccl BEFORE PRIVATE "${PROJECT_BINARY_DIR}/include/nccl_device/gin/rocshmem_gda")
+  target_include_directories(rccl BEFORE PRIVATE ${PROJECT_BINARY_DIR}/include/nccl_device/gin/rocshmem_gda)
 
   # Need to add the GIN GDA directory to the public interface:
   # internal rocSHMEM headers assume that the source directory is in the include search path
