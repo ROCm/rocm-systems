@@ -1,24 +1,5 @@
-/*
- * Copyright (c) Advanced Micro Devices, Inc. All rights reserved.
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- * THE SOFTWARE.
- */
+// Copyright Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
 
 #include "rocm_smi/rocm_smi_kfd.h"
 
@@ -1293,8 +1274,10 @@ int KFDNode::get_total_memory(uint64_t* total) {
     while (std::getline(fs, line)) {
       if (line.substr(0, size_in_bytes_property.length()) == size_in_bytes_property) {
         auto bytes = line.substr(size_in_bytes_property.length());
+        // stoull() wraps a negative string to a huge value instead of throwing.
+        if (bytes.find('-') != std::string::npos) break;
         try {
-          *total += std::stol(bytes);
+          *total += std::stoull(bytes);
           break;
         } catch (...) {
           dentry = readdir(kfd_node_dir);
@@ -1471,11 +1454,11 @@ int KFDNode::get_cache_info(rsmi_gpu_cache_info_t* info) {
 
       if (info->num_cache_types >= RSMI_MAX_CACHE_TYPES) return 1;
 
-      info->cache[info->num_cache_types].cache_level = cache_level;
-      info->cache[info->num_cache_types].cache_size_kb = cache_size;
-      info->cache[info->num_cache_types].max_num_cu_shared = num_cu_shared;
+      info->cache[info->num_cache_types].cache_level = static_cast<uint32_t>(cache_level);
+      info->cache[info->num_cache_types].cache_size_kb = static_cast<uint32_t>(cache_size);
+      info->cache[info->num_cache_types].max_num_cu_shared = static_cast<uint32_t>(num_cu_shared);
       info->cache[info->num_cache_types].num_cache_instance = 1;
-      info->cache[info->num_cache_types].flags = cache_type;
+      info->cache[info->num_cache_types].flags = static_cast<uint32_t>(cache_type);
       info->num_cache_types++;
     } catch (...) {
       continue;

@@ -77,6 +77,7 @@ int ualoe_cdev_telemetry_alloc(ualoe_handle_t handle, unsigned category_mask,
                                ualoe_telemetry_t** telemetry);
 int ualoe_cdev_telemetry_get(ualoe_handle_t handle, ualoe_telemetry_t* telemetry);
 int ualoe_cdev_telemetry_free(ualoe_handle_t handle, ualoe_telemetry_t* telemetry);
+bool ualoe_cdev_is_telem_allocated(ualoe_handle_t handle);
 int ualoe_cdev_l2ping_start(ualoe_handle_t handle, ualoe_ping_spec_t* spec, ualoe_ping_t** ping);
 int ualoe_cdev_l2ping_update(ualoe_handle_t handle, ualoe_ping_t* ping);
 int ualoe_cdev_l2ping_fini(ualoe_handle_t handle, ualoe_ping_t* ping);

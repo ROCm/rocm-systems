@@ -16,6 +16,11 @@ Full documentation for ROCprofiler-SDK is available at [rocm.docs.amd.com/projec
     - Individual kernels can be traced without serialization, and the path is independent of the ROCm runtime version.
     - Experimental: intended to validate the new collection path and to enable out-of-process thread trace and long-kernel tracing in future releases.
 
+  - HIP event tracing: GPU-side barrier tracing for `hipEventRecord` and `hipStreamWaitEvent`:
+    - New tracing kinds `ROCPROFILER_CALLBACK_TRACING_HIP_EVENT` and `ROCPROFILER_BUFFER_TRACING_HIP_EVENT` with operation enum `rocprofiler_hip_event_operation_t` (RECORD, WAIT).
+    - New `--hip-event-trace` CLI flag, automatically enabled by `--hip-trace` and `--hip-runtime-trace`.
+    - rocpd schema bumped to 3.0.4 with new `rocpd_hip_event` table and `hip_events` data view.
+
 **rocprof-trace-decoder:**
 
   - Python API for decoding Advanced Thread Trace (ATT) / SQTT data directly from Python, without writing a C++ consumer:
@@ -28,6 +33,8 @@ Full documentation for ROCprofiler-SDK is available at [rocm.docs.amd.com/projec
 
 ### Resolved issues
 
+  - Fixed `rocprofv3` crashing during output generation when a second tool subscribed to code object tracing in the same process, which blocked profiling PyTorch and Triton workloads through rocprofiler-compute.
+  - Fixed `rocprofv3` hanging instead of exiting when a fatal signal arrives while it is already handling one, for example when output generation aborts. It previously left GPU child processes running and required killing the process manually.
 
 ### Removed
 
@@ -99,6 +106,9 @@ Full documentation for ROCprofiler-SDK is available at [rocm.docs.amd.com/projec
     - New experimental API in `rocprofiler-sdk/experimental/spm.h`:
     - GPU-timestamped counter values alongside kernel dispatch information.
   - Added `spm_support` along with reserved padding to `rocprofiler_counter_info_v1_t`
+  - Anytime initialization support.
+    - Tools can call `rocprofiler_force_configure` after one or more other tools have configured rocprofiler-sdk.
+      - NOTE: during the initialization of another tool, there is a small window where previously existing tools will not receive records generated from application background threads.
 
 **rocprofv3(CLI):**
   - SPM counter collection support in `rocprofv3` (beta):
@@ -197,7 +207,6 @@ Full documentation for ROCprofiler-SDK is available at [rocm.docs.amd.com/projec
 ### Removed
 
 - Counter collection support for plain text (`.txt`) input files has been deprecated due to lack of schema validation and input sanitization. Only structured file formats (JSON and YAML) with schema validation are supported.
-
 
 ### Resolved issues
 

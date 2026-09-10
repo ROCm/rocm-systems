@@ -685,7 +685,7 @@ DecodeResult decodeSInstPrefetchSopp(const MachineInst *opcode,
 SClauseSopp::SClauseSopp(const MachineInst *inst)
     : Sopp("s_clause", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::SClauseSopp)),
-      simm16(16, OperandType::OPR_SIMM16, reinterpret_cast<const OpEncoding *>(inst)->simm16) {
+      simm16(16, OperandType::OPR_CLAUSE, reinterpret_cast<const OpEncoding *>(inst)->simm16) {
   src_operands_[0] = &simm16;
   num_src_ = 1;
   num_dst_ = 0;
@@ -783,13 +783,10 @@ DecodeResult decodeSDenormModeSopp(const MachineInst *opcode,
 STtracedataImmSopp::STtracedataImmSopp(const MachineInst *inst)
     : Sopp("s_ttracedata_imm", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::STtracedataImmSopp)),
-      simm16(16, OperandType::OPR_SIMM16, reinterpret_cast<const OpEncoding *>(inst)->simm16),
-      m0(32, OperandType::OPR_SDST_M0, 124) {
+      simm16(16, OperandType::OPR_SIMM16, reinterpret_cast<const OpEncoding *>(inst)->simm16) {
   src_operands_[0] = &simm16;
-  src_operands_[1] = &m0;
-  num_src_ = 2;
+  num_src_ = 1;
   num_dst_ = 0;
-  m0.apply_fieldless_caps(false, false, false);
 }
 
 namespace detail {

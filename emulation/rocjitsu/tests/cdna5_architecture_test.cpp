@@ -3,8 +3,12 @@
 
 #include "cdna5_sim_test_common.h"
 #include "decode_test_util.h"
+#include "rocjitsu/code/patch/instrumentor.h"
+#include "rocjitsu/code/patch/probe_clobber.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/mma_exec.h"
 #include "util/data_types.h"
+
+#include <set>
 
 namespace {
 
@@ -84,20 +88,95 @@ void write_wmma_packed(amdgpu::ComputeUnitCore &cu, uint32_t base, const amdgpu:
   }
 }
 
+uint8_t encode_wmma_value(uint32_t fmt, float value) {
+  switch (fmt) {
+  case 0:
+    return util::f32_to_fp8_e4m3_rne(value);
+  case 1:
+    return util::f32_to_bf8_e5m2_rne(value);
+  case 2:
+    return util::f32_to_fp6_e2m3_rne(value);
+  case 3:
+    return util::f32_to_bf6_e3m2_rne(value);
+  case 4:
+    return util::f32_to_fp4_e2m1_rne(value);
+  default:
+    return 0;
+  }
+}
+
+float decode_wmma_value(uint32_t fmt, uint8_t value) {
+  switch (fmt) {
+  case 0:
+    return util::fp8_e4m3_to_f32(value);
+  case 1:
+    return util::bf8_e5m2_to_f32(value);
+  case 2:
+    return util::fp6_e2m3_to_f32(value);
+  case 3:
+    return util::bf6_e3m2_to_f32(value);
+  case 4:
+    return util::fp4_e2m1_to_f32(value);
+  default:
+    return 0.0f;
+  }
+}
+
+// Independent transcription of the CDNA5 block-scaled WMMA tables. Keeping the
+// physical writer separate from the execution helper makes this an integration
+// check rather than seeding data through the implementation under test.
+amdgpu::InputLoc manual_block_scaled_wmma_loc(uint32_t dim, uint32_t index, uint32_t k,
+                                              uint32_t data_bits) {
+  const uint32_t slice = dim == 32 ? index / 16u : 0u;
+  const uint32_t index_in_slice = index % 16u;
+  const uint32_t block_elems = data_bits == 8 ? 16u : 32u;
+  const uint32_t lane = index_in_slice + 16u * ((k / block_elems) & 1u);
+  const uint32_t slot = (k / (2u * block_elems)) * block_elems + (k % block_elems);
+  const uint32_t bit = slot * data_bits;
+  const uint32_t bit_in_word = bit % 32u;
+  const uint32_t sub_element = (32u % data_bits == 0) ? bit_in_word / data_bits : 0u;
+  return {bit / 32u + 8u * slice, lane, sub_element, bit_in_word, data_bits};
+}
+
+std::array<uint32_t, 4> build_scaled_wmma_execution_words(
+    uint32_t M, bool scale16, uint32_t matrix_a_fmt, uint32_t matrix_b_fmt, uint16_t scale_src0,
+    uint16_t scale_src1, uint32_t scale_a_select, uint32_t scale_b_select, uint8_t vdst = 64) {
+  constexpr uint16_t kVgprEncoding = 256;
+  auto prefix =
+      cdna5::build_vop3p(scale16 ? 0x3a : 0x35, {.opsel = static_cast<uint8_t>(scale_a_select),
+                                                 .src0 = scale_src0,
+                                                 .src1 = scale_src1,
+                                                 .src2 = kVgprEncoding,
+                                                 .opsel_hi = static_cast<uint8_t>(scale_b_select)});
+  const uint16_t matrix_op =
+      M == 32 ? cdna5::kVWmmaF3232x16x128F4Vop3p : cdna5::kVWmmaF3216x16x128F8f6f4Vop3p;
+  auto matrix =
+      cdna5::build_vop3p(matrix_op, {.vdst = vdst,
+                                     .opsel = static_cast<uint8_t>(matrix_a_fmt),
+                                     .src0 = kVgprEncoding,
+                                     .src1 = kVgprEncoding + 32,
+                                     .src2 = 128,
+                                     .opsel_hi = static_cast<uint8_t>(matrix_b_fmt & 0x3u)});
+  if (M == 32)
+    matrix[0] |= 1u << 14u;
+  else
+    matrix[0] |= (matrix_b_fmt >> 2u) << 14u;
+  return {prefix[0], prefix[1], matrix[0], matrix[1]};
+}
+
 struct ForceScalarGuard {
   bool old = util::force_scalar();
   ~ForceScalarGuard() { util::set_force_scalar_for_testing(old); }
 };
 
-std::vector<uint8_t> make_minimal_gfx1250_elf() {
-  constexpr uint8_t text[] = {0x00, 0x00, 0xB0, 0xBF};
+std::vector<uint8_t> make_minimal_cdna5_elf(uint32_t elf_machine, std::span<const uint8_t> text) {
   constexpr char shstrtab[] = "\0.text\0.shstrtab\0";
   constexpr uint32_t text_name = 1;
   constexpr uint32_t shstrtab_name = 7;
 
   std::vector<uint8_t> image(sizeof(Elf64_Ehdr), 0);
   const size_t text_offset = image.size();
-  image.insert(image.end(), std::begin(text), std::end(text));
+  image.insert(image.end(), text.begin(), text.end());
   const size_t shstrtab_offset = image.size();
   image.insert(image.end(), std::begin(shstrtab), std::end(shstrtab));
   image.resize(align_up(image.size(), alignof(Elf64_Shdr)), 0);
@@ -111,7 +190,7 @@ std::vector<uint8_t> make_minimal_gfx1250_elf() {
   text_shdr.sh_type = SHT_PROGBITS;
   text_shdr.sh_flags = SHF_ALLOC | SHF_EXECINSTR;
   text_shdr.sh_offset = text_offset;
-  text_shdr.sh_size = sizeof(text);
+  text_shdr.sh_size = text.size();
   text_shdr.sh_addralign = alignof(uint32_t);
   append_bytes(image, text_shdr);
 
@@ -134,7 +213,7 @@ std::vector<uint8_t> make_minimal_gfx1250_elf() {
   ehdr.e_machine = EM_AMDGPU;
   ehdr.e_version = 1;
   ehdr.e_shoff = shoff;
-  ehdr.e_flags = EF_AMDGPU_MACH_AMDGCN_GFX1250;
+  ehdr.e_flags = elf_machine;
   ehdr.e_ehsize = sizeof(Elf64_Ehdr);
   ehdr.e_shentsize = sizeof(Elf64_Shdr);
   ehdr.e_shnum = 3;
@@ -149,10 +228,12 @@ TEST(Gfx1250ConfigTest, ConfigLoadsTopology) {
   ASSERT_NE(soc, nullptr);
   EXPECT_EQ(soc->arch(), ROCJITSU_CODE_ARCH_CDNA5);
   EXPECT_EQ(config::parse_arch("cdna5"), ROCJITSU_CODE_ARCH_CDNA5);
+  EXPECT_EQ(loaded.target, ROCJITSU_CODE_TARGET_GFX1250);
   EXPECT_STREQ(config::arch_to_string(ROCJITSU_CODE_ARCH_CDNA5), "cdna5");
 
   EXPECT_TRUE(loaded.device.present);
   EXPECT_EQ(loaded.device.gfx_target_version, 120500u);
+  EXPECT_EQ(loaded.device.device_id, 30145u);
   EXPECT_EQ(loaded.device.marketing_name, "AMD Instinct MI455X");
   EXPECT_EQ(loaded.device.simd_count, 1024u);
   EXPECT_EQ(loaded.device.max_waves_per_simd, kGfx1250MaxWavesPerSimd);
@@ -192,12 +273,14 @@ TEST(Gfx1250ConfigTest, ConfigLoadsTopology) {
   EXPECT_EQ(cu->config().vgprs_per_wf, kGfx1250Wave32VgprAllocation);
   EXPECT_EQ(cu->config().lds_size_kb, kGfx1250LdsSizeKb);
   EXPECT_TRUE(cu->sram_ecc());
+  EXPECT_EQ(cu->config().target, ROCJITSU_CODE_TARGET_GFX1250);
   EXPECT_EQ(soc->xcd(0)->command_processor()->sdma_packet_dialect(),
             amdgpu::SdmaPacketDialect::Gfx1250);
 }
 
 TEST(Gfx1250CodeObjectTest, MachineFlagMapsToTarget) {
-  auto image = make_minimal_gfx1250_elf();
+  constexpr uint8_t text_bytes[] = {0x00, 0x00, 0xB0, 0xBF};
+  auto image = make_minimal_cdna5_elf(EF_AMDGPU_MACH_AMDGCN_GFX1250, text_bytes);
   AmdGpuCodeObject co(image.data(), image.size());
   ASSERT_TRUE(co.is_valid());
   EXPECT_EQ(co.target_id(), ROCJITSU_CODE_TARGET_GFX1250);
@@ -210,6 +293,291 @@ TEST(Gfx1250CodeObjectTest, MachineFlagMapsToTarget) {
   std::unique_ptr<Instruction> inst(decode_valid(*decoder, words));
   ASSERT_NE(inst, nullptr);
   EXPECT_EQ(inst->mnemonic(), "s_endpgm");
+}
+
+TEST(Gfx1250CodeObjectTest, InstrumentationPreservesGfx1251DecoderIdentity) {
+  // v_pk_fma_f64 v[4:7], v[8:11], v[12:15], v[16:19], followed by s_endpgm.
+  // The first instruction is public LLVM gfx1251-only test data.
+  constexpr uint32_t words[] = {0xCC3B4004u, 0x1C421908u, 0xBFB00000u};
+  const auto text =
+      std::span<const uint8_t>(reinterpret_cast<const uint8_t *>(words), sizeof(words));
+  auto image = make_minimal_cdna5_elf(EF_AMDGPU_MACH_AMDGCN_GFX1251, text);
+  AmdGpuCodeObject co(image.data(), image.size());
+  ASSERT_TRUE(co.is_valid());
+  ASSERT_EQ(co.target_id(), ROCJITSU_CODE_TARGET_GFX1251);
+
+  Instrumentor instrumentor(co, ROCJITSU_CODE_ARCH_CDNA5);
+  instrumentor.add_point_by_offset(0);
+  auto validation = instrumentor.validate_points();
+  EXPECT_TRUE(validation.errors.empty());
+  ASSERT_EQ(validation.sites.size(), 1u);
+  EXPECT_EQ(validation.sites[0].mnemonic, "v_pk_fma_f64");
+}
+
+TEST(Gfx1250CodeObjectTest, ProbeClobberPreservesConcreteTargetIdentity) {
+  ProbeCallable callable;
+  callable.symbol = "gfx1251_probe";
+  callable.arch = ROCJITSU_CODE_ARCH_CDNA5;
+  callable.target = ROCJITSU_CODE_TARGET_GFX1251;
+  callable.body_words = {0xCC3B4004u, 0x1C421908u};
+
+  std::string error;
+  EXPECT_TRUE(build_probe_clobber_summary(callable, &error).has_value()) << error;
+
+  callable.target = ROCJITSU_CODE_TARGET_GFX1250;
+  error.clear();
+  EXPECT_FALSE(build_probe_clobber_summary(callable, &error).has_value());
+  EXPECT_FALSE(error.empty());
+}
+
+TEST(Gfx1250DecodeTest, RejectsGfx1251VMovB64Dpp) {
+  // LLVM: llvm/test/MC/AMDGPU/gfx1251_asm_vop1_dpp16.s
+  const uint32_t words[] = {0x7E083AFAu, 0xFF015002u};
+
+  auto decoder = Decoder::create(default_isa_target_registry(), "gfx1250");
+  ASSERT_NE(decoder, nullptr);
+  EXPECT_TRUE(decode_fails(*decoder, words));
+
+  auto gfx1251 = Decoder::create(default_isa_target_registry(), "gfx1251");
+  ASSERT_NE(gfx1251, nullptr);
+  std::unique_ptr<Instruction> inst(decode_valid(*gfx1251, words));
+  ASSERT_NE(inst, nullptr);
+  EXPECT_EQ(inst->mnemonic(), "v_mov_b64_e32");
+  EXPECT_EQ(inst->execute, nullptr);
+}
+
+TEST(Gfx1250DecodeTest, Gfx1251InstructionsAreTargetGated) {
+  struct GoldenEncoding {
+    const char *mnemonic;
+    std::array<uint32_t, 2> words;
+  };
+  // LLVM: llvm/test/MC/AMDGPU/gfx1251_asm_vop3p.s and
+  // llvm/test/MC/AMDGPU/gfx1251_asm_wmma_w32.s.
+  constexpr GoldenEncoding kGfx1251Instructions[] = {
+      {"v_pk_fma_f64", {0xCC3B4004u, 0x1C421908u}},
+      {"v_pk_mul_f64", {0xCC3C4004u, 0x1A021908u}},
+      {"v_pk_add_f64", {0xCC4B4004u, 0x1A021908u}},
+      {"v_pk_add_nc_u64", {0xCC4C4004u, 0x1A021908u}},
+      {"v_pk_sub_nc_u64", {0xCC4D4004u, 0x1A021908u}},
+      {"v_pk_max_num_f64", {0xCC4E4004u, 0x1A021908u}},
+      {"v_pk_min_num_f64", {0xCC4F4004u, 0x1A021908u}},
+      {"v_pk_lshl_add_u64", {0xCC7E4004u, 0x1C421908u}},
+      {"v_wmma_f64_16x16x4_f64", {0xCC5B0008u, 0x1C220900u}},
+  };
+
+  auto gfx1250 = Decoder::create(default_isa_target_registry(), "gfx1250");
+  auto architecture_default =
+      Decoder::create(default_isa_target_registry(), ROCJITSU_CODE_ARCH_CDNA5);
+  auto gfx1251 = Decoder::create(default_isa_target_registry(), "gfx1251");
+  ASSERT_NE(gfx1250, nullptr);
+  ASSERT_NE(architecture_default, nullptr);
+  ASSERT_NE(gfx1251, nullptr);
+
+  for (const auto &[mnemonic, words] : kGfx1251Instructions) {
+    EXPECT_TRUE(decode_fails(*gfx1250, words.data())) << mnemonic;
+    EXPECT_TRUE(decode_fails(*architecture_default, words.data())) << mnemonic;
+    std::unique_ptr<Instruction> decoded(decode_valid(*gfx1251, words.data()));
+    ASSERT_NE(decoded, nullptr) << mnemonic;
+    EXPECT_EQ(decoded->mnemonic(), mnemonic);
+    EXPECT_EQ(decoded->execute, nullptr) << mnemonic;
+  }
+}
+
+TEST(Gfx1250DecodeTest, Gfx1251ImpliedLiteralIdentifiersAreTargetGated) {
+  struct GoldenEncoding {
+    const char *mnemonic;
+    std::array<uint32_t, 3> words;
+  };
+  // Public LLVM gfx1251_asm_vop3p.s golden encodings exercise the
+  // VOP3P_INST_LITERAL identifier added alongside each packed operation.
+  constexpr GoldenEncoding kLiteralInstructions[] = {
+      {"v_pk_fma_f64", {0xCC3B4004u, 0x1C4210FFu, 0x40594000u}},
+      {"v_pk_mul_f64", {0xCC3C4004u, 0x1A0210FFu, 0x40594000u}},
+      {"v_pk_add_f64", {0xCC4B4004u, 0x1A0210FFu, 0x40594000u}},
+      {"v_pk_add_nc_u64", {0xCC4C4004u, 0x1A0210FFu, 0x00000065u}},
+      {"v_pk_sub_nc_u64", {0xCC4D4004u, 0x1A0210FFu, 0x00000065u}},
+      {"v_pk_max_num_f64", {0xCC4E4004u, 0x1A0210FFu, 0x40594000u}},
+      {"v_pk_min_num_f64", {0xCC4F4004u, 0x1A0210FFu, 0x40594000u}},
+      {"v_pk_lshl_add_u64", {0xCC7E4004u, 0x1C4210FFu, 0x00000065u}},
+  };
+
+  auto gfx1250 = Decoder::create(default_isa_target_registry(), "gfx1250");
+  auto gfx1251 = Decoder::create(default_isa_target_registry(), "gfx1251");
+  ASSERT_NE(gfx1250, nullptr);
+  ASSERT_NE(gfx1251, nullptr);
+  for (const auto &[mnemonic, words] : kLiteralInstructions) {
+    EXPECT_TRUE(decode_fails(*gfx1250, words.data())) << mnemonic;
+    std::unique_ptr<Instruction> decoded(decode_valid(*gfx1251, words.data()));
+    ASSERT_NE(decoded, nullptr) << mnemonic;
+    EXPECT_EQ(decoded->mnemonic(), mnemonic);
+    EXPECT_EQ(decoded->size(), 12) << mnemonic;
+    EXPECT_EQ(decoded->execute, nullptr) << mnemonic;
+  }
+}
+
+TEST(Gfx1250DecodeTest, Gfx1251PackedU32LiteralReplicatesBothLanes) {
+  // LLVM gfx1251_asm_vop3p.s:
+  // v_pk_lshl_add_u64 v[4:7], v[8:11], 101, v[16:19]
+  constexpr std::array<uint32_t, 3> kWords{0xCC7E4004u, 0x1C41FF08u, 0x00000065u};
+  auto gfx1251 = Decoder::create(default_isa_target_registry(), "gfx1251");
+  ASSERT_NE(gfx1251, nullptr);
+
+  std::unique_ptr<Instruction> decoded(decode_valid(*gfx1251, kWords.data()));
+  ASSERT_NE(decoded, nullptr);
+  ASSERT_EQ(decoded->num_src_operands(), 3);
+  const Operand *packed_shift = decoded->src_operand(1);
+  ASSERT_NE(packed_shift, nullptr);
+  EXPECT_EQ(packed_shift->encoding_value(), 0x65);
+  EXPECT_FALSE(packed_shift->literal64_value().has_value());
+  EXPECT_EQ(decoded->disassemble(), "v_pk_lshl_add_u64 v[4:7], v[8:11], 0x65, v[16:19]");
+}
+
+TEST(Gfx1250DecodeTest, AllLlvmGfx1251DppFormsAreTargetGated) {
+  struct GoldenEncoding {
+    const char *name;
+    std::array<uint32_t, 4> words;
+  };
+  // One golden for every distinct instruction/encoding form in LLVM's
+  // five gfx1251 DPP16 MC tests: 44 normalized mnemonics, 80 encodings.
+  constexpr GoldenEncoding kDppForms[] = {
+      {"v_mov_b64_dpp", {0x7E083AFAu, 0xFF015002u, 0x00000000u, 0x00000000u}},
+      {"v_mov_b64_dpp", {0x7E083AFAu, 0x01015F02u, 0x00000000u, 0x00000000u}},
+      {"v_mov_b64_dpp", {0x7FFC3AFAu, 0x300553FEu, 0x00000000u, 0x00000000u}},
+      {"v_cvt_i32_f64_dpp", {0x7E0406FAu, 0xFF015104u, 0x00000000u, 0x00000000u}},
+      {"v_cvt_f64_i32_dpp", {0x7E0808FAu, 0xFF015102u, 0x00000000u, 0x00000000u}},
+      {"v_cvt_f32_f64_dpp", {0x7E041EFAu, 0xFF015104u, 0x00000000u, 0x00000000u}},
+      {"v_cvt_f64_f32_dpp", {0x7E0820FAu, 0xFF015102u, 0x00000000u, 0x00000000u}},
+      {"v_cvt_u32_f64_dpp", {0x7E042AFAu, 0xFF015104u, 0x00000000u, 0x00000000u}},
+      {"v_cvt_f64_u32_dpp", {0x7E082CFAu, 0xFF015102u, 0x00000000u, 0x00000000u}},
+      {"v_trunc_f64_dpp", {0x7E042EFAu, 0xFF015104u, 0x00000000u, 0x00000000u}},
+      {"v_ceil_f64_dpp", {0x7E0430FAu, 0xFF015104u, 0x00000000u, 0x00000000u}},
+      {"v_rndne_f64_dpp", {0x7E0432FAu, 0xFF015104u, 0x00000000u, 0x00000000u}},
+      {"v_floor_f64_dpp", {0x7E0434FAu, 0xFF015104u, 0x00000000u, 0x00000000u}},
+      {"v_frexp_exp_i32_f64_dpp", {0x7E0478FAu, 0xFF015104u, 0x00000000u, 0x00000000u}},
+      {"v_frexp_mant_f64_dpp", {0x7E047AFAu, 0xFF015104u, 0x00000000u, 0x00000000u}},
+      {"v_fract_f64_dpp", {0x7E047CFAu, 0xFF015104u, 0x00000000u, 0x00000000u}},
+      {"v_add_nc_u64_dpp", {0x500808FAu, 0x30055302u, 0x00000000u, 0x00000000u}},
+      {"v_add_nc_u64_dpp", {0x500808FAu, 0xFF015002u, 0x00000000u, 0x00000000u}},
+      {"v_add_nc_u64_dpp", {0x500808FAu, 0x01015F02u, 0x00000000u, 0x00000000u}},
+      {"v_sub_nc_u64_dpp", {0x520808FAu, 0x30055302u, 0x00000000u, 0x00000000u}},
+      {"v_sub_nc_u64_dpp", {0x520808FAu, 0xFF015002u, 0x00000000u, 0x00000000u}},
+      {"v_sub_nc_u64_dpp", {0x520808FAu, 0x01015F02u, 0x00000000u, 0x00000000u}},
+      {"v_fmac_f64_dpp", {0x2E0808FAu, 0xFF015102u, 0x00000000u, 0x00000000u}},
+      {"v_add_f64_dpp", {0x040808FAu, 0xFF015102u, 0x00000000u, 0x00000000u}},
+      {"v_mul_f64_dpp", {0x0C0808FAu, 0xFF015102u, 0x00000000u, 0x00000000u}},
+      {"v_max_num_f64_dpp", {0x1C0808FAu, 0xFF015102u, 0x00000000u, 0x00000000u}},
+      {"v_min_num_f64_dpp", {0x1A0808FAu, 0xFF015102u, 0x00000000u, 0x00000000u}},
+      {"v_lshlrev_b64_dpp", {0x3E0808FAu, 0xFF015102u, 0x00000000u, 0x00000000u}},
+      {"v_lshl_add_u64_e64_dpp", {0xD6520002u, 0x04220EFAu, 0xFF015304u, 0x00000000u}},
+      {"v_lshl_add_u64_e64_dpp", {0xD6520002u, 0x040A08FAu, 0xFF015004u, 0x00000000u}},
+      {"v_fma_f64_e64_dpp", {0xD6140004u, 0x04220CFAu, 0xFF015102u, 0x00000000u}},
+      {"v_div_fixup_f64_e64_dpp", {0xD6280004u, 0x04220CFAu, 0xFF015102u, 0x00000000u}},
+      {"v_div_fmas_f64_e64_dpp", {0xD6380004u, 0x04220CFAu, 0xFF015102u, 0x00000000u}},
+      {"v_div_scale_f64_e64_dpp", {0xD6FD0204u, 0x04220CFAu, 0xFF015102u, 0x00000000u}},
+      {"v_mad_co_u64_u32_e64_dpp", {0xD6FE0204u, 0x04220CFAu, 0xFF015102u, 0x00000000u}},
+      {"v_mad_co_i64_i32_e64_dpp", {0xD6FF0204u, 0x04220CFAu, 0xFF015102u, 0x00000000u}},
+      {"v_minimum_f64_e64_dpp", {0xD7410004u, 0x00020CFAu, 0xFF015102u, 0x00000000u}},
+      {"v_maximum_f64_e64_dpp", {0xD7420004u, 0x00020CFAu, 0xFF015102u, 0x00000000u}},
+      {"v_ldexp_f64_e64_dpp", {0xD72B0004u, 0x00020CFAu, 0xFF015102u, 0x00000000u}},
+      {"v_mul_lo_u32_e64_dpp", {0xD72C0004u, 0x00020CFAu, 0xFF015102u, 0x00000000u}},
+      {"v_mul_hi_u32_e64_dpp", {0xD72D0004u, 0x00020CFAu, 0xFF015102u, 0x00000000u}},
+      {"v_mul_hi_i32_e64_dpp", {0xD72E0004u, 0x00020CFAu, 0xFF015102u, 0x00000000u}},
+      {"v_lshrrev_b64_e64_dpp", {0xD73D0004u, 0x00020CFAu, 0xFF015102u, 0x00000000u}},
+      {"v_ashrrev_i64_e64_dpp", {0xD73E0004u, 0x00020CFAu, 0xFF015102u, 0x00000000u}},
+      {"v_mad_u32_e64_dpp", {0xD6350002u, 0x04220EFAu, 0xFF055304u, 0x00000000u}},
+      {"v_mad_u32_e64_dpp", {0xD6350002u, 0x02060EFAu, 0xFF015004u, 0x00000000u}},
+      {"v_max_i64_e64_dpp", {0xD71B0002u, 0x00020CFAu, 0xFF055304u, 0x00000000u}},
+      {"v_max_i64_e64_dpp", {0xD71B0002u, 0x00020CFAu, 0xFF015004u, 0x00000000u}},
+      {"v_max_u64_e64_dpp", {0xD7190002u, 0x00020CFAu, 0xFF055304u, 0x00000000u}},
+      {"v_max_u64_e64_dpp", {0xD7190002u, 0x00020CFAu, 0xFF015004u, 0x00000000u}},
+      {"v_min_i64_e64_dpp", {0xD71A0002u, 0x00020CFAu, 0xFF055304u, 0x00000000u}},
+      {"v_min_i64_e64_dpp", {0xD71A0002u, 0x00020CFAu, 0xFF015004u, 0x00000000u}},
+      {"v_min_u64_e64_dpp", {0xD7180002u, 0x00020CFAu, 0xFF055304u, 0x00000000u}},
+      {"v_min_u64_e64_dpp", {0xD7180002u, 0x00020CFAu, 0xFF015004u, 0x00000000u}},
+      {"v_mad_nc_u64_u32_e64_dpp", {0xD6FA0002u, 0x04220EFAu, 0xFF055304u, 0x00000000u}},
+      {"v_mad_nc_u64_u32_e64_dpp", {0xD6FA0002u, 0x02060AFAu, 0xFF015004u, 0x00000000u}},
+      {"v_mad_nc_i64_i32_e64_dpp", {0xD6FB0002u, 0x04220EFAu, 0xFF055304u, 0x00000000u}},
+      {"v_mad_nc_i64_i32_e64_dpp", {0xD6FB0002u, 0x02060AFAu, 0xFF015004u, 0x00000000u}},
+      {"v_ceil_f64_e64_dpp", {0xD5980002u, 0x000000FAu, 0xFF015104u, 0x00000000u}},
+      {"v_cvt_f32_f64_e64_dpp", {0xD58F0002u, 0x000000FAu, 0xFF015104u, 0x00000000u}},
+      {"v_cvt_f64_f32_e64_dpp", {0xD5900004u, 0x000000FAu, 0xFF015102u, 0x00000000u}},
+      {"v_cvt_f64_i32_e64_dpp", {0xD5840004u, 0x000000FAu, 0xFF015102u, 0x00000000u}},
+      {"v_cvt_f64_u32_e64_dpp", {0xD5960004u, 0x000000FAu, 0xFF015102u, 0x00000000u}},
+      {"v_cvt_i32_f64_e64_dpp", {0xD5830002u, 0x000000FAu, 0xFF015104u, 0x00000000u}},
+      {"v_cvt_u32_f64_e64_dpp", {0xD5950002u, 0x000000FAu, 0xFF015104u, 0x00000000u}},
+      {"v_floor_f64_e64_dpp", {0xD59A0002u, 0x000000FAu, 0xFF015104u, 0x00000000u}},
+      {"v_fract_f64_e64_dpp", {0xD5BE0002u, 0x000000FAu, 0xFF015104u, 0x00000000u}},
+      {"v_frexp_exp_i32_f64_e64_dpp", {0xD5BC0002u, 0x000000FAu, 0xFF015104u, 0x00000000u}},
+      {"v_frexp_mant_f64_e64_dpp", {0xD5BD0002u, 0x000000FAu, 0xFF015104u, 0x00000000u}},
+      {"v_mov_b64_e64_dpp", {0xD59D0004u, 0x000000FAu, 0xFF015102u, 0x00000000u}},
+      {"v_rndne_f64_e64_dpp", {0xD5990002u, 0x000000FAu, 0xFF015104u, 0x00000000u}},
+      {"v_trunc_f64_e64_dpp", {0xD5970002u, 0x000000FAu, 0xFF015104u, 0x00000000u}},
+      {"v_add_f64_e64_dpp", {0xD5020004u, 0x000208FAu, 0xFF015102u, 0x00000000u}},
+      {"v_add_nc_u64_e64_dpp", {0xD5280004u, 0x000208FAu, 0xFF015102u, 0x00000000u}},
+      {"v_fmac_f64_e64_dpp", {0xD5170004u, 0x000208FAu, 0xFF015102u, 0x00000000u}},
+      {"v_lshlrev_b64_e64_dpp", {0xD51F0004u, 0x000208FAu, 0xFF015102u, 0x00000000u}},
+      {"v_max_num_f64_e64_dpp", {0xD50E0004u, 0x000208FAu, 0xFF015102u, 0x00000000u}},
+      {"v_min_num_f64_e64_dpp", {0xD50D0004u, 0x000208FAu, 0xFF015102u, 0x00000000u}},
+      {"v_mul_f64_e64_dpp", {0xD5060004u, 0x000208FAu, 0xFF015102u, 0x00000000u}},
+      {"v_sub_nc_u64_e64_dpp", {0xD5290004u, 0x000208FAu, 0xFF015102u, 0x00000000u}},
+  };
+  static_assert(std::size(kDppForms) == 80);
+
+  std::set<std::string_view> normalized_mnemonics;
+  for (const auto &[name, words] : kDppForms) {
+    std::string_view normalized = name;
+    if (normalized.ends_with("_e64_dpp"))
+      normalized.remove_suffix(std::string_view("_e64_dpp").size());
+    else if (normalized.ends_with("_dpp"))
+      normalized.remove_suffix(std::string_view("_dpp").size());
+    normalized_mnemonics.insert(normalized);
+  }
+  ASSERT_EQ(normalized_mnemonics.size(), 44u);
+
+  auto gfx1250 = Decoder::create(default_isa_target_registry(), "gfx1250");
+  auto gfx1251 = Decoder::create(default_isa_target_registry(), "gfx1251");
+  ASSERT_NE(gfx1250, nullptr);
+  ASSERT_NE(gfx1251, nullptr);
+  for (const auto &[name, words] : kDppForms) {
+    EXPECT_TRUE(decode_fails(*gfx1250, words.data())) << name;
+    std::unique_ptr<Instruction> decoded(decode_valid(*gfx1251, words.data()));
+    ASSERT_NE(decoded, nullptr) << name;
+    std::string expected_mnemonic(name);
+    if (std::string_view(name).ends_with("_e64_dpp"))
+      expected_mnemonic.erase(expected_mnemonic.size() - std::string_view("_e64_dpp").size());
+    else {
+      expected_mnemonic.erase(expected_mnemonic.size() - std::string_view("_dpp").size());
+      expected_mnemonic += "_e32";
+    }
+    EXPECT_EQ(decoded->mnemonic(), expected_mnemonic) << name;
+    EXPECT_EQ(decoded->execute, nullptr) << name;
+  }
+}
+
+TEST(Gfx1250DecodeTest, CommonInstructionDecodesForBothVariants) {
+  constexpr uint32_t kSEndpgm[] = {0xBFB00000u};
+  for (const auto &[target, expects_execution] :
+       std::array<std::pair<std::string_view, bool>, 2>{{{"gfx1250", true}, {"gfx1251", false}}}) {
+    auto decoder = Decoder::create(default_isa_target_registry(), target);
+    ASSERT_NE(decoder, nullptr) << target;
+    std::unique_ptr<Instruction> inst(decode_valid(*decoder, kSEndpgm));
+    ASSERT_NE(inst, nullptr) << target;
+    EXPECT_EQ(inst->mnemonic(), "s_endpgm");
+    EXPECT_EQ(inst->execute != nullptr, expects_execution) << target;
+  }
+}
+
+TEST(Gfx1250DecodeTest, DppCapabilityDoesNotGateThePlainInstructionForm) {
+  // The same V_ADD_F64 mnemonic is legal on gfx1250 in its ordinary VOP2
+  // encoding; only the DPP16 form is a gfx1251 capability.
+  constexpr uint32_t kVAddF64[] = {0x04000000u, 0x00000000u};
+  for (std::string_view target : {"gfx1250", "gfx1251"}) {
+    auto decoder = Decoder::create(default_isa_target_registry(), target);
+    ASSERT_NE(decoder, nullptr) << target;
+    std::unique_ptr<Instruction> decoded(decode_valid(*decoder, kVAddF64));
+    ASSERT_NE(decoded, nullptr) << target;
+    EXPECT_EQ(decoded->mnemonic(), "v_add_f64_e32");
+  }
 }
 
 TEST(Gfx1250DecodeTest, SMovB64Literal64ConsumesThreeDwords) {
@@ -978,6 +1346,147 @@ TEST(Gfx1250ExecutionTest, WmmaNonE8ScalesApplyAfterEachBlockDot) {
         for (uint32_t reg = 0; reg < 8; ++reg)
           for (uint32_t lane = 0; lane < wf->wf_size(); ++lane)
             EXPECT_EQ(cu->read_vgpr(vgpr_base + 64 + reg, lane), std::bit_cast<uint32_t>(expected));
+      }
+    }
+  }
+}
+
+TEST(Gfx1250ExecutionTest, WmmaScaledExecutionMatchesManualLayoutAndDistinctBlockScales) {
+  Gfx1250Sim sim;
+  auto *cu = sim.cu();
+  auto *wf = sim.dispatch_scratch_wf();
+  ASSERT_NE(wf, nullptr);
+  wf->set_exec(0xffffffffu);
+  const uint32_t vgpr_base = wf->vgpr_alloc().base;
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
+  ASSERT_NE(decoder, nullptr);
+  ForceScalarGuard scalar_guard;
+
+  constexpr uint32_t kMatrixA = 0;
+  constexpr uint32_t kMatrixB = 32;
+  constexpr uint32_t kOutput = 64;
+  constexpr uint32_t kScaleA = 80;
+  constexpr uint32_t kScaleB = 82;
+  constexpr std::array<float, 4> matrix_values = {-1.0f, -0.5f, 0.5f, 1.5f};
+
+  struct TestCase {
+    uint32_t M;
+    uint32_t matrix_a_fmt;
+    uint32_t matrix_b_fmt;
+    bool scale16;
+    uint32_t scale_a_select;
+    uint32_t scale_b_select;
+  };
+  constexpr TestCase cases[] = {
+      {16, 0, 4, false, 1, 0}, // FP8 x FP4, 32 values per scale.
+      {16, 4, 0, true, 0, 1},  // FP4 x FP8, 16 values per scale.
+      {16, 2, 3, false, 1, 1}, // FP6 x BF6, including cross-VGPR packed values.
+      {32, 4, 4, true, 0, 1},  // Two-slice FP4 A matrix and 64-bit scale words.
+  };
+
+  const auto matrix_a_raw = [&](const TestCase &tc, uint32_t row, uint32_t k) {
+    const float value = matrix_values[(3u * row + 5u * k + k / 16u) % matrix_values.size()];
+    return encode_wmma_value(tc.matrix_a_fmt, value);
+  };
+  const auto matrix_b_raw = [&](const TestCase &tc, uint32_t col, uint32_t k) {
+    const float value = matrix_values[(5u * col + 3u * k + k / 32u + 1u) % matrix_values.size()];
+    return encode_wmma_value(tc.matrix_b_fmt, value);
+  };
+  const auto scale_a_raw = [](uint32_t row, uint32_t block) {
+    return static_cast<uint8_t>(0x7eu + ((row + 2u * block) % 3u));
+  };
+  const auto scale_b_raw = [](uint32_t col, uint32_t block) {
+    return static_cast<uint8_t>(0x7eu + ((2u * col + block + 1u) % 3u));
+  };
+
+  for (const auto &tc : cases) {
+    SCOPED_TRACE(::testing::Message() << "M=" << tc.M << " a_fmt=" << tc.matrix_a_fmt
+                                      << " b_fmt=" << tc.matrix_b_fmt << " scale16=" << tc.scale16);
+    const uint32_t N = 16;
+    const uint32_t K = 128;
+    const uint32_t a_bits = wmma_format_bits(tc.matrix_a_fmt);
+    const uint32_t b_bits = wmma_format_bits(tc.matrix_b_fmt);
+    const uint32_t scale_blocks = tc.scale16 ? 8u : 4u;
+
+    auto seed_inputs_and_scales = [&]() {
+      for (uint32_t reg = 0; reg < 84; ++reg)
+        for (uint32_t lane = 0; lane < wf->wf_size(); ++lane)
+          cu->write_vgpr(vgpr_base + reg, lane, 0);
+
+      for (uint32_t row = 0; row < tc.M; ++row)
+        for (uint32_t k = 0; k < K; ++k)
+          write_wmma_packed(*cu, vgpr_base + kMatrixA,
+                            manual_block_scaled_wmma_loc(tc.M, row, k, a_bits),
+                            matrix_a_raw(tc, row, k));
+      for (uint32_t col = 0; col < N; ++col)
+        for (uint32_t k = 0; k < K; ++k)
+          write_wmma_packed(*cu, vgpr_base + kMatrixB,
+                            manual_block_scaled_wmma_loc(N, col, k, b_bits),
+                            matrix_b_raw(tc, col, k));
+
+      for (uint32_t row = 0; row < tc.M; ++row) {
+        uint64_t word = 0;
+        for (uint32_t block = 0; block < scale_blocks; ++block)
+          word |= static_cast<uint64_t>(scale_a_raw(row, block)) << (8u * block);
+        const uint32_t lane = tc.M == 32 ? row : row + 16u * tc.scale_a_select;
+        cu->write_vgpr(vgpr_base + kScaleA, lane, static_cast<uint32_t>(word));
+        if (tc.scale16)
+          cu->write_vgpr(vgpr_base + kScaleA + 1, lane, static_cast<uint32_t>(word >> 32u));
+      }
+      for (uint32_t col = 0; col < N; ++col) {
+        uint64_t word = 0;
+        for (uint32_t block = 0; block < scale_blocks; ++block)
+          word |= static_cast<uint64_t>(scale_b_raw(col, block)) << (8u * block);
+        const uint32_t lane = col + 16u * tc.scale_b_select;
+        cu->write_vgpr(vgpr_base + kScaleB, lane, static_cast<uint32_t>(word));
+        if (tc.scale16)
+          cu->write_vgpr(vgpr_base + kScaleB + 1, lane, static_cast<uint32_t>(word >> 32u));
+      }
+    };
+
+    const auto words = build_scaled_wmma_execution_words(
+        tc.M, tc.scale16, tc.matrix_a_fmt, tc.matrix_b_fmt, 256 + kScaleA, 256 + kScaleB,
+        tc.scale_a_select, tc.scale_b_select, kOutput);
+    auto run = [&](bool force_scalar) {
+      util::set_force_scalar_for_testing(force_scalar);
+      seed_inputs_and_scales();
+      std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
+      EXPECT_NE(inst, nullptr);
+      if (!inst)
+        return std::vector<uint32_t>{};
+      cu->execute_instruction(inst.get(), *wf);
+      std::vector<uint32_t> output;
+      output.reserve(tc.M * N);
+      for (uint32_t row = 0; row < tc.M; ++row)
+        for (uint32_t col = 0; col < N; ++col) {
+          const auto loc = amdgpu::wmma_output_loc_32(tc.M, N, row, col);
+          output.push_back(cu->read_vgpr(vgpr_base + kOutput + loc.reg, loc.lane));
+        }
+      return output;
+    };
+
+    const auto scalar = run(true);
+    const auto simd = run(false);
+    ASSERT_EQ(scalar.size(), tc.M * N);
+    ASSERT_EQ(simd, scalar);
+
+    const uint32_t block_size = tc.scale16 ? 16u : 32u;
+    for (uint32_t row = 0; row < tc.M; ++row) {
+      for (uint32_t col = 0; col < N; ++col) {
+        float expected = 0.0f;
+        for (uint32_t block = 0; block < scale_blocks; ++block) {
+          float block_sum = 0.0f;
+          for (uint32_t k = block * block_size; k < (block + 1u) * block_size; ++k) {
+            const float a = decode_wmma_value(tc.matrix_a_fmt, matrix_a_raw(tc, row, k));
+            const float b = decode_wmma_value(tc.matrix_b_fmt, matrix_b_raw(tc, col, k));
+            block_sum = std::fma(a, b, block_sum);
+          }
+          block_sum *= util::e8m0_to_f32(scale_a_raw(row, block));
+          block_sum *= util::e8m0_to_f32(scale_b_raw(col, block));
+          expected += block_sum;
+        }
+        EXPECT_EQ(scalar[row * N + col], std::bit_cast<uint32_t>(expected))
+            << "row=" << row << " col=" << col;
       }
     }
   }

@@ -71,10 +71,10 @@ public:
   void invalidate_all();
 
 private:
-  void ensure_line_locked(uint64_t addr, uint32_t vmid = 0);
-  void flush_line_locked(uint64_t addr, uint32_t vmid = 0);
-  void invalidate_all_locked();
-  void synchronize_epoch_locked();
+  void ensure_line(uint64_t addr, uint32_t vmid = 0);
+  void flush_line(uint64_t addr, uint32_t vmid = 0);
+  void invalidate_all_lines();
+  void synchronize_epoch();
 
   CacheStore cache_;
   L2Cache *l2_;

@@ -112,6 +112,7 @@ public:
   int loop_large = 10;
   int batch = 0;
   bool verif = true;
+  int num_wf = 0;
   size_t large_message_size = 32768;
 
   TeamSplitType team_type = ROCSHMEM_TEST_TEAM_DUP;

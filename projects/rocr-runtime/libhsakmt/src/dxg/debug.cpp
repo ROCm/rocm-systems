@@ -61,10 +61,19 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtDbgAddressWatch(
 HSAKMT_STATUS HSAKMTAPI hsaKmtCheckRuntimeDebugSupport(void) {
   CHECK_DXG_OPEN();
 
-  // Make sure the WDDMDevices are created.
-  HsaSystemProperties props;
-  hsaKmtAcquireSystemProperties(&props);
-  [](auto&&...) {}(props);
+  // The caller owns the topology snapshot the WDDMDevices belong to; this probe
+  // deliberately takes no reference of its own. Acquiring here would enumerate
+  // the adapters only to destroy them again on return, leaving the caller to
+  // build the very same list a second time.
+  //
+  // An empty device list therefore means no snapshot is held (or the machine
+  // has no adapter). Say so, rather than letting the loop below fall through
+  // and report support for devices nobody has looked at.
+  if (dxg_topology->wdevices_.empty()) {
+    pr_warn_once(
+        "DXG system properties must be acquired before checking runtime debug support\n");
+    return HSAKMT_STATUS_NOT_SUPPORTED;
+  }
 
   for (auto&& device : dxg_topology->wdevices_) {
     if (Wkmi::KmdDbgVersion version;
@@ -77,6 +86,12 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtCheckRuntimeDebugSupport(void) {
 }
 
 HSAKMT_STATUS HSAKMTAPI hsaKmtRuntimeEnable(void *rDebug, bool setupTtmp) {
+  /* No acquire here either: the caller holds the snapshot across this call.
+   * ROCr's KfdDriver takes it in Init() before enabling, precisely so the
+   * device list this walks is the one BuildTopology() goes on to use. The
+   * probe reports NOT_SUPPORTED when that list is empty, so a caller that has
+   * not acquired never reaches the loop below.
+   */
   HSAKMT_STATUS result = hsaKmtCheckRuntimeDebugSupport();
 
   if (result)

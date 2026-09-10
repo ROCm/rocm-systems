@@ -62,6 +62,36 @@ extern std::function<hipError_t(void* /*data*/,
                                 hipDeviceptr_t /*ptr*/)>
     g_hipPointerGetAttribute;
 
+// Device model + inventory seams. Defaults succeed with plausible values.
+extern std::function<hipError_t(int* /*version*/)> g_hipRuntimeGetVersion;
+extern std::function<hipError_t(hipDeviceProp_t* /*prop*/, int /*device*/)>
+    g_hipGetDeviceProperties;
+extern std::function<hipError_t(void** /*ptr*/, std::size_t /*size*/,
+                                unsigned /*flags*/)>
+    g_hipExtMallocWithFlags;
+extern std::function<hipError_t(void** /*ptr*/, std::size_t /*size*/,
+                                unsigned /*flags*/)>
+    g_hipHostMalloc;
+extern std::function<hipError_t(void* /*ptr*/)> g_hipFree;
+extern int g_deviceCount;
+extern int g_currentDevice;
+extern std::function<hipError_t(int* /*dev*/)> g_hipGetDevice;
+extern std::function<hipError_t(int /*dev*/)> g_hipSetDevice;
+extern std::function<hipError_t(int* /*count*/)> g_hipGetDeviceCount;
+
+// Deep-path result seams. Default to hipErrorInvalidValue so any call a test
+// hasn't opted into surfaces as an unexpected call; set to hipSuccess to enable
+// the happy path, or leave one at the error value to exercise a specific
+// CUDACHECK early-return. g_hipWarpSize backs
+// hipDeviceGetAttribute(hipDeviceAttributeWarpSize).
+extern hipError_t g_hipDeviceGetAttributeResult;
+extern hipError_t g_hipDeviceGetPCIBusIdResult;
+extern hipError_t g_hipEventCreateResult;
+extern hipError_t g_hipMemPoolResult;
+extern hipError_t g_hipStreamCreateResult;
+extern hipError_t g_hipAsyncOpsResult;
+extern int g_hipWarpSize;
+
 // Restore the HIP controllable seams above to their defaults. Called by
 // ResetP2pFakes(); exposed for tests that only touch HIP hooks.
 void ResetHipFakes();

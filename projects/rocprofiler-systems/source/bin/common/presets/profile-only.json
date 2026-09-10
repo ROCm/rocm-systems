@@ -17,5 +17,10 @@
     },
     "tracing": {
         "enabled": false
+    },
+    "output": {
+        "rocpd_output": {
+            "enabled": false
+        }
     }
 }
