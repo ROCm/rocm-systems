@@ -227,6 +227,26 @@ class DeviceCoverageCMakeTest(unittest.TestCase):
         self.assertEqual(result.splitlines()[0], "OFF")
         self.assertIn("device linker is disabled", result)
 
+    def test_resolve_auto_falls_back_when_rocm_version_unparsed(self):
+        _root, result, _argv, completed = self._resolve(
+            "AUTO", "ON", "", "0", "unknown", ""
+        )
+
+        self.assertEqual(completed.returncode, 0)
+        self.assertEqual(result.splitlines()[0], "OFF")
+        self.assertIn("could not be parsed", result)
+
+    def test_resolve_auto_falls_back_when_compiler_lacks_coverage(self):
+        cap_error = "rejected device coverage flags: unsupported"
+        _root, result, _argv, completed = self._resolve(
+            "AUTO", "ON", "7.15.0", "71500", "7.15.0", cap_error
+        )
+
+        self.assertEqual(completed.returncode, 0)
+        self.assertEqual(result.splitlines()[0], "OFF")
+        self.assertIn("does not support it", result)
+        self.assertIn(cap_error, result)
+
     def test_resolve_on_is_fatal_when_blocked(self):
         _root, result, _argv, completed = self._resolve(
             "ON", "OFF", "7.15.0", "71500", "7.15.0", "",
