@@ -296,7 +296,7 @@ Analyze dispatches 12 and 34 from mixbench workload with 3 decimal precision:
 
 .. code-block:: shell-session
 
-   rocprof-compute analyze -p workloads/mixbench/MI200/ --dispatch 12 34 --decimal 3
+   rocprof-compute analyze -p workloads/mixbench/MI200/ --dispatch 13 35 --decimal 3
 
 Compare two workloads to evaluate the impact of code optimizations
 ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++

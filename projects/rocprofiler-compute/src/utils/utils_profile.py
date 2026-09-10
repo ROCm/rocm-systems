@@ -345,6 +345,7 @@ def run_prof(
             "End_Timestamp",
         ],
         "Dispatch_ID",
+        start=1,
     )
     kernel_ids = csv_ops.GroupIdAssigner(
         ["Kernel_Name", "Grid_Size", "Workgroup_Size", "LDS_Per_Workgroup"],

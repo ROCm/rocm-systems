@@ -417,7 +417,7 @@ def _renumber_dispatch_ids_across_processes(
         return combined_trace
 
     renumbered_trace = combined_trace.copy()
-    renumbered_trace["Dispatch_Id"] = range(len(renumbered_trace))
+    renumbered_trace["Dispatch_Id"] = range(1, len(renumbered_trace) + 1)
     return renumbered_trace
 
 
