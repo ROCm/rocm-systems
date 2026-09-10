@@ -233,8 +233,8 @@ pub trait EmulatorBackend: Sync + Send + std::fmt::Debug {
     /// whose ISA that runtime was not built for — silently, leaving a
     /// session that starts, a workload that runs and an exit status of 0
     /// with no GPU behind any of it. Answering here is what lets mirage
-    /// check the emulated target against the runtime before the session
-    /// costs anything; see [`crate::rocr`].
+    /// check the emulated target against the runtime before each host
+    /// workload starts; see [`crate::rocr`].
     ///
     /// The default is `None`, which is the right answer for every
     /// backend that runs on real hardware — `hotswap` and `rocjitsu-dbt`
