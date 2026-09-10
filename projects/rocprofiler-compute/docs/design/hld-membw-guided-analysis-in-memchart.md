@@ -1,7 +1,8 @@
 # Memory Bandwidth Analysis in Memory Chart
 
-**Status:** Draft (architecture revision)
+**Status:** Implemented (Phase A: pipeline, Phase B: chart integration)
 **Target:** rocprofiler-compute, gfx950, analyze mode (CLI)
+**User docs:** `docs/how-to/membw_analysis.rst`
 
 ---
 
