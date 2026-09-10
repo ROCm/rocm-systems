@@ -1683,7 +1683,13 @@ rdc_status_t rdc_policy_unregister(rdc_handle_t p_rdc_handle, rdc_gpu_group_t gr
  *  @param[in] components  The list of components that should be enabled for health check
  *  for example, RDC_HEALTH_WATCH_THERMAL | RDC_HEALTH_WATCH_POWER
  *
+ *  Each field of the requested components is probed once on every GPU in the
+ *  group. Fields the platform cannot read are reported in the rdcd log and
+ *  skipped; the remaining fields are watched.
+ *
  *  @retval ::RDC_ST_OK is returned upon successful call.
+ *  @retval ::RDC_ST_NOT_SUPPORTED if none of the requested fields can be read
+ *  on any GPU in the group.
  */
 rdc_status_t rdc_health_set(rdc_handle_t p_rdc_handle, rdc_gpu_group_t group_id,
                             unsigned int components);
