@@ -272,14 +272,11 @@ ncclResult_t ncclIntruAddressMapRemove_untyped(struct ncclIntruAddressMap_untype
 }
 
 // ---------------------------------------------------------------------------
-// Memory stack spill (must return real memory to avoid a crash if ever hit).
+// Memory stack spill lives in utils_fakes.cc, which owns src/misc/utils.cc's
+// symbols and now links into this binary alongside this file. That version
+// builds a reclaimable hunk chain rather than leaking each spill, so
+// ncclMemoryStackDestruct (also there) actually frees them.
 // ---------------------------------------------------------------------------
-void* ncclMemoryStack::allocateSpilled(struct ncclMemoryStack*, size_t size, size_t align) {
-  void* p = nullptr;
-  if (align < sizeof(void*)) align = sizeof(void*);
-  if (posix_memalign(&p, align, size) != 0) return nullptr;
-  return p;  // intentionally leaked; process is short-lived
-}
 
 // ---------------------------------------------------------------------------
 // GIN host.
