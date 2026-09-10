@@ -197,8 +197,30 @@ public:
     uint64_t notified_process_exception_mask = 0;
     /// Process/device exception bits reserved by a notifier write in flight.
     uint64_t pending_process_exception_mask = 0;
+    /// In-flight process/device notifier writes per exception bit.
+    std::array<uint32_t, 64> pending_process_exception_counts{};
     /// A failed or superseded publication still requires a background retry.
     bool notification_retry_needed = false;
+
+    void begin_process_notification(uint64_t mask) {
+      for (uint32_t bit = 0; bit < 64; ++bit) {
+        const uint64_t bit_mask = uint64_t{1} << bit;
+        if ((mask & bit_mask) == 0)
+          continue;
+        ++pending_process_exception_counts[bit];
+        pending_process_exception_mask |= bit_mask;
+      }
+    }
+
+    void finish_process_notification(uint64_t mask) {
+      for (uint32_t bit = 0; bit < 64; ++bit) {
+        const uint64_t bit_mask = uint64_t{1} << bit;
+        if ((mask & bit_mask) == 0 || pending_process_exception_counts[bit] == 0)
+          continue;
+        if (--pending_process_exception_counts[bit] == 0)
+          pending_process_exception_mask &= ~bit_mask;
+      }
+    }
 
     /// @brief Previously configured process debug flags.
     uint32_t flags = 0;
@@ -725,6 +747,28 @@ public:
     uint64_t debug_notification_delivered_status = 0;
     /// Status retained for a later subscription even if notification fails.
     uint64_t debug_notification_retained_status = 0;
+    /// Whole events represented by the flattened debugger status fields.
+    /// Retaining their boundaries lets a retry preserve ownership when one
+    /// subscribed bit in a combined event atomically replaces another.
+    std::vector<uint64_t> debug_notification_events;
+
+    void record_debug_notification_event(uint64_t mask) {
+      if (mask != 0 && std::find(debug_notification_events.begin(), debug_notification_events.end(),
+                                 mask) == debug_notification_events.end())
+        debug_notification_events.push_back(mask);
+    }
+
+    void clear_debug_notification_events(uint64_t mask) {
+      for (uint64_t &event : debug_notification_events)
+        event &= ~mask;
+      std::erase(debug_notification_events, uint64_t{0});
+    }
+
+    void prune_debug_notification_events() {
+      for (uint64_t &event : debug_notification_events)
+        event &= exception_status;
+      std::erase(debug_notification_events, uint64_t{0});
+    }
 
     /// @brief Return exception status that the debugger may currently consume.
     uint64_t debugger_visible_exception_status(uint64_t session_generation = 0) const {
@@ -739,6 +783,7 @@ public:
     /// @brief Reserve queue-exception bits for an in-flight ROCr decision.
     void begin_runtime_exception(uint64_t mask) {
       exception_status |= mask;
+      record_debug_notification_event(mask);
       for (uint32_t bit = 0; bit < 64; ++bit) {
         const uint64_t bit_mask = uint64_t{1} << bit;
         if ((mask & bit_mask) == 0)
@@ -780,6 +825,7 @@ public:
         }
         runtime_exception_failed_status &= ~bit_mask;
       }
+      prune_debug_notification_events();
       return failed;
     }
 
@@ -816,6 +862,7 @@ public:
             (runtime_exception_retained_status & bit_mask) == 0)
           exception_status &= ~bit_mask;
       }
+      prune_debug_notification_events();
     }
 
     /// @brief Require another wake if this session later re-enables @p mask.
@@ -831,6 +878,7 @@ public:
       exception_status &= ~(consumed & ~runtime_exception_retained_status);
       debug_notification_delivered_status &= ~consumed;
       debug_notification_retained_status &= ~consumed;
+      clear_debug_notification_events(consumed & ~runtime_exception_retained_status);
     }
 
     /// @brief Resolve retained runtime ownership after a successful debugger resume.
@@ -843,6 +891,7 @@ public:
           runtime_exception_pending_status | debug_notification_pending_status |
           debug_notification_delivered_status | debug_notification_retained_status;
       exception_status &= ~(resolved & ~still_owned);
+      prune_debug_notification_events();
     }
 
     /// @brief Clear every debugger-session-owned exception field.
@@ -854,6 +903,7 @@ public:
       debug_notification_pending_status = 0;
       debug_notification_delivered_status = 0;
       debug_notification_retained_status = 0;
+      prune_debug_notification_events();
     }
 
     /// @brief Area used by the XCC that owns this queue.

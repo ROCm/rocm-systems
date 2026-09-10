@@ -755,6 +755,7 @@ private:
   struct DebugQueueException {
     uint32_t gpu_id = 0;
     uint64_t mask = 0;
+    std::vector<uint64_t> events;
   };
   mutable std::mutex debug_events_mutex_;
   std::unordered_map<pid_t, std::unordered_map<uint32_t, DebugQueueException>> debug_events_;

@@ -411,7 +411,8 @@ protected:
     return fd;
   }
 
-  void expect_combined_event_subscription_transition(uint64_t initial_mask, uint64_t updated_mask) {
+  void expect_combined_event_subscription_transition(uint64_t initial_mask, uint64_t updated_mask,
+                                                     bool publish_from_retry = false) {
     constexpr uint64_t kMemoryViolation = KFD_EC_MASK(EC_QUEUE_WAVE_MEMORY_VIOLATION);
     constexpr uint64_t kWaveTrap = KFD_EC_MASK(EC_QUEUE_WAVE_TRAP);
     constexpr uint64_t kCombined = kMemoryViolation | kWaveTrap;
@@ -454,16 +455,45 @@ protected:
     exceptions.pid = static_cast<uint32_t>(getpid());
     exceptions.op = KFD_IOC_DBG_TRAP_SET_EXCEPTIONS_ENABLED;
     int mask_update_result = -1;
-    driver_->set_debug_notification_result_hook_for_testing([&](bool delivered) {
-      if (!delivered)
+    if (publish_from_retry) {
+      driver_->set_debug_notifier_dup_error_for_testing(EMFILE);
+      EXPECT_FALSE(driver_->notify_debug_event_for_testing(create.queue_id, kCombined,
+                                                           /*retain_on_rejection=*/true));
+
+      auto write_entered = std::make_shared<std::promise<void>>();
+      auto write_entered_future = write_entered->get_future();
+      auto release_write = std::make_shared<std::promise<void>>();
+      auto release_write_future = release_write->get_future().share();
+      driver_->set_debug_notification_write_hook_for_testing([write_entered, release_write_future] {
+        write_entered->set_value();
+        release_write_future.wait();
+      });
+      driver_->set_debug_notifier_dup_error_for_testing(std::nullopt);
+      if (write_entered_future.wait_for(std::chrono::seconds(2)) != std::future_status::ready) {
+        release_write->set_value();
+        driver_->set_debug_notification_write_hook_for_testing({});
+        FAIL() << "background notification retry did not reach the writer";
         return;
+      }
+
       exceptions.set_exceptions_enabled.exception_mask = updated_mask;
       mask_update_result = driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &exceptions);
-    });
-    EXPECT_TRUE(driver_->notify_debug_event_for_testing(create.queue_id, kCombined,
-                                                        /*retain_on_rejection=*/true,
-                                                        /*reserve_runtime_on_rejection=*/true));
-    driver_->set_debug_notification_result_hook_for_testing({});
+      release_write->set_value();
+      pollfd ready{notifier, POLLIN, 0};
+      EXPECT_EQ(::poll(&ready, 1, 2000), 1);
+      driver_->set_debug_notification_write_hook_for_testing({});
+    } else {
+      driver_->set_debug_notification_result_hook_for_testing([&](bool delivered) {
+        if (!delivered)
+          return;
+        exceptions.set_exceptions_enabled.exception_mask = updated_mask;
+        mask_update_result = driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &exceptions);
+      });
+      EXPECT_TRUE(driver_->notify_debug_event_for_testing(create.queue_id, kCombined,
+                                                          /*retain_on_rejection=*/true,
+                                                          /*reserve_runtime_on_rejection=*/true));
+      driver_->set_debug_notification_result_hook_for_testing({});
+    }
     EXPECT_EQ(mask_update_result, 0);
 
     uint64_t notifications = 0;
@@ -484,7 +514,14 @@ protected:
     query.pid = static_cast<uint32_t>(getpid());
     query.op = KFD_IOC_DBG_TRAP_QUERY_DEBUG_EVENT;
     query.query_debug_event.exception_mask = kCombined;
-    ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &query), 0);
+    int query_result = -EAGAIN;
+    for (int attempt = 0; attempt < 200 && query_result == -EAGAIN; ++attempt) {
+      query.query_debug_event.exception_mask = kCombined;
+      query_result = driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &query);
+      if (query_result == -EAGAIN)
+        static_cast<void>(::poll(nullptr, 0, 10));
+    }
+    ASSERT_EQ(query_result, 0);
     EXPECT_EQ(query.query_debug_event.queue_id, create.queue_id);
     EXPECT_EQ(query.query_debug_event.exception_mask, kCombined);
   }
@@ -2534,6 +2571,12 @@ TEST_F(KfdIoctlTest, DbgTrapAddingCombinedEventBitPreservesDebuggerOwnership) {
 TEST_F(KfdIoctlTest, DbgTrapReplacingCombinedEventBitPreservesDebuggerOwnership) {
   expect_combined_event_subscription_transition(KFD_EC_MASK(EC_QUEUE_WAVE_MEMORY_VIOLATION),
                                                 KFD_EC_MASK(EC_QUEUE_WAVE_TRAP));
+}
+
+TEST_F(KfdIoctlTest, DbgTrapRetryPreservesCombinedEventOwnershipAcrossBitReplacement) {
+  expect_combined_event_subscription_transition(KFD_EC_MASK(EC_QUEUE_WAVE_MEMORY_VIOLATION),
+                                                KFD_EC_MASK(EC_QUEUE_WAVE_TRAP),
+                                                /*publish_from_retry=*/true);
 }
 
 TEST_F(KfdIoctlTest, DbgTrapNarrowingCombinedEventClaimPreservesDebuggerOwnership) {
