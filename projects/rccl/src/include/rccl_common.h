@@ -202,6 +202,10 @@ ncclResult_t rcclSelectAlltoAll(struct ncclComm* comm, const void* sendbuff, voi
 // (rcclDdaEnabled is declared below, next to the DDA param decls.)
 bool isSymmetricKernelRequested(struct ncclComm* comm, ncclFunc_t coll, int symkOp, ncclDataType_t datatype,
                                 size_t nElts, const void* sendbuff, void* recvbuff);
+// Pre-window variant: caller has already called ncclDevrFindWindow for both
+// pointers; this skips the redundant lookup.
+bool isSymmetricKernelRequestedWin(struct ncclComm* comm, ncclFunc_t coll, int symkOp, ncclDataType_t datatype,
+                                   size_t nElts, struct ncclDevrWindow* sendWin, struct ncclDevrWindow* recvWin);
 NCCL_API(ncclResult_t, rcclSymKGetInfo, struct ncclComm* comm, ncclFunc_t coll, uint64_t count, ncclDataType_t dataType,
          ncclRedOp_t op, int* algo, int* protocol, int* maxChannels);
 NCCL_API(ncclResult_t, rcclGetAlgoName, int algo, const char** algoName);

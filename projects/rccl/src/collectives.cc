@@ -207,18 +207,22 @@ bool rcclAllReduceShouldTakeDdaPath(const ncclComm* comm, size_t count, ncclData
 }
 
 // Check if symmteric kernels is requested for this collective
-bool isSymmetricKernelRequested(ncclComm* comm, ncclFunc_t coll, int symkOp, ncclDataType_t datatype, size_t nElts,
-                                const void* sendbuff, void* recvbuff) {
+bool isSymmetricKernelRequestedWin(ncclComm* comm, ncclFunc_t coll, int symkOp, ncclDataType_t datatype,
+                                   size_t nElts, ncclDevrWindow* sendWin, ncclDevrWindow* recvWin) {
   if (comm == nullptr || !comm->symmetricSupport) return false;
   if (ncclSymkInitOnce(comm) != ncclSuccess) return false;
   if (!ncclSymkAvailable(comm, coll, symkOp, datatype, nElts)) return false;
+  return sendWin != nullptr && recvWin != nullptr && (sendWin->winFlags & NCCL_WIN_COLL_SYMMETRIC) &&
+         (recvWin->winFlags & NCCL_WIN_COLL_SYMMETRIC);
+}
 
+bool isSymmetricKernelRequested(ncclComm* comm, ncclFunc_t coll, int symkOp, ncclDataType_t datatype, size_t nElts,
+                                const void* sendbuff, void* recvbuff) {
   struct ncclDevrWindow* sendWin = nullptr;
   struct ncclDevrWindow* recvWin = nullptr;
   ncclDevrFindWindow(comm, sendbuff, &sendWin);
   ncclDevrFindWindow(comm, recvbuff, &recvWin);
-  return sendWin != nullptr && recvWin != nullptr && (sendWin->winFlags & NCCL_WIN_COLL_SYMMETRIC) &&
-         (recvWin->winFlags & NCCL_WIN_COLL_SYMMETRIC);
+  return isSymmetricKernelRequestedWin(comm, coll, symkOp, datatype, nElts, sendWin, recvWin);
 }
 
 static inline int hierarchicalShuffleNumBlocks(size_t totalBytes) {

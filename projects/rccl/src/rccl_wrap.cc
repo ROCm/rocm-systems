@@ -1275,7 +1275,7 @@ ncclResult_t rcclSelectAllReduce(struct ncclComm* comm, const void* sendbuff, vo
   const bool symSuppressedBySize = recvRegistered && msgBytes > symMaxR2;
   const bool symkRequested =
     (op == ncclSum) &&
-    isSymmetricKernelRequested(comm, ncclFuncAllReduce, (int)ncclDevSum, datatype, count, sendbuff, recvbuff);
+    isSymmetricKernelRequestedWin(comm, ncclFuncAllReduce, (int)ncclDevSum, datatype, count, sendWin, recvWin);
   const size_t arSymMinR2 = rcclSymMinR2Cap(comm, ncclFuncAllReduce);
   // symSuppressedByMin: DDA wins below symMinR2[AR]; do not block it with symkRequested.
   const bool symSuppressedByMin = symkRequested && arSymMinR2 > 0 && msgBytes < arSymMinR2;
@@ -1498,7 +1498,7 @@ ncclResult_t rcclSelectAllGather(struct ncclComm* comm, const void* sendbuff, vo
   // (1) DDA fast paths. Symmetric-registered buffers defer to the symmetric
   // kernel (extracted downstream), so DDA is gated on !symEligible, as before.
   const bool agSymkRequested =
-    isSymmetricKernelRequested(comm, ncclFuncAllGather, (int)ncclDevSum, datatype, sendcount, sendbuff, recvbuff);
+    isSymmetricKernelRequestedWin(comm, ncclFuncAllGather, (int)ncclDevSum, datatype, sendcount, sendWin, recvWin);
   // symMaxR2[AG] withdraws symk above a size threshold so CE-registered can win
   // (mirrors the AllReduce symSuppressedBySize pattern).
   // symMinR2[AG] withdraws symk below a size threshold so DDA wins small messages
@@ -1730,19 +1730,20 @@ ncclResult_t rcclSelectReduceScatter(struct ncclComm* comm, const void* sendbuff
 
   // (1) Symmetric eligibility (sum/avg). Reported last but gates DDA / hierarchical / Direct here.
   // symMinR2: below this threshold DDA beats symk for R2 buffers -- suppress symk so DDA wins.
-  const bool symkRequested =
-    (op == ncclSum || op == ncclAvg) &&
-    isSymmetricKernelRequested(comm, ncclFuncReduceScatter, (op == ncclAvg) ? (int)ncclDevSumPostDiv : (int)ncclDevSum,
-                               datatype, recvcount, sendbuff, recvbuff);
-  const size_t rsSymMinR2 = rcclSymMinR2Cap(comm, ncclFuncReduceScatter);
-  const bool symSuppressedByMin = symkRequested && rsSymMinR2 > 0 && totalBytes < rsSymMinR2;
-  // Hoist window lookup for symSuppressedBySize (needed before DDA gate).
+  // Window lookup hoisted above isSymmetricKernelRequested to avoid the
+  // redundant ncclDevrFindWindow pair inside that call.
   struct ncclDevrWindow* rsSendWin = nullptr;
   struct ncclDevrWindow* rsRecvWin = nullptr;
   ncclDevrFindWindow(comm, sendbuff, &rsSendWin);
   ncclDevrFindWindow(comm, recvbuff, &rsRecvWin);
   ncclSymRegType_t rsWinRegType;
   NCCLCHECK(ncclGetSymRegType(rsSendWin, rsRecvWin, &rsWinRegType));
+  const bool symkRequested =
+    (op == ncclSum || op == ncclAvg) &&
+    isSymmetricKernelRequestedWin(comm, ncclFuncReduceScatter, (op == ncclAvg) ? (int)ncclDevSumPostDiv : (int)ncclDevSum,
+                                  datatype, recvcount, rsSendWin, rsRecvWin);
+  const size_t rsSymMinR2 = rcclSymMinR2Cap(comm, ncclFuncReduceScatter);
+  const bool symSuppressedByMin = symkRequested && rsSymMinR2 > 0 && totalBytes < rsSymMinR2;
   const bool rsRecvRegistered = (rsWinRegType == ncclSymSendRegRecvReg ||
                                   rsWinRegType == ncclSymSendNonregRecvReg);
   const size_t rsSymMaxR2 = rcclSymMaxR2Cap(comm, ncclFuncReduceScatter, /*graphMode=*/false);
@@ -1929,7 +1930,7 @@ ncclResult_t rcclSelectAlltoAll(struct ncclComm* comm, const void* sendbuff, voi
                                    a2aWinRegType == ncclSymSendNonregRecvReg);
   // symMaxR2[A2A] withdraws symk above threshold so CE-registered can win.
   const bool a2aSymkRequested =
-    isSymmetricKernelRequested(comm, ncclFuncAlltoAll, (int)ncclDevSum, datatype, count, sendbuff, recvbuff);
+    isSymmetricKernelRequestedWin(comm, ncclFuncAlltoAll, (int)ncclDevSum, datatype, count, a2aSendWin, a2aRecvWin);
   const size_t a2aSymMaxR2 = rcclSymMaxR2Cap(comm, ncclFuncAlltoAll, /*graphMode=*/false);
   const bool a2aSymSuppressedBySize = a2aSymkRequested && a2aRecvRegistered &&
                                       totalBytes > a2aSymMaxR2;
