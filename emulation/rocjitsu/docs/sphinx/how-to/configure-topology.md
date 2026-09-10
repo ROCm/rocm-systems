@@ -60,12 +60,13 @@ keep all XCDs on one engine partition.
 
 The host-thread width used to execute accepted CU work in functional mode. A
 nonzero value is applied per SoC and shared by all command processors in that
-SoC. The default, `0`, creates one automatic host-wide budget from the available
-hardware threads, caps it at 32, and divides it as evenly as possible across
-the SoCs. After either selection, each SoC's effective width is capped at the
-largest number of CUs owned by any one command processor in that SoC. This
-control does not change XCD partitioning, queue ownership, or XCD fan-out.
-Clocked mode always uses an effective value of `1`.
+SoC. The default, `1`, keeps dispatch serial. Setting the field explicitly to
+`0` creates one automatic host-wide budget from the available hardware threads,
+caps it at 32, and divides it as evenly as possible across the SoCs. After
+either selection, each SoC's effective width is capped at the largest number of
+CUs owned by any one command processor in that SoC. This control does not
+change XCD partitioning, queue ownership, or XCD fan-out. Clocked mode always
+uses an effective value of `1`.
 
 ### `exec_mode`
 

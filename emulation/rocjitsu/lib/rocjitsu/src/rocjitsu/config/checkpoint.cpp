@@ -87,7 +87,8 @@ void restore_vgpr_block_into_zeroed_storage(amdgpu::ComputeUnitCore &cu, uint32_
 /// @brief Serialize the SoC configuration into a FlatBuffer SimulationConfig.
 flatbuffers::Offset<fb::SimulationConfig>
 serialize_config(flatbuffers::FlatBufferBuilder &builder, const SoC &soc,
-                 const simdojo::SimulationEngine::Config &engine_config) {
+                 const simdojo::SimulationEngine::Config &engine_config,
+                 uint32_t cpu_dispatch_threads) {
   auto arch_str = builder.CreateString(arch_to_string(soc.arch()));
   auto exec_mode_str = builder.CreateString(
       soc.exec_mode() == simdojo::ExecMode::CLOCKED ? "clocked" : "functional");
@@ -125,7 +126,7 @@ serialize_config(flatbuffers::FlatBufferBuilder &builder, const SoC &soc,
   auto fb_vm = fb::CreateVirtualMachineConfig(builder, arch_str, fb_gpu);
 
   return fb::CreateSimulationConfig(builder, engine_config.max_ticks, engine_config.num_threads,
-                                    exec_mode_str, fb_vm, 0, 0, soc.dispatch_threads());
+                                    exec_mode_str, fb_vm, 0, 0, cpu_dispatch_threads);
 }
 
 /// @brief Reconstruct a VirtualMachine::Config from a stored FlatBuffer config.
@@ -180,7 +181,8 @@ VirtualMachine::Config config_from_checkpoint(const fb::SimulationConfig *fb_con
 } // namespace
 
 void save_checkpoint(const std::string &path, const SoC &soc, uint64_t tick,
-                     const simdojo::SimulationEngine::Config &engine_config) {
+                     const simdojo::SimulationEngine::Config &engine_config,
+                     uint32_t cpu_dispatch_threads) {
   flatbuffers::FlatBufferBuilder builder(1024 * 1024);
 
   // Serialize compute unit states across all XCDs and their shader engines.
@@ -272,7 +274,7 @@ void save_checkpoint(const std::string &path, const SoC &soc, uint64_t tick,
   auto cu_vec = builder.CreateVector(cu_offsets);
   auto pages_vec = builder.CreateVector(page_offsets);
   auto mem_state = fb::CreateGpuMemoryState(builder, pages_vec);
-  auto config_offset = serialize_config(builder, soc, engine_config);
+  auto config_offset = serialize_config(builder, soc, engine_config, cpu_dispatch_threads);
 
   auto checkpoint =
       fb::CreateSimulationCheckpoint(builder, tick, config_offset, cu_vec, cp_offset, mem_state);
@@ -422,7 +424,12 @@ LoadedConfig restore_checkpoint(const std::string &path) {
   LoadedConfig result;
   result.engine_config = engine_config;
   result.exec_mode = vm_config.soc.exec_mode;
-  result.cpu_dispatch_threads = fb_config->cpu_dispatch_threads();
+  // This field did not exist in legacy checkpoints, whose dispatch was serial.
+  // A present zero is a new checkpoint's explicit request for automatic sizing.
+  result.cpu_dispatch_threads =
+      flatbuffers::IsFieldPresent(fb_config, fb::SimulationConfig::VT_CPU_DISPATCH_THREADS)
+          ? fb_config->cpu_dispatch_threads()
+          : 1u;
   result.build_result.root = std::move(soc);
   result.build_result.memory = mem_ptr;
   return result;
