@@ -12,7 +12,13 @@
 #ifndef RCCL_TEST_HOST_RECORDER_FAKES_H_
 #define RCCL_TEST_HOST_RECORDER_FAKES_H_
 
+#include <string>
+#include <vector>
+
 #include "nccl.h"
+
+// Every label passed to the non-replayable record(const char*) overload, in call order.
+extern std::vector<std::string> g_recorderLabels;
 
 // Recorder is pure instrumentation, but production NCCLCHECKs the result of some
 // record() calls (e.g. the RedOpCreate path), so a failing recorder is an
