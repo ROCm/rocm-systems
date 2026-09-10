@@ -7353,12 +7353,16 @@ class ConSanValidationTest(unittest.TestCase):
         )
         document = json.loads(path.read_text(encoding="utf-8"))
         workload = validation.WORKLOAD_BY_ID["tensile-gfx950-lds-positive"]
+        self.assertEqual(workload.run_timeout_seconds, 120)
+        self.assertEqual(workload.tensile_inner_timeout_seconds, 110)
+        self.assertEqual(workload.tensile_expected_numeric_rows, 1)
+        self.assertEqual(workload.tensile_minimum_timed_ms, 1.0)
         fault = validation._load_fault(path, "gfx950", workload, "lds-wrong-address")
         expected_detectors = {
             "supercollider": "detected",
-            "record-replay": "not_detected",
+            "record-replay": "detected",
             "sampled": "not_detected",
-            "inline-shadow": "not_detected",
+            "inline-shadow": "detected",
         }
         for profile, detector in expected_detectors.items():
             policy, trials = validation._fault_trials(fault, profile)
@@ -7378,11 +7382,19 @@ class ConSanValidationTest(unittest.TestCase):
             self.assertEqual(environment["RJ_CONSAN_FAULT_REQUIRE_EXACTLY_ONE"], "1")
         self.assertEqual(fault["environment"]["RJ_CONSAN_FAULT_LDS_ADDRESS_VGPR"], "54")
         self.assertIn(
-            "pc=0x0000000000001344",
+            "fnv1a64:1c2a64888a624a30",
+            fault["environment"]["RJ_CONSAN_FAULT_SITE_IDENTITY"],
+        )
+        self.assertIn(
+            "pc=0x00000000000013f0",
             fault["environment"]["RJ_CONSAN_FAULT_SITE_IDENTITY"],
         )
         provenance = document["provenance"]
-        self.assertEqual(provenance["rocm_sdk_version"], "7.15.0a20260720")
+        self.assertEqual(
+            provenance["rocm_libraries_commit"],
+            "512b7a5c1d7eb622c73ea3840a47548144956892",
+        )
+        self.assertEqual(provenance["rocm_sdk_version"], "10.1.0a20260909")
         self.assertIn(" inventory", provenance["inventory_command"])
         self.assertIn("v54", provenance["replacement_vgpr_basis"])
 

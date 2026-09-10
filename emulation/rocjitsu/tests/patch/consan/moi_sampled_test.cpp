@@ -1983,22 +1983,51 @@ TEST(ConSanMoi, Cdna4SampledBarrierPublishesSelectedEpochTransition) {
   text_words[0] = 0xd81a0004u;
   text_words[1] = 0x00000302u; // ds_write_b32 v2, v3 offset:4
   text_words[400] = *barrier;
+  for (uint16_t vgpr = 0u; vgpr < 16u; ++vgpr) {
+    text_words[410u + vgpr] =
+        build_v_mov_b32_e32(/*vdst=*/15u, vector_source_vgpr(vgpr),
+                            ROCJITSU_CODE_ARCH_CDNA4);
+  }
   text_words.back() = build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4);
   MoiOptions options = moi_options(ConSanMoiEngine::Sampled);
   options.moi_track_barriers = true;
+  options.test_force_vgpr_spill = true;
   options.moi_report_buffer_address = 0x123456780000ull;
   options.moi_report_buffer_size = direct_sampled_report_bytes(2);
   options.max_patches = 3;
 
-  const ConSanTransformArtifacts result =
-      test_lower_consan(make_cdna4_lds_code_object(text_words, "sampled_barrier"), options);
+  std::vector<uint8_t> bytes = make_cdna4_lds_code_object(
+      text_words, "sampled_barrier", /*vgpr_granulated=*/3u);
+  mutate_first_kernel_descriptor(bytes, [](KD &descriptor) {
+    AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc3,
+                    kd::COMPUTE_PGM_RSRC3_GFX90A_ACCUM_OFFSET, 3u);
+  });
+  const ConSanTransformArtifacts result = test_lower_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result));
   EXPECT_TRUE(result.modified()) << "warnings=" << testing::PrintToString(result.warnings)
                                  << " errors=" << testing::PrintToString(result.errors);
-  EXPECT_NE(std::ranges::find(result.patches, ConSanPatchKind::TrampolineMoiSampledSyncMetadata,
-                              &ConSanPatchInfo::kind),
-            result.patches.end());
+  const auto patch =
+      std::ranges::find(result.patches, ConSanPatchKind::TrampolineMoiSampledSyncMetadata,
+                        &ConSanPatchInfo::kind);
+  ASSERT_NE(patch, result.patches.end()) << testing::PrintToString(result.warnings);
+  ASSERT_TRUE(patch->relocated_guest_instruction_offset);
+  ASSERT_GT(patch->spilled_vgpr_count, 0u);
+  AmdGpuCodeObject patched(result.replacement.data(), result.replacement.size());
+  ASSERT_TRUE(patched.is_valid());
+  const std::vector<uint32_t> cave =
+      text_words_at_offset(patched, patch->trampoline_offset, patch->trampoline_size);
+  const size_t guest_index =
+      (*patch->relocated_guest_instruction_offset - patch->trampoline_offset) / sizeof(uint32_t);
+  ASSERT_LT(guest_index + 2u, cave.size());
+  EXPECT_EQ(cave[guest_index], *barrier);
+  // A barrier needs no temporary registers. Save the borrowed VGPR window
+  // after it so address-free scratch state never crosses the workgroup
+  // synchronization point; the long Sampled probe and restoration follow.
+  EXPECT_EQ(cave[guest_index + 1u],
+            *build_cdna4_s_wait_vmcnt0(ROCJITSU_CODE_ARCH_CDNA4));
+  EXPECT_EQ(cave[guest_index + 2u],
+            *build_cdna4_s_wait_lds0(ROCJITSU_CODE_ARCH_CDNA4));
   EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
 }
 
@@ -8370,8 +8399,9 @@ TEST(ConSanMoi, Gfx1250SampledQualifiedBarrierUsesSpill) {
   ASSERT_TRUE(patched.is_valid());
   const std::vector<uint32_t> trampoline =
       text_words_at_offset(patched, patch->trampoline_offset, patch->trampoline_size);
-  ASSERT_FALSE(trampoline.empty());
-  EXPECT_EQ(trampoline.front(), 0xBF860000u);
+  ASSERT_GE(trampoline.size(), 2u);
+  EXPECT_EQ(trampoline.front(), words[401]);
+  EXPECT_EQ(trampoline[1], 0xBF860000u);
 }
 
 TEST(ConSanMoi, Gfx1250SampledBarrierDoesNotGateWorkgroupsForAddressSampling) {

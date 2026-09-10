@@ -444,9 +444,16 @@ WORKLOADS = (
         overhead_processes=1,
         fault_families=("lds-wrong-address",),
         targets=("gfx950",),
-        run_timeout_seconds=60,
-        tensile_inner_timeout_seconds=55,
+        # Current Tensile v5 plus the physical Inline Shadow execution takes
+        # about 58 seconds end to end, just beyond the legacy 55-second
+        # generation-and-execution envelope.
+        run_timeout_seconds=120,
+        tensile_inner_timeout_seconds=110,
         tensile_expected_numeric_rows=1,
+        # This is one exact functional row. Current Tensile v5 reports 3.7 ms
+        # or more of device time for it, so retain a positive timing canary
+        # instead of the repeated performance-row default.
+        tensile_minimum_timed_ms=1.0,
     ),
     Workload(
         id="hip-matmul-m128-n128-k128",

@@ -946,6 +946,29 @@ class TensileValidationTest(unittest.TestCase):
         ):
             self.assertNotIn(retired_key, parameters)
 
+    def test_retained_fixtures_use_integer_bounds_check(self) -> None:
+        fixtures = Path(tensile_validation.__file__).with_name("fixtures")
+        for name in (
+            "gfx950_tensile_lds_positive.yaml",
+            "gfx1250_tensile_streamk_smoke.yaml",
+        ):
+            with self.subTest(name=name):
+                fixture = yaml.safe_load(
+                    (fixtures / name).read_text(encoding="utf-8")
+                )
+                bounds_check = fixture["GlobalParameters"]["BoundsCheck"]
+                self.assertIs(type(bounds_check), int)
+                self.assertEqual(bounds_check, 0)
+                if name == "gfx950_tensile_lds_positive.yaml":
+                    _, parameters = fixture["BenchmarkProblems"][0]
+                    fork_parameters = {
+                        key: value
+                        for entry in parameters["ForkParameters"]
+                        for key, value in entry.items()
+                    }
+                    self.assertIs(type(fork_parameters["DirectToLds"][0]), int)
+                    self.assertEqual(fork_parameters["DirectToLds"], [0])
+
 
 if __name__ == "__main__":
     unittest.main()
