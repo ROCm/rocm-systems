@@ -138,6 +138,8 @@ subtrees:
           title: Callback API and tool configuration
         - file: conceptual/range_replay/range_replay_soundness
           title: Soundness and declining
+        - file: conceptual/range_replay/range_replay_performance
+          title: Performance
   - caption: License
     entries:
     - file: license

@@ -157,3 +157,6 @@ interesting counters are.
 - **[Soundness and declining](range_replay_soundness.md)** — what makes a range replayable, the
   decline decision table and why each condition is checked, the cross-thread decline channel, the
   kernarg-recycling problem, the interceptor passthrough gate, and the optional divergence check.
+- **[Performance](range_replay_performance.md)** — the two-term cost model, why the fixed window
+  cost is paid once per range rather than once per dispatch, what the two nightly perf tests
+  measure, and why a declined range must never be timed.
