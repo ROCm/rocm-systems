@@ -1724,6 +1724,15 @@ for target_id, overrides in NATIVE_GTEST_WORKLOAD_OVERRIDES.items():
 
 
 TARGET_WORKLOAD_OVERRIDES: dict[str, dict[str, dict[str, object]]] = {
+    "gfx1201": {
+        # All four exact torch.mode profiles complete on the physical RDNA4
+        # target, but owner-local planning of its 50-MiB multi-kernel code
+        # object takes 24--40 seconds. Keep a bounded 120-second process
+        # envelope instead of misclassifying ordinary patching as a timeout.
+        "pytorch-torch-mode": {
+            "run_timeout_seconds": 120,
+        },
+    },
     "gfx950": {
         # These compact schedules select no workgroup at the production
         # stride.  A target-resolved validation cadence retains evidence from

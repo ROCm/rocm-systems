@@ -34,6 +34,7 @@
 #include "rocjitsu/code/patch/consan/consan_atomic_classifier.h"
 #include "rocjitsu/code/patch/consan/consan_capability_contract.h"
 #include "rocjitsu/code/patch/consan/consan_moi_dispatch_prologue_effect.h"
+#include "rocjitsu/code/patch/consan/consan_moi_dispatch_identity_source.h"
 #include "rocjitsu/code/patch/consan/consan_moi_entry_scalar_backup.h"
 #include "rocjitsu/code/patch/consan/consan_program_analysis_encoding.h"
 #include "rocjitsu/code/patch/consan/consan_scalar_vcc_spill.h"

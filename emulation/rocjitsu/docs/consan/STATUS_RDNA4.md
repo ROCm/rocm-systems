@@ -1,6 +1,6 @@
 # ConSan RDNA4 (`gfx1201`) status
 
-Status snapshot: 2026-08-24. All rows use physical gfx1201 evidence. Green rows retain accepted clean, coverage, reviewed-fault, containment, overhead, health, and provenance bundles.
+Status snapshot: 2026-09-09. All rows use physical gfx1201 evidence. Green rows retain accepted clean, coverage, reviewed-fault, containment, overhead, health, and provenance bundles.
 
 Legend: 🩶 unseen · 🟥 broken before useful evidence · 🟧 below 80% aggregate applicable-site support or another substantial gap · 🟨 timeout-only blocker or at least 80% aggregate applicable-site support · 🟩 accepted workload/profile contract.
 
@@ -9,7 +9,7 @@ Legend: 🩶 unseen · 🟥 broken before useful evidence · 🟧 below 80% aggr
 | Production HIP | P0 | FP16 matmul (`rdna4-matmul-fp16-production`) | 🩶 unassessed | 🩶 unassessed | 🩶 unassessed | 🩶 unassessed |
 | Production HIP | P0 | FP8 matmul (`rdna4-matmul-fp8-production`) | 🟧 exact; only 75/227 accesses supported | 🟨 exact/static complete; bounded dynamic history incomplete | 🟩 exact; 227/227 accesses and 48/48 barriers; 4.72x; reviewed fault bundle | 🟨 exact; 215/227 accesses supported |
 | Main E2E | P0 | Qwen3-0.6B prefill (`qwen-prefill`) | 🟩 exact; 20/20 accesses; fault/overhead bundle | 🟩 exact; 20/20 accesses and 14/14 barriers; fault/overhead bundle | 🟩 exact; 20/20 accesses and 26/26 barriers; 17/32 fault sweep | 🟩 exact; 20/20 accesses and 14/14 barriers; fault/overhead bundle |
-| PyTorch | P0 | `torch.mode` (`pytorch-torch-mode`) | 🟥 relay planning rejects the 12.3-MiB object | 🟩 four exact runs; 140,334 accesses, 21,002 barriers, 38 fences | 🟨 exact; 135,966/144,974 aggregate sites supported | 🟨 timeout-only while patching at the 30-s bound |
+| PyTorch | P0 | `torch.mode` (`pytorch-torch-mode`) | 🟨 clean exact/complete; 29,111 accesses; qualification refresh pending | 🟩 current clean exact/complete plus retained fault/overhead bundle; 29,111 accesses and 7,819 barriers | 🟨 clean exact/complete; 29,111 accesses and 7,819 barriers; qualification refresh pending | 🟨 clean exact/complete after large-object relay and dispatch-proof fixes; 29,111 accesses and 7,819 barriers; qualification refresh pending |
 | Main E2E | P1 | Sharktank TP1 prefill (`tp1-prefill`) | 🟩 exact; 352/352 accesses; fault/overhead bundle | 🟩 exact; 352/352 accesses and 46/46 barriers; fault/overhead bundle | 🟩 exact; 352/352 accesses and 86/86 barriers; fault/overhead bundle | 🟩 exact; 352/352 accesses and 46/46 barriers; fault/overhead bundle |
 | Main E2E | P1 | Sharktank TP1 decode/combined (`tp1-decode-combined`) | 🟩 exact; 704/704 accesses; fault/overhead bundle | 🟩 exact; 704/704 accesses and 92/92 barriers; fault/overhead bundle | 🟩 exact; 704/704 accesses and 172/172 barriers; fault/overhead bundle | 🟩 exact; 704/704 accesses and 92/92 barriers; fault/overhead bundle |
 | PyTorch | P1 | collision-heavy `scatter_reduce` (`pytorch-scatter-reduce`) | 🟩 BF16/FP32 exact; 27/27 accesses; fault/overhead bundle | 🟩 BF16/FP32 exact; 27/27 accesses; fault/overhead bundle | 🟩 BF16/FP32 exact; 27/27 accesses; fault/overhead bundle | 🟩 BF16/FP32 exact; 27/27 accesses; fault/overhead bundle |

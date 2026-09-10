@@ -475,6 +475,7 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
     patch.anchor_offset = candidate.anchor();
     patch.original_size = candidate.size();
     note_moi_probe_patch_info(patch, entry);
+    patch.moi_dispatch_identity_source = entry.emission.dispatch_id;
     patch.workgroup_shadow = entry.emission.workgroup_shadow;
     auto fragment = make_consan_around_text_fragment(
         std::move(*body), body_guest_offset, candidate.size(), candidate.intent_ids, {},

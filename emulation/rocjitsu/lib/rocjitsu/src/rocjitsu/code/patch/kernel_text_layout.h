@@ -24,7 +24,11 @@ inline constexpr size_t kMaxRecoveredIndirectTransferWords = 7;
 inline constexpr size_t kMaxDirectBranchTransferWords = 8;
 
 /// @brief Private branch slots in one generated SGPR-free island pool.
-inline constexpr uint16_t kDirectBranchIslandPoolSlots = 16;
+///
+/// Large client rewrites can make many distinct CFG edges long within one
+/// 8-KiB routing interval. Thirty-two slots retain bounded local capacity
+/// without requiring descriptor-backed scratch registers.
+inline constexpr uint16_t kDirectBranchIslandPoolSlots = 32;
 
 /// @brief Header words before the private slots in a generated island pool.
 inline constexpr uint16_t kGeneratedIslandPoolHeaderWords = 2;

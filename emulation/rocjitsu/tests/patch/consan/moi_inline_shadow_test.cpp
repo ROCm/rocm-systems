@@ -8543,6 +8543,18 @@ TEST(ConSanMoi, FinalValidationPinsVersionedExactShadowPublication) {
   ASSERT_TRUE(patch->scratch_vgpr);
   EXPECT_TRUE(validate_consan_modified_elf(bytes, valid).empty());
 
+  // The emitted access owns the final owner-local dispatch source. The
+  // code-object-wide operating point is planning telemetry and may not retain
+  // the same choice after a large multi-kernel placement has resolved every
+  // component. Final validation must consume the source committed with the
+  // patch instead of attempting to reconstruct it from that broader state.
+  ConSanTransformArtifacts without_global_dispatch = valid;
+  without_global_dispatch.moi_operating_point.moi_dispatch_identity.reset_sgpr();
+  without_global_dispatch.moi_operating_point.moi_dispatch_identity.reset_vgpr();
+  without_global_dispatch.moi_operating_point.owner_transient_sgprs.clear();
+  without_global_dispatch.moi_operating_point.owner_persistent_vgprs.clear();
+  EXPECT_TRUE(validate_consan_modified_elf(bytes, without_global_dispatch).empty());
+
   const size_t body_file_offset =
       valid.program_inventory.text_sections().front().file_offset + patch->trampoline_offset;
   ASSERT_LE(body_file_offset + patch->trampoline_size, valid.replacement.size());

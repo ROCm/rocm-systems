@@ -886,7 +886,7 @@ class ConSanValidationTest(unittest.TestCase):
             workloads["pytorch-torch-mode"]["targets"],
             ("gfx950", "gfx1250", "gfx1201"),
         )
-        self.assertEqual(workloads["pytorch-torch-mode"]["run_timeout_seconds"], 30)
+        self.assertEqual(workloads["pytorch-torch-mode"]["run_timeout_seconds"], 120)
         self.assertEqual(
             workloads["pytorch-rdna4-compiled-softmax"]["targets"], ("gfx1201",)
         )
@@ -1906,6 +1906,7 @@ class ConSanValidationTest(unittest.TestCase):
     def test_run_uses_target_resolved_workload_timeout(self) -> None:
         with temporary_root() as root:
             cases = (
+                ("gfx1201", "pytorch-torch-mode", 120),
                 ("gfx950", "d128-block", 30),
                 ("gfx1250", "d128-block", 150),
                 ("gfx950", "d128-pressure", 30),

@@ -2448,6 +2448,57 @@ TEST(BinaryTranslatorE2E, Gfx1250LongBranchUsesIslandsAfterSemanticExpansionExha
   EXPECT_NE(std::ranges::find(translated_words, marker), translated_words.end());
 }
 
+TEST(BinaryTranslatorE2E, LateClientSgprGrowthStillHasReachableLongBranchIslands) {
+  constexpr size_t kBranchWord = 0x7fff;
+  constexpr uint32_t kGfx1250SNop = 0xBF800000u;
+  constexpr uint32_t kGfx1250SEndpgm = 0xBFB00000u;
+
+  std::vector<uint32_t> words(kBranchWord, kGfx1250SNop);
+  // The source branch reaches word zero at the negative SOPP limit. A client
+  // prefix attached at this late site moves it out of range at the same moment
+  // that the client consumes the last descriptor-backed SGPR pair.
+  words.push_back(
+      cdna5::build_sopp(cdna5::kSCbranchScc0Sopp, {.simm16 = static_cast<uint16_t>(0x8000u)})[0]);
+  words.push_back(kGfx1250SEndpgm);
+
+  auto image = rocjitsu::test_support::make_minimal_amdgpu_elf_with_descriptor_after_text(words);
+  rocjitsu::AmdGpuCodeObject source(image.data(), image.size());
+  ASSERT_TRUE(source.is_valid());
+
+  rocjitsu::BinaryTranslator translator(
+      ROCJITSU_CODE_ARCH_CDNA5, ROCJITSU_CODE_ARCH_CDNA5, 0,
+      gfx1250_revision_options(rocjitsu::ProcessorRevision::Gfx1250B0,
+                               rocjitsu::ProcessorRevision::Gfx1250A0));
+  translator.set_instruction_rewrite_callback(
+      [&](const rocjitsu::InstructionRewriteContext &context)
+          -> std::optional<rocjitsu::InstructionRewrite> {
+        if (context.source_offset != kBranchWord * sizeof(uint32_t))
+          return std::nullopt;
+        return rocjitsu::InstructionRewrite{
+            .prefix_words = {kGfx1250SNop, kGfx1250SNop},
+            .replacement_words = std::nullopt,
+            .markers = {},
+            .source_size = 0,
+            .required_ordinary_sgpr_count = 106,
+            .preserved_source_span_byte_offset = std::nullopt,
+        };
+      });
+
+  const auto result = translator.translate(source);
+  ASSERT_TRUE(result.ok()) << (result.diagnostics.empty() ? ""
+                                                          : result.diagnostics.front().message);
+
+  rocjitsu::AmdGpuCodeObject translated(result.elf_bytes.data(), result.elf_bytes.size());
+  ASSERT_TRUE(translated.is_valid());
+  ASSERT_FALSE(translated.text_sections().empty());
+  const auto &text = *translated.text_sections().front();
+  const auto translated_words = std::span<const uint32_t>(
+      reinterpret_cast<const uint32_t *>(text.data()), text.size() / sizeof(uint32_t));
+  const uint32_t marker = rocjitsu::build_s_nop(rocjitsu::kBranchIslandPoolMarkerNopImmediate,
+                                                ROCJITSU_CODE_ARCH_CDNA5);
+  EXPECT_NE(std::ranges::find(translated_words, marker), translated_words.end());
+}
+
 TEST(BinaryTranslatorE2E, Gfx1250CompactConditionalLayoutIsIdempotent) {
   constexpr size_t kTargetWord = 20000;
   constexpr uint32_t kGfx1250SEndpgm = 0xBFB00000u;
@@ -3585,6 +3636,52 @@ TEST(BinaryTranslatorE2E, PatchesOutOfRangeConditionalThroughIslandSlotWithoutSg
       rocjitsu::compute_sopp_branch_simm16(rebased_island_offset, kTargetOffset + kWord);
   ASSERT_TRUE(island_to_target.has_value());
   EXPECT_EQ(island_word, rocjitsu::build_s_branch(*island_to_target, ROCJITSU_CODE_ARCH_CDNA5));
+}
+
+TEST(BinaryTranslatorE2E, DirectBranchesShareIslandChainForCommonTarget) {
+  constexpr uint64_t kWord = sizeof(uint32_t);
+  constexpr uint64_t kTargetOffset = 0;
+  constexpr uint64_t kIslandOffset = 70000;
+  constexpr uint64_t kFirstBranchOffset = 140000;
+  constexpr size_t kBranchCount = rocjitsu::kDirectBranchIslandPoolSlots + 1u;
+  const uint32_t branch_word = rocjitsu::build_s_branch(0, ROCJITSU_CODE_ARCH_CDNA5);
+  const auto branch = rocjitsu::test_support::decode_one(branch_word, ROCJITSU_CODE_ARCH_CDNA5);
+  ASSERT_NE(branch, nullptr);
+
+  std::vector<uint8_t> text(kFirstBranchOffset + kBranchCount * kWord, 0);
+  rocjitsu::KernelTextLayout layout;
+  layout.body_end = text.size();
+  layout.blocks.push_back(
+      {.source_start = 0, .source_end = kWord, .target_start = 0, .target_end = kWord});
+  for (size_t i = 0; i < kBranchCount; ++i) {
+    const uint64_t branch_offset = kFirstBranchOffset + i * kWord;
+    layout.branch_fixups.push_back({.inst = branch.get(),
+                                    .source_inst_offset = branch_offset,
+                                    .source_target_offset = kTargetOffset,
+                                    .target_inst_offset = branch_offset,
+                                    .target_window_bytes = kWord,
+                                    .translated_words = {branch_word}});
+  }
+  for (uint16_t i = 0; i < rocjitsu::kDirectBranchIslandPoolSlots; ++i)
+    layout.branch_island_slots.push_back(kIslandOffset + i * kWord);
+
+  ASSERT_TRUE(rocjitsu::patch_direct_branch_fixups(text, layout, ROCJITSU_CODE_ARCH_CDNA5).ok);
+
+  uint32_t first_branch = 0;
+  uint32_t last_branch = 0;
+  std::memcpy(&first_branch, text.data() + kFirstBranchOffset, sizeof(first_branch));
+  std::memcpy(&last_branch, text.data() + kFirstBranchOffset + (kBranchCount - 1u) * kWord,
+              sizeof(last_branch));
+  const auto branch_to_shared_island =
+      rocjitsu::compute_sopp_branch_simm16(kFirstBranchOffset, kIslandOffset);
+  const auto last_branch_to_shared_island = rocjitsu::compute_sopp_branch_simm16(
+      kFirstBranchOffset + (kBranchCount - 1u) * kWord, kIslandOffset);
+  ASSERT_TRUE(branch_to_shared_island.has_value());
+  ASSERT_TRUE(last_branch_to_shared_island.has_value());
+  EXPECT_EQ(first_branch,
+            rocjitsu::build_s_branch(*branch_to_shared_island, ROCJITSU_CODE_ARCH_CDNA5));
+  EXPECT_EQ(last_branch,
+            rocjitsu::build_s_branch(*last_branch_to_shared_island, ROCJITSU_CODE_ARCH_CDNA5));
 }
 
 TEST(BinaryTranslatorE2E, FullSgprConditionalPreservesPoolAfterUnconditionalBranch) {

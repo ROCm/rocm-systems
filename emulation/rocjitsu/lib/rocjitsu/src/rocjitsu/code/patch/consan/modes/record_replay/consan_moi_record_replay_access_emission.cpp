@@ -42,6 +42,8 @@ using consan_detail::MoiWorkitemOwnerDerivationPlan;
 using consan_detail::reject_optional_scratch_range_overlap;
 using consan_moi_detail::append_atomic_fetch_add_one_u32;
 using consan_moi_detail::append_atomic_or_u32_literal;
+using consan_moi_detail::append_moi_report_dispatch_id_pair;
+using consan_moi_detail::append_moi_report_dispatch_id_word;
 using consan_moi_detail::append_reserve_bounded_dynamic_record_slot;
 using consan_moi_detail::append_select_first_lane_in_exec_mask;
 using consan_moi_detail::append_store_moi_report_dispatch_id_pair;

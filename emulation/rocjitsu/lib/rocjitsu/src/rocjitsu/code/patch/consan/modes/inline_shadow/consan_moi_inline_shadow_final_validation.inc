@@ -8,37 +8,14 @@ void validate_inline_exact_shadow_semantics(const FinalValidationEnvironment &en
   };
   if (!std::ranges::any_of(result.patches, is_exact_patch))
     return;
-  const auto owner_local_dispatch_vgpr = [&](const ConSanPatchInfo &patch) {
-    std::optional<uint16_t> common;
-    for (uint64_t owner : patch.owner_descriptor_file_offsets) {
-      const auto prologue = std::ranges::find_if(result.patches, [&](const ConSanPatchInfo &item) {
-        return item.kind == ConSanPatchKind::KernelEntryMoiOwnerEpochPrologue &&
-               std::ranges::find(item.owner_descriptor_file_offsets, owner) !=
-                   item.owner_descriptor_file_offsets.end();
-      });
-      const std::optional<uint16_t> capture_vgpr =
-          prologue == result.patches.end() || !prologue->dispatch_id_prologue
-              ? std::nullopt
-              : prologue->dispatch_id_prologue->capture.vgpr();
-      if (!capture_vgpr || (common && *common != *capture_vgpr)) {
-        return std::optional<uint16_t>{};
-      }
-      common = capture_vgpr;
-    }
-    return common;
-  };
   if (!environment.require_target(errors, "ConSan exact-shadow proof found no target profile"))
     return;
   const rj_code_arch_t arch = environment.arch();
   const bool has_exact_patch_without_dispatch =
       std::ranges::any_of(result.patches, [&](const ConSanPatchInfo &patch) {
         return is_exact_patch(patch) && !patch.workgroup_shadow &&
-               !(patch.private_state_layout && patch.private_state_layout->dispatch_id_offset) &&
-               !result.moi_operating_point.moi_dispatch_identity.sgpr() &&
-               !result.moi_operating_point.moi_dispatch_identity.vgpr() &&
-               !owner_local_dispatch_vgpr(patch) &&
-               environment.target_profile->dispatch_identity !=
-                   ConSanDispatchIdentitySource::CodeObjectLiteral;
+               (!patch.moi_dispatch_identity_source ||
+                !patch.moi_dispatch_identity_source->is_well_formed());
       });
   if (!environment.replacement_text.available || has_exact_patch_without_dispatch) {
     errors.emplace_back(
@@ -228,98 +205,47 @@ void validate_inline_exact_shadow_semantics(const FinalValidationEnvironment &en
     const size_t transaction_count = exact_cas_count / 2u;
     std::vector<uint32_t> capture_low;
     std::vector<uint32_t> capture_high;
-    const std::optional<uint16_t> owner_dispatch_vgpr = owner_local_dispatch_vgpr(patch);
-    std::optional<uint16_t> expected_dispatch_sgpr =
-        result.moi_operating_point.moi_dispatch_identity.sgpr();
-    std::optional<uint16_t> expected_dispatch_vgpr =
-        result.moi_operating_point.moi_dispatch_identity.vgpr();
-    const auto &assignments = result.moi_operating_point.owner_transient_sgprs;
-    if (!(patch.private_state_layout && patch.private_state_layout->dispatch_id_offset) &&
-        !assignments.empty()) {
-      // A partially admitted code-object-wide pair can be unavailable to one
-      // owner component. Resolve the exact shared-site choice before checking
-      // the emitted capture; an explicit null pair selects the persistent
-      // vector fallback for that component.
-      const ConSanMoiTransientSgprAssignment *first_assignment = nullptr;
-      for (uint64_t owner : patch.owner_descriptor_file_offsets) {
-        const auto assignment = std::ranges::find(
-            assignments, owner, &ConSanMoiTransientSgprAssignment::descriptor_file_offset);
-        if (assignment != assignments.end()) {
-          first_assignment = &*assignment;
-          break;
-        }
-      }
-      if (first_assignment != nullptr) {
-        expected_dispatch_sgpr = first_assignment->dispatch_id_sgpr;
-        for (uint64_t owner : patch.owner_descriptor_file_offsets) {
-          const auto assignment = std::ranges::find(
-              assignments, owner, &ConSanMoiTransientSgprAssignment::descriptor_file_offset);
-          if (assignment == assignments.end() ||
-              assignment->dispatch_id_sgpr != expected_dispatch_sgpr) {
-            expected_dispatch_sgpr.reset();
-            break;
-          }
-        }
-      }
-    } else if (patch.private_state_layout && patch.private_state_layout->dispatch_id_offset) {
-      expected_dispatch_sgpr.reset();
-      std::optional<uint16_t> owner_reload_sgpr;
-      bool saw_owner_assignment = false;
-      bool inconsistent_owner_assignments = false;
-      for (uint64_t owner : patch.owner_descriptor_file_offsets) {
-        const auto assignment = std::ranges::find(
-            assignments, owner, &ConSanMoiTransientSgprAssignment::descriptor_file_offset);
-        if (assignment == assignments.end())
-          continue;
-        const std::optional<uint16_t> reload_sgpr =
-            assignment->scalar_spill_setup
-                ? std::optional{assignment->scalar_spill_setup->temporaries.frame_base_sgpr}
-                : (!assignment->spill_backed
-                       ? std::optional<uint16_t>(assignment->exec_save_sgpr + 12u)
-                       : std::nullopt);
-        if (saw_owner_assignment && reload_sgpr != owner_reload_sgpr) {
-          expected_dispatch_sgpr.reset();
-          inconsistent_owner_assignments = true;
-          break;
-        }
-        saw_owner_assignment = true;
-        owner_reload_sgpr = reload_sgpr;
-      }
-      if (saw_owner_assignment) {
-        const bool every_owner_has_assignment =
-            std::ranges::all_of(patch.owner_descriptor_file_offsets, [&](uint64_t owner) {
-              return std::ranges::find(assignments, owner,
-                                       &ConSanMoiTransientSgprAssignment::descriptor_file_offset) !=
-                     assignments.end();
-            });
-        if (!inconsistent_owner_assignments && every_owner_has_assignment)
-          expected_dispatch_sgpr = owner_reload_sgpr;
-      } else if (!inconsistent_owner_assignments && result.moi_operating_point.moi_exec_save_sgpr) {
-        expected_dispatch_sgpr =
-            static_cast<uint16_t>(*result.moi_operating_point.moi_exec_save_sgpr + 12u);
-      }
+    if (!patch.moi_dispatch_identity_source ||
+        !patch.moi_dispatch_identity_source->is_well_formed()) {
+      errors.emplace_back(
+          "ConSan final validation found exact-shadow patch without a committed dispatch-ID "
+          "source");
+      continue;
     }
-    if (!expected_dispatch_sgpr && !expected_dispatch_vgpr)
-      expected_dispatch_vgpr = owner_dispatch_vgpr;
-    if (expected_dispatch_sgpr) {
+    const ConSanMoiDispatchIdentitySource &dispatch = *patch.moi_dispatch_identity_source;
+    bool dispatch_source_matches_request = true;
+    if (dispatch.sgpr) {
       capture_low.push_back(
-          build_v_mov_b32_e32(static_cast<uint16_t>(scratch + 2u), *expected_dispatch_sgpr, arch));
-      capture_high.push_back(
-          build_v_mov_b32_e32(static_cast<uint16_t>(scratch + 3u),
-                              static_cast<uint16_t>(*expected_dispatch_sgpr + 1u), arch));
-    } else if (expected_dispatch_vgpr) {
+          build_v_mov_b32_e32(static_cast<uint16_t>(scratch + 2u), *dispatch.sgpr, arch));
+      capture_high.push_back(build_v_mov_b32_e32(static_cast<uint16_t>(scratch + 3u),
+                                                 static_cast<uint16_t>(*dispatch.sgpr + 1u), arch));
+    } else if (dispatch.vgpr) {
       capture_low.push_back(build_v_mov_b32_e32(static_cast<uint16_t>(scratch + 2u),
-                                                vector_source_vgpr(*expected_dispatch_vgpr), arch));
+                                                vector_source_vgpr(*dispatch.vgpr), arch));
       capture_high.push_back(build_v_mov_b32_e32(
           static_cast<uint16_t>(scratch + 3u),
-          vector_source_vgpr(static_cast<uint16_t>(*expected_dispatch_vgpr + 1u)), arch));
-    } else {
+          vector_source_vgpr(static_cast<uint16_t>(*dispatch.vgpr + 1u)), arch));
+    } else if (dispatch.private_offset) {
+      const auto low = instrumentation::build_private_load_b32(static_cast<uint16_t>(scratch + 2u),
+                                                               *dispatch.private_offset, arch);
+      const auto high = instrumentation::build_private_load_b32(
+          static_cast<uint16_t>(scratch + 3u), *dispatch.private_offset + SpillManager::kSlotBytes,
+          arch);
+      const auto wait = instrumentation::build_s_wait_private_load0(arch);
+      if (!low || !high || !wait) {
+        errors.emplace_back(
+            "ConSan final validation could not encode private dispatch-ID expectations");
+        continue;
+      }
+      capture_low = *low;
+      capture_high = *high;
+    } else if (dispatch.literal) {
+      dispatch_source_matches_request = *dispatch.literal == expected_moi_report_dispatch_id;
       const auto low = instrumentation::build_v_mov_b32_literal(
-          static_cast<uint16_t>(scratch + 2u),
-          static_cast<uint32_t>(expected_moi_report_dispatch_id), arch);
+          static_cast<uint16_t>(scratch + 2u), static_cast<uint32_t>(*dispatch.literal), arch);
       const auto high = instrumentation::build_v_mov_b32_literal(
-          static_cast<uint16_t>(scratch + 3u),
-          static_cast<uint32_t>(expected_moi_report_dispatch_id >> 32u), arch);
+          static_cast<uint16_t>(scratch + 3u), static_cast<uint32_t>(*dispatch.literal >> 32u),
+          arch);
       if (!low || !high) {
         errors.emplace_back(
             "ConSan final validation could not encode literal dispatch-ID expectations");
@@ -332,15 +258,12 @@ void validate_inline_exact_shadow_semantics(const FinalValidationEnvironment &en
     // claim and even commit are the two required CAS operations; distinct
     // address/access/mask groups revisit the same body at runtime rather than
     // requiring a duplicated uniform/fallback transaction in the image.
-    if (decoded_legacy_swap || decoded_cas_count < 2u || decoded_cas_count % 2u != 0u ||
-        exact_cas_count != decoded_cas_count ||
+    if (!dispatch_source_matches_request || decoded_legacy_swap || decoded_cas_count < 2u ||
+        decoded_cas_count % 2u != 0u || exact_cas_count != decoded_cas_count ||
         count_pattern(*expected_dispatch_low_store) != transaction_count ||
         count_pattern(*expected_dispatch_high_store) != transaction_count ||
         count_pattern(capture_low) < transaction_count ||
         count_pattern(capture_high) < transaction_count) {
-      const auto optional_register = [](std::optional<uint16_t> value) {
-        return value ? std::to_string(*value) : std::string("none");
-      };
       errors.emplace_back(
           "ConSan final validation found invalid versioned exact-shadow publication semantics: "
           "anchor=" +
@@ -351,9 +274,7 @@ void validate_inline_exact_shadow_semantics(const FinalValidationEnvironment &en
           " dispatch_high_stores=" + std::to_string(count_pattern(*expected_dispatch_high_store)) +
           " capture_low=" + std::to_string(count_pattern(capture_low)) +
           " capture_high=" + std::to_string(count_pattern(capture_high)) +
-          " expected_dispatch_sgpr=" + optional_register(expected_dispatch_sgpr) +
-          " expected_dispatch_vgpr=" + optional_register(expected_dispatch_vgpr) +
-          " owner_dispatch_vgpr=" + optional_register(owner_dispatch_vgpr) +
+          " dispatch_source_matches_request=" + std::to_string(dispatch_source_matches_request) +
           " owner_count=" + std::to_string(patch.owner_descriptor_file_offsets.size()) +
           " legacy_swap=" + std::to_string(decoded_legacy_swap));
     }

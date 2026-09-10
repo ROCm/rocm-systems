@@ -504,6 +504,10 @@ struct ConSanPatchAbiEffects {
   /// Exact preload transformation and unique persistent register
   /// representation proved by an emitted dispatch-ID entry prologue.
   std::optional<ConSanMoiDispatchIdPrologueEffect> dispatch_id_prologue;
+  /// Exact dispatch-ID source consumed by this patch after owner-local
+  /// placement. Final validation must inspect this committed decision rather
+  /// than reconstructing it from the code-object-wide operating point.
+  std::optional<ConSanMoiDispatchIdentitySource> moi_dispatch_identity_source;
   uint16_t spilled_vgpr_count = 0;
   /// Absolute per-workitem private-segment minimum encoded into the owning
   /// kernel descriptor.

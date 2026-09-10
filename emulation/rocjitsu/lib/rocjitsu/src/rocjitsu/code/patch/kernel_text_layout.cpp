@@ -748,23 +748,52 @@ void append_direct_branch_island_pool(std::vector<uint8_t> &kernel_text, KernelT
   return std::nullopt;
 }
 
-[[nodiscard]] std::optional<std::vector<uint64_t>>
-allocate_branch_island_chain(uint64_t branch_pc, uint64_t target_offset,
-                             std::span<const uint64_t> island_slots,
-                             std::vector<uint8_t> &island_used) {
-  std::vector<uint64_t> chain;
+struct BranchIslandChain {
+  std::vector<uint64_t> slots;
+  size_t new_slot_count = 0;
+};
+
+[[nodiscard]] std::optional<BranchIslandChain> allocate_branch_island_chain(
+    uint64_t branch_pc, uint64_t target_offset, std::span<const uint64_t> island_slots,
+    std::vector<uint8_t> &island_used, std::vector<std::optional<uint64_t>> &island_final_targets) {
+  BranchIslandChain chain;
+  std::vector<size_t> new_slot_indices;
   uint64_t current_pc = branch_pc;
 
   while (!compute_sopp_branch_simm16(current_pc, target_offset)) {
+    std::optional<size_t> reusable_slot;
+    for (size_t i = 0; i < island_slots.size(); ++i) {
+      if (!island_used[i] || island_final_targets[i] != target_offset)
+        continue;
+      const uint64_t slot = island_slots[i];
+      if ((target_offset > current_pc && (slot <= current_pc || slot >= target_offset)) ||
+          (target_offset < current_pc && (slot >= current_pc || slot <= target_offset)) ||
+          !compute_sopp_branch_simm16(current_pc, slot)) {
+        continue;
+      }
+      if (!reusable_slot || (target_offset > current_pc && slot > island_slots[*reusable_slot]) ||
+          (target_offset < current_pc && slot < island_slots[*reusable_slot])) {
+        reusable_slot = i;
+      }
+    }
+    if (reusable_slot) {
+      chain.slots.push_back(island_slots[*reusable_slot]);
+      break;
+    }
+
     const auto slot_index =
         find_branch_island_slot(current_pc, target_offset, island_slots, island_used);
     if (!slot_index)
       return std::nullopt;
     island_used[*slot_index] = true;
+    new_slot_indices.push_back(*slot_index);
     current_pc = island_slots[*slot_index];
-    chain.push_back(current_pc);
+    chain.slots.push_back(current_pc);
   }
 
+  chain.new_slot_count = new_slot_indices.size();
+  for (size_t slot_index : new_slot_indices)
+    island_final_targets[slot_index] = target_offset;
   return chain;
 }
 
@@ -839,6 +868,8 @@ TextRelocationResult patch_direct_branch_fixups(std::vector<uint8_t> &text,
   };
 
   std::vector<uint8_t> branch_island_used(layout.branch_island_slots.size(), 0);
+  std::vector<std::optional<uint64_t>> branch_island_final_targets(
+      layout.branch_island_slots.size());
   std::vector<PlannedWindowPatch> window_patches;
   window_patches.reserve(layout.branch_fixups.size());
   std::vector<PlannedIslandPatch> island_patches;
@@ -889,18 +920,24 @@ TextRelocationResult patch_direct_branch_fixups(std::vector<uint8_t> &text,
                                              ? fixup.target_inst_offset
                                              : fixup.target_inst_offset + sizeof(uint32_t);
         auto chain = allocate_branch_island_chain(first_branch_pc, *target_target,
-                                                  layout.branch_island_slots, branch_island_used);
-        if (!chain || chain->empty()) {
+                                                  layout.branch_island_slots, branch_island_used,
+                                                  branch_island_final_targets);
+        if (!chain || chain->slots.empty()) {
+          const size_t used_island_slots =
+              static_cast<size_t>(std::ranges::count(branch_island_used, static_cast<uint8_t>(1u)));
           return relocation_error(
               fixup.source_inst_offset,
-              direct_branch_range_error(fixup.target_inst_offset, *target_target, new_delta),
+              direct_branch_range_error(fixup.target_inst_offset, *target_target, new_delta) +
+                  "; no reachable SGPR-free island chain (slots=" +
+                  std::to_string(layout.branch_island_slots.size()) +
+                  ", used=" + std::to_string(used_island_slots) + ")",
               TextLayoutFailureCategory::ResourceLimit, TextLayoutFailureReason::BranchOutOfRange);
         }
 
         std::vector<uint32_t> island_words;
         if (!append_branch_island_direct_sequence(
                 island_words, *fixup.inst, words.front(), fixup.target_inst_offset,
-                fixup.target_window_bytes, chain->front(), arch)) {
+                fixup.target_window_bytes, chain->slots.front(), arch)) {
           const bool can_grow_conditional_source =
               (fixup.inst->flags() & COND_BRANCH) != 0 &&
               conditional_branch_can_invert(fixup.inst->mnemonic()) &&
@@ -926,15 +963,16 @@ TextRelocationResult patch_direct_branch_fixups(std::vector<uint8_t> &text,
           continue;
         }
         words = std::move(island_words);
-        for (size_t i = 0; i < chain->size(); ++i) {
-          const uint64_t next =
-              i + 1 < chain->size() ? (*chain)[i + 1] : static_cast<uint64_t>(*target_target);
-          const auto simm = compute_sopp_branch_simm16((*chain)[i], next);
-          if (!simm || !text_contains_range(text, (*chain)[i], sizeof(uint32_t))) {
+        for (size_t i = 0; i < chain->new_slot_count; ++i) {
+          const uint64_t next = i + 1 < chain->slots.size() ? chain->slots[i + 1]
+                                                            : static_cast<uint64_t>(*target_target);
+          const auto simm = compute_sopp_branch_simm16(chain->slots[i], next);
+          if (!simm || !text_contains_range(text, chain->slots[i], sizeof(uint32_t))) {
             return relocation_error(fixup.source_inst_offset,
                                     "direct branch island patch points outside translated .text");
           }
-          island_patches.push_back({.offset = (*chain)[i], .word = build_s_branch(*simm, arch)});
+          island_patches.push_back(
+              {.offset = chain->slots[i], .word = build_s_branch(*simm, arch)});
         }
       } else {
         std::vector<uint32_t> long_words;
@@ -1003,6 +1041,8 @@ TextRelocationResult patch_recovered_indirect_fixups(std::vector<uint8_t> &text,
   std::vector<PlannedWindowPatch> window_patches;
   window_patches.reserve(layout.recovered_indirect_fixups.size());
   std::vector<PlannedIslandPatch> island_patches;
+  std::vector<std::optional<uint64_t>> branch_island_final_targets(
+      layout.branch_island_slots.size());
   TextRelocationResult growth_required = relocation_error(
       0, "recovered indirect branches require wider patch windows",
       TextLayoutFailureCategory::ResourceLimit, TextLayoutFailureReason::BranchOutOfRange);
@@ -1075,12 +1115,13 @@ TextRelocationResult patch_recovered_indirect_fixups(std::vector<uint8_t> &text,
       // Special scalar carriers such as VCC and TTMP must not be repurposed as
       // an ordinary long-branch scratch pair. An unconditional island chain is
       // the SGPR-free fallback; call-like transfers need a reserved pair.
-      auto chain =
-          fixup.is_call
-              ? std::optional<std::vector<uint64_t>>{}
-              : allocate_branch_island_chain(fixup.target_window_offset, *target_target,
-                                             layout.branch_island_slots, branch_island_used);
-      if (!chain || chain->empty()) {
+      std::optional<BranchIslandChain> chain;
+      if (!fixup.is_call) {
+        chain = allocate_branch_island_chain(fixup.target_window_offset, *target_target,
+                                             layout.branch_island_slots, branch_island_used,
+                                             branch_island_final_targets);
+      }
+      if (!chain || chain->slots.empty()) {
         return relocation_error(fixup.source_call_offset,
                                 "special-carrier recovered branch is out of range and has no "
                                 "scratch pair or island chain",
@@ -1088,18 +1129,18 @@ TextRelocationResult patch_recovered_indirect_fixups(std::vector<uint8_t> &text,
                                 TextLayoutFailureReason::BranchOutOfRange);
       }
       const auto first_simm =
-          compute_sopp_branch_simm16(fixup.target_window_offset, chain->front());
+          compute_sopp_branch_simm16(fixup.target_window_offset, chain->slots.front());
       if (!first_simm)
         return relocation_error(fixup.source_call_offset,
                                 "recovered indirect branch island chain is malformed");
       words.push_back(build_s_branch(*first_simm, arch));
-      for (size_t i = 0; i < chain->size(); ++i) {
-        const uint64_t next = i + 1 < chain->size() ? (*chain)[i + 1] : *target_target;
-        const auto simm = compute_sopp_branch_simm16((*chain)[i], next);
-        if (!simm || !text_contains_range(text, (*chain)[i], sizeof(uint32_t)))
+      for (size_t i = 0; i < chain->new_slot_count; ++i) {
+        const uint64_t next = i + 1 < chain->slots.size() ? chain->slots[i + 1] : *target_target;
+        const auto simm = compute_sopp_branch_simm16(chain->slots[i], next);
+        if (!simm || !text_contains_range(text, chain->slots[i], sizeof(uint32_t)))
           return relocation_error(fixup.source_call_offset,
                                   "recovered indirect branch island chain is malformed");
-        island_patches.push_back({.offset = (*chain)[i], .word = build_s_branch(*simm, arch)});
+        island_patches.push_back({.offset = chain->slots[i], .word = build_s_branch(*simm, arch)});
       }
     }
     if (words.size() * sizeof(uint32_t) > fixup.target_window_bytes) {

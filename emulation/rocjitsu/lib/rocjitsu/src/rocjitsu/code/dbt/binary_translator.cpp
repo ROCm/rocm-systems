@@ -3594,6 +3594,14 @@ TranslatedCodeObject BinaryTranslator::translate_impl(const AmdGpuCodeObject &ob
       return !next_long_branch_sgpr_pair(kernel_context, source_sgpr_extent, host_arch_)
                   .has_value();
     };
+    // An instruction client can raise the descriptor-backed SGPR extent at
+    // any source site. Seed the sparse SGPR-free fallback grid from the start
+    // rather than discovering at a late rewrite that no reachable island was
+    // emitted behind it. The pools are skipped at runtime and remain available
+    // only if final control-flow relocation actually needs them.
+    const auto should_emit_branch_island_pools = [&] {
+      return instruction_rewrite_callback_ != nullptr || needs_branch_island_fallback();
+    };
     const bool is_gfx1250_b0_to_a0_profile = is_gfx1250_b0_to_a0();
     std::unordered_map<uint64_t, const Instruction *> source_instruction_by_offset;
     std::unordered_map<uint64_t, const BasicBlock *> source_block_by_end_offset;
@@ -4235,7 +4243,7 @@ TranslatedCodeObject BinaryTranslator::translate_impl(const AmdGpuCodeObject &ob
         // Waiting for a CFG boundary can therefore leave a large straight-line
         // expansion with no reachable island even though the fallback was
         // planned before emission.
-        if (needs_branch_island_fallback() && !preserve_generated_branch_island_pools &&
+        if (should_emit_branch_island_pools() && !preserve_generated_branch_island_pools &&
             it != block->instructions().begin() && std::next(it) != block->instructions().end() &&
             kernel_text.size() >= next_branch_island_pool_offset) {
           append_direct_branch_island_pool(kernel_text, layout, host_arch_);
@@ -4914,7 +4922,7 @@ TranslatedCodeObject BinaryTranslator::translate_impl(const AmdGpuCodeObject &ob
               : kernel_text.size();
       layout.blocks.push_back(placement);
       target_offset_by_source_offset.emplace(block->end_offset(), placement.target_end);
-      if (needs_branch_island_fallback() && !preserve_generated_branch_island_pools &&
+      if (should_emit_branch_island_pools() && !preserve_generated_branch_island_pools &&
           block != scope.blocks.back() && kernel_text.size() >= next_branch_island_pool_offset) {
         append_direct_branch_island_pool(kernel_text, layout, host_arch_);
         next_branch_island_pool_offset = next_direct_branch_island_pool_offset(kernel_text.size());
@@ -5111,6 +5119,7 @@ TranslatedCodeObject BinaryTranslator::translate_impl(const AmdGpuCodeObject &ob
           rebaser.rebase(marker.target_offset);
         remaining_growth_words -= requested_growth_words;
       } else if (!layout.long_branch_sgpr) {
+        const std::string island_failure = patched_control_flow.message;
         auto sgpr = reserve_long_branch_sgpr_pair(kernel_context, source_sgpr_extent);
         if (!sgpr) {
           patched_control_flow = {
@@ -5120,7 +5129,8 @@ TranslatedCodeObject BinaryTranslator::translate_impl(const AmdGpuCodeObject &ob
               .required_windows = {},
               .message =
                   "long direct branch requires an additional descriptor-backed SGPR pair after "
-                  "semantic expansion",
+                  "semantic expansion; SGPR-free fallback failed: " +
+                  island_failure,
               .compact_builder_fallbacks = {},
           };
           break;

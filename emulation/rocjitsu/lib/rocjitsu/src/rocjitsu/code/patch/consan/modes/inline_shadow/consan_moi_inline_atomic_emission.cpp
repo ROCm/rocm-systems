@@ -50,6 +50,7 @@ using consan_moi_detail::append_atomic_fetch_add_one_u32;
 using consan_moi_detail::append_atomic_load_u32;
 using consan_moi_detail::append_compare_moi_report_dispatch_id_word;
 using consan_moi_detail::append_load_u32_vgpr_at_offset;
+using consan_moi_detail::append_moi_report_dispatch_id_word;
 using consan_moi_detail::append_store_u32_vgpr_at_offset;
 using consan_moi_detail::moi_has_runtime_hardware_dispatch_id;
 
@@ -1803,8 +1804,8 @@ inline_atomic_scalar_spill_aliases_guest_address(const ConSanMoiAtomicAddressPla
     // then free to reuse the same scalar window, and the ordinary epilogue
     // restores its guest-visible contents a second time. This is deliberately
     // conditional: most sites do not need the extra reload transaction.
-    if (inline_atomic_scalar_spill_aliases_guest_address(
-            address_plan, scalar_spill->sgpr_base, scalar_spill->sgpr_count)) {
+    if (inline_atomic_scalar_spill_aliases_guest_address(address_plan, scalar_spill->sgpr_base,
+                                                         scalar_spill->sgpr_count)) {
       words.insert(words.end(), scalar_spill->restore_words.begin(),
                    scalar_spill->restore_words.end());
     }
