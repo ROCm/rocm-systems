@@ -65,10 +65,14 @@ env:
   # reason. Empty string submits to the general partition instead.
   SLURM_BUILD_RESERVATION: rccl_dev
   # Per-run isolation: each run gets its own cvs worktree, build output, config,
-  # artifacts and logs under runs/<run_key>/, keyed on GITHUB_RUN_ID -- which is
-  # also how build and detect find the same workspace. Already the default in
+  # artifacts and logs under runs/<run_key>/. Already the default in
   # workspace.sh; stated here because it is the single switch that makes
   # concurrent runs safe.
+  #
+  # workspace.sh keys that dir on GITHUB_RUN_ID *and* GITHUB_RUN_ATTEMPT, so two
+  # jobs share a workspace only within one attempt. Anything that has to survive
+  # a re-run therefore travels as a job output holding an absolute path, not as
+  # a path both jobs re-derive -- see config_json in `build`.
   RCCL_CI_WORKSPACE: '1'
 
 # Only `contents: read` here, which is all build and detect need -- they check
@@ -188,9 +192,10 @@ jobs:
             # stages it into runs/<run_key>/config.json and templates that.
             RUN_CONFIG="${RCCL_CI_ROOT}/configs/ci_detect_run_${{ github.run_id }}.json"
             cp "${_CONFIG}" "${RUN_CONFIG}"
-            # Set the output before sbatch runs (not after) so the cleanup-on-
-            # failure step below can still find this path if sbatch fails.
-            echo "config_json=${RUN_CONFIG}" >> "$GITHUB_OUTPUT"
+            # Published before sbatch runs so the cleanup-on-failure step below
+            # can still find the staging copy if sbatch fails. This is NOT what
+            # detect consumes -- see config_json at the end of this step.
+            echo "staging_config=${RUN_CONFIG}" >> "$GITHUB_OUTPUT"
             # An unset/empty SLURM_BUILD_RESERVATION means "no reservation", not
             # "inherit the detect one" -- passing --reservation="" is an error,
             # so the flag has to be omitted entirely in that case.
@@ -250,6 +255,37 @@ jobs:
             build_done=1
             cat "${sb_out}"
             [[ "${sb_rc}" -eq 0 ]] || exit "${sb_rc}"
+
+            # Hand detect the config the build actually TEMPLATED, not the
+            # staging copy it was made from.
+            #
+            # workspace.sh keys its run dir on run_id AND run_attempt, by
+            # design, so a re-run gets a clean workspace. That means a detect-only
+            # re-run computes a different key than the build did, finds no staged
+            # config there, and copies the pristine staging file instead -- which
+            # still points both sides at the fixed prebuilt library. The run then
+            # measures nothing, or the identical-sides guard rejects it outright.
+            #
+            # Publishing the absolute workspace path sidesteps that entirely:
+            # job outputs are re-served verbatim to later attempts, so detect
+            # keeps using the build's templated config and its libraries no
+            # matter which attempt it runs on.
+            WS_CFG=""
+            if [[ "${RCCL_CI_WORKSPACE}" == "1" ]]; then
+              HELPER="${RCCL_CI_ROOT}/cvs/ci/rccl_perf_gate/sbatch/lib/workspace.sh"
+              if [[ -f "${HELPER}" ]]; then
+                WS_ROOT="$(bash "${HELPER}" --print-root 2>/dev/null | tail -n1)" || WS_ROOT=""
+                [[ -n "${WS_ROOT}" && -f "${WS_ROOT}/config.json" ]] && WS_CFG="${WS_ROOT}/config.json"
+              fi
+              if [[ -z "${WS_CFG}" ]]; then
+                echo "::error::RCCL_CI_WORKSPACE=1 but the build staged no workspace config. Refusing to hand detect the untemplated staging copy, which would compare the prebuilt library against itself."
+                exit 1
+              fi
+              echo "Detect will use the workspace config: ${WS_CFG}"
+              echo "config_json=${WS_CFG}" >> "$GITHUB_OUTPUT"
+            else
+              echo "config_json=${RUN_CONFIG}" >> "$GITHUB_OUTPUT"
+            fi
           else
             echo "config_json=${_CONFIG}" >> "$GITHUB_OUTPUT"
           fi
@@ -260,7 +296,7 @@ jobs:
         # left to the janitor above -- see the note in `detect`, before its gate.
         if: failure() || cancelled()
         env:
-          _CONFIG: ${{ steps.resolve.outputs.config_json }}
+          _CONFIG: ${{ steps.resolve.outputs.staging_config }}
         run: |
           case "${_CONFIG}" in
             "${RCCL_CI_ROOT}"/configs/ci_detect_run_*.json) rm -f "${_CONFIG}" ;;
@@ -300,6 +336,11 @@ jobs:
     # until a runner is assigned, so that wait is invisible to every timeout in
     # this file.
     timeout-minutes: 500
+    outputs:
+      # Identifies the archive THIS execution of detect uploaded. Empty when it
+      # uploaded nothing, which is the signal `report` needs -- see the note on
+      # its download step.
+      artifact_id: ${{ steps.up.outputs.artifact-id }}
     steps:
       - name: Run A/B detector (pinned 4-node allocation)
         id: detect
@@ -409,7 +450,7 @@ jobs:
         run: |
           REPORT="${_ART}/ab_regression_report.json"
           # Clear any inherited report BEFORE deciding anything. The artifact dir
-          # is keyed on run_id, not run_attempt, so a re-run inherits attempt 1's
+          # can be reused across attempts, so a re-run may inherit attempt 1's
           # rccl_report.md -- and every bail-out below deliberately leaves the
           # file alone, which would hand `Upload artifacts` a stale verdict for
           # `report` to post as this attempt's answer.
@@ -449,16 +490,14 @@ jobs:
           cat "${_ART}/rccl_report.md" >> "${GITHUB_STEP_SUMMARY}"
 
       - name: Upload artifacts
+        id: up
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          # Per run, so concurrent runs cannot collide -- but deliberately NOT
-          # per attempt. "Re-run failed jobs" bumps run_attempt without re-running
-          # a `detect` that already succeeded, so an attempt-stamped name would
-          # leave `report` hunting for an artifact nobody uploaded and posting
-          # "not measured" over a good verdict. `overwrite` keeps the name
-          # resolving to the newest upload when detect itself is re-run; there is
-          # one writer per run, so the parallel-writer hazard does not apply.
+          # Per run, so concurrent runs cannot collide. `report` does not resolve
+          # this name, though -- it downloads by the artifact-id published below.
+          # The name only has to be stable enough for a human to find, and
+          # `overwrite` only exists so a re-running detect can reclaim it.
           name: rccl-ab-report-${{ github.run_id }}
           overwrite: true
           if-no-files-found: warn
@@ -564,14 +603,32 @@ jobs:
     steps:
       - name: Fetch the rendered report
         id: dl
-        # Absent whenever detect produced no verdict -- skipped, cancelled, or
-        # run but measured nothing. Normal here, not an error: saying something
-        # in exactly those cases is the point of this job.
+        # Download by artifact-id, NOT by name.
+        #
+        # The name is run-scoped, so it survives across attempts, and `overwrite`
+        # only replaces it when there is something to upload. A detect re-run
+        # that dies before producing any files therefore leaves the PREVIOUS
+        # attempt's archive in place under that same name -- and resolving by
+        # name here would fetch it and post an older attempt's PASS under this
+        # attempt's footer. The artifact-id names one specific upload, so a
+        # failed retry cannot inherit an earlier one.
+        #
+        # Skipped when the id is empty, which covers detect being skipped or
+        # cancelled and detect running but uploading nothing. That is a normal
+        # outcome, not an error: saying something in exactly those cases is the
+        # whole point of this job. A report-only re-run still works, because job
+        # outputs from the succeeded detect are re-served verbatim.
+        if: needs.detect.outputs.artifact_id != ''
         continue-on-error: true
         uses: actions/download-artifact@v4
         with:
-          # Run-scoped, not attempt-scoped -- see the note on the upload.
-          name: rccl-ab-report-${{ github.run_id }}
+          artifact-ids: ${{ needs.detect.outputs.artifact_id }}
+          # Required. download-artifact only extracts straight into `path` when
+          # it was given a `name`; downloading by id otherwise nests the files
+          # under path/<artifact-name>/, and the compose step below would find
+          # no rccl_report.md and report every run as unmeasured. With one id
+          # there is nothing to merge -- this just flattens.
+          merge-multiple: true
           path: ${{ runner.temp }}/dl
 
       - name: Compose comment
