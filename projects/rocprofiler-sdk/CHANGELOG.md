@@ -33,6 +33,7 @@ Full documentation for ROCprofiler-SDK is available at [rocm.docs.amd.com/projec
 
 ### Resolved issues
 
+  - `rocprofv3 --kernel-replay-beta-enabled` given without `--replay-mode kernel` is now rejected instead of ignored. The flag acknowledges that kernel replay is a beta feature; it does not select it. Its name reads as if it did, so a command line carrying only the acknowledgement silently ran application replay, and the counter values that produces are indistinguishable from replayed ones.
   - Fixed `rocprofv3` crashing during output generation when a second tool subscribed to code object tracing in the same process, which blocked profiling PyTorch and Triton workloads through rocprofiler-compute.
   - Fixed `rocprofv3` hanging instead of exiting when a fatal signal arrives while it is already handling one, for example when output generation aborts. It previously left GPU child processes running and required killing the process manually.
 

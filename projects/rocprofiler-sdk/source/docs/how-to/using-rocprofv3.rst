@@ -1178,7 +1178,7 @@ The preceding command collects both counter groups in a single run of ``<applica
 
 .. note::
 
-   - ``--replay-mode kernel`` requires ``--pmc`` and ``--kernel-replay-beta-enabled``.
+   - ``--replay-mode kernel`` requires ``--pmc`` and ``--kernel-replay-beta-enabled``. The reverse also holds: ``--kernel-replay-beta-enabled`` acknowledges the beta but does not select kernel replay, so passing it without ``--replay-mode kernel`` is rejected rather than ignored.
 
    - ``--replay-mode kernel`` collects counters only. It cannot be combined with ``--att``, PC sampling, or ``--spm``, and rocprofv3 rejects those combinations. Counter groups are the only thing that changes from one pass to the next, so any other service would stay enabled across all of the passes and report every kernel once per pass. Collect them in a separate run. Tool authors who need per-pass control over other services can get it through the SDK; see :ref:`using-kernel-replay`.
 
