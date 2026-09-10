@@ -914,9 +914,13 @@ impl Session {
             }
             None => (injection.env.clone(), injection.ld_preload.clone()),
         };
+        let emulated_isa =
+            mirage_core::emulator::get_emulator_backend(&self.ctx.profile.emulator.emulator)
+                .and_then(|backend| backend.emulated_isa(&self.ctx.profile));
 
         Ok(SessionDescription {
             session: self.def.id.clone(),
+            emulated_isa,
             node_count,
             nproc_per_node: job_nproc,
             workdir: self.def.workdir.clone(),
