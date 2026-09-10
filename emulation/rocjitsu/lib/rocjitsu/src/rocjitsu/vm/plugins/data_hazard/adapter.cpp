@@ -99,11 +99,12 @@ WaitInfo decode_paired_wait(WaitKind kind, std::string_view text, std::string_vi
 
   if (text.find(memory_field) != std::string_view::npos ||
       text.find(kDscntField) != std::string_view::npos) {
-    // TODO: the paired split waits still fall back to 0 for a parked field, the
-    // same over-drain fixed for legacy s_waitcnt below. Left in scope for a
-    // follow-up once its disassembly form is confirmed.
-    wait.count = parse_waitcnt_field(text, memory_field).value_or(0);
-    wait.paired_count = parse_waitcnt_field(text, kDscntField).value_or(0);
+    // The named-field form omits a counter it leaves parked, the same way the
+    // legacy s_waitcnt form omits vmcnt or lgkmcnt. Leave the omitted field empty
+    // rather than defaulting it to zero: a zero here drains a counter the wait
+    // never named, clearing pending ops and hiding the hazard behind them.
+    wait.count = parse_waitcnt_field(text, memory_field);
+    wait.paired_count = parse_waitcnt_field(text, kDscntField);
     return wait;
   }
 
