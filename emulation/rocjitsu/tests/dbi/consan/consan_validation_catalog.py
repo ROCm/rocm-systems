@@ -1732,6 +1732,13 @@ for target_id, overrides in NATIVE_GTEST_WORKLOAD_OVERRIDES.items():
 
 TARGET_WORKLOAD_OVERRIDES: dict[str, dict[str, dict[str, object]]] = {
     "gfx950": {
+        # Physical Record/Replay of the complete 151,936-logit oracle takes
+        # roughly 99 seconds. Keep the same explicit 900-second envelope used
+        # for the slower gfx950 emulator diagnostic, so the canonical command
+        # reaches a verdict on native hardware without an ad hoc CLI override.
+        "qwen-prefill": {
+            "run_timeout_seconds": 900,
+        },
         # These compact schedules select no workgroup at the production
         # stride.  A target-resolved validation cadence retains evidence from
         # the same unmodified workloads.  Native execution itself is fast, but
