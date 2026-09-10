@@ -9,6 +9,11 @@ on:
           Use it to try a fresher nightly without editing the workflow.
         required: false
         type: string
+      run_tests:
+        description: Run the ctest steps even while RUN_TESTS is off by default.
+        required: false
+        type: boolean
+        default: false
   pull_request:
     paths:
       - 'projects/rocprofiler-sdk/**'
@@ -67,6 +72,15 @@ env:
   ## librocdxg vendor-packet path; without them PMC collection silently produces no data.
   GPU_ENABLE_PAL: "0"
   WSLKMT_VENDOR_PACKET: "1"
+
+  ## Both ctest steps are off for now: the job cannot get as far as running them until
+  ## ROCPROFILER_USE_LIBHSAKMT_WINDOWS and its two companion cache variables land on
+  ## develop, so leaving them on only produces a red job that says nothing new. The build
+  ## still configures with ROCPROFILER_BUILD_TESTS=ON, so the test code is compiled and
+  ## this job keeps protecting against build breakage; only execution is skipped. Flip
+  ## this to "true" (or use the run_tests dispatch input) once Configure succeeds - the
+  ## steps below are unchanged and ready.
+  RUN_TESTS: "false"
 
   ## No tests should be excluded here except for extreme emergencies; tests that cannot run
   ## on the WSL/dxg path should be disabled in CMake (see the /dev/kfd and gfx-info gating
@@ -435,7 +449,16 @@ jobs:
           source "${HOME}/rocprof-wsl-env.sh"
           cmake --build "${SDK_BUILD_DIR}" --parallel "$(nproc)"
 
+      # The job name still says "Build & Test" and a green check would otherwise read as
+      # "the tests passed". Emit a warning annotation so the PR checks UI says plainly
+      # that nothing was executed.
+      - name: Note that tests are disabled
+        if: ${{ !(env.RUN_TESTS == 'true' || inputs.run_tests) }}
+        run: |
+          echo "::warning title=WSL tests not run::RUN_TESTS is off, so the unit and integration test steps were skipped. This job checked that rocprofiler-sdk builds under WSL, nothing more."
+
       - name: Test - unit tests
+        if: ${{ env.RUN_TESTS == 'true' || inputs.run_tests }}
         shell: wsl-bash {0}
         timeout-minutes: 20
         run: |
@@ -448,6 +471,7 @@ jobs:
             -L unittests
 
       - name: Test - integration tests
+        if: ${{ env.RUN_TESTS == 'true' || inputs.run_tests }}
         shell: wsl-bash {0}
         timeout-minutes: 60
         run: |
