@@ -577,15 +577,20 @@ TEST(VfioServerSignals, MapsEachHandledSignalToItsAction) {
 // reported as work that ran and failed -- indistinguishable from work that
 // could not be done -- while the single slot is spent on nothing.
 TEST(VfioDeviceHost, RefusesEmptyWorkRatherThanThrowingOnTheServingThread) {
+  // Declared before the fixture so it outlives the join, and joined
+  // explicitly before returning: the serving thread may still hold the
+  // request when the assertions end, and std::atomic does not extend the
+  // object's lifetime.
+  std::atomic<bool> ran = false;
   ServedDevice served;
   ASSERT_TRUE(served.built());
 
   EXPECT_FALSE(served.host().ask_serving_thread({})) << "an empty target was accepted";
 
   // And the slot is still free, so a real request is not lost behind it.
-  std::atomic<bool> ran = false;
   EXPECT_TRUE(served.host().ask_serving_thread([&ran] { ran = true; }))
       << "the refused request consumed the one outstanding slot";
+  served.stop_serving();
 }
 
 TEST(VfioDeviceHost, RunsAskedWorkOnTheServingThread) {
