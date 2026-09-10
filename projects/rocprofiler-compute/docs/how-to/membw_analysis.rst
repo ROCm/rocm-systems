@@ -161,7 +161,7 @@ Terminal width
 
 The memory chart requires a terminal width of at least **240 columns**
 to display properly. The guidance panel matches the chart width.
-Narrower terminals will cause line wrapping that reduces readability.
+Narrower terminals cause line wrapping that reduces readability.
 
 Check your terminal width with:
 
