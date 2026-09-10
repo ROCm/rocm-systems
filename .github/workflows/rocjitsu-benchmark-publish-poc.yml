@@ -3,6 +3,7 @@ name: "rocjitsu-benchmark-publish-poc"
 on:
   push:
     branches:
+      - "develop"
       - "users/IanWood1/rocjitsu-benchmark-ci-poc"
   workflow_dispatch:
 
@@ -14,17 +15,24 @@ env:
   ROCJITSU_BUILD_DIR: ${{ github.workspace }}/build
   ROCJITSU_VENV: ${{ github.workspace }}/benchmark-venv
   ROCJITSU_RESULT_DIR: ${{ github.workspace }}/benchmark-results
-  RESULTS_BRANCH: users/IanWood1/rocjitsu-benchmark-results
+  FINAL_RESULTS_BRANCH: users/IanWood1/rocjitsu-benchmark-results
+  STAGING_RESULTS_BRANCH: users/IanWood1/rocjitsu-benchmark-results-staging
   RESULTS_ARTIFACT: rocjitsu-benchmark-${{ github.run_id }}-${{ github.run_attempt }}
 
 jobs:
   benchmark:
-    name: Run smoke benchmark
-    runs-on: ubuntu-24.04
+    name: Run nightly benchmark
+    if: >-
+      github.event_name == 'push' ||
+      (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/develop')
+    runs-on: azure-linux-scale-rocm
+    timeout-minutes: 210
     permissions:
       contents: read
     outputs:
       publishable: ${{ steps.validate.outputs.publishable }}
+      results-branch: ${{ steps.route.outputs.results-branch }}
+      publication-lane: ${{ steps.route.outputs.publication-lane }}
     container:
       image: ghcr.io/rocm/no_rocm_image_ubuntu24_04@sha256:4150afe4759d14822f0e3f8930e1124f26e11f68b5c7b91ec9a02b20b1ebbb98
       options: --user 0:0
@@ -32,6 +40,29 @@ jobs:
         DEBIAN_FRONTEND: noninteractive
 
     steps:
+      - name: Select publication lane
+        id: route
+        shell: bash
+        run: |
+          if [[ "${GITHUB_REF}" == "refs/heads/develop" ]]; then
+            echo "results-branch=${FINAL_RESULTS_BRANCH}" >> "${GITHUB_OUTPUT}"
+            echo "publication-lane=develop" >> "${GITHUB_OUTPUT}"
+          else
+            echo "results-branch=${STAGING_RESULTS_BRANCH}" >> "${GITHUB_OUTPUT}"
+            echo "publication-lane=staging" >> "${GITHUB_OUTPUT}"
+          fi
+
+      - name: Report runner CPU resources
+        shell: bash
+        run: |
+          echo "logical_cpus=$(nproc)"
+          lscpu
+          for RESOURCE in /sys/fs/cgroup/cpu.max /sys/fs/cgroup/cpuset.cpus.effective; do
+            if [[ -r "${RESOURCE}" ]]; then
+              echo "${RESOURCE}: $(<"${RESOURCE}")"
+            fi
+          done
+
       - name: Install base dependencies
         run: |
           apt-get update
@@ -85,7 +116,7 @@ jobs:
           cmake --build "${ROCJITSU_BUILD_DIR}" \
             --target rocjitsu_benchmark_workloads
 
-      - name: Run smoke suite
+      - name: Run nightly suite
         id: benchmark
         continue-on-error: true
         working-directory: ${{ env.ROCJITSU_SOURCE_DIR }}
@@ -93,7 +124,7 @@ jobs:
         run: |
           "${ROCJITSU_VENV}/bin/python" -m benchmarks.runner \
             --build-dir "${ROCJITSU_BUILD_DIR}" \
-            --manifest benchmarks/suites/smoke.toml \
+            --manifest benchmarks/suites/nightly.toml \
             --output "${ROCJITSU_RESULT_DIR}"
 
       - name: Validate finalized run
@@ -104,32 +135,44 @@ jobs:
           RUN_JSON="${ROCJITSU_RESULT_DIR}/run.json"
           PUBLISHABLE=false
           if [[ -f "${RUN_JSON}" && ! -L "${RUN_JSON}" ]] &&
-            jq -e --arg sha "${GITHUB_SHA}" '
-              .schemaVersion == 1 and
-              .benchmarkSuite == "smoke" and
-              .finishedAt != null and
-              (.status == "completed" or .status == "failed") and
-              .provenance.rocjitsuCommitSha == $sha and
-              .provenance.dirty == false and
-              (.tests | type == "array")
+            jq -se --arg sha "${GITHUB_SHA}" '
+              length == 1 and (.[0] |
+                .schemaVersion == 1 and
+                .benchmarkSuite == "nightly" and
+                .finishedAt != null and
+                (.status == "completed" or .status == "failed") and
+                .provenance.rocjitsuCommitSha == $sha and
+                .provenance.dirty == false and
+                (.tests | type == "array" and length > 0))
             ' "${RUN_JSON}" >/dev/null; then
             PUBLISHABLE=true
           fi
           echo "publishable=${PUBLISHABLE}" >> "${GITHUB_OUTPUT}"
 
       - name: Stage benchmark diagnostics
-        if: always() && steps.validate.outputs.publishable == 'true'
+        if: always()
         shell: bash
         run: |
           DIAGNOSTICS_DIR="${GITHUB_WORKSPACE}/benchmark-diagnostics"
-          mkdir "${DIAGNOSTICS_DIR}"
-          cp "${ROCJITSU_RESULT_DIR}/run.json" "${DIAGNOSTICS_DIR}/"
+          mkdir -p "${DIAGNOSTICS_DIR}"
+          if [[ -e "${ROCJITSU_RESULT_DIR}/run.json" ]]; then
+            cp --no-dereference "${ROCJITSU_RESULT_DIR}/run.json" "${DIAGNOSTICS_DIR}/"
+          fi
           if [[ -d "${ROCJITSU_RESULT_DIR}/cases" ]]; then
             cp -R "${ROCJITSU_RESULT_DIR}/cases" "${DIAGNOSTICS_DIR}/"
           fi
+          printf '%s\n' \
+            "benchmark_outcome=${{ steps.benchmark.outcome }}" \
+            "publishable=${{ steps.validate.outputs.publishable }}" \
+            "event=${GITHUB_EVENT_NAME}" \
+            "ref=${GITHUB_REF}" \
+            "sha=${GITHUB_SHA}" \
+            "run_id=${GITHUB_RUN_ID}" \
+            "run_attempt=${GITHUB_RUN_ATTEMPT}" \
+            > "${DIAGNOSTICS_DIR}/workflow.txt"
 
       - name: Upload benchmark diagnostics
-        if: always() && steps.validate.outputs.publishable == 'true'
+        if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: ${{ env.RESULTS_ARTIFACT }}
@@ -137,17 +180,23 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
-      - name: Preserve benchmark failure
-        if: always() && steps.benchmark.outcome == 'failure'
+      - name: Preserve benchmark or validation failure
+        if: >-
+          always() &&
+          (steps.benchmark.outcome != 'success' ||
+           steps.validate.outputs.publishable != 'true')
         run: exit 1
 
   publish:
-    name: Publish raw result
+    name: Publish dashboard data (${{ needs.benchmark.outputs.publication-lane }})
     needs: benchmark
     if: always() && needs.benchmark.outputs.publishable == 'true'
     runs-on: ubuntu-24.04
+    timeout-minutes: 30
     permissions:
       contents: write
+    env:
+      RESULTS_BRANCH: ${{ needs.benchmark.outputs.results-branch }}
 
     steps:
       - name: Download benchmark diagnostics
@@ -161,15 +210,24 @@ jobs:
         run: |
           RUN_JSON="${GITHUB_WORKSPACE}/incoming/run.json"
           [[ -f "${RUN_JSON}" && ! -L "${RUN_JSON}" ]]
-          jq -e --arg sha "${GITHUB_SHA}" '
-            .schemaVersion == 1 and
-            .benchmarkSuite == "smoke" and
-            .finishedAt != null and
-            (.status == "completed" or .status == "failed") and
-            .provenance.rocjitsuCommitSha == $sha and
-            .provenance.dirty == false and
-            (.tests | type == "array")
+          jq -se --arg sha "${GITHUB_SHA}" '
+            length == 1 and (.[0] |
+              .schemaVersion == 1 and
+              .benchmarkSuite == "nightly" and
+              .finishedAt != null and
+              (.status == "completed" or .status == "failed") and
+              .provenance.rocjitsuCommitSha == $sha and
+              .provenance.dirty == false and
+              (.tests | type == "array" and length > 0))
           ' "${RUN_JSON}" >/dev/null
+
+      # Keep an immutable source checkout because the publication checkout is
+      # replaced by the results branch on every push attempt.
+      - name: Checkout publisher source
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          path: source
+          persist-credentials: false
 
       - name: Checkout repository for publication
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
@@ -177,38 +235,81 @@ jobs:
           path: publication
           fetch-depth: 1
 
-      - name: Append result to results branch
+      - name: Set up publisher Python
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        with:
+          python-version: "3.12"
+
+      - name: Publish dashboard-ready result
         working-directory: publication
         shell: bash
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
-          if git fetch --no-tags origin \
-            "+refs/heads/${RESULTS_BRANCH}:refs/remotes/origin/${RESULTS_BRANCH}"; then
-            git switch --create "${RESULTS_BRANCH}" \
-              --track "origin/${RESULTS_BRANCH}"
-          else
-            git switch --orphan "${RESULTS_BRANCH}"
-            git rm -rf --ignore-unmatch .
+          RUN_ID="github-${GITHUB_RUN_ID}-attempt-${GITHUB_RUN_ATTEMPT}"
+          TRIGGER=auto
+          if [[ "${GITHUB_EVENT_NAME}" == "workflow_dispatch" ]]; then
+            TRIGGER=manual
           fi
+          COMMIT_MESSAGE="$(git -C "${GITHUB_WORKSPACE}/source" show -s --format=%s "${GITHUB_SHA}")"
 
-          mkdir -p raw-runs
-          DESTINATION="raw-runs/github-${GITHUB_RUN_ID}-attempt-${GITHUB_RUN_ATTEMPT}.json"
-          [[ ! -e "${DESTINATION}" ]]
-          cp "${GITHUB_WORKSPACE}/incoming/run.json" "${DESTINATION}"
-          git add "${DESTINATION}"
-          git commit --signoff \
-            -m "Publish rocjitsu benchmark run ${GITHUB_RUN_ID}.${GITHUB_RUN_ATTEMPT}"
+          MAX_ATTEMPTS=20
+          for ATTEMPT in $(seq 1 "${MAX_ATTEMPTS}"); do
+            # Reconstruct every attempt from the latest results branch instead
+            # of rebasing a commit containing a stale generated index.
+            git reset --hard HEAD || true
+            git clean -ffd
 
-          for ATTEMPT in 1 2 3; do
+            set +e
+            git ls-remote --exit-code --heads origin \
+              "refs/heads/${RESULTS_BRANCH}" >/dev/null
+            REMOTE_STATUS=$?
+            set -e
+            if [[ "${REMOTE_STATUS}" == 0 ]]; then
+              git fetch --no-tags origin \
+                "+refs/heads/${RESULTS_BRANCH}:refs/remotes/origin/${RESULTS_BRANCH}"
+              git switch --detach "refs/remotes/origin/${RESULTS_BRANCH}"
+            elif [[ "${REMOTE_STATUS}" == 2 ]]; then
+              git switch --orphan \
+                "publish-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-${ATTEMPT}"
+              git rm -rf --ignore-unmatch .
+            else
+              exit "${REMOTE_STATUS}"
+            fi
+
+            (
+              cd "${GITHUB_WORKSPACE}/source/emulation/rocjitsu"
+              python -m benchmarks.dashboard_publish \
+                --raw-run "${GITHUB_WORKSPACE}/incoming/run.json" \
+                --data-dir "${GITHUB_WORKSPACE}/publication/public/data" \
+                --run-id "${RUN_ID}" \
+                --repository "https://github.com/${GITHUB_REPOSITORY}" \
+                --environment-id "azure-linux-scale-rocm-u2404-4150afe4-rocm-10.1.0a20260812" \
+                --expected-sha "${GITHUB_SHA}" \
+                --trigger "${TRIGGER}" \
+                --branch develop \
+                --commit-message "${COMMIT_MESSAGE}" \
+                --source-ref "${GITHUB_REF_NAME}" \
+                --is-demo
+            )
+
+            git add public/data
+            if git diff --cached --quiet; then
+              echo "Dashboard run ${RUN_ID} is already published"
+              exit 0
+            fi
+            git commit --signoff \
+              -m "Publish rocjitsu benchmark run ${GITHUB_RUN_ID}.${GITHUB_RUN_ATTEMPT}"
             if git push origin "HEAD:refs/heads/${RESULTS_BRANCH}"; then
               exit 0
             fi
-            if [[ "${ATTEMPT}" == 3 ]]; then
+            if [[ "${ATTEMPT}" == "${MAX_ATTEMPTS}" ]]; then
               exit 1
             fi
-            git fetch --no-tags origin \
-              "+refs/heads/${RESULTS_BRANCH}:refs/remotes/origin/${RESULTS_BRANCH}"
-            git rebase "origin/${RESULTS_BRANCH}"
+            DELAY=$((ATTEMPT * 2))
+            if ((DELAY > 30)); then
+              DELAY=30
+            fi
+            sleep "$((DELAY + RANDOM % 5))"
           done

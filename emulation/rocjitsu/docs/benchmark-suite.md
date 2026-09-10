@@ -3,9 +3,9 @@
 The in-tree benchmark suite runs a fixed workload matrix through rocjitsu on
 `gfx950` and `gfx1250`. It is intended for nightly performance tracking and
 manual evaluation of changes. The first version writes local JSON artifacts;
-the CI proof of concept below exercises publication of those artifacts.
-Historical storage policy, comparisons, and dashboard integration remain
-follow-on work.
+the CI proof of concept below converts those artifacts to the dashboard's
+per-run JSON layout. Historical selection, production scheduling, and retention
+policy remain follow-on work.
 
 Use the controls and sampling protocol in
 [Benchmarking rocjitsu](benchmarking.md) for official performance comparisons.
@@ -32,7 +32,11 @@ for BF16 RMSNorm (hidden size 2880) and grouped-query sliding attention (64
 query heads, 8 key/value heads, head dimension 64, sequence/window 128).
 
 This produces 32 case/target cells in a full run. Inputs and launch
-configurations are fixed, and measured runs do not autotune.
+configurations are fixed, and measured runs do not autotune. The cells execute
+sequentially, while each simulation uses eight worker partitions--one for each
+XCD in both target configurations. Changing that count creates a different
+benchmark configuration and its results must not be compared directly with
+the eight-thread series.
 
 MXFP4 MoE projections are not included. Although the pinned hipBLASLt API
 defines `HIP_R_4F_E2M1` and VEC32 UE8M0 scale metadata, its installed gfx950
@@ -147,35 +151,56 @@ selected cell fails.
 
 ## CI publication proof of concept
 
-`.github/workflows/rocjitsu-benchmark-publish-poc.yml` runs `smoke.toml` when
-`users/IanWood1/rocjitsu-benchmark-ci-poc` is pushed. The trigger makes the
-workflow usable before it exists on the repository's default branch; once it
-does, `workflow_dispatch` also supports manual runs.
+`.github/workflows/rocjitsu-benchmark-publish-poc.yml` runs the complete
+`nightly.toml` matrix in two isolated lanes:
 
-The benchmark job has read-only repository access. It builds the selected
-checkout, runs the smoke suite, and uploads `run.json` plus `cases/` as a
-14-day Actions artifact. The Triton cache is deliberately excluded. A separate
-publisher job is the only job with `contents: write`. It validates the
-schema-v1 result again and uses the workflow's `GITHUB_TOKEN` to append only
-`run.json` to the orphan branch
-`users/IanWood1/rocjitsu-benchmark-results`, at:
+- a push to `users/IanWood1/rocjitsu-benchmark-ci-poc` exercises the workflow
+  before merge and writes only to
+  `users/IanWood1/rocjitsu-benchmark-results-staging`;
+- a push to `develop`, or a manual dispatch whose selected ref is exactly
+  `develop`, writes to `users/IanWood1/rocjitsu-benchmark-results`.
 
-```text
-raw-runs/github-<run-id>-attempt-<attempt>.json
-```
+Manual dispatches of other refs are skipped. The benchmark job has a
+210-minute timeout. It has read-only repository access and uploads a 14-day
+diagnostic artifact containing any available `run.json` and `cases/`, plus
+workflow metadata. Diagnostic staging and upload use `always()`, so setup
+failures, benchmark cell timeouts, and malformed or missing raw results still
+leave an Actions artifact when the job reaches those steps. The Triton cache is
+deliberately excluded.
 
-The results branch is created automatically if it does not exist. Publication
-uses a signed-off `github-actions[bot]` commit and a non-force push with retries
-for concurrent updates. A finalized partial result is still published when a
-benchmark cell fails, while the benchmark job remains failed. Setup failures
-that do not produce a finalized result are not published. Repository policy
-must allow Actions to request `contents: write`, and any branch rules must allow
-the bot to create and update the temporary results branch.
+A separate publisher job is the only job with `contents: write`. It runs only
+for a finalized schema-v1 nightly result tied to the workflow commit; a
+finalized partial result remains publishable even though the benchmark job is
+failed when every failed case already has a catalog definition or another
+target completed that case. On a new data branch, a case that fails on every
+target before emitting its problem metadata remains only in the diagnostic
+artifact because no valid dashboard definition can be created for it. The
+publisher validates the raw result again, then invokes
+`python -m benchmarks.dashboard_publish` to update dashboard-ready resources
+under `public/data/`. The generated run identity is
+`github-<run-id>-attempt-<attempt>`, automatic and manual triggers remain
+distinct, and the hosted catalog is explicitly marked as demo data. Both
+results branches use dashboard branch identity `develop`; the staging branch
+provides repository-level isolation for feature-run data, while the dashboard
+provenance and diagnostic `workflow.txt` retain the actual triggering ref.
 
-This lane proves the same-repository `GITHUB_TOKEN` write path and artifact
-shape. Its GitHub-hosted runner is not the reserved, tuned benchmark machine,
-so its timings must not be mixed into the official performance history. It
-does not deploy GitHub Pages or generate dashboard indexes.
+Publication uses the workflow's `GITHUB_TOKEN` and a signed-off
+`github-actions[bot]` commit. For each non-force push attempt it discards the
+previous generated commit, fetches the latest remote results branch, and reruns
+the publisher against that state. It makes up to 20 attempts with bounded,
+randomized backoff. This reconstructs `public/data/index.json` and any
+content-addressed catalog from all current runs rather than rebasing a stale
+generated index through a conflict. The results branch is created as an orphan
+if it does not exist. Repository policy must allow Actions to request
+`contents: write`, and branch rules must allow the bot to create and update both
+POC results branches.
+
+This workflow proves the same-repository publication and dashboard-data shape;
+it does not deploy GitHub Pages. Its autoscaled `azure-linux-scale-rocm` runner
+is not the reserved, tuned benchmark machine, and all hosted data is marked as
+demo data, so these timings must not be mixed into official performance
+history. The workflow reports the runner's CPU and cgroup allocation to make
+the available host parallelism visible in each job log.
 
 ## Plugin overhead
 
@@ -244,10 +269,11 @@ metrics. Plugin overhead comparisons use the synchronized timing samples in
 `workload.json`, whose boundary is unchanged across profiles.
 
 The runner intentionally has no historical commit selector, backfill engine,
-built-in comparison, CI scheduler, or dashboard publisher. Historical sampling
-(including commits around known performance changes), post-submit automation,
-storage, and dashboard integration remain follow-up work that can consume these
-schema-v1 artifacts.
+built-in comparison, or production scheduler. Historical sampling (including
+commits around known performance changes), production post-submit automation,
+retention, and Pages deployment remain follow-up work. The separate
+`benchmarks.dashboard_publish` module converts one finalized raw run into the
+versioned static resources consumed by the dashboard.
 
 ## Adding a case
 

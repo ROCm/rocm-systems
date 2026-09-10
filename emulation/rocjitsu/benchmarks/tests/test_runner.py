@@ -161,6 +161,7 @@ class RunnerTest(unittest.TestCase):
         )
         self.assertEqual(self.suite.warmups, 3)
         self.assertEqual(self.suite.samples, 21)
+        self.assertEqual(self.suite.num_threads, 8)
         self.assertEqual(self.suite.timeout_seconds, 300)
 
     def test_smoke_manifest_has_single_triton_case(self) -> None:
@@ -170,6 +171,7 @@ class RunnerTest(unittest.TestCase):
         self.assertEqual(smoke.cases, ("triton.rmsnorm_bf16",))
         self.assertEqual(smoke.warmups, 1)
         self.assertEqual(smoke.samples, 3)
+        self.assertEqual(smoke.num_threads, 8)
         self.assertEqual(smoke.timeout_seconds, 60)
 
     def test_manifest_rejects_extra_fields(self) -> None:
@@ -178,6 +180,20 @@ class RunnerTest(unittest.TestCase):
         manifest.write_text(text + "description = 'extra'\n", encoding="utf-8")
         with self.assertRaisesRegex(runner.RunnerError, "extra=.*description"):
             runner.load_manifest(manifest)
+
+    def test_manifest_rejects_invalid_thread_count(self) -> None:
+        manifest = self.root / "suite.toml"
+        text = runner.DEFAULT_MANIFEST.read_text(encoding="utf-8")
+        for value in ("0", "-1", "true"):
+            with self.subTest(value=value):
+                manifest.write_text(
+                    text.replace("num_threads = 8", f"num_threads = {value}"),
+                    encoding="utf-8",
+                )
+                with self.assertRaisesRegex(
+                    runner.RunnerError, "num_threads must be a positive integer"
+                ):
+                    runner.load_manifest(manifest)
 
     def test_manifest_rejects_case_path_traversal(self) -> None:
         manifest = self.root / "suite.toml"
@@ -232,7 +248,12 @@ class RunnerTest(unittest.TestCase):
         for case, marker in expected_programs.items():
             cell = runner.Cell(case, "gfx950")
             command = runner.prepare_command(
-                self.build, output, cell, warmups=2, samples=5
+                self.build,
+                output,
+                cell,
+                warmups=2,
+                samples=5,
+                num_threads=8,
             )
             self.assertTrue(
                 any(
@@ -259,6 +280,12 @@ class RunnerTest(unittest.TestCase):
             self.assertNotIn("HIPBLASLT_TENSILE_LIBPATH", command.environment)
             self.assertTrue(
                 command.environment["TRITON_CACHE_DIR"].endswith("triton/gfx950")
+            )
+            effective_config = command.config_path.read_bytes()
+            self.assertEqual(json.loads(effective_config)["num_threads"], 8)
+            self.assertEqual(
+                hashlib.sha256(effective_config).hexdigest(),
+                runner._target_metadata("gfx950", 8).config_sha256,
             )
 
     def test_plugin_config_is_derived_without_modifying_base(self) -> None:
@@ -369,7 +396,9 @@ class RunnerTest(unittest.TestCase):
                 "pluginProfile": "none",
                 "plugins": [],
                 "targetConfigSha256": {
-                    "gfx950": runner._target_metadata("gfx950").config_sha256
+                    "gfx950": runner._target_metadata(
+                        "gfx950", self.suite.num_threads
+                    ).config_sha256
                 },
             },
         )
@@ -434,7 +463,7 @@ class RunnerTest(unittest.TestCase):
         self.assertEqual(test["dataType"], "bf16")
         self.assertEqual(test["problem"], {"fixture": True})
         self.assertEqual(test["execMode"], "functional")
-        self.assertEqual(test["numThreads"], 1)
+        self.assertEqual(test["numThreads"], 8)
         self.assertEqual(test["durationSeconds"], 2 / 1_000_000_000)
         self.assertEqual(
             test["timing"],
@@ -571,6 +600,9 @@ class RunnerTest(unittest.TestCase):
             runner.TARGET_CONFIGS, {"gfx950": configuration}, clear=True
         ):
             metadata = runner._target_metadata("gfx950")
+            effective_metadata = runner._target_metadata(
+                "gfx950", self.suite.num_threads
+            )
             _, result = self._run(
                 self._matrix("triton.rmsnorm_bf16"),
                 "target-metadata",
@@ -586,7 +618,7 @@ class RunnerTest(unittest.TestCase):
         self.assertEqual(result["tests"][0]["numThreads"], 8)
         self.assertEqual(
             result["configuration"]["targetConfigSha256"]["gfx950"],
-            metadata.config_sha256,
+            effective_metadata.config_sha256,
         )
 
     def test_plugin_profile_is_recorded_and_report_is_retained(self) -> None:
@@ -603,7 +635,9 @@ class RunnerTest(unittest.TestCase):
                 "pluginProfile": "race",
                 "plugins": ["race"],
                 "targetConfigSha256": {
-                    "gfx950": runner._target_metadata("gfx950").config_sha256
+                    "gfx950": runner._target_metadata(
+                        "gfx950", self.suite.num_threads
+                    ).config_sha256
                 },
             },
         )

@@ -34,7 +34,15 @@ TARGET_CONFIGS = {
     "gfx950": ROCJITSU_ROOT / "configs" / "gfx950_mi355x_kmd.json",
     "gfx1250": ROCJITSU_ROOT / "configs" / "gfx1250_mi455x_kmd.json",
 }
-MANIFEST_FIELDS = {"name", "targets", "cases", "warmups", "samples", "timeout_seconds"}
+MANIFEST_FIELDS = {
+    "name",
+    "targets",
+    "cases",
+    "warmups",
+    "samples",
+    "num_threads",
+    "timeout_seconds",
+}
 PACKAGE_NAMES = (
     "rocm-sdk-devel",
     "rocm-sdk-libraries",
@@ -66,6 +74,7 @@ class Suite:
     cases: tuple[str, ...]
     warmups: int
     samples: int
+    num_threads: int
     timeout_seconds: float
 
 
@@ -232,6 +241,7 @@ def load_manifest(path: str | Path = DEFAULT_MANIFEST) -> Suite:
         cases=cases,
         warmups=_integer(value["warmups"], "warmups", allow_zero=True),
         samples=_sample_count(value["samples"]),
+        num_threads=_integer(value["num_threads"], "num_threads", allow_zero=False),
         timeout_seconds=float(timeout),
     )
 
@@ -278,6 +288,7 @@ def prepare_command(
     *,
     warmups: int,
     samples: int,
+    num_threads: int | None = None,
     plugin_profile: str = "none",
 ) -> PreparedCommand:
     """Construct one shell-free Rocjitsu workload command."""
@@ -286,7 +297,7 @@ def prepare_command(
     output_root = Path(output).expanduser().resolve()
     workload_path = output_root / "cases" / cell.case / cell.target / "workload.json"
     config_path, plugin_reports = _materialize_config(
-        output_root, cell, plugin_profile
+        output_root, cell, plugin_profile, num_threads=num_threads
     )
     payload = _program(build, cell) + (
         "--case",
@@ -414,7 +425,9 @@ def validate_build(
     return BuildMetadata(build_type=build_type, rocm_path=rocm_path)
 
 
-def _load_target_configuration(target: str) -> tuple[dict[str, Any], str]:
+def _load_target_configuration(
+    target: str, num_threads: int | None = None
+) -> tuple[dict[str, Any], str]:
     path = TARGET_CONFIGS[target]
     try:
         encoded = path.read_bytes()
@@ -425,12 +438,20 @@ def _load_target_configuration(target: str) -> tuple[dict[str, Any], str]:
         ) from error
     if not isinstance(value, Mapping):
         raise RunnerError(f"target configuration must be a JSON object: {path}")
-    return dict(value), hashlib.sha256(encoded).hexdigest()
+    result = dict(value)
+    if num_threads is not None:
+        result["num_threads"] = num_threads
+        encoded = (
+            json.dumps(result, indent=2, sort_keys=True, allow_nan=False) + "\n"
+        ).encode()
+    return result, hashlib.sha256(encoded).hexdigest()
 
 
-def _target_metadata(target: str) -> TargetMetadata:
+def _target_metadata(
+    target: str, num_threads: int | None = None
+) -> TargetMetadata:
     path = TARGET_CONFIGS[target]
-    value, config_sha256 = _load_target_configuration(target)
+    value, config_sha256 = _load_target_configuration(target, num_threads)
     exec_mode = value.get("exec_mode")
     num_threads = value.get("num_threads")
     if not isinstance(exec_mode, str) or not exec_mode:
@@ -449,13 +470,17 @@ def _target_metadata(target: str) -> TargetMetadata:
 
 
 def _materialize_config(
-    output_root: Path, cell: Cell, plugin_profile: str
+    output_root: Path,
+    cell: Cell,
+    plugin_profile: str,
+    *,
+    num_threads: int | None = None,
 ) -> tuple[Path, dict[str, Path]]:
     try:
         plugins = PLUGIN_PROFILES[plugin_profile]
     except KeyError as error:
         raise RunnerError(f"unknown plugin profile {plugin_profile!r}") from error
-    value, _ = _load_target_configuration(cell.target)
+    value, _ = _load_target_configuration(cell.target, num_threads)
     if value.get("plugins") or value.get("sinks"):
         raise RunnerError(
             f"benchmark base configuration must not enable plugins or sinks: "
@@ -791,7 +816,9 @@ def run_suite(
     build = Path(build_dir).expanduser().resolve()
     build_metadata = validate_build(build, matrix, plugin_profile=plugin_profile)
     targets = tuple(dict.fromkeys(cell.target for cell in matrix))
-    target_metadata = {target: _target_metadata(target) for target in targets}
+    target_metadata = {
+        target: _target_metadata(target, suite.num_threads) for target in targets
+    }
     started = time.monotonic()
     timestamp = _utc_now()
     source = _source_info()
@@ -834,6 +861,7 @@ def run_suite(
                 cell,
                 warmups=selected_warmups,
                 samples=selected_samples,
+                num_threads=suite.num_threads,
                 plugin_profile=plugin_profile,
             )
             cell_dir = command.workload_path.parent

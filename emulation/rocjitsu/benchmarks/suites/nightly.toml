@@ -20,4 +20,5 @@ cases = [
 ]
 warmups = 3
 samples = 21
+num_threads = 8
 timeout_seconds = 300
