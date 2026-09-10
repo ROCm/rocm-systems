@@ -37,6 +37,31 @@ ctest --test-dir build/test -R "asan/" -j$(nproc)
 ctest --test-dir build/test -R "ubsan/" -j$(nproc)
 ```
 
+## Regenerating hidden-latency controls
+
+`test/control/<dataset>/hidden_latency/compare_hidden_latency.csv` holds one row per program
+counter with nonzero hidden latency, listing the instruction and its decoded latency next to
+the hidden idle, stall, and issue cycles. `HiddenIdle` measures the gap before the instruction
+was attempted, not part of its latency, so it routinely exceeds `Latency`. Regenerate one with
+`--write`, pointing `--expected` at the file in the source tree rather than the build copy:
+
+```bash
+cd build/test
+python3 ../../test/hidden_latency_csv_test.py \
+    --lib ../lib/librocprof-trace-decoder.so --write \
+    --expected ../../test/control/navi4_fifo/hidden_latency/compare_hidden_latency.csv \
+    navi4_fifo/*.att --stats "control/navi4_fifo/*.csv"
+```
+
+Controls exist for one trace per architecture. The gfx950 traces have none because they hide
+no cycles at all, which would leave a header-only file; `mi350_histo0_hidden_latency_empty`
+and `mi350_scale_hidden_latency_empty` assert that instead.
+
+`navi4_fifo_hidden_latency_selftest` is the negative control. The per-trace tests only prove
+the comparison accepts a correct file; this one corrupts the control table five ways in memory
+and requires every corruption to be caught, so a comparison that ignored a column or only
+checked that the control is a subset of the output cannot keep passing.
+
 ## Code coverage
 
 Code coverage is generated locally with the CMake `coverage` target using
