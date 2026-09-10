@@ -699,6 +699,18 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     )
 endif()
 
+add_executable(waitcheck_target_test analysis/waitcheck_target_test.cpp)
+target_link_libraries(
+    waitcheck_target_test
+    PRIVATE
+        rocjitsu_waitcheck_target
+        rocjitsu_analysis_internal
+        rocjitsu_amdgpu_isa_model_registry
+        GTest::gtest_main
+)
+rj_configure_target(waitcheck_target_test WARNINGS)
+rj_add_gtest_tests(waitcheck_target_test)
+
 # Exercise the Linux-only model ISA contract in a decoder-only final link.
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     add_executable(rocjitsu_model_only_test model_only_isa_test.cpp)
