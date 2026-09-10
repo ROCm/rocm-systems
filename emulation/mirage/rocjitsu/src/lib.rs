@@ -827,6 +827,30 @@ fn resolve_sim_config(def: &EmulatorDef) -> Result<SimConfig> {
         .as_object_mut()
         .ok_or_else(|| MirageError::Other("rocjitsu vm.gpu must be an object".into()))?;
     gpu.insert("num_gpus".into(), topology.gpus_per_node.max(1).into());
+    // The merges above put the profile's and the agent's unrecognised
+    // keys into this document as written, which is the point — mirage
+    // does not know rocjitsu's whole schema and will not stand between a
+    // profile and a field it wants to set. But a key mirage *does* know
+    // is one it has already given a shape, and passthrough merging
+    // replaces nodes rather than deepening them: `vm.gpu.device: 7`
+    // arrives here as the integer 7 where an object belongs, and
+    // `num_sdma_engines: "4"` as a string where a count belongs, which
+    // `settle_sdma_pair` then reads as absent and silently answers with
+    // zero. Re-parsing `vm` says so now, while the profile is being
+    // written and the user is there to fix it, rather than at daemon
+    // start. Unknown keys survive it by construction: every type under
+    // `VirtualMachineConfig` carries a flattened `extra` map. This is a
+    // check and nothing else — the parsed value is dropped, so no
+    // default it supplies is written back into the config.
+    serde_json::from_value::<mirage_core::agent::VirtualMachineConfig>(sim["vm"].clone()).map_err(
+        |error| {
+            MirageError::Other(format!(
+                "profile's RocJITsu configuration has a vm that does not describe a device: \
+                 {error}. Fields mirage has no name for are passed through as written, but \
+                 the ones it does have to keep their shape."
+            ))
+        },
+    )?;
     for path in missing_config_fields(&sim)? {
         tracing::warn!(
             "profile's RocJITsu configuration is missing field {path}; RocJITsu schema defaults apply"
@@ -1340,6 +1364,77 @@ mod tests {
             def.extra.insert("vm".into(), value);
             assert!(check_config(&def).is_err());
         }
+        // The two containers this walks into itself keep their own
+        // wording, which names the key rather than a parse position.
+        let mut def = def_with_gpus(1);
+        def.extra.insert("vm".into(), serde_json::json!({"gpu": 7}));
+        assert!(
+            check_config(&def)
+                .unwrap_err()
+                .to_string()
+                .contains("vm.gpu must be an object")
+        );
+    }
+
+    /// A profile extra may not quietly change the shape of a field
+    /// mirage has a name for.
+    ///
+    /// Passthrough merging replaces nodes rather than deepening them, so
+    /// a profile that writes a scalar over `vm.gpu.device` hands rocjitsu
+    /// an integer where a device belongs; `num_sdma_engines: "4"` is
+    /// worse than refused, because `settle_sdma_pair` reads a string as
+    /// no answer and writes zero engines over it. Both are the user's
+    /// mistake to see while they are still writing the profile.
+    ///
+    /// The review asked for a topology child missing its `type` here
+    /// too. That document cannot be built: `topology` is a typed field
+    /// of `EmulatorDef`, so a malformed one is refused when the profile
+    /// is parsed, long before this. Only `vm` arrives by passthrough.
+    #[test]
+    fn wrong_shaped_vm_passthrough_is_refused() {
+        for value in [
+            serde_json::json!({"arch": 7}),
+            serde_json::json!({"gpu": {"device": 7}}),
+            serde_json::json!({"gpu": {"memory": 7}}),
+            serde_json::json!({"gpu": {"device": {"num_sdma_engines": "4"}}}),
+            serde_json::json!({"gpu": {"device": {"num_sdma_engines": 1.5}}}),
+        ] {
+            let mut def = def_with_gpus(1);
+            def.extra.insert("vm".into(), value.clone());
+            let error = check_config(&def)
+                .expect_err(&format!("{value} should not describe a device"))
+                .to_string();
+            assert!(
+                error.contains("does not describe a device"),
+                "{value}: {error}"
+            );
+        }
+    }
+
+    /// The positive control for the check above: a name mirage does not
+    /// know is still forwarded, at every depth, and the check does not
+    /// write its own defaults over what the document left out.
+    #[test]
+    fn unknown_vm_fields_still_reach_the_config() {
+        // An agent parsed from a document, so it still knows what that
+        // document did not say.
+        let mut def = def_with_agent(serde_json::json!({
+            "vm": {"arch": "cdna4", "gpu": {"device": {"num_sdma_engines": 0}}},
+            "topology": {"root": {"name": "soc", "type": "soc"}}
+        }));
+        def.extra.insert(
+            "vm".into(),
+            serde_json::json!({
+                "programs": ["a.hsaco"],
+                "gpu": {"device": {"capability2": 9}}
+            }),
+        );
+        def.extra.insert("max_ticks".into(), serde_json::json!(42));
+        let config = synthesised(&def);
+        assert_eq!(config["vm"]["programs"], serde_json::json!(["a.hsaco"]));
+        assert_eq!(config["vm"]["gpu"]["device"]["capability2"], 9);
+        assert_eq!(config["max_ticks"], 42);
+        assert!(config["vm"]["gpu"]["device"].get("simd_count").is_none());
     }
 
     #[test]

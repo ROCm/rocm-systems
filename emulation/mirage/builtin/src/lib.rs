@@ -160,9 +160,9 @@ pub fn ensure_topologies(force: bool) -> Result<Ensured> {
 /// Without `force` — the startup path, run before every command — only
 /// missing documents are written, so a fresh config directory fills
 /// itself in and an existing one is left exactly as it is. The one
-/// exception is [`repair_sdma_queue_count`], which fills in a single
-/// field an older mirage never wrote and without which rocjitsu refuses
-/// to start at all.
+/// exception is [`complete_shipped_sdma_pair`], which finishes a
+/// document that is the shipped one save for a single field an older
+/// mirage never wrote, and touches nothing else.
 ///
 /// With `force` — `mirage state builtins`, which exists so a mirage
 /// upgrade can bring its new definitions with it — every document that is
@@ -187,7 +187,7 @@ fn ensure<T: Serialize>(
     for (name, document) in documents {
         let path = kind.path(name);
         if path.exists() {
-            repair_sdma_queue_count(kind, &path, &document)?;
+            complete_shipped_sdma_pair(kind, &path, &document)?;
             if !force {
                 out.documents.push((name.to_string(), false));
                 continue;
@@ -204,24 +204,36 @@ fn ensure<T: Serialize>(
     Ok(out)
 }
 
-/// Give an on-disk agent the SDMA queue count rocjitsu now requires.
+/// Finish a stored agent that is the shipped one bar its SDMA queue
+/// count.
 ///
 /// rocjitsu refuses a device that has SDMA engines and no queues on them
 /// — `num_sdma_queues_per_engine must be nonzero when num_sdma_engines
 /// is nonzero`, thrown while the config is loaded, which means the
 /// session dies at daemon start. Mirage never wrote the field before
-/// this release, so *every* agent file an older mirage left behind is
-/// one rocjitsu will now reject.
+/// this release, so an agent file an older mirage left behind is one
+/// rocjitsu will now reject.
 ///
-/// Those files cannot simply be replaced with the shipped definition.
-/// An older builtin and a builtin the user has edited look alike from
-/// here, and the second is theirs to keep — mirage's standing promise
-/// (see `is_pristine_builtin`) is that it never overwrites a document
-/// somebody changed. So only the one field that makes the file unusable
-/// is filled in, from the shipped definition, and only when it is
-/// absent: an explicit zero is an answer, and mirage does not argue
-/// with it.
-fn repair_sdma_queue_count<T: Serialize>(
+/// Which is not licence to write the field into every file bearing a
+/// builtin's name. A *pristine* builtin already has it, so the only
+/// documents this can ever see are ones mirage cannot claim: an agent
+/// the user edited, and an agent some earlier release seeded that has
+/// since been superseded. Filling in this GPU's queue count there
+/// produces a document that is neither what was on disk nor what mirage
+/// ships — an MI350X seeded before this release has five SDMA engines
+/// and four CUs per shader array, and would come out of that repair
+/// with five engines, eight queues each, and a shader fabric belonging
+/// to no GPU either party has heard of.
+///
+/// So the field is put back and the result compared against the shipped
+/// document *in full*. Equal, and the file was mirage's own with one key
+/// missing, which this completes; unequal, and it is somebody else's
+/// document that this has no business touching. What happens to those
+/// is already settled elsewhere and needs nothing here: `mirage state
+/// builtins` names them and says how to take the shipped version, and
+/// the rocjitsu backend refuses the incomplete pair at profile
+/// validation, where the document can still be edited.
+fn complete_shipped_sdma_pair<T: Serialize>(
     kind: DocKind,
     path: &std::path::Path,
     document: &T,
@@ -229,12 +241,14 @@ fn repair_sdma_queue_count<T: Serialize>(
     if !matches!(kind, DocKind::Agent) {
         return Ok(());
     }
-    let Some(queues) = serde_json::to_value(document)
-        .ok()
-        .as_ref()
-        .and_then(|shipped| shipped.pointer("/vm/gpu/device/num_sdma_queues_per_engine"))
-        .and_then(serde_json::Value::as_u64)
-        .filter(|queues| *queues > 0)
+    let Ok(shipped) = serde_json::to_value(document) else {
+        return Ok(());
+    };
+    // A shipped agent whose own config omits the field has no value to
+    // complete anything with.
+    let Some(queues) = shipped
+        .pointer("/vm/gpu/device/num_sdma_queues_per_engine")
+        .cloned()
     else {
         return Ok(());
     };
@@ -247,21 +261,15 @@ fn repair_sdma_queue_count<T: Serialize>(
     else {
         return Ok(());
     };
-    // An omitted engine count reads as zero rather than as rocjitsu's
-    // schema default of 2, so an agent that names neither field is left
-    // exactly as the user has it. Nothing is lost by that: the rocjitsu
-    // backend settles the same pair when it synthesises the config, and
-    // a document that says nothing about SDMA is not one this repair
-    // has a value for — it exists for a stored agent whose engine count
-    // an older mirage wrote and whose queue count it did not.
-    let engines = device
-        .get("num_sdma_engines")
-        .and_then(serde_json::Value::as_u64)
-        .unwrap_or(0);
-    if engines == 0 || device.contains_key("num_sdma_queues_per_engine") {
+    // An explicit zero is an answer, and mirage does not argue with it —
+    // rocjitsu will.
+    if device.contains_key("num_sdma_queues_per_engine") {
         return Ok(());
     }
-    device.insert("num_sdma_queues_per_engine".to_string(), queues.into());
+    device.insert("num_sdma_queues_per_engine".to_string(), queues);
+    if stored != shipped {
+        return Ok(());
+    }
     mirage_core::state::write_json(path, &stored)
 }
 
@@ -338,15 +346,11 @@ mod tests {
         mirage_core::paths::clear_test_root();
     }
 
-    /// The repair is one field wide.
-    ///
-    /// An agent an older mirage wrote is not the shipped one minus a
-    /// key — it is a different document, with its own topology and its
-    /// own device identity, and it may be one the user has since
-    /// edited. Both have to survive; only the field rocjitsu refuses to
-    /// start without is filled in.
+    /// The document mirage may complete is the shipped one with that
+    /// single key taken out, and completing it produces the shipped one
+    /// whole.
     #[test]
-    fn a_missing_sdma_queue_count_is_filled_in_without_touching_anything_else() {
+    fn a_shipped_agent_missing_only_the_queue_count_is_completed() {
         let _guard = mirage_core::paths::test_env_lock();
         let tmp = tempfile::tempdir().unwrap();
         mirage_core::paths::set_test_root(tmp.path());
@@ -354,36 +358,78 @@ mod tests {
         for (name, agent) in agents() {
             let path = mirage_core::paths::agent_path(name);
             let shipped = serde_json::to_value(&agent).unwrap();
-            let mut legacy = shipped.clone();
-            let device = legacy["vm"]["gpu"]["device"].as_object_mut().unwrap();
-            device.remove("num_sdma_queues_per_engine");
-            // Nothing a released mirage wrote looks like the shipped
-            // document: the tree and the identity moved too.
-            device.insert("marketing_name".to_string(), "custom GPU".into());
-            legacy["topology"]["root"]["children"] = serde_json::json!([]);
-            mirage_core::state::write_json(&path, &legacy).unwrap();
+            let mut stored = shipped.clone();
+            let device = stored["vm"]["gpu"]["device"].as_object_mut().unwrap();
+            // An agent whose own rocjitsu config omits the field has
+            // nothing to complete and nothing to say here.
+            if device.remove("num_sdma_queues_per_engine").is_none() {
+                continue;
+            }
+            mirage_core::state::write_json(&path, &stored).unwrap();
 
             ensure_agents(false).unwrap();
-
-            let mut expected = legacy.clone();
-            expected["vm"]["gpu"]["device"]["num_sdma_queues_per_engine"] =
-                shipped["vm"]["gpu"]["device"]["num_sdma_queues_per_engine"].clone();
-            let repaired = mirage_core::state::read_json::<serde_json::Value>(&path).unwrap();
-            assert_eq!(repaired, expected, "{name}");
-            assert!(
-                repaired["vm"]["gpu"]["device"]["num_sdma_queues_per_engine"]
-                    .as_u64()
-                    .is_some_and(|queues| queues > 0),
-                "{name}"
-            );
+            let completed = mirage_core::state::read_json::<serde_json::Value>(&path).unwrap();
+            assert_eq!(completed, shipped, "{name}");
 
             // Idempotent: a second pass has nothing left to do.
             ensure_agents(false).unwrap();
             assert_eq!(
                 mirage_core::state::read_json::<serde_json::Value>(&path).unwrap(),
-                expected,
+                shipped,
                 "{name}"
             );
+        }
+
+        mirage_core::paths::clear_test_root();
+    }
+
+    /// A document mirage cannot claim is not completed at all.
+    ///
+    /// This used to write the shipped GPU's queue count into any file
+    /// with a builtin's name and a nonzero engine count — and a pristine
+    /// builtin already has the field, so the only files it could ever
+    /// reach were ones mirage had no claim to. The result described
+    /// neither machine: the MI350X a previous release seeded has five
+    /// SDMA engines and four CUs per shader array, and came out of the
+    /// repair with five engines, the MI355X's eight queues each, and its
+    /// own old shader fabric.
+    #[test]
+    fn an_agent_that_is_not_the_shipped_one_is_never_completed() {
+        let _guard = mirage_core::paths::test_env_lock();
+        let tmp = tempfile::tempdir().unwrap();
+        mirage_core::paths::set_test_root(tmp.path());
+
+        for (name, agent) in agents() {
+            let path = mirage_core::paths::agent_path(name);
+            let shipped = serde_json::to_value(&agent).unwrap();
+
+            // Both ways a file with a builtin's name comes to be missing
+            // the queue count and not be mirage's: one an earlier release
+            // seeded, whose device and tree have since moved, and one the
+            // user edited.
+            let mut superseded = shipped.clone();
+            let device = superseded["vm"]["gpu"]["device"].as_object_mut().unwrap();
+            device.remove("num_sdma_queues_per_engine");
+            device.insert("num_sdma_engines".to_string(), 5.into());
+            device.insert("num_cu_per_sh".to_string(), 4.into());
+            superseded["topology"]["root"]["children"] = serde_json::json!([]);
+
+            let mut edited = shipped.clone();
+            let device = edited["vm"]["gpu"]["device"].as_object_mut().unwrap();
+            device.remove("num_sdma_queues_per_engine");
+            device.insert("marketing_name".to_string(), "custom GPU".into());
+
+            for theirs in [superseded, edited] {
+                mirage_core::state::write_json(&path, &theirs).unwrap();
+                for force in [false, true] {
+                    ensure_agents(force).unwrap();
+                    assert_eq!(
+                        mirage_core::state::read_json::<serde_json::Value>(&path).unwrap(),
+                        theirs,
+                        "{name} (force={force})"
+                    );
+                }
+            }
         }
 
         mirage_core::paths::clear_test_root();

@@ -793,6 +793,25 @@ pub fn profile_put(profile: &ProfileDef) -> Result<Stored> {
     })
 }
 
+/// Say why a fileless builtin profile cannot be deleted.
+///
+/// Its one caller used to be [`profile_delete`], and callers that only
+/// wanted to *know* whether a name was a generated builtin reached the
+/// delete to find out — which answers the question by removing whatever
+/// file has appeared in the meantime. The sentence lives here so asking
+/// costs nothing.
+#[must_use]
+pub fn generated_profile_refusal(name: &str) -> MirageError {
+    MirageError::other(format!(
+        "profile {name:?} is a builtin: mirage generates it from a RocJITsu \
+         config it ships rather than storing it, so there is no file to \
+         delete and it would still be there afterwards. To use your own in \
+         its place, write one under that name (`mirage profile create \
+         {name} ...`) \u{2014} it shadows the builtin, and deleting it later \
+         restores the builtin."
+    ))
+}
+
 /// Delete a profile.
 ///
 /// Deleting a file that shadows a builtin is allowed and is how a
@@ -814,14 +833,7 @@ pub fn profile_delete(name: &str) -> Result<()> {
     let path = crate::paths::profile_path(name);
     if !path.exists() {
         if builtin_profile(name).is_some() {
-            return Err(MirageError::other(format!(
-                "profile {name:?} is a builtin: mirage generates it from a RocJITsu \
-                 config it ships rather than storing it, so there is no file to \
-                 delete and it would still be there afterwards. To use your own in \
-                 its place, write one under that name (`mirage profile create \
-                 {name} ...`) \u{2014} it shadows the builtin, and deleting it later \
-                 restores the builtin."
-            )));
+            return Err(generated_profile_refusal(name));
         }
         return Err(MirageError::not_found(DocKind::Profile, name));
     }

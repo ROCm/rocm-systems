@@ -45,15 +45,32 @@ delete it.
 RocJITsu refuses a device that has SDMA engines and no queues on them,
 and it refuses it while loading the config — so a session dies at daemon
 start rather than at profile validation. Mirage never wrote
-`vm.gpu.device.num_sdma_queues_per_engine` before this release, so every
+`vm.gpu.device.num_sdma_queues_per_engine` before this release, so an
 agent an older Mirage left on disk is one RocJITsu now rejects. On
-startup Mirage fills that one field in from the shipped definition, in
-place, when the stored agent has a nonzero `num_sdma_engines` and no
-queue count of its own. Nothing else about the file is touched: an older
-builtin and an agent you edited look alike from here, and both are yours
-to keep. An explicit `0` is an answer, and Mirage does not argue with it
-— RocJITsu will. The shipped MI300X and MI350X presets use 8 queues per
-engine, and MI450X uses 2.
+startup Mirage completes that one field, in place, but only for a stored
+agent that is otherwise byte-for-byte the one this Mirage ships: put the
+field back and the file *is* the shipped document, so filling it in is
+finishing Mirage's own work and the result is the shipped agent whole.
+The shipped MI300X and MI350X presets use 8 queues per engine, and MI450X
+uses 2.
+
+Any other file is left exactly as it is, because Mirage has no value to
+offer it. An agent seeded by an older release and an agent you edited
+look alike from here, and both are yours to keep — and this GPU's queue
+count describes neither, so writing it in would produce a machine that is
+neither what was on disk nor what Mirage ships. An MI350X seeded before
+this release has five SDMA engines and four CUs per shader array; filling
+in today's eight queues per engine would leave a document belonging to no
+GPU either party has heard of. An explicit `0` is likewise an answer, and
+Mirage does not argue with it — RocJITsu will.
+
+Such a file is not left silent, though. `mirage state builtins` names it
+along with every other builtin document that differs from the shipped
+one, with its path and how to take the shipped version instead
+(`mirage agent delete <name>`, then run `mirage state builtins` again).
+Profile validation refuses the incomplete pair with the reason, at
+`profile create`, `profile import` and `run` — while the document can
+still be edited, rather than at daemon start.
 
 Agents with older or customized layouts are not overwritten. Missing fields
 are reported against the selected RocJITsu preset during profile validation
@@ -86,7 +103,10 @@ Objects are merged recursively over the agent configuration; scalar values
 and arrays replace the corresponding values. Mirage's per-node GPU count
 and explicitly selected plugins remain authoritative. Duplicate root and
 emulator overrides are rejected. Mirage-only container and system-topology
-controls still reject unknown fields *within* them.
+controls still reject unknown fields *within* them. Replacement stops at
+the shape of a field Mirage has a name for: `vm` still has to describe a
+device after merging, so a scalar over `vm.gpu.device` or a string over
+`num_sdma_engines` is refused when the profile is written.
 
 Passthrough is not validation, and RocJITsu is not a backstop: it parses
 the synthesised config with `skip_unexpected_fields_in_json` set, so a key
