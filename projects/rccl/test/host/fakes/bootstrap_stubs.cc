@@ -15,9 +15,13 @@
 
 #include "fakes/bootstrap_stubs.h"
 
+bool g_bootstrapNetInitFail = false;
+ncclResult_t bootstrapNetInit() { return g_bootstrapNetInitFail ? ncclSystemError : ncclSuccess; }
+
 // A std::function seam, not a result code: commGetSplitInfo needs a test to write the (color, key) table into allData.
-extern std::function<ncclResult_t(void* commState, void* allData, int size)>
-    g_bootstrapAllGather;
+// Defaults to failure so the bootstrapAllGather call sites no test reaches stay fail-fast.
+std::function<ncclResult_t(void* commState, void* allData, int size)> g_bootstrapAllGather =
+    [](void*, void*, int) { return ncclInternalError; };
 ncclResult_t bootstrapAllGather(void* commState, void* allData, int size) {
   return g_bootstrapAllGather(commState, allData, size);
 }
@@ -27,13 +31,13 @@ std::function<ncclResult_t(struct ncclBootstrapHandle*, bool)> g_bootstrapCreate
 ncclResult_t bootstrapCreateRoot(struct ncclBootstrapHandle* handle, bool idFromEnv) {
   return g_bootstrapCreateRoot(handle, idFromEnv);
 }
-extern ncclResult_t g_bootstrapGetUniqueIdResult;
-extern ncclResult_t g_bcastGrowHandleResult;
-extern uint64_t g_bootstrapHandleMagic;
-extern int g_bcastGrowHandleCalls;
-extern bool g_bcastGrowHandleIsRoot;
+ncclResult_t g_bootstrapGetUniqueIdResult = ncclSuccess;
+ncclResult_t g_bcastGrowHandleResult      = ncclSuccess;
+uint64_t g_bootstrapHandleMagic           = 0xB007ULL;
+int g_bcastGrowHandleCalls                = 0;
+bool g_bcastGrowHandleIsRoot              = false;
 struct ncclBootstrapHandle g_bootstrapHandleTemplate{};
-extern int g_bootstrapGetUniqueIdCalls;
+int g_bootstrapGetUniqueIdCalls           = 0;
 void ResetBootstrapHandleTemplate() { g_bootstrapHandleTemplate = ncclBootstrapHandle{}; }
 
 // Writes the WHOLE handle, not just magic: a caller that memcpy's too few bytes is invisible if addr/nRanks stay 0.
@@ -46,7 +50,12 @@ ncclResult_t bootstrapGetUniqueId(struct ncclBootstrapHandle* handle, struct ncc
   return g_bootstrapGetUniqueIdResult;
 }
 
-extern std::function<ncclResult_t(struct ncclBootstrapHandle*, struct ncclComm*, bool)> g_bcastGrowHandle;
+// A std::function on top of the result code: the grow path validates the magic the coordinator broadcast back.
+ncclResult_t DefaultBcastGrowHandle(struct ncclBootstrapHandle*, struct ncclComm*, bool) {
+  return g_bcastGrowHandleResult;
+}
+std::function<ncclResult_t(struct ncclBootstrapHandle*, struct ncclComm*, bool)> g_bcastGrowHandle =
+    DefaultBcastGrowHandle;
 
 ncclResult_t bcastGrowHandle(struct ncclBootstrapHandle* handle, struct ncclComm* parent, bool isRoot) {
   ++g_bcastGrowHandleCalls;
@@ -73,4 +82,14 @@ void ResetBootstrapStubs() {
   g_bootstrapInit = DefaultBootstrapInit;
   g_bootstrapSplit = DefaultBootstrapSplit;
   g_bootstrapCreateRoot = DefaultBootstrapCreateRoot;
+  g_bootstrapNetInitFail = false;
+  g_bootstrapAllGather = [](void*, void*, int) { return ncclInternalError; };
+  g_bootstrapGetUniqueIdResult = ncclSuccess;
+  g_bootstrapGetUniqueIdCalls = 0;
+  g_bcastGrowHandleResult = ncclSuccess;
+  g_bcastGrowHandle = DefaultBcastGrowHandle;
+  g_bcastGrowHandleCalls = 0;
+  g_bcastGrowHandleIsRoot = false;
+  g_bootstrapHandleMagic = 0xB007ULL;
+  ResetBootstrapHandleTemplate();
 }

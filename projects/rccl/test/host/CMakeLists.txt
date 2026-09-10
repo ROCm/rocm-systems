@@ -150,7 +150,7 @@ if(BUILD_TESTS)
   # ---------------------------------------------------------------------------
   set(TEST_MICRO_INIT_SOURCE_FILES
     init-test.cc
-    fakes/init_fakes.cc                  # init-only seams (ResetInitFakes)
+    fakes/init_fakes.cc                  # src/init.cc-only seams + the Reset/Install chains
     fakes/bootstrap_stubs.cc             # fail-loud stub floor, grouped by subsystem
     fakes/topo_stubs.cc
     fakes/transport_stubs.cc
@@ -158,9 +158,20 @@ if(BUILD_TESTS)
     fakes/nccl_fakes.cc                  # reusable nccl* stubs
     fakes/hip_fakes.cc                   # HIP runtime seams
     # Shared per-production-TU fakes (see MICROTEST_README.md for the map).
+    fakes/amdsmi_fakes.cc                # src/misc/amdsmi_wrap.cc
+    fakes/api_trace_fakes.cc             # src/misc/api_trace.cc NCCL_API dispatch
     fakes/env_fakes.cc                   # src/misc/param.cc + getenv interposition
+    fakes/env_plugin_fakes.cc            # src/plugin/env.cc
+    fakes/gin_fakes.cc                   # src/plugin/gin.cc + src/gin/gin_host.cc
+    fakes/group_fakes.cc                 # src/group.cc
+    fakes/init_nvtx_fakes.cc             # src/init_nvtx.cc
+    fakes/kernel_config_fakes.cc         # src/misc/kernel_config.cc
+    fakes/libc_interposers.cc            # gethostname / dladdr
+    fakes/mem_manager_fakes.cc           # src/mem_manager.cc
+    fakes/os_fakes.cc                    # src/os/linux.cc
     fakes/rccl_wrap_fakes.cc             # src/rccl_wrap.cc
     fakes/recorder_fakes.cc              # src/recorder.cc
+    fakes/rocmwrap_fakes.cc              # src/misc/rocmwrap.cc
     fakes/strongstream_stubs.cc          # src/misc/strongstream.cc
     fakes/tuning_fakes.cc                # src/graph/tuning.cc
     ${PROJECT_BINARY_DIR}/hipify/src/misc/argcheck.cc  # real PtrCheck/CommCheck
@@ -798,9 +809,20 @@ set(TEST_MICRO_INIT_SOURCE_FILES
   fakes/nccl_stubs.cc
   fakes/nccl_fakes.cc
   fakes/hip_fakes.cc
+  fakes/amdsmi_fakes.cc
+  fakes/api_trace_fakes.cc
   fakes/env_fakes.cc
+  fakes/env_plugin_fakes.cc
+  fakes/gin_fakes.cc
+  fakes/group_fakes.cc
+  fakes/init_nvtx_fakes.cc
+  fakes/kernel_config_fakes.cc
+  fakes/libc_interposers.cc
+  fakes/mem_manager_fakes.cc
+  fakes/os_fakes.cc
   fakes/rccl_wrap_fakes.cc
   fakes/recorder_fakes.cc
+  fakes/rocmwrap_fakes.cc
   fakes/strongstream_stubs.cc
   fakes/tuning_fakes.cc
   ${RCCL_HIPIFY_DIR}/src/misc/argcheck.cc

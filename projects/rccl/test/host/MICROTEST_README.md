@@ -171,22 +171,34 @@ had become before this map existed.
 
 | Production TU | Fakes file |
 |---|---|
+| `src/bootstrap.cc` | `fakes/bootstrap_stubs.cc` |
 | `src/ce_coll.cc` | `fakes/ce_fakes.cc` |
 | `src/collectives.cc` | `fakes/collectives_fakes.cc` |
 | `src/dev_runtime.cc` | `fakes/dev_runtime_fakes.cc` |
+| `src/graph/*.cc` (topo, paths, search, connect, rome consensus) | `fakes/topo_stubs.cc` |
 | `src/graph/tuning.cc`, `src/graph/connect.cc` params | `fakes/tuning_fakes.cc` |
+| `src/group.cc` | `fakes/group_fakes.cc` |
 | `src/init.cc` comm lifecycle | `fakes/comm_fakes.cc` |
+| `src/init_nvtx.cc` | `fakes/init_nvtx_fakes.cc` |
+| `src/mem_manager.cc` | `fakes/mem_manager_fakes.cc` |
+| `src/misc/amdsmi_wrap.cc` | `fakes/amdsmi_fakes.cc` |
+| `src/misc/api_trace.cc` (`NCCL_API` dispatch) | `fakes/api_trace_fakes.cc` |
+| `src/misc/kernel_config.cc` | `fakes/kernel_config_fakes.cc` |
 | `src/misc/param.cc` + `getenv` interposition | `fakes/env_fakes.cc` |
+| `src/misc/rocmwrap.cc` | `fakes/rocmwrap_fakes.cc` |
 | `src/misc/strongstream.cc` | `fakes/strongstream_stubs.cc` |
 | `src/misc/utils.cc` | `fakes/utils_fakes.cc` |
 | `src/os/linux.cc` | `fakes/os_fakes.cc` |
+| `src/plugin/env.cc` | `fakes/env_plugin_fakes.cc` |
+| `src/plugin/gin.cc`, `src/gin/gin_host.cc` | `fakes/gin_fakes.cc` |
 | `src/proxy.cc` | `fakes/proxy_fakes.cc` |
 | `src/rccl_wrap.cc` | `fakes/rccl_wrap_fakes.cc` |
 | `src/recorder.cc` | `fakes/recorder_fakes.cc` |
 | `src/register/*.cc` | `fakes/register_stubs.cc` |
 | `src/scheduler/*.cc` and the deep launch paths | `fakes/sched_stubs.cc` |
 | `src/sym_kernels.cc` | `fakes/sym_kernels_fakes.cc` |
-| `src/transport/*` | `fakes/transport_stubs.cc` |
+| `src/transport/*`, `src/plugin/net.cc` | `fakes/transport_stubs.cc` |
+| libc (`gethostname`, `dladdr`) | `fakes/libc_interposers.cc` |
 | core/lifecycle floor + data symbols | `fakes/nccl_stubs.cc` |
 | reusable `nccl*` seams | `fakes/nccl_fakes.cc` |
 | HIP runtime | `fakes/hip_fakes.cc` |
@@ -212,11 +224,15 @@ Three things do NOT follow the TU-per-file rule, deliberately:
 - `ncclStrongStreamAcquire` / `Release` stay in `nccl_fakes.cc` rather than
   `strongstream_stubs.cc`: they carry `ASSERT_HOOK_MATCHES_PROD` drift
   assertions and moving those is a larger change.
-- `src/os/*.cc` is only partly consolidated. `os_fakes.cc` owns the `linux.cc`
-  allocation shims, but `ncclOsCpuCount`, `ncclOsSetAffinity` and
-  `ncclOsTopoGetStrFromSys` are still split between `collective_stubs.cc` and
-  `nccl_stubs.cc`. That predates this map; the row below is where they *should*
-  live, not where all of them do.
+- `fakes/collective_stubs.cc` still carries fail-loud `ncclOsCpuCount` and
+  `ncclOsSetAffinity` entries. It cannot link `os_fakes.cc` alongside them, so
+  the `rccl-UnitTestsMicro` target keeps that pair target-shaped; every other
+  target gets them from `os_fakes.cc`.
+- A handful of `NCCL_PARAM` bodies stay in `fakes/init_fakes.cc` rather than
+  their owner's fakes file, because that file links into a target whose unit
+  under test defines the same symbol (`ncclParamLaunchOrderImplicit` versus
+  `enqueue.cc:1985`). Splitting them would be a duplicate definition, not a
+  cleanup.
 
 `<uut>_fakes.h` (e.g. `enqueue_fakes.h`) is an aggregation header: it includes
 the per-TU headers that unit's tests use and declares the `Reset<Uut>Fakes()`
