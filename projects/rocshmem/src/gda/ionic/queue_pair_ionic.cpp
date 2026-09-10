@@ -30,15 +30,17 @@
 
 namespace rocshmem {
 
+namespace atomic = detail::atomic;
+
 __device__ uint32_t QueuePair::reserve_sq(ActiveWFInfo &wf_info,
     uint32_t num_wqes) {
   uint32_t my_sq_prod = 0;
 
   // reserve space for wqes in sq
   if (wf_info.is_pe_group_first) {
-    my_sq_prod = detail::atomic::fetch_add<uint32_t, uint32_t,
-        detail::atomic::memory_scope_device>(
-        &sq_prod, num_wqes, detail::atomic::memory_order_relaxed);
+    my_sq_prod = atomic::fetch_add<
+                   atomic::memory_scope::device,
+                   atomic::memory_order::relaxed>(&sq_prod, num_wqes);
   }
   my_sq_prod = __shfl(my_sq_prod, wf_info.pe_group_first_phys_lane_id);
 
@@ -52,9 +54,9 @@ __device__ uint32_t QueuePair::reserve_sq_single(uint32_t num_wqes) {
   uint32_t my_sq_prod = 0;
 
   // reserve space for wqes in sq
-  my_sq_prod = detail::atomic::fetch_add<uint32_t, uint32_t,
-      detail::atomic::memory_scope_device>(
-      &sq_prod, num_wqes, detail::atomic::memory_order_relaxed);
+  my_sq_prod = atomic::fetch_add<
+                 atomic::memory_scope::device,
+                 atomic::memory_order::relaxed>(&sq_prod, num_wqes);
 
   // wait for that space to be available
   ionic_quiet_internal_ccqe_single(my_sq_prod + num_wqes - sq_mask);
@@ -345,8 +347,8 @@ __device__ void QueuePair::ionic_post_wqe_rma(int32_t length,
     }
   }
 
-  detail::atomic::store<__be16, detail::atomic::memory_scope_device>(
-      &wqe->base.flags, wqe_flags, detail::atomic::memory_order_release);
+  atomic::store<atomic::memory_scope::device,
+                atomic::memory_order::release>(&wqe->base.flags, wqe_flags);
 
   if (ring_db) {
     commit_sq(wf_info, my_sq_prod, my_sq_pos, num_wqes);
@@ -400,8 +402,8 @@ __device__ void QueuePair::ionic_post_wqe_rma_single(int32_t length,
     }
   }
 
-  detail::atomic::store<__be16, detail::atomic::memory_scope_device>(
-      &wqe->base.flags, wqe_flags, detail::atomic::memory_order_release);
+  atomic::store<atomic::memory_scope::device,
+                atomic::memory_order::release>(&wqe->base.flags, wqe_flags);
 
   if (ring_db) {
     commit_sq_single(my_sq_prod, my_sq_pos, num_wqes);
@@ -466,8 +468,8 @@ __device__ uint64_t QueuePair::ionic_post_wqe_amo(uintptr_t raddr, uint32_t rkey
     wqe->atomic_v2.lkey = byteswap<uint32_t>(nonfetching_atomic_lkey);
   }
 
-  detail::atomic::store<__be16, detail::atomic::memory_scope_device>(
-      &wqe->base.flags, wqe_flags, detail::atomic::memory_order_release);
+  atomic::store<atomic::memory_scope::device,
+                atomic::memory_order::release>(&wqe->base.flags, wqe_flags);
 
   cons = commit_sq(wf_info, my_sq_prod, my_sq_pos, num_wqes);
 
@@ -532,8 +534,8 @@ __device__ uint64_t QueuePair::ionic_post_wqe_amo_single(uintptr_t raddr,
     wqe->atomic_v2.lkey = byteswap<uint32_t>(nonfetching_atomic_lkey);
   }
 
-  detail::atomic::store<__be16, detail::atomic::memory_scope_device>(
-      &wqe->base.flags, wqe_flags, detail::atomic::memory_order_release);
+  atomic::store<atomic::memory_scope::device,
+                atomic::memory_order::release>(&wqe->base.flags, wqe_flags);
 
   cons = commit_sq_single(my_sq_prod, my_sq_pos, num_wqes);
 

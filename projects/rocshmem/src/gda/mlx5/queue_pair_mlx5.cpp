@@ -31,6 +31,8 @@
 
 namespace rocshmem {
 
+namespace atomic = detail::atomic;
+
 #define MLX5_LOCK_USE_S_SLEEP  1
 #define MLX5_LOCK_USE_S_WAKEUP (0 && MLX5_LOCK_USE_S_SLEEP)
 // sleep for up to 64 * MLX5_LOCK_S_SLEEP_DELAY clock cycles
@@ -52,8 +54,8 @@ __device__ static inline void acquire_lock(uint32_t *lock) {
    * this is fine, since we only need to ensure happens-before between the threads
    * that released and acquired the lock, not between the different threads contending on the lock
    * when they (eventually) acquire the lock, *then* they will synchronize */
-  while (detail::atomic::exchange<uint32_t, detail::atomic::memory_scope_device>(
-             lock, 1, detail::atomic::memory_order_acquire)) {
+  while (atomic::exchange<atomic::memory_scope::device,
+                          atomic::memory_order::acquire>(lock, 1)) {
 #if MLX5_LOCK_USE_S_SLEEP
     // sleep so we don't hammer the memory
     __builtin_amdgcn_s_sleep(MLX5_LOCK_S_SLEEP_DELAY);
@@ -63,8 +65,8 @@ __device__ static inline void acquire_lock(uint32_t *lock) {
 
 __device__ static inline void release_lock(uint32_t *lock) {
   // release lock by storing 0 (unlocked)
-  detail::atomic::store<uint32_t, detail::atomic::memory_scope_device>(
-      lock, 0, detail::atomic::memory_order_release);
+  atomic::store<atomic::memory_scope::device,
+                atomic::memory_order::release>(lock, 0);
 #if MLX5_LOCK_USE_S_WAKEUP
   // wake up any other sleeping waves (in the same workgroup)
   amdgcn_s_wakeup();
@@ -91,11 +93,11 @@ __device__ void QueuePair::mlx5_ring_doorbell(uint64_t sq_post, const gda_mlx5_w
   gda_mlx5_bf_buffer* bf = mlx5_sq.bf_buffer();
 
   // store sq_wqebb_counter to doorbell record
-  detail::atomic::store<__be32, detail::atomic::memory_scope_system>(
-      mlx5_sq.dbrec, be_sq_wqebb_counter, detail::atomic::memory_order_release);
+  atomic::store<atomic::memory_scope::system,
+                atomic::memory_order::release>(mlx5_sq.dbrec, be_sq_wqebb_counter);
   // ring doorbell by storing first 8B of WQE to the doorbell register
-  detail::atomic::store<uint64_t, detail::atomic::memory_scope_system>(
-      &bf->db_reg.val, db_val.val, detail::atomic::memory_order_release);
+  atomic::store<atomic::memory_scope::system,
+                atomic::memory_order::release>(&bf->db_reg.val, db_val.val);
 
   LOGD_TRACE("SQ: posted WQEs with dbrec(%p)=%x (%hu), dbreg(%p)=%lx (%x, %x)",
              mlx5_sq.dbrec, be_sq_wqebb_counter, sq_wqebb_counter,
@@ -123,8 +125,8 @@ __device__ void QueuePair::mlx5_print_cqe_error(const mlx5_cqe64* cqe, uint8_t o
     LOGD_ERROR("CQ: unexpected signature error (%x)", opcode);
     break;
   case MLX5_CQE_REQ_ERR:
-    syndrome = detail::atomic::load<uint8_t, detail::atomic::memory_scope_system>(
-        &err_cqe->syndrome, detail::atomic::memory_order_relaxed);
+    syndrome = atomic::load<atomic::memory_scope::system,
+                            atomic::memory_order::relaxed>(&err_cqe->syndrome);
     switch (syndrome) {
     case MLX5_CQE_SYNDROME_LOCAL_LENGTH_ERR:
       LOGD_ERROR("CQ requester error LOCAL_LENGTH_ERR (%x)", syndrome);
@@ -174,9 +176,9 @@ __device__ void QueuePair::mlx5_print_cqe_error(const mlx5_cqe64* cqe, uint8_t o
     LOGD_ERROR("CQ: unexpected responder error (%x)", opcode);
     break;
   case MLX5_CQE_INVALID: {
-    uint8_t owner = detail::atomic::load<uint8_t, detail::atomic::memory_scope_system>(
-                        &cqe->op_own, detail::atomic::memory_order_relaxed)
-                    & MLX5_CQE_OWNER_MASK;
+    uint8_t owner = atomic::load<atomic::memory_scope::system,
+                                 atomic::memory_order::relaxed>(&cqe->op_own)
+                      & MLX5_CQE_OWNER_MASK;
     LOGD_ERROR("CQ: invalid completion (%x), check owner bit = %u?", opcode, owner);
     break;
   }
@@ -191,8 +193,8 @@ __device__ void QueuePair::mlx5_print_cqe_error(const mlx5_cqe64* cqe, uint8_t o
 __device__ void QueuePair::mlx5_poll_cq_until(uint16_t requested_available_slots) {
   uint16_t sq_depth = mlx5_sq.depth;
 
-  uint64_t sq_post = detail::atomic::load<uint64_t, detail::atomic::memory_scope_device>(
-      &mlx5_sq.post, detail::atomic::memory_order_acquire);
+  uint64_t sq_post = atomic::load<atomic::memory_scope::device,
+                                  atomic::memory_order::acquire>(&mlx5_sq.post);
   // don't need to check CQ if we haven't ever filled SQ and there's enough space left
   if (sq_post + requested_available_slots <= sq_depth) {
     return;
@@ -204,10 +206,10 @@ __device__ void QueuePair::mlx5_poll_cq_until(uint16_t requested_available_slots
     /* Update the SQ head
      * This param provides us the sq_wqebb_counter; all our WQEs are exactly one WQEBB (64B) */
     // 32-bit load: big-endian 16-bit field, then two 8-bit fields
-    uint32_t wqecnt_sig_op_own = detail::atomic::load<uint32_t,
-        detail::atomic::memory_scope_system>(
-        reinterpret_cast<uint32_t*>(&cqe->wqe_counter),
-        detail::atomic::memory_order_acquire);
+    uint32_t wqecnt_sig_op_own = 
+      atomic::load<atomic::memory_scope::system,
+                   atomic::memory_order::acquire>(
+                    reinterpret_cast<uint32_t*>(&cqe->wqe_counter));
     // GPU is little-endian, so wqe_counter is loaded into the low half of wqecnt_sig_op_own
     __be16 be_wqe_counter = static_cast<__be16>(wqecnt_sig_op_own);
     /* GPU is little-endian, so op_own is loaded into the top half of wqecnt_sig_op_own;
@@ -246,8 +248,8 @@ __device__ void QueuePair::mlx5_poll_cq_until(uint16_t requested_available_slots
      *   - no additional WQEs have been posted
      *   - the number of requested SQ slots are available */
     uint64_t prior_sq_post = sq_post;
-    sq_post = detail::atomic::load<uint64_t, detail::atomic::memory_scope_device>(
-        &mlx5_sq.post, detail::atomic::memory_order_acquire);
+    sq_post = atomic::load<atomic::memory_scope::device, 
+                           atomic::memory_order::acquire>(&mlx5_sq.post);
     if (sq_post == prior_sq_post && available_slots >= requested_available_slots) {
       return;
     }

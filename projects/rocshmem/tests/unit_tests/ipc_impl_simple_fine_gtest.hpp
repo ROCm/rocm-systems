@@ -43,6 +43,8 @@
 
 namespace rocshmem {
 
+namespace atomic = detail::atomic;
+
 //=============================================================================
 // Constants and helpers
 //=============================================================================
@@ -75,7 +77,8 @@ __global__
 void
 kernel_put_with_signal_simple_validator(bool *error, int *golden, int *dest, size_t bytes, NotifierT *notifier) {
     if (!get_flat_id()) {
-        while (detail::atomic::load<int, detail::atomic::memory_scope_system>(dest + SIGNAL_OFFSET, detail::atomic::memory_order_acquire) == 0) {
+        while (atomic::load<atomic::memory_scope::system, 
+                            atomic::memory_order::acquire>(dest + SIGNAL_OFFSET) == 0) {
             ;
         }
     }
@@ -147,8 +150,8 @@ template <typename Config>
 class IPCImplSimpleFine : public ::testing::TestWithParam<std::tuple<int, int, int>> {
     using IpcImplT = typename Config::impl_type;
     using MPI_T = RemoteHeapInfo<CommunicatorMPI>;
-    using NotifierT = Notifier<detail::atomic::memory_scope_device>;
-    using NotifierProxyT = NotifierProxy<detail::atomic::memory_scope_device>;
+    using NotifierT = Notifier<atomic::memory_scope::device>;
+    using NotifierProxyT = NotifierProxy<atomic::memory_scope::device>;
     using FN_T1 = void (*)(IpcImplT*, bool*, int*, int*, int*, size_t, TestType, NotifierT*);
     using FN_T2 = void (*)(bool*, int*, int*, size_t, NotifierT*);
 
