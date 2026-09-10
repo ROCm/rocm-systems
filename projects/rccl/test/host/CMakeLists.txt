@@ -140,13 +140,14 @@ if(BUILD_TESTS)
   endif()
 
   # ---------------------------------------------------------------------------
-  # rccl-UnitTestsMicroInit(+-uncached): host-only microtests for src/init.cc
+  # rccl-UnitTestsMicroInit(+-uncached,-faultinj): host-only microtests for src/init.cc
   # (AICOMRCCL-1685). Dedicated executables (NOT shared with rccl-UnitTestsMicro)
   # so init.cc's symbols and std::once_flag state stay isolated. They also compile
   # the real host-only oracle TUs (argcheck/archinfo/utils) from the hipified
-  # snapshot; --gc-sections drops their unreferenced deep deps. Two
-  # HIP_*_UNCACHED_MEMORY variants exercise both arms of the cache-setting paths;
-  # tests self-select via #ifdef and coverage is merged across the two binaries.
+  # snapshot; --gc-sections drops their unreferenced deep deps. A
+  # HIP_*_UNCACHED_MEMORY variant and an ENABLE_FAULT_INJECTION variant exercise
+  # the second arm of each macro; tests self-select via #ifdef and coverage is
+  # merged across the three binaries.
   # ---------------------------------------------------------------------------
   set(TEST_MICRO_INIT_SOURCE_FILES
     init-test.cc
@@ -189,14 +190,31 @@ if(BUILD_TESTS)
     ${PROJECT_BINARY_DIR}/hipify/src/misc/utils.cc
     PROPERTIES GENERATED TRUE)
 
-  # Two binaries, not one: init.cc gates HIP_HOST_UNCACHED_MEMORY/
-  # HIP_UNCACHED_MEMORY at the *preprocessor* (#if defined / #ifndef, e.g. the
-  # gfx950 corruption guard and the uncached-vs-finegrained malloc). Each arm's
-  # code is absent from the object unless its macro is set, so a single compile
-  # of init.cc can only ever reach one side -- covering both requires compiling
-  # it twice with different -D. The base and -uncached binaries together exercise
-  # both arms; coverage merges across their two .profraw files.
-  foreach(_variant "" "-uncached")
+  # Three binaries, not one: init.cc gates HIP_HOST_UNCACHED_MEMORY/
+  # HIP_UNCACHED_MEMORY and, separately, ENABLE_FAULT_INJECTION at the
+  # *preprocessor* (#if defined / #ifndef / #ifdef, e.g. the gfx950 corruption
+  # guard, the uncached-vs-finegrained malloc, and the commAlloc/devCommSetup
+  # fault-mask blocks). Each arm's code is absent from the object unless its
+  # macro is set, so a single compile of init.cc can only ever reach one side --
+  # covering both requires compiling it twice with different -D. The two macro
+  # pairs are lexically disjoint in init.cc (no uncached block contains a
+  # fault-injection block or vice versa), so they need no 2x2 cross product:
+  # base + -uncached + -faultinj reaches every arm of both. Coverage merges
+  # across the three .profraw files.
+  #
+  # None of the three variant macros is inherited here. FAULT_INJECTION defaults
+  # ON and HIP_*_UNCACHED_MEMORY are set from a HIP capability probe that passes
+  # on any current ROCm, so the rccl target defines all three and
+  # RCCL_COMMON_COMPILE_DEFS carries them in-tree, while the standalone project
+  # below has no rccl target to read: every variant collapsed to the same
+  # single arm in CI (the opposite arm from the one it selects locally) and the
+  # matrix silently tested one side twice. Strip them from the inherited list and
+  # set them per variant instead, so both build paths produce the identical
+  # three-way matrix by construction.
+  set(RCCL_INIT_COMPILE_DEFS ${RCCL_COMMON_COMPILE_DEFS})
+  list(REMOVE_ITEM RCCL_INIT_COMPILE_DEFS
+    ENABLE_FAULT_INJECTION HIP_HOST_UNCACHED_MEMORY HIP_UNCACHED_MEMORY)
+  foreach(_variant "" "-uncached" "-faultinj")
     set(_init_tgt "rccl-UnitTestsMicroInit${_variant}")
     add_executable(${_init_tgt} ${TEST_MICRO_INIT_SOURCE_FILES})
     target_include_directories(${_init_tgt} PRIVATE
@@ -204,13 +222,15 @@ if(BUILD_TESTS)
       ${RCCL_COMMON_INCLUDE_DIRS})
     # src/init.cc is the first of the duplicate basenames (vs transport/net_ib/
     # init.cc), so hipify keeps its name -- no _tmp suffix.
-    target_compile_definitions(${_init_tgt} PRIVATE ${RCCL_COMMON_COMPILE_DEFS}
+    target_compile_definitions(${_init_tgt} PRIVATE ${RCCL_INIT_COMPILE_DEFS}
       INIT_CC_PATH="${PROJECT_BINARY_DIR}/hipify/src/init.cc")
     if(ENABLE_ROCSHMEM_GIN)
       target_compile_definitions(${_init_tgt} PRIVATE NCCL_GIN_ANVIL_SDMA_ENABLE=0)
     endif()
     if(_variant STREQUAL "-uncached")
       target_compile_definitions(${_init_tgt} PRIVATE HIP_HOST_UNCACHED_MEMORY HIP_UNCACHED_MEMORY)
+    elseif(_variant STREQUAL "-faultinj")
+      target_compile_definitions(${_init_tgt} PRIVATE ENABLE_FAULT_INJECTION)
     endif()
     # HIP compile requirements without linking the runtime (see rccl-UnitTestsMicro).
     foreach(_hip_tgt hip::host hip::device)
@@ -798,10 +818,10 @@ target_link_libraries(rccl-UnitTestsMicro PRIVATE
 )
 
 # --- Standalone init micro-test binaries --------------------------------
-# rccl-UnitTestsMicroInit(+-uncached): host-only microtests for src/init.cc,
-# same model as rccl-UnitTestsMicro. Compiles the real host-only oracle TUs
-# (argcheck/archinfo/utils) from the hipified snapshot; --gc-sections drops
-# their unreferenced deps. Two HIP_*_UNCACHED_MEMORY variants.
+# rccl-UnitTestsMicroInit(+-uncached,-faultinj): host-only microtests for
+# src/init.cc, same model as rccl-UnitTestsMicro. Compiles the real host-only
+# oracle TUs (argcheck/archinfo/utils) from the hipified snapshot; --gc-sections
+# drops their unreferenced deps. One variant per preprocessor-gated arm.
 set(TEST_MICRO_INIT_SOURCE_FILES
   init-test.cc
   fakes/init_fakes.cc
@@ -834,11 +854,15 @@ set(TEST_MICRO_INIT_SOURCE_FILES
   ${RCCL_TEST_DIR}/common/ProcessIsolatedTestRunner.cpp
 )
 
-# Two binaries, not one: init.cc gates HIP_HOST_UNCACHED_MEMORY/
-# HIP_UNCACHED_MEMORY at the preprocessor, so each arm's code is absent from the
-# object unless its macro is set. Covering both requires compiling init.cc twice
-# with different -D (see the in-build block above for the full rationale).
-foreach(_variant "" "-uncached")
+# Three binaries, not one: init.cc gates HIP_HOST_UNCACHED_MEMORY/
+# HIP_UNCACHED_MEMORY and, separately, ENABLE_FAULT_INJECTION at the preprocessor,
+# so each arm's code is absent from the object unless its macro is set. The two
+# macro pairs are lexically disjoint in init.cc, so base + -uncached + -faultinj
+# reaches every arm without a 2x2 cross product. FAULT_INJECTION defaults ON, so
+# the arm that SHIPS is the -faultinj one; the in-build block above strips the
+# inherited define and sets it per variant so both paths match this matrix
+# exactly (see there for the full rationale).
+foreach(_variant "" "-uncached" "-faultinj")
   set(_init_tgt "rccl-UnitTestsMicroInit${_variant}")
   add_test_executable(${_init_tgt} ${TEST_MICRO_INIT_SOURCE_FILES})
 
@@ -865,6 +889,8 @@ foreach(_variant "" "-uncached")
   )
   if(_variant STREQUAL "-uncached")
     target_compile_definitions(${_init_tgt} PRIVATE HIP_HOST_UNCACHED_MEMORY HIP_UNCACHED_MEMORY)
+  elseif(_variant STREQUAL "-faultinj")
+    target_compile_definitions(${_init_tgt} PRIVATE ENABLE_FAULT_INJECTION)
   endif()
 
   target_link_options(${_init_tgt} PRIVATE -no-hip-rt -Wl,--gc-sections)
@@ -1029,6 +1055,7 @@ endif()
 # with CTest (matching test/host from #9320); run them directly, e.g.
 #   ./build/rccl-UnitTestsMicro   or   ./build/rccl-HostUnitTests
 #   ./build/rccl-UnitTestsMicroInit   ./build/rccl-UnitTestsMicroInit-uncached
+#   ./build/rccl-UnitTestsMicroInit-faultinj
 #   ./build/rccl-UnitTestsMicroEnqueue  ./build/rccl-UnitTestsMicroEnqueue-devlinker
 # The in-RCCL-build path registers the micro/init/enqueue binaries via CTest
 # categories.

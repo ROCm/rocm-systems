@@ -54,10 +54,14 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
   entries are omitted for this target via `RCCL_STUBS_OMIT_<symbol>` macros
   because `enqueue.cc` defines them itself. See
   `test_categories_micro_enqueue.yaml`.
-- **`rccl-UnitTestsMicroInit`** (+ **`-uncached`**) — `init.cc` (via `INIT_CC_PATH`);
+- **`rccl-UnitTestsMicroInit`** (+ **`-uncached`**, **`-faultinj`**) — `init.cc` (via
+  `INIT_CC_PATH`);
   suites `InitMicrotest.*`, `InitMicrotestIsolated.*`. The `-uncached` variant adds
   `HIP_HOST_UNCACHED_MEMORY`/`HIP_UNCACHED_MEMORY` to cover the alternate host-alloc
-  arm. init.cc compiles the *real* `argcheck.cc`/`archinfo.cc`/`utils.cc` ("oracle"
+  arm; the `-faultinj` variant adds `ENABLE_FAULT_INJECTION` to cover the fault-mask
+  arm of `commAlloc`/`devCommSetup` (the arm that ships, since `FAULT_INJECTION`
+  defaults ON). The two macro pairs are lexically disjoint in `init.cc`, so three
+  binaries cover both arms of both without a 2x2 cross product. init.cc compiles the *real* `argcheck.cc`/`archinfo.cc`/`utils.cc` ("oracle"
   TUs) from the hipify tree rather than stubbing them; `--gc-sections` drops the
   deep-path symbols the tests never reach. See `test_categories_micro_init.yaml`.
 
@@ -514,19 +518,23 @@ make -j $(nproc) rccl-UnitTestsMicro
 `test/host/CMakeLists.txt` is dual-mode. Alongside the in-RCCL-build target
 above (`./install.sh -t`, wired via `add_subdirectory(host)`), the same file
 can be configured **directly** to build every host binary — `rccl-HostUnitTests`,
-`rccl-UnitTestsMicro`, `rccl-UnitTestsMicroInit[-uncached]` and
+`rccl-UnitTestsMicro`, `rccl-UnitTestsMicroInit[-uncached|-faultinj]` and
 `rccl-UnitTestsMicroEnqueue[-devlinker]` — **without configuring/building all of
 librccl**. It compiles just the tests + fakes + the hipified unit-under-test
 sources.
 
-Two of those names are preprocessor variants, not duplicates. `init.cc` gates
-part of its allocation path on `HIP_*_UNCACHED_MEMORY` and `enqueue.cc` gates
-`rcclShmemDynamicSize` on `RCCL_DEVICE_LINKER`, both at the **preprocessor**, so
-one compile can only ever reach one arm. The in-RCCL-build path inherits
-`RCCL_DEVICE_LINKER` from the `rccl` target's compile definitions
-(`ENABLE_DEVICE_LINKER` defaults ON, so the device-linker arm is the one that
-ships); this standalone project has no `rccl` target to inherit from, which is
-why it builds the `-devlinker` variant explicitly.
+Three of those names are preprocessor variants, not duplicates. `init.cc` gates
+part of its allocation path on `HIP_*_UNCACHED_MEMORY` and its fault-mask blocks
+on `ENABLE_FAULT_INJECTION`, and `enqueue.cc` gates `rcclShmemDynamicSize` on
+`RCCL_DEVICE_LINKER`, all at the **preprocessor**, so one compile can only ever
+reach one arm. The in-RCCL-build path inherits `RCCL_DEVICE_LINKER` from the
+`rccl` target's compile definitions (`ENABLE_DEVICE_LINKER` defaults ON, so the
+device-linker arm is the one that ships); this standalone project has no `rccl`
+target to inherit from, which is why it builds the `-devlinker` variant
+explicitly. `ENABLE_FAULT_INJECTION` was the same inheritance in reverse -
+defined in-tree, absent standalone, so the two paths tested different code - and
+is now stripped from the inherited list and set per variant in both paths, so the
+`-faultinj` binary is the only one that has it either way.
 
 **ROCm is a prerequisite.** Per epic AICOMRCCL-1661 ("ROCm toolchain is
 available"), this build uses `hipcc` in host-only mode (`--offload-host-only`)
@@ -543,6 +551,7 @@ cmake --build build -j"$(nproc)"
 ./build/rccl-UnitTestsMicro          # p2p tests, ldd shows no HIP/ROCm/HSA/RCCL
 ./build/rccl-UnitTestsMicroInit      # init.cc tests
 ./build/rccl-UnitTestsMicroInit-uncached
+./build/rccl-UnitTestsMicroInit-faultinj      # same, ENABLE_FAULT_INJECTION arm
 ./build/rccl-UnitTestsMicroEnqueue            # enqueue.cc tests
 ./build/rccl-UnitTestsMicroEnqueue-devlinker  # same, RCCL_DEVICE_LINKER arm
 ./build/rccl-HostUnitTests
