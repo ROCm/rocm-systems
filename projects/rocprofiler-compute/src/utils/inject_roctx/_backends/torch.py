@@ -18,6 +18,7 @@ from typing import Any, Callable, Optional
 
 
 from utils.inject_roctx import core
+from utils.inject_roctx.marker_format import cap_args, encode_args
 from utils.inject_roctx._backends import torch_trace_collector
 from utils.inject_roctx.registry import register
 from utils.logger import console_error, console_log, console_warning
@@ -102,8 +103,47 @@ PROCESS_GROUP_METHODS = (
 )
 
 
-def _push_scope(marker: str, context: str, backend: str = "") -> None:
-    core._push_scope(marker, context, backend)
+def _render_tensor(obj: object) -> Optional[str]:
+    shape = getattr(obj, "shape", None)
+    dtype = getattr(obj, "dtype", None)
+    if shape is None or dtype is None:
+        return None
+    try:
+        dims = "x".join(str(int(d)) for d in shape)
+        dt = str(dtype).replace("torch.", "")
+        return f"{dt}[{dims}]"
+    except Exception:
+        return None
+
+
+def format_wrap_args(args: tuple[object, ...], kwargs: dict[str, object]) -> str:
+    items: list[str] = []
+    for value in args:
+        if len(items) >= 32:
+            break
+        rendered = _render_tensor(value)
+        if rendered is None:
+            continue
+        items.append(rendered)
+    for name, value in kwargs.items():
+        if len(items) >= 32:
+            break
+        rendered = _render_tensor(value)
+        if rendered is None:
+            continue
+        items.append(f"{name}={rendered}")
+    if not items:
+        return "n/a"
+    return encode_args(cap_args("(" + ", ".join(items) + ")"))
+
+
+def _push_scope(
+    marker: str,
+    context: str,
+    backend: str = "",
+    args: str = "n/a",
+) -> None:
+    core._push_scope(marker, context, backend, args)
 
 
 def _pop_scope() -> None:
@@ -125,13 +165,16 @@ def roctx_wrapper(
     if getattr(func, "_roctx_wrapped", False):
         return func
     func_name = name or func.__name__
-    call_counter = {"count": 0}
 
     @wraps(func)
     def wrapper(*args: Any, **kwargs: Any) -> object:
-        call_counter["count"] += 1
         location = core.resolve_user_caller_location()
-        _push_scope(func_name, f"#{call_counter['count']}@{location}", backend=backend)
+        _push_scope(
+            func_name,
+            location,
+            backend=backend,
+            args=format_wrap_args(args, kwargs),
+        )
         try:
             return func(*args, **kwargs)
         finally:
@@ -147,12 +190,9 @@ def _marker_only_init_wrapper(name: str, backend: str = "") -> Callable[..., Any
     Used for classes whose construction occurs in __new__ (e.g. cuda.Event,
     cuda.Stream).
     """
-    call_counter = {"count": 0}
-
     def marker_only_init(self: object, *args: Any, **kwargs: Any) -> None:
-        call_counter["count"] += 1
         location = core.resolve_user_caller_location()
-        _push_scope(name, f"#{call_counter['count']}@{location}", backend=backend)
+        _push_scope(name, location, backend=backend)
         try:
             return object.__init__(self)
         finally:
@@ -388,7 +428,12 @@ def patch_compile_callable() -> None:
         **kwargs: Any,
     ) -> object:
         location = core.resolve_user_caller_location()
-        _push_scope("torch.compile", f"#1@{location}", backend=_BACKEND_NAME)
+        _push_scope(
+            "torch.compile",
+            location,
+            backend=_BACKEND_NAME,
+            args=format_wrap_args((model_or_fn, *args), kwargs),
+        )
         try:
             compiled = original_compile(model_or_fn, *args, **kwargs)
         finally:
@@ -402,7 +447,12 @@ def patch_compile_callable() -> None:
         @wraps(compiled)
         def invocation_wrapper(*c_args: Any, **c_kwargs: Any) -> object:
             loc = core.resolve_user_caller_location()
-            _push_scope(f"torch.compile.{fn_label}", f"#1@{loc}", backend=_BACKEND_NAME)
+            _push_scope(
+                f"torch.compile.{fn_label}",
+                loc,
+                backend=_BACKEND_NAME,
+                args=format_wrap_args(c_args, c_kwargs),
+            )
             try:
                 return compiled(*c_args, **c_kwargs)
             finally:
@@ -426,16 +476,6 @@ def patch_compile_callable() -> None:
 
 
 # Dispatcher: C++ tier covers fwd+bwd; Python tier covers forward only.
-
-
-def next_dispatcher_index(op_name: str) -> int:
-    """Per-thread occurrence count for op_name."""
-    counters = getattr(_thread_local, "dispatcher_counters", None)
-    if counters is None:
-        counters = {}
-        _thread_local.dispatcher_counters = counters
-    counters[op_name] = counters.get(op_name, 0) + 1
-    return counters[op_name]
 
 
 def warn_dispatcher_failure_once(phase: str, error: Exception) -> None:
@@ -491,10 +531,18 @@ def install_dispatcher_hook() -> str:
         )
         return "none"
 
-    def start_disp(op_name: str) -> None:
-        idx = next_dispatcher_index(op_name)
+    def start_disp(
+        op_name: str,
+        args: tuple[object, ...] = (),
+        kwargs: Optional[dict[str, object]] = None,
+    ) -> None:
         location = core.resolve_user_caller_location()
-        _push_scope(op_name, f"#{idx}@{location}", backend=_BACKEND_NAME)
+        _push_scope(
+            op_name,
+            location,
+            backend=_BACKEND_NAME,
+            args=format_wrap_args(args, kwargs or {}),
+        )
 
     def end_disp() -> None:
         _pop_scope()
@@ -511,7 +559,7 @@ def install_dispatcher_hook() -> str:
             op_name = dispatcher_marker_name_for(func)
             pushed = False
             try:
-                start_disp(op_name)
+                start_disp(op_name, args, kwargs)
                 pushed = True
             except Exception as exc:
                 warn_dispatcher_failure_once("start", exc)
@@ -546,19 +594,18 @@ def install_tensor_backward_wrapper() -> None:
         return
 
     original_backward = torch.Tensor.backward
-    backward_counter = {"count": 0}
 
     def backward_with_roctx(
         self: object,
         *args: Any,
         **kwargs: Any,
     ) -> object:
-        backward_counter["count"] += 1
         location = core.resolve_user_caller_location()
         _push_scope(
             "torch.Tensor.backward",
-            f"#{backward_counter['count']}@{location}",
+            location,
             backend=_BACKEND_NAME,
+            args=format_wrap_args((self, *args), kwargs),
         )
         try:
             return original_backward(self, *args, **kwargs)
@@ -634,12 +681,9 @@ def inject_roctx_into_optimizer() -> None:
             **kwargs: Any,
         ) -> object:
             location = core.resolve_user_caller_location()
-            if not hasattr(self, "_roctx_step_call_count"):
-                self._roctx_step_call_count = 0
-            self._roctx_step_call_count += 1
             _push_scope(
                 f"optimizer.{type(self).__name__}.step",
-                f"#{self._roctx_step_call_count}@{location}",
+                location,
                 backend=_BACKEND_NAME,
             )
             try:
@@ -781,7 +825,7 @@ def install_function_apply_wrappers() -> bool:
             location = core.resolve_user_caller_location()
             _push_scope(
                 "torch.autograd.Function.apply",
-                f"#1@{location}",
+                location,
                 backend=_BACKEND_NAME,
             )
             try:
@@ -944,14 +988,12 @@ def inject_roctx_into_model() -> None:
 
     def call_with_roctx(self: object, *args: Any, **kwargs: Any) -> object:
         class_name = self.__class__.__name__
-        if not hasattr(self, "_roctx_call_count"):
-            self._roctx_call_count = 0
-        self._roctx_call_count += 1
         location = core.resolve_user_caller_location()
         _push_scope(
             f"nn.Module.{class_name}.forward",
-            f"#{self._roctx_call_count}@{location}",
+            location,
             backend=_BACKEND_NAME,
+            args=format_wrap_args(args, kwargs),
         )
         try:
             return original_call(self, *args, **kwargs)
