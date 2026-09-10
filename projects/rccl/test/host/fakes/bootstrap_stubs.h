@@ -28,6 +28,26 @@ extern std::function<ncclResult_t(uint64_t /*commHash*/, struct ncclComm* /*comm
 
 extern std::function<ncclResult_t(struct ncclBootstrapHandle* /*handle*/, bool /*idFromEnv*/)> g_bootstrapCreateRoot;
 
+extern bool g_bootstrapNetInitFail;
+
+// A std::function, not a result code: tests must write the allgathered (color, key) table into allData.
+extern std::function<ncclResult_t(void* /*commState*/, void* /*allData*/, int /*size*/)> g_bootstrapAllGather;
+
+extern ncclResult_t g_bootstrapGetUniqueIdResult;
+extern int g_bootstrapGetUniqueIdCalls;
+extern uint64_t g_bootstrapHandleMagic;
+// Whole-handle payload the bootstrapGetUniqueId fake writes on success; magic is then overwritten from the global.
+extern struct ncclBootstrapHandle g_bootstrapHandleTemplate;
+// Declared separately: consumers cannot see ncclBootstrapHandle's complete type, which resetting needs.
+void ResetBootstrapHandleTemplate();
+
+// A std::function on top of the result code: the grow path validates the magic the coordinator broadcast back.
+extern ncclResult_t g_bcastGrowHandleResult;
+extern int g_bcastGrowHandleCalls;
+extern bool g_bcastGrowHandleIsRoot;
+ncclResult_t DefaultBcastGrowHandle(struct ncclBootstrapHandle* handle, struct ncclComm* parent, bool isRoot);
+extern std::function<ncclResult_t(struct ncclBootstrapHandle*, struct ncclComm*, bool)> g_bcastGrowHandle;
+
 void ResetBootstrapStubs();
 
 #endif  // RCCL_TEST_HOST_BOOTSTRAP_STUBS_H_

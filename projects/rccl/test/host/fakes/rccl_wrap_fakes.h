@@ -76,6 +76,12 @@ extern int g_rcclSetWarpSpeedCUsCalls;  // UNDRIVEN
 extern std::function<int(struct ncclComm*, struct ncclTaskColl*, int)>
     g_rcclWarpSpeedAdjustChannels;  // UNDRIVEN
 
+// checkHsaEnvSetting's HSA_* scratch validation (rccl_wrap.cc). g_lastHsaScratchEnv records the
+// hsaScratchEnv argument, which is the only proof the check read the environment at all.
+extern bool g_validHsaScratch;
+extern const char* g_lastHsaScratchEnv;
+extern int g_firmwareVersion;
+
 void ResetRcclWrapFakes();
 
 #endif  // RCCL_TEST_HOST_RCCL_WRAP_FAKES_H_

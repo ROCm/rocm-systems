@@ -150,7 +150,7 @@ if(BUILD_TESTS)
   # ---------------------------------------------------------------------------
   set(TEST_MICRO_INIT_SOURCE_FILES
     init-test.cc
-    fakes/init_fakes.cc                  # init-only seams (ResetInitFakes)
+    fakes/init_fakes.cc                  # src/init.cc-only seams + the Reset/Install chains
     fakes/bootstrap_stubs.cc             # fail-loud stub floor, grouped by subsystem
     fakes/topo_stubs.cc
     fakes/transport_stubs.cc
@@ -158,9 +158,20 @@ if(BUILD_TESTS)
     fakes/nccl_fakes.cc                  # reusable nccl* stubs
     fakes/hip_fakes.cc                   # HIP runtime seams
     # Shared per-production-TU fakes (see MICROTEST_README.md for the map).
+    fakes/amdsmi_fakes.cc                # src/misc/amdsmi_wrap.cc
+    fakes/api_trace_fakes.cc             # src/misc/api_trace.cc NCCL_API dispatch
     fakes/env_fakes.cc                   # src/misc/param.cc + getenv interposition
+    fakes/env_plugin_fakes.cc            # src/plugin/env.cc
+    fakes/gin_fakes.cc                   # src/plugin/gin.cc + src/gin/gin_host.cc
+    fakes/group_fakes.cc                 # src/group.cc
+    fakes/init_nvtx_fakes.cc             # src/init_nvtx.cc
+    fakes/kernel_config_fakes.cc         # src/misc/kernel_config.cc
+    fakes/libc_interposers.cc            # gethostname / dladdr
+    fakes/mem_manager_fakes.cc           # src/mem_manager.cc
+    fakes/os_fakes.cc                    # src/os/linux.cc
     fakes/rccl_wrap_fakes.cc             # src/rccl_wrap.cc
     fakes/recorder_fakes.cc              # src/recorder.cc
+    fakes/rocmwrap_fakes.cc              # src/misc/rocmwrap.cc
     fakes/strongstream_stubs.cc          # src/misc/strongstream.cc
     fakes/tuning_fakes.cc                # src/graph/tuning.cc
     ${PROJECT_BINARY_DIR}/hipify/src/misc/argcheck.cc  # real PtrCheck/CommCheck
@@ -264,16 +275,18 @@ if(BUILD_TESTS)
   # UNIT UNDER TEST defines; a target that needs a real value where the floor
   # aborts gets a seam in the owning TU's fakes file instead.
   # ---------------------------------------------------------------------------
-  # LINKS ONLY BECAUSE OF --gc-sections. Relinking without it leaves 78 undefined
-  # symbols: 42 control globals that only init_fakes.cc defines (referenced from
-  # the four *_stubs.cc below, never from enqueue-test.cc), and 36 ordinary
-  # externals of enqueue.cc that nothing in fakes/ defines at all -- among them
-  # hipFuncGetAttributes, netTransport, ncclGroupStartInternal and the
-  # ncclProfiler* set. So a new test reaching one of those paths fails at LINK
-  # time, not as an assertion: e.g. ncclInitKernelsForDevice (enqueue.cc:110)
+  # LINKS ONLY BECAUSE OF --gc-sections. Relinking without it leaves 34 undefined
+  # symbols: 33 ordinary externals of enqueue.cc that nothing in fakes/ defines at
+  # all -- among them hipFuncGetAttributes, netTransport, ncclGroupStartInternal
+  # and the 13-strong ncclProfiler* set -- plus ncclOsStrSep, an external of the
+  # hipified utils.cc oracle TU below. The control globals that used to make up
+  # most of this list are gone: each now lives in the per-production-TU fakes file
+  # that references it, so no *_stubs.cc leaves one dangling. All 34 that remain
+  # need fakes written. So a new test reaching one of those paths fails at LINK
+  # time, not as an assertion: e.g. ncclInitKernelsForDevice (enqueue.cc:90)
   # needs a hipFuncGetAttributes fake before it can be called at all.
-  # Rehoming the 42 globals to their owning TUs' fakes files addresses under half
-  # of this; the other 36 need fakes written.
+  # To recount: take this target's CMakeFiles/.../link.txt, swap --gc-sections for
+  # --error-limit=0 (lld stops at 20 errors otherwise), and run it.
   set(TEST_MICRO_ENQUEUE_SOURCE_FILES
     enqueue-test.cc
     fakes/enqueue_fakes.cc               # ResetEnqueueFakes chain only
@@ -798,9 +811,20 @@ set(TEST_MICRO_INIT_SOURCE_FILES
   fakes/nccl_stubs.cc
   fakes/nccl_fakes.cc
   fakes/hip_fakes.cc
+  fakes/amdsmi_fakes.cc
+  fakes/api_trace_fakes.cc
   fakes/env_fakes.cc
+  fakes/env_plugin_fakes.cc
+  fakes/gin_fakes.cc
+  fakes/group_fakes.cc
+  fakes/init_nvtx_fakes.cc
+  fakes/kernel_config_fakes.cc
+  fakes/libc_interposers.cc
+  fakes/mem_manager_fakes.cc
+  fakes/os_fakes.cc
   fakes/rccl_wrap_fakes.cc
   fakes/recorder_fakes.cc
+  fakes/rocmwrap_fakes.cc
   fakes/strongstream_stubs.cc
   fakes/tuning_fakes.cc
   ${RCCL_HIPIFY_DIR}/src/misc/argcheck.cc
