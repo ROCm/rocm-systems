@@ -207,7 +207,7 @@ def _resolve_metric_name(config_dir: Path, arch: str, metric_id: str) -> str | N
 
 
 # =============================================================================
-# A. LimitedSet
+# LimitedSet
 # =============================================================================
 
 
@@ -263,7 +263,7 @@ def test_limited_set_reserve_does_not_add_elements():
 
 
 # =============================================================================
-# B. CounterFile
+# CounterFile
 # =============================================================================
 
 
@@ -318,7 +318,7 @@ def test_counter_file_reserve_delegates_to_block(perfmon_config):
 
 
 # =============================================================================
-# C. flat_counters_in_perfmon_file
+# flat_counters_in_perfmon_file
 # =============================================================================
 
 
@@ -339,7 +339,7 @@ def test_flat_counters_in_perfmon_file(perfmon_config):
 
 
 # =============================================================================
-# D. _trial_counter_file_with_extra
+# _trial_counter_file_with_extra
 # =============================================================================
 
 
@@ -379,7 +379,7 @@ def test_trial_counter_file_with_extra_overflow(perfmon_config):
 
 
 # =============================================================================
-# E. _rebuild_tcc_channel_file_map
+# _rebuild_tcc_channel_file_map
 # =============================================================================
 
 
@@ -399,7 +399,7 @@ def test_rebuild_tcc_channel_file_map(perfmon_config):
 
 
 # =============================================================================
-# F. _allocate_perfmon_counter_files
+# _allocate_perfmon_counter_files
 # =============================================================================
 
 
@@ -478,7 +478,7 @@ def test_allocate_tcc_channel_coalescing(perfmon_config):
 
 
 # =============================================================================
-# F2. metric-aware coalesce: accum buckets and formula-only grouping
+# metric-aware coalesce: accum buckets and formula-only grouping
 # =============================================================================
 
 
@@ -608,7 +608,7 @@ def test_same_bucket_priority_empty_for_gfx950():
 
 
 # =============================================================================
-# G. _expand_tcc_template_counters
+# _expand_tcc_template_counters
 # =============================================================================
 
 
@@ -634,7 +634,7 @@ def test_expand_tcc_no_templates(perfmon_config):
 
 
 # =============================================================================
-# H. _append_analysis_yaml_for_filter_token alias handling
+# _append_analysis_yaml_for_filter_token alias handling
 # =============================================================================
 
 
@@ -669,7 +669,7 @@ def test_filter_token_known_alias_resolves_without_crash(monkeypatch):
 
 
 # =============================================================================
-# I. Memory Bandwidth Analysis counter selection
+# Memory Bandwidth Analysis counter selection
 # =============================================================================
 
 
@@ -729,3 +729,46 @@ def test_membw_analysis_counter_selection(
 
     assert counters & FIXTURE_COUNTERS == expected_counters
     assert effective_filter_blocks == filter_blocks
+
+
+# =============================================================================
+# post_profiling
+# =============================================================================
+
+
+@pytest.mark.parametrize(
+    ("filter_blocks", "expect_benchmark"),
+    [
+        pytest.param([], True, id="no_filter_runs_benchmark"),
+        pytest.param(["4"], True, id="block_4_runs_benchmark"),
+        pytest.param(["roof"], True, id="roof_alias_runs_benchmark"),
+        pytest.param(["11.2.3", "11.2.4"], False, id="set_metrics_skip_benchmark"),
+        pytest.param(["2"], False, id="unrelated_block_skips_benchmark"),
+    ],
+)
+def test_post_profiling_roofline_gating(
+    perfmon_config,
+    tmp_path: Path,
+    monkeypatch,
+    filter_blocks: list[str],
+    expect_benchmark: bool,
+) -> None:
+    """Roofline runs only when the effective filter blocks cover block 4."""
+    soc = _make_soc(perfmon_config, arch="gfx942")
+    args = soc.get_args()
+    args.device = 0
+    args.filter_blocks = filter_blocks
+    args.no_roof = False
+    args.output_directory = str(tmp_path)
+    mock_benchmark = MagicMock()
+    monkeypatch.setattr(
+        "rocprof_compute_soc.soc_base.run_roofline_benchmark", mock_benchmark
+    )
+    monkeypatch.setattr(
+        "rocprof_compute_soc.soc_base.validate_roofline_csv",
+        lambda _workload_dir: (True, ""),
+    )
+
+    soc.post_profiling()
+
+    assert mock_benchmark.called is expect_benchmark
