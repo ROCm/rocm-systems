@@ -249,7 +249,9 @@ constexpr auto kDebugNotificationWriteTimeout = std::chrono::milliseconds(250);
 class NotificationWriterReaper {
 public:
   NotificationWriterReaper()
-      : worker_([this](std::stop_token stop) { reap_until_stopped(stop); }) {}
+      : owner_pid_(getpid()), worker_([this](std::stop_token stop) { reap_until_stopped(stop); }) {}
+
+  [[nodiscard]] pid_t owner_pid() const { return owner_pid_; }
 
   void adopt(pid_t writer) {
     {
@@ -289,13 +291,32 @@ private:
   std::mutex mutex_;
   std::condition_variable_any cv_;
   std::vector<pid_t> writers_;
+  const pid_t owner_pid_;
   // Declared last so it stops and joins before the state it accesses is destroyed.
   std::jthread worker_;
 };
 
+constinit std::atomic<NotificationWriterReaper *> g_notification_writer_reaper{nullptr};
+
 NotificationWriterReaper &notification_writer_reaper() {
-  static NotificationWriterReaper reaper;
-  return reaper;
+  const pid_t owner_pid = getpid();
+  NotificationWriterReaper *reaper = g_notification_writer_reaper.load(std::memory_order_acquire);
+  if (reaper != nullptr && reaper->owner_pid() == owner_pid)
+    return *reaper;
+
+  auto *replacement = new NotificationWriterReaper();
+  while (!g_notification_writer_reaper.compare_exchange_weak(
+      reaper, replacement, std::memory_order_release, std::memory_order_acquire)) {
+    if (reaper != nullptr && reaper->owner_pid() == owner_pid) {
+      delete replacement;
+      return *reaper;
+    }
+  }
+
+  // Process-lifetime ownership is intentional. Static destruction cannot safely
+  // join a parent thread from a forked child, so each PID publishes its own
+  // instance and lets process teardown reclaim it without running a destructor.
+  return *replacement;
 }
 
 int reap_notification_writer(pid_t writer, int pidfd, int *status, bool defer_reap_for_testing) {
@@ -377,6 +398,7 @@ int reap_notification_writer(pid_t writer, int pidfd, int *status, bool defer_re
 /// short write, EAGAIN after the delivery deadline).
 int write_debug_notification(int fd, const std::function<void()> &before_write = {},
                              std::optional<int> clone3_error_for_testing = std::nullopt,
+                             std::optional<int> clone_pidfd_error_for_testing = std::nullopt,
                              bool defer_reap_for_testing = false) {
   struct stat descriptor_stat {};
   if (safe_fstat(fd, &descriptor_stat) != 0)
@@ -398,8 +420,12 @@ int write_debug_notification(int fd, const std::function<void()> &before_write =
   }
   if (writer < 0 && (errno == ENOSYS || errno == EPERM)) {
     raw_pidfd = -1;
-    writer = static_cast<pid_t>(
-        ::syscall(SYS_clone, CLONE_PIDFD | CLONE_UNTRACED, nullptr, &raw_pidfd, nullptr, nullptr));
+    if (clone_pidfd_error_for_testing) {
+      errno = *clone_pidfd_error_for_testing;
+    } else {
+      writer = static_cast<pid_t>(::syscall(SYS_clone, CLONE_PIDFD | CLONE_UNTRACED, nullptr,
+                                            &raw_pidfd, nullptr, nullptr));
+    }
     if (writer < 0 && (errno == EINVAL || errno == EPERM)) {
       raw_pidfd = -1;
       writer = static_cast<pid_t>(
@@ -3520,6 +3546,7 @@ int SimulatedKfd::retry_debug_notifications(pid_t target_pid, bool invoke_result
   uint64_t session_generation = 0;
   std::array<uint64_t, 64> exception_bit_generations{};
   std::optional<int> clone3_error_for_testing;
+  std::optional<int> clone_pidfd_error_for_testing;
   bool defer_reap_for_testing = false;
   std::function<void(bool)> result_hook;
   std::function<void()> write_hook;
@@ -3586,6 +3613,7 @@ int SimulatedKfd::retry_debug_notifications(pid_t target_pid, bool invoke_result
     session_generation = session->second.generation;
     exception_bit_generations = session->second.exception_bit_generations;
     clone3_error_for_testing = debug_notification_clone3_error_for_testing_;
+    clone_pidfd_error_for_testing = debug_notification_clone_pidfd_error_for_testing_;
     defer_reap_for_testing = debug_notification_deferred_reap_for_testing_;
     if (invoke_result_hook) {
       result_hook = debug_notification_result_hook_for_testing_;
@@ -3602,8 +3630,9 @@ int SimulatedKfd::retry_debug_notifications(pid_t target_pid, bool invoke_result
     }
   }
 
-  const int result = write_debug_notification(notifier.get(), write_hook, clone3_error_for_testing,
-                                              defer_reap_for_testing);
+  const int result =
+      write_debug_notification(notifier.get(), write_hook, clone3_error_for_testing,
+                               clone_pidfd_error_for_testing, defer_reap_for_testing);
   if (result_hook)
     result_hook(result == 0);
 
@@ -3910,8 +3939,10 @@ bool SimulatedKfd::notify_debug_event(const std::shared_ptr<KfdProcess> &proc, u
   UniqueDriverFd notifier;
   bool subscribed = false;
   uint64_t session_generation = 0;
+  uint64_t subscription_claim_mask = 0;
   std::array<uint64_t, 64> exception_bit_generations{};
   std::optional<int> clone3_error_for_testing;
+  std::optional<int> clone_pidfd_error_for_testing;
   bool defer_reap_for_testing = false;
   bool notification_pending = false;
   std::function<void(bool)> result_hook;
@@ -3927,8 +3958,10 @@ bool SimulatedKfd::notify_debug_event(const std::shared_ptr<KfdProcess> &proc, u
     session_generation = session->second.generation;
     exception_bit_generations = session->second.exception_bit_generations;
     clone3_error_for_testing = debug_notification_clone3_error_for_testing_;
+    clone_pidfd_error_for_testing = debug_notification_clone_pidfd_error_for_testing_;
     defer_reap_for_testing = debug_notification_deferred_reap_for_testing_;
-    subscribed = (session->second.exception_enable_mask & exception_mask) != 0;
+    subscription_claim_mask = session->second.exception_enable_mask & exception_mask;
+    subscribed = subscription_claim_mask != 0;
     if (subscribed && session->second.dbg_fd >= 0)
       notifier = UniqueDriverFd(duplicate_debug_notifier(session->second.dbg_fd));
     if ((!subscribed || notifier.get() < 0) && !retain_on_rejection)
@@ -3958,7 +3991,7 @@ bool SimulatedKfd::notify_debug_event(const std::shared_ptr<KfdProcess> &proc, u
   }
   const bool delivered =
       write_debug_notification(notifier.get(), write_hook, clone3_error_for_testing,
-                               defer_reap_for_testing) == 0;
+                               clone_pidfd_error_for_testing, defer_reap_for_testing) == 0;
   if (result_hook)
     result_hook(delivered);
 
@@ -3982,7 +4015,7 @@ bool SimulatedKfd::notify_debug_event(const std::shared_ptr<KfdProcess> &proc, u
       return false;
     const bool still_subscribed = (exception_mask & session->second.exception_enable_mask) != 0;
     const bool subscription_unchanged = exception_subscriptions_unchanged(
-        session->second, exception_bit_generations, exception_mask);
+        session->second, exception_bit_generations, subscription_claim_mask);
     queue->second.finish_debug_notification(
         exception_mask,
         delivered && still_subscribed && subscription_unchanged ? exception_mask : 0);

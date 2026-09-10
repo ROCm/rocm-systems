@@ -25,6 +25,7 @@
 #include <csignal>
 #include <fcntl.h>
 #include <poll.h>
+#include <spawn.h>
 #include <sys/eventfd.h>
 #include <sys/mman.h>
 #include <sys/prctl.h>
@@ -44,12 +45,84 @@
 #include <functional>
 #include <future>
 #include <limits>
+#include <optional>
+#include <string>
+#include <string_view>
 #include <thread>
 #include <vector>
 
+extern char **environ;
+
 namespace {
 
+constexpr std::string_view kIsolatedProbeEnvironment = "ROCJITSU_KFD_IOCTL_TEST_PROBE";
+
+bool is_isolated_probe(std::string_view name) {
+  const char *probe = std::getenv(kIsolatedProbeEnvironment.data());
+  return probe != nullptr && probe == name;
+}
+
+int wait_for_child_with_timeout(pid_t child, std::chrono::milliseconds timeout) {
+  int status = 0;
+  const auto deadline = std::chrono::steady_clock::now() + timeout;
+  while (std::chrono::steady_clock::now() < deadline) {
+    pid_t waited = -1;
+    do {
+      waited = ::waitpid(child, &status, WNOHANG);
+    } while (waited < 0 && errno == EINTR);
+    if (waited == child) {
+      if (WIFEXITED(status))
+        return WEXITSTATUS(status);
+      return WIFSIGNALED(status) ? 128 + WTERMSIG(status) : -EIO;
+    }
+    if (waited < 0)
+      return -errno;
+    static_cast<void>(::poll(nullptr, 0, 10));
+  }
+
+  static_cast<void>(::kill(child, SIGKILL));
+  pid_t waited = -1;
+  do {
+    waited = ::waitpid(child, &status, WNOHANG);
+  } while (waited < 0 && errno == EINTR);
+  return -ETIMEDOUT;
+}
+
+int run_isolated_test_probe(std::string_view name, std::string_view gtest_name,
+                            std::chrono::milliseconds timeout) {
+  const std::string environment_prefix = std::string(kIsolatedProbeEnvironment) + "=";
+  std::string probe_environment = environment_prefix + std::string(name);
+  std::vector<char *> child_environment;
+  for (char **entry = environ; entry != nullptr && *entry != nullptr; ++entry) {
+    if (!std::string_view(*entry).starts_with(environment_prefix))
+      child_environment.push_back(*entry);
+  }
+  child_environment.push_back(probe_environment.data());
+  child_environment.push_back(nullptr);
+
+  std::string filter = "--gtest_filter=" + std::string(gtest_name);
+  char executable[] = "/proc/self/exe";
+  char color[] = "--gtest_color=no";
+  std::array<char *, 4> arguments{executable, filter.data(), color, nullptr};
+  pid_t child = -1;
+  const int spawn_result = ::posix_spawn(&child, executable, nullptr, nullptr, arguments.data(),
+                                         child_environment.data());
+  if (spawn_result != 0)
+    return -spawn_result;
+  return wait_for_child_with_timeout(child, timeout);
+}
+
 TEST(CommandProcessorTest, InterruptCallbackRemovalWaitsForActiveCall) {
+  constexpr std::string_view kProbe = "interrupt-callback-removal";
+  if (!is_isolated_probe(kProbe)) {
+    EXPECT_EQ(run_isolated_test_probe(kProbe,
+                                      "CommandProcessorTest."
+                                      "InterruptCallbackRemovalWaitsForActiveCall",
+                                      std::chrono::seconds(10)),
+              0);
+    return;
+  }
+
   rocjitsu::amdgpu::CommandProcessor cp("cp");
   cp.startup();
   std::promise<void> callback_entered;
@@ -93,6 +166,16 @@ TEST(CommandProcessorTest, InterruptCallbackRemovalWaitsForActiveCall) {
 }
 
 TEST(CommandProcessorTest, DrainedInterruptCallbackLeaseDoesNotTouchDestroyedOwner) {
+  constexpr std::string_view kProbe = "drained-interrupt-callback-lease";
+  if (!is_isolated_probe(kProbe)) {
+    EXPECT_EQ(run_isolated_test_probe(
+                  kProbe,
+                  "CommandProcessorTest.DrainedInterruptCallbackLeaseDoesNotTouchDestroyedOwner",
+                  std::chrono::seconds(10)),
+              0);
+    return;
+  }
+
   auto cp = std::make_unique<rocjitsu::amdgpu::CommandProcessor>("cp");
   cp->set_interrupt_callback([](uint32_t, uint32_t) {});
 
@@ -1921,8 +2004,15 @@ TEST_F(KfdIoctlTest, DbgTrapNotificationFallsBackWhenClone3IsUnavailable) {
   snapshot.queue_snapshot.entry_size = sizeof(snapshot_entry);
   ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &snapshot), 0);
 
-  for (int clone3_error : {ENOSYS, EPERM}) {
+  struct CloneFailures {
+    int clone3_error;
+    std::optional<int> clone_pidfd_error;
+  };
+  for (const auto &[clone3_error, clone_pidfd_error] :
+       std::array{CloneFailures{ENOSYS, std::nullopt}, CloneFailures{EPERM, std::nullopt},
+                  CloneFailures{ENOSYS, EINVAL}}) {
     driver_->set_debug_notification_clone3_error_for_testing(clone3_error);
+    driver_->set_debug_notification_clone_pidfd_error_for_testing(clone_pidfd_error);
     ASSERT_TRUE(driver_->notify_debug_event_for_testing(create.queue_id, kException,
                                                         /*retain_on_rejection=*/false));
     uint64_t notifications = 0;
@@ -1937,8 +2027,14 @@ TEST_F(KfdIoctlTest, DbgTrapNotificationFallsBackWhenClone3IsUnavailable) {
     ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &query), 0);
     EXPECT_EQ(query.query_debug_event.queue_id, create.queue_id);
     EXPECT_EQ(query.query_debug_event.exception_mask, kException);
+
+    int status = 0;
+    errno = 0;
+    EXPECT_EQ(::waitpid(-1, &status, WNOHANG | __WCLONE), -1);
+    EXPECT_EQ(errno, ECHILD);
   }
   driver_->set_debug_notification_clone3_error_for_testing(std::nullopt);
+  driver_->set_debug_notification_clone_pidfd_error_for_testing(std::nullopt);
 }
 
 TEST_F(KfdIoctlTest, DbgTrapNotificationWriterStaysOutsidePtraceDomain) {
@@ -2118,6 +2214,15 @@ TEST_F(KfdIoctlTest, DbgTrapFifoNotifierWritesOneBytePerEvent) {
 }
 
 TEST_F(KfdIoctlTest, DbgTrapCompetingNotifierWriterCannotBlockPublisher) {
+  constexpr std::string_view kProbe = "competing-notifier-writer";
+  if (!is_isolated_probe(kProbe)) {
+    EXPECT_EQ(run_isolated_test_probe(
+                  kProbe, "KfdIoctlTest.DbgTrapCompetingNotifierWriterCannotBlockPublisher",
+                  std::chrono::seconds(10)),
+              0);
+    return;
+  }
+
   constexpr uint64_t kException = KFD_EC_MASK(EC_QUEUE_WAVE_TRAP);
   std::vector<uint8_t> ring(4096);
   uint64_t read_pointer = 0;
@@ -2158,51 +2263,24 @@ TEST_F(KfdIoctlTest, DbgTrapCompetingNotifierWriterCannotBlockPublisher) {
   // The hook clears O_NONBLOCK and consumes the capacity immediately before
   // delivery. The helper writer blocks, but its deadline must keep the caller
   // bounded even though the shared open-file description is now blocking.
-  // Run the call in a subprocess first and enforce its deadline from the
-  // parent, so a regression cannot hang the complete test binary before the
-  // elapsed check below. Force the child through the asynchronous reap branch
-  // to model waitpid(WNOHANG) observing a still-live notification writer.
+  // The complete test runs in a fresh exec-based helper with a parent-enforced
+  // deadline. Force the asynchronous reap branch to model waitpid(WNOHANG)
+  // observing a still-live notification writer.
   driver_->set_debug_notification_deferred_reap_for_testing(true);
-  const pid_t probe = ::fork();
-  ASSERT_GE(probe, 0);
-  if (probe == 0) {
-    const bool delivered = driver_->notify_debug_event_for_testing(create.queue_id, kException,
-                                                                   /*retain_on_rejection=*/true);
-    _exit(delivered ? 1 : 0);
-  }
-  ChildProcessGuard probe_guard(probe);
-  int probe_status = 0;
-  pid_t waited = 0;
-  const auto probe_deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
-  do {
-    do {
-      waited = ::waitpid(probe, &probe_status, WNOHANG);
-    } while (waited < 0 && errno == EINTR);
-    if (waited != 0)
-      break;
-    static_cast<void>(::poll(nullptr, 0, 10));
-  } while (std::chrono::steady_clock::now() < probe_deadline);
-  if (waited == 0) {
-    static_cast<void>(::kill(probe, SIGKILL));
-    do {
-      waited = ::waitpid(probe, &probe_status, WNOHANG);
-    } while (waited < 0 && errno == EINTR);
-    probe_guard.release();
-    FAIL() << "notification publisher exceeded its parent-enforced deadline";
-  }
-  ASSERT_EQ(waited, probe);
-  probe_guard.release();
-  ASSERT_TRUE(WIFEXITED(probe_status));
-  ASSERT_EQ(WEXITSTATUS(probe_status), 0);
-  uint64_t probe_sentinel = 0;
-  ASSERT_EQ(::read(notifier, &probe_sentinel, sizeof(probe_sentinel)),
-            static_cast<ssize_t>(sizeof(probe_sentinel)));
-  ASSERT_EQ(probe_sentinel, saturated);
-
   const auto start = std::chrono::steady_clock::now();
   EXPECT_FALSE(driver_->notify_debug_event_for_testing(create.queue_id, kException,
                                                        /*retain_on_rejection=*/true));
   EXPECT_LT(std::chrono::steady_clock::now() - start, std::chrono::seconds(1));
+
+  // Initializing the deferred reaper must not leave a joinable static thread
+  // that a later fork child tries to destroy. Use exit(), not _exit(), so the
+  // child runs process-lifetime destructors under a second bounded wait.
+  const pid_t exit_probe = ::fork();
+  ASSERT_GE(exit_probe, 0);
+  if (exit_probe == 0)
+    std::exit(0);
+  EXPECT_EQ(wait_for_child_with_timeout(exit_probe, std::chrono::seconds(2)), 0);
+
   driver_->set_debug_notification_deferred_reap_for_testing(false);
   driver_->set_debug_notification_write_hook_for_testing({});
   EXPECT_TRUE(competing_write_ran);
@@ -2364,6 +2442,81 @@ TEST_F(KfdIoctlTest, DbgTrapUnrelatedMaskChangePreservesDebuggerOwnership) {
   ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &query), 0);
   EXPECT_EQ(query.query_debug_event.queue_id, create.queue_id);
   EXPECT_EQ(query.query_debug_event.exception_mask, kPublished);
+}
+
+TEST_F(KfdIoctlTest, DbgTrapAddingCombinedEventBitPreservesDebuggerOwnership) {
+  constexpr uint64_t kInitiallySubscribed = KFD_EC_MASK(EC_QUEUE_WAVE_MEMORY_VIOLATION);
+  constexpr uint64_t kAddedDuringWrite = KFD_EC_MASK(EC_QUEUE_WAVE_TRAP);
+  constexpr uint64_t kCombined = kInitiallySubscribed | kAddedDuringWrite;
+  std::vector<uint8_t> ring(4096);
+  uint64_t read_pointer = 0;
+  uint64_t write_pointer = 0;
+  kfd_ioctl_create_queue_args create{};
+  create.gpu_id = kGpuId;
+  create.queue_type = KFD_IOC_QUEUE_TYPE_COMPUTE_AQL;
+  create.ring_base_address = reinterpret_cast<uint64_t>(ring.data());
+  create.ring_size = static_cast<uint32_t>(ring.size());
+  create.read_pointer_address = reinterpret_cast<uint64_t>(&read_pointer);
+  create.write_pointer_address = reinterpret_cast<uint64_t>(&write_pointer);
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_CREATE_QUEUE, &create), 0);
+
+  const int notifier = eventfd(0, EFD_CLOEXEC | EFD_NONBLOCK);
+  ASSERT_GE(notifier, 0);
+  debug_fds_.push_back(notifier);
+  kfd_ioctl_dbg_trap_args enable{};
+  enable.pid = static_cast<uint32_t>(getpid());
+  enable.op = KFD_IOC_DBG_TRAP_ENABLE;
+  enable.enable.dbg_fd = notifier;
+  enable.enable.exception_mask = kInitiallySubscribed;
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &enable), 0);
+
+  kfd_queue_snapshot_entry snapshot_entry{};
+  kfd_ioctl_dbg_trap_args snapshot{};
+  snapshot.pid = static_cast<uint32_t>(getpid());
+  snapshot.op = KFD_IOC_DBG_TRAP_GET_QUEUE_SNAPSHOT;
+  snapshot.queue_snapshot.exception_mask = KFD_EC_MASK(EC_QUEUE_NEW);
+  snapshot.queue_snapshot.snapshot_buf_ptr = reinterpret_cast<uint64_t>(&snapshot_entry);
+  snapshot.queue_snapshot.num_queues = 1;
+  snapshot.queue_snapshot.entry_size = sizeof(snapshot_entry);
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &snapshot), 0);
+
+  kfd_ioctl_dbg_trap_args exceptions{};
+  exceptions.pid = static_cast<uint32_t>(getpid());
+  exceptions.op = KFD_IOC_DBG_TRAP_SET_EXCEPTIONS_ENABLED;
+  int mask_update_result = -1;
+  driver_->set_debug_notification_result_hook_for_testing([&](bool delivered) {
+    if (!delivered)
+      return;
+    exceptions.set_exceptions_enabled.exception_mask = kCombined;
+    mask_update_result = driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &exceptions);
+  });
+  EXPECT_TRUE(driver_->notify_debug_event_for_testing(create.queue_id, kCombined,
+                                                      /*retain_on_rejection=*/true,
+                                                      /*reserve_runtime_on_rejection=*/true));
+  driver_->set_debug_notification_result_hook_for_testing({});
+  EXPECT_EQ(mask_update_result, 0);
+
+  uint64_t notifications = 0;
+  ASSERT_EQ(::read(notifier, &notifications, sizeof(notifications)),
+            static_cast<ssize_t>(sizeof(notifications)));
+  EXPECT_EQ(notifications, 1u);
+
+  auto process = driver_->find_process(driver_->local_process_id());
+  ASSERT_NE(process, nullptr);
+  {
+    std::lock_guard<std::mutex> lock(process->alloc_mutex_);
+    auto queue = process->queue_snapshot_map_.find(create.queue_id);
+    ASSERT_NE(queue, process->queue_snapshot_map_.end());
+    EXPECT_EQ(queue->second.runtime_exception_pending_status & kCombined, 0u);
+  }
+
+  kfd_ioctl_dbg_trap_args query{};
+  query.pid = static_cast<uint32_t>(getpid());
+  query.op = KFD_IOC_DBG_TRAP_QUERY_DEBUG_EVENT;
+  query.query_debug_event.exception_mask = kCombined;
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &query), 0);
+  EXPECT_EQ(query.query_debug_event.queue_id, create.queue_id);
+  EXPECT_EQ(query.query_debug_event.exception_mask, kCombined);
 }
 
 TEST_F(KfdIoctlTest, DbgTrapHwOpWithoutRuntimeReturnsEPERM) {
