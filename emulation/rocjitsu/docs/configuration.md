@@ -127,6 +127,67 @@ additional CU tasks. This setting does not change queue ownership, XCD fan-out,
 or which SPI or CU accepts the next workgroup. In clocked mode the effective
 value is always 1.
 
+#### Worked CPU-concurrency examples
+
+The tables below separate the inputs that determine concurrency from the
+resulting host-thread limits. They use current shipped topologies. `S` is the
+SoC count, `X` is the XCD count per SoC, and `K` is the number of CUs reachable
+from one command processor. Each listed topology has one command processor per
+XCD, so `K` is also its CUs per XCD. `N` is `num_threads`, `D` is
+`cpu_dispatch_threads`, `H` is the host value reported by
+`hardware_concurrency()`, and `A` is the automatic-mode cap.
+The no-argument runtime helper uses `A = 32`; embedding callers can supply a
+different cap, but `A` is not a JSON setting.
+
+| Case | Shipped topology | S | X | CPs/SoC | CUs/CP (`K`) | Mode | N | D | H | A |
+|---|---|---:|---:|---:|---:|---|---:|---:|---:|---:|
+| A | CDNA4, one GPU | 1 | 8 | 8 | 36 | functional | 8 | 1 (omitted) | 64 | 32 |
+| B | CDNA4, one GPU | 1 | 8 | 8 | 36 | functional | 8 | 0 | 64 | 32 |
+| C | CDNA4, one GPU | 1 | 8 | 8 | 36 | functional | 8 | 64 | 16 | 32 |
+| D | CDNA4, two GPUs | 2 | 8 | 8 | 36 | functional | 1 | 0 | 64 | 32 |
+| E | CDNA4, two GPUs | 2 | 8 | 8 | 36 | functional | 16 | 0 | 64 | 32 |
+| F | CDNA5, four GPUs | 4 | 8 | 8 | 32 | functional | 16 | 0 | 128 | 32 |
+| G | CDNA5, four GPUs | 4 | 8 | 8 | 32 | functional | 4 | 20 | 8 | 32 |
+| H | CDNA4, one GPU | 1 | 8 | 8 | 36 | clocked | 8 | 0 | 64 | 32 |
+
+`E` below is the effective Simdojo engine-thread count after clamping `N` to
+the total XCD count. The dispatch policy first produces a per-SoC budget `B`,
+then computes `W = min(B, K)`. At runtime, one CP batch uses at most
+`min(W, runnable CUs owned by that CP)` threads. Total CUs across the SoC do not
+increase `W` because its CPs share one serializing pool. `P` is the total number
+of retained pool workers, `sum(W - 1)`. `T = E + P` counts execution-thread
+slots, including the caller in single-threaded engine mode but excluding
+doorbell monitors, daemon threads, and other runtime threads. `R` is the
+maximum of those slots that can be runnable on useful simulation work at once.
+`Q` counts only threads advancing CU quanta. All maxima assume enough runnable
+work and favorable partition placement.
+
+| Case | E: engine threads | W: CU threads per active CP | P: retained pool workers | T: execution threads | R: max runnable execution threads | Q: max concurrent CU quanta | Physical ceiling `min(H, R)` |
+|---|---:|---|---:|---:|---:|---:|---:|
+| A | 8 | `[1]` | 0 | 8 | 8 | 8 | 8 |
+| B | 8 | `[32]` | 31 | 39 | 39 | 32 | 39 |
+| C | 8 | `[36]` | 35 | 43 | 43 | 36 | 16 |
+| D | 1 | `[16, 16]` | 30 | 31 | 16 | 16 | 16 |
+| E | 16 | `[16, 16]` | 30 | 46 | 46 | 32 | 46 |
+| F | 16 | `[8, 8, 8, 8]` | 28 | 44 | 44 | 32 | 44 |
+| G | 4 | `[20, 20, 20, 20]` | 76 | 80 | 80 | 80 | 8 |
+| H | 8 | `[1]` | 0 | 8 | 8 | 8 | 8 |
+
+Width `1` uses no pool, so independent XCD partitions can each advance one CU
+on their engine thread. A width greater than one creates one pool per SoC; the
+width includes the engine thread submitting the batch, and the pool retains
+`W - 1` additional workers. Complete submissions from command processors in
+the same SoC currently serialize through that pool, while different SoCs can
+use their pools concurrently. This is why case D creates 31 execution-thread
+slots but can use only 16 at once, and why multiplying `num_threads` by
+`cpu_dispatch_threads` is not a valid concurrency formula. Cases C and G also
+show that an explicit `D` bypasses the automatic cap and can oversubscribe the
+host.
+
+A checkpoint retains `D`, not `W`. Restoring `D = 0` therefore recomputes the
+automatic budget from the new host's `H` and `A`; explicit requests retain
+their value. Clocked mode always uses `W = 1` regardless of `D`.
+
 ### Topology
 
 Components are defined hierarchically under `topology.root`. Range

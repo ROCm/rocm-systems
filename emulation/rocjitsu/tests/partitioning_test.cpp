@@ -84,38 +84,46 @@ void expect_subtree_partition(simdojo::Component *component, simdojo::PartitionI
 }
 
 TEST(CpuDispatchBudgetTest, AutoUsesDetectedHostWidthBelowCap) {
-  EXPECT_EQ(detail::resolve_cpu_dispatch_thread_budgets(
+  EXPECT_EQ(config::resolve_cpu_dispatch_thread_budgets(
                 /*configured_threads=*/0, /*hardware_threads=*/6, /*soc_count=*/1),
             (std::vector<uint32_t>{6}));
 }
 
 TEST(CpuDispatchBudgetTest, AutoFallsBackToOneWhenHostWidthIsUnknown) {
-  EXPECT_EQ(detail::resolve_cpu_dispatch_thread_budgets(
+  EXPECT_EQ(config::resolve_cpu_dispatch_thread_budgets(
                 /*configured_threads=*/0, /*hardware_threads=*/0, /*soc_count=*/1),
             (std::vector<uint32_t>{1}));
 }
 
 TEST(CpuDispatchBudgetTest, AutoCapsHostWidthAtThirtyTwo) {
-  EXPECT_EQ(detail::resolve_cpu_dispatch_thread_budgets(
+  EXPECT_EQ(config::resolve_cpu_dispatch_thread_budgets(
                 /*configured_threads=*/0, /*hardware_threads=*/128, /*soc_count=*/1),
             (std::vector<uint32_t>{32}));
 }
 
+TEST(CpuDispatchBudgetTest, AutoUsesSuppliedCap) {
+  EXPECT_EQ(config::resolve_cpu_dispatch_thread_budgets(
+                /*configured_threads=*/0, /*hardware_threads=*/128, /*soc_count=*/4,
+                /*automatic_thread_cap=*/12),
+            (std::vector<uint32_t>{3, 3, 3, 3}));
+}
+
 TEST(CpuDispatchBudgetTest, AutoDividesHostBudgetFairlyAcrossSocs) {
-  EXPECT_EQ(detail::resolve_cpu_dispatch_thread_budgets(
+  EXPECT_EQ(config::resolve_cpu_dispatch_thread_budgets(
                 /*configured_threads=*/0, /*hardware_threads=*/10, /*soc_count=*/3),
             (std::vector<uint32_t>{4, 3, 3}));
-  EXPECT_EQ(detail::resolve_cpu_dispatch_thread_budgets(
+  EXPECT_EQ(config::resolve_cpu_dispatch_thread_budgets(
                 /*configured_threads=*/0, /*hardware_threads=*/128, /*soc_count=*/4),
             (std::vector<uint32_t>{8, 8, 8, 8}));
-  EXPECT_EQ(detail::resolve_cpu_dispatch_thread_budgets(
+  EXPECT_EQ(config::resolve_cpu_dispatch_thread_budgets(
                 /*configured_threads=*/0, /*hardware_threads=*/2, /*soc_count=*/4),
             (std::vector<uint32_t>{1, 1, 1, 1}));
 }
 
 TEST(CpuDispatchBudgetTest, ExplicitWidthRemainsPerSoc) {
-  EXPECT_EQ(detail::resolve_cpu_dispatch_thread_budgets(
-                /*configured_threads=*/7, /*hardware_threads=*/2, /*soc_count=*/3),
+  EXPECT_EQ(config::resolve_cpu_dispatch_thread_budgets(
+                /*configured_threads=*/7, /*hardware_threads=*/2, /*soc_count=*/3,
+                /*automatic_thread_cap=*/1),
             (std::vector<uint32_t>{7, 7, 7}));
 }
 
