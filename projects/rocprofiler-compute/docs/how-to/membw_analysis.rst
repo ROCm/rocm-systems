@@ -15,7 +15,7 @@ Using memory bandwidth analysis
    guidance text will be refined in future releases. Behavior and
    command-line surface may change.
 
-Memory Bandwidth Analysis identifies bottlenecks in the GPU memory
+Memory bandwidth analysis identifies bottlenecks in the GPU memory
 subsystem. It evaluates stall metrics collected from the
 :doc:`L1 cache (GL1) </conceptual/cdna/vector-l1-cache>`,
 :doc:`L2 cache (GL2) </conceptual/cdna/l2-cache>`, and Efficiency
