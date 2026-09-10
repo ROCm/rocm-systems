@@ -420,15 +420,17 @@ struct ncclGinApi_Flush<NCCL_NET_DEVICE_GIN_ANVIL_SDMA> {
       auto** handles = (::sdma_anvil::SdmaQueueDeviceHandle**)loadConst(&rsCtx->queueHandles);
       int nr = ctx.nRanks;
       int numCh = loadConst(&rsCtx->numChannels);
+      if (handles != nullptr) {
 #pragma unroll 1
-      for (int p = coop.thread_rank(); p < nr; p += coop.size()) {
-        uint64_t peerMask = ((1ULL << numCh) - 1) << (p * numCh);
-        if ((dirty & peerMask) == 0) continue;
-        for (int ch = 0; ch < numCh; ++ch) {
-          uint64_t bit = 1ULL << (p * numCh + ch);
-          if ((dirty & bit) == 0) continue;
-          auto* h = loadConst(handles + p * numCh + ch);
-          if (h != nullptr) ::sdma_anvil::quiet(*h);
+        for (int p = coop.thread_rank(); p < nr; p += coop.size()) {
+          uint64_t peerMask = ((1ULL << numCh) - 1) << (p * numCh);
+          if ((dirty & peerMask) == 0) continue;
+          for (int ch = 0; ch < numCh; ++ch) {
+            uint64_t bit = 1ULL << (p * numCh + ch);
+            if ((dirty & bit) == 0) continue;
+            auto* h = loadConst(handles + p * numCh + ch);
+            if (h != nullptr) ::sdma_anvil::quiet(*h);
+          }
         }
       }
       coop.sync();

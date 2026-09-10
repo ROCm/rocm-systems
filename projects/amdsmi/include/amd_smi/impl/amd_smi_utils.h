@@ -299,4 +299,14 @@ amdsmi_status_t smi_amdgpu_read_clk_freq_from_pp_dpm(amd::smi::AMDSmiGPUDevice* 
  */
 const char* smi_amdgpu_pp_dpm_filename_for_clk_type(amdsmi_clk_type_t clk_type);
 
+/**
+ *  @brief Reset amdsmi_asic_info_t to its not-supported state.
+ *
+ *  Backends call this before filling in what they can, so a field a backend
+ *  does not know about reports N/A rather than a plausible zero.
+ *
+ *  @param[out] info Structure to reset to its not-supported state.
+ */
+void init_asic_info_defaults(amdsmi_asic_info_t* info);
+
 #endif  // AMD_SMI_INCLUDE_AMD_SMI_UTILS_H_

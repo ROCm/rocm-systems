@@ -4,6 +4,8 @@
 /// @file translate_gfx1250_test.cpp
 /// @brief CPU-only tests for gfx1250 revision translation.
 
+#include "../amdgpu_elf_test_support.h"
+#include "../elf_test_support.h"
 #include "decode_test_util.h"
 #include "rocjitsu/code/amdgpu_code_object.h"
 #include "rocjitsu/code/amdgpu_elf.h"
@@ -42,8 +44,6 @@
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"
 #include "rocjitsu/vm/amdgpu/l2_cache.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
-#include "support/elf_test_support.h"
-#include "support/translate_test_support.h"
 #include "util/data_types.h"
 
 #include "rocjitsu/base/rj_compiler.h"
