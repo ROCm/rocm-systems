@@ -94,7 +94,7 @@ RCCL_PARAM(IgnoreArchTable, "IGNORE_ARCH_TABLE", 0);
 // Returns true when the user has restricted the algorithm set via NCCL_ALGO.
 // When true, CE / DDA / Symmetric dispatch is skipped so getAlgoInfo() reaches
 // Ring/Tree exactly as the user requested.  Cached to avoid repeated getenv().
-inline bool rcclNcclAlgoEnvIsSet() {
+bool rcclNcclAlgoEnvIsSet() {
   static int cached = -1;
   if (cached == -1) cached = (ncclGetEnv("NCCL_ALGO") != nullptr) ? 1 : 0;
   return cached == 1;
@@ -803,7 +803,7 @@ inline bool rcclCeAllReduceEnabledDef(bool archDefault) {
   if (param >= 0) return param != 0;
   return archDefault;
 }
-inline bool rcclCeAllReduceEnabled(const ncclComm* comm) {
+bool rcclCeAllReduceEnabled(const ncclComm* comm) {
   return rcclCeAllReduceEnabledDef(rcclCeAllReduceArchDefault(comm));
 }
 
@@ -812,7 +812,7 @@ inline bool rcclForceCeAllReduceEnabledDef(bool archDefault) {
   if (param >= 0) return param != 0;
   return archDefault;
 }
-inline bool rcclForceCeAllReduceEnabled(const ncclComm* comm) {
+bool rcclForceCeAllReduceEnabled(const ncclComm* comm) {
   return rcclForceCeAllReduceEnabledDef(rcclCeAllReduceArchDefault(comm));
 }
 
@@ -833,7 +833,7 @@ inline bool rcclAllGatherCeRegisteredWindowTab(const rcclArchThresholds* table, 
   const size_t regMax = rcclCeRegMaxTab(table, ncclFuncAllGather);
   return regMax == 0 || totalBytes <= regMax;
 }
-inline bool rcclAllGatherCeRegisteredWindow(const ncclComm* comm, size_t totalBytes,
+bool rcclAllGatherCeRegisteredWindow(const ncclComm* comm, size_t totalBytes,
                                             ncclSymRegType_t winRegType, bool graphMode) {
   return rcclAllGatherCeRegisteredWindowTab(extAlgoArchTable(comm), totalBytes, winRegType, graphMode);
 }
@@ -849,7 +849,7 @@ inline size_t rcclDdaLLThresholdTab(const rcclArchThresholds* table, ncclFunc_t 
   if (table == nullptr) return kDdaLLBaseDefault;
   return funcThresholdFromTable(table->ddaLLMax, func);
 }
-inline size_t rcclDdaLLThreshold(const ncclComm* comm, ncclFunc_t func) {
+size_t rcclDdaLLThreshold(const ncclComm* comm, ncclFunc_t func) {
   return rcclDdaLLThresholdTab(extAlgoArchTable(comm), func);
 }
 
@@ -859,7 +859,7 @@ inline size_t rcclDdaLL128ThresholdTab(const rcclArchThresholds* table, ncclFunc
   if (table == nullptr) return kDdaLL128BaseDefault;
   return funcThresholdFromTable(table->ddaLL128Max, func);
 }
-inline size_t rcclDdaLL128Threshold(const ncclComm* comm, ncclFunc_t func) {
+size_t rcclDdaLL128Threshold(const ncclComm* comm, ncclFunc_t func) {
   return rcclDdaLL128ThresholdTab(extAlgoArchTable(comm), func);
 }
 
@@ -869,7 +869,7 @@ inline size_t rcclDdaVmmThresholdTab(const rcclArchThresholds* table, ncclFunc_t
   if (table == nullptr) return kDdaVmmBaseDefault;
   return funcThresholdFromTable(table->ddaVmmMax, func);
 }
-inline size_t rcclDdaVmmThreshold(const ncclComm* comm, ncclFunc_t func) {
+size_t rcclDdaVmmThreshold(const ncclComm* comm, ncclFunc_t func) {
   return rcclDdaVmmThresholdTab(extAlgoArchTable(comm), func);
 }
 
@@ -887,7 +887,7 @@ inline size_t rcclDdaEntryThresholdTab(const rcclArchThresholds* table, ncclFunc
   if (rcclParamDdaLL128()) cap = std::max(cap, rcclDdaLL128ThresholdTab(table, func));
   return cap;
 }
-inline size_t rcclDdaEntryThreshold(const ncclComm* comm, ncclFunc_t func) {
+size_t rcclDdaEntryThreshold(const ncclComm* comm, ncclFunc_t func) {
   return rcclDdaEntryThresholdTab(extAlgoArchTable(comm), func);
 }
 
@@ -1000,7 +1000,7 @@ void rcclApplyUnrollForSize(ncclComm* comm, ncclFunc_t func, size_t msgBytes) {
   }
   }
 
-inline bool rcclDdaEnabled(const ncclComm* comm, size_t totalBytes, size_t threshold) {
+bool rcclDdaEnabled(const ncclComm* comm, size_t totalBytes, size_t threshold) {
   if (!rcclParamDdaEnable() || ncclParamLaunchOrderImplicit() || ncclGroupDepth != 0) {
     return false;
   }
@@ -1195,7 +1195,7 @@ void rcclCeAllReduceGraphLatchTick(struct ncclComm* comm, bool ceCapturing) {
   }
 }
 
-inline bool rcclCeAllReduceAllowed(struct ncclComm* comm) {
+bool rcclCeAllReduceAllowed(struct ncclComm* comm) {
   return !comm->ceColl.graphModeSeen;
 }
 
