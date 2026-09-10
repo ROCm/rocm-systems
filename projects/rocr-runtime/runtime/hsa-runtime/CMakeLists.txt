@@ -248,6 +248,7 @@ set ( SRCS core/driver/driver.cpp
            core/runtime/intercept_queue.cpp
            core/runtime/ipc_signal.cpp
            core/runtime/isa.cpp
+           core/runtime/launch_descriptor.cpp
            core/runtime/runtime.cpp
            core/runtime/signal.cpp
            core/runtime/queue.cpp
