@@ -9869,25 +9869,36 @@ TEST_F(InitMicrotest, CommAlloc_LaunchOrderNotImplicit_SkipsContextTracking) {
   EXPECT_TRUE(LogHas(log, "Using network")) << "commAlloc never got that far\n" << log;
 }
 
-// This build has no ENABLE_FAULT_INJECTION, so a non-zero request is refused rather than honoured.
-TEST_F(InitMicrotest, CommAlloc_FaultInjectionRequested_WarnsAndLeavesFaultsUnset) {
+// A non-zero request is honoured only when ENABLE_FAULT_INJECTION is compiled in, and refused otherwise.
+TEST_F(InitMicrotest, CommAlloc_FaultInjectionRequested_HonouredOnlyWhenCompiledIn) {
   const int64_t kFaultMask = 0x5;
   InstallCommAllocSuccess();
   SetParams({{"RCCL_INJECT_FAULTS", kFaultMask}});
   auto comm = FreshComm();
+#ifdef ENABLE_FAULT_INJECTION
+  const std::string log = CaptureInfoLog([&] {
+    EXPECT_EQ(ncclSuccess, commAlloc(comm.get(), nullptr, /*ndev=*/8, /*rank=*/0));
+  });
+  EXPECT_EQ(static_cast<uint64_t>(kFaultMask), comm->faults);
+  EXPECT_TRUE(LogHas(log, "Enabled RCCL faults injection with value 0x5")) << "actual log:\n" << log;
+#else
   const std::string log = RcclUnitTesting::CaptureLog([&] {
     EXPECT_EQ(ncclSuccess, commAlloc(comm.get(), nullptr, /*ndev=*/8, /*rank=*/0));
   });
   EXPECT_TRUE(LogHas(log, "Ignore faults injection of value 0x5")) << "actual log:\n" << log;
+#endif
 }
 
 TEST_F(InitMicrotest, CommAlloc_NoFaultInjectionRequested_StaysSilent) {
   InstallCommAllocSuccess();
   auto comm = FreshComm();
-  const std::string log = RcclUnitTesting::CaptureLog([&] {
+  const std::string log = CaptureInfoLog([&] {
     EXPECT_EQ(ncclSuccess, commAlloc(comm.get(), nullptr, /*ndev=*/8, /*rank=*/0));
   });
   EXPECT_FALSE(LogHas(log, "faults injection")) << "actual log:\n" << log;
+#ifdef ENABLE_FAULT_INJECTION
+  EXPECT_EQ(0u, comm->faults);
+#endif
 }
 
 // --- devCommSetup: the workFifo sizing guard and the CollNet rank map (init.cc:933-979) ---
