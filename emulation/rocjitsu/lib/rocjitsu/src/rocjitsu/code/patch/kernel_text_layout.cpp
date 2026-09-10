@@ -81,6 +81,17 @@ kernel_text_append_ok(uint64_t target_delta, uint64_t target_entry, uint64_t tar
   return os.str();
 }
 
+[[nodiscard]] std::string entry_branch_range_error(std::string_view kind, uint64_t branch_offset,
+                                                   uint64_t target_offset,
+                                                   size_t available_island_slots) {
+  std::ostringstream os;
+  os << kind << " cannot reach relocated body";
+  os << " (branch .text+0x" << std::hex << branch_offset;
+  os << " target .text+0x" << target_offset;
+  os << std::dec << " available_island_slots=" << available_island_slots << ")";
+  return os.str();
+}
+
 void append_words(std::vector<uint8_t> &text, std::span<const uint32_t> words) {
   if (words.empty())
     return;
@@ -135,35 +146,149 @@ void write_words_at(std::vector<uint8_t> &dst, uint64_t offset, std::span<const 
   std::memcpy(dst.data() + offset, words.data(), words.size() * sizeof(uint32_t));
 }
 
+[[nodiscard]] std::optional<size_t> find_branch_island_slot(uint64_t branch_pc,
+                                                            uint64_t target_offset,
+                                                            std::span<const uint64_t> island_slots,
+                                                            std::span<const uint8_t> island_used) {
+  if (target_offset > branch_pc) {
+    std::optional<size_t> best;
+    for (size_t i = 0; i < island_slots.size(); ++i) {
+      if (island_used[i])
+        continue;
+      const uint64_t slot = island_slots[i];
+      if (slot <= branch_pc || slot >= target_offset)
+        continue;
+      if (!compute_sopp_branch_simm16(branch_pc, slot))
+        continue;
+      if (!best || slot > island_slots[*best])
+        best = i;
+    }
+    return best;
+  }
+
+  if (target_offset < branch_pc) {
+    std::optional<size_t> best;
+    for (size_t i = 0; i < island_slots.size(); ++i) {
+      if (island_used[i])
+        continue;
+      const uint64_t slot = island_slots[i];
+      if (slot >= branch_pc || slot <= target_offset)
+        continue;
+      if (!compute_sopp_branch_simm16(branch_pc, slot))
+        continue;
+      if (!best || slot < island_slots[*best])
+        best = i;
+    }
+    return best;
+  }
+
+  return std::nullopt;
+}
+
+struct BranchIslandChain {
+  std::vector<uint64_t> slots;
+  size_t new_slot_count = 0;
+};
+
+[[nodiscard]] std::optional<BranchIslandChain> allocate_branch_island_chain(
+    uint64_t branch_pc, uint64_t target_offset, std::span<const uint64_t> island_slots,
+    std::vector<uint8_t> &island_used, std::vector<std::optional<uint64_t>> &island_final_targets) {
+  BranchIslandChain chain;
+  std::vector<size_t> new_slot_indices;
+  uint64_t current_pc = branch_pc;
+
+  while (!compute_sopp_branch_simm16(current_pc, target_offset)) {
+    std::optional<size_t> reusable_slot;
+    for (size_t i = 0; i < island_slots.size(); ++i) {
+      if (!island_used[i] || island_final_targets[i] != target_offset)
+        continue;
+      const uint64_t slot = island_slots[i];
+      if ((target_offset > current_pc && (slot <= current_pc || slot >= target_offset)) ||
+          (target_offset < current_pc && (slot >= current_pc || slot <= target_offset)) ||
+          !compute_sopp_branch_simm16(current_pc, slot)) {
+        continue;
+      }
+      if (!reusable_slot || (target_offset > current_pc && slot > island_slots[*reusable_slot]) ||
+          (target_offset < current_pc && slot < island_slots[*reusable_slot])) {
+        reusable_slot = i;
+      }
+    }
+    if (reusable_slot) {
+      chain.slots.push_back(island_slots[*reusable_slot]);
+      break;
+    }
+
+    const auto slot_index =
+        find_branch_island_slot(current_pc, target_offset, island_slots, island_used);
+    if (!slot_index)
+      return std::nullopt;
+    island_used[*slot_index] = true;
+    new_slot_indices.push_back(*slot_index);
+    current_pc = island_slots[*slot_index];
+    chain.slots.push_back(current_pc);
+  }
+
+  chain.new_slot_count = new_slot_indices.size();
+  for (size_t slot_index : new_slot_indices)
+    island_final_targets[slot_index] = target_offset;
+  return chain;
+}
+
+[[nodiscard]] bool write_branch_with_islands(std::vector<uint8_t> &text, uint64_t branch_offset,
+                                             uint64_t target_offset, rj_code_arch_t arch,
+                                             std::vector<uint64_t> &island_slots) {
+  if (branch_offset > text.size() || sizeof(uint32_t) > text.size() - branch_offset)
+    return false;
+
+  std::vector<uint8_t> island_used(island_slots.size(), 0);
+  std::vector<std::optional<uint64_t>> island_final_targets(island_slots.size());
+  const auto chain = allocate_branch_island_chain(branch_offset, target_offset, island_slots,
+                                                  island_used, island_final_targets);
+  if (!chain)
+    return false;
+
+  uint64_t current = branch_offset;
+  for (size_t i = 0; i <= chain->slots.size(); ++i) {
+    const uint64_t next = i < chain->slots.size() ? chain->slots[i] : target_offset;
+    const auto simm = compute_sopp_branch_simm16(current, next);
+    if (!simm || current > text.size() || sizeof(uint32_t) > text.size() - current)
+      return false;
+    current = next;
+  }
+
+  current = branch_offset;
+  for (size_t i = 0; i <= chain->slots.size(); ++i) {
+    const uint64_t next = i < chain->slots.size() ? chain->slots[i] : target_offset;
+    const int16_t simm = *compute_sopp_branch_simm16(current, next);
+    const uint32_t branch = build_s_branch(simm, arch);
+    write_words_at(text, current, std::span<const uint32_t>(&branch, 1));
+    current = next;
+  }
+
+  size_t index = 0;
+  std::erase_if(island_slots, [&](uint64_t) { return island_used[index++] != 0; });
+  return true;
+}
+
 [[nodiscard]] bool write_launch_stub(std::vector<uint8_t> &text,
                                      const KernelEntryLayoutPlan &translation, uint64_t stub_offset,
-                                     uint64_t target_offset, rj_code_arch_t arch) {
+                                     uint64_t target_offset, rj_code_arch_t arch,
+                                     std::vector<uint64_t> &island_slots) {
   uint64_t cursor = stub_offset;
   write_words_at(text, cursor, translation.prologue_words);
   cursor += translation.prologue_words.size() * sizeof(uint32_t);
-
-  const auto branch_dwords = compute_sopp_branch_simm16(cursor, target_offset);
-  if (!branch_dwords)
-    return false;
-  const uint32_t branch = build_s_branch(*branch_dwords, arch);
-  write_words_at(text, cursor, std::span<const uint32_t>(&branch, 1));
-  return true;
+  return write_branch_with_islands(text, cursor, target_offset, arch, island_slots);
 }
 
 [[nodiscard]] bool write_client_entry_stub(std::vector<uint8_t> &text,
                                            const KernelEntryLayoutPlan &translation,
                                            uint64_t stub_offset, uint64_t target_offset,
-                                           rj_code_arch_t arch) {
+                                           rj_code_arch_t arch,
+                                           std::vector<uint64_t> &island_slots) {
   uint64_t cursor = stub_offset;
   write_words_at(text, cursor, translation.client_prefix_words);
   cursor += translation.client_prefix_words.size() * sizeof(uint32_t);
-
-  const auto branch_dwords = compute_sopp_branch_simm16(cursor, target_offset);
-  if (!branch_dwords)
-    return false;
-  const uint32_t branch = build_s_branch(*branch_dwords, arch);
-  write_words_at(text, cursor, std::span<const uint32_t>(&branch, 1));
-  return true;
+  return write_branch_with_islands(text, cursor, target_offset, arch, island_slots);
 }
 
 [[nodiscard]] std::optional<uint64_t> target_for_source_offset(const KernelTextLayout &layout,
@@ -337,52 +462,69 @@ KernelTextAppendResult append_relocated_kernel_text(std::vector<uint8_t> &transl
     const uint64_t secondary_target =
         has_client_prefix ? layout.target_client_prefixes[1] : *preload_body_entry + target_delta;
     if (!write_launch_stub(translated_text, layout.entry_plan, layout.target_entry, primary_target,
-                           arch)) {
+                           arch, layout.branch_island_slots)) {
       return kernel_text_append_error(layout.source_entry,
                                       "kernarg preload launch branch cannot encode target body",
                                       TextLayoutFailureCategory::ResourceLimit);
     }
     if (!write_launch_stub(translated_text, layout.entry_plan,
-                           layout.target_entry + kKernargPreloadSkipBytes, secondary_target,
-                           arch)) {
+                           layout.target_entry + kKernargPreloadSkipBytes, secondary_target, arch,
+                           layout.branch_island_slots)) {
       return kernel_text_append_error(
           layout.entry_plan.kernarg_preload_firmware_entry_text_offset,
           "kernarg preload firmware launch branch cannot encode target body",
           TextLayoutFailureCategory::ResourceLimit);
     }
-    if (has_client_prefix && (!write_client_entry_stub(translated_text, layout.entry_plan,
-                                                       layout.target_client_prefixes[0],
-                                                       layout.target_body_entry, arch) ||
-                              !write_client_entry_stub(translated_text, layout.entry_plan,
-                                                       layout.target_client_prefixes[1],
-                                                       *preload_body_entry + target_delta, arch))) {
-      return kernel_text_append_error(layout.source_entry,
-                                      "client kernel-entry prefix branch cannot encode target body",
-                                      TextLayoutFailureCategory::ResourceLimit);
+    if (has_client_prefix &&
+        (!write_client_entry_stub(translated_text, layout.entry_plan,
+                                  layout.target_client_prefixes[0], layout.target_body_entry, arch,
+                                  layout.branch_island_slots) ||
+         !write_client_entry_stub(
+             translated_text, layout.entry_plan, layout.target_client_prefixes[1],
+             *preload_body_entry + target_delta, arch, layout.branch_island_slots))) {
+      const uint64_t branch_offset =
+          layout.target_client_prefixes[0] +
+          layout.entry_plan.client_prefix_words.size() * sizeof(uint32_t);
+      return kernel_text_append_error(
+          layout.source_entry,
+          entry_branch_range_error("client kernel-entry prefix branch", branch_offset,
+                                   layout.target_body_entry, layout.branch_island_slots.size()),
+          TextLayoutFailureCategory::ResourceLimit);
     }
   } else if (has_descriptor_prologue) {
     const uint64_t launch_target =
         has_client_prefix ? layout.target_client_prefixes[0] : layout.target_body_entry;
     if (!write_launch_stub(translated_text, layout.entry_plan, layout.target_entry, launch_target,
-                           arch)) {
+                           arch, layout.branch_island_slots)) {
       return kernel_text_append_error(
           layout.source_entry, "kernel descriptor prologue branch range exceeds s_branch simm16",
           TextLayoutFailureCategory::ResourceLimit);
     }
-    if (has_client_prefix && !write_client_entry_stub(translated_text, layout.entry_plan,
-                                                      layout.target_client_prefixes[0],
-                                                      layout.target_body_entry, arch)) {
-      return kernel_text_append_error(layout.source_entry,
-                                      "client kernel-entry prefix branch cannot encode target body",
-                                      TextLayoutFailureCategory::ResourceLimit);
+    if (has_client_prefix &&
+        !write_client_entry_stub(translated_text, layout.entry_plan,
+                                 layout.target_client_prefixes[0], layout.target_body_entry, arch,
+                                 layout.branch_island_slots)) {
+      const uint64_t branch_offset =
+          layout.target_client_prefixes[0] +
+          layout.entry_plan.client_prefix_words.size() * sizeof(uint32_t);
+      return kernel_text_append_error(
+          layout.source_entry,
+          entry_branch_range_error("client kernel-entry prefix branch", branch_offset,
+                                   layout.target_body_entry, layout.branch_island_slots.size()),
+          TextLayoutFailureCategory::ResourceLimit);
     }
   } else if (has_client_prefix) {
     if (!write_client_entry_stub(translated_text, layout.entry_plan,
-                                 layout.target_client_prefixes[0], layout.target_body_entry,
-                                 arch)) {
-      return kernel_text_append_error(layout.source_entry,
-                                      "client kernel-entry prefix branch cannot encode target body",
-                                      TextLayoutFailureCategory::ResourceLimit);
+                                 layout.target_client_prefixes[0], layout.target_body_entry, arch,
+                                 layout.branch_island_slots)) {
+      const uint64_t branch_offset =
+          layout.target_client_prefixes[0] +
+          layout.entry_plan.client_prefix_words.size() * sizeof(uint32_t);
+      return kernel_text_append_error(
+          layout.source_entry,
+          entry_branch_range_error("client kernel-entry prefix branch", branch_offset,
+                                   layout.target_body_entry, layout.branch_island_slots.size()),
+          TextLayoutFailureCategory::ResourceLimit);
     }
   } else {
     layout.target_entry = layout.target_body_entry;
@@ -707,94 +849,6 @@ void append_direct_branch_island_pool(std::vector<uint8_t> &kernel_text, KernelT
   if ((inst.flags() & INDIRECT_CALL) == 0 || !inst.branch_offset_bytes())
     return std::nullopt;
   return static_cast<uint16_t>((translated_word >> 16) & 0x7fu);
-}
-
-[[nodiscard]] std::optional<size_t> find_branch_island_slot(uint64_t branch_pc,
-                                                            uint64_t target_offset,
-                                                            std::span<const uint64_t> island_slots,
-                                                            std::span<const uint8_t> island_used) {
-  if (target_offset > branch_pc) {
-    std::optional<size_t> best;
-    for (size_t i = 0; i < island_slots.size(); ++i) {
-      if (island_used[i])
-        continue;
-      const uint64_t slot = island_slots[i];
-      if (slot <= branch_pc || slot >= target_offset)
-        continue;
-      if (!compute_sopp_branch_simm16(branch_pc, slot))
-        continue;
-      if (!best || slot > island_slots[*best])
-        best = i;
-    }
-    return best;
-  }
-
-  if (target_offset < branch_pc) {
-    std::optional<size_t> best;
-    for (size_t i = 0; i < island_slots.size(); ++i) {
-      if (island_used[i])
-        continue;
-      const uint64_t slot = island_slots[i];
-      if (slot >= branch_pc || slot <= target_offset)
-        continue;
-      if (!compute_sopp_branch_simm16(branch_pc, slot))
-        continue;
-      if (!best || slot < island_slots[*best])
-        best = i;
-    }
-    return best;
-  }
-
-  return std::nullopt;
-}
-
-struct BranchIslandChain {
-  std::vector<uint64_t> slots;
-  size_t new_slot_count = 0;
-};
-
-[[nodiscard]] std::optional<BranchIslandChain> allocate_branch_island_chain(
-    uint64_t branch_pc, uint64_t target_offset, std::span<const uint64_t> island_slots,
-    std::vector<uint8_t> &island_used, std::vector<std::optional<uint64_t>> &island_final_targets) {
-  BranchIslandChain chain;
-  std::vector<size_t> new_slot_indices;
-  uint64_t current_pc = branch_pc;
-
-  while (!compute_sopp_branch_simm16(current_pc, target_offset)) {
-    std::optional<size_t> reusable_slot;
-    for (size_t i = 0; i < island_slots.size(); ++i) {
-      if (!island_used[i] || island_final_targets[i] != target_offset)
-        continue;
-      const uint64_t slot = island_slots[i];
-      if ((target_offset > current_pc && (slot <= current_pc || slot >= target_offset)) ||
-          (target_offset < current_pc && (slot >= current_pc || slot <= target_offset)) ||
-          !compute_sopp_branch_simm16(current_pc, slot)) {
-        continue;
-      }
-      if (!reusable_slot || (target_offset > current_pc && slot > island_slots[*reusable_slot]) ||
-          (target_offset < current_pc && slot < island_slots[*reusable_slot])) {
-        reusable_slot = i;
-      }
-    }
-    if (reusable_slot) {
-      chain.slots.push_back(island_slots[*reusable_slot]);
-      break;
-    }
-
-    const auto slot_index =
-        find_branch_island_slot(current_pc, target_offset, island_slots, island_used);
-    if (!slot_index)
-      return std::nullopt;
-    island_used[*slot_index] = true;
-    new_slot_indices.push_back(*slot_index);
-    current_pc = island_slots[*slot_index];
-    chain.slots.push_back(current_pc);
-  }
-
-  chain.new_slot_count = new_slot_indices.size();
-  for (size_t slot_index : new_slot_indices)
-    island_final_targets[slot_index] = target_offset;
-  return chain;
 }
 
 [[nodiscard]] bool append_branch_island_direct_sequence(

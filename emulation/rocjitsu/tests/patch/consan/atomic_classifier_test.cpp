@@ -59,6 +59,26 @@ TEST(ConSanAtomicClassifier, ExactFlatOrderingNormalizesOnAllFiveTargets) {
   }
 }
 
+TEST(ConSanAtomicClassifier, Exact64BitFlatOrderingNormalizesOnAllFiveTargets) {
+  for (const AtomicTargetCase &target : kAtomicTargets) {
+    SCOPED_TRACE(static_cast<uint32_t>(target.arch));
+    ConSanAtomicSite site = exact_flat_atomic(target);
+    site.mnemonic = "flat_atomic_cmpswap_b64";
+    site.width_bits = 64u;
+    site.destination_vgpr = 9u;
+    site.data_vgpr = 12u;
+    const ConSanAtomicLoweringClassification classification =
+        classify_consan_atomic_lowering(site, target.arch);
+    ASSERT_TRUE(classification.normalized());
+    ASSERT_TRUE(classification.exact_ordering_available());
+    ASSERT_TRUE(classification.form);
+    EXPECT_EQ(classification.form->value_width_bits, 64u);
+    EXPECT_EQ(classification.form->value_register_count, 2u);
+    EXPECT_EQ(classification.form->data_register_count, 4u);
+    EXPECT_EQ(classification.form->destination_register_count, 2u);
+  }
+}
+
 TEST(ConSanAtomicClassifier, OrderedOrdinaryFormsOwnGuestDestinationShape) {
   const AtomicTargetCase target{ROCJITSU_CODE_ARCH_RDNA4, 12u, 0x7cu};
   ConSanAtomicSite load = exact_flat_atomic(target);

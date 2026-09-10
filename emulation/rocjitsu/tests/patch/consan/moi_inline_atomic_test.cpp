@@ -706,7 +706,8 @@ TEST(ConSanMoi, Gfx1100VglobalAtomicRejectsInvalidScalarBase) {
   EXPECT_EQ(inline_atomic_exact_ordering_reason(*site, ConSanMoiAtomicEventKind::Acquire,
                                                 ROCJITSU_CODE_ARCH_RDNA3),
             ConSanAtomicClassifierReason::UnsupportedEncoding);
-  EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiInlineAtomicOrdering,
+  EXPECT_EQ(std::ranges::count(result.patches,
+                               ConSanPatchKind::TrampolineMoiInlineAtomicOrdering,
                                &ConSanPatchInfo::kind),
             0u);
 }
@@ -2871,7 +2872,7 @@ TEST(ConSanMoi, InlineAtomicSupportInventoryPinsAdmittedAndDeferredClasses) {
               ConSanCapabilityDisposition::Supported);
   }
   changed = site;
-  changed.width_bits = 64;
+  changed.width_bits = 128;
   EXPECT_EQ(inline_atomic_exact_ordering_reason(changed, ConSanMoiAtomicEventKind::Release,
                                                 ROCJITSU_CODE_ARCH_RDNA4),
             ConSanAtomicClassifierReason::InvalidAccessWidth);
@@ -4831,6 +4832,49 @@ TEST(ConSanMoi, InlineVglobalReturningCasImportsOnlyInsideClaimedSuccessfulTrans
   }
 }
 
+TEST(ConSanMoi, InlineVglobal64BitReturningCasQualifiesBothOutcomeWords) {
+  const std::vector<uint8_t> bytes = make_rdna4_ordered_global_cas_b64_code_object();
+  ASSERT_FALSE(bytes.empty());
+  MoiOptions options = moi_options(ConSanMoiEngine::InlineShadow);
+  options.moi_track_atomics = true;
+  options.scratch_vgpr = 64;
+  options.moi_exec_save_sgpr = 80;
+  options.set_moi_owner_epoch_vgprs(40, 41);
+  options.moi_report_buffer_address = 0x123456780000ull;
+  options.moi_report_buffer_size = kInlineShadowFullLdsReportBufferSize;
+
+  const ConSanTransformArtifacts result = test_lower_consan(bytes, options);
+
+  ASSERT_TRUE(consan_patch_succeeded(result));
+  ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
+  ASSERT_EQ(result.program_inventory.kernels().size(), 1u);
+  const std::vector<ConSanAtomicSite> sites = test_decoded_sites<ConSanAtomicSite>(
+      result.program_inventory, result.program_inventory.kernels().front());
+  ASSERT_EQ(sites.size(), 1u);
+  EXPECT_EQ(sites.front().width_bits, 64u);
+  EXPECT_EQ(inline_atomic_exact_ordering_reason(
+                sites.front(), ConSanMoiAtomicEventKind::AcquireRelease, ROCJITSU_CODE_ARCH_RDNA4),
+            ConSanAtomicClassifierReason::None);
+
+  const auto patch = std::ranges::find_if(result.patches, [](const ConSanPatchInfo &item) {
+    return item.kind == ConSanPatchKind::TrampolineMoiInlineAtomicOrdering;
+  });
+  ASSERT_NE(patch, result.patches.end());
+  AmdGpuCodeObject patched(result.replacement.data(), result.replacement.size());
+  ASSERT_TRUE(patched.is_valid());
+  const std::vector<uint32_t> cave_words =
+      text_words_at_offset(patched, patch->trampoline_offset, patch->trampoline_size);
+  const auto low_word = build_v_cmp_eq_u32_e32_vcc(vector_source_vgpr(/*compare_vgpr=*/28),
+                                                   /*old_value_vgpr=*/32, ROCJITSU_CODE_ARCH_RDNA4);
+  const auto high_word = build_v_cmp_eq_u32_e32_vcc(
+      vector_source_vgpr(/*compare_vgpr=*/29), /*old_value_vgpr=*/33, ROCJITSU_CODE_ARCH_RDNA4);
+  const auto narrow = build_s_and_saveexec_b64(/*sdst=*/80, kAmdGpuVccLo, ROCJITSU_CODE_ARCH_RDNA4);
+  ASSERT_TRUE(low_word && high_word && narrow);
+  const std::array<uint32_t, 4> both_words = {*low_word, *narrow, *high_word, *narrow};
+  EXPECT_EQ(subsequence_positions(cave_words, both_words).size(), 2u)
+      << "release-capable CAS is qualified before its transaction and after the guest";
+}
+
 TEST(ConSanMoi, InlineVglobalNoReturnCasFailsClosedWithoutOutcome) {
   for (const bool vector_only_address : {false, true}) {
     SCOPED_TRACE(vector_only_address ? "vector-only VGLOBAL address"
@@ -5050,8 +5094,7 @@ TEST(ConSanMoi, InlineAtomicScalarSpillPreservesAliasedGuestScalarAddress) {
 
   EXPECT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
   EXPECT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
-  EXPECT_EQ(std::ranges::count(result.patches,
-                               ConSanPatchKind::TrampolineMoiInlineAtomicOrdering,
+  EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiInlineAtomicOrdering,
                                &ConSanPatchInfo::kind),
             2u);
   EXPECT_FALSE(std::ranges::any_of(result.warnings, [](const std::string &warning) {

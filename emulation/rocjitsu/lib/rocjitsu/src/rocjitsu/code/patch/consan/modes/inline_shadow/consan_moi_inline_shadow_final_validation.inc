@@ -511,15 +511,27 @@ void validate_inline_release_transaction_semantics(const FinalValidationEnvironm
       if (!site->data_vgpr || !site->destination_vgpr) {
         valid = false;
       } else {
+        const uint16_t value_word_count = static_cast<uint16_t>(site->width_bits / 32u);
+        const uint16_t compare_vgpr = static_cast<uint16_t>(*site->data_vgpr + value_word_count);
         const auto success = instrumentation::build_v_cmp_eq_u32_vcc(
-            vector_source_vgpr(static_cast<uint16_t>(*site->data_vgpr + 1u)),
-            *site->destination_vgpr, arch);
+            vector_source_vgpr(compare_vgpr), *site->destination_vgpr, arch);
         const auto narrow = instrumentation::build_s_and_saveexec_b64(
             *result.moi_operating_point.moi_exec_save_sgpr, kVccLo, arch);
         if (!success || !narrow) {
           valid = false;
         } else {
-          const std::array<uint32_t, 2> success_sequence = {*success, *narrow};
+          std::vector<uint32_t> success_sequence = {*success, *narrow};
+          if (site->width_bits == 64u) {
+            const auto success_high = instrumentation::build_v_cmp_eq_u32_vcc(
+                vector_source_vgpr(static_cast<uint16_t>(compare_vgpr + 1u)),
+                static_cast<uint16_t>(*site->destination_vgpr + 1u), arch);
+            if (!success_high) {
+              valid = false;
+            } else {
+              success_sequence.push_back(*success_high);
+              success_sequence.push_back(*narrow);
+            }
+          }
           const std::vector<size_t> success_positions = positions(success_sequence);
           const bool guest_offset_valid =
               patch.relocated_guest_instruction_offset &&
@@ -533,9 +545,9 @@ void validate_inline_release_transaction_semantics(const FinalValidationEnvironm
                                                        sizeof(uint32_t))
                                  : body_words.size();
           // The release slot must already be odd when the guest CAS exposes
-          // its new value. Both post-guest outcome qualifications precede the
-          // failed-comparison rollback, and only then may successor metadata
-          // be staged and committed.
+          // its new value. Both complete post-guest outcome qualifications
+          // precede the failed-comparison rollback, and only then may
+          // successor metadata be staged and committed.
           valid &= claimed_compare_exchange && guest_offset_valid &&
                    guest_position < body_words.size() && success_positions.size() == 2u &&
                    cas_positions.front() < guest_position &&

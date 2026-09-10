@@ -3968,6 +3968,56 @@ TEST(BinaryTranslator, ClientRewriteExhaustedSgprsFallsBackToLongBranchIslands) 
   }
 }
 
+TEST(BinaryTranslator, ClientEntryPrefixUsesLongBranchIslandsToReachDeepBodyEntry) {
+  constexpr size_t kTargetWord = 0x18000;
+  const uint32_t nop = build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA4);
+  const uint32_t prefix_nop = build_s_nop(7, ROCJITSU_CODE_ARCH_CDNA4);
+  std::vector<uint32_t> body_words(kTargetWord + 1, nop);
+  body_words[kTargetWord] = build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4);
+
+  KernelTextLayout layout;
+  layout.entry_plan.client_prefix_words = {prefix_nop};
+  layout.source_entry = 0;
+  layout.body_begin = 0;
+  layout.body_end = body_words.size() * sizeof(uint32_t);
+  layout.blocks.push_back({.block = nullptr,
+                           .source_start = 0,
+                           .source_end = sizeof(uint32_t),
+                           .target_start = kTargetWord * sizeof(uint32_t),
+                           .target_end = (kTargetWord + 1) * sizeof(uint32_t)});
+  for (uint64_t slot = first_direct_branch_island_pool_offset();
+       slot < kTargetWord * sizeof(uint32_t); slot = next_direct_branch_island_pool_offset(slot)) {
+    layout.branch_island_slots.push_back(slot);
+  }
+
+  std::vector<uint8_t> translated_text;
+  const auto body_bytes = std::span<const uint8_t>(
+      reinterpret_cast<const uint8_t *>(body_words.data()), body_words.size() * sizeof(uint32_t));
+  const auto result =
+      append_relocated_kernel_text(translated_text, layout, body_bytes, ROCJITSU_CODE_ARCH_CDNA4);
+
+  ASSERT_TRUE(result.ok) << result.message;
+  ASSERT_EQ(layout.target_client_prefixes.size(), 1u);
+  ASSERT_LT(layout.target_client_prefixes[0] + sizeof(uint32_t), translated_text.size());
+  const auto translated_words =
+      std::span<const uint32_t>(reinterpret_cast<const uint32_t *>(translated_text.data()),
+                                translated_text.size() / sizeof(uint32_t));
+  EXPECT_EQ(translated_words[layout.target_client_prefixes[0] / sizeof(uint32_t)], prefix_nop);
+
+  uint64_t branch_pc = layout.target_client_prefixes[0] + sizeof(uint32_t);
+  size_t island_hops = 0;
+  while (branch_pc != layout.target_body_entry) {
+    ASSERT_LT(branch_pc / sizeof(uint32_t), translated_words.size());
+    const int16_t simm = static_cast<int16_t>(translated_words[branch_pc / sizeof(uint32_t)]);
+    const int64_t next = static_cast<int64_t>(branch_pc) + sizeof(uint32_t) +
+                         static_cast<int64_t>(simm) * sizeof(uint32_t);
+    ASSERT_GE(next, 0);
+    branch_pc = static_cast<uint64_t>(next);
+    ASSERT_LE(++island_hops, 16u) << "entry branch island chain did not reach the body";
+  }
+  EXPECT_GE(island_hops, 3u);
+}
+
 TEST(BinaryTranslator, ClientPrefixRunsBeforeRelocatedEntryBranchAndPublishesMarkers) {
   const uint32_t prefix_nop = build_s_nop(7, ROCJITSU_CODE_ARCH_CDNA4);
   const std::vector<uint32_t> words = {

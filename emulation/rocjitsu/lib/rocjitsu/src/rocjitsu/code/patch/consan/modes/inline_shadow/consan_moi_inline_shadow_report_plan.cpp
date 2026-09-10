@@ -10,6 +10,21 @@
 #include <limits>
 
 namespace rocjitsu::consan_moi_impl {
+namespace {
+
+[[nodiscard]] uint64_t inline_ordering_table_capacity(uint64_t event_count) {
+  const uint64_t requested =
+      std::max<uint64_t>(event_count, kConSanMoiInlineShadowAtomicReleaseSlotCapacity);
+  // The device-side hash uses a mask, so every representable direct-mapped
+  // synchronization table must have a power-of-two capacity. Values above
+  // 2^31 cannot round within the 32-bit ABI and are left for the ordinary
+  // layout planner to reject as an ABI-capacity overflow.
+  if (requested > (uint64_t{1} << 31u))
+    return requested;
+  return std::bit_ceil(requested);
+}
+
+} // namespace
 
 bool plan_inline_shadow_report_layout(const ConSanMoiAutoReportInventory &inventory,
                                       ConSanMoiAutoReportPlan &plan, uint64_t &cursor) {
@@ -126,8 +141,8 @@ fit_consan_moi_inline_auto_report_inventory(ConSanMoiAutoReportInventory invento
 }
 
 bool ConSanInlineShadowEvidenceRequirements::well_formed() const {
-  const uint64_t expected_ordering_capacity = std::max<uint64_t>(
-      sizing_inventory.atomic_event_count, kConSanMoiInlineShadowAtomicReleaseSlotCapacity);
+  const uint64_t expected_ordering_capacity =
+      consan_moi_impl::inline_ordering_table_capacity(sizing_inventory.atomic_event_count);
   const uint64_t expected_acquired_epoch_capacity = std::max<uint64_t>(
       expected_ordering_capacity, kConSanMoiInlineShadowAcquiredEpochTokenSlotCapacity);
   return required_lds_aperture_bytes == sizing_inventory.inline_lds_bytes &&
@@ -206,8 +221,7 @@ ConSanEvidenceRequirements consan_moi_impl::plan_inline_shadow_evidence_requirem
       consan_moi_max_workgroup_lds_bytes(context.program_inventory.arch()));
   inventory.inline_lds_bytes =
       std::max(declared_lds_extent, requires_full_lds_aperture ? full_lds_aperture : 0u);
-  const uint64_t ordering_capacity = std::max<uint64_t>(
-      inventory.atomic_event_count, kConSanMoiInlineShadowAtomicReleaseSlotCapacity);
+  const uint64_t ordering_capacity = inline_ordering_table_capacity(inventory.atomic_event_count);
   inventory.inline_atomic_release_count = ordering_capacity;
   inventory.inline_causal_snapshot_count = ordering_capacity;
   inventory.inline_acquired_epoch_token_count =

@@ -843,6 +843,26 @@ TEST(ConSanEvidenceRequirements, InlineIntentCountsAndExpertLimitRemainIndepende
   EXPECT_EQ(requirements.sizing_inventory.atomic_event_count, 1u);
 }
 
+TEST(ConSanEvidenceRequirements, InlineOrderingTablesRoundUpToPowerOfTwo) {
+  const InlineEvidenceFixture fixture =
+      make_inline_evidence_fixture(/*flat=*/false, /*dynamic_lds=*/false, 4096);
+  EvidenceObservationPlanBuilder builder(ConSanCapabilityEngine::InlineShadow);
+  for (size_t i = 0; i < 72; ++i)
+    builder.add(ConSanProbeIntentKind::ExactAtomicOrdering,
+                ConSanSemanticSiteDomain::SynchronizationEvent, 1, true);
+  const ConSanObservationPlan plan = builder.build();
+
+  const ConSanInlineShadowEvidenceRequirements requirements =
+      plan_consan_inline_shadow_evidence(fixture.inventory, evidence_intents(plan));
+
+  ASSERT_TRUE(requirements.complete());
+  EXPECT_EQ(requirements.sizing_inventory.atomic_event_count, 72u);
+  EXPECT_EQ(requirements.sizing_inventory.inline_atomic_release_count, 128u);
+  EXPECT_EQ(requirements.sizing_inventory.inline_causal_snapshot_count, 128u);
+  EXPECT_EQ(requirements.abi_plan.layout.inline_atomic_release_capacity, 128u);
+  EXPECT_EQ(requirements.abi_plan.layout.inline_causal_snapshot_capacity, 128u);
+}
+
 TEST(ConSanEvidenceRequirements, InlineMissingInventoryRelationshipsFailClosedWithTypedReason) {
   InlineEvidenceFixture fixture =
       make_inline_evidence_fixture(/*flat=*/false, /*dynamic_lds=*/false, 4096);

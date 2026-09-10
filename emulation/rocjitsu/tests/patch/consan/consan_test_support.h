@@ -2871,6 +2871,21 @@ std::vector<uint8_t> make_rdna4_ordered_global_cas_code_object(bool return_old_v
   return make_rdna4_lds_code_object(text_words);
 }
 
+std::vector<uint8_t> make_rdna4_ordered_global_cas_b64_code_object() {
+  const auto wait_store = build_s_wait_storecnt0(ROCJITSU_CODE_ARCH_RDNA4);
+  if (!wait_store)
+    return {};
+  // global_atomic_cmpswap_b64 v[32:33], v11, v[26:29], s[2:3]
+  // th:return, scope:system. The compare operand is v[28:29].
+  const std::array<uint32_t, 12> text_words = {
+      0xEE0B0000u, 0x00000000u, 0x00000000u, // global_wb
+      *wait_store, 0xEE108002u, 0x0D1C0020u, 0x0000180Bu,
+      *wait_store, 0xEE0AC000u, 0x000C0000u, 0x00000000u, // global_inv scope:system
+      0xBFB00000u,                                        // s_endpgm
+  };
+  return make_rdna4_lds_code_object(text_words, "ordered_global_cas_b64_probe");
+}
+
 std::vector<uint8_t> make_rdna4_buffer_atomic_code_object() {
   // buffer_atomic_add_u32 v1, v2, s[4:7], 0 th:return scope:device
   const std::array<uint32_t, 4> text_words = {

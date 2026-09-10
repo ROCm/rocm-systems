@@ -1428,10 +1428,18 @@ append_inline_workgroup_key(std::vector<uint32_t> &words, const ConSanMoiWorkgro
       errors.emplace_back("ConSan MOI inline release CAS has no dynamic outcome operands");
       return false;
     }
-    const uint16_t compare_vgpr = static_cast<uint16_t>(*site.data_vgpr + 1u);
+    const uint16_t value_word_count = static_cast<uint16_t>(site.width_bits / 32u);
+    const uint16_t compare_vgpr = static_cast<uint16_t>(*site.data_vgpr + value_word_count);
     if (!exec_masks.narrow(instrumentation::build_v_cmp_eq_u32_vcc(vector_source_vgpr(compare_vgpr),
                                                                    *site.destination_vgpr, arch))) {
       errors.emplace_back("ConSan MOI inline release CAS could not compare its dynamic outcome");
+      return false;
+    }
+    if (site.width_bits == 64u && !exec_masks.narrow(instrumentation::build_v_cmp_eq_u32_vcc(
+                                      vector_source_vgpr(static_cast<uint16_t>(compare_vgpr + 1u)),
+                                      static_cast<uint16_t>(*site.destination_vgpr + 1u), arch))) {
+      errors.emplace_back(
+          "ConSan MOI inline release 64-bit CAS could not compare its high outcome word");
       return false;
     }
     return true;

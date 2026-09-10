@@ -66,7 +66,7 @@ using Reason = ConSanAtomicClassifierReason;
       form.kind != ConSanAtomicLoweringFormKind::GlobalVectorAddress &&
       form.kind != ConSanAtomicLoweringFormKind::GlobalScalarVectorAddress)
     return Reason::UnsupportedAddressSource;
-  if (form.value_width_bits != 32u)
+  if (form.value_width_bits != 32u && form.value_width_bits != 64u)
     return Reason::InvalidAccessWidth;
   if ((form.kind == ConSanAtomicLoweringFormKind::FlatVectorAddress ||
        form.kind == ConSanAtomicLoweringFormKind::FlatScalarVectorAddress) &&
