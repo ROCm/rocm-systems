@@ -59,7 +59,7 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 ### Known issues
 
-* On gfx115x, `TCP_REQ*` counters and the `GL0` metrics derived from them can read zero because the perfmon clock is power-gated at the `AUTO` performance level. Set `STABLE_STD` before profiling (`sudo amd-smi set --perf-level STABLE_STD`). See the [FAQ](https://rocm.docs.amd.com/projects/rocprofiler-compute/en/latest/reference/faq.html) and the [ROCprofiler-SDK PMC performance-level guide](https://rocm.docs.amd.com/projects/rocprofiler-sdk/en/latest/how-to/using-rocprofv3.html#setting-gpu-performance-level-for-pmc-profiling).
+* On gfx115x, `TCP_REQ*` counters and the `GL0` metrics derived from them can read zero because the perfmon clock is power-gated at the `AUTO` performance level.
 
 ## ROCm Compute Profiler 3.9.0 for ROCm 10.1.0
 

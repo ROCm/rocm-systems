@@ -96,28 +96,29 @@ def test_partition_warning_messages(
 
 
 @pytest.mark.parametrize(
-    "gpu_arch, affected",
+    "gpu_arch, perf_level, affected",
     [
-        pytest.param("gfx1150", True, id="gfx1150"),
-        pytest.param("gfx1151", True, id="gfx1151"),
-        pytest.param("gfx1152", True, id="gfx1152"),
-        pytest.param("gfx942", False, id="cdna"),
-        pytest.param("gfx1100", False, id="rdna3"),
-        pytest.param("gfx1250", False, id="gfx1250"),
-        pytest.param(None, False, id="unknown_arch"),
+        pytest.param("gfx1150", None, True, id="gfx1150"),
+        pytest.param("gfx1151", "AUTO", True, id="gfx1151_auto"),
+        pytest.param("gfx1152", "AMDSMI_DEV_PERF_LEVEL_AUTO", True, id="gfx1152"),
+        pytest.param("gfx1151", "STABLE_STD", False, id="gfx1151_stable"),
+        pytest.param("gfx1151", "AmdSmiDevPerfLevel.STABLE_PEAK", False, id="peak"),
+        pytest.param("gfx942", None, False, id="cdna"),
+        pytest.param("gfx1100", "AUTO", False, id="rdna3"),
+        pytest.param("gfx1250", None, False, id="gfx1250"),
+        pytest.param(None, None, False, id="unknown_arch"),
     ],
 )
-def test_pmc_power_gating_warning(gpu_arch, affected):
-    """Perfmon clock gating at AUTO applies to gfx115x only."""
-    message = _pmc_power_gating_warning(SimpleNamespace(gpu_arch=gpu_arch))
+def test_pmc_power_gating_warning(gpu_arch, perf_level, affected):
+    """Warn on gfx115x at AUTO; stay silent on other archs or non-AUTO."""
+    message = _pmc_power_gating_warning(SimpleNamespace(gpu_arch=gpu_arch), perf_level)
 
     if not affected:
         assert message is None
-        return
-
-    assert "STABLE_STD" in message
-    assert "TCP_REQ" in message
-    assert "rocprofiler-sdk" in message
+    else:
+        assert "TCP_REQ" in message
+        assert "rocprofiler-sdk" in message
+        assert "amd-smi set" not in message
 
 
 # ---------------------------------------------------------------------------

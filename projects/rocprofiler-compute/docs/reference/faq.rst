@@ -110,32 +110,20 @@ vLLM V1 runs GPU kernels in a worker process that it terminates with a signal
 on shutdown, and counter data is only written when a process exits normally.
 See :ref:`profile-vllm-workloads` for the workaround and where it applies.
 
-Why are ``TCP_REQ`` and other counters zero on gfx115x?
-=======================================================
+Why are ``TCP_REQ`` and other PMC counters zero?
+================================================
 
-On gfx115x (RDNA 3.5) GPUs, the default ``AUTO``
-performance level can gate the perfmon clock. While that clock is gated,
-the hardware never increments the affected performance counters, so
-counters such as ``TCP_REQ``, ``TCP_REQ_READ``, ``TCP_REQ_WRITE``, and
-``TCP_REQ_MISS`` -- along with the GL0 request metrics derived from them --
-report zero even when the kernel issues global memory traffic.
+On some RDNA GPUs, the default ``AUTO`` performance level can gate the
+perfmon clock. While that clock is gated, the hardware never increments
+the affected performance counters, so values such as ``TCP_REQ``,
+``TCP_REQ_READ``, ``TCP_REQ_WRITE``, and ``TCP_REQ_MISS`` -- and the GL0
+request metrics derived from them -- report zero even when the kernel
+issues global memory traffic.
 
 This is a hardware power-gating behavior rather than a counter-collection
-defect, so the zeros appear in any PMC-based tool on these architectures.
+defect. It has been observed on gfx115x (RDNA 3.5); the same AUTO
+gating is documented for Navi3x and Navi4x.
 
-To work around it, set the GPU performance level to ``STABLE_STD``
-(``profile_standard``) before profiling:
-
-.. code-block:: shell
-
-   $ sudo amd-smi set --perf-level STABLE_STD
-
-Restore ``AUTO`` when the profiling session is finished:
-
-.. code-block:: shell
-
-   $ sudo amd-smi set --perf-level AUTO
-
-For more details, see `Setting GPU performance level for PMC profiling
+For the workaround, see `Setting GPU performance level for PMC profiling
 <https://rocm.docs.amd.com/projects/rocprofiler-sdk/en/latest/how-to/using-rocprofv3.html#setting-gpu-performance-level-for-pmc-profiling>`_
 in the ROCprofiler-SDK documentation.
