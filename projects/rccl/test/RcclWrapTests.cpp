@@ -2676,10 +2676,10 @@ TEST(SkipPresetTopoMatching, Gfx1250_SkipsRomeModelMatching)
 // ---------------------------------------------------------------------------
 // commSetUnrollFactor: RCCL_UNROLL_FACTOR validation against the running arch.
 //
-// Unroll factors 8, 16 and 32 are compiled for gfx1250 only (see
-// unroll_arch_requirement in src/device/generate.py). Requesting one on any
-// other GPU used to be accepted and then dispatched into a device function
-// table whose entries are all nullptr, which faults on the device.
+// Unroll factor 32 is compiled for gfx1250 only (see unroll_arch_requirement in
+// src/device/generate.py). Requesting it on any other GPU used to be accepted and
+// then dispatched into a device function table whose entries are all nullptr,
+// which faults on the device.
 //
 // These assert the return code rather than which rejection branch ran, so they
 // hold for a multi-arch build (where the factor is generated but arch-locked)
