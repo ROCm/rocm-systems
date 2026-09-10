@@ -1149,8 +1149,14 @@ static HsaMemFlags fmm_translate_ioc_to_hsa_flags(uint32_t ioc_flags)
 /*
  * SVM-API range tracking helpers. These mirror the registration_count handling
  * of regular userptr vm_objects so that SVM-API registrations can be torn down
- * symmetrically on deregistration. `svm_api_range_get/put` manage svm_api_mutex
- * internally; callers must hold the mutex only when calling svm_api_range_find.
+ * symmetrically on deregistration.
+ *
+ * Every helper here runs with svm_api_mutex held, and the callers keep it held
+ * across the SET_ATTR ioctl that grants or revokes access. The tree update and
+ * the ioctl it implies must be one critical section: otherwise a NO_ACCESS
+ * decided when a refcount reached zero can reach the kernel after a later
+ * ACCESS_IN_PLACE grant for the same pages, which strands a live registration
+ * without GPU access and faults whatever copy is in flight on it.
  */
 static svm_api_range_t *svm_api_range_find(struct hsa_kfd_fmm_context *fmm_ctx,
 					   void *user_addr)
@@ -1173,11 +1179,15 @@ static svm_api_range_t *svm_api_range_find(struct hsa_kfd_fmm_context *fmm_ctx,
  * allocator cannot hand out the same address twice while the first registration
  * is still live, so in practice that is the same buffer being re-registered.
  * Sub-ranges still owned by another registration are preserved by the interval
- * subtraction in svm_api_range_put.
+ * subtraction in svm_api_range_put_locked.
+ *
+ * Called before the grant ioctl so a concurrent deregister of a neighbor sees
+ * this range and leaves the pages it covers alone. Returns whether the range is
+ * now tracked, so a failed grant can drop the reference again.
  */
-static void svm_api_range_get(struct hsa_kfd_fmm_context *fmm_ctx,
-			      void *user_addr, void *aligned_addr,
-			      uint64_t aligned_size, uint64_t user_size)
+static bool svm_api_range_get_locked(struct hsa_kfd_fmm_context *fmm_ctx,
+				     void *user_addr, void *aligned_addr,
+				     uint64_t aligned_size, uint64_t user_size)
 {
 	svm_api_range_t *r;
 	/* Register rounds out to map whole pages, revoke rounds in. The bytes
@@ -1187,7 +1197,6 @@ static void svm_api_range_get(struct hsa_kfd_fmm_context *fmm_ctx,
 	HSAuint64 in_end = ((HSAuint64)user_addr + user_size) & ~(HSAuint64)(PAGE_SIZE - 1);
 	HSAuint64 in_size = in_end > in_start ? in_end - in_start : 0;
 
-	pthread_mutex_lock(&fmm_ctx->svm_api_mutex);
 	r = svm_api_range_find(fmm_ctx, user_addr);
 	if (r) {
 		++r->refcount;
@@ -1199,8 +1208,7 @@ static void svm_api_range_get(struct hsa_kfd_fmm_context *fmm_ctx,
 		}
 		if (r->size > fmm_ctx->svm_api_max_extent)
 			fmm_ctx->svm_api_max_extent = r->size;
-		pthread_mutex_unlock(&fmm_ctx->svm_api_mutex);
-		return;
+		return true;
 	}
 
 	r = calloc(1, sizeof(*r));
@@ -1210,8 +1218,7 @@ static void svm_api_range_get(struct hsa_kfd_fmm_context *fmm_ctx,
 		 */
 		pr_warn("Failed to track SVM-API range %p, deregister will be a no-op\n",
 			user_addr);
-		pthread_mutex_unlock(&fmm_ctx->svm_api_mutex);
-		return;
+		return false;
 	}
 	r->start = aligned_addr;
 	r->size = aligned_size;
@@ -1222,7 +1229,7 @@ static void svm_api_range_get(struct hsa_kfd_fmm_context *fmm_ctx,
 	hsakmt_rbtree_insert(&fmm_ctx->svm_api_range_tree, &r->node);
 	if (aligned_size > fmm_ctx->svm_api_max_extent)
 		fmm_ctx->svm_api_max_extent = aligned_size;
-	pthread_mutex_unlock(&fmm_ctx->svm_api_mutex);
+	return true;
 }
 
 /* A page range whose GPU access must be revoked on deregister. */
@@ -1262,11 +1269,11 @@ static bool svm_revoke_add(struct svm_revoke_range **arr, int *n, int *cap,
  * survives until its last owner is dropped.
  *
  * On return *out points to a malloc'd array of ranges (caller frees) and the
- * function returns the count (0 if nothing to revoke). NO_ACCESS is issued by
- * the caller outside the lock, per range.
+ * function returns the count (0 if nothing to revoke). The caller issues
+ * NO_ACCESS per range while still holding svm_api_mutex.
  */
-static int svm_api_range_put(struct hsa_kfd_fmm_context *fmm_ctx, void *addr,
-			     struct svm_revoke_range **out)
+static int svm_api_range_put_locked(struct hsa_kfd_fmm_context *fmm_ctx, void *addr,
+				    struct svm_revoke_range **out)
 {
 	struct svm_revoke_range *ranges = NULL;
 	int n = 0, cap = 0;
@@ -1277,12 +1284,9 @@ static int svm_api_range_put(struct hsa_kfd_fmm_context *fmm_ctx, void *addr,
 
 	*out = NULL;
 
-	pthread_mutex_lock(&fmm_ctx->svm_api_mutex);
 	r = svm_api_range_find(fmm_ctx, addr);
-	if (!r || --r->refcount > 0) {
-		pthread_mutex_unlock(&fmm_ctx->svm_api_mutex);
+	if (!r || --r->refcount > 0)
 		return 0;
-	}
 
 	base = (HSAuint64)r->revoke_start;
 	end = base + r->revoke_size;
@@ -1290,10 +1294,8 @@ static int svm_api_range_put(struct hsa_kfd_fmm_context *fmm_ctx, void *addr,
 	free(r);
 
 	/* Fills no whole page, so nothing here is ours alone. */
-	if (end <= base) {
-		pthread_mutex_unlock(&fmm_ctx->svm_api_mutex);
+	if (end <= base)
 		return 0;
-	}
 
 	/* Emit the gaps in [base, end) not covered by any surviving registration.
 	 *
@@ -1339,16 +1341,14 @@ static int svm_api_range_put(struct hsa_kfd_fmm_context *fmm_ctx, void *addr,
 	if (fmm_ctx->svm_api_range_tree.root == &fmm_ctx->svm_api_range_tree.sentinel)
 		fmm_ctx->svm_api_max_extent = 0;
 
-	pthread_mutex_unlock(&fmm_ctx->svm_api_mutex);
 	*out = ranges;
 	return n;
 }
 
 /*
  * Inverse of fmm_register_mem_svm_api()/fmm_map_mem_svm_api(): revoke GPU access
- * to the range (NO_ACCESS for every GPU) and clear the coherency flags that were
- * set at registration time. Called when the last SVM-API registration of a range
- * is removed.
+ * to the range (NO_ACCESS for every GPU). Called with svm_api_mutex held, when
+ * the last SVM-API registration of a range is removed.
  */
 static HSAKMT_STATUS fmm_unregister_mem_svm_api(HsaKFDContext *ctx,
 						void *aligned_addr,
@@ -1418,6 +1418,7 @@ static HSAKMT_STATUS fmm_register_mem_svm_api(HsaKFDContext *ctx,
 	uint32_t access_attrs = fmm_ctx->svm.skip_svm_host_unregister ? 0 : num_gpus;
 	uint32_t num_attrs = access_attrs + 2;
 	uint32_t i;
+	bool locked = false, tracked = false;
 	HSAKMT_STATUS ret;
 
 	if (!fmm_ctx->first_gpu_mem)
@@ -1461,23 +1462,41 @@ static HSAKMT_STATUS fmm_register_mem_svm_api(HsaKFDContext *ctx,
 	args->attrs[access_attrs + 1].value = HSA_SVM_FLAG_EXT_COHERENT;
 	pr_debug("Registering to SVM %p size: %ld\n", (void*)aligned_addr,
 		 aligned_size);
+
+	/* Track the range before granting, and keep svm_api_mutex held across
+	 * the ioctl. A concurrent deregister then either sees this registration
+	 * and spares the pages it covers, or finishes its NO_ACCESS before this
+	 * grant. Ungated, the revoke can reach the kernel after the grant and
+	 * leave this live registration without GPU access.
+	 */
+	if (!fmm_ctx->svm.skip_svm_host_unregister) {
+		pthread_mutex_lock(&fmm_ctx->svm_api_mutex);
+		locked = true;
+		tracked = svm_api_range_get_locked(fmm_ctx, address, (void *)aligned_addr,
+						   aligned_size, size);
+	}
+
 	/* Driver does one copy_from_user, with extra attrs size */
 	if (hsakmt_ioctl(ctx->fd, AMDKFD_IOC_SVM + (s_attr << _IOC_SIZESHIFT), args)) {
 		pr_debug("op set range attrs failed %s\n", strerror(errno));
+		if (tracked) {
+			struct svm_revoke_range *rr = NULL;
+
+			/* Nothing was granted, so give the reference back and
+			 * drop the revoke set rather than issuing it.
+			 */
+			svm_api_range_put_locked(fmm_ctx, address, &rr);
+			free(rr);
+		}
 		ret = HSAKMT_STATUS_ERROR;
 		goto out;
-	}
-
-	if (!fmm_ctx->svm.skip_svm_host_unregister) {
-		/* Track only once the kernel has the attributes, so a failed register
-		 * leaves nothing behind and there is no reserved extent to roll back.
-		 */
-		svm_api_range_get(fmm_ctx, address, (void *)aligned_addr, aligned_size, size);
 	}
 
 	ret = HSAKMT_STATUS_SUCCESS;
 
 out:
+	if (locked)
+		pthread_mutex_unlock(&fmm_ctx->svm_api_mutex);
 	free(args);
 	return ret;
 }
@@ -4812,23 +4831,28 @@ HSAKMT_STATUS hsakmt_fmm_deregister_memory(HsaKFDContext *ctx, void *address)
 		 * no-op) or a host range registered via the SVM API, which
 		 * does not create a vm_object. For the latter, drop a
 		 * reference and, when the last one is gone, issue the inverse
-		 * SET_ATTR to revoke GPU access and clear coherency flags.
+		 * SET_ATTR to revoke GPU access.
 		 */
 		if (ctx->hsakmt_is_svm_api_supported) {
-			if (fmm_ctx->svm.skip_svm_host_unregister)
-				return HSAKMT_STATUS_SUCCESS;
-
 			struct svm_revoke_range *rr = NULL;
 			int nr, i;
 
+			if (fmm_ctx->svm.skip_svm_host_unregister)
+				return HSAKMT_STATUS_SUCCESS;
+
 			/* Revoke only the sub-ranges no surviving registration
 			 * still covers, so overlapping/boundary-sharing
-			 * neighbors keep their GPU access.
+			 * neighbors keep their GPU access. svm_api_mutex is
+			 * held across the ioctls so a concurrent register
+			 * cannot land a grant between the refcount reaching
+			 * zero and the NO_ACCESS below.
 			 */
-			nr = svm_api_range_put(fmm_ctx, address, &rr);
+			pthread_mutex_lock(&fmm_ctx->svm_api_mutex);
+			nr = svm_api_range_put_locked(fmm_ctx, address, &rr);
 			for (i = 0; i < nr; i++)
 				fmm_unregister_mem_svm_api(ctx, rr[i].addr,
 							   rr[i].size);
+			pthread_mutex_unlock(&fmm_ctx->svm_api_mutex);
 			free(rr);
 			return HSAKMT_STATUS_SUCCESS;
 		}
