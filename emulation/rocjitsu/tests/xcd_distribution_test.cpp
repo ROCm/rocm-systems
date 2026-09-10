@@ -32,6 +32,7 @@ RJ_DIAGNOSTIC_POP
 
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <cstdint>
 #include <limits>
 #include <map>
@@ -848,29 +849,31 @@ TEST(XcdDistributionTest, ScratchAllocationProbeDoesNotFaultAndReusesBacking) {
                               &process.page_table_mutex_, process.page_table_generation());
   class Reporter : public amdgpu::MemoryFaultReporter {
   public:
-    unsigned faults = 0;
-    void report_memory_fault(uint32_t, uint64_t, amdgpu::MemoryFaultCause) override { ++faults; }
+    std::atomic_uint faults{0};
+    void report_memory_fault(uint32_t, uint64_t, amdgpu::MemoryFaultCause) override {
+      faults.fetch_add(1, std::memory_order_relaxed);
+    }
   } reporter;
   fx.memory->set_memory_fault_reporter(&reporter);
 
   constexpr uint32_t kPrivateBytes = 16;
   constexpr size_t kScratchSize = kPrivateBytes * kWavefrontSize * kTotalCus;
-  auto release = [](void *p) { munmap(p, kScratchSize); };
-  std::unique_ptr<void, decltype(release)> reservation(
-      mmap(nullptr, kScratchSize, PROT_NONE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0), release);
-  ASSERT_NE(reservation.get(), MAP_FAILED);
-  const auto scratch_va = reinterpret_cast<uint64_t>(reservation.get());
+  void *const mapping = mmap(nullptr, kScratchSize, PROT_NONE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+  ASSERT_NE(mapping, MAP_FAILED);
+  auto release = [](void *address) { munmap(address, kScratchSize); };
+  std::unique_ptr<void, decltype(release)> reservation(mapping, release);
+  const uint64_t scratch_va = reinterpret_cast<uint64_t>(reservation.get());
   std::vector<uint8_t> backing(kScratchSize);
-  unsigned allocations = 0;
+  std::atomic_uint allocations{0};
   for (uint32_t xi = 0; xi < kTotalXcds; ++xi) {
     amdgpu::CommandProcessor *cp = fx.soc->xcd(xi)->command_processor();
     cp->set_scratch_backing_resolver([&](uint32_t) { return scratch_va; });
     cp->set_scratch_backing_allocator([&](uint32_t pid, uint64_t va, size_t size) {
-      ++allocations;
+      allocations.fetch_add(1, std::memory_order_relaxed);
       EXPECT_EQ(pid, process.process_id());
       EXPECT_EQ(va, scratch_va);
       EXPECT_EQ(size, backing.size());
-      EXPECT_EQ(reporter.faults, 0u);
+      EXPECT_EQ(reporter.faults.load(std::memory_order_relaxed), 0u);
       process.map_pages(va, backing.data(), backing.size());
       return true;
     });
@@ -914,8 +917,8 @@ TEST(XcdDistributionTest, ScratchAllocationProbeDoesNotFaultAndReusesBacking) {
   fx.engine->run();
 
   EXPECT_EQ(queue_desc.read_dispatch_id, 1u);
-  EXPECT_EQ(allocations, 1u);
-  EXPECT_EQ(reporter.faults, 0u);
+  EXPECT_EQ(allocations.load(std::memory_order_relaxed), 1u);
+  EXPECT_EQ(reporter.faults.load(std::memory_order_relaxed), 0u);
   for (uint64_t count : fx.soc->dispatched_workgroups_per_xcd())
     EXPECT_EQ(count, kTotalCus / kTotalXcds);
   cp->unregister_queue(1, process.process_id());
