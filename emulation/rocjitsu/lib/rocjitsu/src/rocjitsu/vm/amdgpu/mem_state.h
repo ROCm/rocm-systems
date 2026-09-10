@@ -193,9 +193,10 @@ struct VectorMemState : DynamicInstState {
   bool d16_lo = false; ///< D16 load: write lower 16 bits; preserve or zero upper per SRAM ECC.
   AtomicOp atomic_op = AtomicOp::NONE; ///< Atomic RMW operation (NONE for regular loads/stores).
   // DS packed atomics capture MODE.FP_DENORM16_64 at issue (CDNA5 ISA 12.2).
-  // Rounding is fixed RNE; VALU FP16_OVFL does not apply. Global/flat/buffer
-  // atomics ignore this field and preserve denormals in the memory pipeline.
-  uint32_t packed_denorm_mode = 0;
+  // Rounding is fixed RNE; VALU FP16_OVFL does not apply. Preserve denormals
+  // by default, including FLAT atomics routed to LDS through the shared
+  // aperture (RDNA4 ISA MODE.FP_DENORM). Direct DS execution overrides this.
+  uint32_t packed_denorm_mode = 3;
   bool lds_dst = false; ///< Buffer load with LDS bit: write to LDS, not VGPRs.
   /// Reference LDS address for LDS-destination loads. For ordinary LDS-dst
   /// paths this may include the lane-0 destination offset. For cluster
