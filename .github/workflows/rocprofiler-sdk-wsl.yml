@@ -2,6 +2,13 @@ name: rocprofiler-sdk WSL
 
 on:
   workflow_dispatch:
+    inputs:
+      rocm_tarball:
+        description: >-
+          TheRock nightly to build against, overriding ROCM_TARBALL for this run only.
+          Use it to try a fresher nightly without editing the workflow.
+        required: false
+        type: string
   pull_request:
     paths:
       - 'projects/rocprofiler-sdk/**'
@@ -43,9 +50,13 @@ env:
   ## carries build-essential/cmake/ninja. Provision it the same way the containerised
   ## rocprofiler-sdk CI does (docker/Dockerfile.ci) - unpack a TheRock nightly over
   ## ROCM_PATH - rather than through amdgpu-install, which would need an apt repo and
-  ## root inside the guest. Pinned rather than "latest" so a nightly respin cannot change
-  ## what a rerun of an old commit builds against; bump deliberately.
-  ROCM_TARBALL: "therock-dist-linux-gfx1152-7.14.0a20260612.tar.gz"
+  ## root inside the guest.
+  ##
+  ## A specific nightly rather than "latest" so a respin cannot silently change what a
+  ## rerun of an old commit builds against. That only works if it is kept current, so
+  ## bump this whenever the WSL job is touched; workflow_dispatch takes a `rocm_tarball`
+  ## input to try a fresher one first without editing the file.
+  ROCM_TARBALL: "${{ inputs.rocm_tarball || 'therock-dist-linux-gfx1152-10.1.0a20260822.tar.gz' }}"
 
   ## Used only when rocminfo cannot enumerate a GPU agent at configure time. Must stay in
   ## sync with ROCM_TARBALL above and with the GPU actually installed in the runner.
@@ -137,6 +148,12 @@ jobs:
         uses: Vampire/setup-wsl@6a8db447be7ed35f2f499c02c6e60ff77ef11278 # v6.0.0
         with:
           distribution: ${{ env.WSL_DISTRIBUTION }}
+          # Applies `set -euo pipefail` to every `shell: wsl-bash {0}` step below, so no
+          # step has to repeat it. This is setup-wsl's own default, but the wrapper script
+          # persists on the runner between jobs and is only regenerated when this input is
+          # given explicitly - stating it keeps the guarantee independent of what some
+          # earlier job left behind.
+          wsl-shell-command: bash --noprofile --norc -euo pipefail
           # A dist-upgrade on every run costs minutes and can move the toolchain out from
           # under a tree this job provisions itself; the packages below are pinned enough.
           update: false
@@ -147,7 +164,6 @@ jobs:
       - name: Copy repository into WSL
         shell: wsl-bash {0}
         run: |
-          set -euo pipefail
           # GitHub Actions `env:` does not cross the Windows/WSL boundary (that needs
           # WSLENV), so trusted values are interpolated into the script text instead.
           WORKSPACE_WIN='${{ github.workspace }}'
@@ -156,18 +172,32 @@ jobs:
           SRC="$(wslpath -a -u "${WORKSPACE_WIN}")"
           rm -rf "${HOME}/rocm-systems"
           cp -r "${SRC}" "${HOME}/rocm-systems"
-          git config --global --add safe.directory '*'
+
+          # git refuses to operate in a tree it considers foreign-owned. Scope the
+          # exemption to this one tree rather than switching the check off globally with
+          # '*'; the trailing /* covers the submodule worktrees underneath. --unset-all
+          # first because the distro persists, so plain --add would accumulate a duplicate
+          # pair on every run (it exits 5 when the key is unset, which is not an error).
+          git config --global --unset-all safe.directory || true
+          git config --global --add safe.directory "${HOME}/rocm-systems"
+          git config --global --add safe.directory "${HOME}/rocm-systems/*"
           ls -la "${HOME}/rocm-systems/projects/rocprofiler-sdk"
 
       - name: Provision ROCm
         shell: wsl-bash {0}
         timeout-minutes: 45
         run: |
-          set -euo pipefail
-          # GitHub Actions `env:` does not cross the Windows/WSL boundary (that needs
-          # WSLENV), so trusted values are interpolated into the script text instead.
           ROCM_PATH='${{ env.ROCM_PATH }}'
           ROCM_TARBALL='${{ env.ROCM_TARBALL }}'
+
+          # ROCM_TARBALL can come from a workflow_dispatch input, and it ends up inside a
+          # URL and a tar path, so keep it to a bare file name.
+          case "${ROCM_TARBALL}" in
+            *[!A-Za-z0-9._-]* | "" | .* )
+              echo "ERROR: '${ROCM_TARBALL}' is not a plain tarball file name."
+              exit 1
+              ;;
+          esac
 
           STAMP="${ROCM_PATH}/.therock-tarball"
 
@@ -189,13 +219,15 @@ jobs:
             exit 1
           fi
 
-          # Public bucket, no credentials - the same artifact docker/Dockerfile.ci pulls
-          # with `aws s3 cp --no-sign-request`, over HTTPS so the guest needs no aws cli.
+          # The nightly index, served without credentials, so the guest needs no aws cli
+          # (docker/Dockerfile.ci reaches the same artifacts through `aws s3 cp
+          # --no-sign-request` against the older bucket).
+          NIGHTLIES="https://rocm.nightlies.amd.com/tarball-multi-arch"
           TARBALL="${HOME}/rocm-dist.tar.gz"
           rm -f "${TARBALL}"
           curl -fL --retry 3 --retry-delay 10 --retry-connrefused \
             -o "${TARBALL}" \
-            "https://therock-nightly-tarball.s3.amazonaws.com/${ROCM_TARBALL}"
+            "${NIGHTLIES}/${ROCM_TARBALL}"
 
           # Replace the tree only once the download has succeeded, and stamp it only once
           # the result looks usable - a failed run must not leave a stamp claiming success,
@@ -205,11 +237,10 @@ jobs:
           tar -xf "${TARBALL}" -C "${ROCM_PATH}"
           rm -f "${TARBALL}"
 
-          # These four are exactly what the build needs: rocminfo for GPU-target detection
-          # and the three REQUIRED find_package() calls in
-          # cmake/rocprofiler_config_interfaces.cmake.
-          for probe in bin/rocminfo \
-                       lib/cmake/hip/hip-config.cmake \
+          # These three are the REQUIRED find_package() calls in
+          # cmake/rocprofiler_config_interfaces.cmake - without them Configure fails much
+          # later with a message that says nothing about the tarball.
+          for probe in lib/cmake/hip/hip-config.cmake \
                        lib/cmake/hsa-runtime64/hsa-runtime64-config.cmake \
                        lib/cmake/amd_comgr/amd_comgr-config.cmake; do
             if [ ! -e "${ROCM_PATH}/${probe}" ]; then
@@ -220,15 +251,19 @@ jobs:
             fi
           done
 
+          # Only used to detect the GPU target, and "Prepare build environment" already
+          # falls back to GPU_TARGET_FALLBACK without it, so this is not fatal.
+          if [ ! -x "${ROCM_PATH}/bin/rocminfo" ]; then
+            echo "WARNING: ${ROCM_TARBALL} ships no bin/rocminfo;" \
+                 "the build will fall back to GPU_TARGET_FALLBACK."
+          fi
+
           echo "${ROCM_TARBALL}" > "${STAMP}"
           du -sh "${ROCM_PATH}"
 
       - name: Verify WSL environment
         shell: wsl-bash {0}
         run: |
-          set -euo pipefail
-          # GitHub Actions `env:` does not cross the Windows/WSL boundary (that needs
-          # WSLENV), so trusted values are interpolated into the script text instead.
           ROCM_PATH='${{ env.ROCM_PATH }}'
 
           fail=0
@@ -244,7 +279,7 @@ jobs:
             echo "         the gnulinux platform instead and the WSL path goes untested."
           fi
 
-          # "Provision ROCm" unpacks the pinned tarball at exactly this path, so a miss
+          # "Provision ROCm" unpacks the nightly at exactly this path, so a miss
           # here means that step did not do what it reported.
           if [ ! -d "${ROCM_PATH}" ]; then
             echo "ERROR: no ROCm at ${ROCM_PATH} after the Provision ROCm step."
@@ -280,7 +315,6 @@ jobs:
         shell: wsl-bash {0}
         timeout-minutes: 20
         run: |
-          set -euo pipefail
           cd "${HOME}/rocm-systems"
           git submodule update --init --recursive --jobs 8 -- projects/rocprofiler-sdk
 
@@ -288,7 +322,6 @@ jobs:
         shell: wsl-bash {0}
         timeout-minutes: 15
         run: |
-          set -euo pipefail
           cd "${HOME}/rocm-systems/projects/rocprofiler-sdk"
           python3 -m venv "${HOME}/rocprofiler-sdk-venv"
           # shellcheck disable=SC1091
@@ -299,9 +332,6 @@ jobs:
       - name: Prepare build environment
         shell: wsl-bash {0}
         run: |
-          set -euo pipefail
-          # GitHub Actions `env:` does not cross the Windows/WSL boundary (that needs
-          # WSLENV), so trusted values are interpolated into the script text instead.
           GPU_TARGET_FALLBACK='${{ env.GPU_TARGET_FALLBACK }}'
 
           ROCM_PATH='${{ env.ROCM_PATH }}'
@@ -361,7 +391,6 @@ jobs:
         shell: wsl-bash {0}
         timeout-minutes: 20
         run: |
-          set -euo pipefail
           # shellcheck disable=SC1091
           source "${HOME}/rocprof-wsl-env.sh"
 
@@ -382,7 +411,6 @@ jobs:
         shell: wsl-bash {0}
         timeout-minutes: 15
         run: |
-          set -euo pipefail
           # shellcheck disable=SC1091
           source "${HOME}/rocprof-wsl-env.sh"
 
@@ -403,7 +431,6 @@ jobs:
         shell: wsl-bash {0}
         timeout-minutes: 60
         run: |
-          set -euo pipefail
           # shellcheck disable=SC1091
           source "${HOME}/rocprof-wsl-env.sh"
           cmake --build "${SDK_BUILD_DIR}" --parallel "$(nproc)"
@@ -412,7 +439,6 @@ jobs:
         shell: wsl-bash {0}
         timeout-minutes: 20
         run: |
-          set -euo pipefail
           # shellcheck disable=SC1091
           source "${HOME}/rocprof-wsl-env.sh"
           # Includes platform-dispatch-tests, which is the direct coverage for the
@@ -425,20 +451,15 @@ jobs:
         shell: wsl-bash {0}
         timeout-minutes: 60
         run: |
-          set -euo pipefail
           # shellcheck disable=SC1091
           source "${HOME}/rocprof-wsl-env.sh"
 
-          # GitHub Actions `env:` does not cross the Windows/WSL boundary (that needs
-          # WSLENV), so trusted values are interpolated into the script text instead.
           # These two must reach the ctest child processes, so they are exported.
           export GPU_ENABLE_PAL='${{ env.GPU_ENABLE_PAL }}'
           export WSLKMT_VENDOR_PACKET='${{ env.WSLKMT_VENDOR_PACKET }}'
           EXCLUDE_TESTS_REGEX='${{ env.wsl_EXCLUDE_TESTS_REGEX }}'
           EXCLUDE_LABEL_REGEX='${{ env.wsl_EXCLUDE_LABEL_REGEX }}'
 
-          # An empty -E/-LE regex matches every test name, so only pass the flags when the
-          # corresponding workflow variable is actually set.
           ctest_args=()
           if [ -n "${EXCLUDE_TESTS_REGEX}" ]; then
             ctest_args+=(-E "${EXCLUDE_TESTS_REGEX}")
@@ -457,9 +478,6 @@ jobs:
         if: ${{ always() }}
         shell: wsl-bash {0}
         run: |
-          set -euo pipefail
-          # GitHub Actions `env:` does not cross the Windows/WSL boundary (that needs
-          # WSLENV), so trusted values are interpolated into the script text instead.
           WORKSPACE_WIN='${{ github.workspace }}'
 
           DEST="$(wslpath -a -u "${WORKSPACE_WIN}")/wsl-logs"
@@ -476,7 +494,7 @@ jobs:
 
       - name: Upload logs
         if: ${{ always() }}
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: rocprofiler-sdk-wsl-logs-${{ github.run_id }}-${{ github.run_attempt }}
           path: wsl-logs
