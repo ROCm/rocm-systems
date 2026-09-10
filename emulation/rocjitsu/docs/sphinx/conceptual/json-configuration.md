@@ -42,8 +42,12 @@ objects for the virtual machine and the topology.
 |-------|------|-------------|
 | `max_ticks` | int | Maximum simulation ticks. A value of `0` means unlimited. |
 | `num_threads` | int | Worker threads for the PDES engine. |
-| `exec_mode` | string | Execution mode: `"functional"` or `"cycle"`. |
+| `exec_mode` | string | Execution mode: `"functional"` or `"clocked"`. |
 | `vm.arch` | string | Target architecture, such as `cdna3`, `cdna4`, or `rdna4`. |
+
+`exec_mode` is matched literally. Only `"clocked"` selects cycle-accurate
+mode. If the field is omitted or set to `"functional"`, `"cycle"`, or any
+other value, rocJITsu runs in functional mode.
 
 
 ## Component hierarchy and range expansion
@@ -138,14 +142,17 @@ The `configs/` directory ships several ready-to-use topology files:
 
 | File | Description |
 |------|-------------|
-| `amdgpu_cdna3.json` | Single CDNA3 GPU, standalone simulation. |
-| `amdgpu_cdna3_kmd.json` | Single CDNA3 GPU, daemon or KFD mode. |
-| `amdgpu_cdna4.json` | Single CDNA4 GPU, standalone simulation. |
-| `amdgpu_cdna4_kmd.json` | Single CDNA4 GPU, daemon or KFD mode. |
-| `amdgpu_cdna4_kmd_2gpu.json` | Two CDNA4 GPUs, multi-GPU daemon mode. |
-| `amdgpu_gfx1250.json` | Single gfx1250 GPU, standalone simulation (no KMD). |
-| `amdgpu_rdna3_gfx1100_w7900_kmd.json` | Single RDNA3 gfx1100 GPU, KFD mode. |
-| `amdgpu_rdna4_gfx1201_r9700_kmd.json` | Single RDNA4 gfx1201 GPU, KFD mode. |
+| `gfx90a_mi210_kmd.json` | Single CDNA2 GPU, daemon or KFD mode. |
+| `gfx942_cdna3.json` | Single CDNA3 GPU, standalone simulation. |
+| `gfx942_cdna3_kmd.json` | Single CDNA3 GPU, daemon or KFD mode. |
+| `gfx950_mi355x.json` | Single CDNA4 GPU, standalone simulation. |
+| `gfx950_mi355x_kmd.json` | Single CDNA4 GPU, daemon or KFD mode. |
+| `gfx950_mi355x_kmd_2gpu.json` | Two CDNA4 GPUs, multi-GPU daemon mode. |
+| `gfx1250_mi455x.json` | Single CDNA5 GPU, standalone simulation. |
+| `gfx1250_mi455x_kmd_4gpu.json` | Four CDNA5 GPUs, multi-GPU daemon mode. |
+| `gfx1100_w7900.json` | Single RDNA3 GPU, standalone simulation. |
+| `gfx1151.json` | Single RDNA3.5 GPU, standalone simulation. |
+| `gfx1201_r9700.json` | Single RDNA4 GPU, standalone simulation. |
 
 
 Standalone configs (without `_kmd` in the name) are used with
@@ -160,6 +167,5 @@ Multi-GPU configs define multiple SoCs, each with a distinct GPU ID and
 location ID. Every GPU receives its own command processor, memory
 subsystem, and cache hierarchy. In daemon mode, the simulated driver
 manages all GPUs and routes KFD ioctls to the correct device based on
-`gpu_id`. The `amdgpu_cdna4_kmd_2gpu.json` config provides a working
+`gpu_id`. The `gfx950_mi355x_kmd_2gpu.json` config provides a working
 two-GPU configuration used with RCCL collective tests.
-
