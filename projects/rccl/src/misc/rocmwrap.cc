@@ -179,6 +179,9 @@ int ncclIsCuMemSupported() {
 
 // Runtime cuMem capability without the gfx1250 auto-enable gate. Used when
 // NCCL_CUMEM_ENABLE=1 forces the VMM path on non-gfx1250 platforms.
+#if defined(__GNUC__)
+__attribute__((visibility("default")))
+#endif
 int ncclCuMemRuntimeSupported() {
   return ncclCuMemCapabilityCheck(/*requireGfx1250ForAutoEnable=*/0);
 }

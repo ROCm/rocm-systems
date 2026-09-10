@@ -320,15 +320,16 @@ if(BUILD_TESTS)
     ${RCCL_COMMON_INCLUDE_DIRS}
     ${PROJECT_BINARY_DIR}/hipify/src/device          # device/common.h (neutered)
     ${PROJECT_BINARY_DIR}/hipify/src/include/nccl_device)
-  # src/enqueue.cc is basename-unique in the tree, so hipify keeps its name --
-  # no _tmp suffix (contrast transport/p2p.cc -> p2p_tmp.cc).
+  # Hipify preserves the src/enqueue/ directory, so the staged file is
+  # hipify/src/enqueue/enqueue.cc (not hipify/src/enqueue.cc). Contrast
+  # transport/p2p.cc -> p2p_tmp.cc, which is a basename collision.
   target_compile_definitions(rccl-UnitTestsMicroEnqueue PRIVATE
     ${RCCL_COMMON_COMPILE_DEFS}
     # Per-symbol omissions from the shared nccl_stubs.cc; enqueue.cc itself
     # supplies both, so neither needs a replacement definition.
     RCCL_STUBS_OMIT_ncclInitKernelsForDevice
     RCCL_STUBS_OMIT_ncclParamGraphStreamOrdering
-    ENQUEUE_CC_PATH="${PROJECT_BINARY_DIR}/hipify/src/enqueue.cc")
+    ENQUEUE_CC_PATH="${PROJECT_BINARY_DIR}/hipify/src/enqueue/enqueue.cc")
 
   # Mirrors the opt-out in test/CMakeLists.txt, whose loop does not reach this target.
   # Inheriting ENABLE_ROCSHMEM_GIN defaults NCCL_GIN_ANVIL_SDMA_ENABLE to 1, which pulls
@@ -857,7 +858,7 @@ foreach(_enq_variant "" "-devlinker")
     $<$<BOOL:${HIP_FABRIC_API}>:HIP_FABRIC_API>
     RCCL_STUBS_OMIT_ncclInitKernelsForDevice
     RCCL_STUBS_OMIT_ncclParamGraphStreamOrdering
-    ENQUEUE_CC_PATH="${RCCL_HIPIFY_DIR}/src/enqueue.cc"
+    ENQUEUE_CC_PATH="${RCCL_HIPIFY_DIR}/src/enqueue/enqueue.cc"
   )
   if(_enq_variant STREQUAL "-devlinker")
     target_compile_definitions(${_enq_tgt} PRIVATE RCCL_DEVICE_LINKER)

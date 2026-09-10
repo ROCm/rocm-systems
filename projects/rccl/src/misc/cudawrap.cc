@@ -44,6 +44,9 @@ error:
 #endif
 }
 
+#if defined(__GNUC__)
+__attribute__((visibility("default")))
+#endif
 int ncclCuMemRuntimeSupported() {
   return ncclIsCuMemSupported();
 }

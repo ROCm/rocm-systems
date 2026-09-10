@@ -8,8 +8,9 @@
 // helpers are directly callable.
 //
 // LINE-NUMBER BASE: every `enqueue.cc:NNNN` citation in these tests refers to
-// src/enqueue.cc as committed, NOT to the hipified copy this TU compiles. Hipify
-// inserts one line near the top, so add 1 when navigating build/hipify/src/enqueue.cc.
+// src/enqueue/enqueue.cc as committed, NOT to the hipified copy this TU compiles.
+// Hipify inserts one line near the top, so add 1 when navigating
+// build/hipify/src/enqueue/enqueue.cc.
 
 #include <gtest/gtest.h>
 
@@ -78,8 +79,8 @@ void ncclDevKernel_Generic_8(ncclDevKernelArgsDefaultStorage) {}
 void ncclDevKernel_Generic_16(ncclDevKernelArgsDefaultStorage) {}
 void ncclDevKernel_Generic_32(ncclDevKernelArgsDefaultStorage) {}
 
-// ENQUEUE_CC_PATH is ${PROJECT_BINARY_DIR}/hipify/src/enqueue.cc -- enqueue.cc is
-// basename-unique in the tree, so hipify keeps its name (no _tmp suffix).
+// ENQUEUE_CC_PATH is ${PROJECT_BINARY_DIR}/hipify/src/enqueue/enqueue.cc -- hipify
+// keeps the src/enqueue/ directory layout.
 #include ENQUEUE_CC_PATH
 
 class EnqueueMicrotest : public ::testing::Test {
@@ -1974,37 +1975,53 @@ TEST_F(EnqueueMicrotest, EffectiveP2pBatchEnable_MultiNodeOtherArch_IsDisabled) 
 }
 
 // ===========================================================================
-// getImplicitOrder (enqueue.cc:1996)
-// On AMD the CUDA driver-version arm is #if'd out entirely, so only two arms
-// are reachable: param-on -> Serial, param-off -> None. Pinning that the AMD
+// getImplicitOrder (enqueue.cc:2091)
+// Reads comm->config.launchOrderImplicit (env is applied at init). On AMD the
+// CUDA driver-version arm is #if'd out, so only two arms are reachable:
+// config==1 -> Serial, anything else (0 / UNDEF) -> None. Pinning that the AMD
 // build cannot return ncclImplicitOrderLaunch is the useful assertion.
+// ncclComm is too large for the stack (see BatchPlanComm).
 // ===========================================================================
 
+namespace {
+std::unique_ptr<ncclComm> MakeLaunchOrderComm(int launchOrderImplicit) {
+  auto comm = std::unique_ptr<ncclComm>(new ncclComm{});
+  comm->config.launchOrderImplicit = launchOrderImplicit;
+  return comm;
+}
+}  // namespace
+
 TEST_F(EnqueueMicrotest, GetImplicitOrder_ParamDisabled_IsNone) {
-  SetParam("LAUNCH_ORDER_IMPLICIT", 0);
+  auto comm = MakeLaunchOrderComm(0);
   auto mode = ncclImplicitOrderLaunch;  // poison
-  ASSERT_EQ(ncclSuccess, getImplicitOrder(&mode, /*capturing=*/false));
+  ASSERT_EQ(ncclSuccess, getImplicitOrder(&mode, comm.get(), /*capturing=*/false));
+  EXPECT_EQ(ncclImplicitOrderNone, mode);
+}
+
+TEST_F(EnqueueMicrotest, GetImplicitOrder_UndefDefault_IsNone) {
+  auto comm = MakeLaunchOrderComm(NCCL_CONFIG_UNDEF_INT);
+  auto mode = ncclImplicitOrderLaunch;  // poison
+  ASSERT_EQ(ncclSuccess, getImplicitOrder(&mode, comm.get(), /*capturing=*/false));
   EXPECT_EQ(ncclImplicitOrderNone, mode);
 }
 
 TEST_F(EnqueueMicrotest, GetImplicitOrder_ParamEnabled_IsSerialOnAmd) {
-  SetParam("LAUNCH_ORDER_IMPLICIT", 1);
+  auto comm = MakeLaunchOrderComm(1);
   auto mode = ncclImplicitOrderNone;  // poison
-  ASSERT_EQ(ncclSuccess, getImplicitOrder(&mode, /*capturing=*/false));
+  ASSERT_EQ(ncclSuccess, getImplicitOrder(&mode, comm.get(), /*capturing=*/false));
   EXPECT_EQ(ncclImplicitOrderSerial, mode);
 }
 
 TEST_F(EnqueueMicrotest, GetImplicitOrder_CapturingIsIrrelevantOnAmd) {
   // HONEST SCOPE: this pins that `capturing` does not change the answer; it does
   // NOT prove the AMD arm is what produced it. Under the seam's driver 12000 the
-  // CUDA arm returns Serial for both values too (:2002 12000 < 12090; :2006
-  // 12030 <= min(CUDART, 12000) is false), so an #if change would not fail here.
-  // getImplicitOrder's third parameter (driver, :1996) is what separates the arms.
-  SetParam("LAUNCH_ORDER_IMPLICIT", 1);
+  // CUDA arm returns Serial for both values too, so an #if change would not fail
+  // here. The optional driver argument is what separates the CUDA arms.
+  auto comm = MakeLaunchOrderComm(1);
   auto a = ncclImplicitOrderNone;
   auto b = ncclImplicitOrderNone;
-  ASSERT_EQ(ncclSuccess, getImplicitOrder(&a, /*capturing=*/true));
-  ASSERT_EQ(ncclSuccess, getImplicitOrder(&b, /*capturing=*/false));
+  ASSERT_EQ(ncclSuccess, getImplicitOrder(&a, comm.get(), /*capturing=*/true));
+  ASSERT_EQ(ncclSuccess, getImplicitOrder(&b, comm.get(), /*capturing=*/false));
   EXPECT_EQ(a, b);
   EXPECT_EQ(ncclImplicitOrderSerial, a);
 }
