@@ -24,12 +24,14 @@
 #include <span>
 #include <stdexcept>
 #include <string>
+#include <vector>
 
 namespace {
 
 using namespace rocjitsu;
 
 const std::string CONFIG_PATH = std::string(CONFIG_DIR) + "/gfx950_mi355x.json";
+const std::string CONFIG_KMD_PATH = std::string(CONFIG_DIR) + "/gfx950_mi355x_kmd.json";
 const std::string CONFIG_2GPU_PATH = std::string(CONFIG_DIR) + "/gfx950_mi355x_kmd_2gpu.json";
 const std::string CONFIG_1XCD_PATH = std::string(CONFIG_DIR) + "/gfx1100_w7900.json";
 
@@ -95,6 +97,68 @@ void expect_subtree_partition(simdojo::Component *component, simdojo::PartitionI
 
   for (const auto &child : composite->children())
     expect_subtree_partition(child.get(), expected);
+}
+
+TEST(CpuDispatchBudgetTest, AutoUsesDetectedHostWidthBelowCap) {
+  EXPECT_EQ(config::resolve_cpu_dispatch_thread_budgets(
+                /*requested_threads=*/0, /*hardware_threads=*/6, /*soc_count=*/1),
+            (std::vector<uint32_t>{6}));
+}
+
+TEST(CpuDispatchBudgetTest, AutoFallsBackToOneWhenHostWidthIsUnknown) {
+  EXPECT_EQ(config::resolve_cpu_dispatch_thread_budgets(
+                /*requested_threads=*/0, /*hardware_threads=*/0, /*soc_count=*/1),
+            (std::vector<uint32_t>{1}));
+}
+
+TEST(CpuDispatchBudgetTest, AutoCapsHostWidthAtThirtyTwo) {
+  EXPECT_EQ(config::resolve_cpu_dispatch_thread_budgets(
+                /*requested_threads=*/0, /*hardware_threads=*/128, /*soc_count=*/1),
+            (std::vector<uint32_t>{32}));
+}
+
+TEST(CpuDispatchBudgetTest, AutoUsesSuppliedCap) {
+  EXPECT_EQ(config::resolve_cpu_dispatch_thread_budgets(
+                /*requested_threads=*/0, /*hardware_threads=*/128, /*soc_count=*/4,
+                /*automatic_thread_cap=*/12),
+            (std::vector<uint32_t>{3, 3, 3, 3}));
+}
+
+TEST(CpuDispatchBudgetTest, ZeroSocCountReturnsNoBudgets) {
+  EXPECT_EQ(config::resolve_cpu_dispatch_thread_budgets(
+                /*requested_threads=*/0, /*hardware_threads=*/128, /*soc_count=*/0,
+                /*automatic_thread_cap=*/12),
+            (std::vector<uint32_t>{}));
+}
+
+TEST(CpuDispatchBudgetTest, AutoDividesHostBudgetFairlyAcrossSocs) {
+  EXPECT_EQ(config::resolve_cpu_dispatch_thread_budgets(
+                /*requested_threads=*/0, /*hardware_threads=*/10, /*soc_count=*/3),
+            (std::vector<uint32_t>{4, 3, 3}));
+  EXPECT_EQ(config::resolve_cpu_dispatch_thread_budgets(
+                /*requested_threads=*/0, /*hardware_threads=*/128, /*soc_count=*/4),
+            (std::vector<uint32_t>{8, 8, 8, 8}));
+  EXPECT_EQ(config::resolve_cpu_dispatch_thread_budgets(
+                /*requested_threads=*/0, /*hardware_threads=*/2, /*soc_count=*/4),
+            (std::vector<uint32_t>{1, 1, 1, 1}));
+}
+
+TEST(CpuDispatchBudgetTest, ExplicitWidthRemainsPerSoc) {
+  EXPECT_EQ(config::resolve_cpu_dispatch_thread_budgets(
+                /*requested_threads=*/7, /*hardware_threads=*/2, /*soc_count=*/3,
+                /*automatic_thread_cap=*/12),
+            (std::vector<uint32_t>{7, 7, 7}));
+}
+
+TEST(CpuDispatchBudgetTest, ProductionConfigsDefaultToSerialDispatch) {
+  {
+    auto loaded = config::load_config(CONFIG_KMD_PATH, rocjitsu::kEmbeddedSchema);
+    EXPECT_EQ(loaded.cpu_dispatch_threads, 1u);
+  }
+  {
+    auto loaded = config::load_config(CONFIG_2GPU_PATH, rocjitsu::kEmbeddedSchema);
+    EXPECT_EQ(loaded.cpu_dispatch_threads, 1u);
+  }
 }
 
 TEST(XcdPartitioningTest, EightThreadsMapsEachCdna4XcdToItsOwnPartition) {

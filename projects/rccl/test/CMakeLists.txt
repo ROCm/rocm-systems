@@ -19,6 +19,10 @@ if(BUILD_TESTS)
 
   # CPU-only generator unit test: guards the -fgpu-rdc device-function dispatch
   # codegen in src/device/generate.py. Needs no GPU and no built library.
+  #
+  # Registered here for local `ctest` runs only. Nothing in RCCL CI runs ctest, so
+  # what actually gates this suite is the `guards` phase of
+  # test/host/run_host_tests.sh, which invokes it directly.
   find_package(Python3 COMPONENTS Interpreter REQUIRED)
   add_test(
     NAME rccl-generate-device-table
@@ -560,6 +564,26 @@ if(BUILD_TESTS)
       CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
     add_test(NAME rccl-UnitTestsGinSdmaAllGatherGpu COMMAND rccl-UnitTestsGinSdmaAllGatherGpu)
     set_tests_properties(rccl-UnitTestsGinSdmaAllGatherGpu PROPERTIES LABELS "unit;gpu")
+  endif()
+
+  # GIN Anvil-SDMA hybrid Broadcast (-D 3) policy host unit test (no GPU).
+  # Compiles gin_sdma_broadcast_policy.h from the sibling rccl-tests project with
+  # GIN_SDMA_HOST_ONLY (no librccl / device codegen needed), validating the exact
+  # LSA<->GIN threshold + LL-cap resolution, tier-selection predicates (LL / LSA /
+  # flat / scatter+allgather / ring), scatter/ring chunk math and signal-count
+  # sizing that broadcast.cu relies on. Skip the target if the rccl-tests checkout
+  # is absent so a standalone rccl build still configures. Runs under `ctest -L unit`.
+  if (EXISTS "${_gin_sdma_ag_hdr_dir}/gin_sdma_broadcast_policy.h")
+    add_executable(rccl-UnitTestsGinSdmaBroadcastPolicy gin/gin_sdma_broadcast_policy_test.cpp)
+    set_source_files_properties(gin/gin_sdma_broadcast_policy_test.cpp PROPERTIES LANGUAGE CXX)
+    target_include_directories(rccl-UnitTestsGinSdmaBroadcastPolicy PRIVATE
+      "${_gin_sdma_ag_hdr_dir}")
+    target_compile_definitions(rccl-UnitTestsGinSdmaBroadcastPolicy PRIVATE GIN_SDMA_HOST_ONLY)
+    target_link_libraries(rccl-UnitTestsGinSdmaBroadcastPolicy PRIVATE ${GTEST_BOTH_LIBRARIES} Threads::Threads)
+    set_target_properties(rccl-UnitTestsGinSdmaBroadcastPolicy PROPERTIES
+      RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/test")
+    add_test(NAME rccl-UnitTestsGinSdmaBroadcastPolicy COMMAND rccl-UnitTestsGinSdmaBroadcastPolicy)
+    set_tests_properties(rccl-UnitTestsGinSdmaBroadcastPolicy PROPERTIES LABELS "unit")
   endif()
 
   # rccl-UnitTestsFixturesDebug: Tests that access internal symbols compiled into
