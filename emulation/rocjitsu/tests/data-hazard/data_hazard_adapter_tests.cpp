@@ -1719,6 +1719,109 @@ TEST(DataHazardAdapterTest, GlobalRoutesFeedCrossWorkgroupRaceDetection) {
   EXPECT_EQ(warnings[0].finding.address, 0x4000u);
 }
 
+// Copilot review, plugin.cpp route_scalar_memory: a scalar load (s_load_*) reads
+// global memory, but the route labelled it ScalarRegister, so on_memory_route
+// skipped the global path and the read never reached cross-workgroup race
+// detection. scalar_memory_resource_kind is the routing policy the fix changes;
+// these tests thread through it so they fail on today's code and pass on the fix.
+TEST(DataHazardAdapterTest, ScalarLoadIsTrackedAsGlobalMemory) {
+  EXPECT_EQ(dh::scalar_memory_resource_kind(/*is_load=*/true), ResourceKind::GlobalMemory)
+      << "a scalar load reads global memory and must be tracked there so it can be "
+         "seen racing a global write from another workgroup";
+}
+
+TEST(DataHazardAdapterTest, ScalarStoreStaysRegisterOnly) {
+  EXPECT_EQ(dh::scalar_memory_resource_kind(/*is_load=*/false), ResourceKind::ScalarRegister)
+      << "scalar stores have no global-shadow slot plumbing yet, so the fix must "
+         "leave them register-only";
+}
+
+// The consequence Comment #2 is about, driven end to end at the adapter contract
+// level: workgroup A writes global memory, workgroup B reads the same address
+// with a scalar load, no synchronization between them. Building B's route through
+// scalar_memory_resource_kind makes this fail-first — today the load routes as
+// ScalarRegister and no race is seen; after the fix it routes as GlobalMemory and
+// the cross-workgroup race is reported.
+TEST(DataHazardAdapterTest, ScalarLoadRouteRacesCrossWorkgroupGlobalWrite) {
+  AdapterHarness h;
+
+  ExecutionKey other_wave = h.wave;
+  other_wave.workgroup_id = 1;
+  other_wave.wave_id = 1;
+  h.adapter.on_workgroup_begin(other_wave);
+  h.adapter.on_wave_begin(other_wave);
+
+  h.adapter.on_instruction(h.instruction(1, 0x100));
+
+  dh::MemoryRouteView global_write;
+  global_write.instruction = h.instruction(1, 0x100);
+  global_write.resource_kind = ResourceKind::GlobalMemory;
+  global_write.address = 0x4000;
+  global_write.size_bytes = 4;
+  global_write.is_store = true;
+  h.adapter.on_memory_route(global_write);
+
+  dh::InstructionView read_inst;
+  read_inst.execution = other_wave;
+  read_inst.instruction_id = 2;
+  read_inst.pc = 0x104;
+  h.adapter.on_instruction(read_inst);
+
+  // Shaped as route_scalar_memory produces for a scalar load: a GlobalMemory
+  // route whose destination register stays Scalar.
+  dh::MemoryRouteView scalar_load;
+  scalar_load.instruction = read_inst;
+  scalar_load.resource_kind = dh::scalar_memory_resource_kind(/*is_load=*/true);
+  scalar_load.register_class = dh::RegisterClass::Scalar;
+  scalar_load.register_base = 12;
+  scalar_load.address = 0x4000;
+  scalar_load.size_bytes = 4;
+  scalar_load.is_load = true;
+  h.adapter.on_memory_route(scalar_load);
+
+  const auto warnings = h.engine.warning_snapshot();
+  ASSERT_EQ(warnings.size(), 1u);
+  EXPECT_EQ(warnings[0].finding.kind, HazardKind::GlobalMemoryRace);
+  EXPECT_EQ(warnings[0].finding.resource_kind, ResourceKind::GlobalMemory);
+  EXPECT_EQ(warnings[0].finding.address, 0x4000u);
+}
+
+// Regression guard, not fail-first: routing a scalar load as GlobalMemory must
+// not cost it its SGPR destination tracking. on_memory_route's destination block
+// keys off register_class, not resource_kind, so the RAW on the loaded SGPR is
+// still found. Passes before and after the fix.
+TEST(DataHazardAdapterTest, ScalarLoadRoutedAsGlobalStillTracksSgprDestination) {
+  AdapterHarness h;
+
+  h.adapter.on_instruction(h.instruction(1, 0x100));
+
+  dh::MemoryRouteView smem_load;
+  smem_load.instruction = h.instruction(1, 0x100);
+  smem_load.resource_kind = dh::scalar_memory_resource_kind(/*is_load=*/true);
+  smem_load.register_class = dh::RegisterClass::Scalar;
+  smem_load.register_base = 12;
+  smem_load.address = 0x4000;
+  smem_load.size_bytes = 4;
+  smem_load.is_load = true;
+  h.adapter.on_memory_route(smem_load);
+
+  h.adapter.on_instruction(h.instruction(2, 0x104));
+
+  dh::RegisterAccessView read;
+  read.instruction = h.instruction(2, 0x104);
+  read.register_class = dh::RegisterClass::Scalar;
+  read.physical_reg = 12;
+  read.size_bytes = 4;
+  read.is_read = true;
+  h.adapter.on_register_access(read);
+
+  const auto warnings = h.engine.warning_snapshot();
+  ASSERT_EQ(warnings.size(), 1u);
+  EXPECT_EQ(warnings[0].finding.kind, HazardKind::RAW);
+  EXPECT_EQ(warnings[0].finding.resource_kind, ResourceKind::ScalarRegister);
+  EXPECT_EQ(warnings[0].finding.required_wait, WaitCntType::SMEM);
+}
+
 TEST(DataHazardAdapterTest, WorkgroupBarrierFlushesLdsEpochRaceDetection) {
   AdapterHarness h;
 

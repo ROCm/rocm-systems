@@ -176,6 +176,14 @@ WaitInfo make_wait_info(WaitKind kind, std::string_view operand_text);
 /// first; the register name read as a count would be the SGPR's own number.
 bool wait_count_follows_register(WaitKind kind);
 hazard_core::RegisterKind make_register_kind(RegisterClass reg_class);
+/// The memory resource a scalar-memory route is tracked against. A scalar load
+/// (s_load_*) reads global memory, so it is tracked there — letting the read be
+/// seen racing a global write from another workgroup, a race no s_waitcnt can
+/// close, only synchronization can. Its destination SGPR is still tracked on its
+/// own, because the route keeps register_class = Scalar. A scalar store has no
+/// global-shadow slot plumbing yet, so it stays tracked only through its
+/// destination register.
+hazard_core::ResourceKind scalar_memory_resource_kind(bool is_load);
 hazard_core::InstructionDescriptor make_instruction_descriptor(const InstructionView &instruction,
                                                                hazard_core::EntityId fallback_id);
 

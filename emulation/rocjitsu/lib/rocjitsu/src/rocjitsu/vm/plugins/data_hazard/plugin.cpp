@@ -630,7 +630,7 @@ void DataHazardPlugin::route_scalar_memory(const Instruction &inst, amdgpu::Wave
 
   MemoryRouteView route;
   route.instruction = current;
-  route.resource_kind = hazard_core::ResourceKind::ScalarRegister;
+  route.resource_kind = scalar_memory_resource_kind(smem->is_load);
   route.register_class = RegisterClass::Scalar;
   route.register_base = logical_sgpr_base(wf, smem->dst_register.index);
   route.size_bytes = std::max<uint32_t>(1, smem->num_dwords) * kBytesPerDword;
