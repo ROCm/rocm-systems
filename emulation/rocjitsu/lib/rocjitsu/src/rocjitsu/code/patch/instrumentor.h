@@ -98,12 +98,15 @@ struct InstrumentationPoint {
   // trampoline, or leave both empty for the inline nop.
   const AmdGpuCodeObject *probe_obj = nullptr;
   std::string probe_symbol;
-  // Immediate argument dwords to hand the probe, one per VGPR from the ABI's
-  // arg_vgpr_base. The size is the declared argument count and is part of what
-  // the probe body is verified against, so two sites calling one probe with
-  // different counts do not share a ProbeCallable. Empty means a probe called
-  // with no arguments. Only meaningful alongside probe_obj / probe_symbol.
-  std::vector<uint32_t> probe_args;
+  // Argument dwords to hand the probe, one per VGPR from the ABI's
+  // arg_vgpr_base. Each names where the trampoline gets the value; use
+  // probe_arg_imm() for a constant. The list's *shape* describes the probe: its
+  // size is the declared argument count the probe body is verified against, and
+  // each slot's source decides what the body may assume it received. So two
+  // sites calling one probe with different shapes do not share a ProbeCallable.
+  // Empty means a probe called with no arguments. Only meaningful alongside
+  // probe_obj / probe_symbol.
+  std::vector<ProbeArgValue> probe_args;
   bool force_full_exec = false;
   // TODO: SCC will eventually need a per-point knob mirroring force_full_exec
   // (e.g. probe_consumes_scc) since the probe call clobbers it
@@ -121,10 +124,11 @@ struct ResolvedInstrumentationSite {
   // (ResolvedPoints::probes); nullopt if no probes
   std::optional<size_t> probe_index;
 
-  // Argument values for this site, copied from the request. Per-site, unlike the
-  // ProbeCallable the probe_index names: two sites can call one probe body with
-  // different values, and only the count is shared.
-  std::vector<uint32_t> probe_args;
+  // Argument values for this site, copied from the request. Only the immediates
+  // are genuinely per-site: two sites can call one probe body with different
+  // constants, but the shape is shared, since it keys the ProbeCallable that
+  // probe_index names.
+  std::vector<ProbeArgValue> probe_args;
 
   [[nodiscard]] bool is_probe_call() const { return probe_index.has_value(); }
 };

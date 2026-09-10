@@ -296,12 +296,20 @@ bool TrampolineBuilder::plan_probe_call(TrampolinePlan &plan, const ProbeAbi &ab
   // call, both under the same full mask.
   const bool needs_full_mask = will_spill || !plan.probe_args.empty();
 
+  // An EXEC-sourced argument reads the saved anchor mask rather than `exec`,
+  // which by then holds -1. needs_full_mask already subsumes this (any argument
+  // opens the window), but stating it separately keeps the dependency from being
+  // an accident of that broader condition.
+  const bool reads_saved_exec =
+      std::any_of(plan.probe_args.begin(), plan.probe_args.end(),
+                  [](const ProbeArgValue &arg) { return reads_anchor_exec(arg.source); });
+
   // EXEC/VCC/M0 operand codes are resolved per-arch, but only when actually
   // reserving that register -- so a plan with no special-state saves (and no
   // full-mask window) stays arch-agnostic, as the resource-planning tests rely
   // on. EXEC also rides this path whenever that window is needed, since the
   // anchor mask has to be restored from somewhere.
-  const bool save_exec = plan.preserve_exec || needs_full_mask;
+  const bool save_exec = plan.preserve_exec || needs_full_mask || reads_saved_exec;
   if (!reserve_special(save_exec, save_exec ? scalar_operand_exec_lo(plan.arch) : 0, 2, "EXEC") ||
       !reserve_special(plan.preserve_vcc, plan.preserve_vcc ? scalar_operand_vcc_lo(plan.arch) : 0,
                        2, "VCC") ||
@@ -316,8 +324,10 @@ bool TrampolineBuilder::plan_probe_call(TrampolinePlan &plan, const ProbeAbi &ab
   before_words += 1;     // s_getpc_b64
   before_words += 2 + 2; // s_add_u32 + literal, s_addc_u32 + literal
   before_words += 1;     // s_swappc_b64
-  // Each argument is one v_mov_b32 plus its literal word.
-  before_words += static_cast<uint32_t>(plan.probe_args.size()) * 2;
+  // Each argument is one v_mov_b32; an immediate adds the literal word its src0
+  // field names, a register source does not.
+  for (const ProbeArgValue &arg : plan.probe_args)
+    before_words += arg.source == ProbeArgSource::Immediate ? 2 : 1;
   if (plan.preserve_scc)
     before_words += 2; // s_cselect_b32 (save) + s_cmp_lg_u32 (restore)
   // Each special-state register adds one s_mov save + one s_mov restore.
@@ -426,9 +436,20 @@ std::optional<TrampolineBytes> TrampolineBuilder::emit_probe_call(const Trampoli
   // copy is defined rather than only the lanes active at the anchor. And
   // v_mov_b32 writes no SCC, so it cannot disturb the save/restore pair below.
   for (size_t i = 0; i < plan.probe_args.size(); ++i) {
-    const auto words = build_v_mov_b32_imm(static_cast<uint16_t>(plan.arg_vgpr_base + i),
-                                           plan.probe_args[i], plan.arch);
-    env.insert(env.end(), words.begin(), words.end());
+    const ProbeArgValue &arg = plan.probe_args[i];
+    const uint16_t vdst = static_cast<uint16_t>(plan.arg_vgpr_base + i);
+    if (arg.source == ProbeArgSource::Immediate) {
+      const auto words = build_v_mov_b32_imm(vdst, arg.immediate, plan.arch);
+      env.insert(env.end(), words.begin(), words.end());
+      continue;
+    }
+    // The anchor mask comes from the saved pair, not from `exec`: the widen above
+    // already overwrote the register. exec_temp is the pair base, so the high
+    // dword is the next SGPR.
+    const uint16_t src = arg.source == ProbeArgSource::AnchorExecLo
+                             ? exec_temp
+                             : static_cast<uint16_t>(exec_temp + 1);
+    env.push_back(build_v_mov_b32_src(vdst, src, plan.arch));
   }
 
   // Restore the anchor EXEC before the call so the probe runs under the anchor mask,

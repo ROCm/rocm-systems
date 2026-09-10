@@ -1929,7 +1929,7 @@ TEST(InstrumentorProbePatch, SitesDifferingOnlyInArgumentCountDoNotShareABody) {
     pt.probe_obj = &probe_obj;
     pt.probe_symbol = "rj_test_probe";
     if (anchor != 0)
-      pt.probe_args = {0xAAAAAAAAu};
+      pt.probe_args = {probe_arg_imm(0xAAAAAAAAu)};
     instr.add_point(pt);
   }
 
@@ -1948,6 +1948,79 @@ TEST(InstrumentorProbePatch, SitesDifferingOnlyInArgumentCountDoNotShareABody) {
   EXPECT_EQ(std::count(cave.begin(), cave.end(), kProbeMarkerMovS5), 2);
 }
 
+// Arity is not the only shape fact. Two sites passing one argument each, one a
+// constant and one the anchor mask, are asking for different calls: what the
+// body may assume it received differs, so they must not share a ProbeCallable.
+TEST(InstrumentorProbePatch, SitesDifferingOnlyInArgumentSourceDoNotShareABody) {
+  auto target = make_gfx950_kernel_elf_with_two_nops(); // anchors at offsets 0 and 4.
+  auto probe = make_gfx950_probe_elf("rj_test_probe", {kProbeMarkerMovS5, kProbeSetpcS30S31});
+  AmdGpuCodeObject obj(target.data(), target.size());
+  AmdGpuCodeObject probe_obj(probe.data(), probe.size());
+
+  Instrumentor instr(obj, ROCJITSU_CODE_ARCH_CDNA4);
+  for (uint64_t anchor : {uint64_t{0}, uint64_t{4}}) {
+    InstrumentationPoint pt;
+    pt.anchor_offset = anchor;
+    pt.probe_obj = &probe_obj;
+    pt.probe_symbol = "rj_test_probe";
+    pt.probe_args = anchor == 0 ? std::vector<ProbeArgValue>{probe_arg_imm(0xAAAAAAAAu)}
+                                : std::vector<ProbeArgValue>{{ProbeArgSource::AnchorExecLo, 0}};
+    instr.add_point(pt);
+  }
+
+  auto result = instr.patch_with_debug_summaries();
+  ASSERT_TRUE(result.errors.empty())
+      << (result.errors.empty() ? std::string{} : result.errors.front());
+  ASSERT_EQ(result.patches.size(), 2u);
+  EXPECT_NE(result.patches[0].probe_target_offset, result.patches[1].probe_target_offset);
+}
+
+// A Wave32 kernel's EXEC is one dword. Passing the high half would hand the
+// probe a register the kernel's wave size gives no meaning, so the site is
+// rejected rather than delivering it.
+TEST(InstrumentorProbePatch, AnchorExecHighDwordOnAWave32KernelFailsClosed) {
+  auto target = make_gfx1200_wave32_kernel_elf({0xBF800000u, 0xBF800000u}, /*private_bytes=*/0);
+  auto probe = make_gfx1200_probe_elf(
+      "rj_test_probe", {build_s_setpc_b64(/*s[30:31]=*/30, ROCJITSU_CODE_ARCH_RDNA4)});
+  AmdGpuCodeObject obj(target.data(), target.size());
+  AmdGpuCodeObject probe_obj(probe.data(), probe.size());
+
+  Instrumentor instr(obj, ROCJITSU_CODE_ARCH_RDNA4);
+  InstrumentationPoint pt;
+  pt.anchor_offset = 0;
+  pt.probe_obj = &probe_obj;
+  pt.probe_symbol = "rj_test_probe";
+  pt.probe_args = {{ProbeArgSource::AnchorExecLo, 0}, {ProbeArgSource::AnchorExecHi, 0}};
+  instr.add_point(pt);
+
+  auto result = instr.patch_with_debug_summaries();
+  ASSERT_FALSE(result.errors.empty());
+  EXPECT_NE(result.errors.front().find("Wave32"), std::string::npos) << result.errors.front();
+}
+
+// The same request on a Wave64 kernel is accepted: the gate is the wave size,
+// not the source.
+TEST(InstrumentorProbePatch, AnchorExecHighDwordOnAWave64KernelIsAccepted) {
+  auto target = make_gfx1200_kernel_elf({0xBF800000u, 0xBF800000u}, /*private_bytes=*/0);
+  auto probe = make_gfx1200_probe_elf(
+      "rj_test_probe", {build_s_setpc_b64(/*s[30:31]=*/30, ROCJITSU_CODE_ARCH_RDNA4)});
+  AmdGpuCodeObject obj(target.data(), target.size());
+  AmdGpuCodeObject probe_obj(probe.data(), probe.size());
+
+  Instrumentor instr(obj, ROCJITSU_CODE_ARCH_RDNA4);
+  InstrumentationPoint pt;
+  pt.anchor_offset = 0;
+  pt.probe_obj = &probe_obj;
+  pt.probe_symbol = "rj_test_probe";
+  pt.probe_args = {{ProbeArgSource::AnchorExecLo, 0}, {ProbeArgSource::AnchorExecHi, 0}};
+  instr.add_point(pt);
+
+  auto result = instr.patch_with_debug_summaries();
+  ASSERT_TRUE(result.errors.empty())
+      << (result.errors.empty() ? std::string{} : result.errors.front());
+  ASSERT_EQ(result.patches.size(), 1u);
+}
+
 // The ABI fixes the argument VGPRs at v0 upward, so unlike the envelope's SGPR
 // temps they cannot be re-picked to fit. The default fixture allocates 8 unified
 // VGPRs with the AGPR window at v4, leaving v0..v3 ordinary, so a fifth argument
@@ -1963,7 +2036,7 @@ TEST(InstrumentorProbePatch, ArgumentsPastTheKernelVgprAllocationFailClosed) {
   pt.anchor_offset = 0;
   pt.probe_obj = &probe_obj;
   pt.probe_symbol = "rj_test_probe";
-  pt.probe_args.assign(5, 0u);
+  pt.probe_args.assign(5, probe_arg_imm(0));
   instr.add_point(pt);
 
   auto result = instr.patch_with_debug_summaries();
@@ -1986,7 +2059,7 @@ TEST(InstrumentorProbePatch, ArgumentsFillingTheOrdinaryVgprWindowAreAccepted) {
   pt.anchor_offset = 0;
   pt.probe_obj = &probe_obj;
   pt.probe_symbol = "rj_test_probe";
-  pt.probe_args = {1u, 2u, 3u, 4u};
+  pt.probe_args = {probe_arg_imm(1), probe_arg_imm(2), probe_arg_imm(3), probe_arg_imm(4)};
   instr.add_point(pt);
 
   auto result = instr.patch_with_debug_summaries();
@@ -2009,7 +2082,7 @@ TEST(InstrumentorProbePatch, ArgumentsWithoutASingleKernelDescriptorFailClosed) 
   pt.anchor_offset = 0;
   pt.probe_obj = &probe_obj;
   pt.probe_symbol = "rj_test_probe";
-  pt.probe_args = {1u};
+  pt.probe_args = {probe_arg_imm(1)};
   instr.add_point(pt);
 
   auto result = instr.patch_with_debug_summaries();
@@ -2026,7 +2099,7 @@ TEST(InstrumentorProbePatch, RejectsArgumentsWithoutAProbe) {
   Instrumentor instr(obj, ROCJITSU_CODE_ARCH_CDNA4);
   InstrumentationPoint pt;
   pt.anchor_offset = 0;
-  pt.probe_args = {1u};
+  pt.probe_args = {probe_arg_imm(1)};
   instr.add_point(pt);
 
   auto result = instr.patch_with_debug_summaries();
@@ -2048,7 +2121,7 @@ TEST(InstrumentorProbePatch, RejectsMoreArgumentsThanFitInRegisters) {
   pt.anchor_offset = 0;
   pt.probe_obj = &probe_obj;
   pt.probe_symbol = "rj_test_probe";
-  pt.probe_args.assign(kMaxProbeArgVgprs + 1, 0u);
+  pt.probe_args.assign(kMaxProbeArgVgprs + 1, probe_arg_imm(0));
   instr.add_point(pt);
 
   auto result = instr.patch_with_debug_summaries();
@@ -2903,3 +2976,4 @@ TEST_F(Cdna4ProbeSpill, SpillsMultipleLiveClobberedSgprs) {
 
 } // namespace
 } // namespace rocjitsu
+

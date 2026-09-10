@@ -51,6 +51,45 @@ inline constexpr uint16_t kUnsetLinkPairBase = 1;
 /// needs no ABI change.
 inline constexpr uint8_t kMaxProbeArgVgprs = 16;
 
+/// @brief Where the trampoline gets an argument dword it hands the probe.
+///
+/// @details Each source names one dword. The framework must be able to produce
+/// the value at the site (invariant 1), so this is a closed set, not an operand
+/// the caller can point anywhere.
+///
+/// The EXEC sources read the anchor mask out of the dead SGPR pair the envelope
+/// saved it into, not out of `exec`: argument writes run under a forced full
+/// mask, so by then `exec` no longer holds the value the guest had. Passing one
+/// therefore requires a site that saves EXEC, which every argument-passing site
+/// already does.
+enum class ProbeArgSource {
+  Immediate,    ///< A build-time constant carried in ProbeArgValue::immediate.
+  AnchorExecLo, ///< Low dword of the EXEC mask the guest had at the anchor.
+  AnchorExecHi, ///< High dword of that mask. Wave64 only.
+};
+
+/// @brief One argument dword: where it comes from, and its value when that is a
+///        build-time constant.
+struct ProbeArgValue {
+  ProbeArgSource source = ProbeArgSource::Immediate;
+  uint32_t immediate = 0; ///< Read only when source is Immediate.
+
+  constexpr bool operator==(const ProbeArgValue &) const = default;
+};
+
+/// @brief A ProbeArgValue carrying the constant @p imm.
+///
+/// @details The common case, and the one a caller writes inline, so it gets a
+/// name rather than a two-field aggregate at every site.
+[[nodiscard]] inline constexpr ProbeArgValue probe_arg_imm(uint32_t imm) {
+  return ProbeArgValue{.source = ProbeArgSource::Immediate, .immediate = imm};
+}
+
+/// @brief Does @p source read the saved anchor EXEC pair?
+[[nodiscard]] inline constexpr bool reads_anchor_exec(ProbeArgSource source) {
+  return source == ProbeArgSource::AnchorExecLo || source == ProbeArgSource::AnchorExecHi;
+}
+
 /// @brief Where a verified convention places the values the framework, rather
 ///        than the probe body, is responsible for producing.
 ///
