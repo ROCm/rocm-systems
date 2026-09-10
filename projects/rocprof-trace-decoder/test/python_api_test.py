@@ -8,6 +8,7 @@ from rocprof_trace_decoder import (
     CodeIndex,
     Decoder,
     DecoderStatus,
+    HiddenLatency,
     InstCategory,
     __version__,
 )
@@ -21,6 +22,7 @@ def main() -> int:
     assert __version__
     assert InstCategory.VALU.name == "VALU"
     assert CodeIndex([]).isa_for_pc
+    assert HiddenLatency(idle=1, stall=2, issue=3).total() == 6
 
     lib_path = Path(args.lib) if args.lib else None
     if lib_path is not None and not lib_path.is_file():
