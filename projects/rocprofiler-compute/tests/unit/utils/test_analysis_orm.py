@@ -40,8 +40,8 @@ PC_SAMPLING_SUMMARY_VIEW_COLUMNS = [
     "count",
     "issue_count",
     "stall_count",
-    "wave_occupancy(%)",
-    "active_thread_rate(%)",
+    "wave_occupancy_percent",
+    "active_thread_percent",
     "stall_reason",
 ]
 
@@ -525,8 +525,8 @@ def test_pc_sampling_summary_view_flattens_normalized_tables(db_session):
             "count": 3,
             "issue_count": 1,
             "stall_count": 2,
-            "wave_occupancy(%)": 75.0,
-            "active_thread_rate(%)": 50.0,
+            "wave_occupancy_percent": 75.0,
+            "active_thread_percent": 50.0,
             "stall_reason": {"WAITCNT": 2},
         }
     ]
@@ -757,8 +757,8 @@ def test_pc_sampling_summary_view_keeps_host_trap_states_with_null_counts(db_ses
     assert all(row["stall_count"] is None for row in rows)
     assert all(row["stall_reason"] is None for row in rows)
     # A host-trap record carries an execution mask but no wave count.
-    assert all(row["active_thread_rate(%)"] == 50.0 for row in rows)
-    assert all(row["wave_occupancy(%)"] is None for row in rows)
+    assert all(row["active_thread_percent"] == 50.0 for row in rows)
+    assert all(row["wave_occupancy_percent"] is None for row in rows)
 
 
 @pytest.mark.parametrize("nullable_field", ["offset", "instruction", "source"])
