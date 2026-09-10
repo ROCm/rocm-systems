@@ -252,25 +252,29 @@ bool rcclAlltoAllShouldTakeDdaPath(const ncclComm* comm, size_t totalBytes, bool
                         kDdaAlltoAllGfx1250ThresholdBytes);
 }
 
-// Check if symmetric kernels are requested for this collective (local windows
-// only). Cross-rank agreement belongs in ncclMakeSymmetricTaskList at launch:
+// Check if symmetric kernels is requested for this collective.
+// Win variant: caller has already looked up both windows (avoids redundant ncclDevrFindWindow calls).
+bool isSymmetricKernelRequestedWin(ncclComm* comm, ncclFunc_t coll, int symkOp, ncclDataType_t datatype,
+                                   size_t nElts, ncclDevrWindow* sendWin, ncclDevrWindow* recvWin) {
+  if (comm == nullptr || !comm->symmetricSupport) return false;
+  if (ncclSymkInitOnce(comm) != ncclSuccess) return false;
+  if (!ncclSymkAvailable(comm, coll, symkOp, datatype, nElts)) return false;
+  return sendWin != nullptr && recvWin != nullptr && (sendWin->winFlags & NCCL_WIN_COLL_SYMMETRIC) &&
+         (recvWin->winFlags & NCCL_WIN_COLL_SYMMETRIC);
+}
+
+// Cross-rank agreement belongs in ncclMakeSymmetricTaskList at launch:
 // doing it here deadlocks ncclGroupStart because ranks enqueue one at a time.
 // Callers that report from a single rank must leave agreeAcrossRanks false
 // (the default) so they do not bootstrapAllGather alone.
 bool isSymmetricKernelRequested(ncclComm* comm, ncclFunc_t coll, int symkOp, ncclDataType_t datatype, size_t nElts,
                                 const void* sendbuff, void* recvbuff, bool agreeAcrossRanks) {
   if (comm == nullptr) return false;
-
-  bool local = false;
-  if (comm->symmetricSupport && ncclSymkInitOnce(comm) == ncclSuccess &&
-      ncclSymkAvailable(comm, coll, symkOp, datatype, nElts)) {
-    struct ncclDevrWindow* sendWin = nullptr;
-    struct ncclDevrWindow* recvWin = nullptr;
-    ncclDevrFindWindow(comm, sendbuff, &sendWin);
-    ncclDevrFindWindow(comm, recvbuff, &recvWin);
-    local = sendWin != nullptr && recvWin != nullptr && (sendWin->winFlags & NCCL_WIN_COLL_SYMMETRIC) &&
-            (recvWin->winFlags & NCCL_WIN_COLL_SYMMETRIC);
-  }
+  struct ncclDevrWindow* sendWin = nullptr;
+  struct ncclDevrWindow* recvWin = nullptr;
+  ncclDevrFindWindow(comm, sendbuff, &sendWin);
+  ncclDevrFindWindow(comm, recvbuff, &recvWin);
+  bool local = isSymmetricKernelRequestedWin(comm, coll, symkOp, datatype, nElts, sendWin, recvWin);
   if (!agreeAcrossRanks || comm->nRanks < 2 || comm->bootstrap == nullptr) return local;
 
   // Every rank that opted into agreement must enter the allgather, including
