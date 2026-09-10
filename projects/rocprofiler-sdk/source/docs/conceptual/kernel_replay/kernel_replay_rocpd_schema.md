@@ -33,7 +33,7 @@ write counter groups repeats a sanity counter in each group:
 rocprofv3 --pmc SQ_WAVES,SQ_INSTS_VALU,GRBM_COUNT \
           --pmc SQ_WAVES,SQ_INSTS_VALU,GRBM_GUI_ACTIVE \
           --pmc SQ_WAVES,SQ_INSTS_VALU,SQ_INSTS_SALU \
-          --kernel-replay-beta-enabled -- ./app
+          --replay-mode kernel --kernel-replay-beta-enabled -- ./app
 ```
 
 `SQ_WAVES` is collected three times, once per pass, each time reporting the same 512 waves. Grouped
