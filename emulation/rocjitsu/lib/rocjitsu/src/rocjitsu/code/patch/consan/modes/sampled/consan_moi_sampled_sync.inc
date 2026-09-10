@@ -143,21 +143,12 @@ sampled_cfg_forward_distance(const MoiResourcePlanningState &state, uint64_t des
   const bool control_selectable_vgpr_bank = target->has_selectable_vgpr_bank;
   const bool restore_guest_vgpr_bank =
       control_selectable_vgpr_bank && selectable_vgpr_bank_mode.value_or(0u) != 0u;
-  // A patched s_call_i64 can be immediately followed by the guest's next
-  // s_set_vgpr_msb.  That program-state update may take effect as control
-  // transfers, even when the replaced barrier itself ran in mode zero.  Make
-  // every CDNA5 cave establish its low-register invariant explicitly before
-  // touching scratch VGPRs.
-  if (control_selectable_vgpr_bank)
-    words.push_back(*instrumentation::build_s_set_vgpr_msb_transition(
-        static_cast<uint8_t>(selectable_vgpr_bank_mode.value_or(0u)), 0u, arch));
-  if (spill)
-    words.insert(words.end(), spill->save_words.begin(), spill->save_words.end());
-  if (scalar_spill)
-    words.insert(words.end(), scalar_spill->save_words.begin(), scalar_spill->save_words.end());
-  if (restore_guest_vgpr_bank)
-    words.push_back(*instrumentation::build_s_set_vgpr_msb_transition(
-        0u, static_cast<uint8_t>(*selectable_vgpr_bank_mode), arch));
+  // Execute the guest barrier before borrowing any live VGPRs.  In particular,
+  // do not carry address-free private spill values across s_barrier: physical
+  // CDNA4 kernels can resume a different wave first, and the resulting
+  // cross-barrier scratch transaction is not a preservation primitive.  The
+  // barrier itself needs no temporary state, so capture guest registers after
+  // it and keep the complete save/probe/restore transaction on one side.
   if (guest_instruction_offset)
     *guest_instruction_offset = static_cast<uint32_t>(words.size() * sizeof(uint32_t));
   for (uint64_t offset = 0; offset < candidate.site->size; offset += sizeof(uint32_t)) {
@@ -165,9 +156,17 @@ sampled_cfg_forward_distance(const MoiResourcePlanningState &state, uint64_t des
     std::memcpy(&word, bytes.data() + candidate.site->file_offset + offset, sizeof(word));
     words.push_back(word);
   }
-  if (restore_guest_vgpr_bank)
+  // A patched s_call_i64 can be immediately followed by the guest's next
+  // s_set_vgpr_msb.  That program-state update may take effect as control
+  // transfers. Establish the low instrumentation bank after the guest barrier
+  // and before either spill or probe code touches scratch VGPRs.
+  if (control_selectable_vgpr_bank)
     words.push_back(*instrumentation::build_s_set_vgpr_msb_transition(
-        static_cast<uint8_t>(*selectable_vgpr_bank_mode), 0u, arch));
+        static_cast<uint8_t>(selectable_vgpr_bank_mode.value_or(0u)), 0u, arch));
+  if (spill)
+    words.insert(words.end(), spill->save_words.begin(), spill->save_words.end());
+  if (scalar_spill)
+    words.insert(words.end(), scalar_spill->save_words.begin(), scalar_spill->save_words.end());
   // Runtime sampling selects LDS addresses, not workgroups. Every workgroup
   // which reaches the guest barrier must therefore inspect its banked causal
   // window and advance its epoch. A separate workgroup-residue gate can skip a

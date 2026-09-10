@@ -746,6 +746,11 @@ TEST(SpillManager, ComposesGfx950EntrySgprSpillAfterTemporaryVgprs) {
   EXPECT_EQ(sgprs->sgpr_count, 5u);
   EXPECT_EQ(sgprs->total_private_bytes, 48u);
   EXPECT_EQ(manager.total_private_bytes(), 48u);
+  const auto restore_dependency_wait =
+      instrumentation::build_valu_to_salu_dependency_wait(ROCJITSU_CODE_ARCH_CDNA4);
+  ASSERT_TRUE(restore_dependency_wait);
+  EXPECT_EQ(sgprs->restore_words.back(), *restore_dependency_wait)
+      << "memory-backed scalar restore must separate v_readfirstlane from scalar consumers";
   for (uint16_t sgpr = 0u; sgpr < 5u; ++sgpr) {
     const uint32_t offset = 28u + static_cast<uint32_t>(sgpr) * SpillManager::kSlotBytes;
     const auto store = build_cdna4_address_free_scratch_store_b32(
@@ -1145,6 +1150,10 @@ TEST(SpillManager, ComposesDynamicStackVgprAndSgprFramesAcrossArchitectures) {
                                                   : build_s_wait_storecnt0(target.arch);
     ASSERT_TRUE(wait);
     expected_save.push_back(*wait);
+    const auto restore_dependency_wait =
+        instrumentation::build_valu_to_salu_dependency_wait(target.arch);
+    ASSERT_TRUE(restore_dependency_wait);
+    expected_restore.push_back(*restore_dependency_wait);
     EXPECT_EQ(sgpr_sequence->save_words, expected_save);
     EXPECT_EQ(sgpr_sequence->restore_words, expected_restore);
   }

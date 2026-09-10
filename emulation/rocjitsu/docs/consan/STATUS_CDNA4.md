@@ -109,6 +109,150 @@ runs six full-device dispatches in one executable-owned bounded report
 lifetime, so it remains a disclosed capacity stress result rather than a
 semantic regression. `rocjitsu-test-corpus` remains unmodified.
 
+Current-toolchain physical production follow-up (2026-09-10) is based on
+rocm-systems `e642922cebe8` plus the ConSan fixes in this change, the TheRock
+SDK `10.1.0a20260909`, rocjitsu-test-corpus `c00e52c015f2`, IREE test suites
+`49f46d6d4370`, and rocm-libraries `512b7a5c1d7e`. On the physical MI350X, the
+canonical validator accepts baseline and all four clean profiles for TP1
+prefill, TP1 decode/combined, all three TP2 rows, CLIP BF16, rocBLAS SGEMM, and
+the refreshed target-native Tensile SGEMM. TP1 has complete 176/176 and
+352/352 access coverage; each TP2 row has 544/544 accesses and each
+sync-tracking engine has 60/60 barriers; CLIP has 45/45 accesses and 24/24
+barriers; rocBLAS has 49,435/49,435 accesses and 4,997/4,997 barriers; and
+Tensile has 48/48 accesses and 9/9 barriers. CLIP exposed a physical-only
+Sampled failure: its barrier cave carried borrowed VGPR private-spill state
+across the guest `s_barrier`. Sampled now executes the guest barrier first and
+keeps the full save/probe/restore transaction after it. The forced-spill host
+regression passes all 188 Sampled tests, the affected physical Sampled device
+slice passes 116/116, and the fixed CLIP matrix is retained under
+`/tmp/consan-validation-gfx950-more-e2e-20260910-clip-all-fixed`.
+
+The paired rocBLAS baseline is 328.195 ms; measured ratios are 43.233x for
+SuperCollider, 108.281x for Record/Replay, 86.153x for Sampled, and 90.074x for
+Inline Shadow. The artifact is
+`/tmp/consan-validation-gfx950-more-e2e-20260910-rocblas-overhead`. Current
+Tensile v5 required integer `BoundsCheck` and `DirectToLds` schema values, a
+one-row positive timing threshold, and a measured physical Inline bound. A
+fresh 48-site inventory selected the reviewed target-native `ds_write_b128`
+wrong-address mutation at kernel-relative PC `0x13f0`. The exact oracle fails
+under all four mutations: SuperCollider, Record/Replay, and Inline Shadow emit
+detector-owned diagnostics, while Sampled retains its reviewed miss. All four
+policies are accepted with paired pre/post GPU health checks. Clean evidence is
+under
+`/tmp/consan-validation-gfx950-more-e2e-20260910-tensile-clean-fixed3` and
+`/tmp/consan-validation-gfx950-more-e2e-20260910-tensile-inline-fixed4`;
+contained fault evidence is under
+`/tmp/consan-validation-gfx950-more-e2e-20260910-tensile-fault2`,
+`/tmp/consan-validation-gfx950-more-e2e-20260910-tensile-fault-rr-confirm`, and
+`/tmp/consan-validation-gfx950-more-e2e-20260910-tensile-fault-inline-confirm`.
+The exact gfx950 PyTorch companion
+`amd-torch-device-gfx950==2.15.0a0+rocm10.1.0a20260909` is installed in the
+TheRock virtual environment. Its runtime identity and uninstrumented baseline
+now pass; the validation driver extracts the identity from an explicit sentinel
+so unrelated import noise cannot corrupt provenance. The current HipKittens
+FP8 checkout still fails its external compile because
+`ROTATING_BUFFER_COUNT` is not a constant expression. Neither external source
+tree was modified.
+
+Physical Qwen Record/Replay follow-up (2026-09-10): the canonical complete
+151,936-logit oracle passes on the MI350X with zero diagnostics, complete static
+and dynamic analysis, 844/844 accesses, 40/40 barriers, and 3,806,836 replay
+input accesses in 98.85 seconds. The target manifest now retains the same
+explicit 900-second bound used by the slower gfx950 emulator diagnostic, so
+physical validation no longer needs a command-line timeout override. The
+accepted artifact is
+`/tmp/consan-validation-gfx950-qwen-rr-physical-20260910-b`; its executed code
+object fingerprint is `fnv1a64:fb6a21ba7d0a67b4`.
+
+Physical rocBLAS fault qualification (2026-09-10): a fresh 4,997-site
+target-native inventory plus `TENSILE_DB=0x8000` dispatch tracing identified
+the exact 64x64x32 MFMA specialization selected by `Square_64x64`. Its first
+unconditional `s_barrier`, at kernel-relative `.text+0x518`, follows the
+initial cooperative LDS publication and wait and immediately precedes peer
+`ds_read_b32` operations. The precommitted exact-one drop is accepted in all
+four contained trials: Record/Replay and Inline Shadow emit detector-owned
+diagnostics, while SuperCollider and Sampled retain reviewed deterministic-
+schedule misses. The exact SGEMM oracle remains correct in every trial, and all
+paired pre/post MI350X health checks pass. The accepted artifact is
+`/tmp/consan-validation-gfx950-rocblas-fault-20260910-b`; the reviewed spec has
+SHA-256 `8ea0132c853b3d35c3ebfa5e139eee970c78bd529113db0f0447f62b6ac55c70`.
+
+The current physical HIP Stream-K two-tile Inline Shadow row was rerun after
+the dispatch-bank and regression fixes. Its exact numerical oracle and complete
+80/80 access, 5/5 barrier, 2/2 atomic, and 2/2 fence transformation still pass,
+while the unmodified runner's six 256-CTA launches leave 1,814,097 dynamically
+incomplete events in the executable-lifetime 256-bank exact shadow. This is an
+improvement over the earlier 3,272,268-event result but remains a disclosed
+capacity limit, not a clean verdict. A separately rejected 32-CTA experiment
+kept two CTAs per output tile and passed the oracle, but increased incompleteness
+to 92,533,034 because longer per-CTA polling amplified bank collisions; the
+canonical full-device command is unchanged. Artifacts are
+`/tmp/consan-validation-gfx950-streamk-inline-current-20260910-a` and
+`/tmp/consan-validation-gfx950-streamk-inline-grid32-20260910-a`.
+
+Current physical PyTorch refresh (2026-09-10): all four `scatter_reduce`
+profiles pass the exact BF16/FP32 oracle with complete static and dynamic
+coverage of 27/27 accesses in 6.02--9.43 seconds. For the strengthened
+4,096-wide norm/softmax workload, SuperCollider, Sampled, and Inline Shadow
+pass the exact norm/CPU-softmax oracle with complete 4,880/4,880 access
+coverage; Sampled and Inline Shadow also cover 2,132/2,132 barriers, and Inline
+Shadow retains 232 visible events. Record/Replay reaches the same exact oracle
+at 33.18 seconds but hits the deliberately short 60-second validation cap
+before its final analysis verdict, so that cell remains yellow. Artifacts are
+`/tmp/consan-validation-gfx950-scatter-all-physical-20260910-a` and
+`/tmp/consan-validation-gfx950-norm-all-physical-20260910-a`.
+
+The same refresh found current-object coverage regressions in three
+`torch.mode` profiles. Record/Replay, Sampled, and Inline Shadow preserve the
+exact value/index oracle, but respectively cover 26,398/26,426,
+25,704/26,426, and 26,314/26,426 accesses; Sampled also covers only
+2,659/4,359 barriers. The incomplete clean profiles are localized rather than
+unexplained:
+Record/Replay has 28 access resource failures, all `no_legal_window`; Inline
+Shadow has 112 such access resource failures; Sampled has 22 access resource
+failures plus 700 access placement/lowering failures, and 1,652 barrier
+resource failures plus 48 barrier placement/lowering failures.
+The artifact is `/tmp/consan-validation-gfx950-mode-all-physical-20260910-a`.
+The SuperCollider rejection was fixed without relaxing final validation: the
+text-relocation proof now records the exact per-descriptor before/after
+`COMPUTE_PGM_RSRC1` values when DBT must raise a non-target kernel's SGPR
+allocation to place its long-entry pair above the source SGPR extent. Final
+validation accepts only those exact proof-owned SGPR-granule changes. The
+physical rerun preserves the exact value/index oracle with complete static and
+dynamic analysis of 25,366/25,366 accesses in 10.68 seconds; its artifact is
+`/tmp/consan-validation-gfx950-mode-sc-relocation-proof-20260910-a`.
+`torch.topk`
+Record/Replay transforms with complete 231,322/231,322 access and
+11,423/11,423 barrier coverage, but the physical run terminates after 188.81
+seconds with `HSA_STATUS_ERROR_MEMORY_APERTURE_VIOLATION` before the exact
+oracle. Its artifact is
+`/tmp/consan-validation-gfx950-topk-rr-physical-20260910-b`. A follow-up with
+the scalar-restore dependency-wait repair was stopped early to honor the short
+host window; no verdict is claimed for that interrupted run.
+
+The final short physical regression gate passed the two focused
+Record/Replay spill contracts (`DispatchIdSgprPressureForcedSpill` and
+`PrivateEntryAbiSpill`) 2/2. A complete 607-row physical matrix was not allowed
+to consume the remaining host window: its first four high-pressure
+Record/Replay members passed 4/4 before the run was intentionally stopped.
+
+Additional short physical PyTorch refresh (2026-09-10, source
+`f3ef6f6273`): all four `torch.histc` profiles pass their exact FP32/FP64 bin
+oracles with complete static and dynamic analysis. SuperCollider covers
+110/110 accesses in 1.39 seconds; Record/Replay, Sampled, and Inline Shadow
+each cover 152/152 accesses and 84/84 barriers in 7.78, 1.44, and 4.35 seconds.
+The artifact is
+`/tmp/consan-validation-gfx950-histc-all-physical-20260910-a`.
+`torch.sort` SuperCollider also passes its exact sorted-value/index oracle with
+complete 53,064/53,064 access coverage in 39.13 seconds. Record/Replay reaches
+the deliberately short 45-second cap while transforming the main code object,
+before the oracle or final analysis verdict; Sampled reaches the same bounded
+outcome. Both remain yellow without retries, and Inline Shadow was not started
+because it has the same large-object setup cost. Artifacts are
+`/tmp/consan-validation-gfx950-sort-sc-physical-20260910-a`,
+`/tmp/consan-validation-gfx950-sort-rr-physical-20260910-a`, and
+`/tmp/consan-validation-gfx950-sort-sampled-physical-20260910-a`.
+
 Status snapshot: 2026-08-26. All rows execute on the physical gfx950. This balanced clean-tree refresh used source `e355d1479e` and artifacts under `/home/ossci/xx/consan-validation/production-design-revalidation-20260826-*`; the full physical device-test suite passed 587/587. Retained green cells keep their previously accepted paired-overhead and reviewed-fault evidence unless stated otherwise.
 
 Post-snapshot gfx950 emulation revalidation is identified explicitly in the affected cells. Source `1274082957a` on the gfx1201 host completed the SuperCollider clean contracts for `pytorch-torch-mode` with 24,179/24,179, `pytorch-torch-histc` with 137/137 eligible non-atomic LDS accesses, `pytorch-norm-softmax` with 4,820/4,820 accesses, and `pytorch-scatter-reduce` with 27/27 accesses. Artifacts are under `/tmp/consan-validation-gfx950-sc-subword-complete-20260905-f`, `/tmp/consan-validation-gfx950-sc-histc-20260905-a`, `/tmp/consan-validation-gfx950-sc-norm-softmax-20260905-a`, and `/tmp/consan-validation-gfx950-sc-scatter-reduce-20260905-a` respectively. Source `b8cc03b6cac` additionally completed the `pytorch-torch-sort` SuperCollider contract with its exact sorted-values-and-indices oracle and 56,884/56,884 accesses; its artifact is `/tmp/consan-validation-gfx950-sc-sort-split-reloc-fix-20260906-a`. Source `b80527824b0`, incorporating the subsequent large-object scaling work, completed the neighboring `pytorch-torch-topk` SuperCollider contract in 138.39 seconds with its exact oracle and complete static and dynamic coverage of all 239,442 accesses; its artifact is `/tmp/consan-validation-gfx950-supercollider-topk-20260906-b`. Source `ea99608b166` completed the Sharktank `tp1-prefill` SuperCollider contract with its exact numerical oracle and 176/176 accesses after adding exact Direct-to-LDS observation; its artifact is `/tmp/consan-validation-gfx950-sc-tp1-direct-lds-fix-20260906-b`. Source `528236c46fc` then completed both exact `tp1-decode-combined` oracles with 352/352 accesses and all three exact `tp2-family` oracles with 1,632/1,632 accesses; the artifacts are `/tmp/consan-validation-gfx950-sc-tp1-decode-direct-lds-fix-20260906-a` and `/tmp/consan-validation-gfx950-sc-tp2-direct-lds-fix-20260906-b`. Source `6b6823a0678` promotes TP2's proven 300-second execution bound into the target manifest. Source `35f1b0312ef` revalidated the Record/Replay `streamk-arrival` and `tree-atomic-or` contracts as exact and complete; artifacts are `/tmp/consan-validation-gfx950-rr-streamk-arrival-refresh-20260906-b` and `/tmp/consan-validation-gfx950-rr-tree-atomic-refresh-20260906-a`. Source `9cf729906b4` completed the Sampled `tree-atomic-or` contract by routing entry barriers through the epoch-only path and retaining single-role atomic associations over redundant acquire-release halves; `/tmp/consan-validation-gfx950-sampled-tree-atomic-final-20260906-a` records the clean exact run, and `/tmp/consan-validation-gfx950-sampled-streamk-role-regression-20260906-a` records the neighboring clean regression run. The exact-tree nonphysical gate then passed 4,693 rows and had one contention-only timeout among 4,694 registrations; that gfx1250 InlineShadow row passed serially in 43.83 seconds, and `f10f539616b` raises its full-gate allowance from 120 to 240 seconds. Source `4a64b565e59` then made successful lane-narrow InlineShadow acquires persist their advanced automatic-private epoch across the complete wave. That completed the exact `streamk-arrival` and `tree-atomic-or` gfx950 InlineShadow contracts in `/tmp/consan-validation-gfx950-inline-streamk-private-epoch-20260906-a` and `/tmp/consan-validation-gfx950-inline-tree-private-epoch-20260906-a`; the following full nonphysical ConSan gate passed all 4,694 registrations at `-j16`. Source `0815c2081cd` prevents spill-backed InlineShadow scalar state from aliasing scalar ordered-atomic address operands. The Release-built HIP Stream-K simple object now transforms with complete 32/32 access, 3/3 barrier, and 2/2 atomic/fence coverage; a 300-second emulator run remained execution-time-limited before the oracle verdict. The artifact is `/tmp/consan-validation-gfx950-inline-streamk-simple-20260906-d`, and the following full nonphysical ConSan gate passed all 4,695 registrations at `-j16`. Source `8d144fa75cb` then moved fixed-stack, spill-backed scalar preservation from a lane reservoir to private memory, preventing `v_writelane` from corrupting inactive guest lanes that later reconverge. The complete `pytorch-torch-topk` InlineShadow row now passes its exact FP64 and BF16 value/index oracles with zero diagnostics and complete static and dynamic coverage of all 239,730 accesses and 11,423 barriers in 391.97 seconds; its artifact is `/tmp/consan-validation-gfx950-inline-topk-private-scalar-fix-20260906-b`. The following complete nonphysical ConSan gate passed all 4,698 registrations at `-j16` in 274.98 seconds, including 2,918 simulator rows over all five targets. Source `41636fe8b15` also revalidated the complete `pytorch-torch-topk` Sampled contract: exact FP64 and BF16 value/index oracles, zero diagnostics, and complete static and dynamic coverage of all 239,730 accesses and 11,423 barriers in 228.82 seconds. Its artifact is `/tmp/consan-validation-gfx950-sampled-topk-refresh-20260906-a`. Source `8ccdc14fe58` revalidated `pytorch-torch-mode` InlineShadow as exact and complete within the retained 120-second manifest bound, then qualified an exact-one bitonic-stage barrier drop as a reviewed deterministic-schedule miss with the exact oracle preserved. The artifacts are `/tmp/consan-validation-gfx950-inline-mode-manifest-bound-20260906-a` and `/tmp/consan-validation-gfx950-mode-fault-20260906-b`. Source `9aacbf97dc9` revalidated `pytorch-torch-sort` Inline Shadow with its exact sorted-value/index oracle and complete 56,884/56,884 access and 6,032/6,032 barrier coverage in 198.10 seconds; `/tmp/consan-validation-gfx950-inline-sort-refresh-20260906-b` retains the result, and the target manifest now carries a 300-second emulator bound. Source `8e257b0294b` qualifies an exact-one key-load retirement barrier drop in that same executed radix-sort specialization. Inline Shadow produces a detector-owned diagnostic while retaining the exact oracle; Sampled at stride one records a reviewed deterministic-schedule miss with the exact oracle intact. The artifacts are `/tmp/consan-validation-gfx950-sort-inline-fault-20260906-a` and `/tmp/consan-validation-gfx950-sort-sampled-fault-20260906-b`.
@@ -141,11 +285,11 @@ Legend: 🩶 unseen · 🟥 broken before useful evidence · 🟧 below 80% aggr
 
 | Set | Priority | Workload / validation ID | SuperCollider | Record/Replay | Sampled | Inline Shadow |
 |---|---:|---|---|---|---|---|
-| Main E2E | P0 | Qwen3-0.6B prefill (`qwen-prefill`) | 🟩 exact; 844/844 accesses | 🟨 retained exact/complete result; current gfx950 emulation remains in execution at a 900-s diagnostic bound before oracle/teardown | 🟩 exact; 844/844 accesses and 37/37 barriers | 🟩 exact/complete clean row; current-object exact-one publication-barrier fault detected under paired containment |
-| Main E2E | P1 | Sharktank TP1 prefill (`tp1-prefill`) | 🟩 gfx950 emulation exact/complete; 176/176 accesses | 🟩 exact; 176/176 accesses and 31/31 barriers | 🟩 exact; 176/176 accesses and 28/28 barriers | 🟩 exact; 176/176 accesses and 31/31 barriers |
-| Main E2E | P1 | Sharktank TP1 decode/combined (`tp1-decode-combined`) | 🟩 gfx950 emulation exact/complete; 352/352 accesses | 🟩 exact; 352/352 accesses and 62/62 barriers | 🟩 exact; 352/352 accesses and 56/56 barriers | 🟩 exact; 352/352 accesses and 62/62 barriers |
-| Main E2E | P2 | Sharktank TP2 prefill/decode/combined (`tp2-family`, `tp2-decode`, `tp2-combined`) | 🟩 gfx950 emulation exact/complete; three exact oracles; 1,632/1,632 accesses | 🟩 gfx950 emulation exact/complete under target-resolved bounded cadence; three exact oracles; each row has 544/544 accesses and 60/60 barriers | 🟩 three exact oracles; 1,524/1,524 accesses and 150/150 barriers | 🟨 split prefill exact/complete with zero diagnostics at 544/544 accesses and 60/60 barriers; heavier decode and combined rows pending scalable qualification |
-| Main E2E | P3 | Sharktank CLIP BF16 (`clip-bf16`) | 🟩 exact; 45/45 accesses | 🟩 exact; 45/45 accesses and 24/24 barriers | 🟩 exact; 45/45 accesses and 24/24 barriers | 🟩 exact; 45/45 accesses and 24/24 barriers |
+| Main E2E | P0 | Qwen3-0.6B prefill (`qwen-prefill`) | 🟩 exact; 844/844 accesses | 🟩 physical exact/complete with zero diagnostics; 844/844 accesses, 40/40 barriers, and 3,806,836 replay inputs; 98.85 s | 🟩 exact; 844/844 accesses and 37/37 barriers | 🟩 exact/complete clean row; current-object exact-one publication-barrier fault detected under paired containment |
+| Main E2E | P1 | Sharktank TP1 prefill (`tp1-prefill`) | 🟩 physical clean revalidated; exact/complete; 176/176 accesses | 🟩 physical clean revalidated; exact; 176/176 accesses and 31/31 barriers | 🟩 physical clean revalidated; exact; 176/176 accesses and 28/28 barriers | 🟩 physical clean revalidated; exact; 176/176 accesses and 31/31 barriers |
+| Main E2E | P1 | Sharktank TP1 decode/combined (`tp1-decode-combined`) | 🟩 physical clean revalidated; exact/complete; 352/352 accesses | 🟩 physical clean revalidated; exact; 352/352 accesses and 62/62 barriers | 🟩 physical clean revalidated; exact; 352/352 accesses and 56/56 barriers | 🟩 physical clean revalidated; exact; 352/352 accesses and 62/62 barriers |
+| Main E2E | P2 | Sharktank TP2 prefill/decode/combined (`tp2-family`, `tp2-decode`, `tp2-combined`) | 🟩 physical clean revalidated; three exact oracles; each row has 544/544 accesses | 🟩 physical clean revalidated; three exact oracles; each row has 544/544 accesses and 60/60 barriers | 🟩 physical clean revalidated; three exact oracles; each row has 544/544 accesses and 60/60 barriers | 🟩 physical clean revalidated; three exact oracles with zero forbidden diagnostics; each row has 544/544 accesses and 60/60 barriers |
+| Main E2E | P3 | Sharktank CLIP BF16 (`clip-bf16`) | 🟩 physical clean revalidated; exact; 45/45 accesses | 🟩 physical clean revalidated; exact; 45/45 accesses and 24/24 barriers | 🟩 physical clean revalidated after barrier-spill repair; exact; 45/45 accesses and 24/24 barriers | 🟩 physical clean revalidated; exact; 45/45 accesses and 24/24 barriers |
 | Main E2E | P4 | hip-moi D128 block (`d128-block`) | 🟩 physical clean revalidated; exact; 122/122 accesses | 🟩 physical clean revalidated; exact; 122/122 accesses and 119/119 barriers | 🟩 physical clean revalidated; exact; 122/122 accesses and 119/119 barriers | 🟩 physical clean revalidated; exact; 122/122 accesses and 119/119 barriers |
 | Main E2E | P4 | hip-moi D128 pressure (`d128-pressure`) | 🟩 physical clean revalidated; four exact oracles; 236/236 accesses; retained paired/fault bundle | 🟩 physical clean revalidated; exact; 236/236 accesses and 28/28 barriers; retained paired/fault bundle | 🟩 physical clean revalidated; exact; 236/236 accesses and 28/28 barriers; retained paired/fault bundle | 🟩 physical clean revalidated; exact; 236/236 accesses and 28/28 barriers; retained paired/fault bundle |
 | Main E2E | P4 | hip-moi MFMA attention (`wmma-attention`) | 🟩 physical clean revalidated; exact; 50/50 accesses; retained paired/fault bundle | 🟩 physical clean revalidated; exact; 50/50 accesses and 14/14 barriers; retained paired/fault bundle | 🟩 physical clean revalidated; exact; 50/50 accesses and 14/14 barriers; retained paired/fault bundle | 🟩 physical clean revalidated; exact; 50/50 accesses and 14/14 barriers; retained paired/fault bundle |
@@ -157,12 +301,12 @@ Legend: 🩶 unseen · 🟥 broken before useful evidence · 🟧 below 80% aggr
 | Test corpus | P1 | HipKittens FP8 (`hipkittens-fp8fp32-4wave`) | 🟩 exact; 64/64 accesses; qualified exact-one prologue-publication miss | 🟩 exact; 96/96 accesses and 5/5 barriers | 🟩 exact; 96/96 accesses and 5/5 barriers | 🟩 exact; 96/96 accesses and 5/5 barriers; exact-one prologue-publication fault diagnosed |
 | Test corpus | P1 | HipKittens MXFP8 (`hipkittens-mxfp8-4wave`) | 🟩 physical clean revalidated; exact; 96/96 accesses; retained qualified exact-one prologue-publication miss | 🟩 physical clean revalidated; exact/complete with zero diagnostics; 96/96 accesses and 5/5 barriers | 🟩 physical clean revalidated; exact/complete; 96/96 accesses and 5/5 barriers | 🟩 physical clean revalidated; exact/complete with zero forbidden diagnostics; 96/96 accesses and 5/5 barriers; retained exact-one prologue-publication fault diagnosis |
 | Test corpus | P1 | HIP Stream-K simple (`hip-streamk-simple-m256-n256-k256`) | 🟩 physical clean revalidated; exact; 32/32 accesses; retained qualified exact-one initial-tile publication miss | 🟩 physical clean revalidated; exact/complete with zero diagnostics; 32/32 accesses, 3/3 barriers, 2/2 atomics, and 2/2 fences | 🟩 physical clean revalidated; exact/complete; 32/32 accesses, 3/3 barriers, 2/2 atomics, and 2/2 fences | 🟩 physical clean revalidated; exact/complete with zero diagnostics; 32/32 accesses, 3/3 barriers, 2/2 atomics, and 2/2 fences |
-| Test corpus | P1 | HIP Stream-K two-tile (`hip-streamk-two-tile-m256-n256-k256`) | 🟩 physical clean revalidated; exact; 80/80 accesses; retained qualified exact-one initial-tile publication miss | 🟩 physical clean revalidated; exact/complete with zero diagnostics; 80/80 accesses, 5/5 barriers, 2/2 atomics, and 2/2 fences | 🟩 physical clean revalidated; exact/complete with zero diagnostics; 80/80 accesses, 5/5 barriers, 2/2 atomics, and 2/2 fences | 🟨 physical exact oracle and static coverage complete at 80/80 accesses, 5/5 barriers, 2/2 atomics, and 2/2 fences; the external runner's six full-device launches exceed the bounded executable-lifetime exact-shadow capacity |
-| Test corpus | P2 | rocBLAS SGEMM square-64 (`rocblas-sgemm-square-64`) | 🟨 exact; 49,435/49,435 accesses; overhead/fault missing | 🟩 exact; 49,435/49,435 accesses and 4,997/4,997 barriers | 🟨 exact at standard cadence; 49,435/49,435 accesses and 4,995/4,995 barriers; overhead/fault missing | 🟨 exact and complete; overhead/fault missing |
-| Tensile | P0 | gfx950 Stream-K SGEMM (`tensile-gfx950-lds-positive`) | 🟩 exact; 48/48 accesses and 9/9 barriers | 🟩 exact; 48/48 accesses and 9/9 barriers | 🟩 exact; 48/48 accesses and 9/9 barriers | 🟩 exact; 48/48 accesses and 9/9 barriers |
-| PyTorch | P0 | `torch.mode` (`pytorch-torch-mode`) | 🟩 gfx950 emulation exact/complete; 24,179/24,179 eligible non-atomic LDS accesses | 🟩 exact; 25,523/25,523 accesses and 3,920/3,920 barriers | 🟩 exact; 25,523/25,523 accesses and 3,920/3,920 barriers | 🟩 exact/complete within the retained 120-s manifest bound; qualified exact-one bitonic barrier-drop miss |
-| PyTorch | P0 | `torch.topk` (`pytorch-torch-topk`) | 🟩 gfx950 emulation exact/complete; 239,442/239,442 accesses; 138.39 s | 🟨 retained prior exact result; gfx950 emulation now static-complete at 239,730/239,730 accesses and 11,423/11,423 barriers, but times out at 900 s before oracle/teardown | 🟩 gfx950 emulation exact/complete with zero diagnostics; 239,730/239,730 accesses and 11,423/11,423 barriers; 228.82 s | 🟩 gfx950 emulation exact/complete with zero diagnostics; 239,730/239,730 accesses and 11,423/11,423 barriers; 391.97 s |
-| PyTorch | P1 | `torch.sort` (`pytorch-torch-sort`) | 🟩 gfx950 emulation exact/complete; 56,884/56,884 accesses | 🟩 gfx950 emulation exact/complete with zero diagnostics; 56,884/56,884 accesses and 6,032/6,032 barriers; 68.02 s | 🟩 exact/complete; qualified exact-one key-load retirement miss at stride one | 🟩 gfx950 emulation exact/complete with zero diagnostics; 56,884/56,884 accesses and 6,032/6,032 barriers; exact-one key-load retirement fault diagnosed; 198.10 s |
-| PyTorch | P1 | `torch.histc` (`pytorch-torch-histc`) | 🟩 gfx950 emulation exact/complete; 137/137 eligible non-atomic LDS accesses | 🟩 FP32/FP64 exact; 179/179 accesses and 84/84 barriers | 🟩 FP32/FP64 exact; 179/179 accesses and 84/84 barriers | 🟩 FP32/FP64 exact/complete; qualified exact-one shared-bin initialization miss |
-| PyTorch | P2 | `scatter_reduce` (`pytorch-scatter-reduce`) | 🟩 gfx950 emulation exact/complete; 27/27 accesses | 🟩 BF16/FP32 exact; 27/27 accesses | 🟩 BF16/FP32 exact; 27/27 accesses | 🟩 BF16/FP32 exact; 27/27 accesses; retained fault evidence |
-| PyTorch | P2 | norm/softmax (`pytorch-norm-softmax`) | 🟩 gfx950 emulation exact/complete; 4,820/4,820 accesses | 🟩 exact; 4,820/4,820 accesses and 2,096/2,096 barriers | 🟩 gfx950 emulation exact/complete with zero diagnostics; 4,820/4,820 accesses and 2,096/2,096 barriers; 38.59 s | 🟩 gfx950 emulation exact/complete with zero diagnostics and 232 visible events; 4,820/4,820 accesses and 2,096/2,096 barriers; 36.73 s |
+| Test corpus | P1 | HIP Stream-K two-tile (`hip-streamk-two-tile-m256-n256-k256`) | 🟩 physical clean revalidated; exact; 80/80 accesses; retained qualified exact-one initial-tile publication miss | 🟩 physical clean revalidated; exact/complete with zero diagnostics; 80/80 accesses, 5/5 barriers, 2/2 atomics, and 2/2 fences | 🟩 physical clean revalidated; exact/complete with zero diagnostics; 80/80 accesses, 5/5 barriers, 2/2 atomics, and 2/2 fences | 🟨 current physical exact oracle and static coverage complete at 80/80 accesses, 5/5 barriers, 2/2 atomics, and 2/2 fences; six full-device launches exceed the 256-bank executable-lifetime exact shadow with 1,814,097 incomplete events |
+| Test corpus | P2 | rocBLAS SGEMM square-64 (`rocblas-sgemm-square-64`) | 🟩 physical exact/complete; 49,435/49,435 accesses; 43.233x paired overhead; qualified exact-one initial-tile publication miss | 🟩 physical exact/complete; 49,435/49,435 accesses and 4,997/4,997 barriers; 108.281x paired overhead; exact-one publication fault diagnosed | 🟩 physical exact/complete; 49,435/49,435 accesses and 4,997/4,997 barriers; 86.153x paired overhead; qualified exact-one publication miss | 🟩 physical exact/complete; 49,435/49,435 accesses and 4,997/4,997 barriers; 90.074x paired overhead; exact-one publication fault diagnosed |
+| Tensile | P0 | gfx950 Stream-K SGEMM (`tensile-gfx950-lds-positive`) | 🟩 physical exact/complete; 48/48 accesses and 9/9 barriers; current-object wrong-address fault diagnosed | 🟩 physical exact/complete; 48/48 accesses and 9/9 barriers; current-object wrong-address fault diagnosed | 🟩 physical exact/complete; 48/48 accesses and 9/9 barriers; qualified current-object wrong-address miss | 🟩 physical exact/complete; 48/48 accesses and 9/9 barriers; current-object wrong-address fault diagnosed |
+| PyTorch | P0 | `torch.mode` (`pytorch-torch-mode`) | 🟩 physical exact/complete after exact relocation-owned descriptor proof; 25,366/25,366 accesses; 10.68 s | 🟨 physical exact oracle and dynamic analysis complete; static access coverage 26,398/26,426, barriers 4,359/4,359 | 🟨 physical exact oracle and dynamic analysis complete; static coverage 25,704/26,426 accesses and 2,659/4,359 barriers | 🟨 physical exact oracle and dynamic analysis complete; static access coverage 26,314/26,426, barriers 4,359/4,359 |
+| PyTorch | P0 | `torch.topk` (`pytorch-torch-topk`) | 🟩 gfx950 emulation exact/complete; 239,442/239,442 accesses; 138.39 s | 🟧 current physical transformation is complete at 231,322/231,322 accesses and 11,423/11,423 barriers, but execution aborts with an HSA memory-aperture violation before the oracle at 188.81 s; short follow-up intentionally stopped without verdict | 🟩 gfx950 emulation exact/complete with zero diagnostics; 239,730/239,730 accesses and 11,423/11,423 barriers; 228.82 s | 🟩 gfx950 emulation exact/complete with zero diagnostics; 239,730/239,730 accesses and 11,423/11,423 barriers; 391.97 s |
+| PyTorch | P1 | `torch.sort` (`pytorch-torch-sort`) | 🟩 physical exact/complete; 53,064/53,064 accesses; 39.13 s | 🟨 current physical run reaches the intentional 45-s cap during main-object transformation, before oracle or final analysis; retained prior gfx950-emulation exact/complete result | 🟨 current physical run reaches the intentional 45-s cap during main-object transformation, before oracle or final analysis; retained prior exact/complete and qualified-fault evidence | 🟩 gfx950 emulation exact/complete with zero diagnostics; 56,884/56,884 accesses and 6,032/6,032 barriers; exact-one key-load retirement fault diagnosed; 198.10 s |
+| PyTorch | P1 | `torch.histc` (`pytorch-torch-histc`) | 🟩 physical FP32/FP64 exact/complete; 110/110 accesses; 1.39 s | 🟩 physical FP32/FP64 exact/complete with zero diagnostics; 152/152 accesses and 84/84 barriers; 7.78 s | 🟩 physical FP32/FP64 exact/complete; 152/152 accesses and 84/84 barriers; 1.44 s | 🟩 physical FP32/FP64 exact/complete; 152/152 accesses and 84/84 barriers; retained fault evidence; 4.35 s |
+| PyTorch | P2 | `scatter_reduce` (`pytorch-scatter-reduce`) | 🟩 physical BF16/FP32 exact/complete; 27/27 accesses; 6.02 s | 🟩 physical BF16/FP32 exact/complete with zero diagnostics; 27/27 accesses; 9.43 s | 🟩 physical BF16/FP32 exact/complete; 27/27 accesses; 7.81 s | 🟩 physical BF16/FP32 exact/complete; 27/27 accesses; retained fault evidence; 8.09 s |
+| PyTorch | P2 | norm/softmax (`pytorch-norm-softmax`) | 🟩 physical exact/complete; 4,880/4,880 accesses; 26.54 s | 🟨 physical exact oracle reached at 33.18 s, but the intentionally short 60-s cap expired before the analysis/teardown verdict | 🟩 physical exact/complete; 4,880/4,880 accesses and 2,132/2,132 barriers; 30.95 s | 🟩 physical exact/complete with 232 visible events; 4,880/4,880 accesses and 2,132/2,132 barriers; 39.10 s |

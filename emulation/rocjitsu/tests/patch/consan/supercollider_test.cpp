@@ -5848,6 +5848,71 @@ TEST(ConSan, Cdna4DenseCheckTrapCoversRocblasShapedLargeKernel) {
   EXPECT_GE(sgpr_granulated, 1u);
 }
 
+TEST(ConSan, FinalValidationAcceptsProvenNonTargetDescriptorSgprGrowth) {
+  constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_CDNA4;
+  const std::array<uint32_t, 3> target_words = {
+      0xD86C0000u,
+      0x01000002u, // ds_read_b32 v1, v2
+      build_s_endpgm(kArch),
+  };
+  // Keep the second kernel outside the ConSan site inventory while making the
+  // object large enough to require a whole-text relocation transaction.
+  std::vector<uint32_t> non_target_words(33000u, build_s_mov_b32(0u, 24u, kArch));
+  non_target_words.back() = build_s_endpgm(kArch);
+  const std::vector<uint8_t> bytes = make_cdna4_code_object_with_local_function(
+      target_words, non_target_words, {}, /*vgpr_granulated=*/0u,
+      /*function_is_kernel=*/true);
+
+  AmdGpuCodeObject original(bytes.data(), bytes.size());
+  ASSERT_TRUE(original.is_valid());
+  const auto original_helper =
+      std::ranges::find(original.kernels(), "lds_helper", &AmdGpuKernelInfo::name);
+  ASSERT_NE(original_helper, original.kernels().end());
+
+  ConSanOptions options;
+  options.flavor = ConSanFlavor::SuperCollider;
+  options.probe_lds_check_trap = true;
+  options.scratch_vgpr = 3u;
+  ConSanTransformArtifacts result = test_lower_consan(bytes, options);
+
+  ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
+  ASSERT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
+  ASSERT_TRUE(result.text_relocation);
+  KD original_descriptor{};
+  std::memcpy(&original_descriptor,
+              bytes.data() + original_helper->descriptor_file_offset,
+              sizeof(original_descriptor));
+  const uint32_t original_sgpr_granule = AMDHSA_BITS_GET(
+      original_descriptor.compute_pgm_rsrc1,
+      kd::COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT);
+  mutate_kernel_descriptor(result.replacement, "lds_helper", [&](KD &descriptor) {
+    AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc1,
+                    kd::COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT,
+                    (original_sgpr_granule + 3u));
+  });
+  AmdGpuCodeObject replacement(result.replacement.data(), result.replacement.size());
+  ASSERT_TRUE(replacement.is_valid());
+  const auto replacement_helper =
+      std::ranges::find(replacement.kernels(), "lds_helper", &AmdGpuKernelInfo::name);
+  ASSERT_NE(replacement_helper, replacement.kernels().end());
+  KD replacement_descriptor{};
+  std::memcpy(&replacement_descriptor,
+              result.replacement.data() + replacement_helper->descriptor_file_offset,
+              sizeof(replacement_descriptor));
+  result.text_relocation->descriptor_rsrc1_deltas.push_back(
+      {.descriptor_file_offset = original_helper->descriptor_file_offset,
+       .original_compute_pgm_rsrc1 = original_descriptor.compute_pgm_rsrc1,
+       .replacement_compute_pgm_rsrc1 = replacement_descriptor.compute_pgm_rsrc1});
+
+  EXPECT_TRUE(validate_consan_modified_elf(bytes, result).empty());
+
+  result.text_relocation->descriptor_rsrc1_deltas.clear();
+  const auto unproven_errors = validate_consan_modified_elf(bytes, result);
+  EXPECT_TRUE(std::ranges::any_of(unproven_errors, [](const std::string &error) {
+    return error.find("unplanned descriptor delta") != std::string::npos;
+  }));
+}
+
 TEST(ConSan, Gfx1250DenseCheckTrapUsesExplicitKeysAtScalarLimit) {
   constexpr size_t kSiteCount = 1025u;
   constexpr size_t kTextWords = 66000u;

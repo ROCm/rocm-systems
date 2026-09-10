@@ -1947,8 +1947,12 @@ void validate_resource_and_metadata_deltas(const FinalValidationEnvironment &env
     }
   }
 
-  const bool text_relocated =
-      original.text_sections().front()->size() != replacement.text_sections().front()->size();
+  // A whole-text transaction may repack translated kernels entirely inside
+  // existing linker padding.  In that case the section size is unchanged even
+  // though every affected descriptor receives a new entry coordinate.  The
+  // typed relocation proof, rather than a size delta, is the authority for
+  // permitting that otherwise-forbidden descriptor change.
+  const bool text_relocated = result.text_relocation.has_value();
   std::unordered_map<std::string_view, const AmdGpuKernelInfo *> replacement_kernels_by_name;
   replacement_kernels_by_name.reserve(replacement.kernels().size());
   for (const AmdGpuKernelInfo &kernel : replacement.kernels())
@@ -2139,12 +2143,47 @@ void validate_resource_and_metadata_deltas(const FinalValidationEnvironment &env
       normalized.private_segment_fixed_size = original_descriptor.private_segment_fixed_size;
       normalized.group_segment_fixed_size = original_descriptor.group_segment_fixed_size;
     }
+    if (text_relocated && !requirement.allow_resource_delta &&
+        !has_unscoped_resource_growth) {
+      const auto &descriptor_deltas = result.text_relocation->descriptor_rsrc1_deltas;
+      const auto delta = std::ranges::find(
+          descriptor_deltas, original_kernel.descriptor_file_offset,
+          &ConSanTextRelocationDescriptorDelta::descriptor_file_offset);
+      if (delta != descriptor_deltas.end()) {
+        uint32_t normalized_rsrc1 = delta->replacement_compute_pgm_rsrc1;
+        AMDHSA_BITS_SET(normalized_rsrc1,
+                        kd::COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT,
+                        AMDHSA_BITS_GET(delta->original_compute_pgm_rsrc1,
+                                        kd::COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT));
+        if (delta->original_compute_pgm_rsrc1 != original_descriptor.compute_pgm_rsrc1 ||
+            delta->replacement_compute_pgm_rsrc1 != replacement_descriptor.compute_pgm_rsrc1 ||
+            normalized_rsrc1 != original_descriptor.compute_pgm_rsrc1) {
+          errors.emplace_back(
+              "ConSan final validation found an invalid relocation-owned descriptor delta for "
+              "kernel '" +
+              original_kernel.name + "'");
+        } else {
+          normalized.compute_pgm_rsrc1 = original_descriptor.compute_pgm_rsrc1;
+        }
+      }
+    }
     if (std::memcmp(&normalized, &original_descriptor, sizeof(normalized)) != 0) {
+      const auto *normalized_bytes = reinterpret_cast<const uint8_t *>(&normalized);
+      const auto *original_descriptor_bytes =
+          reinterpret_cast<const uint8_t *>(&original_descriptor);
+      const size_t first_delta = static_cast<size_t>(
+          std::mismatch(normalized_bytes, normalized_bytes + sizeof(normalized),
+                        original_descriptor_bytes)
+              .first -
+          normalized_bytes);
       errors.emplace_back(
           "ConSan final validation found an unplanned descriptor delta for kernel '" +
           original_kernel.name + "' (original offset " +
           std::to_string(original_kernel.descriptor_file_offset) + ", replacement offset " +
-          std::to_string(replacement_kernel.descriptor_file_offset) + ")");
+          std::to_string(replacement_kernel.descriptor_file_offset) + ", first byte " +
+          std::to_string(first_delta) + ": original=" +
+          std::to_string(original_descriptor_bytes[first_delta]) + ", replacement=" +
+          std::to_string(normalized_bytes[first_delta]) + ")");
       continue;
     }
     if (requirement.required_vgpr_count != 0) {

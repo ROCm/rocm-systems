@@ -1702,6 +1702,7 @@ def _workload_runtime_identity(
             "identity_source": "hashed provenance files",
         }
     python = _pytorch_python(workspace)
+    identity_prefix = "CONSAN_PYTORCH_RUNTIME_IDENTITY="
     script = """
 import json
 import pathlib
@@ -1724,7 +1725,7 @@ runtime_libraries = {
     label: [path for path in mapped if pathlib.Path(path).name.startswith(prefix)]
     for label, prefix in prefixes.items()
 }
-print(json.dumps({
+print("CONSAN_PYTORCH_RUNTIME_IDENTITY=" + json.dumps({
     "torch_version": torch.__version__,
     "torch_hip_version": torch.version.hip,
     "torch_file": torch.__file__,
@@ -1743,8 +1744,18 @@ print(json.dumps({
             "cannot record required PyTorch/Triton runtime identity: "
             + json.dumps(packages, sort_keys=True)
         )
+    identity_documents = [
+        line.removeprefix(identity_prefix)
+        for line in str(packages.get("output", "")).splitlines()
+        if line.startswith(identity_prefix)
+    ]
+    if len(identity_documents) != 1:
+        raise ValidationError(
+            "PyTorch/Triton runtime identity did not emit exactly one "
+            "prefixed JSON document"
+        )
     try:
-        package_document = json.loads(str(packages.get("output", "")))
+        package_document = json.loads(identity_documents[0])
     except json.JSONDecodeError as error:
         raise ValidationError(
             "PyTorch/Triton runtime identity did not emit valid JSON"
@@ -1995,4 +2006,3 @@ def _effective_workload(target: str, workload: Workload) -> Workload:
 
 def _workload_provenance_path(artifact_root: Path, workload: Workload) -> Path:
     return artifact_root / workload.id / "provenance.json"
-

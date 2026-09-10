@@ -444,9 +444,16 @@ WORKLOADS = (
         overhead_processes=1,
         fault_families=("lds-wrong-address",),
         targets=("gfx950",),
-        run_timeout_seconds=60,
-        tensile_inner_timeout_seconds=55,
+        # Current Tensile v5 plus the physical Inline Shadow execution takes
+        # about 58 seconds end to end, just beyond the legacy 55-second
+        # generation-and-execution envelope.
+        run_timeout_seconds=120,
+        tensile_inner_timeout_seconds=110,
         tensile_expected_numeric_rows=1,
+        # This is one exact functional row. Current Tensile v5 reports 3.7 ms
+        # or more of device time for it, so retain a positive timing canary
+        # instead of the repeated performance-row default.
+        tensile_minimum_timed_ms=1.0,
     ),
     Workload(
         id="hip-matmul-m128-n128-k128",
@@ -1734,6 +1741,13 @@ TARGET_WORKLOAD_OVERRIDES: dict[str, dict[str, dict[str, object]]] = {
         },
     },
     "gfx950": {
+        # Physical Record/Replay of the complete 151,936-logit oracle takes
+        # roughly 99 seconds. Keep the same explicit 900-second envelope used
+        # for the slower gfx950 emulator diagnostic, so the canonical command
+        # reaches a verdict on native hardware without an ad hoc CLI override.
+        "qwen-prefill": {
+            "run_timeout_seconds": 900,
+        },
         # These compact schedules select no workgroup at the production
         # stride.  A target-resolved validation cadence retains evidence from
         # the same unmodified workloads.  Native execution itself is fast, but

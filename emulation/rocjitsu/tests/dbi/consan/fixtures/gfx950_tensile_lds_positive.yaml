@@ -6,7 +6,7 @@ GlobalParameters:
   Device: 0
   SyncsPerBenchmark: 0
   NumElementsToValidate: -1
-  BoundsCheck: False
+  BoundsCheck: 0
   KernelTime: False
   DataInitTypeAlpha: 1
   DataInitTypeBeta: 1
@@ -42,7 +42,7 @@ BenchmarkProblems:
         - PrefetchGlobalRead: [1]
         - PrefetchLocalRead: [1]
         - ClusterLocalRead: [1]
-        - DirectToLds: [False]
+        - DirectToLds: [0]
         - DirectToVgprA: [False]
         - DirectToVgprB: [False]
         - GlobalReadVectorWidthA: [-1]

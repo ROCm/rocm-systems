@@ -1881,6 +1881,7 @@ class ConSanValidationTest(unittest.TestCase):
         self.assertTrue(gfx950_workloads["tp2-family"]["sharktank_skip_warmup"])
         self.assertTrue(gfx950_workloads["tp2-decode"]["sharktank_skip_warmup"])
         self.assertTrue(gfx950_workloads["tp2-combined"]["sharktank_skip_warmup"])
+        self.assertEqual(gfx950_workloads["qwen-prefill"]["run_timeout_seconds"], 900)
         self.assertEqual(
             workloads["tensile-sk-mxf4gemm-tdm"]["run_timeout_seconds"], 1260
         )
@@ -1917,6 +1918,7 @@ class ConSanValidationTest(unittest.TestCase):
                 ("gfx1250", "tp1-prefill", 60),
                 ("gfx950", "tp1-decode-combined", 300),
                 ("gfx1250", "tp1-decode-combined", 360),
+                ("gfx950", "qwen-prefill", 900),
                 ("gfx1250", "qwen-prefill", 360),
                 ("gfx950", "tp2-family", 1800),
                 ("gfx950", "tp2-decode", 600),
@@ -3116,7 +3118,12 @@ class ConSanValidationTest(unittest.TestCase):
                 "_command_identity",
                 return_value={
                     "available": True,
-                    "output": json.dumps(package_document),
+                    "output": (
+                        "kineto warning before probe\n"
+                        "CONSAN_PYTORCH_RUNTIME_IDENTITY="
+                        + json.dumps(package_document)
+                        + "\nkineto warning after probe\n"
+                    ),
                 },
             ) as command_identity,
             mock.patch.object(
@@ -3158,6 +3165,37 @@ class ConSanValidationTest(unittest.TestCase):
             set(identity["loaded_runtime_libraries"]),
             {"hip-runtime", "hsa-runtime"},
         )
+
+    def test_pytorch_runtime_identity_rejects_ambiguous_documents(self) -> None:
+        workload = validation.WORKLOAD_BY_ID["pytorch-rdna4-compiled-softmax"]
+        document = json.dumps(
+            {
+                "torch_version": "2.14",
+                "torch_hip_version": "7.15",
+                "torch_file": "/frozen/torch/__init__.py",
+                "triton_version": "3.8",
+                "triton_file": "/frozen/triton/__init__.py",
+                "runtime_libraries": {},
+            }
+        )
+        prefix = "CONSAN_PYTORCH_RUNTIME_IDENTITY="
+        with (
+            mock.patch.object(
+                validation_commands,
+                "_command_identity",
+                return_value={
+                    "available": True,
+                    "output": f"{prefix}{document}\n{prefix}{document}\n",
+                },
+            ),
+            self.assertRaisesRegex(
+                validation.ValidationError,
+                "exactly one prefixed JSON document",
+            ),
+        ):
+            validation._workload_runtime_identity(
+                Path("/workspace"), "gfx1201", workload
+            )
 
     def test_pytorch_runtime_identity_is_required(self) -> None:
         workload = validation.WORKLOAD_BY_ID["pytorch-rdna4-compiled-softmax"]
@@ -7348,18 +7386,71 @@ class ConSanValidationTest(unittest.TestCase):
             with self.assertRaisesRegex(validation.ValidationError, "site_provenance"):
                 validation._load_fault(path, "gfx1201", workload, "drop")
 
+    def test_checked_in_gfx950_rocblas_fault_targets_dispatched_publication(
+        self,
+    ) -> None:
+        path = Path(__file__).with_name(
+            "consan_validation_faults_gfx950_rocblas_sgemm.json"
+        )
+        workload = validation.WORKLOAD_BY_ID["rocblas-sgemm-square-64"]
+        fault = validation._load_fault(path, "gfx950", workload, "barrier-drop")
+        identity = fault["environment"]["RJ_CONSAN_FAULT_SITE_IDENTITY"]
+        self.assertIn("fnv1a64:d7c1fd141f009d32", identity)
+        self.assertIn("SN_1LDSB1_APM1_AF0EM2_AF1EM2_AMAS3", identity)
+        self.assertIn("pc=0x0000000000056f18", identity)
+        self.assertIn("occurrence=0", identity)
+        self.assertEqual(
+            fault["reach_witness"]["kind"],
+            "reviewed-unconditional-final-isa",
+        )
+        self.assertIn(".text+0x518", fault["reach_witness"]["evidence"])
+
+        expected_detectors = {
+            "supercollider": "not_detected",
+            "record-replay": "detected",
+            "sampled": "not_detected",
+            "inline-shadow": "detected",
+        }
+        for profile, detector in expected_detectors.items():
+            policy, trials = validation._fault_trials(fault, profile)
+            self.assertEqual(policy["detector"], detector)
+            self.assertEqual(policy["oracle"], "any")
+            self.assertEqual(trials, [{}])
+            environment = validation._fault_trial_environment(
+                profile,
+                workload,
+                Path("/hook.so"),
+                "gfx950",
+                fault,
+                policy,
+                {},
+                Path("/workspace"),
+            )
+            self.assertEqual(environment["RJ_CONSAN_FAULT_REQUIRE_EXACTLY_ONE"], "1")
+            self.assertIn(
+                "SN_1LDSB1_APM1_AF0EM2_AF1EM2_AMAS3",
+                environment["RJ_CONSAN_TEST_KERNEL_FILTER"],
+            )
+        for profile in ("record-replay", "inline-shadow"):
+            policy, _ = validation._fault_trials(fault, profile)
+            self.assertEqual(policy["environment"]["RJ_CONSAN_MOI_REQUIRE_DIAGNOSTICS"], "1")
+
     def test_checked_in_gfx950_tensile_lds_control_policy_and_provenance(self) -> None:
         path = Path(__file__).with_name(
             "consan_validation_faults_gfx950_tensile_lds_positive.json"
         )
         document = json.loads(path.read_text(encoding="utf-8"))
         workload = validation.WORKLOAD_BY_ID["tensile-gfx950-lds-positive"]
+        self.assertEqual(workload.run_timeout_seconds, 120)
+        self.assertEqual(workload.tensile_inner_timeout_seconds, 110)
+        self.assertEqual(workload.tensile_expected_numeric_rows, 1)
+        self.assertEqual(workload.tensile_minimum_timed_ms, 1.0)
         fault = validation._load_fault(path, "gfx950", workload, "lds-wrong-address")
         expected_detectors = {
             "supercollider": "detected",
-            "record-replay": "not_detected",
+            "record-replay": "detected",
             "sampled": "not_detected",
-            "inline-shadow": "not_detected",
+            "inline-shadow": "detected",
         }
         for profile, detector in expected_detectors.items():
             policy, trials = validation._fault_trials(fault, profile)
@@ -7379,11 +7470,19 @@ class ConSanValidationTest(unittest.TestCase):
             self.assertEqual(environment["RJ_CONSAN_FAULT_REQUIRE_EXACTLY_ONE"], "1")
         self.assertEqual(fault["environment"]["RJ_CONSAN_FAULT_LDS_ADDRESS_VGPR"], "54")
         self.assertIn(
-            "pc=0x0000000000001344",
+            "fnv1a64:1c2a64888a624a30",
+            fault["environment"]["RJ_CONSAN_FAULT_SITE_IDENTITY"],
+        )
+        self.assertIn(
+            "pc=0x00000000000013f0",
             fault["environment"]["RJ_CONSAN_FAULT_SITE_IDENTITY"],
         )
         provenance = document["provenance"]
-        self.assertEqual(provenance["rocm_sdk_version"], "7.15.0a20260720")
+        self.assertEqual(
+            provenance["rocm_libraries_commit"],
+            "512b7a5c1d7eb622c73ea3840a47548144956892",
+        )
+        self.assertEqual(provenance["rocm_sdk_version"], "10.1.0a20260909")
         self.assertIn(" inventory", provenance["inventory_command"])
         self.assertIn("v54", provenance["replacement_vgpr_basis"])
 
