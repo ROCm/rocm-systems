@@ -58,6 +58,14 @@ extern std::function<ncclResult_t(struct ncclComm* comm,
 // them to record the stream, or to return an error and drive a NCCLCHECKGOTO.
 extern std::function<ncclResult_t(struct ncclComm* comm, struct ncclKernelPlan* plan,
                                   hipStream_t stream)>
+    g_rmaProxyPutLaunch;
+
+extern std::function<ncclResult_t(struct ncclComm* comm, struct ncclKernelPlan* plan,
+                                  hipStream_t stream)>
+    g_rmaCePutLaunch;
+
+extern std::function<ncclResult_t(struct ncclComm* comm, struct ncclKernelPlan* plan,
+                                  hipStream_t stream)>
     g_rmaProxyWaitLaunch;
 
 extern std::function<ncclResult_t(struct ncclComm* comm, struct ncclKernelPlan* plan,

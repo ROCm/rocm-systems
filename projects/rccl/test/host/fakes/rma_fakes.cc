@@ -9,7 +9,6 @@
 #include "rma/rma_ce.h"
 #include "rma/rma_proxy.h"
 
-#include "fail_loud.h"
 #include "rma_fakes.h"
 
 // ---------------------------------------------------------------------------
@@ -43,6 +42,12 @@ std::function<ncclResult_t(struct ncclComm* comm, struct ncclRmaProxyDesc** desc
     g_rmaDestroyDesc = DefaultRmaDestroyDesc;
 
 std::function<ncclResult_t(struct ncclComm*, struct ncclKernelPlan*, hipStream_t)>
+    g_rmaProxyPutLaunch = DefaultRmaLaunch;
+
+std::function<ncclResult_t(struct ncclComm*, struct ncclKernelPlan*, hipStream_t)>
+    g_rmaCePutLaunch = DefaultRmaLaunch;
+
+std::function<ncclResult_t(struct ncclComm*, struct ncclKernelPlan*, hipStream_t)>
     g_rmaProxyWaitLaunch = DefaultRmaLaunch;
 
 std::function<ncclResult_t(struct ncclComm*, struct ncclKernelPlan*, hipStream_t)>
@@ -70,15 +75,14 @@ ncclResult_t ncclRmaCeWaitLaunch(struct ncclComm* comm, struct ncclKernelPlan* p
   return g_rmaCeWaitLaunch(comm, plan, stream);
 }
 
-// Link floor: referenced by the compiled rma.cc but not driven until the commit
-// that tests ncclRmaPut, which converts these into seams alongside the pair
-// above.
-ncclResult_t ncclRmaProxyPutLaunch(struct ncclComm*, struct ncclKernelPlan*, hipStream_t) {
-  FailLoudUnfaked("rma_fakes", "ncclRmaProxyPutLaunch");
+ncclResult_t ncclRmaProxyPutLaunch(struct ncclComm* comm, struct ncclKernelPlan* plan,
+                                   hipStream_t stream) {
+  return g_rmaProxyPutLaunch(comm, plan, stream);
 }
 
-ncclResult_t ncclRmaCePutLaunch(struct ncclComm*, struct ncclKernelPlan*, hipStream_t) {
-  FailLoudUnfaked("rma_fakes", "ncclRmaCePutLaunch");
+ncclResult_t ncclRmaCePutLaunch(struct ncclComm* comm, struct ncclKernelPlan* plan,
+                                hipStream_t stream) {
+  return g_rmaCePutLaunch(comm, plan, stream);
 }
 
 // ---------------------------------------------------------------------------
@@ -88,6 +92,8 @@ ncclResult_t ncclRmaCePutLaunch(struct ncclComm*, struct ncclKernelPlan*, hipStr
 void ResetRmaFakes() {
   g_rmaCircularBufEmpty = DefaultRmaCircularBufEmpty;
   g_rmaDestroyDesc      = DefaultRmaDestroyDesc;
+  g_rmaProxyPutLaunch   = DefaultRmaLaunch;
+  g_rmaCePutLaunch      = DefaultRmaLaunch;
   g_rmaProxyWaitLaunch  = DefaultRmaLaunch;
   g_rmaCeWaitLaunch     = DefaultRmaLaunch;
 }
