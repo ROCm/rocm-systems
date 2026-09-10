@@ -58,6 +58,36 @@ TEST(VectorBuilder, BuildVMovB32ImmRejectsNonAmdGpuArch) {
                util::UnimplementedInst);
 }
 
+TEST(VectorBuilder, BuildVMovB32Src) {
+  // Same VOP1 layout as the literal form, with src0 carrying the register code
+  // instead of 255 and no second word. An SGPR's src0 code is its index.
+  for (const rj_code_arch_t arch : kAmdGpuArchs) {
+    // v_mov_b32 v3, s30: vdst 3 << 17, op 1 << 9, src0 30.
+    EXPECT_EQ(build_v_mov_b32_src(/*vdst=*/3, /*src0=*/30, arch), 0x7E06021Eu)
+        << "arch " << static_cast<int>(arch);
+    // v0, s0 clears both fields, so a nonzero one cannot come from a stray bit.
+    EXPECT_EQ(build_v_mov_b32_src(0, 0, arch), 0x7E000200u) << "arch " << static_cast<int>(arch);
+    // The high vdst bit is reachable: v255 fills the field.
+    EXPECT_EQ(build_v_mov_b32_src(255, 1, arch), 0x7FFE0201u)
+        << "arch " << static_cast<int>(arch);
+  }
+}
+
+// A literal source needs a trailing word this encoder cannot return, so it is
+// rejected rather than encoded into an instruction that reads whatever follows.
+TEST(VectorBuilder, BuildVMovB32SrcRejectsLiteralSource) {
+  for (const rj_code_arch_t arch : kAmdGpuArchs)
+    EXPECT_THROW((void)build_v_mov_b32_src(0, kVectorSrcLiteral, arch), util::InvalidInst)
+        << "arch " << static_cast<int>(arch);
+}
+
+TEST(VectorBuilder, BuildVMovB32SrcRejectsNonAmdGpuArch) {
+  EXPECT_THROW((void)build_v_mov_b32_src(0, 0, ROCJITSU_CODE_ARCH_RV32I), util::UnimplementedInst);
+  EXPECT_THROW((void)build_v_mov_b32_src(0, 0, ROCJITSU_CODE_ARCH_RV64I), util::UnimplementedInst);
+  EXPECT_THROW((void)build_v_mov_b32_src(0, 0, ROCJITSU_CODE_ARCH_INVALID),
+               util::UnimplementedInst);
+}
+
 // kVectorSrcLiteral is declared once from cdna1's table; this pins that every
 // other generation's table still agrees, so the single constant stays correct.
 TEST(VectorBuilder, SrcLiteralCodeMatchesGeneratedTables) {
