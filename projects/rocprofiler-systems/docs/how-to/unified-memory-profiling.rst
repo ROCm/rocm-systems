@@ -52,9 +52,31 @@ before launching the profiled application:
 Quick start
 ===========
 
-To enable unified memory profiling, set the following environment variables:
+Use the ``trace-unified-memory`` preset to enable unified memory reports and a
+Perfetto timeline:
 
-``ROCPROFSYS_USE_UNIFIED_MEMORY_PROFILING=ON``:
+.. code-block:: shell
+
+   HSA_XNACK=1 \
+   rocprof-sys-run --preset=trace-unified-memory -- ./my_managed_memory_app
+
+.. note::
+
+   The preset enables ``ROCPROFSYS_USE_UNIFIED_MEMORY_PROFILING=ON`` for the
+   ``unified_memory.txt`` and ``unified_memory.json`` reports and
+   ``ROCPROFSYS_TRACE=ON`` for page-fault and migration-throughput tracks in
+   Perfetto. It does not set ``HSA_XNACK`` because that changes the target
+   application's memory behavior.
+
+The unified memory setting automatically enables the required KFD tracing
+domains for page faults and page migrations. You don't need to add
+``kfd_events`` to ``ROCPROFSYS_ROCM_DOMAINS`` separately.
+
+Manual configuration
+--------------------
+
+To enable the same unified-memory reports and Perfetto timeline without the
+preset, set the minimum required environment variables explicitly:
 
 .. code-block:: shell
 
@@ -62,16 +84,6 @@ To enable unified memory profiling, set the following environment variables:
    ROCPROFSYS_USE_UNIFIED_MEMORY_PROFILING=ON \
    ROCPROFSYS_TRACE=ON \
    rocprof-sys-run -- ./my_managed_memory_app
-
-.. note::
-
-   ``ROCPROFSYS_TRACE=ON`` enables Perfetto trace generation. This lets you view unified memory page fault and migration throughput tracks on a timeline. The
-   ``unified_memory.txt`` and ``unified_memory.json`` summary reports are
-   enabled by ``ROCPROFSYS_USE_UNIFIED_MEMORY_PROFILING=ON``.
-
-The unified memory setting automatically enables the required KFD tracing
-domains for page faults and page migrations. You don't need to add
-``kfd_events`` to ``ROCPROFSYS_ROCM_DOMAINS`` separately.
 
 Example workload
 ================
@@ -93,9 +105,8 @@ After building the example, profile it with unified memory profiling enabled:
 .. code-block:: shell
 
    HSA_XNACK=1 \
-   ROCPROFSYS_USE_UNIFIED_MEMORY_PROFILING=ON \
-   ROCPROFSYS_TRACE=ON \
-   rocprof-sys-run -- ./build-unified-memory/unified-memory -s 32 -p 256 -i 4
+   rocprof-sys-run --preset=trace-unified-memory -- \
+       ./build-unified-memory/unified-memory -s 32 -p 256 -i 4
 
 .. tip::
 
@@ -110,10 +121,9 @@ directory for the unified memory text and JSON reports:
 .. code-block:: shell
 
    HSA_XNACK=1 \
-   ROCPROFSYS_USE_UNIFIED_MEMORY_PROFILING=ON \
-   ROCPROFSYS_TRACE=ON \
    ROCPROFSYS_UNIFIED_MEMORY_OUTPUT_PATH=ump-output \
-   rocprof-sys-run -- ./build-unified-memory/unified-memory -s 32 -p 256 -i 4
+   rocprof-sys-run --preset=trace-unified-memory -- \
+       ./build-unified-memory/unified-memory -s 32 -p 256 -i 4
 
 Set ``ROCPROFSYS_USE_PID=NO`` if you want stable output filenames without the
 process ID suffix:
@@ -121,11 +131,10 @@ process ID suffix:
 .. code-block:: shell
 
    HSA_XNACK=1 \
-   ROCPROFSYS_USE_UNIFIED_MEMORY_PROFILING=ON \
-   ROCPROFSYS_TRACE=ON \
    ROCPROFSYS_UNIFIED_MEMORY_OUTPUT_PATH=ump-output \
    ROCPROFSYS_USE_PID=NO \
-   rocprof-sys-run -- ./build-unified-memory/unified-memory -s 32 -p 256 -i 4
+   rocprof-sys-run --preset=trace-unified-memory -- \
+       ./build-unified-memory/unified-memory -s 32 -p 256 -i 4
 
 Output files
 ============
@@ -153,9 +162,10 @@ is also written without a PID suffix as ``perfetto-trace.proto``.
 
 .. note::
 
-  The ``rocpd`` database output is optional. When ``rocpd`` output is enabled (for
-  example, by including ``rocpd`` in ``--output-format``), the output directory
-  also contains ``rocpd-<pid>.db``.
+  The ``rocpd`` database output is enabled by default, so the output directory
+  also contains ``rocpd-<pid>-<session>.db``. When ``ROCPROFSYS_USE_PID=NO`` is
+  set, the database is written as ``rocpd.db``. To omit rocPD, select only
+  Perfetto output with ``--output-format proto``.
 
 Sample text output
 ==================

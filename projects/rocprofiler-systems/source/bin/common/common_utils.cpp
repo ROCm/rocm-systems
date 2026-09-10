@@ -8,7 +8,6 @@
 #include "common/json_config.hpp"
 
 #include <algorithm>
-#include <array>
 #include <cctype>
 #include <cstdlib>
 #include <cstring>
@@ -347,42 +346,32 @@ validate_configuration()
 }
 
 void
-validate_domain_flags(bool gpu_enabled, bool rocm_enabled, bool cpu_enabled,
-                      bool parallel_enabled, std::string_view preset_name)
+validate_domain_flags(const domain_flag_state& state)
 {
-    if(cpu_enabled && !preset_name.empty())
+    if(state.cpu_domain_enabled && !state.active_preset_name.empty() &&
+       state.registry.disables_cpu_sampling(state.active_preset_name))
     {
-        static constexpr std::array<std::string_view, 4> no_sampling_presets = {
-            "trace-gpu", "trace-openmp", "workload-trace", "trace-hpc"
-        };
-        for(const auto& preset : no_sampling_presets)
-        {
-            if(preset_name == preset)
-            {
-                std::cerr << "[rocprof-sys][note] --cpu flag used with '" << preset_name
-                          << "' preset which disables CPU sampling.\n"
-                          << "  The --cpu flag will override the preset's sampling "
-                             "settings.\n";
-                break;
-            }
-        }
+        std::cerr << "[rocprof-sys][note] --cpu flag used with '"
+                  << state.active_preset_name << "' preset which disables CPU sampling.\n"
+                  << "  The --cpu flag will override the preset's sampling settings.\n";
     }
 
-    if(rocm_enabled && !gpu_enabled)
+    if(state.rocm_domain_enabled && !state.gpu_domain_enabled)
     {
         std::cerr << "[rocprof-sys][note] --rocm enables ROCm API tracing. Consider "
                      "adding --gpu for GPU metrics.\n";
     }
 
-    if(parallel_enabled && !rocm_enabled)
+    if(state.parallel_domain_enabled && !state.rocm_domain_enabled)
     {
         std::cerr << "[rocprof-sys][note] --parallel enables MPI/OpenMP profiling. "
                      "Consider adding --rocm for GPU collective tracing.\n";
     }
 
-    const int domain_count = (gpu_enabled ? 1 : 0) + (rocm_enabled ? 1 : 0) +
-                             (cpu_enabled ? 1 : 0) + (parallel_enabled ? 1 : 0);
-    if(domain_count >= 3 && preset_name.empty())
+    const int domain_count =
+        (state.gpu_domain_enabled ? 1 : 0) + (state.rocm_domain_enabled ? 1 : 0) +
+        (state.cpu_domain_enabled ? 1 : 0) + (state.parallel_domain_enabled ? 1 : 0);
+    if(domain_count >= 3 && state.active_preset_name.empty())
     {
         std::cerr << "[rocprof-sys][note] Multiple domain flags specified. Consider "
                      "using a preset like --preset=detailed for comprehensive "
@@ -469,9 +458,7 @@ run_post_parse_validation(std::string_view tool_name, domain_flag_state& state,
 
     warn_if_output_not_writable(tool_name);
     validate_configuration();
-    validate_domain_flags(state.gpu_domain_enabled, state.rocm_domain_enabled,
-                          state.cpu_domain_enabled, state.parallel_domain_enabled,
-                          state.active_preset_name);
+    validate_domain_flags(state);
 }
 
 // ============================================================================

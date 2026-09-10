@@ -142,6 +142,22 @@ CPU Sampling OFF
 
    rocprof-sys-sample --preset=trace-gpu -- ./gpu_compute_app
 
+--preset=trace-unified-memory
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+**Purpose:** Unified memory page-fault and page-migration analysis
+
+**Configuration:** Tracing ON, Profiling OFF, CPU Sampling OFF, Unified Memory
+Profiling ON, GPU Metrics unchanged (the AMD SMI default applies)
+
+**Prerequisites:** An XNACK-capable GPU, ``HSA_XNACK=1`` in the target
+application's environment, and ROCm 7.13 or later
+
+.. code-block:: shell
+
+   HSA_XNACK=1 \
+   rocprof-sys-run --preset=trace-unified-memory -- ./managed_memory_app
+
 --preset=workload-trace
 ~~~~~~~~~~~~~~~~~~~~~~~
 
@@ -397,8 +413,9 @@ fields with descriptions and types.
      - CPU sampling: ``enabled``, ``frequency_hz``, ``timer``, ``delay_sec``,
        ``duration_sec``, ``cpus``, ``gpus``, ``ainics``
    * - ``domains.gpu``
-     - GPU metrics via AMD SMI: ``enabled``, ``metrics`` (temp, power, busy,
-       mem_usage), ``sampling_rate_hz``, ``process_sampling_freq``, ``ainic``
+     - GPU-related settings: AMD SMI ``enabled``, ``metrics`` (temp, power, busy,
+       mem_usage), ``sampling_rate_hz``, ``process_sampling_freq``, ``ainic``;
+       independent KFD-based ``unified_memory_profiling``
    * - ``domains.rocm``
      - ROCm API tracing: ``enabled``, ``api_domains`` (hip_runtime_api,
        kernel_dispatch, etc.), ``group_by_queue``
@@ -409,7 +426,7 @@ fields with descriptions and types.
        ``shmem``, ``ucx``
    * - ``output``
      - Output control: ``path``, ``time_output``, ``file_output``,
-       ``rocpd_output``
+       ``rocpd_output``, ``unified_memory_output_path``
    * - ``hardware_counters``
      - HW counters: ``enabled``, ``rocm_events``, ``papi_events``,
        ``papi_multiplexing``

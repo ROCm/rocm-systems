@@ -53,9 +53,8 @@ register_preset_and_domain_arguments(argument_parser& parser, std::string_view t
     parser
         .add_argument(
             { "--preset" },
-            "Load a preset configuration by name or file path. Available presets: "
-            "balanced, profile-only, detailed, trace-hpc, workload-trace, sys-trace, "
-            "runtime-trace, trace-gpu, trace-openmp, profile-mpi, trace-hw-counters. "
+            "Load a preset configuration by name or file path. Use --list-presets "
+            "to see available built-in presets. "
             "For custom configs, provide a path containing '/' or ending with '.json'")
         .max_count(1)
         .dtype("string")

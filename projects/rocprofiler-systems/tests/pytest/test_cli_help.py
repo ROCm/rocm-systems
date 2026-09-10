@@ -175,6 +175,12 @@ HELP_CASES = [
         id="explain_trace-openmp",
     ),
     pytest.param(
+        ["--explain=trace-unified-memory"],
+        _explain("trace-unified-memory", "gpu")
+        + [r"ROCPROFSYS_USE_UNIFIED_MEMORY_PROFILING = true"],
+        id="explain_trace-unified-memory",
+    ),
+    pytest.param(
         ["--explain=workload-trace"],
         _explain("workload-trace", "gpu"),
         id="explain_workload-trace",
@@ -234,6 +240,7 @@ HELP_CASES = [
             r"\bprofile-only\b",
             r"\btrace-gpu\b",
             r"\btrace-hw-counters\b",
+            r"\btrace-unified-memory\b",
             r"\bworkload-trace\b",
             r"\bprofile-mpi\b",
             r"\btrace-hpc\b",

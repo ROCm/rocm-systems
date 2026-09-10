@@ -360,6 +360,23 @@ TEST_F(json_config_test, resolves_rocm_enabled_flag)
     EXPECT_EQ(result.at(env_vars::TRACE), "true");
 }
 
+TEST_F(json_config_test, resolves_unified_memory_without_gpu_metrics)
+{
+    auto config = nlohmann::json::parse(R"({
+        "domains": {
+            "gpu": {
+                "unified_memory_profiling": {"enabled": true}
+            }
+        }
+    })");
+
+    auto result = resolve_config(config);
+
+    EXPECT_EQ(result.at(env_vars::USE_UNIFIED_MEMORY_PROFILING), "true");
+    EXPECT_EQ(result.count(env_vars::USE_AMD_SMI), 0u);
+    EXPECT_EQ(result.count(env_vars::USE_PROCESS_SAMPLING), 0u);
+}
+
 // Test env_vars_to_json_schema with non-numeric env var values
 TEST_F(json_config_test, handling_non_numeric_values_for_json_schema)
 {
@@ -399,6 +416,26 @@ TEST_F(json_config_test, handling_round_trip_for_new_values_in_json_schema)
     EXPECT_EQ(j["advanced"]["network_interface"]["value"], "ib0");
     EXPECT_EQ(j["advanced"]["trace_periods"]["value"], "1:5,10:20");
     EXPECT_EQ(j["hardware_counters"]["papi_multiplexing"]["enabled"], true);
+}
+
+TEST_F(json_config_test, round_trips_unified_memory_without_gpu_metrics)
+{
+    const std::map<std::string, std::string> env_map = {
+        { env_vars::USE_UNIFIED_MEMORY_PROFILING, "true" },
+    };
+
+    auto exported_config = env_vars_to_json_schema(env_map);
+
+    ASSERT_TRUE(exported_config["domains"]["gpu"].contains("unified_memory_profiling"));
+    EXPECT_EQ(exported_config["domains"]["gpu"]["unified_memory_profiling"]["enabled"],
+              true);
+    EXPECT_FALSE(exported_config["domains"]["gpu"].contains("enabled"));
+
+    auto result = resolve_config(exported_config);
+
+    EXPECT_EQ(result.at(env_vars::USE_UNIFIED_MEMORY_PROFILING), "true");
+    EXPECT_EQ(result.count(env_vars::USE_AMD_SMI), 0u);
+    EXPECT_EQ(result.count(env_vars::USE_PROCESS_SAMPLING), 0u);
 }
 
 // Test env_vars constants match expected string values

@@ -236,36 +236,38 @@ Instead of manually configuring numerous options, use preset modes optimized for
 
 **General Purpose:**
 
-- **`--balanced`** - Balanced profiling with moderate overhead and comprehensive data
-- **`--profile-only`** - Profiling-only mode without tracing (flat profile, minimal overhead)
-- **`--detailed`** - Comprehensive profiling with full system metrics
+- **`--preset=balanced`** - Balanced profiling with moderate overhead and comprehensive data
+- **`--preset=profile-only`** - Profiling-only mode without tracing (flat profile, minimal overhead)
+- **`--preset=detailed`** - Comprehensive profiling with full system metrics
 
 **Workload-Specific:**
 
-- **`--trace-hpc`** - Optimized for HPC/MPI/OpenMP applications
+- **`--preset=trace-hpc`** - Optimized for HPC/MPI/OpenMP applications
   - Automatically enables OMPT, MPIP, and relevant hardware counters
-- **`--workload-trace`** - Optimized for AI/ML/GPU workloads which are supported by ROCm stack
+- **`--preset=workload-trace`** - Optimized for AI/ML/GPU workloads which are supported by ROCm stack
   - Automatically enables GPU tracing, RCCL, and increases buffer sizes
-- **`--trace-gpu`** - GPU workload analysis with host functions, MPI, and device activity
-- **`--trace-openmp`** - OpenMP offload workloads with HSA domains
-- **`--profile-mpi`** - MPI communication latency profiling
-- **`--trace-hw-counters`** - Hardware counter collection during execution
+- **`--preset=trace-gpu`** - GPU workload analysis with host functions, MPI, and device activity
+- **`--preset=trace-unified-memory`** - Unified memory page-fault and page-migration analysis with a Perfetto timeline
+  - Requires `HSA_XNACK=1`; see the [Unified memory profiling guide](docs/how-to/unified-memory-profiling.rst)
+- **`--preset=trace-openmp`** - OpenMP offload workloads with HSA domains
+- **`--preset=profile-mpi`** - MPI communication latency profiling
+- **`--preset=trace-hw-counters`** - Hardware counter collection during execution
   - Automatically enables tracing VALU utilization
 
 **API Tracing:**
 
-- **`--sys-trace`** - Comprehensive system API tracing
-- **`--runtime-trace`** - Runtime API tracing
+- **`--preset=sys-trace`** - Comprehensive system API tracing
+- **`--preset=runtime-trace`** - Runtime API tracing
   - Excludes compiler and low-level HSA
 
 **Example:**
 
 ```bash
 # HPC application with MPI
-mpirun -n 4 rocprof-sys-sample --trace-hpc -- ./mpi_app
+mpirun -n 4 rocprof-sys-sample --preset=trace-hpc -- ./mpi_app
 
 # Balanced profiling with moderate overhead
-rocprof-sys-sample --balanced -- ./myapp
+rocprof-sys-sample --preset=balanced -- ./myapp
 ```
 
 ### Pre-Execution Information
