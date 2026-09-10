@@ -4,7 +4,7 @@
               guided analysis, bottleneck detection
 
 ************************************************************
-Using Memory Bandwidth Analysis in ROCm Compute Profiler
+Using memory bandwidth analysis
 ************************************************************
 
 .. warning::
