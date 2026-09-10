@@ -179,6 +179,12 @@ public:
     /// Bitmask of exception classes that are forwarded to the debugger.
     uint64_t exception_enable_mask = 0;
 
+    /// Monotonic revision of @ref exception_enable_mask.
+    /// In-flight notifier writes capture this value so an unsubscribe/re-subscribe
+    /// ABA cannot commit against a different subscription that happens to have the
+    /// same final mask.
+    uint64_t exception_mask_generation = 0;
+
     /// Process/device exception bits already used to wake this session.
     uint64_t notified_process_exception_mask = 0;
     /// Process/device exception bits reserved by a notifier write in flight.

@@ -1887,6 +1887,69 @@ TEST_F(KfdIoctlTest, DbgTrapEnableAcceptsPrimaryKfdDescriptor) {
   EXPECT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &disable), 0);
 }
 
+TEST_F(KfdIoctlTest, DbgTrapFifoNotifierWritesOneBytePerEvent) {
+  constexpr uint64_t kException = KFD_EC_MASK(EC_QUEUE_WAVE_TRAP);
+  std::vector<uint8_t> ring(4096);
+  uint64_t read_pointer = 0;
+  uint64_t write_pointer = 0;
+  kfd_ioctl_create_queue_args create{};
+  create.gpu_id = kGpuId;
+  create.queue_type = KFD_IOC_QUEUE_TYPE_COMPUTE_AQL;
+  create.ring_base_address = reinterpret_cast<uint64_t>(ring.data());
+  create.ring_size = static_cast<uint32_t>(ring.size());
+  create.read_pointer_address = reinterpret_cast<uint64_t>(&read_pointer);
+  create.write_pointer_address = reinterpret_cast<uint64_t>(&write_pointer);
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_CREATE_QUEUE, &create), 0);
+
+  rocjitsu::test::ScopedTempFile fifo_path("rocjitsu-debug-notifier-");
+  ASSERT_EQ(::unlink(fifo_path.path().c_str()), 0);
+  ASSERT_EQ(::mkfifo(fifo_path.path().c_str(), 0600), 0);
+  const int notifier = ::open(fifo_path.path().c_str(), O_RDWR | O_CLOEXEC | O_NONBLOCK);
+  ASSERT_GE(notifier, 0);
+  debug_fds_.push_back(notifier);
+
+  kfd_ioctl_dbg_trap_args enable{};
+  enable.pid = static_cast<uint32_t>(getpid());
+  enable.op = KFD_IOC_DBG_TRAP_ENABLE;
+  enable.enable.dbg_fd = static_cast<uint32_t>(notifier);
+  enable.enable.exception_mask = kException;
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &enable), 0);
+
+  kfd_queue_snapshot_entry snapshot_entry{};
+  kfd_ioctl_dbg_trap_args snapshot{};
+  snapshot.pid = static_cast<uint32_t>(getpid());
+  snapshot.op = KFD_IOC_DBG_TRAP_GET_QUEUE_SNAPSHOT;
+  snapshot.queue_snapshot.exception_mask = KFD_EC_MASK(EC_QUEUE_NEW);
+  snapshot.queue_snapshot.snapshot_buf_ptr = reinterpret_cast<uint64_t>(&snapshot_entry);
+  snapshot.queue_snapshot.num_queues = 1;
+  snapshot.queue_snapshot.entry_size = sizeof(snapshot_entry);
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &snapshot), 0);
+
+  for (int event = 0; event < 2; ++event) {
+    ASSERT_TRUE(driver_->notify_debug_event_for_testing(create.queue_id, kException,
+                                                        /*retain_on_rejection=*/false));
+    pollfd pfd{notifier, POLLIN, 0};
+    ASSERT_EQ(::poll(&pfd, 1, 1000), 1);
+    uint8_t notification = 0;
+    ASSERT_EQ(::read(notifier, &notification, sizeof(notification)),
+              static_cast<ssize_t>(sizeof(notification)));
+    EXPECT_EQ(notification, 1u);
+
+    // BaseDebug::QueryDebugEvent consumes exactly poll()'s return count (one
+    // byte). A wider write would leave stale readable bytes after this read.
+    pfd.revents = 0;
+    EXPECT_EQ(::poll(&pfd, 1, 0), 0);
+
+    kfd_ioctl_dbg_trap_args query{};
+    query.pid = static_cast<uint32_t>(getpid());
+    query.op = KFD_IOC_DBG_TRAP_QUERY_DEBUG_EVENT;
+    query.query_debug_event.exception_mask = kException;
+    ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &query), 0);
+    EXPECT_EQ(query.query_debug_event.queue_id, create.queue_id);
+    EXPECT_EQ(query.query_debug_event.exception_mask, kException);
+  }
+}
+
 TEST_F(KfdIoctlTest, DbgTrapCompetingNotifierWriterCannotBlockPublisher) {
   constexpr uint64_t kException = KFD_EC_MASK(EC_QUEUE_WAVE_TRAP);
   std::vector<uint8_t> ring(4096);
@@ -1912,27 +1975,29 @@ TEST_F(KfdIoctlTest, DbgTrapCompetingNotifierWriterCannotBlockPublisher) {
   enable.enable.exception_mask = kException;
   ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &enable), 0);
 
-  const int flags = ::fcntl(notifier, F_GETFL);
-  ASSERT_GE(flags, 0);
-  ASSERT_EQ(::fcntl(notifier, F_SETFL, flags & ~O_NONBLOCK), 0);
   const uint64_t saturated = std::numeric_limits<uint64_t>::max() - 1;
   bool competing_write_ran = false;
   driver_->set_debug_notification_write_hook_for_testing([&] {
     if (competing_write_ran)
       return;
     competing_write_ran = true;
+    const int flags = ::fcntl(notifier, F_GETFL);
+    ASSERT_GE(flags, 0);
+    ASSERT_EQ(::fcntl(notifier, F_SETFL, flags & ~O_NONBLOCK), 0);
     ASSERT_EQ(::write(notifier, &saturated, sizeof(saturated)),
               static_cast<ssize_t>(sizeof(saturated)));
   });
 
-  // The hook consumes the capacity after the driver has made the shared open
-  // file description nonblocking but before its write. The write itself must
-  // return EAGAIN rather than relying on an earlier readiness observation.
+  // The hook clears O_NONBLOCK and consumes the capacity immediately before
+  // delivery. The helper writer blocks, but its deadline must keep the caller
+  // bounded even though the shared open-file description is now blocking.
+  const auto start = std::chrono::steady_clock::now();
   EXPECT_FALSE(driver_->notify_debug_event_for_testing(create.queue_id, kException,
                                                        /*retain_on_rejection=*/true));
+  EXPECT_LT(std::chrono::steady_clock::now() - start, std::chrono::seconds(1));
   driver_->set_debug_notification_write_hook_for_testing({});
   EXPECT_TRUE(competing_write_ran);
-  EXPECT_NE(::fcntl(notifier, F_GETFL) & O_NONBLOCK, 0);
+  EXPECT_EQ(::fcntl(notifier, F_GETFL) & O_NONBLOCK, 0);
 
   uint64_t notifications = 0;
   ASSERT_EQ(::read(notifier, &notifications, sizeof(notifications)),

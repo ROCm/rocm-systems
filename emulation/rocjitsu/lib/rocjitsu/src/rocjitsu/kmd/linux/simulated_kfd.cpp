@@ -35,6 +35,7 @@ RJ_DIAGNOSTIC_POP
 #include <fcntl.h>
 #include <format>
 #include <iterator>
+#include <linux/sched.h>
 #include <linux/types.h>
 #include <poll.h>
 #include <sstream>
@@ -45,6 +46,7 @@ RJ_DIAGNOSTIC_POP
 #include <sys/resource.h>
 #include <sys/stat.h>
 #include <sys/syscall.h>
+#include <sys/wait.h>
 #ifndef MADV_POPULATE_WRITE
 #define MADV_POPULATE_WRITE 23
 #endif
@@ -59,6 +61,13 @@ RJ_DIAGNOSTIC_POP
 #define SYS_pidfd_open __NR_pidfd_open
 #else
 #define SYS_pidfd_open 434
+#endif
+#endif
+#ifndef SYS_clone3
+#ifdef __NR_clone3
+#define SYS_clone3 __NR_clone3
+#else
+#define SYS_clone3 435
 #endif
 #endif
 #include <thread>
@@ -229,40 +238,104 @@ template <typename... Args> int safe_fcntl(int fd, int cmd, Args... args) {
   return libc_passthrough().fcntl(fd, cmd, args...);
 }
 
-/// @brief Write one debugger wakeup without ever waiting for descriptor capacity.
-/// @returns Zero after a complete write, otherwise the negative errno (or EIO
-/// for a short write).
-int write_debug_notification(int fd, const std::function<void()> &before_write = {}) {
-  // A readiness probe cannot make the subsequent write bounded: another
-  // holder can consume the last capacity between poll() and write(). Apply
-  // O_NONBLOCK to the shared open-file description instead, so the write
-  // itself is the atomic capacity check. Synthetic KFD descriptors are born
-  // nonblocking; this also repairs a notifier whose flag was later cleared.
-  int flags = 0;
-  do {
-    flags = safe_fcntl(fd, F_GETFL);
-  } while (flags < 0 && errno == EINTR);
-  if (flags < 0)
-    return -errno;
-  if ((flags & O_NONBLOCK) == 0) {
-    int result = 0;
-    do {
-      result = safe_fcntl(fd, F_SETFL, flags | O_NONBLOCK);
-    } while (result < 0 && errno == EINTR);
-    if (result < 0)
+constexpr auto kDebugNotificationWriteTimeout = std::chrono::milliseconds(250);
+
+int reap_notification_writer(pid_t writer, int pidfd, int *status) {
+  const auto deadline = std::chrono::steady_clock::now() + kDebugNotificationWriteTimeout;
+  bool exited = false;
+  int failure = 0;
+  while (!exited) {
+    if (pidfd >= 0) {
+      const auto now = std::chrono::steady_clock::now();
+      if (now >= deadline)
+        break;
+      const auto remaining = std::chrono::duration_cast<std::chrono::milliseconds>(deadline - now);
+      pollfd ready{pidfd, POLLIN, 0};
+      const int result = ::poll(&ready, 1, std::max(1, static_cast<int>(remaining.count())));
+      if (result > 0) {
+        exited = true;
+      } else if (result < 0 && errno != EINTR) {
+        failure = errno;
+        break;
+      }
+    } else {
+      const pid_t result = ::waitpid(writer, status, WNOHANG | __WCLONE);
+      if (result == writer)
+        return 0;
+      if (result < 0 && errno != EINTR) {
+        failure = errno;
+        break;
+      }
+      if (std::chrono::steady_clock::now() >= deadline)
+        break;
+      static_cast<void>(::poll(nullptr, 0, 1));
+    }
+  }
+
+  if (!exited) {
+    static_cast<void>(::kill(writer, SIGKILL));
+    while (::waitpid(writer, status, __WCLONE) < 0 && errno == EINTR) {
+    }
+    return failure != 0 ? -failure : -EAGAIN;
+  }
+
+  while (::waitpid(writer, status, __WCLONE) < 0) {
+    if (errno != EINTR)
       return -errno;
   }
+  return 0;
+}
+
+/// @brief Write one debugger wakeup without ever waiting indefinitely for capacity.
+/// @details File-status flags belong to the shared open-file description, so a
+/// competing holder can clear O_NONBLOCK after any defensive F_SETFL and make a
+/// write block. Perform the write in a disposable child and kill it at a bounded
+/// deadline instead. A raw clone3 with no exit signal keeps the internal child
+/// out of the application's SIGCHLD and ordinary waitpid(-1) contract, and
+/// CLONE_PIDFD publishes its private pidfd atomically. The child executes only
+/// async-signal-safe operations; it never reaches inherited simulator state or
+/// locks.
+///
+/// KFD's userspace test debugger uses an O_RDWR FIFO and consumes one byte per
+/// wakeup. The synthetic primary KFD descriptor is an eventfd, whose ABI requires
+/// an eight-byte counter write. Preserve both framing contracts.
+/// @returns Zero after a complete write, otherwise the negative errno (EIO for a
+/// short write, EAGAIN after the delivery deadline).
+int write_debug_notification(int fd, const std::function<void()> &before_write = {}) {
+  struct stat descriptor_stat {};
+  if (safe_fstat(fd, &descriptor_stat) != 0)
+    return -errno;
+  const size_t write_size = S_ISFIFO(descriptor_stat.st_mode) ? sizeof(uint8_t) : sizeof(uint64_t);
+
   if (before_write)
     before_write();
 
-  const uint64_t one = 1;
-  ssize_t written = 0;
-  do {
-    written = ::write(fd, &one, sizeof(one));
-  } while (written < 0 && errno == EINTR);
-  if (written == static_cast<ssize_t>(sizeof(one)))
-    return 0;
-  return written < 0 ? -errno : -EIO;
+  int raw_pidfd = -1;
+  clone_args clone{};
+  clone.flags = CLONE_PIDFD;
+  clone.pidfd = reinterpret_cast<uintptr_t>(&raw_pidfd);
+  const pid_t writer = static_cast<pid_t>(::syscall(SYS_clone3, &clone, sizeof(clone)));
+  if (writer < 0)
+    return -errno;
+  if (writer == 0) {
+    const uint64_t one = 1;
+    ssize_t written = 0;
+    do {
+      written = libc_passthrough().write(fd, &one, write_size);
+    } while (written < 0 && errno == EINTR);
+    const int result = written == static_cast<ssize_t>(write_size) ? 0 : written < 0 ? errno : EIO;
+    static_cast<void>(::syscall(SYS_exit_group, result));
+    __builtin_unreachable();
+  }
+
+  UniqueDriverFd pidfd(raw_pidfd);
+  int status = 0;
+  const int reap_result = reap_notification_writer(writer, pidfd.get(), &status);
+  if (reap_result != 0)
+    return reap_result;
+  if (!WIFEXITED(status))
+    return -EIO;
+  return WEXITSTATUS(status) == 0 ? 0 : -WEXITSTATUS(status);
 }
 
 int pidfd_is_exited(int pidfd) {
@@ -3334,6 +3407,7 @@ int SimulatedKfd::retry_debug_notifications(pid_t target_pid, bool invoke_result
   UniqueDriverFd notifier;
   uint64_t process_mask = 0;
   uint64_t session_generation = 0;
+  uint64_t exception_mask_generation = 0;
   std::function<void(bool)> result_hook;
   std::function<void()> write_hook;
   {
@@ -3397,6 +3471,7 @@ int SimulatedKfd::retry_debug_notifications(pid_t target_pid, bool invoke_result
     if (queues.empty() && process_mask == 0)
       return 0;
     session_generation = session->second.generation;
+    exception_mask_generation = session->second.exception_mask_generation;
     if (invoke_result_hook) {
       result_hook = debug_notification_result_hook_for_testing_;
       write_hook = debug_notification_write_hook_for_testing_;
@@ -3427,7 +3502,9 @@ int SimulatedKfd::retry_debug_notifications(pid_t target_pid, bool invoke_result
       return result;
     }
     session->second.pending_process_exception_mask &= ~process_mask;
-    if (result == 0) {
+    const bool subscription_unchanged =
+        session->second.exception_mask_generation == exception_mask_generation;
+    if (result == 0 && subscription_unchanged) {
       session->second.notified_process_exception_mask |=
           process_mask & session->second.exception_enable_mask;
     } else {
@@ -3440,7 +3517,8 @@ int SimulatedKfd::retry_debug_notifications(pid_t target_pid, bool invoke_result
         if (queue != proc->queue_snapshot_map_.end() &&
             queue->second.debug_notification_session_generation == session_generation)
           queue->second.finish_debug_notification(
-              pending.mask, result == 0 ? session->second.exception_enable_mask : 0);
+              pending.mask,
+              result == 0 && subscription_unchanged ? session->second.exception_enable_mask : 0);
       }
     }
   }
@@ -3707,6 +3785,7 @@ bool SimulatedKfd::notify_debug_event(const std::shared_ptr<KfdProcess> &proc, u
   UniqueDriverFd notifier;
   bool subscribed = false;
   uint64_t session_generation = 0;
+  uint64_t exception_mask_generation = 0;
   bool notification_pending = false;
   std::function<void(bool)> result_hook;
   std::function<void()> write_hook;
@@ -3719,6 +3798,7 @@ bool SimulatedKfd::notify_debug_event(const std::shared_ptr<KfdProcess> &proc, u
       return false;
     }
     session_generation = session->second.generation;
+    exception_mask_generation = session->second.exception_mask_generation;
     subscribed = (session->second.exception_enable_mask & exception_mask) != 0;
     if (subscribed && session->second.dbg_fd >= 0)
       notifier = UniqueDriverFd(duplicate_debug_notifier(session->second.dbg_fd));
@@ -3770,9 +3850,12 @@ bool SimulatedKfd::notify_debug_event(const std::shared_ptr<KfdProcess> &proc, u
         queue->second.debug_notification_session_generation != session_generation)
       return false;
     const bool still_subscribed = (exception_mask & session->second.exception_enable_mask) != 0;
-    queue->second.finish_debug_notification(exception_mask,
-                                            delivered && still_subscribed ? exception_mask : 0);
-    accepted = delivered && still_subscribed;
+    const bool subscription_unchanged =
+        session->second.exception_mask_generation == exception_mask_generation;
+    queue->second.finish_debug_notification(
+        exception_mask,
+        delivered && still_subscribed && subscription_unchanged ? exception_mask : 0);
+    accepted = delivered && still_subscribed && subscription_unchanged;
     if (!accepted && reserve_runtime_on_rejection)
       queue->second.begin_runtime_exception(exception_mask);
     if (!accepted && retain_on_rejection && still_subscribed)
@@ -5310,6 +5393,7 @@ int SimulatedKfd::debug_trap_ioctl(KfdProcess &caller, void *arg, int *target_me
   }
   case KFD_IOC_DBG_TRAP_SET_EXCEPTIONS_ENABLED: {
     const uint64_t enabled_mask = args->set_exceptions_enabled.exception_mask;
+    const bool mask_changed = session_it->second.exception_enable_mask != enabled_mask;
     const uint64_t disabled_mask = session_it->second.exception_enable_mask & ~enabled_mask;
     if (target_proc != nullptr && disabled_mask != 0) {
       std::lock_guard<std::mutex> alloc_lock(target_proc->alloc_mutex_);
@@ -5318,6 +5402,8 @@ int SimulatedKfd::debug_trap_ioctl(KfdProcess &caller, void *arg, int *target_me
       }
     }
     session_it->second.exception_enable_mask = enabled_mask;
+    if (mask_changed)
+      ++session_it->second.exception_mask_generation;
     session_it->second.notified_process_exception_mask &= enabled_mask;
     lk.unlock();
     const int result = retry_debug_notifications(target_pid, /*invoke_result_hook=*/true);
