@@ -214,6 +214,12 @@ function(amdsmi_configure_common_target _TARGET)
         target_include_directories(${_TARGET} PRIVATE ${AMDCUID_INCLUDE_DIR})
     endif()
 
+    # Compiles in test-only escape hatches (e.g. amdsmi_test_register_node_handle())
+    # that the GTest suite needs but that must not ship in production builds.
+    if(BUILD_TESTS)
+        target_compile_definitions(${_TARGET} PRIVATE BUILD_TESTS)
+    endif()
+
     target_link_directories(${_TARGET} PRIVATE ${CMAKE_CURRENT_BINARY_DIR}/nic/ai-nic/amdsmi_unified/build/)
 endfunction()
 

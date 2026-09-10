@@ -646,6 +646,39 @@ amdsmi_status_t amdsmi_get_switch_processor_handles(amdsmi_socket_handle socket_
   return AMDSMI_STATUS_SUCCESS;
 }
 
+// Registry of amdsmi_node_handle values that were actually handed out by
+// amdsmi_get_node_handle() (or, in unit tests only, injected via
+// amdsmi_test_register_node_handle() -- see amd_smi_test_internal.h). An
+// amdsmi_node_handle is internally a std::string* to a board sysfs path, but
+// callers only ever see it as an opaque void*; a caller can pass any
+// garbage-but-nonzero value through the public API. is_registered_node_handle()
+// lets consumers of a node_handle (amdsmi_get_npm_info(),
+// amdsmi_set_npm_limit()) confirm the pointer is one this library actually
+// vended *before* reinterpret_cast'ing and dereferencing it, so an
+// unregistered/garbage handle is rejected as AMDSMI_STATUS_INVAL instead of
+// being dereferenced as an arbitrary pointer.
+//
+// g_node_registered_pointers is checked by pointer identity only (no
+// dereference of the candidate handle), which is what makes the check safe
+// to run on a completely untrusted node_handle value. It is kept separate
+// from (but updated alongside) g_node_registry: the latter owns the
+// std::string storage for handles amdsmi_get_node_handle() itself allocated,
+// while the pointer set also accommodates test-injected handles that this
+// library does not own.
+namespace {
+std::mutex g_node_mu;
+std::map<std::string, std::unique_ptr<std::string>> g_node_registry;
+std::set<const void*> g_node_registered_pointers;
+
+bool is_registered_node_handle(amdsmi_node_handle node_handle) {
+  if (node_handle == nullptr) {
+    return false;
+  }
+  std::lock_guard<std::mutex> lk(g_node_mu);
+  return g_node_registered_pointers.find(node_handle) != g_node_registered_pointers.end();
+}
+}  // namespace
+
 amdsmi_status_t amdsmi_get_node_handle(amdsmi_processor_handle processor_handle,
                                        amdsmi_node_handle* node_handle) {
   AMDSMI_CHECK_INIT();
@@ -697,9 +730,10 @@ amdsmi_status_t amdsmi_get_node_handle(amdsmi_processor_handle processor_handle,
   }
 
   // Store board path so node handle remains valid for library lifetime.
-  static std::mutex g_node_mu;
-  static std::map<std::string, std::unique_ptr<std::string>> g_node_registry;
-
+  // g_node_mu/g_node_registry/g_node_registered_pointers are file-scope (see
+  // the anonymous namespace above amdsmi_get_node_handle()) so that
+  // is_registered_node_handle() can validate a node_handle from any caller,
+  // not just from within this function.
   std::string board_path = found_board.string();
   {
     std::lock_guard<std::mutex> lk(g_node_mu);
@@ -708,6 +742,7 @@ amdsmi_status_t amdsmi_get_node_handle(amdsmi_processor_handle processor_handle,
       auto ptr = std::make_unique<std::string>(board_path);
       amdsmi_node_handle h = reinterpret_cast<amdsmi_node_handle>(ptr.get());
       g_node_registry.emplace(board_path, std::move(ptr));
+      g_node_registered_pointers.insert(h);
       *node_handle = h;
     } else {
       *node_handle = reinterpret_cast<amdsmi_node_handle>(it->second.get());
@@ -716,6 +751,28 @@ amdsmi_status_t amdsmi_get_node_handle(amdsmi_processor_handle processor_handle,
 
   return AMDSMI_STATUS_SUCCESS;
 }
+
+// Test-only wrapper: registers a raw, test-fabricated amdsmi_node_handle as
+// valid in the same registry amdsmi_get_node_handle() populates, so that
+// is_registered_node_handle() (consulted by amdsmi_get_npm_info() and
+// amdsmi_set_npm_limit()) accepts it. Not declared in amdsmi.h -- internal
+// use via amd_smi_test_internal.h only. See that header for why this exists:
+// unit tests fabricate node_handle values directly (bypassing
+// amdsmi_get_node_handle()'s oam_id == 0 gate, which the test environment
+// cannot satisfy) and need a way to make that fabricated pointer pass the
+// production registered-handle check without weakening the check itself.
+// Guarded by BUILD_TESTS so this handle-forging escape hatch never ships in
+// a production build (see amd_smi_test_internal.h and src/CMakeLists.txt).
+#ifdef BUILD_TESTS
+amdsmi_status_t amdsmi_test_register_node_handle(amdsmi_node_handle node_handle) {
+  if (node_handle == nullptr) {
+    return AMDSMI_STATUS_INVAL;
+  }
+  std::lock_guard<std::mutex> lk(g_node_mu);
+  g_node_registered_pointers.insert(node_handle);
+  return AMDSMI_STATUS_SUCCESS;
+}
+#endif  // BUILD_TESTS
 
 amdsmi_status_t amdsmi_get_processor_count_from_handles(amdsmi_processor_handle* processor_handles,
                                                         uint32_t* processor_count,
@@ -1674,10 +1731,42 @@ amdsmi_status_t amdsmi_get_temp_metric(amdsmi_processor_handle processor_handle,
   return amdsmi_status;
 }
 
+// amdsmi_get_npm_info() memcpy's rsmi_npm_info_t directly into
+// amdsmi_npm_info_t; keep their shared fields byte-compatible so that copy
+// stays correct if either struct changes.
+static_assert(sizeof(amdsmi_npm_info_t) == sizeof(rsmi_npm_info_t),
+              "amdsmi_npm_info_t and rsmi_npm_info_t must stay the same size");
+static_assert(offsetof(amdsmi_npm_info_t, status) == offsetof(rsmi_npm_info_t, status),
+              "status offset mismatch between amdsmi_npm_info_t and rsmi_npm_info_t");
+static_assert(offsetof(amdsmi_npm_info_t, limit) == offsetof(rsmi_npm_info_t, limit),
+              "limit offset mismatch between amdsmi_npm_info_t and rsmi_npm_info_t");
+static_assert(offsetof(amdsmi_npm_info_t, ubb_power_threshold) ==
+                  offsetof(rsmi_npm_info_t, ubb_power_threshold),
+              "ubb_power_threshold offset mismatch between amdsmi_npm_info_t and rsmi_npm_info_t");
+static_assert(offsetof(amdsmi_npm_info_t, max_node_power_limit) ==
+                  offsetof(rsmi_npm_info_t, max_node_power_limit),
+              "max_node_power_limit offset mismatch between amdsmi_npm_info_t and rsmi_npm_info_t");
+static_assert(offsetof(amdsmi_npm_info_t, current_node_power) ==
+                  offsetof(rsmi_npm_info_t, current_node_power),
+              "current_node_power offset mismatch between amdsmi_npm_info_t and rsmi_npm_info_t");
+
 amdsmi_status_t amdsmi_get_npm_info(amdsmi_node_handle node_handle, amdsmi_npm_info_t* npm_info) {
   AMDSMI_CHECK_INIT();
 
   if (node_handle == nullptr || npm_info == nullptr) {
+    return AMDSMI_STATUS_INVAL;
+  }
+
+  // Reject any node_handle this library did not itself hand out (via
+  // amdsmi_get_node_handle(), or a test-registered stand-in -- see
+  // is_registered_node_handle()) *before* the cast/dereference below: an
+  // unprivileged caller could otherwise pass an arbitrary non-null value and
+  // have it dereferenced as a std::string* here, ahead of any privilege
+  // check further down the call chain.
+  // Behavior change: previously any non-null node_handle was dereferenced
+  // here; a caller-supplied garbage handle now fails with
+  // AMDSMI_STATUS_INVAL instead of crashing.
+  if (!is_registered_node_handle(node_handle)) {
     return AMDSMI_STATUS_INVAL;
   }
 
@@ -1707,6 +1796,41 @@ amdsmi_status_t amdsmi_get_npm_info(amdsmi_node_handle node_handle, amdsmi_npm_i
   std::memcpy(npm_info, &rsmi_npm_info, sizeof(amdsmi_npm_info_t));
 
   return AMDSMI_STATUS_SUCCESS;
+}
+
+amdsmi_status_t amdsmi_set_npm_limit(amdsmi_node_handle node_handle, uint64_t limit) {
+  AMDSMI_CHECK_INIT();
+
+  if (node_handle == nullptr) {
+    return AMDSMI_STATUS_INVAL;
+  }
+
+  // Reject any node_handle this library did not itself hand out (via
+  // amdsmi_get_node_handle(), or a test-registered stand-in -- see
+  // is_registered_node_handle()) *before* the cast/dereference below: an
+  // unprivileged caller could otherwise pass an arbitrary non-null value and
+  // have it dereferenced as a std::string* here, ahead of the
+  // REQUIRE_ROOT_ACCESS privilege check that only exists one layer down in
+  // rsmi_dev_npm_limit_set().
+  if (!is_registered_node_handle(node_handle)) {
+    return AMDSMI_STATUS_INVAL;
+  }
+
+  // Verify board path from node_handle
+  auto board_path_str = reinterpret_cast<std::string*>(node_handle);
+  if (board_path_str == nullptr || board_path_str->empty()) {
+    return AMDSMI_STATUS_INVAL;
+  }
+
+#ifdef ENABLE_WSL_BACKEND
+  if (amd::smi::WSLGPUBackend::IsActive()) {
+    return AMDSMI_STATUS_NOT_SUPPORTED;
+  }
+#endif
+
+  rsmi_status_t rstatus =
+      rsmi_dev_npm_limit_set(0, reinterpret_cast<uintptr_t>(node_handle), limit);
+  return amd::smi::rsmi_to_amdsmi_status(rstatus);
 }
 
 amdsmi_status_t amdsmi_get_gpu_vram_usage(amdsmi_processor_handle processor_handle,
