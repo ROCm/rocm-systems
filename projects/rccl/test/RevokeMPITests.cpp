@@ -592,19 +592,24 @@ size_t ddaTwoShotCountForRanks(int nRanks)
     return 0;
 }
 
-/**
- * COLL path needles are written to NCCL_DEBUG_FILE, not the per-rank TEST INFO
- * tee. Slice only that file: concatenating stderr and then substr(before.size())
- * skips the COLL lines on rank 0, whose TEST INFO is larger than the NCCL delta,
- * so ASSERT_MPI_TRUE fires before ncclCommRevoke and the incomplete AllReduce hangs.
- */
-bool ddaNcclDebugContainsNeedleSince(const MPIHelpers::TestLogAssertionContext& logCtx,
-                                     const std::string& ncclBefore, const char* needle)
+std::string ddaLogDelta(const std::string& now, const std::string& before)
 {
-    const std::string ncclNow = logCtx.readNcclDebugLog();
-    const std::string delta =
-        ncclNow.size() >= ncclBefore.size() ? ncclNow.substr(ncclBefore.size()) : ncclNow;
-    return delta.find(needle) != std::string::npos;
+    return now.size() >= before.size() ? now.substr(before.size()) : now;
+}
+
+// NCCL_DEBUG_FILE and the per-rank stderr tee grow independently. A suffix of
+// their concatenation is not the AllReduce delta (it can skip the COLL line
+// entirely). Slice each source, then search.
+bool ddaLogsContainNeedleSince(const MPIHelpers::TestLogAssertionContext& logCtx,
+                               const std::string& beforeNccl, const std::string& beforeStderr,
+                               const char* needle)
+{
+    const std::string ncclDelta =
+        ddaLogDelta(logCtx.readNcclDebugLog(), beforeNccl);
+    const std::string stderrDelta =
+        ddaLogDelta(logCtx.readPerRankStderrLog(), beforeStderr);
+    return ncclDelta.find(needle) != std::string::npos ||
+           stderrDelta.find(needle) != std::string::npos;
 }
 } // namespace
 
@@ -665,7 +670,8 @@ void RevokeDdaMPITest::runIncompleteDdaRevokeShrink(size_t count, const char* ne
     HIP_TEST_CHECK_GTEST_FAIL(zeroInitializeBuffer<float>(sendBuf, count));
     HIP_TEST_CHECK_GTEST_FAIL(zeroInitializeBuffer<float>(recvBuf, count));
 
-    const std::string ncclBefore = logCtx_->readNcclDebugLog();
+    const std::string beforeNccl   = logCtx_->readNcclDebugLog();
+    const std::string beforeStderr = logCtx_->readPerRankStderrLog();
     if(rank != skipRank)
     {
         ASSERT_EQ(ncclSuccess,
@@ -675,7 +681,8 @@ void RevokeDdaMPITest::runIncompleteDdaRevokeShrink(size_t count, const char* ne
     MPI_Barrier(MPI_COMM_WORLD);
 
     const bool tookExpectedDdaPath =
-        rank == skipRank || ddaNcclDebugContainsNeedleSince(*logCtx_, ncclBefore, needle);
+        rank == skipRank ||
+        ddaLogsContainNeedleSince(*logCtx_, beforeNccl, beforeStderr, needle);
     ASSERT_MPI_TRUE(tookExpectedDdaPath);
 
     ASSERT_MPI_EQ(ncclSuccess, ncclCommRevoke(parent, NCCL_REVOKE_DEFAULT));
