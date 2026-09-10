@@ -559,6 +559,13 @@ struct ConSanPatchInfo : ConSanPatchMutationProduct, ConSanPatchFaultProof {};
 /// Image-level proof for one whole-text relocation transaction. This is not a
 /// semantic site patch: it accounts for the active relocated bodies while the
 /// ordinary patch inventory continues to describe only instrumented sites.
+struct ConSanTextRelocationDescriptorDelta {
+  uint64_t descriptor_file_offset = 0;
+  uint32_t original_compute_pgm_rsrc1 = 0;
+  uint32_t replacement_compute_pgm_rsrc1 = 0;
+};
+
 struct ConSanTextRelocationProof {
   uint64_t source_text_size = 0;
+  std::vector<ConSanTextRelocationDescriptorDelta> descriptor_rsrc1_deltas;
 };

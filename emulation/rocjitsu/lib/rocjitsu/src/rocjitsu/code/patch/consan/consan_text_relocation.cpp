@@ -676,6 +676,10 @@ relocate_consan_text(std::span<const uint8_t> descriptor_patched_image, rj_code_
   // has already applied its exact ABI/resource transaction to the input
   // descriptors, so retain those bytes rather than accepting DBT's general
   // cross-target descriptor normalization as a second owner of the ABI.
+  ConSanTextRelocationProof relocation_proof{
+      .source_text_size = source_text_size,
+      .descriptor_rsrc1_deltas = {},
+  };
   for (const AmdGpuKernelInfo &source_kernel : source.kernels()) {
     const auto output_kernel =
         std::ranges::find(output.kernels(), source_kernel.name, &AmdGpuKernelInfo::name);
@@ -706,9 +710,14 @@ relocate_consan_text(std::span<const uint8_t> descriptor_patched_image, rj_code_
           AMDHSA_BITS_GET(output_descriptor->compute_pgm_rsrc1,
                           rocr::llvm::amdhsa::COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT);
       if (output_sgprs > source_sgprs) {
+        const uint32_t original_rsrc1 = source_descriptor->compute_pgm_rsrc1;
         AMDHSA_BITS_SET(source_descriptor->compute_pgm_rsrc1,
                         rocr::llvm::amdhsa::COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT,
                         output_sgprs);
+        relocation_proof.descriptor_rsrc1_deltas.push_back(
+            {.descriptor_file_offset = source_kernel.descriptor_file_offset,
+             .original_compute_pgm_rsrc1 = original_rsrc1,
+             .replacement_compute_pgm_rsrc1 = source_descriptor->compute_pgm_rsrc1});
       }
     }
     if (!write_kernel_descriptor(std::span<uint8_t>(translated.elf_bytes),
@@ -739,7 +748,7 @@ relocate_consan_text(std::span<const uint8_t> descriptor_patched_image, rj_code_
       .placements = std::move(translated.text_placements),
       .marker_placements = std::move(translated.client_marker_placements),
       .text_size = output.text_sections().front()->size(),
-      .relocation = ConSanTextRelocationProof{source_text_size},
+      .relocation = std::move(relocation_proof),
   };
 }
 

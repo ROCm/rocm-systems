@@ -202,22 +202,26 @@ before its final analysis verdict, so that cell remains yellow. Artifacts are
 `/tmp/consan-validation-gfx950-scatter-all-physical-20260910-a` and
 `/tmp/consan-validation-gfx950-norm-all-physical-20260910-a`.
 
-The same refresh found current-object regressions in the two large PyTorch
-rows. `torch.mode` preserves its exact value/index oracle in Record/Replay,
-Sampled, and Inline Shadow, but those profiles respectively cover
-26,398/26,426, 25,704/26,426, and 26,314/26,426 accesses; Sampled also covers
-only 2,659/4,359 barriers. SuperCollider rejects the 11.6 MB rocPRIM fat code
-object before execution because final validation sees descriptor changes in
-multiple architecture variants that are not owned by a ConSan resource plan.
-The incomplete clean profiles are localized rather than unexplained:
+The same refresh found current-object coverage regressions in three
+`torch.mode` profiles. Record/Replay, Sampled, and Inline Shadow preserve the
+exact value/index oracle, but respectively cover 26,398/26,426,
+25,704/26,426, and 26,314/26,426 accesses; Sampled also covers only
+2,659/4,359 barriers. The incomplete clean profiles are localized rather than
+unexplained:
 Record/Replay has 28 access resource failures, all `no_legal_window`; Inline
 Shadow has 112 such access resource failures; Sampled has 22 access resource
 failures plus 700 access placement/lowering failures, and 1,652 barrier
 resource failures plus 48 barrier placement/lowering failures.
-The artifact is
-`/tmp/consan-validation-gfx950-mode-all-physical-20260910-a`; a narrow
-single-granule hypothesis was tested physically and correctly refused the
-broader deltas, so no speculative relaxation was retained. `torch.topk`
+The artifact is `/tmp/consan-validation-gfx950-mode-all-physical-20260910-a`.
+The SuperCollider rejection was fixed without relaxing final validation: the
+text-relocation proof now records the exact per-descriptor before/after
+`COMPUTE_PGM_RSRC1` values when DBT must raise a non-target kernel's SGPR
+allocation to place its long-entry pair above the source SGPR extent. Final
+validation accepts only those exact proof-owned SGPR-granule changes. The
+physical rerun preserves the exact value/index oracle with complete static and
+dynamic analysis of 25,366/25,366 accesses in 10.68 seconds; its artifact is
+`/tmp/consan-validation-gfx950-mode-sc-relocation-proof-20260910-a`.
+`torch.topk`
 Record/Replay transforms with complete 231,322/231,322 access and
 11,423/11,423 barrier coverage, but the physical run terminates after 188.81
 seconds with `HSA_STATUS_ERROR_MEMORY_APERTURE_VIOLATION` before the exact
@@ -300,7 +304,7 @@ Legend: 🩶 unseen · 🟥 broken before useful evidence · 🟧 below 80% aggr
 | Test corpus | P1 | HIP Stream-K two-tile (`hip-streamk-two-tile-m256-n256-k256`) | 🟩 physical clean revalidated; exact; 80/80 accesses; retained qualified exact-one initial-tile publication miss | 🟩 physical clean revalidated; exact/complete with zero diagnostics; 80/80 accesses, 5/5 barriers, 2/2 atomics, and 2/2 fences | 🟩 physical clean revalidated; exact/complete with zero diagnostics; 80/80 accesses, 5/5 barriers, 2/2 atomics, and 2/2 fences | 🟨 current physical exact oracle and static coverage complete at 80/80 accesses, 5/5 barriers, 2/2 atomics, and 2/2 fences; six full-device launches exceed the 256-bank executable-lifetime exact shadow with 1,814,097 incomplete events |
 | Test corpus | P2 | rocBLAS SGEMM square-64 (`rocblas-sgemm-square-64`) | 🟩 physical exact/complete; 49,435/49,435 accesses; 43.233x paired overhead; qualified exact-one initial-tile publication miss | 🟩 physical exact/complete; 49,435/49,435 accesses and 4,997/4,997 barriers; 108.281x paired overhead; exact-one publication fault diagnosed | 🟩 physical exact/complete; 49,435/49,435 accesses and 4,997/4,997 barriers; 86.153x paired overhead; qualified exact-one publication miss | 🟩 physical exact/complete; 49,435/49,435 accesses and 4,997/4,997 barriers; 90.074x paired overhead; exact-one publication fault diagnosed |
 | Tensile | P0 | gfx950 Stream-K SGEMM (`tensile-gfx950-lds-positive`) | 🟩 physical exact/complete; 48/48 accesses and 9/9 barriers; current-object wrong-address fault diagnosed | 🟩 physical exact/complete; 48/48 accesses and 9/9 barriers; current-object wrong-address fault diagnosed | 🟩 physical exact/complete; 48/48 accesses and 9/9 barriers; qualified current-object wrong-address miss | 🟩 physical exact/complete; 48/48 accesses and 9/9 barriers; current-object wrong-address fault diagnosed |
-| PyTorch | P0 | `torch.mode` (`pytorch-torch-mode`) | 🟥 current physical rocPRIM fat object rejected before execution on unplanned multi-architecture descriptor deltas | 🟨 physical exact oracle and dynamic analysis complete; static access coverage 26,398/26,426, barriers 4,359/4,359 | 🟨 physical exact oracle and dynamic analysis complete; static coverage 25,704/26,426 accesses and 2,659/4,359 barriers | 🟨 physical exact oracle and dynamic analysis complete; static access coverage 26,314/26,426, barriers 4,359/4,359 |
+| PyTorch | P0 | `torch.mode` (`pytorch-torch-mode`) | 🟩 physical exact/complete after exact relocation-owned descriptor proof; 25,366/25,366 accesses; 10.68 s | 🟨 physical exact oracle and dynamic analysis complete; static access coverage 26,398/26,426, barriers 4,359/4,359 | 🟨 physical exact oracle and dynamic analysis complete; static coverage 25,704/26,426 accesses and 2,659/4,359 barriers | 🟨 physical exact oracle and dynamic analysis complete; static access coverage 26,314/26,426, barriers 4,359/4,359 |
 | PyTorch | P0 | `torch.topk` (`pytorch-torch-topk`) | 🟩 gfx950 emulation exact/complete; 239,442/239,442 accesses; 138.39 s | 🟧 current physical transformation is complete at 231,322/231,322 accesses and 11,423/11,423 barriers, but execution aborts with an HSA memory-aperture violation before the oracle at 188.81 s; short follow-up intentionally stopped without verdict | 🟩 gfx950 emulation exact/complete with zero diagnostics; 239,730/239,730 accesses and 11,423/11,423 barriers; 228.82 s | 🟩 gfx950 emulation exact/complete with zero diagnostics; 239,730/239,730 accesses and 11,423/11,423 barriers; 391.97 s |
 | PyTorch | P1 | `torch.sort` (`pytorch-torch-sort`) | 🟩 physical exact/complete; 53,064/53,064 accesses; 39.13 s | 🟨 current physical run reaches the intentional 45-s cap during main-object transformation, before oracle or final analysis; retained prior gfx950-emulation exact/complete result | 🟨 current physical run reaches the intentional 45-s cap during main-object transformation, before oracle or final analysis; retained prior exact/complete and qualified-fault evidence | 🟩 gfx950 emulation exact/complete with zero diagnostics; 56,884/56,884 accesses and 6,032/6,032 barriers; exact-one key-load retirement fault diagnosed; 198.10 s |
 | PyTorch | P1 | `torch.histc` (`pytorch-torch-histc`) | 🟩 physical FP32/FP64 exact/complete; 110/110 accesses; 1.39 s | 🟩 physical FP32/FP64 exact/complete with zero diagnostics; 152/152 accesses and 84/84 barriers; 7.78 s | 🟩 physical FP32/FP64 exact/complete; 152/152 accesses and 84/84 barriers; 1.44 s | 🟩 physical FP32/FP64 exact/complete; 152/152 accesses and 84/84 barriers; retained fault evidence; 4.35 s |

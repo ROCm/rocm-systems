@@ -2143,6 +2143,30 @@ void validate_resource_and_metadata_deltas(const FinalValidationEnvironment &env
       normalized.private_segment_fixed_size = original_descriptor.private_segment_fixed_size;
       normalized.group_segment_fixed_size = original_descriptor.group_segment_fixed_size;
     }
+    if (text_relocated && !requirement.allow_resource_delta &&
+        !has_unscoped_resource_growth) {
+      const auto &descriptor_deltas = result.text_relocation->descriptor_rsrc1_deltas;
+      const auto delta = std::ranges::find(
+          descriptor_deltas, original_kernel.descriptor_file_offset,
+          &ConSanTextRelocationDescriptorDelta::descriptor_file_offset);
+      if (delta != descriptor_deltas.end()) {
+        uint32_t normalized_rsrc1 = delta->replacement_compute_pgm_rsrc1;
+        AMDHSA_BITS_SET(normalized_rsrc1,
+                        kd::COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT,
+                        AMDHSA_BITS_GET(delta->original_compute_pgm_rsrc1,
+                                        kd::COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT));
+        if (delta->original_compute_pgm_rsrc1 != original_descriptor.compute_pgm_rsrc1 ||
+            delta->replacement_compute_pgm_rsrc1 != replacement_descriptor.compute_pgm_rsrc1 ||
+            normalized_rsrc1 != original_descriptor.compute_pgm_rsrc1) {
+          errors.emplace_back(
+              "ConSan final validation found an invalid relocation-owned descriptor delta for "
+              "kernel '" +
+              original_kernel.name + "'");
+        } else {
+          normalized.compute_pgm_rsrc1 = original_descriptor.compute_pgm_rsrc1;
+        }
+      }
+    }
     if (std::memcmp(&normalized, &original_descriptor, sizeof(normalized)) != 0) {
       const auto *normalized_bytes = reinterpret_cast<const uint8_t *>(&normalized);
       const auto *original_descriptor_bytes =
