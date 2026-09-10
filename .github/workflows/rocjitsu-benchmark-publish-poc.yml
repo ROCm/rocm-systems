@@ -130,7 +130,7 @@ jobs:
           retention-days: 14
 
       - name: Preserve benchmark failure
-        if: always() && steps.benchmark.outcome != 'success'
+        if: always() && steps.benchmark.outcome == 'failure'
         run: exit 1
 
   publish:

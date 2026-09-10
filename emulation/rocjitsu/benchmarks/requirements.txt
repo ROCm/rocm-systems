@@ -1,5 +1,8 @@
 --index-url https://rocm.nightlies.amd.com/whl-multi-arch/
 --only-binary=:all:
+# The ROCm meta-package is published only as a small pure-Python source archive.
+--no-binary=rocm
+rocm==10.1.0a20260812
 rocm-sdk-devel==10.1.0a20260812
 rocm-sdk-libraries==10.1.0a20260812
 rocm-sdk-device-gfx950==10.1.0a20260812

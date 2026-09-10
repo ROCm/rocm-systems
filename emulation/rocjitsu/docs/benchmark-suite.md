@@ -64,7 +64,7 @@ putting reference computation or output copies inside the timing boundary.
 
 ## Install and build
 
-Use Python 3.12 and install the pinned binary dependencies:
+Use Python 3.12 and install the pinned dependencies:
 
 ```bash
 src=/path/to/rocm-systems/emulation/rocjitsu
@@ -77,9 +77,10 @@ python=/path/to/rocjitsu-benchmark-env/bin/python
 The requirements use AMD's multi-architecture wheel index and provide the ROCm
 SDK, PyTorch, Triton, hipBLASLt, and target-specific gfx950/gfx1250 device
 libraries. The benchmark build consumes those installed packages; it does not
-fetch or build hipBLASLt, TensileLite, or Python requirements from source. The
-requirements file rejects source distributions if a matching binary package is
-unavailable.
+fetch or build hipBLASLt, TensileLite, or other native dependencies from
+source. The native packages are binary-only. The index publishes the 27 KiB
+pure-Python `rocm` metadata package only as a source archive, so it is the sole
+exception; pip builds no ROCm library or benchmark component from source.
 
 Configure a Release build against the SDK installed in the environment:
 
