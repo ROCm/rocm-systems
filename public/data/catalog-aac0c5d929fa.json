@@ -1,0 +1,424 @@
+{
+  "format": "rocjitsu.dashboard.catalog",
+  "isDemo": true,
+  "repository": "https://github.com/ROCm/rocm-systems",
+  "schemaVersion": 1,
+  "targets": [
+    "gfx1250",
+    "gfx950"
+  ],
+  "testCatalog": [
+    {
+      "dataType": "bf16",
+      "execMode": "functional",
+      "id": "tensile.gemm_bf16_batched",
+      "name": "Batched BF16 GEMM",
+      "numThreads": 1,
+      "operation": "GEMM",
+      "problem": {
+        "accumulatorDtype": "fp32",
+        "batchCount": 16,
+        "beta": 0,
+        "inputDtype": "bf16",
+        "inputPattern": "A=0x3c bytes, B=0x38 bytes",
+        "k": 160,
+        "m": 256,
+        "n": 77,
+        "outputDtype": "bf16",
+        "transA": "N",
+        "transB": "T"
+      },
+      "suite": "TensileLite"
+    },
+    {
+      "dataType": "fp16",
+      "execMode": "functional",
+      "id": "tensile.gemm_fp16",
+      "name": "FP16 GEMM",
+      "numThreads": 1,
+      "operation": "GEMM",
+      "problem": {
+        "accumulatorDtype": "fp32",
+        "batchCount": 1,
+        "beta": 0,
+        "inputDtype": "fp16",
+        "inputPattern": "A=0x3c bytes, B=0x38 bytes",
+        "k": 512,
+        "m": 512,
+        "n": 512,
+        "outputDtype": "fp16",
+        "transA": "N",
+        "transB": "N"
+      },
+      "suite": "TensileLite"
+    },
+    {
+      "dataType": "fp8",
+      "execMode": "functional",
+      "id": "tensile.gemm_fp8_scaled",
+      "name": "Scaled FP8 GEMM",
+      "numThreads": 1,
+      "operation": "GEMM",
+      "problem": {
+        "accumulatorDtype": "fp32",
+        "batchCount": 1,
+        "beta": 0,
+        "inputDtype": "fp8",
+        "inputPattern": "A=0x3c bytes, B=0x38 bytes",
+        "k": 128,
+        "m": 128,
+        "n": 128,
+        "outputDtype": "bf16",
+        "scalarScales": true,
+        "transA": "T",
+        "transB": "N"
+      },
+      "suite": "TensileLite"
+    },
+    {
+      "dataType": "fp32",
+      "execMode": "functional",
+      "id": "triton.atomic_add_fp32_contended",
+      "name": "Contended FP32 atomic add",
+      "numThreads": 1,
+      "operation": "Atomic add",
+      "problem": {
+        "buckets": 256,
+        "dtype": "fp32",
+        "elements": 131072,
+        "inputPattern": "deterministic_nonzero_constant_by_phase",
+        "launch": {
+          "blockSize": 256,
+          "grid": [
+            512
+          ],
+          "numStages": 1,
+          "numWarps": 8
+        }
+      },
+      "suite": "Triton"
+    },
+    {
+      "dataType": "fp16",
+      "execMode": "functional",
+      "id": "triton.attention_fp16",
+      "name": "FP16 attention",
+      "numThreads": 1,
+      "operation": "Attention",
+      "problem": {
+        "batch": 1,
+        "causal": false,
+        "dtype": "fp16",
+        "headDimension": 64,
+        "heads": 8,
+        "inputPattern": "deterministic_nonzero_constant_by_phase",
+        "launch": {
+          "block": [
+            16,
+            128,
+            64
+          ],
+          "grid": [
+            8,
+            8
+          ],
+          "numStages": 2,
+          "numWarps": 8
+        },
+        "sequence": 128
+      },
+      "suite": "Triton"
+    },
+    {
+      "dataType": "fp32",
+      "execMode": "functional",
+      "id": "triton.copy_fp32_32m",
+      "name": "32 MiB contiguous FP32 copy",
+      "numThreads": 1,
+      "operation": "Copy",
+      "problem": {
+        "bytes": 33554432,
+        "dtype": "fp32",
+        "elements": 8388608,
+        "inputPattern": "deterministic_nonzero_constant_by_phase",
+        "launch": {
+          "blockSize": 1024,
+          "grid": [
+            8192
+          ],
+          "numStages": 1,
+          "numWarps": 4
+        }
+      },
+      "suite": "Triton"
+    },
+    {
+      "dataType": "fp32",
+      "execMode": "functional",
+      "id": "triton.gather_fp32_irregular",
+      "name": "Irregular FP32 gather",
+      "numThreads": 1,
+      "operation": "Gather",
+      "problem": {
+        "dtype": "fp32",
+        "indexDtype": "int64",
+        "indexOffset": 17,
+        "indexStride": 104729,
+        "inputPattern": "deterministic_nonzero_constant_by_phase",
+        "launch": {
+          "blockSize": 512,
+          "grid": [
+            8193
+          ],
+          "numStages": 1,
+          "numWarps": 4
+        },
+        "outputElements": 4194307,
+        "sourceElements": 8388608
+      },
+      "suite": "Triton"
+    },
+    {
+      "dataType": "bf16",
+      "execMode": "functional",
+      "id": "triton.gemm_bf16_aligned",
+      "name": "Aligned BF16 GEMM",
+      "numThreads": 1,
+      "operation": "GEMM",
+      "problem": {
+        "accumulatorDtype": "fp32",
+        "inputDtype": "bf16",
+        "inputPattern": "deterministic_nonzero_constant_by_phase",
+        "k": 512,
+        "launch": {
+          "block": [
+            64,
+            64,
+            32
+          ],
+          "grid": [
+            16
+          ],
+          "numStages": 2,
+          "numWarps": 4
+        },
+        "m": 256,
+        "n": 256,
+        "outputDtype": "bf16",
+        "transA": "N",
+        "transB": "N"
+      },
+      "suite": "Triton"
+    },
+    {
+      "dataType": "bf16",
+      "execMode": "functional",
+      "id": "triton.gemm_bf16_ragged",
+      "name": "Ragged BF16 GEMM",
+      "numThreads": 1,
+      "operation": "GEMM",
+      "problem": {
+        "accumulatorDtype": "fp32",
+        "inputDtype": "bf16",
+        "inputPattern": "deterministic_nonzero_constant_by_phase",
+        "k": 510,
+        "launch": {
+          "block": [
+            64,
+            64,
+            32
+          ],
+          "grid": [
+            16
+          ],
+          "numStages": 2,
+          "numWarps": 4
+        },
+        "m": 250,
+        "n": 250,
+        "outputDtype": "bf16",
+        "transA": "N",
+        "transB": "N"
+      },
+      "suite": "Triton"
+    },
+    {
+      "dataType": "bf16",
+      "execMode": "functional",
+      "id": "triton.gpt_oss_gqa_bf16",
+      "name": "GPT-OSS-20B BF16 sliding GQA",
+      "numThreads": 1,
+      "operation": "Attention",
+      "problem": {
+        "batch": 1,
+        "causal": true,
+        "dtype": "bf16",
+        "headDimension": 64,
+        "inputPattern": "deterministic_nonzero_constant_by_phase",
+        "keyValueHeads": 8,
+        "launch": {
+          "block": [
+            16,
+            128,
+            64
+          ],
+          "grid": [
+            8,
+            64
+          ],
+          "numStages": 2,
+          "numWarps": 8
+        },
+        "queryHeads": 64,
+        "queryHeadsPerKeyValueHead": 8,
+        "sequence": 128,
+        "window": 128
+      },
+      "suite": "GPT-OSS"
+    },
+    {
+      "dataType": "bf16",
+      "execMode": "functional",
+      "id": "triton.gpt_oss_rmsnorm_bf16",
+      "name": "GPT-OSS-20B BF16 RMSNorm",
+      "numThreads": 1,
+      "operation": "RMSNorm",
+      "problem": {
+        "columns": 2880,
+        "dtype": "bf16",
+        "epsilon": 1e-05,
+        "inputPattern": "deterministic_nonzero_constant_by_phase",
+        "launch": {
+          "blockSize": 4096,
+          "grid": [
+            128
+          ],
+          "numStages": 1,
+          "numWarps": 8
+        },
+        "rows": 128,
+        "weighted": true
+      },
+      "suite": "GPT-OSS"
+    },
+    {
+      "dataType": "bf16",
+      "execMode": "functional",
+      "id": "triton.rmsnorm_bf16",
+      "name": "BF16 RMSNorm",
+      "numThreads": 1,
+      "operation": "RMSNorm",
+      "problem": {
+        "columns": 4096,
+        "dtype": "bf16",
+        "epsilon": 1e-05,
+        "inputPattern": "deterministic_nonzero_constant_by_phase",
+        "launch": {
+          "blockSize": 4096,
+          "grid": [
+            128
+          ],
+          "numStages": 1,
+          "numWarps": 8
+        },
+        "rows": 128
+      },
+      "suite": "Triton"
+    },
+    {
+      "dataType": "fp16",
+      "execMode": "functional",
+      "id": "triton.softmax_fp16_aligned",
+      "name": "Aligned FP16 softmax",
+      "numThreads": 1,
+      "operation": "Softmax",
+      "problem": {
+        "columns": 4096,
+        "dtype": "fp16",
+        "inputPattern": "deterministic_nonzero_constant_by_phase",
+        "launch": {
+          "blockSize": 4096,
+          "grid": [
+            64
+          ],
+          "numStages": 1,
+          "numWarps": 8
+        },
+        "rows": 64
+      },
+      "suite": "Triton"
+    },
+    {
+      "dataType": "fp16",
+      "execMode": "functional",
+      "id": "triton.softmax_fp16_boundary",
+      "name": "Boundary FP16 softmax",
+      "numThreads": 1,
+      "operation": "Softmax",
+      "problem": {
+        "columns": 4097,
+        "dtype": "fp16",
+        "inputPattern": "deterministic_nonzero_constant_by_phase",
+        "launch": {
+          "blockSize": 8192,
+          "grid": [
+            64
+          ],
+          "numStages": 1,
+          "numWarps": 8
+        },
+        "rows": 64
+      },
+      "suite": "Triton"
+    },
+    {
+      "dataType": "fp16",
+      "execMode": "functional",
+      "id": "triton.transpose_fp16_2048",
+      "name": "2048x2048 FP16 transpose",
+      "numThreads": 1,
+      "operation": "Transpose",
+      "problem": {
+        "columns": 2048,
+        "dtype": "fp16",
+        "inputPattern": "deterministic_nonzero_constant_by_phase",
+        "launch": {
+          "grid": [
+            64,
+            64
+          ],
+          "numStages": 1,
+          "numWarps": 8,
+          "tile": [
+            32,
+            32
+          ]
+        },
+        "rows": 2048
+      },
+      "suite": "Triton"
+    },
+    {
+      "dataType": "fp32",
+      "execMode": "functional",
+      "id": "triton.vector_add_fp32_boundary",
+      "name": "Boundary FP32 vector add",
+      "numThreads": 1,
+      "operation": "Vector add",
+      "problem": {
+        "dtype": "fp32",
+        "elements": 8388611,
+        "inputPattern": "deterministic_nonzero_constant_by_phase",
+        "launch": {
+          "blockSize": 1024,
+          "grid": [
+            8193
+          ],
+          "numStages": 1,
+          "numWarps": 4
+        }
+      },
+      "suite": "Triton"
+    }
+  ]
+}

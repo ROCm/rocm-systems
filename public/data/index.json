@@ -1,0 +1,12 @@
+{
+  "catalog": "catalog-aac0c5d929fa.json",
+  "format": "rocjitsu.dashboard.index",
+  "generatedAt": "2026-09-10T18:58:06.893024Z",
+  "runs": [
+    {
+      "path": "runs/github-34513707603-attempt-1.json",
+      "runId": "github-34513707603-attempt-1"
+    }
+  ],
+  "schemaVersion": 1
+}

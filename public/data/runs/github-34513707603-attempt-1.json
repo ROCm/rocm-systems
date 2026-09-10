@@ -1,0 +1,1097 @@
+{
+  "branch": "develop",
+  "commitTimestamp": "2026-09-10T18:20:00Z",
+  "configurationId": "plugins-none-v1",
+  "environmentId": "azure-linux-scale-rocm-u2404-4150afe4-rocm-10.1.0a20260812",
+  "format": "rocjitsu.dashboard.run",
+  "provenance": {
+    "commitMessage": "Use a single simulator thread for rocjitsu benchmarks",
+    "details": [
+      {
+        "key": "sourceRef",
+        "label": "Source ref",
+        "value": "users/IanWood1/rocjitsu-benchmark-ci-poc"
+      },
+      {
+        "key": "buildType",
+        "label": "Build type",
+        "value": "Release"
+      },
+      {
+        "key": "rocmSdkVersion",
+        "label": "ROCm SDK",
+        "value": "10.1.0a20260812"
+      },
+      {
+        "key": "pythonVersion",
+        "label": "Python",
+        "value": "3.12.14"
+      },
+      {
+        "key": "torchVersion",
+        "label": "PyTorch",
+        "value": "2.14.0a0+rocm10.1.0a20260812"
+      },
+      {
+        "key": "tritonVersion",
+        "label": "Triton",
+        "value": "3.8.0+git675c5987.rocm10.1.0a20260812"
+      }
+    ],
+    "rocjitsuCommitSha": "e5c20322ba694f304c8a1dd1a30d9cdc9d92daf3"
+  },
+  "runId": "github-34513707603-attempt-1",
+  "schemaVersion": 1,
+  "tests": [
+    {
+      "dataType": "fp32",
+      "durationSeconds": 0.749235598,
+      "error": null,
+      "execMode": "functional",
+      "exitCode": 0,
+      "logicalTestId": "triton.copy_fp32_32m",
+      "name": "32 MiB contiguous FP32 copy",
+      "numThreads": 1,
+      "operation": "Copy",
+      "problem": {
+        "bytes": 33554432,
+        "dtype": "fp32",
+        "elements": 8388608,
+        "inputPattern": "deterministic_nonzero_constant_by_phase",
+        "launch": {
+          "blockSize": 1024,
+          "grid": [
+            8192
+          ],
+          "numStages": 1,
+          "numWarps": 4
+        }
+      },
+      "status": "completed",
+      "suite": "Triton",
+      "target": "gfx950",
+      "testId": "gfx950:triton.copy_fp32_32m",
+      "timedOut": false
+    },
+    {
+      "dataType": "fp32",
+      "durationSeconds": 0.776351444,
+      "error": null,
+      "execMode": "functional",
+      "exitCode": 0,
+      "logicalTestId": "triton.copy_fp32_32m",
+      "name": "32 MiB contiguous FP32 copy",
+      "numThreads": 1,
+      "operation": "Copy",
+      "problem": {
+        "bytes": 33554432,
+        "dtype": "fp32",
+        "elements": 8388608,
+        "inputPattern": "deterministic_nonzero_constant_by_phase",
+        "launch": {
+          "blockSize": 1024,
+          "grid": [
+            8192
+          ],
+          "numStages": 1,
+          "numWarps": 4
+        }
+      },
+      "status": "completed",
+      "suite": "Triton",
+      "target": "gfx1250",
+      "testId": "gfx1250:triton.copy_fp32_32m",
+      "timedOut": false
+    },
+    {
+      "dataType": "fp32",
+      "durationSeconds": 3.976602478,
+      "error": null,
+      "execMode": "functional",
+      "exitCode": 0,
+      "logicalTestId": "triton.vector_add_fp32_boundary",
+      "name": "Boundary FP32 vector add",
+      "numThreads": 1,
+      "operation": "Vector add",
+      "problem": {
+        "dtype": "fp32",
+        "elements": 8388611,
+        "inputPattern": "deterministic_nonzero_constant_by_phase",
+        "launch": {
+          "blockSize": 1024,
+          "grid": [
+            8193
+          ],
+          "numStages": 1,
+          "numWarps": 4
+        }
+      },
+      "status": "completed",
+      "suite": "Triton",
+      "target": "gfx950",
+      "testId": "gfx950:triton.vector_add_fp32_boundary",
+      "timedOut": false
+    },
+    {
+      "dataType": "fp32",
+      "durationSeconds": 6.136256794,
+      "error": null,
+      "execMode": "functional",
+      "exitCode": 0,
+      "logicalTestId": "triton.vector_add_fp32_boundary",
+      "name": "Boundary FP32 vector add",
+      "numThreads": 1,
+      "operation": "Vector add",
+      "problem": {
+        "dtype": "fp32",
+        "elements": 8388611,
+        "inputPattern": "deterministic_nonzero_constant_by_phase",
+        "launch": {
+          "blockSize": 1024,
+          "grid": [
+            8193
+          ],
+          "numStages": 1,
+          "numWarps": 4
+        }
+      },
+      "status": "completed",
+      "suite": "Triton",
+      "target": "gfx1250",
+      "testId": "gfx1250:triton.vector_add_fp32_boundary",
+      "timedOut": false
+    },
+    {
+      "dataType": "fp16",
+      "durationSeconds": 2.601622597,
+      "error": null,
+      "execMode": "functional",
+      "exitCode": 0,
+      "logicalTestId": "triton.transpose_fp16_2048",
+      "name": "2048x2048 FP16 transpose",
+      "numThreads": 1,
+      "operation": "Transpose",
+      "problem": {
+        "columns": 2048,
+        "dtype": "fp16",
+        "inputPattern": "deterministic_nonzero_constant_by_phase",
+        "launch": {
+          "grid": [
+            64,
+            64
+          ],
+          "numStages": 1,
+          "numWarps": 8,
+          "tile": [
+            32,
+            32
+          ]
+        },
+        "rows": 2048
+      },
+      "status": "completed",
+      "suite": "Triton",
+      "target": "gfx950",
+      "testId": "gfx950:triton.transpose_fp16_2048",
+      "timedOut": false
+    },
+    {
+      "dataType": "fp16",
+      "durationSeconds": 2.276126672,
+      "error": null,
+      "execMode": "functional",
+      "exitCode": 0,
+      "logicalTestId": "triton.transpose_fp16_2048",
+      "name": "2048x2048 FP16 transpose",
+      "numThreads": 1,
+      "operation": "Transpose",
+      "problem": {
+        "columns": 2048,
+        "dtype": "fp16",
+        "inputPattern": "deterministic_nonzero_constant_by_phase",
+        "launch": {
+          "grid": [
+            64,
+            64
+          ],
+          "numStages": 1,
+          "numWarps": 8,
+          "tile": [
+            32,
+            32
+          ]
+        },
+        "rows": 2048
+      },
+      "status": "completed",
+      "suite": "Triton",
+      "target": "gfx1250",
+      "testId": "gfx1250:triton.transpose_fp16_2048",
+      "timedOut": false
+    },
+    {
+      "dataType": "fp32",
+      "durationSeconds": 4.184934403,
+      "error": null,
+      "execMode": "functional",
+      "exitCode": 0,
+      "logicalTestId": "triton.gather_fp32_irregular",
+      "name": "Irregular FP32 gather",
+      "numThreads": 1,
+      "operation": "Gather",
+      "problem": {
+        "dtype": "fp32",
+        "indexDtype": "int64",
+        "indexOffset": 17,
+        "indexStride": 104729,
+        "inputPattern": "deterministic_nonzero_constant_by_phase",
+        "launch": {
+          "blockSize": 512,
+          "grid": [
+            8193
+          ],
+          "numStages": 1,
+          "numWarps": 4
+        },
+        "outputElements": 4194307,
+        "sourceElements": 8388608
+      },
+      "status": "completed",
+      "suite": "Triton",
+      "target": "gfx950",
+      "testId": "gfx950:triton.gather_fp32_irregular",
+      "timedOut": false
+    },
+    {
+      "dataType": "fp32",
+      "durationSeconds": 5.226284532,
+      "error": null,
+      "execMode": "functional",
+      "exitCode": 0,
+      "logicalTestId": "triton.gather_fp32_irregular",
+      "name": "Irregular FP32 gather",
+      "numThreads": 1,
+      "operation": "Gather",
+      "problem": {
+        "dtype": "fp32",
+        "indexDtype": "int64",
+        "indexOffset": 17,
+        "indexStride": 104729,
+        "inputPattern": "deterministic_nonzero_constant_by_phase",
+        "launch": {
+          "blockSize": 512,
+          "grid": [
+            8193
+          ],
+          "numStages": 1,
+          "numWarps": 4
+        },
+        "outputElements": 4194307,
+        "sourceElements": 8388608
+      },
+      "status": "completed",
+      "suite": "Triton",
+      "target": "gfx1250",
+      "testId": "gfx1250:triton.gather_fp32_irregular",
+      "timedOut": false
+    },
+    {
+      "dataType": "fp32",
+      "durationSeconds": 6.189732986,
+      "error": null,
+      "execMode": "functional",
+      "exitCode": 0,
+      "logicalTestId": "triton.atomic_add_fp32_contended",
+      "name": "Contended FP32 atomic add",
+      "numThreads": 1,
+      "operation": "Atomic add",
+      "problem": {
+        "buckets": 256,
+        "dtype": "fp32",
+        "elements": 131072,
+        "inputPattern": "deterministic_nonzero_constant_by_phase",
+        "launch": {
+          "blockSize": 256,
+          "grid": [
+            512
+          ],
+          "numStages": 1,
+          "numWarps": 8
+        }
+      },
+      "status": "completed",
+      "suite": "Triton",
+      "target": "gfx950",
+      "testId": "gfx950:triton.atomic_add_fp32_contended",
+      "timedOut": false
+    },
+    {
+      "dataType": "fp32",
+      "durationSeconds": 6.229274176,
+      "error": null,
+      "execMode": "functional",
+      "exitCode": 0,
+      "logicalTestId": "triton.atomic_add_fp32_contended",
+      "name": "Contended FP32 atomic add",
+      "numThreads": 1,
+      "operation": "Atomic add",
+      "problem": {
+        "buckets": 256,
+        "dtype": "fp32",
+        "elements": 131072,
+        "inputPattern": "deterministic_nonzero_constant_by_phase",
+        "launch": {
+          "blockSize": 256,
+          "grid": [
+            512
+          ],
+          "numStages": 1,
+          "numWarps": 8
+        }
+      },
+      "status": "completed",
+      "suite": "Triton",
+      "target": "gfx1250",
+      "testId": "gfx1250:triton.atomic_add_fp32_contended",
+      "timedOut": false
+    },
+    {
+      "dataType": "fp16",
+      "durationSeconds": 0.2158318,
+      "error": null,
+      "execMode": "functional",
+      "exitCode": 0,
+      "logicalTestId": "triton.softmax_fp16_aligned",
+      "name": "Aligned FP16 softmax",
+      "numThreads": 1,
+      "operation": "Softmax",
+      "problem": {
+        "columns": 4096,
+        "dtype": "fp16",
+        "inputPattern": "deterministic_nonzero_constant_by_phase",
+        "launch": {
+          "blockSize": 4096,
+          "grid": [
+            64
+          ],
+          "numStages": 1,
+          "numWarps": 8
+        },
+        "rows": 64
+      },
+      "status": "completed",
+      "suite": "Triton",
+      "target": "gfx950",
+      "testId": "gfx950:triton.softmax_fp16_aligned",
+      "timedOut": false
+    },
+    {
+      "dataType": "fp16",
+      "durationSeconds": 0.323542967,
+      "error": null,
+      "execMode": "functional",
+      "exitCode": 0,
+      "logicalTestId": "triton.softmax_fp16_aligned",
+      "name": "Aligned FP16 softmax",
+      "numThreads": 1,
+      "operation": "Softmax",
+      "problem": {
+        "columns": 4096,
+        "dtype": "fp16",
+        "inputPattern": "deterministic_nonzero_constant_by_phase",
+        "launch": {
+          "blockSize": 4096,
+          "grid": [
+            64
+          ],
+          "numStages": 1,
+          "numWarps": 8
+        },
+        "rows": 64
+      },
+      "status": "completed",
+      "suite": "Triton",
+      "target": "gfx1250",
+      "testId": "gfx1250:triton.softmax_fp16_aligned",
+      "timedOut": false
+    },
+    {
+      "dataType": "fp16",
+      "durationSeconds": 0.303532961,
+      "error": null,
+      "execMode": "functional",
+      "exitCode": 0,
+      "logicalTestId": "triton.softmax_fp16_boundary",
+      "name": "Boundary FP16 softmax",
+      "numThreads": 1,
+      "operation": "Softmax",
+      "problem": {
+        "columns": 4097,
+        "dtype": "fp16",
+        "inputPattern": "deterministic_nonzero_constant_by_phase",
+        "launch": {
+          "blockSize": 8192,
+          "grid": [
+            64
+          ],
+          "numStages": 1,
+          "numWarps": 8
+        },
+        "rows": 64
+      },
+      "status": "completed",
+      "suite": "Triton",
+      "target": "gfx950",
+      "testId": "gfx950:triton.softmax_fp16_boundary",
+      "timedOut": false
+    },
+    {
+      "dataType": "fp16",
+      "durationSeconds": 0.396388079,
+      "error": null,
+      "execMode": "functional",
+      "exitCode": 0,
+      "logicalTestId": "triton.softmax_fp16_boundary",
+      "name": "Boundary FP16 softmax",
+      "numThreads": 1,
+      "operation": "Softmax",
+      "problem": {
+        "columns": 4097,
+        "dtype": "fp16",
+        "inputPattern": "deterministic_nonzero_constant_by_phase",
+        "launch": {
+          "blockSize": 8192,
+          "grid": [
+            64
+          ],
+          "numStages": 1,
+          "numWarps": 8
+        },
+        "rows": 64
+      },
+      "status": "completed",
+      "suite": "Triton",
+      "target": "gfx1250",
+      "testId": "gfx1250:triton.softmax_fp16_boundary",
+      "timedOut": false
+    },
+    {
+      "dataType": "bf16",
+      "durationSeconds": 0.112640528,
+      "error": null,
+      "execMode": "functional",
+      "exitCode": 0,
+      "logicalTestId": "triton.rmsnorm_bf16",
+      "name": "BF16 RMSNorm",
+      "numThreads": 1,
+      "operation": "RMSNorm",
+      "problem": {
+        "columns": 4096,
+        "dtype": "bf16",
+        "epsilon": 1e-05,
+        "inputPattern": "deterministic_nonzero_constant_by_phase",
+        "launch": {
+          "blockSize": 4096,
+          "grid": [
+            128
+          ],
+          "numStages": 1,
+          "numWarps": 8
+        },
+        "rows": 128
+      },
+      "status": "completed",
+      "suite": "Triton",
+      "target": "gfx950",
+      "testId": "gfx950:triton.rmsnorm_bf16",
+      "timedOut": false
+    },
+    {
+      "dataType": "bf16",
+      "durationSeconds": 0.156199411,
+      "error": null,
+      "execMode": "functional",
+      "exitCode": 0,
+      "logicalTestId": "triton.rmsnorm_bf16",
+      "name": "BF16 RMSNorm",
+      "numThreads": 1,
+      "operation": "RMSNorm",
+      "problem": {
+        "columns": 4096,
+        "dtype": "bf16",
+        "epsilon": 1e-05,
+        "inputPattern": "deterministic_nonzero_constant_by_phase",
+        "launch": {
+          "blockSize": 4096,
+          "grid": [
+            128
+          ],
+          "numStages": 1,
+          "numWarps": 8
+        },
+        "rows": 128
+      },
+      "status": "completed",
+      "suite": "Triton",
+      "target": "gfx1250",
+      "testId": "gfx1250:triton.rmsnorm_bf16",
+      "timedOut": false
+    },
+    {
+      "dataType": "bf16",
+      "durationSeconds": 0.133493355,
+      "error": null,
+      "execMode": "functional",
+      "exitCode": 0,
+      "logicalTestId": "triton.gemm_bf16_aligned",
+      "name": "Aligned BF16 GEMM",
+      "numThreads": 1,
+      "operation": "GEMM",
+      "problem": {
+        "accumulatorDtype": "fp32",
+        "inputDtype": "bf16",
+        "inputPattern": "deterministic_nonzero_constant_by_phase",
+        "k": 512,
+        "launch": {
+          "block": [
+            64,
+            64,
+            32
+          ],
+          "grid": [
+            16
+          ],
+          "numStages": 2,
+          "numWarps": 4
+        },
+        "m": 256,
+        "n": 256,
+        "outputDtype": "bf16",
+        "transA": "N",
+        "transB": "N"
+      },
+      "status": "completed",
+      "suite": "Triton",
+      "target": "gfx950",
+      "testId": "gfx950:triton.gemm_bf16_aligned",
+      "timedOut": false
+    },
+    {
+      "dataType": "bf16",
+      "durationSeconds": 0.248607815,
+      "error": null,
+      "execMode": "functional",
+      "exitCode": 0,
+      "logicalTestId": "triton.gemm_bf16_aligned",
+      "name": "Aligned BF16 GEMM",
+      "numThreads": 1,
+      "operation": "GEMM",
+      "problem": {
+        "accumulatorDtype": "fp32",
+        "inputDtype": "bf16",
+        "inputPattern": "deterministic_nonzero_constant_by_phase",
+        "k": 512,
+        "launch": {
+          "block": [
+            64,
+            64,
+            32
+          ],
+          "grid": [
+            16
+          ],
+          "numStages": 2,
+          "numWarps": 4
+        },
+        "m": 256,
+        "n": 256,
+        "outputDtype": "bf16",
+        "transA": "N",
+        "transB": "N"
+      },
+      "status": "completed",
+      "suite": "Triton",
+      "target": "gfx1250",
+      "testId": "gfx1250:triton.gemm_bf16_aligned",
+      "timedOut": false
+    },
+    {
+      "dataType": "bf16",
+      "durationSeconds": 0.164348668,
+      "error": null,
+      "execMode": "functional",
+      "exitCode": 0,
+      "logicalTestId": "triton.gemm_bf16_ragged",
+      "name": "Ragged BF16 GEMM",
+      "numThreads": 1,
+      "operation": "GEMM",
+      "problem": {
+        "accumulatorDtype": "fp32",
+        "inputDtype": "bf16",
+        "inputPattern": "deterministic_nonzero_constant_by_phase",
+        "k": 510,
+        "launch": {
+          "block": [
+            64,
+            64,
+            32
+          ],
+          "grid": [
+            16
+          ],
+          "numStages": 2,
+          "numWarps": 4
+        },
+        "m": 250,
+        "n": 250,
+        "outputDtype": "bf16",
+        "transA": "N",
+        "transB": "N"
+      },
+      "status": "completed",
+      "suite": "Triton",
+      "target": "gfx950",
+      "testId": "gfx950:triton.gemm_bf16_ragged",
+      "timedOut": false
+    },
+    {
+      "dataType": "bf16",
+      "durationSeconds": 0.350962578,
+      "error": null,
+      "execMode": "functional",
+      "exitCode": 0,
+      "logicalTestId": "triton.gemm_bf16_ragged",
+      "name": "Ragged BF16 GEMM",
+      "numThreads": 1,
+      "operation": "GEMM",
+      "problem": {
+        "accumulatorDtype": "fp32",
+        "inputDtype": "bf16",
+        "inputPattern": "deterministic_nonzero_constant_by_phase",
+        "k": 510,
+        "launch": {
+          "block": [
+            64,
+            64,
+            32
+          ],
+          "grid": [
+            16
+          ],
+          "numStages": 2,
+          "numWarps": 4
+        },
+        "m": 250,
+        "n": 250,
+        "outputDtype": "bf16",
+        "transA": "N",
+        "transB": "N"
+      },
+      "status": "completed",
+      "suite": "Triton",
+      "target": "gfx1250",
+      "testId": "gfx1250:triton.gemm_bf16_ragged",
+      "timedOut": false
+    },
+    {
+      "dataType": "fp16",
+      "durationSeconds": 1.142780622,
+      "error": null,
+      "execMode": "functional",
+      "exitCode": 0,
+      "logicalTestId": "triton.attention_fp16",
+      "name": "FP16 attention",
+      "numThreads": 1,
+      "operation": "Attention",
+      "problem": {
+        "batch": 1,
+        "causal": false,
+        "dtype": "fp16",
+        "headDimension": 64,
+        "heads": 8,
+        "inputPattern": "deterministic_nonzero_constant_by_phase",
+        "launch": {
+          "block": [
+            16,
+            128,
+            64
+          ],
+          "grid": [
+            8,
+            8
+          ],
+          "numStages": 2,
+          "numWarps": 8
+        },
+        "sequence": 128
+      },
+      "status": "completed",
+      "suite": "Triton",
+      "target": "gfx950",
+      "testId": "gfx950:triton.attention_fp16",
+      "timedOut": false
+    },
+    {
+      "dataType": "fp16",
+      "durationSeconds": 1.692759714,
+      "error": null,
+      "execMode": "functional",
+      "exitCode": 0,
+      "logicalTestId": "triton.attention_fp16",
+      "name": "FP16 attention",
+      "numThreads": 1,
+      "operation": "Attention",
+      "problem": {
+        "batch": 1,
+        "causal": false,
+        "dtype": "fp16",
+        "headDimension": 64,
+        "heads": 8,
+        "inputPattern": "deterministic_nonzero_constant_by_phase",
+        "launch": {
+          "block": [
+            16,
+            128,
+            64
+          ],
+          "grid": [
+            8,
+            8
+          ],
+          "numStages": 2,
+          "numWarps": 8
+        },
+        "sequence": 128
+      },
+      "status": "completed",
+      "suite": "Triton",
+      "target": "gfx1250",
+      "testId": "gfx1250:triton.attention_fp16",
+      "timedOut": false
+    },
+    {
+      "dataType": "bf16",
+      "durationSeconds": 0.149002269,
+      "error": null,
+      "execMode": "functional",
+      "exitCode": 0,
+      "logicalTestId": "triton.gpt_oss_rmsnorm_bf16",
+      "name": "GPT-OSS-20B BF16 RMSNorm",
+      "numThreads": 1,
+      "operation": "RMSNorm",
+      "problem": {
+        "columns": 2880,
+        "dtype": "bf16",
+        "epsilon": 1e-05,
+        "inputPattern": "deterministic_nonzero_constant_by_phase",
+        "launch": {
+          "blockSize": 4096,
+          "grid": [
+            128
+          ],
+          "numStages": 1,
+          "numWarps": 8
+        },
+        "rows": 128,
+        "weighted": true
+      },
+      "status": "completed",
+      "suite": "GPT-OSS",
+      "target": "gfx950",
+      "testId": "gfx950:triton.gpt_oss_rmsnorm_bf16",
+      "timedOut": false
+    },
+    {
+      "dataType": "bf16",
+      "durationSeconds": 0.237382608,
+      "error": null,
+      "execMode": "functional",
+      "exitCode": 0,
+      "logicalTestId": "triton.gpt_oss_rmsnorm_bf16",
+      "name": "GPT-OSS-20B BF16 RMSNorm",
+      "numThreads": 1,
+      "operation": "RMSNorm",
+      "problem": {
+        "columns": 2880,
+        "dtype": "bf16",
+        "epsilon": 1e-05,
+        "inputPattern": "deterministic_nonzero_constant_by_phase",
+        "launch": {
+          "blockSize": 4096,
+          "grid": [
+            128
+          ],
+          "numStages": 1,
+          "numWarps": 8
+        },
+        "rows": 128,
+        "weighted": true
+      },
+      "status": "completed",
+      "suite": "GPT-OSS",
+      "target": "gfx1250",
+      "testId": "gfx1250:triton.gpt_oss_rmsnorm_bf16",
+      "timedOut": false
+    },
+    {
+      "dataType": "bf16",
+      "durationSeconds": 8.682295533,
+      "error": null,
+      "execMode": "functional",
+      "exitCode": 0,
+      "logicalTestId": "triton.gpt_oss_gqa_bf16",
+      "name": "GPT-OSS-20B BF16 sliding GQA",
+      "numThreads": 1,
+      "operation": "Attention",
+      "problem": {
+        "batch": 1,
+        "causal": true,
+        "dtype": "bf16",
+        "headDimension": 64,
+        "inputPattern": "deterministic_nonzero_constant_by_phase",
+        "keyValueHeads": 8,
+        "launch": {
+          "block": [
+            16,
+            128,
+            64
+          ],
+          "grid": [
+            8,
+            64
+          ],
+          "numStages": 2,
+          "numWarps": 8
+        },
+        "queryHeads": 64,
+        "queryHeadsPerKeyValueHead": 8,
+        "sequence": 128,
+        "window": 128
+      },
+      "status": "completed",
+      "suite": "GPT-OSS",
+      "target": "gfx950",
+      "testId": "gfx950:triton.gpt_oss_gqa_bf16",
+      "timedOut": false
+    },
+    {
+      "dataType": "bf16",
+      "durationSeconds": null,
+      "error": "command timed out after 300 seconds",
+      "execMode": "functional",
+      "exitCode": null,
+      "logicalTestId": "triton.gpt_oss_gqa_bf16",
+      "name": "GPT-OSS-20B BF16 sliding GQA",
+      "numThreads": 1,
+      "operation": "Attention",
+      "problem": {
+        "batch": 1,
+        "causal": true,
+        "dtype": "bf16",
+        "headDimension": 64,
+        "inputPattern": "deterministic_nonzero_constant_by_phase",
+        "keyValueHeads": 8,
+        "launch": {
+          "block": [
+            16,
+            128,
+            64
+          ],
+          "grid": [
+            8,
+            64
+          ],
+          "numStages": 2,
+          "numWarps": 8
+        },
+        "queryHeads": 64,
+        "queryHeadsPerKeyValueHead": 8,
+        "sequence": 128,
+        "window": 128
+      },
+      "status": "timeout",
+      "suite": "GPT-OSS",
+      "target": "gfx1250",
+      "testId": "gfx1250:triton.gpt_oss_gqa_bf16",
+      "timedOut": true
+    },
+    {
+      "dataType": "fp16",
+      "durationSeconds": 0.989166332,
+      "error": null,
+      "execMode": "functional",
+      "exitCode": 0,
+      "logicalTestId": "tensile.gemm_fp16",
+      "name": "FP16 GEMM",
+      "numThreads": 1,
+      "operation": "GEMM",
+      "problem": {
+        "accumulatorDtype": "fp32",
+        "batchCount": 1,
+        "beta": 0,
+        "inputDtype": "fp16",
+        "inputPattern": "A=0x3c bytes, B=0x38 bytes",
+        "k": 512,
+        "m": 512,
+        "n": 512,
+        "outputDtype": "fp16",
+        "transA": "N",
+        "transB": "N"
+      },
+      "status": "completed",
+      "suite": "TensileLite",
+      "target": "gfx950",
+      "testId": "gfx950:tensile.gemm_fp16",
+      "timedOut": false
+    },
+    {
+      "dataType": "fp16",
+      "durationSeconds": 2.34973179,
+      "error": null,
+      "execMode": "functional",
+      "exitCode": 0,
+      "logicalTestId": "tensile.gemm_fp16",
+      "name": "FP16 GEMM",
+      "numThreads": 1,
+      "operation": "GEMM",
+      "problem": {
+        "accumulatorDtype": "fp32",
+        "batchCount": 1,
+        "beta": 0,
+        "inputDtype": "fp16",
+        "inputPattern": "A=0x3c bytes, B=0x38 bytes",
+        "k": 512,
+        "m": 512,
+        "n": 512,
+        "outputDtype": "fp16",
+        "transA": "N",
+        "transB": "N"
+      },
+      "status": "completed",
+      "suite": "TensileLite",
+      "target": "gfx1250",
+      "testId": "gfx1250:tensile.gemm_fp16",
+      "timedOut": false
+    },
+    {
+      "dataType": "bf16",
+      "durationSeconds": 0.253944647,
+      "error": null,
+      "execMode": "functional",
+      "exitCode": 0,
+      "logicalTestId": "tensile.gemm_bf16_batched",
+      "name": "Batched BF16 GEMM",
+      "numThreads": 1,
+      "operation": "GEMM",
+      "problem": {
+        "accumulatorDtype": "fp32",
+        "batchCount": 16,
+        "beta": 0,
+        "inputDtype": "bf16",
+        "inputPattern": "A=0x3c bytes, B=0x38 bytes",
+        "k": 160,
+        "m": 256,
+        "n": 77,
+        "outputDtype": "bf16",
+        "transA": "N",
+        "transB": "T"
+      },
+      "status": "completed",
+      "suite": "TensileLite",
+      "target": "gfx950",
+      "testId": "gfx950:tensile.gemm_bf16_batched",
+      "timedOut": false
+    },
+    {
+      "dataType": "bf16",
+      "durationSeconds": 1.251274491,
+      "error": null,
+      "execMode": "functional",
+      "exitCode": 0,
+      "logicalTestId": "tensile.gemm_bf16_batched",
+      "name": "Batched BF16 GEMM",
+      "numThreads": 1,
+      "operation": "GEMM",
+      "problem": {
+        "accumulatorDtype": "fp32",
+        "batchCount": 16,
+        "beta": 0,
+        "inputDtype": "bf16",
+        "inputPattern": "A=0x3c bytes, B=0x38 bytes",
+        "k": 160,
+        "m": 256,
+        "n": 77,
+        "outputDtype": "bf16",
+        "transA": "N",
+        "transB": "T"
+      },
+      "status": "completed",
+      "suite": "TensileLite",
+      "target": "gfx1250",
+      "testId": "gfx1250:tensile.gemm_bf16_batched",
+      "timedOut": false
+    },
+    {
+      "dataType": "fp8",
+      "durationSeconds": 0.024989536,
+      "error": null,
+      "execMode": "functional",
+      "exitCode": 0,
+      "logicalTestId": "tensile.gemm_fp8_scaled",
+      "name": "Scaled FP8 GEMM",
+      "numThreads": 1,
+      "operation": "GEMM",
+      "problem": {
+        "accumulatorDtype": "fp32",
+        "batchCount": 1,
+        "beta": 0,
+        "inputDtype": "fp8",
+        "inputPattern": "A=0x3c bytes, B=0x38 bytes",
+        "k": 128,
+        "m": 128,
+        "n": 128,
+        "outputDtype": "bf16",
+        "scalarScales": true,
+        "transA": "T",
+        "transB": "N"
+      },
+      "status": "completed",
+      "suite": "TensileLite",
+      "target": "gfx950",
+      "testId": "gfx950:tensile.gemm_fp8_scaled",
+      "timedOut": false
+    },
+    {
+      "dataType": "fp8",
+      "durationSeconds": 0.02022081,
+      "error": null,
+      "execMode": "functional",
+      "exitCode": 0,
+      "logicalTestId": "tensile.gemm_fp8_scaled",
+      "name": "Scaled FP8 GEMM",
+      "numThreads": 1,
+      "operation": "GEMM",
+      "problem": {
+        "accumulatorDtype": "fp32",
+        "batchCount": 1,
+        "beta": 0,
+        "inputDtype": "fp8",
+        "inputPattern": "A=0x3c bytes, B=0x38 bytes",
+        "k": 128,
+        "m": 128,
+        "n": 128,
+        "outputDtype": "bf16",
+        "scalarScales": true,
+        "transA": "T",
+        "transB": "N"
+      },
+      "status": "completed",
+      "suite": "TensileLite",
+      "target": "gfx1250",
+      "testId": "gfx1250:tensile.gemm_fp8_scaled",
+      "timedOut": false
+    }
+  ],
+  "timestamp": "2026-09-10T18:56:48.985253Z",
+  "trigger": "auto"
+}
