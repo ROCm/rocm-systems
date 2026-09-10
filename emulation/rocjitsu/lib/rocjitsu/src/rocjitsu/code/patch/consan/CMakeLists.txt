@@ -87,8 +87,8 @@ rj_add_object_library(
         consan_moi_report_plan.cpp
         consan_moi_relocation.cpp
         consan_moi_report_emission.cpp
-        consan_moi_record_event_emission.cpp
-        consan_moi_record_planning.cpp
+        modes/record_replay/consan_moi_record_event_emission.cpp
+        modes/record_replay/consan_moi_record_planning.cpp
         modes/record_replay/consan_moi_record_replay.cpp
         modes/record_replay/consan_moi_record_replay_access_emission.cpp
         modes/record_replay/consan_moi_record_replay_model.cpp

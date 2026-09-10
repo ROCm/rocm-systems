@@ -7,6 +7,7 @@
 #include "rocjitsu/code/patch/consan/consan_instruction_semantics.h"
 #include "rocjitsu/code/patch/consan/consan_moi_internal.h"
 #include "rocjitsu/code/patch/consan/consan_moi_sync_emission.h"
+#include "rocjitsu/code/patch/consan/modes/sampled/consan_moi_sampled_atomic_emission.h"
 #include "rocjitsu/code/patch/instrumentation_builder.h"
 
 namespace rocjitsu {

@@ -8,6 +8,7 @@
 #include "rocjitsu/code/patch/consan/consan_moi_internal.h"
 #include "rocjitsu/code/patch/consan/consan_moi_report_emission.h"
 #include "rocjitsu/code/patch/consan/consan_physical_site_alias.h"
+#include "rocjitsu/code/patch/consan/modes/sampled/consan_moi_sampled_atomic_emission.h"
 #include "rocjitsu/code/patch/consan/targets/consan_target_profiles.h"
 #include "rocjitsu/code/patch/instrumentation_builder.h"
 #include "rocjitsu/code/patch/spill_manager.h"

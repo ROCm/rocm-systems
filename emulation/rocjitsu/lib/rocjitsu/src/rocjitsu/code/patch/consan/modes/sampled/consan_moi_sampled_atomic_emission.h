@@ -7,12 +7,55 @@
 #include "rocjitsu/code/patch/consan/consan_moi_internal.h"
 #include "rocjitsu/code/patch/consan/consan_moi_mode_planning.h"
 #include "rocjitsu/code/patch/consan/modes/sampled/consan_moi_sampled_access_emission.h"
+#include "rocjitsu/code/patch/consan/modes/sampled/consan_moi_sampled_report.h"
 
 #include <optional>
 #include <span>
 #include <vector>
 
+namespace rocjitsu::consan_detail {
+
+/// Fully encoded semantic identity for one Sampled atomic synchronization
+/// candidate. Physical aliases may fold only when every field matches.
+struct SampledAtomicSemantics {
+  ConSanMoiSampledSyncRole role = ConSanMoiSampledSyncRole::None;
+  ConSanMoiSampledSyncScope scope = ConSanMoiSampledSyncScope::None;
+  ConSanMoiSampledSyncOutcome outcome = ConSanMoiSampledSyncOutcome::NotApplicable;
+  uint32_t byte_count = 0;
+  uint32_t descriptor = 0;
+  std::optional<uint32_t> cas_failure_descriptor;
+
+  bool operator==(const SampledAtomicSemantics &) const = default;
+};
+
+} // namespace rocjitsu::consan_detail
+
 namespace rocjitsu::consan_moi_impl {
+
+enum class SampledAtomicSemanticsReason : uint8_t {
+  None,
+  UnqualifiedSharedSyncSequence,
+  UnsupportedQualifiedMemoryRole,
+  MissingQualifiedScope,
+  UnsupportedQualifiedScope,
+  UnsupportedQualifiedByteRange,
+  CompareExchangeDynamicOutcomeUnavailable,
+  UnsupportedQualifiedRmwOutcome,
+  SampledSyncAbiRejectedQualifiedSequence,
+  SampledSyncAbiRejectedCasFailure,
+  Count,
+};
+
+struct SampledAtomicSemanticsResult {
+  std::optional<consan_detail::SampledAtomicSemantics> semantics;
+  SampledAtomicSemanticsReason reason = SampledAtomicSemanticsReason::None;
+};
+
+[[nodiscard]] SampledAtomicSemanticsResult
+sampled_atomic_semantics_for_source(const MoiAtomicEvidenceSourceView &source);
+
+[[nodiscard]] std::string_view
+sampled_atomic_semantics_reason_name(SampledAtomicSemanticsReason reason);
 
 /// Exact owner-local state shared by Sampled barrier and atomic emission.
 /// Planning resolves every broad request, resource, and operating-point fact

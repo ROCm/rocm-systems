@@ -4,7 +4,7 @@
 #include "consan_test_support.h"
 #include "rocjitsu/code/patch/consan/consan_moi_access_target.h"
 #include "rocjitsu/code/patch/consan/consan_moi_mode_planning.h"
-#include "rocjitsu/code/patch/consan/consan_moi_record_planning.h"
+#include "rocjitsu/code/patch/consan/modes/record_replay/consan_moi_record_planning.h"
 
 namespace rocjitsu {
 namespace {

@@ -12,7 +12,6 @@
 
 #include "rocjitsu/code/patch/consan/consan_moi.h"
 #include "rocjitsu/code/patch/consan/consan_moi_dispatch_preload.h"
-#include "rocjitsu/code/patch/consan/modes/sampled/consan_moi_sampled_report.h"
 #include "rocjitsu/code/patch/consan/targets/consan_moi_target_ops.h"
 #include "rocjitsu/code/patch/instruction_sequence.h"
 #include "rocjitsu/code/patch/spill_manager.h"
@@ -1027,19 +1026,6 @@ struct ScalarOwnerSgprRange {
 scalar_owner_contexts_admit_reserved_window(std::span<const ScalarOwnerContextSummary> contexts,
                                             uint16_t base, uint16_t width,
                                             bool protect_physical_vcc);
-
-/// Fully encoded semantic identity for one sampled atomic synchronization
-/// candidate. Physical aliases may fold only when every field matches.
-struct SampledAtomicSemantics {
-  ConSanMoiSampledSyncRole role = ConSanMoiSampledSyncRole::None;
-  ConSanMoiSampledSyncScope scope = ConSanMoiSampledSyncScope::None;
-  ConSanMoiSampledSyncOutcome outcome = ConSanMoiSampledSyncOutcome::NotApplicable;
-  uint32_t byte_count = 0;
-  uint32_t descriptor = 0;
-  std::optional<uint32_t> cas_failure_descriptor;
-
-  bool operator==(const SampledAtomicSemantics &) const = default;
-};
 
 /// Return the inline-shadow transaction scratch size shared by placement and
 /// emission. Atomic tracking retains additional publication state.

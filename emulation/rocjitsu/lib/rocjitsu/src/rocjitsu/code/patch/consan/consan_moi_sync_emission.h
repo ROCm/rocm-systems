@@ -16,31 +16,6 @@ class CodeObjectPatcher;
 
 namespace rocjitsu::consan_moi_impl {
 
-enum class SampledAtomicSemanticsReason : uint8_t {
-  None,
-  UnqualifiedSharedSyncSequence,
-  UnsupportedQualifiedMemoryRole,
-  MissingQualifiedScope,
-  UnsupportedQualifiedScope,
-  UnsupportedQualifiedByteRange,
-  CompareExchangeDynamicOutcomeUnavailable,
-  UnsupportedQualifiedRmwOutcome,
-  SampledSyncAbiRejectedQualifiedSequence,
-  SampledSyncAbiRejectedCasFailure,
-  Count,
-};
-
-struct SampledAtomicSemanticsResult {
-  std::optional<consan_detail::SampledAtomicSemantics> semantics;
-  SampledAtomicSemanticsReason reason = SampledAtomicSemanticsReason::None;
-};
-
-[[nodiscard]] SampledAtomicSemanticsResult
-sampled_atomic_semantics_for_source(const MoiAtomicEvidenceSourceView &source);
-
-[[nodiscard]] std::string_view
-sampled_atomic_semantics_reason_name(SampledAtomicSemanticsReason reason);
-
 [[nodiscard]] uint16_t fence_record_scratch_count(const ConSanAtomicLoweringForm &form);
 [[nodiscard]] uint16_t atomic_record_scratch_count(const ConSanAtomicLoweringForm &form);
 

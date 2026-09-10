@@ -33,6 +33,111 @@ using consan_moi_detail::append_select_first_lane_in_exec_mask;
 using consan_moi_detail::append_store_u32_vgpr_at_offset;
 using consan_moi_detail::ConSanMoiRecordEmitter;
 
+SampledAtomicSemanticsResult
+sampled_atomic_semantics_for_source(const MoiAtomicEvidenceSourceView &source) {
+  using Reason = SampledAtomicSemanticsReason;
+  const auto reject = [](Reason reason) {
+    return SampledAtomicSemanticsResult{.semantics = std::nullopt, .reason = reason};
+  };
+  const ConSanSyncSequence &sequence = *source.sequence;
+  const ConSanAtomicSite &site = source.site;
+  if (!consan_sync_confidence_meets(sequence.confidence, ConSanSemanticConfidence::Conservative) ||
+      !consan_sync_confidence_meets(sequence.memory_role_confidence,
+                                    ConSanSemanticConfidence::Conservative)) {
+    return reject(Reason::UnqualifiedSharedSyncSequence);
+  }
+
+  consan_detail::SampledAtomicSemantics semantics;
+  switch (sequence.memory_role) {
+  case ConSanSyncMemoryRole::Release:
+    semantics.role = ConSanMoiSampledSyncRole::RmwRelease;
+    break;
+  case ConSanSyncMemoryRole::Acquire:
+    semantics.role = ConSanMoiSampledSyncRole::RmwAcquire;
+    break;
+  case ConSanSyncMemoryRole::AcquireRelease:
+    semantics.role = ConSanMoiSampledSyncRole::RmwAcquireRelease;
+    break;
+  case ConSanSyncMemoryRole::Unknown:
+  case ConSanSyncMemoryRole::None:
+  case ConSanSyncMemoryRole::SequentiallyConsistent:
+    return reject(Reason::UnsupportedQualifiedMemoryRole);
+  }
+  if (!sequence.scope)
+    return reject(Reason::MissingQualifiedScope);
+  const auto sampled_scope = consan_moi_sampled_sync_scope(*sequence.scope);
+  if (!sampled_scope)
+    return reject(Reason::UnsupportedQualifiedScope);
+  semantics.scope = *sampled_scope;
+  if (site.width_bits == 0 || site.width_bits % 8u != 0 ||
+      site.width_bits / 8u > std::numeric_limits<uint32_t>::max()) {
+    return reject(Reason::UnsupportedQualifiedByteRange);
+  }
+  semantics.byte_count = site.width_bits / 8u;
+  switch (sequence.rmw_outcome) {
+  case ConSanSyncRmwOutcome::NoReturn:
+    semantics.outcome = ConSanMoiSampledSyncOutcome::RmwNoReturn;
+    break;
+  case ConSanSyncRmwOutcome::ReturnsOldValue:
+    semantics.outcome = ConSanMoiSampledSyncOutcome::RmwReturnsOld;
+    break;
+  case ConSanSyncRmwOutcome::CompareExchange:
+    if (!site.returns_old_value.value_or(false) || !site.data_vgpr || !site.destination_vgpr)
+      return reject(Reason::CompareExchangeDynamicOutcomeUnavailable);
+    semantics.outcome = ConSanMoiSampledSyncOutcome::CasSuccess;
+    break;
+  case ConSanSyncRmwOutcome::NotApplicable:
+  case ConSanSyncRmwOutcome::Unknown:
+    return reject(Reason::UnsupportedQualifiedRmwOutcome);
+  }
+
+  const ConSanMoiSampledSyncEncodeResult encoded = encode_consan_moi_sampled_sync_metadata({
+      .address = 1,
+      .byte_count = semantics.byte_count,
+      .kind = ConSanMoiSampledSyncKind::Atomic,
+      .role = semantics.role,
+      .scope = semantics.scope,
+      .outcome = semantics.outcome,
+  });
+  if (encoded.classification != ConSanMoiSampledSyncClassification::Valid)
+    return reject(Reason::SampledSyncAbiRejectedQualifiedSequence);
+  semantics.descriptor = encoded.packed.descriptor;
+
+  if (sequence.rmw_outcome == ConSanSyncRmwOutcome::CompareExchange) {
+    const ConSanMoiSampledSyncEncodeResult failure = encode_consan_moi_sampled_sync_metadata({
+        .address = 1,
+        .byte_count = semantics.byte_count,
+        .kind = ConSanMoiSampledSyncKind::Atomic,
+        .role = semantics.role,
+        .scope = semantics.scope,
+        .outcome = ConSanMoiSampledSyncOutcome::CasFailure,
+    });
+    if (failure.classification != ConSanMoiSampledSyncClassification::Valid)
+      return reject(Reason::SampledSyncAbiRejectedCasFailure);
+    semantics.cas_failure_descriptor = failure.packed.descriptor;
+  }
+  return {.semantics = semantics, .reason = Reason::None};
+}
+
+std::string_view sampled_atomic_semantics_reason_name(SampledAtomicSemanticsReason reason) {
+  using Reason = SampledAtomicSemanticsReason;
+  constexpr auto vocabulary = make_consan_enum_vocabulary(
+      "invalid-sampled-atomic-semantics-reason", consan_enum(Reason::None, ""),
+      consan_enum(Reason::UnqualifiedSharedSyncSequence, "unqualified-shared-sync-sequence"),
+      consan_enum(Reason::UnsupportedQualifiedMemoryRole, "unsupported-qualified-memory-role"),
+      consan_enum(Reason::MissingQualifiedScope, "missing-qualified-scope"),
+      consan_enum(Reason::UnsupportedQualifiedScope, "unsupported-qualified-scope"),
+      consan_enum(Reason::UnsupportedQualifiedByteRange, "unsupported-qualified-byte-range"),
+      consan_enum(Reason::CompareExchangeDynamicOutcomeUnavailable,
+                  "compare-exchange-dynamic-outcome-unavailable"),
+      consan_enum(Reason::UnsupportedQualifiedRmwOutcome, "unsupported-qualified-rmw-outcome"),
+      consan_enum(Reason::SampledSyncAbiRejectedQualifiedSequence,
+                  "sampled-sync-abi-rejected-qualified-sequence"),
+      consan_enum(Reason::SampledSyncAbiRejectedCasFailure,
+                  "sampled-sync-abi-rejected-cas-failure"));
+  return vocabulary.name(reason);
+}
+
 std::optional<ConSanMoiSampledSyncRole> sampled_atomic_role(ConSanMoiAtomicEventKind kind,
                                                             bool is_rmw) {
   switch (kind) {

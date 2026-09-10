@@ -253,21 +253,12 @@ also stay common when they operate on normalized plans. Mode locality must not
 duplicate a dispatcher, placement planner, spill transaction, or publication
 protocol.
 
-The physical source boundary has two kinds of exceptions today. Registry and
-orchestration selection points, plus common ABI, report-layout, and
-report-contract headers, deliberately aggregate the closed set of
+Registry and orchestration selection points, plus common ABI, report-layout,
+and report-contract headers, deliberately aggregate the closed set of
 mode-specific variants so the pipeline and runtime can carry a mode-neutral
-sum type. Those are explicit facades, not shared implementations.
-
-Three non-facade exceptions remain. `consan_moi_record_planning.*` and
-`consan_moi_record_event_emission.*` are consumed only by Record/Replay and
-belong physically under `modes/record_replay`. In addition,
-`consan_moi_internal.h` includes the Sampled report contract to define
-`SampledAtomicSemantics`, while `consan_moi_sync_emission.*` implements that
-Sampled-only source projection. The latter is also a dependency peephole, not
-just a misplaced file. It should move under `modes/sampled` or sit behind a
-mode-neutral contract. Until these are corrected, mode locality is the
-intended ownership rule rather than a completely realized physical invariant.
+sum type. Those are explicit facades, not shared implementations. Outside
+these aggregation surfaces, mode-specific planning, semantic projection, and
+native emission are physically owned by the corresponding mode directory.
 
 The hook mirrors this split. Record/Replay, Sampled, and Inline Shadow own
 their decoder, analyzer, and renderer under `hooks/consan/modes/<mode>`.

@@ -5,7 +5,6 @@
 
 #include "rocjitsu/code/patch/consan/consan_lowering.h"
 #include "rocjitsu/code/patch/consan/consan_moi_mode_planning.h"
-#include "rocjitsu/code/patch/consan/consan_moi_record_planning.h"
 #include "rocjitsu/code/patch/consan/consan_moi_sync_emission.h"
 #include "rocjitsu/code/patch/consan/consan_resource.h"
 #include <algorithm>

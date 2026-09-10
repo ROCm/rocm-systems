@@ -7,7 +7,7 @@
 #pragma once
 
 #include "rocjitsu/code/patch/consan/consan_moi_probe_planning.h"
-#include "rocjitsu/code/patch/consan/consan_moi_record_event_emission.h"
+#include "rocjitsu/code/patch/consan/modes/record_replay/consan_moi_record_event_emission.h"
 
 #include <optional>
 #include <span>
