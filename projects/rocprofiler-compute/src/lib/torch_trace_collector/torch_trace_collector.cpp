@@ -2,6 +2,7 @@
 // SPDX-License-Identifier:  MIT
 
 #include "args_capture.h"
+#include "torch_trace_collector.h"
 #include "wire_format.h"
 
 #include <ATen/record_function.h>
@@ -116,3 +117,8 @@ bool install()
 }
 
 }  // namespace
+
+extern "C" int torch_trace_collector_install(void)
+{
+    return install() ? 0 : 1;
+}
