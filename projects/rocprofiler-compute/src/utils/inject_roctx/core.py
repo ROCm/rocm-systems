@@ -125,15 +125,32 @@ def encode_marker_name(name: str) -> str:
     return name.replace("%", "%25").replace("/", "%2F")
 
 
-def compose_marker(marker: str, context: str, backend: str = "") -> str:
-    full = encode_marker_name(marker) + ":" + context
+def compose_marker(
+    marker: str,
+    context: str,
+    backend: str = "",
+    args: str = "n/a",
+    seq: str = "n/a",
+    tid: str = "n/a",
+    ftid: str = "n/a",
+    scope: str = "n/a",
+) -> str:
+    full = (
+        f"{encode_marker_name(marker)}:{context}"
+        f"|seq={seq}|tid={tid}|ftid={ftid}|scope={scope}|args={args}"
+    )
     if backend:
         full = f"{full}|{backend}"
     return full
 
 
-def _push_scope(marker: str, context: str, backend: str = "") -> None:
-    _STATE.range_push(compose_marker(marker, context, backend))
+def _push_scope(
+    marker: str,
+    context: str,
+    backend: str = "",
+    args: str = "n/a",
+) -> None:
+    _STATE.range_push(compose_marker(marker, context, backend, args=args))
     _thread_local.depth = getattr(_thread_local, "depth", 0) + 1
 
 
