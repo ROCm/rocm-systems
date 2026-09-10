@@ -17,12 +17,6 @@ from pathlib import Path
 from typing import Any, Callable, Optional
 
 from utils.inject_roctx import core
-from utils.inject_roctx._backends.torch_cpp_loader import (
-    CollectorUnavailableError,
-)
-from utils.inject_roctx._backends.torch_cpp_loader import (
-    load as load_torch_trace_collector,
-)
 from utils.inject_roctx.registry import register
 from utils.logger import console_error, console_log, console_warning
 
@@ -62,7 +56,6 @@ class _TorchState:
         self.nn: Any = None
         self.torch_root: str = ""
 
-        self.load_torch_trace_collector: Optional[Callable[..., Any]] = None
         self.torch_trace_collector: Any = None
         self.using_c_tier: bool = False
         self.c_tier_initialized: bool = False
@@ -248,57 +241,6 @@ def _walk_subclasses(cls: type, fn: Callable[[type], None]) -> None:
     for sub in cls.__subclasses__():
         fn(sub)
         _walk_subclasses(sub, fn)
-
-
-def _initialize_c_tier() -> bool:
-    """Load and install torch_trace_collector.so once per process."""
-    if _STATE.c_tier_initialized:
-        return _STATE.using_c_tier
-
-    _STATE.c_tier_initialized = True
-
-    if _STATE.load_torch_trace_collector is None:
-        _STATE.torch_trace_collector = None
-        _STATE.using_c_tier = False
-        return False
-
-    try:
-        module = _STATE.load_torch_trace_collector()
-    except CollectorUnavailableError as exc:
-        console_error("ml api trace", str(exc))
-    except Exception as exc:
-        console_warning(
-            "ml api trace",
-            "C++ RecordFunction tier unavailable "
-            f"({type(exc).__name__}: {exc}); falling back to Python tier",
-        )
-        module = None
-
-    _STATE.torch_trace_collector = module
-
-    if _STATE.torch_trace_collector is not None:
-        try:
-            _STATE.torch_trace_collector.install()
-            console_log(
-                "ml api trace",
-                (
-                    "Coverage tier: C++ RecordFunction "
-                    "(global callback; covers every thread)."
-                ),
-            )
-            _STATE.using_c_tier = True
-            _STATE.native_hook = _RecordFnHook()
-            return True
-        except Exception as exc:
-            console_warning(
-                "ml api trace",
-                "C++ RecordFunction tier install failed "
-                f"({type(exc).__name__}: {exc}); falling back to Python tier",
-            )
-            _STATE.torch_trace_collector = None
-
-    _STATE.using_c_tier = False
-    return False
 
 
 def _emit_python_tier_fallback_warning() -> None:
@@ -1214,8 +1156,6 @@ def _resolve_torch() -> bool:
         _STATE.nn = _nn_mod
     except Exception:
         _STATE.nn = None
-    _STATE.load_torch_trace_collector = load_torch_trace_collector
-
     return True
 
 
@@ -1243,7 +1183,6 @@ class TorchBackend:
         if not _resolve_torch():
             return
 
-        _initialize_c_tier()
         _emit_python_tier_fallback_warning()
         patch_distributed_collectives()
         patch_process_group_methods()
