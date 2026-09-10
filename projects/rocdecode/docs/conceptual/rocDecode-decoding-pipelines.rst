@@ -8,7 +8,7 @@ rocDecode decode pipelines
 
 The rocDecode video decoder pipeline takes video data, extracts it, parses it, and decodes it.
 
-The FFMpeg demultiplexer (demuxer) extracts a segment of video data and sends it to a decoder. 
+The FFMpeg demultiplexer (demuxer) extracts a segment of video data and sends it to a decoder.
 
 .. note::
 
@@ -24,5 +24,4 @@ When FFMpeg-based software decoding is used, no separate parsing step is require
 
   On Linux: ``sudo apt install libavcodec-dev libavformat-dev libavutil-dev``
 
-  On Windows: use pre-built FFmpeg libraries or build from source, and pass ``-DFFMPEG_ROOT=<path-to-ffmpeg>`` to CMake when configuring.
-
+  On Windows: use pre-built FFmpeg libraries or build from source. CMake searches your ``PATH`` and common install locations automatically; pass ``-DFFMPEG_ROOT=<path-to-ffmpeg>`` only to override that search or point to a non-standard install.

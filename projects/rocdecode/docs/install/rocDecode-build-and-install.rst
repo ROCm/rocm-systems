@@ -15,7 +15,7 @@ Alternatively, you can build rocDecode standalone using the following
 instructions.
 
 .. note::
-   
+
    To use the rocDecode samples and tutorials, the ``ROCM_PATH`` environment variable needs to point to the location of your ROCm installation:
 
    .. code:: shell
@@ -123,7 +123,7 @@ Build on Windows
 
       * Set ``VAON12_ROOT`` to the vaon12 NuGet package or custom build directory.
       * Set ``ROCM_PATH`` to the TheRock build output directory.
-      * To include FFmpeg support for samples and the host decoder, add ``-DFFMPEG_ROOT=<path-to-ffmpeg>``.
+      * FFmpeg support (samples and the host decoder) is detected automatically from your ``PATH`` and common install locations. Add ``-DFFMPEG_ROOT=<path-to-ffmpeg>`` only to override that search or point to a non-standard install.
 
 4. To verify the build, run a sample:
 
@@ -135,4 +135,3 @@ Build on Windows
       cmake --build . --config Release
       cd Release
       videodecoderaw.exe -i <input_stream> -f 5
-
