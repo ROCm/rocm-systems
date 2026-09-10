@@ -35,7 +35,7 @@ THE SOFTWARE.
 #include "functional/rdci_dmon.h"
 #include "functional/rdci_fieldgroup.h"
 #include "functional/rdci_group.h"
-#include "functional/rdci_health.h"
+#include "functional/test_health.h"
 #include "functional/rdci_stats.h"
 #include "rdc/rdc.h"
 #include "rdc_tests/test_base.h"
