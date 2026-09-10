@@ -1351,9 +1351,10 @@ hipError_t playback___hipRegisterVar(PlaybackContext& ctx,
     size_t live_size = 0;
     void* live = ctx.resolve_symbol_by_name(name, &live_size);
     if (!live) {
-        static bool warned = false;
-        if (!warned) {
-            warned = true;
+        // Replay dispatches events from more than one thread, so the log-once
+        // flag has to be atomic even though it only guards a diagnostic.
+        static std::atomic<bool> warned{false};
+        if (!warned.exchange(true)) {
             fprintf(stderr,
                     "[HRR] __hipRegisterVar: symbol '%s' is not in any module "
                     "this replay loaded, so copies naming it will fail rather "
@@ -1499,6 +1500,12 @@ hipError_t playback_hipGraphAddMemcpyNodeFromSymbol(PlaybackContext& ctx,
     void* dst = nullptr;
     if (kind == hipMemcpyDeviceToHost || kind == hipMemcpyHostToHost) {
         dst = ctx.host_landing_buffer(a->dst, static_cast<size_t>(a->count));
+        if (!dst) {
+            fprintf(stderr,
+                    "[HRR] hipGraphAddMemcpyNodeFromSymbol: the recorded host "
+                    "destination is null, so this node is not reproduced.\n");
+            return hipErrorInvalidValue;
+        }
     } else {
         dst = ctx.translate_ptr(a->dst);
         if (!dst) {
@@ -1703,6 +1710,27 @@ hipError_t playback_hipLinkAddData(PlaybackContext& ctx,
     if (a->optionValues_present)
         std::memcpy(option_values, a->optionValues_bytes,
                     n_opts * sizeof(void*));
+
+    // A recorded option value is whatever void* the capturing process passed.
+    // Some hipJitOptions take a pointer to a caller-owned buffer
+    // (hipJitOptionInfoLogBuffer and hipJitOptionErrorLogBuffer among them)
+    // and others carry a small integer cast to void*; the archive does not
+    // record which kind each one was. Forwarding a recorded pointer would hand
+    // the runtime an address belonging to a process that no longer exists, so
+    // a link carrying any non-null option value is refused by name rather than
+    // replayed into a wild dereference. Links with no options, and options
+    // whose values are all null, replay unchanged — which is what the captured
+    // workloads use.
+    for (uint32_t i = 0; i < n_opts; ++i) {
+        if (option_values[i]) {
+            fprintf(stderr,
+                    "[HRR] hipLinkAddData: option %u was recorded with a "
+                    "capture-process address (%p) that replay cannot "
+                    "reconstruct, so the link is not reproduced.\n",
+                    i, option_values[i]);
+            return hipErrorInvalidValue;
+        }
+    }
 
     hipError_t r = hipLinkAddData(
         state, static_cast<hipJitInputType>(a->type), const_cast<void*>(image),
@@ -4274,9 +4302,10 @@ hipError_t playback_hipStreamBatchMemOp(PlaybackContext& ctx, const uint8_t* pl)
         if (!live) {
             // A batch the runtime cannot address is rejected whole, so one
             // untranslatable entry would cost the rest of the archive.
-            static bool warned = false;
-            if (!warned) {
-                warned = true;
+            // Atomic for the same reason as the __hipRegisterVar warning:
+            // replay is multi-threaded and this flag is shared.
+            static std::atomic<bool> warned{false};
+            if (!warned.exchange(true)) {
                 fprintf(stderr,
                         "[HRR] hipStreamBatchMemOp: op address 0x%llx is not in "
                         "any recorded allocation — skipping this batch\n",
