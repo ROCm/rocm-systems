@@ -3321,3 +3321,430 @@ TEST(TagArrayTest, EveryOperationRefusesAnArrayWithNoGeometry) {
   EXPECT_THROW((void)tags.invalidate(0x100), std::logic_error);
   EXPECT_THROW(tags.invalidate_all(), std::logic_error);
 }
+
+// ============================================================================
+// Clocked request/response transport
+// ============================================================================
+
+namespace {
+
+/// @brief A message with state of its own, counted so teardown can be checked.
+class ProbeMessage : public Message {
+public:
+  ProbeMessage(uint64_t sequence, uint32_t size_bytes, MessageOp op) {
+    header_.sequence_num = sequence;
+    header_.size_bytes = size_bytes;
+    header_.op = op;
+    ++live;
+  }
+  ~ProbeMessage() override { --live; }
+
+  static inline int live = 0;
+};
+
+/// @brief A clocked server: takes a request, occupies itself for a while, and
+///        answers at the tick it finishes.
+class ServiceServer : public Clocked<Component> {
+public:
+  ServiceServer(const ClockDomain &domain, uint64_t cycles_per_request)
+      : Clocked<Component>("server", domain), cycles_(cycles_per_request) {
+    in_ = add_port(std::make_unique<Port>("in", 0, this, PortDirection::IN));
+    out_ = add_port(std::make_unique<Port>("out", 1, this, PortDirection::OUT));
+    in_->set_handler([this](Tick now, Message *msg) { serve(now, *msg); });
+  }
+
+  /// @brief Never clocks: it has nothing to do on an empty edge.
+  bool clock_at_startup() const override { return false; }
+  bool advance(Tick) override { return false; }
+
+  Port *in() { return in_; }
+  Port *out() { return out_; }
+
+  std::vector<Tick> accepted;
+  std::vector<Tick> answered;
+
+private:
+  void serve(Tick now, Message &request) {
+    accepted.push_back(now);
+    // Occupying the server is what makes a request that arrives behind others
+    // wait for them; nothing else in the model expresses a busy resource.
+    const Tick done = reserve(now, cycles_);
+    answered.push_back(done);
+    out_->send_at(std::make_unique<ProbeMessage>(request.header().sequence_num,
+                                                 request.header().size_bytes, MessageOp::RESPONSE),
+                  done);
+  }
+
+  Port *in_ = nullptr;
+  Port *out_ = nullptr;
+  uint64_t cycles_;
+};
+
+/// @brief Issues requests and records the responses that come back.
+class ServiceClient : public Component {
+public:
+  ServiceClient() : Component("client") {
+    out_ = add_port(std::make_unique<Port>("out", 0, this, PortDirection::OUT));
+    in_ = add_port(std::make_unique<Port>("in", 1, this, PortDirection::IN));
+    in_->set_handler([this](Tick now, Message *msg) {
+      responses.emplace_back(msg->header().sequence_num, now);
+      returned_bytes += msg->header().size_bytes;
+    });
+  }
+
+  /// @brief Queue @p count requests to be issued together at @p tick.
+  void issue_at(Tick tick, uint32_t count) {
+    pending_ = count;
+    this->schedule_event(&issue_, tick);
+  }
+
+  Port *in() { return in_; }
+  Port *out() { return out_; }
+
+  /// @brief (sequence number, tick the response arrived).
+  std::vector<std::pair<uint64_t, Tick>> responses;
+  uint32_t returned_bytes = 0;
+
+private:
+  Event issue_{this, EventType::TIMER_CALLBACK, [this](Tick, Message *) {
+                 for (uint32_t i = 0; i < pending_; ++i)
+                   out_->send(
+                       std::make_unique<ProbeMessage>(next_sequence_++, 64, MessageOp::READ));
+               }};
+  Port *out_ = nullptr;
+  Port *in_ = nullptr;
+  uint32_t pending_ = 0;
+  uint64_t next_sequence_ = 1;
+};
+
+/// @brief A client and a clocked server wired by two clocked links.
+class TransportRig {
+public:
+  static constexpr Tick kRequestLatency = 2000;
+  static constexpr Tick kResponseLatency = 3000;
+  static constexpr uint64_t kServiceCycles = 4;
+
+  TransportRig() {
+    auto root = std::make_unique<CompositeComponent>("root");
+    client = static_cast<ServiceClient *>(root->add_child(std::make_unique<ServiceClient>()));
+    server = static_cast<ServiceServer *>(
+        root->add_child(std::make_unique<ServiceServer>(domain, kServiceCycles)));
+    engine.topology().set_root(std::move(root));
+    engine.topology().add_link(client->out(), server->in(), kRequestLatency);
+    engine.topology().add_link(server->out(), client->in(), kResponseLatency);
+    engine.create();
+  }
+
+  ClockDomain domain{"ghz", 1'000'000'000ULL};
+  SimulationEngine engine{{}};
+  ServiceClient *client = nullptr;
+  ServiceServer *server = nullptr;
+};
+
+} // namespace
+
+TEST(ClockedTransportTest, ARoundTripCostsEachLegExactlyOnce) {
+  ProbeMessage::live = 0;
+  TransportRig rig;
+  rig.client->issue_at(1000, 1);
+
+  rig.engine.run_until_idle();
+
+  ASSERT_EQ(rig.server->accepted, (std::vector<Tick>{3000}));
+  // Request link, then the server's own occupancy, then the response link.
+  // Neither link's propagation is folded into the service time and the service
+  // time is not charged to a link.
+  EXPECT_EQ(rig.server->answered, (std::vector<Tick>{7000}));
+  ASSERT_EQ(rig.client->responses.size(), 1u);
+  EXPECT_EQ(rig.client->responses[0].first, 1u);
+  EXPECT_EQ(rig.client->responses[0].second, 10'000u);
+  EXPECT_EQ(rig.client->returned_bytes, 64u);
+}
+
+TEST(ClockedTransportTest, EveryRequestCompletesExactlyOnce) {
+  ProbeMessage::live = 0;
+  TransportRig rig;
+  rig.client->issue_at(1000, 3);
+
+  rig.engine.run_until_idle();
+
+  ASSERT_EQ(rig.client->responses.size(), 3u);
+  std::vector<uint64_t> answered;
+  for (const auto &[sequence, tick] : rig.client->responses)
+    answered.push_back(sequence);
+  std::sort(answered.begin(), answered.end());
+  EXPECT_EQ(answered, (std::vector<uint64_t>{1, 2, 3}));
+  EXPECT_EQ(ProbeMessage::live, 0) << "a message outlived the exchange";
+}
+
+TEST(ClockedTransportTest, RequestsBehindOthersWaitForTheServer) {
+  ProbeMessage::live = 0;
+  TransportRig rig;
+  rig.client->issue_at(1000, 3);
+
+  rig.engine.run_until_idle();
+
+  // All three arrive together; the server serves them one at a time, so each
+  // response is a full service time behind the one before it. That stagger is
+  // the model's whole representation of queueing delay.
+  EXPECT_EQ(rig.server->accepted, (std::vector<Tick>{3000, 3000, 3000}));
+  EXPECT_EQ(rig.server->answered, (std::vector<Tick>{7000, 11'000, 15'000}));
+
+  std::vector<Tick> arrivals;
+  for (const auto &[sequence, tick] : rig.client->responses)
+    arrivals.push_back(tick);
+  EXPECT_EQ(arrivals, (std::vector<Tick>{10'000, 14'000, 18'000}));
+}
+
+TEST(ClockedTransportTest, MessagesQueuedInTheEngineAreReleasedOnTeardown) {
+  ProbeMessage::live = 0;
+  {
+    TransportRig rig;
+    rig.client->issue_at(1000, 4);
+
+    // Stop with requests in flight: their arrival events are queued but have
+    // not fired.
+    for (int i = 0; i < 3; ++i)
+      rig.engine.step();
+    ASSERT_GT(ProbeMessage::live, 0) << "nothing was in flight to tear down";
+
+    rig.engine.shutdown();
+    EXPECT_EQ(ProbeMessage::live, 0) << "a queued message outlived the engine";
+  }
+  EXPECT_EQ(ProbeMessage::live, 0);
+}
+
+TEST(ClockedTransportTest, AMessageDatedBeforeTheSenderIsRefused) {
+  // The engine's queue is a min-heap with no floor, so a message dated into the
+  // past would be popped next and drag simulated time backwards.
+  ProbeMessage::live = 0;
+  TransportRig rig;
+  rig.client->issue_at(5000, 1);
+  rig.engine.run_until_idle();
+  ASSERT_FALSE(rig.client->responses.empty());
+
+  EXPECT_THROW(
+      rig.client->out()->send_at(std::make_unique<ProbeMessage>(99, 0, MessageOp::READ), 1000),
+      std::invalid_argument);
+  EXPECT_EQ(ProbeMessage::live, 0) << "the refused message leaked";
+}
+
+TEST(ClockedTransportTest, ADepartureAtTheSentinelTickIsRefused) {
+  // TICK_MAX is the "no such tick" value, and it is what a saturated
+  // Clocked::reserve() returns. Treating it as a departure -- or letting it
+  // fall through to "now" -- turns a completion the server said it could not
+  // meet into an immediate answer.
+  ProbeMessage::live = 0;
+  TransportRig rig;
+  rig.client->issue_at(1000, 1);
+  rig.engine.run_until_idle();
+  const size_t responses = rig.client->responses.size();
+
+  EXPECT_THROW(
+      rig.client->out()->send_at(std::make_unique<ProbeMessage>(98, 0, MessageOp::READ), TICK_MAX),
+      std::invalid_argument);
+  rig.engine.run_until_idle();
+  EXPECT_EQ(rig.client->responses.size(), responses) << "the refused message was delivered anyway";
+  EXPECT_EQ(ProbeMessage::live, 0) << "the refused message leaked";
+}
+
+TEST(ClockedTransportTest, AForwardedMessageDepartsAgainRatherThanBeingRefused) {
+  // The shape the whole model is: a request arrives at a component, which
+  // forwards it onward. The message it arrived on still carries the departure
+  // stamp of the hop it came in on, which is by then in the past -- and that
+  // is a fact about where it has been, not a request about where it is going.
+  ProbeMessage::live = 0;
+  // Declared before the rig: the handler below is owned by a component inside
+  // the rig and captures this vector by reference, so the vector has to outlive
+  // the rig rather than the other way round.
+  std::vector<Tick> arrived_stamped;
+  TransportRig rig;
+  rig.server->in()->set_handler([&](Tick now, Message *msg) {
+    arrived_stamped.push_back(msg->header().timestamp);
+    auto onward = std::make_unique<ProbeMessage>(msg->header().sequence_num,
+                                                 msg->header().size_bytes, MessageOp::RESPONSE);
+    // The header the message arrived with, stale departure stamp and all. This
+    // replaces every field the constructor just set, so the op has to be put
+    // back afterwards -- copying the header is the point of the test, and it
+    // copies the request's op along with everything else.
+    onward->header() = msg->header();
+    onward->header().op = MessageOp::RESPONSE;
+    EXPECT_LT(onward->header().timestamp, now);
+    rig.server->out()->send(std::move(onward));
+  });
+
+  rig.client->issue_at(1000, 1);
+  rig.engine.run_until_idle();
+
+  ASSERT_EQ(arrived_stamped.size(), 1u);
+  EXPECT_EQ(arrived_stamped[0], 1000u) << "the request did not arrive carrying its own departure";
+  ASSERT_EQ(rig.client->responses.size(), 1u);
+  // Departed at the tick it was forwarded, not at the tick it originally left.
+  EXPECT_EQ(rig.client->responses[0].second,
+            1000 + TransportRig::kRequestLatency + TransportRig::kResponseLatency);
+  EXPECT_EQ(ProbeMessage::live, 0);
+}
+
+TEST(ClockedTransportTest, ADepartureAtTheEndOfTimeDoesNotWrapIntoThePast) {
+  // arrival_tick() is a bare sum of departure and latency. Wrapped, a message
+  // sent at the end of representable time arrives at a tiny tick, sorts ahead
+  // of everything real, and is delivered at once -- which is the opposite of
+  // what its departure asked for.
+  auto message = std::make_unique<ProbeMessage>(7, 0, MessageOp::READ);
+  message->set_timestamp(TICK_MAX - 100);
+  message->set_latency(TransportRig::kRequestLatency);
+  EXPECT_EQ(message->arrival_tick(), TICK_MAX);
+  EXPECT_GE(message->arrival_tick(), message->header().timestamp);
+}
+
+TEST(ClockedTransportTest, AnArrivalAtTheEndOfTimeIsRefusedRatherThanScheduled) {
+  // TICK_MAX is what an empty event queue and an empty message queue both
+  // report as their next time. A message landing on it is therefore invisible
+  // to every scheduler that asks a queue when it next has work: it never
+  // lowers a partition's min-outgoing tick, so LBTS advances straight past it.
+  // The departure below is representable; only the crossing is not.
+  ProbeMessage::live = 0;
+  TransportRig rig;
+  rig.client->issue_at(1000, 1);
+  rig.engine.run_until_idle();
+  const size_t responses = rig.client->responses.size();
+
+  EXPECT_THROW(rig.client->out()->send_at(std::make_unique<ProbeMessage>(97, 0, MessageOp::READ),
+                                          TICK_MAX - 1),
+               std::invalid_argument);
+  rig.engine.run_until_idle();
+  EXPECT_EQ(rig.client->responses.size(), responses);
+  EXPECT_EQ(ProbeMessage::live, 0) << "the refused message leaked";
+}
+
+namespace {
+
+/// @brief A component with one buffered inbound link, drained by hand.
+class BufferedSink : public Component {
+public:
+  BufferedSink() : Component("sink") {
+    in_ = add_port(std::make_unique<Port>("in", 0, this, PortDirection::IN));
+  }
+  Port *in() { return in_; }
+
+private:
+  Port *in_ = nullptr;
+};
+
+/// @brief A component that sends into a buffered link.
+class BufferedSource : public Component {
+public:
+  BufferedSource() : Component("source") {
+    out_ = add_port(std::make_unique<Port>("out", 0, this, PortDirection::OUT));
+  }
+  Port *out() { return out_; }
+
+private:
+  Port *out_ = nullptr;
+};
+
+} // namespace
+
+TEST(ClockedTransportTest, ABufferedLinkHonoursItsLatency) {
+  // QueuedLink used to stamp only the latency, leaving the default TICK_MAX
+  // departure in place. Every message's arrival tick then wrapped to a small
+  // number, so drain_ready() handed them all over at once, in heap order, and
+  // the link's latency did nothing at all.
+  ProbeMessage::live = 0;
+  BufferedSource source;
+  BufferedSink sink;
+  SimulationEngine engine({});
+  auto root = std::make_unique<CompositeComponent>("root");
+  root->add_child(std::make_unique<TickRecorder>());
+  engine.topology().set_root(std::move(root));
+  QueuedLink *link = engine.topology().add_queued_link(source.out(), sink.in(), /*latency=*/500,
+                                                       /*capacity=*/8);
+  engine.create();
+
+  source.out()->send(std::make_unique<ProbeMessage>(1, 0, MessageOp::READ));
+  EXPECT_EQ(link->next_message_time(), 500u);
+
+  std::vector<std::unique_ptr<Message>> ready;
+  link->drain_ready(/*current_time=*/499, ready);
+  EXPECT_TRUE(ready.empty()) << "the link handed over a message before its latency had passed";
+
+  link->drain_ready(/*current_time=*/500, ready);
+  ASSERT_EQ(ready.size(), 1u);
+  EXPECT_EQ(ready[0]->header().sequence_num, 1u);
+  ready.clear();
+  EXPECT_EQ(ProbeMessage::live, 0);
+
+  // try_send() stamps the same way, and reports rather than asserts when the
+  // queue is full -- destroying the message it could not take.
+  for (int i = 0; i < 8; ++i)
+    EXPECT_TRUE(link->try_send(std::make_unique<ProbeMessage>(2 + i, 0, MessageOp::READ)));
+  EXPECT_EQ(link->next_message_time(), 500u);
+  EXPECT_TRUE(link->full());
+  EXPECT_EQ(ProbeMessage::live, 8);
+  EXPECT_FALSE(link->try_send(std::make_unique<ProbeMessage>(99, 0, MessageOp::READ)));
+  EXPECT_EQ(ProbeMessage::live, 8) << "a refused message was kept";
+
+  // And a buffered link needs a live engine just as an event-driven one does.
+  engine.shutdown();
+  EXPECT_THROW(link->try_send(std::make_unique<ProbeMessage>(100, 0, MessageOp::READ)),
+               std::logic_error);
+
+  // Drain what the full-queue check left behind: ProbeMessage::live is shared
+  // across this suite, so a test that returns with messages outstanding leaves
+  // the next one a non-zero starting count.
+  link->drain_ready(TICK_MAX - 1, ready);
+  ready.clear();
+  EXPECT_EQ(ProbeMessage::live, 0);
+}
+
+TEST(ClockedTransportTest, ABufferedLinkInFunctionalModeStillTakesMessages) {
+  // A functional link has no simulated time and needs no engine, which is the
+  // whole reason the mode exists. A buffered one stamps rather than delivering
+  // synchronously, so it still has to answer "when did this depart?" -- and on
+  // a functional link the answer is tick zero, not the sender's current tick.
+  // Asking the engine for that tick is what would require one.
+  ProbeMessage::live = 0;
+  BufferedSource source;
+  BufferedSink sink;
+  QueuedLink link(/*id=*/0, source.out(), sink.in(), /*latency=*/500, /*capacity=*/4);
+  source.out()->set_link(&link);
+  sink.in()->set_link(&link);
+  link.set_exec_mode(ExecMode::FUNCTIONAL);
+
+  // No engine anywhere: these two components are not in any topology.
+  source.out()->send(std::make_unique<ProbeMessage>(1, 0, MessageOp::READ));
+  EXPECT_TRUE(link.try_send(std::make_unique<ProbeMessage>(2, 0, MessageOp::READ)));
+  EXPECT_EQ(link.size(), 2u);
+  EXPECT_EQ(link.next_message_time(), 500u) << "a functional link dropped its latency";
+
+  std::vector<std::unique_ptr<Message>> ready;
+  link.drain_ready(/*current_time=*/500, ready);
+  EXPECT_EQ(ready.size(), 2u);
+  ready.clear();
+  EXPECT_EQ(ProbeMessage::live, 0);
+}
+
+TEST(ClockedTransportTest, AFunctionalBufferedLinkTakesMessagesAfterTimeHasMoved) {
+  // The same link inside a running engine. Tick zero is the departure of every
+  // functional send, so it must not be read as a departure in the past once
+  // the partition clock has moved on.
+  ProbeMessage::live = 0;
+  TransportRig rig;
+  rig.client->issue_at(1000, 1);
+  rig.engine.run_until_idle();
+  ASSERT_GT(rig.client->responses.size(), 0u);
+
+  BufferedSource source;
+  BufferedSink sink;
+  QueuedLink link(/*id=*/0, source.out(), sink.in(), /*latency=*/500, /*capacity=*/4);
+  source.out()->set_link(&link);
+  sink.in()->set_link(&link);
+  link.set_exec_mode(ExecMode::FUNCTIONAL);
+
+  source.out()->send(std::make_unique<ProbeMessage>(3, 0, MessageOp::READ));
+  EXPECT_EQ(link.size(), 1u);
+  EXPECT_EQ(link.next_message_time(), 500u);
+  EXPECT_EQ(ProbeMessage::live, 1);
+  (void)link.pop();
+  EXPECT_EQ(ProbeMessage::live, 0);
+}

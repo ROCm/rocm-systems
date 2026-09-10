@@ -28,9 +28,12 @@ enum class MessageOp : uint8_t {
 
 /// @brief Common header for all messages sent over links.
 struct MessageHeader {
-  Tick timestamp =
-      TICK_MAX;     ///< Simulation tick when the message was sent (TICK_MAX = not yet stamped).
-  Tick latency = 0; ///< Propagation delay set by the link.
+  /// Simulation tick the message departed. A link overwrites this on every
+  /// send, so pre-setting it has no effect; ask for a departure with
+  /// Port::send_at() instead. TICK_MAX is not a sentinel a link will honour --
+  /// it is refused, both as a departure and as an arrival.
+  Tick timestamp = TICK_MAX;
+  Tick latency = 0;               ///< Propagation delay set by the link.
   uint32_t size_bytes = 0;        ///< Payload size in bytes (for bandwidth modeling).
   PortID src_port = 0;            ///< Source port identifier.
   PortID dst_port = 0;            ///< Destination port identifier.
@@ -86,12 +89,17 @@ public:
   /// @brief Set the propagation latency (called by Link during send).
   void set_latency(Tick lat) { header_.latency = lat; }
 
-  /// @brief Set the send timestamp (called by Link if not already stamped).
+  /// @brief Set the send timestamp (overwritten by Link on every send).
   void set_timestamp(Tick ts) { header_.timestamp = ts; }
 
   /// @brief Compute the simulation tick at which this message arrives.
-  /// @returns timestamp + latency.
-  Tick arrival_tick() const { return header_.timestamp + header_.latency; }
+  ///
+  /// @details Saturates rather than wrapping. A wrapped sum is not a large
+  /// wrong answer but a tiny one: the message sorts ahead of everything real
+  /// and is delivered at once, which is the opposite of the late departure
+  /// that produced it.
+  /// @returns timestamp + latency, saturating at TICK_MAX.
+  Tick arrival_tick() const { return saturating_add_ticks(header_.timestamp, header_.latency); }
 
   /// @brief Order by arrival tick (for min-heap via std::greater).
   bool operator>(const Message &other) const { return arrival_tick() > other.arrival_tick(); }
