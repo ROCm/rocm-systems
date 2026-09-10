@@ -834,12 +834,13 @@ if(ENABLE_DEVICE_LINKER)
   list(FILTER HIP_SOURCES EXCLUDE REGEX "dda_alltoall_fabric_ll128\\.cu\\.cpp$")
   list(FILTER HIP_SOURCES EXCLUDE REGEX "dda_reduce_scatter_fabric_ll\\.cu\\.cpp$")
   list(FILTER HIP_SOURCES EXCLUDE REGEX "dda_reduce_scatter_fabric_ll128\\.cu\\.cpp$")
+  list(FILTER HIP_SOURCES EXCLUDE REGEX "fabric_gpu_barrier\\.cu\\.cpp$")
   # ce_reduce.cc is now pure host code (a dispatcher calling into the
   # per-instantiation launchers generated under gensrc/ce_reduce/, which are
   # excluded above by the "gensrc/.*\\.cpp$" filter and compiled separately
   # by cmake/DeviceLinker.cmake). It stays in the main target and is
   # compiled --offload-host-only like ce_coll.cc.
-  message(STATUS "Device Linker: filtered HIP_SOURCES (removed device .cpp under gensrc/ + subdirs, common.cu, onerank.cu, collectives.cc, dda_all_reduce_ipc.cu.cpp, dda_reduce_scatter_ipc.cu.cpp, dda_all_gather_ipc.cu.cpp, dda_alltoall_ipc.cu.cpp, dda_all_reduce_fabric.cu.cpp, dda_all_reduce_fabric_ll.cu.cpp, dda_reduce_scatter_fabric.cu.cpp, dda_all_gather_fabric.cu.cpp, dda_all_gather_fabric_ll.cu.cpp, dda_alltoall_fabric.cu.cpp)")
+  message(STATUS "Device Linker: filtered HIP_SOURCES (removed device .cpp under gensrc/ + subdirs, common.cu, onerank.cu, collectives.cc, dda_all_reduce_ipc.cu.cpp, dda_reduce_scatter_ipc.cu.cpp, dda_all_gather_ipc.cu.cpp, dda_alltoall_ipc.cu.cpp, dda_all_reduce_fabric.cu.cpp, dda_all_reduce_fabric_ll.cu.cpp, dda_reduce_scatter_fabric.cu.cpp, dda_all_gather_fabric.cu.cpp, dda_all_gather_fabric_ll.cu.cpp, dda_alltoall_fabric.cu.cpp, fabric_gpu_barrier.cu.cpp)")
 endif()
 
 # Create an initial git_version.cpp file (that will be updated with latest git version)
