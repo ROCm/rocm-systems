@@ -201,9 +201,10 @@ std::string kernel_symbol_match_key(std::string_view symbol) {
     symbol.remove_suffix(std::string_view(" [clone .kd]").size());
   if (symbol.ends_with(".kd"))
     symbol.remove_suffix(3);
-  if (symbol.starts_with("void "))
-    symbol.remove_prefix(5);
-  return demangle_kernel_symbol(symbol);
+  std::string key = demangle_kernel_symbol(symbol);
+  if (key.starts_with("void "))
+    key.erase(0, 5);
+  return key;
 }
 
 bool kernel_symbol_names_match(std::string_view left, std::string_view right) {

@@ -530,6 +530,15 @@ TEST(KernelSymbolTest, MatchesExactElfAndProfilerSpellings) {
   EXPECT_FALSE(kernel_symbol_names_match(mangled, "racy_kernel(float*, float*)"));
   EXPECT_FALSE(kernel_symbol_names_match(mangled, "racy_kernel"));
   EXPECT_EQ(kernel_symbol_match_key(mangled), kernel_symbol_match_key(demangled));
+
+  constexpr std::string_view templated =
+      "_ZN2at6native29vectorized_elementwise_kernelILi4ENS0_11FillFunctorIfEESt5arrayIPcLm1EEE"
+      "EviT0_T1_";
+  constexpr std::string_view profiled_template =
+      "void at::native::vectorized_elementwise_kernel<4, at::native::FillFunctor<float>, "
+      "std::array<char*, 1ul> >(int, at::native::FillFunctor<float>, std::array<char*, 1ul>) "
+      "[clone .kd]";
+  EXPECT_TRUE(kernel_symbol_names_match(templated, profiled_template));
 }
 
 TEST(KernelSymbolTest, DisplayNameIsHeaderSafe) {
