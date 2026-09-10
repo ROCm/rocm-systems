@@ -509,12 +509,6 @@ def parse_coverage_evidence(log_text: str) -> CoverageEvidence:
             site for site in sites
             if (site.reader, site.load) == (coverage_record.reader, coverage_record.load)
         )
-        if coverage_record.flavor == "supercollider":
-            if reader_sites:
-                raise CoverageParseError(
-                    f"SuperCollider reader {coverage_record.reader} has MOI coverage_site rows"
-                )
-            continue
         # Compact production logs intentionally retain only the signed aggregate
         # coverage and verdict records. When verbose per-site evidence is present,
         # keep enforcing its exact agreement with those aggregates; an entirely

@@ -32,7 +32,7 @@ class ConSanCoverageGateTest(unittest.TestCase):
         self.assertEqual(decision.evidence.coverage[0].reader, 7)
         self.assertEqual(decision.evidence.verdict.patched_supported["access"], (20, 20))
 
-    def test_accepts_supercollider_aggregate_without_moi_site_rows(self) -> None:
+    def test_accepts_supercollider_aggregate_without_site_rows(self) -> None:
         aggregate = coverage(
             flavor="supercollider",
             engine="supercollider",
@@ -62,7 +62,7 @@ class ConSanCoverageGateTest(unittest.TestCase):
         self.assertTrue(decision.accepted, decision.reasons)
         self.assertEqual(decision.evidence.coverage[0].flavor, "supercollider")
 
-    def test_rejects_moi_site_rows_attached_to_supercollider(self) -> None:
+    def test_accepts_consistent_site_rows_attached_to_supercollider(self) -> None:
         aggregate = coverage(
             flavor="supercollider",
             engine="supercollider",
@@ -83,7 +83,46 @@ class ConSanCoverageGateTest(unittest.TestCase):
             fence_selected="0",
             fence_patched="0",
         )
-        with self.assertRaisesRegex(CoverageParseError, "has MOI coverage_site rows"):
+        decision = acceptance_decision(
+            log(
+                aggregate,
+                coverage_site(
+                    disposition="supported",
+                    reason="none",
+                    outcome="patched",
+                    lowering_reason="none",
+                ),
+                verdict(access="1/1", barrier="0/0", atomic="0/0", fence="0/0"),
+                synthesize_sites=False,
+            )
+        )
+        self.assertTrue(decision.accepted, decision.reasons)
+        self.assertEqual(len(decision.evidence.sites), 1)
+
+    def test_rejects_inconsistent_site_rows_attached_to_supercollider(self) -> None:
+        aggregate = coverage(
+            flavor="supercollider",
+            engine="supercollider",
+            access_discovered="2",
+            access_supported="2",
+            access_selected="2",
+            access_patched="2",
+            barrier_discovered="0",
+            barrier_supported="0",
+            barrier_selected="0",
+            barrier_patched="0",
+            atomic_discovered="0",
+            atomic_supported="0",
+            atomic_selected="0",
+            atomic_patched="0",
+            fence_discovered="0",
+            fence_supported="0",
+            fence_selected="0",
+            fence_patched="0",
+        )
+        with self.assertRaisesRegex(
+            CoverageParseError, "access coverage_site count does not match discovered"
+        ):
             parse_coverage_evidence(
                 log(
                     aggregate,
@@ -93,7 +132,7 @@ class ConSanCoverageGateTest(unittest.TestCase):
                         outcome="patched",
                         lowering_reason="none",
                     ),
-                    verdict(access="1/1", barrier="0/0", atomic="0/0", fence="0/0"),
+                    verdict(access="2/2", barrier="0/0", atomic="0/0", fence="0/0"),
                     synthesize_sites=False,
                 )
             )
