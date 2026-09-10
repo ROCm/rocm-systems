@@ -193,10 +193,10 @@ never dispatched, and one that dispatched yet produced no visible evidence.
 The last state should be interpreted together with the ordinary MOI zero-record
 diagnostic and runtime sampling settings.
 
-## Two-pass dispatched-kernel workflow
+## Generate and use a kernel allowlist
 
-First run the complete workload natively with rocprofv3 kernel tracing, then
-convert the trace to an allowlist:
+Generate an allowlist by profiling the workload once and converting the
+rocprofv3 kernel trace:
 
 ```sh
 rocprofv3 --kernel-trace --output-format csv \
@@ -206,24 +206,16 @@ rocjitsu_consan_allowlist.py \
   --output "$PWD/consan-kernels.txt" "$PWD/consan-profile"
 ```
 
-The generator recursively finds rocprofv3 `*kernel_trace.csv` files,
-deduplicates their exact dispatched kernel names, and writes one name per line.
-Both the profiler's mangled and demangled exact spellings are accepted.
-Run every application path and input shape that the ConSan pass must cover, and
-regenerate the file when the workload, target, or software stack changes.
-
-Then run the same workload with ConSan and the generated allowlist:
+The converter accepts trace CSV files or output directories and writes the
+unique dispatched kernel names one per line. Use that file in a ConSan run:
 
 ```sh
 env \
   HSA_TOOLS_LIB="$CONSAN_HOOK" \
+  RJ_CONSAN_MODE=record-replay \
   RJ_CONSAN_KERNEL_ALLOWLIST_FILE="$PWD/consan-kernels.txt" \
-  RJ_CONSAN_LOG=1 \
   ./application
 ```
-
-At unload, check that each requested kernel reports
-`status=instrumented-dispatched` and a nonzero `dispatches` count.
 
 The three process controls are independent. The concurrent-transform control is
 acquired before semantic inventory. It is a conservative admission unit for
