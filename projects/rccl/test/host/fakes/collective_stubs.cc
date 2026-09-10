@@ -42,7 +42,8 @@ ncclResult_t ncclCeInit(struct ncclComm*) { ::abort(); }
 ncclResult_t ncclLaunchCeColl(struct ncclComm*, struct ncclKernelPlan*) { ::abort(); }
 
 // rma/rma.h, rma/rma_ce.h
-ncclResult_t ncclLaunchRma(struct ncclComm*, struct ncclKernelPlan*) { ::abort(); }
+// ncclLaunchRma is absent on purpose: rma-test.cc compiles the real rma.cc in,
+// so a stub here would be a duplicate symbol.
 ncclResult_t ncclRmaCeInit(struct ncclComm*) { ::abort(); }
 
 // dev_runtime.h
