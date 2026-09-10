@@ -41,7 +41,7 @@ TbufferLoadFormatXMtbuf::TbufferLoadFormatXMtbuf(const MachineInst *inst)
   num_src_ = 4;
   num_dst_ = 1;
   gpumem.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info(amdgpu::WaitCounterType::VMCNT, amdgpu::MemoryCompletionClass::VMEM);
 }
 
 namespace detail {
@@ -74,7 +74,7 @@ TbufferLoadFormatXyMtbuf::TbufferLoadFormatXyMtbuf(const MachineInst *inst)
   num_src_ = 4;
   num_dst_ = 1;
   gpumem.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info(amdgpu::WaitCounterType::VMCNT, amdgpu::MemoryCompletionClass::VMEM);
 }
 
 namespace detail {
@@ -107,7 +107,7 @@ TbufferLoadFormatXyzMtbuf::TbufferLoadFormatXyzMtbuf(const MachineInst *inst)
   num_src_ = 4;
   num_dst_ = 1;
   gpumem.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info(amdgpu::WaitCounterType::VMCNT, amdgpu::MemoryCompletionClass::VMEM);
 }
 
 namespace detail {
@@ -140,7 +140,7 @@ TbufferLoadFormatXyzwMtbuf::TbufferLoadFormatXyzwMtbuf(const MachineInst *inst)
   num_src_ = 4;
   num_dst_ = 1;
   gpumem.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info(amdgpu::WaitCounterType::VMCNT, amdgpu::MemoryCompletionClass::VMEM);
 }
 
 namespace detail {
@@ -173,7 +173,7 @@ TbufferStoreFormatXMtbuf::TbufferStoreFormatXMtbuf(const MachineInst *inst)
   num_src_ = 4;
   num_dst_ = 1;
   gpumem.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info(amdgpu::WaitCounterType::VSCNT, amdgpu::MemoryCompletionClass::UNORDERED);
 }
 
 namespace detail {
@@ -206,7 +206,7 @@ TbufferStoreFormatXyMtbuf::TbufferStoreFormatXyMtbuf(const MachineInst *inst)
   num_src_ = 4;
   num_dst_ = 1;
   gpumem.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info(amdgpu::WaitCounterType::VSCNT, amdgpu::MemoryCompletionClass::UNORDERED);
 }
 
 namespace detail {
@@ -239,7 +239,7 @@ TbufferStoreFormatXyzMtbuf::TbufferStoreFormatXyzMtbuf(const MachineInst *inst)
   num_src_ = 4;
   num_dst_ = 1;
   gpumem.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info(amdgpu::WaitCounterType::VSCNT, amdgpu::MemoryCompletionClass::UNORDERED);
 }
 
 namespace detail {
@@ -272,7 +272,7 @@ TbufferStoreFormatXyzwMtbuf::TbufferStoreFormatXyzwMtbuf(const MachineInst *inst
   num_src_ = 4;
   num_dst_ = 1;
   gpumem.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info(amdgpu::WaitCounterType::VSCNT, amdgpu::MemoryCompletionClass::UNORDERED);
 }
 
 namespace detail {
@@ -305,7 +305,7 @@ TbufferLoadFormatD16XMtbuf::TbufferLoadFormatD16XMtbuf(const MachineInst *inst)
   num_src_ = 4;
   num_dst_ = 1;
   gpumem.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info(amdgpu::WaitCounterType::VMCNT, amdgpu::MemoryCompletionClass::VMEM);
 }
 
 namespace detail {
@@ -344,7 +344,7 @@ TbufferLoadFormatD16XyMtbuf::TbufferLoadFormatD16XyMtbuf(const MachineInst *inst
   num_src_ = 4;
   num_dst_ = 1;
   gpumem.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info(amdgpu::WaitCounterType::VMCNT, amdgpu::MemoryCompletionClass::VMEM);
 }
 
 namespace detail {
@@ -378,7 +378,7 @@ TbufferLoadFormatD16XyzMtbuf::TbufferLoadFormatD16XyzMtbuf(const MachineInst *in
   num_src_ = 4;
   num_dst_ = 1;
   gpumem.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info(amdgpu::WaitCounterType::VMCNT, amdgpu::MemoryCompletionClass::VMEM);
 }
 
 namespace detail {
@@ -418,7 +418,7 @@ TbufferLoadFormatD16XyzwMtbuf::TbufferLoadFormatD16XyzwMtbuf(const MachineInst *
   num_src_ = 4;
   num_dst_ = 1;
   gpumem.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info(amdgpu::WaitCounterType::VMCNT, amdgpu::MemoryCompletionClass::VMEM);
 }
 
 namespace detail {
@@ -452,7 +452,7 @@ TbufferStoreFormatD16XMtbuf::TbufferStoreFormatD16XMtbuf(const MachineInst *inst
   num_src_ = 4;
   num_dst_ = 1;
   gpumem.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info(amdgpu::WaitCounterType::VSCNT, amdgpu::MemoryCompletionClass::UNORDERED);
 }
 
 namespace detail {
@@ -486,7 +486,7 @@ TbufferStoreFormatD16XyMtbuf::TbufferStoreFormatD16XyMtbuf(const MachineInst *in
   num_src_ = 4;
   num_dst_ = 1;
   gpumem.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info(amdgpu::WaitCounterType::VSCNT, amdgpu::MemoryCompletionClass::UNORDERED);
 }
 
 namespace detail {
@@ -520,7 +520,7 @@ TbufferStoreFormatD16XyzMtbuf::TbufferStoreFormatD16XyzMtbuf(const MachineInst *
   num_src_ = 4;
   num_dst_ = 1;
   gpumem.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info(amdgpu::WaitCounterType::VSCNT, amdgpu::MemoryCompletionClass::UNORDERED);
 }
 
 namespace detail {
@@ -554,7 +554,7 @@ TbufferStoreFormatD16XyzwMtbuf::TbufferStoreFormatD16XyzwMtbuf(const MachineInst
   num_src_ = 4;
   num_dst_ = 1;
   gpumem.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info(amdgpu::WaitCounterType::VSCNT, amdgpu::MemoryCompletionClass::UNORDERED);
 }
 
 namespace detail {
