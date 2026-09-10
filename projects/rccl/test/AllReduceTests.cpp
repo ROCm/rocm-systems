@@ -762,7 +762,13 @@ namespace RcclUnitTesting
       GTEST_SKIP() << "Requires at least 1 GPU";
 
     ncclFunc_t                  const funcType      = ncclCollAllReduce;
-    std::vector<ncclDataType_t> const dataTypes     = {ncclFloat32, ncclFloat64, ncclBfloat16};
+    // FP8 is swept here even though AllReduce.Fp8Avg restricts itself to E4M3: at one
+    // rank the avg scalar is exactly 1.0, so pre-scaling then summing and summing then
+    // dividing agree bit for bit, and the AICOMRCCL-2321 reference mismatch cannot
+    // fire. This is also the only test that runs FuncPreMulSum<fp8> on the
+    // oneRankReduce kernel, which is a separate kernel from the ring path.
+    std::vector<ncclDataType_t> const dataTypes     = {ncclFloat32, ncclFloat64, ncclBfloat16,
+                                                       ncclFloat8e4m3, ncclFloat8e5m2};
     bool                        const inPlace       = false; // out-of-place: tail of separate output buffer must be written
     bool                        const useManagedMem = false;
 

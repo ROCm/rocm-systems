@@ -58,6 +58,8 @@
         {"name": "AllReduce.UserBufferRegistration", "description": "AllReduce user-buffer registration path", "test_filter": "AllReduce.UserBufferRegistration"},
         {"name": "AllReduce.ROCTX", "description": "AllReduce roctx logging path", "test_filter": "AllReduce.ROCTX"},
         {"name": "AllReduce.BiasFloat32_Sum", "description": "AllReduce reduce-with-bias path (representative)", "test_filter": "AllReduce.BiasFloat32_Sum"},
+        {"name": "AllReduce.Fp8Avg", "description": "FP8 avg PreMulSum scalar is packed and decoded as float; only discriminates where device rccl_float8 is FNUZ (gfx942 and the software fallback)", "test_filter": "AllReduce.Fp8Avg", "timeout": 300},
+        {"name": "AllReduce.OneRankAvgTailElements", "description": "Single-rank oneRankReduce avg tail, including the FP8 datatypes that exercise FuncPreMulSum<fp8> on that kernel", "test_filter": "AllReduce.OneRankAvgTailElements"},
         {"name": "SendRecv.SinglePairs", "description": "SendRecv single pairs", "test_filter": "SendRecv.SinglePairs"},
         {"name": "GroupCall.Identical", "description": "GroupCall identical", "test_filter": "GroupCall.Identical"},
         {"name": "GroupCall.MultiRootBroadcast", "description": "Multi-root broadcast fallback (AllGatherV disabled)", "test_filter": "GroupCall.MultiRootBroadcast"},

@@ -671,6 +671,9 @@ TEST_F(EnqueueMicrotest, Fp8DeviceIsFnuz_MirrorsTheTypedefSelection) {
   EXPECT_FALSE(rcclFp8DeviceIsFnuz("gfx1250"));
   EXPECT_TRUE(rcclFp8DeviceIsFnuz("gfx942")) << "explicit FNUZ typedef";
   EXPECT_TRUE(rcclFp8DeviceIsFnuz("gfx90a")) << "misses the hip_fp8.h arm, software fallback is FNUZ";
+  // comm->archName is a char* that can be null (init.cc:1584 guards it the same
+  // way), and the null branch is a real branch, so pin it rather than assuming.
+  EXPECT_TRUE(rcclFp8DeviceIsFnuz(nullptr)) << "unknown arch is not one of the OCP four";
   // archName carries feature suffixes, and IsArchMatch is a prefix compare.
   EXPECT_FALSE(rcclFp8DeviceIsFnuz("gfx950:sramecc+:xnack-"));
   EXPECT_TRUE(rcclFp8DeviceIsFnuz("gfx942:sramecc+:xnack-"));

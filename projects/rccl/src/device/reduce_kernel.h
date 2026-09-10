@@ -712,7 +712,12 @@ struct FuncPreMulSum<rccl_bfloat8> {
 };
 
 // A device-resident scalar is still the narrow type in user memory, so promote it
-// here too or the pointer path would disagree with the immediate path above.
+// here too or the pointer path would disagree with the immediate path above. Reading
+// it with the device typedef is what defines such a scalar to be in the device's
+// encoding. No GPU test covers these two yet: the unit-test harness builds scalars on
+// the host and copies them down, and host and device encodings differ by 2x wherever
+// rccl_float8 is FNUZ, so the test would pass on gfx950 and fail on gfx942 for a
+// reason unrelated to this code. Tracked as AICOMRCCL-2322.
 template <>
 struct RedOpArg<FuncPreMulSum<rccl_float8>> {
   static constexpr bool ArgUsed = true;
