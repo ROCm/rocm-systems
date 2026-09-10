@@ -271,8 +271,7 @@ extern "C"
         if(_version > 0) _settings->requires_global_fencing = false;
     }
 
-    void kokkosp_init_library(const int                            loadSeq,
-                              const std::uint64_t                  interfaceVer,
+    void kokkosp_init_library(const int loadSeq, const std::uint64_t interfaceVer,
                               [[maybe_unused]] const std::uint32_t devInfoCount,
                               [[maybe_unused]] void*               deviceInfo)
     {

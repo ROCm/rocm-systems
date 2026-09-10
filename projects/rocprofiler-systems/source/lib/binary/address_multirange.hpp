@@ -6,7 +6,6 @@
 #include "core/binary/address_range.hpp"
 #include "core/binary/fwd.hpp"
 
-
 #include <cstdint>
 #include <utility>
 
