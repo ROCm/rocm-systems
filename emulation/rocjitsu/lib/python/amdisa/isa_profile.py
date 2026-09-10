@@ -426,6 +426,36 @@ class IsaProfile(ABC):
         ...
 
     @property
+    def ds_compare_store_compare_first(self) -> bool:
+        """Whether DS compare-store puts the comparison in DATA0."""
+        return False
+
+    @property
+    def atomic_legacy_minmax(self) -> bool:
+        """Older float-atomic rules preserve selected input bits and propagate SNaNs."""
+        return True
+
+    def scalar_atomic_denorm_modes(
+        self, operation: str, elem_size: int, *, ds: bool
+    ) -> tuple[str, str]:
+        """Return L2 and LDS denormal-mode expressions for scalar FP atomics.
+
+        Older L2 F32 ADD always flushes; F64 ADD and min/max preserve.
+        Other L2 operations follow MODE. Indexed DS and FLAT-to-LDS follow
+        MODE, except F64 ADD which always preserves denormals.
+        """
+        is_f64 = elem_size == 8
+        mode = 'wf.fp_denorm_mode_f16_f64()' if is_f64 else 'wf.fp_denorm_mode_f32()'
+        lds_mode = '3' if operation == 'fadd' and is_f64 else mode
+        if operation == 'fadd':
+            memory_mode = '3' if is_f64 else '0'
+        elif is_f64 and operation != 'fcmpswap':
+            memory_mode = '3'
+        else:
+            memory_mode = mode
+        return memory_mode, lds_mode
+
+    @property
     def generated_arch_name(self) -> str | None:
         """Override for the logical architecture name used by code generation."""
         return None
@@ -1597,6 +1627,11 @@ class CdnaProfile(_AmdgpuProfileBase):
     """
 
     @property
+    def ds_compare_store_compare_first(self) -> bool:
+        # CDNA1-4 / RDNA1-2 DS CMPST reverses the BUFFER operand order.
+        return True
+
+    @property
     def supports_gpr_idx(self) -> bool:
         return True
 
@@ -1942,6 +1977,11 @@ class Rdna1Profile(_AmdgpuProfileBase):
     _SKIP_DPP_SDWA = True
 
     @property
+    def ds_compare_store_compare_first(self) -> bool:
+        # CDNA1-4 / RDNA1-2 DS CMPST reverses the BUFFER operand order.
+        return True
+
+    @property
     def dpp_ctrl_dialect(self) -> DppCtrlDialect:
         return DppCtrlDialect.GFX10_PLUS
 
@@ -2070,6 +2110,11 @@ class Rdna3Profile(_AmdgpuProfileBase):
         if enc_name.upper() == 'ENC_SOP1' and enc_cond == self._SOP1_BASE_COND:
             return False
         return super().skip_inst_encoding(enc_name, enc_cond)
+
+    @property
+    def ds_compare_store_compare_first(self) -> bool:
+        # RDNA3 DS_CMPSTORE notes explicitly match BUFFER operand order.
+        return False
 
     @property
     def dpp_bound_ctrl_applies_to_inactive_sources(self) -> bool:
@@ -2341,6 +2386,23 @@ class Rdna4Profile(_AmdgpuProfileBase):
         if enc_name.upper() == 'ENC_SOP1' and enc_cond == self._SOP1_BASE_COND:
             return False
         return super().skip_inst_encoding(enc_name, enc_cond)
+
+    @property
+    def ds_compare_store_compare_first(self) -> bool:
+        return False
+
+    @property
+    def atomic_legacy_minmax(self) -> bool:
+        # RDNA4 chapter 13 / CDNA5 chapter 12 operate on flushed inputs.
+        return False
+
+    def scalar_atomic_denorm_modes(
+        self, operation: str, elem_size: int, *, ds: bool
+    ) -> tuple[str, str]:
+        # RDNA4 13.2 / CDNA5 12.2: FLAT LDS and L2 both preserve denormals.
+        # Indexed DS retains its independent MODE-controlled policy.
+        _, lds_mode = super().scalar_atomic_denorm_modes(operation, elem_size, ds=ds)
+        return '3', lds_mode if ds else '3'
 
     @property
     def dpp_bound_ctrl_applies_to_inactive_sources(self) -> bool:

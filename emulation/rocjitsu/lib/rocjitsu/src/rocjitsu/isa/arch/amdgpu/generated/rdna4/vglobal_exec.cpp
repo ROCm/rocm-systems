@@ -1193,6 +1193,9 @@ void GlobalAtomicMinNumF32Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   d->num_elems = 1;
   d->is_load = amdgpu::gfx12_atomic_returns(inst_.th);
   d->atomic_op = amdgpu::AtomicOp::FMIN;
+  d->atomic_denorm_mode = 3;
+  d->atomic_lds_denorm_mode = 3;
+  d->atomic_legacy_minmax = false;
   d->wait_counter_type = amdgpu::WaitCounterType::LOADCNT;
   d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
   d->non_temporal = 0;
@@ -1217,6 +1220,9 @@ void GlobalAtomicMaxNumF32Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   d->num_elems = 1;
   d->is_load = amdgpu::gfx12_atomic_returns(inst_.th);
   d->atomic_op = amdgpu::AtomicOp::FMAX;
+  d->atomic_denorm_mode = 3;
+  d->atomic_lds_denorm_mode = 3;
+  d->atomic_legacy_minmax = false;
   d->wait_counter_type = amdgpu::WaitCounterType::LOADCNT;
   d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
   d->non_temporal = 0;
@@ -1338,6 +1344,9 @@ void GlobalAtomicAddF32Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   d->num_elems = 1;
   d->is_load = amdgpu::gfx12_atomic_returns(inst_.th);
   d->atomic_op = amdgpu::AtomicOp::FADD;
+  d->atomic_denorm_mode = 3;
+  d->atomic_lds_denorm_mode = 3;
+  d->atomic_legacy_minmax = false;
   d->wait_counter_type = amdgpu::WaitCounterType::LOADCNT;
   d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
   d->non_temporal = 0;

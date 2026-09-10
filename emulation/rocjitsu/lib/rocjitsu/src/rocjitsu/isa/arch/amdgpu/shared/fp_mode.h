@@ -15,6 +15,7 @@
 #include <cmath>
 #include <cstdint>
 #include <limits>
+#include <type_traits>
 
 #if defined(__x86_64__) || defined(_M_X64) || defined(__i386__)
 #include <xmmintrin.h>
@@ -460,6 +461,75 @@ inline uint16_t packed_mul_bf16(float a, float b, bool fp16_ovfl) {
   // An addend with the product's sign preserves a negative zero product.
   const float zero = std::signbit(a) != std::signbit(b) ? -0.0f : 0.0f;
   return packed_fma_bf16(a, b, zero, fp16_ovfl);
+}
+
+enum class ScalarAtomicOp { FADD, FMIN, FMAX, FCMPSWAP };
+
+/// @brief Execute scalar floating atomics with explicit ISA policy and bit-preserving selection.
+template <typename Bits>
+Bits atomic_scalar(ScalarAtomicOp operation, Bits old_bits, Bits source_bits, Bits compare_bits,
+                   uint32_t denorm_mode, bool legacy_minmax) {
+  static_assert(std::is_same_v<Bits, uint32_t> || std::is_same_v<Bits, uint64_t>);
+  using Float = std::conditional_t<sizeof(Bits) == 4, float, double>;
+  constexpr Bits kSign = Bits{1} << (sizeof(Bits) * 8 - 1);
+  constexpr Bits kExponent =
+      sizeof(Bits) == 4 ? Bits{0x7f800000u} : static_cast<Bits>(0x7ff0000000000000ULL);
+  constexpr Bits kQuiet =
+      sizeof(Bits) == 4 ? Bits{0x00400000u} : static_cast<Bits>(0x0008000000000000ULL);
+  constexpr Bits kMantissa = ~(kSign | kExponent);
+  auto flush = [](Bits bits) -> Bits { return (bits & kExponent) == 0 ? bits & kSign : bits; };
+  auto is_nan = [](Bits bits) {
+    return (bits & kExponent) == kExponent && (bits & kMantissa) != 0;
+  };
+  const Bits old_input = (denorm_mode & 1u) ? old_bits : flush(old_bits);
+  const Bits source_input = (denorm_mode & 1u) ? source_bits : flush(source_bits);
+  const Bits compare_input = (denorm_mode & 1u) ? compare_bits : flush(compare_bits);
+  if (operation == ScalarAtomicOp::FCMPSWAP) {
+    // Integer equality implements finite IEEE equality except for signed zero;
+    // classify NaNs explicitly so equal payloads never cause a swap.
+    const bool equal =
+        old_input == compare_input || ((old_input & ~kSign) == 0 && (compare_input & ~kSign) == 0);
+    return !is_nan(old_input) && !is_nan(compare_input) && equal ? source_input : old_input;
+  }
+  if (operation == ScalarAtomicOp::FADD) {
+    // DS and cache ADD use fixed RNE, independent of both MODE.round and the host.
+    // Select NaNs explicitly so host operand scheduling cannot change payload priority.
+    if (is_nan(old_input))
+      return old_input | kQuiet;
+    if (is_nan(source_input))
+      return source_input | kQuiet;
+    if ((old_input & ~kSign) == kExponent && (source_input & ~kSign) == kExponent &&
+        ((old_input ^ source_input) & kSign))
+      return kSign | kExponent | kQuiet;
+    detail::ScopedFenv nearest_environment(0);
+    volatile Float old_value = std::bit_cast<Float>(old_input);
+    volatile Float source_value = std::bit_cast<Float>(source_input);
+    const Bits result = std::bit_cast<Bits>(static_cast<Float>(old_value + source_value));
+    return (denorm_mode & 2u) ? result : flush(result);
+  }
+
+  // CDNA1-4 / RDNA1-3.5 preserve selected denormals and propagate SNaNs.
+  // CDNA5 / RDNA4 MIN_NUM/MAX_NUM select from the flushed values instead.
+  const Bits old_result = legacy_minmax ? old_bits : old_input;
+  const Bits source_result = legacy_minmax ? source_bits : source_input;
+  if (legacy_minmax) {
+    if (is_nan(old_input) && !(old_input & kQuiet))
+      return old_input | kQuiet;
+    if (is_nan(source_input) && !(source_input & kQuiet))
+      return source_input | kQuiet;
+  }
+  if (is_nan(old_input))
+    return is_nan(source_input) ? old_input | kQuiet : source_result;
+  if (is_nan(source_input))
+    return old_result;
+
+  // Compare IEEE bit patterns directly. This also avoids host DAZ affecting a
+  // preserved denormal comparison and orders -0 before +0 without host fmin/fmax.
+  const Bits old_order = (old_input & kSign) ? ~old_input : old_input ^ kSign;
+  const Bits source_order = (source_input & kSign) ? ~source_input : source_input ^ kSign;
+  const bool select_source =
+      operation == ScalarAtomicOp::FMIN ? source_order < old_order : source_order > old_order;
+  return select_source ? source_result : old_result;
 }
 
 /// @brief Add packed F16/BF16 components using float-memory-atomic policy.

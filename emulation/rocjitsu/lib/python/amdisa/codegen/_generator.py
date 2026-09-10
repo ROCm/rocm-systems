@@ -8099,6 +8099,8 @@ class CodeGenerator:
     _ATOMIC_OP_ENUM: dict[str, str] = {
         'swap': 'amdgpu::AtomicOp::SWAP',
         'cmpswap': 'amdgpu::AtomicOp::CMPSWAP',
+        'condxchg32': 'amdgpu::AtomicOp::CONDXCHG32',
+        'fcmpswap': 'amdgpu::AtomicOp::FCMPSWAP',
         'mskor': 'amdgpu::AtomicOp::MSKOR',
         'add': 'amdgpu::AtomicOp::ADD',
         'sub': 'amdgpu::AtomicOp::SUB',
@@ -8127,6 +8129,22 @@ class CodeGenerator:
             return 'd->exec_mask'
         return 'wf.exec()'
 
+    def _append_atomic_fp_policy(
+        self, lines: list[str], sem: InstructionSemantics, *, ds: bool
+    ) -> None:
+        """Carry manual-defined scalar FP policies through deferred memory execution."""
+        if sem.operation not in ('fadd', 'fmin', 'fmax', 'fcmpswap'):
+            return
+        profile = self.isa_spec.profile
+        memory_mode, lds_mode = profile.scalar_atomic_denorm_modes(
+            sem.operation, sem.elem_size, ds=ds
+        )
+        lines.append(f'  d->atomic_denorm_mode = {memory_mode};')
+        lines.append(f'  d->atomic_lds_denorm_mode = {lds_mode};')
+        lines.append(
+            f'  d->atomic_legacy_minmax = {str(profile.atomic_legacy_minmax).lower()};'
+        )
+
     def _gen_flat_atomic(
         self, dst: list[str], src: list[str], sem: InstructionSemantics
     ) -> str:
@@ -8154,6 +8172,7 @@ class CodeGenerator:
         L.append('  d->num_elems = 1;')
         L.append(f'  d->is_load = {self._atomic_return_expr(sc0)};')
         L.append(f'  d->atomic_op = {op_enum};')
+        self._append_atomic_fp_policy(L, sem, ds=False)
         self._append_wait_counter_type(L, 'flat_atomic')
         L.append(f'  d->mtype = {self._mtype_expr()};')
         L.append(f'  d->non_temporal = {nt};')
@@ -8201,6 +8220,7 @@ class CodeGenerator:
         L.append('  d->num_elems = 1;')
         L.append(f'  d->is_load = {self._atomic_return_expr(sc0)};')
         L.append(f'  d->atomic_op = {op_enum};')
+        self._append_atomic_fp_policy(L, sem, ds=False)
         self._append_wait_counter_type(L, 'buffer_atomic')
         L.append(f'  d->mtype = {self._mtype_expr()};')
         L.append(f'  d->non_temporal = {nt};')
@@ -8237,7 +8257,7 @@ class CodeGenerator:
         returns_data = 'vdst' in dst
 
         L = []
-        is_cmpswap = sem.operation == 'cmpswap'
+        is_cmpswap = sem.operation in ('cmpswap', 'fcmpswap')
         L.append(
             '  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);'
         )
@@ -8247,11 +8267,19 @@ class CodeGenerator:
         L.append('  d->num_elems = 1;')
         L.append(f'  d->is_load = {str(returns_data).lower()};')
         L.append(f'  d->atomic_op = {op_enum};')
+        self._append_atomic_fp_policy(L, sem, ds=True)
         if sem.operation in ('pk_add_f16', 'pk_add_bf16'):
             # CDNA5 ISA 12.2 groups packed F16/BF16 under DS denorm_double controls.
             L.append('  d->packed_denorm_mode = wf.fp_denorm_mode_f16_f64();')
         self._append_wait_counter_type(L, 'ds_atomic')
         L.append('  ds_calculate_addresses(inst_, wf, *d);')
+        if sem.operation == 'condxchg32':
+            # Conditional exchange uses a qword-aligned 16-bit LDS address.
+            L.append('  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {')
+            L.append('    d->per_lane_addr[lane] = wf.lds_base() +')
+            L.append('        ((d->per_lane_addr[lane] - wf.lds_base()) & 0xfff8u);')
+            L.append('  }')
+
         L.append('  auto &cu = wf.cu();')
         L.append('  uint64_t exec = wf.exec();')
         L.append(
@@ -8261,6 +8289,9 @@ class CodeGenerator:
             L.append(
                 f"  uint32_t data1_base = {self._vgpr_base_expr('data1', role='Src2')};"
             )
+        if is_cmpswap and self.isa_spec.profile.ds_compare_store_compare_first:
+            # Normalize older DS comparison/replacement order to the pipeline contract.
+            L.append('  std::swap(data_base, data1_base);')
         stride = data_dwords * 4
         L.append(f'  d->store_data.resize(wf.wf_size() * {stride});')
         L.append('  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {')
@@ -9831,7 +9862,7 @@ class CodeGenerator:
                         _needs_atomic_return_view = (
                             _is_optional_atomic_return
                             and inst_sem.semantic_class == 'buffer_atomic'
-                            and inst_sem.operation == 'cmpswap'
+                            and inst_sem.operation in ('cmpswap', 'fcmpswap')
                             and opnd.name == 'vdata'
                         )
                         atomic_return_operand = (

@@ -47,6 +47,7 @@ enum MemPipelineTag : uint8_t {
 enum class AtomicOp : uint8_t {
   NONE = 0,       ///< Not an atomic operation.
   SWAP,           ///< Exchange.
+  CONDXCHG32,     ///< Two conditional dword exchanges, controlled by each source sign bit.
   CMPSWAP,        ///< Compare-and-swap (data[0] = src, data[1] = cmp).
   MSKOR,          ///< Masked OR (data[0] = mask, data[1] = src).
   ADD,            ///< Atomic add.
@@ -61,6 +62,7 @@ enum class AtomicOp : uint8_t {
   XOR,            ///< Bitwise XOR.
   INC,            ///< Increment (wrapping).
   DEC,            ///< Decrement (wrapping).
+  FCMPSWAP,       ///< Floating comparison, with replacement followed by comparison.
   FADD,           ///< Floating-point add.
   PK_ADD_F16,     ///< Two independent packed IEEE half additions.
   PK_ADD_BF16,    ///< Two independent packed BFloat16 additions.
@@ -197,6 +199,13 @@ struct VectorMemState : DynamicInstState {
   // by default, including FLAT atomics routed to LDS through the shared
   // aperture (RDNA4 ISA MODE.FP_DENORM). Direct DS execution overrides this.
   uint32_t packed_denorm_mode = 3;
+  /// Scalar atomic policies are captured at issue, before MODE can change.
+  /// Separate LDS and L2 modes cover FLAT requests routed to either pipeline.
+  uint32_t atomic_denorm_mode = 3;
+  uint32_t atomic_lds_denorm_mode = 3;
+  /// Older MIN/MAX compare flushed inputs but return the original selected bits.
+  /// They also propagate signaling NaNs instead of treating them as missing numbers.
+  bool atomic_legacy_minmax = true;
   bool lds_dst = false; ///< Buffer load with LDS bit: write to LDS, not VGPRs.
   /// Reference LDS address for LDS-destination loads. For ordinary LDS-dst
   /// paths this may include the lane-0 destination offset. For cluster

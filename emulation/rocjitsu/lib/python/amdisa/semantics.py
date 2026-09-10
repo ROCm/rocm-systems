@@ -1860,7 +1860,7 @@ _FLAT_ATOMIC_OPS: dict[str, tuple[str, int]] = {
     # Integer atomics.
     'SWAP': ('swap', 1),
     'CMPSWAP': ('cmpswap', 2),  # src + cmp
-    'FCMPSWAP': ('cmpswap', 2),  # FP compare-and-swap
+    'FCMPSWAP': ('fcmpswap', 2),  # FP compare-and-swap
     'ADD': ('add', 1),
     'SUB': ('sub', 1),
     'SMIN': ('smin', 1),
@@ -1940,13 +1940,15 @@ def _derive_flat_atomic_info(suffix: str, is_x2: bool) -> tuple[str, int, int] |
         return None
 
     op, data_dw = info
+    if op == 'cmpswap' and type_suffix in ('_F32', '_F64'):
+        op = 'fcmpswap'
     is_64bit = (
         is_x2
         or '64' in type_suffix
         or original_suffix.endswith(('_B64', '_U64', '_I64', '_F64'))
     )
     elem_size = 8 if is_64bit else 4
-    if op in ('cmpswap', 'mskor'):
+    if op in ('cmpswap', 'fcmpswap', 'mskor'):
         data_dw_actual = 2 * (elem_size // 4)
     elif data_dw == 1:
         data_dw_actual = elem_size // 4
@@ -2419,15 +2421,15 @@ def _derive_ds(name: str) -> InstructionSemantics | None:
         '_CMPST_B64': ('cmpswap', 8, 4),
         '_CMPST_RTN_B32': ('cmpswap', 4, 2),
         '_CMPST_RTN_B64': ('cmpswap', 8, 4),
-        '_CMPST_F32': ('cmpswap', 4, 2),
-        '_CMPST_F64': ('cmpswap', 8, 4),
-        '_CMPST_RTN_F32': ('cmpswap', 4, 2),
-        '_CMPST_RTN_F64': ('cmpswap', 8, 4),
+        '_CMPST_F32': ('fcmpswap', 4, 2),
+        '_CMPST_F64': ('fcmpswap', 8, 4),
+        '_CMPST_RTN_F32': ('fcmpswap', 4, 2),
+        '_CMPST_RTN_F64': ('fcmpswap', 8, 4),
         '_CMPSTORE_B32': ('cmpswap', 4, 2),
         '_CMPSTORE_B64': ('cmpswap', 8, 4),
         '_CMPSTORE_RTN_B32': ('cmpswap', 4, 2),
         '_CMPSTORE_RTN_B64': ('cmpswap', 8, 4),
-        '_CONDXCHG32_RTN_B64': ('cmpswap', 8, 4),
+        '_CONDXCHG32_RTN_B64': ('condxchg32', 8, 2),
         '_ADD_F32': ('fadd', 4, 1),
         '_ADD_RTN_F32': ('fadd', 4, 1),
         '_ADD_F64': ('fadd', 8, 2),
@@ -2450,10 +2452,10 @@ def _derive_ds(name: str) -> InstructionSemantics | None:
         '_MAX_NUM_RTN_F64': ('fmax', 8, 2),
         '_SUB_CLAMP_U32': ('sub', 4, 1),
         '_SUB_CLAMP_RTN_U32': ('sub', 4, 1),
-        '_CMPSTORE_F32': ('cmpswap', 4, 2),
-        '_CMPSTORE_RTN_F32': ('cmpswap', 4, 2),
-        '_CMPSTORE_F64': ('cmpswap', 8, 4),
-        '_CMPSTORE_RTN_F64': ('cmpswap', 8, 4),
+        '_CMPSTORE_F32': ('fcmpswap', 4, 2),
+        '_CMPSTORE_RTN_F32': ('fcmpswap', 4, 2),
+        '_CMPSTORE_F64': ('fcmpswap', 8, 4),
+        '_CMPSTORE_RTN_F64': ('fcmpswap', 8, 4),
         '_WRXCHG2ST64_RTN_B32': ('swap', 4, 1),
         '_WRXCHG2ST64_RTN_B64': ('swap', 8, 2),
         '_STOREXCHG2ADDR_RTN_B32': ('swap', 4, 1),

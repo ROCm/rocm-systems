@@ -7465,6 +7465,22 @@ def test_generated_atomic_def_use_follows_return_control(
         assert 'src_operands_[0] = &vdata;' in cmpswap
         assert 'dst_operands_[num_dst_++] = &vdata_return;' in cmpswap
 
+    for arch, mnemonic, payload_bits, return_bits in (
+        ('rdna1', 'BufferAtomicFcmpswapMubuf', 64, 32),
+        ('rdna1', 'BufferAtomicFcmpswapX2Mubuf', 128, 64),
+        ('rdna2', 'BufferAtomicFcmpswapMubuf', 64, 32),
+        ('rdna2', 'BufferAtomicFcmpswapX2Mubuf', 128, 64),
+        ('rdna3', 'BufferAtomicCmpswapF32Mubuf', 64, 32),
+        ('rdna3_5', 'BufferAtomicCmpswapF32Mubuf', 64, 32),
+    ):
+        buffer = (amdgpu_generated_root / arch / 'mubuf.cpp').read_text()
+        cmpswap = buffer.split(f'{mnemonic}::{mnemonic}')[1]
+        cmpswap = cmpswap.split(f'void {mnemonic}::execute_impl')[0]
+        assert f'vdata({payload_bits}, OperandType::OPR_VGPR' in cmpswap
+        assert f'vdata_return({return_bits}, OperandType::OPR_VGPR' in cmpswap
+        assert 'src_operands_[0] = &vdata;' in cmpswap
+        assert 'dst_operands_[num_dst_++] = &vdata_return;' in cmpswap
+
 
 def test_generated_flat_saddr_null_selector_follows_encoding(
     amdgpu_generated_root: Path,
