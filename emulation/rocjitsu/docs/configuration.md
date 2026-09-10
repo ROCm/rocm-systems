@@ -16,11 +16,25 @@ Pre-built simulator configs are in `configs/`:
 | `gfx950_mi355x.json` | Single CDNA4 GPU (standalone simulation) |
 | `gfx950_mi355x_kmd.json` | Single CDNA4 GPU (daemon/KFD mode) |
 | `gfx950_mi355x_kmd_2gpu.json` | Two CDNA4 GPUs (multi-GPU daemon mode) |
-| `gfx1250_mi455x.json` | Single CDNA5 GPU (standalone simulation, no KMD) |
+| `gfx1250_mi455x.json` | Single CDNA5 GPU (standalone or PCI/VFIO simulation) |
 | `gfx1250_mi455x_kmd_4gpu.json` | Four MI455X GPUs (multi-GPU daemon mode) |
 | `gfx1100_w7900.json` | Single RDNA3 GPU (standalone simulation) |
 | `gfx1151.json` | Single RDNA3.5 GPU (standalone simulation) |
 | `gfx1201_r9700.json` | Single RDNA4 GPU (standalone simulation) |
+
+### PCI/VFIO guest compatibility
+
+The gfx1250 PCI profile intentionally advertises no UVD, VCN, or JPEG hardware.
+Compute-only guests therefore require an AMDGPU kernel containing commit
+`4e07da515d1c` (`drm/amdgpu: enumerate UMSCH HW IP`) or an equivalent backport.
+That change makes multimedia discovery accept a device with no VCN instance.
+Rocjitsu does not emulate a placeholder media block, and adding one would expand
+the device contract beyond the compute functionality modeled here.
+
+The generic `scripts/run-vfio-guest.py` launcher requires externally prepared
+guest kernel and initramfs artifacts. See
+[QEMU VFIO-user compute](qemu-vfio.md) for the supported guest contract, the
+complete launch command, GEMM qualification criteria, and troubleshooting.
 
 ## DBT guest configs
 
@@ -99,11 +113,11 @@ partitions, while `num_threads: 4` assigns XCDs from both GPUs to each
 partition.
 
 Raising `num_threads` only pays off if the work reaches more than one XCD, which
-is decided by `HwQueue::xcd_fanout` rather than by how the queue was created (see
+is decided by `AqlQueueConfig::xcd_fanout` rather than by how the queue was created (see
 *Queue ownership and XCD fan-out* in `vm-design.md`). KFD sets the flag for
-compute queues, and a test can opt in when it registers a queue directly; a queue
-without the flag keeps its whole grid on its owning XCD and leaves the other
-partitions idle no matter how `num_threads` is set.
+supported AQL compute queues, and a test can opt in when it registers a queue
+directly; a queue without the flag keeps its whole grid on its owning XCD and
+leaves the other partitions idle no matter how `num_threads` is set.
 
 Setting the flag is not a guarantee that every partition gets work. The grid is
 split in dispatch chunks, and a chunk is a whole cluster for a clustered

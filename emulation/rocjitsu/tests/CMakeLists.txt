@@ -374,6 +374,13 @@ add_test(
         ${CMAKE_CURRENT_SOURCE_DIR}/tools/test_pretranslate.py -v
 )
 add_test(
+    NAME VfioGuestRunUnitTest
+    COMMAND
+        ${Python3_EXECUTABLE} -B
+        ${CMAKE_CURRENT_SOURCE_DIR}/scripts/test_run_vfio_guest.py -v
+)
+
+add_test(
     NAME CommandProcessorSdmaBoundaryTest
     COMMAND
         ${CMAKE_COMMAND} -DROCJITSU_SOURCE_DIR=${CMAKE_SOURCE_DIR} -P
