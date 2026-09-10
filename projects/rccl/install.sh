@@ -8,6 +8,7 @@ ROCM_PATH=${ROCM_PATH:="/opt/rocm"}
 
 # Default values
 build_address_sanitizer=false
+build_all_unrolls=false
 build_bfd=false
 build_freorg_bkwdcomp=false
 build_local_gpu_only=false
@@ -71,6 +72,7 @@ function display_help()
     echo "RCCL build & installation helper script"
     echo " Options:"
     echo "       --address-sanitizer     Build with address sanitizer enabled"
+    echo "       --all_unrolls           Build every unroll factor (1,2,4,8,16,32) for the targeted GPU arch(es) instead of the per-arch default set"
     echo "       --amdgpu_targets        Only compile for specified GPU architecture(s). For multiple targets, separate by ';' (builds for all supported GPU architectures by default)"
     echo "       --cmake-options         Pass additional CMake options (e.g. --cmake-options \"-DFOO=BAR -DBAZ=ON\")"
     echo "       --debug                 Build debug library"
@@ -140,7 +142,7 @@ function display_help()
 # check if we have a modern version of getopt that can handle whitespace and long parameters
 getopt -T
 if [[ "$?" -eq 4 ]]; then
-    GETOPT_PARSE=$(getopt --name "${0}" --options cdfhij:lprtq --longoptions address-sanitizer,amdgpu_targets:,cmake-options:,debug,debug-fast,dependencies,device-linker,disable-colltrace,disable-kernarg-preload,disable-roctx,disable-sym-kernels,disable-warp-speed,dump-asm,enable-code-coverage,enable_backtrace,enable-mpi-tests,enable-tdm-simple,fast,force-reduce-pipeline,generate-sym-kernels,help,install,jobs:,kernel-resource-use,local_gpu_only,log-trace,ninja,no_clean,no-device-linker,npkit-enable,openmp-test-enable,package_build,prefix:,quiet-warnings,rm-legacy-include-dir,rocshmem,rocshmem-gin,roctx-enable,sqtt-enable,run_tests_all,run_tests_quick,static,tests_build,time-trace,verbose -- "$@")
+    GETOPT_PARSE=$(getopt --name "${0}" --options cdfhij:lprtq --longoptions address-sanitizer,all_unrolls,amdgpu_targets:,cmake-options:,debug,debug-fast,dependencies,device-linker,disable-colltrace,disable-kernarg-preload,disable-roctx,disable-sym-kernels,disable-warp-speed,dump-asm,enable-code-coverage,enable_backtrace,enable-mpi-tests,enable-tdm-simple,fast,force-reduce-pipeline,generate-sym-kernels,help,install,jobs:,kernel-resource-use,local_gpu_only,log-trace,ninja,no_clean,no-device-linker,npkit-enable,openmp-test-enable,package_build,prefix:,quiet-warnings,rm-legacy-include-dir,rocshmem,rocshmem-gin,roctx-enable,sqtt-enable,run_tests_all,run_tests_quick,static,tests_build,time-trace,verbose -- "$@")
 else
     echo "Need a new version of getopt"
     exit 1
@@ -156,6 +158,7 @@ eval set -- "${GETOPT_PARSE}"
 while true; do
     case "${1}" in
          --address-sanitizer)        build_address_sanitizer=true;                                                                     shift ;;
+         --all_unrolls)              build_all_unrolls=true;                                                                           shift ;;
          --amdgpu_targets)           build_amdgpu_targets=${2};                                                                        shift 2 ;;
          --cmake-options)            custom_cmake_options=${2};                                                                        shift 2 ;;
          --debug)                    build_release=false;                                                                              shift ;;
@@ -370,6 +373,11 @@ fi
 # Build local GPU arch only
 if [[ "${build_local_gpu_only}" == true ]]; then
     cmake_common_options="${cmake_common_options} -DBUILD_LOCAL_GPU_TARGET_ONLY=ON"
+fi
+
+# Build every unroll factor for the targeted arch(es)
+if [[ "${build_all_unrolls}" == true ]]; then
+    cmake_common_options="${cmake_common_options} -DBUILD_ALL_UNROLLS=ON"
 fi
 
 # Build for specified GPU target(s) only

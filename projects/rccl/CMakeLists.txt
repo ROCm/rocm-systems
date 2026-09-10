@@ -80,6 +80,7 @@ include(cmake/NcclCompat.cmake)
 rccl_define_nccl_compat_options()
 
 option(BUILD_ADDRESS_SANITIZER                 "Enable address sanitizer"                      ${RCCL_DEFAULT_BUILD_ADDRESS_SANITIZER})
+option(BUILD_ALL_UNROLLS                       "Generate every unroll factor (1,2,4,8,16,32) for the targeted GPU arch(es)" OFF)
 option(BUILD_BFD                               "Enable custom backtrace (if bfd.h exists)"     OFF)
 option(BUILD_LOCAL_GPU_TARGET_ONLY             "Build only for GPUs detected on this machine"  OFF)
 option(BUILD_SHARED_LIBS                       "Build as shared library"                       ON)

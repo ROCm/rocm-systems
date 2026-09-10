@@ -119,17 +119,24 @@ rj_add_asm_fixture(triton_cdna3_flash_attention_buffer_async_1024 gfx942)
 rj_add_asm_fixture(hipkittens_bf16fp32_256_256_64_32_with16x32 gfx950)
 rj_add_asm_fixture(hipkittens_bf16fp32_256_256_64_32_with32x16 gfx950)
 
-# Second build of vector_add for gfx90a, used by the DBI hardware-gated
-# smoke test (tests/dbi/hsa_dbi_nop_asm_test.cpp). Outputs vector_add_gfx90a.o
-# so it coexists with the gfx950 build above. (A single multi-target fat
-# binary would be cleaner but the Executable loader has a pre-existing
-# single-bundle assumption — see executable.cpp::load_hip_fatbin.)
+# Per-target builds of vector_add for the DBI smoke test
+# (tests/dbi/hsa_dbi_nop_asm_test.cpp), named so they coexist with the gfx950
+# build above, which that test reuses for its CDNA4 target. (A single
+# multi-target fat binary would be cleaner but the Executable loader has a
+# pre-existing single-bundle assumption — see executable.cpp::load_hip_fatbin.)
 rj_add_device_kernel(vector_add gfx90a OUTPUT_NAME vector_add_gfx90a)
+rj_add_device_kernel(vector_add gfx1201 OUTPUT_NAME vector_add_gfx1201)
 
 # Register-padded vector_add for the DBI probe-CALL smoke test
 # (tests/dbi/hsa_dbi_nop_probe_test.cpp). Forces .sgpr_count >= 32 so the
-# probe's link pair s[30:31] is granted; see vector_add_probe.hip.
+# probe's link pair s[30:31] is granted; see vector_add_probe.hip. Needed per
+# CDNA target: sgpr_count_from_granulated() derives the allocation from the
+# descriptor on CDNA, so a plain vector_add still would not grant s[30:31].
 rj_add_device_kernel(vector_add_probe gfx90a OUTPUT_NAME vector_add_probe_gfx90a)
+rj_add_device_kernel(vector_add_probe gfx950 OUTPUT_NAME vector_add_probe_gfx950)
+# RDNA grants the wave the whole SGPR file, so s[30:31] is available without the
+# padding. Build the padded kernel anyway to keep one fixture shape per target.
+rj_add_device_kernel(vector_add_probe gfx1201 OUTPUT_NAME vector_add_probe_gfx1201)
 
 if(RJ_INSTALL_TESTS)
     set(RJ_DEVICE_KERNEL_FIXTURES
@@ -140,6 +147,9 @@ if(RJ_INSTALL_TESTS)
         ${KERNEL_OUTPUT_DIR}/vector_add.o
         ${KERNEL_OUTPUT_DIR}/vector_add_gfx90a.o
         ${KERNEL_OUTPUT_DIR}/vector_add_probe_gfx90a.o
+        ${KERNEL_OUTPUT_DIR}/vector_add_probe_gfx950.o
+        ${KERNEL_OUTPUT_DIR}/vector_add_gfx1201.o
+        ${KERNEL_OUTPUT_DIR}/vector_add_probe_gfx1201.o
         ${KERNEL_OUTPUT_DIR}/dynamic_copy_loop.o
         ${KERNEL_OUTPUT_DIR}/scratch_spill_probe.o
         ${KERNEL_OUTPUT_DIR}/virtual_lds_smoke.o
@@ -183,6 +193,8 @@ set(HAS_GFX1250_DBT_FIXTURE FALSE)
 set(RJ_GFX1250_DBT_FIXTURE_TARGET)
 if(CLANG_OFFLOAD_BUNDLER)
     rj_add_probe_object(rj_nop_probe gfx90a OUTPUT_NAME rj_nop_probe_gfx90a)
+    rj_add_probe_object(rj_nop_probe gfx950 OUTPUT_NAME rj_nop_probe_gfx950)
+    rj_add_probe_object(rj_nop_probe gfx1201 OUTPUT_NAME rj_nop_probe_gfx1201)
     rj_add_probe_object(
         callable_sgpr_probe
         gfx950
@@ -212,6 +224,8 @@ if(CLANG_OFFLOAD_BUNDLER)
         install(
             FILES
                 ${KERNEL_OUTPUT_DIR}/rj_nop_probe_gfx90a.hsaco
+                ${KERNEL_OUTPUT_DIR}/rj_nop_probe_gfx950.hsaco
+                ${KERNEL_OUTPUT_DIR}/rj_nop_probe_gfx1201.hsaco
                 ${KERNEL_OUTPUT_DIR}/callable_sgpr_probe_gfx950.hsaco
             DESTINATION ${CMAKE_INSTALL_DATADIR}/rocjitsu/tests/kernels
         )
@@ -241,6 +255,9 @@ add_custom_target(
         kernel_vector_add
         kernel_vector_add_gfx90a
         kernel_vector_add_probe_gfx90a
+        kernel_vector_add_probe_gfx950
+        kernel_vector_add_gfx1201
+        kernel_vector_add_probe_gfx1201
         kernel_dynamic_copy_loop
         kernel_scratch_spill_probe
         kernel_virtual_lds_smoke
@@ -263,7 +280,12 @@ add_custom_target(
 )
 
 if(HAS_PROBE_FIXTURES)
-    add_dependencies(device_kernels probe_rj_nop_probe_gfx90a)
+    add_dependencies(
+        device_kernels
+        probe_rj_nop_probe_gfx90a
+        probe_rj_nop_probe_gfx950
+        probe_rj_nop_probe_gfx1201
+    )
 endif()
 
 # Export variables to the parent scope so the test executable can use them.

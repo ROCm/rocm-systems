@@ -200,6 +200,9 @@ public:
     return config_.functional_quantum == 0 ? UINT32_MAX : config_.functional_quantum;
   }
 
+  /// @brief Restore the raw configured functional quantum (0 = unbounded).
+  void set_functional_quantum(uint32_t quantum) { config_.functional_quantum = quantum; }
+
   /// @brief Select whether the CP continuation event owns functional execution.
   void set_pool_driven(bool value) { pool_driven_ = value; }
   bool pool_driven() const { return pool_driven_; }
@@ -1210,6 +1213,10 @@ public:
     // resumes it.
     if (!this->engine())
       return;
+    if (this->pool_driven()) {
+      this->notify_pool_ready();
+      return;
+    }
     auto now = this->engine()->context(this->partition_id()).current_tick();
     schedule_work_at(now + 1);
   }

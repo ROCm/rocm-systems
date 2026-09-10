@@ -36,6 +36,10 @@ Full documentation for ROCprofiler-SDK is available at [rocm.docs.amd.com/projec
   - Fixed `rocprofv3` crashing during output generation when a second tool subscribed to code object tracing in the same process, which blocked profiling PyTorch and Triton workloads through rocprofiler-compute.
   - Fixed `rocprofv3` hanging instead of exiting when a fatal signal arrives while it is already handling one, for example when output generation aborts. It previously left GPU child processes running and required killing the process manually.
 
+### Known issues
+
+- Dynamic attachment with `rocprofv3 --attach` can fail when the target process already exposes `rocprofiler_configure`. `rocprofiler-register` can interpret this symbol as an active profiling tool, preventing the attachment listener from starting. For example, some PyTorch workloads are affected because `libtorch_cpu.so` exports this symbol.
+
 ### Removed
 
 ## ROCprofiler-SDK 1.3.5 for ROCm release 10.0.0
