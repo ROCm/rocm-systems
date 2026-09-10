@@ -275,16 +275,18 @@ if(BUILD_TESTS)
   # UNIT UNDER TEST defines; a target that needs a real value where the floor
   # aborts gets a seam in the owning TU's fakes file instead.
   # ---------------------------------------------------------------------------
-  # LINKS ONLY BECAUSE OF --gc-sections. Relinking without it leaves 78 undefined
-  # symbols: 42 control globals that only init_fakes.cc defines (referenced from
-  # the four *_stubs.cc below, never from enqueue-test.cc), and 36 ordinary
-  # externals of enqueue.cc that nothing in fakes/ defines at all -- among them
-  # hipFuncGetAttributes, netTransport, ncclGroupStartInternal and the
-  # ncclProfiler* set. So a new test reaching one of those paths fails at LINK
-  # time, not as an assertion: e.g. ncclInitKernelsForDevice (enqueue.cc:110)
+  # LINKS ONLY BECAUSE OF --gc-sections. Relinking without it leaves 34 undefined
+  # symbols: 33 ordinary externals of enqueue.cc that nothing in fakes/ defines at
+  # all -- among them hipFuncGetAttributes, netTransport, ncclGroupStartInternal
+  # and the 13-strong ncclProfiler* set -- plus ncclOsStrSep, an external of the
+  # hipified utils.cc oracle TU below. The control globals that used to make up
+  # most of this list are gone: each now lives in the per-production-TU fakes file
+  # that references it, so no *_stubs.cc leaves one dangling. All 34 that remain
+  # need fakes written. So a new test reaching one of those paths fails at LINK
+  # time, not as an assertion: e.g. ncclInitKernelsForDevice (enqueue.cc:90)
   # needs a hipFuncGetAttributes fake before it can be called at all.
-  # Rehoming the 42 globals to their owning TUs' fakes files addresses under half
-  # of this; the other 36 need fakes written.
+  # To recount: take this target's CMakeFiles/.../link.txt, swap --gc-sections for
+  # --error-limit=0 (lld stops at 20 errors otherwise), and run it.
   set(TEST_MICRO_ENQUEUE_SOURCE_FILES
     enqueue-test.cc
     fakes/enqueue_fakes.cc               # ResetEnqueueFakes chain only
