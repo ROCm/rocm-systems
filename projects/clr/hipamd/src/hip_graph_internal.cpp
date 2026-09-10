@@ -3388,6 +3388,105 @@ bool GraphKernelArgManager::AllocGraphKernargPool(size_t pool_size, amd::Device*
   return true;
 }
 
+void GraphKernelArgManager::BeginCapture(const void* owner) {
+  assert(owner != nullptr);
+  assert(capture_owner_ == nullptr && "Graph kernarg captures must not overlap");
+
+  capture_owner_ = owner;
+  capture_allocations_.clear();
+}
+
+void GraphKernelArgManager::EndCapture(const void* owner, bool success) {
+  assert(capture_owner_ == owner && "Mismatched graph kernarg capture owner");
+
+  if (success) {
+    auto old_allocations = owner_allocations_.find(owner);
+    if (old_allocations != owner_allocations_.end()) {
+      free_allocations_.insert(free_allocations_.end(), old_allocations->second.begin(),
+                               old_allocations->second.end());
+      old_allocations->second = std::move(capture_allocations_);
+    } else {
+      owner_allocations_.emplace(owner, std::move(capture_allocations_));
+    }
+  } else {
+    // The old packets and their allocations remain live. Only allocations made
+    // by the failed capture can be reused.
+    free_allocations_.insert(free_allocations_.end(), capture_allocations_.begin(),
+                             capture_allocations_.end());
+  }
+
+  capture_allocations_.clear();
+  capture_owner_ = nullptr;
+}
+
+bool GraphKernelArgManager::FreeBlockFits(const KernelArgAllocation& block, size_t size,
+                                          size_t alignment, address* aligned_addr) {
+  assert(alignment != 0 && "Alignment must be non-zero");
+
+  const address aligned = amd::alignUp(block.kernarg_addr_, alignment);
+  const size_t leading_space = static_cast<size_t>(aligned - block.kernarg_addr_);
+  if (leading_space > block.size_ || size > block.size_ - leading_space) {
+    return false;
+  }
+
+  if (aligned_addr != nullptr) {
+    *aligned_addr = aligned;
+  }
+
+  return true;
+}
+
+address GraphKernelArgManager::TakeFreeBlock(size_t index, address aligned_addr) {
+  const KernelArgAllocation block = free_allocations_[index];
+  free_allocations_.erase(free_allocations_.begin() + index);
+  // Keep the whole block on the new owner so later recaptures can reuse its
+  // full capacity. Do not record the request size; that would leak the tail.
+  if (capture_owner_ != nullptr) {
+    capture_allocations_.push_back(block);
+  }
+
+  return aligned_addr;
+}
+
+address GraphKernelArgManager::AllocKernArgFromFreeList(size_t size, size_t alignment,
+                                                       amd::Device* device) {
+  // Common path: sequential hipGraphExecUpdate frees node i-1 then allocates
+  // for node i. The newest free block is the one that fits.
+  if (!free_allocations_.empty()) {
+    const KernelArgAllocation& newest = free_allocations_.back();
+    address aligned_addr = nullptr;
+    if (newest.device_ == device && FreeBlockFits(newest, size, alignment, &aligned_addr)) {
+      return TakeFreeBlock(free_allocations_.size() - 1, aligned_addr);
+    }
+  }
+
+  // Mixed sizes: reuse the smallest whole block that still fits.
+  size_t best_index = free_allocations_.size();
+  size_t best_capacity = static_cast<size_t>(-1);
+  address best_aligned = nullptr;
+  for (size_t i = 0; i < free_allocations_.size(); ++i) {
+    const KernelArgAllocation& block = free_allocations_[i];
+    if (block.device_ != device) {
+      continue;
+    }
+    address aligned_addr = nullptr;
+    if (!FreeBlockFits(block, size, alignment, &aligned_addr)) {
+      continue;
+    }
+    if (block.size_ < best_capacity) {
+      best_capacity = block.size_;
+      best_index = i;
+      best_aligned = aligned_addr;
+    }
+  }
+
+  if (best_index != free_allocations_.size()) {
+    return TakeFreeBlock(best_index, best_aligned);
+  }
+
+  return nullptr;
+}
+
 address GraphKernelArgManager::AllocKernArg(size_t size, size_t alignment, int devId) {
   if (size == 0) {
     return nullptr;
@@ -3395,6 +3494,16 @@ address GraphKernelArgManager::AllocKernArg(size_t size, size_t alignment, int d
 
   amd::Device* device = g_devices[devId]->devices()[0];
   assert(alignment != 0 && "Alignment must be non-zero");
+
+  // Free-list reuse is only valid while a node capture is tracking the
+  // resulting block. Taking a block outside BeginCapture/EndCapture would
+  // drop it from both the free list and owner maps.
+  if (capture_owner_ != nullptr) {
+    address allocation = AllocKernArgFromFreeList(size, alignment, device);
+    if (allocation != nullptr) {
+      return allocation;
+    }
+  }
 
   // Check if we have any pools allocated for this device
   auto& device_pools = kernarg_graph_[device];
@@ -3410,6 +3519,9 @@ address GraphKernelArgManager::AllocKernArg(size_t size, size_t alignment, int d
   // Check if allocation fits in current pool
   if (new_pool_usage <= current_pool.kernarg_pool_size_) {
     current_pool.kernarg_pool_offset_ = new_pool_usage;
+    if (capture_owner_ != nullptr) {
+      capture_allocations_.emplace_back(aligned_addr, size, device);
+    }
     return aligned_addr;
   }
 
