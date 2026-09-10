@@ -569,22 +569,36 @@ static inline ncclResult_t ncclCuMemFreeAddr(void* ptr, struct ncclMemManager* m
 
   ncclResult_t result = ncclSuccess;
   size_t totalSize = 0;
-  for (int segment = 0; segment < numSegments; segment++) {
-    size_t segmentSize = 0;
-    // ROCM-2696: Proper initialization of base and size is required for cuMemGetAddressRange
-    // base is dereferenced in cuMemGetAddressRange without checking for nullptr
-    CUdeviceptr base = nullptr;
-    // RCCL: cast through char* before pointer arithmetic
-    CUCHECK(cuMemGetAddressRange(&base, &segmentSize, (CUdeviceptr)((char*)ptr + totalSize)));
-    CUCHECK(cuMemUnmap((CUdeviceptr)((char*)ptr + totalSize), segmentSize));
-    totalSize += segmentSize;
-  }
+  struct ncclMemUntrackInfo info = {};
 
-  // Untrack from memory manager
+  // Untrack the dynamic entry (if any) first, so we can tell whether the memory was already released
+  // by a suspend.  In that case the cuMem release functions below would fail, so we must skip them.
   if (manager != nullptr) {
-    NCCLCHECK(ncclMemUntrack(manager, ptr, totalSize));
+    NCCLCHECKGOTO(ncclMemUntrackDynamic(manager, ptr, &info), result, fail);
   }
 
+  if (info.memType != ncclMemPersist && info.dynMemState == ncclDynMemStateReleased) {
+    // Suspended dynamic memory: physical backing already released.
+    totalSize = info.dynMemSize;
+  } else {
+    // Unmap for each segment for active dynamic memory and persistent memory.
+    for (int segment = 0; segment < numSegments; segment++) {
+      size_t segmentSize = 0;
+      // ROCM-2696: Proper initialization of base and size is required for cuMemGetAddressRange
+      // base is dereferenced in cuMemGetAddressRange without checking for nullptr
+      CUdeviceptr base = nullptr;
+      // RCCL: cast through char* before pointer arithmetic
+      CUCHECKGOTO(cuMemGetAddressRange(&base, &segmentSize, (CUdeviceptr)((char*)ptr + totalSize)), result, fail);
+      CUCHECKGOTO(cuMemUnmap((CUdeviceptr)((char*)ptr + totalSize), segmentSize), result, fail);
+      totalSize += segmentSize;
+    }
+    // Untrack persistent memory.
+    if (manager != nullptr && info.memType == ncclMemPersist) {
+      NCCLCHECKGOTO(ncclMemUntrackPersist(manager, ptr, totalSize), result, fail);
+    }
+  }
+
+fail:
   CUCHECK(cuMemAddressFree((CUdeviceptr)ptr, totalSize));
 
   int dev;
@@ -725,28 +739,42 @@ static inline ncclResult_t ncclCuMemFree(void* ptr, struct ncclMemManager* manag
 
   ncclResult_t result = ncclSuccess;
   size_t totalSize = 0;
-  for (int segment = 0; segment < numSegments; segment++) {
-    CUmemGenericAllocationHandle handle;
-    size_t segmentSize = 0;
-    CUCHECK(cuMemRetainAllocationHandle(&handle, (void*)((char*)ptr + totalSize)));
-    CUCHECK(cuMemRelease(handle));
-    // ROCM-2696: Proper initialization of base and size is required for cuMemGetAddressRange
-    // base is dereferenced in cuMemGetAddressRange without checking for nullptr
-    CUdeviceptr base = nullptr;
-    // RCCL: cast through char* before pointer arithmetic
-    CUCHECK(cuMemGetAddressRange(&base, &segmentSize, (CUdeviceptr)((char*)ptr + totalSize)));
-    TRACE(NCCL_ALLOC, "CuMem Free Size %zu pointer %p handle %p segment %d numSegments %d", segmentSize, ptr,
-          (void*)(uintptr_t)handle, segment, numSegments);
-    CUCHECK(cuMemUnmap((CUdeviceptr)((char*)ptr + totalSize), segmentSize));
-    CUCHECK(cuMemRelease(handle));
-    totalSize += segmentSize;
-  }
+  struct ncclMemUntrackInfo info = {};
 
-  // Update tracking with total size after processing all segments
+  // Untrack the dynamic entry (if any) first, so we can tell whether the memory was already released
+  // by a suspend.  In that case the cuMem release functions below would fail, so we must skip them.
   if (manager != nullptr) {
-    NCCLCHECK(ncclMemUntrack(manager, ptr, totalSize));
+    NCCLCHECKGOTO(ncclMemUntrackDynamic(manager, ptr, &info), result, fail);
   }
 
+  if (info.memType != ncclMemPersist && info.dynMemState == ncclDynMemStateReleased) {
+    // Suspended dynamic memory: physical backing already released.
+    totalSize = info.dynMemSize;
+  } else {
+    // Unmap and release physical memory handles for each segment for active dynamic memory and persistent memory.
+    for (int segment = 0; segment < numSegments; segment++) {
+      CUmemGenericAllocationHandle handle;
+      size_t segmentSize = 0;
+      CUCHECKGOTO(cuMemRetainAllocationHandle(&handle, (void*)((char*)ptr + totalSize)), result, fail);
+      CUCHECKGOTO(cuMemRelease(handle), result, fail);
+      // ROCM-2696: Proper initialization of base and size is required for cuMemGetAddressRange
+      // base is dereferenced in cuMemGetAddressRange without checking for nullptr
+      CUdeviceptr base = nullptr;
+      // RCCL: cast through char* before pointer arithmetic
+      CUCHECKGOTO(cuMemGetAddressRange(&base, &segmentSize, (CUdeviceptr)((char*)ptr + totalSize)), result, fail);
+      TRACE(NCCL_ALLOC, "CuMem Free Size %zu pointer %p handle %p segment %d numSegments %d", segmentSize, ptr,
+            (void*)(uintptr_t)handle, segment, numSegments);
+      CUCHECKGOTO(cuMemUnmap((CUdeviceptr)((char*)ptr + totalSize), segmentSize), result, fail);
+      CUCHECKGOTO(cuMemRelease(handle), result, fail);
+      totalSize += segmentSize;
+    }
+    // Untrack persistent memory.
+    if (manager != nullptr && info.memType == ncclMemPersist) {
+      NCCLCHECKGOTO(ncclMemUntrackPersist(manager, ptr, totalSize), result, fail);
+    }
+  }
+
+fail:
   CUCHECK(cuMemAddressFree((CUdeviceptr)ptr, totalSize));
 
   int dev;

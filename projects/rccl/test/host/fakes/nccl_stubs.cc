@@ -54,7 +54,10 @@ ncclResult_t initChannel(struct ncclComm* comm, int channelid) {
 ncclResult_t ncclCeFinalize(struct ncclComm* comm) { return ncclSuccess; }
 ncclResult_t ncclCheckMultiRank(struct ncclComm* comm) { ::abort(); }
 void ncclCudaContextDrop(struct ncclCudaContext* cxt) { ::abort(); }
-ncclResult_t ncclCudaContextTrack(struct ncclCudaContext** out) { ::abort(); }
+ncclResult_t ncclCudaContextTrack(struct ncclCudaContext** out, int, uint64_t) {
+  if (out) *out = nullptr;
+  return ncclSuccess;
+}
 ncclResult_t ncclDdaFabricCommFini(struct ncclComm* comm) { return ncclSuccess; }
 ncclResult_t ncclDdaFabricCommInit(struct ncclComm* comm) { ::abort(); }
 ncclResult_t ncclDdaIpcCommFini(struct ncclComm* comm) { return ncclSuccess; }
@@ -67,6 +70,7 @@ ncclResult_t ncclGinA2AFinalize(struct ncclComm* comm) { return ncclSuccess; }
 ncclResult_t ncclGinAllReduceFinalize(struct ncclComm* comm) { return ncclSuccess; }
 ncclResult_t ncclGinFinalize(struct ncclComm* comm) { return ncclSuccess; }
 ncclResult_t ncclGinHostFinalize(struct ncclComm* comm) { return ncclSuccess; }
+ncclResult_t ncclGinSetDefaultBackend(struct ncclComm* comm, uint64_t) { return ncclSuccess; }
 // Omitted when RCCL_STUBS_OMIT_ncclInitKernelsForDevice is defined -- the unit
 // under test defines this itself (enqueue.cc:90).
 #ifndef RCCL_STUBS_OMIT_ncclInitKernelsForDevice
@@ -119,15 +123,23 @@ ncclResult_t ncclOsTopoGetStrFromSys(const char* path, const char* fileName, cha
 }
 ncclResult_t ncclProfilerPluginFinalize(struct ncclComm* comm) { return ncclSuccess; }
 ncclResult_t ncclProfilerPluginInit(struct ncclComm* comm) { ::abort(); }
+ncclResult_t ncclProfilerThreadCreate(struct ncclComm* comm, struct ncclComm* parent) { return ncclSuccess; }
+ncclResult_t ncclProfilerThreadDestroy(struct ncclComm* comm) { return ncclSuccess; }
 // src/plugin/profiler.cc:871. Not fail-loud: ncclPrepareTasks:601 reaches this on
 // a happy path, and "no profiler plugin loaded" is the truth for a host-only
 // binary that links no plugin, not a steering choice.
 bool ncclProfilerPluginLoaded(void) { return false; }
 void ncclProfilerProxyTraceDumpIfAny(void* profilerContext) { }
 ncclResult_t ncclRasCommFini(const struct ncclComm* comm) { return ncclSuccess; }
+ncclResult_t ncclRunDiagnosticsPassive(struct ncclComm* comm) { return ncclSuccess; }
+ncclResult_t ncclRunDiagnosticsActive(struct ncclComm* comm) { return ncclSuccess; }
 ncclResult_t ncclRegCleanup(struct ncclComm* comm) { return ncclSuccess; }
 ncclResult_t ncclRmaInit(struct ncclComm* comm) { return ncclSuccess; }
 ncclResult_t ncclRmaInitFromParent(struct ncclComm* comm, struct ncclComm* parent) { return ncclSuccess; }
+ncclResult_t ncclRmaFinalize(struct ncclComm* comm) { return ncclSuccess; }
+ncclResult_t ncclRmaCeInit(struct ncclComm* comm) { return ncclSuccess; }
+bool ncclRmaProxyEnabled(struct ncclComm* comm) { return false; }
+ncclResult_t ncclRmaProxyConnectOnce(struct ncclComm* comm) { return ncclSuccess; }
 ncclResult_t ncclRmaProxyFinalize(struct ncclComm* comm) { return ncclSuccess; }
 // ncclStrongStreamDestruct and the rest of src/misc/strongstream.cc: strongstream_stubs.cc.
 ncclResult_t ncclSymkFinalize(struct ncclComm* comm) { ::abort(); }
@@ -142,6 +154,14 @@ ncclResult_t ncclTunerPluginUnload(struct ncclComm* comm) { ::abort(); }
 
 ncclResult_t freeChannel(struct ncclChannel*, int, int, int, struct ncclComm*) { return ncclSuccess; }
 ncclResult_t ncclAsyncLaunch(struct ncclAsyncJob*, ncclResult_t(*)(struct ncclAsyncJob*), void(*)(struct ncclAsyncJob*), void(*)(void*), struct ncclComm*) { ::abort(); }
+ncclResult_t ncclMgmtTaskEnqueue(struct ncclAsyncJob*, ncclResult_t (*)(struct ncclAsyncJob*), void (*)(void*),
+                                 struct ncclComm*) {
+  return ncclSuccess;
+}
+ncclResult_t ncclGpuCftSupport(struct ncclComm* comm, int* gpuCftSupport) {
+  if (gpuCftSupport) *gpuCftSupport = 0;
+  return ncclSuccess;
+}
 // Omitted when RCCL_STUBS_OMIT_ncclParamGraphStreamOrdering is defined -- the
 // unit under test emits this via NCCL_PARAM (enqueue.cc:1986).
 #ifndef RCCL_STUBS_OMIT_ncclParamGraphStreamOrdering

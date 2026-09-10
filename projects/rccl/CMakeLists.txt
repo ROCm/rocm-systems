@@ -476,22 +476,39 @@ if(ROCM_VERSION VERSION_GREATER_EQUAL "71100")
     message(STATUS "Found amd_smi at ${SMI_INCLUDE_DIR}")
     set(SMI_LIBRARIES amd_smi)
 
-    ### Check whether the installed amdsmi headers expose the UALoE fabric struct
-    ### (amdsmi_fabric_info_t). The probe compiles against the struct only — no
-    ### link-time dependency on amdsmi_get_gpu_fabric_info — because amdsmi is
-    ### loaded lazily at runtime via dlopen. If the struct is absent, the compat
-    ### types in amdsmi_wrap.h must be compiled in.
+    ### Check whether the installed amdsmi headers expose UALoE fabric types.
+    ### Classic UALoE headers define AMDSMI_FABRIC_MAX_LOCAL_GPUS plus
+    ### amdsmi_fabric_info_t. ROCm 7.14 can ship fabric telemetry enumerators
+    ### without that macro; requiring the macro then leaves AMDSMI_FABRIC_DIRECT
+    ### off and amdsmi_wrap.h redefines the system enums.
     set(CMAKE_REQUIRED_INCLUDES "${SMI_INCLUDE_DIR}")
+    unset(AMDSMI_HEADER_HAS_FABRIC_TELEMETRY CACHE)
     check_cxx_source_compiles("
       #include <amd_smi/amdsmi.h>
       int main() {
+        amdsmi_fabric_telemetry_category_t cat = AMDSMI_FABRIC_TELEMETRY_CATEGORY_UNKNOWN;
+        (void)cat;
+        return 0;
+      }
+    " AMDSMI_HEADER_HAS_FABRIC_TELEMETRY)
+    check_cxx_source_compiles("
+      #include <amd_smi/amdsmi.h>
+      #if !defined(AMDSMI_FABRIC_MAX_LOCAL_GPUS)
+      #error amdsmi.h has no UALoE fabric types
+      #endif
+      int main() {
         amdsmi_fabric_info_t info{};
+        amdsmi_fabric_info_v1_t v1{};
         (void)info;
+        (void)v1;
         return 0;
       }
     " AMDSMI_FABRIC_API)
     unset(CMAKE_REQUIRED_INCLUDES)
-    if(AMDSMI_FABRIC_API)
+    if(AMDSMI_HEADER_HAS_FABRIC_TELEMETRY AND NOT AMDSMI_FABRIC_API)
+      set(AMDSMI_FABRIC_API TRUE)
+      message(STATUS "amdsmi fabric telemetry types found (no AMDSMI_FABRIC_MAX_LOCAL_GPUS) - enabling AMDSMI_FABRIC_DIRECT")
+    elseif(AMDSMI_FABRIC_API)
       message(STATUS "amdsmi UALoE fabric API found - enabling AMDSMI_FABRIC_DIRECT")
     else()
       message(STATUS "amdsmi UALoE fabric API not found - using compat types")
@@ -692,6 +709,9 @@ configure_file(src/nccl.h.in ${PROJECT_BINARY_DIR}/include/nccl.h)      # Used b
 # Add subdirectories
 #==================================================================================================
 # Source directory contains library creation
+# ENABLE_MPI_TESTS is consumed here as well as under test/: MPI tests poke
+# librccl internals, so Release builds must export those symbols.
+option(ENABLE_MPI_TESTS "Enable MPI-based tests" OFF)
 add_subdirectory(src)
 
 # NCCL Inspector profiler plugin. Built as its own .so and loaded at runtime via

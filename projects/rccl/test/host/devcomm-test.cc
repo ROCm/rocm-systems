@@ -620,12 +620,10 @@ TEST_F(DevcommReqsFilterV22902Microtest, NegativeGinCounts_DoNotRequestGin) {
 // ---- block: ncclDevCommCopyNewToOld_v22902 ----
 namespace {
 
-// The shim memcpys this many bytes into a 200-byte v22902 struct whose railGinBarrier sits at 128.
-// If the modern ncclDevComm ever grows a field before railGinBarrier the copy silently overruns into
-// the old struct's GIN tail, so pin the span rather than derive it.
-constexpr std::size_t kCopyNewToOld22902LsaSpan =
-    offsetof(struct ncclDevComm, railGinBarrier) - offsetof(struct ncclDevComm, rank);
-static_assert(kCopyNewToOld22902LsaSpan == 128, "LSA prefix no longer fits below v22902 railGinBarrier");
+// NCCL 2.31 copies LSA fields individually (and a 3-field resource-window helper)
+// instead of memcopying rank..railGinBarrier. GIN is still dropped: memset the
+// whole old struct, then fill LSA fields, leave railGinBarrier and the GIN tail
+// zero. Pin the v22902 layout so a GIN-tail oracle indexes the right bytes.
 static_assert(offsetof(struct ncclDevComm_v22902, railGinBarrier) == 128,
               "v22902 railGinBarrier moved; the GIN-tail oracle below indexes the wrong bytes");
 static_assert(sizeof(struct ncclDevComm_v22902) == 200,
@@ -649,12 +647,18 @@ std::unique_ptr<struct ncclDevComm> MakeCopyNewToOld22902Source() {
   dev->lsaSize_rcp32 = 0xCAFEBABEu;
   dev->windowTable = reinterpret_cast<ncclDevCommWindowTable_t>(0x1122334455667788ull);
   dev->resourceWindow = reinterpret_cast<ncclWindow_t>(0x99aabbccddeeff00ull);
+  dev->resourceWindow_inlined.lsaFlatBase = reinterpret_cast<char*>(0x0102030405060708ull);
+  dev->resourceWindow_inlined.stride4G = 0x11121314u;
+  dev->resourceWindow_inlined.mcOffset4K = 0x15161718u;
+  dev->lsaMultimem.mcBasePtr = reinterpret_cast<void*>(0xAAAABBBBCCCCDDDDull);
+  dev->lsaBarrier.bufHandle = 0x21;
+  dev->lsaBarrier.nBarriers = 4;
   return dev;
 }
 
-// Arm: the whole body on the real CopyLsaData default -- memset zeroes all 200 bytes, then the LSA
-// prefix is copied in from newDevComm, leaving the GIN tail zero and the source untouched.
-TEST_F(DevcommMicrotest, CopyNewToOld22902_ZeroesWholeStructThenCopiesLsaPrefix) {
+// Arm: memset zeroes the 200-byte old struct, then LSA fields (not GIN) are assigned
+// from newDevComm. Source is read-only; guard bands stay poison.
+TEST_F(DevcommMicrotest, CopyNewToOld22902_ZeroesWholeStructThenCopiesLsaFields) {
   CopyNewToOld22902Dest dst(kCopyNewToOld22902Poison);
   auto src = MakeCopyNewToOld22902Source();
   unsigned char srcSnapshot[sizeof(struct ncclDevComm)];
@@ -671,16 +675,18 @@ TEST_F(DevcommMicrotest, CopyNewToOld22902_ZeroesWholeStructThenCopiesLsaPrefix)
   EXPECT_EQ(0xCAFEBABEu, old->lsaSize_rcp32);
   EXPECT_EQ(reinterpret_cast<void*>(0x1122334455667788ull), static_cast<void*>(old->windowTable));
   EXPECT_EQ(reinterpret_cast<void*>(0x99aabbccddeeff00ull), static_cast<void*>(old->resourceWindow));
-  // Byte-exact: the copied prefix must equal the source's rank..railGinBarrier window verbatim.
-  EXPECT_EQ(-1, FirstDiff(dst.raw(),
-                          reinterpret_cast<const unsigned char*>(src.get()) +
-                              offsetof(struct ncclDevComm, rank),
-                          kCopyNewToOld22902LsaSpan))
-      << "copied LSA prefix differs from the source window";
+  EXPECT_EQ(reinterpret_cast<char*>(0x0102030405060708ull), old->resourceWindow_inlined.lsaFlatBase);
+  EXPECT_EQ(0x11121314u, old->resourceWindow_inlined.stride4G);
+  EXPECT_EQ(0x15161718u, old->resourceWindow_inlined.mcOffset4K);
+  EXPECT_EQ(reinterpret_cast<void*>(0xAAAABBBBCCCCDDDDull), old->lsaMultimem.mcBasePtr);
+  EXPECT_EQ(0x21, old->lsaBarrier.bufHandle);
+  EXPECT_EQ(4, old->lsaBarrier.nBarriers);
 
-  // The GIN tail past the copy is never written by CopyLsaData, so only the memset can have cleared it.
-  EXPECT_TRUE(AllBytesAre(dst.raw() + kCopyNewToOld22902LsaSpan,
-                          sizeof(struct ncclDevComm_v22902) - kCopyNewToOld22902LsaSpan, 0x00));
+  // GIN is not provided for 2.29.2: memset leaves these zero, and the shim never writes them.
+  EXPECT_TRUE(AllBytesAre(dst.raw() + offsetof(struct ncclDevComm_v22902, railGinBarrier),
+                          sizeof(struct ncclDevComm_v22902) -
+                              offsetof(struct ncclDevComm_v22902, railGinBarrier),
+                          0x00));
   EXPECT_EQ(0u, old->ginContextCount);
   EXPECT_EQ(0, old->ginSignalCount);
   EXPECT_EQ(0u, old->ginSignalBase);
@@ -688,66 +694,9 @@ TEST_F(DevcommMicrotest, CopyNewToOld22902_ZeroesWholeStructThenCopiesLsaPrefix)
   EXPECT_EQ(0u, old->ginCounterBase);
   EXPECT_EQ(nullptr, old->ginSignalShadows);
 
-  // sizeof(*old), not more: the bytes flanking the struct keep the guard byte.
   EXPECT_TRUE(dst.GuardsIntact()) << "the shim wrote outside ncclDevComm_v22902";
-  // Direction: newDevComm is read-only here.
   EXPECT_EQ(-1, FirstDiff(srcSnapshot, src.get(), sizeof(srcSnapshot)))
       << "source was modified; the copy ran in the wrong direction";
-}
-
-// Arm: the memset alone, isolated from the copy -- with an inert seam every one of the 200 bytes
-// must be zero, which no partial-size memset can achieve.
-TEST_F(DevcommMicrotest, CopyNewToOld22902_MemsetClearsEveryByteOfTheStruct) {
-  CopyNewToOld22902Dest dst(kCopyNewToOld22902Poison);
-  auto src = MakeCopyNewToOld22902Source();
-  ScopedHook copyLsa(g_ncclDevCommCopyLsaData, [](void*, void const*) {});
-
-  EXPECT_EQ(ncclSuccess, ncclDevCommCopyNewToOld_v22902(comm_.get(), dst.raw(), src.get()));
-
-  EXPECT_EQ(1, copyLsa.calls);
-  EXPECT_TRUE(AllBytesAre(dst.raw(), sizeof(struct ncclDevComm_v22902), 0x00));
-  EXPECT_TRUE(dst.GuardsIntact()) << "the memset ran past ncclDevComm_v22902";
-}
-
-// Arm: the argument computation -- CopyLsaData is handed &old->rank and &newDevComm->rank exactly
-// once, in that order. Both are first fields, so a swap is only visible in the captured pointers.
-TEST_F(DevcommMicrotest, CopyNewToOld22902_PassesDestThenSourceRankPointers) {
-  CopyNewToOld22902Dest dst(kCopyNewToOld22902Poison);
-  auto src = MakeCopyNewToOld22902Source();
-  void* seenDst = nullptr;
-  void const* seenSrc = nullptr;
-  ScopedHook copyLsa(g_ncclDevCommCopyLsaData, [&](void* d, void const* s) {
-    seenDst = d;
-    seenSrc = s;
-  });
-
-  EXPECT_EQ(ncclSuccess, ncclDevCommCopyNewToOld_v22902(comm_.get(), dst.raw(), src.get()));
-
-  EXPECT_EQ(1, copyLsa.calls);
-  EXPECT_EQ(static_cast<void*>(dst.raw()), seenDst);
-  EXPECT_EQ(static_cast<void const*>(reinterpret_cast<const unsigned char*>(src.get()) +
-                                     offsetof(struct ncclDevComm, rank)),
-            seenSrc);
-  EXPECT_NE(seenDst, seenSrc);
-}
-
-// Arm: statement order -- the seam observes a fully zeroed destination, proving the memset runs
-// before the copy rather than after it (which would erase everything the copy just wrote).
-TEST_F(DevcommMicrotest, CopyNewToOld22902_MemsetRunsBeforeTheCopy) {
-  CopyNewToOld22902Dest dst(kCopyNewToOld22902Poison);
-  auto src = MakeCopyNewToOld22902Source();
-  bool destZeroedOnEntry = false;
-  ScopedHook copyLsa(g_ncclDevCommCopyLsaData, [&](void* d, void const* s) {
-    destZeroedOnEntry = AllBytesAre(d, sizeof(struct ncclDevComm_v22902), 0x00);
-    DefaultNcclDevCommCopyLsaData(d, s);
-  });
-
-  EXPECT_EQ(ncclSuccess, ncclDevCommCopyNewToOld_v22902(comm_.get(), dst.raw(), src.get()));
-
-  EXPECT_EQ(1, copyLsa.calls);
-  EXPECT_TRUE(destZeroedOnEntry);
-  EXPECT_EQ(7, dst.obj()->rank);
-  EXPECT_EQ(0xCAFEBABEu, dst.obj()->lsaSize_rcp32);
 }
 
 }  // namespace
@@ -756,17 +705,11 @@ TEST_F(DevcommMicrotest, CopyNewToOld22902_MemsetRunsBeforeTheCopy) {
 // ---- block: ncclDevCommCopyOldToNew_v22902 ----
 namespace {
 
-// Offsets the shim's copy is defined in terms of. Length comes from the NEW struct
-// but is applied to the OLD one, so kOldRankOff + kLsaLen must stay inside the old struct.
-constexpr std::size_t kNewRankOff = offsetof(struct ncclDevComm, rank);
 constexpr std::size_t kNewRailOff = offsetof(struct ncclDevComm, railGinBarrier);
-constexpr std::size_t kLsaLen = kNewRailOff - kNewRankOff;
-constexpr std::size_t kOldRankOff = offsetof(struct ncclDevComm_v22902, rank);
-static_assert(kOldRankOff + kLsaLen <= sizeof(struct ncclDevComm_v22902),
-              "the shim would read past the end of the v22902 devComm");
+constexpr std::size_t kNewHybridOff = offsetof(struct ncclDevComm, hybridDenseGinBarrier);
 
 // Position-dependent fills; the odd strides guarantee source and poison differ at
-// every byte of the copied range, so "dst changed" and "src intact" stay decidable.
+// every copied field, so "dst changed" and "src intact" stay decidable.
 void FillPattern(void* p, std::size_t n, uint8_t base, uint8_t step) {
   uint8_t* b = static_cast<uint8_t*>(p);
   for (std::size_t i = 0; i < n; ++i) {
@@ -798,22 +741,30 @@ class DevcommCopyOldToNewV22902Microtest : public DevcommMicrotest {
   }
 };
 
-// Arm: the single straight-line body, running the real memcpy default of the seam.
-TEST_F(DevcommCopyOldToNewV22902Microtest, MovesLsaPrefixFromOldToNew_LeavesOldUntouched) {
-  ASSERT_NE(-1, FirstDiff(dstBytes() + kNewRankOff, srcBefore_.data() + kOldRankOff, kLsaLen))
-      << "poison and source coincide; the copy would be unobservable";
-
+// Arm: field-by-field LSA copy (2.31). The old 72-byte inlined window is not
+// memcpy'd onto the new 16-byte one; only lsaFlatBase / stride4G / mcOffset4K move.
+TEST_F(DevcommCopyOldToNewV22902Microtest, MovesLsaFieldsFromOldToNew_LeavesOldUntouched) {
   EXPECT_EQ(ncclSuccess, Run());
 
-  EXPECT_EQ(-1, FirstDiff(dstBytes() + kNewRankOff, srcBefore_.data() + kOldRankOff, kLsaLen))
-      << "destination LSA prefix does not match the source it was copied from";
+  EXPECT_EQ(src_->rank, dst_->rank);
+  EXPECT_EQ(src_->nRanks, dst_->nRanks);
+  EXPECT_EQ(src_->nRanks_rcp32, dst_->nRanks_rcp32);
+  EXPECT_EQ(src_->lsaRank, dst_->lsaRank);
+  EXPECT_EQ(src_->lsaSize, dst_->lsaSize);
+  EXPECT_EQ(src_->lsaSize_rcp32, dst_->lsaSize_rcp32);
+  EXPECT_EQ(src_->windowTable, dst_->windowTable);
+  EXPECT_EQ(src_->resourceWindow, dst_->resourceWindow);
+  EXPECT_EQ(src_->resourceWindow_inlined.lsaFlatBase, dst_->resourceWindow_inlined.lsaFlatBase);
+  EXPECT_EQ(src_->resourceWindow_inlined.stride4G, dst_->resourceWindow_inlined.stride4G);
+  EXPECT_EQ(src_->resourceWindow_inlined.mcOffset4K, dst_->resourceWindow_inlined.mcOffset4K);
   EXPECT_EQ(-1, FirstDiff(srcBytes(), srcBefore_.data(), sizeof(*src_)))
       << "source was modified; the copy ran in the wrong direction";
 }
 
-// Arm: same body, asserting the deliberate absence of a memset. The caller
-// (ncclDevCommDestroy) stamps magic/version before calling and must get them back.
-TEST_F(DevcommCopyOldToNewV22902Microtest, PreservesDestinationOutsideLsaPrefix) {
+// Arm: the caller (ncclDevCommDestroy) stamps magic/version before calling and
+// must get them back. GIN fields past railGinBarrier, and hybridDenseGinBarrier
+// (between the new inlined window and lsaMultimem), are not written.
+TEST_F(DevcommCopyOldToNewV22902Microtest, PreservesDestinationOutsideCopiedLsaFields) {
   dst_->magic = NCCL_API_MAGIC;
   dst_->version = NCCL_VERSION_CODE;
 
@@ -821,41 +772,12 @@ TEST_F(DevcommCopyOldToNewV22902Microtest, PreservesDestinationOutsideLsaPrefix)
 
   EXPECT_EQ(NCCL_API_MAGIC, dst_->magic);
   EXPECT_EQ(static_cast<unsigned int>(NCCL_VERSION_CODE), dst_->version);
+  EXPECT_EQ(-1, FirstDiff(dstBytes() + kNewHybridOff, dstPoison_.data() + kNewHybridOff,
+                          sizeof(ncclGinBarrierHandle_t)))
+      << "hybridDenseGinBarrier was overwritten; the inlined-window helper must not spill";
   EXPECT_EQ(-1, FirstDiff(dstBytes() + kNewRailOff, dstPoison_.data() + kNewRailOff,
                           sizeof(*dst_) - kNewRailOff))
-      << "bytes past the LSA prefix were clobbered; the shim must not memset";
-}
-
-// Arm: same body, pinning the exact copy length at both ends of the range.
-TEST_F(DevcommCopyOldToNewV22902Microtest, CopiesLastByteOfRange_NotTheByteAfterIt) {
-  srcBytes()[kOldRankOff + kLsaLen - 1] = 0x5A;
-  srcBytes()[kOldRankOff + kLsaLen] = 0x5B;
-  dstBytes()[kNewRankOff + kLsaLen - 1] = 0xC3;
-  dstBytes()[kNewRailOff] = 0xC4;
-
-  EXPECT_EQ(ncclSuccess, Run());
-
-  EXPECT_EQ(0x5A, dstBytes()[kNewRankOff + kLsaLen - 1]) << "last byte in range was not copied";
-  EXPECT_EQ(0xC4, dstBytes()[kNewRailOff]) << "copy ran one byte past the LSA prefix";
-}
-
-// Arm: same body, observed at the seam -- exactly one call, destination argument first.
-TEST_F(DevcommCopyOldToNewV22902Microtest, InvokesCopyLsaDataExactlyOnce_DestinationFirst) {
-  void* seenDst = nullptr;
-  void const* seenSrc = nullptr;
-  ScopedHook copy(g_ncclDevCommCopyLsaData, [&](void* d, void const* s) {
-    seenDst = d;
-    seenSrc = s;
-  });
-
-  EXPECT_EQ(ncclSuccess, Run());
-
-  EXPECT_EQ(1, copy.calls);
-  EXPECT_EQ(static_cast<void*>(&dst_->rank), seenDst);
-  EXPECT_EQ(static_cast<void const*>(&src_->rank), seenSrc);
-  EXPECT_NE(seenDst, seenSrc);
-  EXPECT_EQ(-1, FirstDiff(dstBytes(), dstPoison_.data(), sizeof(*dst_)))
-      << "the shim wrote to the destination outside ncclDevCommCopyLsaData";
+      << "bytes at and past railGinBarrier were clobbered; the shim must not memset";
 }
 
 // Arm: the callback slots of both compat tables. This pins the wiring only; the actual "v22907
@@ -889,25 +811,6 @@ TEST_F(DevcommCopyOldToNewV22902Microtest, CompatTables_PinTheVersionRangesThatS
   // The gap is deliberate: 2.29.4 matches no table and falls through to ncclInvalidUsage. If a
   // 2.29.4 shim set is ever added, this assertion is the one that must be revisited.
   EXPECT_EQ(NCCL_VERSION(2, 29, 4), ncclDevCommCompat_v22902.maxVersion + 1);
-}
-
-// Pins a latent layout hazard, not desired behaviour: v22902's inlined resource window
-// is 8 bytes longer than the new one, so its tail lands in hybridWorldGinBarrier.
-TEST_F(DevcommCopyOldToNewV22902Microtest, PinsInlinedResourceWindowTailSpillIntoHybridWorldGinBarrier) {
-  constexpr std::size_t kOldInl = offsetof(struct ncclDevComm_v22902, resourceWindow_inlined);
-  constexpr std::size_t kNewHybrid = offsetof(struct ncclDevComm, hybridWorldGinBarrier);
-  ASSERT_EQ(sizeof(struct ncclWindow_vidmem_v22902),
-            sizeof(ncclResourceWindow_vidmem_t) + sizeof(ncclGinBarrierHandle_t));
-
-  EXPECT_EQ(ncclSuccess, Run());
-
-  EXPECT_EQ(-1, FirstDiff(dstBytes() + kNewHybrid,
-                          srcBefore_.data() + kOldInl + sizeof(ncclResourceWindow_vidmem_t),
-                          sizeof(ncclGinBarrierHandle_t)))
-      << "spill target moved; re-derive the v22902 <-> ncclDevComm prefix mapping";
-  EXPECT_EQ(offsetof(struct ncclDevComm_v22902, lsaMultimem) - kOldRankOff,
-            offsetof(struct ncclDevComm, lsaMultimem) - kNewRankOff)
-      << "lsaMultimem no longer realigns; the whole prefix copy is now wrong";
 }
 
 }  // namespace
@@ -1379,11 +1282,8 @@ TEST_F(DevcommReqsFilterV22907Microtest, WarnNamesCompiledThenRuntimeVersion) {
 // ---- block: ncclDevCommCopyNewToOld_v22907 ----
 namespace {
 
-constexpr std::size_t kOld907Size = sizeof(struct ncclDevComm_v22907);
 constexpr std::size_t kOld907AbortOff = offsetof(struct ncclDevComm_v22907, abortFlag);
-// What ncclDevCommCopyLsaData actually moves; anything past it in `old` can only be zero or abortFlag.
-constexpr std::size_t kLsaPrefixLen =
-    offsetof(struct ncclDevComm, railGinBarrier) - offsetof(struct ncclDevComm, rank);
+constexpr std::size_t kOld907GinOff = offsetof(struct ncclDevComm_v22907, railGinBarrier);
 // Never nullptr: a 0x00 abortFlag is indistinguishable from the memset result.
 uint32_t* const kAbortA = reinterpret_cast<uint32_t*>(0xABCDEF0012345678ull);
 uint32_t* const kAbortB = reinterpret_cast<uint32_t*>(0x0FEDCBA987654320ull);
@@ -1399,48 +1299,24 @@ std::unique_ptr<ncclDevComm> MakeZeroedNewDevComm() {
   return p;
 }
 
-// Arm: the memset. With CopyLsaData neutralised, every byte outside abortFlag must be zero.
-TEST_F(DevcommMicrotest, CopyNewToOld22907_ClearsEveryByte_ThenStoresAbortFlagAfterwards) {
+// Arm: memset then field assign. GIN stays zero (never copied); abortFlag is stored last.
+TEST_F(DevcommMicrotest, CopyNewToOld22907_ClearsGinThenStoresAbortFlagAfterwards) {
   auto newDev = MakeZeroedNewDevComm();
   newDev->abortFlag = kAbortA;
 
   Old907Buf buf(0xA5);
-  ScopedHook copyLsa(g_ncclDevCommCopyLsaData, [](void*, void const*) {});
 
   EXPECT_EQ(ncclSuccess, ncclDevCommCopyNewToOld_v22907(comm_.get(), buf.raw(), newDev.get()));
-  EXPECT_EQ(1, copyLsa.calls);
 
-  for (std::size_t i = 0; i < kOld907Size; ++i) {
-    if (i >= kOld907AbortOff && i < kOld907AbortOff + sizeof(uint32_t*)) {
-      continue;
-    }
-    EXPECT_EQ(0u, buf.byteAt(i)) << "byte " << i << " of old was not cleared";
+  for (std::size_t i = kOld907GinOff; i < kOld907AbortOff; ++i) {
+    EXPECT_EQ(0u, buf.byteAt(i)) << "byte " << i << " of GIN tail was not cleared";
   }
   EXPECT_EQ(kAbortA, buf.obj()->abortFlag);
   EXPECT_TRUE(buf.GuardsIntact());
 }
 
-// Arm: the ncclDevCommCopyLsaData call site -- exactly once, dst=&old->rank, src=&newDevComm->rank.
-TEST_F(DevcommMicrotest, CopyNewToOld22907_CallsCopyLsaDataOnceWithOldRankAndNewRank) {
-  auto newDev = MakeZeroedNewDevComm();
-  newDev->abortFlag = kAbortA;
-
-  Old907Buf buf(0xA5);
-  void* seenDst = nullptr;
-  void const* seenSrc = nullptr;
-  ScopedHook copyLsa(g_ncclDevCommCopyLsaData, [&](void* dst, void const* src) {
-    seenDst = dst;
-    seenSrc = src;
-  });
-
-  ASSERT_EQ(ncclSuccess, ncclDevCommCopyNewToOld_v22907(comm_.get(), buf.raw(), newDev.get()));
-  EXPECT_EQ(1, copyLsa.calls);
-  EXPECT_EQ(static_cast<void*>(&buf.obj()->rank), seenDst);
-  EXPECT_EQ(static_cast<void const*>(&newDev->rank), seenSrc);
-}
-
-// Arm: the real LSA memcpy -- prefix fields land, the tail stays zero, the source is not written.
-TEST_F(DevcommMicrotest, CopyNewToOld22907_RealCopyMovesLsaPrefixAndLeavesSourceUnchanged) {
+// Arm: LSA fields land, GIN stays zero, the source is not written.
+TEST_F(DevcommMicrotest, CopyNewToOld22907_CopiesLsaFieldsAndLeavesSourceUnchanged) {
   auto newDev = MakeZeroedNewDevComm();
   newDev->magic = 0xDEADBEEFu;
   newDev->version = 0x0002'1D07u;
@@ -1458,11 +1334,8 @@ TEST_F(DevcommMicrotest, CopyNewToOld22907_RealCopyMovesLsaPrefixAndLeavesSource
   std::memcpy(static_cast<void*>(srcBefore.get()), newDev.get(), sizeof(*newDev));
 
   Old907Buf buf(0xA5);
-  ScopedHook copyLsa(g_ncclDevCommCopyLsaData,
-                     [](void* dst, void const* src) { DefaultNcclDevCommCopyLsaData(dst, src); });
 
   ASSERT_EQ(ncclSuccess, ncclDevCommCopyNewToOld_v22907(comm_.get(), buf.raw(), newDev.get()));
-  EXPECT_EQ(1, copyLsa.calls);
 
   EXPECT_EQ(3, buf.obj()->rank);
   EXPECT_EQ(8, buf.obj()->nRanks);
@@ -1476,8 +1349,8 @@ TEST_F(DevcommMicrotest, CopyNewToOld22907_RealCopyMovesLsaPrefixAndLeavesSource
             static_cast<void*>(buf.obj()->resourceWindow));
   EXPECT_EQ(kAbortA, buf.obj()->abortFlag);
 
-  for (std::size_t i = kLsaPrefixLen; i < kOld907AbortOff; ++i) {
-    EXPECT_EQ(0u, buf.byteAt(i)) << "byte " << i << " past the LSA prefix was not cleared";
+  for (std::size_t i = kOld907GinOff; i < kOld907AbortOff; ++i) {
+    EXPECT_EQ(0u, buf.byteAt(i)) << "byte " << i << " of GIN tail was not cleared";
   }
   EXPECT_EQ(-1, FirstDiff(srcBefore.get(), newDev.get(), sizeof(*newDev)))
       << "source was modified; the copy ran in the wrong direction";

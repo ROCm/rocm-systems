@@ -11,8 +11,11 @@
 #include "topo.h"
 #include "nccl_tuner.h"
 
-NCCL_PARAM(Nthreads, "NTHREADS", -2);
-NCCL_PARAM(Ll128Nthreads, "LL128_NTHREADS", -2);
+// These params are now defined by the 2.31 src/tuning/ modules with identical
+// env names and defaults; declare them here so RCCL's legacy tuning path (which
+// remains the live one) shares a single definition instead of duplicating it.
+int64_t ncclParamNthreads();
+int64_t ncclParamLl128Nthreads();
 
 static int getNthreads(const char* name, int env, int min, int max, int def, int WarpSize) {
   int nt = env;
@@ -1102,7 +1105,7 @@ static const ncclTunerConstants_t ncclTunerConstantsDefaults = {
 };
 // clang-format on
 
-NCCL_PARAM(PatEnable, "PAT_ENABLE", 0);
+int64_t ncclParamPatEnable();
 static int ncclPatEnable(struct ncclComm* comm) {
   if (!ncclParamPatEnable() && !comm->forcePatEnable) return 0;
 #if !defined(__HIP_PLATFORM_AMD__) && !defined(__HIPCC__)
@@ -1114,7 +1117,7 @@ static int ncclPatEnable(struct ncclComm* comm) {
 }
 
 // Network post overhead in ns (1000 = 1 us)
-NCCL_PARAM(NetOverhead, "NET_OVERHEAD", -2);
+int64_t ncclParamNetOverhead();
 
 static float getNetOverhead(struct ncclComm* comm) {
   if (ncclParamNetOverhead() != -2) return ncclParamNetOverhead() * .001;
@@ -1123,7 +1126,7 @@ static float getNetOverhead(struct ncclComm* comm) {
   return 1.0;
 }
 
-NCCL_PARAM(Ll128C2c, "LL128_C2C", 1);
+int64_t ncclParamLl128C2c();
 
 ncclResult_t ncclTopoInitTunerConstants(struct ncclComm* comm) {
   comm->tunerConstants = ncclTunerConstantsDefaults;

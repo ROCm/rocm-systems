@@ -19,7 +19,6 @@
 #include "compiler.h"
 #include "os.h"
 
-#include <assert.h>
 #include <algorithm>
 #include <mutex>
 #include <cstring>
@@ -69,7 +68,7 @@ static ncclResult_t expectedProxyResponseStore(struct ncclProxyState* state, voi
   while (elem) {
     if (elem->opId == opId) {
       if (respSize != elem->respSize) {
-        WARN("Mismatched response size for opId=%p", opId);
+        WARN("Mismatched response size for opId=%p: got %d, expected %d", opId, respSize, elem->respSize);
         return ncclInternalError;
       }
 
@@ -452,7 +451,7 @@ static ncclResult_t ncclProxyOpToArgs(struct ncclProxyOp* op, struct ncclProxyAr
   args->progress = op->connection->tcomm->proxyProgress;
   args->proxyAppendPtr = op->connection->proxyAppendPtr;
 exit:
-  if (args->pattern != ncclPatternProfiler) ncclProfilerStartProxyOpEvent(subIndex, args);
+  ncclProfilerStartProxyOpEvent(subIndex, args);
   args->send = op->connection->send;
   args->prevRank = op->prevRank;
   args->nextRank = op->nextRank;
@@ -579,27 +578,6 @@ static ncclResult_t ncclLocalOpAppend(struct ncclComm* comm, struct ncclProxyCon
   return ncclSuccess;
 }
 
-static void incWorkCounter(struct ncclComm* comm, struct ncclProxyOp* op) {
-  op->workCounter =
-    (op->incWorkCounter) ? ++comm->profiler.workCounter[op->channelId] : comm->profiler.workCounter[op->channelId];
-}
-
-static ncclResult_t SaveProxyProfiler(struct ncclComm* comm, struct ncclProxyOp* op, bool* justInquire) {
-  struct ncclProxyConnector* proxyConn = (op->coll == ncclFuncRecv) ? &comm->profiler.recvProxyConn[op->channelId] :
-                                                                      &comm->profiler.sendProxyConn[op->channelId];
-  if (justInquire) {
-    *justInquire = true;
-    if (!comm->planner.persistent) incWorkCounter(comm, op);
-  } else {
-    op->sendbuff = (uint8_t*)comm->profiler.workStarted;
-    op->recvbuff = (uint8_t*)comm->profiler.workCompleted;
-    // Ensure that in graph capturing the proxy workCounter is incremented to keep up with kernel workCounter
-    if (comm->planner.persistent) incWorkCounter(comm, op);
-    NCCLCHECK(ncclLocalOpAppend(comm, proxyConn, op));
-  }
-  return ncclSuccess;
-}
-
 static ncclResult_t SaveProxy(struct ncclComm* comm, struct ncclChannel* channel, int type, int peer,
                               struct ncclProxyOp* op, int connIndex, bool* justInquire) {
   if (peer < 0) return ncclSuccess;
@@ -620,6 +598,17 @@ static ncclResult_t SaveProxy(struct ncclComm* comm, struct ncclChannel* channel
     NCCLCHECK(ncclLocalOpAppend(comm, &connector->proxyConn, op));
   }
   return ncclSuccess;
+}
+
+// Keep PAT proxy peers on the NVLS-dense rail across nodes.
+static ncclResult_t getNvlsDenseLocalRank(struct ncclComm* comm, int* denseLocalRank) {
+  *denseLocalRank = comm->localRanks == 1 ? 0 : comm->channels[0].nvls.headRank;
+  return ncclSuccess;
+}
+
+static int nvlsDensePeer(struct ncclComm* comm, int node, int denseLocalRank) {
+  int densePeer = node * comm->localRanks + denseLocalRank;
+  return comm->denseToUserRank == nullptr ? densePeer : comm->denseToUserRank[densePeer];
 }
 
 // justInquire != nullptr means don't actually do anything, just assertain need of
@@ -712,12 +701,16 @@ ncclResult_t ncclProxySaveOp(struct ncclComm* comm, struct ncclProxyOp* op, bool
       // Run full algorithm to count the number of steps for each peer.
       ncclResult_t result = ncclSuccess;
       const ssize_t size = op->nbytes / comm->nRanks;
-      const int rank = comm->rank, nranks = comm->nRanks;
+      const int nodeId = comm->node, nNodes = comm->nNodes;
+      const int maxParallelFactor = NCCL_PAT_NWORKERS / WARP_SIZE;
+      int denseLocalRank;
       int *nstepsSend = NULL, *nstepsRecv = NULL;
-      PatRSAlgorithm<char> algo(op->chunkSize, NCCL_STEPS, 16, 0, size, size, op->chunkSize, rank, nranks);
+      PatRSAlgorithm<char> algo(op->chunkSize, NCCL_STEPS, maxParallelFactor, 0, size, size, op->chunkSize, nodeId,
+                                nNodes);
       struct ncclPatStep ps = {0};
-      NCCLCHECKGOTO(ncclCalloc(&nstepsSend, log2Up(nranks)), result, exit_pat_up);
-      NCCLCHECKGOTO(ncclCalloc(&nstepsRecv, log2Up(nranks)), result, exit_pat_up);
+      NCCLCHECKGOTO(getNvlsDenseLocalRank(comm, &denseLocalRank), result, exit_pat_up);
+      NCCLCHECKGOTO(ncclCalloc(&nstepsSend, log2Up(nNodes)), result, exit_pat_up);
+      NCCLCHECKGOTO(ncclCalloc(&nstepsRecv, log2Up(nNodes)), result, exit_pat_up);
 
       do {
         algo.getNextOp(&ps);
@@ -725,14 +718,16 @@ ncclResult_t ncclProxySaveOp(struct ncclComm* comm, struct ncclProxyOp* op, bool
         if (ps.recvDim != -1 && ps.postRecv) nstepsRecv[ps.recvDim]++;
         if (ps.sendDim != -1 && ps.postSend) nstepsSend[ps.sendDim]++;
       } while (ps.last != 2);
-      for (int i = 0; i < log2Up(nranks); i++) {
+      for (int i = 0; i < log2Up(nNodes); i++) {
         if (nstepsSend[i]) {
-          int sendPeer = (rank + (1 << i)) % nranks;
+          int sendNode = (nodeId + (1 << i)) % nNodes;
+          int sendPeer = nvlsDensePeer(comm, sendNode, denseLocalRank);
           op->nsteps = nstepsSend[i];
           NCCLCHECKGOTO(SaveProxy(comm, channel, proxySend, sendPeer, op, 0, justInquire), result, exit_pat_up);
         }
         if (nstepsRecv[i]) {
-          int recvPeer = (rank - (1 << i) + nranks) % nranks;
+          int recvNode = (nodeId - (1 << i) + nNodes) % nNodes;
+          int recvPeer = nvlsDensePeer(comm, recvNode, denseLocalRank);
           op->nsteps = nstepsRecv[i];
           NCCLCHECKGOTO(SaveProxy(comm, channel, proxyRecv, recvPeer, op, 0, justInquire), result, exit_pat_up);
         }
@@ -748,14 +743,17 @@ ncclResult_t ncclProxySaveOp(struct ncclComm* comm, struct ncclProxyOp* op, bool
       // Run full algorithm to count the number of steps for each peer.
       ncclResult_t result = ncclSuccess;
       const ssize_t size = op->nbytes / comm->nRanks;
-      const int rank = comm->rank, nranks = comm->nRanks;
+      const int nodeId = comm->node, nNodes = comm->nNodes;
+      const int maxParallelFactor = NCCL_PAT_NWORKERS / WARP_SIZE;
+      int denseLocalRank;
       int *nstepsSend = NULL, *nstepsRecv = NULL;
       const int sharedConns = comm->patSharedQps ? 1 : 0;
-      PatAGAlgorithm<char> algo(op->chunkSize, NCCL_STEPS, 16, 0, size, size, op->chunkSize, rank, nranks,
-                                sharedConns);
+      PatAGAlgorithm<char> algo(op->chunkSize, NCCL_STEPS, maxParallelFactor, 0, size, size, op->chunkSize, nodeId,
+                                nNodes, sharedConns);
       struct ncclPatStep ps = {0};
-      NCCLCHECKGOTO(ncclCalloc(&nstepsSend, log2Up(nranks)), result, exit_pat_down);
-      NCCLCHECKGOTO(ncclCalloc(&nstepsRecv, log2Up(nranks)), result, exit_pat_down);
+      NCCLCHECKGOTO(getNvlsDenseLocalRank(comm, &denseLocalRank), result, exit_pat_down);
+      NCCLCHECKGOTO(ncclCalloc(&nstepsSend, log2Up(nNodes)), result, exit_pat_down);
+      NCCLCHECKGOTO(ncclCalloc(&nstepsRecv, log2Up(nNodes)), result, exit_pat_down);
 
       do {
         algo.getNextOp(&ps);
@@ -763,15 +761,17 @@ ncclResult_t ncclProxySaveOp(struct ncclComm* comm, struct ncclProxyOp* op, bool
         if (ps.recvDim != -1 && ps.postRecv) nstepsRecv[ps.recvDim]++;
         if (ps.sendDim != -1 && ps.postSend) nstepsSend[ps.sendDim]++;
       } while (ps.last != 2);
-      // When sharing, these match ncclPatternPatUp so AllGather and ReduceScatter use one connection set.
-      for (int i = 0; i < log2Up(nranks); i++) {
+      for (int i = 0; i < log2Up(nNodes); i++) {
         if (nstepsSend[i]) {
-          int sendPeer = sharedConns ? (rank + (1 << i)) % nranks : (rank - (1 << i) + nranks) % nranks;
+          // When sharing, these match ncclPatternPatUp so AllGather and ReduceScatter use one connection set.
+          int sendNode = sharedConns ? (nodeId + (1 << i)) % nNodes : (nodeId - (1 << i) + nNodes) % nNodes;
+          int sendPeer = nvlsDensePeer(comm, sendNode, denseLocalRank);
           op->nsteps = nstepsSend[i];
           NCCLCHECKGOTO(SaveProxy(comm, channel, proxySend, sendPeer, op, 0, justInquire), result, exit_pat_down);
         }
         if (nstepsRecv[i]) {
-          int recvPeer = sharedConns ? (rank - (1 << i) + nranks) % nranks : (rank + (1 << i)) % nranks;
+          int recvNode = sharedConns ? (nodeId - (1 << i) + nNodes) % nNodes : (nodeId + (1 << i)) % nNodes;
+          int recvPeer = nvlsDensePeer(comm, recvNode, denseLocalRank);
           op->nsteps = nstepsRecv[i];
           NCCLCHECKGOTO(SaveProxy(comm, channel, proxyRecv, recvPeer, op, 0, justInquire), result, exit_pat_down);
         }
@@ -788,12 +788,6 @@ ncclResult_t ncclProxySaveOp(struct ncclComm* comm, struct ncclProxyOp* op, bool
       if (op->root == comm->rank) return ncclSuccess;
       NCCLCHECK(SaveProxy(comm, channel, op->pattern == ncclPatternSend ? proxySend : proxyRecv, op->root, op,
                           op->connIndex, justInquire));
-    }
-    break;
-  case ncclPatternProfiler:
-    {
-      if (ncclProfilerNeedsProxy(comm, op)) NCCLCHECK(SaveProxyProfiler(comm, op, justInquire));
-      else incWorkCounter(comm, op);
     }
     break;
   }
@@ -885,10 +879,10 @@ static ncclResult_t ncclProxyGetPostedOps(struct ncclProxyState* proxyState, int
 
     if (state->active == NULL) {
       lock.lock();
-      if (pool->nextOps == -1 && !state->stop) {
+      if (pool->nextOps == -1 && state->stop.load(std::memory_order_acquire) == 0) {
 #ifdef ENABLE_ROCSHMEM
         if (proxyState->rocshmemEnabled) {
-          while (pool->nextOps == -1 && !state->stop) {
+          while (pool->nextOps == -1 && state->stop.load(std::memory_order_acquire) == 0) {
             lock.unlock();
 #if defined(__x86_64__)
             __builtin_ia32_pause();
@@ -902,7 +896,9 @@ static ncclResult_t ncclProxyGetPostedOps(struct ncclProxyState* proxyState, int
         {
           ncclProfilerStartProxyCtrlEvent(proxyState->profilerContext, &eHandle);
           ncclProfilerRecordProxyCtrlEventState(eHandle, 0, ncclProfilerProxyCtrlSleep);
-          pool->cond.wait(lock);
+          // Predicate avoids lost wakeups and guarantees we observe stop after ncclProxyProgressDestroy.
+          pool->cond.wait(lock,
+                          [&]() { return pool->nextOps != -1 || state->stop.load(std::memory_order_acquire) != 0; });
           ncclProfilerRecordProxyCtrlEventState(eHandle, 0, ncclProfilerProxyCtrlWakeup);
           ncclProfilerStopProxyCtrlEvent(eHandle);
         }
@@ -1028,6 +1024,7 @@ void* ncclProxyProgress(void* proxyState_) {
    * ncclParamProgressAppendOpFreq(). If they are equal, we will append proxy ops. This will decrease the
    * frequency of calling ncclProxyGetPostedOps() and reduce the perf impact. */
   int proxyOpAppendCounter = 0;
+  int stopv;
   do {
     int idle = 1;
     ncclResult_t ret = progressOps(proxyState, state, state->active, &idle);
@@ -1059,7 +1056,8 @@ void* ncclProxyProgress(void* proxyState_) {
       }
     }
     lastIdle = idle;
-  } while ((state->stop == 0 || (state->stop == 1 && state->active)) &&
+    stopv = state->stop.load(std::memory_order_acquire);
+  } while ((stopv == 0 || (stopv == 1 && state->active)) &&
            COMPILER_ATOMIC_LOAD(proxyState->abortFlag, std::memory_order_acquire) == 0);
   return NULL;
 }
@@ -1077,7 +1075,6 @@ ncclResult_t ncclProxyStart(struct ncclComm* comm) {
     ops->nextOps = ops->nextOpsEnd = -1;
     ops->count = 0;
   }
-  comm->opCount++;
   TIME_STOP(1);
   return ncclSuccess;
 }
@@ -1098,11 +1095,11 @@ ncclResult_t ncclProxyProgressDestroy(struct ncclProxyState* proxyState) {
   if (state->opsPool) {
     {
       std::lock_guard<std::mutex> lock(state->opsPool->mutex);
-      state->stop = 1;
+      state->stop.store(1, std::memory_order_release);
 #if defined(NCCL_OS_LINUX)
       state->opsPool->cond.notify_one();
 #elif defined(NCCL_OS_WINDOWS)
-      state->opsPool->cond.notify_all();
+      state->opsPool->cond.notify_one();
 #endif
     }
     state->thread.join();
@@ -1309,7 +1306,11 @@ ncclResult_t ncclProxyCallBlockingUDS(struct ncclComm* comm, struct ncclProxyCon
   hdr.respSize = respSize;
   hdr.opId = opId;
 
-  assert(reqSize <= sizeof(hdr.data));
+  if (reqSize > sizeof(hdr.data)) {
+    WARN("Invalid UDS proxy request size %d, expected at most %zu", reqSize, sizeof(hdr.data));
+    res = ncclInternalError;
+    goto error;
+  }
   memcpy(&hdr.data, reqBuff, reqSize);
   NCCLCHECKGOTO(ncclIpcSocketSendMsg(&ipcSock, &hdr, sizeof(hdr), reqFdtmp, proxyConn->tpRank, pidHash), res, error);
   NCCLCHECKGOTO(ncclIpcSocketRecvMsg(&ipcSock, respBuff, respSize, respFd), res, error);
@@ -1460,11 +1461,17 @@ ncclResult_t ncclPollProxyResponse(struct ncclComm* comm, struct ncclProxyConnec
       if (resp.opId != opId) {
         // Unexpected response, need to buffer the socket data
         respBuff = malloc(resp.respSize);
-        if (respBuff == nullptr) {
+        if (respBuff == NULL) {
+          WARN("Could not allocate proxy response buffer for response opId=%p expected opId=%p response size %d",
+               resp.opId, opId, resp.respSize);
           return ncclSystemError;
         }
       }
-      assert(respBuff != NULL);
+      if (respBuff == NULL) {
+        WARN("Proxy response buffer is NULL for response opId=%p expected opId=%p response size %d", resp.opId, opId,
+             resp.respSize);
+        return ncclInternalError;
+      }
       NCCLCHECK(ncclSocketRecv(sock, respBuff, resp.respSize));
     }
 
@@ -1519,7 +1526,8 @@ static ncclResult_t proxyProgressInit(struct ncclProxyState* proxyState) {
     shmPath[0] = '\0';
 #elif defined(NCCL_OS_WINDOWS)
     char shmPath[64];
-    snprintf(shmPath, sizeof(shmPath), "Local\\nccl-shm-%d", GetCurrentProcessId());
+    snprintf(shmPath, sizeof(shmPath), "Local\\nccl-shm-%08x-%02x", (unsigned)GetCurrentProcessId(),
+             proxyState->cudaDev & 0xff);
 #endif
     NCCLCHECK(ncclShmOpen(shmPath, sizeof(shmPath), size, (void**)&pool, NULL, proxyState->tpLocalnRanks,
                           &state->handle));
@@ -1533,7 +1541,7 @@ static ncclResult_t proxyProgressInit(struct ncclProxyState* proxyState) {
       pool->ops[(r + 1) * MAX_OPS_PER_PEER - 1].next = -1;
     }
 
-    ncclOsSetMutexCondShared(pool->mutex, pool->cond);
+    ncclOsSetMutexCondShared(pool->mutex, pool->cond, &pool->syncObjectsInitialized);
 
     state->opsPool = pool;
 
@@ -1555,9 +1563,14 @@ static ncclResult_t proxyProgressInit(struct ncclProxyState* proxyState) {
 
 static void proxyOpsFree(struct ncclProxyState* proxyState) {
   struct ncclProxyProgressState* state = &proxyState->progressState;
+  if (state->opsPool) {
+    ncclOsUnsetMutexCondShared(state->opsPool->mutex, state->opsPool->cond, &state->opsPool->syncObjectsInitialized);
+  }
   if (ncclShmClose(state->handle) != ncclSuccess) {
     WARN("[Service thread] shm close failed");
   }
+  state->opsPool = NULL;
+  state->handle = NULL;
 }
 
 ncclResult_t ncclProxyShmUnlink(struct ncclComm* comm) {
@@ -2147,7 +2160,10 @@ void* ncclProxyServiceUDS(void* _args) {
 
 ncclResult_t ncclProxyInit(struct ncclComm* comm, struct ncclSocket* sock, union ncclSocketAddress* peerAddresses,
                            uint64_t* peerAddressesUDS) {
-  assert(comm->sharedRes->proxyState == nullptr);
+  if (comm->sharedRes->proxyState != nullptr) {
+    WARN("Proxy state is already initialized");
+    return ncclInternalError;
+  }
   comm->sharedRes->proxyState = new ncclProxyState{};
   comm->proxyState = comm->sharedRes->proxyState;
 #ifdef ENABLE_ROCSHMEM
@@ -2254,7 +2270,10 @@ ncclResult_t ncclProxyDestroy(struct ncclComm* comm) {
   struct ncclProxyState* sharedProxyState = comm->sharedRes->proxyState;
 
   if (sharedProxyState) {
-    assert(sharedProxyState->refCount == 0);
+    if (sharedProxyState->refCount != 0) {
+      WARN("Proxy state refCount is %d, expected 0", sharedProxyState->refCount);
+      return ncclInternalError;
+    }
     free(sharedProxyState->peerAddresses);
     free(sharedProxyState->peerAddressesUDS);
     free(sharedProxyState->peerSocks);

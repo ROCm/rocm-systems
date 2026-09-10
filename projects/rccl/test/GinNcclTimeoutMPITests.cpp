@@ -229,7 +229,7 @@ class TimeoutMPITest : public MPITestBase {};
 // Also tests advisory property: injecting during AllReduce doesn't corrupt data.
 TEST_F(TimeoutMPITest, AsyncErrorRoundTrip)
 {
-    ASSERT_TRUE(validateTestPrerequisites(2, kNoProcessLimit, kNoPowerOfTwoRequired, 1, kNoNodeLimit));
+    SKIP_UNLESS_MPI_PREREQS(2, kNoProcessLimit, kNoPowerOfTwoRequired, 1, kNoNodeLimit);
     ASSERT_MPI_EQ(ncclSuccess, createTestCommunicator());
     ncclComm_t  comm   = getActiveCommunicator();
     hipStream_t stream = getActiveStream();
@@ -264,7 +264,7 @@ TEST_F(TimeoutMPITest, AsyncErrorRoundTrip)
 // does not corrupt result, clearable, comm healthy afterwards.
 TEST_F(TimeoutMPITest, AsyncErrorWithInFlightOp)
 {
-    ASSERT_TRUE(validateTestPrerequisites(2, kNoProcessLimit, kNoPowerOfTwoRequired, 1, kNoNodeLimit));
+    SKIP_UNLESS_MPI_PREREQS(2, kNoProcessLimit, kNoPowerOfTwoRequired, 1, kNoNodeLimit);
     ASSERT_MPI_EQ(ncclSuccess, createTestCommunicator());
     ncclComm_t  comm   = getActiveCommunicator();
     hipStream_t stream = getActiveStream();
@@ -298,7 +298,7 @@ TEST_F(TimeoutMPITest, AsyncErrorWithInFlightOp)
 // "timeout" string must be identical on every rank/node.
 TEST_F(TimeoutMPITest, ErrorStringConsistentAcrossRanks)
 {
-    ASSERT_TRUE(validateTestPrerequisites(2, kNoProcessLimit, kNoPowerOfTwoRequired, 1, kNoNodeLimit));
+    SKIP_UNLESS_MPI_PREREQS(2, kNoProcessLimit, kNoPowerOfTwoRequired, 1, kNoNodeLimit);
     const char* s = ncclGetErrorString(ncclTimeout);
     ASSERT_MPI_TRUE(s != nullptr && std::strcmp(s, "timeout") == 0);
     // Verify every rank produced the same string length via AllReduce(min/max).

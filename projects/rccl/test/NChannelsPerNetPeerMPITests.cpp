@@ -350,7 +350,7 @@ protected:
 // ---------------------------------------------------------------------------
 TEST_F(NChannelsPerNetPeerMPITest, ConfigField_HonoredAcrossRanks)
 {
-    ASSERT_MPI_TRUE(validateTestPrerequisites(kMinProcessesForMPI));
+    SKIP_UNLESS_MPI_PREREQS(kMinProcessesForMPI);
 
     constexpr int kRequested = 4;
     configured_value_        = kRequested;
@@ -369,7 +369,7 @@ TEST_F(NChannelsPerNetPeerMPITest, ConfigField_HonoredAcrossRanks)
 // ---------------------------------------------------------------------------
 TEST_F(NChannelsPerNetPeerMPITest, Env_HonoredAcrossRanks)
 {
-    ASSERT_MPI_TRUE(validateTestPrerequisites(kMinProcessesForMPI));
+    SKIP_UNLESS_MPI_PREREQS(kMinProcessesForMPI);
 
     constexpr int kEnvValue = 8;
     setenv("NCCL_NCHANNELS_PER_NET_PEER", "8", /*overwrite=*/1);
@@ -394,7 +394,7 @@ TEST_F(NChannelsPerNetPeerMPITest, Env_HonoredAcrossRanks)
 // ---------------------------------------------------------------------------
 TEST_F(NChannelsPerNetPeerMPITest, Env_OverridesConfig_AcrossRanks)
 {
-    ASSERT_MPI_TRUE(validateTestPrerequisites(kMinProcessesForMPI));
+    SKIP_UNLESS_MPI_PREREQS(kMinProcessesForMPI);
 
     constexpr int kEnvValue = 16;
     setenv("NCCL_NCHANNELS_PER_NET_PEER", "16", /*overwrite=*/1);
@@ -418,7 +418,7 @@ TEST_F(NChannelsPerNetPeerMPITest, Env_OverridesConfig_AcrossRanks)
 // ---------------------------------------------------------------------------
 TEST_F(NChannelsPerNetPeerMPITest, Default_LeavesUndef_AcrossRanks)
 {
-    ASSERT_MPI_TRUE(validateTestPrerequisites(kMinProcessesForMPI));
+    SKIP_UNLESS_MPI_PREREQS(kMinProcessesForMPI);
 
     unsetenv("NCCL_NCHANNELS_PER_NET_PEER");
     configured_value_ = kLeaveConfigUnset;
@@ -436,7 +436,7 @@ TEST_F(NChannelsPerNetPeerMPITest, Default_LeavesUndef_AcrossRanks)
 // ---------------------------------------------------------------------------
 TEST_F(NChannelsPerNetPeerMPITest, ConfigField_FunctionalAllReduceEndToEnd)
 {
-    ASSERT_MPI_TRUE(validateTestPrerequisites(kMinProcessesForMPI));
+    SKIP_UNLESS_MPI_PREREQS(kMinProcessesForMPI);
 
     constexpr int kRequested = 4;
     configured_value_        = kRequested;
@@ -455,10 +455,10 @@ TEST_F(NChannelsPerNetPeerMPITest, ConfigField_FunctionalAllReduceEndToEnd)
 TEST_F(NChannelsPerNetPeerMPITest, MultiNode_NetPeer_HonoredEndToEnd)
 {
     // Require >= 2 processes AND >= 2 nodes so real NET peers exist.
-    ASSERT_MPI_TRUE(validateTestPrerequisites(kMinProcessesForMPI,
+    SKIP_UNLESS_MPI_PREREQS(kMinProcessesForMPI,
                                               kNoProcessLimit,
                                               kNoPowerOfTwoRequired,
-                                              /*min_nodes=*/2));
+                                              /*min_nodes=*/2);
 
     constexpr int kRequested = 4;
     configured_value_        = kRequested;
@@ -479,10 +479,10 @@ TEST_F(NChannelsPerNetPeerMPITest, MultiNode_NetPeer_HonoredEndToEnd)
 // ---------------------------------------------------------------------------
 TEST_F(NChannelsPerNetPeerMPITest, NetSendRecv_AcrossNodes_EndToEnd)
 {
-    ASSERT_MPI_TRUE(validateTestPrerequisites(kMinProcessesForMPI,
+    SKIP_UNLESS_MPI_PREREQS(kMinProcessesForMPI,
                                               kNoProcessLimit,
                                               kNoPowerOfTwoRequired,
-                                              /*min_nodes=*/2));
+                                              /*min_nodes=*/2);
 
     configured_value_ = 4;
     ASSERT_MPI_EQ(ncclSuccess, createTestCommunicator());
@@ -508,10 +508,10 @@ TEST_F(NChannelsPerNetPeerMPITest, NetSendRecv_AcrossNodes_EndToEnd)
 // ---------------------------------------------------------------------------
 TEST_F(NChannelsPerNetPeerMPITest, NetTransport_SelectedForInterNodePeer)
 {
-    ASSERT_MPI_TRUE(validateTestPrerequisites(kMinProcessesForMPI,
+    SKIP_UNLESS_MPI_PREREQS(kMinProcessesForMPI,
                                               kNoProcessLimit,
                                               kNoPowerOfTwoRequired,
-                                              /*min_nodes=*/2));
+                                              /*min_nodes=*/2);
 
     const int world_rank = MPIEnvironment::world_rank;
 
@@ -560,10 +560,10 @@ TEST_F(NChannelsPerNetPeerMPITest, NetTransport_SelectedForInterNodePeer)
 // ---------------------------------------------------------------------------
 TEST_F(NChannelsPerNetPeerMPITest, AutoTuneDivergence_Audit)
 {
-    ASSERT_MPI_TRUE(validateTestPrerequisites(kMinProcessesForMPI,
+    SKIP_UNLESS_MPI_PREREQS(kMinProcessesForMPI,
                                               kNoProcessLimit,
                                               kNoPowerOfTwoRequired,
-                                              /*min_nodes=*/2));
+                                              /*min_nodes=*/2);
 
     const int world_rank = MPIEnvironment::world_rank;
     const int senderRank = 0;

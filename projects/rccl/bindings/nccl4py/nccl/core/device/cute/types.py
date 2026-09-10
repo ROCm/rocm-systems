@@ -1,8 +1,10 @@
 """User-facing enums shared by the rest of the device API.
 
   - :class:`MemoryOrder`   — argument to barrier ``arrive`` / ``wait`` / ``sync``.
+  - :class:`ThreadScope`   — release-scope argument to GIN ``put`` / ``signal``.
   - :class:`GinFenceLevel` — fence-level argument to GIN barrier ``sync``.
   - :class:`GinBackendMask` — backend selection for :meth:`DevComm.gin`.
+  - :class:`GinResourceSharingMode` — resource-sharing mode for :meth:`DevComm.gin`.
 """
 
 from enum import IntEnum, IntFlag
@@ -23,6 +25,21 @@ class MemoryOrder(IntEnum):
     RELEASE = 3
     ACQ_REL = 4
     SEQ_CST = 5
+
+
+class ThreadScope(IntEnum):
+    """Mirrors C++ ``cuda::thread_scope`` from <cuda/std/atomic>.
+
+    Integer values match libcu++ exactly; pass as the release-scope
+    arguments to GIN ``put`` / ``put_value`` / ``signal``. Not the same as
+    ``cutlass.cute.nvgpu.MemoryScope`` (which is an MLIR IR scope kind with
+    a different taxonomy, not the libcu++ thread scope).
+    """
+
+    SYSTEM = 0
+    DEVICE = 1
+    BLOCK = 2
+    THREAD = 3
 
 
 class GinFenceLevel(IntFlag):
@@ -49,8 +66,24 @@ class GinBackendMask(IntFlag):
     ALL = PROXY | GDAKI | GPI
 
 
+class GinResourceSharingMode(IntEnum):
+    """Mirrors ``enum ncclGinResourceSharingMode``.
+
+    Selects whether GIN network resources are shared across the GPU, within
+    each CTA, or are exclusive to each thread. The mode belongs to the
+    :class:`Gin` instance and is independent of an operation's cooperative
+    group.
+    """
+
+    GPU = 0
+    CTA = 1
+    THREAD = 2
+
+
 __all__ = [
     "MemoryOrder",
+    "ThreadScope",
     "GinFenceLevel",
     "GinBackendMask",
+    "GinResourceSharingMode",
 ]

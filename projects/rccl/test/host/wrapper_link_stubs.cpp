@@ -152,3 +152,7 @@ ncclResult_t ncclProxyClientGetFdBlocking(ncclComm*, int, void*, int*) { return 
 int ncclCuMemEnable() { return 0; }
 int ncclCuMemHandleType = 0;
 ncclResult_t getBusId(int, int64_t* busId) { if (busId) *busId = 0; return ncclSuccess; }
+
+// Return type is int64_t (no ncclResult_t), so this can live here. ncclMgmtTaskEnqueue
+// uses the real ncclResult_t enum and is defined in init_stubs.cpp.
+int64_t ncclParamEnqueueRearchEnable() { return 0; }

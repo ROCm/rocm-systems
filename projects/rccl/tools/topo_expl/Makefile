@@ -126,7 +126,7 @@ hipify:
 	# src/include/sym_kernels.h includes "../device/symmetric/gin_scratch.h"
 	# (relative path), so mirror those headers under hipify_rccl/device/symmetric/.
 	cp -a ../../src/device/symmetric/*.h hipify_rccl/device/symmetric/
-	cp -a ../../src/enqueue.cc hipify_rccl/
+	cp -a ../../src/enqueue/enqueue.cc hipify_rccl/
 	cp -a ../../src/register/register.cc hipify_rccl/
 	cp -a ../../src/collectives.cc hipify_rccl/
 	cp -a ../../src/rccl_wrap.cc hipify_rccl/
