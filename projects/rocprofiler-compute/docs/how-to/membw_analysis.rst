@@ -64,7 +64,7 @@ use the block filter:
    $ rocprof-compute analyze --experimental --membw-analysis -p workloads/my_workload/MI350/ -b 3 30
 
 Here, ``-b 3`` selects the memory chart and ``-b 30`` includes the
-Memory Bandwidth Analysis tables.
+memory bandwidth analysis tables.
 
 .. image:: ../data/analyze/cli/membw_mem_chart.png
    :alt: Memory chart with Memory Bandwidth Analysis annotations and guidance panel
