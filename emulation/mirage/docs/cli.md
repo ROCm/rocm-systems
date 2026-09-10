@@ -810,22 +810,60 @@ on:
   works, because that is a stdin with somebody on the other end of it;
   only `y` and `yes`, in any case, are yes.
 
-## Configuration documents reject what they do not understand
+## What a document may say that mirage does not understand
 
-Profiles, agents and topologies are parsed strictly. A key the schema does
-not know is a parse error naming it —
+A key mirage has no name for is one of two things: a typo, or a RocJITsu
+setting newer than this mirage. Refusing every one of them would put
+mirage between a profile and the emulator it configures; accepting every
+one silently would let `emulaotr` load, report success, and run with
+settings the file plainly did not ask for. So the answer depends on where
+the key is, and there are three of them. This applies to every document
+mirage reads: `import` on all three kinds, and the profiles read by `run`
+and `exec`.
+
+**Rejected outright** — the parts of a document that are mirage's own,
+where an unknown key can only be a mistake because there is nobody to
+forward it to. `containerize` and everything under it, including its file
+mounts and port mappings; and a topology document's own fields
+(`num_nodes`, `gpus_per_node`, `agent`), as distinct from the SoC tree
+inside an agent, which is forwarded. Also rejected: `plugins`,
+`exec_mode`, `options` and `topology` written at the profile *root*, which
+are refused with "belongs inside emulator"; the same key given both at the
+root and under `emulator`; and any extra under `emulator` for a backend
+that has no passthrough, which is every backend but RocJITsu.
 
 ```text
-error: json error on <stdin>: unknown field `emulaotr`, expected one of `name`, `description`, `emulator`, `containerize` at line 1 column 42
+error: json error on t.json: unknown field `nodes`, expected one of `num_nodes`, `gpus_per_node`, `agent` at line 1 column 57
+error: json error on p.json: profile field "exec_mode" belongs inside emulator
 ```
 
-— rather than a field quietly dropped on the way in. The two outcomes are
-easy to confuse and are not remotely equivalent: a profile with a typo'd
-key used to load, report success, and then not be what the file plainly
-said it was, which surfaces much later as an emulation that ran with the
-wrong settings. Failing at parse time makes the file and the behaviour the
-same thing again. It applies to every document mirage reads — `import` on
-all three kinds, and the profiles read by `run` and `exec`.
+**Retained and forwarded** — ordinary RocJITsu profile and agent extras,
+recursively, nested device and topology objects included. These reach the
+synthesised RocJITsu configuration exactly as written, which is how a
+profile reaches a setting this mirage has never heard of. An extra at the
+profile *root* is forwarded with a warning naming it, because that is
+where a misspelt mirage key (`descriptoin`, `containerise`) lands; inside
+`emulator` and inside an agent there is no warning, because a key mirage
+does not know is the expected case there.
+
+**Retained but shape-checked** — `vm` and everything under it. Forwarding
+is not licence to change the type of a field mirage does have a name for,
+and passthrough merging replaces nodes rather than deepening them, so
+`"device": 7` would hand RocJITsu an integer where a device belongs and
+`"num_sdma_engines": "4"` a string where a count belongs. Those are
+refused when the profile is written rather than at daemon start:
+
+```text
+error: profile "p": rocjitsu cannot use this profile: profile's RocJITsu configuration has a vm that does not describe a device: invalid type: string "4", expected u32. Fields mirage has no name for are passed through as written, but the ones it does have to keep their shape.
+```
+
+`emulator.topology` is a mirage field throughout, and a malformed one is
+refused outright.
+
+Note that RocJITsu itself drops configuration keys it does not recognise,
+without complaint — so a forwarded key that this mirage passes on is not
+thereby a key that took effect. See the Profile Compatibility section of
+[building.md](building.md).
 
 ## `mirage state`
 

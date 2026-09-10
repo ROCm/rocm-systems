@@ -1265,6 +1265,27 @@ fn report_change(json: bool, kind: DocKind, name: &str, verb: &str) -> anyhow::R
     Ok(())
 }
 
+/// Say why a name with no file behind it does not name a document.
+///
+/// No file is not always no document: a builtin profile is generated at
+/// run time and never written, so `mirage profile list` shows it and a
+/// flat "no such profile" answers a name the user has just read out of
+/// that list.
+///
+/// Telling the two apart used to be done by calling the store's
+/// *delete*, whose refusal is the sentence wanted here — which meant
+/// asking a question by performing the act. Between the existence check
+/// above and that call, another process creating the profile has its
+/// file removed: before the confirmation prompt, with `--force` never
+/// consulted, and the delete then reports the profile as missing. This
+/// only ever needs to look a name up.
+fn missing_document(kind: DocKind, name: &str) -> mirage_core::error::MirageError {
+    if kind == DocKind::Profile && mirage_core::store::builtin_profile(name).is_some() {
+        return mirage_core::store::generated_profile_refusal(name);
+    }
+    mirage_core::error::MirageError::not_found(kind, name)
+}
+
 /// Delete one stored document, having asked first unless told not to.
 ///
 /// One function for all three resource verbs because everything here is
@@ -1303,17 +1324,7 @@ fn delete_document(
     // bad name it is rather than probed for on disk.
     mirage_core::store::validate_name(kind, name)?;
     if !kind.path(name).exists() {
-        // No file is not always no document: a builtin profile is
-        // generated at run time and never written, so `mirage profile
-        // list` shows it and this used to answer "no such profile" for a
-        // name the user had just read out of that list. The store knows
-        // the difference and refuses with the reason, so let it — it has
-        // nothing to remove either way, which is why there is no prompt
-        // to skip here.
-        if kind == DocKind::Profile {
-            mirage_core::store::profile_delete(name)?;
-        }
-        return Err(mirage_core::error::MirageError::not_found(kind, name).into());
+        return Err(missing_document(kind, name).into());
     }
     if !force && !confirm(&format!("delete {word} {name}?"))? {
         if json {
@@ -2986,11 +2997,13 @@ async fn state_cmd(cmd: StateCmd, json: bool) -> anyhow::Result<ExitCode> {
 /// of everything that *had* been refreshed. Repairing an edited agent
 /// and topology therefore took two runs to even discover.
 ///
-/// Builtin profiles are not here because they are not on disk: mirage
-/// generates each one from the rocjitsu config it ships, every time it
-/// is asked for, so there is no stale copy for this command to refresh.
-/// A profile *file* is the user's own, and refreshing it is exactly what
-/// this command must not do.
+/// Builtin profiles are not refreshed because they are not on disk:
+/// mirage generates each one from the rocjitsu config it ships, every
+/// time it is asked for, so there is no stale copy for this command to
+/// rewrite. A profile *file* is the user's own, and refreshing it is
+/// exactly what this command must not do. It is named instead, because a
+/// file under a builtin's name silently outranks the generated one
+/// everywhere else.
 ///
 /// Exit 0 when nothing failed, edited builtins included. `--help`
 /// presents "a builtin you have edited is left alone and named" as the
@@ -3065,7 +3078,55 @@ fn builtins_cmd(json: bool) -> anyhow::Result<ExitCode> {
              (`mirage <kind> delete <name>`) and run `mirage state builtins` again."
         );
     }
+
+    // A profile file under a builtin's name is the definition that name
+    // resolves to, for good — the store looks at disk before it
+    // generates, and this command cannot refresh the file because it
+    // cannot tell a profile the user wrote from one an older mirage
+    // seeded before it stopped seeding them. Which leaves the file
+    // invisible: `profile show mi350x` answers with a definition that no
+    // longer matches what mirage ships, `profile list --long` calls it
+    // not-a-builtin, and this command, whose whole job is to say what is
+    // stale, has never mentioned profiles at all. So name them. Nothing
+    // here writes or removes anything.
+    let shadowed = shadowed_builtin_profiles();
+    if !shadowed.is_empty() {
+        let n = Plural(shadowed.len());
+        eprintln!(
+            "mirage: {} profile file{} share{} a name with a builtin profile, and {} \
+             what that name resolves to:",
+            shadowed.len(),
+            n.pick("", "s"),
+            n.pick("s", ""),
+            n.pick("is", "are"),
+        );
+        for name in &shadowed {
+            eprintln!(
+                "  profile   {name} -> {}",
+                mirage_core::paths::profile_path(name).display()
+            );
+        }
+        eprintln!(
+            "mirage: mirage generates its builtin profiles rather than storing them, so \
+             this command has no copy of yours to refresh and leaves the file as it is. \
+             To hand the name back to the builtin, delete it \
+             (`mirage profile delete <name>`)."
+        );
+    }
     Ok(ExitCode::from(0))
+}
+
+/// Name every builtin profile that a file on disk stands in for.
+///
+/// The store looks at disk before it generates, so such a file is the
+/// definition the name resolves to — in `profile show`, in `run`, and in
+/// `profile list`, which reports it as not being a builtin at all.
+fn shadowed_builtin_profiles() -> Vec<&'static str> {
+    mirage_builtin::profiles()
+        .into_iter()
+        .map(|(name, _)| name)
+        .filter(|name| mirage_core::paths::profile_path(name).exists())
+        .collect()
 }
 
 /// Stop every live run and remove mirage's on-disk state.
@@ -4477,6 +4538,75 @@ exit 0
             !e.contains("answer"),
             "the missing document is the answer, not the prompt: {e}"
         );
+    }
+
+    /// A profile file under a builtin's name is reported, not refreshed.
+    ///
+    /// This is the document an older mirage seeded, before it stopped
+    /// seeding profiles and started generating them. It shadows the
+    /// generated one permanently, and nothing said so: `state builtins`
+    /// reported only agents and topologies, so the one command whose job
+    /// is naming stale copies was silent about the only copy it cannot
+    /// refresh.
+    #[test]
+    fn a_profile_file_shadowing_a_builtin_is_named() {
+        let _lock = mirage_core::paths::test_env_lock();
+        let root = tempfile::tempdir().unwrap();
+        mirage_core::paths::set_test_root(root.path());
+        ensure_builtins_present();
+
+        let path = mirage_core::paths::profile_path("mi350x");
+        mirage_core::state::write_json(
+            &path,
+            &serde_json::json!({
+                "name": "mi350x",
+                "emulator": {
+                    "emulator": "rocjitsu",
+                    "exec_mode": "Functional",
+                    "options": {},
+                    "plugins": {},
+                    "topology": {"agent": "MI350X", "gpus_per_node": 1, "num_nodes": 1}
+                }
+            }),
+        )
+        .unwrap();
+
+        assert_eq!(shadowed_builtin_profiles(), vec!["mi350x"]);
+        assert_eq!(builtins_cmd(false).unwrap(), ExitCode::from(0));
+        assert!(path.is_file(), "and reporting it does not disturb it");
+        let still = mirage_core::state::read_json::<serde_json::Value>(&path).unwrap();
+        assert_eq!(
+            still["emulator"]["topology"]["agent"], "MI350X",
+            "nor rewrite it"
+        );
+    }
+
+    /// Finding out what a name is does not delete anything.
+    ///
+    /// A generated builtin has no file, so classifying one used to be
+    /// done by calling the store's delete and reading its refusal. The
+    /// state this sets up is the one a concurrent `profile create`
+    /// leaves behind a moment after the existence check has already
+    /// answered false — and that delete removed it, before the
+    /// confirmation prompt and without consulting `--force`, then
+    /// reported the profile as missing.
+    #[test]
+    fn classifying_a_generated_builtin_never_removes_a_file() {
+        let _lock = mirage_core::paths::test_env_lock();
+        let root = tempfile::tempdir().unwrap();
+        mirage_core::paths::set_test_root(root.path());
+        ensure_builtins_present();
+
+        let path = mirage_core::paths::profile_path("mi350x");
+        mirage_core::state::write_json(
+            &path,
+            &serde_json::json!({"name": "mi350x", "emulator": {"emulator": "rocjitsu"}}),
+        )
+        .unwrap();
+
+        let e = missing_document(DocKind::Profile, "mi350x").to_string();
+        assert!(e.contains("mi350x") && e.contains("builtin"), "{e}");
+        assert!(path.is_file(), "somebody else's profile is still theirs");
     }
 
     /// The shipped version is on disk before mirage says it is back.
