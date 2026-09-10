@@ -43,52 +43,78 @@ MemoryPipeline::~MemoryPipeline() {
   }
 }
 
-WaitCounterType MemoryPipeline::issue_counter(const Instruction &inst) const {
-  const DynamicInstState *state = inst.data();
-  if (state == nullptr)
-    return counter_type_;
-  switch (state->tag()) {
-  case SCALAR_MEM:
-    return inst.data_as<ScalarMemState>()->wait_counter_type;
-  case GLOBAL_MEM:
-  case LOCAL_MEM:
-    return inst.data_as<VectorMemState>()->wait_counter_type;
-  default:
-    return counter_type_;
+MemoryPipeline::WaitCounterTokens MemoryPipeline::issue_counters(const Instruction &inst) const {
+  WaitCounterTokens counters;
+  if (const auto *issue = inst.amdgpu_memory_issue_info()) {
+    for (const auto obligation : issue->counter_obligations()) {
+      for (uint8_t token = 0; token < obligation.counter_increment(); ++token)
+        counters.types[counters.size++] = obligation.wait_counter_type();
+    }
+    return counters;
   }
+
+  WaitCounterType counter = counter_type_;
+  const DynamicInstState *state = inst.data();
+  if (state != nullptr) {
+    switch (state->tag()) {
+    case SCALAR_MEM:
+      counter = inst.data_as<ScalarMemState>()->wait_counter_type;
+      break;
+    case GLOBAL_MEM:
+    case LOCAL_MEM:
+      counter = inst.data_as<VectorMemState>()->wait_counter_type;
+      break;
+    default:
+      break;
+    }
+  }
+  counters.types[counters.size++] = counter;
+  return counters;
+}
+
+void MemoryPipeline::acquire_wait_counters(Wavefront &wf, const WaitCounterTokens &counters) {
+  for (uint8_t i = 0; i < counters.size; ++i)
+    wf.wait_counters().increment(counters.types[i]);
+}
+
+void MemoryPipeline::release_wait_counters(Wavefront &wf, const WaitCounterTokens &counters) {
+  for (uint8_t i = 0; i < counters.size; ++i)
+    wf.release_wait_counter(counters.types[i]);
 }
 
 void MemoryPipeline::complete_entry(PipelineEntry entry) {
   MemoryAccessDeferredCompletion deferred_completion = [this, inst = entry.inst, wf = entry.wf,
-                                                        counter = entry.counter,
+                                                        counters = entry.counters,
                                                         wave_generation = entry.wave_generation]() {
-    finish_completed_access(inst, *wf, counter, wave_generation);
+    finish_completed_access(inst, *wf, counters, wave_generation);
   };
   const MemoryAccessCompletion completion =
       complete_access(*entry.inst, *entry.wf, std::move(deferred_completion));
   if (completion == MemoryAccessCompletion::Complete)
-    finish_completed_access(entry.inst, *entry.wf, entry.counter, entry.wave_generation);
+    finish_completed_access(entry.inst, *entry.wf, entry.counters, entry.wave_generation);
 }
 
 VmAccessOutcome MemoryPipeline::issue_impl(Instruction *inst, Wavefront &wf,
                                            bool retain_unavailable) {
-  const WaitCounterType counter = issue_counter(*inst);
-  wf.wait_counters().increment(counter);
+  const WaitCounterTokens counters = issue_counters(*inst);
+  acquire_wait_counters(wf, counters);
   const VmAccessOutcome access = initiate_access(*inst, wf);
   if (access == VmAccessOutcome::Unavailable && retain_unavailable) {
-    issued_.push(
-        {.inst = inst, .wf = &wf, .counter = counter, .wave_generation = wf.dispatch_generation()});
+    issued_.push({.inst = inst,
+                  .wf = &wf,
+                  .counters = counters,
+                  .wave_generation = wf.dispatch_generation()});
     wf.set_state(WfState::VM_RETRY);
     wf.cu().request_functional_yield();
     return VmAccessOutcome::Complete;
   }
   if (access != VmAccessOutcome::Complete) {
-    wf.release_wait_counter(counter);
+    release_wait_counters(wf, counters);
     delete inst;
     return access;
   }
   complete_entry(
-      {.inst = inst, .wf = &wf, .counter = counter, .wave_generation = wf.dispatch_generation()});
+      {.inst = inst, .wf = &wf, .counters = counters, .wave_generation = wf.dispatch_generation()});
   return VmAccessOutcome::Complete;
 }
 
@@ -101,10 +127,10 @@ VmAccessOutcome MemoryPipeline::issue_deferred(Instruction *inst, Wavefront &wf)
 }
 
 void MemoryPipeline::defer_unavailable(Instruction *inst, Wavefront &wf) {
-  const WaitCounterType counter = issue_counter(*inst);
-  wf.wait_counters().increment(counter);
+  const WaitCounterTokens counters = issue_counters(*inst);
+  acquire_wait_counters(wf, counters);
   issued_.push(
-      {.inst = inst, .wf = &wf, .counter = counter, .wave_generation = wf.dispatch_generation()});
+      {.inst = inst, .wf = &wf, .counters = counters, .wave_generation = wf.dispatch_generation()});
   wf.set_state(WfState::VM_RETRY);
   wf.cu().request_functional_yield();
 }
@@ -143,7 +169,7 @@ void MemoryPipeline::tick() {
       continue;
     }
 
-    entry.wf->release_wait_counter(entry.counter);
+    release_wait_counters(*entry.wf, entry.counters);
     delete entry.inst;
     if (fault_handler_)
       fault_handler_(*entry.wf, access);
