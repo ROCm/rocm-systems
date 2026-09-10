@@ -448,32 +448,6 @@ __device__ __forceinline__ void profiler(int action) {
   }
 }
 
-#ifdef ENABLE_WARP_SPEED
-// Map the n'th enabled channel in channelMask to its absolute channel index.
-// WarpSpeed packs warpsPerBlock logical channels per physical block; batchZero is
-// keyed by absolute channel id, so the lead warp's channel must index the batch load.
-__device__ __forceinline__ int ncclWarpSpeedAbsChannelId(struct ncclDevKernelArgs const* args, int nthEnabled) {
-  int total = 0;
-  int num = MAXCHANNELS / CHANNELS_PER_MASK_WORD > 0 ? MAXCHANNELS / CHANNELS_PER_MASK_WORD : 1;
-  for (int i = 0; i < num; i++) {
-    uint64_t mask = args->channelMask.masks[i];
-    int pop = __popcll(mask);
-    if (nthEnabled < total + pop) {
-      int rank = nthEnabled - total;
-      for (int b = 0; b < CHANNELS_PER_MASK_WORD; b++) {
-        if (mask & (1ull << b)) {
-          if (rank == 0) return b + i * CHANNELS_PER_MASK_WORD;
-          rank--;
-        }
-      }
-      break;
-    }
-    total += pop;
-  }
-  return -1;
-}
-#endif
-
 template <int SpecializedFnId, typename SpecializedRunWorkBatch, int COLL_UNROLL>
 __device__ __forceinline__ void ncclKernelMain(struct ncclDevKernelArgs const* args) {
   const int tid = threadIdx.x;
@@ -595,11 +569,9 @@ __device__ __forceinline__ void ncclKernelMain(struct ncclDevKernelArgs const* a
       // However, the code ensures that the participation is on a per-warp basis.
       // coverity[device_thread_diverged:FALSE]
 #ifdef ENABLE_WARP_SPEED
-      int batchIx = blockIdx.x;
-      if (args->warpLevelComm) {
-        int leadChannel = ncclWarpSpeedAbsChannelId(args, warpCount * blockIdx.x);
-        if (leadChannel >= 0) batchIx = leadChannel;
-      }
+      // batchZero is dense in enabled-channel order (finishPlan), not keyed by
+      // absolute channel id. WarpSpeed packs warpCount logical channels per block.
+      int batchIx = args->warpLevelComm ? (warpCount * blockIdx.x) : blockIdx.x;
       loadWorkBatchToShmem(subtid, subtn, args, batchIx);
 #else
       loadWorkBatchToShmem(subtid, subtn, args, /*batchIx=*/blockIdx.x);

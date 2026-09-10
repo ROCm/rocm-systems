@@ -832,6 +832,13 @@ static ncclResult_t scheduleCollTasksToPlan(struct ncclComm* comm, struct ncclKe
 
   int const planCollCount = nPlanColls;
 
+#ifdef ENABLE_WARP_SPEED
+  // The plan queue is populated below, so evaluate the exact budgeted prefix
+  // now with the same plan-wide predicate used at launch.
+  bool warpSpeedPlan = rcclWarpSpeedSupported(
+    comm, plan, ncclIntruQueueHead(&planner->collTaskQueue), planCollCount);
+#endif
+
   while (nPlanColls != 0 && !ncclIntruQueueEmpty(&planner->collTaskQueue)) {
     struct ncclTaskColl* task = ncclIntruQueueHead(&planner->collTaskQueue);
     struct ncclWorkList* workNode = ncclIntruQueueHead(&planner->collWorkQueue);
@@ -843,7 +850,7 @@ static ncclResult_t scheduleCollTasksToPlan(struct ncclComm* comm, struct ncclKe
     // WarpSpeed loads one batch chain from the lead channel per physical block.
     // Multi-collective plans must reuse the same channel range so every channel
     // queues all colls (AG#1 then AG#2 via nextJump), not sequential channel slices.
-    if (task->useWarpSpeed && planCollCount > 1 && (planCollCount - nPlanColls) > 0) {
+    if (warpSpeedPlan && planCollCount > 1 && (planCollCount - nPlanColls) > 0) {
       channelId = 0;
       currentTraffic = 0;
     }
