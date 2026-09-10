@@ -64,8 +64,7 @@ jobs:
             --disable-pip-version-check \
             -r "${ROCJITSU_SOURCE_DIR}/benchmarks/requirements.txt"
 
-          ROCM_PATH="$("${ROCJITSU_VENV}/bin/python" -c \
-            'import pathlib, _rocm_sdk_devel; print(pathlib.Path(_rocm_sdk_devel.__file__).parent)')"
+          ROCM_PATH="$("${ROCJITSU_VENV}/bin/rocm-sdk" path --root)"
           echo "ROCM_PATH=${ROCM_PATH}" >> "${GITHUB_ENV}"
           echo "LD_LIBRARY_PATH=${ROCM_PATH}/lib:${LD_LIBRARY_PATH:-}" >> "${GITHUB_ENV}"
 

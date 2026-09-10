@@ -86,8 +86,7 @@ Configure a Release build against the SDK installed in the environment:
 
 ```bash
 build=/path/to/rocjitsu-build-release
-rocm=$("$python" -c \
-  'import pathlib, _rocm_sdk_devel; print(pathlib.Path(_rocm_sdk_devel.__file__).parent)')
+rocm=$("$(dirname "$python")/rocm-sdk" path --root)
 export LD_LIBRARY_PATH="$rocm/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
 
 cmake -S "$src" -B "$build" -G Ninja \
