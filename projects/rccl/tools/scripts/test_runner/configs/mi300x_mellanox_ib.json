@@ -3641,11 +3641,6 @@
           "timeout": 600
         },
         {
-          "name": "GIN_WindowRegister_AfterDevCommCreate",
-          "description": "Symmetric window register after ncclDevCommCreate (AICOMRCCL-2241)",
-          "test_filter": "GinMPIDeviceTests.WindowRegister_AfterDevCommCreate"
-        },
-        {
           "name": "GIN_DeviceMPI_MultiContext",
           "description": "GIN device tests driven across multiple GIN contexts (NCCL_GIN_NCONTEXTS=4): put/putValue-inline/counter+signal/VA-signal, one block per context",
           "test_filter": "GinMPIDeviceTests.*_MultiContext",

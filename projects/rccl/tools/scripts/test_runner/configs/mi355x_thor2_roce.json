@@ -4143,11 +4143,6 @@
           "timeout": 600
         },
         {
-          "name": "GIN_WindowRegister_AfterDevCommCreate",
-          "description": "Symmetric window register after ncclDevCommCreate (AICOMRCCL-2241)",
-          "test_filter": "GinMPIDeviceTests.WindowRegister_AfterDevCommCreate"
-        },
-        {
           "name": "GIN_MultiContext_NonPowerOf2",
           "description": "Multi-context GIN with a non-power-of-2 context count (NCCL_GIN_NCONTEXTS=3)",
           "test_filter": "GinMPIDeviceTests.MultiContext_NonPowerOf2",
