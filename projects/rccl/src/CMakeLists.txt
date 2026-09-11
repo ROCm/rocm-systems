@@ -268,6 +268,7 @@ set(SRC_FILES
   include/nccl_device/gin/anvil_sdma/gin_anvil_ipc_table.h
   include/nccl_device/gin/anvil_sdma/gin_anvil_ipc_table_device.h
   include/nccl_device/gin/anvil_sdma/gin_anvil_sdma_device_host_common.h
+  include/nccl_device/gin/anvil_sdma/gin_fabric_a2a_lane.h
   include/nccl_device/gin/anvil_sdma/gin_fabric_ll_policy.h
   include/nccl_device/gin/anvil_sdma/gin_fabric_ll_device_prims.h
   include/nccl_device/gin/anvil_sdma/gin_fabric_ll_a2a_device.h
