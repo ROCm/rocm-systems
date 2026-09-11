@@ -32,9 +32,33 @@ Grouping policy + metric-aware coalescing remains the **first accurate choice**;
 - If metric \(M = A/B\) (including via YAML variables that expand to PMCs), **all HW counters needed to evaluate \(A\) and \(B\) on a dispatch row** must be collected in the **same perfmon replay** for that metric’s coalesce group.
 - **Exceptions:** documented intentional \>100% (e.g. gfx942 VALU dual-issue), metrics that cannot fit one bucket due to IP-block or slot rules (feeds Phase 2), or investigate-as-bug if violation persists under single-pass.
 
-### 1.3 CPX validation workloads (hardware)
+### 1.3 CPX validation host (Conductor, not alola)
 
-Use the same workloads as the AIPROFCOMP-78 investigation (re-profile on a stack that includes #10912):
+**Primary hardware:** Conductor node `hpe-darkstar-ccs-aus-e12-03.cs-aus.dcgpu` — GPUs can be configured in **CPX** (check `rocm-smi --showcomputepartition`; e.g. GPU[1] / GPU[9]).
+
+**Source tree:** Track [`rocprofiler-compute-develop`](https://github.com/ROCm/rocm-systems/tree/rocprofiler-compute-develop) (not alola Slurm `cpx` reservation).
+
+```bash
+# On Conductor (one-time clone)
+WORK_ROOT=/home/AMD/feizheng/aiprofcomp78
+git clone --depth 1 -b rocprofiler-compute-develop --filter=blob:none --sparse \
+  https://github.com/ROCm/rocm-systems.git "$WORK_ROOT/rocm-systems"
+cd "$WORK_ROOT/rocm-systems"
+git sparse-checkout set projects/rocprofiler-compute
+git sparse-checkout add projects/rocprofiler-compute/src/vendored
+
+# Phase 1 run (after copying script from branch or repo)
+export ROCR_GPU=1   # CPX die
+bash projects/rocprofiler-compute/scripts/aiprofcomp865_phase1_conductor_cpx.sh
+```
+
+When [#10912](https://github.com/ROCm/rocm-systems/pull/10912) is merged to `rocprofiler-compute-develop`, re-run the same script and compare to this baseline.
+
+**Legacy / optional:** alola MI300X + `cpx` reservation (only when reservation is valid).
+
+### 1.4 CPX validation workloads (hardware)
+
+Use the same workloads as the AIPROFCOMP-78 investigation:
 
 | Workload | Role | Notes |
 |----------|------|--------|
@@ -57,7 +81,7 @@ rocprof-compute analyze -p workloads/<name>/gfx942/ -n per_kernel
 
 - `~/Downloads/aiprofcomp78-cpx-data/{occupancy_cpx,mat_exp,rocflop}/` — use for **before** baseline; **after** = new profiles post-#10912.
 
-### 1.4 Golden metric checklist (gfx942)
+### 1.5 Golden metric checklist (gfx942)
 
 Run inspector **before** hardware re-profile to catch grouping gaps cheaply.
 
@@ -83,7 +107,7 @@ In the plan output, read **“Metrics with PMC counters assigned to more than on
 
 **How to fill “Metric ID” from analyze:** use the first column from `rocprof-compute analyze -b …` (e.g. `17.2.1`). Map to inspector rows: `File` stem → block (`1700` → `17`), `Panel` → sub-panel, `Idx` → metric index → id `17.2.1`.
 
-### 1.5 Evidence worksheet (per metric, per workload)
+### 1.6 Evidence worksheet (per metric, per workload)
 
 Copy for each re-profile run:
 
@@ -98,7 +122,7 @@ Verdict: PASS | POLICY_GAP | SLOT_LIMIT (→ Phase 2) | HW_BUG | INTENTIONAL
 Notes:
 ```
 
-### 1.6 Triage buckets (after measurement)
+### 1.7 Triage buckets (after measurement)
 
 | Verdict | Action |
 |---------|--------|
@@ -107,14 +131,14 @@ Notes:
 | **HW_BUG** | File driver/firmware/counter-defect; **do not** cap in YAML until validated |
 | **INTENTIONAL** | Document in metric description (VALU); exclude from “inflation” KPIs |
 
-### 1.7 Phase 1 deliverables
+### 1.8 Phase 1 deliverables
 
 1. Completed worksheet for all **P0** rows × three CPX workloads.
 2. PR(s) only for: grouping policy entries, coalesce edge cases, inspector/docs—**no `BOUND_RATIO`**.
 3. Short summary for Xuan / AIPROFCOMP-865: % of golden metrics single-bucket; list of **SLOT_LIMIT** candidates.
 4. Optional: profile-mode warning when a priority metric id is multi-bucket (stretch).
 
-### 1.8 Phase 1 timeline (suggested)
+### 1.9 Phase 1 timeline (suggested)
 
 | Week | Focus |
 |------|--------|
@@ -125,6 +149,8 @@ Notes:
 ---
 
 ## Phase 2 — Weighted submetrics (`WEIGHTED_AVG`)
+
+**Design handoff:** [`aiprofcomp-865-phase2-weighted-avg-design.md`](aiprofcomp-865-phase2-weighted-avg-design.md) (implementation agent: parser, aggregation, pilot YAML, milestones A–C).
 
 **Start only after** Phase 1 sign-off on P0 metrics **or** explicit **SLOT_LIMIT** classification with inspector evidence.
 
