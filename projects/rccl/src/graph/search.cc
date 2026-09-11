@@ -17,6 +17,7 @@
 #include "rome_models.h"
 
 NCCL_PARAM(CrossNic, "CROSS_NIC", 2);
+NCCL_PARAM(CrossNicFirst, "CROSS_NIC_FIRST", 0);
 
 // Initialize system->maxBw. This is the per-channel (i.e. per-SM)
 // max bw.
@@ -1355,6 +1356,14 @@ search:
     }
     tmpGraph.typeIntra = minTypeIntra;
 
+    if (ncclParamCrossNicFirst() && crossNic == 2 && tmpGraph.crossNic == 0 &&
+        (graph->pattern == NCCL_TOPO_PATTERN_RING || graph->pattern == NCCL_TOPO_PATTERN_BALANCED_TREE)) {
+      // Try a cross-NIC ring before conceding a worse GPU-to-NIC path.
+      tmpGraph.crossNic = 2;
+      goto search;
+    }
+    if (ncclParamCrossNicFirst()) tmpGraph.crossNic = crossNic == 1 ? 1 : 0;
+
     if (system->inter && tmpGraph.typeInter < maxTypeInter &&
         (graph->nChannels == 0 || tmpGraph.typeInter < graph->typeInter || tmpGraph.typeInter < PATH_PXN)) {
       tmpGraph.typeInter += 1;
@@ -1362,13 +1371,13 @@ search:
     }
     tmpGraph.typeInter = minTypeInter;
 
-    if (crossNic == 2 && tmpGraph.crossNic == 0 &&
+    if (!ncclParamCrossNicFirst() && crossNic == 2 && tmpGraph.crossNic == 0 &&
         (graph->pattern == NCCL_TOPO_PATTERN_RING || graph->pattern == NCCL_TOPO_PATTERN_BALANCED_TREE)) {
       // Try again with crossNic if permitted
       tmpGraph.crossNic = 2;
       goto search;
     }
-    tmpGraph.crossNic = crossNic == 1 ? 1 : 0;
+    if (!ncclParamCrossNicFirst()) tmpGraph.crossNic = crossNic == 1 ? 1 : 0;
 
     // Decrease bw until we find a solution
     if ((speedIndex < nspeeds - 1) && (graph->nChannels == 0 || (speedArray[speedIndex + 1] / graph->bwInter > .49))) {
