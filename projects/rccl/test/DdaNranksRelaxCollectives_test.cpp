@@ -11,12 +11,14 @@
 // any 2..kDdaNranks participant count is eligible. End-to-end low-rank GPU
 // speedups are covered by the rccl-tests collective sweeps.
 
+#include "common/DdaAlltoAllTestHelpers.hpp"
 #include "common/DdaIpcTestHelpers.hpp"
 #include "common/ProcessIsolatedTestRunner.hpp"
 
 #include "algorithms/dda/all_gather/dda_all_gather.h"
 #include "algorithms/dda/reduce_scatter/dda_reduce_scatter.h"
 #include "algorithms/dda/alltoall/dda_alltoall.h"
+#include "algorithms/dda/all_reduce/dda_all_reduce.h"
 #include "algorithms/dda/dda_init_detail.h"
 #include "gtest/gtest.h"
 
@@ -49,6 +51,41 @@ TEST_F(DdaCollectivesNranksRelaxTest, FullCliqueEligibleByDefault)
     EXPECT_TRUE(ncclAllGatherDdaIpcEligible(mockComm_.get(), sendbuff_, recvbuff_, kCount, ncclFloat32));
     EXPECT_TRUE(ncclReduceScatterDdaIpcEligible(mockComm_.get(), sendbuff_, recvbuff_, kCount, ncclFloat32, ncclSum));
     EXPECT_TRUE(ncclAllToAllDdaIpcEligible(mockComm_.get(), sendbuff_, recvbuff_, kCount, ncclFloat32));
+}
+
+// Eligibility is only one of the two gates a low-rank comm has to clear: dispatch
+// also calls rcclDdaEnabled() with a participant-count floor. Pin both floors
+// directly, since the eligibility tests above never exercise the minRanks
+// parameter. A 4-rank comm passes at the relaxed floor and fails at the default.
+TEST_F(DdaCollectivesNranksRelaxTest, RcclDdaEnabledHonoursTheRelaxedRankFloor)
+{
+    DdaAlltoAllMockComm decisionComm;
+    decisionComm.reset("gfx950:sramecc+:xnack-");
+    decisionComm.comm.nRanks = 4;
+    const size_t totalBytes = 8ull * 1024 * 1024;
+
+    EXPECT_TRUE(rcclDdaEnabled(decisionComm.get(), totalBytes, 8388608, /*gfx950Default=*/0,
+                               /*gfx1250Default=*/0, /*minRanks=*/2));
+    EXPECT_FALSE(rcclDdaEnabled(decisionComm.get(), totalBytes, 8388608, /*gfx950Default=*/0,
+                                /*gfx1250Default=*/0, /*minRanks=*/8));
+}
+
+// nNodes != 1 is what keeps this feature off multi-node comms, and it is checked
+// before the rank gate in all three collectives. Relax must not weaken it.
+TEST_F(DdaCollectivesNranksRelaxTest, MultiNodeRejectedRegardlessOfRankCount)
+{
+    mockComm_.comm.nNodes = 2;
+    for (int nRanks : {2, 4, nccl_dda_detail::kDdaNranks})
+    {
+        mockComm_.comm.nRanks = nRanks;
+        EXPECT_FALSE(ncclAllGatherDdaIpcEligible(mockComm_.get(), sendbuff_, recvbuff_, kCount, ncclFloat32))
+            << "AllGather nRanks=" << nRanks;
+        EXPECT_FALSE(
+            ncclReduceScatterDdaIpcEligible(mockComm_.get(), sendbuff_, recvbuff_, kCount, ncclFloat32, ncclSum))
+            << "ReduceScatter nRanks=" << nRanks;
+        EXPECT_FALSE(ncclAllToAllDdaIpcEligible(mockComm_.get(), sendbuff_, recvbuff_, kCount, ncclFloat32))
+            << "AllToAll nRanks=" << nRanks;
+    }
 }
 
 // Relaxed path (RCCL_DDA_NRANKS_RELAX=1). RCCL_PARAM caches per-process and
@@ -88,6 +125,21 @@ TEST(DdaCollectivesNranksRelaxIsolatedTest, RelaxedPathAdmitsTwoThroughEightRank
                     << "ReduceScatter nRanks=" << nRanks;
                 EXPECT_FALSE(ncclAllToAllDdaIpcEligible(mockComm.get(), sendbuff, recvbuff, count, ncclFloat32))
                     << "AllToAll nRanks=" << nRanks;
+            }
+
+            // Relax must not open the multi-node door: nNodes != 1 still rejects
+            // every count, including ones the relaxed rank gate would admit.
+            mockComm.comm.nNodes = 2;
+            for (int nRanks : {2, 4, nccl_dda_detail::kDdaNranks})
+            {
+                mockComm.comm.nRanks = nRanks;
+                EXPECT_FALSE(ncclAllGatherDdaIpcEligible(mockComm.get(), sendbuff, recvbuff, count, ncclFloat32))
+                    << "multi-node AllGather nRanks=" << nRanks;
+                EXPECT_FALSE(ncclReduceScatterDdaIpcEligible(mockComm.get(), sendbuff, recvbuff, count, ncclFloat32,
+                                                             ncclSum))
+                    << "multi-node ReduceScatter nRanks=" << nRanks;
+                EXPECT_FALSE(ncclAllToAllDdaIpcEligible(mockComm.get(), sendbuff, recvbuff, count, ncclFloat32))
+                    << "multi-node AllToAll nRanks=" << nRanks;
             }
         },
         {{"RCCL_DDA_NRANKS_RELAX", "1"}});

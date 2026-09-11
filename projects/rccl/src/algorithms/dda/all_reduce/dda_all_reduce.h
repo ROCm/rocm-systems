@@ -14,7 +14,8 @@
 
 struct ncclComm;
 
-// True when RCCL_DDA_NRANKS_RELAX=1 (allow 2..8-rank DDA IPC AllReduce). Default 0.
+// True when RCCL_DDA_NRANKS_RELAX=1 (allow 2..8-rank DDA IPC for every DDA IPC
+// collective). Default 0. Read per process: must match on every rank of a comm.
 bool ncclDdaNranksRelaxEnabled();
 
 // Single source of truth for "is nRanks a supported single-node DDA IPC

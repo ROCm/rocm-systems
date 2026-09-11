@@ -15,16 +15,25 @@
 
 namespace dda::common {
 
+// NRANKS semantics match the CollCommon helpers:
+//   - NRANKS  > 0 : compile-time clique size; the peer loop is fully unrolled and
+//                   nRanksRuntime is ignored.
+//   - NRANKS == 0 : runtime fallback; the clique size comes from nRanksRuntime and
+//                   the peer loop is partially unrolled 8-wide, so one instantiation
+//                   covers every supported clique size.
 template <typename T, int NRANKS, bool hasAcc, bool kStagingCopyInKernel = false>
 #if defined(USE_ROCM)
 __launch_bounds__(512)
 #endif
   __global__ void ddaAllToAllIpc(T* const* __restrict__ ipcbuffs, T* __restrict__ recvbuff, size_t count,
-                                 const T* __restrict__ sendbuff, int selfRank, IpcGpuBarrier barrier) {
+                                 const T* __restrict__ sendbuff, int selfRank, int nRanksRuntime,
+                                 IpcGpuBarrier barrier) {
   // use uint4 to do 16-byte loads to maximize memory efficiency
   // We assume that count % countPerThread == 0. This assumption is enforced
   // before kernel launch
   // TODO: we should be able to deal with left over as well
+  const int nRanks = (NRANKS > 0) ? NRANKS : nRanksRuntime;
+  constexpr int kUnroll = (NRANKS > 0) ? NRANKS : 8;
   const size_t countPerRank = count;
   constexpr auto countPerThread = sizeof(uint4) / sizeof(T);
   const auto gtIdx = blockDim.x * blockIdx.x + threadIdx.x;
@@ -36,7 +45,7 @@ __launch_bounds__(512)
   if constexpr (kStagingCopyInKernel) {
     // Small messages: fuse sendbuff -> scratch copy into the kernel to avoid
     // cudaMemcpyAsync launch overhead on ROCm.
-    const size_t copyCount = count * NRANKS;
+    const size_t copyCount = count * nRanks;
     copyFromSrcToDest<T>(sendbuff, ipcbuffs[selfRank], idxStart, copyCount, idxStride);
     barrier.syncOnSameBlockIdx<true /* hasPreviousMemAccess */, true /* hasSubsequentMemAccess */>();
   } else {
@@ -45,8 +54,8 @@ __launch_bounds__(512)
   }
 
   for (size_t idx = idxStart; idx < idxEnd; idx += idxStride) {
-#pragma unroll NRANKS
-    for (int r = 0; r < NRANKS; ++r) {
+#pragma unroll kUnroll
+    for (int r = 0; r < nRanks; ++r) {
       int srcRank = r;
       int srcIdx = idx + selfRank * idxEnd;
       int destIdx = idx + r * idxEnd;

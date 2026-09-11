@@ -57,31 +57,36 @@ static ncclResult_t ncclAllToAllDdaIpcLaunch(const void* sendbuff, void* recvbuf
 
   if (dda::common::ddaAlltoAllSingleBlockGrid(count, sizeof(T))) {
     dda::common::ddaAllToAllIpc<T, NRANKS, false, true><<<grid, block, 0, stream>>>(
-      d_ipcbuffs, static_cast<T*>(recvbuff), count, static_cast<const T*>(sendbuff), comm->rank, barrierHost);
+      d_ipcbuffs, static_cast<T*>(recvbuff), count, static_cast<const T*>(sendbuff), comm->rank, comm->nRanks,
+      barrierHost);
   } else {
     CUDACHECK(cudaMemcpyAsync(comm->ddaScratch, sendbuff, totalCount * sizeof(T), cudaMemcpyDeviceToDevice, stream));
     dda::common::ddaAllToAllIpc<T, NRANKS, false, false><<<grid, block, 0, stream>>>(
-      d_ipcbuffs, static_cast<T*>(recvbuff), count, static_cast<const T*>(sendbuff), comm->rank, barrierHost);
+      d_ipcbuffs, static_cast<T*>(recvbuff), count, static_cast<const T*>(sendbuff), comm->rank, comm->nRanks,
+      barrierHost);
   }
   CUDACHECK(cudaGetLastError());
 
   return ncclSuccess;
 }
 
-// Dispatch to the template instantiation for the active participant count (2..kDdaNranks).
+// Dispatch to the template instantiation for the active participant count.
+// Only the default kDdaNranks clique gets a compile-time specialisation, keeping
+// that path bit- and perf-identical to baseline; every other supported count uses
+// the NRANKS_CT == 0 runtime kernel. Specialising all seven would compile one
+// kernel per count per type for each DEFAULT_GPUS target, for a path that is
+// default-off and confined to gfx942/gfx950.
 template <typename T>
 static ncclResult_t ncclAllToAllDdaIpcTyped(const void* sendbuff, void* recvbuff, size_t count, ncclComm* comm,
                                             cudaStream_t stream) {
-  switch (comm->nRanks) {
-  case 8: return ncclAllToAllDdaIpcLaunch<T, 8>(sendbuff, recvbuff, count, comm, stream);
-  case 7: return ncclAllToAllDdaIpcLaunch<T, 7>(sendbuff, recvbuff, count, comm, stream);
-  case 6: return ncclAllToAllDdaIpcLaunch<T, 6>(sendbuff, recvbuff, count, comm, stream);
-  case 5: return ncclAllToAllDdaIpcLaunch<T, 5>(sendbuff, recvbuff, count, comm, stream);
-  case 4: return ncclAllToAllDdaIpcLaunch<T, 4>(sendbuff, recvbuff, count, comm, stream);
-  case 3: return ncclAllToAllDdaIpcLaunch<T, 3>(sendbuff, recvbuff, count, comm, stream);
-  case 2: return ncclAllToAllDdaIpcLaunch<T, 2>(sendbuff, recvbuff, count, comm, stream);
-  default: WARN("DDA IPC alltoall: unsupported nRanks %d", comm->nRanks); return ncclInvalidUsage;
+  if (!ncclDdaIpcNranksSupported(comm->nRanks)) {
+    WARN("DDA IPC alltoall: unsupported nRanks %d", comm->nRanks);
+    return ncclInvalidUsage;
   }
+  if (comm->nRanks == kDdaNranks) {
+    return ncclAllToAllDdaIpcLaunch<T, kDdaNranks>(sendbuff, recvbuff, count, comm, stream);
+  }
+  return ncclAllToAllDdaIpcLaunch<T, 0>(sendbuff, recvbuff, count, comm, stream);
 }
 
 } // namespace

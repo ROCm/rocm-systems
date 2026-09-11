@@ -22,11 +22,13 @@ using nccl_dda_detail::DdaIpcBarrierState;
 using nccl_dda_detail::ddaMaxNBlocksForScratch;
 using nccl_dda_detail::kDdaNranks;
 
-// Relax the DDA IPC AllReduce eligibility beyond exactly kDdaNranks (8) ranks.
-// When 0 (default) the classic 8-rank-only gate is enforced and behaviour is
-// bit- and perf-identical to baseline. When 1, any single-node comm of 2..kDdaNranks
-// ranks is eligible for the IPC path. Defined here alongside the DDA IPC comm-init
-// gate so the host init unit tests link it without pulling in the all-reduce compute TU.
+// Relax DDA IPC eligibility beyond exactly kDdaNranks (8) ranks, for every DDA IPC
+// collective (AllReduce / AllGather / ReduceScatter / AllToAll). When 0 (default) the
+// classic 8-rank-only gate is enforced and behaviour is bit- and perf-identical to
+// baseline. When 1, any single-node comm of 2..kDdaNranks ranks is eligible. Read per
+// process, so it must be set identically on every rank of a communicator. Defined here
+// alongside the DDA IPC comm-init gate so the host init unit tests link it without
+// pulling in the all-reduce compute TU.
 RCCL_PARAM(DdaNranksRelax, "DDA_NRANKS_RELAX", 0);
 
 bool ncclDdaNranksRelaxEnabled() {
@@ -151,6 +153,12 @@ ncclResult_t ncclDdaIpcCommInit(ncclComm* comm) {
   // Zero the full peer table so any slot past the live prefix (nActiveRanks) reads
   // as null rather than uninitialized device memory when RCCL_DDA_NRANKS_RELAX
   // shrinks the participant set below kDdaNranks.
+  //
+  // The host-side h_ptrs below is value-initialised, so copying the full table
+  // instead of the live prefix would leave the same nulls in the tail with one
+  // fewer CUDA call. This explicit device-side zero is kept deliberately: it was
+  // asked for in review, and it makes the tail defined at the point of allocation
+  // rather than as a side effect of how much of h_ptrs is later copied.
   cudaError_t mce = cudaMemset(peerDev, 0, kDdaNranks * sizeof(void*));
   if (mce != cudaSuccess) {
     CUDACHECKIGNORE(cudaFree(peerDev));

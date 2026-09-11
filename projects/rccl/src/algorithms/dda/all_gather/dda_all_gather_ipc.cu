@@ -61,27 +61,31 @@ static ncclResult_t ncclAllGatherDdaIpcLaunch(const void* sendbuff, void* recvbu
   T** d_ipcbuffs = reinterpret_cast<T**>(peerPtrsDev);
 
   dda::common::ddaAllGatherIpc<T, NRANKS, false><<<grid, block, 0, stream>>>(
-    d_ipcbuffs, static_cast<T*>(recvbuff), sendcount, static_cast<const T*>(sendbuff), comm->rank, barrierHost);
+    d_ipcbuffs, static_cast<T*>(recvbuff), sendcount, static_cast<const T*>(sendbuff), comm->rank, comm->nRanks,
+    barrierHost);
 
   CUDACHECK(cudaGetLastError());
 
   return ncclSuccess;
 }
 
-// Dispatch to the template instantiation for the active participant count (2..kDdaNranks).
+// Dispatch to the template instantiation for the active participant count.
+// Only the default kDdaNranks clique gets a compile-time specialisation, keeping
+// that path bit- and perf-identical to baseline; every other supported count uses
+// the NRANKS_CT == 0 runtime kernel. Specialising all seven would compile one
+// kernel per count per type for each DEFAULT_GPUS target, for a path that is
+// default-off and confined to gfx942/gfx950.
 template <typename T>
 static ncclResult_t ncclAllGatherDdaIpcTyped(const void* sendbuff, void* recvbuff, size_t sendcount, ncclComm* comm,
                                              cudaStream_t stream) {
-  switch (comm->nRanks) {
-  case 8: return ncclAllGatherDdaIpcLaunch<T, 8>(sendbuff, recvbuff, sendcount, comm, stream);
-  case 7: return ncclAllGatherDdaIpcLaunch<T, 7>(sendbuff, recvbuff, sendcount, comm, stream);
-  case 6: return ncclAllGatherDdaIpcLaunch<T, 6>(sendbuff, recvbuff, sendcount, comm, stream);
-  case 5: return ncclAllGatherDdaIpcLaunch<T, 5>(sendbuff, recvbuff, sendcount, comm, stream);
-  case 4: return ncclAllGatherDdaIpcLaunch<T, 4>(sendbuff, recvbuff, sendcount, comm, stream);
-  case 3: return ncclAllGatherDdaIpcLaunch<T, 3>(sendbuff, recvbuff, sendcount, comm, stream);
-  case 2: return ncclAllGatherDdaIpcLaunch<T, 2>(sendbuff, recvbuff, sendcount, comm, stream);
-  default: WARN("DDA IPC allgather: unsupported nRanks %d", comm->nRanks); return ncclInvalidUsage;
+  if (!ncclDdaIpcNranksSupported(comm->nRanks)) {
+    WARN("DDA IPC allgather: unsupported nRanks %d", comm->nRanks);
+    return ncclInvalidUsage;
   }
+  if (comm->nRanks == kDdaNranks) {
+    return ncclAllGatherDdaIpcLaunch<T, kDdaNranks>(sendbuff, recvbuff, sendcount, comm, stream);
+  }
+  return ncclAllGatherDdaIpcLaunch<T, 0>(sendbuff, recvbuff, sendcount, comm, stream);
 }
 
 } // namespace
