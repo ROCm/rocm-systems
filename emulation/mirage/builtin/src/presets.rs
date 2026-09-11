@@ -1,32 +1,26 @@
-//! The parts of a rocjitsu preset the builtin agents must not drift from.
+//! The rocjitsu configs mirage ships, embedded by `build.rs`.
 //!
-//! Filled in by `build.rs`, which reads `rocjitsu/configs/*.json` — see
-//! there for why these five values are read rather than written, and for
-//! what is deliberately left to the [`agents`](mod@crate::agents)
-//! module instead.
+//! One entry per GPU rocjitsu has a config for. Everything mirage
+//! preloads is derived from this table: the builtin agents are the
+//! `{vm, topology}` in each config ([`mod@crate::agents`]), and the
+//! builtin profiles are one per entry, generated on demand
+//! ([`mod@crate::profiles`]).
 
-/// The arch name and per-CU limits of one rocjitsu preset.
-///
-/// Strings because that is what a component's `config` carries: rocjitsu
-/// reads these back out of the JSON mirage writes, and parsing them to
-/// integers here only to print them again would be a chance to change
-/// them.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// One shipped rocjitsu config, as mirage addresses it.
 pub(crate) struct Preset {
-    /// The preset file this came from, for error messages and doc.
-    pub(crate) preset: &'static str,
-    /// `vm.arch` — which ISA rocjitsu emulates, and therefore which
-    /// limits it enforces on the values below.
-    pub(crate) arch: &'static str,
-    /// Wavefront slots per compute unit. The one that bites: `cdna5`
-    /// caps it at 64 and rocjitsu refuses a larger value outright.
-    pub(crate) num_wf_slots: &'static str,
-    /// Scalar registers per wavefront.
-    pub(crate) sgprs_per_wf: &'static str,
-    /// Vector registers per wavefront.
-    pub(crate) vgprs_per_wf: &'static str,
-    /// Local data share per compute unit, in KiB.
-    pub(crate) lds_size_kb: &'static str,
+    /// The name the agent and its profile are addressed by.
+    pub name: &'static str,
+    /// The `rocjitsu/configs/<stem>.json` it was read from, named in
+    /// the profile's description so a user can go and read the source.
+    pub stem: &'static str,
+    /// `vm.gpu.device.marketing_name` — the GPU this describes.
+    pub marketing_name: &'static str,
+    /// `vm.arch` — the architecture rocjitsu emulates it as.
+    pub arch: &'static str,
+    /// The `{vm, topology}` document, as JSON. Parsed rather than
+    /// constructed, which is what keeps a field the config omits
+    /// omitted; see [`mirage_core::agent::AgentDef`].
+    pub agent: &'static str,
 }
 
 include!(concat!(env!("OUT_DIR"), "/presets.rs"));

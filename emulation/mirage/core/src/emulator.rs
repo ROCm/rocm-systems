@@ -31,27 +31,111 @@ pub type EmulatorKind = String;
 /// The emulator half of a profile: which backend, how it runs, and the
 /// system it emulates.
 ///
-/// Unknown fields are rejected; see [`crate::profile`] for why.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
+/// Additional fields are passed to the selected emulator's
+/// configuration, or refused by a backend that has none — see
+/// [`EmulatorDef::reject_extra`].
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 pub struct EmulatorDef {
+    /// Fields with no typed meaning to mirage, handed to the backend as
+    /// they were written. Deserialization never puts one of the field
+    /// names below in here; [`Serialize`] guarantees the same for a map
+    /// built in Rust, because a flattened map that shadows a typed
+    /// field would otherwise write a profile with duplicate JSON keys
+    /// that mirage could never read back.
+    #[serde(flatten)]
+    pub extra: serde_json::Map<String, serde_json::Value>,
+
     /// Which emulator backend runs this profile, by its canonical
     /// lowercase name.
     pub emulator: EmulatorKind,
 
     /// Which of the backend's plugins to enable, each with its argument
     /// object. See [`PluginsDef`] for what an empty object means.
+    #[serde(default)]
     pub plugins: PluginsDef,
 
     /// Functional or clocked emulation.
+    #[serde(default)]
     pub exec_mode: ExecMode,
 
     /// Backend-specific configuration overrides, e.g.
     /// `{"gpu_model": "cdna3"}`.
+    #[serde(default)]
     pub options: SimpleMap,
 
     /// System topology (rack/node/GPU layout plus the per-GPU agent).
     pub topology: MaybeRef<TopologyDef>,
+}
+
+impl EmulatorDef {
+    /// Refuse passthrough fields on behalf of a backend that does not
+    /// forward them.
+    ///
+    /// [`extra`](Self::extra) is a promise the *rocjitsu* backend keeps:
+    /// it merges these keys into the simulation config it synthesises,
+    /// so a profile can reach a rocjitsu setting mirage has no typed
+    /// field for. No other backend reads them. Since the map lives on
+    /// the shared `EmulatorDef`, dropping `deny_unknown_fields` to make
+    /// that promise possible also stopped every *other* backend
+    /// rejecting a key it will never act on — a misspelled or
+    /// unsupported field under a HotSwap or rocjitsu-dbt emulator would
+    /// parse, and the session would come up with the defaults it was
+    /// meant to change, silently.
+    ///
+    /// So a backend without a passthrough calls this from
+    /// [`EmulatorBackend::validate_profile`], which the CLI and the
+    /// daemon both run before a profile is written — the last point at
+    /// which the user is still looking at the document the key came
+    /// from.
+    ///
+    /// # Errors
+    ///
+    /// Names the offending keys and the backend that has no use for
+    /// them.
+    pub fn reject_extra(&self, backend: &str) -> std::result::Result<(), String> {
+        if self.extra.is_empty() {
+            return Ok(());
+        }
+        let keys = self
+            .extra
+            .keys()
+            .map(|key| format!("{key:?}"))
+            .collect::<Vec<_>>()
+            .join(", ");
+        Err(format!(
+            "emulator field(s) {keys} are not {backend} settings and {backend} has \
+             no configuration to pass them to; remove them, or correct the spelling \
+             of the mirage field that was meant"
+        ))
+    }
+}
+
+/// Written as `extra` with the typed fields laid over it.
+///
+/// Not derived: `#[serde(flatten)]` streams both halves, so an `extra`
+/// holding a typed field's name — `extra` is public, and the profile
+/// parser is the only thing that currently keeps one out — emits that
+/// key twice. `state::write_json` streams straight to the file, so the
+/// result is a profile on disk that fails to parse with `duplicate
+/// field`, and the user's only copy of it is unreadable. Building a
+/// `Value` first makes the typed field win instead.
+impl Serialize for EmulatorDef {
+    fn serialize<S: serde::Serializer>(
+        &self,
+        serializer: S,
+    ) -> std::result::Result<S::Ok, S::Error> {
+        let mut value = serde_json::Value::Object(self.extra.clone());
+        for (key, typed) in [
+            ("emulator", serde_json::to_value(&self.emulator)),
+            ("plugins", serde_json::to_value(&self.plugins)),
+            ("exec_mode", serde_json::to_value(&self.exec_mode)),
+            ("options", serde_json::to_value(&self.options)),
+            ("topology", serde_json::to_value(&self.topology)),
+        ] {
+            value[key] = typed.map_err(serde::ser::Error::custom)?;
+        }
+        value.serialize(serializer)
+    }
 }
 
 /// Whether the host's hardware/environment can actually run an

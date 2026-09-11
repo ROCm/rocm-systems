@@ -280,6 +280,7 @@ fn profile(nodes: u32) -> ProfileDef {
         name: "stub".to_string(),
         description: None,
         emulator: EmulatorDef {
+            extra: Default::default(),
             emulator: "stub".to_string(),
             plugins: PluginsDef::default(),
             exec_mode: mirage_core::emulator::ExecMode::default(),

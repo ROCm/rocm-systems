@@ -259,6 +259,136 @@ fn the_builtin_agents_are_unpacked_on_first_use() {
 }
 
 #[test]
+fn profile_extra_fields_reach_the_daemon_config() {
+    if skip_without_emulator() {
+        return;
+    }
+    let env = Env::new();
+    let mut profile: serde_json::Value =
+        serde_json::from_str(&env.ok(&["profile", "show", "mi350x"])).unwrap();
+    profile["name"] = "extended".into();
+    profile["max_ticks"] = 7654321.into();
+    profile["emulator"]["vm"] = serde_json::json!({"gpu": {"device": {"capability2": 9}}});
+    let source = env.root().join("extended.json");
+    std::fs::write(&source, serde_json::to_vec(&profile).unwrap()).unwrap();
+    env.ok(&["profile", "import", source.to_str().unwrap()]);
+    let mut run = env.spawn_run(&["--profile", "extended"], &["/bin/sh", "-c", "sleep 300"]);
+    let id = run.await_ready(Duration::from_secs(90));
+    let config: serde_json::Value = serde_json::from_slice(
+        &std::fs::read(env.session_scratch(&id).join("rj_config.json")).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(config["max_ticks"], 7654321);
+    assert_eq!(config["vm"]["gpu"]["device"]["capability2"], 9);
+    assert_eq!(
+        config["vm"]["gpu"]["device"]["num_sdma_queues_per_engine"],
+        8
+    );
+    run.signal(Signal::SIGINT);
+    let output = run.wait(Duration::from_secs(60));
+    assert!(!String::from_utf8_lossy(&output.stderr).contains("missing field"));
+}
+
+#[test]
+fn incomplete_profiles_warn_without_losing_extra_fields() {
+    if skip_without_emulator() {
+        return;
+    }
+    let env = Env::new();
+    let mut profile: serde_json::Value =
+        serde_json::from_str(&env.ok(&["profile", "show", "mi350x"])).unwrap();
+    let mut agent: serde_json::Value =
+        serde_json::from_str(&env.ok(&["agent", "show", "mi350x"])).unwrap();
+    agent["vm"]["gpu"]["device"]
+        .as_object_mut()
+        .unwrap()
+        .remove("mem_clk_max");
+    agent["vm"]["gpu"]["device"]["future_field"] = serde_json::json!({"values": [1, true]});
+    profile["name"] = "incomplete".into();
+    profile["emulator"]["topology"]["agent"] = agent;
+    profile["emulator"]
+        .as_object_mut()
+        .unwrap()
+        .remove("plugins");
+    let source = env.root().join("incomplete.json");
+    std::fs::write(&source, serde_json::to_vec(&profile).unwrap()).unwrap();
+    let output = env.run(&["profile", "import", source.to_str().unwrap()]);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(output.status.success(), "{stderr}");
+    assert!(
+        stderr.contains("missing field /emulator/plugins"),
+        "{stderr}"
+    );
+    assert!(
+        stderr.contains("missing field /vm/gpu/device/mem_clk_max"),
+        "{stderr}"
+    );
+    let stored: serde_json::Value =
+        serde_json::from_str(&env.ok(&["profile", "show", "incomplete"])).unwrap();
+    let device = &stored["emulator"]["topology"]["agent"]["vm"]["gpu"]["device"];
+    assert!(device.get("mem_clk_max").is_none());
+    assert_eq!(
+        device["future_field"],
+        serde_json::json!({"values": [1, true]})
+    );
+}
+
+/// The agents mirage ships, as mirage itself reports them.
+///
+/// Every one has a builtin profile of the same name pinning it, so this
+/// doubles as the list of builtin profiles.
+fn builtin_agents() -> Vec<String> {
+    let env = Env::new();
+    serde_json::from_str(&env.ok(&["--json", "agent", "list"])).unwrap()
+}
+
+#[test]
+fn every_builtin_agent_starts_the_rocjitsu_daemon() {
+    if skip_without_emulator() {
+        return;
+    }
+    // Every builtin, asked for rather than listed here: mirage takes its
+    // agents from the RocJITsu configs it ships, so a GPU added there
+    // becomes a builtin without anybody editing this file — and the
+    // point of this test is that a builtin starts. A hardcoded three
+    // would have gone on passing while four new ones went unexercised.
+    for agent in builtin_agents() {
+        let env = Env::new();
+        let output = env.run(&["run", "--profile", &agent, "--", "/bin/true"]);
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(output.status.success(), "{agent}: {stderr}");
+        assert!(!stderr.contains("missing field"), "{agent}: {stderr}");
+        assert!(env.live_runs().is_empty(), "{agent} left a live run");
+    }
+}
+
+#[test]
+fn builtin_agents_without_sdma_queue_counts_are_upgraded() {
+    if skip_without_emulator() {
+        return;
+    }
+    for agent in builtin_agents() {
+        let env = Env::new();
+        let mut old: serde_json::Value =
+            serde_json::from_str(&env.ok(&["agent", "show", &agent])).unwrap();
+        old["vm"]["gpu"]["device"]
+            .as_object_mut()
+            .unwrap()
+            .remove("num_sdma_queues_per_engine");
+        let path = env.root().join(format!("config/mirage/agent/{agent}.json"));
+        std::fs::write(&path, serde_json::to_vec_pretty(&old).unwrap()).unwrap();
+        env.ok(&["run", "--profile", &agent, "--", "/bin/true"]);
+        let upgraded: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+        assert!(
+            upgraded["vm"]["gpu"]["device"]["num_sdma_queues_per_engine"]
+                .as_u64()
+                .is_some_and(|queues| queues > 0)
+        );
+    }
+}
+
+#[test]
 fn run_streams_output_and_propagates_the_exit_code() {
     let env = Env::new();
     if skip_without_emulator() {
@@ -841,6 +971,47 @@ fn the_rank_environment_is_injected() {
     assert_eq!(out.trim(), "0/0/1/0");
 }
 
+/// The workload is told which process hosts the emulator daemon.
+///
+/// The interposer inside the workload asks that daemon for permission to
+/// be read out of, and checks the peer answering its socket against
+/// `$ROCJITSU_DAEMON_PID`. With nothing there it trusts whoever answered
+/// and warns on the workload's own stderr, at every launch — the
+/// variable has to survive the whole way into the workload's
+/// environment, not merely be computed.
+///
+/// Which PID is correct is pinned in `mirage_rocjitsu`'s own tests,
+/// where "the process hosting the daemon" is checkable directly. This
+/// asserts the two facts that only a real run can: that it arrives, and
+/// that `--in-process` — which starts no daemon and connects to no
+/// socket — does not claim one.
+#[test]
+fn the_workload_is_told_which_process_hosts_the_daemon() {
+    let env = Env::new();
+    if skip_without_emulator() {
+        return;
+    }
+    env.create_profile("p");
+    let read_var = ["--", "/bin/sh", "-c", "echo ${ROCJITSU_DAEMON_PID:-unset}"];
+
+    let mut daemon = vec!["run", "--profile", "p"];
+    daemon.extend_from_slice(&read_var);
+    let named = env.ok(&daemon);
+    let named = named.trim();
+    assert!(
+        named.parse::<u32>().is_ok_and(|pid| pid > 0),
+        "a daemon-mode run must name the daemon's process, got {named:?}"
+    );
+
+    let mut local = vec!["run", "--in-process", "--profile", "p"];
+    local.extend_from_slice(&read_var);
+    assert_eq!(
+        env.ok(&local).trim(),
+        "unset",
+        "--in-process starts no daemon, so there is none to name"
+    );
+}
+
 #[test]
 fn a_multi_node_topology_runs_every_node() {
     let env = Env::new();
@@ -1338,12 +1509,20 @@ fn state_builtins_writes_every_shipped_document_and_names_where() {
     let env = Env::new();
 
     let text = env.ok(&["state", "builtins"]);
-    for kind in ["agent", "topology", "profile"] {
+    // The two kinds that have files. Builtin profiles are generated from
+    // the RocJITsu configs mirage ships and never written, so this
+    // command has nothing to say about them — and must not name a path
+    // for one, which the loop below would then go looking for.
+    for kind in ["agent", "topology"] {
         assert!(
             text.contains(kind),
             "no {kind} in the builtins report: {text}"
         );
     }
+    assert!(
+        !text.contains("profile"),
+        "builtin profiles are generated, not written: {text}"
+    );
 
     let json: serde_json::Value =
         serde_json::from_str(&env.ok(&["--json", "state", "builtins"])).unwrap();
@@ -1371,7 +1550,13 @@ fn state_builtins_writes_every_shipped_document_and_names_where() {
     // Everything the report claims exists is loadable through the store,
     // not merely present as bytes.
     env.ok(&["agent", "show", "mi350x"]);
+    // And the profile it does not claim is there all the same, without a
+    // file: that is what generating them means.
     env.ok(&["profile", "show", "mi350x"]);
+    assert!(
+        !env.profile_dir().join("mi350x.json").exists(),
+        "a builtin profile must not be written to disk"
+    );
 }
 
 /// `mirage emulators` is how a user finds out what this build can do.
@@ -2983,8 +3168,9 @@ fn an_exec_joins_the_running_job_rather_than_standing_up_a_new_one() {
             "/bin/sh",
             "-c",
             &format!(
-                "if [ \"$RANK\" = 0 ]; then {report} > {}; fi; sleep 300",
-                recorded.display()
+                "if [ \"$RANK\" = 0 ]; then {report} > '{recorded}.tmp' && \
+                 mv '{recorded}.tmp' '{recorded}'; fi; sleep 300",
+                recorded = recorded.display()
             ),
         ],
     );

@@ -606,6 +606,7 @@ version = "0.2.0"
 dependencies = [
  "inventory",
  "mirage_core",
+ "serde_json",
 ]
 
 [[package]]

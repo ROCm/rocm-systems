@@ -10,10 +10,8 @@
 //! system-level layout that arranges agents into racks/nodes lives
 //! in [`crate::topology`].
 //!
-//! Every type here rejects unknown fields; see [`crate::profile`] for
-//! why. It bites hardest on an agent, where the fields are the emulated
-//! device's identity — a mistyped `l2_size_kb` that silently defaulted to
-//! zero produced a GPU the workload could see and could not explain.
+//! Additional fields are retained for the emulator, including fields in
+//! nested device and topology objects.
 
 use serde::{Deserialize, Serialize};
 
@@ -23,8 +21,9 @@ fn one() -> u32 {
 
 /// Key-value pair for component configuration.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
-#[serde(deny_unknown_fields)]
 pub struct ConfigEntry {
+    #[serde(flatten)]
+    pub extra: serde_json::Map<String, serde_json::Value>,
     pub key: String,
 
     /// All values as strings, parsed by the factory.
@@ -33,8 +32,9 @@ pub struct ConfigEntry {
 
 /// Port definition for dynamic ports.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
-#[serde(deny_unknown_fields)]
 pub struct PortDef {
+    #[serde(flatten)]
+    pub extra: serde_json::Map<String, serde_json::Value>,
     pub name: String,
 
     /// "in" or "out".
@@ -46,8 +46,9 @@ pub struct PortDef {
 
 /// Component definition (recursive for hierarchy).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
-#[serde(deny_unknown_fields)]
 pub struct ComponentDef {
+    #[serde(flatten)]
+    pub extra: serde_json::Map<String, serde_json::Value>,
     /// Name or range pattern like `"xcd[0:7]"`.
     pub name: String,
 
@@ -70,8 +71,9 @@ pub struct ComponentDef {
 
 /// Range variable for link pattern expansion.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
-#[serde(deny_unknown_fields)]
 pub struct ForRange {
+    #[serde(flatten)]
+    pub extra: serde_json::Map<String, serde_json::Value>,
     /// Variable name: "i", "j", "k".
     pub var_name: String,
 
@@ -84,8 +86,9 @@ pub struct ForRange {
 
 /// Link definition (direct or pattern-based).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
 pub struct LinkDef {
+    #[serde(flatten)]
+    pub extra: serde_json::Map<String, serde_json::Value>,
     /// Direct source: "soc.xcd0.l2.hbm_out".
     #[serde(default)]
     pub src: String,
@@ -116,6 +119,7 @@ pub struct LinkDef {
 impl Default for LinkDef {
     fn default() -> Self {
         Self {
+            extra: Default::default(),
             src: String::new(),
             dst: String::new(),
             pattern: String::new(),
@@ -132,8 +136,9 @@ impl Default for LinkDef {
 /// Mirrors the flatbuffer `TopologyDef` in
 /// `rocjitsu/schemas/simulation_config.fbs`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
-#[serde(deny_unknown_fields)]
 pub struct AgentTopologyDef {
+    #[serde(flatten)]
+    pub extra: serde_json::Map<String, serde_json::Value>,
     pub root: ComponentDef,
 
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -143,8 +148,9 @@ pub struct AgentTopologyDef {
 /// KFD device identity and topology properties for sysfs generation.
 /// Mirrors `KfdDeviceInfo` in the rocjitsu flatbuffer schema.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
-#[serde(deny_unknown_fields)]
 pub struct KfdDeviceInfo {
+    #[serde(flatten)]
+    pub extra: serde_json::Map<String, serde_json::Value>,
     #[serde(default)]
     pub gpu_id: u32,
     #[serde(default)]
@@ -202,6 +208,8 @@ pub struct KfdDeviceInfo {
     #[serde(default)]
     pub num_sdma_xgmi_engines: u32,
     #[serde(default)]
+    pub num_sdma_queues_per_engine: u32,
+    #[serde(default)]
     pub num_cp_queues: u32,
     #[serde(default)]
     pub max_engine_clk_fcompute: u32,
@@ -209,8 +217,9 @@ pub struct KfdDeviceInfo {
 
 /// AMDGPU memory configuration.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
-#[serde(deny_unknown_fields)]
 pub struct GpuMemoryConfig {
+    #[serde(flatten)]
+    pub extra: serde_json::Map<String, serde_json::Value>,
     #[serde(default)]
     pub size_mb: u32,
     #[serde(default)]
@@ -219,8 +228,9 @@ pub struct GpuMemoryConfig {
 
 /// AMDGPU top-level configuration.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
-#[serde(deny_unknown_fields)]
 pub struct AmdgpuConfig {
+    #[serde(flatten)]
+    pub extra: serde_json::Map<String, serde_json::Value>,
     #[serde(default)]
     pub num_xcds: u32,
     #[serde(default)]
@@ -240,11 +250,12 @@ pub struct AmdgpuConfig {
 }
 
 /// Virtual machine hardware model. Mirrors `VirtualMachineConfig`
-/// in the rocjitsu flatbuffer schema. `programs` is intentionally
-/// omitted: it's runtime workload configuration, not hardware.
+/// in the rocjitsu flatbuffer schema. Fields without a typed accessor,
+/// including `programs`, are retained in the passthrough map.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
-#[serde(deny_unknown_fields)]
 pub struct VirtualMachineConfig {
+    #[serde(flatten)]
+    pub extra: serde_json::Map<String, serde_json::Value>,
     #[serde(default)]
     pub arch: String,
     #[serde(default)]
@@ -252,19 +263,125 @@ pub struct VirtualMachineConfig {
 }
 
 /// Top-level agent (single-device hardware) definition.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
-#[serde(deny_unknown_fields)]
+///
+/// # Absent is not zero
+///
+/// rocjitsu's schema has its own defaults, and several of them are not
+/// Rust's: `drm_render_minor` defaults to 128 there and to 0 here, and a
+/// 0 maps the emulated GPU onto a render node that does not exist, so
+/// HSA aborts with `OUT_OF_RESOURCES`. A field the document did not
+/// mention therefore has to stay unmentioned when mirage writes the
+/// document back out, rather than being written as the Rust default.
+///
+/// [`omitted`](Self::omitted) is how that is remembered: every path
+/// `Deserialize` had to fill in, with the value it filled in, so
+/// `Serialize` can take it back out again. Two consequences a caller
+/// has to know about, because the type cannot enforce either:
+///
+/// * The record is taken when the document is *parsed*. An `AgentDef`
+///   built in Rust — [`Default::default`], a struct literal — has an
+///   empty record and serializes every field explicitly, `drm_render_minor: 0`
+///   included. Build agents by parsing, not by constructing, anywhere
+///   the result reaches rocjitsu.
+/// * The record is keyed by JSON pointer, so array paths are keyed by
+///   *index*. Inserting into, removing from or reordering any `Vec` in
+///   here after parsing re-points those paths at different elements,
+///   and an element that happens to hold the recorded default loses
+///   that field on the next serialize. Reparse rather than mutate a
+///   `Vec`.
+#[derive(Debug, Clone, Eq, Default)]
 pub struct AgentDef {
+    /// Document keys with no typed field of their own, kept so they
+    /// reach the emulator. `vm` and `topology` are not among them and
+    /// are overwritten on serialize by the fields below.
+    pub extra: serde_json::Map<String, serde_json::Value>,
     pub vm: VirtualMachineConfig,
     pub topology: AgentTopologyDef,
+    /// `(pointer, value)` for every field `Deserialize` defaulted
+    /// because the document omitted it. See the type docs.
+    omitted: Vec<(String, serde_json::Value)>,
+}
+
+/// Two agents are equal when they describe the same machine.
+///
+/// Deliberately not derived: `omitted` is provenance, not content, so a
+/// terse document and a fully spelled-out one describing the same GPU
+/// would otherwise compare unequal while serializing identically.
+impl PartialEq for AgentDef {
+    fn eq(&self, other: &Self) -> bool {
+        self.extra == other.extra && self.vm == other.vm && self.topology == other.topology
+    }
+}
+
+impl Serialize for AgentDef {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        let mut value = serde_json::Value::Object(self.extra.clone());
+        value["vm"] = serde_json::to_value(&self.vm).map_err(serde::ser::Error::custom)?;
+        value["topology"] =
+            serde_json::to_value(&self.topology).map_err(serde::ser::Error::custom)?;
+        for (path, default) in &self.omitted {
+            if value.pointer(path) == Some(default)
+                && let Some((parent, key)) = path.rsplit_once('/')
+                && let Some(object) = value
+                    .pointer_mut(parent)
+                    .and_then(serde_json::Value::as_object_mut)
+            {
+                object.remove(&key.replace("~1", "/").replace("~0", "~"));
+            }
+        }
+        value.serialize(serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for AgentDef {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        #[derive(Deserialize)]
+        struct Fields {
+            vm: VirtualMachineConfig,
+            topology: AgentTopologyDef,
+            #[serde(flatten)]
+            extra: serde_json::Map<String, serde_json::Value>,
+        }
+        let original = serde_json::Value::deserialize(deserializer)?;
+        let fields: Fields =
+            serde_json::from_value(original.clone()).map_err(serde::de::Error::custom)?;
+        let mut agent = Self {
+            vm: fields.vm,
+            topology: fields.topology,
+            extra: fields.extra,
+            omitted: Vec::new(),
+        };
+        let defaulted = serde_json::to_value(&agent).map_err(serde::de::Error::custom)?;
+        collect_omitted(&original, &defaulted, "", &mut agent.omitted);
+        Ok(agent)
+    }
+}
+
+fn collect_omitted(
+    original: &serde_json::Value,
+    defaulted: &serde_json::Value,
+    path: &str,
+    omitted: &mut Vec<(String, serde_json::Value)>,
+) {
+    if let Some(object) = defaulted.as_object() {
+        for (key, value) in object {
+            let child_path = format!("{path}/{}", key.replace('~', "~0").replace('/', "~1"));
+            if let Some(child) = original.get(key) {
+                collect_omitted(child, value, &child_path, omitted);
+            } else {
+                omitted.push((child_path, value.clone()));
+            }
+        }
+    } else if let (Some(original), Some(defaulted)) = (original.as_array(), defaulted.as_array()) {
+        for (index, (child, value)) in original.iter().zip(defaulted).enumerate() {
+            collect_omitted(child, value, &format!("{path}/{index}"), omitted);
+        }
+    }
 }
 
 /// On-disk agent store backed by `<MIRAGE_CONFIG>/agent/`.
 ///
-/// Agents may be stored as opaque JSON blobs by external backends
-/// (e.g. rocjitsu's `cdna3`/`cdna4` flatbuffer configs). `get()`
-/// will fail to parse those as [`AgentDef`]; callers that need raw
-/// access should read the file at [`crate::paths::agent_path`].
+/// Additional emulator fields are retained when an agent is read or written.
 ///
 /// [`crate::store::agent_get`] is where a `MaybeRef::Ref` on a topology is
 /// followed, so it is
