@@ -101,6 +101,9 @@ CLASS_CODE = {mc.CLASS_REAL: 0, mc.CLASS_NOOP: 1, mc.CLASS_ERROR_STUB: 2,
               mc.CLASS_HANDLER_ERROR: 3, mc.CLASS_CRASH: 4,
               mc.CLASS_UNREPLAYABLE: 5}
 
+# Must match HrrAppliesWhen in the emitted header.
+WHEN_CODE = {mc.UNREACHABLE_ALWAYS: 0, mc.UNREACHABLE_NO_IMAGE_SUPPORT: 1}
+
 # Classes that mean the API ran a real handler and did not come back cleanly.
 # Both are known-broken rather than misclassified, so they report as XFAIL and
 # flip to XPASS the day the handler is fixed.
@@ -153,6 +156,11 @@ enum HrrExpectCode {{
                                // with the reason, instead of being attempted
 }};
 
+enum HrrAppliesWhen {{
+  kHrrWhenAlways = 0,          // holds on any part
+  kHrrWhenNoImageSupport = 1,  // only where hipDeviceAttributeImageSupport = 0
+}};
+
 struct HrrApiExpectation {{
   const char* api;
   const char* tier;
@@ -164,6 +172,13 @@ struct HrrApiExpectation {{
   // then a known failure rather than the API having been reclassified.
   bool handler_error_ok;
   bool skip;           // not assertable from a single-process Catch2 workload
+  // Device capability this API's unreachable: declaration was measured under.
+  // kHrrWhenAlways for everything that holds on any part. Otherwise the matrix
+  // has only ever seen the API on a part with that capability, and on any
+  // other one it is unmeasured: whether a texture or array handle can exist is
+  // a property of the device, so a declaration taken where none can is not
+  // evidence about a part where they can.
+  int applies_when;
 }};
 
 // A tier's workloads and the coverage floor its run must clear.
@@ -205,12 +220,13 @@ def emit_cxx(rows: List[mc.ApiRow], overlay: Dict[str, Any], path: Path) -> None
     for r in sorted(rows, key=lambda x: (x.tier, x.api)):
         body.append(
             '    {{"{api}", "{tier}", {expect}, {ploss}, {cap}, {herr}, '
-            '{skip}}},'.format(
+            '{skip}, {when}}},'.format(
                 api=r.api, tier=r.tier, expect=CLASS_CODE[r.expect_class],
                 ploss="true" if r.payload_loss else "false",
                 cap="true" if r.expect_captured else "false",
                 herr="true" if r.tier in r.handler_error_in else "false",
-                skip="true" if r.skip else "false"))
+                skip="true" if r.skip else "false",
+                when=WHEN_CODE[r.unreachable_when]))
 
     floors = []
     workload_arrays = []

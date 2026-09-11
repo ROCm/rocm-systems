@@ -180,6 +180,20 @@ void write_observation(const TierObservation& obs) {
   f << (first ? "" : "\n  ") << "}\n}\n";
 }
 
+// Whether this part can hold a texture, surface or array handle at all.
+// Several unreachable: groups were measured on a part that cannot, and their
+// declarations describe only such a part; queried once because it cannot
+// change under a run.
+bool device_has_image_support() {
+  static const bool supported = [] {
+    int value = 0;
+    return hipDeviceGetAttribute(&value, hipDeviceAttributeImageSupport, 0) ==
+               hipSuccess &&
+           value != 0;
+  }();
+  return supported;
+}
+
 // ---------------------------------------------------------------------------
 // Capture one workload and fold what it recorded into `obs`.
 //
@@ -382,6 +396,15 @@ void run_tier(const std::string& tier) {
     if (e.handler_error_ok && expected == HrrReplayClass::kReal &&
         observed == HrrReplayClass::kHandlerError) {
       INFO("Declared in api_matrix.yaml as failing for this tier's arguments");
+      continue;
+    }
+    // The matrix declared this API unreachable on a part without image
+    // support, and the reason only describes such a part. This one has image
+    // support, so the API became reachable and nobody has measured what it
+    // does here. Assert nothing rather than hold it to an expectation derived
+    // where no texture handle could exist.
+    if (e.applies_when == kHrrWhenNoImageSupport && device_has_image_support()) {
+      INFO("Declared for parts without image support; unmeasured on this part");
       continue;
     }
     CHECK(observed == expected);
