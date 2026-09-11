@@ -488,6 +488,9 @@ public:
         mxinfo.gfx.instance = instance;
         return mxinfo;
     }
+    // WGP blocks encode up to 2 instances in the low bit pair; SA blocks encode up to 32
+    // instances in the low 5 bits. WGP blocks also carry CounterBlockSaAttr, so decode
+    // must check WGP first.
     static uint32_t encode_spm_block_index(uint32_t inst_index,
                                            uint32_t sa_index,
                                            uint32_t wgp_index)

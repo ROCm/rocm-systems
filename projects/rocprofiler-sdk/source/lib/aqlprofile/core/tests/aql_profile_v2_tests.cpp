@@ -246,6 +246,66 @@ TEST_F(AqlProfileV2Test, PmcProfile)
     EXPECT_EQ(profile.events[2].event_id, 300);
 }
 
+TEST_F(AqlProfileV2Test, SpmDecodeShaderEngineGlobal)
+{
+    int se_index  = 0;
+    int sa_index  = 0;
+    int wgp_index = 0;
+
+    const hsa_status_t status =
+        aqlprofile_spm_decode_shader_engine(-1, &se_index, &sa_index, &wgp_index);
+
+    EXPECT_EQ(status, HSA_STATUS_SUCCESS);
+    EXPECT_EQ(se_index, -1);
+    EXPECT_EQ(sa_index, -1);
+    EXPECT_EQ(wgp_index, -1);
+}
+
+TEST_F(AqlProfileV2Test, SpmDecodeShaderEngineBaseSe)
+{
+    int se_index  = -1;
+    int sa_index  = -1;
+    int wgp_index = -1;
+
+    const hsa_status_t status =
+        aqlprofile_spm_decode_shader_engine(3, &se_index, &sa_index, &wgp_index);
+
+    EXPECT_EQ(status, HSA_STATUS_SUCCESS);
+    EXPECT_EQ(se_index, 3);
+    EXPECT_EQ(sa_index, 0);
+    EXPECT_EQ(wgp_index, 0);
+}
+
+TEST_F(AqlProfileV2Test, SpmDecodeShaderEngineExpanded)
+{
+    int se_index  = -1;
+    int sa_index  = -1;
+    int wgp_index = -1;
+
+    const int packed = (7 << 24) | (5 << 16) | 11;
+    const hsa_status_t status =
+        aqlprofile_spm_decode_shader_engine(packed, &se_index, &sa_index, &wgp_index);
+
+    EXPECT_EQ(status, HSA_STATUS_SUCCESS);
+    EXPECT_EQ(se_index, 11);
+    EXPECT_EQ(sa_index, 5);
+    EXPECT_EQ(wgp_index, 7);
+}
+
+TEST_F(AqlProfileV2Test, SpmDecodeShaderEngineNullArgs)
+{
+    int se_index  = -1;
+    int sa_index  = -1;
+    int wgp_index = -1;
+
+    EXPECT_EQ(aqlprofile_spm_decode_shader_engine(0, nullptr, &sa_index, &wgp_index),
+              HSA_STATUS_ERROR_INVALID_ARGUMENT);
+    EXPECT_EQ(aqlprofile_spm_decode_shader_engine(0, &se_index, nullptr, &wgp_index),
+              HSA_STATUS_ERROR_INVALID_ARGUMENT);
+    EXPECT_EQ(aqlprofile_spm_decode_shader_engine(0, &se_index, &sa_index, nullptr),
+              HSA_STATUS_ERROR_INVALID_ARGUMENT);
+}
+
 // Test ATT parameter structure
 TEST_F(AqlProfileV2Test, AttParameter)
 {

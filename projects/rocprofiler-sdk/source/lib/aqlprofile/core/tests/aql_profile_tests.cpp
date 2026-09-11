@@ -147,7 +147,11 @@ CountersVecTest::CountersVec(const profile_t* profile, const Pm4Factory* pm4_fac
 
         if(pm4_builder::SPISkip(block_info->attr, p->counter_id))
         {
-            vec.push_back({p->counter_id, reg_index, block_des, block_info});
+            vec.push_back({p->counter_id,
+                           reg_index,
+                           block_des,
+                           block_info,
+                           AQLPROFILE_SPM_DEPTH_NONE});
             continue;
         }
 
@@ -156,7 +160,8 @@ CountersVecTest::CountersVec(const profile_t* profile, const Pm4Factory* pm4_fac
             throw event_exception("Event is out of block counter registers number limit, ", *p);
         }
 
-        vec.push_back({p->counter_id, reg_index, block_des, block_info});
+        vec.push_back(
+            {p->counter_id, reg_index, block_des, block_info, AQLPROFILE_SPM_DEPTH_NONE});
 
         ++reg_index;
     }

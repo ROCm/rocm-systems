@@ -26,10 +26,8 @@
 #include <stdint.h>
 
 #include <algorithm>
-#include <iomanip>
-#include <iostream>
 #include <map>
-#include <mutex>
+#include <cstdio>
 #include <set>
 #include <utility>
 #include <vector>
@@ -102,7 +100,7 @@ public:
     {
         if constexpr(Primitives::GFXIP_LEVEL >= 11)
         {
-            const uint32_t xcc_number = agent_info->xcc_num;
+            const uint32_t xcc_number = agent_info->xcc_num ? agent_info->xcc_num : 1;
             const uint32_t se_number  = agent_info->se_num / xcc_number;
             const uint32_t sa_number  = agent_info->shader_arrays_per_se;
             if(se_number && sa_number)
@@ -682,16 +680,15 @@ public:
         static std::once_flag dump_mux_once;
         std::call_once(dump_mux_once, [&]() {
             auto dump_mux = [](const char* name, const std::vector<mux_info_t>& mux) {
-                std::cout << "SPM " << name << " mux dump (16-bit words)" << std::endl;
+                std::printf("SPM %s mux dump (16-bit words)\n", name);
                 for(size_t line = 0; line < mux.size(); line += 16)
                 {
-                    std::cout << "   " << std::setw(3) << line / 16 << ":";
+                    std::printf("   %3zu:", line / 16);
                     for(size_t col = 0; col < 16 && line + col < mux.size(); ++col)
                     {
-                        std::cout << ' ' << std::hex << std::setw(4) << std::setfill('0')
-                                  << mux[line + col].data;
+                        std::printf(" %04x", mux[line + col].data);
                     }
-                    std::cout << std::dec << std::setfill(' ') << std::endl;
+                    std::printf("\n");
                 }
             };
 
@@ -744,11 +741,14 @@ public:
 
     void End(CmdBuffer* cmd_buffer, const SpmConfig* config)
     {
-        // Force one last RLC sample pulse before SPM stop so the current partial interval is
-        // materialized into the stream instead of being dropped when CP_PERFMON_CNTL stops/reset SPM.
-        builder.BuildWriteUConfigRegPacket(cmd_buffer,
-                                           Primitives::RLC_SPM_PERFMON_CNTL__ADDR,
-                                           Primitives::rlc_spm_perfmon_cntl_value(0, 0));
+        if(config->spm_force_sample_before_stop)
+        {
+            // Force one last RLC sample pulse before SPM stop so the current partial interval is
+            // materialized into the stream instead of being dropped when CP_PERFMON_CNTL stops/reset SPM.
+            builder.BuildWriteUConfigRegPacket(cmd_buffer,
+                                               Primitives::RLC_SPM_PERFMON_CNTL__ADDR,
+                                               Primitives::rlc_spm_perfmon_cntl_value(1, 0));
+        }
 #if defined(DEBUG_TRACE)
         if(config->spm_sample_count_ptr && !(Primitives::RLC_SPM_SAMPLE_CNT__ADDR == Register()))
         {
