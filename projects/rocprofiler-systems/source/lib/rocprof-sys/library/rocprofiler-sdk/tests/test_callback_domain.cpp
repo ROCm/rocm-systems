@@ -31,6 +31,10 @@ using test_support::tracing_operation_t;
 using test_support::user_data_t;
 
 void
+stub_on_configure()
+{}
+
+void
 stub_on_record(callback_tracing_record_t, user_data_t*, void*)
 {}
 
@@ -41,16 +45,16 @@ constexpr domain_id_t k_domain_id = 17;
 callback_domain_definition<mock_sdk>
 make_definition()
 {
-    return callback_domain_definition<mock_sdk>{
-        .meta =
-            domain_descriptor{
-                .name  = "test_callback_domain",
-                .id    = k_domain_id,
-                .mode  = collection_mode::callback,
-                .group = std::nullopt,
-            },
-        .on_record = &stub_on_record,
-    };
+    return callback_domain_definition<mock_sdk>{ .meta =
+                                                     domain_descriptor{
+                                                         .name = "test_callback_domain",
+                                                         .id   = k_domain_id,
+                                                         .mode =
+                                                             collection_mode::callback,
+                                                         .group = std::nullopt,
+                                                     },
+                                                 .on_record    = &stub_on_record,
+                                                 .on_configure = &stub_on_configure };
 }
 
 // NOLINTNEXTLINE(readability-identifier-naming)
