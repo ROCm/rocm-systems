@@ -435,9 +435,19 @@ intended for debugging and development purposes.
           any single-node communicator of 2 to 8 ranks can use the low-latency DDA
           IPC path, which is otherwise restricted to the full 8-rank clique.
           Only affects ``gfx942``/``gfx950`` and only the IPC AllReduce path;
-          the result is bit-identical to the default path. Benefits latency-bound
-          low-rank AllReduce (largest gains at odd/non-power-of-two rank counts,
-          where the ring is least efficient) and is neutral at 8 ranks.
+          the default (``0``) remains bit-identical to prior behaviour. Benefits
+          latency-bound low-rank AllReduce (largest gains at odd/non-power-of-two
+          rank counts, where the ring is least efficient) and is neutral at 8 ranks.
+        | Must be set to the same value on every rank of a communicator. The
+          variable is read per process, so a communicator in which only some ranks
+          set it will have those ranks take the DDA IPC path while the rest do not,
+          and the mismatched ranks will block during communicator initialization.
+        | With the knob enabled at 2 to 7 ranks, results are **not** bit-identical
+          to the ring path: the DDA IPC kernels reduce in strict rank order rather
+          than the ring's chunk-rotated order, and floating-point addition is not
+          associative, so low-order-bit differences are expected. Every
+          participating communicator also allocates the full DDA IPC scratch
+          buffer, which previously only 8-rank communicators did.
       - | ``0``: 8-rank-only DDA (default).
         | ``1``: allow 2..8-rank DDA IPC AllReduce.
 
