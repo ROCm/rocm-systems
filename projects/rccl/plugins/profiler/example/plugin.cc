@@ -159,45 +159,28 @@ static struct context* contextFromEventHandle(void* eHandle) {
   }
 }
 
-// Initialize pool sizes from environment variables
+// Initialize pool sizes from environment variables. A non-positive override
+// would later `% 0` in the proxyCtrl path, so treat it as "use the default".
+static int poolSizeFromEnv(const char* name, int defaultSize) {
+  const char* str = getenv(name);
+  if (!str) return defaultSize;
+  int v = atoi(str);
+  return v > 0 ? v : defaultSize;
+}
+
 static void initPoolSizes(void) {
-  const char* str;
-
-  str = getenv("NCCL_PROFILE_GROUP_API_POOL_SIZE");
-  groupApiPoolSize = str ? atoi(str) : defaultGroupApiPoolSize;
-
-  str = getenv("NCCL_PROFILE_COLL_API_POOL_SIZE");
-  collApiPoolSize = str ? atoi(str) : defaultCollApiPoolSize;
-
-  str = getenv("NCCL_PROFILE_P2P_API_POOL_SIZE");
-  p2pApiPoolSize = str ? atoi(str) : defaultP2pApiPoolSize;
-
-  str = getenv("NCCL_PROFILE_KERNEL_LAUNCH_POOL_SIZE");
-  kernelLaunchPoolSize = str ? atoi(str) : defaultKernelLaunchPoolSize;
-
-  str = getenv("NCCL_PROFILE_GROUP_POOL_SIZE");
-  groupPoolSize = str ? atoi(str) : defaultGroupPoolSize;
-
-  str = getenv("NCCL_PROFILE_COLL_POOL_SIZE");
-  collPoolSize = str ? atoi(str) : defaultCollPoolSize;
-
-  str = getenv("NCCL_PROFILE_P2P_POOL_SIZE");
-  p2pPoolSize = str ? atoi(str) : defaultP2pPoolSize;
-
-  str = getenv("NCCL_PROFILE_PROXY_CTRL_POOL_SIZE");
-  proxyCtrlPoolSize = str ? atoi(str) : defaultProxyCtrlPoolSize;
-
-  str = getenv("NCCL_PROFILE_CE_COLL_POOL_SIZE");
-  ceCollPoolSize = str ? atoi(str) : defaultCeCollPoolSize;
-
-  str = getenv("NCCL_PROFILE_CE_SYNC_POOL_SIZE");
-  ceSyncPoolSize = str ? atoi(str) : defaultCeSyncPoolSize;
-
-  str = getenv("NCCL_PROFILE_CE_BATCH_POOL_SIZE");
-  ceBatchPoolSize = str ? atoi(str) : defaultCeBatchPoolSize;
-
-  str = getenv("NCCL_PROFILE_PROXY_DETACH_POOL_SIZE");
-  detachPoolSize = str ? atoi(str) : defaultDetachPoolSize;
+  groupApiPoolSize = poolSizeFromEnv("NCCL_PROFILE_GROUP_API_POOL_SIZE", defaultGroupApiPoolSize);
+  collApiPoolSize = poolSizeFromEnv("NCCL_PROFILE_COLL_API_POOL_SIZE", defaultCollApiPoolSize);
+  p2pApiPoolSize = poolSizeFromEnv("NCCL_PROFILE_P2P_API_POOL_SIZE", defaultP2pApiPoolSize);
+  kernelLaunchPoolSize = poolSizeFromEnv("NCCL_PROFILE_KERNEL_LAUNCH_POOL_SIZE", defaultKernelLaunchPoolSize);
+  groupPoolSize = poolSizeFromEnv("NCCL_PROFILE_GROUP_POOL_SIZE", defaultGroupPoolSize);
+  collPoolSize = poolSizeFromEnv("NCCL_PROFILE_COLL_POOL_SIZE", defaultCollPoolSize);
+  p2pPoolSize = poolSizeFromEnv("NCCL_PROFILE_P2P_POOL_SIZE", defaultP2pPoolSize);
+  proxyCtrlPoolSize = poolSizeFromEnv("NCCL_PROFILE_PROXY_CTRL_POOL_SIZE", defaultProxyCtrlPoolSize);
+  ceCollPoolSize = poolSizeFromEnv("NCCL_PROFILE_CE_COLL_POOL_SIZE", defaultCeCollPoolSize);
+  ceSyncPoolSize = poolSizeFromEnv("NCCL_PROFILE_CE_SYNC_POOL_SIZE", defaultCeSyncPoolSize);
+  ceBatchPoolSize = poolSizeFromEnv("NCCL_PROFILE_CE_BATCH_POOL_SIZE", defaultCeBatchPoolSize);
+  detachPoolSize = poolSizeFromEnv("NCCL_PROFILE_PROXY_DETACH_POOL_SIZE", defaultDetachPoolSize);
 }
 
 // Allocate global shared pools
@@ -478,9 +461,11 @@ __hidden ncclResult_t exampleProfilerFinalize(void* context) {
   // Print events first (while pools are still valid)
   printAllEvents(fh, ctx);
 
-  // Then cleanup and free resources
-  ceProfilerCleanupPendingEvents(ctx);
+  // Then cleanup and free resources. Deregister first: the poller holds
+  // ceProfilerCtxt.mutex for a whole sweep, so once this returns it can no
+  // longer reach ctx and query events the cleanup below destroys.
   ceProfilerDeregisterContext(ctx);
+  ceProfilerCleanupPendingEvents(ctx);
   deferContextFree(ctx);
 
   if (__atomic_sub_fetch(&initialized, 1, __ATOMIC_RELAXED) == 0) {

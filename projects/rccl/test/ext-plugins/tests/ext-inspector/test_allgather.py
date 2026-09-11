@@ -27,6 +27,8 @@ def test_single_node(paths, inspector_helpers):
         "PATH": f"{paths.OMPI_INSTALL_DIR}/bin:{env.get('PATH', '')}",
         "LD_LIBRARY_PATH": f"{paths.RCCL_INSTALL_DIR}:{paths.OMPI_INSTALL_DIR}/lib:{paths.INSPECTOR_DIR}:{env.get('LD_LIBRARY_PATH', '')}",
         "HSA_NO_SCRATCH_RECLAIM": "1",
+        # DDA claims AllGather on 8 ranks and is not profiler-traced.
+        "RCCL_DDA_ENABLE": "0",
         "NCCL_PROFILER_PLUGIN": paths.INSPECTOR_SO,
         "NCCL_INSPECTOR_ENABLE": "1",
         "NCCL_INSPECTOR_DUMP_THREAD_INTERVAL_MICROSECONDS": "500",
@@ -80,6 +82,8 @@ def test_single_node(paths, inspector_helpers):
             f"Inspector dump file {dump_file} validation failed: {errors}"
         assert num_records > 0, \
             f"Inspector dump file {dump_file} should have records, found {num_records}"
+        assert inspector_helpers.count_inspector_records(dump_file, coll="AllGather") > 0, \
+            f"{dump_file} has no AllGather records"
 
         # Verify all records are AllGather with correct topology
         with open(dump_file, 'r') as f:
@@ -118,6 +122,8 @@ def test_single_node_verbose(paths, inspector_helpers):
         "PATH": f"{paths.OMPI_INSTALL_DIR}/bin:{env.get('PATH', '')}",
         "LD_LIBRARY_PATH": f"{paths.RCCL_INSTALL_DIR}:{paths.OMPI_INSTALL_DIR}/lib:{paths.INSPECTOR_DIR}:{env.get('LD_LIBRARY_PATH', '')}",
         "HSA_NO_SCRATCH_RECLAIM": "1",
+        # DDA claims AllGather on 8 ranks and is not profiler-traced.
+        "RCCL_DDA_ENABLE": "0",
         "NCCL_PROFILER_PLUGIN": paths.INSPECTOR_SO,
         "NCCL_INSPECTOR_ENABLE": "1",
         "NCCL_INSPECTOR_DUMP_THREAD_INTERVAL_MICROSECONDS": "500",
@@ -168,6 +174,8 @@ def test_single_node_verbose(paths, inspector_helpers):
             f"Inspector dump file {dump_file} validation failed: {errors}"
         assert num_records > 0, \
             f"Inspector dump file {dump_file} should have records, found {num_records}"
+        assert inspector_helpers.count_inspector_records(dump_file, coll="AllGather") > 0, \
+            f"{dump_file} has no AllGather records"
 
         # Verify verbose event trace fields are present
         with open(dump_file, 'r') as f:
@@ -228,6 +236,8 @@ def test_multinode(paths, inspector_helpers):
         "PATH": f"{paths.OMPI_INSTALL_DIR}/bin:{env.get('PATH', '')}",
         "LD_LIBRARY_PATH": f"{paths.RCCL_INSTALL_DIR}:{paths.OMPI_INSTALL_DIR}/lib:{paths.INSPECTOR_DIR}:{env.get('LD_LIBRARY_PATH', '')}",
         "HSA_NO_SCRATCH_RECLAIM": "1",
+        # DDA claims AllGather on 8 ranks and is not profiler-traced.
+        "RCCL_DDA_ENABLE": "0",
         "NCCL_IGNORE_CPU_AFFINITY": "1",
         "NCCL_PROFILER_PLUGIN": paths.INSPECTOR_SO,
         "NCCL_INSPECTOR_ENABLE": "1",
@@ -281,6 +291,8 @@ def test_multinode(paths, inspector_helpers):
             f"Inspector dump file {dump_file} validation failed: {errors}"
         assert num_records > 0, \
             f"Inspector dump file {dump_file} should have records, found {num_records}"
+        assert inspector_helpers.count_inspector_records(dump_file, coll="AllGather") > 0, \
+            f"{dump_file} has no AllGather records"
 
         # Verify all records are AllGather with correct multi-node topology
         with open(dump_file, 'r') as f:
@@ -348,6 +360,8 @@ def test_multinode_verbose(paths, inspector_helpers):
         "PATH": f"{paths.OMPI_INSTALL_DIR}/bin:{env.get('PATH', '')}",
         "LD_LIBRARY_PATH": f"{paths.RCCL_INSTALL_DIR}:{paths.OMPI_INSTALL_DIR}/lib:{paths.INSPECTOR_DIR}:{env.get('LD_LIBRARY_PATH', '')}",
         "HSA_NO_SCRATCH_RECLAIM": "1",
+        # DDA claims AllGather on 8 ranks and is not profiler-traced.
+        "RCCL_DDA_ENABLE": "0",
         "NCCL_IGNORE_CPU_AFFINITY": "1",
         "NCCL_PROFILER_PLUGIN": paths.INSPECTOR_SO,
         "NCCL_INSPECTOR_ENABLE": "1",
@@ -402,6 +416,8 @@ def test_multinode_verbose(paths, inspector_helpers):
             f"Inspector dump file {dump_file} validation failed: {errors}"
         assert num_records > 0, \
             f"Inspector dump file {dump_file} should have records, found {num_records}"
+        assert inspector_helpers.count_inspector_records(dump_file, coll="AllGather") > 0, \
+            f"{dump_file} has no AllGather records"
 
         # Verify verbose event trace fields are present
         with open(dump_file, 'r') as f:

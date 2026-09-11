@@ -197,6 +197,8 @@ struct deviceFlushInfo {
 struct inspectorDumpThread {
   bool run{false};
   bool threadStarted{false};
+  // Sticky: stopThread() clears threadStarted before the destructor runs.
+  bool periodicDumpRan{false};
   jsonFileOutput* jfo;
   char* outputRoot;
   int64_t sampleIntervalUsecs;

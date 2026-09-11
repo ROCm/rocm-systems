@@ -359,6 +359,11 @@ void ceProfilerCleanupPendingEvents(struct context* ctx) {
     ceBatch = ceBatch->pollerNext;
   }
 
+  // Drop the lists so nothing can walk handles that are now destroyed.
+  ctx->ceEvents.ceCollHead = NULL;
+  ctx->ceEvents.ceSyncHead = NULL;
+  ctx->ceEvents.ceBatchHead = NULL;
+
   pthread_mutex_unlock(&ctx->ceEvents.mutex);
 }
 
