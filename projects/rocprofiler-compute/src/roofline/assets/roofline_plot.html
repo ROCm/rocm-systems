@@ -38,7 +38,10 @@ if (window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").match
       double-click to reset</span>
     <button type="button" id="roofline-reset-view"
             class="roofline-btn roofline-btn-sm"
-            title="Frame the kernels currently shown">Reset zoom</button>
+            title="Return to the fixed opening axes">Reset zoom</button>
+    <button type="button" id="roofline-fit-data"
+            class="roofline-btn roofline-btn-sm"
+            title="Use one-shot zoom for drawn kernels; Reset zoom or double-click returns to fixed axes">Fit to data</button>
     <button type="button" id="roofline-export-png"
             class="roofline-btn roofline-btn-sm"
             title="Download the current chart as a PNG image">Export PNG</button>
@@ -54,6 +57,8 @@ ${PLOT_FRAGMENT}
       <div class="roofline-panel-title">
         <span class="roofline-panel-title-label">Kernels
           <span id="roofline-kernel-count" class="roofline-panel-count"></span>
+          <span id="roofline-kernel-offplot-count"
+                class="roofline-offplot-count" aria-live="polite" hidden></span>
         </span>
         <button type="button" id="roofline-show-all"
                 class="roofline-btn roofline-btn-sm">Show all kernels</button>
