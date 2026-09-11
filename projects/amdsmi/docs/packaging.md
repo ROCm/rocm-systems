@@ -1,5 +1,13 @@
 # AMD SMI packaging and install paths
 
+:::{note}
+Looking for install steps? See
+{ref}`Choose an installation method <install_choose>`. This page is the
+reference *behind* those steps: what each delivery channel puts where, how the
+Python module finds the native library, and which copy wins when more than one
+is present.
+:::
+
 AMD SMI ships through several delivery channels. This page describes each one,
 how the Python module locates the native library in each, which combinations
 are supported, and how upgrades and downgrades behave. It is the reference for
@@ -14,6 +22,12 @@ the loader contract that `py-interface/amdsmi_wrapper.py` implements.
 | ROCm via pip (TheRock `rocm_sdk_core`) | `<root>/lib/libamd_smi.so.<MAJOR>` | `<root>/share/amd_smi/amdsmi` | Resolved relative to the wrapper (`../../../lib`) |
 | ROCm via pip in a venv | Same as above, inside the venv | Same as above, inside the venv | Same as above |
 | PyPI wheel | Bundled `libamd_smi_python.so` next to the wrapper | Interpreter `site-packages` | The bundled `.so`; system fallback is disabled |
+
+Each row corresponds to a method on the install page: system package via the
+{ref}`ROCm Core SDK <install_rocm>` or the
+{ref}`standalone package <install_without_rocm>`,
+{ref}`tarball <install_tarball>`, {ref}`ROCm via pip <install_nightly>`, and
+{ref}`PyPI wheel <install_pypi>`.
 
 ### Shipped vs installed
 
