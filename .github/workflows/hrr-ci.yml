@@ -70,10 +70,9 @@ jobs:
       - name: Run unit suite
         shell: bash
         run: |
-          bin=./build/tests/unit/hrr-unit-tests
-          if [ -x "${bin}.exe" ]; then
-            bin="${bin}.exe"
-          fi
+          # Named hrr-unit-tests.exe on Windows, and the -x test is unreliable
+          # under MSYS bash, so locate it rather than guessing the name.
+          bin=$(find build/tests/unit -maxdepth 1 -type f -name 'hrr-unit-tests*' | head -1)
           "${bin}" \
             --reporter console \
             --reporter junit::out=unit-${{ matrix.os }}.xml
@@ -147,6 +146,8 @@ jobs:
 
       - name: Install ROCm SDK
         run: |
+          # CppHeaderParser is required by hipamd/src/CMakeLists.txt.
+          pip install --no-cache-dir CppHeaderParser
           pip install --no-cache-dir --index-url "${ROCM_INDEX_URL}" "rocm[libraries,devel]"
           rocm-sdk init
           echo "ROCM_SDK=$(python -c 'import _rocm_sdk_devel,os;print(os.path.dirname(_rocm_sdk_devel.__file__))')" >> "$GITHUB_ENV"
