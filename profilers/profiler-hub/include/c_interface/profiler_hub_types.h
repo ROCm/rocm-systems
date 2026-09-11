@@ -123,6 +123,40 @@ extern "C"
         ph_track_list_t track_list;
     } ph_node_t;
 
+    /** @brief A single duration event (region/kernel dispatch/memory
+     *         copy/memory allocate).
+     * @note name points into memory owned by the producing ph_ctx_t.
+     */
+    typedef struct
+    {
+        uint64_t    start;
+        uint64_t    end;
+        const char* name;
+    } ph_event_t;
+
+    /** @brief A list of duration events; same lifetime rule as
+     *         ph_track_list_t. */
+    typedef struct
+    {
+        uint32_t    list_size;
+        ph_event_t* events;
+    } ph_event_list_t;
+
+    /** @brief A single PMC/counter sample (instantaneous value). */
+    typedef struct
+    {
+        uint64_t timestamp;
+        double   value;
+    } ph_sample_t;
+
+    /** @brief A list of PMC/counter samples; same lifetime rule as
+     *         ph_track_list_t. */
+    typedef struct
+    {
+        uint32_t     list_size;
+        ph_sample_t* samples;
+    } ph_sample_list_t;
+
     typedef ph_version_t ph_library_version_t;
     typedef ph_version_t ph_schema_version_t;
 

@@ -35,6 +35,69 @@ ph_ctx::get_node()
     return *m_c_node;
 }
 
+ph_event_list_t
+ph_ctx::get_track_events(uint32_t track_id, uint64_t start_ts, uint64_t end_ts)
+{
+    m_c_events.clear();
+
+    const auto track_it = m_track_by_id.find(track_id);
+    if(track_it == m_track_by_id.end())
+    {
+        return ph_event_list_t{ .list_size = 0, .events = nullptr };
+    }
+
+    profiler_hub::reader_types::event_filter_t filter;
+    if(start_ts != 0 || end_ts != 0)
+    {
+        filter.time_window.start = start_ts;
+        filter.time_window.end   = end_ts;
+    }
+
+    m_events = m_reader->get_events_for_track(track_it->second, filter);
+    m_c_events.reserve(m_events.size());
+    for(const auto& event : m_events)
+    {
+        m_c_events.push_back(ph_event_t{
+            .start = event.start_timestamp,
+            .end   = event.end_timestamp,
+            .name  = event.display_name.empty() ? "" : event.display_name.data(),
+        });
+    }
+
+    return ph_event_list_t{ .list_size = static_cast<std::uint32_t>(m_c_events.size()),
+                            .events    = m_c_events.data() };
+}
+
+ph_sample_list_t
+ph_ctx::get_track_samples(uint32_t track_id, uint64_t start_ts, uint64_t end_ts)
+{
+    m_c_samples.clear();
+
+    const auto track_it = m_track_by_id.find(track_id);
+    if(track_it == m_track_by_id.end())
+    {
+        return ph_sample_list_t{ .list_size = 0, .samples = nullptr };
+    }
+
+    profiler_hub::reader_types::event_filter_t filter;
+    if(start_ts != 0 || end_ts != 0)
+    {
+        filter.time_window.start = start_ts;
+        filter.time_window.end   = end_ts;
+    }
+
+    const auto samples = m_reader->get_counter_events_for_track(track_it->second, filter);
+    m_c_samples.reserve(samples.size());
+    for(const auto& sample : samples)
+    {
+        m_c_samples.push_back(
+            ph_sample_t{ .timestamp = sample.timestamp, .value = sample.value });
+    }
+
+    return ph_sample_list_t{ .list_size = static_cast<std::uint32_t>(m_c_samples.size()),
+                             .samples   = m_c_samples.data() };
+}
+
 void
 ph_ctx::initialize_track_list()
 {
@@ -51,6 +114,7 @@ ph_ctx::initialize_track_list()
         }
 
         m_tracks.push_back(track);
+        m_track_by_id.emplace(static_cast<std::uint32_t>(track->id), track);
         m_c_tracks.push_back(ph_track_t{
             .id         = static_cast<std::uint32_t>(track->id),
             .track_name = track->name.c_str(),

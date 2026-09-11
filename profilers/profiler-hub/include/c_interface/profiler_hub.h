@@ -86,6 +86,50 @@ extern "C"
     ph_result_t ph_get_node(ph_ctx_t ctx, ph_node_t* node);
 
     /**
+     * @brief Retrieves duration events (region/kernel dispatch/memory
+     *        copy/memory allocate) for a track within an optional time
+     *        window.
+     * @param ctx Context to query.
+     * @param track_id Id of a track with ph_track_t::agent_id == 0, as
+     *        returned by ph_get_track_list()/ph_get_node().
+     * @param start_ts Start of the time window (ns), or 0 for no filter.
+     * @param end_ts End of the time window (ns), or 0 for no filter.
+     * @param events Out parameter receiving the event list.
+     * @return PH_RESULT_SUCCESS on success, PH_RESULT_INVALID_CONTEXT if
+     *         @p ctx is null, PH_RESULT_INVALID_ARGUMENT if @p events is
+     *         null or @p track_id does not identify a known track.
+     * @note @p events->events and every ph_event_t::name in it point into
+     *       memory owned by @p ctx and follow the same lifetime rule as
+     *       ph_get_track_list().
+     */
+    ph_result_t ph_get_track_events(ph_ctx_t         ctx,
+                                    uint32_t         track_id,
+                                    uint64_t         start_ts,
+                                    uint64_t         end_ts,
+                                    ph_event_list_t* events);
+
+    /**
+     * @brief Retrieves PMC/counter samples for a track within an optional
+     *        time window.
+     * @param ctx Context to query.
+     * @param track_id Id of a track with ph_track_t::agent_id != 0, as
+     *        returned by ph_get_track_list()/ph_get_node().
+     * @param start_ts Start of the time window (ns), or 0 for no filter.
+     * @param end_ts End of the time window (ns), or 0 for no filter.
+     * @param samples Out parameter receiving the sample list.
+     * @return PH_RESULT_SUCCESS on success, PH_RESULT_INVALID_CONTEXT if
+     *         @p ctx is null, PH_RESULT_INVALID_ARGUMENT if @p samples is
+     *         null or @p track_id does not identify a known track.
+     * @note @p samples->samples points into memory owned by @p ctx and
+     *       follows the same lifetime rule as ph_get_track_list().
+     */
+    ph_result_t ph_get_track_samples(ph_ctx_t          ctx,
+                                     uint32_t          track_id,
+                                     uint64_t          start_ts,
+                                     uint64_t          end_ts,
+                                     ph_sample_list_t* samples);
+
+    /**
      * @brief Not yet implemented.
      * @warning Declared for the planned async task API but has no
      *          definition in the current version of the library; calling it
