@@ -200,6 +200,32 @@ inline bool hrr_parse_d2h_summary(const std::string& out, int& d2h_pass, int& d2
 }
 
 // ---------------------------------------------------------------------------
+// Helper: path to hrr-playback, for the spawns below.
+//
+// When hrr-playback was built in tree CMake bakes its absolute path in, which
+// is correct for an in-tree run but wrong wherever the build is used somewhere
+// else: CI builds once and unpacks the artifact on test machines whose
+// workspace root differs, and there every playback spawn dies in execvp.
+// Prefer the baked path, then look for the same binary beside this process's
+// own image, and otherwise hand SpawnProc the bare name so it resolves from
+// PATH as the HRR_BUILD_PLAYBACK=OFF build already relies on.
+// ---------------------------------------------------------------------------
+inline std::string hrr_playback_exe() {
+  std::error_code ec;
+  if (fs::exists(HRR_PLAYBACK_EXE, ec)) return HRR_PLAYBACK_EXE;
+#ifndef _WIN32
+  const fs::path name = fs::path(HRR_PLAYBACK_EXE).filename();
+  // <build>/playback/hrr-playback, reached from <build>/tests/<suite>/<exe>.
+  for (fs::path dir = fs::read_symlink("/proc/self/exe", ec).parent_path();
+       !dir.empty() && dir != dir.root_path(); dir = dir.parent_path()) {
+    const fs::path candidate = dir / "playback" / name;
+    if (fs::exists(candidate, ec)) return candidate.string();
+  }
+#endif
+  return fs::path(HRR_PLAYBACK_EXE).filename().string();
+}
+
+// ---------------------------------------------------------------------------
 // hrr_run_playback — spawn hrr-playback, capture stdout, assert:
 //   1. Exit code == 0.
 //   2. The "D2H checks" summary line is present and shows >= 1 pass, 0 fail.
@@ -210,7 +236,7 @@ inline bool hrr_parse_d2h_summary(const std::string& out, int& d2h_pass, int& d2
 inline void hrr_run_playback(const fs::path& cap_path,
                              const std::string& extra_args = "",
                              bool require_d2h = true) {
-  hrr::test::SpawnProc proc(HRR_PLAYBACK_EXE, /*capture_stdout=*/true);
+  hrr::test::SpawnProc proc(hrr_playback_exe(), /*capture_stdout=*/true);
   set_proc_search_path(proc);
   std::string path_arg = hrr_quote_path(cap_path);
   int ret = proc.run(path_arg + (extra_args.empty() ? "" : " " + extra_args));
@@ -346,7 +372,7 @@ inline std::pair<int, std::string> hrr_playback_env(
     const fs::path& cap_path,
     const std::vector<std::pair<std::string, std::string>>& env,
     const std::string& extra_args = "") {
-  hrr::test::SpawnProc proc(HRR_PLAYBACK_EXE, /*capture_stdout=*/true);
+  hrr::test::SpawnProc proc(hrr_playback_exe(), /*capture_stdout=*/true);
   set_proc_search_path(proc);
   for (const auto& kv : env) proc.setEnv(kv.first, kv.second);
   std::string path_arg = hrr_quote_path(cap_path);
@@ -356,7 +382,7 @@ inline std::pair<int, std::string> hrr_playback_env(
 
 inline std::pair<int, std::string> run_playback_raw(const fs::path& cap_path,
                                                     const std::string& extra_args) {
-  hrr::test::SpawnProc proc(HRR_PLAYBACK_EXE, /*capture_stdout=*/true);
+  hrr::test::SpawnProc proc(hrr_playback_exe(), /*capture_stdout=*/true);
   set_proc_search_path(proc);
   std::string path_arg = cap_path.string();
   int ret = proc.run(path_arg + (extra_args.empty() ? "" : " " + extra_args));
@@ -401,7 +427,7 @@ inline std::pair<int, std::string> hrr_playback_merged(
     const fs::path& cap_path,
     const std::string& extra_args = "",
     const std::vector<std::pair<std::string, std::string>>& env = {}) {
-  hrr::test::SpawnProc proc(HRR_PLAYBACK_EXE, /*capture_stdout=*/true,
+  hrr::test::SpawnProc proc(hrr_playback_exe(), /*capture_stdout=*/true,
                       /*capture_stderr=*/true);
   set_proc_search_path(proc);
   for (const auto& kv : env) proc.setEnv(kv.first, kv.second);
@@ -429,7 +455,7 @@ inline constexpr int kHrrWatchdogKilled = hrr::test::SpawnProc::kKilledOnTimeout
 inline std::pair<int, std::string> hrr_playback_watchdog(
     const fs::path& cap_path, int timeout_seconds,
     const std::string& extra_args = "") {
-  hrr::test::SpawnProc proc(HRR_PLAYBACK_EXE, /*capture_stdout=*/true,
+  hrr::test::SpawnProc proc(hrr_playback_exe(), /*capture_stdout=*/true,
                             /*capture_stderr=*/true);
   set_proc_search_path(proc);
   std::string path_arg = hrr_quote_path(cap_path);
