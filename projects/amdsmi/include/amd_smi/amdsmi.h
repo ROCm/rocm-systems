@@ -769,6 +769,7 @@ typedef enum {
   AMDSMI_VRAM_TYPE_HBM2E = 3,  //!< High Bandwidth Memory, Generation 2 Enhanced
   AMDSMI_VRAM_TYPE_HBM3 = 4,   //!< High Bandwidth Memory, Generation 3
   AMDSMI_VRAM_TYPE_HBM3E = 5,  //!< High Bandwidth Memory, Generation 3 Enhanced
+  AMDSMI_VRAM_TYPE_HBM4 = 6,   //!< High Bandwidth Memory, Generation 4
   // DDR
   AMDSMI_VRAM_TYPE_DDR2 = 10,  //!< Double Data Rate, Generation 2
   AMDSMI_VRAM_TYPE_DDR3 = 11,  //!< Double Data Rate, Generation 3

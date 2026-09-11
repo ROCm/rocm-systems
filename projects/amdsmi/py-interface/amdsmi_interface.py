@@ -739,6 +739,7 @@ class AmdSmiVramType(IntEnum):
     HBM2 = amdsmi_wrapper.AMDSMI_VRAM_TYPE_HBM2
     HBM2E = amdsmi_wrapper.AMDSMI_VRAM_TYPE_HBM2E
     HBM3 = amdsmi_wrapper.AMDSMI_VRAM_TYPE_HBM3
+    HBM4 = amdsmi_wrapper.AMDSMI_VRAM_TYPE_HBM4
     DDR2 = amdsmi_wrapper.AMDSMI_VRAM_TYPE_DDR2
     DDR3 = amdsmi_wrapper.AMDSMI_VRAM_TYPE_DDR3
     DDR4 = amdsmi_wrapper.AMDSMI_VRAM_TYPE_DDR4
