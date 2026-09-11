@@ -398,7 +398,7 @@ protected:
 
             int done = 0;
             int attempts = 0;
-            while (local == ncclSuccess && !done) {
+            while (handshake.status && local == ncclSuccess && !done) {
                 local = AcceptConnection(pair.listenComm, &pair.recvComm);
                 if (local != ncclSuccess) break;
                 if (pair.recvComm != nullptr) {
@@ -823,7 +823,8 @@ protected:
             // Sent even on failure: the peer is waiting for this message.
             MPI_Send(&handshake, sizeof(handshake), MPI_BYTE, peer, 0, MPI_COMM_WORLD);
 
-            for (int i = 0; localOk && i < kMaxRetryAttempts && *recvComm == nullptr; i++) {
+            for (int i = 0; localOk && i < kConnectTimeoutMs / kPollIntervalMs
+                            && *recvComm == nullptr; i++) {
                 if (AcceptConnection(*listenComm, recvComm) != ncclSuccess) {
                     localOk = false;
                     localReason = "accept failed";
@@ -839,7 +840,8 @@ protected:
                 localReason = "peer's listen failed";
             } else {
                 memcpy(handle, handshake.handle, sizeof(handle));
-                for (int i = 0; localOk && i < kMaxRetryAttempts && *sendComm == nullptr; i++) {
+                for (int i = 0; localOk && i < kConnectTimeoutMs / kPollIntervalMs
+                                && *sendComm == nullptr; i++) {
                     if (ConnectToRemote(dev, &handle, sendComm) != ncclSuccess) {
                         localOk = false;
                         localReason = "connect failed";
