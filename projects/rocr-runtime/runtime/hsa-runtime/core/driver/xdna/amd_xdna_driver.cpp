@@ -345,6 +345,37 @@ struct CmdBOPool {
   std::vector<XdnaDriver::BOHandle> entries = {};
   size_t next = 0;
 
+  /// @brief Initializes the command BO pool by creating the specified number of command BOs.
+  ///
+  /// @param[in] driver driver owning the BOs
+  /// @param[in] count number of command BOs to create for the pool
+  hsa_status_t Initialize(const XdnaDriver& driver, size_t count) {
+    entries.reserve(count);
+    for (size_t i = 0; i < count; ++i) {
+      XdnaDriver::BOHandle bo_handle;
+      hsa_status_t err = driver.CreateCmdBO(kEntryByteSize, bo_handle);
+      if (err != HSA_STATUS_SUCCESS) {
+        Finalize(driver);
+        return err;
+      }
+      entries.push_back(std::move(bo_handle));
+    }
+    return HSA_STATUS_SUCCESS;
+  }
+
+  /// @brief Finalizes the command BO pool by destroying all command BOs and clearing the pool.
+  hsa_status_t Finalize(const XdnaDriver& driver) {
+    hsa_status_t err = HSA_STATUS_SUCCESS;
+    for (auto& bo : entries) {
+      hsa_status_t destroy_err = driver.DestroyBOHandle(bo);
+      if (destroy_err != HSA_STATUS_SUCCESS) {
+        err = destroy_err;
+      }
+    }
+    entries.clear();
+    return err;
+  }
+
   XdnaDriver::BOHandle& AcquireCmdBO() {
     auto idx = next & (entries.size() - 1);
     assert(entries[idx].IsValid());
@@ -872,14 +903,9 @@ hsa_status_t XdnaDriver::CreateKernelModeQueue(size_t queue_size, void** queue_m
   }
 
   const size_t pooled_cmd_bo_count = 2 * queue_size;
-  kmq_metadata->cmd_bo_pool.entries.reserve(pooled_cmd_bo_count);
-  for (size_t i = 0; i < pooled_cmd_bo_count; ++i) {
-    BOHandle bo_handle;
-    err = CreateCmdBO(CmdBOPool::kEntryByteSize, bo_handle);
-    if (err != HSA_STATUS_SUCCESS) {
-      return err;
-    }
-    kmq_metadata->cmd_bo_pool.entries.push_back(std::move(bo_handle));
+  err = kmq_metadata->cmd_bo_pool.Initialize(*this, pooled_cmd_bo_count);
+  if (err != HSA_STATUS_SUCCESS) {
+    return err;
   }
 
   kmq_metadata->bo_handles.reserve(queue_size * 4);
@@ -899,20 +925,18 @@ hsa_status_t XdnaDriver::DestroyKernelModeQueue(void* queue_metadata) const {
   std::unique_ptr<KmqMetadata> kmq_metadata;
   kmq_metadata.reset(static_cast<KmqMetadata*>(queue_metadata));
 
-  // Destroy command BO pool entries.
-  for (auto& bo : kmq_metadata->cmd_bo_pool.entries) {
-    DestroyBOHandle(bo);
-  }
+  // Finalize command BO pool.
+  hsa_status_t err = kmq_metadata->cmd_bo_pool.Finalize(*this);
 
   // Destroy hardware context associated with the queue.
-  hsa_status_t err = DestroyHwCtx(fd_, kmq_metadata->hw_ctx_handle);
-  if (err != HSA_STATUS_SUCCESS) {
-    return err;
+  hsa_status_t destroy_err = DestroyHwCtx(fd_, kmq_metadata->hw_ctx_handle);
+  if (destroy_err != HSA_STATUS_SUCCESS) {
+    err = destroy_err;
   }
   kmq_metadata->hw_ctx_handle = AMDXDNA_INVALID_CTX_HANDLE;
   kmq_metadata->syncobj_handle = 0;
 
-  return HSA_STATUS_SUCCESS;
+  return err;
 }
 
 hsa_status_t XdnaDriver::SetQueueCUMask(HSA_QUEUEID queue_id, uint32_t cu_mask_count,
