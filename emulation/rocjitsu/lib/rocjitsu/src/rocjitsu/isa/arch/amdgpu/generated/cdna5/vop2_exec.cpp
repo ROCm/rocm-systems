@@ -1191,7 +1191,9 @@ void VFmamkF32Vop2::execute_impl(amdgpu::Wavefront &wf) {
     float k = std::bit_cast<float>(literal.encoding_value_);
     float s2 = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane));
     amdgpu::sdwa::write_lane<amdgpu::sdwa::ResultFormat::F32>(
-        *this, wf, vdst, lane, std::bit_cast<uint32_t>(std::fma(s0, k, s2)));
+        *this, wf, vdst, lane,
+        std::bit_cast<uint32_t>(amdgpu::fp_mode::arithmetic<amdgpu::fp_mode::Arithmetic::FMA>(
+            s0, k, s2, wf.fp_round_mode_f32(), wf.fp_denorm_mode_f32())));
   }
 }
 
@@ -1204,7 +1206,9 @@ void VFmaakF32Vop2::execute_impl(amdgpu::Wavefront &wf) {
     float s1 = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane));
     float k = std::bit_cast<float>(literal.encoding_value_);
     amdgpu::sdwa::write_lane<amdgpu::sdwa::ResultFormat::F32>(
-        *this, wf, vdst, lane, std::bit_cast<uint32_t>(std::fma(s0, s1, k)));
+        *this, wf, vdst, lane,
+        std::bit_cast<uint32_t>(amdgpu::fp_mode::arithmetic<amdgpu::fp_mode::Arithmetic::FMA>(
+            s0, s1, k, wf.fp_round_mode_f32(), wf.fp_denorm_mode_f32())));
   }
 }
 
@@ -1410,31 +1414,37 @@ void VAddF16Vop2::execute_impl(amdgpu::Wavefront &wf) {
     return;
   }
   auto &inst = *this;
-  if (amdgpu::try_execute_words_simd<2, true, true, 3>(inst, wf, [&](auto a, auto b) {
-        return std::bit_cast<util::native<uint32_t>>(([&](auto a, auto b) {
-          if (wf.fp16_ovfl())
+  if (amdgpu::fp_mode::native_arithmetic_matches(wf.fp_round_mode_f16_f64(),
+                                                 wf.fp_denorm_mode_f16_f64())) {
+    if (amdgpu::try_execute_words_simd<2, true, true, 3>(inst, wf, [&](auto a, auto b) {
+          return std::bit_cast<util::native<uint32_t>>(([&](auto a, auto b) {
+            if (wf.fp16_ovfl())
+              return ([](auto a, auto b) {
+                return util::f32_to_f16_ovfl_simd(util::f16_to_f32_simd(a) +
+                                                  util::f16_to_f32_simd(b));
+              })(a, b);
             return ([](auto a, auto b) {
-              return util::f32_to_f16_ovfl_simd(util::f16_to_f32_simd(a) +
-                                                util::f16_to_f32_simd(b));
+              return util::f32_to_f16_simd(util::f16_to_f32_simd(a) + util::f16_to_f32_simd(b));
             })(a, b);
-          return ([](auto a, auto b) {
-            return util::f32_to_f16_simd(util::f16_to_f32_simd(a) + util::f16_to_f32_simd(b));
-          })(a, b);
-        })(std::bit_cast<util::native<uint32_t>>(a), std::bit_cast<util::native<uint32_t>>(b)));
-      }))
-    return;
+          })(std::bit_cast<util::native<uint32_t>>(a), std::bit_cast<util::native<uint32_t>>(b)));
+        }))
+      return;
+  }
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
     amdgpu::sdwa::write_lane<amdgpu::sdwa::ResultFormat::F16>(
         *this, wf, vdst, lane,
-        amdgpu::sdwa::round_f16_result(*this, wf,
-                                       (util::f16_to_f32(static_cast<uint16_t>(
-                                            amdgpu::RegisterAccess(wf).read_lane(src0, lane))) +
-                                        util::f16_to_f32(static_cast<uint16_t>(
-                                            amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane)))),
-                                       wf.fp16_ovfl()));
+        amdgpu::sdwa::finish_arithmetic_f16(
+            *this, wf,
+            amdgpu::fp_mode::arithmetic_f16<amdgpu::fp_mode::Arithmetic::ADD>(
+                util::f16_to_f32(
+                    static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane(src0, lane))),
+                util::f16_to_f32(
+                    static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane))),
+                0.0f, wf.fp_round_mode_f16_f64(), wf.fp_denorm_mode_f16_f64()),
+            wf.fp_round_mode_f16_f64(), wf.fp_denorm_mode_f16_f64(), wf.fp16_ovfl()));
   }
 }
 
@@ -1455,31 +1465,37 @@ RJ_NOINLINE void VAddF16Vop2::execute_modifier_impl(amdgpu::Wavefront &wf) {
     dpp_write_mask_scope_.bind(wf,
                                wf.exec() & dpp_plan_.row_bank_mask & dpp_plan_.source_write_mask);
   auto &inst = *this;
-  if (amdgpu::try_execute_words_simd<2, true, true, 3>(inst, wf, [&](auto a, auto b) {
-        return std::bit_cast<util::native<uint32_t>>(([&](auto a, auto b) {
-          if (wf.fp16_ovfl())
+  if (amdgpu::fp_mode::native_arithmetic_matches(wf.fp_round_mode_f16_f64(),
+                                                 wf.fp_denorm_mode_f16_f64())) {
+    if (amdgpu::try_execute_words_simd<2, true, true, 3>(inst, wf, [&](auto a, auto b) {
+          return std::bit_cast<util::native<uint32_t>>(([&](auto a, auto b) {
+            if (wf.fp16_ovfl())
+              return ([](auto a, auto b) {
+                return util::f32_to_f16_ovfl_simd(util::f16_to_f32_simd(a) +
+                                                  util::f16_to_f32_simd(b));
+              })(a, b);
             return ([](auto a, auto b) {
-              return util::f32_to_f16_ovfl_simd(util::f16_to_f32_simd(a) +
-                                                util::f16_to_f32_simd(b));
+              return util::f32_to_f16_simd(util::f16_to_f32_simd(a) + util::f16_to_f32_simd(b));
             })(a, b);
-          return ([](auto a, auto b) {
-            return util::f32_to_f16_simd(util::f16_to_f32_simd(a) + util::f16_to_f32_simd(b));
-          })(a, b);
-        })(std::bit_cast<util::native<uint32_t>>(a), std::bit_cast<util::native<uint32_t>>(b)));
-      }))
-    return;
+          })(std::bit_cast<util::native<uint32_t>>(a), std::bit_cast<util::native<uint32_t>>(b)));
+        }))
+      return;
+  }
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
     amdgpu::sdwa::write_lane<amdgpu::sdwa::ResultFormat::F16>(
         *this, wf, vdst, lane,
-        amdgpu::sdwa::round_f16_result(*this, wf,
-                                       (util::f16_to_f32(static_cast<uint16_t>(
-                                            amdgpu::RegisterAccess(wf).read_lane(src0, lane))) +
-                                        util::f16_to_f32(static_cast<uint16_t>(
-                                            amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane)))),
-                                       wf.fp16_ovfl()));
+        amdgpu::sdwa::finish_arithmetic_f16(
+            *this, wf,
+            amdgpu::fp_mode::arithmetic_f16<amdgpu::fp_mode::Arithmetic::ADD>(
+                util::f16_to_f32(
+                    static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane(src0, lane))),
+                util::f16_to_f32(
+                    static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane))),
+                0.0f, wf.fp_round_mode_f16_f64(), wf.fp_denorm_mode_f16_f64()),
+            wf.fp_round_mode_f16_f64(), wf.fp_denorm_mode_f16_f64(), wf.fp16_ovfl()));
   }
   dpp_write_mask_scope_.restore();
 }
@@ -1490,31 +1506,37 @@ void VSubF16Vop2::execute_impl(amdgpu::Wavefront &wf) {
     return;
   }
   auto &inst = *this;
-  if (amdgpu::try_execute_words_simd<2, true, true, 3>(inst, wf, [&](auto a, auto b) {
-        return std::bit_cast<util::native<uint32_t>>(([&](auto a, auto b) {
-          if (wf.fp16_ovfl())
+  if (amdgpu::fp_mode::native_arithmetic_matches(wf.fp_round_mode_f16_f64(),
+                                                 wf.fp_denorm_mode_f16_f64())) {
+    if (amdgpu::try_execute_words_simd<2, true, true, 3>(inst, wf, [&](auto a, auto b) {
+          return std::bit_cast<util::native<uint32_t>>(([&](auto a, auto b) {
+            if (wf.fp16_ovfl())
+              return ([](auto a, auto b) {
+                return util::f32_to_f16_ovfl_simd(util::f16_to_f32_simd(a) -
+                                                  util::f16_to_f32_simd(b));
+              })(a, b);
             return ([](auto a, auto b) {
-              return util::f32_to_f16_ovfl_simd(util::f16_to_f32_simd(a) -
-                                                util::f16_to_f32_simd(b));
+              return util::f32_to_f16_simd(util::f16_to_f32_simd(a) - util::f16_to_f32_simd(b));
             })(a, b);
-          return ([](auto a, auto b) {
-            return util::f32_to_f16_simd(util::f16_to_f32_simd(a) - util::f16_to_f32_simd(b));
-          })(a, b);
-        })(std::bit_cast<util::native<uint32_t>>(a), std::bit_cast<util::native<uint32_t>>(b)));
-      }))
-    return;
+          })(std::bit_cast<util::native<uint32_t>>(a), std::bit_cast<util::native<uint32_t>>(b)));
+        }))
+      return;
+  }
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
     amdgpu::sdwa::write_lane<amdgpu::sdwa::ResultFormat::F16>(
         *this, wf, vdst, lane,
-        amdgpu::sdwa::round_f16_result(*this, wf,
-                                       (util::f16_to_f32(static_cast<uint16_t>(
-                                            amdgpu::RegisterAccess(wf).read_lane(src0, lane))) -
-                                        util::f16_to_f32(static_cast<uint16_t>(
-                                            amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane)))),
-                                       wf.fp16_ovfl()));
+        amdgpu::sdwa::finish_arithmetic_f16(
+            *this, wf,
+            amdgpu::fp_mode::arithmetic_f16<amdgpu::fp_mode::Arithmetic::SUB>(
+                util::f16_to_f32(
+                    static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane(src0, lane))),
+                util::f16_to_f32(
+                    static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane))),
+                0.0f, wf.fp_round_mode_f16_f64(), wf.fp_denorm_mode_f16_f64()),
+            wf.fp_round_mode_f16_f64(), wf.fp_denorm_mode_f16_f64(), wf.fp16_ovfl()));
   }
 }
 
@@ -1535,31 +1557,37 @@ RJ_NOINLINE void VSubF16Vop2::execute_modifier_impl(amdgpu::Wavefront &wf) {
     dpp_write_mask_scope_.bind(wf,
                                wf.exec() & dpp_plan_.row_bank_mask & dpp_plan_.source_write_mask);
   auto &inst = *this;
-  if (amdgpu::try_execute_words_simd<2, true, true, 3>(inst, wf, [&](auto a, auto b) {
-        return std::bit_cast<util::native<uint32_t>>(([&](auto a, auto b) {
-          if (wf.fp16_ovfl())
+  if (amdgpu::fp_mode::native_arithmetic_matches(wf.fp_round_mode_f16_f64(),
+                                                 wf.fp_denorm_mode_f16_f64())) {
+    if (amdgpu::try_execute_words_simd<2, true, true, 3>(inst, wf, [&](auto a, auto b) {
+          return std::bit_cast<util::native<uint32_t>>(([&](auto a, auto b) {
+            if (wf.fp16_ovfl())
+              return ([](auto a, auto b) {
+                return util::f32_to_f16_ovfl_simd(util::f16_to_f32_simd(a) -
+                                                  util::f16_to_f32_simd(b));
+              })(a, b);
             return ([](auto a, auto b) {
-              return util::f32_to_f16_ovfl_simd(util::f16_to_f32_simd(a) -
-                                                util::f16_to_f32_simd(b));
+              return util::f32_to_f16_simd(util::f16_to_f32_simd(a) - util::f16_to_f32_simd(b));
             })(a, b);
-          return ([](auto a, auto b) {
-            return util::f32_to_f16_simd(util::f16_to_f32_simd(a) - util::f16_to_f32_simd(b));
-          })(a, b);
-        })(std::bit_cast<util::native<uint32_t>>(a), std::bit_cast<util::native<uint32_t>>(b)));
-      }))
-    return;
+          })(std::bit_cast<util::native<uint32_t>>(a), std::bit_cast<util::native<uint32_t>>(b)));
+        }))
+      return;
+  }
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
     amdgpu::sdwa::write_lane<amdgpu::sdwa::ResultFormat::F16>(
         *this, wf, vdst, lane,
-        amdgpu::sdwa::round_f16_result(*this, wf,
-                                       (util::f16_to_f32(static_cast<uint16_t>(
-                                            amdgpu::RegisterAccess(wf).read_lane(src0, lane))) -
-                                        util::f16_to_f32(static_cast<uint16_t>(
-                                            amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane)))),
-                                       wf.fp16_ovfl()));
+        amdgpu::sdwa::finish_arithmetic_f16(
+            *this, wf,
+            amdgpu::fp_mode::arithmetic_f16<amdgpu::fp_mode::Arithmetic::SUB>(
+                util::f16_to_f32(
+                    static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane(src0, lane))),
+                util::f16_to_f32(
+                    static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane))),
+                0.0f, wf.fp_round_mode_f16_f64(), wf.fp_denorm_mode_f16_f64()),
+            wf.fp_round_mode_f16_f64(), wf.fp_denorm_mode_f16_f64(), wf.fp16_ovfl()));
   }
   dpp_write_mask_scope_.restore();
 }
@@ -1570,31 +1598,37 @@ void VSubrevF16Vop2::execute_impl(amdgpu::Wavefront &wf) {
     return;
   }
   auto &inst = *this;
-  if (amdgpu::try_execute_words_simd<2, true, true, 3>(inst, wf, [&](auto a, auto b) {
-        return std::bit_cast<util::native<uint32_t>>(([&](auto a, auto b) {
-          if (wf.fp16_ovfl())
+  if (amdgpu::fp_mode::native_arithmetic_matches(wf.fp_round_mode_f16_f64(),
+                                                 wf.fp_denorm_mode_f16_f64())) {
+    if (amdgpu::try_execute_words_simd<2, true, true, 3>(inst, wf, [&](auto a, auto b) {
+          return std::bit_cast<util::native<uint32_t>>(([&](auto a, auto b) {
+            if (wf.fp16_ovfl())
+              return ([](auto a, auto b) {
+                return util::f32_to_f16_ovfl_simd(util::f16_to_f32_simd(b) -
+                                                  util::f16_to_f32_simd(a));
+              })(a, b);
             return ([](auto a, auto b) {
-              return util::f32_to_f16_ovfl_simd(util::f16_to_f32_simd(b) -
-                                                util::f16_to_f32_simd(a));
+              return util::f32_to_f16_simd(util::f16_to_f32_simd(b) - util::f16_to_f32_simd(a));
             })(a, b);
-          return ([](auto a, auto b) {
-            return util::f32_to_f16_simd(util::f16_to_f32_simd(b) - util::f16_to_f32_simd(a));
-          })(a, b);
-        })(std::bit_cast<util::native<uint32_t>>(a), std::bit_cast<util::native<uint32_t>>(b)));
-      }))
-    return;
+          })(std::bit_cast<util::native<uint32_t>>(a), std::bit_cast<util::native<uint32_t>>(b)));
+        }))
+      return;
+  }
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
     amdgpu::sdwa::write_lane<amdgpu::sdwa::ResultFormat::F16>(
         *this, wf, vdst, lane,
-        amdgpu::sdwa::round_f16_result(*this, wf,
-                                       (util::f16_to_f32(static_cast<uint16_t>(
-                                            amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane))) -
-                                        util::f16_to_f32(static_cast<uint16_t>(
-                                            amdgpu::RegisterAccess(wf).read_lane(src0, lane)))),
-                                       wf.fp16_ovfl()));
+        amdgpu::sdwa::finish_arithmetic_f16(
+            *this, wf,
+            amdgpu::fp_mode::arithmetic_f16<amdgpu::fp_mode::Arithmetic::SUB>(
+                util::f16_to_f32(
+                    static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane))),
+                util::f16_to_f32(
+                    static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane(src0, lane))),
+                0.0f, wf.fp_round_mode_f16_f64(), wf.fp_denorm_mode_f16_f64()),
+            wf.fp_round_mode_f16_f64(), wf.fp_denorm_mode_f16_f64(), wf.fp16_ovfl()));
   }
 }
 
@@ -1615,31 +1649,37 @@ RJ_NOINLINE void VSubrevF16Vop2::execute_modifier_impl(amdgpu::Wavefront &wf) {
     dpp_write_mask_scope_.bind(wf,
                                wf.exec() & dpp_plan_.row_bank_mask & dpp_plan_.source_write_mask);
   auto &inst = *this;
-  if (amdgpu::try_execute_words_simd<2, true, true, 3>(inst, wf, [&](auto a, auto b) {
-        return std::bit_cast<util::native<uint32_t>>(([&](auto a, auto b) {
-          if (wf.fp16_ovfl())
+  if (amdgpu::fp_mode::native_arithmetic_matches(wf.fp_round_mode_f16_f64(),
+                                                 wf.fp_denorm_mode_f16_f64())) {
+    if (amdgpu::try_execute_words_simd<2, true, true, 3>(inst, wf, [&](auto a, auto b) {
+          return std::bit_cast<util::native<uint32_t>>(([&](auto a, auto b) {
+            if (wf.fp16_ovfl())
+              return ([](auto a, auto b) {
+                return util::f32_to_f16_ovfl_simd(util::f16_to_f32_simd(b) -
+                                                  util::f16_to_f32_simd(a));
+              })(a, b);
             return ([](auto a, auto b) {
-              return util::f32_to_f16_ovfl_simd(util::f16_to_f32_simd(b) -
-                                                util::f16_to_f32_simd(a));
+              return util::f32_to_f16_simd(util::f16_to_f32_simd(b) - util::f16_to_f32_simd(a));
             })(a, b);
-          return ([](auto a, auto b) {
-            return util::f32_to_f16_simd(util::f16_to_f32_simd(b) - util::f16_to_f32_simd(a));
-          })(a, b);
-        })(std::bit_cast<util::native<uint32_t>>(a), std::bit_cast<util::native<uint32_t>>(b)));
-      }))
-    return;
+          })(std::bit_cast<util::native<uint32_t>>(a), std::bit_cast<util::native<uint32_t>>(b)));
+        }))
+      return;
+  }
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
     amdgpu::sdwa::write_lane<amdgpu::sdwa::ResultFormat::F16>(
         *this, wf, vdst, lane,
-        amdgpu::sdwa::round_f16_result(*this, wf,
-                                       (util::f16_to_f32(static_cast<uint16_t>(
-                                            amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane))) -
-                                        util::f16_to_f32(static_cast<uint16_t>(
-                                            amdgpu::RegisterAccess(wf).read_lane(src0, lane)))),
-                                       wf.fp16_ovfl()));
+        amdgpu::sdwa::finish_arithmetic_f16(
+            *this, wf,
+            amdgpu::fp_mode::arithmetic_f16<amdgpu::fp_mode::Arithmetic::SUB>(
+                util::f16_to_f32(
+                    static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane))),
+                util::f16_to_f32(
+                    static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane(src0, lane))),
+                0.0f, wf.fp_round_mode_f16_f64(), wf.fp_denorm_mode_f16_f64()),
+            wf.fp_round_mode_f16_f64(), wf.fp_denorm_mode_f16_f64(), wf.fp16_ovfl()));
   }
   dpp_write_mask_scope_.restore();
 }
@@ -1650,31 +1690,37 @@ void VMulF16Vop2::execute_impl(amdgpu::Wavefront &wf) {
     return;
   }
   auto &inst = *this;
-  if (amdgpu::try_execute_words_simd<2, true, true, 3>(inst, wf, [&](auto a, auto b) {
-        return std::bit_cast<util::native<uint32_t>>(([&](auto a, auto b) {
-          if (wf.fp16_ovfl())
+  if (amdgpu::fp_mode::native_arithmetic_matches(wf.fp_round_mode_f16_f64(),
+                                                 wf.fp_denorm_mode_f16_f64())) {
+    if (amdgpu::try_execute_words_simd<2, true, true, 3>(inst, wf, [&](auto a, auto b) {
+          return std::bit_cast<util::native<uint32_t>>(([&](auto a, auto b) {
+            if (wf.fp16_ovfl())
+              return ([](auto a, auto b) {
+                return util::f32_to_f16_ovfl_simd(util::f16_to_f32_simd(a) *
+                                                  util::f16_to_f32_simd(b));
+              })(a, b);
             return ([](auto a, auto b) {
-              return util::f32_to_f16_ovfl_simd(util::f16_to_f32_simd(a) *
-                                                util::f16_to_f32_simd(b));
+              return util::f32_to_f16_simd(util::f16_to_f32_simd(a) * util::f16_to_f32_simd(b));
             })(a, b);
-          return ([](auto a, auto b) {
-            return util::f32_to_f16_simd(util::f16_to_f32_simd(a) * util::f16_to_f32_simd(b));
-          })(a, b);
-        })(std::bit_cast<util::native<uint32_t>>(a), std::bit_cast<util::native<uint32_t>>(b)));
-      }))
-    return;
+          })(std::bit_cast<util::native<uint32_t>>(a), std::bit_cast<util::native<uint32_t>>(b)));
+        }))
+      return;
+  }
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
     amdgpu::sdwa::write_lane<amdgpu::sdwa::ResultFormat::F16>(
         *this, wf, vdst, lane,
-        amdgpu::sdwa::round_f16_result(*this, wf,
-                                       (util::f16_to_f32(static_cast<uint16_t>(
-                                            amdgpu::RegisterAccess(wf).read_lane(src0, lane))) *
-                                        util::f16_to_f32(static_cast<uint16_t>(
-                                            amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane)))),
-                                       wf.fp16_ovfl()));
+        amdgpu::sdwa::finish_arithmetic_f16(
+            *this, wf,
+            amdgpu::fp_mode::arithmetic_f16<amdgpu::fp_mode::Arithmetic::MUL>(
+                util::f16_to_f32(
+                    static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane(src0, lane))),
+                util::f16_to_f32(
+                    static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane))),
+                0.0f, wf.fp_round_mode_f16_f64(), wf.fp_denorm_mode_f16_f64()),
+            wf.fp_round_mode_f16_f64(), wf.fp_denorm_mode_f16_f64(), wf.fp16_ovfl()));
   }
 }
 
@@ -1695,31 +1741,37 @@ RJ_NOINLINE void VMulF16Vop2::execute_modifier_impl(amdgpu::Wavefront &wf) {
     dpp_write_mask_scope_.bind(wf,
                                wf.exec() & dpp_plan_.row_bank_mask & dpp_plan_.source_write_mask);
   auto &inst = *this;
-  if (amdgpu::try_execute_words_simd<2, true, true, 3>(inst, wf, [&](auto a, auto b) {
-        return std::bit_cast<util::native<uint32_t>>(([&](auto a, auto b) {
-          if (wf.fp16_ovfl())
+  if (amdgpu::fp_mode::native_arithmetic_matches(wf.fp_round_mode_f16_f64(),
+                                                 wf.fp_denorm_mode_f16_f64())) {
+    if (amdgpu::try_execute_words_simd<2, true, true, 3>(inst, wf, [&](auto a, auto b) {
+          return std::bit_cast<util::native<uint32_t>>(([&](auto a, auto b) {
+            if (wf.fp16_ovfl())
+              return ([](auto a, auto b) {
+                return util::f32_to_f16_ovfl_simd(util::f16_to_f32_simd(a) *
+                                                  util::f16_to_f32_simd(b));
+              })(a, b);
             return ([](auto a, auto b) {
-              return util::f32_to_f16_ovfl_simd(util::f16_to_f32_simd(a) *
-                                                util::f16_to_f32_simd(b));
+              return util::f32_to_f16_simd(util::f16_to_f32_simd(a) * util::f16_to_f32_simd(b));
             })(a, b);
-          return ([](auto a, auto b) {
-            return util::f32_to_f16_simd(util::f16_to_f32_simd(a) * util::f16_to_f32_simd(b));
-          })(a, b);
-        })(std::bit_cast<util::native<uint32_t>>(a), std::bit_cast<util::native<uint32_t>>(b)));
-      }))
-    return;
+          })(std::bit_cast<util::native<uint32_t>>(a), std::bit_cast<util::native<uint32_t>>(b)));
+        }))
+      return;
+  }
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
     amdgpu::sdwa::write_lane<amdgpu::sdwa::ResultFormat::F16>(
         *this, wf, vdst, lane,
-        amdgpu::sdwa::round_f16_result(*this, wf,
-                                       (util::f16_to_f32(static_cast<uint16_t>(
-                                            amdgpu::RegisterAccess(wf).read_lane(src0, lane))) *
-                                        util::f16_to_f32(static_cast<uint16_t>(
-                                            amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane)))),
-                                       wf.fp16_ovfl()));
+        amdgpu::sdwa::finish_arithmetic_f16(
+            *this, wf,
+            amdgpu::fp_mode::arithmetic_f16<amdgpu::fp_mode::Arithmetic::MUL>(
+                util::f16_to_f32(
+                    static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane(src0, lane))),
+                util::f16_to_f32(
+                    static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane))),
+                0.0f, wf.fp_round_mode_f16_f64(), wf.fp_denorm_mode_f16_f64()),
+            wf.fp_round_mode_f16_f64(), wf.fp_denorm_mode_f16_f64(), wf.fp16_ovfl()));
   }
   dpp_write_mask_scope_.restore();
 }
@@ -1817,39 +1869,43 @@ void VLdexpF16Vop2::execute_impl(amdgpu::Wavefront &wf) {
     return;
   }
   auto &inst = *this;
-  if (amdgpu::try_execute_words_simd<2, true, true, 3>(inst, wf, [&](auto a, auto b) {
-        return std::bit_cast<util::native<uint32_t>>(([&](auto a, auto b) {
-          if (wf.fp16_ovfl())
+  if (amdgpu::fp_mode::native_arithmetic_matches(wf.fp_round_mode_f16_f64(),
+                                                 wf.fp_denorm_mode_f16_f64())) {
+    if (amdgpu::try_execute_words_simd<2, true, true, 3>(inst, wf, [&](auto a, auto b) {
+          return std::bit_cast<util::native<uint32_t>>(([&](auto a, auto b) {
+            if (wf.fp16_ovfl())
+              return ([](auto a, auto b) {
+                auto x = util::f16_to_f32_simd(a);
+                auto n = util::stdx::static_simd_cast<
+                    util::stdx::fixed_size_simd<int, util::native<float>::size()>>(
+                    (util::stdx::static_simd_cast<util::native<int32_t>>(b) << 16) >> 16);
+                return util::f32_to_f16_ovfl_simd(util::stdx::ldexp(x, n));
+              })(a, b);
             return ([](auto a, auto b) {
               auto x = util::f16_to_f32_simd(a);
               auto n = util::stdx::static_simd_cast<
                   util::stdx::fixed_size_simd<int, util::native<float>::size()>>(
                   (util::stdx::static_simd_cast<util::native<int32_t>>(b) << 16) >> 16);
-              return util::f32_to_f16_ovfl_simd(util::stdx::ldexp(x, n));
+              return util::f32_to_f16_simd(util::stdx::ldexp(x, n));
             })(a, b);
-          return ([](auto a, auto b) {
-            auto x = util::f16_to_f32_simd(a);
-            auto n = util::stdx::static_simd_cast<
-                util::stdx::fixed_size_simd<int, util::native<float>::size()>>(
-                (util::stdx::static_simd_cast<util::native<int32_t>>(b) << 16) >> 16);
-            return util::f32_to_f16_simd(util::stdx::ldexp(x, n));
-          })(a, b);
-        })(std::bit_cast<util::native<uint32_t>>(a), std::bit_cast<util::native<uint32_t>>(b)));
-      }))
-    return;
+          })(std::bit_cast<util::native<uint32_t>>(a), std::bit_cast<util::native<uint32_t>>(b)));
+        }))
+      return;
+  }
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
     amdgpu::sdwa::write_lane<amdgpu::sdwa::ResultFormat::F16>(
         *this, wf, vdst, lane,
-        amdgpu::sdwa::round_f16_result(
+        amdgpu::sdwa::finish_arithmetic_f16(
             *this, wf,
-            std::ldexp(util::f16_to_f32(
-                           static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane(src0, lane))),
-                       static_cast<int32_t>(static_cast<int16_t>(
-                           amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane)))),
-            wf.fp16_ovfl()));
+            amdgpu::fp_mode::ldexp_f16(util::f16_to_f32(static_cast<uint16_t>(
+                                           amdgpu::RegisterAccess(wf).read_lane(src0, lane))),
+                                       static_cast<int32_t>(static_cast<int16_t>(
+                                           amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane))),
+                                       wf.fp_denorm_mode_f16_f64()),
+            wf.fp_round_mode_f16_f64(), wf.fp_denorm_mode_f16_f64(), wf.fp16_ovfl()));
   }
 }
 
@@ -1870,39 +1926,43 @@ RJ_NOINLINE void VLdexpF16Vop2::execute_modifier_impl(amdgpu::Wavefront &wf) {
     dpp_write_mask_scope_.bind(wf,
                                wf.exec() & dpp_plan_.row_bank_mask & dpp_plan_.source_write_mask);
   auto &inst = *this;
-  if (amdgpu::try_execute_words_simd<2, true, true, 3>(inst, wf, [&](auto a, auto b) {
-        return std::bit_cast<util::native<uint32_t>>(([&](auto a, auto b) {
-          if (wf.fp16_ovfl())
+  if (amdgpu::fp_mode::native_arithmetic_matches(wf.fp_round_mode_f16_f64(),
+                                                 wf.fp_denorm_mode_f16_f64())) {
+    if (amdgpu::try_execute_words_simd<2, true, true, 3>(inst, wf, [&](auto a, auto b) {
+          return std::bit_cast<util::native<uint32_t>>(([&](auto a, auto b) {
+            if (wf.fp16_ovfl())
+              return ([](auto a, auto b) {
+                auto x = util::f16_to_f32_simd(a);
+                auto n = util::stdx::static_simd_cast<
+                    util::stdx::fixed_size_simd<int, util::native<float>::size()>>(
+                    (util::stdx::static_simd_cast<util::native<int32_t>>(b) << 16) >> 16);
+                return util::f32_to_f16_ovfl_simd(util::stdx::ldexp(x, n));
+              })(a, b);
             return ([](auto a, auto b) {
               auto x = util::f16_to_f32_simd(a);
               auto n = util::stdx::static_simd_cast<
                   util::stdx::fixed_size_simd<int, util::native<float>::size()>>(
                   (util::stdx::static_simd_cast<util::native<int32_t>>(b) << 16) >> 16);
-              return util::f32_to_f16_ovfl_simd(util::stdx::ldexp(x, n));
+              return util::f32_to_f16_simd(util::stdx::ldexp(x, n));
             })(a, b);
-          return ([](auto a, auto b) {
-            auto x = util::f16_to_f32_simd(a);
-            auto n = util::stdx::static_simd_cast<
-                util::stdx::fixed_size_simd<int, util::native<float>::size()>>(
-                (util::stdx::static_simd_cast<util::native<int32_t>>(b) << 16) >> 16);
-            return util::f32_to_f16_simd(util::stdx::ldexp(x, n));
-          })(a, b);
-        })(std::bit_cast<util::native<uint32_t>>(a), std::bit_cast<util::native<uint32_t>>(b)));
-      }))
-    return;
+          })(std::bit_cast<util::native<uint32_t>>(a), std::bit_cast<util::native<uint32_t>>(b)));
+        }))
+      return;
+  }
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
     amdgpu::sdwa::write_lane<amdgpu::sdwa::ResultFormat::F16>(
         *this, wf, vdst, lane,
-        amdgpu::sdwa::round_f16_result(
+        amdgpu::sdwa::finish_arithmetic_f16(
             *this, wf,
-            std::ldexp(util::f16_to_f32(
-                           static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane(src0, lane))),
-                       static_cast<int32_t>(static_cast<int16_t>(
-                           amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane)))),
-            wf.fp16_ovfl()));
+            amdgpu::fp_mode::ldexp_f16(util::f16_to_f32(static_cast<uint16_t>(
+                                           amdgpu::RegisterAccess(wf).read_lane(src0, lane))),
+                                       static_cast<int32_t>(static_cast<int16_t>(
+                                           amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane))),
+                                       wf.fp_denorm_mode_f16_f64()),
+            wf.fp_round_mode_f16_f64(), wf.fp_denorm_mode_f16_f64(), wf.fp16_ovfl()));
   }
   dpp_write_mask_scope_.restore();
 }
