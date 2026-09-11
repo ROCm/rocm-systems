@@ -3590,6 +3590,10 @@ protected:
 
     std::optional<agent_address_t>
     register_address (amdgpu_regnum_t regnum) const override;
+
+  protected:
+    virtual agent_address_t accvgprs_addr () const;
+    agent_address_t vgprs_addr () const override;
   };
 
   std::unique_ptr<architecture_t::cwsr_record_t>
@@ -3657,48 +3661,35 @@ mi_architecture_t::register_size (amdgpu_regnum_t regnum) const
   return gfx9_architecture_t::register_size (regnum);
 }
 
+agent_address_t
+mi_architecture_t::cwsr_record_t::accvgprs_addr () const
+{
+  constexpr size_t accvgpr_size = sizeof (int32_t) * 64;
+  return sgprs_addr () - acc_vgpr_count () * accvgpr_size;
+}
+
+agent_address_t
+mi_architecture_t::cwsr_record_t::vgprs_addr () const
+{
+  constexpr size_t vgpr_size = sizeof (int32_t) * 64;
+  return accvgprs_addr () - vgpr_count () * vgpr_size;
+}
+
 std::optional<agent_address_t>
 mi_architecture_t::cwsr_record_t::register_address (
   amdgpu_regnum_t regnum) const
 {
-  /* Delegate to the gfx9 base for all registers except for the vgprs.  */
-  if (regnum < amdgpu_regnum_t::first_vgpr
-      || regnum > amdgpu_regnum_t::last_vgpr)
-    return gfx9_architecture_t::cwsr_record_t::register_address (regnum);
-
-  auto first_sgpr_addr = gfx9_architecture_t::cwsr_record_t::register_address (
-    amdgpu_regnum_t::first_sgpr);
-  dbgapi_assert (first_sgpr_addr);
-
-  agent_address_t sgprs_addr = *first_sgpr_addr;
-
-  size_t accvgpr_count = this->acc_vgpr_count ();
-  size_t accvgpr_size = sizeof (int32_t) * 64;
-  agent_address_t accvgprs_addr = sgprs_addr - accvgpr_count * accvgpr_size;
-
   if (regnum >= amdgpu_regnum_t::a0_64 && regnum <= amdgpu_regnum_t::a255_64
       && ((regnum - amdgpu_regnum_t::a0_64)
-          < utils::narrow<amdgpu_regdiff_t> (accvgpr_count)))
+          < utils::narrow<amdgpu_regdiff_t> (acc_vgpr_count ())))
     {
-      return (accvgprs_addr
+      constexpr size_t accvgpr_size = sizeof (int32_t) * 64;
+      return (accvgprs_addr ()
               + (utils::narrow<size_t> (regnum - amdgpu_regnum_t::a0_64)
                  * accvgpr_size));
     }
 
-  size_t vgpr_count = this->vgpr_count ();
-  size_t vgpr_size = sizeof (int32_t) * 64;
-  agent_address_t vgprs_addr = accvgprs_addr - vgpr_count * vgpr_size;
-
-  if (regnum >= amdgpu_regnum_t::v0_64 && regnum <= amdgpu_regnum_t::v255_64
-      && ((regnum - amdgpu_regnum_t::v0_64)
-          < utils::narrow<amdgpu_regdiff_t> (vgpr_count)))
-    {
-      return (vgprs_addr
-              + (utils::narrow<size_t> (regnum - amdgpu_regnum_t::v0_64)
-                 * vgpr_size));
-    }
-
-  return std::nullopt;
+  return gfx9_architecture_t::cwsr_record_t::register_address (regnum);
 }
 
 /* Arcturus Architecture.  */
