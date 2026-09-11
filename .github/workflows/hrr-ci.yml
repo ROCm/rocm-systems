@@ -236,6 +236,11 @@ jobs:
     name: "Integration (${{ matrix.family }})"
     needs: [ci_config, build]
     runs-on: ${{ matrix.runner }}
+    # The suite runs in about 90 seconds. These are scarce single-GPU machines
+    # and the default timeout is six hours, so a workload that deadlocks on one
+    # part would hold a runner for the rest of the day and publish no log to
+    # say why. Fail instead, while the log still gets uploaded.
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
@@ -312,6 +317,35 @@ jobs:
           ./build/hrr/tests/integration/hrr-integration-tests \
             --reporter console \
             --reporter junit::out=integration-${{ matrix.family }}.xml
+
+      # Unit_HRR_StreamWriteValueRoundtrip fails on every RDNA family:
+      # hipStreamWriteValue64 returns hipSuccess and the value never lands. The
+      # suite only ever runs that workload under capture, so it cannot say
+      # whether HRR is responsible. Run it twice more to find out, reporting
+      # rather than asserting so the suite's own verdict above is untouched:
+      #
+      #   stock SDK runtime  fails -> the part does this without HRR present
+      #   HRR runtime, no capture  fails -> the shims break it while idle
+      #   both pass                       -> capture itself is at fault
+      - name: Diagnose hipStreamWriteValue64
+        if: always()
+        continue-on-error: true
+        env:
+          DEVICES: ${{ matrix.devices }}
+        run: |
+          if [ -n "${DEVICES}" ]; then
+            export HIP_VISIBLE_DEVICES="${DEVICES}"
+          fi
+          # HIP_HRR_CAPTURE_OUTPUT is deliberately unset in both runs.
+          for variant in "stock SDK runtime:${ROCM_SDK}/lib" \
+                         "HRR runtime, capture off:${PWD}/build/clr/hipamd/lib:${ROCM_SDK}/lib"; do
+            echo "::group::${variant%%:*}"
+            LD_LIBRARY_PATH="${variant#*:}" \
+              ./build/hrr/tests/integration/hrr-integration-tests \
+              "Unit_HRR_StreamWriteValue_Direct" && verdict=pass || verdict=FAIL
+            echo "${{ matrix.family }} / ${variant%%:*}: ${verdict}"
+            echo "::endgroup::"
+          done
 
       - name: Upload results
         if: always()
