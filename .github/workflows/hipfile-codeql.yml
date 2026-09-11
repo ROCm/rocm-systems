@@ -74,7 +74,7 @@ jobs:
           # 5% of all memory above 8 GB. On a runner with 16 GB of RAM, CodeQL
           # will reserve up to ~90% of the total memory on the system.
           # This default may be leaving too little for building hipFile.
-          # 80% of 16 GB is 13.1 GB, which leaves  ~3.2 GB for hipFile.
+          # 80% of 16 GB is 13.1 GB, which leaves ~3.2 GB for hipFile.
           ram: 13107
 
       - name: Configure and build hipFile
@@ -82,13 +82,24 @@ jobs:
         # compiler. Debug build type keeps optimizations off so the extracted
         # database is closer to the source.
         #
-        # We also restrict the parallelism here to try to avoid getting OOM
-        # killed by contending with CodeQL. Measured locally on a system
-        # constrained to 4 CPUs and 16 GB, an unbounded parallel build spawned
-        # 62 concurrent compilers and on average peaked at 6.1 GB of memory
-        # usage. This was leading to the runner's kernel OOM killing this job.
-        # When bounded to -j4, the average peak memory usage dropped to 1.8 GB
-        # (and actually finished slightly faster).
+        # We also restrict the parallelism here to avoid getting OOM killed by
+        # contending with CodeQL. Peak memory measured locally on a system
+        # constrained to 4 CPUs and 16 GB, 5 trials of each, with the ram cap
+        # above already applied:
+        #
+        #   build         | compilers | without CodeQL | with CodeQL | OOM kills
+        #   --------------|-----------|----------------|-------------|----------
+        #   --parallel    |        62 |         6.0 GB |     13.5 GB |        16
+        #   --parallel 4  |         8 |         1.7 GB |      5.6 GB |         0
+        #
+        # "without CodeQL" is the cmake build on its own; "with CodeQL" is the
+        # whole container, so it also covers the extractor and the database it
+        # builds. Most of the memory is CodeQL's, and its share grows with the
+        # number of compilers it has to trace -- so bounding the build bounds
+        # CodeQL too.
+        #
+        # The build runs fine unbounded on its own, so this bound is only
+        # needed where CodeQL runs alongside it.
         shell: bash
         run: |
           cmake \
