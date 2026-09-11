@@ -36,7 +36,7 @@ namespace {
     do {                                                                                   \
         std::string _burstWhy;                                                             \
         ncclResult_t _burstRet = RunRecvFlushBurst((iterations), (verifyData),              \
-                                                  (forceWrite), (lastFlush), &_burstWhy);  \
+                                                   (forceWrite), (lastFlush), &_burstWhy); \
         ASSERT_EQ(_burstRet, ncclSuccess)                                                  \
             << "GDR recv+flush burst setup failed on at least one rank (this rank: "        \
             << _burstWhy << ")";                                                           \
@@ -85,8 +85,8 @@ protected:
     // this way; everything below stays EXPECT_, because a rank-local failure that
     // ended the test on one rank would strand its peer at the next collective.
     [[nodiscard]] ncclResult_t RunRecvFlushBurst(int iterations, bool verifyData,
-                                                bool forceWrite, ncclResult_t* rank0LastFlush,
-                                                std::string* setupWhy = nullptr) {
+                                                 bool forceWrite, ncclResult_t* rank0LastFlush,
+                                                 std::string* setupWhy = nullptr) {
         const int rank = MPIEnvironment::world_rank;
 
         AssertInitAndGetDevices(nullptr);
