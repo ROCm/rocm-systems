@@ -44,7 +44,7 @@ TEST(kfd_event_dropped_events_test, descriptor_reports_correct_metadata)
     EXPECT_EQ(k_domain.meta.id, mock_sdk::BUFFER_TRACING_KFD_EVENT_DROPPED_EVENTS);
     EXPECT_EQ(k_domain.meta.mode, collection_mode::buffered);
     ASSERT_TRUE(k_domain.meta.group.has_value());
-    EXPECT_EQ(k_domain.meta.group->name, "kfd_events");
+    EXPECT_EQ(k_domain.meta.group.value().name, "kfd_events");
     EXPECT_EQ(k_domain.on_records, &mock_dispatcher::callback);
 }
 
