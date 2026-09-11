@@ -431,10 +431,8 @@ class Runtime {
                                const hsa_signal_t* dep_signals, hsa_signal_t completion_signal);
 
   hsa_status_t SvmDiscardAndPrefetchBatch(void** ptrs, size_t* sizes, uint32_t count,
-                                          const hsa_agent_t* dst_agents,
-                                          uint32_t num_dst_agents,
-                                          uint32_t num_dep_signals,
-                                          const hsa_signal_t* dep_signals,
+                                          const hsa_agent_t* dst_agents, uint32_t num_dst_agents,
+                                          uint32_t num_dep_signals, const hsa_signal_t* dep_signals,
                                           hsa_signal_t completion_signal);
 
   hsa_status_t DmaBufExport(const void* ptr, size_t size, int* dmabuf, uint64_t* offset,
@@ -871,7 +869,7 @@ class Runtime {
   /// loaded library.
   void LoadTools();
 
-  /// @brief Load the rocjitsu hotswap hook as the first HSA tool.
+  /// @brief Load the rocjitsu hotswap hook as the first HSA tool when enabled.
   hsa_status_t LoadHotswapTool();
 
   /// @brief Call OnUnload method of each tool library.
