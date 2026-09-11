@@ -29,7 +29,7 @@
 | Simulation engine (events, topology, PDES) | `lib/simdojo/` |
 | Shared utility (bit ops, logging, SIMD, allocators) | `lib/util/` |
 | JSON config schema change | `schemas/` + `lib/rocjitsu/src/rocjitsu/config/` |
-| CLI changes | `tools/rocjitsu/` |
+| CLI changes | `cli/` (Rust workspace) |
 | New GPU topology config | `configs/` |
 | Tests | `tests/` (mirror the source structure: `tests/dbt/`, `tests/analysis/`, `tests/patch/`, etc.) |
 
@@ -64,9 +64,12 @@ Before writing new infrastructure, check these existing libraries:
 ## Code style
 
 - **C++20.** Use standard library features (concepts, ranges, `std::format`).
+- **Rust.** The CLI in `cli/` is a Cargo workspace with its own conventions:
+  `clippy -D warnings`, and a lint policy that forbids `unsafe` outside
+  `rocjitsu_sys`. See [cli/docs/building.md](cli/docs/building.md).
 - **Formatting.** The repo uses pre-commit hooks (clang-format for C++,
-  black for Python, gersemi for CMake). Install once and run before
-  every commit:
+  black for Python, gersemi for CMake, rustfmt for Rust). Install once and
+  run before every commit:
   ```bash
   pip install pre-commit
   pre-commit install
@@ -85,7 +88,7 @@ Before writing new infrastructure, check these existing libraries:
   (`-DRJ_LOG_GROUPS=...`, default `OFF`), so they are for tracing only. Use
   `Logger::warn()` for anything that must be audible in a default build. Do
   not add `fprintf`/`printf`/`std::cerr` to library code. Two existing
-  carve-outs: the CLI front end (`tools/`) writes user-facing errors to
+  carve-outs: the command-line tools (`tools/`) write user-facing errors to
   `std::cerr`, and the ROCR-interposed hook layer
   (`lib/rocjitsu/src/rocjitsu/hooks/`) writes fatal diagnostics straight to
   `stderr` — it runs inside another runtime's `OnLoad`, its messages must
