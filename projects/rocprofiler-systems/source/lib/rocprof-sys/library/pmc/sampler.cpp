@@ -164,7 +164,10 @@ write_pause_samples(std::int64_t timestamp)
         slice.pause(timestamp);
     }
 #if ROCPROFILER_VERSION >= 600
-    if(g_gpu_perf_counter_collector) g_gpu_perf_counter_collector->pause(timestamp);
+    if(g_gpu_perf_counter_collector)
+    {
+        g_gpu_perf_counter_collector->pause(timestamp);
+    }
 #endif
 }
 
@@ -353,9 +356,10 @@ pause()
     // sample() holds this lock for a whole AMD SMI sweep, and the caller is an
     // application thread leaving a traced region. Hand the timestamp to the
     // sampling thread rather than waiting for the sweep to finish.
-    std::unique_lock _lk{ type_mutex<category::amd_smi>(), std::try_to_lock };
+    const std::unique_lock pause_lock{ type_mutex<category::amd_smi>(),
+                                       std::try_to_lock };
 
-    if(!_lk.owns_lock())
+    if(!pause_lock.owns_lock())
     {
         g_pending_pause_ts.store(timestamp, std::memory_order_release);
         return;
@@ -378,7 +382,7 @@ flush_pending_pause()
         return;
     }
 
-    auto_lock_t _lk{ type_mutex<category::amd_smi>() };
+    auto_lock_t pause_lock{ type_mutex<category::amd_smi>() };
 
     if(pmc::get_state() != state::process::Active || !is_initialized())
     {
