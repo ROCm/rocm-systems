@@ -25,6 +25,24 @@
 
 namespace {
 
+// The returned status is not the whole verdict. Helpers the burst calls --
+// AssertInitAndGetDevices and PostSendWithRetry -- assert fatally and return from
+// themselves, so the burst can reach its own "return ncclSuccess" with a fatal
+// failure already recorded. Asserting on the status alone would let the test carry
+// on and fail later on an out-parameter nobody wrote, which is what the
+// ASSERT_NO_FATAL_FAILURE this replaced used to catch. Checking HasFatalFailure
+// stops the test at the cause instead.
+#define ASSERT_RECV_FLUSH_BURST(iterations, verifyData, forceWrite, lastFlush)              \
+    do {                                                                                   \
+        std::string _burstWhy;                                                             \
+        ncclResult_t _burstRet = RunRecvFlushBurst((iterations), (verifyData),              \
+                                                  (forceWrite), (lastFlush), &_burstWhy);  \
+        ASSERT_EQ(_burstRet, ncclSuccess)                                                  \
+            << "GDR recv+flush burst setup failed on at least one rank (this rank: "        \
+            << _burstWhy << ")";                                                           \
+        if (::testing::Test::HasFatalFailure()) return;                                     \
+    } while (0)
+
 class GdrFlushTest : public NetIbMPITest {
 protected:
     // NCCL_CUMEM_ENABLE=1 makes the flush scratchpad dma-buf-backed (the path
@@ -164,11 +182,7 @@ TEST_F(GdrFlushTest, CuMemDmaBuf_GpuRecvFlush_NoAsyncFatal) {
     if (!gdrSupported()) GTEST_SKIP() << "GDR (NCCL_PTR_CUDA) not supported on this device";
 
     ncclResult_t flush = ncclSuccess;
-    std::string setupWhy;
-    ASSERT_EQ(RunRecvFlushBurst(/*iterations=*/4, /*verifyData=*/true,
-                                /*forceWrite=*/false, &flush, &setupWhy), ncclSuccess)
-        << "GDR recv+flush burst setup failed on at least one rank (this rank: "
-        << setupWhy << ")";
+    ASSERT_RECV_FLUSH_BURST(/*iterations=*/4, /*verifyData=*/true, /*forceWrite=*/false, &flush);
     if (MPIEnvironment::world_rank == 0)
         EXPECT_EQ(flush, ncclSuccess) << "read-only flush over dma-buf scratchpad must not fault";
 }
@@ -183,11 +197,7 @@ TEST_F(GdrFlushTest, Peermem_GpuRecvFlush_NoAsyncFatal) {
     if (!gdrSupported()) GTEST_SKIP() << "GDR (NCCL_PTR_CUDA) not supported on this device";
 
     ncclResult_t flush = ncclSuccess;
-    std::string setupWhy;
-    ASSERT_EQ(RunRecvFlushBurst(/*iterations=*/4, /*verifyData=*/true,
-                                /*forceWrite=*/false, &flush, &setupWhy), ncclSuccess)
-        << "GDR recv+flush burst setup failed on at least one rank (this rank: "
-        << setupWhy << ")";
+    ASSERT_RECV_FLUSH_BURST(/*iterations=*/4, /*verifyData=*/true, /*forceWrite=*/false, &flush);
     if (MPIEnvironment::world_rank == 0)
         EXPECT_EQ(flush, ncclSuccess) << "peermem RO=0 scratchpad flush must succeed";
 }
@@ -203,11 +213,7 @@ TEST_F(GdrFlushTest, FeatureDisabled_FallbackReadRecvBuffer) {
     if (!gdrSupported()) GTEST_SKIP() << "GDR (NCCL_PTR_CUDA) not supported on this device";
 
     ncclResult_t flush = ncclSuccess;
-    std::string setupWhy;
-    ASSERT_EQ(RunRecvFlushBurst(/*iterations=*/4, /*verifyData=*/true,
-                                /*forceWrite=*/false, &flush, &setupWhy), ncclSuccess)
-        << "GDR recv+flush burst setup failed on at least one rank (this rank: "
-        << setupWhy << ")";
+    ASSERT_RECV_FLUSH_BURST(/*iterations=*/4, /*verifyData=*/true, /*forceWrite=*/false, &flush);
     if (MPIEnvironment::world_rank == 0)
         EXPECT_EQ(flush, ncclSuccess) << "fallback flush (read recv buffer) must succeed";
 }
@@ -221,11 +227,7 @@ TEST_F(GdrFlushTest, RepeatedFlush_NoFaultBurst) {
     if (!gdrSupported()) GTEST_SKIP() << "GDR (NCCL_PTR_CUDA) not supported on this device";
 
     ncclResult_t flush = ncclSuccess;
-    std::string setupWhy;
-    ASSERT_EQ(RunRecvFlushBurst(/*iterations=*/50, /*verifyData=*/false,
-                                /*forceWrite=*/false, &flush, &setupWhy), ncclSuccess)
-        << "GDR recv+flush burst setup failed on at least one rank (this rank: "
-        << setupWhy << ")";
+    ASSERT_RECV_FLUSH_BURST(/*iterations=*/50, /*verifyData=*/false, /*forceWrite=*/false, &flush);
     if (MPIEnvironment::world_rank == 0)
         EXPECT_EQ(flush, ncclSuccess) << "no flush in the burst may raise a QP async-fatal";
 }
@@ -244,11 +246,7 @@ TEST_F(GdrFlushTest, ForcedScratchpadWrite_ReproducesFault) {
     if (!gdrSupported()) GTEST_SKIP() << "GDR (NCCL_PTR_CUDA) not supported on this device";
 
     ncclResult_t forced = ncclSuccess;
-    std::string setupWhy;
-    ASSERT_EQ(RunRecvFlushBurst(/*iterations=*/1, /*verifyData=*/false,
-                                /*forceWrite=*/true, &forced, &setupWhy), ncclSuccess)
-        << "GDR recv+flush burst setup failed on at least one rank (this rank: "
-        << setupWhy << ")";
+    ASSERT_RECV_FLUSH_BURST(/*iterations=*/1, /*verifyData=*/false, /*forceWrite=*/true, &forced);
     if (MPIEnvironment::world_rank == 0)
         EXPECT_NE(forced, ncclSuccess)
             << "forced scratchpad RDMA_WRITE on a dma-buf buffer should fault the flush QP";

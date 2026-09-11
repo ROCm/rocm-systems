@@ -771,6 +771,7 @@
         { "name": "NetIB_Branch_MrCacheRefCount",   "description": "Double-register same buffer: refs reach 2, first dereg keeps MR, second frees it",  "test_filter": "NetIbMPITest.MrCacheRefCount" },
         { "name": "NetIB_Branch_SendSizeClamping",  "description": "isend with size > maxRecvs*maxSize is clamped to maxSize, data integrity verified",  "test_filter": "NetIbMPITest.SendSizeClamping" },
         { "name": "NetIB_Branch_NullCommClose",     "description": "closeSend/closeRecv/closeListen on NULL comm returns ncclSuccess without crash",     "test_filter": "NetIbMPITest.NullCommClose" },
+        { "name": "NetIB_Branch_NullCommCastDataPath", "description": "IB-CAST isend/irecv/iflush reject a NULL comm instead of dereferencing it",         "test_filter": "NetIbMPITest.NullCommCastDataPath" },
         { "name": "NetIB_Branch_SetNetAttrNoOp",    "description": "ncclNetPlugin_v9.setAttr returns ncclSuccess for all known attribute types",         "test_filter": "NetIbMPITest.SetNetAttrNoOp" }
       ]
     },
