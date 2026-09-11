@@ -31,6 +31,10 @@ ncclResult_t ncclRegLocalIsValid(struct ncclReg* reg, bool* isValid) {
 }
 
 ncclResult_t ncclRegister(struct ncclComm* comm, void* data, size_t size, bool isGraph, void** handle) {
+  // Graph destruction only queues plan reclamation. Drain completed graph
+  // callbacks before looking up this virtual address, because a new VMM
+  // allocation may have reused it.
+  NCCLCHECK(ncclCommPollCallbacks(comm, /*waitSome=*/false));
   NCCLCHECK(CommCheck(comm, "ncclCommRegister", "comm"));
 
   struct ncclRegCache* cache = &comm->regCache;
@@ -214,7 +218,7 @@ exit:
 NCCL_API(ncclResult_t, ncclCommDeregister, const ncclComm_t comm, void* handle);
 ncclResult_t ncclCommDeregister_impl(const ncclComm_t comm, void* handle) {
   NCCLCHECK(Recorder::instance().record(rrCommDeregister, comm, handle));
-
+  NCCLCHECK(ncclCommPollCallbacks(comm, /*waitSome=*/false));
   NCCLCHECK(commDeregister(comm, false, (struct ncclReg*)handle));
   return ncclSuccess;
 }
