@@ -64,6 +64,7 @@ class ProfilingSignal : public amd::ReferenceCountedObject {
   static constexpr uint32_t kInvalidQueueIndex = std::numeric_limits<uint32_t>::max();
 
   hsa_signal_t signal_;   //!< HSA signal to track profiling information
+  std::shared_ptr<amd::AqlBatchImage> retained_graph_image_;
   Timestamp* ts_;         //!< Timestamp object associated with the signal
   HwQueueEngine engine_;  //!< Engine used with this signal
   //! vGPU (queue) index of the stream this signal was dispatched on. Graphs span
@@ -464,6 +465,8 @@ class Device : public NullDevice {
                           MemorySegment mem_seg = MemorySegment::kNoAtomics,
                           const void* agentInfo = nullptr, bool allowAllAgentsAccess = true) const override;  // nullptr uses default CPU agent
   virtual void hostFree(void* ptr, size_t size = 0) const override;
+  std::shared_ptr<amd::AqlBatchImage> prepareAqlBatchImage(
+      const amd::AlignedVector64<uint8_t>& packets, const std::vector<uint32_t>& headers) override;
 
   virtual bool amdFileRead(amd::Os::FileDesc handle, void* devicePtr, uint64_t size, int64_t file_offset,
                         uint64_t* size_copied, int32_t* status) override;

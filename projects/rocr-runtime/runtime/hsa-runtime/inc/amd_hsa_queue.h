@@ -150,6 +150,12 @@ typedef struct AMD_QUEUE_ALIGN amd_queue_v2_s {
   uint32_t reserved5;
 
   scratch_last_used_index_xcc_t scratch_last_used_index[MAX_NUM_XCC];
+  // Indirect-buffer queue state. These extend the structure; they are not
+  // padding. Keeping them in the queue descriptor also moves SharedQueue's
+  // following host pointer out of this device-written region. The queue
+  // constructor zero-initializes the entire descriptor before publication.
+  volatile uint64_t aql_ib_active_packet;
+  volatile uint64_t aql_ib_root_packet;
 } amd_queue_v2_t;
 
 #endif // AMD_HSA_QUEUE_H

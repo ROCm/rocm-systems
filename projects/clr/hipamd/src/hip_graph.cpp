@@ -2776,6 +2776,16 @@ hipError_t hipGraphExecUpdate(hipGraphExec_t hGraphExec, hipGraph_t hGraph,
     HIP_RETURN(hipErrorGraphExecUpdateFailure);
   }
 
+  // Finalize on success and on early errors: this API can already have applied
+  // earlier node updates when a later node fails. Never leave their flat packet
+  // storage or synchronization-patch pointers stale on return.
+  struct PacketUpdateScope {
+    hip::GraphExecBase* exec;
+    ~PacketUpdateScope() {
+      if (HIP_GRAPH_AQL_IB_MODE) exec->FinalizeAQLPacketUpdates();
+    }
+  } packetUpdates{reinterpret_cast<hip::GraphExecBase*>(hGraphExec)};
+
   for (std::vector<hip::GraphNode*>::size_type i = 0; i != newGraphNodes.size(); i++) {
     // Checks if all the node types are same before updating
     if (newGraphNodes[i]->GetType() == oldGraphExecNodes[i]->GetType()) {
@@ -2829,7 +2839,12 @@ hipError_t hipGraphExecUpdate(hipGraphExec_t hGraphExec, hipGraph_t hGraph,
       } else {
         auto graphExec = reinterpret_cast<hip::GraphExecBase*>(hGraphExec);
         if (newGraphNodes[i]->GraphCaptureEnabled()) {
-          status = graphExec->UpdateAQLPacket(reinterpret_cast<hip::GraphKernelNode*>(oldGraphExecNodes[i]));
+          status = graphExec->UpdateAQLPacket(oldGraphExecNodes[i], HIP_GRAPH_AQL_IB_MODE);
+          if (status != hipSuccess) {
+            *hErrorNode_out = reinterpret_cast<hipGraphNode_t>(newGraphNodes[i]);
+            *updateResult_out = hipGraphExecUpdateErrorNotSupported;
+            HIP_RETURN(hipErrorGraphExecUpdateFailure);
+          }
         }
       }
     } else {

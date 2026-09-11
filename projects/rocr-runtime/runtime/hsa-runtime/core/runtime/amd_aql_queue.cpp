@@ -78,6 +78,14 @@ namespace AMD {
 
 #define SCRATCH_ALT_RATIO 4
 
+// Device-visible indirect-buffer state extends the shared queue descriptor.
+// Keep its ABI stable and inside the region zeroed by the constructor; the
+// host-only SharedQueue::core_queue pointer must follow this region.
+static_assert(offsetof(amd_queue_v2_t, aql_ib_active_packet) == 2304);
+static_assert(offsetof(amd_queue_v2_t, aql_ib_root_packet) == 2312);
+static_assert(sizeof(amd_queue_v2_t) == 2368);
+static_assert(offsetof(core::SharedQueue, core_queue) >= sizeof(amd_queue_v2_t));
+
 AqlQueue::AqlQueue(core::SharedQueue* shared_queue, GpuAgent* agent, size_t req_size_pkts,
                    HSAuint32 node_id, ScratchInfo& scratch, core::HsaEventCallback callback,
                    void* err_data, bool metadata_prefetch, uint64_t flags)

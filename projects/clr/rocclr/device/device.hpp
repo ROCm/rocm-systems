@@ -39,6 +39,7 @@
 #include <vector>
 #include <map>
 #include <mutex>
+#include <memory>
 #include <list>
 #include <set>
 #include <unordered_set>
@@ -89,6 +90,12 @@ class ExternalSemaphoreCmd;
 class UserEvent;
 class Isa;
 class Device;
+// Backend-owned immutable graph image. Graph batches and in-flight submissions
+// share ownership; replacing a batch must not free an executing image.
+struct AqlBatchImage {
+  virtual ~AqlBatchImage() = default;
+  virtual bool update(const amd::AlignedVector64<uint8_t>&, const std::vector<uint32_t>&) { return false; }
+};
 struct KernelParameterDescriptor;
 struct Coord3D;
 
@@ -1385,7 +1392,8 @@ class VirtualDevice : public amd::ReferenceCountedObject {
                                           bool attach_signal = false,
                                           bool pre_patched = false,
                                           bool blocking = false,
-                                          const std::vector<uint8_t>* flatMetadataData = nullptr) {
+                                          const std::vector<uint8_t>* flatMetadataData = nullptr,
+                                          const std::shared_ptr<amd::AqlBatchImage>& image = {}) {
     return false;
   }
 
@@ -1934,6 +1942,11 @@ class Device : public RuntimeObject {
    * instead of the generic OS allocation routines
    */
   bool customHostAllocator() const { return settings().customHostAllocator_ == 1; }
+
+  virtual std::shared_ptr<AqlBatchImage> prepareAqlBatchImage(
+      const amd::AlignedVector64<uint8_t>& packets, const std::vector<uint32_t>& headers) {
+    return {};
+  }
 
   /**
    * @copydoc amd::Context::hostAlloc

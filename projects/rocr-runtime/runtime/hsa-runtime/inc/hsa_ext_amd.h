@@ -135,6 +135,9 @@ typedef enum {
    */
   HSA_AMD_PACKET_TYPE_EXT_KERNEL_DISPATCH = 3,
 
+  /** Tail-jump to an AQL indirect buffer. */
+  HSA_AMD_PACKET_TYPE_AQL_IB_JUMP = 7,
+
   /* Reserved for a packet that is not yet released */
   HSA_AMD_PACKET_TYPE_RESERVED200 = 200,
 } hsa_amd_packet_type_t;
@@ -226,6 +229,37 @@ typedef struct hsa_amd_barrier_value_packet_s {
    */
   hsa_signal_t completion_signal;
 } hsa_amd_barrier_value_packet_t;
+
+/** Maximum number of 64-byte packets in an indirect-buffer target. */
+#define HSA_AMD_AQL_IB_MAX_TARGET_SIZE_PACKETS 0xffffu
+
+typedef enum {
+  HSA_AMD_AQL_IB_JUMP_TARGET_FLAG_NONE = 0,
+  /** Wait for earlier shader work and make its target writes visible to packet
+   * fetch before entering the target. Invalid for a null target. */
+  HSA_AMD_AQL_IB_JUMP_TARGET_FLAG_DIRTY = 1u << 0,
+} hsa_amd_aql_ib_jump_target_flag_t;
+
+/**
+ * Unconditional AQL indirect-buffer tail jump (one 64-byte slot).
+ * A nonnull target is 64-byte aligned and contains target_size_packets slots,
+ * including its terminal jump. A null {address,size} returns from the program.
+ * A jump inside an indirect buffer must be its final slot, carry no completion
+ * signal, and use release scope NONE. The queue-origin root owns completion
+ * and release semantics for the whole program. All reserved fields are zero.
+ */
+typedef struct hsa_amd_aql_ib_jump_packet_s {
+  hsa_amd_vendor_packet_header_t header;
+  uint32_t target_size_packets;
+  uint64_t target_base_addr;
+  uint32_t target_flags;
+  uint32_t reserved1;
+  uint64_t reserved2;
+  uint64_t reserved3;
+  uint64_t reserved4;
+  hsa_signal_t completion_signal;
+  uint64_t reserved5;
+} hsa_amd_aql_ib_jump_packet_t;
 
 /**
  * @brief Enumeration constants corresponding to the sub-fields of

@@ -1068,7 +1068,10 @@ class GraphExecBase : public amd::ReferenceCountedObject, public Graph {
   virtual hipError_t Init() = 0;
   virtual hipError_t Run(hip::Stream* stream) = 0;
   // AQL packet update — no-op on the classic path (PAL has no AQL capture).
-  virtual hipError_t UpdateAQLPacket(hip::GraphNode* node) { return hipSuccess; }
+  virtual hipError_t UpdateAQLPacket(hip::GraphNode* node, bool deferBatchRefresh = false) {
+    return hipSuccess;
+  }
+  virtual void FinalizeAQLPacketUpdates() {}
   virtual hipError_t UpdatePacketBatchesForNodeEnableDisable(hip::GraphNode* node, bool isEnabled) {
     return hipSuccess;
   }
@@ -1131,7 +1134,8 @@ class GraphExecSegmented : public GraphExecBase {
   hipError_t Run(hip::Stream* stream) override;
   // Capture GPU Packets from graph commands
   hipError_t CaptureAQLPackets();
-  hipError_t UpdateAQLPacket(hip::GraphNode* node) override;
+  hipError_t UpdateAQLPacket(hip::GraphNode* node, bool deferBatchRefresh = false) override;
+  void FinalizeAQLPacketUpdates() override;
   // Handle packetBatches_ updates when nodes are enabled/disabled
   hipError_t UpdatePacketBatchesForNodeEnableDisable(hip::GraphNode* node, bool isEnabled) override;
   //! Recycle HW event signals borrowed for a launch back to the signal pool.
@@ -1211,6 +1215,12 @@ class GraphExecSegmented : public GraphExecBase {
     // 64-byte aligned so NT copies from this buffer can use aligned SIMD loads.
     amd::AlignedVector64<uint8_t> flatPacketData;
     std::vector<uint32_t> validPacketFullHeaders;
+    amd::Device* imageDevice = nullptr;  // Retained by GraphExec's device ownership.
+    std::shared_ptr<amd::AqlBatchImage> preparedImage;
+    std::shared_ptr<amd::AqlBatchImage> filteredPreparedImage;
+    bool imagePreparationPending = true;
+    bool packetRefreshPending = false;
+    bool filteredImagePreparationPending = true;
 
     // Pre-built flat metadata buffer (kMetadataPktSize per AQL packet).
     std::vector<uint8_t> flatMetadataData;
@@ -1245,7 +1255,7 @@ class GraphExecSegmented : public GraphExecBase {
     // Updates flat_packet pointers in patch_list to point into filteredFlatPacketData.
     void rebuildFilteredLists(std::vector<amd::Device::HwEventPatch>& patch_list);
     // Rebuild the flat buffer from the current dispatchPackets contents.
-    void rebuildFlatBuffer();
+    void rebuildFlatBuffer(amd::Device* device = nullptr);
     // Restore flat_packet pointers in patch_list back to flatPacketData when
     // all nodes are re-enabled (disabledNodeCount == 0).
     void restorePatchListPointers(std::vector<amd::Device::HwEventPatch>& patch_list);

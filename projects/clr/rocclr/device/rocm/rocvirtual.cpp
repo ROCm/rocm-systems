@@ -9,6 +9,8 @@
 #include "device/rocm/rocvirtual.hpp"
 #include "device/rocm/rockernel.hpp"
 #include "utils/nontemporal.hpp"
+#include "device/rocm/aql_packet_publication.hpp"
+#include "device/rocm/aql_graph_program.hpp"
 #include "device/rocm/rocmemory.hpp"
 #include "device/rocm/rocblit.hpp"
 #include "device/rocm/roccounters.hpp"
@@ -39,6 +41,8 @@
 #include <cinttypes>
 #include <cstdarg>
 #include <mutex>
+#include <cstdio>
+#include <cstdlib>
 
 
 /**
@@ -652,7 +656,13 @@ void VirtualGPU::MemoryDependency::clear(bool all) {
 
 // ================================================================================================
 VirtualGPU::HwQueueTracker::~HwQueueTracker() {
+  static const bool auditSignals = std::getenv("HIP_AQL_IB_AUDIT") != nullptr;
   for (auto& signal : signal_list_) {
+    if (auditSignals) {
+      std::fprintf(stderr, "HIP_AQL_IB_SIGNAL_DESTROY tracker=%p signal=0x%lx value=%ld done=%u\n",
+                   static_cast<void*>(this), signal->signal_.handle,
+                   Hsa::signal_load_relaxed(signal->signal_), signal->flags_.done_);
+    }
     CpuWaitForSignal(signal);
     signal->release();
   }
@@ -811,6 +821,12 @@ hsa_signal_t VirtualGPU::HwQueueTracker::ActiveSignal(hsa_signal_value_t init_va
   prof_signal->flags_.isPacketDispatch_ = false;
   prof_signal->ResetCachedTiming();
   prof_signal->queue_index_ = gpu_.index();
+  static const bool auditSignals = std::getenv("HIP_AQL_IB_AUDIT") != nullptr;
+  if (auditSignals) {
+    std::fprintf(stderr, "HIP_AQL_IB_SIGNAL_ARM tracker=%p signal=0x%lx value=%ld slot=%zu\n",
+                 static_cast<void*>(this), prof_signal->signal_.handle, init_val,
+                 static_cast<size_t>(current_id_));
+  }
 
   // Release any existing HwEvent before setting new one for the same command
   VirtualGPU::AttachHwEvent(cmd, prof_signal);
@@ -932,6 +948,14 @@ bool VirtualGPU::HwQueueTracker::CpuWaitForSignal(ProfilingSignal* signal) {
       LogPrintfError("Failed signal [0x%lx] wait", signal->signal_);
       return false;
     }
+  }
+
+  // Root completion covers all accesses to its resident image. Release the
+  // submission's reference only after observing completion; graph updates may
+  // already have dropped the batch's reference to this image.
+  {
+    std::scoped_lock lock(signal->LockSignalOps());
+    signal->retained_graph_image_.reset();
   }
 
   // Process this signal's timing before signal reuse
@@ -1296,15 +1320,6 @@ uint64_t VirtualGPU::getQueueID() {
 }
 
 // ================================================================================================
-static inline void packet_store_release(uint32_t* packet, uint16_t header, uint16_t rest) {
-#if IS_WINDOWS
-  std::atomic_ref<uint32_t> atomic_header(*packet);
-  atomic_header.store(header | (rest << 16), std::memory_order_release);
-#else
-  __atomic_store_n(packet, header | (rest << 16), __ATOMIC_RELEASE);
-#endif
-}
-
 // ================================================================================================
 std::string VirtualGPU::AnalyzeAqlQueue() const {
   std::string kernelName = "<not identified>";
@@ -1668,6 +1683,14 @@ static inline void writeMetadataPacketToRing(uint8_t* dst, const uint8_t* src,
 }
 
 // ================================================================================================
+std::shared_ptr<amd::AqlBatchImage> Device::prepareAqlBatchImage(
+    const amd::AlignedVector64<uint8_t>& packets, const std::vector<uint32_t>& headers) try {
+  return HIP_GRAPH_AQL_IB_MODE ? aql_resident::GraphProgram::create(*this, packets, headers)
+                               : nullptr;
+} catch (const std::bad_alloc&) {
+  return {};
+}
+
 // Unified flat-buffer graph dispatch.  Reserves all N queue slots with a single wptr bump,
 // then processes them in kPeriod-sized chunks: yield-until-free → memcpy → per-packet fixups
 // (profiling signals, correlation IDs, kernel-name printing) → valid-header writes → doorbell.
@@ -1687,7 +1710,8 @@ bool VirtualGPU::dispatchAqlPacketBatchFlat(const amd::AlignedVector64<uint8_t>&
                                             const std::vector<uint32_t>& validFullHeaders,
                                             amd::AccumulateCommand* vcmd, bool attach_signal,
                                             bool pre_patched, bool blocking,
-                                            const std::vector<uint8_t>* flatMetadataData) {
+                                            const std::vector<uint8_t>* flatMetadataData,
+                                            const std::shared_ptr<amd::AqlBatchImage>& image) {
   // Both base and ext kernel dispatch packets place kernel_object at the same offset.
   static_assert(offsetof(hsa_kernel_dispatch_packet_t, kernel_object) ==
                     offsetof(hsa_amd_ext_kernel_dispatch_packet_t, kernel_object),
@@ -1713,6 +1737,29 @@ bool VirtualGPU::dispatchAqlPacketBatchFlat(const amd::AlignedVector64<uint8_t>&
   profilingBegin(*vcmd);
   dispatchBlockingWait(nullptr);
 
+  const bool enableFastGraph = HIP_GRAPH_AQL_IB_MODE;
+  if (enableFastGraph && image) {
+    // Launch-time graph signals cannot be baked into an immutable image.
+    // A batch with any such patch keeps its ordinary AQL path and effects.
+    bool hasSignal = false;
+    for (size_t i = 0; i < validFullHeaders.size(); ++i) {
+      uint64_t signal;
+      std::memcpy(&signal, flatPacketData.data() + i * 64 + 56, sizeof(signal));
+      hasSignal |= signal != 0;
+    }
+    if (!hasSignal) {
+      if (HIP_GRAPH_AQL_IB_MODE) {
+        auto program = std::dynamic_pointer_cast<aql_resident::GraphProgram>(image);
+        if (program) {
+          const auto result = program->submit(*this, blocking);
+          if (result != aql_resident::SubmitResult::Unsupported) {
+            profilingEnd();
+            return result == aql_resident::SubmitResult::Submitted;
+          }
+        }
+      }
+    }
+  }
   const uint32_t queueSize = gpu_queue_->size;
   const uint32_t queueMask = queueSize - 1;
   const uint32_t sw_queue_size = queueMask;
@@ -4617,7 +4664,9 @@ bool VirtualGPU::submitKernelInternal(const amd::NDRangeContainer& sizes, const 
                                       const_address parameters, void* event_handle,
                                       uint32_t sharedMemBytes, amd::NDRangeKernelCommand* vcmd,
                                       hsa_kernel_dispatch_packet_t* aql_packet,
-                                      bool attach_signal) {
+                                      bool attach_signal, bool prepare_only) {
+  if (prepare_only && (!aql_packet || vcmd != nullptr ||
+      (command_ != nullptr && command_->getPktCapturingState()))) return false;
   device::Kernel* devKernel = const_cast<device::Kernel*>(kernel.getDeviceKernel(dev()));
   Kernel& gpuKernel = static_cast<Kernel&>(*devKernel);
   size_t ldsUsage = gpuKernel.WorkgroupGroupSegmentByteSize();
@@ -5014,6 +5063,10 @@ bool VirtualGPU::submitKernelInternal(const amd::NDRangeContainer& sizes, const 
     } else {
       rest = (sizes.dimensions() << HSA_KERNEL_DISPATCH_PACKET_SETUP_DIMENSIONS);
     }
+
+    // Resident submissions reserve their fixup and root together. Return the
+    // fully packed packet before metadata prefetch or queue publication.
+    if (prepare_only) return true;
 
     metadata_preloader_.PrepareDispatch(gpuKernel.MetadataKernelDescriptor(),
                                         gpuKernel.MetadataPreloadLength(),

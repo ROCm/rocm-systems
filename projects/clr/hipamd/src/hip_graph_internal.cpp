@@ -6,6 +6,10 @@
 
 #include "hip_graph_internal.hpp"
 
+#include <cstring>
+
+#include "device/device.hpp"
+
 #define CASE_STRING(X, C)                                                                          \
   case X:                                                                                          \
     case_string = #C;                                                                              \
@@ -1919,6 +1923,8 @@ void GraphExecSegmented::PacketBatch::rebuildFilteredLists(
   }
 
   filteredCacheValid = true;
+  filteredPreparedImage.reset();
+  filteredImagePreparationPending = true;
 }
 
 // ================================================================================================
@@ -2110,7 +2116,8 @@ hipError_t GraphExecSegmented::CaptureAndFormPacketsForGraph() {
   for (auto& [seg_id, segBatch] : segmentBatches_) {
     for (auto& batch : segBatch.packet_batches) {
       if (!batch.dispatchPackets.empty()) {
-        batch.rebuildFlatBuffer();
+        // Each segment belongs to one device even in a multi-device graph.
+        batch.rebuildFlatBuffer(g_devices[segments_[seg_id].dev_id]->devices()[0]);
         for (size_t i = 0; i < batch.dispatchPackets.size(); ++i) {
           pktToFlat[batch.dispatchPackets[i]] =
               batch.flatPacketData.data() + i * PacketBatch::kAqlPktSize;
@@ -2171,7 +2178,7 @@ hipError_t GraphExecSegmented::CaptureAQLPackets() {
 }
 
 // ================================================================================================
-hipError_t GraphExecSegmented::UpdateAQLPacket(hip::GraphNode* node) {
+hipError_t GraphExecSegmented::UpdateAQLPacket(hip::GraphNode* node, bool deferBatchRefresh) {
   if (!node->GraphCaptureEnabled()) {
     return hipSuccess;
   }
@@ -2308,25 +2315,30 @@ hipError_t GraphExecSegmented::UpdateAQLPacket(hip::GraphNode* node) {
           }
         }
       }
-      // Rebuild the flat buffer immediately so the next dispatch uses updated packets.
-      // The flat buffer always represents the full packet sequence; the dispatch path
-      // independently skips it when any nodes are disabled (disabledNodeCount != 0).
-      packetBatch.rebuildFlatBuffer();
-
-      // Refresh flat_packet pointers in the patch list since rebuildFlatBuffer
-      // reallocated flatPacketData, invalidating previous flat_packet pointers.
-      for (auto& patch : sync_plan_.patch_list) {
-        for (size_t pi = 0; pi < packetBatch.dispatchPackets.size(); ++pi) {
-          if (patch.packet == packetBatch.dispatchPackets[pi]) {
-            patch.flat_packet = packetBatch.flatPacketData.data() + pi * PacketBatch::kAqlPktSize;
-            break;
-          }
-        }
+      // Whole-graph updates recapture all nodes before refreshing a batch.
+      // Standalone node updates still finish synchronously before returning.
+      if (HIP_GRAPH_AQL_IB_MODE && deferBatchRefresh) {
+        packetBatch.packetRefreshPending = true;
+      } else {
+        packetBatch.rebuildFlatBuffer();
+        packetBatch.restorePatchListPointers(sync_plan_.patch_list);
       }
+
       return hipSuccess;
     }
   }
   return hipSuccess;  // Node not in any batch
+}
+
+void GraphExecSegmented::FinalizeAQLPacketUpdates() {
+  for (auto& entry : segmentBatches_) {
+    for (auto& batch : entry.second.packet_batches) {
+      if (!batch.packetRefreshPending) continue;
+      batch.rebuildFlatBuffer();
+      batch.restorePatchListPointers(sync_plan_.patch_list);
+      batch.packetRefreshPending = false;
+    }
+  }
 }
 
 // ================================================================================================
@@ -2377,7 +2389,16 @@ void GraphExecSegmented::PacketBatch::invalidateMetadataSlot(uint8_t* slot) {
 
 // ================================================================================================
 // Rebuild the flat packet buffer from the current dispatchPackets contents.
-void GraphExecSegmented::PacketBatch::rebuildFlatBuffer() {
+void GraphExecSegmented::PacketBatch::rebuildFlatBuffer(amd::Device* device) {
+  const bool sameDevice = !device || device == imageDevice;
+  if (device) imageDevice = device;
+  amd::AlignedVector64<uint8_t> previousData;
+  std::vector<uint32_t> previousHeaders;
+  if (preparedImage) {
+    previousData = std::move(flatPacketData);
+    previousHeaders = std::move(validPacketFullHeaders);
+  }
+  filteredPreparedImage.reset();
   const size_t n = dispatchPackets.size();
   flatPacketData.clear();
   validPacketFullHeaders.clear();
@@ -2405,6 +2426,15 @@ void GraphExecSegmented::PacketBatch::rebuildFlatBuffer() {
         invalidateMetadataSlot(slot);
       }
     }
+  }
+  if (HIP_GRAPH_AQL_IB_MODE && imageDevice) {
+    if (!sameDevice || previousData != flatPacketData || previousHeaders != validPacketFullHeaders) {
+      if (!sameDevice || !preparedImage || !preparedImage->update(flatPacketData, validPacketFullHeaders)) {
+        preparedImage.reset();
+      }
+    }
+    if (!preparedImage) preparedImage = imageDevice->prepareAqlBatchImage(flatPacketData, validPacketFullHeaders);
+    imagePreparationPending = false;
   }
 }
 
@@ -2642,6 +2672,8 @@ hipError_t GraphExecSegmented::EnqueueSegment(const Segment& segment, hip::Strea
     const amd::AlignedVector64<uint8_t>* flatData;
     const std::vector<uint32_t>* flatHdrs;
     const std::vector<uint8_t>* metaData = nullptr;
+    std::shared_ptr<amd::AqlBatchImage>* preparedImage;
+    bool* preparationPending;
 
     if (packetBatch.disabledNodeCount == 0) {
       flatData = &packetBatch.flatPacketData;
@@ -2649,6 +2681,8 @@ hipError_t GraphExecSegmented::EnqueueSegment(const Segment& segment, hip::Strea
       if (!packetBatch.flatMetadataData.empty()) {
         metaData = &packetBatch.flatMetadataData;
       }
+      preparedImage = &packetBatch.preparedImage;
+      preparationPending = &packetBatch.imagePreparationPending;
     } else {
       // Guard against stale filtered buffers: rebuildFlatBuffer (called from
       // UpdateAQLPacket) invalidates the cache. This is a no-op when valid.
@@ -2658,11 +2692,23 @@ hipError_t GraphExecSegmented::EnqueueSegment(const Segment& segment, hip::Strea
       if (!packetBatch.filteredFlatMetadataData.empty()) {
         metaData = &packetBatch.filteredFlatMetadataData;
       }
+      preparedImage = &packetBatch.filteredPreparedImage;
+      preparationPending = &packetBatch.filteredImagePreparationPending;
     }
 
     if (!flatData->empty()) {
+      // A filtered node set may not have been materialized during update.
+      // Prepare it once here and cache rejection until the input changes.
+      // Launch-time per-packet event effects are checked again by submission;
+      // they cannot be hidden inside a resident program.
+      if (HIP_GRAPH_AQL_IB_MODE && *preparationPending) {
+        *preparedImage = packetBatch.imageDevice
+            ? packetBatch.imageDevice->prepareAqlBatchImage(*flatData, *flatHdrs)
+            : nullptr;
+        *preparationPending = false;
+      }
       bool batchStatus = stream->vdev()->dispatchAqlPacketBatchFlat(
-          *flatData, *flatHdrs, accumulate, attach_signal, true, false, metaData);
+          *flatData, *flatHdrs, accumulate, attach_signal, true, false, metaData, *preparedImage);
       if (!batchStatus) {
         return hipErrorUnknown;
       }

@@ -239,6 +239,8 @@ release(cstring, GPU_CLR_PROFILE_OUTPUT, "",                                  \
         "Enable built-in HIP profiling and write Chrome trace JSON to this path on exit") \
 release(bool, HIP_VMEM_MANAGE_SUPPORT, true,                                  \
         "Virtual Memory Management Support")                                  \
+release(bool, HIP_GRAPH_AQL_IB_MODE, false,                                  \
+        "Use the experimental resident AQL IB HIP graph backend")             \
 release(uint, DEBUG_HIP_GRAPH_DOT_PRINT, 0,                               \
         "0 = Disable, 1 = Print during Graph Inst, 2 = Print during Graph Launch") \
 release(uint, DEBUG_HIP_FORCE_GRAPH_QUEUES, 4,                                \

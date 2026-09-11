@@ -203,7 +203,9 @@ class Timestamp : public amd::ReferenceCountedObject {
   bool GetBlocking() { return blocking_; }
 };
 
+namespace aql_resident { class QueueSubmitter; }
 class VirtualGPU : public device::VirtualDevice {
+  friend class aql_resident::QueueSubmitter;
  public:
   class ManagedBuffer : public amd::EmbeddedObject {
    public:
@@ -552,7 +554,8 @@ class VirtualGPU : public device::VirtualDevice {
       uint32_t sharedMemBytes = 0,                         //!< Shared memory size
       amd::NDRangeKernelCommand* vcmd = nullptr,           //!< Original launch command
       hsa_kernel_dispatch_packet_t* aql_packet = nullptr,  //!< Scheduler launch
-      bool attach_signal = false);
+      bool attach_signal = false,
+      bool prepare_only = false);
   void submitNativeFn(amd::NativeFnCommand& cmd);
   void submitMarker(amd::Marker& cmd);
   void submitAccumulate(amd::AccumulateCommand& cmd);
@@ -729,7 +732,8 @@ class VirtualGPU : public device::VirtualDevice {
                                   bool attach_signal = false,
                                   bool pre_patched = false,
                                   bool blocking = false,
-                                  const std::vector<uint8_t>* flatMetadataData = nullptr) override;
+                                  const std::vector<uint8_t>* flatMetadataData = nullptr,
+                                  const std::shared_ptr<amd::AqlBatchImage>& image = {}) override;
 
   template <typename AqlPacket> bool dispatchGenericAqlPacket(AqlPacket* packet, uint16_t header,
                                                               uint16_t rest, bool blocking,

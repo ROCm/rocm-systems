@@ -19,6 +19,10 @@
 #include "device/comgrctx.hpp"
 #include "device/devhostcall.hpp"
 #include "device/rocm/rocdevice.hpp"
+#include "device/rocm/aql_resident_kernels.hpp"
+#include "device/rocm/aql_static_scratch.hpp"
+#include <cstdlib>
+#include <cstring>
 #include "device/rocm/rocblit.hpp"
 #include "device/rocm/rocvirtual.hpp"
 #include "device/rocm/rocprogram.hpp"
@@ -789,6 +793,7 @@ bool Device::createBlitProgram() {
   }
 
   blitProgram_ = new BlitProgram(context_);
+  if (amd::IS_HIP && HIP_GRAPH_AQL_IB_MODE) extraKernel += aql_resident::kernelSource();
   // Create blit programs
   if (blitProgram_ == nullptr || !blitProgram_->create(this, extraKernel, "")) {
     delete blitProgram_;
@@ -3503,6 +3508,16 @@ hsa_queue_t* Device::acquireQueue(uint32_t queue_size_hint, bool coop_queue,
   desc.callback_data = this;
   desc.engine.compute.type = queue_type;
   desc.engine.compute.private_segment_size = HSA_AMD_PRIVATE_SEGMENT_SIZE_DEFAULT;
+  // Resident dispatches cannot grow scratch by replaying partially executed
+  // programs. Keep a fixed allocation alive for the physical queue lifetime.
+  if (HIP_GRAPH_AQL_IB_MODE) {
+    const char* noReclaim = std::getenv("HSA_NO_SCRATCH_RECLAIM");
+    if (!noReclaim || std::strcmp(noReclaim, "1") != 0) {
+      LogError("HIP_GRAPH_AQL_IB_MODE requires HSA_NO_SCRATCH_RECLAIM=1 for static scratch");
+      return nullptr;
+    }
+    desc.engine.compute.private_segment_size = aql_resident::kStaticScratchWave64LaneBytes;
+  }
   if (device_mem_ring_buf) {
     desc.flags = static_cast<hsa_amd_queue_create_flag_t>(
         desc.flags | HSA_AMD_QUEUE_CREATE_DEVICE_MEM_RING_BUF);
@@ -3552,7 +3567,8 @@ hsa_queue_t* Device::acquireQueue(uint32_t queue_size_hint, bool coop_queue,
     }
   }
 
-  Hsa::profiling_set_profiler_enabled(queue, 1);
+  // Per-dispatch timestamps are unsupported by resident packets.
+  Hsa::profiling_set_profiler_enabled(queue, HIP_GRAPH_AQL_IB_MODE ? 0 : 1);
 
   if (!metadata_version_queried_) {
     uint8_t major = 0, minor = 0;

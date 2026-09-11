@@ -115,6 +115,13 @@ target_sources(rocclr PRIVATE
   ${ROCCLR_SRC_DIR}/device/rocm/rocsettings.cpp
   ${ROCCLR_SRC_DIR}/device/rocm/rocsignal.cpp
   ${ROCCLR_SRC_DIR}/device/rocm/rocvirtual.cpp
+  ${ROCCLR_SRC_DIR}/device/rocm/aql_resident_program.cpp
+  ${ROCCLR_SRC_DIR}/device/rocm/aql_resident_storage.cpp
+  ${ROCCLR_SRC_DIR}/device/rocm/aql_resident_upload.cpp
+  ${ROCCLR_SRC_DIR}/device/rocm/aql_resident_kernels.cpp
+  ${ROCCLR_SRC_DIR}/device/rocm/aql_resident_fixup.cpp
+  ${ROCCLR_SRC_DIR}/device/rocm/aql_resident_submission.cpp
+  ${ROCCLR_SRC_DIR}/device/rocm/aql_graph_program.cpp
   ${ROCCLR_SRC_DIR}/device/rocm/rocurilocator.cpp)
 
 if(UNIX)
