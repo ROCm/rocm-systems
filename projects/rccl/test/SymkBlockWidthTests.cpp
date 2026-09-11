@@ -6,8 +6,8 @@
 
 // Size bands for the gfx950 symmetric reduce kernel block widths.
 //
-// ncclSymkGfx950BlockThreads() is the width decision lifted out of
-// ncclSymkPickKernel(). It is a pure function of the collective, the kernel
+// ncclSymkGfx950BlockThreads() is the width decision lifted out of the
+// symmetric tuning model. It is a pure function of the collective, the kernel
 // class, the rank count and the message size, so these tests need no
 // communicator and no GPU.
 //

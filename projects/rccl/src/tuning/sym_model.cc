@@ -415,14 +415,16 @@ ncclResult_t ncclTuningSymkModelSim(struct ncclTuningInput_t* const inputs, stru
   tuning->timeUs = kTime; // queryModel() has already charged smPenalty
   tuning->nChannels = kBlocks;
 #if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
-  // The width tuning is fitted to gfx950, so every other architecture keeps the upstream width.
+  // The width tuning is fitted to the gfx950 LSA kernels. Other architectures and the GIN kernels,
+  // which carve their warp roles out of the launch width, keep the upstream width.
   struct ncclComm* comm = inputs->comm;
   bool isLL = (tuning_kmask & ncclSymkLLKernelMask()) != 0;
+  bool isLsa = (tuning_kmask & ncclSymkLsaKernelMask()) != 0;
   int nThreads = ncclSymkMaxThreads;
   if (ncclSymkTmaKernelMask() >> tuning->symKernelId & 1) {
     // symCheckTmaLaunch() requires the full launch for Tma.
     nThreads = ncclSymkWarpsPerBlock * comm->WarpSize;
-  } else if (ncclSymkIsGfx950(comm)) {
+  } else if (ncclSymkIsGfx950(comm) && isLsa) {
     nThreads = ncclSymkGfx950BlockThreads(inputs->func, isLL, comm->nRanks, inputs->nBytes);
   }
   tuning->nWarps = std::max(1, nThreads / comm->WarpSize);

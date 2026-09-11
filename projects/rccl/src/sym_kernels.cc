@@ -17,7 +17,6 @@
 #endif
 #include <cmath>
 #include <cfloat>
-#include <cstring>
 
 constexpr uint32_t kernelMask_STMC =
   1 << ncclSymkKernelId_AllGather_LLMC | 1 << ncclSymkKernelId_AllGather_STMC |
@@ -79,6 +78,10 @@ int ncclSymkTmaKernelMask() {
 
 int ncclSymkGinKernelMask() {
   return kernelMask_Gin;
+}
+
+int ncclSymkLsaKernelMask() {
+  return kernelMask_LSA;
 }
 
 int ncclSymkAGKernelMask() {
@@ -199,7 +202,7 @@ extern int64_t ncclParamSymCTAs();
 #if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
 // The block width tuning is fitted to gfx950 and must not reach other architectures.
 bool ncclSymkIsGfx950(struct ncclComm* comm) {
-  return comm->archName != nullptr && strncmp(comm->archName, "gfx950", 6) == 0;
+  return comm->archName != nullptr && IsArchMatch(comm->archName, "gfx950");
 }
 #endif
 

@@ -45,6 +45,7 @@ Full documentation for RCCL is available at [https://rccl.readthedocs.io](https:
 * Updated the RMA plugin interface to v15.
 * Reduced communicator host memory by allocating topology path link arrays to their actual length.
 * Widened the LL128 per-thread shared-memory slice from 8 to 32 elements on gfx1250 (MI450/MI455); other architectures are unchanged. Forced Ring/LL128 bandwidth roughly doubles at 16 MB and above. Per-block LDS rises from 36448 to 85472 bytes, and because the scratch region is shared across protocols this applies to every kernel launch, not only LL128 ones. The tuner's protocol selection is unchanged, so the gain is only visible when LL128 is selected explicitly.
+* Retuned the symmetric AllReduce and ReduceScatter kernels for gfx950. The block width is now selected per collective and message size instead of a fixed 256 threads, and the work partitioning and unroll factors in the load-direct kernels were refitted to the 64-lane wavefront. AllGather, the multi-node GIN kernels, and all other architectures are unchanged.
 
 ### Resolved issues
 * Restored topo tuning-model init (`ncclTopoTuneModel`) after the 2.31 `ncclTuningInit` switch so multi-node kernels do not launch with `blockDim.x=0`.
