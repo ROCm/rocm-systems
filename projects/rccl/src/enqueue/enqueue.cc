@@ -1616,9 +1616,23 @@ static ncclResult_t addP2pToPlan(struct ncclComm* comm, struct ncclKernelPlan* p
       // Legacy LL: use the SIMPLE-derived per-channel P2P_LL_THRESHOLD first. Allow LL beyond that
       // cutoff if the payload still fits in one LL data step across the LL channel plan, capped by
       // the channel bound * P2P_LL_THRESHOLD.
+      //
+      // Single-node all-XGMI gfx942/gfx950 widens that cap to the measured 64 KiB/peer SIMPLE/LL
+      // crossover (bounded by p2pChunkSize / 8), because channel bound * P2P_LL_THRESHOLD (8 * 4 KiB)
+      // stops at 32 KiB/peer and SIMPLE costs ~11% bus bandwidth on 8-rank alltoall between 32 KiB
+      // and 64 KiB per peer; 128 KiB/peer and above keep SIMPLE (going past it regresses 1-4 MiB
+      // total). The LL channel-plan fit check below still gates the widened range. A user-set
+      // NCCL_P2P_LL_THRESHOLD keeps the stock cap, as does the LL128 P2P path (separate branch above)
+      // whose crossover has not been measured on single node.
+      static bool const userSetP2pLLThreshold = ncclGetEnv("NCCL_P2P_LL_THRESHOLD") != nullptr;
+      ssize_t llEligibleMax = (ssize_t)p2pChMax[dir] * p2pLlThreshold;
+      if (comm->nNodes <= 1 && comm->isAllNvlink && (comm->cudaArch == 940 || comm->cudaArch == 950) &&
+          !userSetP2pLLThreshold) {
+        llEligibleMax = std::max<ssize_t>(llEligibleMax, std::min<ssize_t>(comm->p2pChunkSize / 8, 65536));
+      }
       protocol[dir] = hasLL[dir] && bytes[dir] <= (ssize_t)nChannels[dir] * p2pLlThreshold ? NCCL_PROTO_LL
                                                                                            : NCCL_PROTO_SIMPLE;
-      if (hasLL[dir] && protocol[dir] == NCCL_PROTO_SIMPLE && bytes[dir] <= (ssize_t)p2pChMax[dir] * p2pLlThreshold) {
+      if (hasLL[dir] && protocol[dir] == NCCL_PROTO_SIMPLE && bytes[dir] <= llEligibleMax) {
         int llChannels = computeP2pChannels(bytes[dir], p2pChMin[dir], p2pChMax[dir], llStoragePerStep, comm->nNodes);
         // NCCL_CHUNK_SIZE overrides the executed chunk only; eligibility still uses the LL FIFO step.
         int llChunkSize = computeP2pChunkSize(llStoragePerStep, NCCL_PROTO_LL, bytes[dir],
