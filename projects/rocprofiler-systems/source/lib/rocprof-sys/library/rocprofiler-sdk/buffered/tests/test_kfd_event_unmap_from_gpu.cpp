@@ -86,8 +86,9 @@ TEST(kfd_event_unmap_from_gpu_test, on_configure_registers_pmc_info_for_each_gpu
 {
     g_externals_mock = std::make_unique<StrictMock<gmock_externals>>();
 
-    auto gpu_agent = std::make_shared<agent_t>(
-        agent_t{ .type = externals::k_agent_type_gpu, .device_type_index = 4 });
+    auto gpu_agent               = std::make_shared<agent_t>();
+    gpu_agent->type              = externals::k_agent_type_gpu;
+    gpu_agent->device_type_index = 4;
 
     EXPECT_CALL(*g_externals_mock,
                 add_string(Eq(externals::k_kfd_event_unmap_from_gpu_category_name)))

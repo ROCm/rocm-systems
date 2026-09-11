@@ -58,7 +58,8 @@ make_definition()
                 .mode  = collection_mode::buffered,
                 .group = std::nullopt,
             },
-        .on_records = &stub_on_records,
+        .on_records   = &stub_on_records,
+        .on_configure = nullptr,
     };
 }
 
