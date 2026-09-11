@@ -104,6 +104,7 @@ set(SRC_FILES
   device/symmetric/reduce_scatter_gin.cuh
   graph/connect.cc
   graph/paths.cc
+  graph/rccl_graph_gen.cc
   graph/rings.cc
   graph/rings.h
   graph/rome_models.cc
@@ -140,6 +141,9 @@ set(SRC_FILES
   algorithms/dda/reduce_scatter/reduce_scatter_dda_fabric_ll.h
   algorithms/dda/reduce_scatter/reduce_scatter_dda_fabric_ll128.h
   algorithms/gin/gin_alltoall.h
+  algorithms/gin/gin_all_reduce.h
+  algorithms/gin/gin_all_reduce_policy.h
+  algorithms/gin/sdma/all_reduce_gin_sdma.h 
   include/alltoallv_meta.h
   include/alt_rsmi.h
   include/archinfo.h
@@ -218,6 +222,7 @@ set(SRC_FILES
   include/register.h
   include/register_inline.h
   include/rccl_float8.h
+  include/rccl_graph_gen.h
   include/rocmwrap.h
   include/roctx.h
   include/recorder.h
@@ -522,6 +527,7 @@ if(ENABLE_ROCSHMEM_GIN)
     src/gin/gin_plugin_anvil_sdma.cc
     src/gin/gin_anvil_ipc_table_host.cc
     src/algorithms/gin/sdma/gin_alltoall_sdma.cu
+    src/algorithms/gin/sdma/gin_all_reduce_sdma.cu 
   )
 endif()
 
@@ -745,7 +751,7 @@ endif()
 
 # Execute the python script to generate required collective functions
 execute_process(
-    COMMAND ${Python3_EXECUTABLE} ${RCCL_SOURCE_DIR}/src/device/generate.py ${GEN_DIR} ${IFC_ENABLED} OFF ${BUILD_LOCAL_GPU_TARGET_ONLY} ${ENABLE_ROCSHMEM} ${ONLY_FUNCS}
+    COMMAND ${Python3_EXECUTABLE} ${RCCL_SOURCE_DIR}/src/device/generate.py ${GEN_DIR} "${IFC_ENABLED}" OFF "${BUILD_LOCAL_GPU_TARGET_ONLY}" "${ENABLE_ROCSHMEM}" "${BUILD_ALL_UNROLLS}" ${ONLY_FUNCS}
     WORKING_DIRECTORY ${RCCL_SOURCE_DIR}
     RESULT_VARIABLE gen_py_result
     ERROR_VARIABLE gen_py_error
@@ -817,6 +823,7 @@ if(ENABLE_DEVICE_LINKER)
   # Contains the GIN-SDMA alltoall __global__ kernel and its launch site, so it
   # needs full HIP compilation rather than --offload-host-only.
   list(FILTER HIP_SOURCES EXCLUDE REGEX "gin_alltoall_sdma\\.cu\\.cpp$")
+  list(FILTER HIP_SOURCES EXCLUDE REGEX "gin_all_reduce_sdma\\.cu\\.cpp$")
   list(FILTER HIP_SOURCES EXCLUDE REGEX "dda_all_reduce_fabric\\.cu\\.cpp$")
   list(FILTER HIP_SOURCES EXCLUDE REGEX "dda_all_reduce_fabric_ll\\.cu\\.cpp$")
   list(FILTER HIP_SOURCES EXCLUDE REGEX "dda_all_reduce_fabric_ll128\\.cu\\.cpp$")

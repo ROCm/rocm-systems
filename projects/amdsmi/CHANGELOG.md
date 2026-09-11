@@ -46,6 +46,10 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
   - This covers every subcommand that uses the standard human-readable renderer, not only the AI-NIC `RDMA_DEVICES` case that prompted it.
   - `monitor`, `partition`, `topology`, `xgmi`, and the default no-argument output print tables and are unchanged.
 
+- **`container_name` in process info now reports the full container ID**.  
+  - Previously only the first 16 characters were reported. The value is now the complete 64-character ID that `docker inspect`, `docker ps --no-trunc` and Kubernetes tooling use, so process output can be matched against them directly.
+  - Nested LXC containers now report the outer container name rather than `<parent>/<child>`.
+
 - **`cper_decode()` in the internal header `amd_smi/impl/amd_smi_cper.h` takes a new `buf_size` argument**.  
   - The function needs the caller's buffer length to bound the record it walks. It also now rejects a buffer that does not start with the `CPER` signature, so the record walk is safe for any pointer and size rather than depending on `amdsmi_get_afids_from_cper()` having validated first.
   - The symbol is not exported: the version script's `amdsmi_*` glob does not match a mangled C++ name, and `libamd_smi_static.a` is not installed. Only an in-tree build that links the archive sees the new signature.
@@ -88,6 +92,13 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 
 - **Fixed `amd-smi static --vram` reporting `GDDR7` for LPDDR5 unified memory on APUs (e.g. gfx117x)**.  
   - `AMDSMI_VRAM_TYPE__MAX` aliases the highest real memory type (`LPDDR5`), so a genuine LPDDR5 reading was matched by the `__MAX` special case and mislabeled `GDDR7`. It is now correctly reported as `LPDDR5`.
+
+- **Fixed `container_name` in process info being wrong, missing, or crashing `amd-smi`**.  
+  - `amd-smi process --sort-by-pid` could abort with `terminate called after throwing an instance of 'std::out_of_range'` when any GPU process ran in a cgroup whose path ended in `docker` or `lxc`.
+  - Processes in containerd, CRI-O and Podman containers reported no container at all, including Kubernetes pods. They are now identified under either cgroup driver.
+  - Processes that were not in a container could be reported as if they were, for example anything running under the Docker daemon's own `docker.service`.
+  - Containers managed by LXC 3 or later, or by LXD, under systemd are now identified.
+  - A process started from a path of 256 characters or more could report a corrupted process name.
 
 - **Fixed out-of-bounds reads and writes when parsing malformed CPER records**.  
   - A record whose `record_length` is smaller than a CPER header is now dropped by the ring reader. Such a record was previously copied and then had a product serial number written past the end of the caller's buffer.
