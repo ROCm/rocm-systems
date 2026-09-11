@@ -11,10 +11,10 @@
 #include "checks.h"
 #include "comm.h"
 #include "debug.h"
+#include "param.h"
 #include "algorithms/dda/dda_init_detail.h"
 #include "algorithms/dda/ipc/ipc_mem_handler.h"
 #include "algorithms/dda/all_reduce/dda_all_reduce.h"
-#include "param.h"
 
 #include <cuda_runtime.h>
 
