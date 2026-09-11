@@ -76,7 +76,7 @@ ncclResult_t IbCastRegMrDmaBufInternal(void* comm, void* data, size_t size, int 
   // math, so it is reported the same way rather than left as a release-build
   // assert.
   if (comm == NULL || mhandle == NULL || size == 0) {
-    WARN("NET/IB-CAST: regMr called with comm=%p mhandle=%p size=%zu", comm, (void*)mhandle, size);
+    WARN("NET/IB-CAST: regMr/regMrDmaBuf called with comm=%p mhandle=%p size=%zu", comm, (void*)mhandle, size);
     return ncclInvalidArgument;
   }
   struct ncclIbNetCommBase* base = (struct ncclIbNetCommBase*)comm;
