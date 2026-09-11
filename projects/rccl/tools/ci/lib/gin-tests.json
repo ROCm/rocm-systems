@@ -62,6 +62,20 @@
       "args": ""
     },
     {
+      "name": "rccl-gin-conn-check-plugin-ut",
+      "kind": "fixtures",
+      "bin": "rccl-UnitTestsGinAnvilPlugin",
+      "env": [],
+      "args": "--gtest_filter=*ConnCheck*"
+    },
+    {
+      "name": "rccl-gin-conn-check-device-ut",
+      "kind": "fixtures",
+      "bin": "rccl-UnitTestsGinAnvilConnCheckDevice",
+      "env": [],
+      "args": ""
+    },
+    {
       "name": "rccl-gin-fixtures-anvil-gda",
       "kind": "fixtures",
       "bin": "rccl-UnitTestsFixtures",
