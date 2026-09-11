@@ -137,7 +137,8 @@ if(MPI_FOUND)
     )
         target_link_libraries(
             mpi-roctx-regions
-            PRIVATE $<TARGET_NAME_IF_EXISTS:rocprofiler-systems::rocprofiler-systems-compile-options>
+            PRIVATE
+                $<TARGET_NAME_IF_EXISTS:rocprofiler-systems::rocprofiler-systems-compile-options>
         )
     else()
         target_compile_options(mpi-roctx-regions PRIVATE -W -Wall)
@@ -155,5 +156,8 @@ if(MPI_FOUND)
         )
     endif()
 else()
-    message(AUTHOR_WARNING "MPI could not be found. Cannot build the mpi-roctx-regions target")
+    message(
+        AUTHOR_WARNING
+        "MPI could not be found. Cannot build the mpi-roctx-regions target"
+    )
 endif()

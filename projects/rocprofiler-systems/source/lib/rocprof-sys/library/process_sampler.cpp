@@ -177,6 +177,11 @@ sampler::shutdown()
     // set the local sampler state to finalized
     set_state(state::process::Finalized);
 
+    for(auto& itr : instances)
+    {
+        itr->flush_pending_pause();
+    }
+
     // shutdown all components
     for(auto& itr : instances)
         itr->shutdown();

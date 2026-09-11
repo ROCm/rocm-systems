@@ -488,5 +488,5 @@ class TestSelectiveRegionMPI(RocprofsysTest):
             subtest_name="Only in-region MPI calls traced",
             categories=["mpi"],
             pass_regex=["MPI_Allreduce"],
-            fail_regex=["MPI_Bcast"],
+            fail_regex=["MPI_Bcast", "MPI_Comm_rank", "MPI_Comm_size"],
         )
