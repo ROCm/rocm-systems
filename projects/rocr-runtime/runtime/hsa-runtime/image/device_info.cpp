@@ -71,6 +71,11 @@ hsa_status_t GetGPUAsicID(hsa_agent_t agent, uint32_t *chip_id) {
 
   assert(a_str.compare(0, 3, "gfx", 3) == 0);
 
+  // Drop any target-id suffix (e.g. "-strict") so the positional parse below sees
+  // only the base gfxNNNN identifier.
+  size_t suffix = a_str.find('-');
+  if (suffix != std::string::npos) a_str.erase(suffix);
+
   a_str.erase(0,3);
 
   // Load chip_id accounting for stepping and minor in hex and major in dec.

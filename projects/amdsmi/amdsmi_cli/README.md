@@ -2,7 +2,7 @@
 
 A command line tool for manipulating and monitoring the `amdgpu` kernel;
 `amd-smi` is intended to replace and deprecate the existing
-[`rocm-smi`](https://github.com/rocm/rocm_smi_lib) CLI tool.
+[`rocm-smi`](https://github.com/ROCm/rocm-systems/tree/develop/projects/rocm-smi-lib) CLI tool.
 
 When using the CLI tool, you should have at least one AMD GPU and the driver
 installed.
@@ -20,7 +20,7 @@ Find the documentation in the `docs/` directory.
 ## Online documentation
 
 Explore the latest documentation on the [ROCm documentation
-portal](https://rocm.docs.amd.com/projects/en/latest/index.html).
+portal](https://rocm.docs.amd.com/projects/amdsmi/en/latest/index.html).
 
 - [Install AMD SMI](https://rocm.docs.amd.com/projects/amdsmi/en/latest/install/install.html)
 

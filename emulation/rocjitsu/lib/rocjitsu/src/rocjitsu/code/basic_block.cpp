@@ -3,8 +3,8 @@
 
 #include "rocjitsu/code/basic_block.h"
 
-#include "rocjitsu/analysis/control_flow.h"
-#include "rocjitsu/analysis/indirect_branch_discovery.h"
+#include "rocjitsu/code/analysis/control_flow.h"
+#include "rocjitsu/code/analysis/indirect_branch_discovery.h"
 #include "rocjitsu/code/code_object.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
@@ -174,7 +174,9 @@ BasicBlock::build(const CodeObject &co, Decoder &decoder, rj_code_arch_t arch,
       };
       const DecodeErrorEmitter decode_error =
           emit_error.ignores_messages() ? DecodeErrorEmitter{} : DecodeErrorEmitter(emit_at_offset);
-      DecodeResult decode_result = decoder.decode(&inst_data[pc], byte_offset, decode_error);
+      DecodeResult decode_result =
+          decoder.decode_window(std::span<const uint32_t>(inst_data + pc, inst_data_size - pc),
+                                byte_offset, decode_error);
       if (decode_result.failed())
         return Result::failure();
       std::unique_ptr<Instruction> inst = std::move(decode_result).value();

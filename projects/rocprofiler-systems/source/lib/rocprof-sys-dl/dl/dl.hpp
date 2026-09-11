@@ -153,13 +153,13 @@ namespace rocprofsys
 {
 namespace dl
 {
-enum class InstrumentMode : int
+enum class instrument_mode : int
 {
-    None          = -1,
-    BinaryRewrite = 0,
-    ProcessCreate = 1,  // runtime instrumentation at start of process
-    PythonProfile = 2,  // python setprofile
-    Last,
+    none           = -1,
+    binary_rewrite = 0,
+    process_create = 1,  // runtime instrumentation at start of process
+    python_profile = 2,  // python setprofile
+    last,
 };
 }  // namespace dl
 }  // namespace rocprofsys

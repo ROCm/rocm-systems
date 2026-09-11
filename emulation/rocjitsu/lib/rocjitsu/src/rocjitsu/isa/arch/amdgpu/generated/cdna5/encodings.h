@@ -819,7 +819,9 @@ public:
         false ? 0 : inst->neg_hi, inst->clamp, vop3p_encoded_source_count(),
         inst_.op <= 17 || (inst_.op >= 20 && inst_.op <= 21) ||
             (inst_.op >= 27 && inst_.op <= 31) || inst_.op == 35 ||
-            (inst_.op >= 40 && inst_.op <= 50) || (inst_.op >= 54 && inst_.op <= 57));
+            (inst_.op >= 40 && inst_.op <= 50) || (inst_.op >= 54 && inst_.op <= 57) ||
+            (inst_.op >= 59 && inst_.op <= 60) || (inst_.op >= 75 && inst_.op <= 79) ||
+            inst_.op == 126);
     if (has_encoded_dpp())
       amdgpu::dpp::append_dpp16_disassembly(out, dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
                                             dpp_bound_ctrl_, dpp_fi_, true,
