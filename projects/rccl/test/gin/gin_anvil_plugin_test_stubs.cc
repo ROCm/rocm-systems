@@ -110,9 +110,41 @@ void ncclDebugLog(ncclDebugLogLevel level, unsigned long flags, const char* file
 ncclResult_t bootstrapAllGather(void* commState, void* allData, int size) {
   (void)commState;
   if (GinAnvilPluginStubs::g.bootstrapFail) return ncclInternalError;
+  if (allData == nullptr || size <= 0) return ncclSuccess;
+  const int n = GinAnvilPluginStubs::g.bootstrapNranks;
+  auto* bytes = static_cast<unsigned char*>(allData);
+  int src = -1;
+  for (int i = 0; i < n; ++i) {
+    bool nonempty = false;
+    for (int b = 0; b < size; ++b) {
+      if (bytes[static_cast<size_t>(i) * static_cast<size_t>(size) + static_cast<size_t>(b)] != 0) {
+        nonempty = true;
+        break;
+      }
+    }
+    if (nonempty) {
+      src = i;
+      break;
+    }
+  }
+  if (src >= 0) {
+    for (int i = 0; i < n; ++i) {
+      bool empty = true;
+      for (int b = 0; b < size; ++b) {
+        if (bytes[static_cast<size_t>(i) * static_cast<size_t>(size) + static_cast<size_t>(b)] != 0) {
+          empty = false;
+          break;
+        }
+      }
+      if (empty) {
+        memcpy(bytes + static_cast<size_t>(i) * static_cast<size_t>(size),
+               bytes + static_cast<size_t>(src) * static_cast<size_t>(size), static_cast<size_t>(size));
+      }
+    }
+  }
   if (size == static_cast<int>(sizeof(int))) {
     int* devs = static_cast<int*>(allData);
-    for (int i = 0; i < GinAnvilPluginStubs::g.bootstrapNranks; ++i) {
+    for (int i = 0; i < n; ++i) {
       if (devs[i] < 0) devs[i] = 0;
     }
   }

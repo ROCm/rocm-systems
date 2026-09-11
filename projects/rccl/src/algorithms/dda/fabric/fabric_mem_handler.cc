@@ -9,6 +9,7 @@
 #include "alloc.h"
 #include "bootstrap.h"
 #include "checks.h"
+#include "cudawrap.h"
 #include "debug.h"
 #include "p2p.h"
 
@@ -61,11 +62,19 @@ ncclResult_t ncclFabricMemHandler::exchangeMemPtrs() {
   std::vector<FabricExchEntry> entries(static_cast<size_t>(nranks_));
   memset(entries.data(), 0, entries.size() * sizeof(FabricExchEntry));
 
-  // Export this rank's allocation handle into an opaque fabric descriptor.
-  CUCHECK(cuMemExportToShareableHandle(&entries[static_cast<size_t>(rank_)].desc, selfHandle_, ncclCuMemHandleType, 0));
-  entries[static_cast<size_t>(rank_)].size = selfSize_;
+  // Always enter the allgather, even if export fails. A rank-local CUCHECK
+  // return here leaves peers blocked in the FabricExchEntry collective.
+  CUresult exp = CUPFN(cuMemExportToShareableHandle)(&entries[static_cast<size_t>(rank_)].desc, selfHandle_,
+                                                     ncclCuMemHandleType, 0);
+  if (exp == CUDA_SUCCESS) {
+    entries[static_cast<size_t>(rank_)].size = selfSize_;
+  } else {
+    memset(&entries[static_cast<size_t>(rank_)], 0, sizeof(FabricExchEntry));
+    WARN("ncclFabricMemHandler::exchangeMemPtrs: cuMemExportToShareableHandle failed");
+  }
 
   NCCLCHECK(bootstrapAllGather(bootstrap_, entries.data(), static_cast<int>(sizeof(FabricExchEntry))));
+  if (exp != CUDA_SUCCESS) return ncclUnhandledCudaError;
 
   for (int i = 0; i < nranks_; ++i) {
     if (i == rank_) {

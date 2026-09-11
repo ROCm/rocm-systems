@@ -101,6 +101,8 @@ class GinAnvilPluginTest : public ::testing::Test {
     char handle[NCCL_NET_HANDLE_MAXSIZE] = {};
     ASSERT_EQ(plugin_.listen(ictx, 0, handle, &listen), ncclSuccess);
     std::vector<void*> handles(static_cast<size_t>(nranks), handle);
+    mockComm_.comm.nRanks = nranks;
+    mockComm_.comm.rank = rank;
     GinAnvilPluginStubs::SetBootstrapNranks(nranks);
     ASSERT_EQ(plugin_.connect(ictx, handles.data(), nranks, rank, listen, coll), ncclSuccess);
     ASSERT_EQ(plugin_.closeListen(listen), ncclSuccess);

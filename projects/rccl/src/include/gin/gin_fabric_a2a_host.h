@@ -20,6 +20,7 @@ extern "C" {
 #endif
 
 struct ncclDevComm;
+struct ncclComm;
 
 // 0-threshold means the lane is disabled (same encoding as gin_host setup).
 struct ncclGinFabricA2ALane {
@@ -39,6 +40,8 @@ ncclResult_t ncclGinQueryFabricA2ALane(struct ncclDevComm const* devComm, struct
 void ncclGinFabricA2ALanePublish(void* ginHandle, ncclGinFabricA2ALane const& lane);
 void ncclGinFabricA2ALaneErase(void* ginHandle);
 void ncclGinFabricA2ALaneClearAll();
+// AND-reduce localEnabled across comm->bootstrap (comm->nRanks / comm->rank).
+ncclResult_t ncclGinFabricA2ALaneAgreeEnabled(struct ncclComm* comm, int localEnabled, int* allEnabled);
 #endif
 
 #endif

@@ -96,7 +96,14 @@ static void ginAnvilFabricRefDropLocked(GinAnvilFabricKey const& key) {
   fabricBufferRefcount.erase(it);
 }
 
-static ncclResult_t ginAnvilAllgatherOk(struct ncclComm* comm, int rank, int nranks, int localOk) {
+// bootstrapAllGather writes comm->nRanks slots indexed by comm->rank. GIN rail
+// teams can have cctx->nranks != comm->nRanks; callers must not pass the GIN
+// team size as the buffer length.
+static ncclResult_t ginAnvilAllgatherOk(struct ncclComm* comm, int localOk) {
+  if (comm == nullptr || comm->nRanks < 1) return ncclInternalError;
+  const int nranks = comm->nRanks;
+  const int rank = comm->rank;
+  if (rank < 0 || rank >= nranks) return ncclInternalError;
   int* oks = nullptr;
   NCCLCHECK(ncclCalloc(&oks, nranks));
   oks[rank] = localOk ? 1 : 0;
@@ -118,8 +125,12 @@ struct GinAnvilFabricVote {
   uint64_t offset;
 };
 
-static ncclResult_t ginAnvilAllgatherFabricVote(struct ncclComm* comm, int rank, int nranks, GinAnvilFabricVote local,
+static ncclResult_t ginAnvilAllgatherFabricVote(struct ncclComm* comm, GinAnvilFabricVote local,
                                                 int* allPublished) {
+  if (comm == nullptr || comm->nRanks < 1) return ncclInternalError;
+  const int nranks = comm->nRanks;
+  const int rank = comm->rank;
+  if (rank < 0 || rank >= nranks) return ncclInternalError;
   GinAnvilFabricVote* votes = nullptr;
   NCCLCHECK(ncclCalloc(&votes, nranks));
   votes[rank] = local;
@@ -472,7 +483,7 @@ static ncclResult_t ginAnvilRegMrSymFabric(ginAnvilCollCtx* cctx, void* data, si
   }
   GinAnvilFabricVote vote{setupOk, publishedLocal, static_cast<uint64_t>(offset)};
   {
-    ncclResult_t ag = ginAnvilAllgatherFabricVote(comm, cctx->rank, cctx->nranks, vote, &allPublished);
+    ncclResult_t ag = ginAnvilAllgatherFabricVote(comm, vote, &allPublished);
     if (ag != ncclSuccess) return ag;
   }
 
@@ -502,7 +513,7 @@ static ncclResult_t ginAnvilRegMrSymFabric(ginAnvilCollCtx* cctx, void* data, si
     }
 
     {
-      ncclResult_t ag = ginAnvilAllgatherOk(comm, cctx->rank, cctx->nranks, setupOk);
+      ncclResult_t ag = ginAnvilAllgatherOk(comm, setupOk);
       if (ag != ncclSuccess) return ag;
     }
 
@@ -512,7 +523,7 @@ static ncclResult_t ginAnvilRegMrSymFabric(ginAnvilCollCtx* cctx, void* data, si
     ret = guard.handler->exchangeMemPtrs();
     {
       const int exchangeOk = (ret == ncclSuccess) ? 1 : 0;
-      ncclResult_t ag = ginAnvilAllgatherOk(comm, cctx->rank, cctx->nranks, exchangeOk);
+      ncclResult_t ag = ginAnvilAllgatherOk(comm, exchangeOk);
       if (ag != ncclSuccess) return ag;
     }
     if (ret != ncclSuccess) return ret;
@@ -542,30 +553,53 @@ static ncclResult_t ginAnvilRegMrSymFabric(ginAnvilCollCtx* cctx, void* data, si
   mh->size = size;
   mh->fabricMem = true;
   mh->remote_vas_dev = nullptr;
+  mh->devHandle = nullptr;
 
+  int publishOk = 1;
   if (hipMalloc(&mh->devHandle, sizeof(ncclGinAnvilSdmaMemHandle)) != hipSuccess) {
-    ret = ncclSystemError;
-    goto failFabricRef;
+    mh->devHandle = nullptr;
+    publishOk = 0;
   }
-
-  remote_vas_host = (uintptr_t*)malloc(sizeof(uintptr_t) * (size_t)cctx->nranks);
-  if (!remote_vas_host) {
-    ret = ncclSystemError;
-    goto failFabricDevHandle;
+  if (publishOk) {
+    remote_vas_host = (uintptr_t*)malloc(sizeof(uintptr_t) * (size_t)cctx->nranks);
+    if (!remote_vas_host) publishOk = 0;
   }
-  for (int pe = 0; pe < cctx->nranks; pe++) {
-    void* peerPtr = nullptr;
-    NCCLCHECKGOTO(handler->getPeerDeviceMemPtr(pe, &peerPtr), ret, failFabricRemote);
-    remote_vas_host[pe] = reinterpret_cast<uintptr_t>(peerPtr) + offset;
+  if (publishOk) {
+    for (int pe = 0; pe < cctx->nranks; pe++) {
+      void* peerPtr = nullptr;
+      if (handler->getPeerDeviceMemPtr(pe, &peerPtr) != ncclSuccess || peerPtr == nullptr) {
+        publishOk = 0;
+        break;
+      }
+      remote_vas_host[pe] = reinterpret_cast<uintptr_t>(peerPtr) + offset;
+    }
   }
-  if (hipMalloc(&mh->remote_vas_dev, sizeof(uintptr_t) * (size_t)cctx->nranks) != hipSuccess ||
-      hipMemcpy(mh->remote_vas_dev, remote_vas_host, sizeof(uintptr_t) * (size_t)cctx->nranks, hipMemcpyHostToDevice) !=
-        hipSuccess) {
-    ret = ncclSystemError;
-    goto failFabricRemote;
+  if (publishOk) {
+    if (hipMalloc(&mh->remote_vas_dev, sizeof(uintptr_t) * (size_t)cctx->nranks) != hipSuccess ||
+        hipMemcpy(mh->remote_vas_dev, remote_vas_host, sizeof(uintptr_t) * (size_t)cctx->nranks,
+                  hipMemcpyHostToDevice) != hipSuccess) {
+      publishOk = 0;
+    }
+  }
+  {
+    ncclResult_t ag = ginAnvilAllgatherOk(comm, publishOk);
+    if (ag != ncclSuccess) publishOk = 0;
+  }
+  if (!publishOk) {
+    if (mh->remote_vas_dev) {
+      CUDACHECKIGNORE(hipFree(mh->remote_vas_dev));
+      mh->remote_vas_dev = nullptr;
+    }
+    if (remote_vas_host) free(remote_vas_host);
+    if (mh->devHandle) {
+      CUDACHECKIGNORE(hipFree(mh->devHandle));
+      mh->devHandle = nullptr;
+    }
+    std::lock_guard<std::mutex> lock(pluginMutex);
+    ginAnvilFabricRefDropLocked(key);
+    return ncclSystemError;
   }
   free(remote_vas_host);
-  remote_vas_host = nullptr;
 
   {
     ncclGinAnvilSdmaMemHandle hostMh;
@@ -578,21 +612,6 @@ static ncclResult_t ginAnvilRegMrSymFabric(ginAnvilCollCtx* cctx, void* data, si
   *mhandle = mh;
   *ginHandle = mh->devHandle;
   return ncclSuccess;
-
-failFabricRemote:
-  if (mh->remote_vas_dev) {
-    CUDACHECKIGNORE(hipFree(mh->remote_vas_dev));
-    mh->remote_vas_dev = nullptr;
-  }
-  if (remote_vas_host) free(remote_vas_host);
-failFabricDevHandle:
-  if (mh->devHandle) CUDACHECKIGNORE(hipFree(mh->devHandle));
-failFabricRef:
-  {
-    std::lock_guard<std::mutex> lock(pluginMutex);
-    ginAnvilFabricRefDropLocked(key);
-  }
-  return ret;
 }
 
 static ncclResult_t ginAnvilRegMrSymLsa(ginAnvilCollCtx* cctx, void* data, size_t size, ginAnvilMemHandle* mh,
@@ -672,7 +691,9 @@ static ncclResult_t ginAnvilRegMrSym(void* collComm, void* data, size_t size, in
   NCCLCHECK(ncclCalloc(&mh, 1));
 
   ncclResult_t ret = ncclSuccess;
-  if (ginAnvilUseFabricMem(cctx->comm)) {
+  // Fabric MRs allgather on comm->bootstrap (world size). Rail GIN teams
+  // (NCCL_GIN_CONNECTION_RAIL) have cctx->nranks != comm->nRanks; use LSA.
+  if (ginAnvilUseFabricMem(cctx->comm) && cctx->comm && cctx->nranks == cctx->comm->nRanks) {
     ret = ginAnvilRegMrSymFabric(cctx, data, size, mh, mhandle, ginHandle);
   } else {
     ret = ginAnvilRegMrSymLsa(cctx, data, size, mh, mhandle, ginHandle);
@@ -909,7 +930,10 @@ static ncclResult_t ginAnvilCreateContext(void* collComm, ncclGinConfig_t* confi
         cctx->comm->ddaLLEpochLen,
         cctx->comm->nRanks};
     ncclGinFabricA2ALane lane{};
-    if (gin::fabric::ginFabricA2ALaneTryBuild(commState, rcclParamDdaLL() != 0, llThreshold, &lane)) {
+    const int localEnabled =
+        gin::fabric::ginFabricA2ALaneTryBuild(commState, rcclParamDdaLL() != 0, llThreshold, &lane) ? 1 : 0;
+    int allEnabled = 0;
+    if (ncclGinFabricA2ALaneAgreeEnabled(cctx->comm, localEnabled, &allEnabled) == ncclSuccess && allEnabled) {
       ctx->gpuCtxHost.fabricA2APeerScratch = lane.peerScratch;
       ctx->gpuCtxHost.fabricA2ALlEpoch = lane.llEpoch;
       ctx->gpuCtxHost.fabricA2AScratchBytes = lane.scratchBytes;

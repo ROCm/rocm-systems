@@ -5,6 +5,9 @@
  ************************************************************************/
 
 #include "gin/gin_fabric_a2a_host.h"
+#include "alloc.h"
+#include "bootstrap.h"
+#include "comm.h"
 #include "nccl_device/impl/comm__types.h"
 
 #include <cstring>
@@ -29,6 +32,28 @@ void ncclGinFabricA2ALaneErase(void* ginHandle) {
 void ncclGinFabricA2ALaneClearAll() {
   std::lock_guard<std::mutex> lock(ginFabricA2ALaneMutex);
   ginFabricA2ALanes.clear();
+}
+
+ncclResult_t ncclGinFabricA2ALaneAgreeEnabled(struct ncclComm* comm, int localEnabled, int* allEnabled) {
+  if (allEnabled == nullptr) return ncclInvalidArgument;
+  *allEnabled = 0;
+  if (comm == nullptr || comm->nRanks < 1 || comm->rank < 0 || comm->rank >= comm->nRanks) {
+    return ncclInvalidArgument;
+  }
+  int* oks = nullptr;
+  NCCLCHECK(ncclCalloc(&oks, comm->nRanks));
+  oks[comm->rank] = localEnabled ? 1 : 0;
+  ncclResult_t ret = bootstrapAllGather(comm->bootstrap, oks, sizeof(int));
+  int all = 1;
+  if (ret == ncclSuccess) {
+    for (int i = 0; i < comm->nRanks; i++) {
+      if (!oks[i]) all = 0;
+    }
+  }
+  free(oks);
+  if (ret != ncclSuccess) return ret;
+  *allEnabled = all;
+  return ncclSuccess;
 }
 
 extern "C" __attribute__((visibility("default")))

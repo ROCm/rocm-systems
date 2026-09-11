@@ -360,7 +360,10 @@ ncclResult_t ncclGinDevCommSetup(struct ncclComm* comm, struct ncclDevCommRequir
         comm->nRanks};
     const size_t llThreshold =
         gin::fabric::resolveGinFabricLLThresholdAlltoAll((size_t)rcclParamDdaLLThreshold());
-    if (!gin::fabric::ginFabricA2ALaneTryBuild(commState, rcclParamDdaLL() != 0, llThreshold, &lane)) {
+    const int localEnabled =
+        gin::fabric::ginFabricA2ALaneTryBuild(commState, rcclParamDdaLL() != 0, llThreshold, &lane) ? 1 : 0;
+    int allEnabled = 0;
+    if (ncclGinFabricA2ALaneAgreeEnabled(comm, localEnabled, &allEnabled) != ncclSuccess || !allEnabled) {
       if (comm->ddaFabricMemHandler == nullptr || comm->ddaPeerPtrsDev == nullptr ||
           comm->ddaLLEpochDev == nullptr || comm->ddaScratch == nullptr) {
         WARN("GIN A2A: fabric small-msg lane unavailable: missing DDA fabric resources");
@@ -451,7 +454,12 @@ ncclResult_t ncclGinHostFinalize(struct ncclComm* comm) {
       ginState->ginComms[n] = NULL;
     }
   }
-  ncclGinFabricA2ALaneClearAll();
+  // Per-comm: do not wipe other live communicators' lanes in this process.
+  for (struct ncclGinStateDevComm* dc = ginState->devComms; dc != nullptr; dc = dc->next) {
+    if (dc->devHandles[0] && dc->devHandles[0]->handle) {
+      ncclGinFabricA2ALaneErase(dc->devHandles[0]->handle);
+    }
+  }
   memset((void*)ginState, 0, sizeof(*ginState));
   return ncclSuccess;
 }
