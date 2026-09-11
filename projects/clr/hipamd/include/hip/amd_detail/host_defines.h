@@ -193,6 +193,20 @@ template <> struct numeric_limits<char> {
   static constexpr char lowest() noexcept { return min(); }
 };
 
+template <> struct numeric_limits<float> {
+  static constexpr bool is_specialized = true;
+  static constexpr bool is_signed = true;
+  static constexpr float min() noexcept {
+    return __builtin_bit_cast(float, 0x00800000);
+  }
+  static constexpr float lowest() noexcept { return -max(); };
+  static constexpr float max() noexcept {
+    return __builtin_bit_cast(float, 0x7F7FFFFF);
+  }
+  static constexpr float quiet_NaN() noexcept { return __builtin_nanf(""); }
+  static constexpr float infinity() noexcept { return __builtin_huge_valf(); }
+};
+
 #if defined(_WIN32)
 #pragma pop_macro("max")
 #pragma pop_macro("min")
@@ -310,49 +324,24 @@ constexpr index_sequence<Ints...> make_index_sequence_value(index_sequence<Ints.
   return {};
 }
 
-// An equivalent of std::numeric_limits<T>::max() and lowest(). Note that the
-// class name and methods have been changed intentionally to reflect the fact that is not
-// a one-to-one replacement of std::numeric_limits and also to avoid a name collision with
-// the Win32 max() macro
+// Allows to calculate the max() and lowest() of each type. Uses __hip_internal::numeric_limits()
+// most of the time, but gets specialized for __half
 template <typename T>
-struct NumericLimits;
-
-template <>
-struct NumericLimits<int> {
-    static constexpr int maximum() { return 0x7FFFFFFF; }
-    static constexpr int minimum() { return ~0x7FFFFFFF; }
+struct ExclusiveScanIdentity {
+  static constexpr T maximum() { return __hip_internal::numeric_limits<T>::max(); }
+  static constexpr T minimum() { return __hip_internal::numeric_limits<T>::min(); }
 };
 
 template <>
-struct NumericLimits<unsigned int> {
-    static constexpr unsigned int maximum()    { return 0xFFFFFFFFu; }
-    static constexpr unsigned int minimum() { return 0u; }
+struct ExclusiveScanIdentity<float> {
+  static constexpr float maximum() { return __builtin_bit_cast(float, 0x7f800000); }
+  static constexpr float minimum() { return -maximum(); }
 };
 
 template <>
-struct NumericLimits<long long> {
-    static constexpr long long maximum() { return 0x7FFFFFFFFFFFFFFFLL; }
-    static constexpr long long minimum() { return ~0x7FFFFFFFFFFFFFFFLL; }
-};
-
-template <>
-struct NumericLimits<unsigned long long> {
-    static constexpr unsigned long long maximum()    { return 0xFFFFFFFFFFFFFFFFull; }
-    static constexpr unsigned long long minimum() { return 0ull; }
-};
-
-template <>
-struct NumericLimits<float> {
-  static constexpr float maximum()    { return __builtin_bit_cast(float, 0x7f800000); }
-  static constexpr float minimum()    { return -maximum(); }
-  static constexpr float quiet_NaN()  { return __builtin_nanf(""); }
-  static constexpr float infinity()   { return __builtin_huge_valf(); }
-};
-
-template <>
-struct NumericLimits<double> {
-  static constexpr double maximum()    { return __builtin_bit_cast(double, 0x7FF0000000000000LL); }
-  static constexpr double minimum()    { return -maximum(); }
+struct ExclusiveScanIdentity<double> {
+  static constexpr double maximum() { return __builtin_bit_cast(double, 0x7FF0000000000000LL); }
+  static constexpr double minimum() { return -maximum(); }
 };
 
 #if defined(_MSC_VER) && !defined(__clang__)
