@@ -173,8 +173,10 @@ build_consan_moi_atomic_address_materialization(const ConSanMoiAtomicAddressPlan
 /// Shared ordinary per-buffer safety bound used by Sampled and InlineShadow.
 /// Each mode publishes its selected ceiling through the MOI mode registry.
 inline constexpr uint64_t kConSanMoiOrdinaryAutoReportBufferCeilingBytes = 128u * 1024u * 1024u;
-/// G6B3 owns aggregate reservation against this process-wide ceiling.
-inline constexpr uint64_t kConSanMoiAutoReportProcessCeilingBytes = 1024u * 1024u * 1024u;
+/// G6B3 owns aggregate reservation against this process-wide ceiling. Four
+/// maximum-sized Record/Replay reports permit ordinary multi-library workloads
+/// while retaining a deterministic process bound.
+inline constexpr uint64_t kConSanMoiAutoReportProcessCeilingBytes = 4ull * 1024u * 1024u * 1024u;
 struct ConSanMoiAutoReportProcessBudget {
   uint64_t current_live_bytes = 0;
   uint64_t peak_live_bytes = 0;

@@ -270,7 +270,7 @@ const MoiModeOperations kRecordReplayModeOperations = {
     .policy =
         {
             // Full identities and dispatch/access hash tables need the larger tier.
-            .auto_report_buffer_ceiling_bytes = 512u * 1024u * 1024u,
+            .auto_report_buffer_ceiling_bytes = 1ull * 1024u * 1024u * 1024u,
             .default_runtime_sample_stride = 65536u,
             .initialize_owner_epoch_by_default = true,
             .owner_source_applies_without_initialization = false,

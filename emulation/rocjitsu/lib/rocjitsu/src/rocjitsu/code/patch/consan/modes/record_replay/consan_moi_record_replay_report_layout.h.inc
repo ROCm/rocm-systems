@@ -5,8 +5,8 @@
 /// open-addressing headroom, rounds the total table to a power of two, and the
 /// device probes by static range + dispatch + workgroup + wave + dynamic LDS
 /// address. Hot sites can therefore borrow unused capacity from cold sites
-/// without workload-specific sizing. Large code objects halve the dispatch,
-/// owner, and address-group factors under the existing per-buffer ceiling;
+/// without workload-specific sizing. Large code objects halve one dispatch,
+/// owner, or address-group factor at a time under the existing per-buffer ceiling;
 /// direct layouts keep their historical single-identity contract.
 inline constexpr uint32_t kConSanMoiRecordReplayMaximumDispatchBankCount = 16u;
 inline constexpr uint32_t kConSanMoiRecordReplayMaximumOwnerBankCount = 16u;
@@ -53,6 +53,6 @@ static_assert((kConSanMoiRecordReplayProbeLimit & (kConSanMoiRecordReplayProbeLi
 // site, and a code-object-scoped report remains live across repeated
 // dispatches. Barriers publish once per wave, while atomic and fence probes
 // publish once per participating lane.
-inline constexpr uint64_t kConSanMoiRecordReplayDynamicEventHeadroom = 1024u;
+inline constexpr uint64_t kConSanMoiRecordReplayDynamicEventHeadroom = 4096u;
 inline constexpr uint64_t kConSanMoiRecordReplayDynamicLaneEventHeadroom =
     64u * kConSanMoiRecordReplayDynamicEventHeadroom;

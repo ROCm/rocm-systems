@@ -16,7 +16,7 @@
 namespace rocjitsu {
 namespace {
 
-inline constexpr uint64_t kRecordReplayCeilingBytes = 512u * 1024u * 1024u;
+inline constexpr uint64_t kRecordReplayCeilingBytes = 1ull * 1024u * 1024u * 1024u;
 
 [[nodiscard]] std::optional<size_t> claim_record_replay_dispatch_bank(std::span<uint64_t> slots,
                                                                       uint64_t dispatch_id) {
@@ -582,6 +582,35 @@ TEST(ConSanMoiAutoReportPlan, AdaptiveRecordReplayBanksHonorExplicitCallerCap) {
   EXPECT_LE(accepted.required_bytes, kCallerCap);
 }
 
+TEST(ConSanMoiAutoReportPlan, AdaptiveRecordReplayUsesIntermediateTableGeometry) {
+  // This inventory mirrors the large generated-library object from the
+  // whole-workload allowlist regression. Reducing both bank factors together
+  // chose a 4M-entry table even though the ordinary ceiling admits 8M entries,
+  // and the physical workload then saturated after roughly 6M observations.
+  constexpr uint64_t kLogicalRanges = 1850u;
+  const ConSanMoiAutoReportInventory requested{
+      .engine = ConSanMoiEngine::RecordReplay,
+      .access_range_count = kLogicalRanges,
+      .barrier_event_count = 214u,
+      .diagnostic_count = kLogicalRanges,
+      .record_replay_bank_count_adaptive = true,
+  };
+
+  const auto fitted = fit_consan_moi_record_replay_auto_report_inventory(requested);
+  const auto accepted = plan_consan_moi_auto_report(fitted);
+  ASSERT_TRUE(accepted.complete());
+  EXPECT_EQ(accepted.layout.access_record_capacity, 8u * 1024u * 1024u);
+  EXPECT_LE(accepted.required_bytes, kRecordReplayCeilingBytes);
+}
+
+TEST(ConSanMoiAutoReportPlan, RecordReplayRetainsRepeatedDispatchBarrierHeadroom) {
+  const auto fitted = fit_consan_moi_record_replay_auto_report_inventory(
+      {.engine = ConSanMoiEngine::RecordReplay, .barrier_event_count = 1u});
+  EXPECT_EQ(fitted.barrier_event_count, kConSanMoiRecordReplayDynamicEventHeadroom);
+  EXPECT_GE(fitted.barrier_event_count, 4096u);
+  EXPECT_TRUE(plan_consan_moi_auto_report(fitted).complete());
+}
+
 TEST(ConSanMoiAutoReportPlan, AdaptiveInlineDiagnosticsFitLargeTopKInventory) {
   constexpr uint64_t kLogicalRanges = 135718u;
   const ConSanMoiAutoReportInventory requested{
@@ -731,7 +760,7 @@ TEST(ConSanMoiAutoReportPlan, RepresentableHugeCountsAreCapacityInsufficientNotO
 
 TEST(ConSanMoiAutoReportPlan, FrozenSafetyCeilingsRemainDistinct) {
   EXPECT_EQ(kConSanMoiOrdinaryAutoReportBufferCeilingBytes, 128u * 1024u * 1024u);
-  EXPECT_EQ(kConSanMoiAutoReportProcessCeilingBytes, 1024u * 1024u * 1024u);
+  EXPECT_EQ(kConSanMoiAutoReportProcessCeilingBytes, 4ull * 1024u * 1024u * 1024u);
   EXPECT_EQ(consan_moi_mode_policy(ConSanMoiEngine::Sampled).auto_report_buffer_ceiling_bytes,
             kConSanMoiOrdinaryAutoReportBufferCeilingBytes);
   EXPECT_EQ(consan_moi_mode_policy(ConSanMoiEngine::InlineShadow).auto_report_buffer_ceiling_bytes,
@@ -760,6 +789,14 @@ TEST(ConSanMoiAutoReportPlan, ProcessBudgetIsInclusiveAcrossObjectsAndReleaseIsC
                                                                first));
   EXPECT_EQ(budget.current_live_bytes, 0u);
   EXPECT_EQ(budget.peak_live_bytes, kConSanMoiAutoReportProcessCeilingBytes);
+}
+
+TEST(ConSanMoiAutoReportPlan, ProcessBudgetAdmitsFourMaximumRecordReplayReports) {
+  ConSanMoiAutoReportProcessBudget budget;
+  for (unsigned object = 0; object < 4; ++object)
+    ASSERT_TRUE(reserve_consan_moi_auto_report_bytes(budget, kRecordReplayCeilingBytes));
+  EXPECT_EQ(budget.current_live_bytes, kConSanMoiAutoReportProcessCeilingBytes);
+  EXPECT_FALSE(reserve_consan_moi_auto_report_bytes(budget, 1u));
 }
 
 TEST(ConSanMoiAutoReportPlan, CanonicalLayoutRoundTripsHeterogeneousSampledLayout) {

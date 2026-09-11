@@ -565,7 +565,7 @@ TEST(ConSanMoiModePlanning, EachEngineOwnsItsProloguePublicationPolicy) {
 
 TEST(ConSanMoiModePlanning, EachEngineOwnsItsCrossRuntimePolicy) {
   const ConSanMoiModePolicy record_replay = consan_moi_mode_policy(ConSanMoiEngine::RecordReplay);
-  EXPECT_EQ(record_replay.auto_report_buffer_ceiling_bytes, 512u * 1024u * 1024u);
+  EXPECT_EQ(record_replay.auto_report_buffer_ceiling_bytes, 1ull * 1024u * 1024u * 1024u);
   EXPECT_EQ(record_replay.default_runtime_sample_stride, 65536u);
   EXPECT_TRUE(record_replay.initialize_owner_epoch_by_default);
   EXPECT_FALSE(record_replay.owner_source_applies_without_initialization);

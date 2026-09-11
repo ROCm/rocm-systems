@@ -209,10 +209,19 @@ fit_consan_moi_record_replay_auto_report_inventory(ConSanMoiAutoReportInventory 
       return expanded_candidate(1u);
     if (inventory.record_replay_access_dispatch_bank_count != 1u ||
         inventory.record_replay_access_owner_bank_count != 1u) {
-      inventory.record_replay_access_dispatch_bank_count =
-          std::max<uint64_t>(inventory.record_replay_access_dispatch_bank_count / 2u, 1u);
-      inventory.record_replay_access_owner_bank_count =
-          std::max<uint64_t>(inventory.record_replay_access_owner_bank_count / 2u, 1u);
+      // Reduce one sizing dimension at a time. Halving both together skips a
+      // useful intermediate power-of-two table size and can leave nearly half
+      // of the caller's byte budget unused. That lost capacity is observable
+      // as premature saturation in large, otherwise ordinary workloads.
+      if (inventory.record_replay_access_dispatch_bank_count >=
+              inventory.record_replay_access_owner_bank_count &&
+          inventory.record_replay_access_dispatch_bank_count != 1u) {
+        inventory.record_replay_access_dispatch_bank_count =
+            std::max<uint64_t>(inventory.record_replay_access_dispatch_bank_count / 2u, 1u);
+      } else {
+        inventory.record_replay_access_owner_bank_count =
+            std::max<uint64_t>(inventory.record_replay_access_owner_bank_count / 2u, 1u);
+      }
       continue;
     }
     if (inventory.record_replay_address_group_headroom != 1u) {
