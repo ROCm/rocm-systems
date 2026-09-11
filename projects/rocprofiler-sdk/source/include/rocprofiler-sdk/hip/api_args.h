@@ -3643,10 +3643,10 @@ typedef union rocprofiler_hip_api_args_t
 #if HIP_RUNTIME_API_TABLE_STEP_VERSION >= 34
     struct
     {
-        hipKernel_t     kernel;
+        hipKernel_t      kernel;
         hipFuncAttribute attr;
-        int             value;
-        int             device;
+        int              value;
+        int              device;
     } hipKernelSetAttributeForDevice;
 #endif
 } rocprofiler_hip_api_args_t;

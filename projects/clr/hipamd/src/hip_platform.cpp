@@ -498,10 +498,19 @@ hipError_t hipOccupancyAvailableDynamicSMemPerBlock(size_t* dynamicSmemSize, con
 
   const amd::Device& device = *hip::getCurrentDevice()->devices()[dev_id];
   const amd::Kernel& kernel = *func_kernel;
-  const auto* wrkGrpInfo = kernel.getDeviceKernel(device)->workGroupInfo();
+  auto* device_kernel = kernel.getDeviceKernel(device);
+  if (device_kernel == nullptr) {
+    HIP_RETURN(hipErrorInvalidDeviceFunction);
+  }
 
-  const int staticSharedMemoryUsage = wrkGrpInfo->usedLDSSize_;
-  const int maxDynamicSharedSizeBytes = wrkGrpInfo->maxDynamicSharedSizeBytes_;
+  int staticSharedMemoryUsage = 0;
+  int maxDynamicSharedSizeBytes = 0;
+  {
+    std::scoped_lock lock(device_kernel->attributeLock());
+    const auto* wrkGrpInfo = device_kernel->workGroupInfo();
+    staticSharedMemoryUsage = wrkGrpInfo->usedLDSSize_;
+    maxDynamicSharedSizeBytes = wrkGrpInfo->maxDynamicSharedSizeBytes_;
+  }
   const int maxNumBlocks = prop.maxThreadsPerMultiProcessor / blockSize;
   const int maxSharedMemoryPerMultiProcessor = prop.maxSharedMemoryPerMultiProcessor - 
       staticSharedMemoryUsage * std::min(numBlocks, maxNumBlocks);
