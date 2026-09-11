@@ -24,6 +24,8 @@ test_categories:
       - "DdaAlltoAllThresholdTest.*"
       - "DdaAlltoAllThreshold.*"
       - "DdaIpcEligibilityTest.*"
+      - "DdaNranksRelaxTest.*"
+      - "DdaNranksRelaxIsolatedTest.*"
       - "DdaFabricEligibilityTest.*"
       - "CeAllReduceEligibilityTest.*"
       - "RcclCeAllReduceEligibility.*"

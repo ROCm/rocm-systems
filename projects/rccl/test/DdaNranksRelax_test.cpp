@@ -7,12 +7,19 @@
 // Unit tests for the RCCL_DDA_NRANKS_RELAX low-rank DDA IPC AllReduce gate.
 //
 // These exercise ncclAllReduceDdaIpcEligible() and ncclDdaNranksRelaxEnabled()
-// with the mock ncclComm (no GPUs required). RCCL_PARAM values are cached
-// per-process, so these tests cover the default (relax-off) semantics that the
-// eligibility change must preserve: exactly kDdaNranks stays eligible and 2/4
-// rank comms are rejected unless the operator explicitly opts in. The
-// relax-enabled path (2/4-rank engagement + numerics) is covered end-to-end by
-// the rccl-tests AllReduce sweep with RCCL_DDA_NRANKS_RELAX=1.
+// with the mock ncclComm (no GPUs required).
+//
+// RCCL_PARAM values are cached per-process, so the fixture tests below cover the
+// default (relax-off) semantics that the eligibility change must preserve:
+// exactly kDdaNranks stays eligible, and 2..7 rank comms are rejected unless the
+// operator explicitly opts in.
+//
+// The relax-enabled path is covered by DdaNranksRelaxIsolatedTest, which re-execs
+// this binary with RCCL_DDA_NRANKS_RELAX=1 pre-set (the value must be in the
+// environment before any param read) and asserts every count in
+// [2, kDdaNranks] becomes eligible while counts outside that range do not.
+// End-to-end engagement and numerics are additionally covered by the rccl-tests
+// AllReduce sweep with RCCL_DDA_NRANKS_RELAX=1.
 
 #include "common/DdaIpcTestHelpers.hpp"
 #include "common/ProcessIsolatedTestRunner.hpp"
