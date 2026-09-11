@@ -1262,7 +1262,7 @@ HRR_TEST_CASE(Unit_HRR_MultiThreadRoundtrip) {
   // replay (hipStreamSynchronize returns error 900 on an open capture stream).
   // -------------------------------------------------------------------------
   auto run_mt_playback = [&](const std::string& extra_args) {
-    hrr::test::SpawnProc proc(HRR_PLAYBACK_EXE, /*capture_stdout=*/true);
+    hrr::test::SpawnProc proc(hrr_playback_exe(), /*capture_stdout=*/true);
     set_proc_search_path(proc);
 #ifdef _WIN32
     std::string mt_path_arg = "\"" + cap.path.string() + "\"";
