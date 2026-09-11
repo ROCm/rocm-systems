@@ -186,6 +186,12 @@ class EventDD : public Event {
   virtual int64_t time(bool getStartTs) const;
 };
 
+#if !defined(_MSC_VER)
+// Hands the mapped shm of a destroyed IPC event to the deferred cleanup (hip_event_ipc.cpp).
+void enqueueDeferredIpcEvent(ihipIpcEventShmem_t* shmem, const std::string& name, bool unlink,
+                             int device_id);
+#endif
+
 class IPCEvent : public Event {
   // IPC Events
   struct ihipIpcEvent_t {
@@ -202,20 +208,31 @@ class IPCEvent : public Event {
   ~IPCEvent() {
     if (ipc_evt_.ipc_shmem_) {
       int owners = --ipc_evt_.ipc_shmem_->owners;
-      // Make sure event is synchronized
+      // Make sure event is synchronized (waits for this event's own recorded work only)
       hipError_t status = synchronize();
-      status = ihipHostUnregister(&ipc_evt_.ipc_shmem_->signal);
-      if (!amd::Os::MemoryUnmapFile(ipc_evt_.ipc_shmem_, sizeof(hip::ihipIpcEventShmem_t))) {
-        // print hipErrorInvalidHandle;
-      }
+      (void)status;
       // Remove the name only when the creator destroys the event (no further records follow)
       // or the last user leaves. An importer must not: the creator may still re-record the
       // event, and the next hipIpcOpenEventHandle of the same handle must find the live object.
       // The former unconditional shm_unlink here made every later import create a fresh,
       // zero-filled object whose stream wait never blocked.
-      if (ipc_evt_.ipc_creator_ || owners == 0) {
+      const bool unlink = ipc_evt_.ipc_creator_ || owners == 0;
+#if !defined(_MSC_VER)
+      // Unregistering the signal memory waits for ALL streams of the device (SyncAllStreams in
+      // ihipHostUnregister), so hipEventDestroy blocked for as long as unrelated work was queued
+      // (ROCm/rocm-systems#7520). The mapping is released at the next device-wide sync instead,
+      // where that wait is paid anyway; stream waits still queued on it stay valid until then.
+      enqueueDeferredIpcEvent(ipc_evt_.ipc_shmem_, ipc_evt_.ipc_name_, unlink, deviceId());
+      ipc_evt_.ipc_shmem_ = nullptr;
+#else
+      status = ihipHostUnregister(&ipc_evt_.ipc_shmem_->signal);
+      if (!amd::Os::MemoryUnmapFile(ipc_evt_.ipc_shmem_, sizeof(hip::ihipIpcEventShmem_t))) {
+        // print hipErrorInvalidHandle;
+      }
+      if (unlink) {
         amd::Os::shm_unlink(ipc_evt_.ipc_name_);
       }
+#endif
     }
   }
   IPCEvent() : Event(hipEventInterprocess) {}

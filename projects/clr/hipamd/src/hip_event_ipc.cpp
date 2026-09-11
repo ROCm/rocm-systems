@@ -27,6 +27,10 @@
 #include <cstring>
 #include <atomic>
 #include <random>
+#include <algorithm>
+#include <iterator>
+#include <mutex>
+#include <vector>
 #include <fcntl.h>
 #include <sys/mman.h>
 #include <sys/stat.h>
@@ -122,6 +126,100 @@ int mapIpcShmem(const std::string& name, bool create, ihipIpcEventShmem_t** shme
   return 0;
 }
 }  // namespace
+#endif
+
+#if !defined(_MSC_VER)
+namespace {
+// Cleanup of destroyed IPC events, deferred out of hipEventDestroy (ROCm/rocm-systems#7520).
+// Unregistering the signal memory synchronizes every stream of the device, so ~IPCEvent only
+// queues the mapping and Device::SyncAllStreams releases it once the device is idle anyway.
+// Bounded like the ROCr-signal queue on develop (#7710): a full queue costs one device sync for
+// the whole batch instead of one per destroy.
+struct DeferredIpcEvent {
+  ihipIpcEventShmem_t* shmem;
+  std::string name;
+  bool unlink;
+  int device_id;
+};
+constexpr size_t kDeferredIpcMax = 256;
+std::mutex deferred_lock;  // only taken by the process that queued (checked via deferred_pid)
+std::vector<DeferredIpcEvent> deferred;
+std::atomic<pid_t> deferred_pid{0};  // a fork() child inherits a copy of `deferred` (and the lock)
+
+// At exit the mappings go away with the process, but a creator's name would stay in /dev/shm.
+struct DeferredIpcExit {
+  ~DeferredIpcExit() {
+    if (deferred_pid.load() != getpid()) {
+      return;  // nothing queued here, or a fork() child holding the parent's copies
+    }
+    std::lock_guard<std::mutex> lock(deferred_lock);
+    for (const auto& d : deferred) {
+      if (d.unlink) {
+        shm_unlink(d.name.c_str());
+      }
+    }
+  }
+} deferred_exit;
+}  // namespace
+
+void enqueueDeferredIpcEvent(ihipIpcEventShmem_t* shmem, const std::string& name, bool unlink,
+                             int device_id) {
+  bool full = false;
+  {
+    std::lock_guard<std::mutex> lock(deferred_lock);
+    if (deferred_pid.load() != getpid()) {
+      deferred.clear();  // copies inherited through fork() belong to the parent
+      deferred_pid.store(getpid());
+    }
+    deferred.push_back({shmem, name, unlink, device_id});
+    full = deferred.size() >= kDeferredIpcMax;
+  }
+  if (full) {
+    drainDeferredIpcEvents(-1, false);
+  }
+}
+
+void drainDeferredIpcEvents(int device_id, bool synced) {
+  if (deferred_pid.load() != getpid()) {
+    return;
+  }
+  std::vector<DeferredIpcEvent> ready;
+  std::vector<int> devices;
+  {
+    std::lock_guard<std::mutex> lock(deferred_lock);
+    auto match = [device_id](const DeferredIpcEvent& d) {
+      return device_id < 0 || d.device_id == device_id;
+    };
+    if (synced) {
+      auto first = std::stable_partition(deferred.begin(), deferred.end(),
+                                         [&match](const DeferredIpcEvent& d) { return !match(d); });
+      ready.assign(std::make_move_iterator(first), std::make_move_iterator(deferred.end()));
+      deferred.erase(first, deferred.end());
+    } else {
+      for (const auto& d : deferred) {
+        if (match(d) && std::find(devices.begin(), devices.end(), d.device_id) == devices.end()) {
+          devices.push_back(d.device_id);
+        }
+      }
+    }
+  }
+  for (int id : devices) {
+    g_devices[id]->SyncAllStreams();  // ends in drainDeferredIpcEvents(id, true)
+  }
+  for (const auto& d : ready) {
+    if (ihipHostUnregister(&d.shmem->signal, false) != hipSuccess) {
+      // print hipErrorHostMemoryNotRegistered;
+    }
+    if (!amd::Os::MemoryUnmapFile(d.shmem, sizeof(ihipIpcEventShmem_t))) {
+      // print hipErrorInvalidHandle;
+    }
+    if (d.unlink) {
+      amd::Os::shm_unlink(d.name);
+    }
+  }
+}
+#else
+void drainDeferredIpcEvents(int, bool) {}
 #endif
 
 bool IPCEvent::createIpcEventShmemIfNeeded() {

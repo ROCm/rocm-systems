@@ -732,7 +732,11 @@ public:
   extern hipStream_t getPerThreadDefaultStream();
   extern hipError_t ihipUnbindTexture(textureReference* texRef);
   extern hipError_t ihipHostRegister(void* hostPtr, size_t sizeBytes, unsigned int flags);
-  extern hipError_t ihipHostUnregister(void* hostPtr);
+  extern hipError_t ihipHostUnregister(void* hostPtr, bool sync = true);
+  // Releases IPC event mappings whose cleanup ~IPCEvent deferred (hip_event_ipc.cpp).
+  // synced: the device was just synchronized; otherwise it is synchronized first.
+  // device_id < 0: all devices.
+  extern void drainDeferredIpcEvents(int device_id, bool synced);
   extern hipError_t ihipGetDeviceProperties(hipDeviceProp_t* props, hipDevice_t device);
 
   extern hipError_t ihipDeviceGet(hipDevice_t* device, int deviceId);
