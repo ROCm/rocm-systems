@@ -5,7 +5,7 @@
 
 #include <gtest/gtest.h>
 
-using namespace rocprofsys::common;
+using namespace rocprofsys::utility::string;
 
 TEST(to_bool_test, numeric_nonzero_true)
 {

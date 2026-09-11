@@ -2440,6 +2440,27 @@ class TestDeriveDsSwizzle:
         assert block is not None
 
 
+@pytest.mark.parametrize('dtype', ['f16', 'bf16'])
+@pytest.mark.parametrize(
+    ('prefix', 'encoding', 'semantic_class'),
+    [
+        ('GLOBAL_ATOMIC_PK_ADD_', 'ENC_VGLOBAL', 'flat_atomic'),
+        ('FLAT_ATOMIC_PK_ADD_', 'ENC_VFLAT', 'flat_atomic'),
+        ('BUFFER_ATOMIC_PK_ADD_', 'ENC_VBUFFER', 'buffer_atomic'),
+        ('DS_PK_ADD_', 'ENC_VDS', 'ds_atomic'),
+        ('DS_PK_ADD_RTN_', 'ENC_VDS', 'ds_atomic'),
+    ],
+)
+def test_packed_atomic_add_keeps_component_type(
+    dtype, prefix, encoding, semantic_class
+):
+    sem = derive_semantics(prefix + dtype.upper(), encoding)
+    assert sem is not None
+    assert sem.operation == 'pk_add_' + dtype
+    assert sem.semantic_class == semantic_class
+    assert sem.num_elems == 1
+
+
 class TestDeriveMemoryLowerAll:
     def test_all_memory_classes_lower(self):
         classes = [
@@ -2502,12 +2523,27 @@ class TestDerivePacked:
         assert sem.operation == operation
         assert sem.data_type == 'bf16'
 
-    def test_pk_binop_bf16_generator_uses_bf16_helpers(self):
+    @pytest.mark.parametrize(
+        ('operation', 'helper'),
+        [
+            ('add', 'packed_add_bf16'),
+            ('mul', 'packed_mul_bf16'),
+            ('min', 'f32_to_bf16_rne'),
+            ('max', 'f32_to_bf16_rne'),
+        ],
+    )
+    def test_pk_binop_bf16_generator_uses_bf16_helpers(self, operation, helper):
         cpp = gen_pk_binop(
-            ['vdst'], ['src0', 'src1'], 'add', 'bf16', ('inst_.opsel', 'inst_.opsel_hi')
+            ['vdst'],
+            ['src0', 'src1'],
+            operation,
+            'bf16',
+            ('inst_.opsel', 'inst_.opsel_hi'),
         )
         assert 'util::bf16_to_f32' in cpp
-        assert 'util::f32_to_bf16' in cpp
+        assert cpp.count(helper) == 2
+        if operation in ('add', 'mul'):
+            assert cpp.count('wf.fp16_ovfl()') == 2
         assert 'util::f32_to_f16' not in cpp
 
     @pytest.mark.parametrize(
@@ -2542,9 +2578,14 @@ class TestDerivePacked:
             '((inst_.opsel_hi >> 2) & 1)',
             ('inst_.opsel', 'inst_.opsel_hi'),
         )
-        assert 'std::fma' in cpp
+        assert cpp.count('amdgpu::fp_mode::packed_fma_bf16') == 2
+        assert cpp.count('wf.fp16_ovfl()') == 2
+        assert 'std::fma' not in cpp
         assert 'util::bf16_to_f32' in cpp
-        assert 'util::f32_to_bf16' in cpp
+
+    def test_pk_ternary_bf16_rejects_nonfused_operations(self):
+        with pytest.raises(ValueError, match='Unsupported packed BF16 ternary'):
+            gen_pk_ternary(['vdst'], ['src0', 'src1', 'src2'], 'mad', 'bf16')
 
     @pytest.mark.parametrize(
         ('name', 'operation', 'data_type'),

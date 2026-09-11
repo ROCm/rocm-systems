@@ -16,6 +16,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <memory>
+#include <span>
 #include <string_view>
 
 namespace rocjitsu {
@@ -66,6 +67,17 @@ public:
   /// @returns A decoded instruction (pool or heap allocated), or failure.
   DecodeResult decode(const rj_code_binary_inst_t *inst, uint64_t src_loc,
                       const DecodeErrorEmitter &emit_error = {});
+
+  /// @brief Decode from a bounded instruction stream and record its source offset.
+  ///
+  /// @details Uses the original stream when it contains the decoder's maximum
+  /// lookahead. At the tail, pads a temporary window with zeros and rejects any
+  /// instruction whose encoded size exceeds the remaining input or the declared
+  /// bound. Input-backed raw encodings retain the original stream's lifetime;
+  /// callers must keep that stream alive while using the decoded instruction.
+  /// @returns A decoded instruction, or failure with an optional diagnostic.
+  DecodeResult decode_window(std::span<const rj_code_binary_inst_t> words, uint64_t src_loc = 0,
+                             const DecodeErrorEmitter &emit_error = {});
 
   /// @brief Create a decoder for the given architecture.
   static std::unique_ptr<Decoder> create(rj_code_arch_t arch);
