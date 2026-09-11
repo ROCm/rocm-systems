@@ -201,7 +201,7 @@ def test_document_groups_prefixes_and_carries_the_overrides():
 
     assert document["pipelines"] == {"VALU": ["v_add_f32"]}
     assert document["arch_overrides"]["gfx908"] == {"FLAT": ["global_", "scratch_"]}
-    assert "v_mfma_f64_16x16x4f64" in document["arch_overrides"]["gfx950"]["VALU"]
+    assert "v_mfma_f64_" in document["arch_overrides"]["gfx950"]["VALU"]
     # An architecture with no hardware difference carries no override.
     assert "gfx1250" not in document["arch_overrides"]
 
