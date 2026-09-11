@@ -275,6 +275,12 @@ jobs:
           DEVICES: ${{ matrix.devices }}
         run: |
           export LD_LIBRARY_PATH="${PWD}/clr/clr-prefix/lib:${PWD}/clr/rocr-prefix/lib:${ROCM_SDK}/lib"
+          # libhiprtc carries a legacy DT_RPATH holding its own older
+          # libhsa-runtime64.so.1. DT_RPATH is searched before LD_LIBRARY_PATH,
+          # so without this preload that older runtime claims the soname and
+          # every HIP call in a spawned workload dies on a missing newer HSA
+          # symbol, surfacing as "workload ... exited 127".
+          export LD_PRELOAD="${PWD}/clr/rocr-prefix/lib/libhsa-runtime64.so.1"
           if [ -n "${DEVICES}" ]; then
             export HIP_VISIBLE_DEVICES="${DEVICES}"
           fi
