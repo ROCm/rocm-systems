@@ -15,6 +15,11 @@ struct ncclComm;
 // false to use the legacy IPC path
 bool ncclDdaUseFabricPath(struct ncclComm* comm);
 
+// Predicate shared by ginAnvilUseFabricMem and unit tests.
+inline bool ginAnvilUseFabricMemPredicate(bool ddaFabricPath, int cliqueSize, int nRanks, bool cuMemEnabled) {
+  return ddaFabricPath && cliqueSize == nRanks && cuMemEnabled;
+}
+
 // Returns true when the Anvil SDMA GIN plugin should use fabric DDA peer
 // memory for this comm (MI455 single-clique path).
 bool ginAnvilUseFabricMem(struct ncclComm* comm);

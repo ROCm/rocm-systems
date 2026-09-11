@@ -10,11 +10,13 @@
 
 #include <gin_anvil/sdma_factory.h>
 
+#include "alloc.h"
 #include "bootstrap.h"
 #include "debug.h"
 #include "dev_runtime.h"
 
 #include <hip/hip_runtime.h>
+#include <hip/hip_runtime_api.h>
 #include <cstdlib>
 #include <cstring>
 #include <vector>
@@ -32,7 +34,10 @@ struct State {
   bool useFabricMem = false;
   bool fabricAddSelfFail = false;
   bool fabricExchangeFail = false;
-  void* fabricPeerPtr = reinterpret_cast<void*>(0x80000000ULL);
+  void* fabricPeerBase = reinterpret_cast<void*>(0x80000000ULL);
+  size_t fabricPeerStride = 0x1000;
+  bool fabricVmmQueryOk = true;
+  bool fabricRetainOk = true;
 };
 
 struct FakeSdmaOpaque {
@@ -57,9 +62,34 @@ void SetLsaSelfAddr(void* addr) { g.lsaSelfAddr = addr; }
 void SetUseFabricMem(bool use) { g.useFabricMem = use; }
 void SetFabricAddSelfFail(bool fail) { g.fabricAddSelfFail = fail; }
 void SetFabricExchangeFail(bool fail) { g.fabricExchangeFail = fail; }
-void SetFabricPeerPtr(void* ptr) { g.fabricPeerPtr = ptr; }
+void SetFabricPeerBase(void* ptr) { g.fabricPeerBase = ptr; }
+void SetFabricPeerStride(size_t stride) { g.fabricPeerStride = stride; }
+void SetFabricVmmQueryOk(bool ok) { g.fabricVmmQueryOk = ok; }
+void SetFabricRetainOk(bool ok) { g.fabricRetainOk = ok; }
 
 }  // namespace GinAnvilPluginStubs
+
+namespace GinAnvilPluginTestHooks {
+
+ncclResult_t queryVmmRange(void* data, size_t size, CUdeviceptr* base, size_t* memSize, int* numSegments) {
+  if (!GinAnvilPluginStubs::g.fabricVmmQueryOk) return ncclSystemError;
+  if (base == nullptr || memSize == nullptr || numSegments == nullptr) return ncclInvalidArgument;
+  *base = reinterpret_cast<CUdeviceptr>(GinAnvilPluginStubs::g.fabricPeerBase);
+  *memSize = size + 0x1000;
+  *numSegments = 1;
+  (void)data;
+  return ncclSuccess;
+}
+
+CUresult retainAllocationHandle(CUmemGenericAllocationHandle* handle, void* addr) {
+  if (!GinAnvilPluginStubs::g.fabricRetainOk) return CUDA_ERROR_UNKNOWN;
+  if (handle == nullptr) return CUDA_ERROR_INVALID_VALUE;
+  *handle = CUmemGenericAllocationHandle{};
+  (void)addr;
+  return CUDA_SUCCESS;
+}
+
+}  // namespace GinAnvilPluginTestHooks
 
 int ncclDebugLevel = NCCL_LOG_VERSION;
 uint64_t ncclDebugMask = NCCL_INIT;
@@ -204,6 +234,7 @@ ncclResult_t ncclFabricMemHandler::exchangeMemPtrs() {
 
 ncclResult_t ncclFabricMemHandler::getPeerDeviceMemPtr(int peerRank, void** outPeerPtr) const {
   if (!outPeerPtr || peerRank < 0 || peerRank >= nranks_) return ncclInvalidArgument;
-  *outPeerPtr = GinAnvilPluginStubs::g.fabricPeerPtr;
+  uintptr_t base = reinterpret_cast<uintptr_t>(GinAnvilPluginStubs::g.fabricPeerBase);
+  *outPeerPtr = reinterpret_cast<void*>(base + static_cast<uintptr_t>(peerRank) * GinAnvilPluginStubs::g.fabricPeerStride);
   return ncclSuccess;
 }

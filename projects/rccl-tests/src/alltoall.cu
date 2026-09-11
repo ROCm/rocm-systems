@@ -569,9 +569,10 @@ testResult_t AlltoAllRunColl(void* sendbuff, size_t sendoffset, void* recvbuff, 
   return testSuccess;
 }
 
-// Device-side (in-kernel wall_clock64) timing for AllToAll (GIN and Hybrid
+// Device-side (in-kernel wall_clock64) timing for AllToAll (GIN SDMA and Hybrid
 // tiers). Opt-in via --device_timing: launches the persistent timed kernel once
-// for the current size, brackets only the (skip+loop) steady-state collectives
+// for the current size, brackets only the (skip+loop) steady-state collectives.
+// The fabric DDA LL small-message path is host-launched and is skipped here.
 // with the GPU wall clock, reduces the grid busy window (min start .. max end
 // over CTAs) and the slowest rank (MPI MAX), and reports the per-iteration
 // device latency. loop/skip come from --devtime_loop/--devtime_skip (default
@@ -591,6 +592,14 @@ testResult_t AlltoAllDeviceTime(struct threadArgs* args, ncclDataType_t type, nc
 
   const size_t count = args->nbytes / wordSize(type);
   if (count == 0 || devtimeLoop < 1) return testSuccess;
+
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2,28,7) && defined(NCCL_OS_LINUX)
+  // Fabric LL uses a host-launched DDA kernel, not GinAlltoAllTimedKernel.
+  if (deviceImpl == 3) {
+    ncclGinFabricA2ALane lane{};
+    if (AlltoAllGinFabricLLEligibleHost(args->devComms, count, type, &lane)) return testSuccess;
+  }
+#endif
   const size_t perPeerBytes = count * wordSize(type);
 
   // By default use the exact skip/loop counts at every size so the device-timing

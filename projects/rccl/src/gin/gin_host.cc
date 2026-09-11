@@ -350,25 +350,25 @@ ncclResult_t ncclGinDevCommSetup(struct ncclComm* comm, struct ncclDevCommRequir
   // ginAnvilUseFabricMem already requires a single clique; the clique WARN is unreachable.
   if (ginState->ginType == NCCL_GIN_TYPE_ANVIL_SDMA && ginAnvilUseFabricMem(comm)) {
     ncclGinFabricA2ALane lane{};
-    if (comm->ddaFabricMemHandler == nullptr || comm->ddaPeerPtrsDev == nullptr ||
-        comm->ddaLLEpochDev == nullptr || comm->ddaScratch == nullptr) {
-      WARN("GIN A2A: fabric small-msg lane unavailable: missing DDA fabric resources");
-    } else if (rcclParamDdaLL()) {
-      const size_t llThreshold =
-          gin::fabric::resolveGinFabricLLThresholdAlltoAll((size_t)rcclParamDdaLLThreshold());
-      // 0 disables the lane (not "no cap").
-      if (gin::fabric::ginFabricLlLaneResourcesOk(comm->nRanks, comm->ddaScratchBytes, llThreshold)) {
-        lane.enabled = 1;
-        lane.peerScratch = (void**)comm->ddaPeerPtrsDev;
-        lane.llEpoch = comm->ddaLLEpochDev;
-        lane.llEpochLen = comm->ddaLLEpochLen;
-        lane.scratchBytes = comm->ddaScratchBytes;
-        lane.llThreshold = llThreshold;
-        ncclGinFabricA2ALanePublish(devComm->ginHandles[0], lane);
-        INFO(NCCL_INIT,
-             "GIN A2A: fabric LL small-msg lane enabled (nRanks=%d scratchBytes=%zu llThreshold=%zu)",
-             comm->nRanks, comm->ddaScratchBytes, llThreshold);
+    const gin::fabric::GinFabricA2ACommState commState{
+        comm->ddaFabricMemHandler,
+        (void**)comm->ddaPeerPtrsDev,
+        comm->ddaLLEpochDev,
+        comm->ddaScratch,
+        comm->ddaScratchBytes,
+        comm->ddaLLEpochLen,
+        comm->nRanks};
+    const size_t llThreshold =
+        gin::fabric::resolveGinFabricLLThresholdAlltoAll((size_t)rcclParamDdaLLThreshold());
+    if (!gin::fabric::ginFabricA2ALaneTryBuild(commState, rcclParamDdaLL() != 0, llThreshold, &lane)) {
+      if (comm->ddaFabricMemHandler == nullptr || comm->ddaPeerPtrsDev == nullptr ||
+          comm->ddaLLEpochDev == nullptr || comm->ddaScratch == nullptr) {
+        WARN("GIN A2A: fabric small-msg lane unavailable: missing DDA fabric resources");
       }
+    } else {
+      ncclGinFabricA2ALanePublish(devComm->ginHandles[0], lane);
+      INFO(NCCL_INIT, "GIN A2A: fabric LL small-msg lane enabled (nRanks=%d scratchBytes=%zu llThreshold=%zu)",
+           comm->nRanks, comm->ddaScratchBytes, llThreshold);
     }
   }
 
@@ -451,6 +451,7 @@ ncclResult_t ncclGinHostFinalize(struct ncclComm* comm) {
       ginState->ginComms[n] = NULL;
     }
   }
+  ncclGinFabricA2ALaneClearAll();
   memset((void*)ginState, 0, sizeof(*ginState));
   return ncclSuccess;
 }

@@ -39,10 +39,8 @@ bool ncclDdaUseFabricPath(ncclComm* comm) {
 
 bool ginAnvilUseFabricMem(ncclComm* comm) {
   if (comm == nullptr) return false;
-  if (!ncclDdaUseFabricPath(comm)) return false;
-  if (comm->clique.size != comm->nRanks) return false;
-  if (!ncclCuMemEnable()) return false;
-  return true;
+  return ginAnvilUseFabricMemPredicate(ncclDdaUseFabricPath(comm), comm->clique.size, comm->nRanks,
+                                       ncclCuMemEnable());
 }
 
 ncclResult_t ncclDdaFabricCommInit(ncclComm* comm) {

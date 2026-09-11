@@ -1844,6 +1844,11 @@ fail:
   if (ginDevCommReady) {
     (void)ncclGinDevCommFree(comm, outDevComm);
     ginDevCommReady = false;
+    outDevComm->ginContextCount = 0;
+    memset(outDevComm->ginHandles, 0, sizeof(outDevComm->ginHandles));
+    memset(outDevComm->ginNetDeviceTypes, 0, sizeof(outDevComm->ginNetDeviceTypes));
+    outDevComm->resourceWindow = nullptr;
+    outDevComm->resourceWindow_inlined = {};
   }
   CUDACHECKIGNORE(cudaThreadExchangeStreamCaptureMode(&captureMode));
   return ret;

@@ -31,6 +31,32 @@
 #include <mutex>
 #include <new>
 
+#if defined(GIN_ANVIL_PLUGIN_UNIT_TEST)
+namespace GinAnvilPluginTestHooks {
+ncclResult_t queryVmmRange(void* data, size_t size, CUdeviceptr* base, size_t* memSize, int* numSegments);
+CUresult retainAllocationHandle(CUmemGenericAllocationHandle* handle, void* addr);
+}  // namespace GinAnvilPluginTestHooks
+#endif
+
+static ncclResult_t ginAnvilQueryFabricVmmRange(void* data, size_t size, CUdeviceptr* base, size_t* memSize,
+                                                int* numSegments) {
+#if defined(GIN_ANVIL_PLUGIN_UNIT_TEST)
+  return GinAnvilPluginTestHooks::queryVmmRange(data, size, base, memSize, numSegments);
+#else
+  return ncclCuMemGetAddressRange(reinterpret_cast<CUdeviceptr>(data), size, base, memSize, numSegments);
+#endif
+}
+
+static ncclResult_t ginAnvilRetainFabricHandle(CUmemGenericAllocationHandle* handle, void* addr) {
+#if defined(GIN_ANVIL_PLUGIN_UNIT_TEST)
+  return GinAnvilPluginTestHooks::retainAllocationHandle(handle, addr) == CUDA_SUCCESS ? ncclSuccess
+                                                                                       : ncclSystemError;
+#else
+  CUresult cuRes = cuMemRetainAllocationHandle(handle, addr);
+  return cuRes == CUDA_SUCCESS ? ncclSuccess : ncclSystemError;
+#endif
+}
+
 struct GinAnvilFabricKey {
   void* collComm;
   void* data;
@@ -416,16 +442,25 @@ static ncclResult_t ginAnvilRegMrSymFabric(ginAnvilCollCtx* cctx, void* data, si
     }
   } guard;
 
-  ret = ncclCuMemGetAddressRange(reinterpret_cast<CUdeviceptr>(data), size, &memAddr, &memSize, &numSegments);
-  if (ret != ncclSuccess || numSegments != 1 || size > memSize) {
-    if (numSegments != 1) {
-      WARN("GIN anvil-sdma fabric: multi-segment MR not supported yet (segments=%d data=%p size=%zu)",
-           numSegments, data, size);
-    } else if (ret == ncclSuccess && size > memSize) {
-      WARN("GIN anvil-sdma fabric: registration size %zu exceeds mapped segment size %zu for %p", size, memSize, data);
-    }
+  ret = ginAnvilQueryFabricVmmRange(data, size, &memAddr, &memSize, &numSegments);
+  const uintptr_t offset =
+      (ret == ncclSuccess && numSegments == 1)
+          ? (reinterpret_cast<uintptr_t>(data) - reinterpret_cast<uintptr_t>(memAddr))
+          : 0;
+  if (ret != ncclSuccess) {
     setupOk = 0;
-    if (ret == ncclSuccess) ret = ncclSystemError;
+  } else if (numSegments != 1) {
+    WARN("GIN anvil-sdma fabric: multi-segment MR not supported yet (segments=%d data=%p size=%zu)", numSegments, data,
+         size);
+    setupOk = 0;
+    ret = ncclSystemError;
+  } else if (offset + size > memSize) {
+    WARN("GIN anvil-sdma fabric: registration [%p, %p) exceeds mapped segment [%p, %zu) for %p",
+         reinterpret_cast<void*>(reinterpret_cast<uintptr_t>(data)),
+         reinterpret_cast<void*>(reinterpret_cast<uintptr_t>(data) + size), reinterpret_cast<void*>(memAddr), memSize,
+         data);
+    setupOk = 0;
+    ret = ncclSystemError;
   }
 
   int publishedLocal = 0;
@@ -434,9 +469,6 @@ static ncclResult_t ginAnvilRegMrSymFabric(ginAnvilCollCtx* cctx, void* data, si
     auto it = fabricBufferRefcount.find(key);
     if (it != fabricBufferRefcount.end() && it->second > 0) publishedLocal = 1;
   }
-
-  const uintptr_t offset =
-      setupOk ? (reinterpret_cast<uintptr_t>(data) - reinterpret_cast<uintptr_t>(memAddr)) : 0;
   GinAnvilFabricVote vote{setupOk, publishedLocal, static_cast<uint64_t>(offset)};
   {
     ncclResult_t ag = ginAnvilAllgatherFabricVote(comm, cctx->rank, cctx->nranks, vote, &allPublished);
@@ -458,10 +490,9 @@ static ncclResult_t ginAnvilRegMrSymFabric(ginAnvilCollCtx* cctx, void* data, si
       setupOk = 0;
       ret = ncclSystemError;
     } else {
-      CUresult cuRes = cuMemRetainAllocationHandle(&guard.memHandle, reinterpret_cast<void*>(memAddr));
-      if (cuRes != CUDA_SUCCESS) {
+      ret = ginAnvilRetainFabricHandle(&guard.memHandle, reinterpret_cast<void*>(memAddr));
+      if (ret != ncclSuccess) {
         setupOk = 0;
-        ret = ncclSystemError;
       } else {
         guard.retained = true;
         ret = guard.handler->addSelfDeviceMem(reinterpret_cast<void*>(memAddr), guard.memHandle, memSize);
@@ -478,6 +509,11 @@ static ncclResult_t ginAnvilRegMrSymFabric(ginAnvilCollCtx* cctx, void* data, si
 
     // Do not hold pluginMutex across exchangeMemPtrs (bootstrapAllGather).
     ret = guard.handler->exchangeMemPtrs();
+    {
+      const int exchangeOk = (ret == ncclSuccess) ? 1 : 0;
+      ncclResult_t ag = ginAnvilAllgatherOk(comm, cctx->rank, cctx->nranks, exchangeOk);
+      if (ag != ncclSuccess) return ag;
+    }
     if (ret != ncclSuccess) return ret;
 
     {

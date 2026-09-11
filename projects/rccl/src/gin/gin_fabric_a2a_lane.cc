@@ -26,6 +26,11 @@ void ncclGinFabricA2ALaneErase(void* ginHandle) {
   ginFabricA2ALanes.erase(ginHandle);
 }
 
+void ncclGinFabricA2ALaneClearAll() {
+  std::lock_guard<std::mutex> lock(ginFabricA2ALaneMutex);
+  ginFabricA2ALanes.clear();
+}
+
 extern "C" __attribute__((visibility("default")))
 ncclResult_t ncclGinQueryFabricA2ALane(struct ncclDevComm const* devComm,
                                        struct ncclGinFabricA2ALane* out) {

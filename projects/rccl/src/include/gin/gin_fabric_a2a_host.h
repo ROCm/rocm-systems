@@ -10,10 +10,10 @@
 #ifndef NCCL_GIN_FABRIC_A2A_HOST_H_
 #define NCCL_GIN_FABRIC_A2A_HOST_H_
 
-#include "nccl.h"
-
 #include <stddef.h>
 #include <stdint.h>
+
+#include "nccl.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -31,23 +31,14 @@ struct ncclGinFabricA2ALane {
   size_t llThreshold;
 };
 
-#ifdef __cplusplus
-}
-#endif
-
-#ifdef __cplusplus
-void ncclGinFabricA2ALanePublish(void* ginHandle, ncclGinFabricA2ALane const& lane);
-void ncclGinFabricA2ALaneErase(void* ginHandle);
-#endif
-
-#ifdef __cplusplus
-extern "C" {
-#endif
-
 ncclResult_t ncclGinQueryFabricA2ALane(struct ncclDevComm const* devComm, struct ncclGinFabricA2ALane* out);
 
 #ifdef __cplusplus
 }
+
+void ncclGinFabricA2ALanePublish(void* ginHandle, ncclGinFabricA2ALane const& lane);
+void ncclGinFabricA2ALaneErase(void* ginHandle);
+void ncclGinFabricA2ALaneClearAll();
 #endif
 
 #endif

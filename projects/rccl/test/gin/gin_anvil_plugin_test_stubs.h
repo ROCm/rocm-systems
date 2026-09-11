@@ -20,6 +20,9 @@ void SetLsaSelfAddr(void* addr);
 void SetUseFabricMem(bool use);
 void SetFabricAddSelfFail(bool fail);
 void SetFabricExchangeFail(bool fail);
-void SetFabricPeerPtr(void* ptr);
+void SetFabricPeerBase(void* ptr);
+void SetFabricPeerStride(size_t stride);
+void SetFabricVmmQueryOk(bool ok);
+void SetFabricRetainOk(bool ok);
 
 }  // namespace GinAnvilPluginStubs

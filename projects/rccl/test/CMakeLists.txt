@@ -465,7 +465,7 @@ if(BUILD_TESTS)
         ${CMAKE_SOURCE_DIR}/../rocshmem/include)
     endif()
 
-    target_compile_definitions(rccl-UnitTestsGinAnvilPlugin PRIVATE ENABLE_ROCSHMEM_GIN)
+    target_compile_definitions(rccl-UnitTestsGinAnvilPlugin PRIVATE ENABLE_ROCSHMEM_GIN GIN_ANVIL_PLUGIN_UNIT_TEST)
 
     # No rccl link below, so the implicit ordering after hipify has to be explicit.
     add_dependencies(rccl-UnitTestsGinAnvilPlugin hipify_all)
@@ -527,7 +527,9 @@ if(BUILD_TESTS)
   add_executable(rccl-UnitTestsGinFabricLLPolicy gin/gin_fabric_ll_policy_test.cpp)
   set_source_files_properties(gin/gin_fabric_ll_policy_test.cpp PROPERTIES LANGUAGE CXX)
   target_include_directories(rccl-UnitTestsGinFabricLLPolicy PRIVATE
-    ${PROJECT_SOURCE_DIR}/src/include)
+    ${PROJECT_SOURCE_DIR}/src/include
+    ${PROJECT_SOURCE_DIR}/src
+    ${PROJECT_BINARY_DIR}/include)
   target_link_libraries(rccl-UnitTestsGinFabricLLPolicy PRIVATE ${GTEST_BOTH_LIBRARIES} Threads::Threads)
   set_target_properties(rccl-UnitTestsGinFabricLLPolicy PROPERTIES
     RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/test")

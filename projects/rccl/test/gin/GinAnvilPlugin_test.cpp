@@ -468,15 +468,14 @@ TEST_F(GinAnvilPluginTest, QueryFabricA2ALaneGuards) {
 
 TEST_F(GinAnvilPluginTest, RegMrSym_FabricRefcountAndExchangeFail) {
   GinAnvilPluginStubs::SetUseFabricMem(true);
+  GinAnvilPluginStubs::SetFabricVmmQueryOk(true);
+  GinAnvilPluginStubs::SetFabricRetainOk(true);
   void* ictx = nullptr;
   initCtx(&ictx);
   void* coll = nullptr;
   connectColl(ictx, &coll);
 
-  void* data = nullptr;
-  if (hipMalloc(&data, 4096) != hipSuccess) {
-    GTEST_SKIP() << "no GPU memory for fabric register";
-  }
+  void* data = reinterpret_cast<void*>(0x81000);
 
   GinAnvilPluginStubs::SetFabricExchangeFail(true);
   void* mhFail = nullptr;
@@ -488,18 +487,11 @@ TEST_F(GinAnvilPluginTest, RegMrSym_FabricRefcountAndExchangeFail) {
   void* gh1 = nullptr;
   void* mh2 = nullptr;
   void* gh2 = nullptr;
-  ncclResult_t r1 = plugin_.regMrSym(coll, data, 4096, 0, 0, &mh1, &gh1);
-  if (r1 != ncclSuccess) {
-    hipFree(data);
-    plugin_.closeColl(coll);
-    plugin_.finalize(ictx);
-    GTEST_SKIP() << "fabric register needs a VMM allocation";
-  }
+  ASSERT_EQ(plugin_.regMrSym(coll, data, 4096, 0, 0, &mh1, &gh1), ncclSuccess);
   ASSERT_EQ(plugin_.regMrSym(coll, data, 4096, 0, 0, &mh2, &gh2), ncclSuccess);
   EXPECT_NE(mh1, mh2);
   EXPECT_EQ(plugin_.deregMrSym(coll, mh1), ncclSuccess);
   EXPECT_EQ(plugin_.deregMrSym(coll, mh2), ncclSuccess);
-  hipFree(data);
   plugin_.closeColl(coll);
   plugin_.finalize(ictx);
 }

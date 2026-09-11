@@ -14,9 +14,13 @@
 #include <cstddef>
 
 #if !defined(__CUDA_ARCH__) && !defined(__HIP_DEVICE_COMPILE__)
+#include "algorithms/dda/dda_init_detail.h"
+#include "algorithms/dda/device/CollCommon.h"
+#include "algorithms/dda/fabric/fabric_gpu_barrier.h"
 #include "gin/gin_fabric_a2a_host.h"
 #include <cerrno>
 #include <cstdlib>
+#include <cstring>
 #endif
 
 namespace gin {
@@ -29,6 +33,15 @@ constexpr size_t kGinFabricLlPacketBytes = 16;
 constexpr size_t kGinFabricLlA2ASlotStridePkts = kGinFabricLlMaxBytes / kGinFabricLlPacketBytes;
 constexpr size_t kGinFabricLlA2APktsPerBlock = 256;
 constexpr int kGinFabricLlAgMaxBlocksPerPeer = 8;
+
+#if !defined(__CUDA_ARCH__) && !defined(__HIP_DEVICE_COMPILE__)
+static_assert(kGinFabricLlMaxNranks == dda::common::kDdaMaxNranks,
+              "GIN fabric LL lane must match DDA max nranks");
+static_assert(kGinFabricLlMaxBytes == dda::common::kDdaLLMaxBytes,
+              "GIN fabric LL lane must match DDA LL max bytes");
+static_assert(kGinFabricLlAgMaxBlocksPerPeer == nccl_dda_detail::kDdaLLAgMaxBlocksPerPeer,
+              "GIN fabric LL lane must match DDA LL AG max blocks per peer");
+#endif
 
 inline size_t ginFabricLlA2AScratchBytes(int nRanks) {
   return (size_t)2 * (size_t)nRanks * kGinFabricLlA2ASlotStridePkts * kGinFabricLlPacketBytes;
@@ -88,6 +101,34 @@ inline size_t resolveGinFabricLLThresholdAlltoAll(size_t ddaLLThreshold) {
       parseGinFabricLLThresholdEnv("RCCL_GIN_FABRIC_LL_THRESHOLD_ALLTOALL", &alltoallVal) ||
       parseGinFabricLLThresholdEnv("NCCL_GIN_FABRIC_LL_THRESHOLD_ALLTOALL", &alltoallVal);
   return pickGinFabricLLThresholdAlltoAll(alltoallSet, alltoallVal, ddaLLThreshold);
+}
+
+struct GinFabricA2ACommState {
+  void* fabricMemHandler;
+  void** peerPtrsDev;
+  uint32_t* llEpochDev;
+  void* scratch;
+  size_t scratchBytes;
+  int llEpochLen;
+  int nRanks;
+};
+
+inline bool ginFabricA2ALaneTryBuild(GinFabricA2ACommState const& comm, bool ddaLLEnabled, size_t llThreshold,
+                                     ncclGinFabricA2ALane* out) {
+  if (out == nullptr) return false;
+  memset(out, 0, sizeof(*out));
+  if (comm.fabricMemHandler == nullptr || comm.peerPtrsDev == nullptr || comm.llEpochDev == nullptr ||
+      comm.scratch == nullptr || !ddaLLEnabled) {
+    return false;
+  }
+  if (!ginFabricLlLaneResourcesOk(comm.nRanks, comm.scratchBytes, llThreshold)) return false;
+  out->enabled = 1;
+  out->peerScratch = comm.peerPtrsDev;
+  out->llEpoch = comm.llEpochDev;
+  out->llEpochLen = comm.llEpochLen;
+  out->scratchBytes = comm.scratchBytes;
+  out->llThreshold = llThreshold;
+  return true;
 }
 
 #endif // host
