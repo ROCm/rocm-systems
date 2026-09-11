@@ -1423,9 +1423,14 @@ class _AmdgpuProfileBase(IsaProfile):
                    6-bit at [9:4], vmcnt 6-bit at [15:10]).
                    ISAs: RDNA3, RDNA3.5.
         'gfx12' — S_WAITCNT removed; replaced by split S_WAIT_* instructions.
-                   ISAs: RDNA4.
+                   ISAs: RDNA4, CDNA5.
         """
         return 'gfx9'
+
+    @property
+    def vmem_stores_complete_in_order(self) -> bool:
+        """Whether non-FLAT VMEM stores join the ordered VMEM completion class."""
+        return False
 
     @property
     def has_mfma(self) -> bool:
@@ -1595,6 +1600,10 @@ class CdnaProfile(_AmdgpuProfileBase):
       encodings with ``bit_cnt >= 64``, since their ``OpEncoding``
       struct already spans the full instruction width.
     """
+
+    @property
+    def vmem_stores_complete_in_order(self) -> bool:
+        return True
 
     @property
     def supports_gpr_idx(self) -> bool:

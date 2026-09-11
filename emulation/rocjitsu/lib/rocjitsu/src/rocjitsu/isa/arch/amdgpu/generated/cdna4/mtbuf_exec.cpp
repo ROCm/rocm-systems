@@ -6,7 +6,6 @@
 
 #include "rocjitsu/isa/arch/amdgpu/cdna4/addr_calc.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna4/mtbuf.h"
-#include "rocjitsu/isa/arch/amdgpu/generated/shared/execute_shared.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/gfx940_cache_flags.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/gfx9_cache_flags.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/scalar_operand_read.h"

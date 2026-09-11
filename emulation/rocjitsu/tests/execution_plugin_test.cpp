@@ -81,6 +81,7 @@ RJ_DIAGNOSTIC_POP
 #include <iterator>
 #include <map>
 #include <memory>
+#include <optional>
 #include <set>
 #include <sstream>
 #include <string>
@@ -239,6 +240,9 @@ struct HookEvent {
   uint8_t byte_mask = 0;
   uint64_t pc = 0;
   std::thread::id callback_thread;
+  WaitCounterType wait_counter_type = WaitCounterType::VMCNT;
+  MemoryCompletionClass completion_class = MemoryCompletionClass::UNCLASSIFIED;
+  std::optional<WaitCounterType> additional_wait_counter_type;
   std::string mnemonic;
   std::string kernel_name;
   std::string kernel_symbol;
@@ -316,6 +320,11 @@ public:
     e.wf_id = wf.wf_id();
     e.pc = pc;
     e.mnemonic = inst.mnemonic();
+    if (const auto *info = inst.amdgpu_memory_issue_info()) {
+      e.wait_counter_type = info->wait_counter_type;
+      e.completion_class = info->completion_class;
+      e.additional_wait_counter_type = info->additional_wait_counter_type;
+    }
     events.push_back(e);
   }
 
@@ -3810,6 +3819,63 @@ TEST(HookOrderingTest, WorkgroupDispatchedReportsPhysicalRegisterBlockSizes) {
   EXPECT_GT(it->physical_vgpr_count, f.cu()->config().vgprs_per_wf);
   EXPECT_EQ(it->physical_sgpr_count, f.cu()->sgpr_allocation_block_size());
   EXPECT_GT(it->physical_sgpr_count, 32u);
+}
+
+TEST(HookOrderingTest, BeforeInstructionExposesMemoryIssueBeforeOperandReadsAndRouting) {
+  PluginFixture f(/*num_wf_slots=*/1);
+  auto *p = f.attach_ordering_plugin();
+  const auto load =
+      cdna4::build_smem(cdna4::kSLoadDwordSmem, {.sbase = 0, .sdata = 4, .imm = 1, .offset = 0});
+  const std::array<uint32_t, 3> code = {load[0], load[1], S_ENDPGM};
+  f.run_kernel(code.data(), code.size());
+  f.shutdown();
+
+  const auto before_instruction =
+      std::find_if(p->events.begin(), p->events.end(), [](const HookEvent &e) {
+        return e.kind == HookEvent::BEFORE_INSTRUCTION && e.mnemonic == "s_load_dword";
+      });
+  ASSERT_NE(before_instruction, p->events.end());
+  EXPECT_EQ(before_instruction->wait_counter_type, WaitCounterType::LGKMCNT);
+  EXPECT_EQ(before_instruction->completion_class, MemoryCompletionClass::UNORDERED);
+  EXPECT_FALSE(before_instruction->additional_wait_counter_type);
+
+  const auto first_operand_read =
+      std::find_if(std::next(before_instruction), p->events.end(),
+                   [](const HookEvent &e) { return e.kind == HookEvent::READ_SGPR; });
+  const auto route =
+      std::find_if(std::next(before_instruction), p->events.end(), [](const HookEvent &e) {
+        return e.kind == HookEvent::ROUTE_MEMORY && e.mnemonic == "s_load_dword";
+      });
+  ASSERT_NE(first_operand_read, p->events.end());
+  ASSERT_NE(route, p->events.end());
+  EXPECT_LT(before_instruction, first_operand_read);
+  EXPECT_LT(first_operand_read, route);
+}
+
+TEST(InstructionMetadataTest, GenericFlatHasTwoCounterObligations) {
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
+  ASSERT_NE(decoder, nullptr);
+
+  const auto generic_words =
+      cdna4::build_flat(cdna4::kFlatLoadDwordFlat, {.seg = 0, .addr = 0, .saddr = 0x7F, .vdst = 1});
+  std::unique_ptr<Instruction> generic_flat(decode_valid(*decoder, generic_words.data()));
+  ASSERT_NE(generic_flat, nullptr);
+  const auto *generic_issue = generic_flat->amdgpu_memory_issue_info();
+  ASSERT_NE(generic_issue, nullptr);
+  EXPECT_EQ(generic_issue->wait_counter_type, WaitCounterType::VMCNT);
+  ASSERT_TRUE(generic_issue->additional_wait_counter_type);
+  EXPECT_EQ(*generic_issue->additional_wait_counter_type, WaitCounterType::LGKMCNT);
+  EXPECT_EQ(generic_issue->completion_class, MemoryCompletionClass::UNORDERED);
+
+  const auto global_words =
+      cdna4::build_flat(cdna4::kFlatLoadDwordFlat, {.seg = 2, .addr = 0, .saddr = 0x7F, .vdst = 1});
+  std::unique_ptr<Instruction> global(decode_valid(*decoder, global_words.data()));
+  ASSERT_NE(global, nullptr);
+  const auto *global_issue = global->amdgpu_memory_issue_info();
+  ASSERT_NE(global_issue, nullptr);
+  EXPECT_EQ(global_issue->wait_counter_type, WaitCounterType::VMCNT);
+  EXPECT_FALSE(global_issue->additional_wait_counter_type);
+  EXPECT_EQ(global_issue->completion_class, MemoryCompletionClass::VMEM);
 }
 
 // The immediate-halt branch frees a wave's registers the instant s_endpgm

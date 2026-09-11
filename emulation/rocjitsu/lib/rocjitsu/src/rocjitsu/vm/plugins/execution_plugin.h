@@ -85,6 +85,8 @@ public:
 
   /// Called before every AMDGPU instruction is executed.
   /// Wavefront state reflects the state prior to the instruction's effects.
+  /// Memory instructions expose their decoded issue metadata through
+  /// Instruction::amdgpu_memory_issue_info() at this point.
   /// May run concurrently across simulation partitions unless
   /// requires_serial_hot_hooks() returns true.
   virtual void onAmdgpuBeforeExecuteInstruction(uint64_t /*pc*/, const Instruction & /*inst*/,

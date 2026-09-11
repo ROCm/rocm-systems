@@ -26,7 +26,7 @@ ScratchLoadU8Vscratch::ScratchLoadU8Vscratch(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
   gpumem.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info(amdgpu::WaitCounterType::LOADCNT, amdgpu::MemoryCompletionClass::VMEM);
 }
 
 namespace detail {
@@ -54,7 +54,7 @@ ScratchLoadI8Vscratch::ScratchLoadI8Vscratch(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
   gpumem.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info(amdgpu::WaitCounterType::LOADCNT, amdgpu::MemoryCompletionClass::VMEM);
 }
 
 namespace detail {
@@ -82,7 +82,7 @@ ScratchLoadU16Vscratch::ScratchLoadU16Vscratch(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
   gpumem.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info(amdgpu::WaitCounterType::LOADCNT, amdgpu::MemoryCompletionClass::VMEM);
 }
 
 namespace detail {
@@ -110,7 +110,7 @@ ScratchLoadI16Vscratch::ScratchLoadI16Vscratch(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
   gpumem.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info(amdgpu::WaitCounterType::LOADCNT, amdgpu::MemoryCompletionClass::VMEM);
 }
 
 namespace detail {
@@ -138,7 +138,7 @@ ScratchLoadB32Vscratch::ScratchLoadB32Vscratch(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
   gpumem.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info(amdgpu::WaitCounterType::LOADCNT, amdgpu::MemoryCompletionClass::VMEM);
 }
 
 namespace detail {
@@ -166,7 +166,7 @@ ScratchLoadB64Vscratch::ScratchLoadB64Vscratch(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
   gpumem.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info(amdgpu::WaitCounterType::LOADCNT, amdgpu::MemoryCompletionClass::VMEM);
 }
 
 namespace detail {
@@ -194,7 +194,7 @@ ScratchLoadB96Vscratch::ScratchLoadB96Vscratch(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
   gpumem.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info(amdgpu::WaitCounterType::LOADCNT, amdgpu::MemoryCompletionClass::VMEM);
 }
 
 namespace detail {
@@ -222,7 +222,7 @@ ScratchLoadB128Vscratch::ScratchLoadB128Vscratch(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
   gpumem.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info(amdgpu::WaitCounterType::LOADCNT, amdgpu::MemoryCompletionClass::VMEM);
 }
 
 namespace detail {
@@ -250,7 +250,8 @@ ScratchStoreB8Vscratch::ScratchStoreB8Vscratch(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
   gpumem.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info(amdgpu::WaitCounterType::STORECNT,
+                        amdgpu::MemoryCompletionClass::UNORDERED);
 }
 
 namespace detail {
@@ -278,7 +279,8 @@ ScratchStoreB16Vscratch::ScratchStoreB16Vscratch(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
   gpumem.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info(amdgpu::WaitCounterType::STORECNT,
+                        amdgpu::MemoryCompletionClass::UNORDERED);
 }
 
 namespace detail {
@@ -306,7 +308,8 @@ ScratchStoreB32Vscratch::ScratchStoreB32Vscratch(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
   gpumem.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info(amdgpu::WaitCounterType::STORECNT,
+                        amdgpu::MemoryCompletionClass::UNORDERED);
 }
 
 namespace detail {
@@ -334,7 +337,8 @@ ScratchStoreB64Vscratch::ScratchStoreB64Vscratch(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
   gpumem.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info(amdgpu::WaitCounterType::STORECNT,
+                        amdgpu::MemoryCompletionClass::UNORDERED);
 }
 
 namespace detail {
@@ -362,7 +366,8 @@ ScratchStoreB96Vscratch::ScratchStoreB96Vscratch(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
   gpumem.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info(amdgpu::WaitCounterType::STORECNT,
+                        amdgpu::MemoryCompletionClass::UNORDERED);
 }
 
 namespace detail {
@@ -390,7 +395,8 @@ ScratchStoreB128Vscratch::ScratchStoreB128Vscratch(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
   gpumem.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info(amdgpu::WaitCounterType::STORECNT,
+                        amdgpu::MemoryCompletionClass::UNORDERED);
 }
 
 namespace detail {
@@ -418,7 +424,7 @@ ScratchLoadD16U8Vscratch::ScratchLoadD16U8Vscratch(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
   gpumem.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info(amdgpu::WaitCounterType::LOADCNT, amdgpu::MemoryCompletionClass::VMEM);
 }
 
 namespace detail {
@@ -452,7 +458,7 @@ ScratchLoadD16I8Vscratch::ScratchLoadD16I8Vscratch(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
   gpumem.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info(amdgpu::WaitCounterType::LOADCNT, amdgpu::MemoryCompletionClass::VMEM);
 }
 
 namespace detail {
@@ -486,7 +492,7 @@ ScratchLoadD16B16Vscratch::ScratchLoadD16B16Vscratch(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
   gpumem.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info(amdgpu::WaitCounterType::LOADCNT, amdgpu::MemoryCompletionClass::VMEM);
 }
 
 namespace detail {
@@ -520,7 +526,7 @@ ScratchLoadD16HiU8Vscratch::ScratchLoadD16HiU8Vscratch(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
   gpumem.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info(amdgpu::WaitCounterType::LOADCNT, amdgpu::MemoryCompletionClass::VMEM);
 }
 
 namespace detail {
@@ -554,7 +560,7 @@ ScratchLoadD16HiI8Vscratch::ScratchLoadD16HiI8Vscratch(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
   gpumem.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info(amdgpu::WaitCounterType::LOADCNT, amdgpu::MemoryCompletionClass::VMEM);
 }
 
 namespace detail {
@@ -588,7 +594,7 @@ ScratchLoadD16HiB16Vscratch::ScratchLoadD16HiB16Vscratch(const MachineInst *inst
   num_src_ = 3;
   num_dst_ = 1;
   gpumem.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info(amdgpu::WaitCounterType::LOADCNT, amdgpu::MemoryCompletionClass::VMEM);
 }
 
 namespace detail {
@@ -623,7 +629,8 @@ ScratchStoreD16HiB8Vscratch::ScratchStoreD16HiB8Vscratch(const MachineInst *inst
   num_src_ = 3;
   num_dst_ = 1;
   gpumem.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info(amdgpu::WaitCounterType::STORECNT,
+                        amdgpu::MemoryCompletionClass::UNORDERED);
 }
 
 namespace detail {
@@ -652,7 +659,8 @@ ScratchStoreD16HiB16Vscratch::ScratchStoreD16HiB16Vscratch(const MachineInst *in
   num_src_ = 3;
   num_dst_ = 1;
   gpumem.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info(amdgpu::WaitCounterType::STORECNT,
+                        amdgpu::MemoryCompletionClass::UNORDERED);
 }
 
 namespace detail {
@@ -683,7 +691,7 @@ ScratchLoadBlockVscratch::ScratchLoadBlockVscratch(const MachineInst *inst)
   num_dst_ = 1;
   gpumem.apply_fieldless_caps(false, false, false);
   m0.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info(amdgpu::WaitCounterType::LOADCNT, amdgpu::MemoryCompletionClass::VMEM);
 }
 
 namespace detail {
@@ -713,7 +721,8 @@ ScratchStoreBlockVscratch::ScratchStoreBlockVscratch(const MachineInst *inst)
   num_dst_ = 1;
   gpumem.apply_fieldless_caps(false, false, false);
   m0.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info(amdgpu::WaitCounterType::STORECNT,
+                        amdgpu::MemoryCompletionClass::UNORDERED);
 }
 
 namespace detail {

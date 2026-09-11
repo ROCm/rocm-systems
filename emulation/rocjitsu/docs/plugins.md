@@ -291,7 +291,13 @@ group divides hooks by frequency and synchronization cost:
 - Instruction before/after, memory-routing, and register-access callbacks are
   high-frequency and run concurrently with both other high-frequency callbacks
   and infrequent callbacks by default. Each callback is scoped to a wavefront
-  below the simulation's shader-engine partition granularity.
+  below the simulation's shader-engine partition granularity. During the
+  before-instruction callback, a memory instruction exposes its decoded wait-counter
+  obligations and completion-order metadata through `amdgpu_memory_issue_info()`, before
+  address or store-data operands are read. This metadata describes operations
+  routed through the scalar, vector, and local memory pipelines; it is not a
+  complete inventory of non-memory events, such as messages and timestamp
+  queries, that hardware wait counters may also track.
 
 A plugin whose high-frequency callbacks reach shared mutable state may override
 `requires_serial_hot_hooks()` to return `true`. The group samples that stable
