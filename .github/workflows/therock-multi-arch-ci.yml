@@ -12,7 +12,7 @@
 # - Supports prebuilt stages to skip certain build stages
 # - Better parallelization across GPU architectures
 
-# TheRock ref: pinned to ROCm/TheRock#7636 merge commit for multi-arch package toggles.
+# TheRock ref: pinned to ROCm/TheRock commit 6b8d96a0f5e5cbaedc622c13773a915af2d3aaac.
 # NOTE: update all `@<ref>` refs and `ref:` inputs together when switching
 
 # =============================================================================
