@@ -31,12 +31,12 @@ Panel Config:
           avg: SUM(UTCL1_REQS_sum) / SUM($denom)
           min: MIN(UTCL1_REQS_sum / $denom)
           max: MAX(UTCL1_REQS_sum / $denom)
-          unit: (Count + $normUnit)
+          unit: (Requests + $normUnit)
         Total Returns to UTCL0:
           avg: SUM(UTCL1_RTNS_sum) / SUM($denom)
           min: MIN(UTCL1_RTNS_sum / $denom)
           max: MAX(UTCL1_RTNS_sum / $denom)
-          unit: (Count + $normUnit)
+          unit: (Returns + $normUnit)
         UTCL1 Lookup Hit Rate:
           avg: 100 * SUM(UTCL1_HITS_sum) / SUM(UTCL1_REQS_sum)
           min: 100 * MIN(UTCL1_HITS_sum / UTCL1_REQS_sum)
@@ -46,12 +46,12 @@ Panel Config:
           avg: SUM(UTCL1_UTCL2_REQS_sum) / SUM($denom)
           min: MIN(UTCL1_UTCL2_REQS_sum / $denom)
           max: MAX(UTCL1_UTCL2_REQS_sum / $denom)
-          unit: (Count + $normUnit)
+          unit: (Requests + $normUnit)
         UTCL1-UTCL2 Returns:
           avg: SUM(UTCL1_UTCL2_RET_CNT_sum) / SUM($denom)
           min: MIN(UTCL1_UTCL2_RET_CNT_sum / $denom)
           max: MAX(UTCL1_UTCL2_RET_CNT_sum / $denom)
-          unit: (Count + $normUnit)
+          unit: (Returns + $normUnit)
         UTCL1-UTCL2 Request Latency:
           avg: SUM(UTCL1_UTCL2_REQS_OUTSTANDING_sum) / SUM(UTCL1_UTCL2_REQS_sum)
           min: MIN(UTCL1_UTCL2_REQS_OUTSTANDING_sum / UTCL1_UTCL2_REQS_sum)

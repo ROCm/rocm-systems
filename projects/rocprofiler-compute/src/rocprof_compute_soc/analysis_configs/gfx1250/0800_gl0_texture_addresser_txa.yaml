@@ -55,22 +55,22 @@ Panel Config:
           avg: SUM(TX_VCA_LDS_TOTAL_WAVEFRONTS_sum) / SUM($denom)
           min: MIN(TX_VCA_LDS_TOTAL_WAVEFRONTS_sum / $denom)
           max: MAX(TX_VCA_LDS_TOTAL_WAVEFRONTS_sum / $denom)
-          unit: (Count + $normUnit)
+          unit: (Instructions + $normUnit)
         LDS Load Instructions:
           avg: SUM(TX_VCA_LDS_LOAD_WAVEFRONTS_sum) / SUM($denom)
           min: MIN(TX_VCA_LDS_LOAD_WAVEFRONTS_sum / $denom)
           max: MAX(TX_VCA_LDS_LOAD_WAVEFRONTS_sum / $denom)
-          unit: (Count + $normUnit)
+          unit: (Instructions + $normUnit)
         LDS Store Instructions:
           avg: SUM(TX_VCA_LDS_STORE_WAVEFRONTS_sum) / SUM($denom)
           min: MIN(TX_VCA_LDS_STORE_WAVEFRONTS_sum / $denom)
           max: MAX(TX_VCA_LDS_STORE_WAVEFRONTS_sum / $denom)
-          unit: (Count + $normUnit)
+          unit: (Instructions + $normUnit)
         LDS Atomics Instructions:
           avg: SUM(TX_VCA_LDS_ATOMIC_WAVEFRONTS_sum) / SUM($denom)
           min: MIN(TX_VCA_LDS_ATOMIC_WAVEFRONTS_sum / $denom)
           max: MAX(TX_VCA_LDS_ATOMIC_WAVEFRONTS_sum / $denom)
-          unit: (Count + $normUnit)
+          unit: (Instructions + $normUnit)
   - metric_table:
       id: 803
       title: Shader-TXA Requests - VMEM
@@ -85,42 +85,42 @@ Panel Config:
           avg: SUM(TX_VCA_BUFFER_WAVEFRONTS_sum) / SUM($denom)
           min: MIN(TX_VCA_BUFFER_WAVEFRONTS_sum / $denom)
           max: MAX(TX_VCA_BUFFER_WAVEFRONTS_sum / $denom)
-          unit: (Count + $normUnit)
+          unit: (Instructions + $normUnit)
         Buffer Load Instructions:
           avg: SUM(TX_VCA_BUFFER_LOAD_WAVEFRONTS_sum) / SUM($denom)
           min: MIN(TX_VCA_BUFFER_LOAD_WAVEFRONTS_sum / $denom)
           max: MAX(TX_VCA_BUFFER_LOAD_WAVEFRONTS_sum / $denom)
-          unit: (Count + $normUnit)
+          unit: (Instructions + $normUnit)
         Buffer Store Instructions:
           avg: SUM(TX_VCA_BUFFER_STORE_WAVEFRONTS_sum) / SUM($denom)
           min: MIN(TX_VCA_BUFFER_STORE_WAVEFRONTS_sum / $denom)
           max: MAX(TX_VCA_BUFFER_STORE_WAVEFRONTS_sum / $denom)
-          unit: (Count + $normUnit)
+          unit: (Instructions + $normUnit)
         Buffer Atomics Instructions:
           avg: SUM(TX_VCA_BUFFER_ATOMIC_WAVEFRONTS_sum) / SUM($denom)
           min: MIN(TX_VCA_BUFFER_ATOMIC_WAVEFRONTS_sum / $denom)
           max: MAX(TX_VCA_BUFFER_ATOMIC_WAVEFRONTS_sum / $denom)
-          unit: (Count + $normUnit)
+          unit: (Instructions + $normUnit)
         Flat Instructions:
           avg: SUM(TX_VCA_FLAT_WAVEFRONTS_sum) / SUM($denom)
           min: MIN(TX_VCA_FLAT_WAVEFRONTS_sum / $denom)
           max: MAX(TX_VCA_FLAT_WAVEFRONTS_sum / $denom)
-          unit: (Count + $normUnit)
+          unit: (Instructions + $normUnit)
         Flat Load Instructions:
           avg: SUM(TX_VCA_FLAT_LOAD_WAVEFRONTS_sum) / SUM($denom)
           min: MIN(TX_VCA_FLAT_LOAD_WAVEFRONTS_sum / $denom)
           max: MAX(TX_VCA_FLAT_LOAD_WAVEFRONTS_sum / $denom)
-          unit: (Count + $normUnit)
+          unit: (Instructions + $normUnit)
         Flat Store Instructions:
           avg: SUM(TX_VCA_FLAT_STORE_WAVEFRONTS_sum) / SUM($denom)
           min: MIN(TX_VCA_FLAT_STORE_WAVEFRONTS_sum / $denom)
           max: MAX(TX_VCA_FLAT_STORE_WAVEFRONTS_sum / $denom)
-          unit: (Count + $normUnit)
+          unit: (Instructions + $normUnit)
         Flat Atomics Instructions:
           avg: SUM(TX_VCA_FLAT_ATOMIC_WAVEFRONTS_sum) / SUM($denom)
           min: MIN(TX_VCA_FLAT_ATOMIC_WAVEFRONTS_sum / $denom)
           max: MAX(TX_VCA_FLAT_ATOMIC_WAVEFRONTS_sum / $denom)
-          unit: (Count + $normUnit)
+          unit: (Instructions + $normUnit)
   - metric_table:
       id: 804
       title: Shader-TXA Requests - Async Load and Store
@@ -135,37 +135,37 @@ Panel Config:
           avg: SUM(TX_VCA_ASYNC_LOAD_WAVEFRONT_sum) / SUM($denom)
           min: MIN(TX_VCA_ASYNC_LOAD_WAVEFRONT_sum / $denom)
           max: MAX(TX_VCA_ASYNC_LOAD_WAVEFRONT_sum / $denom)
-          unit: (Count + $normUnit)
+          unit: (Instructions + $normUnit)
         Async Store Instruction:
           avg: SUM(TX_VCA_ASYNC_STORE_WAVEFRONT_sum) / SUM($denom)
           min: MIN(TX_VCA_ASYNC_STORE_WAVEFRONT_sum / $denom)
           max: MAX(TX_VCA_ASYNC_STORE_WAVEFRONT_sum / $denom)
-          unit: (Count + $normUnit)
+          unit: (Instructions + $normUnit)
         Async Direct Load Instruction:
           avg: SUM(TX_VCA_ASYNC_LOAD_WAVEFRONT_sum) / SUM($denom)
           min: MIN(TX_VCA_ASYNC_LOAD_WAVEFRONT_sum / $denom)
           max: MAX(TX_VCA_ASYNC_LOAD_WAVEFRONT_sum / $denom)
-          unit: (Count + $normUnit)
+          unit: (Instructions + $normUnit)
         Async Direct Store Instruction:
           avg: SUM(TX_VCA_ASYNC_STORE_WAVEFRONT_sum) / SUM($denom)
           min: MIN(TX_VCA_ASYNC_STORE_WAVEFRONT_sum / $denom)
           max: MAX(TX_VCA_ASYNC_STORE_WAVEFRONT_sum / $denom)
-          unit: (Count + $normUnit)
+          unit: (Instructions + $normUnit)
         Cluster Load Instruction:
           avg: SUM(TX_VCA_CLUSTER_LOAD_WAVEFRONT_sum) / SUM($denom)
           min: MIN(TX_VCA_CLUSTER_LOAD_WAVEFRONT_sum / $denom)
           max: MAX(TX_VCA_CLUSTER_LOAD_WAVEFRONT_sum / $denom)
-          unit: (Count + $normUnit)
+          unit: (Instructions + $normUnit)
         Async Cluster Load Instruction:
           avg: SUM(TX_VCA_ASYNC_CLUSTER_LOAD_WAVEFRONT_sum) / SUM($denom)
           min: MIN(TX_VCA_ASYNC_CLUSTER_LOAD_WAVEFRONT_sum / $denom)
           max: MAX(TX_VCA_ASYNC_CLUSTER_LOAD_WAVEFRONT_sum / $denom)
-          unit: (Count + $normUnit)
+          unit: (Instructions + $normUnit)
         Async Barrier Instruction:
           avg: SUM(TX_VCA_ASYNC_BARRIER_WAVEFRONT_sum) / SUM($denom)
           min: MIN(TX_VCA_ASYNC_BARRIER_WAVEFRONT_sum / $denom)
           max: MAX(TX_VCA_ASYNC_BARRIER_WAVEFRONT_sum / $denom)
-          unit: (Count + $normUnit)
+          unit: (Instructions + $normUnit)
   - metric_table:
       id: 805
       title: Shader-TXA Requests - TDM
@@ -180,27 +180,27 @@ Panel Config:
           avg: SUM(TX_VCA_TENSOR_DMA_WAVEFRONT_sum) / SUM($denom)
           min: MIN(TX_VCA_TENSOR_DMA_WAVEFRONT_sum / $denom)
           max: MAX(TX_VCA_TENSOR_DMA_WAVEFRONT_sum / $denom)
-          unit: (Count + $normUnit)
+          unit: (Instructions + $normUnit)
         TDM Async Load Instructions:
           avg: SUM(TX_VCA_TENSOR_ASYNC_LOAD_DMA_REQUEST_sum) / SUM($denom)
           min: MIN(TX_VCA_TENSOR_ASYNC_LOAD_DMA_REQUEST_sum / $denom)
           max: MAX(TX_VCA_TENSOR_ASYNC_LOAD_DMA_REQUEST_sum / $denom)
-          unit: (Count + $normUnit)
+          unit: (Instructions + $normUnit)
         TDM Async Store Instructions:
           avg: SUM(TX_VCA_TENSOR_ASYNC_STORE_DMA_REQUEST_sum) / SUM($denom)
           min: MIN(TX_VCA_TENSOR_ASYNC_STORE_DMA_REQUEST_sum / $denom)
           max: MAX(TX_VCA_TENSOR_ASYNC_STORE_DMA_REQUEST_sum / $denom)
-          unit: (Count + $normUnit)
+          unit: (Instructions + $normUnit)
         TDM Async Cluster Load Instructions:
           avg: SUM(TX_VCA_TENSOR_ASYNC_CLUSTER_LOAD_DMA_REQUEST_sum) / SUM($denom)
           min: MIN(TX_VCA_TENSOR_ASYNC_CLUSTER_LOAD_DMA_REQUEST_sum / $denom)
           max: MAX(TX_VCA_TENSOR_ASYNC_CLUSTER_LOAD_DMA_REQUEST_sum / $denom)
-          unit: (Count + $normUnit)
+          unit: (Instructions + $normUnit)
         TDM Async Barrier Instruction:
           avg: SUM(TX_VCA_TENSOR_ASYNC_BARRIER_DMA_REQUEST_sum) / SUM($denom)
           min: MIN(TX_VCA_TENSOR_ASYNC_BARRIER_DMA_REQUEST_sum / $denom)
           max: MAX(TX_VCA_TENSOR_ASYNC_BARRIER_DMA_REQUEST_sum / $denom)
-          unit: (Count + $normUnit)
+          unit: (Instructions + $normUnit)
   - metric_table:
       id: 806
       title: Shader-TXA Requests - Block Load and Store
@@ -215,12 +215,12 @@ Panel Config:
           avg: SUM(TX_VCA_BLOCK_LOAD_WAVEFRONTS_sum) / SUM($denom)
           min: MIN(TX_VCA_BLOCK_LOAD_WAVEFRONTS_sum / $denom)
           max: MAX(TX_VCA_BLOCK_LOAD_WAVEFRONTS_sum / $denom)
-          unit: (Count + $normUnit)
+          unit: (Instructions + $normUnit)
         Block Store Instruction:
           avg: SUM(TX_VCA_BLOCK_STORE_WAVEFRONTS_sum) / SUM($denom)
           min: MIN(TX_VCA_BLOCK_STORE_WAVEFRONTS_sum / $denom)
           max: MAX(TX_VCA_BLOCK_STORE_WAVEFRONTS_sum / $denom)
-          unit: (Count + $normUnit)
+          unit: (Instructions + $normUnit)
   - metric_table:
       id: 807
       title: Shader-TXA Interface
