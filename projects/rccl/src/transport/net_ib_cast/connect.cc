@@ -438,6 +438,11 @@ static ncclResult_t ncclIbCreateQpIonic(struct ncclIbQpCreateAttr* createQpAttrs
   } else {
     qpInitAttr.sq_sig_all &= (~(1 << 19));
   }
+  if (createQpAttrs->isP2p) {
+    qpInitAttr.sq_sig_all |= (1 << 25);
+  } else {
+    qpInitAttr.sq_sig_all &= (~(1 << 25));
+  }
 
   if (!nccl_channel_ud_map[createQpAttrs->ibDevN][createQpAttrs->channelId][channel_type].udAllocated) {
     bool lud = nccl_channel_last_ud[createQpAttrs->ibDevN][channel_type];
@@ -471,6 +476,7 @@ void IbCastBuildDataQpCreateAttr(struct ncclIbNetCommBase* base, int devIndex, s
   out->pd = devBase->pd;
   out->ibDevN = devBase->ibDevN;
   out->useIonic = IbCastAinicRoce;
+  out->isP2p = base->isP2p;
   if (base->isSend) {
     out->maxRecvWorkRequest = 0;
     out->maxSendWorkRequest = 2 * NET_IB_MAX_REQUESTS;
@@ -807,6 +813,7 @@ static ncclResult_t IbCastSenderQpsCreate(ncclIbSendComm* comm, struct ncclIbCon
     qpCreateAttrs.channelId = channelId;
     qpCreateAttrs.ibDevN = commDev->base.ibDevN;
     qpCreateAttrs.useIonic = IbCastAinicRoce;
+    qpCreateAttrs.isP2p = comm->base.isP2p;
 
     if (ibDev->ibProvider == IB_PROVIDER_MLX5 && ncclParamIbCastOooRq()) {
       if (ibDev->ar == 0) {
@@ -1038,6 +1045,7 @@ ib_recv_dev_list:
   comm->base.vProps = mergedDev->vProps;
   // Read isP2p from handle
   isP2p = handle->isP2p;
+  comm->base.isP2p = isP2p;
   comm->useCtsOffload = IbCastIsCtsOffloadEnabled(isP2p) && !handle->isRMA;
   comm->base.recvMatchingScheme = IbCastResolveRecvMatchingScheme(comm->useCtsOffload);
 
@@ -1382,6 +1390,7 @@ static ncclResult_t IbCastReceiverQpsCreateToRts(ncclIbRecvComm* rComm, struct n
     qpCreateAttrs.channelId = channelId;
     qpCreateAttrs.ibDevN = rCommDev->base.ibDevN;
     qpCreateAttrs.useIonic = IbCastAinicRoce;
+    qpCreateAttrs.isP2p = rComm->base.isP2p;
 
     if (rComm->base.resiliency) {
       IbCastResiliencyDataRqSizeGet(rComm->base.resiliency, devIndex, &qpCreateAttrs.maxRecvWorkRequest);
@@ -1670,6 +1679,7 @@ ib_recv:
   /* copy back the received info */
   memcpy(&remMeta, stage->buffer, sizeof(struct ncclIbConnectionMetadata));
 
+  rComm->base.isP2p = remMeta.isP2p;
   rComm->useCtsOffload = IbCastIsCtsOffloadEnabled(remMeta.isP2p) && !remMeta.isRMA;
   rComm->base.recvMatchingScheme = IbCastResolveRecvMatchingScheme(rComm->useCtsOffload);
   INFO(NCCL_NET, "NET/IB: ncclIbAccept isP2p=%d isRMA=%d useCtsOffload=%d (IbP2pDisableCts=%ld) recvMatchingScheme=%d",
