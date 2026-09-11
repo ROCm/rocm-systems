@@ -137,7 +137,7 @@ ARCH_OVERRIDES = {
 class TableGen:
     """Reads the AMDGPU instruction definitions out of LLVM."""
 
-    therock_repo = "https://github.com/ROCm/TheRock.git"
+    therock_repo = "https://github.com/ROCm/TheRock"
     therock_llvm_submodule = "compiler/amd-llvm"
     llvm_repo = "https://github.com/ROCm/llvm-project"
     sparse_paths = ("llvm/lib/Target/AMDGPU", "llvm/include/llvm")
@@ -168,7 +168,7 @@ class TableGen:
         llvm_path = work_path / "llvm"
         llvm_path.mkdir(parents=True)
         run_git(llvm_path, "init", "--quiet")
-        run_git(llvm_path, "remote", "add", "origin", f"{TableGen.llvm_repo}.git")
+        run_git(llvm_path, "remote", "add", "origin", TableGen.llvm_repo)
         run_git(llvm_path, "sparse-checkout", "init", "--cone")
         run_git(llvm_path, "sparse-checkout", "set", *TableGen.sparse_paths)
         print(f"Fetching {commit[:12]} of {TableGen.llvm_repo}")
