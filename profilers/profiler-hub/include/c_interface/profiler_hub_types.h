@@ -76,17 +76,33 @@ extern "C"
      */
     typedef struct
     {
-        const char* name;
+        uint32_t    id;
+        const char* machine_id;
+        const char* system_name;
+        const char* hostname;
+        const char* release;
+        const char* version;
+        const char* hardware_name;
+        const char* domain_name;
     } ph_node_info_t;
 
     /**
-     * @brief A compute agent (e.g. GPU) belonging to a node.
-     * @note name points into memory owned by the producing ph_ctx_t.
+     * @brief A compute agent (e.g. CPU/GPU) belonging to a node.
+     * @note All const char* fields point into memory owned by the producing
+     *       ph_ctx_t.
      */
     typedef struct
     {
         uint32_t    id;
+        const char* agent_type;
+        uint32_t    absolute_index;
+        uint32_t    logical_index;
+        uint32_t    uuid;
         const char* name;
+        const char* model_name;
+        const char* vendor_name;
+        const char* product_name;
+        const char* user_name;
     } ph_agent_t;
 
     /** @brief A list of agents; same lifetime rule as ph_track_list_t. */
