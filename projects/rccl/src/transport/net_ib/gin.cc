@@ -87,6 +87,13 @@ ncclResult_t ncclGinIbGdakiInitOnce() {
 // Initlialize GDAKI or PROXY backend. ginType can force a particular backend.
 // If provided, overwrite ginIb with the backend (generic ginIb case).
 ncclResult_t ncclGinIbInitType(void** ctx, uint64_t commId, ncclDebugLogger_t logFunction, int type) {
+  // Anvil-SDMA does not use the IB RMA proxy. commAlloc still walks internal RMA
+  // plugins, and a second ibv_get_device_list after NET/IB-CAST loaded providers
+  // SIGSEGVs on some MI455 rdma-core stacks (ionic / bng_re).
+  if (type == (int)NCCL_NET_DEVICE_GIN_ANVIL_SDMA) {
+    INFO(NCCL_INIT | NCCL_NET, "RMA/IB: skip verbs init for Anvil-SDMA (NCCL_GIN_TYPE=%d)", type);
+    return ncclInternalError;
+  }
   NCCLCHECK(ncclIbInitDevices(logFunction, nullptr));
   if (ncclNIbDevs == 0) return ncclInternalError; // Caught in plugin init code, not propagated to user.
 
