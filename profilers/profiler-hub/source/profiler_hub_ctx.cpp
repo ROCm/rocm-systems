@@ -38,11 +38,19 @@ ph_ctx::get_node()
 void
 ph_ctx::initialize_track_list()
 {
-    m_tracks = m_reader->get_all_tracks();
-    m_c_tracks.reserve(m_tracks.size());
+    const auto all_tracks = m_reader->get_all_tracks();
 
-    for(const auto& track : m_tracks)
+    m_tracks.reserve(all_tracks.size());
+    m_c_tracks.reserve(all_tracks.size());
+
+    for(const auto& track : all_tracks)
     {
+        if(track->event_count == 0)
+        {
+            continue;
+        }
+
+        m_tracks.push_back(track);
         m_c_tracks.push_back(ph_track_t{
             .id         = static_cast<std::uint32_t>(track->id),
             .track_name = track->name.c_str(),
@@ -52,6 +60,8 @@ ph_ctx::initialize_track_list()
                                        // info (we need an investigation)
                        ? static_cast<std::uint32_t>(track->thread_info->thread_id)
                        : 0,
+            .event_count = static_cast<std::uint32_t>(track->event_count),
+            .agent_id    = static_cast<std::uint32_t>(track->agent_id),
         });
     }
 }

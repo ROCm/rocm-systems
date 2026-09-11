@@ -310,6 +310,27 @@ struct time_range_result
     std::optional<size_t> max_end;
 };
 
+struct track_key_count_result
+{
+    size_t                nid{};
+    std::optional<size_t> pid{};
+    std::optional<size_t> tid{};
+    size_t                count{};
+};
+
+struct track_id_count_result
+{
+    size_t track_id{};
+    size_t count{};
+};
+
+struct track_agent_count_result
+{
+    size_t track_id{};
+    size_t agent_id{};
+    size_t count{};
+};
+
 struct read_statements
 {
     explicit read_statements(std::shared_ptr<sqlite_backend> backend, std::string uuid)
@@ -338,6 +359,8 @@ struct read_statements
         initialize_correlated_event_statements();
         initialize_count_statements();
         initialize_time_range_statements();
+        initialize_track_event_count_statements();
+        initialize_track_agent_count_statement();
     }
     read_statements()                                  = delete;
     read_statements(const read_statements&)            = delete;
@@ -408,6 +431,23 @@ struct read_statements
     using event_id_func_t =
         std::function<sqlite_backend::result_set<event_id_result>(size_t)>;
     using count_func_t = std::function<sqlite_backend::result_set<count_result>()>;
+
+    using track_key_count_statement_func_t =
+        std::function<sqlite_backend::result_set<track_key_count_result>()>;
+    using track_id_count_statement_func_t =
+        std::function<sqlite_backend::result_set<track_id_count_result>()>;
+
+    struct track_event_count_statement_set
+    {
+        track_key_count_statement_func_t region;
+        track_key_count_statement_func_t kernel_dispatch;
+        track_key_count_statement_func_t memory_allocate;
+        track_key_count_statement_func_t memory_copy;
+        track_id_count_statement_func_t  sample;
+    };
+
+    using track_agent_count_statement_func_t =
+        std::function<sqlite_backend::result_set<track_agent_count_result>()>;
     using count_time_filtered_func_t =
         std::function<sqlite_backend::result_set<count_result>(size_t, size_t)>;
     using time_range_func_t =
@@ -554,6 +594,18 @@ struct read_statements
         const
     {
         return m_correlated_event_statements;
+    }
+
+    [[nodiscard]] const track_event_count_statement_set& track_event_count_statements()
+        const
+    {
+        return m_track_event_count_statements;
+    }
+
+    [[nodiscard]] const track_agent_count_statement_func_t& track_agent_count_statement()
+        const
+    {
+        return m_track_agent_count_statement;
     }
 
     // Count and time range accessors
@@ -776,6 +828,64 @@ private:
                 &agent_info_result::product_name,
                 &agent_info_result::user_name,
                 &agent_info_result::extdata);
+    }
+
+    void initialize_track_event_count_statements()
+    {
+        auto make_key_count_stmt = [&](const std::string& table) {
+            auto q = queries::select::table_select_query{}
+                         .select("nid", "pid", "tid", "COUNT(*) AS count")
+                         .from(fmt::format("{}_{}", table, m_uuid))
+                         .group_by("nid", "pid", "tid")
+                         .get_query_string();
+            return m_backend->create_read_statement_executor<track_key_count_result>(
+                q,
+                &track_key_count_result::nid,
+                &track_key_count_result::pid,
+                &track_key_count_result::tid,
+                &track_key_count_result::count);
+        };
+
+        m_track_event_count_statements.region = make_key_count_stmt("rocpd_region");
+        m_track_event_count_statements.kernel_dispatch =
+            make_key_count_stmt("rocpd_kernel_dispatch");
+        m_track_event_count_statements.memory_allocate =
+            make_key_count_stmt("rocpd_memory_allocate");
+        m_track_event_count_statements.memory_copy =
+            make_key_count_stmt("rocpd_memory_copy");
+
+        auto sample_query = queries::select::table_select_query{}
+                                .select("track_id", "COUNT(*) AS count")
+                                .from(fmt::format("rocpd_sample_{}", m_uuid))
+                                .group_by("track_id")
+                                .get_query_string();
+        m_track_event_count_statements.sample =
+            m_backend->create_read_statement_executor<track_id_count_result>(
+                sample_query,
+                &track_id_count_result::track_id,
+                &track_id_count_result::count);
+    }
+
+    // Per-device (agent) breakdown of PMC/counter track samples. A track's
+    // total event_count can span multiple physical devices (e.g. two GPUs
+    // both writing "device_temp"); this lets ph_ctx split such a track into
+    // one logical track per device.
+    void initialize_track_agent_count_statement()
+    {
+        auto query = queries::select::table_select_query{}
+                         .select("S.track_id", "PI.agent_id", "COUNT(*) AS count")
+                         .from(fmt::format("rocpd_sample_{}", m_uuid), "S")
+                         .inner_join("rocpd_pmc_event", "PE", "PE.event_id = S.event_id")
+                         .inner_join("rocpd_info_pmc", "PI", "PI.id = PE.pmc_id")
+                         .group_by("S.track_id", "PI.agent_id")
+                         .get_query_string();
+
+        m_track_agent_count_statement =
+            m_backend->create_read_statement_executor<track_agent_count_result>(
+                query,
+                &track_agent_count_result::track_id,
+                &track_agent_count_result::agent_id,
+                &track_agent_count_result::count);
     }
 
     void initialize_track_info_statement()
@@ -1419,6 +1529,9 @@ private:
 
     // Correlated events
     correlated_event_statement_set m_correlated_event_statements;
+
+    track_event_count_statement_set    m_track_event_count_statements;
+    track_agent_count_statement_func_t m_track_agent_count_statement;
 
     // Count statements
     count_func_t m_region_count;

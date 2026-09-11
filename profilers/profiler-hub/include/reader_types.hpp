@@ -267,6 +267,8 @@ struct track_info_t
     size_t      id{};
     std::string name{};
     std::string extdata{};
+    size_t      event_count{};
+    size_t      agent_id{};
 
     std::shared_ptr<node_info_t>    node_info;
     std::shared_ptr<process_info_t> process_info;
