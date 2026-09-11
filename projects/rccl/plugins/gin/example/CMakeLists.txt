@@ -20,22 +20,22 @@ set(SRC_FILES
 )
 
 # Create shared library
-add_library(nccl-gin-example SHARED ${SRC_FILES})
+add_library(rccl-gin-example SHARED ${SRC_FILES})
 
 # Set include directories
-target_include_directories(nccl-gin-example PRIVATE
+target_include_directories(rccl-gin-example PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/nccl
 )
 
 # Set output name to match Makefile
-set_target_properties(nccl-gin-example PROPERTIES
+set_target_properties(rccl-gin-example PROPERTIES
     OUTPUT_NAME "rccl-gin-example"
     PREFIX "lib"
     POSITION_INDEPENDENT_CODE ON
 )
 
 if(NOT GIN_EXAMPLE_STANDALONE)
-    set_target_properties(nccl-gin-example PROPERTIES
+    set_target_properties(rccl-gin-example PROPERTIES
         LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/test/unit/plugins
     )
 endif()

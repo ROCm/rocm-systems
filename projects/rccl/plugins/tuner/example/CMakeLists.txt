@@ -12,22 +12,22 @@ set(SRC_FILES
 )
 
 # Create shared library
-add_library(nccl-tuner-example SHARED ${SRC_FILES})
+add_library(rccl-tuner-example SHARED ${SRC_FILES})
 
 # Set include directories
-target_include_directories(nccl-tuner-example PRIVATE
+target_include_directories(rccl-tuner-example PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/nccl
 )
 
 # Set output name to match Makefile
-set_target_properties(nccl-tuner-example PROPERTIES
+set_target_properties(rccl-tuner-example PROPERTIES
     OUTPUT_NAME "rccl-tuner-example"
     PREFIX "lib"
     POSITION_INDEPENDENT_CODE ON
 )
 
 if(NOT TUNER_EXAMPLE_STANDALONE)
-    set_target_properties(nccl-tuner-example PROPERTIES
+    set_target_properties(rccl-tuner-example PROPERTIES
         LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/test/unit/plugins
     )
 endif()

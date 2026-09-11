@@ -182,7 +182,7 @@ be used for all logging, especially when `NCCL_DEBUG=INFO` is set.
 
 Note: setting `NCCL_NET=<plugin name>` will ensure a specific network implementation is used, with
 a matching `name`. This is not to be confused with `NCCL_NET_PLUGIN` which defines a suffix to the
-`librccl-net.so`library name to load.
+`librccl-net.so` library name to load.
 
 `init`
 

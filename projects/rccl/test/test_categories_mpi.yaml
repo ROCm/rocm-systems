@@ -411,6 +411,7 @@ execution_settings:
   category_timeouts:
     quick: 1200
     quick_env_ce_allreduce: 1200
+    quick_env_ce_alltoall: 1200
     quick_env_shm_ce_memcpy_send: 1200
     quick_env_shm_ce_memcpy_recv: 1200
     quick_env_shm_ce_memcpy_both_simple: 1200

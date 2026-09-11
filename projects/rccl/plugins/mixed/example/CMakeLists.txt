@@ -20,28 +20,28 @@ set(SRC_FILES
 )
 
 # Create shared library
-add_library(nccl-mixed-example SHARED ${SRC_FILES})
+add_library(rccl-mixed-example SHARED ${SRC_FILES})
 
-target_include_directories(nccl-mixed-example PRIVATE
+target_include_directories(rccl-mixed-example PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../../net/example/nccl
     ${CMAKE_CURRENT_SOURCE_DIR}/../../tuner/example/nccl
 )
 
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
-    target_compile_definitions(nccl-mixed-example PRIVATE NCCL_OS_LINUX)
+    target_compile_definitions(rccl-mixed-example PRIVATE NCCL_OS_LINUX)
 elseif(CMAKE_SYSTEM_NAME STREQUAL "Windows")
-    target_compile_definitions(nccl-mixed-example PRIVATE NCCL_OS_WINDOWS)
+    target_compile_definitions(rccl-mixed-example PRIVATE NCCL_OS_WINDOWS)
 endif()
 
 # Set output name to match Makefile
-set_target_properties(nccl-mixed-example PROPERTIES
+set_target_properties(rccl-mixed-example PROPERTIES
     OUTPUT_NAME "rccl-mixed"
     PREFIX "lib"
     POSITION_INDEPENDENT_CODE ON
 )
 
 if(NOT MIXED_STANDALONE)
-    set_target_properties(nccl-mixed-example PROPERTIES
+    set_target_properties(rccl-mixed-example PROPERTIES
         LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/test/unit/plugins
     )
 endif()

@@ -15,7 +15,7 @@
 #   2. projects/rccl  install.sh              build RCCL from PR sources
 #   3. lib/build-ompi-ucx.sh                  build a UCX-enabled OpenMPI (isolated)
 #   4. projects/rccl-tests                    build the *_perf binaries (with MPI)
-#   5. plugins/tuner/example                  build + install libnccl-tuner-example.so
+#   5. plugins/tuner/example                  build + install librccl-tuner-example.so
 #   6. test/ext-plugins                       run pytest -m "ext_mixed or ext_tuner"
 #
 # Scope: the mixed-plugin tests (the pytest port of plugins/mixed/example/test.sh
@@ -172,18 +172,18 @@ fi
 # (RCCL_INSTALL_DIR/plugins/tuner/example); its presence is also what makes
 # conftest run (not skip) the ext_tuner tests.
 _pt "build:tuner-so:start"
-echo "==> [4/5] build + install libnccl-tuner-example.so"
+echo "==> [4/5] build + install librccl-tuner-example.so"
 tuner_src="${rccl_src}/plugins/tuner/example"
 tuner_dst="${rccl_install_dir}/plugins/tuner/example"
 make -C "${tuner_src}" -j"${build_jobs}" default
-tuner_so="$(find "${tuner_src}" -name libnccl-tuner-example.so -type f 2>/dev/null | head -n1)"
+tuner_so="$(find "${tuner_src}" -name librccl-tuner-example.so -type f 2>/dev/null | head -n1)"
 if [[ -z "${tuner_so}" ]]; then
-  echo "ERROR: libnccl-tuner-example.so not produced under ${tuner_src}" >&2
+  echo "ERROR: librccl-tuner-example.so not produced under ${tuner_src}" >&2
   exit 1
 fi
 mkdir -p "${tuner_dst}"
-cp -f "${tuner_so}" "${tuner_dst}/libnccl-tuner-example.so"
-echo "    installed -> ${tuner_dst}/libnccl-tuner-example.so"
+cp -f "${tuner_so}" "${tuner_dst}/librccl-tuner-example.so"
+echo "    installed -> ${tuner_dst}/librccl-tuner-example.so"
 
 # 5) Hand the install/test locations to the run stage. RCCL_INSTALL_DIR is the
 # librccl.so dir and the plugin root; OMPI_INSTALL_DIR/UCX come from ompi-ucx.env
