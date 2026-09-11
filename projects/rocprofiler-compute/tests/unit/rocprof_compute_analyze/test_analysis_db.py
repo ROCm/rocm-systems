@@ -2556,6 +2556,7 @@ def test_add_code_object_isa_adds_unsampled_lines(db_session):
             code_object_stores,
             kernel_symbols,
             source_frames,
+            {"gpu_arch": "gfx950"},
         )
         db_session.commit()
 
@@ -2670,6 +2671,7 @@ def test_add_code_object_isa_scopes_unsampled_code_objects_by_process(db_session
             code_object_stores,
             kernel_symbols,
             source_frames,
+            {"gpu_arch": "gfx950"},
         )
         db_session.commit()
 
@@ -2745,6 +2747,7 @@ def test_add_code_object_isa_skips_code_object_without_load_base(db_session):
             code_object_stores,
             kernel_symbols,
             source_frames,
+            {"gpu_arch": "gfx950"},
         )
         db_session.commit()
 
@@ -2837,6 +2840,7 @@ def test_add_code_object_isa_scopes_duplicate_offsets_by_process(db_session):
             code_object_stores,
             kernel_symbols,
             source_frames,
+            {"gpu_arch": "gfx950"},
         )
         db_session.commit()
 
@@ -2940,6 +2944,7 @@ def test_add_code_object_isa_requires_process_local_dispatch(db_session):
             code_object_stores,
             {},
             make_source_frame_collector(workload),
+            {"gpu_arch": "gfx950"},
         )
         db_session.commit()
 

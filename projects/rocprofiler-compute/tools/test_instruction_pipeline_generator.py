@@ -18,6 +18,7 @@ from instruction_pipeline_generator import (  # noqa: E402
     Corpus,
     InstructionRecord,
     Pipeline,
+    Prefixes,
     Rules,
     Table,
     TableGen,
@@ -76,45 +77,61 @@ def test_unknown_mnemonic_is_unclassified():
 
 
 def test_mnemonics_cover_every_printed_form():
-    """Short form, encoding-suffixed form and per-family rename all get a key."""
+    """The name and the per-family rename are kept; PseudoInstr is not a name."""
     record = {
         "Mnemonic": "v_add_co_ci_u32",
+        # Identifies the instruction rather than naming it, so it is not a key.
         "PseudoInstr": "v_addc_u32_e32",
         # The operands follow the name with no separating space.
-        "AsmString": "v_add_co_ci_u32$vdst, vcc, $src0, $src1",
+        "AsmString": "v_addc_co_u32$vdst, vcc, $src0, $src1",
     }
 
-    mnemonics = TableGen.mnemonics_for_record("V_ADD_CO_CI_U32_e32_gfx11", record)
+    mnemonics = TableGen.mnemonics_for_record(record)
 
-    assert mnemonics == {
-        "v_add_co_ci_u32",
-        "v_add_co_ci_u32_e32",
-        "v_addc_u32_e32",
-    }
+    assert mnemonics == {"v_add_co_ci_u32", "v_addc_co_u32"}
 
 
-def test_encodings_merge_across_records_sharing_a_mnemonic():
-    """The variant carrying IsMAI decides the pipeline for all of them."""
+def test_variant_takes_the_encodings_of_its_pseudo():
+    """A concrete record can print the name while its pseudo sets IsMAI."""
     dump = make_dump({
-        "V_MFMA_F32_e64_vgprcd": {
-            "Mnemonic": "v_mfma_f32_16x16x16f16",
-            "VALU": 1,
-        },
-        "V_MFMA_F32_e64": {
+        "V_MFMA_F32_16X16X16_F16_e64": {
             "Mnemonic": "v_mfma_f32_16x16x16f16",
             "VALU": 1,
             "IsMAI": 1,
         },
+        "V_MFMA_F32_16X16X16_F16_gfx940_acd": {
+            "PseudoInstr": "V_MFMA_F32_16X16X16_F16_e64",
+            "AsmString": "v_mfma_f32_16x16x16_f16$vdst, $src0",
+            "VALU": 1,
+        },
     })
 
-    assert Rules.build_table(TableGen.records(dump)) == {
+    table = Rules.build_table(TableGen.instructions(TableGen.records(dump)))
+
+    # Both spellings of the one instruction answer the same way.
+    assert table == {
         "v_mfma_f32_16x16x16f16": "MATRIX",
-        "v_mfma_f32_16x16x16f16_e64": "MATRIX",
+        "v_mfma_f32_16x16x16_f16": "MATRIX",
     }
 
 
+def test_record_without_a_pseudo_stands_for_itself():
+    """A pseudo has no PseudoInstr of its own and is its own instruction."""
+    dump = make_dump({
+        "V_ADD_F32_e32": {"Mnemonic": "v_add_f32", "VALU": 1},
+        "S_ADD_I32": {"Mnemonic": "s_add_i32", "SALU": 1},
+    })
+
+    instructions = TableGen.instructions(TableGen.records(dump))
+
+    assert sorted(sorted(i.mnemonics) for i in instructions) == [
+        ["s_add_i32"],
+        ["v_add_f32"],
+    ]
+
+
 def test_records_without_a_printed_name_are_dropped():
-    dump = make_dump({"PSEUDO_ONLY": {"Mnemonic": None, "VALU": 1}})
+    dump = make_dump({"NO_NAME": {"Mnemonic": None, "VALU": 1}})
 
     assert TableGen.records(dump) == []
 
@@ -138,20 +155,66 @@ def test_record_encodings_ignore_fields_that_are_not_pipeline_encodings():
     assert TableGen.records(dump) == [
         InstructionRecord(
             record_name="V_ADD_F32_e32",
-            mnemonics=frozenset({"v_add_f32", "v_add_f32_e32"}),
+            pseudo="V_ADD_F32_e32",
+            mnemonics=frozenset({"v_add_f32"}),
             encodings=frozenset({"VALU"}),
         )
     ]
 
 
-def test_document_groups_mnemonics_and_records_the_rules():
-    """Mnemonics group under their pipeline, and every rule behind them is kept."""
-    document = Table.build_document(
-        "0" * 40, {"v_add_f32_e32": Pipeline.VALU, "v_add_f32": Pipeline.VALU}
-    )
+def test_compression_keeps_the_shortest_prefix_that_holds():
+    """One pipeline below a node means the node stands for all of it."""
+    table = {
+        "v_add_f32": Pipeline.VALU,
+        "v_sub_f32": Pipeline.VALU,
+        "s_add_i32": Pipeline.SCALAR,
+    }
 
-    assert document["pipelines"] == {"VALU": ["v_add_f32", "v_add_f32_e32"]}
-    produced_by_encodings = set(document["rules"]["encodings"].values())
-    produced_by_prefixes = set(document["rules"]["prefixes"])
-    assert produced_by_encodings | produced_by_prefixes == {p.value for p in Pipeline}
-    assert "s_wait" in document["rules"]["prefixes"]["INTERNAL"]
+    prefixes = Prefixes.compress(table)
+
+    # v and s would hold too, but a prefix stops at an underscore.
+    assert prefixes == {"v_": Pipeline.VALU, "s_": Pipeline.SCALAR}
+    assert Prefixes.mismatches(prefixes, table) == []
+
+
+def test_a_disagreeing_descendant_gets_its_own_prefix():
+    """The longer prefix wins, so a name under another name still resolves."""
+    table = {"s_wakeup": Pipeline.INTERNAL, "s_wakeup_barrier": Pipeline.BARRIER}
+
+    prefixes = Prefixes.compress(table)
+
+    assert Prefixes.longest_match(prefixes, "s_wakeup") == Pipeline.INTERNAL
+    assert Prefixes.longest_match(prefixes, "s_wakeup_barrier") == Pipeline.BARRIER
+    assert Prefixes.mismatches(prefixes, table) == []
+
+
+def test_mismatches_name_what_a_prefix_answers_differently():
+    """The check the generator refuses to write on."""
+    table = {"v_add_f32": Pipeline.VALU, "v_add_f64": Pipeline.MATRIX}
+
+    assert Prefixes.mismatches({"v_": Pipeline.VALU}, table) == ["v_add_f64"]
+
+
+def test_document_groups_prefixes_and_carries_the_overrides():
+    """Prefixes group under their pipeline, per architecture and by default."""
+    document = Table.build_document("0" * 40, {"v_add_f32": Pipeline.VALU})
+
+    assert document["pipelines"] == {"VALU": ["v_add_f32"]}
+    assert document["arch_overrides"]["gfx908"] == {"FLAT": ["global_", "scratch_"]}
+    assert "v_mfma_f64_16x16x4f64" in document["arch_overrides"]["gfx950"]["VALU"]
+    # An architecture with no hardware difference carries no override.
+    assert "gfx1250" not in document["arch_overrides"]
+
+
+def test_overrides_apply_by_prefix_for_one_architecture():
+    """An override claims the encoding tails of the name it lists."""
+    table = {
+        "global_load_dword": Pipeline.VMEM,
+        "v_mfma_f64_16x16x4f64_vgprcd_e64": Pipeline.MATRIX,
+    }
+
+    assert Rules.apply_overrides(table, "gfx950") == {
+        "global_load_dword": Pipeline.FLAT,
+        "v_mfma_f64_16x16x4f64_vgprcd_e64": Pipeline.VALU,
+    }
+    assert Rules.apply_overrides(table, "gfx1250") == table
