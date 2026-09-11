@@ -621,25 +621,14 @@ TEST_F(NetIbMPITest, CastSplitDataThresholdBoundary) {
         // otherwise put past the allocation.
         const size_t bufSize = std::max<size_t>(64, threshold);
 
-        const RdmaResourceCounts before = CaptureRdmaResources();
-        RunMultiThreadedIndependent(
-            0, MPIEnvironment::nThreads,
+        RunThreadedBody(
+            0, MPIEnvironment::nThreads, "threaded CastSplitDataThresholdBoundary",
             [&](int threadIdx, ConnectionPair& pair) -> ThreadResult {
+                WorkerHostBuffer host = WorkerSetupHostBuffer(rank, pair, bufSize);
+                if (!host.result.ok) return host.result;
+                void* buffer = host.buffer;
+                void* mhandle = host.mhandle;
                 ThreadResult result;
-                void* buffer = malloc(bufSize);
-                if (!buffer) {
-                    result.ok = false;
-                    result.msg = "malloc failed";
-                    return result;
-                }
-                auto bufferGuard = makeHostBufferAutoGuard(buffer);
-
-                void* workerComm = (rank == 0) ? pair.recvComm : pair.sendComm;
-                void* mhandle = nullptr;
-                result = WorkerRegister(workerComm, buffer, bufSize, NCCL_PTR_HOST, &mhandle);
-                if (!result.ok) return result;
-                NetMHandleWorkerGuard mhandleGuard(mhandle,
-                                                   NetMHandleWorkerDeleter(net_, workerComm));
 
                 const int seed = WorkerSeed(threadIdx, 1599);
                 result = WorkerCastPrepareTokens(rank, pair, buffer, mhandle, nqps, 1599, seed);
@@ -654,9 +643,6 @@ TEST_F(NetIbMPITest, CastSplitDataThresholdBoundary) {
                 return WorkerCastTransferExpectTokens(rank, pair, buffer, threshold - 1, 1601,
                                                       mhandle, seed + 2, /*tokens=*/1);
             });
-        MPI_Barrier(MPI_COMM_WORLD);
-        AssertNoRdmaLeaks(before, CaptureRdmaResources(),
-                          "threaded CastSplitDataThresholdBoundary");
         return;
     }
 
@@ -1132,25 +1118,14 @@ TEST_F(NetIbMPITest, CastSendRecvMultipleSizes) {
         wrrSizes.erase(std::unique(wrrSizes.begin(), wrrSizes.end()), wrrSizes.end());
         const std::vector<size_t> splitSizes = {threshold, threshold * 2};
 
-        const RdmaResourceCounts before = CaptureRdmaResources();
-        RunMultiThreadedIndependent(
-            0, MPIEnvironment::nThreads,
+        RunThreadedBody(
+            0, MPIEnvironment::nThreads, "threaded CastSendRecvMultipleSizes",
             [&](int threadIdx, ConnectionPair& pair) -> ThreadResult {
+                WorkerHostBuffer host = WorkerSetupHostBuffer(rank, pair, bufSize);
+                if (!host.result.ok) return host.result;
+                void* buffer = host.buffer;
+                void* mhandle = host.mhandle;
                 ThreadResult result;
-                void* buffer = malloc(bufSize);
-                if (!buffer) {
-                    result.ok = false;
-                    result.msg = "malloc failed";
-                    return result;
-                }
-                auto bufferGuard = makeHostBufferAutoGuard(buffer);
-
-                void* workerComm = (rank == 0) ? pair.recvComm : pair.sendComm;
-                void* mhandle = nullptr;
-                result = WorkerRegister(workerComm, buffer, bufSize, NCCL_PTR_HOST, &mhandle);
-                if (!result.ok) return result;
-                NetMHandleWorkerGuard mhandleGuard(mhandle,
-                                                   NetMHandleWorkerDeleter(net_, workerComm));
 
                 const int seedBase = WorkerSeed(threadIdx, 1999);
                 result = WorkerCastPrepareTokens(rank, pair, buffer, mhandle, nqps, 1999,
@@ -1159,21 +1134,21 @@ TEST_F(NetIbMPITest, CastSendRecvMultipleSizes) {
 
                 int tag = 2000;
                 for (size_t size : wrrSizes) {
-                    result = WorkerCastTransferExpectTokens(rank, pair, buffer, size, tag++,
-                                                            mhandle, seedBase + tag,
+                    const int stepTag = tag++;
+                    result = WorkerCastTransferExpectTokens(rank, pair, buffer, size, stepTag,
+                                                            mhandle, seedBase + stepTag,
                                                             /*tokens=*/1);
                     if (!result.ok) return result;
                 }
                 for (size_t size : splitSizes) {
-                    result = WorkerCastTransferExpectTokens(rank, pair, buffer, size, tag++,
-                                                            mhandle, seedBase + tag,
+                    const int stepTag = tag++;
+                    result = WorkerCastTransferExpectTokens(rank, pair, buffer, size, stepTag,
+                                                            mhandle, seedBase + stepTag,
                                                             /*tokens=*/0);
                     if (!result.ok) return result;
                 }
                 return result;
             });
-        MPI_Barrier(MPI_COMM_WORLD);
-        AssertNoRdmaLeaks(before, CaptureRdmaResources(), "threaded CastSendRecvMultipleSizes");
         return;
     }
 
@@ -1308,26 +1283,14 @@ TEST_F(NetIbMPITest, CastLargeTransfer) {
             GTEST_SKIP() << "the connection uses a single queue pair, which bypasses WRR and "
                             "split selection; CastSingleQPBypassesWrr covers that case";
         if (nqpsStatus != 0) return;
-        const RdmaResourceCounts before = CaptureRdmaResources();
-        RunMultiThreadedIndependent(
-            0, MPIEnvironment::nThreads,
+        RunThreadedBody(
+            0, MPIEnvironment::nThreads, "threaded CastLargeTransfer",
             [&](int threadIdx, ConnectionPair& pair) -> ThreadResult {
+                WorkerHostBuffer host = WorkerSetupHostBuffer(rank, pair, kLargeBufferSize);
+                if (!host.result.ok) return host.result;
+                void* buffer = host.buffer;
+                void* mhandle = host.mhandle;
                 ThreadResult result;
-                void* buffer = malloc(kLargeBufferSize);
-                if (!buffer) {
-                    result.ok = false;
-                    result.msg = "malloc failed";
-                    return result;
-                }
-                auto bufferGuard = makeHostBufferAutoGuard(buffer);
-
-                void* workerComm = (rank == 0) ? pair.recvComm : pair.sendComm;
-                void* mhandle = nullptr;
-                result = WorkerRegister(workerComm, buffer, kLargeBufferSize, NCCL_PTR_HOST,
-                                        &mhandle);
-                if (!result.ok) return result;
-                NetMHandleWorkerGuard mhandleGuard(mhandle,
-                                                   NetMHandleWorkerDeleter(net_, workerComm));
 
                 const int seed = WorkerSeed(threadIdx, 2099);
                 result = WorkerCastPrepareTokens(rank, pair, buffer, mhandle, nqps, 2099, seed);
@@ -1336,8 +1299,6 @@ TEST_F(NetIbMPITest, CastLargeTransfer) {
                 return WorkerCastTransferExpectTokens(rank, pair, buffer, kLargeBufferSize,
                                                       2100, mhandle, seed + 1, /*tokens=*/0);
             });
-        MPI_Barrier(MPI_COMM_WORLD);
-        AssertNoRdmaLeaks(before, CaptureRdmaResources(), "threaded CastLargeTransfer");
         return;
     }
 
@@ -1427,26 +1388,15 @@ TEST_F(NetIbMPITest, CastSendRecvZeroSize) {
             GTEST_SKIP() << "the connection uses a single queue pair, which bypasses WRR and "
                             "split selection; CastSingleQPBypassesWrr covers that case";
         if (nqpsStatus != 0) return;
-        const RdmaResourceCounts before = CaptureRdmaResources();
-        RunMultiThreadedIndependent(
-            0, MPIEnvironment::nThreads,
+        RunThreadedBody(
+            0, MPIEnvironment::nThreads, "threaded CastSendRecvZeroSize",
             [&](int threadIdx, ConnectionPair& pair) -> ThreadResult {
-                ThreadResult result;
                 const size_t regSize = 64;
-                void* buffer = malloc(regSize);
-                if (!buffer) {
-                    result.ok = false;
-                    result.msg = "malloc failed";
-                    return result;
-                }
-                auto bufferGuard = makeHostBufferAutoGuard(buffer);
-
-                void* workerComm = (rank == 0) ? pair.recvComm : pair.sendComm;
-                void* mhandle = nullptr;
-                result = WorkerRegister(workerComm, buffer, regSize, NCCL_PTR_HOST, &mhandle);
-                if (!result.ok) return result;
-                NetMHandleWorkerGuard mhandleGuard(mhandle,
-                                                   NetMHandleWorkerDeleter(net_, workerComm));
+                WorkerHostBuffer host = WorkerSetupHostBuffer(rank, pair, regSize);
+                if (!host.result.ok) return host.result;
+                void* buffer = host.buffer;
+                void* mhandle = host.mhandle;
+                ThreadResult result;
 
                 const int seed = WorkerSeed(threadIdx, 2199);
                 result = WorkerCastPrepareTokens(rank, pair, buffer, mhandle, nqps, 2199, seed);
@@ -1455,8 +1405,6 @@ TEST_F(NetIbMPITest, CastSendRecvZeroSize) {
                 return WorkerCastTransferExpectTokens(rank, pair, buffer, 0, 2200, mhandle,
                                                       seed + 1, /*tokens=*/1);
             });
-        MPI_Barrier(MPI_COMM_WORLD);
-        AssertNoRdmaLeaks(before, CaptureRdmaResources(), "threaded CastSendRecvZeroSize");
         return;
     }
 
@@ -1541,6 +1489,10 @@ TEST_F(NetIbMPITest, CastStressMultiRoundTwoConns) {
     if (MPIEnvironment::nThreads > 1) {
         if (GetSplitDataMin() == 0)
             GTEST_SKIP() << "RCCL_IB_QP_SCHED_SPLIT_DATA_MIN=0: no WRR/split boundary exists";
+        // As the other four threaded branches do: a short update interval refills
+        // tokens mid-phase, and the audit below then reads a ledger the sends did
+        // not produce.
+        CAST_REQUIRE_UPDATE_INTERVAL_OR_SKIP(10000000);
 
         // The live count, agreed across ranks, not the environment's request: on a
         // merged device the plugin creates that many QPs per member, so a threshold
@@ -1571,25 +1523,14 @@ TEST_F(NetIbMPITest, CastStressMultiRoundTwoConns) {
         static constexpr int kThreadedMsgs = 100;
         static constexpr int kThreadedRampRounds = 5;
 
-        const RdmaResourceCounts before = CaptureRdmaResources();
-        RunMultiThreadedIndependent(
-            0, MPIEnvironment::nThreads,
+        RunThreadedBody(
+            0, MPIEnvironment::nThreads, "threaded CastStressMultiRoundTwoConns",
             [&](int threadIdx, ConnectionPair& pair) -> ThreadResult {
+                WorkerHostBuffer host = WorkerSetupHostBuffer(rank, pair, bufSize);
+                if (!host.result.ok) return host.result;
+                void* buffer = host.buffer;
+                void* mhandle = host.mhandle;
                 ThreadResult result;
-                void* buffer = malloc(bufSize);
-                if (!buffer) {
-                    result.ok = false;
-                    result.msg = "malloc failed";
-                    return result;
-                }
-                auto bufferGuard = makeHostBufferAutoGuard(buffer);
-
-                void* workerComm = (rank == 0) ? pair.recvComm : pair.sendComm;
-                void* mhandle = nullptr;
-                result = WorkerRegister(workerComm, buffer, bufSize, NCCL_PTR_HOST, &mhandle);
-                if (!result.ok) return result;
-                NetMHandleWorkerGuard mhandleGuard(mhandle,
-                                                   NetMHandleWorkerDeleter(net_, workerComm));
 
                 const int tagBase = 10000 + threadIdx * 200;
                 const int seedBase = WorkerSeed(threadIdx, 3999);
@@ -1626,6 +1567,21 @@ TEST_F(NetIbMPITest, CastStressMultiRoundTwoConns) {
                         result.msg = "activeTotTokens left the [0, initTotTokens] range";
                         return result;
                     }
+                    // Exact, because everything above holds whether or not WRR ran:
+                    // schedInit is set unconditionally, and the sum and the range hold
+                    // both at 0 and at an untouched full ledger. This phase arms
+                    // exactly kThreadedMsgs tokens against exactly that many
+                    // sub-threshold sends and the refill only fires on the next one, so
+                    // a WRR path that ran leaves none and one that did not leaves all.
+                    if (state.activeTotTokens != 0) {
+                        result.ok = false;
+                        result.msg = "the WRR phase left "
+                                     + std::to_string(state.activeTotTokens) + " of "
+                                     + std::to_string(state.initTotTokens)
+                                     + " tokens unspent, so the sends did not take the "
+                                       "WRR path";
+                        return result;
+                    }
                 }
 
                 // Phase 2: ramp across the WRR/split boundary.
@@ -1633,17 +1589,15 @@ TEST_F(NetIbMPITest, CastStressMultiRoundTwoConns) {
                 for (int round = 0; round < kThreadedRampRounds; round++) {
                     for (size_t size : rampSizes) {
                         if (size == 0 || size > bufSize) continue;
-                        result = WorkerSendRecvPattern(rank, pair, buffer, size, tag++, mhandle,
-                                                       seedBase + tag,
+                        const int stepTag = tag++;
+                        result = WorkerSendRecvPattern(rank, pair, buffer, size, stepTag, mhandle,
+                                                       seedBase + stepTag,
                                                        kLargeTransferTimeoutMs);
                         if (!result.ok) return result;
                     }
                 }
                 return result;
             });
-        MPI_Barrier(MPI_COMM_WORLD);
-        AssertNoRdmaLeaks(before, CaptureRdmaResources(),
-                          "threaded CastStressMultiRoundTwoConns");
         return;
     }
 
