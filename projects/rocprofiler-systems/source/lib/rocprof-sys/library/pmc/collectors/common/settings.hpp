@@ -57,14 +57,6 @@ using ::rocprofsys::pmc::device_selection_mode;
 using ::rocprofsys::pmc::collectors::cpu::enabled_metrics;
 }  // namespace cpu
 
-// Import hipFile types into collectors namespace
-namespace hipfile
-{
-using ::rocprofsys::pmc::collectors::hipfile::ALL_HIPFILE_METRICS;
-using ::rocprofsys::pmc::collectors::hipfile::enabled_metrics;
-using ::rocprofsys::pmc::collectors::hipfile::METRIC_TABLE;
-}  // namespace hipfile
-
 // GPU metric bitfield helpers: ENABLE_ALL_METRICS sets bits 0..NUM_GPU_METRIC_BITS-1
 inline constexpr std::uint32_t NUM_GPU_METRIC_BITS = 17;
 inline constexpr std::uint32_t ENABLE_ALL_METRICS  = (1U << NUM_GPU_METRIC_BITS) - 1U;
@@ -141,12 +133,27 @@ struct settings_policy
      * (@c env_vars::HIPFILE_METRICS_DEFAULT) is registered in config.cpp; the "all"
      * below applies only when the setting is absent entirely, as it is in unit tests.
      */
-    static hipfile::enabled_metrics get_hipfile_enabled_metrics()
+    static hipfile::enabled_metrics get_hipfile_enabled_metrics() noexcept
     {
-        static auto _enabled_metrics = []() {
-            auto setting =
-                get_setting_value<std::string>(std::string{ env_vars::HIPFILE_METRICS });
-            return parse_hipfile_enabled_metrics(setting.value_or("all"));
+        static auto _enabled_metrics = []() noexcept {
+            try
+            {
+                auto setting = get_setting_value<std::string>(
+                    std::string{ env_vars::HIPFILE_METRICS });
+                return parse_hipfile_enabled_metrics(setting.value_or("all"));
+            } catch(const std::exception& ex)
+            {
+                LOG_ERROR("Failed to apply {}: {}. Collecting all hipFile metrics.",
+                          env_vars::HIPFILE_METRICS, ex.what());
+            } catch(...)
+            {
+                LOG_ERROR("Failed to apply {}: unknown exception. Collecting all hipFile "
+                          "metrics.",
+                          env_vars::HIPFILE_METRICS);
+            }
+            hipfile::enabled_metrics fallback;
+            fallback.value = hipfile::ALL_HIPFILE_METRICS;
+            return fallback;
         }();
         return _enabled_metrics;
     }
@@ -230,51 +237,53 @@ struct settings_policy
      */
     static nic::nic_device_filter get_nic_device_filter() noexcept
     {
-        try
-        {
-            auto filter =
-                get_setting_value<std::string>(std::string{ env_vars::SAMPLING_AINICS });
-            if(!filter.has_value())
+        static auto _filter = []() noexcept {
+            try
             {
-                // NIC sampling disabled by default
-                nic::nic_device_filter result;
-                result.mode = nic::device_selection_mode::NONE;
-                return result;
-            }
+                auto filter = get_setting_value<std::string>(
+                    std::string{ env_vars::SAMPLING_AINICS });
+                if(!filter.has_value())
+                {
+                    // NIC sampling disabled by default
+                    nic::nic_device_filter result;
+                    result.mode = nic::device_selection_mode::none;
+                    return result;
+                }
 
-            const auto& filter_str = filter.value();
-            if(filter_str == "all" || filter_str == "on")
+                const auto& filter_str = filter.value();
+                if(filter_str == "all" || filter_str == "on")
+                {
+                    nic::nic_device_filter result;
+                    result.mode = nic::device_selection_mode::all;
+                    return result;
+                }
+
+                if(filter_str == "none" || filter_str == "off" || filter_str.empty())
+                {
+                    nic::nic_device_filter result;
+                    result.mode = nic::device_selection_mode::none;
+                    return result;
+                }
+
+                nic::nic_device_filter result;
+                result.mode  = nic::device_selection_mode::specific;
+                result.names = parse_name_list(filter_str);
+                return result;
+            } catch(const std::exception& ex)
             {
-                nic::nic_device_filter result;
-                result.mode = nic::device_selection_mode::ALL;
-                return result;
-            }
-
-            if(filter_str == "none" || filter_str == "off" || filter_str.empty())
+                LOG_ERROR("Failed to apply {}: {}. Disabling NIC sampling only.",
+                          env_vars::SAMPLING_AINICS, ex.what());
+            } catch(...)
             {
-                nic::nic_device_filter result;
-                result.mode = nic::device_selection_mode::NONE;
-                return result;
+                LOG_ERROR("Failed to apply {}: unknown exception. Disabling NIC sampling "
+                          "only.",
+                          env_vars::SAMPLING_AINICS);
             }
-
-            // Parse comma-separated names
             nic::nic_device_filter result;
-            result.mode  = nic::device_selection_mode::SPECIFIC;
-            result.names = parse_name_list(filter_str);
+            result.mode = nic::device_selection_mode::none;
             return result;
-        } catch(const std::exception& ex)
-        {
-            LOG_ERROR("Failed to apply {}: {}. Disabling NIC sampling only.",
-                      env_vars::SAMPLING_AINICS, ex.what());
-        } catch(...)
-        {
-            LOG_ERROR("Failed to apply {}: unknown exception. Disabling NIC sampling "
-                      "only.",
-                      env_vars::SAMPLING_AINICS);
-        }
-        nic::nic_device_filter result;
-        result.mode = nic::device_selection_mode::NONE;
-        return result;
+        }();
+        return _filter;
     }
 
     /**
