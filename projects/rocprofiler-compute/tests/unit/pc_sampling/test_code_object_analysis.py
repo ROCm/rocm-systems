@@ -5,11 +5,15 @@ import json
 from pathlib import Path
 
 import common
+import pytest
+import yaml
 
+from pc_sampling import code_object_analysis
 from pc_sampling.code_object_analysis import (
     CodeObjectDisassembly,
     CodeObjectInstruction,
     CodeObjectSymbol,
+    InstructionPipelines,
     load_code_object_disassemblies,
     parse_code_object_info,
 )
@@ -171,3 +175,90 @@ def test_load_skips_malformed_json():
         assert load_code_object_disassemblies(str(workload_dir)) == {}
     finally:
         common.clean_output_dir(True, str(workload_dir))
+
+
+# =============================================================================
+# Execution pipeline lookup
+# =============================================================================
+
+
+def _clear_pipeline_caches(monkeypatch):
+    """Drop the per-architecture tables a previous test may have loaded."""
+    monkeypatch.setattr(InstructionPipelines, "pipeline_by_prefix", {})
+    monkeypatch.setattr(InstructionPipelines, "prefix_lengths", {})
+    monkeypatch.setattr(InstructionPipelines, "pipeline_by_mnemonic", {})
+
+
+@pytest.fixture
+def pipeline_table(tmp_path, monkeypatch):
+    """Point the loader at a small generated table."""
+    analysis_configs = tmp_path / "rocprof_compute_soc" / "analysis_configs"
+    analysis_configs.mkdir(parents=True)
+    (analysis_configs / "instruction_pipelines.yaml").write_text(
+        yaml.safe_dump({
+            "commit": "0" * 40,
+            "arch_overrides": {
+                "gfx950": {"VALU": ["v_mfma_f64_"], "FLAT": ["global_"]}
+            },
+            "pipelines": {
+                "VALU": ["v_mov_b32_e32"],
+                "INTERNAL": ["s_wait"],
+                "BARRIER": ["s_waitcnt_barrier"],
+                "MATRIX": ["v_mfma_"],
+                "VMEM": ["global_"],
+            },
+        }),
+        encoding="utf-8",
+    )
+    _clear_pipeline_caches(monkeypatch)
+    monkeypatch.setattr(code_object_analysis.config, "rocprof_compute_home", tmp_path)
+
+
+@pytest.mark.parametrize(
+    "instruction, expected",
+    [
+        ("v_mov_b32_e32 v1, 0", "VALU"),
+        ("s_waitcnt", "INTERNAL"),
+        ("s_waitcnt lgkmcnt(0)", "INTERNAL"),
+        ("v_mfma_f32_16x16x16f16 a[0:3], v0, v1, a[0:3]", "MATRIX"),
+        ("v_not_a_real_instruction v0", None),
+        (None, None),
+        ("", None),
+    ],
+)
+def test_lookup_reads_the_leading_mnemonic(pipeline_table, instruction, expected):
+    assert InstructionPipelines.lookup(instruction) == expected
+
+
+def test_lookup_takes_the_longest_matching_prefix(pipeline_table):
+    """A prefix under another prefix answers for the names below it."""
+    assert InstructionPipelines.lookup("s_waitcnt_barrier") == "BARRIER"
+    assert InstructionPipelines.lookup("s_wait_anything_else") == "INTERNAL"
+
+
+def test_lookup_applies_the_architectures_overrides(pipeline_table):
+    """An override replaces a prefix for its architecture and no other."""
+    assert InstructionPipelines.lookup("v_mfma_f64_16x16x4f64", "gfx950") == "VALU"
+    assert InstructionPipelines.lookup("v_mfma_f64_16x16x4f64", "gfx942") == "MATRIX"
+    # The matrix instructions the override does not name are unaffected.
+    assert InstructionPipelines.lookup("v_mfma_f32_16x16x4f16", "gfx950") == "MATRIX"
+    # gfx1150 through gfx1153 share the gfx115x configs, and hold no override.
+    assert InstructionPipelines.lookup("global_load_dword", "gfx1151") == "VMEM"
+    assert InstructionPipelines.lookup("global_load_dword", "gfx950") == "FLAT"
+
+
+def test_lookup_answers_a_repeated_mnemonic_from_memory(pipeline_table):
+    """Every instruction line comes through lookup, so the answer is kept."""
+    assert InstructionPipelines.lookup("v_mov_b32_e32 v1, 0") == "VALU"
+
+    assert InstructionPipelines.pipeline_by_mnemonic[None] == {"v_mov_b32_e32": "VALU"}
+    assert InstructionPipelines.lookup("v_mov_b32_e32 v9, 1") == "VALU"
+
+
+def test_lookup_without_a_table_leaves_every_type_unset(tmp_path, monkeypatch):
+    """A missing table degrades to empty types instead of failing analyze."""
+    _clear_pipeline_caches(monkeypatch)
+    monkeypatch.setattr(code_object_analysis.config, "rocprof_compute_home", tmp_path)
+
+    assert InstructionPipelines.lookup("v_mov_b32_e32 v1, 0") is None
+    assert InstructionPipelines.lookup("s_waitcnt") is None

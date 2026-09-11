@@ -8,6 +8,7 @@ from typing import Any, Optional
 
 import pandas as pd
 
+from pc_sampling.code_object_analysis import InstructionPipelines
 from pc_sampling.pc_sampling_analysis import (
     SOURCE_LINE_MISSING,
     aggregate_pc_sample_records,
@@ -468,11 +469,15 @@ def _format_pc_sampling_display_frame(
     method: str,
     sorting_type: str,
     num_rows: Optional[int] = None,
+    gpu_arch: Optional[str] = None,
 ) -> pd.DataFrame:
     """Return the sampling rows in their requested display layout."""
     # Project stall_reason as a descending list[(reason, count)].
     df["stall_reason"] = df["stall_reason"].apply(_stall_reason_dict_to_list)
     df["source_line"] = df["source_line"].apply(_trim_source_line)
+    df["instruction_type"] = df["instruction"].apply(
+        lambda instruction: InstructionPipelines.lookup(instruction, gpu_arch)
+    )
 
     # Sort on the numeric offset (lexicographic hex order is wrong), then
     # format offset as hex for display. Leading with pid keeps each process's
@@ -500,6 +505,7 @@ def _format_pc_sampling_display_frame(
         "pid",
         "source_line",
         "instruction",
+        "instruction_type",
         "code_object_id",
         "offset",
         "count",
@@ -604,6 +610,7 @@ def load_pc_sampling_data(
         pc_sampling_method,
         sorting_type,
         num_rows=num_rows,
+        gpu_arch=sys_info.get("gpu_arch"),
     )
 
 
