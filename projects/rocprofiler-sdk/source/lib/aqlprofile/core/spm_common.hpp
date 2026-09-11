@@ -43,3 +43,6 @@ typedef struct SpmBufferDesc_
 
     uint16_t* get_counter_map() { return (uint16_t*) (this + 1); }
 } SpmBufferDesc;
+
+static constexpr size_t SPM_COUNTER_MAP_CAPACITY =
+    (SPM_DESC_SIZE - sizeof(SpmBufferDesc)) / sizeof(uint16_t);

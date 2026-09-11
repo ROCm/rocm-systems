@@ -299,8 +299,12 @@ AllocateCounter(counter_des_t&                                            counte
     if(is_first_16bit && !is_gfx12_sqc && (reg_index % 4))
         reg_index = ret.first->second.index = (ret.first->second.index + 3) & ~3;
 
+    if(block_info->spm_counter_count == 0)
+        throw std::runtime_error(std::string("SPM not supported for block ") + block_info->name);
+
     if(reg_index >= block_info->spm_counter_count)
-        throw std::runtime_error("Event is out of block counter registers number limit");
+        throw std::runtime_error(std::string("Event is out of block counter registers number limit for ") +
+                                 block_info->name);
 
     counter_des.index = reg_index;
 
@@ -471,11 +475,15 @@ _internal_aqlprofile_spm_create_packets(aqlprofile_handle_t*          handle,
 
         const pm4_builder::counters_vector countersVec =
             CountersVec(profile.events, profile.event_count, pm4_factory);
+        if(countersVec.size() > SPM_COUNTER_MAP_CAPACITY)
+            return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
 
         pm4_builder::TraceConfig& trace_config = memory->config;
 
         trace_config.spm_has_core1     = (pm4_factory->GetGpuId() == aql_profile::MI100_GPU_ID) ||
                                      (pm4_factory->GetGpuId() == aql_profile::MI200_GPU_ID);
+        trace_config.spm_force_sample_before_stop =
+            pm4_factory->GetGpuId() >= aql_profile::GFX11_GPU_ID;
         trace_config.spm_sample_delay_max = pm4_factory->GetSpmSampleDelayMax();
         trace_config.sampleRate =
             (s->parameters.at(AQLPROFILE_SPM_PARAMETER_TYPE_SAMPLE_INTERVAL) + 16) & ~31ul;
@@ -493,7 +501,9 @@ _internal_aqlprofile_spm_create_packets(aqlprofile_handle_t*          handle,
 
         trace_config.xcc_number = pm4_factory->GetXccNumber();
         trace_config.se_number  = pm4_factory->GetShaderEnginesNumber() / trace_config.xcc_number;
-        trace_config.sa_number  = pm4_factory->GetGpuId() >= aql_profile::GFX10_GPU_ID ? 2 : 0;
+        trace_config.sa_number  = pm4_factory->GetGpuId() >= aql_profile::GFX10_GPU_ID
+                                     ? pm4_factory->GetShaderArraysNumber()
+                                     : 0;
 
         trace_config.data_buffer_ptr  = memory->GetOutputBuf();
         trace_config.data_buffer_size = memory->GetOutputBufSize();

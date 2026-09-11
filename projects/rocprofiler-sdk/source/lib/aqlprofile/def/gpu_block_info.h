@@ -134,7 +134,7 @@ struct GpuBlockInfo
     // SPM block id
     uint32_t spm_block_id;
     // Maximum number of 16-bit SPM counters that can be enabled at once
-    uint32_t spm_counter_count;
+    uint32_t spm_counter_count = 0;
 };
 
 // Block descriptor

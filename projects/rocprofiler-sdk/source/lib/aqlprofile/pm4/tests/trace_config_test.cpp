@@ -34,7 +34,19 @@ TEST_F(TraceConfigTest, DefaultValues)
     EXPECT_EQ(default_config.spm_sample_interval_type, 0u);
     EXPECT_EQ(default_config.perfMASK, ~0u);
     EXPECT_FALSE(default_config.spm_has_core1);
+    EXPECT_FALSE(default_config.spm_force_sample_before_stop);
     EXPECT_EQ(default_config.se_mask, 0x11);
+}
+
+TEST_F(TraceConfigTest, SpmForceSampleBeforeStop)
+{
+    EXPECT_FALSE(config.spm_force_sample_before_stop);
+
+    config.spm_force_sample_before_stop = true;
+    EXPECT_TRUE(config.spm_force_sample_before_stop);
+
+    config.spm_force_sample_before_stop = false;
+    EXPECT_FALSE(config.spm_force_sample_before_stop);
 }
 
 TEST_F(TraceConfigTest, SEConfiguration)
