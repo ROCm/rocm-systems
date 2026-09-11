@@ -542,11 +542,10 @@ TEST(WrapMicrotestIsolated, GetAlgoProtoIndex_CrossPurposeLatchSuppressesAlgoWar
         EXPECT_NE(std::string::npos, protoLog.find("Invalid algo or protocol string"));  // primes the shared latch
 
         SetMicroEnv("RCCL_OVERRIDE_ALGO", "bogusalgo");
-        const char* algoStr[] = {"TREE", "RING", "COLLNET_DIRECT", "COLLNET_CHAIN", "NVLS", "NVLS_TREE", "PAT"};
         float algoTable[NCCL_NUM_ALGORITHMS][NCCL_NUM_PROTOCOLS] = {};
         ncclTaskColl algoInfo{};
         const std::string algoLog = RcclUnitTesting::CaptureLog(
-            [&]() { EXPECT_EQ(ncclInvalidUsage, rcclOverrideAlgorithm(algoStr, algoTable, &algoInfo)); });
+            [&]() { EXPECT_EQ(ncclInvalidUsage, rcclOverrideAlgorithm(ncclAlgoStr, algoTable, &algoInfo)); });
         EXPECT_TRUE(algoLog.empty())
             << "a genuinely different bad RCCL_OVERRIDE_ALGO string should still warn -- it doesn't, because "
                "failedProtoWarn is shared with rcclOverrideProtocol's earlier failure. Got: "
@@ -1574,11 +1573,10 @@ TEST(WrapMicrotestIsolated, OverrideAlgorithm_UnsetEnvLeavesAlgorithmUntouched) 
       "Wrap_OverrideAlgorithm_UnsetEnvLeavesAlgorithmUntouched",
       []() {
         SetMicroEnvAbsent("RCCL_OVERRIDE_ALGO");
-        const char* algoStr[] = {"TREE", "RING", "COLLNET_DIRECT", "COLLNET_CHAIN", "NVLS", "NVLS_TREE", "PAT"};
         float table[NCCL_NUM_ALGORITHMS][NCCL_NUM_PROTOCOLS] = {};
         ncclTaskColl info{};
         info.algorithm = NCCL_ALGO_TREE;
-        EXPECT_EQ(ncclSuccess, rcclOverrideAlgorithm(algoStr, table, &info));
+        EXPECT_EQ(ncclSuccess, rcclOverrideAlgorithm(ncclAlgoStr, table, &info));
         EXPECT_EQ(NCCL_ALGO_TREE, info.algorithm);
       });
 }
@@ -1587,14 +1585,14 @@ TEST(WrapMicrotestIsolated, OverrideAlgorithm_ValidMatchOverridesAlgorithm) {
   RUN_ISOLATED_TEST(
       "Wrap_OverrideAlgorithm_ValidMatchOverridesAlgorithm",
       []() {
-        SetMicroEnv("RCCL_OVERRIDE_ALGO", "RING");
-        const char* algoStr[] = {"TREE", "RING", "COLLNET_DIRECT", "COLLNET_CHAIN", "NVLS", "NVLS_TREE", "PAT"};
+        // Pin a spelling that differs from the old test-local uppercase table.
+        SetMicroEnv("RCCL_OVERRIDE_ALGO", "CollNetDirect");
         float table[NCCL_NUM_ALGORITHMS][NCCL_NUM_PROTOCOLS] = {}; // all zero: not NCCL_ALGO_PROTO_IGNORE
         ncclTaskColl info{};
         info.algorithm = NCCL_ALGO_TREE;
         info.protocol = NCCL_PROTO_SIMPLE;
-        EXPECT_EQ(ncclSuccess, rcclOverrideAlgorithm(algoStr, table, &info));
-        EXPECT_EQ(NCCL_ALGO_RING, info.algorithm);
+        EXPECT_EQ(ncclSuccess, rcclOverrideAlgorithm(ncclAlgoStr, table, &info));
+        EXPECT_EQ(NCCL_ALGO_COLLNET_DIRECT, info.algorithm);
       });
 }
 
@@ -1606,13 +1604,12 @@ TEST(WrapMicrotestIsolated, OverrideAlgorithm_SecondCallAfterFailureReturnsInval
       "Wrap_OverrideAlgorithm_SecondCallAfterFailureReturnsInvalidUsageWithoutReparsing",
       []() {
         SetMicroEnv("RCCL_OVERRIDE_ALGO", "bogus");
-        const char* algoStr[] = {"TREE", "RING", "COLLNET_DIRECT", "COLLNET_CHAIN", "NVLS", "NVLS_TREE", "PAT"};
         float table[NCCL_NUM_ALGORITHMS][NCCL_NUM_PROTOCOLS] = {};
         ncclTaskColl info{};
         info.algorithm = NCCL_ALGO_TREE;
-        EXPECT_EQ(ncclInvalidUsage, rcclOverrideAlgorithm(algoStr, table, &info));
+        EXPECT_EQ(ncclInvalidUsage, rcclOverrideAlgorithm(ncclAlgoStr, table, &info));
         std::string log = RcclUnitTesting::CaptureLog(
-            [&]() { EXPECT_EQ(ncclInvalidUsage, rcclOverrideAlgorithm(algoStr, table, &info)); });
+            [&]() { EXPECT_EQ(ncclInvalidUsage, rcclOverrideAlgorithm(ncclAlgoStr, table, &info)); });
         EXPECT_EQ(std::string::npos, log.find("Invalid algo or protocol string"))
             << "the repeated invalid input should not emit another warning";
         EXPECT_EQ(NCCL_ALGO_TREE, info.algorithm);
