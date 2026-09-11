@@ -1022,6 +1022,8 @@ TEST_F(DdaFabricEligibilityTest, AllReduceLL_AtTwoShotThresholdEligible)
 // the rejection is attributable to the threshold and not to the shard shape rules.
 TEST_F(DdaFabricEligibilityTest, AllReduceLL_PastBothThresholds)
 {
+    // DDA_LL_TWOSHOT_THRESHOLD default 2 MiB; use 524320 float32 (~2.1 MiB)
+    // so both one-shot (1 MiB) and two-shot (2 MiB) limits are exceeded.
     EXPECT_FALSE(ncclAllReduceDdaFabricLLEligible(
         mockComm_.get(), sendbuff_, recvbuff_, 524320, ncclFloat32, ncclSum));
 }
