@@ -85,6 +85,70 @@ std::mutex &log_mutex();
 std::atomic<ConSanTransformOverride> g_test_consan_transform_override{nullptr};
 std::atomic<size_t> g_test_consan_moi_retry_count{0};
 
+/// Process-wide union of time intervals spent preparing instrumented code
+/// objects. Loads may transform concurrently, so summing per-load durations
+/// would overstate the wall-clock startup cost seen by the application.
+class ConSanInstrumentationClock {
+public:
+  static ConSanInstrumentationClock &instance() {
+    static ConSanInstrumentationClock clock;
+    return clock;
+  }
+
+  void begin() {
+    std::lock_guard lock(mutex_);
+    if (active_++ == 0u)
+      interval_begin_ = std::chrono::steady_clock::now();
+  }
+
+  void end() {
+    std::lock_guard lock(mutex_);
+    assert(active_ != 0u);
+    if (--active_ == 0u) {
+      elapsed_ += std::chrono::steady_clock::now() - interval_begin_;
+    }
+  }
+
+  [[nodiscard]] uint64_t elapsed_nanoseconds() const {
+    std::lock_guard lock(mutex_);
+    auto elapsed = elapsed_;
+    if (active_ != 0u)
+      elapsed += std::chrono::steady_clock::now() - interval_begin_;
+    return static_cast<uint64_t>(
+        std::chrono::duration_cast<std::chrono::nanoseconds>(elapsed).count());
+  }
+
+  void reset() {
+    std::lock_guard lock(mutex_);
+    assert(active_ == 0u);
+    elapsed_ = {};
+  }
+
+private:
+  mutable std::mutex mutex_;
+  size_t active_ = 0;
+  std::chrono::steady_clock::time_point interval_begin_{};
+  std::chrono::steady_clock::duration elapsed_{};
+};
+
+class ScopedConSanInstrumentationTimer {
+public:
+  ScopedConSanInstrumentationTimer() { ConSanInstrumentationClock::instance().begin(); }
+  ScopedConSanInstrumentationTimer(const ScopedConSanInstrumentationTimer &) = delete;
+  ScopedConSanInstrumentationTimer &operator=(const ScopedConSanInstrumentationTimer &) = delete;
+  ~ScopedConSanInstrumentationTimer() { stop(); }
+
+  void stop() {
+    if (!active_)
+      return;
+    active_ = false;
+    ConSanInstrumentationClock::instance().end();
+  }
+
+private:
+  bool active_ = true;
+};
+
 /// Invoke the production transformer or a test double through the same typed
 /// contract. The hook never reconstructs prototype option or result values.
 rocjitsu::TransformResult run_consan_transform(std::span<const uint8_t> bytes,
@@ -3284,6 +3348,7 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
   bool using_replacement_reader = false;
   bool replacement_storage_retained = false;
   bool replacement_instrumentation_selected = false;
+  std::optional<ScopedConSanInstrumentationTimer> instrumentation_timer;
   const auto release_replacement_storage = [&] {
     if (!replacement_storage_retained) {
       replacement_storage.reset();
@@ -3322,8 +3387,7 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
     const uint8_t *bytes = reader_bytes.bytes;
     const size_t size = reader_bytes.size;
     if (!config->kernel_name_allowlist.empty()) {
-      log_message(kLogInfo,
-                  "ConSan kernel allowlist prefilter reader=%llu bytes=%zu outcome=begin",
+      log_message(kLogInfo, "ConSan kernel allowlist prefilter reader=%llu bytes=%zu outcome=begin",
                   static_cast<unsigned long long>(code_object_reader.handle), size);
       const rocjitsu::KernelNameIndexMatch match = rocjitsu::match_kernel_name_index(
           std::span<const uint8_t>(bytes, size), config->kernel_name_allowlist);
@@ -3341,6 +3405,7 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
                     static_cast<unsigned long long>(code_object_reader.handle), size);
       }
     }
+    instrumentation_timer.emplace();
     // Reader handles may be destroyed and reused by the HSA runtime. Keep a
     // process-local identity for this particular load so retained coverage can
     // be joined to the correspondingly numbered captured object without
@@ -4839,6 +4904,10 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
     }
   }
 
+  // The original HSA loader and kernel execution are not instrumentation
+  // preparation. Publish the cumulative clock before crossing that boundary.
+  if (instrumentation_timer)
+    instrumentation_timer->stop();
   hsa_status_t load_status =
       original_load(executable, agent, reader_to_load, options, loaded_code_object);
   if (load_status != HSA_STATUS_SUCCESS && using_replacement_reader && !config->fail_closed) {
@@ -4902,6 +4971,7 @@ extern "C" RJ_HOOK_EXPORT bool OnLoad(HsaApiTable *table, uint64_t runtime_versi
     return false;
 
   g_log_level.store(config->log_level, std::memory_order_relaxed);
+  ConSanInstrumentationClock::instance().reset();
   if (!config->enabled) {
     log_message(kLogInfo, "ConSan is disabled; not installing wrappers");
     return true;
@@ -4924,4 +4994,8 @@ extern "C" RJ_HOOK_EXPORT void rj_dbi_test_set_log_sink_override(LogSinkOverride
 
 extern "C" RJ_HOOK_EXPORT size_t rj_dbi_test_consan_moi_retry_count() {
   return g_test_consan_moi_retry_count.load(std::memory_order_relaxed);
+}
+
+extern "C" RJ_HOOK_EXPORT uint64_t rj_dbi_consan_instrumentation_nanoseconds() {
+  return ConSanInstrumentationClock::instance().elapsed_nanoseconds();
 }

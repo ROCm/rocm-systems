@@ -27,7 +27,7 @@ from consan_validation_catalog import (
 from consan_validation_support import SITE_KINDS
 
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 AORTA_DIR_ENV = "CONSAN_BENCHMARK_AORTA_DIR"
 PYTHON_ENV = "CONSAN_BENCHMARK_PYTHON"
 HOOK_ENV = "CONSAN_BENCHMARK_HOOK"
@@ -35,9 +35,9 @@ RESULT_MARKER = "CONSAN_BENCHMARK_RESULT="
 SUPPORTED_TARGETS = ("gfx950", "gfx1201")
 MODE_LABELS = {
     "supercollider": "SuperCollider",
-    "record-replay": "Record/Replay",
+    "record-replay": "RecordReplay",
     "sampled": "Sampled",
-    "inline-shadow": "Inline Shadow",
+    "inline-shadow": "InlineShadow",
 }
 
 
@@ -168,7 +168,12 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
         action="store_true",
         help="reuse fingerprint-matched completed cells from the output directory",
     )
-    parser.add_argument("--audit-sites", action=argparse.BooleanOptionalAction, default=True)
+    parser.add_argument(
+        "--audit-sites",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help=argparse.SUPPRESS,
+    )
     parser.add_argument(
         "--workload",
         choices=tuple(workload.id for workload in WORKLOADS),
@@ -406,14 +411,29 @@ def _metric(run: dict[str, Any], name: str) -> float:
     return float(value)
 
 
+def _phase_ms(run: dict[str, Any], name: str) -> float:
+    value = run["payload"]["phase_ms"].get(name)
+    if not isinstance(value, (int, float)) or value <= 0:
+        raise BenchmarkError(f"invalid phase latency {name}: {value!r}")
+    return float(value)
+
+
+def _instrumentation_ms(run: dict[str, Any], name: str) -> float:
+    value = run["payload"]["instrumentation_ms"].get(name)
+    if not isinstance(value, (int, float)) or value < 0:
+        raise BenchmarkError(f"invalid instrumentation latency {name}: {value!r}")
+    return float(value)
+
+
 def _summarize_workload(
     workload: Workload,
     native: list[dict[str, Any]],
-    modes: dict[str, dict[str, dict[str, Any] | None]],
+    modes: dict[str, dict[str, Any]],
     inventory: dict[str, Any],
     kernel_allowlist: tuple[str, ...],
 ) -> dict[str, Any]:
     native_latency = _median([_metric(run, workload.primary_metric) for run in native])
+    native_runtime = _median([_phase_ms(run, "run") for run in native])
     result: dict[str, Any] = {
         "id": workload.id,
         "description": workload.description,
@@ -421,6 +441,8 @@ def _summarize_workload(
         "config": workload.config,
         "native_latency_ms": native_latency,
         "native_samples_ms": [_metric(run, workload.primary_metric) for run in native],
+        "native_runtime_ms": native_runtime,
+        "native_runtime_samples_ms": [_phase_ms(run, "run") for run in native],
         "parameter_count": native[0]["payload"]["result"]["metrics"]["parameter_count"],
         "runtime": native[0]["payload"]["runtime"],
         "kernel_inventory": inventory["payload"]["kernel_names"],
@@ -428,169 +450,58 @@ def _summarize_workload(
         "modes": {},
     }
     for mode in PROFILE_IDS:
-        quick = modes[mode]["quick"]
-        assert quick is not None
-        latency = _metric(quick, workload.primary_metric)
-        audit = modes[mode]["audit"]
+        run = modes[mode]
+        latency = _metric(run, workload.primary_metric)
+        startup_ms = _instrumentation_ms(run, "total")
+        runtime_ms = _phase_ms(run, "run") - _instrumentation_ms(run, "during_run")
+        if runtime_ms <= 0:
+            raise BenchmarkError(
+                f"{workload.id} {mode} instrumentation time exceeds timed runtime"
+            )
         mode_result: dict[str, Any] = {
             "latency_ms": latency,
-            "ratio": latency / native_latency,
-            "peak_device_memory": quick["payload"]["peak_device_memory"],
+            "runtime_ms": runtime_ms,
+            "runtime_ratio": runtime_ms / native_runtime,
+            "startup_ms": startup_ms,
+            "peak_device_memory": run["payload"]["peak_device_memory"],
         }
-        if audit is not None:
-            quick_wall = float(quick["wall_ms"])
-            audit_wall = float(audit["wall_ms"])
-            quick_run = float(quick["payload"]["phase_ms"]["run"])
-            audit_run = float(audit["payload"]["phase_ms"]["run"])
-            mode_result["site_audit"] = {
-                "quick_wall_ms": quick_wall,
-                "audit_wall_ms": audit_wall,
-                "wall_delta_ms": audit_wall - quick_wall,
-                "wall_delta_percent": (audit_wall / quick_wall - 1.0) * 100.0,
-                "quick_run_ms": quick_run,
-                "audit_run_ms": audit_run,
-                "run_delta_ms": audit_run - quick_run,
-                "run_delta_percent": (audit_run / quick_run - 1.0) * 100.0,
-                "coverage": audit["coverage"],
-            }
+        if "coverage" in run:
+            mode_result["coverage"] = run["coverage"]
         result["modes"][mode] = mode_result
     return result
-
-
-def _format_bytes(value: int) -> str:
-    return f"{value / (1024**2):.1f} MiB"
 
 
 def _render_status(summary: dict[str, Any]) -> str:
     columns = tuple(PROFILE_IDS)
     lines = [
-        "# ConSan `gfx1201` benchmark status",
+        f"# ConSan `{summary['target']}` benchmark status",
         "",
-        f"Last measured: {summary['completed_at']}.",
+        "For each mode, **startup** is its incremental one-off cold-run cost and",
+        "**runtime** is steady-state instrumented latency / native latency.",
         "",
-        "## Instrumentation overhead",
-        "",
-        "Each cell is **audit-disabled instrumented latency / native latency**. "
-        "Site-audit cost is excluded and reported separately below.",
-        "",
-        "| Workload | " + " | ".join(MODE_LABELS[mode] for mode in columns) + " |",
-        "| --- | " + " | ".join("---:" for _ in columns) + " |",
-    ]
-    for workload in summary["workloads"]:
-        cells = [f"{workload['modes'][mode]['ratio']:.3f}×" for mode in columns]
-        lines.append(f"| {workload['description']} | " + " | ".join(cells) + " |")
-
-    lines += [
-        "",
-        "## Absolute latency",
-        "",
-        "Milliseconds in the workload's synchronized first-use operation. Native is the "
-        "median of the fresh-process measurements bracketing the four-mode matrix.",
-        "",
-        "| Workload | Native | "
-        + " | ".join(MODE_LABELS[mode] for mode in columns)
-        + " |",
-        "| --- | ---: | " + " | ".join("---:" for _ in columns) + " |",
-    ]
-    for workload in summary["workloads"]:
-        cells = [f"{workload['modes'][mode]['latency_ms']:.3f}" for mode in columns]
-        lines.append(
-            f"| {workload['id']} | {workload['native_latency_ms']:.3f} | "
-            + " | ".join(cells)
-            + " |"
-        )
-
-    if summary["audit_sites"]:
-        lines += [
-            "",
-            "## Site-audit overhead",
-            "",
-            "This is the separately measured process-wall delta from enabling "
-            "detailed site evidence. Negative deltas are retained rather than clipped.",
-            "",
-            "| Workload | Mode | Audit off | Audit on | Delta | Warm-run delta |",
-            "| --- | --- | ---: | ---: | ---: | ---: |",
-        ]
-        for workload in summary["workloads"]:
-            for mode in columns:
-                audit = workload["modes"][mode]["site_audit"]
-                lines.append(
-                    f"| {workload['id']} | {MODE_LABELS[mode]} | "
-                    f"{audit['quick_wall_ms']:.1f} ms | {audit['audit_wall_ms']:.1f} ms | "
-                    f"{audit['wall_delta_ms']:+.1f} ms ({audit['wall_delta_percent']:+.2f}%) | "
-                    f"{audit['run_delta_ms']:+.1f} ms ({audit['run_delta_percent']:+.2f}%) |"
-                )
-        lines += [
-            "",
-            "### Site-audit coverage",
-            "",
-            "`Checked` counts every discovered site examined by the audit; `missed` "
-            "is supported minus patched. Every row also passed the final static and "
-            "dynamic completeness verdict.",
-            "",
-            "| Workload | Mode | Objects | Selected | Instrumented | Checked | Unsupported | Missed |",
-            "| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: |",
-        ]
-        for workload in summary["workloads"]:
-            for mode in columns:
-                coverage = workload["modes"][mode]["site_audit"]["coverage"]
-                lines.append(
-                    f"| {workload['id']} | {MODE_LABELS[mode]} | "
-                    f"{coverage['applicable_code_objects']} | {coverage['selected']} | "
-                    f"{coverage['patched']} | {coverage['checked']} | "
-                    f"{coverage['unsupported']} | {coverage['missed']} |"
-                )
-
-    lines += [
-        "",
-        "## Workloads and memory",
-        "",
-        "| Workload | Parameters | Peak allocated (largest mode) | Primary metric |",
-        "| --- | ---: | ---: | --- |",
-    ]
-    for workload in summary["workloads"]:
-        peak = max(
-            workload["modes"][mode]["peak_device_memory"]["allocated_bytes"]
+        "| Workload | "
+        + " | ".join(
+            column
             for mode in columns
+            for column in (
+                f"{MODE_LABELS[mode]} startup",
+                f"{MODE_LABELS[mode]} runtime",
+            )
         )
-        lines.append(
-            f"| {workload['description']} | {workload['parameter_count']:,} | "
-            f"{_format_bytes(peak)} | `{workload['primary_metric']}` |"
-        )
-
-    aorta = summary["provenance"]["aorta"]
-    source = summary["provenance"]["rocm_systems"]
-    lines += [
-        "",
-        "## Provenance and scope",
-        "",
-        f"- Target: `{summary['target']}`; device: "
-        f"`{summary['workloads'][0]['runtime']['device_name']}` "
-        f"(`{summary['workloads'][0]['runtime']['architecture']}`).",
-        f"- ROCm Systems commit: `{source['commit']}`"
-        + (" (dirty benchmark implementation)" if source["dirty"] else "")
-        + ".",
-        f"- Aorta commit: `{aorta['commit']}`"
-        + (" (dirty checkout)" if aorta["dirty"] else "")
-        + ".",
-        f"- Hook SHA-256: `{summary['provenance']['hook']['sha256']}`.",
-        f"- PyTorch: `{summary['workloads'][0]['runtime']['torch']}`; HIP: "
-        f"`{summary['workloads'][0]['runtime']['hip']}`.",
-        f"- Complete matrix wall time: {summary['suite_wall_seconds']:.1f} seconds.",
-        "- TokenSpeed is not selected on gfx1201 because its pinned Aorta container "
-        "rejects this target. Portable Gluon and explicitly pinned "
-        "hipBLASLt/Tensile end-to-end cells remain future corpus additions.",
-        "- These synthetic Aorta models provide PyTorch prefill, synthetic decode, "
-        "and top-1 MoE coverage; they are not real Qwen serving workloads.",
-        "- Each workload first inventories its native dispatches. Every exact observed "
-        "kernel entry forms the ConSan allowlist; colocated but undispatched library "
-        "kernels are outside the measurement policy.",
-        "",
-        "The complete machine-readable samples and logs are retained in the artifact "
-        f"directory `{summary['artifact_dir']}`. See [BENCHMARK.md](BENCHMARK.md) "
-        "for the measurement and admission contract.",
-        "",
+        + " |",
+        "| --- | " + " | ".join("---:" for _ in range(2 * len(columns))) + " |",
     ]
+    for workload in summary["workloads"]:
+        cells = [
+            value
+            for mode in columns
+            for value in (
+                f"{workload['modes'][mode]['startup_ms'] / 1000.0:.3g} s",
+                f"{workload['modes'][mode]['runtime_ratio']:.3g}×",
+            )
+        ]
+        lines.append(f"| {workload['description']} | " + " | ".join(cells) + " |")
+    lines.append("")
     return "\n".join(lines)
 
 
@@ -657,27 +568,16 @@ def _main(argv: list[str]) -> int:
                 label="native-before",
             )
         ]
-        modes: dict[str, dict[str, dict[str, Any] | None]] = {}
+        modes: dict[str, dict[str, Any]] = {}
         for mode in PROFILE_IDS:
-            quick = _run_one(
+            modes[mode] = _run_one(
                 args=args,
                 workload=workload,
                 mode=mode,
-                audit_sites=False,
-                label=f"{mode}--audit-off",
+                audit_sites=args.audit_sites,
+                label=f"{mode}--audit-{'on' if args.audit_sites else 'off'}",
                 kernel_allowlist_file=kernel_allowlist_file,
             )
-            audit = None
-            if args.audit_sites:
-                audit = _run_one(
-                    args=args,
-                    workload=workload,
-                    mode=mode,
-                    audit_sites=True,
-                    label=f"{mode}--audit-on",
-                    kernel_allowlist_file=kernel_allowlist_file,
-                )
-            modes[mode] = {"quick": quick, "audit": audit}
         native.append(
             _run_one(
                 args=args,

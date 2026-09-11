@@ -4,14 +4,27 @@
 from __future__ import annotations
 
 import argparse
+import ctypes
 from dataclasses import asdict
 import json
+import os
 from pathlib import Path
 import sys
 import time
 
 
 RESULT_MARKER = "CONSAN_BENCHMARK_RESULT="
+
+
+def _instrumentation_clock():
+    hook_path = os.environ.get("HSA_TOOLS_LIB")
+    if not hook_path:
+        return lambda: 0
+    hook = ctypes.CDLL(hook_path)
+    query = hook.rj_dbi_consan_instrumentation_nanoseconds
+    query.argtypes = ()
+    query.restype = ctypes.c_uint64
+    return query
 
 
 def _parse_args(argv: list[str]) -> argparse.Namespace:
@@ -44,6 +57,8 @@ def _main(argv: list[str]) -> int:
     import torch
     from aorta.workloads.inference import InferenceWorkload
 
+    instrumentation_nanoseconds = _instrumentation_clock()
+    instrumentation_begin = instrumentation_nanoseconds()
     if not torch.cuda.is_available():
         raise SystemExit("the Aorta benchmark requires a visible ROCm GPU")
     torch.cuda.reset_peak_memory_stats()
@@ -53,6 +68,7 @@ def _main(argv: list[str]) -> int:
     workload.setup()
     torch.cuda.synchronize()
     setup_ms = (time.perf_counter() - setup_start) * 1000.0
+    instrumentation_before_run = instrumentation_nanoseconds()
     try:
         run_start = time.perf_counter()
         profiler = None
@@ -71,6 +87,7 @@ def _main(argv: list[str]) -> int:
                 profiler.__exit__(None, None, None)
         torch.cuda.synchronize()
         run_ms = (time.perf_counter() - run_start) * 1000.0
+        instrumentation_after_run = instrumentation_nanoseconds()
         kernel_names = []
         kernel_stats = []
         if profiler is not None:
@@ -93,6 +110,13 @@ def _main(argv: list[str]) -> int:
         payload = {
             "result": asdict(result),
             "phase_ms": {"setup": setup_ms, "run": run_ms},
+            "instrumentation_ms": {
+                "before_run": (instrumentation_before_run - instrumentation_begin)
+                / 1_000_000.0,
+                "during_run": (instrumentation_after_run - instrumentation_before_run)
+                / 1_000_000.0,
+                "total": (instrumentation_after_run - instrumentation_begin) / 1_000_000.0,
+            },
             "peak_device_memory": {
                 "allocated_bytes": torch.cuda.max_memory_allocated(),
                 "reserved_bytes": torch.cuda.max_memory_reserved(),

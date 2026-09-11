@@ -16,7 +16,17 @@ from consan_validation_catalog import PROFILE_IDS
 from consan_validation_test_support import coverage, verdict
 
 
-def _run(metric: str, value: float, *, wall_ms: float = 1000.0) -> dict:
+def _run(
+    metric: str,
+    value: float,
+    *,
+    wall_ms: float = 1000.0,
+    run_ms: float | None = None,
+    instrumentation_before_run_ms: float = 0.0,
+    instrumentation_during_run_ms: float = 0.0,
+) -> dict:
+    if run_ms is None:
+        run_ms = wall_ms / 2
     return {
         "wall_ms": wall_ms,
         "payload": {
@@ -24,7 +34,13 @@ def _run(metric: str, value: float, *, wall_ms: float = 1000.0) -> dict:
                 "passed": True,
                 "metrics": {metric: value, "parameter_count": 123},
             },
-            "phase_ms": {"run": wall_ms / 2},
+            "phase_ms": {"run": run_ms},
+            "instrumentation_ms": {
+                "before_run": instrumentation_before_run_ms,
+                "during_run": instrumentation_during_run_ms,
+                "total": instrumentation_before_run_ms
+                + instrumentation_during_run_ms,
+            },
             "peak_device_memory": {
                 "allocated_bytes": 1024,
                 "reserved_bytes": 2048,
@@ -56,7 +72,9 @@ class ConSanBenchmarkTest(unittest.TestCase):
     def test_resume_reuses_only_a_fingerprinted_completed_cell(self) -> None:
         workload = benchmark.Workload("cell", "fixture", "latency_ms", {})
         output = benchmark.RESULT_MARKER + json.dumps(
-            {"result": {"passed": True, "metrics": {"latency_ms": 1.0}}}
+            {
+                "result": {"passed": True, "metrics": {"latency_ms": 1.0}},
+            }
         )
         with tempfile.TemporaryDirectory() as directory:
             args = self._runner_args(directory)
@@ -120,7 +138,7 @@ class ConSanBenchmarkTest(unittest.TestCase):
         self.assertEqual(decode.primary_metric, "decode_latency_ms")
         self.assertEqual(moe.config["request"]["generate_tokens"], 0)
 
-    def test_site_audit_is_enabled_by_default_and_has_one_switch(self) -> None:
+    def test_site_audit_is_enabled_by_default_with_hidden_opt_out(self) -> None:
         common = [
             "--target",
             "gfx1201",
@@ -134,6 +152,12 @@ class ConSanBenchmarkTest(unittest.TestCase):
         self.assertTrue(benchmark._parse_args(common).audit_sites)
         self.assertFalse(
             benchmark._parse_args([*common, "--no-audit-sites"]).audit_sites
+        )
+        with self.assertRaises(SystemExit), mock.patch("sys.stdout") as stdout:
+            benchmark._parse_args(["--help"])
+        self.assertNotIn(
+            "audit-sites",
+            "".join(call.args[0] for call in stdout.write.call_args_list),
         )
 
     def test_clean_environment_removes_stale_sanitizer_controls(self) -> None:
@@ -182,38 +206,58 @@ class ConSanBenchmarkTest(unittest.TestCase):
         with self.assertRaises(benchmark.BenchmarkError):
             benchmark._coverage_summary("not coverage evidence")
 
-    def test_ratio_uses_audit_off_latency_and_bracketed_native_median(self) -> None:
+    def test_summary_splits_instrumentation_from_runtime(self) -> None:
         workload = benchmark.Workload("id", "description", "latency_ms", {})
         modes = {}
         for index, mode in enumerate(PROFILE_IDS, 1):
-            quick = _run("latency_ms", 20.0 + index)
-            audit = _run("latency_ms", 9000.0, wall_ms=2000.0)
-            audit["coverage"] = {"accepted": True}
-            modes[mode] = {"quick": quick, "audit": audit}
+            run = _run(
+                "latency_ms",
+                20.0 + index,
+                run_ms=1020.0 + 100.0 * index,
+                instrumentation_before_run_ms=300.0,
+                instrumentation_during_run_ms=700.0 + 100.0 * index,
+            )
+            run["coverage"] = {"accepted": True}
+            modes[mode] = run
         summary = benchmark._summarize_workload(
             workload,
-            [_run("latency_ms", 9.0), _run("latency_ms", 11.0)],
+            [
+                _run("latency_ms", 9.0, run_ms=19.0),
+                _run("latency_ms", 11.0, run_ms=21.0),
+            ],
             modes,
             {"payload": {"kernel_names": ["Cijk_fixture.kd"]}},
             ("Cijk_fixture.kd",),
         )
         self.assertEqual(summary["native_latency_ms"], 10.0)
+        self.assertEqual(summary["native_runtime_ms"], 20.0)
         for index, mode in enumerate(PROFILE_IDS, 1):
-            self.assertEqual(summary["modes"][mode]["ratio"], (20.0 + index) / 10.0)
             self.assertEqual(
-                summary["modes"][mode]["site_audit"]["wall_delta_percent"],
-                100.0,
+                summary["modes"][mode]["runtime_ratio"], 16.0
             )
+            self.assertEqual(
+                summary["modes"][mode]["startup_ms"], 1000.0 + 100.0 * index
+            )
+            self.assertEqual(summary["modes"][mode]["coverage"], {"accepted": True})
 
     def test_status_primary_table_has_all_four_modes(self) -> None:
         workload = benchmark.Workload("id", "description", "latency_ms", {})
         modes = {
-            mode: {"quick": _run("latency_ms", 10.0), "audit": None}
+            mode: _run(
+                "latency_ms",
+                398.875,
+                run_ms=1250.0,
+                instrumentation_before_run_ms=250.0,
+                instrumentation_during_run_ms=500.0,
+            )
             for mode in PROFILE_IDS
         }
         workload_summary = benchmark._summarize_workload(
             workload,
-            [_run("latency_ms", 5.0), _run("latency_ms", 5.0)],
+            [
+                _run("latency_ms", 5.0, run_ms=5.0),
+                _run("latency_ms", 5.0, run_ms=5.0),
+            ],
             modes,
             {"payload": {"kernel_names": ["Cijk_fixture.kd"]}},
             ("Cijk_fixture.kd",),
@@ -234,7 +278,14 @@ class ConSanBenchmarkTest(unittest.TestCase):
         text = benchmark._render_status(summary)
         for label in benchmark.MODE_LABELS.values():
             self.assertIn(label, text)
-        self.assertIn("| description | 2.000× | 2.000× | 2.000× | 2.000× |", text)
+        self.assertIn(
+            "| description | 0.75 s | 150× | 0.75 s | 150× | "
+            "0.75 s | 150× | 0.75 s | 150× |",
+            text,
+        )
+        self.assertNotIn("Absolute latency", text)
+        self.assertNotIn("Site-audit", text)
+        self.assertEqual(text.count("| --- |"), 1)
 
     def test_workload_selection_includes_every_exact_observed_kernel(self) -> None:
         inventory = {

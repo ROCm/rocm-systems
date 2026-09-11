@@ -1779,8 +1779,11 @@ public:
         dlsym(library_, "rj_dbi_test_set_log_sink_override"));
     moi_retry_count_ =
         reinterpret_cast<MoiRetryCountFn>(dlsym(library_, "rj_dbi_test_consan_moi_retry_count"));
+    instrumentation_nanoseconds_ = reinterpret_cast<InstrumentationNanosecondsFn>(
+        dlsym(library_, "rj_dbi_consan_instrumentation_nanoseconds"));
     if (on_load_ == nullptr || on_unload_ == nullptr || set_override_ == nullptr ||
-        set_log_sink_override_ == nullptr || moi_retry_count_ == nullptr) {
+        set_log_sink_override_ == nullptr || moi_retry_count_ == nullptr ||
+        instrumentation_nanoseconds_ == nullptr) {
       error_ = dlerror();
       return;
     }
@@ -1805,6 +1808,9 @@ public:
   [[nodiscard]] bool installed() const { return installed_; }
   [[nodiscard]] const std::string &error() const { return error_; }
   [[nodiscard]] size_t moi_retry_count() const { return moi_retry_count_(); }
+  [[nodiscard]] uint64_t instrumentation_nanoseconds() const {
+    return instrumentation_nanoseconds_();
+  }
   void use_production_transform() { set_override_(nullptr); }
   void set_log_sink_override(rocjitsu::consan_hook::LogSinkOverride sink) {
     set_log_sink_override_(sink);
@@ -1842,6 +1848,7 @@ private:
   using SetOverrideFn = void (*)(rocjitsu::consan_hook::ConSanTransformOverride);
   using SetLogSinkOverrideFn = void (*)(rocjitsu::consan_hook::LogSinkOverride);
   using MoiRetryCountFn = size_t (*)();
+  using InstrumentationNanosecondsFn = uint64_t (*)();
   rocjitsu::test::ScopedTempDirectory runtime_dir_;
   void *library_ = nullptr;
   OnLoadFn on_load_ = nullptr;
@@ -1849,6 +1856,7 @@ private:
   SetOverrideFn set_override_ = nullptr;
   SetLogSinkOverrideFn set_log_sink_override_ = nullptr;
   MoiRetryCountFn moi_retry_count_ = nullptr;
+  InstrumentationNanosecondsFn instrumentation_nanoseconds_ = nullptr;
   bool installed_ = false;
   bool needs_unload_ = false;
   std::string error_;
@@ -2088,6 +2096,7 @@ TEST(HsaHooksUnitTest, ConSanLoadedWithoutConfigurationDefaultsToMoiRecordReplay
   InstalledDbiHook hook(api);
   ASSERT_TRUE(hook.installed()) << hook.error();
   EXPECT_NE(api.core.hsa_executable_load_agent_code_object_fn, original_load);
+  EXPECT_EQ(hook.instrumentation_nanoseconds(), 0u);
 
   constexpr std::array<uint8_t, 8> original = {0x7f, 'E', 'L', 'F', 1, 2, 3, 4};
   hsa_code_object_reader_t reader{};
@@ -2097,6 +2106,7 @@ TEST(HsaHooksUnitTest, ConSanLoadedWithoutConfigurationDefaultsToMoiRecordReplay
   ASSERT_EQ(api.core.hsa_executable_load_agent_code_object_fn(hsa_executable_t{7}, kHostAgent,
                                                               reader, nullptr, nullptr),
             HSA_STATUS_SUCCESS);
+  EXPECT_GT(hook.instrumentation_nanoseconds(), 0u);
   ASSERT_EQ(g_transform_override_flavors.size(), 1u);
   EXPECT_EQ(g_transform_override_flavors.front(), rocjitsu::ConSanFlavor::Moi);
   ASSERT_EQ(g_transform_override_engines.size(), 1u);

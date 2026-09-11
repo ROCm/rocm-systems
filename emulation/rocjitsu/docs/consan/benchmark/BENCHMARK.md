@@ -42,67 +42,36 @@ identical model sizes. Framework or generator provenance must be observed from
 the executed code objects. A model name alone does not prove whether a GEMM came
 from Torch, Triton, Gluon, rocBLAS, hipBLASLt, or Tensile.
 
-## Coverage-audited and quick runs
+## Coverage audit
 
-Checking site instrumentation is optional, but **enabled by default**. The
-runner interface must expose an ordinary boolean pair such as:
+Every benchmark run verifies site instrumentation by default. A result is
+admissible only when every site selected by the ordinary policy was
+instrumented, static and dynamic analysis completed, and the final coverage
+verdict passed. The audit has negligible measured cost, so its latency is the
+ordinary instrumented latency; the suite does not run a second audit-disabled
+control for every cell.
 
-```text
---audit-sites       verify site instrumentation (default)
---no-audit-sites    skip that verification for a quick run
-```
+The committed audited suite should ultimately remain below the 30-minute target
+so a new binary can be qualified without an unbounded preliminary campaign.
 
-The exact spelling may follow the runner's established option conventions, but
-disabling the check must require only one documented option. An environment
-variable, source edit, or manually modified recipe is not an acceptable user
-interface.
+Each process measures one synchronized end-to-end operation with its numerical
+oracle. PyTorch loads GPU code objects lazily, so ConSan transformation can be
+interleaved with that operation rather than forming one framework-visible
+phase. The hook therefore maintains a monotonic process clock covering the
+union of intervals spent preparing instrumented replacement code objects.
+Native samples bracket the four-mode matrix to expose drift.
 
-The procedure therefore has two modes:
+For each mode, target status files report two values:
 
-- **Audited (default)** verifies that every site supported and selected by the
-  ordinary policy was instrumented, with no hidden coverage cap, and that
-  static and dynamic analysis completed. It also runs a matched audit-disabled
-  control so the cost of checking instrumentation can be reported. The
-  audit-enabled sample is not used as the ordinary ConSan performance result
-  when audit collection perturbs execution.
-- **Quick** measures the same binaries, inputs, kernel selection, and ConSan
-  modes while omitting the expensive coverage cross-check and its detailed
-  logging.
+- **startup (seconds)** is the hook-measured time spent preparing selected
+  instrumented code objects before or during the workload. Concurrent
+  transformations count their union in wall time, not their summed CPU time.
+- **runtime (ratio)** is the synchronized instrumented workload time after
+  subtracting in-workload ConSan transformation time, divided by the bracketed
+  median native workload time.
 
-Skipping the audit may reduce turnaround but must not alter which sites ConSan
-selects or instruments. A quick result is admissible only when an audited run of
-the identical workload and binary identity already passed. The committed
-audited suite should ultimately remain below the 30-minute target so a new
-binary can be qualified without an unbounded preliminary campaign.
-
-For each workload/ConSan-mode pair, the audited report must include:
-
-- audit-enabled and audit-disabled total wall latency;
-- the audit delta in milliseconds and as a percentage of the matched
-  audit-disabled latency;
-- audit-enabled and audit-disabled transformation/load latency when the phases
-  can be separated;
-- audit-enabled and audit-disabled first-use workload latency when dynamic
-  checking can affect execution; and
-- the site counts selected, instrumented, checked, unsupported, and missed.
-
-Use the audit-disabled sample as the denominator. Label the result
-`site-audit overhead`; do not fold it into ConSan's instrumentation overhead.
-The audit-on and audit-off samples must use the same workload, binary, input,
-mode, site-selection policy, and instrumentation. Only collection,
-cross-checking, and detailed audit logging may differ. A native baseline has no
-ConSan sites, so its site-audit overhead is reported as not applicable.
-
-The initial suite measures one synchronized, first-use end-to-end operation in
-each fresh process. This deliberately includes lazy code-object transformation
-in the instrumented latency and avoids turning a bounded, code-object-lifetime
-Record/Replay report into an unbounded repetition log. Native samples bracket
-the four-mode matrix to expose drift. Future steady-state measurements may add
-an explicit report-lifetime/reset protocol, but must not silently reuse a
-saturated report. Report absolute values as well as paired ratios. Keep
-transformation/load latency, first-use workload latency, peak device memory, original
-and patched code-object sizes, report high-water marks, overflow state, and
-spilling as distinct measurements rather than folding them into one score.
+Detailed phase measurements, instrumentation-clock snapshots, audit evidence,
+and provenance remain in the machine-readable benchmark artifacts.
 
 ## External Aorta checkout
 
