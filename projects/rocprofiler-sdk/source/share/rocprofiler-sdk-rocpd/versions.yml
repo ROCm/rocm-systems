@@ -23,6 +23,13 @@ rocprofiler-sdk-rocpd:
       rocpd_data_views: versions/3.0.2/data_views.sql
       rocpd_summary_views: versions/3.0.2/summary_views.sql
     - version: "3.0.3"
+      rocpd_metadata: versions/3.0.3/rocpd_metadata.sql
+      rocpd_tables: versions/3.0.3/rocpd_tables.sql
+      rocpd_views: versions/3.0.3/rocpd_views.sql
+      rocpd_indexes: versions/3.0.3/rocpd_indexes.sql
+      rocpd_data_views: versions/3.0.3/data_views.sql
+      rocpd_summary_views: versions/3.0.3/summary_views.sql
+    - version: "3.0.4"
       rocpd_metadata: rocpd_metadata.sql
       rocpd_tables: rocpd_tables.sql
       rocpd_views: rocpd_views.sql
@@ -48,3 +55,7 @@ rocprofiler-sdk-rocpd:
 # - rocpd_info_pmc: added spm_support column
 # - Added spm_counters data view
 # - Modified counters_collection view to exclude SPM records (WHERE sample_id IS NULL)
+
+# Version 3.0.4
+# - Added rocpd_hip_event table for HIP event barrier records (hipEventRecord, hipStreamWaitEvent)
+# - Added hip_events data view

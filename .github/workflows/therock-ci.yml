@@ -81,7 +81,7 @@ jobs:
         with:
           repository: "ROCm/TheRock"
           path: TheRock
-          ref: 648a501e56a1e0919976d6f540b7853e63d44998 # 2026-09-02
+          ref: ec26b5e6128bcef52e1d36199f16042bee19cf36 # 2026-09-09 commit
 
       - name: Checkout CI config
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -197,7 +197,7 @@ jobs:
   # TODO: Remove this separate job once MI455 test infrastructure is stable and
   # we have sufficient MI455 machine capacity to run tests without blocking PRs.
   therock-test-linux-mi455:
-    name: Linux MI455 Test
+    name: Linux MI455 Test (non-blocking)
     needs: [setup, therock-build-linux-mi455]
     if: ${{ needs.setup.outputs.run_mi455_test == 'true' }}
     uses: ./.github/workflows/therock-test-packages.yml
