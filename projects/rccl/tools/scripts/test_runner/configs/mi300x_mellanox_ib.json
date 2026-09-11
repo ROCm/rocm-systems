@@ -854,7 +854,7 @@
           "name": "DdaFabricEligibilityTest",
           "description": "Dda Fabric eligibility tests",
           "test_filter": "DdaFabricEligibilityTest.*"
-	},
+        },
         {
           "name": "CeAlltoAllvEligibilityTest",
           "description": "CE AlltoAllv eligibility, metadata layout, and ncclCeImplemented/ncclCeAvailable gating tests",

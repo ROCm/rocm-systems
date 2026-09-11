@@ -470,8 +470,7 @@ ncclResult_t ncclAlltoAll_impl(const void* sendbuff, void* recvbuff, size_t coun
     const size_t totalBytes = comm->nRanks * count * ncclTypeSize(datatype);
     bool ceAlltoAllAllowed = false;
     if ((comm->config.CTAPolicy & NCCL_CTA_POLICY_ZERO) &&
-        rcclDdaEnabled(comm, totalBytes, kDdaAlltoAllGfx942ThresholdBytes, kDdaAlltoAllGfx950ThresholdBytes,
-                       kDdaAlltoAllGfx1250ThresholdBytes)) {
+        rcclAlltoAllShouldTakeDdaPath(comm, totalBytes, /*ceAlltoAllAllowed=*/false)) {
       NCCLCHECK(alltoAllRegisteredCeAllowed(comm, sendbuff, recvbuff, datatype, stream, &ceAlltoAllAllowed));
       if (ceAlltoAllAllowed) {
         INFO(NCCL_COLL, "AllToAll: yielding DDA to CE (NCCL_CTA_POLICY_ZERO)");
