@@ -37,6 +37,7 @@
 #include "rocjitsu/code/patch/consan/modes/inline_shadow/consan_moi_inline_atomic_emission.h"
 #include "rocjitsu/code/patch/consan/modes/inline_shadow/consan_moi_inline_shadow_emission.h"
 #include "rocjitsu/code/patch/consan/targets/consan_vgpr_bank_state.h"
+#include "rocjitsu/code/patch/consan/targets/consan_wave_sched_state.h"
 #include "rocjitsu/code/patch/instrumentation_builder.h"
 #include "rocjitsu/code/patch/spill_manager.h"
 #include "rocjitsu/code/patch/trampoline_builder.h"
@@ -77,9 +78,9 @@ using consan_detail::MoiWorkitemOwnerDerivationPlan;
 using consan_detail::plan_moi_workgroup_shadow_clear;
 using consan_detail::range_overlaps;
 using consan_detail::reject_optional_scratch_range_overlap;
+using consan_moi_detail::append_publish_first_active_lane_visible_evidence_if_zero;
 using consan_moi_detail::append_word_bytes;
 using consan_moi_detail::append_words_bytes;
-using consan_moi_detail::append_publish_first_active_lane_visible_evidence_if_zero;
 using consan_moi_detail::decode_relocatable_entry_instruction;
 using consan_moi_detail::moi_has_runtime_hardware_dispatch_id;
 using consan_moi_detail::MoiVisibleEvidencePublicationResult;

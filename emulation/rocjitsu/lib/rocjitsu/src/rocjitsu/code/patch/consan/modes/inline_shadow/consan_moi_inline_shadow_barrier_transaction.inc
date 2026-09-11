@@ -161,11 +161,52 @@ build_inline_shadow_private_epoch_barrier_cave_words(
     const SgprSpillSequence *scalar_spill, rj_code_arch_t arch, uint32_t original_barrier_word,
     std::optional<uint16_t> selectable_vgpr_bank_mode, std::vector<std::string> &errors,
     uint32_t *guest_instruction_offset = nullptr);
+
+[[nodiscard]] bool bracket_inline_shadow_barrier_expert_scheduling(
+    std::vector<uint32_t> &words, uint32_t guest_size, rj_code_arch_t arch,
+    std::optional<uint16_t> wave_sched_mode, uint32_t &guest_instruction_offset,
+    std::vector<std::string> &errors) {
+  if (wave_sched_mode != 2u)
+    return true;
+  if (guest_size == 0u || guest_size % sizeof(uint32_t) != 0u ||
+      guest_instruction_offset % sizeof(uint32_t) != 0u ||
+      guest_instruction_offset > words.size() * sizeof(uint32_t) ||
+      guest_size > words.size() * sizeof(uint32_t) - guest_instruction_offset) {
+    errors.emplace_back("ConSan MOI inline-shadow barrier has an invalid expert-scheduled guest");
+    return false;
+  }
+  const auto sched_hwreg = build_hwreg_imm(/*reg_id=*/26u, /*offset=*/0u, /*size_bits=*/2u);
+  const auto normal =
+      sched_hwreg ? build_s_setreg_imm32_b32(*sched_hwreg, /*literal=*/0u, arch) : std::nullopt;
+  const auto expert =
+      sched_hwreg ? build_s_setreg_imm32_b32(*sched_hwreg, /*literal=*/2u, arch) : std::nullopt;
+  if (!normal || !expert) {
+    errors.emplace_back("ConSan MOI inline-shadow barrier could not suspend expert scheduling");
+    return false;
+  }
+
+  const size_t guest_word = guest_instruction_offset / sizeof(uint32_t);
+  const size_t guest_words = guest_size / sizeof(uint32_t);
+  std::vector<uint32_t> bracketed;
+  bracketed.reserve(words.size() + 4u * normal->size());
+  bracketed.insert(bracketed.end(), normal->begin(), normal->end());
+  bracketed.insert(bracketed.end(), words.begin(), words.begin() + guest_word);
+  bracketed.insert(bracketed.end(), expert->begin(), expert->end());
+  guest_instruction_offset = static_cast<uint32_t>(bracketed.size() * sizeof(uint32_t));
+  bracketed.insert(bracketed.end(), words.begin() + guest_word,
+                   words.begin() + guest_word + guest_words);
+  bracketed.insert(bracketed.end(), normal->begin(), normal->end());
+  bracketed.insert(bracketed.end(), words.begin() + guest_word + guest_words, words.end());
+  bracketed.insert(bracketed.end(), expert->begin(), expert->end());
+  words = std::move(bracketed);
+  return true;
+}
+
 void try_apply_inline_shadow_barrier_transaction(
-    std::span<const uint8_t> bytes, const ConSanOptions &options,
-    MoiBarrierBodyPlanner plan_body, MoiPrivateBarrierPlanner plan_private_body,
-    const ConSanMoiOperatingPoint &operating_point, rj_code_arch_t arch,
-    const MoiObjectModeSemantics &semantics, ConSanTransformArtifacts &result) {
+    std::span<const uint8_t> bytes, const ConSanOptions &options, MoiBarrierBodyPlanner plan_body,
+    MoiPrivateBarrierPlanner plan_private_body, const ConSanMoiOperatingPoint &operating_point,
+    rj_code_arch_t arch, const MoiObjectModeSemantics &semantics,
+    ConSanTransformArtifacts &result) {
   const ConSanTargetProfile *target = consan_target_profile(arch);
   if (target == nullptr) {
     result.warnings.emplace_back(
@@ -463,11 +504,14 @@ void try_apply_inline_shadow_barrier_transaction(
     const std::optional<uint16_t> selectable_vgpr_bank_mode =
         consan_selectable_vgpr_bank_mode_at(arch, active_bytes, container->text_file_offset,
                                             container->entry_text_offset, site.file_offset);
+    const std::optional<uint16_t> wave_sched_mode =
+        consan_wave_sched_mode_at(arch, active_bytes, container->text_file_offset,
+                                  container->entry_text_offset, site.file_offset);
     uint32_t guest_instruction_offset = 0u;
     std::optional<std::vector<uint32_t>> words;
     if (const auto *private_epoch =
-                   std::get_if<MoiInlinePrivateEpochBarrierEmissionPlan>(&planned.body);
-               private_epoch && planned.spill) {
+            std::get_if<MoiInlinePrivateEpochBarrierEmissionPlan>(&planned.body);
+        private_epoch && planned.spill) {
       words = build_inline_shadow_private_epoch_barrier_cave_words(
           *private_epoch, *planned.spill, planned.scalar_spill ? &*planned.scalar_spill : nullptr,
           arch, original_barrier_word, selectable_vgpr_bank_mode, result.errors,
@@ -483,6 +527,9 @@ void try_apply_inline_shadow_barrier_transaction(
       return;
     }
     if (!words)
+      return;
+    if (!bracket_inline_shadow_barrier_expert_scheduling(*words, site.size, arch, wave_sched_mode,
+                                                         guest_instruction_offset, result.errors))
       return;
 
     ConSanPatchInfo patch;

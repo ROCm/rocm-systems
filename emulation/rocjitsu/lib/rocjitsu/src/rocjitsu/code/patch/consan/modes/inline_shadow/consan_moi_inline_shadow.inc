@@ -61,6 +61,7 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
     std::optional<MoiWorkitemOwnerDerivationPlan> owner_derivation;
     MoiInlineShadowEmissionPlan emission;
     uint32_t guest_instruction_word_count = 0u;
+    std::optional<uint16_t> wave_sched_mode;
   };
 
   const std::span<const uint8_t> active_bytes = result.active_bytes(bytes);
@@ -386,9 +387,12 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
         .private_layout = std::move(private_layout),
         .required_private_bytes = required_private_bytes,
     };
+    const std::optional<uint16_t> wave_sched_mode = consan_wave_sched_mode_at(
+        arch, active_bytes, container->text_file_offset, container->entry_text_offset,
+        container->text_file_offset + candidate.anchor());
     planned.push_back({std::move(probe), candidate_ptr, std::move(candidate_point),
                        std::move(owner_derivation), std::move(emission),
-                       guest_instruction_word_count});
+                       guest_instruction_word_count, wave_sched_mode});
     if (options.max_patches_is_expert_limit && planned.size() == options.max_patches)
       break;
   }
@@ -434,6 +438,7 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
         entry.scalar_spill ? std::span<const uint32_t>(entry.scalar_spill->restore_words)
                            : std::span<const uint32_t>{};
     body_options.incoming_vgpr_bank_mode = candidate.incoming_vgpr_bank_mode;
+    body_options.incoming_wave_sched_mode = entry.wave_sched_mode;
     body_options.probe_guest_instruction_offset =
         static_cast<uint32_t>((probe_words->size() - guest_words) * sizeof(uint32_t));
     body_options.guest_instruction_word_count = guest_words;

@@ -99,6 +99,10 @@ assemble_moi_appended_body(const MoiAppendedBodyPatchPlan &plan,
                         " could not suspend expert scheduling");
     return std::nullopt;
   }
+  const bool expert_wraps_trailing_guest =
+      suspend_expert_scheduling && options.trailing_guest_word_count != 0u;
+  const bool expert_wraps_embedded_guest =
+      suspend_expert_scheduling && !expert_wraps_trailing_guest;
   const bool capture_high_bank_address = options.high_bank_address_source.has_value();
   const uint8_t incoming_vgpr_msb_mode =
       static_cast<uint8_t>(options.incoming_vgpr_bank_mode.value_or(0u));
@@ -165,13 +169,16 @@ assemble_moi_appended_body(const MoiAppendedBodyPatchPlan &plan,
                         " has an invalid embedded-guest VGPR-bank plan");
     return std::nullopt;
   }
-  if (suspend_expert_scheduling && (!guest_word || options.trailing_guest_word_count != 0u)) {
+  if (suspend_expert_scheduling &&
+      (!guest_word ||
+       (expert_wraps_trailing_guest && (*guest_word != probe_prefix_words ||
+                                        guest_word_count != options.trailing_guest_word_count)))) {
     errors.emplace_back("ConSan MOI " + std::string(probe_name) +
                         " has an invalid expert-scheduled guest plan");
     return std::nullopt;
   }
   const bool wrap_embedded_guest = options.wrap_embedded_guest_vgpr_bank;
-  if (wrap_embedded_guest || suspend_expert_scheduling) {
+  if (wrap_embedded_guest || expert_wraps_embedded_guest) {
     body.insert(body.end(), probe_words.begin(), probe_words.begin() + *guest_word);
     if (wrap_embedded_guest)
       body.push_back(*instrumentation::build_s_set_vgpr_msb_transition(
@@ -200,10 +207,12 @@ assemble_moi_appended_body(const MoiAppendedBodyPatchPlan &plan,
     body.push_back(*instrumentation::build_s_set_vgpr_msb_transition(
         0u, static_cast<uint8_t>(*options.incoming_vgpr_bank_mode), options.arch));
   }
+  if (expert_wraps_trailing_guest)
+    body.insert(body.end(), expert_scheduling->begin(), expert_scheduling->end());
   const size_t trailing_probe_body_begin = body.size();
   body.insert(body.end(), probe_words.begin() + probe_prefix_words, probe_words.end());
   if (guest_word && options.body_guest_instruction_offset && !wrap_embedded_guest &&
-      !suspend_expert_scheduling) {
+      !expert_wraps_embedded_guest) {
     const size_t body_word = *guest_word < probe_prefix_words
                                  ? probe_body_begin + *guest_word
                                  : trailing_probe_body_begin + *guest_word - probe_prefix_words;
@@ -218,7 +227,7 @@ assemble_moi_appended_body(const MoiAppendedBodyPatchPlan &plan,
     body.push_back(*instrumentation::build_s_set_vgpr_msb_transition(
         0u, static_cast<uint8_t>(*options.incoming_vgpr_bank_mode), options.arch));
   }
-  if (expert_scheduling)
+  if (expert_wraps_embedded_guest)
     body.insert(body.end(), expert_scheduling->begin(), expert_scheduling->end());
   body.insert(body.end(), plan.displaced_tail_words.begin(), plan.displaced_tail_words.end());
   if (plan.body_size != 0u &&

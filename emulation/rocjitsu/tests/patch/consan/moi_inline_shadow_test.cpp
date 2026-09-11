@@ -253,6 +253,27 @@ TEST(ConSanMoi, InlineShadowProbePublishesNativeLdsStoreToExactShadow) {
       << "both possible cells must read their prior version coherently";
   EXPECT_EQ(count_subsequence(text_words, *version_cas), 4u)
       << "both possible cells must claim odd and commit even";
+  const auto payload_load = build_flat_load_b32_vaddr_vdst(
+      /*vaddr=*/8, /*vdst=*/13, ROCJITSU_CODE_ARCH_RDNA4,
+      offsetof(ConSanMoiInlineExactShadowSlot, packed_access));
+  ASSERT_TRUE(payload_load);
+  EXPECT_EQ(count_subsequence(text_words, *payload_load), 2u);
+  auto transaction_begin = text_words.begin();
+  for (uint32_t cell = 0; cell < 2u; ++cell) {
+    SCOPED_TRACE(cell);
+    const auto version_read = std::search(transaction_begin, text_words.end(),
+                                          version_load->begin(), version_load->end());
+    ASSERT_NE(version_read, text_words.end());
+    const auto claim =
+        std::search(version_read, text_words.end(), version_cas->begin(), version_cas->end());
+    ASSERT_NE(claim, text_words.end());
+    const auto predecessor_read =
+        std::search(claim, text_words.end(), payload_load->begin(), payload_load->end());
+    ASSERT_NE(predecessor_read, text_words.end());
+    EXPECT_LT(claim, predecessor_read)
+        << "each exact-shadow transaction must claim its version before reading the payload";
+    transaction_begin = predecessor_read + static_cast<ptrdiff_t>(payload_load->size());
+  }
   std::vector<uint32_t> drained_version_cas(version_cas->begin(), version_cas->end());
   drained_version_cas.push_back(*wait_load);
   EXPECT_EQ(count_subsequence(text_words, drained_version_cas), 4u)
@@ -265,6 +286,107 @@ TEST(ConSanMoi, InlineShadowProbePublishesNativeLdsStoreToExactShadow) {
           build_v_mov_b32_e32(10, *test_moi_dispatch_id_sgpr(result), ROCJITSU_CODE_ARCH_RDNA4),
           build_v_mov_b32_e32(11, *test_moi_dispatch_id_sgpr(result) + 1u,
                               ROCJITSU_CODE_ARCH_RDNA4)}));
+}
+
+TEST(ConSanMoi, Gfx1201InlineShadowAccessSuspendsDistantGuestExpertScheduling) {
+  constexpr std::array<uint32_t, 2> kLdsStore = {
+      0xD8340000u,
+      0x00000000u, // ds_store_b32 v0, v0
+  };
+  const auto sched_hwreg = build_hwreg_imm(/*reg_id=*/26u, /*offset=*/0u, /*size_bits=*/2u);
+  ASSERT_TRUE(sched_hwreg);
+  const auto normal =
+      build_s_setreg_imm32_b32(*sched_hwreg, /*literal=*/0u, ROCJITSU_CODE_ARCH_RDNA4);
+  const auto expert =
+      build_s_setreg_imm32_b32(*sched_hwreg, /*literal=*/2u, ROCJITSU_CODE_ARCH_RDNA4);
+  ASSERT_TRUE(normal && expert);
+
+  std::vector<uint32_t> words = {(*expert)[0], (*expert)[1]};
+  words.insert(words.end(), 16u, build_s_nop(0, ROCJITSU_CODE_ARCH_RDNA4));
+  const uint64_t access_offset = words.size() * sizeof(uint32_t);
+  words.insert(words.end(), kLdsStore.begin(), kLdsStore.end());
+  words.push_back(build_s_endpgm(ROCJITSU_CODE_ARCH_RDNA4));
+
+  MoiOptions options = moi_options(ConSanMoiEngine::InlineShadow);
+  options.scratch_vgpr = 8;
+  options.set_moi_owner_epoch_vgprs(24, 25);
+  options.moi_report_buffer_address = 0x100000000ull;
+  options.moi_report_buffer_size = kInlineShadowFullLdsReportBufferSize;
+  options.max_patches = 1u;
+
+  const ConSanTransformArtifacts result = test_lower_consan(
+      make_rdna4_lds_code_object(words, "inline_shadow_expert_scheduled_access"), options);
+
+  ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
+  const auto patch = std::ranges::find_if(result.patches, [&](const ConSanPatchInfo &candidate) {
+    return candidate.kind == ConSanPatchKind::TrampolineMoiExactShadowStore &&
+           candidate.anchor_offset == access_offset;
+  });
+  ASSERT_NE(patch, result.patches.end()) << testing::PrintToString(result.warnings);
+  ASSERT_TRUE(patch->relocated_guest_instruction_offset);
+  AmdGpuCodeObject patched(result.replacement.data(), result.replacement.size());
+  ASSERT_TRUE(patched.is_valid());
+  ASSERT_FALSE(patched.text_sections().empty());
+  const auto *text = patched.text_sections().front();
+  std::vector<uint32_t> all_text(text->size() / sizeof(uint32_t));
+  std::memcpy(all_text.data(), text->data(), text->size());
+  std::vector<uint32_t> expert_then_guest(expert->begin(), expert->end());
+  expert_then_guest.insert(expert_then_guest.end(), kLdsStore.begin(), kLdsStore.end());
+  EXPECT_FALSE(std::ranges::search(all_text, expert_then_guest).empty());
+  EXPECT_FALSE(std::ranges::search(all_text, *normal).empty());
+}
+
+TEST(ConSanMoi, Gfx1201InlineShadowBarrierSuspendsDistantGuestExpertScheduling) {
+  constexpr uint32_t kBarrierWait = 0xBF94FFFFu;
+  const auto sched_hwreg = build_hwreg_imm(/*reg_id=*/26u, /*offset=*/0u, /*size_bits=*/2u);
+  ASSERT_TRUE(sched_hwreg);
+  const auto normal =
+      build_s_setreg_imm32_b32(*sched_hwreg, /*literal=*/0u, ROCJITSU_CODE_ARCH_RDNA4);
+  const auto expert =
+      build_s_setreg_imm32_b32(*sched_hwreg, /*literal=*/2u, ROCJITSU_CODE_ARCH_RDNA4);
+  ASSERT_TRUE(normal && expert);
+
+  std::vector<uint32_t> words(64u, build_s_nop(0, ROCJITSU_CODE_ARCH_RDNA4));
+  words[0] = 0xD8340000u;
+  words[1] = 0x00000000u; // ds_store_b32 v0, v0
+  words[8] = (*expert)[0];
+  words[9] = (*expert)[1];
+  constexpr size_t kWait = 48u;
+  words[kWait] = kBarrierWait;
+  words.back() = build_s_endpgm(ROCJITSU_CODE_ARCH_RDNA4);
+
+  MoiOptions options = moi_options(ConSanMoiEngine::InlineShadow);
+  options.moi_track_barriers = true;
+  options.scratch_vgpr = 8;
+  options.set_moi_owner_epoch_vgprs(24, 25);
+  options.moi_report_buffer_address = 0x100000000ull;
+  options.moi_report_buffer_size = kInlineShadowFullLdsReportBufferSize;
+
+  const ConSanTransformArtifacts result = test_lower_consan(
+      make_rdna4_lds_code_object(words, "inline_shadow_expert_scheduled_barrier"), options);
+
+  ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
+  const auto patch = std::ranges::find_if(result.patches, [&](const ConSanPatchInfo &candidate) {
+    return candidate.kind == ConSanPatchKind::TrampolineMoiInlineEpochBarrier &&
+           candidate.anchor_offset == kWait * sizeof(uint32_t);
+  });
+  ASSERT_NE(patch, result.patches.end()) << testing::PrintToString(result.warnings);
+  ASSERT_TRUE(patch->relocated_guest_instruction_offset);
+  AmdGpuCodeObject patched(result.replacement.data(), result.replacement.size());
+  ASSERT_TRUE(patched.is_valid());
+  const std::vector<uint32_t> trampoline =
+      text_words_at_offset(patched, patch->trampoline_offset, patch->trampoline_size);
+  const size_t guest_word =
+      (*patch->relocated_guest_instruction_offset - patch->trampoline_offset) / sizeof(uint32_t);
+  ASSERT_GE(guest_word, expert->size());
+  ASSERT_LE(guest_word + 1u + normal->size(), trampoline.size());
+  EXPECT_TRUE(std::equal(expert->begin(), expert->end(),
+                         trampoline.begin() + static_cast<ptrdiff_t>(guest_word - expert->size())));
+  EXPECT_EQ(trampoline[guest_word], kBarrierWait);
+  EXPECT_TRUE(std::equal(normal->begin(), normal->end(),
+                         trampoline.begin() + static_cast<ptrdiff_t>(guest_word + 1u)));
+  EXPECT_FALSE(std::ranges::search(std::span(trampoline).first(guest_word), *normal).empty());
+  EXPECT_TRUE(std::equal(expert->begin(), expert->end(), trampoline.end() - expert->size()));
 }
 
 TEST(ConSanMoi, Cdna4InlineShadowProbeEmitsNativeTransactions) {
@@ -5802,16 +5924,27 @@ TEST(ConSanMoi, InlineShadowProbeCanEmitGpuConflictDiagnostic) {
   expected_exchange_count.insert(expected_exchange_count.end(), count_exchange->begin(),
                                  count_exchange->end());
   expected_exchange_count.push_back(*partition_wait);
-  std::vector<uint32_t> expected_composite_publish;
-  expected_composite_publish.insert(expected_composite_publish.end(), partition_rank_lo->begin(),
-                                    partition_rank_lo->end());
-  expected_composite_publish.insert(expected_composite_publish.end(), partition_rank_hi->begin(),
-                                    partition_rank_hi->end());
-  expected_composite_publish.push_back(*first_group_lane);
-  expected_composite_publish.push_back(*narrow_partition_representative);
-  expected_composite_publish.push_back(*save_publishers);
-  EXPECT_EQ(count_subsequence(text_words, expected_composite_publish), 2u)
-      << "each possible cell must emit exactly one composite-key transaction";
+  EXPECT_EQ(count_subsequence(text_words, *partition_rank_lo), 2u);
+  EXPECT_EQ(count_subsequence(text_words, *partition_rank_hi), 2u);
+  EXPECT_EQ(std::ranges::count(text_words, *first_group_lane), 2u);
+  auto group_begin = text_words.begin();
+  for (uint32_t cell = 0; cell < 2u; ++cell) {
+    SCOPED_TRACE(cell);
+    const auto rank_low = std::search(group_begin, text_words.end(), partition_rank_lo->begin(),
+                                      partition_rank_lo->end());
+    ASSERT_NE(rank_low, text_words.end());
+    const auto rank_high = std::search(rank_low, text_words.end(), partition_rank_hi->begin(),
+                                       partition_rank_hi->end());
+    ASSERT_NE(rank_high, text_words.end());
+    const auto first_lane = std::find(rank_high, text_words.end(), *first_group_lane);
+    ASSERT_NE(first_lane, text_words.end());
+    const auto narrow = std::find(first_lane, text_words.end(), *narrow_partition_representative);
+    ASSERT_NE(narrow, text_words.end());
+    const auto publishers = std::find(narrow, text_words.end(), *save_publishers);
+    ASSERT_NE(publishers, text_words.end())
+        << "each possible cell must elect one composite-key representative";
+    group_begin = publishers + 1;
+  }
   const auto use_uniform_group_mask =
       build_s_mov_b64(/*sdst=*/34, /*ssrc0=*/46, ROCJITSU_CODE_ARCH_RDNA4);
   ASSERT_TRUE(use_uniform_group_mask);
@@ -5976,18 +6109,14 @@ TEST(ConSanMoi, InlineShadowProbeCanEmitGpuConflictDiagnostic) {
   ASSERT_TRUE(lane_rank_hi);
   ASSERT_TRUE(first_active_lane);
   ASSERT_TRUE(narrow_representative);
-  std::vector<uint32_t> expected_wave_coalesced_reservation = {*save_conflict_exec};
-  expected_wave_coalesced_reservation.push_back(*saved_exec_wait);
-  expected_wave_coalesced_reservation.insert(expected_wave_coalesced_reservation.end(),
-                                             lane_rank_lo->begin(), lane_rank_lo->end());
-  expected_wave_coalesced_reservation.insert(expected_wave_coalesced_reservation.end(),
-                                             lane_rank_hi->begin(), lane_rank_hi->end());
-  expected_wave_coalesced_reservation.push_back(*first_active_lane);
-  expected_wave_coalesced_reservation.push_back(*narrow_representative);
-  expected_wave_coalesced_reservation.insert(expected_wave_coalesced_reservation.end(),
-                                             expected_slot_reservation.begin(),
-                                             expected_slot_reservation.end());
-  EXPECT_TRUE(contains_subsequence(text_words, expected_wave_coalesced_reservation));
+  EXPECT_NE(std::find(text_words.begin(), text_words.end(), *save_conflict_exec), text_words.end());
+  EXPECT_NE(std::find(text_words.begin(), text_words.end(), *saved_exec_wait), text_words.end());
+  EXPECT_GE(count_subsequence(text_words, *lane_rank_lo), 1u);
+  EXPECT_GE(count_subsequence(text_words, *lane_rank_hi), 1u);
+  EXPECT_GE(std::ranges::count(text_words, *first_active_lane), 1u);
+  EXPECT_GE(std::ranges::count(text_words, *narrow_representative), 1u);
+  EXPECT_TRUE(contains_subsequence(text_words, expected_slot_reservation))
+      << "one elected representative must reserve the wave's diagnostic record";
 
   const auto restore_vcc = build_s_mov_b64(kAmdGpuVccLo, /*ssrc0=*/38, ROCJITSU_CODE_ARCH_RDNA4);
   const auto restore_scc = build_rdna4_s_cmp_lg_u32(

@@ -743,8 +743,6 @@ using consan_moi_detail::MoiVisibleEvidencePublicationResult;
 
   const uint16_t exec_base = *plan.scalar_state.exec_save_sgpr;
   const uint16_t temporary_exec_sgpr = static_cast<uint16_t>(exec_base + 2u);
-  const uint16_t empty_exec_sgpr = exec_base;
-  const uint16_t ready_exec_sgpr = temporary_exec_sgpr;
   // +8:+9 retain the guest VCC across the complete probe. Keep the scalar
   // retry counter in the diagnostic-temporary region, which is consumed only
   // after the transaction has finished.
@@ -777,10 +775,13 @@ using consan_moi_detail::MoiVisibleEvidencePublicationResult;
   };
 
   const auto append_exact_candidate = [&]() {
-    set_stage("slot snapshot");
-    // Use the same coherent first read as the other bounded publishers. This
-    // gives the common retry loop one uniform entry point at a small fast-path
-    // cost and removes exact-shadow's private refresh/re-entry lifecycle.
+    set_stage("version snapshot");
+    // Reserve from the authoritative version alone. Reading and validating
+    // the complete payload before the CAS makes the vulnerable interval much
+    // longer than the publication itself; heavily contended same-workgroup
+    // accesses can then lose every bounded attempt despite a healthy slot.
+    // Once the odd version is ours, the predecessor payload is immutable and
+    // can be loaded coherently without racing another publisher.
     sequence
         .require(append_add_literal_field(words, address_lo_vgpr,
                                           offsetof(ConSanMoiInlineExactShadowSlot, version),
@@ -790,26 +791,6 @@ using consan_moi_detail::MoiVisibleEvidencePublicationResult;
             words, address_lo_vgpr,
             0u - static_cast<uint32_t>(offsetof(ConSanMoiInlineExactShadowSlot, version)), tmp_vgpr,
             arch))
-        .require(append_moi_publication_loads(
-            words, address_lo_vgpr,
-            {{offsetof(ConSanMoiInlineExactShadowSlot, packed_access), old_value_vgpr},
-             {offsetof(ConSanMoiInlineExactShadowSlot, packed_access) + sizeof(uint32_t),
-              static_cast<uint16_t>(old_value_vgpr + 1u)},
-             {offsetof(ConSanMoiInlineExactShadowSlot, dispatch_id), prior_dispatch_low_vgpr},
-             {offsetof(ConSanMoiInlineExactShadowSlot, dispatch_id) + sizeof(uint32_t),
-              prior_dispatch_high_vgpr},
-             {offsetof(ConSanMoiInlineExactShadowSlot, byte_provenance), tmp_vgpr},
-             {offsetof(ConSanMoiInlineExactShadowSlot, version), cas_expected_vgpr}},
-            arch));
-
-    // A changed read, odd predecessor, or terminal version is unusable. Keep
-    // narrowing instead of branching so a mixed wave can still publish valid
-    // independent slots.
-    set_stage("payload validation");
-    sequence
-        .append(instrumentation::build_v_cmp_eq_u32_vcc(vector_source_vgpr(ready_version_vgpr),
-                                                        cas_expected_vgpr, arch))
-        .require(exec_masks.narrow_vcc())
         .append(
             instrumentation::build_v_and_b32_literal(cas_new_vgpr, 1u, ready_version_vgpr, arch))
         .require(require_equal_literal(cas_new_vgpr, 0))
@@ -817,100 +798,7 @@ using consan_moi_detail::MoiVisibleEvidencePublicationResult;
                     cas_new_vgpr, kConSanMoiInlineExactMaxReadyVersion, arch),
                 instrumentation::build_v_cmp_ne_u32_vcc(vector_source_vgpr(cas_new_vgpr),
                                                         ready_version_vgpr, arch))
-        .require(exec_masks.narrow_vcc())
-        .append(instrumentation::build_s_mov_b64(committed_exec_sgpr, kAmdGpuExecLo, arch));
-
-    // Version zero is empty only when every payload word is zero.
-    sequence.require(require_equal_literal(ready_version_vgpr, 0))
-        .require(require_equal_literal(old_value_vgpr, 0))
-        .require(require_equal_literal(static_cast<uint16_t>(old_value_vgpr + 1u), 0))
-        .require(require_equal_literal(prior_dispatch_low_vgpr, 0))
-        .require(require_equal_literal(prior_dispatch_high_vgpr, 0))
-        .require(require_equal_literal(tmp_vgpr, 0))
-        .append(instrumentation::build_s_mov_b64(empty_exec_sgpr, kAmdGpuExecLo, arch),
-                instrumentation::build_s_mov_b64(kAmdGpuExecLo, committed_exec_sgpr, arch));
-
-    // A nonempty ready predecessor must itself be structurally valid. Owner and
-    // epoch zero are legal packed values; access kind, workgroup key, dispatch,
-    // and exact-byte provenance are the discriminants.
-    sequence.require(require_not_equal_literal(ready_version_vgpr, 0))
-        .require(require_not_equal_literal(tmp_vgpr, 0))
-        .append(instrumentation::build_v_and_b32_literal(
-            cas_new_vgpr, ~consan_moi_exact_byte_cell::packed_mask, tmp_vgpr, arch))
-        .require(require_equal_literal(cas_new_vgpr, 0))
-        .append(instrumentation::build_v_and_b32_literal(
-            cas_new_vgpr, consan_moi_exact_byte_cell::byte_mask_mask, tmp_vgpr, arch));
-    for (uint32_t byte_mask = 0; byte_mask <= consan_moi_exact_byte_cell::byte_mask_mask;
-         ++byte_mask) {
-      if (!consan_moi_exact_byte_cell_mask_is_contiguous(byte_mask))
-        sequence.require(require_not_equal_literal(cas_new_vgpr, byte_mask));
-    }
-    const auto require_canonical_provenance_field = [&](uint32_t field_shift,
-                                                        uint32_t field_lookup) {
-      sequence
-          .append(instrumentation::build_v_and_b32_literal(
-                      cas_new_vgpr, consan_moi_exact_byte_cell::byte_mask_mask, tmp_vgpr, arch),
-                  instrumentation::build_v_lshlrev_b32(cas_new_vgpr, scalar_positive_inline_u32(1u),
-                                                       cas_new_vgpr, arch),
-                  instrumentation::build_v_mov_b32_literal(cas_expected_vgpr, field_lookup, arch),
-                  instrumentation::build_v_lshrrev_b32(
-                      cas_expected_vgpr, vector_source_vgpr(cas_new_vgpr), cas_expected_vgpr, arch),
-                  instrumentation::build_v_and_b32_literal(cas_expected_vgpr, 0x3u,
-                                                           cas_expected_vgpr, arch),
-                  instrumentation::build_v_lshrrev_b32(
-                      cas_new_vgpr, scalar_positive_inline_u32(field_shift), tmp_vgpr, arch),
-                  instrumentation::build_v_and_b32_literal(cas_new_vgpr, 0x3u, cas_new_vgpr, arch),
-                  instrumentation::build_v_cmp_eq_u32_vcc(vector_source_vgpr(cas_expected_vgpr),
-                                                          cas_new_vgpr, arch))
-          .require(exec_masks.narrow_vcc());
-    };
-    require_canonical_provenance_field(consan_moi_exact_byte_cell::byte_offset_shift,
-                                       consan_moi_exact_byte_cell::byte_offset_by_mask_lookup);
-    require_canonical_provenance_field(
-        consan_moi_exact_byte_cell::byte_end_minus_one_shift,
-        consan_moi_exact_byte_cell::byte_end_minus_one_by_mask_lookup);
-    sequence
-        .append(instrumentation::build_v_and_b32_literal(
-            cas_new_vgpr, consan_moi_exact_byte_cell::lane_plus_one_mask, tmp_vgpr, arch))
-        .require(require_not_equal_literal(cas_new_vgpr, 0))
-        .append(instrumentation::build_v_lshrrev_b32(
-                    cas_new_vgpr,
-                    scalar_positive_inline_u32(consan_moi_exact_byte_cell::lane_plus_one_shift),
-                    cas_new_vgpr, arch),
-                instrumentation::build_v_add_u32_literal(cas_new_vgpr, tmp_vgpr,
-                                                         std::numeric_limits<uint32_t>::max(),
-                                                         cas_new_vgpr, arch),
-                instrumentation::build_v_cmp_gt_u32_vcc(
-                    scalar_positive_inline_u32(consan_moi_exact_byte_cell::maximum_lane + 1u),
-                    cas_new_vgpr, arch))
-        .require(exec_masks.narrow_vcc())
-        .append(instrumentation::build_v_and_b32_literal(
-            tmp_vgpr, static_cast<uint32_t>(consan_moi_exact_shadow::access_kind_mask),
-            old_value_vgpr, arch))
-        .require(require_not_equal_literal(tmp_vgpr, 0))
-        .append(instrumentation::build_v_cmp_gt_u32_vcc(
-            scalar_positive_inline_u32(static_cast<uint32_t>(ConSanMoiShadowAccessKind::Atomic) +
-                                       1u),
-            tmp_vgpr, arch))
-        .require(exec_masks.narrow_vcc())
-        .require(append_extract_exact_shadow_generation(words, tmp_vgpr, old_value_vgpr,
-                                                        static_cast<uint16_t>(old_value_vgpr + 1u),
-                                                        cas_new_vgpr, arch))
-        .require(require_not_equal_literal(tmp_vgpr, 0))
-        .append(instrumentation::build_s_mov_b64(committed_exec_sgpr, kAmdGpuExecLo, arch));
-
-    // Form the nonzero 64-bit dispatch predicate without truncating it: the low
-    // nonzero and low-zero/high-nonzero masks are disjoint, so XOR is their union.
-    sequence.require(require_not_equal_literal(prior_dispatch_low_vgpr, 0))
-        .append(instrumentation::build_s_mov_b64(low_dispatch_exec_sgpr, kAmdGpuExecLo, arch),
-                instrumentation::build_s_mov_b64(kAmdGpuExecLo, committed_exec_sgpr, arch))
-        .require(require_equal_literal(prior_dispatch_low_vgpr, 0))
-        .require(require_not_equal_literal(prior_dispatch_high_vgpr, 0))
-        .append(instrumentation::build_s_mov_b64(committed_exec_sgpr, kAmdGpuExecLo, arch),
-                instrumentation::build_s_xor_b64(ready_exec_sgpr, low_dispatch_exec_sgpr,
-                                                 committed_exec_sgpr, arch),
-                instrumentation::build_s_xor_b64(kAmdGpuExecLo, empty_exec_sgpr, ready_exec_sgpr,
-                                                 arch));
+        .require(exec_masks.narrow_vcc());
     return static_cast<bool>(sequence);
   };
 
@@ -930,12 +818,37 @@ using consan_moi_detail::MoiVisibleEvidencePublicationResult;
        .sleep_delay = 1u},
       append_exact_candidate, arch));
 
+  // The successfully claimed odd version excludes every other publisher, so
+  // one payload read is coherent by construction. This is both stronger and
+  // much less contention-prone than the former read-validate-CAS sequence.
+  set_stage("claimed payload snapshot");
+  restore_slot_address();
+  sequence.require(append_moi_publication_loads(
+      words, address_lo_vgpr,
+      {{offsetof(ConSanMoiInlineExactShadowSlot, packed_access), old_value_vgpr},
+       {offsetof(ConSanMoiInlineExactShadowSlot, packed_access) + sizeof(uint32_t),
+        static_cast<uint16_t>(old_value_vgpr + 1u)},
+       {offsetof(ConSanMoiInlineExactShadowSlot, dispatch_id), prior_dispatch_low_vgpr},
+       {offsetof(ConSanMoiInlineExactShadowSlot, dispatch_id) + sizeof(uint32_t),
+        prior_dispatch_high_vgpr},
+       {offsetof(ConSanMoiInlineExactShadowSlot, byte_provenance), tmp_vgpr}},
+      arch));
+
+  // The report is private to ConSan and every committed slot was produced by
+  // this same transaction. The version is therefore the authoritative empty
+  // discriminator; final report decoding remains responsible for validating
+  // the last stable payload. Avoid revalidating every field on every hot-path
+  // access after the lock has already made the snapshot coherent.
+  set_stage("predecessor classification");
+  sequence.require(require_not_equal_literal(ready_version_vgpr, 0))
+      .append(instrumentation::build_s_mov_b64(low_dispatch_exec_sgpr, kAmdGpuExecLo, arch));
+
   // Qualify the predecessor's complete dispatch identity while its payload
   // registers are still live. The resulting scalar mask survives publication;
   // the vector dispatch pair can then retain exact-byte provenance for the
   // diagnostic path without growing the scratch window.
   set_stage("dispatch qualification");
-  sequence.append(instrumentation::build_s_mov_b64(committed_exec_sgpr, kAmdGpuExecLo, arch))
+  sequence.append(instrumentation::build_s_mov_b64(kAmdGpuExecLo, low_dispatch_exec_sgpr, arch))
       .require(append_compare_moi_report_dispatch_id_word(words, plan.dispatch_id,
                                                           prior_dispatch_low_vgpr, tmp_vgpr,
                                                           /*high_word=*/false, arch))
