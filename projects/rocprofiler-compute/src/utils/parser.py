@@ -469,14 +469,15 @@ def _format_pc_sampling_display_frame(
     method: str,
     sorting_type: str,
     num_rows: Optional[int] = None,
+    gpu_arch: Optional[str] = None,
 ) -> pd.DataFrame:
     """Return the sampling rows in their requested display layout."""
     # Project stall_reason as a descending list[(reason, count)].
     df["stall_reason"] = df["stall_reason"].apply(_stall_reason_dict_to_list)
     df["source_line"] = df["source_line"].apply(_trim_source_line)
-    # The CLI reads the profiler output, not the analysis database, so the
-    # static type is looked up here rather than joined.
-    df["instruction_type"] = df["instruction"].apply(InstructionPipelines.lookup)
+    df["instruction_type"] = df["instruction"].apply(
+        lambda instruction: InstructionPipelines.lookup(instruction, gpu_arch)
+    )
 
     # Sort on the numeric offset (lexicographic hex order is wrong), then
     # format offset as hex for display. Leading with pid keeps each process's
@@ -609,6 +610,7 @@ def load_pc_sampling_data(
         pc_sampling_method,
         sorting_type,
         num_rows=num_rows,
+        gpu_arch=sys_info.get("gpu_arch"),
     )
 
 

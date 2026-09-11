@@ -854,13 +854,13 @@ class Database:
             )
             .join(Kernel, KernelSymbol.kernel_uuid == Kernel.kernel_uuid)
             .join(Workload, CodeObjectStore.workload_id == Workload.workload_id)
-            # A mnemonic the pipeline table does not hold has no type.
+            # An instruction with no pipeline leaves the type empty.
             .outerjoin(
                 InstructionTypeLookup,
                 InstructionLine.instruction_type_uuid
                 == InstructionTypeLookup.instruction_type_lookup_uuid,
             )
-            # A line the disassembly holds but no sample landed on has no state.
+            # A line no sample landed on leaves the counts empty.
             .outerjoin(
                 PCSampleState,
                 InstructionLine.instruction_uuid == PCSampleState.instruction_uuid,
@@ -1056,7 +1056,7 @@ class Database:
                 KernelSymbol.code_object_uuid == CodeObjectStore.code_object_uuid,
             )
             .join(Kernel, KernelSymbol.kernel_uuid == Kernel.kernel_uuid)
-            # A mnemonic the pipeline table does not hold has no type.
+            # An instruction with no pipeline leaves the type empty.
             .outerjoin(
                 InstructionTypeLookup,
                 InstructionLine.instruction_type_uuid

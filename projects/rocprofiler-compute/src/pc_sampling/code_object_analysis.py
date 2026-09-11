@@ -12,12 +12,13 @@ Also maps a disassembled instruction to the execution pipeline that runs it.
 
 import json
 from pathlib import Path
-from typing import Any, NamedTuple, Optional
+from typing import Any, ClassVar, NamedTuple, Optional
 
 import yaml
 
 import config
 from utils.logger import console_warning
+from utils.utils_common import canonical_config_arch
 
 CODE_OBJ_INFO_GLOB = "**/*_code_obj_info.json"
 
@@ -113,28 +114,76 @@ def _to_instruction(instruction: dict[str, Any]) -> CodeObjectInstruction:
 
 
 class InstructionPipelines:
-    """The generated mnemonic-to-pipeline table, read once and kept."""
+    """The generated prefix-to-pipeline table, read once per architecture."""
 
-    table: Optional[dict[str, str]] = None
+    # Analyze can process workloads from various GPU architectures, so each one
+    # keeps its own prefixes, the prefix lengths worth trying, and the answers
+    # already worked out.
+    pipeline_by_prefix: ClassVar[dict[Optional[str], dict[str, str]]] = {}
+    prefix_lengths: ClassVar[dict[Optional[str], list[int]]] = {}
+    pipeline_by_mnemonic: ClassVar[dict[Optional[str], dict[str, Optional[str]]]] = {}
 
     @classmethod
-    def lookup(cls, instruction: Optional[str]) -> Optional[str]:
+    def lookup(
+        cls, instruction: Optional[str], gpu_arch: Optional[str] = None
+    ) -> Optional[str]:
         """Return the execution pipeline that runs a disassembled instruction.
 
         The pipeline (VALU, MATRIX, SCALAR, and so on) is a property of the
         instruction itself, so it applies to every disassembled line, not only
-        the offsets PC sampling landed on. Returns None for an instruction the
-        table does not hold, leaving the type unset rather than guessing.
+        the offsets PC sampling landed on. Returns None for a mnemonic no prefix
+        matches, leaving the type unset rather than guessing.
         """
         if not instruction:
             return None
-        if cls.table is None:
-            cls.table = cls.load()
-        return cls.table.get(instruction.split(maxsplit=1)[0])
+        arch = canonical_config_arch(gpu_arch)
+        if arch not in cls.pipeline_by_prefix:
+            cls._load_arch(arch)
+        # Every instruction line of every kernel comes through here, so each
+        # mnemonic is searched for once and answered from memory after that.
+        answers = cls.pipeline_by_mnemonic[arch]
+        mnemonic = instruction.split(maxsplit=1)[0]
+        if mnemonic not in answers:
+            answers[mnemonic] = cls._search(arch, mnemonic)
+        return answers[mnemonic]
 
     @classmethod
-    def load(cls) -> dict[str, str]:
-        """Read the table, inverting it into the mnemonic lookup."""
+    def _search(cls, arch: Optional[str], mnemonic: str) -> Optional[str]:
+        """Return the pipeline of the longest prefix the mnemonic starts with."""
+        prefixes = cls.pipeline_by_prefix[arch]
+        for length in cls.prefix_lengths[arch]:
+            if length > len(mnemonic):
+                continue
+            pipeline = prefixes.get(mnemonic[:length])
+            if pipeline is not None:
+                return pipeline
+        return None
+
+    @classmethod
+    def _load_arch(cls, arch: Optional[str]) -> None:
+        """Build one architecture's prefix table from the generated file."""
+        document = cls.load()
+        # An override replaces the prefix it names. A longer prefix still wins,
+        # so the default table can be more specific than an override.
+        groups = [
+            document.get("pipelines") or {},
+            (document.get("arch_overrides") or {}).get(arch) or {},
+        ]
+        prefixes = {
+            prefix: pipeline
+            for group in groups
+            for pipeline, group_prefixes in group.items()
+            for prefix in group_prefixes
+        }
+        cls.pipeline_by_prefix[arch] = prefixes
+        cls.prefix_lengths[arch] = sorted(
+            {len(prefix) for prefix in prefixes}, reverse=True
+        )
+        cls.pipeline_by_mnemonic[arch] = {}
+
+    @staticmethod
+    def load() -> dict[str, Any]:
+        """Read the generated file, or nothing when it is not installed."""
         path = (
             config.rocprof_compute_home
             / "rocprof_compute_soc"
@@ -143,12 +192,6 @@ class InstructionPipelines:
         )
         if not path.is_file():
             return {}
-        # The C loader is far faster on a file this size, and ships with PyYAML
-        # wherever libyaml is available.
+        # The C loader is faster and ships with PyYAML wherever libyaml is.
         loader = getattr(yaml, "CSafeLoader", yaml.SafeLoader)
-        document = yaml.load(path.read_text(encoding="utf-8"), Loader=loader)
-        return {
-            mnemonic: pipeline
-            for pipeline, mnemonics in ((document or {}).get("pipelines") or {}).items()
-            for mnemonic in mnemonics
-        }
+        return yaml.load(path.read_text(encoding="utf-8"), Loader=loader) or {}
