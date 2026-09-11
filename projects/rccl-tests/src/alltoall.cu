@@ -264,8 +264,10 @@ __global__ void NvlAlltoAllKernelOptimized(ncclWindow_t sendwin, size_t sendoffs
 
 #if defined(ENABLE_DEVICE_API) && NCCL_VERSION_CODE >= NCCL_VERSION(2,28,7) && defined(NCCL_OS_LINUX)
 #if defined(__HIP_PLATFORM_AMD__) || defined(__HIP_PLATFORM_HCC__)
+#include <hip/amd_detail/amd_hip_bf16.h>
 using bf16 = __hip_bfloat16;
 #else
+#include <cuda_bf16.h>
 using bf16 = __nv_bfloat16;
 #endif
 using gin::fabric::ginFabricLlAlltoAllBlocksPerPeer;
