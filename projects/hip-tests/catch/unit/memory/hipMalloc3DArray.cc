@@ -179,7 +179,6 @@ HIP_TEMPLATE_TEST_CASE(Unit_hipMalloc3DArray_MaxTexture, int, uint4, short, usho
     const auto extent =
         GENERATE_COPY(from_range(std::begin(extentsToTest), std::end(extentsToTest)));
     CAPTURE(extent.width, extent.height, extent.depth);
-
     auto maxArrayCreateError = hipMalloc3DArray(&array, &desc, extent, flag);
     // this can try to alloc many GB of memory, so out of memory is acceptable
     if (maxArrayCreateError == hipErrorOutOfMemory) return;
