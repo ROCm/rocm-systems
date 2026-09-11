@@ -2604,6 +2604,8 @@ protected:
   {
     /* No fixup is necessary.  */
   }
+
+  register_class_t &get_register_class (const char *class_name);
 };
 
 gfx9_architecture_t::gfx9_architecture_t (elf_amdgpu_machine_t e_machine,
@@ -2687,6 +2689,17 @@ gfx9_architecture_t::gfx9_architecture_t (elf_amdgpu_machine_t e_machine,
                                    amdgpu_regnum_t::pseudo_exec_64);
   general_registers.add_registers (amdgpu_regnum_t::pseudo_vcc_64,
                                    amdgpu_regnum_t::pseudo_vcc_64);
+}
+
+register_class_t &
+gfx9_architecture_t::get_register_class (const char *class_name)
+{
+  register_class_t *reg_class
+    = find_if ([&class_name] (const register_class_t &rc)
+               { return rc.name () == class_name; });
+  dbgapi_assert (reg_class != nullptr);
+
+  return *reg_class;
 }
 
 std::pair<amd_dbgapi_wave_state_t, amd_dbgapi_wave_stop_reasons_t>
@@ -3568,22 +3581,14 @@ mi_architecture_t::mi_architecture_t (elf_amdgpu_machine_t e_machine,
   : gfx9_architecture_t (e_machine, std::move (target_triple))
 {
   /* Vector registers: [a0-a255]  */
-  register_class_t *vector_registers
-    = find_if ([] (const register_class_t &register_class)
-               { return register_class.name () == "vector"; });
-  dbgapi_assert (vector_registers != nullptr);
-
-  vector_registers->add_registers (amdgpu_regnum_t::a0_64,
-                                   amdgpu_regnum_t::a255_64);
+  register_class_t &vector_registers = get_register_class ("vector");
+  vector_registers.add_registers (amdgpu_regnum_t::a0_64,
+                                  amdgpu_regnum_t::a255_64);
 
   /* General registers: [a0-a255]  */
-  register_class_t *general_registers
-    = find_if ([] (const register_class_t &register_class)
-               { return register_class.name () == "general"; });
-  dbgapi_assert (general_registers != nullptr);
-
-  general_registers->add_registers (amdgpu_regnum_t::a0_64,
-                                    amdgpu_regnum_t::a255_64);
+  register_class_t &general_registers = get_register_class ("general");
+  general_registers.add_registers (amdgpu_regnum_t::a0_64,
+                                   amdgpu_regnum_t::a255_64);
 }
 
 std::string
@@ -4501,24 +4506,21 @@ gfx10_architecture_t::gfx10_architecture_t (elf_amdgpu_machine_t e_machine,
   : gfx9_architecture_t (e_machine, std::move (target_triple))
 {
   /* Scalar registers: [s103-s105]  */
-  register_class_t *scalar_registers
-    = find_if ([] (const register_class_t &register_class)
-               { return register_class.name () == "scalar"; });
-  dbgapi_assert (scalar_registers != nullptr);
+  register_class_t &scalar_registers = get_register_class ("scalar");
 
   auto gfx9_scalar_register_count
     = gfx9_architecture_t::scalar_register_count ();
   auto gfx10_scalar_register_count
     = gfx10_architecture_t::scalar_register_count ();
 
-  scalar_registers->add_registers
+  scalar_registers.add_registers
     ((amdgpu_regnum_t::first_sgpr
       + utils::narrow<amdgpu_regdiff_t> (gfx9_scalar_register_count)),
      (amdgpu_regnum_t::first_sgpr
       + utils::narrow<amdgpu_regdiff_t> (gfx10_scalar_register_count)
       - 1));
 
-  scalar_registers->add_registers
+  scalar_registers.add_registers
     ((amdgpu_regnum_t::first_shadow_sgpr
       + utils::narrow<amdgpu_regdiff_t> (gfx9_scalar_register_count)),
      (amdgpu_regnum_t::first_shadow_sgpr
@@ -4526,48 +4528,36 @@ gfx10_architecture_t::gfx10_architecture_t (elf_amdgpu_machine_t e_machine,
       - 1));
 
   /* Vector registers: [v0_32-v255_32]  */
-  register_class_t *vector_registers
-    = find_if ([] (const register_class_t &register_class)
-               { return register_class.name () == "vector"; });
-  dbgapi_assert (vector_registers != nullptr);
-
-  vector_registers->add_registers (amdgpu_regnum_t::v0_32,
-                                   amdgpu_regnum_t::v255_32);
+  register_class_t &vector_registers = get_register_class ("vector");
+  vector_registers.add_registers (amdgpu_regnum_t::v0_32,
+                                  amdgpu_regnum_t::v255_32);
 
   /* System registers: [xnack_mask_32]  */
-  register_class_t *system_registers
-    = find_if ([] (const register_class_t &register_class)
-               { return register_class.name () == "system"; });
-  dbgapi_assert (system_registers != nullptr);
-
-  system_registers->remove_registers (amdgpu_regnum_t::xnack_mask_64,
-                                      amdgpu_regnum_t::xnack_mask_64);
+  register_class_t &system_registers = get_register_class ("system");
+  system_registers.remove_registers (amdgpu_regnum_t::xnack_mask_64,
+                                     amdgpu_regnum_t::xnack_mask_64);
 
   /* gfx10.1 still supports xnack_mask, but only 32bit wide.  */
   if (e_machine == EF_AMDGPU_MACH_AMDGCN_GFX1010
       || e_machine == EF_AMDGPU_MACH_AMDGCN_GFX1011
       || e_machine == EF_AMDGPU_MACH_AMDGCN_GFX1012)
-    system_registers->add_registers (amdgpu_regnum_t::xnack_mask_32,
-                                     amdgpu_regnum_t::xnack_mask_32);
+    system_registers.add_registers (amdgpu_regnum_t::xnack_mask_32,
+                                    amdgpu_regnum_t::xnack_mask_32);
 
   /* General registers: [s103-s105, {vector}_32, exec_32, vcc_32]  */
-  register_class_t *general_registers
-    = find_if ([] (const register_class_t &register_class)
-               { return register_class.name () == "general"; });
-  dbgapi_assert (general_registers != nullptr);
-
-  general_registers->add_registers
+  register_class_t &general_registers = get_register_class ("general");
+  general_registers.add_registers
     ((amdgpu_regnum_t::first_sgpr
       + utils::narrow<amdgpu_regdiff_t> (gfx9_scalar_register_count)),
      (amdgpu_regnum_t::first_sgpr
       + utils::narrow<amdgpu_regdiff_t> (gfx10_scalar_register_count)
       - 1));
-  general_registers->add_registers (amdgpu_regnum_t::v0_32,
-                                    amdgpu_regnum_t::v255_32);
-  general_registers->add_registers (amdgpu_regnum_t::pseudo_exec_32,
-                                    amdgpu_regnum_t::pseudo_exec_32);
-  general_registers->add_registers (amdgpu_regnum_t::pseudo_vcc_32,
-                                    amdgpu_regnum_t::pseudo_vcc_32);
+  general_registers.add_registers (amdgpu_regnum_t::v0_32,
+                                   amdgpu_regnum_t::v255_32);
+  general_registers.add_registers (amdgpu_regnum_t::pseudo_exec_32,
+                                   amdgpu_regnum_t::pseudo_exec_32);
+  general_registers.add_registers (amdgpu_regnum_t::pseudo_vcc_32,
+                                   amdgpu_regnum_t::pseudo_vcc_32);
 }
 
 std::string
@@ -6414,14 +6404,7 @@ gfx12_architecture_t::gfx12_architecture_t (elf_amdgpu_machine_t e_machine,
                                             std::string target_triple)
   : gfx11_architecture_t (e_machine, target_triple)
 {
-  auto &system_registers = [this] () -> register_class_t &
-  {
-    register_class_t *sys_regs
-      = find_if ([] (const register_class_t &register_class)
-                 { return register_class.name () == "system"; });
-    dbgapi_assert (sys_regs != nullptr);
-    return *sys_regs;
-  }();
+  auto &system_registers = get_register_class ("system");
 
   /* In GFX12, STATUS becomes STATUS + STATE_PRIV, MODE and TRAPSTS are
      reorganised into TRAP_CTRL, EXCP_FLAG_PRIV and EXCE_FLAG_USER.  */
@@ -7738,9 +7721,6 @@ public:
   std::vector<agent_t::aperture_t>
   get_apertures (const os_agent_info_t &info) const override;
   const void *register_read_only_mask (amdgpu_regnum_t regnum) const override;
-
-private:
-  register_class_t &get_register_class (const char *class_name);
 };
 
 std::vector<agent_t::aperture_t>
@@ -7784,17 +7764,6 @@ gfx12_5_architecture_t::get_apertures (const os_agent_info_t &info) const
       address_space_t::global (),
       { address_space_t::global ().id () } }
   };
-}
-
-register_class_t &
-gfx12_5_architecture_t::get_register_class (const char *class_name)
-{
-  register_class_t *reg_class
-    = find_if ([&class_name] (const register_class_t &rc)
-               { return rc.name () == class_name; });
-  dbgapi_assert (reg_class != nullptr);
-
-  return *reg_class;
 }
 
 gfx12_5_architecture_t::gfx12_5_architecture_t (elf_amdgpu_machine_t e_machine,
