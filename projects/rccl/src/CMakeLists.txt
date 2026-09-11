@@ -143,7 +143,7 @@ set(SRC_FILES
   algorithms/gin/gin_alltoall.h
   algorithms/gin/gin_all_reduce.h
   algorithms/gin/gin_all_reduce_policy.h
-  algorithms/gin/sdma/all_reduce_gin_sdma.h 
+  algorithms/gin/sdma/all_reduce_gin_sdma.h
   include/alltoallv_meta.h
   include/alt_rsmi.h
   include/archinfo.h
