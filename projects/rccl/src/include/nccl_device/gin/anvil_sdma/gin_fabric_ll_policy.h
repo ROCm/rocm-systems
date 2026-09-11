@@ -13,25 +13,7 @@
 
 #include <cstddef>
 #include <cstdint>
-
-#if !defined(__CUDA_ARCH__) && !defined(__HIP_DEVICE_COMPILE__)
-#if defined(GIN_FABRIC_LL_POLICY_HOST_TEST)
-// Host GTest only: do not pull nccl.h / HIP / alloc.h (Jenkins extra(rccl) has no cuda.h).
-struct ncclGinFabricA2ALane {
-  int enabled;
-  void** peerScratch;
-  uint32_t* llEpoch;
-  int llEpochLen;
-  size_t scratchBytes;
-  size_t llThreshold;
-};
-#else
-#include "gin/gin_fabric_a2a_host.h"
-#endif
-#include <cerrno>
-#include <cstdlib>
-#include <cstring>
-#endif
+#include "nccl_device/gin/anvil_sdma/gin_fabric_a2a_lane.h"
 
 namespace gin {
 namespace fabric {
@@ -75,6 +57,9 @@ inline size_t pickGinFabricLLThresholdAlltoAll(bool alltoallSet, unsigned long l
 }
 
 #if !defined(__CUDA_ARCH__) && !defined(__HIP_DEVICE_COMPILE__)
+#include <cerrno>
+#include <cstdlib>
+#include <cstring>
 
 inline bool ginFabricLlAlltoAllEligible(ncclGinFabricA2ALane const& lane, int nRanks, size_t count, size_t typeBytes,
                                         bool dtypeOk) {

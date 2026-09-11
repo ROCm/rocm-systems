@@ -824,7 +824,7 @@ rocm_install(FILES       ${PROJECT_BINARY_DIR}/include/nccl.h
                          ${PROJECT_BINARY_DIR}/include/nccl_device.h
              DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
 rocm_install(FILES       src/include/gin/gin_fabric_a2a_host.h
-             DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/gin)
+             DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/nccl_device/gin)
 rocm_install(DIRECTORY   ${PROJECT_BINARY_DIR}/include/nccl_device/
              DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/nccl_device)
 ## Optional: install LLVM bitcode artifacts when EMIT_LLVM_IR is enabled.

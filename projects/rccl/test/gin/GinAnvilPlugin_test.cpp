@@ -303,6 +303,7 @@ TEST_F(GinAnvilPluginTest, CreateContext_PublishesDeviceFabricA2ALane) {
   EXPECT_EQ(hostCtx.fabricA2ALlEpoch, mockComm_.comm.ddaLLEpochDev);
   EXPECT_EQ(hostCtx.fabricA2ALlEpochLen, mockComm_.comm.ddaLLEpochLen);
   EXPECT_EQ(hostCtx.fabricA2ALlThreshold, 64u * 1024u);
+  EXPECT_EQ(hostCtx.fabricA2AScratchBytes, mockComm_.comm.ddaScratchBytes);
 
   plugin_.destroyContext(ginCtx);
   plugin_.closeColl(coll);
@@ -511,7 +512,7 @@ TEST_F(GinAnvilPluginTest, RegMrSym_FabricRefcountAndExchangeFail) {
   void* coll = nullptr;
   connectColl(ictx, &coll);
 
-  void* data = reinterpret_cast<void*>(0x81000);
+  void* data = reinterpret_cast<void*>(0x80001000ULL);
 
   GinAnvilPluginStubs::SetFabricExchangeFail(true);
   void* mhFail = nullptr;

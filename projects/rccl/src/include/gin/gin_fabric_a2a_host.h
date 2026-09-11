@@ -14,6 +14,7 @@
 #include <stdint.h>
 
 #include "nccl.h"
+#include "nccl_device/gin/anvil_sdma/gin_fabric_a2a_lane.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -21,16 +22,6 @@ extern "C" {
 
 struct ncclDevComm;
 struct ncclComm;
-
-// 0-threshold means the lane is disabled (same encoding as gin_host setup).
-struct ncclGinFabricA2ALane {
-  int enabled;
-  void** peerScratch;
-  uint32_t* llEpoch;
-  int llEpochLen;
-  size_t scratchBytes;
-  size_t llThreshold;
-};
 
 ncclResult_t ncclGinQueryFabricA2ALane(struct ncclDevComm const* devComm, struct ncclGinFabricA2ALane* out);
 

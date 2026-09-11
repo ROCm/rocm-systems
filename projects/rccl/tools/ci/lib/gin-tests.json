@@ -69,6 +69,13 @@
       "args": ""
     },
     {
+      "name": "rccl-gin-anvil-plugin-ut",
+      "kind": "fixtures",
+      "bin": "rccl-UnitTestsGinAnvilPlugin",
+      "env": [],
+      "args": ""
+    },
+    {
       "name": "rccl-gin-fixtures-anvil-gda",
       "kind": "fixtures",
       "bin": "rccl-UnitTestsFixtures",
