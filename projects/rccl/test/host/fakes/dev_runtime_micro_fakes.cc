@@ -723,7 +723,7 @@ HIP_FAKE hipError_t hipGetLastError(void) { return hipSuccess; }
 // Params are not cached here (see fakes/dev_runtime_micro_fakes.h), so the default just
 // hands back the value the NCCL_PARAM declaration was written with.
 static int64_t DefaultLoadParam(const char*, int64_t deftVal) { return deftVal; }
-std::function<int64_t(const char*, int64_t)> g_devrLoadParam = DefaultLoadParam;
+std::function<int64_t(const char*, int64_t)> g_loadParam = DefaultLoadParam;
 
 void ResetDevRuntimeMicroFakes() {
   g_devrHipMemGetAllocationPropertiesFromHandle = DefaultMemGetAllocationPropertiesFromHandle;
@@ -771,7 +771,7 @@ void ResetDevRuntimeMicroFakes() {
   g_devrNcclCommDeregister                      = DefaultCommDeregister;
   g_devrRmaProxyDeregister                      = DefaultRmaProxyDeregister;
   g_devrAllocAndPopulateSegmentWindows      = DefaultDevrAllocAndPopulateSegmentWindows;
-  g_devrLoadParam                               = DefaultLoadParam;
+  g_loadParam                               = DefaultLoadParam;
 
   // Not a hook either, but 12 tests assign it directly to steer the
   // POSIX-FD-vs-shareable-handle split in symMemory{Export,ImportAndMap}
