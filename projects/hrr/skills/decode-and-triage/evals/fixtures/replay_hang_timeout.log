@@ -1,0 +1,8 @@
+[HRR] Archive : 5 events, 1 kernels, 1 blobs, 2 code objects
+[HRR] Threads : 1 captured
+[HRR] Device  : AMD Radeon Graphics (gfx950:sramecc+:xnack-)
+[HRR] Mode    : single-threaded
+[HRR] [replay] Device state OK — beginning replay
+[HRR] Pre-loading 2 code objects...
+[HRR] All code objects pre-loaded OK.
+[triage] replay timed out after 1800s
