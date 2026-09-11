@@ -329,9 +329,8 @@ def gen_vector_unary(
         )
         if is_vop3:
             L.extend(vop3_src_mod('s', 0, has_abs))
-        L.append('    int exp = 0;')
         L.append(
-            '    if (s != 0.0f && !std::isnan(s) && !std::isinf(s)) std::frexp(s, &exp);'
+            '    const int32_t exp = amdgpu::frexp_f32(s, wf.fp_denorm_mode_f32()).exponent;'
         )
         L.append(
             f'    amdgpu::RegisterAccess(wf).write_lane({dst[0]}, lane, static_cast<uint32_t>(exp));'
@@ -355,8 +354,9 @@ def gen_vector_unary(
         )
         if is_vop3:
             L.extend(vop3_src_mod('s', 0, has_abs))
-        L.append('    int exp = 0;')
-        L.append(f'    float result = std::frexp(s, &exp);')
+        L.append(
+            '    float result = amdgpu::frexp_f32(s, wf.fp_denorm_mode_f32()).mantissa;'
+        )
         if is_vop3:
             L.extend(vop3_dst_mod('result'))
         L.append(
@@ -386,7 +386,17 @@ def gen_vector_unary(
         expr = math_map_f64.get(op, f's /* TODO: {op} */')
         if is_vop3:
             L.append(f'    double result = {expr};')
-            L.extend(vop3_dst_mod_f64('result'))
+            if op == 'ldexp':
+                L.append(
+                    '    result = amdgpu::div_apply_omod(result, wf.fp_round_mode_f16_f64(), '
+                    'amdgpu::fp_mode::effective_omod(wf.cu().arch(), '
+                    'wf.fp_denorm_mode_f16_f64(), wf.ieee_mode(), inst_.omod));'
+                )
+                L.append(
+                    '    if (inst_.clamp) result = amdgpu::clamp_floating_result(result, wf);'
+                )
+            else:
+                L.extend(vop3_dst_mod_f64('result'))
             L.append(
                 f'    amdgpu::RegisterAccess(wf).write_lane64({dst[0]}, lane, std::bit_cast<uint64_t>(result));'
             )
@@ -460,7 +470,17 @@ def gen_vector_unary(
         expr = math_map.get(op, f's /* TODO: {op} */')
         if is_vop3:
             L.append(f'    float result = {expr};')
-            L.extend(vop3_dst_mod('result'))
+            if op == 'ldexp':
+                L.append(
+                    '    result = amdgpu::div_apply_omod(result, wf.fp_round_mode_f32(), '
+                    'amdgpu::fp_mode::effective_omod(wf.cu().arch(), '
+                    'wf.fp_denorm_mode_f32(), wf.ieee_mode(), inst_.omod));'
+                )
+                L.append(
+                    '    if (inst_.clamp) result = amdgpu::clamp_floating_result(result, wf);'
+                )
+            else:
+                L.extend(vop3_dst_mod('result'))
             L.append(
                 f'    amdgpu::RegisterAccess(wf).write_lane({dst[0]}, lane, std::bit_cast<uint32_t>(result));'
             )
@@ -523,7 +543,7 @@ def gen_vector_binop(
             'fmin': 'std::fmin(sv0, sv1)',
             'fmax': 'std::fmax(sv0, sv1)',
             'fmac': f'std::fma(sv0, sv1, std::bit_cast<double>(amdgpu::RegisterAccess(wf).read_lane64({d}, lane)))',
-            'ldexp': 'std::ldexp(sv0, static_cast<int>(sv1_i))',
+            'ldexp': 'amdgpu::ldexp(sv0, sv1_i, wf.fp_round_mode_f16_f64(), wf.fp_denorm_mode_f16_f64())',
         }
         expr = f_op_map.get(op, f'sv0 /* TODO: {op} */')
         if is_vop3:
@@ -564,7 +584,7 @@ def gen_vector_binop(
             'fmin': 'std::fmin(sv0, sv1)',
             'fmax': 'std::fmax(sv0, sv1)',
             'fmac': f'std::fma(sv0, sv1, std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane({d}, lane)))',
-            'ldexp': 'std::ldexp(sv0, static_cast<int>(sv1_i))',
+            'ldexp': 'amdgpu::ldexp(sv0, sv1_i, wf.fp_round_mode_f32(), wf.fp_denorm_mode_f32())',
         }
         expr = f_op_map.get(op, f'sv0 /* TODO: {op} */')
         if is_vop3:

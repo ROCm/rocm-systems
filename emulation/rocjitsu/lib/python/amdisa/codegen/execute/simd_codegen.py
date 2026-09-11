@@ -491,12 +491,15 @@ SIMD_VOP1_UNARY: dict[str, tuple[str, str, str]] = {
     'v_frexp_mant_f32_vop1': (
         'float32_t',
         'float32_t',
-        '[](auto a) { return util::frexp_mant_f32_simd(std::bit_cast<util::native<uint32_t>>(a)); }',
+        '[&wf](auto a) { return util::native<float>([&](auto i) {'
+        ' return amdgpu::frexp_f32(static_cast<float>(a[i]), wf.fp_denorm_mode_f32()).mantissa; }); }',
     ),
     'v_frexp_exp_i32_f32_vop1': (
         'uint32_t',
         'uint32_t',
-        '[](auto a) { return util::frexp_exp_f32_simd(a); }',
+        '[&wf](auto a) { return util::native<uint32_t>([&](auto i) {'
+        ' return static_cast<uint32_t>(amdgpu::frexp_f32(std::bit_cast<float>('
+        'static_cast<uint32_t>(a[i])), wf.fp_denorm_mode_f32()).exponent); }); }',
     ),
     # frexp f16: the scalar widens src to f32, runs std::frexp, then narrows the
     # mantissa (or float(exp)) back to f16 via f32_to_f16. Compose the bit-exact
@@ -1932,6 +1935,8 @@ SIMD_VOP3_TRUE16_UNSAFE = frozenset(
 # (operand shape is identical: src0 in, vdst out, 32-bit lanes) — only the
 # probe routing key differs. RDNA3+; CDNA4 does not decode.
 SIMD_VOP3_UNARY_INT_EXTRA: dict[str, tuple[str, str, str]] = {
+    # ABS/NEG cannot change the exponent; the result has no FP output modifiers.
+    'v_frexp_exp_i32_f32_vop3': SIMD_VOP1_UNARY['v_frexp_exp_i32_f32_vop1'],
     # v_not_b16: `uint16_t(~src0)`, zero-extended. Same shape as v_not_b32 but
     # masked to 16 bits.
     'v_not_b16_vop3': (
@@ -2063,11 +2068,6 @@ SIMD_VOP3_FREXP_FP: dict[str, tuple[str, str]] = {
         '[](auto a) { return util::stdx::static_simd_cast<util::native<float>>('
         'util::frexp_exp_f32_simd(std::bit_cast<util::native<uint32_t>>(a))); }',
     ),
-    'v_frexp_exp_i32_f32_vop3': (
-        'fp32',
-        '[](auto a) { return util::stdx::static_simd_cast<util::native<float>>('
-        'util::frexp_exp_f32_simd(std::bit_cast<util::native<uint32_t>>(a))); }',
-    ),
     # f64 source -> float(exp) dst. Mixed-width (read64 / narrow32 store): the new
     # cvt-vop3 f64->b32 glue applies the f64 src abs/neg + float omod/clamp.
     # frexp_exp_f64_simd returns the int32 exp in the low 32 bits of each 64-bit
@@ -2161,10 +2161,10 @@ SIMD_VOP3_TERNARY_FP16: dict[str, str] = {
     'v_maximumminimum_f16_vop3': '[](auto a, auto b, auto c) { return util::ieee_minimum_simd(util::ieee_maximum_simd(a, b), c); }',
     'v_minimummaximum_f16_vop3': '[](auto a, auto b, auto c) { return util::ieee_maximum_simd(util::ieee_minimum_simd(a, b), c); }',
     'v_div_fixup_f16_vop3': (
-        '[](auto p, auto b, auto c) { return ::rocjitsu::amdgpu::div_fixup_f16_promoted_simd(p, b, c); }'
+        '[&wf](auto p, auto b, auto c) { return ::rocjitsu::amdgpu::div_fixup_f16_promoted_simd(p, b, c, wf.fp_round_mode_f16_f64(), wf.fp_denorm_mode_f16_f64()); }, true'
     ),
     'v_div_fixup_legacy_f16_vop3': (
-        '[](auto p, auto b, auto c) { return ::rocjitsu::amdgpu::div_fixup_f16_promoted_simd(p, b, c); }'
+        '[&wf](auto p, auto b, auto c) { return ::rocjitsu::amdgpu::div_fixup_f16_promoted_simd(p, b, c, wf.fp_round_mode_f16_f64(), wf.fp_denorm_mode_f16_f64()); }, true'
     ),
 }
 
@@ -2193,27 +2193,19 @@ SIMD_VOP3_FMAC_FP32: dict[str, str] = {
 SIMD_VOP3_FMAC_FP16 = {'v_fmac_f16_vop3'}
 SIMD_VOP3_FMAC_FP64 = {'v_fmac_f64_vop3'}
 
-# --- VOP3 ldexp (mixed-width: fp src0 + int32 src1 exp) --------------------
-#
-# stdx::ldexp on native<float|double> with same-size int simd is bit-exact to
-# std::ldexp for every input including NaN (proven in the v_ldexp_f16 VOP2
-# slice).
+# Mixed-width LDEXP batches operand access but rounds each lane with guest MODE.
 SIMD_VOP3_LDEXP_FP32: dict[str, str] = {
-    # stdx::ldexp wants the integer arg as fixed_size_simd<int, size> matching
-    # the float abi, not the native<int32_t> the operand reader returns.
     'v_ldexp_f32_vop3': (
-        '[](auto a, auto e) {'
-        ' return util::stdx::ldexp(a, util::stdx::static_simd_cast<'
-        'util::stdx::fixed_size_simd<int, util::native<float>::size()>>(e)); }'
+        '[&wf](auto a, auto e) { return util::native<float>([&](auto i) {'
+        ' return amdgpu::ldexp(static_cast<float>(a[i]), static_cast<int32_t>(e[i]),'
+        ' wf.fp_round_mode_f32(), wf.fp_denorm_mode_f32()); }); }'
     ),
 }
 SIMD_VOP3_LDEXP_FP64: dict[str, str] = {
-    # narrow32<int32_t> is already an 8-wide fixed_size_simd; just re-cast to
-    # the int-typed equivalent so stdx::ldexp accepts the matching abi.
     'v_ldexp_f64_vop3': (
-        '[](auto a, auto e) {'
-        ' return util::stdx::ldexp(a, util::stdx::static_simd_cast<'
-        'util::stdx::fixed_size_simd<int, util::native_width64>>(e)); }'
+        '[&wf](auto a, auto e) { return util::native<double>([&](auto i) {'
+        ' return amdgpu::ldexp(static_cast<double>(a[i]), static_cast<int32_t>(e[i]),'
+        ' wf.fp_round_mode_f16_f64(), wf.fp_denorm_mode_f16_f64()); }); }'
     ),
 }
 
@@ -2577,6 +2569,48 @@ def _fp16_ovfl_cpp_op(cpp_op: str) -> str:
 
 
 def simd_probe_line(
+    template_name: str,
+    *,
+    true16_vop3: bool = False,
+    result_writer: str | None = None,
+) -> str | None:
+    probe = _simd_probe_line(
+        template_name, true16_vop3=true16_vop3, result_writer=result_writer
+    )
+    arithmetic_ops = (
+        'add',
+        'sub',
+        'subrev',
+        'mul',
+        'fma',
+        'fmac',
+        'fmaak',
+        'fmamk',
+        'mac',
+        'madak',
+        'madmk',
+    )
+    fields = template_name.split('_')
+    if (
+        probe is None
+        or len(fields) < 3
+        or fields[0] != 'v'
+        or fields[1] not in arithmetic_ops
+    ):
+        return probe
+    dtype = next((field for field in fields if field in ('f16', 'f32', 'f64')), None)
+    if dtype is None:
+        return probe
+    if dtype in ('f16', 'f64') and fields[1] in ('fma', 'fmac', 'fmaak', 'fmamk'):
+        return probe
+    mode = 'f32' if dtype == 'f32' else 'f16_f64'
+    return (
+        f'  if (amdgpu::fp_mode::native_arithmetic_matches(wf.fp_round_mode_{mode}(), '
+        f'wf.fp_denorm_mode_{mode}())) {{\n{probe}\n  }}'
+    )
+
+
+def _simd_probe_line(
     template_name: str,
     *,
     true16_vop3: bool = False,
