@@ -65,7 +65,7 @@ jobs:
         with:
           repository: "ROCm/TheRock"
           path: "TheRock"
-          ref: 648a501e56a1e0919976d6f540b7853e63d44998 # 2026-09-02
+          ref: ec26b5e6128bcef52e1d36199f16042bee19cf36 # 2026-09-09 commit
 
       - name: Install python deps
         run: |
@@ -151,6 +151,8 @@ jobs:
   therock-test-linux-multi-node:
     name: "Test multi-node"
     # TODO: Re-enable gfx94X-dcgpu and gfx950-dcgpu multi-node tests once the clusters are stable again.
+    # TODO: When re-enabling, gate this job the same way as the other therock-build-linux
+    # dependents: if: ${{ (needs.therock-build-linux.result == 'success' || needs.therock-build-linux.result == 'skipped') && ... }}
     if: false
     permissions:
       contents: read
@@ -166,7 +168,7 @@ jobs:
   therock-test-linux-single-node:
     name: "Test single-node"
     # TODO(TheRock#3288): Re-enable gfx950-dcgpu runners once we get more capacity
-    if: ${{ !cancelled() && inputs.amdgpu_families != 'gfx950-dcgpu' }}
+    if: ${{ (needs.therock-build-linux.result == 'success' || needs.therock-build-linux.result == 'skipped') && inputs.amdgpu_families != 'gfx950-dcgpu' }}
     needs: [therock-build-linux]
     uses: ./.github/workflows/therock-rccl-test-packages-single-node.yml
     with:
@@ -177,7 +179,7 @@ jobs:
 
   therock-test-pytorch-distributed:
     name: "Test PyTorch distributed (scheduled)"
-    if: ${{ !cancelled() && inputs.amdgpu_families != 'gfx950-dcgpu' && (inputs.event_name == 'schedule' || inputs.event_name == 'workflow_dispatch') }}
+    if: ${{ (needs.therock-build-linux.result == 'success' || needs.therock-build-linux.result == 'skipped') && inputs.amdgpu_families != 'gfx950-dcgpu' && (inputs.event_name == 'schedule' || inputs.event_name == 'workflow_dispatch') }}
     needs: [therock-build-linux]
     uses: ./.github/workflows/therock-rccl-test-pytorch-distributed.yml
     secrets:
@@ -193,7 +195,7 @@ jobs:
 
   therock-test-jax-collective:
     name: "Test JAX collective (scheduled)"
-    if: ${{ !cancelled() && inputs.amdgpu_families != 'gfx950-dcgpu' && (inputs.event_name == 'schedule' || inputs.event_name == 'workflow_dispatch') }}
+    if: ${{ (needs.therock-build-linux.result == 'success' || needs.therock-build-linux.result == 'skipped') && inputs.amdgpu_families != 'gfx950-dcgpu' && (inputs.event_name == 'schedule' || inputs.event_name == 'workflow_dispatch') }}
     needs: [therock-build-linux]
     uses: ./.github/workflows/therock-rccl-test-jax-collective.yml
     secrets:
@@ -208,7 +210,7 @@ jobs:
 
   therock-test-rocprof:
     name: "Test rocprofv3 smoke"
-    if: ${{ !cancelled() && inputs.amdgpu_families != 'gfx950-dcgpu' }}
+    if: ${{ (needs.therock-build-linux.result == 'success' || needs.therock-build-linux.result == 'skipped') && inputs.amdgpu_families != 'gfx950-dcgpu' }}
     needs: [therock-build-linux]
     uses: ./.github/workflows/therock-rccl-test-rocprof.yml
     secrets:
@@ -223,7 +225,7 @@ jobs:
 
   therock-test-madengine:
     name: "Test MADEngine workloads (scheduled)"
-    if: ${{ !cancelled() && inputs.amdgpu_families == 'gfx950-dcgpu' && (inputs.event_name == 'schedule' || inputs.event_name == 'workflow_dispatch') }}
+    if: ${{ (needs.therock-build-linux.result == 'success' || needs.therock-build-linux.result == 'skipped') && inputs.amdgpu_families == 'gfx950-dcgpu' && (inputs.event_name == 'schedule' || inputs.event_name == 'workflow_dispatch') }}
     needs: [therock-build-linux]
     permissions:
       contents: read
