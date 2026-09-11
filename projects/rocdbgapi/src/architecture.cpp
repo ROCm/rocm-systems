@@ -4440,6 +4440,10 @@ protected:
 
     std::optional<agent_address_t>
     register_address (amdgpu_regnum_t regnum) const override;
+
+  protected:
+    virtual agent_address_t shared_vgprs_addr () const;
+    agent_address_t vgprs_addr () const override;
   };
 
   std::unique_ptr<architecture_t::cwsr_record_t>
@@ -4943,6 +4947,20 @@ gfx10_architecture_t::cwsr_record_t::scratch_scoreboard_id () const
     m_compute_relaunch_wave);
 }
 
+agent_address_t
+gfx10_architecture_t::cwsr_record_t::shared_vgprs_addr () const
+{
+  constexpr size_t shared_vgpr_size = sizeof (int32_t) * 32;
+  return sgprs_addr () - shared_vgpr_count () * shared_vgpr_size;
+}
+
+agent_address_t
+gfx10_architecture_t::cwsr_record_t::vgprs_addr () const
+{
+  size_t vgpr_size = sizeof (int32_t) * lane_count ();
+  return shared_vgprs_addr () - vgpr_count () * vgpr_size;
+}
+
 std::optional<agent_address_t>
 gfx10_architecture_t::cwsr_record_t::register_address (
   amdgpu_regnum_t regnum) const
@@ -5000,70 +5018,38 @@ gfx10_architecture_t::cwsr_record_t::register_address (
       break;
     }
 
-  /* Now that renaming is done, delegate to the gfx9 base for all registers
-     except vector registers.  The vector register slayout in the context save
-     area is different for gfx10 because of the shared vgprs, so we'll have
-     to handle it in this function.  */
-  if (regnum < amdgpu_regnum_t::first_vgpr
-      || regnum > amdgpu_regnum_t::last_vgpr)
-    return gfx9_architecture_t::cwsr_record_t::register_address (regnum);
-
-  auto first_sgpr_addr = gfx9_architecture_t::cwsr_record_t::register_address (
-    amdgpu_regnum_t::first_sgpr);
-  dbgapi_assert (first_sgpr_addr);
-
-  agent_address_t sgprs_addr = *first_sgpr_addr;
-
   /* The shared vgprs are 32-wide vector registers shared between the 2 halves
      of a wave64 on gfx10.  They are logically addressed right after the
      64-wide private vector registers.  Note: In wave32, although unsupported,
      they are still allocated.  */
-  size_t shared_vgpr_count = this->shared_vgpr_count ();
-  size_t shared_vgpr_size = sizeof (int32_t) * 32;
-  agent_address_t shared_vgprs_addr
-    = sgprs_addr - shared_vgpr_count * shared_vgpr_size;
-
-  size_t private_vgpr_count = this->vgpr_count ();
-  size_t private_vgpr_size = sizeof (int32_t) * lane_count;
-  agent_address_t private_vgprs_addr
-    = shared_vgprs_addr - private_vgpr_count * private_vgpr_size;
-
   if (regnum >= (amdgpu_regnum_t::v0_32
-                 + utils::narrow<amdgpu_regdiff_t> (private_vgpr_count))
+                 + utils::narrow<amdgpu_regdiff_t> (vgpr_count ()))
       && regnum <= amdgpu_regnum_t::v255_32
       && ((regnum - amdgpu_regnum_t::v0_32)
-          < utils::narrow<amdgpu_regdiff_t> (private_vgpr_count
-                                             + shared_vgpr_count)))
+          < utils::narrow<amdgpu_regdiff_t> (vgpr_count ()
+                                             + shared_vgpr_count ())))
     {
-      return (shared_vgprs_addr
+      constexpr size_t shared_vgpr_size = sizeof (int32_t) * 32;
+      return (shared_vgprs_addr ()
               + (utils::narrow<size_t>
                  (regnum
                   - (amdgpu_regnum_t::v0_32
-                     + utils::narrow<amdgpu_regdiff_t> (private_vgpr_count)))
+                     + utils::narrow<amdgpu_regdiff_t> (vgpr_count ())))
                  * shared_vgpr_size));
     }
 
   if (lane_count == 32 && regnum >= amdgpu_regnum_t::v0_32
       && regnum <= amdgpu_regnum_t::v255_32
       && ((regnum - amdgpu_regnum_t::v0_32)
-          < utils::narrow<amdgpu_regdiff_t> (private_vgpr_count)))
+          < utils::narrow<amdgpu_regdiff_t> (vgpr_count ())))
     {
-      return (private_vgprs_addr
+      constexpr size_t vgpr_size = sizeof (int32_t) * 32;
+      return (vgprs_addr ()
               + (utils::narrow<size_t> (regnum - amdgpu_regnum_t::v0_32)
-                 * private_vgpr_size));
+                 * vgpr_size));
     }
 
-  if (lane_count == 64 && regnum >= amdgpu_regnum_t::v0_64
-      && regnum <= amdgpu_regnum_t::v255_64
-      && ((regnum - amdgpu_regnum_t::v0_64)
-          < utils::narrow<amdgpu_regdiff_t> (private_vgpr_count)))
-    {
-      return (private_vgprs_addr
-              + (utils::narrow<size_t> (regnum - amdgpu_regnum_t::v0_64)
-                 * private_vgpr_size));
-    }
-
-  return std::nullopt;
+  return gfx9_architecture_t::cwsr_record_t::register_address (regnum);
 }
 
 bool
