@@ -4944,10 +4944,15 @@ hsa_status_t Runtime::VMemoryExportShareableHandle(int* dmabuf_fd,
    * Use drm_owner (the GPU agent used during CreateShareableHandle) instead. */
   auto agentOwner = memoryHandle->drmAgent();
 
-  auto* gpuAgentOwner = static_cast<AMD::GpuAgent*>(agentOwner);
-  if (flags & HSA_AMD_DMABUF_MAPPING_TYPE_PCIE && !gpuAgentOwner->is_xgmi_cpu_gpu() &&
-      !gpuAgentOwner->LargeBarEnabled()){
-    return static_cast<hsa_status_t>(HSA_STATUS_ERROR_NOT_SUPPORTED);
+  if (flags & HSA_AMD_DMABUF_MAPPING_TYPE_PCIE) {
+auto agentOwner = memoryHandle->drmAgent();
+    if (agentOwner->device_type() != core::Agent::DeviceType::kAmdGpuDevice) {
+      return static_cast<hsa_status_t>(HSA_STATUS_ERROR_NOT_SUPPORTED);
+    }
+    auto* gpuAgentOwner = static_cast<AMD::GpuAgent*>(agentOwner);
+    if (!gpuAgentOwner->is_xgmi_cpu_gpu() && !gpuAgentOwner->LargeBarEnabled()) {
+      return static_cast<hsa_status_t>(HSA_STATUS_ERROR_NOT_SUPPORTED);
+    }
   }
 
   return agentOwner->driver().ExportMemoryHandle(*agentOwner, memoryHandle->driver_handle,
