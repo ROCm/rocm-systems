@@ -90,6 +90,27 @@ struct HookConfig : rocjitsu::ConSanRequest,
   bool moi_auto_report_buffer_size_explicit = false;
   bool max_patches_explicit = false;
   bool moi_runtime_sample_stride_explicit = false;
+  enum class MoiEpochAnalysisKind : uint8_t { Every, Nth, Periodic, Manual };
+  struct MoiEpochAnalysisPolicy {
+    MoiEpochAnalysisKind kind = MoiEpochAnalysisKind::Every;
+    uint64_t value = 1;
+    uint64_t offset = 1;
+
+    [[nodiscard]] bool selects(uint64_t epoch, bool manual_window_open) const {
+      switch (kind) {
+      case MoiEpochAnalysisKind::Every:
+        return true;
+      case MoiEpochAnalysisKind::Nth:
+        return epoch == value;
+      case MoiEpochAnalysisKind::Periodic:
+        return epoch >= offset && (epoch - offset) % value == 0;
+      case MoiEpochAnalysisKind::Manual:
+        return manual_window_open;
+      }
+      return false;
+    }
+  };
+  MoiEpochAnalysisPolicy moi_epoch_analysis;
   int log_level = kLogDisabled;
   std::string dump_dir;
 
@@ -348,11 +369,16 @@ void bind_auto_moi_report_buffer_to_executable(uint64_t reader, uint64_t generat
                                                hsa_executable_t executable);
 void discard_auto_moi_report_buffer(CoreApiTable *core, uint64_t reader, uint64_t generation);
 void retire_auto_moi_report_buffers(CoreApiTable *core, hsa_executable_t executable);
+void configure_auto_moi_epoch_analysis(HookConfig::MoiEpochAnalysisPolicy policy);
+[[nodiscard]] bool begin_auto_moi_epoch_analysis_window();
+[[nodiscard]] bool end_auto_moi_epoch_analysis_window();
 /// Analyze and recycle every live automatic MOI report after the caller has
 /// established device-wide quiescence. The operation is transactional: no
 /// report is reset unless every live report has a complete host snapshot.
 [[nodiscard]] AutoMoiReportCheckpointResult
 checkpoint_auto_moi_report_buffers_after_device_synchronize(CoreApiTable *core);
+[[nodiscard]] AutoMoiReportCheckpointResult
+checkpoint_auto_moi_report_buffers_automatically(CoreApiTable *core);
 [[nodiscard]] AutoMoiReportSummary summarize_and_clear_auto_moi_report_buffers(CoreApiTable *core);
 
 /// Fully typed transform seam observed by HSA-hook unit tests. A test double

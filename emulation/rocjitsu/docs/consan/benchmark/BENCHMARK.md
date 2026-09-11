@@ -136,7 +136,7 @@ double-counted.
 Each target status cell reports two values per mode:
 
 - **Startup (seconds)**: the total cold-path latency through completion of the
-  first synchronized operation and its automatic evidence checkpoint. It
+  first synchronized operation and its selected evidence checkpoints. It
   includes ConSan transformation, replacement-object load/bind work,
   first-dispatch setup, the operation itself, and any other warm-up cost. This
   intentionally avoids exposing an implementation-dependent boundary between
@@ -145,15 +145,19 @@ Each target status cell reports two values per mode:
   median second-operation time from the two initial native processes.
 
 The first operation is therefore both a correctness-checked warm-up and part of
-the reported Startup latency; none of its cost is discarded. Its automatic
-evidence-checkpoint latency is included there as well. The ordinary workload
-synchronization lets ConSan observe global quiescence and recycle bounded
-Record/Replay, Sampled, or InlineShadow evidence without a benchmark-specific
-API call; SuperCollider intentionally keeps its lifetime-sticky marker. Run
-exposes the repeated-operation path after code objects have been transformed,
-loaded, and dispatched once. The two operations must use identical inputs and
-execution shape; workloads with evolving state must restore it before each
-operation. The Run ratio uses only matching second-operation ordinals.
+the reported Startup latency; none of its cost is discarded. Its host evidence
+analysis is included there as well. For the three MOI modes, the harness uses
+`RJ_CONSAN_MOI_EPOCH_ANALYSIS=manual` and keeps an explicit analysis window open
+from immediately before Run1 through its final synchronization. This includes
+every internal synchronized epoch belonging to Run1. Run2 remains fully
+instrumented, but its quiescent report epochs are validated and recycled
+without snapshot, decode, analysis, or rendering. The resulting Run ratio
+measures the sustainable device instrumentation path rather than repeatedly
+charging a user-selected host analysis. SuperCollider intentionally keeps its
+lifetime-sticky marker and needs no selection window. The two operations must
+use identical inputs and execution shape; workloads with evolving state must
+restore it before each operation. The Run ratio uses only matching
+second-operation ordinals.
 
 Use a workload's direct device timer when it exposes one reliably (for example,
 the hipBLASLt event time); otherwise use synchronized host time and subtract

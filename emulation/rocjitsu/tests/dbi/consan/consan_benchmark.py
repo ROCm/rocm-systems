@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 import hashlib
 import json
+import math
 import os
 from pathlib import Path
 import statistics
@@ -245,6 +246,7 @@ def _clean_environment(
     mode: str | None,
     audit_sites: bool,
     kernel_allowlist_file: Path | None = None,
+    manual_epoch_analysis: bool = False,
 ) -> dict[str, str]:
     removed = HSA_TOOL_ENVIRONMENT | SOFTWARE_MODEL_ENVIRONMENT | {"HIP_TARGET"}
     environment = {
@@ -266,6 +268,8 @@ def _clean_environment(
     )
     if kernel_allowlist_file is not None:
         environment["RJ_CONSAN_KERNEL_ALLOWLIST_FILE"] = str(kernel_allowlist_file)
+    if manual_epoch_analysis and mode != "supercollider":
+        environment["RJ_CONSAN_MOI_EPOCH_ANALYSIS"] = "manual"
     return environment
 
 
@@ -380,7 +384,12 @@ def _run_one(
             *command,
         ]
     environment = _clean_environment(
-        args.target, args.hook, mode, audit_sites, kernel_allowlist_file
+        args.target,
+        args.hook,
+        mode,
+        audit_sites,
+        kernel_allowlist_file,
+        manual_epoch_analysis=workload.payload in ("aorta", "gluon"),
     )
     log_path = args.output_dir / f"{workload.id}--{label}.log"
     checkpoint_path = args.output_dir / f"{workload.id}--{label}.json"
@@ -643,14 +652,24 @@ def _summarize_workload(
     return result
 
 
+def _format_three_significant_digits(value: float) -> str:
+    if not math.isfinite(value) or value <= 0:
+        raise BenchmarkError(f"cannot format invalid benchmark value: {value!r}")
+    decimal_places = 2 - math.floor(math.log10(value))
+    if decimal_places > 0:
+        return f"{value:,.{decimal_places}f}".rstrip("0").rstrip(".")
+    return f"{round(value, decimal_places):,.0f}"
+
+
 def _render_status(summary: dict[str, Any]) -> str:
     columns = tuple(PROFILE_IDS)
     lines = [
         f"# ConSan `{summary['target']}` benchmark status",
         "",
-        "For each mode, **Startup** is the total latency through the first synchronized run and",
-        "evidence checkpoint, including instrumentation, loading, binding, and warm-up; **Run** is the second-run",
-        "instrumented/native overhead ratio after that cold path.",
+        "For each mode, **Startup** is the total latency through the first synchronized",
+        "run and automatic evidence checkpoint, including instrumentation, loading,",
+        "binding, and warm-up; **Run** is the second-run instrumented/native overhead",
+        "ratio after that cold path.",
         "",
         "| Workload | "
         + " | ".join(
@@ -673,8 +692,8 @@ def _render_status(summary: dict[str, Any]) -> str:
             else:
                 cells.extend(
                     (
-                        f"{result['startup_ms'] / 1000.0:.3g} s",
-                        f"{result['run_ratio']:.3g}×",
+                        f"{_format_three_significant_digits(result['startup_ms'] / 1000.0)} s",
+                        f"{_format_three_significant_digits(result['run_ratio'])}×",
                     )
                 )
         lines.append(f"| {workload['description']} | " + " | ".join(cells) + " |")

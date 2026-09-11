@@ -356,13 +356,47 @@ is quiescent, it analyzes and recycles the current report epoch automatically.
 Normal HIP and PyTorch launch-and-synchronize loops therefore keep working as
 their repetition count grows.
 
-The automatic transaction snapshots and analyzes every live report before it
-clears any of them. It preserves each allocation address, layout, reader, and
-generation embedded in instrumented code. Record/Replay access and dispatch
-tables, Sampled causal windows/publication state, and Inline Shadow ownership,
-ordering, and diagnostic state are all epoch-local and recycled. Final unload
-combines every completed epoch with the last live epoch, so earlier conflicts,
-diagnostics, saturation, and evidence are neither forgotten nor counted twice.
+By default, the automatic transaction snapshots and analyzes every live report
+before it clears any of them. It preserves each allocation address, layout,
+reader, and generation embedded in instrumented code. Record/Replay access and
+dispatch tables, Sampled causal windows/publication state, and Inline Shadow
+ownership, ordering, and diagnostic state are all epoch-local and recycled.
+Final unload combines every analyzed epoch with the last live epoch, so earlier
+conflicts, diagnostics, saturation, and evidence are neither forgotten nor
+counted twice.
+
+For a long repeated workload where analyzing every iteration is unnecessary,
+`RJ_CONSAN_MOI_EPOCH_ANALYSIS` selects which synchronized epochs receive the
+full host snapshot/decode/analyze pipeline:
+
+| Value | Selected synchronized epochs |
+| --- | --- |
+| `every` | Every epoch (default). |
+| `nth:N` | Only epoch `N`. |
+| `periodic:N` | Epochs `N`, `2N`, `3N`, and so on. |
+| `periodic:N:OFFSET` | `OFFSET`, then every `N` epochs; `1 <= OFFSET <= N`. |
+| `manual` | Epochs completed while an explicit analysis window is open. |
+
+Unselected epochs are still instrumented on the GPU. At a proven quiescence
+boundary, ConSan validates and resets their bounded report storage without
+copying, decoding, analyzing, or rendering it. Consequently, diagnostics in an
+unselected epoch do not contribute to the final verdict. The default remains
+`every` when complete per-iteration analysis is required.
+
+Manual selection is intended for harnesses that know the semantic operation
+boundaries. After setting `RJ_CONSAN_MOI_EPOCH_ANALYSIS=manual`, resolve and
+call these exports from the loaded `HSA_TOOLS_LIB`:
+
+```c
+uint32_t rj_dbi_consan_begin_epoch_analysis_window();
+uint32_t rj_dbi_consan_end_epoch_analysis_window();
+```
+
+Open the window before submitting the first operation to analyze and close it
+after its final synchronization. Every synchronized epoch completed within the
+window is analyzed. Nesting, closing an unopened window, or calling either API
+under a non-manual policy returns status `3`; `0` means success, `1` means the
+hook is inactive, and `2` means the selected mode is not an MOI engine.
 
 #### Expert fallback for externally synchronized work
 

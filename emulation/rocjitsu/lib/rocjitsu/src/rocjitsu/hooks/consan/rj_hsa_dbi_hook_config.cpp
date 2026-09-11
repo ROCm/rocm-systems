@@ -66,6 +66,78 @@ struct BoolEnvBinding {
   });
 }
 
+[[nodiscard]] bool parse_positive_decimal(std::string_view text, uint64_t *out) {
+  if (text.empty() ||
+      !std::ranges::all_of(text, [](unsigned char c) { return std::isdigit(c) != 0; }))
+    return false;
+  errno = 0;
+  char *end = nullptr;
+  const std::string owned(text);
+  const unsigned long long value = std::strtoull(owned.c_str(), &end, 10);
+  if (errno == ERANGE || end == owned.c_str() || *end != '\0' || value == 0)
+    return false;
+  *out = static_cast<uint64_t>(value);
+  return true;
+}
+
+[[nodiscard]] bool parse_moi_epoch_analysis_env(HookConfig::MoiEpochAnalysisPolicy *policy) {
+  const char *raw = std::getenv("RJ_CONSAN_MOI_EPOCH_ANALYSIS");
+  if (raw == nullptr || *raw == '\0') {
+    *policy = {};
+    return true;
+  }
+  const std::string_view value(raw);
+  if (ascii_iequals(value, "every")) {
+    *policy = {};
+    return true;
+  }
+  if (ascii_iequals(value, "manual")) {
+    policy->kind = HookConfig::MoiEpochAnalysisKind::Manual;
+    policy->value = 1;
+    policy->offset = 1;
+    return true;
+  }
+
+  const size_t first_colon = value.find(':');
+  const std::string_view kind = value.substr(0, first_colon);
+  std::string_view arguments =
+      first_colon == std::string_view::npos ? std::string_view{} : value.substr(first_colon + 1);
+  if (ascii_iequals(kind, "nth")) {
+    uint64_t epoch = 0;
+    if (arguments.find(':') == std::string_view::npos &&
+        parse_positive_decimal(arguments, &epoch)) {
+      policy->kind = HookConfig::MoiEpochAnalysisKind::Nth;
+      policy->value = epoch;
+      policy->offset = epoch;
+      return true;
+    }
+  } else if (ascii_iequals(kind, "periodic")) {
+    const size_t second_colon = arguments.find(':');
+    const std::string_view period_text = arguments.substr(0, second_colon);
+    const std::string_view offset_text = second_colon == std::string_view::npos
+                                             ? std::string_view{}
+                                             : arguments.substr(second_colon + 1);
+    uint64_t period = 0;
+    uint64_t offset = 0;
+    const bool has_explicit_offset = second_colon != std::string_view::npos;
+    if (parse_positive_decimal(period_text, &period) &&
+        (has_explicit_offset ? parse_positive_decimal(offset_text, &offset)
+                             : (offset = period, true)) &&
+        offset <= period) {
+      policy->kind = HookConfig::MoiEpochAnalysisKind::Periodic;
+      policy->value = period;
+      policy->offset = offset;
+      return true;
+    }
+  }
+
+  std::fprintf(stderr,
+               "[rocjitsu-dbi-hooks] invalid RJ_CONSAN_MOI_EPOCH_ANALYSIS='%s'; expected "
+               "every, nth:N, periodic:N, periodic:N:OFFSET, or manual\n",
+               raw);
+  return false;
+}
+
 [[nodiscard]] bool append_kernel_allowlist_name(std::string_view item, const char *source,
                                                 std::vector<std::string> *out) {
   while (!item.empty() && std::isspace(static_cast<unsigned char>(item.front())))
@@ -520,6 +592,7 @@ void warn_irrelevant_env_combinations(const HookConfig &config) {
       "RJ_CONSAN_MOI_RUNTIME_SAMPLE_STRIDE",
       "RJ_CONSAN_MOI_RUNTIME_SAMPLE_OFFSET",
       "RJ_CONSAN_MOI_SAMPLED_CHECK",
+      "RJ_CONSAN_MOI_EPOCH_ANALYSIS",
   };
   for (const char *name : kMoiOnlyKnobs) {
     if (env_has_value(name))
@@ -796,6 +869,8 @@ void warn_irrelevant_env_combinations(const HookConfig &config) {
                      &config.moi_runtime_sample_stride))
     return std::nullopt;
   if (!parse_u32_env("RJ_CONSAN_MOI_RUNTIME_SAMPLE_OFFSET", 0, &config.moi_runtime_sample_offset))
+    return std::nullopt;
+  if (!parse_moi_epoch_analysis_env(&config.moi_epoch_analysis))
     return std::nullopt;
   if (!refresh_report_config_from_env(&config))
     return std::nullopt;

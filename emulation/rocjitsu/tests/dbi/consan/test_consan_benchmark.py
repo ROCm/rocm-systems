@@ -273,12 +273,30 @@ class ConSanBenchmarkTest(unittest.TestCase):
             instrumented = benchmark._clean_environment(
                 "gfx1201", Path("/new-hook"), "sampled", True, Path("/names.txt")
             )
+            manually_selected = benchmark._clean_environment(
+                "gfx1201",
+                Path("/new-hook"),
+                "inline-shadow",
+                True,
+                manual_epoch_analysis=True,
+            )
+            supercollider = benchmark._clean_environment(
+                "gfx1201",
+                Path("/new-hook"),
+                "supercollider",
+                True,
+                manual_epoch_analysis=True,
+            )
         self.assertEqual(native, {"PATH": "/bin", "HIP_TARGET": "gfx1201"})
         self.assertEqual(instrumented["HSA_TOOLS_LIB"], "/new-hook")
         self.assertEqual(instrumented["RJ_CONSAN_MODE"], "sampled")
         self.assertEqual(instrumented["RJ_CONSAN_LOG"], "3")
         self.assertEqual(instrumented["RJ_CONSAN_KERNEL_ALLOWLIST_FILE"], "/names.txt")
         self.assertNotIn("HSA_MODEL_LIB", instrumented)
+        self.assertEqual(
+            manually_selected["RJ_CONSAN_MOI_EPOCH_ANALYSIS"], "manual"
+        )
+        self.assertNotIn("RJ_CONSAN_MOI_EPOCH_ANALYSIS", supercollider)
 
     def test_payload_parser_requires_one_successful_machine_record(self) -> None:
         text = (
@@ -415,6 +433,12 @@ class ConSanBenchmarkTest(unittest.TestCase):
         self.assertNotIn("Absolute latency", text)
         self.assertNotIn("Site-audit", text)
         self.assertEqual(text.count("| --- |"), 1)
+
+    def test_status_uses_grouped_decimal_not_scientific_notation(self) -> None:
+        self.assertEqual(benchmark._format_three_significant_digits(9296.37), "9,300")
+        self.assertEqual(benchmark._format_three_significant_digits(12345.0), "12,300")
+        self.assertEqual(benchmark._format_three_significant_digits(2.714), "2.71")
+        self.assertEqual(benchmark._format_three_significant_digits(0.01234), "0.0123")
 
     def test_payload_command_selects_each_backend(self) -> None:
         args = self._runner_args("/tmp")

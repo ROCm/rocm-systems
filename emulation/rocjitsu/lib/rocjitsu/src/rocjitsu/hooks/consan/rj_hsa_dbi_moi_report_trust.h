@@ -13,6 +13,7 @@ namespace rocjitsu::consan_hook {
 struct AutoMoiReportSummary {
   uint64_t buffer_count = 0;
   uint64_t completed_epoch_count = 0;
+  uint64_t discarded_epoch_count = 0;
   uint64_t required_report_bytes = 0;
   uint64_t allocated_report_bytes = 0;
   uint64_t current_live_report_bytes = 0;

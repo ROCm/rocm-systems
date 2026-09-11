@@ -21,9 +21,9 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
     return parser.parse_args(argv)
 
 
-def _instrumentation_clock():
+def _instrumentation_control():
     if "RJ_CONSAN_MODE" not in os.environ:
-        return lambda: 0
+        return (lambda: 0), (lambda: None), (lambda: None)
     hook_path = os.environ.get("HSA_TOOLS_LIB")
     if not hook_path:
         raise RuntimeError("RJ_CONSAN_MODE is set without HSA_TOOLS_LIB")
@@ -31,7 +31,24 @@ def _instrumentation_clock():
     query = hook.rj_dbi_consan_instrumentation_nanoseconds
     query.argtypes = ()
     query.restype = ctypes.c_uint64
-    return query
+    begin_window = hook.rj_dbi_consan_begin_epoch_analysis_window
+    begin_window.argtypes = ()
+    begin_window.restype = ctypes.c_uint32
+    end_window = hook.rj_dbi_consan_end_epoch_analysis_window
+    end_window.argtypes = ()
+    end_window.restype = ctypes.c_uint32
+
+    def set_analysis_window(open_window: bool) -> None:
+        if os.environ.get("RJ_CONSAN_MOI_EPOCH_ANALYSIS") != "manual":
+            return
+        status = begin_window() if open_window else end_window()
+        if status != 0:
+            raise RuntimeError(
+                f"could not {'open' if open_window else 'close'} the ConSan "
+                f"epoch-analysis window: status {status}"
+            )
+
+    return query, lambda: set_analysis_window(True), lambda: set_analysis_window(False)
 
 
 def _main(argv: list[str]) -> int:
@@ -67,7 +84,7 @@ def _main(argv: list[str]) -> int:
         values = shared.load(layout)
         gl.store(destination + offsets, values * 1.25 + 0.5)
 
-    instrumentation_nanoseconds = _instrumentation_clock()
+    instrumentation_nanoseconds, begin_analysis, end_analysis = _instrumentation_control()
     instrumentation_begin = instrumentation_nanoseconds()
     setup_start = time.perf_counter()
     if not torch.cuda.is_available():
@@ -87,17 +104,23 @@ def _main(argv: list[str]) -> int:
 
     runs = []
     for run_index in range(2):
+        if run_index == 0:
+            begin_analysis()
         instrumentation_before = instrumentation_nanoseconds()
         run_start = time.perf_counter()
-        shared_roundtrip_kernel[(1,)](
-            source,
-            destination,
-            SIZE=size,
-            layout=layout,
-            shared_layout=shared_layout,
-            num_warps=1,
-        )
-        torch.cuda.synchronize()
+        try:
+            shared_roundtrip_kernel[(1,)](
+                source,
+                destination,
+                SIZE=size,
+                layout=layout,
+                shared_layout=shared_layout,
+                num_warps=1,
+            )
+            torch.cuda.synchronize()
+        finally:
+            if run_index == 0:
+                end_analysis()
         run_ms = (time.perf_counter() - run_start) * 1000.0
         instrumentation_after = instrumentation_nanoseconds()
         actual = destination.cpu()

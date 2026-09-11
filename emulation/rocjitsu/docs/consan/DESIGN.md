@@ -425,18 +425,30 @@ generation-consistent snapshot
   -> bounded renderer
 ```
 
-The adapter automatically checkpoints the same pipeline when intercepted waits
-show that every tracked instrumented dispatch is complete. A dispatch's own
-completion signal is preferred; an ordered barrier completion signal safely
-proxies for preceding signal-less dispatches on the same queue. Submission and
-recycling share a gate, so a new report writer cannot appear between the
-quiescence check and reset. A checkpoint first captures and validates every
-live report, then analyzes every captured epoch, and only then reinitializes all
-allocations. This transaction prevents a bad snapshot in one code object from
-discarding evidence in another. Accumulated host summaries retain all earlier
-verdict-relevant evidence while only the current epoch occupies device storage.
-An explicit API is retained only for custom runtimes whose completion or
-synchronization cannot be observed safely.
+The adapter automatically checkpoints when intercepted waits show that every
+tracked instrumented dispatch is complete. A dispatch's own completion signal
+is preferred; an ordered barrier completion signal safely proxies for
+preceding signal-less dispatches on the same queue. Submission and recycling
+share a gate, so a new report writer cannot appear between the quiescence check
+and reset.
+
+The default `every` epoch-analysis policy runs the full snapshot, decode,
+analysis, and render pipeline at each checkpoint. `nth`, `periodic`, and
+explicit manual-window policies can select fewer epochs. A selected checkpoint
+first captures and validates every live report, analyzes every captured epoch,
+and only then reinitializes all allocations. An unselected checkpoint validates
+every live header and layout, then resets the allocations without copying or
+interpreting their evidence. Both paths are transactional: failure leaves all
+reports and the logical epoch number unchanged and retryable. Accumulated host
+summaries retain verdict evidence only from selected epochs, while the device
+stores only the current epoch. The default therefore preserves complete
+per-iteration analysis; selective policies deliberately trade dynamic coverage
+for bounded host-analysis cost.
+
+An explicit checkpoint API is retained for custom runtimes whose completion or
+synchronization cannot be observed safely. A separate begin/end window API
+lets a harness select semantic operations under the manual policy without
+embedding iteration knowledge in the hook.
 
 The checkpoint boundary is shared by all MOI engines because work separated by
 a device-wide synchronization cannot race across that boundary. Its reset is

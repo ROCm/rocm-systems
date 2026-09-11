@@ -85,6 +85,21 @@ std::mutex &log_mutex();
 std::atomic<ConSanTransformOverride> g_test_consan_transform_override{nullptr};
 std::atomic<size_t> g_test_consan_moi_retry_count{0};
 
+[[nodiscard]] std::string
+moi_epoch_analysis_policy_name(const HookConfig::MoiEpochAnalysisPolicy &policy) {
+  switch (policy.kind) {
+  case HookConfig::MoiEpochAnalysisKind::Every:
+    return "every";
+  case HookConfig::MoiEpochAnalysisKind::Nth:
+    return "nth:" + std::to_string(policy.value);
+  case HookConfig::MoiEpochAnalysisKind::Periodic:
+    return "periodic:" + std::to_string(policy.value) + ":" + std::to_string(policy.offset);
+  case HookConfig::MoiEpochAnalysisKind::Manual:
+    return "manual";
+  }
+  return "invalid";
+}
+
 /// Process-wide union of time intervals spent preparing instrumented code
 /// objects. Loads may transform concurrently, so summing per-load durations
 /// would overstate the wall-clock startup cost seen by the application.
@@ -2212,6 +2227,7 @@ public:
     moi_forbid_overflow_ = config.moi_forbid_overflow;
     moi_runtime_sample_stride_ = config.moi_runtime_sample_stride;
     moi_runtime_sample_offset_ = config.moi_runtime_sample_offset;
+    configure_auto_moi_epoch_analysis(config.moi_epoch_analysis);
     fault_load_selector_.reset();
     if (config.fault_load_occurrence)
       fault_load_selector_.emplace(*config.fault_load_occurrence);
@@ -2289,6 +2305,7 @@ public:
         "moi_owner_source=%s flat_provenance=%s moi_owner_sgpr=%s moi_owner_vgpr=%s "
         "moi_epoch_vgpr=%s "
         "moi_runtime_sample_stride=%u moi_runtime_sample_stride_source=%s "
+        "moi_epoch_analysis=%s "
         "moi_report_buffer=%s moi_report_buffer_size=%llu "
         "moi_auto_report_buffer_size=%llu moi_auto_report_buffer_size_source=%s mode=%s",
         rocjitsu::consan_flavor_name(config.flavor.value_or(rocjitsu::ConSanFlavor::None)),
@@ -2335,6 +2352,7 @@ public:
                                         : "unset",
         config.moi_runtime_sample_stride,
         config.moi_runtime_sample_stride_explicit ? "expert-override" : "standard-profile",
+        moi_epoch_analysis_policy_name(config.moi_epoch_analysis).c_str(),
         config.moi_report_buffer_address ? std::to_string(*config.moi_report_buffer_address).c_str()
                                          : "disabled",
         static_cast<unsigned long long>(config.moi_report_buffer_size),
@@ -2373,6 +2391,20 @@ public:
     if (status == ConSanEpochCheckpointStatus::Complete)
       AutoMoiEpochQuiescenceRegistry::instance().clear_after_explicit_checkpoint();
     return status;
+  }
+
+  [[nodiscard]] ConSanEpochCheckpointStatus set_epoch_analysis_window(bool open) {
+    std::lock_guard lock(mutex_);
+    if (!active_ || !config_)
+      return ConSanEpochCheckpointStatus::Inactive;
+    if (config_->flavor != rocjitsu::ConSanFlavor::Moi)
+      return ConSanEpochCheckpointStatus::NotMoi;
+    if (config_->moi_epoch_analysis.kind != HookConfig::MoiEpochAnalysisKind::Manual)
+      return ConSanEpochCheckpointStatus::ReportSnapshotFailed;
+    const bool changed =
+        open ? begin_auto_moi_epoch_analysis_window() : end_auto_moi_epoch_analysis_window();
+    return changed ? ConSanEpochCheckpointStatus::Complete
+                   : ConSanEpochCheckpointStatus::ReportSnapshotFailed;
   }
 
   void uninstall() {
@@ -2483,7 +2515,8 @@ public:
     std::fprintf(
         stderr,
         "[rocjitsu-dbi-hooks] ConSan MOI report memory required_bytes=%llu "
-        "allocated_bytes=%llu completed_epochs=%llu live_before_cleanup=%llu "
+        "allocated_bytes=%llu completed_epochs=%llu discarded_epochs=%llu "
+        "live_before_cleanup=%llu "
         "live_after_cleanup=%llu "
         "peak_live_bytes=%llu per_buffer_ceiling=%llu process_ceiling=%llu "
         "allocation_failures=%llu capacity_failures=%llu cleanup_failures=%llu "
@@ -2491,6 +2524,7 @@ public:
         static_cast<unsigned long long>(moi_report_summary.required_report_bytes),
         static_cast<unsigned long long>(moi_report_summary.allocated_report_bytes),
         static_cast<unsigned long long>(moi_report_summary.completed_epoch_count),
+        static_cast<unsigned long long>(moi_report_summary.discarded_epoch_count),
         static_cast<unsigned long long>(moi_report_summary.current_live_report_bytes),
         static_cast<unsigned long long>(moi_report_summary.current_live_report_bytes_after_cleanup),
         static_cast<unsigned long long>(moi_report_summary.peak_live_report_bytes),
@@ -2940,7 +2974,7 @@ void try_automatic_moi_epoch_checkpoint() {
     return;
   AutoMoiEpochQuiescenceRegistry::instance().checkpoint_if_quiescent(
       core->hsa_signal_load_scacquire_fn,
-      [core] { return checkpoint_auto_moi_report_buffers_after_device_synchronize(core); });
+      [core] { return checkpoint_auto_moi_report_buffers_automatically(core); });
 }
 
 hsa_status_t HSA_API rj_dbi_signal_destroy(hsa_signal_t signal) {
@@ -5248,4 +5282,12 @@ extern "C" RJ_HOOK_EXPORT uint64_t rj_dbi_consan_instrumentation_nanoseconds() {
 
 extern "C" RJ_HOOK_EXPORT uint32_t rj_dbi_consan_checkpoint_after_device_synchronize() {
   return static_cast<uint32_t>(layer().checkpoint_after_device_synchronize());
+}
+
+extern "C" RJ_HOOK_EXPORT uint32_t rj_dbi_consan_begin_epoch_analysis_window() {
+  return static_cast<uint32_t>(layer().set_epoch_analysis_window(true));
+}
+
+extern "C" RJ_HOOK_EXPORT uint32_t rj_dbi_consan_end_epoch_analysis_window() {
+  return static_cast<uint32_t>(layer().set_epoch_analysis_window(false));
 }

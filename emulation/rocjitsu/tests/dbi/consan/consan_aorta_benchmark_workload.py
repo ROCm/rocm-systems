@@ -15,9 +15,9 @@ import time
 RESULT_MARKER = "CONSAN_BENCHMARK_RESULT="
 
 
-def _instrumentation_clock():
+def _instrumentation_control():
     if "RJ_CONSAN_MODE" not in os.environ:
-        return lambda: 0
+        return (lambda: 0), (lambda: None), (lambda: None)
     hook_path = os.environ.get("HSA_TOOLS_LIB")
     if not hook_path:
         raise RuntimeError("RJ_CONSAN_MODE is set without HSA_TOOLS_LIB")
@@ -25,7 +25,24 @@ def _instrumentation_clock():
     query = hook.rj_dbi_consan_instrumentation_nanoseconds
     query.argtypes = ()
     query.restype = ctypes.c_uint64
-    return query
+    begin_window = hook.rj_dbi_consan_begin_epoch_analysis_window
+    begin_window.argtypes = ()
+    begin_window.restype = ctypes.c_uint32
+    end_window = hook.rj_dbi_consan_end_epoch_analysis_window
+    end_window.argtypes = ()
+    end_window.restype = ctypes.c_uint32
+
+    def set_analysis_window(open_window: bool) -> None:
+        if os.environ.get("RJ_CONSAN_MOI_EPOCH_ANALYSIS") != "manual":
+            return
+        status = begin_window() if open_window else end_window()
+        if status != 0:
+            raise RuntimeError(
+                f"could not {'open' if open_window else 'close'} the ConSan "
+                f"epoch-analysis window: status {status}"
+            )
+
+    return query, lambda: set_analysis_window(True), lambda: set_analysis_window(False)
 
 
 def _parse_args(argv: list[str]) -> argparse.Namespace:
@@ -53,7 +70,7 @@ def _main(argv: list[str]) -> int:
     import torch
     from aorta.workloads.inference import InferenceWorkload
 
-    instrumentation_nanoseconds = _instrumentation_clock()
+    instrumentation_nanoseconds, begin_analysis, end_analysis = _instrumentation_control()
     instrumentation_begin = instrumentation_nanoseconds()
     if not torch.cuda.is_available():
         raise SystemExit("the Aorta benchmark requires a visible ROCm GPU")
@@ -75,11 +92,17 @@ def _main(argv: list[str]) -> int:
         results = []
         runs = []
         for run_index in range(2):
+            if run_index == 0:
+                begin_analysis()
             input_generator.set_state(input_state)
             instrumentation_before = instrumentation_nanoseconds()
             run_start = time.perf_counter()
-            result = workload.run()
-            torch.cuda.synchronize()
+            try:
+                result = workload.run()
+                torch.cuda.synchronize()
+            finally:
+                if run_index == 0:
+                    end_analysis()
             run_ms = (time.perf_counter() - run_start) * 1000.0
             instrumentation_after = instrumentation_nanoseconds()
             result_payload = asdict(result)

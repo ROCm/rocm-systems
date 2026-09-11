@@ -47,6 +47,29 @@ public:
     return *registry;
   }
 
+  void configure_epoch_analysis(HookConfig::MoiEpochAnalysisPolicy policy) {
+    std::lock_guard lock(mutex_);
+    epoch_analysis_policy_ = policy;
+    automatic_epoch_ = 0;
+    manual_analysis_window_open_ = false;
+  }
+
+  [[nodiscard]] bool begin_epoch_analysis_window() {
+    std::lock_guard lock(mutex_);
+    if (manual_analysis_window_open_)
+      return false;
+    manual_analysis_window_open_ = true;
+    return true;
+  }
+
+  [[nodiscard]] bool end_epoch_analysis_window() {
+    std::lock_guard lock(mutex_);
+    if (!manual_analysis_window_open_)
+      return false;
+    manual_analysis_window_open_ = false;
+    return true;
+  }
+
   void reject_plan(uint64_t reader, uint64_t required_size, uint64_t configured_cap,
                    std::string_view reason) {
     record_allocation_attempt(required_size);
@@ -345,8 +368,51 @@ public:
         accumulate_summary);
   }
 
-  AutoMoiReportCheckpointResult checkpoint_after_device_synchronize(CoreApiTable *core) {
+  AutoMoiReportCheckpointResult checkpoint_after_device_synchronize(CoreApiTable *core,
+                                                                    bool automatic) {
     std::lock_guard lock(mutex_);
+    uint64_t automatic_epoch = 0;
+    bool analyze = true;
+    if (automatic) {
+      if (automatic_epoch_ == std::numeric_limits<uint64_t>::max()) {
+        log_message(kLogInfo, "ConSan MOI epoch checkpoint outcome=selection-failed "
+                              "reason=automatic-epoch-counter-overflow");
+        return {.status = ConSanEpochCheckpointStatus::ReportSnapshotFailed,
+                .report_count = entry_count_};
+      }
+      automatic_epoch = automatic_epoch_ + 1u;
+      analyze = epoch_analysis_policy_.selects(automatic_epoch, manual_analysis_window_open_);
+    }
+
+    if (!analyze) {
+      // A discarded epoch still needs a transactional reset: validate every
+      // live header before changing any buffer, then clear all buffers. It
+      // deliberately avoids the full snapshot/decode/analyze/render pipeline.
+      for (const Entry &entry : std::span(entries_).first(entry_count_)) {
+        const auto *header = static_cast<const ConSanMoiReportHeader *>(entry.ptr);
+        if (header == nullptr || !consan_moi_report_header_is_current(*header) ||
+            !consan_moi_report_layout_matches_header(*header, entry.layout, entry.layout.engine,
+                                                     entry.size)) {
+          log_message(kLogInfo,
+                      "ConSan MOI epoch checkpoint outcome=discard-failed reader=%llu "
+                      "automatic_epoch=%llu reason=invalid-header-or-layout",
+                      static_cast<unsigned long long>(entry.reader),
+                      static_cast<unsigned long long>(automatic_epoch));
+          return {.status = ConSanEpochCheckpointStatus::ReportSnapshotFailed,
+                  .report_count = entry_count_};
+        }
+      }
+      for (Entry &entry : std::span(entries_).first(entry_count_))
+        reset_entry(entry);
+      completed_summary_.discarded_epoch_count += entry_count_;
+      automatic_epoch_ = automatic_epoch;
+      log_message(kLogInfo,
+                  "ConSan MOI epoch checkpoint outcome=discarded automatic_epoch=%llu "
+                  "reports=%zu",
+                  static_cast<unsigned long long>(automatic_epoch), entry_count_);
+      return {.status = ConSanEpochCheckpointStatus::Complete, .report_count = entry_count_};
+    }
+
     struct PreparedEpoch {
       size_t entry_index = 0;
       AutoMoiReportSnapshot snapshot;
@@ -416,10 +482,7 @@ public:
       entry.static_metadata_counted = true;
       // Instrumented code embeds the allocation generation for Sampled and
       // InlineShadow. Preserve it while clearing all epoch-local state.
-      std::memset(entry.ptr, 0, entry.size);
-      *static_cast<ConSanMoiReportHeader *>(entry.ptr) =
-          make_consan_moi_report_header_for_layout(entry.generation, entry.reader, entry.layout);
-      std::atomic_thread_fence(std::memory_order_release);
+      reset_entry(entry);
 
       // `buffer_count` describes physical allocations, not logical epochs.
       // The same allocation remains live and will be counted exactly once at
@@ -428,8 +491,11 @@ public:
       ++epoch.summary.completed_epoch_count;
       accumulate_summary(completed_summary_, epoch.summary);
     }
-    log_message(kLogInfo, "ConSan MOI epoch checkpoint outcome=complete reports=%zu",
-                prepared.size());
+    if (automatic)
+      automatic_epoch_ = automatic_epoch;
+    log_message(kLogInfo,
+                "ConSan MOI epoch checkpoint outcome=complete automatic_epoch=%llu reports=%zu",
+                static_cast<unsigned long long>(automatic_epoch), prepared.size());
     return {.status = ConSanEpochCheckpointStatus::Complete, .report_count = prepared.size()};
   }
 
@@ -458,6 +524,9 @@ public:
     capacity_failure_count_ = 0;
     cleanup_failure_count_ = 0;
     completed_summary_ = {};
+    automatic_epoch_ = 0;
+    manual_analysis_window_open_ = false;
+    epoch_analysis_policy_ = {};
     process_budget_.peak_live_bytes = process_budget_.current_live_bytes;
     return total;
   }
@@ -521,6 +590,7 @@ private:
   static void accumulate_summary(Summary &total, const Summary &entry) {
     total.buffer_count += entry.buffer_count;
     total.completed_epoch_count += entry.completed_epoch_count;
+    total.discarded_epoch_count += entry.discarded_epoch_count;
     total.fine_grained_snapshot_bytes += entry.fine_grained_snapshot_bytes;
     total.coarse_grained_snapshot_bytes += entry.coarse_grained_snapshot_bytes;
     total.visible_access_record_count += entry.visible_access_record_count;
@@ -584,6 +654,13 @@ private:
   void record_allocation_attempt(uint64_t required_size) {
     std::lock_guard lock(mutex_);
     required_report_bytes_ = byte_accounting::saturating_add(required_report_bytes_, required_size);
+  }
+
+  static void reset_entry(Entry &entry) {
+    std::memset(entry.ptr, 0, entry.size);
+    *static_cast<ConSanMoiReportHeader *>(entry.ptr) =
+        make_consan_moi_report_header_for_layout(entry.generation, entry.reader, entry.layout);
+    std::atomic_thread_fence(std::memory_order_release);
   }
 
   void record_allocation_failure(uint64_t, bool capacity_failure) {
@@ -683,6 +760,9 @@ private:
   uint64_t capacity_failure_count_ = 0;
   uint64_t cleanup_failure_count_ = 0;
   Summary completed_summary_;
+  HookConfig::MoiEpochAnalysisPolicy epoch_analysis_policy_;
+  uint64_t automatic_epoch_ = 0;
+  bool manual_analysis_window_open_ = false;
   std::atomic<uint64_t> next_generation_{0};
 };
 
@@ -724,9 +804,27 @@ void retire_auto_moi_report_buffers(CoreApiTable *core, hsa_executable_t executa
   AutoMoiReportBufferRegistry::instance().retire(core, executable);
 }
 
+void configure_auto_moi_epoch_analysis(HookConfig::MoiEpochAnalysisPolicy policy) {
+  AutoMoiReportBufferRegistry::instance().configure_epoch_analysis(policy);
+}
+
+bool begin_auto_moi_epoch_analysis_window() {
+  return AutoMoiReportBufferRegistry::instance().begin_epoch_analysis_window();
+}
+
+bool end_auto_moi_epoch_analysis_window() {
+  return AutoMoiReportBufferRegistry::instance().end_epoch_analysis_window();
+}
+
 AutoMoiReportCheckpointResult
 checkpoint_auto_moi_report_buffers_after_device_synchronize(CoreApiTable *core) {
-  return AutoMoiReportBufferRegistry::instance().checkpoint_after_device_synchronize(core);
+  return AutoMoiReportBufferRegistry::instance().checkpoint_after_device_synchronize(
+      core, /*automatic=*/false);
+}
+
+AutoMoiReportCheckpointResult checkpoint_auto_moi_report_buffers_automatically(CoreApiTable *core) {
+  return AutoMoiReportBufferRegistry::instance().checkpoint_after_device_synchronize(
+      core, /*automatic=*/true);
 }
 
 AutoMoiReportSummary summarize_and_clear_auto_moi_report_buffers(CoreApiTable *core) {
