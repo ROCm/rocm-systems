@@ -500,6 +500,14 @@ typedef enum cudaDeviceP2PAttr hipDeviceP2PAttr;
 #define hipDevP2PAttrHipArrayAccessSupported cudaDevP2PAttrCudaArrayAccessSupported
 #define hipFuncAttributeMaxDynamicSharedMemorySize cudaFuncAttributeMaxDynamicSharedMemorySize
 #define hipFuncAttributePreferredSharedMemoryCarveout cudaFuncAttributePreferredSharedMemoryCarveout
+#define hipFuncAttributeClusterDimMustBeSet cudaFuncAttributeClusterDimMustBeSet
+#define hipFuncAttributeRequiredClusterWidth cudaFuncAttributeRequiredClusterWidth
+#define hipFuncAttributeRequiredClusterHeight cudaFuncAttributeRequiredClusterHeight
+#define hipFuncAttributeRequiredClusterDepth cudaFuncAttributeRequiredClusterDepth
+#define hipFuncAttributeNonPortableClusterSizeAllowed cudaFuncAttributeNonPortableClusterSizeAllowed
+#define hipFuncAttributeClusterSchedulingPolicyPreference                                          \
+  cudaFuncAttributeClusterSchedulingPolicyPreference
+#define hipFuncAttributeMax cudaFuncAttributeMax
 
 #define hipLibraryHostUniversalFunctionAndDataTable                                                \
   CU_LIBRARY_HOST_UNIVERSAL_FUNCTION_AND_DATA_TABLE
@@ -986,6 +994,14 @@ typedef CUDA_RESOURCE_VIEW_DESC HIP_RESOURCE_VIEW_DESC;
   CU_FUNC_ATTRIBUTE_MAX_DYNAMIC_SHARED_SIZE_BYTES
 #define HIP_FUNC_ATTRIBUTE_PREFERRED_SHARED_MEMORY_CARVEOUT                                        \
   CU_FUNC_ATTRIBUTE_PREFERRED_SHARED_MEMORY_CARVEOUT
+#define HIP_FUNC_ATTRIBUTE_CLUSTER_DIM_MUST_BE_SET CU_FUNC_ATTRIBUTE_CLUSTER_SIZE_MUST_BE_SET
+#define HIP_FUNC_ATTRIBUTE_REQUIRED_CLUSTER_WIDTH CU_FUNC_ATTRIBUTE_REQUIRED_CLUSTER_WIDTH
+#define HIP_FUNC_ATTRIBUTE_REQUIRED_CLUSTER_HEIGHT CU_FUNC_ATTRIBUTE_REQUIRED_CLUSTER_HEIGHT
+#define HIP_FUNC_ATTRIBUTE_REQUIRED_CLUSTER_DEPTH CU_FUNC_ATTRIBUTE_REQUIRED_CLUSTER_DEPTH
+#define HIP_FUNC_ATTRIBUTE_NON_PORTABLE_CLUSTER_SIZE_ALLOWED                                       \
+  CU_FUNC_ATTRIBUTE_NON_PORTABLE_CLUSTER_SIZE_ALLOWED
+#define HIP_FUNC_ATTRIBUTE_CLUSTER_SCHEDULING_POLICY_PREFERENCE                                    \
+  CU_FUNC_ATTRIBUTE_CLUSTER_SCHEDULING_POLICY_PREFERENCE
 #define HIP_FUNC_ATTRIBUTE_MAX CU_FUNC_ATTRIBUTE_MAX
 
 // Pointer Attributes
@@ -1839,6 +1855,7 @@ typedef CUlaunchConfig HIP_LAUNCH_CONFIG;
 typedef CUlaunchAttributeID hipDrvLaunchAttributeID;
 typedef CUlaunchAttributeValue hipDrvLaunchAttributeValue;
 #define hipLaunchAttributeCooperative cudaLaunchAttributeCooperative
+#define hipLaunchAttributeClusterDimension cudaLaunchAttributeClusterDimension
 #define hipDrvLaunchAttributeCooperative CU_LAUNCH_ATTRIBUTE_COOPERATIVE
 
 typedef enum cudaGraphNodeType hipGraphNodeType;

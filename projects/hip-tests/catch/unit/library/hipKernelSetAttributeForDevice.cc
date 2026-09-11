@@ -6,7 +6,10 @@
 
 #include <hip_test_common.hh>
 
+#include <algorithm>
+#include <fstream>
 #include <string>
+#include <vector>
 
 #if !HT_NVIDIA || CUDA_VERSION >= CUDA_12080
 
@@ -210,7 +213,24 @@ HIP_TEST_CASE(Unit_hipKernelSetAttributeForDevice_Positive_CrossDevice) {
   HIP_CHECK(hipSetDevice(0));
   hipLibrary_t library = nullptr;
   hipKernel_t kernel = nullptr;
-  LoadLibraryKernel(&library, &kernel);
+
+  SECTION("LoadFromFile") {
+    LoadLibraryKernel(&library, &kernel);
+  }
+
+  SECTION("LoadData then overwrite image") {
+    std::ifstream input("library_code_load.code", std::ios::binary | std::ios::ate);
+    REQUIRE(input.good());
+    const std::streamsize image_size = input.tellg();
+    REQUIRE(image_size > 0);
+    std::vector<char> image(static_cast<size_t>(image_size));
+    input.seekg(0, std::ios::beg);
+    REQUIRE(input.read(image.data(), image_size).good());
+
+    HIP_CHECK(hipLibraryLoadData(&library, image.data(), nullptr, nullptr, 0, nullptr, nullptr, 0));
+    HIP_CHECK(hipLibraryGetKernel(&kernel, library, "add_kernel"));
+    std::fill(image.begin(), image.end(), 0);
+  }
 
   HIP_CHECK(
       hipKernelSetAttributeForDevice(kernel, hipFuncAttributeMaxDynamicSharedMemorySize, 0, 0));
