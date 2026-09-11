@@ -37,7 +37,7 @@ else()
 endif()
 
 # Conditionally compile the hipFile collector when cmake/Packages.cmake resolved
-# ROCPROFSYS_HIPFILE_SUPPORT (derived from ROCPROFSYS_BUILD_HIPFILE=ON/OFF/AUTO).
+# ROCPROFSYS_HIPFILE_SUPPORT (derived from ROCPROFSYS_USE_HIPFILE=ON/OFF/AUTO).
 if(ROCPROFSYS_HIPFILE_SUPPORT)
     add_subdirectory(hipfile)
 else()
