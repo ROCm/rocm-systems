@@ -11,6 +11,7 @@
 #include "common/environment.hpp"
 #include "common/path.hpp"
 #include "common/static_object.hpp"
+#include "common/string_utility.hpp"
 #include "constraint.hpp"
 #include "gpu.hpp"
 #include "logger/logger.hpp"
@@ -61,6 +62,7 @@
 #include <linux/capability.h>
 #include <numeric>
 #include <ostream>
+#include <set>
 #include <sstream>
 #include <string>
 #include <string_view>
@@ -104,16 +106,6 @@ get_config()
         (void) _once;
     }
     return settings::shared_instance();
-}
-
-std::string
-get_setting_name(std::string _v)
-{
-    constexpr auto _prefix = std::string_view{ "rocprofsys_" };
-    for(auto& itr : _v)
-        itr = tolower(itr);
-    if(_v.starts_with(_prefix)) return _v.substr(_prefix.length());
-    return _v;
 }
 
 template <typename Tp>
@@ -164,26 +156,10 @@ const auto strict_config_value_validations = std::array<config_value_validation,
       "a positive finite floating-point value" },
 } };
 
-[[nodiscard]] std::string
-trim_config_value(std::string_view value)
-{
-    auto str = std::string{ value };
-    utility::trim_str(str);
-    return str;
-}
-
-[[nodiscard]] std::string
-lower_config_value(std::string value)
-{
-    for(auto& itr : value)
-        itr = static_cast<char>(std::tolower(static_cast<unsigned char>(itr)));
-    return value;
-}
-
 [[nodiscard]] bool
 has_config_value_reference(std::string_view raw_value)
 {
-    auto value = trim_config_value(raw_value);
+    auto value = utility::string::trim(raw_value);
     return !value.empty() && value.front() == '$';
 }
 
@@ -208,7 +184,7 @@ is_recognized_boolean_text_value(std::string_view value)
 [[nodiscard]] bool
 is_valid_boolean_config_value(std::string_view raw_value)
 {
-    auto value = lower_config_value(trim_config_value(raw_value));
+    auto value = utility::string::to_lower(utility::string::trim(raw_value));
     if(value.empty()) return false;
 
     if(is_integer_config_value(value)) return true;
@@ -219,14 +195,14 @@ is_valid_boolean_config_value(std::string_view raw_value)
 [[nodiscard]] bool
 parse_floating_point_config_value(std::string_view raw_value, double& parsed_value)
 {
-    auto value = trim_config_value(raw_value);
+    auto value = utility::string::trim(raw_value);
     if(value.empty()) return false;
 
     char* end    = nullptr;
     errno        = 0;
-    parsed_value = std::strtod(value.c_str(), &end);
+    parsed_value = std::strtod(value.data(), &end);
 
-    if(end == value.c_str()) return false;
+    if(end == value.data()) return false;
 
     while(end && std::isspace(static_cast<unsigned char>(*end)) != 0)
         ++end;
@@ -289,7 +265,7 @@ validate_config_setting_value(std::string_view name, std::string_view raw_value,
         }
         case config_value_rule::choice:
         {
-            auto value = trim_config_value(raw_value);
+            auto value = utility::string::trim(raw_value);
             if(choices)
             {
                 valid =
@@ -335,7 +311,7 @@ validate_config_file_values(const std::string& config_file, const std::string& t
     {
         ++line_number;
 
-        auto trimmed_line = trim_config_value(line);
+        auto trimmed_line = utility::string::trim(line);
         if(trimmed_line.empty() || trimmed_line.front() == '#') continue;
 
         auto key       = std::string{};
@@ -343,25 +319,25 @@ validate_config_file_values(const std::string& config_file, const std::string& t
 
         if(auto equal_pos = trimmed_line.find('='); equal_pos != std::string::npos)
         {
-            key =
-                trim_config_value(std::string_view{ trimmed_line }.substr(0, equal_pos));
-            raw_value =
-                trim_config_value(std::string_view{ trimmed_line }.substr(equal_pos + 1));
+            key = utility::string::trim(
+                std::string_view{ trimmed_line }.substr(0, equal_pos));
+            raw_value = utility::string::trim(
+                std::string_view{ trimmed_line }.substr(equal_pos + 1));
         }
         else
         {
             auto split_pos = trimmed_line.find_first_of(" \t");
             if(split_pos == std::string::npos) continue;
 
-            key =
-                trim_config_value(std::string_view{ trimmed_line }.substr(0, split_pos));
-            raw_value =
-                trim_config_value(std::string_view{ trimmed_line }.substr(split_pos + 1));
+            key = utility::string::trim(
+                std::string_view{ trimmed_line }.substr(0, split_pos));
+            raw_value = utility::string::trim(
+                std::string_view{ trimmed_line }.substr(split_pos + 1));
         }
 
         if(auto comment_pos = raw_value.find('#'); comment_pos != std::string::npos)
-            raw_value =
-                trim_config_value(std::string_view{ raw_value }.substr(0, comment_pos));
+            raw_value = utility::string::trim(
+                std::string_view{ raw_value }.substr(0, comment_pos));
 
         if(!raw_value.empty() && has_config_value_reference(raw_value)) continue;
 
@@ -397,52 +373,58 @@ install_strict_config_value_callbacks(const std::shared_ptr<settings>& _config)
 
 // Accepts either a `const char*` literal or `std::string_view` (e.g. env_vars::FOO)
 // for ENV_NAME -- std::string{} can be constructed from either.
-#define ROCPROFSYS_CONFIG_SETTING(TYPE, ENV_NAME, DESCRIPTION, INITIAL_VALUE, ...)           \
-    [&]() {                                                                                  \
-        auto _env_name = std::string{ ENV_NAME };                                            \
-        auto _ret      = _config->insert<TYPE, TYPE>(                                        \
-            _env_name, get_setting_name(_env_name), DESCRIPTION, TYPE{ INITIAL_VALUE }, \
-            std::set<std::string>{ "custom", "rocprofsys", "librocprof-sys",            \
-                                        __VA_ARGS__ });                                      \
-        if(!_ret.second)                                                                     \
-        {                                                                                    \
-            LOG_WARNING("Duplicate setting: {} / {}", get_setting_name(_env_name),           \
-                        _env_name);                                                          \
-        }                                                                                    \
-        return _config->find(_env_name)->second;                                             \
+#define ROCPROFSYS_CONFIG_SETTING(TYPE, ENV_NAME, DESCRIPTION, INITIAL_VALUE, ...)       \
+    [&]() {                                                                              \
+        auto _env_name = std::string{ ENV_NAME };                                        \
+        auto _ret      = _config->insert<TYPE, TYPE>(                                    \
+            _env_name,                                                              \
+            std::string{ utility::string::strip_rocprofsys_prefix(_env_name) },     \
+            DESCRIPTION, TYPE{ INITIAL_VALUE },                                     \
+            std::set<std::string>{ "custom", "rocprofsys", "librocprof-sys",        \
+                                        __VA_ARGS__ });                                  \
+        if(!_ret.second)                                                                 \
+        {                                                                                \
+            LOG_WARNING("Duplicate setting: {} / {}",                                    \
+                        utility::string::strip_rocprofsys_prefix(_env_name), _env_name); \
+        }                                                                                \
+        return _config->find(_env_name)->second;                                         \
     }()
 
 // below does not include "librocprof-sys"
-#define ROCPROFSYS_CONFIG_EXT_SETTING(TYPE, ENV_NAME, DESCRIPTION, INITIAL_VALUE, ...)       \
-    [&]() {                                                                                  \
-        auto _env_name = std::string{ ENV_NAME };                                            \
-        auto _ret      = _config->insert<TYPE, TYPE>(                                        \
-            _env_name, get_setting_name(_env_name), DESCRIPTION, TYPE{ INITIAL_VALUE }, \
-            std::set<std::string>{ "custom", "rocprofsys", __VA_ARGS__ });              \
-        if(!_ret.second)                                                                     \
-        {                                                                                    \
-            LOG_WARNING("Duplicate setting: {} / {}", get_setting_name(_env_name),           \
-                        _env_name);                                                          \
-        }                                                                                    \
-        return _config->find(_env_name)->second;                                             \
+#define ROCPROFSYS_CONFIG_EXT_SETTING(TYPE, ENV_NAME, DESCRIPTION, INITIAL_VALUE, ...)   \
+    [&]() {                                                                              \
+        auto _env_name = std::string{ ENV_NAME };                                        \
+        auto _ret      = _config->insert<TYPE, TYPE>(                                    \
+            _env_name,                                                              \
+            std::string{ utility::string::strip_rocprofsys_prefix(_env_name) },     \
+            DESCRIPTION, TYPE{ INITIAL_VALUE },                                     \
+            std::set<std::string>{ "custom", "rocprofsys", __VA_ARGS__ });          \
+        if(!_ret.second)                                                                 \
+        {                                                                                \
+            LOG_WARNING("Duplicate setting: {} / {}",                                    \
+                        utility::string::strip_rocprofsys_prefix(_env_name), _env_name); \
+        }                                                                                \
+        return _config->find(_env_name)->second;                                         \
     }()
 
 // setting + command line option
-#define ROCPROFSYS_CONFIG_CL_SETTING(TYPE, ENV_NAME, DESCRIPTION, INITIAL_VALUE,             \
-                                     CMD_LINE, ...)                                          \
-    [&]() {                                                                                  \
-        auto _env_name = std::string{ ENV_NAME };                                            \
-        auto _ret      = _config->insert<TYPE, TYPE>(                                        \
-            _env_name, get_setting_name(_env_name), DESCRIPTION, TYPE{ INITIAL_VALUE }, \
-            std::set<std::string>{ "custom", "rocprofsys", "librocprof-sys",            \
-                                        __VA_ARGS__ },                                       \
-            std::vector<std::string>{ CMD_LINE });                                      \
-        if(!_ret.second)                                                                     \
-        {                                                                                    \
-            LOG_WARNING("Duplicate setting: {} / {}", get_setting_name(_env_name),           \
-                        _env_name);                                                          \
-        }                                                                                    \
-        return _config->find(_env_name)->second;                                             \
+#define ROCPROFSYS_CONFIG_CL_SETTING(TYPE, ENV_NAME, DESCRIPTION, INITIAL_VALUE,         \
+                                     CMD_LINE, ...)                                      \
+    [&]() {                                                                              \
+        auto _env_name = std::string{ ENV_NAME };                                        \
+        auto _ret      = _config->insert<TYPE, TYPE>(                                    \
+            _env_name,                                                              \
+            std::string{ utility::string::strip_rocprofsys_prefix(_env_name) },     \
+            DESCRIPTION, TYPE{ INITIAL_VALUE },                                     \
+            std::set<std::string>{ "custom", "rocprofsys", "librocprof-sys",        \
+                                        __VA_ARGS__ },                                   \
+            std::vector<std::string>{ CMD_LINE });                                  \
+        if(!_ret.second)                                                                 \
+        {                                                                                \
+            LOG_WARNING("Duplicate setting: {} / {}",                                    \
+                        utility::string::strip_rocprofsys_prefix(_env_name), _env_name); \
+        }                                                                                \
+        return _config->find(_env_name)->second;                                         \
     }()
 }  // namespace
 
@@ -2241,7 +2223,7 @@ print_settings(bool _include_env)
 
     // generic filter for filtering relevant options
     auto _is_rocprofsys_option = [](const auto& _v, const auto&) {
-        return (_v.find("ROCPROFSYS_") == 0);
+        return _v.starts_with("ROCPROFSYS_");
     };
 
     if(_include_env)
@@ -2249,8 +2231,15 @@ print_settings(bool _include_env)
         std::stringstream _ss1{};
         tim::print_env(_ss1, [_is_rocprofsys_option](const std::string& _v) {
             auto _is_omni_opt = _is_rocprofsys_option(_v, std::set<std::string>{});
-            if(settings::verbose() >= 2 || settings::debug()) return _is_omni_opt;
-            return (_is_omni_opt && _v.find("ROCPROFSYS_SIGNAL_") != 0);
+            if(settings::verbose() >= 2 || settings::debug())
+            {
+                return _is_omni_opt;
+            }
+            if(_is_omni_opt && !_v.starts_with("ROCPROFSYS_SIGNAL_"))
+            {
+                return true;
+            }
+            return false;
         });
 
         LOG_INFO("{}", _ss1.str());
@@ -3377,9 +3366,8 @@ bool
 rank_passes_filter(std::optional<std::uint64_t> current_rank,
                    std::optional<std::uint64_t> world_size, std::string enabled_ranks_str)
 {
-    rocprofsys::utility::trim_str(enabled_ranks_str);
-    for(auto& ch : enabled_ranks_str)
-        ch = static_cast<char>(std::tolower(static_cast<unsigned char>(ch)));
+    enabled_ranks_str = rocprofsys::utility::string::to_lower(
+        rocprofsys::utility::string::trim(enabled_ranks_str));
 
     if(enabled_ranks_str.empty() || enabled_ranks_str == "all") return true;
     if(enabled_ranks_str == "none") return false;
@@ -3725,10 +3713,11 @@ get_causal_output_filename()
     auto        _fname = static_cast<tim::tsettings<std::string>&>(*_v->second).get();
     for(auto&& itr : std::initializer_list<std::string>{ ".txt", ".json", ".xml" })
     {
-        auto _pos = _fname.find(itr);
         // if extension is found at end of string, remove
-        if(_pos != std::string::npos && (_pos + itr.length()) == _fname.length())
+        if(_fname.ends_with(itr))
+        {
             _fname = _fname.substr(0, _fname.length() - itr.length());
+        }
     }
     return _fname;
 }
