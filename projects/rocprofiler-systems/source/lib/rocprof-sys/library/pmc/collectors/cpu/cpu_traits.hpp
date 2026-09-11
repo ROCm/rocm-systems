@@ -117,7 +117,7 @@ struct cpu_traits
         std::vector<device_entry> entries;
         const auto                filter = get_device_filter<Settings>();
 
-        if(filter.mode == device_selection_mode::NONE)
+        if(filter.mode == device_selection_mode::none)
         {
             LOG_DEBUG("{} sampling disabled via configuration", device_name);
             return entries;
@@ -129,8 +129,8 @@ struct cpu_traits
         {
             const auto index = dev->get_index();
 
-            const bool should_include = (filter.mode == device_selection_mode::ALL) ||
-                                        (filter.mode == device_selection_mode::SPECIFIC &&
+            const bool should_include = (filter.mode == device_selection_mode::all) ||
+                                        (filter.mode == device_selection_mode::specific &&
                                          filter.indices.count(index) > 0);
 
             if(should_include)
@@ -152,7 +152,10 @@ struct cpu_traits
 private:
     static void warn_invalid_indices(const device_filter& filter, size_t max_index)
     {
-        if(filter.mode != device_selection_mode::SPECIFIC) return;
+        if(filter.mode != device_selection_mode::specific)
+        {
+            return;
+        }
         for(const auto idx : filter.indices)
         {
             if(idx >= max_index)
