@@ -355,8 +355,8 @@ bit_extract(Integral x, int first, int last)
     return (x >> first) & bit_mask(0, last - first);
 }
 
-// stopped: no monitor thread. active: monitor running and admitting new waits. Drains pick their
-// grace period from registration::get_fini_status(), not from this state.
+// stopped: no monitor thread. active: monitor running and admitting new waits. Drains key off
+// registration::get_fini_status(), not this state.
 enum class monitor_state : uint8_t
 {
     stopped = 0,
@@ -371,13 +371,33 @@ constexpr auto drain_warn_interval = std::chrono::seconds{30};
 // How often a wait re-tests the condition it is waiting on.
 constexpr auto poll_interval = std::chrono::milliseconds{1};
 
+class completion_monitor;
+
+void
+move_incoming_to_active(completion_monitor&);
+void
+retire_completed(completion_monitor&, pending_completion_vector_t&);
+void
+force_retire_all(completion_monitor&);
+void
+completion_monitor_loop(completion_monitor&);
+
 // Shared state for the single completion-monitor thread. Producers push new waits onto `incoming`
 // -- the only cross-thread field -- and bump `wake_signal`, which sits in the last slot of the
 // monitor's wait array so hsa_amd_signal_wait_any returns.
-struct completion_monitor
+class completion_monitor
 {
+    // Single owner at any time: the monitor thread while it runs, then the finalizing thread once
+    // stop_completion_monitor has joined it.
+    std::vector<pending_completion> active = {};
+
+    friend void move_incoming_to_active(completion_monitor&);
+    friend void retire_completed(completion_monitor&, pending_completion_vector_t&);
+    friend void force_retire_all(completion_monitor&);
+    friend void completion_monitor_loop(completion_monitor&);
+
+public:
     common::Synchronized<std::vector<pending_completion>> incoming    = {};
-    std::vector<pending_completion>                       active      = {};
     hsa_signal_t                                          wake_signal = {};
     std::atomic<monitor_state>                            state       = {monitor_state::stopped};
 
@@ -744,9 +764,7 @@ retire_completion_async(completion_monitor&                          mon,
     });
 }
 
-// Move any newly-registered waits from the shared inbox into `active`. `active` has a
-// single owner at any time: the monitor thread while it runs, then the finalizing thread
-// once stop_completion_monitor has joined it.
+// Move any newly-registered waits from the shared inbox into `active`.
 void
 move_incoming_to_active(completion_monitor& mon)
 {
