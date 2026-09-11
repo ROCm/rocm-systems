@@ -411,6 +411,75 @@ TEST(DaemonApi, AcceptsValidGetVersionIoctlPayload) {
   close_session(client, 3);
 }
 
+TEST(DaemonApi, AcceptsCuMaskInlinePayloadAndKeepsConnectionUsable) {
+  TempDirectory directory;
+  const auto socket_path = directory.path() / "daemon.sock";
+  TestDaemon daemon(socket_path);
+  ASSERT_EQ(daemon.start_status(), ROCJITSU_STATUS_SUCCESS);
+  const int client = connect_to(socket_path);
+  ASSERT_GE(client, 0);
+  ASSERT_EQ(handshake(client).version, kRpcProtocolVersion);
+  kfd_ioctl_set_cu_mask_args args{};
+  args.queue_id = 999;
+  args.num_cu_mask = 32;
+  args.cu_mask_ptr = 0xDEADBEEF;
+  const uint32_t mask = 1;
+  ASSERT_TRUE(send_ioctl_request(client, 2, AMDKFD_IOC_SET_CU_MASK, &args, sizeof(args), &mask,
+                                 sizeof(mask)));
+  RpcHeader response{};
+  ASSERT_TRUE(rpc_recv_exact(client, &response, sizeof(response)));
+  EXPECT_EQ(response.result, -EINVAL); // Valid payload, missing queue.
+  std::vector<uint8_t> payload(response.payload_bytes);
+  ASSERT_TRUE(rpc_recv_exact(client, payload.data(), payload.size()));
+  kfd_ioctl_get_version_args version{};
+  ASSERT_TRUE(send_ioctl_request(client, 3, AMDKFD_IOC_GET_VERSION, &version, sizeof(version)));
+  ASSERT_TRUE(rpc_recv_exact(client, &response, sizeof(response)));
+  ASSERT_EQ(response.result, 0);
+  ASSERT_EQ(response.payload_bytes, sizeof(version));
+  ASSERT_TRUE(rpc_recv_exact(client, &version, sizeof(version)));
+  close_session(client, 4);
+}
+
+TEST(DaemonApi, RejectsMalformedCuMaskPayloadWithoutStoppingServer) {
+  TempDirectory directory;
+  const auto socket_path = directory.path() / "daemon.sock";
+  TestDaemon daemon(socket_path);
+  ASSERT_EQ(daemon.start_status(), ROCJITSU_STATUS_SUCCESS);
+  struct MaskPayloadCase {
+    uint32_t bits;
+    size_t bytes;
+    uint64_t pointer = 0xDEADBEEF;
+  };
+  for (const MaskPayloadCase &test :
+       {MaskPayloadCase{0, 0}, MaskPayloadCase{31, sizeof(uint32_t)},
+        MaskPayloadCase{32, sizeof(uint32_t) - 1}, MaskPayloadCase{32, sizeof(uint32_t) + 1},
+        MaskPayloadCase{32, sizeof(uint32_t), 0}}) {
+    const uint32_t bits = test.bits;
+    const size_t bytes = test.bytes;
+    SCOPED_TRACE(bits);
+    SCOPED_TRACE(bytes);
+    const int client = connect_to(socket_path);
+    ASSERT_GE(client, 0);
+    ASSERT_EQ(handshake(client).version, kRpcProtocolVersion);
+    kfd_ioctl_set_cu_mask_args args{};
+    args.queue_id = 999;
+    args.num_cu_mask = bits;
+    args.cu_mask_ptr = test.pointer;
+    std::vector<uint8_t> mask(bytes);
+    ASSERT_TRUE(send_ioctl_request(client, 2, AMDKFD_IOC_SET_CU_MASK, &args, sizeof(args),
+                                   mask.data(), mask.size()));
+    RpcHeader response{};
+    EXPECT_FALSE(rpc_recv_exact(client, &response, sizeof(response)));
+    EXPECT_EQ(daemon.status(), RJ_DAEMON_STATUS_RUNNING);
+    close(client);
+  }
+  // A malformed client's disconnect must not prevent a fresh session.
+  const int client = connect_to(socket_path);
+  ASSERT_GE(client, 0);
+  ASSERT_EQ(handshake(client).version, kRpcProtocolVersion);
+  close_session(client, 2);
+}
+
 TEST(DaemonApi, RejectsWaitEventsInlineArrayOverflowWithoutStoppingServer) {
   TempDirectory directory;
   const auto socket_path = directory.path() / "daemon.sock";
