@@ -13,15 +13,12 @@
 // seams use conservative production-like defaults; tests override them with
 // ScopedHook when a branch needs different behaviour.
 //
-// Deliberately NOT reusing nccl_stubs.cc / bootstrap_stubs.cc / topo_stubs.cc
-// / transport_stubs.cc here: those are curated for init.cc and each already
-// stubs commSetUnrollFactor and rcclCommSetP2pShiftSize as abort() floors for
-// init.cc's benefit -- both are REAL functions defined by rccl_wrap.cc
-// itself, so linking those files together with this one would be a
-// duplicate-symbol error. fakes/nccl_fakes.cc (p2p.cc's fakes, already part
-// of this binary) has no such conflict -- p2p.cc never calls either function
-// -- so this file's logging globals (below) are shared with nccl_fakes.cc's
-// rather than duplicated.
+// Dependencies with an established owner live in their canonical fake files:
+// collectives_fakes, strongstream_stubs, dev_runtime_fakes, ce_fakes,
+// sym_kernels_fakes, transport_stubs, and tuning_fakes. This file contains
+// only the remaining rccl_wrap.cc link-closure seams that have no shared owner
+// yet. nccl_stubs.cc is not linked because it defines commSetUnrollFactor,
+// which is a real function supplied by the unit under test itself.
 //
 // RCCL_PARAM / NCCL_PARAM: every RCCL_PARAM(...) invocation textually inside
 // rccl_wrap.cc is redirected by wrap-test.cc to route through a g_loadParam
@@ -31,33 +28,25 @@
 // `extern` and calls without a local RCCL_PARAM/NCCL_PARAM invocation (their
 // generator lives in another .cc) are stubbed below instead.
 
-#include <dlfcn.h>
-
-#include <cstdint>
-#include <cstdio>
-#include <cstdlib>
-#include <cstring>
-#include <functional>
-#include <optional>
-#include <string>
-#include <unordered_map>
-
 #include "wrap_fakes.h"
 
-#include "nccl.h"
-#include "comm.h"
-#include "debug.h"
-#include "rccl_common.h"
-#include "enqueue.h"     // NCCL_ALGO_*/NCCL_PROTO_*, ncclSimInfo_t (getAlgoInfo's param)
-#include "group.h"
-#include "ce_coll.h"
-#include "sym_kernels.h"
-#include "dev_runtime.h"
-#include "strongstream.h"
-#include "algorithms/dda/all_reduce/dda_all_reduce.h"
+#include <cstdint>
+#include <functional>
+
 #include "algorithms/dda/all_gather/dda_all_gather.h"
+#include "algorithms/dda/all_reduce/dda_all_reduce.h"
 #include "algorithms/dda/reduce_scatter/dda_reduce_scatter.h"
 #include "amdsmi_wrap.h"
+#include "ce_coll.h"
+#include "comm.h"
+#include "debug.h"
+#include "dev_runtime.h"
+#include "enqueue.h"
+#include "group.h"
+#include "nccl.h"
+#include "rccl_common.h"
+#include "strongstream.h"
+#include "sym_kernels.h"
 
 // ---------------------------------------------------------------------------
 // Logging infrastructure. WARN/INFO (debug.h) expand to ncclDebugLog(); three
@@ -94,8 +83,6 @@ char  ncclLastError[1024] = {};
 // NCCL_PARAM/RCCL_PARAM(...) invocation text below still matches -- a
 // run-time tripwire where a compile-time one isn't possible.
 // ---------------------------------------------------------------------------
-int64_t ncclParamMinNchannels() { return -2; }              // graph/connect.cc:832
-int64_t ncclParamMaxNchannels() { return -2; }              // graph/connect.cc:833
 static int64_t DefaultParamForceCe() { return 1; }          // enqueue.cc:3796
 std::function<int64_t()> g_paramForceCe = DefaultParamForceCe;
 int64_t rcclParamForceCe() { return g_paramForceCe(); }
@@ -121,26 +108,6 @@ int64_t ncclParamLaunchOrderImplicit() { return g_paramLaunchOrderImplicit(); }
 // defines it -- a second copy here would be a duplicate-symbol error. Its
 // real default (0, "not grouped") is what every rccl_wrap.cc test so far
 // assumes, same as when this was a hand-copied stub.
-
-// rcclUseAinic: real definition (transport/net.cc:343) does hardware NIC
-// detection via std::call_once; not linked here (pulls in the IB/net
-// transport layer). false -- "not an AINIC" -- is the common-case default,
-// now a controllable seam so rcclUseAllGatherDirect's AINIC-disabled branch
-// (never exercised before) can be proven too.
-static bool DefaultUseAinic() { return false; }
-std::function<bool()> g_useAinic = DefaultUseAinic;
-bool rcclUseAinic() { return g_useAinic(); }
-
-// ncclPxnDisable: real definition graph/paths.cc:754, reads comm fields set
-// up during channel/topology construction this lean binary doesn't build.
-// Not to be confused with rcclSetPxn (already tested), which computes
-// comm->pxnDisable itself and never calls this getter. 0 -- "PXN not
-// disabled" -- is the common-case default, now a controllable seam so
-// rcclUseReduceScatterDirect's PXN-disabled branch (never exercised before)
-// can be proven too.
-static int DefaultPxnDisable(struct ncclComm* /*comm*/) { return 0; }
-std::function<int(struct ncclComm*)> g_pxnDisable = DefaultPxnDisable;
-int ncclPxnDisable(struct ncclComm* comm) { return g_pxnDisable(comm); }
 
 // ncclDevFuncUnrollGenerated: extern bool const[NCCL_NUM_UNROLLS]. Real array,
 // not abort-floor -- commSetUnrollFactor indexes it unconditionally on every
@@ -173,93 +140,6 @@ std::function<ncclResult_t(const ncclComm_t, int*)> g_commCount = DefaultCommCou
 ncclResult_t ncclCommCount(const ncclComm_t comm, int* count) { return g_commCount(comm, count); }
 
 // ---------------------------------------------------------------------------
-// ncclAlgoToString / ncclProtoToString / ncclFuncToString / ncclDatatypeToString:
-// faithful copies of collectives.cc's trivial switch tables, NOT abort-floors
-// -- rcclGetAlgoName/rcclGetProtocolName delegate to the first two for native
-// algo/protocol values, and rcclOverrideProtocol/rcclOverrideAlgorithm use all
-// four in WARN messages. All four callers are tested in wrap-test.cc.
-// fakes/collectives_fakes.cc owns shared versions, but its
-// ncclDatatypeToString deliberately returns the placeholder "dtype" because
-// its consumers do not inspect datatype log text. These tests do, so this
-// target keeps production-faithful local copies. Linking real collectives.cc
-// would pull in the DDA/symmetric-kernel/nvtx dependency chain. Each function
-// below names the exact production definition it copies.
-//
-// NCCL_ALGO_* / NCCL_PROTO_* are plain #defines, not a real enum, so the
-// compiler can't warn on a switch missing a newly-added case the way it could
-// for an enum. ncclFunc_t / ncclDataType_t ARE real enums with trailing count
-// sentinels (ncclNumFuncs, ncclNumTypes), so those are checkable too.
-//
-// All four counts are pinned by a RUNTIME test
-// (FakeTableDrift_StringTableCountsMatchProduction in wrap-test.cc),
-// deliberately NOT by static_assert. This file is linked into
-// rccl-UnitTestsMicro, which p2p/rma/group/devcomm tests all share: a
-// compile-time assert here would break every one of those builds over a
-// constant none of them read. A failing test names the drift just as loudly
-// and only fails the suite that cares. CI runs these tests, so the drift is
-// caught either way.
-// ---------------------------------------------------------------------------
-const char* ncclFuncToString(ncclFunc_t fn) {  // collectives.cc:32
-  switch (fn) {
-  case ncclFuncAllGather: return "AllGather";
-  case ncclFuncAllReduce: return "AllReduce";
-  case ncclFuncAlltoAll: return "AlltoAll";
-  case ncclFuncAlltoAllv: return "AlltoAllv";
-  case ncclFuncBroadcast: return "Broadcast";
-  case ncclFuncGather: return "Gather";
-  case ncclFuncRecv: return "Recv";
-  case ncclFuncReduce: return "Reduce";
-  case ncclFuncReduceScatter: return "ReduceScatter";
-  case ncclFuncScatter: return "Scatter";
-  case ncclFuncSendRecv: return "SendRecv";
-  case ncclFuncSend: return "Send";
-  case ncclFuncPutSignal: return "PutSignal";
-  case ncclFuncSignal: return "Signal";
-  case ncclFuncWaitSignal: return "WaitSignal";
-  default: return "Invalid";
-  }
-}
-
-const char* ncclDatatypeToString(ncclDataType_t type) {  // collectives.cc:86
-  switch (type) {
-  case ncclInt8: return "ncclInt8";
-  case ncclInt32: return "ncclInt32";
-  case ncclUint32: return "ncclUint32";
-  case ncclInt64: return "ncclInt64";
-  case ncclUint64: return "ncclUint64";
-  case ncclFloat16: return "ncclFloat16";
-  case ncclFloat32: return "ncclFloat32";
-  case ncclFloat64: return "ncclFloat64";
-  case ncclBfloat16: return "ncclBfloat16";
-  case ncclFloat8e4m3: return "ncclFloat8e4m3";
-  case ncclFloat8e5m2: return "ncclFloat8e5m2";
-  default: return "Unknown";
-  }
-}
-
-const char* ncclAlgoToString(int algo) {  // collectives.cc:115
-  switch (algo) {
-  case NCCL_ALGO_TREE: return "TREE";
-  case NCCL_ALGO_RING: return "RING";
-  case NCCL_ALGO_COLLNET_DIRECT: return "COLLNET_DIRECT";
-  case NCCL_ALGO_COLLNET_CHAIN: return "COLLNET_CHAIN";
-  case NCCL_ALGO_NVLS: return "NVLS";
-  case NCCL_ALGO_NVLS_TREE: return "NVLS_TREE";
-  case NCCL_ALGO_PAT: return "PAT";
-  default: return "Unknown";
-  }
-}
-
-const char* ncclProtoToString(int proto) {  // collectives.cc:136
-  switch (proto) {
-  case NCCL_PROTO_LL: return "LL";
-  case NCCL_PROTO_LL128: return "LL128";
-  case NCCL_PROTO_SIMPLE: return "SIMPLE";
-  default: return "Unknown";
-  }
-}
-
-// ---------------------------------------------------------------------------
 // Controllable seams for the top-level dispatchers (rcclSelectAllReduce/
 // AllGather/ReduceScatter, rcclHierarchicalAlgoInfo, rcclGetAlgoInfo,
 // rcclGetCollImplInfo, rcclSymkQuery/rcclSymKGetInfo's deep path). Without
@@ -285,116 +165,6 @@ bool isSymmetricKernelRequested(struct ncclComm* comm, ncclFunc_t coll, int symk
                                 size_t nElts, const void* sendbuff, void* recvbuff) {
   return g_isSymmetricKernelRequested(comm, coll, symkOp, datatype, nElts, sendbuff, recvbuff);
 }
-
-// Drives `ceCapturing` on rcclSelectAllReduce's live (query=false) path only
-// (query=true uses the caller-supplied graphCapturingHint instead). Default:
-// "not currently capturing a graph" (ncclCudaGraphNone's real, inline
-// semantics -- graphId == ULLONG_MAX), the common non-graph-mode case.
-static ncclResult_t DefaultCudaGetCapturingGraph(struct ncclCudaGraph* graph, hipStream_t, int graphUsageMode) {
-  *graph = ncclCudaGraphNone(graphUsageMode);
-  return ncclSuccess;
-}
-std::function<ncclResult_t(struct ncclCudaGraph*, hipStream_t, int)> g_cudaGetCapturingGraph =
-    DefaultCudaGetCapturingGraph;
-ncclResult_t ncclCudaGetCapturingGraph(struct ncclCudaGraph* graph, hipStream_t stream, int graphUsageMode) {
-  return g_cudaGetCapturingGraph(graph, stream, graphUsageMode);
-}
-
-// Window/registration-state trio, driving hasSysmemSegment/winRegType in
-// AllReduce's and AllGather's CE checks. Defaults: no window found (a plain,
-// unregistered buffer -- the common case for operands not set up as
-// symmetric windows), no sysmem segment, and the "neither side registered"
-// reg-type.
-static ncclResult_t DefaultDevrFindWindow(struct ncclComm*, void const*, struct ncclDevrWindow** window) {
-  *window = nullptr;
-  return ncclSuccess;
-}
-std::function<ncclResult_t(struct ncclComm*, void const*, struct ncclDevrWindow**)> g_devrFindWindow =
-    DefaultDevrFindWindow;
-ncclResult_t ncclDevrFindWindow(struct ncclComm* comm, void const* ptr, struct ncclDevrWindow** window) {
-  return g_devrFindWindow(comm, ptr, window);
-}
-
-static bool DefaultDevrWindowHasSysmemSegment(struct ncclDevrWindow*) { return false; }
-std::function<bool(struct ncclDevrWindow*)> g_devrWindowHasSysmemSegment = DefaultDevrWindowHasSysmemSegment;
-bool ncclDevrWindowHasSysmemSegment(struct ncclDevrWindow* window) { return g_devrWindowHasSysmemSegment(window); }
-
-static ncclResult_t DefaultGetSymRegType(struct ncclDevrWindow*, struct ncclDevrWindow*, ncclSymRegType_t* type) {
-  *type = ncclSymSendNonregRecvNonreg;
-  return ncclSuccess;
-}
-std::function<ncclResult_t(struct ncclDevrWindow*, struct ncclDevrWindow*, ncclSymRegType_t*)> g_getSymRegType =
-    DefaultGetSymRegType;
-ncclResult_t ncclGetSymRegType(struct ncclDevrWindow* sendWin, struct ncclDevrWindow* recvWin,
-                               ncclSymRegType_t* type) {
-  return g_getSymRegType(sendWin, recvWin, type);
-}
-
-// Symmetric-kernel deep path (past rcclSymkQuery's four already-tested early
-// guards). Defaults: init succeeds (common case), but "not available" so
-// rcclSymkQuery still returns false by default -- a test opts a specific
-// case into the real kernel-pick path via ScopedHook.
-static ncclResult_t DefaultSymkInitOnce(struct ncclComm*) { return ncclSuccess; }
-std::function<ncclResult_t(struct ncclComm*)> g_symkInitOnce = DefaultSymkInitOnce;
-ncclResult_t ncclSymkInitOnce(struct ncclComm* comm) { return g_symkInitOnce(comm); }
-
-static bool DefaultSymkAvailable(struct ncclComm*, ncclFunc_t, int, ncclDataType_t, size_t) { return false; }
-std::function<bool(struct ncclComm*, ncclFunc_t, int, ncclDataType_t, size_t)> g_symkAvailable = DefaultSymkAvailable;
-bool ncclSymkAvailable(struct ncclComm* comm, ncclFunc_t coll, int op, ncclDataType_t dt, size_t count) {
-  return g_symkAvailable(comm, coll, op, dt, count);
-}
-
-// Default: succeeds but reports "no kernel found" (ncclSymkKernelId_Count),
-// matching the sentinel rcclSymkQuery itself checks for and rejects -- a
-// graceful "queried, nothing matched" default rather than a real pick.
-static ncclResult_t DefaultSymkPickKernel(struct ncclComm*, ncclFunc_t, int, ncclDataType_t, size_t, size_t, int,
-                                          ncclSymRegType_t, float* estTimeUs, ncclSymkKernelId* kernelId,
-                                          int* maxChannels, int* nWarps, bool* forced) {
-  *estTimeUs = 0.0f;
-  *kernelId = ncclSymkKernelId_Count;
-  *maxChannels = 0;
-  *nWarps = 0;
-  *forced = false;
-  return ncclSuccess;
-}
-std::function<ncclResult_t(struct ncclComm*, ncclFunc_t, int, ncclDataType_t, size_t, size_t, int, ncclSymRegType_t,
-                            float*, ncclSymkKernelId*, int*, int*, bool*)>
-    g_symkPickKernel = DefaultSymkPickKernel;
-ncclResult_t ncclSymkPickKernel(struct ncclComm* comm, ncclFunc_t coll, int op, ncclDataType_t dt, size_t count,
-                                size_t count2, int n, ncclSymRegType_t regType, float* estTimeUs,
-                                ncclSymkKernelId* kernelId, int* maxChannels, int* nWarps, bool* forced) {
-  return g_symkPickKernel(comm, coll, op, dt, count, count2, n, regType, estTimeUs, kernelId, maxChannels, nWarps,
-                          forced);
-}
-
-static bool DefaultSymkKernelIdIsLL(int) { return false; }
-std::function<bool(int)> g_symkKernelIdIsLL = DefaultSymkKernelIdIsLL;
-bool rcclSymkKernelIdIsLL(int kernelId) { return g_symkKernelIdIsLL(kernelId); }
-
-// CE availability trio. Defaults false/false/1: CE fast paths off by
-// default (a test opts in via ScopedHook), a small positive block count so
-// a test that DOES opt CE in without also overriding this gets a sane,
-// nonzero channel count rather than a silently-wrong 0.
-static bool DefaultCeAvailable(struct ncclComm*, ncclFunc_t, int, ncclDataType_t, ncclSymRegType_t) { return false; }
-std::function<bool(struct ncclComm*, ncclFunc_t, int, ncclDataType_t, ncclSymRegType_t)> g_ceAvailable =
-    DefaultCeAvailable;
-bool ncclCeAvailable(struct ncclComm* comm, ncclFunc_t coll, int op, ncclDataType_t dt, ncclSymRegType_t regType) {
-  return g_ceAvailable(comm, coll, op, dt, regType);
-}
-
-static bool DefaultCeScratchAvailable(struct ncclComm*, ncclFunc_t, int, ncclDataType_t, ncclSymRegType_t) {
-  return false;
-}
-std::function<bool(struct ncclComm*, ncclFunc_t, int, ncclDataType_t, ncclSymRegType_t)> g_ceScratchAvailable =
-    DefaultCeScratchAvailable;
-bool ncclCeScratchAvailable(struct ncclComm* comm, ncclFunc_t coll, int op, ncclDataType_t dt,
-                            ncclSymRegType_t regType) {
-  return g_ceScratchAvailable(comm, coll, op, dt, regType);
-}
-
-static int DefaultCeLocalReduceBlocks(ncclDataType_t, size_t) { return 1; }
-std::function<int(ncclDataType_t, size_t)> g_ceLocalReduceBlocks = DefaultCeLocalReduceBlocks;
-int ncclCeLocalReduceBlocks(ncclDataType_t dt, size_t count) { return g_ceLocalReduceBlocks(dt, count); }
 
 // rcclAllReduceShouldTakeDdaPath: real body lives in collectives.cc (not
 // linked here), same abort-floor-turned-seam treatment as the rest. Default
