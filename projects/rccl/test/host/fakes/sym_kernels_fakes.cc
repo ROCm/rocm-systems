@@ -9,6 +9,14 @@
 #include "sym_kernels_fakes.h"
 
 #include "comm.h"  // also declares ncclDevrWindow, so no forward declaration here
+#include "signature-drift.h"
+
+ASSERT_HOOK_MATCHES_PROD(g_getSymRegType, ncclGetSymRegType);
+ASSERT_HOOK_MATCHES_PROD(g_symkInitOnce, ncclSymkInitOnce);
+ASSERT_HOOK_MATCHES_PROD(g_symkAvailable, ncclSymkAvailable);
+ASSERT_HOOK_MATCHES_PROD(g_symkPickKernel, ncclSymkPickKernel);
+ASSERT_HOOK_MATCHES_PROD(g_symkKernelIdIsLL, rcclSymkKernelIdIsLL);
+#undef ASSERT_HOOK_MATCHES_PROD
 
 ncclSymRegType_t g_symRegType = ncclSymSendNonregRecvNonreg;
 ncclResult_t g_getSymRegTypeResult = ncclSuccess;

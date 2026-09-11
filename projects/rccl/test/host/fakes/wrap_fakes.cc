@@ -45,8 +45,42 @@
 #include "group.h"
 #include "nccl.h"
 #include "rccl_common.h"
+#include "signature-drift.h"
 #include "strongstream.h"
 #include "sym_kernels.h"
+
+ASSERT_HOOK_MATCHES_PROD(g_amdSmiGetFirmwareVersion, amd_smi_getFirmwareVersion);
+ASSERT_HOOK_MATCHES_PROD(g_isSymmetricKernelRequested, isSymmetricKernelRequested);
+ASSERT_HOOK_MATCHES_PROD(g_allReduceShouldTakeDdaPath, rcclAllReduceShouldTakeDdaPath);
+ASSERT_HOOK_MATCHES_PROD(g_commCount, ncclCommCount);
+
+ASSERT_HOOK_MATCHES_PROD(g_allReduceDdaIpcEligible, ncclAllReduceDdaIpcEligible);
+ASSERT_HOOK_MATCHES_PROD(g_allReduceDdaFabricEligible, ncclAllReduceDdaFabricEligible);
+ASSERT_HOOK_MATCHES_PROD(g_allReduceDdaFabricLLEligible, ncclAllReduceDdaFabricLLEligible);
+ASSERT_HOOK_MATCHES_PROD(g_allReduceDdaFabricLL128Eligible, ncclAllReduceDdaFabricLL128Eligible);
+ASSERT_HOOK_MATCHES_PROD(g_allReduceDdaIpcBlocks, ncclAllReduceDdaIpcBlocks);
+ASSERT_HOOK_MATCHES_PROD(g_allReduceDdaFabricBlocks, ncclAllReduceDdaFabricBlocks);
+ASSERT_HOOK_MATCHES_PROD(g_allReduceDdaFabricLLBlocks, ncclAllReduceDdaFabricLLBlocks);
+ASSERT_HOOK_MATCHES_PROD(g_allReduceDdaFabricLL128Blocks, ncclAllReduceDdaFabricLL128Blocks);
+
+ASSERT_HOOK_MATCHES_PROD(g_allGatherDdaIpcEligible, ncclAllGatherDdaIpcEligible);
+ASSERT_HOOK_MATCHES_PROD(g_allGatherDdaFabricEligible, ncclAllGatherDdaFabricEligible);
+ASSERT_HOOK_MATCHES_PROD(g_allGatherDdaFabricLLEligible, ncclAllGatherDdaFabricLLEligible);
+ASSERT_HOOK_MATCHES_PROD(g_allGatherDdaFabricLL128Eligible, ncclAllGatherDdaFabricLL128Eligible);
+ASSERT_HOOK_MATCHES_PROD(g_allGatherDdaIpcBlocks, ncclAllGatherDdaIpcBlocks);
+ASSERT_HOOK_MATCHES_PROD(g_allGatherDdaFabricBlocks, ncclAllGatherDdaFabricBlocks);
+ASSERT_HOOK_MATCHES_PROD(g_allGatherDdaFabricLLBlocks, ncclAllGatherDdaFabricLLBlocks);
+ASSERT_HOOK_MATCHES_PROD(g_allGatherDdaFabricLL128Blocks, ncclAllGatherDdaFabricLL128Blocks);
+
+ASSERT_HOOK_MATCHES_PROD(g_reduceScatterDdaIpcEligible, ncclReduceScatterDdaIpcEligible);
+ASSERT_HOOK_MATCHES_PROD(g_reduceScatterDdaFabricEligible, ncclReduceScatterDdaFabricEligible);
+ASSERT_HOOK_MATCHES_PROD(g_reduceScatterDdaFabricLLEligible, ncclReduceScatterDdaFabricLLEligible);
+ASSERT_HOOK_MATCHES_PROD(g_reduceScatterDdaFabricLL128Eligible, ncclReduceScatterDdaFabricLL128Eligible);
+// getAlgoInfo, rcclKernelPackedChannels, and the four ReduceScatter *Blocks
+// hooks are link-closure symbols with no production header declaration, so
+// there is no header-visible signature to pin here.
+
+#undef ASSERT_HOOK_MATCHES_PROD
 
 // ---------------------------------------------------------------------------
 // Logging infrastructure. WARN/INFO (debug.h) expand to ncclDebugLog(); three
@@ -77,11 +111,9 @@ char  ncclLastError[1024] = {};
 // Unlike NCCL_NUM_ALGORITHMS/ncclNumFuncs below, there's no importable
 // constant for "the current default" here -- NCCL_PARAM/RCCL_PARAM bakes
 // deftVal directly as an inline macro-argument literal (see param.h), not a
-// separately declared symbol, so a static_assert can't check it. Instead,
-// wrap-test.cc's ParamDefaults_MatchProductionSource test reads the real
-// graph/connect.cc / enqueue.cc source at run time and confirms the exact
-// NCCL_PARAM/RCCL_PARAM(...) invocation text below still matches -- a
-// run-time tripwire where a compile-time one isn't possible.
+// separately declared symbol, so a static_assert can't check it. CMakeLists.txt
+// checks the invocation text against the original sources at configure time,
+// when those files are guaranteed to be available.
 // ---------------------------------------------------------------------------
 static int64_t DefaultParamForceCe() { return 1; }          // enqueue.cc:3796
 std::function<int64_t()> g_paramForceCe = DefaultParamForceCe;
