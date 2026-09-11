@@ -121,17 +121,6 @@ endif()
 set(THREADS_PREFER_PTHREAD_FLAG ON)
 find_package(Threads QUIET)
 
-# Check Libva version compatibility: requires libva >= 1.22 on Linux.
-# On Windows, vaon12 ships an older libva version that is still compatible.
-if(Libva_FOUND AND NOT WIN32)
-  if("${Libva_VERSION}" VERSION_GREATER_EQUAL "1.22")
-    message("-- ${White}\tLibva Version Supported${ColourReset}")
-  else()
-    set(Libva_FOUND FALSE)
-    message("-- ${Yellow}\tLibva Version Not Supported (found ${Libva_VERSION}, need >= 1.22)${ColourReset}")
-  endif()
-endif()
-
 if(NOT WIN32)
   if(ROCDECODE_ENABLE_ROCPROFILER_REGISTER)
     find_package(rocprofiler-register QUIET
@@ -144,6 +133,7 @@ if(ROCDECODE_ENABLE_HOST_DECODER)
 endif()
 
 # On Windows we don't need Libdrm_amdgpu (vaon12 replaces DRM)
+set(_deps_met FALSE)
 if(WIN32)
   if(HIP_FOUND AND Libva_FOUND AND Threads_FOUND)
     set(_deps_met TRUE)
@@ -174,7 +164,6 @@ if(_deps_met)
     # vaon12: va_win32.lib instead of va-drm; d3d12/dxgi for CreateSharedHandle interop
     set(LINK_LIBRARY_LIST ${LINK_LIBRARY_LIST} ${LIBVA_WIN32_LIBRARY} d3d12 dxgi)
   else()
-    set(LINK_LIBRARY_LIST ${LINK_LIBRARY_LIST} ${LIBVA_DRM_LIBRARY})
     # DRM_AMDGPU
     include_directories(${LIBDRM_AMDGPU_INCLUDE_DIR})
     set(LINK_LIBRARY_LIST ${LINK_LIBRARY_LIST} ${LIBDRM_AMDGPU_LIBRARY})
@@ -215,22 +204,6 @@ if(_deps_met)
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall")
   endif()
   target_link_libraries(${PROJECT_NAME} ${LINK_LIBRARY_LIST})
-
-  if(WIN32)
-    # Copy vaon12 DLLs to output directory so the library can find the VA driver at runtime
-    if(VAON12_ROOT STREQUAL "C:/vaon12")
-      set(VAON12_BIN_DIR "${VAON12_ROOT}/build/native/x64/bin")
-    else()
-      set(VAON12_BIN_DIR "${VAON12_ROOT}/bin")
-    endif()
-    if(EXISTS "${VAON12_BIN_DIR}")
-      file(GLOB VAON12_DLLS "${VAON12_BIN_DIR}/*.dll")
-      foreach(dll ${VAON12_DLLS})
-        add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
-          COMMAND ${CMAKE_COMMAND} -E copy_if_different "${dll}" $<TARGET_FILE_DIR:${PROJECT_NAME}>)
-      endforeach()
-    endif()
-  endif()
 
   set_target_properties(${PROJECT_NAME} PROPERTIES POSITION_INDEPENDENT_CODE ON)
   set_target_properties(${PROJECT_NAME} PROPERTIES LINKER_LANGUAGE CXX)
@@ -280,10 +253,6 @@ if(_deps_met)
             RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
             LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
             ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR})
-    # install vaon12 runtime DLLs alongside rocdecode
-    if(EXISTS "${VAON12_BIN_DIR}")
-      install(FILES ${VAON12_DLLS} DESTINATION ${CMAKE_INSTALL_BINDIR})
-    endif()
   else()
     install(TARGETS ${PROJECT_NAME} LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR} NAMELINK_SKIP)
     install(TARGETS ${PROJECT_NAME} EXPORT ${PROJECT_NAME}-targets LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR} NAMELINK_ONLY)
