@@ -385,12 +385,27 @@ TEST(XcdPartitioningTest, DefaultThreadCountIsHostCappedXcdCount) {
   ASSERT_NE(soc, nullptr);
   ASSERT_EQ(soc->num_xcds(), 8u);
 
+  // Stated host widths, so the assertions describe the rule instead of
+  // recomputing it. Deriving the expectation from available_host_threads() the
+  // way the resolver does leaves the test green under any rule the two sides
+  // share -- swapping affinity for hardware_concurrency(), say, would move both.
+  EXPECT_EQ(amdgpu::default_xcd_partition_count(soc, 1u), 1u);
+  EXPECT_EQ(amdgpu::default_xcd_partition_count(soc, 3u), 3u);
+  EXPECT_EQ(amdgpu::default_xcd_partition_count(soc, 8u), 8u);
+  EXPECT_EQ(amdgpu::default_xcd_partition_count(soc, 64u), 8u) << "must cap at the XCD count";
+  EXPECT_EQ(amdgpu::default_xcd_partition_count(soc, 0u), 1u) << "indeterminate host floors at 1";
+
+  // The measuring overload has to agree with the stated-width one for the width
+  // this process actually has; that is the only part affinity is load-bearing for.
   const uint32_t host_threads = amdgpu::available_host_threads();
   const uint32_t expected = host_threads == 0 ? 1u : std::min(host_threads, 8u);
   EXPECT_EQ(amdgpu::default_xcd_partition_count(soc), expected);
 
   // The shipped config omits num_threads, so loading it resolves the default.
   EXPECT_EQ(loaded.engine_config.num_threads, expected);
+  EXPECT_EQ(config::load_config(CONFIG_PATH, rocjitsu::kEmbeddedSchema, /*host_threads=*/4)
+                .engine_config.num_threads,
+            4u);
 }
 
 TEST(XcdPartitioningTest, DefaultThreadCountAggregatesSocsAndFloorsAtOne) {
@@ -401,6 +416,16 @@ TEST(XcdPartitioningTest, DefaultThreadCountAggregatesSocsAndFloorsAtOne) {
   // Two views of the same 8-XCD SoC stand in for a 16-XCD multi-GPU VM: the
   // default counts XCDs across every SoC it is given.
   std::array<SoC *, 2> pair = {soc, soc};
+
+  // A stated width above one SoC's XCD count is what separates aggregation from
+  // counting only the first SoC: at 16 the correct answer is 16, and a
+  // first-SoC-only implementation says 8. A width measured on a narrow runner
+  // saturates first and hides the difference.
+  EXPECT_EQ(amdgpu::default_xcd_partition_count(std::span<SoC *>(pair), 16u), 16u);
+  EXPECT_EQ(amdgpu::default_xcd_partition_count(std::span<SoC *>(pair), 64u), 16u);
+  EXPECT_EQ(amdgpu::default_xcd_partition_count(std::span<SoC *>(pair), 12u), 12u);
+  EXPECT_EQ(amdgpu::default_xcd_partition_count(std::span<SoC *>(pair), 0u), 1u);
+
   const uint32_t host_threads = amdgpu::available_host_threads();
   const uint32_t expected = host_threads == 0 ? 1u : std::min(host_threads, 16u);
   EXPECT_EQ(amdgpu::default_xcd_partition_count(std::span<SoC *>(pair)), expected);
@@ -429,7 +454,20 @@ TEST(XcdPartitioningTest, LoaderResolvesZeroThreadsAcrossExtraGpuBuilds) {
   ASSERT_EQ(extra_soc->num_xcds(), 8u);
 
   // The literal 16 is the point: a default derived from the first SoC alone
-  // would cap at 8 on any host with more than eight usable CPUs.
+  // caps at 8. Stating the host width is what keeps that distinction alive on a
+  // constrained runner -- under `taskset -c 0` a measured width resolves both
+  // the correct and the first-SoC-only implementation to 1.
+  EXPECT_EQ(config::load_config_from_string(json, rocjitsu::kEmbeddedSchema, /*host_threads=*/16)
+                .engine_config.num_threads,
+            16u);
+  EXPECT_EQ(config::load_config_from_string(json, rocjitsu::kEmbeddedSchema, /*host_threads=*/9)
+                .engine_config.num_threads,
+            9u)
+      << "a first-SoC-only default would clamp this to 8";
+  EXPECT_EQ(config::load_config_from_string(json, rocjitsu::kEmbeddedSchema, /*host_threads=*/64)
+                .engine_config.num_threads,
+            16u);
+
   const uint32_t host_threads = amdgpu::available_host_threads();
   const uint32_t expected = host_threads == 0 ? 1u : std::min(host_threads, 16u);
   EXPECT_EQ(loaded.engine_config.num_threads, expected);
@@ -462,6 +500,14 @@ TEST(XcdPartitioningTest, ShippedConfigsOmitNumThreadsExceptTheDocumentedPin) {
     if (kPinnedConfigs.count(entry.path().filename().string()) != 0) {
       saw_pinned_configs.insert(entry.path().filename().string());
       EXPECT_TRUE(pins_num_threads) << entry.path().filename() << " must keep its documented pin";
+      // The pin's whole purpose is a single partition: docs/configuration.md
+      // says any multi-partition value hangs RCCL collectives on these configs.
+      // Checking only that the key is present would let 2 or 64 through, which
+      // is the exact state the pin exists to prevent.
+      const config::LoadedConfig pinned =
+          config::load_config(entry.path().string(), rocjitsu::kEmbeddedSchema);
+      EXPECT_EQ(pinned.engine_config.num_threads, 1u)
+          << entry.path().filename() << " must pin num_threads to exactly 1";
     } else {
       EXPECT_FALSE(pins_num_threads)
           << entry.path().filename()

@@ -41,6 +41,23 @@ namespace amdgpu {
 /// @brief Convenience overload for a single SoC.
 [[nodiscard]] uint32_t default_xcd_partition_count(SoC *soc);
 
+/// @brief Default partition count against an explicit host width.
+///
+/// @details Same rule as the overloads above -- min(@p host_threads, total
+/// XCDs), floored at 1 -- but with the host width supplied instead of measured.
+/// The measuring overloads call @ref available_host_threads, which makes a test
+/// that derives its own expectation from that helper pass no matter what the
+/// rule is; passing a width states the expected mapping outright, and lets a
+/// one-CPU runner still exercise the wide-host behavior.
+/// @param host_threads Host width to resolve against; 0 means indeterminate and
+/// yields 1, matching what @ref available_host_threads reports when it cannot
+/// tell.
+/// @returns The default partition count, always at least 1.
+[[nodiscard]] uint32_t default_xcd_partition_count(std::span<SoC *> socs, uint32_t host_threads);
+
+/// @brief Convenience overload for a single SoC.
+[[nodiscard]] uint32_t default_xcd_partition_count(SoC *soc, uint32_t host_threads);
+
 /// @brief Clamp a requested partition count to the visible XCD count.
 ///
 /// @details Counts XCDs across all non-null SoCs and clamps

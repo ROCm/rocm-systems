@@ -43,10 +43,19 @@ uint32_t available_host_threads() {
   return std::thread::hardware_concurrency();
 }
 
-uint32_t default_xcd_partition_count(std::span<SoC *> socs) {
+uint32_t default_xcd_partition_count(std::span<SoC *> socs, uint32_t host_threads) {
   // The clamp already maps an indeterminate host thread count (0) to 1 and caps
   // at the XCD total, which is exactly min(host threads, XCDs) floored at 1.
-  return clamp_xcd_partition_count(socs, available_host_threads());
+  return clamp_xcd_partition_count(socs, host_threads);
+}
+
+uint32_t default_xcd_partition_count(SoC *soc, uint32_t host_threads) {
+  std::array<SoC *, 1> socs = {soc};
+  return default_xcd_partition_count(std::span<SoC *>(socs), host_threads);
+}
+
+uint32_t default_xcd_partition_count(std::span<SoC *> socs) {
+  return default_xcd_partition_count(socs, available_host_threads());
 }
 
 uint32_t default_xcd_partition_count(SoC *soc) {
