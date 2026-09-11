@@ -9,6 +9,13 @@
 
 #include "dev_runtime_fakes.h"
 
+#include "dev_runtime.h"
+#include "signature-drift.h"
+
+ASSERT_HOOK_MATCHES_PROD(g_devrFindWindow, ncclDevrFindWindow);
+ASSERT_HOOK_MATCHES_PROD(g_devrWindowHasSysmemSegment, ncclDevrWindowHasSysmemSegment);
+#undef ASSERT_HOOK_MATCHES_PROD
+
 static ncclResult_t DefaultDevrFindWindow(struct ncclComm*, void const*, struct ncclDevrWindow** window) {
   if (window) *window = nullptr;
   return ncclSuccess;

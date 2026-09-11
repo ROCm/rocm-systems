@@ -10,7 +10,13 @@
 
 #include "comm.h"
 #include "nccl.h"
+#include "signature-drift.h"
 #include "sym_kernels.h"  // ncclSymRegType_t
+
+ASSERT_HOOK_MATCHES_PROD(g_ceAvailable, ncclCeAvailable);
+ASSERT_HOOK_MATCHES_PROD(g_ceScratchAvailable, ncclCeScratchAvailable);
+ASSERT_HOOK_MATCHES_PROD(g_ceLocalReduceBlocks, ncclCeLocalReduceBlocks);
+#undef ASSERT_HOOK_MATCHES_PROD
 
 bool g_ceImplemented = false;
 bool g_ceAvailableValue = false;

@@ -16,8 +16,16 @@
 #include <cstdlib>
 #include <functional>
 
+#include "channel.h"
+#include "graph.h"
 #include "nccl.h"
 #include "nccl_fakes.h"  // g_loadParam, for the NCCL_PARAM default this floor stands in for
+#include "signature-drift.h"
+
+ASSERT_HOOK_MATCHES_PROD(g_useAinic, rcclUseAinic);
+ASSERT_HOOK_MATCHES_PROD(g_pxnDisable, ncclPxnDisable);
+ASSERT_HOOK_MATCHES_PROD(g_ncclProxyStop, ncclProxyStop);
+#undef ASSERT_HOOK_MATCHES_PROD
 
 struct ncclComm;
 struct ncclTopoGraph;

@@ -47,8 +47,10 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
     `devcomm-test.cc`); suites `Devcomm*`. `devcomm/devcomm_v23000.cc` is not
     covered yet.
   - `rccl_wrap.cc` (`WRAP_CC_PATH`, from `wrap-test.cc`); suites
-    `WrapMicrotest.*`, `WrapMicrotestIsolated.*`. Its dependency seams live
-    in `fakes/wrap_fakes.cc`, same as `p2p-test.cc`/`p2p_fakes.cc`. Real
+    `WrapMicrotest.*`, `WrapMicrotestIsolated.*`. Shared dependency seams live
+    in their production-TU owners (`ce_fakes.cc`, `dev_runtime_fakes.cc`,
+    `sym_kernels_fakes.cc`, etc.); `wrap_fakes.cc` contains only link-closure
+    seams without an existing shared owner. Real
     `archinfo.cc` is compiled alongside it for `IsArchMatch`
     (`rcclIsArchSupportedForFunc` et al. need the real prefix-match
     behaviour) -- the same real-oracle-TU technique

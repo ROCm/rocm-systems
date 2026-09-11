@@ -1,13 +1,9 @@
 cmake_minimum_required(VERSION 3.16)
 
-# Configure-time half of wrap-test.cc's ParamDefaults_MatchProductionSource
-# drift check. That test reads graph/connect.cc / enqueue.cc at RUN time, so it
-# GTEST_SKIPs when the binary runs relocated (rocm_installed) and the hipify
-# tree is gone -- a skip CTest counts as green, which would let the four
-# hardcoded fake parameter defaults drift unnoticed on exactly the
-# runs that skip. Checking here as well closes that: the sources are always
-# present at configure time, so drift becomes a build error everywhere,
-# independent of where the binary is later executed.
+# Configure-time drift checks for fake parameter defaults whose production
+# values exist only as RCCL_PARAM/NCCL_PARAM macro arguments. The original
+# sources are guaranteed to be available here, unlike at installed-test run
+# time, so a changed default becomes an immediate configuration error.
 function(rccl_assert_param_default_unchanged _file _needle _fake)
   if(NOT EXISTS "${_file}")
     message(FATAL_ERROR "wrap-test drift guard: ${_file} not found at configure time")
@@ -19,15 +15,13 @@ function(rccl_assert_param_default_unchanged _file _needle _fake)
       "wrap-test drift guard: ${_file} no longer contains\n"
       "    ${_needle}\n"
       "Update ${_fake} to match the new "
-      "default, then update this check and ParamDefaults_MatchProductionSource.")
+      "default, then update this check.")
   endif()
 endfunction()
 
-# Checked against the ORIGINAL sources, not the hipify'd copies: hipify runs at
-# build time, so its output does not exist yet here, and these four macro
-# invocations contain no CUDA identifiers for it to rewrite. Paths are relative
-# to this file so the single call below covers the in-build and standalone
-# contexts alike.
+# Checked against the original sources because hipify output does not exist yet
+# at configure time. Paths are relative to this file, so the same checks cover
+# the in-build and standalone contexts.
 set(_rccl_src_root "${CMAKE_CURRENT_LIST_DIR}/../../src")
 rccl_assert_param_default_unchanged("${_rccl_src_root}/graph/connect.cc"
   "NCCL_PARAM(MinNchannels, \"MIN_NCHANNELS\", -2)" "fakes/tuning_fakes.cc: ncclParamMinNchannels()")
@@ -145,15 +139,6 @@ if(BUILD_TESTS)
     DEVCOMM_V22907_CC_PATH="${PROJECT_BINARY_DIR}/hipify/src/devcomm/devcomm_v22907.cc"
     WRAP_CC_PATH="${PROJECT_BINARY_DIR}/hipify/src/rccl_wrap.cc"
     RCCL_TRANSPORT_STUBS_OMIT_COLLECTIVE_FLOOR
-    # Real paths for wrap-test.cc's ParamDefaults_MatchProductionSource test,
-    # which reads these at run time to catch a hardcoded
-    # fakes/wrap_fakes.cc RCCL_PARAM default (e.g. rcclParamForceCe)
-    # silently drifting from the real NCCL_PARAM/RCCL_PARAM invocation --
-    # there's no importable constant for these the way NCCL_NUM_ALGORITHMS
-    # etc. is, since the default is an inline macro-argument literal, not a
-    # separately declared symbol.
-    CONNECT_CC_PATH="${PROJECT_BINARY_DIR}/hipify/src/graph/connect.cc"
-    ENQUEUE_CC_PATH="${PROJECT_BINARY_DIR}/hipify/src/enqueue.cc"
   )
 
   # Make sure the hipify step has run before trying to compile the test.
@@ -891,10 +876,6 @@ target_compile_definitions(rccl-UnitTestsMicro PRIVATE
   DEVCOMM_V22907_CC_PATH="${RCCL_HIPIFY_DIR}/src/devcomm/devcomm_v22907.cc"
   WRAP_CC_PATH="${RCCL_HIPIFY_DIR}/src/rccl_wrap.cc"
   RCCL_TRANSPORT_STUBS_OMIT_COLLECTIVE_FLOOR
-  # See the in-build block's comment: real paths for the
-  # ParamDefaults_MatchProductionSource drift check.
-  CONNECT_CC_PATH="${RCCL_HIPIFY_DIR}/src/graph/connect.cc"
-  ENQUEUE_CC_PATH="${RCCL_HIPIFY_DIR}/src/enqueue.cc"
   # Same fallback-vs-runtime conflicts the host target guards against: without
   # these, p2p-test.cc redefines hipMemFabricHandle_st and the amdsmi fabric
   # enumerators on ROCm 7.14+, and the standalone build fails.

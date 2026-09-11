@@ -16,7 +16,11 @@
 
 #include "fail_loud.h"
 #include "nccl.h"
+#include "signature-drift.h"
 #include "strongstream.h"
+
+ASSERT_HOOK_MATCHES_PROD(g_cudaGetCapturingGraph, ncclCudaGetCapturingGraph);
+#undef ASSERT_HOOK_MATCHES_PROD
 
 struct ncclCudaContext;
 

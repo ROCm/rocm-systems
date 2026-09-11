@@ -34,6 +34,7 @@
 #include "strongstream_stubs.h"
 #include "sym_kernels_fakes.h"
 #include "transport_stubs.h"
+#include "tuning_fakes.h"
 
 // The env-var test-control API (SetMicroEnv/SetMicroEnvAbsent/ClearMicroEnv)
 // is declared by fakes/env_fakes.h, the shared owner of getenv interposition
