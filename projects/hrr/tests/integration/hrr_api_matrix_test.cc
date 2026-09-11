@@ -315,7 +315,7 @@ void run_tier(const std::string& tier) {
   const HrrTierFloor& floor = tier_floor(tier);
 
   if (floor.gpus > 1 && visible_device_count() < floor.gpus) {
-    HRR_SKIP("tier requires at least two visible GPUs");
+    HRR_SKIP_CASE("tier requires at least two visible GPUs");
   }
 
   TierObservation obs;
@@ -504,8 +504,6 @@ TEST_CASE("Unit_HRR_ApiMatrix_T4_Roundtrip", "[hrr][api-matrix]") {
  *     rocFFT/rocSPARSE/rocRAND import zero texture symbols, and the
  *     managed-memory caller that does exist belongs to a recommender workload
  *     absent from Instinct MLPerf submissions.
- *   - Hidden ([.]) so it does not run by default. run-api-matrix.sh
- *     --include-deprioritised runs it by name.
  */
 TEST_CASE("Unit_HRR_ApiMatrix_T5_Roundtrip", "[hrr][api-matrix]") {
   run_tier("T5");

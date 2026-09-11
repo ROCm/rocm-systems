@@ -68,11 +68,23 @@
 
 // HRR_SKIP replaces the hip-tests skip macro: emit a warning describing why the current
 // case is being skipped and return early.
+//
+// This is the macro for the hidden [.][hrr-direct] workloads. It deliberately
+// does NOT use Catch2's SKIP(): the workloads are spawned as subprocesses and
+// observe_workload treats any non-zero exit as a genuine failure, but a Catch2
+// run whose only selected case skips exits 4. Gating a workload with SKIP()
+// would therefore turn "this host has one GPU" into a tier failure.
 #define HRR_SKIP(message)                                                       \
   do {                                                                          \
     WARN(message);                                                             \
     return;                                                                    \
   } while (0)
+
+// HRR_SKIP_CASE is the equivalent for a visible test case, where the exit code
+// is Catch2's own and a real skip is what reporters should see. Using it keeps
+// a tier that could not run from being indistinguishable, in a JUnit report or
+// a --summary, from one that ran and passed.
+#define HRR_SKIP_CASE(message) SKIP(message)
 
 // ---------------------------------------------------------------------------
 // Shared capture/replay helpers.

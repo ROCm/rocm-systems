@@ -599,10 +599,6 @@ HRR_TEST_CASE(Unit_HRR_DivergenceAbortRoundtrip) {
  *     loop and stops the replay (exit 2) BEFORE the faulting kernel runs, so the
  *     null + 0x20000 write never happens.  REQUIRE a clean exit 2 rather than a
  *     GPU memory fault.
- *
- *   Hidden ([.]) because a mistuned guard could let the raw GPU fault through,
- *   which can destabilise a shared runner.  Run explicitly by name to validate
- *   the guard converts the fault class into a clean exit.
  */
 TEST_CASE("Unit_HRR_NullOptionalPtrRoundtrip", "[hrr-repro]") {
   ScopedDir cap{fs::temp_directory_path() / "hrr_roundtrip_nulloptional"};
@@ -640,7 +636,7 @@ HRR_TEST_CASE(Unit_HRR_StreamWriteValueRoundtrip) {
   HRR_HIP_CHECK(hipDeviceGetAttribute(&canUseStreamValue,
                                   hipDeviceAttributeCanUseStreamWaitValue, 0));
   if (!canUseStreamValue) {
-    HRR_SKIP("stream wait value unsupported");
+    HRR_SKIP_CASE("stream wait value unsupported");
   }
 
   ScopedDir cap{fs::temp_directory_path() / "hrr_roundtrip_streamwritevalue"};
@@ -1098,9 +1094,9 @@ HRR_TEST_CASE(Unit_HRR_MemcpyPeerRoundtrip) {
   int ndev = 0;
   if (!hrr_find_peer_accessible_pair(src_dev, dst_dev, ndev)) {
     if (ndev < 2) {
-      HRR_SKIP("fewer than two GPUs");
+      HRR_SKIP_CASE("fewer than two GPUs");
     } else {
-      HRR_SKIP("peer access unavailable");
+      HRR_SKIP_CASE("peer access unavailable");
     }
   }
   ScopedDir cap{fs::temp_directory_path() / "hrr_roundtrip_memcpypeer"};
@@ -1149,7 +1145,7 @@ HRR_TEST_CASE(Unit_HRR_MiscAPIsRoundtrip) {
 // hrr_run_exact_roundtrip() is the correct oracle (see helper above).
 HRR_TEST_CASE(Unit_HRR_DrvMemcpy3DRoundtrip) {
 #ifdef _WIN32
-  HRR_SKIP("driver memcpy 3D HRR roundtrip is disabled on Windows");
+  HRR_SKIP_CASE("driver memcpy 3D HRR roundtrip is disabled on Windows");
 #else
   ScopedDir cap{fs::temp_directory_path() / "hrr_roundtrip_drvmemcpy3d"};
   hrr_run_exact_roundtrip("Unit_HRR_DrvMemcpy3D_Direct", cap.path);
@@ -1158,7 +1154,7 @@ HRR_TEST_CASE(Unit_HRR_DrvMemcpy3DRoundtrip) {
 
 HRR_TEST_CASE(Unit_HRR_DrvMemcpy2DUnalignedRoundtrip) {
 #ifdef _WIN32
-  HRR_SKIP("driver memcpy 2D unaligned HRR roundtrip is disabled on Windows");
+  HRR_SKIP_CASE("driver memcpy 2D unaligned HRR roundtrip is disabled on Windows");
 #else
   ScopedDir cap{fs::temp_directory_path() / "hrr_roundtrip_drvmemcpy2dunaligned"};
   hrr_run_exact_roundtrip("Unit_HRR_DrvMemcpy2DUnaligned_Direct", cap.path);
