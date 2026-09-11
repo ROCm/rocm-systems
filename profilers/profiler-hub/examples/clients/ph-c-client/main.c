@@ -2,18 +2,31 @@
 #include <profiler-hub/c_interface/profiler_hub_types.h>
 
 #include <stdio.h>
+#include <time.h>
+
+#define TIME_CALL(label, call)                                                           \
+    do                                                                                   \
+    {                                                                                    \
+        struct timespec _bench_t0, _bench_t1;                                            \
+        clock_gettime(CLOCK_MONOTONIC, &_bench_t0);                                      \
+        call;                                                                            \
+        clock_gettime(CLOCK_MONOTONIC, &_bench_t1);                                      \
+        const double _bench_ms = (_bench_t1.tv_sec - _bench_t0.tv_sec) * 1000.0 +        \
+                                 (_bench_t1.tv_nsec - _bench_t0.tv_nsec) / 1e6;          \
+        printf("[bench] %-24s %8.3f ms\n", label, _bench_ms);                            \
+    } while(0)
 
 int
 main()
 {
     const char* trace_path = "/home/amd/test_dbs/rocpd-3930708-0.db";
     ph_ctx_t    ctx        = {};
-    ph_ctx_create(&ctx, trace_path);
+    TIME_CALL("ph_ctx_create", ph_ctx_create(&ctx, trace_path));
 
     ph_library_version_t library_version;
-    ph_get_library_version(ctx, &library_version);
+    TIME_CALL("ph_get_library_version", ph_get_library_version(ctx, &library_version));
     ph_schema_version_t schema_version;
-    ph_get_schema_version(ctx, &schema_version);
+    TIME_CALL("ph_get_schema_version", ph_get_schema_version(ctx, &schema_version));
 
     printf("=== Version ===\n");
     printf("%-10s %d.%d.%d\n",
@@ -28,7 +41,7 @@ main()
            schema_version.patch);
 
     ph_node_t node;
-    ph_get_node(ctx, &node);
+    TIME_CALL("ph_get_node", ph_get_node(ctx, &node));
 
     printf("\n=== Node ===\n");
     printf("%-14s %d\n", "id:", node.info.id);
@@ -88,6 +101,6 @@ main()
                track->track_name);
     }
 
-    ph_ctx_free(ctx);
+    TIME_CALL("ph_ctx_free", ph_ctx_free(ctx));
     return 0;
 }
