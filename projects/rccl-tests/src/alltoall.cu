@@ -16,6 +16,7 @@
 #include "algorithms/dda/device/CollCommon.h"
 #include "algorithms/dda/fabric/fabric_gpu_barrier.h"
 #include "include/gin/gin_fabric_a2a_host.h"
+#include "nccl_device/gin/anvil_sdma/gin_anvil_sdma_device_host_common.h"
 #include "nccl_device/gin/anvil_sdma/gin_fabric_ll_policy.h"
 #endif
 #endif
@@ -279,39 +280,53 @@ static bool AlltoAllGinFabricLLEligibleHost(ncclDevComm* devComm, size_t count, 
   return true;
 }
 
-// Test#5 is still GIN-SDMA AllToAll. On gfx1250+MNNVL+one clique, small messages
-// host-launch the existing fabric DDA LL kernel on the GIN plugin's fabric lane;
-// large messages keep GinAlltoAllKernel (gin.put / SDMA).
+// Device-API DDA entry point. The host chooses the required 2D launch geometry,
+// but the GPU kernel obtains its DDA lane from the backend-owned GIN context and
+// invokes the same body as the host-initiated ncclAllToAll DDA launcher.
 template <typename T, int N>
-static void AlltoAllLaunchFabricLLKernel(T** peers, T* recvPtr, T* sendPtr, size_t perChunkBytes, ncclDevComm* devComm,
-                                         ncclGinFabricA2ALane const& lane, dim3 grid, dim3 block, cudaStream_t stream) {
-  dda::common::ddaAllToAllFabricLL<T, N><<<grid, block, 0, stream>>>(
-      peers, recvPtr, sendPtr, perChunkBytes, devComm->rank, devComm->nRanks, lane.llEpoch, lane.llEpochLen);
+__global__ void GinDdaAllToAllFabricLLKernel(ncclWindow_t sendwin, size_t sendoffset,
+                                              ncclWindow_t recvwin, size_t recvoffset,
+                                              size_t perChunkBytes, ncclDevComm devComm) {
+  auto* ctx = reinterpret_cast<ncclGinAnvilSdmaGPUContext*>(devComm.ginHandles[0]);
+  if (ctx == nullptr || ctx->layoutMagic != NCCL_GIN_ANVIL_SDMA_LAYOUT_MAGIC ||
+      ctx->fabricA2AEnabled == 0) {
+    return;
+  }
+  const size_t requiredScratch =
+      static_cast<size_t>(2) * static_cast<size_t>(devComm.nRanks) *
+      gin::fabric::kGinFabricLlA2ASlotStridePkts * gin::fabric::kGinFabricLlPacketBytes;
+  if (devComm.nRanks < 2 || devComm.nRanks > gin::fabric::kGinFabricLlMaxNranks ||
+      perChunkBytes == 0 || perChunkBytes % 16 != 0 ||
+      perChunkBytes * 2 > gin::fabric::kGinFabricLlMaxBytes ||
+      static_cast<size_t>(devComm.nRanks) * perChunkBytes > ctx->fabricA2ALlThreshold ||
+      requiredScratch > ctx->fabricA2AScratchBytes) {
+    return;
+  }
+
+  T* sendPtr = static_cast<T*>(ncclGetLsaPointer(sendwin, sendoffset, devComm.lsaRank));
+  T* recvPtr = static_cast<T*>(ncclGetLsaPointer(recvwin, recvoffset, devComm.lsaRank));
+  dda::common::ddaAllToAllFabricLLBody<T, N>(
+      reinterpret_cast<T**>(ctx->fabricA2APeerScratch), recvPtr, sendPtr, perChunkBytes,
+      devComm.rank, devComm.nRanks, ctx->fabricA2ALlEpoch, ctx->fabricA2ALlEpochLen);
 }
 
 template <typename T>
 static testResult_t AlltoAllLaunchFabricLL(void* sendbuff, size_t sendoffset, void* recvbuff, size_t recvoffset,
-                                           size_t count, ncclDevComm* devComm, ncclGinFabricA2ALane const& lane,
-                                           cudaStream_t stream) {
+                                           size_t count, ncclDevComm* devComm, cudaStream_t stream) {
   const size_t perChunkBytes = count * sizeof(T);
   const int blocksPerPeer = ginFabricLlAlltoAllBlocksPerPeer(perChunkBytes);
   dim3 block(256);
   dim3 grid((unsigned)devComm->nRanks, (unsigned)blocksPerPeer);
 
-  void* sendPtr = nullptr;
-  void* recvPtr = nullptr;
-  NCCLCHECK(ncclGetLsaDevicePointer((ncclWindow_t)sendbuff, sendoffset, devComm->lsaRank, &sendPtr));
-  NCCLCHECK(ncclGetLsaDevicePointer((ncclWindow_t)recvbuff, recvoffset, devComm->lsaRank, &recvPtr));
-
-  T** peers = reinterpret_cast<T**>(lane.peerScratch);
-  T* recvT = reinterpret_cast<T*>(recvPtr);
-  T* sendT = reinterpret_cast<T*>(sendPtr);
   if (devComm->nRanks == 4) {
-    AlltoAllLaunchFabricLLKernel<T, 4>(peers, recvT, sendT, perChunkBytes, devComm, lane, grid, block, stream);
+    GinDdaAllToAllFabricLLKernel<T, 4><<<grid, block, 0, stream>>>(
+        (ncclWindow_t)sendbuff, sendoffset, (ncclWindow_t)recvbuff, recvoffset, perChunkBytes, *devComm);
   } else if (devComm->nRanks == 8) {
-    AlltoAllLaunchFabricLLKernel<T, 8>(peers, recvT, sendT, perChunkBytes, devComm, lane, grid, block, stream);
+    GinDdaAllToAllFabricLLKernel<T, 8><<<grid, block, 0, stream>>>(
+        (ncclWindow_t)sendbuff, sendoffset, (ncclWindow_t)recvbuff, recvoffset, perChunkBytes, *devComm);
   } else {
-    AlltoAllLaunchFabricLLKernel<T, 0>(peers, recvT, sendT, perChunkBytes, devComm, lane, grid, block, stream);
+    GinDdaAllToAllFabricLLKernel<T, 0><<<grid, block, 0, stream>>>(
+        (ncclWindow_t)sendbuff, sendoffset, (ncclWindow_t)recvbuff, recvoffset, perChunkBytes, *devComm);
   }
   CUDACHECK(cudaGetLastError());
   return testSuccess;
@@ -541,13 +556,13 @@ testResult_t AlltoAllRunColl(void* sendbuff, size_t sendoffset, void* recvbuff, 
         ncclGinFabricA2ALane lane{};
         if (AlltoAllGinFabricLLEligibleHost(devComm, count, type, &lane)) {
           if (type == ncclFloat32) {
-            TESTCHECK(AlltoAllLaunchFabricLL<float>(sendbuff, sendoffset, recvbuff, recvoffset, count, devComm, lane,
+            TESTCHECK(AlltoAllLaunchFabricLL<float>(sendbuff, sendoffset, recvbuff, recvoffset, count, devComm,
                                                     stream));
           } else if (type == ncclFloat16) {
-            TESTCHECK(AlltoAllLaunchFabricLL<half>(sendbuff, sendoffset, recvbuff, recvoffset, count, devComm, lane,
+            TESTCHECK(AlltoAllLaunchFabricLL<half>(sendbuff, sendoffset, recvbuff, recvoffset, count, devComm,
                                                    stream));
           } else if (type == ncclBfloat16) {
-            TESTCHECK(AlltoAllLaunchFabricLL<bf16>(sendbuff, sendoffset, recvbuff, recvoffset, count, devComm, lane,
+            TESTCHECK(AlltoAllLaunchFabricLL<bf16>(sendbuff, sendoffset, recvbuff, recvoffset, count, devComm,
                                                    stream));
           } else {
             return testNotImplemented;

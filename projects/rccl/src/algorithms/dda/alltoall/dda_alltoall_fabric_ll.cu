@@ -15,6 +15,7 @@
 #include "algorithms/dda/dda_init_detail.h" // nccl_dda_detail::kDdaLLAgMaxBlocksPerPeer
 #include "debug.h"
 #include "algorithms/dda/fabric/fabric_gpu_barrier.h" // dda::common::kDdaMaxNranks
+#include "nccl_device/gin/anvil_sdma/gin_fabric_ll_policy.h"
 
 #include <cuda_runtime.h>
 
@@ -27,6 +28,13 @@ using dda::common::kDdaLLA2ASlotStridePkts;
 using dda::common::kDdaLLMaxBytes;
 using dda::common::LLPacket16;
 using nccl_dda_detail::kDdaLLAgMaxBlocksPerPeer;
+
+static_assert(gin::fabric::kGinFabricLlMaxNranks == dda::common::kDdaMaxNranks,
+              "GIN device-API and host DDA max-rank limits must match");
+static_assert(gin::fabric::kGinFabricLlMaxBytes == dda::common::kDdaLLMaxBytes,
+              "GIN device-API and host DDA LL size limits must match");
+static_assert(gin::fabric::kGinFabricLlAgMaxBlocksPerPeer == nccl_dda_detail::kDdaLLAgMaxBlocksPerPeer,
+              "GIN device-API and host DDA block limits must match");
 
 // LL scratch: 2 banks * nRanks slots * kDdaLLA2ASlotStridePkts * 16B.
 static inline size_t ddaLLA2AScratchSize(int nRanks) {

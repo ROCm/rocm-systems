@@ -95,6 +95,9 @@ int ncclDebugLevel = NCCL_LOG_VERSION;
 uint64_t ncclDebugMask = NCCL_INIT;
 thread_local int ncclDebugNoWarn = 0;
 
+int64_t rcclParamDdaLL() { return 1; }
+int64_t rcclParamDdaLLThreshold() { return 64 * 1024; }
+
 void ncclDebugLog(ncclDebugLogLevel level, unsigned long flags, const char* filefunc, int line,
                   const char* fmt, ...) {
   (void)level;

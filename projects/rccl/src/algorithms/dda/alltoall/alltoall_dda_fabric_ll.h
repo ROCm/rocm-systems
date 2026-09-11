@@ -33,7 +33,7 @@ namespace dda::common {
 // LL is for small-message, so the full payload is well under the staging cap.
 constexpr size_t kDdaLLA2ASlotStridePkts = kDdaLLMaxBytes / sizeof(LLPacket16);
 
-// LL all-to-all kernel. 2D grid: grid.x == nRanks selects the peer (column b
+// LL all-to-all body. 2D grid: grid.x == nRanks selects the peer (column b
 // owns peer b); grid.y == blocksPerPeer splits that peer's packets into gridDim.y
 // contiguous chunks (chunk == blockIdx.y). grid.y == 1 is one block per peer.
 //
@@ -41,16 +41,14 @@ constexpr size_t kDdaLLA2ASlotStridePkts = kDdaLLMaxBytes / sizeof(LLPacket16);
 // scatter this rank's chunk-for-peer-b (sendbuff[b]) into peer b's slot, then
 // poll their own slot b for the chunk peer b sent to us (-> recvbuff[b]).
 template <typename T, int NRANKS_CT>
-#if defined(USE_ROCM)
-__launch_bounds__(512)
-#endif
-  __global__ void ddaAllToAllFabricLL(T* const* __restrict__ peerScratch,    // ddaPeerPtrsDev: nRanks scratch bases
-                                      T* __restrict__ recvbuff,              // local user output (nRanks chunks)
-                                      const T* __restrict__ sendbuff,        // local user input (nRanks chunks)
-                                      size_t perChunkBytes,                  // per-peer chunk payload; multiple of 16
-                                      int selfRank, int nRanksRt,
-                                      uint32_t* __restrict__ epochDev,       // per-block LL epoch cells
-                                      int epochLen) {                        // number of cells in epochDev
+__device__ __forceinline__ void ddaAllToAllFabricLLBody(
+    T* const* __restrict__ peerScratch,  // ddaPeerPtrsDev: nRanks scratch bases
+    T* __restrict__ recvbuff,            // local user output (nRanks chunks)
+    const T* __restrict__ sendbuff,      // local user input (nRanks chunks)
+    size_t perChunkBytes,                // per-peer chunk payload; multiple of 16
+    int selfRank, int nRanksRt,
+    uint32_t* __restrict__ epochDev,     // per-block LL epoch cells
+    int epochLen) {                      // number of cells in epochDev
 
   const int nRanks = NRANKS_CT ? NRANKS_CT : nRanksRt;
   const int peer = blockIdx.x;             // grid.x == nRanks: one column/peer
@@ -121,6 +119,23 @@ __launch_bounds__(512)
   }
 
   ddaSetLLEpoch(epochDev, epochLen, flatBlockId, total, flag);
+}
+
+// Host-initiated RCCL entry point. Device-API kernels call the same body
+// directly, avoiding device-side dynamic parallelism.
+template <typename T, int NRANKS_CT>
+#if defined(USE_ROCM)
+__launch_bounds__(512)
+#endif
+__global__ void ddaAllToAllFabricLL(T* const* __restrict__ peerScratch,
+                                    T* __restrict__ recvbuff,
+                                    const T* __restrict__ sendbuff,
+                                    size_t perChunkBytes,
+                                    int selfRank, int nRanksRt,
+                                    uint32_t* __restrict__ epochDev,
+                                    int epochLen) {
+  ddaAllToAllFabricLLBody<T, NRANKS_CT>(peerScratch, recvbuff, sendbuff, perChunkBytes,
+                                        selfRank, nRanksRt, epochDev, epochLen);
 }
 
 } // namespace dda::common

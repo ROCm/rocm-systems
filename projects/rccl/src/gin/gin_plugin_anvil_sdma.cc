@@ -21,6 +21,7 @@
 #include "bootstrap.h"
 #include "nccl_device/gin/anvil_sdma/gin_anvil_sdma_device_host_common.h"
 #include "nccl_device/gin/anvil_sdma/gin_anvil_ipc_table.h"
+#include "nccl_device/gin/anvil_sdma/gin_fabric_ll_policy.h"
 #include <gin_anvil/sdma_factory.h>
 #include <hip/hip_runtime.h>
 #include <cstdint>
@@ -889,6 +890,34 @@ static ncclResult_t ginAnvilCreateContext(void* collComm, ncclGinConfig_t* confi
   ctx->gpuCtxHost.signals = nullptr;
   ctx->gpuCtxHost.signal_remote_addrs = nullptr;
   ctx->signal_remote_addrs_dev = nullptr;
+  ctx->gpuCtxHost.fabricA2APeerScratch = nullptr;
+  ctx->gpuCtxHost.fabricA2ALlEpoch = nullptr;
+  ctx->gpuCtxHost.fabricA2AScratchBytes = 0;
+  ctx->gpuCtxHost.fabricA2ALlThreshold = 0;
+  ctx->gpuCtxHost.fabricA2ALlEpochLen = 0;
+  ctx->gpuCtxHost.fabricA2AEnabled = 0;
+
+  if (ginAnvilUseFabricMem(cctx->comm)) {
+    const size_t llThreshold =
+        gin::fabric::resolveGinFabricLLThresholdAlltoAll((size_t)rcclParamDdaLLThreshold());
+    const gin::fabric::GinFabricA2ACommState commState{
+        cctx->comm->ddaFabricMemHandler,
+        (void**)cctx->comm->ddaPeerPtrsDev,
+        cctx->comm->ddaLLEpochDev,
+        cctx->comm->ddaScratch,
+        cctx->comm->ddaScratchBytes,
+        cctx->comm->ddaLLEpochLen,
+        cctx->comm->nRanks};
+    ncclGinFabricA2ALane lane{};
+    if (gin::fabric::ginFabricA2ALaneTryBuild(commState, rcclParamDdaLL() != 0, llThreshold, &lane)) {
+      ctx->gpuCtxHost.fabricA2APeerScratch = lane.peerScratch;
+      ctx->gpuCtxHost.fabricA2ALlEpoch = lane.llEpoch;
+      ctx->gpuCtxHost.fabricA2AScratchBytes = lane.scratchBytes;
+      ctx->gpuCtxHost.fabricA2ALlThreshold = lane.llThreshold;
+      ctx->gpuCtxHost.fabricA2ALlEpochLen = lane.llEpochLen;
+      ctx->gpuCtxHost.fabricA2AEnabled = 1;
+    }
+  }
 
   if (config->nCounters > 0) {
     if (hipExtMallocWithFlags((void**)&ctx->gpuCtxHost.counters, sizeof(uint64_t) * config->nCounters,

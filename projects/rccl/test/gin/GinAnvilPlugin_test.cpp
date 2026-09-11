@@ -96,12 +96,13 @@ class GinAnvilPluginTest : public ::testing::Test {
     ncclGinAnvilSetInitContext(*ictx, mockComm_.get());
   }
 
-  void connectColl(void* ictx, void** coll) {
+  void connectColl(void* ictx, void** coll, int nranks = 1, int rank = 0) {
     void* listen = nullptr;
     char handle[NCCL_NET_HANDLE_MAXSIZE] = {};
     ASSERT_EQ(plugin_.listen(ictx, 0, handle, &listen), ncclSuccess);
-    void* handles[1] = {handle};
-    ASSERT_EQ(plugin_.connect(ictx, handles, 1, 0, listen, coll), ncclSuccess);
+    std::vector<void*> handles(static_cast<size_t>(nranks), handle);
+    GinAnvilPluginStubs::SetBootstrapNranks(nranks);
+    ASSERT_EQ(plugin_.connect(ictx, handles.data(), nranks, rank, listen, coll), ncclSuccess);
     ASSERT_EQ(plugin_.closeListen(listen), ncclSuccess);
   }
 };
@@ -269,6 +270,39 @@ TEST_F(GinAnvilPluginTest, CreateContext_EnvAndCounters) {
   EXPECT_NE(hostCtx.counters, nullptr);
 
   EXPECT_EQ(plugin_.destroyContext(ginCtx), ncclSuccess);
+  plugin_.closeColl(coll);
+  plugin_.finalize(ictx);
+}
+
+TEST_F(GinAnvilPluginTest, CreateContext_PublishesDeviceFabricA2ALane) {
+  GinAnvilPluginStubs::SetUseFabricMem(true);
+  mockComm_.comm.nRanks = 4;
+  mockComm_.comm.ddaFabricMemHandler = reinterpret_cast<ncclFabricMemHandler*>(0x1);
+  mockComm_.comm.ddaPeerPtrsDev = reinterpret_cast<void**>(0x2000);
+  mockComm_.comm.ddaLLEpochDev = reinterpret_cast<uint32_t*>(0x3000);
+  mockComm_.comm.ddaScratch = reinterpret_cast<void*>(0x4000);
+  mockComm_.comm.ddaScratchBytes = static_cast<size_t>(512) * 1024 * 1024;
+  mockComm_.comm.ddaLLEpochLen = 32;
+
+  void* ictx = nullptr;
+  initCtx(&ictx);
+  void* coll = nullptr;
+  connectColl(ictx, &coll, 4);
+
+  ncclGinConfig_t cfg{};
+  void* ginCtx = nullptr;
+  ncclNetDeviceHandle_v11_t* devHandle = nullptr;
+  ASSERT_EQ(plugin_.createContext(coll, &cfg, &ginCtx, &devHandle), ncclSuccess);
+
+  ncclGinAnvilSdmaGPUContext hostCtx{};
+  ASSERT_EQ(hipMemcpy(&hostCtx, devHandle->handle, sizeof(hostCtx), hipMemcpyDeviceToHost), hipSuccess);
+  EXPECT_EQ(hostCtx.fabricA2AEnabled, 1u);
+  EXPECT_EQ(hostCtx.fabricA2APeerScratch, reinterpret_cast<void**>(mockComm_.comm.ddaPeerPtrsDev));
+  EXPECT_EQ(hostCtx.fabricA2ALlEpoch, mockComm_.comm.ddaLLEpochDev);
+  EXPECT_EQ(hostCtx.fabricA2ALlEpochLen, mockComm_.comm.ddaLLEpochLen);
+  EXPECT_EQ(hostCtx.fabricA2ALlThreshold, 64u * 1024u);
+
+  plugin_.destroyContext(ginCtx);
   plugin_.closeColl(coll);
   plugin_.finalize(ictx);
 }

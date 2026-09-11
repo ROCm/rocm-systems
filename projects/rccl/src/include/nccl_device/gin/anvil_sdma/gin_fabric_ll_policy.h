@@ -14,9 +14,6 @@
 #include <cstddef>
 
 #if !defined(__CUDA_ARCH__) && !defined(__HIP_DEVICE_COMPILE__)
-#include "algorithms/dda/dda_init_detail.h"
-#include "algorithms/dda/device/CollCommon.h"
-#include "algorithms/dda/fabric/fabric_gpu_barrier.h"
 #include "gin/gin_fabric_a2a_host.h"
 #include <cerrno>
 #include <cstdlib>
@@ -33,15 +30,6 @@ constexpr size_t kGinFabricLlPacketBytes = 16;
 constexpr size_t kGinFabricLlA2ASlotStridePkts = kGinFabricLlMaxBytes / kGinFabricLlPacketBytes;
 constexpr size_t kGinFabricLlA2APktsPerBlock = 256;
 constexpr int kGinFabricLlAgMaxBlocksPerPeer = 8;
-
-#if !defined(__CUDA_ARCH__) && !defined(__HIP_DEVICE_COMPILE__)
-static_assert(kGinFabricLlMaxNranks == dda::common::kDdaMaxNranks,
-              "GIN fabric LL lane must match DDA max nranks");
-static_assert(kGinFabricLlMaxBytes == dda::common::kDdaLLMaxBytes,
-              "GIN fabric LL lane must match DDA LL max bytes");
-static_assert(kGinFabricLlAgMaxBlocksPerPeer == nccl_dda_detail::kDdaLLAgMaxBlocksPerPeer,
-              "GIN fabric LL lane must match DDA LL AG max blocks per peer");
-#endif
 
 inline size_t ginFabricLlA2AScratchBytes(int nRanks) {
   return (size_t)2 * (size_t)nRanks * kGinFabricLlA2ASlotStridePkts * kGinFabricLlPacketBytes;
