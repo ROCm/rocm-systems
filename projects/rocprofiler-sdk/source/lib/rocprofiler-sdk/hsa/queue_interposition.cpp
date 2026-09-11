@@ -585,27 +585,9 @@ async_signal_handler(hsa_signal_t                            completion_signal,
 
         if(signal_value < starting_value) break;         // kernel completed
         if(registration::get_fini_status() != 0) break;  // tearing down: run cleanup path
-        // Last consumer stopped: bounded grace for PGLE kernels still in flight.
-        // Unbounded wait deadlocks (ROCM-29631); immediate abandon drops trace data.
-        if(!has_active_queue_interposition_consumers())
-        {
-            static const auto grace_ms =
-                common::get_env("ROCPROFILER_QUEUE_INTERPOSITION_STOP_GRACE_MS", 10);
-            const auto deadline = std::chrono::steady_clock::now() +
-                                  std::chrono::milliseconds{grace_ms};
-            while(signal_value >= starting_value &&
-                  std::chrono::steady_clock::now() < deadline &&
-                  registration::get_fini_status() == 0)
-            {
-                signal_value = get_core_table()->hsa_signal_wait_relaxed_fn(
-                    completion_signal,
-                    HSA_SIGNAL_CONDITION_LT,
-                    starting_value,
-                    timeout_hint.count(),
-                    HSA_WAIT_STATE_ACTIVE);
-            }
-            break;
-        }
+        // Last consumer stopped without joining us; do not spin forever on a
+        // completion that may never arrive (ROCM-29631 stop-path deadlock).
+        if(!has_active_queue_interposition_consumers()) break;
         ++niterations;
 
         // Surface long-running waits for diagnostics without giving up the wait.
