@@ -857,8 +857,16 @@ hipError_t hipDeviceGetUuid(hipUUID* uuid, hipDevice_t device) {
   CATCH;
 }
 hipError_t hipDeviceGetLuid(char* luid, unsigned int* deviceNodeMask, hipDevice_t device) {
+  auto const __rocm_in_luid = luid;
+  auto const __rocm_in_deviceNodeMask = deviceNodeMask;
+  auto const __rocm_in_device = device;
+  rocm_trace_emit_hipDeviceGetLuid_enter(
+      (const void*)(uintptr_t)(__rocm_in_luid), (const void*)(uintptr_t)(__rocm_in_deviceNodeMask),
+      (__rocm_in_device)); /* __ROCM_CURATED__: hipDeviceGetLuid */
   TRY;
-  return hip::GetHipDispatchTable()->hipDeviceGetLuid_fn(luid, deviceNodeMask, device);
+  ROCM_TRACE_RET_STATUS_CURATED_NOARGS(
+      hipDeviceGetLuid,
+      hip::GetHipDispatchTable()->hipDeviceGetLuid_fn(luid, deviceNodeMask, device));
   CATCH;
 }
 hipError_t hipDeviceGraphMemTrim(int device) {
@@ -2778,8 +2786,14 @@ hipError_t hipInit(unsigned int flags) {
   CATCH;
 }
 hipError_t hipInitDevice(int device, unsigned int deviceFlags, unsigned int flags) {
+  auto const __rocm_in_device = device;
+  auto const __rocm_in_deviceFlags = deviceFlags;
+  auto const __rocm_in_flags = flags;
+  rocm_trace_emit_hipInitDevice_enter((__rocm_in_device), (__rocm_in_deviceFlags),
+                                      (__rocm_in_flags)); /* __ROCM_CURATED__: hipInitDevice */
   TRY;
-  return hip::GetHipDispatchTable()->hipInitDevice_fn(device, deviceFlags, flags);
+  ROCM_TRACE_RET_STATUS_CURATED_NOARGS(
+      hipInitDevice, hip::GetHipDispatchTable()->hipInitDevice_fn(device, deviceFlags, flags));
   CATCH;
 }
 hipError_t hipIpcCloseMemHandle(void* devPtr) {
@@ -7435,7 +7449,15 @@ hipError_t hipExecutionCtxWaitEvent(hipExecutionCtx_t ctx, hipEvent_t event) {
 }
 hipError_t hipMemGetDefaultMemPool(hipMemPool_t* memPool, hipMemLocation* location,
                                    hipMemAllocationType type) {
+  auto const __rocm_in_memPool = memPool;
+  auto const __rocm_in_location = location;
+  auto const __rocm_in_type = type;
+  rocm_trace_emit_hipMemGetDefaultMemPool_enter(
+      (const void*)(uintptr_t)(__rocm_in_memPool), (const void*)(uintptr_t)(__rocm_in_location),
+      (int32_t)(__rocm_in_type)); /* __ROCM_CURATED__: hipMemGetDefaultMemPool */
   TRY;
-  return hip::GetHipDispatchTable()->hipMemGetDefaultMemPool_fn(memPool, location, type);
+  ROCM_TRACE_RET_STATUS_CURATED_NOARGS(
+      hipMemGetDefaultMemPool,
+      hip::GetHipDispatchTable()->hipMemGetDefaultMemPool_fn(memPool, location, type));
   CATCH;
 }

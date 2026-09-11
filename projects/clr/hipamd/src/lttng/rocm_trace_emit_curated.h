@@ -2,7 +2,7 @@
  * Do not edit by hand — regenerate instead (see command below).
  *
  * SHA256(curated_apis.yaml) at generation:
- * 01f28bb9306e3dcfcd8e1346d95c6178564a9d06e6e43d68385088a90f4027e7
+ * a971a3fe60ae5bba0b3bd9be0cfee22b0b467416175276836147a91b149546de
  *
  * Per-API typed emit helpers for curated parameter capture. Every
  * helper takes (<captured-args...>, <status_type> status); status is
@@ -1198,6 +1198,25 @@ static inline void rocm_trace_emit_hipMemGetAllocationPropertiesFromHandle_exit(
   if (rocm_trace_disabled()) return;
   if (lttng_ust_tracepoint_enabled(rocm_hip, hipMemGetAllocationPropertiesFromHandle)) {
     lttng_ust_do_tracepoint(rocm_hip, hipMemGetAllocationPropertiesFromHandle, (int32_t)1, 0, 0,
+                            (int32_t)status);
+  }
+}
+
+static inline void rocm_trace_emit_hipMemGetDefaultMemPool_enter(const void* memPool,
+                                                                 const void* location,
+                                                                 int32_t type) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipMemGetDefaultMemPool)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipMemGetDefaultMemPool, (int32_t)0,
+                            (uint64_t)(uintptr_t)(memPool), (uint64_t)(uintptr_t)(location),
+                            (int32_t)(type), 0);
+  }
+}
+
+static inline void rocm_trace_emit_hipMemGetDefaultMemPool_exit(hipError_t status) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipMemGetDefaultMemPool)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipMemGetDefaultMemPool, (int32_t)1, 0, 0, 0,
                             (int32_t)status);
   }
 }
@@ -6722,6 +6741,23 @@ static inline void rocm_trace_emit_hipDeviceGetLimit_exit(hipError_t status) {
   }
 }
 
+static inline void rocm_trace_emit_hipDeviceGetLuid_enter(const void* luid,
+                                                          const void* deviceNodeMask,
+                                                          int32_t device) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipDeviceGetLuid)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipDeviceGetLuid, (int32_t)0, (uint64_t)(uintptr_t)(luid),
+                            (uint64_t)(uintptr_t)(deviceNodeMask), (int32_t)(device), 0);
+  }
+}
+
+static inline void rocm_trace_emit_hipDeviceGetLuid_exit(hipError_t status) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipDeviceGetLuid)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipDeviceGetLuid, (int32_t)1, 0, 0, 0, (int32_t)status);
+  }
+}
+
 static inline void rocm_trace_emit_hipDeviceGetMemPool_enter(const void* mem_pool, int32_t device) {
   if (rocm_trace_disabled()) return;
   if (lttng_ust_tracepoint_enabled(rocm_hip, hipDeviceGetMemPool)) {
@@ -9724,6 +9760,22 @@ static inline void rocm_trace_emit_hipInit_exit(hipError_t status) {
   }
 }
 
+static inline void rocm_trace_emit_hipInitDevice_enter(int32_t device, uint32_t deviceFlags,
+                                                       uint32_t flags) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipInitDevice)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipInitDevice, (int32_t)0, (int32_t)(device),
+                            (uint32_t)(deviceFlags), (uint32_t)(flags), 0);
+  }
+}
+
+static inline void rocm_trace_emit_hipInitDevice_exit(hipError_t status) {
+  if (rocm_trace_disabled()) return;
+  if (lttng_ust_tracepoint_enabled(rocm_hip, hipInitDevice)) {
+    lttng_ust_do_tracepoint(rocm_hip, hipInitDevice, (int32_t)1, 0, 0, 0, (int32_t)status);
+  }
+}
+
 static inline void rocm_trace_emit_hipProfilerDisableExt_enter(const void* end_record_id) {
   if (rocm_trace_disabled()) return;
   if (lttng_ust_tracepoint_enabled(rocm_hip, hipProfilerDisableExt)) {
@@ -10049,6 +10101,9 @@ static inline void rocm_trace_emit_hipMemGetAllocationGranularity_exit(hipError_
 static inline void rocm_trace_emit_hipMemGetAllocationPropertiesFromHandle_enter(const void*,
                                                                                  const void*) {}
 static inline void rocm_trace_emit_hipMemGetAllocationPropertiesFromHandle_exit(hipError_t) {}
+static inline void rocm_trace_emit_hipMemGetDefaultMemPool_enter(const void*, const void*,
+                                                                 int32_t) {}
+static inline void rocm_trace_emit_hipMemGetDefaultMemPool_exit(hipError_t) {}
 static inline void rocm_trace_emit_hipMemGetHandleForAddressRange_enter(const void*, uint64_t,
                                                                         size_t, int32_t, uint64_t) {
 }
@@ -10868,6 +10923,8 @@ static inline void rocm_trace_emit_hipDeviceGetGraphMemAttribute_enter(int32_t, 
 static inline void rocm_trace_emit_hipDeviceGetGraphMemAttribute_exit(hipError_t) {}
 static inline void rocm_trace_emit_hipDeviceGetLimit_enter(const void*, int32_t) {}
 static inline void rocm_trace_emit_hipDeviceGetLimit_exit(hipError_t) {}
+static inline void rocm_trace_emit_hipDeviceGetLuid_enter(const void*, const void*, int32_t) {}
+static inline void rocm_trace_emit_hipDeviceGetLuid_exit(hipError_t) {}
 static inline void rocm_trace_emit_hipDeviceGetMemPool_enter(const void*, int32_t) {}
 static inline void rocm_trace_emit_hipDeviceGetMemPool_exit(hipError_t) {}
 static inline void rocm_trace_emit_hipDeviceGetName_enter(const char*, int32_t, int32_t) {}
@@ -11304,6 +11361,8 @@ static inline void rocm_trace_emit_hipGetStreamDeviceId_enter(uint64_t) {}
 static inline void rocm_trace_emit_hipGetStreamDeviceId_exit(int32_t) {}
 static inline void rocm_trace_emit_hipInit_enter(uint32_t) {}
 static inline void rocm_trace_emit_hipInit_exit(hipError_t) {}
+static inline void rocm_trace_emit_hipInitDevice_enter(int32_t, uint32_t, uint32_t) {}
+static inline void rocm_trace_emit_hipInitDevice_exit(hipError_t) {}
 static inline void rocm_trace_emit_hipProfilerDisableExt_enter(const void*) {}
 static inline void rocm_trace_emit_hipProfilerDisableExt_exit(hipError_t) {}
 static inline void rocm_trace_emit_hipProfilerEnableExt_enter(const void*, uint64_t) {}

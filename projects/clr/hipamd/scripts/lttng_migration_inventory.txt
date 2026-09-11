@@ -61,6 +61,7 @@ hipDeviceGetDevResource	STATUS	hipError_t
 hipDeviceGetExecutionCtx	STATUS	hipError_t
 hipDeviceGetGraphMemAttribute	STATUS	hipError_t
 hipDeviceGetLimit	STATUS	hipError_t
+hipDeviceGetLuid	STATUS	hipError_t
 hipDeviceGetMemPool	STATUS	hipError_t
 hipDeviceGetName	STATUS	hipError_t
 hipDeviceGetP2PAttribute	STATUS	hipError_t
@@ -269,6 +270,7 @@ hipHostUnregister	STATUS	hipError_t
 hipImportExternalMemory	STATUS	hipError_t
 hipImportExternalSemaphore	STATUS	hipError_t
 hipInit	STATUS	hipError_t
+hipInitDevice	STATUS	hipError_t
 hipIpcCloseMemHandle	STATUS	hipError_t
 hipIpcGetEventHandle	STATUS	hipError_t
 hipIpcGetMemHandle	STATUS	hipError_t
@@ -328,6 +330,7 @@ hipMemGetAccess	STATUS	hipError_t
 hipMemGetAddressRange	STATUS	hipError_t
 hipMemGetAllocationGranularity	STATUS	hipError_t
 hipMemGetAllocationPropertiesFromHandle	STATUS	hipError_t
+hipMemGetDefaultMemPool	STATUS	hipError_t
 hipMemGetHandleForAddressRange	STATUS	hipError_t
 hipMemGetInfo	STATUS	hipError_t
 hipMemGetMemPool	STATUS	hipError_t

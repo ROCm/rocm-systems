@@ -30,7 +30,7 @@ hip:
   hip_peer:      ["hipDeviceEnablePeerAccess", "hipDeviceDisablePeerAccess", "hipDeviceCanAccessPeer", "hipMemcpyPeer*", "hipMemcpy*Peer*", "hipCtxEnablePeerAccess", "hipCtxDisablePeerAccess", "hipDeviceGetP2PAttribute", "hipExtGetLinkTypeAndHopCount"]
   hip_error:     ["hipGetLastError", "hipPeekAtLastError", "hipExtGetLastError", "hipGetErrorString", "hipGetErrorName", "hipDrvGetErrorString", "hipDrvGetErrorName", "__hipOnError"]
   hip_external:  ["hipImportExternal*", "hipExternalMemory*", "hipDestroyExternal*", "hipSignalExternalSemaphoresAsync", "hipWaitExternalSemaphoresAsync"]
-  hip_init:      ["hipInit", "hipDriverGetVersion", "hipRuntimeGetVersion", "hipGetProcAddress*", "hipGetFuncBySymbol", "hipApiName", "hipProfiler*", "hipExtEnableLogging", "hipExtDisableLogging", "hipExtSetLoggingParams", "hipGetDriverEntryPoint*", "hipGetStreamDeviceId", "__hipRegister*", "__hipUnregisterFatBinary"]
+  hip_init:      ["hipInit", "hipInitDevice", "hipDriverGetVersion", "hipRuntimeGetVersion", "hipGetProcAddress*", "hipGetFuncBySymbol", "hipApiName", "hipProfiler*", "hipExtEnableLogging", "hipExtDisableLogging", "hipExtSetLoggingParams", "hipGetDriverEntryPoint*", "hipGetStreamDeviceId", "__hipRegister*", "__hipUnregisterFatBinary"]
   hip_graphics:  ["hipGraphicsGL*", "hipGraphicsMapResources", "hipGraphicsResourceGetMappedPointer", "hipGraphicsSubResourceGetMappedArray", "hipGraphicsUnmapResources", "hipGraphicsUnregisterResource", "hipGLGetDevices"]
   hip_symbol:    ["hipGetSymbolAddress", "hipGetSymbolSize"]
 hsa:

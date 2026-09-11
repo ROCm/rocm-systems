@@ -226,6 +226,9 @@
 - api: hipMemGetAllocationPropertiesFromHandle
   args: [prop, handle]
 
+- api: hipMemGetDefaultMemPool
+  args: [memPool, location, type]
+
 - api: hipMemGetHandleForAddressRange
   args: [handle, dptr, size, handleType, flags]
 
@@ -1140,6 +1143,9 @@
 - api: hipDeviceGetLimit
   args: [pValue, limit]
 
+- api: hipDeviceGetLuid
+  args: [luid, deviceNodeMask, device]
+
 - api: hipDeviceGetMemPool
   args: [mem_pool, device]
 
@@ -1703,6 +1709,9 @@
 
 - api: hipInit
   args: [flags]
+
+- api: hipInitDevice
+  args: [device, deviceFlags, flags]
 
 - api: hipProfilerDisableExt
   args: [end_record_id]
