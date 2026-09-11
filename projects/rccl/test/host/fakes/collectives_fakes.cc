@@ -11,11 +11,9 @@
 // collective LAUNCH pipeline (ncclLaunchKernel and friends) and therefore
 // cannot link into a target whose unit under test defines those.
 //
-// Real names rather than placeholders for the two tables and the three switches
-// below: production logs through those, and a test asserting on a log line should
-// see what production would print. ncclDatatypeToString and ncclDevRedOpToString
-// are the deliberate exceptions -- no test asserts on a datatype or redop in a
-// log line, so they return a fixed token rather than a transcribed table.
+// Real names rather than placeholders: production logs through these helpers,
+// and tests asserting log content must see the same text production emits.
+// Keep these switches faithful to src/collectives.cc.
 
 #include "device.h"
 #include "info.h"
@@ -29,14 +27,21 @@ const char* ncclProtoStr[NCCL_NUM_PROTOCOLS] = {"LL", "LL128", "Simple"};
 
 const char* ncclFuncToString(ncclFunc_t op) {
   switch (op) {
-    case ncclFuncBroadcast: return "Broadcast";
-    case ncclFuncReduce: return "Reduce";
     case ncclFuncAllGather: return "AllGather";
-    case ncclFuncReduceScatter: return "ReduceScatter";
     case ncclFuncAllReduce: return "AllReduce";
+    case ncclFuncAlltoAll: return "AlltoAll";
+    case ncclFuncAlltoAllv: return "AlltoAllv";
+    case ncclFuncBroadcast: return "Broadcast";
+    case ncclFuncGather: return "Gather";
+    case ncclFuncRecv: return "Recv";
+    case ncclFuncReduce: return "Reduce";
+    case ncclFuncReduceScatter: return "ReduceScatter";
+    case ncclFuncScatter: return "Scatter";
     case ncclFuncSendRecv: return "SendRecv";
     case ncclFuncSend: return "Send";
-    case ncclFuncRecv: return "Recv";
+    case ncclFuncPutSignal: return "PutSignal";
+    case ncclFuncSignal: return "Signal";
+    case ncclFuncWaitSignal: return "WaitSignal";
     default: return "Invalid";
   }
 }
@@ -71,12 +76,22 @@ const char* ncclProtoToString(int proto) {
 // default arm. Protocols get the same guard.
 static_assert(NCCL_NUM_PROTOCOLS == 3,
               "ncclProtoToString above must name every protocol; add the new case");
-// ncclFuncToString gets NO count guard on purpose. ncclNumFuncs is 19
-// (nccl_common.h:95) and includes the alltoallv/scatter/gather family; the switch
-// names the 8 that enqueue.cc logs and lets the rest fall to "Invalid", which
-// mirrors what production's own table does. A guard here would fire on an
-// enumerator this fake never needed to name.
+const char* ncclDatatypeToString(ncclDataType_t type) {
+  switch (type) {
+    case ncclInt8: return "ncclInt8";
+    case ncclInt32: return "ncclInt32";
+    case ncclUint32: return "ncclUint32";
+    case ncclInt64: return "ncclInt64";
+    case ncclUint64: return "ncclUint64";
+    case ncclFloat16: return "ncclFloat16";
+    case ncclFloat32: return "ncclFloat32";
+    case ncclFloat64: return "ncclFloat64";
+    case ncclBfloat16: return "ncclBfloat16";
+    case ncclFloat8e4m3: return "ncclFloat8e4m3";
+    case ncclFloat8e5m2: return "ncclFloat8e5m2";
+    default: return "Unknown";
+  }
+}
 
-// Deliberate placeholders; see the exception noted in the file header.
-const char* ncclDatatypeToString(ncclDataType_t) { return "dtype"; }
+// Red-op text is not consumed by this target; retain the existing placeholder.
 const char* ncclDevRedOpToString(ncclDevRedOp_t) { return "redop"; }

@@ -34,10 +34,8 @@ extern std::function<ncclResult_t(struct ncclComm*, int coll, int algorithm, int
     g_topoGetAlgoTime;
 extern int g_topoGetAlgoTimeCalls;
 
-// Min/max channel clamps. These do NOT mirror production: NCCL_PARAM defaults
-// both to -2 (graph/connect.cc:832-833), the sentinel meaning "unset". The fakes
-// default to 0/MAXCHANNELS instead, i.e. the already-resolved clamps, so a test
-// sees an inert clamp without going through ncclMinNchannels/ncclMaxNchannels.
+// Min/max channel-clamp parameter defaults from graph/connect.cc:832-833.
+// Both use -2, the production sentinel meaning "unset".
 extern int64_t g_paramMinNchannels;  // UNDRIVEN
 extern int64_t g_paramMaxNchannels;  // UNDRIVEN
 

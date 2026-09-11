@@ -23,16 +23,17 @@
 #include <cstdint>
 #include <functional>
 
-#include "nccl.h"  // ncclResult_t
-// comm.h transitively provides ncclComm, ncclTaskColl, ncclDevrWindow,
-// ncclFunc_t (via sym_kernels.h -> nccl_common.h), ncclSymRegType_t,
-// ncclSymkKernelId, and ncclCudaGraph/hipStream_t (via strongstream.h) --
-// everything the seam declarations below need. enqueue.h adds
-// ncclSimInfo_t and the NCCL_ALGO_*/NCCL_PROTO_* used by getAlgoInfo's
-// default (see wrap_fakes.cc). Same two headers wrap_fakes.cc itself
-// includes for the same reason.
+// Include canonical fake-owner headers here so wrap-test.cc consumes their
+// seams without redeclaring them. comm.h/enqueue.h provide the remaining
+// ncclComm, task, datatype, and algorithm types used below.
+#include "ce_fakes.h"
 #include "comm.h"
+#include "dev_runtime_fakes.h"
 #include "enqueue.h"
+#include "nccl.h"
+#include "strongstream_stubs.h"
+#include "sym_kernels_fakes.h"
+#include "transport_stubs.h"
 
 // The env-var test-control API (SetMicroEnv/SetMicroEnvAbsent/ClearMicroEnv)
 // is declared by fakes/env_fakes.h, the shared owner of getenv interposition
@@ -62,32 +63,12 @@ extern std::function<int64_t()> g_paramForceCe;
 
 extern std::function<bool(struct ncclComm*, ncclFunc_t, int, ncclDataType_t, size_t, const void*, void*)>
     g_isSymmetricKernelRequested;
-extern std::function<ncclResult_t(struct ncclCudaGraph*, hipStream_t, int)> g_cudaGetCapturingGraph;
-extern std::function<ncclResult_t(struct ncclComm*, void const*, struct ncclDevrWindow**)> g_devrFindWindow;
-extern std::function<bool(struct ncclDevrWindow*)> g_devrWindowHasSysmemSegment;
-extern std::function<ncclResult_t(struct ncclDevrWindow*, struct ncclDevrWindow*, ncclSymRegType_t*)>
-    g_getSymRegType;
-
-extern std::function<ncclResult_t(struct ncclComm*)> g_symkInitOnce;
-extern std::function<bool(struct ncclComm*, ncclFunc_t, int, ncclDataType_t, size_t)> g_symkAvailable;
-extern std::function<ncclResult_t(struct ncclComm*, ncclFunc_t, int, ncclDataType_t, size_t, size_t, int,
-                                  ncclSymRegType_t, float*, ncclSymkKernelId*, int*, int*, bool*)>
-    g_symkPickKernel;
-extern std::function<bool(int)> g_symkKernelIdIsLL;
-
-extern std::function<bool(struct ncclComm*, ncclFunc_t, int, ncclDataType_t, ncclSymRegType_t)> g_ceAvailable;
-extern std::function<bool(struct ncclComm*, ncclFunc_t, int, ncclDataType_t, ncclSymRegType_t)>
-    g_ceScratchAvailable;
-extern std::function<int(ncclDataType_t, size_t)> g_ceLocalReduceBlocks;
-
 extern std::function<bool(const struct ncclComm*, size_t, ncclDataType_t, bool, bool)> g_allReduceShouldTakeDdaPath;
 
 extern std::function<ncclResult_t(struct ncclComm*, struct ncclTaskColl*, int, int, int, ncclSimInfo_t*)>
     g_getAlgoInfo;
 extern std::function<int(struct ncclComm*, ncclFunc_t, size_t, ncclDataType_t, int, int)> g_kernelPackedChannels;
 extern std::function<ncclResult_t(const ncclComm_t, int*)> g_commCount;
-extern std::function<bool()> g_useAinic;
-extern std::function<int(struct ncclComm*)> g_pxnDisable;
 
 // --- Per-collective DDA eligibility/blocks (24 hooks total) ---
 extern std::function<bool(ncclComm*, const void*, void*, size_t, ncclDataType_t, ncclRedOp_t)>
