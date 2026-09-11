@@ -12,7 +12,7 @@ from utils.logger import console_error, console_log, console_warning
 from utils.native_tool_finder import find_prebuilt_artifacts
 
 _THIS_DIR = Path(__file__).resolve().parent
-_PACKAGE_ROOT = _THIS_DIR.parents[3]
+_PACKAGE_ROOT = _THIS_DIR.parents[2]
 
 _ARTIFACT_NAME_GLOB = "torch_trace_collector-*.so"
 _ARTIFACT_NAME_PATTERN = re.compile(r"^torch_trace_collector-(\d+\.\d+)\.so$")
