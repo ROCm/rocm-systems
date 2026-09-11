@@ -9,6 +9,7 @@
 #include "rocjitsu/isa/arch/amdgpu/shared/fp_mode.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/gfx12_cache_flags.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/mma_exec.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/simd_glue.h"
 #include "rocjitsu/isa/target_provider.h"
 #include "rocjitsu/vm/plugins/execution_plugin_group.h"
 
@@ -717,6 +718,42 @@ TEST(FpModePolicyTest, F64HelpersRestoreAmbientHostEnvironment) {
     EXPECT_EQ(std::fegetround(), FE_DOWNWARD);
     (void)amdgpu::fp_mode::finish_f64(input, 1, 1, false, true);
     EXPECT_EQ(std::fegetround(), FE_DOWNWARD);
+  }
+}
+
+TEST(FpModePolicyTest, F16FmaUsesGuestRoundingAndRestoresAmbientHostEnvironment) {
+  HostFenvGuard environment_guard;
+  struct TestCase {
+    int ambient_rounding;
+    uint32_t guest_rounding;
+    uint16_t src0;
+    uint16_t src1;
+    uint16_t src2;
+    uint16_t expected;
+  };
+  constexpr std::array kCases{
+      TestCase{FE_TONEAREST, 1, 0x0001u, 0x0001u, 0x7800u, 0x7801u},
+      TestCase{FE_UPWARD, 0, 0x0001u, 0x0001u, 0x7800u, 0x7800u},
+      TestCase{FE_TONEAREST, 2, 0x8001u, 0x0001u, 0xf800u, 0xf801u},
+  };
+
+  for (const TestCase &test : kCases) {
+    ASSERT_EQ(std::fesetround(test.ambient_rounding), 0);
+    EXPECT_EQ(amdgpu::fp_mode::fma_f16(test.src0, test.src1, test.src2, false, false, false, false,
+                                       false, false, test.guest_rounding, 3, 0, false, false,
+                                       false),
+              test.expected);
+    EXPECT_EQ(std::fegetround(), test.ambient_rounding);
+
+    if constexpr (util::has_stdx_simd) {
+      const auto result = amdgpu::fma_f16_mode_simd(
+          util::broadcast<uint32_t>(test.src0), util::broadcast<uint32_t>(test.src1),
+          util::broadcast<uint32_t>(test.src2), false, false, false, false, false, false,
+          test.guest_rounding, 3, 0, false, false, false);
+      for (std::size_t lane = 0; lane < util::native_width_v<uint32_t>; ++lane)
+        EXPECT_EQ(result[lane], test.expected) << "lane " << lane;
+      EXPECT_EQ(std::fegetround(), test.ambient_rounding);
+    }
   }
 }
 

@@ -83,7 +83,12 @@ set(CMAKE_VISIBILITY_INLINES_HIDDEN ON)
 # helpers through alu_exceptions.h from outside this option set: it can no
 # longer emit an unflagged inline definition of fma_f64 or finish_f64 by
 # accident, because it can no longer see one.
-if(
+if(MSVC)
+    set(RJ_STRICT_FP_ROUNDING_OPTIONS
+        /fp:strict
+        -DROCJITSU_STRICT_FP_ROUNDING=1
+    )
+elseif(
     CMAKE_CXX_COMPILER_ID STREQUAL "GNU"
     OR CMAKE_CXX_COMPILER_ID MATCHES "Clang"
 )
@@ -91,21 +96,16 @@ if(
         -frounding-math
         -DROCJITSU_STRICT_FP_ROUNDING=1
     )
-elseif(MSVC)
-    set(RJ_STRICT_FP_ROUNDING_OPTIONS
-        /fp:strict
-        -DROCJITSU_STRICT_FP_ROUNDING=1
-    )
 else()
     # Unknown compiler: nothing to spell "the rounding mode is dynamic" with, so
     # the miscompile above may well be present. Define the guard anyway rather
     # than failing the build -- that is the behaviour such a toolchain already
-    # had -- but say so, because otherwise the only report is the f64
+    # had -- but say so, because otherwise the only report is the
     # directed-rounding tests failing.
     message(
         WARNING
         "No strict floating-point rounding option known for "
-        "${CMAKE_CXX_COMPILER_ID}; the guest's MODE.FP_ROUND may not reach f64 "
+        "${CMAKE_CXX_COMPILER_ID}; the guest's MODE.FP_ROUND may not reach host "
         "arithmetic. See fp_mode.h."
     )
     set(RJ_STRICT_FP_ROUNDING_OPTIONS -DROCJITSU_STRICT_FP_ROUNDING=1)

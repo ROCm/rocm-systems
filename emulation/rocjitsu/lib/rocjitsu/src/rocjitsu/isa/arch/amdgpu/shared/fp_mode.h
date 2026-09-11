@@ -295,10 +295,9 @@ inline uint16_t packed_mul_bf16(float a, float b, bool fp16_ovfl) {
 }
 
 /// @brief Execute an F16 fused multiply-add and return its raw F16 encoding.
-/// @details The intermediate is computed in double and rounded to F16 in
-/// software by pseudo_scalar, but the double fma is still subject to whatever
-/// rounding mode is in effect when this runs, so it belongs on this side of the
-/// split.
+/// @details The double intermediate is computed under the guest rounding mode,
+/// then rounded to F16 in software by pseudo_scalar. The host environment is
+/// restored before the software result policy runs.
 inline uint16_t fma_f16(uint16_t src0, uint16_t src1, uint16_t src2, bool abs0, bool abs1,
                         bool abs2, bool neg0, bool neg1, bool neg2, uint32_t round_mode,
                         uint32_t denorm_mode, uint32_t omod, bool clamp, bool fp16_ovfl,
@@ -310,9 +309,13 @@ inline uint16_t fma_f16(uint16_t src0, uint16_t src1, uint16_t src2, bool abs0, 
   const double multiplicand = static_cast<double>(util::f16_to_f32(src0));
   const double multiplier = static_cast<double>(util::f16_to_f32(src1));
   const double addend = static_cast<double>(util::f16_to_f32(src2));
-  uint16_t result =
-      pseudo_scalar::round_f16_result(std::fma(multiplicand, multiplier, addend), round_mode, omod,
-                                      clamp, fp16_ovfl, clamp_nan_to_zero);
+  double intermediate;
+  {
+    detail::ScopedFenv environment(round_mode);
+    intermediate = std::fma(multiplicand, multiplier, addend);
+  }
+  uint16_t result = pseudo_scalar::round_f16_result(intermediate, round_mode, omod, clamp,
+                                                    fp16_ovfl, clamp_nan_to_zero);
   if ((denorm_mode & 2u) == 0 && (result & 0x7c00u) == 0 && (result & 0x03ffu) != 0)
     result &= 0x8000u;
   return finalize_omod_f16(result, omod);

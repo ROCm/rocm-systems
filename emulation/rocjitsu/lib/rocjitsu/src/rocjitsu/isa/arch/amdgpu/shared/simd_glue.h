@@ -658,8 +658,9 @@ inline util::native<uint32_t> finalize_omod_f16_bits_simd(util::native<uint32_t>
 /// @brief Execute a native-width batch of architectural F16 fused multiply-adds.
 /// @details The raw F16 operands remain in 32-bit SIMD lanes. Each native-width
 /// batch is split into double-width chunks so the multiply-add itself is fused
-/// in SIMD without the erroneous F16-to-F32-to-F16 double rounding. The final
-/// F16 rounding and output policy reuse the scalar architectural primitive.
+/// in SIMD under the guest rounding mode without the erroneous
+/// F16-to-F32-to-F16 double rounding. The final F16 rounding and output policy
+/// reuse the scalar architectural primitive.
 inline util::native<uint32_t>
 fma_f16_mode_simd(util::native<uint32_t> src0, util::native<uint32_t> src1,
                   util::native<uint32_t> src2, bool abs0, bool abs1, bool abs2, bool neg0,
@@ -692,7 +693,11 @@ fma_f16_mode_simd(util::native<uint32_t> src0, util::native<uint32_t> src1,
     const util::native<double> a(a_lanes, util::stdx::vector_aligned);
     const util::native<double> b(b_lanes, util::stdx::vector_aligned);
     const util::native<double> c(c_lanes, util::stdx::vector_aligned);
-    const util::native<double> result = util::stdx::fma(a, b, c);
+    util::native<double> result;
+    {
+      fp_mode::detail::ScopedFenv environment(round_mode);
+      result = util::stdx::fma(a, b, c);
+    }
     alignas(util::native<double>) double result_lanes[W64];
     result.copy_to(result_lanes, util::stdx::vector_aligned);
     for (std::size_t i = 0; i < W64; ++i) {
