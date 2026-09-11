@@ -75,10 +75,6 @@ start_bundle(bundle_t& _bundle, std::int64_t _tid, Args&&... _args)
                                       std::string_view{ _name }, _args...);
         }
     }
-    else
-    {
-        tim::consume_parameters(_args...);
-    }
     if(get_use_timemory())
     {
         _bundle.push(_tid);
@@ -118,10 +114,6 @@ stop_bundle(bundle_t& _bundle, std::int64_t _tid, Args&&... _args)
             category_region_t{}.audit(quirk::config<quirk::perfetto>{},
                                       std::string_view{ _name }, _args...);
         }
-    }
-    else
-    {
-        tim::consume_parameters(_args...);
     }
 }
 
@@ -184,7 +176,7 @@ pthread_create_gotcha::wrapper::operator()() const
     auto         _is_sampling = false;
     auto         _bundle      = std::shared_ptr<bundle_t>{};
     auto         _signals     = std::set<int>{};
-    auto         _coverage    = (get_mode() == state::process::Mode::Coverage);
+    auto         _coverage    = (get_mode() == state::process::Mode::coverage);
     const auto&  _parent_info = thread_info::get(m_config.parent_tid, InternalTID);
     const auto&  _info        = thread_info::init(m_config.offset);
     if(!_info)
@@ -544,13 +536,17 @@ pthread_create_gotcha::get_native_handles()
 
 namespace
 {
-constexpr const char* rocm_internal_libraries[] = { "libhsa-runtime64",
-                                                    "librocprofiler-sdk", "libamdhip64" };
+constexpr const std::array k_rocm_internal_libraries = { "libhsa-runtime64",
+                                                         "librocprofiler-sdk",
+                                                         "libamdhip64" };
 
 bool
 is_rocm_internal_thread(void* func_ptr)
 {
-    if(!func_ptr) return false;
+    if(!func_ptr)
+    {
+        return false;
+    }
 
     Dl_info info;
     if(dladdr(func_ptr, &info) == 0 || info.dli_fname == nullptr)
@@ -561,12 +557,9 @@ is_rocm_internal_thread(void* func_ptr)
 
     const std::string_view lib_name{ info.dli_fname };
 
-    for(const auto* lib : rocm_internal_libraries)
-    {
-        if(lib_name.find(lib) != std::string_view::npos) return true;
-    }
-
-    return false;
+    return std::ranges::any_of(k_rocm_internal_libraries, [lib_name](const auto* lib) {
+        return lib_name.find(lib) != std::string_view::npos;
+    });
 }
 }  // namespace
 
@@ -582,126 +575,129 @@ pthread_create_gotcha::operator()(pthread_t* thread, const pthread_attr_t* attr,
         return (*m_wrappee)(thread, attr, func, arg);
     }
 
-    auto _tid = utility::get_thread_index();
-    if(static_cast<size_t>(_tid) >= ROCPROFSYS_MAX_THREADS ||
+    auto tid = utility::get_thread_index();
+    if(static_cast<size_t>(tid) >= ROCPROFSYS_MAX_THREADS ||
        thread_info::get_initialized_thread() >= ROCPROFSYS_MAX_THREADS)
     {
         warn_thread_limit_once();
         return (*m_wrappee)(thread, attr, func, arg);
     }
-    auto _thr_state    = state::thread::get();
-    auto _glob_state   = state::process::get();
-    auto _mode         = get_mode();
-    auto _disabled     = (_thr_state == state::thread::Disabled);
-    auto _enabled      = (_thr_state == state::thread::Enabled);
-    auto _bundle       = std::optional<bundle_t>{};
-    auto _sample_child = sampling_enabled_on_child_threads();
-    auto _active = (_glob_state == ::rocprofsys::state::process::Active && !_disabled);
-    const auto& _info = thread_info::init(!_active || !_sample_child || _disabled);
-    if(!_info)
+    auto thr_state    = state::thread::get();
+    auto glob_state   = state::process::get();
+    auto mode         = get_mode();
+    auto disabled     = (thr_state == state::thread::Disabled);
+    auto enabled      = (thr_state == state::thread::Enabled);
+    auto bundle       = std::optional<bundle_t>{};
+    auto sample_child = sampling_enabled_on_child_threads();
+    auto active       = (glob_state == ::rocprofsys::state::process::Active && !disabled);
+    const auto& info  = thread_info::init(!active || !sample_child || disabled);
+    if(!info)
     {
         // Untracked parent threads cannot safely create wrapped/profiled child threads.
         return (*m_wrappee)(thread, attr, func, arg);
     }
 
-    auto _thread_state_guard = state::thread::scoped(state::thread::Internal);
+    auto thread_state_guard = state::thread::scoped(state::thread::Internal);
+    auto coverage           = (mode == state::process::Mode::coverage);
+    auto use_sampling       = config::get_use_sampling();
+    auto use_causal         = config::get_use_causal();
+    auto offset             = (!enabled || !active || info->is_offset);
+    auto use_bundle         = (active && !coverage && !offset);
+    auto enable_sampling =
+        (use_sampling && sample_child && active && !coverage && !offset);
+    auto enable_causal = (use_causal && sample_child && active && !coverage && !offset);
 
-    auto _coverage     = (_mode == state::process::Mode::Coverage);
-    auto _use_sampling = config::get_use_sampling();
-    auto _use_causal   = config::get_use_causal();
-    auto _offset       = (!_enabled || !_active || _info->is_offset);
-    auto _use_bundle   = (_active && !_coverage && !_offset);
-    auto _enable_sampling =
-        (_use_sampling && _sample_child && _active && !_coverage && !_offset);
-    auto _enable_causal =
-        (_use_causal && _sample_child && _active && !_coverage && !_offset);
-
-    static const bool debug_threading_get_id =
+    static const bool k_debug_threading_get_id =
         get_env<bool>(TIMEMORY_SETTINGS_PREFIX "DEBUG_THREADING_GET_ID", false);
 
-    if(debug_threading_get_id)
+    if(k_debug_threading_get_id)
     {
         LOG_TRACE(
             "Creating new thread :: global_state={}, thread_state={}, mode={}, "
             "active={}, "
             "coverage={}, use_causal={}, use_sampling={}, sample_children={}, tid={}, "
             "use_bundle={}, enable_causal={}, enable_sampling={}, thread_info={}...",
-            _glob_state, _thr_state, _mode, std::to_string(_active),
-            std::to_string(_coverage), std::to_string(_use_causal),
-            std::to_string(_use_sampling), std::to_string(_sample_child),
-            std::to_string(_tid), std::to_string(_use_bundle),
-            std::to_string(_enable_causal), std::to_string(_enable_sampling),
-            _info->as_string());
+            glob_state, thr_state, mode, std::to_string(active), std::to_string(coverage),
+            std::to_string(use_causal), std::to_string(use_sampling),
+            std::to_string(sample_child), std::to_string(tid), std::to_string(use_bundle),
+            std::to_string(enable_causal), std::to_string(enable_sampling),
+            info->as_string());
 
-        std::stringstream _backtrace_ss;
-        timemory_print_demangled_backtrace<8>(_backtrace_ss, std::string{},
-                                              std::string{ "threading::get_id() [id=" } +
-                                                  std::to_string(_tid) +
-                                                  std::string{ "]" },
-                                              std::string{ " " }, false);
-        LOG_TRACE("Backtrace: {}", _backtrace_ss.str());
+        std::stringstream backtrace_ss;
+        constexpr auto    k_demangle_backtrace_depth = 8;
+        timemory_print_demangled_backtrace<k_demangle_backtrace_depth>(
+            backtrace_ss, std::string{},
+            std::string{ "threading::get_id() [id=" } + std::to_string(tid) +
+                std::string{ "]" },
+            std::string{ " " }, false);
+        LOG_TRACE("Backtrace: {}", backtrace_ss.str());
     }
 
-    if(_active && !_disabled && !_info->is_offset)
+    if(active && !disabled && !info->is_offset)
     {
         LOG_DEBUG("[PID={}][rank={}] Starting new thread on {}", process::get_id(),
-                  dmp::rank(), _info->index_data->as_string().c_str());
+                  dmp::rank(), info->index_data->as_string().c_str());
     }
 
     // ensure that cpu cid stack exists on the parent thread if active
-    if(_active && !_coverage)
+    if(active && !coverage)
     {
         LOG_DEBUG("Locking signals...");
         get_cpu_cid_stack();
     }
 
     state::thread::set(state::thread::Disabled);
-    auto _blocked = get_sampling_signals();
-    auto _promise = (_active) ? std::make_shared<std::promise<void>>() : promise_t{};
-    auto _config =
-        wrapper_config{ _enable_causal, _enable_sampling, _offset, _tid, _promise };
-    auto* _wrap = new wrapper{ func, arg, _config };
+    auto  blocked = get_sampling_signals();
+    auto  promise = (active) ? std::make_shared<std::promise<void>>() : promise_t{};
+    auto  config  = wrapper_config{ .enable_causal   = enable_causal,
+                                    .enable_sampling = enable_sampling,
+                                    .offset          = offset,
+                                    .parent_tid      = tid,
+                                    .promise         = promise };
+    auto* wrap    = new wrapper{ func, arg, config };
     state::thread::set(state::thread::Internal);
 
     // block the signals in entire process
-    if(_enable_sampling && !_blocked.empty())
+    if(enable_sampling && !blocked.empty())
     {
         LOG_DEBUG("Blocking signals...");
-        tim::signals::block_signals(_blocked, tim::signals::sigmask_scope::process);
+        tim::signals::block_signals(blocked, tim::signals::sigmask_scope::process);
     }
 
-    if(_use_bundle)
+    if(use_bundle)
     {
-        _bundle = bundle_t{ "pthread_create" };
-        start_bundle(*_bundle, _info->index_data->sequent_value, audit::incoming{},
-                     thread, attr, func, arg);
+        bundle = bundle_t{ "pthread_create" };
+        start_bundle(*bundle, info->index_data->sequent_value, audit::incoming{}, thread,
+                     attr, func, arg);
     }
 
     // threads must process their delays before creating a new thread
     causal::delay::process();
 
     // create the thread
-    auto _ret = (*m_wrappee)(thread, attr, &wrapper::wrap, static_cast<void*>(_wrap));
+    auto ret = (*m_wrappee)(thread, attr, &wrapper::wrap, static_cast<void*>(wrap));
 
     // wait for thread to set promise
-    if(_promise)
+    if(promise)
     {
         LOG_DEBUG("Waiting for child to signal it is setup...");
-        _promise->get_future().wait_for(std::chrono::milliseconds{ 500 });
+        promise->get_future().wait_for(500ms);
     }
 
-    if(_use_bundle)
-        stop_bundle(*_bundle, _info->index_data->sequent_value, audit::outgoing{}, _ret);
+    if(use_bundle)
+    {
+        stop_bundle(*bundle, info->index_data->sequent_value, audit::outgoing{}, ret);
+    }
 
     // unblock the signals in the entire process
-    if(_enable_sampling && !_blocked.empty())
+    if(enable_sampling && !blocked.empty())
     {
         LOG_DEBUG("Unblocking signals...");
-        tim::signals::unblock_signals(_blocked, tim::signals::sigmask_scope::process);
+        tim::signals::unblock_signals(blocked, tim::signals::sigmask_scope::process);
     }
 
     LOG_DEBUG("Returning success...");
-    return _ret;
+    return ret;
 }
 }  // namespace component
 }  // namespace rocprofsys

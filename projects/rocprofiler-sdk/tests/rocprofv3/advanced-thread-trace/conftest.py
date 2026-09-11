@@ -90,6 +90,11 @@ def pytest_addoption(parser):
         action="store",
         help="Path to ATT no-detail output directory.",
     )
+    parser.addoption(
+        "--att-pmc-input",
+        action="store",
+        help="Path to JSON file from a combined ATT + counter collection run.",
+    )
 
 
 @pytest.fixture
@@ -176,3 +181,12 @@ def att_no_detail_out_dir_path(request):
     if not output_dir_path:
         pytest.skip("--att-no-detail-out-dir not provided")
     return output_dir_path
+
+
+@pytest.fixture
+def att_pmc_json_data(request):
+    filename = request.config.getoption("--att-pmc-input")
+    if not filename:
+        pytest.skip("--att-pmc-input not provided")
+    with open(filename, "r") as inp:
+        return dotdict(collapse_dict_list(json.load(inp)))
