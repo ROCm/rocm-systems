@@ -13,6 +13,7 @@
 
 #include <cstdlib>
 
+#include "fail_loud.h"
 #include "utils.h"
 
 // Per-thread wait signal referenced by the inline MPSC-callback drain helpers
@@ -33,7 +34,10 @@ void* ncclMemoryStack::allocateSpilled(struct ncclMemoryStack* me, size_t size, 
   const size_t hunkSize = need < kMinHunkSize ? kMinHunkSize : need;
 
   struct Hunk* hunk = static_cast<struct Hunk*>(malloc(hunkSize));
-  if (hunk == nullptr) return nullptr;
+  // Both ncclMemoryStackAlloc overloads memset the result unconditionally, so
+  // returning nullptr would fault at the call site with no diagnostic. Production
+  // aborts here too (src/misc/utils.cc).
+  if (hunk == nullptr) FailLoud("utils_fakes", "memory stack hunk malloc failed");
   hunk->size = hunkSize;
 
   // Push onto the chain rooted at the stub rather than above the current top:
