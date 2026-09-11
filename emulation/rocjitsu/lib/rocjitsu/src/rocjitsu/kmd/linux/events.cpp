@@ -96,6 +96,24 @@ void EventState::signal_interrupt(uint32_t event_id) {
   }
 }
 
+bool EventState::signal_memory_fault(const MemoryFault &fault) {
+  std::lock_guard<std::mutex> lock(mutex_);
+  bool delivered = false;
+  for (auto &[id, ev] : events_) {
+    if (ev.event_type != KFD_IOC_EVENT_MEMORY)
+      continue;
+    // A memory-exception event is not a signal event: it carries no age slot in
+    // the shared page and the runtime does not poll it, it parks a thread in
+    // WAIT_EVENTS. Record the payload for that thread to collect and wake it.
+    ev.fault = fault;
+    ev.signaled = true;
+    for (auto *cv : ev.waiters)
+      cv->notify_one();
+    delivered = true;
+  }
+  return delivered;
+}
+
 /// @brief Set the closing flag and wake all waiters across all events.
 void EventState::notify_closing() {
   std::lock_guard<std::mutex> lock(mutex_);
@@ -364,6 +382,16 @@ int EventState::wait_events(void *arg, uint32_t process_id) {
       any_ready = true;
       if (it->second.event_type == 0)
         ev_data[i].signal_event_data.last_event_age = it->second.event_age;
+      if (it->second.event_type == KFD_IOC_EVENT_MEMORY) {
+        // The union member the runtime reads for this event type. Report the
+        // address that faulted so the failure names its own cause.
+        auto &exception = ev_data[i].memory_exception_data;
+        exception = {};
+        exception.va = it->second.fault.va;
+        exception.gpu_id = it->second.fault.gpu_id;
+        exception.failure.NotPresent = it->second.fault.not_present ? 1u : 0u;
+        exception.failure.ReadOnly = it->second.fault.read_only ? 1u : 0u;
+      }
       if (it->second.auto_reset) {
         it->second.signaled = false;
         if (it->second.event_type == 0)

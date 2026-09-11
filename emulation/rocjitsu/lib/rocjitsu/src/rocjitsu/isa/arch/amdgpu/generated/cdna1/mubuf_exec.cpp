@@ -7,6 +7,7 @@
 #include "rocjitsu/isa/arch/amdgpu/cdna1/addr_calc.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna1/mubuf.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/gfx9_cache_flags.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/scalar_operand_read.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/simd_glue.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/mem_state.h"
@@ -1207,7 +1208,7 @@ void BufferAtomicPkAddF16Mubuf::execute_impl(amdgpu::Wavefront &wf) {
   d->elem_size = 4;
   d->num_elems = 1;
   d->is_load = (inst_.glc != 0);
-  d->atomic_op = amdgpu::AtomicOp::FADD;
+  d->atomic_op = amdgpu::AtomicOp::PK_ADD_F16;
   d->mtype = amdgpu::mtype_from_flags_gfx9(inst_.glc);
   d->non_temporal = 0;
   mubuf_calculate_addresses(inst_, wf, *d);

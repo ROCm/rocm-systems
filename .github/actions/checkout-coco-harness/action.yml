@@ -12,11 +12,11 @@ inputs:
   path:
     description: 'Checkout path, relative to the workspace.'
     required: true
-  app-id:
-    description: 'GitHub App ID used to mint the checkout token.'
+  client-id:
+    description: 'GitHub App client ID used to mint the checkout token.'
     required: true
   app-private-key:
-    description: 'Private key for app-id.'
+    description: 'Private key for client-id.'
     required: true
 
 runs:
@@ -31,7 +31,7 @@ runs:
       id: coco_token
       uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
       with:
-        app-id: ${{ inputs.app-id }}
+        client-id: ${{ inputs.client-id }}
         private-key: ${{ inputs.app-private-key }}
         owner: ${{ github.repository_owner }}
         repositories: tRCCL

@@ -33,8 +33,8 @@
 #include <unordered_map>
 #include <vector>
 
-// Decoder-side reader for the `.sqtt_funcmap` ELF section emitted by the
-// sqtt_instrumentation LLVM pass. The pass writes one ASCII row per
+// Decoder-side reader for the `.sqtt_funcmap` ELF section emitted by the AMD
+// SQTT marker LLVM pass. The pass writes one ASCII row per
 // instrumented function/marker; at runtime the matching ID surfaces in the
 // trace as `rocprofiler_thread_trace_decoder_shaderdata_t::value`
 // (see trace_decoder_types.h: bit 0 = exit_prev, bit 1 = is_enter,

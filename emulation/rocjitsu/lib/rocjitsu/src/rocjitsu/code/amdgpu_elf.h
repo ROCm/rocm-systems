@@ -63,6 +63,7 @@ inline constexpr uint32_t EF_AMDGPU_MACH_AMDGCN_GFX1100 = 0x41;
 inline constexpr uint32_t EF_AMDGPU_MACH_AMDGCN_GFX1150 = 0x43;
 inline constexpr uint32_t EF_AMDGPU_MACH_AMDGCN_GFX1200 = 0x48;
 inline constexpr uint32_t EF_AMDGPU_MACH_AMDGCN_GFX1250 = 0x49;
+inline constexpr uint32_t EF_AMDGPU_MACH_AMDGCN_GFX1251 = 0x5a;
 inline constexpr uint32_t EF_AMDGPU_MACH_AMDGCN_GFX1201 = 0x4e;
 
 /*
@@ -126,6 +127,7 @@ inline constexpr rj_code_arch_t arch_for_elf_mach(uint32_t mach) {
   case EF_AMDGPU_MACH_AMDGCN_GFX1201:
     return ROCJITSU_CODE_ARCH_RDNA4;
   case EF_AMDGPU_MACH_AMDGCN_GFX1250:
+  case EF_AMDGPU_MACH_AMDGCN_GFX1251:
     return ROCJITSU_CODE_ARCH_CDNA5;
   default:
     return ROCJITSU_CODE_ARCH_INVALID;
@@ -161,6 +163,8 @@ inline constexpr const char *elf_mach_name(uint32_t mach) {
     return "gfx1201";
   case EF_AMDGPU_MACH_AMDGCN_GFX1250:
     return "gfx1250";
+  case EF_AMDGPU_MACH_AMDGCN_GFX1251:
+    return "gfx1251";
   default:
     return "unknown";
   }

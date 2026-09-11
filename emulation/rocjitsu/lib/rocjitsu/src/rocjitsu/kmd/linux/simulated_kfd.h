@@ -125,6 +125,35 @@ public:
   uint32_t open_process(pid_t client_pid = 0);
   void set_process_client_pid(uint32_t process_id, pid_t client_pid);
 
+  /// @brief Binds one GPU's memory to this driver for fault reporting.
+  /// @details Every GPU has its own GpuMemory, and the report has to name the
+  /// device that faulted: the runtime maps gpu_id to a node and surfaces it, so
+  /// a shared reporter that guessed would misattribute a fault from any device
+  /// but the first.
+  class GpuFaultReporter : public amdgpu::MemoryFaultReporter {
+  public:
+    GpuFaultReporter(SimulatedKfd *driver, uint32_t gpu_id) : driver_(driver), gpu_id_(gpu_id) {}
+
+    void report_memory_fault(uint32_t vmid, uint64_t addr,
+                             amdgpu::MemoryFaultCause cause) override {
+      driver_->report_memory_fault(vmid, addr, gpu_id_, cause);
+    }
+
+  private:
+    SimulatedKfd *driver_ = nullptr;
+    uint32_t gpu_id_ = 0;
+  };
+
+  /// @brief Deliver a GPU memory violation to the faulting process.
+  /// @details Hardware raises a VM fault and KFD reports it as an event of type
+  /// KFD_IOC_EVENT_MEMORY; the runtime parks a handler thread on that event and
+  /// decides whether to abort. Emulating the report rather than choosing a
+  /// policy here is what makes an invalid GPU access behave as it would on
+  /// silicon. A process that registered no such event gets a warning instead,
+  /// because the violation would otherwise vanish silently.
+  void report_memory_fault(uint32_t vmid, uint64_t addr, uint32_t gpu_id,
+                           amdgpu::MemoryFaultCause cause);
+
   int ioctl(uint32_t process_id, unsigned long request, void *arg, int *target_mem_fd = nullptr,
             int target_proc_fd = -1);
   void *mmap(uint32_t process_id, void *addr, size_t length, int prot, int flags, off_t offset);
@@ -157,6 +186,10 @@ public:
 
   uint32_t gpu_id() const { return gpus_.empty() ? 0 : gpus_[0].gpu_id; }
   uint32_t num_gpus() const { return static_cast<uint32_t>(gpus_.size()); }
+  /// @brief KFD gpu_id of the device at @p index, for callers that must name one.
+  uint32_t gpu_id_at(uint32_t index) const {
+    return index < gpus_.size() ? gpus_[index].gpu_id : 0;
+  }
   const Sysfs &topology() const { return topology_; }
   std::string topology_path() const override { return topology_.path(); }
   std::string drm_path() const override { return topology_.drm_path(); }
@@ -241,6 +274,8 @@ public:
   struct GpuDevice {
     SoC *soc = nullptr;
     uint32_t gpu_id = 0;
+    /// Fault reporter bound to this device, so a violation names its own GPU.
+    std::unique_ptr<GpuFaultReporter> fault_reporter;
     bool cps_initialized = false;
     /// Whether the "no CWSR layout for this architecture" warning has been
     /// logged for this GPU. The check now runs per faulting access rather than
@@ -250,6 +285,9 @@ public:
     bool cwsr_layout_warned = false;
     kfd_process_device_apertures apertures{};
   };
+
+  /// @brief Lazily create @p gpu's bound reporter, so a fault names its device.
+  GpuFaultReporter *fault_reporter_for(GpuDevice &gpu);
 
 private:
   /// @brief Look up the local-mode process.
@@ -275,7 +313,8 @@ private:
   }
 
   void map_to_gpu(KfdProcess &proc, uint64_t gpu_va, void *host_ptr, size_t size,
-                  amdgpu::Mtype mtype = amdgpu::Mtype::RW);
+                  amdgpu::Mtype mtype = amdgpu::Mtype::RW,
+                  KfdProcess::HostExtentOwner owner = KfdProcess::HostExtentOwner::Application);
   void unmap_from_gpu(KfdProcess &proc, uint64_t gpu_va, size_t size);
 
   void update_cp_doorbell_base(uint32_t gpu_ordinal, uint32_t process_id, void *base);
@@ -360,7 +399,8 @@ private:
   /// @param gpu_id KFD GPU id of the queue whose wave would stop.
   bool debug_stop_publishable(uint32_t gpu_id);
   int resume_debug_queues(KfdProcess *proc, uint32_t *queue_ids, uint32_t num_queues);
-  void apply_cwsr_to_wave(amdgpu::Wavefront &wf, const kmd::CwsrWaveState &state);
+  void apply_cwsr_to_wave(amdgpu::Wavefront &wf, const kmd::CwsrWaveState &state,
+                          rj_code_arch_t arch);
 
   /// @brief Address-watchpoint handler installed on every compute unit.
   /// @details Runs on the engine thread for each active-lane global-memory
@@ -470,10 +510,14 @@ private:
   /// held simultaneously (allocate_scratch_backing and close() both release
   /// process_mutex_ before taking alloc_mutex_):
   ///   op_mutex_ < process_mutex_
-  ///   op_mutex_ < alloc_mutex_ < {ipc_mutex_, page_table_mutex_, owned_fds_mutex_}
+  ///   op_mutex_ < alloc_mutex_ < {ipc_mutex_, page_table_request_mutex_, owned_fds_mutex_}
+  ///   page_table_request_mutex_ < page_table_mutex_
+  ///   page_table_request_mutex_ < vmid_mutex_       (GpuMemory binding validation)
   ///   op_mutex_ < runtime_mutex_ < alloc_mutex_        (runtime_enable_ioctl)
   ///   op_mutex_ < debug_sessions_mutex_ < runtime_mutex_ (debug_trap_ioctl)
   ///   process_mutex_ < interrupt_mutex_                (open()/open_process())
+  ///   hw_queue_mutex_ (CP) < scratch_backing_mutex_ (KfdProcess) < alloc_mutex_
+  ///                                                    (allocate_scratch_backing)
   /// The op_mutex_ in the debug rule is always the CALLER's, while runtime_mutex_
   /// may belong to a DIFFERENT process (the debug target resolved by client pid).
   /// debug_trap_ioctl holds only the caller's op_mutex_ and never acquires the

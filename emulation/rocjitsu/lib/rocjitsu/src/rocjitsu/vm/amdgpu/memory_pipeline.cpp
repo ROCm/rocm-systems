@@ -3,7 +3,9 @@
 
 #include "rocjitsu/vm/amdgpu/memory_pipeline.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/ds_transpose.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/fp_mode.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/scalar_operand_read.h"
+#include "rocjitsu/isa/isa_traits.h"
 #include "rocjitsu/vm/amdgpu/cluster_lds_multicast.h"
 #include "rocjitsu/vm/amdgpu/command_processor.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
@@ -58,9 +60,10 @@ std::vector<ClusterLdsTarget> resolve_lds_write_targets(VectorMemState &d, Wavef
   return targets;
 }
 
-void write_lds_dst_load_direct(const VectorMemState &d, Lds &lds, uint32_t per_lane_bytes) {
+void write_lds_dst_load_direct(const VectorMemState &d, Lds &lds, uint32_t per_lane_bytes,
+                               uint64_t write_mask) {
   for (uint32_t lane = 0; lane < d.wf_size; ++lane) {
-    if ((d.lane_mask & (1ULL << lane)) == 0)
+    if ((write_mask & (1ULL << lane)) == 0)
       continue;
     uint32_t data_offset = lane * per_lane_bytes;
     if (data_offset + per_lane_bytes > d.response_data.size()) {
@@ -112,7 +115,9 @@ MemoryAccessCompletion complete_lds_dst_load(VectorMemState &d, Wavefront &wf, C
   });
 
   if (!d.cluster_multicast || cluster_downgrades_to_ordinary) {
-    write_lds_dst_load_direct(d, wf.lds(), per_lane_bytes);
+    // GFX9/CDNA: out-of-range lanes return zeros, and those zeros are written to LDS.
+    const uint64_t write_mask = arch_is_cdna_4_or_lower(cu.arch()) ? d.exec_mask : d.lane_mask;
+    write_lds_dst_load_direct(d, wf.lds(), per_lane_bytes, write_mask);
     return MemoryAccessCompletion::Complete;
   }
 
@@ -143,6 +148,8 @@ MemoryAccessCompletion vector_complete(VectorMemState &d, Wavefront &wf, Compute
   uint32_t total_bytes = d.num_elems * d.elem_size;
   uint32_t vgpr_count =
       is_atomic ? std::max(1u, (d.elem_size + 3u) / 4u) : std::max(1u, (total_bytes + 3u) / 4u);
+  if (!cu.owns_vgpr_range(wf, d.dst_reg_base, vgpr_count))
+    return MemoryAccessCompletion::Complete;
 
   // Zero destination VGPRs for OOB lanes. Per AMD ISA spec, out-of-bounds
   // buffer loads return 0. exec_mask is the effective issue mask; ordinary OOB
@@ -230,18 +237,18 @@ ScalarMemPipeline::complete_access(Instruction &inst, Wavefront &wf,
   auto &d = *inst.data_as<ScalarMemState>();
   if (!d.is_load)
     return MemoryAccessCompletion::Complete;
-  for (uint32_t i = 0; i < d.num_dwords; ++i) {
-    // Dispatch on the selector, not the resolved base: an SDATA of 108..123
-    // names the trap-temporary file, and the ROCr handler loads into TTMPs.
-    amdgpu::write_scalar_selector(wf, d.dst_selector + i, d.response_data[i]);
-  }
+  if (d.dst_register.width != d.num_dwords)
+    return MemoryAccessCompletion::Complete;
+  RegisterAccess registers(wf);
+  for (uint32_t i = 0; i < d.num_dwords; ++i)
+    registers.write_scalar_unobserved(d.dst_register, i, d.response_data[i]);
   // Trace: log SMEM load values for debugging.
   util::Logger::vm([&](auto &os) {
     if (wf.wg_id() == 0) {
       static thread_local uint32_t slw_count = 0;
       if (++slw_count <= 100) {
-        os << std::format("SMEM complete: addr={:#x} dst_s={} ndw={} data=[{:#x}", d.addr,
-                          d.dst_reg_base, d.num_dwords, d.response_data[0]);
+        os << std::format("SMEM complete: addr={:#x} dst={} ndw={} data=[{:#x}", d.addr,
+                          d.dst_register.index, d.num_dwords, d.response_data[0]);
         for (uint32_t i = 1; i < d.num_dwords && i < 4; ++i)
           os << std::format(",{:#x}", d.response_data[i]);
         os << std::format("] wg={}", wf.wg_id());
@@ -306,6 +313,10 @@ template <typename F> F apply_fp_atomic(AtomicOp op, F old_val, F src_val) {
   }
 }
 
+bool is_packed_add(AtomicOp op) {
+  return op == AtomicOp::PK_ADD_F16 || op == AtomicOp::PK_ADD_BF16;
+}
+
 uint32_t atomic_source_stride(const VectorMemState &d, const std::vector<uint8_t> &store_data) {
   const bool uses_two_sources =
       (d.atomic_op == AtomicOp::CMPSWAP || d.atomic_op == AtomicOp::MSKOR);
@@ -347,7 +358,13 @@ void execute_atomic_rmw(VectorMemState &d, L2Cache *l2, uint32_t vmid) {
             std::memcpy(&old_val, line_data + offset, 4);
 
             uint32_t new_val;
-            if (is_fp) {
+            if (is_packed_add(d.atomic_op)) {
+              uint32_t src_val;
+              std::memcpy(&src_val, &d.store_data[lane * src_stride], 4);
+              new_val = fp_mode::atomic_add_packed_16(old_val, src_val,
+                                                      d.atomic_op == AtomicOp::PK_ADD_BF16,
+                                                      /*denorm_mode=*/3);
+            } else if (is_fp) {
               float old_f = std::bit_cast<float>(old_val);
               float src_f;
               std::memcpy(&src_f, &d.store_data[lane * src_stride], 4);
@@ -440,7 +457,12 @@ void execute_lds_atomic_rmw(VectorMemState &d, Lds *lds,
     if (esz == 4) {
       uint32_t old_val = lds->read32(addr);
       uint32_t new_val;
-      if (is_fp) {
+      if (is_packed_add(d.atomic_op)) {
+        uint32_t src_val;
+        std::memcpy(&src_val, &store_data[lane * src_stride], 4);
+        new_val = fp_mode::atomic_add_packed_16(
+            old_val, src_val, d.atomic_op == AtomicOp::PK_ADD_BF16, d.packed_denorm_mode);
+      } else if (is_fp) {
         float old_f = std::bit_cast<float>(old_val);
         float src_f;
         std::memcpy(&src_f, &store_data[lane * src_stride], 4);
@@ -501,6 +523,7 @@ void GlobalMemPipeline::initiate_access(Instruction &inst, Wavefront &wf) {
   const uint64_t scratch_lanes = d.scratch_swizzle ? d.scratch_lane_mask & request_lanes : 0;
   const uint64_t plain_lanes = request_lanes & ~scratch_lanes;
   const uint32_t stride = d.scratch_addr_stride;
+  const uint32_t base_offset = d.scratch_addr_base_offset;
 
   if (d.is_load) {
     const uint64_t request_lanes = transpose_request_lane_mask(d);
@@ -510,20 +533,20 @@ void GlobalMemPipeline::initiate_access(Instruction &inst, Wavefront &wf) {
     if (scratch_request_lanes)
       l1_->load(d.per_lane_addr.data(), scratch_request_lanes, d.elem_size, d.num_elems,
                 d.response_data.data(), d.mtype, d.non_temporal, d.request_force_l1_bypass,
-                d.wf_size, wf.process_id(), stride, d.element_lane_masks.view());
+                d.wf_size, wf.process_id(), stride, base_offset, d.element_lane_masks.view());
     if (plain_request_lanes)
       l1_->load(d.per_lane_addr.data(), plain_request_lanes, d.elem_size, d.num_elems,
                 d.response_data.data(), d.mtype, d.non_temporal, d.request_force_l1_bypass,
-                d.wf_size, wf.process_id(), 0, d.element_lane_masks.view());
+                d.wf_size, wf.process_id(), 0, /*addr_base_offset=*/0, d.element_lane_masks.view());
   } else {
     if (scratch_lanes)
       l1_->store(d.per_lane_addr.data(), scratch_lanes, d.elem_size, d.num_elems,
                  d.store_data.data(), d.mtype, d.non_temporal, d.wf_size, wf.process_id(), stride,
-                 d.element_lane_masks.view());
+                 base_offset, d.element_lane_masks.view());
     if (plain_lanes)
       l1_->store(d.per_lane_addr.data(), plain_lanes, d.elem_size, d.num_elems, d.store_data.data(),
                  d.mtype, d.non_temporal, d.wf_size, wf.process_id(), 0,
-                 d.element_lane_masks.view());
+                 /*addr_base_offset=*/0, d.element_lane_masks.view());
   }
 }
 

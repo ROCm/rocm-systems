@@ -197,9 +197,9 @@ def test_run_clang_tidy_timeout_returns_false(monkeypatch):
 
 
 # --------------------------------------------------------------------------- #
-# get_enabled_checks
+# has_enabled_checks
 # --------------------------------------------------------------------------- #
-def test_get_enabled_checks_parses_list(monkeypatch):
+def test_has_enabled_checks_true_when_list_populated(monkeypatch):
     out = (
         "Enabled checks:\n"
         "    misc-const-correctness\n"
@@ -210,17 +210,14 @@ def test_get_enabled_checks_parses_list(monkeypatch):
     monkeypatch.setattr(
         ctc, "_clang_tidy", lambda a, *e, timeout=None: _completed(list(e), 0, out, "")
     )
-    assert ctc.get_enabled_checks(_args()) == [
-        "misc-const-correctness",
-        "modernize-use-auto",
-    ]
+    assert ctc.has_enabled_checks(_args()) is True
 
 
-def test_get_enabled_checks_failure_warns_and_returns_empty(monkeypatch, capsys):
+def test_has_enabled_checks_failure_warns_and_returns_false(monkeypatch, capsys):
     monkeypatch.setattr(
         ctc, "_clang_tidy", lambda a, *e, timeout=None: _completed(list(e), 1, "", "boom")
     )
-    assert ctc.get_enabled_checks(_args()) == []
+    assert ctc.has_enabled_checks(_args()) is False
     assert "could not resolve check list" in capsys.readouterr().err
 
 

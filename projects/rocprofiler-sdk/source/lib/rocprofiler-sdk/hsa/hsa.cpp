@@ -31,6 +31,7 @@
 #include "lib/rocprofiler-sdk/hsa/pc_sampling.hpp"
 #include "lib/rocprofiler-sdk/hsa/scratch_memory.hpp"
 #include "lib/rocprofiler-sdk/hsa/utils.hpp"
+#include "lib/rocprofiler-sdk/kfd/signal_less_gate.hpp"
 #include "lib/rocprofiler-sdk/registration.hpp"
 #include "lib/rocprofiler-sdk/thread_trace/core.hpp"
 #include "lib/rocprofiler-sdk/tracing/tracing.hpp"
@@ -574,6 +575,11 @@ hsa_shut_down_refcnt_impl()
             // thread-trace producer/consumer threads *before* ROCR tears down
             // SDMA engines and signal pools in Runtime::Unload().
             thread_trace::flush_and_stop();
+            // F24 terminal fail-closed fence: after real hsa_shut_down the runtime
+            // frees SDMA/signal state, so no callback-capable signal-less completion
+            // may survive. On timeout abandon+disable process-wide. No-op with the
+            // feature off.
+            ::rocprofiler::kfd::signal_less_fence_completions();
         }
         return get_core_table()->hsa_shut_down_fn();
     }

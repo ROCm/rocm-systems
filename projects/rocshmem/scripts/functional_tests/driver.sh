@@ -834,10 +834,10 @@ TestColl() {
   ExecTest  "fcollect"         3       1            64        32768
   ExecTest  "fcollect"         5       1            64        32768
 
-  # NOTE: teamreduction at rank counts > 2 currently fails a data validation
-  # check in the ring all-reduce path; this is a pre-existing bug unrelated to
-  # work/sync pool alignment, so it is only run at 2 ranks here.
   ExecTest  "teamreduction"    2       1            64        32768
+  ExecTest  "teamreduction"    3       1            64        32768
+  ExecTest  "teamreduction"    4       1            64        32768
+  ExecTest  "teamreduction"    8       1            64        32768
 
   ExecTest  "teamreducescatter" 2      1            64        32768
   ExecTest  "teamreducescatter" 4      1            64        32768
@@ -849,6 +849,8 @@ TestColl() {
     ExecTest  "alltoall_wave"       2       1            $WAVE_SIZE   512
     ExecTest  "fcollect_wave"       2       1            $WAVE_SIZE   32768
     ExecTest  "reduce_wave"         2       1            $WAVE_SIZE   32768
+    ExecTest  "reduce_wave"         4       1            $WAVE_SIZE   32768
+    ExecTest  "reduce_wave"         8       1            $WAVE_SIZE   32768
     ExecTest  "reducescatter_wave"  2       1            $WAVE_SIZE   32768
     ExecTest  "reducescatter_wave"  4       1            $WAVE_SIZE   32768
     ExecTest  "reducescatter_wave"  8       1            $WAVE_SIZE   32768
@@ -1250,8 +1252,8 @@ case $TEST in
     TestColl
     TestOther
     TestOnStream
-    # Tile tests are only supported on IPC backend
-    if [[ ! "$TEST" =~ ^(gda|ro) ]]; then
+    # Tile tests are only supported on IPC and GDA backend
+    if [[ ! "$TEST" =~ ^(ro) ]]; then
       TestTiles
     fi
     # Host non-MPI IPC tests are only supported on IPC backend

@@ -1,7 +1,7 @@
 #
 #
 #
-cmake_minimum_required(VERSION 3.21.0 FATAL_ERROR)
+cmake_minimum_required(VERSION 3.24 FATAL_ERROR)
 
 project(rocprofiler-rocprofv3-tests LANGUAGES C CXX)
 
@@ -61,5 +61,8 @@ add_subdirectory(att-consecutive-kernels)
 add_subdirectory(kfd)
 add_subdirectory(roctx-pause-resume)
 add_subdirectory(mpi-ranks)
+add_subdirectory(hip-event-trace)
 add_subdirectory(hip-graph-bubbles-test)
 add_subdirectory(hip-graph-attribution-test)
+add_subdirectory(kernel-replay)
+add_subdirectory(signal-handler)

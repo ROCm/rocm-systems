@@ -5,7 +5,7 @@
 #include "common/path.hpp"
 #include "logger/debug.hpp"
 
-#include <spdlog/fmt/ranges.h>
+#include <fmt/ranges.h>
 
 #include <algorithm>
 #include <cstdlib>

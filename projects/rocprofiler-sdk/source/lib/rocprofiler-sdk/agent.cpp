@@ -84,7 +84,7 @@ void
 update_agent_runtime_visibility(rocprofiler_agent_t& agent_info)
 {
     //
-    //      https://rocm.docs.amd.com/en/latest/conceptual/gpu-isolation.html
+    //      https://rocm.docs.amd.com/en/latest/reference/system-optimization/gpu-isolation.html
     //
     //
     // ROCR_VISIBLE_DEVICES

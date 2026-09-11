@@ -1,26 +1,7 @@
 #!/bin/bash -e
 
-# MIT License
-#
-# Copyright (c) 2025 Advanced Micro Devices, Inc. All rights reserved.
-#
-# Permission is hereby granted, free of charge, to any person obtaining a copy
-# of this software and associated documentation files (the "Software"), to deal
-# in the Software without restriction, including without limitation the rights
-# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-# copies of the Software, and to permit persons to whom the Software is
-# furnished to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included in
-# all copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-# THE SOFTWARE.
+# Copyright (c) Advanced Micro Devices, Inc.
+# SPDX-License-Identifier: MIT
 
 SCRIPT_DIR=$(realpath $(dirname ${BASH_SOURCE[0]}))
 cd $(dirname ${SCRIPT_DIR})
@@ -181,6 +162,24 @@ test-rocprof-sys-sample()
     verbose-run rocprof-sys-sample --sample-cputime 100 --sample-realtime 50 --hsa-interrupt 0 -TPH -- python3 ${SOURCE_DIR}/examples/python/external.py -n 5 -v 20
 }
 
+find-roctx-site-packages()
+{
+    # rocprofiler-sdk installs its "roctx" Python bindings per interpreter
+    # under <rocm_path>/lib{,64}/pythonX.Y/site-packages, unlike rocprofsys's
+    # own ABI-agnostic bindings. Resolve that directory for the interpreter
+    # that will run source.py so `import roctx` can succeed.
+    local python_version=$("${1}" -c 'import sys; print("%d.%d" % sys.version_info[:2])')
+    local rocm_path="${ROCM_PATH:-/opt/rocm}"
+    for lib_name in lib lib64; do
+        local candidate="${rocm_path}/${lib_name}/python${python_version}/site-packages"
+        if [ -d "${candidate}/roctx" ]; then
+            echo "${candidate}"
+            return 0
+        fi
+    done
+    return 1
+}
+
 test-rocprof-sys-python()
 {
     verbose-run which rocprof-sys-python
@@ -188,7 +187,14 @@ test-rocprof-sys-python()
     verbose-run rocprof-sys-python -b -- ${SOURCE_DIR}/examples/python/builtin.py -n 5 -v 5
     verbose-run rocprof-sys-python -b -- ${SOURCE_DIR}/examples/python/noprofile.py -n 5 -v 5
     verbose-run rocprof-sys-python -- ${SOURCE_DIR}/examples/python/external.py -n 5 -v 5
-    verbose-run python3 ${SOURCE_DIR}/examples/python/source.py -n 5 -v 5
+
+    local roctx_site_packages=$(find-roctx-site-packages python3 || true)
+    if [ -n "${roctx_site_packages}" ]; then
+        PYTHONPATH="${roctx_site_packages}${PYTHONPATH:+:${PYTHONPATH}}" \
+            verbose-run python3 ${SOURCE_DIR}/examples/python/source.py -n 5 -v 5
+    else
+        echo -e "\nSkipping ${SOURCE_DIR}/examples/python/source.py: roctx Python bindings not installed for $(python3 -c 'import sys; print("%d.%d" % sys.version_info[:2])')\n"
+    fi
 }
 
 test-rocprof-sys-rewrite()

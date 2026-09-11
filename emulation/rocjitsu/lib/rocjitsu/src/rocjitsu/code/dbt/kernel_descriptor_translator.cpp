@@ -182,8 +182,8 @@ constexpr uint16_t kTtmpRdna4GridX = 9;
 // Kernel descriptor field helpers.
 // -----------------------------------------------------------------------------
 
-[[nodiscard]] uint32_t user_sgpr_count(const KD &desc) {
-  return AMDHSA_BITS_GET(desc.compute_pgm_rsrc2, kd::COMPUTE_PGM_RSRC2_USER_SGPR_COUNT);
+[[nodiscard]] uint32_t user_sgpr_count(const KD &desc, rj_code_arch_t arch) {
+  return kernel_descriptor_user_sgpr_count(arch, desc);
 }
 
 [[nodiscard]] bool has_kernarg_segment_ptr(const KD &desc) {
@@ -261,7 +261,7 @@ constexpr uint16_t kTtmpRdna4GridX = 9;
   return std::max(desc.kernarg_size, preload_end_bytes);
 }
 
-[[nodiscard]] int16_t workgroup_id_sgpr(const KD &desc, uint32_t dimension) {
+[[nodiscard]] int16_t workgroup_id_sgpr(const KD &desc, uint32_t dimension, rj_code_arch_t arch) {
   const uint32_t rsrc2 = desc.compute_pgm_rsrc2;
   const bool enabled[3] = {
       AMDHSA_BITS_GET(rsrc2, kd::COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_ID_X) != 0,
@@ -273,7 +273,7 @@ constexpr uint16_t kTtmpRdna4GridX = 9;
   // USER_SGPR_COUNT block, in X/Y/Z order; disabled dimensions consume no SGPR.
   // The packed IDs on gfx942/gfx950 are work-item IDs in VGPR0, not these
   // workgroup IDs, so each enabled workgroup dimension still consumes one SGPR.
-  uint32_t sgpr = user_sgpr_count(desc);
+  uint32_t sgpr = user_sgpr_count(desc, arch);
   for (uint32_t i = 0; i < 3; ++i) {
     if (!enabled[i])
       continue;
@@ -284,11 +284,11 @@ constexpr uint16_t kTtmpRdna4GridX = 9;
   return -1;
 }
 
-[[nodiscard]] uint32_t source_initial_sgpr_count(const KD &desc) {
+[[nodiscard]] uint32_t source_initial_sgpr_count(const KD &desc, rj_code_arch_t arch) {
   // USER_SGPR_COUNT covers only the user block. Enabled workgroup IDs and
   // WORKGROUP_INFO are dense system SGPRs that follow it and must move when a
   // kernarg pointer is inserted into that user block.
-  uint32_t sgprs = user_sgpr_count(desc);
+  uint32_t sgprs = user_sgpr_count(desc, arch);
   const uint32_t rsrc2 = desc.compute_pgm_rsrc2;
   if (AMDHSA_BITS_GET(rsrc2, kd::COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_ID_X))
     ++sgprs;
@@ -371,11 +371,11 @@ void append_salu_write(std::vector<uint32_t> &words, uint32_t word, rj_code_arch
 }
 
 void append_rdna4_workgroup_grid_prologue(std::vector<uint32_t> &words, const KD &desc,
-                                          rj_code_arch_t host_arch) {
+                                          rj_code_arch_t guest_arch, rj_code_arch_t host_arch) {
   const uint16_t shift16 = scalar_positive_inline_u32(16);
-  const int16_t sgpr_wg_id_x = workgroup_id_sgpr(desc, 0);
-  const int16_t sgpr_wg_id_y = workgroup_id_sgpr(desc, 1);
-  const int16_t sgpr_wg_id_z = workgroup_id_sgpr(desc, 2);
+  const int16_t sgpr_wg_id_x = workgroup_id_sgpr(desc, 0, guest_arch);
+  const int16_t sgpr_wg_id_y = workgroup_id_sgpr(desc, 1, guest_arch);
+  const int16_t sgpr_wg_id_z = workgroup_id_sgpr(desc, 2, guest_arch);
 
   if (sgpr_wg_id_x >= 0) {
     append_salu_write(words,
@@ -424,7 +424,7 @@ build_kernel_entry_prologue(const KD &src, rj_code_arch_t guest_arch, rj_code_ar
   //   future target needs SGPR-based scratch setup, it should be appended here
   //   and represented in KdTranslation::prologue_words, not hidden in the patcher.
   if (arch_is_cdna_4_or_lower(guest_arch) && host_arch == ROCJITSU_CODE_ARCH_RDNA4)
-    append_rdna4_workgroup_grid_prologue(words, src, host_arch);
+    append_rdna4_workgroup_grid_prologue(words, src, guest_arch, host_arch);
 
   return words;
 }
@@ -505,7 +505,7 @@ translate_one_descriptor(rj_code_arch_t guest_arch, rj_code_arch_t host_arch,
   const auto preserved_kernarg_bytes = kernarg_bytes_to_preserve(src);
   result.kernarg_size = preserved_kernarg_bytes.value_or(src.kernarg_size);
   result.target_kernarg_size = src.kernarg_size;
-  result.source_user_sgpr_count = static_cast<uint8_t>(user_sgpr_count(src));
+  result.source_user_sgpr_count = static_cast<uint8_t>(user_sgpr_count(src, guest_arch));
   result.target_user_sgpr_count = result.source_user_sgpr_count;
   result.source_has_kernarg_segment_ptr = has_kernarg_segment_ptr(src);
   result.has_kernarg_segment_ptr = result.source_has_kernarg_segment_ptr;
@@ -517,9 +517,9 @@ translate_one_descriptor(rj_code_arch_t guest_arch, rj_code_arch_t host_arch,
   result.has_dispatch_ptr = has_dispatch_ptr(src);
   if (auto dispatch_sgpr = dispatch_ptr_sgpr(src))
     result.dispatch_ptr_sgpr = *dispatch_sgpr;
-  result.workgroup_id_sgpr_x = workgroup_id_sgpr(src, 0);
-  result.workgroup_id_sgpr_y = workgroup_id_sgpr(src, 1);
-  result.workgroup_id_sgpr_z = workgroup_id_sgpr(src, 2);
+  result.workgroup_id_sgpr_x = workgroup_id_sgpr(src, 0, guest_arch);
+  result.workgroup_id_sgpr_y = workgroup_id_sgpr(src, 1, guest_arch);
+  result.workgroup_id_sgpr_z = workgroup_id_sgpr(src, 2, guest_arch);
   result.lds_overflow_workgroup_id_sgpr_x = result.workgroup_id_sgpr_x;
   result.lds_overflow_workgroup_id_sgpr_y = result.workgroup_id_sgpr_y;
   result.lds_overflow_workgroup_id_sgpr_z = result.workgroup_id_sgpr_z;
@@ -769,7 +769,7 @@ translate_one_descriptor(rj_code_arch_t guest_arch, rj_code_arch_t host_arch,
         result.has_kernarg_segment_ptr = true;
         result.kernarg_segment_ptr_sgpr = inserted_slot;
         result.target_user_sgpr_count = result.source_user_sgpr_count + 2u;
-        const uint32_t source_initial_sgprs = source_initial_sgpr_count(src);
+        const uint32_t source_initial_sgprs = source_initial_sgpr_count(src, guest_arch);
         if (source_initial_sgprs > inserted_slot) {
           const uint32_t repair_count = source_initial_sgprs - inserted_slot;
           if (repair_count > std::numeric_limits<uint16_t>::max()) {

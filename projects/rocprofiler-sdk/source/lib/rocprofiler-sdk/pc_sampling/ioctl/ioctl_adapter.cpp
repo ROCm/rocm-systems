@@ -463,7 +463,11 @@ convert_ioctl_pcs_config_to_rocp(const rocprofiler_ioctl_pc_sampling_info_t& ioc
         // No one configured PC sampling on the corresponding device.
         // Read the values of min and max interval provided by the KFD
         rocp_pcs_config.min_interval = ioctl_pcs_config.interval_min;
-        rocp_pcs_config.max_interval = std::min(ioctl_pcs_config.interval_max, 1ul << 20);
+        rocp_pcs_config.max_interval = ioctl_pcs_config.interval_max;
+        if(rocp_pcs_config.unit == ROCPROFILER_PC_SAMPLING_UNIT_CYCLES)
+        {
+            rocp_pcs_config.max_interval = std::min(rocp_pcs_config.max_interval, 1ul << 20);
+        }
     }
 
     rocp_pcs_config.flags = ioctl_pcs_config.flags;

@@ -129,6 +129,10 @@ struct Gfx1250Sim {
   void build() {
     soc = loaded.soc();
     memory = loaded.memory();
+    // This fixture drives the engine directly and inspects single-partition
+    // state, so pin one worker instead of taking the config's default of one
+    // partition per XCD.
+    loaded.engine_config.num_threads = 1;
     engine = std::make_unique<simdojo::SimulationEngine>(loaded.engine_config);
     engine->topology().set_root(loaded.take_root());
     loaded.wire_links(engine->topology());
@@ -167,7 +171,7 @@ struct Gfx1250Sim {
                     ((vgprs / kGfx1250VgprEncodingGranule) - 1));
     AMDHSA_BITS_SET(kd.compute_pgm_rsrc1, COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT,
                     ((sgprs / 8) - 1));
-    AMDHSA_BITS_SET(kd.compute_pgm_rsrc2, COMPUTE_PGM_RSRC2_USER_SGPR_COUNT, user_sgprs);
+    AMDHSA_BITS_SET(kd.compute_pgm_rsrc2, COMPUTE_PGM_RSRC2_GFX125_USER_SGPR_COUNT, user_sgprs);
     AMDHSA_BITS_SET(kd.compute_pgm_rsrc2, COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_ID_X,
                     enable_wg_id_x);
     AMDHSA_BITS_SET(kd.compute_pgm_rsrc2, COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_ID_Y,

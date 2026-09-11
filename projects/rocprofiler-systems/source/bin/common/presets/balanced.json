@@ -11,6 +11,11 @@
         "name": "balanced",
         "use_case": "General-purpose profiling when you need both tracing and sampling without excessive overhead"
     },
+    "output": {
+        "rocpd_output": {
+            "enabled": true
+        }
+    },
     "profiling": {
         "enabled": true
     },
@@ -21,6 +26,6 @@
         }
     },
     "tracing": {
-        "enabled": true
+        "enabled": false
     }
 }

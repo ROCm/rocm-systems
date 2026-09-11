@@ -23,6 +23,7 @@
 #include "rocjitsu/vm/amdgpu/cluster_lds_multicast.h"
 #include "rocjitsu/vm/amdgpu/completion_tracker.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
+#include "rocjitsu/vm/amdgpu/cpu_dispatch_pool.h"
 #include "rocjitsu/vm/amdgpu/dispatch_entry.h"
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"
 #include "rocjitsu/vm/amdgpu/l2_cache.h"
@@ -39,6 +40,7 @@
 #include <limits>
 #include <memory>
 #include <mutex>
+#include <shared_mutex>
 #include <string>
 #include <thread>
 #include <unordered_map>
@@ -73,6 +75,14 @@ struct HwQueue {
   uint64_t last_doorbell = 0;
   bool host_accessible = false;
   bool is_sdma = false;
+  /// @brief Set when a packet faulted; the queue stops until it is torn down.
+  /// @details A faulted packet is retired rather than retried, because its
+  /// endpoint will never resolve. Continuing the scan would then run the FENCE
+  /// or signal packet behind it and publish completion for work that never
+  /// happened, which is the same lie the faulted copy was stopped from telling.
+  /// Hardware halts the engine on a VM fault and waits for the driver; this
+  /// models that, and the violation has already been reported to the process.
+  bool faulted = false;
   bool debug_suspended = false;
   bool runtime_suspended = false;
   /// A command-processor pass observed this queue while its debugger gate was closed.
@@ -116,16 +126,9 @@ enum class SdmaPacketDialect {
 /// not on global CU idle. Signals fire in per-queue submission order.
 class CommandProcessor : public simdojo::Component {
 public:
-  explicit CommandProcessor(std::string name) : simdojo::Component(std::move(name)) {
-    // Bind the doorbell handler at construction, not in startup(): register_queue()
-    // may start the doorbell poll thread (which fires doorbell_event_ via
-    // schedule_event_now) as soon as a host-accessible queue is registered, which can
-    // happen before startup() runs. Binding here removes that ordering hazard — a
-    // handlerless doorbell_event_ would be silently dropped by the engine.
-    doorbell_event_.set_handler(
-        [this](simdojo::Tick ts, simdojo::Message *) { handle_doorbell(ts); });
-  }
-  ~CommandProcessor() override { stop_doorbell_monitor(); }
+  explicit CommandProcessor(std::string name,
+                            simdojo::ExecMode exec_mode = simdojo::ExecMode::FUNCTIONAL);
+  ~CommandProcessor() override;
 
   void set_memory(GpuMemory *mem) { memory_ = mem; }
   void add_l2_cache(L2Cache *l2) {
@@ -141,6 +144,9 @@ public:
   SdmaPacketDialect sdma_packet_dialect() const { return sdma_packet_dialect_; }
   /// @brief Configure launch and packet behavior derived from the GPU architecture.
   void configure_for_arch(rj_code_arch_t arch);
+  void set_shared_dispatch_pool(CpuDispatchPool *pool);
+  void set_dispatch_threads(uint32_t threads);
+  uint32_t dispatch_threads() const { return dispatch_threads_; }
   /// @brief Update doorbell_base for all queues belonging to a process.
   /// @details Called when the doorbell page is mmap'd after queue creation.
   void set_doorbell_base(uint32_t process_id, void *base);
@@ -176,6 +182,12 @@ public:
   /// @param rank This CP's XCD index.
   /// @param peers All XCD command processors of the SoC, in XCD index order.
   void set_xcd_topology(uint32_t rank, std::vector<CommandProcessor *> peers);
+
+  /// @brief Identify this CP's XCC in the device-wide scratch allocation.
+  void set_scratch_xcc_layout(uint32_t xcc_id, uint32_t xcc_count) {
+    scratch_xcc_id_ = xcc_id;
+    scratch_xcc_count_ = xcc_count == 0 ? 1 : xcc_count;
+  }
 
   void register_queue(HwQueue queue);
   void unregister_queue(uint32_t queue_id, uint32_t process_id);
@@ -215,8 +227,14 @@ public:
                                                 simdojo::PortProtocol::DISPATCH);
     dispatch_ports_.push_back(add_port(std::move(port)));
     cus_.push_back(cu);
+    scratch_shader_engine_count_ =
+        std::max(scratch_shader_engine_count_, cu->shader_engine_id() + 1);
+    scratch_waves_per_se_ =
+        std::max(scratch_waves_per_se_, cu->scratch_scoreboard_base() + cu->num_wf_slots());
+    cu->set_pool_driven(dispatch_threads_ > 1);
     cu->set_command_processor(this);
     cu->set_on_idle([this]() { on_cu_idle(); });
+    cu->set_on_pool_ready([this, cu]() { on_cu_pool_ready(cu); });
   }
 
   void startup() override;
@@ -246,20 +264,51 @@ public:
 
   [[nodiscard]] size_t next_cu_index() const { return next_cu_; }
 
-  /// @brief Deepest (@p queue_id, @p process_id) ever got on this CP.
+  /// @brief Number of entries (@p queue_id, @p process_id) accepted on this CP.
   ///
-  /// @details Test-only. A replica's entry list is otherwise unobservable: a packet
-  /// that runs no shader retires in zero time, so once a run finishes every queue is
-  /// empty whether or not those packets were ever placed on the peers at all. The
-  /// peak is recorded by the owning CP as it pushes, under its own queue mutex, so
-  /// this is read AFTER a run rather than sampled during one. Sampling was the
-  /// earlier design and was wrong: it reached into every peer CP from inside a
-  /// workgroup callback that already held the dispatching CP's mutex, which is a
-  /// lock-order inversion between any two CPs the moment more than one thread runs.
-  [[nodiscard]] size_t peak_queued_entry_count_for_test(uint32_t queue_id, uint32_t process_id) {
+  /// @details Test-only. Acceptance is recorded at the queue's single ordered push
+  /// site under this CP's queue mutex and read AFTER a run. Unlike queue depth, the
+  /// count does not depend on whether a peer retires an earlier entry before the
+  /// next one arrives.
+  [[nodiscard]] size_t accepted_entry_count_for_test(uint32_t queue_id, uint32_t process_id) {
     std::lock_guard<std::recursive_mutex> lock(hw_queue_mutex_);
     const auto *qs = find_queue_state(queue_id, process_id);
-    return qs == nullptr ? 0 : qs->peak_entries;
+    return qs == nullptr ? 0 : qs->accepted_entries;
+  }
+
+  /// @brief Kinds of the first two entries accepted on this CP for the queue.
+  /// @details Test-only. The order matches the queue's ordered push site.
+  [[nodiscard]] std::array<DispatchPacketKind, 2>
+  first_accepted_entry_kinds_for_test(uint32_t queue_id, uint32_t process_id) {
+    std::lock_guard<std::recursive_mutex> lock(hw_queue_mutex_);
+    const auto *qs = find_queue_state(queue_id, process_id);
+    return qs == nullptr ? std::array<DispatchPacketKind, 2>{} : qs->first_accepted_entry_kinds;
+  }
+
+  /// @brief Hardware queues registered with this CP, including fan-out replicas.
+  ///
+  /// @details Test-only. Whether a queue is present here as an owner or as a
+  /// replica is an internal placement detail, not something production code
+  /// should branch on.
+  [[nodiscard]] size_t registered_queue_count_for_test() const {
+    std::lock_guard<std::recursive_mutex> lock(hw_queue_mutex_);
+    return hw_queues_.size();
+  }
+
+  /// @brief Host-accessible queues this CP polls, excluding fan-out replicas.
+  ///
+  /// @details Test-only, and the count form of polls_kfd_queues(): replication
+  /// makes every CP hold a host-accessible queue, so this is what says whether a
+  /// CP still has a ring of its own to read after another CP's queue is
+  /// destroyed. Deliberately narrower than "queues this CP owns" -- a queue
+  /// registered directly against this CP by a test is owned by it but is not
+  /// host-accessible, so it is not counted here.
+  [[nodiscard]] size_t polled_kfd_queue_count_for_test() const {
+    std::lock_guard<std::recursive_mutex> lock(hw_queue_mutex_);
+    size_t polled = 0;
+    for (const auto &q : hw_queues_)
+      polled += (q.host_accessible && !q.fanout_replica) ? 1 : 0;
+    return polled;
   }
 
   /// @brief Step a dispatch id within one XCD's residue class.
@@ -476,6 +525,8 @@ private:
   bool find_valid_cluster_barrier_locked(const Wavefront &wf, int32_t barrier_id,
                                          const ClusterWorkgroupPlacement *&placement,
                                          const ClusterBarrierState *&barriers) const;
+  void drain_pending_cluster_barrier_completions();
+  void drain_pending_wg_completions();
   void mark_cluster_workgroup_complete(uint32_t dispatch_id, uint32_t wg_id);
   void erase_cluster_workgroup(uint32_t dispatch_id, uint32_t wg_id);
   void erase_cluster_workgroups(uint32_t dispatch_id);
@@ -490,12 +541,24 @@ private:
   /// @brief Process all queues: dispatch undispatched entries, handle non-kernel entries.
   void process_queues();
 
+  bool has_runnable_cus() const;
+  FunctionalQuantumResult run_active_cus_once(simdojo::Tick now);
+  void refresh_pooled_due_ticks(simdojo::Tick now);
+  simdojo::Tick next_pooled_due_tick(simdojo::Tick now);
+  void arm_dispatch_continuation(simdojo::Tick tick);
+  void cancel_dispatch_continuation();
+
   /// @brief Called from CU on_idle callback. In functional mode with quantum>0,
   /// checks for stalled dispatches that can resume.
   void on_cu_idle();
 
+  /// @brief Wake the CP-owned functional driver after a pooled CU becomes runnable.
+  void on_cu_pool_ready(ComputeUnitCore *cu);
+
   /// @brief Queue scheduling: select next queue with undispatched entries.
   HwQueueState *schedule_next_queue();
+
+  void handle_doorbell_sync(simdojo::Tick timestamp);
 
   /// @brief Check if barrier is satisfied for an entry.
   bool barrier_satisfied(const HwQueueState &qs, size_t idx) const;
@@ -586,6 +649,26 @@ private:
   uint32_t dispatch_id_base_ = 1;
   size_t total_dispatched_ = 0;
   std::atomic<uint64_t> dispatched_workgroups_{0};
+  simdojo::ExecMode exec_mode_ = simdojo::ExecMode::FUNCTIONAL;
+  uint32_t dispatch_threads_ = 1;
+  CpuDispatchPool *shared_dispatch_pool_ = nullptr;
+  std::unique_ptr<CpuDispatchPool> local_dispatch_pool_;
+  std::vector<ComputeUnitCore *> active_cu_scratch_;
+  std::vector<FunctionalQuantumResult> quantum_result_scratch_;
+  std::unordered_map<ComputeUnitCore *, simdojo::Tick> pooled_due_ticks_;
+
+  struct PendingWorkgroupCompletion {
+    uint32_t dispatch_id = 0;
+    uint32_t wg_id = 0;
+  };
+  std::vector<PendingWorkgroupCompletion> pending_wg_completions_;
+
+  struct PendingClusterBarrierCompletion {
+    uint32_t dispatch_id = 0;
+    uint8_t completion_bit = 0;
+    std::vector<std::pair<ComputeUnitCore *, uint32_t>> peers;
+  };
+  std::vector<PendingClusterBarrierCompletion> pending_cluster_barrier_completions_;
 
   struct ClusterWorkgroupPlacement {
     ComputeUnitCore *cu = nullptr;
@@ -616,6 +699,14 @@ private:
   std::unordered_map<uint64_t, ClusterBarrierState> cluster_barriers_;
 
   simdojo::Event doorbell_event_{this, simdojo::EventType::TIMER_CALLBACK};
+  simdojo::Event dispatch_continuation_event_{this, simdojo::EventType::TIMER_CALLBACK};
+  bool dispatch_continuation_pending_ = false;
+  simdojo::Tick dispatch_continuation_tick_ = simdojo::TICK_MAX;
+  uintptr_t dispatch_continuation_generation_ = 0;
+  // Guards changes to the shape of hw_queues_ and new_queue_states_. The
+  // dispatch handler holds a shared lock while worker execution temporarily
+  // releases hw_queue_mutex_, keeping its vector references stable.
+  std::shared_mutex queue_structure_mutex_;
   mutable std::recursive_mutex hw_queue_mutex_;
 
   std::shared_ptr<ExecutionPluginGroup> plugin_group_ = ExecutionPluginGroup::empty_group();
@@ -632,7 +723,7 @@ private:
   void read_gpu_block(uint64_t va, void *dst, size_t size, uint32_t vmid) const;
 
   /// @brief Write a block of bytes to GPU virtual address space from a buffer.
-  void write_gpu_block(uint64_t va, const void *src, size_t size, uint32_t vmid);
+  amdgpu::AccessOutcome write_gpu_block(uint64_t va, const void *src, size_t size, uint32_t vmid);
 
   void stop_doorbell_monitor();
   /// @brief Stop and join the monitor only when no polled queue remains.
@@ -655,6 +746,10 @@ private:
   ScratchBackingResolver scratch_resolver_;
   ScratchBackingAllocator scratch_allocator_;
   uint32_t scratch_wave_divisor_ = 1;
+  uint32_t scratch_shader_engine_count_ = 1;
+  uint32_t scratch_waves_per_se_ = 1;
+  uint32_t scratch_xcc_id_ = 0;
+  uint32_t scratch_xcc_count_ = 1;
   std::unique_ptr<CompletionTracker> completion_;
 
   std::atomic<bool> invalid_pending_{false};
