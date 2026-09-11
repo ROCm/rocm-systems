@@ -18,7 +18,12 @@ permissions:
 env:
   # One fat binary covers every family that has a test runner, so the GPU jobs
   # download a single artifact instead of rebuilding per architecture.
-  HRR_ARCHS: "gfx90a;gfx942;gfx950;gfx1030;gfx1100;gfx1150;gfx1151;gfx1153;gfx1200"
+  #
+  # Every arch a pool can hand out has to be listed, not one representative per
+  # family: linux-gfx110X-gpu-rocm and linux-gfx120X-gpu-rocm are wildcard
+  # pools, and a machine whose arch is missing from the binary fails every
+  # workload with hipErrorInvalidImage (200) rather than skipping.
+  HRR_ARCHS: "gfx90a;gfx942;gfx950;gfx1030;gfx1100;gfx1101;gfx1102;gfx1150;gfx1151;gfx1153;gfx1200;gfx1201"
   ROCM_INDEX_URL: "https://rocm.nightlies.amd.com/whl-multi-arch/"
 
 jobs:
