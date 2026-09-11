@@ -571,8 +571,10 @@ TEST_F(DdaFabricEligibilityTest, AllReduceLL_AtTwoShotThresholdEligible)
 // falls through to LL128 / Simple.
 TEST_F(DdaFabricEligibilityTest, AllReduceLL_PastBothThresholds)
 {
+    // DDA_LL_TWOSHOT_THRESHOLD raised to 32 MiB; use 8389000 float32 (~33.6 MiB)
+    // so both one-shot (1 MiB) and two-shot (32 MiB) limits are exceeded.
     EXPECT_FALSE(ncclAllReduceDdaFabricLLEligible(
-        mockComm_.get(), sendbuff_, recvbuff_, 4194336, ncclFloat32, ncclSum));
+        mockComm_.get(), sendbuff_, recvbuff_, 8389000, ncclFloat32, ncclSum));
 }
 
 // The gate above only reports the disjunction of the two tiers. These call each
