@@ -39,7 +39,7 @@ target_include_directories(
     INTERFACE ${CMAKE_CURRENT_SOURCE_DIR}/external_headers/drm_headers
 )
 
-add_subdirectory(src/rocjitsu/analysis)
+add_subdirectory(src/rocjitsu/code/analysis)
 add_subdirectory(src/rocjitsu/code)
 add_subdirectory(src/rocjitsu/isa)
 

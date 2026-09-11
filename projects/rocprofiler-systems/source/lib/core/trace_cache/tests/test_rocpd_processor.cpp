@@ -403,16 +403,14 @@ TEST_F(rocpd_write_read_test, agents_round_trip_all_types)
 
     register_agent(gpu_agent());
     register_agent(cpu_agent());
-
-    // profiler-hub only supports CPU and GPU agent types; NIC is rejected
-    EXPECT_THROW(register_agent(nic_agent()), std::invalid_argument);
+    register_agent(nic_agent());
 
     flush_and_open_reader();
     auto agents = m_reader->get_all_agents();
 
-    ASSERT_EQ(agents.size(), 2U);
+    ASSERT_EQ(agents.size(), 3U);
 
-    bool found_gpu = false, found_cpu = false;
+    bool found_gpu = false, found_cpu = false, found_nic = false;
     for(const auto& agent_ptr : agents)
     {
         if(agent_ptr->agent_type == "GPU")
@@ -427,9 +425,16 @@ TEST_F(rocpd_write_read_test, agents_round_trip_all_types)
             EXPECT_EQ(agent_ptr->name, "CPU0");
             EXPECT_EQ(agent_ptr->model_name, "EPYC");
         }
+        else if(agent_ptr->agent_type == "NIC")
+        {
+            found_nic = true;
+            EXPECT_EQ(agent_ptr->name, "NIC0");
+            EXPECT_EQ(agent_ptr->model_name, "CX7");
+        }
     }
     EXPECT_TRUE(found_gpu) << "GPU agent not found in read-back";
     EXPECT_TRUE(found_cpu) << "CPU agent not found in read-back";
+    EXPECT_TRUE(found_nic) << "NIC agent not found in read-back";
 }
 
 // ---------------------------------------------------------------------------

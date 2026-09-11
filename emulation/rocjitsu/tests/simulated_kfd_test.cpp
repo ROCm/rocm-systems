@@ -18,6 +18,7 @@ RJ_DIAGNOSTIC_IGNORE_PEDANTIC
 RJ_DIAGNOSTIC_POP
 
 #include "embedded_schema.h"
+#include "rocjitsu/kmd/linux/host_mapping_lock.h"
 #include "simdojo/sim/simulation.h"
 
 #include "rocjitsu/base/rj_compiler.h"
@@ -34,6 +35,7 @@ RJ_DIAGNOSTIC_POP
 #include <chrono>
 #include <cstdlib>
 #include <filesystem>
+#include <shared_mutex>
 #include <thread>
 #include <vector>
 
@@ -51,6 +53,17 @@ struct TestVM {
   rocjitsu::SimulatedKfd *driver() {
     auto *vm = dynamic_cast<rocjitsu::VirtualMachine *>(engine->topology().root());
     return vm ? vm->driver() : nullptr;
+  }
+
+  rocjitsu::amdgpu::GpuMemory *memory(uint32_t index = 0) {
+    auto *vm = dynamic_cast<rocjitsu::VirtualMachine *>(engine->topology().root());
+    auto *soc = vm ? vm->soc(index) : nullptr;
+    return soc ? soc->memory() : nullptr;
+  }
+
+  uint32_t num_socs() {
+    auto *vm = dynamic_cast<rocjitsu::VirtualMachine *>(engine->topology().root());
+    return vm ? vm->num_socs() : 0;
   }
 };
 
@@ -199,6 +212,161 @@ TEST_F(SimulatedKfdTest, AdditionalDoorbellMmapKeepsEarlierClientViewLive) {
   std::atomic_ref<uint64_t>(*first_slot).store(0x123456789abcdef0ULL, std::memory_order_release);
   EXPECT_EQ(std::atomic_ref<uint64_t>(*second_slot).load(std::memory_order_acquire),
             0x123456789abcdef0ULL);
+  EXPECT_EQ(driver->close(), 0);
+}
+
+/// @brief Block until a mapping change is genuinely stuck behind the lock.
+/// @details Sleeping and observing that nothing happened proves nothing: an
+/// implementation that takes no lock passes that check whenever the machine is
+/// busy enough to leave the worker unscheduled. Waiting for the blocked-writer
+/// count instead makes the block a fact, and an implementation that never
+/// takes the lock fails here rather than passing by accident.
+[[nodiscard]] bool wait_for_blocked_mapping_change() {
+  const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
+  while (rocjitsu::host_mapping_lock().blocked_writers() == 0) {
+    if (std::chrono::steady_clock::now() > deadline)
+      return false;
+    std::this_thread::yield();
+  }
+  return true;
+}
+
+/// @brief Backing an allocation must not replace a page an access is holding.
+/// @details A MAP_FIXED replacement over a client range is the same hazard as
+/// the application's own mmap: an emulated atomic establishes that a page is
+/// writable and then stores through it, so a mapping change in between stores
+/// into whatever replaced the page. The interposer takes this lock around the
+/// application's mapping calls; the driver's own MAP_FIXED paths are reached
+/// without passing through it, so they have to take it themselves. Standing in
+/// for an in-flight atomic by holding the lock shared here.
+TEST_F(SimulatedKfdTest, FixedAllocationMmapWaitsForInFlightHostAccesses) {
+  auto t = create_test_vm();
+  auto *driver = t.driver();
+  ASSERT_NE(driver, nullptr);
+  ASSERT_GE(driver->open(), 0);
+
+  const long host_page_size = ::sysconf(_SC_PAGESIZE);
+  ASSERT_GT(host_page_size, 0);
+  const size_t page_size = static_cast<size_t>(host_page_size);
+
+  void *target =
+      ::mmap(nullptr, page_size, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+  ASSERT_NE(target, MAP_FAILED);
+
+  kfd_ioctl_alloc_memory_of_gpu_args alloc{};
+  alloc.va_addr = reinterpret_cast<uint64_t>(target);
+  alloc.size = page_size;
+  alloc.gpu_id = driver->gpu_id();
+  alloc.flags = KFD_IOC_ALLOC_MEM_FLAGS_USERPTR | KFD_IOC_ALLOC_MEM_FLAGS_WRITABLE;
+  ASSERT_EQ(driver->ioctl(driver->local_process_id(), AMDKFD_IOC_ALLOC_MEMORY_OF_GPU, &alloc), 0);
+
+  std::atomic<bool> completed{false};
+  auto held = rocjitsu::host_mapping_lock().lock_shared();
+  std::thread mapper([&] {
+    driver->mmap(target, page_size, PROT_READ | PROT_WRITE, MAP_SHARED | MAP_FIXED,
+                 static_cast<off_t>(alloc.mmap_offset));
+    completed.store(true, std::memory_order_release);
+  });
+
+  const bool blocked = wait_for_blocked_mapping_change();
+  EXPECT_TRUE(blocked) << "the driver never took the mapping lock for this operation";
+  EXPECT_FALSE(!blocked || completed.load(std::memory_order_acquire))
+      << "the driver replaced a mapping while an access held a pointer into it";
+
+  held.unlock();
+  mapper.join();
+  EXPECT_TRUE(completed.load(std::memory_order_acquire));
+
+  EXPECT_EQ(driver->close(), 0);
+  ::munmap(target, page_size);
+}
+
+/// @brief Tearing an allocation down must not pull a page out from under one.
+/// @details Sharper than the replacement case: teardown drops the GPU page-table
+/// entry first, so a concurrent access misses the page table, falls through to
+/// the identity path, and validates the very host page this is about to remove.
+/// Routed through the driver rather than the interposer, so the interposer's own
+/// lock never sees it.
+TEST_F(SimulatedKfdTest, AllocationMunmapWaitsForInFlightHostAccesses) {
+  auto t = create_test_vm();
+  auto *driver = t.driver();
+  ASSERT_NE(driver, nullptr);
+  ASSERT_GE(driver->open(), 0);
+
+  const long host_page_size = ::sysconf(_SC_PAGESIZE);
+  ASSERT_GT(host_page_size, 0);
+  const size_t page_size = static_cast<size_t>(host_page_size);
+
+  void *target =
+      ::mmap(nullptr, page_size, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+  ASSERT_NE(target, MAP_FAILED);
+
+  kfd_ioctl_alloc_memory_of_gpu_args alloc{};
+  alloc.va_addr = reinterpret_cast<uint64_t>(target);
+  alloc.size = page_size;
+  alloc.gpu_id = driver->gpu_id();
+  alloc.flags = KFD_IOC_ALLOC_MEM_FLAGS_USERPTR | KFD_IOC_ALLOC_MEM_FLAGS_WRITABLE;
+  ASSERT_EQ(driver->ioctl(driver->local_process_id(), AMDKFD_IOC_ALLOC_MEMORY_OF_GPU, &alloc), 0);
+  ASSERT_EQ(driver->mmap(target, page_size, PROT_READ | PROT_WRITE, MAP_SHARED | MAP_FIXED,
+                         static_cast<off_t>(alloc.mmap_offset)),
+            target);
+
+  std::atomic<bool> completed{false};
+  auto held = rocjitsu::host_mapping_lock().lock_shared();
+  std::thread unmapper([&] {
+    driver->munmap(target, page_size);
+    completed.store(true, std::memory_order_release);
+  });
+
+  const bool blocked = wait_for_blocked_mapping_change();
+  EXPECT_TRUE(blocked) << "the driver never took the mapping lock for this operation";
+  EXPECT_FALSE(!blocked || completed.load(std::memory_order_acquire))
+      << "the driver withdrew a mapping while an access held a pointer into it";
+
+  held.unlock();
+  unmapper.join();
+  EXPECT_TRUE(completed.load(std::memory_order_acquire));
+
+  EXPECT_EQ(driver->close(), 0);
+}
+
+/// @brief A doorbell MAP_FIXED must not replace a page an access is holding.
+/// @details The interposer hands a MAP_FIXED mmap straight to the driver, so
+/// this replacement never passes through the interposer's lock either.
+TEST_F(SimulatedKfdTest, FixedDoorbellMmapWaitsForInFlightHostAccesses) {
+  auto t = create_test_vm();
+  auto *driver = t.driver();
+  ASSERT_NE(driver, nullptr);
+  ASSERT_GE(driver->open(), 0);
+
+  const long host_page_size = ::sysconf(_SC_PAGESIZE);
+  ASSERT_GT(host_page_size, 0);
+  const size_t doorbell_page_size = static_cast<size_t>(host_page_size);
+  const off_t doorbell_mmap_offset = static_cast<off_t>(
+      rocjitsu::KFD_MMAP_TYPE_DOORBELL | rocjitsu::kfd_mmap_gpu_id(driver->gpu_id()));
+
+  void *target = ::mmap(nullptr, doorbell_page_size, PROT_NONE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+  ASSERT_NE(target, MAP_FAILED);
+  ASSERT_EQ(::munmap(target, doorbell_page_size), 0);
+
+  std::atomic<bool> completed{false};
+  auto held = rocjitsu::host_mapping_lock().lock_shared();
+  std::thread mapper([&] {
+    driver->force_next_doorbell_monitor_mmap_at_for_testing(target);
+    driver->mmap(target, doorbell_page_size, PROT_READ | PROT_WRITE, MAP_SHARED | MAP_FIXED,
+                 doorbell_mmap_offset);
+    completed.store(true, std::memory_order_release);
+  });
+
+  const bool blocked = wait_for_blocked_mapping_change();
+  EXPECT_TRUE(blocked) << "the driver never took the mapping lock for this operation";
+  EXPECT_FALSE(!blocked || completed.load(std::memory_order_acquire))
+      << "the driver replaced a doorbell page while an access held a pointer into it";
+
+  held.unlock();
+  mapper.join();
+  EXPECT_TRUE(completed.load(std::memory_order_acquire));
+
   EXPECT_EQ(driver->close(), 0);
 }
 
@@ -907,6 +1075,265 @@ TEST_F(SimulatedKfdTest, TopologyDirectoryExists) {
 // KFD_SIGNAL_EVENT_LIMIT, which turned a live consumer's ioctls into -EBADF and
 // destroyed the ages it was polling. This asserts the wake disturbs neither the
 // page nor the closing flag, so a driver that survives it keeps serving.
+// A GPU access that cannot be translated must reach the runtime as a memory
+// violation. Hardware raises a VM fault and KFD reports it on the process's
+// KFD_IOC_EVENT_MEMORY event; without that report the simulator either
+// dereferences the address -- corrupting the host -- or swallows it, and the
+// failure resurfaces somewhere unrelated with nothing tying it to its cause.
+TEST_F(SimulatedKfdTest, UnresolvedGpuAddressRaisesMemoryExceptionEvent) {
+  auto t = create_test_vm();
+  ASSERT_NE(t.driver(), nullptr);
+  auto *drv = t.driver();
+  auto *memory = t.memory();
+  ASSERT_NE(memory, nullptr);
+
+  ASSERT_GE(drv->open(), 0);
+  const uint32_t process_id = drv->local_process_id();
+  auto proc = drv->find_process(process_id);
+  ASSERT_NE(proc, nullptr);
+
+  constexpr size_t kSlots = 64;
+  std::vector<uint64_t> page(kSlots, 0);
+  proc->event_state_.adopt_page(page.data(), page.size() * sizeof(uint64_t));
+
+  kfd_ioctl_create_event_args create{};
+  create.event_type = KFD_IOC_EVENT_MEMORY;
+  ASSERT_EQ(drv->ioctl(AMDKFD_IOC_CREATE_EVENT, &create), 0);
+
+  // A page reserved but never made accessible: what a runtime VA aperture looks
+  // like, and where an address invented upstream most often lands.
+  void *raw =
+      mmap(nullptr, rocjitsu::KfdProcess::kPageSize, PROT_NONE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+  ASSERT_NE(raw, MAP_FAILED);
+  const uint64_t faulting_va = reinterpret_cast<uint64_t>(raw) + 0x40;
+
+  memory->read32(faulting_va, process_id);
+
+  kfd_event_data ev{};
+  ev.event_id = create.event_id;
+  kfd_ioctl_wait_events_args wait{};
+  wait.events_ptr = reinterpret_cast<uint64_t>(&ev);
+  wait.num_events = 1;
+  wait.wait_for_all = 1;
+  wait.timeout = 0;
+  ASSERT_EQ(drv->ioctl(AMDKFD_IOC_WAIT_EVENTS, &wait), 0);
+
+  EXPECT_EQ(wait.wait_result, KFD_IOC_WAIT_RESULT_COMPLETE)
+      << "the memory-exception event must be signaled by the rejected access";
+  EXPECT_EQ(ev.memory_exception_data.va, faulting_va)
+      << "the report must name the address that faulted";
+  EXPECT_EQ(ev.memory_exception_data.failure.NotPresent, 1u);
+  EXPECT_EQ(ev.memory_exception_data.failure.ReadOnly, 0u);
+
+  munmap(raw, rocjitsu::KfdProcess::kPageSize);
+  EXPECT_EQ(drv->close(), 0);
+}
+
+// A fault has to name the device it happened on. The runtime maps gpu_id to a
+// node and surfaces it as the faulting node, so reporting every device's
+// violation as the first one is misattribution the caller can see, not just
+// untidy metadata.
+TEST_F(SimulatedKfdTest, MemoryExceptionNamesTheFaultingGpu) {
+  const std::string config = std::string(CONFIG_DIR) + "/gfx950_mi355x_kmd_2gpu.json";
+  rj_vm_t *vm = nullptr;
+  ASSERT_EQ(rj_vm_create(config.c_str(), RJ_VM_MODE_LOCAL, &vm), ROCJITSU_STATUS_SUCCESS);
+  ASSERT_NE(vm, nullptr);
+  ASSERT_GE(vm->vm->num_socs(), 2u) << "this regression needs a second device to misattribute";
+
+  auto *drv = dynamic_cast<rocjitsu::SimulatedKfd *>(vm->vm->driver());
+  ASSERT_NE(drv, nullptr);
+  auto *second_memory = vm->vm->soc(1)->memory();
+  ASSERT_NE(second_memory, nullptr);
+
+  const uint32_t process_id = drv->local_process_id();
+  auto proc = drv->find_process(process_id);
+  ASSERT_NE(proc, nullptr);
+
+  constexpr size_t kSlots = 64;
+  std::vector<uint64_t> page(kSlots, 0);
+  proc->event_state_.adopt_page(page.data(), page.size() * sizeof(uint64_t));
+
+  kfd_ioctl_create_event_args create{};
+  create.event_type = KFD_IOC_EVENT_MEMORY;
+  ASSERT_EQ(drv->ioctl(AMDKFD_IOC_CREATE_EVENT, &create), 0);
+
+  void *raw =
+      mmap(nullptr, rocjitsu::KfdProcess::kPageSize, PROT_NONE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+  ASSERT_NE(raw, MAP_FAILED);
+
+  // Fault the SECOND device only.
+  second_memory->read32(reinterpret_cast<uint64_t>(raw), process_id);
+
+  kfd_event_data ev{};
+  ev.event_id = create.event_id;
+  kfd_ioctl_wait_events_args wait{};
+  wait.events_ptr = reinterpret_cast<uint64_t>(&ev);
+  wait.num_events = 1;
+  wait.wait_for_all = 1;
+  wait.timeout = 0;
+  ASSERT_EQ(drv->ioctl(AMDKFD_IOC_WAIT_EVENTS, &wait), 0);
+  ASSERT_EQ(wait.wait_result, KFD_IOC_WAIT_RESULT_COMPLETE);
+  EXPECT_EQ(ev.memory_exception_data.gpu_id, drv->gpu_id_at(1))
+      << "a fault on the second device must not be reported against the first";
+  EXPECT_NE(drv->gpu_id_at(1), drv->gpu_id_at(0))
+      << "the devices must differ or this asserts nothing";
+
+  munmap(raw, rocjitsu::KfdProcess::kPageSize);
+  rj_vm_destroy(vm);
+}
+
+// A page that is readable but refuses the write is a protection fault, and the
+// KFD ABI reports it in a different field than a missing page. The runtime
+// reads the two separately, so collapsing them misstates the cause.
+TEST_F(SimulatedKfdTest, ReadOnlyPageReportsReadOnlyRatherThanNotPresent) {
+  auto t = create_test_vm();
+  ASSERT_NE(t.driver(), nullptr);
+  auto *drv = t.driver();
+  auto *memory = t.memory();
+  ASSERT_NE(memory, nullptr);
+
+  ASSERT_GE(drv->open(), 0);
+  const uint32_t process_id = drv->local_process_id();
+  auto proc = drv->find_process(process_id);
+  ASSERT_NE(proc, nullptr);
+
+  constexpr size_t kSlots = 64;
+  std::vector<uint64_t> page(kSlots, 0);
+  proc->event_state_.adopt_page(page.data(), page.size() * sizeof(uint64_t));
+
+  kfd_ioctl_create_event_args create{};
+  create.event_type = KFD_IOC_EVENT_MEMORY;
+  ASSERT_EQ(drv->ioctl(AMDKFD_IOC_CREATE_EVENT, &create), 0);
+
+  void *raw =
+      mmap(nullptr, rocjitsu::KfdProcess::kPageSize, PROT_READ, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+  ASSERT_NE(raw, MAP_FAILED);
+  const uint64_t addr = reinterpret_cast<uint64_t>(raw);
+
+  // Reading is fine; only the write violates the protection.
+  memory->read32(addr, process_id);
+  memory->write32(addr, 0x1234u, process_id);
+
+  kfd_event_data ev{};
+  ev.event_id = create.event_id;
+  kfd_ioctl_wait_events_args wait{};
+  wait.events_ptr = reinterpret_cast<uint64_t>(&ev);
+  wait.num_events = 1;
+  wait.wait_for_all = 1;
+  wait.timeout = 0;
+  ASSERT_EQ(drv->ioctl(AMDKFD_IOC_WAIT_EVENTS, &wait), 0);
+  ASSERT_EQ(wait.wait_result, KFD_IOC_WAIT_RESULT_COMPLETE);
+  EXPECT_EQ(ev.memory_exception_data.failure.ReadOnly, 1u);
+  EXPECT_EQ(ev.memory_exception_data.failure.NotPresent, 0u);
+
+  munmap(raw, rocjitsu::KfdProcess::kPageSize);
+  EXPECT_EQ(drv->close(), 0);
+}
+
+// An atomic against a mapped page that is not writable must name the cause the
+// mapping actually has. A PROT_NONE reservation -- the shape the runtime leaves
+// around an aperture -- is absent to the GPU, so reporting it as a protection
+// violation would send the runtime looking for a permission problem on memory
+// that is not mapped at all.
+TEST_F(SimulatedKfdTest, MappedReservationReportsNotPresentRatherThanReadOnly) {
+  auto t = create_test_vm();
+  ASSERT_NE(t.driver(), nullptr);
+  auto *drv = t.driver();
+  auto *memory = t.memory();
+  ASSERT_NE(memory, nullptr);
+
+  ASSERT_GE(drv->open(), 0);
+  const uint32_t process_id = drv->local_process_id();
+  auto proc = drv->find_process(process_id);
+  ASSERT_NE(proc, nullptr);
+
+  constexpr size_t kSlots = 64;
+  std::vector<uint64_t> page(kSlots, 0);
+  proc->event_state_.adopt_page(page.data(), page.size() * sizeof(uint64_t));
+
+  kfd_ioctl_create_event_args create{};
+  create.event_type = KFD_IOC_EVENT_MEMORY;
+  ASSERT_EQ(drv->ioctl(AMDKFD_IOC_CREATE_EVENT, &create), 0);
+
+  void *raw =
+      mmap(nullptr, rocjitsu::KfdProcess::kPageSize, PROT_NONE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+  ASSERT_NE(raw, MAP_FAILED);
+
+  // Reached through a page-table entry at a GPU address that is nothing like a
+  // host pointer, so the mapped path is the only one that can service it: an
+  // identity fallback would answer a different question and let the mapped
+  // classification regress unnoticed.
+  constexpr uint64_t kGpuVa = 0x8000'0000'0000ULL;
+  proc->map_pages(kGpuVa, raw, rocjitsu::KfdProcess::kPageSize);
+  ASSERT_TRUE(memory->is_mapped(kGpuVa, process_id))
+      << "the atomic must resolve through the page table, not by identity";
+
+  EXPECT_EQ(memory->atomic_store(kGpuVa, sizeof(uint64_t), 1, process_id),
+            rocjitsu::amdgpu::AccessOutcome::Faulted);
+
+  kfd_event_data ev{};
+  ev.event_id = create.event_id;
+  kfd_ioctl_wait_events_args wait{};
+  wait.events_ptr = reinterpret_cast<uint64_t>(&ev);
+  wait.num_events = 1;
+  wait.wait_for_all = 1;
+  wait.timeout = 0;
+  ASSERT_EQ(drv->ioctl(AMDKFD_IOC_WAIT_EVENTS, &wait), 0);
+  ASSERT_EQ(wait.wait_result, KFD_IOC_WAIT_RESULT_COMPLETE);
+  EXPECT_EQ(ev.memory_exception_data.va, kGpuVa);
+  EXPECT_EQ(ev.memory_exception_data.failure.NotPresent, 1u);
+  EXPECT_EQ(ev.memory_exception_data.failure.ReadOnly, 0u);
+
+  munmap(raw, rocjitsu::KfdProcess::kPageSize);
+  EXPECT_EQ(drv->close(), 0);
+}
+
+// The reporting path must stay quiet for addresses that do resolve, or every
+// local-mode workload would raise faults for its ordinary pageable pointers.
+TEST_F(SimulatedKfdTest, ResolvableAddressRaisesNoMemoryException) {
+  auto t = create_test_vm();
+  ASSERT_NE(t.driver(), nullptr);
+  auto *drv = t.driver();
+  auto *memory = t.memory();
+  ASSERT_NE(memory, nullptr);
+
+  ASSERT_GE(drv->open(), 0);
+  const uint32_t process_id = drv->local_process_id();
+  auto proc = drv->find_process(process_id);
+  ASSERT_NE(proc, nullptr);
+
+  constexpr size_t kSlots = 64;
+  std::vector<uint64_t> page(kSlots, 0);
+  proc->event_state_.adopt_page(page.data(), page.size() * sizeof(uint64_t));
+
+  kfd_ioctl_create_event_args create{};
+  create.event_type = KFD_IOC_EVENT_MEMORY;
+  ASSERT_EQ(drv->ioctl(AMDKFD_IOC_CREATE_EVENT, &create), 0);
+
+  void *raw = mmap(nullptr, rocjitsu::KfdProcess::kPageSize, PROT_READ | PROT_WRITE,
+                   MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+  ASSERT_NE(raw, MAP_FAILED);
+  const uint64_t addr = reinterpret_cast<uint64_t>(raw) + 0x40;
+
+  constexpr uint32_t kValue = 0x5eeded;
+  memory->write32(addr, kValue, process_id);
+  EXPECT_EQ(memory->read32(addr, process_id), kValue);
+
+  kfd_event_data ev{};
+  ev.event_id = create.event_id;
+  kfd_ioctl_wait_events_args wait{};
+  wait.events_ptr = reinterpret_cast<uint64_t>(&ev);
+  wait.num_events = 1;
+  wait.wait_for_all = 1;
+  wait.timeout = 0;
+  ASSERT_EQ(drv->ioctl(AMDKFD_IOC_WAIT_EVENTS, &wait), 0);
+  EXPECT_EQ(wait.wait_result, KFD_IOC_WAIT_RESULT_TIMEOUT)
+      << "a translation that succeeded must not report a violation";
+
+  munmap(raw, rocjitsu::KfdProcess::kPageSize);
+  EXPECT_EQ(drv->close(), 0);
+}
+
 TEST_F(SimulatedKfdTest, BeginLocalShutdownLeavesSignaledEventPageIntact) {
   auto t = create_test_vm();
   ASSERT_NE(t.driver(), nullptr);

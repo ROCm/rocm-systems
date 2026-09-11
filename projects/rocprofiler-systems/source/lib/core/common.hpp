@@ -13,7 +13,6 @@
 #include <timemory/backends/threading.hpp>
 #include <timemory/environment/types.hpp>
 #include <timemory/mpl/types.hpp>
-#include <timemory/utility/filepath.hpp>
 #include <timemory/utility/locking.hpp>
 
 #include <cassert>
@@ -85,7 +84,6 @@ namespace rocprofsys
 {
 namespace api       = ::tim::api;        // NOLINT
 namespace category  = ::tim::category;   // NOLINT
-namespace filepath  = ::tim::filepath;   // NOLINT
 namespace project   = ::tim::project;    // NOLINT
 namespace process   = ::tim::process;    // NOLINT
 namespace threading = ::tim::threading;  // NOLINT

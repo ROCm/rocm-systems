@@ -9,12 +9,11 @@
 #include "logger/debug.hpp"
 #include "policies/rocprofiler-sdk/tracing-config.hpp"
 
-#include <spdlog/fmt/fmt.h>  // NOLINT(misc-include-cleaner)
-
 #include <algorithm>
 #include <concepts>
 #include <cstddef>
 #include <cstdint>
+#include <fmt/format.h>
 #include <iterator>
 #include <ranges>
 #include <regex>

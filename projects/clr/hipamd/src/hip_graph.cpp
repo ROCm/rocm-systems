@@ -3789,7 +3789,16 @@ hipError_t hipGraphExecBatchMemOpNodeSetParams(hipGraphExec_t hGraphExec, hipGra
   if (clonedNode == nullptr) {
     HIP_RETURN(hipErrorInvalidValue);
   }
-  HIP_RETURN(reinterpret_cast<hip::hipGraphBatchMemOpNode*>(clonedNode)->SetParams(nodeParams));
+  hipError_t status =
+      reinterpret_cast<hip::hipGraphBatchMemOpNode*>(clonedNode)->SetParams(nodeParams);
+  if (status != hipSuccess) {
+    HIP_RETURN(status);
+  }
+  // The batch-mem-op node's AQL packet is pre-captured at instantiate
+  // (GraphCaptureEnabled()==true); re-capture it so the updated write value
+  // takes effect on the next launch without re-instantiation.
+  status = graphExec->UpdateAQLPacket(clonedNode);
+  HIP_RETURN(status);
 }
 
 hipError_t capturehipStreamBatchMemOp(hipStream_t& stream, unsigned int& count,

@@ -295,6 +295,21 @@ public:
   static constexpr uint64_t kPageShift = 12;
   static constexpr uint64_t kPageSize = 1ULL << kPageShift;
 
+  /// @brief Who owns the host memory behind an extent, and so who may revoke it.
+  ///
+  /// @details The two cannot be treated alike by anything that dereferences the
+  /// extent. Driver memory is a memfd this process mapped read-write and holds
+  /// open; nothing outside can change its protection or take it away, so its
+  /// pointer is valid by construction and checking it would be pure cost on the
+  /// path that moves the most bytes. Application memory is the caller's own
+  /// pages, registered through USERPTR or reached by identity; the application
+  /// may mprotect or munmap them at any time, and dereferencing one without
+  /// checking is how a GPU access becomes a host SIGSEGV.
+  enum class HostExtentOwner : uint8_t {
+    Driver,      ///< A memfd this driver created, mapped and keeps open.
+    Application, ///< The caller's pages; revocable, so validate before use.
+  };
+
   /// @brief One host-backed interval within a GPU page.
   struct HostExtent {
     uint8_t *host_ptr = nullptr;
@@ -302,6 +317,10 @@ public:
     size_t host_backed_bytes = 0;
     /// GPU-page offset that corresponds to host_ptr.
     size_t gpu_page_offset = 0;
+    /// @brief Defaults to Application, which is the safe direction to be wrong
+    /// in: a driver extent mistaken for an application one is validated
+    /// needlessly, while the reverse is dereferenced without checking.
+    HostExtentOwner owner = HostExtentOwner::Application;
 
     bool operator==(const HostExtent &) const = default;
   };
@@ -454,11 +473,12 @@ public:
   /// unmapping from silently replacing an unrelated sibling.
   struct PageTableEntry {
     PageTableEntry() = default;
-    PageTableEntry(uint8_t *host_ptr, amdgpu::Mtype page_mtype)
-        : mtype(page_mtype), host_extents{{host_ptr, kPageSize, 0}} {}
+    PageTableEntry(uint8_t *host_ptr, amdgpu::Mtype page_mtype,
+                   HostExtentOwner owner = HostExtentOwner::Application)
+        : mtype(page_mtype), host_extents{{host_ptr, kPageSize, 0, owner}} {}
     PageTableEntry(uint8_t *host_ptr, amdgpu::Mtype page_mtype, size_t host_backed_bytes,
-                   size_t gpu_page_offset)
-        : mtype(page_mtype), host_extents{{host_ptr, host_backed_bytes, gpu_page_offset}} {}
+                   size_t gpu_page_offset, HostExtentOwner owner = HostExtentOwner::Application)
+        : mtype(page_mtype), host_extents{{host_ptr, host_backed_bytes, gpu_page_offset, owner}} {}
 
     amdgpu::Mtype mtype = amdgpu::Mtype::RW;
     HostExtentList host_extents;
@@ -474,8 +494,12 @@ public:
 
   /// @brief Map host pages into this process's GPU page table.
   /// @param mtype PTE MTYPE for these pages (derived from allocation flags).
+  /// @param owner Who may revoke the backing; see HostExtentOwner. Defaults to
+  ///        Application so an unannotated caller is validated rather than
+  ///        trusted.
   void map_pages(uint64_t gpu_va, void *host_ptr, size_t size,
-                 amdgpu::Mtype mtype = amdgpu::Mtype::RW) {
+                 amdgpu::Mtype mtype = amdgpu::Mtype::RW,
+                 HostExtentOwner owner = HostExtentOwner::Application) {
     std::unique_lock request_lock(*page_table_request_mutex_);
     std::unique_lock lock(page_table_mutex_);
     auto *base = static_cast<uint8_t *>(host_ptr);
@@ -485,11 +509,13 @@ public:
       const size_t gpu_page_offset = mapped_va & (kPageSize - 1);
       const size_t host_backed_bytes =
           std::min<size_t>(kPageSize - gpu_page_offset, size - host_offset);
-      auto [page, inserted] = page_table_.try_emplace(mapped_va >> kPageShift, base + host_offset,
-                                                      mtype, host_backed_bytes, gpu_page_offset);
+      auto [page, inserted] =
+          page_table_.try_emplace(mapped_va >> kPageShift, base + host_offset, mtype,
+                                  host_backed_bytes, gpu_page_offset, owner);
       if (!inserted) {
         page->second.mtype = mtype;
-        replace_host_extent(page->second, {base + host_offset, host_backed_bytes, gpu_page_offset});
+        replace_host_extent(page->second,
+                            {base + host_offset, host_backed_bytes, gpu_page_offset, owner});
       }
       mapped_va += host_backed_bytes;
       host_offset += host_backed_bytes;

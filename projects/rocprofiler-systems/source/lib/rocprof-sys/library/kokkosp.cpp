@@ -129,7 +129,7 @@ violates_name_rules(Arg&& _arg, Args&&... _args)
 {
     // for causal profiling we only consider callbacks which are explicitly named
     if(rocprofsys::config::get_use_causal() &&
-       (std::string_view{ _arg }.find("Kokkos::") == 0 ||
+       (std::string_view{ _arg }.starts_with("Kokkos::") ||
         std::string_view{ _arg }.find("Space::") != std::string_view::npos))
         return true;
 

@@ -19,7 +19,10 @@ find_env_var(const std::vector<std::string>& env, std::string_view var_name)
     const std::string prefix = std::string(var_name) + "=";
     for(const auto& entry : env)
     {
-        if(std::string_view{ entry }.find(prefix) == 0) return entry;
+        if(std::string_view{ entry }.starts_with(prefix))
+        {
+            return entry;
+        }
     }
     return "";
 }
@@ -259,8 +262,8 @@ TEST_F(UpdateEnvTest, RealWorld_Timing_DoubleValues)
     const std::string delay_var = find_env_var(m_env_vars, env_vars::TRACE_DELAY);
     const std::string freq_var  = find_env_var(m_env_vars, env_vars::SAMPLING_FREQ);
 
-    EXPECT_TRUE(delay_var.find(std::string{ env_vars::TRACE_DELAY } + "=") == 0);
-    EXPECT_TRUE(freq_var.find(std::string{ env_vars::SAMPLING_FREQ } + "=") == 0);
+    EXPECT_TRUE(delay_var.starts_with(std::string{ env_vars::TRACE_DELAY } + "="));
+    EXPECT_TRUE(freq_var.starts_with(std::string{ env_vars::SAMPLING_FREQ } + "="));
 }
 
 TEST_F(UpdateEnvTest, StringTypes_StdString)

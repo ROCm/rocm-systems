@@ -230,6 +230,20 @@ GpuAgent::GpuAgent(HSAuint32 node, const HsaNodeProperties& node_props, bool xna
 
   assert(isa != nullptr && "ISA registry inconsistency.");
 
+  // A0 silicon requires the "strict" ISA variant. Re-point A0 devices to the 
+  // strict variant by name so the reported ISA and code-object
+  // selection target the A0-safe ISA. Later steppings keep the base target.
+  if (properties_.Capability.ui32.ASICRevision == 0 &&
+      !core::Runtime::runtime_singleton_->flag().disable_gfx12_strict()) {
+    const std::string strict_name =
+        "amdgcn-amd-amdhsa--" + isa->GetProcessorName() + "-strict";
+    const core::Isa* strict_isa = core::IsaRegistry::GetIsa(strict_name);
+    // gfx1250 (12.5.0) A0 must have a registered strict variant.
+    if (isa->GetMajorVersion() == 12 && isa->GetMinorVersion() == 5)
+      assert(strict_isa != nullptr && "A0 strict ISA variant is not registered.");
+    if (strict_isa != nullptr) isa = strict_isa;
+  }
+
   supported_isas_.push_back(isa);
   if (!supported_isas_[0]->GetIsaGeneric().empty()) {
     supported_isas_.push_back(core::IsaRegistry::GetIsa(supported_isas_[0]->GetIsaGeneric()));
@@ -605,8 +619,8 @@ void GpuAgent::InitScratchPool() {
 
   void* scratch_base = nullptr;
   hsa_status_t err = driver().AllocateScratchMemory(node_id(), max_scratch_len, &scratch_base);
-  assert(err == HSA_STATUS_SUCCESS && "AllocateScratchMemory failed");
-  assert(IsMultipleOf(scratch_base, 0x1000) &&
+  debug_warning(err == HSA_STATUS_SUCCESS && "AllocateScratchMemory failed");
+  assert((err != HSA_STATUS_SUCCESS || IsMultipleOf(scratch_base, 0x1000)) &&
          "Scratch base is not page aligned!");
 
   scratch_pool_. ~SmallHeap();

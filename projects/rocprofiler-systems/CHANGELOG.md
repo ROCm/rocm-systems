@@ -25,6 +25,9 @@ replaces Perfetto as the primary trace output.
   default. Pass `--profile` to get a call-stack-based profile instead.
 - `rocprof-sys-python` no longer accepts abbreviated long options (for example,
   `--conf` for `--config`). Spell out the full option name.
+- `ROCPROFSYS_MONOCHROME` and `MONOCHROME` now treat any value other than a recognized
+false token (`off`/`false`/`no`/`n`/`f`/`0`) as `true`, instead of only recognizing a
+fixed set of true tokens.
 
 ### Resolved issues
 

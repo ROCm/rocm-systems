@@ -117,3 +117,22 @@ const char* ncclEnvPluginGetEnv(const char* name) {
 extern "C" bool ncclParamIsCacheDisabled(const char* key) {
   return false;
 }
+
+// Stub definition for ncclParamP2pDisable
+int64_t ncclParamP2pDisable() {
+  static int64_t val = -1;
+  if (val != -1) {
+    return val;
+  }
+
+  const char* env = std::getenv("NCCL_P2P_DISABLE");
+  if (!env) {
+    val = 0; // Unset defaults to 0
+    return val;
+  }
+  int parsed = std::atoi(env);
+
+  // Return 1 for any non-zero value, 0 otherwise
+  val = (parsed != 0) ? 1 : 0;
+  return val;
+}

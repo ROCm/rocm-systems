@@ -125,6 +125,35 @@ public:
   uint32_t open_process(pid_t client_pid = 0);
   void set_process_client_pid(uint32_t process_id, pid_t client_pid);
 
+  /// @brief Binds one GPU's memory to this driver for fault reporting.
+  /// @details Every GPU has its own GpuMemory, and the report has to name the
+  /// device that faulted: the runtime maps gpu_id to a node and surfaces it, so
+  /// a shared reporter that guessed would misattribute a fault from any device
+  /// but the first.
+  class GpuFaultReporter : public amdgpu::MemoryFaultReporter {
+  public:
+    GpuFaultReporter(SimulatedKfd *driver, uint32_t gpu_id) : driver_(driver), gpu_id_(gpu_id) {}
+
+    void report_memory_fault(uint32_t vmid, uint64_t addr,
+                             amdgpu::MemoryFaultCause cause) override {
+      driver_->report_memory_fault(vmid, addr, gpu_id_, cause);
+    }
+
+  private:
+    SimulatedKfd *driver_ = nullptr;
+    uint32_t gpu_id_ = 0;
+  };
+
+  /// @brief Deliver a GPU memory violation to the faulting process.
+  /// @details Hardware raises a VM fault and KFD reports it as an event of type
+  /// KFD_IOC_EVENT_MEMORY; the runtime parks a handler thread on that event and
+  /// decides whether to abort. Emulating the report rather than choosing a
+  /// policy here is what makes an invalid GPU access behave as it would on
+  /// silicon. A process that registered no such event gets a warning instead,
+  /// because the violation would otherwise vanish silently.
+  void report_memory_fault(uint32_t vmid, uint64_t addr, uint32_t gpu_id,
+                           amdgpu::MemoryFaultCause cause);
+
   int ioctl(uint32_t process_id, unsigned long request, void *arg, int *target_mem_fd = nullptr,
             int target_proc_fd = -1);
   void *mmap(uint32_t process_id, void *addr, size_t length, int prot, int flags, off_t offset);
@@ -157,6 +186,10 @@ public:
 
   uint32_t gpu_id() const { return gpus_.empty() ? 0 : gpus_[0].gpu_id; }
   uint32_t num_gpus() const { return static_cast<uint32_t>(gpus_.size()); }
+  /// @brief KFD gpu_id of the device at @p index, for callers that must name one.
+  uint32_t gpu_id_at(uint32_t index) const {
+    return index < gpus_.size() ? gpus_[index].gpu_id : 0;
+  }
   const Sysfs &topology() const { return topology_; }
   std::string topology_path() const override { return topology_.path(); }
   std::string drm_path() const override { return topology_.drm_path(); }
@@ -241,6 +274,8 @@ public:
   struct GpuDevice {
     SoC *soc = nullptr;
     uint32_t gpu_id = 0;
+    /// Fault reporter bound to this device, so a violation names its own GPU.
+    std::unique_ptr<GpuFaultReporter> fault_reporter;
     bool cps_initialized = false;
     /// Whether the "no CWSR layout for this architecture" warning has been
     /// logged for this GPU. The check now runs per faulting access rather than
@@ -250,6 +285,9 @@ public:
     bool cwsr_layout_warned = false;
     kfd_process_device_apertures apertures{};
   };
+
+  /// @brief Lazily create @p gpu's bound reporter, so a fault names its device.
+  GpuFaultReporter *fault_reporter_for(GpuDevice &gpu);
 
 private:
   /// @brief Look up the local-mode process.
@@ -275,7 +313,8 @@ private:
   }
 
   void map_to_gpu(KfdProcess &proc, uint64_t gpu_va, void *host_ptr, size_t size,
-                  amdgpu::Mtype mtype = amdgpu::Mtype::RW);
+                  amdgpu::Mtype mtype = amdgpu::Mtype::RW,
+                  KfdProcess::HostExtentOwner owner = KfdProcess::HostExtentOwner::Application);
   void unmap_from_gpu(KfdProcess &proc, uint64_t gpu_va, size_t size);
 
   void update_cp_doorbell_base(uint32_t gpu_ordinal, uint32_t process_id, void *base);

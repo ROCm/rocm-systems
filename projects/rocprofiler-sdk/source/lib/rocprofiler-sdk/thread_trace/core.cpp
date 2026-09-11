@@ -33,6 +33,7 @@
 #include "lib/rocprofiler-sdk/hsa/queue.hpp"
 #include "lib/rocprofiler-sdk/hsa/queue_controller.hpp"
 #include "lib/rocprofiler-sdk/internal_threading.hpp"
+#include "lib/rocprofiler-sdk/kernel_replay/local_context.hpp"
 #include "lib/rocprofiler-sdk/registration.hpp"
 
 #include <rocprofiler-sdk/fwd.h>
@@ -458,6 +459,12 @@ DispatchThreadTracer::pre_kernel_call(const hsa::Queue&              queue,
 
     auto&       agent      = *CHECK_NOTNULL(it->second);
     const auto& parameters = agent.params;
+
+    // Kernel-replay localized context control: a replay pass may disable this ATT context for the
+    // pass -- skip the trace (but keep serialization) when it's forced off. No-op outside a replay
+    // loop. See kernel_replay/local_context.hpp.
+    if(auto ov = kernel_replay::local_context_override(parameters.context_id); ov && !*ov)
+        return {nullptr, parameters.bSerialize};
 
     auto control_flags = parameters.dispatch_cb_fn(queue.get_agent().get_rocp_agent()->id,
                                                    queue.get_id(),

@@ -60,7 +60,7 @@ get_counter_description(const client_data* tool_data, std::string_view _v)
     const auto& _info = tool_data->events_info;
     for(const auto& itr : _info)
     {
-        if(itr.symbol().find(_v) == 0 || itr.short_description().find(_v) == 0)
+        if(itr.symbol().starts_with(_v) || itr.short_description().starts_with(_v))
         {
             return itr.long_description();
         }

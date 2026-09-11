@@ -140,17 +140,35 @@ private:
 // dropped when the pipe was full at stop.
 template <size_t Capacity>
 bool
-spill_overflow_to_pipe(record_pipe<Capacity>& pipe, std::deque<record_batch>& overflow)
+spill_overflow_to_pipe(record_pipe<Capacity>&    pipe,
+                       std::deque<record_batch>& overflow,
+                       std::atomic<uint64_t>*    inflight = nullptr)
 {
     while(!overflow.empty())
     {
         auto* _slot = pipe.acquire();
         if(_slot == nullptr) return false;
-        *_slot = std::move(overflow.front());
+        // Count captured BEFORE the move: std::move empties the source vector, so
+        // reading its size after would read 0 and under-discharge the reservation.
+        const auto _count = overflow.front().records.size();
+        *_slot            = std::move(overflow.front());
         overflow.pop_front();
         pipe.publish();
+        // Discharge after publish; release pairs with the GC gate's acquire load.
+        if(inflight != nullptr) inflight->fetch_sub(_count, std::memory_order_release);
     }
     return true;
+}
+
+// D2 gate predicate: closed-window GC may run only when nothing copied is still
+// invisible to the processor -- no reader-reserved-but-unpublished record AND an
+// empty pipe. Pure and header-exposed so a unit test can drive all four
+// combinations directly; the acquire load feeding `inflight` and its ordering
+// ahead of pipe.empty() live at the call site in kfd_reader.cpp.
+inline bool
+gc_gate_open(uint64_t inflight, bool pipe_empty)
+{
+    return inflight == 0 && pipe_empty;
 }
 }  // namespace kfd
 }  // namespace rocprofiler

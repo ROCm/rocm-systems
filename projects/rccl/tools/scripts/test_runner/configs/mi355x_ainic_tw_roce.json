@@ -156,6 +156,29 @@
         }
       ]
     },
+    "a_netib_multithread": {
+      "extends": "gtest_base",
+      "timeout": 600,
+      "command_args": "--net_ib_nthreads=4",
+      "description": "A17: four worker threads per rank, each on its own NET/IB context and connection. Mirrors how a framework process with several communicators drives the plugin from several proxy threads.",
+      "tests": [
+        {
+          "name": "A17_NetIB_MultiThread_SimpleSendRecv",
+          "description": "Concurrent workers each transfer on an independent connection.",
+          "test_filter": "NetIbMPITest.SimpleSendRecv"
+        },
+        {
+          "name": "A17_NetIB_MultiThread_SequentialTransfers",
+          "description": "Concurrent workers each run repeated transfers on an independent connection.",
+          "test_filter": "NetIbMPITest.MultipleSequentialTransfers"
+        },
+        {
+          "name": "A17_NetIB_MultiThread_ProgressDoesNotSerialize",
+          "description": "Gate: concurrent workers must progress at the same time. Catches a lock held across a progress call, which functional tests pass straight through.",
+          "test_filter": "NetIbMPITest.ThreadedProgressDoesNotSerialize"
+        }
+      ]
+    },
 
     "gin_proxy": {
       "extends": "gtest_base",
@@ -445,6 +468,7 @@
     { "config": "gin_enable_gate",       "enabled": true },
     { "config": "gin_ainic_backend",     "enabled": true },
     { "config": "bootstrap_socket_poll", "enabled": true, "smoke": true },
+    { "config": "a_netib_multithread",   "enabled": true, "smoke": true },
 
     { "config": "ib_baseline",           "enabled": true, "smoke": true },
     { "config": "cast_alltoall_full",    "enabled": true, "smoke": true },

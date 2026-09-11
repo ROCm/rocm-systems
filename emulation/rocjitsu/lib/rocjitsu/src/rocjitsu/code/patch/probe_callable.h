@@ -43,9 +43,10 @@ enum class ProbeCallingConvention {
 /// @brief A probe body extracted from a code object and verified to be safe to
 ///        relocate verbatim into the instrumented code object.
 struct ProbeCallable {
-  std::string symbol;                               ///< Resolved symbol name.
-  rj_code_arch_t arch = ROCJITSU_CODE_ARCH_INVALID; ///< ISA the body decodes as.
-  std::vector<uint32_t> body_words;                 ///< The body's instruction words, in order.
+  std::string symbol;                                        ///< Resolved symbol name.
+  rj_code_arch_t arch = ROCJITSU_CODE_ARCH_INVALID;          ///< ISA the body decodes as.
+  rj_code_target_id_t target = ROCJITSU_CODE_TARGET_INVALID; ///< Concrete ISA target, if known.
+  std::vector<uint32_t> body_words; ///< The body's instruction words, in order.
   ProbeCallingConvention cc = ProbeCallingConvention::Unknown; ///< Verified ABI.
 
   /// Byte offset of the body once it has been laid out in the instrumented
