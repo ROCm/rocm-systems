@@ -6,7 +6,9 @@
 #
 .DEFAULT_GOAL: build
 ROCM_PATH ?= /opt/rocm
-CXX = $(ROCM_PATH)/bin/amdclang++
+ifeq ($(origin CXX),default)
+CXX := $(ROCM_PATH)/bin/amdclang++
+endif
 BUILDDIR ?= .
 HIPIFY_PL_EXE ?= $(ROCM_PATH)/bin/hipify-perl
 HIPIFY_DIR := hipify-profiler

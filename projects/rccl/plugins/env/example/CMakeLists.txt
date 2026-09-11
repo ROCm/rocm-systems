@@ -20,22 +20,22 @@ set(SRC_FILES
 )
 
 # Create shared library
-add_library(nccl-env-example SHARED ${SRC_FILES})
+add_library(rccl-env-example SHARED ${SRC_FILES})
 
 # Set include directories
-target_include_directories(nccl-env-example PRIVATE
+target_include_directories(rccl-env-example PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/nccl
 )
 
 # Set output name to match Makefile
-set_target_properties(nccl-env-example PROPERTIES
+set_target_properties(rccl-env-example PROPERTIES
     OUTPUT_NAME "rccl-env-example"
     PREFIX "lib"
     POSITION_INDEPENDENT_CODE ON
 )
 
 if(NOT ENV_EXAMPLE_STANDALONE)
-    set_target_properties(nccl-env-example PROPERTIES
+    set_target_properties(rccl-env-example PROPERTIES
         LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/test/unit/plugins
     )
 endif()

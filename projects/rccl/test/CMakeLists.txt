@@ -795,7 +795,7 @@ if(BUILD_TESTS)
   if(ENABLE_MPI_TESTS AND ENABLE_HOST_API_TESTS)
     set(RCCL_GIN_EXAMPLE_PLUGIN_DIR "${CMAKE_BINARY_DIR}/test/unit/plugins")
     set(RCCL_GIN_EXAMPLE_PLUGIN "${RCCL_GIN_EXAMPLE_PLUGIN_DIR}/librccl-gin-example.so")
-    if(NOT TARGET nccl-gin-example)
+    if(NOT TARGET rccl-gin-example)
       find_program(RCCL_GIN_EXAMPLE_CC NAMES gcc cc REQUIRED)
       add_custom_command(
         OUTPUT "${RCCL_GIN_EXAMPLE_PLUGIN}"
@@ -809,7 +809,7 @@ if(BUILD_TESTS)
         COMMENT "Building librccl-gin-example.so for Host API regression tests"
         VERBATIM
       )
-      add_custom_target(nccl-gin-example DEPENDS "${RCCL_GIN_EXAMPLE_PLUGIN}")
+      add_custom_target(rccl-gin-example DEPENDS "${RCCL_GIN_EXAMPLE_PLUGIN}")
     endif()
   endif()
 
@@ -879,7 +879,7 @@ if(BUILD_TESTS)
     endif()
 
     if(ENABLE_HOST_API_TESTS)
-      add_dependencies(rccl-UnitTestsMPI nccl-gin-example)
+      add_dependencies(rccl-UnitTestsMPI rccl-gin-example)
       target_compile_definitions(rccl-UnitTestsMPI PRIVATE
         RCCL_GIN_EXAMPLE_PLUGIN_DIR="${RCCL_GIN_EXAMPLE_PLUGIN_DIR}"
       )
@@ -897,7 +897,7 @@ if(BUILD_TESTS)
         HostApiCustomGinPluginMPITests.cpp
       )
       list(APPEND RCCL_TEST_EXECUTABLES rccl-HostApiCustomGinPluginMPI)
-      add_dependencies(rccl-HostApiCustomGinPluginMPI nccl-gin-example)
+      add_dependencies(rccl-HostApiCustomGinPluginMPI rccl-gin-example)
       target_compile_definitions(rccl-HostApiCustomGinPluginMPI PRIVATE
         RCCL_GIN_EXAMPLE_PLUGIN_DIR="${RCCL_GIN_EXAMPLE_PLUGIN_DIR}"
       )

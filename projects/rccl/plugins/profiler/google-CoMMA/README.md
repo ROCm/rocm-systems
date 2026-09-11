@@ -31,3 +31,10 @@ make
 ```
 
 Output: `CoMMA/target/debug/libnccl_profiler.so`.
+
+RCCL's default profiler auto-discovery only looks for `librccl-profiler*.so`, so this
+artifact is not picked up unless you load it explicitly:
+
+```bash
+export NCCL_PROFILER_PLUGIN=/path/to/CoMMA/target/debug/libnccl_profiler.so
+```

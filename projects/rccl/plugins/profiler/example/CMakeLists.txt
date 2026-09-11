@@ -53,26 +53,26 @@ endforeach()
 # Sources include these by name, so they must exist before compiling.
 add_custom_target(hipify-profiler-example DEPENDS ${PROFILER_HIPIFIED_HDR})
 
-add_library(nccl-profiler-example SHARED ${PROFILER_HIPIFIED_SRC})
-add_dependencies(nccl-profiler-example hipify-profiler-example)
+add_library(rccl-profiler-example SHARED ${PROFILER_HIPIFIED_SRC})
+add_dependencies(rccl-profiler-example hipify-profiler-example)
 
-target_include_directories(nccl-profiler-example PRIVATE
+target_include_directories(rccl-profiler-example PRIVATE
     ${PROFILER_HIPIFY_DIR}
     ${PROFILER_HIPIFY_DIR}/nccl
     ${ROCM_PATH}/include
 )
 
-target_compile_definitions(nccl-profiler-example PRIVATE __HIP_PLATFORM_AMD__)
+target_compile_definitions(rccl-profiler-example PRIVATE __HIP_PLATFORM_AMD__)
 
 # Match the Makefile output name.
-set_target_properties(nccl-profiler-example PROPERTIES
+set_target_properties(rccl-profiler-example PROPERTIES
     OUTPUT_NAME "rccl-profiler-example"
     PREFIX "lib"
     POSITION_INDEPENDENT_CODE ON
 )
 
 if(NOT PROFILER_EXAMPLE_STANDALONE)
-    set_target_properties(nccl-profiler-example PROPERTIES
+    set_target_properties(rccl-profiler-example PROPERTIES
         LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/test/unit/plugins
     )
 endif()

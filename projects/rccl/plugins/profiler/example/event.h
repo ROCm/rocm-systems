@@ -257,7 +257,7 @@ struct ceSync {
   struct ceColl* parent;
   int ceSyncId;
   bool isComplete;
-  uint32_t seqNumber;
+  uint64_t seqNumber;
   int nRanks;
   cudaStream_t stream;
   uint64_t eventId;

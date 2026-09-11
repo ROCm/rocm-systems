@@ -11,22 +11,22 @@ set(SRC_FILES
 )
 
 # Create shared library
-add_library(nccl-net-example SHARED ${SRC_FILES})
+add_library(rccl-net-example SHARED ${SRC_FILES})
 
 # Set include directories
-target_include_directories(nccl-net-example PRIVATE
+target_include_directories(rccl-net-example PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/nccl
 )
 
 # Set output name to match Makefile
-set_target_properties(nccl-net-example PROPERTIES
+set_target_properties(rccl-net-example PROPERTIES
     OUTPUT_NAME "rccl-net-example"
     PREFIX "lib"
     POSITION_INDEPENDENT_CODE ON
 )
 
 if(NOT NET_EXAMPLE_STANDALONE)
-    set_target_properties(nccl-net-example PROPERTIES
+    set_target_properties(rccl-net-example PROPERTIES
         LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/test/unit/plugins
     )
 endif()
