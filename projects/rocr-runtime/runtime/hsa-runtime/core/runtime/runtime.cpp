@@ -4945,7 +4945,6 @@ hsa_status_t Runtime::VMemoryExportShareableHandle(int* dmabuf_fd,
   auto agentOwner = memoryHandle->drmAgent();
 
   if (flags & HSA_AMD_DMABUF_MAPPING_TYPE_PCIE) {
-auto agentOwner = memoryHandle->drmAgent();
     if (agentOwner->device_type() != core::Agent::DeviceType::kAmdGpuDevice) {
       return static_cast<hsa_status_t>(HSA_STATUS_ERROR_NOT_SUPPORTED);
     }
