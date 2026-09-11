@@ -144,3 +144,36 @@ def test_single_node_dump_at_teardown(paths, inspector_helpers):
         records = inspector_helpers.count_inspector_p2p_records(dump_file)
         assert records > 0, \
             f"{dump_file} should hold p2p records written at teardown, found {records}"
+
+
+@pytest.mark.ext_inspector
+@pytest.mark.sendrecv
+def test_single_node_dump_thread_disabled(paths, inspector_helpers):
+    """Output is written at teardown even with the dump thread turned off.
+
+    NCCL_INSPECTOR_DUMP_THREAD_ENABLE=0 skips the dump thread entirely. The dumper
+    still has to be constructed, otherwise inspectorDumpNow() returns at its null
+    check and the documented teardown output never appears.
+    """
+
+    dump_dir = _fresh_dump_dir(paths, "thread_disabled")
+    env = _sendrecv_env(paths, dump_dir, {
+        "RCCL_DDA_ENABLE": "0",
+        "NCCL_INSPECTOR_DUMP_THREAD_ENABLE": "0",
+    })
+    env.pop("NCCL_INSPECTOR_DUMP_THREAD_INTERVAL_MICROSECONDS", None)
+
+    result, log_file = _run_sendrecv(paths, env, "single_node_thread_disabled.log")
+    assert result.returncode == 0, f"SendRecv inspector dump-thread-disabled test failed, see {log_file}"
+
+    dump_files = glob.glob(os.path.join(dump_dir, "*.log"))
+    assert len(dump_files) == 8, \
+        f"Should have 8 inspector dump files (one per rank), found {len(dump_files)}: {dump_files}"
+
+    for dump_file in dump_files:
+        assert os.path.getsize(dump_file) > 0, \
+            (f"{dump_file} is empty: with the dump thread disabled the teardown dump is the "
+             f"only output, so an empty file means the dumper was never constructed")
+        records = inspector_helpers.count_inspector_p2p_records(dump_file)
+        assert records > 0, \
+            f"{dump_file} should hold p2p records written at teardown, found {records}"

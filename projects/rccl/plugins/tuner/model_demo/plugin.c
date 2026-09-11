@@ -213,6 +213,8 @@ __hidden ncclResult_t pluginGetCollInfo(void* context, ncclFunc_t collType, size
 
   int nAlgos = numAlgo < NCCL_NUM_ALGORITHMS ? numAlgo : NCCL_NUM_ALGORITHMS;
   int nProtos = numProto < NCCL_NUM_PROTOCOLS ? numProto : NCCL_NUM_PROTOCOLS;
+  int bestAlgo = -1, bestProto = -1;
+  float bestTime = 0;
   for (int a=0; a<nAlgos; a++) {
     for (int p=0; p<nProtos; p++) {
       // RCCL marks combinations it cannot use; leave those untouched.
@@ -221,9 +223,14 @@ __hidden ncclResult_t pluginGetCollInfo(void* context, ncclFunc_t collType, size
       ncclTopoGetAlgoTime_Tuner(collType, a, p, numPipeOps, &time, nBytes);
       // A negative time means the model has no bandwidth data for this
       // combination, so keep the cost RCCL estimated itself.
-      if (time >= 0) table[a][p] = time;
+      if (time < 0) continue;
+      table[a][p] = time;
+      if (bestAlgo < 0 || time < bestTime) { bestAlgo = a; bestProto = p; bestTime = time; }
     }
   }
+  // A zero cost is how RCCL recognizes that the tuner made the choice; without
+  // it rcclUpdateCollectiveProtocol reassigns the protocol after tuning.
+  if (bestAlgo >= 0) table[bestAlgo][bestProto] = 0;
   return ncclSuccess;
 }
 

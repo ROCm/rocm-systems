@@ -83,6 +83,12 @@ static void pollCeCollEvents(struct context* ctx) {
         __atomic_fetch_sub(&event->parent->refCount, 1, __ATOMIC_RELAXED);
       }
 
+      // Retiring unlinks the event, so destroy its cudaEvents here: the
+      // finalize-time cleanup only walks the lists and would never see them,
+      // and the slot's handles are overwritten when the ring wraps.
+      if (event->startEvent) { cudaEventDestroy(event->startEvent); event->startEvent = NULL; }
+      if (event->stopEvent) { cudaEventDestroy(event->stopEvent); event->stopEvent = NULL; }
+
       // Return event to pool for reuse (ring buffer behavior)
       __atomic_fetch_add(&ctx->ceCollPoolBase, 1, __ATOMIC_RELAXED);
 
@@ -131,6 +137,12 @@ static void pollCeSyncEvents(struct context* ctx) {
         __atomic_fetch_sub(&event->parent->base.refCount, 1, __ATOMIC_RELAXED);
       }
 
+      // Retiring unlinks the event, so destroy its cudaEvents here: the
+      // finalize-time cleanup only walks the lists and would never see them,
+      // and the slot's handles are overwritten when the ring wraps.
+      if (event->startEvent) { cudaEventDestroy(event->startEvent); event->startEvent = NULL; }
+      if (event->stopEvent) { cudaEventDestroy(event->stopEvent); event->stopEvent = NULL; }
+
       // Return event to pool for reuse (ring buffer behavior)
       __atomic_fetch_add(&ctx->ceSyncPoolBase, 1, __ATOMIC_RELAXED);
 
@@ -178,6 +190,12 @@ static void pollCeBatchEvents(struct context* ctx) {
       if (event->parent) {
         __atomic_fetch_sub(&event->parent->base.refCount, 1, __ATOMIC_RELAXED);
       }
+
+      // Retiring unlinks the event, so destroy its cudaEvents here: the
+      // finalize-time cleanup only walks the lists and would never see them,
+      // and the slot's handles are overwritten when the ring wraps.
+      if (event->startEvent) { cudaEventDestroy(event->startEvent); event->startEvent = NULL; }
+      if (event->stopEvent) { cudaEventDestroy(event->stopEvent); event->stopEvent = NULL; }
 
       // Return event to pool for reuse (ring buffer behavior)
       __atomic_fetch_add(&ctx->ceBatchPoolBase, 1, __ATOMIC_RELAXED);
@@ -358,6 +376,11 @@ void ceProfilerCleanupPendingEvents(struct context* ctx) {
     if (ceBatch->stopEvent) cudaEventDestroy(ceBatch->stopEvent);
     ceBatch = ceBatch->pollerNext;
   }
+
+  // Drop the lists so nothing can walk handles that are now destroyed.
+  ctx->ceEvents.ceCollHead = NULL;
+  ctx->ceEvents.ceSyncHead = NULL;
+  ctx->ceEvents.ceBatchHead = NULL;
 
   pthread_mutex_unlock(&ctx->ceEvents.mutex);
 }

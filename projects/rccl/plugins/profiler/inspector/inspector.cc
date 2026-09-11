@@ -520,15 +520,19 @@ inspectorDumpThread::~inspectorDumpThread() {
       }
     }
 
-    // Cleanup (delete) prom files after closing them
-    for (size_t i = 0; i < deviceFlushEntries.size(); i++) {
-      if (deviceFlushEntries[i].filename[0] != '\0') {
-        if (unlink(deviceFlushEntries[i].filename) == 0) {
-          TRACE_INSPECTOR("NCCL Inspector: Cleaned up Prometheus file %s",
-                          deviceFlushEntries[i].filename);
-        } else {
-          INFO_INSPECTOR("NCCL Inspector: Failed to cleanup Prometheus file %s: %s",
-                         deviceFlushEntries[i].filename, strerror(errno));
+    // Periodic Prometheus dumps rotate by unlinking the previous file. Skip that
+    // when no dump thread ran, otherwise PROM_DUMP=1 with the default interval
+    // writes a teardown file in inspectorDumpNow() and deletes it immediately.
+    if (periodicDumpRan) {
+      for (size_t i = 0; i < deviceFlushEntries.size(); i++) {
+        if (deviceFlushEntries[i].filename[0] != '\0') {
+          if (unlink(deviceFlushEntries[i].filename) == 0) {
+            TRACE_INSPECTOR("NCCL Inspector: Cleaned up Prometheus file %s",
+                            deviceFlushEntries[i].filename);
+          } else {
+            INFO_INSPECTOR("NCCL Inspector: Failed to cleanup Prometheus file %s: %s",
+                           deviceFlushEntries[i].filename, strerror(errno));
+          }
         }
       }
     }
@@ -631,6 +635,7 @@ void inspectorDumpThread::startThread() {
     return;
   }
   threadStarted = true;
+  periodicDumpRan = true;
   TRACE_INSPECTOR("NCCL Inspector inspectorDumpThread: created");
 }
 
@@ -1078,10 +1083,13 @@ static inspectorResult_t initDumpThreadFromEnv() {
   if (enableNcclInspectorDumpThread) {
     INS_CHK(inspectorStartDumpThread(ncclInspectorDumpIntervalUsecs));
   } else {
+    // Docs: DUMP_THREAD_ENABLE=0 still writes once at communicator teardown.
+    // Construct the dumper with a negative interval so no thread is started.
     INFO_INSPECTOR(
       "NCCL Inspector: NCCL_INSPECTOR_DUMP_THREAD_ENABLE set to 0; not "
       "starting internal dump "
       "thread.");
+    INS_CHK(inspectorStartDumpThread(-1));
   }
   return inspectorSuccess;
 }

@@ -162,11 +162,28 @@ def validate_inspector_p2p_line(line):
         if not isinstance(record["header"][field], expected_type):
             return False, record, f"header.{field} has wrong type"
 
+    for field, expected_type in INSPECTOR_METADATA_FIELDS.items():
+        if field not in record["metadata"]:
+            return False, record, f"Missing metadata field: '{field}'"
+        if not isinstance(record["metadata"][field], expected_type):
+            return False, record, f"metadata.{field} has wrong type"
+
     for field, expected_type in INSPECTOR_P2P_PERF_FIELDS.items():
         if field not in record["p2p_perf"]:
             return False, record, f"Missing p2p_perf field: '{field}'"
         if not isinstance(record["p2p_perf"][field], expected_type):
             return False, record, f"p2p_perf.{field} has wrong type"
+
+    if record["p2p_perf"]["p2p_exec_time_us"] < 0:
+        return False, record, "p2p_perf.p2p_exec_time_us is negative"
+    if record["p2p_perf"]["p2p_msg_size_bytes"] < 0:
+        return False, record, "p2p_perf.p2p_msg_size_bytes is negative"
+    if record["p2p_perf"]["p2p_algobw_gbs"] < 0:
+        return False, record, "p2p_perf.p2p_algobw_gbs is negative"
+    if record["p2p_perf"]["p2p_busbw_gbs"] < 0:
+        return False, record, "p2p_perf.p2p_busbw_gbs is negative"
+    if record["p2p_perf"]["p2p_timing_source"] not in ("kernel_gpu", "kernel_cpu", "collective_cpu"):
+        return False, record, f"p2p_perf.p2p_timing_source has unexpected value: '{record['p2p_perf']['p2p_timing_source']}'"
 
     return True, record, "OK"
 

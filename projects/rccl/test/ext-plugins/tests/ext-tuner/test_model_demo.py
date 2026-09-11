@@ -5,8 +5,42 @@
 #  ************************************************************************
 
 import os
+import shutil
 import subprocess
 import pytest
+
+MODEL_DEMO_DIR = os.path.abspath(
+    os.path.join(
+        os.path.dirname(__file__), "..", "..", "..", "..", "plugins", "tuner", "model_demo"
+    )
+)
+MODEL_DEMO_SO = os.path.join(MODEL_DEMO_DIR, "librccl-tuner.so")
+_built_so = None
+
+
+def _build_model_demo_plugin():
+    """Build librccl-tuner.so from plugins/tuner/model_demo. Returns the path or skips."""
+    global _built_so
+    if _built_so is not None:
+        return _built_so
+
+    cc = os.environ.get("CC", "cc")
+    if shutil.which("make") is None or shutil.which(cc) is None:
+        pytest.skip(f"make/{cc} not available to build the model_demo tuner")
+
+    build = subprocess.run(
+        ["make", "default"],
+        cwd=MODEL_DEMO_DIR,
+        capture_output=True,
+        text=True,
+        timeout=120,
+    )
+    assert build.returncode == 0, (
+        f"Failed to build model_demo tuner:\nstdout:\n{build.stdout}\nstderr:\n{build.stderr}"
+    )
+    assert os.path.exists(MODEL_DEMO_SO), f"model_demo tuner not produced at {MODEL_DEMO_SO}"
+    _built_so = MODEL_DEMO_SO
+    return _built_so
 
 
 @pytest.mark.ext_tuner
@@ -20,9 +54,7 @@ def test_model_demo_tuner_runs(paths):
     a clean exit is the regression check here.
     """
 
-    plugin_so = os.path.join(paths.RCCL_INSTALL_DIR, "plugins", "tuner", "model_demo", "librccl-tuner.so")
-    if not os.path.exists(plugin_so):
-        pytest.skip(f"model_demo tuner is not built at {plugin_so}")
+    plugin_so = _build_model_demo_plugin()
 
     env = os.environ.copy()
     env.update({

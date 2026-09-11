@@ -159,45 +159,28 @@ static struct context* contextFromEventHandle(void* eHandle) {
   }
 }
 
-// Initialize pool sizes from environment variables
+// Initialize pool sizes from environment variables. A non-positive override
+// would later `% 0` in the proxyCtrl path, so treat it as "use the default".
+static int poolSizeFromEnv(const char* name, int defaultSize) {
+  const char* str = getenv(name);
+  if (!str) return defaultSize;
+  int v = atoi(str);
+  return v > 0 ? v : defaultSize;
+}
+
 static void initPoolSizes(void) {
-  const char* str;
-
-  str = getenv("NCCL_PROFILE_GROUP_API_POOL_SIZE");
-  groupApiPoolSize = str ? atoi(str) : defaultGroupApiPoolSize;
-
-  str = getenv("NCCL_PROFILE_COLL_API_POOL_SIZE");
-  collApiPoolSize = str ? atoi(str) : defaultCollApiPoolSize;
-
-  str = getenv("NCCL_PROFILE_P2P_API_POOL_SIZE");
-  p2pApiPoolSize = str ? atoi(str) : defaultP2pApiPoolSize;
-
-  str = getenv("NCCL_PROFILE_KERNEL_LAUNCH_POOL_SIZE");
-  kernelLaunchPoolSize = str ? atoi(str) : defaultKernelLaunchPoolSize;
-
-  str = getenv("NCCL_PROFILE_GROUP_POOL_SIZE");
-  groupPoolSize = str ? atoi(str) : defaultGroupPoolSize;
-
-  str = getenv("NCCL_PROFILE_COLL_POOL_SIZE");
-  collPoolSize = str ? atoi(str) : defaultCollPoolSize;
-
-  str = getenv("NCCL_PROFILE_P2P_POOL_SIZE");
-  p2pPoolSize = str ? atoi(str) : defaultP2pPoolSize;
-
-  str = getenv("NCCL_PROFILE_PROXY_CTRL_POOL_SIZE");
-  proxyCtrlPoolSize = str ? atoi(str) : defaultProxyCtrlPoolSize;
-
-  str = getenv("NCCL_PROFILE_CE_COLL_POOL_SIZE");
-  ceCollPoolSize = str ? atoi(str) : defaultCeCollPoolSize;
-
-  str = getenv("NCCL_PROFILE_CE_SYNC_POOL_SIZE");
-  ceSyncPoolSize = str ? atoi(str) : defaultCeSyncPoolSize;
-
-  str = getenv("NCCL_PROFILE_CE_BATCH_POOL_SIZE");
-  ceBatchPoolSize = str ? atoi(str) : defaultCeBatchPoolSize;
-
-  str = getenv("NCCL_PROFILE_PROXY_DETACH_POOL_SIZE");
-  detachPoolSize = str ? atoi(str) : defaultDetachPoolSize;
+  groupApiPoolSize = poolSizeFromEnv("NCCL_PROFILE_GROUP_API_POOL_SIZE", defaultGroupApiPoolSize);
+  collApiPoolSize = poolSizeFromEnv("NCCL_PROFILE_COLL_API_POOL_SIZE", defaultCollApiPoolSize);
+  p2pApiPoolSize = poolSizeFromEnv("NCCL_PROFILE_P2P_API_POOL_SIZE", defaultP2pApiPoolSize);
+  kernelLaunchPoolSize = poolSizeFromEnv("NCCL_PROFILE_KERNEL_LAUNCH_POOL_SIZE", defaultKernelLaunchPoolSize);
+  groupPoolSize = poolSizeFromEnv("NCCL_PROFILE_GROUP_POOL_SIZE", defaultGroupPoolSize);
+  collPoolSize = poolSizeFromEnv("NCCL_PROFILE_COLL_POOL_SIZE", defaultCollPoolSize);
+  p2pPoolSize = poolSizeFromEnv("NCCL_PROFILE_P2P_POOL_SIZE", defaultP2pPoolSize);
+  proxyCtrlPoolSize = poolSizeFromEnv("NCCL_PROFILE_PROXY_CTRL_POOL_SIZE", defaultProxyCtrlPoolSize);
+  ceCollPoolSize = poolSizeFromEnv("NCCL_PROFILE_CE_COLL_POOL_SIZE", defaultCeCollPoolSize);
+  ceSyncPoolSize = poolSizeFromEnv("NCCL_PROFILE_CE_SYNC_POOL_SIZE", defaultCeSyncPoolSize);
+  ceBatchPoolSize = poolSizeFromEnv("NCCL_PROFILE_CE_BATCH_POOL_SIZE", defaultCeBatchPoolSize);
+  detachPoolSize = poolSizeFromEnv("NCCL_PROFILE_PROXY_DETACH_POOL_SIZE", defaultDetachPoolSize);
 }
 
 // Allocate global shared pools
@@ -478,7 +461,9 @@ __hidden ncclResult_t exampleProfilerFinalize(void* context) {
   // Print events first (while pools are still valid)
   printAllEvents(fh, ctx);
 
-  // Then cleanup and free resources
+  // Then cleanup and free resources. The cleanup clears the poller lists under
+  // ceEvents.mutex, so a concurrent sweep walks empty lists rather than events
+  // whose cudaEvents it just destroyed.
   ceProfilerCleanupPendingEvents(ctx);
   ceProfilerDeregisterContext(ctx);
   deferContextFree(ctx);
@@ -1147,6 +1132,13 @@ __hidden ncclResult_t exampleProfilerStartEvent_v6(void* context, void** eHandle
     *eHandle = NULL;
     return ncclSuccess;
   }
+  // The CE paths below bypass exampleProfilerStartEvent, so they need the same
+  // guard: an event created after finalize has begun has no poller to complete
+  // it and leaks its cudaEvents past the cleanup that already ran.
+  if (__atomic_load_n(&ctx->finalizing, __ATOMIC_RELAXED)) {
+    *eHandle = NULL;
+    return ncclSuccess;
+  }
   if (eDescr->type == ncclProfileCeColl) {
     return ceProfilerStartCeCollEvent(ctx, eHandle, eDescr, startTime);
   }
@@ -1166,6 +1158,13 @@ __hidden ncclResult_t exampleProfilerStopEvent_v6(void* eHandle) {
   if (!eHandle) return ncclSuccess;
 
   uint64_t type = *(uint64_t*)eHandle;
+
+  // Same guard as exampleProfilerStopEvent: once finalize has cleaned up, the
+  // cudaEvents these record into have already been destroyed.
+  struct context* eventCtx = contextFromEventHandle(eHandle);
+  if (eventCtx && __atomic_load_n(&eventCtx->finalizing, __ATOMIC_RELAXED)) {
+    return ncclSuccess;
+  }
 
   // Handle CE events - record stop event to stream
   if (type == ncclProfileCeColl) {
