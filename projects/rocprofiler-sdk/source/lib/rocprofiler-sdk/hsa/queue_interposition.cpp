@@ -363,13 +363,12 @@ enum class monitor_state : uint8_t
     active
 };
 
-// Longest a drain waits for outstanding completions to retire. Expiry loses no records -- the
-// monitor keeps retiring what lands afterwards -- but it loses their ordering, and these callers
-// need records delivered while the kernel symbols they name are still valid.
-constexpr auto runtime_drain_timeout  = std::chrono::seconds{30};
-constexpr auto shutdown_drain_timeout = std::chrono::seconds{5};
+// How often an unbounded drain repeats its warning. A drain still waiting after this is either a
+// very long-running dispatch or a caller waiting on its own completion; the wait continues either
+// way, and the log is what distinguishes them.
+constexpr auto drain_warn_interval = std::chrono::seconds{30};
 
-// How often a bounded wait re-tests the condition it is waiting on.
+// How often a wait re-tests the condition it is waiting on.
 constexpr auto poll_interval = std::chrono::milliseconds{1};
 
 // Shared state for the single completion-monitor thread. Producers push new waits onto `incoming`
@@ -425,11 +424,13 @@ should_bypass_inline_intercept()
                 monitor_state::active);
 }
 
-// Hand a completed-batch wait to the monitor: enqueue it on the inbox and bump the wake signal.
-// returning an entry with a null session. All of it runs under the inbox lock, which teardown's
-// final drain also takes, so a wake store never reaches a destroyed signal.
+// Hand a dispatched batch's completion wait to the monitor: enqueue it on the inbox and bump the
+// wake signal. Returns an entry with a null session once the monitor owns the wait, or the batch
+// itself if the monitor had already stopped, leaving the caller to retire it. All of it runs under
+// the inbox lock, which teardown's final drain also takes, so a wake store never reaches a
+// destroyed signal.
 pending_completion
-register_completion(pending_completion&& pending)
+register_pending_completion(pending_completion&& pending)
 {
     auto& mon      = get_completion_monitor();
     auto  declined = pending_completion{};
@@ -863,11 +864,14 @@ completion_monitor_loop(completion_monitor& mon)
         conds.emplace_back(HSA_SIGNAL_CONDITION_NE);
         values.emplace_back(0);
 
+        ROCP_TRACE << fmt::format("[queue-interposition] waiting on {} completion signal(s) + wake",
+                                  mon.active.size());
+
         // Waits indefinitely on purpose. Every event that can change the answer already returns
-        // this call: a completion satisfies its own LT condition, and both register_completion and
-        // stop_completion_monitor bump wake_signal. The satisfying index and value are discarded --
-        // wait_any names at most one signal, and the active set is rescanned below because several
-        // may have dropped at once.
+        // this call: a completion satisfies its own LT condition, and both
+        // register_pending_completion and stop_completion_monitor bump wake_signal. The satisfying
+        // index and value are discarded -- wait_any names at most one signal, and the active set is
+        // rescanned below because several may have dropped at once.
         [[maybe_unused]] auto satisfying_value = hsa_signal_value_t{0};
         get_amd_ext_table()->hsa_amd_signal_wait_any_fn(static_cast<uint32_t>(signals.size()),
                                                         signals.data(),
@@ -883,50 +887,51 @@ completion_monitor_loop(completion_monitor& mon)
     }
 }
 
-// Poll the in-flight counter down to zero, or to the deadline. The counter falls without the
-// monitor thread: the record emitter decrements it once a batch's records are out. The deadline is
-// what lets a thread that is itself emitting a record call this.
+// Poll the in-flight counter down to zero, warning every drain_warn_interval. The counter falls
+// without the monitor thread: the record emitter decrements it once a batch's records are out. The
+// wait is unbounded, as are the callers it gates -- code-object unload and signal-pool teardown are
+// safe only once the records naming those objects are out.
+//
+// A drain entered from a tool callback running on the record emitter waits on that callback's own
+// still-counted batch and never returns; the warning names that case.
 void
-wait_for_inflight_drain(completion_monitor& mon, std::chrono::seconds timeout)
+wait_for_inflight_drain(completion_monitor& mon)
 {
-    const auto deadline = std::chrono::steady_clock::now() + timeout;
+    const auto start        = std::chrono::steady_clock::now();
+    auto       next_warning = start + drain_warn_interval;
 
     while(mon.inflight.load(std::memory_order_acquire) > 0)
     {
-        if(std::chrono::steady_clock::now() >= deadline)
+        const auto now = std::chrono::steady_clock::now();
+        if(now >= next_warning)
         {
             ROCP_WARNING << fmt::format(
-                "Completion monitor drain gave up with {} batch(es) still in flight after {} ms",
+                "Completion monitor drain still waiting on {} batch(es) after {} s. A drain "
+                "entered from a tool callback running on the record emitter waits on that "
+                "callback's own batch and cannot complete.",
                 mon.inflight.load(std::memory_order_acquire),
-                std::chrono::milliseconds{timeout}.count());
-            return;
+                std::chrono::duration_cast<std::chrono::seconds>(now - start).count());
+            next_warning = now + drain_warn_interval;
         }
         std::this_thread::sleep_for(poll_interval);
     }
 }
 
-// Wait, bounded, for all in-flight completions to retire without stopping the monitor.
+// Wait for all in-flight completions to retire without stopping the monitor.
 // Safe to call while interception is still active (e.g. on context stop).
 void
 drain_completion_monitor()
 {
-    // Same guard as stop_completion_monitor, and for the same reason: this is one of three entry
-    // points that dereference the monitor's static_object, which destroy_static_objects has nulled
-    // once finalization has completed.
-    if(registration::get_fini_status() > 0 || internal_threading::fork_stale()) return;
+    // Skips the drain both during and after finalization. stop_completion_monitor covers that path,
+    // and past destroy_static_objects the monitor's static_object is null, so it must not be
+    // constructed or dereferenced here.
+    if(registration::get_fini_status() != 0 || internal_threading::fork_stale()) return;
 
     // Polls `inflight`, not `state`: work outlives the monitor thread, since submit_to_task_group
     // admits on fini-status and emitter existence alone. Must not bump wake_signal -- this runs on
     // arbitrary tool threads with nothing serializing it against stop_completion_monitor, which
     // destroys that signal.
-    //
-    // The short grace period once finalization has begun, because a dependency in flight there may
-    // never resolve. fini_status is -1 from the top of finalize()'s call_once, so the first
-    // teardown drain in signal_less_teardown gets it too.
-    auto& mon = get_completion_monitor();
-    wait_for_inflight_drain(
-        mon,
-        (registration::get_fini_status() != 0) ? shutdown_drain_timeout : runtime_drain_timeout);
+    wait_for_inflight_drain(get_completion_monitor());
 }
 
 // Local kernel-dispatch tracing path: swaps in pooled completion signals,
@@ -1624,7 +1629,7 @@ process_doorbell_impl(const queue_state_ptr_t& state,
     auto declined = pending_completion_vector_t{};
     for(auto& pending : deferred_completions)
     {
-        auto orphan = register_completion(std::move(pending));
+        auto orphan = register_pending_completion(std::move(pending));
         if(orphan.session) declined.emplace_back(std::move(orphan));
     }
 
@@ -1815,8 +1820,8 @@ ROCP_QUEUE_LOAD_WRITE_INDEX(scacquire, std::memory_order_acquire)
     {                                                                                              \
         /* This gate decides whether to take the interposition path, nothing more. A caller */     \
         /* admitted here can still be inside process_doorbell_impl when the monitor stops, */      \
-        /* and needs no counting: register_completion re-tests the state under the inbox */        \
-        /* lock and disposes of its own batch if it lost the race. */                              \
+        /* and needs no counting: register_pending_completion re-tests the state under the */      \
+        /* inbox lock and disposes of its own batch if it lost the race. */                        \
         if(should_bypass_inline_intercept())                                                       \
         {                                                                                          \
             get_next_table()->hsa_signal_##NAME##_fn(sig, val);                                    \
@@ -2003,10 +2008,11 @@ stop_completion_monitor()
     // of the exchange goes straight on to signal-pool teardown and correlation-id finalization, and
     // records still in the emitter name both.
     //
-    // This wait is unbounded: it ends when the tool callbacks queued on the emitter return. The
-    // bounded wait is drain_completion_monitor, which queue_controller_fini reaches through
-    // queue_controller_sync just before this call, and which the hsa_shut_down route reaches only
-    // when the KFD signal-less feature is on.
+    // This wait is unbounded: it ends when the tool callbacks queued on the emitter return. It is
+    // the only drain that runs on this path -- drain_completion_monitor, which
+    // queue_controller_fini reaches through queue_controller_sync just before this call, returns
+    // immediately once finalization has begun, leaving force_retire_all above and this join to
+    // dispose of everything.
     if(mon.record_emitter) mon.record_emitter->join();
 }
 
