@@ -11,6 +11,26 @@ void Component::schedule_event(Event *event, Tick timestamp, std::unique_ptr<Mes
   engine_->schedule_event(event, timestamp, std::move(message));
 }
 
+bool Component::attached() const {
+  // Both halves are needed: shutdown() destroys the partition contexts but
+  // leaves every component holding its engine pointer, so a non-null engine_
+  // is not on its own a promise that contexts_[partition_id_] exists. Nor is a
+  // component that no partition claimed, whose ID is still INVALID_PARTITION_ID.
+  return engine_ != nullptr && partition_id_ < engine_->num_contexts();
+}
+
+bool Component::schedule_wake(Event *event, Tick timestamp) {
+  return attached() && engine_->schedule_wake(event, timestamp);
+}
+
+bool Component::wake_pending(const Event &event) const {
+  return attached() && engine_->wake_pending(event);
+}
+
+Tick Component::current_tick() const {
+  return attached() ? engine_->context(partition_id_).current_tick() : 0;
+}
+
 Port *Component::add_port(std::unique_ptr<Port> port) {
   Port *raw = port.get();
   ports_.push_back(std::move(port));
