@@ -1445,7 +1445,7 @@ perfetto_processor_t::handle([[maybe_unused]] const ainic_pmc_sample& _nic_sampl
 }
 
 void
-perfetto_processor_t::handle([[maybe_unused]] const hipfile_pmc_sample& _hipfile_sample)
+perfetto_processor_t::handle(const hipfile_pmc_sample& _hipfile_sample)
 {
     using hipfile_track = core::perfetto::counter_track<category::hipfile>;
     namespace collector = pmc::collectors::hipfile;
