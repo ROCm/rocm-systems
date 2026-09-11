@@ -26,6 +26,7 @@
 #include "lib/rocprofiler-sdk/hsa/aql_packet.hpp"
 
 #include <memory>
+#include <mutex>
 #include <vector>
 
 namespace rocprofiler
@@ -68,6 +69,9 @@ struct att_queue_t
     hsa_agent_t                        hsa_agent{};
     hsa_agent_t                        near_cpu{};
 
+    // Serializes submissions with terminal disable after GPU overflow. Heap-owned
+    // so the queue remains movable; a null submit_fn means it cannot be restarted.
+    std::unique_ptr<std::mutex> submit_mutex{std::make_unique<std::mutex>()};
     void (*submit_fn)(const att_queue_t&            self,
                       hsa_ext_amd_aql_pm4_packet_t* packet,
                       att_signal_t*                 completion){nullptr};
@@ -88,10 +92,13 @@ att_queue_create(rocprofiler_agent_id_t             agent_id,
 void
 att_queue_destroy(att_queue_t& queue);
 
+bool
+att_queue_enabled(const att_queue_t& queue);
+
 signal_ptr_t
 att_queue_submit(const att_queue_t& queue, hsa_ext_amd_aql_pm4_packet_t* packet, bool wait);
 
-void
+bool
 att_queue_submit(const att_queue_t&            queue,
                  hsa_ext_amd_aql_pm4_packet_t* packet,
                  att_signal_t*                 completion);

@@ -25,13 +25,13 @@
 #include "lib/rocprofiler-sdk/thread_trace/threading.hpp"
 #include "lib/common/environment.hpp"
 #include "lib/common/utility.hpp"
-#include "lib/rocprofiler-sdk/agent.hpp"
-#include "lib/rocprofiler-sdk/internal_threading.hpp"
 #include "lib/rocprofiler-sdk/thread_trace/core.hpp"
 
 #include <fmt/format.h>
 
+#include <algorithm>
 #include <atomic>
+#include <chrono>
 #include <cstdint>
 #include <thread>
 
@@ -43,8 +43,6 @@ constexpr double SQTT_BANDWIDTH_DEFAULT = 60E9;  // 60GB/s, for wiggle room
 
 namespace
 {
-using buffer_slot_t = triple_buffer_shared_data_t::buffer_slot_t;
-
 struct trace_callback_data_t
 {
     void*        data{};
@@ -128,7 +126,7 @@ consumer_loop(
 //
 // The producer operates in three phases:
 // 1. Poll: Send status query packets to check if GPU buffer is full
-// 2. Copy: When buffer is full, perform async GPU->CPU memory copy
+// 2. Copy: Wait for the buffer swap, then synchronously copy GPU data to CPU memory
 // 3. Notify: Signal the consumer that owns the slot via its per-slot cv
 //
 // The loop uses adaptive polling with backoff based on estimated bandwidth to minimize
@@ -262,6 +260,22 @@ producer_loop(
 
         if(auto status = buffer_packet.query_buffer_status())
         {
+            if(status->gpu_full)
+            {
+                auto submit_lock = std::unique_lock{*queue.submit_mutex};
+                queue.submit_fn  = nullptr;
+
+                // Leave SQTT untouched after overflow: no swap, stop, restart,
+                // or later code-object markers on this queue.
+                ROCP_ERROR << "GPU buffer overflow: ATT tracing disabled for agent "
+                           << queue.agent_id.handle
+                           << ". Discarding GPU-resident trace data and rejecting ALL further "
+                              "packets on this queue, including stop/restart. Tracing will not "
+                              "resume on this queue; already-copied CPU data will still be "
+                              "delivered.";
+                break;
+            }
+
             ROCP_TRACE << "Sending buffer swap";
             // PHASE 2: trigger GPU buffer swap and stage the data into a CPU slot
             // The copy runs on a different engine than the AQL queue, so the packet's
@@ -278,19 +292,17 @@ producer_loop(
             size_t     slot_idx = try_claim_slot();
             const bool cpu_full = (slot_idx == num_buffers);
 
-            if(cpu_full || status->gpu_full) stop_trace();
+            if(cpu_full) stop_trace();
 
             int flags = ROCPROFILER_THREAD_TRACE_SHADER_DATA_FLAGS_NONE;
             if(cpu_full) flags |= ROCPROFILER_THREAD_TRACE_SHADER_DATA_FLAGS_CPU_BUFFER_FULL;
-            if(status->gpu_full)
-                flags |= ROCPROFILER_THREAD_TRACE_SHADER_DATA_FLAGS_GPU_BUFFER_FULL;
 
             // If CPU was full we must wait for a slot before we can publish.
             if(cpu_full) slot_idx = wait_for_free_slot();
             send_to_consumer(
                 status->data, buffer_size, flags, slot_idx, false, status->read_offset);
 
-            if(cpu_full || status->gpu_full)
+            if(cpu_full)
             {
                 iterate_trace();
                 send_header();
@@ -304,8 +316,11 @@ producer_loop(
         }
     }
 
-    stop_trace();
-    iterate_trace();
+    if(att_queue_enabled(queue))
+    {
+        stop_trace();
+        iterate_trace();
+    }
 
     // Signal all consumers to exit. Taking each slot mutex before notifying
     // prevents a consumer from missing the wakeup while entering cv.wait().

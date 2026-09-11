@@ -217,12 +217,27 @@ att_queue_destroy(att_queue_t& queue)
     queue.cpu_buffers.clear();
 }
 
-void
+bool
+att_queue_enabled(const att_queue_t& queue)
+{
+    auto lock = std::unique_lock{*queue.submit_mutex};
+    return queue.submit_fn != nullptr;
+}
+
+bool
 att_queue_submit(const att_queue_t&            queue,
                  hsa_ext_amd_aql_pm4_packet_t* packet,
                  att_signal_t*                 completion)
 {
+    auto lock = std::unique_lock{*queue.submit_mutex};
+    if(!queue.submit_fn)
+    {
+        ROCP_TRACE << "Discarding ATT packet submission on disabled queue for agent "
+                   << queue.agent_id.handle;
+        return false;
+    }
     queue.submit_fn(queue, packet, completion);
+    return true;
 }
 
 signal_ptr_t
@@ -230,7 +245,7 @@ att_queue_submit(const att_queue_t& queue, hsa_ext_amd_aql_pm4_packet_t* packet,
 {
     auto signal = signal_ptr_t{};
     if(wait) signal = make_signal(queue);
-    att_queue_submit(queue, packet, signal.get());
+    if(!att_queue_submit(queue, packet, signal.get())) return nullptr;
     return signal;
 }
 
