@@ -236,6 +236,18 @@ rocprofiler_ompt_is_finalized(int* status)
 ompt_start_tool_result_t*
 rocprofiler_ompt_start_tool(unsigned int omp_version, const char* /*runtime_version*/)
 {
+    // The OpenMP runtime discovers tools while holding its initialization lock. Initializing
+    // rocprofiler-sdk here loads client tool libraries, and their constructors can call back into
+    // the OpenMP runtime and re-enter that lock on the same thread. Only proceed when the SDK is
+    // already initialized, so no client libraries need to be loaded.
+    if(::rocprofiler::registration::get_init_status() == 0)
+    {
+        std::clog << "WARNING: rocprofiler-sdk OMPT support is not enabled because the OpenMP "
+                     "runtime initialized before rocprofiler-sdk. Initialize rocprofiler-sdk "
+                     "before the first OpenMP call to enable OMPT.\n";
+        return nullptr;
+    }
+
     // log to clog since logging probably won't be initialized here
     auto _init_status = ::rocprofiler::ompt::init_status.load();
     if(_init_status != 0)
@@ -257,16 +269,5 @@ rocprofiler_ompt_start_tool(unsigned int omp_version, const char* /*runtime_vers
     }
 
     return _result;
-}
-
-ompt_start_tool_result_t*
-ompt_start_tool(unsigned int omp_version, const char* runtime_version) ROCPROFILER_PUBLIC_API;
-
-ompt_start_tool_result_t*
-ompt_start_tool(unsigned int omp_version, const char* runtime_version)
-{
-    ::rocprofiler::registration::init_logging();
-    ::rocprofiler::registration::initialize();
-    return rocprofiler_ompt_start_tool(omp_version, runtime_version);
 }
 }
