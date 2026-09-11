@@ -139,8 +139,8 @@ bool
 has_spm_support(const Metric& metric, rocprofiler_agent_id_t agent_id);
 
 /**
- * Validate extra counter YAML structure
- * Returns std::nullopt if valid, or error message if invalid
+ * Validate custom counter YAML structure and field types.
+ * Returns std::nullopt if valid, or an error message if invalid.
  */
 std::optional<std::string>
 validateExtraCounterYAML(const YAML::Node& root);
