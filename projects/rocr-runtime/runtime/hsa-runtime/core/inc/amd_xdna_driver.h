@@ -61,28 +61,6 @@ namespace AMD {
 /// @details The user-mode driver for AMD AIE that provides APIs for the ROCr core to allocate
 /// memory, manage DMA buffers, allocate queues, and more.
 class XdnaDriver final : public core::Driver {
-  /// Pool of command BOs owned by a kernel mode queue. Needs BOHandle and the
-  /// BO create/destroy helpers to build and tear down its entries.
-  friend struct CmdBOPool;
-  /// Kernel mode queue metadata. Holds a CmdBOPool and the BO handle scratch
-  /// buffers reused across submissions.
-  friend struct KmqMetadata;
-
-  /// @brief BO handle information.
-  struct BOHandle {
-    /// Mapped address.
-    void* vaddr = nullptr;
-    /// Handle returned by xdna. Same value as AMDXDNA_INVALID_BO_HANDLE.
-    uint32_t handle = 0;
-    /// Size in bytes.
-    size_t size = 0;
-
-    constexpr BOHandle() = default;
-    constexpr BOHandle(void* vaddr, uint32_t handle, size_t size)
-        : vaddr{vaddr}, handle{handle}, size{size} {}
-    constexpr bool IsValid() const { return handle != 0; }
-  };
-
 public:
   XdnaDriver(std::string devnode_name);
 
@@ -123,8 +101,12 @@ public:
   /// dispatch queue.
   ///
   /// @param[in] queue_size size of the dispatch queue in number of packets
+  /// @param[in] num_core_tiles number of core tiles to give the queue's hardware context. The
+  /// driver divides this by the number of core rows to get a column count, so a value smaller
+  /// than one row's worth of tiles asks for zero columns and is rejected.
   /// @param[out] queue_metadata KMQ metadata created for the dispatch queue
-  hsa_status_t CreateKernelModeQueue(size_t queue_size, void** queue_metadata) const;
+  hsa_status_t CreateKernelModeQueue(size_t queue_size, uint32_t num_core_tiles,
+                                     void** queue_metadata) const;
 
   /// @brief Destroy the Kernel Mode Queue (KMQ) metadata.
   ///
@@ -194,13 +176,6 @@ public:
   hsa_status_t CheckAcceleratorReadiness(core::Agent& agent, bool* ready) const override;
 
  private:
-  /// @brief Destroys @p bo_handle.
-  ///
-  /// @note This function will unmap the virtual address and close the BO, even if the former fails.
-  ///
-  /// @param[in,out] bo_handle BO handle to destroy.
-  hsa_status_t DestroyBOHandle(BOHandle& bo_handle) const;
-
   /// @brief Queries the driver version and updates internal state.
   hsa_status_t QueryDriverVersion();
 
@@ -209,20 +184,6 @@ public:
 
   /// @brief Free device accessible heap (dev heap) space.
   hsa_status_t FreeDeviceHeap();
-
-  /// @brief Creates a command BO and returns it to @p bo_info.
-  ///
-  /// @param[in] size size of memory to allocate
-  /// @param[out] bo_info allocated BO
-  hsa_status_t CreateCmdBO(uint32_t size, BOHandle& bo_info) const;
-
-  /// @brief Returns true if @p vaddr lies within the dev heap mapping.
-  ///
-  /// Dev heap BOs carve their VA out of the device heap and borrow its mapping, so
-  /// FreeMemory must not unmap them. This lets FreeMemory distinguish those from
-  /// BO_SHAREs (which own an independent mmap) by the VA alone, without the caller
-  /// tracking mapping ownership.
-  bool IsDevHeapVA(const void* vaddr) const;
 
   /// @brief Device heap BO.
   ///
