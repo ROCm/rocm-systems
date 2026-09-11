@@ -5406,11 +5406,17 @@ amdsmi_status_t amdsmi_get_afids_from_cper(char* cper_buffer, uint32_t buf_size,
     return AMDSMI_STATUS_INVAL;
   }
 
+  // Validate the buffer holds a full header before dereferencing any header field
+  if (buf_size < sizeof(amdsmi_cper_hdr_t)) {
+    ss << __PRETTY_FUNCTION__ << "\n:" << __LINE__ << "[AFIDS] cper buffer size: " << std::dec
+       << buf_size << " is smaller than the cper header: (" << sizeof(amdsmi_cper_hdr_t) << ")\n";
+    LOG_ERROR(ss);
+    return AMDSMI_STATUS_UNEXPECTED_SIZE;
+  }
   const amdsmi_cper_hdr_t* cper = reinterpret_cast<const amdsmi_cper_hdr_t*>(cper_buffer);
-  if (cper->record_length > buf_size) {
-    ss << __PRETTY_FUNCTION__ << "\n:" << __LINE__ << "[AFIDS] cper buffer size " << std::dec
-       << buf_size << " is smaller than cper record length " << std::dec << cper->record_length
-       << "\n";
+  if ((cper->record_length < sizeof(amdsmi_cper_hdr_t)) || (cper->record_length > buf_size)) {
+    ss << __PRETTY_FUNCTION__ << "\n:" << __LINE__ << "[AFIDS] cper record length: " << std::dec
+       << cper->record_length << " does not fit the buffer size: " << buf_size << "\n";
     LOG_ERROR(ss);
     return AMDSMI_STATUS_UNEXPECTED_SIZE;
   } else if (strncmp(cper->signature, "CPER", 4) != 0) {
@@ -5420,7 +5426,7 @@ amdsmi_status_t amdsmi_get_afids_from_cper(char* cper_buffer, uint32_t buf_size,
     return AMDSMI_STATUS_UNEXPECTED_DATA;
   }
   uint32_t i = 0;
-  for (int afid : cper_decode(cper)) {
+  for (int afid : cper_decode(cper, buf_size)) {
     if (i < *num_afids) {
       afids[i] = static_cast<uint64_t>(afid);
     }
@@ -5825,7 +5831,6 @@ amdsmi_status_t amdsmi_get_pcie_info(amdsmi_processor_handle processor_handle,
 
   SMIGPUDEVICE_MUTEX(gpu_device->get_mutex())
 
-  char buff[AMDSMI_MAX_STRING_LENGTH];
   FILE* fp;
   double pcie_speed = 0;
   unsigned pcie_width = 0;
@@ -5855,7 +5860,7 @@ amdsmi_status_t amdsmi_get_pcie_info(amdsmi_processor_handle processor_handle,
       "/sys/class/drm/" + gpu_device->get_gpu_path() + "/device/max_link_speed";
   fp = fopen(path_max_link_speed.c_str(), "r");
   if (fp) {
-    if (fscanf(fp, "%lf %s", &pcie_speed, buff) != 2) {
+    if (fscanf(fp, "%lf %*s", &pcie_speed) != 1) {
       fclose(fp);
       std::ostringstream ss;
       ss << __PRETTY_FUNCTION__ << " | Failed to parse: " << path_max_link_speed;

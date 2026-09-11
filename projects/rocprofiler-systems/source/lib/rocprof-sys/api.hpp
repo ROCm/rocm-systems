@@ -7,8 +7,6 @@
 #include "rocprofiler-systems/annotation.h"  // in rocprof-sys-common-api
 #include "rocprofiler-systems/categories.h"  // in rocprof-sys-common-api
 
-#include <timemory/compat/macros.h>
-
 #include <cstddef>
 
 // forward decl of the API

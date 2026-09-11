@@ -12,7 +12,7 @@ rocprofiler_add_integration_execute_test(
         json -o spm -- $<TARGET_FILE:simple-transpose>
     DEPENDS simple-transpose
     TIMEOUT 60
-    LABELS "integration-tests"
+    LABELS "integration-tests;spm"
     ENVIRONMENT "${PRELOAD_ENV}"
     FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
     DISABLED ${IS_DISABLED})
@@ -26,7 +26,7 @@ rocprofiler_add_integration_execute_test(
         $<TARGET_FILE:simple-transpose>
     DEPENDS simple-transpose
     TIMEOUT 45
-    LABELS "integration-tests"
+    LABELS "integration-tests;spm"
     ENVIRONMENT "${PRELOAD_ENV}"
     FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
     DISABLED ${IS_DISABLED})
@@ -40,7 +40,7 @@ rocprofiler_add_integration_validate_test(
          ${CMAKE_CURRENT_BINARY_DIR}/out_spm/spm_results.json
     CONFIG pytest.ini
     COPY spm_input.json conftest.py
-    LABELS "integration-tests"
+    LABELS "integration-tests;spm"
     FIXTURES_REQUIRED
         "rocprofv3-test-spm-json-execute;rocprofv3-test-spm-json-compare-to-pmc"
     FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
@@ -55,7 +55,7 @@ rocprofiler_add_integration_execute_test(
         $<TARGET_FILE:vector-ops>
     DEPENDS vector-ops
     TIMEOUT 60
-    LABELS "integration-tests"
+    LABELS "integration-tests;spm"
     ENVIRONMENT "${PRELOAD_ENV}"
     FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
     DISABLED ${IS_DISABLED})
@@ -68,7 +68,7 @@ rocprofiler_add_integration_validate_test(
     ARGS --spm-json ${CMAKE_CURRENT_BINARY_DIR}/out_multi/multi_results.json
     CONFIG pytest.ini
     COPY conftest.py
-    LABELS "integration-tests"
+    LABELS "integration-tests;spm"
     FIXTURES_REQUIRED "rocprofv3-test-spm-multigpu-json-execute"
     FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
     DISABLED ${IS_DISABLED})
