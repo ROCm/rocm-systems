@@ -26,7 +26,7 @@ exercise telemetry, not to pin a particular I/O path.
 
 Source: `hipfile-io.cpp`. Built whenever the hipFile runtime is found (same as
 `hipfile-trace`). Profiling its I/O counters still requires hipFile telemetry
-support in the profiler binaries (`ROCPROFSYS_BUILD_HIPFILE=ON`, or `AUTO` with a
+support in the profiler binaries (`ROCPROFSYS_USE_HIPFILE=ON`, or `AUTO` with a
 new enough package).
 
 Usage: `hipfile-io [FILE] [GPUID] [SECONDS]`

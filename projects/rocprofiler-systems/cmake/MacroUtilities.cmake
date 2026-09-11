@@ -585,6 +585,55 @@ function(ROCPROFILER_SYSTEMS_ADD_CACHE_OPTION _NAME _MESSAGE _TYPE _DEFAULT)
 endfunction()
 
 # ----------------------------------------------------------------------------------------#
+# function rocprofiler_systems_add_tristate_option(<OPTION_NAME> <DOCSRING>
+# <DEFAULT_VALUE> [NO_FEATURE] [ADVANCED] [CMAKE_DEFINE])
+#
+# Add an option whose value is ON, OFF, or AUTO, where AUTO means "enable when the
+# dependency is available, otherwise skip quietly" and ON means "enable, and fail
+# configure when the dependency is missing". Pair with
+# rocprofiler_systems_resolve_tristate_option() where the value is consumed; the cache
+# entry itself is left holding whatever the user passed.
+#
+function(ROCPROFILER_SYSTEMS_ADD_TRISTATE_OPTION _NAME _MESSAGE _DEFAULT)
+    rocprofiler_systems_add_cache_option(
+        ${_NAME}
+        "${_MESSAGE}"
+        STRING
+        "${_DEFAULT}"
+        ${ARGN}
+    )
+    set_property(CACHE ${_NAME} PROPERTY STRINGS ON OFF AUTO)
+endfunction()
+
+# ----------------------------------------------------------------------------------------#
+# function rocprofiler_systems_resolve_tristate_option(<OPTION_NAME> <OUTPUT_VARIABLE>)
+#
+# Normalize a tri-state option into exactly ON, OFF, or AUTO and store it in
+# <OUTPUT_VARIABLE>, so callers can compare with STREQUAL instead of repeating the
+# boolean spellings CMake accepts. Anything outside the three states is a hard error:
+# a typo such as -DROCPROFSYS_USE_XYZ=AUTOO would otherwise silently behave like OFF.
+#
+function(ROCPROFILER_SYSTEMS_RESOLVE_TRISTATE_OPTION _NAME _OUTPUT_VARIABLE)
+    string(TOUPPER "${${_NAME}}" _value)
+
+    if(_value STREQUAL "TRUE" OR _value STREQUAL "1")
+        set(_value "ON")
+    elseif(_value STREQUAL "FALSE" OR _value STREQUAL "0")
+        set(_value "OFF")
+    endif()
+
+    if(
+        NOT _value STREQUAL "ON"
+        AND NOT _value STREQUAL "OFF"
+        AND NOT _value STREQUAL "AUTO"
+    )
+        message(FATAL_ERROR "${_NAME} must be ON, OFF, or AUTO, got '${${_NAME}}'")
+    endif()
+
+    set(${_OUTPUT_VARIABLE} "${_value}" PARENT_SCOPE)
+endfunction()
+
+# ----------------------------------------------------------------------------------------#
 # function rocprofiler_systems_report_feature_changes() :: print changes in features
 #
 function(ROCPROFILER_SYSTEMS_REPORT_FEATURE_CHANGES)
