@@ -8128,6 +8128,8 @@ class CodeGenerator:
         'inc': 'amdgpu::AtomicOp::INC',
         'dec': 'amdgpu::AtomicOp::DEC',
         'fadd': 'amdgpu::AtomicOp::FADD',
+        'pk_add_f16': 'amdgpu::AtomicOp::PK_ADD_F16',
+        'pk_add_bf16': 'amdgpu::AtomicOp::PK_ADD_BF16',
         'fmin': 'amdgpu::AtomicOp::FMIN',
         'fmax': 'amdgpu::AtomicOp::FMAX',
         'append': 'amdgpu::AtomicOp::APPEND',
@@ -8260,6 +8262,9 @@ class CodeGenerator:
         L.append('  d->num_elems = 1;')
         L.append(f'  d->is_load = {str(returns_data).lower()};')
         L.append(f'  d->atomic_op = {op_enum};')
+        if sem.operation in ('pk_add_f16', 'pk_add_bf16'):
+            # CDNA5 ISA 12.2 groups packed F16/BF16 under DS denorm_double controls.
+            L.append('  d->packed_denorm_mode = wf.fp_denorm_mode_f16_f64();')
         self._append_wait_counter_type(L, 'ds_atomic')
         L.append('  ds_calculate_addresses(inst_, wf, *d);')
         L.append('  auto &cu = wf.cu();')
@@ -13883,6 +13888,36 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
             f'}}'
         )
 
+        # to_special_reg_class(): maps a special operand (VCC/EXEC/SDST_EXEC/
+        # SSRC_SPECIAL_SCC/M0/PC) to its special RegClass so InstDefUse can
+        # record it as a singleton member of its defs/uses set by operand
+        # direction. Driven by the shared fieldless operand policy table's
+        # effect column, so it keys only on the operand type. A special register
+        # named through a generic selector field instead (e.g. EXEC_LO encoded as
+        # selector value 126 on OPR_SDST) is not handled here and stays nullopt;
+        # surfacing those would add encoding_value_-guarded sub-branches per
+        # selector type. See def_use_chain.h for the consumer-facing contract.
+        special_ref_cases = []
+        for opnd_type in self.isa_spec.operand_types:
+            effect = fieldless_policy(opnd_type).effect
+            if effect is not None and effect.special_reg is not None:
+                special_ref_cases.append(
+                    f'case OperandType::{opnd_type}: '
+                    f'return RegClass::{effect.special_reg.name};'
+                )
+        special_ref_cases.sort()
+        special_ref_body = '\n'.join(special_ref_cases)
+        special_ref_impl = (
+            f'std::optional<RegClass> Operand::to_special_reg_class() const {{\n'
+            f'switch (opr_type_) {{\n'
+            f'{special_ref_body}\n'
+            f'default:\n'
+            f'  break;\n'
+            f'}}\n'
+            f'return std::nullopt;\n'
+            f'}}'
+        )
+
         operand_ctor_decl = (
             '  Operand(int size_bits, OperandType opr_type, int encoding_value,\n'
             '          bool packed_16bit_source = false, bool packed_16bit_dst = false);\n'
@@ -14022,6 +14057,7 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
                 '  std::string name() const override;\n'
                 f'{literal64_decl}'
                 '  std::optional<RegisterRef> to_register_ref() const override;\n'
+                '  std::optional<RegClass> to_special_reg_class() const override;\n'
                 f'{execution_backend_public_decl}'
                 f'{execution_decls}'
                 '  uint64_t widened_literal32_value() const;\n'
@@ -14179,6 +14215,7 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
                 cgen.Line(const_value_impl),
                 cgen.Line(name_impl),
                 cgen.Line(ref_impl),
+                cgen.Line(special_ref_impl),
             ]
         )
 
