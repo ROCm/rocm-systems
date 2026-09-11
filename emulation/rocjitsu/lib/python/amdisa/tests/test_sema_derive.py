@@ -2528,8 +2528,8 @@ class TestDerivePacked:
         [
             ('add', 'packed_add_bf16'),
             ('mul', 'packed_mul_bf16'),
-            ('min', 'f32_to_bf16_rne'),
-            ('max', 'f32_to_bf16_rne'),
+            ('min', 'packed_select_bf16'),
+            ('max', 'packed_select_bf16'),
         ],
     )
     def test_pk_binop_bf16_generator_uses_bf16_helpers(self, operation, helper):
