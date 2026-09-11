@@ -284,7 +284,11 @@ mpi_gotcha::audit(const gotcha_data_t& _data, audit::incoming, int*, char***)
     LOG_DEBUG("{}(int*, char***)", _data.tool_id);
 
     g_mpi_hidden_trace_pushed = !mpip_paused();
-    if(g_mpi_hidden_trace_pushed) rocprofsys_push_trace_hidden(_data.tool_id.c_str());
+    if(g_mpi_hidden_trace_pushed)
+    {
+        rocprofsys_push_trace_hidden(_data.tool_id.c_str());
+    }
+
 #if !defined(ROCPROFSYS_USE_MPI) && defined(ROCPROFSYS_USE_MPI_HEADERS)
     rocprofsys::mpi::is_initialized_callback() = []() { return true; };
     rocprofsys::mpi::is_finalized()            = false;
@@ -297,7 +301,11 @@ mpi_gotcha::audit(const gotcha_data_t& _data, audit::incoming, int*, char***, in
     LOG_DEBUG("{}(int*, char***, int, int*)", _data.tool_id);
 
     g_mpi_hidden_trace_pushed = !mpip_paused();
-    if(g_mpi_hidden_trace_pushed) rocprofsys_push_trace_hidden(_data.tool_id.c_str());
+    if(g_mpi_hidden_trace_pushed)
+    {
+        rocprofsys_push_trace_hidden(_data.tool_id.c_str());
+    }
+
 #if !defined(ROCPROFSYS_USE_MPI) && defined(ROCPROFSYS_USE_MPI_HEADERS)
     rocprofsys::mpi::is_initialized_callback() = []() { return true; };
     rocprofsys::mpi::is_finalized()            = false;
@@ -332,7 +340,11 @@ mpi_gotcha::audit(const gotcha_data_t& _data, audit::incoming, comm_t _comm, int
     LOG_DEBUG("{}(comm_t _comm, int* _val)", _data.tool_id);
 
     g_mpi_hidden_trace_pushed = !mpip_paused();
-    if(g_mpi_hidden_trace_pushed) rocprofsys_push_trace_hidden(_data.tool_id.c_str());
+    if(g_mpi_hidden_trace_pushed)
+    {
+        rocprofsys_push_trace_hidden(_data.tool_id.c_str());
+    }
+
     if(_data.tool_id.starts_with("MPI_Comm_rank") ||
        _data.tool_id.starts_with("PMPI_Comm_rank"))
     {
