@@ -168,7 +168,7 @@ ncclResult_t ncclProxyClientGetFdBlocking(struct ncclComm* comm, int rank, void*
 // ---------------------------------------------------------------------------
 // Symmetric kernels.
 // ---------------------------------------------------------------------------
-ncclResult_t ncclSymkInitOnce(struct ncclComm*) { return ncclSuccess; }
+// ncclSymkInitOnce (src/sym_kernels.cc): sym_kernels_fakes.cc.
 
 // ---------------------------------------------------------------------------
 // Space allocator.

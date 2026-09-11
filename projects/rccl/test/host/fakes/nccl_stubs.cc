@@ -71,7 +71,7 @@ ncclResult_t ncclDdaIpcCommFini(struct ncclComm* comm) { return ncclSuccess; }
 ncclResult_t ncclDdaIpcCommInit(struct ncclComm* comm) { ::abort(); }
 bool ncclDdaUseFabricPath(struct ncclComm* comm) { return false; }
 ncclResult_t ncclDevrFinalize(struct ncclComm* comm) { return ncclSuccess; }
-ncclResult_t ncclDevrFindWindow(struct ncclComm* comm, void const* userPtr, struct ncclDevrWindow** outWin) { ::abort(); }
+// ncclDevrFindWindow (src/dev_runtime.cc): dev_runtime_fakes.cc.
 bool ncclDevrIsOneLsaTeam(struct ncclComm* comm) { ::abort(); }
 ncclResult_t ncclGinA2AFinalize(struct ncclComm* comm) { return ncclSuccess; }
 ncclResult_t ncclGinFinalize(struct ncclComm* comm) { return ncclSuccess; }
@@ -206,7 +206,7 @@ ncclResult_t ncclMemAlloc(void** ptr, size_t size) { ::abort(); }
 ncclResult_t ncclMemFree(void* ptr) { return g_ncclMemFree(ptr); }
 }
 
-ncclResult_t ncclSymkInitOnce(struct ncclComm* comm) { ::abort(); }
+// ncclSymkInitOnce (src/sym_kernels.cc): sym_kernels_fakes.cc.
 
 void ResetNcclStubs() {
 #ifndef RCCL_STUBS_OMIT_ncclInitKernelsForDevice

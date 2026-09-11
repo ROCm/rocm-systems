@@ -22,6 +22,11 @@ struct ncclComm;
 // A host-only binary has no device, so `false` is the honest answer rather than
 // a steering choice; override it to exercise the AINIC arm.
 extern bool g_rcclUseAinic;
+extern std::function<bool()> g_useAinic;
+
+// ncclPxnDisable (src/graph/paths.cc:754). The default mirrors an initialized
+// communicator with PXN enabled; override for direct-selection tests.
+extern std::function<int(struct ncclComm*)> g_pxnDisable;
 
 // ncclProxyStop (src/proxy.cc): comm teardown stops the proxy through this.
 extern std::function<ncclResult_t(struct ncclComm*)> g_ncclProxyStop;
