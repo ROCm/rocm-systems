@@ -734,8 +734,7 @@ TopologyBuildResult build_topology(const fb::TopologyDef *topology_def, simdojo:
   return result;
 }
 
-LoadedConfig build_from_fb(const rocjitsu::fb::SimulationConfig *fb_config,
-                           uint32_t host_threads_override) {
+LoadedConfig build_from_fb(const rocjitsu::fb::SimulationConfig *fb_config, uint32_t host_threads) {
   LoadedConfig result;
   result.engine_config = engine_config_from_fb(fb_config);
   result.exec_mode = exec_mode_from_fb(fb_config);
@@ -826,10 +825,7 @@ LoadedConfig build_from_fb(const rocjitsu::fb::SimulationConfig *fb_config,
       if (SoC *extra_soc = dynamic_cast<SoC *>(extra_gpu.root.get()))
         socs.push_back(extra_soc);
     }
-    result.engine_config.num_threads =
-        host_threads_override == 0
-            ? amdgpu::default_xcd_partition_count(socs)
-            : amdgpu::default_xcd_partition_count(socs, host_threads_override);
+    result.engine_config.num_threads = amdgpu::default_xcd_partition_count(socs, host_threads);
   }
 
   return result;
@@ -917,20 +913,28 @@ DeviceIdentityConfig load_device_identity(const std::string &json_path,
 }
 
 LoadedConfig load_config(const std::string &json_path, const std::string &schema_text,
-                         uint32_t host_threads_override) {
+                         uint32_t host_threads) {
   std::string json_text = read_config_file(json_path);
-  return with_parsed_simulation_config_json(
-      json_text, schema_text, [host_threads_override](const fb::SimulationConfig *fb_config) {
-        return build_from_fb(fb_config, host_threads_override);
-      });
+  return with_parsed_simulation_config_json(json_text, schema_text,
+                                            [host_threads](const fb::SimulationConfig *fb_config) {
+                                              return build_from_fb(fb_config, host_threads);
+                                            });
+}
+
+LoadedConfig load_config(const std::string &json_path, const std::string &schema_text) {
+  return load_config(json_path, schema_text, amdgpu::available_host_threads());
 }
 
 LoadedConfig load_config_from_string(const std::string &json, const std::string &schema_text,
-                                     uint32_t host_threads_override) {
-  return with_parsed_simulation_config_json(
-      json, schema_text, [host_threads_override](const fb::SimulationConfig *fb_config) {
-        return build_from_fb(fb_config, host_threads_override);
-      });
+                                     uint32_t host_threads) {
+  return with_parsed_simulation_config_json(json, schema_text,
+                                            [host_threads](const fb::SimulationConfig *fb_config) {
+                                              return build_from_fb(fb_config, host_threads);
+                                            });
+}
+
+LoadedConfig load_config_from_string(const std::string &json, const std::string &schema_text) {
+  return load_config_from_string(json, schema_text, amdgpu::available_host_threads());
 }
 
 } // namespace config

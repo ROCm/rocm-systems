@@ -181,25 +181,42 @@ simdojo::ExecMode parse_exec_mode(const std::string &mode_str);
 /// @param json_path Path to the JSON config file.
 /// @param schema_text FlatBuffers schema text (the .fbs content).
 /// @returns LoadedConfig with engine parameters and built topology.
-/// @param host_threads_override Host width used to resolve an unset (or zero)
-/// `num_threads`. 0, the default, measures the process's own affinity. Pass a
-/// value to resolve against a stated host width instead: a test that lets the
-/// loader measure cannot tell a correct all-SoC XCD total from a first-SoC-only
-/// one on a runner narrower than one GPU's XCD count, because both saturate at
-/// the host width.
+/// @throws std::runtime_error on file I/O, parse errors, or invalid config.
+LoadedConfig load_config(const std::string &json_path, const std::string &schema_text);
+
+/// @brief Load simulation config from a JSON file against a stated host width.
+///
+/// @details Like the two-argument overload, but resolves an unset (or zero)
+/// `num_threads` against @p host_threads instead of the process's own affinity,
+/// making host-dependent policy explicit for embedding callers and
+/// deterministic tests. @p host_threads is always the width used, including 0,
+/// which means indeterminate and resolves to a single partition.
+/// @param json_path Path to the JSON config file.
+/// @param schema_text FlatBuffers schema text (the .fbs content).
+/// @param host_threads Host width to resolve the default partition count
+/// against.
+/// @returns LoadedConfig with engine parameters and built topology.
 /// @throws std::runtime_error on file I/O, parse errors, or invalid config.
 LoadedConfig load_config(const std::string &json_path, const std::string &schema_text,
-                         uint32_t host_threads_override = 0);
+                         uint32_t host_threads);
 
 /// @brief Load simulation config from a JSON string.
 /// @param json JSON configuration string.
 /// @param schema_text FlatBuffers schema text (the .fbs content).
 /// @returns LoadedConfig with engine parameters and built topology.
-/// @param host_threads_override Host width used to resolve an unset (or zero)
-/// `num_threads`; see @ref load_config. 0, the default, measures affinity.
+/// @throws std::runtime_error on parse errors or invalid config.
+LoadedConfig load_config_from_string(const std::string &json, const std::string &schema_text);
+
+/// @brief Load simulation config from a JSON string against a stated host width.
+/// @details See the three-argument @ref load_config overload.
+/// @param json JSON configuration string.
+/// @param schema_text FlatBuffers schema text (the .fbs content).
+/// @param host_threads Host width to resolve the default partition count
+/// against; 0 means indeterminate and resolves to a single partition.
+/// @returns LoadedConfig with engine parameters and built topology.
 /// @throws std::runtime_error on parse errors or invalid config.
 LoadedConfig load_config_from_string(const std::string &json, const std::string &schema_text,
-                                     uint32_t host_threads_override = 0);
+                                     uint32_t host_threads);
 
 } // namespace config
 } // namespace rocjitsu

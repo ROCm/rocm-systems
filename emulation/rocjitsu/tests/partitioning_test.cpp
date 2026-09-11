@@ -504,8 +504,14 @@ TEST(XcdPartitioningTest, ShippedConfigsOmitNumThreadsExceptTheDocumentedPin) {
       // says any multi-partition value hangs RCCL collectives on these configs.
       // Checking only that the key is present would let 2 or 64 through, which
       // is the exact state the pin exists to prevent.
+      //
+      // The stated width has to exceed 1, or the assertion cannot see the
+      // difference: resolving against the live affinity of a one-CPU runner
+      // turns a pin of 0 -- which opts back into the default -- into 1 as
+      // surely as a real pin does. At 64 the config has to carry the literal 1.
       const config::LoadedConfig pinned =
-          config::load_config(entry.path().string(), rocjitsu::kEmbeddedSchema);
+          config::load_config(entry.path().string(), rocjitsu::kEmbeddedSchema,
+                              /*host_threads=*/64);
       EXPECT_EQ(pinned.engine_config.num_threads, 1u)
           << entry.path().filename() << " must pin num_threads to exactly 1";
     } else {
