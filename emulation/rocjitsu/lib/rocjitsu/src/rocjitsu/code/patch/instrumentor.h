@@ -88,22 +88,31 @@ struct InstrumentationPoint {
 
   InstrumentationKind kind = InstrumentationKind::BeforeInst;
 
-  // filter_flags / force_full_exec are not used yet. The validator rejects any
-  // non-default value to keep the contract honest until each field is actually
-  // implemented.
-  // TODO: consume force_full_exec when EXEC policy management lands; consume
-  // filter_flags to filter based on InstFlags.
+  // filter_flags is not used yet. The validator rejects any non-default value
+  // to keep the contract honest until the field is actually implemented.
+  // TODO: consume filter_flags to filter based on InstFlags.
   uint32_t filter_flags = 0;
   // probe_obj / probe_symbol are consumed: set both to request a probe-call
   // trampoline, or leave both empty for the inline nop.
   const AmdGpuCodeObject *probe_obj = nullptr;
   std::string probe_symbol;
-  // Immediate argument dwords to hand the probe, one per VGPR from the ABI's
-  // arg_vgpr_base. The size is the declared argument count and is part of what
-  // the probe body is verified against, so two sites calling one probe with
-  // different counts do not share a ProbeCallable. Empty means a probe called
-  // with no arguments. Only meaningful alongside probe_obj / probe_symbol.
-  std::vector<uint32_t> probe_args;
+  // Argument dwords to hand the probe, one per VGPR from the ABI's
+  // arg_vgpr_base. Each names where the trampoline gets the value; use
+  // probe_arg_imm() for a constant. The list's *shape* describes the probe: its
+  // size is the declared argument count the probe body is verified against, and
+  // each slot's source decides what the body may assume it received. So two
+  // sites calling one probe with different shapes do not share a ProbeCallable.
+  // Empty means a probe called with no arguments. Only meaningful alongside
+  // probe_obj / probe_symbol.
+  std::vector<ProbeArgValue> probe_args;
+  // Run the probe body with every lane enabled rather than under the mask the
+  // guest had at the anchor. For a uniform probe whose work does not depend on
+  // which lanes were active; a probe that reads per-lane guest state wants the
+  // anchor mask instead, which is the default. Like the argument shape, this
+  // describes the probe rather than the site, so it keys the ProbeCallable.
+  //
+  // The envelope already widens EXEC around the spill and argument writes; this
+  // holds that window open across the call instead of closing it first.
   bool force_full_exec = false;
   // TODO: SCC will eventually need a per-point knob mirroring force_full_exec
   // (e.g. probe_consumes_scc) since the probe call clobbers it
@@ -121,10 +130,15 @@ struct ResolvedInstrumentationSite {
   // (ResolvedPoints::probes); nullopt if no probes
   std::optional<size_t> probe_index;
 
-  // Argument values for this site, copied from the request. Per-site, unlike the
-  // ProbeCallable the probe_index names: two sites can call one probe body with
-  // different values, and only the count is shared.
-  std::vector<uint32_t> probe_args;
+  // Argument values for this site, copied from the request. Only the immediates
+  // are genuinely per-site: two sites can call one probe body with different
+  // constants, but the shape is shared, since it keys the ProbeCallable that
+  // probe_index names.
+  std::vector<ProbeArgValue> probe_args;
+
+  // Mask policy for this site, copied from the request. Shared with every other
+  // site that resolved to the same probe_index, since it keys the registry.
+  bool force_full_exec = false;
 
   [[nodiscard]] bool is_probe_call() const { return probe_index.has_value(); }
 };

@@ -573,7 +573,7 @@ TEST(TrampolineBuilderPlan, ArgumentsAddTwoWordsEachPlusTheFullMaskWindow) {
 
   TrampolinePlan three;
   three.arch = ROCJITSU_CODE_ARCH_CDNA2;
-  three.probe_args = {1u, 2u, 3u};
+  three.probe_args = {probe_arg_imm(1), probe_arg_imm(2), probe_arg_imm(3)};
   ASSERT_TRUE(TrampolineBuilder::plan_probe_call(three, arg_abi(3), make_sgpr_set({4}),
                                                  /*probe_body_clobbers=*/{}, &err))
       << err;
@@ -584,6 +584,78 @@ TEST(TrampolineBuilderPlan, ArgumentsAddTwoWordsEachPlusTheFullMaskWindow) {
             none.before_word_count + kArgWords + kExecToggles + kExecSaveRestore);
 }
 
+// An EXEC-sourced argument reads a register rather than a literal, so its
+// v_mov_b32 has no trailing word and the argument costs one word, not two.
+TEST(TrampolineBuilderPlan, AnchorExecArgumentsCostOneWordEach) {
+  TrampolinePlan immediates;
+  immediates.arch = ROCJITSU_CODE_ARCH_CDNA2;
+  immediates.probe_args = {probe_arg_imm(1), probe_arg_imm(2)};
+  std::string err;
+  ASSERT_TRUE(TrampolineBuilder::plan_probe_call(immediates, arg_abi(2), make_sgpr_set({4}),
+                                                 /*probe_body_clobbers=*/{}, &err))
+      << err;
+
+  TrampolinePlan mask;
+  mask.arch = ROCJITSU_CODE_ARCH_CDNA2;
+  mask.probe_args = {{ProbeArgSource::AnchorExecLo, 0}, {ProbeArgSource::AnchorExecHi, 0}};
+  ASSERT_TRUE(TrampolineBuilder::plan_probe_call(mask, arg_abi(2), make_sgpr_set({4}),
+                                                 /*probe_body_clobbers=*/{}, &err))
+      << err;
+  // Same window, same register reservations; only the two literal words differ.
+  EXPECT_EQ(mask.before_word_count, immediates.before_word_count - 2);
+}
+
+// A full-exec site opens the full-mask window even with nothing to spill and no
+// arguments, since the probe itself runs inside it. Two toggles rather than
+// three: the widen, and the re-widen guarding the (here empty) epilogue against
+// a probe that narrowed EXEC. The anchor-mask restore before the call is what
+// disappears.
+TEST(TrampolineBuilderPlan, FullExecOpensTheWindowAndCostsTwoToggles) {
+  TrampolinePlan masked;
+  masked.arch = ROCJITSU_CODE_ARCH_CDNA2;
+  masked.preserve_exec = false;
+  std::string err;
+  ASSERT_TRUE(TrampolineBuilder::plan_probe_call(masked, arg_abi(0), make_sgpr_set({4}),
+                                                 /*probe_body_clobbers=*/{}, &err))
+      << err;
+
+  TrampolinePlan full;
+  full.arch = ROCJITSU_CODE_ARCH_CDNA2;
+  full.preserve_exec = false;
+  full.force_full_exec = true;
+  ASSERT_TRUE(TrampolineBuilder::plan_probe_call(full, arg_abi(0), make_sgpr_set({4}),
+                                                 /*probe_body_clobbers=*/{}, &err))
+      << err;
+
+  const uint16_t exec_lo = scalar_operand_exec_lo(full.arch);
+  EXPECT_TRUE(std::any_of(full.special_state_saves.begin(), full.special_state_saves.end(),
+                          [&](const SpecialStateSlot &s) { return s.operand == exec_lo; }));
+  constexpr uint32_t kExecToggles = 2;
+  constexpr uint32_t kExecSaveRestore = 2; // the EXEC temp's s_mov pair
+  EXPECT_EQ(full.before_word_count, masked.before_word_count + kExecToggles + kExecSaveRestore);
+}
+
+// A site that already opened the window for its spills or arguments saves the
+// one toggle the anchor-mask restore cost.
+TEST(TrampolineBuilderPlan, FullExecDropsOneToggleFromAnArgumentSite) {
+  TrampolinePlan masked;
+  masked.arch = ROCJITSU_CODE_ARCH_CDNA2;
+  masked.probe_args = {probe_arg_imm(1)};
+  std::string err;
+  ASSERT_TRUE(TrampolineBuilder::plan_probe_call(masked, arg_abi(1), make_sgpr_set({4}),
+                                                 /*probe_body_clobbers=*/{}, &err))
+      << err;
+
+  TrampolinePlan full;
+  full.arch = ROCJITSU_CODE_ARCH_CDNA2;
+  full.probe_args = {probe_arg_imm(1)};
+  full.force_full_exec = true;
+  ASSERT_TRUE(TrampolineBuilder::plan_probe_call(full, arg_abi(1), make_sgpr_set({4}),
+                                                 /*probe_body_clobbers=*/{}, &err))
+      << err;
+  EXPECT_EQ(full.before_word_count, masked.before_word_count - 1);
+}
+
 // The envelope writes the argument VGPRs, so they are builder clobbers and the
 // orchestrator's spill set picks them up when they are live.
 TEST(TrampolineBuilderPlan, ArgumentVgprsAreBuilderClobbers) {
@@ -591,7 +663,7 @@ TEST(TrampolineBuilderPlan, ArgumentVgprsAreBuilderClobbers) {
   // An argument-passing plan reserves the EXEC temp, which resolves a per-arch
   // operand code, so unlike a bare no-argument plan it is not arch-agnostic.
   plan.arch = ROCJITSU_CODE_ARCH_CDNA2;
-  plan.probe_args = {7u, 8u};
+  plan.probe_args = {probe_arg_imm(7), probe_arg_imm(8)};
   std::string err;
   ASSERT_TRUE(TrampolineBuilder::plan_probe_call(plan, arg_abi(2), make_sgpr_set({4}),
                                                  /*probe_body_clobbers=*/{}, &err))
@@ -624,7 +696,7 @@ TEST(TrampolineBuilderPlan, PassingArgumentsReservesTheExecSave) {
   // Nothing live, nothing the probe clobbers -- the site still opens the window.
   TrampolinePlan dead_arg;
   dead_arg.arch = ROCJITSU_CODE_ARCH_CDNA2;
-  dead_arg.probe_args = {1u};
+  dead_arg.probe_args = {probe_arg_imm(1)};
   ASSERT_TRUE(TrampolineBuilder::plan_probe_call(dead_arg, arg_abi(1), make_sgpr_set({4}),
                                                  /*probe_body_clobbers=*/{}, &err))
       << err;
@@ -632,7 +704,7 @@ TEST(TrampolineBuilderPlan, PassingArgumentsReservesTheExecSave) {
 
   TrampolinePlan live_arg;
   live_arg.arch = ROCJITSU_CODE_ARCH_CDNA2;
-  live_arg.probe_args = {1u};
+  live_arg.probe_args = {probe_arg_imm(1)};
   ASSERT_TRUE(TrampolineBuilder::plan_probe_call(live_arg, arg_abi(1), make_vgpr_set({0}),
                                                  /*probe_body_clobbers=*/{}, &err))
       << err;
@@ -643,7 +715,7 @@ TEST(TrampolineBuilderPlan, PassingArgumentsReservesTheExecSave) {
 // disagreement means a direct caller built the two independently.
 TEST(TrampolineBuilderPlan, ArgumentCountDisagreeingWithTheAbiFails) {
   TrampolinePlan plan;
-  plan.probe_args = {1u, 2u};
+  plan.probe_args = {probe_arg_imm(1), probe_arg_imm(2)};
   std::string err;
   EXPECT_FALSE(TrampolineBuilder::plan_probe_call(plan, arg_abi(1), /*live_at_anchor=*/{},
                                                   /*probe_body_clobbers=*/{}, &err));
@@ -738,7 +810,7 @@ TEST(TrampolineBuilderEmit, SwappcUsesCcLinkPairAndTargetPair) {
 // inactive lanes holding whatever the guest left there.
 TEST(TrampolineBuilderEmit, MaterializesArgumentsInsideTheFullMaskWindow) {
   TrampolinePlan plan = make_probe_plan();
-  plan.probe_args = {0xAAAA0000u, 0xBBBB1111u};
+  plan.probe_args = {probe_arg_imm(0xAAAA0000u), probe_arg_imm(0xBBBB1111u)};
   std::string err;
   ASSERT_TRUE(TrampolineBuilder::plan_probe_call(plan, arg_abi(2), make_sgpr_set({4}),
                                                  /*probe_body_clobbers=*/{}, &err))
@@ -775,6 +847,98 @@ TEST(TrampolineBuilderEmit, MaterializesArgumentsInsideTheFullMaskWindow) {
   });
   ASSERT_NE(swappc, w.end());
   EXPECT_LT(restore_at - w.begin(), swappc - w.begin());
+}
+
+// The mask argument reads the saved anchor EXEC pair, not `exec`. By the time
+// the argument writes run, the widen above has already overwritten `exec` with
+// -1, so sourcing the live register would hand every probe the same all-ones
+// value instead of the mask the guest was running under.
+TEST(TrampolineBuilderEmit, AnchorExecArgumentsReadTheSavedPair) {
+  TrampolinePlan plan = make_probe_plan();
+  plan.probe_args = {{ProbeArgSource::AnchorExecLo, 0}, {ProbeArgSource::AnchorExecHi, 0}};
+  std::string err;
+  ASSERT_TRUE(TrampolineBuilder::plan_probe_call(plan, arg_abi(2), make_sgpr_set({4}),
+                                                 /*probe_body_clobbers=*/{}, &err))
+      << err;
+  const auto bytes = TrampolineBuilder::emit_probe_call(plan, &err);
+  ASSERT_TRUE(bytes.has_value()) << err;
+
+  const uint16_t exec_lo = scalar_operand_exec_lo(plan.arch);
+  const auto saved = std::find_if(plan.special_state_saves.begin(), plan.special_state_saves.end(),
+                                  [&](const SpecialStateSlot &s) { return s.operand == exec_lo; });
+  ASSERT_NE(saved, plan.special_state_saves.end());
+
+  // Both halves come from the temp pair, in declaration order into v0 and v1.
+  const std::vector<uint32_t> &w = bytes->trampoline_words;
+  const uint32_t lo = build_v_mov_b32_src(0, saved->temp_base, plan.arch);
+  const uint32_t hi =
+      build_v_mov_b32_src(1, static_cast<uint16_t>(saved->temp_base + 1), plan.arch);
+  const auto lo_at = std::find(w.begin(), w.end(), lo);
+  ASSERT_NE(lo_at, w.end());
+  ASSERT_NE(lo_at + 1, w.end());
+  EXPECT_EQ(lo_at[1], hi);
+
+  // Nothing reads the live EXEC register into a VGPR.
+  EXPECT_EQ(std::count(w.begin(), w.end(), build_v_mov_b32_src(0, exec_lo, plan.arch)), 0);
+}
+
+// Under force_full_exec the call is reached with EXEC still -1: no anchor-mask
+// restore stands between the widen and the s_swappc. That is the whole mechanism,
+// so it is asserted on the emitted words rather than inferred from the count.
+TEST(TrampolineBuilderEmit, FullExecReachesTheCallWithTheWindowOpen) {
+  TrampolinePlan plan = make_probe_plan();
+  plan.force_full_exec = true;
+  std::string err;
+  ASSERT_TRUE(TrampolineBuilder::plan_probe_call(plan, arg_abi(0), make_sgpr_set({4}),
+                                                 /*probe_body_clobbers=*/{}, &err))
+      << err;
+  const auto bytes = TrampolineBuilder::emit_probe_call(plan, &err);
+  ASSERT_TRUE(bytes.has_value()) << err;
+
+  const std::vector<uint32_t> &w = bytes->trampoline_words;
+  const uint16_t exec_lo = scalar_operand_exec_lo(plan.arch);
+  const uint32_t widen = build_s_mov_b64(exec_lo, scalar_inline_neg_one(plan.arch), plan.arch);
+  const auto widen_at = std::find(w.begin(), w.end(), widen);
+  ASSERT_NE(widen_at, w.end());
+  const auto swappc = std::find_if(w.begin(), w.end(), [&](uint32_t word) {
+    return decode_sop1_op(word) == sop1_op_swappc_b64(plan.arch) &&
+           decode_sop1_sdst(word) == plan.link_pair_base;
+  });
+  ASSERT_NE(swappc, w.end());
+  ASSERT_LT(widen_at - w.begin(), swappc - w.begin());
+
+  // No EXEC write of any kind between the widen and the call.
+  const auto between = std::find_if(widen_at + 1, swappc, [&](uint32_t word) {
+    return decode_sop1_op(word) == sop1_op_mov_b64(plan.arch) && decode_sop1_sdst(word) == exec_lo;
+  });
+  EXPECT_EQ(between, swappc) << "the anchor mask must not be restored before a full-exec call";
+}
+
+// The same plan without the policy restores the anchor mask first, which is what
+// makes the test above a statement about force_full_exec rather than about the
+// envelope in general.
+TEST(TrampolineBuilderEmit, WithoutFullExecTheAnchorMaskIsRestoredBeforeTheCall) {
+  TrampolinePlan plan = make_probe_plan();
+  plan.probe_args = {probe_arg_imm(1)};
+  std::string err;
+  ASSERT_TRUE(TrampolineBuilder::plan_probe_call(plan, arg_abi(1), make_sgpr_set({4}),
+                                                 /*probe_body_clobbers=*/{}, &err))
+      << err;
+  const auto bytes = TrampolineBuilder::emit_probe_call(plan, &err);
+  ASSERT_TRUE(bytes.has_value()) << err;
+
+  const std::vector<uint32_t> &w = bytes->trampoline_words;
+  const uint16_t exec_lo = scalar_operand_exec_lo(plan.arch);
+  const auto saved = std::find_if(plan.special_state_saves.begin(), plan.special_state_saves.end(),
+                                  [&](const SpecialStateSlot &s) { return s.operand == exec_lo; });
+  ASSERT_NE(saved, plan.special_state_saves.end());
+  const uint32_t restore = build_s_mov_b64(exec_lo, saved->temp_base, plan.arch);
+  const auto swappc = std::find_if(w.begin(), w.end(), [&](uint32_t word) {
+    return decode_sop1_op(word) == sop1_op_swappc_b64(plan.arch) &&
+           decode_sop1_sdst(word) == plan.link_pair_base;
+  });
+  ASSERT_NE(swappc, w.end());
+  EXPECT_NE(std::find(w.begin(), swappc, restore), swappc);
 }
 
 // A call passing nothing emits no argument words at all -- the v0 write that a

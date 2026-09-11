@@ -294,7 +294,10 @@ bool TrampolineBuilder::plan_probe_call(TrampolinePlan &plan, const ProbeAbi &ab
   // see. Writing under EXEC=-1 defines every lane. It costs nothing in guest
   // state: a live argument VGPR is stored before the write and reloaded after the
   // call, both under the same full mask.
-  const bool needs_full_mask = will_spill || !plan.probe_args.empty();
+  //
+  // A full-exec site opens the window for its own sake: the probe runs inside it
+  // rather than under the anchor mask.
+  const bool needs_full_mask = will_spill || !plan.probe_args.empty() || plan.force_full_exec;
 
   // EXEC/VCC/M0 operand codes are resolved per-arch, but only when actually
   // reserving that register -- so a plan with no special-state saves (and no
@@ -316,19 +319,28 @@ bool TrampolineBuilder::plan_probe_call(TrampolinePlan &plan, const ProbeAbi &ab
   before_words += 1;     // s_getpc_b64
   before_words += 2 + 2; // s_add_u32 + literal, s_addc_u32 + literal
   before_words += 1;     // s_swappc_b64
-  // Each argument is one v_mov_b32 plus its literal word.
-  before_words += static_cast<uint32_t>(plan.probe_args.size()) * 2;
+  // Each argument is one v_mov_b32; an immediate adds the literal word its src0
+  // field names, a register source does not.
+  for (const ProbeArgValue &arg : plan.probe_args)
+    before_words += arg.source == ProbeArgSource::Immediate ? 2 : 1;
   if (plan.preserve_scc)
     before_words += 2; // s_cselect_b32 (save) + s_cmp_lg_u32 (restore)
   // Each special-state register adds one s_mov save + one s_mov restore.
   before_words += static_cast<uint32_t>(special_saves.size()) * 2;
-  // The full-mask window costs three EXEC toggles: widen before the stores and
-  // the argument writes, restore the anchor mask before the call (the probe runs
-  // under the anchor mask), re-widen before the loads. The third is emitted even
-  // when only arguments needed the window and the spill epilogue is empty, so the
-  // planner and the emitter count the same three unconditionally.
-  if (needs_full_mask)
-    before_words += 3;
+  // The full-mask window's EXEC toggles, counted one per s_mov so this mirrors
+  // emit_probe_call's three conditionals in the same order. A count that does not
+  // match what the emitter produces trips the drift guard there.
+  if (needs_full_mask) {
+    before_words += 1; // Widen ahead of the spill stores and the argument writes.
+    // Restore the anchor mask so the probe runs under it. A force_full_exec site
+    // skips this; leaving the window open across the call is the whole policy.
+    if (!plan.force_full_exec)
+      before_words += 1;
+    // Re-widen for the spill loads. Emitted even when the epilogue is empty (an
+    // argument site that spills nothing), and on a force_full_exec site too,
+    // since the probe may have narrowed EXEC while it ran.
+    before_words += 1;
+  }
 
   plan.is_probe_call = true;
   plan.link_pair_base = kLinkPairBase;
@@ -381,7 +393,8 @@ std::optional<TrampolineBytes> TrampolineBuilder::emit_probe_call(const Trampoli
   // drives the EXEC toggles only, since EXEC save/restore is decided by
   // special_state_saves membership.
   const bool full_mask_exec = !plan.vgpr_spills.empty() || !plan.sgpr_spills.empty() ||
-                              !plan.acc_spills.empty() || !plan.probe_args.empty();
+                              !plan.acc_spills.empty() || !plan.probe_args.empty() ||
+                              plan.force_full_exec;
 
   // SGPR pair holding the saved anchor EXEC (populated by the save loop below).
   // Reused to restore the anchor mask before the call; always present when the
@@ -426,15 +439,31 @@ std::optional<TrampolineBytes> TrampolineBuilder::emit_probe_call(const Trampoli
   // copy is defined rather than only the lanes active at the anchor. And
   // v_mov_b32 writes no SCC, so it cannot disturb the save/restore pair below.
   for (size_t i = 0; i < plan.probe_args.size(); ++i) {
-    const auto words = build_v_mov_b32_imm(static_cast<uint16_t>(plan.arg_vgpr_base + i),
-                                           plan.probe_args[i], plan.arch);
-    env.insert(env.end(), words.begin(), words.end());
+    const ProbeArgValue &arg = plan.probe_args[i];
+    const uint16_t vdst = static_cast<uint16_t>(plan.arg_vgpr_base + i);
+    if (arg.source == ProbeArgSource::Immediate) {
+      const auto words = build_v_mov_b32_imm(vdst, arg.immediate, plan.arch);
+      env.insert(env.end(), words.begin(), words.end());
+      continue;
+    }
+    // The anchor mask comes from the saved pair, not from `exec`: the widen above
+    // already overwrote the register. exec_temp is the pair base, so the high
+    // dword is the next SGPR.
+    //
+    // So an EXEC-sourced argument needs a site that saved EXEC. Nothing asks for
+    // that on its own: any argument at all opens the full-mask window, which
+    // reserves the temp, and the guard above fails closed if it is somehow absent.
+    const uint16_t src = arg.source == ProbeArgSource::AnchorExecLo
+                             ? exec_temp
+                             : static_cast<uint16_t>(exec_temp + 1);
+    env.push_back(build_v_mov_b32_src(vdst, src, plan.arch));
   }
 
   // Restore the anchor EXEC before the call so the probe runs under the anchor mask,
   // not the full mask used to bracket the stores and argument writes. The loads are
-  // re-widened after.
-  if (full_mask_exec)
+  // re-widened after. Skipped under force_full_exec, which is what leaves the probe
+  // running with every lane enabled.
+  if (full_mask_exec && !plan.force_full_exec)
     env.push_back(build_s_mov_b64(scalar_operand_exec_lo(plan.arch), exec_temp, plan.arch));
 
   // SCC save (prologue): capture SCC into the temp without disturbing it. The
@@ -478,6 +507,8 @@ std::optional<TrampolineBytes> TrampolineBuilder::emit_probe_call(const Trampoli
     env.push_back(build_s_cmp_lg_u32(plan.scc_temp, scalar_positive_inline_u32(0), plan.arch));
 
   // Full-mask the spill load to match the store (the probe may have changed EXEC).
+  // Emitted on a force_full_exec site too: it entered the call at -1, but the probe
+  // may have narrowed EXEC while running, which is the case this guards against.
   if (full_mask_exec)
     env.push_back(build_s_mov_b64(scalar_operand_exec_lo(plan.arch),
                                   scalar_inline_neg_one(plan.arch), plan.arch));
