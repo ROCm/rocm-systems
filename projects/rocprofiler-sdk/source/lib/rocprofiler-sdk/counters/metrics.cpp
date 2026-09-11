@@ -94,6 +94,19 @@ format_yaml_counter_definition(const yaml_counter_definition& definition)
                        definition.expression);
 }
 
+std::optional<uint64_t>
+parse_unsigned_integer(const YAML::Node& node)
+{
+    if(!node || !node.IsScalar()) return std::nullopt;
+
+    auto value        = node.as<std::string>();
+    auto parsed_value = uint64_t{};
+    auto result       = std::from_chars(value.data(), value.data() + value.size(), parsed_value);
+    if(value.empty() || result.ec != std::errc{} || result.ptr != value.data() + value.size())
+        return std::nullopt;
+    return parsed_value;
+}
+
 /**
  * Constant/special metrics are treated as pseudo-metrics in that they
  * are given their own metric id. MAX_WAVE_SIZE for example is not collected
@@ -124,19 +137,6 @@ get_constants(uint64_t starting_id)
     return constants;
 }
 
-/**
- * Expected YAML Format:
- * COUNTER_NAME:
- *  architectures:
- *   gfxXX: // Can be more than one, / delimited if they share identical data
- *     block: <Optional>
- *     event: <Optional>
- *     expression: <optional>
- *     description: <Optional>
- *   gfxYY:
- *      ...
- *  description: General counter description
- */
 counter_metrics_t
 loadYAML(const std::string& filename, std::optional<ArchMetric> add_metric)
 {
@@ -410,6 +410,14 @@ validateExtraCounterYAML(const YAML::Node& root)
     if(!sdk_node) return "Missing top-level 'rocprofiler-sdk' key";
     if(!sdk_node.IsMap()) return "'rocprofiler-sdk' must be a map";
 
+    const auto schema_version = sdk_node["counters-schema-version"];
+    if(schema_version)
+    {
+        auto parsed_schema_version = parse_unsigned_integer(schema_version);
+        if(!parsed_schema_version || *parsed_schema_version != 1)
+            return "Unsupported 'counters-schema-version'; expected 1";
+    }
+
     const auto counters_node = sdk_node["counters"];
     if(!counters_node) return "Missing 'counters' array under 'rocprofiler-sdk'";
 
@@ -487,12 +495,7 @@ validateExtraCounterYAML(const YAML::Node& root)
 
             if(has_event)
             {
-                auto event_value  = event.as<std::string>();
-                auto event_id     = uint64_t{};
-                auto parse_result = std::from_chars(
-                    event_value.data(), event_value.data() + event_value.size(), event_id);
-                if(event_value.empty() || parse_result.ec != std::errc{} ||
-                   parse_result.ptr != event_value.data() + event_value.size())
+                if(!parse_unsigned_integer(event))
                     return fmt::format("{}: 'event' must be an unsigned integer", def_ctx);
             }
         }

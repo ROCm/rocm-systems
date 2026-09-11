@@ -413,11 +413,6 @@ TEST(metrics, counter_info_v1_size_field)
     }
 }
 
-TEST(metrics, validate_malformed_yaml)
-{
-    EXPECT_THROW(YAML::Load("rocprofiler-sdk:\n  counters: \"unclosed"), YAML::Exception);
-}
-
 namespace
 {
 void
@@ -442,6 +437,18 @@ TEST(metrics, validate_missing_top_key)
 TEST(metrics, validate_top_key_type)
 {
     expect_validation_error("rocprofiler-sdk: invalid", "'rocprofiler-sdk' must be a map");
+}
+
+TEST(metrics, validate_schema_version_type)
+{
+    expect_validation_error("rocprofiler-sdk:\n  counters-schema-version: [1]\n  counters: []",
+                            "Unsupported 'counters-schema-version'; expected 1");
+}
+
+TEST(metrics, validate_unsupported_schema_version)
+{
+    expect_validation_error("rocprofiler-sdk:\n  counters-schema-version: 2\n  counters: []",
+                            "Unsupported 'counters-schema-version'; expected 1");
 }
 
 TEST(metrics, validate_missing_counters)

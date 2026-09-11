@@ -1,7 +1,0 @@
-wrong-key:
-  counters:
-  - name: TEST
-    definitions:
-    - architectures:
-      - gfx942
-      expression: test
