@@ -788,6 +788,18 @@ TEST_F(NetIbMPITest, FaultInjCastQpErrorClearRecovers) {
                     }
                     result = WorkerCastFaultClear(faulted.sendComm);
                     if (!result.ok) return result;
+                    // Checked, or the clear is untested: phase 2 runs on a connection
+                    // created before any worker body did, so removing the call above
+                    // left this test passing. ncclIbCastFaultClear also resets
+                    // fatalErrorCount, which the check above required to be non-zero,
+                    // so reading zero here is what makes the clear observable.
+                    const int clearedCount = WorkerCastFatalCount(faulted.sendComm);
+                    if (clearedCount != 0) {
+                        result.ok = false;
+                        result.msg = "the fault clear left " + std::to_string(clearedCount)
+                                     + " fatal errors on the faulted connection";
+                        return result;
+                    }
                 }
 
                 // Phase 2: the fresh connection must be unaffected.
@@ -1857,8 +1869,8 @@ TEST_F(NetIbMPITest, FailoverMultiRequestInFlight) {
                 // count, 4 KB left 0 of 4 requests outstanding and 1 MB left 0 to 1,
                 // because those finish before the batch is posted.
                 const size_t size = 16 * 1024 * 1024;
-                // One slice per in-flight message, plus one for the warmup.
-                const size_t bufSize = size * (kThreadedReqs + 1);
+                // One slice per in-flight message; the warm-up reuses slice 0.
+                const size_t bufSize = size * kThreadedReqs;
                 void* buffer = malloc(bufSize);
                 if (!buffer) {
                     result.ok = false;
@@ -1892,6 +1904,12 @@ TEST_F(NetIbMPITest, FailoverMultiRequestInFlight) {
                                                   &mhandleGuard, &bufferGuard,
                                                   &reposts[threadIdx]);
             });
+        // The counts exist on rank 1 alone: rank 0 has no sendComm to read them from,
+        // so its entries stay at the -1 initialiser, and rank 1's own TEST_INFO never
+        // reaches the report because non-zero ranks have their gtest output removed
+        // unless RCCL_MPI_LOG_ALL_RANKS is set, which no suite running this test sets.
+        // Broadcasting from the rank that has them lets the rank that is read log them.
+        MPI_Bcast(reposts.data(), static_cast<int>(reposts.size()), MPI_INT, 1, MPI_COMM_WORLD);
         for (int t = 0; t < MPIEnvironment::nThreads; t++)
             TEST_INFO("worker %d: messages posted before the QP error, repost count %d",
                       t, reposts[t]);
@@ -2193,8 +2211,8 @@ TEST_F(NetIbMPITest, RecoverySuccessRestoresTraffic) {
                     return result;
                 }
                 result = WorkerTransferAcrossQpFailure(rank, pair, buffer, size, 1301, mhandle,
-                                                      WorkerSeed(threadIdx, 1),
-                                                      kLargeTransferTimeoutMs, &mhandleGuard,
+                                                       WorkerSeed(threadIdx, 1),
+                                                       kLargeTransferTimeoutMs, &mhandleGuard,
                                                       &bufferGuard);
                 if (!result.ok) {
                     result.msg = "failover transfer after the link failure: " + result.msg;
@@ -4131,9 +4149,10 @@ TEST_F(NetIbMPITest, FaultIsolationAcrossWorkers) {
     AssertInitAndGetDevices(nullptr);
 
     static constexpr int kHealthyTransfers = 10;
-        // The isolation claim holds only while the fault is live, and the start gate
-        // synchronizes nothing past entry: bystanders wait for the victim to arm, the victim
-        // waits for their traffic before clearing, and the fatal count is read in between.
+    // The isolation claim holds only while the fault is live, and the start gate
+    // synchronizes nothing past entry: bystanders wait for the victim to arm, the
+    // victim waits for their traffic before clearing, and the fatal count is read in
+    // between.
     std::atomic<bool> faultArmed{false};
     std::atomic<bool> victimFinished{false};
     std::atomic<int>  bystandersDone{0};
@@ -4266,6 +4285,11 @@ TEST_F(NetIbMPITest, FaultIsolationAcrossWorkers) {
                     result.msg = "the victim worker never finished";
                     return result;
                 }
+                // Not the evidence for isolation, and worth being plain about: this
+                // counter lives in the communicator's own stats, and every queue and
+                // completion context in the transport belongs to its owner, so a
+                // sibling's failure cannot reach it by construction. What carries the
+                // claim is the verified transfers above and the victim's own check.
                 const int fatalCount = WorkerCastFatalCount(pair.sendComm);
                 if (fatalCount != 0) {
                     result.ok = false;
