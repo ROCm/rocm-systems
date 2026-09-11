@@ -88,11 +88,9 @@ struct InstrumentationPoint {
 
   InstrumentationKind kind = InstrumentationKind::BeforeInst;
 
-  // filter_flags / force_full_exec are not used yet. The validator rejects any
-  // non-default value to keep the contract honest until each field is actually
-  // implemented.
-  // TODO: consume force_full_exec when EXEC policy management lands; consume
-  // filter_flags to filter based on InstFlags.
+  // filter_flags is not used yet. The validator rejects any non-default value
+  // to keep the contract honest until the field is actually implemented.
+  // TODO: consume filter_flags to filter based on InstFlags.
   uint32_t filter_flags = 0;
   // probe_obj / probe_symbol are consumed: set both to request a probe-call
   // trampoline, or leave both empty for the inline nop.
@@ -107,6 +105,14 @@ struct InstrumentationPoint {
   // Empty means a probe called with no arguments. Only meaningful alongside
   // probe_obj / probe_symbol.
   std::vector<ProbeArgValue> probe_args;
+  // Run the probe body with every lane enabled rather than under the mask the
+  // guest had at the anchor. For a uniform probe whose work does not depend on
+  // which lanes were active; a probe that reads per-lane guest state wants the
+  // anchor mask instead, which is the default. Like the argument shape, this
+  // describes the probe rather than the site, so it keys the ProbeCallable.
+  //
+  // The envelope already widens EXEC around the spill and argument writes; this
+  // holds that window open across the call instead of closing it first.
   bool force_full_exec = false;
   // TODO: SCC will eventually need a per-point knob mirroring force_full_exec
   // (e.g. probe_consumes_scc) since the probe call clobbers it
@@ -129,6 +135,10 @@ struct ResolvedInstrumentationSite {
   // constants, but the shape is shared, since it keys the ProbeCallable that
   // probe_index names.
   std::vector<ProbeArgValue> probe_args;
+
+  // Mask policy for this site, copied from the request. Shared with every other
+  // site that resolved to the same probe_index, since it keys the registry.
+  bool force_full_exec = false;
 
   [[nodiscard]] bool is_probe_call() const { return probe_index.has_value(); }
 };

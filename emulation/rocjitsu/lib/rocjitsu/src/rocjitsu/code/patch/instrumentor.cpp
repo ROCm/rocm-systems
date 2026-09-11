@@ -332,9 +332,9 @@ validate_anchor(const Instruction &anchor, uint64_t anchor_offset,
     fail("InstrumentationPoint::probe_args requires a probe_obj / probe_symbol");
     return std::nullopt;
   }
-  // TODO: consume force_full_exec when EXEC policy management is implemented
-  if (pt.force_full_exec) {
-    fail("InstrumentationPoint::force_full_exec must be false temporarily");
+  // Likewise, the inline nop has no envelope whose mask could be widened.
+  if (pt.probe_obj == nullptr && pt.force_full_exec) {
+    fail("InstrumentationPoint::force_full_exec requires a probe_obj / probe_symbol");
     return std::nullopt;
   }
 
@@ -718,16 +718,18 @@ Instrumentor::ResolvedPoints Instrumentor::resolve_points() {
   };
   const rj_code_target_id_t destination_target = effective_target(obj_);
 
-  // Store probe objects, symbols, and declared argument sources together in
-  // probe_keys. The shape of the call is a property of the probe: its arity is
-  // part of the convention the body was verified against, and which slots the
-  // framework sources from EXEC decides what the body may assume it received. So
-  // two sites calling one probe with different shapes get distinct
-  // ProbeCallables. Only the immediate *values* stay per-site.
+  // Store probe objects, symbols, declared argument sources, and mask policy
+  // together in probe_keys. The shape of the call is a property of the probe:
+  // its arity is part of the convention the body was verified against, which
+  // slots the framework sources from EXEC decides what the body may assume it
+  // received, and the mask policy decides which lanes it runs on. So two sites
+  // calling one probe with different shapes get distinct ProbeCallables. Only
+  // the immediate *values* stay per-site.
   struct ProbeKey {
     const AmdGpuCodeObject *obj;
     std::string symbol;
     std::vector<ProbeArgSource> arg_sources;
+    bool force_full_exec;
   };
   // The shape half of a point's argument list: the part that keys the registry.
   auto arg_sources_of = [](const InstrumentationPoint &pt) {
@@ -746,7 +748,8 @@ Instrumentor::ResolvedPoints Instrumentor::resolve_points() {
     const std::vector<ProbeArgSource> sources = arg_sources_of(pt);
     for (size_t i = 0; i < probe_keys.size(); ++i) {
       if (probe_keys[i].obj == pt.probe_obj && probe_keys[i].symbol == pt.probe_symbol &&
-          probe_keys[i].arg_sources == sources)
+          probe_keys[i].arg_sources == sources &&
+          probe_keys[i].force_full_exec == pt.force_full_exec)
         return i;
     }
     // Bounded before the narrowing cast below, which would wrap a large count
@@ -784,7 +787,7 @@ Instrumentor::ResolvedPoints Instrumentor::resolve_points() {
       return std::nullopt;
     }
     out.probes.push_back(std::move(*callable));
-    probe_keys.push_back({pt.probe_obj, pt.probe_symbol, sources});
+    probe_keys.push_back({pt.probe_obj, pt.probe_symbol, sources, pt.force_full_exec});
     return out.probes.size() - 1;
   };
 
@@ -829,6 +832,7 @@ Instrumentor::ResolvedPoints Instrumentor::resolve_points() {
       }
       site->probe_index = *index;
       site->probe_args = pt.probe_args;
+      site->force_full_exec = pt.force_full_exec;
     }
 
     sites.push_back(std::move(*site));
@@ -1063,6 +1067,7 @@ InstrumentedCodeObjectDebug Instrumentor::patch_with_debug_summaries() {
       // never lands past its .sgpr_count
       plan.kernel_sgpr_count = *kernel_sgpr_count;
       plan.probe_args = site.probe_args;
+      plan.force_full_exec = site.force_full_exec;
       // Given liveness, clobbers, and calling convention, select registers
       // for trampoline and determine how big the trampoline will be
       if (!TrampolineBuilder::plan_probe_call(plan, probe.abi, live, summary->ordinary_clobbers,
