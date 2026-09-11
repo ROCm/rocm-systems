@@ -9,6 +9,11 @@
 namespace rocprofsys::domains::buffered
 {
 
+template <policies::rocprofiler_sdk::domain_service_externals Externals>
+inline void
+on_kfd_event_page_fault_configure()
+{}
+
 template <policies::rocprofiler_sdk::domain_service_backend   SdkBackend,
           policies::rocprofiler_sdk::domain_service_externals Externals>
 inline void
@@ -31,7 +36,8 @@ inline constexpr auto k_kfd_event_page_fault = buffered_domain_definition<SdkBac
         },
     .on_records = buffered_callback_dispatcher<
         SdkBackend, typename SdkBackend::kfd_event_page_fault_record,
-        on_kfd_event_page_fault<SdkBackend, Externals>>::callback
+        on_kfd_event_page_fault<SdkBackend, Externals>>::callback,
+    .on_configure = on_kfd_event_page_fault_configure<Externals>
 };
 
 }  // namespace rocprofsys::domains::buffered
