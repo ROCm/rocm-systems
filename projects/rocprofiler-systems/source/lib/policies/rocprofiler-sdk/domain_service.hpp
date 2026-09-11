@@ -105,82 +105,88 @@ concept domain_service_externals =
                                       typename Externals::agent_t,
                                       typename Externals::agent_type_t>;
         {
-            Externals::AGENT_TYPE_GPU
+            Externals::k_agent_type_gpu
         } -> std::convertible_to<typename Externals::agent_type_t>;
         {
-            Externals::AGENT_TYPE_CPU
+            Externals::k_agent_type_cpu
         } -> std::convertible_to<typename Externals::agent_type_t>;
-        { Externals::pmc_value_type_absolute } -> std::convertible_to<std::string_view>;
+        { Externals::k_pmc_value_type_absolute } -> std::convertible_to<std::string_view>;
         {
-            Externals::kfd_event_dropped_events_category_name
+            Externals::k_kfd_event_dropped_events_category_name
         } -> std::convertible_to<std::string_view>;
         {
-            Externals::kfd_event_dropped_events_category_description
+            Externals::k_kfd_event_dropped_events_category_description
         } -> std::convertible_to<std::string_view>;
         {
-            Externals::kfd_event_queue_category_name
+            Externals::k_kfd_event_queue_category_name
         } -> std::convertible_to<std::string_view>;
         {
-            Externals::kfd_event_queue_category_description
+            Externals::k_kfd_event_queue_category_description
         } -> std::convertible_to<std::string_view>;
         {
-            Externals::kfd_event_unmap_from_gpu_category_name
+            Externals::k_kfd_event_unmap_from_gpu_category_name
         } -> std::convertible_to<std::string_view>;
         {
-            Externals::kfd_event_unmap_from_gpu_category_description
+            Externals::k_kfd_event_unmap_from_gpu_category_description
         } -> std::convertible_to<std::string_view>;
         {
-            Externals::kfd_page_fault_category_name
+            Externals::k_kfd_page_fault_category_name
         } -> std::convertible_to<std::string_view>;
         {
-            Externals::kfd_page_fault_category_description
+            Externals::k_kfd_page_fault_category_description
         } -> std::convertible_to<std::string_view>;
         {
-            Externals::kfd_page_migrate_category_name
+            Externals::k_kfd_page_migrate_category_name
         } -> std::convertible_to<std::string_view>;
         {
-            Externals::kfd_page_migrate_category_description
+            Externals::k_kfd_page_migrate_category_description
         } -> std::convertible_to<std::string_view>;
-        { Externals::kfd_queue_category_name } -> std::convertible_to<std::string_view>;
+        { Externals::k_kfd_queue_category_name } -> std::convertible_to<std::string_view>;
         {
-            Externals::kfd_queue_category_description
+            Externals::k_kfd_queue_category_description
         } -> std::convertible_to<std::string_view>;
-        typename Externals::pmc_info_t{
-            .type             = typename Externals::agent_type_t{},
-            .agent_type_index = std::size_t{},
-            .target_arch      = std::string{},
-            .event_code       = std::size_t{},
-            .instance_id      = std::size_t{},
-            .name             = std::string{},
-            .symbol           = std::string{},
-            .description      = std::string{},
-            .long_description = std::string{},
-            .component        = std::string{},
-            .units            = std::string{},
-            .value_type       = std::string{},
-            .block            = std::string{},
-            .expression       = std::string{},
-            .is_constant      = std::uint32_t{},
-            .is_derived       = std::uint32_t{},
-            .extdata          = std::string{},
+        {
+            typename Externals::pmc_info_t{
+                .type             = typename Externals::agent_type_t{},
+                .agent_type_index = std::size_t{},
+                .target_arch      = std::string{},
+                .event_code       = std::size_t{},
+                .instance_id      = std::size_t{},
+                .name             = std::string{},
+                .symbol           = std::string{},
+                .description      = std::string{},
+                .long_description = std::string{},
+                .component        = std::string{},
+                .units            = std::string{},
+                .value_type       = std::string{},
+                .block            = std::string{},
+                .expression       = std::string{},
+                .is_constant      = std::uint32_t{},
+                .is_derived       = std::uint32_t{},
+                .extdata          = std::string{},
+            }
         };
-        typename Externals::thread_info_t{ std::int32_t{},  std::int32_t{},
-                                           std::uint64_t{}, std::uint32_t{},
-                                           std::uint32_t{}, std::string{} };
-        typename Externals::track_t{ std::string{}, std::uint64_t{}, std::string{} };
-        typename Externals::kfd_sample_t{ std::uint64_t{},
-                                          std::string{},
-                                          std::uint64_t{},
-                                          std::uint64_t{},
-                                          std::string{},
-                                          std::string{},
-                                          std::string{},
-                                          std::string{},
-                                          std::uint32_t{},
-                                          std::uint8_t{},
-                                          std::string{},
-                                          double{},
-                                          std::optional<std::int64_t>{} };
+        {
+            typename Externals::thread_info_t{ std::int32_t{},  std::int32_t{},
+                                               std::uint64_t{}, std::uint32_t{},
+                                               std::uint32_t{}, std::string{} }
+        };
+        { typename Externals::track_t{ std::string{}, std::uint64_t{}, std::string{} } };
+        {
+            typename Externals::kfd_sample_t{ std::uint64_t{},
+                                              std::string{},
+                                              std::uint64_t{},
+                                              std::uint64_t{},
+                                              std::string{},
+                                              std::string{},
+                                              std::string{},
+                                              std::string{},
+                                              std::uint32_t{},
+                                              std::uint8_t{},
+                                              std::string{},
+                                              double{},
+                                              std::optional<std::int64_t>{} }
+        };
     } && requires(std::string_view text, Externals::thread_info_t thread_info,
                   Externals::track_t track, Externals::pmc_info_t pmc_info,
                   Externals::kfd_sample_t sample) {

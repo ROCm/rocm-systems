@@ -6,7 +6,6 @@
 #include "library/rocprofiler-sdk/types.hpp"
 #include "policies/rocprofiler-sdk/domain_service.hpp"
 
-#include <memory>
 #include <string_view>
 #include <vector>
 

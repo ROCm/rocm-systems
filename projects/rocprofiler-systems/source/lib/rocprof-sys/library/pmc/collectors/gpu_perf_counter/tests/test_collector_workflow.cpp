@@ -333,9 +333,15 @@ TEST_F(SdkPmcCollectorWorkflowTest, MultiGpuIsolation)
             return MockBackend::status_success;
         });
 
+    constexpr std::uint64_t k_context_handle_agent0 = 50;
+    constexpr std::uint64_t k_context_handle_agent1 = 51;
     EXPECT_CALL(*mock, create_context(_))
-        .WillOnce([](MockBackend::context_id_t* ctx) { ctx->handle = 50; })
-        .WillOnce([](MockBackend::context_id_t* ctx) { ctx->handle = 51; });
+        .WillOnce([=](MockBackend::context_id_t* ctx) {
+            ctx->handle = k_context_handle_agent0;
+        })
+        .WillOnce([=](MockBackend::context_id_t* ctx) {
+            ctx->handle = k_context_handle_agent1;
+        });
 
     EXPECT_CALL(*mock, configure_device_counting_service(_, _, _, _, _))
         .Times(2)
@@ -344,9 +350,10 @@ TEST_F(SdkPmcCollectorWorkflowTest, MultiGpuIsolation)
     EXPECT_CALL(*mock, start_context(_)).Times(2).WillRepeatedly(Return());
     EXPECT_CALL(*mock, stop_context(_)).Times(2).WillRepeatedly(Return());
 
-    EXPECT_CALL(
-        *mock, sample_device_counting_service(
-                   ::testing::Field(&MockBackend::context_id_t::handle, 50u), _, _, _, _))
+    EXPECT_CALL(*mock, sample_device_counting_service(
+                           ::testing::Field(&MockBackend::context_id_t::handle,
+                                            k_context_handle_agent0),
+                           _, _, _, _))
         .WillRepeatedly([](MockBackend::context_id_t, MockBackend::user_data_t,
                            MockBackend::counter_flag_t,
                            MockBackend::counter_record_t* out, size_t* count) {
@@ -355,9 +362,10 @@ TEST_F(SdkPmcCollectorWorkflowTest, MultiGpuIsolation)
             *count               = 1;
             return MockBackend::status_success;
         });
-    EXPECT_CALL(
-        *mock, sample_device_counting_service(
-                   ::testing::Field(&MockBackend::context_id_t::handle, 51u), _, _, _, _))
+    EXPECT_CALL(*mock, sample_device_counting_service(
+                           ::testing::Field(&MockBackend::context_id_t::handle,
+                                            k_context_handle_agent1),
+                           _, _, _, _))
         .WillRepeatedly([](MockBackend::context_id_t, MockBackend::user_data_t,
                            MockBackend::counter_flag_t,
                            MockBackend::counter_record_t* out, size_t* count) {

@@ -14,8 +14,14 @@
 
 #include <fmt/format.h>
 
-#include <memory>
+#include <algorithm>
+#include <cstddef>
+#include <optional>
 #include <span>
+#include <string>
+#include <string_view>
+#include <type_traits>
+#include <utility>
 #include <vector>
 
 namespace rocprofsys

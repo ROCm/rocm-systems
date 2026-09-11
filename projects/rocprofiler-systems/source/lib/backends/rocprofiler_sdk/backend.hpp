@@ -5,7 +5,6 @@
 
 #include "backends/rocprofiler_sdk/types.hpp"
 #include "common/version.hpp"
-#include "logger/debug.hpp"
 
 #include <rocprofiler-sdk/version.h>
 
@@ -91,6 +90,7 @@ struct backend
     static constexpr status_t       status_hsa_not_loaded =
         Wrapper::STATUS_ERROR_HSA_NOT_LOADED;
 
+    // NOLINTNEXTLINE(readability-identifier-naming)
     static constexpr buffer_policy_t BUFFER_POLICY_LOSSLESS =
         Wrapper::BUFFER_POLICY_LOSSLESS;
 
@@ -181,8 +181,10 @@ struct backend
         Wrapper::BUFFER_TRACING_KFD_EVENT_UNMAP_FROM_GPU;
     static constexpr buffer_tracing_kind_t BUFFER_TRACING_KFD_EVENT_DROPPED_EVENTS =
         Wrapper::BUFFER_TRACING_KFD_EVENT_DROPPED_EVENTS;
+    // NOLINTNEXTLINE(readability-identifier-naming)
     static constexpr buffer_tracing_kind_t BUFFER_TRACING_KFD_EVENT_PAGE_MIGRATE =
         Wrapper::BUFFER_TRACING_KFD_EVENT_PAGE_MIGRATE;
+    // NOLINTNEXTLINE(readability-identifier-naming)
     static constexpr buffer_tracing_kind_t BUFFER_TRACING_KFD_EVENT_PAGE_FAULT =
         Wrapper::BUFFER_TRACING_KFD_EVENT_PAGE_FAULT;
 

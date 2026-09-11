@@ -467,8 +467,10 @@ struct wrapper
         ROCPROFILER_BUFFER_TRACING_KFD_EVENT_UNMAP_FROM_GPU;
     static constexpr buffer_tracing_kind BUFFER_TRACING_KFD_EVENT_DROPPED_EVENTS =
         ROCPROFILER_BUFFER_TRACING_KFD_EVENT_DROPPED_EVENTS;
+    // NOLINTNEXTLINE(readability-identifier-naming)
     static constexpr buffer_tracing_kind BUFFER_TRACING_KFD_EVENT_PAGE_MIGRATE =
         ROCPROFILER_BUFFER_TRACING_KFD_EVENT_PAGE_MIGRATE;
+    // NOLINTNEXTLINE(readability-identifier-naming)
     static constexpr buffer_tracing_kind BUFFER_TRACING_KFD_EVENT_PAGE_FAULT =
         ROCPROFILER_BUFFER_TRACING_KFD_EVENT_PAGE_FAULT;
 #endif

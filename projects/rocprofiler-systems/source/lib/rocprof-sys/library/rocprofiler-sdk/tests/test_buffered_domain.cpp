@@ -3,6 +3,7 @@
 
 #include "library/rocprofiler-sdk/buffered_domain.hpp"
 #include "library/rocprofiler-sdk/tests/mock_domain_service.hpp"
+#include "library/rocprofiler-sdk/types.hpp"
 
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
@@ -11,6 +12,7 @@
 #include <cstdint>
 #include <memory>
 #include <optional>
+#include <utility>
 #include <vector>
 
 namespace rocprofsys::domains
@@ -60,6 +62,7 @@ make_definition()
     };
 }
 
+// NOLINTNEXTLINE(readability-identifier-naming)
 class buffered_domain_test : public ::testing::Test
 {
 protected:
@@ -68,6 +71,7 @@ protected:
 
     // Sets up the strict, ordered expectations for one configure() call and returns
     // the buffer id that create_buffer() will report back through its out-parameter.
+    // NOLINTNEXTLINE(readability-function-size)
     void expect_configure(const context_id_t& context, const buffer_id_t& buffer,
                           const callback_thread_id_t& thread,
                           tracing_operation_t* ops_ptr, std::size_t ops_size)
@@ -82,6 +86,7 @@ protected:
                           Eq(mock_sdk::BUFFER_POLICY_LOSSLESS), Eq(&stub_on_records),
                           Eq(static_cast<void*>(nullptr)), NotNull()))
             .Times(1)
+            // NOLINTNEXTLINE(readability-magic-numbers)
             .WillOnce(DoAll(SetArgPointee<6>(buffer), Return()));
 
         EXPECT_CALL(*g_mock,
@@ -98,15 +103,17 @@ protected:
     }
 };
 
+constexpr int k_test_context_id = 7;
+
 TEST_F(buffered_domain_test, name_returns_definition_name)
 {
-    sut_t domain{ make_definition(), context_id_t{ 7 }, {} };
+    const sut_t domain{ make_definition(), context_id_t{ k_test_context_id }, {} };
     EXPECT_EQ(domain.name(), "test_domain");
 }
 
 TEST_F(buffered_domain_test, buffer_id_is_default_before_configure)
 {
-    sut_t domain{ make_definition(), context_id_t{ 7 }, {} };
+    const sut_t domain{ make_definition(), context_id_t{ k_test_context_id }, {} };
     EXPECT_EQ(domain.buffer_id(), buffer_id_t{});
 }
 
@@ -133,7 +140,7 @@ TEST_F(buffered_domain_test,
 
 TEST_F(buffered_domain_test, flush_does_not_call_flush_buffer_when_never_configured)
 {
-    sut_t domain{ make_definition(), context_id_t{ 7 }, {} };
+    const sut_t domain{ make_definition(), context_id_t{ k_test_context_id }, {} };
     domain.flush();
 }
 
@@ -159,7 +166,7 @@ TEST_F(buffered_domain_test, flush_calls_flush_buffer_when_configured)
 
 TEST_F(buffered_domain_test, destructor_does_not_destroy_buffer_when_never_configured)
 {
-    sut_t domain{ make_definition(), context_id_t{ 7 }, {} };
+    const sut_t domain{ make_definition(), context_id_t{ k_test_context_id }, {} };
 }
 
 TEST_F(buffered_domain_test, destructor_destroys_buffer_when_configured)
@@ -195,8 +202,9 @@ TEST_F(buffered_domain_test, move_construction_transfers_buffer_ownership)
     expect_configure(context, buffer, thread, ops_ptr, ops_size);
     domain_a.configure();
 
-    sut_t domain_b{ std::move(domain_a) };
+    const sut_t domain_b{ std::move(domain_a) };
 
+    // NOLINTNEXTLINE(bugprone-use-after-move) verifying the post-move state is empty
     EXPECT_EQ(domain_a.buffer_id(), buffer_id_t{});
     EXPECT_EQ(domain_b.buffer_id(), buffer);
 
@@ -237,6 +245,7 @@ TEST_F(buffered_domain_test,
 
     domain_b = std::move(domain_a);
 
+    // NOLINTNEXTLINE(bugprone-use-after-move) verifying the post-move state is empty
     EXPECT_EQ(domain_a.buffer_id(), buffer_id_t{});
     EXPECT_EQ(domain_b.buffer_id(), buffer_a);
 }

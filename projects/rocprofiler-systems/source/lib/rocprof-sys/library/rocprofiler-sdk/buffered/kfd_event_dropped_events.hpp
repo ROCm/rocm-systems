@@ -7,10 +7,11 @@
 #include "logger/debug.hpp"
 #include "policies/rocprofiler-sdk/domain_service.hpp"
 
-#include <fmt/format.h>
-
 #include <cstddef>
 #include <cstdint>
+#include <optional>
+#include <string>
+#include <utility>
 
 namespace rocprofsys::domains::buffered
 {
@@ -19,13 +20,13 @@ template <policies::rocprofiler_sdk::domain_service_externals Externals>
 inline void
 on_kfd_event_dropped_events_configure()
 {
-    Externals::add_string(Externals::kfd_event_dropped_events_category_name);
+    Externals::add_string(Externals::k_kfd_event_dropped_events_category_name);
 
     // Dropped events carry no agent of their own; pin metadata to the first
     // GPU agent as a placeholder so the post-processor can resolve one.
     // Skip entirely when there is no GPU agent to pin to.
     auto& agent_mgr  = Externals::get_agent_manager();
-    auto  gpu_agents = agent_mgr.get_agents_by_type(Externals::AGENT_TYPE_GPU);
+    auto  gpu_agents = agent_mgr.get_agents_by_type(Externals::k_agent_type_gpu);
     if(gpu_agents.empty())
     {
         LOG_DEBUG("kfd_event_dropped_events: no GPU agents found; no PMC info will be "
@@ -40,18 +41,18 @@ on_kfd_event_dropped_events_configure()
     constexpr auto*       k_component   = "rocm";
     constexpr auto*       k_block       = "KFD";
     constexpr auto*       k_expression  = "";
-    const std::string     value_type_absolute{ Externals::pmc_value_type_absolute };
+    const std::string     value_type_absolute{ Externals::k_pmc_value_type_absolute };
 
     Externals::add_pmc_info(typename Externals::pmc_info_t{
-        .type             = Externals::AGENT_TYPE_GPU,
+        .type             = Externals::k_agent_type_gpu,
         .agent_type_index = dev_idx,
         .target_arch      = "GPU",
         .event_code       = k_event_code,
         .instance_id      = k_instance_id,
-        .name   = std::string{ Externals::kfd_event_dropped_events_category_name },
+        .name   = std::string{ Externals::k_kfd_event_dropped_events_category_name },
         .symbol = "KFD Dropped Events",
         .description =
-            std::string{ Externals::kfd_event_dropped_events_category_description },
+            std::string{ Externals::k_kfd_event_dropped_events_category_description },
         .long_description = "KFD dropped_events events",
         .component        = k_component,
         .units            = "count",
@@ -89,10 +90,10 @@ on_kfd_event_dropped_events(typename SdkBackend::kfd_event_dropped_record* recor
     const auto pmc_value = static_cast<double>(record->count);
     Externals::buffer_storage_store(typename Externals::kfd_sample_t{
         tid, name, record->timestamp, record->timestamp, "" /*empty args*/,
-        std::string{ Externals::kfd_event_dropped_events_category_name },
+        std::string{ Externals::k_kfd_event_dropped_events_category_name },
         std::move(track_name), "{}", 0,
-        static_cast<std::uint8_t>(Externals::AGENT_TYPE_GPU),
-        std::string{ Externals::kfd_event_dropped_events_category_name }, pmc_value,
+        static_cast<std::uint8_t>(Externals::k_agent_type_gpu),
+        std::string{ Externals::k_kfd_event_dropped_events_category_name }, pmc_value,
         std::optional<std::int64_t>(record->pid) });
 }
 

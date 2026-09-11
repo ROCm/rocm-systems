@@ -6,9 +6,6 @@
 #include "library/rocprofiler-sdk/types.hpp"
 #include "policies/rocprofiler-sdk/domain_service.hpp"
 
-#include <cstddef>
-#include <cstdint>
-
 namespace rocprofsys::domains::buffered
 {
 
