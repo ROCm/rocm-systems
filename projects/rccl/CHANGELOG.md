@@ -141,7 +141,7 @@ Full documentation for RCCL is available at [https://rccl.readthedocs.io](https:
 * RCCL adds a NCCL CMake alias shim layer for CMake-based build compatibility.
 * CTS offload is now controlled per-connection rather than globally, allowing P2P connections to fall back to standard RDMA writes while non-P2P traffic continues to use CTS.
 
-### Resolved Issues
+### Resolved issues
 * Fixed `netOverride` being skipped when rail-optimized trees are enabled (restores desired NIC mapping for targeted 4-NIC systems).
 * Fixed RCCL Inspector plugin teardown segfault/hang and collective-count correctness.
 * Fixed `ncclGroupSimulateEnd` planner state leak and resource cleanup.
@@ -154,7 +154,7 @@ Full documentation for RCCL is available at [https://rccl.readthedocs.io](https:
 * Fixed IPC registration incorrect `#ifdef` guard that disabled registration.
 * Fixed symmetric kernels validation errors on gfx942 and gfx950.
 
-### Known Issues
+### Known issues
 * On gfx90a (MI210/MI250/MI250X) with ROCm 7.13 or later, per-launch scratch-memory reclaim in the runtime degrades RCCL performance. Set `HSA_NO_SCRATCH_RECLAIM=1` to restore performance.
 
 ## RCCL 2.28.3 for ROCm 7.12
@@ -181,7 +181,7 @@ Full documentation for RCCL is available at [https://rccl.readthedocs.io](https:
 * Tuning: constant values used for CorrectionFactor tables for improved consistency.
 * DMABUF disabled configurations now correctly respected in `rocm_net_ib`.
 
-### Resolved Issues
+### Resolved issues
 * Fixed shutdown ordering race condition and use-after-free crash in proxy cleanup.
 * Fixed DMABUF support check failure (SWDEV-579889 / ROCM-2855).
 * Fixed `qpIndex` selection in `ncclIbIrecv` for AINIC mode.
@@ -241,7 +241,7 @@ Full documentation for RCCL is available at [https://rccl.readthedocs.io](https:
 * Enabling WarpSpeed in auto mode using RCCL_WARP_SPEED_AUTO optimizes performance and reduces the CU count by 50% on a single node for AllReduce, AllGather from 64MB, and ReduceScatter from 256MB.
 * The following configuration knobs control WarpSpeed behavior for debugging purposes: `RCCL_WARP_SPEED_ENABLE`, `RCCL_UNROLL_FACTOR`, `RCCL_WARP_SPEED_CU_COUNT`, and `RCCL_THREADS_PER_BLOCK`. Note that the effective unroll factor is calculated as 2 raised to the value of `RCCL_UNROLL_FACTOR`.
 
-### Resolved Issues
+### Resolved issues
 * Fixed missing memory fence in the LL protocol for gfx950, which caused collective hangs.
 * Fixed segmentation fault in the external profiler plugin on communicator teardown.
 * Fixed LL128 protocol selection to respect the user's explicit protocol override setting.
@@ -265,7 +265,7 @@ Full documentation for RCCL is available at [https://rccl.readthedocs.io](https:
 ### Changed
 * Enabling P2P batching with `RCCL_P2P_BATCH_ENABLE=1` is only applicable up to 32 nodes.
 
-### Resolved Issues
+### Resolved issues
 
 * Fixed crash when using the librccl-profiler plugin with the all-to-all collective after the 2.27 update.
 
@@ -328,7 +328,7 @@ Full documentation for RCCL is available at [https://rccl.readthedocs.io](https:
 ### Optimized
 * Improved the performance of the `FP8` Sum operation by upcasting to `FP16`.
 
-### Known Issues
+### Known issues
 * When running this version of RCCL using ROCm versions earlier than 6.4.0, the user must set the environment flag `HSA_NO_SCRATCH_RECLAIM=1`.
 
 ## RCCL 2.22.3 for ROCm 6.4.2
