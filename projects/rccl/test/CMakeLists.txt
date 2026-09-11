@@ -361,6 +361,7 @@ if(BUILD_TESTS)
     list(APPEND TEST_FIXTURE_SOURCE_FILES
       gin/GinAnvilIpcTableHost_test.cpp
       ../src/gin/gin_anvil_ipc_table_host.cc
+      device/sdma/anvil_stub_quiet_count.cpp
     )
   endif()
 
@@ -1017,6 +1018,21 @@ if(BUILD_TESTS)
     endif()
     target_include_directories(rccl-UnitTestsFixtures BEFORE PRIVATE
       ${CMAKE_CURRENT_SOURCE_DIR}/device)
+    # Compile IPC + Suite H + the quiet-count TU relocatable so the single
+    # g_sdmaStubQuietCount definition is visible to both device images.
+    set_source_files_properties(
+      ${CMAKE_CURRENT_SOURCE_DIR}/device/GinAnvilIpcDevice_test.cpp
+      ${CMAKE_CURRENT_SOURCE_DIR}/device/GinAnvilSdmaTemplate_test.cpp
+      ${CMAKE_CURRENT_SOURCE_DIR}/device/sdma/anvil_stub_quiet_count.cpp
+      PROPERTIES COMPILE_OPTIONS "-fgpu-rdc")
+    set(_RCCL_ANVIL_STUB_OFFLOAD "")
+    foreach(_g IN LISTS GPU_TARGETS)
+      if(_g)
+        list(APPEND _RCCL_ANVIL_STUB_OFFLOAD "--offload-arch=${_g}")
+      endif()
+    endforeach()
+    target_link_options(rccl-UnitTestsFixtures PRIVATE
+      -fgpu-rdc --hip-link ${_RCCL_ANVIL_STUB_OFFLOAD} -rdynamic)
     if(TARGET rccl-UnitTestsGinAnvilPlugin)
       target_include_directories(rccl-UnitTestsGinAnvilPlugin BEFORE PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/device)

@@ -5,9 +5,11 @@
 
 namespace sdma_anvil {
 
-// Weak so every HIP TU that includes this stub can device-link on its own,
-// while rccl-UnitTestsFixtures still gets a single merged symbol.
-__device__ unsigned long long g_sdmaStubQuietCount __attribute__((weak)) = 0;
+// Defined once in anvil_stub_quiet_count.cpp. A header definition is emitted by
+// every TU that includes gin_anvil_sdma.h; rccl-UnitTestsFixtures compiles IPC
+// and Suite H separately, and -fgpu-rdc is a link option only, so weak does
+// not merge the two device copies.
+extern __device__ unsigned long long g_sdmaStubQuietCount;
 
 struct SdmaQueueDeviceHandle {
   int tag;
