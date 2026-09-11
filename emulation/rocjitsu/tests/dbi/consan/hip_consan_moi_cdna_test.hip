@@ -310,6 +310,15 @@ TEST(ConSanMoiCdnaTest, SecondAddressGroupReportsExactLaneConflict) {
   EXPECT_EQ(out, 0u);
 }
 
+TEST(ConSanMoiCdnaTest, DisjointLaneB128StoresDoNotConflict) {
+  uint32_t *out_device = nullptr;
+  HIP_ASSERT(hipMalloc(&out_device, sizeof(uint32_t)));
+  moi_disjoint_lane_b128_stores_for_instrumentation<<<1, 32>>>(out_device);
+  HIP_ASSERT(hipGetLastError());
+  HIP_ASSERT(hipDeviceSynchronize());
+  HIP_ASSERT(hipFree(out_device));
+}
+
 TEST(ConSanMoiCdnaTest, BarrierForcedSpillPreservesLiveVgprsAndWritesRecords) {
   constexpr uint32_t kThreads = 64;
   constexpr uint32_t kValuesPerThread = 8;

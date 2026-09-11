@@ -1609,6 +1609,15 @@ TEST(ConSanMoiHipTest, SecondAddressGroupReportsExactLaneConflict) {
   EXPECT_EQ(out, 0u);
 }
 
+TEST(ConSanMoiHipTest, DisjointLaneB128StoresDoNotConflict) {
+  uint32_t *d_out = nullptr;
+  HIP_ASSERT(hipMalloc(&d_out, sizeof(uint32_t)));
+  moi_disjoint_lane_b128_stores_for_instrumentation<<<1, 32>>>(d_out);
+  HIP_ASSERT(hipGetLastError());
+  HIP_ASSERT(hipDeviceSynchronize());
+  free_device_ptr(d_out);
+}
+
 TEST(ConSanMoiHipTest, RepeatedDispatchesRetainAutomaticRecords) {
   constexpr uint32_t kDispatchCount = 4u;
   uint32_t *d_out = nullptr;

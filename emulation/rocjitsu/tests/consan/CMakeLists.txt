@@ -2204,6 +2204,9 @@ set(RJ_CONSAN_CDNA_MOI_NONEMPTY_SCALAR_SPILL_INCORRECT_TEST
 set(RJ_CONSAN_CDNA_MOI_ADDRESS_GROUP_TEST
     "ConSanMoiCdnaTest.SecondAddressGroupReportsExactLaneConflict"
 )
+set(RJ_CONSAN_CDNA_MOI_DISJOINT_B128_TEST
+    "ConSanMoiCdnaTest.DisjointLaneB128StoresDoNotConflict"
+)
 set(RJ_CONSAN_LDS_MOI_BARRIER_RECORD_TEST
     "ConSanMoiHipTest.BarrierRecordOrdersTwoWaveAccesses"
 )
@@ -2228,12 +2231,22 @@ set(RJ_CONSAN_MOI_DYNAMIC_PRIVATE_STACK_TEST
 set(RJ_CONSAN_MOI_ADDRESS_GROUP_TEST
     "ConSanMoiHipTest.SecondAddressGroupReportsExactLaneConflict"
 )
+set(RJ_CONSAN_MOI_DISJOINT_B128_TEST
+    "ConSanMoiHipTest.DisjointLaneB128StoresDoNotConflict"
+)
 
-function(rj_add_consan_address_group_sim_case prefix target filter config)
+function(
+    rj_add_consan_address_group_sim_cases
+    prefix
+    target
+    conflict_filter
+    disjoint_filter
+    config
+)
     rj_add_consan_hip_case(
         NAME "${prefix}.MoiSecondAddressGroupRace"
         TARGET ${target}
-        FILTER "${filter}"
+        FILTER "${conflict_filter}"
         CONFIG "${config}"
         TIMEOUT 60
         RUN_SERIAL
@@ -2250,6 +2263,28 @@ function(rj_add_consan_address_group_sim_case prefix target filter config)
             "RJ_CONSAN_MOI_TRACK_ATOMICS=0"
             "RJ_CONSAN_TEST_KERNEL_FILTER=moi_second_address_group_race_for_instrumentation"
             "RJ_CONSAN_LOG=3"
+            "RJ_CONSAN_MAX_PATCHES=1"
+            "RJ_CONSAN_REQUIRE_PATCH=1"
+    )
+    rj_add_consan_hip_case(
+        NAME "${prefix}.MoiDisjointLaneB128StoresAreClean"
+        TARGET ${target}
+        FILTER "${disjoint_filter}"
+        CONFIG "${config}"
+        TIMEOUT 60
+        RUN_SERIAL
+        PASS_REGEX "committed_records=[3-9][0-9]"
+        FAIL_REGEX "RJ_CONSAN_MOI_(REQUIRE_RECORDS|FORBID_DIAGNOSTICS) requested"
+        ENVIRONMENT
+            "HSA_TOOLS_LIB=$<TARGET_FILE:rocjitsu_dbi_hooks>"
+            "RJ_CONSAN_MODE=record-replay"
+            "RJ_CONSAN_MOI_REQUIRE_RECORDS=1"
+            "RJ_CONSAN_MOI_FORBID_DIAGNOSTICS=1"
+            "RJ_CONSAN_MOI_FORBID_OVERFLOW=1"
+            "RJ_CONSAN_MOI_TRACK_BARRIERS=0"
+            "RJ_CONSAN_MOI_TRACK_ATOMICS=0"
+            "RJ_CONSAN_TEST_KERNEL_FILTER=moi_disjoint_lane_b128_stores_for_instrumentation"
+            "RJ_CONSAN_LOG=1"
             "RJ_CONSAN_MAX_PATCHES=1"
             "RJ_CONSAN_REQUIRE_PATCH=1"
     )
@@ -2874,10 +2909,11 @@ function(rj_add_consan_cdna_sim_cases)
         SHARED_KERNEL "moi_cdna_shared_lds_helper_for_instrumentation"
         SHARED_INIT_OWNER_EPOCH 1
     )
-    rj_add_consan_address_group_sim_case(
+    rj_add_consan_address_group_sim_cases(
         "${_sim_PREFIX}"
         ${_sim_MOI_TARGET}
         "${RJ_CONSAN_CDNA_MOI_ADDRESS_GROUP_TEST}"
+        "${RJ_CONSAN_CDNA_MOI_DISJOINT_B128_TEST}"
         "${_sim_CONFIG}"
     )
     rj_add_consan_scalar_spill_exec_cases(
@@ -3099,10 +3135,11 @@ function(rj_add_consan_gfx1250_sim_cases)
         SHARED_KERNEL "moi_shared_noinline_lds_helper_for_instrumentation"
         SHARED_INIT_OWNER_EPOCH 0
     )
-    rj_add_consan_address_group_sim_case(
+    rj_add_consan_address_group_sim_cases(
         "${_sim_PREFIX}"
         ${_sim_MOI_TARGET}
         "${RJ_CONSAN_MOI_ADDRESS_GROUP_TEST}"
+        "${RJ_CONSAN_MOI_DISJOINT_B128_TEST}"
         "${_sim_CONFIG}"
     )
     rj_add_consan_scalar_spill_exec_cases(
