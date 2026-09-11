@@ -434,14 +434,14 @@ typedef struct hsa_amd_ext_kernel_dispatch_packet_s {
    *     and is interpreted as a satisfied dependency.
    *
    * Format 4 (HSA_AMD_PACKET_TYPE_EXT_KERNEL_DISPATCH_LD):
-   *   - launch_descriptor: Pointer to amd_launch_descriptor_t structure
+   *   - launch_descriptor: Opaque handle to amd_launch_descriptor_t
    *     providing advanced scheduling control (CU enable, wave limiter,
-   *     L2 prefetch, etc.). A NULL pointer indicates no launch descriptor
+   *     L2 prefetch, etc.). A handle value of 0 indicates no launch descriptor
    *     is used. Dependencies must be handled via barrier packets.
    */
   union {
     hsa_signal_t dep_signal;                      // Format 3: signal-based dependency
-    amd_launch_descriptor_t* launch_descriptor;   // Format 4: pointer to descriptor
+    amd_launch_descriptor_t launch_descriptor;    // Format 4: opaque handle
   };
 
   /**
@@ -5159,6 +5159,128 @@ typedef enum hsa_amd_log_flag_s {
  * initialized.
  */
 hsa_status_t hsa_amd_enable_logging(uint8_t* flags, void* file);
+
+/**
+ * @brief Launch descriptor field identifiers for use with hsa_amd_launch_descriptor_set.
+ */
+typedef enum {
+  /** Version field (uint8_t): AMD_LAUNCH_DESCRIPTOR_VERSION_GFX1250, etc. */
+  HSA_AMD_LAUNCH_DESCRIPTOR_FIELD_VERSION = 0,
+
+  /** Priority field (uint8_t): Dispatch priority (0=default). */
+  HSA_AMD_LAUNCH_DESCRIPTOR_FIELD_PRIORITY = 1,
+
+  /** PM hint field (uint8_t): Power management firmware hint (0=no hint). */
+  HSA_AMD_LAUNCH_DESCRIPTOR_FIELD_PM_HINT = 2,
+
+  /** CU start field (uint32_t, bits [3:0]): First CU index within each SE (0-15). */
+  HSA_AMD_LAUNCH_DESCRIPTOR_FIELD_CU_START = 3,
+
+  /** CU count field (uint32_t, bits [7:4]): Number of contiguous CUs (0-15, 0=all). */
+  HSA_AMD_LAUNCH_DESCRIPTOR_FIELD_CU_COUNT = 4,
+
+  /** SE enable field (uint32_t, bits [9:8]): Shader Engine enable mask (bit 0=SE0, bit 1=SE1). */
+  HSA_AMD_LAUNCH_DESCRIPTOR_FIELD_SE_EN = 5,
+
+  /** Dispatch granularity limiter (uint16_t): Max dispatch units resident (0=no limit). */
+  HSA_AMD_LAUNCH_DESCRIPTOR_FIELD_DISPATCH_GRANULARITY_LIMITER = 6,
+
+  /** TG chunk size (uint16_t): Workgroups per XCC (0=inherit from higher level). */
+  HSA_AMD_LAUNCH_DESCRIPTOR_FIELD_TG_CHUNK_SIZE = 7
+} hsa_amd_launch_descriptor_field_t;
+
+/**
+ * @brief Create a launch descriptor.
+ *
+ * Allocates and initializes a new launch descriptor. The descriptor is
+ * zero-initialized and must be configured using hsa_amd_launch_descriptor_set
+ * or hsa_amd_launch_descriptor_set_prefetch before use.
+ *
+ * The descriptor must remain valid (not destroyed) until the kernel dispatch
+ * that uses it has completed. Wait on the dispatch's completion_signal before
+ * destroying the descriptor.
+ *
+ * @param[out] launch_descriptor Pointer to receive the handle.
+ *
+ * @retval ::HSA_STATUS_SUCCESS The function has been executed successfully.
+ *
+ * @retval ::HSA_STATUS_ERROR_NOT_INITIALIZED The runtime has not been initialized.
+ *
+ * @retval ::HSA_STATUS_ERROR_INVALID_ARGUMENT @p launch_descriptor is NULL.
+ *
+ * @retval ::HSA_STATUS_ERROR_OUT_OF_RESOURCES Failed to allocate memory.
+ */
+hsa_status_t HSA_API hsa_amd_launch_descriptor_create(
+    amd_launch_descriptor_t* launch_descriptor);
+
+/**
+ * @brief Destroy a launch descriptor.
+ *
+ * Releases the resources associated with a launch descriptor. The descriptor
+ * must not be destroyed while it is still referenced by any in-flight kernel
+ * dispatch. Wait on the dispatch's completion_signal before calling this function.
+ *
+ * @param[in] launch_descriptor The handle to destroy (passed by value).
+ *
+ * @retval ::HSA_STATUS_SUCCESS The function has been executed successfully.
+ *
+ * @retval ::HSA_STATUS_ERROR_NOT_INITIALIZED The runtime has not been initialized.
+ *
+ * @retval ::HSA_STATUS_ERROR_INVALID_ARGUMENT Invalid handle (0 or invalid).
+ */
+hsa_status_t HSA_API hsa_amd_launch_descriptor_destroy(
+    amd_launch_descriptor_t launch_descriptor);
+
+/**
+ * @brief Set a field in a launch descriptor.
+ *
+ * Configures individual fields in the launch descriptor. All values are passed
+ * as uint64_t and will be cast to the appropriate field type internally.
+ *
+ * @param[in] launch_descriptor The handle.
+ *
+ * @param[in] field The field to set (see hsa_amd_launch_descriptor_field_t).
+ *
+ * @param[in] value The value to set. Will be cast to the field's native type.
+ *        For CU fields, only the relevant bits are used.
+ *
+ * @retval ::HSA_STATUS_SUCCESS The function has been executed successfully.
+ *
+ * @retval ::HSA_STATUS_ERROR_NOT_INITIALIZED The runtime has not been initialized.
+ *
+ * @retval ::HSA_STATUS_ERROR_INVALID_ARGUMENT Invalid handle, unknown field,
+ *         or value out of range for the field type.
+ */
+hsa_status_t HSA_API hsa_amd_launch_descriptor_set(
+    amd_launch_descriptor_t launch_descriptor,
+    uint32_t field,
+    uint64_t value);
+
+/**
+ * @brief Configure an L2 prefetch region.
+ *
+ * Instructs the Command Processor to warm the L2 cache with a 2D memory region
+ * before kernel execution. Up to AMD_LAUNCH_DESCRIPTOR_MAX_PREFETCH_REGIONS (2)
+ * regions can be configured.
+ *
+ * @param[in] launch_descriptor The handle.
+ *
+ * @param[in] index Prefetch region index (0 to AMD_LAUNCH_DESCRIPTOR_MAX_PREFETCH_REGIONS-1).
+ *
+ * @param[in] prefetch Pointer to prefetch configuration. Pass NULL to disable
+ *        this region (sets all fields to 0).
+ *
+ * @retval ::HSA_STATUS_SUCCESS The function has been executed successfully.
+ *
+ * @retval ::HSA_STATUS_ERROR_NOT_INITIALIZED The runtime has not been initialized.
+ *
+ * @retval ::HSA_STATUS_ERROR_INVALID_ARGUMENT Invalid handle, index out of range,
+ *         or invalid prefetch configuration.
+ */
+hsa_status_t HSA_API hsa_amd_launch_descriptor_set_prefetch(
+    amd_launch_descriptor_t launch_descriptor,
+    uint32_t index,
+    const amd_data_prefetch_t* prefetch);
 
 /** @} */
 
