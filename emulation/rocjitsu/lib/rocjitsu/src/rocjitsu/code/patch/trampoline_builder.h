@@ -105,6 +105,12 @@ struct TrampolinePlan {
   /// temp even at a site that would not otherwise need one.
   std::vector<ProbeArgValue> probe_args;
 
+  /// Run the probe body under EXEC = -1 instead of the anchor mask. The envelope
+  /// opens a full-mask window for the spill stores and argument writes either
+  /// way; this holds it open across the call rather than restoring the anchor
+  /// mask first, so it costs one EXEC toggle instead of three.
+  bool force_full_exec = false;
+
   bool is_probe_call = false;    ///< True once plan_probe_call() populated these.
   uint16_t link_pair_base = 30;  ///< Return-link pair, derived from the probe cc.
   uint16_t arg_vgpr_base = 0;    ///< First argument VGPR, derived from the probe ABI.

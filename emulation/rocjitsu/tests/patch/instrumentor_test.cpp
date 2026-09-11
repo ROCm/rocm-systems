@@ -253,7 +253,8 @@ TEST(Validator, AcceptsProbeObjWithSymbol) {
       << err;
 }
 
-TEST(Validator, RejectsForceFullExec) {
+// The inline nop has no call envelope, so there is no mask to widen around one.
+TEST(Validator, RejectsForceFullExecWithoutAProbe) {
   static constexpr uint32_t kRaw = 0xDEADBEEFu;
   TestInstruction anchor("v_add_f32_e32", 4, 0, std::nullopt, &kRaw);
   auto text = dummy_text();
@@ -262,7 +263,7 @@ TEST(Validator, RejectsForceFullExec) {
 
   std::string err;
   EXPECT_FALSE(validate_anchor(anchor, 0, text, pt, ROCJITSU_CODE_ARCH_CDNA4, &err).has_value());
-  EXPECT_FALSE(err.empty());
+  EXPECT_NE(err.find("force_full_exec"), std::string::npos) << err;
 }
 
 TEST(Validator, RejectsDenylistedMnemonic) {
@@ -1965,6 +1966,32 @@ TEST(InstrumentorProbePatch, SitesDifferingOnlyInArgumentSourceDoNotShareABody) 
     pt.probe_symbol = "rj_test_probe";
     pt.probe_args = anchor == 0 ? std::vector<ProbeArgValue>{probe_arg_imm(0xAAAAAAAAu)}
                                 : std::vector<ProbeArgValue>{{ProbeArgSource::AnchorExecLo, 0}};
+    instr.add_point(pt);
+  }
+
+  auto result = instr.patch_with_debug_summaries();
+  ASSERT_TRUE(result.errors.empty())
+      << (result.errors.empty() ? std::string{} : result.errors.front());
+  ASSERT_EQ(result.patches.size(), 2u);
+  EXPECT_NE(result.patches[0].probe_target_offset, result.patches[1].probe_target_offset);
+}
+
+// Mask policy is part of the shape too: one site running the probe masked and
+// another running it with every lane enabled are different calls, so they get
+// separate ProbeCallables even though the argument list matches.
+TEST(InstrumentorProbePatch, SitesDifferingOnlyInMaskPolicyDoNotShareABody) {
+  auto target = make_gfx950_kernel_elf_with_two_nops(); // anchors at offsets 0 and 4.
+  auto probe = make_gfx950_probe_elf("rj_test_probe", {kProbeMarkerMovS5, kProbeSetpcS30S31});
+  AmdGpuCodeObject obj(target.data(), target.size());
+  AmdGpuCodeObject probe_obj(probe.data(), probe.size());
+
+  Instrumentor instr(obj, ROCJITSU_CODE_ARCH_CDNA4);
+  for (uint64_t anchor : {uint64_t{0}, uint64_t{4}}) {
+    InstrumentationPoint pt;
+    pt.anchor_offset = anchor;
+    pt.probe_obj = &probe_obj;
+    pt.probe_symbol = "rj_test_probe";
+    pt.force_full_exec = anchor != 0;
     instr.add_point(pt);
   }
 
