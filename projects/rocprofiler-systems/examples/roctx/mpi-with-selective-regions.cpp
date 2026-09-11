@@ -12,21 +12,23 @@
 
 namespace
 {
-constexpr int CALLS_PER_PHASE = 8;
+constexpr int k_calls_per_phase = 8;
 
 void
 run_untraced_phase()
 {
     int value = 0;
-    for(int i = 0; i < CALLS_PER_PHASE; ++i)
+    for(int i = 0; i < k_calls_per_phase; ++i)
+    {
         MPI_Bcast(&value, 1, MPI_INT, 0, MPI_COMM_WORLD);
+    }
 }
 
 void
 run_traced_phase()
 {
     roctxRangePushA("TracedRegion");
-    for(int i = 0; i < CALLS_PER_PHASE; ++i)
+    for(int i = 0; i < k_calls_per_phase; ++i)
     {
         int local = 1;
         int total = 0;
@@ -50,7 +52,10 @@ main(int argc, char** argv)
     run_traced_phase();
     run_untraced_phase();
 
-    if(rank == 0) printf("mpi-roctx-regions completed on %d rank(s)\n", size);
+    if(rank == 0)
+    {
+        printf("mpi-roctx-regions completed on %d rank(s)\n", size);
+    }
 
     MPI_Finalize();
     return 0;

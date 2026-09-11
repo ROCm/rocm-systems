@@ -12,6 +12,7 @@ endif()
 
 find_package(hip QUIET HINTS ${ROCmVersion_DIR} PATHS ${ROCmVersion_DIR})
 find_package(Threads REQUIRED)
+find_package(MPI)
 
 find_program(
     HIPCC_EXECUTABLE
@@ -121,3 +122,38 @@ foreach(_target IN LISTS ROCTX_EXAMPLE_TARGETS)
         )
     endif()
 endforeach()
+
+if(MPI_FOUND)
+    add_executable(mpi-roctx-regions mpi-with-selective-regions.cpp)
+    target_link_libraries(
+        mpi-roctx-regions
+        PRIVATE Threads::Threads MPI::MPI_CXX ${ROCTX_LIBRARY}
+    )
+
+    if(
+        CMAKE_CXX_COMPILER_ID MATCHES "Clang"
+        AND NOT CMAKE_CXX_COMPILER_IS_HIPCC
+        AND NOT HIPCC_EXECUTABLE
+    )
+        target_link_libraries(
+            mpi-roctx-regions
+            PRIVATE $<TARGET_NAME_IF_EXISTS:rocprofiler-systems::rocprofiler-systems-compile-options>
+        )
+    else()
+        target_compile_options(mpi-roctx-regions PRIVATE -W -Wall)
+    endif()
+
+    if(NOT CMAKE_CXX_COMPILER_IS_HIPCC AND HIPCC_EXECUTABLE)
+        rocprofiler_systems_custom_compilation(COMPILER ${HIPCC_EXECUTABLE} TARGET mpi-roctx-regions)
+    endif()
+
+    if(ROCPROFSYS_INSTALL_EXAMPLES AND TARGET mpi-roctx-regions)
+        install(
+            TARGETS mpi-roctx-regions
+            DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/rocprofiler-systems/examples
+            COMPONENT rocprofiler-systems-examples
+        )
+    endif()
+else()
+    message(AUTHOR_WARNING "MPI could not be found. Cannot build the mpi-roctx-regions target")
+endif()

@@ -93,11 +93,13 @@ sampler::poll(std::atomic<state::process::State>* _state, nsec_t _interval,
         if(state::process::get() != state::process::Active) continue;
 
         for(auto& itr : instances)
+        {
             itr->flush_pending_pause();
+        }
 
         if(sampler_paused.load(std::memory_order_relaxed))
         {
-            _now = std::chrono::steady_clock::now() + _interval;
+            now = std::chrono::steady_clock::now() + _interval;
             continue;
         }
         get_sampler_is_sampling().store(true);
@@ -141,14 +143,14 @@ sampler::setup()
     shutdown();
 
     LOG_DEBUG("Setting up PMC sampling.");
-    auto& _pmc                = instances.emplace_back(std::make_unique<instance>());
-    _pmc->setup               = []() { pmc::setup(); };
-    _pmc->shutdown            = []() { pmc::shutdown(); };
-    _pmc->post_process        = []() { pmc::post_process(); };
-    _pmc->config              = []() { pmc::config(); };
-    _pmc->sample              = []() { pmc::sample(); };
-    _pmc->pause               = []() { pmc::pause(); };
-    _pmc->flush_pending_pause = []() { pmc::flush_pending_pause(); };
+    auto& pmc                = instances.emplace_back(std::make_unique<instance>());
+    pmc->setup               = []() { pmc::setup(); };
+    pmc->shutdown            = []() { pmc::shutdown(); };
+    pmc->post_process        = []() { pmc::post_process(); };
+    pmc->config              = []() { pmc::config(); };
+    pmc->sample              = []() { pmc::sample(); };
+    pmc->pause               = []() { pmc::pause(); };
+    pmc->flush_pending_pause = []() { pmc::flush_pending_pause(); };
 
     for(auto& itr : instances)
         itr->setup();

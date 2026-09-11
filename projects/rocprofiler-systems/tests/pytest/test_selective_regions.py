@@ -436,6 +436,7 @@ class TestSelectiveRegionNoMarker(RocprofsysTest):
 # =============================================================================
 
 
+@pytest.mark.mpi
 @pytest.mark.class_name("mpi-roctx-regions")
 class TestSelectiveRegionMPI(RocprofsysTest):
     """Regression: region filtering must not switch MPI tracing off entirely.
