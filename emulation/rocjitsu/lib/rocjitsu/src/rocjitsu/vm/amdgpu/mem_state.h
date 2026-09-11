@@ -16,6 +16,7 @@
 #include "rocjitsu/vm/amdgpu/mtype.h"
 #include "rocjitsu/vm/amdgpu/wait_counters.h"
 
+#include <algorithm>
 #include <array>
 #include <cassert>
 #include <cstddef>
@@ -229,6 +230,15 @@ struct VectorMemState : DynamicInstState {
   uint32_t ds2_dst_reg_base = 0;
   std::vector<uint8_t> ds2_store_data;
   std::vector<uint8_t> ds2_response_data;
+
+  /// Number of consecutive VGPRs written by one load-result range.
+  /// DS dual-access instructions have two such ranges, starting at
+  /// dst_reg_base and ds2_dst_reg_base respectively.
+  [[nodiscard]] uint32_t destination_vgpr_count() const {
+    const uint32_t result_bytes = atomic_op == AtomicOp::NONE ? num_elems * elem_size : elem_size;
+    constexpr uint32_t kBytesPerVgpr = sizeof(uint32_t);
+    return std::max(1u, (result_bytes + kBytesPerVgpr - 1u) / kBytesPerVgpr);
+  }
 };
 
 /// @brief Reject a vector-memory instruction before it reaches a memory pipeline.

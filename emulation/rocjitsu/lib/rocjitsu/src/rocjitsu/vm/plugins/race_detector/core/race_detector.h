@@ -8,8 +8,10 @@
 #include "rocjitsu/vm/plugins/race_detector/core/wave_race_state.h"
 #include <cstdint>
 #include <functional>
+#include <optional>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 namespace rocjitsu::plugins::race_detector {
@@ -19,7 +21,8 @@ namespace rocjitsu::plugins::race_detector {
 ///
 /// Event lifecycle:
 ///   1. allocateEventId() — registers a new event (ACTIVE).
-///   2. markEventWaveComplete() — transitions to WAVE_COMPLETE (s_waitcnt).
+///   2. markEventWaveComplete() — transitions to WAVE_COMPLETE after all of
+///      the event's wait-counter obligations have completed.
 ///   3. retireEvent() — removes from live lists, decrements byte counts,
 ///      marks RETIRED (for LDS events, called at s_barrier via
 ///      flushBarrierPendingEvents).
@@ -36,13 +39,26 @@ public:
   RaceDetector(int nWaves, int vgprCount, int sgprCount, Dim3d workgroupId,
                std::function<void(RaceViolation)> raceHandler);
 
+  /// Allocate an event using the counter and ordering implied by its type.
+  EventId allocateEventId(WaveId wave, uint64_t pc, MemoryEventType type,
+                          std::vector<uint32_t> registers, uint64_t execMask) {
+    return allocateEventId(wave, pc, type, std::move(registers), execMask, 0xF, {},
+                           defaultWaitCounterType(type), defaultMemoryOrder(type));
+  }
+
   /// Allocate a workgroup-global event ID and record its metadata.
-  EventId allocateEventId(WaveId, uint64_t pc, MemoryEventType, std::vector<uint32_t> registers,
-                          uint64_t execMask, uint8_t byteMask = 0xF, IntervalSet ldsIntervals = {},
-                          amdgpu::WaitCounterType waitCounterType = amdgpu::WaitCounterType::VMCNT);
+  EventId
+  allocateEventId(WaveId, uint64_t pc, MemoryEventType, std::vector<uint32_t> registers,
+                  uint64_t execMask, uint8_t byteMask, IntervalSet ldsIntervals,
+                  amdgpu::WaitCounterType waitCounterType, MemoryOrderClass memoryOrder,
+                  std::optional<amdgpu::WaitCounterType> additionalWaitCounterType = std::nullopt);
 
   /// Transition an event from ACTIVE to WAVE_COMPLETE.
   void markEventWaveComplete(EventId);
+
+  /// Satisfy the event's obligations covered by one wait-counter update.
+  /// Returns true once every obligation for the event has been satisfied.
+  bool satisfyEventWaitCounter(EventId, amdgpu::WaitCounterType);
 
   /// Retire an event. For LDS-touching events, removes from live lists
   /// and decrements per-byte counts. All events are marked RETIRED in the
@@ -50,12 +66,18 @@ public:
   void retireEvent(EventId);
 
   /// Check for RAW hazards: no outstanding LDS writes overlap the range.
-  void validateRead(int addr, WaveId, int lane, int nBytes) const;
+  /// Same-wave operations are ordered only when both belong to the same
+  /// non-UNORDERED completion class.
+  void validateRead(int addr, WaveId, int lane, int nBytes,
+                    MemoryOrderClass currentMemoryOrder = MemoryOrderClass::LDS) const;
 
   /// Check for WAR hazards: no outstanding LDS reads overlap the range.
+  /// Same-wave operations are ordered only when both belong to the same
+  /// non-UNORDERED completion class.
   /// TODO(newling): WAW detection (write vs outstanding writes) is not
   /// implemented.
-  void validateWrite(int addr, WaveId, int lane, int nBytes) const;
+  void validateWrite(int addr, WaveId, int lane, int nBytes,
+                     MemoryOrderClass currentMemoryOrder = MemoryOrderClass::LDS) const;
 
   const EventRegistry &events() const { return events_; }
 

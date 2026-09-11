@@ -180,6 +180,13 @@ following lifecycle:
    retired and, from the perspective of all threads in all wavefronts, the
    operation is complete.
 
+Generic `FLAT_*` instructions have two independent completion obligations:
+the vector-memory counter and the LDS counter. A wait on only one domain does
+not complete the race-detector event; both domains must be satisfied. The
+resolved route still determines whether the event accesses global memory or
+LDS. This currently assumes that all active lanes select the same memory space;
+mixed LDS/global lanes are tracked separately in #11456.
+
 The plugin keeps track, for all registers and LDS memory bytes, of which memory
 operations are in flight. When an instruction in the emulator accesses an LDS
 byte, there is a check to see what memory events are still in flight that

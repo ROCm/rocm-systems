@@ -7,6 +7,7 @@
 #include "rocjitsu/vm/plugins/race_detector/core/types.h"
 #include <cassert>
 #include <cstdint>
+#include <optional>
 #include <span>
 #include <vector>
 
@@ -36,6 +37,10 @@ class EventRegistry {
     uint64_t pc;
     MemoryEventType type;
     amdgpu::WaitCounterType waitCounterType;
+    std::optional<amdgpu::WaitCounterType> additionalWaitCounterType;
+    MemoryOrderClass memoryOrder;
+    bool waitCounterSatisfied;
+    bool additionalWaitCounterSatisfied;
     EventStatus status;
     uint8_t byteMask;
     uint64_t execMask;
@@ -44,13 +49,16 @@ class EventRegistry {
   };
 
 public:
-  /// Allocate a new event. Returns a unique EventId.
+  /// Allocate a new event. Generic FLAT events carry an additional simultaneous
+  /// counter obligation; ordinary events leave it empty.
   EventId add(WaveId waveId, uint64_t pc, MemoryEventType type, std::vector<uint32_t> registers,
               uint64_t execMask, uint8_t byteMask, IntervalSet ldsIntervals,
-              amdgpu::WaitCounterType waitCounterType) {
+              amdgpu::WaitCounterType waitCounterType, MemoryOrderClass memoryOrder,
+              std::optional<amdgpu::WaitCounterType> additionalWaitCounterType = std::nullopt) {
     int id = base_offset_ + static_cast<int>(entries_.size());
-    entries_.push_back({waveId, pc, type, waitCounterType, EventStatus::ACTIVE, byteMask, execMask,
-                        std::move(registers), std::move(ldsIntervals)});
+    entries_.push_back({waveId, pc, type, waitCounterType, additionalWaitCounterType, memoryOrder,
+                        false, false, EventStatus::ACTIVE, byteMask, execMask, std::move(registers),
+                        std::move(ldsIntervals)});
 
     // To prevent the number of events recorded growing indefinitely, we try to
     // remove retired events from time to time.
@@ -62,6 +70,7 @@ public:
   /// Transition ACTIVE → WAVE_COMPLETE (s_waitcnt resolved this event).
   void markComplete(EventId id) {
     assert(entries_[index(id)].status == EventStatus::ACTIVE);
+    assert(allWaitCountersSatisfied(id));
     entries_[index(id)].status = EventStatus::WAVE_COMPLETE;
   }
 
@@ -74,6 +83,34 @@ public:
   amdgpu::WaitCounterType waitCounterType(EventId id) const {
     return entries_[index(id)].waitCounterType;
   }
+  std::optional<amdgpu::WaitCounterType> additionalWaitCounterType(EventId id) const {
+    return entries_[index(id)].additionalWaitCounterType;
+  }
+  bool hasPendingWaitCounter(EventId id, amdgpu::WaitCounterType waitType) const {
+    const auto &event = entries_[index(id)];
+    const bool primaryPending =
+        !event.waitCounterSatisfied && amdgpu::wait_counter_covers(waitType, event.waitCounterType);
+    const bool additionalPending =
+        event.additionalWaitCounterType && !event.additionalWaitCounterSatisfied &&
+        amdgpu::wait_counter_covers(waitType, *event.additionalWaitCounterType);
+    return primaryPending || additionalPending;
+  }
+  bool satisfyWaitCounter(EventId id, amdgpu::WaitCounterType waitType) {
+    auto &event = entries_[index(id)];
+    assert(event.status == EventStatus::ACTIVE);
+    if (amdgpu::wait_counter_covers(waitType, event.waitCounterType))
+      event.waitCounterSatisfied = true;
+    if (event.additionalWaitCounterType &&
+        amdgpu::wait_counter_covers(waitType, *event.additionalWaitCounterType))
+      event.additionalWaitCounterSatisfied = true;
+    return allWaitCountersSatisfied(id);
+  }
+  bool allWaitCountersSatisfied(EventId id) const {
+    const auto &event = entries_[index(id)];
+    return event.waitCounterSatisfied &&
+           (!event.additionalWaitCounterType || event.additionalWaitCounterSatisfied);
+  }
+  MemoryOrderClass memoryOrder(EventId id) const { return entries_[index(id)].memoryOrder; }
   EventStatus status(EventId id) const { return entries_[index(id)].status; }
   bool isTrimmable(EventId id) const { return isEntryTrimmable(entries_[index(id)]); }
   uint64_t pc(EventId id) const { return entries_[index(id)].pc; }
