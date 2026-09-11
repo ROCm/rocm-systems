@@ -137,14 +137,14 @@ sudo make install
 git clone https://github.com/ROCm/rocm-systems.git
 cd rocm-systems\projects\rocdecode
 mkdir build && cd build
-cmake .. -DVAON12_ROOT=<path-to-vaon12> -DROCM_PATH=<path-to-TheRock-build>
+cmake .. -DROCM_PATH=<path-to-TheRock-build>
 cmake --build . --config Release
 cmake --install . --config Release
 ```
 
 > [!NOTE]
-> * Set `VAON12_ROOT` to the vaon12 NuGet package or custom build directory.
-> * Set `ROCM_PATH` to the TheRock build output directory.
+> * Set `ROCM_PATH` to the TheRock build output directory. The VA-API runtime and driver are
+>   picked up from there; no separate path needs to be supplied.
 > * To include FFmpeg support, add `-DFFMPEG_ROOT=<path-to-ffmpeg>`.
 
 ### Run tests
@@ -230,7 +230,7 @@ guide for other options.
 
   ```bat
   mkdir rocdecode-sample && cd rocdecode-sample
-  cmake %ROCM_PATH%\share\rocdecode\samples\videoDecode -DROCM_PATH=%ROCM_PATH% -DVAON12_ROOT=%VAON12_ROOT% -DFFMPEG_ROOT=%FFMPEG_ROOT%
+  cmake %ROCM_PATH%\share\rocdecode\samples\videoDecode -DROCM_PATH=%ROCM_PATH% -DFFMPEG_ROOT=%FFMPEG_ROOT%
   cmake --build . --config Release
   set PATH=%ROCM_PATH%\bin;%FFMPEG_ROOT%\bin;%PATH%
   Release\videodecode.exe -i %ROCM_PATH%\share\rocdecode\video\AMD_driving_virtual_20-H265.mp4
@@ -250,7 +250,7 @@ guide for other options.
 
   ```bat
   mkdir rocdecode-test && cd rocdecode-test
-  cmake %ROCM_PATH%\share\rocdecode\test -DROCM_PATH=%ROCM_PATH% -DVAON12_ROOT=%VAON12_ROOT% -DFFMPEG_ROOT=%FFMPEG_ROOT%
+  cmake %ROCM_PATH%\share\rocdecode\test -DROCM_PATH=%ROCM_PATH% -DFFMPEG_ROOT=%FFMPEG_ROOT%
   cmake --build . --config Release
   set PATH=%ROCM_PATH%\bin;%FFMPEG_ROOT%\bin;%PATH%
   ctest -C Release -VV

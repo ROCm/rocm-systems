@@ -115,14 +115,14 @@ Build on Windows
    .. code-block:: bat
 
       mkdir build && cd build
-      cmake .. -DVAON12_ROOT=<path-to-vaon12> -DROCM_PATH=<path-to-TheRock-build>
+      cmake .. -DROCM_PATH=<path-to-TheRock-build>
       cmake --build . --config Release
       cmake --install . --config Release
 
    .. note::
 
-      * Set ``VAON12_ROOT`` to the vaon12 NuGet package or custom build directory.
-      * Set ``ROCM_PATH`` to the TheRock build output directory.
+      * Set ``ROCM_PATH`` to the TheRock build output directory. The VA-API runtime and
+        driver are picked up from there; no separate path needs to be supplied.
       * To include FFmpeg support for samples and the host decoder, add ``-DFFMPEG_ROOT=<path-to-ffmpeg>``.
 
 4. To verify the build, run a sample:
