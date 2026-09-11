@@ -246,7 +246,7 @@ def _clean_environment(
     mode: str | None,
     audit_sites: bool,
     kernel_allowlist_file: Path | None = None,
-    manual_epoch_analysis: bool = False,
+    epoch_analysis: str | None = None,
 ) -> dict[str, str]:
     removed = HSA_TOOL_ENVIRONMENT | SOFTWARE_MODEL_ENVIRONMENT | {"HIP_TARGET"}
     environment = {
@@ -258,7 +258,12 @@ def _clean_environment(
     if mode is None:
         return environment
     assert hook is not None
-    environment.update(PROFILES[mode].environment)
+    profile_environment = dict(PROFILES[mode].environment)
+    # Validation profiles reject reported races. A performance benchmark must
+    # retain those diagnostics as artifacts without requiring unrelated
+    # third-party workloads to be race-free.
+    profile_environment.pop("RJ_CONSAN_MOI_FORBID_DIAGNOSTICS", None)
+    environment.update(profile_environment)
     environment.update(
         {
             "HSA_TOOLS_LIB": str(hook),
@@ -268,8 +273,8 @@ def _clean_environment(
     )
     if kernel_allowlist_file is not None:
         environment["RJ_CONSAN_KERNEL_ALLOWLIST_FILE"] = str(kernel_allowlist_file)
-    if manual_epoch_analysis and mode != "supercollider":
-        environment["RJ_CONSAN_MOI_EPOCH_ANALYSIS"] = "manual"
+    if epoch_analysis is not None and mode != "supercollider":
+        environment["RJ_CONSAN_MOI_EPOCH_ANALYSIS"] = epoch_analysis
     return environment
 
 
@@ -389,7 +394,9 @@ def _run_one(
         mode,
         audit_sites,
         kernel_allowlist_file,
-        manual_epoch_analysis=workload.payload in ("aorta", "gluon"),
+        epoch_analysis=(
+            "manual" if workload.payload in ("aorta", "gluon") else "nth:1"
+        ),
     )
     log_path = args.output_dir / f"{workload.id}--{label}.log"
     checkpoint_path = args.output_dir / f"{workload.id}--{label}.json"
@@ -667,7 +674,7 @@ def _render_status(summary: dict[str, Any]) -> str:
         f"# ConSan `{summary['target']}` benchmark status",
         "",
         "For each mode, **Startup** is the total latency through the first synchronized",
-        "run and automatic evidence checkpoint, including instrumentation, loading,",
+        "run and its selected evidence checkpoints, including instrumentation, loading,",
         "binding, and warm-up; **Run** is the second-run instrumented/native overhead",
         "ratio after that cold path.",
         "",

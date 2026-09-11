@@ -278,20 +278,21 @@ class ConSanBenchmarkTest(unittest.TestCase):
                 Path("/new-hook"),
                 "inline-shadow",
                 True,
-                manual_epoch_analysis=True,
+                epoch_analysis="manual",
             )
             supercollider = benchmark._clean_environment(
                 "gfx1201",
                 Path("/new-hook"),
                 "supercollider",
                 True,
-                manual_epoch_analysis=True,
+                epoch_analysis="manual",
             )
         self.assertEqual(native, {"PATH": "/bin", "HIP_TARGET": "gfx1201"})
         self.assertEqual(instrumented["HSA_TOOLS_LIB"], "/new-hook")
         self.assertEqual(instrumented["RJ_CONSAN_MODE"], "sampled")
         self.assertEqual(instrumented["RJ_CONSAN_LOG"], "3")
         self.assertEqual(instrumented["RJ_CONSAN_KERNEL_ALLOWLIST_FILE"], "/names.txt")
+        self.assertNotIn("RJ_CONSAN_MOI_FORBID_DIAGNOSTICS", instrumented)
         self.assertNotIn("HSA_MODEL_LIB", instrumented)
         self.assertEqual(
             manually_selected["RJ_CONSAN_MOI_EPOCH_ANALYSIS"], "manual"

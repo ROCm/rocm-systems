@@ -149,15 +149,17 @@ the reported Startup latency; none of its cost is discarded. Its host evidence
 analysis is included there as well. For the three MOI modes, the harness uses
 `RJ_CONSAN_MOI_EPOCH_ANALYSIS=manual` and keeps an explicit analysis window open
 from immediately before Run1 through its final synchronization. This includes
-every internal synchronized epoch belonging to Run1. Run2 remains fully
-instrumented, but its quiescent report epochs are validated and recycled
-without snapshot, decode, analysis, or rendering. The resulting Run ratio
-measures the sustainable device instrumentation path rather than repeatedly
-charging a user-selected host analysis. SuperCollider intentionally keeps its
-lifetime-sticky marker and needs no selection window. The two operations must
-use identical inputs and execution shape; workloads with evolving state must
-restore it before each operation. The Run ratio uses only matching
-second-operation ordinals.
+every internal synchronized epoch belonging to Run1. Opaque subprocess
+payloads that cannot call the window API select their first automatic report
+epoch with `nth:1` and use a direct device timer for steady execution. Run2
+remains fully instrumented, but its quiescent report epochs are validated and
+recycled without snapshot, decode, analysis, or rendering. The resulting Run
+ratio measures the sustainable device instrumentation path rather than
+repeatedly charging a user-selected host analysis. SuperCollider intentionally
+keeps its lifetime-sticky marker and needs no selection window. The two
+operations must use identical inputs and execution shape; workloads with
+evolving state must restore it before each operation. The Run ratio uses only
+matching second-operation ordinals.
 
 Use a workload's direct device timer when it exposes one reliably (for example,
 the hipBLASLt event time); otherwise use synchronized host time and subtract
@@ -168,6 +170,10 @@ human status table.
 
 The coverage audit is enabled by default. A mode result is admissible only when
 all selected supported sites were patched and the final verdict is complete.
+Reported workload races remain in the JSON and log artifacts but do not reject
+a performance cell: numerical correctness and instrumentation completeness are
+the benchmark gates, while deciding whether third-party code is race-free
+belongs to validation.
 The opt-out exists for investigation but is intentionally not advertised as a
 normal benchmark path. Prior measurements found its cost negligible, so status
 tables do not carry separate audit-on/off columns.
