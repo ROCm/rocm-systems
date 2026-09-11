@@ -19,7 +19,7 @@ Full documentation for RCCL is available at [https://rccl.readthedocs.io](https:
 * Raised the default channel count on single-node gfx1250 (MI450) to 256 for both collectives and P2P. The count is still clamped by the GPU CU count and by `NCCL_MAX_NCHANNELS` / `NCCL_MAX_CTAS` / `NCCL_MAX_P2P_NCHANNELS`. Multi-node gfx1250 keeps the 64-channel cap on the NET path. `RCCL_SATURATE_P2P_NCHANNELS` now defaults to on for gfx1250 so the per-peer channel count tiles the larger pool; set it to `0` to restore the previous behavior.
 * Narrowed unroll-factor kernel generation: gfx1250 (MI450/MI455) local builds now generate only unroll 32, its runtime default, instead of 8/16/32, and a multi-arch build generates 1/2/4/32 instead of all six factors. This cuts the multi-arch kernel count by roughly a third; use `--all_unrolls` to build 8 and 16.
 
-### Resolved Issues
+### Resolved issues
 * Fixed DDA fabric AllToAll validation race by staging send data into scratch with a host-launched `cudaMemcpyAsync` before the peer exchange kernel.
 * `NCCL_MAX_P2P_NCHANNELS` opt-in is now detected from the environment rather than from the parameter value. The value defaults to `MAXCHANNELS`, so every unset run was treated as an opt-in past the historical `4*CHANNEL_LIMIT` (64) bound. As a result, P2P channels on non-gfx1250 architectures were limited only by the collective channel count, and the gfx950 (MI350) multi-node P2P caps never applied. Set `NCCL_MAX_P2P_NCHANNELS` explicitly to restore a higher bound.
 * Fixed `NCCL_CHECK_MODE` having no effect. `commAlloc` reset `comm->checkMode` from the deprecated `NCCL_CHECK_POINTERS` after `NCCL_CHECK_MODE` had already been parsed, so `DEBUG_LOCAL` was only reachable through the deprecated variable and `DEBUG_GLOBAL`, which validates symmetric buffer registration across ranks, was unreachable entirely.
@@ -36,10 +36,10 @@ Full documentation for RCCL is available at [https://rccl.readthedocs.io](https:
 * Added GPU-only multi-segment registration for symmetric memory windows, enabling contiguous VA ranges backed by multiple physical segments (single-node validated).
 * Added Elastic Buffer support for symmetric windows spanning device and host/`HOST_NUMA` memory segments (`NCCL_ELASTIC_BUFFER_REGISTER`, `NCCL_SYM_REUSE_SYSMEM_HANDLES`). Single-node path validated; multi-node registration remains limited pending HIP/HSA multi-segment DMA-BUF export support.
 
-### Resolved Issues
+### Resolved issues
 * Retagged the RCCL-only `COLLTRACE` destroy-time log lines from `NCCL_INIT` to `NCCL_DESTROY` and documented the `DESTROY` `NCCL_DEBUG_SUBSYS` subsystem. The NCCL 2.30.3 sync added `NCCL_DESTROY` and retagged the shared comm-destroy/plugin-unload log lines, but missed these RCCL-specific lines since `COLLTRACE` has no upstream equivalent; they are now excluded from `NCCL_DEBUG=INFO` output by default, consistent with the other destroy-time lines.
 
-### Known Issues
+### Known issues
 * Multi-node multi-segment and Elastic Buffer symmetric-window registration is not yet enabled; NET and LSA+GIN multi-segment paths depend on runtime support for exporting contiguous DMA-BUF handles across all physical segments.
 
 ## RCCL 2.30.4 for ROCm 7.14.0
@@ -137,7 +137,7 @@ Full documentation for RCCL is available at [https://rccl.readthedocs.io](https:
 * RCCL adds a NCCL CMake alias shim layer for CMake-based build compatibility.
 * CTS offload is now controlled per-connection rather than globally, allowing P2P connections to fall back to standard RDMA writes while non-P2P traffic continues to use CTS.
 
-### Resolved Issues
+### Resolved issues
 * Fixed `netOverride` being skipped when rail-optimized trees are enabled (restores desired NIC mapping for targeted 4-NIC systems).
 * Fixed RCCL Inspector plugin teardown segfault/hang and collective-count correctness.
 * Fixed `ncclGroupSimulateEnd` planner state leak and resource cleanup.
@@ -150,7 +150,7 @@ Full documentation for RCCL is available at [https://rccl.readthedocs.io](https:
 * Fixed IPC registration incorrect `#ifdef` guard that disabled registration.
 * Fixed symmetric kernels validation errors on gfx942 and gfx950.
 
-### Known Issues
+### Known issues
 * On gfx90a (MI210/MI250/MI250X) with ROCm 7.13 or later, per-launch scratch-memory reclaim in the runtime degrades RCCL performance. Set `HSA_NO_SCRATCH_RECLAIM=1` to restore performance.
 
 ## RCCL 2.28.3 for ROCm 7.12
@@ -177,7 +177,7 @@ Full documentation for RCCL is available at [https://rccl.readthedocs.io](https:
 * Tuning: constant values used for CorrectionFactor tables for improved consistency.
 * DMABUF disabled configurations now correctly respected in `rocm_net_ib`.
 
-### Resolved Issues
+### Resolved issues
 * Fixed shutdown ordering race condition and use-after-free crash in proxy cleanup.
 * Fixed DMABUF support check failure (SWDEV-579889 / ROCM-2855).
 * Fixed `qpIndex` selection in `ncclIbIrecv` for AINIC mode.
@@ -237,7 +237,7 @@ Full documentation for RCCL is available at [https://rccl.readthedocs.io](https:
 * Enabling WarpSpeed in auto mode using RCCL_WARP_SPEED_AUTO optimizes performance and reduces the CU count by 50% on a single node for AllReduce, AllGather from 64MB, and ReduceScatter from 256MB.
 * The following configuration knobs control WarpSpeed behavior for debugging purposes: `RCCL_WARP_SPEED_ENABLE`, `RCCL_UNROLL_FACTOR`, `RCCL_WARP_SPEED_CU_COUNT`, and `RCCL_THREADS_PER_BLOCK`. Note that the effective unroll factor is calculated as 2 raised to the value of `RCCL_UNROLL_FACTOR`.
 
-### Resolved Issues
+### Resolved issues
 * Fixed missing memory fence in the LL protocol for gfx950, which caused collective hangs.
 * Fixed segmentation fault in the external profiler plugin on communicator teardown.
 * Fixed LL128 protocol selection to respect the user's explicit protocol override setting.
@@ -261,7 +261,7 @@ Full documentation for RCCL is available at [https://rccl.readthedocs.io](https:
 ### Changed
 * Enabling P2P batching with `RCCL_P2P_BATCH_ENABLE=1` is only applicable up to 32 nodes.
 
-### Resolved Issues
+### Resolved issues
 
 * Fixed crash when using the librccl-profiler plugin with the all-to-all collective after the 2.27 update.
 
@@ -324,7 +324,7 @@ Full documentation for RCCL is available at [https://rccl.readthedocs.io](https:
 ### Optimized
 * Improved the performance of the `FP8` Sum operation by upcasting to `FP16`.
 
-### Known Issues
+### Known issues
 * When running this version of RCCL using ROCm versions earlier than 6.4.0, the user must set the environment flag `HSA_NO_SCRATCH_RECLAIM=1`.
 
 ## RCCL 2.22.3 for ROCm 6.4.2
