@@ -1,0 +1,1088 @@
+# HRR per-API playback test matrix — priority overlay.
+#
+# api_classes.json (produced by derive_manifest.py) says what every HIP API's
+# replay behaviour *is*, read straight out of HRR's generator. This file says
+# what we *expect* it to be, which tier of work owns it, and which hidden
+# Catch2 workload exercises it.
+#
+# The two are deliberately separate. Deriving the expectation from the same
+# source as the observation would make the matrix tautological; keeping a
+# human-authored expectation means an upstream reclassification shows up as a
+# failure that someone has to look at.
+#
+# Resolution order for a given API, first match wins:
+#   1. overrides:<api>
+#   2. tiers:<T>:apis membership
+#   3. patterns (in file order)
+#   4. defaults
+#
+# expect:
+#   derived     — expected observable class is whatever api_classes.json says
+#                 (REAL / NOOP / ERROR_STUB). This is the normal case: the test
+#                 asserts the API still behaves as its classification claims.
+#   REAL / NOOP / ERROR_STUB — assert this specific class regardless of what
+#                 the generator currently says. Use when we want a *specific*
+#                 behaviour locked in rather than tracking the generator.
+#
+# payload_loss: true marks an API that has a real playback handler and is
+#   therefore counted in the "273 faithfully replayed" headline, yet cannot be
+#   replayed because its input struct never reached the archive (section 8.3).
+#   These are XFAIL: the test asserts the loss is still present, so it flips to
+#   a failure the day P2 fixes it — which is the signal we want.
+#
+# Section references are to work/HRR-Use-Case-Priorities.md.
+
+version: 1
+baseline: api_classes_baseline.json
+
+defaults:
+  tier: T4
+  expect: derived
+  workloads:
+    - Unit_HRR_ApiMatrix_Breadth_Direct
+
+# ---------------------------------------------------------------------------
+# Tiers, ordered by the P1-P9 priority list in section 10.
+# ---------------------------------------------------------------------------
+tiers:
+
+  T0:
+    title: UC1 dense LLM inference / serving substrate
+    rationale: >-
+      Rank-1 use-case (section 2). The PyTorch + hipBLASLt surface is already
+      62/67 faithful with one consequential gap, so this tier is mostly
+      regression lock-in: it exists so that the APIs every Instinct serving
+      deployment depends on cannot silently change class.
+    # Coverage floor: how many of this tier's APIs its own workloads must
+    # still reach. 65 of 67: hipModuleLoad and hipModuleLoadDataEx are
+    # recorded by T4's module workload instead, so they are asserted on, just
+    # not from here. UC1 is the rank-1 use case, and a serving API that stops
+    # being exercised is the regression this matrix exists to catch.
+    min_covered: 65
+    gpus: 1
+    workloads:
+      - Unit_HRR_ApiMatrix_UC1Dense_Direct
+    apis:
+      # Allocation
+      - hipMalloc
+      - hipFree
+      - hipHostMalloc
+      - hipHostFree
+      - hipHostRegister
+      - hipHostUnregister
+      - hipHostGetDevicePointer
+      - hipMemGetInfo
+      - hipPointerGetAttributes
+      # Data movement
+      - hipMemcpy
+      - hipMemcpyAsync
+      - hipMemcpyWithStream
+      - hipMemcpyHtoD
+      - hipMemcpyDtoH
+      - hipMemcpyHtoDAsync
+      - hipMemcpyDtoHAsync
+      - hipMemcpyDtoD
+      - hipMemset
+      - hipMemsetAsync
+      - hipMemsetD32
+      - hipMemsetD32Async
+      # Kernel launch
+      - hipLaunchKernel
+      - hipLaunchByPtr
+      - __hipPushCallConfiguration
+      - __hipPopCallConfiguration
+      - hipModuleLaunchKernel
+      - hipExtModuleLaunchKernel
+      - hipDrvLaunchKernelEx
+      - hipLaunchKernelExC
+      - hipFuncGetAttribute
+      - hipLaunchHostFunc
+      # Streams and events
+      - hipStreamCreate
+      - hipStreamCreateWithFlags
+      - hipStreamCreateWithPriority
+      - hipStreamDestroy
+      - hipStreamSynchronize
+      - hipStreamWaitEvent
+      - hipStreamQuery
+      - hipStreamGetFlags
+      - hipStreamGetPriority
+      - hipEventCreate
+      - hipEventCreateWithFlags
+      - hipEventRecord
+      - hipEventQuery
+      - hipEventSynchronize
+      - hipEventElapsedTime
+      - hipEventDestroy
+      - hipDeviceSynchronize
+      # Stream-capture graphs (the only graph shape HRR replays)
+      - hipStreamBeginCapture
+      - hipStreamEndCapture
+      - hipStreamIsCapturing
+      - hipStreamGetCaptureInfo
+      - hipGraphInstantiate
+      - hipGraphLaunch
+      - hipGraphDestroy
+      - hipGraphExecDestroy
+      - hipThreadExchangeStreamCaptureMode
+      # Modules and code objects
+      - hipModuleLoad
+      - hipModuleLoadData
+      - hipModuleLoadDataEx
+      - hipModuleGetFunction
+      - hipModuleUnload
+      - hipGetProcAddress
+      - hipGetFuncBySymbol
+      - __hipRegisterFatBinary
+      - __hipUnregisterFatBinary
+      - __hipRegisterFunction
+
+  T1:
+    title: Payload-loss class (P1, P2)
+    rationale: >-
+      Section 8.3: APIs with a real playback handler that still cannot replay,
+      because the generator lowers pointer arguments to a bare uint64_t and a
+      >8-byte by-value struct to a single 8-byte field. These are counted in
+      the "faithfully replayed" headline and should not be. Every API here is
+      marked payload_loss, so its test asserts the loss is still present and
+      turns red when P2 lands.
+    # Coverage floor: every API in the tier.
+    min_covered: 14
+    gpus: 1
+    workloads:
+      - Unit_HRR_ApiMatrix_PayloadLoss_Direct
+    apis:
+      - hipIpcGetMemHandle
+      - hipIpcOpenMemHandle
+      - hipIpcCloseMemHandle
+      - hipIpcGetEventHandle
+      - hipIpcOpenEventHandle
+      - hipMemCreate
+      - hipStreamBatchMemOp
+      - hipImportExternalMemory
+      - hipImportExternalSemaphore
+      - hipExternalMemoryGetMappedBuffer
+      - hipDestroyExternalMemory
+      - hipDestroyExternalSemaphore
+      - hipSignalExternalSemaphoresAsync
+      - hipWaitExternalSemaphoresAsync
+      - hipLaunchCooperativeKernelMultiDevice
+
+  T2:
+    title: Silent failures — handlers that lie
+    rationale: >-
+      Section 9 ranks correctness-of-replay above breadth, and the worst cases
+      are the ones that return hipSuccess while doing nothing. The graph
+      mutation family replays stale per-token parameters for ggml/llama.cpp
+      with no error at all (section 8.4a, P5); hipStreamWriteValue64 makes
+      XLA's VMM allocator hang rather than fail (section 7, H2);
+      hipHostAlloc allocates nothing, and HIPIFY funnels ported CUDA code onto
+      exactly that spelling (section 8.6).
+    # Coverage floor: 34 of 35. hipGraphExecChildGraphNodeSetParams is
+    # recorded by T4's graph workload, which builds the child graph this one
+    # does not need.
+    min_covered: 34
+    gpus: 1
+    workloads:
+      - Unit_HRR_ApiMatrix_SilentFailure_Direct
+    apis:
+      # The 16-symbol graph-mutation family (section 8.4a), plus the three
+      # hipDrvGraph* spellings the document's table omits.
+      - hipGraphExecUpdate
+      - hipGraphExecKernelNodeSetParams
+      - hipGraphExecMemcpyNodeSetParams
+      - hipGraphExecMemcpyNodeSetParams1D
+      - hipGraphExecMemsetNodeSetParams
+      - hipGraphExecHostNodeSetParams
+      - hipGraphExecChildGraphNodeSetParams
+      - hipGraphExecNodeSetParams
+      - hipGraphExecBatchMemOpNodeSetParams
+      - hipGraphKernelNodeSetParams
+      - hipGraphMemcpyNodeSetParams
+      - hipGraphMemcpyNodeSetParams1D
+      - hipGraphMemsetNodeSetParams
+      - hipGraphHostNodeSetParams
+      - hipGraphBatchMemOpNodeSetParams
+      - hipGraphNodeSetParams
+      - hipDrvGraphExecMemcpyNodeSetParams
+      - hipDrvGraphExecMemsetNodeSetParams
+      - hipDrvGraphMemcpyNodeSetParams
+      # Deferred-free counter writes — H2, the one hazard whose symptom is a
+      # hung replay rather than a wrong answer.
+      - hipStreamWriteValue32
+      - hipStreamWriteValue64
+      - hipStreamWaitValue32
+      - hipStreamWaitValue64
+      # Allocates nothing at replay; cudaHostAlloc hipifies to this spelling.
+      - hipHostAlloc
+      - hipFreeHost
+      - hipMallocHost
+      - hipMemAllocHost
+      # MoRI's globalGpuStates is populated through these; both are no-ops, so
+      # every replayed MoRI kernel dereferences zeros (UC2 risk 5).
+      - hipModuleGetGlobal
+      - hipMemcpyToSymbol
+      - hipMemcpyFromSymbol
+      - hipMemcpyToSymbolAsync
+      - hipMemcpyFromSymbolAsync
+      - hipGetSymbolAddress
+      - hipGetSymbolSize
+      # Cooperative launch requires all workgroups co-resident, so an
+      # unfaithful replay deadlocks at the grid-wide barrier rather than
+      # erroring — which is why it is replayed through the cooperative entry
+      # point rather than the ordinary one. Live on Instinct via MIOpen's
+      # Winograd Fury solver.
+      - hipModuleLaunchCooperativeKernel
+
+  T3:
+    title: Multi-GPU — device identity, IPC and VMM (P3, P4, P7)
+    rationale: >-
+      Section 5: the multi-GPU delta is 42 APIs and only ~31% faithful. Events
+      carry no device ID and alloc_map has no device field, so peer replay is
+      structurally unsound before any individual API is considered. Needs two
+      GPUs; the runner uses HIP_VISIBLE_DEVICES=6,7.
+    # Coverage floor: 20 of 21. The export crash that used to hide
+    # hipMemImportFromShareableHandle is fixed, so only the two 3D peer copies
+    # are outside the floor — T4 records them on one device, where they are the
+    # same code path.
+    min_covered: 20
+    gpus: 2
+    workloads:
+      - Unit_HRR_ApiMatrix_MultiGpu_Direct
+      - Unit_HRR_ApiMatrix_ShareableHandle_Direct
+      - Unit_HRR_MemcpyPeer_Direct
+      - Unit_HRR_VMM_Direct
+    apis:
+      - hipDeviceCanAccessPeer
+      - hipDeviceEnablePeerAccess
+      - hipDeviceDisablePeerAccess
+      - hipMemcpyPeer
+      - hipMemcpyPeerAsync
+      - hipMemcpy3DPeer
+      - hipMemcpy3DPeerAsync
+      - hipMemAddressReserve
+      - hipMemAddressFree
+      - hipMemRelease
+      - hipMemMap
+      - hipMemUnmap
+      - hipMemSetAccess
+      - hipMemGetAccess
+      - hipMemGetAllocationGranularity
+      - hipMemGetAllocationPropertiesFromHandle
+      - hipMemRetainAllocationHandle
+      - hipMemExportToShareableHandle
+      - hipMemImportFromShareableHandle
+      - hipMemGetHandleForAddressRange
+      - hipExtGetLinkTypeAndHopCount
+      - hipDeviceGetP2PAttribute
+
+  T4:
+    title: Breadth sweep — everything not called out above
+    rationale: >-
+      The default tier. Section 9 is explicit that API breadth is not the
+      single-GPU bottleneck, so this tier is not where the diagnostic value is;
+      its job is to make the claim "all HIP API functions are covered" true, and
+      to catch an API silently changing class. Each API gets one call site and
+      one classification assertion, nothing more. The 254 NOOP APIs mostly land
+      here, and asserting they are still NOOP is the point: a NOOP that quietly
+      became a real handler, or vice versa, changes what a recording means.
+
+      Most of the call sites already exist. The HrrTest suite has 42 hidden
+      workloads covering the device, stream, event, memcpy, memset, mempool,
+      module, occupancy and graph families, so this tier captures those and
+      adds one new workload for what none of them reach, rather than writing a
+      second copy of coverage that is already there.
+    # Coverage floor: what the breadth workloads reach today. The rest are
+    # declared unreachable with the measurement that says why, so this floor
+    # only moves when a workload stops reaching something it used to.
+    min_covered: 254
+    gpus: 1
+    workloads:
+      - Unit_HRR_ApiMatrix_Breadth_Direct
+      - Unit_HRR_ApiMatrix_Breadth2_Direct
+      - Unit_HRR_ApiMatrix_Reset_Direct
+      - Unit_HRR_ApiMatrix_GraphNodes_Direct
+      - Unit_HRR_ApiMatrix_LegacySurface_Direct
+      - Unit_HRR_ApiMatrix_LegacyCtx_Direct
+      - Unit_HRR_ApiMatrix_LegacyLaunch_Direct
+      - Unit_HRR_ApiMatrix_ProcAddress_Direct
+      - Unit_HRR_ApiMatrix_SptKernelLaunch_Direct
+      - Unit_HRR_ApiMatrix_SptCoopLaunch_Direct
+      # The remaining _spt entry points are only reachable from
+      # hrr_spt_workload_test.cc, the one translation unit built with
+      # -fgpu-default-stream=per-thread. #10306 moved these call sites out of
+      # the workloads above without naming their new homes here, which dropped
+      # 18 _spt APIs out of this tier.
+      - Unit_HRR_MemcpySpt_Direct
+      - Unit_HRR_MemsetSpt_Direct
+      - Unit_HRR_Memset3DSpt_Direct
+      - Unit_HRR_Memcpy3DSpt_Direct
+      - Unit_HRR_StreamQuerySpt_Direct
+      - Unit_HRR_StreamWaitEventSpt_Direct
+      - Unit_HRR_StreamCaptureBeginSpt_Direct
+      - Unit_HRR_GraphLaunchSpt_Direct
+      - Unit_HRR_StreamCaptureQuerySpt_Direct
+      - Unit_HRR_ApiMatrix_MemPoolShare_Direct
+      - Unit_HRR_AllApis_Direct
+      - Unit_HRR_StressApis_Direct
+      - Unit_HRR_DeviceInfo_Direct
+      - Unit_HRR_DeviceExtra_Direct
+      - Unit_HRR_DeviceMemPool_Direct
+      - Unit_HRR_MemPoolExtended_Direct
+      - Unit_HRR_MemcpyExtra_Direct
+      - Unit_HRR_MemsetExtra_Direct
+      - Unit_HRR_MemsetVariants_Direct
+      - Unit_HRR_DrvMemcpy_Direct
+      - Unit_HRR_DrvMemcpy3D_Direct
+      - Unit_HRR_ModuleAPI_Direct
+      - Unit_HRR_ModuleExtra_Direct
+      - Unit_HRR_StreamAdvanced_Direct
+      - Unit_HRR_StreamAdvanced2_Direct
+      - Unit_HRR_GraphExplicit_Direct
+      - Unit_HRR_GraphWorkload_Direct
+      - Unit_HRR_Occupancy_Direct
+      - Unit_HRR_Context_Direct
+      - Unit_HRR_MiscAPIs_Direct
+      - Unit_HRR_HostAliases_Direct
+      - Unit_HRR_ExtMalloc_Direct
+      - Unit_HRR_Logging_Direct
+
+  T5:
+    title: Deprioritised on verified negative evidence
+    rationale: >-
+      Section 10's deprioritised list. Textures, hipArray, surfaces and
+      mipmaps are absent from the shipping code of every Tier-1 project —
+      MIOpen has zero occurrences across its whole repository, and shipped
+      rocFFT/rocSPARSE/rocRAND import zero texture symbols. hipMallocManaged
+      is live code (FBGEMM_GPU) but the recommender workload is absent from
+      Instinct. hipExtLaunchKernel has no library caller in either monorepo
+      since MSCCL was deleted by 5ffe6a3dfb. Skipped by default; run with
+      --include-deprioritised.
+    # Coverage floor: what the deprioritised workload reaches on a part with
+    # no image support. On one with images it should jump by ~70.
+    min_covered: 14
+    gpus: 1
+    skip_by_default: true
+    workloads:
+      - Unit_HRR_ApiMatrix_Deprioritised_Direct
+      - Unit_HRR_Texture_Direct
+
+# ---------------------------------------------------------------------------
+# Pattern rules — applied to any API not named in a tier above, in file order.
+# ---------------------------------------------------------------------------
+patterns:
+  - match: '^hipTexRef|^hipBindTexture|^hipUnbindTexture|^hipGetTextureAlignmentOffset|^hipGetTextureReference|Texture(Object)?$|^hipCreateTextureObject|^hipDestroyTextureObject|^hipTexObject'
+    tier: T5
+    reason: Textures — section 10, verified absent from every Tier-1 project.
+  - match: 'Array|Mipmap|MipMapped|Surface|ChannelDesc'
+    tier: T5
+    reason: hipArray / mipmap / surface families — section 10, same evidence.
+  - match: '^hipGL|^hipGraphics'
+    tier: T5
+    reason: OpenGL interop — not an AI/ML path on Instinct datacenter GPUs.
+  - match: '^hipMallocManaged$|^hipMemAdvise|^hipMemRangeGetAttribute|^hipMemPrefetchAsync'
+    tier: T5
+    reason: >-
+      Managed memory — section 10, deprioritised on workload grounds. Live code
+      in FBGEMM_GPU with MI300 CI, but recommenders do not appear in Instinct
+      MLPerf submissions or AMD's serving guidance.
+  - match: '^hipExtLaunchKernel$|^hipLaunchCooperativeKernel$'
+    tier: T5
+    reason: >-
+      hipExtLaunchKernel has no library caller in either monorepo; the MSCCL
+      path that justified it was deleted by 5ffe6a3dfb. hipLaunchCooperativeKernel
+      has one known caller (ROCm DeepEP launch.cuh:67) on a non-default path.
+  - match: '^hipCtx|^hipDevicePrimaryCtx'
+    tier: T4
+    reason: Driver-API context family — breadth only, no AI-tier caller.
+
+# ---------------------------------------------------------------------------
+# APIs that cannot be made to write an event on this stack.
+#
+# A tier that runs and simply never reaches an API is the failure mode this
+# matrix exists to prevent: the API silently stops being asserted on and the
+# run still reports PASS. So every such API has to be listed here, with the
+# measurement that says why, and check_matrix.py fails the run for any that is
+# not. The declaration is itself an assertion in the other direction: if one of
+# these does reach an archive, the reason no longer holds and the report says
+# XPASS rather than quietly gaining a row.
+#
+# Each reason below was measured on this stack (gfx950, ROCm 7.13 SDK headers,
+# the rocm-systems capture runtime) by calling the API and reading back the
+# archive's event breakdown, not inferred from its signature.
+# ---------------------------------------------------------------------------
+unreachable:
+  - group: no-image-support
+    reason: >-
+      This part reports hipDeviceAttributeImageSupport = 0. Every entry point
+      that creates or configures texture state returns 801
+      (hipErrorNotSupported) and the capture shim writes no event, so the
+      whole texture, surface and mipmap creation surface is unreachable here
+      rather than merely untested. Two spellings escape this and are covered:
+      hipArrayCreate and hipArray3DCreate are recorded before the runtime
+      rejects them, as are the three destroy entry points, which accept a null
+      handle. This is also why section 10's deprioritisation of textures costs
+      nothing on Instinct hardware: the family does not run there.
+    apis:
+      - hipMallocArray
+      - hipMalloc3DArray
+      - hipMallocMipmappedArray
+      - hipMipmappedArrayCreate
+      - hipCreateChannelDesc
+      - hipCreateTextureObject
+      - hipCreateSurfaceObject
+      - hipTexObjectCreate
+      - hipModuleGetTexRef
+      - hipGetTextureReference
+      - hipGetTextureAlignmentOffset
+      - hipBindTexture
+      - hipBindTexture2D
+      - hipBindTextureToArray
+      - hipBindTextureToMipmappedArray
+      - hipUnbindTexture
+      - hipTexRefSetAddress
+      - hipTexRefSetAddress2D
+      - hipTexRefSetAddressMode
+      - hipTexRefSetArray
+      - hipTexRefSetBorderColor
+      - hipTexRefSetFilterMode
+      - hipTexRefSetFlags
+      - hipTexRefSetFormat
+      - hipTexRefSetMaxAnisotropy
+      - hipTexRefSetMipmapFilterMode
+      - hipTexRefSetMipmapLevelBias
+      - hipTexRefSetMipmapLevelClamp
+      - hipTexRefSetMipmappedArray
+      - hipTexRefGetAddress
+      - hipTexRefGetAddressMode
+      - hipTexRefGetArray
+      - hipTexRefGetBorderColor
+      - hipTexRefGetFilterMode
+      - hipTexRefGetFlags
+      - hipTexRefGetFormat
+      - hipTexRefGetMaxAnisotropy
+      - hipTexRefGetMipMappedArray
+      - hipTexRefGetMipmapFilterMode
+      - hipTexRefGetMipmapLevelBias
+      - hipTexRefGetMipmapLevelClamp
+
+  - group: array-handle-required
+    reason: >-
+      Takes a hipArray_t, hipMipmappedArray_t or texture object as its subject,
+      and on a part without image support no such handle can exist. Called with
+      a null one the runtime returns 400 (invalid handle) or 1 (invalid value)
+      before the capture shim records anything, so unlike hipArrayCreate these
+      leave no event. They become reachable the moment the matrix runs on a
+      part with image support; nothing else has to change.
+    apis:
+      - hipArrayDestroy
+      - hipArrayGetDescriptor
+      - hipArray3DGetDescriptor
+      - hipArrayGetInfo
+      - hipFreeArray
+      - hipFreeMipmappedArray
+      - hipGetChannelDesc
+      - hipGetMipmappedArrayLevel
+      - hipMipmappedArrayDestroy
+      - hipMipmappedArrayGetLevel
+      - hipMipmappedArrayGetMemoryRequirements
+      - hipMemMapArrayAsync
+      - hipExternalMemoryGetMappedMipmappedArray
+      - hipGetTextureObjectResourceDesc
+      - hipGetTextureObjectResourceViewDesc
+      - hipGetTextureObjectTextureDesc
+      - hipTexObjectGetResourceDesc
+      - hipTexObjectGetResourceViewDesc
+      - hipTexObjectGetTextureDesc
+      - hipMemcpyAtoA
+      - hipMemcpyAtoD
+      - hipMemcpyAtoH
+      - hipMemcpyAtoHAsync
+      - hipMemcpyDtoA
+      - hipMemcpyHtoA
+      - hipMemcpyHtoAAsync
+      - hipMemcpyToArray
+      - hipMemcpyFromArray
+      - hipMemcpyFromArray_spt
+      - hipMemcpy2DToArray
+      - hipMemcpy2DToArray_spt
+      - hipMemcpy2DToArrayAsync
+      - hipMemcpy2DToArrayAsync_spt
+      - hipMemcpy2DFromArray
+      - hipMemcpy2DFromArray_spt
+      - hipMemcpy2DFromArrayAsync
+      - hipMemcpy2DFromArrayAsync_spt
+      - hipMemcpy2DArrayToArray
+
+  - group: absent-from-sdk-headers
+    reason: >-
+      Declared in the rocm-systems headers but not in the ROCm 7.13 SDK the
+      hip-tests suite compiles against, so no call site can be written at all —
+      this is a property of the build, not of replay. HRR captures each of
+      them, which is why they are in the manifest, but the same header gap
+      applies to the playback tool: hipInitDevice and hipMemGetDefaultMemPool
+      replay as no-op stubs rather than real handlers. They are the one group
+      here whose gap closes by moving the tests to a newer SDK rather than by
+      better hardware or a fixed handler.
+    apis:
+      - hipGreenCtxCreate
+      - hipInitDevice
+      - hipDevResourceGenerateDesc
+      - hipDevSmResourceSplit
+      - hipDevSmResourceSplitByCount
+      - hipDeviceGetDevResource
+      - hipStreamGetDevResource
+      - hipDeviceGetExecutionCtx
+      - hipExecutionCtxDestroy
+      - hipExecutionCtxGetDevResource
+      - hipExecutionCtxGetDevice
+      - hipExecutionCtxGetId
+      - hipExecutionCtxRecordEvent
+      - hipExecutionCtxStreamCreate
+      - hipExecutionCtxSynchronize
+      - hipExecutionCtxWaitEvent
+      - hipDrvMemDiscardAndPrefetchBatchAsync
+      - hipDrvMemDiscardBatchAsync
+      - hipMemDiscardAndPrefetchBatchAsync
+      - hipMemDiscardBatchAsync
+      - hipMemGetDefaultMemPool
+      - hipLibraryGetGlobal
+      - hipLibraryGetManaged
+      - hipOccupancyMaxActiveClusters
+      - hipOccupancyMaxPotentialClusterSize
+
+  - group: unsupported-by-this-runtime
+    reason: >-
+      Returns 801 (hipErrorNotSupported) on the first call and writes no event.
+      The profiler control pair was deprecated and removed; the driver-context
+      queries are unimplemented in the AMD runtime even though hipCtxCreate
+      itself works, which is why the rest of the hipCtx family is covered in T4
+      and only these six are not. hipDeviceGetLuid is unsupported by design
+      rather than unimplemented: a LUID is a Windows/DXGI adapter identifier, so
+      the Linux path returns 801 before it touches the output buffer, and the
+      capture shim only records on success. HRR carries a generated capture
+      shim for it, but replay is a no-op stub: the symbol is not declared in
+      the Linux headers the playback tool builds against, so no real handler
+      can be compiled for it.
+    apis:
+      - hipProfilerStart
+      - hipProfilerStop
+      - hipCtxGetApiVersion
+      - hipCtxGetCacheConfig
+      - hipCtxSetCacheConfig
+      - hipCtxGetFlags
+      - hipCtxSetSharedMemConfig
+      - hipCtxSynchronize
+      - hipDeviceGetLuid
+
+  - group: rejected-before-recording
+    reason: >-
+      Reached, and rejected by the runtime before the capture shim records
+      anything: hipMemPrefetchBatchAsync returns 1 (invalid value) for a
+      device-resident range that the single-range hipMemPrefetchAsync accepts,
+      hipModuleLaunchCooperativeKernelMultiDevice returns 400 (invalid handle)
+      for a launch descriptor the plain module launch accepts, and
+      hipDevicePrimaryCtxSetFlags returns 216 (context already in use) whether
+      or not the primary context has been released first, and hipLinkAddFile
+      returns 1 for every input this suite can produce — hiprtc code and hiprtc
+      bitcode, from a plain compile and from -fgpu-rdc, as bundled and
+      unbundled. Each is a capture-side gap rather than a replay one: a program
+      that calls them successfully would record them, and this suite cannot get
+      them to succeed.
+    apis:
+      - hipMemPrefetchBatchAsync
+      - hipModuleLaunchCooperativeKernelMultiDevice
+      - hipDevicePrimaryCtxSetFlags
+      - hipLinkAddFile
+
+  - group: crashes-the-capturing-process
+    reason: >-
+      Segfaults during capture, not replay. Adding
+      hipGraphAddExternalSemaphoresSignalNode to a workload takes the recording
+      process down with SIGSEGV, so the archive ends there and neither it nor
+      the five other external-semaphore graph node entry points behind it can
+      be recorded. Worth separating from the replay-side crashes the matrix
+      declares as CRASH: those produce an archive and cost only the events
+      after them, this one costs the recording.
+    apis:
+      - hipGraphAddExternalSemaphoresSignalNode
+      - hipGraphAddExternalSemaphoresWaitNode
+      - hipGraphExternalSemaphoresSignalNodeGetParams
+      - hipGraphExternalSemaphoresSignalNodeSetParams
+      - hipGraphExternalSemaphoresWaitNodeGetParams
+      - hipGraphExternalSemaphoresWaitNodeSetParams
+      - hipGraphExecExternalSemaphoresSignalNodeSetParams
+      - hipGraphExecExternalSemaphoresWaitNodeSetParams
+
+  - group: no-caller-can-reach-it
+    reason: >-
+      Present in HRR's API tables but not callable from a test. hipExtHostAlloc
+      has an event type and a dispatch-table slot but no exported symbol to
+      link against. hipGetStreamDeviceId returns an int rather than a
+      hipError_t and writes no event even on success. The remaining
+      registration entry points are emitted by the compiler at image load, and
+      a translation unit carrying a __managed__ global or a texture reference
+      records only __hipRegisterFatBinary — those registrations never reach the
+      archive. __hipRegisterVar is no longer among them: the symbol registry
+      sweeps the registered __device__ globals itself.
+    apis:
+      - hipExtHostAlloc
+      - hipGetStreamDeviceId
+      - __hipRegisterManagedVar
+      - __hipRegisterSurface
+      - __hipRegisterTexture
+
+  - group: needs-an-opengl-context
+    reason: >-
+      OpenGL interop, and these containers have no GL context: all three return
+      1 (invalid value) and record nothing. Section 10 already deprioritises
+      the family on workload grounds — no Instinct AI path uses GL interop —
+      so this is a gap by two independent arguments.
+    apis:
+      - hipGLGetDevices
+      - hipGraphicsGLRegisterBuffer
+      - hipGraphicsGLRegisterImage
+      - hipGraphicsMapResources
+      - hipGraphicsResourceGetMappedPointer
+      - hipGraphicsSubResourceGetMappedArray
+      - hipGraphicsUnmapResources
+      - hipGraphicsUnregisterResource
+
+# ---------------------------------------------------------------------------
+# Per-API overrides.
+# ---------------------------------------------------------------------------
+overrides:
+
+  # -- APIs HIP folds away before HRR records them ---------------------------
+  # Measured: each of these is called by a workload and none of them appears in
+  # the archive's Event Type Breakdown. No workload can change that, so the
+  # matrix asserts the absence instead of carrying a coverage hole that can
+  # never be closed. If one starts being captured the report says XPASS, which
+  # is the signal that HIP's lowering changed.
+  hipLaunchKernel:
+    captured: false
+    note: >-
+      The <<<>>> chevron path. HIP lowers it to hipModuleLaunchKernel before
+      the capture layer sees it, which is why a chevron launch shows up in the
+      archive as hipModuleLaunchKernel with the mangled kernel symbol. Replay
+      fidelity is unaffected; what is lost is which entry point the application
+      used.
+  hipExtModuleLaunchKernel:
+    captured: false
+    note: >-
+      Same lowering as hipLaunchKernel. The global-work-size form and the
+      event-timing arguments are resolved before capture, so the archive records
+      an ordinary hipModuleLaunchKernel.
+  hipLaunchByPtr:
+    captured: false
+    note: >-
+      The pre-chevron hipConfigureCall / hipSetupArgument / hipLaunchByPtr
+      sequence lowers the same way: the launch itself arrives as
+      hipModuleLaunchKernel. hipConfigureCall and hipSetupArgument are recorded
+      under their own names, so only the hipLaunchByPtr event is absent.
+  hipModuleGetFunction:
+    note: >-
+      The one PASSTHROUGH_ONLY capture shim: it calls through and writes no
+      event. Replay resolves kernels from the symbol name carried in the launch
+      event against the pre-loaded code objects, so it has no use for the
+      capture-time hipFunction_t. The manifest derives the never-captured
+      expectation from capture_class; this note is only the reason.
+  __hipRegisterFunction:
+    captured: false
+    note: >-
+      Only __hipRegisterFatBinary reaches the archive; the per-function
+      registrations that follow it are resolved from the code object at replay.
+  __hipUnregisterFatBinary:
+    captured: false
+    note: >-
+      Runs during static teardown, after the capture layer has written its
+      shutdown trailer.
+
+  # -- APIs that cannot succeed in a single-process test ---------------------
+  # The capture shims record an event only when the real call returns
+  # hipSuccess, so an API that cannot succeed here is never recorded and no
+  # amount of workload work will change that. Two groups hit this:
+  #
+  #   IPC open       HIP rejects opening a handle in the process that exported
+  #                  it, so the same-process call the workload makes always
+  #                  fails. Exercising these for real needs a second process,
+  #                  which is a capture-harness change rather than a workload.
+  #   external mem   Importing needs a real dma-buf or opaque fd from another
+  #                  API (Vulkan, DRM). There is nothing to import in a HIP
+  #                  unit test, so the import fails and the dependent calls
+  #                  never run.
+  #
+  # Declaring them keeps the count honest: these are not APIs someone forgot
+  # to call, they are APIs this harness structurally cannot reach.
+  hipIpcCloseMemHandle:
+    captured: false
+    note: Only reachable after a successful hipIpcOpenMemHandle.
+  hipImportExternalMemory:
+    captured: false
+    note: >-
+      The workload calls it, with fd -1, because a real external memory handle
+      needs an exporter (Vulkan, DMA-BUF) this suite has no way to stand up.
+      The import is rejected before an event is written.
+  hipExternalMemoryGetMappedBuffer:
+    captured: false
+    note: Only reachable after a successful hipImportExternalMemory.
+  hipDestroyExternalMemory:
+    captured: false
+    note: Only reachable after a successful hipImportExternalMemory.
+  hipImportExternalSemaphore:
+    captured: false
+    note: >-
+      Same as hipImportExternalMemory: called with fd -1 and rejected before an
+      event is written, because the suite cannot produce a real exporter.
+  hipSignalExternalSemaphoresAsync:
+    captured: false
+    note: Only reachable after a successful hipImportExternalSemaphore.
+  hipWaitExternalSemaphoresAsync:
+    captured: false
+    note: Only reachable after a successful hipImportExternalSemaphore.
+  hipDestroyExternalSemaphore:
+    captured: false
+    note: Only reachable after a successful hipImportExternalSemaphore.
+
+  # -- APIs whose handler fails at replay ------------------------------------
+  # Measured, not predicted: each of these returns a HIP error at replay, and
+  # by default hrr-playback stops at the first one. That is a harder failure
+  # than a payload loss the caller can ignore, and it is why the matrix replays
+  # with --continue-on-error. Expecting HANDLER_ERROR makes today's behaviour
+  # XFAIL; if a fix lands, the matrix reports XPASS.
+
+  # -- The T0 launch surface -------------------------------------------------
+  hipDrvLaunchKernelEx:
+    note: >-
+      Triton's default modern launch path. hipLaunchConfig_t used to be
+      recorded as a capture-time address (section 8.3, P2c) and replay
+      returned 400. A hand-written shim now records the descriptor's fields
+      and its attribute list into the same variable-length launch payload
+      every other launch uses, and replay rebuilds the descriptor around the
+      translated stream and resolved function.
+  hipLaunchKernelExC:
+    note: >-
+      CK cluster launches. Recorded and replayed through the same launch
+      payload as hipDrvLaunchKernelEx; the host stub address is resolved to a
+      hipFunction_t at capture, because it is the one thing about this
+      spelling that cannot survive the process boundary.
+  hipLaunchHostFunc:
+    expect: UNREPLAYABLE
+    payload_loss: false
+    note: >-
+      Recorded into a captured graph by CK's FMHA-backward launcher, reached
+      through aiter's mha_bwd (UC1 fidelity risk 2). A declared scope
+      exclusion: the callback is a host function pointer into the capturing
+      process, so no amount of recorded argument bytes would make it
+      callable here. Replay names the API and the reason instead of enqueuing
+      a null callback.
+  hipModuleUnload:
+    note: >-
+      UC1's single consequential gap, and the one place the document and the
+      binary disagree. The generator emits a NOOP handler, but is_special() in
+      hrr_playback.cpp intercepts the event first and drops the module from
+      module_map, so no NOOP warning is ever printed and the API is observably
+      REAL. Module lifetime is still not reproduced — the real hipModuleUnload
+      is not called — which is what matters at UC3's 10^4-10^5 load/unload
+      cycles (section 3, UC1/UC3). The manifest derives this from is_special()
+      rather than declaring it here.
+
+  # -- P2(a): the 64-byte handle truncation ----------------------------------
+  hipIpcGetMemHandle:
+    payload_loss: false
+    note: >-
+      P2(a). The 64-byte handle used to be lowered to one uint64_t and replay
+      passed a null out-pointer, which is why it returned 1. It is now
+      recorded whole, re-exported from the live allocation at replay, and the
+      recorded bytes are paired with the live ones in ipc_handle_map so an
+      import later in the same archive resolves.
+  hipIpcOpenMemHandle:
+    payload_loss: false
+    captured: false
+    note: >-
+      hipIpcMemHandle_t is 64 bytes (HIP_IPC_HANDLE_SIZE) and is now carried
+      whole as inline bytes; the import resolves the recorded handle through
+      ipc_handle_map to the one this replay's exporter produced. Still never
+      captured here: HIP rejects a same-process open and the shim only records
+      successful calls, so exercising it needs a two-process capture.
+  hipIpcOpenEventHandle:
+    payload_loss: false
+    captured: false
+    note: Carried whole as inline bytes like hipIpcOpenMemHandle, and
+      unreachable here for the same same-process reason. P2(a).
+  hipMemCreate:
+    payload_loss: false
+    note: >-
+      P2(b). hipMemAllocationProp is carried inline and replay allocates with
+      the recorded type and location instead of a hardcoded Pinned/device 0;
+      a recorded device ordinal this host does not have is refused rather than
+      quietly satisfied from another device.
+  hipStreamBatchMemOp:
+    payload_loss: false
+    note: >-
+      P2(d). The union op-list is carried inline (up to 16 entries) and each
+      op's device address is translated by op type at replay. Not flagged by
+      the mechanical detector because the parameter is not const-qualified,
+      which is exactly why the overlay is authoritative.
+
+  # -- Silent failures worth a specific, non-derived assertion ---------------
+  hipStreamWriteValue64:
+    note: >-
+      Section 7, H2. XLA:ROCm's VMM allocator batches frees behind this write
+      while the CPU polls the location, so while this was a no-op replay did
+      not fail — it hung. PR #8855 gives it and hipStreamWriteValue32 a real
+      handler that translates both the destination pointer and the stream;
+      both are measured REAL here, so the class is derived again rather than
+      pinned to NOOP and the H2 hang is closed. The workload still runs under
+      the watchdog, which is what would catch a regression back to the no-op.
+  hipHostAlloc:
+    expect: NOOP
+    note: >-
+      Allocates nothing at replay. cudaHostAlloc hipifies to this spelling
+      while cudaMallocHost hipifies to the working hipHostMalloc, so which
+      spelling a ported codebase happened to use decides replay fidelity
+      (section 8.6). FAISS and MIGraphX use the broken one.
+  hipGraphExecUpdate:
+    expect: NOOP
+    note: >-
+      ggml/llama.cpp mutates its instantiated graph per token. The graph was
+      legitimately stream-captured so it is in graph_map, H1's fail-loud gate
+      never fires, and every token replays the first token's parameters. This
+      is the silent-corruption case P5 exists for.
+  hipLinkComplete:
+    note: >-
+      Used to fail because the linker state was never carried across the
+      process boundary: hipLinkState_t was on the generator's non-castable list
+      and every state argument was recorded as zero, so completing the link had
+      nothing to work from. The state is a plain opaque pointer, so it is
+      recorded like any other handle now and resolved through link_state_map,
+      which hipLinkCreate populates from its output.
+  hipLinkDestroy:
+    note: Same link_state_map lookup as hipLinkComplete.
+  hipLinkAddData:
+    note: >-
+      Returns 1 (invalid argument) at replay, which is what it returned at
+      capture: no linker input this suite can produce is accepted. The shim
+      records the call even so, and the image is written as a blob, so replay
+      hands the linker the same bytes and reproduces the same rejection rather
+      than dereferencing a capture-time host pointer.
+  hipExtLaunchMultiKernelMultiDevice:
+    expect: UNREPLAYABLE
+    note: >-
+      A declared scope exclusion. hipLaunchParams names each kernel by a host
+      function address in the capturing process, and unlike a single-device
+      launch there is no equivalent entry point that takes a hipFunction_t.
+  hipLaunchCooperativeKernelMultiDevice:
+    expect: UNREPLAYABLE
+    note: >-
+      The same hipLaunchParams exclusion as hipExtLaunchMultiKernelMultiDevice,
+      with a second reason of its own: the cooperative variant exists for a
+      grid-wide barrier across devices, so decomposing it into per-device
+      launches would not be the recorded call either. It sits in T1 because
+      the launch descriptor family is section 8.3's headline example of an API
+      counted as faithfully replayed that cannot replay.
+  hipStreamAddCallback_spt:
+    expect: UNREPLAYABLE
+    payload_loss: false
+    note: >-
+      Same host callback pointer and same declared exclusion as the plain
+      spelling.
+  hipLaunchHostFunc_spt:
+    expect: UNREPLAYABLE
+    payload_loss: false
+    note: >-
+      Same declared exclusion as the plain hipLaunchHostFunc. This spelling is
+      called on a stream rather than inside a graph, which is why it used to
+      surface the missing host function pointer as a bare error 1 while the
+      graph recording swallowed it.
+  hipStreamAddCallback:
+    expect: UNREPLAYABLE
+    payload_loss: false
+    note: >-
+      The recorded argument is a host function pointer belonging to the
+      capturing process, so there is nothing for replay to call. Declared as a
+      scope exclusion alongside hipLaunchHostFunc rather than left to fail as
+      a bare error 1 from inside the runtime.
+
+  # -- The two array spellings that reach an archive on a part with no images -
+  hipArrayCreate:
+    note: >-
+      Returns 801 (operation not supported) at replay, having returned the same
+      801 at capture: gfx950 reports no image support. Unlike every other
+      member of the array family the capture shim records the call before the
+      runtime rejects it, so this is the one spelling that gets an event.
+      Reproducing the recorded error is the faithful outcome, and the
+      capture-error passthrough says so rather than reporting a handler
+      failure; on a part with images the same handler creates a real array.
+  hipArray3DCreate:
+    note: Same 801 at capture and at replay as hipArrayCreate, 3D spelling.
+  hipMemAdvise_v2:
+    note: >-
+      Used to return 1 (invalid argument) at replay on the same managed range
+      where the v1 spelling replayed cleanly: the two differ only in taking a
+      hipMemLocation by value, and the generator was lowering that struct to a
+      dropped uint64_t and rebuilding a zeroed location. It is carried as
+      inline bytes now (BY_VALUE_STRUCTS), and the advice replays.
+
+  # -- A real handler that fails on one tier's arguments ----------------------
+  hipMemcpyAsync:
+    handler_error_in: [T2, T4]
+    note: >-
+      Faithful everywhere else, and the workhorse of every tier. In T2 and T4
+      it fails once each, and the failure is not its own:
+      hipMemcpyFromSymbolAsync (T2) and its _spt spelling (T4) are recorded as
+      an inner hipMemcpyAsync reading from the __device__ symbol's address, and
+      that address was never registered in the archive's allocation map because
+      hipGetSymbolAddress is a no-op at replay. The handler reports "src not
+      mapped — pointer translation bug" and returns invalid argument. It is the
+      read side of UC2 risk 5, and the loud half: the write side
+      (hipMemcpyToSymbol) is a silent no-op.
+
+  hipGraphInstantiate:
+    handler_error_in: [T4]
+    note: >-
+      Faithful for a stream-captured graph and, since the node-API workstream,
+      for a graph built node by node as well — T0 and T2 both pass. It still
+      returns 801 in T4, and by design: that graph contains a host-function
+      node, host callbacks are a declared scope exclusion, and a graph with an
+      unreplayable node is refused rather than launched with less work in it
+      than the recording had. The loud end of the exclusion, not a defect.
+  hipGraphExecMemcpyNodeSetParamsToSymbol:
+    handler_error_in: [T4]
+    note: >-
+      The symbol resolves and the node-level spelling replays; this one fails
+      because the exec it mutates comes from the hipGraphInstantiate above,
+      which is refused for the host-node exclusion. Second-order, and reported
+      against the exec it was handed rather than swallowed.
+  hipGraphExecMemcpyNodeSetParamsFromSymbol:
+    handler_error_in: [T4]
+    note: Read side of hipGraphExecMemcpyNodeSetParamsToSymbol, same cause.
+
+  # -- Handlers that do not fail, they crash ---------------------------------
+  hipMemExportToShareableHandle:
+    workloads: [Unit_HRR_ApiMatrix_ShareableHandle_Direct]
+    note: >-
+      MoRI's fabric handle export (UC2a, "Fabric / shareable handles"). It used
+      to pass the recorded `void* shareableHandle` straight through, asking the
+      runtime to write the exported fd to the capturing process's stack
+      address, and the measured outcome was SIGSEGV rather than an error —
+      which also cost every event recorded after it, hence the dedicated
+      workload. It now exports into a local buffer against the VMM handle
+      translated through vmm_handle_map. The fd it mints is meaningful only
+      inside the replay: handing it to another process is out of scope, and
+      hipMemImportFromShareableHandle is a declared exclusion for that reason.
+  hipMemImportFromShareableHandle:
+    expect: UNREPLAYABLE
+    workloads: [Unit_HRR_ApiMatrix_ShareableHandle_Direct]
+    note: >-
+      Observable now that the export no longer crashes, and a declared scope
+      exclusion. The recorded argument is an fd belonging to the exporting
+      process; the export replay re-runs mints a different one, so the recorded
+      number names some other file here, or nothing.
+  hipMemGetHandleForAddressRange:
+    workloads: [Unit_HRR_ApiMatrix_ShareableHandle_Direct]
+    note: >-
+      dmabuf export of an existing allocation, MoRI's RDMA path. Same local
+      out-buffer treatment as hipMemExportToShareableHandle, run against the
+      translated device pointer.
+  hipMemRetainAllocationHandle:
+    workloads: [Unit_HRR_ApiMatrix_ShareableHandle_Direct]
+    note: Same ordering rule as hipMemGetHandleForAddressRange.
+  hipMemPoolExportToShareableHandle:
+    workloads: [Unit_HRR_ApiMatrix_MemPoolShare_Direct]
+    note: >-
+      Same shape and same fix as hipMemExportToShareableHandle, on the pool
+      rather than the VMM allocation. That both were the same defect confirms
+      it was the generated out-pointer convention rather than anything specific
+      to the VMM export.
+  hipMemPoolImportFromShareableHandle:
+    expect: UNREPLAYABLE
+    workloads: [Unit_HRR_ApiMatrix_MemPoolShare_Direct]
+    note: >-
+      Observable once the pool export stopped crashing, and it crashed in turn:
+      hip_mempool.cpp:426 imports whatever file the recorded fd names in this
+      process. The same declared exclusion as hipMemImportFromShareableHandle,
+      and the reason replay now refuses it by name instead of importing a
+      stranger's file descriptor.
+  hipSetupArgument:
+    workloads: [Unit_HRR_ApiMatrix_LegacyLaunch_Direct]
+    note: >-
+      The third crashing out-pointer, and the clearest of them: HRR recorded
+      `const void* arg` as a bare address with none of the `size` bytes behind
+      it, and the handler replayed it verbatim, so the runtime memcpy'd from a
+      capture-time host address. The argument bytes are now carried in the
+      event and replay pushes those, which is the whole content of the call.
+      Kept in its own workload because it sat at event 31 of the legacy-surface
+      archive and hid the ~80 APIs recorded after it.
+  hipGetProcAddress_spt:
+    workloads: [Unit_HRR_ApiMatrix_ProcAddress_Direct]
+    note: >-
+      The same defect on an input string: `const char* symbol` was recorded as
+      an address with none of its characters, and replaying the address was a
+      SIGSEGV in hip::hipGetProcAddress_common (hip_device.cpp:880). The name
+      is now recorded, so replay looks up the symbol the recording asked for.
+  hipLaunchKernel_spt:
+    workloads: [Unit_HRR_ApiMatrix_SptKernelLaunch_Direct]
+    note: >-
+      The same defect with the widest blast radius of the five: any translation
+      unit compiled -fgpu-default-stream=per-thread calls this instead of
+      hipLaunchKernel, so an ordinary chevron launch in such a program is
+      recorded here. It now takes the same manual capture and replay path as
+      the plain spelling — kernel resolved by recorded name and code-object
+      hash, arguments from the launch payload — under its own event id.
+  hipLaunchCooperativeKernel_spt:
+    workloads: [Unit_HRR_ApiMatrix_SptCoopLaunch_Direct]
+    note: >-
+      Cooperative sibling of hipLaunchKernel_spt, and it failed cleanly rather
+      than crashing: 13 (invalid device symbol) for the recorded host function
+      address. Same fix, plus the cooperative entry point at replay, which the
+      grid-wide barrier in the workload's kernel depends on: an unfaithful
+      replay of this one hangs rather than returning a wrong answer.
+  hipCtxPushCurrent:
+    workloads: [Unit_HRR_ApiMatrix_LegacyCtx_Direct]
+    note: >-
+      Not an out-pointer, a broken pair: hipCtxPopCurrent was NOOP and the push
+      was real, so replay pushed the capture-time hipCtx_t and the process died
+      at the next API wanting a current device (SIGSEGV in hip::hipGetDevice,
+      hip_device_runtime.cpp:705). The family now runs against ctx_map, so the
+      create and the pop register what they hand out and the push pushes a
+      context that exists here. An unmapped value is refused by the runtime as
+      hipErrorInvalidContext rather than poisoning the thread.
+  hipCtxDestroy:
+    workloads: [Unit_HRR_ApiMatrix_LegacyCtx_Direct]
+    note: >-
+      Real and survivable, which is worth recording because it looks like the
+      obvious suspect for the crash next door and is not: the workload replays
+      a hipGetDevice after it, and that call returns.
+
+  # -- Things the classification calls fine that the evidence agrees with ----
+  hipGetProcAddress:
+    note: >-
+      Real now that the symbol name is recorded, alongside its _spt spelling.
+      It was a harmless NOOP before: section 8.1 settled by experiment that
+      Triton is captured anyway, because hipGetProcAddress returns the exported
+      wrapper, which reads the dispatch table at call time, so pointers cached
+      before capture was installed still route through HRR's shims. What replay
+      does with the resolved pointer is still nothing — no recorded call goes
+      through it — but the lookup itself is now the recorded one.
+  hipGetFuncBySymbol:
+    expect: NOOP
+    note: >-
+      NOOP but harmless — HRR re-resolves kernels by recorded name plus
+      code-object hash rather than by the recorded handle (section 4, RCCL).
+  hipExtMallocWithFlags:
+    note: >-
+      RCCL's primary device allocator, and a verified non-gap: playback passes
+      the recorded flags through (hip_playback.cpp:1288). The fine-grained /
+      uncached flag is load-bearing on XGMI, so this test guards a property
+      that is easy to regress.
+
+  # -- Cannot be exercised from a single-process Catch2 workload -------------
+  hipIpcGetEventHandle:
+    skip: true
+    reason: >-
+      Event IPC needs a second process to consume the handle. Covered by the
+      T3 multi-GPU workload only to the extent one process can reach it.
+  hipDeviceGetP2PAttribute:
+    skip_unless_multi_gpu: true
+    reason: Requires two devices.

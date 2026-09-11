@@ -22,9 +22,9 @@
 # every API's replay class still matches what HRR's generator declares.
 #
 # hrr_api_matrix_expectations.h is GENERATED from the pair api_classes.json +
-# api_matrix.yaml.  Regenerate after an upstream classification change with:
-#   aim-labs/scenarios/prep/hrr-api-matrix/check_matrix.py --emit-cxx \
-#       <this dir>/hrr_api_matrix_expectations.h
+# api_matrix.yaml, both in ../../tools/api-matrix.  Regenerate after an upstream
+# classification change with:
+#   ../../tools/api-matrix/check_matrix.py --emit-cxx
 #
 # hrr_kernel_args_test.cc covers what replay does with a pointer-typed kernel
 # argument no allocation explains: a sentinel keeps its value, an

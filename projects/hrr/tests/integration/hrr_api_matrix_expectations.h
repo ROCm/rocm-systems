@@ -8,16 +8,16 @@
  * GENERATED FILE — do not edit by hand.
  *
  * Regenerate with:
- *   aim-labs/scenarios/prep/hrr-api-matrix/check_matrix.py --emit-cxx \
- *       rocm-systems/projects/hip-tests/catch/unit/hrr/hrr_api_matrix_expectations.h
+ *   projects/hrr/tools/api-matrix/check_matrix.py --emit-cxx \
+ *       projects/hrr/tests/integration/hrr_api_matrix_expectations.h
  *
  * Source of truth is the pair api_classes.json (derived from HRR's generator)
  * and api_matrix.yaml (the authored tier and expectation overlay). Generating
  * this header rather than transcribing it is what keeps the Catch2 tests and
- * the aim-labs reporter from drifting into disagreeing about what an API is
+ * the matrix reporter from drifting into disagreeing about what an API is
  * supposed to do at replay.
  *
- * Generated 2026-08-24 from 553 HIP APIs.
+ * Generated 2026-09-11 from 553 HIP APIs.
  */
 
 #pragma once
@@ -241,7 +241,7 @@ inline constexpr HrrApiExpectation kHrrApiMatrix[] = {
     {"hipDeviceGetExecutionCtx", "T4", 0, false, true, false, false},
     {"hipDeviceGetGraphMemAttribute", "T4", 1, false, true, false, false},
     {"hipDeviceGetLimit", "T4", 0, false, true, false, false},
-    {"hipDeviceGetLuid", "T4", 0, false, true, false, false},
+    {"hipDeviceGetLuid", "T4", 1, false, true, false, false},
     {"hipDeviceGetMemPool", "T4", 0, false, true, false, false},
     {"hipDeviceGetName", "T4", 1, false, true, false, false},
     {"hipDeviceGetPCIBusId", "T4", 1, false, true, false, false},
@@ -384,7 +384,7 @@ inline constexpr HrrApiExpectation kHrrApiMatrix[] = {
     {"hipHccModuleLaunchKernel", "T4", 1, false, true, false, false},
     {"hipHostGetFlags", "T4", 1, false, true, false, false},
     {"hipInit", "T4", 0, false, true, false, false},
-    {"hipInitDevice", "T4", 0, false, true, false, false},
+    {"hipInitDevice", "T4", 1, false, true, false, false},
     {"hipKernelGetAttribute", "T4", 1, false, true, false, false},
     {"hipKernelGetFunction", "T4", 1, false, true, false, false},
     {"hipKernelGetLibrary", "T4", 1, false, true, false, false},
@@ -417,7 +417,7 @@ inline constexpr HrrApiExpectation kHrrApiMatrix[] = {
     {"hipMemDiscardAndPrefetchBatchAsync", "T4", 1, false, true, false, false},
     {"hipMemDiscardBatchAsync", "T4", 1, false, true, false, false},
     {"hipMemGetAddressRange", "T4", 1, false, true, false, false},
-    {"hipMemGetDefaultMemPool", "T4", 0, false, true, false, false},
+    {"hipMemGetDefaultMemPool", "T4", 1, false, true, false, false},
     {"hipMemGetMemPool", "T4", 0, false, true, false, false},
     {"hipMemPoolCreate", "T4", 0, false, true, false, false},
     {"hipMemPoolDestroy", "T4", 0, false, true, false, false},
@@ -659,6 +659,15 @@ inline constexpr const char* const kHrrWorkloadsT4[] = {
     "Unit_HRR_ApiMatrix_ProcAddress_Direct",
     "Unit_HRR_ApiMatrix_SptKernelLaunch_Direct",
     "Unit_HRR_ApiMatrix_SptCoopLaunch_Direct",
+    "Unit_HRR_MemcpySpt_Direct",
+    "Unit_HRR_MemsetSpt_Direct",
+    "Unit_HRR_Memset3DSpt_Direct",
+    "Unit_HRR_Memcpy3DSpt_Direct",
+    "Unit_HRR_StreamQuerySpt_Direct",
+    "Unit_HRR_StreamWaitEventSpt_Direct",
+    "Unit_HRR_StreamCaptureBeginSpt_Direct",
+    "Unit_HRR_GraphLaunchSpt_Direct",
+    "Unit_HRR_StreamCaptureQuerySpt_Direct",
     "Unit_HRR_ApiMatrix_MemPoolShare_Direct",
     "Unit_HRR_AllApis_Direct",
     "Unit_HRR_StressApis_Direct",
