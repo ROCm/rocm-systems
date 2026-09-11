@@ -14,4 +14,5 @@ target_include_directories(rocjitsu_vm PRIVATE ${GENERATED_DIR})
 add_dependencies(rocjitsu_vm flatbuffers_schemas)
 
 add_subdirectory(amdgpu)
+add_subdirectory(timing)
 add_subdirectory(risc_v)

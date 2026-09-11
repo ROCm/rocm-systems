@@ -17,6 +17,7 @@ set(RJ_HOOKS_LINK_LIBS
     rocjitsu_isa
     rocjitsu_amdgpu_isa_registry
     rocjitsu_vm_amdgpu
+    rocjitsu_vm_timing
     util
     flatbuffers
     simdojo
