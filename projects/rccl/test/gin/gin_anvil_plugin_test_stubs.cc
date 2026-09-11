@@ -28,6 +28,10 @@ struct State {
   bool factoryNullHandles = false;
   bool lsaAddrFail = false;
   bool connCheckVerifyMissing = false;
+  int connCheckMissingCalls = 0;
+  int connCheckWriteCalls = 0;
+  int connCheckVerifyCalls = 0;
+  std::vector<unsigned long long> connCheckWriteStamps;
   void* lsaSelfAddr = reinterpret_cast<void*>(0x70001000ULL);
 };
 
@@ -51,6 +55,14 @@ void SetFactoryNullHandles(bool nullHandles) { g.factoryNullHandles = nullHandle
 void SetLsaAddrFail(bool fail) { g.lsaAddrFail = fail; }
 void SetLsaSelfAddr(void* addr) { g.lsaSelfAddr = addr; }
 void SetConnCheckVerifyMissing(bool missing) { g.connCheckVerifyMissing = missing; }
+void SetConnCheckMissingCalls(int calls) { g.connCheckMissingCalls = calls; }
+int GetConnCheckWriteCalls() { return g.connCheckWriteCalls; }
+int GetConnCheckVerifyCalls() { return g.connCheckVerifyCalls; }
+unsigned long long GetConnCheckWriteStamp(int call) {
+  return call >= 0 && static_cast<size_t>(call) < g.connCheckWriteStamps.size()
+             ? g.connCheckWriteStamps[static_cast<size_t>(call)]
+             : 0;
+}
 
 }  // namespace GinAnvilPluginStubs
 
@@ -193,8 +205,9 @@ extern "C" int ginAnvilConnWrite(void* remoteAddrsDev, int nRanks, int selfRank,
   (void)remoteAddrsDev;
   (void)nRanks;
   (void)selfRank;
-  (void)stamp;
   (void)stream;
+  ++GinAnvilPluginStubs::g.connCheckWriteCalls;
+  GinAnvilPluginStubs::g.connCheckWriteStamps.push_back(stamp);
   return 0;
 }
 
@@ -203,12 +216,23 @@ extern "C" int ginAnvilConnCheck(void* localSignals, int nRanks, unsigned long l
   (void)localSignals;
   (void)stamp;
   (void)stream;
+  ++GinAnvilPluginStubs::g.connCheckVerifyCalls;
   if (missingDev && nRanks > 0) {
-    const char* injEnv = getenv("NCCL_GIN_ANVIL_SDMA_CONN_INJECT_FAIL_RANK");
+    bool missingForRetry = GinAnvilPluginStubs::g.connCheckMissingCalls > 0;
+    if (missingForRetry) --GinAnvilPluginStubs::g.connCheckMissingCalls;
+    bool injectMissing = false;
+#ifdef ENABLE_FAULT_INJECTION
+    if (const char* injEnv = getenv("NCCL_GIN_ANVIL_SDMA_CONN_INJECT_FAIL_RANK")) {
+      injectMissing = atoi(injEnv) >= 0;
+    }
+#endif
     const bool simulateMissing =
-        GinAnvilPluginStubs::g.connCheckVerifyMissing || (injEnv && atoi(injEnv) >= 0);
-    const int fill = simulateMissing ? 1 : 0;
-    if (hipMemset(missingDev, fill, sizeof(int) * static_cast<size_t>(nRanks)) != hipSuccess) return -1;
+        GinAnvilPluginStubs::g.connCheckVerifyMissing || missingForRetry || injectMissing;
+    std::vector<int> missing(static_cast<size_t>(nRanks), simulateMissing ? 1 : 0);
+    if (hipMemcpy(missingDev, missing.data(), sizeof(int) * static_cast<size_t>(nRanks),
+                  hipMemcpyHostToDevice) != hipSuccess) {
+      return -1;
+    }
   }
   return 0;
 }
