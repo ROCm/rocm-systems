@@ -46,6 +46,18 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
   - This covers every subcommand that uses the standard human-readable renderer, not only the AI-NIC `RDMA_DEVICES` case that prompted it.
   - `monitor`, `partition`, `topology`, `xgmi`, and the default no-argument output print tables and are unchanged.
 
+- **`container_name` in process info now reports the full container ID**.  
+  - Previously only the first 16 characters were reported. The value is now the complete 64-character ID that `docker inspect`, `docker ps --no-trunc` and Kubernetes tooling use, so process output can be matched against them directly.
+  - Nested LXC containers now report the outer container name rather than `<parent>/<child>`.
+
+- **`cper_decode()` in the internal header `amd_smi/impl/amd_smi_cper.h` takes a new `buf_size` argument**.  
+  - The function needs the caller's buffer length to bound the record it walks. It also now rejects a buffer that does not start with the `CPER` signature, so the record walk is safe for any pointer and size rather than depending on `amdsmi_get_afids_from_cper()` having validated first.
+  - The symbol is not exported: the version script's `amdsmi_*` glob does not match a mangled C++ name, and `libamd_smi_static.a` is not installed. Only an in-tree build that links the archive sees the new signature.
+
+- **`amd_smi/impl/amd_smi_cper.h` and `example/amd_smi_cper.cc` are no longer installed in the dev package**.  
+  - Both functions the header declares are C++ symbols, which the version script's `amdsmi_*` export glob does not match, so including the header only ever led to a link error. It joins the `_test` and WSL impl headers that are already build-only.
+  - The example is the one shipped file that included that header, so it went with it rather than being left unbuildable against an install tree.
+
 ### Optimized
 
 ### Resolved Issues
@@ -80,6 +92,21 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 
 - **Fixed `amd-smi static --vram` reporting `GDDR7` for LPDDR5 unified memory on APUs (e.g. gfx117x)**.  
   - `AMDSMI_VRAM_TYPE__MAX` aliases the highest real memory type (`LPDDR5`), so a genuine LPDDR5 reading was matched by the `__MAX` special case and mislabeled `GDDR7`. It is now correctly reported as `LPDDR5`.
+
+- **Fixed `container_name` in process info being wrong, missing, or crashing `amd-smi`**.  
+  - `amd-smi process --sort-by-pid` could abort with `terminate called after throwing an instance of 'std::out_of_range'` when any GPU process ran in a cgroup whose path ended in `docker` or `lxc`.
+  - Processes in containerd, CRI-O and Podman containers reported no container at all, including Kubernetes pods. They are now identified under either cgroup driver.
+  - Processes that were not in a container could be reported as if they were, for example anything running under the Docker daemon's own `docker.service`.
+  - Containers managed by LXC 3 or later, or by LXD, under systemd are now identified.
+  - A process started from a path of 256 characters or more could report a corrupted process name.
+
+- **Fixed out-of-bounds reads and writes when parsing malformed CPER records**.  
+  - A record whose `record_length` is smaller than a CPER header is now dropped by the ring reader. Such a record was previously copied and then had a product serial number written past the end of the caller's buffer.
+  - `amdsmi_get_afids_from_cper` now returns `AMDSMI_STATUS_UNEXPECTED_SIZE` when `buf_size` is smaller than a CPER header, instead of reading header fields the caller never supplied.
+  - A section descriptor's `fru_id` and `fru_text` are now logged only up to their declared width. Neither field is required to carry a terminator, so logging one walked past the descriptor and printed whatever followed it, up to the first zero byte outside the record.
+  - A crashdump section's registers are now copied into an aligned buffer before decoding. The section sits at a record-supplied offset inside a packed struct, so an odd offset left the decoder loading a `uint64_t` from an address it was not aligned for.
+  - A non-standard error section whose `reg_arr_size` exceeds the fixed 128-byte register dump is now rejected and logged. In ACA register context (`reg_ctx_type` 1) that size already produced no AFID, so those records decode as before. In boot context (`reg_ctx_type` 9) the decoder previously read registers from past the end of `reg_dump`, and any AFID it derived from them is gone.
+  - A record whose `error_severity` is too large for the severity mask to select is now dropped. Such a value previously wrapped around the 32-bit mask and matched a bit belonging to a different severity, so the record was reported under a severity it never carried.
 
 - **Fixed `amd-smi set -L/--clk-limit <clk> max <value>` not enforcing caps that fall between clock levels**.  
   - For `mclk` and `fclk` ONLY, which expose a discrete DPM table, the requested `max` is now rounded down to the nearest selectable clock level, so the enforced limit never exceeds the requested value.
