@@ -1,5 +1,5 @@
 /*
-Copyright (c) 2023 - 2026 Advanced Micro Devices, Inc. All rights reserved.
+Copyright (c) 2026 Advanced Micro Devices, Inc. All rights reserved.
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -388,9 +388,7 @@ rocDecStatus D3D12Interop::CopyToStagingBuffer(int pic_idx) {
     // We override Offset and RowPitch to match the expected linear layout, but keep Width/Height/Format
     // from D3D12's GetCopyableFootprints so the copy source is read correctly.
     D3D12_PLACED_SUBRESOURCE_FOOTPRINT src_footprints[3] = {};
-    // NV12/P010: 2 subresources. Planar YUV: may need more, but D3D12 NV12 is always 2.
-    UINT num_subresources = (tex_desc.Format == DXGI_FORMAT_NV12 || tex_desc.Format == DXGI_FORMAT_P010 ||
-                             tex_desc.Format == DXGI_FORMAT_P016) ? 2 : 1;
+    UINT num_subresources = layout.num_planes;
     // Only the footprints are used below; pass nullptr for the optional row-count/size/total out-params.
     d3d12_device_->GetCopyableFootprints(&tex_desc, 0, num_subresources, 0,
                                          src_footprints, nullptr, nullptr, nullptr);

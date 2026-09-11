@@ -1,5 +1,5 @@
 /*
-Copyright (c) 2023 - 2026 Advanced Micro Devices, Inc. All rights reserved.
+Copyright (c) 2026 Advanced Micro Devices, Inc. All rights reserved.
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -49,6 +49,7 @@ THE SOFTWARE.
     if (FAILED(hres)) {\
         std::ostringstream hres_oss_; hres_oss_ << std::hex << static_cast<uint32_t>(hres);\
         CriticalLog(g_rocdec_logger, ROCDEC_STR("D3D12 failure: ") + #call + " failed with 'HRESULT: 0x" + hres_oss_.str() + "' at " + __FILE__ + ":" + ROCDEC_TOSTR(__LINE__));\
+        FunctionExitLog(g_rocdec_logger);\
         return ROCDEC_RUNTIME_ERROR;\
     }\
 }
