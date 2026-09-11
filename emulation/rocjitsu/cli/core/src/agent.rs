@@ -201,6 +201,9 @@ pub struct KfdDeviceInfo {
     pub num_sdma_engines: u32,
     #[serde(default)]
     pub num_sdma_xgmi_engines: u32,
+    /// Rejected by the emulator when zero and `num_sdma_engines` is not.
+    #[serde(default)]
+    pub num_sdma_queues_per_engine: u32,
     #[serde(default)]
     pub num_cp_queues: u32,
     #[serde(default)]

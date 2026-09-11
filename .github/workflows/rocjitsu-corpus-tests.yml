@@ -166,11 +166,14 @@ jobs:
       # the test suite launches almost everything through it, so a build
       # without cargo silently skips most of what this job exists to run.
       # rustup rather than apt: the workspace is edition 2024 and needs
-      # 1.85, well past what Ubuntu 24.04 packages.
+      # 1.85, well past what Ubuntu 24.04 packages. The minimal profile
+      # omits clippy and rustfmt, which the `cargo_clippy` and `cargo_fmt`
+      # ctest cases invoke.
       - name: Install Rust
         run: |
           curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
-            | sh -s -- -y --profile minimal --default-toolchain stable
+            | sh -s -- -y --profile minimal --default-toolchain stable \
+              --component clippy,rustfmt
           echo "${HOME}/.cargo/bin" >> "${GITHUB_PATH}"
 
       - name: Checkout rocm-systems
