@@ -329,6 +329,14 @@ if(BUILD_TESTS)
     RCCL_STUBS_OMIT_ncclInitKernelsForDevice
     RCCL_STUBS_OMIT_ncclParamGraphStreamOrdering
     ENQUEUE_CC_PATH="${PROJECT_BINARY_DIR}/hipify/src/enqueue.cc")
+
+  # Mirrors the opt-out in test/CMakeLists.txt, whose loop does not reach this target.
+  # Inheriting ENABLE_ROCSHMEM_GIN defaults NCCL_GIN_ANVIL_SDMA_ENABLE to 1, which pulls
+  # in rocSHMEM's sdma device headers.
+  if(ENABLE_ROCSHMEM_GIN)
+    target_compile_definitions(rccl-UnitTestsMicroEnqueue PRIVATE NCCL_GIN_ANVIL_SDMA_ENABLE=0)
+  endif()
+
   # HIP compile requirements without linking the runtime (see rccl-UnitTestsMicro).
   foreach(_hip_tgt hip::host hip::device)
     if(TARGET ${_hip_tgt})
@@ -568,12 +576,25 @@ add_library(rccl-source-wrappers STATIC
   bootstrap_wrapper.cc
   init_stubs.cpp
   wrapper_link_stubs.cpp
+  hip_prop_r0600_stub.cpp
   accl_profiler_wrapper.cc
 )
 target_include_directories(rccl-source-wrappers PRIVATE
   ${ACCL_PROFILER_DIR}
   ${RCCL_INCLUDE_DIRS}
 )
+# Standalone HostUnitTests never find_package(hip); in-tree already has hip::host.
+if(NOT TARGET hip::host)
+  find_package(hip QUIET)
+endif()
+foreach(_hip_tgt hip::host hip::device)
+  if(TARGET ${_hip_tgt})
+    target_include_directories(rccl-source-wrappers PRIVATE
+      $<TARGET_PROPERTY:${_hip_tgt},INTERFACE_INCLUDE_DIRECTORIES>)
+    target_compile_definitions(rccl-source-wrappers PRIVATE
+      $<TARGET_PROPERTY:${_hip_tgt},INTERFACE_COMPILE_DEFINITIONS>)
+  endif()
+endforeach()
 # accl_profiler_wrapper.cc needs the non-hipified profiler headers;
 # scope the extra include to just that file to avoid os.h/rocmwrap.h
 # conflicts with the hipified sources used by other wrappers.

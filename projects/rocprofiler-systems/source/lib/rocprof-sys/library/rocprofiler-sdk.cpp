@@ -2767,7 +2767,7 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* user_data)
     if(!gpu_perf_counters_setting.empty() && !_data->gpu_agents.empty())
     {
         pmc::register_gpu_perf_counter_source(
-            get_agent_manager_instance().get_agents_by_type(agent_type::GPU));
+            get_agent_manager_instance().get_agents_by_type(agent_type::gpu));
     }
 #endif
 

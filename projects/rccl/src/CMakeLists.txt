@@ -104,6 +104,7 @@ set(SRC_FILES
   device/symmetric/reduce_scatter_gin.cuh
   graph/connect.cc
   graph/paths.cc
+  graph/rccl_graph_gen.cc
   graph/rings.cc
   graph/rings.h
   graph/rome_models.cc
@@ -221,6 +222,7 @@ set(SRC_FILES
   include/register.h
   include/register_inline.h
   include/rccl_float8.h
+  include/rccl_graph_gen.h
   include/rocmwrap.h
   include/roctx.h
   include/recorder.h
@@ -749,7 +751,7 @@ endif()
 
 # Execute the python script to generate required collective functions
 execute_process(
-    COMMAND ${Python3_EXECUTABLE} ${RCCL_SOURCE_DIR}/src/device/generate.py ${GEN_DIR} ${IFC_ENABLED} OFF ${BUILD_LOCAL_GPU_TARGET_ONLY} ${ENABLE_ROCSHMEM} ${ONLY_FUNCS}
+    COMMAND ${Python3_EXECUTABLE} ${RCCL_SOURCE_DIR}/src/device/generate.py ${GEN_DIR} "${IFC_ENABLED}" OFF "${BUILD_LOCAL_GPU_TARGET_ONLY}" "${ENABLE_ROCSHMEM}" "${BUILD_ALL_UNROLLS}" ${ONLY_FUNCS}
     WORKING_DIRECTORY ${RCCL_SOURCE_DIR}
     RESULT_VARIABLE gen_py_result
     ERROR_VARIABLE gen_py_error
