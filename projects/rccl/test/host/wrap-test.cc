@@ -899,8 +899,8 @@ TEST(WrapMicrotest, FuncMaxSendRecvCount_OtherFuncsReturnCountUnscaled) {
 // ===========================================================================
 // ParamDefaults_MatchProductionSource -- the same drift-guard idea as the
 // FakeTableDrift_* tests above, for values no constant can express. ncclParamMinNchannels/MaxNchannels,
-// rcclParamForceCe, and ncclParamLaunchOrderImplicit hardcode the real
-// NCCL_PARAM/RCCL_PARAM default they copy (see wrap_fakes.cc), but that
+// rcclParamForceCe, and ncclParamLaunchOrderImplicit mirror the real
+// NCCL_PARAM/RCCL_PARAM defaults they copy (see wrap_fakes.cc), but each
 // default is an inline macro-argument literal with no separately importable
 // constant -- unlike NCCL_NUM_ALGORITHMS or ncclNumFuncs, there's nothing a
 // static_assert could check. Instead, this test reads the real
@@ -1087,6 +1087,11 @@ TEST(WrapMicrotestIsolated, UpdateCollectiveProtocol_Gfx950ReduceScatterSmallSiz
         info.protocol = NCCL_PROTO_SIMPLE;
         rcclUpdateCollectiveProtocol(comm, /*nBytes=*/1048576, &info); // exactly at the 1MiB threshold
         EXPECT_EQ(NCCL_PROTO_LL, info.protocol);
+        ncclTaskColl pastThreshold{};
+        pastThreshold.func = ncclFuncReduceScatter;
+        pastThreshold.protocol = NCCL_PROTO_SIMPLE;
+        rcclUpdateCollectiveProtocol(comm, /*nBytes=*/1048577, &pastThreshold);
+        EXPECT_EQ(NCCL_PROTO_SIMPLE, pastThreshold.protocol);
         DeleteCommWithArch(comm);
       });
 }
@@ -1104,6 +1109,11 @@ TEST(WrapMicrotestIsolated, UpdateCollectiveProtocol_Gfx942ReduceScatterSmallSiz
         info.protocol = NCCL_PROTO_SIMPLE;
         rcclUpdateCollectiveProtocol(comm, /*nBytes=*/352128, &info); // exactly at the threshold
         EXPECT_EQ(NCCL_PROTO_LL, info.protocol);
+        ncclTaskColl pastThreshold{};
+        pastThreshold.func = ncclFuncReduceScatter;
+        pastThreshold.protocol = NCCL_PROTO_SIMPLE;
+        rcclUpdateCollectiveProtocol(comm, /*nBytes=*/352129, &pastThreshold);
+        EXPECT_EQ(NCCL_PROTO_SIMPLE, pastThreshold.protocol);
         DeleteCommWithArch(comm);
       });
 }
@@ -1548,8 +1558,9 @@ TEST(WrapMicrotestIsolated, OverrideProtocol_UnmatchedStringReturnsInvalidUsage)
 // rcclOverrideProtocol's own `static bool validInput` latch (rccl_wrap.cc:283-
 // 284) had never seen its early-return arm fire (llvm-cov: [True: 0, False:
 // 5]) -- every prior test made exactly one call per isolated process. A
-// second call after a failed parse must short-circuit via the cached
-// validInput=false rather than re-parsing (and re-warning).
+// second call after a failed parse returns from the cached validInput=false
+// arm. The status assertion pins that arm; log silence is only a secondary
+// check because rcclGetAlgoProtoIndex has its own warn-once latch.
 TEST(WrapMicrotestIsolated, OverrideProtocol_SecondCallAfterFailureReturnsInvalidUsageWithoutReparsing) {
   RUN_ISOLATED_TEST(
       "Wrap_OverrideProtocol_SecondCallAfterFailureReturnsInvalidUsageWithoutReparsing",
@@ -1563,7 +1574,7 @@ TEST(WrapMicrotestIsolated, OverrideProtocol_SecondCallAfterFailureReturnsInvali
         std::string log = RcclUnitTesting::CaptureLog(
             [&]() { EXPECT_EQ(ncclInvalidUsage, rcclOverrideProtocol(protoStr, table, &info)); });
         EXPECT_EQ(std::string::npos, log.find("Invalid algo or protocol string"))
-            << "second call must hit the cached validInput=false early-return, not re-parse and re-warn";
+            << "the repeated invalid input should not emit another warning";
         EXPECT_EQ(NCCL_PROTO_SIMPLE, info.protocol);
       });
 }
@@ -1598,9 +1609,8 @@ TEST(WrapMicrotestIsolated, OverrideAlgorithm_ValidMatchOverridesAlgorithm) {
 }
 
 // Complementary proof for rcclOverrideAlgorithm's own, separate `static bool
-// validInput` latch (rccl_wrap.cc:310-311) -- same never-fired early-return
-// arm as rcclOverrideProtocol's above, a distinct static local to this
-// function.
+// validInput` latch (rccl_wrap.cc:310-311) -- same early-return status proof
+// as rcclOverrideProtocol's above, with its own distinct static local.
 TEST(WrapMicrotestIsolated, OverrideAlgorithm_SecondCallAfterFailureReturnsInvalidUsageWithoutReparsing) {
   RUN_ISOLATED_TEST(
       "Wrap_OverrideAlgorithm_SecondCallAfterFailureReturnsInvalidUsageWithoutReparsing",
@@ -1614,7 +1624,7 @@ TEST(WrapMicrotestIsolated, OverrideAlgorithm_SecondCallAfterFailureReturnsInval
         std::string log = RcclUnitTesting::CaptureLog(
             [&]() { EXPECT_EQ(ncclInvalidUsage, rcclOverrideAlgorithm(algoStr, table, &info)); });
         EXPECT_EQ(std::string::npos, log.find("Invalid algo or protocol string"))
-            << "second call must hit the cached validInput=false early-return, not re-parse and re-warn";
+            << "the repeated invalid input should not emit another warning";
         EXPECT_EQ(NCCL_ALGO_TREE, info.algorithm);
       });
 }
@@ -3244,7 +3254,7 @@ TEST(WrapMicrotestIsolated, SelectAllReduce_SymmetricGatedOnSumOpOnly) {
         EXPECT_EQ(ncclSuccess, rcclSelectAllReduce(comm, nullptr, nullptr, /*count=*/8, ncclFloat32, ncclProd,
                                                     /*stream=*/nullptr, /*query=*/true,
                                                     /*graphCapturingHint=*/false, &decision));
-        EXPECT_NE((int)rcclAddonAlgos_t::RCCL_SYMMETRIC, decision.algo);
+        EXPECT_EQ(NCCL_ALGO_RING, decision.algo);
         DeleteCommWithArch(comm);
       });
 }
@@ -3344,7 +3354,7 @@ TEST(WrapMicrotestIsolated, SelectAllReduce_CeRegisteredNotChosenWhenProbeSaysUn
         EXPECT_EQ(ncclSuccess, rcclSelectAllReduce(comm, nullptr, nullptr, /*count=*/8, ncclFloat32, ncclSum,
                                                     /*stream=*/nullptr, /*query=*/true,
                                                     /*graphCapturingHint=*/false, &decision));
-        EXPECT_NE((int)rcclAddonAlgos_t::RCCL_CE_REGISTERED, decision.algo)
+        EXPECT_EQ(NCCL_ALGO_RING, decision.algo)
             << "ncclCeAvailable() returning false must block CE even when everything else favours it";
         DeleteCommWithArch(comm);
       });
@@ -3370,7 +3380,7 @@ TEST(WrapMicrotestIsolated, SelectAllReduce_CeRegisteredNotChosenWithUnsupported
         EXPECT_EQ(ncclSuccess, rcclSelectAllReduce(comm, nullptr, nullptr, /*count=*/8, ncclFloat32, ncclAvg,
                                                     /*stream=*/nullptr, /*query=*/true,
                                                     /*graphCapturingHint=*/false, &decision));
-        EXPECT_NE((int)rcclAddonAlgos_t::RCCL_CE_REGISTERED, decision.algo);
+        EXPECT_EQ(NCCL_ALGO_RING, decision.algo);
         DeleteCommWithArch(comm);
       });
 }
@@ -3512,7 +3522,7 @@ TEST(WrapMicrotestIsolated, SelectAllReduce_CeTwoShotNotChosenWhenNeitherForceNo
         EXPECT_EQ(ncclSuccess, rcclSelectAllReduce(comm, nullptr, nullptr, /*count=*/8, ncclFloat32, ncclSum,
                                                     /*stream=*/nullptr, /*query=*/true,
                                                     /*graphCapturingHint=*/false, &decision));
-        EXPECT_NE((int)rcclAddonAlgos_t::RCCL_CE_2SHOT, decision.algo);
+        EXPECT_EQ(NCCL_ALGO_RING, decision.algo);
         DeleteCommWithArch(comm);
       });
 }
@@ -3538,7 +3548,7 @@ TEST(WrapMicrotestIsolated, SelectAllReduce_CeTwoShotNotChosenWhenStagingBufferN
         EXPECT_EQ(ncclSuccess, rcclSelectAllReduce(comm, nullptr, nullptr, /*count=*/8, ncclFloat32, ncclSum,
                                                     /*stream=*/nullptr, /*query=*/true,
                                                     /*graphCapturingHint=*/false, &decision));
-        EXPECT_NE((int)rcclAddonAlgos_t::RCCL_CE_2SHOT, decision.algo);
+        EXPECT_EQ(NCCL_ALGO_RING, decision.algo);
         DeleteCommWithArch(comm);
       });
 }
@@ -4024,8 +4034,8 @@ TEST(WrapMicrotestIsolated, SelectAllGather_HierarchicalChosenLiveMode) {
       });
 }
 
-// CE force-scratch (branch #2): rcclParamForceCe() is a hardcoded-true stub
-// (wrap_fakes.cc), so this only needs ceScratch true (seam), a reg-type that
+// CE force-scratch (branch #2): rcclParamForceCe() defaults true, so this only
+// needs ceScratch true (seam), a reg-type that
 // is neither fully-registered variant (the default, NonregNonreg, already
 // satisfies this), no sysmem segment (default), a non-null ddaScratch, and
 // totalBytes within ddaScratchBytes.
@@ -4045,6 +4055,30 @@ TEST(WrapMicrotestIsolated, SelectAllGather_CeForceScratchChosen) {
         EXPECT_EQ(ncclSuccess, rcclSelectAllGather(comm, nullptr, nullptr, /*sendcount=*/8, ncclFloat32,
                                                     /*query=*/true, /*graphCapturingHint=*/false, &decision));
         EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_CE_REGISTERED, decision.algo);
+        DeleteCommWithArch(comm);
+      });
+}
+
+// Keep every other force-scratch gate armed while turning off ForceCe itself.
+// This pins the first conjunct independently: deleting rcclParamForceCe() from
+// the production condition would incorrectly select CE_REGISTERED.
+TEST(WrapMicrotestIsolated, SelectAllGather_CeForceScratchRequiresForceCe) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SelectAllGather_CeForceScratchRequiresForceCe",
+      []() {
+        ScopedHook forceCe(g_paramForceCe, []() { return int64_t(0); });
+        ScopedHook ceScratch(g_ceScratchAvailable, [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t,
+                                                       ncclSymRegType_t) { return true; });
+        ncclComm* comm = MakeCommWithArch("gfx90a");
+        comm->nRanks = 1;
+        comm->nNodes = 1;
+        uint8_t scratch[64];
+        comm->ddaScratch = scratch;
+        comm->ddaScratchBytes = sizeof(scratch);
+        rcclCollDecision decision{};
+        EXPECT_EQ(ncclSuccess, rcclSelectAllGather(comm, nullptr, nullptr, /*sendcount=*/8, ncclFloat32,
+                                                    /*query=*/true, /*graphCapturingHint=*/false, &decision));
+        EXPECT_EQ(NCCL_ALGO_RING, decision.algo);
         DeleteCommWithArch(comm);
       });
 }
@@ -4335,7 +4369,11 @@ TEST(WrapMicrotestIsolated, SelectReduceScatter_SymmetricGatedOnSumOrAvgOpOnly) 
         rcclCollDecision decision{};
         EXPECT_EQ(ncclSuccess, rcclSelectReduceScatter(comm, nullptr, nullptr, /*recvcount=*/8, ncclFloat32,
                                                         ncclProd, /*query=*/false, &decision));
-        EXPECT_NE((int)rcclAddonAlgos_t::RCCL_SYMMETRIC, decision.algo);
+        // query=false returns right after rccl_wrap.cc:1291's unconditional
+        // `decision->algo = NCCL_ALGO_RING;`, before the query-only
+        // getAlgoInfo block -- so the exact value is deterministic, not just
+        // "not symmetric" (which every other wrong branch would also satisfy).
+        EXPECT_EQ(NCCL_ALGO_RING, decision.algo);
         DeleteCommWithArch(comm);
       });
 }
@@ -5707,11 +5745,11 @@ TEST(WrapMicrotest, OverrideChannels_UndefinedThresholdBreaksLoop) {
 // short-circuiting the whole condition regardless of A/B). A mask of 0
 // guarantees B is false for every FLAGS value in one shot; a level of -1
 // guarantees C is true for every call site in one shot -- so two broad
-// sweeps (the zero-mask one directly below, the negative-level one further
-// down past the rcclSelectAllGather section), each replaying already-proven
-// call configurations under a different ScopedDebugLogging context, close
-// every in-scope INFO call site's remaining arm(s) at once instead of one bespoke
-// test per site. (ENABLE_WARP_SPEED's own INFO call sites are out of scope,
+// sweep pairs (zero-mask and negative-level), replaying already-proven call
+// configurations under different ScopedDebugLogging contexts, close every
+// in-scope INFO call site's remaining arms. Direct-disabled and CTA-policy
+// configurations use separate isolated children because the disable parameter
+// is cached on first use. (ENABLE_WARP_SPEED's own INFO call sites are out of scope,
 // same as the rest of that cluster; rcclUseAllGatherDirect's AINIC INFO call
 // site at rccl_wrap.cc:724 is reachable -- g_useAinic is a seam, driven by
 // UseAllGatherDirect_AinicDisablesDirect -- but is not replayed by this
@@ -5721,8 +5759,8 @@ TEST(WrapMicrotest, OverrideChannels_UndefinedThresholdBreaksLoop) {
 namespace {
 // Replays a broad, already-proven cross-section of INFO(...) call sites
 // under whatever ScopedDebugLogging context the caller has set up. Shared by
-// both sweep tests below so the same configurations aren't duplicated twice.
-void ExerciseInfoCallSites() {
+// the sweep tests below so the call configurations stay in one place.
+void ExerciseInfoCallSites(bool seedDirectDisabled) {
   // rcclOverrideChannels: nNodes<2 (216), single-GPU-per-node (221),
   // matched-threshold-in-bounds (246+262), matched-threshold-out-of-bounds
   // (246+267).
@@ -5769,6 +5807,20 @@ void ExerciseInfoCallSites() {
     rcclOverrideChannels(comm, ncclFuncAllReduce, /*nBytes=*/8192, nc);
     DeleteCommWithArch(comm);
   }
+  // rcclUseAllGatherDirect: seed its function-local static with the disabled
+  // value before rcclHierarchicalAlgoInfo below reaches the same helper.
+  if (seedDirectDisabled) {
+    g_loadParam = [](const char* env, int64_t deft) {
+      return std::strcmp(env, "RCCL_DIRECT_ALLGATHER_DISABLE") == 0 ? int64_t(1) : deft;
+    };
+    SetMicroEnvAbsent("RCCL_DIRECT_ALLGATHER_THRESHOLD");
+    ncclComm* comm = MakeCommWithArch("gfx950");
+    comm->nRanks = 8;
+    size_t msgSize = 1024;
+    rcclUseAllGatherDirect(comm, msgSize);
+    DeleteCommWithArch(comm);
+    ClearMicroEnv();
+  }
   // rcclHierarchicalAlgoInfo's summary line (442).
   {
     SetMicroEnvAbsent("RCCL_DIRECT_ALLGATHER_THRESHOLD");
@@ -5789,20 +5841,9 @@ void ExerciseInfoCallSites() {
     DeleteHierarchicalSubComms(interComm, intraComm);
     ClearMicroEnv();
   }
-  // rcclUseAllGatherDirect: param-disabled (719), CTA-policy-ZERO (742).
-  {
-    g_loadParam = [](const char* env, int64_t deft) {
-      return std::strcmp(env, "RCCL_DIRECT_ALLGATHER_DISABLE") == 0 ? int64_t(1) : deft;
-    };
-    SetMicroEnvAbsent("RCCL_DIRECT_ALLGATHER_THRESHOLD");
-    ncclComm* comm = MakeCommWithArch("gfx950");
-    comm->nRanks = 8;
-    size_t msgSize = 1024;
-    rcclUseAllGatherDirect(comm, msgSize);
-    DeleteCommWithArch(comm);
-    ClearMicroEnv();
-  }
-  {
+  // rcclUseAllGatherDirect: CTA-policy-ZERO (742). The param-disabled (719)
+  // configuration is deliberately first above because the parameter caches.
+  if (!seedDirectDisabled) {
     g_loadParam = [](const char*, int64_t deft) { return deft; };
     SetMicroEnvAbsent("RCCL_DIRECT_ALLGATHER_THRESHOLD");
     ncclComm* comm = MakeCommWithArch("gfx950");
@@ -5915,7 +5956,18 @@ TEST(WrapMicrotestIsolated, InfoMacroSweep_AllCallSitesSuppressedByZeroMask) {
         // is non-negative so "C" is false too -- the whole condition is
         // false and ncclDebugLog is never invoked.
         RcclUnitTesting::ScopedDebugLogging debugLogging(NCCL_LOG_INFO, /*mask=*/0);
-        ExerciseInfoCallSites();
+        std::string log = RcclUnitTesting::CaptureLog([]() { ExerciseInfoCallSites(/*seedDirectDisabled=*/true); });
+        EXPECT_TRUE(log.empty()) << "INFO must be suppressed when the debug mask is zero";
+      });
+}
+
+TEST(WrapMicrotestIsolated, InfoMacroSweep_CtaDirectCallSiteSuppressedByZeroMask) {
+  RUN_ISOLATED_TEST(
+      "Wrap_InfoMacroSweep_CtaDirectCallSiteSuppressedByZeroMask",
+      []() {
+        RcclUnitTesting::ScopedDebugLogging debugLogging(NCCL_LOG_INFO, /*mask=*/0);
+        std::string log = RcclUnitTesting::CaptureLog([]() { ExerciseInfoCallSites(/*seedDirectDisabled=*/false); });
+        EXPECT_TRUE(log.empty()) << "INFO must be suppressed when the debug mask is zero";
       });
 }
 
@@ -6040,6 +6092,18 @@ TEST(WrapMicrotestIsolated, InfoMacroSweep_AllCallSitesForcedOpenByNegativeDebug
         // the whole condition to true regardless of A/B -- ncclDebugLog
         // fires at every call site reached below.
         RcclUnitTesting::ScopedDebugLogging debugLogging(/*level=*/-1, /*mask=*/0);
-        ExerciseInfoCallSites();
+        std::string log = RcclUnitTesting::CaptureLog([]() { ExerciseInfoCallSites(/*seedDirectDisabled=*/true); });
+        EXPECT_FALSE(log.empty()) << "negative debug level must open the exercised INFO call sites";
+      });
+}
+
+
+TEST(WrapMicrotestIsolated, InfoMacroSweep_CtaDirectCallSiteForcedOpenByNegativeDebugLevel) {
+  RUN_ISOLATED_TEST(
+      "Wrap_InfoMacroSweep_CtaDirectCallSiteForcedOpenByNegativeDebugLevel",
+      []() {
+        RcclUnitTesting::ScopedDebugLogging debugLogging(/*level=*/-1, /*mask=*/0);
+        std::string log = RcclUnitTesting::CaptureLog([]() { ExerciseInfoCallSites(/*seedDirectDisabled=*/false); });
+        EXPECT_FALSE(log.empty()) << "negative debug level must open the exercised INFO call sites";
       });
 }

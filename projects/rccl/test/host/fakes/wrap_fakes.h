@@ -43,9 +43,15 @@
 // a canned firmware response or a failure.
 extern std::function<ncclResult_t(uint32_t, uint64_t*)> g_amdSmiGetFirmwareVersion;
 
-// rcclDdaEnabled's ncclParamLaunchOrderImplicit() dependency, made settable
-// so a test can drive that disjunct of its 3-way disable guard independently.
+// External parameter accessors made settable so tests can drive their
+// respective guards independently.
 extern std::function<int64_t()> g_paramLaunchOrderImplicit;
+extern std::function<int64_t()> g_paramForceCe;
+
+// Deliberate reset opt-out: every mutable hook in this file is installed via
+// ScopedHook (or exercised in a forked RUN_ISOLATED_TEST child), so state is
+// restored at scope exit or discarded with the child process. This suite has
+// no persistent hook state for a ResetWrapFakes() entry point to clean up.
 
 // ---------------------------------------------------------------------------
 // Dispatcher seams: drive rcclSelectAllReduce/AllGather/ReduceScatter,

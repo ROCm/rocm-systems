@@ -4,14 +4,14 @@
  * See LICENSE.txt for license information
  ************************************************************************/
 
-// Fail-loud stub floor for src/rccl_wrap.cc's host-only microtest, compiled
+// Host-only dependency floor for src/rccl_wrap.cc's microtest, compiled
 // into rccl-UnitTestsMicro alongside p2p.cc/rma_proxy_progress.cc's own
 // tests. #include-ing the whole 1773-line rccl_wrap.cc (via WRAP_CC_PATH)
 // pulls in the DDA / CE / symmetric-kernel / hierarchical backend-selection
 // machinery even though the covered functions (see wrap-test.cc) don't reach
-// all of it yet. Everything below satisfies the link closure; entries the
-// current tests never reach default to abort()-on-call so an accidentally
-// exercised path fails fast instead of silently returning a wrong answer.
+// all of it yet. Everything below satisfies the link closure. Controllable
+// seams use conservative production-like defaults; tests override them with
+// ScopedHook when a branch needs different behaviour.
 //
 // Deliberately NOT reusing nccl_stubs.cc / bootstrap_stubs.cc / topo_stubs.cc
 // / transport_stubs.cc here: those are curated for init.cc and each already
@@ -69,13 +69,10 @@
 // are defined once, by fakes/nccl_fakes.cc, which this binary already links
 // for p2p.cc's tests -- defining them again here would be a duplicate-symbol
 // error. ncclDebugMask's default there (0) differs from what this file used
-// when it was its own standalone binary (~0ULL), but that's not observable
-// by anything currently covered: WARN(...) calls ncclDebugLog() unconditionally
-// regardless of mask, and no function covered so far calls INFO(...) (which
-// does check ncclDebugLevel/ncclDebugMask) at all. A future test that needs to
-// capture an INFO(...) line should raise both explicitly first, e.g. with
-// RcclUnitTesting::ScopedDebugLogging, rather than relying on either side's
-// default.
+// when it was its own standalone binary (~0ULL). WARN(...) calls
+// ncclDebugLog() unconditionally regardless of mask; INFO(...) call sites are
+// tested with explicit ScopedDebugLogging settings in wrap-test.cc rather
+// than relying on either fake's default.
 // ---------------------------------------------------------------------------
 FILE* ncclDebugFile = nullptr;
 char  ncclLastError[1024] = {};
@@ -99,10 +96,12 @@ char  ncclLastError[1024] = {};
 // ---------------------------------------------------------------------------
 int64_t ncclParamMinNchannels() { return -2; }              // graph/connect.cc:832
 int64_t ncclParamMaxNchannels() { return -2; }              // graph/connect.cc:833
-int64_t rcclParamForceCe() { return 1; }                    // enqueue.cc:3796
+static int64_t DefaultParamForceCe() { return 1; }          // enqueue.cc:3796
+std::function<int64_t()> g_paramForceCe = DefaultParamForceCe;
+int64_t rcclParamForceCe() { return g_paramForceCe(); }
 
-// ncclParamLaunchOrderImplicit: upgraded to a settable hook (unlike the three
-// plain scalars above) so a test can drive rcclDdaEnabled's
+// ncclParamLaunchOrderImplicit: a settable hook, like rcclParamForceCe above,
+// so a test can drive rcclDdaEnabled's
 // `ncclParamLaunchOrderImplicit() != 0` disjunct independently -- the real
 // default (0, "explicit launch order") favors the common case, matching the
 // other three.
@@ -178,11 +177,13 @@ ncclResult_t ncclCommCount(const ncclComm_t comm, int* count) { return g_commCou
 // faithful copies of collectives.cc's trivial switch tables, NOT abort-floors
 // -- rcclGetAlgoName/rcclGetProtocolName delegate to the first two for native
 // algo/protocol values, and rcclOverrideProtocol/rcclOverrideAlgorithm use all
-// four in WARN messages. All four callers are tested in wrap-test.cc. Real
-// collectives.cc is not linked here: it pulls in the DDA/symmetric-kernel/
-// nvtx dependency chain this lean binary otherwise avoids entirely (see the
-// file header comment). Each function below names the exact definition it
-// copies, so a drift is checkable without leaving this file.
+// four in WARN messages. All four callers are tested in wrap-test.cc.
+// fakes/collectives_fakes.cc owns shared versions, but its
+// ncclDatatypeToString deliberately returns the placeholder "dtype" because
+// its consumers do not inspect datatype log text. These tests do, so this
+// target keeps production-faithful local copies. Linking real collectives.cc
+// would pull in the DDA/symmetric-kernel/nvtx dependency chain. Each function
+// below names the exact production definition it copies.
 //
 // NCCL_ALGO_* / NCCL_PROTO_* are plain #defines, not a real enum, so the
 // compiler can't warn on a switch missing a newly-added case the way it could
@@ -456,10 +457,10 @@ ncclResult_t amd_smi_getFirmwareVersion(uint32_t devIdx, uint64_t* fwVersion) {
 // --- Per-collective DDA eligibility/blocks (24 functions total) ---
 // Every *Eligible defaults false (DDA path not eligible by default, letting
 // CE-registered/symmetric/hierarchical/Direct/plain-kernel run, matching
-// every existing test's expectations); every *Blocks defaults to 1 (a sane
-// nonzero placeholder for a test that opts a path in without separately
-// overriding the channel count). One seam pair per function, same
-// Default*/g_hookName pattern as every other seam in this file.
+// every existing test's expectations). Every reachable *Blocks hook has a
+// distinct 11x/12x sentinel, and selecting tests assert those values to prove
+// which path supplied nMaxChannels. The unused 13x hooks remain distinct so a
+// future production call cannot silently agree with a neighboring path.
 
 // --- AllReduce DDA (dda_all_reduce.h) ---
 static bool DefaultAllReduceDdaIpcEligible(ncclComm*, const void*, void*, size_t, ncclDataType_t, ncclRedOp_t) {

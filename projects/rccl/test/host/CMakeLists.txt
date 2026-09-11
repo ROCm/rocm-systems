@@ -161,7 +161,7 @@ if(BUILD_TESTS)
   # device pass entirely, which is robust across clang toolchains that ignore the
   # older -Xarch_device coverage split.
   # -ffunction-sections/--gc-sections (added for wrap-test.cc): rccl_wrap.cc's
-  # abort()-floor stub surface (fakes/wrap_fakes.cc) is large and mostly
+  # dependency-floor stub surface (fakes/wrap_fakes.cc) is large and mostly
   # unreached by these tests; this drops the unreferenced deep
   # deps rather than pulling in the world, matching rccl-UnitTestsMicroInit's
   # rationale for the same flags.
@@ -893,7 +893,7 @@ target_compile_definitions(rccl-UnitTestsMicro PRIVATE
 # -no-pie for the same reason as rccl-HostUnitTests: the RCCL-vendored
 # libgtest.a used by this standalone path is built without -fPIC, so a PIE
 # link fails with "relocation R_X86_64_32 cannot be used against local symbol".
-# --gc-sections (added for wrap-test.cc): rccl_wrap.cc's abort()-floor stub
+# --gc-sections (added for wrap-test.cc): rccl_wrap.cc's dependency-floor stub
 # surface (fakes/wrap_fakes.cc) is large and mostly unreached by
 # these tests; this drops the unreferenced deep deps, matching
 # rccl-UnitTestsMicroInit's rationale for the same flag.
