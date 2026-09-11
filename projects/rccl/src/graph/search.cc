@@ -17,7 +17,9 @@
 #include "rome_models.h"
 
 NCCL_PARAM(CrossNic, "CROSS_NIC", 2);
-NCCL_PARAM(CrossNicFirst, "CROSS_NIC_FIRST", 0);
+// Order of the last two relaxation steps of the topology search: 1 tries a cross-NIC ring before
+// widening the accepted GPU-to-NIC path type, 0 widens the path type first.
+NCCL_PARAM(CrossNicFirst, "CROSS_NIC_FIRST", 1);
 
 // Initialize system->maxBw. This is the per-channel (i.e. per-SM)
 // max bw.
@@ -1165,6 +1167,7 @@ ncclResult_t ncclTopoCompute(ncclTopoSystem* system, struct ncclTopoGraph* graph
                    ncclParamCrossNic() :
                    0;
   graph->crossNic = crossNic == 1 ? 1 : 0;
+  int crossNicFirst = ncclParamCrossNicFirst();
   graph->bwIntra = graph->bwInter = 0;
   graph->latencyInter = 0;
   int minTypeIntra = PATH_LOC, minTypeInter = PATH_PIX;
@@ -1356,13 +1359,15 @@ search:
     }
     tmpGraph.typeIntra = minTypeIntra;
 
-    if (ncclParamCrossNicFirst() && crossNic == 2 && tmpGraph.crossNic == 0 &&
+    // PXN is disabled by default, so the typeInter step below finds no PATH_PXN and widens straight
+    // to PATH_PHB, where a GPU reaches its NIC across a host bridge and loses GDR. A cross-NIC ring
+    // keeps every GPU on its own NIC, so it is worth trying before widening.
+    if (crossNicFirst && crossNic == 2 && tmpGraph.crossNic == 0 &&
         (graph->pattern == NCCL_TOPO_PATTERN_RING || graph->pattern == NCCL_TOPO_PATTERN_BALANCED_TREE)) {
-      // Try a cross-NIC ring before conceding a worse GPU-to-NIC path.
       tmpGraph.crossNic = 2;
       goto search;
     }
-    if (ncclParamCrossNicFirst()) tmpGraph.crossNic = crossNic == 1 ? 1 : 0;
+    if (crossNicFirst) tmpGraph.crossNic = crossNic == 1 ? 1 : 0;
 
     if (system->inter && tmpGraph.typeInter < maxTypeInter &&
         (graph->nChannels == 0 || tmpGraph.typeInter < graph->typeInter || tmpGraph.typeInter < PATH_PXN)) {
@@ -1371,13 +1376,13 @@ search:
     }
     tmpGraph.typeInter = minTypeInter;
 
-    if (!ncclParamCrossNicFirst() && crossNic == 2 && tmpGraph.crossNic == 0 &&
+    if (!crossNicFirst && crossNic == 2 && tmpGraph.crossNic == 0 &&
         (graph->pattern == NCCL_TOPO_PATTERN_RING || graph->pattern == NCCL_TOPO_PATTERN_BALANCED_TREE)) {
       // Try again with crossNic if permitted
       tmpGraph.crossNic = 2;
       goto search;
     }
-    if (!ncclParamCrossNicFirst()) tmpGraph.crossNic = crossNic == 1 ? 1 : 0;
+    if (!crossNicFirst) tmpGraph.crossNic = crossNic == 1 ? 1 : 0;
 
     // Decrease bw until we find a solution
     if ((speedIndex < nspeeds - 1) && (graph->nChannels == 0 || (speedArray[speedIndex + 1] / graph->bwInter > .49))) {
