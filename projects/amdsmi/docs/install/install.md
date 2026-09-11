@@ -190,75 +190,82 @@ Nightly builds of the ROCm Core SDK (including AMD SMI) are published by
 (install_tarball)=
 ## Install from a tarball
 
-A tarball is an unpacked ROCm tree rather than a managed package: nothing runs
-`ldconfig` and nothing is added to `sys.path`, so you point at the tree yourself.
-Both the `amd-smi` CLI and the `amdsmi` Python module ship inside it and work
-from any prefix.
+A tarball has no install step. Extracting it runs no package manager, no
+`ldconfig`, and no pip, so nothing is registered with Python. The `amd-smi` CLI
+and the `amdsmi` Python module both ship inside the archive and run from
+wherever you extract it, so you point your tools at the tree instead of
+installing out of it.
 
 1. Extract the tarball. The examples below use `$AMDSMI_ROOT` for the directory
-   that contains `bin/`, `lib/`, and `share/`.
+   that contains `bin/`, `lib/`, and `share/`. If the archive expands into a
+   versioned top-level directory, point `AMDSMI_ROOT` at that directory.
 
    ```bash
    mkdir -p ~/rocm-tarball
    tar -xf <rocm-tarball>.tar.gz -C ~/rocm-tarball
    export AMDSMI_ROOT=~/rocm-tarball
-   ```
 
-   If the archive expands into a versioned top-level directory, set
-   `AMDSMI_ROOT` to that directory instead.
-
-2. Confirm the layout. These two paths are what the CLI and the Python loader
-   key on.
-
-   ```bash
    ls "$AMDSMI_ROOT/lib/libamd_smi.so."*
    ls "$AMDSMI_ROOT/share/amd_smi/amdsmi/amdsmi_wrapper.py"
    ```
 
-3. Run the CLI. It resolves its Python modules relative to its own location, so
-   only `PATH` is needed.
+   Those two paths are what the CLI and the Python loader key on.
+
+2. Run the CLI. It locates its own Python modules, so only `PATH` is needed.
 
    ```bash
    export PATH="$AMDSMI_ROOT/bin${PATH:+:${PATH}}"
    amd-smi version
    ```
 
-4. Use the Python library. Add the module directory to `PYTHONPATH`.
+3. Make the module importable, using whichever scope you want.
+
+   **Current shell** — one variable, no files written:
 
    ```bash
    export PYTHONPATH="$AMDSMI_ROOT/share/amd_smi${PYTHONPATH:+:${PYTHONPATH}}"
-   python3 -c "import amdsmi; print(amdsmi.amdsmi_get_lib_version())"
    ```
 
-   `LD_LIBRARY_PATH` is not required. The wrapper loads
-   `<root>/lib/libamd_smi.so.<MAJOR>` by a path relative to itself, and the
-   library's `RUNPATH` is `$ORIGIN`-relative, so its ROCm dependencies resolve
-   from the same extracted tree.
+   `PYTHONPATH` outranks every install location, so this also overrides an
+   installed `amd-smi-lib` package or a pip `amdsmi` wheel for any Python
+   started from this shell. Append the `export` line to your `~/.bashrc` (or
+   equivalent) to persist it.
 
-   To persist either variable across shells, append the `export` line to your
-   `~/.bashrc` (or equivalent shell config).
+   **One virtual environment** — no environment variable, nothing else on the
+   host affected:
 
-:::{note}
-`PYTHONPATH` takes precedence over every install location, so setting it makes
-the tarball's copy win over an installed `amd-smi-lib` package or a pip
-`amdsmi` wheel in the same shell. Set it only in the shells that should use the
-tarball. To scope it to one environment instead, drop a `.pth` file into a
-virtual environment:
+   ```bash
+   python3 -m venv .venv
+   source .venv/bin/activate
+   echo "$AMDSMI_ROOT/share/amd_smi" > "$(python3 -c 'import sysconfig; print(sysconfig.get_paths()["purelib"])')/amdsmi.pth"
+   ```
 
-```bash
-python3 -m venv .venv
-source .venv/bin/activate
-python3 -c "import sysconfig, pathlib, os
-p = pathlib.Path(sysconfig.get_paths()['purelib']) / 'amdsmi-tarball.pth'
-p.write_text(os.environ['AMDSMI_ROOT'] + '/share/amd_smi\n')"
-python3 -c "import amdsmi; print(amdsmi.amdsmi_get_lib_version())"
-```
+4. Verify. The reported module path should be under `$AMDSMI_ROOT/share/amd_smi`.
 
-The tarball ships the module as a plain directory with no packaging metadata,
-so `pip install` cannot consume it directly. See
-[Packaging and install paths](../packaging.md) for the full precedence and
-coexistence rules.
+   ```bash
+   python3 -c "import amdsmi; print(amdsmi.__file__); print(amdsmi.amdsmi_get_lib_version())"
+   ```
+
+:::{important}
+Reference the module where the tarball put it. Do not copy it elsewhere.
+
+The wrapper finds the library at `<root>/lib/libamd_smi.so.<MAJOR>` by walking
+up from its own file, so it pairs with the tarball's own library only while it
+stays at `<root>/share/amd_smi/amdsmi`. Copy it into `site-packages` and that
+relative path stops resolving: the loader falls through to a bare
+`libamd_smi.so.<MAJOR>` lookup and binds whatever the dynamic linker finds
+first. On a host that already has ROCm installed that is `/opt/rocm/lib`, so
+you silently get a different library than the one you extracted; on a host
+without ROCm the import fails outright. The directory also ships no
+`pyproject.toml` or `setup.py`, so `pip install` cannot consume it in place.
+
+Keeping the module in the tree is what makes `LD_LIBRARY_PATH` unnecessary: the
+library's `RUNPATH` is `$ORIGIN`-relative, so its own ROCm dependencies resolve
+from the same extracted tree.
 :::
+
+See [Packaging and install paths](../packaging.md) for the full precedence and
+coexistence rules.
 
 ## Optional and advanced installation
 

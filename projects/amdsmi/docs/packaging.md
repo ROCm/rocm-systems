@@ -31,12 +31,20 @@ action:
 
 A tarball is an archive of a build tree, not a package: extracting it runs no
 package manager, no `ldconfig`, and no pip, so it cannot register a module with
-any interpreter. It hands you the module and leaves the install to you.
+any interpreter. It hands you the module and leaves the wiring to you.
 `<root>/share/amd_smi/amdsmi` is a plain importable directory with no
 `pyproject.toml`, `setup.py`, or `.dist-info`, so it is **not** pip-installable
 either — you make it importable by pointing an interpreter at its parent:
 `PYTHONPATH=<root>/share/amd_smi`, a `.pth` file in a venv, or `sys.path.insert()`.
 See {ref}`Install from a tarball <install_tarball>` for the procedure.
+
+Point at the module in place rather than copying it into `site-packages`. Loader
+step 3 resolves the library by a path relative to the wrapper, so it only pairs
+with the tarball's own library while the module stays at
+`<root>/share/amd_smi/amdsmi`. Moved out, step 3 no longer matches and step 4
+binds whatever bare `libamd_smi.so.<MAJOR>` the dynamic linker finds first —
+silently a different library on a host with ROCm installed, and an import
+failure on a host without it.
 
 The `amd-smi` CLI needs none of that. At startup it puts a `share/amd_smi`
 directory on `sys.path` itself — `$ROCM_PATH/share/amd_smi` when that variable
