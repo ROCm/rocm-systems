@@ -32,6 +32,10 @@
 - changed-files:
   - any-glob-to-any-file: 'projects/hip-tests/**/*'
 
+"project: hrr":
+- changed-files:
+  - any-glob-to-any-file: 'projects/hrr/**/*'
+
 "project: rccl":
 - changed-files:
   - any-glob-to-any-file: 'projects/rccl/**/*'
