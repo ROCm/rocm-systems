@@ -873,6 +873,16 @@ aqlprofile_spm_start(aqlprofile_handle_t            handle,
 hsa_status_t
 aqlprofile_spm_stop(aqlprofile_handle_t handle);
 
+/**
+ * @brief Callback invoked for each decoded SPM sample.
+ *
+ * The `shader_engine` argument uses the following contract:
+ * - `-1` for global SPM samples
+ * - otherwise a packed topology value compatible with
+ *   ::aqlprofile_spm_decode_shader_engine(). For the base non-global sample,
+ *   that packed value is numerically equal to the shader-engine index because
+ *   `sa_index` and `wgp_index` are both zero.
+ */
 typedef void (*aqlprofile_spm_decode_callback_v1_t)(uint64_t timestamp,
                                                     uint64_t value,
                                                     uint64_t index,

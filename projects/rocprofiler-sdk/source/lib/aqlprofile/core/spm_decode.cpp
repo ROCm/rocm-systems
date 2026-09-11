@@ -144,12 +144,14 @@ aqlprofile_spm_decode_stream_v1(aqlprofile_spm_buffer_desc_t        desc_bin,
                                                                           se_step * j]
                                                             : 0,
                                                    is_32bit);
-                    decode_cb(timestamp, bufvalue, i, j, userdata);
+                    decode_cb(timestamp, bufvalue, i, encode_spm_shader_engine(j), userdata);
 
                     size_t event_i_exp = event_exp_start;
                     for(uint32_t sa = 0; sa < sa_count; ++sa)
                         for(uint32_t wgp = 0; wgp < wgp_count; ++wgp)
                         {
+                            // The base SE sample already covers the original (sa=0, wgp=0) case,
+                            // so only the additional SA/WGP-expanded projections are emitted here.
                             if((sa == 0) && (wgp == 0)) continue;
 
                             uint16_t expanded_index =
