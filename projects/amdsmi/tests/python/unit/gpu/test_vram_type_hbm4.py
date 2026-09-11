@@ -2,36 +2,48 @@
 # Copyright Advanced Micro Devices, Inc.
 # SPDX-License-Identifier: MIT
 
-"""Unit test for the ``AMDSMI_VRAM_TYPE_HBM4`` enum value.
+"""Unit test for the ``AMDSMI_VRAM_TYPE_HBM4`` / ``HBM3E`` enum values.
 
-``amdsmi_wrapper.py`` is loaded directly from the source tree (it has no
-relative imports and does not load the compiled library at import time), so
-the test exercises the regenerated wrapper rather than a possibly-stale
-installed copy.
+``py-interface`` is loaded directly from the source tree, without executing
+its package ``__init__.py`` (which requires a CMake-generated ``_version.py``),
+so the test exercises the regenerated wrapper and interface rather than a
+possibly-stale installed copy.
 """
 
-import importlib.util
+import importlib
 import os
+import sys
+import types
 import unittest
 
 _THIS_DIR = os.path.dirname(os.path.abspath(__file__))
 _REPO_ROOT = os.path.abspath(os.path.join(_THIS_DIR, "..", "..", "..", ".."))
-WRAPPER_PATH = os.path.join(_REPO_ROOT, "py-interface", "amdsmi_wrapper.py")
+PY_INTERFACE_DIR = os.path.join(_REPO_ROOT, "py-interface")
 
 
-def _load_wrapper_module():
-    spec = importlib.util.spec_from_file_location("amdsmi_wrapper_under_test", WRAPPER_PATH)
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
+def _load_amdsmi_interface_module():
+    amdsmi_pkg = types.ModuleType("amdsmi")
+    amdsmi_pkg.__path__ = [PY_INTERFACE_DIR]
+    sys.modules["amdsmi"] = amdsmi_pkg
+    return importlib.import_module("amdsmi.amdsmi_interface")
 
 
 class TestVramTypeHbm4(unittest.TestCase):
     def test_hbm4_value_and_name_mapping(self):
-        wrapper = _load_wrapper_module()
+        interface = _load_amdsmi_interface_module()
+        wrapper = interface.amdsmi_wrapper
 
         self.assertEqual(wrapper.AMDSMI_VRAM_TYPE_HBM4, 6)
         self.assertEqual(wrapper.amdsmi_vram_type_t__enumvalues[6], "AMDSMI_VRAM_TYPE_HBM4")
+        self.assertEqual(interface.AmdSmiVramType.HBM4, 6)
+
+    def test_hbm3e_value_and_name_mapping(self):
+        interface = _load_amdsmi_interface_module()
+        wrapper = interface.amdsmi_wrapper
+
+        self.assertEqual(wrapper.AMDSMI_VRAM_TYPE_HBM3E, 5)
+        self.assertEqual(wrapper.amdsmi_vram_type_t__enumvalues[5], "AMDSMI_VRAM_TYPE_HBM3E")
+        self.assertEqual(interface.AmdSmiVramType.HBM3E, 5)
 
 
 if __name__ == "__main__":
