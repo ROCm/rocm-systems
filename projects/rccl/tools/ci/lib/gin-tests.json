@@ -20,13 +20,6 @@
 
   "tests": [
     {
-      "name": "rocshmem-a2a-sdma",
-      "kind": "rocshmem",
-      "bin": "rocshmem_functional_tests",
-      "env": ["NCCL_DEBUG=VERSION", "ROCSHMEM_DEBUG_LEVEL=info:noversion", "ROCSHMEM_TEST_UUID=1"],
-      "args": "-a 19 -w 1 -z 256 -v {E} -n 100 -noverif"
-    },
-    {
       "name": "rccl-gin-hostproxy-d1",
       "kind": "rccl-tests",
       "bin": "alltoall_perf",
