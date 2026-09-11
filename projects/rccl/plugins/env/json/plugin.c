@@ -11,7 +11,10 @@
  *
  * The JSON file is a flat object mapping NCCL/RCCL variable names to
  * string values, e.g.:
- *   { "NCCL_DEBUG": "INFO", "NCCL_ALGO": "Ring" }
+ *   { "NCCL_ALGO": "Ring", "NCCL_SOCKET_IFNAME": "eth0" }
+ *
+ * NCCL_DEBUG and NCCL_DEBUG_SUBSYS are not honoured from JSON: they are
+ * read via getenv before the env plugin is initialized.
  *
  * Lookup precedence: JSON file value > process environment (getenv).
  * If NCCL_ENV_JSON_FILE is unset or the file cannot be read, the
@@ -96,7 +99,9 @@ static int parseJson(const char *buf) {
   }
 
   // Consume the closing brace and require nothing but whitespace after it, so a file that
-  // merely starts with valid JSON is not accepted as a whole config.
+  // merely starts with valid JSON is not accepted as a whole config. Skip whitespace first
+  // so a 256-entry file with a newline before '}' is still accepted.
+  skipWhitespace(&p);
   if (*p != '}') return -1;
   p++;
   skipWhitespace(&p);

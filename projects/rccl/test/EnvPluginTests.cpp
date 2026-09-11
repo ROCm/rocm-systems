@@ -278,7 +278,9 @@ TEST(EnvPluginTests, ExternalPlugin_JsonPlugin_MalformedJson_FallsBackToGetenv) 
         FILE* f = fopen(jsonPath.c_str(), "w");
         ASSERT_NE(f, nullptr) << "Failed to create temp JSON file: " << jsonPath;
         // Missing quotes around key — parseString returns -1, loadJsonFile returns -1.
-        fprintf(f, "{badkey: \"value\"}");
+        // Put the probe key in the file so a parser that accepted unquoted keys would
+        // return from_json instead of falling through to getenv().
+        fprintf(f, "{NCCL_TEST_JSON_MALFORMED: \"from_json\"}");
         fclose(f);
 
         setenv("NCCL_TEST_JSON_MALFORMED", "from_getenv", 1);
@@ -351,7 +353,7 @@ TEST(EnvPluginTests, ExternalPlugin_JsonPlugin_AtEntryLimit_IsApplied) {
         for (int i = 0; i < 255; i++) {
           fprintf(f, "\"NCCL_TEST_JSON_FILLER_%d\": \"v%d\", ", i, i);
         }
-        fprintf(f, "\"NCCL_TEST_JSON_ATLIMIT\": \"from_json\"}");
+        fprintf(f, "\"NCCL_TEST_JSON_ATLIMIT\": \"from_json\"\n}");
         fclose(f);
 
         setenv("NCCL_TEST_JSON_ATLIMIT", "from_getenv", 1);

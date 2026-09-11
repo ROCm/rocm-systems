@@ -181,9 +181,9 @@ values:
 .. code-block:: json
 
    {
-     "NCCL_DEBUG": "INFO",
      "NCCL_ALGO": "Ring",
-     "NCCL_DEBUG_SUBSYS": "ENV,INIT"
+     "NCCL_PROTO": "Simple",
+     "NCCL_SOCKET_IFNAME": "eth0"
    }
 
 .. note::
@@ -200,6 +200,11 @@ values:
    The whole file is rejected if it breaks any of these rules, including
    exceeding the entry limit; RCCL then logs a warning and reads every variable
    from the process environment instead. It is never applied in part.
+
+   ``NCCL_DEBUG`` and ``NCCL_DEBUG_SUBSYS`` are not read from the JSON file.
+   Both are marked ``NCCL_PARAM_FLAG_NO_ENVPLUGIN_INIT`` and ``ncclDebugInit``
+   calls ``getenv`` before the env plugin is loaded, so a JSON value for either
+   key is ignored.
 
 Usage
 -----
@@ -220,7 +225,7 @@ Usage
 
       cat > /etc/rccl/config.json << 'EOF'
       {
-        "NCCL_DEBUG": "WARN",
+        "NCCL_ALGO": "Ring",
         "NCCL_SOCKET_IFNAME": "eth0"
       }
       EOF

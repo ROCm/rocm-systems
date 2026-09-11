@@ -635,6 +635,13 @@ if(BUILD_TESTS)
 
     add_executable(rccl-UnitTestsFixturesDebug ${TEST_FIXTURE_DEBUG_SOURCE_FILES})
 
+    if(TARGET rccl-env-json)
+      add_dependencies(rccl-UnitTestsFixturesDebug rccl-env-json)
+    endif()
+    if(TARGET rccl-env-example)
+      add_dependencies(rccl-UnitTestsFixturesDebug rccl-env-example)
+    endif()
+
     # Hide the test executable's own symbols so it does NOT interpose
     # librccl.so's weak alloc.h template/global symbols (e.g.
     # ncclCudaHostCallocDebug<>, ncclDebugLevel) at load time. Without this,
