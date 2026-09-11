@@ -5,6 +5,9 @@ from __future__ import annotations
 import json
 import os
 from pathlib import Path
+import subprocess
+import tempfile
+from types import SimpleNamespace
 import unittest
 from unittest import mock
 
@@ -37,6 +40,73 @@ def _run(metric: str, value: float, *, wall_ms: float = 1000.0) -> dict:
 
 
 class ConSanBenchmarkTest(unittest.TestCase):
+    @staticmethod
+    def _runner_args(directory: str, *, resume: bool = False) -> SimpleNamespace:
+        return SimpleNamespace(
+            target="gfx1201",
+            hook=None,
+            output_dir=Path(directory),
+            python=Path("/fixture/python"),
+            aorta_dir=Path("/fixture/aorta"),
+            timeout=7,
+            resume=resume,
+            run_identity={"fixture": "identity"},
+        )
+
+    def test_resume_reuses_only_a_fingerprinted_completed_cell(self) -> None:
+        workload = benchmark.Workload("cell", "fixture", "latency_ms", {})
+        output = benchmark.RESULT_MARKER + json.dumps(
+            {"result": {"passed": True, "metrics": {"latency_ms": 1.0}}}
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            args = self._runner_args(directory)
+            with mock.patch.object(
+                benchmark.subprocess,
+                "run",
+                return_value=SimpleNamespace(stdout=output, stderr="", returncode=0),
+            ) as run:
+                first = benchmark._run_one(
+                    args=args,
+                    workload=workload,
+                    mode=None,
+                    audit_sites=False,
+                    label="native",
+                )
+                run.assert_called_once()
+
+            args.resume = True
+            with mock.patch.object(benchmark.subprocess, "run") as run:
+                second = benchmark._run_one(
+                    args=args,
+                    workload=workload,
+                    mode=None,
+                    audit_sites=False,
+                    label="native",
+                )
+                run.assert_not_called()
+            self.assertEqual(second, first)
+
+    def test_timeout_preserves_partial_output(self) -> None:
+        workload = benchmark.Workload("cell", "fixture", "latency_ms", {})
+        with tempfile.TemporaryDirectory() as directory:
+            args = self._runner_args(directory)
+            timeout = subprocess.TimeoutExpired(
+                cmd=["fixture"], timeout=args.timeout, output=b"partial stdout\n", stderr=b"partial stderr\n"
+            )
+            with mock.patch.object(benchmark.subprocess, "run", side_effect=timeout):
+                with self.assertRaisesRegex(benchmark.BenchmarkError, "timed out"):
+                    benchmark._run_one(
+                        args=args,
+                        workload=workload,
+                        mode=None,
+                        audit_sites=False,
+                        label="native",
+                    )
+            self.assertEqual(
+                (Path(directory) / "cell--native.log").read_text(),
+                "partial stdout\npartial stderr\n",
+            )
+
     def test_workloads_measure_one_bounded_operation_per_process(self) -> None:
         self.assertEqual(len(benchmark.WORKLOADS), 3)
         for workload in benchmark.WORKLOADS:

@@ -163,6 +163,11 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--output-dir", type=Path, required=True)
     parser.add_argument("--status", type=Path)
     parser.add_argument("--timeout", type=int, default=600)
+    parser.add_argument(
+        "--resume",
+        action="store_true",
+        help="reuse fingerprint-matched completed cells from the output directory",
+    )
     parser.add_argument("--audit-sites", action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument(
         "--workload",
@@ -293,19 +298,60 @@ def _run_one(
     ]
     if profile_kernels:
         command.append("--profile-kernels")
-    start = time.perf_counter()
-    process = subprocess.run(
-        command,
-        env=_clean_environment(
-            args.target, args.hook, mode, audit_sites, kernel_allowlist_file
-        ),
-        capture_output=True,
-        text=True,
-        timeout=args.timeout,
+    environment = _clean_environment(
+        args.target, args.hook, mode, audit_sites, kernel_allowlist_file
     )
+    log_path = args.output_dir / f"{workload.id}--{label}.log"
+    checkpoint_path = args.output_dir / f"{workload.id}--{label}.json"
+    controlled_environment = {
+        name: value
+        for name, value in environment.items()
+        if name.startswith(CONTROLLED_ENV_PREFIX)
+        or name in HSA_TOOL_ENVIRONMENT
+        or name == "HIP_TARGET"
+    }
+    fingerprint_payload = {
+        "run_identity": args.run_identity,
+        "command": command,
+        "environment": controlled_environment,
+    }
+    fingerprint = hashlib.sha256(
+        json.dumps(fingerprint_payload, sort_keys=True).encode("utf-8")
+    ).hexdigest()
+    if args.resume and checkpoint_path.is_file() and log_path.is_file():
+        try:
+            checkpoint = json.loads(checkpoint_path.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError):
+            checkpoint = None
+        if isinstance(checkpoint, dict) and checkpoint.get("fingerprint") == fingerprint:
+            result = checkpoint.get("result")
+            if isinstance(result, dict):
+                print(f"resume {workload.id} {label}", flush=True)
+                return result
+
+    print(f"run {workload.id} {label}", flush=True)
+    start = time.perf_counter()
+    try:
+        process = subprocess.run(
+            command,
+            env=environment,
+            capture_output=True,
+            text=True,
+            timeout=args.timeout,
+        )
+    except subprocess.TimeoutExpired as error:
+        def timeout_text(value: str | bytes | None) -> str:
+            if value is None:
+                return ""
+            return value.decode("utf-8", errors="replace") if isinstance(value, bytes) else value
+
+        output = timeout_text(error.stdout) + timeout_text(error.stderr)
+        log_path.write_text(output, encoding="utf-8")
+        raise BenchmarkError(
+            f"{workload.id} {label} timed out after {args.timeout} seconds; see {log_path}"
+        ) from error
     wall_ms = (time.perf_counter() - start) * 1000.0
     output = process.stdout + process.stderr
-    log_path = args.output_dir / f"{workload.id}--{label}.log"
     log_path.write_text(output, encoding="utf-8")
     if process.returncode != 0:
         raise BenchmarkError(
@@ -321,6 +367,11 @@ def _run_one(
     }
     if mode is not None and audit_sites:
         result["coverage"] = _coverage_summary(output)
+    _atomic_write(
+        checkpoint_path,
+        json.dumps({"fingerprint": fingerprint, "result": result}, indent=2) + "\n",
+    )
+    print(f"pass {workload.id} {label} wall_ms={wall_ms:.1f}", flush=True)
     return result
 
 
@@ -567,6 +618,14 @@ def _main(argv: list[str]) -> int:
     aorta_identity = _git_identity(args.aorta_dir)
     source_root = Path(__file__).resolve().parents[5]
     source_identity = _git_identity(source_root)
+    hook_sha256 = _sha256(args.hook)
+    args.run_identity = {
+        "source": source_identity,
+        "aorta": aorta_identity,
+        "hook_sha256": hook_sha256,
+        "runner_sha256": _sha256(Path(__file__)),
+        "payload_sha256": _sha256(Path(__file__).with_name("consan_aorta_benchmark_workload.py")),
+    }
     selected = [
         workload
         for workload in WORKLOADS
@@ -646,7 +705,7 @@ def _main(argv: list[str]) -> int:
         "provenance": {
             "aorta": aorta_identity,
             "rocm_systems": source_identity,
-            "hook": {"path": str(args.hook), "sha256": _sha256(args.hook)},
+            "hook": {"path": str(args.hook), "sha256": hook_sha256},
             "python": str(args.python),
         },
         "workloads": workload_summaries,
