@@ -5,17 +5,20 @@
 #define ROCM_SMI_ROCM_SMI_H_
 
 #ifdef __cplusplus
-extern "C" {
-#include <stddef.h>
-#include <stdint.h>
-#else
 #include <cstddef>
 #include <cstdint>
+#else
+#include <stddef.h>
+#include <stdint.h>
 #endif  // __cplusplus
 
 #include <stdbool.h>
 
 #include "rocm_smi/kfd_ioctl.h"
+
+#ifdef __cplusplus
+extern "C" {
+#endif  // __cplusplus
 
 /** \file rocm_smi.h
  *  Main header file for the ROCm SMI library.
@@ -3515,7 +3518,7 @@ rsmi_status_t rsmi_dev_mem_overdrive_level_get(uint32_t dv_ind, uint32_t* od);
  *  arguments and ::RSMI_STATUS_NOT_SUPPORTED if it is not supported with the
  *  provided arguments.
  *  If multiple current frequencies are found, a warning is shown. If no
- *  current frequency is found, it is reflected as -1. If frequencies are not
+ *  current frequency is found, it is reflected as UINT32_MAX. If frequencies are not
  *  read from low to high a warning is shown as well.
  *
  *  @retval ::RSMI_STATUS_SUCCESS call was successful

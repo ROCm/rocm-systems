@@ -173,6 +173,18 @@ int Device::agentGlobalIndex(hsa_agent_t agent) {
   return -1;
 }
 
+// Query HSA_AMD_MEMORY_PROPERTY_AGENT_IS_APU (MI300A reports true despite BASE profile).
+bool Device::agentIsAPU(hsa_agent_t agent) {
+  uint8_t memory_properties[8] = {0};
+  if (HSA_STATUS_SUCCESS !=
+      Hsa::agent_get_info(agent, (hsa_agent_info_t)HSA_AMD_AGENT_INFO_MEMORY_PROPERTIES,
+                          memory_properties)) {
+    LogError("HSA_AGENT_INFO_AMD_MEMORY_PROPERTIES query failed");
+    return false;
+  }
+  return hsa_flag_isset64(memory_properties, HSA_AMD_MEMORY_PROPERTY_AGENT_IS_APU);
+}
+
 void Device::setupCpuAgent() {
   int32_t numaDistance = std::numeric_limits<int32_t>::max();
   uint32_t index = 0;  // 0 as default
@@ -658,13 +670,16 @@ bool Device::create() {
   info_.hdpMemFlushCntl = hdpInfo.HDP_MEM_FLUSH_CNTL;
   info_.hdpRegFlushCntl = hdpInfo.HDP_REG_FLUSH_CNTL;
 
+  // Query before Settings::create() since the threshold selection depends on it.
+  isAPU_ = agentIsAPU(bkendDevice_);
+
   // Create HSA settings
   assert(!settings_);
   roc::Settings* hsaSettings = new roc::Settings();
   settings_ = hsaSettings;
   if (!hsaSettings || !hsaSettings->create((agent_profile_ == HSA_PROFILE_FULL), *isa,
                                            isa->xnack() == amd::Isa::Feature::Enabled, coop_groups,
-                                           isXgmi_)) {
+                                           isXgmi_, isAPU_)) {
     LogPrintfError("Unable to create settings for HSA device %s (PCI ID %x)", agent_name,
                    pciDeviceId_);
     return false;
@@ -1282,16 +1297,7 @@ bool Device::populateOCLDeviceConstants() {
 
   info_.maxWorkItemDimensions_ = 3;
 
-  uint8_t memory_properties[8];
-  // Get the memory property from ROCr.
-  if (HSA_STATUS_SUCCESS !=
-      Hsa::agent_get_info(bkendDevice_, (hsa_agent_info_t)HSA_AMD_AGENT_INFO_MEMORY_PROPERTIES,
-                         memory_properties)) {
-    LogError("HSA_AGENT_INFO_AMD_MEMORY_PROPERTIES query failed");
-  }
-
-  // Check if the device is APU
-  if (hsa_flag_isset64(memory_properties, HSA_AMD_MEMORY_PROPERTY_AGENT_IS_APU)) {
+  if (isAPU_) {
     info_.hostUnifiedMemory_ = 1;
   }
 
@@ -1732,6 +1738,22 @@ bool Device::populateOCLDeviceConstants() {
       (amd::device::getValueFromIsaMeta(isaName, "AddressableNumSGPRs", sgprValue))
       ? (atoi(sgprValue.c_str()))
       : 0;
+
+  std::string sgprAllocGranule, trapHandlerEnabled;
+  info_.sgprAllocGranularity_ =
+      amd::device::getValueFromIsaMeta(isaName, "SGPRAllocGranule", sgprAllocGranule)
+      ? atoi(sgprAllocGranule.c_str())
+      : 0;
+  // Comgr reports whether a trap handler is present, but not the size of the
+  // SGPR block it reserves per wave, which is arch-independent.
+  constexpr uint32_t kTrapNumSgprs = 16;  // LLVM IsaInfo::TRAP_NUM_SGPRS
+  info_.sgprTrapHandlerReserve_ =
+      (amd::device::getValueFromIsaMeta(isaName, "TrapHandlerEnabled", trapHandlerEnabled) &&
+       atoi(trapHandlerEnabled.c_str()) != 0)
+      ? kTrapNumSgprs
+      : 0;
+  ClPrint(amd::LOG_INFO, amd::LOG_INIT, "sgprAllocGranule=%u, sgprTrapHandlerReserve=%u",
+          info_.sgprAllocGranularity_, info_.sgprTrapHandlerReserve_);
   std::string imageSupport;
   if (amd::device::getValueFromIsaMeta(isaName, "ImageSupport", imageSupport)) {
     info_.imageSupport_ =
@@ -4213,6 +4235,22 @@ uint32_t Device::SdmaEngineAllocator::AllocateEngine(VirtualGPU* vgpu, HwQueueEn
     status = Hsa::memory_get_preferred_copy_engine(peerAgent, copyAgent, &preferredMask);
   }
 
+  const bool is_inter_gpu = (engine_type == HwQueueEngine::SdmaP2P);
+
+  // maxSdmaWriteMask_ describes CPU<->GPU traffic and includes the H2D/D2H blit
+  // slots, which ROCr refuses to drive a P2P copy on. The engines it does accept
+  // for an inter-GPU copy are the ones reported for the peer direction, so use
+  // those as the valid set instead. That query only lists engines which are idle
+  // at the time of the call, so keep the union per peer to stay correct once all
+  // of them are busy.
+  if (is_inter_gpu) {
+    uint32_t& peer_engine_mask = peer_engine_mask_[peerAgent.handle];
+    peer_engine_mask |= freeEngineMask;
+    if (peer_engine_mask != 0) {
+      validEngineMask = peer_engine_mask;
+    }
+  }
+
   // Constrain to valid engines
   freeEngineMask &= validEngineMask;
   preferredMask &= validEngineMask;
@@ -4226,8 +4264,6 @@ uint32_t Device::SdmaEngineAllocator::AllocateEngine(VirtualGPU* vgpu, HwQueueEn
   uint32_t allocated_mask = 0;
 
   // For inter-GPU copies, strongly prefer the recommended engines
-  bool is_inter_gpu = (engine_type == HwQueueEngine::SdmaP2P);
-
   if (is_inter_gpu && (preferredMask != 0)) {
     // Inter-GPU: prioritize preferredMask, even if engines are already allocated
     candidate_mask = validEngineMask & preferredMask;

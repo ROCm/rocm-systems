@@ -25,6 +25,7 @@ import io
 import json
 import os
 import sys
+import tempfile
 import types
 import unittest
 
@@ -298,6 +299,24 @@ class TestCliRasCperJson(unittest.TestCase):
             self.assertEqual(buffer.getvalue(), "")
         finally:
             self.ras_module.time.sleep = original_sleep
+
+    def test_afid_folder_all_files_skipped_emits_empty_json(self):
+        # --afid --folder --json where every *.cper is a symlink: O_NOFOLLOW
+        # skips them all, so results is empty. It must still print exactly `[]`
+        # so json.loads consumers don't choke on empty output.
+        with tempfile.TemporaryDirectory() as folder:
+            link = os.path.join(folder, "planted.cper")
+            os.symlink(os.devnull, link)
+
+            commands = self._make_commands()
+            args = argparse.Namespace(folder=folder)
+            buffer = io.StringIO()
+            with contextlib.redirect_stdout(buffer):
+                commands._decode_afid_folder(args)
+            captured = buffer.getvalue()
+
+        self.assertEqual(captured.strip(), "[]")
+        self.assertEqual(json.loads(captured), [])
 
 
 if __name__ == "__main__":

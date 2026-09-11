@@ -12,6 +12,7 @@
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
+#include <fmt/format.h>
 #include <functional>
 #include <initializer_list>
 #include <map>
@@ -20,7 +21,6 @@
 #include <rocprofiler-sdk/callback_tracing.h>
 #include <rocprofiler-sdk/cxx/name_info.hpp>
 #include <set>
-#include <spdlog/fmt/ranges.h>
 #include <string.h>
 #include <string>
 #include <sys/types.h>
