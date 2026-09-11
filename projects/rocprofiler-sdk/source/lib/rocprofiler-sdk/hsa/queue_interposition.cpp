@@ -1889,10 +1889,14 @@ notify_queue_interposition_consumer_context_started(const context::context* ctx)
             const auto next =
                 s_active_queue_interposition_consumers.fetch_add(1, std::memory_order_acq_rel) + 1;
             s_consumer_transition_in_progress.store(false, std::memory_order_release);
+            // Bypass doorbells can advance hardware write indices while
+            // transition_in_progress is true (resync above used a stale snapshot).
+            // Resync again once intercept is active so shadow matches hardware.
+            resync_all_queue_shadow_states();
             if(queue_interposition_debug_enabled())
             {
-                log_all_queue_shadow_states("after 0->1 resync");
-                log_stale_shadow_queues("after 0->1 resync");
+                log_all_queue_shadow_states("after 0->1 post-unlock resync");
+                log_stale_shadow_queues("after 0->1 post-unlock resync");
                 ROCP_WARNING << fmt::format(
                     "[ROCM-29631] consumer_context_started ctx={} prev={} next={}",
                     fmt::ptr(ctx),
