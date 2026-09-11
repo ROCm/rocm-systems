@@ -86,11 +86,11 @@ Panel Config:
         max: Max
         unit: Unit
       metric:
-        Dispatched Waves:
+        Dispatched Wavefronts:
           avg: AVG(SQG_WAVES_sum)
           min: MIN(SQG_WAVES_sum)
           max: MAX(SQG_WAVES_sum)
-          unit: Waves
+          unit: Wavefronts
         Dispatched Threads:
           avg: AVG(SQG_ITEMS_sum)
           min: MIN(SQG_ITEMS_sum)
@@ -664,7 +664,7 @@ Panel Config:
     Scratch Allocation: >-
       Bytes of scratch (private) memory allocated per work-item.
 
-    Dispatched Waves: >-
+    Dispatched Wavefronts: >-
       Total wavefronts dispatched.
 
     Dispatched Threads: >-
