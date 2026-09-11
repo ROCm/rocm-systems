@@ -51,6 +51,16 @@ On AMD Instinct MI300 and MI350 series GPUs, the active partition modes change
 how counters are normalized and how percent-of-peak metrics are calculated. See
 :doc:`/conceptual/cdna/compute-memory-partition`.
 
+Why does the CLI memory chart look wrapped or garbled?
+======================================================
+
+The chart is drawn at a fixed width and does not shrink to fit the terminal.
+When the window is too narrow, each chart line wraps onto the next row and the
+boxes and arrows stop lining up.
+
+Widen the terminal until one chart line fits on a single row. If you cannot
+resize the window, see :ref:`cli-memory-chart-viewing`.
+
 How can I SSH tunnel in MobaXterm?
 ==================================
 
@@ -109,3 +119,21 @@ Why does profiling a vLLM workload produce empty performance counter data?
 vLLM V1 runs GPU kernels in a worker process that it terminates with a signal
 on shutdown, and counter data is only written when a process exits normally.
 See :ref:`profile-vllm-workloads` for the workaround and where it applies.
+
+Why are ``TCP_REQ`` and other PMC counters zero?
+================================================
+
+On some RDNA GPUs, the default ``AUTO`` performance level can gate the
+perfmon clock. While that clock is gated, the hardware never increments
+the affected performance counters, so values such as ``TCP_REQ``,
+``TCP_REQ_READ``, ``TCP_REQ_WRITE``, and ``TCP_REQ_MISS`` -- and the GL0
+request metrics derived from them -- report zero even when the kernel
+issues global memory traffic.
+
+This is a hardware power-gating behavior rather than a counter-collection
+defect. It has been observed on gfx115x (RDNA 3.5); the same AUTO
+gating is documented for Navi3x and Navi4x.
+
+For the workaround, see `Setting GPU performance level for PMC profiling
+<https://rocm.docs.amd.com/projects/rocprofiler-sdk/en/latest/how-to/using-rocprofv3.html#setting-gpu-performance-level-for-pmc-profiling>`_
+in the ROCprofiler-SDK documentation.

@@ -29,6 +29,7 @@ from pc_sampling.source_snapshot_analysis import (
     SourceFrame,
     WorkloadSourceSnapshot,
     export_source_snapshot_files,
+    load_source_path_map,
     parse_source_frames,
     read_source_file_digest_and_lines,
     resolve_snapshot_path,
@@ -40,6 +41,8 @@ from utils.analysis_orm import Database
 from utils.file_io import (
     load_pc_sampling_results,
     process_pc_sampling_kernel_traces,
+    rank_kernels_by_total_duration,
+    validate_kernel_filter_ids,
 )
 from utils.logger import (
     console_debug,
@@ -97,28 +100,15 @@ def filter_dispatch_frame(
     """Apply the analysis mode filters to one frame of dispatch rows.
 
     The frame carries the profiler's column names, so both the counter frame
-    and the PC-sampling trace can be filtered by the same rules.
+    and the PC-sampling trace can be filtered by the same rules. Kernel ids
+    index the gpu and dispatch filtered ranking, the same ids the cli mode's
+    top stats table shows.
     """
-    top_kernels = (
-        dispatch_frame
-        .assign(
-            duration=dispatch_frame["End_Timestamp"] - dispatch_frame["Start_Timestamp"]
-        )
-        .sort_values(by="duration", ascending=False)
-        .drop_duplicates("Kernel_Name")["Kernel_Name"]
-        .to_list()
-    )
     if filter_gpu_ids:
         dispatch_frame = dispatch_frame.loc[
             dispatch_frame["GPU_ID"]
             .astype(str)
             .isin(normalize_filter_to_str_list(filter_gpu_ids))
-        ]
-    if filter_kernel_ids:
-        dispatch_frame = dispatch_frame.loc[
-            dispatch_frame["Kernel_Name"].isin([
-                top_kernels[kernel_id] for kernel_id in filter_kernel_ids
-            ])
         ]
     if filter_dispatch_ids:
         if ">" in filter_dispatch_ids[0]:
@@ -130,6 +120,14 @@ def filter_dispatch_frame(
             dispatch_frame = dispatch_frame.loc[
                 dispatch_frame["Dispatch_ID"].astype(str).isin(filter_dispatch_ids)
             ]
+    if filter_kernel_ids:
+        top_kernels = rank_kernels_by_total_duration(dispatch_frame)
+        validate_kernel_filter_ids(filter_kernel_ids, len(top_kernels))
+        dispatch_frame = dispatch_frame.loc[
+            dispatch_frame["Kernel_Name"].isin([
+                top_kernels[kernel_id] for kernel_id in filter_kernel_ids
+            ])
+        ]
     return dispatch_frame
 
 
@@ -159,6 +157,7 @@ class SourceFrameCollector:
     def __init__(self, workload_path: Path, workload: orm.Workload) -> None:
         self._workload_path = workload_path
         self._workload = workload
+        self._source_path_map = load_source_path_map(workload_path)
         self._frames_by_comment: dict[str, list[SourceFrame]] = {}
         self._source_files: dict[str, orm.SourceFile] = {}
         self._source_lines: dict[SourceFrame, orm.SourceLine] = {}
@@ -176,7 +175,9 @@ class SourceFrameCollector:
 
         # Parse once per distinct comment; instructions repeat them heavily.
         if source not in self._frames_by_comment:
-            self._frames_by_comment[source] = parse_source_frames(source)
+            self._frames_by_comment[source] = parse_source_frames(
+                source, self._source_path_map
+            )
 
         for frame_index, frame in enumerate(self._frames_by_comment[source]):
             Database.get_session().add(

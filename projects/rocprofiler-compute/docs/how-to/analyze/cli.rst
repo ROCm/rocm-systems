@@ -61,6 +61,33 @@ There are three high-level GPU analysis views:
    :align: left
    :alt: Memory Chart
 
+.. _cli-memory-chart-viewing:
+
+The memory chart is a wide diagram drawn at a fixed width. It does not shrink to
+fit the terminal, so in a narrow window every chart line wraps and the boxes,
+arrows, and bandwidth labels no longer line up. Widening the window until one
+chart line fits on a single row fixes this. If you cannot resize, use one of the
+following instead.
+
+Pipe the output into ``less``. ``-S`` cuts long lines instead of wrapping them,
+and ``-R`` shows the colored log lines above the chart as color rather than
+escape codes. Use the left and right arrow keys to scroll across the chart:
+
+.. code-block:: shell
+
+   $ rocprof-compute analyze -p workloads/vcopy/MI200/ -b 3 | less -RS
+
+You can also send the output to an editor, for example Visual Studio Code:
+
+.. code-block:: shell
+
+   $ rocprof-compute analyze -p workloads/vcopy/MI200/ -b 3 | code -
+
+The chart is colored only when it is printed straight to a terminal, so it is
+plain text in both of the preceding commands.
+
+To print the block as tables instead of the diagram, see :ref:`cli-view-table`.
+
 **Empirical hierarchical roofline:**
 
 .. code-block:: shell-session
@@ -73,7 +100,7 @@ There are three high-level GPU analysis views:
 
 .. note::
    * Visualized memory chart and Roofline chart are only supported in single run analysis. In multiple runs comparison mode, both are switched back to basic table view.
-   * Visualized memory chart requires the width of the terminal output to be greater than or equal to 240 to display the whole chart properly.
+   * Visualized memory chart is drawn at a fixed width and needs a wide terminal. See :ref:`cli-memory-chart-viewing` if it wraps.
    * Visualized Roofline chart is adapted to the initial terminal size only. If it is not clear, you may need to adjust the terminal size and regenerate it to check the display effect. Roofline analysis provides detailed, structured table output with measured empirical peak values for comparison.
 
 .. _cli-list-available-metrics:
@@ -358,6 +385,8 @@ More analysis options
 
    $ rocprof-compute analyze -p workloads/vcopy/MI200/  --list-metrics gfx90a --include-cols Description
 
+.. _cli-view-table:
+
 **TTY output view (plain tables)**
 
 Use ``--view table`` to force plain tabular output for all sections and ignore ``cli_style`` from the analysis YAML (for example, memory charts and Roofline charts are shown as tables). Additional ``--view`` values may be added in future releases.
@@ -403,7 +432,7 @@ First, list the top kernels in your application using `--list-stats`.
    ╒════╤═══════════════╤══════════════════════════════════════════════╤══════════╕
    │    │   Dispatch_ID │ Kernel_Name                                  │   GPU_ID │
    ╞════╪═══════════════╪══════════════════════════════════════════════╪══════════╡
-   │  0 │             0 │ vecCopy(double*, double*, double*, int, int) │        0 │
+   │  0 │             1 │ vecCopy(double*, double*, double*, int, int) │        0 │
    ╘════╧═══════════════╧══════════════════════════════════════════════╧══════════╛
 
 Second, select the index of the kernel you would like to filter; for example,

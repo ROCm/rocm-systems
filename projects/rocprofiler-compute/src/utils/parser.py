@@ -16,6 +16,7 @@ from pc_sampling.pc_sampling_analysis import (
     load_pc_sample_records,
 )
 from utils import schema
+from utils.file_io import validate_kernel_filter_ids
 from utils.logger import console_error, console_warning, demarcate
 from utils.metrics.evaluation_pipeline import eval_metric
 from utils.metrics.expression import gen_counter_list
@@ -333,14 +334,9 @@ def apply_kernel_filter(df: pd.DataFrame, workload: schema.Workload) -> pd.DataF
                 "is called before applying kernel filters."
             )
 
-        # Validate kernel IDs
-        for kernel_id in workload.filter_kernel_ids:
-            if kernel_id >= len(kernel_top_dataframe["Kernel_Name"]):
-                console_error(
-                    f"{kernel_id} is an invalid kernel id. "
-                    "Please enter an id between 0-"
-                    f"{len(kernel_top_dataframe['Kernel_Name']) - 1}"
-                )
+        validate_kernel_filter_ids(
+            workload.filter_kernel_ids, len(kernel_top_dataframe["Kernel_Name"])
+        )
 
         # Extract kernel names and mark selected kernels with "*"
         # TODO: fix it for unaligned comparison
@@ -375,11 +371,28 @@ def apply_dispatch_filter(df: pd.DataFrame, workload: schema.Workload) -> pd.Dat
     """Apply dispatch ID filters."""
     # NB: support ignoring the 1st n dispatched execution by '> n'
     #     The better way may be parsing python slice string
+    available_dispatch_ids = set(df["Dispatch_ID"].astype(int))
+    if available_dispatch_ids:
+        available_ids_hint = (
+            f"Dispatch ids run from {min(available_dispatch_ids)} to "
+            f"{max(available_dispatch_ids)}."
+        )
+    else:
+        available_ids_hint = "This workload has no dispatches."
+
     for dispatch_id in workload.filter_dispatch_ids:
         if isinstance(dispatch_id, str) and ">" in dispatch_id:
-            dispatch_id = re.match(r"\>\s*(\d+)", dispatch_id).group(1)
-        if int(dispatch_id) >= len(df):  # subtract 2 bc of the two header rows
-            console_error("analysis", f"{dispatch_id} is an invalid dispatch id.")
+            # '> n' skips the first n dispatches, so n is a number of
+            # dispatches, not an id.
+            skipped = int(re.match(r"\>\s*(\d+)", dispatch_id).group(1))
+            valid = 0 <= skipped <= len(available_dispatch_ids)
+        else:
+            valid = int(dispatch_id) in available_dispatch_ids
+        if not valid:
+            console_error(
+                "analysis",
+                f"{dispatch_id} is an invalid dispatch id. {available_ids_hint}",
+            )
 
     if (
         isinstance(workload.filter_dispatch_ids[0], str)
@@ -391,7 +404,7 @@ def apply_dispatch_filter(df: pd.DataFrame, workload: schema.Workload) -> pd.Dat
         selected_dispatches = [
             int(dispatch_str) for dispatch_str in workload.filter_dispatch_ids
         ]
-        df = df.loc[selected_dispatches]
+        df = df[df["Dispatch_ID"].astype(int).isin(selected_dispatches)]
 
     return df
 
@@ -563,7 +576,7 @@ def load_pc_sampling_data(
 
         kernel_top_df = workload.dfs[PMC_KERNEL_TOP_TABLE_ID]
         kernel_index = workload.filter_kernel_ids[0]
-        if kernel_index >= len(kernel_top_df):
+        if not 0 <= kernel_index < len(kernel_top_df):
             console_warning(
                 f"Kernel index {kernel_index} is out of bounds. "
                 f"kernel_top table has only {len(kernel_top_df)} rows."

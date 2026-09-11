@@ -21,9 +21,14 @@ import pytest
 from sqlalchemy import text
 
 from pc_sampling import per_kernel_isa_export, source_snapshot_analysis
-from rocprof_compute_analyze.analysis_db import SourceFrameCollector, db_analysis
+from rocprof_compute_analyze.analysis_db import (
+    SourceFrameCollector,
+    db_analysis,
+    filter_dispatch_frame,
+)
 from utils import analysis_orm as orm
 from utils import schema
+from utils.file_io import create_df_kernel_top_stats
 from utils.metrics.noise_clamper import (
     clear_noise_clamp_warnings,
     get_noise_clamp_warnings,
@@ -770,6 +775,70 @@ def test_calc_metrics_data_exports_qualified_per_channel_names():
 
 
 # =============================================================================
+# filter_dispatch_frame tests
+# =============================================================================
+
+
+def make_repeated_dispatch_frame():
+    """Frame where the longest kernel by total time is not the longest dispatch.
+
+    ``kernel_frequent`` runs three times for 500ns each, ``kernel_long`` once
+    for 1000ns.
+    """
+    return pd.DataFrame({
+        "Kernel_Name": [
+            "kernel_long",
+            "kernel_frequent",
+            "kernel_frequent",
+            "kernel_frequent",
+        ],
+        "GPU_ID": [0, 0, 0, 0],
+        "Dispatch_ID": [1, 2, 3, 4],
+        "Start_Timestamp": [0, 2000, 3000, 4000],
+        "End_Timestamp": [1000, 2500, 3500, 4500],
+    })
+
+
+def test_filter_dispatch_frame_kernel_ids_match_the_cli_top_stats(tmp_path):
+    """-k selects the same kernel here as it does in the cli top stats table."""
+    dispatch_frame = make_repeated_dispatch_frame()
+    kernel_top_df, _ = create_df_kernel_top_stats(
+        df_in=dispatch_frame,
+        raw_data_dir=str(tmp_path),
+        filter_gpu_ids=None,
+        filter_dispatch_ids=None,
+        time_unit="ns",
+    )
+
+    filtered_df = filter_dispatch_frame(dispatch_frame, None, [0], None)
+
+    assert filtered_df["Kernel_Name"].unique().tolist() == [
+        kernel_top_df.loc[0, "Kernel_Name"]
+    ]
+
+
+@pytest.mark.parametrize("kernel_id", [99, -1])
+def test_filter_dispatch_frame_rejects_out_of_range_kernel_id(kernel_id):
+    """An out-of-range -k exits instead of raising IndexError."""
+    with pytest.raises(SystemExit):
+        filter_dispatch_frame(make_repeated_dispatch_frame(), None, [kernel_id], None)
+
+
+def test_filter_dispatch_frame_bounds_kernel_ids_by_the_filtered_frame():
+    """Kernel ids are bounded by the frame left after the gpu and dispatch filters.
+
+    Dispatch 1 leaves one kernel, so id 1 is out of range here even though the
+    unfiltered frame has two kernels.
+    """
+    assert not filter_dispatch_frame(
+        make_repeated_dispatch_frame(), None, [1], None
+    ).empty
+
+    with pytest.raises(SystemExit):
+        filter_dispatch_frame(make_repeated_dispatch_frame(), None, [1], ["1"])
+
+
+# =============================================================================
 # Noise-clamp warning + summary tests
 # =============================================================================
 
@@ -1392,9 +1461,9 @@ def test_run_analysis_scopes_pc_sampling_uuids_by_process(db_session):
     assert [
         (dispatch.dispatch_id, dispatch.kernel.kernel_name) for dispatch in dispatches
     ] == [
-        (0, "vecCopy"),
         (1, "vecCopy"),
         (2, "vecCopy"),
+        (3, "vecCopy"),
     ]
     assert len({dispatch.kernel_uuid for dispatch in dispatches}) == 1
     assert len({dispatch.dispatch_uuid for dispatch in dispatches}) == 3
@@ -1459,8 +1528,8 @@ def test_run_analysis_materialized_views_keep_pc_sampling_origins(
     assert [
         (dispatch.dispatch_id, dispatch.kernel.kernel_name) for dispatch in dispatches
     ] == [
-        (0, "vecCopy"),
         (1, "vecCopy"),
+        (2, "vecCopy"),
     ]
     assert len({dispatch.dispatch_uuid for dispatch in dispatches}) == 2
     assert len({dispatch.kernel_uuid for dispatch in dispatches}) == 1
@@ -1896,10 +1965,12 @@ def make_source_workload_tool_data_records(
     workload_path,
     snapshot_sources,
     sampled_sources,
+    source_path_map=None,
 ):
     """Create PC-sampling inputs whose comments point at snapshot sources.
 
     A path named only in sampled_sources is absent from the snapshot.
+    source_path_map pairs raw DWARF paths with canonical ones.
     """
     workload_path.mkdir(parents=True, exist_ok=True)
     for original_source_path, content in snapshot_sources.items():
@@ -1908,6 +1979,13 @@ def make_source_workload_tool_data_records(
         )
         snapshot_path.parent.mkdir(parents=True, exist_ok=True)
         snapshot_path.write_text(content, encoding="utf-8")
+
+    if source_path_map:
+        map_path = workload_path / "src" / "42_source_map.json"
+        map_path.parent.mkdir(parents=True, exist_ok=True)
+        map_path.write_text(
+            json.dumps({"source_paths": source_path_map}), encoding="utf-8"
+        )
 
     tool_data = make_pc_sampling_tool_data()
     tool_data["strings"]["pc_sample_comments"] = list(sampled_sources)
@@ -2172,6 +2250,33 @@ def test_run_analysis_records_source_file_missing_from_snapshot(db_session, tmp_
             "int present;",
         ),
     ]
+
+
+def test_run_analysis_resolves_raw_dwarf_path_to_canonical_path(db_session, tmp_path):
+    """A file whose raw DWARF path is not canonical is read from its copy."""
+    workload_path = tmp_path / "workload"
+    raw_dwarf_path = "/home/u/app/build/../include/vcopy.hpp"
+    canonical_path = "/home/u/app/include/vcopy.hpp"
+    tool_data_records = make_source_workload_tool_data_records(
+        workload_path,
+        {canonical_path: "int first;\nint second;\n"},
+        [f"{raw_dwarf_path}:2"],
+        source_path_map={raw_dwarf_path: canonical_path},
+    )
+    analyzer = make_pc_sampling_database_analyzer({
+        str(workload_path): tool_data_records
+    })
+
+    run_analysis_with_materialized_views(analyzer)
+
+    source_file = db_session.query(orm.SourceFile).one()
+    assert source_file.file_path == canonical_path
+    # A checksum at all means the snapshot copy was found.
+    assert source_file.md5_checksum is not None
+    assert [
+        (source_line.line_number, source_line.content)
+        for source_line in source_file.source_lines
+    ] == [(1, "int first;"), (2, "int second;")]
 
 
 def test_run_analysis_records_line_past_end_of_source_file(db_session, tmp_path):
@@ -3063,7 +3168,7 @@ def test_run_analysis_kernel_filter_reaches_a_sampling_only_workload(tmp_path):
     ]
 
 
-@pytest.mark.parametrize("filter_dispatch_ids", [["1"], [">0"], ["> 0"]])
+@pytest.mark.parametrize("filter_dispatch_ids", [["2"], [">1"], ["> 1"]])
 def test_run_analysis_dispatch_filter_reaches_a_sampling_only_workload(
     tmp_path, filter_dispatch_ids
 ):
