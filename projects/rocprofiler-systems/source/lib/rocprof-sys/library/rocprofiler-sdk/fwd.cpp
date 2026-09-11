@@ -254,8 +254,8 @@ client_data::set_agents()
         }
     };
 
-    fill_agents(agent_type::GPU, gpu_agents);
-    fill_agents(agent_type::CPU, cpu_agents);
+    fill_agents(agent_type::gpu, gpu_agents);
+    fill_agents(agent_type::cpu, cpu_agents);
 }
 }  // namespace rocprofiler_sdk
 }  // namespace rocprofsys

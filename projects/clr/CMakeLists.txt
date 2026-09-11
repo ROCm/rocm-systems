@@ -2,7 +2,7 @@
 #
 # SPDX-License-Identifier: MIT
 
-cmake_minimum_required(VERSION 3.16.8)
+cmake_minimum_required(VERSION 3.27)
 project(clr)
 
 # Temporary no-op change on aqlprofile to exercise TheRock Multi-arch CI
@@ -50,6 +50,8 @@ option(USE_NEW_HOSTCALL_IMPL
 if(NOT CMAKE_BUILD_TYPE)
     set(CMAKE_BUILD_TYPE "Release")
 endif()
+
+include("${CMAKE_CURRENT_LIST_DIR}/cmake/CLRHardening.cmake")
 
 #############
 # Build steps
