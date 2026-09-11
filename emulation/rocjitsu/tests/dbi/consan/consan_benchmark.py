@@ -68,7 +68,7 @@ def _model_config(*, num_experts: int = 1) -> dict[str, Any]:
 WORKLOADS = (
     Workload(
         id="pytorch-dense-prefill",
-        description="PyTorch synthetic dense prefill (long prompt)",
+        description="PyTorch synthetic dense prefill (32-token prompt)",
         primary_metric="prefill_latency_ms",
         config={
             "mode": "offline_batch",
@@ -78,7 +78,7 @@ WORKLOADS = (
             "warmup_steps": 0,
             "steps": 1,
             "model": _model_config(),
-            "request": {"batch_size": 1, "prompt_len": 128, "generate_tokens": 0},
+            "request": {"batch_size": 1, "prompt_len": 32, "generate_tokens": 0},
             "serving": {"kv_cache": True},
             "checks": {
                 "fail_on_nan_logits": True,
@@ -117,7 +117,7 @@ WORKLOADS = (
     ),
     Workload(
         id="pytorch-top1-moe-prefill",
-        description="PyTorch synthetic four-expert top-1 MoE prefill",
+        description="PyTorch synthetic four-expert top-1 MoE prefill (16-token prompt)",
         primary_metric="prefill_latency_ms",
         config={
             "mode": "offline_batch",
@@ -127,7 +127,7 @@ WORKLOADS = (
             "warmup_steps": 0,
             "steps": 1,
             "model": _model_config(num_experts=4),
-            "request": {"batch_size": 1, "prompt_len": 64, "generate_tokens": 0},
+            "request": {"batch_size": 1, "prompt_len": 16, "generate_tokens": 0},
             "serving": {"kv_cache": True},
             "checks": {
                 "fail_on_nan_logits": True,
