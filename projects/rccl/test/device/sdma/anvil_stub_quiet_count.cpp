@@ -8,6 +8,8 @@
 // Keep this out of the header: IPC and Suite H both include gin_anvil_sdma.h,
 // and rccl-UnitTestsFixtures does not compile those TUs relocatable by default.
 
+#include <hip/hip_runtime.h>
+
 namespace sdma_anvil {
 __device__ unsigned long long g_sdmaStubQuietCount = 0;
 }

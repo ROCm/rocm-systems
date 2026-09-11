@@ -1670,6 +1670,9 @@ void GinMPIDeviceTests::runBarrierFenceVisibility(
 // that drains the peer queue used by the payload. These tests assert the
 // documented visibility outcomes; the self-put case below is the one that
 // directly distinguishes Put from None because None omits the self slot.
+// BarrierFence_AllContextsGet_SingleNode is the only case here that reaches
+// the new FlushAsync/Wait path (AllContexts Get fence); single-context Get
+// still uses ncclGinApi_Flush.
 TEST_F(GinMPIDeviceTests, BarrierFence_PutMakesInboundPutVisible_SingleNode) {
   runBarrierFenceVisibility(BarrierFenceOperation::Put, /*allContexts=*/false, /*defaultFence=*/false);
 }
