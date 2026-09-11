@@ -9,7 +9,6 @@
 #include "binary/scope_filter.hpp"
 #include "common/env_vars.hpp"
 #include "common/path.hpp"
-#include "common/units.hpp"
 #include "core/binary/fwd.hpp"
 #include "core/config.hpp"
 #include "core/containers/c_array.hpp"
@@ -130,7 +129,7 @@ get_filters(const std::set<binary::scope_filter::filter_scope>& _scopes = {
     // in function mode, it generally doesn't help to experiment on main function since
     // telling the user to "make the main function" faster is literally useless since it
     // contains everything that could be made faster
-    if(config::get_causal_mode() == state::process::CausalMode::Function &&
+    if(config::get_causal_mode() == state::process::CausalMode::function &&
        _scopes.count(sf::FUNCTION_FILTER) > 0)
         _filters.emplace_back(sf{ sf::FILTER_EXCLUDE, sf::FUNCTION_FILTER,
                                   "( main\\(|^main$|^main\\.cold$)" });
@@ -145,7 +144,7 @@ get_filters(const std::set<binary::scope_filter::filter_scope>& _scopes = {
         // symbols starting with leading underscore are generally system functions
         _filters.emplace_back(sf{ sf::FILTER_EXCLUDE, sf::FUNCTION_FILTER, "^_" });
 
-        if(config::get_causal_mode() == state::process::CausalMode::Function)
+        if(config::get_causal_mode() == state::process::CausalMode::function)
         {
             // exclude STL implementation functions
             _filters.emplace_back(sf{ sf::FILTER_EXCLUDE, sf::FUNCTION_FILTER, "::_M" });
@@ -155,7 +154,7 @@ get_filters(const std::set<binary::scope_filter::filter_scope>& _scopes = {
     // in function mode, it generally doesn't help to claim
     // "make main function" faster since it contains everything
     // that could be made faster
-    if(config::get_causal_mode() == state::process::CausalMode::Function &&
+    if(config::get_causal_mode() == state::process::CausalMode::function &&
        _scopes.count(sf::FUNCTION_FILTER) > 0)
     {
         _filters.emplace_back(sf{ sf::FILTER_EXCLUDE, sf::FUNCTION_FILTER,
@@ -489,14 +488,14 @@ perform_experiment_impl(std::shared_ptr<std::promise<void>> _started)  // NOLINT
     double _duration_sec =
         config::get_setting_value<double>(std::string{ env_vars::CAUSAL_DURATION })
             .value_or(0.0);
-    auto _duration_nsec = duration_nsec_t{ _duration_sec * units::sec };
+    const auto duration_nsec = std::chrono::duration_cast<duration_nsec_t>(
+        std::chrono::duration<double>{ _duration_sec });
 
     if(_delay_sec > 0.0)
     {
         LOG_DEBUG("[causal] delaying experimentation for {} seconds...", _delay_sec);
-        const std::uint64_t _delay_nsec = _delay_sec * units::sec;
         std::this_thread::yield();
-        std::this_thread::sleep_for(std::chrono::nanoseconds{ _delay_nsec });
+        std::this_thread::sleep_for(std::chrono::duration<double>{ _delay_sec });
     }
 
     auto _impl_count        = 0;
@@ -505,7 +504,7 @@ perform_experiment_impl(std::shared_ptr<std::promise<void>> _started)  // NOLINT
         if(_duration_sec > 1.0e-3)
         {
             auto _elapsed = clock_type::now() - _start_time;
-            if(_elapsed >= _duration_nsec)
+            if(_elapsed >= duration_nsec)
             {
                 LOG_DEBUG("[causal] stopping experimentation after {} seconds "
                           "(elapsed: {} seconds)...",
@@ -699,11 +698,13 @@ save_line_info(const settings::compose_filename_config& _cfg, int _verbose)
     auto _write = [_verbose](const std::string& ofname, const auto& _data,
                              const std::array<bool, 3>& _info) {
         auto _ofs = std::ofstream{};
-        if(tim::filepath::open(_ofs, ofname))
+        if(path::create_parent_dirs_and_open_ofstream(_ofs, ofname))
         {
             if(_verbose >= 0)
+            {
                 operation::file_output_message<binary::symbol>{}(
                     ofname, std::string{ "causal_symbol_info" });
+            }
             save_line_info_impl(_ofs, _data, _info);
             save_maps_info_impl(_ofs);
         }
@@ -798,8 +799,10 @@ sample_selection(size_t _nitr, size_t _wait_ns)
 
             eligible_pc_history[_addr] += 1;
 
-            if(get_causal_mode() == state::process::CausalMode::Function)
+            if(get_causal_mode() == state::process::CausalMode::function)
+            {
                 _sym_addr = (_dl_info.symbol) ? _dl_info.symbol.address() : _addr;
+            }
 
             // lookup the PC line info at either the address or the symbol address
             auto linfo = get_line_info(_lookup_addr, false);
@@ -830,7 +833,7 @@ sample_selection(size_t _nitr, size_t _wait_ns)
             }
 
             auto& _linfo_v =
-                (config::get_causal_mode() == state::process::CausalMode::Function)
+                (config::get_causal_mode() == state::process::CausalMode::function)
                     ? linfo.front()
                     : linfo.back();
             return selected_entry{ _addr, _sym_addr, _linfo_v };
@@ -907,7 +910,7 @@ get_line_info(uintptr_t _addr, bool _include_discarded)
                 if(!_ipaddr.contains(_addr)) continue;
 
                 if(_include_discarded ||
-                   config::get_causal_mode() == state::process::CausalMode::Function)
+                   config::get_causal_mode() == state::process::CausalMode::function)
                 {
                     // check if the primary symbol satisfy the constraints
                     if(ditr(_filters)) _local_data.emplace_back(ditr);
@@ -918,7 +921,7 @@ get_line_info(uintptr_t _addr, bool _include_discarded)
                 }
 
                 if(_include_discarded ||
-                   config::get_causal_mode() == state::process::CausalMode::Line)
+                   config::get_causal_mode() == state::process::CausalMode::line)
                 {
                     auto _debug_data = std::deque<binary::symbol>{};
                     for(const auto& itr : ditr.get_debug_line_info(_filters))
