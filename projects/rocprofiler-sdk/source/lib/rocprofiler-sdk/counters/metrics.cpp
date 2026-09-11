@@ -224,8 +224,7 @@ loadYAML(const std::string& filename, std::optional<ArchMetric> add_metric)
     for(const auto& counter : header)
     {
         auto counter_name = counter["name"].as<std::string>();
-        auto description =
-            counter["description"] ? counter["description"].as<std::string>() : std::string{};
+        auto description  = counter["description"].as<std::string>();
         for(const auto& definition : counter["definitions"])
         {
             for(const auto& arch : definition["architectures"])
@@ -426,9 +425,11 @@ validateExtraCounterYAML(const YAML::Node& root)
         if(!counter["name"].IsScalar()) return fmt::format("{}: 'name' must be a string", ctx);
 
         auto name = counter["name"].as<std::string>();
+        if(name.empty()) return fmt::format("{}: 'name' must not be empty", ctx);
 
         const auto description = counter["description"];
-        if(description && !description.IsScalar())
+        if(!description) return fmt::format("Counter '{}': missing 'description'", name);
+        if(!description.IsScalar())
             return fmt::format("Counter '{}': 'description' must be a string", name);
 
         if(!counter["definitions"]) return fmt::format("Counter '{}': missing 'definitions'", name);
@@ -453,6 +454,8 @@ validateExtraCounterYAML(const YAML::Node& root)
             {
                 if(!arch.IsScalar())
                     return fmt::format("{}: architecture must be a string", def_ctx);
+                if(arch.as<std::string>().empty())
+                    return fmt::format("{}: architecture must not be empty", def_ctx);
             }
 
             const auto expression = def["expression"];
@@ -470,6 +473,13 @@ validateExtraCounterYAML(const YAML::Node& root)
             bool has_event = static_cast<bool>(event);
             bool has_block = static_cast<bool>(block);
 
+            if(has_expr && expression.as<std::string>().empty())
+                return fmt::format("{}: 'expression' must not be empty", def_ctx);
+            if(has_block && block.as<std::string>().empty())
+                return fmt::format("{}: 'block' must not be empty", def_ctx);
+            if(has_expr && (has_event || has_block))
+                return fmt::format("{}: 'expression' cannot be combined with 'event' or 'block'",
+                                   def_ctx);
             if(has_event && !has_block) return fmt::format("{}: 'event' requires 'block'", def_ctx);
             if(has_block && !has_event) return fmt::format("{}: 'block' requires 'event'", def_ctx);
             if(!has_expr && !has_event)

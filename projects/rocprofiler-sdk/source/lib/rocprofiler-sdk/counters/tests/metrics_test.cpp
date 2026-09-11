@@ -463,15 +463,34 @@ TEST(metrics, validate_counter_type)
 TEST(metrics, validate_missing_name)
 {
     expect_validation_error(
-        "rocprofiler-sdk:\n  counters:\n  - definitions:\n    - architectures: [gfx942]",
+        "rocprofiler-sdk:\n  counters:\n  - description: test\n    definitions:\n    - "
+        "architectures: [gfx942]",
         "missing 'name' field");
 }
 
 TEST(metrics, validate_name_type)
 {
-    expect_validation_error("rocprofiler-sdk:\n  counters:\n  - name: [T]\n    definitions:\n    - "
-                            "architectures: [gfx942]\n      expression: test",
-                            "'name' must be a string");
+    expect_validation_error(
+        "rocprofiler-sdk:\n  counters:\n  - name: [T]\n    description: test\n    "
+        "definitions:\n    - "
+        "architectures: [gfx942]\n      expression: test",
+        "'name' must be a string");
+}
+
+TEST(metrics, validate_empty_name)
+{
+    expect_validation_error(
+        "rocprofiler-sdk:\n  counters:\n  - name: ''\n    description: test\n    "
+        "definitions:\n    - architectures: [gfx942]\n      expression: test",
+        "'name' must not be empty");
+}
+
+TEST(metrics, validate_missing_description)
+{
+    expect_validation_error(
+        "rocprofiler-sdk:\n  counters:\n  - name: T\n    definitions:\n    - architectures: "
+        "[gfx942]\n      expression: test",
+        "missing 'description'");
 }
 
 TEST(metrics, validate_description_type)
@@ -484,133 +503,200 @@ TEST(metrics, validate_description_type)
 
 TEST(metrics, validate_missing_definitions)
 {
-    expect_validation_error("rocprofiler-sdk:\n  counters:\n  - name: T", "missing 'definitions'");
+    expect_validation_error("rocprofiler-sdk:\n  counters:\n  - name: T\n    description: test",
+                            "missing 'definitions'");
 }
 
 TEST(metrics, validate_definitions_type)
 {
-    expect_validation_error("rocprofiler-sdk:\n  counters:\n  - name: T\n    definitions: invalid",
-                            "'definitions' must be a sequence");
+    expect_validation_error(
+        "rocprofiler-sdk:\n  counters:\n  - name: T\n    description: test\n    "
+        "definitions: invalid",
+        "'definitions' must be a sequence");
 }
 
 TEST(metrics, validate_empty_definitions)
 {
-    expect_validation_error("rocprofiler-sdk:\n  counters:\n  - name: T\n    definitions: []",
-                            "'definitions' is empty");
+    expect_validation_error(
+        "rocprofiler-sdk:\n  counters:\n  - name: T\n    description: test\n    "
+        "definitions: []",
+        "'definitions' is empty");
 }
 
 TEST(metrics, validate_definition_type)
 {
     expect_validation_error(
-        "rocprofiler-sdk:\n  counters:\n  - name: T\n    definitions: [invalid]",
+        "rocprofiler-sdk:\n  counters:\n  - name: T\n    description: test\n    definitions: "
+        "[invalid]",
         "definition must be a map");
 }
 
 TEST(metrics, validate_empty_architectures)
 {
     expect_validation_error(
-        "rocprofiler-sdk:\n  counters:\n  - name: T\n    definitions:\n    - architectures: []",
+        "rocprofiler-sdk:\n  counters:\n  - name: T\n    description: test\n    "
+        "definitions:\n    - architectures: []",
         "'architectures' is empty");
 }
 
 TEST(metrics, validate_architectures_type)
 {
     expect_validation_error(
-        "rocprofiler-sdk:\n  counters:\n  - name: T\n    definitions:\n    - architectures: "
-        "gfx942",
+        "rocprofiler-sdk:\n  counters:\n  - name: T\n    description: test\n    "
+        "definitions:\n    - architectures: gfx942",
         "'architectures' must be a sequence");
 }
 
 TEST(metrics, validate_architecture_type)
 {
     expect_validation_error(
-        "rocprofiler-sdk:\n  counters:\n  - name: T\n    definitions:\n    - architectures: "
-        "[[gfx942]]",
+        "rocprofiler-sdk:\n  counters:\n  - name: T\n    description: test\n    "
+        "definitions:\n    - architectures: [[gfx942]]",
         "architecture must be a string");
+}
+
+TEST(metrics, validate_empty_architecture)
+{
+    expect_validation_error(
+        "rocprofiler-sdk:\n  counters:\n  - name: T\n    description: test\n    "
+        "definitions:\n    - architectures: ['']\n      expression: test",
+        "architecture must not be empty");
 }
 
 TEST(metrics, validate_no_event_or_expr)
 {
     expect_validation_error(
-        "rocprofiler-sdk:\n  counters:\n  - name: T\n    definitions:\n    - architectures: "
-        "[gfx942]",
+        "rocprofiler-sdk:\n  counters:\n  - name: T\n    description: test\n    "
+        "definitions:\n    - architectures: [gfx942]",
         "must have 'expression' or");
 }
 
 TEST(metrics, validate_event_needs_block)
 {
-    expect_validation_error("rocprofiler-sdk:\n  counters:\n  - name: T\n    definitions:\n    - "
-                            "architectures: [gfx942]\n      event: 1",
-                            "'event' requires 'block'");
+    expect_validation_error(
+        "rocprofiler-sdk:\n  counters:\n  - name: T\n    description: test\n    "
+        "definitions:\n    - architectures: [gfx942]\n      event: 1",
+        "'event' requires 'block'");
 }
 
 TEST(metrics, validate_block_needs_event)
 {
-    expect_validation_error("rocprofiler-sdk:\n  counters:\n  - name: T\n    definitions:\n    - "
-                            "architectures: [gfx942]\n      block: B",
-                            "'block' requires 'event'");
+    expect_validation_error(
+        "rocprofiler-sdk:\n  counters:\n  - name: T\n    description: test\n    "
+        "definitions:\n    - architectures: [gfx942]\n      block: B",
+        "'block' requires 'event'");
 }
 
 TEST(metrics, validate_expression_type)
 {
-    expect_validation_error("rocprofiler-sdk:\n  counters:\n  - name: T\n    definitions:\n    - "
-                            "architectures: [gfx942]\n      expression: [test]",
-                            "'expression' must be a string");
+    expect_validation_error(
+        "rocprofiler-sdk:\n  counters:\n  - name: T\n    description: test\n    "
+        "definitions:\n    - architectures: [gfx942]\n      expression: [test]",
+        "'expression' must be a string");
 }
 
 TEST(metrics, validate_event_type)
 {
-    expect_validation_error("rocprofiler-sdk:\n  counters:\n  - name: T\n    definitions:\n    - "
-                            "architectures: [gfx942]\n      event: [1]\n      block: SQ",
-                            "'event' must be an unsigned integer");
+    expect_validation_error(
+        "rocprofiler-sdk:\n  counters:\n  - name: T\n    description: test\n    "
+        "definitions:\n    - architectures: [gfx942]\n      event: [1]\n      "
+        "block: SQ",
+        "'event' must be an unsigned integer");
 }
 
 TEST(metrics, validate_block_type)
 {
-    expect_validation_error("rocprofiler-sdk:\n  counters:\n  - name: T\n    definitions:\n    - "
-                            "architectures: [gfx942]\n      expression: test\n      block: [SQ]",
-                            "'block' must be a string");
+    expect_validation_error(
+        "rocprofiler-sdk:\n  counters:\n  - name: T\n    description: test\n    "
+        "definitions:\n    - architectures: [gfx942]\n      expression: test\n  "
+        "    block: [SQ]",
+        "'block' must be a string");
 }
 
 TEST(metrics, validate_event_value)
 {
-    expect_validation_error("rocprofiler-sdk:\n  counters:\n  - name: T\n    definitions:\n    - "
-                            "architectures: [gfx942]\n      event: invalid\n      block: SQ",
-                            "'event' must be an unsigned integer");
+    expect_validation_error(
+        "rocprofiler-sdk:\n  counters:\n  - name: T\n    description: test\n    "
+        "definitions:\n    - architectures: [gfx942]\n      event: invalid\n    "
+        "  block: SQ",
+        "'event' must be an unsigned integer");
 }
 
-TEST(metrics, validate_valid_expression_without_description)
+TEST(metrics, validate_empty_expression)
 {
-    auto error = counters::validateExtraCounterYAML(
-        YAML::Load("rocprofiler-sdk:\n  counters:\n  - name: T\n    definitions:\n    - "
-                   "architectures: [gfx942]\n      expression: test"));
+    expect_validation_error(
+        "rocprofiler-sdk:\n  counters:\n  - name: T\n    description: test\n    "
+        "definitions:\n    - architectures: [gfx942]\n      expression: ''",
+        "'expression' must not be empty");
+}
+
+TEST(metrics, validate_empty_block)
+{
+    expect_validation_error(
+        "rocprofiler-sdk:\n  counters:\n  - name: T\n    description: test\n    "
+        "definitions:\n    - architectures: [gfx942]\n      event: 1\n      "
+        "block: ''",
+        "'block' must not be empty");
+}
+
+TEST(metrics, validate_expression_cannot_have_event_or_block)
+{
+    expect_validation_error(
+        "rocprofiler-sdk:\n  counters:\n  - name: T\n    description: test\n    "
+        "definitions:\n    - architectures: [gfx942]\n      expression: SQ_WAVES\n      block: "
+        "SQ\n      event: 1",
+        "'expression' cannot be combined with 'event' or 'block'");
+}
+
+TEST(metrics, validate_canonical_documented_yaml)
+{
+    auto error = counters::validateExtraCounterYAML(YAML::Load(R"(
+rocprofiler-sdk:
+  counters-schema-version: 1
+  counters:
+    - name: DERIVED_TEST
+      description: Test derived counter
+      properties: []
+      definitions:
+        - architectures: [gfx942]
+          expression: SQ_WAVES
+    - name: HW_TEST
+      description: Test hardware counter
+      properties: []
+      definitions:
+        - architectures: [gfx942]
+          block: SQ
+          event: 1
+)"));
     EXPECT_FALSE(error.has_value());
 }
 
-TEST(metrics, validate_valid_event_and_block)
+TEST(metrics, validate_backward_compatible_omissions)
 {
-    auto error = counters::validateExtraCounterYAML(
-        YAML::Load("rocprofiler-sdk:\n  counters:\n  - name: T\n    definitions:\n    - "
-                   "architectures: [gfx942]\n      event: 1\n      block: SQ"));
+    auto error = counters::validateExtraCounterYAML(YAML::Load(R"(
+rocprofiler-sdk:
+  counters:
+    - name: T
+      description: test
+      definitions:
+        - architectures: [gfx942]
+          expression: SQ_WAVES
+)"));
     EXPECT_FALSE(error.has_value());
 }
 
-TEST(metrics, validate_duplicate_counter_same_arch)
+TEST(metrics, validate_architecture_specific_definitions)
 {
-    // Duplicate entries are structurally valid. The loader compares their definitions.
-    auto error = counters::validateExtraCounterYAML(YAML::Load(
-        "rocprofiler-sdk:\n  counters:\n  - name: DUP\n    definitions:\n    - architectures: "
-        "[gfx942]\n      expression: expr1\n  - name: DUP\n    definitions:\n    - architectures: "
-        "[gfx942]\n      expression: expr2"));
-    EXPECT_FALSE(error.has_value());
-}
-
-TEST(metrics, validate_duplicate_counter_different_arch)
-{
-    // Same counter name with different architectures should be valid
-    auto error = counters::validateExtraCounterYAML(YAML::Load(
-        "rocprofiler-sdk:\n  counters:\n  - name: MULTI\n    definitions:\n    - architectures: "
-        "[gfx906]\n      expression: expr1\n  - name: MULTI\n    definitions:\n    - "
-        "architectures: [gfx942]\n      expression: expr2"));
+    auto error = counters::validateExtraCounterYAML(YAML::Load(R"(
+rocprofiler-sdk:
+  counters:
+    - name: MULTI
+      description: Architecture-specific counter
+      definitions:
+        - architectures: [gfx906]
+          expression: expr1
+        - architectures: [gfx942]
+          expression: expr2
+)"));
     EXPECT_FALSE(error.has_value());
 }
