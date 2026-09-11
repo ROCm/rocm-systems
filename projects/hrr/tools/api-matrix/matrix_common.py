@@ -49,6 +49,13 @@ VALID_CLASSES = (CLASS_REAL, CLASS_NOOP, CLASS_ERROR_STUB, CLASS_UNREPLAYABLE,
 
 TIER_ORDER = ["T0", "T1", "T2", "T3", "T4", "T5"]
 
+# Device capability an unreachable: group's measurement was taken under. Most
+# declarations hold on any part; the texture ones do not, because whether a
+# texture or array handle can exist at all is a property of the device.
+UNREACHABLE_ALWAYS = "always"
+UNREACHABLE_NO_IMAGE_SUPPORT = "no_image_support"
+VALID_UNREACHABLE_WHEN = (UNREACHABLE_ALWAYS, UNREACHABLE_NO_IMAGE_SUPPORT)
+
 
 @dataclass
 class ApiRow:
@@ -82,6 +89,11 @@ class ApiRow:
     # rather than a silent one.
     unreachable_reason: str = ""
     unreachable_group: str = ""
+    # Device capability the group's measurement was taken under, from the
+    # group's when:. "always" for a declaration that holds anywhere; otherwise
+    # the reason only describes parts with that capability, and on any other
+    # part the API is unmeasured rather than unreachable.
+    unreachable_when: str = UNREACHABLE_ALWAYS
     note: str = ""
     source: str = ""            # how the tier was decided, for the report
 
@@ -105,6 +117,7 @@ class ApiRow:
             "skip_unless_multi_gpu": self.skip_unless_multi_gpu,
             "unreachable_reason": self.unreachable_reason,
             "unreachable_group": self.unreachable_group,
+            "unreachable_when": self.unreachable_when,
             "note": self.note,
             "tier_source": self.source,
         }
@@ -178,12 +191,17 @@ def unreachable_index(overlay: Dict[str, Any]) -> Dict[str, Dict[str, str]]:
         if not name or not reason:
             raise MatrixError(
                 "every unreachable: entry needs a group and a reason")
+        when = group.get("when") or UNREACHABLE_ALWAYS
+        if when not in VALID_UNREACHABLE_WHEN:
+            raise MatrixError(
+                f"unreachable.{name}: when: '{when}' is not one of "
+                f"{', '.join(VALID_UNREACHABLE_WHEN)}")
         for api in group.get("apis") or []:
             if api in index:
                 raise MatrixError(
                     f"{api} is listed in unreachable groups "
                     f"{index[api]['group']} and {name}; one reason per API")
-            index[api] = {"group": name, "reason": reason}
+            index[api] = {"group": name, "reason": reason, "when": when}
     return index
 
 
@@ -282,6 +300,8 @@ def resolve(manifest: Dict[str, Any], overlay: Dict[str, Any]) -> List[ApiRow]:
             skip_unless_multi_gpu=bool(ov.get("skip_unless_multi_gpu", False)) or gpus > 1,
             unreachable_reason=unreachable.get(api, {}).get("reason", ""),
             unreachable_group=unreachable.get(api, {}).get("group", ""),
+            unreachable_when=unreachable.get(api, {}).get(
+                "when", UNREACHABLE_ALWAYS),
             note=ov.get("note", ""),
             source=source,
         ))

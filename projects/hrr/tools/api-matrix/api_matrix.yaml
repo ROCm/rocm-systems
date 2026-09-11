@@ -413,6 +413,7 @@ patterns:
 # ---------------------------------------------------------------------------
 unreachable:
   - group: no-image-support
+    when: no_image_support
     reason: >-
       This part reports hipDeviceAttributeImageSupport = 0. Every entry point
       that creates or configures texture state returns 801
@@ -467,6 +468,7 @@ unreachable:
       - hipTexRefGetMipmapLevelClamp
 
   - group: array-handle-required
+    when: no_image_support
     reason: >-
       Takes a hipArray_t, hipMipmappedArray_t or texture object as its subject,
       and on a part without image support no such handle can exist. Called with
