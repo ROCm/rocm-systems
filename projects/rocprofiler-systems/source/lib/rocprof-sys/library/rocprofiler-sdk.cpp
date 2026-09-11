@@ -31,7 +31,6 @@
 #include "library/pmc/sampler.hpp"
 #include "library/process_sampler.hpp"
 #include "library/rocprofiler-sdk/counters.hpp"
-#include "library/rocprofiler-sdk/domain_selection.hpp"
 #include "library/rocprofiler-sdk/fwd.hpp"
 #include "library/rocprofiler-sdk/rccl.hpp"
 #include "library/rocprofiler-sdk/trace_control.hpp"
@@ -45,7 +44,6 @@
 #include <timemory/unwind/processed_entry.hpp>
 #include <timemory/variadic/lightweight_tuple.hpp>
 
-#include <exception>
 #include <string_view>
 #include <type_traits>
 #include <utility>
@@ -120,8 +118,8 @@ struct external_dependencies
     using pmc_info_t      = trace_cache::info::pmc;
     using kfd_sample_t    = trace_cache::kfd_sample;
 
-    static constexpr agent_type_t k_agent_type_gpu = agent_type_t::GPU;
-    static constexpr agent_type_t k_agent_type_cpu = agent_type_t::CPU;
+    static constexpr agent_type_t k_agent_type_gpu = agent_type_t::gpu;
+    static constexpr agent_type_t k_agent_type_cpu = agent_type_t::cpu;
 
     static agent_manager_t& get_agent_manager()
     {
