@@ -101,6 +101,29 @@ TEST_F(DdaNranksRelaxTest, MissingIpcResourcesRejected)
         mockComm_.get(), sendbuff_, recvbuff_, kCount, ncclFloat32, ncclSum));
 }
 
+// The dispatch gate agrees with eligibility when relax is off: the full clique
+// reaches the launch path (and fails only the scratch-size check), while a
+// low-rank comm is refused by ncclDdaIpcNranksSupported() before it. Distinct
+// return codes keep the two apart. No GPU: both return before any kernel launch.
+TEST_F(DdaNranksRelaxTest, DispatchRejectsLowRankWhenRelaxOff)
+{
+    mockComm_.comm.ddaScratchBytes = 0;
+
+    mockComm_.comm.nRanks = nccl_dda_detail::kDdaNranks;
+    EXPECT_EQ(ncclAllReduceDdaIpc(sendbuff_, recvbuff_, kCount, ncclFloat32, ncclSum,
+                                  mockComm_.get(), nullptr),
+              ncclInvalidArgument);
+
+    for (int nRanks : {2, 3, 4, 5, 6, 7})
+    {
+        mockComm_.comm.nRanks = nRanks;
+        EXPECT_EQ(ncclAllReduceDdaIpc(sendbuff_, recvbuff_, kCount, ncclFloat32, ncclSum,
+                                      mockComm_.get(), nullptr),
+                  ncclInvalidUsage)
+            << "nRanks=" << nRanks << " must be refused with relax off";
+    }
+}
+
 // Relaxed path (RCCL_DDA_NRANKS_RELAX=1). RCCL_PARAM caches per-process and
 // NCCL_NO_CACHE is parsed once, so the relaxed value has to be set before any
 // param read: run in a fresh re-exec'd process with the env pre-set. This proves
@@ -138,6 +161,38 @@ TEST(DdaNranksRelaxIsolatedTest, RelaxedPathAdmitsTwoThroughEightRanks)
                 EXPECT_FALSE(ncclAllReduceDdaIpcEligible(
                     mockComm.get(), sendbuff, recvbuff, count, ncclFloat32, ncclSum))
                     << "nRanks=" << nRanks << " must not be eligible";
+            }
+
+            // Eligibility alone does not prove the dispatch routes the count: with
+            // only the checks above, deleting a supported count from
+            // ncclAllReduceDdaIpcTyped() would still pass. Drive the real entry
+            // point and separate the two failure modes by rank count.
+            //
+            // ddaScratchBytes = 0 makes every supported count fail the scratch-size
+            // check inside ncclAllReduceDdaIpcLaunch() and return
+            // ncclInvalidArgument, which is reached only after the dispatch has
+            // accepted the count -- and before any barrier deref or kernel launch,
+            // so this needs no GPU. An unsupported count is rejected earlier by the
+            // ncclDdaIpcNranksSupported() gate and returns ncclInvalidUsage.
+            mockComm.comm.ddaScratchBytes = 0;
+
+            for (int nRanks = 2; nRanks <= nccl_dda_detail::kDdaNranks; ++nRanks)
+            {
+                mockComm.comm.nRanks = nRanks;
+                EXPECT_EQ(ncclAllReduceDdaIpc(sendbuff, recvbuff, count, ncclFloat32,
+                                              ncclSum, mockComm.get(), nullptr),
+                          ncclInvalidArgument)
+                    << "nRanks=" << nRanks
+                    << " should reach the launch path and fail the scratch check";
+            }
+
+            for (int nRanks : {1, 9, 16})
+            {
+                mockComm.comm.nRanks = nRanks;
+                EXPECT_EQ(ncclAllReduceDdaIpc(sendbuff, recvbuff, count, ncclFloat32,
+                                              ncclSum, mockComm.get(), nullptr),
+                          ncclInvalidUsage)
+                    << "nRanks=" << nRanks << " must be refused by the dispatch gate";
             }
         },
         {{"RCCL_DDA_NRANKS_RELAX", "1"}});
