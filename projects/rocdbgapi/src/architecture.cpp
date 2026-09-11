@@ -8031,11 +8031,7 @@ gfx12_5_architecture_t::cwsr_record_t::register_address (
     {
       const size_t ttmp_size = sizeof (uint32_t);
       const size_t ttmp_count = 16;
-      const size_t ttmps_addr
-        = gfx12_architecture_t::cwsr_record_t::register_address (
-            amdgpu_regnum_t::first_sgpr)
-            .value ()
-          + sgpr_count () * sizeof (uint32_t) - ttmp_size * ttmp_count;
+      const size_t ttmps_addr = hwregs_addr () - ttmp_size * ttmp_count;
 
       size_t ttmp_nr
         = utils::narrow<size_t> (regnum - amdgpu_regnum_t::first_ttmp);
