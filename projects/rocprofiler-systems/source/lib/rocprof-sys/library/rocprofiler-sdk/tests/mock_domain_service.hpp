@@ -145,10 +145,11 @@ struct tracing_names_t
 
     std::vector<entry_t> entries;
 
-    auto begin() const { return entries.begin(); }
-    auto end() const { return entries.end(); }
+    [[nodiscard]] auto begin() const { return entries.begin(); }
+    [[nodiscard]] auto end() const { return entries.end(); }
 
-    std::string_view at(std::size_t /*kind*/, std::uint32_t /*operation*/) const
+    [[nodiscard]] std::string_view at(std::size_t /*kind*/,
+                                      std::uint32_t /*operation*/) const
     {
         return "operation";
     }
@@ -162,10 +163,12 @@ struct gmock_sdk_backend
 {
     MOCK_METHOD(void, create_context, (context_id_t * context));
     MOCK_METHOD(void, start_context, (context_id_t context));
+    // NOLINTNEXTLINE(readability-function-size)
     MOCK_METHOD(void, create_buffer,
                 (context_id_t context, std::size_t buffer_size,
                  std::size_t buffer_watermark, buffer_policy_t policy,
                  on_records_cb_t callback, void* callback_data, buffer_id_t* buffer_out));
+    // NOLINTNEXTLINE(readability-function-size)
     MOCK_METHOD(void, configure_buffer_tracing_service,
                 (context_id_t context, buffer_tracing_kind_t kind,
                  tracing_operation_t* operations, std::size_t num_operations,
@@ -175,6 +178,7 @@ struct gmock_sdk_backend
                 (buffer_id_t buffer, callback_thread_id_t thread));
     MOCK_METHOD(void, flush_buffer, (buffer_id_t buffer));
     MOCK_METHOD(int, destroy_buffer, (buffer_id_t buffer));
+    // NOLINTNEXTLINE(readability-function-size)
     MOCK_METHOD(void, configure_callback_tracing_service,
                 (context_id_t context, callback_tracing_kind_t kind,
                  tracing_operation_t* operations, std::size_t num_operations,
@@ -211,6 +215,7 @@ struct mock_sdk
     using on_record_cb_t            = test_support::on_record_cb_t;
     using tracing_names_t           = test_support::tracing_names_t;
 
+    // NOLINTBEGIN(readability-identifier-naming)
     static constexpr std::size_t     compile_time_version                    = 90909;
     static constexpr buffer_policy_t BUFFER_POLICY_LOSSLESS                  = 1;
     static constexpr std::size_t     BUFFER_TRACING_KFD_EVENT_DROPPED_EVENTS = 20;
@@ -222,6 +227,7 @@ struct mock_sdk
     static constexpr std::size_t     BUFFER_TRACING_KFD_PAGE_MIGRATE         = 26;
     static constexpr std::size_t     BUFFER_TRACING_KFD_QUEUE                = 27;
     static constexpr std::size_t     CALLBACK_TRACING_CODE_OBJECT            = 1;
+    // NOLINTEND(readability-identifier-naming)
 
     using kfd_event_dropped_record      = test_support::kfd_event_dropped_record;
     using kfd_event_page_fault_record   = test_support::kfd_event_page_fault_record;
@@ -235,6 +241,7 @@ struct mock_sdk
     static void create_context(context_id_t* context) { g_mock->create_context(context); }
     static void start_context(context_id_t context) { g_mock->start_context(context); }
 
+    // NOLINTNEXTLINE(readability-function-size)
     static void create_buffer(context_id_t context, std::size_t buffer_size,
                               std::size_t buffer_watermark, buffer_policy_t policy,
                               on_records_cb_t callback, void* callback_data,
@@ -244,6 +251,7 @@ struct mock_sdk
                               callback_data, buffer_out);
     }
 
+    // NOLINTNEXTLINE(readability-function-size)
     static void configure_buffer_tracing_service(context_id_t          context,
                                                  buffer_tracing_kind_t kind,
                                                  tracing_operation_t*  operations,
@@ -271,6 +279,7 @@ struct mock_sdk
         return g_mock->destroy_buffer(buffer);
     }
 
+    // NOLINTNEXTLINE(readability-function-size)
     static void configure_callback_tracing_service(context_id_t            context,
                                                    callback_tracing_kind_t kind,
                                                    tracing_operation_t*    operations,
@@ -401,49 +410,55 @@ struct externals
 
         void insert_agent(agent_t& /*agent*/) {}
 
-        std::vector<std::shared_ptr<agent_t>> get_agents_by_type(int type) const
+        [[nodiscard]] std::vector<std::shared_ptr<agent_t>> get_agents_by_type(
+            int type) const
         {
             return g_externals_mock->get_agents_by_type(type);
         }
 
-        const agent_t& get_agent_by_type_index(std::size_t /*type_index*/,
-                                               int /*type*/) const
+        [[nodiscard]] const agent_t& get_agent_by_type_index(std::size_t /*type_index*/,
+                                                             int /*type*/) const
         {
-            static agent_t placeholder{};
-            return placeholder;
+            static const agent_t k_placeholder{};
+            return k_placeholder;
         }
 
-        const agent_t& get_agent_by_id(std::size_t /*device_id*/, int /*type*/) const
+        [[nodiscard]] const agent_t& get_agent_by_id(std::size_t /*device_id*/,
+                                                     int /*type*/) const
         {
-            static agent_t placeholder{};
-            return placeholder;
+            static const agent_t k_placeholder{};
+            return k_placeholder;
         }
 
-        const agent_t& get_agent_by_handle(std::size_t /*handle*/, int /*type*/) const
+        [[nodiscard]] const agent_t& get_agent_by_handle(std::size_t /*handle*/,
+                                                         int /*type*/) const
         {
-            static agent_t placeholder{};
-            return placeholder;
+            static const agent_t k_placeholder{};
+            return k_placeholder;
         }
 
-        const agent_t& get_agent_by_handle(std::uint64_t /*handle*/) const
+        [[nodiscard]] const agent_t& get_agent_by_handle(std::uint64_t /*handle*/) const
         {
-            static agent_t placeholder{};
-            return placeholder;
+            static const agent_t k_placeholder{};
+            return k_placeholder;
         }
 
-        std::vector<std::shared_ptr<agent_t>> get_agents() const { return {}; }
+        [[nodiscard]] std::vector<std::shared_ptr<agent_t>> get_agents() const
+        {
+            return {};
+        }
 
-        std::size_t get_gpu_agents_count() const { return 0; }
-        std::size_t get_cpu_agents_count() const { return 0; }
+        [[nodiscard]] std::size_t get_gpu_agents_count() const { return 0; }
+        [[nodiscard]] std::size_t get_cpu_agents_count() const { return 0; }
     };
 
-    static constexpr int AGENT_TYPE_GPU = 1;
-    static constexpr int AGENT_TYPE_CPU = 0;
+    static constexpr int k_agent_type_gpu = 1;
+    static constexpr int k_agent_type_cpu = 0;
 
     static agent_manager_t& get_agent_manager()
     {
-        static agent_manager_t manager;
-        return manager;
+        static agent_manager_t s_manager;
+        return s_manager;
     }
 
     static void add_string(std::string_view value)
@@ -461,30 +476,31 @@ struct externals
     static std::int32_t get_pid() { return 0; }
     static std::int32_t get_ppid() { return 0; }
 
-    static constexpr std::string_view pmc_value_type_absolute = "ABS";
+    static constexpr std::string_view k_pmc_value_type_absolute = "ABS";
 
-    static constexpr std::string_view kfd_event_dropped_events_category_name =
+    static constexpr std::string_view k_kfd_event_dropped_events_category_name =
         "rocm_kfd_event_dropped_events";
-    static constexpr std::string_view kfd_event_dropped_events_category_description =
+    static constexpr std::string_view k_kfd_event_dropped_events_category_description =
         "KFD Dropped Events";
-    static constexpr std::string_view kfd_event_queue_category_name =
+    static constexpr std::string_view k_kfd_event_queue_category_name =
         "rocm_kfd_event_queue";
-    static constexpr std::string_view kfd_event_queue_category_description =
+    static constexpr std::string_view k_kfd_event_queue_category_description =
         "KFD Event Queue";
-    static constexpr std::string_view kfd_event_unmap_from_gpu_category_name =
+    static constexpr std::string_view k_kfd_event_unmap_from_gpu_category_name =
         "rocm_kfd_event_unmap_from_gpu";
-    static constexpr std::string_view kfd_event_unmap_from_gpu_category_description =
+    static constexpr std::string_view k_kfd_event_unmap_from_gpu_category_description =
         "KFD Unmap from GPU";
-    static constexpr std::string_view kfd_page_fault_category_name =
+    static constexpr std::string_view k_kfd_page_fault_category_name =
         "rocm_kfd_page_fault";
-    static constexpr std::string_view kfd_page_fault_category_description =
+    static constexpr std::string_view k_kfd_page_fault_category_description =
         "KFD Page Fault Events";
-    static constexpr std::string_view kfd_page_migrate_category_name =
+    static constexpr std::string_view k_kfd_page_migrate_category_name =
         "rocm_kfd_page_migrate";
-    static constexpr std::string_view kfd_page_migrate_category_description =
+    static constexpr std::string_view k_kfd_page_migrate_category_description =
         "KFD Page Migrate Events";
-    static constexpr std::string_view kfd_queue_category_name        = "rocm_kfd_queue";
-    static constexpr std::string_view kfd_queue_category_description = "KFD Queue Events";
+    static constexpr std::string_view k_kfd_queue_category_name = "rocm_kfd_queue";
+    static constexpr std::string_view k_kfd_queue_category_description =
+        "KFD Queue Events";
 };
 
 }  // namespace rocprofsys::domains::test_support

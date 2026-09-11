@@ -3,13 +3,14 @@
 
 #include "library/rocprofiler-sdk/callback_domain.hpp"
 #include "library/rocprofiler-sdk/tests/mock_domain_service.hpp"
+#include "library/rocprofiler-sdk/types.hpp"
 
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
 
-#include <cstddef>
 #include <memory>
 #include <optional>
+#include <utility>
 #include <vector>
 
 namespace rocprofsys::domains
@@ -52,6 +53,7 @@ make_definition()
     };
 }
 
+// NOLINTNEXTLINE(readability-identifier-naming)
 class callback_domain_test : public ::testing::Test
 {
 protected:
@@ -61,7 +63,7 @@ protected:
 
 TEST_F(callback_domain_test, name_returns_definition_name)
 {
-    sut_t domain{ make_definition(), context_id_t{ 3 }, {} };
+    const sut_t domain{ make_definition(), context_id_t{ 3 }, {} };
     EXPECT_EQ(domain.name(), "test_callback_domain");
 }
 
@@ -70,7 +72,8 @@ TEST_F(callback_domain_test,
 {
     const context_id_t context{ 3 };
 
-    std::vector<tracing_operation_t> operations{ 4, 5 };
+    constexpr int                    k_op_count = 5;
+    std::vector<tracing_operation_t> operations{ 4, k_op_count };
     auto* const                      ops_ptr  = operations.data();
     const auto                       ops_size = operations.size();
 

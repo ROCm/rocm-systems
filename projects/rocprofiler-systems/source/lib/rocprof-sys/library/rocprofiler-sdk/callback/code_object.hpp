@@ -6,6 +6,8 @@
 #include "library/rocprofiler-sdk/types.hpp"
 #include "policies/rocprofiler-sdk/domain_service.hpp"
 
+#include <optional>
+
 namespace rocprofsys::domains::callback
 {
 

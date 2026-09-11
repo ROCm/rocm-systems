@@ -3,6 +3,7 @@
 
 #include "library/rocprofiler-sdk/domain_registry.hpp"
 #include "library/rocprofiler-sdk/tests/mock_domain_service.hpp"
+#include "library/rocprofiler-sdk/types.hpp"
 
 #include <gtest/gtest.h>
 

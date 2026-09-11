@@ -3,12 +3,9 @@
 
 #pragma once
 
-#include "common/units/data_size.hpp"
 #include "library/rocprofiler-sdk/types.hpp"
 #include "policies/rocprofiler-sdk/domain_service.hpp"
 
-#include <memory>
-#include <stdexcept>
 #include <string_view>
 #include <utility>
 #include <vector>

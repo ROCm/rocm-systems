@@ -1,13 +1,20 @@
 // Copyright (c) Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
+#include "library/rocprofiler-sdk/buffered/kfd_event_page_fault.hpp"
+#include "library/rocprofiler-sdk/buffered/kfd_page_fault.hpp"
+#include "library/rocprofiler-sdk/buffered/kfd_queue.hpp"
+#include "library/rocprofiler-sdk/callback/code_object.hpp"
+#include "library/rocprofiler-sdk/domain_selection.hpp"
 #include "library/rocprofiler-sdk/domain_service.hpp"
 #include "library/rocprofiler-sdk/tests/mock_domain_service.hpp"
+#include "library/rocprofiler-sdk/types.hpp"
 
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
 
 #include <algorithm>
+#include <cstddef>
 #include <memory>
 #include <optional>
 #include <stdexcept>
@@ -48,15 +55,18 @@ using domains::test_support::mock_sdk;
 
 using sut_t = domain_service<mock_sdk, externals>;
 
+constexpr std::size_t k_unsupported_domain_value = 999;
+
 // Matches a tracing_operation_t* argument whose first expected.size() elements equal
 // expected exactly. The pointee address is an implementation-internal detail of
 // domain_service::configure_domain() (a freshly built local vector), so identity
 // cannot be asserted -- contents can, and are asserted exactly.
-MATCHER_P(OperationsEqual, expected, "")
+MATCHER_P(operations_equal, expected, "")
 {
     return std::equal(expected.begin(), expected.end(), arg);
 }
 
+// NOLINTNEXTLINE(readability-identifier-naming)
 class domain_service_test : public ::testing::Test
 {
 protected:
@@ -75,13 +85,14 @@ protected:
     }
 
     // Every production on_configure() body calls add_string(category_name) followed by
-    // get_agents_by_type(AGENT_TYPE_GPU), unconditionally and exactly once; asserting
+    // get_agents_by_type(k_agent_type_gpu), unconditionally and exactly once; asserting
     // both confirms on_configure() actually ran rather than merely not crashing.
     void expect_on_configure_ran(std::string_view category_name)
     {
         InSequence seq;
         EXPECT_CALL(*g_externals_mock, add_string(Eq(category_name))).Times(1);
-        EXPECT_CALL(*g_externals_mock, get_agents_by_type(Eq(externals::AGENT_TYPE_GPU)))
+        EXPECT_CALL(*g_externals_mock,
+                    get_agents_by_type(Eq(externals::k_agent_type_gpu)))
             .Times(1)
             .WillOnce(Return(std::vector<std::shared_ptr<agent_t>>{}));
     }
@@ -98,6 +109,7 @@ protected:
         EXPECT_CALL(*g_mock, start_context(Eq(context))).Times(1);
     }
 
+    // NOLINTNEXTLINE(readability-function-size)
     void expect_configure_buffered(
         const mock_sdk::context_id_t& context, const mock_sdk::buffer_id_t& buffer,
         const mock_sdk::callback_thread_id_t& thread,
@@ -115,10 +127,11 @@ protected:
                 Eq(mock_sdk::BUFFER_POLICY_LOSSLESS), Eq(on_records),
                 Eq(static_cast<void*>(nullptr)), NotNull()))
             .Times(1)
+            // NOLINTNEXTLINE(readability-magic-numbers)
             .WillOnce(DoAll(SetArgPointee<6>(buffer), Return()));
 
         EXPECT_CALL(*g_mock, configure_buffer_tracing_service(
-                                 Eq(context), Eq(kind), OperationsEqual(operations),
+                                 Eq(context), Eq(kind), operations_equal(operations),
                                  Eq(operations.size()), Eq(buffer)))
             .Times(1);
 
@@ -135,7 +148,7 @@ protected:
         const std::vector<mock_sdk::tracing_operation_t>& operations)
     {
         EXPECT_CALL(*g_mock, configure_callback_tracing_service(
-                                 Eq(context), Eq(kind), OperationsEqual(operations),
+                                 Eq(context), Eq(kind), operations_equal(operations),
                                  Eq(operations.size()), Eq(on_record),
                                  Eq(static_cast<void*>(nullptr))))
             .Times(1);
@@ -154,7 +167,9 @@ TEST_F(domain_service_test,
         .entries = { { .name       = "kfd_queue",
                        .operations = { "op0", "op1" },
                        .value      = mock_sdk::BUFFER_TRACING_KFD_QUEUE },
-                     { .name = "unsupported_domain", .operations = {}, .value = 999 } }
+                     { .name       = "unsupported_domain",
+                       .operations = {},
+                       .value      = k_unsupported_domain_value } }
     };
     g_callback_table = mock_sdk::tracing_names_t{
         .entries = { { .name       = "code_object",
@@ -162,7 +177,7 @@ TEST_F(domain_service_test,
                        .value      = mock_sdk::CALLBACK_TRACING_CODE_OBJECT } }
     };
 
-    sut_t service;
+    const sut_t service;
 
     const auto available = service.available_domains();
     ASSERT_EQ(available.size(), 2u);
@@ -176,6 +191,7 @@ TEST_F(domain_service_test,
     EXPECT_EQ(available[0].operations[1].id, 1u);
     EXPECT_EQ(available[0].operations[1].name, "op1");
     ASSERT_TRUE(available[0].group.has_value());
+    // NOLINTNEXTLINE(bugprone-unchecked-optional-access) checked by ASSERT_TRUE above
     EXPECT_EQ(*available[0].group, "kfd_events");
 
     EXPECT_EQ(available[1].key.mode, domains::collection_mode::callback);
@@ -205,7 +221,7 @@ TEST_F(domain_service_test,
         context, buffer, thread,
         static_cast<mock_sdk::buffer_tracing_kind_t>(mock_sdk::BUFFER_TRACING_KFD_QUEUE),
         domains::buffered::k_kfd_queue<mock_sdk, externals>.on_records, { 0, 1 });
-    expect_on_configure_ran(externals::kfd_queue_category_name);
+    expect_on_configure_ran(externals::k_kfd_queue_category_name);
     expect_start_context(context);
 
     service.configure(std::vector<domain_selection>{ domain_selection{
@@ -334,7 +350,7 @@ TEST_F(domain_service_test,
         context, buffer, thread,
         static_cast<mock_sdk::buffer_tracing_kind_t>(mock_sdk::BUFFER_TRACING_KFD_QUEUE),
         domains::buffered::k_kfd_queue<mock_sdk, externals>.on_records, { 0, 1 });
-    expect_on_configure_ran(externals::kfd_queue_category_name);
+    expect_on_configure_ran(externals::k_kfd_queue_category_name);
     expect_start_context(context);
 
     service.configure(std::vector<domain_selection>{
@@ -371,7 +387,7 @@ TEST_F(domain_service_test, flush_calls_flush_on_each_configured_buffered_domain
         context, buffer, thread,
         static_cast<mock_sdk::buffer_tracing_kind_t>(mock_sdk::BUFFER_TRACING_KFD_QUEUE),
         domains::buffered::k_kfd_queue<mock_sdk, externals>.on_records, { 0 });
-    expect_on_configure_ran(externals::kfd_queue_category_name);
+    expect_on_configure_ran(externals::k_kfd_queue_category_name);
     expect_start_context(context);
 
     service.configure(std::vector<domain_selection>{ domain_selection{
@@ -403,7 +419,7 @@ TEST_F(domain_service_test, configure_calls_on_configure_when_domain_defines_it)
         static_cast<mock_sdk::buffer_tracing_kind_t>(
             mock_sdk::BUFFER_TRACING_KFD_PAGE_FAULT),
         domains::buffered::k_kfd_page_fault<mock_sdk, externals>.on_records, { 0 });
-    expect_on_configure_ran(externals::kfd_page_fault_category_name);
+    expect_on_configure_ran(externals::k_kfd_page_fault_category_name);
     expect_start_context(context);
 
     service.configure(std::vector<domain_selection>{ domain_selection{
@@ -451,9 +467,9 @@ TEST_F(domain_service_test,
     // on_code_object_configure() is a no-op, so it has no Externals side effect to
     // assert on; this instead asserts the precondition domain_service's `if` branches
     // on (on_configure is non-null) and that invoking it does not throw or crash.
-    constexpr const auto& code_object_definition =
+    constexpr const auto& k_code_object_definition =
         domains::callback::k_code_object<mock_sdk, externals>;
-    ASSERT_NE(code_object_definition.on_configure, nullptr);
+    ASSERT_NE(k_code_object_definition.on_configure, nullptr);
 
     g_callback_table = mock_sdk::tracing_names_t{
         .entries = { { .name       = "code_object",
@@ -506,13 +522,13 @@ TEST_F(domain_service_test,
         context, queue_buffer, queue_thread,
         static_cast<mock_sdk::buffer_tracing_kind_t>(mock_sdk::BUFFER_TRACING_KFD_QUEUE),
         domains::buffered::k_kfd_queue<mock_sdk, externals>.on_records, { 0 });
-    expect_on_configure_ran(externals::kfd_queue_category_name);
+    expect_on_configure_ran(externals::k_kfd_queue_category_name);
     expect_configure_buffered(
         context, page_fault_buffer, page_fault_thread,
         static_cast<mock_sdk::buffer_tracing_kind_t>(
             mock_sdk::BUFFER_TRACING_KFD_PAGE_FAULT),
         domains::buffered::k_kfd_page_fault<mock_sdk, externals>.on_records, { 0 });
-    expect_on_configure_ran(externals::kfd_page_fault_category_name);
+    expect_on_configure_ran(externals::k_kfd_page_fault_category_name);
     expect_start_context(context);
 
     service.configure(std::vector<domain_selection>{ domain_selection{
@@ -552,13 +568,13 @@ TEST_F(domain_service_test,
         context, queue_buffer, queue_thread,
         static_cast<mock_sdk::buffer_tracing_kind_t>(mock_sdk::BUFFER_TRACING_KFD_QUEUE),
         domains::buffered::k_kfd_queue<mock_sdk, externals>.on_records, { 0 });
-    expect_on_configure_ran(externals::kfd_queue_category_name);
+    expect_on_configure_ran(externals::k_kfd_queue_category_name);
     expect_configure_buffered(
         context, page_fault_buffer, page_fault_thread,
         static_cast<mock_sdk::buffer_tracing_kind_t>(
             mock_sdk::BUFFER_TRACING_KFD_PAGE_FAULT),
         domains::buffered::k_kfd_page_fault<mock_sdk, externals>.on_records, { 0 });
-    expect_on_configure_ran(externals::kfd_page_fault_category_name);
+    expect_on_configure_ran(externals::k_kfd_page_fault_category_name);
     expect_start_context(context);
 
     // No name and no group set: match_domains() falls through to its final branch,

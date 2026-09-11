@@ -12,6 +12,8 @@
 #include <cstddef>
 #include <cstdint>
 #include <exception>
+#include <optional>
+#include <string>
 
 namespace rocprofsys::domains::buffered
 {
@@ -20,10 +22,10 @@ template <policies::rocprofiler_sdk::domain_service_externals Externals>
 inline void
 on_kfd_event_unmap_from_gpu_configure()
 {
-    Externals::add_string(Externals::kfd_event_unmap_from_gpu_category_name);
+    Externals::add_string(Externals::k_kfd_event_unmap_from_gpu_category_name);
 
     auto& agent_mgr  = Externals::get_agent_manager();
-    auto  gpu_agents = agent_mgr.get_agents_by_type(Externals::AGENT_TYPE_GPU);
+    auto  gpu_agents = agent_mgr.get_agents_by_type(Externals::k_agent_type_gpu);
     if(gpu_agents.empty())
     {
         LOG_DEBUG("kfd_event_unmap_from_gpu: no GPU agents found; no PMC info will be "
@@ -37,18 +39,18 @@ on_kfd_event_unmap_from_gpu_configure()
         constexpr auto*       k_component   = "rocm";
         constexpr auto*       k_block       = "KFD";
         constexpr auto*       k_expression  = "";
-        const std::string     value_type_absolute{ Externals::pmc_value_type_absolute };
+        const std::string     value_type_absolute{ Externals::k_pmc_value_type_absolute };
 
         Externals::add_pmc_info(typename Externals::pmc_info_t{
-            .type             = Externals::AGENT_TYPE_GPU,
+            .type             = Externals::k_agent_type_gpu,
             .agent_type_index = dev_idx,
             .target_arch      = "GPU",
             .event_code       = k_event_code,
             .instance_id      = k_instance_id,
-            .name   = std::string{ Externals::kfd_event_unmap_from_gpu_category_name },
+            .name   = std::string{ Externals::k_kfd_event_unmap_from_gpu_category_name },
             .symbol = "KFD Unmap from GPU Events",
             .description =
-                std::string{ Externals::kfd_event_unmap_from_gpu_category_description },
+                std::string{ Externals::k_kfd_event_unmap_from_gpu_category_description },
             .long_description = "KFD unmap from GPU events",
             .component        = k_component,
             .units            = "events",
@@ -98,7 +100,7 @@ on_kfd_event_unmap_from_gpu(typename SdkBackend::kfd_event_unmap_record* record,
             return std::string{ "?" };
         }
 
-        const bool is_gpu = (agent_ptr->type == Externals::AGENT_TYPE_GPU);
+        const bool is_gpu = (agent_ptr->type == Externals::k_agent_type_gpu);
         return fmt::format("{} {}", is_gpu ? "GPU" : "CPU", agent_ptr->device_type_index);
     };
 
@@ -110,11 +112,11 @@ on_kfd_event_unmap_from_gpu(typename SdkBackend::kfd_event_unmap_record* record,
 
     Externals::buffer_storage_store(typename Externals::kfd_sample_t{
         tid, name, record->timestamp, record->timestamp, "" /*empty args*/,
-        std::string{ Externals::kfd_event_unmap_from_gpu_category_name },
+        std::string{ Externals::k_kfd_event_unmap_from_gpu_category_name },
         std::move(track_name), "{}",
         static_cast<std::uint32_t>(agent ? agent->device_type_index : 0),
-        static_cast<std::uint8_t>(Externals::AGENT_TYPE_GPU),
-        std::string{ Externals::kfd_event_unmap_from_gpu_category_name }, pmc_value,
+        static_cast<std::uint8_t>(Externals::k_agent_type_gpu),
+        std::string{ Externals::k_kfd_event_unmap_from_gpu_category_name }, pmc_value,
         std::optional<std::int64_t>(record->pid) });
 }
 
