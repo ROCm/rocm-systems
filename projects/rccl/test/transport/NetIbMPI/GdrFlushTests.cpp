@@ -30,15 +30,15 @@ namespace {
 // on and fail later on an out-parameter nobody wrote, which is what the
 // ASSERT_NO_FATAL_FAILURE this replaced used to catch. Checking HasFatalFailure
 // stops the test at the cause instead.
-#define ASSERT_RECV_FLUSH_BURST(iterations, verifyData, lastFlush)                         \
-    do {                                                                                   \
-        std::string _burstWhy;                                                             \
-        ncclResult_t _burstRet = RunRecvFlushBurst((iterations), (verifyData),              \
-                                                  (lastFlush), &_burstWhy);                \
-        ASSERT_EQ(_burstRet, ncclSuccess)                                                  \
-            << "GDR recv+flush burst setup failed on at least one rank (this rank: "        \
-            << _burstWhy << ")";                                                           \
-        if (::testing::Test::HasFatalFailure()) return;                                     \
+#define ASSERT_RECV_FLUSH_BURST(iterations, verifyData, lastFlush)                   \
+    do {                                                                             \
+        std::string _burstWhy;                                                       \
+        ncclResult_t _burstRet = RunRecvFlushBurst((iterations), (verifyData),       \
+                                                  (lastFlush), &_burstWhy);          \
+        ASSERT_EQ(_burstRet, ncclSuccess)                                            \
+            << "GDR recv+flush burst setup failed on at least one rank (this rank: " \
+            << _burstWhy << ")";                                                     \
+        if (::testing::Test::HasFatalFailure()) return;                              \
     } while (0)
 
 class GdrFlushTest : public NetIbMPITest {
