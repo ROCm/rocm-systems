@@ -118,13 +118,13 @@ agent_manager::get_agents() const
 size_t
 agent_manager::get_gpu_agents_count() const
 {
-    return get_agent_count(agent_type::GPU);
+    return get_agent_count(agent_type::gpu);
 }
 
 size_t
 agent_manager::get_cpu_agents_count() const
 {
-    return get_agent_count(agent_type::CPU);
+    return get_agent_count(agent_type::cpu);
 }
 
 size_t

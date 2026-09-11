@@ -187,7 +187,7 @@ struct gpu_traits
         std::vector<device_entry> entries;
         auto                      filter = get_device_filter<Settings>();
 
-        if(filter.mode == device_selection_mode::NONE)
+        if(filter.mode == device_selection_mode::none)
         {
             LOG_DEBUG("{} sampling disabled via configuration", device_name);
             return entries;
@@ -203,8 +203,8 @@ struct gpu_traits
         {
             auto index = device->get_index();
 
-            bool should_include = (filter.mode == device_selection_mode::ALL) ||
-                                  (filter.mode == device_selection_mode::SPECIFIC &&
+            bool should_include = (filter.mode == device_selection_mode::all) ||
+                                  (filter.mode == device_selection_mode::specific &&
                                    filter.indices.count(index) > 0);
 
             if(should_include) ++selected_count;
@@ -299,7 +299,7 @@ struct gpu_traits
 
         const auto bdfid = ::rocprofsys::common::pci_bdfid_from_string(bdf);
 
-        if(filter.mode == device_selection_mode::SPECIFIC)
+        if(filter.mode == device_selection_mode::specific)
         {
             LOG_WARNING("{} device [{}] (BDF {}, rocminfo BDFID {}) was requested via "
                         "ROCPROFSYS_SAMPLING_GPUS but is not visible to the ROCm "
@@ -322,7 +322,7 @@ struct gpu_traits
      */
     static void warn_invalid_indices(const device_filter& filter, size_t max_index)
     {
-        if(filter.mode != device_selection_mode::SPECIFIC)
+        if(filter.mode != device_selection_mode::specific)
         {
             return;
         }

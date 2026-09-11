@@ -172,11 +172,66 @@ native. Use `--no-replay` for metadata-only (no GPU).
 | `PASS` | Replay completed; D2H checks passed |
 | `MAF` | GPU memory access fault during replay |
 | `FAIL` | Replay finished but validation failed (e.g. D2H mismatch) |
-| `ABORT` | Replay stopped early (fatal API, version mismatch, user abort) |
+| `ABORT` | Replay stopped early (fatal API, version mismatch, queue abort, user abort, replay process killed by a signal) |
+| `HANG` | Replay made no progress and the runner had to stop it (see `HRR_REPLAY_TIMEOUT`) |
 | `UNKNOWN` | Insufficient signal to classify (e.g. metadata-only triage, missing log) |
 
 When outcome is `UNKNOWN` or fault class is `unknown`, say so explicitly in the
 summary — do not invent a fault type.
+
+A fault on the GPU and a crash of the replay process are different findings.
+The runtime's `Memory access fault by GPU node-N ... on address 0x...` line is
+the GPU one: outcome `MAF`, fault class `illegal_memory_access`, or
+`read_only_page_fault` when the reason names a read-only page. The replay
+process dying on a signal without printing any of that is the host one: outcome
+`ABORT`, fault class `replay_crashed`, and it implicates no kernel, because
+nothing about the workload was established. Report that as a failed run rather
+than as the user's defect.
+
+An HSA queue abort (`HSA_STATUS_ERROR_EXCEPTION`, `ABORTED`, `MEMORY_FAULT`) is
+not a hang: `MEMORY_FAULT` is a fault and the other two are hardware exceptions,
+which an out-of-bounds access raises. The abort line carries the kernel but no
+faulting address, so read the kernel from there. A genuine hang shows up as no
+progress against the clock, which is what `HRR_REPLAY_TIMEOUT` reports; do not
+report one on the strength of an HSA status alone.
+
+### A faulting ATen kernel needs the original failure signature
+
+PyTorch and vLLM reach the GPU through `<<<>>>` (`hipLaunchByPtr`), and those
+kernels pass device pointers inside by-value structs: `vectorized_elementwise_kernel`
+takes a `std::array<char*,N>`, `reduce_kernel` a config struct with pointers at
+arbitrary offsets. Capture records those offsets and replay translates them, with
+a defensive rescan for any the capture-time heuristic missed, so on a current
+build these kernels replay faithfully and a fault on one is a real finding.
+
+Two things still make such a fault ambiguous: the detector is a value-based
+heuristic, and an archive recorded before that support landed carries no offsets
+at all, in which case replay launches with a capture-time address and faults on a
+workload that is fine. Both look identical to a workload defect.
+
+So the fault class stays what the evidence says (`illegal_memory_access`), the
+finding carries a note, and you **ask the user for their original failure
+signature** before calling it their bug. If their run never faulted here, suspect
+the recording. Faults on `hipModuleLaunchKernel`-launched kernels (hipBLASLt
+GEMMs, custom HIP kernels) do not carry this ambiguity.
+
+### Kernel attribution
+
+Replay runs with `--sync-after-launch`, which `triage_archive.sh` adds for you.
+Without it the GPU is serialized only once at the end, so a fault is reported but
+not attributed and the finding has no failing event and no kernel. Pass
+`--no-sync` only when throughput matters more than attribution.
+
+A clean replay implicates no kernel, so the finding reports none even though the
+archive lists the kernels it ran. Never present a kernel next to a `PASS`.
+
+A memory fault can tear the process down before the failing dispatch is
+attributed, leaving a log with no kernel at all. When the archive holds exactly
+one kernel, the finding names it and says the name was inferred; confirm it with
+`--sync-after-launch`, which stops replay on the faulting dispatch. With more
+than one kernel it stays unknown rather than guessing. Names that `--info`
+truncated to its column width are never used: a cut-off symbol cannot be looked
+up or handed to a kernel developer.
 
 ### Finding summary template (Step 5 / W4)
 

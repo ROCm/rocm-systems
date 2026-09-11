@@ -56,9 +56,8 @@ constexpr uint32_t kWavefrontSize = 64;
 
 /// How many worker threads the fixture's engine runs on.
 enum class Threading {
-  /// One thread drives every XCD, as the config ships. Any ordering between two
-  /// XCDs is then a property of the single drain loop rather than of the code
-  /// under test.
+  /// One thread drives every XCD. Any ordering between two XCDs is then a
+  /// property of the single drain loop rather than of the code under test.
   Single,
   /// One thread per XCD, via the XCD-aware partitioning policy. This is what puts
   /// two command processors on genuinely opposing threads, so the cross-CP inbox
@@ -77,9 +76,12 @@ struct XcdDistributionFixture {
       : loaded(config::load_config(CONFIG_PATH, rocjitsu::kEmbeddedSchema)) {
     soc = loaded.soc();
     memory = loaded.memory();
-    if (threading == Threading::ThreadPerXcd)
-      loaded.engine_config.num_threads =
-          amdgpu::clamp_xcd_partition_count(soc, static_cast<uint32_t>(soc->num_xcds()));
+    // load_config() resolves an unset num_threads to one partition per XCD, so
+    // Single has to pin one worker rather than just leave the config alone.
+    loaded.engine_config.num_threads =
+        threading == Threading::ThreadPerXcd
+            ? amdgpu::clamp_xcd_partition_count(soc, static_cast<uint32_t>(soc->num_xcds()))
+            : 1u;
     engine = std::make_unique<simdojo::SimulationEngine>(loaded.engine_config);
     engine->topology().set_root(loaded.take_root());
     loaded.wire_links(engine->topology());

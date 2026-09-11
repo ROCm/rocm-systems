@@ -1,6 +1,5 @@
 {
   "max_ticks": 10000000,
-  "num_threads": 1,
   "exec_mode": "functional",
   "vm": {
     "arch": "rdna3_5",

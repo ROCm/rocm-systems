@@ -8,7 +8,6 @@
 #include <timemory/backends/threading.hpp>
 #include <timemory/mpl/type_traits.hpp>
 #include <timemory/operations/types.hpp>
-#include <timemory/utility/macros.hpp>
 #include <timemory/utility/type_list.hpp>
 
 namespace rocprofsys

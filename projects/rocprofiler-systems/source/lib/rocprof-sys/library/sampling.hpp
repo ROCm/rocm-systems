@@ -13,7 +13,6 @@
 #include "library/components/callchain.hpp"
 #include "library/thread_data.hpp"
 
-#include <timemory/macros/language.hpp>
 #include <timemory/variadic/types.hpp>
 
 #include <cstdint>

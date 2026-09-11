@@ -9,7 +9,6 @@
 #include "library/thread_data.hpp"
 
 #include <timemory/components/base.hpp>
-#include <timemory/macros/language.hpp>
 #include <timemory/mpl/concepts.hpp>
 
 #include <atomic>

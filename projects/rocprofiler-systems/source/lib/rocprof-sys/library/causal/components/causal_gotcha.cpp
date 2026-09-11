@@ -8,7 +8,6 @@
 
 #include <timemory/backends/threading.hpp>
 #include <timemory/signals/signal_mask.hpp>
-#include <timemory/utility/macros.hpp>
 #include <timemory/utility/types.hpp>
 
 #include <array>
