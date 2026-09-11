@@ -37,6 +37,19 @@ def _run(metric: str, value: float, *, wall_ms: float = 1000.0) -> dict:
 
 
 class ConSanBenchmarkTest(unittest.TestCase):
+    def test_workloads_measure_one_bounded_operation_per_process(self) -> None:
+        self.assertEqual(len(benchmark.WORKLOADS), 3)
+        for workload in benchmark.WORKLOADS:
+            self.assertEqual(workload.config["warmup_steps"], 0)
+            self.assertEqual(workload.config["steps"], 1)
+
+        prefill, decode, moe = benchmark.WORKLOADS
+        self.assertEqual(prefill.config["request"]["generate_tokens"], 0)
+        self.assertEqual(decode.config["mode"], "continuous_batch")
+        self.assertEqual(decode.config["request"]["generate_tokens"], 1)
+        self.assertEqual(decode.primary_metric, "decode_latency_ms")
+        self.assertEqual(moe.config["request"]["generate_tokens"], 0)
+
     def test_site_audit_is_enabled_by_default_and_has_one_switch(self) -> None:
         common = [
             "--target",

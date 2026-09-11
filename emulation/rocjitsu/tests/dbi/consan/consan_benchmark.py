@@ -68,17 +68,17 @@ def _model_config(*, num_experts: int = 1) -> dict[str, Any]:
 WORKLOADS = (
     Workload(
         id="pytorch-dense-prefill",
-        description="PyTorch synthetic dense prefill (long prompt, one output token)",
+        description="PyTorch synthetic dense prefill (long prompt)",
         primary_metric="prefill_latency_ms",
         config={
             "mode": "offline_batch",
             "device": "cuda",
             "dtype": "bfloat16",
             "seed": 1234,
-            "warmup_steps": 1,
-            "steps": 5,
+            "warmup_steps": 0,
+            "steps": 1,
             "model": _model_config(),
-            "request": {"batch_size": 1, "prompt_len": 128, "generate_tokens": 1},
+            "request": {"batch_size": 1, "prompt_len": 128, "generate_tokens": 0},
             "serving": {"kv_cache": True},
             "checks": {
                 "fail_on_nan_logits": True,
@@ -89,18 +89,25 @@ WORKLOADS = (
     ),
     Workload(
         id="pytorch-synthetic-decode",
-        description="PyTorch synthetic dense decode (short prompt, repeated token loop)",
+        description="PyTorch synthetic dense decode (one continuous-batch tick)",
         primary_metric="decode_latency_ms",
         config={
-            "mode": "offline_batch",
+            "mode": "continuous_batch",
             "device": "cuda",
             "dtype": "bfloat16",
             "seed": 1234,
-            "warmup_steps": 1,
-            "steps": 4,
+            "warmup_steps": 0,
+            "steps": 1,
             "model": _model_config(),
-            "request": {"batch_size": 4, "prompt_len": 16, "generate_tokens": 16},
-            "serving": {"kv_cache": True},
+            "request": {"batch_size": 1, "prompt_len": 16, "generate_tokens": 1},
+            "serving": {
+                "kv_cache": True,
+                "continuous_batch": {
+                    "enabled": True,
+                    "max_active_requests": 1,
+                    "arrival_pattern": "fixed",
+                },
+            },
             "checks": {
                 "fail_on_nan_logits": True,
                 "fail_on_nonfinite_output": True,
@@ -117,10 +124,10 @@ WORKLOADS = (
             "device": "cuda",
             "dtype": "bfloat16",
             "seed": 1234,
-            "warmup_steps": 1,
-            "steps": 4,
+            "warmup_steps": 0,
+            "steps": 1,
             "model": _model_config(num_experts=4),
-            "request": {"batch_size": 1, "prompt_len": 64, "generate_tokens": 1},
+            "request": {"batch_size": 1, "prompt_len": 64, "generate_tokens": 0},
             "serving": {"kv_cache": True},
             "checks": {
                 "fail_on_nan_logits": True,
@@ -426,8 +433,8 @@ def _render_status(summary: dict[str, Any]) -> str:
         "",
         "## Absolute latency",
         "",
-        "Milliseconds in the workload's synchronized warm phase. Native is the "
-        "median of the measurements bracketing the four-mode matrix.",
+        "Milliseconds in the workload's synchronized first-use operation. Native is the "
+        "median of the fresh-process measurements bracketing the four-mode matrix.",
         "",
         "| Workload | Native | "
         + " | ".join(MODE_LABELS[mode] for mode in columns)

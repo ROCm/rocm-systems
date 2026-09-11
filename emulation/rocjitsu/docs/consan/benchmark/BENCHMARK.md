@@ -82,8 +82,8 @@ For each workload/ConSan-mode pair, the audited report must include:
   audit-disabled latency;
 - audit-enabled and audit-disabled transformation/load latency when the phases
   can be separated;
-- audit-enabled and audit-disabled warm workload latency when dynamic checking
-  can affect execution; and
+- audit-enabled and audit-disabled first-use workload latency when dynamic
+  checking can affect execution; and
 - the site counts selected, instrumented, checked, unsupported, and missed.
 
 Use the audit-disabled sample as the denominator. Label the result
@@ -93,9 +93,14 @@ mode, site-selection policy, and instrumentation. Only collection,
 cross-checking, and detailed audit logging may differ. A native baseline has no
 ConSan sites, so its site-audit overhead is reported as not applicable.
 
-Native and instrumented samples should be interleaved, with warmup separated
-from measurement. Report absolute values as well as paired ratios. Keep
-transformation/load latency, warm workload latency, peak device memory, original
+The initial suite measures one synchronized, first-use end-to-end operation in
+each fresh process. This deliberately includes lazy code-object transformation
+in the instrumented latency and avoids turning a bounded, code-object-lifetime
+Record/Replay report into an unbounded repetition log. Native samples bracket
+the four-mode matrix to expose drift. Future steady-state measurements may add
+an explicit report-lifetime/reset protocol, but must not silently reuse a
+saturated report. Report absolute values as well as paired ratios. Keep
+transformation/load latency, first-use workload latency, peak device memory, original
 and patched code-object sizes, report high-water marks, overflow state, and
 spilling as distinct measurements rather than folding them into one score.
 
@@ -150,8 +155,7 @@ TokenSpeed probes as end-to-end workloads would not close it.
 The useful starting set is therefore:
 
 1. a long-prompt, short-output dense `inference` cell for PyTorch prefill;
-2. a short-prompt, bounded multi-token dense `inference` cell for synthetic
-   PyTorch decode;
+2. a short-context, single continuous-batch tick for synthetic PyTorch decode;
 3. a small `num_experts > 1` `inference` cell for PyTorch top-1 MoE routing;
 4. a Qwen3-0.6B prefill cell and a Qwen3-0.6B decode cell through
    `tokenspeed_serve` on gfx950, and on gfx1201 only if that external stack can
