@@ -202,13 +202,13 @@ needs_full_parse(int argc, char** argv)
         auto arg = std::string_view{ argv[arg_idx] };
         if(arg == "--" || arg == "-?" || arg == "-h" || arg == "--help" ||
            arg == "--version" || arg == "--export-config" ||
-           arg.find("--export-config=") == 0 || arg == "--list-presets" ||
-           arg == "--explain" || arg.find("--explain=") == 0)
+           arg.starts_with("--export-config=") || arg == "--list-presets" ||
+           arg == "--explain" || arg.starts_with("--explain="))
         {
             return true;
         }
     }
-    return argc > 1 && argv[1] != nullptr && std::string_view{ argv[1] }.find('-') == 0;
+    return argc > 1 && argv[1] != nullptr && std::string_view{ argv[1] }.starts_with('-');
 }
 
 bool

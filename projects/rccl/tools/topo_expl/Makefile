@@ -70,6 +70,7 @@ RCCL_FILES = hipify_rccl/graph/topo.cc \
 			hipify_rccl/graph/xml.cc \
 			hipify_rccl/graph/rome_models.cc \
 			hipify_rccl/graph/archinfo.cc \
+			hipify_rccl/graph/rccl_graph_gen.cc \
 			../../src/misc/param.cc \
 			../../src/misc/nvmlwrap_stub.cc \
 			hipify_rccl/rccl_wrap.cc \
