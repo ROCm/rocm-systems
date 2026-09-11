@@ -84,6 +84,7 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
     uint32_t guest_instruction_word_count = 0u;
     bool spill_overlaps_guest_operands = false;
     bool wrap_embedded_guest_vgpr_bank = false;
+    std::optional<uint16_t> wave_sched_mode;
   };
   std::vector<PlannedSampledPatch> planned_patches;
   planned_patches.reserve(candidates.size());
@@ -306,6 +307,12 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
     planned.guest_instruction_word_count = guest_instruction_word_count;
     planned.spill_overlaps_guest_operands = spill_overlaps_guest_operands;
     planned.wrap_embedded_guest_vgpr_bank = wrap_embedded_guest_vgpr_bank;
+    if (const ConSanProgramContainer *container =
+            result.program_inventory.container(candidate.site().container)) {
+      planned.wave_sched_mode = consan_wave_sched_mode_at(
+          arch, active_bytes, container->text_file_offset, container->entry_text_offset,
+          container->text_file_offset + candidate.anchor());
+    }
     planned_patches.push_back(std::move(planned));
     next_record_index += required_slots;
     if (next_record_index == max_access_record_slots)
@@ -390,6 +397,7 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
             ? std::span<const uint32_t>(planned_patch.scalar_spill->restore_words)
             : std::span<const uint32_t>{};
     body_options.incoming_vgpr_bank_mode = candidate.incoming_vgpr_bank_mode;
+    body_options.incoming_wave_sched_mode = planned_patch.wave_sched_mode;
     body_options.entry_prefix_words = entry_prefix_words;
     body_options.probe_guest_instruction_offset = probe_guest_offset;
     body_options.guest_instruction_word_count = guest_word_count;

@@ -13,6 +13,7 @@
 #include "rocjitsu/code/patch/spill_manager.h"
 
 #include <algorithm>
+#include <array>
 #include <ranges>
 
 namespace rocjitsu::consan_moi_impl {
@@ -83,6 +84,21 @@ assemble_moi_appended_body(const MoiAppendedBodyPatchPlan &plan,
   }
   const bool select_low_vgpr_bank =
       moi_appended_body_uses_selectable_vgpr_bank(options.arch, options.incoming_vgpr_bank_mode);
+  const bool suspend_expert_scheduling = options.incoming_wave_sched_mode == 2u;
+  const auto wave_sched_hwreg = build_hwreg_imm(/*reg_id=*/26u, /*offset=*/0u, /*size_bits=*/2u);
+  const auto normal_scheduling =
+      suspend_expert_scheduling && wave_sched_hwreg
+          ? build_s_setreg_imm32_b32(*wave_sched_hwreg, /*literal=*/0u, options.arch)
+          : std::optional<std::array<uint32_t, 2>>{};
+  const auto expert_scheduling =
+      suspend_expert_scheduling && wave_sched_hwreg
+          ? build_s_setreg_imm32_b32(*wave_sched_hwreg, /*literal=*/2u, options.arch)
+          : std::optional<std::array<uint32_t, 2>>{};
+  if (suspend_expert_scheduling && (!normal_scheduling || !expert_scheduling)) {
+    errors.emplace_back("ConSan MOI " + std::string(probe_name) +
+                        " could not suspend expert scheduling");
+    return std::nullopt;
+  }
   const bool capture_high_bank_address = options.high_bank_address_source.has_value();
   const uint8_t incoming_vgpr_msb_mode =
       static_cast<uint8_t>(options.incoming_vgpr_bank_mode.value_or(0u));
@@ -96,6 +112,8 @@ assemble_moi_appended_body(const MoiAppendedBodyPatchPlan &plan,
   }
   const size_t probe_prefix_words = probe_words.size() - options.trailing_guest_word_count;
   body.insert(body.end(), options.entry_prefix_words.begin(), options.entry_prefix_words.end());
+  if (normal_scheduling)
+    body.insert(body.end(), normal_scheduling->begin(), normal_scheduling->end());
   uint8_t current_vgpr_msb_mode = incoming_vgpr_msb_mode;
   const bool save_spill_before_high_bank_capture = capture_high_bank_address && plan.spill;
   if (save_spill_before_high_bank_capture) {
@@ -147,18 +165,29 @@ assemble_moi_appended_body(const MoiAppendedBodyPatchPlan &plan,
                         " has an invalid embedded-guest VGPR-bank plan");
     return std::nullopt;
   }
+  if (suspend_expert_scheduling && (!guest_word || options.trailing_guest_word_count != 0u)) {
+    errors.emplace_back("ConSan MOI " + std::string(probe_name) +
+                        " has an invalid expert-scheduled guest plan");
+    return std::nullopt;
+  }
   const bool wrap_embedded_guest = options.wrap_embedded_guest_vgpr_bank;
-  if (wrap_embedded_guest) {
+  if (wrap_embedded_guest || suspend_expert_scheduling) {
     body.insert(body.end(), probe_words.begin(), probe_words.begin() + *guest_word);
-    body.push_back(*instrumentation::build_s_set_vgpr_msb_transition(
-        0u, static_cast<uint8_t>(*options.incoming_vgpr_bank_mode), options.arch));
+    if (wrap_embedded_guest)
+      body.push_back(*instrumentation::build_s_set_vgpr_msb_transition(
+          0u, static_cast<uint8_t>(*options.incoming_vgpr_bank_mode), options.arch));
+    if (expert_scheduling)
+      body.insert(body.end(), expert_scheduling->begin(), expert_scheduling->end());
     if (options.body_guest_instruction_offset)
       *options.body_guest_instruction_offset =
           static_cast<uint32_t>(body.size() * sizeof(uint32_t));
     body.insert(body.end(), probe_words.begin() + *guest_word,
                 probe_words.begin() + *guest_word + guest_word_count);
-    body.push_back(*instrumentation::build_s_set_vgpr_msb_transition(
-        static_cast<uint8_t>(*options.incoming_vgpr_bank_mode), 0u, options.arch));
+    if (normal_scheduling)
+      body.insert(body.end(), normal_scheduling->begin(), normal_scheduling->end());
+    if (wrap_embedded_guest)
+      body.push_back(*instrumentation::build_s_set_vgpr_msb_transition(
+          static_cast<uint8_t>(*options.incoming_vgpr_bank_mode), 0u, options.arch));
     body.insert(body.end(), probe_words.begin() + *guest_word + guest_word_count,
                 probe_words.begin() + probe_prefix_words);
   } else {
@@ -173,7 +202,8 @@ assemble_moi_appended_body(const MoiAppendedBodyPatchPlan &plan,
   }
   const size_t trailing_probe_body_begin = body.size();
   body.insert(body.end(), probe_words.begin() + probe_prefix_words, probe_words.end());
-  if (guest_word && options.body_guest_instruction_offset && !wrap_embedded_guest) {
+  if (guest_word && options.body_guest_instruction_offset && !wrap_embedded_guest &&
+      !suspend_expert_scheduling) {
     const size_t body_word = *guest_word < probe_prefix_words
                                  ? probe_body_begin + *guest_word
                                  : trailing_probe_body_begin + *guest_word - probe_prefix_words;
@@ -188,6 +218,8 @@ assemble_moi_appended_body(const MoiAppendedBodyPatchPlan &plan,
     body.push_back(*instrumentation::build_s_set_vgpr_msb_transition(
         0u, static_cast<uint8_t>(*options.incoming_vgpr_bank_mode), options.arch));
   }
+  if (expert_scheduling)
+    body.insert(body.end(), expert_scheduling->begin(), expert_scheduling->end());
   body.insert(body.end(), plan.displaced_tail_words.begin(), plan.displaced_tail_words.end());
   if (plan.body_size != 0u &&
       (body.size() + options.deferred_guest_word_count) * sizeof(uint32_t) != plan.body_size) {

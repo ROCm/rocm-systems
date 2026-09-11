@@ -67,6 +67,10 @@ struct MoiAppendedBodyOptions {
   /// no transition; a nonzero value is valid only on a target whose profile
   /// advertises selectable banks.
   std::optional<uint16_t> incoming_vgpr_bank_mode = std::nullopt;
+  /// WAVE_SCHED_MODE observed on entry. A value of two brackets injected
+  /// memory work in normal scheduling while preserving the guest instruction
+  /// and the continuation in expert scheduling.
+  std::optional<uint16_t> incoming_wave_sched_mode = std::nullopt;
   /// Guest address operand to copy before selecting the low instrumentation
   /// bank, and the low-bank scratch register that receives the copy. They are
   /// either both present or both absent.

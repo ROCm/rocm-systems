@@ -85,8 +85,8 @@ sampled_cfg_forward_distance(const MoiResourcePlanningState &state, uint64_t des
     const MoiSampledSyncEmissionPlan &plan, const VgprSpillSequence *spill,
     const SgprSpillSequence *scalar_spill, rj_code_arch_t arch,
     const ConSanMoiReportBufferLayout &layout, const ConSanMoiPrivateStateLayout *private_layout,
-    std::optional<uint16_t> selectable_vgpr_bank_mode, std::vector<std::string> &errors,
-    uint32_t *guest_instruction_offset = nullptr) {
+    std::optional<uint16_t> selectable_vgpr_bank_mode, std::optional<uint16_t> wave_sched_mode,
+    std::vector<std::string> &errors, uint32_t *guest_instruction_offset = nullptr) {
   const bool scalar_persistent = plan.persistent_sgprs.complete();
   if (!plan.owner_epoch_vgprs.epoch || !plan.exec_save_sgpr || !plan.owner_epoch_vgprs.owner ||
       !plan.workitem_owner || candidate.owner_descriptor_file_offset == 0u ||
@@ -143,6 +143,20 @@ sampled_cfg_forward_distance(const MoiResourcePlanningState &state, uint64_t des
   const bool control_selectable_vgpr_bank = target->has_selectable_vgpr_bank;
   const bool restore_guest_vgpr_bank =
       control_selectable_vgpr_bank && selectable_vgpr_bank_mode.value_or(0u) != 0u;
+  const bool suspend_expert_scheduling = wave_sched_mode == 2u;
+  const auto wave_sched_hwreg = build_hwreg_imm(/*reg_id=*/26u, /*offset=*/0u, /*size_bits=*/2u);
+  const auto normal_scheduling =
+      suspend_expert_scheduling && wave_sched_hwreg
+          ? build_s_setreg_imm32_b32(*wave_sched_hwreg, /*literal=*/0u, arch)
+          : std::optional<std::array<uint32_t, 2>>{};
+  const auto expert_scheduling =
+      suspend_expert_scheduling && wave_sched_hwreg
+          ? build_s_setreg_imm32_b32(*wave_sched_hwreg, /*literal=*/2u, arch)
+          : std::optional<std::array<uint32_t, 2>>{};
+  if (suspend_expert_scheduling && (!normal_scheduling || !expert_scheduling)) {
+    errors.emplace_back("ConSan MOI sampled barrier could not suspend expert scheduling");
+    return std::nullopt;
+  }
   // Execute the guest barrier before borrowing any live VGPRs.  In particular,
   // do not carry address-free private spill values across s_barrier: physical
   // CDNA4 kernels can resume a different wave first, and the resulting
@@ -156,6 +170,8 @@ sampled_cfg_forward_distance(const MoiResourcePlanningState &state, uint64_t des
     std::memcpy(&word, bytes.data() + candidate.site->file_offset + offset, sizeof(word));
     words.push_back(word);
   }
+  if (normal_scheduling)
+    words.insert(words.end(), normal_scheduling->begin(), normal_scheduling->end());
   // A patched s_call_i64 can be immediately followed by the guest's next
   // s_set_vgpr_msb.  That program-state update may take effect as control
   // transfers. Establish the low instrumentation bank after the guest barrier
@@ -429,6 +445,8 @@ sampled_cfg_forward_distance(const MoiResourcePlanningState &state, uint64_t des
   if (restore_guest_vgpr_bank)
     sequence.append(instrumentation::build_s_set_vgpr_msb_transition(
         0u, static_cast<uint8_t>(*selectable_vgpr_bank_mode), arch));
+  if (expert_scheduling)
+    words.insert(words.end(), expert_scheduling->begin(), expert_scheduling->end());
   if (!sequence.finish(arch)) {
     errors.emplace_back("ConSan MOI sampled barrier local branch is out of range");
     return std::nullopt;
@@ -794,12 +812,15 @@ void try_apply_sampled_barrier_sync_patch(
     const std::optional<uint16_t> selectable_vgpr_bank_mode =
         consan_selectable_vgpr_bank_mode_at(arch, active_bytes, container->text_file_offset,
                                             container->entry_text_offset, site.file_offset);
+    const std::optional<uint16_t> wave_sched_mode =
+        consan_wave_sched_mode_at(arch, active_bytes, container->text_file_offset,
+                                  container->entry_text_offset, site.file_offset);
     uint32_t guest_instruction_offset = 0u;
     auto words = build_sampled_barrier_sync_cave_words(
         bytes, planned.candidate, *emission_plan, planned.spill ? &*planned.spill : nullptr,
         planned.scalar_spill ? &*planned.scalar_spill : nullptr, arch, layout,
         planned.private_layout ? &*planned.private_layout : nullptr, selectable_vgpr_bank_mode,
-        result.errors, &guest_instruction_offset);
+        wave_sched_mode, result.errors, &guest_instruction_offset);
     if (!words)
       return;
     ConSanPatchInfo patch;

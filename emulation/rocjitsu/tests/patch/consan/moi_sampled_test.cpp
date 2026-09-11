@@ -6613,6 +6613,118 @@ TEST(ConSanMoi, SampledQualifiedBarrierPublishesSelectedEpochTransition) {
       trampoline, std::array<uint32_t, 3>{*restore_exec, *restore_vcc, *restore_scc}));
 }
 
+TEST(ConSanMoi, Gfx1201SampledBarrierSuspendsDistantGuestExpertScheduling) {
+  constexpr uint32_t kBarrierSignal = 0xBE804EC1u;
+  constexpr uint32_t kBarrierWait = 0xBF94FFFFu;
+  const auto sched_hwreg = build_hwreg_imm(/*reg_id=*/26u, /*offset=*/0u, /*size_bits=*/2u);
+  ASSERT_TRUE(sched_hwreg);
+  const auto normal =
+      build_s_setreg_imm32_b32(*sched_hwreg, /*literal=*/0u, ROCJITSU_CODE_ARCH_RDNA4);
+  const auto expert =
+      build_s_setreg_imm32_b32(*sched_hwreg, /*literal=*/2u, ROCJITSU_CODE_ARCH_RDNA4);
+  ASSERT_TRUE(normal && expert);
+
+  std::vector<uint32_t> words(96u, build_s_nop(0, ROCJITSU_CODE_ARCH_RDNA4));
+  words[0] = 0xD8340000u;
+  words[1] = 0x00000000u; // ds_store_b32 v0, v0
+  words[8] = (*expert)[0];
+  words[9] = (*expert)[1];
+  constexpr size_t kSignal = 48u;
+  constexpr size_t kWait = 49u;
+  words[kSignal] = kBarrierSignal;
+  words[kWait] = kBarrierWait;
+  words.back() = build_s_endpgm(ROCJITSU_CODE_ARCH_RDNA4);
+
+  MoiOptions options = moi_options(ConSanMoiEngine::Sampled);
+  options.moi_track_barriers = true;
+  options.scratch_vgpr = 8;
+  options.moi_exec_save_sgpr = 80;
+  options.set_moi_owner_epoch_vgprs(20, 21);
+  options.moi_report_buffer_address = 0x123456780000ull;
+  options.moi_report_buffer_size = direct_sampled_report_bytes(2);
+  options.max_patches = 3;
+
+  const ConSanTransformArtifacts result = test_lower_consan(
+      make_rdna4_lds_code_object(words, "sampled_expert_scheduled_barrier"), options);
+
+  ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
+  const auto patch = std::ranges::find_if(result.patches, [&](const ConSanPatchInfo &candidate) {
+    return candidate.kind == ConSanPatchKind::TrampolineMoiSampledSyncMetadata &&
+           candidate.anchor_offset == kWait * sizeof(uint32_t);
+  });
+  ASSERT_NE(patch, result.patches.end()) << testing::PrintToString(result.warnings);
+  AmdGpuCodeObject patched(result.replacement.data(), result.replacement.size());
+  ASSERT_TRUE(patched.is_valid());
+  const std::vector<uint32_t> trampoline =
+      text_words_at_offset(patched, patch->trampoline_offset, patch->trampoline_size);
+  const auto guest_then_normal = std::array{kBarrierWait, (*normal)[0], (*normal)[1]};
+  EXPECT_FALSE(std::ranges::search(trampoline, guest_then_normal).empty());
+  EXPECT_FALSE(std::ranges::search(trampoline, *expert).empty());
+}
+
+TEST(ConSanMoi, Gfx1201SampledAccessSuspendsDistantGuestExpertScheduling) {
+  constexpr std::array<uint32_t, 2> kLdsLoad = {
+      0xDBFC00A0u,
+      0x9C000083u, // ds_load_b128 v[156:159], v131 offset:160
+  };
+  const auto sched_hwreg = build_hwreg_imm(/*reg_id=*/26u, /*offset=*/0u, /*size_bits=*/2u);
+  ASSERT_TRUE(sched_hwreg);
+  const auto normal =
+      build_s_setreg_imm32_b32(*sched_hwreg, /*literal=*/0u, ROCJITSU_CODE_ARCH_RDNA4);
+  const auto expert =
+      build_s_setreg_imm32_b32(*sched_hwreg, /*literal=*/2u, ROCJITSU_CODE_ARCH_RDNA4);
+  ASSERT_TRUE(normal && expert);
+
+  std::vector<uint32_t> words = {(*expert)[0], (*expert)[1]};
+  words.insert(words.end(), 16u, build_s_nop(0, ROCJITSU_CODE_ARCH_RDNA4));
+  const uint64_t access_offset = words.size() * sizeof(uint32_t);
+  words.insert(words.end(), kLdsLoad.begin(), kLdsLoad.end());
+  words.push_back(build_s_endpgm(ROCJITSU_CODE_ARCH_RDNA4));
+
+  MoiOptions options = moi_options(ConSanMoiEngine::Sampled);
+  options.scratch_vgpr = 1;
+  options.moi_exec_save_sgpr = 80;
+  options.set_moi_owner_epoch_vgprs(20, 21);
+  options.moi_report_buffer_address = 0x123456780000ull;
+  options.moi_report_buffer_size = direct_sampled_report_bytes(2);
+  options.moi_runtime_sample_stride = 2;
+
+  const ConSanTransformArtifacts result =
+      test_lower_consan(make_rdna4_lds_code_object(words, "sampled_expert_scheduled_access",
+                                                   kRdna4Wave64AllVgprsGranulated),
+                        options);
+
+  ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
+  const auto patch = std::ranges::find_if(result.patches, [&](const ConSanPatchInfo &candidate) {
+    return candidate.kind == ConSanPatchKind::TrampolineMoiSampledWatchpointStore &&
+           candidate.anchor_offset == access_offset;
+  });
+  ASSERT_NE(patch, result.patches.end()) << testing::PrintToString(result.warnings);
+  ASSERT_TRUE(patch->relocated_guest_instruction_offset);
+  AmdGpuCodeObject patched(result.replacement.data(), result.replacement.size());
+  ASSERT_TRUE(patched.is_valid());
+  const std::vector<uint32_t> trampoline =
+      text_words_at_offset(patched, patch->trampoline_offset, patch->trampoline_size);
+  const size_t guest_word =
+      (*patch->relocated_guest_instruction_offset - patch->trampoline_offset) / sizeof(uint32_t);
+  ASSERT_GE(guest_word, expert->size());
+  ASSERT_LE(guest_word + kLdsLoad.size() + normal->size(), trampoline.size());
+  EXPECT_TRUE(std::equal(expert->begin(), expert->end(),
+                         trampoline.begin() + static_cast<ptrdiff_t>(guest_word - expert->size())))
+      << "guest_word=" << guest_word << " trampoline=" << testing::PrintToString(trampoline);
+  EXPECT_TRUE(std::equal(kLdsLoad.begin(), kLdsLoad.end(),
+                         trampoline.begin() + static_cast<ptrdiff_t>(guest_word)))
+      << "guest_word=" << guest_word << " trampoline=" << testing::PrintToString(trampoline);
+  EXPECT_TRUE(std::equal(normal->begin(), normal->end(),
+                         trampoline.begin() + static_cast<ptrdiff_t>(guest_word + kLdsLoad.size())))
+      << "guest_word=" << guest_word << " trampoline=" << testing::PrintToString(trampoline);
+  EXPECT_FALSE(std::ranges::search(std::span(trampoline).first(guest_word), *normal).empty());
+  EXPECT_FALSE(
+      std::ranges::search(
+          std::span(trampoline).subspan(guest_word + kLdsLoad.size() + normal->size()), *expert)
+          .empty());
+}
+
 TEST(ConSanMoi, SampledStraightLineSeparatedBarriersPublishTwoMemberSequences) {
   std::vector<uint32_t> words(540, build_s_nop(0, ROCJITSU_CODE_ARCH_RDNA4));
   words[0] = 0xD8340000u;

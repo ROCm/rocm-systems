@@ -38,6 +38,7 @@
 #include "rocjitsu/code/patch/consan/modes/sampled/consan_moi_sampled_contracts.h"
 #include "rocjitsu/code/patch/consan/modes/sampled/consan_moi_sampled_window_emission.h"
 #include "rocjitsu/code/patch/consan/targets/consan_vgpr_bank_state.h"
+#include "rocjitsu/code/patch/consan/targets/consan_wave_sched_state.h"
 #include "rocjitsu/code/patch/instruction_sequence.h"
 #include "rocjitsu/code/patch/instrumentation_builder.h"
 #include "rocjitsu/code/patch/spill_manager.h"
