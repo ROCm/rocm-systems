@@ -38,7 +38,7 @@ Panel Config:
           max: MAX(SPI_RA_REQ_ALLOC_sum)
           unit: Count
         # SPI_CSN_WAVE_* reads CS0-only (DEBUG_PIPE_SEL); compute uses SPI_ALL_WAVE.
-        Dispatched Waves:
+        Dispatched Wavefronts:
           avg: AVG(SPI_ALL_WAVE_sum)
           min: MIN(SPI_ALL_WAVE_sum)
           max: MAX(SPI_ALL_WAVE_sum)
@@ -190,7 +190,7 @@ Panel Config:
       (SPI_RA_REQ_ALLOC_sum). SPI_CSN_NUM_THREADGROUPS_sum is CS-pipe scoped and
       reads zero for gfx1250 compute dispatches.
 
-    Dispatched Waves: >-
+    Dispatched Wavefronts: >-
       Total wavefronts dispatched (SPI_ALL_WAVE_sum; SPI_CSN_WAVE_sum is CS-pipe
       scoped and reads zero for gfx1250 compute dispatches).
 
