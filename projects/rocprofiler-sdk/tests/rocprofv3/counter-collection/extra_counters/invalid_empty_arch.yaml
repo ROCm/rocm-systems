@@ -1,7 +1,0 @@
-rocprofiler-sdk:
-  counters:
-  - name: TEST
-    description: test
-    definitions:
-    - architectures: []
-      expression: test
