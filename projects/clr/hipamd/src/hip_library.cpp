@@ -99,14 +99,18 @@ hipError_t LibraryContainer::ResolveKernelForDevice(hipKernel_t* k, const std::s
     return Kernel(k, name);
   }
 
-  // The first getter or setter for a non-primary device loads its code object. Later calls from
+  // The first setter/getter for a non-primary device loads its code object. Later calls from
   // either API reuse this entry and the kernel cached internally by Function::GetDynFunc.
   std::scoped_lock<std::mutex> lock(lib_mutex_);
   auto dynco = code_objects_by_device_.find(device);
   if (dynco == code_objects_by_device_.end()) {
     auto target = std::make_unique<hip::DynCO>(device);
     const char* fname = filename_.empty() ? nullptr : filename_.c_str();
-    IHIP_RETURN_ONFAIL(target->loadCodeObject(fname, image_, /* init_global_vars */ false));
+    const void* image = filename_.empty() ? image_storage_.data() : nullptr;
+    // This code object is used only to resolve functions for the requested device, no need to
+    // initialize global and managed variables.
+    constexpr bool init_global_vars = false;
+    IHIP_RETURN_ONFAIL(target->loadCodeObject(fname, image, init_global_vars));
     dynco = code_objects_by_device_.emplace(device, std::move(target)).first;
   }
 
@@ -133,7 +137,7 @@ hipError_t LibraryContainer::GetManaged(const std::string& name, void** dptr, si
   return dynco_->GetManaged(name, dptr, bytes);
 }
 
-LibraryContainer::LibraryContainer(const char* code_object) : image_(code_object) {}
+LibraryContainer::LibraryContainer(const char* code_object) : input_image_(code_object) {}
 
 LibraryContainer::LibraryContainer(const std::string &file_name) : filename_(file_name) {}
 
@@ -160,13 +164,16 @@ hipError_t LibraryContainer::BuildIt() {
   if (built_.load(std::memory_order_relaxed)) {
     return hipSuccess;
   }
-  if (filename_.empty() && image_ == nullptr) {
+  if (filename_.empty() && input_image_ == nullptr) {
     return hipErrorInvalidValue;
   }
 
   dynco_ = std::make_unique<hip::DynCO>();
   const char* fname = filename_.empty() ? nullptr : filename_.c_str();
-  IHIP_RETURN_ONFAIL(dynco_->loadCodeObject(fname, image_));
+  std::vector<char>* input_storage = filename_.empty() ? &image_storage_ : nullptr;
+  // The primary code object (for current device) owns the library's global and managed-variable state.
+  constexpr bool init_global_vars = true;
+  IHIP_RETURN_ONFAIL(dynco_->loadCodeObject(fname, input_image_, init_global_vars, input_storage));
 
   built_.store(true, std::memory_order_release);
   return hipSuccess;

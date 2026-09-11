@@ -12,6 +12,7 @@
 #include <memory>
 #include <mutex>
 #include <string>
+#include <vector>
 
 #include <hip/hip_runtime.h>
 
@@ -63,12 +64,12 @@ class LibraryContainer {
 
   std::mutex lib_mutex_;
   std::atomic_bool built_ = false;
+  std::string filename_;              // empty when loading from image
+  const char* input_image_ = nullptr; // caller-owned image, used only when filename_ is empty
+  std::vector<char> image_storage_;   // image copy needed for lazy-load of secondary devices
   std::unique_ptr<hip::DynCO> dynco_;
   // Function-only code objects keyed by device ID; dynco_ owns the primary full load.
   std::map<int, std::unique_ptr<hip::DynCO>> code_objects_by_device_;
-  // Construction args saved until the lazy BuildIt() runs.
-  std::string filename_;          // empty when loading from image
-  const char* image_ = nullptr;   // valid only when filename_ is empty
   // Cache of hipKernel_t handles keyed by (name, device).
   std::map<std::pair<std::string /* name */, int /* device */>, hipKernel_t> kernels_;
 };

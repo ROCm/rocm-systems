@@ -237,7 +237,7 @@ hipError_t hipFuncSetAttribute(const void* func, hipFuncAttribute attr, int valu
   if (func == nullptr) {
     HIP_RETURN(hipErrorInvalidDeviceFunction);
   }
-  if (attr < 0 || attr >= hipFuncAttributeMax) {
+  if (attr < 0 || attr > hipFuncAttributeMax) {
     HIP_RETURN(hipErrorInvalidValue);
   }
 
