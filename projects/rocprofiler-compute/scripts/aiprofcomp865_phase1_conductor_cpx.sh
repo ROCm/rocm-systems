@@ -41,8 +41,14 @@ cd "$REPO"
 git fetch origin "$BRANCH"
 git checkout "$BRANCH"
 git pull --ff-only origin "$BRANCH" || true
-# Sparse clone must include vendored PyYAML (and other vendored bits under src/).
-git sparse-checkout add projects/rocprofiler-compute/src/vendored 2>/dev/null || true
+# Sparse clone often omits vendored blobs; materialize from git or rsync from dev machine.
+if [[ ! -f "$PROJ/src/vendored/pyyaml/lib/yaml/__init__.py" ]]; then
+  git checkout HEAD -- projects/rocprofiler-compute/src/vendored 2>/dev/null || true
+fi
+if [[ ! -f "$PROJ/src/vendored/pyyaml/lib/yaml/__init__.py" ]]; then
+  echo "ERROR: missing src/vendored (rsync from workstation or use full clone)."
+  exit 1
+fi
 git log -1 --oneline
 
 cd "$PROJ"
