@@ -106,67 +106,67 @@ Panel Config:
           avg: SUM(CHC_REQ_sum) / SUM($denom)
           min: MIN(CHC_REQ_sum / $denom)
           max: MAX(CHC_REQ_sum / $denom)
-          unit: (Count + $normUnit)
+          unit: (Requests + $normUnit)
         Total Requests - Read:
           avg: SUM(CHC_REQ_READ_sum) / SUM($denom)
           min: MIN(CHC_REQ_READ_sum / $denom)
           max: MAX(CHC_REQ_READ_sum / $denom)
-          unit: (Count + $normUnit)
+          unit: (Requests + $normUnit)
         Total Requests - 32B Read:
           avg: SUM(CHC_REQ_READ_32B_sum) / SUM($denom)
           min: MIN(CHC_REQ_READ_32B_sum / $denom)
           max: MAX(CHC_REQ_READ_32B_sum / $denom)
-          unit: (Count + $normUnit)
+          unit: (Requests + $normUnit)
         Total Requests - 64B Read:
           avg: SUM(CHC_REQ_READ_64B_sum) / SUM($denom)
           min: MIN(CHC_REQ_READ_64B_sum / $denom)
           max: MAX(CHC_REQ_READ_64B_sum / $denom)
-          unit: (Count + $normUnit)
+          unit: (Requests + $normUnit)
         Total Requests - 128B Read:
           avg: SUM(CHC_REQ_READ_128B_sum) / SUM($denom)
           min: MIN(CHC_REQ_READ_128B_sum / $denom)
           max: MAX(CHC_REQ_READ_128B_sum / $denom)
-          unit: (Count + $normUnit)
+          unit: (Requests + $normUnit)
         Total Requests - 256B Read:
           avg: SUM(CHC_REQ_READ_256B_sum) / SUM($denom)
           min: MIN(CHC_REQ_READ_256B_sum / $denom)
           max: MAX(CHC_REQ_READ_256B_sum / $denom)
-          unit: (Count + $normUnit)
+          unit: (Requests + $normUnit)
         Total Requests - Write:
           avg: SUM(CHC_REQ_WRITE_sum) / SUM($denom)
           min: MIN(CHC_REQ_WRITE_sum / $denom)
           max: MAX(CHC_REQ_WRITE_sum / $denom)
-          unit: (Count + $normUnit)
+          unit: (Requests + $normUnit)
         Total Requests - 32B Write:
           avg: SUM(CHC_REQ_WRITE_32B_sum) / SUM($denom)
           min: MIN(CHC_REQ_WRITE_32B_sum / $denom)
           max: MAX(CHC_REQ_WRITE_32B_sum / $denom)
-          unit: (Count + $normUnit)
+          unit: (Requests + $normUnit)
         Total Requests - 64B Write:
           avg: SUM(CHC_REQ_WRITE_64B_sum) / SUM($denom)
           min: MIN(CHC_REQ_WRITE_64B_sum / $denom)
           max: MAX(CHC_REQ_WRITE_64B_sum / $denom)
-          unit: (Count + $normUnit)
+          unit: (Requests + $normUnit)
         Total Requests - 128B Write:
           avg: SUM(CHC_REQ_WRITE_128B_sum) / SUM($denom)
           min: MIN(CHC_REQ_WRITE_128B_sum / $denom)
           max: MAX(CHC_REQ_WRITE_128B_sum / $denom)
-          unit: (Count + $normUnit)
+          unit: (Requests + $normUnit)
         Total Requests - 256B Write:
           avg: SUM(CHC_REQ_WRITE_256B_sum) / SUM($denom)
           min: MIN(CHC_REQ_WRITE_256B_sum / $denom)
           max: MAX(CHC_REQ_WRITE_256B_sum / $denom)
-          unit: (Count + $normUnit)
+          unit: (Requests + $normUnit)
         Total Requests - Atomic with Return:
           avg: SUM(CHC_REQ_ATOMIC_WITH_RET_sum) / SUM($denom)
           min: MIN(CHC_REQ_ATOMIC_WITH_RET_sum / $denom)
           max: MAX(CHC_REQ_ATOMIC_WITH_RET_sum / $denom)
-          unit: (Count + $normUnit)
+          unit: (Requests + $normUnit)
         Total Requests - Atomic without Return:
           avg: SUM(CHC_REQ_ATOMIC_WITHOUT_RET_sum) / SUM($denom)
           min: MIN(CHC_REQ_ATOMIC_WITHOUT_RET_sum / $denom)
           max: MAX(CHC_REQ_ATOMIC_WITHOUT_RET_sum / $denom)
-          unit: (Count + $normUnit)
+          unit: (Requests + $normUnit)
   - metric_table:
       id: 1505
       title: CHC Bandwidth and Latency

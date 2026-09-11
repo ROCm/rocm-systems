@@ -48,7 +48,7 @@ Panel Config:
           avg: SUM(GLARBA_ARB_REQUESTS_sum) / SUM($denom)
           min: MIN(GLARBA_ARB_REQUESTS_sum / $denom)
           max: MAX(GLARBA_ARB_REQUESTS_sum / $denom)
-          unit: (Count + $normUnit)
+          unit: (Requests + $normUnit)
         GLARBA Request Latency:
           avg: SUM(GLARBA_REQ_INFLIGHT_LEVEL_sum) / SUM(GLARBA_ARB_REQUESTS_sum)
           min: MIN(GLARBA_REQ_INFLIGHT_LEVEL_sum / GLARBA_ARB_REQUESTS_sum)
@@ -95,27 +95,27 @@ Panel Config:
           avg: SUM(GLARBC_REQ_sum) / SUM($denom)
           min: MIN(GLARBC_REQ_sum / $denom)
           max: MAX(GLARBC_REQ_sum / $denom)
-          unit: (Count + $normUnit)
+          unit: (Requests + $normUnit)
         GLARBC Requests - Read:
           avg: SUM(GLARBC_REQ_READ_sum) / SUM($denom)
           min: MIN(GLARBC_REQ_READ_sum / $denom)
           max: MAX(GLARBC_REQ_READ_sum / $denom)
-          unit: (Count + $normUnit)
+          unit: (Requests + $normUnit)
         GLARBC Requests - Write:
           avg: SUM(GLARBC_REQ_WRITE_sum) / SUM($denom)
           min: MIN(GLARBC_REQ_WRITE_sum / $denom)
           max: MAX(GLARBC_REQ_WRITE_sum / $denom)
-          unit: (Count + $normUnit)
+          unit: (Requests + $normUnit)
         GLARBC Requests - Atomic with Return:
           avg: SUM(GLARBC_REQ_ATOMIC_WITH_RET_sum) / SUM($denom)
           min: MIN(GLARBC_REQ_ATOMIC_WITH_RET_sum / $denom)
           max: MAX(GLARBC_REQ_ATOMIC_WITH_RET_sum / $denom)
-          unit: (Count + $normUnit)
+          unit: (Requests + $normUnit)
         GLARBC Requests - Atomic without Return:
           avg: SUM(GLARBC_REQ_ATOMIC_WITHOUT_RET_sum) / SUM($denom)
           min: MIN(GLARBC_REQ_ATOMIC_WITHOUT_RET_sum / $denom)
           max: MAX(GLARBC_REQ_ATOMIC_WITHOUT_RET_sum / $denom)
-          unit: (Count + $normUnit)
+          unit: (Requests + $normUnit)
   - metric_table:
       id: 1204
       title: GLARBC Request Bandwidth
@@ -140,7 +140,7 @@ Panel Config:
           avg: SUM(GLARBC_GLARB_RET_ACK_sum) / SUM($denom)
           min: MIN(GLARBC_GLARB_RET_ACK_sum / $denom)
           max: MAX(GLARBC_GLARB_RET_ACK_sum / $denom)
-          unit: (Count + $normUnit)
+          unit: (ACKs + $normUnit)
   - metric_table:
       id: 1205
       title: GLARBC-GL2 Interface
@@ -165,7 +165,7 @@ Panel Config:
           avg: SUM(GLARBC_GL2_RET_ACK_sum) / SUM($denom)
           min: MIN(GLARBC_GL2_RET_ACK_sum / $denom)
           max: MAX(GLARBC_GL2_RET_ACK_sum / $denom)
-          unit: (Count + $normUnit)
+          unit: (ACKs + $normUnit)
   metrics_description:
     Utilization: >-
       Percentage of GLARBA/GLARBC cycles the Graphics Level Arbiter is actively processing requests.

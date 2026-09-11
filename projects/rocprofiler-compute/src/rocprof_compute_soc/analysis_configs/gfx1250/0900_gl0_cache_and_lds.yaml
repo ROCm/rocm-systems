@@ -51,17 +51,17 @@ Panel Config:
           avg: SUM(TX_VMW_REQ_sum) / SUM($denom)
           min: MIN(TX_VMW_REQ_sum / $denom)
           max: MAX(TX_VMW_REQ_sum / $denom)
-          unit: (Count + $normUnit)
+          unit: (Requests + $normUnit)
         Total Requests - Read:
           avg: SUM(TX_VMW_REQ_READ_sum) / SUM($denom)
           min: MIN(TX_VMW_REQ_READ_sum / $denom)
           max: MAX(TX_VMW_REQ_READ_sum / $denom)
-          unit: (Count + $normUnit)
+          unit: (Requests + $normUnit)
         Total Requests - Write:
           avg: SUM(TX_VMW_REQ_WRITE_sum) / SUM($denom)
           min: MIN(TX_VMW_REQ_WRITE_sum / $denom)
           max: MAX(TX_VMW_REQ_WRITE_sum / $denom)
-          unit: (Count + $normUnit)
+          unit: (Requests + $normUnit)
         Request Stall Rate:
           avg: 100 * SUM(TX_VMW_VMW_VCA_REQ_STALL_sum) / SUM(TX_VMW_GATE_EN1_sum)
           min: 100 * MIN(TX_VMW_VMW_VCA_REQ_STALL_sum / TX_VMW_GATE_EN1_sum)
@@ -76,17 +76,17 @@ Panel Config:
           avg: SUM(TX_VMW_SECTORS_sum) / SUM($denom)
           min: MIN(TX_VMW_SECTORS_sum / $denom)
           max: MAX(TX_VMW_SECTORS_sum / $denom)
-          unit: (Count + $normUnit)
+          unit: (Requests + $normUnit)
         Total Requests - Sector Reads:
           avg: SUM(TX_VMW_SECTORS_READ_sum) / SUM($denom)
           min: MIN(TX_VMW_SECTORS_READ_sum / $denom)
           max: MAX(TX_VMW_SECTORS_READ_sum / $denom)
-          unit: (Count + $normUnit)
+          unit: (Requests + $normUnit)
         Total Requests - Sector Writes:
           avg: SUM(TX_VMW_SECTORS_WRITE_sum) / SUM($denom)
           min: MIN(TX_VMW_SECTORS_WRITE_sum / $denom)
           max: MAX(TX_VMW_SECTORS_WRITE_sum / $denom)
-          unit: (Count + $normUnit)
+          unit: (Requests + $normUnit)
   - metric_table:
       id: 903
       title: Cache Lookup
@@ -297,7 +297,7 @@ Panel Config:
           avg: SUM(TX_VMW_GL1_REQ_READ_sum) / SUM($denom)
           min: MIN(TX_VMW_GL1_REQ_READ_sum / $denom)
           max: MAX(TX_VMW_GL1_REQ_READ_sum / $denom)
-          unit: (Count + $normUnit)
+          unit: (Requests + $normUnit)
         GL0-GL1 Read Bandwidth:
           avg: SUM(TX_VMW_GL1_REQ_READ_64B_sum * 64 + TX_VMW_GL1_REQ_READ_128B_sum * 128 + TX_VMW_GL1_READ_REQ_256B_sum * 256) / SUM(End_Timestamp - Start_Timestamp)
           min: MIN((TX_VMW_GL1_REQ_READ_64B_sum * 64 + TX_VMW_GL1_REQ_READ_128B_sum * 128 + TX_VMW_GL1_READ_REQ_256B_sum * 256) / (End_Timestamp - Start_Timestamp))
@@ -307,7 +307,7 @@ Panel Config:
           avg: SUM(TX_VMW_GL1_REQ_WRITE_sum) / SUM($denom)
           min: MIN(TX_VMW_GL1_REQ_WRITE_sum / $denom)
           max: MAX(TX_VMW_GL1_REQ_WRITE_sum / $denom)
-          unit: (Count + $normUnit)
+          unit: (Requests + $normUnit)
         GL0-GL1 Write Bandwidth:
           avg: SUM(TX_VMW_GL1_WRITE_REQ_128B_sum * 128 + TX_VMW_GL1_WRITE_REQ_256B_sum * 256) / SUM(End_Timestamp - Start_Timestamp)
           min: MIN((TX_VMW_GL1_WRITE_REQ_128B_sum * 128 + TX_VMW_GL1_WRITE_REQ_256B_sum * 256) / (End_Timestamp - Start_Timestamp))
@@ -317,27 +317,27 @@ Panel Config:
           avg: SUM(TX_VMW_GL1_REQ_ATOMIC_WITH_RET_sum) / SUM($denom)
           min: MIN(TX_VMW_GL1_REQ_ATOMIC_WITH_RET_sum / $denom)
           max: MAX(TX_VMW_GL1_REQ_ATOMIC_WITH_RET_sum / $denom)
-          unit: (Count + $normUnit)
+          unit: (Requests + $normUnit)
         GL0-GL1 Atomic Requests - Without Return:
           avg: SUM(TX_VMW_GL1_REQ_ATOMIC_WITHOUT_RET_sum) / SUM($denom)
           min: MIN(TX_VMW_GL1_REQ_ATOMIC_WITHOUT_RET_sum / $denom)
           max: MAX(TX_VMW_GL1_REQ_ATOMIC_WITHOUT_RET_sum / $denom)
-          unit: (Count + $normUnit)
+          unit: (Requests + $normUnit)
         GL0-GL1 Cluster Request:
           avg: SUM(TX_VMW_GL1_CLUSTER_REQ_sum) / SUM($denom)
           min: MIN(TX_VMW_GL1_CLUSTER_REQ_sum / $denom)
           max: MAX(TX_VMW_GL1_CLUSTER_REQ_sum / $denom)
-          unit: (Count + $normUnit)
+          unit: (Requests + $normUnit)
         GL0-GL1 Prefetch Request - CU Scope:
           avg: SUM(TX_VMW_GL1_REQ_CU_PREFETCH_sum) / SUM($denom)
           min: MIN(TX_VMW_GL1_REQ_CU_PREFETCH_sum / $denom)
           max: MAX(TX_VMW_GL1_REQ_CU_PREFETCH_sum / $denom)
-          unit: (Count + $normUnit)
+          unit: (Requests + $normUnit)
         GL0-GL1 Prefetch Request - GL2 Scope:
           avg: SUM(TX_VMW_GL1_REQ_L2_PREFETCH_sum) / SUM($denom)
           min: MIN(TX_VMW_GL1_REQ_L2_PREFETCH_sum / $denom)
           max: MAX(TX_VMW_GL1_REQ_L2_PREFETCH_sum / $denom)
-          unit: (Count + $normUnit)
+          unit: (Requests + $normUnit)
   - metric_table:
       id: 907
       title: GL0-GL1 Interface - Latency
@@ -404,7 +404,7 @@ Panel Config:
           avg: SUM(TX_VMW_UTCL0_REQUEST_sum) / SUM($denom)
           min: MIN(TX_VMW_UTCL0_REQUEST_sum / $denom)
           max: MAX(TX_VMW_UTCL0_REQUEST_sum / $denom)
-          unit: (Count + $normUnit)
+          unit: (Requests + $normUnit)
         UTCL0 Thrash Stall Rate:
           avg: 100 * SUM(TX_VMW_UTCL0_STALL_THRASHING_STALL_sum) / SUM(TX_VMW_VMW_BUSY_sum)
           min: 100 * MIN(TX_VMW_UTCL0_STALL_THRASHING_STALL_sum / TX_VMW_VMW_BUSY_sum)
@@ -425,37 +425,37 @@ Panel Config:
           avg: SUM(TX_VMW_UTCL0_UTCL1_REQUEST_sum) / SUM($denom)
           min: MIN(TX_VMW_UTCL0_UTCL1_REQUEST_sum / $denom)
           max: MAX(TX_VMW_UTCL0_UTCL1_REQUEST_sum / $denom)
-          unit: (Count + $normUnit)
+          unit: (Requests + $normUnit)
         UTCL0-UTCL1 Requests - Internal Retry:
           avg: SUM(TX_VMW_UTCL0_INTERNAL_RETRY_REQ_sum) / SUM($denom)
           min: MIN(TX_VMW_UTCL0_INTERNAL_RETRY_REQ_sum / $denom)
           max: MAX(TX_VMW_UTCL0_INTERNAL_RETRY_REQ_sum / $denom)
-          unit: (Count + $normUnit)
+          unit: (Requests + $normUnit)
         UTCL0-UTCL1 Returns:
           avg: SUM(TX_VMW_UTCL0_UTCL1_RETURN_sum) / SUM($denom)
           min: MIN(TX_VMW_UTCL0_UTCL1_RETURN_sum / $denom)
           max: MAX(TX_VMW_UTCL0_UTCL1_RETURN_sum / $denom)
-          unit: (Count + $normUnit)
+          unit: (Returns + $normUnit)
         UTCL0-UTCL1 Returns - Permission Fault:
           avg: SUM(TX_VMW_UTCL0_UTCL1_PERM_FAULT_sum) / SUM($denom)
           min: MIN(TX_VMW_UTCL0_UTCL1_PERM_FAULT_sum / $denom)
           max: MAX(TX_VMW_UTCL0_UTCL1_PERM_FAULT_sum / $denom)
-          unit: (Count + $normUnit)
+          unit: (Returns + $normUnit)
         UTCL0-UTCL1 Returns - XNACK Retry:
           avg: SUM(TX_VMW_UTCL0_UTCL1_XNACK_RETRY_FAULT_sum) / SUM($denom)
           min: MIN(TX_VMW_UTCL0_UTCL1_XNACK_RETRY_FAULT_sum / $denom)
           max: MAX(TX_VMW_UTCL0_UTCL1_XNACK_RETRY_FAULT_sum / $denom)
-          unit: (Count + $normUnit)
+          unit: (Returns + $normUnit)
         UTCL0-UTCL1 Returns - Partial Resident Fault:
           avg: SUM(TX_VMW_UTCL0_UTCL1_XNACK_PRT_FAULT_sum) / SUM($denom)
           min: MIN(TX_VMW_UTCL0_UTCL1_XNACK_PRT_FAULT_sum / $denom)
           max: MAX(TX_VMW_UTCL0_UTCL1_XNACK_PRT_FAULT_sum / $denom)
-          unit: (Count + $normUnit)
+          unit: (Returns + $normUnit)
         UTCL0-UTCL1 Returns - No Retry Fault:
           avg: SUM(TX_VMW_UTCL0_UTCL1_XNACK_NO_RETRY_FAULT_sum) / SUM($denom)
           min: MIN(TX_VMW_UTCL0_UTCL1_XNACK_NO_RETRY_FAULT_sum / $denom)
           max: MAX(TX_VMW_UTCL0_UTCL1_XNACK_NO_RETRY_FAULT_sum / $denom)
-          unit: (Count + $normUnit)
+          unit: (Returns + $normUnit)
         UTCL1 Request Latency:
           avg: SUM(TX_VMW_UTCL0_UTCL1_INFLIGHT_sum) / SUM(TX_VMW_UTCL0_UTCL1_REQUEST_sum)
           min: MIN(TX_VMW_UTCL0_UTCL1_INFLIGHT_sum / TX_VMW_UTCL0_UTCL1_REQUEST_sum)

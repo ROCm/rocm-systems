@@ -125,47 +125,47 @@ Panel Config:
           avg: SUM(SQ_INSTS_ALL_sum) / SUM($denom)
           min: MIN(SQ_INSTS_ALL_sum / $denom)
           max: MAX(SQ_INSTS_ALL_sum / $denom)
-          unit: (Count + $normUnit)
+          unit: (Instructions + $normUnit)
         Instructions - Internal:
           avg: SUM(SQ_INSTS_INTERNAL_sum) / SUM($denom)
           min: MIN(SQ_INSTS_INTERNAL_sum / $denom)
           max: MAX(SQ_INSTS_INTERNAL_sum / $denom)
-          unit: (Count + $normUnit)
+          unit: (Instructions + $normUnit)
         Instructions - VALU:
           avg: SUM(SQ_INSTS_VALU_sum) / SUM($denom)
           min: MIN(SQ_INSTS_VALU_sum / $denom)
           max: MAX(SQ_INSTS_VALU_sum / $denom)
-          unit: (Count + $normUnit)
+          unit: (Instructions + $normUnit)
         Instructions - SALU:
           avg: SUM(SQ_INSTS_SALU_sum) / SUM($denom)
           min: MIN(SQ_INSTS_SALU_sum / $denom)
           max: MAX(SQ_INSTS_SALU_sum / $denom)
-          unit: (Count + $normUnit)
+          unit: (Instructions + $normUnit)
         Instructions - SMEM:
           avg: SUM(SQ_INSTS_SMEM_sum) / SUM($denom)
           min: MIN(SQ_INSTS_SMEM_sum / $denom)
           max: MAX(SQ_INSTS_SMEM_sum / $denom)
-          unit: (Count + $normUnit)
+          unit: (Instructions + $normUnit)
         Instructions - Transcendental:
           avg: SUM(SQ_INSTS_VALU_TRANS_sum) / SUM($denom)
           min: MIN(SQ_INSTS_VALU_TRANS_sum / $denom)
           max: MAX(SQ_INSTS_VALU_TRANS_sum / $denom)
-          unit: (Count + $normUnit)
+          unit: (Instructions + $normUnit)
         Instructions - Double Precision:
           avg: SUM(SQ_INSTS_VALU_DP_sum) / SUM($denom)
           min: MIN(SQ_INSTS_VALU_DP_sum / $denom)
           max: MAX(SQ_INSTS_VALU_DP_sum / $denom)
-          unit: (Count + $normUnit)
+          unit: (Instructions + $normUnit)
         Instructions - VMEM:
           avg: SUM(SQ_INSTS_TEX_sum) / SUM($denom)
           min: MIN(SQ_INSTS_TEX_sum / $denom)
           max: MAX(SQ_INSTS_TEX_sum / $denom)
-          unit: (Count + $normUnit)
+          unit: (Instructions + $normUnit)
         Instructions - LDS:
           avg: SUM(SQ_INSTS_LDS_sum) / SUM($denom)
           min: MIN(SQ_INSTS_LDS_sum / $denom)
           max: MAX(SQ_INSTS_LDS_sum / $denom)
-          unit: (Count + $normUnit)
+          unit: (Instructions + $normUnit)
   - metric_table:
       id: 706
       title: VMEM Instruction Mix
@@ -180,12 +180,12 @@ Panel Config:
           avg: SUM(SQ_INSTS_FLAT_sum) / SUM($denom)
           min: MIN(SQ_INSTS_FLAT_sum / $denom)
           max: MAX(SQ_INSTS_FLAT_sum / $denom)
-          unit: (Count + $normUnit)
+          unit: (Instructions + $normUnit)
         Instructions - Global Scratch:
           avg: SUM(SQ_INSTS_VEC32_GLOBAL_SCRATCH_sum) / SUM($denom)
           min: MIN(SQ_INSTS_VEC32_GLOBAL_SCRATCH_sum / $denom)
           max: MAX(SQ_INSTS_VEC32_GLOBAL_SCRATCH_sum / $denom)
-          unit: (Count + $normUnit)
+          unit: (Instructions + $normUnit)
         # Instructions - VMEM Load (SQ_INSTS_TEX_LOAD_sum): REMOVED for gfx1250.
         # On gfx1250, the MIMG (image_load) and MTBUF-format (buffer_load_format_*)
         # instruction classes do not exist — the assembler rejects them.
@@ -195,67 +195,67 @@ Panel Config:
           avg: SUM(SQ_INSTS_FLAT_LOAD_sum) / SUM($denom)
           min: MIN(SQ_INSTS_FLAT_LOAD_sum / $denom)
           max: MAX(SQ_INSTS_FLAT_LOAD_sum / $denom)
-          unit: (Count + $normUnit)
+          unit: (Instructions + $normUnit)
         Instructions - Flat Store:
           avg: SUM(SQ_INSTS_FLAT_STORE_sum) / SUM($denom)
           min: MIN(SQ_INSTS_FLAT_STORE_sum / $denom)
           max: MAX(SQ_INSTS_FLAT_STORE_sum / $denom)
-          unit: (Count + $normUnit)
+          unit: (Instructions + $normUnit)
         Instructions - Buffer Load:
           avg: SUM(SQ_INSTS_BUFFER_LOAD_sum) / SUM($denom)
           min: MIN(SQ_INSTS_BUFFER_LOAD_sum / $denom)
           max: MAX(SQ_INSTS_BUFFER_LOAD_sum / $denom)
-          unit: (Count + $normUnit)
+          unit: (Instructions + $normUnit)
         Instructions - Buffer Store:
           avg: SUM(SQ_INSTS_BUFFER_STORE_sum) / SUM($denom)
           min: MIN(SQ_INSTS_BUFFER_STORE_sum / $denom)
           max: MAX(SQ_INSTS_BUFFER_STORE_sum / $denom)
-          unit: (Count + $normUnit)
+          unit: (Instructions + $normUnit)
         Instructions - Global Scratch Load:
           avg: SUM(SQ_INSTS_VEC32_GLOBAL_SCRATCH_LOAD_sum) / SUM($denom)
           min: MIN(SQ_INSTS_VEC32_GLOBAL_SCRATCH_LOAD_sum / $denom)
           max: MAX(SQ_INSTS_VEC32_GLOBAL_SCRATCH_LOAD_sum / $denom)
-          unit: (Count + $normUnit)
+          unit: (Instructions + $normUnit)
         Instructions - Global Scratch Store:
           avg: SUM(SQ_INSTS_VEC32_GLOBAL_SCRATCH_STORE_sum) / SUM($denom)
           min: MIN(SQ_INSTS_VEC32_GLOBAL_SCRATCH_STORE_sum / $denom)
           max: MAX(SQ_INSTS_VEC32_GLOBAL_SCRATCH_STORE_sum / $denom)
-          unit: (Count + $normUnit)
+          unit: (Instructions + $normUnit)
         Instructions - Global Scratch Atomics:
           avg: SUM(SQ_INSTS_VEC32_GLOBAL_SCRATCH_ATOMIC_sum) / SUM($denom)
           min: MIN(SQ_INSTS_VEC32_GLOBAL_SCRATCH_ATOMIC_sum / $denom)
           max: MAX(SQ_INSTS_VEC32_GLOBAL_SCRATCH_ATOMIC_sum / $denom)
-          unit: (Count + $normUnit)
+          unit: (Instructions + $normUnit)
         Instructions - VMEM Atomic RTN:
           avg: SUM(SQ_INSTS_TEX_ATOMIC_RTN_sum) / SUM($denom)
           min: MIN(SQ_INSTS_TEX_ATOMIC_RTN_sum / $denom)
           max: MAX(SQ_INSTS_TEX_ATOMIC_RTN_sum / $denom)
-          unit: (Count + $normUnit)
+          unit: (Instructions + $normUnit)
         Instructions - VMEM Atomic NORTN:
           avg: SUM(SQ_INSTS_TEX_ATOMIC_NORTN_sum) / SUM($denom)
           min: MIN(SQ_INSTS_TEX_ATOMIC_NORTN_sum / $denom)
           max: MAX(SQ_INSTS_TEX_ATOMIC_NORTN_sum / $denom)
-          unit: (Count + $normUnit)
+          unit: (Instructions + $normUnit)
         Instructions - Multicast Load:
           avg: SUM(SQ_INSTS_MULTICAST_LOAD_sum) / SUM($denom)
           min: MIN(SQ_INSTS_MULTICAST_LOAD_sum / $denom)
           max: MAX(SQ_INSTS_MULTICAST_LOAD_sum / $denom)
-          unit: (Count + $normUnit)
+          unit: (Instructions + $normUnit)
         Instructions - Async Load:
           avg: SUM(SQ_INSTS_ASYNC_LOAD_sum) / SUM($denom)
           min: MIN(SQ_INSTS_ASYNC_LOAD_sum / $denom)
           max: MAX(SQ_INSTS_ASYNC_LOAD_sum / $denom)
-          unit: (Count + $normUnit)
+          unit: (Instructions + $normUnit)
         Instructions - Async Store:
           avg: SUM(SQ_INSTS_ASYNC_STORE_sum) / SUM($denom)
           min: MIN(SQ_INSTS_ASYNC_STORE_sum / $denom)
           max: MAX(SQ_INSTS_ASYNC_STORE_sum / $denom)
-          unit: (Count + $normUnit)
+          unit: (Instructions + $normUnit)
         Instructions - TDM:
           avg: SUM(SQ_INSTS_TDM_sum) / SUM($denom)
           min: MIN(SQ_INSTS_TDM_sum / $denom)
           max: MAX(SQ_INSTS_TDM_sum / $denom)
-          unit: (Count + $normUnit)
+          unit: (Instructions + $normUnit)
   - metric_table:
       id: 707
       title: LDS Instruction Mix
@@ -270,32 +270,32 @@ Panel Config:
           avg: SUM(SQ_INSTS_VEC32_LDS_sum) / SUM($denom)
           min: MIN(SQ_INSTS_VEC32_LDS_sum / $denom)
           max: MAX(SQ_INSTS_VEC32_LDS_sum / $denom)
-          unit: (Count + $normUnit)
+          unit: (Instructions + $normUnit)
         Instructions - LDS Load:
           avg: SUM(SQ_INSTS_VEC32_LDS_LOAD_sum) / SUM($denom)
           min: MIN(SQ_INSTS_VEC32_LDS_LOAD_sum / $denom)
           max: MAX(SQ_INSTS_VEC32_LDS_LOAD_sum / $denom)
-          unit: (Count + $normUnit)
+          unit: (Instructions + $normUnit)
         Instructions - LDS Store:
           avg: SUM(SQ_INSTS_VEC32_LDS_STORE_sum) / SUM($denom)
           min: MIN(SQ_INSTS_VEC32_LDS_STORE_sum / $denom)
           max: MAX(SQ_INSTS_VEC32_LDS_STORE_sum / $denom)
-          unit: (Count + $normUnit)
+          unit: (Instructions + $normUnit)
         Instructions - LDS Atomic RTN:
           avg: SUM(SQ_INSTS_VEC32_LDS_ATOMIC_RTN_sum) / SUM($denom)
           min: MIN(SQ_INSTS_VEC32_LDS_ATOMIC_RTN_sum / $denom)
           max: MAX(SQ_INSTS_VEC32_LDS_ATOMIC_RTN_sum / $denom)
-          unit: (Count + $normUnit)
+          unit: (Instructions + $normUnit)
         Instructions - LDS Atomic NORTN:
           avg: SUM(SQ_INSTS_VEC32_LDS_ATOMIC_NORTN_sum) / SUM($denom)
           min: MIN(SQ_INSTS_VEC32_LDS_ATOMIC_NORTN_sum / $denom)
           max: MAX(SQ_INSTS_VEC32_LDS_ATOMIC_NORTN_sum / $denom)
-          unit: (Count + $normUnit)
+          unit: (Instructions + $normUnit)
         Instructions - LDS Other:
           avg: SUM(SQ_INSTS_VEC32_LDS_OTHER_sum) / SUM($denom)
           min: MIN(SQ_INSTS_VEC32_LDS_OTHER_sum / $denom)
           max: MAX(SQ_INSTS_VEC32_LDS_OTHER_sum / $denom)
-          unit: (Count + $normUnit)
+          unit: (Instructions + $normUnit)
   - metric_table:
       id: 708
       title: VALU Instruction Mix
@@ -310,37 +310,37 @@ Panel Config:
           avg: SUM(SQ_INSTS_VALU_sum) / SUM($denom)
           min: MIN(SQ_INSTS_VALU_sum / $denom)
           max: MAX(SQ_INSTS_VALU_sum / $denom)
-          unit: (Count + $normUnit)
+          unit: (Instructions + $normUnit)
         VALU Instructions - Trans:
           avg: SUM(SQ_INSTS_VALU_TRANS_sum) / SUM($denom)
           min: MIN(SQ_INSTS_VALU_TRANS_sum / $denom)
           max: MAX(SQ_INSTS_VALU_TRANS_sum / $denom)
-          unit: (Count + $normUnit)
+          unit: (Instructions + $normUnit)
         VALU Instructions - Double Precision:
           avg: SUM(SQ_INSTS_VALU_DP_sum) / SUM($denom)
           min: MIN(SQ_INSTS_VALU_DP_sum / $denom)
           max: MAX(SQ_INSTS_VALU_DP_sum / $denom)
-          unit: (Count + $normUnit)
+          unit: (Instructions + $normUnit)
         VALU Instructions - CMACC:
           avg: SUM(SQ_INSTS_VALU_CMACC_sum) / SUM($denom)
           min: MIN(SQ_INSTS_VALU_CMACC_sum / $denom)
           max: MAX(SQ_INSTS_VALU_CMACC_sum / $denom)
-          unit: (Count + $normUnit)
+          unit: (Instructions + $normUnit)
         VALU Instructions - SMACC:
           avg: SUM(SQ_INSTS_VALU_SMACC_sum) / SUM($denom)
           min: MIN(SQ_INSTS_VALU_SMACC_sum / $denom)
           max: MAX(SQ_INSTS_VALU_SMACC_sum / $denom)
-          unit: (Count + $normUnit)
+          unit: (Instructions + $normUnit)
         VALU Instructions - XDL:
           avg: SUM(SQ_INSTS_VALU_XDLMACC_sum) / SUM($denom)
           min: MIN(SQ_INSTS_VALU_XDLMACC_sum / $denom)
           max: MAX(SQ_INSTS_VALU_XDLMACC_sum / $denom)
-          unit: (Count + $normUnit)
+          unit: (Instructions + $normUnit)
         VALU Instructions - WMMA:
           avg: SUM(SQ_INSTS_VEC32_VALU_WMMA_sum) / SUM($denom)
           min: MIN(SQ_INSTS_VEC32_VALU_WMMA_sum / $denom)
           max: MAX(SQ_INSTS_VEC32_VALU_WMMA_sum / $denom)
-          unit: (Count + $normUnit)
+          unit: (Instructions + $normUnit)
   - metric_table:
       id: 709
       title: VALU FLOPs and IOPs Counting
@@ -355,37 +355,37 @@ Panel Config:
           avg: SUM(SP_VALU_IOPS_sum) / SUM($denom)
           min: MIN(SP_VALU_IOPS_sum / $denom)
           max: MAX(SP_VALU_IOPS_sum / $denom)
-          unit: (Count + $normUnit)
+          unit: (IOPs + $normUnit)
         VALU FP Operations - FP16:
           avg: SUM(SP_VALU_FLOPS_FP16_sum) / SUM($denom)
           min: MIN(SP_VALU_FLOPS_FP16_sum / $denom)
           max: MAX(SP_VALU_FLOPS_FP16_sum / $denom)
-          unit: (Count + $normUnit)
+          unit: (FLOPs + $normUnit)
         VALU FP Operations - FP16 Trans:
           avg: SUM(SP_VALU_FLOPS_FP16_TRANS_sum) / SUM($denom)
           min: MIN(SP_VALU_FLOPS_FP16_TRANS_sum / $denom)
           max: MAX(SP_VALU_FLOPS_FP16_TRANS_sum / $denom)
-          unit: (Count + $normUnit)
+          unit: (FLOPs + $normUnit)
         VALU FP Operations - FP32:
           avg: SUM(SP_VALU_FLOPS_FP32_sum) / SUM($denom)
           min: MIN(SP_VALU_FLOPS_FP32_sum / $denom)
           max: MAX(SP_VALU_FLOPS_FP32_sum / $denom)
-          unit: (Count + $normUnit)
+          unit: (FLOPs + $normUnit)
         VALU FP Operations - FP32 Trans:
           avg: SUM(SP_VALU_FLOPS_FP32_TRANS_sum) / SUM($denom)
           min: MIN(SP_VALU_FLOPS_FP32_TRANS_sum / $denom)
           max: MAX(SP_VALU_FLOPS_FP32_TRANS_sum / $denom)
-          unit: (Count + $normUnit)
+          unit: (FLOPs + $normUnit)
         VALU FP Operations - FP64:
           avg: SUM(SP_VALU_FLOPS_FP64_sum) / SUM($denom)
           min: MIN(SP_VALU_FLOPS_FP64_sum / $denom)
           max: MAX(SP_VALU_FLOPS_FP64_sum / $denom)
-          unit: (Count + $normUnit)
+          unit: (FLOPs + $normUnit)
         VALU FP Operations - FP64 Trans:
           avg: SUM(SP_VALU_FLOPS_FP64_TRANS_sum) / SUM($denom)
           min: MIN(SP_VALU_FLOPS_FP64_TRANS_sum / $denom)
           max: MAX(SP_VALU_FLOPS_FP64_TRANS_sum / $denom)
-          unit: (Count + $normUnit)
+          unit: (FLOPs + $normUnit)
 
   - metric_table:
       id: 710
@@ -401,52 +401,52 @@ Panel Config:
           avg: SUM(SQ_VALU_WMMA_FLOP_FP32_sum) / SUM($denom)
           min: MIN(SQ_VALU_WMMA_FLOP_FP32_sum / $denom)
           max: MAX(SQ_VALU_WMMA_FLOP_FP32_sum / $denom)
-          unit: (Count + $normUnit)
+          unit: (FLOPs + $normUnit)
         WMMA FP Operations - FP64:
           avg: SUM(SQ_VALU_WMMA_FLOP_FP64_sum) / SUM($denom)
           min: MIN(SQ_VALU_WMMA_FLOP_FP64_sum / $denom)
           max: MAX(SQ_VALU_WMMA_FLOP_FP64_sum / $denom)
-          unit: (Count + $normUnit)
+          unit: (FLOPs + $normUnit)
         WMMA FP Operations - FP16:
           avg: SUM(SQ_VALU_WMMA_FLOP_FP16_sum) / SUM($denom)
           min: MIN(SQ_VALU_WMMA_FLOP_FP16_sum / $denom)
           max: MAX(SQ_VALU_WMMA_FLOP_FP16_sum / $denom)
-          unit: (Count + $normUnit)
+          unit: (FLOPs + $normUnit)
         WMMA FP Operations - BF16:
           avg: SUM(SQ_VALU_WMMA_FLOP_BF16_sum) / SUM($denom)
           min: MIN(SQ_VALU_WMMA_FLOP_BF16_sum / $denom)
           max: MAX(SQ_VALU_WMMA_FLOP_BF16_sum / $denom)
-          unit: (Count + $normUnit)
+          unit: (FLOPs + $normUnit)
         WMMA FP Operations - FP8:
           avg: SUM(SQ_VALU_WMMA_FLOP_FP8_sum) / SUM($denom)
           min: MIN(SQ_VALU_WMMA_FLOP_FP8_sum / $denom)
           max: MAX(SQ_VALU_WMMA_FLOP_FP8_sum / $denom)
-          unit: (Count + $normUnit)
+          unit: (FLOPs + $normUnit)
         WMMA FP Operations - FP6:
           avg: SUM(SQ_VALU_WMMA_FLOP_FP6_sum) / SUM($denom)
           min: MIN(SQ_VALU_WMMA_FLOP_FP6_sum / $denom)
           max: MAX(SQ_VALU_WMMA_FLOP_FP6_sum / $denom)
-          unit: (Count + $normUnit)
+          unit: (FLOPs + $normUnit)
         WMMA FP Operations - FP4:
           avg: SUM(SQ_VALU_WMMA_FLOP_FP4_sum) / SUM($denom)
           min: MIN(SQ_VALU_WMMA_FLOP_FP4_sum / $denom)
           max: MAX(SQ_VALU_WMMA_FLOP_FP4_sum / $denom)
-          unit: (Count + $normUnit)
+          unit: (FLOPs + $normUnit)
         WMMA FP Operations - FP6FP4:
           avg: SUM(SQ_VALU_WMMA_FLOP_F6F4_sum) / SUM($denom)
           min: MIN(SQ_VALU_WMMA_FLOP_F6F4_sum / $denom)
           max: MAX(SQ_VALU_WMMA_FLOP_F6F4_sum / $denom)
-          unit: (Count + $normUnit)
+          unit: (FLOPs + $normUnit)
         WMMA Int Operations - Int8:
           avg: SUM(SQ_VALU_WMMA_FLOP_I8_sum) / SUM($denom)
           min: MIN(SQ_VALU_WMMA_FLOP_I8_sum / $denom)
           max: MAX(SQ_VALU_WMMA_FLOP_I8_sum / $denom)
-          unit: (Count + $normUnit)
+          unit: (IOPs + $normUnit)
         WMMA Int Operations - Int4:
           avg: SUM(SQ_VALU_WMMA_FLOP_I4_sum) / SUM($denom)
           min: MIN(SQ_VALU_WMMA_FLOP_I4_sum / $denom)
           max: MAX(SQ_VALU_WMMA_FLOP_I4_sum / $denom)
-          unit: (Count + $normUnit)
+          unit: (IOPs + $normUnit)
   - metric_table:
       id: 711
       title: Instruction Issue Stalls
