@@ -6,9 +6,9 @@
 The rocDecode FFMpeg decoder utility class
 ***********************************************
 
-The rocDecode FFMpeg decoder utility class, `FFMpegVideoDecoder <https://github.com/ROCm/rocm-systems/tree/develop/projects/rocdecode/utils/ffmpegvideodecode/ffmpeg_video_dec.h>`_, is used to decode demultiplexed (demuxed) frames on the CPU. 
+The rocDecode FFMpeg decoder utility class, `FFMpegVideoDecoder <https://github.com/ROCm/rocm-systems/tree/develop/projects/rocdecode/utils/ffmpegvideodecode/ffmpeg_video_dec.h>`_, is used to decode demultiplexed (demuxed) frames on the CPU.
 
-FFMpegVideoDecoder uses the FFMpeg video decoding backend to decode frame packets output by the FFMpeg demultiplexer (demuxer). It inherits from :doc:`the RocVideoDecode utility class <./rocDecode-util-decoder>` and uses many of the same functions. 
+FFMpegVideoDecoder uses the FFMpeg video decoding backend to decode frame packets output by the FFMpeg demultiplexer (demuxer). It inherits from :doc:`the RocVideoDecode utility class <./rocDecode-util-decoder>` and uses many of the same functions.
 
 The ``FFMpegVideoDecoder()`` constructor takes the same parameters as ``RocVideoDecoder`` except for the first parameter, which is the number of CPU threads rather than the device ID, and the force zero latency parameter, which isn't supported with the FFMpeg decoder.
 
@@ -18,7 +18,7 @@ Six functions are implemented in FFMpegVideoDecoder: ``DecodeFrame()``, ``GetFra
 
 Once decoding is done, ``GetFrame()`` returns the decoded frame and its timestamp and ``GetOutputSurfaceInfo()`` returns a pointer to the metadata associated with the decoded frame.
 
-``SaveFrameToFile()`` saves the decoded output surface to a file. 
+``SaveFrameToFile()`` saves the decoded output surface to a file.
 
 Once processing is complete, ``ReleaseFrame()`` is used to release the frame.
 
@@ -33,7 +33,7 @@ For information about using the FFMpeg decoder, see :doc:`Understanding the rocD
 
   On Linux: ``sudo apt install libavcodec-dev libavformat-dev libavutil-dev``
 
-  On Windows: use pre-built FFmpeg libraries or build from source, and pass ``-DFFMPEG_ROOT=<path-to-ffmpeg>`` to CMake when configuring.
+  On Windows: use pre-built FFmpeg libraries or build from source. CMake searches your ``PATH`` and common install locations automatically; pass ``-DFFMPEG_ROOT=<path-to-ffmpeg>`` only to override that search or point to a non-standard install.
 
 .. |ffmpeg| replace:: ``utils/ffmpegvideodecode/ffmpeg_video_dec.h``
 .. _ffmpeg: https://github.com/ROCm/rocm-systems/tree/develop/projects/rocdecode/utils/ffmpegvideodecode/ffmpeg_video_dec.h
