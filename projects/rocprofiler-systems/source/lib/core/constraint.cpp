@@ -3,6 +3,7 @@
 
 #include "constraint.hpp"
 #include "common/env_vars.hpp"
+#include "common/string_utility.hpp"
 #include "config.hpp"
 #include "state.hpp"
 #include "utility.hpp"
@@ -20,6 +21,7 @@
 #include <string>
 #include <thread>
 #include <type_traits>
+#include <utility>
 
 using namespace std::chrono_literals;
 
@@ -34,18 +36,6 @@ constexpr auto k_max_poll_interval = 100ms;
 
 #define ROCPROFSYS_CLOCK_IDENTIFIER(VAL)                                                 \
     clock_identifier { #VAL, VAL }
-
-auto
-clock_name(std::string _v)
-{
-    constexpr auto _clock_prefix = std::string_view{ "clock_" };
-    for(auto& itr : _v)
-        itr = tolower(itr);
-    auto _pos = _v.find(_clock_prefix);
-    if(_pos == 0) _v = _v.substr(_pos + _clock_prefix.length());
-    if(_v == "process_cputime_id") _v = "cputime";
-    return _v;
-}
 
 auto accepted_clock_ids =
     std::set<clock_identifier>{ ROCPROFSYS_CLOCK_IDENTIFIER(CLOCK_REALTIME),
@@ -74,11 +64,11 @@ find_clock_identifier(const Tp& _v)
     }
     else
     {
-        _descript        = "name";
-        auto _clock_name = clock_name(_v);
+        _descript            = "name";
+        auto normalized_name = utility::string::clock_name(_v);
         for(const auto& itr : accepted_clock_ids)
         {
-            if(itr.name == _clock_name || itr.raw_name == _v ||
+            if(itr.name == normalized_name || itr.raw_name == _v ||
                std::to_string(itr.value) == _v)
             {
                 return itr;
@@ -146,7 +136,7 @@ stages::stages()
 clock_identifier::clock_identifier(std::string_view _name, int _val)
 : value{ _val }
 , raw_name{ _name }
-, name{ clock_name(std::string{ _name }) }
+, name{ utility::string::clock_name(std::string{ _name }) }
 {}
 
 bool
@@ -171,18 +161,15 @@ bool
 clock_identifier::operator==(std::string _rhs) const
 {
     return (raw_name == std::string_view{ _rhs }) ||
-           (name == clock_name(std::move(_rhs)));
+           (name == utility::string::clock_name(std::move(_rhs)));
 }
 
 std::string
 clock_identifier::as_string() const
 {
-    auto _name = name;
-    for(auto& itr : _name)
-        itr = tolower(itr);
-    auto _ss = std::stringstream{};
-    _ss << _name << "(id=" << raw_name << ", value=" << value << ")";
-    return _ss.str();
+    auto oss = std::stringstream{};
+    oss << name << "(id=" << raw_name << ", value=" << value << ")";
+    return oss.str();
 }
 
 //--------------------------------------------------------------------------------------//
