@@ -6,6 +6,7 @@
  ************************************************************************/
 
 #include "sym_kernels.h"
+#include "archinfo.h"
 #include "comm.h"
 #include "device.h"
 #include "nccl_device/core_tmp.h"
@@ -511,7 +512,7 @@ static void queryModel_lsa(struct ncclComm* comm, ncclSymkKernelId k, size_t nBy
 #if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
 // The block width tuning in this file is fitted to gfx950 and must not reach other architectures.
 static bool ncclSymkIsGfx950(struct ncclComm* comm) {
-  return comm->archName != nullptr && strncmp(comm->archName, "gfx950", 6) == 0;
+  return comm->archName != nullptr && IsArchMatch(comm->archName, "gfx950");
 }
 #endif
 
@@ -528,8 +529,9 @@ ncclResult_t ncclSymkInitOnce(struct ncclComm* comm) {
     reqs.lsaMultimem = symk->hasLsaMultimem;
     reqs.lsaBarrierCount = ncclSymkMaxBlocks;
 
-    // Sized for the widest LL launch any collective will use, since the buffer is shared. AllGather
-    // keeps the narrow pitch and simply leaves the upper slots untouched.
+    // Sized for the widest LL launch any collective will use, since one shared buffer is allocated
+    // here before the first collective is known. Doubling the width costs 4 MiB on an 8-rank comm;
+    // AllGather keeps the narrow pitch and simply leaves the upper slots untouched.
     int llThreads = ncclSymkMaxThreads;
 #if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
     if (ncclSymkIsGfx950(comm)) llThreads = ncclSymkGfx950LLThreads;
@@ -779,10 +781,12 @@ ncclResult_t ncclSymkPickKernel(struct ncclComm* comm, ncclFunc_t coll, int /*nc
   *estTimeUs = kmask == 0 || kernelMask_user() == (1 << ncclSymkKernelId_Count) - 1 ? bestTime : 0.0f;
   *nBlocks = bestBlocks;
 #if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
-  // The width tuning is fitted to gfx950, so every other architecture keeps the upstream width.
+  // The width tuning is fitted to the gfx950 LSA kernels. Other architectures and the GIN kernels,
+  // which carve their warp roles out of the launch width, keep the upstream width.
   bool isLL = bestKernel != ncclSymkKernelId_Count && (kernelMask_LL >> (int)bestKernel & 1);
-  int nThreads = ncclSymkIsGfx950(comm) ? ncclSymkGfx950BlockThreads(coll, isLL, comm->nRanks, nBytes)
-                                        : ncclSymkMaxThreads;
+  bool isLsa = bestKernel != ncclSymkKernelId_Count && (kernelMask_LSA >> (int)bestKernel & 1);
+  int nThreads = ncclSymkIsGfx950(comm) && isLsa ? ncclSymkGfx950BlockThreads(coll, isLL, comm->nRanks, nBytes)
+                                                 : ncclSymkMaxThreads;
   *nWarps = std::max(1, nThreads / comm->WarpSize);
 #else
   *nWarps = 16;

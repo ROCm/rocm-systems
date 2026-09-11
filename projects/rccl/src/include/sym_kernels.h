@@ -31,7 +31,7 @@ constexpr int ncclSymkLLMaxEltSize = 8;
 
 // Widest LL block the gfx950 reduce kernels launch, worth 5 to 10% at the sizes where it removes an
 // epoch, since an LL epoch carries one element per thread. This bounds the shared slot buffer the
-// host allocates; the kernels take both their pitch and their stride from blockDim.
+// host allocates; the kernels take their slot stride from blockDim.
 constexpr int ncclSymkGfx950LLThreads = 512;
 
 constexpr __host__ __device__ int ncclSymkLLMaxSlots(int eltSize = ncclSymkLLMaxEltSize) {

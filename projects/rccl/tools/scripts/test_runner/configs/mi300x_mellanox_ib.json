@@ -3961,9 +3961,9 @@
       },
       "tests": [
         {
-          "name": "Symk_ChunkFloor",
-          "description": "ReduceScatter and AllReduce with counts whose final chunk wave is partial",
-          "test_filter": "SymmetricKernelCorruptionTest.ChunkFloor_PartialFinalWave"
+          "name": "Symk_CountSweep",
+          "description": "ReduceScatter and AllReduce across LL and LD sizes, including partial final chunk waves",
+          "test_filter": "SymmetricKernelCorruptionTest.CountSweep_PartitioningAndSlots"
         },
         {
           "name": "Symk_MisalignedPacks",
