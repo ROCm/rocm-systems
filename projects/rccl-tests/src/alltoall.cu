@@ -14,8 +14,6 @@
 #if NCCL_VERSION_CODE >= NCCL_VERSION(2,28,7) && defined(NCCL_OS_LINUX)
 #include "algorithms/dda/alltoall/alltoall_dda_fabric_ll.h"
 #include "algorithms/dda/device/CollCommon.h"
-#include "algorithms/dda/fabric/fabric_gpu_barrier.h"
-#include "include/gin/gin_fabric_a2a_host.h"
 #include "nccl_device/gin/anvil_sdma/gin_anvil_sdma_device_host_common.h"
 #include "nccl_device/gin/anvil_sdma/gin_fabric_ll_policy.h"
 #endif
@@ -268,15 +266,25 @@ __global__ void NvlAlltoAllKernelOptimized(ncclWindow_t sendwin, size_t sendoffs
 #if NCCL_VERSION_CODE >= NCCL_VERSION(2,28,7) && defined(NCCL_OS_LINUX)
 using ::bf16;
 using gin::fabric::ginFabricLlAlltoAllBlocksPerPeer;
-using gin::fabric::ginFabricLlAlltoAllEligible;
 
-static bool AlltoAllGinFabricLLEligibleHost(ncclDevComm* devComm, size_t count, ncclDataType_t type,
-                                            ncclGinFabricA2ALane* outLane) {
-  ncclGinFabricA2ALane lane{};
-  if (!devComm || ncclGinQueryFabricA2ALane(devComm, &lane) != ncclSuccess) return false;
+// Host launch gate reads the same backend GPU context the device kernel uses.
+// Do not call ncclGinQueryFabricA2ALane here: hip-link of alltoall_perf does not
+// resolve that librccl host export from this .cu translation unit.
+static bool AlltoAllGinFabricLLEligibleHost(ncclDevComm* devComm, size_t count, ncclDataType_t type) {
+  if (!devComm || devComm->ginHandles[0] == nullptr) return false;
   const bool dtypeOk = type == ncclFloat32 || type == ncclFloat16 || type == ncclBfloat16;
-  if (!ginFabricLlAlltoAllEligible(lane, devComm->nRanks, count, wordSize(type), dtypeOk)) return false;
-  if (outLane) *outLane = lane;
+  if (!dtypeOk || count == 0) return false;
+  ncclGinAnvilSdmaGPUContext ctx{};
+  if (cudaMemcpy(&ctx, devComm->ginHandles[0], sizeof(ctx), cudaMemcpyDeviceToHost) != cudaSuccess) {
+    return false;
+  }
+  if (ctx.layoutMagic != NCCL_GIN_ANVIL_SDMA_LAYOUT_MAGIC || ctx.fabricA2AEnabled == 0) return false;
+  const size_t perChunkBytes = count * wordSize(type);
+  if (devComm->nRanks < 2 || devComm->nRanks > gin::fabric::kGinFabricLlMaxNranks) return false;
+  if (perChunkBytes % 16 != 0) return false;
+  if (perChunkBytes * 2 > gin::fabric::kGinFabricLlMaxBytes) return false;
+  if (static_cast<size_t>(devComm->nRanks) * perChunkBytes > ctx.fabricA2ALlThreshold) return false;
+  if (gin::fabric::ginFabricLlA2AScratchBytes(devComm->nRanks) > ctx.fabricA2AScratchBytes) return false;
   return true;
 }
 
@@ -553,8 +561,7 @@ testResult_t AlltoAllRunColl(void* sendbuff, size_t sendoffset, void* recvbuff, 
           kernel = GinAlltoAllKernel<bf16>;
         }
 #endif
-        ncclGinFabricA2ALane lane{};
-        if (AlltoAllGinFabricLLEligibleHost(devComm, count, type, &lane)) {
+        if (AlltoAllGinFabricLLEligibleHost(devComm, count, type)) {
           if (type == ncclFloat32) {
             TESTCHECK(AlltoAllLaunchFabricLL<float>(sendbuff, sendoffset, recvbuff, recvoffset, count, devComm,
                                                     stream));
@@ -611,8 +618,7 @@ testResult_t AlltoAllDeviceTime(struct threadArgs* args, ncclDataType_t type, nc
 #if NCCL_VERSION_CODE >= NCCL_VERSION(2,28,7) && defined(NCCL_OS_LINUX)
   // Fabric LL uses a host-launched DDA kernel, not GinAlltoAllTimedKernel.
   if (deviceImpl == 3) {
-    ncclGinFabricA2ALane lane{};
-    if (AlltoAllGinFabricLLEligibleHost(args->devComms, count, type, &lane)) return testSuccess;
+    if (AlltoAllGinFabricLLEligibleHost(args->devComms, count, type)) return testSuccess;
   }
 #endif
   const size_t perPeerBytes = count * wordSize(type);
