@@ -56,7 +56,7 @@ The HIP documentation is organized into the following categories:
 * [NVIDIA CUDA to HIP API Function Comparison](./reference/api_syntax)
 * [List of deprecated APIs](./reference/deprecated_api_list)
 * [Low Precision Floating Point Types](./reference/low_fp_types)
-* {doc}`./reference/hardware_features`
+* {doc}`./reference/gpu_hardware_features`
 
 :::
 

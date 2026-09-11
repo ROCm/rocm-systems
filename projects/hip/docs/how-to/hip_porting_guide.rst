@@ -547,7 +547,7 @@ Identifying device architecture and features
 ============================================
 
 GPUs of different generations and architectures do not provide the same
-level of :doc:`hardware feature support <../reference/hardware_features>`. To
+level of :doc:`hardware feature support <../reference/gpu_hardware_features>`. To
 guard device code that uses architecture-dependent features, the
 ``__HIP_ARCH_<FEATURE>__`` C++-macros can be used, as described below.
 

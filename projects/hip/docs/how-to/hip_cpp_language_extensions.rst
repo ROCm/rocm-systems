@@ -146,7 +146,7 @@ launched with more threads than ``MAX_THREADS_PER_BLOCK``.
 
 If no ``__launch_bounds__`` are specified, ``MAX_THREADS_PER_BLOCK`` is
 the maximum block size supported by the device (see
-:doc:`../reference/hardware_features`). Reducing ``MAX_THREADS_PER_BLOCK``
+:doc:`../reference/gpu_hardware_features`). Reducing ``MAX_THREADS_PER_BLOCK``
 allows the compiler to use more resources per thread than an unconstrained
 compilation. This might however reduce the amount of blocks that can run
 concurrently on a CU, thereby reducing occupancy and trading thread-level
@@ -337,7 +337,7 @@ warpSize
 The ``warpSize`` constant contains the number of threads per warp for the given
 target device. On AMD hardware, this is referred to as ``wavefront size``, which 
 may vary depending on the architecture. For more details, see the
-:doc:`hardware features <../reference/hardware_features>`.
+:doc:`hardware features <../reference/gpu_hardware_features>`.
 
 Since ``warpSize`` can differ between devices, it can not be assumed to be a
 compile-time constant on the host. It has to be queried using
@@ -686,7 +686,7 @@ memory location, the instructions are serialized in an undefined order.
 
 Atomic operations in kernels can operate on block scope (i.e. shared memory),
 device scope (global memory), or system scope (system memory), depending on
-:doc:`hardware support <../reference/hardware_features>`.
+:doc:`hardware support <../reference/gpu_hardware_features>`.
 
 The listed functions are also available with the ``_system`` (e.g.
 ``atomicAdd_system``) suffix, operating on system scope, which includes host
