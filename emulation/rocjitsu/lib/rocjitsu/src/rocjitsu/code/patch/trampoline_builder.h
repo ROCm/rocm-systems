@@ -33,6 +33,31 @@ struct InlineAsmItem {
   std::vector<uint32_t> words;
 };
 
+/// @brief One saved register live at the anchor and clobbered by instrumentation,
+///        with its stable per-lane byte offset in the DBI spill zone (assigned by
+///        SpillManager). @ref cls selects the emit path in build_spill_bracket: a
+///        VGPR spills straight to scratch; an AccVGPR likewise spills straight to
+///        scratch via the CDNA `acc` bit; an SGPR is bridged through a VGPR lane
+///        (writelane/readlane) because SGPRs cannot reach scratch directly.
+///
+/// VGPR, SGPR, and AccVGPR slots are held in separate vectors (TrampolinePlan::
+/// vgpr_spills / sgpr_spills / acc_spills), so @ref cls is redundant with the owning
+/// vector but records the register file explicitly for the emitter.
+struct SpillSlot {
+  RegClass cls = RegClass::VGPR; ///< Register file: VGPR/AccVGPR (direct) or SGPR (bridged).
+  uint16_t reg = 0;              ///< Register index to save before / restore after the call.
+  uint32_t byte_offset = 0;      ///< Per-lane scratch byte offset for this slot.
+};
+
+/// @brief One special register (EXEC/VCC/M0) saved to a dead SGPR temp before the
+///        call and restored after. `operand` is its scalar-operand code
+///        (arch-specific for M0).
+struct SpecialStateSlot {
+  uint16_t operand = 0;   ///< Scalar-operand code of the special register.
+  uint16_t temp_base = 0; ///< Dead SGPR (pair base when width==2) holding the save.
+  uint8_t width = 1;      ///< Register lanes: 2 for EXEC/VCC, 1 for M0.
+};
+
 /// @brief Builder-facing description of one trampoline.
 ///
 /// Coordinates are .text-relative byte offsets. The orchestrator fills this
@@ -62,14 +87,43 @@ struct TrampolinePlan {
   // TrampolinePlan for now since this is the builder's one input;
   // lift back out into a dedicated resource-plan type if it grows unwieldy.
   //----------------------------------------------------------------------------
-  bool is_probe_call = false;     ///< True once plan_probe_call() populated these.
-  uint16_t link_pair_base = 30;   ///< Return-link pair, derived from the probe cc.
-  uint16_t target_pair_base = 0;  ///< Dead even SGPR pair holding the probe address.
-  bool preserve_scc = true;       ///< v0 preserves SCC across target materialization.
-  uint16_t scc_temp = 0;          ///< Dead SGPR holding saved SCC across the call.
-  RegisterSet builder_clobbers;   ///< {link} | {target pair} | {scc_temp}; feeds the spill formula.
-  uint32_t before_word_count = 0; ///< Envelope words emitted before the relocated original.
+  /// Upper bound (exclusive) for envelope/temp SGPR selection: the kernel's own
+  /// allocation. find_free_sgpr* never picks an index >= this, so a temp cannot
+  /// land past the kernel's .sgpr_count. Defaults to the conservative cross-ISA
+  /// allocatable bound (no kernel-specific limit); the orchestrator narrows it to
+  /// the patched kernel's actual count.
+  uint32_t kernel_sgpr_count = REGISTER_SET_ALLOCATABLE_SGPRS;
+
+  bool is_probe_call = false;    ///< True once plan_probe_call() populated these.
+  uint16_t link_pair_base = 30;  ///< Return-link pair, derived from the probe cc.
+  uint16_t target_pair_base = 0; ///< Dead even SGPR pair holding the probe address.
+  bool preserve_scc = true;      ///< v0 preserves SCC across target materialization.
+  uint16_t scc_temp = 0;         ///< Dead SGPR holding saved SCC across the call.
+
+  // Special-state preservation: set by the orchestrator when the probe body
+  // clobbers the register; plan_probe_call allocates a dead SGPR temp for each
+  // and records it in special_state_saves (one plan/emit loop, not a branch each).
+  bool preserve_exec = false;
+  bool preserve_vcc = false;
+  bool preserve_m0 = false;
+  std::vector<SpecialStateSlot> special_state_saves; ///< Filled by plan_probe_call.
+  RegisterSet builder_clobbers;     ///< {link} | {target pair} | {scc/special temps}; feeds spill.
+  uint32_t before_word_count = 0;   ///< Envelope words emitted before the relocated original.
   uint64_t probe_target_offset = 0; ///< .text-relative byte offset of the copied probe body.
+
+  /// VGPRs to save/restore around the call; emit_probe_call brackets each with a
+  /// scratch_store before and a scratch_load after. Empty when nothing spills.
+  std::vector<SpillSlot> vgpr_spills;
+
+  /// SGPRs to save/restore, each bridged through `spill_bridge_vgpr`.
+  std::vector<SpillSlot> sgpr_spills;
+
+  /// Dead-at-anchor VGPR bridging SGPR<->scratch. Valid iff sgpr_spills non-empty.
+  uint16_t spill_bridge_vgpr = 0;
+
+  /// AccVGPRs to save/restore around the call, stored/loaded directly with the
+  /// CDNA scratch `acc` bit (no bridge VGPR needed). CDNA-only. Empty otherwise.
+  std::vector<SpillSlot> acc_spills;
 };
 
 /// @brief Output bytes for one trampoline.
@@ -99,8 +153,9 @@ public:
   ///
   /// Picks the call-envelope registers and computes the envelope word count
   /// without choosing layout or emitting bytes. On success, fills
-  /// `plan.is_probe_call`, `link_pair_base`, `target_pair_base`, `preserve_scc`,
-  /// `scc_temp`, `builder_clobbers`, and `before_word_count`, then returns true.
+  /// `plan.is_probe_call`, `link_pair_base`, `target_pair_base`, `scc_temp`,
+  /// `special_state_saves`, `builder_clobbers`, and `before_word_count`, then
+  /// returns true. (`preserve_scc`/`preserve_*` are inputs, read but not written.)
   ///
   /// Policy:
   ///   - Link pair is derived from @p cc via link_pair_for(); an unknown
@@ -112,6 +167,15 @@ public:
   ///   - SCC is preserved with one dead SGPR temp. The temp lives across the call
   ///     (saved before materialization, restored after), so it must avoid both
   ///     the live set and @p probe_body_clobbers. Extending this is deferred.
+  ///   - EXEC/VCC/M0 are preserved when the corresponding plan.preserve_* flag is
+  ///     set. The orchestrator sets preserve_exec/preserve_vcc unconditionally as a
+  ///     conservative policy (the summary detects the special-state writes the
+  ///     decoder exposes as operands, but always saving keeps correctness
+  ///     independent of per-opcode implicit-def coverage) and gates preserve_m0 on
+  ///     the probe's clobbers; EXEC is additionally preserved here when the site
+  ///     spills (forced to -1 around the store/load). Each preserved register gets
+  ///     its own dead SGPR temp (a pair for EXEC/VCC, single for M0) recorded in
+  ///     plan.special_state_saves, drawn from the same dead pool as the SCC temp.
   ///
   /// Returns false and writes a diagnostic naming the unavailable resource to
   /// @p error_out (if non-null) when @p cc is unknown, the link pair is live, or

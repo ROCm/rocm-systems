@@ -37,6 +37,12 @@ if(HIP_PLATFORM MATCHES "amd")
     CheckRejectedArchs($ENV{HCC_AMDGPU_TARGET})
   endif()
 
+  # The WGP/CU reporting is AMD specific.
+  set(TEST_SRC
+    ${TEST_SRC}
+    hipOccupancyLdsPerMultiprocessor.cc
+    )
+
   if(CLUSTERS_SUPPORTED EQUAL 1)
     message(STATUS "Adding clusters tests")
     set(TEST_SRC

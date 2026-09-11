@@ -5,56 +5,15 @@
 
 #include "common/environment.hpp"
 #include "common/path.hpp"
-#include <spdlog/fmt/fmt.h>
+#include <fmt/format.h>
 
 #include <cstdlib>
-#include <cstring>
 #include <dlfcn.h>
 #include <link.h>
 #include <linux/limits.h>
 #include <string>
 #include <sys/stat.h>
 #include <unistd.h>
-
-#if !defined(ROCPROFSYS_SETUP_LOG_NAME)
-#    if defined(ROCPROFSYS_COMMON_LIBRARY_NAME)
-#        define ROCPROFSYS_SETUP_LOG_NAME "[" ROCPROFSYS_COMMON_LIBRARY_NAME "]"
-#    else
-#        define ROCPROFSYS_SETUP_LOG_NAME
-#    endif
-#endif
-
-#if !defined(ROCPROFSYS_SETUP_LOG_START)
-#    if defined(ROCPROFSYS_COMMON_LIBRARY_LOG_START)
-#        define ROCPROFSYS_SETUP_LOG_START ROCPROFSYS_COMMON_LIBRARY_LOG_START
-#    elif defined(TIMEMORY_LOG_COLORS_AVAILABLE)
-#        define ROCPROFSYS_SETUP_LOG_START                                               \
-            fprintf(stderr, "%s", ::tim::log::color::info());
-#    else
-#        define ROCPROFSYS_SETUP_LOG_START
-#    endif
-#endif
-
-#if !defined(ROCPROFSYS_SETUP_LOG_END)
-#    if defined(ROCPROFSYS_COMMON_LIBRARY_LOG_END)
-#        define ROCPROFSYS_SETUP_LOG_END ROCPROFSYS_COMMON_LIBRARY_LOG_END
-#    elif defined(TIMEMORY_LOG_COLORS_AVAILABLE)
-#        define ROCPROFSYS_SETUP_LOG_END fprintf(stderr, "%s", ::tim::log::color::end());
-#    else
-#        define ROCPROFSYS_SETUP_LOG_END
-#    endif
-#endif
-
-#define ROCPROFSYS_SETUP_LOG(CONDITION, ...)                                             \
-    if(CONDITION)                                                                        \
-    {                                                                                    \
-        fflush(stderr);                                                                  \
-        ROCPROFSYS_SETUP_LOG_START                                                       \
-        fprintf(stderr, "[rocprof-sys]" ROCPROFSYS_SETUP_LOG_NAME "[%i] ", getpid());    \
-        fprintf(stderr, __VA_ARGS__);                                                    \
-        ROCPROFSYS_SETUP_LOG_END                                                         \
-        fflush(stderr);                                                                  \
-    }
 
 namespace rocprofsys
 {
@@ -71,14 +30,13 @@ get_environ(int _verbose, std::string _search_paths = {},
 
     if(!_omnilib_path.empty())
     {
-        _omnilib      = fmt::format("{}/{}", _omnilib_path, ::basename(_omnilib.c_str()));
+        _omnilib      = fmt::format("{}/{}", _omnilib_path, path::filename(_omnilib));
         _search_paths = fmt::format("{}:{}", _omnilib_path, _search_paths);
     }
 
     if(!_omnilib_dl_path.empty())
     {
-        _omnilib_dl =
-            fmt::format("{}/{}", _omnilib_dl_path, ::basename(_omnilib_dl.c_str()));
+        _omnilib_dl = fmt::format("{}/{}", _omnilib_dl_path, path::filename(_omnilib_dl));
         _search_paths = fmt::format("{}:{}", _omnilib_dl_path, _search_paths);
     }
 
@@ -87,8 +45,8 @@ get_environ(int _verbose, std::string _search_paths = {},
         _search_paths = get_default_lib_search_paths();
     }
 
-    _omnilib    = common::path::find_path(_omnilib, _verbose, _search_paths);
-    _omnilib_dl = common::path::find_path(_omnilib_dl, _verbose, _search_paths);
+    _omnilib    = common::path::find_library(_omnilib, _verbose, _search_paths);
+    _omnilib_dl = common::path::find_library(_omnilib_dl, _verbose, _search_paths);
 
     return _data;
 }

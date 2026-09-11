@@ -133,7 +133,7 @@ void launchFunction() {
   streamIds.push_back(streamId);
   mutex.unlock();
 
-  HIP_CHECK(hipStreamDestroy(stream));
+  HIP_CHECK_THREAD(hipStreamDestroy(stream));
 }
 
 /**

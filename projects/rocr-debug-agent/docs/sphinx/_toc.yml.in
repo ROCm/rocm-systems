@@ -5,7 +5,7 @@ subtrees:
   - caption: Install
     entries:
     - file: install/installation
-      title: Install ROCr Debug Agent
+      title: Install ROCR Debug Agent
     - url: https://github.com/ROCm/rocm-systems/blob/develop/projects/rocr-debug-agent/README.md
       title: Build from source
   - caption: How to

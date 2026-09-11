@@ -27,7 +27,7 @@
 #include "libhsakmt.h"
 #include "fmm.h"
 #include "hsakmt/hsakmtmodel.h"
-#include "hsakmt/linux/kfd_ioctl.h"
+#include "kfd_ioctl.h"
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
@@ -1937,6 +1937,13 @@ void *hsakmt_fmm_allocate_scratch(HsaKFDContext *ctx,
 					    0, (void *)LONG_MAX, -1);
 	}
 
+	/* A partially initialized aperture (base NULL, limit derived from the
+	 * requested size) would claim every low VA in the process, so leave the
+	 * aperture untouched and let the caller see the failure instead.
+	 */
+	if (!mem)
+		return NULL;
+
 	/* Remember scratch backing aperture for later */
 	aperture_phy->base = mem;
 	aperture_phy->limit = VOID_PTR_ADD(mem, aligned_size-1);
@@ -2203,6 +2210,23 @@ void *hsakmt_fmm_allocate_device(HsaKFDContext *ctx,
 		aperture = &fmm_ctx->mem_handle_aperture;
 
 	/* Allocate device memory */
+	mem = NULL;
+	if (hsakmt_udmabuf_dev_fd > 0 && aperture == fmm_ctx->svm.dgpu_aperture
+		 && hsakmt_device_is_apu_by_node_id(ctx, node_id)
+		 && aperture->ops == &mmap_aperture_ops) {
+
+		mem  = udmabuf_allocation(ctx, gpu_id, node_id, size, aperture, alignment,
+                                        mflags, &vm_obj);
+		pr_debug("udmabuf_allocation mem %p\n", mem);
+		if (!mem) {
+			pr_err("udmabuf_allocation allocation fail size %lu\n", size);
+			return NULL;
+		}
+	}
+
+	/* env HSA_USE_UDMABUF not set, or not apu, or cannot use udmabuf,
+	 * fall back to use device driver to allocate memory
+	 */
 	if (!mem) {
 		mem = __fmm_allocate_device(ctx,
 					   gpu_id, address, size, aperture, &mmap_offset,
@@ -3940,6 +3964,24 @@ void hsakmt_fmm_destroy_process_apertures(HsaKFDContext *ctx)
 		fmm_ctx->first_gpu_mem = NULL;
 	}
 	fmm_ctx->gpu_mem_count = 0;
+}
+
+HSAKMT_STATUS hsakmt_fmm_get_default_host_gpu(HsaKFDContext *ctx,
+					      HSAuint32 *node_id,
+					      HSAuint32 *gpu_id)
+{
+	struct hsa_kfd_fmm_context *fmm_ctx;
+
+	if (!ctx || !node_id || !gpu_id)
+		return HSAKMT_STATUS_INVALID_PARAMETER;
+
+	fmm_ctx = ctx->fmm_context;
+	if (!fmm_ctx || !fmm_ctx->first_gpu_mem)
+		return HSAKMT_STATUS_ERROR;
+
+	*node_id = fmm_ctx->first_gpu_mem->node_id;
+	*gpu_id = fmm_ctx->first_gpu_mem->gpu_id;
+	return HSAKMT_STATUS_SUCCESS;
 }
 
 HSAKMT_STATUS hsakmt_fmm_advance_vm_timeline(HsaKFDContext *ctx,

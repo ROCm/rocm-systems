@@ -28,6 +28,9 @@ on:
       - '!**/.wordlist.txt'
       - '.github/actions/rocprofiler-sdk-util/resolve-ci-config/**'
 
+permissions:
+  contents: read
+
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true

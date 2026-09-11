@@ -20,6 +20,7 @@
 #include <hip_test_checkers.hh>
 #include <hip_test_common.hh>
 
+#include <algorithm>
 #include <cstdint>
 #include <cstdlib>
 #include <vector>
@@ -125,6 +126,75 @@ TEST_CASE("Performance_Graph_CollapseCorrectness") {
                  << " value=" << (bad >= 0 ? host[bad] : 5)
                  << " (poison=" << kPoison << ")");
     REQUIRE(bad == -1);
+  }
+
+  HIP_CHECK(hipStreamDestroy(stream));
+  HIP_CHECK(hipGraphExecDestroy(exec));
+  HIP_CHECK(hipGraphDestroy(graph));
+  HIP_CHECK(hipFree(a));
+  HIP_CHECK(hipFree(b));
+  HIP_CHECK(hipFree(c));
+  HIP_CHECK(hipFree(out));
+}
+
+TEST_CASE("Performance_Graph_DisabledBoundarySynchronization") {
+  const size_t bytes = static_cast<size_t>(kN) * sizeof(int);
+  int *a = nullptr, *b = nullptr, *c = nullptr, *out = nullptr;
+  HIP_CHECK(hipMalloc(&a, bytes));
+  HIP_CHECK(hipMalloc(&b, bytes));
+  HIP_CHECK(hipMalloc(&c, bytes));
+  HIP_CHECK(hipMalloc(&out, bytes));
+
+  int one = 1, two = 2, three = 3, four = 4, n = kN;
+  void* a_p = a;
+  void* b_p = b;
+  void* c_p = c;
+  void* out_p = out;
+
+  hipGraph_t graph{};
+  HIP_CHECK(hipGraphCreate(&graph, 0));
+  hipGraphNode_t set_node =
+      AddKernel(graph, {}, reinterpret_cast<void*>(k_set), {&a_p, &one, &n});
+  hipGraphNode_t b_node = AddKernel(graph, {set_node}, reinterpret_cast<void*>(k_mul),
+                                    {&a_p, &b_p, &two, &n});
+  hipGraphNode_t c_first = AddKernel(graph, {set_node}, reinterpret_cast<void*>(k_mul),
+                                     {&a_p, &c_p, &three, &n});
+  hipGraphNode_t c_last = AddKernel(graph, {c_first}, reinterpret_cast<void*>(k_mul),
+                                    {&a_p, &c_p, &four, &n});
+  AddKernel(graph, {b_node, c_last}, reinterpret_cast<void*>(k_add),
+            {&b_p, &c_p, &out_p, &n});
+
+  hipGraphExec_t exec{};
+  HIP_CHECK(hipGraphInstantiate(&exec, graph, nullptr, nullptr, 0));
+
+  int expected = 0;
+  SECTION("disable first consumer packet") {
+    HIP_CHECK(hipGraphNodeSetEnabled(exec, c_first, 0));
+    expected = 6;
+  }
+  SECTION("disable last producer packet") {
+    HIP_CHECK(hipGraphNodeSetEnabled(exec, c_last, 0));
+    expected = 5;
+  }
+  SECTION("disable all packets in producer segment") {
+    HIP_CHECK(hipGraphNodeSetEnabled(exec, c_first, 0));
+    HIP_CHECK(hipGraphNodeSetEnabled(exec, c_last, 0));
+    expected = 1;
+  }
+
+  hipStream_t stream{};
+  HIP_CHECK(hipStreamCreate(&stream));
+  std::vector<int> host(kN);
+  for (int iteration = 0; iteration < kIters; ++iteration) {
+    HIP_CHECK(hipMemsetAsync(a, 0xFF, bytes, stream));
+    HIP_CHECK(hipMemsetAsync(b, 0xFF, bytes, stream));
+    HIP_CHECK(hipMemsetAsync(c, 0xFF, bytes, stream));
+    HIP_CHECK(hipMemsetAsync(out, 0xFF, bytes, stream));
+    HIP_CHECK(hipGraphLaunch(exec, stream));
+    HIP_CHECK(hipMemcpyAsync(host.data(), out, bytes, hipMemcpyDeviceToHost, stream));
+    HIP_CHECK(hipStreamSynchronize(stream));
+    REQUIRE(std::all_of(host.begin(), host.end(),
+                        [expected](int value) { return value == expected; }));
   }
 
   HIP_CHECK(hipStreamDestroy(stream));

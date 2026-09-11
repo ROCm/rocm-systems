@@ -275,7 +275,7 @@ class MIGPUSpecs:
     ) -> bool:
         """Return True if the GPU supports compute partitions."""
         try:
-            partition_supported_series = {"mi300", "mi350"}
+            partition_supported_series = {"mi300", "mi350", "gfx1250_series"}
             if bool(gpu_arch):
                 series = cls.get_gpu_series(gpu_arch.lower().strip())
             elif bool(gpu_model):

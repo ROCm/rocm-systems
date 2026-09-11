@@ -15,6 +15,14 @@ There are two modes of counter collection service:
 
 This topic explains how to setup dispatch and device counting and use common counter collection APIs. For details on the APIs including the less commonly used counter collection APIs, see the API library. For fully functional examples of both dispatch and device counting, see `Samples <https://github.com/ROCm/rocm-systems/tree/develop/projects/rocprofiler-sdk/samples>`_.
 
+When a tool needs more counters than fit in one hardware pass, it can collect groups across
+successive application runs, rotate groups across successive dispatches, or **replay each dispatch**
+in-process with device memory restored between passes. Kernel replay is a callback tracing domain
+(:ref:`kernel-replay-sdk-api`), not a third counting mode: dispatch counting still supplies the
+counter records; replay decides how many times the dispatch runs. Custom tools subscribe
+to the domain directly (:ref:`using-kernel-replay`). ``rocprofv3`` exposes that as
+``--replay-mode kernel --kernel-replay-beta-enabled`` (:ref:`using-kernel-replay-rocprofv3`).
+
 Definitions
 -----------
 
@@ -333,7 +341,7 @@ Firmware restrictions are defined alongside counter definitions in the ``config.
               expression: 400*reduce(SQ_WAIT_INST_LDS,sum)/reduce(SQ_WAVES,sum)/reduce(GRBM_GUI_ACTIVE,max)
 
       # Required: Firmware restrictions schema version
-      fw_restriction_schema_version: 1
+      fw-restriction-schema-version: 2
 
       # List of firmware restrictions
       firmware_restrictions:
@@ -355,9 +363,18 @@ Firmware restrictions are defined alongside counter definitions in the ``config.
             - "gfx1100"
             - "gfx1101"
 
+        # Example: per-feature capability floor (queried at runtime, not a hard
+        # startup requirement)
+        - firmware_type: CP
+          feature: pc_sampling_host_trap
+          min_version: 210
+          reason: "PC sampling host-trap mode requires CP firmware version 210 or newer on MI300 devices"
+          affected_architectures:
+            - "gfx942"
+
 **Schema elements:**
 
-- ``fw_restriction_schema_version`` (required): Integer specifying the schema version (currently 1).
+- ``fw-restriction-schema-version`` (required): Integer specifying the schema version (currently 2; the ``feature`` field was added in version 2).
 - ``firmware_restrictions``: Array of restriction objects consisting of the following fields:
 
   - ``firmware_type`` (required): Type of firmware being restricted. Supported types include:
@@ -368,6 +385,7 @@ Firmware restrictions are defined alongside counter definitions in the ``config.
   - ``min_version`` (required): Integer specifying the minimum firmware version.
   - ``reason`` (optional): Human-readable explanation for the restriction.
   - ``affected_architectures`` (optional): Array of GPU architecture names, such as "gfx940" and "gfx942" liable to meet this restriction. If empty, the restriction applies to all the architectures.
+  - ``feature`` (optional): String naming a firmware-gated feature. When present, the entry is treated as a *per-feature capability floor* rather than a hard startup requirement: it is **not** enforced during the startup firmware validation and does not prevent ROCprofiler-SDK from initializing. Instead, services query it at runtime (via the internal feature-support API) to decide whether functionality requiring that firmware feature can be enabled on a given agent. When ``feature`` is absent (or empty), the entry is a hard floor as before and is enforced at startup.
 
 Counter definitions file location
 ++++++++++++++++++++++++++++++++++

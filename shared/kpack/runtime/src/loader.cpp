@@ -402,6 +402,7 @@ kpack_error_t kpack_load_code_object(kpack_cache_t cache,
   // For each architecture in priority order, search all archives
   void* kernel_data = nullptr;
   size_t kernel_size = 0;
+  kpack_error_t last_err = KPACK_SUCCESS;
 
   for (size_t i = 0; i < arch_count; ++i) {
     const char* arch = arch_list[i];
@@ -455,14 +456,22 @@ kpack_error_t kpack_load_code_object(kpack_cache_t cache,
       KPACK_DEBUG(cache, "  found kernel: %zu bytes", kernel_size);
       break;
     }
-    // Archive was found with matching architecture — the kernel either
-    // exists or it doesn't. Trying a different ISA won't help, so return
-    // the error directly (KERNEL_NOT_FOUND or unexpected error).
-    KPACK_DEBUG(cache, "  kernel not found in this archive (error %d)", err);
-    return err;
+    // Archive was found with matching architecture but the kernel was not
+    // present in it (e.g. an xnack-variant kpack that is missing a kernel
+    // present in the base/generic kpack). Continue to the next candidate
+    // rather than returning immediately — a less-specific but still ISA-
+    // compatible archive (e.g. bare gfx90a.kpack) may contain the kernel.
+    KPACK_DEBUG(cache, "  kernel not found in this archive (error %d), trying next candidate", err);
+    last_err = err;
   }
 
   if (!kernel_data) {
+    // If we found matching archives but none contained the kernel, report
+    // KERNEL_NOT_FOUND rather than ARCH_NOT_FOUND for accurate diagnostics.
+    if (last_err != KPACK_SUCCESS) {
+      KPACK_DEBUG(cache, "kernel not found in any compatible archive (last error %d)", last_err);
+      return last_err;
+    }
     KPACK_DEBUG(cache, "no archive with compatible architecture found");
     return KPACK_ERROR_ARCH_NOT_FOUND;
   }

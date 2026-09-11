@@ -24,7 +24,7 @@
  */
 
 #include "libhsakmt.h"
-#include "hsakmt/linux/kfd_ioctl.h"
+#include "kfd_ioctl.h"
 #include <stdlib.h>
 #include <string.h>
 #include <assert.h>
@@ -562,7 +562,7 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtMapMemoryToGPUNodesCtx(HsaKFDContext *ctx,
 						  void *MemoryAddress,
 						  HSAuint64 MemorySizeInBytes,
 						  HSAuint64 *AlternateVAGPU,
-						  HsaMemMapFlags MemMapFlags,
+						  HsaMemFlags MemFlags,
 						  HSAuint64 NumberOfNodes,
 						  HSAuint32 *NodeArray)
 {
@@ -781,6 +781,24 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtAvailableMemory(HSAuint32 Node,
 	return hsaKmtAvailableMemoryCtx(&hsakmt_primary_kfd_ctx, Node, AvailableBytes);
 }
 
+HSAKMT_STATUS HSAKMTAPI hsaKmtGetDefaultHostGpuCtx(HsaKFDContext *ctx,
+						   HSAuint32 *NodeId,
+						   HSAuint32 *GpuId)
+{
+	CHECK_KFD_OPEN();
+
+	if (!NodeId || !GpuId)
+		return HSAKMT_STATUS_INVALID_PARAMETER;
+
+	return hsakmt_fmm_get_default_host_gpu(ctx, NodeId, GpuId);
+}
+
+HSAKMT_STATUS HSAKMTAPI hsaKmtGetDefaultHostGpu(HSAuint32 *NodeId,
+						HSAuint32 *GpuId)
+{
+	return hsaKmtGetDefaultHostGpuCtx(&hsakmt_primary_kfd_ctx, NodeId, GpuId);
+}
+
 HSAKMT_STATUS HSAKMTAPI hsaKmtRegisterMemory(void *MemoryAddress,
 					      HSAuint64 MemorySizeInBytes)
 {
@@ -899,12 +917,12 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtMapMemoryToGPUNodes(
 					  void *MemoryAddress,
 					  HSAuint64 MemorySizeInBytes,
 					  HSAuint64 *AlternateVAGPU,
-					  HsaMemMapFlags MemMapFlags,
+					  HsaMemFlags MemFlags,
 					  HSAuint64 NumberOfNodes,
 					  HSAuint32 *NodeArray)
 {
 	return hsaKmtMapMemoryToGPUNodesCtx(&hsakmt_primary_kfd_ctx, MemoryAddress,
-				MemorySizeInBytes, AlternateVAGPU, MemMapFlags, NumberOfNodes, NodeArray);
+				MemorySizeInBytes, AlternateVAGPU, MemFlags, NumberOfNodes, NodeArray);
 }
 
 HSAKMT_STATUS HSAKMTAPI hsaKmtUnmapMemoryToGPU(void *MemoryAddress)

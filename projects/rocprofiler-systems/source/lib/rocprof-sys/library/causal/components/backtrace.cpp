@@ -2,7 +2,6 @@
 // SPDX-License-Identifier: MIT
 
 #include "library/causal/components/backtrace.hpp"
-#include "common/units.hpp"
 #include "core/concepts.hpp"
 #include "core/config.hpp"
 #include "core/state.hpp"
@@ -32,11 +31,7 @@
 #include <execinfo.h>
 #include <type_traits>
 
-namespace rocprofsys
-{
-namespace causal
-{
-namespace component
+namespace rocprofsys::causal::component
 {
 namespace
 {
@@ -78,7 +73,7 @@ backtrace::global_init()
 void
 overflow::sample(int _sig)
 {
-    ROCPROFSYS_SCOPED_THREAD_STATE(ThreadState::Internal);
+    auto _thread_state_guard = state::thread::scoped(state::thread::Internal);
 
     static thread_local const auto& _tinfo      = thread_info::get();
     auto                            _tid        = _tinfo->index_data->sequent_value;
@@ -147,9 +142,9 @@ backtrace::sample(int _sig)
 
     ++_protect_flag;
     // on RedHat, the unw_step within get_unw_signal_frame_stack_raw involves a mutex lock
-    ROCPROFSYS_SCOPED_THREAD_STATE(ThreadState::Internal);
-    m_index = causal::experiment::get_index();
-    m_stack = get_unw_signal_frame_stack_raw<depth, ignore_depth>();
+    auto _thread_state_guard = state::thread::scoped(state::thread::Internal);
+    m_index                  = causal::experiment::get_index();
+    m_stack                  = get_unw_signal_frame_stack_raw<depth, ignore_depth>();
 
     auto _set_current_selection = [](auto _stack) {
         // save the former selection count
@@ -207,26 +202,4 @@ backtrace::sample(int _sig)
     ++_protect_flag;
 }
 
-template <typename Tp>
-Tp
-backtrace::get_period(std::uint64_t _units)
-{
-    using cast_type = std::conditional_t<std::is_floating_point<Tp>::value, Tp, double>;
-
-    double       _period = 1.0 / 1000.0;
-    std::int64_t _period_nsec =
-        static_cast<std::int64_t>(_period * units::sec) % units::sec;
-    return static_cast<Tp>(_period_nsec) / static_cast<cast_type>(_units);
-}
-}  // namespace component
-}  // namespace causal
-}  // namespace rocprofsys
-
-#define INSTANTIATE_BT_CAUSAL_PERIOD(TYPE)                                               \
-    template TYPE rocprofsys::causal::component::backtrace::get_period<TYPE>(            \
-        std::uint64_t);
-
-INSTANTIATE_BT_CAUSAL_PERIOD(float)
-INSTANTIATE_BT_CAUSAL_PERIOD(double)
-INSTANTIATE_BT_CAUSAL_PERIOD(std::int64_t)
-INSTANTIATE_BT_CAUSAL_PERIOD(std::uint64_t)
+}  // namespace rocprofsys::causal::component

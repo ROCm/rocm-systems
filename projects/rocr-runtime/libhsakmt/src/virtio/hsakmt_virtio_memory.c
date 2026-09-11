@@ -412,7 +412,7 @@ HSAKMT_STATUS HSAKMTAPI vhsaKmtFreeMemory(void* MemoryAddress, HSAuint64 SizeInB
 
 HSAKMT_STATUS HSAKMTAPI vhsaKmtMapMemoryToGPUNodes(void* MemoryAddress, HSAuint64 MemorySizeInBytes,
                                                    HSAuint64* AlternateVAGPU,
-                                                   HsaMemMapFlags MemMapFlags,
+                                                   HsaMemFlags MemFlags,
                                                    HSAuint64 NumberOfNodes, HSAuint32* NodeArray) {
   CHECK_VIRTIO_KFD_OPEN();
 
@@ -429,7 +429,6 @@ HSAKMT_STATUS HSAKMTAPI vhsaKmtMapMemoryToGPUNodes(void* MemoryAddress, HSAuint6
   req->hdr = VHSAKMT_CCMD(MEMORY, req_len);
   req->type = VHSAKMT_CCMD_MEMORY_MAP_TO_GPU_NODES;
   req->map_to_GPU_nodes_args.MemorySizeInBytes = MemorySizeInBytes;
-  req->map_to_GPU_nodes_args.MemMapFlags = MemMapFlags;
   req->map_to_GPU_nodes_args.NumberOfNodes = NumberOfNodes;
 
   bo = vhsakmt_find_bo_by_addr(dev, MemoryAddress);

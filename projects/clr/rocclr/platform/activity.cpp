@@ -135,21 +135,18 @@ void ReportActivity(const amd::Command& command) {
   }
 
   if (command.type() == CL_COMMAND_TASK) {
-    auto timestamps = static_cast<const amd::AccumulateCommand&>(command).getTimestamps();
-    const auto& kernel_names =
-        static_cast<const amd::AccumulateCommand&>(command).getKernelNames();
-    // kernel_names and timestamps are both populated only when profiling is active
-    // at dispatch time. Walk the shorter of the two as a safety bound.
-    for (uint32_t i = 0; i < kernel_names.size() && i < timestamps.size(); i++) {
-      auto& ts = timestamps[i];
-      record.begin_ns = ts.start;
-      record.end_ns = ts.end;
-      record.kernel_name = kernel_names[i];
-      // Use per-packet queue_index when available so each kernel is assigned
-      // to the internal parallel stream it ran on, not the launch stream.
-      if (ts.queue_index != UINT32_MAX) {
-        record.queue_id = static_cast<uint64_t>(ts.queue_index);
+    const auto& kernel_dispatches =
+        static_cast<const amd::AccumulateCommand&>(command).getKernelDispatches();
+    for (const auto& dispatch : kernel_dispatches) {
+      // Missing or invalid signal timing leaves this dispatch's slot empty
+      // instead of shifting every later kernel onto the wrong timestamp.
+      if (dispatch.end_ns == 0) {
+        continue;
       }
+      record.begin_ns = dispatch.start_ns;
+      record.end_ns = dispatch.end_ns;
+      record.kernel_name = dispatch.kernel_name;
+      record.queue_id = static_cast<uint64_t>(dispatch.queue_index);
       function(ACTIVITY_DOMAIN_HIP_OPS, operation_id, &record);
     }
   } else {

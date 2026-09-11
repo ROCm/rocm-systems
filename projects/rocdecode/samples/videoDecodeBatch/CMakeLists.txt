@@ -51,14 +51,9 @@ if(NOT CMAKE_BUILD_TYPE)
   set_property(CACHE CMAKE_BUILD_TYPE PROPERTY STRINGS "Debug" "Release")
 endif()
 if(CMAKE_BUILD_TYPE MATCHES Debug)
-  # -O0 -- Don't Optimize output file 
-  # -gdwarf-4  -- generate debugging information, dwarf-4 for making valgrind work
-  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O0 -gdwarf-4")
+  set(ROCDECODE_SAMPLE_COMPILE_OPTIONS -O0 -gdwarf-4)
 else()
-  # -O3       -- Optimize output file 
-  # -DNDEBUG  -- turn off asserts 
-  # -fPIC     -- Generate position-independent code if possible
-  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O3 -DNDEBUG -fPIC")
+  set(ROCDECODE_SAMPLE_COMPILE_OPTIONS -O3 -DNDEBUG -fPIC)
 endif()
 
 # Set supported GPU Targets
@@ -124,6 +119,17 @@ if(HIP_FOUND AND FFMPEG_FOUND AND rocdecode_FOUND AND Threads_FOUND AND rocprofi
 
     list(APPEND SOURCES ${PROJECT_SOURCE_DIR} videodecodebatch.cpp ${CMAKE_CURRENT_SOURCE_DIR}/../../utils/rocvideodecode/roc_video_dec.cpp)
     add_executable(${PROJECT_NAME} ${SOURCES})
+    target_compile_options(${PROJECT_NAME} PRIVATE ${ROCDECODE_SAMPLE_COMPILE_OPTIONS})
+    # On TheRock installs libva is vendored under lib/rocm_sysdeps, but FFmpeg still
+    # links the system libva, so both load at runtime. librocdecode already depends
+    # on the vendored libva, so force librocdecode to be the FIRST direct dependency
+    # of the executable -- ahead of FFmpeg -- so the vendored libva enters the global
+    # symbol scope first and wins VA symbol interposition, loading the matching
+    # vendored VA driver. It must be injected as a raw path because CMake
+    # topologically reorders normal link entries, placing FFmpeg ahead otherwise.
+    if(EXISTS "${ROCM_PATH}/lib/rocm_sysdeps/lib")
+      set(LINK_LIBRARY_LIST -Wl,--push-state,--no-as-needed ${rocdecode_LIBRARY} -Wl,--pop-state ${LINK_LIBRARY_LIST})
+    endif()
     target_link_libraries(${PROJECT_NAME} ${LINK_LIBRARY_LIST})
     # FFMPEG multi-version support
     if(_FFMPEG_AVCODEC_VERSION VERSION_LESS_EQUAL 58.134.100)

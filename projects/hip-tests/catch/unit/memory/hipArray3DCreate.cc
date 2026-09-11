@@ -124,6 +124,33 @@ HIP_TEMPLATE_TEST_CASE(Unit_hipArray3DCreate_MaxTexture, int, uint4, short, usho
 
     CAPTURE(desc.Width, desc.Height, desc.Depth);
 
+    {
+      size_t bytesPerElement = desc.NumChannels;
+      switch (desc.Format) {
+        case HIP_AD_FORMAT_SIGNED_INT32:
+        case HIP_AD_FORMAT_UNSIGNED_INT32:
+        case HIP_AD_FORMAT_FLOAT:
+          bytesPerElement *= 4; break;
+        case HIP_AD_FORMAT_SIGNED_INT16:
+        case HIP_AD_FORMAT_UNSIGNED_INT16:
+        case HIP_AD_FORMAT_HALF:
+          bytesPerElement *= 2; break;
+        default:
+          break;
+      }
+      size_t w = desc.Width ? desc.Width : 1;
+      size_t h = desc.Height ? desc.Height : 1;
+      size_t d = desc.Depth ? desc.Depth : 1;
+      size_t estimatedBytes = w * h * d * bytesPerElement;
+      size_t freeMem = 0, totalMem = 0;
+      HIP_CHECK(hipMemGetInfo(&freeMem, &totalMem));
+      if (estimatedBytes > freeMem) {
+        WARN("Skipping allocation of " << (estimatedBytes >> 20)
+             << " MB (free: " << (freeMem >> 20) << " MB)");
+        return;
+      }
+    }
+
     auto maxArrayCreateError = hipArray3DCreate(&array, &desc);
     // this can try to alloc many GB of memory, so out of memory is acceptable
     if (maxArrayCreateError == hipErrorOutOfMemory) return;

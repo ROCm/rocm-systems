@@ -1,0 +1,234 @@
+/*
+ * Copyright Advanced Micro Devices, Inc.
+ *
+ * SPDX-License-Identifier: MIT
+ */
+
+#include <cstddef>
+
+#include <hip/hip_runtime_api.h>
+#include <hip_test_common.hh>
+#include <contract_cleanup.hh>
+
+// BACKEND-DIFF: hip/hip_ext.h and hipExtLaunchKernel (used by the ExtLaunchKernel
+// contract below) are AMD extensions with no NVIDIA equivalent; the header and
+// its test are gated to AMD. Parity would require a NVIDIA-side ext-launch entry.
+#if HT_AMD
+#include <hip/hip_ext.h>
+#endif
+
+// The symbol contracts resolve device globals through the public symbol query
+// APIs. Those APIs look the symbols up by their registered external name, so the
+// device globals (and the kernels that keep them live in the device image) must
+// have external linkage and therefore live at file scope rather than inside an
+// anonymous namespace.
+constexpr int kContractSymbolArraySize = 8;
+__device__ int g_contract_symbol_scalar = 0;
+__device__ int g_contract_symbol_array[kContractSymbolArraySize] = {};
+
+// Tiny kernels that reference the device globals so the compiler keeps the
+// symbols live in the device image, making them resolvable through the public
+// symbol query APIs.
+__global__ void TouchSymbolScalarKernel() {
+  if (threadIdx.x == 0 && blockIdx.x == 0) {
+    g_contract_symbol_scalar = g_contract_symbol_scalar + 1;
+  }
+}
+
+__global__ void TouchSymbolArrayKernel() {
+  if (threadIdx.x == 0 && blockIdx.x == 0) {
+    g_contract_symbol_array[0] = g_contract_symbol_array[0] + 1;
+  }
+}
+
+namespace {
+constexpr int kExpectedValue = 0x1234;
+
+// A tiny in-source kernel that publishes a value through a device pointer so the
+// cooperative, extended, and AMD extension launch contracts share one launchable
+// symbol without any external per-arch code-object fixture.
+__global__ void WriteValueKernel(int* output, int value) {
+  if (threadIdx.x == 0 && blockIdx.x == 0) {
+    *output = value;
+  }
+}
+
+int ReadDeviceInt(int* device_ptr) {
+  int value = 0;
+  HIP_CHECK(hipMemcpy(&value, device_ptr, sizeof(value), hipMemcpyDeviceToHost));
+  return value;
+}
+
+// Reports whether the current device advertises cooperative launch support so the
+// cooperative-launch contracts can skip cleanly on paths that lack it.
+bool CooperativeLaunchSupported() {
+  int current_device = 0;
+  HIP_CHECK(hipGetDevice(&current_device));
+  int cooperative_launch = 0;
+  HIP_CHECK(hipDeviceGetAttribute(&cooperative_launch, hipDeviceAttributeCooperativeLaunch,
+                                  current_device));
+  return cooperative_launch != 0;
+}
+
+// Portable symbol-reference idiom. The HIP C++ hipGetSymbolAddress/Size
+// overloads take the device global by reference (const T&) and apply the address
+// operator internally, so the correct argument on both backends is the bare
+// global via HIP_SYMBOL; taking its address here would double-address it and fail
+// symbol lookup.
+#define CONTRACT_SYMBOL(expr) HIP_SYMBOL(expr)
+}  // namespace
+
+// @asserts: hipLaunchCooperativeKernel - a cooperative launch executes and publishes the expected value, or skips if unsupported
+HIP_TEST_CASE(Contract_KernelLaunch_HipLaunchCooperativeKernel_Default_WritesExpectedValue) {
+  if (!CooperativeLaunchSupported()) {
+    HIP_SKIP_TEST("This device does not support cooperative kernel launch.");
+  }
+
+  hip::contract::ContractCleanup cleanup;
+  int* device_value = nullptr;
+  HIP_CHECK(hipMalloc(&device_value, sizeof(*device_value)));
+  cleanup.Add([device_value] { (void)hipFree(device_value); });
+  HIP_CHECK(hipMemset(device_value, 0, sizeof(*device_value)));
+
+  // A cooperative launch of the host-function pointer with a single-thread grid
+  // must execute and publish the expected value deterministically.
+  int value = kExpectedValue;
+  void* kernel_args[] = {&device_value, &value};
+  HIP_CHECK(hipLaunchCooperativeKernel(reinterpret_cast<const void*>(WriteValueKernel), dim3(1),
+                                       dim3(1), kernel_args, 0, nullptr));
+  HIP_CHECK(hipDeviceSynchronize());
+
+  REQUIRE(ReadDeviceInt(device_value) == kExpectedValue);
+}
+
+// @asserts: hipLaunchCooperativeKernel - a null function pointer is rejected with a non-success status rather than silently succeeding
+HIP_TEST_CASE(Contract_KernelLaunch_HipLaunchCooperativeKernel_NullFunction_IsRejected) {
+  if (!CooperativeLaunchSupported()) {
+    HIP_SKIP_TEST("This device does not support cooperative kernel launch.");
+  }
+
+  // Launching a cooperative kernel with a null function pointer must not silently
+  // succeed. The exact error code is backend-specific, so only a non-success
+  // status is required. The null is typed as const void* so the plain (non
+  // template) launch overload is selected.
+  const void* null_function = nullptr;
+  const hipError_t status =
+      hipLaunchCooperativeKernel(null_function, dim3(1), dim3(1), nullptr, 0, nullptr);
+  REQUIRE(status != hipSuccess);
+  // The rejected launch leaves a sticky thread-local error (observed as
+  // hipErrorInvalidDeviceFunction on the NVIDIA backend). Clear it so it does not
+  // leak into the next test's hipGetLastError() check; the AMD runtime does not
+  // surface it the same way, but clearing is correct on both backends.
+  (void)hipGetLastError();
+}
+
+// @asserts: hipGetSymbolAddress - a device global resolves to a non-null device pointer usable for host-device copies
+HIP_TEST_CASE(Contract_KernelLaunch_HipGetSymbolAddress_Default_ReturnsUsableDevicePointer) {
+  // Launch a kernel that references the device global so the symbol is emitted
+  // and resolvable in the device image on every runtime path.
+  hipLaunchKernelGGL(TouchSymbolScalarKernel, dim3(1), dim3(1), 0, 0);
+  // Check launch/enqueue status first, then synchronize to surface any
+  // asynchronous execution error before resolving the device symbol.
+  HIP_CHECK(hipGetLastError());
+  HIP_CHECK(hipDeviceSynchronize());
+
+  // Resolving a device global through the public symbol API must yield a non-null
+  // device pointer that behaves like any other device allocation for copies.
+  int* symbol_ptr = nullptr;
+  HIP_CHECK(hipGetSymbolAddress(reinterpret_cast<void**>(&symbol_ptr),
+                                CONTRACT_SYMBOL(g_contract_symbol_scalar)));
+  REQUIRE(symbol_ptr != nullptr);
+
+  const int written = kExpectedValue;
+  HIP_CHECK(hipMemcpy(symbol_ptr, &written, sizeof(written), hipMemcpyHostToDevice));
+
+  REQUIRE(ReadDeviceInt(symbol_ptr) == kExpectedValue);
+}
+
+// @asserts: hipGetSymbolSize - the reported size of a device global array matches its declared byte size
+HIP_TEST_CASE(Contract_KernelLaunch_HipGetSymbolSize_Default_MatchesDeclaredSize) {
+  // Launch a kernel that references the device global array so the symbol is
+  // emitted and resolvable in the device image on every runtime path.
+  hipLaunchKernelGGL(TouchSymbolArrayKernel, dim3(1), dim3(1), 0, 0);
+  // Check launch/enqueue status first, then synchronize to surface any
+  // asynchronous execution error before resolving the device symbol.
+  HIP_CHECK(hipGetLastError());
+  HIP_CHECK(hipDeviceSynchronize());
+
+  // The reported size of a device global array must match its declared byte size.
+  size_t symbol_size = 0;
+  HIP_CHECK(hipGetSymbolSize(&symbol_size, CONTRACT_SYMBOL(g_contract_symbol_array)));
+  REQUIRE(symbol_size == sizeof(g_contract_symbol_array));
+}
+
+// @asserts: hipGetSymbolAddress - a null symbol is rejected with a non-success status rather than silently succeeding
+HIP_TEST_CASE(Contract_KernelLaunch_HipGetSymbolAddress_NullSymbol_IsRejected) {
+  // Resolving a null symbol must not silently succeed. The exact error code is
+  // backend-specific, so only a non-success status is required. The null is
+  // typed as const void* so the non-template C API overload is selected;
+  // a bare nullptr would bind to the C++ template (T = std::nullptr_t), which
+  // passes the address of a non-null temporary and would not exercise the
+  // null-symbol contract.
+  void* symbol_ptr = nullptr;
+  const void* null_symbol = nullptr;
+  const hipError_t status = hipGetSymbolAddress(&symbol_ptr, null_symbol);
+  REQUIRE(status != hipSuccess);
+}
+
+// @asserts: hipLaunchKernelEx - a minimal extended-launch configuration executes the kernel and publishes the expected value
+// PLATFORM-DIFF: hipLaunchKernelEx is not exported from the Windows HIP runtime
+// (absent from amdhip.def.in), so referencing it is an unresolved external at link
+// time on Windows. The contract is exercised only where the symbol is exported
+// (non-Windows). This gate can be removed once the Windows runtime exports it.
+HIP_TEST_CASE(Contract_KernelLaunch_HipLaunchKernelEx_Default_WritesExpectedValue) {
+#if defined(_WIN32)
+  HIP_SKIP_TEST("hipLaunchKernelEx is not exported from the Windows HIP runtime; the "
+                "extended-launch contract cannot be linked or exercised there.");
+#else
+  hip::contract::ContractCleanup cleanup;
+  int* device_value = nullptr;
+  HIP_CHECK(hipMalloc(&device_value, sizeof(*device_value)));
+  cleanup.Add([device_value] { (void)hipFree(device_value); });
+  HIP_CHECK(hipMemset(device_value, 0, sizeof(*device_value)));
+
+  // A minimal extended-launch configuration (single-thread grid, no dynamic
+  // shared memory, default stream, no attributes) must execute the kernel and
+  // publish the expected value deterministically.
+  hipLaunchConfig_t config = {};
+  config.gridDim = dim3(1);
+  config.blockDim = dim3(1);
+  config.dynamicSmemBytes = 0;
+  config.stream = nullptr;
+  config.attrs = nullptr;
+  config.numAttrs = 0;
+
+  HIP_CHECK(hipLaunchKernelEx(&config, WriteValueKernel, device_value, kExpectedValue));
+  HIP_CHECK(hipDeviceSynchronize());
+
+  REQUIRE(ReadDeviceInt(device_value) == kExpectedValue);
+#endif  // _WIN32
+}
+
+// BACKEND-DIFF: hipExtLaunchKernel is an AMD extension with no NVIDIA equivalent,
+// so this contract builds only on AMD (see the gated hip_ext.h include above).
+#if HT_AMD
+// @asserts: hipExtLaunchKernel - the AMD extended launch entry point executes the kernel and publishes the expected value
+HIP_TEST_CASE(Contract_KernelLaunch_HipExtLaunchKernel_Default_WritesExpectedValue) {
+  hip::contract::ContractCleanup cleanup;
+  int* device_value = nullptr;
+  int value = kExpectedValue;
+  void* kernel_args[] = {&device_value, &value};
+
+  HIP_CHECK(hipMalloc(&device_value, sizeof(*device_value)));
+  cleanup.Add([device_value] { (void)hipFree(device_value); });
+  HIP_CHECK(hipMemset(device_value, 0, sizeof(*device_value)));
+
+  // The AMD extended launch entry point (no start/stop events, no flags) must
+  // execute the kernel and publish the expected value deterministically.
+  HIP_CHECK(hipExtLaunchKernel(reinterpret_cast<const void*>(WriteValueKernel), dim3(1), dim3(1),
+                               kernel_args, 0, nullptr, nullptr, nullptr, 0));
+  HIP_CHECK(hipDeviceSynchronize());
+
+  REQUIRE(ReadDeviceInt(device_value) == kExpectedValue);
+}
+#endif  // HT_AMD

@@ -1,7 +1,7 @@
 #
 # Integration test application libraries
 #
-cmake_minimum_required(VERSION 3.21.0 FATAL_ERROR)
+cmake_minimum_required(VERSION 3.24 FATAL_ERROR)
 
 project(rocprofiler-sdk-tests-lib LANGUAGES C CXX)
 
@@ -22,3 +22,6 @@ endif()
 
 # libraries used by integration test apps which DO link to rocprofiler-sdk-roctx
 add_subdirectory(transpose)
+
+# Python test packages and their native libraries
+add_subdirectory(python)

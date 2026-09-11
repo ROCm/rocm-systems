@@ -113,7 +113,7 @@ RCCL_AMDSMI_FN(amdsmi_get_fabric_telemetry_data, amdsmi_status_t,
                (amdsmi_processor_handle processor_handle, amdsmi_fabric_telemetry_t* telemetry))
 RCCL_AMDSMI_FN(amdsmi_free_fabric_telemetry, amdsmi_status_t,
                (amdsmi_processor_handle processor_handle, amdsmi_fabric_telemetry_t* telemetry))
-RCCL_AMDSMI_FN(amdsmi_fabric_telem_id_to_string, const char*, (uint64_t telem_id))
+RCCL_AMDSMI_FN(amdsmi_fabric_telem_id_to_string, amdsmi_status_t, (uint64_t telem_id, const char** telem_name))
 // Firmware info
 RCCL_AMDSMI_FN(amdsmi_get_fw_info, amdsmi_status_t, (amdsmi_processor_handle processor_handle, amdsmi_fw_info_t* info))
 } // namespace
@@ -132,8 +132,17 @@ std::mutex fabricLock; // Thread safety for fabric operations
 bool fabricInitialized = false;
 thread_local bool threadFabricInitialized = false;
 ncclResult_t fabricInitResult = ncclSuccess;
+std::mutex amdSmiInitLock;
 ncclResult_t amdSmiInitResult = ncclSuccess;
-std::atomic<bool> amdSmiInitCalled{false}; // Track if amd_smi_init has been called
+bool amdSmiInitCalled = false;
+bool amdSmiLibInitialized = false;
+
+// Major version of the loaded amd_smi, as it reports itself. Selects the telemetry
+// name call convention; see amdSmiTelemIdUsesOutParam().
+std::atomic<uint32_t> amdSmiLibMajor{kAmdSmiLibVersionUnknown};
+
+// Signature amdsmi_fabric_telem_id_to_string had before amd_smi 27.0
+using AmdSmiTelemIdToStringLegacyFn = const char* (*)(uint64_t);
 } // namespace
 
 /*************************************************************************
@@ -141,7 +150,7 @@ std::atomic<bool> amdSmiInitCalled{false}; // Track if amd_smi_init has been cal
  ************************************************************************/
 static ncclResult_t getProcessorHandle(uint32_t deviceIndex, amdsmi_processor_handle* procHandle) {
   if (!rcclParamUseAmdSmiLib()) {
-    return ncclSystemError; // Fabric only supported with amd_smi_lib
+    return ncclSystemError; // processor handles are amd_smi_lib-only
   }
 
   uint32_t socket_count = 0;
@@ -179,10 +188,7 @@ static bool amd_smi_FabricFunctionsLoaded() {
  * Existing AMD SMI Wrapper Functions
  ************************************************************************/
 
-ncclResult_t amd_smi_init() {
-  // Ensure we only initialize once
-  if (amdSmiInitCalled.exchange(true)) return amdSmiInitResult;
-
+static ncclResult_t amd_smi_init_impl() {
   if (__atomic_load_n(&is_wsl2, __ATOMIC_ACQUIRE) == -1)
     __atomic_store_n(&is_wsl2, (access("/dev/dxg", F_OK) == -1) ? 0 : 1, __ATOMIC_RELEASE);
   if (__atomic_load_n(&is_wsl2, __ATOMIC_ACQUIRE)) {
@@ -197,7 +203,6 @@ ncclResult_t amd_smi_init() {
       static void* libhandle = dlopen(RCCL_AMDSMI_LIBNAME, RTLD_NOW);
       if (libhandle == nullptr) {
         WARN("Failed to open %s: %s", RCCL_AMDSMI_LIBNAME, dlerror());
-        amdSmiInitResult = ncclInternalError;
         return ncclInternalError;
       }
 
@@ -235,32 +240,51 @@ ncclResult_t amd_smi_init() {
 
     // initialize amd-smi for AMD GPUs
     AMDSMITRY(amdsmi_init, AMDSMI_INIT_AMD_GPUS);
+    amdSmiLibInitialized = true;
 
     // get amd-smi version
     amdsmi_version_t version;
     AMDSMITRY(amdsmi_get_lib_version, &version);
-    INFO(NCCL_INIT, "amdsmi_lib: version %d.%d.%d.%s", version.major, version.minor, version.release, version.build);
+    INFO(NCCL_INIT, "amdsmi_lib: version %u.%u.%u (build %s)", version.major, version.minor, version.release,
+         version.build);
+    // Retained because the telemetry name call convention depends on it
+    amdSmiLibMajor.store(version.major, std::memory_order_release);
   } else {
-#ifdef HIP_FABRIC_API
-    WARN("RCCL_USE_AMD_SMI_LIB not set, but HIP_FABRIC_API is defined. Fabric support is only available through AMD "
-         "SMI. Rerun with RCCL_USE_AMD_SMI_LIB=1 to enable AMD SMI and UALoE fabric support.");
-#endif
     // initialize alternate rsmi
     ARSMICHECK(ARSMI_init());
-    INFO(NCCL_INIT, "initialized internal alternative rsmi functionality");
+    // RCCL_USE_AMD_SMI_LIB only selects who performs fabric *discovery*: amd_smi_lib, or the
+    // ualink sysfs nodes via ARSMI_get_fabric_info(). Both populate amdsmiFabricDevices
+    // identically, so UALoE/UALLink works on this path.
+    INFO(NCCL_INIT, "initialized internal alternative rsmi functionality; UALoE/UALLink fabric discovery uses sysfs "
+                    "(set RCCL_USE_AMD_SMI_LIB=1 to use amd_smi_lib instead)");
   }
   return ncclSuccess;
 }
 
-ncclResult_t amd_smi_shutdown() {
-  // Only shutdown if we actually initialized with amd_smi_lib
-  if (!rcclParamUseAmdSmiLib() || pfn_amdsmi_shut_down == nullptr) {
-    return ncclSuccess;
-  }
-  amdSmiInitCalled.store(false);
-  amdSmiInitResult = ncclSuccess;
+ncclResult_t amd_smi_init() {
+  std::lock_guard<std::mutex> lock(amdSmiInitLock);
+  if (amdSmiInitCalled) return amdSmiInitResult;
 
-  AMDSMITRY(amdsmi_shut_down);
+  // Cache failures too; shutdown explicitly resets this state for a retry.
+  amdSmiInitResult = amd_smi_init_impl();
+  amdSmiInitCalled = true;
+  return amdSmiInitResult;
+}
+
+ncclResult_t amd_smi_shutdown() {
+  std::lock_guard<std::mutex> lock(amdSmiInitLock);
+
+  if (!amdSmiInitCalled) return ncclSuccess;
+
+  // The backend may be initialized even if a later version query failed.
+  if (amdSmiLibInitialized) {
+    AMDSMITRY(amdsmi_shut_down);
+    amdSmiLibInitialized = false;
+  }
+
+  amdSmiLibMajor.store(kAmdSmiLibVersionUnknown, std::memory_order_release);
+  amdSmiInitResult = ncclSuccess;
+  amdSmiInitCalled = false;
   return ncclSuccess;
 }
 
@@ -602,6 +626,30 @@ ncclResult_t amd_smi_ensureFabricInitialized() {
     fabricInitResult = ncclInternalError;
     return fabricInitResult;
   }
+
+  // amd_smi 26.x shipped both fabric payload sizes under the same SONAME, so
+  // the library version cannot identify a mixed header/runtime installation.
+  // Probe through an oversized canary buffer before using the typed structure.
+  // If the layouts differ (or cannot be identified), use the sysfs backend.
+  if (!useSysfs && amd_smi_FabricFunctionsLoaded()) {
+    amdsmi_processor_handle probeHandle;
+    if (getProcessorHandle(0, &probeHandle) == ncclSuccess) {
+      amdSmiFabricInfoBuffer probeBuffer;
+      amdSmiPrepareFabricInfoBuffer(probeBuffer);
+      pfn_amdsmi_get_gpu_fabric_info(probeHandle, amdSmiFabricInfoBufferAsInfo(probeBuffer));
+      const amdSmiFabricRuntimeLayout runtimeLayout = amdSmiDetectFabricRuntimeLayout(probeBuffer);
+      const bool runtimeLayoutIs8Gpu = runtimeLayout == amdSmiFabricRuntimeLayout::EightGpu;
+      if (runtimeLayout == amdSmiFabricRuntimeLayout::Unknown) {
+        WARN("AMD SMI fabric: unable to verify the loaded library's fabric ABI; falling back to sysfs");
+        useSysfs = true;
+      } else if (runtimeLayoutIs8Gpu != amdSmiFabricLayoutIs8Gpu) {
+        WARN("AMD SMI fabric ABI mismatch: RCCL was built for the %u-GPU layout, but the loaded library uses the "
+             "%u-GPU layout; falling back to sysfs",
+             amdSmiFabricLayoutIs8Gpu ? 8 : 16, runtimeLayoutIs8Gpu ? 8 : 16);
+        useSysfs = true;
+      }
+    }
+  }
   amdsmiFabricDeviceCount = (int)numDevs;
 
   for (uint32_t d = 0; d < numDevs; d++) {
@@ -640,17 +688,15 @@ ncclResult_t amd_smi_ensureFabricInitialized() {
         devInfo->fabricSupported = false;
         continue;
       }
-      if (fabricInfo.fabric_info.version != AMDSMI_FABRIC_INFO_CURRENT_VERSION) {
-        WARN("AMD SMI fabric: unexpected fabric info version %u for device %u, expected %u",
-             fabricInfo.fabric_info.version, d, AMDSMI_FABRIC_INFO_CURRENT_VERSION);
+      const uint32_t fabricVersion = amdSmiFabricInfoVersion(fabricInfo);
+      if (!amdSmiFabricVersionUsable(fabricVersion)) {
+        WARN("AMD SMI fabric: unexpected fabric info version %u for device %u, expected %u", fabricVersion, d,
+             AMDSMI_FABRIC_INFO_CURRENT_VERSION);
         devInfo->fabricSupported = false;
         continue;
       }
-      const amdsmi_fabric_info_v1_t* v1 = &fabricInfo.fabric_info.fabric_version.v1;
-      devInfo->fabricSupported =
-        ((v1->fabric_type == AMDSMI_FABRIC_TYPE_UALOE || v1->fabric_type == AMDSMI_FABRIC_TYPE_UALLINK) &&
-         (v1->accel_state == AMDSMI_FABRIC_ACCELERATOR_VPOD_STATE_ACTIVE ||
-          v1->accel_state == AMDSMI_FABRIC_ACCELERATOR_VPOD_STATE_READY));
+      const amdsmi_fabric_info_v1_t* v1 = amdSmiFabricInfoV1(fabricInfo);
+      devInfo->fabricSupported = amdSmiFabricStateUsable(v1->fabric_type, v1->accel_state);
       devInfo->fabricType = v1->fabric_type;
       devInfo->state = v1->accel_state;
       devInfo->acceleratorId = v1->accelerator_id;
@@ -762,5 +808,17 @@ const char* amd_smi_fabricTelemIdToString(uint64_t telemId) {
   if (pfn_amdsmi_fabric_telem_id_to_string == nullptr) {
     return ARSMI_fabric_telem_id_to_string(telemId);
   }
-  return pfn_amdsmi_fabric_telem_id_to_string(telemId);
+  if (!amdSmiTelemIdUsesOutParam(amdSmiLibMajor.load(std::memory_order_acquire))) {
+    // dlsym gave us an address, not a prototype: on a pre-27 runtime the symbol has
+    // to be called through its own signature or the extra argument is read as one.
+    auto legacyFn = reinterpret_cast<AmdSmiTelemIdToStringLegacyFn>(pfn_amdsmi_fabric_telem_id_to_string);
+    const char* legacyName = legacyFn(telemId);
+    return legacyName == nullptr ? "UNKNOWN" : legacyName;
+  }
+  const char* telemName = nullptr;
+  amdsmi_status_t ret = pfn_amdsmi_fabric_telem_id_to_string(telemId, &telemName);
+  if (ret != AMDSMI_STATUS_SUCCESS || telemName == nullptr) {
+    return "UNKNOWN";
+  }
+  return telemName;
 }

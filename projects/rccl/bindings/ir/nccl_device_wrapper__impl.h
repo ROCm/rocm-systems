@@ -2,7 +2,7 @@
  * Copyright (c) 2025 Advanced Micro Devices, Inc. All rights reserved.
  * Adapted from NVIDIA NCCL ir/nccl_device_wrapper__impl.h (v2.29.2-1).
  *
- * See LICENSE.txt for license information
+ * See LICENSE.txt for more license information
  ************************************************************************/
 #ifndef _NCCL_DEVICE_WRAPPER__IMPL_H_
 #define _NCCL_DEVICE_WRAPPER__IMPL_H_
@@ -32,6 +32,7 @@
  *                      now that the NCCL v2.29.x GIN sync landed them.
  */
 
+#include "nccl_device.h"
 #include "nccl_device_wrapper.h"
 #include <new>          /* placement new */
 

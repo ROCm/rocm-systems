@@ -1,24 +1,5 @@
-/*
- * Copyright (c) Advanced Micro Devices, Inc. All rights reserved.
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- * THE SOFTWARE.
- */
+// Copyright Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
 
 #include "rocm_smi/rocm_smi_properties.h"
 
@@ -125,7 +106,6 @@ const AMDGpuVerbList_t amdgpu_verb_check_list{
     {AMDGpuVerbTypes_t::kSetGpuPciBandwidth, "amdsmi_set_gpu_pci_bandwidth"},
     {AMDGpuVerbTypes_t::kSetPowerCap, "amdsmi_set_power_cap"},
     {AMDGpuVerbTypes_t::kSetGpuPowerProfile, "amdsmi_set_gpu_power_profile"},
-    {AMDGpuVerbTypes_t::kSetGpuClkRange, "amdsmi_set_gpu_clk_range"},
     {AMDGpuVerbTypes_t::kSetGpuOdClkInfo, "amdsmi_set_gpu_od_clk_info"},
     {AMDGpuVerbTypes_t::kSetGpuOdVoltInfo, "amdsmi_set_gpu_od_volt_info"},
     {AMDGpuVerbTypes_t::kSetGpuPerfLevelV1, "amdsmi_set_gpu_perf_level_v1"},
@@ -187,11 +167,6 @@ const AMDGpuPropertyList_t amdgpu_property_reinforcement_list{
       make_unique_property_id(AMDGpuPropertyTypesOffset_t::kDevInfoTypes,
                               DevInfoTypes::kDevPowerProfileMode),
       AMDGpuVerbTypes_t::kSetGpuPowerProfile, AMDGpuPropertyOpModeTypes_t::kBoth, false}},
-    {0x74A1,
-     {kDevRevIDAll,
-      make_unique_property_id(AMDGpuPropertyTypesOffset_t::kPerfTypes,
-                              rsmi_dev_perf_level::RSMI_DEV_PERF_LEVEL_MANUAL),
-      AMDGpuVerbTypes_t::kSetGpuClkRange, AMDGpuPropertyOpModeTypes_t::kSrIov, false}},
     {0x74A1,
      {kDevRevIDAll,
       make_unique_property_id(AMDGpuPropertyTypesOffset_t::kPerfTypes,

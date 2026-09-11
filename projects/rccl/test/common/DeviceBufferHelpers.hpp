@@ -109,6 +109,38 @@ constexpr const char* getTypeName()
     return NcclTypeTraits<T>::name;
 }
 
+/**
+ * @brief VMM-aware device allocation for registrable buffers
+ *
+ * Routes through ncclMemAlloc so the buffer is cuMem/VMM memory when cuMem is
+ * enabled and hipMalloc otherwise. Use this instead of a raw hipMalloc for any
+ * buffer that will be ncclCommRegister'd, so tests exercise the same memory type
+ * production uses. Free with freeDeviceBuffer (or makeHipMemBufferAutoGuard),
+ * never hipFree.
+ *
+ * @param[out] ptr   Receives the allocated device buffer pointer
+ * @param      bytes Allocation size in bytes
+ * @return ncclSuccess on success, otherwise the failing ncclResult_t
+ */
+inline ncclResult_t allocateDeviceBuffer(void** ptr, size_t bytes)
+{
+    return ncclMemAlloc(ptr, bytes);
+}
+
+/**
+ * @brief Free a buffer allocated with allocateDeviceBuffer
+ *
+ * Unmaps and releases the VMM handle when cuMem is enabled, falls back to
+ * hipFree otherwise.
+ *
+ * @param ptr Device buffer previously returned by allocateDeviceBuffer
+ * @return ncclSuccess on success, otherwise the failing ncclResult_t
+ */
+inline ncclResult_t freeDeviceBuffer(void* ptr)
+{
+    return ncclMemFree(ptr);
+}
+
 // ============================================================================
 // Device Buffer Initialization
 // ============================================================================

@@ -8,58 +8,102 @@
 #include "library/thread_info.hpp"
 #include "logger/debug.hpp"
 
+#include <cstddef>
 #include <cstdint>
 
+#include <fmt/format.h>
 #include <map>
 #include <memory>
-#include <spdlog/fmt/fmt.h>
 #include <vector>
 
 namespace rocprofsys::pmc::collectors::nic
-{
-
-namespace
 {
 
 struct nic_track_description
 {
     const char* track_name;
     const char* units;
-    size_t      track_index = 0;
 };
 
-// Helper function to create enabled_metrics value from bit positions
-// See enabled_metrics definition in pmc/collectors/nic/types.hpp for bit position
-// documentation
-inline constexpr std::uint32_t
-make_nic_metric_value(std::initializer_list<std::uint8_t> bit_positions)
-{
-    std::uint32_t value = 0;
-    for(auto bit : bit_positions)
-    {
-        value |= (1u << bit);
-    }
-    return value;
-}
+inline constexpr auto RX_RDMA_UCAST_BYTES_VALUE     = std::uint32_t(1) << 0;
+inline constexpr auto TX_RDMA_UCAST_BYTES_VALUE     = std::uint32_t(1) << 1;
+inline constexpr auto RX_RDMA_UCAST_PKTS_VALUE      = std::uint32_t(1) << 2;
+inline constexpr auto TX_RDMA_UCAST_PKTS_VALUE      = std::uint32_t(1) << 3;
+inline constexpr auto RX_RDMA_CNP_PKTS_VALUE        = std::uint32_t(1) << 4;
+inline constexpr auto TX_RDMA_CNP_PKTS_VALUE        = std::uint32_t(1) << 5;
+inline constexpr auto TX_RDMA_ACK_TIMEOUT_VALUE     = std::uint32_t(1) << 6;
+inline constexpr auto RESP_TX_PKT_SEQ_ERR_VALUE     = std::uint32_t(1) << 7;
+inline constexpr auto REQ_RX_PKT_SEQ_ERR_VALUE      = std::uint32_t(1) << 8;
+inline constexpr auto REQ_RX_IMPL_NAK_SEQ_ERR_VALUE = std::uint32_t(1) << 9;
 
-inline constexpr auto RX_RDMA_UCAST_BYTES_VALUE     = make_nic_metric_value({ 0 });
-inline constexpr auto TX_RDMA_UCAST_BYTES_VALUE     = make_nic_metric_value({ 1 });
-inline constexpr auto RX_RDMA_UCAST_PKTS_VALUE      = make_nic_metric_value({ 2 });
-inline constexpr auto TX_RDMA_UCAST_PKTS_VALUE      = make_nic_metric_value({ 3 });
-inline constexpr auto RX_RDMA_CNP_PKTS_VALUE        = make_nic_metric_value({ 4 });
-inline constexpr auto TX_RDMA_CNP_PKTS_VALUE        = make_nic_metric_value({ 5 });
-inline constexpr auto TX_RDMA_ACK_TIMEOUT_VALUE     = make_nic_metric_value({ 6 });
-inline constexpr auto RESP_TX_PKT_SEQ_ERR_VALUE     = make_nic_metric_value({ 7 });
-inline constexpr auto REQ_RX_PKT_SEQ_ERR_VALUE      = make_nic_metric_value({ 8 });
-inline constexpr auto REQ_RX_IMPL_NAK_SEQ_ERR_VALUE = make_nic_metric_value({ 9 });
+// Default track labels and units, keyed by metric bit value. Adding a metric
+// touches several ordered lists that must stay in sync: the *_VALUE bit constant
+// above, a row here, the enabled_metrics/metrics members in types.hpp, and an
+// emit_nic_counter<> call in post_process_device.
+inline const std::map<std::uint32_t, nic_track_description>&
+make_default_nic_tracks()
+{
+    static const std::map<std::uint32_t, nic_track_description> tracks = {
+        { RX_RDMA_UCAST_BYTES_VALUE,
+          { .track_name = "RX RDMA BYTES", .units = "bytes" } },
+        { TX_RDMA_UCAST_BYTES_VALUE,
+          { .track_name = "TX RDMA BYTES", .units = "bytes" } },
+        { RX_RDMA_UCAST_PKTS_VALUE,
+          { .track_name = "RX RDMA PACKETS", .units = "packets" } },
+        { TX_RDMA_UCAST_PKTS_VALUE,
+          { .track_name = "TX RDMA PACKETS", .units = "packets" } },
+        { RX_RDMA_CNP_PKTS_VALUE,
+          { .track_name = "RX CNP PACKETS", .units = "packets" } },
+        { TX_RDMA_CNP_PKTS_VALUE,
+          { .track_name = "TX CNP PACKETS", .units = "packets" } },
+        { TX_RDMA_ACK_TIMEOUT_VALUE,
+          { .track_name = "TX ACK TIMEOUT", .units = "timeouts" } },
+        { RESP_TX_PKT_SEQ_ERR_VALUE,
+          { .track_name = "RESP TX PKT SEQ ERR", .units = "errors" } },
+        { REQ_RX_PKT_SEQ_ERR_VALUE,
+          { .track_name = "REQ RX PKT SEQ ERR", .units = "errors" } },
+        { REQ_RX_IMPL_NAK_SEQ_ERR_VALUE,
+          { .track_name = "REQ RX IMPL NAK SEQ ERR", .units = "errors" } },
+    };
+    return tracks;
+}
 
 struct nic_perfetto_sample
 {
-    size_t  timestamp;
-    metrics metric_values;
+    std::uint64_t timestamp;
+    metrics       metric_values;
 };
 
-}  // namespace
+// Emit a single NIC counter sample to a pre-resolved track. CategoryTp is a
+// registered Perfetto category trait (see core/categories.hpp);
+// trait::name<CategoryTp>::value is a compile-time literal, which is what
+// TRACE_COUNTER's category argument requires (a runtime string cannot be used).
+// track_index < 0 means the metric is disabled or has no track, so the emit is
+// skipped; callers resolve it once (see resolve_nic_track) instead of looking it
+// up per sample.
+template <typename CategoryTp>
+inline void
+emit_nic_counter(size_t device_index, std::int64_t track_index, std::uint64_t ts,
+                 std::uint64_t value)
+{
+    if(track_index < 0) return;
+    TRACE_COUNTER(trait::name<CategoryTp>::value,
+                  perfetto_counter_track<metrics>::at(device_index,
+                                                      static_cast<size_t>(track_index)),
+                  ts, static_cast<double>(value));
+}
+
+// Resolve a metric's track index once (before the per-sample loop). Returns -1 if
+// the metric is not enabled or has no registered track for this device.
+inline std::int64_t
+resolve_nic_track(const enabled_metrics& effective_metrics, std::uint32_t bit_key,
+                  const std::map<std::uint32_t, size_t>& device_tracks)
+{
+    if((effective_metrics.value & bit_key) == 0) return -1;
+    auto it = device_tracks.find(bit_key);
+    if(it == device_tracks.end()) return -1;
+    return static_cast<std::int64_t>(it->second);
+}
 
 /**
  * @brief Output policy for writing NIC RDMA samples directly to Perfetto traces.
@@ -73,9 +117,9 @@ struct perfetto_policy
 {
     using counter_track = perfetto_counter_track<metrics>;
 
-    // Static storage for Perfetto tracks and sample buffering (C++17 inline static)
-    static inline std::map<size_t, std::map<std::uint32_t, nic_track_description>>
-        tracks{};
+    // Static storage for Perfetto tracks and sample buffering (C++17 inline static).
+    // Per device: metric bit value -> resolved counter-track index.
+    static inline std::map<size_t, std::map<std::uint32_t, size_t>> tracks{};
     static inline std::map<size_t, std::unique_ptr<std::vector<nic_perfetto_sample>>>
         bundle{};
 
@@ -117,92 +161,11 @@ struct perfetto_policy
 
         auto& device_tracks = perfetto_policy::tracks[device_index];
 
-        if(enabled_metric_config.bits.rx_rdma_ucast_bytes)
+        for(const auto& [bit_value, description] : make_default_nic_tracks())
         {
-            device_tracks[RX_RDMA_UCAST_BYTES_VALUE] = {
-                "RX RDMA BYTES", "bytes",
-                counter_track::emplace(device_index, addendum("RX RDMA BYTES"), "bytes")
-            };
-        }
-
-        if(enabled_metric_config.bits.tx_rdma_ucast_bytes)
-        {
-            device_tracks[TX_RDMA_UCAST_BYTES_VALUE] = {
-                "TX RDMA BYTES", "bytes",
-                counter_track::emplace(device_index, addendum("TX RDMA BYTES"), "bytes")
-            };
-        }
-
-        if(enabled_metric_config.bits.rx_rdma_ucast_pkts)
-        {
-            device_tracks[RX_RDMA_UCAST_PKTS_VALUE] = {
-                "RX RDMA PACKETS", "packets",
-                counter_track::emplace(device_index, addendum("RX RDMA PACKETS"),
-                                       "packets")
-            };
-        }
-
-        if(enabled_metric_config.bits.tx_rdma_ucast_pkts)
-        {
-            device_tracks[TX_RDMA_UCAST_PKTS_VALUE] = {
-                "TX RDMA PACKETS", "packets",
-                counter_track::emplace(device_index, addendum("TX RDMA PACKETS"),
-                                       "packets")
-            };
-        }
-
-        if(enabled_metric_config.bits.rx_rdma_cnp_pkts)
-        {
-            device_tracks[RX_RDMA_CNP_PKTS_VALUE] = {
-                "RX CNP PACKETS", "packets",
-                counter_track::emplace(device_index, addendum("RX CNP PACKETS"),
-                                       "packets")
-            };
-        }
-
-        if(enabled_metric_config.bits.tx_rdma_cnp_pkts)
-        {
-            device_tracks[TX_RDMA_CNP_PKTS_VALUE] = {
-                "TX CNP PACKETS", "packets",
-                counter_track::emplace(device_index, addendum("TX CNP PACKETS"),
-                                       "packets")
-            };
-        }
-
-        if(enabled_metric_config.bits.tx_rdma_ack_timeout)
-        {
-            device_tracks[TX_RDMA_ACK_TIMEOUT_VALUE] = {
-                "TX ACK TIMEOUT", "timeouts",
-                counter_track::emplace(device_index, addendum("TX ACK TIMEOUT"),
-                                       "timeouts")
-            };
-        }
-
-        if(enabled_metric_config.bits.resp_tx_pkt_seq_err)
-        {
-            device_tracks[RESP_TX_PKT_SEQ_ERR_VALUE] = {
-                "RESP TX PKT SEQ ERR", "errors",
-                counter_track::emplace(device_index, addendum("RESP TX PKT SEQ ERR"),
-                                       "errors")
-            };
-        }
-
-        if(enabled_metric_config.bits.req_rx_pkt_seq_err)
-        {
-            device_tracks[REQ_RX_PKT_SEQ_ERR_VALUE] = {
-                "REQ RX PKT SEQ ERR", "errors",
-                counter_track::emplace(device_index, addendum("REQ RX PKT SEQ ERR"),
-                                       "errors")
-            };
-        }
-
-        if(enabled_metric_config.bits.req_rx_impl_nak_seq_err)
-        {
-            device_tracks[REQ_RX_IMPL_NAK_SEQ_ERR_VALUE] = {
-                "REQ RX IMPL NAK SEQ ERR", "errors",
-                counter_track::emplace(device_index, addendum("REQ RX IMPL NAK SEQ ERR"),
-                                       "errors")
-            };
+            if((enabled_metric_config.value & bit_value) == 0) continue;
+            device_tracks[bit_value] = counter_track::emplace(
+                device_index, addendum(description.track_name), description.units);
         }
     }
 
@@ -221,7 +184,8 @@ struct perfetto_policy
         auto it = perfetto_policy::bundle.find(device_index);
         if(it != perfetto_policy::bundle.end())
         {
-            it->second->emplace_back(nic_perfetto_sample{ timestamp, metric_values });
+            it->second->emplace_back(nic_perfetto_sample{
+                .timestamp = timestamp, .metric_values = metric_values });
         }
     }
 
@@ -233,24 +197,22 @@ struct perfetto_policy
      *
      * @tparam DeviceVector Container type holding NIC device handles
      * @param devices Vector of NIC devices
-     * @param enabled_metrics Metrics that were enabled during collection
+     * @param enabled Metrics that were enabled during collection
      */
     template <typename DeviceVector>
-    static void post_process(
-        const DeviceVector&                                 devices,
-        ::rocprofsys::pmc::collectors::nic::enabled_metrics enabled_metrics)
+    static void post_process(const DeviceVector&                                 devices,
+                             ::rocprofsys::pmc::collectors::nic::enabled_metrics enabled)
     {
         for(const auto& device : devices)
         {
-            post_process_device(device->get_index(), enabled_metrics,
+            post_process_device(device->get_index(), enabled,
                                 device->get_supported_metrics());
         }
     }
 
     static void post_process_device(
-        size_t                                              device_index,
-        ::rocprofsys::pmc::collectors::nic::enabled_metrics enabled_metrics,
-        ::rocprofsys::pmc::collectors::nic::enabled_metrics supported_metrics)
+        size_t device_index, ::rocprofsys::pmc::collectors::nic::enabled_metrics enabled,
+        ::rocprofsys::pmc::collectors::nic::enabled_metrics supported)
     {
         auto bundle_it = perfetto_policy::bundle.find(device_index);
         if(bundle_it == perfetto_policy::bundle.end() || !bundle_it->second)
@@ -260,15 +222,15 @@ struct perfetto_policy
 
         auto& samples = *bundle_it->second;
 
-        const auto& thread_info = thread_info::get(0, InternalTID);
-        if(!thread_info)
+        const auto& tinfo = thread_info::get(0, InternalTID);
+        if(!tinfo)
         {
             return;
         }
 
         ::rocprofsys::pmc::collectors::nic::enabled_metrics effective_metrics{};
         effective_metrics.value =
-            static_cast<std::uint32_t>(enabled_metrics.value & supported_metrics.value);
+            static_cast<std::uint32_t>(enabled.value & supported.value);
 
         if(effective_metrics.value == 0)
         {
@@ -283,146 +245,72 @@ struct perfetto_policy
 
         auto& device_tracks = tracks_it->second;
 
+        // Resolve each enabled metric's track index once; device_tracks is fixed
+        // after setup, so there is no need to look it up per sample.
+        const auto rx_rdma_ucast_bytes_idx = resolve_nic_track(
+            effective_metrics, RX_RDMA_UCAST_BYTES_VALUE, device_tracks);
+        const auto tx_rdma_ucast_bytes_idx = resolve_nic_track(
+            effective_metrics, TX_RDMA_UCAST_BYTES_VALUE, device_tracks);
+        const auto rx_rdma_ucast_pkts_idx =
+            resolve_nic_track(effective_metrics, RX_RDMA_UCAST_PKTS_VALUE, device_tracks);
+        const auto tx_rdma_ucast_pkts_idx =
+            resolve_nic_track(effective_metrics, TX_RDMA_UCAST_PKTS_VALUE, device_tracks);
+        const auto rx_rdma_cnp_pkts_idx =
+            resolve_nic_track(effective_metrics, RX_RDMA_CNP_PKTS_VALUE, device_tracks);
+        const auto tx_rdma_cnp_pkts_idx =
+            resolve_nic_track(effective_metrics, TX_RDMA_CNP_PKTS_VALUE, device_tracks);
+        const auto tx_rdma_ack_timeout_idx = resolve_nic_track(
+            effective_metrics, TX_RDMA_ACK_TIMEOUT_VALUE, device_tracks);
+        const auto resp_tx_pkt_seq_err_idx = resolve_nic_track(
+            effective_metrics, RESP_TX_PKT_SEQ_ERR_VALUE, device_tracks);
+        const auto req_rx_pkt_seq_err_idx =
+            resolve_nic_track(effective_metrics, REQ_RX_PKT_SEQ_ERR_VALUE, device_tracks);
+        const auto req_rx_impl_nak_seq_err_idx = resolve_nic_track(
+            effective_metrics, REQ_RX_IMPL_NAK_SEQ_ERR_VALUE, device_tracks);
+
         for(const auto& sample : samples)
         {
             const auto ts = sample.timestamp;
 
-            if(!thread_info->is_valid_time(ts))
+            if(!tinfo->is_valid_time(ts))
             {
                 LOG_WARNING("Invalid timestamp {} for NIC sample", ts);
                 continue;
             }
 
-            // RX RDMA unicast bytes
-            if(effective_metrics.bits.rx_rdma_ucast_bytes)
-            {
-                auto it = device_tracks.find(RX_RDMA_UCAST_BYTES_VALUE);
-                if(it != device_tracks.end())
-                {
-                    TRACE_COUNTER(
-                        "nic_rx_ucast_bytes",
-                        counter_track::at(device_index, it->second.track_index), ts,
-                        static_cast<double>(sample.metric_values.rx_rdma_ucast_bytes));
-                }
-            }
-
-            // TX RDMA unicast bytes
-            if(effective_metrics.bits.tx_rdma_ucast_bytes)
-            {
-                auto it = device_tracks.find(TX_RDMA_UCAST_BYTES_VALUE);
-                if(it != device_tracks.end())
-                {
-                    TRACE_COUNTER(
-                        "nic_tx_ucast_bytes",
-                        counter_track::at(device_index, it->second.track_index), ts,
-                        static_cast<double>(sample.metric_values.tx_rdma_ucast_bytes));
-                }
-            }
-
-            // RX RDMA unicast packets
-            if(effective_metrics.bits.rx_rdma_ucast_pkts)
-            {
-                auto it = device_tracks.find(RX_RDMA_UCAST_PKTS_VALUE);
-                if(it != device_tracks.end())
-                {
-                    TRACE_COUNTER(
-                        "nic_rx_ucast_pkts",
-                        counter_track::at(device_index, it->second.track_index), ts,
-                        static_cast<double>(sample.metric_values.rx_rdma_ucast_pkts));
-                }
-            }
-
-            // TX RDMA unicast packets
-            if(effective_metrics.bits.tx_rdma_ucast_pkts)
-            {
-                auto it = device_tracks.find(TX_RDMA_UCAST_PKTS_VALUE);
-                if(it != device_tracks.end())
-                {
-                    TRACE_COUNTER(
-                        "nic_tx_ucast_pkts",
-                        counter_track::at(device_index, it->second.track_index), ts,
-                        static_cast<double>(sample.metric_values.tx_rdma_ucast_pkts));
-                }
-            }
-
-            // RX RDMA CNP packets
-            if(effective_metrics.bits.rx_rdma_cnp_pkts)
-            {
-                auto it = device_tracks.find(RX_RDMA_CNP_PKTS_VALUE);
-                if(it != device_tracks.end())
-                {
-                    TRACE_COUNTER(
-                        "nic_rx_cnp_pkts",
-                        counter_track::at(device_index, it->second.track_index), ts,
-                        static_cast<double>(sample.metric_values.rx_rdma_cnp_pkts));
-                }
-            }
-
-            // TX RDMA CNP packets
-            if(effective_metrics.bits.tx_rdma_cnp_pkts)
-            {
-                auto it = device_tracks.find(TX_RDMA_CNP_PKTS_VALUE);
-                if(it != device_tracks.end())
-                {
-                    TRACE_COUNTER(
-                        "nic_tx_cnp_pkts",
-                        counter_track::at(device_index, it->second.track_index), ts,
-                        static_cast<double>(sample.metric_values.tx_rdma_cnp_pkts));
-                }
-            }
-
-            // TX RDMA ACK timeouts
-            if(effective_metrics.bits.tx_rdma_ack_timeout)
-            {
-                auto it = device_tracks.find(TX_RDMA_ACK_TIMEOUT_VALUE);
-                if(it != device_tracks.end())
-                {
-                    TRACE_COUNTER(
-                        "nic_tx_rdma_ack_timeout",
-                        counter_track::at(device_index, it->second.track_index), ts,
-                        static_cast<double>(sample.metric_values.tx_rdma_ack_timeout));
-                }
-            }
-
-            // RESP TX PKT SEQ errors
-            if(effective_metrics.bits.resp_tx_pkt_seq_err)
-            {
-                auto it = device_tracks.find(RESP_TX_PKT_SEQ_ERR_VALUE);
-                if(it != device_tracks.end())
-                {
-                    TRACE_COUNTER(
-                        "nic_resp_tx_pkt_seq_err",
-                        counter_track::at(device_index, it->second.track_index), ts,
-                        static_cast<double>(sample.metric_values.resp_tx_pkt_seq_err));
-                }
-            }
-
-            // REQ RX PKT SEQ errors
-            if(effective_metrics.bits.req_rx_pkt_seq_err)
-            {
-                auto it = device_tracks.find(REQ_RX_PKT_SEQ_ERR_VALUE);
-                if(it != device_tracks.end())
-                {
-                    TRACE_COUNTER(
-                        "nic_req_rx_pkt_seq_err",
-                        counter_track::at(device_index, it->second.track_index), ts,
-                        static_cast<double>(sample.metric_values.req_rx_pkt_seq_err));
-                }
-            }
-
-            // REQ RX IMPL NAK SEQ errors
-            if(effective_metrics.bits.req_rx_impl_nak_seq_err)
-            {
-                auto it = device_tracks.find(REQ_RX_IMPL_NAK_SEQ_ERR_VALUE);
-                if(it != device_tracks.end())
-                {
-                    TRACE_COUNTER("nic_req_rx_impl_nak_seq_err",
-                                  counter_track::at(device_index, it->second.track_index),
-                                  ts,
-                                  static_cast<double>(
-                                      sample.metric_values.req_rx_impl_nak_seq_err));
-                }
-            }
+            // Emit one counter sample per enabled metric, using the track indices
+            // resolved above. The category travels as a registered category trait so
+            // TRACE_COUNTER still sees a compile-time literal; see emit_nic_counter.
+            emit_nic_counter<category::amd_smi_nic_rx_ucast_bytes>(
+                device_index, rx_rdma_ucast_bytes_idx, ts,
+                sample.metric_values.rx_rdma_ucast_bytes);
+            emit_nic_counter<category::amd_smi_nic_tx_ucast_bytes>(
+                device_index, tx_rdma_ucast_bytes_idx, ts,
+                sample.metric_values.tx_rdma_ucast_bytes);
+            emit_nic_counter<category::amd_smi_nic_rx_ucast_pkts>(
+                device_index, rx_rdma_ucast_pkts_idx, ts,
+                sample.metric_values.rx_rdma_ucast_pkts);
+            emit_nic_counter<category::amd_smi_nic_tx_ucast_pkts>(
+                device_index, tx_rdma_ucast_pkts_idx, ts,
+                sample.metric_values.tx_rdma_ucast_pkts);
+            emit_nic_counter<category::amd_smi_nic_rx_cnp_pkts>(
+                device_index, rx_rdma_cnp_pkts_idx, ts,
+                sample.metric_values.rx_rdma_cnp_pkts);
+            emit_nic_counter<category::amd_smi_nic_tx_cnp_pkts>(
+                device_index, tx_rdma_cnp_pkts_idx, ts,
+                sample.metric_values.tx_rdma_cnp_pkts);
+            emit_nic_counter<category::amd_smi_nic_tx_rdma_ack_timeout>(
+                device_index, tx_rdma_ack_timeout_idx, ts,
+                sample.metric_values.tx_rdma_ack_timeout);
+            emit_nic_counter<category::amd_smi_nic_resp_tx_pkt_seq_err>(
+                device_index, resp_tx_pkt_seq_err_idx, ts,
+                sample.metric_values.resp_tx_pkt_seq_err);
+            emit_nic_counter<category::amd_smi_nic_req_rx_pkt_seq_err>(
+                device_index, req_rx_pkt_seq_err_idx, ts,
+                sample.metric_values.req_rx_pkt_seq_err);
+            emit_nic_counter<category::amd_smi_nic_req_rx_impl_nak_seq_err>(
+                device_index, req_rx_impl_nak_seq_err_idx, ts,
+                sample.metric_values.req_rx_impl_nak_seq_err);
         }
     }
 };

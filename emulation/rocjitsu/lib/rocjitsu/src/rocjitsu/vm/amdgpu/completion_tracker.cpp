@@ -6,6 +6,7 @@
 #include "rocjitsu/vm/amdgpu/hsa_clock.h"
 
 #include "rocjitsu/base/rj_compiler.h"
+#include "rocjitsu/vm/amdgpu/l2_cache.h"
 RJ_DIAGNOSTIC_PUSH
 RJ_DIAGNOSTIC_IGNORE_PEDANTIC
 #include "hsa/amd_hsa_queue.h"
@@ -17,6 +18,7 @@ RJ_DIAGNOSTIC_POP
 #include <atomic>
 #include <cstring>
 #include <format>
+#include <set>
 
 namespace rocjitsu {
 namespace amdgpu {
@@ -31,7 +33,9 @@ void CompletionTracker::notify_wg_complete(uint32_t dispatch_id, uint32_t wg_id,
           os << std::format("CT: wg_complete d={} wg={} completed={}/{}", dispatch_id, wg_id,
                             entry.completed_wgs, entry.total_wgs);
         });
-        drain_completions(queues);
+        // Completion callbacks can run from CU worker threads. The CP drains
+        // completions after dispatch fan-out rejoins, keeping cache flushes and
+        // signal firing on the CP path.
         return;
       }
     }
@@ -51,11 +55,9 @@ void CompletionTracker::drain_completions(std::vector<HwQueueState> &queues) {
                           entry.completed_wgs, entry.total_wgs, entry.completion_signal);
       });
 
-      flush_caches(entry.process_id);
-      plugin_group_->onAmdgpuDispatchExecutionEnd(entry.dispatch_id);
-      if (entry.completion_signal != 0) {
-        fire_signal(entry);
-      }
+      deliver_completion(entry);
+      if (!entry.completion_notified)
+        break;
       if (dispatch_retired_cb_)
         dispatch_retired_cb_(entry);
 
@@ -67,13 +69,49 @@ void CompletionTracker::drain_completions(std::vector<HwQueueState> &queues) {
     // HQD idle: write the queue's inactive signal and fire the interrupt.
     // On real hardware the CP writes the HQD status to amd_signal_t::value
     // and kfd_signal_event_interrupt broadcasts to all type-0 events.
-    if (had_entries && qs.entries.empty() && last_process_id != 0) {
+    // A fan-out replica does not own the queue and must not report it idle: its
+    // shards drain ahead of the owning XCD's, so it would signal idle while the
+    // dispatch is still running elsewhere.
+    if (had_entries && qs.entries.empty() && last_process_id != 0 && !qs.fanout_replica) {
       if (qs.queue_desc_va != 0)
         fire_queue_idle_signal(qs.queue_desc_va, last_process_id);
       if (interrupt_cb_)
         interrupt_cb_(last_process_id, 0);
     }
   }
+}
+
+void CompletionTracker::complete_non_kernel(DispatchEntry &entry) {
+  if (entry.is_non_kernel())
+    deliver_completion(entry);
+}
+
+void CompletionTracker::deliver_completion(DispatchEntry &entry) {
+  if (entry.completion_notified)
+    return;
+
+  // Publish this XCD's share only after its own caches are flushed. The release
+  // in publish_share() pairs with the acquire in grid_retired(), so the signal
+  // cannot fire while another XCD's results remain in its caches.
+  if (!entry.grid_share_published) {
+    flush_caches(entry.process_id);
+    entry.grid_share_published = true;
+    if (entry.grid_completion && entry.grid_completion->publish_share(entry.total_wgs) &&
+        grid_retired_cb_)
+      grid_retired_cb_(entry);
+  }
+
+  // A completed local shard remains queued until all peer XCD shares retire.
+  if (!entry.grid_fully_completed())
+    return;
+
+  // Only the XCD that read the packet reports completion and fires its signal.
+  if (!entry.fanout_peer) {
+    plugin_group_->onAmdgpuDispatchExecutionEnd(entry.dispatch_id);
+    if (entry.completion_signal != 0)
+      fire_signal(entry);
+  }
+  entry.completion_notified = true;
 }
 
 void CompletionTracker::fire_queue_idle_signal(uint64_t queue_desc_va, uint32_t process_id) {
@@ -85,25 +123,20 @@ void CompletionTracker::fire_queue_idle_signal(uint64_t queue_desc_va, uint32_t 
   constexpr uint32_t EVENT_ID_OFF = 24;
 
   uint64_t sig_handle_va = queue_desc_va + kQueueInactiveSigOff;
-  auto *desc_page = memory_->resolve_host_ptr(sig_handle_va, process_id);
-  if (!desc_page)
-    return;
-
-  size_t page_offset = sig_handle_va & 0xFFF;
-  if (page_offset + sizeof(uint64_t) > 0x1000)
+  auto *sig_handle = memory_->resolve_host_ptr(sig_handle_va, process_id, sizeof(uint64_t));
+  if (!sig_handle)
     return;
 
   uint64_t sig_addr = 0;
-  std::memcpy(&sig_addr, desc_page + page_offset, sizeof(sig_addr));
+  std::memcpy(&sig_addr, sig_handle, sizeof(sig_addr));
   if (sig_addr == 0)
     return;
 
   if ((sig_addr & 0x3F) != 0)
     return;
-  auto *sig_page = memory_->resolve_host_ptr(sig_addr, process_id);
-  if (!sig_page)
+  auto *sig_base = memory_->resolve_host_ptr(sig_addr, process_id, EVENT_ID_OFF + sizeof(uint32_t));
+  if (!sig_base)
     return;
-  auto *sig_base = sig_page + (sig_addr & 0xFFF);
 
   constexpr uint32_t SIG_VAL_OFF = 8;
   constexpr uint64_t kIdleStatus = 0x10;
@@ -126,9 +159,9 @@ void CompletionTracker::fire_queue_idle_signal(uint64_t queue_desc_va, uint32_t 
   uint64_t mailbox_ptr = 0;
   std::memcpy(&mailbox_ptr, sig_base + MAILBOX_PTR_OFF, sizeof(mailbox_ptr));
   if (mailbox_ptr != 0) {
-    auto *mb_page = memory_->resolve_host_ptr(mailbox_ptr, process_id);
-    if (mb_page) {
-      auto *mb_ptr = reinterpret_cast<uint64_t *>(mb_page + (mailbox_ptr & 0xFFF));
+    auto *mb_ptr = reinterpret_cast<uint64_t *>(
+        memory_->resolve_host_ptr(mailbox_ptr, process_id, sizeof(uint64_t)));
+    if (mb_ptr) {
       std::atomic_ref<uint64_t>(*mb_ptr).store(uint64_t(event_id), std::memory_order_release);
     }
   }
@@ -138,8 +171,16 @@ void CompletionTracker::fire_queue_idle_signal(uint64_t queue_desc_va, uint32_t 
 }
 
 void CompletionTracker::flush_caches(uint32_t vmid) {
-  for (auto *cu : cus_)
-    cu->flush_all(vmid);
+  std::set<L2Cache *> flushed_l2s;
+  for (auto *cu : cus_) {
+    cu->flush_l1(vmid);
+    if (auto *l2 = cu->l2(); l2 && flushed_l2s.insert(l2).second)
+      l2->flush_all(vmid);
+  }
+  for (auto *l2 : l2_caches_) {
+    if (l2 && flushed_l2s.insert(l2).second)
+      l2->flush_all(vmid);
+  }
 }
 
 bool CompletionTracker::all_complete(const std::vector<HwQueueState> &queues) const {
@@ -167,22 +208,21 @@ void CompletionTracker::fire_signal(const DispatchEntry &entry) {
   constexpr uint32_t END_TS_OFF = 40;
 
   if (memory_) {
-    auto *sig_page =
-        memory_->resolve_host_ptr(entry.completion_signal + SIG_VAL_OFF, entry.process_id);
+    auto *sig_base = memory_->resolve_host_ptr(entry.completion_signal, entry.process_id,
+                                               END_TS_OFF + sizeof(uint64_t));
     uint64_t start_ts = entry.profiling_start_timestamp;
     if (start_ts == 0)
       start_ts = hsa_system_timestamp();
     uint64_t end_ts = std::max(hsa_system_timestamp(), start_ts + 1);
 
     util::Logger::cp([&](auto &os) {
-      auto *page0 = memory_->resolve_host_ptr(entry.completion_signal, entry.process_id);
       uint64_t kind_raw = 0, val_raw = 0, mbx_raw = 0;
       uint32_t eid_raw = 0;
-      if (page0) {
-        std::memcpy(&kind_raw, page0 + (entry.completion_signal & 0xFFF), 8);
-        std::memcpy(&val_raw, page0 + ((entry.completion_signal + SIG_VAL_OFF) & 0xFFF), 8);
-        std::memcpy(&mbx_raw, page0 + ((entry.completion_signal + MAILBOX_PTR_OFF) & 0xFFF), 8);
-        std::memcpy(&eid_raw, page0 + ((entry.completion_signal + EVENT_ID_OFF) & 0xFFF), 4);
+      if (sig_base) {
+        std::memcpy(&kind_raw, sig_base, sizeof(kind_raw));
+        std::memcpy(&val_raw, sig_base + SIG_VAL_OFF, sizeof(val_raw));
+        std::memcpy(&mbx_raw, sig_base + MAILBOX_PTR_OFF, sizeof(mbx_raw));
+        std::memcpy(&eid_raw, sig_base + EVENT_ID_OFF, sizeof(eid_raw));
       } else {
         kind_raw = memory_->read64(entry.completion_signal, entry.process_id);
         val_raw = memory_->read64(entry.completion_signal + SIG_VAL_OFF, entry.process_id);
@@ -192,22 +232,19 @@ void CompletionTracker::fire_signal(const DispatchEntry &entry) {
       os << std::format("SIGNAL_DUMP d={} sig={:#x} pid={} host_page={} kind={:#x} val={} "
                         "mailbox={:#x} event_id={}",
                         entry.dispatch_id, entry.completion_signal, entry.process_id,
-                        page0 != nullptr, kind_raw, static_cast<int64_t>(val_raw), mbx_raw,
+                        sig_base != nullptr, kind_raw, static_cast<int64_t>(val_raw), mbx_raw,
                         eid_raw);
     });
 
     int64_t old = 0;
     uint64_t new_val = 0;
-    if (sig_page) {
-      auto *start_ptr = reinterpret_cast<uint64_t *>(
-          sig_page + ((entry.completion_signal + START_TS_OFF) & 0xFFF));
-      auto *end_ptr =
-          reinterpret_cast<uint64_t *>(sig_page + ((entry.completion_signal + END_TS_OFF) & 0xFFF));
+    if (sig_base) {
+      auto *start_ptr = reinterpret_cast<uint64_t *>(sig_base + START_TS_OFF);
+      auto *end_ptr = reinterpret_cast<uint64_t *>(sig_base + END_TS_OFF);
       std::atomic_ref<uint64_t>(*start_ptr).store(start_ts, std::memory_order_relaxed);
       std::atomic_ref<uint64_t>(*end_ptr).store(end_ts, std::memory_order_release);
 
-      auto *sig_ptr = reinterpret_cast<uint64_t *>(
-          sig_page + ((entry.completion_signal + SIG_VAL_OFF) & 0xFFF));
+      auto *sig_ptr = reinterpret_cast<uint64_t *>(sig_base + SIG_VAL_OFF);
       old =
           static_cast<int64_t>(std::atomic_ref<uint64_t>(*sig_ptr).load(std::memory_order_relaxed));
       new_val = static_cast<uint64_t>(old - 1);
@@ -232,9 +269,9 @@ void CompletionTracker::fire_signal(const DispatchEntry &entry) {
     });
 
     if (mailbox_ptr != 0) {
-      auto *mb_page = memory_->resolve_host_ptr(mailbox_ptr, entry.process_id);
-      if (mb_page) {
-        auto *mb_ptr = reinterpret_cast<uint64_t *>(mb_page + (mailbox_ptr & 0xFFF));
+      auto *mb_ptr = reinterpret_cast<uint64_t *>(
+          memory_->resolve_host_ptr(mailbox_ptr, entry.process_id, sizeof(uint64_t)));
+      if (mb_ptr) {
         std::atomic_ref<uint64_t>(*mb_ptr).store(uint64_t(event_id), std::memory_order_release);
       } else {
         memory_->write64(mailbox_ptr, uint64_t(event_id), entry.process_id);

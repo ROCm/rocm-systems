@@ -16,7 +16,9 @@ AMD SMI supports:
 
 - {ref}`AMD GPUs <rocm:release-supported-hw>` on Linux bare metal systems
 - AMD GPUs in Linux virtual machine guests
-- AMD EPYC™ CPUs through the [esmi_ib_library](https://github.com/amd/esmi_ib_library)
+- AMD EPYC™ CPUs through the
+  [esmi_ib_library](https://github.com/amd/esmi_ib_library) (requires the
+  `amd_hsmp` kernel module with HSMP enabled in BIOS at runtime)
 
 For AMD SMI on Linux SR-IOV hosts, refer to
 the [AMD SMI for Virtualization documentation](https://instinct.docs.amd.com/projects/amd-smi-virt/en/latest/index.html).
@@ -57,7 +59,10 @@ To run AMD SMI, the following components need to be installed on your system:
     <cli-output-na>` for more information.
     :::
 - The `amd_hsmp` or `hsmp_acpi` driver
+  - Required for `amdsmi_init(AMDSMI_INIT_AMD_CPUS)` and `amd-smi` CPU commands.
   - See [amd_hsmp](https://github.com/amd/amd_hsmp) for more information.
+  - Without it, CPU discovery is skipped non-fatally and only GPU and NIC data
+    is reported.
 
 Also confirm that your Linux kernel version matches the system requirements
 described in {ref}`Operating system support <rocm:release-supported-os>`.
@@ -210,23 +215,46 @@ from your ROCm instance.
 Multiple ROCm installations may cause `amd-smi` failures.
 Installing multiple versions of ROCm on the same system can result in the `amd-smi` CLI not functioning correctly.
 
-1. Remove previous AMD SMI installation.
+Starting with ROCm 7.14, the `amd-smi-lib` rpm/deb package no longer
+runs `pip install` during postinst — it installs the `amdsmi` Python package directly into the system
+Python's `site-packages` as part of the package payload. Removing the
+package removes those files; only a legacy (pre-7.14) pip-registered
+install needs to be uninstalled manually.
+
+1. Remove previous AMD SMI installations.
 
    ```shell
+   # Legacy: pre-7.14 system packages and any user pip install
    python3 -m pip list | grep amd
    python3 -m pip uninstall amdsmi
+
+   # Modern: 7.14+ system package, remove it with your package manager
+   sudo apt remove amd-smi-lib   # or: sudo dnf remove amd-smi-lib
    ```
 
-2. Install the AMD SMI Python library from your target ROCm instance. Replace
-   `<major>` and `<minor>` with the appropriate ROCm version.
+2. Install the AMD SMI Python library. Pick **one** of the two paths:
 
-   ```shell
-   # Install from target ROCm instance
-   cd /opt/rocm/core-<major>.<minor>/share/amd_smi
-   python3 -m pip install --user .
-   ```
+   - **System package** (recommended when you want the rpm/deb to manage the
+     install). Install or reinstall `amd-smi-lib` from your target ROCm
+     instance; the package installs the wrapper into the system Python's
+     `site-packages` so `import amdsmi` resolves it directly.
+   - **Pip wheel** (recommended for venvs, containers, or when ROCm is not
+     installed on the host but the amdgpu kernel driver is present):
 
-   > **Note:** `sudo` may be required. On some systems, use `--break-system-packages` if pip installation fails.
+     ```shell
+     python3 -m pip install amdsmi
+     ```
+
+     The wheel ships its own SONAME-renamed `libamd_smi_python.so` next to
+     the wrapper, so it does not depend on `/opt/rocm` being present.
+
+   See `py-interface/README.md` in the source tree, or
+   [Packaging and install paths](../packaging.md) for the full install-paths
+   matrix, coexistence rules, and the `AMDSMI_LIB_OVERRIDE` override.
+
+   > **Note:** `sudo` may be required for the system-package path. For pip,
+   > use `--break-system-packages` only if installing into a non-venv
+   > Python that PEP 668 has marked externally managed.
 
 3. You should now have the AMD SMI Python library in your Python path:
 

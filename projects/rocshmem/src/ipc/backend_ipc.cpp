@@ -36,6 +36,7 @@
 #include "log.hpp"
 #include "memory/default_allocator.hpp"
 #include "memory/hip_allocator_vmm_common.hpp"
+#include "memfabric/pod_detection.hpp"
 
 namespace rocshmem {
 
@@ -166,22 +167,65 @@ IPCBackend::~IPCBackend() {
 int IPCBackend::backend_can_run(MPI_Comm comm, TcpBootstrap* bootstrap) {
   int ret = ROCSHMEM_ERROR;
 
+  /*
+   * A heap exported with hipMemHandleTypeFabric is addressable by every device
+   * in the fabric pod, which on a pod-per-rack system is larger than one node.
+   * Admission must therefore be sized by pod membership rather than by node
+   * membership, otherwise a pod-spanning job is rejected before ipcHostInit()
+   * -- which already makes this same distinction -- ever runs.
+   */
+  bool use_pod_detection{false};
+#ifdef HAVE_AMDSMI_GPU_FABRIC_INFO
+  use_pod_detection =
+      (get_default_allocator()->get_type() == AllocatorTypeVMMFabric);
+#endif
+
   if (comm != MPI_COMM_NULL) {
     int comm_size;
     mpilib_ftable_.Comm_size(comm, &comm_size);
-    MPI_Comm shmcomm;
-    mpilib_ftable_.Comm_split_type(comm, MPI_COMM_TYPE_SHARED, 0, MPI_INFO_NULL,
-                                  &shmcomm);
-    int shm_comm_size;
-    mpilib_ftable_.Comm_size(shmcomm, &shm_comm_size);
-    mpilib_ftable_.Comm_free(&shmcomm);
-    if (shm_comm_size == comm_size) {
+    int group_size{0};
+
+    if (use_pod_detection) {
+      int my_rank;
+      mpilib_ftable_.Comm_rank(comm, &my_rank);
+
+      PodIds localPodIds = detectLocalPodIds();
+      if (!IS_PODIDS_ZERO(localPodIds)) {
+        std::vector<PodIds> allPodIds(comm_size);
+        mpilib_ftable_.Allgather(&localPodIds, sizeof(PodIds), MPI_CHAR,
+                                 allPodIds.data(), sizeof(PodIds), MPI_CHAR,
+                                 comm);
+        group_size =
+            static_cast<int>(matchIpcCapableRanks(my_rank, allPodIds).size());
+      }
+    } else {
+      MPI_Comm shmcomm;
+      mpilib_ftable_.Comm_split_type(comm, MPI_COMM_TYPE_SHARED, 0,
+                                     MPI_INFO_NULL, &shmcomm);
+      mpilib_ftable_.Comm_size(shmcomm, &group_size);
+      mpilib_ftable_.Comm_free(&shmcomm);
+    }
+
+    LOG_INFO("IPC admission (MPI): %s group of %d, world %d",
+             use_pod_detection ? "pod" : "node", group_size, comm_size);
+
+    if (group_size == comm_size) {
       ret = ROCSHMEM_SUCCESS;
     }
   } else if (bootstrap != nullptr) {
       int world_size = bootstrap->getNranks();
-      int shm_size = bootstrap->getNranksPerNode();
-      if (shm_size == world_size) {
+      /*
+       * getIpcCapableRanks() memoises its result, so the pod-id allGather it
+       * performs here is not repeated by ipcHostInit() later.
+       */
+      int group_size = use_pod_detection
+                           ? static_cast<int>(bootstrap->getIpcCapableRanks().size())
+                           : bootstrap->getNranksPerNode();
+
+      LOG_INFO("IPC admission (bootstrap): %s group of %d, world %d",
+               use_pod_detection ? "pod" : "node", group_size, world_size);
+
+      if (group_size == world_size) {
         ret = ROCSHMEM_SUCCESS;
       }
   }

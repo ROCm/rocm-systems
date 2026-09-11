@@ -8,6 +8,7 @@
 #include "core/trace_cache/cacheable.hpp"
 
 #include "common/defines.h"
+#include "policies/thread_state_policy.hpp"
 
 #include <atomic>
 #include <cassert>
@@ -81,7 +82,8 @@ struct flush_worker_factory_t
     }
 };
 
-template <typename WorkerFactory, typename TypeIdentifierEnum>
+template <typename WorkerFactory, typename TypeIdentifierEnum,
+          rocprofsys::policies::thread_state_policy ThreadStatePolicy = state::thread>
 class buffer_storage
 {
     static_assert(type_traits::is_enum_class_v<TypeIdentifierEnum>,
@@ -150,7 +152,7 @@ public:
         // for position management; extending the critical section to cover the
         // actual memcpy closes the window that TSan (correctly) flags.
         //
-        ROCPROFSYS_SCOPED_THREAD_STATE(ThreadState::Internal);
+        auto thread_state_guard = ThreadStatePolicy::scoped(ThreadStatePolicy::Internal);
         std::lock_guard scope{ m_mutex };
 
         auto*  buf      = reserve_memory_space(bytes_to_reserve);
@@ -174,7 +176,7 @@ private:
     {
         // Hold m_mutex for the full read so store() cannot write into the
         // region we are draining to the file.
-        ROCPROFSYS_SCOPED_THREAD_STATE(ThreadState::Internal);
+        auto thread_state_guard = ThreadStatePolicy::scoped(ThreadStatePolicy::Internal);
         std::lock_guard guard{ m_mutex };
 
         size_t _head = m_head;

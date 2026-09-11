@@ -88,6 +88,44 @@ inline unsigned long getParentProcessId() {
 }
 
 namespace hip {
+#if !HT_WIN
+/**
+ * read()/write() on a pipe (or socket/terminal) may transfer fewer bytes than
+ * requested, and may be interrupted by a signal (EINTR) before moving any data.
+ * A single call with a ">= 0" success check can therefore leave the buffer only
+ * partially filled. These helpers loop until the entire buffer has been
+ * transferred, retrying on EINTR, and treat a 0 return (EOF / peer closed early)
+ * as an error.
+ **/
+inline bool writeAll(int fd, const void* buf, size_t count) {
+  const char* ptr = static_cast<const char*>(buf);
+  size_t total = 0;
+  while (total < count) {
+    ssize_t n = write(fd, ptr + total, count - total);
+    if (n <= 0) {
+      if (n < 0 && errno == EINTR) continue;
+      return false;
+    }
+    total += static_cast<size_t>(n);
+  }
+  return true;
+}
+
+inline bool readAll(int fd, void* buf, size_t count) {
+  char* ptr = static_cast<char*>(buf);
+  size_t total = 0;
+  while (total < count) {
+    ssize_t n = read(fd, ptr + total, count - total);
+    if (n <= 0) {
+      if (n < 0 && errno == EINTR) continue;
+      return false;  // n == 0 is an unexpected EOF
+    }
+    total += static_cast<size_t>(n);
+  }
+  return true;
+}
+#endif  // !HT_WIN
+
 /*
 Class to spawn a process in isolation and test its standard output and return status.
 
@@ -108,6 +146,7 @@ class SpawnProc {
   std::string resultStr_;
   std::string tmpFileName_;
   bool captureOutput_;
+  bool captureStderr_;
   Process process_{};
   bool spawned_ = false;
   std::future<int> asyncFuture_;
@@ -163,7 +202,8 @@ class SpawnProc {
       if (hFile != INVALID_HANDLE_VALUE) {
         si.dwFlags |= STARTF_USESTDHANDLES;
         si.hStdOutput = hFile;
-        si.hStdError = hFile;  // Redirect stderr to the same file as stdout
+        // Only merge stderr into the captured file when explicitly requested.
+        si.hStdError = captureStderr_ ? hFile : GetStdHandle(STD_ERROR_HANDLE);
         si.hStdInput = GetStdHandle(STD_INPUT_HANDLE);
         inheritHandles = TRUE;
       }
@@ -230,7 +270,8 @@ class SpawnProc {
         int fd = open(tmpFileName_.c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0644);
         if (fd >= 0) {
           dup2(fd, STDOUT_FILENO);
-          dup2(fd, STDERR_FILENO);  // Redirect stderr to the same file as stdout
+          // Only merge stderr into the captured file when explicitly requested.
+          if (captureStderr_) dup2(fd, STDERR_FILENO);
           close(fd);
         }
       }
@@ -290,8 +331,14 @@ class SpawnProc {
   }
 
  public:
-  SpawnProc(std::string exeName, bool captureOutput = false)
-      : exeName_(std::move(exeName)), captureOutput_(captureOutput) {
+  // captureStderr only takes effect when captureOutput is also true. It merges
+  // the child's stderr into the captured output; leave it false for tests that
+  // compare stdout exactly, so unrelated stderr (diagnostics or banners) does
+  // not corrupt the comparison. Opt in for tests that assert on stderr content
+  // (e.g. AMD_LOG output).
+  SpawnProc(std::string exeName, bool captureOutput = false, bool captureStderr = false)
+      : exeName_(std::move(exeName)), captureOutput_(captureOutput),
+        captureStderr_(captureStderr) {
     if (!fs::path(exeName_).is_absolute()) {
       auto dir = fs::path(TestContext::get().currentPath());
       dir /= exeName_;

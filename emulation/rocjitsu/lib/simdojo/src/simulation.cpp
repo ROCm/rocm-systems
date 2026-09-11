@@ -3,10 +3,25 @@
 
 #include "simdojo/sim/simulation.h"
 
+#include "util/log.h"
+
 #include <algorithm>
 #include <cassert>
+#include <chrono>
+#include <exception>
+#include <stdexcept>
+#include <string>
+#include <thread>
 
 namespace simdojo {
+
+namespace {
+
+std::string link_endpoints(const Link &link) {
+  return link.src()->full_path() + " -> " + link.dst()->full_path();
+}
+
+} // namespace
 
 void PartitionContext::drain_incoming() {
   for (auto &queue : incoming)
@@ -23,11 +38,22 @@ SimulationEngine::~SimulationEngine() {
 
 void SimulationEngine::create() {
   assert(!created_ && "create() called twice without shutdown()");
-  if (topology_.partitions().empty())
-    topology_.partition(config_.num_threads);
+  if (config_.num_threads == 0)
+    throw std::invalid_argument("SimulationEngine requires at least one worker thread");
+
+  if (topology_.partitions().empty()) {
+    if (config_.num_threads > 1) {
+      throw std::invalid_argument(
+          "multi-threaded SimulationEngine requires an explicit topology partition policy");
+    }
+    topology_.partition_balanced(1);
+  }
   setup_partitions();
 
   done_.store(false, std::memory_order_release);
+  startup_complete_.store(false, std::memory_order_release);
+  startup_failed_.store(false, std::memory_order_release);
+  components_shut_down_ = false;
   active_primaries_.store(0, std::memory_order_release);
   has_primaries_.store(false, std::memory_order_release);
   exit_status_ = {};
@@ -48,26 +74,50 @@ void SimulationEngine::shutdown() {
 
   // In single-threaded mode, wake idle CV. In multi-threaded mode,
   // threads will see done_ after their current barrier epoch completes.
-  if (config_.num_threads == 1 && !contexts_.empty()) {
-    auto &ctx = *contexts_[0];
-    ctx.idle_wakeup_.store(true, std::memory_order_release);
-    ctx.idle_wakeup_.notify_one();
-  }
+  wake_partition(0);
 
   workers_.clear();
   barrier_.reset();
-  shutdown_components();
+  // Capture, do not propagate: engine cleanup below MUST still run, and shutdown()
+  // is reached from ~SimulationEngine(), from rj_vm_run() on the engine's own
+  // background thread, and across the C API — none of which can absorb an
+  // exception. A failing component hook is reported, not thrown.
+  std::exception_ptr component_failure = shutdown_components();
 
   running_ = false;
-  contexts_.clear();
-  async_queues_.clear();
+  {
+    // Exclusive: a foreign thread may be mid-wake or mid-async-schedule on these
+    // vectors. Workers are already joined above, so nothing we join can be waiting
+    // on this lock. Taken after shutdown_components() so component teardown, which
+    // may still schedule, is not blocked.
+    std::unique_lock<std::shared_mutex> lock(contexts_mutex_);
+    contexts_.clear();
+    async_queues_.clear();
+  }
   created_ = false;
+  report_component_failure(component_failure, "engine shutdown");
 }
 
 void SimulationEngine::setup_partitions() {
   const uint32_t num_threads = config_.num_threads;
-  assert(num_threads > 0);
-  assert(topology_.partitions().size() == num_threads);
+  if (topology_.partitions().size() != num_threads) {
+    throw std::invalid_argument(
+        "SimulationEngine topology partition count must match the worker thread count");
+  }
+
+  // Validate cross-partition link constraints.
+  for (auto &link : topology_.links()) {
+    if (link->is_cross_partition()) {
+      if (link->latency() == 0) {
+        throw std::invalid_argument("SimulationEngine cross-partition link " +
+                                    link_endpoints(*link) + " requires positive latency");
+      }
+      if (dynamic_cast<QueuedLink *>(link.get()) != nullptr) {
+        throw std::invalid_argument("SimulationEngine QueuedLink " + link_endpoints(*link) +
+                                    " must not cross partition boundaries");
+      }
+    }
+  }
 
   contexts_.reserve(num_threads);
   for (uint32_t i = 0; i < num_threads; ++i)
@@ -76,15 +126,6 @@ void SimulationEngine::setup_partitions() {
   async_queues_.reserve(num_threads);
   for (uint32_t i = 0; i < num_threads; ++i)
     async_queues_.push_back(std::make_unique<AsyncQueue>());
-
-  // Validate cross-partition link constraints.
-  for (auto &link : topology_.links()) {
-    if (link->is_cross_partition()) {
-      assert(link->latency() > 0 && "cross-partition links require positive latency for LBTS");
-      assert(dynamic_cast<QueuedLink *>(link.get()) == nullptr &&
-             "QueuedLinks must not cross partition boundaries (they bypass the LBTS protocol)");
-    }
-  }
 
   // Set engine pointer on all components.
   for (auto &part : topology_.partitions()) {
@@ -97,8 +138,44 @@ ExitStatus SimulationEngine::run() {
   assert(created_ && "run() called before create()");
   const uint32_t num_threads = config_.num_threads;
 
-  startup_components();
+  // A component startup() can throw. run() may execute on a background thread
+  // (the LD_PRELOAD interposer's local VM) whose top-level lambda has no catch, so
+  // an escaping exception would call std::terminate AND leave wait_until_started()
+  // blocked forever (startup_complete_ never set). Catch it, latch readiness with a
+  // failure flag so waiters wake and can unwind, and return an error ExitStatus
+  // rather than running the epoch loop against half-started components.
+  // A startup() throw makes this create() generation terminal: partition/async
+  // event queues, primary counters, and per-component state from the partial
+  // attempt are left intact, so re-running startup on top of them would
+  // double-schedule events and double-register primaries. Refuse to re-run and
+  // require shutdown() + create() for a clean generation. Deliberately a RUNTIME
+  // guard with NO paired assert: an assert would abort in assertion-enabled builds
+  // and return in release ones, so the API's behaviour would depend on the build.
+  // Copied under exit_mutex_ like the normal return below: a foreign thread can be
+  // inside request_exit() assigning exit_status_, whose message is a std::string.
+  if (startup_failed()) {
+    std::lock_guard<std::mutex> lock(exit_mutex_);
+    return exit_status_;
+  }
+  try {
+    startup_components();
+  } catch (const std::exception &e) {
+    fail_startup(std::string("component startup failed: ") + e.what());
+  } catch (...) {
+    // The engine may run on a background thread whose lambda has no catch, so a
+    // non-std::exception throw would still call std::terminate. Latch failure and
+    // return an error status for those too, matching step()'s catch (...).
+    fail_startup("component startup failed with a non-standard exception");
+  }
+  if (startup_failed()) {
+    std::lock_guard<std::mutex> lock(exit_mutex_);
+    return exit_status_;
+  }
   running_ = true;
+  // Publish readiness only after every component's startup() has run, so an
+  // embedding that launched run() on a background thread (the LD_PRELOAD
+  // interposer's local VM) does not expose a half-started device.
+  latch_startup(/*failed=*/false);
   pacer_.anchor(0);
 
   if (config_.max_ticks > 0 && num_threads == 1) {
@@ -124,7 +201,65 @@ ExitStatus SimulationEngine::run() {
   }
 
   running_ = false;
+  // Copy under the lock: a foreign thread can still be inside request_exit()
+  // assigning exit_status_ as run() unwinds, and the copy reads its message string.
+  std::lock_guard<std::mutex> lock(exit_mutex_);
   return exit_status_;
+}
+
+void SimulationEngine::fail_startup(std::string message) {
+  // Records the status and marks the generation done in ONE critical section, so a
+  // concurrent request_exit() cannot replace this failure with EXIT_REQUEST/code 0 and
+  // report a generation whose components never started as a clean run.
+  set_terminal_exit(ExitReason::INTERRUPTED, current_time_.load(std::memory_order_acquire),
+                    std::move(message), /*code=*/1);
+  // Unwind BEFORE publishing readiness, so a waiter that observes the failure also
+  // observes a generation that is torn down rather than one still running component
+  // shutdown hooks. Nothing here can escape past the latch: shutdown_components()
+  // and report_component_failure() are both noexcept and catch each callback.
+  report_component_failure(shutdown_components(), "startup unwind");
+  latch_startup(/*failed=*/true);
+}
+
+void SimulationEngine::latch_startup_if_unlatched(bool failed) {
+  if (startup_complete_.load(std::memory_order_acquire))
+    return;
+  if (failed) {
+    // Same reasoning as fail_startup(): the flag latched here is run()/step()'s
+    // terminal guard, so it needs a status behind it, recorded together with done_.
+    set_terminal_exit(ExitReason::INTERRUPTED, current_time_.load(std::memory_order_acquire),
+                      "engine thread returned without completing component startup",
+                      /*code=*/1);
+  }
+  latch_startup(failed);
+}
+
+void SimulationEngine::report_component_failure(std::exception_ptr failure,
+                                                const char *phase) noexcept {
+  if (!failure)
+    return;
+  // Outer catch-all: this is the last step of a teardown that must not throw, and
+  // the reporting path itself formats and allocates.
+  try {
+    try {
+      std::rethrow_exception(failure);
+    } catch (const std::exception &e) {
+      util::Logger::warn("SimulationEngine: a component shutdown() threw during ", phase, ": ",
+                         e.what());
+    } catch (...) {
+      util::Logger::warn("SimulationEngine: a component shutdown() threw a non-standard exception "
+                         "during ",
+                         phase);
+    }
+  } catch (...) {
+    // Reporting itself failed; nothing further here is safe or useful.
+  }
+}
+
+bool SimulationEngine::wait_until_started() const {
+  while (!startup_complete_.load(std::memory_order_acquire))
+    startup_complete_.wait(false, std::memory_order_acquire);
+  return !startup_failed_.load(std::memory_order_acquire);
 }
 
 bool SimulationEngine::step() {
@@ -132,8 +267,26 @@ bool SimulationEngine::step() {
   assert(config_.num_threads == 1 && "step() requires single-threaded mode");
 
   if (!running_) {
-    startup_components();
+    // A prior startup() throw made this generation terminal (see run()): its
+    // partial event/primary/component state is still live, so re-running startup
+    // would double-schedule events and double-register primaries. Report done;
+    // the caller must shutdown() + create() to retry.
+    if (startup_failed())
+      return false;
+    // step() runs on the foreground caller, so a startup throw propagates to it
+    // (rethrown below) after fail_startup() records the same terminal ExitStatus
+    // run() would, publishes it to wait_until_started() waiters, and unwinds.
+    try {
+      startup_components();
+    } catch (const std::exception &e) {
+      fail_startup(std::string("component startup failed: ") + e.what());
+      throw;
+    } catch (...) {
+      fail_startup("component startup failed with a non-standard exception");
+      throw;
+    }
     running_ = true;
+    latch_startup(/*failed=*/false);
 
     if (config_.max_ticks > 0) {
       max_ticks_event_.set_handler([this](Tick ts, Message *) {
@@ -279,8 +432,20 @@ void SimulationEngine::worker_loop(PartitionID partition_id) {
       drain_async_for_partition(ctx);
 
       // Phase 2: Process all events with timestamp <= global LBTS.
+      //
+      // TICK_MAX is the absence of a horizon, not an infinite one: it says every
+      // partition published "nothing scheduled" at the last barrier, so this
+      // epoch has no bound to process against. Treating it as one lets a
+      // partition whose handlers keep re-arming (the command processor's stall
+      // re-check does, once per doorbell wait) run the entire simulation inside
+      // a single epoch while every peer sits in the barrier waiting for it --
+      // which is the multi-partition hang. Skip processing instead: whatever the
+      // drain above just pulled in is published below, the barrier turns it into
+      // a finite LBTS, and the next epoch processes it. The cost is one extra
+      // epoch per idle-to-busy transition.
       Tick lbts = global_lbts_.load(std::memory_order_acquire);
-      while (!ctx.event_queue.empty() && ctx.event_queue.next_event_time() <= lbts) {
+      while (lbts != TICK_MAX && !ctx.event_queue.empty() &&
+             ctx.event_queue.next_event_time() <= lbts) {
         auto entry = ctx.event_queue.pop();
         process_event(ctx, entry);
         if (done_.load(std::memory_order_acquire)) {
@@ -298,8 +463,11 @@ void SimulationEngine::worker_loop(PartitionID partition_id) {
       // Phase 4: Barrier (completion function computes new global_lbts).
       barrier_->arrive_and_wait();
       if (done_.load(std::memory_order_acquire)) {
-        // After arrive_and_wait, if done_ was set by the completion function,
-        // ALL threads see it simultaneously and ALL exit.
+        // request_exit() can set done_ while peers released from the same phase
+        // are already entering the next one. Contribute this worker's arrival
+        // instead of abandoning that phase and stranding those peers.
+        ctx.local_next.store(TICK_MAX, std::memory_order_relaxed);
+        barrier_->arrive_and_drop();
         return;
       }
     }
@@ -321,6 +489,45 @@ void SimulationEngine::barrier_completion() {
 
   if (check_termination(new_lbts))
     return;
+
+  if (new_lbts == TICK_MAX)
+    idle_wait_quiescent();
+}
+
+void SimulationEngine::idle_wait_quiescent() {
+  // Every partition published TICK_MAX, so nothing in the simulation can advance
+  // until a foreign thread posts an async event -- a doorbell, a primary
+  // releasing, or request_exit(). Without a wait here the epoch loop runs flat
+  // out, and an idle engine pins one host core per partition. That is not just
+  // waste: rocjitsu's own suite runs many emulators at once under `ctest -j`, and
+  // the spinning partitions starve the guest process that has to ring the
+  // doorbell, so a run that is merely idle never becomes busy again.
+  //
+  // This runs in the barrier's completion function, which means every other
+  // worker is already parked inside the barrier -- so one bounded sleep here
+  // idles the whole engine, with no wakeup to lose and no peer left waiting on a
+  // partition that decided to sleep on its own.
+  //
+  // Bounded rather than unbounded: the loop must come back often enough to keep
+  // re-checking termination, and the exit paths that set done_ do not all post an
+  // async event. A 1ms cap costs an idle engine a thousand near-empty epochs a
+  // second, and the 50us poll keeps the added doorbell latency well inside the
+  // 100us cadence the command processor's own poll thread already runs at.
+  using namespace std::chrono_literals;
+  const auto deadline = std::chrono::steady_clock::now() + 1ms;
+  while (!done_.load(std::memory_order_acquire) && !any_async_pending()) {
+    if (std::chrono::steady_clock::now() >= deadline)
+      return;
+    std::this_thread::sleep_for(50us);
+  }
+}
+
+bool SimulationEngine::any_async_pending() const {
+  for (const auto &aq : async_queues_) {
+    if (aq->pending.load(std::memory_order_acquire))
+      return true;
+  }
+  return false;
 }
 
 void SimulationEngine::process_event(PartitionContext &ctx, EventQueueEntry &entry) {
@@ -365,11 +572,8 @@ void SimulationEngine::primary_release() {
   [[maybe_unused]] uint32_t prev = active_primaries_.fetch_sub(1, std::memory_order_release);
   assert(prev > 0 && "primary_release called without matching register_as_primary or retain");
   // Wake idle engine so it can check termination (e.g., doorbell monitor releasing primary).
-  if (prev == 1 && config_.num_threads == 1 && !contexts_.empty()) {
-    auto &ctx = *contexts_[0];
-    ctx.idle_wakeup_.store(true, std::memory_order_release);
-    ctx.idle_wakeup_.notify_one();
-  }
+  if (prev == 1)
+    wake_partition(0);
 }
 
 void SimulationEngine::primary_retain() {
@@ -433,6 +637,19 @@ bool SimulationEngine::check_termination(Tick lbts) {
   return false;
 }
 
+void SimulationEngine::wake_partition_locked(PartitionID pid) {
+  if (config_.num_threads != 1 || pid >= contexts_.size())
+    return;
+  PartitionContext &ctx = *contexts_[pid];
+  ctx.idle_wakeup_.store(true, std::memory_order_release);
+  ctx.idle_wakeup_.notify_one();
+}
+
+void SimulationEngine::wake_partition(PartitionID pid) {
+  std::shared_lock<std::shared_mutex> lock(contexts_mutex_);
+  wake_partition_locked(pid);
+}
+
 void SimulationEngine::request_exit(std::string reason, int code) {
   Tick tick = current_time_.load(std::memory_order_acquire);
   {
@@ -447,12 +664,9 @@ void SimulationEngine::request_exit(std::string reason, int code) {
     done_.store(true, std::memory_order_release);
   }
 
-  // In single-threaded mode, wake the idle wait.
-  if (config_.num_threads == 1 && !contexts_.empty()) {
-    auto &ctx = *contexts_[0];
-    ctx.idle_wakeup_.store(true, std::memory_order_release);
-    ctx.idle_wakeup_.notify_one();
-  }
+  // In single-threaded mode, wake the idle wait. Guarded: the engine thread may be
+  // inside shutdown() destroying the contexts while the host thread requests exit.
+  wake_partition(0);
   // In multi-threaded mode, done_ is checked after each barrier epoch.
   // No explicit wake needed since threads will see it at the next barrier.
 }
@@ -462,20 +676,28 @@ void SimulationEngine::schedule_event_async(Event *event, Tick timestamp,
   Component *target = event->target();
   assert(target != nullptr && "schedule_event_async: event has no target component");
   PartitionID pid = target->partition_id();
-  assert(pid < async_queues_.size() && "schedule_event_async: target partition ID out of range");
+
+  // Shared: keeps async_queues_ and contexts_ alive for the duration. Producers do
+  // not exclude one another, so this stays off the critical path; only shutdown()
+  // blocks here. Held across the wake so the context cannot be freed under us.
+  std::shared_lock<std::shared_mutex> lock(contexts_mutex_);
+  if (pid >= async_queues_.size()) {
+    // shutdown() has cleared the queues, so the event has nowhere left to go. A
+    // non-empty queue vector here instead means an out-of-range partition ID, which
+    // is a caller bug. (Checked against async_queues_ rather than created_: that
+    // flag is written outside the lock, so reading it here would itself race.)
+    assert(async_queues_.empty() && "schedule_event_async: target partition ID out of range");
+    return;
+  }
   auto &aq = *async_queues_[pid];
   {
-    std::lock_guard<std::mutex> lock(aq.mutex);
+    std::lock_guard<std::mutex> qlock(aq.mutex);
     aq.events.push_back(EventQueueEntry{timestamp, 0, event, std::move(message)});
     aq.pending.store(true, std::memory_order_release);
   }
 
   // Wake the target partition so idle workers pick up the new event.
-  if (config_.num_threads == 1 && pid < contexts_.size()) {
-    PartitionContext &pctx = *contexts_[pid];
-    pctx.idle_wakeup_.store(true, std::memory_order_release);
-    pctx.idle_wakeup_.notify_one();
-  }
+  wake_partition_locked(pid);
   // In multi-threaded mode, async events are drained at each barrier epoch.
 }
 
@@ -508,6 +730,23 @@ void SimulationEngine::set_exit(ExitReason reason, Tick tick, std::string messag
   }
 }
 
+void SimulationEngine::set_terminal_exit(ExitReason reason, Tick tick, std::string message,
+                                         int code) {
+  std::lock_guard<std::mutex> lock(exit_mutex_);
+  // Deliberately NOT first-writer-wins, unlike set_exit(). Only terminal failures
+  // reach here, and a terminal failure outranks whatever was recorded before it: a
+  // request_exit() that already stored its default code-0 EXIT_REQUEST -- including
+  // one issued from inside a startup callback that then threw -- would otherwise
+  // survive, and run() would hand back a success status for a generation whose
+  // components never started. done_ is stored in this same critical section for the
+  // mirror-image reason: request_exit() gates its own overwrite on done_ read under
+  // this lock, so releasing before storing it would let a LATER request_exit()
+  // replace this failure.
+  exit_status_ = ExitStatus(reason, tick, std::move(message), code);
+  exit_set_ = true;
+  done_.store(true, std::memory_order_release);
+}
+
 void SimulationEngine::initialize_components() {
   for (auto &part : topology_.partitions()) {
     for (auto *comp : part.components)
@@ -522,11 +761,40 @@ void SimulationEngine::startup_components() {
   }
 }
 
-void SimulationEngine::shutdown_components() {
-  for (auto &part : topology_.partitions()) {
-    for (auto *comp : part.components)
-      comp->shutdown();
+std::exception_ptr SimulationEngine::shutdown_components() noexcept {
+  // shutdown() pairs with initialize() (both run over every component), so it must
+  // shut down every INITIALIZED component in reverse topology order — not only the
+  // ones whose startup() ran. create() initializes all components, so a
+  // create(); shutdown() with no run()/step() still releases their resources, and a
+  // partial-startup unwind still cleans up every initialized component. Guarded so
+  // it runs exactly once per create() generation: both the startup-failure unwind
+  // and the later engine shutdown() reach here, and a component must not be shut
+  // down twice. Reset by create().
+  if (components_shut_down_)
+    return {};
+  components_shut_down_ = true;
+
+  // Iterate in place rather than building a temporary vector: this runs on the
+  // teardown path reached from ~SimulationEngine(), so a bad_alloc from that
+  // temporary would skip EVERY component's cleanup and escape a noexcept
+  // destructor. Reverse partition order, reverse component order within each.
+  //
+  // Each callback is isolated: Component::shutdown() is not noexcept, and the
+  // generation is already marked shut down above, so letting one throw would
+  // permanently skip cleanup for the components after it with no way to retry.
+  std::exception_ptr first_failure;
+  auto &partitions = topology_.partitions();
+  for (auto part = partitions.rbegin(); part != partitions.rend(); ++part) {
+    for (auto comp = part->components.rbegin(); comp != part->components.rend(); ++comp) {
+      try {
+        (*comp)->shutdown();
+      } catch (...) {
+        if (!first_failure)
+          first_failure = std::current_exception();
+      }
+    }
   }
+  return first_failure;
 }
 
 Tick SimulationEngine::compute_async_floor(const PartitionContext &ctx) const {

@@ -1,1 +1,2 @@
-__version__ = "@amd_smi_lib_VERSION_STRING@"
+__version__ = "@amd_smi_lib_WHEEL_VERSION@"
+__commit__ = "@amd_smi_lib_VERSION_HASH@"

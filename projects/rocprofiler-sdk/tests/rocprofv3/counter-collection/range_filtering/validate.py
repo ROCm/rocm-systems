@@ -28,6 +28,9 @@ import numpy as np
 import pandas as pd
 import re
 
+# the profiled kernel; internal rocclr helper kernels are ignored
+TARGET_KERNEL = "transpose"
+
 
 def unique(lst):
     return list(set(lst))
@@ -40,25 +43,60 @@ def validate_json(input_data):
     data = json_data["rocprofiler-sdk-tool"]
     counter_collection_data = data["callback_records"]["counter_collection"]
     kernel_dispatch_data = data["buffer_records"]["kernel_dispatch"]
-    dispatch_ids = {}
 
     def get_kernel_name(kernel_id):
         return data["kernel_symbols"][kernel_id]["formatted_kernel_name"]
 
-    iteration = 1
-    for dispatch in kernel_dispatch_data:
-        dispatch_info = dispatch["dispatch_info"]
-        kernel_name = get_kernel_name(dispatch_info["kernel_id"])
-        if kernel_name == "transpose" and iteration in iteration_list:
-            dispatch_ids[dispatch_info["dispatch_id"]] = dispatch_info
-        if kernel_name == "transpose":
-            iteration = iteration + 1
+    expected_iterations = set(iteration_list)
+    assert len(expected_iterations) > 0, "iteration range must not be empty"
 
+    # recover each launch's 1-based ordinal from the unfiltered kernel_dispatch
+    # trace, ordered by dispatch_id
+    launch_dispatch_ids = sorted(
+        dispatch["dispatch_info"]["dispatch_id"]
+        for dispatch in kernel_dispatch_data
+        if get_kernel_name(dispatch["dispatch_info"]["kernel_id"]) == TARGET_KERNEL
+    )
+    ordinal_by_dispatch_id = {
+        dispatch_id: ordinal + 1
+        for ordinal, dispatch_id in enumerate(launch_dispatch_ids)
+    }
+
+    # need more launches than the range so the ordinals are recoverable
+    assert len(launch_dispatch_ids) > len(expected_iterations), (
+        f"{TARGET_KERNEL} launched {len(launch_dispatch_ids)} times; expected "
+        f"more than the {len(expected_iterations)} requested iterations so the "
+        "original launch ordinals can be recovered"
+    )
+
+    # map each counter-collected dispatch back to its ordinal (list keeps dups)
+    captured_ordinals = []
     for counter in counter_collection_data:
-        dispatch_data = counter["dispatch_data"]["dispatch_info"]
-        dispatch_id = dispatch_data["dispatch_id"]
-        if dispatch_id in dispatch_ids.keys():
-            assert dispatch_data == dispatch_ids[dispatch_id]
+        dispatch_info = counter["dispatch_data"]["dispatch_info"]
+        kernel_name = get_kernel_name(dispatch_info["kernel_id"])
+        if kernel_name != TARGET_KERNEL:
+            continue
+        dispatch_id = dispatch_info["dispatch_id"]
+        assert dispatch_id in ordinal_by_dispatch_id, (
+            f"counter record dispatch_id {dispatch_id} not found in the "
+            f"{TARGET_KERNEL} kernel_dispatch trace"
+        )
+        captured_ordinals.append(ordinal_by_dispatch_id[dispatch_id])
+
+    captured_set = set(captured_ordinals)
+
+    # captured iterations must equal the requested set exactly
+    assert captured_set == expected_iterations, (
+        f"{TARGET_KERNEL} captured iterations {sorted(captured_set)}, "
+        f"expected {sorted(expected_iterations)}"
+    )
+
+    # exactly one record per requested iteration (no duplicates, no misses)
+    assert len(captured_ordinals) == len(expected_iterations), (
+        f"{TARGET_KERNEL} captured {len(captured_ordinals)} records "
+        f"(iterations {sorted(captured_ordinals)}); expected exactly "
+        f"{len(expected_iterations)} ({sorted(expected_iterations)})"
+    )
 
 
 def test_validate_counter_collection_pass1(input_json_pass1):

@@ -62,16 +62,15 @@ rocprof-sys-run -- ./roctx
 | `ROCPROFSYS_SELECTED_REGIONS` | `Region1` | Filter tracing to only the named region(s) |
 
 ```bash
-rocprof-sys-run \
-    -e ROCPROFSYS_ROCM_DOMAINS=hip_runtime_api,marker_api,kernel_dispatch \
-    -e ROCPROFSYS_TRACE=true \
-    -- ./roctx
+ROCPROFSYS_ROCM_DOMAINS=hip_runtime_api,marker_api,kernel_dispatch \
+ROCPROFSYS_TRACE=true \
+rocprof-sys-run -- ./roctx
 ```
 
 ### Selective Region Example
 
 ```bash
-ROCPROFSYS_SELECTED_REGIONS="Region1" rocprof-sys-run \
-    -e ROCPROFSYS_ROCM_DOMAINS=hip_runtime_api,marker_api,kernel_dispatch \
-    -- ./selective-region
+ROCPROFSYS_SELECTED_REGIONS=Region1 \
+ROCPROFSYS_ROCM_DOMAINS=hip_runtime_api,marker_api,kernel_dispatch \
+rocprof-sys-run -- ./selective-region
 ```

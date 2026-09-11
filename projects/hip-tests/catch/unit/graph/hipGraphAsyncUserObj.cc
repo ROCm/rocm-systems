@@ -41,8 +41,8 @@ template <typename T> __global__ void KernelFn(T* Ad, int clockrate, int WaitMs)
 void threadFunc_dltMemory() {
   std::unique_lock lk(m);
   cv.wait(lk, [] { return setVar; });
-  REQUIRE(globalPtr != nullptr);
-  HIP_CHECK(hipHostFree(globalPtr));
+  REQUIRE_THREAD(globalPtr != nullptr);
+  HIP_CHECK_THREAD(hipHostFree(globalPtr));
   setVar = false;
 }
 static int kernelDelayMs() { return isQuickLevel() ? 500 : 5000; }
@@ -117,6 +117,7 @@ HIP_TEST_CASE(Unit_hipGraphUserObj_Int_float_Objects) {
     hipUserObjectCreate_int_float_Objects(hostArr, devArr, destroyPinnedObj);
     HIP_CHECK(hipFree(devArr));
     t1.join();
+    HIP_CHECK_THREAD_FINALIZE();
   }
   SECTION("Called with float Obj") {
     std::thread t1(threadFunc_dltMemory);
@@ -130,6 +131,7 @@ HIP_TEST_CASE(Unit_hipGraphUserObj_Int_float_Objects) {
     hipUserObjectCreate_int_float_Objects(hostArr, devArr, destroyPinnedObj);
     HIP_CHECK(hipFree(devArr));
     t1.join();
+    HIP_CHECK_THREAD_FINALIZE();
   }
 }
 void destroyHostRegObj(void* ptr) {
@@ -251,6 +253,7 @@ HIP_TEST_CASE(Unit_hipGraphUserObj_Struct_Class_Ojects) {
     REQUIRE(structObj_d != nullptr);
     hipUserObjectCreate_Struct_Class_Objects<BoxStruct>(structObj_h, structObj_d);
     t1.join();
+    HIP_CHECK_THREAD_FINALIZE();
   }
   SECTION("Called with Class Object") {
     std::thread t1(threadFunc_dltMemory);
@@ -263,6 +266,7 @@ HIP_TEST_CASE(Unit_hipGraphUserObj_Struct_Class_Ojects) {
     REQUIRE(classObj_d != nullptr);
     hipUserObjectCreate_Struct_Class_Objects<BoxClass>(classObj_h, classObj_d);
     t1.join();
+    HIP_CHECK_THREAD_FINALIZE();
   }
 }
 /**
@@ -324,6 +328,7 @@ HIP_TEST_CASE(Unit_hipGraphUserObj_ClonedGraph) {
   REQUIRE(*hostArr == 9999);
   HIP_CHECK(hipUserObjectRelease(Uobj, 1));
   t1.join();
+  HIP_CHECK_THREAD_FINALIZE();
   HIP_CHECK(hipStreamDestroy(stream));
   HIP_CHECK(hipFree(devArr));
 }
@@ -400,6 +405,7 @@ HIP_TEST_CASE(Unit_hipGraphUserObj_ManualGraph) {
   REQUIRE(*hostArr == 9999);
   HIP_CHECK(hipUserObjectRelease(Uobj, 1));
   t1.join();
+  HIP_CHECK_THREAD_FINALIZE();
   HIP_CHECK(hipStreamDestroy(stream));
   HIP_CHECK(hipFree(devArr));
 }

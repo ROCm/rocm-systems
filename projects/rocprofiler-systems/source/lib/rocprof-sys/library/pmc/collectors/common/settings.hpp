@@ -4,17 +4,19 @@
 #pragma once
 
 #include "common/env_vars.hpp"
+#include "common/string_utility.hpp"
 #include "core/config.hpp"
+#include "core/gpu_visibility.hpp"
 #include "library/pmc/collectors/cpu/types.hpp"
 #include "library/pmc/collectors/gpu/types.hpp"
 #include "library/pmc/collectors/gpu_perf_counter/types.hpp"
 #include "library/pmc/collectors/nic/types.hpp"
 #include "library/pmc/common/types.hpp"
 #include "logger/debug.hpp"
-#include <cstdint>
 
 #include <algorithm>
 #include <cstdint>
+#include <optional>
 #include <regex>
 #include <set>
 #include <sstream>
@@ -71,19 +73,38 @@ struct settings_policy
         if(filter_str == "all" || filter_str == "on" || filter_str.empty())
         {
             device_filter result;
-            result.mode = device_selection_mode::ALL;
+            result.mode = device_selection_mode::all;
             return result;
         }
         if(filter_str == "none" || filter_str == "off")
         {
             device_filter result;
-            result.mode = device_selection_mode::NONE;
+            result.mode = device_selection_mode::none;
             return result;
         }
         device_filter result;
-        result.mode    = device_selection_mode::SPECIFIC;
+        result.mode    = device_selection_mode::specific;
         result.indices = parse_numeric_range(filter_str);
         return result;
+    }
+
+    /**
+     * @brief Get the GPU device filter from ROCPROFSYS_SAMPLING_GPUS.
+     */
+    static device_filter get_gpu_device_filter()
+    {
+        return get_device_filter(rocprofsys::get_sampling_gpus());
+    }
+
+    /**
+     * @brief PCIe BDFs of the GPUs the ROCm runtime exposes.
+     *
+     * Honors ROCR_VISIBLE_DEVICES / HIP_VISIBLE_DEVICES. Returns std::nullopt when
+     * visibility could not be determined; see rocprofsys::gpu::get_visible_gpu_bdfs.
+     */
+    static std::optional<std::set<std::string>> get_visible_gpu_bdfs()
+    {
+        return rocprofsys::gpu::get_visible_gpu_bdfs();
     }
 
     static gpu::enabled_metrics get_enabled_metrics() noexcept
@@ -114,7 +135,7 @@ struct settings_policy
         {
             // NIC sampling disabled by default
             nic::nic_device_filter result;
-            result.mode = nic::device_selection_mode::NONE;
+            result.mode = nic::device_selection_mode::none;
             return result;
         }
 
@@ -122,20 +143,20 @@ struct settings_policy
         if(filter_str == "all" || filter_str == "on")
         {
             nic::nic_device_filter result;
-            result.mode = nic::device_selection_mode::ALL;
+            result.mode = nic::device_selection_mode::all;
             return result;
         }
 
         if(filter_str == "none" || filter_str == "off" || filter_str.empty())
         {
             nic::nic_device_filter result;
-            result.mode = nic::device_selection_mode::NONE;
+            result.mode = nic::device_selection_mode::none;
             return result;
         }
 
         // Parse comma-separated names
         nic::nic_device_filter result;
-        result.mode  = nic::device_selection_mode::SPECIFIC;
+        result.mode  = nic::device_selection_mode::specific;
         result.names = parse_name_list(filter_str);
         return result;
     }
@@ -178,18 +199,13 @@ struct settings_policy
             return gpu_perf_counter::gpu_perf_counter_settings{};
         }
 
-        std::string trimmed;
-        trimmed.reserve(value_str.size());
-        for(auto chr : value_str)
-        {
-            if(chr != '\t' && chr != ' ') trimmed.push_back(chr);
-        }
+        auto trimmed = utility::string::trim(value_str);
 
         gpu_perf_counter::gpu_perf_counter_settings result;
 
         constexpr auto device_qualifier = std::string_view{ ":device=" };
 
-        std::stringstream stream(trimmed);
+        std::stringstream stream(std::string{ trimmed });
         std::string       token;
         while(std::getline(stream, token, ','))
         {
@@ -236,12 +252,7 @@ struct settings_policy
 private:
     static cpu::enabled_metrics parse_cpu_enabled_metrics(const std::string& input)
     {
-        std::string trimmed;
-        trimmed.reserve(input.size());
-        std::for_each(input.begin(), input.end(), [&trimmed](char ch) {
-            if(ch != '\t' && ch != ' ')
-                trimmed.push_back(static_cast<char>(std::tolower(ch)));
-        });
+        auto trimmed = utility::string::to_lower(utility::string::trim(input));
 
         if(trimmed.empty() || trimmed == "all")
         {
@@ -276,9 +287,9 @@ private:
         cpu::enabled_metrics metrics;
         metrics.value = DISABLE_ALL_METRICS;
 
-        std::regex           tokenizer{ R"(\w+)" };
-        std::sregex_iterator it(trimmed.begin(), trimmed.end(), tokenizer);
-        std::sregex_iterator end;
+        const std::regex           tokenizer{ R"(\w+)" };
+        std::sregex_iterator       it(trimmed.begin(), trimmed.end(), tokenizer);
+        const std::sregex_iterator end;
 
         for(; it != end; ++it)
         {
@@ -297,35 +308,28 @@ private:
 
     static gpu::enabled_metrics parse_enabled_metrics(const std::string& input)
     {
-        std::string settings_trimmed;
-        settings_trimmed.reserve(input.size());
-        std::for_each(input.begin(), input.end(), [&settings_trimmed](char ch) {
-            if(ch != '\t' && ch != ' ')
-            {
-                settings_trimmed.push_back(static_cast<char>(std::tolower(ch)));
-            }
-        });
+        auto trimmed = utility::string::to_lower(utility::string::trim(input));
 
-        if(settings_trimmed.empty() || settings_trimmed == "all")
+        if(trimmed.empty() || trimmed == "all")
         {
             gpu::enabled_metrics result;
             result.value = ENABLE_ALL_METRICS;
             return result;
         }
 
-        if(settings_trimmed == "none")
+        if(trimmed == "none")
         {
             gpu::enabled_metrics result;
             result.value = DISABLE_ALL_METRICS;
             return result;
         }
 
-        std::regex validator{
+        const std::regex validator{
             R"(^(?:temp|power|busy|mem_usage|vcn_activity|jpeg_activity|xgmi|pcie|sdma_usage|gfx_clock|mem_clock)"
             R"()(?:[,;](?:temp|power|busy|mem_usage|vcn_activity|jpeg_activity|xgmi|pcie|sdma_usage|gfx_clock|mem_clock))*$)"
         };
 
-        if(!std::regex_match(settings_trimmed, validator))
+        if(!std::regex_match(trimmed, validator))
         {
             LOG_INFO("Invalid metrics settings '{}'. Enabling all metrics.", input);
             gpu::enabled_metrics result;
@@ -361,10 +365,9 @@ private:
 
         gpu::enabled_metrics metrics;
         metrics.value = DISABLE_ALL_METRICS;
-        std::regex           tokenizer{ R"(\w+)" };
-        std::sregex_iterator it(settings_trimmed.begin(), settings_trimmed.end(),
-                                tokenizer);
-        std::sregex_iterator end;
+        const std::regex           tokenizer{ R"(\w+)" };
+        std::sregex_iterator       it(trimmed.begin(), trimmed.end(), tokenizer);
+        const std::sregex_iterator end;
 
         for(; it != end; ++it)
         {
@@ -390,9 +393,9 @@ private:
             return result;
         }
 
-        std::regex           tokenizer{ R"(\d+(?:[-:]\d+)*)" };
-        std::sregex_iterator it(input_range.begin(), input_range.end(), tokenizer);
-        std::sregex_iterator end;
+        const std::regex           tokenizer{ R"(\d+(?:[-:]\d+)*)" };
+        std::sregex_iterator       it(input_range.begin(), input_range.end(), tokenizer);
+        const std::sregex_iterator end;
 
         for(; it != end; ++it)
         {
@@ -442,12 +445,10 @@ private:
             std::string       subtoken;
             while(std::getline(ss2, subtoken, ';'))
             {
-                // Trim whitespace
-                auto start = subtoken.find_first_not_of(" \t");
-                auto end   = subtoken.find_last_not_of(" \t");
-                if(start != std::string::npos && end != std::string::npos)
+                auto trimmed = rocprofsys::utility::string::trim(subtoken);
+                if(!trimmed.empty())
                 {
-                    result.insert(subtoken.substr(start, end - start + 1));
+                    result.insert(std::string{ trimmed });
                 }
             }
         }

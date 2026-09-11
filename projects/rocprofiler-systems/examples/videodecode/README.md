@@ -70,8 +70,7 @@ rocprof-sys-run -- ./videodecode -i /path/to/video.mp4
 | `ROCPROFSYS_PROFILE` | `true` | Generate call-stack profile |
 
 ```bash
-rocprof-sys-run \
-    -e ROCPROFSYS_ROCM_DOMAINS=hip_runtime_api,kernel_dispatch,memory_copy \
-    -e ROCPROFSYS_TRACE=true \
-    -- ./videodecode -i /path/to/video.mp4
+ROCPROFSYS_ROCM_DOMAINS=hip_runtime_api,kernel_dispatch,memory_copy \
+ROCPROFSYS_TRACE=true \
+rocprof-sys-run -- ./videodecode -i /path/to/video.mp4
 ```

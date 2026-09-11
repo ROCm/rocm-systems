@@ -160,7 +160,7 @@ function(ROCPROFILER_SYSTEMS_STRIP_TARGET)
                     --keep-symbol="rocprofsys_set_env" --keep-symbol="rocprofsys_set_mpi"
                     --keep-symbol="rocprofsys_reset_preload"
                     --keep-symbol="rocprofsys_set_instrumented"
-                    --keep-symbol="rocprofsys_user_*" --keep-symbol="ompt_start_tool"
+                    --keep-symbol="rocprofsys_causal_*" --keep-symbol="ompt_start_tool"
                     --keep-symbol="kokkosp_*" --keep-symbol="OnLoad"
                     --keep-symbol="OnUnload" --keep-symbol="OnLoadToolProp"
                     --keep-symbol="OnUnloadTool" --keep-symbol="__libc_start_main"
@@ -448,6 +448,33 @@ macro(ROCPROFILER_SYSTEMS_ADD_INTERFACE_LIBRARY _TARGET)
         )
     endif()
 endmacro()
+
+# ----------------------------------------------------------------------------------------#
+# function install_public_headers(<header>...) stage public headers into the build tree and
+# install them.
+#
+# Each header is copied to ${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_INCLUDEDIR}/, keeping its
+# path relative to the calling directory, so an uninstalled build tree presents the same
+# include layout as an install. The same headers are then installed.
+#
+function(ROCPROFILER_SYSTEMS_INSTALL_PUBLIC_HEADERS)
+    foreach(_HEADER ${ARGN})
+        string(
+            REPLACE
+            "${CMAKE_CURRENT_SOURCE_DIR}/"
+            "${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_INCLUDEDIR}/"
+            _DEST
+            "${_HEADER}"
+        )
+        configure_file("${_HEADER}" "${_DEST}" COPYONLY)
+    endforeach()
+
+    install(
+        FILES ${ARGN}
+        DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/${PROJECT_NAME}
+        COMPONENT core
+    )
+endfunction()
 
 # -----------------------------------------------------------------------
 # function add_feature(<NAME> <DOCSTRING>) Add a project feature, whose activation is

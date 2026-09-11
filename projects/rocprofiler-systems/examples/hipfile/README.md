@@ -49,7 +49,8 @@ hipFILE version: X.Y.Z
 Add `hipfile_api` to `ROCPROFSYS_ROCM_DOMAINS` (shorthand: `hipfile`) to capture the hipFILE API:
 
 ```bash
-rocprof-sys-run -e ROCPROFSYS_ROCM_DOMAINS=hipfile_api -- ./hipfile-trace
+ROCPROFSYS_ROCM_DOMAINS=hipfile_api \
+rocprof-sys-run -- ./hipfile-trace
 ```
 
 The captured hipFILE API calls appear in the Perfetto trace and the RocPD database under the `rocm_hipfile_api` category.
@@ -63,10 +64,9 @@ The captured hipFILE API calls appear in the Perfetto trace and the RocPD databa
 | `ROCPROFSYS_PROFILE` | `true` | Generate call-stack profile |
 
 ```bash
-rocprof-sys-run \
-    -e ROCPROFSYS_ROCM_DOMAINS=hip_runtime_api,kernel_dispatch,memory_copy,hipfile_api \
-    -e ROCPROFSYS_TRACE=true \
-    -- ./hipfile-trace
+ROCPROFSYS_ROCM_DOMAINS=hip_runtime_api,kernel_dispatch,memory_copy,hipfile_api \
+ROCPROFSYS_TRACE=true \
+rocprof-sys-run -- ./hipfile-trace
 ```
 
 > **Note:** Requesting the `hipfile_api` domain against a ROCProfiler-SDK older than 1.3.5 (which does not expose the hipFILE tracing domain) results in an `unsupported ROCPROFSYS_ROCM_DOMAINS value: hipfile_api` error, the same as any other unavailable domain.

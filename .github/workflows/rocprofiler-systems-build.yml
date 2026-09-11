@@ -46,11 +46,42 @@ on:
       - '!projects/rocprofiler-systems/docker/**'
       - '!projects/rocprofiler-systems/CMakePresets.json'
 
+permissions:
+  contents: read
+
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
+  notify-ci-start:
+    name: "CI status: mark run in progress"
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+      pull-requests: write
+    steps:
+      - name: Checkout summary comment action
+        uses: actions/checkout@v6
+        with:
+          sparse-checkout: |
+            .github/actions/upsert-ci-summary-comment
+          sparse-checkout-cone-mode: false
+
+      - name: Write "in progress" placeholder
+        shell: bash
+        run: |
+          RUN_URL="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          echo "⏳ **CI run in progress** — [view run](${RUN_URL}). The results below are from a previous run until this one finishes." > ci-run-in-progress.md
+          : > ci-run-in-progress-empty.md
+
+      - name: Post placeholder on the sticky CI summary comment
+        uses: ./.github/actions/upsert-ci-summary-comment
+        with:
+          build-content-file: ci-run-in-progress.md
+          sanitizer-content-file: ci-run-in-progress-empty.md
+
   matrix-setup:
     name: Matrix setup
     runs-on: ubuntu-latest
@@ -170,6 +201,122 @@ jobs:
       has_primary: ${{ needs.matrix-setup.outputs.rhel_has_primary }}
       has_system_deps: ${{ needs.matrix-setup.outputs.rhel_has_system_deps }}
 
+  # RHEL-only compiler compatibility check. Defined here (not inside the
+  # shared build-group.yml) so it never appears as a phantom "skipped" job
+  # with an unresolved ${{ matrix.gcc-toolset }} name under the other three
+  # groups' call graphs — it simply isn't part of their workflow at all.
+  rhel-compiler-check:
+    name: RHEL compiler check / gcc-toolset-${{ matrix.gcc-toolset }}
+    permissions:
+      contents: read
+    runs-on: ubuntu-latest
+    container:
+      image: dgaliffiamd/rocprofiler-systems:ci-rocm-${{ matrix.rocm-version }}-rhel-${{ matrix.os-release }}
+      options: --shm-size=512m
+
+    strategy:
+      fail-fast: false
+      matrix:
+        os-release: ['8.10']
+        rocm-version: ['7.2']
+        gcc-toolset: ['13', '14', '15']
+        build-type: ['Release']
+
+    env:
+      CCACHE_DIR: ${{ github.workspace }}/.ccache
+
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          sparse-checkout: |
+            projects/rocprofiler-systems
+            .gitmodules
+          submodules: recursive
+
+      - name: Install GCC Toolset
+        shell: bash
+        run: |
+          dnf install -y \
+            gcc-toolset-${{ matrix.gcc-toolset }}-binutils \
+            gcc-toolset-${{ matrix.gcc-toolset }}-gcc \
+            gcc-toolset-${{ matrix.gcc-toolset }}-gcc-c++ \
+            gcc-toolset-${{ matrix.gcc-toolset }}-gcc-gfortran
+          TS=/opt/rh/gcc-toolset-${{ matrix.gcc-toolset }}/root/usr/bin
+          echo "CC=${TS}/gcc" >> "${GITHUB_ENV}"
+          echo "CXX=${TS}/g++" >> "${GITHUB_ENV}"
+          echo "${TS}" >> "${GITHUB_PATH}"
+          "${TS}/gcc" --version
+
+      - name: Configure environment
+        shell: bash
+        run: |
+          echo "/opt/rocm/bin" >> "${GITHUB_PATH}"
+          echo "ROCM_PATH=/opt/rocm" >> "${GITHUB_ENV}"
+          echo "LD_LIBRARY_PATH=/opt/rocm/lib:${LD_LIBRARY_PATH}" >> "${GITHUB_ENV}"
+
+      - name: Restore ccache
+        uses: actions/cache@v6
+        with:
+          path: ${{ github.workspace }}/.ccache
+          key: ccache-redhat-${{ github.job }}-${{ matrix.os-release }}-gcc${{ matrix.gcc-toolset }}-${{ matrix.rocm-version }}-${{ matrix.build-type }}-${{ github.sha }}
+          restore-keys: |
+            ccache-redhat-${{ github.job }}-${{ matrix.os-release }}-gcc${{ matrix.gcc-toolset }}-${{ matrix.rocm-version }}-${{ matrix.build-type }}-
+            ccache-redhat-${{ github.job }}-${{ matrix.os-release }}-gcc${{ matrix.gcc-toolset }}-${{ matrix.rocm-version }}-
+
+      - name: Configure ccache
+        shell: bash
+        run: |
+          mkdir -p "${CCACHE_DIR}"
+          ccache --max-size=1G
+          ccache --set-config=sloppiness=time_macros,include_file_mtime,include_file_ctime,pch_defines
+          ccache -z
+          ccache -p | head -20
+
+      - name: Configure
+        timeout-minutes: 30
+        shell: bash
+        working-directory: projects/rocprofiler-systems/
+        env:
+          CMAKE_C_COMPILER_LAUNCHER: ccache
+          CMAKE_CXX_COMPILER_LAUNCHER: ccache
+        run: |
+          git config --global --add safe.directory "${GITHUB_WORKSPACE}"
+          git config --global --add safe.directory "${PWD}"
+          cmake --version
+          cmake -B build . \
+            -DCMAKE_C_COMPILER=${CC} \
+            -DCMAKE_CXX_COMPILER=${CXX} \
+            -DCMAKE_BUILD_TYPE=${{ matrix.build-type }} \
+            -DCMAKE_INSTALL_PREFIX=/opt/rocprofiler-systems \
+            -DROCPROFSYS_BUILD_TESTING=OFF \
+            -DROCPROFSYS_USE_PYTHON=ON \
+            -DROCPROFSYS_BUILD_DYNINST=ON \
+            -DROCPROFSYS_BUILD_TBB=ON \
+            -DROCPROFSYS_BUILD_ELFUTILS=ON \
+            -DROCPROFSYS_BUILD_LIBIBERTY=ON \
+            -DROCPROFSYS_PYTHON_PREFIX=/opt/conda/envs \
+            "-DROCPROFSYS_PYTHON_ENVS=py3.8;py3.9;py3.10;py3.11;py3.12;py3.13" \
+            -DROCPROFSYS_BUILD_NUMBER=${{ github.run_attempt }}
+
+      - name: Build
+        timeout-minutes: 60
+        shell: bash
+        working-directory: projects/rocprofiler-systems/
+        env:
+          CMAKE_C_COMPILER_LAUNCHER: ccache
+          CMAKE_CXX_COMPILER_LAUNCHER: ccache
+        run: |
+          cmake --build build --target all --parallel $(nproc)
+
+      - name: ccache stats
+        if: always()
+        shell: bash
+        run: |
+          echo "=== ccache stats ==="
+          ccache -s -v || true
+          echo "=== ccache dir size ==="
+          du -sh "${CCACHE_DIR}" || true
+
   code-coverage:
     name: Code coverage
     needs: matrix-setup
@@ -203,11 +350,12 @@ jobs:
       issues: write
       pull-requests: write
     steps:
-      - name: Checkout summary script
+      - name: Checkout summary tooling
         uses: actions/checkout@v6
         with:
           sparse-checkout: |
             projects/rocprofiler-systems/scripts/summarize-junit-results.py
+            .github/actions/upsert-ci-summary-comment
           sparse-checkout-cone-mode: false
 
       - name: Download build JUnit artifacts
@@ -257,53 +405,7 @@ jobs:
 
       - name: Update PR CI result summary
         if: github.event_name == 'pull_request'
-        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9
+        uses: ./.github/actions/upsert-ci-summary-comment
         with:
-          script: |
-            const fs = require('fs');
-            const marker = '<!-- rocprofiler-systems-ci-summary -->';
-            const start = '<!-- rocprofiler-systems-build-summary:start -->';
-            const end = '<!-- rocprofiler-systems-build-summary:end -->';
-            const sanitizerStart = '<!-- rocprofiler-systems-sanitizer-summary:start -->';
-            const sanitizerEnd = '<!-- rocprofiler-systems-sanitizer-summary:end -->';
-            const buildSection = `${start}\n${fs.readFileSync('junit-summary.md', 'utf8').trim()}\n${end}`;
-            const sanitizerSection = `${sanitizerStart}\n${fs.readFileSync('sanitizer-summary.md', 'utf8').trim()}\n${sanitizerEnd}`;
-
-            function replaceSection(body, sectionStart, sectionEnd, replacement) {
-              const begin = body.indexOf(sectionStart);
-              const finish = body.indexOf(sectionEnd);
-              if (begin !== -1 && finish !== -1 && finish > begin) {
-                return `${body.slice(0, begin)}${replacement}${body.slice(finish + sectionEnd.length)}`;
-              }
-              return `${body.trim()}\n\n${replacement}`;
-            }
-
-            const { owner, repo } = context.repo;
-            const issue_number = context.issue.number;
-            const comments = await github.paginate(github.rest.issues.listComments, {
-              owner,
-              repo,
-              issue_number,
-              per_page: 100,
-            });
-            const comment = comments.find((item) =>
-              item.user.type === 'Bot' && item.body && item.body.includes(marker)
-            );
-
-            if (comment) {
-              let body = replaceSection(comment.body, start, end, buildSection);
-              body = replaceSection(body, sanitizerStart, sanitizerEnd, sanitizerSection);
-              await github.rest.issues.updateComment({
-                owner,
-                repo,
-                comment_id: comment.id,
-                body,
-              });
-            } else {
-              await github.rest.issues.createComment({
-                owner,
-                repo,
-                issue_number,
-                body: `${marker}\n# rocprofiler-systems CI Summary\n\n${buildSection}\n\n${sanitizerSection}`,
-              });
-            }
+          build-content-file: junit-summary.md
+          sanitizer-content-file: sanitizer-summary.md

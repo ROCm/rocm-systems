@@ -182,7 +182,7 @@ void
 mpi_gotcha::subscribe_to_init_event(
     const std::function<void(int rank, int size)>& _callback)
 {
-    std::lock_guard<std::mutex> _lk{ s_on_init_callbacks_mutex };
+    const std::lock_guard<std::mutex> _lk{ s_on_init_callbacks_mutex };
     if(_callback)
     {
         s_on_init_callbacks.push_back(_callback);
@@ -200,14 +200,14 @@ std::mutex mpi_gotcha::s_mutex = {};
 void
 mpi_gotcha::pause()
 {
-    std::scoped_lock<std::mutex> _lk{ s_mutex };
+    const std::scoped_lock<std::mutex> _lk{ s_mutex };
     mpi_gotcha_t::set_ready(false);
 }
 
 void
 mpi_gotcha::resume()
 {
-    std::scoped_lock<std::mutex> _lk{ s_mutex };
+    const std::scoped_lock<std::mutex> _lk{ s_mutex };
     mpi_gotcha_t::set_ready(true);
 }
 
@@ -297,7 +297,8 @@ mpi_gotcha::audit([[maybe_unused]] const gotcha_data_t& _data, audit::incoming)
     rocprofsys::mpi::is_initialized_callback() = []() { return false; };
     rocprofsys::mpi::is_finalized()            = true;
 #else
-    if(is_root_process() && rocprofsys::get_state() < rocprofsys::State::Finalized)
+    if(is_root_process() &&
+       rocprofsys::state::process::get() < rocprofsys::state::process::Finalized)
         rocprofsys_finalize_hidden();
 #endif
 }
@@ -308,14 +309,14 @@ mpi_gotcha::audit(const gotcha_data_t& _data, audit::incoming, comm_t _comm, int
     LOG_DEBUG("{}(comm_t _comm, int* _val)", _data.tool_id);
 
     rocprofsys_push_trace_hidden(_data.tool_id.c_str());
-    if(_data.tool_id.find("MPI_Comm_rank") == 0 ||
-       _data.tool_id.find("PMPI_Comm_rank") == 0)
+    if(_data.tool_id.starts_with("MPI_Comm_rank") ||
+       _data.tool_id.starts_with("PMPI_Comm_rank"))
     {
         m_comm_val = (uintptr_t) _comm;  // NOLINT
         m_rank_ptr = _val;
     }
-    else if(_data.tool_id.find("MPI_Comm_size") == 0 ||
-            _data.tool_id.find("PMPI_Comm_size") == 0)
+    else if(_data.tool_id.starts_with("MPI_Comm_size") ||
+            _data.tool_id.starts_with("PMPI_Comm_size"))
     {
         m_comm_val = (uintptr_t) _comm;  // NOLINT
         m_size_ptr = _val;
@@ -335,7 +336,7 @@ mpi_gotcha::audit(const gotcha_data_t& _data, audit::outgoing, int _retval)
     if(!settings::use_output_suffix()) settings::use_output_suffix() = true;
 
     if(_retval == rocprofsys::mpi::success_v &&
-       (_data.tool_id.find("MPI_Init") == 0 || _data.tool_id.find("PMPI_Init") == 0))
+       (_data.tool_id.starts_with("MPI_Init") || _data.tool_id.starts_with("PMPI_Init")))
     {
         rocprofsys_mpi_set_attr();
         // rocprof-sys will set this environment variable to true in binary rewrite mode
@@ -354,7 +355,7 @@ mpi_gotcha::audit(const gotcha_data_t& _data, audit::outgoing, int _retval)
             mpip_index = activate_mpip<mpip_bundle_t, project::rocprofsys>();
         }
 
-        auto_lock_t _lk{ type_mutex<mpi_gotcha>() };
+        const auto_lock_t _lk{ type_mutex<mpi_gotcha>() };
         if(!mproc_comm_record.updated())
         {
             populate_rank_and_size();
@@ -363,10 +364,10 @@ mpi_gotcha::audit(const gotcha_data_t& _data, audit::outgoing, int _retval)
         }
     }
     else if(_retval == rocprofsys::mpi::success_v &&
-            (_data.tool_id.find("MPI_Comm_") == 0 ||
-             _data.tool_id.find("PMPI_Comm_") == 0))
+            (_data.tool_id.starts_with("MPI_Comm_") ||
+             _data.tool_id.starts_with("PMPI_Comm_")))
     {
-        auto_lock_t _lk{ type_mutex<mpi_gotcha>() };
+        const auto_lock_t _lk{ type_mutex<mpi_gotcha>() };
         if(m_comm_val != null_comm())
         {
             auto& _comm_entry = mpi_comm_records[m_comm_val];
@@ -396,7 +397,7 @@ mpi_gotcha::audit(const gotcha_data_t& _data, audit::outgoing, int _retval)
             if(_comm_entry.updated())
             {
                 static thread_local int _num_updates = 0;
-                static int              _disable_after =
+                static const int        _disable_after =
                     rocprofsys::get_env<int>(env_vars::MPI_MAX_COMM_UPDATES, 4);
                 if(_num_updates++ < _disable_after) update();
             }

@@ -1,0 +1,15 @@
+# Linker version script for the TEST-ONLY instrumented hotswap hook DSO.
+#
+# Same strict policy as the shipped library (OnLoad/OnUnload only), plus the
+# rj_test_* entry points the unit tests link against. This DSO is never installed,
+# so exporting the test hooks here keeps the shipped ABI clean while still letting
+# tests observe internal lifecycle state (e.g. retained-buffer count). Keep in sync
+# with the RJ_HOTSWAP_TEST_HOOKS entry points in gfx1250_b0_a0_hotswap.cpp.
+{
+  global:
+    OnLoad;
+    OnUnload;
+    rj_test_*;
+  local:
+    *;
+};

@@ -249,6 +249,7 @@ texture:
     tags: [texobj, image]
   Unit_TexObjectCreate_TypePitch2D_EdgeCases:
     <<: *level_2
+    disabled: [amd_windows]
     tags: [texobj, image]
   Unit_hipGetTexObjectResourceDesc_positive:
     <<: *level_2

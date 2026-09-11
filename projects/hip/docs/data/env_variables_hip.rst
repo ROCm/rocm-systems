@@ -23,7 +23,7 @@ The GPU isolation environment variables in HIP are collected in the following ta
         | Devices indices exposed to OpenCL and HIP applications.
       - Example: ``0,2``
 
-    * - | ``HIP_VISIBLE_DEVICES`` or ``CUDA_VISIBLE_DEVICES``
+    * - | ``HIP_VISIBLE_DEVICES``
         | Device indices exposed to HIP applications.
       - Example: ``0,2``
 
@@ -116,7 +116,7 @@ The debugging environment variables in HIP are collected in the following table.
       - | 0: Disable. Kernel executes normally.
         | 1: Enable. Serializes kernel enqueue, behaves the same as ``AMD_SERIALIZE_KERNEL``.
 
-    * - | ``HIP_VISIBLE_DEVICES`` (or ``CUDA_VISIBLE_DEVICES``)
+    * - | ``HIP_VISIBLE_DEVICES``
         | Only devices whose index is present in the sequence are visible to HIP
       - Unset by default.
       - 0,1,2: Depending on the number of devices on the system.
@@ -146,11 +146,12 @@ The debugging environment variables in HIP are collected in the following table.
     * - | ``GPU_MAX_HW_QUEUES``
         | The maximum number of hardware queues allocated per device.
       - ``4``
-      - The variable controls how many independent hardware queues HIP runtime can create per process,
-        per device. If an application allocates more HIP streams than this number, then HIP runtime reuses
-        the same hardware queues for the new streams in a round-robin manner. Note that this maximum
-        number does not apply to hardware queues that are created for CU-masked HIP streams, or
-        cooperative queues for HIP Cooperative Groups (single queue per device).
+      - | The recommended maximum value for this setting is 4.
+        | The variable controls how many independent hardware queues HIP runtime can create per process,
+        | per device. If an application allocates more HIP streams than this number, then HIP runtime reuses
+        | the same hardware queues for the new streams in a round-robin manner. Note that this maximum
+        | number does not apply to hardware queues that are created for CU-masked HIP streams, or
+        | cooperative queues for HIP Cooperative Groups (single queue per device).
 
 HIP memory management related variables
 --------------------------------------------------------------------------------

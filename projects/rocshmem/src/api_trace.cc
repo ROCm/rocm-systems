@@ -144,9 +144,9 @@ RocshmemGetFunctionTable_impl()
             table_array.data(), table_array.size(), &lib_id);
 
     if(rocp_reg_status != ROCP_REG_SUCCESS && rocp_reg_status != ROCP_REG_NO_TOOLS) {
-        fprintf(stderr, "[rocprofiler-sdk-rocshmem][%d] rocprofiler-register failed with error code %d : %s\n",
-                getpid(), rocp_reg_status,
-                rocprofiler_register_error_string(rocp_reg_status));
+        LOG_WARN("[rocprofiler-sdk-rocshmem][%d] rocprofiler-register failed with error code %d : %s\n",
+                 getpid(), rocp_reg_status,
+                 rocprofiler_register_error_string(rocp_reg_status));
     }
 #endif
 

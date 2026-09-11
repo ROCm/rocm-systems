@@ -6,9 +6,9 @@
 
 #include "rocjitsu/code/dbt/waitcnt_translator.h"
 
-#include "rocjitsu/code/patch/instruction_builder.h"
-#include "rocjitsu/isa/arch/amdgpu/rdna4/builders.h"
-#include "rocjitsu/isa/arch/amdgpu/rdna4/opcodes.h"
+#include "rocjitsu/code/builders/instruction_builder.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna4/builders.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna4/opcodes.h"
 
 #include <algorithm>
 

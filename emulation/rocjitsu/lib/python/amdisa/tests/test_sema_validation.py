@@ -243,6 +243,7 @@ class TestAllClassesLowerWithOperandMap:
         }
         for cls_name in sorted(_DERIVE_REGISTRY.keys()):
             operation = {
+                'pseudo_scalar_unary': 'sqrt',
                 'scalar_saveexec': 'and',
                 'scalar_wrexec': 'andn1',
             }.get(cls_name, 'add')

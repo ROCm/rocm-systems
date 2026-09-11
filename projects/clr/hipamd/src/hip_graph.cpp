@@ -76,7 +76,8 @@ hipError_t ihipGraphAddKernelNode(hip::GraphNode** pGraphNode, hip::Graph* graph
                                   int globalWorkSizeX_remainder = 0,
                                   int globalWorkSizeY_remainder = 0,
                                   int globalWorkSizeZ_remainder = 0,
-                                  dim3 clusterDim = {1, 1, 1}) {
+                                  dim3 clusterDim = {1, 1, 1},
+                                  uint32_t launchFlags = 0) {
   if (!hip::Graph::isGraphValid(graph)) {
     return hipErrorInvalidValue;
   }
@@ -117,7 +118,8 @@ hipError_t ihipGraphAddKernelNode(hip::GraphNode** pGraphNode, hip::Graph* graph
 
   *pGraphNode =
       new hip::GraphKernelNode(pNodeParams, pNodeEvents, coopKernel, globalWorkSizeX_remainder,
-                               globalWorkSizeY_remainder, globalWorkSizeZ_remainder, clusterDim);
+                               globalWorkSizeY_remainder, globalWorkSizeZ_remainder, clusterDim,
+                               launchFlags);
   status = ihipGraphAddNode(*pGraphNode, graph, pDependencies, numDependencies, capture, deviceId);
   return status;
 }
@@ -302,7 +304,8 @@ hipError_t ihipExtLaunchKernel(hipStream_t stream, hipFunction_t f, uint32_t glo
   status = ihipGraphAddKernelNode(
       &pGraphNode, s->GetCaptureGraph(), s->GetLastCapturedNodes().data(),
       s->GetLastCapturedNodes().size(), &nodeParams, &nodeEvents, true, 0, s->DeviceId(),
-      globalWorkSizeX_remainder, globalWorkSizeY_remainder, globalWorkSizeZ_remainder);
+      globalWorkSizeX_remainder, globalWorkSizeY_remainder, globalWorkSizeZ_remainder,
+      {1, 1, 1}, flags);
 
   if (status != hipSuccess) {
     return status;
@@ -3786,7 +3789,16 @@ hipError_t hipGraphExecBatchMemOpNodeSetParams(hipGraphExec_t hGraphExec, hipGra
   if (clonedNode == nullptr) {
     HIP_RETURN(hipErrorInvalidValue);
   }
-  HIP_RETURN(reinterpret_cast<hip::hipGraphBatchMemOpNode*>(clonedNode)->SetParams(nodeParams));
+  hipError_t status =
+      reinterpret_cast<hip::hipGraphBatchMemOpNode*>(clonedNode)->SetParams(nodeParams);
+  if (status != hipSuccess) {
+    HIP_RETURN(status);
+  }
+  // The batch-mem-op node's AQL packet is pre-captured at instantiate
+  // (GraphCaptureEnabled()==true); re-capture it so the updated write value
+  // takes effect on the next launch without re-instantiation.
+  status = graphExec->UpdateAQLPacket(clonedNode);
+  HIP_RETURN(status);
 }
 
 hipError_t capturehipStreamBatchMemOp(hipStream_t& stream, unsigned int& count,

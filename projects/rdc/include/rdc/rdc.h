@@ -318,6 +318,11 @@ typedef enum {
   RDC_FI_ECC_DEFERRED_TOTAL,  //!< Total accumulated deferred ECC errors
   RDC_FI_ECC_LAST = RDC_FI_ECC_DEFERRED_TOTAL,
 
+  /**
+   * @brief RAS CPER related fields
+   */
+  RDC_FI_AFID = 680,  //!< Decoded AFID(s) and severity from the driver CPER ring
+
   // In new ASCI, such as MI300, the XGMI events is not supported
   // Using below XGMI related fields to calculate the bandwidth.
   RDC_FI_XGMI_0_READ_KB = 700,  //!< XGMI_0 accumulated data read size (KB)

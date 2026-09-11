@@ -90,7 +90,7 @@ def get_build_in_vars(gpu_series: str) -> dict[str, str]:
         },
     }
 
-    if gpu_series.startswith("MI"):
+    if gpu_series == "GFX1250_SERIES" or gpu_series.startswith("MI"):
         return build_in_vars["cdna"]
     elif gpu_series.startswith("RDNA"):
         return build_in_vars["rdna35"]
@@ -160,5 +160,11 @@ def extract_counters_and_variables(
 
 def counter_to_block(counter: str) -> str:
     """Map a counter name to its IP block, applying :data:`BLOCK_REMAP`."""
+    if counter.startswith("GC_CANE_"):
+        return "GC_CANE"
+    if counter.startswith("GC_EA_SE_"):
+        return "GC_EA_SE"
     block = counter.split("_")[0]
+    if block == "TX":
+        return "TCP"
     return BLOCK_REMAP.get(block, block)

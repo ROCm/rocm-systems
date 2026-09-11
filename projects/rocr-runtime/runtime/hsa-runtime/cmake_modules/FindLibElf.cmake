@@ -73,7 +73,7 @@ if (UNIX)
     set_property(TARGET elf::elf PROPERTY INTERFACE_INCLUDE_DIRECTORIES ${LIBELF_INCLUDE_DIRS})
   endif()
 else()
-  find_path(ROCR_LIBELF_INCLUDE_DIR libelf.h
+  find_path(ROCR_LIBELF_SOURCE_DIR libelf.h
       HINTS
         ${AMD_LIBELF_PATH}
       PATHS
@@ -83,13 +83,19 @@ else()
         ${CMAKE_SOURCE_DIR}/../../shared/amdgpu-windows-interop/hsail-compiler/lib/loaders/elf/utils/libelf
       NO_DEFAULT_PATH)
 
-  message("=> LibElf paths:" ${CMAKE_CURRENT_BINARY_DIR} ${ROCR_LIBELF_INCLUDE_DIR})
-  if (${BUILD_SHARED_LIBS})
-    mark_as_advanced(ROCR_LIBELF_INCLUDE_DIR)
-    add_subdirectory("${ROCR_LIBELF_INCLUDE_DIR}" ${CMAKE_CURRENT_BINARY_DIR}/libelf)
+  if(NOT ROCR_LIBELF_SOURCE_DIR)
+    message(FATAL_ERROR "AMD LibElf source directory not found")
   endif()
-  set(USE_AMD_LIBELF "yes" CACHE FORCE "")
-  set(AMD_ELFTOOLCHAIN_DIR ${ROCR_LIBELF_INCLUDE_DIR}/../..;${ROCR_LIBELF_INCLUDE_DIR}/../common/win32;${ROCR_LIBELF_INCLUDE_DIR}/../common)
-  set(ROCR_LIBELF_INCLUDE_DIR ${ROCR_LIBELF_INCLUDE_DIR};${AMD_ELFTOOLCHAIN_DIR})
+
+  message("=> LibElf paths:" ${CMAKE_CURRENT_BINARY_DIR} ${ROCR_LIBELF_SOURCE_DIR})
+  if (BUILD_SHARED_LIBS AND NOT TARGET oclelf)
+    mark_as_advanced(ROCR_LIBELF_SOURCE_DIR)
+    add_subdirectory("${ROCR_LIBELF_SOURCE_DIR}" ${CMAKE_CURRENT_BINARY_DIR}/libelf)
+  endif()
+  set(USE_AMD_LIBELF "yes" CACHE STRING "" FORCE)
+  set(AMD_ELFTOOLCHAIN_DIR ${ROCR_LIBELF_SOURCE_DIR}/../..;${ROCR_LIBELF_SOURCE_DIR}/../common/win32;${ROCR_LIBELF_SOURCE_DIR}/../common)
+  set(ROCR_LIBELF_INCLUDE_DIR ${ROCR_LIBELF_SOURCE_DIR};${AMD_ELFTOOLCHAIN_DIR})
   set(LIBELF_INCLUDE_DIR ${ROCR_LIBELF_INCLUDE_DIR})
+  set(LIBELF_FOUND TRUE)
+  set(LibElf_FOUND TRUE)
 endif()

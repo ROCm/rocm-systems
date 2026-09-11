@@ -2,12 +2,12 @@
 // SPDX-License-Identifier: MIT
 
 #pragma once
-#include "common/span.hpp"
 #include <array>
 #include <concepts>
 #include <cstddef>
 #include <cstdint>
 #include <optional>
+#include <span>
 #include <string_view>
 #include <tuple>
 #include <type_traits>
@@ -68,7 +68,7 @@ struct is_span : std::false_type
 {};
 
 template <typename T>
-struct is_span<span<T>> : std::true_type
+struct is_span<std::span<T>> : std::true_type
 {};
 
 template <typename T>

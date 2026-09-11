@@ -190,14 +190,9 @@ ompt_task_schedule_callback(ompt_data_t*       prior_task_data,
     auto* state_prior = as_task_state(pprior);
     if(state_prior == nullptr)
     {
-        // An empty slot is only expected for the trailing early_fulfill case; a
-        // non-empty slot here is an implicit task (ompt_save_state), which has no
-        // explicit-task correlation to pop/retire -- fall through to handle next_task.
-        if(pprior->ptr == nullptr)
-        {
-            if(prior_task_status == ompt_task_early_fulfill) return;
-            ROCP_FATAL << "state_prior == nullptr prior_task_status: " << prior_task_status << ".";
-        }
+        // An implicit task has no explicit-task correlation to pop or retire, and has no
+        // saved state at all unless implicit_task is among the enabled operations.
+        if(pprior->ptr == nullptr && prior_task_status == ompt_task_early_fulfill) return;
     }
     else
     {
@@ -771,9 +766,15 @@ ompt_impl<OpIdx>::begin(ompt_data_t* data, Args... args)
                                buffered_contexts,
                                external_corr_ids);
 
-    auto* corr_id          = tracing::correlation_service::construct(ref_count);
-    auto  internal_corr_id = corr_id->internal;
-    auto  ancestor_corr_id = corr_id->ancestor;
+    auto* corr_id = tracing::correlation_service::construct(ref_count);
+    if(!corr_id)
+    {
+        // finalization began mid-call: construct() returns null. Skip this OMPT region; no state
+        // is stashed, so the paired end() skips too (see the null-state guard there).
+        return;
+    }
+    auto internal_corr_id = corr_id->internal;
+    auto ancestor_corr_id = corr_id->ancestor;
 
     tracing::populate_external_correlation_ids(external_corr_ids,
                                                thr_id,
@@ -835,9 +836,12 @@ ompt_impl<OpIdx>::end(ompt_data_t* data, Args... args)
     ompt_save_state* state = nullptr;
     if(data != nullptr)
         state = static_cast<ompt_save_state*>(data->ptr);
-    else
-        state = get_ompt_state_stack().pop_back_val();
-    assert(state != nullptr);
+    else if(auto& _state_stack = get_ompt_state_stack(); !_state_stack.empty())
+        state = _state_stack.pop_back_val();
+
+    // begin() does not stash state when it cannot construct a correlation id (finalization in
+    // progress), so there is nothing to pair this end() with -- skip instead of dereferencing null.
+    if(!state) return;
 
     ROCP_FATAL_IF(state->operation_idx != info_type::operation_idx)
         << "Mismatch of OMPT operation: begin=" << state->operation_idx

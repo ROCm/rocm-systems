@@ -31,6 +31,8 @@ def _generator(tmp_path: Path, encodings: list[InstEncoding]) -> CodeGenerator:
     )
     spec = SimpleNamespace(
         arch_name='testisa',
+        generated_dir_name='testisa',
+        cpp_namespace='testisa',
         inst_encodings=encodings,
         primary_decode_table=[None] * (max_decode_value + 2),
         encoding_map={enc.enc_name: enc for enc in encodings},
@@ -104,7 +106,7 @@ def test_encoding_constants_reject_base_name_collisions(tmp_path):
 
 def test_checked_in_rdna4_headers_pin_representative_generated_constants():
     project_root = Path(__file__).resolve().parents[4]
-    isa_dir = project_root / 'lib/rocjitsu/src/rocjitsu/isa/arch/amdgpu/rdna4'
+    isa_dir = project_root / 'lib/rocjitsu/src/rocjitsu/isa/arch/amdgpu/generated/rdna4'
 
     opcodes = (isa_dir / 'opcodes.h').read_text()
     encodings = (isa_dir / 'encodings.h').read_text()
@@ -122,7 +124,8 @@ def test_checked_in_rdna4_headers_pin_representative_generated_constants():
 def test_checked_in_gfx1250_header_exposes_generated_scalar_builders():
     project_root = Path(__file__).resolve().parents[4]
     builders = (
-        project_root / 'lib/rocjitsu/src/rocjitsu/isa/arch/amdgpu/gfx1250/builders.h'
+        project_root
+        / 'lib/rocjitsu/src/rocjitsu/isa/arch/amdgpu/generated/cdna5/builders.h'
     ).read_text()
 
     assert 'build_sopp(uint16_t op' in builders

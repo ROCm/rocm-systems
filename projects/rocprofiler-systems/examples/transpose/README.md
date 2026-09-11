@@ -71,8 +71,7 @@ rocprof-sys-run -- ./transpose 4 200 10
 | `ROCPROFSYS_PROFILE` | `true` | Generate call-stack profile |
 
 ```bash
-rocprof-sys-run \
-    -e ROCPROFSYS_ROCM_DOMAINS=hip_runtime_api,kernel_dispatch,memory_copy \
-    -e ROCPROFSYS_TRACE=true \
-    -- ./transpose 4 200 10
+ROCPROFSYS_ROCM_DOMAINS=hip_runtime_api,kernel_dispatch,memory_copy \
+ROCPROFSYS_TRACE=true \
+rocprof-sys-run -- ./transpose 4 200 10
 ```

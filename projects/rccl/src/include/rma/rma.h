@@ -13,11 +13,7 @@
 #include "rma/rma_ce.h"
 #include "rma/rma_proxy.h"
 
-// Internal signal mode enum
-typedef enum {
-  NCCL_SIGNAL_NONE = 0,        // No signaling
-  NCCL_SIGNAL = 1              // Default signal operation
-} ncclSignalMode_t;
+#define NCCL_RMA_MAX_CONNECTIONS 4
 
 struct ncclRmaArgs {
   int ctx;

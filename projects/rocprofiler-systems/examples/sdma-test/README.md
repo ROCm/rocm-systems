@@ -69,9 +69,8 @@ rocprof-sys-run -- ./sdma-test -s 256 -n 5
 To capture SDMA-specific metrics:
 
 ```bash
-rocprof-sys-run \
-    -e ROCPROFSYS_ROCM_DOMAINS=hip_runtime_api,memory_copy \
-    -e ROCPROFSYS_AMD_SMI_METRICS=sdma_usage \
-    -e ROCPROFSYS_TRACE=true \
-    -- ./sdma-test -s 512 -n 5
+ROCPROFSYS_ROCM_DOMAINS=hip_runtime_api,memory_copy \
+ROCPROFSYS_AMD_SMI_METRICS=sdma_usage \
+ROCPROFSYS_TRACE=true \
+rocprof-sys-run -- ./sdma-test -s 512 -n 5
 ```

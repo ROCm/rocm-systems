@@ -103,6 +103,9 @@ cooperativeGrps:
   Unit_hipLaunchCooperativeKernel_Basic:
     <<: *level_2
     tags: [cooperative, launch]
+  Unit_hipLaunchCooperativeKernel_QueueReclaim:
+    <<: *level_2
+    tags: [cooperative, launch]
   Unit_hipLaunchCooperativeKernelMultiDevice_Basic:
     <<: *level_2
     # Kernel uses runtime sized shared memory which is not adjusted to handle ASAN extra memory requirements
@@ -203,6 +206,27 @@ cooperativeGrps:
     <<: *level_2
     tags: [cooperative, ops]
   Unit_coop_thread_block_split_barrier:
+    <<: *level_2
+    tags: [cooperative, ops]
+  Unit_coop_thread_block_split_barrier_Multiple:
+    <<: *level_2
+    tags: [cooperative, ops]
+  Unit_coop_thread_block_split_barrier_EquivalentToSync:
+    <<: *level_2
+    tags: [cooperative, ops]
+  Unit_coop_thread_block_split_barrier_ProducerConsumer:
+    <<: *level_2
+    tags: [cooperative, ops]
+  Unit_coop_grids_split_barrier_Multiple:
+    <<: *level_2
+    tags: [cooperative, ops]
+  Unit_coop_thread_block_split_barrier_Sanity:
+    <<: *level_2
+    tags: [cooperative, ops]
+  Unit_coop_thread_block_split_barrier_ImbalancedWorkload:
+    <<: *level_2
+    tags: [cooperative, ops]
+  Unit_coop_thread_block_split_barrier_TokenLifetime:
     <<: *level_2
     tags: [cooperative, ops]
   Unit_Thread_Block_Coalesced_Reduce_arithmetic: *level_2

@@ -12,6 +12,7 @@ import base64
 import socket
 import shutil
 import argparse
+import urllib.parse
 import multiprocessing
 import xml.etree.ElementTree as ET
 
@@ -63,9 +64,19 @@ def log(msg, level="info"):
             print(f"[INFO] {msg}", flush=True)
 
 
-def log_group_start(title):
+def _escape_workflow_data(text: str) -> str:
+    """Percent-encode the characters that would end a "::command::" line.
+
+    GitHub Actions parses workflow commands one line at a time, so a CR or LF
+    inside a title truncates the command and lets the remainder be read as a
+    new one; "%" has to go first so the escapes below are not re-escaped.
+    """
+    return text.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
+
+
+def log_group_start(title: str) -> None:
     if IS_GITHUB_ACTIONS:
-        print(f"::group::{title}", flush=True)
+        print(f"::group::{_escape_workflow_data(title)}", flush=True)
     else:
         bar = "=" * 60
         print(_color(f"\n{bar}\n{title}\n{bar}", "cyan", "bold"), flush=True)
@@ -93,6 +104,12 @@ def which(cmd, require):
 # ---------------------------------------------------------------------------
 
 
+def _cdash_build_name(name: str) -> str:
+    """Rewrite <owner>-<PR_number>/merge-<suffix> to PR_<PR_number>_<owner>-<suffix>,
+    matching the buildname CDash actually stores for a PR build."""
+    return re.sub(r"(.*)-([0-9]+)/merge", r"PR_\2_\1", name)
+
+
 def generate_custom(args, cmake_args, ctest_args):
     if not os.path.exists(args.binary_dir):
         os.makedirs(args.binary_dir)
@@ -111,7 +128,7 @@ def generate_custom(args, cmake_args, ctest_args):
     CMAKE_CMD = which("cmake", require=True)
     CTEST_CMD = which("ctest", require=True)
 
-    NAME = re.sub(r"(.*)-([0-9]+)/merge", "PR_\\2_\\1", NAME)
+    NAME = _cdash_build_name(NAME)
 
     return f"""
         set(CTEST_PROJECT_NAME "rocprofiler-systems")
@@ -249,7 +266,8 @@ def generate_build_script(args):
     return _script_preamble() + f"""
         ctest_start({DASHBOARD_MODE} APPEND)
         ctest_build(BUILD "{BINARY_DIR}" RETURN_VALUE _build_ret)
-        safe_submit(PARTS Build)
+        file(GLOB CTEST_NOTES_FILES "{BINARY_DIR}/Testing/Temporary/LastBuild_*.log")
+        safe_submit(PARTS Build Notes)
         handle_error("Build" _build_ret)
         """
 
@@ -399,7 +417,7 @@ def generate_all_script(args, ctest_args=None):
 # Argument parsing
 # ---------------------------------------------------------------------------
 
-_VALID_STAGES = ["generate", "configure", "build", "test", "all"]
+_VALID_STAGES = ["generate", "configure", "build", "test", "cdash-link", "all"]
 
 _DASHBOARD_STAGES = [
     "Start",
@@ -428,6 +446,7 @@ def parse_cdash_args(args):
             "  configure  — ctest_start() + update + configure + CDash submit\n"
             "  build      — ctest_start(APPEND) + build + CDash submit\n"
             "  test       — ctest_start(APPEND) + test + coverage + CDash submit Done\n"
+            "  cdash-link — print a CDash results link for --name, no ctest run\n"
             "  all        — original single-step behaviour (default)\n\n"
             "Splitting into generate → configure → build → test allows separate\n"
             "GitHub Actions steps while keeping a single CDash build entry.\n"
@@ -572,8 +591,10 @@ def set_python_hints_from_cmake_args(cmake_args):
 # lives only inline in Testing/<TAG>/Build.xml, where CTest's XML writer has
 # already replaced every non-XML-safe control byte (including the ESC byte
 # that starts each compiler color code) with the literal text
-# "[NON-XML-CHAR-0xNN]". Build failures therefore need XML recovery instead
-# of a raw-log read; configure/test do not.
+# "[NON-XML-CHAR-0xNN]". Build failures therefore need XML recovery to get
+# those bytes back; configure does not. Test failures read Test.xml for an
+# unrelated reason: LastTest.log concatenates every test's output, so only
+# the XML keeps it attributed per test and lets the passing ones be dropped.
 # ---------------------------------------------------------------------------
 
 _ANSI_ESCAPE_RE = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
@@ -662,6 +683,47 @@ def _read_build_xml_failures(args):
     return blocks
 
 
+def _read_test_xml_failures(args):
+    """Recover the captured output of each failed test from CTest's test
+    report (Testing/<TAG>/Test.xml). Returns a list of (name, output) pairs,
+    empty if Test.xml doesn't exist or recorded no failures.
+
+    LastTest.log holds every test's output, passing ones included, so printing
+    it raw buries the failures in the whole suite. Test.xml keeps the output
+    attributed per test, which is what makes filtering possible.
+    """
+    tag_dir = _current_run_tag_dir(args)
+    if tag_dir is None:
+        return []
+    path = os.path.join(tag_dir, "Test.xml")
+    if not os.path.isfile(path):
+        return []
+    try:
+        root = ET.parse(path).getroot()
+    except ET.ParseError:
+        return []
+
+    failures = []
+    for test in root.iter("Test"):
+        if test.get("Status") != "failed":
+            continue
+        output = "\n".join(
+            _restore_non_xml_chars(_decode_ctest_value(value))
+            for measurement in test.iter("Measurement")
+            for value in measurement.findall("Value")
+        )
+        failures.append((test.findtext("Name") or "<unknown>", output))
+    return failures
+
+
+def _print_log_group(title: str, content: str) -> None:
+    if os.environ.get("NO_COLOR") or os.environ.get("TERM") == "dumb":
+        content = _strip_ansi(content)
+    log_group_start(title)
+    print(content, flush=True)
+    log_group_end()
+
+
 def print_failure_log(args, stage_label: str) -> None:
     """Print the recovered CTest output for a failed stage so its ANSI
     color renders in the GitHub Actions step log."""
@@ -669,20 +731,55 @@ def print_failure_log(args, stage_label: str) -> None:
         blocks = _read_build_xml_failures(args)
         if not blocks:
             return
-        content = "\n".join(blocks)
-        source = "Build.xml (recovered)"
-    else:
-        content = _read_raw_stage_log(args, stage_label)
-        if content is None:
+        _print_log_group("build log: Build.xml (recovered)", "\n".join(blocks))
+        return
+
+    if stage_label == "test":
+        failures = _read_test_xml_failures(args)
+        if failures:
+            for name, output in failures:
+                _print_log_group(f"test log: {name} (failed)", output)
             return
-        source = f"Last{stage_label.capitalize()}.log"
 
-    if os.environ.get("NO_COLOR") or os.environ.get("TERM") == "dumb":
-        content = _strip_ansi(content)
+    content = _read_raw_stage_log(args, stage_label)
+    if content is None:
+        return
+    _print_log_group(f"{stage_label} log: Last{stage_label.capitalize()}.log", content)
 
-    log_group_start(f"{stage_label} log: {source}")
-    print(content, flush=True)
-    log_group_end()
+
+def print_build_success_log(args) -> None:
+    content = _read_raw_stage_log(args, "build")
+    if content is None:
+        return
+    _print_log_group("build log: LastBuild.log", content)
+
+
+def _cdash_link_url(name: str) -> str:
+    query = urllib.parse.urlencode(
+        {
+            "project": "rocprofiler-systems",
+            "filtercount": "1",
+            "showfilters": "1",
+            "field1": "buildname",
+            "compare1": "65",  # CDash filter op "65" == "starts with"
+            "value1": _cdash_build_name(name),
+        }
+    )
+    return f"https://my.cdash.org/index.php?{query}"
+
+
+def print_cdash_link(args) -> None:
+    url = _cdash_link_url(args.name)
+
+    github_summary = os.environ.get("GITHUB_STEP_SUMMARY")
+    if github_summary:
+        with open(github_summary, "a", encoding="utf-8") as f:
+            f.write(f"### CDash Results\n[View build on CDash]({url})\n")
+
+    if IS_GITHUB_ACTIONS:
+        print(f"::notice title=CDash Results::{url}", flush=True)
+    else:
+        log(f"CDash Results: {url}")
 
 
 def _count_diagnostics(text: str):
@@ -938,6 +1035,8 @@ def do_stage(args, script_name, stage_label, ctest_args=None):
             )
         elif stage_label == "test":
             collect_test_artifacts(args, ctest_args or [], print_xml=True)
+        elif stage_label == "build":
+            print_build_success_log(args)
 
         if stage_label == "build":
             annotate_build_diagnostics(args, failed)
@@ -1005,15 +1104,15 @@ if __name__ == "__main__":
     # cmake files are written only when generating (or running 'all').
     # Subsequent stages (configure/build/test) use the already-written
     # scripts so they don't need cmake_args or ctest_args passed again.
+    # cdash-link needs neither — it only prints a URL derived from --name.
+    _stage_scripts = {
+        "configure": "dashboard_configure.cmake",
+        "build": "dashboard_build.cmake",
+        "test": "dashboard_test.cmake",
+    }
     if args.stage in ("generate", "all"):
         do_generate(args, cmake_args, ctest_args)
-    else:
-        # Validate that generate was already run
-        _stage_scripts = {
-            "configure": "dashboard_configure.cmake",
-            "build": "dashboard_build.cmake",
-            "test": "dashboard_test.cmake",
-        }
+    elif args.stage in _stage_scripts:
         expected = os.path.join(args.binary_dir, _stage_scripts[args.stage])
         if not os.path.exists(expected):
             raise RuntimeError(
@@ -1032,5 +1131,7 @@ if __name__ == "__main__":
         do_stage(args, "dashboard_build.cmake", "build")
     elif args.stage == "test":
         do_stage(args, "dashboard_test.cmake", "test", ctest_args)
+    elif args.stage == "cdash-link":
+        print_cdash_link(args)
     else:  # "all"
         do_all(args, ctest_args)

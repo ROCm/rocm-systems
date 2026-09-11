@@ -7,6 +7,7 @@ from unittest.mock import patch
 
 sys.path.insert(0, os.fspath(Path(__file__).parent.parent))
 import therock_configure_ci
+import therock_matrix
 
 
 class ConfigureCITest(unittest.TestCase):
@@ -351,6 +352,24 @@ class ConfigureCITest(unittest.TestCase):
         self.assertGreaterEqual(len(projects), 1)
         self.assertEqual(outputs["run_linux_rccl_ci"], "false")
 
+    @patch("therock_configure_ci.get_modified_paths")
+    def test_rccl_ci_not_triggered_by_docs_only_change_pull_request(
+        self, mock_get_modified
+    ):
+        """PR with only skippable RCCL doc paths should skip both regular and RCCL CI."""
+        args = {"is_pull_request": True, "base_ref": "HEAD^", "platform": "linux"}
+    
+        mock_get_modified.return_value = [
+            "projects/rccl/README.md",
+            "projects/rccl/docs/install/building-installing.rst",
+            "projects/rccl/.readthedocs.yaml",
+        ]
+    
+        outputs = therock_configure_ci.run(args)
+        projects = json.loads(outputs["projects"])
+        self.assertEqual(len(projects), 0)
+        self.assertEqual(outputs["run_linux_rccl_ci"], "false")
+
     def test_rccl_ci_triggered_nightly(self):
         """A nightly event should run both regular and RCCL CI."""
         args = {"is_nightly": True, "base_ref": "HEAD^", "platform": "linux"}
@@ -452,8 +471,8 @@ class ConfigureCITest(unittest.TestCase):
         self.assertEqual(outputs["run_linux_rccl_ci"], "false")
 
     @patch("therock_configure_ci.get_modified_paths")
-    def test_hipfile_pr_triggers_storage_libs_linux_ci(self, mock_get_modified):
-        """PR with hipfile changes should trigger storage_libs build with THEROCK_ENABLE_STORAGE_LIBS=ON."""
+    def test_hipfile_pr_builds_storage_libs_and_rocprofiler_sdk(self, mock_get_modified):
+        """PR with hipfile changes should build storage_libs and rocprofiler-sdk."""
         args = {
             "is_pull_request": True,
             "base_ref": "HEAD^",
@@ -469,6 +488,7 @@ class ConfigureCITest(unittest.TestCase):
         self.assertEqual(len(project_to_run), 1)
         cmake_options = project_to_run[0]["cmake_options"]
         self.assertIn("DTHEROCK_ENABLE_STORAGE_LIBS=ON", cmake_options)
+        self.assertIn("DTHEROCK_ENABLE_ROCPROFV3=ON", cmake_options)
         self.assertNotIn("DTHEROCK_ENABLE_ALL=ON", cmake_options)
 
     @patch("therock_configure_ci.get_modified_paths")
@@ -487,6 +507,77 @@ class ConfigureCITest(unittest.TestCase):
 
         project_to_run, _ = therock_configure_ci.retrieve_projects(args)
         self.assertEqual(len(project_to_run), 0)
+
+    @patch("therock_configure_ci.get_modified_paths")
+    def test_amdsmi_pr_triggers_amdsmi_group(self, mock_get_modified):
+        """PR with amdsmi changes should build everything and test amdsmi plus
+        its downstream dependents (blas, rocprofiler-systems, rocrtst)."""
+        args = {
+            "is_pull_request": True,
+            "base_ref": "HEAD^",
+            "platform": "linux",
+        }
+
+        mock_get_modified.return_value = ["projects/amdsmi/src/amdsmi.cpp"]
+
+        project_to_run, _ = therock_configure_ci.retrieve_projects(args)
+        self.assertEqual(len(project_to_run), 1)
+        self.assertIn("DTHEROCK_ENABLE_ALL=ON", project_to_run[0]["cmake_options"])
+        tests = {
+            t.strip() for t in project_to_run[0]["projects_to_test"].split(",")
+        }
+        self.assertEqual(
+            tests,
+            {
+                "amdsmi",
+                "rocblas",
+                "hipblas",
+                "hipblaslt",
+                "rocprofiler-systems",
+                "rocrtst",
+            },
+        )
+        # rccl is intentionally excluded: the main Linux build forces
+        # THEROCK_ENABLE_RCCL=OFF and RCCL runs in its own dedicated pipeline.
+        self.assertNotIn("rccl", tests)
+
+    def test_amdsmi_group_uses_valid_test_targets(self):
+        """Every test target in the amdsmi group must be a real TheRock test
+        target (a key in fetch_test_configurations.test_matrix)."""
+        # Keys of TheRock's fetch_test_configurations.test_matrix. Kept in sync
+        # manually since TheRock is not checked out during unit tests.
+        valid_test_targets = {
+            "sanity", "hip-tests", "hipfile", "rocblas", "rocroller",
+            "tensilelite", "origami", "hipblas", "amdsmi", "hipblaslt",
+            "hipsolver", "rocsolver", "rocprim", "hipcub", "rocgdb-cpu",
+            "rocgdb-gpu", "rocgdb-corefile", "rocr-debug-agent", "rocthrust", "hipsparse",
+            "rocsparse", "hipsparselt", "rocrand", "hiprand", "rocfft",
+            "hipfft", "miopen", "rccl", "rocshmem", "rocprofiler-sdk",
+            "hipdnn", "hipdnn_install", "hipdnn-integration-tests",
+            "hipdnn-samples", "miopenprovider", "hipblasltprovider",
+            "hipkernelprovider", "rocwmma", "rocalution",
+            "rocprofiler-compute", "rocprofiler-systems", "libhipcxx_amdclang",
+            "libhipcxx_hiprtc", "hipthreads", "hipthreads_examples",
+            "rocdecode", "rocjpeg", "aqlprofile", "rocrtst", "hiptensor",
+        }
+        amdsmi_tests = {
+            t.strip()
+            for t in therock_matrix.project_map["amdsmi"][
+                "projects_to_test"
+            ].split(",")
+        }
+        self.assertTrue(amdsmi_tests <= valid_test_targets, amdsmi_tests)
+
+    def test_amdsmi_in_core_all_nightly_test_targets(self):
+        """amdsmi must be an explicit test target in core, all, and nightly."""
+        for group in ("core", "all", "nightly"):
+            tests = {
+                t.strip()
+                for t in therock_matrix.project_map[group][
+                    "projects_to_test"
+                ].split(",")
+            }
+            self.assertIn("amdsmi", tests, group)
 
 
 if __name__ == "__main__":

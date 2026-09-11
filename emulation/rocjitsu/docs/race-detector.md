@@ -58,7 +58,7 @@ int main() {
 
 Compile it with `hipcc` or `amdclang++`. The `--offload-arch` must match the
 emulated GPU, which depends on the config file you pass to rocjitsu (e.g.
-`gfx950_cdna4.json` emulates gfx950). If using `amdclang++`, pass `-O1` or
+`gfx950_mi355x.json` emulates gfx950). If using `amdclang++`, pass `-O1` or
 higher — the emulator does not currently support unoptimized (`-O0`) GPU code
 objects. `hipcc` defaults to `-O3` so this isn't an issue there.
 
@@ -83,7 +83,7 @@ $BUILD_DIR/tools/rocjitsu/rocjitsu --config my_config.json -- /tmp/race_example
 You should see output:
 
 ```
-RACE kernel=transpose_lds symbol=_Z13transpose_ldsPKiPi dispatch=1 type=LDS reg=508 wave=0 lane=0 wg=0,0,0 conflict=unknown
+RACE kernel=transpose_lds symbol=_Z13transpose_ldsPKiPi dispatch=1 type=LDS access=read reg=508 wave=0 lane=0 wg=0,0,0 conflict=unknown
 Race on LDS byte 508 [workgroup (0, 0, 0), wave 0, lane 0]
   ==>  ds_write_b32 v0, v1  ; <-- wave 1
        v_sub_u32_e32 v1, 0, v0
@@ -136,18 +136,28 @@ races. Some examples:
 1. A wave issues a global load into a VGPR, then reads that VGPR before issuing
    `s_waitcnt vmcnt(0)`. The load may not have completed, so the read value is
    undefined.
+1. A wave issues a load into a VGPR, then an instruction overwrites that VGPR
+   before the load completes. The load may complete later and clobber the
+   instruction result.
 1. One wave in a workgroup writes to an LDS address. Another wave reads from
    the same address without an intervening `s_barrier`. The read may see stale
    data because the write may not have completed from the reader's perspective.
 
 ## What this plugin detects
 
-- **VGPR races**: a vector register is read before a pending global or LDS load
-  has completed (`s_waitcnt vmcnt` / `s_waitcnt lgkmcnt` insufficient).
-- **SGPR races**: a scalar register is read before a pending scalar load has
-  completed (`s_waitcnt lgkmcnt` insufficient).
-- **LDS races**: an LDS byte is read or written by one wave while another wave
-  has an outstanding write to the same byte, without an intervening `s_barrier`.
+- **VGPR races**: a vector register is read or overwritten by an instruction
+  before a pending global or LDS load has completed (`s_waitcnt vmcnt` /
+  `s_waitcnt lgkmcnt` insufficient).
+- **Scalar-register races**: an SGPR or TTMP is read or overwritten before a
+  pending scalar-memory load has completed. A later scalar load to the same
+  destination is also checked because scalar-memory results can complete out
+  of order.
+- **LDS races**: an LDS byte is read by one wave while another wave has an
+  outstanding write to the same byte, or written by one wave while another
+  wave has an outstanding read of the same byte, without an intervening
+  `s_barrier`;
+  or a wave reads bytes targeted by its own outstanding direct-to-LDS operation
+  before the required `s_waitcnt vmcnt`.
 
 Detection is at byte granularity: D16 (half-register) loads only flag races on
 the affected bytes, and LDS races are tracked per byte.
@@ -157,7 +167,11 @@ the affected bytes, and LDS races are tracked per byte.
 Every in-flight memory operation has an **event** that goes through the
 following lifecycle:
 
-1. **ACTIVE** — the operation is in flight.
+1. **ACTIVE** — the operation is in flight. Ordinary DS operations issued by
+   the same wave remain ordered with respect to each other, so a later
+   same-wave DS read or write does not race solely because the earlier DS event
+   is still active. Direct-to-LDS VMEM writes still require the owning wave to
+   wait for `vmcnt` before reading the destination bytes.
 1. **WAVE_COMPLETE** — `s_waitcnt` has retired the event for the owning wave.
    This means the event is no longer in flight from the perspective of the wave
    that issued the operation, but is still in flight from the perspective of
@@ -171,7 +185,15 @@ operations are in flight. When an instruction in the emulator accesses an LDS
 byte, there is a check to see what memory events are still in flight that
 read/write that byte, from the perspective of the accessing thread. In this way,
 RAW (read-after-write) and WAR (write-after-read) hazards can be detected.
-Similar logic applies for VGPR and SGPR accesses.
+For VGPRs and scalar registers, the detector also flags WAW when an instruction
+write can be clobbered by a pending asynchronous load. The detector also reports
+WAW between scalar loads targeting the same SGPR or TTMP.
+
+On architectures where scalar-memory and data-share operations use a combined
+`lgkmcnt`, a nonzero partial wait cannot identify which scalar destination has
+completed. Those scalar destinations remain pending until `lgkmcnt(0)`. The
+same partial wait can still retire older data-share operations that are provably
+complete from their in-order completion rule.
 
 **LDS race detection** uses coarse-grained counters (one per 16-byte chunk) for
 fast-path checks, with interval-based overlap scanning as a fallback. Live
@@ -283,10 +305,17 @@ ctest --test-dir $BUILD_DIR -R "RaceTest"
   (missing `s_waitcnt` and `s_barrier`). It does not detect inter-workgroup
   races, races between dispatches, or host-device synchronization issues.
 
-- **No WAW detection**: write-after-write hazards are not currently flagged.
-  This includes both LDS WAW (two waves writing to the same LDS byte without a
-  barrier) and VGPR WAW (an ALU instruction overwriting a register that has a
-  pending global load).
+- **Limited WAW detection**: VGPR WAW is limited to synchronous instruction
+  writes that overlap a pending asynchronous load. Scalar-register WAW covers
+  instruction writes and scalar loads that overlap pending scalar-memory
+  destinations. WAW between two asynchronous VGPR writers and LDS WAW are not
+  currently reported.
+
+- **Conservative DPP/SDWA write masks**: WAW precision depends on the execution
+  plugin's instruction-write lane and byte masks. DPP destinations can currently
+  report all active lanes, and SDWA preserve-mode destinations can report a full
+  dword, so writes to architecturally preserved lanes or bytes may be
+  conservatively reported as races.
 
 - **Kernel name resolution**: kernel names in race reports may show as `"?"` if
   symbol information is not available in the code object.

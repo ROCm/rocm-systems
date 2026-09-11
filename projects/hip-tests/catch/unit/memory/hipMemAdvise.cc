@@ -84,7 +84,10 @@ HIP_TEST_CASE(Unit_hipMemAdvise_No_Flag_Interference) {
   if (supported_devices.empty()) {
     HIP_SKIP_TEST(HipTest::SkipReason::kManagedMemoryUnsupported);
   }
+  // Disabled on HIP: hipCpuDeviceId is not supported for hipMemAdviseSetAccessedBy
+#if HT_NVIDIA
   supported_devices.push_back(hipCpuDeviceId);
+#endif
   const auto device = GENERATE_COPY(from_range(supported_devices));
 
   std::array<hipMemoryAdvise, 3> advice{hipMemAdviseSetReadMostly, hipMemAdviseSetPreferredLocation,
@@ -111,7 +114,6 @@ HIP_TEST_CASE(Unit_hipMemAdvise_Rounding) {
   if (supported_devices.empty()) {
     HIP_SKIP_TEST(HipTest::SkipReason::kManagedMemoryUnsupported);
   }
-  supported_devices.push_back(hipCpuDeviceId);
   const auto device = supported_devices.front();
 
   LinearAllocGuard<uint8_t> alloc(LinearAllocs::hipMallocManaged, 3 * kPageSize);

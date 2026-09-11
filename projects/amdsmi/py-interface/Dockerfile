@@ -9,8 +9,6 @@ ARG DEBCONF_NONINTERACTIVE_SEEN=true
 ENV TZ="America/Chicago"
 RUN ln -snf /usr/share/zoneinfo/${TZ} /etc/localtime && echo ${TZ} > /etc/timezone
 
-RUN useradd -m rocm && USER rocm
-
 RUN apt update --yes \
         && apt install --yes \
             build-essential \

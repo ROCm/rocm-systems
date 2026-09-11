@@ -15,10 +15,11 @@
 /// The wide MAD cases also compare the explicit SGPR-pair carry/overflow mask.
 /// In-process inactive lanes must keep the sentinel.
 
+#include "decode_test_util.h"
 #include "util/simd_test_hooks.h"
 
 #include "rocjitsu/code/rj_code.h"
-#include "rocjitsu/isa/arch/amdgpu/shared/execute_shared.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/shared/execute_shared.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
@@ -59,8 +60,10 @@ constexpr void vop3_encode(uint32_t op, uint32_t vdst, uint32_t src0, uint32_t s
 
 // VOP3_SDST_ENC: word0 also carries sdst[14:8].
 constexpr void vop3_sdstenc_encode(uint32_t op, uint32_t vdst, uint32_t sdst, uint32_t src0,
-                                   uint32_t src1, uint32_t src2, uint32_t words[2]) {
-  words[0] = (vdst & 0xFF) | ((sdst & 0x7F) << 8) | ((op & 0x3FF) << 16) | (0x34u << 26);
+                                   uint32_t src1, uint32_t src2, uint32_t words[2],
+                                   uint32_t clamp = 0) {
+  words[0] = (vdst & 0xFF) | ((sdst & 0x7F) << 8) | ((clamp & 0x1) << 15) | ((op & 0x3FF) << 16) |
+             (0x34u << 26);
   words[1] = (src0 & 0x1FF) | ((src1 & 0x1FF) << 9) | ((src2 & 0x1FF) << 18);
 }
 
@@ -151,7 +154,7 @@ void check_revshift(const char *name, uint32_t op, uint64_t exec) {
     EXPECT_NE(fx.wf, nullptr);
     uint32_t words[2] = {0u, 0u};
     vop3_encode(op, kDstVgpr, /*src0=*/256, /*src1=*/258, /*src2=*/0, words);
-    Instruction *inst = fx.decoder->decode(words);
+    Instruction *inst = decode_valid(*fx.decoder, words);
     EXPECT_NE(inst, nullptr) << name << " decode failed";
     uint32_t vb = fx.wf->vgpr_alloc().base;
     for (uint32_t lane = 0; lane < WF_SIZE; ++lane) {
@@ -187,7 +190,7 @@ void check_lshl_add(uint64_t exec) {
     EXPECT_NE(fx.wf, nullptr);
     uint32_t words[2] = {0u, 0u};
     vop3_encode(/*op=*/520, kDstVgpr, /*src0=*/256, /*src1=*/258, /*src2=*/260, words);
-    Instruction *inst = fx.decoder->decode(words);
+    Instruction *inst = decode_valid(*fx.decoder, words);
     EXPECT_NE(inst, nullptr) << "v_lshl_add_u64 decode failed";
     uint32_t vb = fx.wf->vgpr_alloc().base;
     for (uint32_t lane = 0; lane < WF_SIZE; ++lane) {
@@ -269,7 +272,7 @@ void check_mad64(const char *name, uint32_t op, bool is_signed, uint64_t exec) {
     EXPECT_EQ(sb % 2u, 0u) << name << ": sgpr_alloc base not pair-aligned";
     uint32_t words[2] = {0u, 0u};
     vop3_sdstenc_encode(op, kDstVgpr, sb, /*src0=*/256, /*src1=*/258, /*src2=*/260, words);
-    Instruction *inst = fx.decoder->decode(words);
+    Instruction *inst = decode_valid(*fx.decoder, words);
     EXPECT_NE(inst, nullptr) << name << " decode failed";
     uint32_t vb = fx.wf->vgpr_alloc().base;
     for (uint32_t lane = 0; lane < WF_SIZE; ++lane) {
@@ -313,6 +316,52 @@ TEST(Vop3Shift64SimdCorrectness, MadWide64) {
   check_mad64("v_mad_i64_i32_vop3", 489, /*is_signed=*/true, ~0ULL);
   check_mad64("v_mad_u64_u32_vop3", 488, /*is_signed=*/false, 0xA5A5'F0F0'1234'8001ULL);
   check_mad64("v_mad_i64_i32_vop3", 489, /*is_signed=*/true, 0xA5A5'F0F0'1234'8001ULL);
+}
+
+TEST(Vop3Shift64SimdCorrectness, MadWide64ClampSaturatesAndPreservesCarry) {
+  ForceScalarGuard gate_guard;
+  struct ClampCase {
+    bool is_signed;
+    uint32_t src0;
+    uint32_t src1;
+    uint64_t src2;
+    uint64_t expected;
+  };
+  constexpr std::array kCases{
+      ClampCase{false, UINT32_MAX, UINT32_MAX, UINT64_MAX, UINT64_MAX},
+      ClampCase{true, static_cast<uint32_t>(INT32_MIN), static_cast<uint32_t>(INT32_MAX),
+                static_cast<uint64_t>(INT64_MIN), static_cast<uint64_t>(INT64_MIN)},
+      ClampCase{true, static_cast<uint32_t>(INT32_MAX), static_cast<uint32_t>(INT32_MAX),
+                static_cast<uint64_t>(INT64_MAX), static_cast<uint64_t>(INT64_MAX)},
+  };
+  for (const ClampCase &test : kCases) {
+    for (bool force_scalar : {false, true}) {
+      util::set_force_scalar_for_testing(force_scalar);
+      Fixture fx;
+      ASSERT_NE(fx.cu, nullptr);
+      ASSERT_NE(fx.wf, nullptr);
+      const uint32_t sb = fx.wf->sgpr_alloc().base;
+      ASSERT_EQ(sb % 2u, 0u);
+      const uint32_t opcode = test.is_signed ? 489u : 488u;
+      uint32_t words[2] = {0u, 0u};
+      vop3_sdstenc_encode(opcode, kDstVgpr, sb, /*src0=*/256, /*src1=*/258, /*src2=*/260, words,
+                          /*clamp=*/1);
+      std::unique_ptr<Instruction> inst(decode_valid(*fx.decoder, words));
+      ASSERT_NE(inst, nullptr);
+      const uint32_t vb = fx.wf->vgpr_alloc().base;
+      fx.cu->write_vgpr(vb, 0, test.src0);
+      fx.cu->write_vgpr(vb + 2, 0, test.src1);
+      fx.write64(vb + 4, 0, test.src2);
+      fx.write64(vb + kDstVgpr, 0, 0u);
+      fx.write_sgpr64(sb, 0u);
+      fx.wf->set_exec(1u);
+      fx.cu->execute_instruction(inst.get(), *fx.wf);
+      EXPECT_EQ(fx.read64(vb + kDstVgpr, 0), test.expected)
+          << "signed " << test.is_signed << " scalar " << force_scalar;
+      EXPECT_EQ(fx.read_sgpr64(sb) & 1u, 1u)
+          << "signed " << test.is_signed << " scalar " << force_scalar;
+    }
+  }
 }
 
 TEST(Vop3Shift64SimdCorrectness, RevShiftsFullExec) {

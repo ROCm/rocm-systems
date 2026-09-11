@@ -135,16 +135,24 @@ Foo foo = static_cast<Foo>(bar); // OK but could use auto instead to avoid repet
 
 ## Logging
 
-- Never use `fprintf`, `printf`, or `std::cerr`. Use `Logger` from `util/log.h`
-  (`Logger::print<>()`), which supports compile-time group filters for building
-  with or without tracing.
+- Use `Logger` from `util/log.h`. `Logger::print<>()` and the per-group helpers
+  are compiled out unless the group is enabled at configure time
+  (`cmake -DRJ_LOG_GROUPS=...`; the default is `OFF`, see `cmake/rj_log.cmake`),
+  so use them for tracing only.
+- Use `Logger::warn()` for messages that must appear in a default build.
+- Do not add `fprintf`, `printf`, or `std::cerr` to library code. Existing
+  carve-outs are the CLI front end (`tools/`, user-facing `std::cerr` errors)
+  and the ROCR hook layer (`lib/rocjitsu/src/rocjitsu/hooks/`, fatal `stderr`
+  diagnostics that must survive a log-groups-OFF build, plus an
+  async-signal-safe `::write` backtrace path).
 
 ## Error Handling
 
-- Exceptions are only for unrecoverable errors: initialization/configuration
-  failures (`ConfigError`) and invalid or unimplemented instructions during
-  code-object parsing (`InvalidInst`, `UnimplementedInst`). All exception types
-  live in `util/except.h`.
+- Expected failures such as a rejected instruction encoding return `Result` or
+  `FailureOr<T>`. Accept a `DiagnosticEmitter` when the caller needs the reason;
+  its sink is non-owning and must not outlive its callable.
+- Exceptions are only for unrecoverable initialization, configuration, or
+  execution failures. Exception types live in `util/except.h`.
 - Do not throw in simulation hot paths (event handlers, instruction execution,
   cache lookups).
 - Do not add `try`/`catch` except at a boundary that must translate an error

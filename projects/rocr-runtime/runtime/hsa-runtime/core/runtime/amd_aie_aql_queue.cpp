@@ -251,6 +251,11 @@ hsa_status_t AieAqlQueue::GetInfo(hsa_queue_info_attribute_t attribute, void* va
     case HSA_QUEUE_INFO_HW_ID:
       *static_cast<uint32_t*>(value) = public_handle()->id;
       break;
+    case HSA_AMD_QUEUE_INFO_ENGINE_TYPE:
+      *static_cast<hsa_amd_queue_engine_t*>(value) = HSA_AMD_QUEUE_ENGINE_AIE;
+      break;
+    case HSA_AMD_QUEUE_INFO_SDMA_ENGINE_ID:
+      return HSA_STATUS_ERROR_INVALID_ARGUMENT;
     default:
       return HSA_STATUS_ERROR_INVALID_ARGUMENT;
   }

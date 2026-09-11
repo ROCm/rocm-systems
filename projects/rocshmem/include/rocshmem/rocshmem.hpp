@@ -328,7 +328,7 @@ __host__ void rocshmem_buffer_unregister_all();
  * rocshmem_buffer_unregister_symmetric().
  *
  * @note This routine is currently restricted to memory allocated through the
- *       HIP Virtual Memory Management (VMM) APIs (ROCm 7.0 or newer). Passing
+ *       HIP Virtual Memory Management (VMM) APIs (ROCm 7.2 or newer). Passing
  *       a non-VMM pointer returns nullptr.
  *
  * @param[in] addr   Pointer to previously allocated VMM memory.
