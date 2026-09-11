@@ -139,22 +139,14 @@ NCCL_DEVICE_INLINE void signalPeer(ncclGinAnvilSdmaGPUContext* rsCtx, int peer, 
 
 NCCL_DEVICE_INLINE void fenceBeforeSignal(ncclGinAnvilSdmaGPUContext* rsCtx, bool sdmaDataPath,
                                           ::sdma_anvil::SdmaQueueDeviceHandle* handle, bool hasCounter) {
-  if (hasCounter) {
-    if (sdmaDataPath && handle != nullptr) {
-      ::sdma_anvil::quiet(*handle);
-      // Earlier small puts and PutValue operations use IPC rather than this
-      // queue, so quiet alone does not order all traffic before the signal.
-      NCCL_GIN_THREADFENCE_SYSTEM();
-    } else {
-      NCCL_GIN_THREADFENCE_SYSTEM();
-    }
-  } else if (sdmaDataPath && handle != nullptr) {
+  (void)hasCounter;
+  if (sdmaDataPath && handle != nullptr) {
     ::sdma_anvil::quiet(*handle);
+    // Earlier small puts and PutValue operations use IPC rather than this
+    // queue, so quiet alone does not order all traffic before the signal.
     // A standalone barrier signal must follow both queued SDMA traffic and
     // sub-threshold IPC puts issued on the same context.
     NCCL_GIN_THREADFENCE_SYSTEM();
-  } else if (sdmaDataPath) {
-    __builtin_amdgcn_fence(__ATOMIC_RELEASE, "agent");
   } else if (rsCtx != nullptr && loadConst(&rsCtx->ipcAgentFence) != 0) {
     __builtin_amdgcn_fence(__ATOMIC_RELEASE, "agent");
   } else {
@@ -207,10 +199,10 @@ struct ncclGinApi_Put<NCCL_NET_DEVICE_GIN_ANVIL_SDMA> {
     if (hasWins && !useIpcPut) {
       handle = queueHandle(rsCtx, peer, blockId);
       if (handle == nullptr) useIpcPut = true;
-    } else if (!hasWins && (hasSignal || hasCounter)) {
-      // A standalone strong signal is used by GIN barriers to publish completion
-      // of puts issued earlier on this context. Keep it ordered after the peer's
-      // SDMA queue, otherwise the barrier signal can overtake the payload.
+    }
+    if (handle == nullptr && (hasSignal || hasCounter)) {
+      // Standalone barrier signals and windowed puts with a strong signal must
+      // still resolve the peer queue so fenceBeforeSignal can quiet in-flight SDMA.
       handle = queueHandle(rsCtx, peer, blockId);
     }
     bool sdmaDataPath = handle != nullptr;
@@ -326,7 +318,10 @@ struct ncclGinApi_PutValue<NCCL_NET_DEVICE_GIN_ANVIL_SDMA> {
       handle = queueHandle(rsCtx, peer, blockId);
       if (handle == nullptr) useIpcPut = true;
     }
-    bool sdmaDataPath = !useIpcPut && handle != nullptr;
+    if (handle == nullptr && hasSignal) {
+      handle = queueHandle(rsCtx, peer, blockId);
+    }
+    bool sdmaDataPath = handle != nullptr;
     bool sdmaFusedSignal = false;
 
     if (useIpcPut) {

@@ -185,7 +185,14 @@
         {
           "name": "ReduceScatter_Symmetric_Avg", "description": "Symmetric-memory ReduceScatter avg (2 ranks/node)", "test_filter": "GinMPIDeviceTests.ReduceScatter_Symmetric_Avg",
           "num_ranks": 4, "num_gpus": 2
-        }
+        },
+        { "name": "BarrierFence_PutMakesInboundPutVisible", "description": "Put-fenced barrier makes inbound put visible (single-node)", "test_filter": "GinMPIDeviceTests.BarrierFence_PutMakesInboundPutVisible_SingleNode" },
+        { "name": "BarrierFence_PutIncludesSelfPut", "description": "Put-fenced barrier covers self-put (single-node)", "test_filter": "GinMPIDeviceTests.BarrierFence_PutIncludesSelfPut_SingleNode" },
+        { "name": "BarrierFence_GetMakesLocalGetVisible", "description": "Get-fenced barrier makes local get visible (single-node)", "test_filter": "GinMPIDeviceTests.BarrierFence_GetMakesLocalGetVisible_SingleNode" },
+        { "name": "BarrierFence_DefaultIncludesGet", "description": "Default fence covers local get (single-node)", "test_filter": "GinMPIDeviceTests.BarrierFence_DefaultIncludesGet_SingleNode" },
+        { "name": "BarrierFence_DefaultIncludesPut", "description": "Default fence covers inbound put (single-node)", "test_filter": "GinMPIDeviceTests.BarrierFence_DefaultIncludesPut_SingleNode" },
+        { "name": "BarrierFence_AllContextsPut", "description": "Put-fenced AllContexts barrier (single-node)", "test_filter": "GinMPIDeviceTests.BarrierFence_AllContextsPut_SingleNode" },
+        { "name": "BarrierFence_AllContextsGet", "description": "Get-fenced AllContexts barrier exercises FlushAsync/Wait (single-node)", "test_filter": "GinMPIDeviceTests.BarrierFence_AllContextsGet_SingleNode" }
       ]
     },
     "gin_devmpi_gda": {

@@ -158,9 +158,9 @@ ncclGinBarrierSession
 
       Initializes a new network barrier session.  *coop* represents a cooperative group (see :ref:`devapi_coops`).  *gin* is
       a previously initialized :cpp:class:`ncclGin` object (or pass :cpp:class:`ncclGinAllContexts` instead; see below).
-      *ncclTeamTagRail* indicates that the barrier will apply to all
-      peers on the same rail as the local rank (see :ref:`devapi_teams`).  *index* identifies the underlying barrier to use
-      (it should be different for each *coop*; typically set to ``blockIdx.x`` to ensure uniqueness between CTAs).
+      *ncclTeamTagRail* indicates that the barrier will apply to all peers on the same rail as the local rank (see
+      :ref:`devapi_teams`).  *index* identifies the underlying barrier to use (it should be different for each *coop*;
+      typically set to ``blockIdx.x`` to ensure uniqueness between CTAs).
 
    .. cpp:function:: ncclGinBarrierSession(Coop coop, ncclGin gin, ncclTeam team, ncclGinBarrierHandle handle, uint32_t index)
 
