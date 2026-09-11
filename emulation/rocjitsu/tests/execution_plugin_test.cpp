@@ -391,7 +391,8 @@ public:
     }
   }
 
-  void onAmdgpuBarrierResolved(std::span<amdgpu::Wavefront *> wfs) override {
+  void onAmdgpuBarrierResolved(std::span<amdgpu::Wavefront *> wfs,
+                               AmdgpuBarrierScope /*scope*/) override {
     HookEvent e{HookEvent::BARRIER_RESOLVED};
     if (!wfs.empty()) {
       e.dispatch_id = wfs[0]->dispatch_id();

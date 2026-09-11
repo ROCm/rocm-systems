@@ -13,7 +13,9 @@
 
 #pragma once
 
+#include "hash_utils.h"
 #include "hazard_events.h"
+#include "rocjitsu/vm/plugins/execution_plugin.h"
 #include "simulator_api.h"
 
 #include <array>
@@ -145,6 +147,9 @@ public:
   void on_instruction(const InstructionView &instruction);
   void on_register_access(const RegisterAccessView &access);
   void on_memory_route(const MemoryRouteView &route);
+  void on_barrier(const hazard_core::ExecutionKey &wave, AmdgpuBarrierScope scope);
+  void on_cluster_barrier(const hazard_core::ExecutionKey &wave);
+  void on_named_barrier(const hazard_core::ExecutionKey &wave);
   void on_workgroup_barrier(const hazard_core::ExecutionKey &wave);
   void on_local_memory_atomic_barrier(const hazard_core::ExecutionKey &wave, bool async);
   void on_shutdown();

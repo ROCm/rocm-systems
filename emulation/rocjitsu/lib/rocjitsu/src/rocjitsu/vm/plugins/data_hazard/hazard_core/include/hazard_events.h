@@ -150,6 +150,7 @@ enum class BarrierKind {
   Cluster,
   LocalMemoryAtomic,
   LocalMemoryAtomicAsync,
+  Named,
   Unknown,
 };
 

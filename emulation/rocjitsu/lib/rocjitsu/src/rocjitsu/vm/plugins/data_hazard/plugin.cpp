@@ -199,10 +199,10 @@ read_tensor_descriptor(const Instruction &inst, const amdgpu::Wavefront &wf) {
   }
 
   try {
-    return tdm::parse_descriptor(tdm::read_sgpr_group<4>(wf, descriptor_regs[0], false),
-                                 tdm::read_sgpr_group<8>(wf, descriptor_regs[1], false),
-                                 tdm::read_sgpr_group<4>(wf, descriptor_regs[2], true),
-                                 tdm::read_sgpr_group<4>(wf, descriptor_regs[3], true));
+    return tdm::parse_descriptor(tdm::read_sgpr_group<4>(wf, descriptor_regs[0], false).value(),
+                                 tdm::read_sgpr_group<8>(wf, descriptor_regs[1], false).value(),
+                                 tdm::read_sgpr_group<4>(wf, descriptor_regs[2], true).value(),
+                                 tdm::read_sgpr_group<4>(wf, descriptor_regs[3], true).value());
   } catch (const std::exception &) {
     return std::nullopt;
   }
@@ -762,12 +762,13 @@ void DataHazardPlugin::onAmdgpuReadSgpr(const amdgpu::Wavefront *wf, uint32_t ph
   adapter_.on_register_access(access);
 }
 
-void DataHazardPlugin::onAmdgpuBarrierResolved(std::span<amdgpu::Wavefront *> wavefronts) {
+void DataHazardPlugin::onAmdgpuBarrierResolved(std::span<amdgpu::Wavefront *> wavefronts,
+                                               AmdgpuBarrierScope scope) {
   if (shutting_down())
     return;
   for (amdgpu::Wavefront *wf : wavefronts) {
     if (wf != nullptr)
-      adapter_.on_workgroup_barrier(make_wave_key(*wf));
+      adapter_.on_barrier(make_wave_key(*wf), scope);
   }
 }
 
@@ -783,7 +784,7 @@ tensor_lds_ranges(const amdgpu::tensor_dma_detail::TensorDmaDescriptor &desc, bo
   try {
     const tdm::TensorDmaLayout layout(desc);
     // A descriptor the executor rejects faults instead of writing LDS.
-    tdm::validate_supported_descriptor(desc, layout);
+    assert(tdm::validate_supported_descriptor(desc, layout).succeeded());
 
     tdm::for_each_lds_run(desc, layout, [&](const tdm::TensorDmaLdsRun &run) {
       if (run.element_count == 0)

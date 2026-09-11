@@ -585,9 +585,10 @@ void DataHazardEngine::on_barrier(const BarrierEvent &barrier) {
       hazard_core::clear_pending_ops(&wave->core, WaitCntType::LDS, 0);
       prune_retired_instructions(*wave);
     }
-  }
-
-  if (barrier.kind == BarrierKind::Workgroup) {
+  } else if (barrier.kind == BarrierKind::Workgroup) {
+    for (const auto &key : workgroup_keys_for_barrier(barrier))
+      flush_workgroup_epoch(key);
+  } else if (barrier.kind == BarrierKind::Cluster) {
     for (const auto &key : workgroup_keys_for_barrier(barrier))
       flush_workgroup_epoch(key);
   }

@@ -22,6 +22,7 @@ public:
     std::vector<uint32_t> workgroup_ids;
     std::thread::id callback_thread;
     uint32_t active_instructions = 0;
+    AmdgpuBarrierScope scope = AmdgpuBarrierScope::Workgroup;
   };
 
   void onAmdgpuBeforeExecuteInstruction(uint64_t, const Instruction &,
@@ -34,11 +35,13 @@ public:
     active_instructions_.fetch_sub(1, std::memory_order_relaxed);
   }
 
-  void onAmdgpuBarrierResolved(std::span<amdgpu::Wavefront *> wavefronts) override {
+  void onAmdgpuBarrierResolved(std::span<amdgpu::Wavefront *> wavefronts,
+                               AmdgpuBarrierScope scope) override {
     Resolution resolution;
     resolution.span_size = wavefronts.size();
     resolution.callback_thread = std::this_thread::get_id();
     resolution.active_instructions = active_instructions_.load(std::memory_order_relaxed);
+    resolution.scope = scope;
     std::vector<uint32_t> workgroups;
     for (const auto *wf : wavefronts)
       workgroups.push_back(wf->wg_id());
@@ -752,6 +755,7 @@ TEST(Gfx1250SimulationTest, ParallelClusterBarrierSynchronizesWorkgroupsAcrossCo
   EXPECT_EQ(resolutions[0].workgroup_ids, (std::vector<uint32_t>{0, 1}));
   EXPECT_EQ(resolutions[0].callback_thread, cp_thread);
   EXPECT_EQ(resolutions[0].active_instructions, 0u);
+  EXPECT_EQ(resolutions[0].scope, AmdgpuBarrierScope::Cluster);
 }
 
 TEST(Gfx1250SimulationTest, ClusterBarrierCompletesAfterWorkgroupTerminatesEarly) {

@@ -383,14 +383,21 @@ void for_each_lds_run(const TensorDmaDescriptor &desc, const TensorDmaLayout &la
     visit(TensorDmaLdsRun{static_cast<uint64_t>(iter) * desc.lds_increment, element_count});
 }
 
+// copy_tensor validates the descriptor and GPU-memory attachment before entering
+// the element loops. No rejection check or diagnostic work is needed per element.
 inline void copy_bytes(const TensorDmaDescriptor &desc, Wavefront &wf, uint64_t global_element,
                        uint64_t lds_element, bool in_bounds, bool store_from_lds) {
-  if (!wf.has_gpu_memory())
-    throw util::UnimplementedInst("tensor DMA without GPU memory");
-
   const uint64_t global_addr = desc.global_base + global_element * desc.elem_size;
-  const uint32_t lds_addr =
-      wf.lds_base() + static_cast<uint32_t>(lds_element_offset(desc, lds_element, store_from_lds));
+  uint64_t lds_byte = lds_element * desc.elem_size;
+  // The ISA applies descriptor padding only to memory-to-LDS transfers.
+  // Stores read the ordinary dense LDS stream and ignore the padding fields.
+  if (desc.pad && !store_from_lds) {
+    const uint32_t pad_interval_bytes = desc.pad_interval * sizeof(uint32_t);
+    const uint32_t pad_amount_bytes = desc.pad_amount * sizeof(uint32_t);
+    lds_byte += (lds_byte / pad_interval_bytes) * pad_amount_bytes;
+  }
+
+  const uint32_t lds_addr = wf.lds_base() + desc.lds_base + static_cast<uint32_t>(lds_byte);
   std::array<uint8_t, 8> bytes{};
   auto element_bytes = std::span<uint8_t>(bytes).first(desc.elem_size);
   if (store_from_lds) {
