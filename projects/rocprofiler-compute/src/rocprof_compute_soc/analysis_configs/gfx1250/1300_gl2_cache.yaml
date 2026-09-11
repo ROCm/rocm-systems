@@ -37,22 +37,22 @@ Panel Config:
           avg: SUM(GL2A_REQ_GL2C0_sum) / SUM($denom)
           min: MIN(GL2A_REQ_GL2C0_sum / $denom)
           max: MAX(GL2A_REQ_GL2C0_sum / $denom)
-          unit: (Count + $normUnit)
+          unit: (Requests + $normUnit)
         GL2A-GL2C1 Request:
           avg: SUM(GL2A_REQ_GL2C1_sum) / SUM($denom)
           min: MIN(GL2A_REQ_GL2C1_sum / $denom)
           max: MAX(GL2A_REQ_GL2C1_sum / $denom)
-          unit: (Count + $normUnit)
+          unit: (Requests + $normUnit)
         GL2A-GL2C2 Request:
           avg: SUM(GL2A_REQ_GL2C2_sum) / SUM($denom)
           min: MIN(GL2A_REQ_GL2C2_sum / $denom)
           max: MAX(GL2A_REQ_GL2C2_sum / $denom)
-          unit: (Count + $normUnit)
+          unit: (Requests + $normUnit)
         GL2A-GL2C3 Request:
           avg: SUM(GL2A_REQ_GL2C3_sum) / SUM($denom)
           min: MIN(GL2A_REQ_GL2C3_sum / $denom)
           max: MAX(GL2A_REQ_GL2C3_sum / $denom)
-          unit: (Count + $normUnit)
+          unit: (Requests + $normUnit)
         GL2A-GL2C0 Request Stall Rate:
           avg: 100 * SUM(GL2A_REQ_STALL_GL2C0_sum) / SUM(GL2A_BUSY_sum)
           min: 100 * MIN(GL2A_REQ_STALL_GL2C0_sum / GL2A_BUSY_sum)
