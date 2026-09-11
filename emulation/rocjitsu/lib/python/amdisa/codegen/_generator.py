@@ -8128,6 +8128,8 @@ class CodeGenerator:
         'inc': 'amdgpu::AtomicOp::INC',
         'dec': 'amdgpu::AtomicOp::DEC',
         'fadd': 'amdgpu::AtomicOp::FADD',
+        'pk_add_f16': 'amdgpu::AtomicOp::PK_ADD_F16',
+        'pk_add_bf16': 'amdgpu::AtomicOp::PK_ADD_BF16',
         'fmin': 'amdgpu::AtomicOp::FMIN',
         'fmax': 'amdgpu::AtomicOp::FMAX',
         'append': 'amdgpu::AtomicOp::APPEND',
@@ -8260,6 +8262,9 @@ class CodeGenerator:
         L.append('  d->num_elems = 1;')
         L.append(f'  d->is_load = {str(returns_data).lower()};')
         L.append(f'  d->atomic_op = {op_enum};')
+        if sem.operation in ('pk_add_f16', 'pk_add_bf16'):
+            # CDNA5 ISA 12.2 groups packed F16/BF16 under DS denorm_double controls.
+            L.append('  d->packed_denorm_mode = wf.fp_denorm_mode_f16_f64();')
         self._append_wait_counter_type(L, 'ds_atomic')
         L.append('  ds_calculate_addresses(inst_, wf, *d);')
         L.append('  auto &cu = wf.cu();')
