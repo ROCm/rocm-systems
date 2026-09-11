@@ -3269,7 +3269,7 @@ TEST_F(NetIbMPITest, FaultInjectionShimsAbsentUnlessRequested) {
     void* listenComm = nullptr;
     void* sendComm   = nullptr;
     void* recvComm   = nullptr;
-    SetupCastConnection(/*dev=*/0, &listenComm, &sendComm, &recvComm);
+    ASSERT_SETUP_CAST_CONNECTION(/*dev=*/0, &listenComm, &sendComm, &recvComm);
 
     constexpr size_t kMsgSize = 1024;
     std::vector<char> buf(kMsgSize, 0);
