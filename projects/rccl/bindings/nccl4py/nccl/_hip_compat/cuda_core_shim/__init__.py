@@ -33,7 +33,10 @@ from typing import Any, Callable
 
 __all__ = ["_register_as_cuda_core"]
 
-_TYPING_NAMES = ("IsStreamType", "DevicePointerType", "IsStreamT", "DevicePointerT")
+# Every spelling cuda.core has used, newest first. A future rename is one edit here.
+_IS_STREAM_NAMES = ("IsStreamType", "IsStreamT")
+_DEVICE_POINTER_NAMES = ("DevicePointerType", "DevicePointerT")
+_TYPING_NAMES = _IS_STREAM_NAMES + _DEVICE_POINTER_NAMES
 _SUBMODULES = ("system", "utils", "typing", "experimental", "_stream", "_memory")
 
 
@@ -73,11 +76,11 @@ def _resolve_cuda_core(name: str) -> Any:
 
 
 def _resolve_cuda_core_typing(name: str) -> Any:
-    if name in ("IsStreamType", "IsStreamT"):
+    if name in _IS_STREAM_NAMES:
         from .typing import IsStreamType
 
         return IsStreamType
-    if name in ("DevicePointerType", "DevicePointerT"):
+    if name in _DEVICE_POINTER_NAMES:
         from .typing import DevicePointerType
 
         return DevicePointerType
@@ -106,7 +109,7 @@ def _resolve_cuda_core_utils(name: str) -> Any:
 
 def _resolve_cuda_core_stream(name: str) -> Any:
     # Pre-1.0 cuda.core kept the stream protocol in this private module.
-    if name in ("IsStreamType", "IsStreamT"):
+    if name in _IS_STREAM_NAMES:
         return _resolve_cuda_core_typing(name)
     if name == "Stream":
         from ._stream import Stream
@@ -117,7 +120,7 @@ def _resolve_cuda_core_stream(name: str) -> Any:
 
 def _resolve_cuda_core_memory(name: str) -> Any:
     # Pre-1.0 cuda.core kept the device-pointer alias in this private module.
-    if name in ("DevicePointerType", "DevicePointerT"):
+    if name in _DEVICE_POINTER_NAMES:
         return _resolve_cuda_core_typing(name)
     if name == "Buffer":
         from ._memory import Buffer

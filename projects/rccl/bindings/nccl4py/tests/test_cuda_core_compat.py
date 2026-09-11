@@ -10,14 +10,15 @@ differently in every generation, so a sync that brings a drop using a new
 spelling breaks ``import nccl.core`` unless the shim grows it. The required
 surface is therefore derived from the vendored sources themselves.
 
-Only the symbol-resolution test needs hip-python; namespace registration is
-HIP-free, which keeps the guard meaningful on a CPU-only host.
+Only the HIP-backed symbols need hip-python; namespace registration and the
+typing surface are HIP-free, so the guard stays meaningful on a CPU-only host.
 """
 
 from __future__ import annotations
 
 import ast
 import importlib
+import importlib.util
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -67,7 +68,7 @@ def _scan_cuda_core_imports() -> tuple[_CudaCoreImport, ...]:
     for path in sorted(_PKG_DIR.rglob("*.py")):
         if _SHIM_DIR in path.parents:
             continue
-        tree = ast.parse(path.read_text(), filename=str(path))
+        tree = ast.parse(path.read_bytes(), filename=str(path))
         rel = path.relative_to(_PKG_DIR.parent)
         for node in ast.walk(tree):
             if isinstance(node, ast.ImportFrom) and _is_cuda_core(node.module):
@@ -104,13 +105,22 @@ class TestVendoredImportSurface:
         )
 
     def test_every_imported_symbol_resolves(self):
-        pytest.importorskip("hip", reason="hip-python is required to resolve HIP-backed symbols")
+        have_hip = importlib.util.find_spec("hip") is not None
         missing = []
         for imp in _VENDORED_IMPORTS:
             if imp.name is None:
                 continue
             module = importlib.import_module(imp.module)
-            if not hasattr(module, imp.name):
+            try:
+                resolved = hasattr(module, imp.name)
+            except (ImportError, OSError):
+                # A symbol the shim serves from hip-python. Where hip-python is
+                # installed this is a real break; where it is not, only the
+                # HIP-free half of the surface can be checked.
+                if have_hip:
+                    raise
+                continue
+            if not resolved:
                 missing.append(str(imp))
         assert not missing, "symbols missing from the HIP shim:\n" + "\n".join(missing)
 
