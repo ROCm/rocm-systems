@@ -1097,23 +1097,9 @@ void GpuAgent::PreloadBlits() {
 
 void GpuAgent::ReleaseResources() {
   if (this->Enabled()) {
-    // Stop any PC sampling session left active by a client at shutdown time.
-    //
-    // pcs_hosttrap_data_/pcs_stochastic_data_ are GpuAgent members that embed a
-    // consumer_thread/consumer_cv/consumer_mutex plus one os::Thread per XCC
-    // (see pcs_data_t / per_xcc_pcs_data_t in amd_gpu_agent.h). Those members are
-    // otherwise only torn down by ~GpuAgent's automatic member destruction, which
-    // runs after Runtime::Unload() has cleared SharedSignalPool/EventPool and reset
-    // queues_[]. If a client (e.g. a profiling tool) leaves a session active when
-    // hsa_shut_down() is invoked - which can race with that tool's own atexit-based
-    // cleanup - the consumer thread and/or per-XCC threads may still be blocked
-    // waiting on those objects when they are destroyed. Destroying a
-    // std::condition_variable/std::mutex/std::thread while another thread is still
-    // waiting on/running with it is undefined behavior and has been observed to
-    // hang the process (see AIPROFSDK-1047). Stopping here - while the driver
-    // context, doorbell/signal pools, and QueuePCSampling are all still valid -
-    // lets PcSamplingStop's normal teardown path (KFD stop, wake+join XCC threads,
-    // drain+join the consumer thread, final flush) run safely instead.
+    // Stop any PC sampling session left active by a client at shutdown time
+    // to prevent a shutdown race condition between GpuAgent's members and 
+    // the client's atexit-based cleanup.
     for (pcs_data_t* pcs_data : {&pcs_hosttrap_data_, &pcs_stochastic_data_}) {
       if (pcs_data->session != nullptr && pcs_data->session->isActive()) {
         PcSamplingStop(*pcs_data->session);
