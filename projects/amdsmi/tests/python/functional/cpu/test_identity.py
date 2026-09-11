@@ -25,32 +25,20 @@ class TestCpuIdentity(unittest.TestCase):
     def setUp(self):
         self.raise_exception = None
         self.common.amdsmi_smart_init()
-        self.common.processors = amdsmi.amdsmi_get_processor_handles()
 
     def tearDown(self):
         amdsmi.amdsmi_shut_down()
 
     def test_first_online_core_on_cpu_socket(self):
         self.common.print_func_name("")
-
-        if self.common.TODO_SKIP_FAIL:
-            msg = "\tSkipping test_first_online_core_on_cpu_socket as it fails (IO Error)."
-            self.common.print(msg)
-            self.skipTest(msg)
-
-        self.common.Test_API_Per_GPU(
+        self.common.Test_API_Per_CPU(
             amdsmi_first_online_core_on_cpu_socket=amdsmi.amdsmi_first_online_core_on_cpu_socket
         )
         return
 
     def test_get_cpu_family(self):
         self.common.print_func_name("")
-
-        if self.common.TODO_SKIP_FAIL:
-            msg = "\tSkipping test_get_cpu_family as it fails (IO Error)."
-            self.common.print(msg)
-            self.skipTest(msg)
-
+        self.common.skip_without_cpu()
         self.common.Test_API(amdsmi_get_cpu_family=amdsmi.amdsmi_get_cpu_family)
         return
 
@@ -61,29 +49,19 @@ class TestCpuIdentity(unittest.TestCase):
 
     def test_get_cpu_model(self):
         self.common.print_func_name("")
-
-        if self.common.TODO_SKIP_FAIL:
-            msg = "\tSkipping test_get_cpu_model as it fails (IO Error)."
-            self.common.print(msg)
-            self.skipTest(msg)
-
+        self.common.skip_without_cpu()
         self.common.Test_API(amdsmi_get_cpu_model=amdsmi.amdsmi_get_cpu_model)
         return
 
     def test_get_cpu_smu_fw_version(self):
         self.common.print_func_name("")
-        self.common.Test_API_Per_GPU(
+        self.common.Test_API_Per_CPU(
             amdsmi_get_cpu_smu_fw_version=amdsmi.amdsmi_get_cpu_smu_fw_version
         )
         return
 
     def test_get_threads_per_core(self):
         self.common.print_func_name("")
-
-        if self.common.TODO_SKIP_FAIL:
-            msg = "\tSkipping test_get_threads_per_core as it fails (IO Error)."
-            self.common.print(msg)
-            self.skipTest(msg)
-
+        self.common.skip_without_cpu()
         self.common.Test_API(amdsmi_get_threads_per_core=amdsmi.amdsmi_get_threads_per_core)
         return

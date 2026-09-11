@@ -1220,12 +1220,12 @@ class Common:
             raise unittest.SkipTest(msg)
         return
 
-    def _build_call_msg(self, func_name, i, j, params):
+    def _build_call_msg(self, func_name, i, j, params, label="gpu"):
         msg = f"\t### {func_name}("
         if i is not None:
-            msg += f"gpu={i}"
+            msg += f"{label}={i}"
         if j is not None:
-            msg += f", gpu={j}"
+            msg += f", {label}={j}"
         for param_name, param_value in params.items():
             if isinstance(param_value, list):
                 msg += f", {param_name}={{value}}"
@@ -1341,6 +1341,101 @@ class Common:
         if raise_exception:
             raise raise_exception
         return
+
+    def cpu_socket_handles(self):
+        """CPU socket handles, or [] when the library was initialized without CPUs."""
+        try:
+            return amdsmi.amdsmi_get_cpu_handles()["processor_handles"]
+        except (amdsmi.AmdSmiLibraryException, amdsmi.AmdSmiParameterException):
+            return []
+
+    def cpu_core_handles(self):
+        """CPU core handles, or [] when the library was initialized without CPUs."""
+        try:
+            return amdsmi.amdsmi_get_cpucore_handles()
+        except (amdsmi.AmdSmiLibraryException, amdsmi.AmdSmiParameterException):
+            return []
+
+    def skip_without_cpu(self):
+        """CPU socket handles, skipping the calling test when there are none.
+
+        The handle-less CPU APIs (family, model, threads per core) have nothing to
+        iterate but still need INIT_AMD_CPUS, so they call this and drop the result.
+        """
+        handles = self.cpu_socket_handles()
+        if not handles:
+            msg = "\tNo CPU processors found; skipping CPU-specific test"
+            self.print(msg)
+            raise unittest.SkipTest(msg)
+        return handles
+
+    def _Test_API_Per_Handle(self, handles, label, kwargs):
+        # Shared body for the CPU iterators. Handles are re-read by the caller on
+        # every invocation: setUp/tearDown re-init and shut down the library per
+        # test, which invalidates any handle cached from an earlier init.
+        params = kwargs
+        iterator = iter(params.items())
+        func_name, func = next(iterator)
+        del params[func_name]
+
+        if not handles:
+            msg = "\tNo CPU processors found; skipping CPU-specific test"
+            self.print(msg)
+            raise unittest.SkipTest(msg)
+
+        raise_exception = None
+        for i in range(len(handles) + 1):
+            cond = self.PASS
+            if i < len(handles):
+                handle = handles[i]
+            else:
+                # bad handle: None is rejected by the isinstance check in
+                # amdsmi_interface.py for CPU handles exactly as it is for GPUs.
+                handle = self.bad_gpu
+                i = "invalid"
+                cond = self.FAIL
+
+            msg = self._build_call_msg(func_name, i, None, params, label=label)
+            try:
+                data = func(handle, *[value for value in params.values()])
+                self.print(msg, data)
+                self.check_ret("", "", cond)
+            except (amdsmi.AmdSmiLibraryException, amdsmi.AmdSmiParameterException) as e:
+                if self.check_ret(msg, e, cond):
+                    raise_exception = e
+            self.print("")
+        if raise_exception:
+            raise raise_exception
+        return
+
+    def Test_API_Per_CPU(self, **kwargs):
+        """
+        Tests API per CPU socket with zero or more arguments
+
+        Arguments:
+            func_name: API to be executed
+        Optional:
+            param1_name: Name of parameter 1
+            param2_name: Name of parameter 2
+            param3_name: Name of parameter 3
+        """
+        return self._Test_API_Per_Handle(self.cpu_socket_handles(), "cpu", kwargs)
+
+    def Test_API_Per_CPU_Core(self, **kwargs):
+        """
+        Tests API per CPU core with zero or more arguments
+
+        For the core-scoped APIs ("Cpu core which to query"), which reject a socket
+        handle.
+
+        Arguments:
+            func_name: API to be executed
+        Optional:
+            param1_name: Name of parameter 1
+            param2_name: Name of parameter 2
+            param3_name: Name of parameter 3
+        """
+        return self._Test_API_Per_Handle(self.cpu_core_handles(), "core", kwargs)
 
     def Test_Per_GPU_With_One_Enum(self, **kwargs):
         """

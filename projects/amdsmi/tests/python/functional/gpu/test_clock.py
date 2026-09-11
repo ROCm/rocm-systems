@@ -2,7 +2,7 @@
 # Copyright Advanced Micro Devices, Inc.
 # SPDX-License-Identifier: MIT
 
-"""GPU clock: set clock frequency, set PCI bandwidth."""
+"""GPU clock: set clock frequency, set PCI bandwidth, SOC P-state."""
 
 import unittest
 
@@ -153,6 +153,68 @@ class TestGpuClock(unittest.TestCase):
             try:
                 bitmask = 1 << (current_bandwidth_index)
                 ret = amdsmi.amdsmi_set_gpu_pci_bandwidth(gpu, bitmask)
+                self.common.print(msg, ret)
+                self.common.check_ret("", "", self.common.PASS)
+            except (amdsmi.AmdSmiLibraryException, amdsmi.AmdSmiParameterException) as e:
+                if self.common.check_ret(msg, e, self.common.PASS):
+                    self.raise_exception = e
+
+        if self.raise_exception:
+            raise self.raise_exception
+        return
+
+    # integration
+
+    def test_soc_pstate(self):
+        self.common.print_func_name("")
+
+        for i, gpu in enumerate(self.common.processors):
+            self.common.print_device_header(i)
+            # Get current policy info
+            msg = f"\t### amdsmi_get_soc_pstate(gpu={i}):"
+            try:
+                policy_info = amdsmi.amdsmi_get_soc_pstate(gpu)
+                self.common.print(msg, "")
+                self.common.check_ret("", "", self.common.PASS)
+
+                num_supported = policy_info["num_supported"]
+                if not isinstance(num_supported, int):
+                    self.common.print(f"Cannot determine num_supported={num_supported}", "")
+                    continue
+                policy_id_current = policy_info["current_id"]
+                if not isinstance(policy_id_current, int):
+                    self.common.print(f"Cannot determine policy_id_current={policy_id_current}", "")
+                    continue
+                policy_id_orig = policy_info["policies"][policy_id_current]["policy_id"]
+                if not isinstance(policy_id_orig, int):
+                    self.common.print(f"Cannot determine orig policy_id={policy_id_orig}", "")
+                    continue
+
+                index = 0
+                if num_supported >= 2:
+                    if policy_id_current != 0:
+                        index = 1
+                policy_id = policy_info["policies"][index]["policy_id"]
+            except (amdsmi.AmdSmiLibraryException, amdsmi.AmdSmiParameterException) as e:
+                if self.common.check_ret(msg, e, self.common.PASS):
+                    self.raise_exception = e
+                continue
+
+            # Set SOC Pstate policy
+            msg = f"\t### amdsmi_set_soc_pstate(gpu={i}):"
+            try:
+                ret = amdsmi.amdsmi_set_soc_pstate(gpu, policy_id)
+                self.common.print(msg, ret)
+                self.common.check_ret("", "", self.common.PASS)
+            except (amdsmi.AmdSmiLibraryException, amdsmi.AmdSmiParameterException) as e:
+                if self.common.check_ret(msg, e, self.common.PASS):
+                    self.raise_exception = e
+                continue
+
+            # Set back to original policy
+            msg = f"\t### amdsmi_set_soc_pstate(gpu={i}, policy_id={policy_id_orig}):"
+            try:
+                ret = amdsmi.amdsmi_set_soc_pstate(gpu, policy_id_orig)
                 self.common.print(msg, ret)
                 self.common.check_ret("", "", self.common.PASS)
             except (amdsmi.AmdSmiLibraryException, amdsmi.AmdSmiParameterException) as e:
