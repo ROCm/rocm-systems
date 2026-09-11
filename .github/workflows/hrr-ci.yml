@@ -214,8 +214,7 @@ jobs:
           name: hrr-build
           path: |
             build/hrr
-            build/clr/clr-prefix/lib
-            build/clr/rocr-prefix/lib
+            build/clr/hipamd/lib
           retention-days: 3
 
   # ---------------------------------------------------------------------------
@@ -243,18 +242,20 @@ jobs:
           - { family: gfx1150, runner: "linux-gfx1150-gpu-rocm" }
           - { family: gfx1153, runner: "linux-gfx1153-gpu-rocm" }
     steps:
-      # These are self-hosted machines where the hosted-tool-cache Python is not
-      # usable (its pip wrapper cannot execute), so build on the system Python
-      # in a virtualenv rather than provisioning one with setup-python.
+      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        with:
+          python-version: "3.12"
+
+      # Invoked through "python -m" and by script path throughout: on some of
+      # these self-hosted machines the console-script wrappers cannot execute,
+      # and the system Python has no ensurepip to build a virtualenv with.
       - name: Install ROCm SDK
         run: |
-          python3 -m venv .venv
-          ./.venv/bin/python -m pip install --quiet --upgrade pip
           # devel as well as libraries: rocm-sdk init refuses to run without it.
-          ./.venv/bin/python -m pip install --no-cache-dir \
+          python -m pip install --no-cache-dir \
             --index-url "${ROCM_INDEX_URL}" "rocm[libraries,devel]"
-          ./.venv/bin/rocm-sdk init
-          echo "ROCM_SDK=$(./.venv/bin/python -c 'import _rocm_sdk_devel,os;print(os.path.dirname(_rocm_sdk_devel.__file__))')" >> "$GITHUB_ENV"
+          python "$(command -v rocm-sdk)" init
+          echo "ROCM_SDK=$(python -c 'import _rocm_sdk_devel,os;print(os.path.dirname(_rocm_sdk_devel.__file__))')" >> "$GITHUB_ENV"
 
       - name: Download build
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
@@ -274,13 +275,11 @@ jobs:
           # every device rather than meaning "no restriction".
           DEVICES: ${{ matrix.devices }}
         run: |
-          export LD_LIBRARY_PATH="${PWD}/clr/clr-prefix/lib:${PWD}/clr/rocr-prefix/lib:${ROCM_SDK}/lib"
-          # libhiprtc carries a legacy DT_RPATH holding its own older
-          # libhsa-runtime64.so.1. DT_RPATH is searched before LD_LIBRARY_PATH,
-          # so without this preload that older runtime claims the soname and
-          # every HIP call in a spawned workload dies on a missing newer HSA
-          # symbol, surfacing as "workload ... exited 127".
-          export LD_PRELOAD="${PWD}/clr/rocr-prefix/lib/libhsa-runtime64.so.1"
+          # hipamd/lib holds the amdhip64 carrying the capture shims and must
+          # precede the SDK, which ships a plain build under the same soname.
+          # No ROCr preload here: CLR was built against the SDK's ROCr, so the
+          # two agree and there is no in-tree runtime to substitute.
+          export LD_LIBRARY_PATH="${PWD}/clr/hipamd/lib:${ROCM_SDK}/lib"
           if [ -n "${DEVICES}" ]; then
             export HIP_VISIBLE_DEVICES="${DEVICES}"
           fi
