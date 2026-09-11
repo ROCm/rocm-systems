@@ -133,7 +133,8 @@ time intervals spent preparing selected replacement code objects and loading
 and binding their replacements. Concurrent transforms are therefore not
 double-counted.
 
-Each target status cell reports two values per mode:
+Each target status row begins with matching uninstrumented Startup and Run
+values, then reports two values per ConSan mode:
 
 - **Startup (seconds)**: the total cold-path latency through completion of the
   first synchronized operation and its selected evidence checkpoints. It
@@ -141,8 +142,9 @@ Each target status cell reports two values per mode:
   first-dispatch setup, the operation itself, and any other warm-up cost. This
   intentionally avoids exposing an implementation-dependent boundary between
   instrumentation and first-run warm-up.
-- **Run (ratio)**: the second identical synchronized operation divided by the
-  median second-operation time from the two initial native processes.
+- **Run (seconds and ratio)**: the absolute latency of the second identical
+  synchronized operation, followed by that latency divided by the median
+  second-operation time from the two initial native processes.
 
 The first operation is therefore both a correctness-checked warm-up and part of
 the reported Startup latency; none of its cost is discarded. Its host evidence
@@ -154,7 +156,7 @@ payloads that cannot call the window API select their first automatic report
 epoch with `nth:1` and use a direct device timer for steady execution. Run2
 remains fully instrumented, but its quiescent report epochs are validated and
 recycled without snapshot, decode, analysis, or rendering. The resulting Run
-ratio measures the sustainable device instrumentation path rather than
+value measures the sustainable device instrumentation path rather than
 repeatedly charging a user-selected host analysis. SuperCollider intentionally
 keeps its lifetime-sticky marker and needs no selection window. The two
 operations must use identical inputs and execution shape; workloads with

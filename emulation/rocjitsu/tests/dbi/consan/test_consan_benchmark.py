@@ -467,7 +467,8 @@ class ConSanBenchmarkTest(unittest.TestCase):
         for label in benchmark.MODE_LABELS.values():
             self.assertIn(label, text)
         self.assertIn(
-            "| description | 1.5 s | 200× | 1.5 s | 200× | 1.5 s | 200× | 1.5 s | 200× |",
+            "| description | 0.005 s | 0.005 s (1×) | 1.5 s | 1 s (200×) | "
+            "1.5 s | 1 s (200×) | 1.5 s | 1 s (200×) | 1.5 s | 1 s (200×) |",
             text,
         )
         self.assertNotIn("Absolute latency", text)

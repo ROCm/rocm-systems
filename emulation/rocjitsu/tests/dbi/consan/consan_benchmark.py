@@ -721,10 +721,10 @@ def _render_status(summary: dict[str, Any]) -> str:
         "",
         "For each mode, **Startup** is the total latency through the first synchronized",
         "run and its selected evidence checkpoints, including instrumentation, loading,",
-        "binding, and warm-up; **Run** is the second-run instrumented/native overhead",
-        "ratio after that cold path.",
+        "binding, and warm-up; **Run** is the absolute second-run latency followed",
+        "by its ratio to the matching uninstrumented second run.",
         "",
-        "| Workload | "
+        "| Workload | Uninstrumented Startup | Uninstrumented Run | "
         + " | ".join(
             column
             for mode in columns
@@ -734,10 +734,22 @@ def _render_status(summary: dict[str, Any]) -> str:
             )
         )
         + " |",
-        "| --- | " + " | ".join("---:" for _ in range(2 * len(columns))) + " |",
+        "| --- | "
+        + " | ".join("---:" for _ in range(2 + 2 * len(columns)))
+        + " |",
     ]
     for workload in summary["workloads"]:
-        cells = []
+        native_runtime = workload.get("native_runtime_ms")
+        if native_runtime is None:
+            native_runtime = workload.get("native", {}).get("runtime_ms")
+        if not isinstance(native_runtime, (list, tuple)) or len(native_runtime) != 2:
+            native_cells = ["pending", "pending"]
+        else:
+            native_cells = [
+                f"{_format_three_significant_digits(native_runtime[0] / 1000.0)} s",
+                f"{_format_three_significant_digits(native_runtime[1] / 1000.0)} s (1×)",
+            ]
+        cells = native_cells
         for mode in columns:
             result = workload["modes"].get(mode)
             if result is None:
@@ -746,7 +758,8 @@ def _render_status(summary: dict[str, Any]) -> str:
                 cells.extend(
                     (
                         f"{_format_three_significant_digits(result['startup_ms'] / 1000.0)} s",
-                        f"{_format_three_significant_digits(result['run_ratio'])}×",
+                        f"{_format_three_significant_digits(result['run_ms'] / 1000.0)} s "
+                        f"({_format_three_significant_digits(result['run_ratio'])}×)",
                     )
                 )
         lines.append(f"| {workload['description']} | " + " | ".join(cells) + " |")
@@ -865,6 +878,7 @@ def _main(argv: list[str]) -> int:
             _median([_runtime_ms(run, run_index) for run in native_reference])
             for run_index in range(2)
         )
+        status_rows[workload.id]["native"] = {"runtime_ms": list(native_runtime)}
         modes: dict[str, dict[str, Any]] = {}
         for mode in PROFILE_IDS:
             modes[mode] = _run_one(
