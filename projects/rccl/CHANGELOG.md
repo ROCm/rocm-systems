@@ -27,6 +27,7 @@ Full documentation for RCCL is available at [https://rccl.readthedocs.io](https:
 * Fixed the per-unroll device function tables being misaligned in multi-arch builds. The LL128 `SendRecv` kernel was skipped for unrolls 8/16/32, so every function after `SendRecv` in those tables sat one index below the id the host had computed from the unroll-1 ordering, and the last entry of the host lookup table was dropped. `AlltoAllPivot`, `AlltoAllGda`, `AlltoAllvGda` and `AllGatherV` were affected on gfx1250.
 
 ### Known issues
+* On gfx90a (MI210/MI250/MI250X) with ROCm 7.13 or later, per-launch scratch-memory reclaim in the runtime degrades RCCL performance. Set `HSA_NO_SCRATCH_RECLAIM=1` to restore performance.
 * The improved AllGatherV support breaks the NCCL profiler support for ncclBroadcast operations, limiting visibility to API events. `NCCL_ALLGATHERV_ENABLE=0` can be used as a workaround until it is fixed in a future release.
 * Multi-node multi-segment and Elastic Buffer symmetric-window registration is not yet enabled; NET and LSA+GIN multi-segment paths depend on runtime support for exporting contiguous DMA-BUF handles across all physical segments.
 
@@ -40,6 +41,7 @@ Full documentation for RCCL is available at [https://rccl.readthedocs.io](https:
 * Retagged the RCCL-only `COLLTRACE` destroy-time log lines from `NCCL_INIT` to `NCCL_DESTROY` and documented the `DESTROY` `NCCL_DEBUG_SUBSYS` subsystem. The NCCL 2.30.3 sync added `NCCL_DESTROY` and retagged the shared comm-destroy/plugin-unload log lines, but missed these RCCL-specific lines since `COLLTRACE` has no upstream equivalent; they are now excluded from `NCCL_DEBUG=INFO` output by default, consistent with the other destroy-time lines.
 
 ### Known issues
+* On gfx90a (MI210/MI250/MI250X) with ROCm 7.13 or later, per-launch scratch-memory reclaim in the runtime degrades RCCL performance. Set `HSA_NO_SCRATCH_RECLAIM=1` to restore performance.
 * Multi-node multi-segment and Elastic Buffer symmetric-window registration is not yet enabled; NET and LSA+GIN multi-segment paths depend on runtime support for exporting contiguous DMA-BUF handles across all physical segments.
 
 ## RCCL 2.30.4 for ROCm 7.14.0
@@ -102,6 +104,7 @@ Full documentation for RCCL is available at [https://rccl.readthedocs.io](https:
 * Fixed RCCL initialization failing (`Failed to find ROCm runtime library`) on runtime-only ROCm trees that ship no unversioned `libhsa-runtime64.so` developer symlink (e.g. TheRock multi-arch pip-wheel `/opt/rocm-less` deployments). RCCL no longer `dlopen`s the HSA runtime by name; instead it directly links `hsa-runtime64::hsa-runtime64` (already a hard transitive dependency via the HIP runtime) and binds `hsa_init`, `hsa_system_get_info`, `hsa_status_string`, and `hsa_amd_portable_export_dmabuf` to those symbols. The linker records `DT_NEEDED libhsa-runtime64.so.1` and resolves it through librccl's existing RPATH, removing the SONAME version-string fragility and load-scope (`RTLD_LOCAL`) issues. The `RCCL_ROCR_PATH` override is no longer needed and has been removed.
 
 ### Known issues
+* On gfx90a (MI210/MI250/MI250X) with ROCm 7.13 or later, per-launch scratch-memory reclaim in the runtime degrades RCCL performance. Set `HSA_NO_SCRATCH_RECLAIM=1` to restore performance.
 * Elastic-buffer support for GIN (multi-segment symmetric memory windows backed by a mix of device and CPU/`HOST_NUMA` memory, exposed through `NCCL_ELASTIC_BUFFER_REGISTER` and `NCCL_SYM_REUSE_SYSMEM_HANDLES`) was newly synced from upstream and compiles on ROCm, but is unverified on AMD hardware.
 * The `librccl_device.bc` LLVM IR/bitcode artifact and its `nccl_device_wrapper.h` header (used to call RCCL device APIs without linking the full C++ library) are not currently included in official ROCm RCCL packages. To obtain them, rebuild RCCL from source with `-DEMIT_LLVM_IR=ON -DBITCODE_LIB_ARCH=<gfx target>`.
 
