@@ -11,7 +11,7 @@
 #include <cerrno>
 #include <cstdio>
 #include <cstring>
-#include <mutex>
+#include <atomic>
 #include <random>
 #include <fcntl.h>
 #include <sys/mman.h>
@@ -35,40 +35,39 @@ namespace {
 // /dev/shm (e.g. containers started with --ipc=host) get identical pids, and "/hip_<pid>_<n>"
 // then names the same object in both processes -- one silently re-initializes the other's live
 // event. The random per-process nonce keeps names unique; it is regenerated after fork().
-// Hex keeps the name short (at most 5 + 8 + 1 + 8 + 1 + 16 characters; in practice < 32) so it
-// fits the handle even after millions of events.
-std::mutex ipc_name_lock;
-int ipc_name_pid = -1;
-std::string ipc_name_prefix;
-uint64_t ipc_name_counter = 0;
+// At most 5 + 8 + 1 + 8 + 1 + 8 = 31 characters, so the name always fits the 32-byte handle.
+// Lock-free on purpose: a mutex held by another thread during fork() would stay locked forever
+// in the child.
+std::atomic<uint64_t> ipc_name_id{0};  // (pid << 32) | nonce of the current process
+std::atomic<uint32_t> ipc_name_counter{0};
 
-void refreshIpcNamePrefix() {  // caller holds ipc_name_lock
-  const int pid = static_cast<int>(getpid());
-  if (pid == ipc_name_pid) {
-    return;
+std::string ipcNamePrefix() {
+  const uint64_t pid = static_cast<uint32_t>(getpid());
+  uint64_t id = ipc_name_id.load(std::memory_order_acquire);
+  while ((id >> 32) != pid) {  // first use in this process, e.g. after fork()
+    const uint64_t fresh = (pid << 32) | std::random_device{}();
+    if (ipc_name_id.compare_exchange_weak(id, fresh, std::memory_order_acq_rel)) {
+      id = fresh;
+    }
   }
-  std::random_device rd;
-  char buf[32];
-  snprintf(buf, sizeof(buf), "/hip_%x_%08x_", static_cast<unsigned>(pid), static_cast<unsigned>(rd()));
-  ipc_name_prefix = buf;
-  ipc_name_pid = pid;
-  ipc_name_counter = 0;
+  char buf[24];
+  snprintf(buf, sizeof(buf), "/hip_%x_%08x_", static_cast<unsigned>(id >> 32),
+           static_cast<unsigned>(id));
+  return buf;
 }
 
 std::string newIpcName() {
-  std::lock_guard<std::mutex> lock(ipc_name_lock);
-  refreshIpcNamePrefix();
-  char buf[20];
-  snprintf(buf, sizeof(buf), "%llx", static_cast<unsigned long long>(ipc_name_counter++));
-  return ipc_name_prefix + buf;
+  char buf[9];
+  snprintf(buf, sizeof(buf), "%x",
+           static_cast<unsigned>(ipc_name_counter.fetch_add(1, std::memory_order_relaxed)));
+  return ipcNamePrefix() + buf;
 }
 
 // True if this process created `name`. Replaces the pid comparison against owners_process_id,
 // which reports "same process" for any process with the same pid in another PID namespace.
 bool isOwnIpcName(const std::string& name) {
-  std::lock_guard<std::mutex> lock(ipc_name_lock);
-  return ipc_name_pid == static_cast<int>(getpid()) &&
-         name.compare(0, ipc_name_prefix.size(), ipc_name_prefix) == 0;
+  const std::string prefix = ipcNamePrefix();
+  return name.compare(0, prefix.size(), prefix) == 0;
 }
 
 // Creates (exclusively) or opens (must exist) the shm object of an IPC event and maps it.
@@ -234,7 +233,10 @@ hipError_t IPCEventEmulated::enqueueRecordCommand(hip::Stream* stream, amd::Comm
   // Guard event_/shmem against concurrent query/synchronize/streamWait. Graph
   // event-record nodes call this directly; lock_ is recursive.
   std::scoped_lock lock(lock_);
-  createIpcEventShmemIfNeeded();
+  if (!createIpcEventShmemIfNeeded()) {
+    command->release();  // ownership passed to us; it was never enqueued
+    return hipErrorInvalidValue;
+  }
 
   // Allocate signal slot for this event
   auto* const shmem = ipc_evt_.ipc_shmem_;
