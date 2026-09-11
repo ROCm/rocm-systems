@@ -56,7 +56,15 @@ jobs:
       - name: Configure
         shell: bash
         run: |
+          extra=()
+          if [ "${RUNNER_OS}" = "Windows" ]; then
+            # The runner builds with MinGW, whose libstdc++/libgcc/winpthread
+            # DLLs are not on PATH for later steps, so a dynamically linked
+            # binary fails to start at all. Link them in instead.
+            extra+=(-DCMAKE_EXE_LINKER_FLAGS=-static)
+          fi
           cmake -S projects/hrr -B build -GNinja -Wno-dev \
+            "${extra[@]}" \
             -DCMAKE_BUILD_TYPE=Release \
             -DCMAKE_PREFIX_PATH="${ROCM_SDK}" \
             -DROCM_PATH="${ROCM_SDK}" \
@@ -235,16 +243,18 @@ jobs:
           - { family: gfx1150, runner: "linux-gfx1150-gpu-rocm" }
           - { family: gfx1153, runner: "linux-gfx1153-gpu-rocm" }
     steps:
-      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
-        with:
-          python-version: "3.12"
-
+      # These are self-hosted machines where the hosted-tool-cache Python is not
+      # usable (its pip wrapper cannot execute), so build on the system Python
+      # in a virtualenv rather than provisioning one with setup-python.
       - name: Install ROCm SDK
         run: |
+          python3 -m venv .venv
+          ./.venv/bin/python -m pip install --quiet --upgrade pip
           # devel as well as libraries: rocm-sdk init refuses to run without it.
-          pip install --no-cache-dir --index-url "${ROCM_INDEX_URL}" "rocm[libraries,devel]"
-          rocm-sdk init
-          echo "ROCM_SDK=$(python -c 'import _rocm_sdk_devel,os;print(os.path.dirname(_rocm_sdk_devel.__file__))')" >> "$GITHUB_ENV"
+          ./.venv/bin/python -m pip install --no-cache-dir \
+            --index-url "${ROCM_INDEX_URL}" "rocm[libraries,devel]"
+          ./.venv/bin/rocm-sdk init
+          echo "ROCM_SDK=$(./.venv/bin/python -c 'import _rocm_sdk_devel,os;print(os.path.dirname(_rocm_sdk_devel.__file__))')" >> "$GITHUB_ENV"
 
       - name: Download build
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
