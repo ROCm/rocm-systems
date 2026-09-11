@@ -151,9 +151,3 @@
 
 #define ROCPROFSYS_VAR_NAME_COMBINE(X, Y) X##Y
 #define ROCPROFSYS_VARIABLE(X, Y)         ROCPROFSYS_VAR_NAME_COMBINE(X, Y)
-
-#if defined(__cplusplus)
-#    if !defined(ROCPROFSYS_FOLD_EXPRESSION)
-#        define ROCPROFSYS_FOLD_EXPRESSION(...) ((__VA_ARGS__), ...)
-#    endif
-#endif
