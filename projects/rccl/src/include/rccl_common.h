@@ -253,7 +253,6 @@ size_t rcclCeAr2ShotMax(const ncclComm* comm);
 bool rcclNcclAlgoEnvIsSet();
 // Registered CE AllReduce AUTO size cap. Env RCCL_CE_AR_REG_MAX_MSG_BYTES wins;
 // else arch table ceRegMax[AR]; 0 means no upper bound.
-size_t rcclCeArRegisteredMax(const ncclComm* comm);
 // Decides whether ncclAllReduce_impl takes the DDA path for this call. Mirrors the guard in
 // collectives.cc exactly: DDA requires !symEligible on every arch (gfx1250 fabric included).
 // Non-gfx1250 also requires CE AllReduce not to service the call (`ceAllReduceAllowed`);
@@ -286,11 +285,6 @@ RCCL_PARAM_DECLARE(DdaLLThreshold);
 RCCL_PARAM_DECLARE(DdaLL128);
 RCCL_PARAM_DECLARE(DdaLL128Threshold);
 RCCL_PARAM_DECLARE(DdaEnable);
-
-// Per-collective DDA AlltoAll VMM/IPC caps. These match ddaVmmMax[AlltoAll]
-// in the arch tables; tests use the names as the expected table values.
-
-// gfx942's DDA-IPC cap for AR/AG/RS, i.e. its ddaVmmMax[AllReduce] table entry.
 
 // Value of RCCL_DDA_THRESHOLD / RCCL_DDA_LL_THRESHOLD / RCCL_DDA_LL128_THRESHOLD
 // meaning "the user did not set this". 0 already means "disable this tier", so

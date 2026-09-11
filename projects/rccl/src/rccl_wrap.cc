@@ -838,10 +838,6 @@ bool rcclAllGatherCeRegisteredWindow(const ncclComm* comm, size_t totalBytes,
   return rcclAllGatherCeRegisteredWindowTab(extAlgoArchTable(comm), totalBytes, winRegType, graphMode);
 }
 
-// Keep old name as a shim for callers that have not been updated yet.
-inline size_t rcclCeArRegisteredMax(const ncclComm* comm) {
-  return rcclCeRegMax(comm, ncclFuncAllReduce);
-}
 
 inline size_t rcclDdaLLThresholdTab(const rcclArchThresholds* table, ncclFunc_t func) {
   size_t threshold;
@@ -1789,13 +1785,13 @@ ncclResult_t rcclSelectReduceScatter(struct ncclComm* comm, const void* sendbuff
     if (ddaFabricArch) {
       const size_t rsDdaLLMax    = rcclDdaLLThresholdTab(archTable, ncclFuncReduceScatter);
       const size_t rsDdaLL128Max = rcclDdaLL128ThresholdTab(archTable, ncclFuncReduceScatter);
-      if (rcclParamDdaLL() && rsShardBytes <= rsDdaLLMax &&
+      if (rcclParamDdaLL() && totalBytes <= rsDdaLLMax &&
           ncclReduceScatterDdaFabricLLEligible(comm, sendbuff, recvbuff, recvcount, datatype, op)) {
         decision->algo = RCCL_DDA_FABRIC_LL;
         decision->protocol = NCCL_PROTO_LL;
         return ncclSuccess;
       }
-      if (rcclParamDdaLL128() && rsShardBytes <= rsDdaLL128Max &&
+      if (rcclParamDdaLL128() && totalBytes <= rsDdaLL128Max &&
           ncclReduceScatterDdaFabricLL128Eligible(comm, sendbuff, recvbuff, recvcount, datatype, op)) {
         decision->algo = RCCL_DDA_FABRIC_LL128;
         decision->protocol = NCCL_PROTO_LL128;
@@ -2029,7 +2025,11 @@ ncclResult_t rcclSelectAlltoAll(struct ncclComm* comm, const void* sendbuff, voi
     }
 
     // (5) Hierarchical CE: multi-node, non-LSA-spanning.
-    if (ncclHierCeAvailable(comm, ncclFuncAlltoAll, ncclDevSum, datatype, a2aWinRegType)) {
+    // Require CTA_POLICY_ZERO and no sysmem segment, matching the AllGather twin.
+    const bool a2aHasSysmem = ncclDevrWindowHasSysmemSegment(a2aSendWin) ||
+                               ncclDevrWindowHasSysmemSegment(a2aRecvWin);
+    if ((comm->config.CTAPolicy & NCCL_CTA_POLICY_ZERO) && !a2aHasSysmem &&
+        ncclHierCeAvailable(comm, ncclFuncAlltoAll, ncclDevSum, datatype, a2aWinRegType)) {
       decision->algo = RCCL_CE_REGISTERED;  // reports as CE; hier dispatch in taskAppend
       if (query) {
         int a, p, ch;

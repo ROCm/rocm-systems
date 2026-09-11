@@ -1042,15 +1042,27 @@ static struct tuningModel tuning_model_10{
   // Values >1.0 boost, <1.0 suppress. 2.0=clear winner, 0.5=loser.
   .treeCorrectionFactor =
     {
-      {2.0, 2.0, 2.0, 2.0, 2.0, 2.0, 2.0, 2.0, 2.0, 2.0, 2.0, 2.0, 2.0, 2.0, 0.5, 0.5, 0.5, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0,},
-      {1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 2.0, 2.0, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 1.0, 1.0, 1.0, 1.0, 1.0,},
-      {1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 0.5, 0.5, 0.5, 0.5, 0.5,},
+      // LL: Tree[0-13] Ring[14-16]
+      {2.0, 2.0, 2.0, 2.0, 2.0, 2.0, 2.0, 2.0, 2.0, 2.0, 2.0, 2.0, 2.0, 2.0,
+       0.5, 0.5, 0.5, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0,},
+      // LL128: Tree[14-15] Ring[16-21]
+      {1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0,
+       2.0, 2.0, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 1.0, 1.0, 1.0, 1.0, 1.0,},
+      // Simple: Ring[22-26]
+      {1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0,
+       1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 0.5, 0.5, 0.5, 0.5, 0.5,},
     },
   .ringCorrectionFactor =
     {
-      {0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 2.0, 2.0, 2.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0,},
-      {1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 0.5, 0.5, 2.0, 2.0, 2.0, 2.0, 2.0, 2.0, 1.0, 1.0, 1.0, 1.0, 1.0,},
-      {1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 2.0, 2.0, 2.0, 2.0, 2.0,},
+      // LL: Ring[14-16] Tree[0-13]
+      {0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5,
+       2.0, 2.0, 2.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0,},
+      // LL128: Ring[16-21] Tree[14-15]
+      {1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0,
+       0.5, 0.5, 2.0, 2.0, 2.0, 2.0, 2.0, 2.0, 1.0, 1.0, 1.0, 1.0, 1.0,},
+      // Simple: Ring[22-26]
+      {1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0,
+       1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 2.0, 2.0, 2.0, 2.0, 2.0,},
     },
   .llProtoRanges =
     {
@@ -1076,28 +1088,8 @@ static struct tuningModel tuning_model_10{
       {/*LL (min/max/factor/thread_threshold)*/ {0, 2048, 1, 0},
        /*LL128 (min/max/factor/thread_threshold)*/ {2048, 16777216, 1, 0}},
     },
-  .channelThresholds = {
-    /*ReduceScatter*/ {{512, 1024, 2},
-                       {1024, 2048, 4},
-                       {2048, 4096, 8},
-                       {4096, 65536, 16},
-                       {65536, 262144, 32},
-                       {262144, 524288, 40},
-                       {524288, 1048576, 48},
-                       {1048576, 2097152, 56},
-                       {2097152, 268435457, 64}},
-    /*AllGather*/
-    {{2048, 4096, 2},
-     {4096, 8192, 4},
-     {8192, 16384, 8},
-     {16384, 262144, 16},
-     {262144, 524288, 32},
-     {524288, 1048576, 40},
-     {1, 1, 48},
-     {1048576, 4194304, 56},
-     {4194304, 268435457, 64}},
-    /*AllReduce*/ {{0, 0, 0}, {0, 0, 0}, {0, 0, 0}, {0, 0, 0}, {0, 0, 0}, {0, 0, 0}, {0, 0, 0}, {0, 0, 0}, {0, 0, 0}},
-  },
+  // gfx1250 returns early from rcclOverrideChannels, so channelThresholds is unreachable.
+  .channelThresholds = {{{CHAN_THRESHOLDS_UNDEFINED}}},
 };
 static struct tuningModel rcclTuningModel[] = {
   tuning_model_0, tuning_model_1, tuning_model_2, tuning_model_3, tuning_model_4,
@@ -1731,7 +1723,7 @@ ncclResult_t ncclTopoGetAlgoTime(struct ncclComm* comm, int coll, int algorithm,
 // Per-arch DDA/CE dispatch threshold tables.
 // DDA arrays: [Broadcast=0, Reduce=1, AllGather=2, ReduceScatter=3, AllReduce=4,
 //              SendRecv=5, Send=6, Recv=7, AlltoAll=8]. 0 disables that tier.
-// AR/AG/A2A compare total message bytes; RS compares rsShardBytes (per-rank recv).
+// All collectives compare total message bytes against the table values.
 
 // ---- gfx1250 per-size unroll breakpoints (AICOMRCCL-1756 placeholders) -------
 // Format: {maxBytes, unrollIdx}. First entry where maxBytes >= msgBytes wins.
@@ -1765,7 +1757,7 @@ static const rcclArchThresholds rcclArchThresholds_gfx1250 = {
     0,                   // [0] Broadcast      -- not used
     0,                   // [1] Reduce          -- not used
     128ULL*1024,         // [2] AllGather       -- 128 KiB (kernel hard cap kDdaLLAgMaxPerRankBytes)
-    4ULL*1024*1024,      // [3] ReduceScatter   -- 1 MiB per-rank (= 4 MiB total at 4 ranks; DDA/LL wins up to 4M total)
+    16ULL*1024*1024,     // [3] ReduceScatter   -- 16 MiB total (rsShardBytes<=4MiB at 4 ranks; DDA/LL wins up to 16 MiB)
     32ULL*1024*1024,     // [4] AllReduce       -- 32 MiB (two-shot path; kDdaLLMaxBytes=32MiB)
     0,                   // [5] SendRecv        -- not used
     0,                   // [6] Send            -- not used
@@ -1778,7 +1770,7 @@ static const rcclArchThresholds rcclArchThresholds_gfx1250 = {
     0,                   // [0] Broadcast      -- not used
     0,                   // [1] Reduce          -- not used
     64ULL*1024*1024,     // [2] AllGather       -- 16 MiB per-rank (= 64 MiB total; DDA/LL128 wins 1M-64M per v6 data)
-    512ULL*1024,            // [3] ReduceScatter   -- 512 KiB per-rank (kernel hard cap kDdaLL128RsMaxBytes; DDA/LL covers above)
+    2ULL*1024*1024,      // [3] ReduceScatter   -- 2 MiB total (rsShardBytes<=512KiB at 4 ranks; unreachable while LL fires first)
     32ULL*1024*1024,     // [4] AllReduce       -- 32 MiB
     0,                   // [5] SendRecv        -- not used
     0,                   // [6] Send            -- not used
@@ -1796,7 +1788,7 @@ static const rcclArchThresholds rcclArchThresholds_gfx1250 = {
     0,                   // [5] SendRecv        -- not used
     0,                   // [6] Send            -- not used
     0,                   // [7] Recv            -- not used
-    0,      // [8] AlltoAll        -- 2 MiB (LL tiers cover <=2M; Ring/Simple wins 2M-4M; DDA/VMM above)
+    0,      // [8] AlltoAll        -- 0 = disabled; LL/LL128 tiers cover <=128M, Ring above
   },
   // ddaVmmMaxR2: DDA VMM cap when recv buffer is registered (R2 mode).
   // DDA is gated on !symEligible (AR: !symkRequested) on every arch, including
@@ -1805,7 +1797,7 @@ static const rcclArchThresholds rcclArchThresholds_gfx1250 = {
   .ddaVmmMaxR2 = {
     0,                   // [0] Broadcast      -- not used
     0,                   // [1] Reduce          -- not used
-    64ULL*1024,          // [2] AllGather       -- R2 AG: symEligible blocks DDA, override unused
+    0,                   // [2] AllGather       -- 0; symEligible blocks DDA for R2 AG regardless
     0,                   // [3] ReduceScatter   -- 0; symEligible=true for R2 blocks DDA regardless
     4ULL*1024*1024,      // [4] AllReduce       -- R2 AR: symEligible blocks DDA, override unused
     0,                   // [5] SendRecv        -- not used
@@ -1820,7 +1812,7 @@ static const rcclArchThresholds rcclArchThresholds_gfx1250 = {
   .ddaVmmMaxGraph = {
     0,                   // [0] Broadcast      -- not used
     0,                   // [1] Reduce          -- not used
-    1ULL*1024*1024,      // [2] AllGather       -- no graph-specific override (placeholder)
+    0,                   // [2] AllGather       -- 0; no graph-specific VMM override for AG
     0,                   // [3] ReduceScatter   -- no graph-specific override (placeholder)
     256ULL*1024*1024,    // [4] AllReduce       -- extend to 256 MiB in graph mode (CE blocked)
     0,                   // [5] SendRecv        -- not used
@@ -1880,7 +1872,7 @@ static const rcclArchThresholds rcclArchThresholds_gfx1250 = {
     0,                    // [0] Broadcast      -- not used
     0,                    // [1] Reduce          -- not used
     2ULL*1024*1024,       // [2] AllGather  -- CE-registered wins above 2 MiB for R2 (suppress symk)
-    1ULL*1024,            // [3] ReduceScatter   -- no suppression (placeholder)
+    0,                    // [3] ReduceScatter   -- no suppression needed; symMinR2 handles lower bound
     0,                    // [4] AllReduce       -- CE-registered wins above 0 B (suppress symk for all R2 AR)
     0,                    // [5] SendRecv        -- not used
     0,                    // [6] Send            -- not used
@@ -1892,7 +1884,7 @@ static const rcclArchThresholds rcclArchThresholds_gfx1250 = {
     0,                    // [0] Broadcast      -- not used
     0,                    // [1] Reduce          -- not used
     2ULL*1024*1024,                    // [2] AllGather       -- keep symk in graph mode
-    1ULL*1024,                    // [3] ReduceScatter   -- keep symk in graph mode
+    0,                            // [3] ReduceScatter   -- keep symk in graph mode
     0,            // [4] AllReduce       -- keep symk in graph mode (CE blocked)
     0,                    // [5] SendRecv        -- not used
     0,                    // [6] Send            -- not used
@@ -1931,7 +1923,10 @@ static const rcclArchThresholds rcclArchThresholds_gfx950 = {
   .symMaxR2    = {0, 0, 0, 0, 0, 0, 0, 0, 0},
   .symMaxR2Graph = {0, 0, 0, 0, 0, 0, 0, 0, 0},
   .symMinR2    = {0, 0, 0, 0, 0, 0, 0, 0, 0},
-
+  .unrollMapAR  = nullptr,
+  .unrollMapAG  = nullptr,
+  .unrollMapRS  = nullptr,
+  .unrollMapA2A = nullptr,
 };
 
 // gfx942: DDA-IPC cap is 8 MiB for AR/AG/RS and 4 MiB for AlltoAll. No fabric LL/LL128.
@@ -1945,7 +1940,10 @@ static const rcclArchThresholds rcclArchThresholds_gfx942 = {
   .symMaxR2    = {0, 0, 0, 0, 0, 0, 0, 0, 0},
   .symMaxR2Graph = {0, 0, 0, 0, 0, 0, 0, 0, 0},
   .symMinR2    = {0, 0, 0, 0, 0, 0, 0, 0, 0},
-
+  .unrollMapAR  = nullptr,
+  .unrollMapAG  = nullptr,
+  .unrollMapRS  = nullptr,
+  .unrollMapA2A = nullptr,
 };
 
 const rcclArchThresholds* rcclGetArchThresholds(const char* gcn) {
