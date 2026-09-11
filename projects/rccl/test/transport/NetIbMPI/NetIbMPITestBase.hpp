@@ -388,8 +388,11 @@ protected:
 
         if (rank == 0) {
             local = CreateListenComm(dev, &pair.handle, &pair.listenComm);
-            handshake.status = (local == ncclSuccess) ? 1 : 0;
-            if (local == ncclSuccess) memcpy(handshake.handle, pair.handle, sizeof(pair.handle));
+            // Non-null as well as the return code, so this reads the same as the cast
+            // and ListenCloseListen handshakes. Nothing reaches it today: ncclIbListen
+            // assigns *listenComm only on its success path.
+            handshake.status = (local == ncclSuccess && pair.listenComm != nullptr) ? 1 : 0;
+            if (handshake.status) memcpy(handshake.handle, pair.handle, sizeof(pair.handle));
             // Sent even on failure: the peer is waiting for this message.
             MPI_Send(&handshake, sizeof(handshake), MPI_BYTE, peerRank, 0, MPI_COMM_WORLD);
 

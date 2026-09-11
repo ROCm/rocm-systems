@@ -883,8 +883,8 @@ TEST_F(NetIbMPITest, ListenCloseListen) {
                 // hang this rank while the peer waits in the reduction below, which
                 // is the failure this test exists to have reported instead.
                 ncclResult_t r = ncclSuccess;
-                for (int attempt = 0; attempt < kMaxRetryAttempts && !pair.recvComm
-                                      && r == ncclSuccess; attempt++) {
+                for (int attempt = 0; attempt < kConnectTimeoutMs / kPollIntervalMs
+                                      && !pair.recvComm && r == ncclSuccess; attempt++) {
                     r = AcceptConnection(pair.listenComm, &pair.recvComm);
                     if (!pair.recvComm && r == ncclSuccess) usleep(kPollIntervalUs);
                 }
@@ -896,8 +896,8 @@ TEST_F(NetIbMPITest, ListenCloseListen) {
             } else {
                 // Bounded and paced, for the same reason as the accept side.
                 ncclResult_t r = ncclSuccess;
-                for (int attempt = 0; attempt < kMaxRetryAttempts && !pair.sendComm
-                                      && r == ncclSuccess; attempt++) {
+                for (int attempt = 0; attempt < kConnectTimeoutMs / kPollIntervalMs
+                                      && !pair.sendComm && r == ncclSuccess; attempt++) {
                     r = ConnectToRemote(mergedDev, &pair.handle, &pair.sendComm);
                     if (!pair.sendComm && r == ncclSuccess) usleep(kPollIntervalUs);
                 }
@@ -916,17 +916,21 @@ TEST_F(NetIbMPITest, ListenCloseListen) {
                    << " (cross-subnet node pair, or rank 0's listen failed)";
         }
 
-        // Close: data comms first, then listen
+        // Close: data comms first, then listen. Reported, not asserted: a fatal
+        // assertion here leaves this rank's loop while its peer starts the next
+        // iteration and blocks in the MPI_Recv above -- the hang this test was
+        // rewritten to remove. ncclIbCloseRecv is a chain of NCCLCHECKs, so it can
+        // genuinely fail, and both ranks have to keep walking the same iterations.
         if (rank == 0) {
-            ASSERT_EQ(CloseRecvComm(pair.recvComm), ncclSuccess)
+            EXPECT_EQ(CloseRecvComm(pair.recvComm), ncclSuccess)
                 << "CloseRecvComm failed iter " << iter;
         } else {
-            ASSERT_EQ(CloseSendComm(pair.sendComm), ncclSuccess)
+            EXPECT_EQ(CloseSendComm(pair.sendComm), ncclSuccess)
                 << "CloseSendComm failed iter " << iter;
         }
 
         if (rank == 0) {
-            ASSERT_EQ(CloseListenComm(pair.listenComm), ncclSuccess)
+            EXPECT_EQ(CloseListenComm(pair.listenComm), ncclSuccess)
                 << "CloseListenComm failed iter " << iter;
         }
     }
