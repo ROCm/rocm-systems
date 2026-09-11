@@ -519,7 +519,8 @@ Bits atomic_scalar(ScalarAtomicOp operation, Bits old_bits, Bits source_bits, Bi
       return source_input | kQuiet;
   }
   if (is_nan(old_input))
-    return is_nan(source_input) ? old_input | kQuiet : source_result;
+    return is_nan(source_input) ? (legacy_minmax ? old_input : source_input) | kQuiet
+                                : source_result;
   if (is_nan(source_input))
     return old_result;
 

@@ -1872,8 +1872,8 @@ _FLAT_ATOMIC_OPS: dict[str, tuple[str, int]] = {
     'XOR': ('xor', 1),
     'INC': ('inc', 1),
     'DEC': ('dec', 1),
-    'CSUB': ('sub', 1),
-    'SUB_CLAMP': ('sub', 1),
+    'CSUB': ('sub_clamp', 1),
+    'SUB_CLAMP': ('sub_clamp', 1),
     # Floating-point atomics.
     'ADD_F32': ('fadd', 1),
     'ADD_F64': ('fadd', 2),
@@ -1889,7 +1889,7 @@ _FLAT_ATOMIC_OPS: dict[str, tuple[str, int]] = {
     'MAX_NUM_F32': ('fmax', 1),
     'MIN_NUM_F64': ('fmin', 2),
     'MAX_NUM_F64': ('fmax', 2),
-    'COND_SUB': ('sub', 1),
+    'COND_SUB': ('cond_sub', 1),
     'ORDERED_ADD': ('add', 2),
     # RDNA3+ typed MIN/MAX (suffix stripped from the full instruction name).
     'MIN_I32': ('smin', 1),
@@ -2015,11 +2015,11 @@ def _derive_flat(name: str) -> InstructionSemantics | None:
                 name, 'flat_load', elem_size=esz, num_elems=ne, sign_extend=se
             )
 
-    if upper == 'GLOBAL_LOAD_ADDTID_B32':
+    if upper in ('GLOBAL_LOAD_ADDTID_B32', 'GLOBAL_LOAD_DWORD_ADDTID'):
         return InstructionSemantics(
             name, 'global_load_addtid', elem_size=4, num_elems=1
         )
-    if upper == 'GLOBAL_STORE_ADDTID_B32':
+    if upper in ('GLOBAL_STORE_ADDTID_B32', 'GLOBAL_STORE_DWORD_ADDTID'):
         return InstructionSemantics(
             name, 'global_store_addtid', elem_size=4, num_elems=1
         )
@@ -2363,6 +2363,8 @@ def _derive_ds(name: str) -> InstructionSemantics | None:
         '_ADD_U64': ('add', 8, 2),
         '_ADD_RTN_U32': ('add', 4, 1),
         '_ADD_RTN_U64': ('add', 8, 2),
+        '_COND_SUB_U32': ('cond_sub', 4, 1),
+        '_COND_SUB_RTN_U32': ('cond_sub', 4, 1),
         '_SUB_U32': ('sub', 4, 1),
         '_SUB_U64': ('sub', 8, 2),
         '_SUB_RTN_U32': ('sub', 4, 1),
@@ -2450,8 +2452,8 @@ def _derive_ds(name: str) -> InstructionSemantics | None:
         '_MIN_NUM_RTN_F64': ('fmin', 8, 2),
         '_MAX_NUM_F64': ('fmax', 8, 2),
         '_MAX_NUM_RTN_F64': ('fmax', 8, 2),
-        '_SUB_CLAMP_U32': ('sub', 4, 1),
-        '_SUB_CLAMP_RTN_U32': ('sub', 4, 1),
+        '_SUB_CLAMP_U32': ('sub_clamp', 4, 1),
+        '_SUB_CLAMP_RTN_U32': ('sub_clamp', 4, 1),
         '_CMPSTORE_F32': ('fcmpswap', 4, 2),
         '_CMPSTORE_RTN_F32': ('fcmpswap', 4, 2),
         '_CMPSTORE_F64': ('fcmpswap', 8, 4),

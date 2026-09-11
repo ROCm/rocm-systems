@@ -922,7 +922,7 @@ void BufferAtomicCsubMubuf::execute_impl(amdgpu::Wavefront &wf) {
   d->elem_size = 4;
   d->num_elems = 1;
   d->is_load = (inst_.glc != 0);
-  d->atomic_op = amdgpu::AtomicOp::SUB;
+  d->atomic_op = amdgpu::AtomicOp::SUB_CLAMP;
   d->mtype = amdgpu::mtype_from_flags_gfx10(inst_.glc, inst_.dlc, inst_.slc);
   d->non_temporal = 0;
   mubuf_calculate_addresses(inst_, wf, *d);

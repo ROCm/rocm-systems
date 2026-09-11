@@ -2165,7 +2165,7 @@ void DsCondSubU32Vds::execute_impl(amdgpu::Wavefront &wf) {
   d->elem_size = 4;
   d->num_elems = 1;
   d->is_load = false;
-  d->atomic_op = amdgpu::AtomicOp::SUB;
+  d->atomic_op = amdgpu::AtomicOp::COND_SUB;
   d->wait_counter_type = amdgpu::WaitCounterType::DSCNT;
   ds_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
@@ -2186,7 +2186,7 @@ void DsSubClampU32Vds::execute_impl(amdgpu::Wavefront &wf) {
   d->elem_size = 4;
   d->num_elems = 1;
   d->is_load = false;
-  d->atomic_op = amdgpu::AtomicOp::SUB;
+  d->atomic_op = amdgpu::AtomicOp::SUB_CLAMP;
   d->wait_counter_type = amdgpu::WaitCounterType::DSCNT;
   ds_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
@@ -2368,7 +2368,7 @@ void DsCondSubRtnU32Vds::execute_impl(amdgpu::Wavefront &wf) {
   d->elem_size = 4;
   d->num_elems = 1;
   d->is_load = true;
-  d->atomic_op = amdgpu::AtomicOp::SUB;
+  d->atomic_op = amdgpu::AtomicOp::COND_SUB;
   d->wait_counter_type = amdgpu::WaitCounterType::DSCNT;
   ds_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
@@ -2390,7 +2390,7 @@ void DsSubClampRtnU32Vds::execute_impl(amdgpu::Wavefront &wf) {
   d->elem_size = 4;
   d->num_elems = 1;
   d->is_load = true;
-  d->atomic_op = amdgpu::AtomicOp::SUB;
+  d->atomic_op = amdgpu::AtomicOp::SUB_CLAMP;
   d->wait_counter_type = amdgpu::WaitCounterType::DSCNT;
   ds_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();

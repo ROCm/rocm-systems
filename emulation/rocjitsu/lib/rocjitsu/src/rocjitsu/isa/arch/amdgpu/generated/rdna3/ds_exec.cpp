@@ -531,7 +531,7 @@ void DsAddF32Ds::execute_impl(amdgpu::Wavefront &wf) {
   d->num_elems = 1;
   d->is_load = false;
   d->atomic_op = amdgpu::AtomicOp::FADD;
-  d->atomic_denorm_mode = 0;
+  d->atomic_denorm_mode = 2;
   d->atomic_lds_denorm_mode = wf.fp_denorm_mode_f32();
   d->atomic_legacy_minmax = true;
   d->wait_counter_type = amdgpu::WaitCounterType::DSCNT;
@@ -2465,7 +2465,7 @@ void DsAddRtnF32Ds::execute_impl(amdgpu::Wavefront &wf) {
   d->num_elems = 1;
   d->is_load = true;
   d->atomic_op = amdgpu::AtomicOp::FADD;
-  d->atomic_denorm_mode = 0;
+  d->atomic_denorm_mode = 2;
   d->atomic_lds_denorm_mode = wf.fp_denorm_mode_f32();
   d->atomic_legacy_minmax = true;
   d->wait_counter_type = amdgpu::WaitCounterType::DSCNT;

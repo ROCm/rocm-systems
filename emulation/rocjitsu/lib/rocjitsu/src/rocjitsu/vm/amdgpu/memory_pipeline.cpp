@@ -286,6 +286,10 @@ template <typename T> T apply_int_atomic(AtomicOp op, T old_val, T src_val, T cm
     return old_val + src_val;
   case AtomicOp::SUB:
     return old_val - src_val;
+  case AtomicOp::SUB_CLAMP:
+    return old_val >= src_val ? old_val - src_val : T{0};
+  case AtomicOp::COND_SUB:
+    return old_val >= src_val ? old_val - src_val : old_val;
   case AtomicOp::RSUB:
     return src_val - old_val;
   case AtomicOp::SMIN:

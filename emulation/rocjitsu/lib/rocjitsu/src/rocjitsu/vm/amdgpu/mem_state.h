@@ -52,6 +52,8 @@ enum class AtomicOp : uint8_t {
   MSKOR,          ///< Masked OR (data[0] = mask, data[1] = src).
   ADD,            ///< Atomic add.
   SUB,            ///< Atomic subtract (mem - data).
+  SUB_CLAMP,      ///< Unsigned subtraction, clamped to zero on underflow.
+  COND_SUB,       ///< Unsigned subtraction, retaining memory on underflow.
   RSUB,           ///< Atomic reverse subtract (data - mem).
   SMIN,           ///< Signed minimum.
   UMIN,           ///< Unsigned minimum.

@@ -8036,11 +8036,7 @@ class CodeGenerator:
         L.append('    d->wf_size = wf.wf_size();')
         L.append('    d->wg_id = wf.wg_id(); d->wf_id = wf.wf_id();')
         L.append('    uint64_t base = amdgpu::RegisterAccess(wf).read_scalar64(saddr);')
-        offset_expr = (
-            'signed_ioffset(inst_.ioffset)'
-            if self.isa_spec.arch_name == 'cdna5'
-            else 'static_cast<int32_t>(inst_.ioffset << 8) >> 8'
-        )
+        offset_expr = self.isa_spec.profile.global_addtid_offset_expr
         L.append(f'    int64_t offset = static_cast<int64_t>({offset_expr});')
         L.append('    for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {')
         L.append('      if (!(exec & (1ULL << lane))) continue;')
@@ -8084,7 +8080,9 @@ class CodeGenerator:
         self._append_global_addtid_addresses(L)
         L.append('  auto &cu = wf.cu();')
         L.append('  uint64_t exec = wf.exec();')
-        L.append(f"  uint32_t data_base = {self._vgpr_base_expr('vsrc')};")
+        L.append(
+            f"  uint32_t data_base = {self._vgpr_base_expr(self.isa_spec.profile.flat_store_src_field)};"
+        )
         L.append('  d->store_data.resize(wf.wf_size() * 4);')
         L.append('  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {')
         L.append('    if (!(exec & (1ULL << lane))) continue;')
@@ -8104,6 +8102,8 @@ class CodeGenerator:
         'mskor': 'amdgpu::AtomicOp::MSKOR',
         'add': 'amdgpu::AtomicOp::ADD',
         'sub': 'amdgpu::AtomicOp::SUB',
+        'sub_clamp': 'amdgpu::AtomicOp::SUB_CLAMP',
+        'cond_sub': 'amdgpu::AtomicOp::COND_SUB',
         'rsub': 'amdgpu::AtomicOp::RSUB',
         'smin': 'amdgpu::AtomicOp::SMIN',
         'umin': 'amdgpu::AtomicOp::UMIN',
@@ -8151,8 +8151,8 @@ class CodeGenerator:
         """Generate flat_atomic execute() body.
 
         If the operation is recognized, emits a full VectorMemState setup
-        with AtomicOp for the pipeline. Unrecognized variants (FP atomics,
-        etc.) fall back to a TODO stub.
+        with AtomicOp for the pipeline. Unrecognized variants raise an
+        explicit unimplemented-instruction error.
         """
         if sem.operation is None or sem.operation not in self._ATOMIC_OP_ENUM:
             return f'  (void)wf;\n  throw util::UnimplementedInst(mnemonic()); // TODO: unhandled flat_atomic variant ({sem.name})'
@@ -9742,6 +9742,14 @@ class CodeGenerator:
                     cdna5_swmmac_has_modifiers = self._cdna5_swmmac_has_modifiers(inst)
                     operand_size_exprs: dict[str, str] = {}
                     for opnd in inst.operands:
+                        # FLAT's optional scalar address is constructed below,
+                        # including when a GLOBAL-only XML form lists it explicitly.
+                        if (
+                            enc.enc_name == 'ENC_FLAT'
+                            and opnd.name == 'saddr'
+                            and any(o.name == 'addr' for o in inst.operands)
+                        ):
+                            continue
                         opnd_size_expr = self._operand_size_override(
                             enc.enc_name, opnd, inst_sem
                         )
@@ -10013,7 +10021,7 @@ class CodeGenerator:
                     _has_flat_saddr = self.isa_spec.profile.mnemonic_rule(
                         enc.enc_name
                     ).use_flat_mnemonic
-                    if _has_flat_saddr:
+                    if _has_flat_saddr and any(o.name == 'addr' for o in inst.operands):
                         saddr_null = self._saddr_null_expr(enc.enc_name)
                         private_members.append(cgen.Statement('Operand saddr'))
                         opnd_ctor_init.append('saddr(0, OperandType::OPR_SREG, 0)')
@@ -10344,6 +10352,13 @@ class CodeGenerator:
                             'OpSelSdstExec::OPR_SDST_EXEC_EXEC_LO) '
                             f'[[unlikely]] return emit_error.emit() << "{inst.name} has an invalid '
                             'SReg_32_XEXEC destination";'
+                        )
+
+                    if inst.required_flat_segment is not None:
+                        factory_validation_parts.append(
+                            f'if (reinterpret_cast<const {factory_op_encoding}*>(inst)->seg != '
+                            f'{inst.required_flat_segment}u) [[unlikely]] return emit_error.emit() '
+                            f'<< "{inst.name} requires its GLOBAL segment";'
                         )
 
                     # Flat segment-aware operands: adjust addr width and add
