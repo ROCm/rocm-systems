@@ -31,6 +31,7 @@ concept domain_service_backend =
         typename Backend::on_records_cb_t;
         typename Backend::on_record_cb_t;
         typename Backend::buffer_policy_t;
+        { Backend::compile_time_version } -> std::convertible_to<std::uint32_t>;
         {
             Backend::BUFFER_POLICY_LOSSLESS
         } -> std::convertible_to<typename Backend::buffer_policy_t>;
