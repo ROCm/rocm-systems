@@ -800,6 +800,9 @@ class TestHipKernelProviderRockeHandler:
     """Tests for HipKernelProviderRockeHandler detection logic."""
 
     _ENGINE_DIR = "lib/hipdnn_plugins/engines/arch_content/rocke"
+    _TEST_ENGINE_DIR = (
+        "lib/hipdnn_plugins/engines/test_arch_content/hip-kernel-provider"
+    )
 
     @pytest.fixture
     def handler(self):
@@ -878,6 +881,54 @@ class TestHipKernelProviderRockeHandler:
 
         result = handler.detect(file_path, prefix_root)
         assert result == "gfx942"
+
+    def test_detect_test_arch_content(self, handler, prefix_root):
+        """Test content splits per arch like the runtime container. Unsplit, the
+        per-arch builds each emit one artifact of the same name holding only
+        their own arches, and the last to finish overwrites the others."""
+        file_path = (
+            prefix_root / f"{self._TEST_ENGINE_DIR}/unit/shared/gfx1101/kernels.kpack"
+        )
+        file_path.parent.mkdir(parents=True)
+        file_path.touch()
+
+        result = handler.detect(file_path, prefix_root)
+        assert result == "gfx1101"
+
+    def test_detect_test_arch_content_various_arches(self, handler, prefix_root):
+        for arch in ("gfx942", "gfx1100", "gfx1101", "gfx1201"):
+            file_path = (
+                prefix_root
+                / f"{self._TEST_ENGINE_DIR}/unit/shared/{arch}/descriptor.json"
+            )
+            file_path.parent.mkdir(parents=True, exist_ok=True)
+            file_path.touch()
+
+            result = handler.detect(file_path, prefix_root)
+            assert result == arch, f"Failed for {arch}"
+
+    def test_reject_test_arch_content_without_arch_dir(self, handler, prefix_root):
+        """An arch-independent asset under test_arch_content stays generic, so
+        every arch's test artifact keeps a copy of it."""
+        file_path = (
+            prefix_root / f"{self._TEST_ENGINE_DIR}/test_kpack_binary/test_zstd.kpack"
+        )
+        file_path.parent.mkdir(parents=True)
+        file_path.touch()
+
+        result = handler.detect(file_path, prefix_root)
+        assert result is None
+
+    def test_reject_test_arch_content_not_under_engines(self, handler, prefix_root):
+        """A test_arch_content dir not directly under engines/ stays generic."""
+        file_path = (
+            prefix_root / "share/some_component/test_arch_content/gfx942/data.bin"
+        )
+        file_path.parent.mkdir(parents=True)
+        file_path.touch()
+
+        result = handler.detect(file_path, prefix_root)
+        assert result is None
 
     def test_reject_no_arch_dir_under_arch_content(self, handler, prefix_root):
         """arch_content content with no arch directory stays generic (None)."""

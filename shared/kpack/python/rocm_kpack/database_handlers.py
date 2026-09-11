@@ -283,14 +283,23 @@ class MIOpenHandler(DatabaseHandler):
 class HipKernelProviderRockeHandler(DatabaseHandler):
     """Handler for hipKernelProvider per-architecture kernel content.
 
-    Engines install ISA-specific content under a generic ``arch_content``
-    container in the plugin engines dir, keyed by an arch directory:
+    Engines install ISA-specific content under a generic container in the
+    plugin engines dir, keyed by an arch directory:
         .../hipdnn_plugins/engines/arch_content/rocke/gfx942/rocke_client_gfx942.kpack
         .../hipdnn_plugins/engines/arch_content/rocke/gfx950/rocke_client_gfx950.kpack
-    The container is ``arch_content`` (not ``hip_kernel_provider/``, whose name
-    would collide with the plugin file and shadow it from hipDNN's loader), so
-    future engines drop under ``arch_content/<engine>/`` with no handler change.
+    Test content sits in the parallel ``test_arch_content`` container so it
+    packages into the test component rather than the runtime one. Both split:
+    each per-arch build emits only the arches it was built for, so an unsplit
+    container leaves every family writing one artifact name and the last family
+    to finish overwrites the rest.
+    The containers are named for their content, not the engine (a
+    ``hip_kernel_provider/`` name would collide with the plugin file and shadow
+    it from hipDNN's loader), so future engines drop under
+    ``<container>/<engine>/`` with no handler change.
     """
+
+    #: Containers under ``engines/`` whose arch subdirectories are split per arch.
+    _ARCH_CONTAINERS = ("arch_content", "test_arch_content")
 
     def name(self) -> str:
         return "hipkernelprovider"
@@ -299,9 +308,10 @@ class HipKernelProviderRockeHandler(DatabaseHandler):
         """
         Detect per-arch content by its arch directory.
 
-        Pattern: */engines/arch_content/[.../]<arch>/...  The ``engines`` parent
-        scopes the match to the plugin engines dir (matching TheRock's
-        ``**/engines/arch_content/**`` include).
+        Pattern: */engines/<container>/[.../]<arch>/... for each container in
+        ``_ARCH_CONTAINERS``.  The ``engines`` parent scopes the match to the
+        plugin engines dir (matching TheRock's ``**/engines/arch_content/**``
+        and ``**/engines/test_arch_content/**`` includes).
 
         Returns:
             Bundle key (the gfx arch directory, e.g. 'gfx942') or None.
@@ -311,13 +321,13 @@ class HipKernelProviderRockeHandler(DatabaseHandler):
             (
                 i
                 for i in range(1, len(parts))
-                if parts[i] == "arch_content" and parts[i - 1] == "engines"
+                if parts[i] in self._ARCH_CONTAINERS and parts[i - 1] == "engines"
             ),
             None,
         )
         if root is None:
             return None
-        # First arch dir under arch_content with a file beneath it is the key.
+        # First arch dir under the container with a file beneath it is the key.
         for i in range(root + 1, len(parts) - 1):
             if _GFX_ARCH_PATTERN.fullmatch(parts[i]):
                 return parts[i]
