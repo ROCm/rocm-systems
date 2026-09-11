@@ -16,13 +16,14 @@
 #include "fakes/dev_runtime_micro_fakes.h"
 
 // param.h's NCCL_PARAM caches its value in a function-local static, so a param
-// read once is frozen for the process. Replace the generated body with one that
-// calls g_devrLoadParam every time, so tests can vary a param between cases. Must
+// read once is frozen for the process. fakes/param_redirect.h -- shared with
+// group/p2p/init/enqueue -- replaces the generated body with one that calls
+// g_loadParam on every read, so tests can vary a param between cases. Must
 // precede the unit under test, which is where the bodies are emitted.
-#include "param.h"
-#undef NCCL_PARAM
-#define NCCL_PARAM(name, env, deftVal) \
-  int64_t ncclParam##name() { return g_devrLoadParam((env), (deftVal)); }
+//
+// g_loadParam is supplied by fakes/dev_runtime_micro_fakes.cc here rather than
+// fakes/nccl_fakes.cc, which this binary does not link.
+#include "fakes/param_redirect.h"
 
 // ncclCalloc's failure arms cannot be reached while it always succeeds, and it
 // is a macro rather than a symbol, so route it through a call counter.
@@ -312,7 +313,7 @@ TEST_F(DevrInitOnceTest, SymmetricDefaultStride_SizesFromLargestPeer) {
 // -- the configured stride is used instead of the largest peer's memory.
 TEST_F(DevrInitOnceTest, SymmetricExplicitStride_UsesConfiguredValue) {
   comm->symmetricSupport = 1;
-  ScopedHook loadParam(g_devrLoadParam, [](const char* env, int64_t deftVal) -> int64_t {
+  ScopedHook loadParam(g_loadParam, [](const char* env, int64_t deftVal) -> int64_t {
     return std::string(env) == "WIN_STRIDE" ? (int64_t(1) << 33) : deftVal;
   });
 
@@ -971,7 +972,7 @@ TEST_F(SymImportAndMapForRankTest, RemoteRank_ImportsInsteadOfReusing) {
 // segment -- so the caller's handle is reused without an import.
 TEST_F(SymImportAndMapForRankTest, RemoteHostSegmentWithReuseParam_ReusesHandles) {
   messages[1 * kMaxSegments].type = kLocHostNuma;
-  ScopedHook loadParam(g_devrLoadParam, ReuseSysmemHandlesOn());
+  ScopedHook loadParam(g_loadParam, ReuseSysmemHandlesOn());
   ScopedHook import(g_devrHipMemImportFromShareableHandle,
                     [](hipMemGenericAllocationHandle_t*, void*, hipMemAllocationHandleType) { return hipSuccess; });
 
@@ -982,7 +983,7 @@ TEST_F(SymImportAndMapForRankTest, RemoteHostSegmentWithReuseParam_ReusesHandles
 
 // Branch: param on but the segment is device-backed, so reuse does not apply.
 TEST_F(SymImportAndMapForRankTest, RemoteDeviceSegmentWithReuseParam_StillImports) {
-  ScopedHook loadParam(g_devrLoadParam, ReuseSysmemHandlesOn());
+  ScopedHook loadParam(g_loadParam, ReuseSysmemHandlesOn());
   ScopedHook import(g_devrHipMemImportFromShareableHandle,
                     [](hipMemGenericAllocationHandle_t* h, void*, hipMemAllocationHandleType) {
                       if (h) *h = reinterpret_cast<hipMemGenericAllocationHandle_t>(0x1);
@@ -2113,7 +2114,7 @@ TEST_F(SymMemoryObtainRegisterTest, SingleLsaTeam_LeavesRmaProxyDisabled) {
 // Branch: RMA_DISABLE overrides the other three conditions.
 TEST_F(SymMemoryObtainRegisterTest, RmaDisabledByParam_LeavesRmaProxyDisabled) {
   EnableRmaPrerequisites();
-  ScopedHook loadParam(g_devrLoadParam, [](const char* env, int64_t deftVal) -> int64_t {
+  ScopedHook loadParam(g_loadParam, [](const char* env, int64_t deftVal) -> int64_t {
     return std::string(env) == "RMA_DISABLE" ? 1 : deftVal;
   });
   ScopedHook gather(g_devrBootstrapAllGather, agreeing);
@@ -3365,7 +3366,7 @@ TEST_F(DevrWindowRegisterInGroupSymTest, MisalignedWindow_ReturnsInvalidArgument
 TEST_F(DevrWindowRegisterInGroupSymTest, SysmemSegmentWithoutElasticParam_ReturnsInvalidArgument) {
   ScopedHook range(g_devrHipMemGetAddressRange, AddressRangeOf(4096));
   ScopedHook props(g_devrHipMemGetAllocationPropertiesFromHandle, SegmentsOfType(kLocHost));
-  ScopedHook loadParam(g_devrLoadParam, [](const char* env, int64_t deftVal) -> int64_t {
+  ScopedHook loadParam(g_loadParam, [](const char* env, int64_t deftVal) -> int64_t {
     return std::string(env) == "ELASTIC_BUFFER_REGISTER" ? 0 : deftVal;
   });
   ScopedHook dereg(g_devrNcclCommDeregister, [](const ncclComm_t, void*) { return ncclSuccess; });
@@ -4422,7 +4423,7 @@ TEST_F(NcclVersionCompatTest, CallerNewerThanLibrary_ReturnsInvalidUsage) {
 TEST_F(NcclVersionCompatTest, VersionCheckDisabled_FallsThroughToLookup) {
   ncclDevCommCompat_v22902.minVersion = 0;
   ncclDevCommCompat_v22902.maxVersion = NCCL_VERSION_CODE + 10;
-  ScopedHook loadParam(g_devrLoadParam, [](const char* env, int64_t deftVal) -> int64_t {
+  ScopedHook loadParam(g_loadParam, [](const char* env, int64_t deftVal) -> int64_t {
     return std::string(env) == "ENABLE_VERSION_CHECK" ? 0 : deftVal;
   });
 

@@ -106,7 +106,7 @@ extern std::function<ncclResult_t(struct ncclComm*, int, void*, int*)> g_devrPro
 // the macro to call this instead of param.h's caching body, so a param's value
 // can differ between tests; the default returns the param's own default.
 // Takes the bare env name (no "NCCL_" prefix) and that default.
-extern std::function<int64_t(const char*, int64_t)> g_devrLoadParam;
+extern std::function<int64_t(const char*, int64_t)> g_loadParam;
 
 // Restore every seam above to its default. Call from a fixture TearDown so a
 // test cannot leak behaviour into the next one.
