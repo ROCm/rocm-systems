@@ -237,4 +237,131 @@ TEST_F(CeAlltoAllvEligibilityTest, PeerSendSizeValidationAcceptsMatch)
     EXPECT_EQ(ncclAlltoAllvValidatePeerSendSize(128, 128, 0, 1), ncclSuccess);
 }
 
+// ---------------------------------------------------------------------------
+// ncclCeAlltoAllEligible: the AlltoAll DDA-yield probe. Same CTA / sysmem /
+// capture / group-depth gates as AlltoAllv, plus hierarchical CE so it matches
+// taskAppend. These cases actually enter the predicate that
+// alltoAllRegisteredCeAllowed calls; Rcclwrap.AlltoAllDdaDecision_* only
+// drives rcclAlltoAllShouldTakeDdaPath with a literal ceAlltoAllAllowed.
+class CeAlltoAllEligibilityTest : public ::testing::Test
+{
+protected:
+    CeAlltoAllvMockComm mockComm_;
+};
+
+TEST_F(CeAlltoAllEligibilityTest, EligibleWithSymmetricSingleNode)
+{
+    if (!isCeRuntimeDriverSupported())
+        GTEST_SKIP() << "CE driver not in supported range";
+
+    EXPECT_TRUE(ncclCeAlltoAllEligible(mockComm_.get(),
+                                       ncclFloat32,
+                                       ncclSymSendRegRecvReg,
+                                       /*hasSysmemSegment=*/false,
+                                       /*capturing=*/false));
+    EXPECT_TRUE(ncclCeAlltoAllEligible(mockComm_.get(),
+                                       ncclFloat32,
+                                       ncclSymSendNonregRecvReg,
+                                       /*hasSysmemSegment=*/false,
+                                       /*capturing=*/false));
+}
+
+TEST_F(CeAlltoAllEligibilityTest, RequiresZeroCtaPolicy)
+{
+    if (!isCeRuntimeDriverSupported())
+        GTEST_SKIP() << "CE driver not in supported range";
+
+    mockComm_.comm.config.CTAPolicy = NCCL_CTA_POLICY_DEFAULT;
+    EXPECT_FALSE(ncclCeAlltoAllEligible(mockComm_.get(),
+                                        ncclFloat32,
+                                        ncclSymSendRegRecvReg,
+                                        /*hasSysmemSegment=*/false,
+                                        /*capturing=*/false));
+
+    mockComm_.comm.config.CTAPolicy = NCCL_CTA_POLICY_ZERO;
+    EXPECT_TRUE(ncclCeAlltoAllEligible(mockComm_.get(),
+                                       ncclFloat32,
+                                       ncclSymSendRegRecvReg,
+                                       /*hasSysmemSegment=*/false,
+                                       /*capturing=*/false));
+}
+
+TEST_F(CeAlltoAllEligibilityTest, RejectsSysmemSegmentOrCapture)
+{
+    if (!isCeRuntimeDriverSupported())
+        GTEST_SKIP() << "CE driver not in supported range";
+
+    EXPECT_FALSE(ncclCeAlltoAllEligible(mockComm_.get(),
+                                        ncclFloat32,
+                                        ncclSymSendRegRecvReg,
+                                        /*hasSysmemSegment=*/true,
+                                        /*capturing=*/false));
+    EXPECT_FALSE(ncclCeAlltoAllEligible(mockComm_.get(),
+                                        ncclFloat32,
+                                        ncclSymSendRegRecvReg,
+                                        /*hasSysmemSegment=*/false,
+                                        /*capturing=*/true));
+}
+
+TEST_F(CeAlltoAllEligibilityTest, RejectsNestedGroup)
+{
+    if (!isCeRuntimeDriverSupported())
+        GTEST_SKIP() << "CE driver not in supported range";
+
+    const int savedGroupDepth = ncclGroupDepth;
+    ncclGroupDepth = 1;
+    EXPECT_FALSE(ncclCeAlltoAllEligible(mockComm_.get(),
+                                        ncclFloat32,
+                                        ncclSymSendRegRecvReg,
+                                        /*hasSysmemSegment=*/false,
+                                        /*capturing=*/false));
+    ncclGroupDepth = savedGroupDepth;
+}
+
+TEST_F(CeAlltoAllEligibilityTest, MultiNodeRejected)
+{
+    if (!isCeRuntimeDriverSupported())
+        GTEST_SKIP() << "CE driver not in supported range";
+
+    // nRanks=1 so computeLsaSize does not walk the unset rankToNode table.
+    // Single-node CE is closed by nNodes>1; hier CE is closed by a one-rank LSA team.
+    mockComm_.comm.nNodes = 2;
+    mockComm_.comm.nRanks = 1;
+    EXPECT_FALSE(ncclCeAlltoAllEligible(mockComm_.get(),
+                                        ncclFloat32,
+                                        ncclSymSendRegRecvReg,
+                                        /*hasSysmemSegment=*/false,
+                                        /*capturing=*/false));
+}
+
+TEST_F(CeAlltoAllEligibilityTest, NoSymmetricSupportRejected)
+{
+    if (!isCeRuntimeDriverSupported())
+        GTEST_SKIP() << "CE driver not in supported range";
+
+    mockComm_.comm.symmetricSupport = false;
+    EXPECT_FALSE(ncclCeAlltoAllEligible(mockComm_.get(),
+                                        ncclFloat32,
+                                        ncclSymSendRegRecvReg,
+                                        /*hasSysmemSegment=*/false,
+                                        /*capturing=*/false));
+}
+
+TEST_F(CeAlltoAllEligibilityTest, UnsupportedWindowRegistrationRejected)
+{
+    if (!isCeRuntimeDriverSupported())
+        GTEST_SKIP() << "CE driver not in supported range";
+
+    EXPECT_FALSE(ncclCeAlltoAllEligible(mockComm_.get(),
+                                        ncclFloat32,
+                                        ncclSymSendNonregRecvNonreg,
+                                        /*hasSysmemSegment=*/false,
+                                        /*capturing=*/false));
+    EXPECT_FALSE(ncclCeAlltoAllEligible(mockComm_.get(),
+                                        ncclFloat32,
+                                        ncclSymSendRegRecvNonreg,
+                                        /*hasSysmemSegment=*/false,
+                                        /*capturing=*/false));
+}
+
 } // namespace RcclUnitTesting

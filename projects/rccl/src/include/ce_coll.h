@@ -187,6 +187,11 @@ ncclResult_t ncclAlltoAllvValidatePeerSendSize(size_t sendBytes, size_t peerRecv
 bool ncclCeAlltoAllvEligible(struct ncclComm* comm, ncclDataType_t datatype, ncclSymRegType_t winRegType,
                              bool hasSysmemSegment, bool capturing);
 
+// Same CTA_POLICY_ZERO / sysmem / capture / group-depth gates as AlltoAllv, plus
+// hierarchical CE so the AlltoAll DDA yield matches taskAppend.
+bool ncclCeAlltoAllEligible(struct ncclComm* comm, ncclDataType_t datatype, ncclSymRegType_t winRegType,
+                            bool hasSysmemSegment, bool capturing);
+
 ncclResult_t ncclHierCeAllGather(struct ncclComm* comm, struct ncclKernelPlan* plan, cudaStream_t stream);
 
 ncclResult_t ncclHierCeAlltoAll(struct ncclComm* comm, struct ncclKernelPlan* plan, cudaStream_t stream);

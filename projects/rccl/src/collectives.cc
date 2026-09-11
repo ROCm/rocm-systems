@@ -206,10 +206,8 @@ bool rcclAllReduceShouldTakeDdaPath(const ncclComm* comm, size_t count, ncclData
 }
 
 bool rcclAlltoAllShouldTakeDdaPath(const ncclComm* comm, size_t totalBytes, bool ceAlltoAllAllowed) {
-  // AlltoAll has no symmetric kernel. If we do not yield when CE will dispatch,
-  // gfx1250 DDA (default below 4 MiB) returns before enqueue and CE AlltoAll
-  // never initializes -- the CeMPI_AlltoAll tests fail with "CE: rank" absent
-  // even though NCCL_CTA_POLICY=2 and the buffers are symmetrically registered.
+  // AlltoAll has no symmetric kernel, so DDA must yield here or registered-window
+  // CE never dispatches. Full contract is on the declaration in rccl_common.h.
   return !ceAlltoAllAllowed &&
          rcclDdaEnabled(comm, totalBytes, kDdaAlltoAllGfx942ThresholdBytes, kDdaAlltoAllGfx950ThresholdBytes,
                         kDdaAlltoAllGfx1250ThresholdBytes);
@@ -388,8 +386,8 @@ ncclResult_t ncclAllGather_impl(const void* sendbuff, void* recvbuff, size_t sen
 
 RCCL_PARAM(AlltoAllPivotEnable, "ALL_TO_ALL_PIVOT_ENABLE", 0);
 
-// Registered-window CE predicate that matches taskAppend for AlltoAll (CTA_POLICY_ZERO
-// is checked by the caller). Only invoked when DDA would otherwise early-return.
+// Window/graph prologue, then ncclCeAlltoAllEligible. CTA_POLICY_ZERO is also
+// checked by the caller so the default AlltoAll path skips this lookup.
 static ncclResult_t alltoAllRegisteredCeAllowed(ncclComm* comm, const void* sendbuff, void* recvbuff,
                                                 ncclDataType_t datatype, cudaStream_t stream, bool* allowed) {
   *allowed = false;
@@ -402,9 +400,7 @@ static ncclResult_t alltoAllRegisteredCeAllowed(ncclComm* comm, const void* send
   NCCLCHECK(ncclGetSymRegType(sendWin, recvWin, &winRegType));
   struct ncclCudaGraph ceGraph;
   NCCLCHECK(ncclCudaGetCapturingGraph(&ceGraph, stream, comm->config.graphUsageMode));
-  *allowed = !ncclCudaGraphValid(ceGraph) && !hasSysmemSegment &&
-             (ncclCeAvailable(comm, ncclFuncAlltoAll, (int)ncclSum, datatype, winRegType) ||
-              ncclHierCeAvailable(comm, ncclFuncAlltoAll, (int)ncclSum, datatype, winRegType));
+  *allowed = ncclCeAlltoAllEligible(comm, datatype, winRegType, hasSysmemSegment, ncclCudaGraphValid(ceGraph));
   return ncclSuccess;
 }
 
@@ -483,22 +479,21 @@ ncclResult_t ncclAlltoAll_impl(const void* sendbuff, void* recvbuff, size_t coun
     }
     if (rcclAlltoAllShouldTakeDdaPath(comm, totalBytes, ceAlltoAllAllowed)) {
       if (IsArchMatch(comm->archName, "gfx1250")) {
-        const size_t a2aBytes = comm->nRanks * count * ncclTypeSize(datatype);
         const int64_t llThresh = rcclParamDdaLLThreshold();
         const int64_t ll128Thresh = rcclParamDdaLL128Threshold();
         // Small-chunk fast lane: LL protocol (no GPU barrier).
-        if (rcclParamDdaLL() && llThresh > 0 && a2aBytes <= (size_t)llThresh &&
+        if (rcclParamDdaLL() && llThresh > 0 && totalBytes <= (size_t)llThresh &&
             ncclAllToAllDdaFabricLLEligible(comm, sendbuff, recvbuff, count, datatype)) {
           INFO(NCCL_COLL, "AllToAll: taking DDA fabric LL path: nRanks=%d nNodes=%d count=%zu datatype=%d bytes=%zu",
-               comm->nRanks, comm->nNodes, count, (int)datatype, a2aBytes);
+               comm->nRanks, comm->nNodes, count, (int)datatype, totalBytes);
           NCCLCHECK(ncclAllToAllDdaFabricLL(sendbuff, recvbuff, count, datatype, comm, stream));
           return ncclSuccess;
         }
         // Mid-chunk fast lane: LL128 protocol (128B lines, no GPU barrier).
-        if (rcclParamDdaLL128() && ll128Thresh > 0 && a2aBytes <= (size_t)ll128Thresh &&
+        if (rcclParamDdaLL128() && ll128Thresh > 0 && totalBytes <= (size_t)ll128Thresh &&
             ncclAllToAllDdaFabricLL128Eligible(comm, sendbuff, recvbuff, count, datatype)) {
           INFO(NCCL_COLL, "AllToAll: taking DDA fabric LL128 path: nRanks=%d nNodes=%d count=%zu datatype=%d bytes=%zu",
-               comm->nRanks, comm->nNodes, count, (int)datatype, a2aBytes);
+               comm->nRanks, comm->nNodes, count, (int)datatype, totalBytes);
           NCCLCHECK(ncclAllToAllDdaFabricLL128(sendbuff, recvbuff, count, datatype, comm, stream));
           return ncclSuccess;
         }

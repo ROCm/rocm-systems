@@ -2615,8 +2615,9 @@ TEST(RcclAllReduceDdaDecision, UnsupportedArch_NoDda)
 // rcclAlltoAllShouldTakeDdaPath: AlltoAll has no symmetric kernel, so DDA used
 // to early-return on gfx1250 even when NCCL_CTA_POLICY_ZERO would take CE.
 // When ceAlltoAllAllowed is true, DDA must yield. Default (CE not allowed)
-// AlltoAll DDA on gfx1250 is unchanged.
-TEST(RcclAlltoAllDdaDecision, Gfx1250_CeNotAllowed_TakesDda)
+// AlltoAll DDA on gfx1250 is unchanged. The window/CTA/graph probe itself is
+// CeAlltoAllEligibilityTest; these cases only lock the helper's boolean.
+TEST(Rcclwrap, AlltoAllDdaDecision_Gfx1250_CeNotAllowed_TakesDda)
 {
     ncclComm comm{};
     InitDdaDecisionComm(comm, "gfx1250", 4, 1, /*symmetricSupport=*/true);
@@ -2625,7 +2626,7 @@ TEST(RcclAlltoAllDdaDecision, Gfx1250_CeNotAllowed_TakesDda)
     EXPECT_TRUE(rcclAlltoAllShouldTakeDdaPath(&comm, totalBytes, /*ceAlltoAllAllowed=*/false));
 }
 
-TEST(RcclAlltoAllDdaDecision, Gfx1250_CeAllowed_YieldsToCe)
+TEST(Rcclwrap, AlltoAllDdaDecision_Gfx1250_CeAllowed_YieldsToCe)
 {
     ncclComm comm{};
     InitDdaDecisionComm(comm, "gfx1250", 4, 1, /*symmetricSupport=*/true);
@@ -2633,7 +2634,7 @@ TEST(RcclAlltoAllDdaDecision, Gfx1250_CeAllowed_YieldsToCe)
     EXPECT_FALSE(rcclAlltoAllShouldTakeDdaPath(&comm, totalBytes, /*ceAlltoAllAllowed=*/true));
 }
 
-TEST(RcclAlltoAllDdaDecision, Gfx1250_TwoRankLlSize_CeAllowed_YieldsToCe)
+TEST(Rcclwrap, AlltoAllDdaDecision_Gfx1250_TwoRankLlSize_CeAllowed_YieldsToCe)
 {
     ncclComm comm{};
     InitDdaDecisionComm(comm, "gfx1250", 2, 1, /*symmetricSupport=*/true);
@@ -2643,7 +2644,7 @@ TEST(RcclAlltoAllDdaDecision, Gfx1250_TwoRankLlSize_CeAllowed_YieldsToCe)
     EXPECT_FALSE(rcclAlltoAllShouldTakeDdaPath(&comm, totalBytes, /*ceAlltoAllAllowed=*/true));
 }
 
-TEST(RcclAlltoAllDdaDecision, Gfx1250_AboveThreshold_NoDda)
+TEST(Rcclwrap, AlltoAllDdaDecision_Gfx1250_AboveThreshold_NoDda)
 {
     ncclComm comm{};
     InitDdaDecisionComm(comm, "gfx1250", 4, 1, /*symmetricSupport=*/true);
@@ -2651,7 +2652,7 @@ TEST(RcclAlltoAllDdaDecision, Gfx1250_AboveThreshold_NoDda)
     EXPECT_FALSE(rcclAlltoAllShouldTakeDdaPath(&comm, totalBytes, /*ceAlltoAllAllowed=*/false));
 }
 
-TEST(RcclAlltoAllDdaDecision, Gfx950_TooFewRanks_NoDda)
+TEST(Rcclwrap, AlltoAllDdaDecision_Gfx950_TooFewRanks_NoDda)
 {
     ncclComm comm{};
     InitDdaDecisionComm(comm, "gfx950", 4, 1, /*symmetricSupport=*/true);
