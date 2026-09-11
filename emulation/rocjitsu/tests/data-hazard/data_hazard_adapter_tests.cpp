@@ -1397,6 +1397,64 @@ TEST(DataHazardAdapterTest, GlobalToLdsRouteFeedsCrossWaveLdsRaceDetection) {
   EXPECT_EQ(warnings[0].finding.address, 0x180u);
 }
 
+// A gfx12 named barrier resolves for only the subset of waves that joined it.
+// The plugin maps that to a non-retiring workgroup barrier, which must leave the
+// shared LDS epoch intact: clearing it would discard a non-member wave's
+// pre-barrier LDS access as if it had synchronized, hiding a real cross-wave
+// race. Here member wave 0 writes LDS[0x80], a partial (named) barrier resolves
+// for wave 0 alone, then non-member wave 1 writes the same address; the race
+// must still be reported at the following full-workgroup barrier.
+TEST(DataHazardAdapterTest, NamedBarrierDoesNotRetireLdsEpochAcrossNonMembers) {
+  AdapterHarness h;
+
+  ExecutionKey other_wave = h.wave;
+  other_wave.wave_id = 1;
+  h.adapter.on_wave_begin(other_wave);
+
+  h.adapter.on_instruction(h.instruction(1, 0x100));
+  dh::MemoryRouteView member_write;
+  member_write.instruction = h.instruction(1, 0x100);
+  member_write.resource_kind = ResourceKind::LocalMemory;
+  member_write.address = 0x80;
+  member_write.local_address = 0x80;
+  member_write.size_bytes = 4;
+  member_write.local_size_bytes = 4;
+  member_write.is_store = true;
+  member_write.writes_local_memory = true;
+  h.adapter.on_memory_route(member_write);
+
+  // Named barrier resolves for the member wave only. Non-retiring: the epoch,
+  // which still holds wave 0's write, must survive.
+  h.adapter.on_barrier(h.wave, rocjitsu::AmdgpuBarrierScope::Named);
+
+  dh::InstructionView other_inst;
+  other_inst.execution = other_wave;
+  other_inst.instruction_id = 2;
+  other_inst.pc = 0x104;
+  h.adapter.on_instruction(other_inst);
+
+  dh::MemoryRouteView nonmember_write;
+  nonmember_write.instruction = other_inst;
+  nonmember_write.resource_kind = ResourceKind::LocalMemory;
+  nonmember_write.address = 0x80;
+  nonmember_write.local_address = 0x80;
+  nonmember_write.size_bytes = 4;
+  nonmember_write.local_size_bytes = 4;
+  nonmember_write.is_store = true;
+  nonmember_write.writes_local_memory = true;
+  h.adapter.on_memory_route(nonmember_write);
+
+  // A full-workgroup barrier retires the epoch, checking the two waves' writes
+  // for races before clearing.
+  h.adapter.on_barrier(h.wave, rocjitsu::AmdgpuBarrierScope::Workgroup);
+
+  const auto warnings = h.engine.warning_snapshot();
+  ASSERT_EQ(warnings.size(), 1u);
+  EXPECT_EQ(warnings[0].finding.kind, HazardKind::LocalMemoryRace);
+  EXPECT_EQ(warnings[0].finding.resource_kind, ResourceKind::LocalMemory);
+  EXPECT_EQ(warnings[0].finding.address, 0x80u);
+}
+
 TEST(DataHazardAdapterTest, GlobalToLdsPerLaneRouteFeedsSpecificLdsRegion) {
   AdapterHarness h;
 
@@ -2277,8 +2335,8 @@ TEST(DataHazardAdapterTest, PairedStorecntDscntStorecntOnlyDoesNotDrainDscnt) {
 // Guards the fix from overcorrecting: when the named form spells both fields,
 // both still drain.
 TEST(DataHazardAdapterTest, PairedLoadcntDscntBothFieldsDrainBothCounters) {
-  const auto action =
-      dh::make_wait_action(dh::make_wait_info(dh::WaitKind::WaitLoadcntDscnt, "loadcnt(0) dscnt(2)"));
+  const auto action = dh::make_wait_action(
+      dh::make_wait_info(dh::WaitKind::WaitLoadcntDscnt, "loadcnt(0) dscnt(2)"));
 
   const auto *vmem = find_counter(action, WaitCntType::VMEM);
   const auto *lds = find_counter(action, WaitCntType::LDS);

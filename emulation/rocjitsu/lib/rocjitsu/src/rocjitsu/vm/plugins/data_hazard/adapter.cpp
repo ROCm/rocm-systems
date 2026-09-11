@@ -4,6 +4,8 @@
 #include "rocjitsu/vm/plugins/data_hazard/adapter.h"
 
 #include "detail/waitcnt_decode.h"
+#include "hash_utils.h"
+#include "rocjitsu/vm/plugins/execution_plugin.h"
 
 #include <algorithm>
 #include <charconv>
@@ -509,10 +511,46 @@ void DataHazardAdapter::on_memory_route(const MemoryRouteView &route) {
   // s_wait_storecnt drains, so do not track them as pending WAR reads.
 }
 
+void DataHazardAdapter::on_barrier(const ExecutionKey &wave, AmdgpuBarrierScope scope) {
+  switch (scope) {
+  case AmdgpuBarrierScope::Workgroup:
+    on_workgroup_barrier(wave);
+    break;
+  case AmdgpuBarrierScope::Cluster:
+    on_cluster_barrier(wave);
+    break;
+  case AmdgpuBarrierScope::Named:
+    on_named_barrier(wave);
+    break;
+  case AmdgpuBarrierScope::LocalMemoryAtomic:
+    on_local_memory_atomic_barrier(wave, false);
+    break;
+  case AmdgpuBarrierScope::LocalMemoryAtomicAsync:
+    on_local_memory_atomic_barrier(wave, true);
+    break;
+  default:
+    break;
+  }
+}
+
 void DataHazardAdapter::on_workgroup_barrier(const ExecutionKey &wave) {
   BarrierEvent event;
   event.wave = wave;
   event.kind = BarrierKind::Workgroup;
+  api_.on_barrier(event);
+}
+
+void DataHazardAdapter::on_cluster_barrier(const ExecutionKey &wave) {
+  BarrierEvent event;
+  event.wave = wave;
+  event.kind = BarrierKind::Cluster;
+  api_.on_barrier(event);
+}
+
+void DataHazardAdapter::on_named_barrier(const ExecutionKey &wave) {
+  BarrierEvent event;
+  event.wave = wave;
+  event.kind = BarrierKind::Named;
   api_.on_barrier(event);
 }
 

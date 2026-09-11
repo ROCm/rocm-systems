@@ -180,7 +180,8 @@ public:
                              uint8_t byte_mask = ExecutionPlugin::kFullByteMask) override;
   void onAmdgpuReadSgpr(const amdgpu::Wavefront *wf, uint32_t physical_reg) override;
 
-  void onAmdgpuBarrierResolved(std::span<amdgpu::Wavefront *> wavefronts) override;
+  void onAmdgpuBarrierResolved(std::span<amdgpu::Wavefront *> wavefronts,
+                               AmdgpuBarrierScope scope) override;
 
   /// Exposed for tests: the hazards collected so far.
   const WarningCollector &warnings() const { return collector_; }

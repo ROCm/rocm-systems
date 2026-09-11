@@ -1093,7 +1093,7 @@ protected:
   };
   std::vector<Wavefront *> complete_barrier(uint32_t dispatch_id, uint32_t wg_id,
                                             uint8_t completion_bit, uint32_t named_barrier_id = 0);
-  void notify_barrier_complete(std::span<Wavefront *> members);
+  void notify_barrier_complete(std::span<Wavefront *> members, AmdgpuBarrierScope scope);
   std::unordered_map<uint64_t, WorkgroupBarriers> barrier_wgs_;
 
   uint64_t shared_aperture_base_ = 0;
