@@ -2,7 +2,7 @@
 # Copyright Advanced Micro Devices, Inc.
 # SPDX-License-Identifier: MIT
 
-"""GPU power: power cap set."""
+"""GPU power: power cap set, energy count."""
 
 import unittest
 
@@ -89,6 +89,17 @@ class TestGpuPower(unittest.TestCase):
         return
 
     # integration
+
+    def test_get_energy_count(self):
+        self.common.print_func_name("")
+
+        if self.common.TODO_SKIP_FAIL:
+            msg = "\tSkipping test_get_energy_count as it fails (MI350X, AMDSMI_STATUS_UNEXPECTED_DATA)."
+            self.common.print(msg)
+            self.skipTest(msg)
+
+        self.common.Test_API_Per_GPU(amdsmi_get_energy_count=amdsmi.amdsmi_get_energy_count)
+        return
 
     def test_get_gpu_power_profile_presets(self):
         self.common.print_func_name("")
