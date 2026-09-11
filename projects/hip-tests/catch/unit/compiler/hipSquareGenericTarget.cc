@@ -6,6 +6,10 @@
 
 #include <hip_test_common.hh>
 
+#if HT_LINUX
+#include <sys/wait.h>
+#endif
+
 /*
  * Square each element in the array A and write to array C.
  */
@@ -98,7 +102,18 @@ HIP_TEST_CASE(Unit_test_generic_target_only_in_regular_fatbin) {
 #endif  // GENERIC_COMPRESSED
 
   printf("Run %s\n", cmd);
-  REQUIRE(std::system(cmd) == 0);
+  int rc = std::system(cmd);
+#if HT_WIN
+  const int exitCode = rc;
+#else
+  const int exitCode = WIFEXITED(rc) ? WEXITSTATUS(rc) : -1;
+#endif
+  // Catch2 v3 exits with AllTestsSkippedExitCode (4) when every test case in the
+  // child was skipped. That is a skip, not a failure: propagate it as a skip.
+  if (exitCode == 4) {
+    HIP_SKIP_TEST("child skipped: generic target unsupported.");
+  }
+  REQUIRE(rc == 0);
   printf("PASSED!\n");
 }
 #endif  // NO_GENERIC_TARGET_ONLY_TEST

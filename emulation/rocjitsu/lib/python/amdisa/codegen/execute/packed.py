@@ -141,19 +141,19 @@ def gen_pk_binop(
         L.append('    if (inst_.neg & 2) { b_lo = -b_lo; }')
         L.append('    if (inst_.neg_hi & 1) { a_hi = -a_hi; }')
         L.append('    if (inst_.neg_hi & 2) { b_hi = -b_hi; }')
-        f_op_map = {
-            'add': ('a_lo + b_lo', 'a_hi + b_hi'),
-            'mul': ('a_lo * b_lo', 'a_hi * b_hi'),
-            'min': ('std::fmin(a_lo, b_lo)', 'std::fmin(a_hi, b_hi)'),
-            'max': ('std::fmax(a_lo, b_lo)', 'std::fmax(a_hi, b_hi)'),
-        }
-        lo_expr, hi_expr = f_op_map[op]
-        L.append(f'    float rlo = {lo_expr};')
-        L.append(f'    float rhi = {hi_expr};')
-        # Packed BF16 arithmetic is not mode-aware here. Explicit F32-to-BF16
-        # data conversions use the mode-aware helpers instead.
+        if op in ('add', 'mul'):
+            for half, result in (('lo', 'rlo'), ('hi', 'rhi')):
+                if op == 'add':
+                    expr = f'amdgpu::fp_mode::packed_add_bf16(a_{half}, b_{half}, wf.fp16_ovfl())'
+                else:
+                    expr = f'amdgpu::fp_mode::packed_mul_bf16(a_{half}, b_{half}, wf.fp16_ovfl())'
+                L.append(f'    uint16_t {result} = {expr};')
+        else:
+            fn = {'min': 'std::fmin', 'max': 'std::fmax'}[op]
+            L.append(f'    uint16_t rlo = util::f32_to_bf16_rne({fn}(a_lo, b_lo));')
+            L.append(f'    uint16_t rhi = util::f32_to_bf16_rne({fn}(a_hi, b_hi));')
         L.append(
-            f'    amdgpu::RegisterAccess(wf).write_lane({d}, lane, util::f32_to_bf16(rlo) | (static_cast<uint32_t>(util::f32_to_bf16(rhi)) << 16));'
+            f'    amdgpu::RegisterAccess(wf).write_lane({d}, lane, rlo | (static_cast<uint32_t>(rhi) << 16));'
         )
     elif dtype == 'i16':
         L.append(
@@ -339,6 +339,8 @@ def gen_pk_ternary(
             f'    amdgpu::RegisterAccess(wf).write_lane({d}, lane, util::f32_to_f16_mode(rlo, wf.fp16_ovfl()) | (static_cast<uint32_t>(util::f32_to_f16_mode(rhi, wf.fp16_ovfl())) << 16));'
         )
     elif dtype == 'bf16':
+        if op != 'fma':
+            raise ValueError(f'Unsupported packed BF16 ternary operation: {op}')
         L.append(
             '    float a_lo = util::bf16_to_f32(static_cast<uint16_t>(sel0_lo ? (raw0 >> 16) : raw0));'
         )
@@ -363,16 +365,14 @@ def gen_pk_ternary(
         L.append('    if (inst_.neg_hi & 1) { a_hi = -a_hi; }')
         L.append('    if (inst_.neg_hi & 2) { b_hi = -b_hi; }')
         L.append('    if (inst_.neg_hi & 4) { c_hi = -c_hi; }')
-        if op == 'fma':
-            L.append('    float rlo = std::fma(a_lo, b_lo, c_lo);')
-            L.append('    float rhi = std::fma(a_hi, b_hi, c_hi);')
-        else:
-            L.append('    float rlo = a_lo * b_lo + c_lo;')
-            L.append('    float rhi = a_hi * b_hi + c_hi;')
-        # Packed BF16 arithmetic is not mode-aware here. Explicit F32-to-BF16
-        # data conversions use the mode-aware helpers instead.
         L.append(
-            f'    amdgpu::RegisterAccess(wf).write_lane({d}, lane, util::f32_to_bf16(rlo) | (static_cast<uint32_t>(util::f32_to_bf16(rhi)) << 16));'
+            '    uint16_t rlo = amdgpu::fp_mode::packed_fma_bf16(a_lo, b_lo, c_lo, wf.fp16_ovfl());'
+        )
+        L.append(
+            '    uint16_t rhi = amdgpu::fp_mode::packed_fma_bf16(a_hi, b_hi, c_hi, wf.fp16_ovfl());'
+        )
+        L.append(
+            f'    amdgpu::RegisterAccess(wf).write_lane({d}, lane, rlo | (static_cast<uint32_t>(rhi) << 16));'
         )
     elif dtype == 'i16':
         L.append(

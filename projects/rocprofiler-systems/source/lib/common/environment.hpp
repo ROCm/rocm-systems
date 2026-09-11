@@ -6,6 +6,7 @@
 #include "common/defines.h"
 #include "common/env_vars.hpp"
 #include "common/path.hpp"
+#include "common/string_utility.hpp"
 #include "logger/debug.hpp"
 #include <fmt/format.h>
 
@@ -56,48 +57,6 @@ struct posix_env
     static char* getenv(const char* name) { return ::getenv(name); }
 };
 
-/// @brief Parse a string into a boolean.
-///
-/// Leading and trailing whitespace is trimmed before interpretation. All-digit
-/// strings are truthy when non-zero (an overflowing digit string is also truthy);
-/// other values are matched case-insensitively against the false tokens
-/// off/false/no/n/f/0 (anything else is truthy). An empty or all-whitespace string
-/// yields @p fallback.
-/// @param value    The string to interpret.
-/// @param fallback Returned when @p value is empty or all whitespace.
-/// @return The parsed boolean.
-[[nodiscard]] inline bool
-to_bool(std::string_view value, bool fallback = false)
-{
-    // trim leading/trailing whitespace before interpreting
-    constexpr std::string_view whitespace = " \t\n\r\f\v";
-    const auto                 first_pos  = value.find_first_not_of(whitespace);
-    if(first_pos == std::string_view::npos) return fallback;  // empty or all whitespace
-    const auto last_pos = value.find_last_not_of(whitespace);
-    value               = value.substr(first_pos, last_pos - first_pos + 1);
-
-    if(value.find_first_not_of("0123456789") == std::string_view::npos)
-    {
-        std::uint64_t numeric{};
-        const auto*   last   = value.data() + value.size();
-        const auto [ptr, ec] = std::from_chars(value.data(), last, numeric);
-        if(ec == std::errc::result_out_of_range) return true;
-        if(ec == std::errc{} && ptr == last) return numeric != 0;
-        return true;
-    }
-
-    std::string lower{ value };
-    std::transform(lower.begin(), lower.end(), lower.begin(),
-                   [](unsigned char chr) { return std::tolower(chr); });
-
-    constexpr auto false_values = std::array{
-        std::string_view{ "off" }, std::string_view{ "false" }, std::string_view{ "no" },
-        std::string_view{ "n" },   std::string_view{ "f" },
-    };
-    return !std::any_of(false_values.begin(), false_values.end(),
-                        [&lower](std::string_view val) { return lower == val; });
-}
-
 /// @brief Environment variable read/write facade, parameterised over the backend.
 ///
 /// All conversion and parsing logic lives here. Use @c environment<posix_env> (the
@@ -133,7 +92,7 @@ private:
             throw std::runtime_error(
                 std::string{ "No boolean value provided for " }.append(env_id));
         }
-        return to_bool(env_sv, fallback);
+        return rocprofsys::utility::string::to_bool(env_sv, fallback);
     }
 
     template <typename Tp>
@@ -143,15 +102,13 @@ private:
         if(!raw) return fallback;
 
         // Trim surrounding whitespace so values such as " 1.5 " still parse.
-        constexpr std::string_view whitespace = " \t\n\r\f\v";
-        std::string_view           token{ raw };
-        const auto                 first = token.find_first_not_of(whitespace);
-        if(first == std::string_view::npos)
+        const auto token =
+            utility::string::rtrim(utility::string::ltrim(std::string_view{ raw }));
+        if(token.empty())
         {
             LOG_ERROR("[get_env] Cannot convert empty getenv(\"{}\") to float", env_id);
             return fallback;
         }
-        token = token.substr(first, token.find_last_not_of(whitespace) - first + 1);
 
 #if defined(__cpp_lib_to_chars) && __cpp_lib_to_chars >= 201611L
         // Locale-independent, non-throwing parse mirroring the integral path: a
@@ -184,15 +141,13 @@ private:
         if(!raw) return fallback;
 
         // Trim surrounding whitespace so values such as " 42 " still parse.
-        constexpr std::string_view whitespace = " \t\n\r\f\v";
-        std::string_view           token{ raw };
-        const auto                 first = token.find_first_not_of(whitespace);
-        if(first == std::string_view::npos)
+        const auto token =
+            utility::string::rtrim(utility::string::ltrim(std::string_view{ raw }));
+        if(token.empty())
         {
             LOG_ERROR("[get_env] Cannot convert empty getenv(\"{}\") to integer", env_id);
             return fallback;
         }
-        token = token.substr(first, token.find_last_not_of(whitespace) - first + 1);
 
         // std::from_chars parses against the exact target type: it rejects a
         // leading '-' for unsigned Tp and reports result_out_of_range, so
@@ -405,14 +360,17 @@ remove_env(std::vector<std::string>& env_list, std::string_view env_variable,
 
     env_list.erase(std::remove_if(env_list.begin(), env_list.end(),
                                   [&key](const std::string& entry) {
-                                      return std::string_view{ entry }.find(key) == 0;
+                                      return std::string_view{ entry }.starts_with(key);
                                   }),
                    env_list.end());
 
     // Restore from original_envs if previously existed
     for(const auto& orig : original_envs)
     {
-        if(std::string_view{ orig }.find(key) == 0) env_list.emplace_back(orig);
+        if(std::string_view{ orig }.starts_with(key))
+        {
+            env_list.emplace_back(orig);
+        }
     }
 }
 
@@ -513,8 +471,7 @@ is_python_interpreter(std::string_view executable)
     constexpr std::string_view python3_prefix = "python3.";
 
     const bool has_valid_prefix =
-        basename.size() > python3_prefix.size() &&
-        basename.substr(0, python3_prefix.size()) == python3_prefix;
+        basename.size() > python3_prefix.size() && basename.starts_with(python3_prefix);
     if(!has_valid_prefix) return false;
 
     const auto version_digits = basename.substr(python3_prefix.size());
@@ -663,7 +620,7 @@ update_env(std::vector<std::string>& _environ, std::string_view _env_var, Tp&& _
     const auto _key         = fmt::format("{}=", _env_var);
 
     const auto matches_key = [&_key](const std::string& entry) {
-        return std::string_view{ entry }.find(_key) == 0;
+        return std::string_view{ entry }.starts_with(_key);
     };
 
     auto first = std::find_if(_environ.begin(), _environ.end(), matches_key);
@@ -725,7 +682,7 @@ add_torch_library_path(std::vector<std::string>& envp, std::string_view executab
     constexpr std::string_view ld_prefix = "LD_LIBRARY_PATH=";
 
     auto is_ld_path = [&](const std::string& entry) {
-        return std::string_view{ entry }.substr(0, ld_prefix.length()) == ld_prefix;
+        return std::string_view{ entry }.starts_with(ld_prefix);
     };
 
     for(const auto& entry : envp)
