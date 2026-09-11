@@ -161,10 +161,6 @@ HIP_TEMPLATE_TEST_CASE(Unit_hipMalloc3DArray_MaxTexture, int, uint4, short, usho
   CAPTURE(sizes.max1D, sizes.max2D, sizes.max3D);
 
   const size_t s = 64;
-  const size_t elemSize = (desc.x + desc.y + desc.z + desc.w) / 8;
-  size_t freeMem = 0, totalMem = 0;
-  HIP_CHECK(hipMemGetInfo(&freeMem, &totalMem));
-
   SECTION("Happy") {
     // stored in a vector so some values can be ifdef'd out
     std::vector<hipExtent> extentsToTest{
@@ -183,12 +179,6 @@ HIP_TEMPLATE_TEST_CASE(Unit_hipMalloc3DArray_MaxTexture, int, uint4, short, usho
     const auto extent =
         GENERATE_COPY(from_range(std::begin(extentsToTest), std::end(extentsToTest)));
     CAPTURE(extent.width, extent.height, extent.depth);
-
-    // Skip allocations exceeding free device memory to avoid hostAlloc thrashing
-    const size_t w = extent.width ? extent.width : 1;
-    const size_t h = extent.height ? extent.height : 1;
-    const size_t d = extent.depth ? extent.depth : 1;
-    if (w * h * d * elemSize > freeMem) return;
 
     auto maxArrayCreateError = hipMalloc3DArray(&array, &desc, extent, flag);
     // this can try to alloc many GB of memory, so out of memory is acceptable
