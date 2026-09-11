@@ -15,8 +15,9 @@ namespace rocjitsu {
 namespace {
 
 /// Per-class hardware bound. Indices >= this are not representable in
-/// RegisterSet's bitsets and indicate either a programming error or a class
-/// that RegisterSet doesn't track (EXEC, VCC, etc.).
+/// RegisterSet's per-index bitsets and indicate either a programming error or a
+/// special singleton class (EXEC, VCC, ...) that has no scratch slot; those
+/// return 0 so every index is rejected.
 [[nodiscard]] size_t per_class_max(RegClass cls) {
   switch (cls) {
   case RegClass::SGPR:
@@ -85,9 +86,16 @@ std::optional<uint32_t> SpillManager::allocate_slots(RegisterRef reg, unsigned w
 }
 
 bool SpillManager::reserve(const RegisterSet &set) {
+  // Special singletons (EXEC/VCC/...) have no scratch slot. Reject the whole
+  // request up front rather than letting one reach allocate_slot's bounds
+  // rejection and trip the post-capacity-check assert below. Special-register
+  // preservation is out of scope for this allocator.
+  if (set.has_specials())
+    return false;
+
   // Count NEW registers (cache misses) so we can size-check upfront.
   unsigned num_new = 0;
-  set.for_each([&](RegisterRef reg) {
+  set.for_each_ordinary([&](RegisterRef reg) {
     const std::pair<RegClass, uint16_t> key{reg.cls, reg.index};
     if (!reg_to_offset_.contains(key))
       ++num_new;
@@ -97,9 +105,9 @@ bool SpillManager::reserve(const RegisterSet &set) {
   }
 
   // Capacity check passed — no failure possible from here. Every reg from
-  // for_each is within per-class bounds (the bitset itself enforces that),
-  // and we just verified there's enough room.
-  set.for_each([this](RegisterRef reg) {
+  // for_each_ordinary is within per-class bounds (the bitset itself enforces
+  // that), and we just verified there's enough room.
+  set.for_each_ordinary([this](RegisterRef reg) {
     [[maybe_unused]] auto off = allocate_slot(reg);
     assert(off.has_value() && "allocate_slot failed after capacity check");
   });
