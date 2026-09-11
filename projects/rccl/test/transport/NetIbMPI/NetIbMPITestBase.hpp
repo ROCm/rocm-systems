@@ -1736,7 +1736,8 @@ protected:
                                             int messages = 1, std::atomic<int>* arrived = nullptr,
                                             int expected = 0,
                                             NetMHandleWorkerGuard* registration = nullptr,
-                                            HostBufferAutoGuard* allocation = nullptr) {
+                                            HostBufferAutoGuard* allocation = nullptr,
+                                            std::atomic<bool>* aborted = nullptr) {
         ThreadResult result;
         // Without a gate here the failures are merely started from several workers,
         // not overlapping: each worker allocates, registers and warms up first, so a
@@ -1745,7 +1746,7 @@ protected:
         // to cover -- go untested. Bounded, and a timeout is reported rather than
         // asserted, since a worker cannot fail the test alone.
         if (arrived && expected > 1
-            && !WorkerRendezvous(*arrived, expected, kFailureGatePolls)) {
+            && !WorkerRendezvous(*arrived, expected, kWorkerGatePolls, aborted)) {
             result.ok = false;
             result.msg = "workers did not all reach the link failure together";
             return result;
@@ -1796,9 +1797,24 @@ protected:
         return result;
     }
 
-    // The receiver cannot be asked how many queue pairs its connection uses, so a flush
-    // walks this many; extra indices are refused harmlessly.
-    static constexpr int kMaxQpsToFlush = 8;
+    // Drives this rank's own side of the connection to error, which retires whatever
+    // work is outstanding on it with a flush status. The two sides learn their queue
+    // pair count differently: the sender can be asked, while the receiver cannot, so
+    // that walk stops at the first index the API refuses. It used to walk a fixed
+    // eight, which is exactly what NCCL_IB_QPS_PER_CONNECTION=4 gives on the two-member
+    // merged device these suites use -- no headroom, so raising that parameter would
+    // have left the higher queue pairs unflushed and the memory still referenced.
+    void WorkerFlushOwnSideQps(ConnectionPair& pair, int rank) {
+        if (rank == 1) {
+            int nqps = 0;
+            if (!WorkerCastLiveNqps(pair.sendComm, &nqps).ok || nqps <= 0) nqps = 1;
+            for (int qp = 0; qp < nqps; qp++) WorkerCastDriveQpToError(pair.sendComm, qp);
+        } else {
+            for (int qp = 0; ; qp++) {
+                if (ncclIbCastFaultDriveRecvQpToError(pair.recvComm, qp) != ncclSuccess) break;
+            }
+        }
+    }
 
     // For a failure where a request may still be live and the test cannot reach it:
     // WorkerSendRecvPattern owns its request and a timed-out wait does not cancel the
@@ -1810,14 +1826,7 @@ protected:
     ThreadResult WorkerRetainAfterAbandonedRequest(ThreadResult failure, ConnectionPair& pair,
                                                    int rank, NetMHandleWorkerGuard* registration,
                                                    HostBufferAutoGuard* allocation) {
-        if (rank == 1) {
-            int nqps = 0;
-            if (!WorkerCastLiveNqps(pair.sendComm, &nqps).ok || nqps <= 0) nqps = 1;
-            for (int qp = 0; qp < nqps; qp++) WorkerCastDriveQpToError(pair.sendComm, qp);
-        } else {
-            for (int qp = 0; qp < kMaxQpsToFlush; qp++)
-                ncclIbCastFaultDriveRecvQpToError(pair.recvComm, qp);
-        }
+        WorkerFlushOwnSideQps(pair, rank);
         failure.msg += "; the buffer and its registration are retained, since a request may "
                        "still reference them";
         if (registration) registration->release();
@@ -1827,7 +1836,9 @@ protected:
 
     // Bounded gate for the failure point: 30 s is well past the setup a sibling
     // still has to finish, and a worker that already failed must not hang the rest.
-    static constexpr int kFailureGatePolls = 3000;  // 3000 * 10ms
+    // One name for the 30 s worker gate, shared by every rendezvous and flag wait in
+    // the suite, so raising it is one edit.
+    static constexpr int kWorkerGatePolls = 3000;  // 3000 * 10ms = 30s
 
     // Failover with requests already in flight. isend only gets a request once the
     // receiver has published a FIFO slot, so "all sends posted" implies "all receives
@@ -1839,7 +1850,8 @@ protected:
                                             int expected = 0,
                                             NetMHandleWorkerGuard* registration = nullptr,
                                             HostBufferAutoGuard* allocation = nullptr,
-                                            int* repostsOut = nullptr) {
+                                            int* repostsOut = nullptr,
+                                            std::atomic<bool>* aborted = nullptr) {
         ThreadResult result;
         std::vector<void*> requests(messages, nullptr);
 
@@ -1870,14 +1882,7 @@ protected:
                 // live count, so the receiver walks the same span it was told to expect;
                 // driving a queue pair that does not exist is harmless here, and using
                 // the send-side call on a receive communicator would flush nothing.
-                int nqps = 0;
-                if (rank == 1) {
-                    if (!WorkerCastLiveNqps(pair.sendComm, &nqps).ok || nqps <= 0) nqps = 1;
-                    for (int qp = 0; qp < nqps; qp++) WorkerCastDriveQpToError(pair.sendComm, qp);
-                } else {
-                    for (int qp = 0; qp < kMaxQpsToFlush; qp++)
-                        ncclIbCastFaultDriveRecvQpToError(pair.recvComm, qp);
-                }
+                WorkerFlushOwnSideQps(pair, rank);
                 const int live = waitAll();
                 if (live > 0) {
                     failure.msg += "; " + std::to_string(live)
@@ -1898,7 +1903,7 @@ protected:
         // only lines the workers up, and each one then posts and breaks its own link
         // without pausing in between.
         if (arrived && expected > 1
-            && !WorkerRendezvous(*arrived, expected, kFailureGatePolls)) {
+            && !WorkerRendezvous(*arrived, expected, kWorkerGatePolls, aborted)) {
             result.ok = false;
             result.msg = "workers did not all reach the link failure together";
             return finish(result);
@@ -1985,6 +1990,62 @@ protected:
         return result;
     }
 
+    // Resiliency device state constants (from ncclIbResiliencyDevState enum). Held
+    // here because WorkerWaitForRecovery below reads them.
+    static constexpr int kDevStateOk                 = 0;
+    static constexpr int kDevStateRecoveryInProgress = 2;
+    static constexpr int kDevStateRecoveryFailed     = 3;
+    static constexpr int kDevStateRecovered          = 4;
+    static constexpr int kDevStateErrorPermanent     = 5;
+
+    // The global recovery thread's own budget, and the first post-recovery message
+    // has to wait out that budget on top of its own: the kick that puts the restored
+    // queue pairs back in rotation is a message, and a worker cannot make the MPI
+    // handshake the serial bodies use to order it.
+    static constexpr int kRecoveryPollIterations = 6000;  // 6000 * 10ms = 60s
+    static constexpr int kFirstPostRecoveryTimeoutMs =
+        kRecoveryPollIterations * (kPollIntervalUs / 1000) + kLargeTransferTimeoutMs;
+
+    // Waits for the global recovery thread to bring device 0 back on this send
+    // communicator. Ok is also the device's state before anything happened, so
+    // accepting it alone would call a communicator recovered on a run where the
+    // injected failure was never observed, and the traffic a caller then runs would
+    // prove nothing -- recoveryCount separates the two. Recovered means the recovery
+    // thread is done, not that the queue pairs are back in rotation; the caller's
+    // first message is what finishes that.
+    ThreadResult WorkerWaitForRecovery(void* sendComm) {
+        ThreadResult result;
+        bool recovered = false;
+        int lastState = -1;
+        int recoveries = 0;
+        for (int poll = 0; poll < kRecoveryPollIterations; poll++) {
+            struct ncclIbCastResiliencyState state = {};
+            if (ncclIbCastGetResiliencyState(sendComm, &state) != ncclSuccess) {
+                result.ok = false;
+                result.msg = "ncclIbCastGetResiliencyState failed while waiting for recovery";
+                return result;
+            }
+            lastState = state.devState[0];
+            recoveries = state.recoveryCount[0];
+            if (lastState == kDevStateRecovered
+                || (lastState == kDevStateOk && recoveries > 0)) {
+                recovered = true;
+                break;
+            }
+            if (lastState == kDevStateRecoveryFailed || lastState == kDevStateErrorPermanent) {
+                break;
+            }
+            usleep(kPollIntervalUs);
+        }
+        if (!recovered) {
+            result.ok = false;
+            result.msg = "device 0 never reported a completed recovery; last state was "
+                         + std::to_string(lastState)
+                         + " with recoveryCount=" + std::to_string(recoveries);
+        }
+        return result;
+    }
+
     // Poll a receive the peer may never satisfy, and report whether it finished.
     bool WorkerDrainRecv(void* request, int pollIterations) {
         if (!request) return true;
@@ -2018,6 +2079,14 @@ protected:
         // A flush completion surfaces as an error, and that is the expected
         // outcome here: all that matters is that the request stops being
         // outstanding before the memory region goes away.
+        // What makes the error safe to accept is the walk above, not the error itself.
+        // IbCastTest returns ncclRemoteError on the first error CQE and never sets done
+        // afterwards, so an error is the only end this wait can ever see; treating it as
+        // the end is sound because the loop drove every queue pair the connection has,
+        // stopping at the first index the API refused, so no member is left with work
+        // still able to touch the buffer. It walked a fixed eight before, which happened
+        // to equal the count these suites run with -- and it is that, not the error
+        // status, that could have released memory a higher queue pair still referenced.
         static constexpr int kFlushPolls = 500;  // 500 * 10ms = 5s
         for (int poll = 0; poll < kFlushPolls; poll++) {
             int done = 0;

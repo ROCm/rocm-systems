@@ -96,7 +96,6 @@ TEST_F(NetIbMPITest, MrCacheRefCount) {
         // for a worker that is never coming and the reported cause stays the real
         // one rather than "only K of N".
         std::atomic<bool> registerFailed{false};
-        static constexpr int kRendezvousPolls = 3000;  // 3000 * 10ms = 30s
 
         RunThreadedBody(
             ThreadDevPolicy::Fixed(0), nThreads,
@@ -122,7 +121,7 @@ TEST_F(NetIbMPITest, MrCacheRefCount) {
                     release(mh1);
                     return result;
                 }
-                if (!WorkerRendezvous(bothHeld, nThreads, kRendezvousPolls, &registerFailed)) {
+                if (!WorkerRendezvous(bothHeld, nThreads, kWorkerGatePolls, &registerFailed)) {
                     release(mh1);
                     release(mh2);
                     result.ok = false;
