@@ -2,6 +2,7 @@ rocprofiler-sdk:
   counters-schema-version: 1
   counters:
     - name: TEST_YAML_LOAD
+      description: cycles
       properties: []
       definitions:
         - architectures:
@@ -30,6 +31,7 @@ rocprofiler-sdk:
           - gfx1250
           expression: reduce(GRBM_GUI_ACTIVE,max)*CU_NUM
     - name: TEST_YAML_LOAD
+      description: cycles
       properties: []
       definitions:
         - architectures:
