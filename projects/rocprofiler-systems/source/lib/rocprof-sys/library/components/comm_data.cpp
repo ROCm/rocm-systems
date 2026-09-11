@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "library/components/comm_data.hpp"
-#include "common/units.hpp"
+#include "common/units/data_size.hpp"
 #include "core/components/fwd.hpp"
 #include "core/config.hpp"
 #include "core/node_info.hpp"
@@ -11,6 +11,10 @@
 #include "core/trace_cache/sample_type.hpp"
 #include "library/tracing.hpp"
 #include <cstdint>
+
+using rocprofsys::common::units::bytes;
+using rocprofsys::common::units::data_size_cast;
+using rocprofsys::common::units::megabytes;
 
 namespace rocprofsys
 {
@@ -86,39 +90,91 @@ void
 metadata_initialize_comm_data_pmc()
 {
     // find the proper values for a following definitions
-    [[maybe_unused]] const size_t          EVENT_CODE       = 0;
-    [[maybe_unused]] const size_t          INSTANCE_ID      = 0;
-    [[maybe_unused]] constexpr const char* LONG_DESCRIPTION = "";
-    [[maybe_unused]] constexpr const char* COMPONENT        = "";
-    [[maybe_unused]] constexpr const char* BLOCK            = "";
-    [[maybe_unused]] constexpr const char* EXPRESSION       = "";
-    [[maybe_unused]] constexpr const char* MSG              = "bytes";
-    [[maybe_unused]] constexpr const auto* TARGET_ARCH      = "CPU";
-    auto                                   ni               = node_info::get_instance();
-    [[maybe_unused]] constexpr const auto  DEVICE_ID = 0;  // Assuming CPU device ID is 0
+    [[maybe_unused]] const size_t          event_code         = 0;
+    [[maybe_unused]] const size_t          instance_id        = 0;
+    [[maybe_unused]] constexpr const char* k_long_description = "";
+    [[maybe_unused]] constexpr const char* k_component        = "";
+    [[maybe_unused]] constexpr const char* k_block            = "";
+    [[maybe_unused]] constexpr const char* k_expression       = "";
+    [[maybe_unused]] constexpr const char* k_msg              = "bytes";
+    [[maybe_unused]] constexpr const auto* k_target_arch      = "CPU";
+    auto                                   n_info             = node_info::get_instance();
+    [[maybe_unused]] constexpr const auto k_device_id = 0;  // Assuming CPU device ID is 0
 
 #if defined(ROCPROFSYS_USE_MPI)
     trace_cache::get_metadata_registry().add_pmc_info(
-        { agent_type::CPU, DEVICE_ID, TARGET_ARCH, EVENT_CODE, INSTANCE_ID,
-          comm_data::mpi_send::label, "Tracks MPI communication data sizes",
-          trait::name<category::mpi>::description, LONG_DESCRIPTION, COMPONENT, MSG,
-          rocprofsys::trace_cache::ABSOLUTE, BLOCK, EXPRESSION, 0, 0, "{}" });
+        { .type             = agent_type::cpu,
+          .agent_type_index = k_device_id,
+          .target_arch      = k_target_arch,
+          .event_code       = event_code,
+          .instance_id      = instance_id,
+          .name             = comm_data::mpi_send::label,
+          .symbol           = "Tracks MPI communication data sizes",
+          .description      = trait::name<category::mpi>::description,
+          .long_description = k_long_description,
+          .component        = k_component,
+          .units            = k_msg,
+          .value_type       = rocprofsys::trace_cache::ABSOLUTE,
+          .block            = k_block,
+          .expression       = k_expression,
+          .is_constant      = 0,
+          .is_derived       = 0,
+          .extdata          = "{}" });
     trace_cache::get_metadata_registry().add_pmc_info(
-        { agent_type::CPU, DEVICE_ID, TARGET_ARCH, EVENT_CODE, INSTANCE_ID,
-          comm_data::mpi_recv::label, "Tracks MPI communication data sizes",
-          trait::name<category::mpi>::description, LONG_DESCRIPTION, COMPONENT, MSG,
-          rocprofsys::trace_cache::ABSOLUTE, BLOCK, EXPRESSION, 0, 0, "{}" });
+        { .type             = agent_type::cpu,
+          .agent_type_index = k_device_id,
+          .target_arch      = k_target_arch,
+          .event_code       = event_code,
+          .instance_id      = instance_id,
+          .name             = comm_data::mpi_recv::label,
+          .symbol           = "Tracks MPI communication data sizes",
+          .description      = trait::name<category::mpi>::description,
+          .long_description = k_long_description,
+          .component        = k_component,
+          .units            = k_msg,
+          .value_type       = rocprofsys::trace_cache::ABSOLUTE,
+          .block            = k_block,
+          .expression       = k_expression,
+          .is_constant      = 0,
+          .is_derived       = 0,
+          .extdata          = "{}" });
 #endif
     trace_cache::get_metadata_registry().add_pmc_info(
-        { agent_type::CPU, DEVICE_ID, TARGET_ARCH, EVENT_CODE, INSTANCE_ID,
-          comm_data::ucx_send::label, "Tracks UCX communication data sizes",
-          trait::name<category::ucx>::description, LONG_DESCRIPTION, COMPONENT, MSG,
-          rocprofsys::trace_cache::ABSOLUTE, BLOCK, EXPRESSION, 0, 0, "{}" });
+        { .type             = agent_type::cpu,
+          .agent_type_index = k_device_id,
+          .target_arch      = k_target_arch,
+          .event_code       = event_code,
+          .instance_id      = instance_id,
+          .name             = comm_data::ucx_send::label,
+          .symbol           = "Tracks UCX communication data sizes",
+          .description      = trait::name<category::ucx>::description,
+          .long_description = k_long_description,
+          .component        = k_component,
+          .units            = k_msg,
+          .value_type       = rocprofsys::trace_cache::ABSOLUTE,
+          .block            = k_block,
+          .expression       = k_expression,
+          .is_constant      = 0,
+          .is_derived       = 0,
+          .extdata          = "{}" });
     trace_cache::get_metadata_registry().add_pmc_info(
-        { agent_type::CPU, DEVICE_ID, TARGET_ARCH, EVENT_CODE, INSTANCE_ID,
-          comm_data::ucx_recv::label, "Tracks UCX communication data sizes",
-          trait::name<category::ucx>::description, LONG_DESCRIPTION, COMPONENT, MSG,
-          rocprofsys::trace_cache::ABSOLUTE, BLOCK, EXPRESSION, 0, 0, "{}" });
+        { .type             = agent_type::cpu,
+          .agent_type_index = k_device_id,
+          .target_arch      = k_target_arch,
+          .event_code       = event_code,
+          .instance_id      = instance_id,
+          .name             = comm_data::ucx_recv::label,
+          .symbol           = "Tracks UCX communication data sizes",
+          .description      = trait::name<category::ucx>::description,
+          .long_description = k_long_description,
+          .component        = k_component,
+          .units            = k_msg,
+          .value_type       = rocprofsys::trace_cache::ABSOLUTE,
+          .block            = k_block,
+          .expression       = k_expression,
+          .is_constant      = 0,
+          .is_derived       = 0,
+          .extdata          = "{}" });
 }
 
 template <typename Track>
@@ -143,11 +199,10 @@ cache_comm_data_events(const std::uint32_t device_id, int bytes)
     const std::string line_info       = "{}";
 
     trace_cache::get_buffer_storage().store(trace_cache::pmc_event_with_sample{
-        static_cast<size_t>(category_enum_id<category::comm_data>::value),
-        track_name.c_str(), timestamp_ns, event_metadata.c_str(), stack_id,
-        parent_stack_id, correlation_id, call_stack.c_str(), line_info.c_str(), device_id,
-        static_cast<std::uint8_t>(agent_type::CPU), track_name.c_str(),
-        static_cast<double>(value), std::nullopt });
+        static_cast<size_t>(category_enum_id<category::comm_data>::value), track_name,
+        timestamp_ns, event_metadata, stack_id, parent_stack_id, correlation_id,
+        call_stack, line_info, device_id, static_cast<std::uint8_t>(agent_type::cpu),
+        track_name, static_cast<double>(value), std::nullopt });
 }
 
 }  // namespace
@@ -190,7 +245,8 @@ comm_data::configure()
     comm_data_tracker_t::label()        = "comm_data";
     comm_data_tracker_t::description()  = "Tracks MPI/RCCL/UCX communication data sizes";
     comm_data_tracker_t::display_unit() = "MB";
-    comm_data_tracker_t::unit()         = units::megabyte;
+    comm_data_tracker_t::unit() =
+        static_cast<std::int64_t>(data_size_cast<bytes>(megabytes{ 1.0 }).to_bytes());
 
     auto _fmt_flags = comm_data_tracker_t::get_format_flags();
     _fmt_flags &= (std::ios_base::fixed & std::ios_base::scientific);
