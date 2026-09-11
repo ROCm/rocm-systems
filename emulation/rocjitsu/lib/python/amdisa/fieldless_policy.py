@@ -14,10 +14,13 @@ columns are
   * ``caps``    -- runtime capability for the normal read/write/SIMD accessors
                    (:class:`FieldlessCaps`),
   * ``display`` -- disassembly display policy (:class:`FieldlessDisplay`),
-  * ``effect``  -- architectural-effect metadata.
+  * ``effect``  -- architectural-effect metadata (:class:`FieldlessEffect`): the
+                   special register a fieldless operand corresponds to, or
+                   ``None`` for types with no effect modeled yet.
 
-``role`` and ``caps`` are live today: the generator consumes them to classify
-and lower each operand. ``display`` and ``effect`` are staged extension points.
+``role``, ``caps`` and ``effect`` are live today: the generator consumes them to
+classify and lower each operand and to emit ``to_special_reg_class()``.
+``display`` is a staged extension point.
 """
 
 from __future__ import annotations
@@ -37,7 +40,9 @@ class FieldlessCategory(enum.Enum):
       SPECIAL_REGISTER: a real architectural register that has no encoding
         field -- VCC/EXEC/SCC/M0/PC and FLAT_SCRATCH (per-wave scratch-base
         register state held in SGPRs). The concrete operand_type -> C++
-        RegClass mapping is not modeled here.
+        RegClass mapping is carried by ``FieldlessEffect.special_reg`` (a
+        :class:`SpecialRegClass`) for VCC/EXEC/SCC/M0/PC; FLAT_SCRATCH is
+        classified here but supplies no special_reg yet.
       MEMORY_PSEUDO: a memory-resource pseudo-operand (global/LDS) that carries
         memory-effect meaning but never a register value.
       LITERAL: a value-bearing fieldless literal (``OPR_SIMM32``).
@@ -63,6 +68,44 @@ class FieldlessDisplay(enum.Enum):
     """
 
     HIDDEN = 'hidden'
+
+
+class SpecialRegClass(enum.Enum):
+    """An architectural special register a fieldless operand corresponds to.
+
+    Mirrors the special (non-indexed) members of the C++ ``RegClass`` enum
+    (``register_set.h``): each value's name is the C++ enumerator (so generator
+    lowers ``SpecialRegClass.VCC`` to ``RegClass::VCC``). Only the classes a
+    fieldless operand currently denotes are listed. Two C++ ``RegClass`` values
+    are not produced here: FLAT_SCRATCH (its operand ``OPR_FLAT_SCRATCH``
+    classifies as ``SPECIAL_REGISTER`` in the policy table but supplies no
+    ``FieldlessEffect.special_reg``) and TTMP (a per-index trap-temporary file
+    that is not a fieldless operand at all), so no fieldless operand lowers to
+    either.
+    """
+
+    EXEC = 'EXEC'
+    VCC = 'VCC'
+    SCC = 'SCC'
+    M0 = 'M0'
+    PC = 'PC'
+
+
+@dataclass(frozen=True)
+class FieldlessEffect:
+    """Architectural-effect metadata for a fieldless operand (one effect object).
+
+    Lives on the :class:`FieldlessPolicy` row so effect data cannot drift into a
+    separate type-keyed map. For now it carries only the special register the
+    operand denotes; memory-effect fields (for the ``MEMORY_PSEUDO`` types) are
+    deferred.
+
+    Attributes:
+        special_reg: The special register this operand reads/writes as an
+            architectural effect, or ``None`` if it denotes no special register.
+    """
+
+    special_reg: SpecialRegClass | None = None
 
 
 @dataclass(frozen=True)
@@ -128,16 +171,16 @@ class FieldlessPolicy:
         role: Semantic category.
         caps: Runtime capability for the normal accessors.
         display: Disassembly display policy.
-        effect: Architectural-effect metadata. Stub (``None``) for now; a later
-            slice populates the special-register / memory effect a fieldless
-            operand corresponds to. Present here so effect data lives on the
-            same policy row rather than in a separate type-keyed map.
+        effect: Architectural-effect metadata (:class:`FieldlessEffect`), or
+            ``None`` for a type with no effect modeled yet (literal, memory
+            pseudo, placeholder). Present here so effect data lives on the same
+            policy row rather than in a separate type-keyed map.
     """
 
     role: FieldlessCategory
     caps: FieldlessCaps
     display: FieldlessDisplay = FieldlessDisplay.HIDDEN
-    effect: object | None = None
+    effect: FieldlessEffect | None = None
 
 
 #: The fieldless operand policy table: every fieldless ``operand_type`` ->
@@ -146,14 +189,40 @@ class FieldlessPolicy:
 _FIELDLESS_POLICY: dict[str, FieldlessPolicy] = {
     # Value-bearing literal: the one fieldless operand read as a real value.
     'OPR_SIMM32': FieldlessPolicy(FieldlessCategory.LITERAL, _VALUE_ONLY),
-    # Architectural special registers: inert through normal accessors; their
-    # architectural effects are exposed through a later special-effect API.
-    'OPR_VCC': FieldlessPolicy(FieldlessCategory.SPECIAL_REGISTER, _INERT),
-    'OPR_EXEC': FieldlessPolicy(FieldlessCategory.SPECIAL_REGISTER, _INERT),
-    'OPR_SDST_EXEC': FieldlessPolicy(FieldlessCategory.SPECIAL_REGISTER, _INERT),
-    'OPR_SSRC_SPECIAL_SCC': FieldlessPolicy(FieldlessCategory.SPECIAL_REGISTER, _INERT),
-    'OPR_PC': FieldlessPolicy(FieldlessCategory.SPECIAL_REGISTER, _INERT),
-    'OPR_SDST_M0': FieldlessPolicy(FieldlessCategory.SPECIAL_REGISTER, _INERT),
+    # Architectural special registers: inert through normal accessors, but their
+    # architectural effect (the special register they denote) is carried in the
+    # effect column and consumed by the generated to_special_reg_class() helper.
+    # SDST_EXEC is the SDST-namespace alias for EXEC, so both map to EXEC.
+    'OPR_VCC': FieldlessPolicy(
+        FieldlessCategory.SPECIAL_REGISTER,
+        _INERT,
+        effect=FieldlessEffect(SpecialRegClass.VCC),
+    ),
+    'OPR_EXEC': FieldlessPolicy(
+        FieldlessCategory.SPECIAL_REGISTER,
+        _INERT,
+        effect=FieldlessEffect(SpecialRegClass.EXEC),
+    ),
+    'OPR_SDST_EXEC': FieldlessPolicy(
+        FieldlessCategory.SPECIAL_REGISTER,
+        _INERT,
+        effect=FieldlessEffect(SpecialRegClass.EXEC),
+    ),
+    'OPR_SSRC_SPECIAL_SCC': FieldlessPolicy(
+        FieldlessCategory.SPECIAL_REGISTER,
+        _INERT,
+        effect=FieldlessEffect(SpecialRegClass.SCC),
+    ),
+    'OPR_PC': FieldlessPolicy(
+        FieldlessCategory.SPECIAL_REGISTER,
+        _INERT,
+        effect=FieldlessEffect(SpecialRegClass.PC),
+    ),
+    'OPR_SDST_M0': FieldlessPolicy(
+        FieldlessCategory.SPECIAL_REGISTER,
+        _INERT,
+        effect=FieldlessEffect(SpecialRegClass.M0),
+    ),
     # Memory pseudo-operands: no register value; drive memory-effect metadata
     # in a later slice.
     'OPR_DSMEM': FieldlessPolicy(FieldlessCategory.MEMORY_PSEUDO, _INERT),
