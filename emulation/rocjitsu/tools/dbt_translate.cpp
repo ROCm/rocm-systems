@@ -10,6 +10,7 @@
 #include "rocjitsu/code/executable.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
+#include "rocjitsu/isa/target_registry.h"
 
 #include <algorithm>
 #include <cassert>
@@ -38,6 +39,19 @@ struct CodeObjectInspection {
   std::string disassembly;
 };
 
+[[nodiscard]] std::unique_ptr<Decoder> create_inspection_decoder(rj_code_target_id_t target,
+                                                                 rj_code_arch_t fallback_arch) {
+  if (target != ROCJITSU_CODE_TARGET_INVALID)
+    return Decoder::create(default_isa_target_registry(), target);
+  return Decoder::create(fallback_arch);
+}
+
+[[nodiscard]] rj_code_target_id_t target_for_machine(uint32_t machine) {
+  const IsaGpuTargetDescription *target =
+      default_isa_target_registry().find_gpu_target_by_elf_machine(machine & EF_AMDGPU_MACH);
+  return target == nullptr ? ROCJITSU_CODE_TARGET_INVALID : target->public_id;
+}
+
 void record_decode_failure(CodeSectionReport &section_report, size_t byte_offset,
                            std::string message) {
   ++section_report.decode_failure_count;
@@ -49,7 +63,8 @@ void record_decode_failure(CodeSectionReport &section_report, size_t byte_offset
 }
 
 [[nodiscard]] CodeObjectInspection inspect_code_object(const AmdGpuCodeObject &obj,
-                                                       rj_code_arch_t arch,
+                                                       rj_code_target_id_t target,
+                                                       rj_code_arch_t fallback_arch,
                                                        const std::string &label,
                                                        bool include_disassembly) {
   CodeObjectInspection inspection;
@@ -59,7 +74,7 @@ void record_decode_failure(CodeSectionReport &section_report, size_t byte_offset
   if (include_disassembly)
     os << "--- " << label << " ---\n";
 
-  auto decoder = Decoder::create(arch);
+  auto decoder = create_inspection_decoder(target, fallback_arch);
   inspection.report.decoder_available = decoder != nullptr;
   if (!decoder) {
     if (include_disassembly)
@@ -90,7 +105,7 @@ void record_decode_failure(CodeSectionReport &section_report, size_t byte_offset
       // Linked gfx1250 objects use zero-filled holes between independently
       // aligned function bodies. BasicBlock::build() treats these words as
       // padding rather than instructions, so host validation must do the same.
-      if (arch == ROCJITSU_CODE_ARCH_CDNA5 && words[pc] == 0) {
+      if (fallback_arch == ROCJITSU_CODE_ARCH_CDNA5 && words[pc] == 0) {
         ++pc;
         continue;
       }
@@ -300,8 +315,10 @@ collect_executable_sections(const AmdGpuCodeObject &object) {
 }
 
 [[nodiscard]] std::string disassemble_source_instruction(const AmdGpuCodeObject &obj,
-                                                         uint64_t offset, rj_code_arch_t arch) {
-  auto decoder = Decoder::create(arch);
+                                                         uint64_t offset,
+                                                         rj_code_target_id_t target,
+                                                         rj_code_arch_t fallback_arch) {
+  auto decoder = create_inspection_decoder(target, fallback_arch);
   if (!decoder)
     return "<decoder unavailable>";
 
@@ -327,9 +344,10 @@ collect_executable_sections(const AmdGpuCodeObject &object) {
 }
 
 [[nodiscard]] std::vector<std::string> disassemble_words(std::span<const uint32_t> words,
-                                                         rj_code_arch_t arch) {
+                                                         rj_code_target_id_t target,
+                                                         rj_code_arch_t fallback_arch) {
   std::vector<std::string> lines;
-  auto decoder = Decoder::create(arch);
+  auto decoder = create_inspection_decoder(target, fallback_arch);
   if (!decoder) {
     lines.push_back("<decoder unavailable>");
     return lines;
@@ -356,13 +374,14 @@ collect_executable_sections(const AmdGpuCodeObject &object) {
 
 [[nodiscard]] InstructionTranslationReport
 build_instruction_report(const TranslationTraceEvent &trace, const AmdGpuCodeObject &source,
-                         rj_code_arch_t guest_arch, rj_code_arch_t host_arch) {
+                         rj_code_target_id_t guest_target, rj_code_arch_t guest_arch,
+                         rj_code_target_id_t host_target, rj_code_arch_t host_arch) {
   InstructionTranslationReport report;
   report.source_offset = trace.source_offset;
   report.source_size = trace.source_size;
   report.source_words.assign(trace.source_words.begin(), trace.source_words.end());
   report.source_instruction =
-      disassemble_source_instruction(source, trace.source_offset, guest_arch);
+      disassemble_source_instruction(source, trace.source_offset, guest_target, guest_arch);
   report.has_legalization = trace.legalization != nullptr;
   report.action = trace.legalization ? trace.legalization->action : Action::Identity;
   report.copied_original = trace.copied_original;
@@ -371,7 +390,7 @@ build_instruction_report(const TranslationTraceEvent &trace, const AmdGpuCodeObj
   report.emitted_in_cave = trace.emitted_in_cave;
   report.target_offset = trace.target_offset;
   report.target_words.assign(trace.target_words.begin(), trace.target_words.end());
-  report.target_instructions = disassemble_words(report.target_words, host_arch);
+  report.target_instructions = disassemble_words(report.target_words, host_target, host_arch);
   return report;
 }
 
@@ -397,6 +416,19 @@ struct SelectedInput {
     if (selected.code_object != nullptr)
       return selected;
 
+    // A standalone code object is also a valid one-object Executable. On a
+    // failed selection, distinguish concrete metadata disagreement from an
+    // out-of-range executable selection so the target-boundary failure is
+    // actionable.
+    AmdGpuCodeObject direct_object(options.input_path);
+    if (direct_object.is_valid() && direct_object.target_id() != ROCJITSU_CODE_TARGET_INVALID &&
+        options.input_target != ROCJITSU_CODE_TARGET_INVALID &&
+        direct_object.target_id() != options.input_target) {
+      error = "input target does not match standalone code-object target metadata";
+      selected.executable.reset();
+      return selected;
+    }
+
     error = "failed to select requested code object from executable: " + options.input_path;
     selected.executable.reset();
     return selected;
@@ -413,6 +445,15 @@ struct SelectedInput {
     return selected;
   }
 
+  const rj_code_target_id_t object_target = selected.direct_code_object->target_id();
+  if (object_target != ROCJITSU_CODE_TARGET_INVALID &&
+      options.input_target != ROCJITSU_CODE_TARGET_INVALID &&
+      object_target != options.input_target) {
+    error = "input target does not match standalone code-object target metadata";
+    selected.direct_code_object.reset();
+    return selected;
+  }
+
   selected.code_object = selected.direct_code_object.get();
   return selected;
 }
@@ -420,24 +461,24 @@ struct SelectedInput {
 } // namespace
 
 std::optional<std::string_view> translation_request_error(const TranslateOptions &options) {
-  if (options.guest_arch == ROCJITSU_CODE_ARCH_CDNA5 &&
-      options.input_revision == ProcessorRevision::Unspecified) {
+  const bool input_is_gfx1250 = options.input_target == ROCJITSU_CODE_TARGET_GFX1250;
+  const uint32_t output_machine =
+      options.target_mach ? options.target_mach : elf_mach_for_arch(options.host_arch);
+  const bool output_is_gfx1250 = (output_machine & EF_AMDGPU_MACH) == EF_AMDGPU_MACH_AMDGCN_GFX1250;
+
+  if (input_is_gfx1250 && options.input_revision == ProcessorRevision::Unspecified) {
     return "--input-revision is required when --input-target is gfx1250";
   }
-  if (options.guest_arch != ROCJITSU_CODE_ARCH_CDNA5 &&
-      options.input_revision != ProcessorRevision::Unspecified) {
+  if (!input_is_gfx1250 && options.input_revision != ProcessorRevision::Unspecified) {
     return "--input-revision is only valid when --input-target is gfx1250";
   }
-  if (options.host_arch == ROCJITSU_CODE_ARCH_CDNA5 &&
-      options.output_revision == ProcessorRevision::Unspecified) {
+  if (output_is_gfx1250 && options.output_revision == ProcessorRevision::Unspecified) {
     return "--output-revision is required when --output-target is gfx1250";
   }
-  if (options.host_arch != ROCJITSU_CODE_ARCH_CDNA5 &&
-      options.output_revision != ProcessorRevision::Unspecified) {
+  if (!output_is_gfx1250 && options.output_revision != ProcessorRevision::Unspecified) {
     return "--output-revision is only valid when --output-target is gfx1250";
   }
-  if (options.guest_arch == ROCJITSU_CODE_ARCH_CDNA5 &&
-      options.host_arch == ROCJITSU_CODE_ARCH_CDNA5 &&
+  if (input_is_gfx1250 && output_is_gfx1250 &&
       options.input_revision == ProcessorRevision::Gfx1250A0 &&
       options.output_revision == ProcessorRevision::Gfx1250B0) {
     return "gfx1250 A0-to-B0 translation is not supported";
@@ -447,8 +488,7 @@ std::optional<std::string_view> translation_request_error(const TranslateOptions
   if (options.verify_idempotence && options.skip_failed_kernels)
     return "--verify-idempotence cannot be combined with --skip-failed-kernels";
   if (options.verify_rewrite_discharge &&
-      !(options.guest_arch == ROCJITSU_CODE_ARCH_CDNA5 &&
-        options.host_arch == ROCJITSU_CODE_ARCH_CDNA5 &&
+      !(input_is_gfx1250 && output_is_gfx1250 &&
         options.input_revision == ProcessorRevision::Gfx1250B0 &&
         options.output_revision == ProcessorRevision::Gfx1250A0)) {
     return "--verify-rewrite-discharge requires gfx1250 b0-to-a0 translation";
@@ -490,10 +530,14 @@ ToolResult<TranslateOutput> translate_code_object(const TranslateOptions &option
                                        options.disassembly == DisassemblyMode::Both;
   const bool need_translated_disassembly = options.disassembly == DisassemblyMode::Translated ||
                                            options.disassembly == DisassemblyMode::Both;
+  const uint32_t output_machine =
+      options.target_mach ? options.target_mach : elf_mach_for_arch(options.host_arch);
+  const rj_code_target_id_t output_target = target_for_machine(output_machine);
 
   if (need_report || need_source_disassembly) {
-    auto source_inspection = inspect_code_object(*input.code_object, options.guest_arch, "source",
-                                                 need_source_disassembly);
+    auto source_inspection =
+        inspect_code_object(*input.code_object, options.input_target, options.guest_arch, "source",
+                            need_source_disassembly);
     output.value.source_report = std::move(source_inspection.report);
     output.value.disassembly += source_inspection.disassembly;
   }
@@ -504,8 +548,9 @@ ToolResult<TranslateOutput> translate_code_object(const TranslateOptions &option
     if (need_report) {
       output.value.instruction_translations.clear();
       translator.set_trace_callback([&](const TranslationTraceEvent &trace) {
-        output.value.instruction_translations.push_back(build_instruction_report(
-            trace, *input.code_object, options.guest_arch, options.host_arch));
+        output.value.instruction_translations.push_back(
+            build_instruction_report(trace, *input.code_object, options.input_target,
+                                     options.guest_arch, output_target, options.host_arch));
       });
     }
     auto translated = translator.translate(*input.code_object);
@@ -538,8 +583,9 @@ ToolResult<TranslateOutput> translate_code_object(const TranslateOptions &option
   }
 
   {
-    auto translated_inspection = inspect_code_object(translated_obj, options.host_arch,
-                                                     "translated", need_translated_disassembly);
+    auto translated_inspection =
+        inspect_code_object(translated_obj, translated_obj.target_id(), options.host_arch,
+                            "translated", need_translated_disassembly);
     output.value.translated_report = std::move(translated_inspection.report);
     output.value.disassembly += translated_inspection.disassembly;
   }

@@ -133,6 +133,7 @@ bool install_inline_dbt_config(std::string simulator_json, const char *host_isa,
       "simd_per_cu": 4,
       "wave_front_size": 64,
       "max_slots_scratch_cu": 32,
+      "num_sdma_queues_per_engine": 2,
       "lds_size_kb": )"
               << lds_size_kb << R"(
     }

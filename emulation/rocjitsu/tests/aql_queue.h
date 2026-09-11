@@ -45,10 +45,9 @@ public:
   /// @param read_ptr_addr Address of the read pointer.
   /// @param write_ptr_addr Address of the write pointer.
   /// @param doorbell_addr Address of the doorbell.
-  /// @param xcd_fanout Spread each dispatch over every XCD. This helper is the only
-  /// thing that sets the flag today; it models the fan-out path the KFD create-queue
-  /// ioctl is to opt into for compute queues on a multi-XCD part. Off by default so
-  /// a test that binds a queue to one command processor keeps its CUs to itself.
+  /// @param xcd_fanout Spread each dispatch over every XCD, as the KFD create-queue
+  /// ioctl now does for compute queues on a multi-XCD part. Off by default so a test
+  /// that binds a queue to one command processor keeps its CUs to itself.
   /// @param queue_id Queue id. A fan-out queue is replicated onto every XCD and its
   /// shards are routed back by (queue_id, process_id), so a test creating more than
   /// one fan-out queue must give each a distinct id.

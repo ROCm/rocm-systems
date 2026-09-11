@@ -740,11 +740,11 @@ void Buffer::destroy() {
     return;
   }
 
+  // The root buffer owns this descriptor even if interop mapping failed before
+  // kind_ could be changed to MEMORY_KIND_INTEROP.
+  freeInteropImageDescriptor();
+
   if (kind_ == MEMORY_KIND_INTEROP) {
-    // Owns the interop image descriptor allocated in Buffer::create for swizzle-metadata SRD
-    // reconstruction. Image views borrow it and early-return in Image::destroy without freeing,
-    // and the backing buffer is torn down after its views, so freeing it here is safe.
-    freeInteropImageDescriptor();
     destroyInteropBuffer();
     return;
   }
@@ -1292,9 +1292,27 @@ bool Buffer::GetFDHandleForMem(void* dev_ptr, size_t size, bool vmm, void* handl
 
     // Now, retrieve the shareable handle (fd in linux) for the phys_mem handle.
     hsa_status = Hsa::vmem_export_shareable_handle(&dmabuffd, mem_handle, 0);
+
+    // hsa_amd_vmem_retain_alloc_handle() must be balanced by hsa_amd_vmem_handle_release(),
+    // regardless of whether the export above succeeded. A successfully exported dmabuf fd
+    // owns its own reference to the backing allocation, so releasing mem_handle here does
+    // not invalidate it.
+    hsa_status_t release_status = Hsa::vmem_handle_release(mem_handle);
+
     if (hsa_status != HSA_STATUS_SUCCESS) {
       LogPrintfError("Cannot get shareable handle for mem_handle: %lu, hsa returned status: %d",
                      mem_handle, hsa_status);
+      return false;
+    }
+    if (release_status != HSA_STATUS_SUCCESS) {
+      LogPrintfError(
+          "Cannot release retained alloc handle for dev_ptr: 0x%x hsa returned status: %d",
+          dev_ptr, release_status);
+      // The retained handle could not be balanced after a successful export. Don't hand back
+      // a fd whose backing allocation's reference count is now in an unknown state.
+#if !IS_WINDOWS
+      close(dmabuffd);
+#endif
       return false;
     }
   } else {

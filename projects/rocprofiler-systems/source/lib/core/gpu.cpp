@@ -106,8 +106,8 @@ query_rocm_agents()
             const auto* _agent = static_cast<const rocprofiler_agent_v0_t*>(agents[i]);
             agent       cur_agent;
             cur_agent.type =
-                (_agent->type == ROCPROFILER_AGENT_TYPE_GPU ? agent_type::GPU
-                                                              : agent_type::CPU);
+                (_agent->type == ROCPROFILER_AGENT_TYPE_GPU ? agent_type::gpu
+                                                              : agent_type::cpu);
             cur_agent.handle               = _agent->id.handle;
             cur_agent.device_id            = _agent->device_id;
             cur_agent.node_id              = _agent->node_id;
@@ -165,7 +165,7 @@ get_visible_gpu_bdfs()
 
     std::set<std::string> _bdfs;
     for(const auto& _agent :
-        get_agent_manager_instance().get_agents_by_type(agent_type::GPU))
+        get_agent_manager_instance().get_agents_by_type(agent_type::gpu))
     {
         if(!_agent) continue;
         if(!_agent->hip_visible) continue;

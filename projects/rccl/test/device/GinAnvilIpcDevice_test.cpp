@@ -171,8 +171,8 @@ TEST_F(GinAnvilIpcDeviceTest, IpcFlatAtomicAddSys64) {
 using nccl::gin::anvil::detail::anvilCtxValid;
 using nccl::gin::anvil::detail::effectiveChannel;
 using nccl::gin::anvil::detail::markSdmaDirty;
-using nccl::gin::anvil::detail::anvilSignalPtrOrDummy;
 using nccl::gin::anvil::detail::remoteSignalAddr;
+using nccl::utility::loadConst;
 using nccl::gin::anvil::detail::useSdmaFusedSignal;
 using nccl::gin::anvil::detail::fenceBeforeSignal;
 
@@ -197,6 +197,7 @@ TEST_F(GinAnvilIpcDeviceTest, DetailHelpers_ChannelAndDirty) {
   hostCtx.sdmaChannelStride = 1;
   hostCtx.fusedSdmaSignal = 1;
   hostCtx.signals = reinterpret_cast<uint64_t*>(0x1);  // non-null for fused predicate
+  hostCtx.signal_remote_addrs = reinterpret_cast<uintptr_t*>(0x1);
 
   DeviceBuffer<uint64_t> d_dirty(1);
   d_dirty.zero();
@@ -212,10 +213,12 @@ TEST_F(GinAnvilIpcDeviceTest, DetailHelpers_ChannelAndDirty) {
   d_fused.zero();
   d_dirtyRead.zero();
 
-  kernelDetailHelpers<<<1, 1>>>(d_ctx.ptr, 128, d_eff.ptr, d_fused.ptr, d_dirtyRead.ptr);
+  // blockId=2, single-warp block (<<<1,1>>> => nWarpsPerBlock clamped to 1, warpId 0)
+  // => slot = 2*1 + 0 = 2, effChannel = (baseCh + stride*slot) % numCh.
+  kernelDetailHelpers<<<1, 1>>>(d_ctx.ptr, 2, d_eff.ptr, d_fused.ptr, d_dirtyRead.ptr);
   syncAndCheck();
 
-  EXPECT_EQ(d_eff.download(), 2);  // (0 + 1*(128/64)) % 4 == 2
+  EXPECT_EQ(d_eff.download(), 2);  // (0 + 1*2) % 4 == 2
   hipDeviceProp_t prop{};
   ASSERT_EQ(hipSuccess, hipGetDeviceProperties(&prop, 0));
   const bool oss7 = (std::strstr(prop.gcnArchName, "gfx950") != nullptr);
@@ -248,15 +251,15 @@ __global__ void kernelAnvilCtxValid(bool* outValid, bool* outSignalNonNull) {
   good.layoutMagic = NCCL_GIN_ANVIL_SDMA_LAYOUT_MAGIC;
   outValid[2] = anvilCtxValid(&good);
 
-  outSignalNonNull[0] = (anvilSignalPtrOrDummy(nullptr, 0) != nullptr);
-  outSignalNonNull[1] = (anvilSignalPtrOrDummy(&good, 0) != nullptr);
+  outSignalNonNull[0] = !anvilCtxValid(nullptr);
+  outSignalNonNull[1] = (loadConst(&good.signals) == nullptr);
 
   good.signals = nullptr;
-  outSignalNonNull[2] = (anvilSignalPtrOrDummy(&good, 0) != nullptr);
+  outSignalNonNull[2] = (loadConst(&good.signals) == nullptr);
 
   uint64_t sigs[2] = {0, 0};
   good.signals = sigs;
-  outSignalNonNull[3] = (anvilSignalPtrOrDummy(&good, 1) == sigs + 1);
+  outSignalNonNull[3] = (loadConst(&good.signals) + 1 == sigs + 1);
 
   outSignalNonNull[4] = (remoteSignalAddr(&good, 0, 0) == nullptr);
 }
@@ -279,7 +282,7 @@ TEST_F(GinAnvilIpcDeviceTest, AnvilCtxValid_AndSignalPtr) {
 
 __global__ void kernelFencePaths(bool sdmaPath, bool hasCounter) {
   if (threadIdx.x != 0) return;
-  fenceBeforeSignal(sdmaPath, nullptr, hasCounter);
+  fenceBeforeSignal(nullptr, sdmaPath, nullptr, hasCounter);
 }
 
 TEST_F(GinAnvilIpcDeviceTest, FenceBeforeSignal_CompilesAllPaths) {
@@ -365,7 +368,7 @@ __global__ void kernelFlushDirty(PutHarness* h, uint64_t* dirty) {
   ginCtx.nRanks = 2;
   h->ctx.sdmaDirty = dirty;
   h->ctx.queueHandles = nullptr;
-  ncclGinApi_Flush<NCCL_NET_DEVICE_GIN_ANVIL_SDMA>::call(ginCtx, ncclCoopThread{},
+  ncclGinApi_Flush<NCCL_NET_DEVICE_GIN_ANVIL_SDMA>::call(ginCtx, ncclCoopThread{}, false, nullptr,
                                                          cuda::memory_order_seq_cst, nullptr);
 }
 

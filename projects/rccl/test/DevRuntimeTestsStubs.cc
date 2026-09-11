@@ -1,9 +1,9 @@
 /*************************************************************************
  * Copyright (c) 2026 Advanced Micro Devices, Inc. All rights reserved.
  *
- * No-op host stubs for the DevRuntimeTests micro-test binary.
+ * No-op host stubs for the rccl-UnitTestsDevRuntime micro-test binary.
  *
- * dev_runtime.cc is #included whole into DevRuntimeTests.cpp, which leaves
+ * dev_runtime.cc is #included whole into gin_teardown_test.cpp, which leaves
  * undefined references to everything the translation unit calls but does not
  * define. These inert host-side definitions let the binary link without
  * librccl.so or a GPU. Real headers are included so every signature is checked
@@ -22,6 +22,9 @@
 #include "cudawrap.h"
 #include "dev_runtime_internal.h"
 #include "gin/gin_host.h"
+#ifdef ENABLE_ROCSHMEM_GIN
+#include "gin/gin_host_anvil_sdma.h"
+#endif
 #include "rma/rma_proxy.h"
 #include "nccl_device/core_tmp.h"
 #include "nccl_device/lsa_barrier.h"
@@ -29,8 +32,12 @@
 
 #include <cassert>
 #include <cstdarg>
+#include <cstdio>
 #include <cstdlib>
 #include <sys/mman.h>
+
+// Count hipMemAddressFree for skip-on vs skip-off finalize tests.
+int rcclTestHipMemAddressFreeCount = 0;
 
 // ---------------------------------------------------------------------------
 // Globals the translation unit references.
@@ -178,6 +185,11 @@ ncclResult_t ncclGinRegister(struct ncclComm*, void*, size_t, void*[NCCL_GIN_MAX
   return ncclSuccess;
 }
 ncclResult_t ncclGinDeregister(struct ncclComm*, void*[NCCL_GIN_MAX_CONNECTIONS]) { return ncclSuccess; }
+#ifdef ENABLE_ROCSHMEM_GIN
+ncclResult_t ncclGinAnvilBindResourceWindowSignals(struct ncclComm*, void*, size_t, int, int) {
+  return ncclSuccess;
+}
+#endif
 
 // ---------------------------------------------------------------------------
 // RMA proxy.
@@ -244,7 +256,22 @@ HIP_FAKE hipError_t hipMemAddressReserve(void** ptr, size_t size, size_t, void*,
 }
 HIP_FAKE hipError_t hipMemAddressFree(void* devPtr, size_t size) {
   assert(size != 0);
+  rcclTestHipMemAddressFreeCount++;
   munmap(devPtr, size);
+  return hipSuccess;
+}
+
+HIP_FAKE hipError_t hipGetDevice(int* device) {
+  if (device) *device = 0;
+  return hipSuccess;
+}
+
+HIP_FAKE hipError_t hipGetDevicePropertiesR0600(hipDeviceProp_t* prop, int) {
+  if (prop == nullptr) return hipErrorInvalidValue;
+  *prop = hipDeviceProp_t{};
+  const char* arch = std::getenv("RCCL_TEST_GCN_ARCH");
+  if (arch == nullptr || arch[0] == '\0') arch = "gfx900";
+  std::snprintf(prop->gcnArchName, sizeof(prop->gcnArchName), "%s", arch);
   return hipSuccess;
 }
 HIP_FAKE hipError_t hipMemCreate(hipMemGenericAllocationHandle_t* handle, size_t, const hipMemAllocationProp*,

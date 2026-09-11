@@ -77,6 +77,10 @@ public:
   /// @brief Create a decoder from a built-in architecture in a scoped registry.
   static std::unique_ptr<Decoder> create(const IsaTargetRegistry &registry, rj_code_arch_t arch);
 
+  /// @brief Create a decoder for a concrete public GPU target.
+  static std::unique_ptr<Decoder> create(const IsaTargetRegistry &registry,
+                                         rj_code_target_id_t target);
+
   /// @brief Enable pool allocation for decoded instructions.
   ///
   /// When active, Instruction::operator new/delete route through the
@@ -107,8 +111,9 @@ template <typename Isa> class IsaDecoder final : public Decoder {
 public:
   using Decoder::decode;
 
-  explicit IsaDecoder(const IsaExecutionBackend *execution_backend = nullptr)
-      : execution_backend_(execution_backend) {}
+  explicit IsaDecoder(const IsaExecutionBackend *execution_backend = nullptr,
+                      uint64_t isa_features = 0)
+      : execution_backend_(execution_backend), isa_features_(isa_features) {}
 
   DecodeResult decode(const rj_code_binary_inst_t *inst,
                       const DecodeErrorEmitter &emit_error) override {
@@ -116,6 +121,10 @@ public:
     DecodeResult result = Isa::Decoder::decode(inst, emit_error);
     if (result.failed()) [[unlikely]]
       return Result::failure();
+    const uint64_t missing_features = result.value()->required_isa_features() & ~isa_features_;
+    if (missing_features != 0) [[unlikely]]
+      return emit_error.emit() << "instruction requires unavailable target ISA features (mask "
+                               << missing_features << ")";
     if (validate_instruction_operands(*result.value(), emit_error).failed()) [[unlikely]]
       return Result::failure();
     return result;
@@ -125,6 +134,7 @@ public:
 
 private:
   const IsaExecutionBackend *execution_backend_;
+  const uint64_t isa_features_;
 };
 
 } // namespace rocjitsu
