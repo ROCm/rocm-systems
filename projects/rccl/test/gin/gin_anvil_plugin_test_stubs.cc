@@ -24,6 +24,7 @@ struct State {
   int probeResult = 1;
   bool bootstrapFail = false;
   int bootstrapNranks = 1;
+  std::vector<int> bootstrapIntResult;
   bool factoryCreateFail = false;
   bool factoryNullHandles = false;
   bool lsaAddrFail = false;
@@ -50,6 +51,9 @@ void Reset() { g = State{}; }
 void SetProbeResult(int result) { g.probeResult = result; }
 void SetBootstrapFail(bool fail) { g.bootstrapFail = fail; }
 void SetBootstrapNranks(int nranks) { g.bootstrapNranks = nranks; }
+void SetBootstrapIntResult(const int* values, int count) {
+  g.bootstrapIntResult.assign(values, values + count);
+}
 void SetFactoryCreateFail(bool fail) { g.factoryCreateFail = fail; }
 void SetFactoryNullHandles(bool nullHandles) { g.factoryNullHandles = nullHandles; }
 void SetLsaAddrFail(bool fail) { g.lsaAddrFail = fail; }
@@ -84,6 +88,13 @@ ncclResult_t bootstrapAllGather(void* commState, void* allData, int size) {
   if (GinAnvilPluginStubs::g.bootstrapFail) return ncclInternalError;
   if (size == static_cast<int>(sizeof(int))) {
     int* devs = static_cast<int*>(allData);
+    if (!GinAnvilPluginStubs::g.bootstrapIntResult.empty()) {
+      for (int i = 0; i < GinAnvilPluginStubs::g.bootstrapNranks; ++i) {
+        devs[i] = GinAnvilPluginStubs::g.bootstrapIntResult[static_cast<size_t>(i)];
+      }
+      GinAnvilPluginStubs::g.bootstrapIntResult.clear();
+      return ncclSuccess;
+    }
     int known = -1;
     int maxv = 0;
     for (int i = 0; i < GinAnvilPluginStubs::g.bootstrapNranks; ++i) {

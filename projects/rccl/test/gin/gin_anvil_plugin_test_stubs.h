@@ -13,6 +13,7 @@ void Reset();
 void SetProbeResult(int result);
 void SetBootstrapFail(bool fail);
 void SetBootstrapNranks(int nranks);
+void SetBootstrapIntResult(const int* values, int count);
 void SetFactoryCreateFail(bool fail);
 void SetFactoryNullHandles(bool nullHandles);
 void SetLsaAddrFail(bool fail);
