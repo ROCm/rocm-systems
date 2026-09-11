@@ -6,8 +6,13 @@
 
 #include <hip_test_common.hh>
 
+#include <algorithm>
+#include <fstream>
 #include <string>
+#include <vector>
 
+
+// Available on cuda 12.8 and above
 #if !HT_NVIDIA || CUDA_VERSION >= CUDA_12080
 
 namespace {
@@ -101,6 +106,7 @@ HIP_TEST_CASE(Unit_hipKernelSetAttributeForDevice_Positive_LaunchLimit) {
   HIP_CHECK(hipFree(output));
   HIP_CHECK(hipFree(input_a));
   HIP_CHECK(hipFree(input_b));
+  (void)hipGetLastError();
   HIP_CHECK(hipLibraryUnload(library));
 }
 
@@ -197,6 +203,7 @@ HIP_TEST_CASE(Unit_hipKernelSetAttributeForDevice_Positive_ClusterLaunch) {
   HIP_CHECK(hipFree(output));
   HIP_CHECK(hipFree(input_a));
   HIP_CHECK(hipFree(input_b));
+  (void)hipGetLastError();
   HIP_CHECK(hipLibraryUnload(library));
 }
 
@@ -210,7 +217,24 @@ HIP_TEST_CASE(Unit_hipKernelSetAttributeForDevice_Positive_CrossDevice) {
   HIP_CHECK(hipSetDevice(0));
   hipLibrary_t library = nullptr;
   hipKernel_t kernel = nullptr;
-  LoadLibraryKernel(&library, &kernel);
+
+  SECTION("LoadFromFile") {
+    LoadLibraryKernel(&library, &kernel);
+  }
+
+  SECTION("LoadData then overwrite image") {
+    std::ifstream input("library_code_load.code", std::ios::binary | std::ios::ate);
+    REQUIRE(input.good());
+    const std::streamsize image_size = input.tellg();
+    REQUIRE(image_size > 0);
+    std::vector<char> image(static_cast<size_t>(image_size));
+    input.seekg(0, std::ios::beg);
+    REQUIRE(input.read(image.data(), image_size).good());
+
+    HIP_CHECK(hipLibraryLoadData(&library, image.data(), nullptr, nullptr, 0, nullptr, nullptr, 0));
+    HIP_CHECK(hipLibraryGetKernel(&kernel, library, "add_kernel"));
+    std::fill(image.begin(), image.end(), 0);
+  }
 
   HIP_CHECK(
       hipKernelSetAttributeForDevice(kernel, hipFuncAttributeMaxDynamicSharedMemorySize, 0, 0));
@@ -276,6 +300,7 @@ HIP_TEST_CASE(Unit_hipKernelSetAttributeForDevice_Positive_FunctionOverride) {
   HIP_CHECK(hipFree(output));
   HIP_CHECK(hipFree(input_a));
   HIP_CHECK(hipFree(input_b));
+  (void)hipGetLastError();
   HIP_CHECK(hipLibraryUnload(library));
 }
 
@@ -321,6 +346,7 @@ HIP_TEST_CASE(Unit_hipKernelSetAttributeForDevice_Negative_Parameters) {
   HIP_CHECK_ERROR(hipKernelSetAttributeForDevice(
                       kernel, hipFuncAttributeClusterSchedulingPolicyPreference, 3, 0),
                   hipErrorInvalidValue);
+  (void)hipGetLastError();
   HIP_CHECK(hipLibraryUnload(library));
 }
 
