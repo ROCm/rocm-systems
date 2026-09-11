@@ -45,7 +45,7 @@
 
 #include <link.h>
 #include <vector>
-#include <amdgpu_drm.h>
+#include <hsakmt/drm/amdgpu_drm.h>
 
 #include "core/inc/amd_gpu_agent.h"
 #include "core/inc/amd_memory_region.h"

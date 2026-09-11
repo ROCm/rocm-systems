@@ -7,10 +7,13 @@
 
 #include <cerrno>
 #include <cstring>
+#include <unistd.h>
 #include <algorithm>
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
+
+#include <xf86drm.h>
 
 #include "core/inc/amd_drm_driver.h"
 #include "core/inc/amd_aql_queue.h"
@@ -19,6 +22,145 @@
 
 namespace rocr {
 namespace AMD {
+
+namespace {
+
+// Raw DRM-ioctl replacements for the UKI libdrm wrapper functions. Per the UKI
+// direction ROCr no longer adds wrappers to libdrm; it issues the ioctls itself
+// against its own kernel-mirrored UAPI (hsakmt/drm/amdgpu_drm.h). The DRM fd
+// comes from libdrm's upstream amdgpu_device_get_fd().
+
+uint64_t UserqMqdSize(uint32_t ip_type) {
+  switch (ip_type) {
+    case AMDGPU_HW_IP_GFX:     return sizeof(struct drm_amdgpu_userq_mqd_gfx11);
+    case AMDGPU_HW_IP_DMA:     return sizeof(struct drm_amdgpu_userq_mqd_sdma_gfx11);
+    case AMDGPU_HW_IP_COMPUTE: return sizeof(struct drm_amdgpu_userq_mqd_compute_gfx11);
+    default:                   return 0;
+  }
+}
+
+int DrmUserqCreate(amdgpu_device_handle dev, uint32_t ip_type,
+                   uint32_t doorbell_handle, uint32_t doorbell_offset,
+                   uint64_t queue_va, uint64_t queue_size,
+                   uint64_t wptr_va, uint64_t rptr_va,
+                   void* mqd_in, uint32_t flags, uint32_t* queue_id) {
+  if (dev == nullptr) return -EINVAL;
+  const uint64_t mqd_size = UserqMqdSize(ip_type);
+  if (mqd_size == 0) return -EINVAL;
+
+  union drm_amdgpu_userq userq;
+  memset(&userq, 0, sizeof(userq));
+  userq.in.op = AMDGPU_USERQ_OP_CREATE;
+  userq.in.ip_type = ip_type;
+  userq.in.doorbell_handle = doorbell_handle;
+  userq.in.doorbell_offset = doorbell_offset;
+  userq.in.queue_va = queue_va;
+  userq.in.queue_size = queue_size;
+  userq.in.wptr_va = wptr_va;
+  userq.in.rptr_va = rptr_va;
+  userq.in.mqd = reinterpret_cast<uint64_t>(mqd_in);
+  userq.in.mqd_size = mqd_size;
+  userq.in.flags = flags;
+
+  int ret = drmCommandWriteRead(amdgpu_device_get_fd(dev), DRM_AMDGPU_USERQ,
+                                &userq, sizeof(userq));
+  if (ret == 0) *queue_id = userq.out.queue_id;
+  return ret;
+}
+
+int DrmUserqModify(amdgpu_device_handle dev, uint32_t ip_type, uint32_t queue_id,
+                   uint64_t queue_va, uint64_t queue_size,
+                   uint64_t wptr_va, uint64_t rptr_va, void* mqd_in) {
+  if (dev == nullptr) return -EINVAL;
+  const uint64_t mqd_size = UserqMqdSize(ip_type);
+  if (mqd_size == 0) return -EINVAL;
+
+  union drm_amdgpu_userq userq;
+  memset(&userq, 0, sizeof(userq));
+  userq.in.op = AMDGPU_USERQ_OP_MODIFY;
+  userq.in.ip_type = ip_type;
+  userq.in.queue_id = queue_id;
+  userq.in.queue_va = queue_va;
+  userq.in.queue_size = queue_size;
+  userq.in.wptr_va = wptr_va;
+  userq.in.rptr_va = rptr_va;
+  userq.in.mqd = reinterpret_cast<uint64_t>(mqd_in);
+  userq.in.mqd_size = mqd_size;
+
+  return drmCommandWriteRead(amdgpu_device_get_fd(dev), DRM_AMDGPU_USERQ,
+                             &userq, sizeof(userq));
+}
+
+int DrmUserqFree(amdgpu_device_handle dev, uint32_t queue_id) {
+  union drm_amdgpu_userq userq;
+  memset(&userq, 0, sizeof(userq));
+  userq.in.op = AMDGPU_USERQ_OP_FREE;
+  userq.in.queue_id = queue_id;
+  return drmCommandWriteRead(amdgpu_device_get_fd(dev), DRM_AMDGPU_USERQ,
+                             &userq, sizeof(userq));
+}
+
+// Returns 0 on success, or -1 with errno set (drmIoctl semantics), so callers
+// can distinguish EOPNOTSUPP (CWSR L2 trap optional) from a hard failure.
+int DrmCwsrSetL2Trap(amdgpu_device_handle dev, uint64_t tba_va, uint32_t tba_sz,
+                     uint64_t tma_va, uint32_t tma_sz) {
+  union drm_amdgpu_cwsr args;
+  memset(&args, 0, sizeof(args));
+  args.in.op = AMDGPU_CWSR_OP_SET_L2_TRAP;
+  args.in.l2trap.tba_va = tba_va;
+  args.in.l2trap.tba_sz = tba_sz;
+  args.in.l2trap.tma_va = tma_va;
+  args.in.l2trap.tma_sz = tma_sz;
+  return drmIoctl(amdgpu_device_get_fd(dev), DRM_IOCTL_AMDGPU_CWSR, &args);
+}
+
+int DrmQueryInfo(amdgpu_device_handle dev, uint32_t query, uint32_t hw_ip_type,
+                 uint32_t ip_instance, void* out, uint32_t out_size) {
+  struct drm_amdgpu_info request;
+  memset(&request, 0, sizeof(request));
+  request.return_pointer = reinterpret_cast<uintptr_t>(out);
+  request.return_size = out_size;
+  request.query = query;
+  request.query_hw_ip.type = hw_ip_type;
+  request.query_hw_ip.ip_instance = ip_instance;
+  return drmCommandWrite(amdgpu_device_get_fd(dev), DRM_AMDGPU_INFO,
+                         &request, sizeof(request));
+}
+
+// Mirrors amdgpu_svm_{set,get,reset}_attr: page-align check + GEM_SVM ioctl,
+// with the GET-path PREFERRED/PREFETCH location post-processing (SYSMEM->0).
+int DrmSvmOp(amdgpu_device_handle dev, uint32_t op, uint64_t start, uint64_t size,
+             uint32_t nattr, struct drm_amdgpu_svm_attribute* attrs) {
+  const long page_size = sysconf(_SC_PAGESIZE);
+  if (start == 0 || size == 0) return -EINVAL;
+  if ((start & (page_size - 1)) || (size & (page_size - 1))) return -EINVAL;
+
+  struct drm_amdgpu_gem_svm args;
+  memset(&args, 0, sizeof(args));
+  args.start_addr = start;
+  args.size = size;
+  args.operation = op;
+  args.nattr = nattr;
+  args.attrs_ptr = reinterpret_cast<uint64_t>(attrs);
+
+  int r = drmCommandWriteRead(amdgpu_device_get_fd(dev), DRM_AMDGPU_GEM_SVM,
+                              &args, sizeof(args));
+  if (r) return r;
+
+  if (op == AMDGPU_SVM_OP_GET_ATTR) {
+    for (uint32_t i = 0; i < nattr; ++i) {
+      if (attrs[i].type != AMDGPU_SVM_ATTR_PREFERRED_LOC &&
+          attrs[i].type != AMDGPU_SVM_ATTR_PREFETCH_LOC)
+        continue;
+      if (attrs[i].value == AMDGPU_SVM_LOCATION_SYSMEM)
+        attrs[i].value = 0;
+      // UNDEFINED and GPU-id values pass through unchanged.
+    }
+  }
+  return 0;
+}
+
+}  // namespace
 
 DrmDriver::DrmDriver(std::string devnode_name)
     : KfdDriver(core::DriverType::DRM, std::move(devnode_name)) {}
@@ -66,10 +208,11 @@ hsa_status_t DrmDriver::CreateQueue(const CreateQueueInParams *queueIn, CreateQu
 
   if (type == AQL_QUEUE) {
     compute_mqd.eop_va = drmQueueIn->extra_va;
-    compute_mqd.ctx_save_area_addr = drmQueueIn->cwsr_va;
+    compute_mqd.ctx_save_area_va = drmQueueIn->cwsr_va;
     compute_mqd.ctx_save_area_size = drmQueueIn->cwsr_size;
-    fprintf(stderr, "DEBUG DRM: Creating compute queue with eop_va=0x%llx, cwsr_va=0x%llx, cwsr_size=%u\n",
-            (unsigned long long)compute_mqd.eop_va, (unsigned long long)compute_mqd.ctx_save_area_addr, compute_mqd.ctx_save_area_size);
+    // queue_percentage=0 means suspended (AMDGPU_USERQ_IS_ACTIVE checks > 0);
+    // default to fully scheduled, matching ModifyQueueInParams.
+    compute_mqd.queue_percentage = AMDGPU_USERQ_MAX_QUEUE_PERCENTAGE;
     mqd_in = &compute_mqd;
     // This is an HSA AQL queue — tell the kernel/MES to configure it in AQL mode.
     // Previously set SECURE (1<<2) which made MES treat it as a non-AQL (PM4) TMZ
@@ -90,17 +233,17 @@ hsa_status_t DrmDriver::CreateQueue(const CreateQueueInParams *queueIn, CreateQu
     return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
   }
 
-  int result = amdgpu_create_userqueue(gpu_agent.libDrmDev(),
-                                       ip_type,
-                                       doorbell_handle,
-                                       doorbell_offset,
-                                       (uint64_t) drmQueueIn->ring_buf,
-                                       drmQueueIn->ring_buf_size,
-                                       drmQueueIn->wptr_addr,
-                                       drmQueueIn->rptr_addr,
-                                       mqd_in,
-                                       flags,
-                                       &queue_id);
+  int result = DrmUserqCreate(gpu_agent.libDrmDev(),
+                              ip_type,
+                              doorbell_handle,
+                              doorbell_offset,
+                              (uint64_t) drmQueueIn->ring_buf,
+                              drmQueueIn->ring_buf_size,
+                              drmQueueIn->wptr_addr,
+                              drmQueueIn->rptr_addr,
+                              mqd_in,
+                              flags,
+                              &queue_id);
 
   if (result != 0) {
     debug_print("Failed to create user queue! Error code: %d (%s)\n", result, strerror(-result));
@@ -126,7 +269,7 @@ hsa_status_t DrmDriver::DestroyQueue(const DestroyQueueInParams *queueIn) {
 
   FreeDoorbellOffset(drmQueueIn->gpu_agent, drmQueueIn->doorbell_offset);
 
-  if (amdgpu_free_userqueue(drmQueueIn->gpu_agent.libDrmDev(), drmQueueIn->queue_id) != 0) {
+  if (DrmUserqFree(drmQueueIn->gpu_agent.libDrmDev(), drmQueueIn->queue_id) != 0) {
     debug_print("Failed to free userqueue!\n");
     return HSA_STATUS_ERROR;
   }
@@ -171,14 +314,14 @@ hsa_status_t DrmDriver::ModifyQueue(const ModifyQueueInParams *queueIn) {
   mqd_in = &compute_mqd;
   ip_type = AMDGPU_HW_IP_COMPUTE;
 
-  int result = amdgpu_modify_userqueue(gpu_agent.libDrmDev(),
-                                       ip_type,
-                                       drmQueueIn->queue_id,
-                                       (uint64_t)drmQueueIn->ring_buf,
-                                       drmQueueIn->ring_buf_size,
-                                       drmQueueIn->wptr_addr,
-                                       drmQueueIn->rptr_addr,
-                                       mqd_in);
+  int result = DrmUserqModify(gpu_agent.libDrmDev(),
+                              ip_type,
+                              drmQueueIn->queue_id,
+                              (uint64_t)drmQueueIn->ring_buf,
+                              drmQueueIn->ring_buf_size,
+                              drmQueueIn->wptr_addr,
+                              drmQueueIn->rptr_addr,
+                              mqd_in);
 
   if (result != 0) {
     debug_print("Failed to modify user queue!\n");
@@ -190,6 +333,13 @@ hsa_status_t DrmDriver::ModifyQueue(const ModifyQueueInParams *queueIn) {
 
 void DrmDriver::ReleaseResources(core::Agent &agent) {
   FreeDoorbellMemory(agent);
+
+  auto it = trap_tma_by_agent_.find(&agent);
+  if (it != trap_tma_by_agent_.end()) {
+    if (it->second != nullptr)
+      static_cast<GpuAgent&>(agent).system_deallocator()(it->second);
+    trap_tma_by_agent_.erase(it);
+  }
 }
 
 hsa_status_t DrmDriver::AllocateDoorbellMemory(core::Agent &agent) {
@@ -350,7 +500,18 @@ hsa_status_t DrmDriver::GetUserQueueMetadata(core::Agent &agent, queue_type type
     return HSA_STATUS_ERROR_INVALID_ARGUMENT;
   }
 
-  int result = amdgpu_query_uq_fw_area_info(gpu_agent.libDrmDev(), ip_type, 0, info);
+  int result = DrmQueryInfo(gpu_agent.libDrmDev(), AMDGPU_INFO_UQ_FW_AREAS, ip_type, 0,
+                            info, sizeof(*info));
+
+  return (result == 0) ? HSA_STATUS_SUCCESS : HSA_STATUS_ERROR;
+}
+
+hsa_status_t DrmDriver::QueryCwsrInfo(core::Agent &agent, struct drm_amdgpu_info_cwsr *info) {
+  if (!info)
+    return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+
+  GpuAgent &gpu_agent = static_cast<GpuAgent &>(agent);
+  int result = DrmQueryInfo(gpu_agent.libDrmDev(), AMDGPU_INFO_CWSR, 0, 0, info, sizeof(*info));
 
   return (result == 0) ? HSA_STATUS_SUCCESS : HSA_STATUS_ERROR;
 }
@@ -388,6 +549,78 @@ hsa_status_t DrmDriver::AllocQueueGWS(HSA_QUEUEID queue_id, uint32_t num_gws,
   // Stub: GWS (Global Wave Sync) allocation not yet supported in DRM mode
   // May require new kernel ioctl support
   return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+}
+
+hsa_status_t DrmDriver::SetTrapHandler(uint32_t node_id, const void* base, uint64_t base_size,
+                                       const void* buffer_base, uint64_t buffer_base_size) const {
+  // On the DRM/UKI path the kernel installs the first-level CWSR trap handler
+  // itself at KMS open; userspace only installs the level-2 handler via the CWSR
+  // ioctl. Route to libdrm instead of the KFD path inherited from KfdDriver.
+  //
+  // The kernel validates that both the trap-handler code (TBA) and the trap
+  // memory buffer (TMA) are GPU virtual addresses mapped in this device's render
+  // VM. The TBA (trap_code_buf_) already satisfies this: it is allocated
+  // executable and is therefore GPU-resident with a render-VM bo_va mapping.
+  // The TMA is the problem on the exception-debugging path, where the generic
+  // code passes a NULL TMA (the KFD path lets the kernel manage that buffer
+  // internally, but the DRM path requires userspace to supply one). Substitute a
+  // zeroed, render-VM-mapped TMA. Plain kernarg memory does not get a render-VM
+  // bo_va mapping, so allocate from the executable system pool (same property
+  // that makes the TBA valid).
+  core::Agent* agent = core::Runtime::runtime_singleton_->agent_by_nodeid(node_id);
+  if (agent == nullptr || agent->device_type() != core::Agent::kAmdGpuDevice) {
+    return HSA_STATUS_ERROR_INVALID_AGENT;
+  }
+
+  GpuAgent* gpuAgent = static_cast<GpuAgent*>(agent);
+  amdgpu_device_handle dev = gpuAgent->libDrmDev();
+
+  uint64_t tma_va = reinterpret_cast<uint64_t>(buffer_base);
+  uint64_t tma_size = buffer_base_size;
+  if (buffer_base == nullptr || buffer_base_size == 0) {
+    constexpr size_t kDrmTrapTmaSize = 0x1000;
+    void*& tma = trap_tma_by_agent_[agent];
+    if (tma == nullptr) {
+      tma = gpuAgent->system_allocator()(kDrmTrapTmaSize, 0x1000,
+                      core::MemoryRegion::AllocateExecutable |
+                      core::MemoryRegion::AllocateExecutableBlitKernelObject);
+      if (tma == nullptr) {
+        trap_tma_by_agent_.erase(agent);
+        debug_print(
+              "DrmDriver::SetTrapHandler: render-VM TMA allocation failed\n");
+        return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
+      }
+      memset(tma, 0, kDrmTrapTmaSize);
+    }
+    tma_va = reinterpret_cast<uint64_t>(tma);
+    tma_size = kDrmTrapTmaSize;
+  }
+
+  int result = DrmCwsrSetL2Trap(
+                                            dev,
+                                            reinterpret_cast<uint64_t>(base),
+                                            static_cast<uint32_t>(base_size),
+                                            tma_va, static_cast<uint32_t>(tma_size));
+  if (result == 0)
+    return HSA_STATUS_SUCCESS;
+
+  const int err = errno;
+  // The level-2 trap handler is genuinely optional only when the kernel has no
+  // per-file CWSR object (user queues disabled): the kernel installs the
+  // first-level handler itself and reports EOPNOTSUPP. Treat that as non-fatal.
+  //
+  // Do NOT swallow EINVAL. On this ioctl EINVAL means the kernel's
+  // amdgpu_cwsr_validate_user_addr() could not find the TBA/TMA in this
+  // process's DRM render VM (amdgpu_vm_bo_lookup_mapping failed) -- i.e. the
+  // trap buffer is not mapped where the kernel expects. That is a real
+  // VM-mapping bug, not a "feature absent" condition, so surface it.
+  if (err == EOPNOTSUPP) {
+    debug_print("DrmDriver::SetTrapHandler: CWSR L2 trap handler unavailable "
+                "(EOPNOTSUPP); continuing without it\n");
+    return HSA_STATUS_SUCCESS;
+  }
+  debug_print("DrmCwsrSetL2Trap failed: %d (errno %d)\n", result, err);
+  return HSA_STATUS_ERROR;
 }
 
 // Legacy DestroyQueue: used for KFD-created queues when DRM queue creation falls back to KFD.
@@ -440,7 +673,8 @@ hsa_status_t DrmDriver::SvmSetAttr(void* base, size_t size,
       amdgpu_device_handle dev = static_cast<GpuAgent*>(agent)->libDrmDev();
       if (dev == nullptr)
         continue;
-      if (amdgpu_svm_reset_attr(dev, reinterpret_cast<uint64_t>(base), size))
+      if (DrmSvmOp(dev, AMDGPU_SVM_OP_RESET_ATTR, reinterpret_cast<uint64_t>(base), size, 0,
+                   nullptr))
         return HSA_STATUS_ERROR;
     }
     return HSA_STATUS_SUCCESS;
@@ -583,8 +817,8 @@ hsa_status_t DrmDriver::SvmSetAttr(void* base, size_t size,
      *      with the original values on already-updated devices to restore a
      *      consistent state before returning an error.
      */
-    if (amdgpu_svm_set_attr(dev, reinterpret_cast<uint64_t>(base), size,
-                            static_cast<uint32_t>(attrs.size()), attrs.data()) != 0)
+    if (DrmSvmOp(dev, AMDGPU_SVM_OP_SET_ATTR, reinterpret_cast<uint64_t>(base), size,
+                 static_cast<uint32_t>(attrs.size()), attrs.data()) != 0)
       return HSA_STATUS_ERROR;
   }
 
@@ -667,8 +901,8 @@ hsa_status_t DrmDriver::SvmGetAttr(void* base, size_t size,
     if (dev == nullptr)
       continue;
 
-    if (amdgpu_svm_get_attr(dev, reinterpret_cast<uint64_t>(base), size,
-                            static_cast<uint32_t>(req.size()), req.data()) != 0)
+    if (DrmSvmOp(dev, AMDGPU_SVM_OP_GET_ATTR, reinterpret_cast<uint64_t>(base), size,
+                 static_cast<uint32_t>(req.size()), req.data()) != 0)
       continue;
 
     auto& vals = node_vals[agent];
@@ -806,7 +1040,7 @@ hsa_status_t DrmDriver::SvmPrefetch(const core::Agent& dstAgent, void* base, siz
       return HSA_STATUS_ERROR;
 
     drm_amdgpu_svm_attribute attr{AMDGPU_SVM_ATTR_PREFETCH_LOC, kSvmLocationThisGpu};
-    if (amdgpu_svm_set_attr(dev, reinterpret_cast<uint64_t>(base), size, 1, &attr) != 0)
+    if (DrmSvmOp(dev, AMDGPU_SVM_OP_SET_ATTR, reinterpret_cast<uint64_t>(base), size, 1, &attr) != 0)
       return HSA_STATUS_ERROR;
 
     return HSA_STATUS_SUCCESS;
@@ -833,7 +1067,7 @@ hsa_status_t DrmDriver::SvmPrefetch(const core::Agent& dstAgent, void* base, siz
     if (dev == nullptr)
       continue;
 
-    amdgpu_svm_set_attr(dev, reinterpret_cast<uint64_t>(base), size, 1, &attr);
+    DrmSvmOp(dev, AMDGPU_SVM_OP_SET_ATTR, reinterpret_cast<uint64_t>(base), size, 1, &attr);
   }
   return HSA_STATUS_SUCCESS;
 }
