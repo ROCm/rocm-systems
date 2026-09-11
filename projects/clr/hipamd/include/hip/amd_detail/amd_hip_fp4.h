@@ -263,7 +263,7 @@ __FP4_HOST_DEVICE_STATIC__ __hip_fp4_storage_t __hip_cvt_halfraw_to_fp4(
 #if HIP_ENABLE_GFX950_OCP_BUILTINS
   if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_cvt_scalef32_pk_fp4_f16))
     u.ui32 = __builtin_amdgcn_cvt_scalef32_pk_fp4_f16(
-        u.ui32, internal::half2_to_f16x2(__half2{x, 0}), 1.0f /* scale */, 0);
+        u.ui32, internal::half2_to_f16x2(__half2{x,{}}), 1.0f /* scale */, 0);
   return u.fp4[0];
 #elif HIP_ENABLE_GFX1250_OCP_BUILTINS
   auto val = internal::half2_to_f16x2(__half2{x, x});

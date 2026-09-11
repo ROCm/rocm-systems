@@ -12,7 +12,7 @@
 #include "log.hpp"
 #include "module_function.hpp"
 
-#include <spdlog/fmt/ranges.h>
+#include <fmt/ranges.h>
 
 #include <dlfcn.h>
 #include <string>
@@ -27,17 +27,6 @@ bool
 is_text_file(const std::string& filename);
 
 //======================================================================================//
-
-inline string_t
-to_lower(string_t s)
-{
-    for(auto& itr : s)
-        itr = tolower(itr);
-    return s;
-}
-//
-//======================================================================================//
-//
 template <typename Tp>
     requires(!std::is_same_v<Tp, std::string>)
 snippet_pointer_t

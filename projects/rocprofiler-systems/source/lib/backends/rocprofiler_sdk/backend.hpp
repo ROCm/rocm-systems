@@ -8,10 +8,9 @@
 
 #include <rocprofiler-sdk/version.h>
 
-#include <spdlog/fmt/fmt.h>  // NOLINT(misc-include-cleaner)
-
 #include <cstddef>
 #include <cstdint>
+#include <fmt/format.h>
 #include <memory>
 #include <stdexcept>
 #include <string>

@@ -81,9 +81,9 @@ static bool IsDoorbellTypeSupported(unsigned int doorbell_type) {
 // Count KFD topology nodes.
 static int CountKfdNodes() {
   int count = 0;
-  for (int i = 0; i < 64; ++i) {
+  while (true) {
     std::ostringstream path;
-    path << "/sys/devices/virtual/kfd/kfd/topology/nodes/" << i << "/properties";
+    path << "/sys/devices/virtual/kfd/kfd/topology/nodes/" << count << "/properties";
     std::ifstream props(path.str());
     if (!props.is_open()) break;
     ++count;
