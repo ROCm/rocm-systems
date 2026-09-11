@@ -206,16 +206,6 @@ void ComputeQueue::FaultMonitorThread(ComputeQueue* queue) {
   auto last_progress = std::chrono::steady_clock::now();
 
   while (!queue->thread_stop_) {
-    // error_reason written by GPU trap handler
-    if (queue->error_code_ &&
-        queue->error_code_->load(std::memory_order_acquire) != 0) {
-      if (queue->thread_stop_.exchange(true)) return;
-      int64_t code = queue->error_code_->load(std::memory_order_relaxed);
-      pr_err("GPU fault detected via error_reason: 0x%" PRIx64 "\n", static_cast<uint64_t>(code));
-      queue->HandleError(static_cast<hsa_status_t>(code));
-      return;
-    }
-
     // Stall detection: rptr hasn't advanced while work is pending.
     // Skipped when disable_wait_timeout_ is set (user opt-out for long-running kernels).
     if (!dxg_runtime->disable_wait_timeout_) {
@@ -252,15 +242,7 @@ void ComputeQueue::AqlToPm4Thread(ComputeQueue* queue) {
   start_time = std::chrono::steady_clock::now();
 
   while (true) {
-    // Poll error_reason for trap handler fault codes (DXG lacks KFD event path).
     if (queue->thread_stop_) break;
-    if (queue->error_code_ && queue->error_code_->load(std::memory_order_acquire) != 0) {
-      if (queue->thread_stop_.exchange(true)) break;
-      int64_t code = queue->error_code_->load(std::memory_order_relaxed);
-      pr_err("GPU fault detected via error_reason: 0x%" PRIx64 "\n", static_cast<uint64_t>(code));
-      queue->HandleError(static_cast<hsa_status_t>(code));
-      break;
-    }
 
     if (!queue->IsInvalidPacket()) {
       hsa_status_t status = queue->Process();
@@ -368,7 +350,10 @@ ComputeQueue::ComputeQueue(WDDMDevice* device, void* ring, uint64_t ring_size,
     aql_to_pm4_thread_ = std::thread(AqlToPm4Thread, this);
   }
 
-  // Fault monitor polls error_reason_ for all queue types.
+  // Fault monitor watches ring pointers for a stalled (wedged) queue. On
+  // WSL/DXG the GPU trap handler never writes error_reason_ (no KFD; host does
+  // not program TBA for the guest VMID), so stall detection is the only
+  // in-guest fault signal for a wedged queue.
   if (error_code_) {
     fault_monitor_thread_ = std::thread(FaultMonitorThread, this);
   }
