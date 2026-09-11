@@ -2,14 +2,27 @@
 
 Full documentation for HIP is available at [rocm.docs.amd.com](https://rocm.docs.amd.com/projects/HIP/en/latest/index.html)
 
+## HIP 10.2.0 for ROCm 10.2.0
+
+### Added
+* An optional `HIP_FORCE_API_VERSION` macro can be used to select an older version of the HIP APIs. For example, `HIP_FORCE_API_VERSION=600` selects the HIP 6.0 APIs. This macro must be defined before including `hip_runtime_api.h`.
+
+### Changed
+* `hipMemAdvise` is now an alias for `hipMemAdvise_v2`. To use the previous version of `hipMemAdvise`, define `HIP_FORCE_API_VERSION` as a non-zero value less than 800.
+
 ## HIP 10.1.0 for ROCm 10.1.0
 
 ### Added
 * New HIP APIs
-    - Device Management: support for querying a device identifier.
-      * `hipDeviceGetLuid` returns the locally unique identifier (LUID) and device node mask for a device
-    - Device Management: support for API parity with corresponding CUDA API.
-      * `hipInitDevice` initializes the runtime state for the requested device, but does not make the device current for the calling thread. It also sets the requested flags and ensures the device's default stream is created.
+    - Device Management: Support for the following APIs for parity with corresponding CUDA APIs.
+      * `hipDeviceGetLuid` returns the locally unique identifier (LUID) and device node mask for the specified device.
+      * `hipInitDevice` initializes the runtime state for the specified device without making it the current device for the calling thread. It also applies to the requested flags and ensures the device's default stream is created.
+* Support for host-NUMA virtual memory management (VMM) in `hipMemCreate()` and related VMM APIs. These APIs now support `hipMemLocationTypeHostNuma` and `hipMemLocationTypeHostNumaCurrent`, enabling allocations backed by physical host memory on the selected NUMA node. Previously, support was limited to GPU VMM pools with deferred host access. This enhancement aligns HIP behavior with the corresponding CUDA APIs and expands support for NUMA-aware memory allocation.
+* Support for coarse-grained memory coherency on Windows. In supported Windows configurations, applications can now leverage unified memory to reduce memory footprint by up to 30% by eliminating unnecessary host-device data copies. Components interacting with the device can directly access host memory pointers and enable coarse-grained memory coherency by registering and pinning the associated host allocations using `hipHostRegister()` with the `hipExtHostRegisterCoarseGrained` flag. This provides behavior on Windows that is consistent with the existing Linux implementation while improving memory efficiency. 
+
+### Resolved issues
+* On windows, HIP runtime now correctly handles non-P2P data transfers between GPUs and coordinates multi-GPU kernel execution, eliminates deadlocks and invalid values in multi-process workloads and resolve issues observed when running LLMs, such as Llama, on multi-GPU Windows configurations.
+* Resolved an out-of-memory issue affecting AMD variable graphics memory configurations under maximum AI workloads on Windows. The HIP runtime now correctly utilizes the full unified memory pool available on large-memory APUs, enabling system RAM to be dynamically allocated as graphics memory and supporting the execution of larger AI models.
 
 ## HIP 10.0.0 for ROCm 10.0.0
 
@@ -54,15 +67,6 @@ Copy operations at or below the 256-row threshold are unchanged.
     - Streamlined batch grouping:
       * Removed the `AgentGroup/src_agent` mapping for D2D broadcasts.
       * Processed `H2D` and `D2H` LINEAR operations directly, bypassing the broadcast map.
-      
-## HIP 8.0 for ROCm 8.0
-
-### Added
-* An optional `HIP_FORCE_API_VERSION` macro can be used to select an older version of the HIP APIs. For example, `HIP_FORCE_API_VERSION=600` selects the HIP 6.0 APIs. This macro must be defined before including `hip_runtime_api.h`.
-
-### Deprecated
-
-* `hipMemAdvise` is now an alias for `hipMemAdvise_v2`. To use the previous version of `hipMemAdvise`, define `HIP_FORCE_API_VERSION` as a non-zero value less than 800.
 
 ## HIP 7.14 for ROCm 7.14
 
