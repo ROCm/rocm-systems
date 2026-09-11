@@ -325,10 +325,12 @@ class CodeGenerator:
     _SRC_OPERANDS_CAPACITY = 6
     _DST_OPERANDS_CAPACITY = 3
 
-    # Memory semantics recognized by code generation. This table is also the
-    # source of truth for the MEMORY_OP instruction flag: every implemented
-    # entry has explicit issue-counter and completion-order metadata before it
-    # can call a memory pipeline.
+    # Memory-pipeline semantics recognized by code generation. This table is
+    # also the source of truth for the MEMORY_OP instruction flag: every entry
+    # has explicit issue-counter and completion-order metadata before it can
+    # call a memory pipeline. Counter-producing operations outside those
+    # pipelines (for example messages and timestamp queries) are intentionally
+    # not represented here.
     _MEMORY_ISSUE_KINDS = {
         'smem_load': 'scalar',
         'smem_store': 'scalar',
