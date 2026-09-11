@@ -198,5 +198,27 @@ TEST_F(KernelScopeTest, BlockForOffsetResolvesInteriorOffsets) {
   EXPECT_EQ(block_for_offset(offset_index_, 0x1000), nullptr);
 }
 
+TEST(BasicBlockWindow, CfgRejectsTruncatedInstructionWithSourceOffset) {
+  TestCodeObject object({0xbf800000, 0xbe8000ff}); // s_nop; s_mov_b32 with no literal.
+  auto decoder = Decoder::create(kArch);
+  ASSERT_NE(decoder, nullptr);
+  util::StringDiagnostic diagnostic;
+  auto result = BasicBlock::build(object, *decoder, kArch, diagnostic.emitter());
+  EXPECT_TRUE(result.failed());
+  EXPECT_EQ(diagnostic.message(), "truncated instruction encoding at .text byte offset 4");
+}
+
+TEST(BasicBlockWindow, CfgPreservesFourWordInstructionAtSectionEnd) {
+  TestCodeObject object({0xcc3a0200, 0x42020d04, 0xcc336008, 0x04223110});
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
+  ASSERT_NE(decoder, nullptr);
+  auto blocks = build_valid_blocks(object, *decoder, ROCJITSU_CODE_ARCH_CDNA5);
+  ASSERT_EQ(blocks.size(), 1u);
+  const Instruction &instruction = *blocks.front()->instructions().begin();
+  EXPECT_EQ(instruction.size(), 16);
+  ASSERT_NE(instruction.raw_encoding(), nullptr);
+  EXPECT_EQ(instruction.raw_encoding()[3], 0x04223110u);
+}
+
 } // namespace
 } // namespace rocjitsu
