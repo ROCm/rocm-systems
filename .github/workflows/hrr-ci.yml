@@ -70,19 +70,21 @@ jobs:
       - name: Run unit suite
         shell: bash
         run: |
-          ./build/tests/unit/hrr-unit-tests \
+          bin=./build/tests/unit/hrr-unit-tests
+          if [ -x "${bin}.exe" ]; then
+            bin="${bin}.exe"
+          fi
+          "${bin}" \
             --reporter console \
-            --reporter junit::out=unit-results.xml
+            --reporter junit::out=unit-${{ matrix.os }}.xml
 
-      - name: Publish results
+      - name: Upload results
         if: always()
-        uses: EnricoMi/publish-unit-test-result-action@d0a4676d0e0b938bc201470d88276b7c74c712b3 # v2.24.0
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          files: unit-results.xml
-          check_name: "HRR unit — ${{ matrix.os }}"
-          comment_mode: "off"
-          check_run: false
-          job_summary: true
+          name: results-unit-${{ matrix.os }}
+          path: unit-${{ matrix.os }}.xml
+          retention-days: 3
 
   # ---------------------------------------------------------------------------
   # Resolve the GPU runner labels from the shared CI config, the same way the
@@ -129,6 +131,15 @@ jobs:
             projects/hip
             projects/rocr-runtime
           set-safe-directory: true
+
+      # ROCclr pulls in OpenGL through ROCclrHSA.cmake even with CLR_BUILD_OCL
+      # off, so the GL development packages are required to configure CLR.
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y --no-install-recommends \
+            ninja-build pkg-config libnuma-dev libelf-dev libdrm-dev \
+            libgl1-mesa-dev libglx-dev mesa-common-dev
 
       - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
         with:
@@ -251,12 +262,40 @@ jobs:
             --reporter console \
             --reporter junit::out=integration-${{ matrix.family }}.xml
 
-      - name: Publish results
+      - name: Upload results
         if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: results-integration-${{ matrix.family }}
+          path: integration-${{ matrix.family }}.xml
+          retention-days: 3
+
+  # ---------------------------------------------------------------------------
+  # Per-test reporting for every job above. Collected centrally because the
+  # publishing action is a container action and so cannot run on the Windows
+  # runners.
+  # ---------------------------------------------------------------------------
+  report:
+    name: "Test results"
+    needs: [unit, integration]
+    if: always()
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      checks: write
+      pull-requests: write
+    steps:
+      - name: Download all results
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: results-*
+          merge-multiple: true
+
+      - name: Publish
         uses: EnricoMi/publish-unit-test-result-action@d0a4676d0e0b938bc201470d88276b7c74c712b3 # v2.24.0
         with:
-          files: integration-${{ matrix.family }}.xml
-          check_name: "HRR integration — ${{ matrix.family }}"
+          files: "*.xml"
+          check_name: "HRR test results"
           comment_mode: "off"
           check_run: false
           job_summary: true
