@@ -87,6 +87,7 @@ pub fn mi300x() -> AgentDef {
                     l2_size_kb: 4096,
                     num_sdma_engines: 4,
                     num_sdma_xgmi_engines: 6,
+                    num_sdma_queues_per_engine: 8,
                     num_cp_queues: 128,
                     max_engine_clk_fcompute: 2100,
                     ..Default::default()
@@ -137,6 +138,7 @@ pub fn mi350x() -> AgentDef {
                     l2_size_kb: 4096,
                     num_sdma_engines: 5,
                     num_sdma_xgmi_engines: 12,
+                    num_sdma_queues_per_engine: 8,
                     num_cp_queues: 128,
                     max_engine_clk_fcompute: 2700,
                     ..Default::default()
@@ -186,6 +188,7 @@ pub fn mi450x() -> AgentDef {
                     l2_size_kb: 4096,
                     num_sdma_engines: 5,
                     num_sdma_xgmi_engines: 12,
+                    num_sdma_queues_per_engine: 2,
                     num_cp_queues: 128,
                     max_engine_clk_fcompute: 2700,
                     ..Default::default()
@@ -377,6 +380,27 @@ mod tests {
                 ("lds_size_kb", preset.lds_size_kb),
             ] {
                 assert_eq!(cu_config(&agent, key), want, "{} {key}", preset.preset);
+            }
+        }
+    }
+
+    /// A builtin that declares SDMA engines must also say how many queues
+    /// each engine has.
+    ///
+    /// `rj_vm_create_from_string` rejects that pair outright, so a zero
+    /// here is not a wrong number in a report — it fails every session the
+    /// profile starts.
+    #[test]
+    fn every_agent_declares_its_sdma_queue_depth() {
+        for (name, agent) in agents() {
+            let device = &agent.vm.gpu.device;
+            if device.num_sdma_engines != 0 {
+                assert_ne!(
+                    device.num_sdma_queues_per_engine, 0,
+                    "`{name}` declares {} SDMA engines but no queues per \
+                     engine; the emulator refuses such a config",
+                    device.num_sdma_engines
+                );
             }
         }
     }
