@@ -176,7 +176,13 @@ protected:
     return {kMovV3V0, build_s_setpc_b64(/*s[30:31]=*/30, a_.arch)};
   }
 
-  [[nodiscard]] bool lane_active(uint32_t lane) const { return (kAnchorMask >> lane) & 1u; }
+  // Widened before the shift: the wave64 fixtures run lanes up to 63, and
+  // shifting a uint32_t by 32 or more is undefined. On x86 the count masks to 5
+  // bits, so lane 32 would read as lane 0 and an inactive lane could report
+  // active.
+  [[nodiscard]] bool lane_active(uint32_t lane) const {
+    return (uint64_t{kAnchorMask} >> lane) & 1u;
+  }
 
   //============================================================================
   // No arguments, nothing to spill: the envelope emits no EXEC toggles at all,
@@ -217,9 +223,10 @@ protected:
     for (uint32_t lane = 0; lane < a_.wave_size; ++lane) {
       EXPECT_EQ(regs[0][lane], lane_active(lane) ? kProbeSentinel : kUntouched)
           << "lane " << lane << ": the probe must have run under the restored anchor mask";
-      if (lane_active(lane))
+      if (lane_active(lane)) {
         EXPECT_EQ(regs[1][lane], kGuestValue)
             << "lane " << lane << ": the guest's v0 did not survive carrying the argument";
+      }
     }
   }
 
@@ -233,9 +240,10 @@ protected:
     for (uint32_t lane = 0; lane < a_.wave_size; ++lane) {
       EXPECT_EQ(regs[0][lane], kProbeSentinel)
           << "lane " << lane << ": a full-exec probe must receive its argument in every lane";
-      if (lane_active(lane))
+      if (lane_active(lane)) {
         EXPECT_EQ(regs[1][lane], kGuestValue)
             << "lane " << lane << ": the guest's v0 did not survive carrying the argument";
+      }
     }
   }
 
