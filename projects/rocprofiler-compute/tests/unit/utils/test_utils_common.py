@@ -1519,3 +1519,30 @@ def test_is_gfx1250_matches_only_the_supported_architecture():
     assert not utils_common.is_gfx1250("gfx12500")
     assert not utils_common.is_gfx1250("gfx1251")
     assert not utils_common.is_gfx1250(None)
+
+
+@pytest.mark.misc
+def test_omit_sqg_counters_from_sdk_config_drops_sqg_block_and_derived():
+    sdk_config = {
+        "rocprofiler-sdk": {
+            "counters": [
+                {"name": "GRBM_GUI_ACTIVE", "definitions": [{"block": "GRBM"}]},
+                {
+                    "name": "SQG_WAVES",
+                    "definitions": [{"block": "SQG", "architectures": ["gfx1250"]}],
+                },
+                {
+                    "name": "SQG_LEVEL_WGP_ACTIVE_ACCUM",
+                    "definitions": [
+                        {
+                            "architectures": ["gfx1250"],
+                            "expression": "accumulate(SQG_LEVEL_WGP_ACTIVE, HIGH_RES)",
+                        }
+                    ],
+                },
+            ]
+        }
+    }
+    filtered = utils_common.omit_sqg_counters_from_sdk_config(sdk_config)
+    names = [c["name"] for c in filtered["rocprofiler-sdk"]["counters"]]
+    assert names == ["GRBM_GUI_ACTIVE"]

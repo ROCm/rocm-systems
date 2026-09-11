@@ -1103,6 +1103,52 @@ def print_status(msg: str) -> None:
     console_log("")
 
 
+def omit_sqg_counters_from_sdk_config(sdk_config: dict[str, Any]) -> dict[str, Any]:
+    """Return sdk_config without SQG counters (for list-avail only).
+
+    gfx942 profiling does not collect SQG block counters. Feeding SQG derived
+    metrics (e.g. SQG_LEVEL_WGP_ACTIVE accumulates) to list-avail can abort on
+    some ROCm builds when the SDK evaluates them against MI300 agents.
+    """
+    sdk_root = sdk_config.get("rocprofiler-sdk")
+    if not isinstance(sdk_root, dict):
+        return sdk_config
+    counters = sdk_root.get("counters")
+    if not isinstance(counters, list):
+        return sdk_config
+
+    filtered: list[Any] = []
+    for entry in counters:
+        if not isinstance(entry, dict):
+            filtered.append(entry)
+            continue
+        name = entry.get("name", "")
+        if isinstance(name, str) and name.startswith("SQG_"):
+            continue
+        definitions = entry.get("definitions")
+        if not isinstance(definitions, list):
+            filtered.append(entry)
+            continue
+        skip = False
+        for definition in definitions:
+            if not isinstance(definition, dict):
+                continue
+            if definition.get("block") == "SQG":
+                skip = True
+                break
+            expression = definition.get("expression")
+            if isinstance(expression, str) and "SQG_" in expression:
+                skip = True
+                break
+        if not skip:
+            filtered.append(entry)
+
+    return {
+        **sdk_config,
+        "rocprofiler-sdk": {**sdk_root, "counters": filtered},
+    }
+
+
 def create_temp_rocprofiler_metrics_path(sdk_config: dict[str, Any]) -> str:
     """
     Create temporary directory with rocprofiler metrics config files.

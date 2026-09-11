@@ -34,7 +34,7 @@ Grouping policy + metric-aware coalescing remains the **first accurate choice**;
 
 ### 1.3 CPX validation host (Conductor, not alola)
 
-**Primary hardware:** Conductor node `hpe-darkstar-ccs-aus-e12-03.cs-aus.dcgpu` — GPUs can be configured in **CPX** (check `rocm-smi --showcomputepartition`; e.g. GPU[1] / GPU[9]).
+**Primary hardware:** Conductor node `hpe-darkstar-ccs-aus-e12-03.cs-aus.dcgpu` — GPUs can be configured in **CPX** (check `rocm-smi --showcomputepartition`; e.g. GPU[1] / GPU[9]). Use an **ROCR index that exposes 38 CUs** (`rocminfo`); on this host that is usually **`ROCR_GPU=9`**, not GPU[1] (304 CUs / SPX in sysinfo).
 
 **Source tree:** Track [`rocprofiler-compute-develop`](https://github.com/ROCm/rocm-systems/tree/rocprofiler-compute-develop) (not alola Slurm `cpx` reservation).
 
@@ -48,11 +48,15 @@ git sparse-checkout set projects/rocprofiler-compute
 git sparse-checkout add projects/rocprofiler-compute/src/vendored
 
 # Phase 1 run (after copying script from branch or repo)
-export ROCR_GPU=1   # CPX die
+export ROCR_GPU=9   # 38-CU CPX die on Conductor (verify with rocminfo)
+export ROCM_ROOT=/cluster/apps/ubuntu-24/rocm/rocm-7.15.0.dev.df64a75  # one prefix; do not mix /opt/rocm
+# export SKIP_GIT=1   # if sparse clone / vendored rsync broke git metadata
 bash projects/rocprofiler-compute/scripts/aiprofcomp865_phase1_conductor_cpx.sh
 ```
 
 When [#10912](https://github.com/ROCm/rocm-systems/pull/10912) is merged to `rocprofiler-compute-develop`, re-run the same script and compare to this baseline.
+
+**Conductor SDK workaround:** `list-avail` during `perfmon_coalesce` loads `sdk_config.yaml`; SQG-derived metrics can abort on gfx942 agents. Profiling omits SQG entries from that avail-only config (gfx942 does not collect SQG HW counters). The Phase 1 script defaults to `--block 3 6 11 17` instead of the full panel; use `FULL_PANEL=1` when SQG/SDK issues are resolved.
 
 **Legacy / optional:** alola MI300X + `cpx` reservation (only when reservation is valid).
 
