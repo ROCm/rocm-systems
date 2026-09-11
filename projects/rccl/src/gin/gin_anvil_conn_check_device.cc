@@ -40,7 +40,7 @@ __global__ void ginAnvilConnCheckKernel(unsigned long long* localSignals, int nR
 }
 
 static int connCheckLaunchOk() {
-  const hipError_t err = hipGetLastError();
+  const hipError_t err = hipPeekAtLastError();
   return (err == hipSuccess) ? 0 : -1;
 }
 
@@ -50,6 +50,7 @@ static int connCheckLaunchOk() {
 extern "C" int ginAnvilConnWrite(void* remoteAddrsDev, int nRanks, int selfRank,
                                  unsigned long long stamp, hipStream_t stream) {
   if (nRanks <= 0 || nRanks > gin_anvil::conn_check::kMaxConnCheckRanks) return -1;
+  (void)hipGetLastError();
   hipLaunchKernelGGL(gin_anvil::conn_check::ginAnvilConnWriteKernel, dim3(1), dim3(nRanks), 0, stream,
                      reinterpret_cast<uintptr_t*>(remoteAddrsDev), nRanks, selfRank, stamp);
   return gin_anvil::conn_check::connCheckLaunchOk();
@@ -58,6 +59,7 @@ extern "C" int ginAnvilConnWrite(void* remoteAddrsDev, int nRanks, int selfRank,
 extern "C" int ginAnvilConnCheck(void* localSignals, int nRanks, unsigned long long stamp, int* missingDev,
                                  hipStream_t stream) {
   if (nRanks <= 0 || nRanks > gin_anvil::conn_check::kMaxConnCheckRanks) return -1;
+  (void)hipGetLastError();
   hipLaunchKernelGGL(gin_anvil::conn_check::ginAnvilConnCheckKernel, dim3(1), dim3(nRanks), 0, stream,
                      reinterpret_cast<unsigned long long*>(localSignals), nRanks, stamp, missingDev);
   return gin_anvil::conn_check::connCheckLaunchOk();
@@ -65,27 +67,7 @@ extern "C" int ginAnvilConnCheck(void* localSignals, int nRanks, unsigned long l
 
 #else  // !__HIPCC__ && !__CUDACC__
 
-#include "gin/gin_anvil_conn_check.h"
-
-extern "C" int ginAnvilConnWrite(void* remoteAddrsDev, int nRanks, int selfRank,
-                                 unsigned long long stamp, hipStream_t stream) {
-  (void)remoteAddrsDev;
-  (void)nRanks;
-  (void)selfRank;
-  (void)stamp;
-  (void)stream;
-  return -1;
-}
-
-extern "C" int ginAnvilConnCheck(void* localSignals, int nRanks, unsigned long long stamp, int* missingDev,
-                                 hipStream_t stream) {
-  (void)localSignals;
-  (void)nRanks;
-  (void)stamp;
-  (void)missingDev;
-  (void)stream;
-  return -1;
-}
+#error "gin_anvil_conn_check_device.cc requires HIP device compilation"
 
 #endif  // __HIPCC__ || __CUDACC__
 

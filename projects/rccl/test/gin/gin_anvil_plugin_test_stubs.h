@@ -18,5 +18,9 @@ void SetFactoryNullHandles(bool nullHandles);
 void SetLsaAddrFail(bool fail);
 void SetLsaSelfAddr(void* addr);
 void SetConnCheckVerifyMissing(bool missing);
+void SetConnCheckMissingCalls(int calls);
+int GetConnCheckWriteCalls();
+int GetConnCheckVerifyCalls();
+unsigned long long GetConnCheckWriteStamp(int call);
 
 }  // namespace GinAnvilPluginStubs
