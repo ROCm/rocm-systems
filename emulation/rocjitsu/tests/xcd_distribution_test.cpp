@@ -270,6 +270,41 @@ TEST(XcdDistributionTest, FanoutQueueGridSpreadsOverAllXcds) {
     EXPECT_EQ(counts[xi], kTotalCus / kTotalXcds) << "xcd" << xi;
 }
 
+TEST(XcdDistributionTest, CuMaskRoutesGridAwayFromOwningXcd) {
+  for (Threading threading : {Threading::Single, Threading::ThreadPerXcd}) {
+    XcdDistributionFixture fx(threading);
+    auto *owner = fx.soc->xcd(3)->command_processor();
+    auto queue = test::make_fanout_queue(fx.memory, owner);
+    amdgpu::QueueCuSelection selected(std::in_place);
+    selected->push_back(fx.soc->xcd(0)->command_processor()->compute_units().front());
+    selected->push_back(fx.soc->xcd(7)->command_processor()->compute_units().front());
+    owner->set_queue_cu_selection(/*queue_id=*/1, /*process_id=*/0, selected);
+    selected->clear(); // The queue owns its selection independently of the caller.
+    queue->dispatch(kKdAddr, 10 * kWavefrontSize, kWavefrontSize);
+    queue->dispatch_with_barrier(kKdAddr, 6 * kWavefrontSize, kWavefrontSize);
+    fx.engine->run();
+    const auto counts = fx.soc->dispatched_workgroups_per_xcd();
+    for (uint32_t xi = 0; xi < kTotalXcds; ++xi)
+      EXPECT_EQ(counts[xi], xi == 0 || xi == 7 ? 8u : 0u) << "xcd" << xi;
+  }
+}
+
+TEST(XcdDistributionTest, EmptyCuMaskDefersFetchUntilQueueIsEnabled) {
+  XcdDistributionFixture fx;
+  auto *owner = fx.soc->xcd(0)->command_processor();
+  auto queue = test::make_fanout_queue(fx.memory, owner);
+  owner->set_queue_cu_selection(/*queue_id=*/1, /*process_id=*/0,
+                                amdgpu::QueueCuSelection(std::in_place));
+  queue->dispatch(kKdAddr, kWavefrontSize, kWavefrontSize);
+  (void)fx.engine->step();
+  auto counts = fx.soc->dispatched_workgroups_per_xcd();
+  EXPECT_EQ(std::accumulate(counts.begin(), counts.end(), uint64_t{0}), 0u);
+  owner->set_queue_cu_selection(/*queue_id=*/1, /*process_id=*/0, std::nullopt);
+  fx.engine->run();
+  counts = fx.soc->dispatched_workgroups_per_xcd();
+  EXPECT_EQ(std::accumulate(counts.begin(), counts.end(), uint64_t{0}), 1u);
+}
+
 // The split must not depend on which XCD the queue landed on: rank is the XCD's
 // own index, so the workgroup-to-XCD mapping is the same for every queue.
 TEST(XcdDistributionTest, FanoutIsIndependentOfOwningXcd) {
