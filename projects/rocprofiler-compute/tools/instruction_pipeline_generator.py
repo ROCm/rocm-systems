@@ -105,9 +105,11 @@ class Instruction(NamedTuple):
 FLAT_MEMORY = {"global_": Pipeline.FLAT, "scratch_": Pipeline.FLAT}
 
 # On gfx942 and gfx950 the higher precision MFMA run on the vector ALU rather
-# than the matrix pipe.
+# than the matrix pipe. f32 sources are named since v_mfma_f32_ would claim the
+# low precision ones too.
 VALU_MFMA = dict.fromkeys(
     (
+        "v_mfma_f64_",
         "v_mfma_f32_16x16x1f32",
         "v_mfma_f32_16x16x4_f32",
         "v_mfma_f32_16x16x4f32",
@@ -115,9 +117,6 @@ VALU_MFMA = dict.fromkeys(
         "v_mfma_f32_32x32x2_f32",
         "v_mfma_f32_32x32x2f32",
         "v_mfma_f32_4x4x1f32",
-        "v_mfma_f64_16x16x4_f64",
-        "v_mfma_f64_16x16x4f64",
-        "v_mfma_f64_4x4x4f64",
     ),
     Pipeline.VALU,
 )
