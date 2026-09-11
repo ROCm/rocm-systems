@@ -230,6 +230,7 @@ impl Hotswap {
             ld_preload: Some(ld_preload),
             files: Default::default(),
             env,
+            emulated_isa: None,
             mounts,
             libraries: Default::default(),
             host_gpus: true,

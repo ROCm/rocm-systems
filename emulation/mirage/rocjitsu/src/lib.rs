@@ -132,10 +132,6 @@ impl EmulatorBackend for Rocjitsu {
         SupportStatus::supported("software emulator; no special hardware required")
     }
 
-    fn emulated_isa(&self, def: &ProfileDef) -> Option<String> {
-        emulated_isa(&def.emulator)
-    }
-
     fn discover_plugins(&self) -> Vec<PluginsDef> {
         // Report the plugins whose shared objects ship next to the
         // interposer (`librocjitsu_plugin_<name>.so`). Each entry is a
@@ -184,6 +180,9 @@ impl EmulatorBackend for Rocjitsu {
     fn injection_def(&self, ctx: &SessionContext) -> Result<InjectionDef> {
         let def = ctx.emulator();
         let config = kmd_config(def, &ctx.runtime_dir)?;
+        let emulated_isa = std::fs::read(&config)
+            .ok()
+            .and_then(|config| isa_of_config(&config));
         // Refuse to run unemulated: if the KMD interposer can't be
         // located there is nothing to emulate the workload, so fail
         // loudly rather than silently running on real hardware.
@@ -285,6 +284,7 @@ impl EmulatorBackend for Rocjitsu {
             ld_preload: Some(ld_preload.display().to_string()),
             files: Default::default(),
             env,
+            emulated_isa,
             mounts: Default::default(),
             libraries,
             host_gpus: false,
