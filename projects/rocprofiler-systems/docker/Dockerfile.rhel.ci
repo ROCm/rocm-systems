@@ -12,8 +12,8 @@ SHELL [ "/bin/bash", "-c" ]
 
 ENV PATH=/usr/lib64/openmpi/bin:/usr/local/bin:${PATH}
 
-# Dyninst needs GCC >= 10; RHEL 8 base is GCC 8 — use gcc-toolset on el8 only (install step below).
-ARG GCC_TOOLSET_VERSION=10
+# ROCm Systems Profiler needs GCC >= 11 for C++20; RHEL 8 base is GCC 8 — use gcc-toolset on el8 only (install step below).
+ARG GCC_TOOLSET_VERSION=11
 
 ARG EXTRA_PACKAGES=""
 ARG ELFUTILS_DOWNLOAD_VERSION="0.188"
