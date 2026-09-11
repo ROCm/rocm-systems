@@ -55,7 +55,7 @@ inline constexpr unsigned long MIN_HIPFILE_VERSION = version_ordinal(
 static_assert(version_ordinal(HIPFILE_VERSION_MAJOR, HIPFILE_VERSION_MINOR,
                               HIPFILE_VERSION_PATCH) >= MIN_HIPFILE_VERSION,
               "hipfile.h predates the per-GPU stats API (hipFileGetStatsL3); reconfigure "
-              "against a newer hipFile or build with ROCPROFSYS_BUILD_HIPFILE=OFF");
+              "against a newer hipFile or build with ROCPROFSYS_USE_HIPFILE=OFF");
 
 /**
  * @brief 1:1 thin wrapper around hipFile's public stats API.

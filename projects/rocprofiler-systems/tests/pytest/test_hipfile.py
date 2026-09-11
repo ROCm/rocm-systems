@@ -166,7 +166,7 @@ def require_hipfile_collector(rocprof_config: RocprofsysConfig) -> None:
     missing = [s for s in HIPFILE_SETTINGS if s not in result.stdout]
     if missing:
         pytest.skip(
-            "hipFile collector not compiled in (ROCPROFSYS_BUILD_HIPFILE=OFF, "
+            "hipFile collector not compiled in (ROCPROFSYS_USE_HIPFILE=OFF, "
             "or AUTO with no new enough package) — "
             f"missing settings: {missing}"
         )

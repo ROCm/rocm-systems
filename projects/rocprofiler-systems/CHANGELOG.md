@@ -16,6 +16,8 @@ Full documentation for ROCm Systems Profiler is available at [https://rocm.docs.
   and the run-time setting that enables collection (default `OFF`). See
   [hipFile GPU-direct storage I/O telemetry](./docs/how-to/hipfile-telemetry.rst).
 
+## ROCm Systems Profiler 1.9.0 for ROCm 10.1 (unreleased)
+
 ### Changed
 
 - `ROCPROFSYS_MONOCHROME` and `MONOCHROME` now treat any value other than a recognized

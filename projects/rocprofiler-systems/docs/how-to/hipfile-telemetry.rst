@@ -87,16 +87,18 @@ Requirements
 Build support
 =============
 
-There are two independent switches, one for each question:
+``ROCPROFSYS_USE_HIPFILE`` answers both questions, at two different stages:
 
-* ``ROCPROFSYS_BUILD_HIPFILE`` (CMake option) decides whether hipFile support is
-  compiled into the profiler at all. It is tri-state: ``AUTO`` (the default),
-  ``ON``, or ``OFF``.
-* ``ROCPROFSYS_USE_HIPFILE`` (environment variable or configuration file setting)
-  decides whether a given run collects hipFile samples. See
-  `Enabling collection at run time`_.
+* As a **CMake option** it decides whether hipFile support is compiled into the
+  profiler at all. It is tri-state: ``AUTO`` (the default), ``ON``, or ``OFF``.
+* As an **environment variable or configuration file setting** it decides whether
+  a given run collects hipFile samples. It is a plain boolean and defaults to
+  ``OFF``. See `Enabling collection at run time`_.
 
-``ROCPROFSYS_BUILD_HIPFILE`` defaults to ``AUTO``, so hipFile support is built
+The two stages are independent: a profiler that was built with hipFile support
+still collects nothing until the run-time setting is turned on.
+
+As a CMake option, ``ROCPROFSYS_USE_HIPFILE`` defaults to ``AUTO``, so support is built
 whenever a suitable hipFile package is present and skipped (with a status
 message) when it is not. To require the feature (failing configure if hipFile
 is missing or older than ``ROCPROFSYS_HIPFILE_MIN_VERSION``, 0.5.0), pass
@@ -105,7 +107,7 @@ is missing or older than ``ROCPROFSYS_HIPFILE_MIN_VERSION``, 0.5.0), pass
 
 .. code-block:: shell
 
-   cmake -D ROCPROFSYS_BUILD_HIPFILE=OFF <other options> <path/to/source>
+   cmake -D ROCPROFSYS_USE_HIPFILE=OFF <other options> <path/to/source>
 
 The build requires hipFile 0.5.0 or later. With the default ``AUTO``, a package
 older than that is treated the same as no package at all: support is left off
@@ -120,8 +122,8 @@ links AMD SMI: ``libhipfile.so.0`` must be present when the profiler starts, eve
 matching hipFile with the profiler. Source builds must run against the same ROCm
 prefix they were configured with. A missing ``libhipfile``, or an older hipFile that
 still uses SONAME ``libhipfile.so.0`` but does not export the stats API (for example
-0.4), can prevent the profiler from loading at all. Build with
-``ROCPROFSYS_BUILD_HIPFILE=OFF`` if that dependency is not acceptable.
+0.4), can prevent the profiler from loading at all. Configure with
+``-D ROCPROFSYS_USE_HIPFILE=OFF`` if that dependency is not acceptable.
 
 If a new enough ``libhipfile`` does load, the version is re-checked at run time.
 When it is too old, the profiler logs a warning and emits no hipFile tracks.
@@ -131,18 +133,19 @@ To point CMake at a specific hipFile installation, pass
 ``CMAKE_PREFIX_PATH``. The configure output reports which way it resolved, either
 ``hipFile stats support enabled`` with the version it found, or
 ``hipFile stats support disabled`` with the reason. The derived result is the
-CMake variable ``ROCPROFSYS_HIPFILE_SUPPORT``; ``ROCPROFSYS_BUILD_HIPFILE`` keeps
-the value you passed (``AUTO``, ``ON``, or ``OFF``).
+CMake variable ``ROCPROFSYS_HIPFILE_SUPPORT``; the ``ROCPROFSYS_USE_HIPFILE`` cache
+entry keeps the value you passed (``AUTO``, ``ON``, or ``OFF``).
 
 Enabling collection at run time
 ===============================
 
 Even in a build that includes hipFile support, collection is off until you ask for
-it: ``ROCPROFSYS_USE_HIPFILE`` defaults to ``OFF``. Enable it by setting
+it: as a run-time setting, ``ROCPROFSYS_USE_HIPFILE`` defaults to ``OFF`` (unlike
+the CMake option of the same name, which defaults to ``AUTO``). Enable it by setting
 ``ROCPROFSYS_USE_HIPFILE=ON``. Collection runs on the process-sampling thread, so
 process sampling must also be enabled (it is on by default). If it is off, the
 profiler logs a warning and records no hipFile telemetry. When hipFile support
-is not compiled in (``ROCPROFSYS_BUILD_HIPFILE=OFF``, or ``AUTO`` with no new
+is not compiled in (``-D ROCPROFSYS_USE_HIPFILE=OFF``, or ``AUTO`` with no new
 enough package) the collector is not present and the settings are not
 registered. Their presence in ``rocprof-sys-avail --settings`` is a direct
 indicator of compile-time support:

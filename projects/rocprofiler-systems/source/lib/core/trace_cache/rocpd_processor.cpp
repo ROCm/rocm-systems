@@ -642,7 +642,7 @@ rocpd_processor_t::handle([[maybe_unused]] const ainic_pmc_sample& nic_sample)
 }
 
 void
-rocpd_processor_t::handle([[maybe_unused]] const hipfile_pmc_sample& hipfile_sample)
+rocpd_processor_t::handle(const hipfile_pmc_sample& hipfile_sample)
 {
     namespace collector = pmc::collectors::hipfile;
 

@@ -308,7 +308,7 @@ endif()
 #
 # ----------------------------------------------------------------------------------------#
 
-# hipFile telemetry is requested with ROCPROFSYS_BUILD_HIPFILE (ON / OFF / AUTO).
+# hipFile telemetry is requested with ROCPROFSYS_USE_HIPFILE (ON / OFF / AUTO).
 # The derived ROCPROFSYS_HIPFILE_SUPPORT cache (INTERNAL FORCE) is what every
 #downstream if(), compile definition, and add_subdirectory consults.
 #The user-facing cache is never overwritten:
@@ -318,7 +318,9 @@ endif()
 #                              and how to point CMake at a different prefix
 #   OFF                     -> never search
 #
-# ROCPROFSYS_USE_HIPFILE is the separate run-time switch.
+# As with ROCPROFSYS_USE_AINIC, the same name is also a run-time setting: here it
+# decides whether hipFile support is compiled in, and at run time whether a given
+# run collects. A build must opt in at both points.
 #
 # When SUPPORT is ON, the backend links libhipfile through the hip::hipfile imported
 # target (a DT_NEEDED dependency), matching how the profiler consumes amd_smi and other
@@ -355,33 +357,17 @@ if(NOT ROCPROFSYS_HIPFILE_MIN_VERSION MATCHES "^[0-9]+\\.[0-9]+\\.[0-9]+$")
     )
 endif()
 
-string(TOUPPER "${ROCPROFSYS_BUILD_HIPFILE}" _rocprofsys_build_hipfile)
-if(_rocprofsys_build_hipfile STREQUAL "TRUE" OR _rocprofsys_build_hipfile STREQUAL "1")
-    set(_rocprofsys_build_hipfile "ON")
-elseif(
-    _rocprofsys_build_hipfile STREQUAL "FALSE"
-    OR _rocprofsys_build_hipfile STREQUAL "0"
+rocprofiler_systems_resolve_tristate_option(
+    ROCPROFSYS_USE_HIPFILE
+    _rocprofsys_use_hipfile
 )
-    set(_rocprofsys_build_hipfile "OFF")
-endif()
-
-if(
-    NOT _rocprofsys_build_hipfile STREQUAL "ON"
-    AND NOT _rocprofsys_build_hipfile STREQUAL "OFF"
-    AND NOT _rocprofsys_build_hipfile STREQUAL "AUTO"
-)
-    message(
-        FATAL_ERROR
-        "ROCPROFSYS_BUILD_HIPFILE must be ON, OFF, or AUTO, got '${ROCPROFSYS_BUILD_HIPFILE}'"
-    )
-endif()
 
 set(_rocprofsys_hipfile_prefix_hint
     "Set -Dhipfile_DIR=<prefix>/lib/cmake/hipfile or add the install prefix to CMAKE_PREFIX_PATH"
 )
 
-if(_rocprofsys_build_hipfile STREQUAL "OFF")
-    message(STATUS "hipFile stats support disabled: ROCPROFSYS_BUILD_HIPFILE is OFF")
+if(_rocprofsys_use_hipfile STREQUAL "OFF")
+    message(STATUS "hipFile stats support disabled: ROCPROFSYS_USE_HIPFILE is OFF")
 else()
     find_package(
         hipfile
@@ -419,16 +405,14 @@ else()
         else()
             set(_rocprofsys_hipfile_found_desc "no hipFile package was found")
         endif()
-        # Do not advertise an unusable package to later CMake.
-        set(hipfile_FOUND FALSE)
-        if(_rocprofsys_build_hipfile STREQUAL "ON")
+        if(_rocprofsys_use_hipfile STREQUAL "ON")
             message(
                 FATAL_ERROR
-                "ROCPROFSYS_BUILD_HIPFILE=ON requires hipFile >= ${ROCPROFSYS_HIPFILE_MIN_VERSION}, but ${_rocprofsys_hipfile_found_desc} "
+                "ROCPROFSYS_USE_HIPFILE=ON requires hipFile >= ${ROCPROFSYS_HIPFILE_MIN_VERSION}, but ${_rocprofsys_hipfile_found_desc} "
                 "(the per-GPU stats API is not present before ${ROCPROFSYS_HIPFILE_MIN_VERSION}). "
                 "${_rocprofsys_hipfile_prefix_hint}. "
-                "Configure with -DROCPROFSYS_BUILD_HIPFILE=OFF to disable the feature, or "
-                "-DROCPROFSYS_BUILD_HIPFILE=AUTO to disable it only when hipFile is missing."
+                "Configure with -DROCPROFSYS_USE_HIPFILE=OFF to disable the feature, or "
+                "-DROCPROFSYS_USE_HIPFILE=AUTO to disable it only when hipFile is missing."
             )
         else()
             message(
@@ -441,7 +425,7 @@ else()
     endif()
 endif()
 
-unset(_rocprofsys_build_hipfile)
+unset(_rocprofsys_use_hipfile)
 unset(_rocprofsys_hipfile_usable)
 unset(_rocprofsys_hipfile_found_desc)
 unset(_rocprofsys_hipfile_prefix_hint)
