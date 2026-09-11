@@ -711,7 +711,7 @@ namespace {
 inline std::pair<uint64_t, uint64_t> hrr_capture_direct_hsa(
     const std::string& direct_case, const fs::path& cap_path) {
   std::string out;
-  { hrr::test::SpawnProc proc(HRR_TEST_EXE, /*capture_stdout=*/true);
+  { hrr::test::SpawnProc proc(hrr_test_exe(), /*capture_stdout=*/true);
     proc.setEnv("HIP_HRR_CAPTURE_OUTPUT", cap_path.string());
     set_proc_search_path(proc);
     int ret = proc.run("\"" + direct_case + "\"");

@@ -193,7 +193,7 @@ void observe_workload(const std::string& direct_case, TierObservation& obs) {
                 ("hrr_matrix_" + direct_case)};
 
   {
-    hrr::test::SpawnProc proc(HRR_TEST_EXE);
+    hrr::test::SpawnProc proc(hrr_test_exe());
     proc.setEnv("HIP_HRR_CAPTURE_OUTPUT", cap.path.string());
     set_proc_search_path(proc);
     const int ret = proc.run("\"" + direct_case + "\"");
