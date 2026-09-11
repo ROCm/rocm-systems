@@ -65,7 +65,7 @@ get_cpu_cid() ROCPROFSYS_HOT;
 
 unique_ptr_t<std::vector<std::uint64_t>>&
 get_cpu_cid_stack(std::int64_t _tid    = threading::get_id(),
-                  std::int64_t _parent = 0) TIMEMORY_HOT;
+                  std::int64_t _parent = 0) ROCPROFSYS_HOT;
 
 using cpu_cid_data_t       = std::tuple<std::uint64_t, std::uint64_t, std::uint32_t>;
 using cpu_cid_pair_t       = std::tuple<std::uint64_t, std::uint32_t>;
