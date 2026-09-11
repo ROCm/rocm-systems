@@ -826,6 +826,7 @@ if(ENABLE_DEVICE_LINKER)
   # needs full HIP compilation rather than --offload-host-only.
   list(FILTER HIP_SOURCES EXCLUDE REGEX "gin_alltoall_sdma\\.cu\\.cpp$")
   list(FILTER HIP_SOURCES EXCLUDE REGEX "gin_all_reduce_sdma\\.cu\\.cpp$")
+  list(FILTER HIP_SOURCES EXCLUDE REGEX "gin_anvil_conn_check_device\\.cc$")
   list(FILTER HIP_SOURCES EXCLUDE REGEX "dda_all_reduce_fabric\\.cu\\.cpp$")
   list(FILTER HIP_SOURCES EXCLUDE REGEX "dda_all_reduce_fabric_ll\\.cu\\.cpp$")
   list(FILTER HIP_SOURCES EXCLUDE REGEX "dda_all_reduce_fabric_ll128\\.cu\\.cpp$")
