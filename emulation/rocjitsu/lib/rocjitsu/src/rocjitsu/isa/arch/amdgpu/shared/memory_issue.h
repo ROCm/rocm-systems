@@ -28,6 +28,12 @@ enum class MemoryCompletionClass : uint8_t {
 /// not change these obligations. exec_masked distinguishes ordinary vector
 /// memory operations from scalar memory and the few vector operations that
 /// execute independently of EXEC.
+///
+/// This descriptor covers instructions modeled through rocJITsu's scalar,
+/// vector, and local memory pipelines. It is not a complete inventory of every
+/// hardware event counted by wait instructions. Counter-producing operations
+/// outside those pipelines, such as messages and timestamp queries, require
+/// separate accounting by consumers that model total counter occupancy.
 struct MemoryIssueInfo {
   WaitCounterType wait_counter_type = WaitCounterType::VMCNT;
   MemoryCompletionClass completion_class = MemoryCompletionClass::UNCLASSIFIED;
