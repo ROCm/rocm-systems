@@ -117,12 +117,6 @@ parse(const std::string& serialized)
     return process_arguments_string(serialized);
 }
 
-bool
-starts_with(const std::string& value, const std::string& prefix)
-{
-    return value.rfind(prefix, 0) == 0;
-}
-
 // A type that is ostream-streamable but has no fmt formatter, used to exercise the
 // fmt::streamed fallback branch in get_serialized_arg_value.
 struct streamable_only
@@ -320,11 +314,11 @@ TEST(category_region_serialization, serialize_annotation_args_variadic)
     ASSERT_EQ(args.size(), 2u);
 
     EXPECT_EQ(args[0].arg_number, 0u);
-    EXPECT_TRUE(starts_with(args[0].arg_name, "arg0-"));
+    EXPECT_TRUE(args[0].arg_name.starts_with("arg0-"));
     EXPECT_EQ(args[0].arg_value, "42");
 
     EXPECT_EQ(args[1].arg_number, 1u);
-    EXPECT_TRUE(starts_with(args[1].arg_name, "arg1-"));
+    EXPECT_TRUE(args[1].arg_name.starts_with("arg1-"));
     EXPECT_EQ(args[1].arg_type, "string");
     EXPECT_EQ(args[1].arg_value, "hello");
 }
