@@ -444,9 +444,13 @@ TEST_F(GinAnvilSdmaTemplateTest, Put_SdmaCounterFence) {
   uploadHarness(&d_h, &host, &d_src, &d_dst, &d_entry, &d_q, &d_row, 0);
   host.ctx.counters = d_counters.ptr;
   d_h.upload(host);
+  resetQuietCount();
+  resetThreadfenceCount();
   kernelPutSdmaCounter<<<1, 1>>>(d_h.ptr);
   syncAndCheck();
   EXPECT_EQ(d_counters.download(), 1ULL);
+  EXPECT_EQ(readQuietCount(), 1ULL);
+  EXPECT_EQ(readThreadfenceCount(), 1ULL);
 }
 
 // H12: Flush clears multiple dirty channel bits across peers.

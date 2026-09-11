@@ -169,6 +169,8 @@ ncclGinBarrierSession
       This variant expects *team* to be passed as an argument, and also takes an extra *handle* argument indicating the
       location of the underlying barriers (typically set to the ``railGinBarrier`` field of the device communicator).
 
+   .. cpp:function:: ncclGinBarrierSession(Coop coop, ncclGinAllContexts allCtx, ncclTeam team, ncclGinBarrierHandle handle, uint32_t index)
+   .. cpp:function:: ncclGinBarrierSession(Coop coop, ncclGinAllContexts allCtx, ncclTeamTagRail tag, uint32_t index)
    .. cpp:function:: ncclGinBarrierSession(Coop coop, ncclGinAllContexts allCtx, ncclTeamTagWorld tag, uint32_t index)
 
       Same as the single-context constructors, but arrival signaling and fencing iterate every GIN context on the comm.

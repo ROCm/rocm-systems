@@ -213,7 +213,7 @@ struct ncclGinApi_Put<NCCL_NET_DEVICE_GIN_ANVIL_SDMA> {
       // SDMA queue, otherwise the barrier signal can overtake the payload.
       handle = queueHandle(rsCtx, peer, blockId);
     }
-    bool sdmaDataPath = ((!hasWins && handle != nullptr) || (hasWins && !useIpcPut && handle != nullptr));
+    bool sdmaDataPath = handle != nullptr;
     bool sdmaFusedSignal = false;
 
     if (hasWins) {
