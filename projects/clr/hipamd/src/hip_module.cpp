@@ -165,7 +165,6 @@ hipError_t hipFuncGetAttribute(int* value, hipFunction_attribute attrib, hipFunc
     HIP_RETURN(hipErrorMissingConfiguration);
   }
 
-  std::scoped_lock lock(device_kernel->attributeLock());
   const device::Kernel::WorkGroupInfo* wrkGrpInfo = device_kernel->workGroupInfo();
   if (wrkGrpInfo == nullptr) {
     HIP_RETURN(hipErrorMissingConfiguration);
@@ -251,7 +250,7 @@ hipError_t hipFuncSetAttribute(const void* func, hipFuncAttribute attr, int valu
   if (func == nullptr) {
     HIP_RETURN(hipErrorInvalidDeviceFunction);
   }
-  if (attr < 0 || attr >= hipFuncAttributeMax) {
+  if (attr < 0 || attr > hipFuncAttributeMax) {
     HIP_RETURN(hipErrorInvalidValue);
   }
 
@@ -276,7 +275,6 @@ hipError_t hipFuncSetAttribute(const void* func, hipFuncAttribute attr, int valu
   if (d_kernel == nullptr) {
     HIP_RETURN(hipErrorInvalidDeviceFunction);
   }
-  std::scoped_lock lock(d_kernel->attributeLock());
 
   if (attr == hipFuncAttributeMaxDynamicSharedMemorySize) {
     if ((value < 0) ||
@@ -315,7 +313,6 @@ hipError_t hipFuncSetCacheConfig(const void* func, hipFuncCache_t cacheConfig) {
   if (hipSuccess != status) {
     HIP_RETURN(status);
   }
-  std::scoped_lock lock(d_kernel->attributeLock());
   d_kernel->workGroupInfo()->groupMemCarveout_ =
       amd::funcCacheToCarveoutPercent(static_cast<uint32_t>(cacheConfig));
   d_kernel->workGroupInfo()->hasFuncPreferredShmemCarveout_ = true;
@@ -388,7 +385,6 @@ hipError_t ihipLaunchKernel_validate(hipFunction_t f, const amd::LaunchParams& l
     return hipErrorInvalidDevice;
   }
   {
-    std::scoped_lock lock(device_kernel->attributeLock());
     const amd::device::Kernel::WorkGroupInfo* work_group_info = device_kernel->workGroupInfo();
     if (work_group_info == nullptr) {
       return hipErrorInvalidDeviceFunction;
@@ -460,8 +456,6 @@ hipError_t ihipResolveGraphClusterDimensions(hipFunction_t f, int deviceId, dim3
   size_t required_cluster[3] = {};
   bool has_required_cluster = false;
   {
-    // Snapshot mutable runtime attributes while preserving nonzero compile-time components.
-    std::scoped_lock lock(device_kernel->attributeLock());
     const auto* work_group_info = device_kernel->workGroupInfo();
     if (work_group_info == nullptr) {
       return hipErrorInvalidDeviceFunction;
@@ -549,7 +543,6 @@ hipError_t UpdateNumClustersFromKernel(const hip::Stream* stream, const amd::Ker
     return hipErrorInvalidDeviceFunction;
   }
 
-  std::scoped_lock attribute_lock(devKernel->attributeLock());
   const auto* work_group_info = devKernel->workGroupInfo();
   const bool has_runtime_cluster = work_group_info->runtimeClusterSize_[0] != 0 ||
                                    work_group_info->runtimeClusterSize_[1] != 0 ||
