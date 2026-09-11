@@ -116,7 +116,7 @@ std::string
 preset_registry::translate_legacy_flag(std::string_view arg) const
 {
     // Must start with "--" and not contain "="
-    if(arg.size() <= 2 || arg.compare(0, 2, "--") != 0 ||
+    if(arg.size() <= 2 || !arg.starts_with("--") ||
        arg.find('=') != std::string_view::npos)
         return {};
 
@@ -187,8 +187,7 @@ preset_registry::resolve_filepath(const std::string& name_or_path)
     auto filepath  = fmt::format("{}/{}.json", m_directory, name_or_path);
     auto resolved  = common::path::realpath(filepath);
     auto canon_dir = common::path::realpath(m_directory);
-    if(resolved.empty() || canon_dir.empty() ||
-       resolved.compare(0, canon_dir.size(), canon_dir) != 0)
+    if(resolved.empty() || canon_dir.empty() || !resolved.starts_with(canon_dir))
     {
         std::cerr << "[rocprof-sys] WARNING: Preset path '" << filepath
                   << "' resolves outside preset directory. Ignoring.\n";

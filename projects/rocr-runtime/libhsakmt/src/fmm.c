@@ -1582,6 +1582,13 @@ void *hsakmt_fmm_allocate_scratch(HsaKFDContext *ctx,
 					    0, (void *)LONG_MAX, -1);
 	}
 
+	/* A partially initialized aperture (base NULL, limit derived from the
+	 * requested size) would claim every low VA in the process, so leave the
+	 * aperture untouched and let the caller see the failure instead.
+	 */
+	if (!mem)
+		return NULL;
+
 	/* Remember scratch backing aperture for later */
 	aperture_phy->base = mem;
 	aperture_phy->limit = VOID_PTR_ADD(mem, aligned_size-1);

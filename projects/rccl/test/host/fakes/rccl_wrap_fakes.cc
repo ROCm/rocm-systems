@@ -129,6 +129,7 @@ void ResetRcclWrapFakes() {
   g_rcclOverrideChannels = DefaultOverrideChannels;
   g_rcclOverrideChannelsCalls = 0;
   g_rcclIsArchSupportedForFunc = true;
+  g_rcclParamDirectReduceScatterThreshold = 8388608;
   g_rcclUpdateCollectiveProtocolCalls = 0;
   g_rcclSetPipeliningCalls = 0;
   g_rcclUpdateThreadThresholdCalls = 0;
@@ -162,6 +163,10 @@ bool rcclCanUseWarpSpeedAuto(struct ncclComm*, int) {
 }
 ncclResult_t rcclCommSetP2pShiftSize(struct ncclComm*) {
   FailLoudUnfaked("rccl_wrap_fakes", "rcclCommSetP2pShiftSize");
+}
+int64_t g_rcclParamDirectReduceScatterThreshold = 8388608;     // rccl_wrap.cc:51 default
+int64_t rcclParamDirectReduceScatterThreshold() {              // rccl_wrap.cc:51
+  return g_rcclParamDirectReduceScatterThreshold;
 }
 int64_t rcclParamWarpSpeedForceEnable() {                      // rccl_wrap.cc:78
   FailLoudUnfaked("rccl_wrap_fakes", "rcclParamWarpSpeedForceEnable");
