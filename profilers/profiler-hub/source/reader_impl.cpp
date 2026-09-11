@@ -222,6 +222,21 @@ reader_t::impl::get_all_tracks()
     {
         const auto& statement       = m_read_statements->track_info_statement();
         const auto  track_info_list = statement().to_vector();
+        const auto  event_counts    = get_track_event_counts(track_info_list);
+
+        std::unordered_map<size_t, std::vector<std::pair<size_t, size_t>>>
+            agent_counts_by_track;
+        for(const auto& row :
+            m_read_statements->track_agent_count_statement()().to_vector())
+        {
+            agent_counts_by_track[row.track_id].emplace_back(row.agent_id, row.count);
+        }
+
+        size_t next_synthetic_id = 0;
+        for(const auto& track_info : track_info_list)
+        {
+            next_synthetic_id = std::max(next_synthetic_id, track_info.id + 1);
+        }
 
         m_track_info_list.reserve(track_info_list.size());
         for(const auto& track_info : track_info_list)
@@ -245,8 +260,25 @@ reader_t::impl::get_all_tracks()
             }
 
             auto track_info_ptr     = std::make_shared<reader_types::track_info_t>();
+            track_info_ptr->id      = track_info.id;
             track_info_ptr->name    = track_name != nullptr ? track_name : "";
             track_info_ptr->extdata = track_info.extdata;
+
+            const auto agent_it = agent_counts_by_track.find(track_info.id);
+            const bool has_agent_split =
+                agent_it != agent_counts_by_track.end() && !agent_it->second.empty();
+
+            if(has_agent_split)
+            {
+                track_info_ptr->agent_id    = agent_it->second.front().first;
+                track_info_ptr->event_count = agent_it->second.front().second;
+            }
+            else
+            {
+                const auto count_it = event_counts.find(track_info.id);
+                track_info_ptr->event_count =
+                    count_it != event_counts.end() ? count_it->second : 0;
+            }
 
             auto node_it = m_node_info_utility.find(track_info.nid);
             if(node_it != m_node_info_utility.end() && node_it->second)
@@ -281,10 +313,86 @@ reader_t::impl::get_all_tracks()
                                  track_info.tid.value_or(0) };
             m_track_ptr_to_topology.emplace(track_info_ptr, topo);
             m_topology_to_track_ptr.emplace(topo, track_info_ptr);
+
+            // Additional devices for this track (beyond the first) each get
+            // their own synthetic track entry, sharing the real db track id
+            // for future per-track queries but exposing a distinct public id.
+            if(has_agent_split)
+            {
+                for(size_t i = 1; i < agent_it->second.size(); ++i)
+                {
+                    const auto [agent_id, count] = agent_it->second[i];
+
+                    auto extra_track_ptr =
+                        std::make_shared<reader_types::track_info_t>(*track_info_ptr);
+                    extra_track_ptr->id          = next_synthetic_id++;
+                    extra_track_ptr->agent_id    = agent_id;
+                    extra_track_ptr->event_count = count;
+
+                    m_track_info_list.push_back(extra_track_ptr);
+                    m_track_info_utility.emplace(extra_track_ptr->id, extra_track_ptr);
+                    m_track_ptr_to_db_id.emplace(extra_track_ptr, track_info.id);
+                    m_track_ptr_to_topology.emplace(extra_track_ptr, topo);
+                }
+            }
         }
     }
 
     return m_track_info_list;
+}
+
+std::unordered_map<size_t, size_t>
+reader_t::impl::get_track_event_counts(
+    const std::vector<data_storage::schema_v3::track_info_result>& tracks)
+{
+    // NULL pid/tid must not collide with a real 0 (e.g. a track with no thread
+    // vs. a track whose thread id is genuinely 0), so use an out-of-band
+    // sentinel instead of value_or(0) for the missing case.
+    constexpr size_t no_id = std::numeric_limits<size_t>::max();
+    auto             key_of =
+        [no_id](size_t nid, std::optional<size_t> pid, std::optional<size_t> tid) {
+            return topology_key_t{ nid, pid.value_or(no_id), tid.value_or(no_id) };
+        };
+
+    std::unordered_map<topology_key_t, size_t, topology_key_hash_t> key_counts;
+
+    auto accumulate = [&](const auto& statement) {
+        for(const auto& row : statement().to_vector())
+        {
+            key_counts[key_of(row.nid, row.pid, row.tid)] += row.count;
+        }
+    };
+
+    const auto& stmts = m_read_statements->track_event_count_statements();
+    accumulate(stmts.region);
+    accumulate(stmts.kernel_dispatch);
+    accumulate(stmts.memory_allocate);
+    accumulate(stmts.memory_copy);
+
+    std::unordered_map<size_t, size_t> sample_counts;
+    for(const auto& row : stmts.sample().to_vector())
+    {
+        sample_counts.emplace(row.track_id, row.count);
+    }
+
+    std::unordered_map<size_t, size_t> counts;
+    for(const auto& track : tracks)
+    {
+        const topology_key_t key = key_of(track.nid, track.pid, track.tid);
+
+        size_t total = 0;
+        if(const auto it = key_counts.find(key); it != key_counts.end())
+        {
+            total += it->second;
+        }
+        if(const auto it = sample_counts.find(track.id); it != sample_counts.end())
+        {
+            total += it->second;
+        }
+        counts.emplace(track.id, total);
+    }
+
+    return counts;
 }
 
 reader_types::kernel_symbol_info_list_t

@@ -66,16 +66,25 @@ main()
                agent->product_name);
     }
 
-    printf("\n=== Tracks (%d, showing first 5) ===\n", node.track_list.list_size);
-    printf("%-4s %-12s %-8s %-8s %s\n", "id", "nid", "pid", "tid", "name");
-    for(uint32_t i = 0; i < node.track_list.list_size && i < 5; ++i)
+    printf("\n=== Tracks (%d) ===\n", node.track_list.list_size);
+    printf("%-4s %-12s %-8s %-8s %-8s %-8s %s\n",
+           "id",
+           "nid",
+           "pid",
+           "tid",
+           "agent",
+           "events",
+           "name");
+    for(uint32_t i = 0; i < node.track_list.list_size; ++i)
     {
         const ph_track_t* track = &node.track_list.tracks[i];
-        printf("%-4d %-12d %-8d %-8d %s\n",
+        printf("%-4d %-12d %-8d %-8d %-8d %-8d %s\n",
                track->id,
                track->nid,
                track->pid,
                track->tid,
+               track->agent_id,
+               track->event_count,
                track->track_name);
     }
 

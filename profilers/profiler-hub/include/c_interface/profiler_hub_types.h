@@ -53,9 +53,12 @@ extern "C"
     {
         uint32_t    id;
         const char* track_name;
-        uint32_t    nid; /**< Node id this track belongs to. */
-        uint32_t    pid; /**< Process id this track belongs to. */
-        uint32_t    tid; /**< Thread id this track belongs to, or 0 if unknown. */
+        uint32_t    nid;         /**< Node id this track belongs to. */
+        uint32_t    pid;         /**< Process id this track belongs to. */
+        uint32_t    tid;         /**< Thread id this track belongs to, or 0 if unknown. */
+        uint32_t    event_count; /**< Total events recorded on this track. */
+        uint32_t    agent_id;    /**< Owning device (agent) id, or 0 if not
+                                       device-specific. */
     } ph_track_t;
 
     /**
