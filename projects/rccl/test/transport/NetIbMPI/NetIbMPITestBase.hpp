@@ -1503,11 +1503,8 @@ protected:
         void* comm = (rank == 0) ? recvComm : sendComm;
         std::vector<char> probe(128, 0);
         void* mhandle = nullptr;
-        const int registered =
-            RegisterMemory(comm, probe.data(), probe.size(), NCCL_PTR_HOST, &mhandle)
-                    == ncclSuccess
-                ? 1
-                : 0;
+        const int registered = RegisterMemory(comm, probe.data(), probe.size(),
+                                              NCCL_PTR_HOST, &mhandle) == ncclSuccess;
         // Agreed before either side moves: a one-sided failure would otherwise send
         // the failing rank into the teardown barrier while its peer waits inside
         // GetActualNqps for traffic that is never coming, and the test would hang
@@ -2037,10 +2034,16 @@ protected:
         AssertNoRdmaLeaks(before, CaptureRdmaResources(), label);
     }
 
+    void RunThreadedBody(int dev, int nThreads, const char* label,
+                         std::function<ThreadResult(int, ConnectionPair&)> body) {
+        RunThreadedBody(ThreadDevPolicy::Fixed(dev), nThreads, label, std::move(body));
+    }
+
     // Threaded size sweep: every worker walks the list on its own connection with
     // a per-worker payload seed, so a transfer delivered on the wrong connection
-    // fails verification. Registers the whole buffer once and reuses that handle
-    // for every size. Wraps the run in an RDMA resource leak check.
+    // fails verification. Memory comes from `registration`: Once registers a buffer
+    // covering the largest step and reuses that handle, PerSize allocates and
+    // registers each step fresh. Wraps the run in an RDMA resource leak check.
     // How a threaded size sweep gets its memory. Some serial bodies allocate and
     // register once and reuse that for every step; others allocate and register
     // exactly the current size on each step. On a fused device the second shape is

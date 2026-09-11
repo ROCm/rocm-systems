@@ -827,15 +827,22 @@ TEST_F(NetIbMPITest, MixedSizes_VNic) {
         << "Failed to create fused vNIC from devices 0 and 1";
     ASSERT_GE(vdev, 0);
 
+    // Sizes: 1B, 3MB, 3B, 5MB, 7B, 7MB, 64B, 16MB, 1B, 11MB, 4MB, 1B.
+    // Tiny sizes may use only one QP, large ones stripe across both.
+    // Odd MB sizes (3, 5, 7, 11) produce uneven QP splits.
+    // Shared by both halves: a size added for one of them belongs to the other too.
+    const std::vector<size_t> testSizes = {
+        1, 3*1024*1024, 3, 5*1024*1024, 7, 7*1024*1024,
+        64, 16*1024*1024, 1, 11*1024*1024, 4*1024*1024, 1
+    };
+
     // Parameterized by MPIEnvironment::nThreads: the uneven-split ladder runs on
     // every worker's own fused connection simultaneously.
     if (MPIEnvironment::nThreads > 1) {
         // Per-size allocation and registration, as the serial body does: on a fused
         // device every regMr fans out across both members, and that churn is what
         // this test is about.
-        RunThreadedSizeSweep(ThreadDevPolicy::Fixed(vdev), MPIEnvironment::nThreads,
-                             {1, 3*1024*1024, 3, 5*1024*1024, 7, 7*1024*1024,
-                              64, 16*1024*1024, 1, 11*1024*1024, 4*1024*1024, 1},
+        RunThreadedSizeSweep(ThreadDevPolicy::Fixed(vdev), MPIEnvironment::nThreads, testSizes,
                              /*repeats=*/1, "threaded MixedSizes_VNic",
                              SweepRegistration::PerSize);
         return;
@@ -844,14 +851,6 @@ TEST_F(NetIbMPITest, MixedSizes_VNic) {
     ConnectionPair pair;
     NetConnectionGuard connGuard(net_);
     SetupConnectionWithGuard(vdev, pair, connGuard);
-
-    // Sizes: 1B, 3MB, 3B, 5MB, 7B, 7MB, 64B, 16MB, 1B, 11MB, 4MB, 1B.
-    // Tiny sizes may use only one QP, large ones stripe across both.
-    // Odd MB sizes (3, 5, 7, 11) produce uneven QP splits.
-    std::vector<size_t> testSizes = {
-        1, 3*1024*1024, 3, 5*1024*1024, 7, 7*1024*1024,
-        64, 16*1024*1024, 1, 11*1024*1024, 4*1024*1024, 1
-    };
 
     for (size_t idx = 0; idx < testSizes.size(); idx++) {
         size_t size = testSizes[idx];
@@ -920,9 +919,16 @@ TEST_F(NetIbMPITest, UnalignedSizeTransfer_VNic) {
 
     // Parameterized by MPIEnvironment::nThreads: concurrent workers hit the
     // 128-byte striping boundary on both members of the fused device at once.
+    // Sizes around 128-byte QP striping alignment boundaries.
+    // ncclIbMultiSend computes chunkSize = DIVUP(DIVUP(size, nqps), 128) * 128.
+    // These sizes produce uneven QP splits where one QP gets more data than the other.
+    // 127: all on QP 0, QP 1 posts zero-sge. 129: 128B on QP 0, 1B on QP 1.
+    // 255: 128B each, QP 1 gets 127B. 257: 256B on QP 0, 1B remainder on QP 1.
+    // Shared by both halves: a size added for one of them belongs to the other too.
+    const std::vector<size_t> testSizes = {127, 129, 255, 257, 511, 513};
+
     if (MPIEnvironment::nThreads > 1) {
-        RunThreadedSizeSweep(ThreadDevPolicy::Fixed(vdev), MPIEnvironment::nThreads,
-                             {127, 129, 255, 257, 511, 513},
+        RunThreadedSizeSweep(ThreadDevPolicy::Fixed(vdev), MPIEnvironment::nThreads, testSizes,
                              /*repeats=*/2, "threaded UnalignedSizeTransfer_VNic",
                              SweepRegistration::PerSize);
         return;
@@ -931,13 +937,6 @@ TEST_F(NetIbMPITest, UnalignedSizeTransfer_VNic) {
     ConnectionPair pair;
     NetConnectionGuard connGuard(net_);
     SetupConnectionWithGuard(vdev, pair, connGuard);
-
-    // Sizes around 128-byte QP striping alignment boundaries.
-    // ncclIbMultiSend computes chunkSize = DIVUP(DIVUP(size, nqps), 128) * 128.
-    // These sizes produce uneven QP splits where one QP gets more data than the other.
-    // 127: all on QP 0, QP 1 posts zero-sge. 129: 128B on QP 0, 1B on QP 1.
-    // 255: 128B each, QP 1 gets 127B. 257: 256B on QP 0, 1B remainder on QP 1.
-    std::vector<size_t> testSizes = {127, 129, 255, 257, 511, 513};
 
     for (size_t idx = 0; idx < testSizes.size(); idx++) {
         size_t size = testSizes[idx];
@@ -1335,26 +1334,16 @@ TEST_F(NetIbMPITest, SequentialTransfers_VNic) {
             ThreadDevPolicy::Fixed(vdev), MPIEnvironment::nThreads,
             "threaded SequentialTransfers_VNic",
             [&](int threadIdx, ConnectionPair& pair) -> ThreadResult {
-                ThreadResult result;
                 const size_t size = kSmallBufferSize;
-                void* buffer = malloc(size);
-                if (!buffer) {
-                    result.ok = false;
-                    result.msg = "malloc failed";
-                    return result;
-                }
-                auto bufferGuard = makeHostBufferAutoGuard(buffer);
-
-                void* comm = (rank == 0) ? pair.recvComm : pair.sendComm;
-                void* mhandle = nullptr;
-                result = WorkerRegister(comm, buffer, size, NCCL_PTR_HOST, &mhandle);
-                if (!result.ok) return result;
-                NetMHandleWorkerGuard mhandleGuard(mhandle, NetMHandleWorkerDeleter(net_, comm));
+                WorkerHostBuffer host = WorkerSetupHostBuffer(rank, pair, size);
+                if (!host.result.ok) return host.result;
 
                 // Worker-constant, as above.
+                ThreadResult result;
                 const int seed = WorkerSeed(threadIdx, 7000);
                 for (int iter = 0; iter < kThreadedIters; iter++) {
-                    result = WorkerSendRecvPattern(rank, pair, buffer, size, 700, mhandle, seed);
+                    result = WorkerSendRecvPattern(rank, pair, host.buffer, size, 700,
+                                                   host.mhandle, seed);
                     if (!result.ok) return result;
                 }
                 return result;
