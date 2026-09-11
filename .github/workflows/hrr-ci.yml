@@ -70,10 +70,10 @@ jobs:
       - name: Run unit suite
         shell: bash
         run: |
-          # Named hrr-unit-tests.exe on Windows, and the -x test is unreliable
-          # under MSYS bash, so locate it rather than guessing the name.
-          bin=$(find build/tests/unit -maxdepth 1 -type f -name 'hrr-unit-tests*' | head -1)
-          "${bin}" \
+          # Named hrr-unit-tests.exe on Windows. Resolved with a bash glob
+          # rather than find, which on a Windows runner resolves to FIND.EXE.
+          bin=(build/tests/unit/hrr-unit-tests*)
+          "${bin[0]}" \
             --reporter console \
             --reporter junit::out=unit-${{ matrix.os }}.xml
 
@@ -138,7 +138,8 @@ jobs:
           sudo apt-get update -q
           sudo apt-get install -y --no-install-recommends \
             ninja-build pkg-config libnuma-dev libelf-dev libdrm-dev \
-            libgl1-mesa-dev libglx-dev mesa-common-dev
+            libgl1-mesa-dev libglx-dev mesa-common-dev \
+            libclang-rt-18-dev
 
       - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
         with:
