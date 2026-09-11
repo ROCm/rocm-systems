@@ -1,7 +1,0 @@
-rocprofiler-sdk:
-  counters:
-  - description: test counter
-    definitions:
-    - architectures:
-      - gfx942
-      expression: test

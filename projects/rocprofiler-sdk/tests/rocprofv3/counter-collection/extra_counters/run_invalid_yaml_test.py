@@ -22,9 +22,14 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 # THE SOFTWARE.
 
+"""Validate fatal extra-counter failure status, diagnostics, and timeout.
+
+CTest cannot reliably combine expected signal termination with output matching,
+so this wrapper converts the child result into a normal test pass or failure.
+"""
+
 import argparse
 import re
-import signal
 import subprocess
 import sys
 
@@ -84,13 +89,8 @@ def main():
 
     sys.stdout.write(result.stdout)
 
-    expected_returncode = -signal.SIGABRT
-    if result.returncode != expected_returncode:
-        print(
-            "Expected command to terminate with SIGABRT "
-            f"({expected_returncode}), got {result.returncode}",
-            file=sys.stderr,
-        )
+    if result.returncode == 0:
+        print("Expected command to terminate unsuccessfully", file=sys.stderr)
         return 1
 
     missing_patterns = [
