@@ -24,7 +24,6 @@
 #include <timemory/settings.hpp>
 #include <timemory/signals/signal_mask.hpp>
 #include <timemory/utility/console.hpp>
-#include <timemory/utility/filepath.hpp>
 #include <timemory/utility/signals.hpp>
 
 #include <algorithm>
@@ -82,7 +81,7 @@ get_default_max_library_functions()
 }
 }  // namespace
 
-using InstrumentMode = ::rocprofsys::dl::InstrumentMode;
+using InstrumentMode = ::rocprofsys::dl::instrument_mode;
 
 bool   use_return_info              = false;
 bool   use_args_info                = false;
@@ -118,7 +117,6 @@ string_t prefer_library = {};
 //  global variables
 //
 patch_pointer_t  bpatch                        = {};
-call_expr_t*     terminate_expr                = nullptr;
 snippet_vec_t    init_names                    = {};
 snippet_vec_t    fini_names                    = {};
 fmodset_t        available_module_functions    = {};
@@ -152,10 +150,9 @@ std::unique_ptr<std::ofstream> log_ofs = {};
 
 namespace
 {
-namespace process  = tim::process;  // NOLINT
-namespace signals  = tim::signals;
-namespace filepath = tim::filepath;
-namespace path     = rocprofsys::common::path;
+namespace process = tim::process;  // NOLINT
+namespace signals = tim::signals;
+namespace path    = rocprofsys::common::path;
 
 using signal_settings = tim::signals::signal_settings;
 using sys_signal      = tim::signals::sys_signal;
@@ -1194,14 +1191,13 @@ main(int argc, char** argv)
     if(_cmdv && _cmdv[0] && strlen(_cmdv[0]) > 0)
     {
         auto _is_executable = rocprofsys_get_is_executable(_cmdv[0], binary_rewrite);
-        const std::string _cmdv_base      = path::filename(_cmdv[0]);
-        auto              _has_lib_suffix = _cmdv_base.length() > 3 &&
-                               (_cmdv_base.find(".so.") != std::string::npos ||
-                                _cmdv_base.find(".so") == (_cmdv_base.length() - 3) ||
-                                _cmdv_base.find(".a") == (_cmdv_base.length() - 2));
-        auto _has_lib_prefix = _cmdv_base.length() > 3 && _cmdv_base.find("lib") == 0;
+        const std::string cmdv_base      = path::filename(_cmdv[0]);
+        auto              has_lib_suffix = cmdv_base.length() > 3 &&
+                              (cmdv_base.find(".so.") != std::string::npos ||
+                               cmdv_base.ends_with(".so") || cmdv_base.ends_with(".a"));
+        auto has_lib_prefix = cmdv_base.length() > 3 && cmdv_base.starts_with("lib");
         if(!force_config && !_is_executable && !binary_rewrite &&
-           (_has_lib_prefix || _has_lib_suffix))
+           (has_lib_prefix || has_lib_suffix))
         {
             fflush(stdout);
             std::stringstream _separator{};
@@ -1220,9 +1216,9 @@ main(int argc, char** argv)
                           "--all-functions'\n");
             verbprintf(
                 0, "(which will provide an approximation for runtime instrumentation)\n");
-            verbprintf(1, "%s :: (^lib)=%s, (.so$|.a$|.so.*)=%s\n", _cmdv_base.c_str(),
-                       (_has_lib_prefix) ? "true" : "false",
-                       (_has_lib_suffix) ? "true" : "false");
+            verbprintf(1, "%s :: (^lib)=%s, (.so$|.a$|.so.*)=%s\n", cmdv_base.c_str(),
+                       (has_lib_prefix) ? "true" : "false",
+                       (has_lib_suffix) ? "true" : "false");
             verbprintf(0, "\n");
             verbprintf(0, "%s\n", _separator.str().c_str());
             verbprintf(0, "\n");
@@ -1252,8 +1248,8 @@ main(int argc, char** argv)
             // there is no extension, assume it is an exe
             outfile = (_is_local) ? _cmd + ".inst" : _cmd;
         }
-        else if(_cmd.find("lib") == 0 || _cmd.find(".so") != std::string::npos ||
-                _cmd.find(".a") == _cmd.length() - 2)
+        else if(_cmd.starts_with("lib") || _cmd.find(".so") != std::string::npos ||
+                _cmd.ends_with(".a"))
         {
             // if it starts with lib, ends with .a, or contains .so (e.g. libfoo.so,
             // libfoo.so.2), assume it is a library and retain the name but put it in a
@@ -1287,8 +1283,10 @@ main(int argc, char** argv)
         log_ofs = std::make_unique<std::ofstream>();
         verbprintf_bare(0, "%s", ::tim::log::color::source());
         verbprintf(0, "Opening '%s' for log output... ", logfile.c_str());
-        if(!filepath::open(*log_ofs, logfile))
+        if(!path::create_parent_dirs_and_open_ofstream(*log_ofs, logfile))
+        {
             throw std::runtime_error("Error opening log output file " + logfile);
+        }
         verbprintf_bare(0, "Done\n%s", ::tim::log::color::end());
         print_log_entries(*log_ofs, -1, {}, {}, "", false);
     }
@@ -1451,7 +1449,7 @@ main(int argc, char** argv)
 
     // prioritize the user environment arguments
     auto instr_mode_v =
-        (binary_rewrite) ? InstrumentMode::BinaryRewrite : InstrumentMode::ProcessCreate;
+        binary_rewrite ? InstrumentMode::binary_rewrite : InstrumentMode::process_create;
     auto instr_mode_v_int = static_cast<int>(instr_mode_v);
     auto env_vars         = parser.get<strvec_t>("env");
     env_vars.reserve(env_vars.size() + env_config_variables.size());
@@ -1693,17 +1691,24 @@ main(int argc, char** argv)
     auto get_library_ext = [=](const std::vector<string_t>& linput) {
         auto lnames           = linput;
         auto _get_library_ext = [](string_t lname) {
-            if(lname.find(".so") != string_t::npos ||
-               lname.find(".a") == lname.length() - 2)
+            if(lname.find(".so") != string_t::npos || lname.ends_with(".a"))
+            {
                 return lname;
+            }
             if(!prefer_library.empty())
+            {
                 return (lname +
                         ((prefer_library == "static" || is_static_exe) ? ".a" : ".so"));
+            }
             else
+            {
                 return (lname + ((is_static_exe) ? ".a" : ".so"));
+            }
         };
         for(auto& lname : lnames)
+        {
             lname = _get_library_ext(lname);
+        }
         ROCPROFSYS_ADD_LOG_ENTRY("Using library:",
                                  fmt::format("[{}]", fmt::join(lnames, ", ")));
         return lnames;
@@ -2499,7 +2504,7 @@ main(int argc, char** argv)
         if(success)
         {
             verbprintf(0, "\n");
-            if(outfile.find('/') != 0)
+            if(!outfile.starts_with('/'))
             {
                 verbprintf(0, "The instrumented executable image is stored in '%s/%s'\n",
                            get_cwd().c_str(), outfile.c_str());
@@ -2719,18 +2724,22 @@ namespace
 std::string
 canonicalize(std::string _path)
 {
-    if(_path.find("./") == 0)
-        _path = _path.replace(0, 1, get_cwd());
-    else if(_path.find("../") == 0)
-        _path = _path.insert(0, get_cwd() + "/");
-
-    auto _leading_dash = (_path.find('/') == 0);
-    auto _pieces       = rocprofsys::delimit(_path, "/");
-    std::reverse(_pieces.begin(), _pieces.end());
-    auto _tree = std::vector<std::string>{};
-    for(size_t i = 0; i < _pieces.size(); ++i)
+    if(_path.starts_with("./"))
     {
-        const auto& itr = _pieces.at(i);
+        _path = _path.replace(0, 1, get_cwd());
+    }
+    else if(_path.starts_with("../"))
+    {
+        _path = _path.insert(0, get_cwd() + "/");
+    }
+
+    auto leading_dash = _path.starts_with('/');
+    auto pieces       = rocprofsys::delimit(_path, "/");
+    std::ranges::reverse(pieces);
+    auto _tree = std::vector<std::string>{};
+    for(size_t i = 0; i < pieces.size(); ++i)
+    {
+        const auto& itr = pieces.at(i);
         if(itr == ".")
         {
             continue;
@@ -2741,11 +2750,11 @@ canonicalize(std::string _path)
             _tree.emplace_back(itr);
     }
     std::reverse(_tree.begin(), _tree.end());
-    auto _cpath = std::string{ (_leading_dash) ? "/" : "" };
+    auto cpath = std::string{ leading_dash ? "/" : "" };
     for(size_t i = 0; i < _tree.size() - 1; ++i)
-        _cpath += _tree.at(i) + "/";
-    _cpath += _tree.back();
-    return _cpath;
+        cpath += _tree.at(i) + "/";
+    cpath += _tree.back();
+    return cpath;
 }
 
 //======================================================================================//
@@ -2753,7 +2762,10 @@ canonicalize(std::string _path)
 std::string
 absolute(std::string _path)
 {
-    if(_path.find('/') == 0) return canonicalize(_path);
+    if(_path.starts_with('/'))
+    {
+        return canonicalize(_path);
+    }
     return canonicalize(fmt::format("{}/{}", get_cwd(), _path));
 }
 
@@ -2817,13 +2829,19 @@ get_absolute_filepath(std::string _name)
     auto _combine_paths = std::vector<strvec_t>{ bin_search_paths, lib_search_paths };
     auto _base_name     = path::filename(_name);
     // if the name looks like a library, put the lib_search_paths first
-    if(_base_name.find("lib") == 0 || _base_name.find(".so") != std::string::npos ||
+    if(_base_name.starts_with("lib") || _base_name.find(".so") != std::string::npos ||
        _base_name.find(".a") != std::string::npos)
+    {
         std::reverse(_combine_paths.begin(), _combine_paths.end());
+    }
     _search_paths.reserve(bin_search_paths.size() + lib_search_paths.size());
     for(const auto& pitr : _combine_paths)
+    {
         for(const auto& itr : pitr)
+        {
             _search_paths.emplace_back(itr);
+        }
+    }
 
     return get_absolute_filepath(std::move(_name), _search_paths);
 }

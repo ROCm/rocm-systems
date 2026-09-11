@@ -532,5 +532,5 @@ cmake --build build -j"$(nproc)"
 ./build/rccl-HostUnitTests
 ```
 
-Disable coverage instrumentation for the standalone micro-test with
-`-DMICRO_COVERAGE=OFF`.
+Disable coverage instrumentation for the standalone host-only test binaries
+with `-DHOST_TEST_COVERAGE=OFF`.
