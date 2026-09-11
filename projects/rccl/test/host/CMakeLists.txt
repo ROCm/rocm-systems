@@ -955,36 +955,6 @@ foreach(_enq_variant "" "-devlinker")
   )
 endforeach()
 
-# --- Coverage (all host-only test binaries) -----------------------------
-# Single switch for the whole standalone build: llvm source-based coverage is
-# either on for every host-only test binary or off for all of them. Host-only
-# build, so no -Xarch_device split is needed -- --offload-host-only never runs
-# the amdgcn device pass (see CMAKE_CXX_FLAGS_INIT above). On by default so the
-# binaries always produce a profile; disable with -DHOST_TEST_COVERAGE=OFF.
-#
-# Applied uniformly, per target:
-#  - the -fprofile-instr-generate/-fcoverage-mapping instrumentation flags;
-#  - RCCL_TEST_CODE_COVERAGE=1, which is what makes process-isolated tests flush
-#    their counters in the forked child (common/ProcessIsolatedTestRunner.cpp).
-#    Without it those tests run but contribute nothing to the profile;
-#  - libdl, which the RCCL_TEST_CODE_COVERAGE dlsym() path in that runner needs
-#    (empty where libdl is folded into libc, glibc >= 2.34).
-# rccl-source-wrappers is a static library reached by rccl-HostUnitTests, so it
-# only takes the instrumentation flags -- mem_manager.cc reaches the binary
-# through it and otherwise disappears from the report entirely.
-option(HOST_TEST_COVERAGE "Build the host-only test binaries with llvm source-based coverage" ON)
-if(HOST_TEST_COVERAGE)
-  # HOST_TEST_BINARIES is populated by add_test_executable() above, so new test
-  # binaries are instrumented automatically.
-  foreach(_cov_tgt ${HOST_TEST_BINARIES})
-    target_compile_options(${_cov_tgt} PRIVATE -fprofile-instr-generate -fcoverage-mapping)
-    target_link_options(${_cov_tgt} PRIVATE -fprofile-instr-generate -fcoverage-mapping)
-    target_compile_definitions(${_cov_tgt} PRIVATE RCCL_TEST_CODE_COVERAGE=1)
-    target_link_libraries(${_cov_tgt} PRIVATE ${CMAKE_DL_LIBS})
-  endforeach()
-  target_compile_options(rccl-source-wrappers PRIVATE -fprofile-instr-generate -fcoverage-mapping)
-endif()
-
 # --- Standalone dev_runtime micro-test binary ---------------------------
 # rccl-UnitTestsMicroDevRuntime: see the in-build block above for why this is
 # its own executable rather than more sources on rccl-UnitTestsMicro.
@@ -1052,7 +1022,6 @@ if(HOST_TEST_COVERAGE)
   endforeach()
   target_compile_options(rccl-source-wrappers PRIVATE -fprofile-instr-generate -fcoverage-mapping)
 endif()
-
 
 # NOTE: the standalone project intentionally does not register these binaries
 # with CTest (matching test/host from #9320); run them directly out of the build
