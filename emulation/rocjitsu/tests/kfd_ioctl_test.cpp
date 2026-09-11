@@ -2438,7 +2438,8 @@ volatile sig_atomic_t notification_signal_marker_fd = -1;
 
 void record_notification_signal(int) {
   const uint8_t marker = 1;
-  static_cast<void>(::write(notification_signal_marker_fd, &marker, sizeof(marker)));
+  [[maybe_unused]] const auto written =
+      ::write(notification_signal_marker_fd, &marker, sizeof(marker));
 }
 
 TEST_F(KfdIoctlTest, DbgTrapNotifierChildDoesNotRunApplicationSignalHandler) {
