@@ -4,7 +4,8 @@
 set -euo pipefail
 
 WORKDIR="${WORKDIR:-$HOME/aiprofcomp78}"
-PROJ="${PROJ:-$WORKDIR/rocm-systems/projects/rocprofiler-compute}"
+PROJ="${PROJ:-${REPROFILE_PROJ:-$WORKDIR/rocm-systems/projects/rocprofiler-compute}}"
+SKIP_GIT="${SKIP_GIT:-0}"
 # Default: grouping coalesce fix (#10912). Override with AIPROFCOMP-865 branch if merged.
 GIT_BRANCH="${GIT_BRANCH:-users/feizheng10/fix-counter-grouping-pack}"
 NODE="${NODE:-ctr-cx71-mi300x-22}"
@@ -16,10 +17,12 @@ module load ubuntu-24 rocm/7.15.0.dev.df64a75
 export PATH="${ROCM_PATH}/bin:${PATH}"
 export LD_LIBRARY_PATH="${ROCM_PATH}/lib:${LD_LIBRARY_PATH:-}"
 
-cd "$WORKDIR/rocm-systems"
-git fetch origin "${GIT_BRANCH}"
-git checkout "${GIT_BRANCH}"
-git pull --ff-only origin "${GIT_BRANCH}" || true
+if [[ "$SKIP_GIT" != "1" ]]; then
+  cd "$WORKDIR/rocm-systems"
+  git fetch origin "${GIT_BRANCH}"
+  git checkout "${GIT_BRANCH}"
+  git pull --ff-only origin "${GIT_BRANCH}" || true
+fi
 
 cd "$PROJ"
 if [[ -f "$WORKDIR/venv/bin/activate" ]]; then
@@ -35,11 +38,20 @@ if ! grep -q '"6.1.2"' "$POLICY" 2>/dev/null; then
 fi
 
 echo "=== Code ==="
-git log -1 --oneline
-python3 -c "import rocprof_compute; print('rocprof_compute OK')"
+if [[ "$SKIP_GIT" != "1" ]] && git -C "$PROJ" rev-parse --is-inside-work-tree &>/dev/null; then
+  git -C "$PROJ" log -1 --oneline
+else
+  echo "PROJ=$PROJ (SKIP_GIT=$SKIP_GIT)"
+fi
+python3 -c "from rocprof_compute_soc.soc_base import OmniSoC_Base; print('soc_base OK')"
+rocprof() {
+  python3 "$PROJ/src/rocprof-compute" "$@"
+}
+rocprof --version | head -1
 
 echo "=== Partition ==="
-rocm-smi --showcomputepartition --showmempartition 2>&1 | head -12
+rocm-smi --showcomputepartition 2>&1 | head -8 || true
+rocm-smi --showmempartition 2>&1 | head -8 || true
 
 mkdir -p "$ANALYZE_DIR"
 
@@ -63,7 +75,7 @@ run_workload() {
   fi
   echo "Workload path: $wl_path"
 
-  rocprof-compute analyze -p "$wl_path/" -b 3.1.63 3.1.64 6.1.2 17.2.1 17.2.5 11.2.3 \
+  rocprof analyze -p "$wl_path/" -b 3.1.63 3.1.64 6.1.2 17.2.1 17.2.5 11.2.3 \
     >"$analyze_log" 2>&1
 
   {
@@ -84,7 +96,7 @@ hipcc -O3 occupancy.hip -o occupancy
 cd "$PROJ"
 run_workload occupancy_cpx \
   'rm -rf workloads/occupancy_cpx' \
-  'rocprof-compute profile -n occupancy_cpx -VV --overwrite -- ./sample/occupancy'
+  'rocprof profile -n occupancy_cpx -VV -- ./sample/occupancy'
 
 # rocflop (build if missing)
 if [[ ! -x "$PROJ/sample/rocflop" ]]; then
@@ -93,7 +105,7 @@ fi
 if [[ -x "$PROJ/sample/rocflop" ]]; then
   run_workload rocflop \
     'rm -rf workloads/rocflop' \
-    'rocprof-compute profile -n rocflop -VV --overwrite -- ./sample/rocflop'
+    'rocprof profile -n rocflop -VV -- ./sample/rocflop'
 fi
 
 # mat_exp from HPCTrainingExamples if present
@@ -101,7 +113,7 @@ MAT_EXP_BIN="${MAT_EXP_BIN:-$WORKDIR/HPCTrainingExamples/HPCTrainingExamples/Man
 if [[ -x "$MAT_EXP_BIN" ]]; then
   run_workload mat_exp \
     'rm -rf workloads/mat_exp' \
-    "rocprof-compute profile -n mat_exp -VV --overwrite -- $MAT_EXP_BIN"
+    "rocprof profile -n mat_exp -VV --overwrite -- $MAT_EXP_BIN"
 else
   echo "SKIP mat_exp: set MAT_EXP_BIN to streams_sync mat_exp binary"
 fi
