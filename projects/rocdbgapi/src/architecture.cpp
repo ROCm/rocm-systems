@@ -7625,6 +7625,9 @@ protected:
 
     std::optional<agent_address_t>
     register_address (amdgpu_regnum_t regnum) const override;
+
+  protected:
+    agent_address_t ttmps_addr () const override;
   };
 
   std::unique_ptr<architecture_t::cwsr_record_t>
@@ -7987,6 +7990,15 @@ gfx12_5_architecture_t::cwsr_record_t::is_last_wave () const
   return compute_relaunch_wave_payload_last_wave (m_compute_relaunch_wave);
 }
 
+agent_address_t
+gfx12_5_architecture_t::cwsr_record_t::ttmps_addr () const
+{
+  /* In gfx125x TTMPs are saved at the end of the SGPR block.  */
+  constexpr size_t ttmp_size = sizeof (uint32_t);
+  constexpr size_t ttmp_count = 16;
+  return hwregs_addr () - ttmp_count * ttmp_size;
+}
+
 std::optional<agent_address_t>
 gfx12_5_architecture_t::cwsr_record_t::register_address (
   amdgpu_regnum_t regnum) const
@@ -8023,19 +8035,6 @@ gfx12_5_architecture_t::cwsr_record_t::register_address (
       break;
     default:
       break;
-    }
-
-  /* In gfx125x TTMPs are saved at the end of the SGPR block.  */
-  if (regnum >= amdgpu_regnum_t::first_ttmp
-      && regnum <= amdgpu_regnum_t::last_ttmp)
-    {
-      const size_t ttmp_size = sizeof (uint32_t);
-      const size_t ttmp_count = 16;
-      const size_t ttmps_addr = hwregs_addr () - ttmp_size * ttmp_count;
-
-      size_t ttmp_nr
-        = utils::narrow<size_t> (regnum - amdgpu_regnum_t::first_ttmp);
-      return ttmps_addr + ttmp_nr * ttmp_size;
     }
 
   return gfx12_architecture_t::cwsr_record_t::register_address (regnum);
