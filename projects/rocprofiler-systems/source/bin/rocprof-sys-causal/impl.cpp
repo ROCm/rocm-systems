@@ -216,7 +216,7 @@ void
 update_env(std::vector<std::string>& _environ, std::string_view _env_var, Tp&& _env_val,
            bool _append, std::string_view _join_delim)
 {
-    auto _mode = _append ? update_mode::APPEND : update_mode::REPLACE;
+    auto _mode = _append ? update_mode::append : update_mode::replace;
     rocprofsys::common::update_env(_environ, _env_var, std::forward<Tp>(_env_val), _mode,
                                    _join_delim, updated_envs, original_envs);
 }
@@ -235,7 +235,7 @@ add_default_env(std::vector<std::string>& _environ, std::string_view _env_var,
     if(exists) return;
 
     rocprofsys::common::update_env(_environ, _env_var, std::forward<Tp>(_env_val),
-                                   update_mode::REPLACE, ":", updated_envs,
+                                   update_mode::replace, ":", updated_envs,
                                    original_envs);
 }
 
