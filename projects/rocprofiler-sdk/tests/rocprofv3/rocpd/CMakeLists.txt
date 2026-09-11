@@ -320,6 +320,8 @@ rocprofiler_add_integration_validate_test(
          validate.py::test_otf2_data
          validate.py::test_otf2_system_tree_node_data
          validate.py::test_csv_data
+         validate.py::test_counter_collection_fields_match_across_rocpd_csv_json
+         validate.py::test_counter_collection_fields_match_perfetto
          validate.py::test_arg_annotations_exist
          validate.py::test_event_id_annotations
          --json-input
@@ -336,6 +338,8 @@ rocprofiler_add_integration_validate_test(
          ${CMAKE_CURRENT_BINARY_DIR}/rocpd-output-data/out_kernel_trace.csv
          ${CMAKE_CURRENT_BINARY_DIR}/rocpd-output-data/out_memory_allocation_trace.csv
          ${CMAKE_CURRENT_BINARY_DIR}/rocpd-output-data/out_regions_trace.csv
+         --db-input
+         ${CMAKE_CURRENT_BINARY_DIR}/rocpd-input-data/out_results.db
     TIMEOUT 120
     LABELS "integration-tests;rocpd"
     FIXTURES_REQUIRED rocprofv3-test-rocpd-generation)
