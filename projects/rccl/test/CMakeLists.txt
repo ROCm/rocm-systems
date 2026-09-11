@@ -527,11 +527,10 @@ if(BUILD_TESTS)
   add_executable(rccl-UnitTestsGinFabricLLPolicy gin/gin_fabric_ll_policy_test.cpp)
   set_source_files_properties(gin/gin_fabric_ll_policy_test.cpp PROPERTIES LANGUAGE CXX)
   target_include_directories(rccl-UnitTestsGinFabricLLPolicy PRIVATE
-    ${PROJECT_SOURCE_DIR}/src/include
-    ${PROJECT_SOURCE_DIR}/src
-    ${PROJECT_BINARY_DIR}/include)
+    ${PROJECT_SOURCE_DIR}/src/include)
+  target_compile_definitions(rccl-UnitTestsGinFabricLLPolicy PRIVATE GIN_FABRIC_LL_POLICY_HOST_TEST)
   target_link_libraries(rccl-UnitTestsGinFabricLLPolicy PRIVATE
-    ${GTEST_BOTH_LIBRARIES} Threads::Threads hip::host)
+    ${GTEST_BOTH_LIBRARIES} Threads::Threads)
   set_target_properties(rccl-UnitTestsGinFabricLLPolicy PROPERTIES
     RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/test")
   add_test(NAME rccl-UnitTestsGinFabricLLPolicy COMMAND rccl-UnitTestsGinFabricLLPolicy)

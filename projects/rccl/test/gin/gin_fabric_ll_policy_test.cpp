@@ -6,12 +6,13 @@
 
 #include <gtest/gtest.h>
 
+#include <cstdint>
 #include <cstdlib>
 
-#include "algorithms/dda/fabric/fabric_init.h"
 #include "nccl_device/gin/anvil_sdma/gin_fabric_ll_policy.h"
 
 using gin::fabric::GinFabricA2ACommState;
+using gin::fabric::ginAnvilUseFabricMemPredicate;
 using gin::fabric::ginFabricA2ALaneTryBuild;
 using gin::fabric::ginFabricLlAlltoAllBlocksPerPeer;
 using gin::fabric::ginFabricLlAlltoAllEligible;
@@ -20,6 +21,7 @@ using gin::fabric::ginFabricLlLaneResourcesOk;
 using gin::fabric::kGinFabricLlAgMaxBlocksPerPeer;
 using gin::fabric::kGinFabricLlA2APktsPerBlock;
 using gin::fabric::kGinFabricLlMaxBytes;
+using gin::fabric::kGinFabricLlMaxNranks;
 using gin::fabric::parseGinFabricLLThresholdEnv;
 using gin::fabric::pickGinFabricLLThresholdAlltoAll;
 using gin::fabric::resolveGinFabricLLThresholdAlltoAll;
@@ -97,6 +99,14 @@ TEST(GinFabricLLPolicy, LaneResourcesRejectZeroThreshold) {
   EXPECT_FALSE(ginFabricLlLaneResourcesOk(4, ginFabricLlA2AScratchBytes(4), 0));
 }
 
+TEST(GinFabricLLPolicy, LaneResourcesRejectUndersizedScratchAndRankBounds) {
+  const size_t scratch4 = ginFabricLlA2AScratchBytes(4);
+  EXPECT_TRUE(ginFabricLlLaneResourcesOk(4, scratch4, 64 * 1024));
+  EXPECT_FALSE(ginFabricLlLaneResourcesOk(4, scratch4 - 1, 64 * 1024));
+  EXPECT_FALSE(ginFabricLlLaneResourcesOk(1, scratch4, 64 * 1024));
+  EXPECT_FALSE(ginFabricLlLaneResourcesOk(kGinFabricLlMaxNranks + 1, scratch4, 64 * 1024));
+}
+
 TEST(GinFabricLLPolicy, BlocksPerPeerCoversFastDivideAndClamp) {
   EXPECT_EQ(ginFabricLlAlltoAllBlocksPerPeer(8), 1);
   EXPECT_EQ(ginFabricLlAlltoAllBlocksPerPeer(kGinFabricLlA2APktsPerBlock * 8), 1);
@@ -120,6 +130,8 @@ TEST(GinFabricLLPolicy, LaneBuildRequiresResourcesAndDdaLL) {
   EXPECT_EQ(lane.llThreshold, 64u * 1024u);
   EXPECT_FALSE(ginFabricA2ALaneTryBuild(comm, false, 64 * 1024, &lane));
   EXPECT_FALSE(ginFabricA2ALaneTryBuild(comm, true, 0, &lane));
+  comm.scratchBytes = ginFabricLlA2AScratchBytes(4) - 1;
+  EXPECT_FALSE(ginFabricA2ALaneTryBuild(comm, true, 64 * 1024, &lane));
 }
 
 TEST(GinFabricLLPolicy, FabricMemPredicate) {

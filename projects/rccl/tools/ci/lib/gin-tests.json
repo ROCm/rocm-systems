@@ -62,6 +62,13 @@
       "args": ""
     },
     {
+      "name": "rccl-gin-fabric-ll-policy-ut",
+      "kind": "fixtures",
+      "bin": "rccl-UnitTestsGinFabricLLPolicy",
+      "env": [],
+      "args": ""
+    },
+    {
       "name": "rccl-gin-fixtures-anvil-gda",
       "kind": "fixtures",
       "bin": "rccl-UnitTestsFixtures",

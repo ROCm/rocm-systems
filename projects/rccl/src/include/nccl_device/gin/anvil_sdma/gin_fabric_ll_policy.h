@@ -12,9 +12,22 @@
 #define _NCCL_DEVICE_GIN_ANVIL_SDMA_GIN_FABRIC_LL_POLICY_H_
 
 #include <cstddef>
+#include <cstdint>
 
 #if !defined(__CUDA_ARCH__) && !defined(__HIP_DEVICE_COMPILE__)
+#if defined(GIN_FABRIC_LL_POLICY_HOST_TEST)
+// Host GTest only: do not pull nccl.h / HIP / alloc.h (Jenkins extra(rccl) has no cuda.h).
+struct ncclGinFabricA2ALane {
+  int enabled;
+  void** peerScratch;
+  uint32_t* llEpoch;
+  int llEpochLen;
+  size_t scratchBytes;
+  size_t llThreshold;
+};
+#else
 #include "gin/gin_fabric_a2a_host.h"
+#endif
 #include <cerrno>
 #include <cstdlib>
 #include <cstring>
@@ -48,6 +61,11 @@ inline bool ginFabricLlLaneResourcesOk(int nRanks, size_t scratchBytes, size_t l
   if (nRanks < 2 || nRanks > kGinFabricLlMaxNranks) return false;
   if (ginFabricLlA2AScratchBytes(nRanks) > scratchBytes) return false;
   return true;
+}
+
+// Clique-wide VMM fabric path (shared with ginAnvilUseFabricMem).
+inline bool ginAnvilUseFabricMemPredicate(bool ddaFabricPath, int cliqueSize, int nRanks, bool cuMemEnabled) {
+  return ddaFabricPath && cliqueSize == nRanks && cuMemEnabled;
 }
 
 inline size_t pickGinFabricLLThresholdAlltoAll(bool alltoallSet, unsigned long long alltoallVal,

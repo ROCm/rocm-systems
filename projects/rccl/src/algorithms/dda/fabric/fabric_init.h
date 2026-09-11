@@ -8,6 +8,7 @@
 
 #include "nccl.h"
 #include "alloc.h"
+#include "nccl_device/gin/anvil_sdma/gin_fabric_ll_policy.h"
 
 struct ncclComm;
 
@@ -15,10 +16,7 @@ struct ncclComm;
 // false to use the legacy IPC path
 bool ncclDdaUseFabricPath(struct ncclComm* comm);
 
-// Predicate shared by ginAnvilUseFabricMem and unit tests.
-inline bool ginAnvilUseFabricMemPredicate(bool ddaFabricPath, int cliqueSize, int nRanks, bool cuMemEnabled) {
-  return ddaFabricPath && cliqueSize == nRanks && cuMemEnabled;
-}
+using gin::fabric::ginAnvilUseFabricMemPredicate;
 
 // Returns true when the Anvil SDMA GIN plugin should use fabric DDA peer
 // memory for this comm (MI455 single-clique path).
