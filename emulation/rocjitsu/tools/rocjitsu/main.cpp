@@ -686,11 +686,11 @@ int main(int argc, char *argv[]) {
                 dbt_execution_gpus, child_rocr_visible, environment_value("HIP_VISIBLE_DEVICES"),
                 environment_value("CUDA_VISIBLE_DEVICES"), dbt_guest_config.host.gpu_id))
       launch_environment.set(client_visible->name, client_visible->value);
-    // The HSA hook still uses the legacy tools callback path. Disable only the
+    // The HSA hook still uses the legacy tools callback path. Disable the
     // rocprofiler-register table-delivery path so it cannot validate an
-    // unshadowed table before rocjitsu installs guest-agent wrappers.
-    launch_environment.set("HSA_TOOLS_DISABLE_REGISTER", "1");
-    launch_environment.set("HSA_TOOLS_LIB", hooks_path);
+    // unshadowed table before rocjitsu installs guest-agent wrappers. Also
+    // exclude the overlapping automatic HotSwap hook across ROCr generations.
+    rocjitsu::cli::configure_dbt_guest_tool_environment(launch_environment, hooks_path);
   }
   // Export the invocation runtime dir so every descendant (including grandchild
   // processes spawned through wrappers like ctest) inherits the exact directory
