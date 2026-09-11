@@ -684,6 +684,12 @@ graph:
   Unit_hipStreamBeginCapture_MultipleStreams_ReuseEvent:
     <<: *level_2
     tags: [capture]
+  Unit_hipStreamBeginCapture_Positive_SelfWaitOnCaptureStream:
+    <<: *level_2
+    tags: [capture]
+  Unit_hipStreamBeginCapture_Positive_SelfWaitOnForkedStream:
+    <<: *level_2
+    tags: [capture]
   Unit_hipGraphAddMemcpyNode1D_Functional:
     <<: *level_2
     tags: [node]
