@@ -230,6 +230,23 @@ typedef union rocprofiler_hipfile_api_args_t
         hipFileStringConfigParameter_t param;
         const char*                    desc_str;
     } hipFileSetParameterString;
+
+#if HIPFILE_RUNTIME_API_TABLE_STEP_VERSION >= 1
+    struct
+    {
+        hipFileStatsLevel1_t* stats;
+    } hipFileGetStatsL1;
+
+    struct
+    {
+        hipFileStatsLevel2_t* stats;
+    } hipFileGetStatsL2;
+
+    struct
+    {
+        hipFileStatsLevel3_t* stats;
+    } hipFileGetStatsL3;
+#endif
 } rocprofiler_hipfile_api_args_t;
 
 ROCPROFILER_EXTERN_C_FINI

@@ -24,7 +24,7 @@
  */
 
 #include "libhsakmt.h"
-#include "hsakmt/linux/kfd_ioctl.h"
+#include "kfd_ioctl.h"
 #include <stdlib.h>
 #include <string.h>
 #include <assert.h>
@@ -277,8 +277,6 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtRegisterMemoryCtx(HsaKFDContext *ctx,
 		return HSAKMT_STATUS_SUCCESS;
 
 	HsaMemFlags flags;
-
-	flags.Value = 0;
 	flags.ui32.CoarseGrain = 1;
 	flags.ui32.ExtendedCoherent = 0;
 	return hsakmt_fmm_register_memory(ctx,
@@ -308,8 +306,6 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtRegisterMemoryToNodesCtx(HsaKFDContext *ctx,
 
 	if (ret == HSAKMT_STATUS_SUCCESS) {
 		HsaMemFlags flags;
-
-		flags.Value = 0;
 		flags.ui32.CoarseGrain = 1;
 		flags.ui32.ExtendedCoherent = 0;
 

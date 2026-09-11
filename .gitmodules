@@ -70,10 +70,6 @@
 	path = projects/rocprofiler-systems/external/perfetto
 	url = https://github.com/google/perfetto.git
 	shallow = true
-[submodule "projects/rocprofiler-systems/external/elfio"]
-	path = projects/rocprofiler-systems/external/elfio
-	url = https://github.com/jrmadsen/ELFIO.git
-	shallow = true
 [submodule "projects/rocprofiler-systems/external/dyninst"]
 	path = projects/rocprofiler-systems/external/dyninst
 	url = https://github.com/ROCm/dyninst.git
@@ -103,6 +99,11 @@
 	path = projects/rocprofiler-systems/external/spdlog
 	url = https://github.com/gabime/spdlog.git
 	tag = v1.17.0
+	shallow = true
+[submodule "projects/rocprofiler-systems/external/fmt"]
+	path = projects/rocprofiler-systems/external/fmt
+	url = https://github.com/fmtlib/fmt.git
+	tag = 12.2.0
 	shallow = true
 [submodule "projects/rocprofiler-systems/external/json"]
 	path = projects/rocprofiler-systems/external/json

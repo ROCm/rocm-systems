@@ -407,7 +407,7 @@ SIMD_VOP1_UNARY: dict[str, tuple[str, str, str]] = {
     # --- bit-scan (SWAR, no stdx primitive) -----------------------------------
     # All return uint32_t. Most special-case the zero input to 0xFFFFFFFF,
     # matching the scalar bodies (std::countl_zero / countr_zero / popcount);
-    # cls_i32 instead maps the all-zero/all-one case to 31. The VOP3
+    # cls_i32, like signed FFBH, returns 0xFFFFFFFF for an all-zero. The VOP3
     # twins share these (modifier-free integer bodies, auto-routed below). f16<->
     # f32 round-trip not involved -> not in _VOP3_UNARY_SKIP.
     #
@@ -463,8 +463,8 @@ SIMD_VOP1_UNARY: dict[str, tuple[str, str, str]] = {
         '[](auto a) {'
         ' util::native<uint32_t> u = a;'
         ' util::stdx::where((a & 0x80000000u) != 0u, u) = ~a;'
-        ' auto c = util::clz_u32_simd(u) - 1u;'
-        ' util::stdx::where(u == 0u, c) = 31u;'
+        ' auto c = util::clz_u32_simd(u);'
+        ' util::stdx::where(u == 0u, c) = 0xFFFFFFFFu;'
         ' return c; }',
     ),
     # v_bfrev_b32: reverse the 32 bits of src0. The scalar body loops bit-by-bit;
@@ -1735,10 +1735,12 @@ SIMD_VOPC_VOP3_F64: dict[str, str] = _build_simd_vopc_vop3_f64()
 #
 # 16-bit forms compute a 32-bit add/sub and mask the low 16 bits, matching the
 # scalar body's `uint32_t(uint16_t(int16_t(low16(a)+low16(b))))` (or the u16
-# variant) — both reduce to `(a + b) & 0xFFFFu` / `(a - b) & 0xFFFFu` because
+# variant) — both reduce to `(a + b) & 0xFFFFu` / `(a - b) & 0xFFFFu` when
+# CLAMP is clear because
 # unsigned 32-bit wrap-around at the low 16 bits is identical to signed/unsigned
 # 16-bit wrap. 32-bit forms use the wrap-around add/sub on uint32 lanes;
-# signed-vs-unsigned wraps the same way.
+# signed-vs-unsigned wraps the same way. The shared glue falls back to scalar
+# execution when CLAMP requests saturating arithmetic.
 SIMD_VOP3_BINARY_INT_EXTRA: dict[str, tuple[str, str]] = {
     # v_bcnt_u32_b32: VOP3-only (no VOP1 twin). D = CountOneBits(S0) + S1 -- the
     # second source is an accumulator, so this is binary, not unary. Keep the

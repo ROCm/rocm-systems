@@ -24,6 +24,7 @@
 #include "simdojo/components/vector_reg.h"
 #include "util/simd.h"
 
+#include <algorithm>
 #include <bit>
 #include <cassert>
 #include <cmath>
@@ -92,6 +93,151 @@ template <typename T> inline T clamp_floating_result(T value, bool clamp_nan_to_
 /// @brief Clamp one floating result according to the wave's ISA and MODE state.
 template <typename T> inline T clamp_floating_result(T value, const Wavefront &wf) {
   return clamp_floating_result(value, floating_clamp_nan_to_zero(wf));
+}
+
+/// @brief Execute VOP3 integer addition, saturating when CLAMP is set.
+template <typename T>
+inline std::make_unsigned_t<T> vop3_integer_add(std::make_unsigned_t<T> lhs,
+                                                std::make_unsigned_t<T> rhs, bool clamp) {
+  static_assert(std::is_integral_v<T> && (sizeof(T) == 2 || sizeof(T) == 4 || sizeof(T) == 8));
+  using U = std::make_unsigned_t<T>;
+  const U lhs_bits = lhs;
+  const U rhs_bits = rhs;
+  if (!clamp)
+    return static_cast<U>(lhs_bits + rhs_bits);
+  if constexpr (std::is_signed_v<T>) {
+    static_assert(sizeof(T) <= 4, "signed 64-bit VOP3 saturation is not implemented");
+    using Wide = std::conditional_t<sizeof(T) == 2, int32_t, int64_t>;
+    const Wide wide = static_cast<Wide>(std::bit_cast<T>(lhs_bits)) +
+                      static_cast<Wide>(std::bit_cast<T>(rhs_bits));
+    const Wide saturated = std::clamp(wide, static_cast<Wide>(std::numeric_limits<T>::min()),
+                                      static_cast<Wide>(std::numeric_limits<T>::max()));
+    return static_cast<U>(saturated);
+  } else {
+    const U max = std::numeric_limits<U>::max();
+    return rhs_bits > max - lhs_bits ? max : static_cast<U>(lhs_bits + rhs_bits);
+  }
+}
+
+/// @brief Add with intrinsic saturation, then select the maximum or minimum operand.
+template <typename T, bool SelectMax>
+inline std::make_unsigned_t<T> vop3_integer_add_minmax(std::make_unsigned_t<T> lhs,
+                                                       std::make_unsigned_t<T> rhs,
+                                                       std::make_unsigned_t<T> bound) {
+  static_assert(std::is_integral_v<T> && sizeof(T) == 4);
+  using U = std::make_unsigned_t<T>;
+  const U sum_bits = vop3_integer_add<T>(lhs, rhs, true);
+  if constexpr (std::is_signed_v<T>) {
+    const T sum = std::bit_cast<T>(sum_bits);
+    const T typed_bound = std::bit_cast<T>(bound);
+    return static_cast<U>(SelectMax ? std::max(sum, typed_bound) : std::min(sum, typed_bound));
+  } else {
+    return SelectMax ? std::max(sum_bits, bound) : std::min(sum_bits, bound);
+  }
+}
+
+/// @brief Execute an integer multiply-add with an exact intermediate.
+template <typename T, unsigned SourceBits>
+inline std::make_unsigned_t<T> vop3_integer_mad(uint32_t lhs, uint32_t rhs,
+                                                std::make_unsigned_t<T> addend, bool clamp) {
+  static_assert(std::is_integral_v<T> && sizeof(T) <= 4);
+  static_assert(SourceBits == 16 || SourceBits == 24);
+  using U = std::make_unsigned_t<T>;
+  if constexpr (std::is_signed_v<T>) {
+    const auto extend = [](uint32_t value) -> int64_t {
+      constexpr uint32_t shift = 32 - SourceBits;
+      return static_cast<int64_t>(static_cast<int32_t>(value << shift) >> shift);
+    };
+    const int64_t wide = extend(lhs) * extend(rhs) + static_cast<int64_t>(std::bit_cast<T>(addend));
+    if (!clamp)
+      return static_cast<U>(wide);
+    return static_cast<U>(std::clamp(wide, static_cast<int64_t>(std::numeric_limits<T>::min()),
+                                     static_cast<int64_t>(std::numeric_limits<T>::max())));
+  } else {
+    constexpr uint32_t source_mask = (uint32_t{1} << SourceBits) - 1u;
+    const uint64_t wide = static_cast<uint64_t>(lhs & source_mask) * (rhs & source_mask) + addend;
+    if (clamp && wide > std::numeric_limits<U>::max())
+      return std::numeric_limits<U>::max();
+    return static_cast<U>(wide);
+  }
+}
+
+template <typename T, unsigned SourceBits>
+inline std::make_unsigned_t<T> vop3_integer_mul(uint32_t lhs, uint32_t rhs, bool clamp) {
+  return vop3_integer_mad<T, SourceBits>(lhs, rhs, std::make_unsigned_t<T>{0}, clamp);
+}
+
+inline uint32_t vop3_integer_sad_u8(uint32_t lhs, uint32_t rhs, uint32_t addend, bool clamp) {
+  uint32_t difference = 0;
+  for (unsigned i = 0; i < 4; ++i) {
+    const uint32_t a = (lhs >> (i * 8)) & 0xffu;
+    const uint32_t b = (rhs >> (i * 8)) & 0xffu;
+    difference += a > b ? a - b : b - a;
+  }
+  return vop3_integer_add<uint32_t>(difference, addend, clamp);
+}
+
+/// @brief Execute shifted byte SAD plus accumulation, saturating when CLAMP is set.
+inline uint32_t vop3_integer_sad_hi_u8(uint32_t lhs, uint32_t rhs, uint32_t addend, bool clamp) {
+  uint32_t difference = 0;
+  for (unsigned i = 0; i < 4; ++i) {
+    const uint32_t a = (lhs >> (i * 8)) & 0xffu;
+    const uint32_t b = (rhs >> (i * 8)) & 0xffu;
+    difference += a > b ? a - b : b - a;
+  }
+  const uint64_t wide = (static_cast<uint64_t>(difference) << 16) + addend;
+  if (clamp && wide > UINT32_MAX)
+    return UINT32_MAX;
+  return static_cast<uint32_t>(wide);
+}
+
+inline uint32_t vop3_integer_sad_u16(uint32_t lhs, uint32_t rhs, uint32_t addend, bool clamp) {
+  uint32_t difference = 0;
+  for (unsigned i = 0; i < 2; ++i) {
+    const uint32_t a = (lhs >> (i * 16)) & 0xffffu;
+    const uint32_t b = (rhs >> (i * 16)) & 0xffffu;
+    difference += a > b ? a - b : b - a;
+  }
+  return vop3_integer_add<uint32_t>(difference, addend, clamp);
+}
+
+inline uint32_t vop3_integer_sad_u32(uint32_t lhs, uint32_t rhs, uint32_t addend, bool clamp) {
+  const uint32_t difference = lhs > rhs ? lhs - rhs : rhs - lhs;
+  return vop3_integer_add<uint32_t>(difference, addend, clamp);
+}
+
+inline uint32_t vop3_integer_msad_u8(uint32_t lhs, uint32_t rhs, uint32_t addend, bool clamp) {
+  uint32_t difference = 0;
+  for (unsigned i = 0; i < 4; ++i) {
+    const uint32_t a = (lhs >> (i * 8)) & 0xffu;
+    const uint32_t b = (rhs >> (i * 8)) & 0xffu;
+    if (b != 0)
+      difference += a > b ? a - b : b - a;
+  }
+  return vop3_integer_add<uint32_t>(difference, addend, clamp);
+}
+
+/// @brief Execute VOP3 integer subtraction, saturating when CLAMP is set.
+template <typename T>
+inline std::make_unsigned_t<T> vop3_integer_sub(std::make_unsigned_t<T> lhs,
+                                                std::make_unsigned_t<T> rhs, bool clamp) {
+  static_assert(std::is_integral_v<T> && (sizeof(T) == 2 || sizeof(T) == 4 || sizeof(T) == 8));
+  using U = std::make_unsigned_t<T>;
+  const U lhs_bits = lhs;
+  const U rhs_bits = rhs;
+  if (!clamp)
+    return static_cast<U>(lhs_bits - rhs_bits);
+  if constexpr (std::is_signed_v<T>) {
+    static_assert(sizeof(T) <= 4, "signed 64-bit VOP3 saturation is not implemented");
+    using Wide = std::conditional_t<sizeof(T) == 2, int32_t, int64_t>;
+    const Wide wide = static_cast<Wide>(std::bit_cast<T>(lhs_bits)) -
+                      static_cast<Wide>(std::bit_cast<T>(rhs_bits));
+    const Wide saturated = std::clamp(wide, static_cast<Wide>(std::numeric_limits<T>::min()),
+                                      static_cast<Wide>(std::numeric_limits<T>::max()));
+    return static_cast<U>(saturated);
+  } else {
+    return lhs_bits < rhs_bits ? U{0} : static_cast<U>(lhs_bits - rhs_bits);
+  }
 }
 
 /// @brief Return whether V_DOT4 integer instructions honor the encoded CLAMP bit.
@@ -1675,15 +1821,14 @@ template <typename Inst, typename CmpOp, typename WriteResult>
 /// VOP3 integer/bitwise binary SIMD fast path. Same shape as
 /// try_execute_binary_vop2_simd but reads the VOP3 operands `src0`/`src1`
 /// (instead of `src0`/`vsrc1`). The generated integer/bitwise VOP3 bodies apply
-/// no source/result modifiers (abs/neg/omod are float-only; clamp on an integer
-/// op means saturate, which these wrap-around/bitwise twins do not request), so
-/// the plain op is bit-identical to the scalar body on every input. T is a
-/// 32-bit integer lane type.
+/// no source/result modifiers other than integer CLAMP. Saturating integer
+/// arithmetic falls back to the scalar body; the plain op is bit-identical to
+/// that body when CLAMP is clear. T is a 32-bit integer lane type.
 template <typename T, typename Inst, typename BinOp>
   requires(util::has_stdx_simd)
 [[nodiscard]] inline bool try_execute_binary_vop3_simd(Inst &inst, Wavefront &wf, BinOp bin_op) {
-  if (simd_force_scalar() || !sdwa::supports_direct_simd_store(inst) || !inst.src0.simd_capable() ||
-      !inst.src1.simd_capable() || !inst.vdst.simd_capable())
+  if (inst.inst_.clamp != 0u || simd_force_scalar() || !sdwa::supports_direct_simd_store(inst) ||
+      !inst.src0.simd_capable() || !inst.src1.simd_capable() || !inst.vdst.simd_capable())
     return false;
   constexpr std::size_t W = util::native_width_v<T>;
   const uint64_t chunk_full = util::mask<uint64_t>(static_cast<int>(W));
@@ -2232,16 +2377,17 @@ template <bool True16, typename Inst, typename UnOp>
 
 /// VOP3 integer/bitwise ternary SIMD fast path. Reads `src0`/`src1`/`src2`,
 /// runs `tern_op(a, b, c)`, and masked-stores the result. The generated scalar
-/// bodies for these ternary integer ops apply no source/result modifiers (abs/
-/// neg/omod are float-only; clamp is unused on integer 3-source ops), so the
-/// plain functor is bit-identical to the scalar body. T is a 32-bit integer
-/// lane type (typically uint32_t). Same SIMD-capable / EXEC-chunk loop as the
-/// binary VOP3 path.
+/// bodies for these ternary integer ops apply no source/result modifiers except
+/// integer CLAMP. Saturating arithmetic falls back to the scalar body; the plain
+/// functor is bit-identical to that body when CLAMP is clear. T is a 32-bit
+/// integer lane type (typically uint32_t). Same SIMD-capable / EXEC-chunk loop
+/// as the binary VOP3 path.
 template <typename T, typename Inst, typename TernOp>
   requires(util::has_stdx_simd)
 [[nodiscard]] inline bool try_execute_ternary_vop3_simd(Inst &inst, Wavefront &wf, TernOp tern_op) {
-  if (simd_force_scalar() || !sdwa::supports_direct_simd_store(inst) || !inst.src0.simd_capable() ||
-      !inst.src1.simd_capable() || !inst.src2.simd_capable() || !inst.vdst.simd_capable())
+  if (inst.inst_.clamp != 0u || simd_force_scalar() || !sdwa::supports_direct_simd_store(inst) ||
+      !inst.src0.simd_capable() || !inst.src1.simd_capable() || !inst.src2.simd_capable() ||
+      !inst.vdst.simd_capable())
     return false;
   constexpr std::size_t W = util::native_width_v<T>;
   const uint64_t chunk_full = util::mask<uint64_t>(static_cast<int>(W));
@@ -2277,8 +2423,9 @@ template <typename T, typename Inst, typename TernOp>
 [[nodiscard]] inline bool try_execute_ternary_vop3_true16_src01_simd(Inst &inst, Wavefront &wf,
                                                                      TernOp tern_op) {
   static_assert(std::is_same_v<T, uint32_t>);
-  if (simd_force_scalar() || !sdwa::supports_direct_simd_store(inst) || !inst.src0.simd_capable() ||
-      !inst.src1.simd_capable() || !inst.src2.simd_capable() || !inst.vdst.simd_capable())
+  if (inst.inst_.clamp != 0u || simd_force_scalar() || !sdwa::supports_direct_simd_store(inst) ||
+      !inst.src0.simd_capable() || !inst.src1.simd_capable() || !inst.src2.simd_capable() ||
+      !inst.vdst.simd_capable())
     return false;
   constexpr std::size_t W = util::native_width_v<T>;
   const uint64_t chunk_full = util::mask<uint64_t>(static_cast<int>(W));
@@ -3281,6 +3428,10 @@ template <typename Inst, typename MadOp, typename WriteResult>
   if (simd_force_scalar() || !inst.src0.simd_capable() || !inst.src1.simd_capable() ||
       !inst.src2.simd_capable() || !inst.vdst.simd_capable())
     return false;
+  if constexpr (requires { inst.inst_.clamp; }) {
+    if (inst.inst_.clamp)
+      return false;
+  }
   constexpr std::size_t W = util::native_width64;
   const uint64_t chunk_full = util::mask<uint64_t>(static_cast<int>(W));
   const uint64_t exec = dpp::execution_lane_mask(inst, wf);
@@ -3334,8 +3485,8 @@ template <typename Inst, typename CarryOp, typename WriteResult>
 [[nodiscard]] inline bool try_execute_binary_vop3_co_result_simd(Inst &inst, Wavefront &wf,
                                                                  CarryOp carry_op,
                                                                  WriteResult write_result) {
-  if (simd_force_scalar() || !inst.src0.simd_capable() || !inst.src1.simd_capable() ||
-      !inst.vdst.simd_capable())
+  if (simd_force_scalar() || inst.inst_.clamp || !inst.src0.simd_capable() ||
+      !inst.src1.simd_capable() || !inst.vdst.simd_capable())
     return false;
   using T = uint32_t;
   constexpr std::size_t W = util::native_width_v<T>;
@@ -3387,8 +3538,8 @@ template <typename Inst, typename CarryOp, typename WriteResult>
 [[nodiscard]] inline bool try_execute_binary_vop3_cin_result_simd(Inst &inst, Wavefront &wf,
                                                                   CarryOp carry_op,
                                                                   WriteResult write_result) {
-  if (simd_force_scalar() || !inst.src0.simd_capable() || !inst.src1.simd_capable() ||
-      !inst.vdst.simd_capable())
+  if (simd_force_scalar() || inst.inst_.clamp || !inst.src0.simd_capable() ||
+      !inst.src1.simd_capable() || !inst.vdst.simd_capable())
     return false;
   using T = uint32_t;
   constexpr std::size_t W = util::native_width_v<T>;
@@ -3571,8 +3722,8 @@ template <FmaMixDst DstMode, typename Inst>
 /// output) and op_sel_hi = 3 (both srcs feed their high half into the
 /// high output) — the LLVM-AS encoder emits this for the default-mode
 /// pk mnemonics, and the SIMD fast path bails when any other combination
-/// is requested. The scalar bodies do NOT apply neg / neg_hi / clamp on
-/// these integer pk ops, so the SIMD path also passes through. Functor
+/// or integer saturation is requested. The scalar bodies apply CLAMP to
+/// packed integer add/sub independently for each selected half. Functor
 /// receives the two source u32 lane vectors (each holding {low16, high16}
 /// packed) and returns the same shape; the per-half decompose / recompose
 /// lives inside the functor for op-specific flexibility (e.g. mul_lo
@@ -3583,7 +3734,7 @@ template <typename Inst, typename Op>
   if (simd_force_scalar() || !sdwa::supports_direct_simd_store(inst) || !inst.src0.simd_capable() ||
       !inst.src1.simd_capable() || !inst.vdst.simd_capable())
     return false;
-  if (inst.inst_.op_sel != 0u || inst.inst_.op_sel_hi != 3u)
+  if (inst.inst_.clamp || inst.inst_.op_sel != 0u || inst.inst_.op_sel_hi != 3u)
     return false;
   using T = uint32_t;
   constexpr std::size_t W = util::native_width_v<T>;
@@ -3615,16 +3766,17 @@ template <typename Inst, typename Op>
 /// third source's high-half selector op_sel_hi_2 == 1 (per the scalar body
 /// `sel2_hi = inst.inst_.op_sel_hi_2`, which is a single bit — value 1 picks
 /// the high half for the high-output computation). For pk_mad_i16/u16 the
-/// scalar bodies also do not apply neg/neg_hi/clamp; the SIMD path passes
-/// through. Functor receives three u32 packed lane vectors and returns the
-/// per-half-masked packed result.
+/// scalar bodies do not apply neg/neg_hi. Clamped integer MAD falls back to
+/// scalar execution for exact per-half saturation. Functor receives three u32
+/// packed lane vectors and returns the per-half-masked packed result.
 template <typename Inst, typename Op>
   requires(util::has_stdx_simd)
 [[nodiscard]] inline bool try_execute_vop3p_pk_ternary_int_simd(Inst &inst, Wavefront &wf, Op op) {
   if (simd_force_scalar() || !sdwa::supports_direct_simd_store(inst) || !inst.src0.simd_capable() ||
       !inst.src1.simd_capable() || !inst.src2.simd_capable() || !inst.vdst.simd_capable())
     return false;
-  if (inst.inst_.op_sel != 0u || inst.inst_.op_sel_hi != 3u || inst.inst_.op_sel_hi_2 != 1u)
+  if (inst.inst_.clamp || inst.inst_.op_sel != 0u || inst.inst_.op_sel_hi != 3u ||
+      inst.inst_.op_sel_hi_2 != 1u)
     return false;
   using T = uint32_t;
   constexpr std::size_t W = util::native_width_v<T>;

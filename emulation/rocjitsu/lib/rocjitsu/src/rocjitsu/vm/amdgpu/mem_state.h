@@ -62,6 +62,8 @@ enum class AtomicOp : uint8_t {
   INC,            ///< Increment (wrapping).
   DEC,            ///< Decrement (wrapping).
   FADD,           ///< Floating-point add.
+  PK_ADD_F16,     ///< Two independent packed IEEE half additions.
+  PK_ADD_BF16,    ///< Two independent packed BFloat16 additions.
   FMIN,           ///< Floating-point minimum.
   FMAX,           ///< Floating-point maximum.
   APPEND,         ///< LDS append counter.
@@ -183,10 +185,19 @@ struct VectorMemState : DynamicInstState {
   bool scratch_swizzle = false;
   uint64_t scratch_lane_mask = 0;
   uint32_t scratch_addr_stride = 0;
+  // Low bits of the uniform address contribution applied after swizzling. The
+  // cache walker subtracts this contribution when locating logical dword
+  // boundaries, while per_lane_addr remains the actual first-byte address.
+  uint32_t scratch_addr_base_offset = 0;
   bool d16_hi = false; ///< D16_HI load: write upper 16 bits; preserve or zero lower per SRAM ECC.
   bool d16_lo = false; ///< D16 load: write lower 16 bits; preserve or zero upper per SRAM ECC.
   AtomicOp atomic_op = AtomicOp::NONE; ///< Atomic RMW operation (NONE for regular loads/stores).
-  bool lds_dst = false;                ///< Buffer load with LDS bit: write to LDS, not VGPRs.
+  // DS packed atomics capture MODE.FP_DENORM16_64 at issue (CDNA5 ISA 12.2).
+  // Rounding is fixed RNE; VALU FP16_OVFL does not apply. Preserve denormals
+  // by default, including FLAT atomics routed to LDS through the shared
+  // aperture (RDNA4 ISA MODE.FP_DENORM). Direct DS execution overrides this.
+  uint32_t packed_denorm_mode = 3;
+  bool lds_dst = false; ///< Buffer load with LDS bit: write to LDS, not VGPRs.
   /// Reference LDS address for LDS-destination loads. For ordinary LDS-dst
   /// paths this may include the lane-0 destination offset. For cluster
   /// multicast this must be exactly Wavefront::lds_base(), the source WG

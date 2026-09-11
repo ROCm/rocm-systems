@@ -85,7 +85,13 @@ void Queue::flush_hdp() {
 
 void Queue::sfence_flush_hdp() {
   if (envvar::ro::net_cpu_queue) {
+#if defined(__x86_64__) || defined(_M_X64)
     asm volatile("sfence" ::: "memory");
+#elif defined(__powerpc__)
+    asm volatile("lwsync" ::: "memory");
+#else
+#error "Unsupported architecture: add a store fence for this platform"
+#endif
     hdp_proxy_.get()->hdp_flush();
   }
 }

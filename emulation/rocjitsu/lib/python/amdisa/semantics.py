@@ -1603,6 +1603,10 @@ def _derive_vop3p(name: str) -> InstructionSemantics | None:
         return InstructionSemantics(
             name, 'pk_binop_f32', operation='add', data_type='f32'
         )
+    if name == 'V_PK_LSHL_ADD_U64':
+        return InstructionSemantics(
+            name, 'pk_lshl_add_u64', operation='lshl_add', data_type='u64'
+        )
     if name == 'V_PK_MOV_B32':
         return InstructionSemantics(name, 'pk_mov_b32')
 
@@ -1896,9 +1900,9 @@ _FLAT_ATOMIC_OPS: dict[str, tuple[str, int]] = {
     'MIN_U64': ('umin', 2),
     'MAX_I64': ('smax', 2),
     'MAX_U64': ('umax', 2),
-    # Packed FP atomics (treated as 32-bit fadd for now).
-    'PK_ADD_F16': ('fadd', 1),
-    'PK_ADD_BF16': ('fadd', 1),
+    # Packed FP atomics retain the component format through execution.
+    'PK_ADD_F16': ('pk_add_f16', 1),
+    'PK_ADD_BF16': ('pk_add_bf16', 1),
 }
 
 
@@ -2460,10 +2464,10 @@ def _derive_ds(name: str) -> InstructionSemantics | None:
         '_STOREXCHG_2ADDR_STRIDE64_RTN_B32': ('swap', 4, 1),
         '_STOREXCHG_2ADDR_RTN_B64': ('swap', 8, 2),
         '_STOREXCHG_2ADDR_STRIDE64_RTN_B64': ('swap', 8, 2),
-        '_PK_ADD_F16': ('fadd', 4, 1),
-        '_PK_ADD_RTN_F16': ('fadd', 4, 1),
-        '_PK_ADD_BF16': ('fadd', 4, 1),
-        '_PK_ADD_RTN_BF16': ('fadd', 4, 1),
+        '_PK_ADD_F16': ('pk_add_f16', 4, 1),
+        '_PK_ADD_RTN_F16': ('pk_add_f16', 4, 1),
+        '_PK_ADD_BF16': ('pk_add_bf16', 4, 1),
+        '_PK_ADD_RTN_BF16': ('pk_add_bf16', 4, 1),
     }
     for suffix, (op, esz, dw) in _DS_ATOMIC_MAP.items():
         if suffix in upper:

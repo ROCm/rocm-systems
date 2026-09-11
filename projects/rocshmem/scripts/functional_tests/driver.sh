@@ -1252,8 +1252,8 @@ case $TEST in
     TestColl
     TestOther
     TestOnStream
-    # Tile tests are only supported on IPC backend
-    if [[ ! "$TEST" =~ ^(gda|ro) ]]; then
+    # Tile tests are only supported on IPC and GDA backend
+    if [[ ! "$TEST" =~ ^(ro) ]]; then
       TestTiles
     fi
     # Host non-MPI IPC tests are only supported on IPC backend

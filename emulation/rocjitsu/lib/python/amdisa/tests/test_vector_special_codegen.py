@@ -10,7 +10,9 @@ import re
 
 import pytest
 
-from amdisa.codegen.execute.simd_codegen import simd_probe_line
+from amdisa.codegen.execute.sema_lower import _INLINE_UNARY_OPS
+from amdisa.codegen.execute.simd_codegen import SIMD_VOP1_UNARY, simd_probe_line
+from amdisa.codegen.execute.vector_alu import gen_vector_unary
 from amdisa.codegen.execute.vector_special import (
     _TRIG_PREOP_CHUNK_BITS,
     _TRIG_PREOP_TWO_OVER_PI_CHUNKS,
@@ -32,6 +34,19 @@ from amdisa.codegen.config import CodegenConfig
 from amdisa.codegen._generator import CodeGenerator
 from amdisa.gpuisa import Instruction, Operand
 from amdisa.isa_profile import Cdna5Profile, Rdna3Profile, Rdna4Profile
+
+
+def test_cls_i32_codegen():
+    scalar = gen_vector_unary(['vdst'], ['src0'], 'cls_i32', None)
+    semantic = _INLINE_UNARY_OPS['cls_i32']
+    simd = SIMD_VOP1_UNARY['v_cls_i32_vop1'][2]
+
+    for emitted in (scalar, semantic, simd):
+        assert '0xFFFFFFFFu' in emitted or 'static_cast<uint32_t>(-1)' in emitted
+        assert 'countl_zero' in emitted or 'clz_u32_simd' in emitted
+        assert 'countl_zero(abs_val)) - 1' not in emitted
+        assert 'countl_zero(a)) - 1' not in emitted
+        assert 'clz_u32_simd(u) - 1' not in emitted
 
 
 def test_permlane_uses_opsel_fi_and_bound_ctrl_bits():
@@ -97,8 +112,8 @@ def test_saturating_pack_codegen_covers_all_narrowing_modes():
 
 def test_perm_and_qsad_codegen_cover_multiword_results():
     perm = gen_vector_perm_pk16(['vdst'], ['src0', 'src1', 'src2'], 'b6', True)
-    qsad = gen_vector_qsad(['vdst'], ['src0', 'src1', 'src2'], 'sad_pk_u16', True)
-    mqsad = gen_vector_qsad(['vdst'], ['src0', 'src1', 'src2'], 'msad_u32', True)
+    qsad = gen_vector_qsad(['vdst'], ['src0', 'src1', 'src2'], 'sad_pk_u16', True, True)
+    mqsad = gen_vector_qsad(['vdst'], ['src0', 'src1', 'src2'], 'msad_u32', True, True)
 
     assert 'uint32_t packed[3]' in perm
     assert 'source_bit = index * 6u' in perm
@@ -107,11 +122,11 @@ def test_perm_and_qsad_codegen_cover_multiword_results():
     assert 'read_lane64(src1, lane)' in perm
     assert '(window + byte) * 8' in qsad
     assert 'write_lane64(vdst, lane, packed_result)' in qsad
-    assert 'value & 0xffffu' in qsad
+    assert 'inst_.clamp ? std::min(value, 0xffffu) : (value & 0xffffu)' in qsad
     assert 'if (b != 0)' in mqsad
     assert 'accum[window] = amdgpu::RegisterAccess(wf).read_lane' in mqsad
     assert 'if (std::optional<uint64_t> constant = src2.const_value())' in mqsad
-    assert 'accum[window] + sum' in mqsad
+    assert 'vop3_integer_add<uint32_t>(accum[window], sum, inst_.clamp)' in mqsad
 
 
 @pytest.mark.parametrize(

@@ -592,6 +592,7 @@ TEST(rocrtstFunc, AgentPropertiesTests) {
 }
 
 TEST(rocrtstFunc, GpuDiscoveryDeprecatedDoorbellTest) {
+  if (rocrtst::SkipOnWsl("KFD topology sysfs (/sys/.../kfd/topology/nodes) unavailable on WSL/DXG")) return;
   // Verifies hsa_init() succeeds when deprecated GPUs (DoorbellType != 2) are
   // present. Regression test for: a single pre-Vega GPU (e.g. Polaris/gfx803)
   // would abort HSA initialization for ALL devices in the system.
@@ -622,6 +623,20 @@ TEST(rocrtstFunc, SvmMemory_AccessedBy_All_Devices_Test) {
     SvmMemoryTestBasic smt;
     if (!RunCustomTestProlog(&smt)) return;
     smt.TestAccessedByAllDevices();
+    RunCustomTestEpilog(&smt);
+}
+
+TEST(rocrtstFunc, SvmMemory_DiscardAndPrefetchBatch_Test) {
+    SvmMemoryTestBasic smt;
+    if (!RunCustomTestProlog(&smt)) return;
+    smt.TestSVMDiscardAndPrefetchBatch();
+    RunCustomTestEpilog(&smt);
+}
+
+TEST(rocrtstFunc, SvmMemory_DiscardAndPrefetchBatch_Perf_Test) {
+    SvmMemoryTestBasic smt;
+    if (!RunCustomTestProlog(&smt)) return;
+    smt.TestSVMDiscardAndPrefetchBatchPerf();
     RunCustomTestEpilog(&smt);
 }
 
@@ -688,6 +703,7 @@ TEST(rocrtstFunc, VirtMemory_Interprocess_DevicePool_Test) {
 }
 
 TEST(rocrtstFunc, VirtMemory_Interprocess_HostPool_Test) {
+    if (rocrtst::SkipOnWsl("host-pool cross-process VMM (dma-buf) unavailable on WSL/DXG")) return;
     VirtMemoryTestInterProcess vmt(PoolType::kCpuPool);
     if (!RunCustomTestProlog(&vmt)) return;
     RunCustomTestEpilog(&vmt);

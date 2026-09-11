@@ -29,6 +29,7 @@ objects for the virtual machine and the topology.
 {
   "max_ticks": 100000,
   "num_threads": 1,
+  "cpu_dispatch_threads": 0,
   "exec_mode": "functional",
   "vm": { "arch": "cdna4" },
   "topology": {
@@ -41,9 +42,25 @@ objects for the virtual machine and the topology.
 | Field | Type | Description |
 |-------|------|-------------|
 | `max_ticks` | int | Maximum simulation ticks. A value of `0` means unlimited. |
-| `num_threads` | int | Worker threads for the PDES engine. |
-| `exec_mode` | string | Execution mode: `"functional"` or `"cycle"`. |
+| `num_threads` | int | Simdojo engine partitions, clamped to the aggregate XCD count. |
+| `cpu_dispatch_threads` | int | Requested functional CU-dispatch width. `1` is serial and the default when omitted; `0` explicitly selects an automatic host-wide budget capped at 32 and split across SoCs; other values apply per SoC. Each effective SoC width is capped at its largest per-CP CU count. |
+| `exec_mode` | string | Execution mode: `"functional"` or `"clocked"`. |
 | `vm.arch` | string | Target architecture, such as `cdna3`, `cdna4`, or `rdna4`. |
+
+`num_threads` and `cpu_dispatch_threads` control different layers.
+`num_threads` partitions whole XCD subtrees across Simdojo engine threads. A
+single XCD is never split between engine partitions. In functional mode,
+`cpu_dispatch_threads` controls the host parallelism used to execute accepted
+CU work. Its omitted-field default is serial; set it explicitly to `0` to use
+automatic sizing. Its budget is shared by all command processors in a SoC and
+does not change queue ownership or XCD fan-out. After either automatic or explicit
+selection, the effective width is capped at the largest number of CUs owned by
+any one command processor in that SoC. In clocked mode its effective value is
+always 1.
+
+`exec_mode` is matched literally. Only `"clocked"` selects cycle-accurate
+mode. If the field is omitted or set to `"functional"`, `"cycle"`, or any
+other value, rocJITsu runs in functional mode.
 
 
 ## Component hierarchy and range expansion
@@ -138,14 +155,17 @@ The `configs/` directory ships several ready-to-use topology files:
 
 | File | Description |
 |------|-------------|
-| `amdgpu_cdna3.json` | Single CDNA3 GPU, standalone simulation. |
-| `amdgpu_cdna3_kmd.json` | Single CDNA3 GPU, daemon or KFD mode. |
-| `amdgpu_cdna4.json` | Single CDNA4 GPU, standalone simulation. |
-| `amdgpu_cdna4_kmd.json` | Single CDNA4 GPU, daemon or KFD mode. |
-| `amdgpu_cdna4_kmd_2gpu.json` | Two CDNA4 GPUs, multi-GPU daemon mode. |
-| `amdgpu_gfx1250.json` | Single gfx1250 GPU, standalone simulation (no KMD). |
-| `amdgpu_rdna3_gfx1100_w7900_kmd.json` | Single RDNA3 gfx1100 GPU, KFD mode. |
-| `amdgpu_rdna4_gfx1201_r9700_kmd.json` | Single RDNA4 gfx1201 GPU, KFD mode. |
+| `gfx90a_mi210_kmd.json` | Single CDNA2 GPU, daemon or KFD mode. |
+| `gfx942_cdna3.json` | Single CDNA3 GPU, standalone simulation. |
+| `gfx942_cdna3_kmd.json` | Single CDNA3 GPU, daemon or KFD mode. |
+| `gfx950_mi355x.json` | Single CDNA4 GPU, standalone simulation. |
+| `gfx950_mi355x_kmd.json` | Single CDNA4 GPU, daemon or KFD mode. |
+| `gfx950_mi355x_kmd_2gpu.json` | Two CDNA4 GPUs, multi-GPU daemon mode. |
+| `gfx1250_mi455x.json` | Single CDNA5 GPU, standalone simulation. |
+| `gfx1250_mi455x_kmd_4gpu.json` | Four CDNA5 GPUs, multi-GPU daemon mode. |
+| `gfx1100_w7900.json` | Single RDNA3 GPU, standalone simulation. |
+| `gfx1151.json` | Single RDNA3.5 GPU, standalone simulation. |
+| `gfx1201_r9700.json` | Single RDNA4 GPU, standalone simulation. |
 
 
 Standalone configs (without `_kmd` in the name) are used with
@@ -160,6 +180,5 @@ Multi-GPU configs define multiple SoCs, each with a distinct GPU ID and
 location ID. Every GPU receives its own command processor, memory
 subsystem, and cache hierarchy. In daemon mode, the simulated driver
 manages all GPUs and routes KFD ioctls to the correct device based on
-`gpu_id`. The `amdgpu_cdna4_kmd_2gpu.json` config provides a working
+`gpu_id`. The `gfx950_mi355x_kmd_2gpu.json` config provides a working
 two-GPU configuration used with RCCL collective tests.
-
