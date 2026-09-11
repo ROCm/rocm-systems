@@ -1900,10 +1900,13 @@ notify_queue_interposition_consumer_context_started(const context::context* ctx)
             // intercept only after shadow matches hardware.
             resync_all_queue_shadow_states();
             s_consumer_transition_in_progress.store(false, std::memory_order_release);
+            // Third resync after intercept re-enables: catches any bypass doorbell
+            // that slipped between the pre-unlock resync and transition unlock.
+            resync_all_queue_shadow_states();
             if(queue_interposition_debug_enabled())
             {
-                log_all_queue_shadow_states("after 0->1 pre-unlock resync");
-                log_stale_shadow_queues("after 0->1 pre-unlock resync");
+                log_all_queue_shadow_states("after 0->1 pre+post unlock resync");
+                log_stale_shadow_queues("after 0->1 pre+post unlock resync");
                 ROCP_WARNING << fmt::format(
                     "[ROCM-29631] consumer_context_started ctx={} prev={} next={}",
                     fmt::ptr(ctx),
