@@ -16,10 +16,11 @@ on:
         default: false
   pull_request:
     paths:
+      - '.github/workflows/rocprofiler-sdk-wsl.yml'
       - 'projects/rocprofiler-sdk/**'
       - 'projects/rocr-runtime/libhsakmt/**'
       - 'projects/rocr-runtime/runtime/hsa-runtime/core/util/**'
-      - '.github/workflows/rocprofiler-sdk-wsl.yml'
+      - 'shared/amdgpu-windows-interop/wkmi/**'
       - '!**/*.md'
       - '!**/*.rst'
       - '!**/*.rtf'
@@ -28,10 +29,11 @@ on:
   push:
     branches: [ develop ]
     paths:
+      - '.github/workflows/rocprofiler-sdk-wsl.yml'
       - 'projects/rocprofiler-sdk/**'
       - 'projects/rocr-runtime/libhsakmt/**'
       - 'projects/rocr-runtime/runtime/hsa-runtime/core/util/**'
-      - '.github/workflows/rocprofiler-sdk-wsl.yml'
+      - 'shared/amdgpu-windows-interop/wkmi/**'
       - '!**/*.md'
       - '!**/*.rst'
       - '!**/*.rtf'
