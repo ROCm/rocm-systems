@@ -173,9 +173,9 @@ if (ENABLE_DEVICE_API)
     endif()
     if (RCCL_SOURCE_DIR)
         list(APPEND _rccl_device_inc_dirs ${RCCL_SOURCE_DIR}/src)
-        if (NOT EXISTS "${RCCL_SOURCE_DIR}/src/algorithms/dda/alltoall/alltoall_dda_fabric_ll.h")
+        if (NOT EXISTS "${RCCL_SOURCE_DIR}/src/include/nccl_device/gin/anvil_sdma/gin_fabric_ll_a2a_device.h")
             message(FATAL_ERROR
-                "RCCL_SOURCE_DIR=${RCCL_SOURCE_DIR} does not contain DDA fabric AllToAll headers")
+                "RCCL_SOURCE_DIR=${RCCL_SOURCE_DIR} is missing gin_fabric_ll_a2a_device.h")
         endif()
         if (NOT EXISTS "${RCCL_SOURCE_DIR}/src/include/gin/gin_fabric_a2a_host.h")
             message(FATAL_ERROR

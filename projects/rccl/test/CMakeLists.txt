@@ -530,7 +530,8 @@ if(BUILD_TESTS)
     ${PROJECT_SOURCE_DIR}/src/include
     ${PROJECT_SOURCE_DIR}/src
     ${PROJECT_BINARY_DIR}/include)
-  target_link_libraries(rccl-UnitTestsGinFabricLLPolicy PRIVATE ${GTEST_BOTH_LIBRARIES} Threads::Threads)
+  target_link_libraries(rccl-UnitTestsGinFabricLLPolicy PRIVATE
+    ${GTEST_BOTH_LIBRARIES} Threads::Threads hip::host)
   set_target_properties(rccl-UnitTestsGinFabricLLPolicy PROPERTIES
     RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/test")
   add_test(NAME rccl-UnitTestsGinFabricLLPolicy COMMAND rccl-UnitTestsGinFabricLLPolicy)

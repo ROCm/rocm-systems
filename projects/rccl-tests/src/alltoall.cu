@@ -12,8 +12,7 @@
 #include "nccl_device.h"
 #include "rccl_vector_types.h"
 #if NCCL_VERSION_CODE >= NCCL_VERSION(2,28,7) && defined(NCCL_OS_LINUX)
-#include "algorithms/dda/alltoall/alltoall_dda_fabric_ll.h"
-#include "algorithms/dda/device/CollCommon.h"
+#include "nccl_device/gin/anvil_sdma/gin_fabric_ll_a2a_device.h"
 #include "nccl_device/gin/anvil_sdma/gin_anvil_sdma_device_host_common.h"
 #include "nccl_device/gin/anvil_sdma/gin_fabric_ll_policy.h"
 #endif
@@ -264,7 +263,11 @@ __global__ void NvlAlltoAllKernelOptimized(ncclWindow_t sendwin, size_t sendoffs
 }
 
 #if NCCL_VERSION_CODE >= NCCL_VERSION(2,28,7) && defined(NCCL_OS_LINUX)
-using ::bf16;
+#if defined(__HIP_PLATFORM_AMD__) || defined(__HIP_PLATFORM_HCC__)
+using bf16 = __hip_bfloat16;
+#else
+using bf16 = __nv_bfloat16;
+#endif
 using gin::fabric::ginFabricLlAlltoAllBlocksPerPeer;
 
 // Host launch gate reads the same backend GPU context the device kernel uses.
