@@ -851,6 +851,11 @@
           "test_filter": "DdaNranksRelaxTest.*:DdaNranksRelaxIsolatedTest.*"
         },
         {
+          "name": "DdaCollectivesNranksRelaxTest",
+          "description": "Low-rank (2..8) DDA IPC AllGather/ReduceScatter/AllToAll eligibility tests (RCCL_DDA_NRANKS_RELAX)",
+          "test_filter": "DdaCollectivesNranksRelaxTest.*:DdaCollectivesNranksRelaxIsolatedTest.*"
+        },
+        {
           "name": "DdaAlltoAllThresholdTest",
           "description": "DDA AlltoAll 4 MiB threshold and host staging-byte unit tests for gfx942/gfx950",
           "test_filter": "DdaAlltoAllThresholdTest.*:DdaAlltoAllThreshold.*"

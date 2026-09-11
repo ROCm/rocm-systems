@@ -1248,6 +1248,11 @@
           "name": "DdaNranksRelaxTest",
           "description": "Low-rank (2..8) DDA IPC AllReduce eligibility tests (RCCL_DDA_NRANKS_RELAX)",
           "test_filter": "DdaNranksRelaxTest.*:DdaNranksRelaxIsolatedTest.*"
+        },
+        {
+          "name": "DdaCollectivesNranksRelaxTest",
+          "description": "Low-rank (2..8) DDA IPC AllGather/ReduceScatter/AllToAll eligibility tests (RCCL_DDA_NRANKS_RELAX)",
+          "test_filter": "DdaCollectivesNranksRelaxTest.*:DdaCollectivesNranksRelaxIsolatedTest.*"
         }
       ]
     },

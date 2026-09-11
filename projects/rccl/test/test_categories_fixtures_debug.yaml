@@ -27,6 +27,8 @@ test_categories:
       - "DdaIpcEligibilityTest.*"
       - "DdaNranksRelaxTest.*"
       - "DdaNranksRelaxIsolatedTest.*"
+      - "DdaCollectivesNranksRelaxTest.*"
+      - "DdaCollectivesNranksRelaxIsolatedTest.*"
       - "DdaFabricEligibilityTest.*"
       - "CeAllReduceEligibilityTest.*"
       - "RcclCeAllReduceEligibility.*"
