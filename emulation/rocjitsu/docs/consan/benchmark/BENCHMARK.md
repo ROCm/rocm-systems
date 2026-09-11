@@ -133,22 +133,27 @@ time intervals spent preparing selected replacement code objects and loading
 and binding their replacements. Concurrent transforms are therefore not
 double-counted.
 
-Each target status cell reports three values per mode:
+Each target status cell reports two values per mode:
 
-- **Startup (seconds)**: total hook-measured ConSan transformation plus
-  replacement-object load/bind time in that fresh process, whether it occurred
-  before or during either operation;
-- **Run1 (ratio)**: the first synchronized instrumented operation with any
-  overlapping startup interval excluded, divided by the median first-operation
-  time from the two initial native processes; and
-- **Run2 (ratio)**: the second identical synchronized operation divided by the
-  median second-operation time from those native processes.
+- **Startup (seconds)**: the total cold-path latency through completion of the
+  first synchronized operation and its automatic evidence checkpoint. It
+  includes ConSan transformation, replacement-object load/bind work,
+  first-dispatch setup, the operation itself, and any other warm-up cost. This
+  intentionally avoids exposing an implementation-dependent boundary between
+  instrumentation and first-run warm-up.
+- **Run (ratio)**: the second identical synchronized operation divided by the
+  median second-operation time from the two initial native processes.
 
-Run1 intentionally exposes first-dispatch and other cold costs that lie outside
-the ConSan startup clock. Run2 exposes the repeated-operation path after code
-objects have been transformed, loaded, and dispatched once. The two operations
-must use identical inputs and execution shape; workloads with evolving state
-must restore it before each operation. Neither ratio mixes run ordinals.
+The first operation is therefore both a correctness-checked warm-up and part of
+the reported Startup latency; none of its cost is discarded. Its automatic
+evidence-checkpoint latency is included there as well. The ordinary workload
+synchronization lets ConSan observe global quiescence and recycle bounded
+Record/Replay, Sampled, or InlineShadow evidence without a benchmark-specific
+API call; SuperCollider intentionally keeps its lifetime-sticky marker. Run
+exposes the repeated-operation path after code objects have been transformed,
+loaded, and dispatched once. The two operations must use identical inputs and
+execution shape; workloads with evolving state must restore it before each
+operation. The Run ratio uses only matching second-operation ordinals.
 
 Use a workload's direct device timer when it exposes one reliably (for example,
 the hipBLASLt event time); otherwise use synchronized host time and subtract
@@ -163,7 +168,7 @@ The opt-out exists for investigation but is intentionally not advertised as a
 normal benchmark path. Prior measurements found its cost negligible, so status
 tables do not carry separate audit-on/off columns.
 
-## Artifacts and checkpointing
+## Artifacts and result checkpointing
 
 Never treat terminal output as the only record. The output directory contains a
 log and fingerprinted JSON checkpoint for every inventory, native, and mode

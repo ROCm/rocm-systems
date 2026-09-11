@@ -304,7 +304,7 @@ class ConSanBenchmarkTest(unittest.TestCase):
         with self.assertRaises(benchmark.BenchmarkError):
             benchmark._coverage_summary("not coverage evidence")
 
-    def test_summary_splits_startup_and_matching_run_ordinals(self) -> None:
+    def test_summary_folds_first_run_into_startup_and_reports_steady_run(self) -> None:
         workload = benchmark.Workload("id", "description", "latency_ms", {})
         modes = {}
         for index, mode in enumerate(PROFILE_IDS, 1):
@@ -335,8 +335,14 @@ class ConSanBenchmarkTest(unittest.TestCase):
         for index, mode in enumerate(PROFILE_IDS, 1):
             self.assertEqual(summary["modes"][mode]["runtime_ratio"], [16.0, 20.0])
             self.assertEqual(
-                summary["modes"][mode]["startup_ms"], 1100.0 + 100.0 * index
+                summary["modes"][mode]["startup_ms"], 1420.0 + 100.0 * index
             )
+            self.assertEqual(
+                summary["modes"][mode]["instrumentation_ms"],
+                1100.0 + 100.0 * index,
+            )
+            self.assertEqual(summary["modes"][mode]["run_ms"], 600.0)
+            self.assertEqual(summary["modes"][mode]["run_ratio"], 20.0)
             self.assertEqual(summary["modes"][mode]["coverage"], {"accepted": True})
 
     def test_summary_accepts_a_non_model_payload_without_parameters(self) -> None:
@@ -403,8 +409,7 @@ class ConSanBenchmarkTest(unittest.TestCase):
         for label in benchmark.MODE_LABELS.values():
             self.assertIn(label, text)
         self.assertIn(
-            "| description | 0.75 s | 150× | 200× | 0.75 s | 150× | 200× | "
-            "0.75 s | 150× | 200× | 0.75 s | 150× | 200× |",
+            "| description | 1.5 s | 200× | 1.5 s | 200× | 1.5 s | 200× | 1.5 s | 200× |",
             text,
         )
         self.assertNotIn("Absolute latency", text)

@@ -562,12 +562,18 @@ def _summarize_mode(
     run: dict[str, Any], native_runtime: tuple[float, float]
 ) -> dict[str, Any]:
     runtime_ms = tuple(_runtime_ms(run, index) for index in range(2))
+    instrumentation_ms = _instrumentation_ms(run, "total")
     result: dict[str, Any] = {
         "runtime_ms": list(runtime_ms),
         "runtime_ratio": [
             runtime_ms[index] / native_runtime[index] for index in range(2)
         ],
-        "startup_ms": _instrumentation_ms(run, "total"),
+        # Startup is the complete cold-path latency, not merely the portion
+        # that happens to fall inside the hook's instrumentation clock.
+        "startup_ms": instrumentation_ms + runtime_ms[0],
+        "instrumentation_ms": instrumentation_ms,
+        "run_ms": runtime_ms[1],
+        "run_ratio": runtime_ms[1] / native_runtime[1],
         "peak_device_memory": run["payload"]["peak_device_memory"],
     }
     if "coverage" in run:
@@ -642,8 +648,9 @@ def _render_status(summary: dict[str, Any]) -> str:
     lines = [
         f"# ConSan `{summary['target']}` benchmark status",
         "",
-        "For each mode, **Startup** is the one-off instrumentation/load cost;",
-        "**Run1** and **Run2** are matching-order instrumented/native overhead ratios.",
+        "For each mode, **Startup** is the total latency through the first synchronized run and",
+        "evidence checkpoint, including instrumentation, loading, binding, and warm-up; **Run** is the second-run",
+        "instrumented/native overhead ratio after that cold path.",
         "",
         "| Workload | "
         + " | ".join(
@@ -651,25 +658,23 @@ def _render_status(summary: dict[str, Any]) -> str:
             for mode in columns
             for column in (
                 f"{MODE_LABELS[mode]} Startup",
-                f"{MODE_LABELS[mode]} Run1",
-                f"{MODE_LABELS[mode]} Run2",
+                f"{MODE_LABELS[mode]} Run",
             )
         )
         + " |",
-        "| --- | " + " | ".join("---:" for _ in range(3 * len(columns))) + " |",
+        "| --- | " + " | ".join("---:" for _ in range(2 * len(columns))) + " |",
     ]
     for workload in summary["workloads"]:
         cells = []
         for mode in columns:
             result = workload["modes"].get(mode)
             if result is None:
-                cells.extend(("pending", "pending", "pending"))
+                cells.extend(("pending", "pending"))
             else:
                 cells.extend(
                     (
                         f"{result['startup_ms'] / 1000.0:.3g} s",
-                        f"{result['runtime_ratio'][0]:.3g}×",
-                        f"{result['runtime_ratio'][1]:.3g}×",
+                        f"{result['run_ratio']:.3g}×",
                     )
                 )
         lines.append(f"| {workload['description']} | " + " | ".join(cells) + " |")
