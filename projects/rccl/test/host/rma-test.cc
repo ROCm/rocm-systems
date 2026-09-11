@@ -15,6 +15,7 @@
 
 #include <cstdint>
 #include <deque>
+#include <functional>
 #include <memory>
 #include <utility>
 #include <vector>
@@ -74,6 +75,10 @@ static void RmaMicroFree(void* p) {
 #define free(p) RmaMicroFree(p)
 
 #include RMA_CC_PATH
+
+// Counting free() is only meaningful for the unit under test; past this point
+// the tests' own cleanup should not land in g_rmaFreeCalls.
+#undef free
 
 namespace {
 
@@ -909,10 +914,10 @@ protected:
   static void ReleaseProxyWaitArrays(ncclKernelPlan* plan) {
     for (ncclTaskRma* t = plan->rmaTaskQueueProxy.head; t != nullptr; t = t->next) {
       if (t->func != ncclFuncWaitSignal) continue;
-      // Deliberately not the counted RmaMicroFree: this stands in for the
-      // downstream consumer, not for anything scheduleRmaTasksToPlan does.
-      (::free)(t->peers);
-      (::free)(t->nsignals);
+      // Stands in for the downstream consumer, not for anything
+      // scheduleRmaTasksToPlan does. Uncounted: the macro ends at the unit.
+      free(t->peers);
+      free(t->nsignals);
       t->peers = nullptr;
       t->nsignals = nullptr;
     }
@@ -1181,6 +1186,22 @@ TEST_F(RmaScheduleTest, Batching_WaitSignalBehindPut_StopsBatching) {
   EXPECT_EQ(comm_->planner.nTasksRma, 1);
 }
 
+// The WaitSignal arm does no batching at all (rma.cc:136), so a put queued behind
+// one is left for the next plan. Without this the batch loop could be hoisted out
+// of the put/signal arm and no assertion would notice.
+TEST_F(RmaScheduleTest, Batching_PutBehindWaitSignal_IsLeftForTheNextPlan) {
+  EnqueueWait(0, {2});
+  EnqueuePut(0, 1);
+
+  ASSERT_EQ(scheduleRmaTasksToPlan(comm_.get(), plan_.get()), ncclSuccess);
+
+  EXPECT_EQ(plan_->rmaArgs->func, ncclFuncWaitSignal);
+  EXPECT_EQ(plan_->rmaArgs->nRmaTasks, 1);
+  ASSERT_EQ(QueueLength(&ctxQueues_[0]), 1);
+  EXPECT_EQ(ctxQueues_[0].head->func, ncclFuncPutSignal);
+  EXPECT_EQ(comm_->planner.nTasksRma, 1);
+}
+
 // isRmaPutOrSignal(task1) false short-circuits the &&. Reached for any leading
 // func that is neither WaitSignal nor put/signal, since the else branch treats
 // "not WaitSignal" as put/signal without checking.
@@ -1440,14 +1461,19 @@ TEST_F(RmaDebugLoggingTest, EveryLauncherInProgressIsNonFatalUnderEveryDebugStat
         args.nRmaTasksProxy = 1;
         args.nRmaTasksCe = 1;
         plan_->rmaArgs = &args;
-        if (put && proxy)        { ScopedHook h(g_rmaProxyPutLaunch, inProgress);
-                                   EXPECT_EQ(ncclRmaPut(comm_.get(), plan_.get(), kMainStream), ncclSuccess); }
-        else if (put)            { ScopedHook h(g_rmaCePutLaunch, inProgress);
-                                   EXPECT_EQ(ncclRmaPut(comm_.get(), plan_.get(), kMainStream), ncclInProgress); }
-        else if (proxy)          { ScopedHook h(g_rmaProxyWaitLaunch, inProgress);
-                                   EXPECT_EQ(ncclRmaWaitSignal(comm_.get(), plan_.get(), kMainStream), ncclSuccess); }
-        else                     { ScopedHook h(g_rmaCeWaitLaunch, inProgress);
-                                   EXPECT_EQ(ncclRmaWaitSignal(comm_.get(), plan_.get(), kMainStream), ncclInProgress); }
+        if (put && proxy) {
+          ScopedHook h(g_rmaProxyPutLaunch, inProgress);
+          EXPECT_EQ(ncclRmaPut(comm_.get(), plan_.get(), kMainStream), ncclSuccess);
+        } else if (put) {
+          ScopedHook h(g_rmaCePutLaunch, inProgress);
+          EXPECT_EQ(ncclRmaPut(comm_.get(), plan_.get(), kMainStream), ncclInProgress);
+        } else if (proxy) {
+          ScopedHook h(g_rmaProxyWaitLaunch, inProgress);
+          EXPECT_EQ(ncclRmaWaitSignal(comm_.get(), plan_.get(), kMainStream), ncclSuccess);
+        } else {
+          ScopedHook h(g_rmaCeWaitLaunch, inProgress);
+          EXPECT_EQ(ncclRmaWaitSignal(comm_.get(), plan_.get(), kMainStream), ncclInProgress);
+        }
       }
     }
   }
