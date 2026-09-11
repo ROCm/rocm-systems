@@ -2517,6 +2517,13 @@ protected:
 
     std::optional<agent_address_t>
     register_address (amdgpu_regnum_t regnum) const override;
+
+  protected:
+    virtual agent_address_t lds_addr () const;
+    virtual agent_address_t hwregs_addr () const;
+    virtual agent_address_t ttmps_addr () const;
+    virtual agent_address_t sgprs_addr () const;
+    virtual agent_address_t vgprs_addr () const;
   };
 
   virtual std::unique_ptr<architecture_t::cwsr_record_t>
@@ -3194,6 +3201,45 @@ gfx9_architecture_t::is_sequential (const instruction_t &instruction) const
     && !is_sopk_encoding<16, 21> (instruction);
 }
 
+agent_address_t
+gfx9_architecture_t::cwsr_record_t::lds_addr () const
+{
+  if (is_first_wave ())
+    return m_context_save_address - lds_size ();
+  else
+    return m_context_save_address;
+}
+
+agent_address_t
+gfx9_architecture_t::cwsr_record_t::hwregs_addr () const
+{
+  constexpr size_t hwreg_size = sizeof (uint32_t);
+  return lds_addr () - hwreg_count () * hwreg_size;
+}
+
+agent_address_t
+gfx9_architecture_t::cwsr_record_t::ttmps_addr () const
+{
+  /* TTMP registers are saved at the end of the HWREG block.  */
+  constexpr size_t ttmp_size = sizeof (uint32_t);
+  constexpr size_t ttmp_count = 16;
+  return lds_addr () - ttmp_count * ttmp_size;
+}
+
+agent_address_t
+gfx9_architecture_t::cwsr_record_t::sgprs_addr () const
+{
+  constexpr size_t sgpr_size = sizeof (int32_t);
+  return hwregs_addr () - sgpr_count () * sgpr_size;
+}
+
+agent_address_t
+gfx9_architecture_t::cwsr_record_t::vgprs_addr () const
+{
+  constexpr size_t vgpr_size = sizeof (int32_t) * 64;
+  return sgprs_addr () - vgpr_count () * vgpr_size;
+}
+
 std::optional<agent_address_t>
 gfx9_architecture_t::cwsr_record_t::register_address (
   amdgpu_regnum_t regnum) const
@@ -3201,29 +3247,19 @@ gfx9_architecture_t::cwsr_record_t::register_address (
   const auto &architecture
     = static_cast<const gfx9_architecture_t &> (queue ().architecture ());
 
-  agent_address_t save_area_addr = m_context_save_address;
-
-  if (is_first_wave ())
+  if (regnum == amdgpu_regnum_t::lds_0)
     {
-      save_area_addr -= lds_size ();
+      if (is_first_wave ())
+        return lds_addr ();
 
-      if (regnum == amdgpu_regnum_t::lds_0)
-        return save_area_addr;
+      return std::nullopt;
     }
-
-  const size_t hwreg_size = sizeof (uint32_t);
-  const agent_address_t hwregs_addr
-    = save_area_addr - (this->hwreg_count () * hwreg_size);
-
-  /* TTMP registers are saved at the end of the HWREG block.  */
-  const size_t ttmp_size = sizeof (uint32_t);
-  const size_t ttmp_count = 16;
-  const agent_address_t ttmps_addr = save_area_addr - ttmp_count * ttmp_size;
 
   if (regnum >= amdgpu_regnum_t::first_ttmp
       && regnum <= amdgpu_regnum_t::last_ttmp)
     {
-      return (ttmps_addr
+      constexpr size_t ttmp_size = sizeof (uint32_t);
+      return (ttmps_addr ()
               + (utils::narrow<size_t> (regnum - amdgpu_regnum_t::first_ttmp)
                  * ttmp_size));
     }
@@ -3267,21 +3303,18 @@ gfx9_architecture_t::cwsr_record_t::register_address (
   if (regnum >= amdgpu_regnum_t::first_hwreg
       && regnum <= amdgpu_regnum_t::last_hwreg)
     {
-      return (hwregs_addr
+      constexpr size_t hwreg_size = sizeof (uint32_t);
+      return (hwregs_addr ()
               + utils::narrow<size_t> (regnum - amdgpu_regnum_t::first_hwreg)
               * hwreg_size);
     }
-
-  size_t sgpr_count = this->sgpr_count ();
-  size_t sgpr_size = sizeof (int32_t);
-  agent_address_t sgprs_addr = hwregs_addr - sgpr_count * sgpr_size;
 
   auto arch_scalars_count = (architecture.scalar_register_count ()
                              + architecture.scalar_alias_count ());
   amdgpu_regnum_t aliased_sgpr_end
     = (amdgpu_regnum_t::first_sgpr
        + utils::narrow<amdgpu_regdiff_t> (std::min (arch_scalars_count,
-                                                    sgpr_count)));
+                                                    sgpr_count ())));
 
   auto scalar_alias_count = architecture.scalar_alias_count ();
 
@@ -3323,8 +3356,9 @@ gfx9_architecture_t::cwsr_record_t::register_address (
     {
       /* The xnack_mask register (shadow_sgpr_end[-4:-3]) really is saved in
          the hwreg block (hwreg[7:8]) by the CWSR handler.  */
+      constexpr size_t hwreg_size = sizeof (uint32_t);
       if (regnum == (shadow_sgpr_end - 4) || regnum == (shadow_sgpr_end - 3))
-        return (hwregs_addr
+        return (hwregs_addr ()
                 + (utils::narrow<size_t> (11 - (shadow_sgpr_end - regnum))
                    * hwreg_size));
 
@@ -3334,20 +3368,18 @@ gfx9_architecture_t::cwsr_record_t::register_address (
 
   if (regnum >= amdgpu_regnum_t::first_sgpr && regnum < aliased_sgpr_end)
     {
-      return (sgprs_addr
+      constexpr size_t sgpr_size = sizeof (int32_t);
+      return (sgprs_addr ()
               + (utils::narrow<size_t> (regnum - amdgpu_regnum_t::s0)
                  * sgpr_size));
     }
 
-  size_t vgpr_count = this->vgpr_count ();
-  size_t vgpr_size = sizeof (int32_t) * 64;
-  agent_address_t vgprs_addr = sgprs_addr - vgpr_count * vgpr_size;
-
   if (regnum >= amdgpu_regnum_t::v0_64 && regnum <= amdgpu_regnum_t::v255_64
       && ((regnum - amdgpu_regnum_t::v0_64)
-          < utils::narrow<amdgpu_regdiff_t> (vgpr_count)))
+          < utils::narrow<amdgpu_regdiff_t> (vgpr_count ())))
     {
-      return (vgprs_addr
+      constexpr size_t vgpr_size = sizeof (int32_t) * 64;
+      return (vgprs_addr ()
               + (utils::narrow<size_t> (regnum - amdgpu_regnum_t::v0_64)
                  * vgpr_size));
     }
