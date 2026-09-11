@@ -183,6 +183,13 @@ struct gmock_sdk_backend
 
 inline std::unique_ptr<::testing::StrictMock<gmock_sdk_backend>> g_mock;
 
+// Settable by domain_service<> tests to drive filter_supported_domains() with a
+// specific set of supported buffered/callback domains; left empty (the default) by
+// tests -- e.g. registry<>/callback_domain<>/buffered_domain<> tests -- that never
+// call get_{buffer,callback}_tracing_names().
+inline tracing_names_t g_buffer_table;
+inline tracing_names_t g_callback_table;
+
 // SdkBackend stand-in: every lifecycle member forwards to g_mock, so tests drive
 // behavior entirely through EXPECT_CALL instead of hand-written shim bodies. Tests
 // that never invoke a given member (e.g. the kfd_* on_record(s)/on_configure() tests,
@@ -202,7 +209,9 @@ struct mock_sdk
     using buffer_policy_t           = test_support::buffer_policy_t;
     using on_records_cb_t           = test_support::on_records_cb_t;
     using on_record_cb_t            = test_support::on_record_cb_t;
+    using tracing_names_t           = test_support::tracing_names_t;
 
+    static constexpr std::size_t     compile_time_version                    = 90909;
     static constexpr buffer_policy_t BUFFER_POLICY_LOSSLESS                  = 1;
     static constexpr std::size_t     BUFFER_TRACING_KFD_EVENT_DROPPED_EVENTS = 20;
     static constexpr std::size_t     BUFFER_TRACING_KFD_EVENT_PAGE_FAULT     = 21;
@@ -273,8 +282,8 @@ struct mock_sdk
             context, kind, operations, num_operations, on_record, callback_data);
     }
 
-    static tracing_names_t get_buffer_tracing_names() { return {}; }
-    static tracing_names_t get_callback_tracing_names() { return {}; }
+    static tracing_names_t get_buffer_tracing_names() { return g_buffer_table; }
+    static tracing_names_t get_callback_tracing_names() { return g_callback_table; }
 };
 
 // Stand-in for the agent/trace_cache::info shapes every on_kfd_*<...> touches through
