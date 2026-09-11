@@ -161,6 +161,20 @@ database_backend<SqlitePolicy>::database_backend(std::string    db_path,
                                 "database open failed!");
     }
 
+    // Best-effort read/write performance pragmas. Ignored on failure (e.g. a
+    // read-only file/media can't honor temp_store=MEMORY's implicit locking)
+    // since these are optimizations, not correctness requirements.
+    for(const auto* pragma : { "PRAGMA cache_size = -262144",      // ~256MB page cache
+                               "PRAGMA temp_store = MEMORY",       // no disk temp b-trees
+                               "PRAGMA mmap_size = 1073741824" })  // 1GB mmap window
+    {
+        try
+        {
+            execute(pragma);
+        } catch(...)
+        {}
+    }
+
     validate_sqlite3_result(
         SqlitePolicy::prepare(m_sqlite3, "BEGIN TRANSACTION", &m_begin_stmt),
         "BEGIN TRANSACTION",
