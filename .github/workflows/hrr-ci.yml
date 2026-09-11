@@ -80,6 +80,13 @@ jobs:
         run: |
           # Named hrr-unit-tests.exe on Windows. Resolved with a bash glob
           # rather than find, which on a Windows runner resolves to FIND.EXE.
+          if [ "${RUNNER_OS}" = "Windows" ]; then
+            # The recovery cases spawn hrr-playback.exe, which loads the SDK's
+            # HIP DLLs. Without them on PATH it dies with STATUS_DLL_NOT_FOUND
+            # before running anything.
+            PATH="$(cygpath -u "${ROCM_SDK}")/bin:${PATH}"
+            export PATH
+          fi
           shopt -s nullglob
           bin=(build/tests/unit/hrr-unit-tests*)
           if [ ${#bin[@]} -eq 0 ]; then
