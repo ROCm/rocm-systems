@@ -2396,7 +2396,7 @@ static void CreateCeAllReduceEligibleComm(
 // A count of float32 divisible by the 8 mock ranks; well within NCCL_CE_AR_MAX_MSG_BYTES.
 static constexpr size_t kCeAllReduceCount = 4096;
 
-// rcclUseCeAllReduce gates the Copy Engine AllReduce path. The CE kernels never
+// rcclUseCeAr2Shot gates the Copy Engine AllReduce path. The CE kernels never
 // read the bias buffer, so an eligible-looking ncclAllReduceWithBias call must
 // still be refused; taking CE there silently drops the bias from the result.
 TEST(Rcclwrap, RcclUseCeAllReduce_BiasBuffer)
@@ -2412,7 +2412,7 @@ TEST(Rcclwrap, RcclUseCeAllReduce_BiasBuffer)
                 CreateCeAllReduceEligibleComm(comm, *topo, gpu, /*nRanks=*/8);
 
                 int biasBuffer = 0;
-                EXPECT_FALSE(rcclUseCeAllReduce(comm,
+                EXPECT_FALSE(rcclUseCeAr2Shot(comm,
                                                 kCeAllReduceCount,
                                                 ncclFloat32,
                                                 ncclSum,
@@ -2435,7 +2435,7 @@ TEST(Rcclwrap, RcclUseCeAllReduce_BiasBuffer)
                 struct ncclTopoNode   gpu;
                 CreateCeAllReduceEligibleComm(comm, *topo, gpu, /*nRanks=*/8);
 
-                EXPECT_TRUE(rcclUseCeAllReduce(comm,
+                EXPECT_TRUE(rcclUseCeAr2Shot(comm,
                                                kCeAllReduceCount,
                                                ncclFloat32,
                                                ncclSum,
@@ -2458,7 +2458,7 @@ TEST(Rcclwrap, RcclUseCeAllReduce_BiasBuffer)
 // enabled for this arch and size.
 //
 // `ceAllReduceAllowed` is passed in directly rather than derived inside the
-// test: the call site computes it once from rcclUseCeAllReduce() plus whatever
+// test: the call site computes it once from rcclUseCeAr2Shot() plus whatever
 // additional gating CE AllReduce requires (graph latch, ncclGroupDepth,
 // force/symReg, op/dtype/size/divisibility support, etc). Driving it directly
 // keeps these cases independent of RCCL_CE_ALLREDUCE's default and of CE
