@@ -32,28 +32,7 @@ FULL_TEST_TRIGGER_PATTERNS = [
     ".github/scripts/repo_config_model.py",
     ".github/scripts/pr_detect_changed_subtrees.py",
     ".github/repos-config.json",
-    # shared/ctest holds the CTest categorization logic consumed by every
-    # project's tests; a change there can alter selection everywhere, so treat
-    # it as a full-test trigger rather than a single surfaced component.
-    "shared/ctest/*",
 ]
-
-# CI-relevant monorepo directories that are NOT subtree-synced repos and so are
-# absent from repos-config.json. Without these, a PR confined to shared/* or
-# emulation/* yields no matched subtree -> empty changed_projects -> TheRock
-# falls back to building and testing everything. Each entry MUST have a
-# corresponding mapping in TheRock (build topology alias + the test selector's
-# _EXTERNAL_SUBTREE_ALIASES); TheRock hard-fails on an unmapped shared/* or
-# emulation/* path, so keep this list in lock-step with TheRock when adding
-# directories.
-# shared/ctest is intentionally excluded (handled as a full-test trigger above).
-CI_RELEVANT_NON_SUBTREE_PREFIXES = {
-    "shared/amdgpu-windows-interop",
-    "shared/kpack",
-    "shared/machine-readable-isa",
-    "emulation/mirage",
-    "emulation/rocjitsu",
-}
 
 
 @dataclass
@@ -80,28 +59,6 @@ def should_run_all_tests(paths: Optional[Iterable[str]]) -> bool:
     if paths is None:
         return False
     return matches_paths(paths, FULL_TEST_TRIGGER_PATTERNS)
-
-
-def _subtree_prefix(path: str) -> str:
-    """First two path components, matching find_matched_subtrees()."""
-    return "/".join(path.split("/", 2)[:2])
-
-
-def get_unclassified_paths(paths: Iterable[str], valid_prefixes: set) -> list:
-    """Non-skippable changed paths that map to no known subtree.
-
-    A PR can mix a recognized path (e.g. ``projects/rdc/...``) with a path we
-    cannot classify (a top-level file, or a directory absent from both
-    repos-config.json and CI_RELEVANT_NON_SUBTREE_PREFIXES). find_matched_subtrees
-    silently drops the unclassified path, which would let CI narrow the build to
-    the recognized subset and miss the impact of the unclassified change. Callers
-    should treat any such path conservatively (run the full suite).
-    """
-    return [
-        p
-        for p in paths
-        if not is_path_skippable(p) and _subtree_prefix(p) not in valid_prefixes
-    ]
 
 
 def get_changed_projects(base_ref: str) -> ChangedProjectsResult:
@@ -132,17 +89,7 @@ def get_changed_projects(base_ref: str) -> ChangedProjectsResult:
 
     repo_config_path = SCRIPT_DIR / ".." / "repos-config.json"
     config = load_repo_config(str(repo_config_path))
-    valid_prefixes = get_valid_prefixes(config) | CI_RELEVANT_NON_SUBTREE_PREFIXES
-
-    # Conservative guard (see erman-gurses' review on #11379): if any non-skippable
-    # change cannot be classified to a known subtree, we cannot reason about its
-    # build/test impact. Narrowing on just the recognized subset would silently
-    # drop the unclassified change, so fall back to a full run instead.
-    if get_unclassified_paths(modified_paths, valid_prefixes):
-        return ChangedProjectsResult(
-            changed_projects="", run_all_tests=True, skip_tests=False
-        )
-
+    valid_prefixes = get_valid_prefixes(config)
     matched_subtrees = find_matched_subtrees(list(modified_paths), valid_prefixes)
 
     return ChangedProjectsResult(
