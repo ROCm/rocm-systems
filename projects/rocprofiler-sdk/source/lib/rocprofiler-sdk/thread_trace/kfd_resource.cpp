@@ -23,6 +23,7 @@
 #include "lib/rocprofiler-sdk/thread_trace/kfd_resource.hpp"
 
 #include "lib/common/logging.hpp"
+#include "lib/common/synchronized.hpp"
 #include "lib/rocprofiler-sdk/agent.hpp"
 #include "lib/rocprofiler-sdk/details/kfd_ioctl.h"
 #include "lib/rocprofiler-sdk/platform/agent.hpp"
@@ -38,6 +39,7 @@
 #include <algorithm>
 #include <atomic>
 #include <cerrno>
+#include <chrono>
 #include <cstdlib>
 #include <cstring>
 #include <limits>
@@ -55,20 +57,19 @@ namespace thread_trace
 {
 namespace
 {
-constexpr size_t   KFD_PAGE_SIZE             = 4096;
-constexpr size_t   KFD_HUGE_PAGE_SIZE        = 2 * 1024 * 1024;
-constexpr size_t   AQL_PACKET_SIZE           = sizeof(hsa_ext_amd_aql_pm4_packet_t);
-constexpr size_t   AQL_QUEUE_PACKETS         = 512;
-constexpr size_t   AQL_QUEUE_SIZE            = AQL_PACKET_SIZE * AQL_QUEUE_PACKETS;
-constexpr size_t   SDMA_QUEUE_MIN_SIZE       = 64 * 1024;
-constexpr size_t   SDMA_MAX_COPY_SIZE        = 0x3FFFFFFF;
-constexpr uint32_t SDMA_OP_COPY              = 1;
-constexpr uint32_t SDMA_OP_FENCE             = 5;
-constexpr uint32_t SDMA_OP_GCR               = 17;
-constexpr uint32_t SDMA_SUBOP_USER_GCR       = 1;
-constexpr uint32_t SDMA_MEMORY_SCOPE_SYSTEM  = 3;
-constexpr uint32_t KFD_QUEUE_PRIORITY_NORMAL = 7;
-constexpr uint32_t KFD_QUEUE_PRIORITY_MAX    = 15;
+constexpr size_t   KFD_PAGE_SIZE            = 4096;
+constexpr size_t   KFD_HUGE_PAGE_SIZE       = 2 * 1024 * 1024;
+constexpr size_t   AQL_PACKET_SIZE          = sizeof(hsa_ext_amd_aql_pm4_packet_t);
+constexpr size_t   AQL_QUEUE_PACKETS        = 512;
+constexpr size_t   AQL_QUEUE_SIZE           = AQL_PACKET_SIZE * AQL_QUEUE_PACKETS;
+constexpr size_t   SDMA_QUEUE_MIN_SIZE      = 64 * 1024;
+constexpr size_t   SDMA_MAX_COPY_SIZE       = 0x3FFFFFFF;
+constexpr uint32_t SDMA_OP_COPY             = 1;
+constexpr uint32_t SDMA_OP_FENCE            = 5;
+constexpr uint32_t SDMA_OP_GCR              = 17;
+constexpr uint32_t SDMA_SUBOP_USER_GCR      = 1;
+constexpr uint32_t SDMA_MEMORY_SCOPE_SYSTEM = 3;
+constexpr uint32_t KFD_QUEUE_PRIORITY_MAX   = 15;
 
 // Upper bounds on the per-CU wave state, used only when KFD does not report the
 // context-save size. They are deliberately the largest values across supported GPUs
@@ -79,6 +80,25 @@ constexpr uint64_t MAX_SGPR_BYTES_PER_CU  = 0x8000;
 constexpr uint64_t MIN_HWREG_BYTES_PER_CU = 0x1000;
 
 static_assert(AQL_PACKET_SIZE == 64, "KFD AQL queue assumes the standard 64-byte packet size");
+
+template <typename PredicateT, typename DiagnosticT>
+void
+wait_with_diagnostics(PredicateT&& pending, DiagnosticT&& diagnostic)
+{
+    constexpr auto interval        = std::chrono::seconds{30};
+    auto           next_diagnostic = std::chrono::steady_clock::now() + interval;
+    while(pending())
+    {
+        const auto now = std::chrono::steady_clock::now();
+        if(now >= next_diagnostic)
+        {
+            diagnostic();
+            next_diagnostic = now + interval;
+        }
+        std::this_thread::sleep_for(std::chrono::microseconds(1));
+        std::this_thread::yield();
+    }
+}
 
 size_t
 align_up(size_t value, size_t alignment)
@@ -247,8 +267,11 @@ public:
 
     ~kfd_runtime_t()
     {
-        for(const auto& [_, fd] : _render_fds)
-            if(fd >= 0) ::close(fd);
+        _render_fds.wlock([](auto& render_fds) {
+            for(const auto& [_, fd] : render_fds)
+                if(fd >= 0) ::close(fd);
+            render_fds.clear();
+        });
         if(_kfd_fd >= 0) ::close(_kfd_fd);
     }
 
@@ -256,20 +279,21 @@ public:
 
     int render_fd(uint32_t render_minor)
     {
-        auto lock = std::unique_lock{_mutex};
-        auto itr  = _render_fds.find(render_minor);
-        if(itr != _render_fds.end()) return itr->second;
+        return _render_fds.wlock([&](auto& render_fds) {
+            auto itr = render_fds.find(render_minor);
+            if(itr != render_fds.end()) return itr->second;
 
-        const auto path = std::string{"/dev/dri/renderD"} + std::to_string(render_minor);
-        int        fd   = duplicate_open_device(path);
-        if(fd < 0) throw std::runtime_error{"could not duplicate ROCr's " + path + " descriptor"};
-        return _render_fds.emplace(render_minor, fd).first->second;
+            const auto path = std::string{"/dev/dri/renderD"} + std::to_string(render_minor);
+            int        fd   = duplicate_open_device(path);
+            if(fd < 0)
+                throw std::runtime_error{"could not duplicate ROCr's " + path + " descriptor"};
+            return render_fds.emplace(render_minor, fd).first->second;
+        });
     }
 
 private:
-    int                               _kfd_fd{-1};
-    std::mutex                        _mutex{};
-    std::unordered_map<uint32_t, int> _render_fds{};
+    int                                                     _kfd_fd{-1};
+    common::Synchronized<std::unordered_map<uint32_t, int>> _render_fds{};
 };
 
 std::shared_ptr<kfd_runtime_t>
@@ -450,18 +474,17 @@ struct kfd_memory_pool_t::impl
         ::munmap(ptr, allocation.size);
     }
 
-    std::shared_ptr<kfd_runtime_t>          runtime{};
-    uint32_t                                gpu_id{0};
-    uint32_t                                gfx_target_version{0};
-    uint32_t                                num_xcc{1};
-    uint32_t                                cwsr_size{0};
-    uint32_t                                ctl_stack_size{0};
-    uint32_t                                debug_memory_size{0};
-    uint32_t                                max_cu_id{0};
-    uint32_t                                max_wave_id{0};
-    int                                     render_fd{-1};
-    std::mutex                              mutex{};
-    std::unordered_map<void*, allocation_t> allocations{};
+    std::shared_ptr<kfd_runtime_t>                                runtime{};
+    uint32_t                                                      gpu_id{0};
+    uint32_t                                                      gfx_target_version{0};
+    uint32_t                                                      num_xcc{1};
+    uint32_t                                                      cwsr_size{0};
+    uint32_t                                                      ctl_stack_size{0};
+    uint32_t                                                      debug_memory_size{0};
+    uint32_t                                                      max_cu_id{0};
+    uint32_t                                                      max_wave_id{0};
+    int                                                           render_fd{-1};
+    common::Synchronized<std::unordered_map<void*, allocation_t>> allocations{};
 };
 
 kfd_memory_pool_t::kfd_memory_pool_t(const rocprofiler_agent_t& agent)
@@ -472,14 +495,8 @@ kfd_memory_pool_t::~kfd_memory_pool_t()
 {
     ROCP_INFO << "Deleting kfd pool";
 
-    auto allocations = std::vector<std::pair<void*, impl::allocation_t>>{};
-    {
-        auto lock = std::unique_lock{_impl->mutex};
-        allocations.reserve(_impl->allocations.size());
-        for(const auto& entry : _impl->allocations)
-            allocations.emplace_back(entry);
-        _impl->allocations.clear();
-    }
+    auto allocations =
+        _impl->allocations.wlock([](auto& entries) { return std::exchange(entries, {}); });
     for(const auto& [ptr, allocation] : allocations)
         _impl->release(ptr, allocation);
 }
@@ -546,10 +563,9 @@ kfd_memory_pool_t::allocate(size_t size, kfd_memory_kind_t kind, size_t alignmen
                                  std::strerror(error)};
     }
 
-    {
-        auto lock = std::unique_lock{_impl->mutex};
-        _impl->allocations.emplace(ptr, impl::allocation_t{allocation_size, args.handle, kind});
-    }
+    _impl->allocations.wlock([&](auto& allocations) {
+        allocations.emplace(ptr, impl::allocation_t{allocation_size, args.handle, kind});
+    });
     return ptr;
 }
 
@@ -558,19 +574,13 @@ kfd_memory_pool_t::deallocate(void* ptr)
 {
     if(ptr == nullptr) return;
 
-    auto allocation = impl::allocation_t{};
+    auto allocation = _impl->allocations.wlock([&](auto& entries) { return entries.extract(ptr); });
+    if(allocation.empty())
     {
-        auto lock = std::unique_lock{_impl->mutex};
-        auto itr  = _impl->allocations.find(ptr);
-        if(itr == _impl->allocations.end())
-        {
-            ROCP_WARNING << "Ignoring unknown KFD allocation " << ptr;
-            return;
-        }
-        allocation = itr->second;
-        _impl->allocations.erase(itr);
+        ROCP_WARNING << "Ignoring unknown KFD allocation " << ptr;
+        return;
     }
-    _impl->release(ptr, allocation);
+    _impl->release(ptr, allocation.mapped());
 }
 
 bool
@@ -579,14 +589,15 @@ kfd_memory_pool_t::is_device_pointer(const void* ptr) const
     if(ptr == nullptr) return false;
 
     const auto address = reinterpret_cast<uintptr_t>(ptr);
-    auto       lock    = std::unique_lock{_impl->mutex};
-    for(const auto& [base_ptr, allocation] : _impl->allocations)
-    {
-        const auto base = reinterpret_cast<uintptr_t>(base_ptr);
-        if(address >= base && address - base < allocation.size)
-            return allocation.kind == kfd_memory_kind_t::device;
-    }
-    return false;
+    return _impl->allocations.rlock([&](const auto& allocations) {
+        for(const auto& [base_ptr, allocation] : allocations)
+        {
+            const auto base = reinterpret_cast<uintptr_t>(base_ptr);
+            if(address >= base && address - base < allocation.size)
+                return allocation.kind == kfd_memory_kind_t::device;
+        }
+        return false;
+    });
 }
 
 uint32_t
@@ -675,11 +686,13 @@ kfd_signal_t::wait() const
 {
     ROCP_TRACE << "Waiting for KFD signal";
     auto t0 = std::chrono::system_clock::now();
-    while(load_signal_value(_signal) != 0)
-    {
-        std::this_thread::sleep_for(std::chrono::microseconds(1));
-        std::this_thread::yield();
-    }
+    wait_with_diagnostics(
+        [&]() { return load_signal_value(_signal) != 0; },
+        [&]() {
+            ROCP_INFO << "Still waiting in kfd_signal_t::wait (30-second diagnostic): gpu_id="
+                      << _memory->gpu_id() << ", signal=" << _signal
+                      << ", value=" << load_signal_value(_signal);
+        });
 
     std::atomic_thread_fence(std::memory_order_acq_rel);
     auto t1 = std::chrono::system_clock::now();
@@ -742,9 +755,7 @@ struct direct_queue_t
             args.gpu_id                = memory->gpu_id();
             args.queue_type            = queue_type;
             args.queue_percentage      = 100;
-            args.queue_priority        = (queue_type == KFD_IOC_QUEUE_TYPE_SDMA)
-                                             ? KFD_QUEUE_PRIORITY_MAX
-                                             : KFD_QUEUE_PRIORITY_NORMAL;
+            args.queue_priority        = KFD_QUEUE_PRIORITY_MAX;
 
             if(queue_type == KFD_IOC_QUEUE_TYPE_COMPUTE_AQL)
             {
@@ -835,11 +846,15 @@ struct direct_queue_t
 
     void wait_for_space(uint64_t end_index) const
     {
-        while(end_index - load_acquire(rptr) >= ring_size)
-        {
-            std::this_thread::sleep_for(std::chrono::microseconds(1));
-            std::this_thread::yield();
-        }
+        wait_with_diagnostics(
+            [&]() { return end_index - load_acquire(rptr) >= ring_size; },
+            [&]() {
+                ROCP_INFO
+                    << "Still waiting in direct_queue_t::wait_for_space (30-second diagnostic): "
+                    << "gpu_id=" << memory->gpu_id() << ", queue_id=" << queue_id
+                    << ", rptr=" << load_acquire(rptr) << ", wptr=" << load_acquire(wptr)
+                    << ", end_index=" << end_index << ", ring_size=" << ring_size;
+            });
     }
 
     std::shared_ptr<kfd_memory_pool_t> memory{};

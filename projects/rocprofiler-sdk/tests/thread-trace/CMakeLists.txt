@@ -34,15 +34,6 @@ rocprofiler_add_integration_execute_test(
     LABELS "integration-tests"
     PRELOAD "$<TARGET_FILE:thread-trace-agent-tool>")
 
-# Same agent profiling test, but forcing the CP DMA copy path instead of SDMA.
-rocprofiler_add_integration_execute_test(
-    thread-trace-api-agent-cp-dma-test
-    TARGET thread-trace-test-app
-    TIMEOUT 10
-    LABELS "integration-tests"
-    PRELOAD "$<TARGET_FILE:thread-trace-agent-tool>"
-    ENVIRONMENT "ROCPROFILER_SQTT_FORCE_CP_DMA=1")
-
 # Same agent profiling test, but forcing the HSA queue/signal backend instead of KFD.
 rocprofiler_add_integration_execute_test(
     thread-trace-api-agent-hsa-fallback-test

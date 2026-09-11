@@ -296,7 +296,13 @@ std::shared_ptr<att_signal_t>
 ThreadTracerAgent::start_thread_trace(std::shared_ptr<std::atomic<int>> _flag)
 {
     ROCP_TRACE << "Starting thread trace for agent " << agent_id.handle;
-    auto lock   = std::unique_lock{trace_resources_mut};
+    auto lock = std::unique_lock{trace_resources_mut};
+    if(!att_queue_enabled(*queue))
+    {
+        ROCP_WARNING << "Cannot restart thread trace after GPU buffer overflow for agent "
+                     << agent_id.handle;
+        return nullptr;
+    }
     worker_flag = std::move(_flag);
 
     auto control_packet_copy = get_control(true);
@@ -304,7 +310,7 @@ ThreadTracerAgent::start_thread_trace(std::shared_ptr<std::atomic<int>> _flag)
     control_packet_copy->populate_before();
     control_packet_copy->populate_after();
 
-    // Warmup the async copy so we dont wait too long for the flip.
+    // Warm up the copy backend before tracing starts.
     if(params.num_buffers > 1)
     {
         auto& buffer = queue->cpu_buffers;
@@ -649,7 +655,7 @@ DeviceThreadTracer::start_context()
         wait_list.emplace_back(tracer->start_thread_trace(worker_flag));
 
     for(auto& sig : wait_list)
-        signal_wait(*CHECK_NOTNULL(sig));
+        if(sig) signal_wait(*sig);
 }
 
 void
