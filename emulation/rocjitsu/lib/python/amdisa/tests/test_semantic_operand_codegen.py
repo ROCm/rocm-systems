@@ -4,7 +4,7 @@
 """Codegen regressions for semantic register operands."""
 
 from amdisa.codegen._generator import CodeGenerator, _OperandCtx
-from amdisa.semantics import derive_semantics
+from amdisa.semantics import InstructionSemantics, derive_semantics
 
 
 def test_ttmp_prefix_maps_to_architectural_register_class():
@@ -227,6 +227,54 @@ def test_accvgpr_src_is_canonicalized_into_acc_range():
     )
 
 
+def test_sdwa_clamp_preserves_semantic_result_width():
+    for data_type, expected in (
+        ('f16', 'F16'),
+        ('f32', 'F32'),
+        ('i32', 'NONE'),
+        (None, 'NONE'),
+    ):
+        sem = InstructionSemantics('V_ADD', 'vector_binop', data_type=data_type)
+        assert CodeGenerator._sdwa_result_format(sem) == (
+            f'amdgpu::sdwa::ResultFormat::{expected}'
+        )
+    # Floating-destination conversions use their result format.
+    conversion = InstructionSemantics(
+        'V_CVT_F16_F32', 'vector_unary', operation='cvt_f16_f32', data_type='f16_f32'
+    )
+    assert (
+        CodeGenerator._sdwa_result_format(conversion)
+        == 'amdgpu::sdwa::ResultFormat::F16'
+    )
+
+    packed = InstructionSemantics('V_PK_FMAC_F16', 'pk_fmac_vop2', data_type='f16')
+    assert (
+        CodeGenerator._sdwa_result_format(packed)
+        == 'amdgpu::sdwa::ResultFormat::PK_F16'
+    )
+
+    for data_type in ('f16', 'f32'):
+        exponent = InstructionSemantics(
+            'V_FREXP_EXP',
+            'vector_unary',
+            operation=f'frexp_exp_{data_type}',
+            data_type=data_type,
+        )
+        assert (
+            CodeGenerator._sdwa_result_format(exponent)
+            == 'amdgpu::sdwa::ResultFormat::NONE'
+        )
+
+    for operation in ('cvt_norm_i16_f16', 'cvt_norm_u16_f16'):
+        conversion = InstructionSemantics(
+            'V_CVT_NORM', 'vector_unary', operation=operation, data_type='f16'
+        )
+        assert (
+            CodeGenerator._sdwa_result_format(conversion)
+            == 'amdgpu::sdwa::ResultFormat::NONE'
+        )
+
+
 def test_sdwa_conversion_result_formats():
     for name, expected in (
         ('V_CVT_F16_F32', 'F16'),
@@ -247,4 +295,13 @@ def test_sdwa_conversion_result_formats():
         assert semantics is not None
         assert CodeGenerator._sdwa_result_format(semantics) == (
             f'amdgpu::sdwa::ResultFormat::{expected}'
+        )
+
+
+def test_sdwa_packed_conversion_result_format():
+    for name in ('V_CVT_PKRTZ_F16_F32', 'V_CVT_PK_RTZ_F16_F32'):
+        semantics = derive_semantics(name, 'VOP3')
+        assert semantics is not None
+        assert CodeGenerator._sdwa_result_format(semantics) == (
+            'amdgpu::sdwa::ResultFormat::PK_F16'
         )
