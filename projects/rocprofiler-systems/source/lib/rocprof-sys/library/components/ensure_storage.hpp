@@ -19,7 +19,7 @@ namespace
 template <typename... Tp>
 struct ensure_storage
 {
-    void operator()() const { ROCPROFSYS_FOLD_EXPRESSION((*this)(tim::type_list<Tp>{})); }
+    void operator()() const { (((*this)(tim::type_list<Tp>{})), ...); }
 
 private:
     template <typename Up>
