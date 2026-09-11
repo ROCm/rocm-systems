@@ -146,6 +146,8 @@ void Device::AddSafeStream(Stream* event_stream, Stream* wait_stream) {
 
 // ================================================================================================
 void Device::Reset() {
+  // Release deferred IPC event mappings while the device and its streams still exist.
+  drainDeferredIpcEvents(deviceId(), false);
   {
     amd::ScopedLock lock(lock_);
     auto it = mem_pools_.begin();
@@ -294,6 +296,9 @@ void Device::SyncAllStreams(bool cpu_wait, bool wait_blocking_streams_only) {
   }
   // Release freed memory for all memory pools on the device
   ReleaseFreedMemory();
+  // All work of this device is done, so the IPC event mappings that hipEventDestroy left
+  // behind (see ~IPCEvent) can go now without another wait.
+  drainDeferredIpcEvents(deviceId(), true);
 }
 
 // ================================================================================================

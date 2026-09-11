@@ -1360,7 +1360,7 @@ hipError_t hipHostRegister(void* hostPtr, size_t sizeBytes, unsigned int flags) 
   HIP_RETURN(ihipHostRegister(hostPtr, sizeBytes, flags));
 }
 
-hipError_t ihipHostUnregister(void* hostPtr) {
+hipError_t ihipHostUnregister(void* hostPtr, bool sync) {
   if (hostPtr == nullptr) {
     return hipErrorInvalidValue;
   }
@@ -1368,8 +1368,11 @@ hipError_t ihipHostUnregister(void* hostPtr) {
   amd::Memory* mem = getMemoryObject(hostPtr, offset);
 
   if (mem != nullptr) {
-    // Wait on the device, associated with the current memory object during allocation
-    g_devices[mem->getUserData().deviceId]->SyncAllStreams();
+    // Wait on the device, associated with the current memory object during allocation.
+    // sync == false: the caller has just waited on that device (deferred IPC event cleanup).
+    if (sync) {
+      g_devices[mem->getUserData().deviceId]->SyncAllStreams();
+    }
 
     amd::MemObjMap::RemoveMemObj(hostPtr);
     for (const auto& device : g_devices) {

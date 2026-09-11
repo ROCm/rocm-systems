@@ -186,13 +186,20 @@ class EventDD : public Event {
   virtual int64_t time(bool getStartTs) const;
 };
 
+#if !defined(_MSC_VER)
+// Hands the mapped shm of a destroyed IPC event to the deferred cleanup (hip_event_ipc.cpp).
+void enqueueDeferredIpcEvent(ihipIpcEventShmem_t* shmem, const std::string& name, bool unlink,
+                             int device_id);
+#endif
+
 class IPCEvent : public Event {
   // IPC Events
   struct ihipIpcEvent_t {
     std::string ipc_name_;
     int ipc_fd_;
     ihipIpcEventShmem_t* ipc_shmem_;
-    ihipIpcEvent_t() : ipc_name_("dummy"), ipc_fd_(0), ipc_shmem_(nullptr) {}
+    bool ipc_creator_;  //!< this process created ipc_name_ (and may remove it)
+    ihipIpcEvent_t() : ipc_name_("dummy"), ipc_fd_(0), ipc_shmem_(nullptr), ipc_creator_(false) {}
     void setipcname(const char* name) { ipc_name_ = std::string(name); }
   };
   ihipIpcEvent_t ipc_evt_;
@@ -201,22 +208,32 @@ class IPCEvent : public Event {
   ~IPCEvent() {
     if (ipc_evt_.ipc_shmem_) {
       int owners = --ipc_evt_.ipc_shmem_->owners;
-      // Make sure event is synchronized
+      // Make sure event is synchronized (waits for this event's own recorded work only)
       hipError_t status = synchronize();
+      (void)status;
+      // Remove the name only when the creator destroys the event (no further records follow)
+      // or the last user leaves. An importer must not: the creator may still re-record the
+      // event, and the next hipIpcOpenEventHandle of the same handle must find the live object.
+      // The former unconditional shm_unlink here made every later import create a fresh,
+      // zero-filled object whose stream wait never blocked.
+      const bool unlink = ipc_evt_.ipc_creator_ || owners == 0;
+#if !defined(_MSC_VER)
+      // Unregistering the signal memory waits for ALL streams of the device (SyncAllStreams in
+      // ihipHostUnregister), so hipEventDestroy blocked for as long as unrelated work was queued
+      // (ROCm/rocm-systems#7520). The mapping is released at the next device-wide sync instead,
+      // where that wait is paid anyway; stream waits still queued on it stay valid until then.
+      enqueueDeferredIpcEvent(ipc_evt_.ipc_shmem_, ipc_evt_.ipc_name_, unlink, deviceId());
+      ipc_evt_.ipc_shmem_ = nullptr;
+#else
       status = ihipHostUnregister(&ipc_evt_.ipc_shmem_->signal);
       if (!amd::Os::MemoryUnmapFile(ipc_evt_.ipc_shmem_, sizeof(hip::ihipIpcEventShmem_t))) {
         // print hipErrorInvalidHandle;
       }
-      if (owners == 0) {
+      if (unlink) {
         amd::Os::shm_unlink(ipc_evt_.ipc_name_);
       }
-    }
-#if !defined(_MSC_VER)
-    // Clean up the POSIX shared memory object
-    if (!ipc_evt_.ipc_name_.empty() && ipc_evt_.ipc_name_ != "dummy") {
-      shm_unlink(ipc_evt_.ipc_name_.c_str());
-    }
 #endif
+    }
   }
   IPCEvent() : Event(hipEventInterprocess) {}
   bool createIpcEventShmemIfNeeded();
