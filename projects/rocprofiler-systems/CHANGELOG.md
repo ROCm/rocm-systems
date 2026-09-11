@@ -4,7 +4,15 @@
 
 Full documentation for ROCm Systems Profiler is available at [https://rocm.docs.amd.com/projects/rocprofiler-systems/en/latest/](https://rocm.docs.amd.com/projects/rocprofiler-systems/en/latest/).
 
-## ROCm Systems Profiler 1.9.0 for ROCm 10.1 (unreleased)
+## ROCm Systems Profiler 1.10.0 for ROCm 10.2 (unreleased)
+
+### Changed
+
+- `ROCPROFSYS_MONOCHROME` and `MONOCHROME` now treat any value other than a recognized
+false token (`off`/`false`/`no`/`n`/`f`/`0`) as `true`, instead of only recognizing a
+fixed set of true tokens.
+
+## ROCm Systems Profiler 1.9.0 for ROCm 10.1
 
 ### Changed
 
@@ -57,7 +65,7 @@ replaces Perfetto as the primary trace output.
     `COMPONENTS causal-api`. The `user` component no longer exists, so requesting
     it now fails at configure time.
 
-## ROCm Systems Profiler 1.8.0 for ROCm 10.0 (unreleased)
+## ROCm Systems Profiler 1.8.0 for ROCm 10.0
 
 ### Added
 

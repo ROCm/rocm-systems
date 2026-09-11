@@ -22,13 +22,14 @@
 #                   prerequisite the host tests compile against
 #   configure       configure test/host
 #   build           build all host binaries (default target)
-#   guards          kernel-count pytest plus src/include/test_poison_hip_atomics.py
+#   guards          device-table unittest, kernel-count pytest, and
+#                   src/include/test_poison_hip_atomics.py
 #   run             run the suite (timestamped log + JUnit XML). Always emits
 #                   llvm source-based coverage profiles (*.profraw) into
 #                   <BUILD_DIR>/coverage (requires the host tests to be built
 #                   with -DHOST_TEST_COVERAGE=ON, the default). Also runs the
-#                   CPU-only guards: kernel-count pytest plus the
-#                   __hip_atomic_* poison compile probe.
+#                   CPU-only guards: device-table unittest, kernel-count pytest,
+#                   and the __hip_atomic_* poison compile probe.
 #   coverage        turn the per-binary *.profraw profiles from `run` into
 #                   reports: a per-binary text/HTML report + lcov tracefile
 #                   (clean, no hash mismatch), plus an overall line/branch union
@@ -214,6 +215,15 @@ do_poison_hip_atomics() {
   python3 "$RCCL_ROOT/src/include/test_poison_hip_atomics.py"
 }
 
+# Run the device-table generator guard suite: plain unittest, needs only python3.
+# It is also registered with add_test() in test/CMakeLists.txt, but nothing in
+# RCCL CI runs `ctest`, so that registration never gates. Running it here is what
+# actually makes it a guard.
+do_device_table_guards() {
+  echo "==> Device-table guards (unittest: src/device/test_generate_device_table.py)"
+  python3 "$RCCL_ROOT/src/device/test_generate_device_table.py" -v
+}
+
 # Run the kernel-count guard pytest suite (test/kernel-count) in a local venv so
 # the lean host-test image needs no system pytest. See that dir's README.
 do_kernel_count_guards() {
@@ -228,13 +238,16 @@ do_kernel_count_guards() {
   "$venv/bin/python" -m pytest "$gd/tests" -v
 }
 
-# All CPU-only guards: the kernel-count pytest suite, then the __hip_atomic_*
-# poison compile probe. Collected with `|| rc=1` rather than run back to back so
-# that under `set -e` (line 53) a kernel-count failure still leaves the poison
-# probe running and reported, instead of aborting the phase at the first one.
-# Same idiom as do_host_tests above.
+# All CPU-only guards: the device-table unittest suite, the kernel-count pytest
+# suite, then the __hip_atomic_* poison compile probe. Collected with `|| rc=1`
+# rather than run back to back so that under `set -e` (line 53) one guard failing
+# still leaves the rest running and reported, instead of aborting the phase at the
+# first one. Returning rc explicitly rather than leaning on `set -e` is what makes
+# them gate: the `all` phase invokes this as `do_run "$@" || run_rc=$?`, which
+# suspends errexit for the whole call. Same idiom as do_host_tests above.
 do_guards() {
   local rc=0
+  do_device_table_guards || rc=1
   do_kernel_count_guards || rc=1
   do_poison_hip_atomics || rc=1
   return "$rc"
@@ -402,8 +415,12 @@ do_coverage() {
 # gtest failure would otherwise abort the phase and drop the guards entirely, so
 # one red signal would hide the other.
 do_run() {
+  # Accumulate instead of relying on `set -e`, for the same reason do_guards
+  # does: the `all` phase's `do_run "$@" || run_rc=$?` suspends errexit here, so
+  # a bare `do_host_tests "$@"` would leave its failure behind and return only
+  # whatever do_guards reported.
   local rc=0
-  do_host_tests "$@" || rc=1
+  do_host_tests "$@" || rc=$?
   do_guards || rc=1
   return "$rc"
 }

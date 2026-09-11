@@ -126,9 +126,18 @@ add_subdirectory(late-start-tracing)
 # multiple anytime tool configuration validation tests
 add_subdirectory(multi-tool-test)
 
+# duplicate rocprofiler-sdk initialization validation test
+add_subdirectory(duplicate-sdk-initialization)
+
 # anytime tool configuration (force_configure) validation tests
 add_subdirectory(anytime-tool-config)
 
 # python bindings
 add_subdirectory(python-bindings)
 add_subdirectory(rocprofv3-avail)
+
+add_test(
+    NAME rocprofiler-sdk-spm-runner-preflight
+    COMMAND ${Python3_EXECUTABLE} -m unittest spm_runner_preflight_test
+    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
+set_tests_properties(rocprofiler-sdk-spm-runner-preflight PROPERTIES LABELS "unittests")

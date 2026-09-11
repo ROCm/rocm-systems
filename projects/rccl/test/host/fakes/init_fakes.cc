@@ -18,6 +18,7 @@
 // link line whose unit under test already defines the symbol (enqueue.cc:1985 for LaunchOrderImplicit),
 // or has no fakes file at all. The trailing comment names the definition each copies.
 int64_t ncclParamLaunchOrderImplicit() { return g_loadParam("LAUNCH_ORDER_IMPLICIT", 0); }  // enqueue.cc:1985
+int64_t rcclParamIntraGraphGen() { return g_loadParam("INTRA_GRAPH_GEN", 0); }               // graph/rccl_graph_gen.cc:34
 
 // Dead seam: no src/*.cc defines ncclTopoGetStrFromSys and no unit under test calls it. Kept as-is
 // rather than deleted, since removing it is a behaviour question this move is not answering.
