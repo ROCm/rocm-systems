@@ -56,8 +56,10 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
     must immediately follow the unit -- see `fakes/libc_seam.h:9-19`) instead
     of the shared `fakes/nccl_fakes.cc` the other units in this binary use.
   - `rccl_wrap.cc` (`WRAP_CC_PATH`, from `wrap-test.cc`); suites
-    `WrapMicrotest.*`, `WrapMicrotestIsolated.*`. Its dependency seams live
-    in `fakes/wrap_fakes.cc`, same as `p2p-test.cc`/`p2p_fakes.cc`. Real
+    `WrapMicrotest.*`, `WrapMicrotestIsolated.*`. Shared dependency seams live
+    in their production-TU owners (`ce_fakes.cc`, `dev_runtime_fakes.cc`,
+    `sym_kernels_fakes.cc`, etc.); `wrap_fakes.cc` contains only link-closure
+    seams without an existing shared owner. Real
     `archinfo.cc` is compiled alongside it for `IsArchMatch`
     (`rcclIsArchSupportedForFunc` et al. need the real prefix-match
     behaviour) -- the same real-oracle-TU technique
