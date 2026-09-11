@@ -44,9 +44,7 @@ arch_overrides:
     - v_mfma_f32_32x32x2_f32
     - v_mfma_f32_32x32x2f32
     - v_mfma_f32_4x4x1f32
-    - v_mfma_f64_16x16x4_f64
-    - v_mfma_f64_16x16x4f64
-    - v_mfma_f64_4x4x4f64
+    - v_mfma_f64_
   gfx950:
     FLAT:
     - global_
@@ -59,9 +57,7 @@ arch_overrides:
     - v_mfma_f32_32x32x2_f32
     - v_mfma_f32_32x32x2f32
     - v_mfma_f32_4x4x1f32
-    - v_mfma_f64_16x16x4_f64
-    - v_mfma_f64_16x16x4f64
-    - v_mfma_f64_4x4x4f64
+    - v_mfma_f64_
 pipelines:
   MATRIX:
   - v_accvgpr_read_
