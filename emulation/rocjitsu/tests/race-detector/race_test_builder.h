@@ -109,15 +109,18 @@ public:
   }
 
   /// Register an LDS write and validate against outstanding reads.
-  void ldsWrite(int wave, int lane, int addr, int bytes) {
-    constexpr MemoryOrderClass memoryOrder = MemoryOrderClass::LDS;
-    detector_->validateWrite(addr, WaveId{wave}, lane, bytes);
+  void ldsWrite(int wave, int lane, int addr, int bytes,
+                MemoryOrderClass memoryOrder = MemoryOrderClass::LDS,
+                amdgpu::WaitCounterType waitCounterType = amdgpu::WaitCounterType::LGKMCNT,
+                std::optional<amdgpu::WaitCounterType> additionalWaitCounterType = std::nullopt) {
+    detector_->validateWrite(addr, WaveId{wave}, lane, bytes, memoryOrder);
     std::vector<uint32_t> ldsAddrs(waveSize_, 0);
     ldsAddrs[lane] = addr;
     uint64_t laneMask = 1ULL << lane;
     waves_[wave]->registerLdsEvent(pc_++, MemoryEventType::VGPR_TO_LDS,
                                    /*registers=*/{}, laneMask, waveSize_, ldsAddrs, bytes,
-                                   /*byteMask=*/0xF, amdgpu::WaitCounterType::LGKMCNT, memoryOrder);
+                                   /*byteMask=*/0xF, waitCounterType, memoryOrder,
+                                   additionalWaitCounterType);
   }
 
   /// Register an LDS read and validate against outstanding writes.
@@ -127,7 +130,7 @@ public:
                amdgpu::WaitCounterType waitCounterType = amdgpu::WaitCounterType::LGKMCNT,
                MemoryOrderClass memoryOrder = MemoryOrderClass::LDS,
                std::optional<amdgpu::WaitCounterType> additionalWaitCounterType = std::nullopt) {
-    detector_->validateRead(addr, WaveId{wave}, lane, bytes);
+    detector_->validateRead(addr, WaveId{wave}, lane, bytes, memoryOrder);
     std::vector<uint32_t> ldsAddrs(waveSize_, 0);
     ldsAddrs[lane] = addr;
     uint64_t laneMask = 1ULL << lane;
@@ -143,6 +146,12 @@ public:
   void flatLdsLoad(int wave, int lane, int addr, int bytes, int vgprDst) {
     ldsRead(wave, lane, addr, bytes, vgprDst, /*byteMask=*/0xF, amdgpu::WaitCounterType::VMCNT,
             MemoryOrderClass::UNORDERED, amdgpu::WaitCounterType::LGKMCNT);
+  }
+
+  /// Register a generic FLAT store whose active lane resolves to LDS.
+  void flatLdsStore(int wave, int lane, int addr, int bytes) {
+    ldsWrite(wave, lane, addr, bytes, MemoryOrderClass::UNORDERED, amdgpu::WaitCounterType::VMCNT,
+             amdgpu::WaitCounterType::LGKMCNT);
   }
 
   // -- Sync --
@@ -211,12 +220,14 @@ public:
         RegisterRef{RegClass::TTMP, static_cast<uint16_t>(reg), static_cast<uint8_t>(width)});
   }
 
-  void checkLdsRead(int wave, int lane, int addr, int bytes) {
-    detector_->validateRead(addr, WaveId{wave}, lane, bytes);
+  void checkLdsRead(int wave, int lane, int addr, int bytes,
+                    MemoryOrderClass memoryOrder = MemoryOrderClass::LDS) {
+    detector_->validateRead(addr, WaveId{wave}, lane, bytes, memoryOrder);
   }
 
-  void checkLdsWrite(int wave, int lane, int addr, int bytes) {
-    detector_->validateWrite(addr, WaveId{wave}, lane, bytes);
+  void checkLdsWrite(int wave, int lane, int addr, int bytes,
+                     MemoryOrderClass memoryOrder = MemoryOrderClass::LDS) {
+    detector_->validateWrite(addr, WaveId{wave}, lane, bytes, memoryOrder);
   }
 
   // -- Results --
