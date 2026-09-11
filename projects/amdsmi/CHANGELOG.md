@@ -35,6 +35,7 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 
 - **Added `AMDSMI_VRAM_TYPE_HBM4` to `amdsmi_vram_type_t`**.  
   - Identifies HBM Generation 4 VRAM, reported by `amdsmi_get_gpu_vram_info()`.
+  - Also added the pre-existing `HBM3E` value to the Python `AmdSmiVramType` enum, which had been missing it.
 
 ### Changed
 
