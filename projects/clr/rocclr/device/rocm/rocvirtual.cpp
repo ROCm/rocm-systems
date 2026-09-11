@@ -5045,12 +5045,7 @@ bool VirtualGPU::submitKernelInternal(const amd::NDRangeContainer& sizes, const 
     }
 
     if (dev().settings().groupMemCarveout_) {
-      // Synchronize with setters
-      int requestedPercent = -1;
-      {
-        std::scoped_lock attribute_lock(devKernel->attributeLock());
-        requestedPercent = devKernel->workGroupInfo()->groupMemCarveout_;
-      }
+      const int requestedPercent = devKernel->workGroupInfo()->groupMemCarveout_;
       // Signed storage preserves -1 (device default) and explicit 0; cast only resolved 0..100.
       const uint8_t percent = requestedPercent >= 0
                                   ? static_cast<uint8_t>(requestedPercent)

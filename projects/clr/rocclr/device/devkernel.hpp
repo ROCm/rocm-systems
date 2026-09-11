@@ -11,8 +11,6 @@
 #include "platform/memory.hpp"
 #include "platform/ndrange.hpp"
 
-#include <mutex>
-
 namespace amd {
 class Device;
 class KernelSignature;
@@ -238,8 +236,6 @@ class Kernel {
   const WorkGroupInfo* workGroupInfo() const { return &workGroupInfo_; }
   //! Returns the kernel info structure for filling in
   WorkGroupInfo* workGroupInfo() { return &workGroupInfo_; }
-  //! Serializes mutable runtime attributes for this device kernel
-  std::mutex& attributeLock() const { return attributeLock_; }
 
   //! Returns the kernel signature
   const amd::KernelSignature& signature() const { return *signature_; }
@@ -413,7 +409,6 @@ class Kernel {
   Kernel& operator=(const Kernel&);
 
   std::unordered_map<size_t, size_t> patchReferences_;  //!< Patch table for references
-  mutable std::mutex attributeLock_;                    //!< mutable runtime attributes
 
   enum KernelKind { Normal = 0, Init = 1, Fini = 2 };
 
