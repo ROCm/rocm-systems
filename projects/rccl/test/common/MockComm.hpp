@@ -13,9 +13,7 @@
 
 #include <rccl/rccl.h>
 
-#include <cstdlib>
 #include <cstring>
-#include <new>
 
 #include "comm.h"
 #include "graph/topo.h"
@@ -24,7 +22,7 @@
 namespace RcclUnitTesting
 {
 
-// Caller owns mockTopo and mockGpuNode; CleanupMockComm frees the heap mockComm.
+// Caller owns mockTopo and mockGpuNode; CleanupMockComm deletes the heap mockComm.
 inline void CreateMockComm(
     ncclComm_t&            mockComm,
     struct ncclTopoSystem& mockTopo,
@@ -33,11 +31,9 @@ inline void CreateMockComm(
     int                    nRanks
 )
 {
-    mockComm = static_cast<ncclComm_t>(std::calloc(1, sizeof(ncclComm)));
-    if (mockComm == nullptr)
-    {
-        throw std::bad_alloc();
-    }
+    // Value-init on the heap so POD is zeroed and rmaState's thread/mutex/cv are constructed.
+    mockComm = new ncclComm();
+
     // Initialize basic communicator fields
     mockComm->nRanks = nRanks;
     mockComm->nNodes = 1; // Default to single node for P2P tests
@@ -70,7 +66,7 @@ inline void CleanupMockComm(ncclComm_t& mockComm)
 {
     if(mockComm)
     {
-        std::free(mockComm);
+        delete mockComm;
         mockComm = nullptr;
     }
 }

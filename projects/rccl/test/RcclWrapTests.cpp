@@ -151,8 +151,8 @@ static bool isAlgoStrValid(const char* envStr)
     return false; // No match found
 }
 
-// Heap ncclTopoSystem (~13 MiB) plus CreateMockComm. Protocol tests then set
-// nNodes and topo->ll128Enabled, matching InitGetAlgoInfoMockComm.
+// CreateMockComm on the caller's topo, which must outlive comm, then the
+// protocol-test defaults nNodes = 2 and topo->ll128Enabled.
 static void InitProtocolMockComm(ncclComm_t& comm, ncclTopoSystem& topo)
 {
     struct ncclTopoNode gpu{};
