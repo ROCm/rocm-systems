@@ -3062,6 +3062,19 @@ hipError_t hipMemcpyBatchAsync(void** dsts, void** srcs, size_t* sizes, size_t c
                                                             attrsIdxs, numAttrs, failIdx, stream);
   CATCH;
 }
+hipError_t hipExtMemcpyBatchAsync(void** dsts, void** srcs,
+                                  size_t* sizes, size_t* sizesDst,
+                                  hipExtMemcpyWait* waits,
+                                  hipExtMemcpySignal* signals,
+                                  size_t count,
+                                  hipExtMemcpyAttributes* attrs, size_t* attrsIdxs, size_t numAttrs,
+                                  hipStream_t stream) {
+  TRY;
+  return hip::GetHipDispatchTable()->hipExtMemcpyBatchAsync_fn(
+      dsts, srcs, sizes, sizesDst, waits, signals,
+      count, attrs, attrsIdxs, numAttrs, stream);
+  CATCH;
+}
 hipError_t hipMemcpy3DBatchAsync(size_t numOps, struct hipMemcpy3DBatchOp* opList, size_t* failIdx,
                                  unsigned long long flags, hipStream_t stream) {
   TRY;

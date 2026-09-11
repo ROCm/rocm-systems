@@ -735,10 +735,11 @@ class Settings {
       uint kernel_arg_opt_ : 1;               //!< Enables kernel arg optimization for blit kernels
       uint kernel_arg_impl_ : 2;              //!< Kernel argument implementation
       uint sdma_swap_supported_ : 1;         //!< SDMA linear swap copy (gfx94x/gfx95x)
+      uint sdma_asymmetric_swap_supported_ : 1; //!< SDMA asymmetric swap (currently unsupported)
       uint groupMemCarveout_ : 1;             //!< Group memory carveout functionality
       uint sdma_indirect_supported_ : 1;     //!< SDMA linear indirect copy (gfx1250+)
       uint aql_device_ring_buf_ : 1;          //!< Place the AQL queue ring buffer in device memory
-      uint reserved_ : 8;
+      uint reserved_ : 7;
     };
     uint value_;
   };

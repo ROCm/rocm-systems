@@ -1185,12 +1185,13 @@ struct BatchCopyOp {
   size_t srcOffset;        //!< Offset in source buffer
   size_t dstOffset;        //!< Offset in destination buffer
   size_t size;             //!< Size of the copy in bytes
+  size_t sizeB{0};         //!< For swap: B-side size (0 = symmetric, same as size)
   CopyMetadata metadata;   //!< Copy metadata for this operation
 
   BatchCopyOp(Memory* src, Memory* dst, size_t srcOff, size_t dstOff,
-              size_t sz, CopyMetadata meta = CopyMetadata())
+              size_t sz, CopyMetadata meta = CopyMetadata(), size_t szB = 0)
       : srcMemory(src), dstMemory(dst), srcOffset(srcOff),
-        dstOffset(dstOff), size(sz), metadata(meta) {}
+        dstOffset(dstOff), size(sz), sizeB(szB), metadata(meta) {}
 };
 
 //! Structure to hold pageable host-to-device write operation info for batch
