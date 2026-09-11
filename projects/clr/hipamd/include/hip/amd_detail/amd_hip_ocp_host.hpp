@@ -68,8 +68,8 @@ struct Float {
   bool HasInf;
 };
 
-static const float ieee754_nan = __hip_internal::NumericLimits<float>::quiet_NaN();
-static const float ieee754_inf = __hip_internal::NumericLimits<float>::infinity();
+static const float ieee754_nan = __hip_internal::numeric_limits<float>::quiet_NaN();
+static const float ieee754_inf = __hip_internal::numeric_limits<float>::infinity();
 
 __OCP_FP_HOST_DEVICE_STATIC__ __hip_uint32_t U32(float f) {
   static_assert(sizeof(__hip_uint32_t) == sizeof(float), "");
