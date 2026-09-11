@@ -81,6 +81,7 @@ HipDispatchTable         g_real_table{};
 HipDispatchTable         g_cap_table{};
 std::atomic<bool>        g_installed{false};
 std::atomic<bool>        g_table_built{false};  // guard for hip_capture_build_table()
+std::atomic<bool>        g_cap_table_ready{false};  // g_cap_table fully populated
 
 HipCompilerDispatchTable g_real_compiler_table{};
 std::atomic<bool>        g_compiler_installed{false};  // guard for hip_capture_build_compiler_table()
@@ -2180,6 +2181,9 @@ hipError_t capture_hipGraphExecBatchMemOpNodeSetParams(
 // ---------------------------------------------------------------------------
 
 void hip_capture_install(HipDispatchTable* target) {
+  // A caller that lost the hip_capture_build_table() guard race would otherwise
+  // publish a still-zeroed g_cap_table, nulling every slot of the live table.
+  if (!g_cap_table_ready.load(std::memory_order_acquire)) return;
   if (g_installed.exchange(true)) return;
   if (!target) target = const_cast<HipDispatchTable*>(hip::GetHipDispatchTable());
   std::memcpy(target, &g_cap_table, sizeof(HipDispatchTable));
@@ -2271,6 +2275,12 @@ static void record_registered_var(const void* host_var, const char* name,
 // The compiler table stays in hip_capture_init(). Installing it this early
 // races compiler-table setup and leaves ModuleInfo() null, which surfaces as
 // hipErrorInvalidDeviceFunction on the first kernel launch.
+//
+// Note this runs before ToolsInit() registers the table with rocprofiler, so a
+// profiler attaching to a capturing process wraps HRR's shims as its
+// "originals" rather than the reverse, and hip_capture_uninstall() restores a
+// pre-registration snapshot, dropping the tool's wrappers. That only matters
+// when capture and a profiler tool run together, which HRR does not support.
 // ---------------------------------------------------------------------------
 void hip_capture_install_early(HipDispatchTable* table) {
   // Flag::init() has not run, so HIP_HRR_CAPTURE_OUTPUT is not populated yet and
@@ -2312,7 +2322,14 @@ void hrr_install_clr_exception_handler() {
 }  // namespace
 
 void hip_capture_init() {
-  if (!hip_capture_enabled()) return;
+  if (!hip_capture_enabled()) {
+    // hip_capture_install_early() gates on getenv() because Flag::init() has
+    // not run that early. If the flag disagrees with what getenv() saw, the
+    // shims are already latched with no writer behind them, which would drop
+    // every HIP API silently and never restore the table. Undo it instead.
+    if (g_installed) hip_capture_uninstall();
+    return;
+  }
 
   // HIP_HRR_DEBUG_ARGS traces are emitted via LogPrintfInfo (amd::LOG_INFO).
   // ClPrint filters anything above AMD_LOG_LEVEL, so a user who set the trace
@@ -2327,11 +2344,18 @@ void hip_capture_init() {
                   static_cast<int>(amd::LOG_INFO));
   }
 
-  // Snapshot the fully-initialized dispatch table and install runtime shims here
-  // only (see comment above — no static-init capture hook).
+  // Build the runtime dispatch table before touching the capture guards.
+  // Leaving it to hip_capture_build_table(), which called GetHipDispatchTable()
+  // itself, meant that when this was the first use of that table its static
+  // initialiser ran UpdateDispatchTable() -> hip_capture_install_early()
+  // underneath us with g_table_built already set: the nested build returned on
+  // the guard and installed a still-zeroed g_cap_table over the live table.
+  // Forcing the table here means install_early() has already run to completion,
+  // leaving the block below a fallback for when it declined to install.
+  HipDispatchTable* live = const_cast<HipDispatchTable*>(hip::GetHipDispatchTable());
   if (!g_installed) {
-    hip_capture_build_table();
-    hip_capture_install();
+    hip_capture_build_table(live);
+    hip_capture_install(live);
   }
 
   // Open the events writer now — Flag::init() has run so output_dir is valid.

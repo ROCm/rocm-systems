@@ -2208,6 +2208,7 @@ extern HipDispatchTable         g_real_table;
 extern HipDispatchTable         g_cap_table;
 extern std::atomic<bool>        g_installed;
 extern std::atomic<bool>        g_table_built;
+extern std::atomic<bool>        g_cap_table_ready;
 extern HipCompilerDispatchTable g_real_compiler_table;
 extern std::atomic<bool>        g_compiler_installed;
 
@@ -2611,6 +2612,11 @@ def generate_build_table(entries: List[ApiEntry]) -> str:
             # keeping it preserves pass-through.
             continue
         lines.append(f"  g_cap_table.{e.name}_fn = capture_{e.name};")
+    lines.append("")
+    lines.append("  // Publish only now that every slot is populated. hip_capture_install()")
+    lines.append("  // refuses to copy the table until this is set, so a caller that returned")
+    lines.append("  // on the guard above cannot memcpy a zeroed table over the live one.")
+    lines.append("  g_cap_table_ready.store(true, std::memory_order_release);")
     lines.append("}")
     lines.append("")
 
