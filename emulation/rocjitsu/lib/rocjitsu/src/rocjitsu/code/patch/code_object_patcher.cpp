@@ -658,7 +658,7 @@ build_text_placement_index(uint64_t old_text_size, uint64_t new_text_size,
                                          uint64_t old_text_size,
                                          const TextPlacementIndex &placements,
                                          bool require_every_text_symbol_mapped,
-                                         bool preserve_unreferenced_local_text_symbols) {
+                                         bool source_text_prefix_is_preserved) {
   if (placements.target_by_source.empty())
     return true;
 
@@ -747,7 +747,7 @@ build_text_placement_index(uint64_t old_text_size, uint64_t new_text_size,
       const bool must_relocate =
           (require_every_text_symbol_mapped && externally_resolvable) ||
           (referenced != referenced_by_symtab.end() && referenced->second.contains(i));
-      if (preserve_unreferenced_local_text_symbols && !externally_resolvable && !must_relocate)
+      if (source_text_prefix_is_preserved && !externally_resolvable && !must_relocate)
         continue;
 
       uint64_t source_text_offset = symbol.st_value;
@@ -904,6 +904,30 @@ build_text_placement_index(uint64_t old_text_size, uint64_t new_text_size,
                 target_end - start.offset < best_extent->second - best_extent->first)
               best_extent = std::pair{start.offset, target_end};
           }
+        }
+        if (!best_extent && source_text_prefix_is_preserved && !must_relocate &&
+            starts != placements.targets_by_source.end()) {
+          // A selected body's end and the following unselected function's
+          // start may share one source offset. The end placement belongs to
+          // the preceding owner and has no same-owner mapping inside the next
+          // function. In append-only mode that next body and symbol remain
+          // valid in the preserved source prefix; do not mistake the boundary
+          // marker for a relocation of the unselected function.
+          bool has_same_owner_placement_inside_symbol = false;
+          for (const TextPlacementIndex::OwnedTarget &start : starts->second) {
+            for (const TextOffsetRelocation &candidate : placements.all) {
+              if (candidate.owner_descriptor_file_offset == start.owner_descriptor_file_offset &&
+                  candidate.source_offset > source_text_offset &&
+                  candidate.source_offset <= source_text_offset + old_size) {
+                has_same_owner_placement_inside_symbol = true;
+                break;
+              }
+            }
+            if (has_same_owner_placement_inside_symbol)
+              break;
+          }
+          if (!has_same_owner_placement_inside_symbol)
+            continue;
         }
         if (!best_extent)
           return false;
@@ -1696,7 +1720,7 @@ bool CodeObjectPatcher::replace_text(
     std::span<const PcRelativeTextRelocation> code_relocations,
     bool require_every_text_symbol_mapped,
     const std::unordered_map<uint64_t, uint64_t> *canonical_code_pointer_placement,
-    bool preserve_unreferenced_local_text_symbols) {
+    bool source_text_prefix_is_preserved) {
   // Keep fail-closed behavior for callers that assume word-aligned executable
   // sections; accepting a non-word-aligned replacement can break downstream
   // PC-relative patching and branch-distance checks.
@@ -1915,8 +1939,7 @@ bool CodeObjectPatcher::replace_text(
   }
   shdrs[*text_index].sh_size = new_text.size();
   if (!relocate_text_symbols(image, header, shdrs, *text_index, text_size_, *text_placements,
-                             require_every_text_symbol_mapped,
-                             preserve_unreferenced_local_text_symbols)) {
+                             require_every_text_symbol_mapped, source_text_prefix_is_preserved)) {
     return false;
   }
   if (!relocate_relative_text_addends(image, header, shdrs, *text_index, text_size_,

@@ -3092,6 +3092,52 @@ TEST(CodeObjectPatcher, ReplaceTextShrinksStaleAppendedFunctionExtentToEmittedBo
   EXPECT_EQ(symbols[2].st_size, 4u);
 }
 
+TEST(CodeObjectPatcher, PreservedAdjacentFunctionIsNotRelocatedByPrecedingBodyEnd) {
+  auto image = make_minimal_amdgpu_elf_with_load_segments();
+  auto ehdr = read_elf_struct_for_test<Elf64_Ehdr>(image, 0);
+  const auto shdrs = read_elf_array_for_test<Elf64_Shdr>(image, ehdr.e_shoff, ehdr.e_shnum);
+  const auto symtab = std::ranges::find_if(
+      shdrs, [](const Elf64_Shdr &section) { return section.sh_type == SHT_SYMTAB; });
+  ASSERT_NE(symtab, shdrs.end());
+  auto symbols = read_elf_array_for_test<Elf64_Sym>(image, symtab->sh_offset,
+                                                    symtab->sh_size / sizeof(Elf64_Sym));
+  ASSERT_GE(symbols.size(), 3u);
+  symbols[2].st_value = 0x1104u;
+  symbols[2].st_size = 4u;
+  write_bytes_for_test(image, symtab->sh_offset, symbols.data(),
+                       symbols.size() * sizeof(Elf64_Sym));
+
+  AmdGpuCodeObject co(image.data(), image.size());
+  ASSERT_TRUE(co.is_valid());
+  CodeObjectPatcher patcher(co);
+  const std::array<uint32_t, 4> text_words = {0xBF800000u, 0xBF800000u, 0xBF800000u, 0xBF800000u};
+  const auto bytes = std::span<const uint8_t>(reinterpret_cast<const uint8_t *>(text_words.data()),
+                                              sizeof(text_words));
+  // The first translated body expands from source [0, 4) to target [8, 16).
+  // Its end marker shares source offset 4 with the unselected next function.
+  constexpr std::array<TextOffsetRelocation, 2> mappings = {
+      TextOffsetRelocation{
+          .source_offset = 0, .target_offset = 8, .owner_descriptor_file_offset = 64},
+      TextOffsetRelocation{
+          .source_offset = 4, .target_offset = 16, .owner_descriptor_file_offset = 64},
+  };
+  ASSERT_TRUE(patcher.replace_text(bytes, mappings, {}, {}, false, nullptr,
+                                   /*source_text_prefix_is_preserved=*/true));
+
+  const auto patched = patcher.emit();
+  ehdr = read_elf_struct_for_test<Elf64_Ehdr>(patched, 0);
+  const auto patched_shdrs =
+      read_elf_array_for_test<Elf64_Shdr>(patched, ehdr.e_shoff, ehdr.e_shnum);
+  const auto patched_symtab = std::ranges::find_if(
+      patched_shdrs, [](const Elf64_Shdr &section) { return section.sh_type == SHT_SYMTAB; });
+  ASSERT_NE(patched_symtab, patched_shdrs.end());
+  const auto patched_symbols = read_elf_array_for_test<Elf64_Sym>(
+      patched, patched_symtab->sh_offset, patched_symtab->sh_size / sizeof(Elf64_Sym));
+  ASSERT_GE(patched_symbols.size(), 3u);
+  EXPECT_EQ(patched_symbols[2].st_value, 0x1104u);
+  EXPECT_EQ(patched_symbols[2].st_size, 4u);
+}
+
 TEST(CodeObjectPatcher, AppendsNonAllocSectionWithoutMovingLoadableSegments) {
   auto image = make_minimal_amdgpu_elf_with_load_segments();
   AmdGpuCodeObject co(image.data(), image.size());
