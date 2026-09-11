@@ -41,13 +41,6 @@
 #    include <mpi.h>
 #endif
 
-#if defined(MPICH) && MPICH > 0
-#    define ROCPROFSYS_MPI_MPICH 1
-#elif defined(OMPI_MAJOR_VERSION) && defined(OMPI_MINOR_VERSION) &&                      \
-    defined(OMPI_PATCH_VERSION)
-#    define ROCPROFSYS_MPI_OPENMPI 1
-#endif
-
 namespace rocprofsys
 {
 namespace mpi
