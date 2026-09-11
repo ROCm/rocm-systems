@@ -1556,9 +1556,8 @@ void validate_dispatch_id_prologue_semantics(const FinalValidationEnvironment &e
       invalid_restore =
           destination >= preload.original_user_sgpr_count ||
           source >= preload.expanded_user_sgpr_count || destination >= source ||
-          (index != 0u &&
-           (preload.guest_restore_destinations[index - 1u] >= destination ||
-            preload.guest_restore_sources[index - 1u] >= source));
+          (index != 0u && (preload.guest_restore_destinations[index - 1u] >= destination ||
+                           preload.guest_restore_sources[index - 1u] >= source));
     }
     if ((!preload.descriptor_change_required() && preload.guest_restore_count != 0u) ||
         (preload.descriptor_change_required() && invalid_restore)) {
@@ -1588,8 +1587,8 @@ void validate_dispatch_id_prologue_semantics(const FinalValidationEnvironment &e
       append_salu(build_s_mov_b32(static_cast<uint16_t>(persistent + 1u),
                                   static_cast<uint16_t>(preload.dispatch_id_sgpr + 1u), arch));
       if (preload.identity_salt_sgpr) {
-        const auto mix = instrumentation::build_s_xor_b64(
-            persistent, persistent, *preload.identity_salt_sgpr, arch);
+        const auto mix = instrumentation::build_s_xor_b64(persistent, persistent,
+                                                          *preload.identity_salt_sgpr, arch);
         if (!mix) {
           errors.emplace_back(
               "ConSan final validation cannot encode the dispatch-ID identity mix for kernel '" +
@@ -1667,9 +1666,8 @@ void validate_dispatch_id_prologue_semantics(const FinalValidationEnvironment &e
     // unrelated instrumentation can encode the same individual moves.
     std::vector<uint32_t> dispatch_repair = std::move(capture_prefix);
     dispatch_repair.insert(dispatch_repair.end(), restore_words.begin(), restore_words.end());
-    const auto repair =
-        std::search(entry_words.begin(), entry_words.end(), dispatch_repair.begin(),
-                    dispatch_repair.end());
+    const auto repair = std::search(entry_words.begin(), entry_words.end(), dispatch_repair.begin(),
+                                    dispatch_repair.end());
     if (repair == entry_words.end()) {
       errors.emplace_back(
           "ConSan final validation found no complete dispatch-ID capture and restore in kernel '" +
@@ -2116,8 +2114,20 @@ void validate_resource_and_metadata_deltas(const FinalValidationEnvironment &env
                         preload.original_kernarg_preload_length);
       }
     }
-    if (text_relocated || requirement.allow_entry_delta)
+    // Growing an ELF text section can move the descriptor section in the
+    // image even when a local transaction leaves the kernel's text-relative
+    // entry unchanged. The descriptor-to-entry displacement must then be
+    // rebased by CodeObjectPatcher. Admit that structural delta only when the
+    // independently decoded entry coordinate proves that no executable entry
+    // moved; arbitrary unplanned entry mutations still fail below.
+    const bool descriptor_rebased_around_unchanged_entry =
+        original_kernel.entry_text_offset == replacement_kernel.entry_text_offset &&
+        original_descriptor.kernel_code_entry_byte_offset !=
+            replacement_descriptor.kernel_code_entry_byte_offset;
+    if (text_relocated || requirement.allow_entry_delta ||
+        descriptor_rebased_around_unchanged_entry) {
       normalized.kernel_code_entry_byte_offset = original_descriptor.kernel_code_entry_byte_offset;
+    }
     const ConSanDescriptorResourceDeltaValidation target_resource_validation =
         validate_consan_descriptor_resource_delta(
             arch, {
@@ -2143,16 +2153,14 @@ void validate_resource_and_metadata_deltas(const FinalValidationEnvironment &env
       normalized.private_segment_fixed_size = original_descriptor.private_segment_fixed_size;
       normalized.group_segment_fixed_size = original_descriptor.group_segment_fixed_size;
     }
-    if (text_relocated && !requirement.allow_resource_delta &&
-        !has_unscoped_resource_growth) {
+    if (text_relocated && !requirement.allow_resource_delta && !has_unscoped_resource_growth) {
       const auto &descriptor_deltas = result.text_relocation->descriptor_rsrc1_deltas;
-      const auto delta = std::ranges::find(
-          descriptor_deltas, original_kernel.descriptor_file_offset,
-          &ConSanTextRelocationDescriptorDelta::descriptor_file_offset);
+      const auto delta =
+          std::ranges::find(descriptor_deltas, original_kernel.descriptor_file_offset,
+                            &ConSanTextRelocationDescriptorDelta::descriptor_file_offset);
       if (delta != descriptor_deltas.end()) {
         uint32_t normalized_rsrc1 = delta->replacement_compute_pgm_rsrc1;
-        AMDHSA_BITS_SET(normalized_rsrc1,
-                        kd::COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT,
+        AMDHSA_BITS_SET(normalized_rsrc1, kd::COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT,
                         AMDHSA_BITS_GET(delta->original_compute_pgm_rsrc1,
                                         kd::COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT));
         if (delta->original_compute_pgm_rsrc1 != original_descriptor.compute_pgm_rsrc1 ||
@@ -2171,19 +2179,19 @@ void validate_resource_and_metadata_deltas(const FinalValidationEnvironment &env
       const auto *normalized_bytes = reinterpret_cast<const uint8_t *>(&normalized);
       const auto *original_descriptor_bytes =
           reinterpret_cast<const uint8_t *>(&original_descriptor);
-      const size_t first_delta = static_cast<size_t>(
-          std::mismatch(normalized_bytes, normalized_bytes + sizeof(normalized),
-                        original_descriptor_bytes)
-              .first -
-          normalized_bytes);
+      const size_t first_delta =
+          static_cast<size_t>(std::mismatch(normalized_bytes, normalized_bytes + sizeof(normalized),
+                                            original_descriptor_bytes)
+                                  .first -
+                              normalized_bytes);
       errors.emplace_back(
           "ConSan final validation found an unplanned descriptor delta for kernel '" +
           original_kernel.name + "' (original offset " +
           std::to_string(original_kernel.descriptor_file_offset) + ", replacement offset " +
           std::to_string(replacement_kernel.descriptor_file_offset) + ", first byte " +
-          std::to_string(first_delta) + ": original=" +
-          std::to_string(original_descriptor_bytes[first_delta]) + ", replacement=" +
-          std::to_string(normalized_bytes[first_delta]) + ")");
+          std::to_string(first_delta) +
+          ": original=" + std::to_string(original_descriptor_bytes[first_delta]) +
+          ", replacement=" + std::to_string(normalized_bytes[first_delta]) + ")");
       continue;
     }
     if (requirement.required_vgpr_count != 0) {
