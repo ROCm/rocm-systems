@@ -47,6 +47,7 @@ use std::os::unix::fs::MetadataExt;
 use std::path::{Path, PathBuf};
 
 use goblin::Object;
+use goblin::elf::dynamic::{DT_AUDIT, DT_DEPAUDIT};
 use nix::unistd::{AccessFlags, eaccess};
 use rustix::fs::getxattr;
 use rustix::io::Errno;
@@ -263,7 +264,18 @@ fn direct_runpath_runtime(
     let Object::Elf(elf) = Object::parse(image).ok()? else {
         return None;
     };
-    if !elf.rpaths.is_empty() || !elf.libraries.contains(&ROCR_SONAME) {
+    // An executable's own audit tags install callbacks without any
+    // LD_AUDIT environment variable; la_objsearch may replace the
+    // runtime before RUNPATH resolution.
+    if !elf.rpaths.is_empty()
+        || !elf.libraries.contains(&ROCR_SONAME)
+        || elf.dynamic.as_ref().is_some_and(|dynamic| {
+            dynamic
+                .dyns
+                .iter()
+                .any(|entry| matches!(entry.d_tag, DT_AUDIT | DT_DEPAUDIT))
+        })
+    {
         return None;
     }
 
@@ -273,9 +285,7 @@ fn direct_runpath_runtime(
             if directory.is_empty() {
                 return None;
             }
-            let directory = directory
-                .replace("${ORIGIN}", &origin)
-                .replace("$ORIGIN", &origin);
+            let directory = expand_origin(directory, &origin);
             if directory.contains('$') {
                 return None;
             }
@@ -286,7 +296,7 @@ fn direct_runpath_runtime(
             if require_trusted_paths {
                 directory = trusted_system_directory(&directory)?;
             }
-            if nested_runtime_exists(&directory, require_trusted_paths)? {
+            if hwcap_runtime_exists(&directory, require_trusted_paths)? {
                 return None;
             }
             let mut candidate = directory.join(ROCR_SONAME);
@@ -311,34 +321,57 @@ fn direct_runpath_runtime(
     None
 }
 
-fn nested_runtime_exists(directory: &Path, require_trusted_paths: bool) -> Option<bool> {
-    let mut pending = vec![(directory.to_path_buf(), 0_u8)];
-    let mut visited = BTreeSet::new();
-    let mut entries = 0_usize;
-    while let Some((directory, depth)) = pending.pop() {
-        let canonical = std::fs::canonicalize(&directory).ok()?;
-        if !visited.insert(canonical) {
+fn expand_origin(directory: &str, origin: &str) -> String {
+    let directory = directory.replace("${ORIGIN}", origin);
+    let mut expanded = String::with_capacity(directory.len());
+    let mut rest = directory.as_str();
+    while let Some(at) = rest.find("$ORIGIN") {
+        expanded.push_str(&rest[..at]);
+        let after = &rest[at + "$ORIGIN".len()..];
+        if after
+            .as_bytes()
+            .first()
+            .is_none_or(|byte| !byte.is_ascii_alphanumeric() && *byte != b'_')
+        {
+            expanded.push_str(origin);
+        } else {
+            expanded.push_str("$ORIGIN");
+        }
+        rest = after;
+    }
+    expanded.push_str(rest);
+    expanded
+}
+
+fn hwcap_runtime_exists(directory: &Path, require_trusted_paths: bool) -> Option<bool> {
+    // Modern glibc augments one RUNPATH directory with candidates at
+    // `<dir>/glibc-hwcaps/<level>`. It does not recursively search every
+    // directory below `<dir>`: walking ordinary ROCm asset trees such as
+    // hipblaslt/library and rocblas/library both invents candidates the
+    // loader cannot select and can exhaust any bounded walk before the
+    // real runtime is considered.
+    let mut hwcaps = directory.join("glibc-hwcaps");
+    if !hwcaps.exists() {
+        return Some(false);
+    }
+    if require_trusted_paths {
+        hwcaps = trusted_system_directory(&hwcaps)?;
+    }
+    for entry in std::fs::read_dir(hwcaps).ok()? {
+        let entry = entry.ok()?;
+        let mut path = entry.path();
+        if !path.is_dir() {
             continue;
         }
-        for entry in std::fs::read_dir(directory).ok()? {
-            let entry = entry.ok()?;
-            entries += 1;
-            if entries > 4096 {
-                return None;
+        if require_trusted_paths {
+            path = trusted_system_directory(&path)?;
+        }
+        let runtime = path.join(ROCR_SONAME);
+        if runtime.is_file() {
+            if require_trusted_paths {
+                trusted_system_file(&runtime)?;
             }
-            let path = entry.path();
-            if depth > 0 && path.is_file() && entry.file_name() == OsStr::new(ROCR_SONAME) {
-                if require_trusted_paths {
-                    trusted_system_file(&path)?;
-                }
-                return Some(true);
-            }
-            if path.is_dir() && depth < 4 {
-                if require_trusted_paths {
-                    trusted_system_directory(&path)?;
-                }
-                pending.push((path, depth + 1));
-            }
+            return Some(true);
         }
     }
     Some(false)
@@ -754,10 +787,10 @@ mod tests {
         let runnable = runnable_dir.join("workload");
         std::fs::write(&blocked, b"not executable").unwrap();
         std::fs::write(&runnable, b"executable").unwrap();
-        // The group execute bit is set, but the file's owner is this
-        // process and the owner execute bit is not. A raw mode-bit check
-        // would accept it even though execvp gets EACCES.
-        std::fs::set_permissions(&blocked, std::fs::Permissions::from_mode(0o410)).unwrap();
+        // No execute bit is set, so both ordinary users and UID 0 reject
+        // the candidate. Root treats any execute bit as sufficient for
+        // X_OK, unlike the owner/group selection an ordinary user gets.
+        std::fs::set_permissions(&blocked, std::fs::Permissions::from_mode(0o400)).unwrap();
         std::fs::set_permissions(&runnable, std::fs::Permissions::from_mode(0o755)).unwrap();
 
         let env = [(
@@ -860,11 +893,48 @@ mod tests {
         let workload_image = std::fs::read(&workload).unwrap();
         assert_eq!(
             direct_runpath_runtime(&workload, &workload_image, false),
-            Some(runtime.canonicalize().unwrap())
+            None,
+            "the linker's propagated DT_DEPAUDIT must suppress the verdict"
         );
         assert!(
             !marker.exists(),
             "static dependency analysis must not load an audit module"
+        );
+
+        let built_runtime = Command::new("cc")
+            .args(["-shared", "-fPIC"])
+            .arg(&runtime_source)
+            .arg(format!("-Wl,-soname,{ROCR_SONAME}"))
+            .arg("-o")
+            .arg(&runtime)
+            .status()
+            .unwrap();
+        assert!(built_runtime.success(), "linking the clean runtime");
+        let built_workload = Command::new("cc")
+            .arg(&workload_source)
+            .arg("-L")
+            .arg(tmp.path())
+            .arg(format!("-l:{ROCR_SONAME}"))
+            .arg("-Wl,--enable-new-dtags")
+            .arg("-Wl,-rpath,$ORIGIN")
+            .arg("-o")
+            .arg(&workload)
+            .status()
+            .unwrap();
+        assert!(built_workload.success(), "linking the clean workload");
+        let workload_image = std::fs::read(&workload).unwrap();
+        assert_eq!(
+            direct_runpath_runtime(&workload, &workload_image, false),
+            Some(runtime.canonicalize().unwrap())
+        );
+
+        let unrelated = tmp.path().join("hipblaslt").join("library");
+        std::fs::create_dir_all(&unrelated).unwrap();
+        std::os::unix::fs::symlink(&runtime, unrelated.join(ROCR_SONAME)).unwrap();
+        assert_eq!(
+            direct_runpath_runtime(&workload, &workload_image, false),
+            Some(runtime.canonicalize().unwrap()),
+            "a library below an unrelated asset directory is not a loader alternative"
         );
 
         let hwcap = tmp.path().join("glibc-hwcaps").join("x86-64-v3");
@@ -874,6 +944,48 @@ mod tests {
             direct_runpath_runtime(&workload, &workload_image, false),
             None,
             "a symlinked hardware-capability alternative makes the selected runtime ambiguous"
+        );
+        std::fs::remove_dir_all(tmp.path().join("glibc-hwcaps")).unwrap();
+
+        for tag in ["--audit", "--depaudit"] {
+            let audited_workload = tmp
+                .path()
+                .join(format!("workload-{}", tag.trim_start_matches("--")));
+            let built_workload = Command::new("cc")
+                .arg(&workload_source)
+                .arg("-L")
+                .arg(tmp.path())
+                .arg(format!("-l:{ROCR_SONAME}"))
+                .arg("-Wl,--enable-new-dtags")
+                .arg("-Wl,-rpath,$ORIGIN")
+                .arg(format!("-Wl,{tag},{}", audit.display()))
+                .arg("-o")
+                .arg(&audited_workload)
+                .status()
+                .unwrap();
+            assert!(built_workload.success(), "linking an executable with {tag}");
+            assert_eq!(
+                direct_runpath_runtime(
+                    &audited_workload,
+                    &std::fs::read(&audited_workload).unwrap(),
+                    false
+                ),
+                None,
+                "{tag} can redirect the runtime lookup and must suppress a verdict"
+            );
+        }
+    }
+
+    #[test]
+    fn only_complete_origin_tokens_are_expanded() {
+        assert_eq!(expand_origin("$ORIGIN/lib", "/opt/app"), "/opt/app/lib");
+        assert_eq!(
+            expand_origin("${ORIGIN}_extra", "/opt/app"),
+            "/opt/app_extra"
+        );
+        assert_eq!(
+            expand_origin("$ORIGIN_extra:/opt/rocm/lib", "/opt/app"),
+            "$ORIGIN_extra:/opt/rocm/lib"
         );
     }
 
