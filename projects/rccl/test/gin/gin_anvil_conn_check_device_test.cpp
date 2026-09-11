@@ -43,36 +43,37 @@ class GinAnvilConnCheckDeviceTest : public ::testing::Test {
   std::vector<void*> allocations_;
 };
 
-TEST_F(GinAnvilConnCheckDeviceTest, WritesAndVerifiesEverySourceSlot) {
+TEST_F(GinAnvilConnCheckDeviceTest, WritesSelfRankSlotOnEveryPeer) {
   constexpr int kRanks = 2;
   constexpr unsigned long long kStamp = 0xC0FFEE01ULL;
-  uint64_t* signals = nullptr;
+  uint64_t* peer0Signals = nullptr;
+  uint64_t* peer1Signals = nullptr;
   uintptr_t* remoteAddrs = nullptr;
-  int* missing = nullptr;
 
   ASSERT_EQ(CreateStream(), hipSuccess);
-  ASSERT_EQ(Allocate(&signals, kRanks), hipSuccess);
+  ASSERT_EQ(Allocate(&peer0Signals, kRanks), hipSuccess);
+  ASSERT_EQ(Allocate(&peer1Signals, kRanks), hipSuccess);
   ASSERT_EQ(Allocate(&remoteAddrs, kRanks), hipSuccess);
-  ASSERT_EQ(Allocate(&missing, kRanks), hipSuccess);
-  ASSERT_EQ(hipMemsetAsync(signals, 0, sizeof(uint64_t) * kRanks, stream_), hipSuccess);
+  ASSERT_EQ(hipMemsetAsync(peer0Signals, 0, sizeof(uint64_t) * kRanks, stream_), hipSuccess);
+  ASSERT_EQ(hipMemsetAsync(peer1Signals, 0, sizeof(uint64_t) * kRanks, stream_), hipSuccess);
 
   const uintptr_t hostAddrs[kRanks] = {
-      reinterpret_cast<uintptr_t>(signals), reinterpret_cast<uintptr_t>(signals)};
+      reinterpret_cast<uintptr_t>(peer0Signals), reinterpret_cast<uintptr_t>(peer1Signals)};
   ASSERT_EQ(hipMemcpyAsync(remoteAddrs, hostAddrs, sizeof(hostAddrs), hipMemcpyHostToDevice, stream_),
             hipSuccess);
 
-  for (int source = 0; source < kRanks; ++source) {
-    ASSERT_EQ(ginAnvilConnWrite(remoteAddrs, kRanks, source, kStamp, stream_), 0);
-  }
-  ASSERT_EQ(ginAnvilConnCheck(signals, kRanks, kStamp, missing, stream_), 0);
-
-  std::vector<int> hostMissing(kRanks, -1);
-  ASSERT_EQ(hipMemcpyAsync(hostMissing.data(), missing, sizeof(int) * kRanks,
-                          hipMemcpyDeviceToHost, stream_),
+  ASSERT_EQ(ginAnvilConnWrite(remoteAddrs, kRanks, 0, kStamp, stream_), 0);
+  uint64_t peer0Host[kRanks] = {};
+  uint64_t peer1Host[kRanks] = {};
+  ASSERT_EQ(hipMemcpyAsync(peer0Host, peer0Signals, sizeof(peer0Host), hipMemcpyDeviceToHost, stream_),
+            hipSuccess);
+  ASSERT_EQ(hipMemcpyAsync(peer1Host, peer1Signals, sizeof(peer1Host), hipMemcpyDeviceToHost, stream_),
             hipSuccess);
   ASSERT_EQ(hipStreamSynchronize(stream_), hipSuccess);
-  EXPECT_EQ(hostMissing[0], 0);
-  EXPECT_EQ(hostMissing[1], 0);
+  EXPECT_EQ(peer0Host[0], kStamp);
+  EXPECT_EQ(peer0Host[1], 0);
+  EXPECT_EQ(peer1Host[0], kStamp);
+  EXPECT_EQ(peer1Host[1], 0);
 }
 
 TEST_F(GinAnvilConnCheckDeviceTest, ReportsAnUnwrittenSourceSlot) {

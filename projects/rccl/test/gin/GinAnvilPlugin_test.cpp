@@ -458,6 +458,31 @@ TEST_F(GinAnvilPluginTest, ConnCheck_SkippedWhenLsaSizeMismatch) {
   void* coll = nullptr;
   connectColl(ictx, &coll, 2);
   ncclGinConfig_t cfg{};
+  cfg.nSignals = 2;
+  void* ginCtx = nullptr;
+  ncclNetDeviceHandle_v11_t* devHandle = nullptr;
+  ASSERT_EQ(plugin_.createContext(coll, &cfg, &ginCtx, &devHandle), ncclSuccess);
+
+  char arena[4096] = {};
+  EXPECT_EQ(ncclGinAnvilBindResourceWindowSignals(mockComm_.get(), arena, 0, 1, 2), ncclSuccess);
+  EXPECT_EQ(GinAnvilPluginStubs::GetConnCheckWriteCalls(), 0);
+  EXPECT_EQ(GinAnvilPluginStubs::GetConnCheckVerifyCalls(), 0);
+
+  plugin_.destroyContext(ginCtx);
+  plugin_.closeColl(coll);
+  plugin_.finalize(ictx);
+}
+
+// Conn-check also skips independently when its rank-indexed probe would exceed
+// the signal slot.
+TEST_F(GinAnvilPluginTest, ConnCheck_SkippedWhenSignalSlotTooSmall) {
+  GinAnvilPluginStubs::SetBootstrapNranks(2);
+  mockComm_.get()->devrState.lsaSize = 2;
+  void* ictx = nullptr;
+  initCtx(&ictx);
+  void* coll = nullptr;
+  connectColl(ictx, &coll, 2);
+  ncclGinConfig_t cfg{};
   cfg.nSignals = 1;
   void* ginCtx = nullptr;
   ncclNetDeviceHandle_v11_t* devHandle = nullptr;
@@ -484,7 +509,6 @@ TEST_F(GinAnvilPluginTest, ConnCheck_InjectFailRankAbortsBind) {
   ScopedEnv inj("NCCL_GIN_ANVIL_SDMA_CONN_INJECT_FAIL_RANK", "0");
   GinAnvilPluginStubs::SetBootstrapNranks(2);
   mockComm_.get()->devrState.lsaSize = 2;
-  mockComm_.get()->rank = 0;
   void* ictx = nullptr;
   initCtx(&ictx);
   void* coll = nullptr;
@@ -531,6 +555,32 @@ TEST_F(GinAnvilPluginTest, ConnCheck_EnvBypassSkipsGate) {
   plugin_.finalize(ictx);
 }
 
+TEST_F(GinAnvilPluginTest, ConnCheck_InconsistentEnvBypassFailsCollectively) {
+  ScopedEnv bypass("NCCL_GIN_ANVIL_SDMA_CONN_CHECK", "0");
+  GinAnvilPluginStubs::SetBootstrapNranks(2);
+  mockComm_.get()->devrState.lsaSize = 2;
+  void* ictx = nullptr;
+  initCtx(&ictx);
+  void* coll = nullptr;
+  connectColl(ictx, &coll, 2);
+  ncclGinConfig_t cfg{};
+  cfg.nSignals = 2;
+  void* ginCtx = nullptr;
+  ncclNetDeviceHandle_v11_t* devHandle = nullptr;
+  ASSERT_EQ(plugin_.createContext(coll, &cfg, &ginCtx, &devHandle), ncclSuccess);
+
+  const int setupStates[2] = {1, 0};
+  GinAnvilPluginStubs::SetBootstrapIntResult(setupStates, 2);
+  char arena[4096] = {};
+  EXPECT_EQ(ncclGinAnvilBindResourceWindowSignals(mockComm_.get(), arena, 0, 1, 2), ncclSystemError);
+  EXPECT_EQ(GinAnvilPluginStubs::GetConnCheckWriteCalls(), 0);
+  EXPECT_EQ(GinAnvilPluginStubs::GetConnCheckVerifyCalls(), 0);
+
+  plugin_.destroyContext(ginCtx);
+  plugin_.closeColl(coll);
+  plugin_.finalize(ictx);
+}
+
 // G23: healthy connectivity traverses the gate and succeeds.
 TEST_F(GinAnvilPluginTest, ConnCheck_HealthyConnectivitySucceeds) {
   void* rawDevLsa = nullptr;
@@ -558,6 +608,82 @@ TEST_F(GinAnvilPluginTest, ConnCheck_HealthyConnectivitySucceeds) {
   plugin_.destroyContext(ginCtx);
   plugin_.closeColl(coll);
   plugin_.finalize(ictx);
+}
+
+TEST_F(GinAnvilPluginTest, ConnCheck_NonNumericEnvValueKeepsGateEnabled) {
+  ScopedEnv enabled("NCCL_GIN_ANVIL_SDMA_CONN_CHECK", "true");
+  void* rawDevLsa = nullptr;
+  ASSERT_EQ(hipMalloc(&rawDevLsa, sizeof(uint64_t) * 2), hipSuccess);
+  HipAllocation devLsa(rawDevLsa);
+  GinAnvilPluginStubs::SetLsaSelfAddr(devLsa.get());
+  GinAnvilPluginStubs::SetBootstrapNranks(2);
+  mockComm_.get()->devrState.lsaSize = 2;
+
+  void* ictx = nullptr;
+  initCtx(&ictx);
+  void* coll = nullptr;
+  connectColl(ictx, &coll, 2);
+  ncclGinConfig_t cfg{};
+  cfg.nSignals = 2;
+  void* ginCtx = nullptr;
+  ncclNetDeviceHandle_v11_t* devHandle = nullptr;
+  ASSERT_EQ(plugin_.createContext(coll, &cfg, &ginCtx, &devHandle), ncclSuccess);
+
+  char arena[4096] = {};
+  EXPECT_EQ(ncclGinAnvilBindResourceWindowSignals(mockComm_.get(), arena, 0, 1, 2), ncclSuccess);
+  EXPECT_EQ(GinAnvilPluginStubs::GetConnCheckWriteCalls(), 1);
+  EXPECT_EQ(GinAnvilPluginStubs::GetConnCheckVerifyCalls(), 1);
+
+  plugin_.destroyContext(ginCtx);
+  plugin_.closeColl(coll);
+  plugin_.finalize(ictx);
+}
+
+TEST_F(GinAnvilPluginTest, ConnCheck_DedupUsesCommObjectNotSharedHash) {
+  GinAnvilPluginStubs::SetBootstrapNranks(2);
+  GinAnvilMockComm secondComm;
+  secondComm.comm.commHash = mockComm_.get()->commHash;
+
+  void* rawFirstLsa = nullptr;
+  void* rawSecondLsa = nullptr;
+  ASSERT_EQ(hipMalloc(&rawFirstLsa, sizeof(uint64_t) * 2), hipSuccess);
+  ASSERT_EQ(hipMalloc(&rawSecondLsa, sizeof(uint64_t) * 2), hipSuccess);
+  HipAllocation firstLsa(rawFirstLsa);
+  HipAllocation secondLsa(rawSecondLsa);
+
+  void* firstInit = nullptr;
+  initCtx(&firstInit);
+  void* firstColl = nullptr;
+  connectColl(firstInit, &firstColl, 2);
+  ncclGinConfig_t cfg{};
+  cfg.nSignals = 2;
+  void* firstGin = nullptr;
+  ncclNetDeviceHandle_v11_t* firstHandle = nullptr;
+  ASSERT_EQ(plugin_.createContext(firstColl, &cfg, &firstGin, &firstHandle), ncclSuccess);
+  GinAnvilPluginStubs::SetLsaSelfAddr(firstLsa.get());
+  char firstArena[4096] = {};
+  ASSERT_EQ(ncclGinAnvilBindResourceWindowSignals(mockComm_.get(), firstArena, 0, 1, 2), ncclSuccess);
+
+  void* secondInit = nullptr;
+  ASSERT_EQ(plugin_.init(&secondInit, 0, nullptr), ncclSuccess);
+  ncclGinAnvilSetInitContext(secondInit, secondComm.get());
+  void* secondColl = nullptr;
+  connectColl(secondInit, &secondColl, 2);
+  void* secondGin = nullptr;
+  ncclNetDeviceHandle_v11_t* secondHandle = nullptr;
+  ASSERT_EQ(plugin_.createContext(secondColl, &cfg, &secondGin, &secondHandle), ncclSuccess);
+  GinAnvilPluginStubs::SetLsaSelfAddr(secondLsa.get());
+  char secondArena[4096] = {};
+  EXPECT_EQ(ncclGinAnvilBindResourceWindowSignals(secondComm.get(), secondArena, 0, 1, 2), ncclSuccess);
+  EXPECT_EQ(GinAnvilPluginStubs::GetConnCheckWriteCalls(), 2);
+  EXPECT_EQ(GinAnvilPluginStubs::GetConnCheckVerifyCalls(), 2);
+
+  plugin_.destroyContext(firstGin);
+  plugin_.destroyContext(secondGin);
+  plugin_.closeColl(firstColl);
+  plugin_.closeColl(secondColl);
+  plugin_.finalize(firstInit);
+  plugin_.finalize(secondInit);
 }
 
 // G24: a transient miss retries with a new stamp and then succeeds.

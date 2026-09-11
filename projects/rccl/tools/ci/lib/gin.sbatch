@@ -247,8 +247,6 @@ fi
 test_rc=0
 {
 echo "==> [6/6] run GIN tests"
-"${rccl_conn_plugin_bin}" --gtest_filter='*ConnCheck*'
-"${rccl_conn_device_bin}"
 "${ci_dir}/run-gin-ci.sh"
 } > "${test_out}" 2> "${test_err}" || test_rc=$?
 echo "==> test phase logs: ${test_out} / ${test_err}"
