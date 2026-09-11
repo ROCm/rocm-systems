@@ -36,23 +36,23 @@ Panel Config:
           avg: AVG(SPI_RA_REQ_ALLOC_sum)
           min: MIN(SPI_RA_REQ_ALLOC_sum)
           max: MAX(SPI_RA_REQ_ALLOC_sum)
-          unit: Count
+          unit: Workgroups
         # SPI_CSN_WAVE_* reads CS0-only (DEBUG_PIPE_SEL); compute uses SPI_ALL_WAVE.
         Dispatched Wavefronts:
           avg: AVG(SPI_ALL_WAVE_sum)
           min: MIN(SPI_ALL_WAVE_sum)
           max: MAX(SPI_ALL_WAVE_sum)
-          unit: Count
+          unit: Wavefronts
         Dispatched Clusters:
           avg: AVG(SPI_CSN_NUM_CLUSTERS_sum)
           min: MIN(SPI_CSN_NUM_CLUSTERS_sum)
           max: MAX(SPI_CSN_NUM_CLUSTERS_sum)
-          unit: Count
+          unit: Clusters
         Dispatched Group-of-Groups:
           avg: AVG(SPI_CSN_NUM_GROUPS_OF_GROUPS_sum)
           min: MIN(SPI_CSN_NUM_GROUPS_OF_GROUPS_sum)
           max: MAX(SPI_CSN_NUM_GROUPS_OF_GROUPS_sum)
-          unit: Count
+          unit: Group-of-Groups
         Wavefront Dispatch Rate:
           avg: SUM(SPI_ALL_WAVE_sum) / SUM(SPI_BUSY_sum)
           min: MIN(SPI_ALL_WAVE_sum / SPI_BUSY_sum)
@@ -159,22 +159,22 @@ Panel Config:
           avg: SUM(SPI_CSQ_P0_Q0_OCCUPANCY_sum) / SUM(SPI_BUSY_sum)
           min: MIN(SPI_CSQ_P0_Q0_OCCUPANCY_sum / SPI_BUSY_sum)
           max: MAX(SPI_CSQ_P0_Q0_OCCUPANCY_sum / SPI_BUSY_sum)
-          unit: Count
+          unit: Requests
         Per-Queue Outstanding Dispatch Requests (P0_Q1_sum):
           avg: SUM(SPI_CSQ_P0_Q1_OCCUPANCY_sum) / SUM(SPI_BUSY_sum)
           min: MIN(SPI_CSQ_P0_Q1_OCCUPANCY_sum / SPI_BUSY_sum)
           max: MAX(SPI_CSQ_P0_Q1_OCCUPANCY_sum / SPI_BUSY_sum)
-          unit: Count
+          unit: Requests
         Per-Queue Outstanding Dispatch Requests (P1_Q0_sum):
           avg: SUM(SPI_CSQ_P1_Q0_OCCUPANCY_sum) / SUM(SPI_BUSY_sum)
           min: MIN(SPI_CSQ_P1_Q0_OCCUPANCY_sum / SPI_BUSY_sum)
           max: MAX(SPI_CSQ_P1_Q0_OCCUPANCY_sum / SPI_BUSY_sum)
-          unit: Count
+          unit: Requests
         Per-Queue Outstanding Dispatch Requests (P1_Q1_sum):
           avg: SUM(SPI_CSQ_P1_Q1_OCCUPANCY_sum) / SUM(SPI_BUSY_sum)
           min: MIN(SPI_CSQ_P1_Q1_OCCUPANCY_sum / SPI_BUSY_sum)
           max: MAX(SPI_CSQ_P1_Q1_OCCUPANCY_sum / SPI_BUSY_sum)
-          unit: Count
+          unit: Requests
         CPC Pre-Alloc Request Stall Rate:
           avg: 100 * SUM(SPI_RA_PRE_ALLOC_STALL_sum) / SUM(SPI_BUSY_sum)
           min: 100 * MIN(SPI_RA_PRE_ALLOC_STALL_sum / SPI_BUSY_sum)
