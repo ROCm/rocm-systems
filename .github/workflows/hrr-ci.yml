@@ -261,7 +261,16 @@ jobs:
           # devel as well as libraries: rocm-sdk init refuses to run without it.
           python -m pip install --no-cache-dir \
             --index-url "${ROCM_INDEX_URL}" "rocm[libraries,devel]"
-          python "$(command -v rocm-sdk)" init
+          # Run as a module where possible. Falling back to the script means
+          # locating it: some of these machines install into a --user bin that
+          # is not on PATH, leaving command -v empty.
+          if ! python -m rocm_sdk init; then
+            cli="$(command -v rocm-sdk || true)"
+            if [ -z "${cli}" ]; then
+              cli="$(python -c 'import site;print(site.USER_BASE)')/bin/rocm-sdk"
+            fi
+            python "${cli}" init
+          fi
           echo "ROCM_SDK=$(python -c 'import _rocm_sdk_devel,os;print(os.path.dirname(_rocm_sdk_devel.__file__))')" >> "$GITHUB_ENV"
 
       # Unpacked under build/ so the tree matches the build machine's layout.

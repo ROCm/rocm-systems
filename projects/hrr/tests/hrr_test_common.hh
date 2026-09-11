@@ -41,6 +41,7 @@
 #include <map>
 #include <set>
 #include <sstream>
+#include <system_error>
 #include <string>
 #include <utility>
 #include <vector>
@@ -249,6 +250,26 @@ inline void hrr_run_playback(const fs::path& cap_path,
 
 #if defined(HRR_TEST_EXE)
 // ---------------------------------------------------------------------------
+// Helper: path to this test binary, for the spawns below.
+//
+// CMake bakes HRR_TEST_EXE in as an absolute path into the build tree, which is
+// correct for a normal in-tree run but wrong wherever the binary is used
+// somewhere else: CI builds once and unpacks the artifact on test machines
+// whose workspace root differs, and there every spawn dies in execvp. Prefer
+// the baked path and fall back to this process's own image, which is the same
+// binary the macro was naming.
+// ---------------------------------------------------------------------------
+inline std::string hrr_test_exe() {
+  std::error_code ec;
+  if (fs::exists(HRR_TEST_EXE, ec)) return HRR_TEST_EXE;
+#ifndef _WIN32
+  const fs::path self = fs::read_symlink("/proc/self/exe", ec);
+  if (!ec && !self.empty()) return self.string();
+#endif
+  return HRR_TEST_EXE;
+}
+
+// ---------------------------------------------------------------------------
 // Helper: shared roundtrip body — capture → verify archive → playback.
 //
 // min_events:  minimum number of events expected in events.bin.  Every workload
@@ -263,7 +284,7 @@ inline void hrr_run_roundtrip(const std::string& direct_case,
                               const fs::path& cap_path,
                               size_t min_events = 5,
                               bool require_d2h = true) {
-  { hrr::test::SpawnProc proc(HRR_TEST_EXE);
+  { hrr::test::SpawnProc proc(hrr_test_exe());
     proc.setEnv("HIP_HRR_CAPTURE_OUTPUT", cap_path.string());
     { set_proc_search_path(proc); }
     int ret = proc.run("\"" + direct_case + "\"");
@@ -305,7 +326,7 @@ inline void hrr_run_roundtrip(const std::string& direct_case,
 inline void hrr_capture_direct(const std::string& direct_case,
                                const fs::path& cap_path,
                                size_t min_events = 5) {
-  { hrr::test::SpawnProc proc(HRR_TEST_EXE);
+  { hrr::test::SpawnProc proc(hrr_test_exe());
     proc.setEnv("HIP_HRR_CAPTURE_OUTPUT", cap_path.string());
     { set_proc_search_path(proc); }
     int ret = proc.run("\"" + direct_case + "\"");
