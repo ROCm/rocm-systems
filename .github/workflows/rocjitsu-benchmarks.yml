@@ -1,0 +1,272 @@
+name: "rocjitsu-benchmarks"
+
+on:
+  push:
+    branches:
+      - "develop"
+  workflow_dispatch:
+
+# Each job grants only the access it needs.
+permissions: {}
+
+env:
+  ROCJITSU_SOURCE_DIR: ${{ github.workspace }}/rocm-systems/emulation/rocjitsu
+  CORPUS_SOURCE_DIR: ${{ github.workspace }}/rocjitsu-test-corpus
+  ROCJITSU_BUILD_DIR: ${{ github.workspace }}/build
+  ROCJITSU_VENV: ${{ github.workspace }}/benchmark-venv
+  ROCJITSU_RESULT_DIR: ${{ github.workspace }}/benchmark-results
+  RESULTS_BRANCH: shared/rocjitsu-benchmark-results
+  RESULTS_ARTIFACT: rocjitsu-benchmark-${{ github.run_id }}-${{ github.run_attempt }}
+
+jobs:
+  benchmark:
+    name: Run nightly benchmark
+    runs-on: rocjitsu-benchmark
+    timeout-minutes: 210
+    permissions:
+      contents: read
+    outputs:
+      corpus-sha: ${{ steps.corpus.outputs.sha }}
+      machine: ${{ steps.corpus.outputs.machine }}
+      ran: ${{ steps.benchmark.outcome == 'success' || steps.benchmark.outcome == 'failure' }}
+    container:
+      image: ghcr.io/rocm/no_rocm_image_ubuntu24_04@sha256:4150afe4759d14822f0e3f8930e1124f26e11f68b5c7b91ec9a02b20b1ebbb98
+      options: --user 0:0
+      env:
+        DEBIAN_FRONTEND: noninteractive
+
+    steps:
+      - name: Report runner CPU resources
+        shell: bash
+        run: |
+          echo "logical_cpus=$(nproc)"
+          lscpu
+          for RESOURCE in /sys/fs/cgroup/cpu.max /sys/fs/cgroup/cpuset.cpus.effective; do
+            if [[ -r "${RESOURCE}" ]]; then
+              echo "${RESOURCE}: $(<"${RESOURCE}")"
+            fi
+          done
+
+      - name: Install base dependencies
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends \
+            build-essential \
+            ca-certificates \
+            clang \
+            cmake \
+            git \
+            libclang-rt-dev \
+            libdrm-dev \
+            ninja-build
+
+      - name: Checkout rocm-systems
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          path: rocm-systems
+
+      - name: Checkout benchmark corpus
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          repository: ROCm/rocjitsu-test-corpus
+          ref: 29d257508afdbcdebdc1f85339b67692bfdae705
+          path: rocjitsu-test-corpus
+          persist-credentials: false
+
+      - name: Record corpus revision
+        id: corpus
+        shell: bash
+        run: |
+          echo "sha=$(git -C "${CORPUS_SOURCE_DIR}" rev-parse HEAD)" >> "${GITHUB_OUTPUT}"
+          echo "machine=${RUNNER_NAME}" >> "${GITHUB_OUTPUT}"
+
+      - name: Set up Python
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        with:
+          python-version: "3.12"
+
+      - name: Install benchmark dependencies
+        shell: bash
+        run: |
+          python -m venv "${ROCJITSU_VENV}"
+          "${ROCJITSU_VENV}/bin/python" -m pip install \
+            --disable-pip-version-check \
+            -r "${CORPUS_SOURCE_DIR}/benchmarks/requirements.txt"
+
+          ROCM_PATH="$("${ROCJITSU_VENV}/bin/rocm-sdk" path --root)"
+          echo "ROCM_PATH=${ROCM_PATH}" >> "${GITHUB_ENV}"
+          echo "LD_LIBRARY_PATH=${ROCM_PATH}/lib:${LD_LIBRARY_PATH:-}" >> "${GITHUB_ENV}"
+
+      - name: Test benchmark harness
+        working-directory: ${{ env.CORPUS_SOURCE_DIR }}
+        run: '"${ROCJITSU_VENV}/bin/python" -m unittest discover -s benchmarks/tests -v'
+
+      - name: Build rocjitsu and plugins
+        shell: bash
+        run: |
+          cmake -S "${ROCJITSU_SOURCE_DIR}" -B "${ROCJITSU_BUILD_DIR}" -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DBUILD_TESTING=ON \
+            -DLTO=OFF \
+            -DRJ_ENABLE_ASAN=OFF \
+            -DRJ_ENABLE_MSAN=OFF \
+            -DRJ_ENABLE_TSAN=OFF \
+            -DRJ_ENABLE_UBSAN=OFF \
+            -DROCM_PATH="${ROCM_PATH}" \
+            -DPython3_EXECUTABLE="${ROCJITSU_VENV}/bin/python"
+          cmake --build "${ROCJITSU_BUILD_DIR}" \
+            --target rocjitsu_bin rocjitsu_shared \
+              rocjitsu_plugin_logging_so rocjitsu_plugin_race_so rocjitsu_plugin_throughput_so
+
+      - name: Run nightly suite
+        timeout-minutes: 30
+        id: benchmark
+        working-directory: ${{ env.CORPUS_SOURCE_DIR }}
+        shell: bash
+        run: |
+          "${ROCJITSU_VENV}/bin/python" -m benchmarks.runner \
+            --rocjitsu-source-dir "${ROCJITSU_SOURCE_DIR}" \
+            --build-dir "${ROCJITSU_BUILD_DIR}" \
+            --manifest benchmarks/suites/nightly.toml \
+            --output "${ROCJITSU_RESULT_DIR}"
+
+      - name: Record workflow diagnostics
+        if: always()
+        shell: bash
+        run: |
+          mkdir -p "${ROCJITSU_RESULT_DIR}"
+          printf '%s\n' \
+            "benchmark_outcome=${{ steps.benchmark.outcome }}" \
+            "event=${GITHUB_EVENT_NAME}" \
+            "ref=${GITHUB_REF}" \
+            "sha=${GITHUB_SHA}" \
+            "run_id=${GITHUB_RUN_ID}" \
+            "run_attempt=${GITHUB_RUN_ATTEMPT}" \
+            > "${ROCJITSU_RESULT_DIR}/workflow.txt"
+
+      - name: Upload benchmark diagnostics
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ${{ env.RESULTS_ARTIFACT }}
+          path: |
+            ${{ env.ROCJITSU_RESULT_DIR }}/run.json
+            ${{ env.ROCJITSU_RESULT_DIR }}/cases
+            ${{ env.ROCJITSU_RESULT_DIR }}/workflow.txt
+          if-no-files-found: error
+          retention-days: 14
+
+  publish:
+    name: Publish dashboard data
+    needs: benchmark
+    if: ${{ !cancelled() && github.ref == 'refs/heads/develop' && needs.benchmark.outputs.ran == 'true' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: write
+    env:
+      CORPUS_SHA: ${{ needs.benchmark.outputs.corpus-sha }}
+      BENCHMARK_MACHINE: ${{ needs.benchmark.outputs.machine }}
+
+    steps:
+      - name: Download benchmark diagnostics
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: ${{ env.RESULTS_ARTIFACT }}
+          path: incoming
+
+      - name: Checkout publisher corpus
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          repository: ROCm/rocjitsu-test-corpus
+          ref: ${{ needs.benchmark.outputs.corpus-sha }}
+          path: rocjitsu-test-corpus
+          persist-credentials: false
+
+      - name: Checkout repository for publication
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          path: publication
+          fetch-depth: 1
+
+      - name: Set up publisher Python
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        with:
+          python-version: "3.12"
+
+      - name: Publish dashboard-ready result
+        working-directory: publication
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          RUN_ID="github-${GITHUB_RUN_ID}-attempt-${GITHUB_RUN_ATTEMPT}"
+          TRIGGER=auto
+          if [[ "${GITHUB_EVENT_NAME}" == "workflow_dispatch" ]]; then
+            TRIGGER=manual
+          fi
+          # Read metadata before switching this checkout to the results branch.
+          COMMIT_MESSAGE="$(git show -s --format=%s "${GITHUB_SHA}")"
+
+          MAX_ATTEMPTS=20
+          for ATTEMPT in $(seq 1 "${MAX_ATTEMPTS}"); do
+            # Reconstruct every attempt from the latest results branch instead
+            # of rebasing a commit containing a stale generated index.
+            git reset --hard HEAD || true
+            git clean -ffd
+
+            set +e
+            git ls-remote --exit-code --heads origin \
+              "refs/heads/${RESULTS_BRANCH}" >/dev/null
+            REMOTE_STATUS=$?
+            set -e
+            if [[ "${REMOTE_STATUS}" == 0 ]]; then
+              git fetch --no-tags origin \
+                "+refs/heads/${RESULTS_BRANCH}:refs/remotes/origin/${RESULTS_BRANCH}"
+              git switch --detach "refs/remotes/origin/${RESULTS_BRANCH}"
+            elif [[ "${REMOTE_STATUS}" == 2 ]]; then
+              git switch --orphan \
+                "publish-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-${ATTEMPT}"
+              git rm -rf --ignore-unmatch .
+            else
+              exit "${REMOTE_STATUS}"
+            fi
+
+            (
+              cd "${CORPUS_SOURCE_DIR}"
+              python -m benchmarks.dashboard_publish \
+                --raw-run "${GITHUB_WORKSPACE}/incoming/run.json" \
+                --data-dir "${GITHUB_WORKSPACE}/publication/data" \
+                --run-id "${RUN_ID}" \
+                --repository "https://github.com/${GITHUB_REPOSITORY}" \
+                --environment-id "rocjitsu-benchmark-u2404-4150afe4-rocm-10.1.0a20260812" \
+                --expected-sha "${GITHUB_SHA}" \
+                --expected-corpus-sha "${CORPUS_SHA}" \
+                --machine-id "${BENCHMARK_MACHINE}" \
+                --trigger "${TRIGGER}" \
+                --branch develop \
+                --commit-message "${COMMIT_MESSAGE}" \
+                --source-ref "${GITHUB_REF_NAME}" \
+                --is-beta
+            )
+
+            git add data
+            if git diff --cached --quiet; then
+              echo "Dashboard run ${RUN_ID} is already published"
+              exit 0
+            fi
+            git commit --signoff \
+              -m "Publish rocjitsu benchmark run ${GITHUB_RUN_ID}.${GITHUB_RUN_ATTEMPT}"
+            if git push origin "HEAD:refs/heads/${RESULTS_BRANCH}"; then
+              exit 0
+            fi
+            if [[ "${ATTEMPT}" == "${MAX_ATTEMPTS}" ]]; then
+              exit 1
+            fi
+            DELAY=$((ATTEMPT * 2))
+            if ((DELAY > 30)); then
+              DELAY=30
+            fi
+            sleep "$((DELAY + RANDOM % 5))"
+          done
