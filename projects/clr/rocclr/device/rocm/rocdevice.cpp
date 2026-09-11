@@ -4235,6 +4235,22 @@ uint32_t Device::SdmaEngineAllocator::AllocateEngine(VirtualGPU* vgpu, HwQueueEn
     status = Hsa::memory_get_preferred_copy_engine(peerAgent, copyAgent, &preferredMask);
   }
 
+  const bool is_inter_gpu = (engine_type == HwQueueEngine::SdmaP2P);
+
+  // maxSdmaWriteMask_ describes CPU<->GPU traffic and includes the H2D/D2H blit
+  // slots, which ROCr refuses to drive a P2P copy on. The engines it does accept
+  // for an inter-GPU copy are the ones reported for the peer direction, so use
+  // those as the valid set instead. That query only lists engines which are idle
+  // at the time of the call, so keep the union per peer to stay correct once all
+  // of them are busy.
+  if (is_inter_gpu) {
+    uint32_t& peer_engine_mask = peer_engine_mask_[peerAgent.handle];
+    peer_engine_mask |= freeEngineMask;
+    if (peer_engine_mask != 0) {
+      validEngineMask = peer_engine_mask;
+    }
+  }
+
   // Constrain to valid engines
   freeEngineMask &= validEngineMask;
   preferredMask &= validEngineMask;
@@ -4248,8 +4264,6 @@ uint32_t Device::SdmaEngineAllocator::AllocateEngine(VirtualGPU* vgpu, HwQueueEn
   uint32_t allocated_mask = 0;
 
   // For inter-GPU copies, strongly prefer the recommended engines
-  bool is_inter_gpu = (engine_type == HwQueueEngine::SdmaP2P);
-
   if (is_inter_gpu && (preferredMask != 0)) {
     // Inter-GPU: prioritize preferredMask, even if engines are already allocated
     candidate_mask = validEngineMask & preferredMask;

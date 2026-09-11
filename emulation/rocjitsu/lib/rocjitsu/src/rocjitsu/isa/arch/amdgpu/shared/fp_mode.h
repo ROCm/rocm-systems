@@ -314,6 +314,27 @@ inline uint16_t fma_f32_to_bf16(float multiplicand, float multiplier, float adde
                                                      clamp, clamp_nan_to_zero);
 }
 
+/// @brief Packed BF16 math always rounds once to nearest-even and preserves denormals.
+inline uint16_t packed_fma_bf16(float a, float b, float c, bool fp16_ovfl) {
+  uint16_t result = fma_f32_to_bf16(a, b, c, 0, false, false);
+  // FP16_OVFL clamps finite-input results that round to BF16 infinity;
+  // infinities supplied as operands retain their normal arithmetic behavior.
+  if (fp16_ovfl && (result & 0x7fffu) == 0x7f80u && std::isfinite(a) && std::isfinite(b) &&
+      std::isfinite(c))
+    result = static_cast<uint16_t>((result & 0x8000u) | 0x7f7fu);
+  return result;
+}
+
+inline uint16_t packed_add_bf16(float a, float b, bool fp16_ovfl) {
+  return packed_fma_bf16(a, 1.0f, b, fp16_ovfl);
+}
+
+inline uint16_t packed_mul_bf16(float a, float b, bool fp16_ovfl) {
+  // An addend with the product's sign preserves a negative zero product.
+  const float zero = std::signbit(a) != std::signbit(b) ? -0.0f : 0.0f;
+  return packed_fma_bf16(a, b, zero, fp16_ovfl);
+}
+
 inline float finalize_omod_f32(float value, uint32_t omod) {
   if (omod == 0)
     return value;

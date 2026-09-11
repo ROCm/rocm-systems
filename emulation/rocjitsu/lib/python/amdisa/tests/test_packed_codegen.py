@@ -198,7 +198,7 @@ def test_pk_f16_binop_narrows_inline_float_constants():
     assert 'encoding_value_' not in cpp
 
 
-def test_pk_bf16_ternary_narrows_inline_float_constants_as_bf16():
+def test_pk_bf16_ternary_preserves_fp32_inline_constants():
     cpp = gen_pk_ternary(
         ['vdst'],
         ['src0', 'src1', 'src2'],
@@ -208,9 +208,24 @@ def test_pk_bf16_ternary_narrows_inline_float_constants_as_bf16():
         opsel_exprs=('inst_.op_sel', 'inst_.op_sel_hi'),
     )
 
-    assert 'raw0 = util::f32_to_bf16(std::bit_cast<float>(raw0));' in cpp
-    assert 'raw2 = util::f32_to_bf16(std::bit_cast<float>(raw2));' in cpp
+    assert 'pk16_src_needs_narrowing' not in cpp
+    assert 'raw0 = util::f32_to_bf16' not in cpp
+    assert 'raw2 = util::f32_to_bf16' not in cpp
     assert 'f32_to_f16' not in cpp
+
+
+def test_pk_bf16_binary_preserves_fp32_inline_constants():
+    for op in ('add', 'mul', 'min', 'max'):
+        cpp = gen_pk_binop(
+            ['vdst'],
+            ['src0', 'src1'],
+            op,
+            'bf16',
+            opsel_exprs=('inst_.opsel', 'inst_.opsel_hi'),
+        )
+        assert 'pk16_src_needs_narrowing' not in cpp
+        assert 'raw0 = util::f32_to_bf16' not in cpp
+        assert 'raw1 = util::f32_to_bf16' not in cpp
 
 
 def test_dot2_half_forms_narrow_inline_float_constants():

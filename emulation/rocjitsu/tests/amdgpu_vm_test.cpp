@@ -929,6 +929,86 @@ TEST(GpuMemoryTest, VmidMappedKernelSymbolUsesTranslatedHostPointer) {
   mem.unregister_process(process.process_id());
 }
 
+TEST(GpuMemoryTest, HostBackingProbeDoesNotFaultBeforeAllocation) {
+  amdgpu::GpuMemory memory("scratch_probe");
+  KfdProcess process(7);
+  IdentityHostPage page;
+  ASSERT_NE(page.data, nullptr);
+  const uint64_t va = reinterpret_cast<uint64_t>(page.data);
+  ASSERT_EQ(mprotect(page.data, KfdProcess::kPageSize, PROT_NONE), 0);
+  memory.set_passthrough(true);
+  memory.register_process(process.process_id(), &process.page_table_, &process.page_table_mutex_,
+                          process.page_table_generation());
+  RecordingFaultReporter reporter;
+  memory.set_memory_fault_reporter(&reporter);
+
+  {
+    amdgpu::GpuMemory::FaultScope faults;
+    EXPECT_FALSE(memory.has_host_backing(va, process.process_id(), KfdProcess::kPageSize));
+    EXPECT_FALSE(faults.observed());
+    EXPECT_TRUE(reporter.addresses.empty());
+  }
+  // An actual access to the same absent range must still report the fault.
+  EXPECT_EQ(memory.resolve_host_ptr(va, process.process_id()), nullptr);
+  EXPECT_EQ(reporter.addresses, (std::vector<uint64_t>{va}));
+  reporter.addresses.clear();
+
+  std::array<uint8_t, KfdProcess::kPageSize> backing{};
+  process.map_pages(va, backing.data(), backing.size());
+  EXPECT_TRUE(memory.has_host_backing(va, process.process_id(), backing.size()));
+  EXPECT_TRUE(reporter.addresses.empty());
+  memory.set_memory_fault_reporter(nullptr);
+  memory.unregister_process(process.process_id());
+}
+
+TEST(GpuMemoryTest, HostBackingProbeChecksWholeRangeAndAcceptsIdentityPages) {
+  amdgpu::GpuMemory memory("scratch_probe_range");
+  KfdProcess process(7);
+  IdentityHostPage page;
+  ASSERT_NE(page.data, nullptr);
+  memory.set_passthrough(true);
+  const uint64_t identity_va = reinterpret_cast<uint64_t>(page.data);
+  EXPECT_TRUE(memory.has_host_backing(identity_va, 0, KfdProcess::kPageSize));
+  EXPECT_FALSE(memory.has_host_backing(identity_va, 0, 0));
+  EXPECT_FALSE(memory.has_host_backing(UINT64_MAX, 0, 2));
+
+  memory.register_process(process.process_id(), &process.page_table_, &process.page_table_mutex_,
+                          process.page_table_generation());
+  EXPECT_TRUE(memory.has_host_backing(identity_va, process.process_id(), KfdProcess::kPageSize));
+  EXPECT_FALSE(memory.is_mapped(identity_va, process.process_id()));
+
+  constexpr uint64_t kVa = 0x40000000;
+  memory.set_passthrough(false);
+  process.map_pages(kVa, page.data, KfdProcess::kPageSize);
+  EXPECT_TRUE(memory.has_host_backing(kVa, process.process_id(), KfdProcess::kPageSize));
+  EXPECT_FALSE(memory.has_host_backing(kVa, process.process_id(), KfdProcess::kPageSize + 1));
+  std::array<uint8_t, 16> tail{};
+  process.map_pages(kVa + KfdProcess::kPageSize, tail.data(), tail.size());
+  EXPECT_TRUE(
+      memory.has_host_backing(kVa, process.process_id(), KfdProcess::kPageSize + tail.size()));
+  EXPECT_FALSE(
+      memory.has_host_backing(kVa, process.process_id(), KfdProcess::kPageSize + tail.size() + 1));
+  memory.unregister_process(process.process_id());
+}
+
+TEST(GpuMemoryTest, HostBackingProbeAcceptsAdjacentSubpageExtents) {
+  amdgpu::GpuMemory memory("scratch_probe_extents");
+  KfdProcess process(7);
+  memory.register_process(process.process_id(), &process.page_table_, &process.page_table_mutex_,
+                          process.page_table_generation());
+  constexpr uint64_t kVa = 0x40000100;
+  std::array<uint8_t, 4> first{};
+  std::array<uint8_t, 4> second{};
+  process.map_pages(kVa, first.data(), first.size());
+  process.map_pages(kVa + first.size(), second.data(), second.size());
+  EXPECT_TRUE(memory.has_host_backing(kVa, process.process_id(), first.size() + second.size()));
+  EXPECT_FALSE(
+      memory.has_host_backing(kVa, process.process_id(), first.size() + second.size() + 1));
+  EXPECT_FALSE(
+      memory.has_host_backing(kVa - 1, process.process_id(), first.size() + second.size()));
+  memory.unregister_process(process.process_id());
+}
+
 TEST(GpuMemoryTest, UnregisterInvalidatesThreadLocalTranslationCaches) {
   amdgpu::GpuMemory memory("memory");
   constexpr uint32_t kPid = 7;
