@@ -324,8 +324,8 @@ bool ncclCeAlltoAllEligible(struct ncclComm* comm, ncclDataType_t datatype, nccl
   if (ncclGroupDepth != 0) return false;
   if (!(comm->config.CTAPolicy & NCCL_CTA_POLICY_ZERO)) return false;
   if (hasSysmemSegment || capturing) return false;
-  return ncclCeAvailable(comm, ncclFuncAlltoAll, ncclDevSum, datatype, winRegType) ||
-         ncclHierCeAvailable(comm, ncclFuncAlltoAll, ncclDevSum, datatype, winRegType);
+  // Single-node CE only: hier CE is multi-node and launch is still LSA-only.
+  return ncclCeAvailable(comm, ncclFuncAlltoAll, ncclDevSum, datatype, winRegType);
 }
 
 bool ncclCeScratchAvailable(struct ncclComm* comm, ncclFunc_t coll, int /*ncclDevRedOp_t*/ red, ncclDataType_t ty,

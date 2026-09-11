@@ -464,8 +464,8 @@ ncclResult_t ncclAlltoAll_impl(const void* sendbuff, void* recvbuff, size_t coun
     }
 #endif
     // Symmetric kernels are not supported for AlltoAll, so unlike AllGather we cannot
-    // gate DDA on !symEligible. When registered-window CE would dispatch, DDA must
-    // not early-return. Skip the window/graph probes unless DDA is actually enabled
+    // gate DDA on !symEligible. When single-node registered-window CE would dispatch,
+    // DDA must not early-return. Skip the window/graph probes unless DDA is actually enabled
     // for this size and CTA_POLICY_ZERO is set -- the default AlltoAll path pays nothing.
     const size_t totalBytes = comm->nRanks * count * ncclTypeSize(datatype);
     bool ceAlltoAllAllowed = false;

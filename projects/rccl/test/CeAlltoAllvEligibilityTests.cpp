@@ -237,12 +237,7 @@ TEST_F(CeAlltoAllvEligibilityTest, PeerSendSizeValidationAcceptsMatch)
     EXPECT_EQ(ncclAlltoAllvValidatePeerSendSize(128, 128, 0, 1), ncclSuccess);
 }
 
-// ---------------------------------------------------------------------------
-// ncclCeAlltoAllEligible: the AlltoAll DDA-yield probe. Same CTA / sysmem /
-// capture / group-depth gates as AlltoAllv, plus hierarchical CE so it matches
-// taskAppend. These cases actually enter the predicate that
-// alltoAllRegisteredCeAllowed calls; Rcclwrap.AlltoAllDdaDecision_* only
-// drives rcclAlltoAllShouldTakeDdaPath with a literal ceAlltoAllAllowed.
+// ncclCeAlltoAllEligible: DDA-yield probe (same gates as AlltoAllv, then single-node ncclCeAvailable).
 class CeAlltoAllEligibilityTest : public ::testing::Test
 {
 protected:
@@ -323,10 +318,31 @@ TEST_F(CeAlltoAllEligibilityTest, MultiNodeRejected)
     if (!isCeRuntimeDriverSupported())
         GTEST_SKIP() << "CE driver not in supported range";
 
-    // nRanks=1 so computeLsaSize does not walk the unset rankToNode table.
-    // Single-node CE is closed by nNodes>1; hier CE is closed by a one-rank LSA team.
     mockComm_.comm.nNodes = 2;
-    mockComm_.comm.nRanks = 1;
+    EXPECT_FALSE(ncclCeAlltoAllEligible(mockComm_.get(),
+                                        ncclFloat32,
+                                        ncclSymSendRegRecvReg,
+                                        /*hasSysmemSegment=*/false,
+                                        /*capturing=*/false));
+}
+
+TEST_F(CeAlltoAllEligibilityTest, MultiNodeHierAvailable_DoesNotYieldDda)
+{
+    if (!isCeRuntimeDriverSupported())
+        GTEST_SKIP() << "CE driver not in supported range";
+
+    // Hier CE can be available; DDA still must not yield (launch is LSA-only).
+    mockComm_.configureHierEligible();
+    EXPECT_TRUE(ncclHierCeAvailable(mockComm_.get(),
+                                    ncclFuncAlltoAll,
+                                    ncclDevSum,
+                                    ncclFloat32,
+                                    ncclSymSendRegRecvReg));
+    EXPECT_FALSE(ncclCeAvailable(mockComm_.get(),
+                                 ncclFuncAlltoAll,
+                                 ncclDevSum,
+                                 ncclFloat32,
+                                 ncclSymSendRegRecvReg));
     EXPECT_FALSE(ncclCeAlltoAllEligible(mockComm_.get(),
                                         ncclFloat32,
                                         ncclSymSendRegRecvReg,
