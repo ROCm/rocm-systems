@@ -66,12 +66,18 @@ public:
   void retireEvent(EventId);
 
   /// Check for RAW hazards: no outstanding LDS writes overlap the range.
-  void validateRead(int addr, WaveId, int lane, int nBytes) const;
+  /// Same-wave operations are ordered only when both belong to the same
+  /// non-UNORDERED completion class.
+  void validateRead(int addr, WaveId, int lane, int nBytes,
+                    MemoryOrderClass currentMemoryOrder = MemoryOrderClass::LDS) const;
 
   /// Check for WAR hazards: no outstanding LDS reads overlap the range.
+  /// Same-wave operations are ordered only when both belong to the same
+  /// non-UNORDERED completion class.
   /// TODO(newling): WAW detection (write vs outstanding writes) is not
   /// implemented.
-  void validateWrite(int addr, WaveId, int lane, int nBytes) const;
+  void validateWrite(int addr, WaveId, int lane, int nBytes,
+                     MemoryOrderClass currentMemoryOrder = MemoryOrderClass::LDS) const;
 
   const EventRegistry &events() const { return events_; }
 
