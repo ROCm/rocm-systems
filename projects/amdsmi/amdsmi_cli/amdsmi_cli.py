@@ -229,8 +229,9 @@ if __name__ == "__main__":
         elif sys.argv[1] in valid_commands:
             args = amd_smi_parser.parse_args(args=None)
         else:
+            # Raised before args are parsed, so the format comes from sys.argv.
             raise amdsmi_cli_exceptions.AmdSmiInvalidSubcommandException(
-                sys.argv[1], amd_smi_commands.logger.destination
+                sys.argv[1], amd_smi_helpers.get_output_format()
             )
 
         # Handle command modifiers before subcommand execution
