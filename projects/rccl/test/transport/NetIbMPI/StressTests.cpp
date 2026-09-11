@@ -412,7 +412,7 @@ TEST_F(NetIbMPITest, InlineSendBoundary) {
 //      large-MR registration.
 //      Parameterized by MPIEnvironment::nThreads: concurrent workers sweep the
 //      whole ladder at once, so alignment and chunking paths run under real
-//      bandwidth pressure with several 64 MB registrations live per device.
+//      bandwidth pressure.
 TEST_F(NetIbMPITest, MixedSizeBarrage) {
     ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
                                          false, kMinGpusPerNode, kNoNodeLimit));
@@ -430,7 +430,10 @@ TEST_F(NetIbMPITest, MixedSizeBarrage) {
     NetConnectionGuard guard(net_);
     SetupConnectionWithGuard(0, cp, guard);
 
-    const size_t maxSz = 64 * 1024 * 1024; // 64 MB
+    // From the shared ladder, not a constant beside it: a size added to
+    // kBarrageSizes would otherwise send DoSendRecv past the end of this buffer.
+    size_t maxSz = 1;
+    for (size_t sz : kBarrageSizes) maxSz = std::max(maxSz, sz);
     auto buf = makeHostBufferAutoGuard(malloc(maxSz));
     ASSERT_NE(buf.get(), nullptr);
 
@@ -700,20 +703,19 @@ TEST_F(NetIbMPITest, RequestSlotExhaustion) {
     NetConnectionGuard guard(net_);
     SetupConnectionWithGuard(0, cp, guard);
 
-    static constexpr int kMaxReqs = 32; // NCCL_NET_MAX_REQUESTS
     const size_t sz = 256;
-    auto buf = makeHostBufferAutoGuard(malloc(sz * kMaxReqs));
+    auto buf = makeHostBufferAutoGuard(malloc(sz * kMaxReqsPerComm));
     ASSERT_NE(buf.get(), nullptr);
 
     void* comm = (rank == 0) ? cp.recvComm : cp.sendComm;
     void* mh = nullptr;
-    ASSERT_EQ(RegisterMemory(comm, buf.get(), sz * kMaxReqs, NCCL_PTR_HOST, &mh), ncclSuccess);
+    ASSERT_EQ(RegisterMemory(comm, buf.get(), sz * kMaxReqsPerComm, NCCL_PTR_HOST, &mh), ncclSuccess);
     NetMHandleGuard mhGuard(mh, NetMHandleDeleter(net_, comm));
 
     if (rank == 0) {
         // Post all 32 irecvs
-        std::vector<void*> reqs(kMaxReqs, nullptr);
-        for (int i = 0; i < kMaxReqs; i++) {
+        std::vector<void*> reqs(kMaxReqsPerComm, nullptr);
+        for (int i = 0; i < kMaxReqsPerComm; i++) {
             char* p = static_cast<char*>(buf.get()) + i * sz;
             PostSingleRecv(cp.recvComm, p, sz, /*tag=*/i, mh, &reqs[i]);
         }
@@ -721,7 +723,7 @@ TEST_F(NetIbMPITest, RequestSlotExhaustion) {
         MPI_Barrier(MPI_COMM_WORLD);
 
         // Wait for all completions
-        for (int i = 0; i < kMaxReqs; i++) {
+        for (int i = 0; i < kMaxReqsPerComm; i++) {
             int rsz = 0;
             ASSERT_EQ(WaitForCompletion(reqs[i], &rsz, kStressTimeoutMs), ncclSuccess)
                 << "Completion failed for recv " << i;
@@ -731,7 +733,7 @@ TEST_F(NetIbMPITest, RequestSlotExhaustion) {
         MPI_Barrier(MPI_COMM_WORLD);
 
         // Send all 32
-        for (int i = 0; i < kMaxReqs; i++) {
+        for (int i = 0; i < kMaxReqsPerComm; i++) {
             char* p = static_cast<char*>(buf.get()) + i * sz;
             fillHostBufferWithPattern<uint8_t>(p, sz, makeBytePattern(i));
             void* req = nullptr;
@@ -762,6 +764,7 @@ TEST_F(NetIbMPITest, MemoryRegistrationStorm) {
     int rank = MPIEnvironment::world_rank;
     AssertInitAndGetDevices(nullptr);
 
+    static constexpr size_t kRegStormBufSz = 4096;
     const int nThreads = MPIEnvironment::nThreads;
     if (nThreads > 1) {
         // Keep the aggregate registration count near the serial test's 512 rather
@@ -770,7 +773,6 @@ TEST_F(NetIbMPITest, MemoryRegistrationStorm) {
         // grows with N only spreads the workers apart in time until the
         // verification transfer outlives any sane timeout.
         const int kThreadedBufs = std::max(16, 512 / nThreads);
-        static constexpr size_t kThreadedBufSz = 4096;
         RunThreadedBody(
             ThreadDevPolicy::Fixed(0), nThreads, "threaded MemoryRegistrationStorm",
             [&](int threadIdx, ConnectionPair& pair) -> ThreadResult {
@@ -782,7 +784,7 @@ TEST_F(NetIbMPITest, MemoryRegistrationStorm) {
                     for (auto* p : bufs) free(p);
                 });
                 for (int i = 0; i < kThreadedBufs; i++) {
-                    bufs[i] = malloc(kThreadedBufSz);
+                    bufs[i] = malloc(kRegStormBufSz);
                     if (!bufs[i]) {
                         result.ok = false;
                         result.msg = "malloc failed";
@@ -811,7 +813,7 @@ TEST_F(NetIbMPITest, MemoryRegistrationStorm) {
                 });
                 auto registerAll = [&]() {
                     for (int i = 0; i < kThreadedBufs; i++) {
-                        result = WorkerRegister(comm, bufs[i], kThreadedBufSz, NCCL_PTR_HOST,
+                        result = WorkerRegister(comm, bufs[i], kRegStormBufSz, NCCL_PTR_HOST,
                                                 &handles[i]);
                         if (!result.ok) return false;
                     }
@@ -846,7 +848,7 @@ TEST_F(NetIbMPITest, MemoryRegistrationStorm) {
                 // The connection must still work after the storm. The peer's
                 // worker may be several hundred registrations behind, so this
                 // transfer waits on the stress budget rather than the default.
-                return WorkerHostTransfer(rank, pair, kThreadedBufSz, 0,
+                return WorkerHostTransfer(rank, pair, kRegStormBufSz, 0,
                                           WorkerSeed(threadIdx, 999), kStressTimeoutMs);
             });
         return;
@@ -859,12 +861,11 @@ TEST_F(NetIbMPITest, MemoryRegistrationStorm) {
     void* comm = (rank == 0) ? cp.recvComm : cp.sendComm;
 
     static constexpr int kNumBufs = 512;
-    static constexpr size_t kBufSz = 4096;
 
     // Allocate all buffers
     std::vector<void*> bufs(kNumBufs);
     for (int i = 0; i < kNumBufs; i++) {
-        bufs[i] = malloc(kBufSz);
+        bufs[i] = malloc(kRegStormBufSz);
         ASSERT_NE(bufs[i], nullptr) << "malloc failed at buffer " << i;
     }
     auto bufCleanup = makeScopeGuard([&]() {
@@ -874,7 +875,7 @@ TEST_F(NetIbMPITest, MemoryRegistrationStorm) {
     // Phase 1: register all forward
     std::vector<void*> handles(kNumBufs, nullptr);
     for (int i = 0; i < kNumBufs; i++) {
-        ASSERT_EQ(RegisterMemory(comm, bufs[i], kBufSz, NCCL_PTR_HOST, &handles[i]), ncclSuccess)
+        ASSERT_EQ(RegisterMemory(comm, bufs[i], kRegStormBufSz, NCCL_PTR_HOST, &handles[i]), ncclSuccess)
             << "regMr failed at " << i;
     }
 
@@ -887,7 +888,7 @@ TEST_F(NetIbMPITest, MemoryRegistrationStorm) {
 
     // Phase 3: re-register all forward
     for (int i = 0; i < kNumBufs; i++) {
-        ASSERT_EQ(RegisterMemory(comm, bufs[i], kBufSz, NCCL_PTR_HOST, &handles[i]), ncclSuccess)
+        ASSERT_EQ(RegisterMemory(comm, bufs[i], kRegStormBufSz, NCCL_PTR_HOST, &handles[i]), ncclSuccess)
             << "re-regMr failed at " << i;
     }
 
@@ -908,14 +909,14 @@ TEST_F(NetIbMPITest, MemoryRegistrationStorm) {
     MPI_Barrier(MPI_COMM_WORLD);
 
     // Phase 5: verify connection is still alive with one transfer
-    auto tbuf = makeHostBufferAutoGuard(malloc(kBufSz));
+    auto tbuf = makeHostBufferAutoGuard(malloc(kRegStormBufSz));
     ASSERT_NE(tbuf.get(), nullptr);
     void* mh = nullptr;
-    ASSERT_EQ(RegisterMemory(comm, tbuf.get(), kBufSz, NCCL_PTR_HOST, &mh), ncclSuccess);
+    ASSERT_EQ(RegisterMemory(comm, tbuf.get(), kRegStormBufSz, NCCL_PTR_HOST, &mh), ncclSuccess);
     NetMHandleGuard mhGuard(mh, NetMHandleDeleter(net_, comm));
 
     DoSendRecv(cp.sendComm, cp.recvComm,
-               tbuf.get(), tbuf.get(), kBufSz,
+               tbuf.get(), tbuf.get(), kRegStormBufSz,
                /*tag=*/0, mh, mh, /*patternSeed=*/999);
 }
 
@@ -2042,15 +2043,15 @@ TEST_F(NetIbMPITest, RapidRecvPostDrain) {
     int rank = MPIEnvironment::world_rank;
     AssertInitAndGetDevices(nullptr);
 
+    static constexpr int kDrainBatch = 32;
     const int nThreads = MPIEnvironment::nThreads;
     if (nThreads > 1) {
         static constexpr int kThreadedCycles = 25;
-        static constexpr int kThreadedBatch  = 32;
         RunThreadedBody(
             ThreadDevPolicy::Fixed(0), nThreads, "threaded RapidRecvPostDrain",
             [&](int threadIdx, ConnectionPair& pair) -> ThreadResult {
                 const size_t sz = 256;
-                WorkerHostBuffer h = WorkerSetupHostBuffer(rank, pair, sz * kThreadedBatch);
+                WorkerHostBuffer h = WorkerSetupHostBuffer(rank, pair, sz * kDrainBatch);
                 if (!h.result.ok) return h.result;
                 void* buffer = h.buffer;
                 void* mh = h.mhandle;
@@ -2060,7 +2061,7 @@ TEST_F(NetIbMPITest, RapidRecvPostDrain) {
                 // per-slot seed would alias into another worker's patterns modulo 256.
                 const int workerPattern = WorkerSeed(threadIdx, 0);
                 for (int cycle = 0; cycle < kThreadedCycles; cycle++) {
-                    result = WorkerBatchPostDrain(rank, pair, buffer, sz, kThreadedBatch, mh,
+                    result = WorkerBatchPostDrain(rank, pair, buffer, sz, kDrainBatch, mh,
                                                   workerPattern,
                                                   "cycle " + std::to_string(cycle) + " ");
                     if (!result.ok) return result;
@@ -2075,29 +2076,28 @@ TEST_F(NetIbMPITest, RapidRecvPostDrain) {
     SetupConnectionWithGuard(0, cp, guard);
 
     static constexpr int kCycles = 100;
-    static constexpr int kBatch  = 32;
     const size_t sz = 256;
 
-    auto buf = makeHostBufferAutoGuard(malloc(sz * kBatch));
+    auto buf = makeHostBufferAutoGuard(malloc(sz * kDrainBatch));
     ASSERT_NE(buf.get(), nullptr);
 
     void* comm = (rank == 0) ? cp.recvComm : cp.sendComm;
     void* mh = nullptr;
-    ASSERT_EQ(RegisterMemory(comm, buf.get(), sz * kBatch, NCCL_PTR_HOST, &mh), ncclSuccess);
+    ASSERT_EQ(RegisterMemory(comm, buf.get(), sz * kDrainBatch, NCCL_PTR_HOST, &mh), ncclSuccess);
     NetMHandleGuard mhGuard(mh, NetMHandleDeleter(net_, comm));
 
     for (int cycle = 0; cycle < kCycles; cycle++) {
         if (rank == 0) {
             // Post all recvs
-            std::vector<void*> reqs(kBatch, nullptr);
-            for (int i = 0; i < kBatch; i++) {
+            std::vector<void*> reqs(kDrainBatch, nullptr);
+            for (int i = 0; i < kDrainBatch; i++) {
                 char* p = static_cast<char*>(buf.get()) + i * sz;
                 PostSingleRecv(cp.recvComm, p, sz, /*tag=*/i, mh, &reqs[i]);
             }
             // Signal sender
             MPI_Barrier(MPI_COMM_WORLD);
             // Drain all
-            for (int i = 0; i < kBatch; i++) {
+            for (int i = 0; i < kDrainBatch; i++) {
                 int rsz = 0;
                 ASSERT_EQ(WaitForCompletion(reqs[i], &rsz, kStressTimeoutMs), ncclSuccess)
                     << "Drain failed cycle=" << cycle << " msg=" << i;
@@ -2106,9 +2106,9 @@ TEST_F(NetIbMPITest, RapidRecvPostDrain) {
             // Wait for recvs to be posted
             MPI_Barrier(MPI_COMM_WORLD);
             // Send all
-            for (int i = 0; i < kBatch; i++) {
+            for (int i = 0; i < kDrainBatch; i++) {
                 char* p = static_cast<char*>(buf.get()) + i * sz;
-                fillHostBufferWithPattern<uint8_t>(p, sz, makeBytePattern(cycle * kBatch + i));
+                fillHostBufferWithPattern<uint8_t>(p, sz, makeBytePattern(cycle * kDrainBatch + i));
                 void* req = nullptr;
                 PostSendWithRetry(cp.sendComm, p, sz, /*tag=*/i, mh, &req);
                 int rsz = 0;

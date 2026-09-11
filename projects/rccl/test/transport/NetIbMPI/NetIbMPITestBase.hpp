@@ -1127,8 +1127,9 @@ protected:
     // request. FifoPressureSenderFast reports that count in its failure message
     // rather than asserting on it: nothing orders the sender's attempt against the
     // receiver publishing a slot, so a descheduled sender can legitimately see
-    // none. Without the count a test whose subject is backpressure would have to
-    // reimplement this loop just to observe it.
+    // none. The count is not forwarded by WorkerSendRecvRaw or
+    // WorkerSendRecvPattern, so a test that wants it posts through this helper
+    // directly and drives its own wait and verify, as that one does.
     ThreadResult WorkerPostSend(void* sendComm, void* data, size_t size, int tag,
                                 void* mhandle, void** request, bool busyPoll = false,
                                 int timeoutMs = kSlotWaitDefaultMs,
@@ -1290,27 +1291,40 @@ protected:
             }
             if (!result.ok) return result;
         }
+        // Every slot is waited on even after one of them fails. Returning at the first
+        // failure left the rest of the batch outstanding, and the caller's
+        // WorkerHostBuffer then deregistered the memory and freed it while the device
+        // could still be writing into those slots -- a crash in teardown instead of a
+        // readable failure. The first failure is what gets reported.
+        ThreadResult firstFailure;
         for (int i = 0; i < slots; i++) {
             int sizes[1] = {0};
-            result = WorkerWait(requests[i], sizes, kStressTimeoutMs);
-            if (!result.ok) return result;
+            const ThreadResult waited = WorkerWait(requests[i], sizes, kStressTimeoutMs);
+            if (!waited.ok) {
+                if (firstFailure.ok) firstFailure = waited;
+                continue;
+            }
             if (rank != 0) continue;
             const char* slot = static_cast<const char*>(buffer) + i * slotSize;
             if (sizes[0] != static_cast<int>(slotSize)) {
-                result.ok = false;
-                result.msg = where + "slot " + std::to_string(i) + ": received "
-                             + std::to_string(sizes[0]) + " of " + std::to_string(slotSize)
-                             + " bytes";
-                return result;
+                if (firstFailure.ok) {
+                    firstFailure.ok = false;
+                    firstFailure.msg = where + "slot " + std::to_string(i) + ": received "
+                                       + std::to_string(sizes[0]) + " of "
+                                       + std::to_string(slotSize) + " bytes";
+                }
+                continue;
             }
             if (!verifyHostBufferData<uint8_t>(slot, slotSize, makeBytePattern(pattern))) {
-                result.ok = false;
-                result.msg = where + "slot " + std::to_string(i)
-                             + ": payload is not this worker's pattern";
-                return result;
+                if (firstFailure.ok) {
+                    firstFailure.ok = false;
+                    firstFailure.msg = where + "slot " + std::to_string(i)
+                                       + ": payload is not this worker's pattern";
+                }
+                continue;
             }
         }
-        return result;
+        return firstFailure;
     }
 
     // A worker's registered host buffer, kept alive as one movable value: the
@@ -1814,20 +1828,11 @@ protected:
 
         RunThreadedBody(
             policy, nThreads, label, [&](int threadIdx, ConnectionPair& pair) -> ThreadResult {
+                WorkerHostBuffer h = WorkerSetupHostBuffer(rank, pair, maxSize);
+                if (!h.result.ok) return h.result;
+                void* buffer = h.buffer;
+                void* mhandle = h.mhandle;
                 ThreadResult result;
-                void* buffer = malloc(maxSize);
-                if (!buffer) {
-                    result.ok = false;
-                    result.msg = "malloc failed";
-                    return result;
-                }
-                auto bufferGuard = makeHostBufferAutoGuard(buffer);
-
-                void* comm = (rank == 0) ? pair.recvComm : pair.sendComm;
-                void* mhandle = nullptr;
-                result = WorkerRegister(comm, buffer, maxSize, NCCL_PTR_HOST, &mhandle);
-                if (!result.ok) return result;
-                NetMHandleWorkerGuard mhGuard(mhandle, NetMHandleWorkerDeleter(net_, comm));
 
                 // One pattern for this worker across the whole sweep. Varying it per
                 // step aliased modulo 256 -- WorkerSeed(0, 8) and WorkerSeed(8, 0) are
