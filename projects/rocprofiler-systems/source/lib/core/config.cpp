@@ -82,7 +82,7 @@ int  verbose_value  = rocprofsys::get_env<int>(env_vars::VERBOSE, 0);
 bool debug_value    = rocprofsys::get_env<bool>(env_vars::DEBUG_MODE, false);
 auto configure_once = std::once_flag{};
 
-TIMEMORY_NOINLINE bool&
+bool&
 _settings_are_configured()
 {
     static bool _v = false;

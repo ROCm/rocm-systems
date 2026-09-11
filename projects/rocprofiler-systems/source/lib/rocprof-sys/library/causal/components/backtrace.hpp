@@ -12,7 +12,6 @@
 #include "library/perf.hpp"
 
 #include <timemory/components/base.hpp>
-#include <timemory/macros/language.hpp>
 #include <timemory/mpl/concepts.hpp>
 #include <timemory/tpls/cereal/cereal/cereal.hpp>
 #include <timemory/utility/unwind.hpp>

@@ -119,7 +119,7 @@ ROCPROFSYS_DEFINE_CONCRETE_TRAIT(prevent_reentry, sampling::sampler_t, std::true
 ROCPROFSYS_DEFINE_CONCRETE_TRAIT(provide_backtrace, sampling::sampler_t, std::false_type)
 
 ROCPROFSYS_DEFINE_CONCRETE_TRAIT(buffer_size, sampling::sampler_t,
-                                 TIMEMORY_ESC(std::integral_constant<size_t, 2048>))
+                                 std::integral_constant<size_t, 2048>)
 
 using namespace std::chrono_literals;
 
