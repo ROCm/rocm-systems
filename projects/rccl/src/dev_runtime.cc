@@ -280,8 +280,19 @@ ncclResult_t ncclDevrFinalize(struct ncclComm* comm) {
       // so this is now expected to succeed. Surface failures instead of
       // masking with CUCHECKIGNORE — a regression in the drain path should
       // not be silently swallowed (AICOMRCCL-835).
+      // Temporary gfx1250 workaround (ROCM-30633): leftover peer maps can make
+      // AddressFree hang or double-free. This is the only reclaim site, so the
+      // reservation (lsaSize * bigSize) is not returned until process exit.
+      // gfx950 still frees. Drop this skip once AddressFree is safe on gfx1250.
       CUdeviceptr flatAddr = reinterpret_cast<CUdeviceptr>(devr->lsaFlatBase);
-      CUCHECKGOTO(cuMemAddressFree(flatAddr, devr->lsaSize * devr->bigSize), fatalRet, cleanup);
+      size_t flatBytes = devr->lsaSize * devr->bigSize;
+      devr->lsaFlatBase = nullptr;
+      if (!rcclSkipLsaFlatAddressFree()) {
+        CUCHECKGOTO(cuMemAddressFree(flatAddr, flatBytes), fatalRet, cleanup);
+      } else {
+        INFO(NCCL_INIT, "ncclDevrFinalize: skipping lsaFlatBase cuMemAddressFree "
+             "(temporary gfx1250/NCCL_CUMEM_SKIP_FREE; VA unreclaimed until exit)");
+      }
     }
     ncclSpaceDestruct(&devr->bigSpace);
   }
@@ -803,46 +814,54 @@ fail_mem:
 }
 
 static void symMemoryDestroy(struct ncclComm* comm, struct ncclDevrMemory* mem) {
-  if (mem != nullptr) {
-    struct ncclDevrState* devr = &comm->devrState;
-    if (devr->ginEnabled && mem->ginSegmentInfos != nullptr) {
-      for (int segment = 0; segment < mem->numGinSegments; segment++) {
-        ncclGinDeregister(comm, mem->ginSegmentInfos[segment].ginHostWins);
-      }
-    }
-    if (devr->rmaProxyEnabled && mem->maxGlobalNumSegments == 1) {
-      ncclRmaProxyDeregister(comm, mem->rmaHostWins);
-    }
-    for (struct ncclDevrTeam* t = devr->teamHead; t != nullptr; t = t->next) {
-      symUnbindTeamMemory(comm, t, mem);
-    }
-    for (int r = 0; r < devr->lsaSize; r++) {
-      uintptr_t base = reinterpret_cast<uintptr_t>(devr->lsaFlatBase);
-      uintptr_t addr = base + r * devr->bigSize + mem->bigOffset;
-      for (int idx = 0; idx < mem->lsaNumSegments[r]; idx++) {
-        CUdeviceptr tmpBase;
-        size_t tmpBaseSize;
-        CUCHECKIGNORE(cuMemGetAddressRange(&tmpBase, &tmpBaseSize, reinterpret_cast<CUdeviceptr>(addr)));
-        CUCHECKIGNORE(cuMemUnmap(reinterpret_cast<CUdeviceptr>(addr), tmpBaseSize));
-        addr = addr + tmpBaseSize;
-      }
-    }
-
-    ncclSpaceFree(&devr->bigSpace, mem->bigOffset, mem->lsaMaxSize);
-    for (int segment = 0; segment < mem->numSegments; segment++) {
-      CUCHECKIGNORE(cuMemRelease(mem->memHandles[segment]));
-    }
-
-    struct ncclDevrMemory** ptr = &devr->memHead;
-    while (*ptr != mem) ptr = &(*ptr)->next;
-    *ptr = mem->next; // Remove from list.
-
-    free(mem->ginSegmentInfos);
-    free(mem->lsaNumSegments);
-    free(mem->segmentSizes);
-    free(mem->memHandles);
-    free(mem);
+  if (mem == nullptr) {
+    return;
   }
+  struct ncclDevrState* devr = &comm->devrState;
+  struct ncclDevrMemory** memLink = &devr->memHead;
+  while (*memLink != nullptr && *memLink != mem) {
+    memLink = &(*memLink)->next;
+  }
+  // Idempotent: a window pair or finalize drain may already have destroyed this mem.
+  if (*memLink != mem) {
+    return;
+  }
+
+  if (devr->ginEnabled && mem->ginSegmentInfos != nullptr) {
+    for (int segment = 0; segment < mem->numGinSegments; segment++) {
+      ncclGinDeregister(comm, mem->ginSegmentInfos[segment].ginHostWins);
+    }
+  }
+  if (devr->rmaProxyEnabled && mem->maxGlobalNumSegments == 1) {
+    ncclRmaProxyDeregister(comm, mem->rmaHostWins);
+  }
+  for (struct ncclDevrTeam* t = devr->teamHead; t != nullptr; t = t->next) {
+    symUnbindTeamMemory(comm, t, mem);
+  }
+  for (int r = 0; r < devr->lsaSize; r++) {
+    uintptr_t base = reinterpret_cast<uintptr_t>(devr->lsaFlatBase);
+    uintptr_t addr = base + r * devr->bigSize + mem->bigOffset;
+    for (int idx = 0; idx < mem->lsaNumSegments[r]; idx++) {
+      CUdeviceptr tmpBase;
+      size_t tmpBaseSize;
+      CUCHECKIGNORE(cuMemGetAddressRange(&tmpBase, &tmpBaseSize, reinterpret_cast<CUdeviceptr>(addr)));
+      CUCHECKIGNORE(cuMemUnmap(reinterpret_cast<CUdeviceptr>(addr), tmpBaseSize));
+      addr = addr + tmpBaseSize;
+    }
+  }
+
+  ncclSpaceFree(&devr->bigSpace, mem->bigOffset, mem->lsaMaxSize);
+  for (int segment = 0; segment < mem->numSegments; segment++) {
+    CUCHECKIGNORE(cuMemRelease(mem->memHandles[segment]));
+  }
+
+  *memLink = mem->next; // Remove from list.
+
+  free(mem->ginSegmentInfos);
+  free(mem->lsaNumSegments);
+  free(mem->segmentSizes);
+  free(mem->memHandles);
+  free(mem);
 }
 
 static ncclResult_t symWindowTableInitOnce(struct ncclComm* comm, cudaStream_t stream) {
@@ -2160,14 +2179,19 @@ ncclResult_t ncclDevCommDestroy(struct ncclComm* comm, struct ncclDevComm const*
   CUDACHECK(cudaGetDevice(&saveDev));
   CUDACHECK(cudaSetDevice(comm->cudaDev)); // This is needed at least for cuMem memory freeing in GDAKI
 
-  if (devComm->resourceWindow != nullptr) {
-    NCCLCHECKGOTO(ncclCommWindowDeregister(comm, devComm->resourceWindow), ret, end);
-  }
+  // Tear down GIN contexts before the resource window: signal/barrier memory lives
+  // inside resourceWindow and Anvil SDMA still references it during destroyContext.
+  // Always run both steps; fold the second status so a GIN failure does not skip
+  // window deregister (finalize drain still reclaims, but this is the explicit path).
   if (devComm->ginContextCount) {
-    NCCLCHECKGOTO(ncclGinDevCommFree(comm, devComm), ret, end);
+    ncclResult_t ginRet = ncclGinDevCommFree(comm, devComm);
+    if (ginRet != ncclSuccess && ret == ncclSuccess) ret = ginRet;
+  }
+  if (devComm->resourceWindow != nullptr) {
+    ncclResult_t winRet = ncclCommWindowDeregister(comm, devComm->resourceWindow);
+    if (winRet != ncclSuccess && ret == ncclSuccess) ret = winRet;
   }
 
-end:
   CUDACHECKIGNORE(cudaSetDevice(saveDev));
   return ret;
 }

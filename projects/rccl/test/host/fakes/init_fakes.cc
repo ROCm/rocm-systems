@@ -65,6 +65,7 @@ int64_t ncclParamNvlsEnable() { return g_loadParam("NVLS_ENABLE", 2); }         
 int64_t ncclParamNvtxDisable() { return g_loadParam("NVTX_DISABLE", 0); }                   // init_nvtx.cc:16
 int64_t ncclParamPatEnable() { return g_loadParam("PAT_ENABLE", 0); }                       // graph/tuning.cc:1105
 int64_t ncclParamSingleProcMemRegEnable() { return g_loadParam("SINGLE_PROC_MEM_REG_ENABLE", 0); }  // group.cc:605
+int64_t rcclParamIntraGraphGen() {return g_loadParam("INTRA_GRAPH_GEN", 0);}
 
 // rccl::Recorder moved to recorder_fakes.cc: the ctor/dtor/instance() triple was
 // copied verbatim into three fakes files, differing only in which record()

@@ -17,6 +17,7 @@
 #include <atomic>
 #include <chrono>
 #include <cstdint>
+#include <ctime>
 #include <memory>
 #include <stdexcept>
 #include <string>
@@ -1047,6 +1048,148 @@ TEST(TerminationTest, RequestExitRacingShutdownIsSafe) {
     engine.request_exit("test stop");
     runner.join();
   }
+}
+
+namespace {
+
+/// Waits for a peer partition by re-arming its own event every tick, the way the
+/// command processor re-checks a doorbell whose grid is still running on another
+/// XCD. It schedules nothing during startup: the engine has to come up fully
+/// quiescent so the first barrier publishes TICK_MAX, which is the state the
+/// stall has to survive.
+class PeerWaitComponent : public Component {
+public:
+  explicit PeerWaitComponent(std::string name) : Component(std::move(name)) {
+    in_ = add_port(std::make_unique<Port>("in", 0, this, PortDirection::IN, PortProtocol::UNTYPED));
+    out_ =
+        add_port(std::make_unique<Port>("out", 1, this, PortDirection::OUT, PortProtocol::UNTYPED));
+    in_->set_handler([this](Tick, Message *) { replied = true; });
+    recheck_.set_handler([this](Tick ts, Message *) {
+      ++rechecks;
+      if (replied) {
+        engine()->primary_release();
+        return;
+      }
+      if (!sent_) {
+        sent_ = true;
+        out_->send(make_test_msg(1));
+      }
+      // The reply can only be delivered by a later epoch's incoming drain, so a
+      // re-check that outlives the epoch it was armed in is the whole point.
+      schedule_event(&recheck_, ts + 1);
+    });
+  }
+
+  void startup() override { engine()->register_as_primary(); }
+
+  Port *in_port() { return in_; }
+  Port *out_port() { return out_; }
+  Event *recheck_event() { return &recheck_; }
+
+  bool replied = false;
+  uint64_t rechecks = 0;
+
+private:
+  bool sent_ = false;
+  Port *in_ = nullptr;
+  Port *out_ = nullptr;
+  Event recheck_{this, EventType::TIMER_CALLBACK};
+};
+
+} // namespace
+
+// Regression: a partition that re-arms its own event while waiting on a peer must
+// not be able to run the epoch loop by itself.
+//
+// An engine that comes up with nothing scheduled publishes TICK_MAX at its first
+// barrier. TICK_MAX is the absence of a horizon, not an infinite one, but the
+// epoch loop used to compare against it like any other bound -- so the first
+// partition to receive async work processed events, and everything those handlers
+// re-armed, without ever arriving at the next barrier. Its peers stayed parked in
+// that barrier, the reply this partition was waiting for was never drained, and
+// the run hung. Reproduces at any partition count; rocjitsu hit it on every
+// multi-XCD config whose partition count was not exactly the XCD count.
+TEST(TerminationTest, QuiescentEpochDoesNotStrandPeersAtTheBarrier) {
+  SimulationEngine engine({.num_threads = 2});
+  auto root = std::make_unique<CompositeComponent>("root");
+  auto *waiter = static_cast<PeerWaitComponent *>(
+      root->add_child(std::make_unique<PeerWaitComponent>("waiter0")));
+  // target=2 so the responder replies to the message it receives instead of
+  // treating it as the last one; it is not a primary, so it never ends the run.
+  auto *responder = static_cast<PingPongComponent *>(root->add_child(
+      std::make_unique<PingPongComponent>("responder1", 2, false, /*register_primary=*/false)));
+  engine.topology().set_root(std::move(root));
+  engine.topology().add_link(waiter->out_port(), responder->in_port(), 1);
+  engine.topology().add_link(responder->out_port(), waiter->in_port(), 1);
+  engine.topology().partition_manual(2, partition_by_name_suffix);
+  ASSERT_EQ(waiter->partition_id(), 0u);
+  ASSERT_EQ(responder->partition_id(), 1u);
+  engine.create();
+
+  ExitStatus exit_status;
+  std::atomic<bool> finished{false};
+  std::thread runner([&]() {
+    exit_status = engine.run();
+    finished.store(true, std::memory_order_release);
+  });
+  ASSERT_TRUE(engine.wait_until_started());
+
+  // Let the engine settle into the quiescent state first. Nothing is scheduled,
+  // so the first barrier publishes TICK_MAX within microseconds of startup; the
+  // kick has to land after that, because an engine that never reaches a
+  // TICK_MAX barrier does not exercise this at all.
+  std::this_thread::sleep_for(std::chrono::milliseconds(50));
+
+  // Kick the waiter from a foreign thread, exactly as a doorbell write does.
+  engine.schedule_event_now(waiter->recheck_event());
+
+  // Bounded wait: a regression deadlocks the engine, and the test has to fail
+  // rather than hang the suite. request_exit() unwinds the workers either way.
+  const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
+  while (!finished.load(std::memory_order_acquire) && std::chrono::steady_clock::now() < deadline)
+    std::this_thread::sleep_for(std::chrono::milliseconds(1));
+  const bool finished_on_its_own = finished.load(std::memory_order_acquire);
+  if (!finished_on_its_own)
+    engine.request_exit("regression timeout");
+  runner.join();
+
+  EXPECT_TRUE(finished_on_its_own) << "engine did not terminate: the waiting partition never "
+                                      "reached the barrier, so its peer's reply was never drained";
+  EXPECT_EQ(exit_status.reason, ExitReason::COMPLETED);
+  EXPECT_TRUE(waiter->replied);
+  EXPECT_EQ(responder->recv_count, 1u);
+}
+
+// Regression: a quiescent multi-partition engine must idle, not spin.
+//
+// With no idle wait in the epoch loop, every partition of an idle engine burns a
+// host core going round the barrier. rocjitsu's own suite runs many emulators at
+// once under `ctest -j`, and those spinning partitions starved the guest process
+// that had to ring the next doorbell -- so an idle engine never became busy
+// again. Measured as CPU time, which is what starves a peer; wall time is not.
+TEST(TerminationTest, QuiescentEngineDoesNotSpinTheHost) {
+  SimulationEngine engine({.num_threads = 4});
+  auto root = std::make_unique<CompositeComponent>("root");
+  for (int i = 0; i < 4; ++i)
+    root->add_child(std::make_unique<PeerWaitComponent>("idle" + std::to_string(i)));
+  engine.topology().set_root(std::move(root));
+  engine.topology().partition_balanced(4);
+  engine.create();
+
+  std::thread runner([&]() { engine.run(); });
+  ASSERT_TRUE(engine.wait_until_started());
+
+  const auto cpu_before = std::clock();
+  std::this_thread::sleep_for(std::chrono::milliseconds(200));
+  const auto cpu_used =
+      static_cast<double>(std::clock() - cpu_before) / static_cast<double>(CLOCKS_PER_SEC);
+
+  engine.request_exit("test stop");
+  runner.join();
+
+  // Four spinning partitions burn ~0.8s of CPU over this window; four idle ones
+  // burn milliseconds. The threshold is one core's worth, well clear of both.
+  EXPECT_LT(cpu_used, 0.2) << "idle engine consumed " << cpu_used << "s of CPU in 0.2s";
 }
 
 TEST(TerminationTest, StepModeConsistency) {
