@@ -446,6 +446,7 @@ class db_analysis(OmniAnalyze_Base):
                 code_object_stores,
                 kernel_symbols,
                 source_frames,
+                sys_info,
             )
             workload_source_snapshots.append(
                 WorkloadSourceSnapshot(
@@ -698,6 +699,7 @@ class db_analysis(OmniAnalyze_Base):
                         kernel,
                         kernel_symbols,
                         source_frames,
+                        sys_info.get("gpu_arch"),
                     )
 
         return code_object_stores
@@ -744,13 +746,14 @@ class db_analysis(OmniAnalyze_Base):
     @staticmethod
     def _get_instruction_type(
         instruction: Optional[str],
+        gpu_arch: Optional[str],
     ) -> Optional[orm.InstructionTypeLookup]:
         """Return the lookup row for an instruction's execution pipeline.
 
         None when the mnemonic is unknown, which leaves the column NULL and
         makes the missing table entry visible.
         """
-        pipeline = InstructionPipelines.lookup(instruction)
+        pipeline = InstructionPipelines.lookup(instruction, gpu_arch)
         if pipeline is None:
             return None
         return Database.get_or_create_type(orm.InstructionTypeLookup, pipeline)
@@ -762,12 +765,15 @@ class db_analysis(OmniAnalyze_Base):
         kernel: orm.Kernel,
         kernel_symbols: dict[KernelSymbolKey, orm.KernelSymbol],
         source_frames: SourceFrameCollector,
+        gpu_arch: Optional[str] = None,
     ) -> None:
         """Insert one instruction line, its sample state, and child counts."""
         instruction_line = orm.InstructionLine(
             code_object_offset=line.code_object_offset,
             instruction=line.instruction,
-            instruction_type_lookup=db_analysis._get_instruction_type(line.instruction),
+            instruction_type_lookup=db_analysis._get_instruction_type(
+                line.instruction, gpu_arch
+            ),
             kernel_symbol=db_analysis._get_or_create_kernel_symbol(
                 code_object_store, kernel, kernel_symbols
             ),
@@ -814,9 +820,11 @@ class db_analysis(OmniAnalyze_Base):
         code_object_stores: dict[CodeObjectKey, orm.CodeObjectStore],
         kernel_symbols: dict[KernelSymbolKey, orm.KernelSymbol],
         source_frames: SourceFrameCollector,
+        sys_info: dict[str, Any],
     ) -> None:
         """Add dispatched kernels' disassembly as instruction lines,
         skipping any offset already present."""
+        gpu_arch = sys_info.get("gpu_arch")
         tool_data_records = self._pc_sampling_tool_data_per_workload.get(
             workload_path, []
         )
@@ -875,13 +883,14 @@ class db_analysis(OmniAnalyze_Base):
                     kernel_symbol.code_object_offset = (
                         symbol.virtual_address - code_object_store.load_base
                     )
-                    self._add_symbol_isa(kernel_symbol, symbol, source_frames)
+                    self._add_symbol_isa(kernel_symbol, symbol, source_frames, gpu_arch)
 
     @staticmethod
     def _add_symbol_isa(
         kernel_symbol: orm.KernelSymbol,
         symbol: CodeObjectSymbol,
         source_frames: SourceFrameCollector,
+        gpu_arch: Optional[str] = None,
     ) -> None:
         """Add a symbol's disassembly, skipping offsets it already holds."""
         existing_offsets = {
@@ -897,7 +906,7 @@ class db_analysis(OmniAnalyze_Base):
                 code_object_offset=code_object_offset,
                 instruction=instruction.instruction,
                 instruction_type_lookup=db_analysis._get_instruction_type(
-                    instruction.instruction
+                    instruction.instruction, gpu_arch
                 ),
                 kernel_symbol=kernel_symbol,
             )
