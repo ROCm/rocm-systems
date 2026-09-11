@@ -52,6 +52,51 @@ find_path(RCCL_EP_RCCL_INCLUDE_DIR
 
 find_package(hip REQUIRED)
 
+# <nccl_device.h> is version-gated and degrades silently when ROCM_VERSION is
+# undefined: coop.h:124 and :154 fall back from __syncwarp() to __syncthreads()
+# in ncclCoopTile::sync() and ncclCoopLanes::sync(), and hip_compat.h:63 defines
+# CU_MEM_LOCATION_TYPE_HOST_NUMA that a ROCm >= 7.12 build already provides.
+# RCCL's own build passes -DROCM_VERSION for this exact file
+# (cmake/DeviceLinker.cmake:772), so the standalone artifact has to agree or the
+# two builds of one source differ in device code. Already set when this module
+# is pulled in with add_subdirectory() from RCCL, which computes it the same way.
+if(NOT DEFINED ROCM_VERSION)
+  if(NOT DEFINED ROCM_PATH)
+    if(DEFINED ENV{ROCM_PATH})
+      set(ROCM_PATH "$ENV{ROCM_PATH}")
+    else()
+      set(ROCM_PATH "/opt/rocm")
+    endif()
+  endif()
+  # Prefer ROCm's own stamp, directly or under the 'core' symlink multi-arch
+  # installs use. Fall back to the HIP package version, whose major.minor tracks
+  # ROCm's -- its patch component counts HIP builds, not ROCm patches, so drop
+  # it rather than let 7.0.51831 read as a ROCm far newer than every gate above.
+  set(_rccl_ep_rocm_stamp "${ROCM_PATH}/.info/version")
+  if(NOT EXISTS "${_rccl_ep_rocm_stamp}")
+    set(_rccl_ep_rocm_stamp "${ROCM_PATH}/core/.info/version")
+  endif()
+  if(EXISTS "${_rccl_ep_rocm_stamp}")
+    file(READ "${_rccl_ep_rocm_stamp}" _rccl_ep_rocm_version)
+    string(REGEX MATCH "([0-9]+)\\.([0-9]+)\\.([0-9]+)" _m "${_rccl_ep_rocm_version}")
+  else()
+    set(_rccl_ep_rocm_stamp "hip_VERSION=${hip_VERSION}")
+    string(REGEX MATCH "([0-9]+)\\.([0-9]+)" _m "${hip_VERSION}")
+    set(CMAKE_MATCH_3 0)
+  endif()
+  if(NOT _m)
+    message(FATAL_ERROR
+      "rccl_ep: could not read a ROCm version from ${_rccl_ep_rocm_stamp}. Pass it "
+      "explicitly as -DROCM_VERSION=<10000*major + 100*minor + patch>, e.g. 70002 "
+      "for ROCm 7.0.2.")
+  endif()
+  math(EXPR ROCM_VERSION
+       "(10000 * ${CMAKE_MATCH_1}) + (100 * ${CMAKE_MATCH_2}) + ${CMAKE_MATCH_3}")
+  if(RCCL_EP_STANDALONE)
+    message(STATUS "rccl_ep: ROCM_VERSION   ${ROCM_VERSION} (from ${_rccl_ep_rocm_stamp})")
+  endif()
+endif()
+
 add_library(rccl_ep SHARED python/rccl_ep_capi.hip)
 
 # No -fgpu-rdc. Without rocSHMEM there is no cross-TU device code, and a
@@ -69,6 +114,8 @@ target_include_directories(rccl_ep PRIVATE
   "${RCCL_EP_RCCL_INCLUDE_DIR}")
 
 target_link_libraries(rccl_ep PRIVATE "${RCCL_EP_RCCL_LIBRARY}" hip::device)
+
+target_compile_definitions(rccl_ep PRIVATE ROCM_VERSION=${ROCM_VERSION})
 
 target_compile_options(rccl_ep PRIVATE $<$<COMPILE_LANGUAGE:HIP>:-Wno-unused-value>)
 

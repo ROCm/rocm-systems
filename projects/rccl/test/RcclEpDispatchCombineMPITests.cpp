@@ -114,7 +114,7 @@ class RcclEpDispatchCombineTest : public MPITestBase
 {
 protected:
     void* handle_ = nullptr;
-    int   rank_ = 0, nRanks_ = 0, device_ = 0, numExperts_ = 0;
+    int   rank_ = 0, nRanks_ = 0, device_ = 0, numExperts_ = 0, topk_ = kTopk;
 
     void TearDown() override
     {
@@ -125,9 +125,12 @@ protected:
         MPITestBase::TearDown();
     }
 
-    // Refuse rather than fail on a runtime without symmetric memory. ep_configure is
-    // the real probe: it allocates and registers the window.
-    bool SetupEp()
+    // ENVIRONMENT ONLY. A runtime without symmetric memory, or a run that is not eight
+    // ranks on one node, is a reason to skip. rccl_ep itself failing is not, and this
+    // used to share one bool with the ep_create/ep_configure calls below -- which turned
+    // a null handle or a rejected configure into a green skip, the precise outcome these
+    // tests exist to catch.
+    bool EnvReady()
     {
         if (!validateTestPrerequisites(kRanks, kNoProcessLimit, kNoPowerOfTwoRequired,
                                        kRequireSingleNode, kRequireSingleNode)) {
@@ -143,41 +146,62 @@ protected:
         // than re-deriving from the global rank. Per-rank, so agree before the collectives.
         int localOk = (hipGetDevice(&device_) == hipSuccess) ? 1 : 0;
         int deviceOk = 0;
-        if (MPI_Allreduce(&localOk, &deviceOk, 1, MPI_INT, MPI_MIN, MPI_COMM_WORLD) != MPI_SUCCESS) return false;
-        if (deviceOk == 0) return false;
-
-        // A multiple of the rank count, so the owner of an expert is simply
-        // index / experts_per_rank.
-        numExperts_ = nRanks_ * kExpertsPerRank;
-
-        // Every rank must reach the same decision: a rank-0-only early return would leave
-        // the others blocked in the Bcast below, hanging the job instead of failing it.
-        std::vector<char> uid(static_cast<size_t>(ep_unique_id_size()), 0);
-        int ok = 1;
-        if (rank_ == 0 && ep_get_unique_id(uid.data()) != 0) ok = 0;
-        if (MPI_Bcast(uid.data(), static_cast<int>(uid.size()), MPI_BYTE, 0, MPI_COMM_WORLD) !=
-            MPI_SUCCESS) {
-            ok = 0;
+        if (MPI_Allreduce(&localOk, &deviceOk, 1, MPI_INT, MPI_MIN, MPI_COMM_WORLD) != MPI_SUCCESS) {
+            return false;
         }
-        int allOk = 0;
-        if (MPI_Allreduce(&ok, &allOk, 1, MPI_INT, MPI_MIN, MPI_COMM_WORLD) != MPI_SUCCESS) return false;
-        if (allOk == 0) return false;
+        return deviceOk != 0;
+    }
+
+    // The library calls, all of them red on failure. Every rank calls in unconditionally
+    // and the verdict is taken afterwards: ASSERT_MPI_* is itself an allreduce, so
+    // asserting on rank 0's unique id BEFORE the Bcast would leave the other seven
+    // blocked in it. (A rank that fails *inside* ep_configure still wedges the rest --
+    // that is a known library defect, not one a test-side assertion can reach.)
+    //
+    // `num_experts` must be a multiple of the rank count, so the owner of an expert is
+    // simply index / experts_per_rank.
+    void CreateEp(int numExperts, int numTopk)
+    {
+        numExperts_ = numExperts;
+        topk_       = numTopk;
+
+        std::vector<char> uid(static_cast<size_t>(ep_unique_id_size()), 0);
+        int idOk = (rank_ != 0 || ep_get_unique_id(uid.data()) == 0) ? 1 : 0;
+        ASSERT_MPI_EQ(MPI_SUCCESS, MPI_Bcast(uid.data(), static_cast<int>(uid.size()), MPI_BYTE, 0,
+                                             MPI_COMM_WORLD));
+        ASSERT_MPI_EQ(1, idOk);
 
         handle_ = ep_create(rank_, nRanks_, uid.data(), kTokens, kHidden, device_);
-        if (handle_ == nullptr) return false;
-        return ep_configure(handle_, numExperts_, kTopk) == 0;
+        ASSERT_MPI_TRUE(handle_ != nullptr);
+        ASSERT_MPI_EQ(0, ep_configure(handle_, numExperts_, topk_));
     }
 
     int DistinctDestinations(const std::vector<int32_t>& topk, int token) const
     {
         const int expertsPerRank = numExperts_ / nRanks_;
         std::set<int> owners;
-        for (int k = 0; k < kTopk; ++k) {
-            owners.insert(topk[static_cast<size_t>(token) * kTopk + k] / expertsPerRank);
+        for (int k = 0; k < topk_; ++k) {
+            owners.insert(topk[static_cast<size_t>(token) * topk_ + k] / expertsPerRank);
         }
         return static_cast<int>(owners.size());
     }
+
+    // Plan, dispatch, combine with an identity expert, and check every token came back
+    // scaled by the number of distinct ranks that own its top-k experts -- see the file
+    // header for why that value is computable on the host. Reads numExperts_ and topk_,
+    // so it can be re-run after a reconfigure at a different shape.
+    void RoundTrip();
 };
+
+// CreateEp and RoundTrip have to be void to use the ASSERT_MPI_* macros, and an
+// assertion inside a subroutine only returns from that subroutine -- both the FAIL()
+// arm and the GTEST_SKIP() arm. A caller that ignores that runs on with a null handle,
+// so every call to one of them goes through this.
+#define ASSERT_EP_STEP(call)                          \
+    do {                                              \
+        call;                                         \
+        if (HasFatalFailure() || IsSkipped()) return; \
+    } while (0)
 
 // Plain hipMalloc: only rccl_ep's own window has to be symmetric, not the payload.
 struct EpBuffers
@@ -223,14 +247,8 @@ size_t DispatchBytesPerRow(bool useFp8, size_t hiddenSf)
 // Combine carries the payload back with its weights, but not the expert indices.
 size_t CombineBytesPerRow() { return kHidden * sizeof(__hip_bfloat16) + kTopk * sizeof(float); }
 
-} // namespace
-
-TEST_F(RcclEpDispatchCombineTest, DispatchCombineRoundTrip)
+void RcclEpDispatchCombineTest::RoundTrip()
 {
-    if (!SetupEp()) {
-        GTEST_SKIP() << "rccl_ep needs NCCL_CUMEM_ENABLE=1 and 8 ranks on a single node";
-    }
-
     const int    cap       = nRanks_ * kTokens;
     const size_t hiddenSf  = (kHidden + 127) / 128;
     hipStream_t  stream    = nullptr;
@@ -238,13 +256,13 @@ TEST_F(RcclEpDispatchCombineTest, DispatchCombineRoundTrip)
     SCOPE_EXIT(if (stream != nullptr) (void)hipStreamDestroy(stream));
 
     std::vector<__hip_bfloat16> hX(static_cast<size_t>(kTokens) * kHidden);
-    std::vector<int32_t>        hTopk(static_cast<size_t>(kTokens) * kTopk);
-    std::vector<float>          hTopkW(static_cast<size_t>(kTokens) * kTopk, 1.0f / kTopk);
+    std::vector<int32_t>        hTopk(static_cast<size_t>(kTokens) * topk_);
+    std::vector<float>          hTopkW(static_cast<size_t>(kTokens) * topk_, 1.0f / topk_);
     for (int t = 0; t < kTokens; ++t) {
         const __hip_bfloat16 v = __float2bfloat16(TokenValue(rank_, t));
         std::fill_n(hX.begin() + static_cast<size_t>(t) * kHidden, kHidden, v);
-        for (int k = 0; k < kTopk; ++k) {
-            hTopk[static_cast<size_t>(t) * kTopk + k] = ExpertFor(rank_, t, k, numExperts_, nRanks_);
+        for (int k = 0; k < topk_; ++k) {
+            hTopk[static_cast<size_t>(t) * topk_ + k] = ExpertFor(rank_, t, k, numExperts_, nRanks_);
         }
     }
 
@@ -258,8 +276,8 @@ TEST_F(RcclEpDispatchCombineTest, DispatchCombineRoundTrip)
     ASSERT_MPI_EQ(hipSuccess, hipMalloc(&b.sendc,    static_cast<size_t>(nRanks_) * sizeof(int32_t)));
     ASSERT_MPI_EQ(hipSuccess, hipMalloc(&b.outX,     static_cast<size_t>(cap) * kHidden * sizeof(__hip_bfloat16)));
     ASSERT_MPI_EQ(hipSuccess, hipMalloc(&b.outSf,    static_cast<size_t>(cap) * hiddenSf * sizeof(float)));
-    ASSERT_MPI_EQ(hipSuccess, hipMalloc(&b.outTopk,  static_cast<size_t>(cap) * kTopk * sizeof(int32_t)));
-    ASSERT_MPI_EQ(hipSuccess, hipMalloc(&b.outTw,    static_cast<size_t>(cap) * kTopk * sizeof(float)));
+    ASSERT_MPI_EQ(hipSuccess, hipMalloc(&b.outTopk,  static_cast<size_t>(cap) * topk_ * sizeof(int32_t)));
+    ASSERT_MPI_EQ(hipSuccess, hipMalloc(&b.outTw,    static_cast<size_t>(cap) * topk_ * sizeof(float)));
     ASSERT_MPI_EQ(hipSuccess, hipMalloc(&b.outSrc,   static_cast<size_t>(cap) * sizeof(int32_t)));
     ASSERT_MPI_EQ(hipSuccess, hipMalloc(&b.combined, static_cast<size_t>(kTokens) * kHidden * sizeof(__hip_bfloat16)));
 
@@ -324,14 +342,56 @@ TEST_F(RcclEpDispatchCombineTest, DispatchCombineRoundTrip)
             }
         }
     }
+}
 
+} // namespace
+
+TEST_F(RcclEpDispatchCombineTest, DispatchCombineRoundTrip)
+{
+    if (!EnvReady()) {
+        GTEST_SKIP() << "rccl_ep needs NCCL_CUMEM_ENABLE=1 and 8 ranks on a single node";
+    }
+    ASSERT_EP_STEP(CreateEp(nRanks_ * kExpertsPerRank, kTopk));
+    ASSERT_EP_STEP(RoundTrip());
+}
+
+// ep_configure is re-enterable: called again at a different shape it tears the window
+// down, reallocates and re-registers it, rebuilds the devComm and refills the peer
+// views. Nothing else covered that path, and it is not hypothetical -- the Python
+// layer reconfigures whenever a caller changes num_experts or num_topk between steps.
+//
+// The second shape changes BOTH: num_experts alone would leave the window the same
+// size, so a reconfigure that quietly kept the old allocation would still pass. topk
+// scales `y` and `cw`, so the round trip below can only hold if the new layout is the
+// one in force. Running the round trip at each shape is what proves the first configure
+// was live too, rather than only the last one.
+TEST_F(RcclEpDispatchCombineTest, ReconfigureBetweenShapes)
+{
+    if (!EnvReady()) {
+        GTEST_SKIP() << "rccl_ep needs NCCL_CUMEM_ENABLE=1 and 8 ranks on a single node";
+    }
+
+    ASSERT_EP_STEP(CreateEp(nRanks_ * (kExpertsPerRank / 2), kTopk / 2));
+    ASSERT_EP_STEP(RoundTrip());
+
+    numExperts_ = nRanks_ * kExpertsPerRank;
+    topk_       = kTopk;
+    ASSERT_MPI_EQ(0, ep_configure(handle_, numExperts_, topk_));
+    ASSERT_EP_STEP(RoundTrip());
+
+    // Repeating the shape it already has is the early-return branch, and it must not
+    // free and rebuild a window the caller is still using -- the round trip after it
+    // reads the same window.
+    ASSERT_MPI_EQ(0, ep_configure(handle_, numExperts_, topk_));
+    ASSERT_EP_STEP(RoundTrip());
 }
 
 TEST_F(RcclEpDispatchCombineTest, DispatchBf16AndFp8Bandwidth)
 {
-    if (!SetupEp()) {
+    if (!EnvReady()) {
         GTEST_SKIP() << "rccl_ep needs NCCL_CUMEM_ENABLE=1 and 8 ranks on a single node";
     }
+    ASSERT_EP_STEP(CreateEp(nRanks_ * kExpertsPerRank, kTopk));
 
     const int    cap      = nRanks_ * kTokens;
     const size_t hiddenSf = (kHidden + 127) / 128;

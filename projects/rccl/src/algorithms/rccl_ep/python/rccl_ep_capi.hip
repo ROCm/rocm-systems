@@ -164,6 +164,13 @@ void* ep_create(int rank, int num_ranks, const char* unique_id,
     fprintf(stderr, "[rccl_ep] num_ranks %d must be in [1, kMaxRanks=%d]\n", num_ranks, kMaxRanks);
     return nullptr;
   }
+  // EpWindowLayout::make widens this to size_t, so a negative value sign-extends
+  // and wraps every offset in the window; zero reserves empty regions that the
+  // slot arithmetic then indexes anyway.
+  if (max_tokens_per_rank < 1) {
+    fprintf(stderr, "[rccl_ep] max_tokens_per_rank %d must be positive\n", max_tokens_per_rank);
+    return nullptr;
+  }
 
   auto* h = new EpHandle();
   h->cfg.num_ranks = num_ranks;

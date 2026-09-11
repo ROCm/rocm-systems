@@ -21,6 +21,66 @@ namespace rccl_ep {
 // B0, A1, B2, A3, interleaved across ranks. Pre-reducing reorders that, and
 // float addition is not associative, so bit-exactness fails.
 
+// Sum `nrow` rows of `src`, named by `rows` and applied in the order given,
+// into the single row `dst`, seeded by up to two optional bias rows. All four
+// pointers address a ROW, not a tensor -- the caller has already applied its
+// own token stride.
+//
+// Both combine paths reduce exactly this way and under the same contract:
+// accumulate in fp32, round once at the end, and apply the terms as bias0,
+// bias1, then rows in ascending k. That order is the bit-exactness guarantee,
+// so it is defined here once rather than in each path.
+//
+// Vectorised at dwordx4: scalar 2-byte loads are an 8x loss of load width, and
+// the split changes only which lane owns which element, never the order of
+// additions applied to any single element.
+__device__ __forceinline__ void reduce_rows_bf16(bf16_t* dst,
+                                                 const bf16_t* __restrict__ src,
+                                                 const int32_t* rows, int nrow,
+                                                 const bf16_t* __restrict__ bias0,
+                                                 const bf16_t* __restrict__ bias1,
+                                                 int hidden, int lane) {
+  constexpr int kPerVec = 8; // 8 bf16 = 16 B
+  const int nvec = hidden / kPerVec;
+  for (int v = lane; v < nvec; v += kWarpSize) {
+    float acc[kPerVec];
+    const int h0 = v * kPerVec;
+#pragma unroll
+    for (int u = 0; u < kPerVec; ++u) acc[u] = 0.f;
+    if (bias0) {
+      const uint4 b = *reinterpret_cast<const uint4*>(bias0 + h0);
+      const bf16_t* bb = reinterpret_cast<const bf16_t*>(&b);
+#pragma unroll
+      for (int u = 0; u < kPerVec; ++u) acc[u] += __bfloat162float(bb[u]);
+    }
+    if (bias1) {
+      const uint4 b = *reinterpret_cast<const uint4*>(bias1 + h0);
+      const bf16_t* bb = reinterpret_cast<const bf16_t*>(&b);
+#pragma unroll
+      for (int u = 0; u < kPerVec; ++u) acc[u] += __bfloat162float(bb[u]);
+    }
+    for (int j = 0; j < nrow; ++j) { // ascending k, as strict order requires
+      const uint4 y = *reinterpret_cast<const uint4*>(src + (size_t)rows[j] * hidden + h0);
+      const bf16_t* yy = reinterpret_cast<const bf16_t*>(&y);
+#pragma unroll
+      for (int u = 0; u < kPerVec; ++u) acc[u] += __bfloat162float(yy[u]);
+    }
+    uint4 o;
+    bf16_t* oo = reinterpret_cast<bf16_t*>(&o);
+#pragma unroll
+    for (int u = 0; u < kPerVec; ++u) oo[u] = __float2bfloat16(acc[u]);
+    *reinterpret_cast<uint4*>(dst + h0) = o;
+  }
+  // scalar tail when hidden is not a multiple of 8
+  for (int h = nvec * kPerVec + lane; h < hidden; h += kWarpSize) {
+    float acc = 0.f;
+    if (bias0) acc += __bfloat162float(bias0[h]);
+    if (bias1) acc += __bfloat162float(bias1[h]);
+    for (int j = 0; j < nrow; ++j) acc += __bfloat162float(src[(size_t)rows[j] * hidden + h]);
+    dst[h] = __float2bfloat16(acc);
+  }
+}
+
 // Expert side: push locally-owned values back to the origin, preserving slot k
 // so the origin accumulates in order. Input layout is selected by `grouped` and
 // `row_map`: grouped=1 is one already-reduced row per token pushed to k_last;
@@ -70,9 +130,7 @@ __global__ void combine_impl(EpConfig cfg,
       // with a single rounding at the end; bf16 accumulation would not match.
       const int kl = last_local_slot(recv_topk, i, K);
       if (kl >= 0) {
-        bf16_t* dst = w.y() + slot * cfg.hidden;
-        // Row bases hoisted and vectorised at dwordx4. This writes to a PEER,
-        // where narrow stores cost more than against local HBM, so keep it wide.
+        // Row bases hoisted out of the element loop.
         int32_t row[kMaxTopk];
         int nrow = 0;
         for (int k = 0; k < K; ++k) {
@@ -80,30 +138,11 @@ __global__ void combine_impl(EpConfig cfg,
           const int r = row_map[(size_t)i * K + k];
           if (r >= 0) row[nrow++] = r;
         }
-        constexpr int kPerVec = 8;
-        const int nvec = cfg.hidden / kPerVec;
-        for (int v = lane; v < nvec; v += kWarpSize) {
-          float acc[kPerVec];
-          const int h0 = v * kPerVec;
-#pragma unroll
-          for (int u = 0; u < kPerVec; ++u) acc[u] = 0.f;
-          for (int j = 0; j < nrow; ++j) {   // ascending k, as strict order requires
-            const uint4 y = *reinterpret_cast<const uint4*>(in_y + (size_t)row[j] * cfg.hidden + h0);
-            const bf16_t* yy = reinterpret_cast<const bf16_t*>(&y);
-#pragma unroll
-            for (int u = 0; u < kPerVec; ++u) acc[u] += __bfloat162float(yy[u]);
-          }
-          uint4 o;
-          bf16_t* oo = reinterpret_cast<bf16_t*>(&o);
-#pragma unroll
-          for (int u = 0; u < kPerVec; ++u) oo[u] = __float2bfloat16(acc[u]);
-          *reinterpret_cast<uint4*>(dst + h0) = o;
-        }
-        for (int h = nvec * kPerVec + lane; h < cfg.hidden; h += kWarpSize) {
-          float acc = 0.f;
-          for (int j = 0; j < nrow; ++j) acc += __bfloat162float(in_y[(size_t)row[j] * cfg.hidden + h]);
-          dst[h] = __float2bfloat16(acc);
-        }
+        // No bias on this side; the origin seeds its own. The store goes to a
+        // PEER, where narrow stores cost more than against local HBM, which is
+        // the other reason reduce_rows_bf16 keeps them at dwordx4.
+        reduce_rows_bf16(w.y() + slot * cfg.hidden, in_y, row, nrow,
+                         /*bias0=*/nullptr, /*bias1=*/nullptr, cfg.hidden, lane);
       }
       if (in_w) {
         for (int k = 0; k < K; ++k) {
@@ -185,71 +224,24 @@ __global__ void combine_reduce_epilogue_impl(EpConfig cfg, WindowView self,
 
     // Row base for each contributing slot, hoisted out of the element loop.
     // Recomputing owner and slot per element cost a topk_idx load and an
-    // integer divide for every one of hidden x K accesses.
+    // integer divide for every one of hidden x K accesses. Packed rather than
+    // indexed by k, so the reduction carries no per-element branch; ascending k
+    // is preserved, which is the part the bit-exactness contract cares about.
     int32_t row[kMaxTopk];
+    int nrow = 0;
     for (int k = 0; k < K; ++k) {
-      if (!take[k]) {
-        row[k] = -1;
-        continue;
-      }
+      if (!take[k]) continue;
       const int owner = topk_idx[(size_t)t * K + k] / epr;
       const size_t slot = EpWindowLayout::slot(cfg, owner, t);
       // Must mirror the sender's layout: one row per slot when grouped, one
       // per (slot, k) when reading the expanded layout.
-      row[k] = (int32_t)(grouped ? slot : (slot * K + k));
+      row[nrow++] = (int32_t)(grouped ? slot : (slot * K + k));
     }
 
-    // Vectorised at dwordx4, matching the dispatch path; scalar 2-byte loads
-    // here are an 8x loss of load width.
-    //
-    // Bit-exactness is preserved: this changes only which lane owns which
-    // element, never the order of additions applied to any single element,
-    // which stays bias then ascending k.
-    constexpr int kPerVec = 8; // 8 bf16 = 16 B
-    const int nvec = cfg.hidden / kPerVec;
-    const bf16_t* ybase = self.y();
-    for (int v = lane; v < nvec; v += kWarpSize) {
-      float acc[kPerVec];
-      const int h0 = v * kPerVec;
-#pragma unroll
-      for (int u = 0; u < kPerVec; ++u) acc[u] = 0.f;
-      if (bias0) {
-        const uint4 b = *reinterpret_cast<const uint4*>(bias0 + (size_t)t * cfg.hidden + h0);
-        const bf16_t* bb = reinterpret_cast<const bf16_t*>(&b);
-#pragma unroll
-        for (int u = 0; u < kPerVec; ++u) acc[u] += __bfloat162float(bb[u]);
-      }
-      if (bias1) {
-        const uint4 b = *reinterpret_cast<const uint4*>(bias1 + (size_t)t * cfg.hidden + h0);
-        const bf16_t* bb = reinterpret_cast<const bf16_t*>(&b);
-#pragma unroll
-        for (int u = 0; u < kPerVec; ++u) acc[u] += __bfloat162float(bb[u]);
-      }
-      for (int k = 0; k < K; ++k) { // strict k order
-        if (row[k] < 0) continue;
-        const uint4 y = *reinterpret_cast<const uint4*>(ybase + (size_t)row[k] * cfg.hidden + h0);
-        const bf16_t* yy = reinterpret_cast<const bf16_t*>(&y);
-#pragma unroll
-        for (int u = 0; u < kPerVec; ++u) acc[u] += __bfloat162float(yy[u]);
-      }
-      uint4 o;
-      bf16_t* oo = reinterpret_cast<bf16_t*>(&o);
-#pragma unroll
-      for (int u = 0; u < kPerVec; ++u) oo[u] = __float2bfloat16(acc[u]);
-      *reinterpret_cast<uint4*>(out + (size_t)t * cfg.hidden + h0) = o;
-    }
-
-    // scalar tail when hidden is not a multiple of 8
-    for (int h = nvec * kPerVec + lane; h < cfg.hidden; h += kWarpSize) {
-      float acc = 0.f;
-      if (bias0) acc += __bfloat162float(bias0[(size_t)t * cfg.hidden + h]);
-      if (bias1) acc += __bfloat162float(bias1[(size_t)t * cfg.hidden + h]);
-      for (int k = 0; k < K; ++k) {
-        if (row[k] < 0) continue;
-        acc += __bfloat162float(ybase[(size_t)row[k] * cfg.hidden + h]);
-      }
-      out[(size_t)t * cfg.hidden + h] = __float2bfloat16(acc);
-    }
+    const size_t tbase = (size_t)t * cfg.hidden;
+    reduce_rows_bf16(out + tbase, self.y(), row, nrow,
+                     bias0 ? bias0 + tbase : nullptr,
+                     bias1 ? bias1 + tbase : nullptr, cfg.hidden, lane);
 
     if (out_w) {
       for (int k = lane; k < K; k += kWarpSize) {

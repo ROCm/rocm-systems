@@ -90,6 +90,23 @@ def _ptr(t: Optional[torch.Tensor]) -> int:
     return 0 if t is None else t.data_ptr()
 
 
+def _bias(t: Optional[torch.Tensor], name: str) -> Optional[torch.Tensor]:
+    """Normalise a combine bias to what the kernel actually reads.
+
+    combine.h loads bias0/bias1 as a dense bf16 [num_tokens, hidden] at 16-byte
+    stride. A column slice of a wider buffer has the right shape and the wrong
+    stride, and a float32 bias has the right stride and half the reach; neither
+    raises anywhere, they just read from the wrong offsets. Copy the first and
+    refuse the second, rather than converting silently -- a down-cast to bf16
+    would change the result the strict-order accumulation exists to make exact.
+    """
+    if t is None:
+        return None
+    if t.dtype != torch.bfloat16:
+        raise TypeError(f"{name} must be bfloat16, got {t.dtype}")
+    return t.contiguous()
+
+
 def _align(x: int, y: int) -> int:
     return ((x + y - 1) // y) * y
 
@@ -215,7 +232,12 @@ class ElasticBuffer:
         # neither accepts the other's tensors, so follow the backend.
         t = torch.frombuffer(bytearray(buf.raw), dtype=torch.uint8).clone()
         t = t.cuda() if dist.get_backend(group) != "gloo" else t.cpu()
-        dist.broadcast(t, src=0, group=group)
+        # `group_src=0` names rank 0 *within* group, matching the rank_idx == 0
+        # source check above. `src=0` is a global rank: torch raises on an EP
+        # subgroup that excludes global rank 0, and on one that holds it at a
+        # non-zero group index the zero-filled buffer wins the broadcast and
+        # every rank calls ncclCommInitRank on a non-id -- the hang above.
+        dist.broadcast(t, group_src=0, group=group)
         t = t.cpu()
         raw = bytes(bytearray(t.tolist()))
 
@@ -514,6 +536,7 @@ class ElasticBuffer:
         b0, b1 = (bias, None)
         if isinstance(bias, tuple):
             b0, b1 = bias
+        b0, b1 = _bias(b0, "bias0"), _bias(b1, "bias1")
         in_w = topk_weights.contiguous().float() if topk_weights is not None else None
 
         out = torch.empty((num_tokens, self.hidden), dtype=torch.bfloat16, device=x.device)
