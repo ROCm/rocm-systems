@@ -201,9 +201,10 @@ class IPCEventEmulated : public Event {
   struct ihipIpcEvent_t {
     std::string ipc_name_;                //!< Name of the shared memory object for IPC
     ihipIpcEventShmem_t* ipc_shmem_;      //!< Pointer to mapped IPC shared memory structure
+    bool ipc_creator_;                    //!< This process created ipc_name_ (and may remove it)
 
-    ihipIpcEvent_t() : ipc_shmem_(nullptr) {
-      ipc_name_.reserve(32);  // Reserve space for typical IPC name "/hip_<pid>_<counter>"
+    ihipIpcEvent_t() : ipc_shmem_(nullptr), ipc_creator_(false) {
+      ipc_name_.reserve(32);  // Reserve space for typical IPC name "/hip_<pid>_<nonce>_<counter>"
     }
   };
   ihipIpcEvent_t ipc_evt_;
@@ -219,16 +220,15 @@ class IPCEventEmulated : public Event {
       if (!amd::Os::MemoryUnmapFile(ipc_evt_.ipc_shmem_, sizeof(hip::ihipIpcEventShmem_t))) {
         // print hipErrorInvalidHandle;
       }
-      if (owners == 0) {
+      // Remove the name only when the creator destroys the event (no further records follow)
+      // or the last user leaves. An importer must not: the creator may still re-record the
+      // event, and the next hipIpcOpenEventHandle of the same handle must find the live object.
+      // The former unconditional shm_unlink here made every later import create a fresh,
+      // zero-filled object whose stream wait never blocked.
+      if (ipc_evt_.ipc_creator_ || owners == 0) {
         amd::Os::shm_unlink(ipc_evt_.ipc_name_);
       }
     }
-#if !defined(_MSC_VER)
-    // Clean up the POSIX shared memory object
-    if (!ipc_evt_.ipc_name_.empty()) {
-      shm_unlink(ipc_evt_.ipc_name_.c_str());
-    }
-#endif
   }
   bool createIpcEventShmemIfNeeded();
   hipError_t GetHandle(ihipIpcEventHandle_t* handle) override;
