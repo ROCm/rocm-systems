@@ -72,8 +72,13 @@ public:
   }
 
 private:
-  int nBlocks_;
-  FlagType* flags_;
+  // Initialized in-class so a default-constructed mailbox is deterministic.
+  // IpcGpuBarrier holds a std::array<DeviceMailbox, NRANKS> but fills only the
+  // first nRanks entries when RCCL_DDA_NRANKS_RELAX admits a smaller clique;
+  // without these the unused tail would carry indeterminate values into the
+  // kernel argument.
+  int nBlocks_{0};
+  FlagType* flags_{nullptr};
 
   __device__ inline int getFlagIdx(int rank, int block) {
     return block * NRANKS + rank;

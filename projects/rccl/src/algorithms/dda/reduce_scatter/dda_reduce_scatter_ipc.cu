@@ -96,7 +96,7 @@ bool ncclReduceScatterDdaIpcEligible(ncclComm* comm, const void* sendbuff, void*
   if (comm->nNodes != 1) {
     return false;
   }
-  if (!ncclDdaNranksSupported(comm->nRanks)) {
+  if (!ncclDdaIpcNranksSupported(comm->nRanks)) {
     return false;
   }
   if (op != ncclSum) {

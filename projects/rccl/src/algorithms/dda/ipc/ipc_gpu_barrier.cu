@@ -29,7 +29,6 @@ __host__ DeviceMailbox::DeviceMailbox(int nRanks, int nBlocks, void* flagsBuf)
 /* static */ __host__ std::pair<std::unique_ptr<DeviceBuffer>, DeviceMailbox> DeviceMailbox::mallocAndInit(
   int nRanks, int nBlocks) {
   assert(nRanks <= NRANKS);
-  (void)nRanks;
   // Always allocate/stride for NRANKS so getFlagIdx(rank, block) stays valid
   // regardless of the active participant count.
   auto flagBuf = std::make_unique<DeviceBuffer>(NRANKS * nBlocks * sizeof(FlagType));

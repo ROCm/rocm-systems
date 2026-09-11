@@ -1243,6 +1243,11 @@
           "name": "DdaIpcEligibilityTest",
           "description": "Dda IPC eligibility tests",
           "test_filter": "DdaIpcEligibilityTest.*"
+        },
+        {
+          "name": "DdaNranksRelaxTest",
+          "description": "Low-rank (2..8) DDA IPC AllReduce eligibility tests (RCCL_DDA_NRANKS_RELAX)",
+          "test_filter": "DdaNranksRelaxTest.*:DdaNranksRelaxIsolatedTest.*"
         }
       ]
     },

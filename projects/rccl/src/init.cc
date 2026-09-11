@@ -2873,9 +2873,7 @@ static ncclResult_t ncclCommInitRankFunc(struct ncclAsyncJob* job_) {
   if (!job->parent && !job->isGrow) {
     if (ncclDdaUseFabricPath(comm)) {
       NCCLCHECKGOTO(ncclDdaFabricCommInit(comm), res, fail);
-    } else if (comm->nNodes == 1 &&
-               (comm->nRanks == 8 ||
-                (ncclDdaNranksRelaxEnabled() && comm->nRanks >= 2 && comm->nRanks <= 7))) {
+    } else if (comm->nNodes == 1 && ncclDdaIpcNranksSupported(comm->nRanks)) {
       NCCLCHECKGOTO(ncclDdaIpcCommInit(comm), res, fail);
     }
   }

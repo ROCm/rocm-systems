@@ -101,7 +101,7 @@ bool ncclAllGatherDdaIpcEligible(ncclComm* comm, const void* sendbuff, void* rec
   if (comm->nNodes != 1) {
     return false;
   }
-  if (!ncclDdaNranksSupported(comm->nRanks)) {
+  if (!ncclDdaIpcNranksSupported(comm->nRanks)) {
     return false;
   }
   if (datatype != ncclFloat32 && datatype != ncclFloat16 && datatype != ncclBfloat16) {
