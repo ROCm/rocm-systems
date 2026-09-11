@@ -15,6 +15,7 @@ from consan_coverage_gate import (  # noqa: E402
     CoverageParseError,
     acceptance_decision,
     parse_coverage_evidence,
+    parse_coverage_site_records,
 )
 from consan_validation_test_support import (  # noqa: E402
     coverage,
@@ -26,6 +27,34 @@ from consan_validation_test_support import (  # noqa: E402
 
 
 class ConSanCoverageGateTest(unittest.TestCase):
+    def test_accepts_current_policy_reason_vocabulary(self) -> None:
+        reasons = (
+            "access_family_disabled",
+            "operation_kind_excluded",
+            "reserved_for_synchronization_policy",
+            "target_capability_unavailable",
+            "range_encoding_unavailable",
+            "tracking_disabled",
+            "engine_mutation_only",
+            "invalid_barrier_encoding",
+            "ambiguous_sequence_membership",
+            "missing_completing_event",
+            "redundant_adjacent_full_barrier",
+            "missing_execution_owner",
+            "missing_directional_access_window",
+            "unsupported_address_source",
+            "missing_operands",
+            "unsupported_dynamic_outcome",
+            "unsupported_encoding",
+            "association_unavailable",
+            "communication_not_applicable",
+            "conflicting_physical_aliases",
+        )
+        records = parse_coverage_site_records(
+            log(*(coverage_site(reason=reason) for reason in reasons))
+        )
+        self.assertEqual(tuple(record.reason for record in records), reasons)
+
     def test_accepts_complete_exact_evidence(self) -> None:
         decision = acceptance_decision(log(coverage(), verdict()))
         self.assertTrue(decision.accepted, decision.reasons)
