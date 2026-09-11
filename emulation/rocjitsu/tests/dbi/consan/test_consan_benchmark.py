@@ -18,28 +18,40 @@ from consan_validation_test_support import coverage, verdict
 
 def _run(
     metric: str,
-    value: float,
+    values: tuple[float, float],
     *,
     wall_ms: float = 1000.0,
-    run_ms: float | None = None,
-    instrumentation_before_run_ms: float = 0.0,
-    instrumentation_during_run_ms: float = 0.0,
+    run_ms: tuple[float, float] | None = None,
+    instrumentation_ms: tuple[float, float] = (0.0, 0.0),
+    startup_ms: float = 0.0,
+    direct_runtime: bool = False,
 ) -> dict:
     if run_ms is None:
-        run_ms = wall_ms / 2
+        run_ms = (wall_ms / 2, wall_ms / 2)
+    runs = []
+    for index in range(2):
+        operation = {
+            "index": index + 1,
+            "result": {
+                "passed": True,
+                "metrics": {metric: values[index], "parameter_count": 123},
+            },
+            "phase_ms": run_ms[index],
+            "instrumentation_ms": instrumentation_ms[index],
+        }
+        if direct_runtime:
+            operation["runtime_ms"] = run_ms[index]
+        runs.append(operation)
     return {
         "wall_ms": wall_ms,
         "payload": {
-            "result": {
-                "passed": True,
-                "metrics": {metric: value, "parameter_count": 123},
-            },
-            "phase_ms": {"run": run_ms},
+            "result": runs[0]["result"],
+            "runs": runs,
+            "phase_ms": {"run": run_ms[0]},
             "instrumentation_ms": {
-                "before_run": instrumentation_before_run_ms,
-                "during_run": instrumentation_during_run_ms,
-                "total": instrumentation_before_run_ms
-                + instrumentation_during_run_ms,
+                "before_run": startup_ms - sum(instrumentation_ms),
+                "during_run": sum(instrumentation_ms),
+                "total": startup_ms,
             },
             "peak_device_memory": {
                 "allocated_bytes": 1024,
@@ -67,6 +79,8 @@ class ConSanBenchmarkTest(unittest.TestCase):
             timeout=7,
             resume=resume,
             run_identity={"fixture": "identity"},
+            rocprofv3=Path("/fixture/rocprofv3"),
+            hipblaslt_bench=None,
         )
 
     def test_resume_reuses_only_a_fingerprinted_completed_cell(self) -> None:
@@ -104,12 +118,92 @@ class ConSanBenchmarkTest(unittest.TestCase):
                 run.assert_not_called()
             self.assertEqual(second, first)
 
+    def test_rocprof_profiles_the_exact_payload_command(self) -> None:
+        workload = benchmark.Workload("cell", "fixture", "latency_ms", {})
+        output = benchmark.RESULT_MARKER + json.dumps(
+            {"result": {"passed": True, "metrics": {"latency_ms": 1.0}}}
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            args = self._runner_args(directory)
+            profile = Path(directory) / "profile"
+            with mock.patch.object(
+                benchmark.subprocess,
+                "run",
+                return_value=SimpleNamespace(stdout=output, stderr="", returncode=0),
+            ) as run:
+                benchmark._run_one(
+                    args=args,
+                    workload=workload,
+                    mode=None,
+                    audit_sites=False,
+                    label="inventory",
+                    profile_directory=profile,
+                )
+            command = run.call_args.args[0]
+            separator = command.index("--")
+            self.assertEqual(
+                command[:separator],
+                [
+                    "/fixture/rocprofv3",
+                    "--kernel-trace",
+                    "--output-format",
+                    "csv",
+                    "--output-directory",
+                    str(profile),
+                ],
+            )
+            self.assertEqual(
+                command[separator + 1 :], benchmark._payload_command(args, workload)
+            )
+
+    def test_allowlist_content_participates_in_cell_fingerprint(self) -> None:
+        workload = benchmark.Workload("cell", "fixture", "latency_ms", {})
+        output = benchmark.RESULT_MARKER + json.dumps(
+            {"result": {"passed": True, "metrics": {"latency_ms": 1.0}}}
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            args = self._runner_args(directory)
+            allowlist = Path(directory) / "allowlist.txt"
+            allowlist.write_text("kernel-a\n", encoding="utf-8")
+            with mock.patch.object(
+                benchmark.subprocess,
+                "run",
+                return_value=SimpleNamespace(stdout=output, stderr="", returncode=0),
+            ):
+                benchmark._run_one(
+                    args=args,
+                    workload=workload,
+                    mode=None,
+                    audit_sites=False,
+                    label="native",
+                    kernel_allowlist_file=allowlist,
+                )
+            args.resume = True
+            allowlist.write_text("kernel-b\n", encoding="utf-8")
+            with mock.patch.object(
+                benchmark.subprocess,
+                "run",
+                return_value=SimpleNamespace(stdout=output, stderr="", returncode=0),
+            ) as run:
+                benchmark._run_one(
+                    args=args,
+                    workload=workload,
+                    mode=None,
+                    audit_sites=False,
+                    label="native",
+                    kernel_allowlist_file=allowlist,
+                )
+            run.assert_called_once()
+
     def test_timeout_preserves_partial_output(self) -> None:
         workload = benchmark.Workload("cell", "fixture", "latency_ms", {})
         with tempfile.TemporaryDirectory() as directory:
             args = self._runner_args(directory)
             timeout = subprocess.TimeoutExpired(
-                cmd=["fixture"], timeout=args.timeout, output=b"partial stdout\n", stderr=b"partial stderr\n"
+                cmd=["fixture"],
+                timeout=args.timeout,
+                output=b"partial stdout\n",
+                stderr=b"partial stderr\n",
             )
             with mock.patch.object(benchmark.subprocess, "run", side_effect=timeout):
                 with self.assertRaisesRegex(benchmark.BenchmarkError, "timed out"):
@@ -125,18 +219,20 @@ class ConSanBenchmarkTest(unittest.TestCase):
                 "partial stdout\npartial stderr\n",
             )
 
-    def test_workloads_measure_one_bounded_operation_per_process(self) -> None:
-        self.assertEqual(len(benchmark.WORKLOADS), 3)
-        for workload in benchmark.WORKLOADS:
+    def test_workloads_measure_two_bounded_operations_per_process(self) -> None:
+        self.assertEqual(len(benchmark.WORKLOADS), 5)
+        for workload in benchmark.WORKLOADS[:3]:
             self.assertEqual(workload.config["warmup_steps"], 0)
             self.assertEqual(workload.config["steps"], 1)
 
-        prefill, decode, moe = benchmark.WORKLOADS
+        prefill, decode, moe, gluon, hipblaslt = benchmark.WORKLOADS
         self.assertEqual(prefill.config["request"]["generate_tokens"], 0)
         self.assertEqual(decode.config["mode"], "continuous_batch")
         self.assertEqual(decode.config["request"]["generate_tokens"], 1)
         self.assertEqual(decode.primary_metric, "decode_latency_ms")
         self.assertEqual(moe.config["request"]["generate_tokens"], 0)
+        self.assertEqual(gluon.payload, "gluon")
+        self.assertEqual(hipblaslt.payload, "hipblaslt")
 
     def test_site_audit_is_enabled_by_default_with_hidden_opt_out(self) -> None:
         common = [
@@ -146,6 +242,8 @@ class ConSanBenchmarkTest(unittest.TestCase):
             "/aorta",
             "--hook",
             "/hook",
+            "--rocprofv3",
+            "/rocprofv3",
             "--output-dir",
             "/output",
         ]
@@ -179,14 +277,14 @@ class ConSanBenchmarkTest(unittest.TestCase):
         self.assertEqual(instrumented["HSA_TOOLS_LIB"], "/new-hook")
         self.assertEqual(instrumented["RJ_CONSAN_MODE"], "sampled")
         self.assertEqual(instrumented["RJ_CONSAN_LOG"], "3")
-        self.assertEqual(
-            instrumented["RJ_CONSAN_KERNEL_ALLOWLIST_FILE"], "/names.txt"
-        )
+        self.assertEqual(instrumented["RJ_CONSAN_KERNEL_ALLOWLIST_FILE"], "/names.txt")
         self.assertNotIn("HSA_MODEL_LIB", instrumented)
 
     def test_payload_parser_requires_one_successful_machine_record(self) -> None:
-        text = "noise\n" + benchmark.RESULT_MARKER + json.dumps(
-            {"result": {"passed": True}}
+        text = (
+            "noise\n"
+            + benchmark.RESULT_MARKER
+            + json.dumps({"result": {"passed": True}})
         )
         self.assertTrue(benchmark._parse_payload(text)["result"]["passed"])
         with self.assertRaises(benchmark.BenchmarkError):
@@ -206,60 +304,86 @@ class ConSanBenchmarkTest(unittest.TestCase):
         with self.assertRaises(benchmark.BenchmarkError):
             benchmark._coverage_summary("not coverage evidence")
 
-    def test_summary_splits_instrumentation_from_runtime(self) -> None:
+    def test_summary_splits_startup_and_matching_run_ordinals(self) -> None:
         workload = benchmark.Workload("id", "description", "latency_ms", {})
         modes = {}
         for index, mode in enumerate(PROFILE_IDS, 1):
             run = _run(
                 "latency_ms",
-                20.0 + index,
-                run_ms=1020.0 + 100.0 * index,
-                instrumentation_before_run_ms=300.0,
-                instrumentation_during_run_ms=700.0 + 100.0 * index,
+                (20.0 + index, 30.0 + index),
+                run_ms=(1120.0 + 100.0 * index, 630.0),
+                instrumentation_ms=(800.0 + 100.0 * index, 30.0),
+                startup_ms=1100.0 + 100.0 * index,
             )
             run["coverage"] = {"accepted": True}
             modes[mode] = run
         summary = benchmark._summarize_workload(
             workload,
             [
-                _run("latency_ms", 9.0, run_ms=19.0),
-                _run("latency_ms", 11.0, run_ms=21.0),
+                _run("latency_ms", (9.0, 29.0), run_ms=(19.0, 29.0)),
+                _run("latency_ms", (11.0, 31.0), run_ms=(21.0, 31.0)),
             ],
+            _run("latency_ms", (12.0, 33.0), run_ms=(22.0, 33.0)),
             modes,
-            {"payload": {"kernel_names": ["Cijk_fixture.kd"]}},
             ("Cijk_fixture.kd",),
         )
-        self.assertEqual(summary["native_latency_ms"], 10.0)
-        self.assertEqual(summary["native_runtime_ms"], 20.0)
+        self.assertEqual(summary["native_latency_ms"], [10.0, 30.0])
+        self.assertEqual(summary["native_runtime_ms"], [20.0, 30.0])
+        self.assertEqual(summary["native_validation_runtime_ms"], [22.0, 33.0])
+        self.assertAlmostEqual(summary["native_validation_drift_ratio"][0], 0.1)
+        self.assertAlmostEqual(summary["native_validation_drift_ratio"][1], 0.1)
         for index, mode in enumerate(PROFILE_IDS, 1):
+            self.assertEqual(summary["modes"][mode]["runtime_ratio"], [16.0, 20.0])
             self.assertEqual(
-                summary["modes"][mode]["runtime_ratio"], 16.0
-            )
-            self.assertEqual(
-                summary["modes"][mode]["startup_ms"], 1000.0 + 100.0 * index
+                summary["modes"][mode]["startup_ms"], 1100.0 + 100.0 * index
             )
             self.assertEqual(summary["modes"][mode]["coverage"], {"accepted": True})
+
+    def test_summary_accepts_a_non_model_payload_without_parameters(self) -> None:
+        workload = benchmark.Workload("id", "description", "latency_ms", {})
+        runs = [_run("latency_ms", (2.0, 1.0)) for _ in range(2)]
+        for run in runs:
+            run["payload"]["result"]["metrics"].pop("parameter_count")
+        validation = _run("latency_ms", (2.0, 1.0))
+        validation["payload"]["result"]["metrics"].pop("parameter_count")
+        modes = {mode: _run("latency_ms", (2.0, 1.0)) for mode in PROFILE_IDS}
+        summary = benchmark._summarize_workload(
+            workload, runs, validation, modes, ("kernel",)
+        )
+        self.assertNotIn("parameter_count", summary)
+        self.assertEqual(summary["payload_metrics"], {"latency_ms": 2.0})
+
+    def test_direct_device_runtime_does_not_subtract_instrumentation(self) -> None:
+        run = _run(
+            "latency_ms",
+            (2.0, 3.0),
+            run_ms=(2.0, 3.0),
+            instrumentation_ms=(100.0, 200.0),
+            direct_runtime=True,
+        )
+        self.assertEqual(benchmark._runtime_ms(run, 0), 2.0)
+        self.assertEqual(benchmark._runtime_ms(run, 1), 3.0)
 
     def test_status_primary_table_has_all_four_modes(self) -> None:
         workload = benchmark.Workload("id", "description", "latency_ms", {})
         modes = {
             mode: _run(
                 "latency_ms",
-                398.875,
-                run_ms=1250.0,
-                instrumentation_before_run_ms=250.0,
-                instrumentation_during_run_ms=500.0,
+                (398.875, 399.0),
+                run_ms=(1250.0, 1000.0),
+                instrumentation_ms=(500.0, 0.0),
+                startup_ms=750.0,
             )
             for mode in PROFILE_IDS
         }
         workload_summary = benchmark._summarize_workload(
             workload,
             [
-                _run("latency_ms", 5.0, run_ms=5.0),
-                _run("latency_ms", 5.0, run_ms=5.0),
+                _run("latency_ms", (5.0, 5.0), run_ms=(5.0, 5.0)),
+                _run("latency_ms", (5.0, 5.0), run_ms=(5.0, 5.0)),
             ],
+            _run("latency_ms", (5.0, 5.0), run_ms=(5.0, 5.0)),
             modes,
-            {"payload": {"kernel_names": ["Cijk_fixture.kd"]}},
             ("Cijk_fixture.kd",),
         )
         summary = {
@@ -279,34 +403,41 @@ class ConSanBenchmarkTest(unittest.TestCase):
         for label in benchmark.MODE_LABELS.values():
             self.assertIn(label, text)
         self.assertIn(
-            "| description | 0.75 s | 150× | 0.75 s | 150× | "
-            "0.75 s | 150× | 0.75 s | 150× |",
+            "| description | 0.75 s | 150× | 200× | 0.75 s | 150× | 200× | "
+            "0.75 s | 150× | 200× | 0.75 s | 150× | 200× |",
             text,
         )
         self.assertNotIn("Absolute latency", text)
         self.assertNotIn("Site-audit", text)
         self.assertEqual(text.count("| --- |"), 1)
 
-    def test_workload_selection_includes_every_exact_observed_kernel(self) -> None:
-        inventory = {
-            "payload": {
-                "kernel_names": [
-                    "void templated<int, float>() [clone .kd]",
-                    "Cijk_selected_b.kd",
-                    "Cijk_selected_a.kd",
-                ]
-            }
-        }
+    def test_payload_command_selects_each_backend(self) -> None:
+        args = self._runner_args("/tmp")
+        args.hipblaslt_bench = Path("/fixture/hipblaslt-bench")
+        for workload in benchmark.WORKLOADS:
+            command = benchmark._payload_command(args, workload)
+            self.assertIn(benchmark._payload_program(workload).name, command[1])
         self.assertEqual(
-            benchmark._select_dispatched_kernels(inventory),
-            (
-                "Cijk_selected_a.kd",
-                "Cijk_selected_b.kd",
-                "void templated<int, float>() [clone .kd]",
-            ),
+            command[-2:], ["--hipblaslt-bench", "/fixture/hipblaslt-bench"]
         )
-        with self.assertRaises(benchmark.BenchmarkError):
-            benchmark._select_dispatched_kernels({"payload": {"kernel_names": []}})
+
+    def test_allowlist_converter_output_is_the_exact_inventory(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            output = root / "allowlist.txt"
+            output.write_text("kernel one\nkernel,two\n", encoding="utf-8")
+            log = root / "converter.log"
+            with mock.patch.object(
+                benchmark.subprocess,
+                "run",
+                return_value=SimpleNamespace(
+                    stdout="wrote two kernels\n", stderr="", returncode=0
+                ),
+            ) as run:
+                names = benchmark._generate_kernel_allowlist(root, output, log)
+            self.assertEqual(names, ("kernel one", "kernel,two"))
+            self.assertEqual(log.read_text(), "wrote two kernels\n")
+            self.assertIn("rocjitsu_consan_allowlist.py", str(run.call_args.args[0][1]))
 
 
 if __name__ == "__main__":

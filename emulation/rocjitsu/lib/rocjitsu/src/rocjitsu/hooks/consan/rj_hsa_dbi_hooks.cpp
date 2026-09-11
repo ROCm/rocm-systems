@@ -4904,9 +4904,10 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
     }
   }
 
-  // The original HSA loader and kernel execution are not instrumentation
-  // preparation. Publish the cumulative clock before crossing that boundary.
-  if (instrumentation_timer)
+  // Loading and binding a replacement is part of its one-off startup cost.
+  // Loading an untouched object is native runtime work and must not be charged
+  // to ConSan merely because semantic inspection preceded it.
+  if (instrumentation_timer && !using_replacement_reader)
     instrumentation_timer->stop();
   hsa_status_t load_status =
       original_load(executable, agent, reader_to_load, options, loaded_code_object);
@@ -4922,6 +4923,8 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
                 "ConSan replacement load failed status=%d; retrying untouched original reader=%llu",
                 static_cast<int>(load_status),
                 static_cast<unsigned long long>(code_object_reader.handle));
+    if (instrumentation_timer)
+      instrumentation_timer->stop();
     load_status = original_load(executable, agent, code_object_reader, options, loaded_code_object);
   }
   if (load_status == HSA_STATUS_SUCCESS && using_replacement_reader && patch_result_storage) {
@@ -4943,6 +4946,8 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
   if (load_status == HSA_STATUS_SUCCESS && patch_result_storage)
     KernelPrivateDispatchRegistry::instance().note_code_object(*patch_result_storage);
   record_static_coverage(load_status == HSA_STATUS_SUCCESS && using_replacement_reader);
+  if (instrumentation_timer)
+    instrumentation_timer->stop();
   return load_status;
 }
 
@@ -4980,7 +4985,12 @@ extern "C" RJ_HOOK_EXPORT bool OnLoad(HsaApiTable *table, uint64_t runtime_versi
   return layer().install(table, *config);
 }
 
-extern "C" RJ_HOOK_EXPORT void OnUnload() { layer().uninstall(); }
+extern "C" RJ_HOOK_EXPORT void OnUnload() {
+  log_message(kLogInfo, "ConSan instrumentation timing total_ns=%llu",
+              static_cast<unsigned long long>(
+                  ConSanInstrumentationClock::instance().elapsed_nanoseconds()));
+  layer().uninstall();
+}
 
 extern "C" RJ_HOOK_EXPORT void
 rj_dbi_test_set_consan_transform_override(ConSanTransformOverride override) {

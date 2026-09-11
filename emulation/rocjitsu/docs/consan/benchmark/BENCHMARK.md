@@ -1,163 +1,233 @@
 # ConSan benchmarking
 
-This guide defines ConSan performance measurement. Benchmarking is deliberately
-separate from correctness qualification in
-[`validation/`](../validation/VALIDATION.md): benchmark results cannot promote a
-validation cell, and validation status does not carry latency or overhead
-claims.
+This is the reproducible runbook for measuring ConSan. Benchmarking is separate
+from correctness qualification in [`validation/`](../validation/VALIDATION.md):
+a benchmark result cannot promote a validation cell, and validation status does
+not carry performance claims.
 
-The active benchmark targets are [gfx950](STATUS_GFX950.md) and
-[gfx1201](STATUS_GFX1201.md). The [gfx942](STATUS_GFX942.md),
-[gfx1100](STATUS_GFX1100.md), and [gfx1250](STATUS_GFX1250.md) ledgers are
-placeholders for future expansion, not part of the current required matrix.
-Unlike correctness ledgers, benchmark ledgers are specific to one concrete
-target because performance does not generalize across all products implementing
-an architecture family.
+The active performance targets are [gfx950](STATUS_GFX950.md) and
+[gfx1201](STATUS_GFX1201.md). Benchmark ledgers name concrete targets because
+performance does not generalize across every product in an architecture family.
+The other `STATUS_*.md` files are placeholders, not required targets.
 
-## Contract
+## Measurement contract
 
-The benchmark suite must be automatic and reproducible with one command. Its
-latency target is less than 30 minutes over the complete default audited
-baseline-plus-ConSan matrix on a warm machine with one supported GPU and at
-least 16 GiB of device memory. Initial baselines may exceed that target while
-the corpus and transform costs are being characterized; the runner records the
-actual elapsed time rather than rejecting otherwise valid results. The target
-includes the paired audit-on/audit-off work needed to measure the site-audit
-cost and setup performed on every ordinary run;
-preinstallation and a populated model cache may be documented prerequisites,
-but hidden manual preparation may not be.
+The runner executes a native baseline and all four ConSan modes on one physical
+GPU. GPU work must be serialized: do not run two cells concurrently, and use
+`-j1` if the surrounding test driver has a job-count option. Each cell runs in a
+fresh process and performs the same bounded, synchronized operation twice.
+Every admitted cell must:
 
-Every workload must:
+- use exactly the same operation and inputs natively and in every mode;
+- pass an independent numerical or output oracle;
+- use the generated exact-name kernel allowlist for every instrumented run;
+- pass ConSan's static, dynamic, and final site-coverage audit; and
+- preserve enough provenance to reproduce the executable, software stack,
+  target, workload configuration, and selected kernels.
 
-- execute an end-to-end, production-shaped operation with a bounded input;
-- run unchanged in the native baseline and each supported ConSan mode;
-- retain an independent output or numerical oracle in timed and untimed runs;
-- record source, executable, code-object, framework, compiler, runtime, target,
-  input, and configuration identities;
-- report end-to-end latency or throughput in the workload's natural unit; and
-- fit on a 16 GiB GPU without relying on multi-GPU sharding.
+The long-term suite-latency target is 30 minutes on a warm machine with one
+supported GPU and at least 16 GiB of device memory. This is currently an
+aspiration, not an admission threshold: do not distort initial workloads merely
+to meet it. The runner records actual suite time so later corpus trimming can be
+evidence-based.
 
-The suite should span independently generated ISA rather than multiply nearly
-identical model sizes. Framework or generator provenance must be observed from
-the executed code objects. A model name alone does not prove whether a GEMM came
-from Torch, Triton, Gluon, rocBLAS, hipBLASLt, or Tensile.
+The core consists of production-shaped Aorta operations. Small generator- or
+library-specific GEMMs may supplement it when no portable end-to-end Aorta path
+can prove that ISA source. Such probes must obey the same baseline, oracle,
+allowlist, audit, and provenance rules and must be labelled as kernel workloads,
+not end-to-end models.
 
-## Coverage audit
+## Prerequisites and invocation
 
-Every benchmark run verifies site instrumentation by default. A result is
-admissible only when every site selected by the ordinary policy was
-instrumented, static and dynamic analysis completed, and the final coverage
-verdict passed. The audit has negligible measured cost, so its latency is the
-ordinary instrumented latency; the suite does not run a second audit-disabled
-control for every cell.
+Keep Aorta external to RocJITsu and point the runner at a named checkout. Use a
+ROCm Python environment that contains the Aorta dependencies, a ConSan hook
+built from the RocJITsu revision being measured, and `rocprofv3` from the same
+ROCm distribution as the runtime under test. Generator-specific cells may also
+need Gluon and `hipblaslt-bench` from that distribution.
 
-The committed audited suite should ultimately remain below the 30-minute target
-so a new binary can be qualified without an unbounded preliminary campaign.
-
-Each process measures one synchronized end-to-end operation with its numerical
-oracle. PyTorch loads GPU code objects lazily, so ConSan transformation can be
-interleaved with that operation rather than forming one framework-visible
-phase. The hook therefore maintains a monotonic process clock covering the
-union of intervals spent preparing instrumented replacement code objects.
-Native samples bracket the four-mode matrix to expose drift.
-
-For each mode, target status files report two values:
-
-- **startup (seconds)** is the hook-measured time spent preparing selected
-  instrumented code objects before or during the workload. Concurrent
-  transformations count their union in wall time, not their summed CPU time.
-- **runtime (ratio)** is the synchronized instrumented workload time after
-  subtracting in-workload ConSan transformation time, divided by the bracketed
-  median native workload time.
-
-Detailed phase measurements, instrumentation-clock snapshots, audit evidence,
-and provenance remain in the machine-readable benchmark artifacts.
-
-## External Aorta checkout
-
-Workloads come from an external ROCm/Aorta checkout. No Aorta source or model
-artifact is vendored into RocJITsu. The future runner will require:
+The runner's required inputs can be supplied by options or their corresponding
+environment variables. A representative invocation from the RocJITsu source
+tree is:
 
 ```sh
-export CONSAN_BENCHMARK_AORTA_DIR=/path/to/aorta
+python3 tests/dbi/consan/consan_benchmark.py \
+  --target gfx1201 \
+  --aorta-dir "$HOME/workspace/aorta" \
+  --python /path/to/rocm-python \
+  --hook /path/to/librocjitsu_dbi_hooks.so \
+  --rocprofv3 /path/to/rocprofv3 \
+  --hipblaslt-bench /path/to/hipblaslt-bench \
+  --output-dir /tmp/consan-benchmark-gfx1201 \
+  --status docs/consan/benchmark/STATUS_GFX1201.md \
+  --timeout 600
 ```
 
-It must reject a missing or unidentifiable checkout and record the Aorta commit
-and dirty-tree state. The survey below describes Aorta commit
-`da894f76e4c14cec03f428e7aed2aa45dfbf6a65` and must be revisited when the
-selected workloads or that revision change.
+`CONSAN_BENCHMARK_AORTA_DIR`, `CONSAN_BENCHMARK_PYTHON`,
+`CONSAN_BENCHMARK_HOOK`, `CONSAN_BENCHMARK_ROCPROFV3`, and
+`CONSAN_BENCHMARK_HIPBLASLT_BENCH` are the environment equivalents. Omit the
+hipBLASLt argument only when the selected target corpus has no hipBLASLt cell.
+Use `--workload ID` repeatedly for a focused run. Use `--resume` after an
+interruption; a cell is reused only when its complete input fingerprint matches.
 
-## Aorta workload survey
+Before accepting results on a new host, confirm that all binaries and Python
+libraries resolve to the intended local ROCm installation and that the reported
+GPU target matches `--target`. Do not substitute an emulator for the physical
+benchmark GPU.
 
-Aorta currently exposes two materially different model paths.
+## Exact two-pass allowlist workflow
 
-| Aorta path | Model or shape | Actual implementation source | 16 GiB / all-target suitability | Distinct value |
-| --- | --- | --- | --- | --- |
-| `workload: inference`, `offline_batch` | Synthetic dense decoder, long prompt and short output | PyTorch eager. Matrix operations use the libraries selected by the installed PyTorch/ROCm stack; Aorta does not pin or prove a particular Tensile solution. | Good. Shape and model dimensions are fully bounded and the path is target-neutral. | Prefill-heavy attention, softmax, normalization, embedding, and large GEMM shapes. |
-| `workload: inference`, `offline_batch` | The same decoder with a short prompt and longer token loop | PyTorch eager. Its `kv_cache: true` behavior is simulated by length-one forwards; it is not a real paged-KV implementation. | Good, with a bounded token count. | Decode-shaped small-M GEMMs, repeated launches, reductions, and argmax. It must be named synthetic decode, not Qwen decode. |
-| `workload: inference`, `num_experts > 1` | Synthetic top-1 MoE decoder | PyTorch eager with argmax, boolean masks, indexed gather/write, GLU experts, and backend GEMMs. | Good at small expert and hidden sizes. | A different routing/indexing and sparse-expert kernel mix from the dense path. |
-| `workload: training` or `llm_determinism` | Synthetic dense or top-1 MoE repeated-block model | PyTorch eager, including backward and optionally AdamW or FSDP/RCCL paths. | Single-rank bounded shapes fit, but distributed variants are not portable to a one-GPU 16 GiB contract. | Backward/optimizer kernels if the inference-only core leaves a meaningful ISA gap. |
-| `workload: tokenspeed_serve` | Qwen3 0.6B, 1.7B, 4B, and 8B | TokenSpeed serving. Its registered provider set includes Gluon, Triton, and Torch paths; the provider actually selected must be captured from each run. | Not an all-target candidate as written: the pinned container accepts only `gfx950` and `gfx1250` and supplies its own ROCm stack. The 8B recipe was measured only on a 309 GiB device and is not a safe 16 GiB commitment. | Real Qwen prefill/decode and production TokenSpeed kernel selection. The 0.6B through 4B variants are the plausible size candidates once portability and local-runtime integration exist. |
-| `workload: tokenspeed_serve` | `openai/gpt-oss-20b` | TokenSpeed's dedicated MXFP4 MoE path and Gluon JIT. | Exclude from the initial suite. Its MXFP4 checkpoint is designed for 16 GiB systems, but Aorta has only measured this exact stack on a 309 GiB GPU, requires a roughly 40 GB complete repository snapshot on disk, and spends minutes in startup. | Valuable future large-MoE stress, but its exact Aorta-plus-ConSan memory use and total-matrix latency are not yet qualified. |
+Allowlist discovery is a native profiling pass, not a textual scan of binaries
+and not a hand-written guess. For each workload the runner must perform the
+same two-pass workflow documented in
+[`USAGE.md`](../USAGE.md#generate-and-use-a-kernel-allowlist):
 
-Two useful Aorta facilities are not end-to-end model candidates:
+1. Run the exact workload natively under `rocprofv3 --kernel-trace`.
+2. Convert the resulting trace directory with
+   `rocjitsu_consan_allowlist.py`.
+3. Reject an empty or malformed inventory.
+4. Pass the generated file unchanged to every ConSan mode through
+   `RJ_CONSAN_KERNEL_ALLOWLIST_FILE`.
 
-- `tokenspeed-kernel-gemm-smoke.yaml` isolates Gluon BF16, Torch BF16, Triton
-  FP8 block-scale, and Torch FP8 block-scale GEMMs. It is useful for proving
-  generator-specific ISA properties, but it is a kernel benchmark and is
-  currently `gfx950`-specific.
-- `tokenspeed-kernel-suites-smoke.yaml` executes attention, MoE, quantization,
-  sampling, and transform tests. These provide correctness and code-object
-  coverage, not performance metrics or end-to-end model execution.
+In expanded form, the discovery operation is:
 
-Aorta has no existing portable Gluon end-to-end workload and no existing
-end-to-end workload that pins execution to Tensile. Its local PyTorch workloads
-may reach Tensile through rocBLAS or hipBLASLt, but that is a runtime routing
-result to record, not a source-level guarantee. Consequently the current
-portable core can begin with the three bounded PyTorch inference shapes above,
-but it does not yet satisfy the desired generator diversity. Closing that gap
-requires adding portable Aorta workload recipes or adapters; relabeling the
-TokenSpeed probes as end-to-end workloads would not close it.
+```sh
+rocprofv3 --kernel-trace --output-format csv \
+  --output-directory "$artifact_dir/kernel-profile" -- \
+  <the exact native workload command>
 
-## Provisional corpus
+rocjitsu_consan_allowlist.py \
+  --output "$artifact_dir/kernel-allowlist.txt" \
+  "$artifact_dir/kernel-profile"
+```
 
-The useful starting set is therefore:
+The benchmark runner automates these commands and records both the trace-derived
+inventory and final allowlist. A framework profiler may provide supplementary
+diagnostics, but it is not the canonical allowlist source. If ordinary lazy
+loading causes the measured operation to dispatch a kernel absent from the
+discovery pass, fix the workload's deterministic setup or repeat discovery;
+never silently append a guessed name.
 
-1. a long-prompt, short-output dense `inference` cell for PyTorch prefill;
-2. a short-context, single continuous-batch tick for synthetic PyTorch decode;
-3. a small `num_experts > 1` `inference` cell for PyTorch top-1 MoE routing;
-4. a Qwen3-0.6B prefill cell and a Qwen3-0.6B decode cell through
-   `tokenspeed_serve` on gfx950, and on gfx1201 only if that external stack can
-   be enabled without substantial porting; and
-5. a small pinned-hipBLASLt/Tensile end-to-end cell and a Gluon end-to-end cell
-   on each target where those paths work naturally.
+## Per-workload execution order
 
-Items 1--3 are immediately portable candidates, not yet frozen benchmark
-shapes. Items 4--5 are required diversity work, not claims about what the
-current Aorta checkout can execute on both targets. The suite is a
-target-specific union, not a requirement that every workload run on every
-target. Record a difficult external-framework path as `not selected on this
-target` rather than making its port a prerequisite; in particular, TokenSpeed
-may be omitted on gfx1201 while remaining in the gfx950 suite. The
-exact-provider kernel smokes may supplement this corpus as ISA probes, but
-cannot satisfy an end-to-end slot.
+For each workload, use this order:
 
-The final shapes must be chosen from audited runs. Prefer the smallest shape
-that retains the intended kernel mix and amortizes launch noise; reject any
-candidate whose baseline-plus-four-mode matrix jeopardizes the 30-minute suite
-bound. Current TokenSpeed recipes load the model into their serving stack and
-do not establish host-to-device weight streaming, so a model is not considered
-16-GiB-safe merely because an external system could cycle its weights.
+1. `rocprofv3` native kernel-inventory pass and allowlist conversion;
+2. two native timing processes, each containing Run1 and Run2, used immediately
+   to establish a separate median for each run ordinal;
+3. `SuperCollider`, `RecordReplay`, `Sampled`, and `InlineShadow`, updating the
+   target status row after each completed mode; and
+4. one final native timing sample used only as a post-validation drift check.
 
-## Suite selection status
+The final sample does not silently redefine the denominator after the modes
+have run. Compare it with the initial native median and flag material drift in
+the machine-readable result. If drift makes the measurements unreliable,
+invalidate and rerun the workload rather than selecting the more favorable
+baseline.
 
-The benchmark corpus is not yet frozen. Candidate choice should maximize
-executed-ISA diversity per minute, using an audited code-object inventory to
-show which candidate adds new instruction, synchronization, addressing, and
-generator families. Model-size variants that add no meaningful ISA family
-should be dropped in favor of distinct prefill, decode, routing, reduction, or
-library-provider paths.
+## Startup, runtime, and coverage
 
-No number from the former validation campaigns is admitted into the benchmark
+PyTorch and other lazy stacks may load GPU code during the measured operation,
+so API-level timestamps alone cannot separate instrumentation from execution.
+The ConSan hook maintains a monotonic process clock covering the union of wall
+time intervals spent preparing selected replacement code objects and loading
+and binding their replacements. Concurrent transforms are therefore not
+double-counted.
+
+Each target status cell reports three values per mode:
+
+- **Startup (seconds)**: total hook-measured ConSan transformation plus
+  replacement-object load/bind time in that fresh process, whether it occurred
+  before or during either operation;
+- **Run1 (ratio)**: the first synchronized instrumented operation with any
+  overlapping startup interval excluded, divided by the median first-operation
+  time from the two initial native processes; and
+- **Run2 (ratio)**: the second identical synchronized operation divided by the
+  median second-operation time from those native processes.
+
+Run1 intentionally exposes first-dispatch and other cold costs that lie outside
+the ConSan startup clock. Run2 exposes the repeated-operation path after code
+objects have been transformed, loaded, and dispatched once. The two operations
+must use identical inputs and execution shape; workloads with evolving state
+must restore it before each operation. Neither ratio mixes run ordinals.
+
+Use a workload's direct device timer when it exposes one reliably (for example,
+the hipBLASLt event time); otherwise use synchronized host time and subtract
+the hook's overlapping preparation time. Status values use three significant
+digits. Absolute latencies, clock snapshots, drift, coverage evidence, memory,
+kernel inventory, and provenance remain in JSON artifacts rather than the
+human status table.
+
+The coverage audit is enabled by default. A mode result is admissible only when
+all selected supported sites were patched and the final verdict is complete.
+The opt-out exists for investigation but is intentionally not advertised as a
+normal benchmark path. Prior measurements found its cost negligible, so status
+tables do not carry separate audit-on/off columns.
+
+## Artifacts and checkpointing
+
+Never treat terminal output as the only record. The output directory contains a
+log and fingerprinted JSON checkpoint for every inventory, native, and mode
+cell, the trace-derived allowlist, and a final `summary.json`. A checkpoint is
+written only after the process exits successfully, its oracle passes, and (for
+an instrumented audited cell) coverage is accepted. Keep partial logs for
+timeouts and failures.
+
+The fingerprint must cover at least the RocJITsu commit and dirty state, Aorta
+commit and dirty state, hook and runner hashes, payload hashes, target,
+controlled environment, exact command, allowlist, profiler, and external
+benchmark executable. Changing any of these invalidates the affected cached
+cell. The status file is a concise projection of accepted artifacts, not an
+independent source of truth.
+
+## Current corpus
+
+The portable Aorta core is deliberately small and ISA-diverse:
+
+| Workload | Source | Distinct behavior |
+| --- | --- | --- |
+| Synthetic dense prefill, 32-token prompt | Aorta PyTorch eager inference | Prefill attention, normalization, embedding, reductions, and dense GEMMs. |
+| Synthetic dense decode, one continuous-batch tick | Aorta PyTorch eager inference | Decode-shaped small-M operations and launch-heavy execution. This is synthetic decode, not Qwen decode. |
+| Synthetic four-expert top-1 MoE prefill, 16-token prompt | Aorta PyTorch eager inference | Routing, masks, indexed gather/write, GLU experts, and sparse-expert shapes. |
+| Verified shared-memory round trip | Gluon JIT kernel probe | A portable, directly attributable Gluon-generated code object with genuine LDS load/store sites. |
+| Verified FP16 GEMM | local hipBLASLt/Tensile kernel probe | A dispatched library-selected Tensile solution, captured by exact kernel name. |
+
+The last two are kernel workloads, not end-to-end Aorta models. They close a
+generator-provenance gap without pretending that PyTorch's runtime-selected GEMM
+provider proves Gluon or Tensile coverage.
+
+Aorta's TokenSpeed recipes provide real Qwen and additional Gluon/Triton/Torch
+paths, but the pinned stack currently accepts gfx950/gfx1250 rather than
+gfx1201. TokenSpeed may therefore be included on gfx950 and omitted on gfx1201.
+More generally, the target corpus is a target-specific union: record an
+external-framework workload as not selected when it does not work naturally on
+that GPU instead of turning a difficult port into a prerequisite.
+
+All workloads must fit a 16 GiB GPU without multi-GPU sharding. Prefer distinct
+generators and execution shapes over redundant model-size variants. Revisit the
+corpus when an added workload supplies a new instruction, synchronization,
+addressing, dispatch, or generator family at acceptable cost.
+
+## Bringing up another physical target
+
+To populate a new `STATUS_<TARGET>.md`:
+
+1. build RocJITsu and the ConSan hook for that target from the intended commit;
+2. assemble one coherent local ROCm runtime, profiler, Python environment, and
+   optional library benchmark executable;
+3. start with one native inventory/oracle run per candidate and omit only the
+   workloads that reject the target or require substantial porting;
+4. run the serialized full matrix with default coverage auditing, preserving
+   artifacts and updating partial status after every mode;
+5. inspect final native drift, failed/unused allowlist entries, coverage
+   verdicts, target identity, and numerical results before admitting cells; and
+6. commit the concise status table together with any runner, payload, test, or
+   documentation changes needed to make the procedure reproducible.
+
+When benchmarking exposes a ConSan correctness bug, stop admitting performance
+numbers for that path, fix the bug, add a regression test, rerun the relevant
+nonphysical tests, rebuild the hook, and restart the invalidated physical cells.
+Do not normalize a failure into target-specific benchmark procedure.
+
+No number from former validation or empirical campaigns is admitted into these
 status ledgers. Those runs used different corpora and timing contracts and are
-not comparable to the suite defined here.
+not comparable.

@@ -12,14 +12,15 @@ from pathlib import Path
 import sys
 import time
 
-
 RESULT_MARKER = "CONSAN_BENCHMARK_RESULT="
 
 
 def _instrumentation_clock():
+    if "RJ_CONSAN_MODE" not in os.environ:
+        return lambda: 0
     hook_path = os.environ.get("HSA_TOOLS_LIB")
     if not hook_path:
-        return lambda: 0
+        raise RuntimeError("RJ_CONSAN_MODE is set without HSA_TOOLS_LIB")
     hook = ctypes.CDLL(hook_path)
     query = hook.rj_dbi_consan_instrumentation_nanoseconds
     query.argtypes = ()
@@ -31,11 +32,6 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--aorta-dir", type=Path, required=True)
     parser.add_argument("--config-json", required=True)
-    parser.add_argument(
-        "--profile-kernels",
-        action="store_true",
-        help="inventory dispatched GPU kernel names in a native discovery run",
-    )
     return parser.parse_args(argv)
 
 
@@ -68,54 +64,63 @@ def _main(argv: list[str]) -> int:
     workload.setup()
     torch.cuda.synchronize()
     setup_ms = (time.perf_counter() - setup_start) * 1000.0
+    input_generator = getattr(workload, "_input_gen", None)
+    if not isinstance(input_generator, torch.Generator):
+        raise RuntimeError(
+            "Aorta inference workload exposes no resettable input generator"
+        )
+    input_state = input_generator.get_state()
     instrumentation_before_run = instrumentation_nanoseconds()
     try:
-        run_start = time.perf_counter()
-        profiler = None
-        if args.profile_kernels:
-            profiler = torch.profiler.profile(
-                activities=(
-                    torch.profiler.ProfilerActivity.CPU,
-                    torch.profiler.ProfilerActivity.CUDA,
-                )
-            )
-            profiler.__enter__()
-        try:
+        results = []
+        runs = []
+        for run_index in range(2):
+            input_generator.set_state(input_state)
+            instrumentation_before = instrumentation_nanoseconds()
+            run_start = time.perf_counter()
             result = workload.run()
-        finally:
-            if profiler is not None:
-                profiler.__exit__(None, None, None)
-        torch.cuda.synchronize()
-        run_ms = (time.perf_counter() - run_start) * 1000.0
-        instrumentation_after_run = instrumentation_nanoseconds()
-        kernel_names = []
-        kernel_stats = []
-        if profiler is not None:
-            device_events = [
-                event
-                for event in profiler.events()
-                if event.device_type != torch.autograd.DeviceType.CPU
-            ]
-            kernel_names = sorted({event.name for event in device_events})
-            kernel_stats = [
+            torch.cuda.synchronize()
+            run_ms = (time.perf_counter() - run_start) * 1000.0
+            instrumentation_after = instrumentation_nanoseconds()
+            result_payload = asdict(result)
+            results.append(result_payload)
+            runs.append(
                 {
-                    "name": name,
-                    "dispatches": sum(event.count for event in device_events if event.name == name),
-                    "device_time_us": sum(
-                        event.device_time_total for event in device_events if event.name == name
-                    ),
+                    "index": run_index + 1,
+                    "result": result_payload,
+                    "phase_ms": run_ms,
+                    "instrumentation_ms": (
+                        instrumentation_after - instrumentation_before
+                    )
+                    / 1_000_000.0,
                 }
-                for name in kernel_names
-            ]
+            )
+        instrumentation_after_run = instrumentation_nanoseconds()
+        combined_result = dict(results[0])
+        checksums = tuple(
+            result.get("metrics", {}).get("logits_checksum") for result in results
+        )
+        equivalent = checksums[0] is None or checksums[0] == checksums[1]
+        combined_result["passed"] = (
+            all(result["passed"] for result in results) and equivalent
+        )
+        combined_result["failure_count"] = sum(
+            int(result["failure_count"]) for result in results
+        ) + int(not equivalent)
+        if not equivalent:
+            combined_result.setdefault("failure_details", []).append(
+                {"runs": [1, 2], "problems": ["logits-checksum-mismatch"]}
+            )
         payload = {
-            "result": asdict(result),
-            "phase_ms": {"setup": setup_ms, "run": run_ms},
+            "result": combined_result,
+            "runs": runs,
+            "phase_ms": {"setup": setup_ms, "run": runs[0]["phase_ms"]},
             "instrumentation_ms": {
                 "before_run": (instrumentation_before_run - instrumentation_begin)
                 / 1_000_000.0,
-                "during_run": (instrumentation_after_run - instrumentation_before_run)
+                "during_run": sum(run["instrumentation_ms"] for run in runs),
+                "total": (instrumentation_after_run - instrumentation_begin)
                 / 1_000_000.0,
-                "total": (instrumentation_after_run - instrumentation_begin) / 1_000_000.0,
             },
             "peak_device_memory": {
                 "allocated_bytes": torch.cuda.max_memory_allocated(),
@@ -128,11 +133,9 @@ def _main(argv: list[str]) -> int:
                 "device_name": torch.cuda.get_device_name(),
                 "architecture": torch.cuda.get_device_properties(0).gcnArchName,
             },
-            "kernel_names": kernel_names,
-            "kernel_stats": kernel_stats,
         }
         print(RESULT_MARKER + json.dumps(payload, sort_keys=True), flush=True)
-        return 0 if result.passed else 2
+        return 0 if combined_result["passed"] else 2
     finally:
         workload.cleanup()
 

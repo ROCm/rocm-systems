@@ -463,6 +463,19 @@ add_test(
         ${Python3_EXECUTABLE}
         ${CMAKE_CURRENT_SOURCE_DIR}/tools/test_consan_allowlist.py -v
 )
+add_test(
+    NAME ConSanBenchmarkUnitTest
+    COMMAND
+        ${Python3_EXECUTABLE}
+        ${CMAKE_CURRENT_SOURCE_DIR}/dbi/consan/test_consan_benchmark.py -v
+)
+add_test(
+    NAME ConSanHipblasltBenchmarkWorkloadUnitTest
+    COMMAND
+        ${Python3_EXECUTABLE}
+        ${CMAKE_CURRENT_SOURCE_DIR}/dbi/consan/test_consan_hipblaslt_benchmark_workload.py
+        -v
+)
 
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     set(PLUGIN_LOADER_FIXTURE_DIR

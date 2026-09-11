@@ -26,11 +26,12 @@ from consan_validation_catalog import (
 )
 from consan_validation_support import SITE_KINDS
 
-
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 AORTA_DIR_ENV = "CONSAN_BENCHMARK_AORTA_DIR"
 PYTHON_ENV = "CONSAN_BENCHMARK_PYTHON"
 HOOK_ENV = "CONSAN_BENCHMARK_HOOK"
+ROCPROFV3_ENV = "CONSAN_BENCHMARK_ROCPROFV3"
+HIPBLASLT_BENCH_ENV = "CONSAN_BENCHMARK_HIPBLASLT_BENCH"
 RESULT_MARKER = "CONSAN_BENCHMARK_RESULT="
 SUPPORTED_TARGETS = ("gfx950", "gfx1201")
 MODE_LABELS = {
@@ -51,6 +52,7 @@ class Workload:
     description: str
     primary_metric: str
     config: dict[str, Any]
+    payload: str = "aorta"
 
 
 def _model_config(*, num_experts: int = 1) -> dict[str, Any]:
@@ -136,6 +138,20 @@ WORKLOADS = (
             },
         },
     ),
+    Workload(
+        id="gluon-shared-roundtrip",
+        description="Gluon verified shared-memory round trip (1024 elements)",
+        primary_metric="latency_ms",
+        config={"size": 1024},
+        payload="gluon",
+    ),
+    Workload(
+        id="hipblaslt-tensile-gemm",
+        description="hipBLASLt/Tensile verified FP16 GEMM (512×512×512)",
+        primary_metric="latency_ms",
+        config={"m": 512, "n": 512, "k": 512, "iterations": 10},
+        payload="hipblaslt",
+    ),
 )
 
 
@@ -159,6 +175,21 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
         type=Path,
         default=os.environ.get(HOOK_ENV),
         help=f"librocjitsu_dbi_hooks.so (default: ${HOOK_ENV})",
+    )
+    parser.add_argument(
+        "--rocprofv3",
+        type=Path,
+        default=os.environ.get(ROCPROFV3_ENV),
+        help=f"rocprofv3 from the tested ROCm distribution (default: ${ROCPROFV3_ENV})",
+    )
+    parser.add_argument(
+        "--hipblaslt-bench",
+        type=Path,
+        default=os.environ.get(HIPBLASLT_BENCH_ENV),
+        help=(
+            "hipblaslt-bench from the tested ROCm distribution "
+            f"(default: ${HIPBLASLT_BENCH_ENV})"
+        ),
     )
     parser.add_argument("--output-dir", type=Path, required=True)
     parser.add_argument("--status", type=Path)
@@ -253,7 +284,7 @@ def _parse_payload(output: str) -> dict[str, Any]:
     except json.JSONDecodeError as error:
         raise BenchmarkError(f"malformed benchmark result: {error}") from error
     if not payload.get("result", {}).get("passed"):
-        raise BenchmarkError("Aorta workload numerical oracle failed")
+        raise BenchmarkError("benchmark workload numerical oracle failed")
     return payload
 
 
@@ -264,7 +295,9 @@ def _coverage_summary(output: str) -> dict[str, Any]:
         raise BenchmarkError(f"site audit evidence is invalid: {error}") from error
     if not decision.accepted:
         raise BenchmarkError("site audit failed: " + "; ".join(decision.reasons))
-    applicable = tuple(record for record in decision.evidence.coverage if record.applicable)
+    applicable = tuple(
+        record for record in decision.evidence.coverage if record.applicable
+    )
     counts: dict[str, int] = {}
     for field in ("discovered", "selected", "patched", "supported", "unsupported"):
         counts[field] = sum(
@@ -282,6 +315,46 @@ def _coverage_summary(output: str) -> dict[str, Any]:
     }
 
 
+def _payload_program(workload: Workload) -> Path:
+    filenames = {
+        "aorta": "consan_aorta_benchmark_workload.py",
+        "gluon": "consan_gluon_benchmark_workload.py",
+        "hipblaslt": "consan_hipblaslt_benchmark_workload.py",
+    }
+    try:
+        filename = filenames[workload.payload]
+    except KeyError as error:
+        raise BenchmarkError(
+            f"unknown workload payload kind: {workload.payload}"
+        ) from error
+    return Path(__file__).with_name(filename)
+
+
+def _payload_command(args: argparse.Namespace, workload: Workload) -> list[str]:
+    command = [
+        str(args.python),
+        str(_payload_program(workload)),
+        "--aorta-dir",
+        str(args.aorta_dir),
+        "--config-json",
+        json.dumps(workload.config, separators=(",", ":"), sort_keys=True),
+    ]
+    if workload.payload == "hipblaslt":
+        if args.hipblaslt_bench is None:
+            raise BenchmarkError(
+                f"set ${HIPBLASLT_BENCH_ENV} or pass --hipblaslt-bench for {workload.id}"
+            )
+        command.extend(("--hipblaslt-bench", str(args.hipblaslt_bench)))
+    return command
+
+
+def _archive_existing(path: Path) -> None:
+    if not path.exists():
+        return
+    archived = path.with_name(f"{path.name}.previous-{time.time_ns()}")
+    path.rename(archived)
+
+
 def _run_one(
     *,
     args: argparse.Namespace,
@@ -290,19 +363,22 @@ def _run_one(
     audit_sites: bool,
     label: str,
     kernel_allowlist_file: Path | None = None,
-    profile_kernels: bool = False,
+    profile_directory: Path | None = None,
 ) -> dict[str, Any]:
-    payload_program = Path(__file__).with_name("consan_aorta_benchmark_workload.py")
-    command = [
-        str(args.python),
-        str(payload_program),
-        "--aorta-dir",
-        str(args.aorta_dir),
-        "--config-json",
-        json.dumps(workload.config, separators=(",", ":"), sort_keys=True),
-    ]
-    if profile_kernels:
-        command.append("--profile-kernels")
+    command = _payload_command(args, workload)
+    if profile_directory is not None:
+        if args.rocprofv3 is None:
+            raise BenchmarkError(f"set ${ROCPROFV3_ENV} or pass --rocprofv3")
+        command = [
+            str(args.rocprofv3),
+            "--kernel-trace",
+            "--output-format",
+            "csv",
+            "--output-directory",
+            str(profile_directory),
+            "--",
+            *command,
+        ]
     environment = _clean_environment(
         args.target, args.hook, mode, audit_sites, kernel_allowlist_file
     )
@@ -319,6 +395,11 @@ def _run_one(
         "run_identity": args.run_identity,
         "command": command,
         "environment": controlled_environment,
+        "kernel_allowlist_sha256": (
+            _sha256(kernel_allowlist_file)
+            if kernel_allowlist_file is not None
+            else None
+        ),
     }
     fingerprint = hashlib.sha256(
         json.dumps(fingerprint_payload, sort_keys=True).encode("utf-8")
@@ -328,12 +409,19 @@ def _run_one(
             checkpoint = json.loads(checkpoint_path.read_text(encoding="utf-8"))
         except (json.JSONDecodeError, OSError):
             checkpoint = None
-        if isinstance(checkpoint, dict) and checkpoint.get("fingerprint") == fingerprint:
+        profile_available = profile_directory is None or profile_directory.is_dir()
+        if (
+            isinstance(checkpoint, dict)
+            and checkpoint.get("fingerprint") == fingerprint
+            and profile_available
+        ):
             result = checkpoint.get("result")
             if isinstance(result, dict):
                 print(f"resume {workload.id} {label}", flush=True)
                 return result
 
+    if profile_directory is not None:
+        _archive_existing(profile_directory)
     print(f"run {workload.id} {label}", flush=True)
     start = time.perf_counter()
     try:
@@ -345,10 +433,15 @@ def _run_one(
             timeout=args.timeout,
         )
     except subprocess.TimeoutExpired as error:
+
         def timeout_text(value: str | bytes | None) -> str:
             if value is None:
                 return ""
-            return value.decode("utf-8", errors="replace") if isinstance(value, bytes) else value
+            return (
+                value.decode("utf-8", errors="replace")
+                if isinstance(value, bytes)
+                else value
+            )
 
         output = timeout_text(error.stdout) + timeout_text(error.stderr)
         log_path.write_text(output, encoding="utf-8")
@@ -380,22 +473,38 @@ def _run_one(
     return result
 
 
-def _select_dispatched_kernels(inventory: dict[str, Any]) -> tuple[str, ...]:
-    names = inventory["payload"].get("kernel_names")
-    if not isinstance(names, list) or not all(isinstance(name, str) for name in names):
-        raise BenchmarkError("native kernel inventory is absent or malformed")
-    # Instrument the complete observed end-to-end dispatch set. The file-backed
-    # exact-name interface accommodates demangled names containing commas.
-    selected = tuple(sorted(set(names)))
-    if not selected:
-        raise BenchmarkError("native workload dispatched no GPU kernel")
-    if any("\n" in name or "\r" in name for name in selected):
-        raise BenchmarkError("selected kernel name cannot be encoded in the allowlist file")
-    return selected
-
-
-def _write_kernel_allowlist(path: Path, kernel_names: tuple[str, ...]) -> None:
-    path.write_text("".join(f"{name}\n" for name in kernel_names), encoding="utf-8")
+def _generate_kernel_allowlist(
+    trace_directory: Path, output: Path, log: Path
+) -> tuple[str, ...]:
+    converter = (
+        Path(__file__).resolve().parents[3] / "scripts" / "rocjitsu_consan_allowlist.py"
+    )
+    process = subprocess.run(
+        (sys.executable, str(converter), "--output", str(output), str(trace_directory)),
+        capture_output=True,
+        text=True,
+    )
+    converter_output = process.stdout + process.stderr
+    log.write_text(converter_output, encoding="utf-8")
+    if process.returncode != 0:
+        raise BenchmarkError(
+            f"rocprofv3 allowlist conversion exited {process.returncode}; see {log}"
+        )
+    try:
+        names = tuple(
+            line for line in output.read_text(encoding="utf-8").splitlines() if line
+        )
+    except OSError as error:
+        raise BenchmarkError(f"could not read generated allowlist: {error}") from error
+    if not names or len(names) != len(set(names)):
+        raise BenchmarkError(
+            "generated kernel allowlist is empty or contains duplicates"
+        )
+    if any("\n" in name or "\r" in name for name in names):
+        raise BenchmarkError(
+            "generated kernel allowlist contains an invalid kernel name"
+        )
+    return names
 
 
 def _median(values: list[float]) -> float:
@@ -404,17 +513,20 @@ def _median(values: list[float]) -> float:
     return statistics.median(values)
 
 
-def _metric(run: dict[str, Any], name: str) -> float:
-    value = run["payload"]["result"]["metrics"].get(name)
+def _operation(run: dict[str, Any], index: int) -> dict[str, Any]:
+    operations = run["payload"].get("runs")
+    if not isinstance(operations, list) or len(operations) != 2:
+        raise BenchmarkError("benchmark payload must contain exactly two runs")
+    operation = operations[index]
+    if not isinstance(operation, dict):
+        raise BenchmarkError(f"benchmark run {index + 1} is malformed")
+    return operation
+
+
+def _metric(run: dict[str, Any], name: str, index: int) -> float:
+    value = _operation(run, index).get("result", {}).get("metrics", {}).get(name)
     if not isinstance(value, (int, float)) or value <= 0:
         raise BenchmarkError(f"invalid primary metric {name}: {value!r}")
-    return float(value)
-
-
-def _phase_ms(run: dict[str, Any], name: str) -> float:
-    value = run["payload"]["phase_ms"].get(name)
-    if not isinstance(value, (int, float)) or value <= 0:
-        raise BenchmarkError(f"invalid phase latency {name}: {value!r}")
     return float(value)
 
 
@@ -425,48 +537,102 @@ def _instrumentation_ms(run: dict[str, Any], name: str) -> float:
     return float(value)
 
 
+def _runtime_ms(run: dict[str, Any], index: int) -> float:
+    operation = _operation(run, index)
+    direct = operation.get("runtime_ms")
+    if direct is not None:
+        if not isinstance(direct, (int, float)) or direct <= 0:
+            raise BenchmarkError(f"invalid direct runtime latency: {direct!r}")
+        return float(direct)
+    phase = operation.get("phase_ms")
+    instrumentation = operation.get("instrumentation_ms")
+    if not isinstance(phase, (int, float)) or phase <= 0:
+        raise BenchmarkError(f"invalid run {index + 1} phase latency: {phase!r}")
+    if not isinstance(instrumentation, (int, float)) or instrumentation < 0:
+        raise BenchmarkError(
+            f"invalid run {index + 1} instrumentation latency: {instrumentation!r}"
+        )
+    runtime = float(phase) - float(instrumentation)
+    if runtime <= 0:
+        raise BenchmarkError("instrumentation time exceeds timed runtime")
+    return runtime
+
+
+def _summarize_mode(
+    run: dict[str, Any], native_runtime: tuple[float, float]
+) -> dict[str, Any]:
+    runtime_ms = tuple(_runtime_ms(run, index) for index in range(2))
+    result: dict[str, Any] = {
+        "runtime_ms": list(runtime_ms),
+        "runtime_ratio": [
+            runtime_ms[index] / native_runtime[index] for index in range(2)
+        ],
+        "startup_ms": _instrumentation_ms(run, "total"),
+        "peak_device_memory": run["payload"]["peak_device_memory"],
+    }
+    if "coverage" in run:
+        result["coverage"] = run["coverage"]
+    return result
+
+
 def _summarize_workload(
     workload: Workload,
-    native: list[dict[str, Any]],
+    native_reference: list[dict[str, Any]],
+    native_validation: dict[str, Any],
     modes: dict[str, dict[str, Any]],
-    inventory: dict[str, Any],
     kernel_allowlist: tuple[str, ...],
 ) -> dict[str, Any]:
-    native_latency = _median([_metric(run, workload.primary_metric) for run in native])
-    native_runtime = _median([_phase_ms(run, "run") for run in native])
+    native_latency = tuple(
+        _median(
+            [
+                _metric(run, workload.primary_metric, run_index)
+                for run in native_reference
+            ]
+        )
+        for run_index in range(2)
+    )
+    native_runtime = tuple(
+        _median([_runtime_ms(run, run_index) for run in native_reference])
+        for run_index in range(2)
+    )
+    validation_runtime = tuple(
+        _runtime_ms(native_validation, run_index) for run_index in range(2)
+    )
+    payload_metrics = native_reference[0]["payload"]["result"]["metrics"]
     result: dict[str, Any] = {
         "id": workload.id,
         "description": workload.description,
         "primary_metric": workload.primary_metric,
         "config": workload.config,
-        "native_latency_ms": native_latency,
-        "native_samples_ms": [_metric(run, workload.primary_metric) for run in native],
-        "native_runtime_ms": native_runtime,
-        "native_runtime_samples_ms": [_phase_ms(run, "run") for run in native],
-        "parameter_count": native[0]["payload"]["result"]["metrics"]["parameter_count"],
-        "runtime": native[0]["payload"]["runtime"],
-        "kernel_inventory": inventory["payload"]["kernel_names"],
+        "native_latency_ms": list(native_latency),
+        "native_samples_ms": [
+            [_metric(run, workload.primary_metric, run_index) for run_index in range(2)]
+            for run in native_reference
+        ],
+        "native_runtime_ms": list(native_runtime),
+        "native_runtime_samples_ms": [
+            [_runtime_ms(run, run_index) for run_index in range(2)]
+            for run in native_reference
+        ],
+        "native_validation_runtime_ms": list(validation_runtime),
+        "native_validation_drift_ratio": [
+            validation_runtime[index] / native_runtime[index] - 1.0
+            for index in range(2)
+        ],
+        "payload_metrics": payload_metrics,
+        "runtime": native_reference[0]["payload"]["runtime"],
+        "kernel_inventory": list(kernel_allowlist),
         "kernel_allowlist": list(kernel_allowlist),
         "modes": {},
     }
+    if "parameter_count" in payload_metrics:
+        result["parameter_count"] = payload_metrics["parameter_count"]
     for mode in PROFILE_IDS:
         run = modes[mode]
-        latency = _metric(run, workload.primary_metric)
-        startup_ms = _instrumentation_ms(run, "total")
-        runtime_ms = _phase_ms(run, "run") - _instrumentation_ms(run, "during_run")
-        if runtime_ms <= 0:
-            raise BenchmarkError(
-                f"{workload.id} {mode} instrumentation time exceeds timed runtime"
-            )
-        mode_result: dict[str, Any] = {
-            "latency_ms": latency,
-            "runtime_ms": runtime_ms,
-            "runtime_ratio": runtime_ms / native_runtime,
-            "startup_ms": startup_ms,
-            "peak_device_memory": run["payload"]["peak_device_memory"],
-        }
-        if "coverage" in run:
-            mode_result["coverage"] = run["coverage"]
+        mode_result = _summarize_mode(run, native_runtime)
+        mode_result["latency_ms"] = [
+            _metric(run, workload.primary_metric, run_index) for run_index in range(2)
+        ]
         result["modes"][mode] = mode_result
     return result
 
@@ -476,30 +642,36 @@ def _render_status(summary: dict[str, Any]) -> str:
     lines = [
         f"# ConSan `{summary['target']}` benchmark status",
         "",
-        "For each mode, **startup** is its incremental one-off cold-run cost and",
-        "**runtime** is steady-state instrumented latency / native latency.",
+        "For each mode, **Startup** is the one-off instrumentation/load cost;",
+        "**Run1** and **Run2** are matching-order instrumented/native overhead ratios.",
         "",
         "| Workload | "
         + " | ".join(
             column
             for mode in columns
             for column in (
-                f"{MODE_LABELS[mode]} startup",
-                f"{MODE_LABELS[mode]} runtime",
+                f"{MODE_LABELS[mode]} Startup",
+                f"{MODE_LABELS[mode]} Run1",
+                f"{MODE_LABELS[mode]} Run2",
             )
         )
         + " |",
-        "| --- | " + " | ".join("---:" for _ in range(2 * len(columns))) + " |",
+        "| --- | " + " | ".join("---:" for _ in range(3 * len(columns))) + " |",
     ]
     for workload in summary["workloads"]:
-        cells = [
-            value
-            for mode in columns
-            for value in (
-                f"{workload['modes'][mode]['startup_ms'] / 1000.0:.3g} s",
-                f"{workload['modes'][mode]['runtime_ratio']:.3g}×",
-            )
-        ]
+        cells = []
+        for mode in columns:
+            result = workload["modes"].get(mode)
+            if result is None:
+                cells.extend(("pending", "pending", "pending"))
+            else:
+                cells.extend(
+                    (
+                        f"{result['startup_ms'] / 1000.0:.3g} s",
+                        f"{result['runtime_ratio'][0]:.3g}×",
+                        f"{result['runtime_ratio'][1]:.3g}×",
+                    )
+                )
         lines.append(f"| {workload['description']} | " + " | ".join(cells) + " |")
     lines.append("")
     return "\n".join(lines)
@@ -520,54 +692,102 @@ def _main(argv: list[str]) -> int:
     if args.hook is None:
         raise BenchmarkError(f"set ${HOOK_ENV} or pass --hook")
     args.hook = args.hook.resolve()
-    for path, description in (
-        (args.python, "benchmark Python"),
-        (args.hook, "ConSan hook"),
-    ):
-        if not path.is_file():
-            raise BenchmarkError(f"{description} does not exist: {path}")
-    aorta_identity = _git_identity(args.aorta_dir)
-    source_root = Path(__file__).resolve().parents[5]
-    source_identity = _git_identity(source_root)
-    hook_sha256 = _sha256(args.hook)
-    args.run_identity = {
-        "source": source_identity,
-        "aorta": aorta_identity,
-        "hook_sha256": hook_sha256,
-        "runner_sha256": _sha256(Path(__file__)),
-        "payload_sha256": _sha256(Path(__file__).with_name("consan_aorta_benchmark_workload.py")),
-    }
+    if args.rocprofv3 is None:
+        raise BenchmarkError(f"set ${ROCPROFV3_ENV} or pass --rocprofv3")
+    args.rocprofv3 = args.rocprofv3.resolve()
     selected = [
         workload
         for workload in WORKLOADS
         if args.workload is None or workload.id in args.workload
     ]
+    if not selected:
+        raise BenchmarkError("no workloads selected")
+    if args.hipblaslt_bench is not None:
+        args.hipblaslt_bench = args.hipblaslt_bench.resolve()
+    for path, description in (
+        (args.python, "benchmark Python"),
+        (args.hook, "ConSan hook"),
+        (args.rocprofv3, "rocprofv3"),
+    ):
+        if not path.is_file():
+            raise BenchmarkError(f"{description} does not exist: {path}")
+    if any(workload.payload == "hipblaslt" for workload in selected):
+        if args.hipblaslt_bench is None:
+            raise BenchmarkError(
+                f"set ${HIPBLASLT_BENCH_ENV} or pass --hipblaslt-bench"
+            )
+        if not args.hipblaslt_bench.is_file():
+            raise BenchmarkError(
+                f"hipblaslt-bench does not exist: {args.hipblaslt_bench}"
+            )
+    aorta_identity = _git_identity(args.aorta_dir)
+    source_root = Path(__file__).resolve().parents[5]
+    source_identity = _git_identity(source_root)
+    hook_sha256 = _sha256(args.hook)
+    converter = (
+        Path(__file__).resolve().parents[3] / "scripts" / "rocjitsu_consan_allowlist.py"
+    )
+    args.run_identity = {
+        "source": source_identity,
+        "aorta": aorta_identity,
+        "hook_sha256": hook_sha256,
+        "rocprofv3_sha256": _sha256(args.rocprofv3),
+        "runner_sha256": _sha256(Path(__file__)),
+        "converter_sha256": _sha256(converter),
+        "payload_sha256": {
+            workload.payload: _sha256(_payload_program(workload))
+            for workload in selected
+        },
+    }
+    if args.hipblaslt_bench is not None:
+        args.run_identity["hipblaslt_bench_sha256"] = _sha256(args.hipblaslt_bench)
     args.output_dir = args.output_dir.resolve()
     args.output_dir.mkdir(parents=True, exist_ok=True)
+    if args.status is not None:
+        args.status = args.status.resolve()
 
     suite_start = time.perf_counter()
     workload_summaries = []
+    status_projection = {
+        "target": args.target,
+        "workloads": [
+            {"id": workload.id, "description": workload.description, "modes": {}}
+            for workload in selected
+        ],
+    }
+    status_rows = {
+        workload["id"]: workload for workload in status_projection["workloads"]
+    }
     for workload in selected:
-        inventory = _run_one(
+        profile_directory = args.output_dir / f"{workload.id}--kernel-profile"
+        _run_one(
             args=args,
             workload=workload,
             mode=None,
             audit_sites=False,
             label="kernel-inventory",
-            profile_kernels=True,
+            profile_directory=profile_directory,
         )
-        kernel_allowlist = _select_dispatched_kernels(inventory)
         kernel_allowlist_file = args.output_dir / f"{workload.id}--kernel-allowlist.txt"
-        _write_kernel_allowlist(kernel_allowlist_file, kernel_allowlist)
-        native = [
+        kernel_allowlist = _generate_kernel_allowlist(
+            profile_directory,
+            kernel_allowlist_file,
+            args.output_dir / f"{workload.id}--kernel-allowlist.log",
+        )
+        native_reference = [
             _run_one(
                 args=args,
                 workload=workload,
                 mode=None,
                 audit_sites=False,
-                label="native-before",
+                label=f"native-reference-{sample}",
             )
+            for sample in (1, 2)
         ]
+        native_runtime = tuple(
+            _median([_runtime_ms(run, run_index) for run in native_reference])
+            for run_index in range(2)
+        )
         modes: dict[str, dict[str, Any]] = {}
         for mode in PROFILE_IDS:
             modes[mode] = _run_one(
@@ -578,18 +798,25 @@ def _main(argv: list[str]) -> int:
                 label=f"{mode}--audit-{'on' if args.audit_sites else 'off'}",
                 kernel_allowlist_file=kernel_allowlist_file,
             )
-        native.append(
-            _run_one(
-                args=args,
-                workload=workload,
-                mode=None,
-                audit_sites=False,
-                label="native-after",
+            status_rows[workload.id]["modes"][mode] = _summarize_mode(
+                modes[mode], native_runtime
             )
+            if args.status is not None:
+                _atomic_write(args.status, _render_status(status_projection))
+        native_validation = _run_one(
+            args=args,
+            workload=workload,
+            mode=None,
+            audit_sites=False,
+            label="native-validation",
         )
         workload_summaries.append(
             _summarize_workload(
-                workload, native, modes, inventory, kernel_allowlist
+                workload,
+                native_reference,
+                native_validation,
+                modes,
+                kernel_allowlist,
             )
         )
 
@@ -607,14 +834,18 @@ def _main(argv: list[str]) -> int:
             "rocm_systems": source_identity,
             "hook": {"path": str(args.hook), "sha256": hook_sha256},
             "python": str(args.python),
+            "rocprofv3": {
+                "path": str(args.rocprofv3),
+                "sha256": args.run_identity["rocprofv3_sha256"],
+            },
         },
         "workloads": workload_summaries,
     }
-    _atomic_write(args.output_dir / "summary.json", json.dumps(summary, indent=2) + "\n")
+    _atomic_write(
+        args.output_dir / "summary.json", json.dumps(summary, indent=2) + "\n"
+    )
     if args.status is not None:
-        if args.target != "gfx1201":
-            raise BenchmarkError("the current status renderer is specific to gfx1201")
-        _atomic_write(args.status.resolve(), _render_status(summary))
+        _atomic_write(args.status, _render_status(summary))
     print(json.dumps(summary, indent=2))
     return 0
 

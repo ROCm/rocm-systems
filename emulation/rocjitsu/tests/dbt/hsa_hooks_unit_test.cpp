@@ -2075,6 +2075,7 @@ rocjitsu::ConSanTransformArtifacts process_growth_replacement_result(size_t repl
 }
 
 TEST(HsaHooksUnitTest, ConSanLoadedWithoutConfigurationDefaultsToMoiRecordReplay) {
+  ScopedEnvVar log_level("RJ_CONSAN_LOG", "3");
   ScopedEnvVar mode("RJ_CONSAN_MODE", nullptr);
   ScopedEnvVar policy("RJ_CONSAN_POLICY", nullptr);
   ScopedEnvVar report_buffer("RJ_CONSAN_MOI_REPORT_BUFFER", nullptr);
@@ -2111,6 +2112,12 @@ TEST(HsaHooksUnitTest, ConSanLoadedWithoutConfigurationDefaultsToMoiRecordReplay
   EXPECT_EQ(g_transform_override_flavors.front(), rocjitsu::ConSanFlavor::Moi);
   ASSERT_EQ(g_transform_override_engines.size(), 1u);
   EXPECT_EQ(g_transform_override_engines.front(), rocjitsu::ConSanMoiEngine::RecordReplay);
+
+  testing::internal::CaptureStderr();
+  hook.unload();
+  const std::string unload_log = testing::internal::GetCapturedStderr();
+  EXPECT_NE(unload_log.find("ConSan instrumentation timing total_ns="), std::string::npos)
+      << unload_log;
 }
 
 TEST(HsaHooksUnitTest, ConSanThreadsAbsoluteAndRelativePatchedImageGrowthLimits) {
