@@ -5479,7 +5479,7 @@ std::string intraNodeSymReason() {
   MPI_Comm_size(nodeComm, &nodeSize);
   MPI_Comm_free(&nodeComm);
   if (nodeSize < 2)
-    return "Symmetric ReduceScatter requires >=2 ranks per node";
+    return "Symmetric hierarchical collectives require >=2 ranks per node";
   return "";
 }
 
@@ -5664,6 +5664,86 @@ TEST_F(GinMPIDeviceTests, ReduceScatter_Symmetric_Avg) {
       ASSERT_NEAR(expected, static_cast<double>(hostRecv[i]), tol)
           << "rank=" << rank << " i=" << i;
     }
+  }
+}
+
+TEST_F(GinMPIDeviceTests, AllGather_Symmetric) {
+  if (requestedGinType() == 4)
+    GTEST_SKIP() << "Skipping symmetric AllGather (RailRing_LsaST) for rocSHMEM-GDA";
+  if (auto reason = ginProxyTestSkipReason(); !reason.empty())
+    GTEST_SKIP() << reason;
+
+  if (auto reason = crossNodeReason(); !reason.empty())
+    GTEST_SKIP() << reason;
+
+  if (auto reason = intraNodeSymReason(); !reason.empty())
+    GTEST_SKIP() << reason;
+
+  if (!validateTestPrerequisites(/*min_processes=*/2, /*max_processes=*/8))
+    GTEST_SKIP() << "Requires 2-8 ranks";
+
+  ASSERT_EQ(ncclSuccess, createTestCommunicator());
+  ncclComm_t  comm   = getActiveCommunicator();
+  hipStream_t stream = getActiveStream();
+
+  int rank = -1, nRanks = -1;
+  ncclCommUserRank(comm, &rank);
+  ncclCommCount(comm, &nRanks);
+  ASSERT_GE(nRanks, 2);
+  ASSERT_LE(nRanks, 8);
+
+  // 1 (alignment/tail edges), 1024 (medium), 65536 (saturating).
+  const std::vector<size_t> counts = {1, 1024, size_t{1} << 16};
+
+  for (size_t count : counts) {
+    SCOPED_TRACE(::testing::Message() << "count=" << count);
+
+    // Send buffer holds this rank's block; recv holds one block per rank.
+    const size_t sendBytes = count * sizeof(float);
+    const size_t recvElems = count * static_cast<size_t>(nRanks);
+    const size_t recvBytes = recvElems * sizeof(float);
+
+    void* dSend = nullptr;
+    void* dRecv = nullptr;
+    ASSERT_MPI_EQ(ncclSuccess, ncclMemAlloc(&dSend, sendBytes));
+    ASSERT_MPI_EQ(ncclSuccess, ncclMemAlloc(&dRecv, recvBytes));
+    auto memCleanup = makeScopeGuard([&]() {
+      if (dSend) (void)ncclMemFree(dSend);
+      if (dRecv) (void)ncclMemFree(dRecv);
+    });
+
+    ncclWindow_t sendWin = nullptr, recvWin = nullptr;
+    ASSERT_MPI_EQ(ncclSuccess,
+        ncclCommWindowRegister(comm, dSend, sendBytes, &sendWin, NCCL_WIN_COLL_SYMMETRIC));
+    ASSERT_MPI_EQ(ncclSuccess,
+        ncclCommWindowRegister(comm, dRecv, recvBytes, &recvWin, NCCL_WIN_COLL_SYMMETRIC));
+    auto winCleanup = makeScopeGuard([&]() {
+      if (sendWin) (void)ncclCommWindowDeregister(comm, sendWin);
+      if (recvWin) (void)ncclCommWindowDeregister(comm, recvWin);
+    });
+
+    std::vector<float> hostSend(count);
+    for (size_t i = 0; i < count; i++)
+      hostSend[i] = static_cast<float>(static_cast<size_t>(rank) * count + i);
+    std::vector<float> hostRecv(recvElems, -1.0f);
+    ASSERT_MPI_EQ(hipSuccess,
+        hipMemcpy(dSend, hostSend.data(), sendBytes, hipMemcpyHostToDevice));
+    ASSERT_MPI_EQ(hipSuccess,
+        hipMemcpy(dRecv, hostRecv.data(), recvBytes, hipMemcpyHostToDevice));
+
+    MPI_Barrier(MPI_COMM_WORLD);
+
+    ASSERT_MPI_EQ(ncclSuccess,
+        ncclAllGather(dSend, dRecv, count, ncclFloat32, comm, stream));
+    ASSERT_MPI_EQ(hipSuccess, hipStreamSynchronize(stream));
+
+    MPI_Barrier(MPI_COMM_WORLD);
+
+    ASSERT_EQ(hipSuccess,
+        hipMemcpy(hostRecv.data(), dRecv, recvBytes, hipMemcpyDeviceToHost));
+    for (size_t j = 0; j < recvElems; j++)
+      ASSERT_EQ(static_cast<float>(j), hostRecv[j])
+          << "rank=" << rank << " j=" << j << " (src=" << j / count << " i=" << j % count << ")";
   }
 }
 

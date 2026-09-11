@@ -46,6 +46,7 @@ enum ncclSymkKernelId {
   ncclSymkKernelId_AllGather_ST,
   ncclSymkKernelId_AllGather_TmaSTMC,
   ncclSymkKernelId_AllGather_STMC,
+  ncclSymkKernelId_AllGather_RailRing_LsaST,
   ncclSymkKernelId_AllGather_RailRing_LsaSTMC,
 
   ncclSymkKernelId_ReduceScatter_LL,

@@ -35,15 +35,15 @@ GENERATE_PY = RCCL_ROOT / "src" / "device" / "symmetric" / "generate.py"
 # If a change moves these numbers, update them here AND explain in the PR
 # description WHY. Do not blind-update.
 # ---------------------------------------------------------------------------
-EXPECTED_TOTAL = 42
+EXPECTED_TOTAL = 43
 EXPECTED_PER_COLL = {
-    "AllGather": 2,
+    "AllGather": 3,
     "AllReduce": 10,
     "ReduceScatter": 30,
 }
 EXPECTED_DIMS = {
     "coll": {"AllGather", "AllReduce", "ReduceScatter"},
-    "algo": {"LL", "ST", "AGxLL_R", "RSxLD_AGxST", "LD", "RailA2A_LsaLD"},
+    "algo": {"LL", "ST", "RailRing_LsaST", "AGxLL_R", "RSxLD_AGxST", "LD", "RailA2A_LsaLD"},
     "red": {"sum", "avg"},
     "ty": {"f32", "f16", "bf16", "f8e4m3", "f8e5m2"},
 }
@@ -223,6 +223,8 @@ def test_per_collective_and_dimension_baselines(sym_host):
      {"coll": "ReduceScatter", "algo": "RailA2A_LsaLD", "red": "sum", "ty": "bf16"}),
     ("ncclSymkDevKernel_AllGather_ST",
      {"coll": "AllGather", "algo": "ST", "red": None, "ty": None}),
+    ("ncclSymkDevKernel_AllGather_RailRing_LsaST",
+     {"coll": "AllGather", "algo": "RailRing_LsaST", "red": None, "ty": None}),
     ("ncclSymkDevKernel_AllReduce_AGxLL_R_sum_f32",
      {"coll": "AllReduce", "algo": "AGxLL_R", "red": "sum", "ty": "f32"}),
 ])
