@@ -822,13 +822,17 @@ reader_t::impl::get_events_for_track(reader_types::track_info_ptr_t      track,
             std::vector<data_storage::schema_v3::timeline_event_result> results;
             if(has_time)
             {
-                results = stmts
+                const auto window_end   = filter.time_window.end.value();
+                const auto window_start = filter.time_window.start.value();
+                results                 = stmts
                               .track_and_time_filtered(topo.nid,
                                                        topo.pid,
                                                        topo.tid,
+                                                       window_end,
+                                                       window_start,
                                                        db_id,
-                                                       filter.time_window.end.value(),
-                                                       filter.time_window.start.value())
+                                                       window_end,
+                                                       window_start)
                               .to_vector();
             }
             else
@@ -869,6 +873,51 @@ reader_t::impl::get_events_for_track(reader_types::track_info_ptr_t      track,
 
     apply_pagination(all_events, filter.pagination);
     return all_events;
+}
+
+reader_types::counter_timeline_event_list_t
+reader_t::impl::get_counter_events_for_track(reader_types::track_info_ptr_t      track,
+                                             const reader_types::event_filter_t& filter)
+{
+    if(!track) return {};
+
+    auto db_id_it = m_track_ptr_to_db_id.find(track);
+    if(db_id_it == m_track_ptr_to_db_id.end()) return {};
+
+    const auto db_id = db_id_it->second;
+
+    const bool has_time =
+        filter.time_window.start.has_value() && filter.time_window.end.has_value();
+
+    std::vector<data_storage::schema_v3::pmc_sample_result> results;
+    if(has_time)
+    {
+        results =
+            m_read_statements
+                ->pmc_sample_time_filtered_statement()(db_id,
+                                                       track->agent_id,
+                                                       filter.time_window.start.value(),
+                                                       filter.time_window.end.value())
+                .to_vector();
+    }
+    else
+    {
+        results =
+            m_read_statements->pmc_sample_statement()(db_id, track->agent_id).to_vector();
+    }
+
+    reader_types::counter_timeline_event_list_t events;
+    events.reserve(results.size());
+    for(const auto& result : results)
+    {
+        events.push_back(reader_types::counter_timeline_event_t{
+            .timestamp = result.timestamp,
+            .value     = result.value,
+            .track     = track,
+        });
+    }
+
+    return events;
 }
 
 size_t

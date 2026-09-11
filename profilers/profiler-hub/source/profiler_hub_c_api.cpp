@@ -105,3 +105,47 @@ ph_get_node(ph_ctx_t ctx, ph_node_t* node)
 
     return PH_RESULT_SUCCESS;
 }
+
+ph_result_t
+ph_get_track_events(ph_ctx_t         ctx,
+                    uint32_t         track_id,
+                    uint64_t         start_ts,
+                    uint64_t         end_ts,
+                    ph_event_list_t* events)
+{
+    if(ctx == nullptr)
+    {
+        return PH_RESULT_INVALID_CONTEXT;
+    }
+
+    if(events == nullptr || !ctx->has_track(track_id))
+    {
+        return PH_RESULT_INVALID_ARGUMENT;
+    }
+
+    *events = ctx->get_track_events(track_id, start_ts, end_ts);
+
+    return PH_RESULT_SUCCESS;
+}
+
+ph_result_t
+ph_get_track_samples(ph_ctx_t          ctx,
+                     uint32_t          track_id,
+                     uint64_t          start_ts,
+                     uint64_t          end_ts,
+                     ph_sample_list_t* samples)
+{
+    if(ctx == nullptr)
+    {
+        return PH_RESULT_INVALID_CONTEXT;
+    }
+
+    if(samples == nullptr || !ctx->has_track(track_id))
+    {
+        return PH_RESULT_INVALID_ARGUMENT;
+    }
+
+    *samples = ctx->get_track_samples(track_id, start_ts, end_ts);
+
+    return PH_RESULT_SUCCESS;
+}

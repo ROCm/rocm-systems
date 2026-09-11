@@ -65,6 +65,10 @@ struct reader_t::impl
         reader_types::track_info_ptr_t      track,
         const reader_types::event_filter_t& filter);
 
+    [[nodiscard]] reader_types::counter_timeline_event_list_t
+    get_counter_events_for_track(reader_types::track_info_ptr_t      track,
+                                 const reader_types::event_filter_t& filter);
+
     [[nodiscard]] size_t get_event_count(const reader_types::event_filter_t& filter);
 
     // Event detail queries
