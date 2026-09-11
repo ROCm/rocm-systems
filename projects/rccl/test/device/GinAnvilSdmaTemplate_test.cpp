@@ -20,6 +20,14 @@
 __device__ unsigned long long g_sdmaStubThreadfenceCount = 0;
 #undef NCCL_GIN_THREADFENCE_SYSTEM
 #define NCCL_GIN_THREADFENCE_SYSTEM() atomicAdd(&g_sdmaStubThreadfenceCount, 1ULL)
+// Force the OSS7 fused-signal gate without pretending this TU is gfx950.
+// Include the stub opcodes first so pragma-once wins, then override
+// SDMA_IS_OSS7 before gin_anvil_sdma.h expands useSdmaFusedSignal.
+// Defining __gfx950__ would also flip HIP arch branches in later includes
+// on non-gfx950 compiles.
+#include "sdma/sdma_opcodes.h"
+#undef SDMA_IS_OSS7
+#define SDMA_IS_OSS7 1
 #include "nccl_device/gin/anvil_sdma/gin_anvil_sdma.h"
 #endif
 
@@ -82,6 +90,24 @@ static unsigned long long readThreadfenceCount() {
   unsigned long long c = 0;
   HIP_EXPECT(hipMemcpyFromSymbol(&c, HIP_SYMBOL(g_sdmaStubThreadfenceCount), sizeof(c)));
   return c;
+}
+
+static void resetSdmaCallLog() {
+  int zero = 0;
+  HIP_CHECK(hipMemcpyToSymbol(HIP_SYMBOL(sdma_anvil::g_sdmaCallLogCount), &zero, sizeof(zero)));
+}
+
+static std::vector<sdma_anvil::SdmaCallLogEntry> readSdmaCallLog() {
+  int count = 0;
+  HIP_EXPECT(hipMemcpyFromSymbol(&count, HIP_SYMBOL(sdma_anvil::g_sdmaCallLogCount), sizeof(count)));
+  if (count < 0) count = 0;
+  if (count > sdma_anvil::kSdmaCallLogCapacity) count = sdma_anvil::kSdmaCallLogCapacity;
+  std::vector<sdma_anvil::SdmaCallLogEntry> log(static_cast<size_t>(count));
+  if (count > 0) {
+    HIP_EXPECT(hipMemcpyFromSymbol(log.data(), HIP_SYMBOL(sdma_anvil::g_sdmaCallLog),
+                                   static_cast<size_t>(count) * sizeof(sdma_anvil::SdmaCallLogEntry)));
+  }
+  return log;
 }
 
 // H1: non-leader thread returns immediately.
@@ -477,6 +503,65 @@ TEST_F(GinAnvilSdmaTemplateTest, Flush_MultiDirtyBits) {
   kernelFlushMultiDirty<<<1, 1>>>(d_h.ptr, d_dirty.ptr);
   syncAndCheck();
   EXPECT_EQ(d_dirty.download(), 0ULL);
+}
+
+// H13: a put larger than the per-copy cap (gin_sdma::kGinPutSegBytes, 128 MiB)
+// splits into multiple ::sdma_anvil::put segments, and the fused completion
+// signal (::sdma_anvil::putSignal) is attached ONLY to the final segment;
+// earlier segments must carry no signal (::sdma_anvil::put, not putSignal).
+__global__ void kernelPutOversizeSegments(TemplateHarness* h) {
+  if (threadIdx.x != 0) return;
+  ncclGinCtx ginCtx{};
+  ginCtx.handle = &h->ctx;
+  ginCtx.nRanks = 2;
+  ncclGinSignalDescriptor sig{};
+  sig.type = NCCL_GIN_SIGNAL_TYPE_INDEXED;
+  sig.indexedSignal.signalId = 0;
+  const size_t bytes = gin_sdma::kGinPutSegBytes + 4096;
+  ncclGinApi_Put<NCCL_NET_DEVICE_GIN_ANVIL_SDMA>::call(
+      ginCtx, ncclCoopThread{}, 1, true, reinterpret_cast<ncclGinWindow_t>(&h->dstMh), 0,
+      reinterpret_cast<ncclGinWindow_t>(&h->srcMh), 0, bytes, sig, ncclGinSignalInc, 0, false, 0,
+      false, nullptr, cuda::thread_scope_system, cuda::thread_scope_system);
+}
+
+TEST_F(GinAnvilSdmaTemplateTest, Put_OversizeSplitsSegmentsFusedSignalOnFinalOnly) {
+  const size_t bytes = gin_sdma::kGinPutSegBytes + 4096;
+  DeviceBuffer<uint8_t> d_src(bytes);
+  DeviceBuffer<uint8_t> d_dst(bytes);
+  DeviceBuffer<uint64_t> d_signals(1);
+  d_signals.zero();
+  // Remote signal resolution for peer 1 falls back to signal_remote_addrs
+  // (see remoteSignalAddr in gin_anvil_sdma.h) since the IPC table below only
+  // maps the data buffer's address range, not the signals array.
+  DeviceBuffer<uint64_t> d_remoteSignal(1);
+  d_remoteSignal.zero();
+  DeviceBuffer<uintptr_t> d_signalRemoteAddrs(2);
+  uintptr_t remoteAddrs[2] = {0, reinterpret_cast<uintptr_t>(d_remoteSignal.ptr)};
+  d_signalRemoteAddrs.copyFrom(remoteAddrs, 2);
+
+  DeviceBuffer<ncclGinAnvilIpcBufEntry> d_entry(1);
+  DeviceBuffer<sdma_anvil::SdmaQueueDeviceHandle> d_q(1);
+  DeviceBuffer<sdma_anvil::SdmaQueueDeviceHandle*> d_row(2);
+  DeviceBuffer<TemplateHarness> d_h(1);
+  TemplateHarness host{};
+  uploadHarness(&d_h, &host, &d_src, &d_dst, &d_entry, &d_q, &d_row, /*threshold=*/0);
+  host.ctx.signals = d_signals.ptr;
+  host.ctx.signal_remote_addrs = d_signalRemoteAddrs.ptr;
+  host.ctx.fusedSdmaSignal = 1;
+  d_h.upload(host);
+
+  resetSdmaCallLog();
+  kernelPutOversizeSegments<<<1, 1>>>(d_h.ptr);
+  syncAndCheck();
+
+  auto log = readSdmaCallLog();
+  ASSERT_EQ(log.size(), 2u);
+  // First (non-final) segment: capped at kGinPutSegBytes, carries no signal.
+  EXPECT_EQ(log[0].kind, 0);
+  EXPECT_EQ(log[0].bytes, gin_sdma::kGinPutSegBytes);
+  // Final segment: the remainder, carries the fused completion signal.
+  EXPECT_EQ(log[1].kind, 1);
+  EXPECT_EQ(log[1].bytes, bytes - gin_sdma::kGinPutSegBytes);
 }
 
 #endif  // NCCL_GIN_ANVIL_SDMA_ENABLE
