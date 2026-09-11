@@ -56,26 +56,59 @@ inline void rcclRegisterShutdownHandler() {
   std::call_once(once, []() { atexit(rcclShutdownHandler); });
 }
 
-// RCCL workaround (gfx950): hipMemUnmap on cuMem VMM *peer* allocations can
-// deadlock in the HSA busy-wait during ncclCommDestroy teardown. To avoid the
-// hang we skip ONLY the peer-aperture teardown in ncclCuMemFreeAddr (the
+// RCCL workaround (gfx950 / gfx1250): hipMemUnmap on cuMem VMM *peer* allocations
+// can deadlock or double-free in the HSA busy-wait during ncclCommDestroy teardown.
+// To avoid that we skip ONLY the peer-aperture teardown in ncclCuMemFreeAddr (the
 // cuMemUnmap + cuMemAddressFree of the peer-mapped VA range), leaking just that
 // VA aperture (the OS reclaims it at process exit). The owner's physical handle
 // (ncclCuMemFree -> cuMemRelease) and ordinary buffers (ncclCudaFree -> cudaFree)
 // still free normally, so long-lived processes do not grow memory on every
-// ncclCommDestroy. Auto-enabled on gfx950; override with NCCL_CUMEM_SKIP_FREE=0
-// (force off) or =1 (force on).
-inline bool rcclSkipCuMemFree() {
-  static const bool skip = [](){
+// ncclCommDestroy. Auto-enabled on gfx950 and gfx1250 (ROCM-30633); override with
+// NCCL_CUMEM_SKIP_FREE=0 (force off) or =1 (force on).
+//
+// Separate site: ncclDevrFinalize may skip owner-local cuMemAddressFree of the
+// LSA flat VA reservation (lsaFlatBase). Temporary gfx1250-only workaround
+// (ROCM-30633): leftover peer maps can hang or double-free AddressFree, and this
+// is the only reclaim site, so a process that creates/destroys device-API comms
+// in a loop will not recover that VA until exit. MI355 (gfx950) still
+// AddressFrees this reservation with skip-free auto-on. NCCL_CUMEM_SKIP_FREE
+// =0/1 still overrides both helpers below.
+inline bool rcclSkipCuMemFreeFromArch(const hipDeviceProp_t& prop) {
+  return strstr(prop.gcnArchName, "gfx950") != nullptr ||
+         strstr(prop.gcnArchName, "gfx1250") != nullptr;
+}
+
+inline bool rcclSkipLsaFlatAddressFreeFromArch(const hipDeviceProp_t& prop) {
+  return strstr(prop.gcnArchName, "gfx1250") != nullptr;
+}
+
+inline bool rcclQueryDeviceProp(hipDeviceProp_t* prop) {
+  *prop = hipDeviceProp_t{};
+  int dev = 0;
+  if (hipGetDevice(&dev) != hipSuccess) return false;
+  if (hipGetDeviceProperties(prop, dev) != hipSuccess) return false;
+  return true;
+}
+
+// Shared NCCL_CUMEM_SKIP_FREE parse + memoization; ArchPred is the only difference.
+template <bool (*ArchPred)(const hipDeviceProp_t&)>
+inline bool rcclSkipCuMemFreeIfArch() {
+  static const bool skip = []() {
     const char* e = getenv("NCCL_CUMEM_SKIP_FREE");
     if (e) return atoi(e) != 0;
     hipDeviceProp_t prop;
-    int dev = 0;
-    if (hipGetDevice(&dev) != hipSuccess) return false;
-    if (hipGetDeviceProperties(&prop, dev) != hipSuccess) return false;
-    return strstr(prop.gcnArchName, "gfx950") != nullptr;
+    if (!rcclQueryDeviceProp(&prop)) return false;
+    return ArchPred(prop);
   }();
   return skip;
+}
+
+inline bool rcclSkipCuMemFree() {
+  return rcclSkipCuMemFreeIfArch<rcclSkipCuMemFreeFromArch>();
+}
+
+inline bool rcclSkipLsaFlatAddressFree() {
+  return rcclSkipCuMemFreeIfArch<rcclSkipLsaFlatAddressFreeFromArch>();
 }
 uint64_t clockNano(); // from utils.h with which we have a circular dependency
 
@@ -550,7 +583,7 @@ fail:
 static inline ncclResult_t ncclCuMemFreeAddr(void* ptr, struct ncclMemManager* manager, int numSegments = 1) {
   if (ptr == NULL) return ncclSuccess;
   // Check if process is shutting down to avoid use-after-free in HIP runtime.
-  // gfx950 (rcclSkipCuMemFree): hipMemUnmap on cuMem VMM *peer* apertures can
+  // gfx950/gfx1250 (rcclSkipCuMemFree): hipMemUnmap on cuMem VMM *peer* apertures can
   // deadlock in the HSA busy-wait during ncclCommDestroy. GIN-SDMA device tests
   // allocate symmetric windows and hit this on teardown; skipping only the peer
   // VA unmap here lets the run finish (OS reclaims at exit). Owner handle release
@@ -707,10 +740,10 @@ fail:
 static inline ncclResult_t ncclCuMemFree(void* ptr, struct ncclMemManager* manager, int numSegments = 1) {
   if (ptr == NULL) return ncclSuccess;
   // Check if process is shutting down to avoid use-after-free in HIP runtime.
-  // NOTE: the gfx950 rcclSkipCuMemFree() workaround is intentionally NOT applied
-  // here -- this releases the owner's physical handle (cuMemRelease), which does
-  // not hit the peer-unmap deadlock; skipping it would leak physical memory. The
-  // skip is confined to the peer aperture unmap in ncclCuMemFreeAddr.
+  // NOTE: the gfx950/gfx1250 rcclSkipCuMemFree() workaround is intentionally NOT
+  // applied here -- this releases the owner's physical handle (cuMemRelease), which
+  // does not hit the peer-unmap deadlock; skipping it would leak physical memory.
+  // The skip is confined to the peer aperture unmap in ncclCuMemFreeAddr.
   if (rcclShutdownFlag().load(std::memory_order_acquire)) {
     INFO(NCCL_ALLOC, "ncclCuMemFree: Skipping free (process shutdown) pointer %p", ptr);
     return ncclSuccess;
@@ -1038,8 +1071,8 @@ ncclResult_t ncclCudaFree(T* ptr, struct ncclMemManager* manager, int numSegment
   // Check if process is shutting down. The atexit handler sets this flag
   // BEFORE HIP runtime static destructors run, so we can safely skip the free.
   // The OS will reclaim all memory when the process exits anyway.
-  // NOTE: the gfx950 rcclSkipCuMemFree() workaround is intentionally NOT applied
-  // here -- ordinary buffers (cudaFree) and the VMM handle release
+  // NOTE: the gfx950/gfx1250 rcclSkipCuMemFree() workaround is intentionally NOT
+  // applied here -- ordinary buffers (cudaFree) and the VMM handle release
   // (ncclCuMemFree) must free normally so long-lived processes do not leak on
   // every ncclCommDestroy. The peer-unmap deadlock is dodged in ncclCuMemFreeAddr.
   if (rcclShutdownFlag().load(std::memory_order_acquire)) {

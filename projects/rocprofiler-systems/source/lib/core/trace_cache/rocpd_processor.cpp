@@ -4,7 +4,7 @@
 #include "core/trace_cache/rocpd_processor.hpp"
 #include "agent.hpp"
 #include "common/md5sum.hpp"
-#include "common/units.hpp"
+#include "common/units/data_size.hpp"
 #include "core/agent_manager.hpp"
 #include "core/common_types.hpp"
 #include "core/config.hpp"
@@ -30,6 +30,7 @@
 #include <rocprofiler-sdk/version.h>
 
 #include <algorithm>
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <exception>
@@ -42,6 +43,10 @@
 #include <string>
 #include <utility>
 #include <vector>
+
+using rocprofsys::common::units::bytes;
+using rocprofsys::common::units::data_size_cast;
+using rocprofsys::common::units::megabytes;
 
 namespace rocprofsys::trace_cache
 {
@@ -367,7 +372,7 @@ rocpd_processor_t::handle([[maybe_unused]] const gpu_pmc_sample& gpu_pmc)
     try
     {
         agent_ptr =
-            &m_agent_manager->get_agent_by_type_index(gpu_pmc.device_id, agent_type::GPU);
+            &m_agent_manager->get_agent_by_type_index(gpu_pmc.device_id, agent_type::gpu);
     } catch(const std::out_of_range& e)
     {
         LOG_WARNING("GPU PMC sample skipped: agent lookup failed for device_id={}: {}",
@@ -431,9 +436,11 @@ rocpd_processor_t::handle([[maybe_unused]] const gpu_pmc_sample& gpu_pmc)
                   info::format_track_name<category::amd_smi_power>(),
                   enabled.bits.current_socket_power || enabled.bits.average_socket_power,
                   pmc::collectors::gpu::select_socket_power(enabled, m));
-    insert_scalar(trait::name<category::amd_smi_memory_usage>::value,
-                  info::format_track_name<category::amd_smi_memory_usage>(),
-                  enabled.bits.memory_usage, m.memory_usage / units::megabyte);
+    insert_scalar(
+        trait::name<category::amd_smi_memory_usage>::value,
+        info::format_track_name<category::amd_smi_memory_usage>(),
+        enabled.bits.memory_usage,
+        data_size_cast<megabytes>(bytes{ static_cast<double>(m.memory_usage) }).count());
     insert_scalar(trait::name<category::amd_smi_sdma_usage>::value,
                   info::format_track_name<category::amd_smi_sdma_usage>(),
                   enabled.bits.sdma_usage, m.sdma_usage);
@@ -555,7 +562,7 @@ rocpd_processor_t::handle([[maybe_unused]] const ainic_pmc_sample& nic_sample)
     try
     {
         agent_ptr =
-            &m_agent_manager->get_agent_by_id(nic_sample.device_id, agent_type::NIC);
+            &m_agent_manager->get_agent_by_id(nic_sample.device_id, agent_type::nic);
     } catch(const std::out_of_range& e)
     {
         LOG_WARNING("NIC PMC sample skipped: agent lookup failed for device_id={}: {}",
@@ -644,7 +651,7 @@ rocpd_processor_t::handle(
     try
     {
         agent_ptr = &m_agent_manager->get_agent_by_type_index(gpu_perf_counter.device_id,
-                                                              agent_type::GPU);
+                                                              agent_type::gpu);
     } catch(const std::out_of_range& e)
     {
         LOG_WARNING("GPU perf-counter sample skipped: agent lookup failed for "
@@ -742,7 +749,7 @@ rocpd_processor_t::handle([[maybe_unused]] const cpu_pmc_sample& cpu_pmc_smpl)
     const agent* agent_ptr = nullptr;
     try
     {
-        agent_ptr = &m_agent_manager->get_agent_by_type_index(device_id, agent_type::CPU);
+        agent_ptr = &m_agent_manager->get_agent_by_type_index(device_id, agent_type::cpu);
     } catch(const std::out_of_range& e)
     {
         LOG_WARNING("CPU PMC sample skipped: agent lookup failed for device_id={}: {}",
@@ -791,26 +798,27 @@ rocpd_processor_t::handle([[maybe_unused]] const cpu_pmc_sample& cpu_pmc_smpl)
             insert_event_and_sample(
                 trait::name<category::process_page>::value,
                 trait::name<category::process_page>::value,
-                static_cast<double>(cpu_pmc_smpl.process_data.page_rss) /
-                    units::megabyte);
+                data_size_cast<megabytes>(
+                    bytes{ static_cast<double>(cpu_pmc_smpl.process_data.page_rss) })
+                    .count());
         }
 
         if(enabled_m.bits.virt_mem)
         {
-            insert_event_and_sample(
-                trait::name<category::process_virt>::value,
-                trait::name<category::process_virt>::value,
-                static_cast<double>(cpu_pmc_smpl.process_data.virt_mem) /
-                    units::megabyte);
+            const auto virt_mem_b =
+                bytes{ static_cast<double>(cpu_pmc_smpl.process_data.virt_mem) };
+            insert_event_and_sample(trait::name<category::process_virt>::value,
+                                    trait::name<category::process_virt>::value,
+                                    data_size_cast<megabytes>(virt_mem_b).count());
         }
 
         if(enabled_m.bits.peak_rss)
         {
-            insert_event_and_sample(
-                trait::name<category::process_peak>::value,
-                trait::name<category::process_peak>::value,
-                static_cast<double>(cpu_pmc_smpl.process_data.peak_rss) /
-                    units::megabyte);
+            const auto peak_rss_b =
+                bytes{ static_cast<double>(cpu_pmc_smpl.process_data.peak_rss) };
+            insert_event_and_sample(trait::name<category::process_peak>::value,
+                                    trait::name<category::process_peak>::value,
+                                    data_size_cast<megabytes>(peak_rss_b).count());
         }
 
         if(enabled_m.bits.ctx_switches)
@@ -831,20 +839,27 @@ rocpd_processor_t::handle([[maybe_unused]] const cpu_pmc_sample& cpu_pmc_smpl)
 
         if(enabled_m.bits.user_time)
         {
-            insert_event_and_sample(
-                trait::name<category::process_user_mode_time>::value,
-                trait::name<category::process_user_mode_time>::value,
-                static_cast<double>(cpu_pmc_smpl.process_data.user_mode_time) /
-                    units::sec);
+            const auto user_mode_time_us =
+                std::chrono::microseconds{ cpu_pmc_smpl.process_data.user_mode_time };
+            const auto user_mode_time_s =
+                std::chrono::duration<double>{ user_mode_time_us };
+
+            insert_event_and_sample(trait::name<category::process_user_mode_time>::value,
+                                    trait::name<category::process_user_mode_time>::value,
+                                    user_mode_time_s.count());
         }
 
         if(enabled_m.bits.kernel_time)
         {
+            const auto kernel_mode_time_us =
+                std::chrono::microseconds{ cpu_pmc_smpl.process_data.kernel_mode_time };
+            const auto kernel_mode_time_s =
+                std::chrono::duration<double>{ kernel_mode_time_us };
+
             insert_event_and_sample(
                 trait::name<category::process_kernel_mode_time>::value,
                 trait::name<category::process_kernel_mode_time>::value,
-                static_cast<double>(cpu_pmc_smpl.process_data.kernel_mode_time) /
-                    units::sec);
+                kernel_mode_time_s.count());
         }
     }
 
@@ -1268,8 +1283,8 @@ rocpd_processor_t::post_process_metadata()
     for(const auto& pmc_info : pmc_info_list)
     {
         constexpr std::array<agent_type, 2> cpu_gpu_types = {
-            agent_type::GPU,
-            agent_type::CPU,
+            agent_type::gpu,
+            agent_type::cpu,
         };
 
         const bool is_cpu_gpu_agent =
