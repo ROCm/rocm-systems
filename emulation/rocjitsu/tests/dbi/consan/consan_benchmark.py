@@ -17,7 +17,7 @@ import sys
 import time
 from typing import Any
 
-from consan_coverage_gate import CoverageParseError, acceptance_decision
+from consan_coverage_gate import CoverageParseError, parse_coverage_evidence
 from consan_validation_catalog import (
     CONTROLLED_ENV_PREFIX,
     HSA_TOOL_ENVIRONMENT,
@@ -259,10 +259,18 @@ def _clean_environment(
         return environment
     assert hook is not None
     profile_environment = dict(PROFILES[mode].environment)
-    # Validation profiles reject reported races. A performance benchmark must
-    # retain those diagnostics as artifacts without requiring unrelated
-    # third-party workloads to be race-free.
-    profile_environment.pop("RJ_CONSAN_MOI_FORBID_DIAGNOSTICS", None)
+    # Validation profiles require exhaustive dynamic evidence and reject
+    # reported races. A performance benchmark instead gates on static site
+    # instrumentation and numerical correctness. Keep dynamic diagnostics and
+    # bounded-capture saturation visible in artifacts without aborting the
+    # measured process.
+    profile_environment.update(
+        {
+            "RJ_CONSAN_MOI_REQUIRE_RECORDS": "0",
+            "RJ_CONSAN_MOI_FORBID_DIAGNOSTICS": "0",
+            "RJ_CONSAN_MOI_FORBID_OVERFLOW": "0",
+        }
+    )
     environment.update(profile_environment)
     environment.update(
         {
@@ -299,14 +307,52 @@ def _parse_payload(output: str) -> dict[str, Any]:
 
 def _coverage_summary(output: str) -> dict[str, Any]:
     try:
-        decision = acceptance_decision(output)
+        evidence = parse_coverage_evidence(output)
     except CoverageParseError as error:
         raise BenchmarkError(f"site audit evidence is invalid: {error}") from error
-    if not decision.accepted:
-        raise BenchmarkError("site audit failed: " + "; ".join(decision.reasons))
+    verdict = evidence.verdict
     applicable = tuple(
-        record for record in decision.evidence.coverage if record.applicable
+        record for record in evidence.coverage if record.applicable
     )
+    reasons: list[str] = []
+    if not verdict.applicable:
+        reasons.append("verdict applicable=false")
+    if not verdict.static_complete:
+        reasons.append("verdict static_complete=false")
+    if verdict.applicable_code_objects == 0:
+        reasons.append("no applicable code objects")
+    if verdict.incomplete_code_objects != 0:
+        reasons.append(
+            f"incomplete code objects: {verdict.incomplete_code_objects}"
+        )
+    for record in applicable:
+        if record.expert_limit:
+            reasons.append(
+                f"reader {record.reader} used an expert patch limit"
+            )
+        if not record.analysis_complete:
+            reasons.append(f"reader {record.reader} static analysis incomplete")
+        for kind in SITE_KINDS:
+            patched = record.counts[f"{kind}_patched"]
+            supported = record.counts[f"{kind}_supported"]
+            if patched != supported:
+                reasons.append(
+                    f"reader {record.reader} {kind} patched/supported mismatch: "
+                    f"{patched}/{supported}"
+                )
+            for category in (
+                "unsupported",
+                "resource_failed",
+                "placement_or_lowering_failed",
+                "expert_limit_omitted",
+            ):
+                count = record.counts[f"{kind}_{category}"]
+                if count:
+                    reasons.append(
+                        f"reader {record.reader} {kind} {category}: {count}"
+                    )
+    if reasons:
+        raise BenchmarkError("site audit failed: " + "; ".join(reasons))
     counts: dict[str, int] = {}
     for field in ("discovered", "selected", "patched", "supported", "unsupported"):
         counts[field] = sum(
@@ -318,8 +364,8 @@ def _coverage_summary(output: str) -> dict[str, Any]:
     counts["missed"] = counts["supported"] - counts["patched"]
     return {
         "accepted": True,
-        "applicable_code_objects": decision.evidence.verdict.applicable_code_objects,
-        "dynamic_complete": decision.evidence.verdict.dynamic_complete,
+        "applicable_code_objects": verdict.applicable_code_objects,
+        "dynamic_complete": verdict.dynamic_complete,
         **counts,
     }
 

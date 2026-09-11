@@ -13,7 +13,7 @@ from unittest import mock
 
 import consan_benchmark as benchmark
 from consan_validation_catalog import PROFILE_IDS
-from consan_validation_test_support import coverage, verdict
+from consan_validation_test_support import coverage, log, verdict
 
 
 def _run(
@@ -292,7 +292,9 @@ class ConSanBenchmarkTest(unittest.TestCase):
         self.assertEqual(instrumented["RJ_CONSAN_MODE"], "sampled")
         self.assertEqual(instrumented["RJ_CONSAN_LOG"], "3")
         self.assertEqual(instrumented["RJ_CONSAN_KERNEL_ALLOWLIST_FILE"], "/names.txt")
-        self.assertNotIn("RJ_CONSAN_MOI_FORBID_DIAGNOSTICS", instrumented)
+        self.assertEqual(instrumented["RJ_CONSAN_MOI_REQUIRE_RECORDS"], "0")
+        self.assertEqual(instrumented["RJ_CONSAN_MOI_FORBID_DIAGNOSTICS"], "0")
+        self.assertEqual(instrumented["RJ_CONSAN_MOI_FORBID_OVERFLOW"], "0")
         self.assertNotIn("HSA_MODEL_LIB", instrumented)
         self.assertEqual(
             manually_selected["RJ_CONSAN_MOI_EPOCH_ANALYSIS"], "manual"
@@ -322,6 +324,43 @@ class ConSanBenchmarkTest(unittest.TestCase):
         self.assertEqual(summary["missed"], 0)
         with self.assertRaises(benchmark.BenchmarkError):
             benchmark._coverage_summary("not coverage evidence")
+
+    def test_coverage_summary_accepts_incomplete_dynamic_capture(self) -> None:
+        summary = benchmark._coverage_summary(
+            "\n".join(
+                (
+                    coverage(),
+                    verdict(
+                        analysis_complete="false",
+                        dynamic_complete="false",
+                        dynamic_incomplete="1",
+                        record_replay_bank_saturation="1",
+                    ),
+                )
+            )
+        )
+        self.assertTrue(summary["accepted"])
+        self.assertFalse(summary["dynamic_complete"])
+
+    def test_coverage_summary_rejects_incomplete_static_instrumentation(self) -> None:
+        with self.assertRaisesRegex(
+            benchmark.BenchmarkError, "static analysis incomplete"
+        ):
+            benchmark._coverage_summary(
+                log(
+                    coverage(
+                        analysis_complete="false",
+                        access_patched="19",
+                        access_placement_or_lowering_failed="1",
+                    ),
+                    verdict(
+                        analysis_complete="false",
+                        static_complete="false",
+                        incomplete_code_objects="1",
+                        access="19/20",
+                    ),
+                )
+            )
 
     def test_summary_folds_first_run_into_startup_and_reports_steady_run(self) -> None:
         workload = benchmark.Workload("id", "description", "latency_ms", {})

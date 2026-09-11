@@ -21,7 +21,7 @@ Every admitted cell must:
 - use exactly the same operation and inputs natively and in every mode;
 - pass an independent numerical or output oracle;
 - use the generated exact-name kernel allowlist for every instrumented run;
-- pass ConSan's static, dynamic, and final site-coverage audit; and
+- pass ConSan's static site-instrumentation audit; and
 - preserve enough provenance to reproduce the executable, software stack,
   target, workload configuration, and selected kernels.
 
@@ -169,11 +169,12 @@ kernel inventory, and provenance remain in JSON artifacts rather than the
 human status table.
 
 The coverage audit is enabled by default. A mode result is admissible only when
-all selected supported sites were patched and the final verdict is complete.
-Reported workload races remain in the JSON and log artifacts but do not reject
-a performance cell: numerical correctness and instrumentation completeness are
-the benchmark gates, while deciding whether third-party code is race-free
-belongs to validation.
+static analysis completed and every selected supported site was patched.
+Dynamic reports are still decoded at the selected Run1 checkpoints and retained
+in the JSON and log artifacts, but reported workload races or exhaustion of a
+bounded dynamic evidence table do not reject a performance cell: numerical
+correctness and static instrumentation completeness are the benchmark gates,
+while exhaustive race-analysis qualification belongs to validation.
 The opt-out exists for investigation but is intentionally not advertised as a
 normal benchmark path. Prior measurements found its cost negligible, so status
 tables do not carry separate audit-on/off columns.
