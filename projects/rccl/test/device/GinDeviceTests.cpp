@@ -924,4 +924,82 @@ TEST_F(GinDeviceTest, ResetCounter) {
   }
 }
 
+// ---------------------------------------------------------------------------
+// Flush_CoopPartitionCoverage: ncclGinApi_Flush<NCCL_NET_DEVICE_GIN_PROXY>::call
+//   grid-strides peers via `pe = coop.thread_rank(); pe < ctx.nRanks; pe +=
+//   coop.size()`. kNranks=5 with a 3-thread coop (5 % 3 != 0) forces the
+//   stride to wrap, so some threads visit two peers and one visits none.
+//
+//   Presetting lastIssuedGet[pe] > lastVisibleGet[pe] for every peer forces
+//   Wait's local-flush branch to fire once per peer: it posts one flush GFD
+//   to ctx.rank's own queue, then stores lastVisibleGet[pe]. There is no CPU
+//   consumer draining cis[], so the flush's busy-wait is broken
+//   deterministically via an armed abortFlag (utility.h testAbort).
+//
+//   Oracle: a skipped peer leaves lastVisibleGet[pe] at its unwritten preset;
+//   a duplicated visit or broken stride re-posts a flush GFD, so
+//   pis[ctx.rank] (count of local-flush posts) must land at exactly kNranks.
+// ---------------------------------------------------------------------------
+
+__global__ void kernelFlushCoop(ncclGinCtx ctx, uint32_t* abortFlag) {
+  ncclGinApi_Flush<NCCL_NET_DEVICE_GIN_PROXY>::call(ctx, ncclCoopCta{}, /*hasDescriptor=*/false,
+                                                    /*descriptor=*/nullptr, cuda::memory_order_relaxed, abortFlag);
+}
+
+TEST_F(GinDeviceTest, Flush_CoopPartitionCoverage) {
+  constexpr uint32_t kNranks    = 5;  // 5 % 3 != 0 forces the 3-thread coop's stride to wrap.
+  constexpr uint32_t kQueueSize = 8;  // power of two; comfortably more than the kNranks posts to queue ctx.rank.
+
+  DeviceBuffer<ncclGinProxyGfd_t>    d_queues(kNranks * kQueueSize);
+  DeviceBuffer<uint32_t>             d_pis(kNranks);
+  DeviceBuffer<uint32_t>             d_cis(kNranks);
+  DeviceBuffer<uint32_t>             d_lastIssuedGet(kNranks);
+  DeviceBuffer<uint32_t>             d_lastVisibleGet(kNranks);
+  DeviceBuffer<ncclGinProxyGpuCtx_t> d_proxyCtx(1);
+  DeviceBuffer<uint32_t>             d_abortFlag(1);
+
+  d_queues.zero();
+  d_pis.zero();
+  d_cis.zero();
+  d_lastVisibleGet.copyFrom(std::vector<uint32_t>(kNranks, 0u));
+  d_lastIssuedGet.copyFrom(std::vector<uint32_t>(kNranks, 1u)); // > lastVisibleGet for every peer.
+
+  ncclGinProxyGpuCtx_t hostProxyCtx{};
+  hostProxyCtx.nranks         = static_cast<int>(kNranks);
+  hostProxyCtx.queueSize      = kQueueSize;
+  hostProxyCtx.queues         = d_queues.ptr;
+  hostProxyCtx.pis            = d_pis.ptr;
+  hostProxyCtx.cis            = d_cis.ptr;
+  hostProxyCtx.counters       = nullptr;
+  hostProxyCtx.signals        = nullptr;
+  hostProxyCtx.signalOffsets  = nullptr;
+  hostProxyCtx.lastIssuedGet  = d_lastIssuedGet.ptr;
+  hostProxyCtx.lastVisibleGet = d_lastVisibleGet.ptr;
+  d_proxyCtx.upload(hostProxyCtx);
+
+  // Wrap the proxy ctx in an ncclGinCtx; Flush only looks at ctx.rank/ctx.nRanks/ctx.handle.
+  ncclGinCtx ctx{};
+  ctx.backend = NCCL_NET_DEVICE_GIN_PROXY;
+  ctx.rank    = 0;
+  ctx.nRanks  = static_cast<int>(kNranks);
+  ctx.handle  = d_proxyCtx.ptr;
+
+  d_abortFlag.upload(1u); // armed: breaks the no-consumer local-flush busy-wait deterministically.
+
+  kernelFlushCoop<<<1, 3>>>(ctx, d_abortFlag.ptr); // 3 threads; 5 % 3 != 0 forces the stride to wrap.
+  syncAndCheck();
+
+  std::vector<uint32_t> pis            = d_pis.copyTo();
+  std::vector<uint32_t> lastVisibleGet = d_lastVisibleGet.copyTo();
+
+  // Every peer visited exactly once: lastVisibleGet[pe] moved 0 -> 1; a skipped peer stays at 0.
+  for (uint32_t pe = 0; pe < kNranks; pe++) {
+    EXPECT_EQ(lastVisibleGet[pe], 1u) << "peer " << pe << " must be visited by the coop-strided loop";
+  }
+
+  // Each peer visit posts exactly one local-flush GFD to ctx.rank's own queue; a
+  // duplicated visit or broken stride would overshoot kNranks, a skip would undershoot it.
+  EXPECT_EQ(pis[ctx.rank], kNranks) << "exactly one local-flush GFD must be posted per peer";
+}
+
 } // namespace RcclUnitTesting
