@@ -72,11 +72,18 @@ def log(*args: object) -> None:
 
 
 def parse_parsable_job_id(stdout: str) -> str:
-    """Extract the job id from `sbatch --parsable` stdout (`<id>` or `<id>;<cluster>`)."""
+    """Extract the job id from `sbatch --parsable` stdout (`<id>` or `<id>;<cluster>`).
+
+    Returns "" for anything not purely numeric: `--parsable` only ever prints
+    digits (optionally `;<cluster>`), so banner text landing on the last line
+    -- the mirror image of the banner-before-id case this already handles --
+    must not be handed to sacct/scancel as if it were a real job id.
+    """
     text = stdout.strip()
     if not text:
         return ""
-    return text.splitlines()[-1].split(";")[0].strip()
+    candidate = text.splitlines()[-1].split(";")[0].strip()
+    return candidate if candidate.isdigit() else ""
 
 
 def scancel_job(job_id: str) -> None:
@@ -153,13 +160,13 @@ def submit_and_wait(
         sys.stdout.flush()
 
         job_id = parse_parsable_job_id(proc.stdout)
+        if proc.returncode != 0:
+            return proc.returncode, job_id, None
         if job_id and chdir is not None:
             # So a later `if: cancelled()` step can scancel if this process is
             # SIGKILL'd before the handler runs (GHA signals the step PID).
             (chdir / "slurm-job-id").write_text(f"{job_id}\n")
             log(f"==> wrote {chdir / 'slurm-job-id'}")
-        if proc.returncode != 0:
-            return proc.returncode, job_id, None
         if not job_id:
             # sbatch exited 0 but printed nothing parsable: there is nothing
             # to wait on or scancel, so trusting rc=0 here would report a

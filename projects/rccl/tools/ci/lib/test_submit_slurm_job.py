@@ -27,6 +27,12 @@ class ParseParsableJobIdTest(unittest.TestCase):
         self.assertEqual(parse_parsable_job_id(""), "")
         self.assertEqual(parse_parsable_job_id("   \n"), "")
 
+    def test_banner_after_id_is_rejected(self) -> None:
+        # The mirror image of test_banner_before_id: `--parsable` only ever
+        # prints digits, so trailing non-numeric text on the last line means
+        # this is not a real job id and must not be handed to sacct/scancel.
+        self.assertEqual(parse_parsable_job_id("19010\nsome trailing note\n"), "")
+
 
 class WaitForJobTest(unittest.TestCase):
     """wait_for_job is the load-bearing replacement for `sbatch --wait`."""
@@ -67,6 +73,34 @@ class WaitForJobTest(unittest.TestCase):
                 self.assertEqual(rc, 0)
                 self.assertEqual(result.state, "COMPLETED")
                 self.assertEqual(remaining, [])
+
+    def test_non_terminal_states_is_exactly_expected(self) -> None:
+        # A literal expected set, not a spot-check subset: iterating
+        # NON_TERMINAL_STATES itself would pass trivially even after a
+        # deletion, since that just shortens what the loop checks against.
+        self.assertEqual(
+            submit_slurm_job.NON_TERMINAL_STATES,
+            frozenset(
+                {
+                    "",
+                    "COMPLETING",
+                    "CONFIGURING",
+                    "PENDING",
+                    "REQUEUED",
+                    "REQUEUE_FED",
+                    "REQUEUE_HOLD",
+                    "RESIZING",
+                    "RESV_DEL_HOLD",
+                    "REVOKED",
+                    "RUNNING",
+                    "SIGNALING",
+                    "SPECIAL_EXIT",
+                    "STAGE_OUT",
+                    "STOPPED",
+                    "SUSPENDED",
+                }
+            ),
+        )
 
     def test_terminal_failure_still_returns_zero(self) -> None:
         # wait_for_job only reports "did we cancel it"; sacct is the success
@@ -132,10 +166,14 @@ class SubmitCommandTest(unittest.TestCase):
 
         That file is what the `if: cancelled()` backup step reads to scancel a
         SIGKILL'd process, so a real chdir must actually end up on disk with
-        the job id in it.
+        the job id in it. This also pins that sbatch itself runs from that
+        directory (`cwd=`), since a relative `#SBATCH --output=%x-%j.out`
+        depends on it.
         """
+        seen_kwargs = {}
 
         def fake_run(cmd, **kwargs):
+            seen_kwargs.update(kwargs)
             return mock.Mock(returncode=0, stdout="19010\n", stderr="")
 
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -150,23 +188,34 @@ class SubmitCommandTest(unittest.TestCase):
 
             self.assertEqual((rc, job_id, result), (0, "19010", None))
             self.assertEqual((chdir / "slurm-job-id").read_text(), "19010\n")
+        self.assertEqual(seen_kwargs["cwd"], str(chdir))
 
     def test_empty_job_id_is_hard_failure(self) -> None:
         """sbatch rc=0 with no parsable id must not be read as success.
 
         Nothing was submitted to wait on or scancel, so trusting rc=0 here
-        would report a queued-but-unknown job as a pass.
+        would report a queued-but-unknown job as a pass. wait_for_job is
+        mocked and asserted never called: without this, a regression in the
+        early-return guard would fall through into a real wait loop instead
+        of failing this test, since there is no job id for it to fail on.
         """
+        wait_for_job_calls = []
 
         def fake_run(cmd, **kwargs):
             return mock.Mock(returncode=0, stdout="\n", stderr="")
 
+        def fake_wait_for_job(*a, **k):
+            wait_for_job_calls.append((a, k))
+            return (0, JobResult(state="COMPLETED", exit_code="0:0"))
+
         with mock.patch.object(submit_slurm_job.subprocess, "run", fake_run):
-            rc, job_id, result = submit_slurm_job.submit_and_wait(
-                submit_slurm_job.Path("job.sbatch"), "ALL", None, None
-            )
+            with mock.patch.object(submit_slurm_job, "wait_for_job", fake_wait_for_job):
+                rc, job_id, result = submit_slurm_job.submit_and_wait(
+                    submit_slurm_job.Path("job.sbatch"), "ALL", None, None
+                )
 
         self.assertEqual((rc, job_id, result), (1, "", None))
+        self.assertEqual(wait_for_job_calls, [])
 
     def test_unexpected_exception_scancels_before_reraising(self) -> None:
         """An unexpected crash after a job id exists must not leak the node.
@@ -267,6 +316,70 @@ class SubmitCommandTest(unittest.TestCase):
 
         self.assertEqual((rc, job_id), (0, "19010"))
         self.assertIs(result, failed)
+
+
+class EvaluateTest(unittest.TestCase):
+    """Direct calls to evaluate(): previously only reached indirectly via
+    MainRegressionTest, which only ever fed it a COMPLETED|0:0 case."""
+
+    def test_non_completed_state_is_failure(self) -> None:
+        self.assertEqual(
+            submit_slurm_job.evaluate(0, "19010", JobResult("FAILED", "1:0")), 1
+        )
+
+    def test_nonzero_exit_code_is_failure(self) -> None:
+        self.assertEqual(
+            submit_slurm_job.evaluate(0, "19010", JobResult("COMPLETED", "2:0")), 1
+        )
+
+    def test_completed_zero_exit_is_success(self) -> None:
+        self.assertEqual(
+            submit_slurm_job.evaluate(0, "19010", JobResult("COMPLETED", "0:0")), 0
+        )
+
+
+class QueryJobTest(unittest.TestCase):
+    def test_called_process_error_is_treated_as_no_data(self) -> None:
+        """Argus flagged this path was only ever exercised via literal ""
+        inputs, never a real mocked exception from subprocess itself."""
+
+        def fake_check_output(cmd, **kwargs):
+            raise submit_slurm_job.subprocess.CalledProcessError(1, cmd)
+
+        with mock.patch.object(
+            submit_slurm_job.subprocess, "check_output", fake_check_output
+        ):
+            result = submit_slurm_job.query_job("19010", retries=1, interval=0)
+
+        self.assertEqual(result, JobResult(state="", exit_code=""))
+
+
+class ScancelJobTest(unittest.TestCase):
+    """scancel_job's own body was never executed: every caller-level test
+    mocks the whole function away."""
+
+    def test_cancels_before_logging(self) -> None:
+        seen = []
+
+        def fake_run(cmd, **kwargs):
+            seen.append(cmd)
+            return mock.Mock(returncode=0)
+
+        def raising_log(*a, **k):
+            raise RuntimeError("reentrant call")
+
+        with mock.patch.object(submit_slurm_job.subprocess, "run", fake_run):
+            with mock.patch.object(submit_slurm_job, "log", raising_log):
+                with self.assertRaises(RuntimeError):
+                    submit_slurm_job.scancel_job("19010")
+
+        self.assertEqual(seen, [["scancel", "19010"]])
+
+    def test_empty_job_id_is_a_no_op(self) -> None:
+        with mock.patch.object(submit_slurm_job.subprocess, "run") as mock_run:
+            submit_slurm_job.scancel_job("")
+
+        mock_run.assert_not_called()
 
 
 class MainRegressionTest(unittest.TestCase):

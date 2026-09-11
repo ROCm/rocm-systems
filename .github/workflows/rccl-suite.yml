@@ -337,16 +337,20 @@ jobs:
             --export "ALL,RCCL_DEVICE_API_WORKDIR,RCCL_DEVICE_API_CACHE,ROCM_AMDGPU_FAMILY,RCCL_AMDGPU_TARGETS,RCCL_CI_DEBUG"
 
       - name: scancel Slurm job if GitHub cancelled
-        if: cancelled()
+        # failure() too: a step killed by something other than a GitHub
+        # cancel (e.g. an OOM kill) also skips submit_slurm_job.py's own
+        # signal handlers, and scancel on an already-finished job is a
+        # harmless no-op.
+        if: failure() || cancelled()
         run: |
           set -euo pipefail
           id_file="${GITHUB_WORKSPACE}/${CI_SUBDIR}/.ci-out/${SUITE}-logs/slurm-job-id"
           if [[ -f "${id_file}" ]]; then
             job_id="$(tr -d '[:space:]' < "${id_file}")"
-            echo "==> GitHub cancelled; scancel ${job_id}"
+            echo "==> step failed or was cancelled; scancel ${job_id}"
             scancel "${job_id}" || true
           else
-            echo "==> GitHub cancelled; no slurm-job-id file (sbatch never returned)"
+            echo "==> step failed or was cancelled; no slurm-job-id file (sbatch never returned)"
           fi
 
       - name: Dump compute-node logs
