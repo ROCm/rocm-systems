@@ -22,7 +22,7 @@ Panel Config:
 
   - metric_table:
       id: 602
-      title: Wave Dispatch
+      title: Wavefront Dispatch
       header:
         metric: Metric
         avg: Avg
@@ -53,22 +53,22 @@ Panel Config:
           min: MIN(SPI_CSN_NUM_GROUPS_OF_GROUPS_sum)
           max: MAX(SPI_CSN_NUM_GROUPS_OF_GROUPS_sum)
           unit: Count
-        Wave Dispatch Rate:
+        Wavefront Dispatch Rate:
           avg: SUM(SPI_ALL_WAVE_sum) / SUM(SPI_BUSY_sum)
           min: MIN(SPI_ALL_WAVE_sum / SPI_BUSY_sum)
           max: MAX(SPI_ALL_WAVE_sum / SPI_BUSY_sum)
-          unit: Waves per Cycle
+          unit: Wavefronts per Cycle
         Thread Dispatch Rate:
           avg: SUM(SPI_ALL_WAVE_ITEMS_sum) / SUM(SPI_BUSY_sum)
           min: MIN(SPI_ALL_WAVE_ITEMS_sum / SPI_BUSY_sum)
           max: MAX(SPI_ALL_WAVE_ITEMS_sum / SPI_BUSY_sum)
           unit: Threads per Cycle
-        Per-SE Wave Occupancy:
+        Per-SE Wavefront Occupancy:
           avg: SUM(SPI_ALL_WAVE_IN_FLIGHT_sum) / SUM(SPI_BUSY_sum)
           min: MIN(SPI_ALL_WAVE_IN_FLIGHT_sum / SPI_BUSY_sum)
           max: MAX(SPI_ALL_WAVE_IN_FLIGHT_sum / SPI_BUSY_sum)
-          unit: Waves
-        Per-SE Wave Life:
+          unit: Wavefronts
+        Per-SE Wavefront Life:
           avg: SUM(SPI_ALL_WAVE_IN_FLIGHT_sum) / SUM(SPI_ALL_WAVE_sum)
           min: MIN(SPI_ALL_WAVE_IN_FLIGHT_sum / SPI_ALL_WAVE_sum)
           max: MAX(SPI_ALL_WAVE_IN_FLIGHT_sum / SPI_ALL_WAVE_sum)
@@ -200,16 +200,16 @@ Panel Config:
     Dispatched Group-of-Groups: >-
       Total group-of-groups dispatch operations issued by SPI.
 
-    Wave Dispatch Rate: >-
+    Wavefront Dispatch Rate: >-
       Average wavefronts launched per busy cycle.
 
     Thread Dispatch Rate: >-
       Average threads launched per busy cycle.
 
-    Per-SE Wave Occupancy: >-
+    Per-SE Wavefront Occupancy: >-
       Average wavefronts in-flight per Shader Engine.
 
-    Per-SE Wave Life: >-
+    Per-SE Wavefront Life: >-
       Average wavefront lifetime in cycles per Shader Engine.
 
     Context Save Rate: >-

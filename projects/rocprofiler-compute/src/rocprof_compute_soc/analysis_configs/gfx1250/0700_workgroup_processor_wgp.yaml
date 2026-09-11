@@ -78,7 +78,7 @@ Panel Config:
 
   - metric_table:
       id: 703
-      title: Wave Dispatch
+      title: Wavefront Dispatch
       header:
         metric: Metric
         avg: Avg
@@ -98,7 +98,7 @@ Panel Config:
           unit: Threads
   - metric_table:
       id: 704
-      title: Wave Life
+      title: Wavefront Life
       header:
         metric: Metric
         avg: Avg
@@ -106,14 +106,14 @@ Panel Config:
         max: Max
         unit: Unit
       metric:
-        Wave Life:
+        Wavefront Life:
           avg: SUM(SQG_WAVE_CYCLES_sum) / SUM(SQG_WAVES_sum)
           min: MIN(SQG_WAVE_CYCLES_sum / SQG_WAVES_sum)
           max: MAX(SQG_WAVE_CYCLES_sum / SQG_WAVES_sum)
           unit: Cycles
   - metric_table:
       id: 705
-      title: Wave Instruction Mix
+      title: Wavefront Instruction Mix
       header:
         metric: Metric
         avg: Avg
@@ -670,7 +670,7 @@ Panel Config:
     Dispatched Threads: >-
       Total work-items dispatched.
 
-    Wave Life: >-
+    Wavefront Life: >-
       Average wavefront lifetime in cycles.
 
     Total Instructions: >-
