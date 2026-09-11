@@ -60,6 +60,12 @@ from amdisa.semantics import (
     derive_semantics,
 )
 
+# The generated *_exec.cpp sources reach fp_mode.h, which refuses to compile
+# without the strict rounding-mode build options. CMake attaches these to
+# rocjitsu_isa_<arch>_exec via RJ_STRICT_FP_ROUNDING_OPTIONS; a preprocess-only
+# check has to supply the define the same way. See emulation/rocjitsu/CMakeLists.txt.
+STRICT_FP_ROUNDING_DEFINE = '-DROCJITSU_STRICT_FP_ROUNDING=1'
+
 
 def _repo_root() -> Path:
     return Path(__file__).resolve().parents[6]
@@ -3589,6 +3595,7 @@ def test_single_isa_cdna1_sources_preprocess_with_source_includes(
         [
             compiler,
             '-E',
+            STRICT_FP_ROUNDING_DEFINE,
             *(flag for root in include_roots for flag in ('-I', str(root))),
             str(generated_root / 'cdna1' / 'vop3p_exec.cpp'),
             '-o',
@@ -3640,6 +3647,7 @@ def test_custom_identity_preprocesses_with_profile_handwritten_includes(
             [
                 compiler,
                 '-E',
+                STRICT_FP_ROUNDING_DEFINE,
                 *(flag for root in include_roots for flag in ('-I', str(root))),
                 str(source_path),
                 '-o',

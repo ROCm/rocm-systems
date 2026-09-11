@@ -125,33 +125,38 @@ RunResult run_fmac(bool force_scalar, uint64_t exec, uint32_t mode, bool literal
 }
 
 TEST(Vop2FmaF64SimdCorrectness, InlineLiteralUsesEncodedHighWord) {
-  if constexpr (!util::has_stdx_simd)
-    GTEST_SKIP() << "<experimental/simd> unavailable";
   ForceScalarGuard guard;
   const RunResult scalar = run_fmac(true, ~uint64_t{0}, /*mode=*/3u << 6, true);
-  const RunResult simd = run_fmac(false, ~uint64_t{0}, /*mode=*/3u << 6, true);
-  EXPECT_EQ(simd.output, scalar.output);
-  EXPECT_EQ(simd.output[0], 0x3e10000000000000ULL);
+  EXPECT_EQ(scalar.output[0], 0x3e10000000000000ULL);
+  if constexpr (util::has_stdx_simd_64bit_lanes) {
+    const RunResult simd = run_fmac(false, ~uint64_t{0}, /*mode=*/3u << 6, true);
+    EXPECT_EQ(simd.output, scalar.output);
+  }
 }
 
 TEST(Vop2FmaF64SimdCorrectness, PartialExecPreservesBothInactiveVgprWords) {
-  if constexpr (!util::has_stdx_simd)
-    GTEST_SKIP() << "<experimental/simd> unavailable";
   ForceScalarGuard guard;
   constexpr uint64_t kExec = 0xa5a5f0f012348001ULL;
   const RunResult scalar = run_fmac(true, kExec, /*mode=*/3u << 6);
-  const RunResult simd = run_fmac(false, kExec, /*mode=*/3u << 6);
-  EXPECT_EQ(simd.output, scalar.output);
   for (uint32_t lane = 0; lane < kWaveSize; ++lane) {
     if ((kExec & (uint64_t{1} << lane)) == 0) {
-      EXPECT_EQ(simd.output[lane], simd.accumulator[lane]) << "inactive lane " << lane;
+      EXPECT_EQ(scalar.output[lane], scalar.accumulator[lane]) << "scalar, inactive lane " << lane;
+    }
+  }
+  if constexpr (util::has_stdx_simd_64bit_lanes) {
+    const RunResult simd = run_fmac(false, kExec, /*mode=*/3u << 6);
+    EXPECT_EQ(simd.output, scalar.output);
+    for (uint32_t lane = 0; lane < kWaveSize; ++lane) {
+      if ((kExec & (uint64_t{1} << lane)) == 0) {
+        EXPECT_EQ(simd.output[lane], simd.accumulator[lane]) << "simd, inactive lane " << lane;
+      }
     }
   }
 }
 
 TEST(Vop2FmaF64SimdCorrectness, AllRoundAndDenormModesMatchScalar) {
-  if constexpr (!util::has_stdx_simd)
-    GTEST_SKIP() << "<experimental/simd> unavailable";
+  if constexpr (!util::has_stdx_simd_64bit_lanes)
+    GTEST_SKIP() << "64-bit-lane SIMD path unavailable; both runs would be the scalar one";
   ForceScalarGuard guard;
   for (uint32_t round = 0; round < 4; ++round) {
     for (uint32_t denorm = 0; denorm < 4; ++denorm) {
@@ -164,8 +169,8 @@ TEST(Vop2FmaF64SimdCorrectness, AllRoundAndDenormModesMatchScalar) {
 }
 
 TEST(Vop2FmaF64SimdCorrectness, SpecialValuesAndDenormBoundariesMatchScalarExactly) {
-  if constexpr (!util::has_stdx_simd)
-    GTEST_SKIP() << "<experimental/simd> unavailable";
+  if constexpr (!util::has_stdx_simd_64bit_lanes)
+    GTEST_SKIP() << "64-bit-lane SIMD path unavailable; both runs would be the scalar one";
   ForceScalarGuard guard;
 
   constexpr uint64_t kPositiveZero = 0x0000'0000'0000'0000ULL;
@@ -207,6 +212,98 @@ TEST(Vop2FmaF64SimdCorrectness, SpecialValuesAndDenormBoundariesMatchScalarExact
       const RunResult scalar = run_fmac(true, ~uint64_t{0}, mode, false, &inputs);
       const RunResult simd = run_fmac(false, ~uint64_t{0}, mode, false, &inputs);
       EXPECT_EQ(simd.output, scalar.output) << "round=" << round << " denorm=" << denorm;
+    }
+  }
+}
+
+/// @brief Both paths against the architecturally correct result, not against
+///        each other.
+///
+/// @details The tests above compare the scalar and SIMD paths. That catches a
+/// divergence but not a shared mistake, and it names whichever path it is given
+/// as the reference: when MODE.FP_ROUND stopped reaching the arithmetic, the
+/// scalar path returned the round-to-nearest answer under every mode and the
+/// failure read as "the two disagree" rather than "one is wrong".
+///
+/// These expectations are computed from the ISA definition rather than from the
+/// model. Both operands are chosen so the result lands on a rounding boundary,
+/// where the mode is the only thing that decides the answer:
+///
+///   a) 1.0 * 2^-53 + 1.0 is an exact tie, half an ulp above 1.0. Nearest
+///      rounds to even and keeps 1.0; +inf must step up one ulp; -inf and zero
+///      keep 1.0.
+///   b) 1.125 * 2^-53 + 1.25 lands 0.5625 ulp above 1.25. Nearest is past the
+///      halfway point and steps up, as does +inf; -inf and zero truncate.
+///   c) the negative mirror of (b), 0.5625 ulp below -1.25. Nearest and -inf
+///      take the more-negative neighbor; +inf and zero truncate toward -1.25.
+///
+/// (c) is what separates the four modes from each other. Both positive rows
+/// give -inf and toward-zero the same answer, so on their own they would still
+/// pass with FE_DOWNWARD and FE_TOWARDZERO transposed. Adding a negative row
+/// splits that pair -- and splits nearest from +inf -- so each of the four
+/// MODE.FP_ROUND values is pinned to exactly one host mode.
+///
+/// Because the reference is the ISA and not the other path, the scalar half
+/// stands on its own and runs everywhere -- it is the half that caught this bug.
+/// The SIMD half is gated on `has_stdx_simd_64bit_lanes`, not `has_stdx_simd`:
+/// where the 64-bit-lane probes are compiled out, `run_fmac(false, ...)` falls
+/// through to the scalar implementation, and asserting on it would report the
+/// scalar path a second time as SIMD coverage.
+TEST(Vop2FmaF64SimdCorrectness, DirectedRoundingMatchesTheIsaNotTheOtherPath) {
+  ForceScalarGuard guard;
+
+  constexpr uint64_t kOne = 0x3FF0000000000000ULL;
+  constexpr uint64_t kOneAndAnEighth = 0x3FF2000000000000ULL;
+  constexpr uint64_t kOneAndAQuarter = 0x3FF4000000000000ULL;
+  constexpr uint64_t kTwoPowMinus53 = 0x3CA0000000000000ULL;
+  constexpr uint64_t kNegativeOneAndAnEighth = 0xBFF2000000000000ULL;
+  constexpr uint64_t kNegativeOneAndAQuarter = 0xBFF4000000000000ULL;
+
+  struct Case {
+    const char *what;
+    uint64_t src0;
+    uint64_t src1;
+    uint64_t accumulator;
+    // Indexed by MODE.FP_ROUND: 0 nearest-even, 1 +inf, 2 -inf, 3 zero.
+    std::array<uint64_t, 4> expected;
+  };
+
+  const Case cases[] = {
+      {"exact tie half an ulp above 1.0", kOne, kTwoPowMinus53, kOne, {kOne, kOne + 1, kOne, kOne}},
+      {"0.5625 ulp above 1.25",
+       kOneAndAnEighth,
+       kTwoPowMinus53,
+       kOneAndAQuarter,
+       {kOneAndAQuarter + 1, kOneAndAQuarter + 1, kOneAndAQuarter, kOneAndAQuarter}},
+      // Bits are sign-magnitude, so +1 here is the neighbor further from zero.
+      {"0.5625 ulp below -1.25",
+       kNegativeOneAndAnEighth,
+       kTwoPowMinus53,
+       kNegativeOneAndAQuarter,
+       {kNegativeOneAndAQuarter + 1, kNegativeOneAndAQuarter, kNegativeOneAndAQuarter + 1,
+        kNegativeOneAndAQuarter}},
+  };
+
+  for (const Case &test_case : cases) {
+    RawInputs inputs{};
+    for (uint32_t lane = 0; lane < kWaveSize; ++lane)
+      inputs[lane] = {test_case.src0, test_case.src1, test_case.accumulator};
+
+    for (uint32_t round = 0; round < 4; ++round) {
+      // Denorm mode is irrelevant here; nothing in these cases is subnormal.
+      const uint32_t mode = (round << 2) | (3u << 6);
+      const uint64_t want = test_case.expected[round];
+      const RunResult scalar = run_fmac(true, ~uint64_t{0}, mode, false, &inputs);
+      for (uint32_t lane = 0; lane < kWaveSize; ++lane)
+        EXPECT_EQ(scalar.output[lane], want)
+            << "scalar, " << test_case.what << ", round=" << round << ", lane=" << lane;
+
+      if constexpr (util::has_stdx_simd_64bit_lanes) {
+        const RunResult simd = run_fmac(false, ~uint64_t{0}, mode, false, &inputs);
+        for (uint32_t lane = 0; lane < kWaveSize; ++lane)
+          EXPECT_EQ(simd.output[lane], want)
+              << "simd, " << test_case.what << ", round=" << round << ", lane=" << lane;
+      }
     }
   }
 }
