@@ -185,8 +185,9 @@ the second is the one that gets missed:
    on the target. A shared target is the trap: `rccl-UnitTestsMPI` also carries
    suites that discard `[[nodiscard]]` results of their own, and promoting the
    warning there fails builds the change never touched. `test/CMakeLists.txt`
-   filters the NetIbMPI sources out of the target's source list and sets the
-   option on those alone, via `set_source_files_properties`.
+   copies the target's source list, narrows the copy to the NetIbMPI sources,
+   and sets the option on those alone via `set_source_files_properties`; the
+   target's own source list is unchanged.
 2. The caller may only assert on that status if the failure is *rank-agreed*.
    A helper that fails rank-locally — one node's device, one NIC — takes its
    rank out of the test while the others wait at the next collective, and

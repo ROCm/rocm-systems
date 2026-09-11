@@ -204,6 +204,8 @@ TEST_F(NetIbMPITest, NullCommCastDataPath) {
     void*  phandles[1] = {nullptr};
 
     EXPECT_EQ(netIbCast.regMr(nullptr, buf, sz, NCCL_PTR_HOST, &mhandle), ncclInvalidArgument);
+    // deregMr takes the handle by value and returns early on NULL, so the comm
+    // guard is only reached when the handle is non-null.
     EXPECT_EQ(netIbCast.deregMr(nullptr, &mhandle), ncclInvalidArgument);
     EXPECT_EQ(netIbCast.isend(nullptr, buf, sz, /*tag=*/0, /*mhandle=*/nullptr,
                               /*phandle=*/nullptr, &request),
