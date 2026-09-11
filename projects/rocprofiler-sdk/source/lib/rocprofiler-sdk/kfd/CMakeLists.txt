@@ -13,6 +13,7 @@ set(ROCPROFILER_LIB_KFD_EVENT_HEADERS
     stream_geometry.hpp
     correlation_types.hpp
     doorbell_map.hpp
+    env_parse.hpp
     kfd_correlation.hpp
     poll_reader.hpp
     kfd_profiler.hpp

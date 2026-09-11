@@ -65,8 +65,8 @@
 #include <timemory/process/threading.hpp>
 #include <timemory/utility/types.hpp>
 
+#include <fmt/ranges.h>
 #include <nlohmann/json.hpp>
-#include <spdlog/fmt/ranges.h>
 
 #include "logger/debug.hpp"
 
@@ -654,6 +654,7 @@ void
 cache_scratch_memory(rocprofiler_buffer_tracing_scratch_memory_record_t* record,
                      std::uint64_t                                       stream_handle)
 {
+    trace_cache::get_metadata_registry().add_queue(record->queue_id.handle);
     trace_cache::get_metadata_registry().add_stream(stream_handle);
     trace_cache::get_buffer_storage().store(trace_cache::scratch_memory_sample{
         record->start_timestamp, record->end_timestamp, record->thread_id,

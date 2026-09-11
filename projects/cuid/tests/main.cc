@@ -4,10 +4,14 @@
 #include "test_common.h"
 
 // Unit tests (no root or device required)
+#include "unit/acpi_parser_test.h"
+#include "unit/concurrency_test.h"
 #include "unit/cuid_gpu_test.h"
 #include "unit/file_lock_test.h"
 #include "unit/gim_util_test.h"
 #include "unit/id_string_test.h"
+#include "unit/pci_util_test.h"
+#include "unit/sha256_test.h"
 #include "unit/status_string_test.h"
 #include "unit/utilities_test.h"
 #include "unit/version_read_test.h"
@@ -44,6 +48,16 @@ TEST(cuidtstUnprivileged, IdString) {
 
 TEST(cuidtstUnprivileged, Utilities) {
   TestUtilities tst;
+  RunGenericTest(&tst);
+}
+
+TEST(cuidtstUnprivileged, Sha256Kat) {
+  TestSha256Kat tst;
+  RunGenericTest(&tst);
+}
+
+TEST(cuidtstUnprivileged, HmacSha256Kat) {
+  TestHmacSha256Kat tst;
   RunGenericTest(&tst);
 }
 
@@ -122,8 +136,23 @@ TEST(cuidtstUnprivileged, GimFormatBdf) {
   RunGenericTest(&tst);
 }
 
+TEST(cuidtstUnprivileged, PciConfigDecode) {
+  TestPciConfigDecode tst;
+  RunGenericTest(&tst);
+}
+
+TEST(cuidtstUnprivileged, ConcurrentApi) {
+  TestConcurrentApi tst;
+  RunGenericTest(&tst);
+}
+
 TEST(cuidtstUnprivileged, CuidGpuRenderNode) {
   TestCuidGpuRenderNode tst;
+  RunGenericTest(&tst);
+}
+
+TEST(cuidtstUnprivileged, AcpiMadtParse) {
+  TestAcpiMadtParse tst;
   RunGenericTest(&tst);
 }
 

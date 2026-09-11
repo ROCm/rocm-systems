@@ -356,6 +356,25 @@ def test_pk_f32_simm32_literal_operand_replicates_extension_word():
     ) == stmt
 
 
+def test_pk_u32_simm32_literal_operand_replicates_extension_word():
+    stmt = CodeGenerator._literal_operand_fixup_stmt(
+        _operand(
+            'src1',
+            'OPR_SRC',
+            size=64,
+            data_format_name='FMT_NUM_PK2_U32',
+        ),
+        'Vop3pInstLiteralMachineInst',
+        literal_operand_type='OPR_SIMM32',
+    )
+
+    assert (
+        'src1 = Operand::make_literal32(64, static_cast<uint32_t>('
+        'reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32), '
+        'Operand::Literal32Widening::Replicate32);'
+    ) == stmt
+
+
 def test_i64_simm32_literal_operand_sign_extends_from_data_format():
     stmt = CodeGenerator._literal_operand_fixup_stmt(
         _operand(

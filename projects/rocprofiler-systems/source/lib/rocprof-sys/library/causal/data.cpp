@@ -9,7 +9,6 @@
 #include "binary/scope_filter.hpp"
 #include "common/env_vars.hpp"
 #include "common/path.hpp"
-#include "common/units.hpp"
 #include "core/binary/fwd.hpp"
 #include "core/config.hpp"
 #include "core/containers/c_array.hpp"
@@ -489,14 +488,14 @@ perform_experiment_impl(std::shared_ptr<std::promise<void>> _started)  // NOLINT
     double _duration_sec =
         config::get_setting_value<double>(std::string{ env_vars::CAUSAL_DURATION })
             .value_or(0.0);
-    auto _duration_nsec = duration_nsec_t{ _duration_sec * units::sec };
+    const auto duration_nsec = std::chrono::duration_cast<duration_nsec_t>(
+        std::chrono::duration<double>{ _duration_sec });
 
     if(_delay_sec > 0.0)
     {
         LOG_DEBUG("[causal] delaying experimentation for {} seconds...", _delay_sec);
-        const std::uint64_t _delay_nsec = _delay_sec * units::sec;
         std::this_thread::yield();
-        std::this_thread::sleep_for(std::chrono::nanoseconds{ _delay_nsec });
+        std::this_thread::sleep_for(std::chrono::duration<double>{ _delay_sec });
     }
 
     auto _impl_count        = 0;
@@ -505,7 +504,7 @@ perform_experiment_impl(std::shared_ptr<std::promise<void>> _started)  // NOLINT
         if(_duration_sec > 1.0e-3)
         {
             auto _elapsed = clock_type::now() - _start_time;
-            if(_elapsed >= _duration_nsec)
+            if(_elapsed >= duration_nsec)
             {
                 LOG_DEBUG("[causal] stopping experimentation after {} seconds "
                           "(elapsed: {} seconds)...",
@@ -699,11 +698,13 @@ save_line_info(const settings::compose_filename_config& _cfg, int _verbose)
     auto _write = [_verbose](const std::string& ofname, const auto& _data,
                              const std::array<bool, 3>& _info) {
         auto _ofs = std::ofstream{};
-        if(tim::filepath::open(_ofs, ofname))
+        if(path::create_parent_dirs_and_open_ofstream(_ofs, ofname))
         {
             if(_verbose >= 0)
+            {
                 operation::file_output_message<binary::symbol>{}(
                     ofname, std::string{ "causal_symbol_info" });
+            }
             save_line_info_impl(_ofs, _data, _info);
             save_maps_info_impl(_ofs);
         }

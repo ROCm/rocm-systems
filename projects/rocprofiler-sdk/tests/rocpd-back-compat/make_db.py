@@ -60,6 +60,7 @@ _STR_REGION_NAME = 3
 _STR_MEM_COPY = 4
 _STR_CATEGORY = 5
 _STR_SPM = 6
+_STR_HIP_EVENT_RECORD = 7
 
 _EVT_REGION_1 = 1
 _EVT_REGION_2 = 2
@@ -69,6 +70,7 @@ _EVT_KERNEL_2 = 5
 _EVT_GRAPH_1 = 6
 _EVT_GRAPH_2 = 7
 _EVT_GRAPH_3 = 8
+_EVT_HIP_EVENT_1 = 9
 
 _PMC_NO_SPM_ID = 1
 _PMC_SPM_ID = 2
@@ -124,6 +126,7 @@ def insert_minimal_data(
             (_STR_MEM_COPY, guid, "Pageable to Device"),
             (_STR_CATEGORY, guid, "MARKER"),
             (_STR_SPM, guid, "SPM"),
+            (_STR_HIP_EVENT_RECORD, guid, "HIP_EVENT_RECORD"),
         ],
     )
 
@@ -507,6 +510,38 @@ def insert_minimal_data(
                 (1, guid, _EVT_KERNEL_1, _SAMPLE_SPM_ID, _PMC_SPM_ID, 16.0, 0, 0, 0),
                 (2, guid, _EVT_KERNEL_1, _SAMPLE_SPM_ID, _PMC_SPM_ID, 16.0, 0, 1, 0),
             ],
+        )
+
+    # HIP event barrier data was introduced in schema 3.0.4.
+    if ver >= (3, 0, 4):
+        conn.execute(
+            f"INSERT INTO {tbl('rocpd_event')} "
+            "(id, guid, category_id, stack_id, parent_stack_id, correlation_id) "
+            "VALUES (?,?,?,?,?,?)",
+            (_EVT_HIP_EVENT_1, guid, _STR_CATEGORY, _EVT_HIP_EVENT_1, 0, 1),
+        )
+        conn.execute(
+            f"INSERT INTO {tbl('rocpd_hip_event')} "
+            "(id, guid, nid, pid, tid, start, end, name_id, agent_id, queue_id, stream_id, "
+            "hip_event_handle, source_queue_id, event_id, extdata) "
+            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            (
+                1,
+                guid,
+                _NID,
+                _PID,
+                _TID,
+                _T_START,
+                _T_START + 50_000,
+                _STR_HIP_EVENT_RECORD,
+                _AGENT_ID,
+                _QUEUE_ID,
+                _STREAM_ID,
+                123456789,  # dummy hip_event_handle pointer value
+                _QUEUE_ID,  # source_queue_id == queue_id for a RECORD operation
+                _EVT_HIP_EVENT_1,
+                "{}",
+            ),
         )
 
 

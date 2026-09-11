@@ -4,6 +4,7 @@
 #include "rocjitsu/vm/amdgpu/memory_pipeline.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/ds_transpose.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/scalar_operand_read.h"
+#include "rocjitsu/isa/isa_traits.h"
 #include "rocjitsu/vm/amdgpu/cluster_lds_multicast.h"
 #include "rocjitsu/vm/amdgpu/command_processor.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
@@ -58,9 +59,10 @@ std::vector<ClusterLdsTarget> resolve_lds_write_targets(VectorMemState &d, Wavef
   return targets;
 }
 
-void write_lds_dst_load_direct(const VectorMemState &d, Lds &lds, uint32_t per_lane_bytes) {
+void write_lds_dst_load_direct(const VectorMemState &d, Lds &lds, uint32_t per_lane_bytes,
+                               uint64_t write_mask) {
   for (uint32_t lane = 0; lane < d.wf_size; ++lane) {
-    if ((d.lane_mask & (1ULL << lane)) == 0)
+    if ((write_mask & (1ULL << lane)) == 0)
       continue;
     uint32_t data_offset = lane * per_lane_bytes;
     if (data_offset + per_lane_bytes > d.response_data.size()) {
@@ -112,7 +114,9 @@ MemoryAccessCompletion complete_lds_dst_load(VectorMemState &d, Wavefront &wf, C
   });
 
   if (!d.cluster_multicast || cluster_downgrades_to_ordinary) {
-    write_lds_dst_load_direct(d, wf.lds(), per_lane_bytes);
+    // GFX9/CDNA: out-of-range lanes return zeros, and those zeros are written to LDS.
+    const uint64_t write_mask = arch_is_cdna_4_or_lower(cu.arch()) ? d.exec_mask : d.lane_mask;
+    write_lds_dst_load_direct(d, wf.lds(), per_lane_bytes, write_mask);
     return MemoryAccessCompletion::Complete;
   }
 
@@ -503,6 +507,7 @@ void GlobalMemPipeline::initiate_access(Instruction &inst, Wavefront &wf) {
   const uint64_t scratch_lanes = d.scratch_swizzle ? d.scratch_lane_mask & request_lanes : 0;
   const uint64_t plain_lanes = request_lanes & ~scratch_lanes;
   const uint32_t stride = d.scratch_addr_stride;
+  const uint32_t base_offset = d.scratch_addr_base_offset;
 
   if (d.is_load) {
     const uint64_t request_lanes = transpose_request_lane_mask(d);
@@ -512,20 +517,20 @@ void GlobalMemPipeline::initiate_access(Instruction &inst, Wavefront &wf) {
     if (scratch_request_lanes)
       l1_->load(d.per_lane_addr.data(), scratch_request_lanes, d.elem_size, d.num_elems,
                 d.response_data.data(), d.mtype, d.non_temporal, d.request_force_l1_bypass,
-                d.wf_size, wf.process_id(), stride, d.element_lane_masks.view());
+                d.wf_size, wf.process_id(), stride, base_offset, d.element_lane_masks.view());
     if (plain_request_lanes)
       l1_->load(d.per_lane_addr.data(), plain_request_lanes, d.elem_size, d.num_elems,
                 d.response_data.data(), d.mtype, d.non_temporal, d.request_force_l1_bypass,
-                d.wf_size, wf.process_id(), 0, d.element_lane_masks.view());
+                d.wf_size, wf.process_id(), 0, /*addr_base_offset=*/0, d.element_lane_masks.view());
   } else {
     if (scratch_lanes)
       l1_->store(d.per_lane_addr.data(), scratch_lanes, d.elem_size, d.num_elems,
                  d.store_data.data(), d.mtype, d.non_temporal, d.wf_size, wf.process_id(), stride,
-                 d.element_lane_masks.view());
+                 base_offset, d.element_lane_masks.view());
     if (plain_lanes)
       l1_->store(d.per_lane_addr.data(), plain_lanes, d.elem_size, d.num_elems, d.store_data.data(),
                  d.mtype, d.non_temporal, d.wf_size, wf.process_id(), 0,
-                 d.element_lane_masks.view());
+                 /*addr_base_offset=*/0, d.element_lane_masks.view());
   }
 }
 
