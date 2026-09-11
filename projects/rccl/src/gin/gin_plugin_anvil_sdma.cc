@@ -33,8 +33,9 @@
 static std::map<void*, int> bufferRegRefcount;
 static std::mutex pluginMutex;
 
-// Comms (by commHash) whose LSA-signal peer connectivity has already been validated once.
-static std::set<uint64_t> ginAnvilConnCheckedCommHashes;
+// Per-rank comm objects whose LSA-signal peer connectivity has already been
+// validated once. A process may own multiple ranks with the same commHash.
+static std::set<struct ncclComm*> ginAnvilConnCheckedComms;
 
 struct ginAnvilInitCtx {
   struct ncclComm* comm;
@@ -138,7 +139,7 @@ void ncclGinAnvilPluginTestResetHostState(void) {
     g_pendingByComm.erase(comm);
   }
   bufferRegRefcount.clear();
-  ginAnvilConnCheckedCommHashes.clear();
+  ginAnvilConnCheckedComms.clear();
 }
 
 static ncclResult_t ginAnvilInit(void** ctx, uint64_t commId, ncclDebugLogger_t logFunction) {
@@ -238,6 +239,12 @@ static uint32_t ginAnvilIpcSignalPeerFromEnv() {
   return atoi(e) != 0 ? 1u : 0u;
 }
 
+static bool ginAnvilConnCheckEnabledFromEnv() {
+  const char* e = getenv("NCCL_GIN_ANVIL_SDMA_CONN_CHECK");
+  if (!e || !e[0]) return true;
+  return !(e[0] == '0' && e[1] == '\0');
+}
+
 static ncclResult_t ginAnvilConnect(void* ctx, void* handles[], int nranks, int rank, void* listenComm,
                                     void** collComm) {
   auto* ictx = (ginAnvilInitCtx*)ctx;
@@ -294,7 +301,7 @@ static ncclResult_t ginAnvilFinalize(void* ctx) {
   ginAnvilInitCtx* ictx = (ginAnvilInitCtx*)ctx;
   if (ictx && ictx->comm) {
     std::lock_guard<std::mutex> lock(pluginMutex);
-    ginAnvilConnCheckedCommHashes.erase(ictx->comm->commHash);
+    ginAnvilConnCheckedComms.erase(ictx->comm);
   }
   delete ictx;
   return ncclSuccess;
@@ -414,7 +421,8 @@ static bool ginAnvilSignalDebugEnabled() {
 // The pass/fail decision is made collectively (bootstrap allgather) so all ranks
 // abort together rather than one rank aborting while the rest hang.
 enum GinAnvilConnCheckStep {
-  kConnCheckWrite = 1,
+  kConnCheckNone = 0,
+  kConnCheckWrite,
   kConnCheckBarrierAfterWrite,
   kConnCheckVerify,
   kConnCheckD2H,
@@ -425,6 +433,7 @@ enum GinAnvilConnCheckStep {
 
 static const char* ginAnvilConnCheckStepName(GinAnvilConnCheckStep step) {
   switch (step) {
+    case kConnCheckNone: return "none";
     case kConnCheckWrite: return "write";
     case kConnCheckBarrierAfterWrite: return "barrier-after-write";
     case kConnCheckVerify: return "verify";
@@ -437,12 +446,11 @@ static const char* ginAnvilConnCheckStepName(GinAnvilConnCheckStep step) {
 }
 
 static ncclResult_t ginAnvilCheckSignalConnectivity(ginAnvilGinCtx* ctx, void* lsaSelf) {
-  const char* off = getenv("NCCL_GIN_ANVIL_SDMA_CONN_CHECK");
   struct ncclComm* comm = ctx->comm;
   struct ncclDevrState* devr = &comm->devrState;
   const int nRanks = ctx->nRanks;
   const int rank = ctx->rank;
-  constexpr int kMaxConnCheckRanks = 1024;
+  constexpr int kMaxConnCheckRanks = NCCL_GIN_ANVIL_IPC_MAX_RANKS;
   if (nRanks < 2) return ncclSuccess;
   if (nRanks > kMaxConnCheckRanks) {
     WARN("GIN anvil-sdma: conn-check supports at most %d ranks (got %d)", kMaxConnCheckRanks, nRanks);
@@ -471,14 +479,20 @@ static ncclResult_t ginAnvilCheckSignalConnectivity(ginAnvilGinCtx* ctx, void* l
   bool ok = false;
   bool hasMissingSnapshot = false;
   int localMissing = 0;
-  GinAnvilConnCheckStep failedStep = kConnCheckWrite;
+  GinAnvilConnCheckStep failedStep = kConnCheckNone;
 
   // Setup and bypass are collective decisions. No rank may leave while peers
   // are about to enter the first conn-check barrier.
-  enum SetupState { kSetupReady = 0, kSetupBypass = 1, kSetupFailed = 2 };
-  int setupState = (off && atoi(off) == 0) ? kSetupBypass : kSetupReady;
+  enum SetupState {
+    kSetupReady = 0,
+    kSetupBypass = 1,
+    kSetupFailed = 2,
+  };
+  int setupState = ginAnvilConnCheckEnabledFromEnv() ? kSetupReady : kSetupBypass;
   if (setupState == kSetupReady &&
       (ctx->signal_remote_addrs_dev == nullptr || lsaSelf == nullptr)) {
+    WARN("GIN anvil-sdma: conn-check setup has null address (rank %d, remote-addrs=%p, lsaSelf=%p)",
+         rank, (void*)ctx->signal_remote_addrs_dev, lsaSelf);
     setupState = kSetupFailed;
   }
   if (setupState == kSetupReady &&
@@ -515,6 +529,9 @@ static ncclResult_t ginAnvilCheckSignalConnectivity(ginAnvilGinCtx* ctx, void* l
       if (bypassRanks != nRanks) {
         WARN("GIN anvil-sdma: conn-check bypass differs across ranks (%d/%d disabled)", bypassRanks, nRanks);
         ret = ncclSystemError;
+      } else {
+        INFO(NCCL_INIT,
+             "GIN anvil-sdma: LSA signal conn-check disabled by NCCL_GIN_ANVIL_SDMA_CONN_CHECK=0");
       }
       goto cleanup;
     }
@@ -527,7 +544,7 @@ static ncclResult_t ginAnvilCheckSignalConnectivity(ginAnvilGinCtx* ctx, void* l
   for (int attempt = 0; attempt < MAX_ATTEMPTS && !ok; attempt++) {
     unsigned long long stamp = 0xC0FFEE00ULL + (unsigned long long)(attempt + 1);
     bool localFail = false;
-    failedStep = kConnCheckWrite;
+    failedStep = kConnCheckNone;
     hasMissingSnapshot = false;
     auto failAt = [&](GinAnvilConnCheckStep step) {
       localFail = true;
@@ -707,13 +724,13 @@ static ncclResult_t ginAnvilRegisterLsaSignals(ginAnvilGinCtx* ctx, void* lsaSel
   bool doConnCheck = false;
   {
     std::lock_guard<std::mutex> lock(pluginMutex);
-    if (ginAnvilConnCheckedCommHashes.insert(comm->commHash).second) doConnCheck = true;
+    if (ginAnvilConnCheckedComms.insert(comm).second) doConnCheck = true;
   }
   if (doConnCheck) {
     ncclResult_t checkResult = ginAnvilCheckSignalConnectivity(ctx, lsaSelf);
     if (checkResult != ncclSuccess) {
       std::lock_guard<std::mutex> lock(pluginMutex);
-      ginAnvilConnCheckedCommHashes.erase(comm->commHash);
+      ginAnvilConnCheckedComms.erase(comm);
       return checkResult;
     }
   }
