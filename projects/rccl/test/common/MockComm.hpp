@@ -15,6 +15,7 @@
 
 #include <cstdlib>
 #include <cstring>
+#include <new>
 
 #include "comm.h"
 #include "graph/topo.h"
@@ -23,8 +24,7 @@
 namespace RcclUnitTesting
 {
 
-// Caller owns mockTopo and mockGpuNode. mockComm is heap allocated and released
-// by CleanupMockComm.
+// Caller owns mockTopo and mockGpuNode; CleanupMockComm frees the heap mockComm.
 inline void CreateMockComm(
     ncclComm_t&            mockComm,
     struct ncclTopoSystem& mockTopo,
@@ -33,10 +33,11 @@ inline void CreateMockComm(
     int                    nRanks
 )
 {
-    // Heap calloc: `new ncclComm()` value-inits a MAXCHANNELS-sized object on the
-    // stack (~13MB) and SIGSEGVs the default 8MB thread stack on gfx1250.
     mockComm = static_cast<ncclComm_t>(std::calloc(1, sizeof(ncclComm)));
-
+    if (mockComm == nullptr)
+    {
+        throw std::bad_alloc();
+    }
     // Initialize basic communicator fields
     mockComm->nRanks = nRanks;
     mockComm->nNodes = 1; // Default to single node for P2P tests

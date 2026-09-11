@@ -151,20 +151,14 @@ static bool isAlgoStrValid(const char* envStr)
     return false; // No match found
 }
 
-// `new ncclComm()` value-inits ~13MB on the stack (MAXCHANNELS arrays) and
-// overflows the 8MB default thread stack. calloc keeps the mock on the heap.
-static ncclComm_t AllocBareComm()
+// Heap ncclTopoSystem (~13 MiB) plus CreateMockComm. Protocol tests then set
+// nNodes and topo->ll128Enabled, matching InitGetAlgoInfoMockComm.
+static void InitProtocolMockComm(ncclComm_t& comm, ncclTopoSystem& topo)
 {
-    auto* comm = static_cast<ncclComm_t>(std::calloc(1, sizeof(ncclComm)));
-    comm->topo = static_cast<ncclTopoSystem*>(std::calloc(1, sizeof(ncclTopoSystem)));
-    return comm;
-}
-
-static void FreeBareComm(ncclComm_t comm)
-{
-    if(!comm) return;
-    std::free(comm->topo);
-    std::free(comm);
+    struct ncclTopoNode gpu{};
+    CreateMockComm(comm, topo, gpu, "gfx942", /*nRanks=*/1);
+    comm->nNodes             = 2; // triggers inter-node logic
+    comm->topo->ll128Enabled = true;
 }
 
 TEST(Rcclwrap, RcclFuncMaxSendRecvCount)
@@ -187,19 +181,9 @@ TEST(Rcclwrap, RcclUpdateCollectiveProtocol_UsesLL128WhenInRange)
     setenv("NCCL_PROTO", "", 1); // Trigger auto selection mode
     unsetenv("NCCL_PROTO");
 
-    ncclComm_t comm = AllocBareComm();
-    // Manually populate minimal fields for comm
-    comm->nRanks                    = 1;
-    comm->nNodes                    = 2; // triggers inter-node logic
-    comm->rank                      = 0;
-    comm->topo->ll128Enabled        = true;
-    comm->topo->nodes[GPU].nodes[0] = {};
-    comm->topo->nodes[GPU].count    = 1;
-    strncpy(
-        comm->topo->nodes[GPU].nodes[0].gpu.gcn,
-        "gfx942",
-        sizeof(comm->topo->nodes[GPU].nodes[0].gpu.gcn)
-    );
+    ncclComm_t comm = nullptr;
+    auto       topo = std::make_unique<ncclTopoSystem>();
+    InitProtocolMockComm(comm, *topo);
 
     int idx = rcclGetTunableIndex(ncclFuncAllReduce);
     comm->minMaxLLRange[idx][NCCL_PROTO_LL][RCCL_PROTOCOL_MIN_IDX]       = 512;
@@ -218,7 +202,7 @@ TEST(Rcclwrap, RcclUpdateCollectiveProtocol_UsesLL128WhenInRange)
     rcclUpdateCollectiveProtocol(comm, nBytes, &info);
     EXPECT_TRUE(info.protocol == NCCL_PROTO_LL128 || info.protocol == NCCL_PROTO_LL);
 
-    FreeBareComm(comm);
+    CleanupMockComm(comm);
 }
 
 TEST(Rcclwrap, RcclUpdateCollectiveProtocol_WarnsOnGfx942Arch)
@@ -226,18 +210,9 @@ TEST(Rcclwrap, RcclUpdateCollectiveProtocol_WarnsOnGfx942Arch)
     setenv("NCCL_PROTO", "", 1);
     unsetenv("NCCL_PROTO");
 
-    ncclComm_t comm = AllocBareComm();
-    // Manually populate minimal fields for comm
-    comm->nRanks                    = 1;
-    comm->nNodes                    = 2; // triggers inter-node logic
-    comm->rank                      = 0;
-    comm->topo->ll128Enabled        = true;
-    comm->topo->nodes[GPU].nodes[0] = {};
-    strncpy(
-        comm->topo->nodes[GPU].nodes[0].gpu.gcn,
-        "gfx942",
-        sizeof(comm->topo->nodes[GPU].nodes[0].gpu.gcn)
-    );
+    ncclComm_t comm = nullptr;
+    auto       topo = std::make_unique<ncclTopoSystem>();
+    InitProtocolMockComm(comm, *topo);
 
     int idx = rcclGetTunableIndex(ncclFuncAllReduce);
     comm->minMaxLLRange[idx][NCCL_PROTO_LL][RCCL_PROTOCOL_MIN_IDX]       = RCCL_LL_LIMITS_UNDEFINED;
@@ -255,7 +230,7 @@ TEST(Rcclwrap, RcclUpdateCollectiveProtocol_WarnsOnGfx942Arch)
     rcclUpdateCollectiveProtocol(comm, nBytes, &info);
     EXPECT_EQ(info.protocol, NCCL_PROTO_UNDEF);
 
-    FreeBareComm(comm);
+    CleanupMockComm(comm);
 }
 
 TEST(Rcclwrap, RcclUpdateCollectiveProtocol_HonorsUserProtocolEnv)
@@ -265,18 +240,9 @@ TEST(Rcclwrap, RcclUpdateCollectiveProtocol_HonorsUserProtocolEnv)
                                   // block
     setenv("NCCL_PROTO", "1", 1); // Simulate manual override
 
-    ncclComm_t comm = AllocBareComm();
-    // Manually populate minimal fields for comm
-    comm->nRanks = 1;
-    comm->nNodes = 2; // triggers inter-node logic
-    comm->rank   = 0;
-    comm->topo->ll128Enabled        = true;
-    comm->topo->nodes[GPU].nodes[0] = {};
-    strncpy(
-        comm->topo->nodes[GPU].nodes[0].gpu.gcn,
-        "gfx942",
-        sizeof(comm->topo->nodes[GPU].nodes[0].gpu.gcn)
-    );
+    ncclComm_t comm = nullptr;
+    auto       topo = std::make_unique<ncclTopoSystem>();
+    InitProtocolMockComm(comm, *topo);
 
     ncclTaskColl info = {};
     // Manually populate minimal fields for info
@@ -287,7 +253,7 @@ TEST(Rcclwrap, RcclUpdateCollectiveProtocol_HonorsUserProtocolEnv)
     rcclUpdateCollectiveProtocol(comm, nBytes, &info);
     EXPECT_EQ(info.protocol, NCCL_PROTO_UNDEF);
 
-    FreeBareComm(comm);
+    CleanupMockComm(comm);
 }
 
 TEST(Rcclwrap, RcclUpdateCollectiveProtocol_SimpleFallbackWhenNoRanges)
@@ -295,19 +261,9 @@ TEST(Rcclwrap, RcclUpdateCollectiveProtocol_SimpleFallbackWhenNoRanges)
     setenv("NCCL_PROTO", "", 1); // Trigger auto selection mode
     unsetenv("NCCL_PROTO");
 
-    ncclComm_t comm = AllocBareComm();
-    // Manually populate minimal fields for comm
-    comm->nRanks = 1;
-    comm->nNodes = 2; // triggers inter-node logic
-    comm->rank   = 0;
-    comm->topo->ll128Enabled        = true;
-    comm->topo->nodes[GPU].nodes[0] = {};
-    comm->topo->nodes[GPU].count    = 1;
-    strncpy(
-        comm->topo->nodes[GPU].nodes[0].gpu.gcn,
-        "gfx942",
-        sizeof(comm->topo->nodes[GPU].nodes[0].gpu.gcn)
-    );
+    ncclComm_t comm = nullptr;
+    auto       topo = std::make_unique<ncclTopoSystem>();
+    InitProtocolMockComm(comm, *topo);
 
     int idx = rcclGetTunableIndex(ncclFuncAllReduce);
     comm->minMaxLLRange[idx][NCCL_PROTO_LL][RCCL_PROTOCOL_MIN_IDX] = 512;
@@ -322,7 +278,7 @@ TEST(Rcclwrap, RcclUpdateCollectiveProtocol_SimpleFallbackWhenNoRanges)
     rcclUpdateCollectiveProtocol(comm, nBytes, &info);
     EXPECT_EQ(info.protocol, NCCL_PROTO_SIMPLE);
 
-    FreeBareComm(comm);
+    CleanupMockComm(comm);
 }
 
 TEST(Rcclwrap, validHsaScratchEnvSettingTest)
