@@ -4,7 +4,7 @@ cmake_minimum_required(VERSION 3.16)
 # drift check. That test reads graph/connect.cc / enqueue.cc at RUN time, so it
 # GTEST_SKIPs when the binary runs relocated (rocm_installed) and the hipify
 # tree is gone -- a skip CTest counts as green, which would let the four
-# hardcoded fakes/wrap_fakes.cc param defaults drift unnoticed on exactly the
+# hardcoded fake parameter defaults drift unnoticed on exactly the
 # runs that skip. Checking here as well closes that: the sources are always
 # present at configure time, so drift becomes a build error everywhere,
 # independent of where the binary is later executed.
@@ -18,7 +18,7 @@ function(rccl_assert_param_default_unchanged _file _needle _fake)
     message(FATAL_ERROR
       "wrap-test drift guard: ${_file} no longer contains\n"
       "    ${_needle}\n"
-      "Update ${_fake} in test/host/fakes/wrap_fakes.cc to match the new "
+      "Update ${_fake} to match the new "
       "default, then update this check and ParamDefaults_MatchProductionSource.")
   endif()
 endfunction()
@@ -30,14 +30,14 @@ endfunction()
 # contexts alike.
 set(_rccl_src_root "${CMAKE_CURRENT_LIST_DIR}/../../src")
 rccl_assert_param_default_unchanged("${_rccl_src_root}/graph/connect.cc"
-  "NCCL_PARAM(MinNchannels, \"MIN_NCHANNELS\", -2)" "ncclParamMinNchannels()")
+  "NCCL_PARAM(MinNchannels, \"MIN_NCHANNELS\", -2)" "fakes/tuning_fakes.cc: ncclParamMinNchannels()")
 rccl_assert_param_default_unchanged("${_rccl_src_root}/graph/connect.cc"
-  "NCCL_PARAM(MaxNchannels, \"MAX_NCHANNELS\", -2)" "ncclParamMaxNchannels()")
+  "NCCL_PARAM(MaxNchannels, \"MAX_NCHANNELS\", -2)" "fakes/tuning_fakes.cc: ncclParamMaxNchannels()")
 rccl_assert_param_default_unchanged("${_rccl_src_root}/enqueue.cc"
-  "RCCL_PARAM(ForceCe, \"FORCE_CE\", 1)" "rcclParamForceCe()")
+  "RCCL_PARAM(ForceCe, \"FORCE_CE\", 1)" "fakes/wrap_fakes.cc: rcclParamForceCe()")
 rccl_assert_param_default_unchanged("${_rccl_src_root}/enqueue.cc"
   "NCCL_PARAM(LaunchOrderImplicit, \"LAUNCH_ORDER_IMPLICIT\", 0)"
-  "ncclParamLaunchOrderImplicit()")
+  "fakes/wrap_fakes.cc: ncclParamLaunchOrderImplicit()")
 unset(_rccl_src_root)
 
 set(RCCL_MICRO_TEST_SOURCES
@@ -56,6 +56,13 @@ set(RCCL_MICRO_TEST_SOURCES
   fakes/devcomm_fakes.cc
   fakes/hip_fakes.cc                   # HIP runtime seams + link-satisfying stubs
   fakes/env_fakes.cc                   # src/misc/param.cc + getenv interposition
+  fakes/ce_fakes.cc                    # src/ce_coll.cc availability seams
+  fakes/collectives_fakes.cc           # src/collectives.cc name helpers
+  fakes/dev_runtime_fakes.cc           # src/dev_runtime.cc window seams
+  fakes/strongstream_stubs.cc          # src/misc/strongstream.cc capture seam
+  fakes/sym_kernels_fakes.cc           # src/sym_kernels.cc query seams
+  fakes/transport_stubs.cc             # transport/PXN/AINIC seams
+  fakes/tuning_fakes.cc                # graph tuning/channel params
   fakes/wrap_fakes.cc                  # rccl_wrap.cc dependency seams (cf. p2p_fakes.cc)
   ../common/main_altrsmi.cpp           # minimal gtest main, no RCCL deps
   ../common/ProcessIsolatedTestRunner.cpp
@@ -137,6 +144,7 @@ if(BUILD_TESTS)
     DEVCOMM_V22902_CC_PATH="${PROJECT_BINARY_DIR}/hipify/src/devcomm/devcomm_v22902.cc"
     DEVCOMM_V22907_CC_PATH="${PROJECT_BINARY_DIR}/hipify/src/devcomm/devcomm_v22907.cc"
     WRAP_CC_PATH="${PROJECT_BINARY_DIR}/hipify/src/rccl_wrap.cc"
+    RCCL_TRANSPORT_STUBS_OMIT_COLLECTIVE_FLOOR
     # Real paths for wrap-test.cc's ParamDefaults_MatchProductionSource test,
     # which reads these at run time to catch a hardcoded
     # fakes/wrap_fakes.cc RCCL_PARAM default (e.g. rcclParamForceCe)
@@ -231,6 +239,7 @@ if(BUILD_TESTS)
     # Shared per-production-TU fakes (see MICROTEST_README.md for the map).
     fakes/amdsmi_fakes.cc                # src/misc/amdsmi_wrap.cc
     fakes/api_trace_fakes.cc             # src/misc/api_trace.cc NCCL_API dispatch
+    fakes/dev_runtime_fakes.cc            # src/dev_runtime.cc window seams
     fakes/env_fakes.cc                   # src/misc/param.cc + getenv interposition
     fakes/env_plugin_fakes.cc            # src/plugin/env.cc
     fakes/gin_fakes.cc                   # src/plugin/gin.cc + src/gin/gin_host.cc
@@ -244,6 +253,7 @@ if(BUILD_TESTS)
     fakes/recorder_fakes.cc              # src/recorder.cc
     fakes/rocmwrap_fakes.cc              # src/misc/rocmwrap.cc
     fakes/strongstream_stubs.cc          # src/misc/strongstream.cc
+    fakes/sym_kernels_fakes.cc            # src/sym_kernels.cc
     fakes/tuning_fakes.cc                # src/graph/tuning.cc
     ${PROJECT_BINARY_DIR}/hipify/src/misc/argcheck.cc  # real PtrCheck/CommCheck
     ${PROJECT_BINARY_DIR}/hipify/src/misc/archinfo.cc  # real IsArchMatch/GcnArchNameFormat
@@ -493,6 +503,7 @@ if(BUILD_TESTS)
     set(TEST_MICRO_DEVRUNTIME_SOURCE_FILES
       dev-runtime-test.cc
       fakes/dev_runtime_micro_fakes.cc
+      fakes/sym_kernels_fakes.cc
       ../common/main_altrsmi.cpp
       ../common/ProcessIsolatedTestRunner.cpp
     )
@@ -879,6 +890,7 @@ target_compile_definitions(rccl-UnitTestsMicro PRIVATE
   DEVCOMM_V22902_CC_PATH="${RCCL_HIPIFY_DIR}/src/devcomm/devcomm_v22902.cc"
   DEVCOMM_V22907_CC_PATH="${RCCL_HIPIFY_DIR}/src/devcomm/devcomm_v22907.cc"
   WRAP_CC_PATH="${RCCL_HIPIFY_DIR}/src/rccl_wrap.cc"
+  RCCL_TRANSPORT_STUBS_OMIT_COLLECTIVE_FLOOR
   # See the in-build block's comment: real paths for the
   # ParamDefaults_MatchProductionSource drift check.
   CONNECT_CC_PATH="${RCCL_HIPIFY_DIR}/src/graph/connect.cc"
@@ -920,6 +932,7 @@ set(TEST_MICRO_INIT_SOURCE_FILES
   fakes/hip_fakes.cc
   fakes/amdsmi_fakes.cc
   fakes/api_trace_fakes.cc
+  fakes/dev_runtime_fakes.cc
   fakes/env_fakes.cc
   fakes/env_plugin_fakes.cc
   fakes/gin_fakes.cc
@@ -933,6 +946,7 @@ set(TEST_MICRO_INIT_SOURCE_FILES
   fakes/recorder_fakes.cc
   fakes/rocmwrap_fakes.cc
   fakes/strongstream_stubs.cc
+  fakes/sym_kernels_fakes.cc
   fakes/tuning_fakes.cc
   ${RCCL_HIPIFY_DIR}/src/misc/argcheck.cc
   ${RCCL_HIPIFY_DIR}/src/misc/archinfo.cc
@@ -1076,6 +1090,7 @@ endforeach()
 add_test_executable(rccl-UnitTestsMicroDevRuntime
   dev-runtime-test.cc
   fakes/dev_runtime_micro_fakes.cc
+  fakes/sym_kernels_fakes.cc
   ${RCCL_TEST_DIR}/common/main_altrsmi.cpp
   ${RCCL_TEST_DIR}/common/ProcessIsolatedTestRunner.cpp
 )

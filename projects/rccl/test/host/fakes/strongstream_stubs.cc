@@ -12,16 +12,22 @@
 // moving those is a larger change than this one. Everything else this TU owns is
 // here, so the subsystem now lives in two files rather than four.
 
+#include "strongstream_stubs.h"
+
+#include "fail_loud.h"
 #include "nccl.h"
 #include "strongstream.h"
 
-#include "fail_loud.h"
-#include "strongstream_stubs.h"
-
 struct ncclCudaContext;
 
-ncclResult_t ncclCudaGetCapturingGraph(struct ncclCudaGraph*, hipStream_t, int) {
-  FailLoudUnfaked("strongstream_stubs", "ncclCudaGetCapturingGraph");
+static ncclResult_t DefaultCudaGetCapturingGraph(struct ncclCudaGraph* graph, hipStream_t, int graphUsageMode) {
+  if (graph) *graph = ncclCudaGraphNone(graphUsageMode);
+  return ncclSuccess;
+}
+std::function<ncclResult_t(struct ncclCudaGraph*, hipStream_t, int)> g_cudaGetCapturingGraph =
+    DefaultCudaGetCapturingGraph;
+ncclResult_t ncclCudaGetCapturingGraph(struct ncclCudaGraph* graph, hipStream_t stream, int graphUsageMode) {
+  return g_cudaGetCapturingGraph(graph, stream, graphUsageMode);
 }
 ncclResult_t ncclCudaGraphAddDestructor(struct ncclCudaGraph, hipHostFn_t, void*) {
   FailLoudUnfaked("strongstream_stubs", "ncclCudaGraphAddDestructor");
@@ -50,6 +56,7 @@ ncclResult_t ncclCudaContextTrack(struct ncclCudaContext** out) {
 }
 
 void ResetStrongStreamStubs() {
+  g_cudaGetCapturingGraph = DefaultCudaGetCapturingGraph;
   g_ncclStrongStreamResult = ncclSuccess;
   g_ncclCudaContextTrackResult = ncclSuccess;
   g_ncclCudaContextTrackCalls = 0;

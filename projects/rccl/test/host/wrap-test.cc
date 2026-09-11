@@ -42,6 +42,7 @@
 
 #include <cstring>
 #include <fstream>
+#include <functional>
 #include <optional>
 #include <sstream>
 #include <string>
@@ -60,8 +61,6 @@
 // all use it), including the "RCCL_" + env convention the RCCL_PARAM arm needs.
 // g_loadParam itself lives in fakes/nccl_fakes.h/.cc, already part of this
 // binary -- declaring a second copy here would be a duplicate-symbol error.
-#include <functional>
-
 #include "fakes/nccl_fakes.h"    // extern g_loadParam
 #include "fakes/param_redirect.h"  // NCCL_PARAM/RCCL_PARAM -> g_loadParam
 
@@ -900,7 +899,8 @@ TEST(WrapMicrotest, FuncMaxSendRecvCount_OtherFuncsReturnCountUnscaled) {
 // ParamDefaults_MatchProductionSource -- the same drift-guard idea as the
 // FakeTableDrift_* tests above, for values no constant can express. ncclParamMinNchannels/MaxNchannels,
 // rcclParamForceCe, and ncclParamLaunchOrderImplicit mirror the real
-// NCCL_PARAM/RCCL_PARAM defaults they copy (see wrap_fakes.cc), but each
+// NCCL_PARAM/RCCL_PARAM defaults they copy (see tuning_fakes.cc and
+// wrap_fakes.cc), but each
 // default is an inline macro-argument literal with no separately importable
 // constant -- unlike NCCL_NUM_ALGORITHMS or ncclNumFuncs, there's nothing a
 // static_assert could check. Instead, this test reads the real
@@ -938,9 +938,9 @@ TEST(WrapMicrotest, ParamDefaults_MatchProductionSource) {
   const std::string& enqueueCc = *enqueueOpt;
 
   EXPECT_NE(std::string::npos, connectCc.find(R"(NCCL_PARAM(MinNchannels, "MIN_NCHANNELS", -2))"))
-      << "graph/connect.cc's NCCL_PARAM(MinNchannels...) changed -- update ncclParamMinNchannels() in wrap_fakes.cc";
+      << "graph/connect.cc's NCCL_PARAM(MinNchannels...) changed -- update ncclParamMinNchannels() in tuning_fakes.cc";
   EXPECT_NE(std::string::npos, connectCc.find(R"(NCCL_PARAM(MaxNchannels, "MAX_NCHANNELS", -2))"))
-      << "graph/connect.cc's NCCL_PARAM(MaxNchannels...) changed -- update ncclParamMaxNchannels() in wrap_fakes.cc";
+      << "graph/connect.cc's NCCL_PARAM(MaxNchannels...) changed -- update ncclParamMaxNchannels() in tuning_fakes.cc";
   EXPECT_NE(std::string::npos, enqueueCc.find(R"(RCCL_PARAM(ForceCe, "FORCE_CE", 1))"))
       << "enqueue.cc's RCCL_PARAM(ForceCe...) changed -- update rcclParamForceCe() in wrap_fakes.cc";
   EXPECT_NE(std::string::npos, enqueueCc.find(R"(NCCL_PARAM(LaunchOrderImplicit, "LAUNCH_ORDER_IMPLICIT", 0))"))
@@ -948,8 +948,14 @@ TEST(WrapMicrotest, ParamDefaults_MatchProductionSource) {
          "ncclParamLaunchOrderImplicit() in wrap_fakes.cc";
 }
 
+TEST(WrapMicrotest, CanonicalTuningParamDefaults_MatchProduction) {
+  EXPECT_EQ(-2, ncclParamMinNchannels());
+  EXPECT_EQ(-2, ncclParamMaxNchannels());
+}
+
 // ===========================================================================
-// Drift watchdogs for the hand-copied tables in fakes/wrap_fakes.cc.
+// Drift watchdogs for the hand-copied tables in fakes/collectives_fakes.cc
+// and ncclDevFuncUnrollGenerated[] in fakes/wrap_fakes.cc.
 //
 // Those tables (ncclAlgoToString / ncclProtoToString / ncclFuncToString /
 // ncclDatatypeToString, and ncclDevFuncUnrollGenerated[]) copy production
@@ -959,29 +965,26 @@ TEST(WrapMicrotest, ParamDefaults_MatchProductionSource) {
 // returns "Unknown" (or, for the unroll array, silently zero-fills a new
 // slot to false) instead of failing.
 //
-// These are runtime tests rather than static_asserts on purpose. This binary
-// is shared -- p2p, rma, group and devcomm tests all link the same
-// executable -- so a compile-time assert would break their builds over
-// constants none of them read. A failing test is just as loud, and CI runs
-// it, but the blast radius stops at the suite that actually owns the tables.
+// The runtime checks complement collectives_fakes.cc's compile-time algorithm
+// and protocol guards by also pinning the collective/datatype/unroll counts.
 // ===========================================================================
 
 // One test for all four string tables: they share a failure mode (a new enum
 // value falls through to "Unknown") and a fix (update the matching switch in
-// fakes/wrap_fakes.cc), so splitting them buys nothing a reviewer can act on.
+// fakes/collectives_fakes.cc), so splitting them buys nothing a reviewer can act on.
 TEST(WrapMicrotest, FakeTableDrift_StringTableCountsMatchProduction) {
   EXPECT_EQ(7, NCCL_NUM_ALGORITHMS)
       << "NCCL_NUM_ALGORITHMS changed -- update ncclAlgoToString's switch in "
-         "fakes/wrap_fakes.cc to match collectives.cc:115, then update this count";
+         "fakes/collectives_fakes.cc to match collectives.cc:115, then update this count";
   EXPECT_EQ(3, NCCL_NUM_PROTOCOLS)
       << "NCCL_NUM_PROTOCOLS changed -- update ncclProtoToString's switch in "
-         "fakes/wrap_fakes.cc to match collectives.cc:136, then update this count";
+         "fakes/collectives_fakes.cc to match collectives.cc:136, then update this count";
   EXPECT_EQ(19, ncclNumFuncs)
       << "ncclFunc_t changed -- update ncclFuncToString's switch in "
-         "fakes/wrap_fakes.cc to match collectives.cc:32, then update this count";
+         "fakes/collectives_fakes.cc to match collectives.cc:32, then update this count";
   EXPECT_EQ(12, ncclNumTypes)
       << "ncclDataType_t changed -- update ncclDatatypeToString's switch in "
-         "fakes/wrap_fakes.cc to match collectives.cc:86, then update this count";
+         "fakes/collectives_fakes.cc to match collectives.cc:86, then update this count";
 }
 
 TEST(WrapMicrotest, FakeTableDrift_UnrollCountMatchesProduction) {
@@ -3739,6 +3742,7 @@ TEST(WrapMicrotestIsolated, SelectAllReduce_LiveModeNeverCallsGetAlgoInfo) {
         EXPECT_EQ(ncclSuccess, rcclSelectAllReduce(comm, nullptr, nullptr, /*count=*/8, ncclFloat32, ncclSum,
                                                     /*stream=*/nullptr, /*query=*/false,
                                                     /*graphCapturingHint=*/false, &decision));
+        EXPECT_EQ(NCCL_ALGO_RING, decision.algo);
         EXPECT_EQ(0, decision.nMaxChannels);
         EXPECT_EQ(0, getAlgo.calls);
         DeleteCommWithArch(comm);
@@ -4560,7 +4564,7 @@ TEST(WrapMicrotestIsolated, SelectReduceScatter_HierarchicalGatedOnSumOpOnly) {
         rcclCollDecision decision{};
         EXPECT_EQ(ncclSuccess, rcclSelectReduceScatter(comm, nullptr, nullptr, /*recvcount=*/8, ncclFloat32,
                                                         ncclAvg, /*query=*/false, &decision));
-        EXPECT_NE((int)rcclAddonAlgos_t::RCCL_HIERARCHICAL_REDUCESCATTER, decision.algo);
+        EXPECT_EQ(NCCL_ALGO_RING, decision.algo);
         DeleteCommWithArch(comm);
       });
 }
@@ -4642,8 +4646,7 @@ TEST(WrapMicrotestIsolated, SelectReduceScatter_AvgOpIsExcludedFromDirect) {
         EXPECT_EQ(ncclSuccess,
                   rcclSelectReduceScatter(comm, nullptr, nullptr, /*recvcount=*/1048576 / 4, ncclFloat32, ncclAvg,
                                           /*query=*/false, &decision));
-        EXPECT_NE((int)rcclAddonAlgos_t::RCCL_DIRECT_REDUCESCATTER, decision.algo)
-            << "ncclAvg must not take the Direct ReduceScatter path";
+        EXPECT_EQ(NCCL_ALGO_RING, decision.algo) << "ncclAvg must fall through to the plain-kernel path";
         DeleteCommWithArch(comm);
       });
 }
@@ -5945,6 +5948,18 @@ void ExerciseInfoCallSites(bool seedDirectDisabled) {
     DeleteCommWithArch(comm);
   }
 }
+
+void ExpectInfoCallSiteLogs(const std::string& log, bool seedDirectDisabled) {
+  EXPECT_NE(std::string::npos, log.find("RCCL Channel Tuning not applied"));
+  EXPECT_NE(std::string::npos, log.find("single GPU per node case"));
+  EXPECT_NE(std::string::npos, log.find("RCCL tuning model overrides nchannels"));
+  EXPECT_NE(std::string::npos, log.find("RCCL tuning model cannot override nchannels"));
+  if (seedDirectDisabled) {
+    EXPECT_NE(std::string::npos, log.find("DIRECT ALLGATHER has been disabled"));
+  } else {
+    EXPECT_NE(std::string::npos, log.find("CTA policy ZERO"));
+  }
+}
 }  // namespace
 
 TEST(WrapMicrotestIsolated, InfoMacroSweep_AllCallSitesSuppressedByZeroMask) {
@@ -6093,10 +6108,9 @@ TEST(WrapMicrotestIsolated, InfoMacroSweep_AllCallSitesForcedOpenByNegativeDebug
         // fires at every call site reached below.
         RcclUnitTesting::ScopedDebugLogging debugLogging(/*level=*/-1, /*mask=*/0);
         std::string log = RcclUnitTesting::CaptureLog([]() { ExerciseInfoCallSites(/*seedDirectDisabled=*/true); });
-        EXPECT_FALSE(log.empty()) << "negative debug level must open the exercised INFO call sites";
+        ExpectInfoCallSiteLogs(log, /*seedDirectDisabled=*/true);
       });
 }
-
 
 TEST(WrapMicrotestIsolated, InfoMacroSweep_CtaDirectCallSiteForcedOpenByNegativeDebugLevel) {
   RUN_ISOLATED_TEST(
@@ -6104,6 +6118,6 @@ TEST(WrapMicrotestIsolated, InfoMacroSweep_CtaDirectCallSiteForcedOpenByNegative
       []() {
         RcclUnitTesting::ScopedDebugLogging debugLogging(/*level=*/-1, /*mask=*/0);
         std::string log = RcclUnitTesting::CaptureLog([]() { ExerciseInfoCallSites(/*seedDirectDisabled=*/false); });
-        EXPECT_FALSE(log.empty()) << "negative debug level must open the exercised INFO call sites";
+        ExpectInfoCallSiteLogs(log, /*seedDirectDisabled=*/false);
       });
 }
