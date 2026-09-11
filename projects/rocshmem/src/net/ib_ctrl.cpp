@@ -23,6 +23,7 @@
 #include "net/ib_ctrl.hpp"
 
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 
 namespace rocshmem {
@@ -93,11 +94,23 @@ bool IbCtrl::select_gid() {
     return true;
   }
 
+  // Explicit override, mirroring perftest's `-x <gid_index>` for hard cases.
+  if (const char *env = getenv("ROCSHMEM_ROCE_GID_INDEX")) {
+    dev_.gid_index = atoi(env);
+    ibv_->query_gid(dev_.ctx, dev_.port, dev_.gid_index, &dev_.gid);
+    return true;
+  }
+
   constexpr size_t kMax = 128;
   std::vector<struct ibv_gid_entry> entries(kMax);
   int n = ibv_->query_gid_table(dev_.ctx, entries.data(), kMax);
   if (n > 0) {
-    int fallback = -1;
+    // Match the device-initiated GDA backend (GDABackend::select_gid_index):
+    // skip fe80::/10 link-local GIDs (not routable across the rail-optimized
+    // /31 RoCE fabric between nodes), then prefer RoCEv2 over RoCEv1. This
+    // lands on the IPv4-mapped RoCEv2 GID (::ffff:a.b.c.d), the routable one.
+    int selected = -1;
+    uint32_t selected_type = IBV_GID_TYPE_ROCE_V1;
     for (int i = 0; i < n; i++) {
       const auto &e = entries[i];
       if (e.port_num != dev_.port) {
@@ -114,18 +127,18 @@ bool IbCtrl::select_gid() {
       if (zero) {
         continue;
       }
-      if (fallback < 0) {
-        fallback = static_cast<int>(e.gid_index);
+      // Skip fe80::/10 link-local GIDs.
+      if (e.gid.raw[0] == 0xfe && (e.gid.raw[1] & 0xc0) == 0x80) {
+        continue;
       }
-      if (e.gid_type == IBV_GID_TYPE_ROCE_V2) {
-        dev_.gid_index = static_cast<int>(e.gid_index);
+      if (selected < 0 || e.gid_type > selected_type) {
+        selected = static_cast<int>(e.gid_index);
+        selected_type = e.gid_type;
         dev_.gid = e.gid;
-        return true;
       }
     }
-    if (fallback >= 0) {
-      dev_.gid_index = fallback;
-      ibv_->query_gid(dev_.ctx, dev_.port, fallback, &dev_.gid);
+    if (selected >= 0) {
+      dev_.gid_index = selected;
       return true;
     }
   }
