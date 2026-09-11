@@ -184,6 +184,8 @@ public:
       uint64_t exception_mask = 0;
       /// False once a mask update leaves none of the event subscribed.
       bool continuously_subscribed = true;
+      /// Bits consumed while this particular publication was in flight.
+      uint64_t consumed_mask = 0;
     };
 
     /// Active whole-event ownership decisions, keyed by a local monotonic id.
@@ -201,6 +203,14 @@ public:
     std::array<uint32_t, 64> pending_process_exception_counts{};
     /// A failed or superseded publication still requires a background retry.
     bool notification_retry_needed = false;
+    /// QUERY consumed a wake while queue publication still hid its status.
+    bool notification_query_retry_needed = false;
+
+    void consume_process_notification(uint64_t mask) {
+      notified_process_exception_mask &= ~mask;
+      for (auto &[_, claim] : notification_claims)
+        claim.consumed_mask |= claim.exception_mask & mask;
+    }
 
     void begin_process_notification(uint64_t mask) {
       for (uint32_t bit = 0; bit < 64; ++bit) {

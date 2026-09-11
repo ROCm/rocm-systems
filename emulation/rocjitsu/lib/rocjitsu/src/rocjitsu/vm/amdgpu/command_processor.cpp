@@ -1105,15 +1105,18 @@ void CommandProcessor::update_queue(uint32_t queue_id, uint32_t process_id, uint
 }
 
 void CommandProcessor::set_queue_debug_suspended(uint32_t queue_id, uint32_t process_id,
-                                                 bool suspended) {
+                                                 bool suspended, bool resolve_exception) {
   bool wake_command_processor = false;
   {
     std::lock_guard<std::recursive_mutex> lock(hw_queue_mutex_);
     for (size_t index = 0; index < hw_queues_.size(); ++index) {
       auto &q = hw_queues_[index];
       if (q.queue_id == queue_id && q.process_id == process_id) {
-        if (q.debug_suspended == suspended)
+        const bool exception_resolved = resolve_exception && q.exception_suspended;
+        if (q.debug_suspended == suspended && !exception_resolved)
           continue;
+        if (exception_resolved)
+          q.exception_suspended = false;
         q.debug_suspended = suspended;
         if (suspended) {
           // Existing queue work needs a resume pass only when the gate, rather

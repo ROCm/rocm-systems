@@ -213,7 +213,8 @@ public:
   void accept_fanout_shard(DispatchEntry shard);
   void update_queue(uint32_t queue_id, uint32_t process_id, uint64_t ring_base_va,
                     uint32_t ring_size, uint32_t queue_percentage);
-  void set_queue_debug_suspended(uint32_t queue_id, uint32_t process_id, bool suspended);
+  void set_queue_debug_suspended(uint32_t queue_id, uint32_t process_id, bool suspended,
+                                 bool resolve_exception = false);
   bool signal_queue_exception(uint32_t queue_id, uint32_t process_id, uint64_t status,
                               bool publish_interrupt = true);
   /// @brief Publish a prepared queue exception without entering any CU.

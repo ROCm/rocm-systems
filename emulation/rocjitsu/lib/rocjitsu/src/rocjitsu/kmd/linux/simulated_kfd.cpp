@@ -404,6 +404,15 @@ int write_debug_notification(int fd, const std::function<void()> &before_write =
   if (before_write)
     before_write();
 
+  // Block application handlers before the child exists, including the window
+  // before write(). The parent restores its mask on every clone outcome.
+  sigset_t blocked_signals;
+  sigset_t previous_signals;
+  sigfillset(&blocked_signals);
+  const int mask_result = ::pthread_sigmask(SIG_SETMASK, &blocked_signals, &previous_signals);
+  if (mask_result != 0)
+    return -mask_result;
+
   int raw_pidfd = -1;
   clone_args clone{};
   clone.flags = CLONE_PIDFD | CLONE_UNTRACED;
@@ -428,8 +437,12 @@ int write_debug_notification(int fd, const std::function<void()> &before_write =
           ::syscall(SYS_clone, CLONE_UNTRACED, nullptr, nullptr, nullptr, nullptr));
     }
   }
-  if (writer < 0)
-    return -errno;
+  if (writer != 0) {
+    const int clone_error = errno;
+    static_cast<void>(::pthread_sigmask(SIG_SETMASK, &previous_signals, nullptr));
+    if (writer < 0)
+      return -clone_error;
+  }
   if (writer == 0) {
     const uint64_t one = 1;
     ssize_t written = 0;
@@ -462,11 +475,14 @@ uint64_t begin_notification_claim(KfdProcess::DebugSession &session, uint64_t ex
   return claim_id;
 }
 
-bool finish_notification_claim(KfdProcess::DebugSession &session, uint64_t claim_id) {
+bool finish_notification_claim(KfdProcess::DebugSession &session, uint64_t claim_id,
+                               uint64_t *consumed_mask = nullptr) {
   auto claim = session.notification_claims.find(claim_id);
   if (claim == session.notification_claims.end())
     return false;
   const bool continuously_subscribed = claim->second.continuously_subscribed;
+  if (consumed_mask != nullptr)
+    *consumed_mask = claim->second.consumed_mask;
   session.notification_claims.erase(claim);
   return continuously_subscribed;
 }
@@ -2658,6 +2674,7 @@ int SimulatedKfd::create_queue_ioctl(KfdProcess &proc, void *arg) {
         // save area. Preserve the legacy single-area model for older targets.
         .xcc_id = gpu->soc->arch() == ROCJITSU_CODE_ARCH_CDNA5 ? target_xcc_id : 0,
         .exception_status = KFD_EC_MASK(EC_QUEUE_NEW),
+        .debug_notification_retained_status = KFD_EC_MASK(EC_QUEUE_NEW),
         .debug_notification_events = {KFD_EC_MASK(EC_QUEUE_NEW)},
     };
   }
@@ -3544,6 +3561,7 @@ int SimulatedKfd::retry_debug_notifications(pid_t target_pid, bool invoke_result
     uint64_t mask = 0;
     uint64_t claim_id = 0;
     bool continuously_subscribed = true;
+    uint64_t consumed_mask = 0;
   };
   struct PendingQueueNotification {
     uint32_t queue_id = 0;
@@ -3572,8 +3590,10 @@ int SimulatedKfd::retry_debug_notifications(pid_t target_pid, bool invoke_result
     session->second.notification_retry_needed = false;
 
     proc = find_process_by_client_pid(target_pid);
+    bool has_visible_queue_event = false;
     auto collect_queues = [&] {
       queues.clear();
+      has_visible_queue_event = false;
       if (!proc)
         return;
       std::lock_guard<std::mutex> alloc_lock(proc->alloc_mutex_);
@@ -3587,6 +3607,7 @@ int SimulatedKfd::retry_debug_notifications(pid_t target_pid, bool invoke_result
                 : 0;
         const uint64_t visible_status =
             queue->second.debugger_visible_exception_status(session->second.generation);
+        has_visible_queue_event |= (visible_status & session->second.exception_enable_mask) != 0;
         PendingQueueNotification pending{};
         pending.queue_id = queue_id;
         for (uint64_t event_mask : queue->second.debug_notification_events) {
@@ -3624,13 +3645,32 @@ int SimulatedKfd::retry_debug_notifications(pid_t target_pid, bool invoke_result
 
     collect_queues();
     process_mask = collect_process_mask();
-    if (queues.empty() && process_mask == 0)
+    const bool retry_query =
+        session->second.notification_query_retry_needed && has_visible_queue_event;
+    if (queues.empty() && process_mask == 0 && !retry_query)
       return 0;
     notifier = UniqueDriverFd(duplicate_debug_notifier(session->second.dbg_fd));
     if (notifier.get() < 0) {
       session->second.notification_retry_needed = true;
       debug_sessions_cv_.notify_one();
       return -errno;
+    }
+
+    if (retry_query) {
+      // A debugger that already drained the first wake must get another after
+      // the event becomes visible. Serialize this bounded recovery write with
+      // QUERY and session changes; it makes no new ownership claim and cannot
+      // hide the committed event again. No CU or allocation lock is held.
+      const int result =
+          write_debug_notification(notifier.get(), {}, debug_notification_clone3_error_for_testing_,
+                                   debug_notification_clone_pidfd_error_for_testing_,
+                                   debug_notification_deferred_reap_for_testing_);
+      if (result != 0) {
+        session->second.notification_retry_needed = true;
+        debug_sessions_cv_.notify_one();
+        return result;
+      }
+      session->second.notification_query_retry_needed = false;
     }
 
     // Recompute after duplication so a concurrently resolved queue event is
@@ -3683,7 +3723,8 @@ int SimulatedKfd::retry_debug_notifications(pid_t target_pid, bool invoke_result
     }
     for (auto &claim : process_claims)
       claim.continuously_subscribed =
-          claim.claim_id != 0 && finish_notification_claim(session->second, claim.claim_id);
+          claim.claim_id != 0 &&
+          finish_notification_claim(session->second, claim.claim_id, &claim.consumed_mask);
     for (auto &pending : queues)
       for (auto &claim : pending.claims)
         claim.continuously_subscribed =
@@ -3695,8 +3736,12 @@ int SimulatedKfd::retry_debug_notifications(pid_t target_pid, bool invoke_result
     for (const auto &claim : process_claims) {
       const bool still_subscribed = (claim.mask & session->second.exception_enable_mask) != 0;
       if (result == 0 && claim.continuously_subscribed && still_subscribed)
-        delivered_process_mask |= claim.mask;
+        delivered_process_mask |= claim.mask & ~claim.consumed_mask;
       else if (still_subscribed)
+        session->second.notification_retry_needed = true;
+      // Another event with the same bit may have arrived after QUERY consumed
+      // this claim but before its pending count was released.
+      if (claim.consumed_mask != 0 && still_subscribed)
         session->second.notification_retry_needed = true;
     }
     session->second.notified_process_exception_mask |= delivered_process_mask;
@@ -3718,6 +3763,7 @@ int SimulatedKfd::retry_debug_notifications(pid_t target_pid, bool invoke_result
         }
       }
     }
+    session->second.notification_retry_needed |= session->second.notification_query_retry_needed;
     retry_needed = session->second.notification_retry_needed;
   }
   if (retry_needed)
@@ -4039,6 +4085,7 @@ bool SimulatedKfd::notify_debug_event(const std::shared_ptr<KfdProcess> &proc, u
     result_hook(delivered);
 
   bool accepted = false;
+  bool retry_needed = false;
   {
     std::lock_guard<std::mutex> lk(debug_sessions_mutex_);
     auto session = debug_sessions_.find(target_pid);
@@ -4069,10 +4116,12 @@ bool SimulatedKfd::notify_debug_event(const std::shared_ptr<KfdProcess> &proc, u
     accepted = delivered && still_subscribed && continuously_subscribed;
     if (!accepted && reserve_runtime_on_rejection)
       queue->second.begin_runtime_exception(exception_mask);
-    if (!accepted && retain_on_rejection && still_subscribed)
+    if ((!accepted && retain_on_rejection && still_subscribed) ||
+        session->second.notification_query_retry_needed)
       session->second.notification_retry_needed = true;
+    retry_needed = session->second.notification_retry_needed;
   }
-  if (!accepted && retain_on_rejection)
+  if (retry_needed)
     debug_sessions_cv_.notify_one();
   return accepted;
 }
@@ -4794,7 +4843,8 @@ int SimulatedKfd::resume_debug_queues(KfdProcess *proc, uint32_t *queue_ids, uin
     // those waves so CP completion processing cannot observe a queue as still
     // suspended if a resumed wave completes immediately.
     gpu->soc->for_each_cp([&](amdgpu::CommandProcessor *cp) {
-      cp->set_queue_debug_suspended(context.queue_id, proc->process_id(), keep_dispatch_suspended);
+      cp->set_queue_debug_suspended(context.queue_id, proc->process_id(), keep_dispatch_suspended,
+                                    saw_runtime_exception && !unresolved_runtime_exception);
     });
     for (auto *cu : wake)
       cu->schedule_work_async();
@@ -4966,7 +5016,7 @@ void SimulatedKfd::clear_completed_debug_queues(KfdProcess *proc, const uint32_t
 }
 
 int SimulatedKfd::debug_query_event(pid_t target_pid, KfdProcess *target_proc,
-                                    uint64_t enabled_mask,
+                                    KfdProcess::DebugSession &session,
                                     kfd_ioctl_dbg_trap_query_debug_event_args &args) {
   const uint64_t clear_mask = args.exception_mask;
   if (target_proc != nullptr) {
@@ -4976,7 +5026,13 @@ int SimulatedKfd::debug_query_event(pid_t target_pid, KfdProcess *target_proc,
       if (queue == target_proc->queue_snapshot_map_.end())
         continue;
       const uint64_t visible_status = queue->second.debugger_visible_exception_status();
-      if ((visible_status & enabled_mask) == 0)
+      const uint64_t pending_status = queue->second.exception_status &
+                                      queue->second.debug_notification_pending_status &
+                                      ~queue->second.runtime_exception_pending_status &
+                                      ~queue->second.runtime_exception_queried_status;
+      if ((pending_status & session.exception_enable_mask) != 0)
+        session.notification_query_retry_needed = true;
+      if ((visible_status & session.exception_enable_mask) == 0)
         continue;
       args.exception_mask = visible_status;
       args.queue_id = queue_id;
@@ -4992,9 +5048,10 @@ int SimulatedKfd::debug_query_event(pid_t target_pid, KfdProcess *target_proc,
     return -EAGAIN;
   auto &queues = process->second;
   for (auto queue = queues.begin(); queue != queues.end(); ++queue) {
-    if ((queue->second.mask & enabled_mask) == 0)
+    if ((queue->second.mask & session.exception_enable_mask) == 0)
       continue;
     args.exception_mask = queue->second.mask;
+    session.consume_process_notification(clear_mask & args.exception_mask);
     args.queue_id = queue->first;
     args.gpu_id = queue->second.gpu_id;
     queue->second.mask &= ~clear_mask;
@@ -5008,7 +5065,8 @@ int SimulatedKfd::debug_query_event(pid_t target_pid, KfdProcess *target_proc,
   return -EAGAIN;
 }
 
-void SimulatedKfd::raise_process_debug_event(pid_t target_pid, uint64_t exception_mask) {
+void SimulatedKfd::raise_process_debug_event(pid_t target_pid, uint64_t exception_mask,
+                                             bool invoke_result_hook) {
   {
     std::lock_guard<std::mutex> lk(debug_sessions_mutex_);
     auto session = debug_sessions_.find(target_pid);
@@ -5021,7 +5079,8 @@ void SimulatedKfd::raise_process_debug_event(pid_t target_pid, uint64_t exceptio
     if (std::find(event.events.begin(), event.events.end(), exception_mask) == event.events.end())
       event.events.push_back(exception_mask);
   }
-  [[maybe_unused]] const int notification_result = retry_debug_notifications(target_pid);
+  [[maybe_unused]] const int notification_result =
+      retry_debug_notifications(target_pid, invoke_result_hook);
   debug_sessions_cv_.notify_one();
 }
 
@@ -5156,7 +5215,14 @@ int SimulatedKfd::debug_query_exception_info(pid_t target_pid,
     if (process != debug_events_.end()) {
       auto event = process->second.find(0);
       if (event != process->second.end()) {
-        event->second.mask &= ~KFD_EC_MASK(EC_PROCESS_RUNTIME);
+        constexpr uint64_t kRuntime = KFD_EC_MASK(EC_PROCESS_RUNTIME);
+        auto session = debug_sessions_.find(target_pid);
+        if (session != debug_sessions_.end())
+          session->second.consume_process_notification(event->second.mask & kRuntime);
+        event->second.mask &= ~kRuntime;
+        for (uint64_t &mask : event->second.events)
+          mask &= ~kRuntime;
+        std::erase(event->second.events, uint64_t{0});
         if (event->second.mask == 0)
           process->second.erase(event);
       }
@@ -5670,12 +5736,7 @@ int SimulatedKfd::debug_trap_ioctl(KfdProcess &caller, void *arg, int *target_me
     return 0;
   }
   case KFD_IOC_DBG_TRAP_QUERY_DEBUG_EVENT: {
-    const uint64_t clear_mask = args->query_debug_event.exception_mask;
-    const int result = debug_query_event(
-        target_pid, target_proc, session_it->second.exception_enable_mask, args->query_debug_event);
-    if (result == 0)
-      session_it->second.notified_process_exception_mask &= ~clear_mask;
-    return result;
+    return debug_query_event(target_pid, target_proc, session_it->second, args->query_debug_event);
   }
   case KFD_IOC_DBG_TRAP_SUSPEND_QUEUES: {
     if (args->suspend_queues.num_queues != 0 && args->suspend_queues.queue_array_ptr == 0)

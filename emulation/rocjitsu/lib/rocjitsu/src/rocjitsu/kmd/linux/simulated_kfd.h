@@ -107,13 +107,6 @@ classify_pre_gfx12_trap_interrupt_site(rj_code_arch_t arch, uint32_t payload_mov
   return TrapInterruptSite::Unknown;
 }
 
-constexpr uint64_t preserve_runtime_queue_exception_owner(uint64_t queue_exception_status,
-                                                          uint64_t runtime_exception_status,
-                                                          uint64_t debugger_status) {
-  // A combined event has one owner. Once any bit was published to ROCr, a
-  // later subscription change cannot split the same event with the debugger.
-  return (queue_exception_status & runtime_exception_status) != 0 ? 0 : debugger_status;
-}
 } // namespace detail
 } // namespace kmd
 /// @brief 128-bit IPC share handle key, matching the kernel's random handle.
@@ -280,7 +273,7 @@ public:
   /// @details This narrow seam exercises retained process-event notification
   /// and subscription races through the production retry helper.
   void raise_process_debug_event_for_testing(pid_t target_pid, uint64_t exception_mask) {
-    raise_process_debug_event(target_pid, exception_mask);
+    raise_process_debug_event(target_pid, exception_mask, /*invoke_result_hook=*/true);
   }
 
   /// @brief Release the local process's parked event waiters so a blocking
@@ -540,11 +533,13 @@ private:
   void reap_exited_debug_sessions(std::stop_token stop);
   int debug_device_snapshot(kfd_ioctl_dbg_trap_device_snapshot_args &args);
   int debug_queue_snapshot(KfdProcess *target, kfd_ioctl_dbg_trap_queue_snapshot_args &args);
-  int debug_query_event(pid_t target_pid, KfdProcess *target_proc, uint64_t enabled_mask,
+  int debug_query_event(pid_t target_pid, KfdProcess *target_proc,
+                        KfdProcess::DebugSession &session,
                         kfd_ioctl_dbg_trap_query_debug_event_args &args);
   int debug_query_exception_info(pid_t target_pid,
                                  kfd_ioctl_dbg_trap_query_exception_info_args &args);
-  void raise_process_debug_event(pid_t target_pid, uint64_t exception_mask);
+  void raise_process_debug_event(pid_t target_pid, uint64_t exception_mask,
+                                 bool invoke_result_hook = false);
   /// @brief Report an EC_PROCESS_RUNTIME transition to the attached debugger.
   /// @param enabling True to block for the debugger's ack under the liveness
   ///        deadline. A disable transition is reported and returns immediately:
