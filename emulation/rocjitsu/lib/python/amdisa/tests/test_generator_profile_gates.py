@@ -3565,11 +3565,11 @@ def test_generated_vector_f16_arithmetic_consumes_fp16_ovfl(
 
     assert 'if (wf.fp16_ovfl())' in vop2
     assert 'f32_to_f16_ovfl_simd' in vop2
-    assert 'util::f32_to_f16_mode' in vop2
+    assert 'sdwa::round_f16_result' in vop2
     assert 'wf.fp16_ovfl()' in vop2
     assert 'if (wf.fp16_ovfl())' in vop3
     assert 'f32_to_f16_ovfl_simd' in vop3
-    assert 'util::f32_to_f16_mode' in vop3
+    assert 'sdwa::round_f16_result' in vop3
     assert 'wf.fp16_ovfl()' in vop3
 
 
@@ -8391,3 +8391,33 @@ def test_ds_subtraction_keeps_underflow_policy(profile_type, returning):
         sem = derive_semantics(name + suffix, 'ENC_VDS', profile_type())
         assert sem is not None
         assert sem.operation == operation
+
+
+@pytest.mark.parametrize(
+    'operation',
+    ['frexp_exp_f32', 'frexp_exp_f16', 'cvt_norm_i16_f16', 'cvt_norm_u16_f16'],
+)
+def test_sdwa_integer_results_ignore_float_modifiers(operation):
+    sem = SimpleNamespace(name='V_INTEGER_RESULT', operation=operation, data_type='f16')
+    assert CodeGenerator._sdwa_result_format(sem) == 'amdgpu::sdwa::ResultFormat::NONE'
+
+
+def test_sdwa_conversion_result_formats():
+    for name, expected in (
+        ('V_CVT_F16_F32', 'F16'),
+        ('V_CVT_F16_I16', 'F16'),
+        ('V_CVT_F16_U16', 'F16'),
+        ('V_CVT_F32_F16', 'F32'),
+        ('V_CVT_F32_I32', 'F32'),
+        ('V_CVT_F32_U32', 'F32'),
+        ('V_CVT_F32_UBYTE0', 'F32'),
+        ('V_CVT_I32_F32', 'NONE'),
+        ('V_CVT_U32_F32', 'NONE'),
+        ('V_CVT_I16_F16', 'NONE'),
+        ('V_CVT_NORM_I16_F16', 'NONE'),
+    ):
+        semantics = derive_semantics(name, 'VOP1')
+        assert semantics is not None
+        assert CodeGenerator._sdwa_result_format(semantics) == (
+            f'amdgpu::sdwa::ResultFormat::{expected}'
+        )
