@@ -154,8 +154,8 @@ void* ep_create(int rank, int num_ranks, const char* unique_id,
   // vector paths are only aligned when hidden is a multiple of 8. The scalar
   // tails cover a leftover element count, not a misaligned base, so reject an
   // odd hidden here rather than reach a misaligned dwordx4.
-  if (hidden % 8 != 0) {
-    fprintf(stderr, "[rccl_ep] hidden %d must be a multiple of 8 (16B vector alignment)\n", hidden);
+  if (hidden <= 0 || hidden % 8 != 0) {
+    fprintf(stderr, "[rccl_ep] hidden %d must be a positive multiple of 8 (16B vector alignment)\n", hidden);
     return nullptr;
   }
   // kMaxRanks bounds the scale-up domain the window layout is written for, and
@@ -203,8 +203,9 @@ void* ep_create(int rank, int num_ranks, const char* unique_id,
 // reveals at the first dispatch, not at buffer construction.
 int ep_configure(void* handle, int num_experts, int num_topk) {
   auto* h = static_cast<EpHandle*>(handle);
-  if (h->configured && h->cfg.num_experts == num_experts && h->cfg.num_topk == num_topk)
+  if (h->configured && h->cfg.num_experts == num_experts && h->cfg.num_topk == num_topk) {
     return 0;
+  }
   // Validated before the teardown below, so a rejected reconfigure leaves the
   // existing window intact rather than freed.
   if (num_topk < 1 || num_topk > kMaxTopk) {
@@ -252,6 +253,20 @@ int ep_configure(void* handle, int num_experts, int num_topk) {
     return -1;
   }
   h->devcomm = true;
+
+  // k_capi_fill_views resolves peer windows by LSA index while every data-path
+  // kernel indexes d_views by world rank, so the two agree only when the LSA
+  // team is the whole communicator under the identity mapping. A comm that
+  // spans nodes, or one whose ranks are reordered within the node, would
+  // otherwise push payloads into the wrong peer's window with no error.
+  if (h->devComm.lsaSize != h->cfg.num_ranks || h->devComm.lsaRank != h->cfg.rank) {
+    fprintf(stderr,
+            "[rccl_ep] LSA team is rank %d of %d but the communicator is rank %d of %d; "
+            "rccl_ep needs a single-node communicator with the identity LSA mapping\n",
+            h->devComm.lsaRank, h->devComm.lsaSize, h->cfg.rank, h->cfg.num_ranks);
+    release_window(h, true);
+    return -1;
+  }
 
   hipLaunchKernelGGL(k_capi_fill_views, dim3(1), dim3(1), 0, 0,
                      h->win, h->lay, h->cfg.num_ranks, h->d_views);
@@ -339,6 +354,12 @@ int ep_dispatch(void* handle,
   // ep_create's hidden % 8 guard only covers bf16 (2 bytes/element).
   if (use_fp8 && c.hidden % 16 != 0) {
     fprintf(stderr, "[rccl_ep] hidden %d must be a multiple of 16 for fp8 (16B vector alignment)\n", c.hidden);
+    return -1;
+  }
+  // The fp8 paths read x_sf and write out_sf unconditionally, so a missing scale
+  // tensor is a device-side fault rather than a skipped copy.
+  if (use_fp8 && (x_sf == 0 || out_sf == 0)) {
+    fprintf(stderr, "[rccl_ep] fp8 dispatch needs both x_sf and out_sf\n");
     return -1;
   }
 
@@ -494,6 +515,14 @@ int ep_combine(void* handle,
   const EpConfig& c = h->cfg;
   hipStream_t s = (hipStream_t)stream;
   REQUIRE_CONFIGURED(h, "ep_combine");
+  // Same capacity bound ep_dispatch enforces: combine writes slot
+  // rank * num_max_tokens_per_rank + t, and src_tok = g % T aliases two tokens
+  // onto one slot once t runs past capacity.
+  if (num_tokens > c.num_max_tokens_per_rank) {
+    fprintf(stderr, "[rccl_ep] num_tokens %d exceeds num_max_tokens_per_rank %d\n",
+            num_tokens, c.num_max_tokens_per_rank);
+    return -1;
+  }
   // Two different grids. The transport is (num_ranks, per_rank) so a CTA owns
   // one peer; the reduce epilogue is purely local and 1-D over tokens, so it
   // takes the whole budget. Sharing one value silently starved the epilogue of

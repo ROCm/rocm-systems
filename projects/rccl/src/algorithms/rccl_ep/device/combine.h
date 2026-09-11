@@ -167,7 +167,10 @@ __global__ void combine_reduce_epilogue_impl(EpConfig cfg, WindowView self,
     bool take[kMaxTopk];
     for (int k = 0; k < K; ++k) {
       const int e = topk_idx[(size_t)t * K + k];
-      take[k] = (e >= 0);
+      // Upper bound as well as lower: owner = e / epr reaches num_ranks for an
+      // out-of-range id, and slot() would then index a whole rank-region past
+      // the end of the window.
+      take[k] = (e >= 0 && e < cfg.num_experts);
       if (take[k] && grouped) {
         const int owner = e / epr;
         for (int k2 = k + 1; k2 < K; ++k2) {

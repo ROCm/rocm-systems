@@ -66,7 +66,8 @@ empty build.
 
 ## Runtime contract
 
-Four things are not discoverable and must be set by the caller:
+Three things are not discoverable and must be set by the caller; the fourth row
+is an optional override:
 
 | Variable | Why |
 | --- | --- |

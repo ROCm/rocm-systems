@@ -248,7 +248,11 @@ class ElasticBuffer:
         return EventOverlap(ev)
 
     def barrier(self):
-        _lib().ep_barrier(self._h, torch.cuda.current_stream().cuda_stream)
+        # Before the first dispatch the handle is unconfigured, so the C side
+        # returns -1 without launching anything. Swallowing that would let the
+        # caller believe the ranks had rendezvoused.
+        if _lib().ep_barrier(self._h, torch.cuda.current_stream().cuda_stream) != 0:
+            raise RuntimeError("ep_barrier failed")
 
     def destroy(self):
         if getattr(self, "_h", None):
@@ -260,6 +264,10 @@ class ElasticBuffer:
         key = (num_experts, num_topk)
         if self._configured == key:
             return
+        # A failed ep_configure has already released the old window on the C
+        # side, so keeping the stale key here would short-circuit a retry at the
+        # previous shape and leave dispatch running against no window at all.
+        self._configured = None
         if _lib().ep_configure(self._h, num_experts, num_topk) != 0:
             raise RuntimeError(f"ep_configure({num_experts}, {num_topk}) failed")
         self._configured = key
@@ -413,7 +421,8 @@ class ElasticBuffer:
 
         # Per-source-rank prefix sum.
         rc = torch.empty((self.num_ranks,), dtype=torch.int32, device=x.device)
-        lib.ep_recv_counts(self._h, rc.data_ptr(), stream)
+        if lib.ep_recv_counts(self._h, rc.data_ptr(), stream) != 0:
+            raise RuntimeError("ep_recv_counts failed")
         h.psum_num_recv_tokens_per_scaleup_rank = torch.cumsum(rc, 0).to(torch.int32)
         h.dst_buffer_slot_idx = slot
 
@@ -421,7 +430,9 @@ class ElasticBuffer:
         counts = torch.zeros((epr,), dtype=torch.int32, device=x.device)
 
         if not do_expand:
-            lib.ep_expert_counts(self._h, rtk.data_ptr(), n, counts.data_ptr(), stream)
+            if lib.ep_expert_counts(self._h, rtk.data_ptr(), n,
+                                    counts.data_ptr(), stream) != 0:
+                raise RuntimeError("ep_expert_counts failed")
             h.expanded = False
             self._expert_metadata(h, counts, expert_alignment)
             # recv_src_metadata: column 0 is src_token_global_idx (the only
@@ -464,12 +475,14 @@ class ElasticBuffer:
                 esf = torch.empty((rows, hidden_sf), dtype=torch.float32, device=x.device)
                 sf_rs, sf_cs = hidden_sf, 1
 
-        lib.ep_expand_scatter(self._h, 1 if use_fp8 else 0,
-                              rx.data_ptr(), _ptr(rsf), rtw.data_ptr(),
-                              row_map.data_ptr(), n,
-                              ex.data_ptr(), _ptr(esf), sf_rs, sf_cs, ew.data_ptr(),
-                              1 if do_zero_padding else 0, expert_alignment,
-                              counts.data_ptr(), offsets.data_ptr(), num_sms, stream)
+        if lib.ep_expand_scatter(self._h, 1 if use_fp8 else 0,
+                                 rx.data_ptr(), _ptr(rsf), rtw.data_ptr(),
+                                 row_map.data_ptr(), n,
+                                 ex.data_ptr(), _ptr(esf), sf_rs, sf_cs, ew.data_ptr(),
+                                 1 if do_zero_padding else 0, expert_alignment,
+                                 counts.data_ptr(), offsets.data_ptr(),
+                                 num_sms, stream) != 0:
+            raise RuntimeError("ep_expand_scatter failed")
 
         h.expanded = True
         h.row_map, h.expert_offsets, h.num_expanded_rows = row_map, offsets, rows
@@ -513,10 +526,14 @@ class ElasticBuffer:
         #   expanded, multiple reduction on   -> 1, reduced from the expanded
         #                                        input inside the kernel
         grouped = 1 if (not handle.expanded or self.allow_multiple_reduction) else 0
+        # The column slice is strided, so .contiguous() really copies. Bind it:
+        # inline, the copy is dropped as soon as data_ptr() returns and the
+        # allocator can hand the block out again before the kernel reads it.
+        recv_src = handle.recv_src_metadata[:, 0].contiguous()
         rc = lib.ep_combine(self._h, x.data_ptr(), _ptr(in_w),
                             _ptr(handle.row_map) if handle.expanded else 0,
                             handle.recv_topk_idx.data_ptr(),
-                            handle.recv_src_metadata[:, 0].contiguous().data_ptr(),
+                            recv_src.data_ptr(),
                             handle.num_recv,
                             handle.topk_idx_i32.data_ptr(), num_tokens,
                             _ptr(b0), _ptr(b1), grouped,
