@@ -10,6 +10,7 @@
 #pragma once
 
 #include <cuda.h>
+#include <cuda_runtime_api.h>
 #include <cstdint>
 #include <memory>
 
@@ -105,5 +106,10 @@ private:
     return block * nRanks_ + rank;
   }
 };
+
+// Publish a stream-ordered scratch copy once per rank before a multi-block
+// collective consumes peer scratch. The one-block release/acquire barrier
+// replaces an acquire-only prologue in every collective block.
+void launchFabricGpuBarrierPublish(FabricGpuBarrier barrier, cudaStream_t stream);
 
 } // namespace dda::common

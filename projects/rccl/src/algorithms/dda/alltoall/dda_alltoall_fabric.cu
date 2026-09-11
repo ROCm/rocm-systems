@@ -58,6 +58,8 @@ static ncclResult_t ncclAllToAllDdaFabricTyped(const void* sendbuff, void* recvb
   // host-launched cudaMemcpyAsync avoids the per-block in-kernel copy race on
   // the fabric path.
   CUDACHECK(cudaMemcpyAsync(comm->ddaScratch, sendbuff, totalCount * sizeof(T), cudaMemcpyDeviceToDevice, stream));
+  dda::common::launchFabricGpuBarrierPublish(barrierHost, stream);
+  CUDACHECK(cudaGetLastError());
 
   switch (nRanks) {
   case 4:

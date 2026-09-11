@@ -76,6 +76,8 @@ static ncclResult_t ncclAllReduceDdaFabricTyped(const void* sendbuff, void* recv
 
   if (treeOk) {
     CUDACHECK(cudaMemcpyAsync(comm->ddaScratch, sendbuff, count * sizeof(T), cudaMemcpyDeviceToDevice, stream));
+    dda::common::launchFabricGpuBarrierPublish(barrierHost, stream);
+    CUDACHECK(cudaGetLastError());
     // NRANKS_CT 4/8: unrolled CollCommon reduce; 0: runtime fallback.
     switch (nRanks) {
     case 4:
