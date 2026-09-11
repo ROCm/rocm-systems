@@ -53,6 +53,13 @@ namespace rocprofsys::trace_cache
 namespace
 {
 
+// Tests construct rocpd_processor_t without rocprofsys_init_library / USE_ROCPD.
+// post_process_metadata() normally returns early when get_use_rocpd() is false; tests
+// toggle this via detail::set_force_rocpd_metadata_registration_for_tests() (see
+// test_rocpd_processor.cpp run_processor_and_open_reader) so agent/PMC metadata still
+// registers on the production code path.
+bool g_force_rocpd_metadata_registration = false;
+
 using rocpd_helpers::make_agent_uid;
 using rocpd_helpers::make_event;
 using rocpd_helpers::make_trace_env;
@@ -80,6 +87,15 @@ generate_db_output_path(int pid)
 }
 
 }  // namespace
+
+namespace detail
+{
+void
+set_force_rocpd_metadata_registration_for_tests(bool enabled)
+{
+    g_force_rocpd_metadata_registration = enabled;
+}
+}  // namespace detail
 
 void
 rocpd_processor_t::handle(const kernel_dispatch_sample& kds)
@@ -372,7 +388,7 @@ rocpd_processor_t::handle([[maybe_unused]] const gpu_pmc_sample& gpu_pmc)
     try
     {
         agent_ptr =
-            &m_agent_manager->get_agent_by_type_index(gpu_pmc.device_id, agent_type::GPU);
+            &m_agent_manager->get_agent_by_type_index(gpu_pmc.device_id, agent_type::gpu);
     } catch(const std::out_of_range& e)
     {
         LOG_WARNING("GPU PMC sample skipped: agent lookup failed for device_id={}: {}",
@@ -562,7 +578,7 @@ rocpd_processor_t::handle([[maybe_unused]] const ainic_pmc_sample& nic_sample)
     try
     {
         agent_ptr =
-            &m_agent_manager->get_agent_by_id(nic_sample.device_id, agent_type::NIC);
+            &m_agent_manager->get_agent_by_id(nic_sample.device_id, agent_type::nic);
     } catch(const std::out_of_range& e)
     {
         LOG_WARNING("NIC PMC sample skipped: agent lookup failed for device_id={}: {}",
@@ -651,7 +667,7 @@ rocpd_processor_t::handle(
     try
     {
         agent_ptr = &m_agent_manager->get_agent_by_type_index(gpu_perf_counter.device_id,
-                                                              agent_type::GPU);
+                                                              agent_type::gpu);
     } catch(const std::out_of_range& e)
     {
         LOG_WARNING("GPU perf-counter sample skipped: agent lookup failed for "
@@ -749,7 +765,7 @@ rocpd_processor_t::handle([[maybe_unused]] const cpu_pmc_sample& cpu_pmc_smpl)
     const agent* agent_ptr = nullptr;
     try
     {
-        agent_ptr = &m_agent_manager->get_agent_by_type_index(device_id, agent_type::CPU);
+        agent_ptr = &m_agent_manager->get_agent_by_type_index(device_id, agent_type::cpu);
     } catch(const std::out_of_range& e)
     {
         LOG_WARNING("CPU PMC sample skipped: agent lookup failed for device_id={}: {}",
@@ -1073,7 +1089,7 @@ rocpd_processor_t::finalize_processing()
 void
 rocpd_processor_t::post_process_metadata()
 {
-    if(!get_use_rocpd())
+    if(!g_force_rocpd_metadata_registration && !get_use_rocpd())
     {
         LOG_TRACE("Rocpd not enabled, skipping metadata post-processing");
         return;

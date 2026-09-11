@@ -35,6 +35,13 @@ using test_device_t = device<MockBackend>;
 namespace rocprofsys::pmc::collectors::nic::testing
 {
 
+constexpr size_t kHwNicDeviceId0 = 0;
+constexpr size_t kHwNicDeviceId1 = 1;
+constexpr size_t kHwNicDeviceId2 = 2;
+constexpr size_t kHwNicDeviceId5 = 5;
+constexpr size_t kHwNicDeviceId7 = 7;
+constexpr size_t kHwNicDeviceId9 = 9;
+
 struct stub_settings
 {
     inline static nic_device_filter filter{};
@@ -42,7 +49,7 @@ struct stub_settings
     static void reset()
     {
         filter      = nic_device_filter{};
-        filter.mode = device_selection_mode::ALL;
+        filter.mode = device_selection_mode::all;
         filter.names.clear();
     }
 
@@ -72,7 +79,7 @@ protected:
     static size_t nic_agent_count()
     {
         return ::rocprofsys::get_agent_manager_instance()
-            .get_agents_by_type(agent_type::NIC)
+            .get_agents_by_type(agent_type::nic)
             .size();
     }
 
@@ -81,7 +88,7 @@ protected:
         size_t count = 0;
         for(const auto& agent_ptr :
             ::rocprofsys::get_agent_manager_instance().get_agents_by_type(
-                agent_type::NIC))
+                agent_type::nic))
         {
             if(agent_ptr->device_id == device_id) ++count;
         }
@@ -175,24 +182,25 @@ TEST_F(NicTraitsRegisterAgentsTest, register_nic_agents_lookup_by_hardware_devic
     const auto nic_before = nic_agent_count();
 
     auto       provider = make_provider({
-        make_nic_device(2, "rdma2", "AINIC-2"),
-        make_nic_device(5, "rdma5", "AINIC-5"),
+        make_nic_device(kHwNicDeviceId2, "rdma2", "AINIC-2"),
+        make_nic_device(kHwNicDeviceId5, "rdma5", "AINIC-5"),
     });
     const auto entries  = enumerate_nics(provider);
     ASSERT_EQ(entries.size(), 2U);
-    EXPECT_EQ(entry_indices(entries), (std::set<size_t>{ 2, 5 }));
+    EXPECT_EQ(entry_indices(entries),
+              (std::set<size_t>{ kHwNicDeviceId2, kHwNicDeviceId5 }));
 
     EXPECT_EQ(nic_agent_count(), nic_before + 2);
 
     agent_manager& mgr = ::rocprofsys::get_agent_manager_instance();
     EXPECT_NO_THROW({
-        const agent& by_id_2 = mgr.get_agent_by_id(2, agent_type::NIC);
-        EXPECT_EQ(by_id_2.device_id, 2U);
+        const agent& by_id_2 = mgr.get_agent_by_id(kHwNicDeviceId2, agent_type::nic);
+        EXPECT_EQ(by_id_2.device_id, static_cast<std::uint64_t>(kHwNicDeviceId2));
         EXPECT_EQ(by_id_2.name, "AINIC-2");
     });
     EXPECT_NO_THROW({
-        const agent& by_id_5 = mgr.get_agent_by_id(5, agent_type::NIC);
-        EXPECT_EQ(by_id_5.device_id, 5U);
+        const agent& by_id_5 = mgr.get_agent_by_id(kHwNicDeviceId5, agent_type::nic);
+        EXPECT_EQ(by_id_5.device_id, static_cast<std::uint64_t>(kHwNicDeviceId5));
         EXPECT_EQ(by_id_5.name, "AINIC-5");
     });
 }
@@ -200,7 +208,7 @@ TEST_F(NicTraitsRegisterAgentsTest, register_nic_agents_lookup_by_hardware_devic
 TEST_F(NicTraitsRegisterAgentsTest, sampling_disabled_does_not_register_agents)
 {
     const auto nic_before      = nic_agent_count();
-    stub_settings::filter.mode = device_selection_mode::NONE;
+    stub_settings::filter.mode = device_selection_mode::none;
 
     auto       provider = make_provider({ make_nic_device(0, "rdma0") });
     const auto entries  = enumerate_nics(provider);
@@ -222,28 +230,28 @@ TEST_F(NicTraitsRegisterAgentsTest, empty_discovery_registers_no_agents)
 TEST_F(NicTraitsRegisterAgentsTest, specific_filter_registers_only_matching_port_name)
 {
     const auto nic_before      = nic_agent_count();
-    const auto id2_before      = nic_agent_count_with_device_id(2);
-    const auto id5_before      = nic_agent_count_with_device_id(5);
-    stub_settings::filter.mode = device_selection_mode::SPECIFIC;
+    const auto id2_before      = nic_agent_count_with_device_id(kHwNicDeviceId2);
+    const auto id5_before      = nic_agent_count_with_device_id(kHwNicDeviceId5);
+    stub_settings::filter.mode = device_selection_mode::specific;
     stub_settings::filter.names.insert("rdma1");
 
     auto       provider = make_provider({
-        make_nic_device(2, "rdma0"),
-        make_nic_device(5, "rdma1", "AINIC-5"),
+        make_nic_device(kHwNicDeviceId2, "rdma0"),
+        make_nic_device(kHwNicDeviceId5, "rdma1", "AINIC-5"),
     });
     const auto entries  = enumerate_nics(provider);
 
     ASSERT_EQ(entries.size(), 1U);
-    EXPECT_EQ(entry_indices(entries), (std::set<size_t>{ 5 }));
+    EXPECT_EQ(entry_indices(entries), (std::set<size_t>{ kHwNicDeviceId5 }));
     EXPECT_EQ(nic_agent_count(), nic_before + 1);
-    EXPECT_EQ(nic_agent_count_with_device_id(2), id2_before);
-    EXPECT_EQ(nic_agent_count_with_device_id(5), id5_before + 1);
+    EXPECT_EQ(nic_agent_count_with_device_id(kHwNicDeviceId2), id2_before);
+    EXPECT_EQ(nic_agent_count_with_device_id(kHwNicDeviceId5), id5_before + 1);
 
     bool found_ainic_5 = false;
     for(const auto& agent_ptr :
-        ::rocprofsys::get_agent_manager_instance().get_agents_by_type(agent_type::NIC))
+        ::rocprofsys::get_agent_manager_instance().get_agents_by_type(agent_type::nic))
     {
-        if(agent_ptr->device_id == 5 && agent_ptr->name == "AINIC-5")
+        if(agent_ptr->device_id == kHwNicDeviceId5 && agent_ptr->name == "AINIC-5")
             found_ainic_5 = true;
     }
     EXPECT_TRUE(found_ainic_5);
@@ -252,20 +260,20 @@ TEST_F(NicTraitsRegisterAgentsTest, specific_filter_registers_only_matching_port
 TEST_F(NicTraitsRegisterAgentsTest, unsupported_nic_skipped_under_all_mode)
 {
     const auto nic_before = nic_agent_count();
-    const auto id2_before = nic_agent_count_with_device_id(2);
-    const auto id5_before = nic_agent_count_with_device_id(5);
+    const auto id2_before = nic_agent_count_with_device_id(kHwNicDeviceId2);
+    const auto id5_before = nic_agent_count_with_device_id(kHwNicDeviceId5);
 
     auto       provider = make_provider({
-        make_nic_device(2, "rdma0"),
-        make_unsupported_nic_device(5, "rdma-no-rdma"),
+        make_nic_device(kHwNicDeviceId2, "rdma0"),
+        make_unsupported_nic_device(kHwNicDeviceId5, "rdma-no-rdma"),
     });
     const auto entries  = enumerate_nics(provider);
 
     ASSERT_EQ(entries.size(), 1U);
-    EXPECT_EQ(entry_indices(entries), (std::set<size_t>{ 2 }));
+    EXPECT_EQ(entry_indices(entries), (std::set<size_t>{ kHwNicDeviceId2 }));
     EXPECT_EQ(nic_agent_count(), nic_before + 1);
-    EXPECT_EQ(nic_agent_count_with_device_id(2), id2_before + 1);
-    EXPECT_EQ(nic_agent_count_with_device_id(5), id5_before);
+    EXPECT_EQ(nic_agent_count_with_device_id(kHwNicDeviceId2), id2_before + 1);
+    EXPECT_EQ(nic_agent_count_with_device_id(kHwNicDeviceId5), id5_before);
 }
 
 TEST_F(NicTraitsRegisterAgentsTest,
@@ -274,17 +282,18 @@ TEST_F(NicTraitsRegisterAgentsTest,
     const auto nic_before = nic_agent_count();
 
     auto provider = make_provider({
-        make_nic_device(2, "rdma0"),
-        make_nic_device(5, "rdma1"),
+        make_nic_device(kHwNicDeviceId2, "rdma0"),
+        make_nic_device(kHwNicDeviceId5, "rdma1"),
     });
     ASSERT_EQ(enumerate_nics(provider).size(), 2U);
 
-    agent_manager& mgr  = ::rocprofsys::get_agent_manager_instance();
-    const agent&   at_2 = mgr.get_agent_by_id(2, agent_type::NIC);
-    const agent&   at_5 = mgr.get_agent_by_id(5, agent_type::NIC);
+    agent_manager& mgr = ::rocprofsys::get_agent_manager_instance();
+    // Use type_index: earlier tests may have registered the same hardware device_id.
+    const agent& at_2 = mgr.get_agent_by_type_index(nic_before, agent_type::nic);
+    const agent& at_5 = mgr.get_agent_by_type_index(nic_before + 1, agent_type::nic);
 
-    EXPECT_EQ(at_2.device_id, 2U);
-    EXPECT_EQ(at_5.device_id, 5U);
+    EXPECT_EQ(at_2.device_id, static_cast<std::uint64_t>(kHwNicDeviceId2));
+    EXPECT_EQ(at_5.device_id, static_cast<std::uint64_t>(kHwNicDeviceId5));
     EXPECT_EQ(at_2.device_type_index, nic_before);
     EXPECT_EQ(at_5.device_type_index, nic_before + 1);
 }
@@ -294,31 +303,32 @@ TEST_F(NicTraitsRegisterAgentsTest, get_agent_by_type_index_matches_registered_n
     const auto nic_before = nic_agent_count();
 
     auto provider = make_provider({
-        make_nic_device(7, "rdma0", "AINIC-by-id-7"),
-        make_nic_device(9, "rdma1", "AINIC-by-id-9"),
+        make_nic_device(kHwNicDeviceId7, "rdma0", "AINIC-by-id-7"),
+        make_nic_device(kHwNicDeviceId9, "rdma1", "AINIC-by-id-9"),
     });
     ASSERT_EQ(enumerate_nics(provider).size(), 2U);
 
     agent_manager& mgr = ::rocprofsys::get_agent_manager_instance();
 
-    const agent& by_type_first = mgr.get_agent_by_type_index(nic_before, agent_type::NIC);
+    const agent& by_type_first = mgr.get_agent_by_type_index(nic_before, agent_type::nic);
     const agent& by_type_second =
-        mgr.get_agent_by_type_index(nic_before + 1, agent_type::NIC);
+        mgr.get_agent_by_type_index(nic_before + 1, agent_type::nic);
 
-    EXPECT_EQ(by_type_first.device_id, 7U);
-    EXPECT_EQ(by_type_second.device_id, 9U);
+    EXPECT_EQ(by_type_first.device_id, static_cast<std::uint64_t>(kHwNicDeviceId7));
+    EXPECT_EQ(by_type_second.device_id, static_cast<std::uint64_t>(kHwNicDeviceId9));
     EXPECT_EQ(by_type_first.name, "AINIC-by-id-7");
     EXPECT_EQ(by_type_second.name, "AINIC-by-id-9");
 
-    EXPECT_EQ(by_type_first.device_id, mgr.get_agent_by_id(7, agent_type::NIC).device_id);
+    EXPECT_EQ(by_type_first.device_id,
+              mgr.get_agent_by_id(kHwNicDeviceId7, agent_type::nic).device_id);
     EXPECT_EQ(by_type_second.device_id,
-              mgr.get_agent_by_id(9, agent_type::NIC).device_id);
+              mgr.get_agent_by_id(kHwNicDeviceId9, agent_type::nic).device_id);
 
     // type_index is the per-type ordinal from insert_agent, not hardware device_id.
     EXPECT_NE(by_type_first.device_id, static_cast<std::uint64_t>(nic_before));
     EXPECT_NE(by_type_second.device_id, static_cast<std::uint64_t>(nic_before + 1));
 
-    EXPECT_THROW(mgr.get_agent_by_type_index(nic_before + 2, agent_type::NIC),
+    EXPECT_THROW(mgr.get_agent_by_type_index(nic_before + 2, agent_type::nic),
                  std::out_of_range);
 }
 
@@ -330,7 +340,7 @@ TEST_F(NicTraitsRegisterAgentsTest, single_nic_at_index_zero_uses_hardware_devic
     EXPECT_EQ(nic_agent_count(), nic_before + 1);
 
     agent_manager& mgr = ::rocprofsys::get_agent_manager_instance();
-    const agent&   nic = mgr.get_agent_by_id(0, agent_type::NIC);
+    const agent&   nic = mgr.get_agent_by_id(0, agent_type::nic);
     EXPECT_EQ(nic.device_id, 0U);
 }
 
@@ -339,14 +349,16 @@ TEST_F(NicTraitsRegisterAgentsTest, provider_order_does_not_change_hardware_devi
     const auto nic_before = nic_agent_count();
 
     auto provider = make_provider({
-        make_nic_device(5, "rdma1"),
-        make_nic_device(2, "rdma0"),
+        make_nic_device(kHwNicDeviceId5, "rdma1"),
+        make_nic_device(kHwNicDeviceId2, "rdma0"),
     });
     ASSERT_EQ(enumerate_nics(provider).size(), 2U);
 
     agent_manager& mgr = ::rocprofsys::get_agent_manager_instance();
-    EXPECT_EQ(mgr.get_agent_by_id(2, agent_type::NIC).device_id, 2U);
-    EXPECT_EQ(mgr.get_agent_by_id(5, agent_type::NIC).device_id, 5U);
+    EXPECT_EQ(mgr.get_agent_by_id(kHwNicDeviceId2, agent_type::nic).device_id,
+              static_cast<std::uint64_t>(kHwNicDeviceId2));
+    EXPECT_EQ(mgr.get_agent_by_id(kHwNicDeviceId5, agent_type::nic).device_id,
+              static_cast<std::uint64_t>(kHwNicDeviceId5));
     EXPECT_EQ(nic_agent_count(), nic_before + 2);
 }
 
@@ -354,12 +366,13 @@ TEST_F(NicTraitsRegisterAgentsTest, agent_metadata_populated_from_device)
 {
     const auto nic_before = nic_agent_count();
 
-    enumerate_nics(
-        make_provider({ make_nic_device(1, "rdma0", "Product-X", "Vendor-Y") }));
+    enumerate_nics(make_provider(
+        { make_nic_device(kHwNicDeviceId1, "rdma0", "Product-X", "Vendor-Y") }));
 
     agent_manager& mgr = ::rocprofsys::get_agent_manager_instance();
-    const agent&   nic = mgr.get_agent_by_id(1, agent_type::NIC);
+    const agent&   nic = mgr.get_agent_by_type_index(nic_before, agent_type::nic);
 
+    EXPECT_EQ(nic.device_id, static_cast<std::uint64_t>(kHwNicDeviceId1));
     EXPECT_EQ(nic.name, "Product-X");
     EXPECT_EQ(nic.model_name, "Vendor-Y");
     EXPECT_EQ(nic.vendor_name, "AI NIC");

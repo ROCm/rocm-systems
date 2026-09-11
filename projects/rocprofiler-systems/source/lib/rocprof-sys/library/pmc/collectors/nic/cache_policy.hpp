@@ -84,7 +84,7 @@ struct cache_policy
         constexpr const char* TARGET_ARCH = "NIC";
 
         trace_cache::get_metadata_registry().add_pmc_info(
-            { agent_type::NIC, nic_id, TARGET_ARCH, EVENT_CODE, INSTANCE_ID,
+            { agent_type::nic, nic_id, TARGET_ARCH, EVENT_CODE, INSTANCE_ID,
               trait::name<category::amd_smi_nic_rx_ucast_pkts>::value,
               "NIC RX UCast PKTS",
               trait::name<category::amd_smi_nic_rx_ucast_pkts>::description,
@@ -92,7 +92,7 @@ struct cache_policy
               BLOCK, EXPRESSION, 0, 0, "{}" });
 
         trace_cache::get_metadata_registry().add_pmc_info(
-            { agent_type::NIC, nic_id, TARGET_ARCH, EVENT_CODE, INSTANCE_ID,
+            { agent_type::nic, nic_id, TARGET_ARCH, EVENT_CODE, INSTANCE_ID,
               trait::name<category::amd_smi_nic_tx_ucast_pkts>::value,
               "NIC TX UCast PKTS",
               trait::name<category::amd_smi_nic_tx_ucast_pkts>::description,
@@ -100,21 +100,21 @@ struct cache_policy
               BLOCK, EXPRESSION, 0, 0, "{}" });
 
         trace_cache::get_metadata_registry().add_pmc_info(
-            { agent_type::NIC, nic_id, TARGET_ARCH, EVENT_CODE, INSTANCE_ID,
+            { agent_type::nic, nic_id, TARGET_ARCH, EVENT_CODE, INSTANCE_ID,
               trait::name<category::amd_smi_nic_rx_cnp_pkts>::value, "NIC RX CNP PKTS",
               trait::name<category::amd_smi_nic_rx_cnp_pkts>::description,
               LONG_DESCRIPTION, COMPONENT, "packets", rocprofsys::trace_cache::ABSOLUTE,
               BLOCK, EXPRESSION, 0, 0, "{}" });
 
         trace_cache::get_metadata_registry().add_pmc_info(
-            { agent_type::NIC, nic_id, TARGET_ARCH, EVENT_CODE, INSTANCE_ID,
+            { agent_type::nic, nic_id, TARGET_ARCH, EVENT_CODE, INSTANCE_ID,
               trait::name<category::amd_smi_nic_tx_cnp_pkts>::value, "NIC TX CNP PKTS",
               trait::name<category::amd_smi_nic_tx_cnp_pkts>::description,
               LONG_DESCRIPTION, COMPONENT, "packets", rocprofsys::trace_cache::ABSOLUTE,
               BLOCK, EXPRESSION, 0, 0, "{}" });
 
         trace_cache::get_metadata_registry().add_pmc_info(
-            { agent_type::NIC, nic_id, TARGET_ARCH, EVENT_CODE, INSTANCE_ID,
+            { agent_type::nic, nic_id, TARGET_ARCH, EVENT_CODE, INSTANCE_ID,
               trait::name<category::amd_smi_nic_rx_ucast_bytes>::value,
               "NIC RX UCast Bytes",
               trait::name<category::amd_smi_nic_rx_ucast_bytes>::description,
@@ -122,7 +122,7 @@ struct cache_policy
               BLOCK, EXPRESSION, 0, 0, "{}" });
 
         trace_cache::get_metadata_registry().add_pmc_info(
-            { agent_type::NIC, nic_id, TARGET_ARCH, EVENT_CODE, INSTANCE_ID,
+            { agent_type::nic, nic_id, TARGET_ARCH, EVENT_CODE, INSTANCE_ID,
               trait::name<category::amd_smi_nic_tx_ucast_bytes>::value,
               "NIC TX UCast Bytes",
               trait::name<category::amd_smi_nic_tx_ucast_bytes>::description,
@@ -130,7 +130,7 @@ struct cache_policy
               BLOCK, EXPRESSION, 0, 0, "{}" });
 
         trace_cache::get_metadata_registry().add_pmc_info(
-            { agent_type::NIC, nic_id, TARGET_ARCH, EVENT_CODE, INSTANCE_ID,
+            { agent_type::nic, nic_id, TARGET_ARCH, EVENT_CODE, INSTANCE_ID,
               trait::name<category::amd_smi_nic_tx_rdma_ack_timeout>::value,
               "NIC TX RDMA ACK Timeout",
               trait::name<category::amd_smi_nic_tx_rdma_ack_timeout>::description,
@@ -138,7 +138,7 @@ struct cache_policy
               BLOCK, EXPRESSION, 0, 0, "{}" });
 
         trace_cache::get_metadata_registry().add_pmc_info(
-            { agent_type::NIC, nic_id, TARGET_ARCH, EVENT_CODE, INSTANCE_ID,
+            { agent_type::nic, nic_id, TARGET_ARCH, EVENT_CODE, INSTANCE_ID,
               trait::name<category::amd_smi_nic_resp_tx_pkt_seq_err>::value,
               "NIC RESP TX PKT SEQ Error",
               trait::name<category::amd_smi_nic_resp_tx_pkt_seq_err>::description,
@@ -146,7 +146,7 @@ struct cache_policy
               BLOCK, EXPRESSION, 0, 0, "{}" });
 
         trace_cache::get_metadata_registry().add_pmc_info(
-            { agent_type::NIC, nic_id, TARGET_ARCH, EVENT_CODE, INSTANCE_ID,
+            { agent_type::nic, nic_id, TARGET_ARCH, EVENT_CODE, INSTANCE_ID,
               trait::name<category::amd_smi_nic_req_rx_pkt_seq_err>::value,
               "NIC REQ RX PKT SEQ Error",
               trait::name<category::amd_smi_nic_req_rx_pkt_seq_err>::description,
@@ -154,7 +154,7 @@ struct cache_policy
               BLOCK, EXPRESSION, 0, 0, "{}" });
 
         trace_cache::get_metadata_registry().add_pmc_info(
-            { agent_type::NIC, nic_id, TARGET_ARCH, EVENT_CODE, INSTANCE_ID,
+            { agent_type::nic, nic_id, TARGET_ARCH, EVENT_CODE, INSTANCE_ID,
               trait::name<category::amd_smi_nic_req_rx_impl_nak_seq_err>::value,
               "NIC REQ RX Impl NAK SEQ Error",
               trait::name<category::amd_smi_nic_req_rx_impl_nak_seq_err>::description,
