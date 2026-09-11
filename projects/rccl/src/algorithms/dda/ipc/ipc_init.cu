@@ -33,6 +33,19 @@ bool ncclDdaNranksRelaxEnabled() {
   return rcclParamDdaNranksRelax() != 0;
 }
 
+// Single source of truth for the supported DDA IPC participant counts. Both the
+// comm-init gate below and the per-collective eligibility gates call this, so the
+// two cannot drift apart and allocate IPC resources that eligibility then refuses.
+bool ncclDdaIpcNranksSupported(int nRanks) {
+  if (nRanks == kDdaNranks) {
+    return true;
+  }
+  if (!ncclDdaNranksRelaxEnabled()) {
+    return false;
+  }
+  return nRanks >= 2 && nRanks <= kDdaNranks;
+}
+
 #define HIP_CALL(cmd) \
   do { \
     hipError_t error = (cmd); \
@@ -60,10 +73,7 @@ ncclResult_t ncclDdaIpcCommInit(ncclComm* comm) {
   //   which aborts comm init entirely. Gate init to match dispatch.
   const bool ddaArchSupported =
     comm->archName != nullptr && (IsArchMatch(comm->archName, "gfx942") || IsArchMatch(comm->archName, "gfx950"));
-  const bool nranksSupported =
-    comm->nRanks == kDdaNranks ||
-    (ncclDdaNranksRelaxEnabled() && comm->nRanks >= 2 && comm->nRanks <= kDdaNranks);
-  if (!nranksSupported || comm->nNodes != 1 || comm->bootstrap == nullptr || comm->directMode ||
+  if (!ncclDdaIpcNranksSupported(comm->nRanks) || comm->nNodes != 1 || comm->bootstrap == nullptr || comm->directMode ||
       comm->MNNVL || !ddaArchSupported) {
     return ncclSuccess;
   }

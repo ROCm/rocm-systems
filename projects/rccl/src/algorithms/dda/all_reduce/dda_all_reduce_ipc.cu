@@ -37,17 +37,6 @@ static inline std::pair<dim3, dim3> ddaAllReduceIpcGeom(size_t count, int typeSi
   return dda::common::getGridAndBlockDims(count, typeSize, ddaMaxNBlocksForScratch());
 }
 
-/** True when nRanks is a supported DDA IPC participant count. */
-static bool ddaNranksSupported(int nRanks) {
-  if (nRanks == kDdaNranks) {
-    return true;
-  }
-  if (!ncclDdaNranksRelaxEnabled()) {
-    return false;
-  }
-  return nRanks >= 2 && nRanks <= kDdaNranks;
-}
-
 template <typename T, int NRANKS>
 static ncclResult_t ncclAllReduceDdaIpcLaunch(const void* sendbuff, void* recvbuff, size_t count, ncclComm* comm,
                                               cudaStream_t stream) {
@@ -61,13 +50,22 @@ static ncclResult_t ncclAllReduceDdaIpcLaunch(const void* sendbuff, void* recvbu
     return ncclInvalidArgument;
   }
 
+  // NRANKS == 0 selects the runtime kernel; the clique size then comes from the
+  // comm. Use nRanks (never the NRANKS template parameter) for any arithmetic
+  // here, or the runtime instantiation divides by zero.
+  const int nRanks = (NRANKS > 0) ? NRANKS : comm->nRanks;
+  if (nRanks <= 0) {
+    WARN("DDA IPC allreduce: invalid nRanks %d", nRanks);
+    return ncclInvalidUsage;
+  }
+
   const size_t sizeBytes = count * sizeof(T);
   const bool wantTree = sizeBytes > kDdaFlatTreeThresholdBytes;
-  const bool treeOk = wantTree && (count % static_cast<size_t>(NRANKS) == 0);
+  const bool treeOk = wantTree && (count % static_cast<size_t>(nRanks) == 0);
 
   if (wantTree && !treeOk) {
     INFO(NCCL_ALL, "DDA IPC: size %zu B > 256KB but count %zu not divisible by %d; using flat kernel", sizeBytes, count,
-         NRANKS);
+         nRanks);
   }
 
   auto gridBlock = ddaAllReduceIpcGeom(count, sizeof(T));
@@ -83,10 +81,12 @@ static ncclResult_t ncclAllReduceDdaIpcLaunch(const void* sendbuff, void* recvbu
   if (treeOk) {
     CUDACHECK(cudaMemcpyAsync(comm->ddaScratch, sendbuff, count * sizeof(T), cudaMemcpyDeviceToDevice, stream));
     dda::common::ddaAllReduceTreeIpc<T, NRANKS, false><<<grid, block, 0, stream>>>(
-      d_ipcbuffs, static_cast<T*>(recvbuff), count, static_cast<const T*>(sendbuff), comm->rank, barrierHost, nullptr);
+      d_ipcbuffs, static_cast<T*>(recvbuff), count, static_cast<const T*>(sendbuff), comm->rank, comm->nRanks,
+      barrierHost, nullptr);
   } else {
     dda::common::ddaAllReduceFlatIpc<T, NRANKS, false><<<grid, block, 0, stream>>>(
-      d_ipcbuffs, static_cast<T*>(recvbuff), count, static_cast<const T*>(sendbuff), comm->rank, barrierHost, nullptr);
+      d_ipcbuffs, static_cast<T*>(recvbuff), count, static_cast<const T*>(sendbuff), comm->rank, comm->nRanks,
+      barrierHost, nullptr);
   }
 
   CUDACHECK(cudaGetLastError());
@@ -97,28 +97,24 @@ static ncclResult_t ncclAllReduceDdaIpcLaunch(const void* sendbuff, void* recvbu
 // Dispatch to the template instantiation for the active participant count.
 // ncclAllReduceDdaIpcEligible() guarantees comm->nRanks is in [2, kDdaNranks]
 // (exactly kDdaNranks when RCCL_DDA_NRANKS_RELAX is off) before we get here.
+//
+// Only the default kDdaNranks clique gets a compile-time specialisation, keeping
+// that path bit- and perf-identical to baseline. Every other supported count uses
+// the NRANKS_CT == 0 runtime kernel, which the CollCommon reduceScatter/allGather
+// helpers unroll 8-wide. Specialising all seven counts instead would compile
+// 2 kernels x 7 counts x 3 types for each of the DEFAULT_GPUS targets, for a path
+// that is default-off and confined to gfx942/gfx950.
 template <typename T>
 static ncclResult_t ncclAllReduceDdaIpcTyped(const void* sendbuff, void* recvbuff, size_t count, ncclComm* comm,
                                              cudaStream_t stream) {
-  switch (comm->nRanks) {
-  case 8:
-    return ncclAllReduceDdaIpcLaunch<T, 8>(sendbuff, recvbuff, count, comm, stream);
-  case 7:
-    return ncclAllReduceDdaIpcLaunch<T, 7>(sendbuff, recvbuff, count, comm, stream);
-  case 6:
-    return ncclAllReduceDdaIpcLaunch<T, 6>(sendbuff, recvbuff, count, comm, stream);
-  case 5:
-    return ncclAllReduceDdaIpcLaunch<T, 5>(sendbuff, recvbuff, count, comm, stream);
-  case 4:
-    return ncclAllReduceDdaIpcLaunch<T, 4>(sendbuff, recvbuff, count, comm, stream);
-  case 3:
-    return ncclAllReduceDdaIpcLaunch<T, 3>(sendbuff, recvbuff, count, comm, stream);
-  case 2:
-    return ncclAllReduceDdaIpcLaunch<T, 2>(sendbuff, recvbuff, count, comm, stream);
-  default:
+  if (!ncclDdaIpcNranksSupported(comm->nRanks)) {
     WARN("DDA IPC allreduce: unsupported nRanks %d", comm->nRanks);
     return ncclInvalidUsage;
   }
+  if (comm->nRanks == kDdaNranks) {
+    return ncclAllReduceDdaIpcLaunch<T, kDdaNranks>(sendbuff, recvbuff, count, comm, stream);
+  }
+  return ncclAllReduceDdaIpcLaunch<T, 0>(sendbuff, recvbuff, count, comm, stream);
 }
 
 } // namespace
@@ -139,7 +135,7 @@ bool ncclAllReduceDdaIpcEligible(ncclComm* comm, const void* sendbuff, void* rec
   if (comm->nNodes != 1) {
     return false;
   }
-  if (!ddaNranksSupported(comm->nRanks)) {
+  if (!ncclDdaIpcNranksSupported(comm->nRanks)) {
     return false;
   }
   // Checks shared by both DDA all-reduce backends.
