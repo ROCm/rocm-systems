@@ -1280,7 +1280,7 @@ static ncclResult_t recvProxyProgress(struct ncclProxyState* proxyState, struct 
               // Portable equivalent. seq_cst fence keeps the load inside
               // the volatile read from being reordered ahead of the CQE poll.
               std::atomic_thread_fence(std::memory_order_seq_cst);
-              (void)*(volatile int*)resources->gdcFlush;
+              (void)*(volatile uint64_t*)resources->gdcFlush;
 #endif
             } else {
               NCCLCHECK(collNetRecvFlush(proxyState, resources, args, sub, groupStart, totalSize, recvBeg,
