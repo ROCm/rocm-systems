@@ -1803,7 +1803,7 @@ static const rcclArchThresholds rcclArchThresholds_gfx1250 = {
     0,                   // [5] SendRecv        -- not used
     0,                   // [6] Send            -- not used
     0,                   // [7] Recv            -- not used
-    0,                   // [8] AlltoAll        -- no R2-specific override (use 4 MiB)
+    0,                   // [8] AlltoAll        -- no R2-specific override (use ddaVmmMax)
   },
   // ddaVmmMaxGraph: DDA VMM cap during graph capture (graphCapturingHint=true).
   // CE AllReduce is blocked by graphModeSeen latch during graph captures.
