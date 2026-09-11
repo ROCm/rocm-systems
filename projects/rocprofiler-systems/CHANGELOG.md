@@ -15,17 +15,20 @@ Full documentation for ROCm Systems Profiler is available at [https://rocm.docs.
 - `ROCPROFSYS_MONOCHROME` and `MONOCHROME` now treat any value other than a recognized
   false token (`off`/`false`/`no`/`n`/`f`/`0`) as `true`, instead of only recognizing a
   fixed set of true tokens.
+- Perfetto trace output now defaults to the `.pftrace` extension instead of
+  `.proto`, and `--output-format pftrace` is the canonical token for
+  requesting it (`proto` is kept as a permanent backward-compatible alias).
 
 ## ROCm Systems Profiler 1.9.0 for ROCm 10.1
 
 ### Changed
 
 - **rocpd is now the default output format.** When no output format is specified,
-profiling data is emitted as a rocpd SQLite database (`rocpd.db`). Perfetto (`.proto`)
-output must now be explicitly enabled via `--output-format proto`. Requires
-ROCProfiler-SDK 1.0.0 or later (ROCm 7.0.0+).
+  profiling data is emitted as a rocpd SQLite database (`rocpd.db`). Perfetto (`.proto`)
+  output must now be explicitly enabled via `--output-format proto`. Requires
+  ROCProfiler-SDK 1.0.0 or later (ROCm 7.0.0+).
 - `ROCPROFSYS_PROFILE` (timemory backend) now defaults to `false`, since rocpd
-replaces Perfetto as the primary trace output.
+  replaces Perfetto as the primary trace output.
 - All built-in presets that perform tracing (`--balanced`, `--detailed`, `--sys-trace`,
   `--runtime-trace`, `--trace-gpu`, `--trace-hpc`, `--trace-hw-counters`, `--trace-openmp`,
   `--workload-trace`) now produce a rocpd database by default, because rocpd is the new
