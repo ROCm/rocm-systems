@@ -299,20 +299,12 @@ bool TrampolineBuilder::plan_probe_call(TrampolinePlan &plan, const ProbeAbi &ab
   // rather than under the anchor mask.
   const bool needs_full_mask = will_spill || !plan.probe_args.empty() || plan.force_full_exec;
 
-  // An EXEC-sourced argument reads the saved anchor mask rather than `exec`,
-  // which by then holds -1. needs_full_mask already subsumes this (any argument
-  // opens the window), but stating it separately keeps the dependency from being
-  // an accident of that broader condition.
-  const bool reads_saved_exec =
-      std::any_of(plan.probe_args.begin(), plan.probe_args.end(),
-                  [](const ProbeArgValue &arg) { return reads_anchor_exec(arg.source); });
-
   // EXEC/VCC/M0 operand codes are resolved per-arch, but only when actually
   // reserving that register -- so a plan with no special-state saves (and no
   // full-mask window) stays arch-agnostic, as the resource-planning tests rely
   // on. EXEC also rides this path whenever that window is needed, since the
   // anchor mask has to be restored from somewhere.
-  const bool save_exec = plan.preserve_exec || needs_full_mask || reads_saved_exec;
+  const bool save_exec = plan.preserve_exec || needs_full_mask;
   if (!reserve_special(save_exec, save_exec ? scalar_operand_exec_lo(plan.arch) : 0, 2, "EXEC") ||
       !reserve_special(plan.preserve_vcc, plan.preserve_vcc ? scalar_operand_vcc_lo(plan.arch) : 0,
                        2, "VCC") ||
@@ -457,6 +449,10 @@ std::optional<TrampolineBytes> TrampolineBuilder::emit_probe_call(const Trampoli
     // The anchor mask comes from the saved pair, not from `exec`: the widen above
     // already overwrote the register. exec_temp is the pair base, so the high
     // dword is the next SGPR.
+    //
+    // So an EXEC-sourced argument needs a site that saved EXEC. Nothing asks for
+    // that on its own: any argument at all opens the full-mask window, which
+    // reserves the temp, and the guard above fails closed if it is somehow absent.
     const uint16_t src = arg.source == ProbeArgSource::AnchorExecLo
                              ? exec_temp
                              : static_cast<uint16_t>(exec_temp + 1);

@@ -605,23 +605,6 @@ TEST(TrampolineBuilderPlan, AnchorExecArgumentsCostOneWordEach) {
   EXPECT_EQ(mask.before_word_count, immediates.before_word_count - 2);
 }
 
-// Passing the mask obliges the planner to reserve an EXEC temp, since the value
-// is read back out of it. Subsumed today by "any argument opens the full-mask
-// window", but the reservation is what the emitter actually depends on.
-TEST(TrampolineBuilderPlan, AnchorExecArgumentReservesTheExecTemp) {
-  TrampolinePlan plan;
-  plan.arch = ROCJITSU_CODE_ARCH_CDNA2;
-  plan.probe_args = {{ProbeArgSource::AnchorExecLo, 0}};
-  plan.preserve_exec = false;
-  std::string err;
-  ASSERT_TRUE(TrampolineBuilder::plan_probe_call(plan, arg_abi(1), make_sgpr_set({4}),
-                                                 /*probe_body_clobbers=*/{}, &err))
-      << err;
-  const uint16_t exec_lo = scalar_operand_exec_lo(plan.arch);
-  EXPECT_TRUE(std::any_of(plan.special_state_saves.begin(), plan.special_state_saves.end(),
-                          [&](const SpecialStateSlot &s) { return s.operand == exec_lo; }));
-}
-
 // A full-exec site opens the full-mask window even with nothing to spill and no
 // arguments, since the probe itself runs inside it. Two toggles rather than
 // three: the widen, and the re-widen guarding the (here empty) epilogue against
@@ -881,9 +864,8 @@ TEST(TrampolineBuilderEmit, AnchorExecArgumentsReadTheSavedPair) {
   ASSERT_TRUE(bytes.has_value()) << err;
 
   const uint16_t exec_lo = scalar_operand_exec_lo(plan.arch);
-  const auto saved = std::find_if(
-      plan.special_state_saves.begin(), plan.special_state_saves.end(),
-      [&](const SpecialStateSlot &s) { return s.operand == exec_lo; });
+  const auto saved = std::find_if(plan.special_state_saves.begin(), plan.special_state_saves.end(),
+                                  [&](const SpecialStateSlot &s) { return s.operand == exec_lo; });
   ASSERT_NE(saved, plan.special_state_saves.end());
 
   // Both halves come from the temp pair, in declaration order into v0 and v1.

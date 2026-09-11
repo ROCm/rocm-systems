@@ -68,8 +68,7 @@ TEST(VectorBuilder, BuildVMovB32Src) {
     // v0, s0 clears both fields, so a nonzero one cannot come from a stray bit.
     EXPECT_EQ(build_v_mov_b32_src(0, 0, arch), 0x7E000200u) << "arch " << static_cast<int>(arch);
     // The high vdst bit is reachable: v255 fills the field.
-    EXPECT_EQ(build_v_mov_b32_src(255, 1, arch), 0x7FFE0201u)
-        << "arch " << static_cast<int>(arch);
+    EXPECT_EQ(build_v_mov_b32_src(255, 1, arch), 0x7FFE0201u) << "arch " << static_cast<int>(arch);
   }
 }
 
