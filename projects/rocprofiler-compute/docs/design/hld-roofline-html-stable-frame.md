@@ -187,6 +187,16 @@ but it does not:
 - choose the compute precision used for kernel comparison; or
 - change kernel coordinates.
 
+The opening selection belongs to the server. `_combined_html_figure` records it
+in the model as `defaultPrecisions` and paints the figure to match: ceilings for
+unselected precisions ship hidden, and bandwidth roofs ship clipped to the
+selected cap. Without that, the document would paint every ceiling at the
+highest cap on load and then drop to one precision once the controller's first
+restyle landed. Each roof also carries its full `sampleAi` grid, so selecting a
+taller precision re-extends the diagonal at the original sample density rather
+than from the clipped trace. The Dash figures are left untouched, because the
+WebUI has no Precision control to restore a hidden ceiling.
+
 The separate kernel comparison-precision dropdown discussed alongside
 [#10723](https://github.com/ROCm/rocm-systems/pull/10723) is deferred to a
 future design.

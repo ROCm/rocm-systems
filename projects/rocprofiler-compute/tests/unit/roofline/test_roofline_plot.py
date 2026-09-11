@@ -654,6 +654,76 @@ function rangeCalls(controller) {
   assert.deepEqual(Array.from(restored.y[0]), [1, 20, 80, 100]);
 }
 
+// The server paints the figure already narrowed, so the opening selection has
+// to be the one it drew rather than a hardcoded preference.
+{
+  const controller = makeController({
+    precisions: ["FP16", "FP32", "FP64"],
+    defaultPrecisions: ["FP64"],
+    computeTraces: [
+      { traceIndex: 0, dtype: "FP16", peakPerf: 200, label: "FP16" },
+      { traceIndex: 1, dtype: "FP32", peakPerf: 100, label: "FP32" },
+      { traceIndex: 2, dtype: "FP64", peakPerf: 40, label: "FP64" },
+    ],
+  });
+  const checked = controller.elements["roofline-precision-menu"].children
+    .flatMap((label) => label.children)
+    .filter((child) => child.checked)
+    .map((child) => child.value);
+
+  assert.deepEqual(checked, ["FP64"]);
+  assert.equal(
+    controller.elements["roofline-precision-label"].textContent,
+    "FP64"
+  );
+  const opening = controller.restyleCalls.find((call) => call.update.visible);
+  assert.deepEqual(Array.from(opening.update.visible), [false, false, true]);
+}
+
+// A roof shipped clipped to the opening selection must still re-extend at full
+// sample density, which it can only do from the grid the server sends along.
+{
+  const controller = makeController({
+    precisions: ["FP32", "FP64"],
+    defaultPrecisions: ["FP64"],
+    computeTraces: [
+      { traceIndex: 0, dtype: "FP32", peakPerf: 100, label: "FP32" },
+      { traceIndex: 1, dtype: "FP64", peakPerf: 40, label: "FP64" },
+    ],
+    rooflineTraces: [
+      {
+        traceIndex: 2,
+        level: "HBM",
+        bandwidth: 10,
+        kneeAi: 4,
+        kneePerf: 40,
+        sampleAi: [0.1, 2, 8],
+        x: [0.1, 2, 4],
+        y: [1, 20, 40],
+      },
+    ],
+  });
+  const precisionMenu = controller.elements["roofline-precision-menu"];
+  const precisionInput = (name) =>
+    precisionMenu.children
+      .flatMap((label) => label.children)
+      .find((child) => child.value === name);
+  const fp32 = precisionInput("FP32");
+  const fp64 = precisionInput("FP64");
+
+  fp32.checked = true;
+  precisionMenu.dispatchEvent(eventOf("change", { target: fp32 }));
+  fp64.checked = false;
+  precisionMenu.dispatchEvent(eventOf("change", { target: fp64 }));
+
+  const roofUpdates = controller.restyleCalls.filter(
+    (call) => call.indices.includes(2) && call.update.x
+  );
+  const widened = roofUpdates[roofUpdates.length - 1].update;
+  assert.deepEqual(Array.from(widened.x[0]), [0.1, 2, 8, 10]);
+  assert.deepEqual(Array.from(widened.y[0]), [1, 20, 80, 100]);
+}
+
 {
   const controller = makeController({
     kernels: [

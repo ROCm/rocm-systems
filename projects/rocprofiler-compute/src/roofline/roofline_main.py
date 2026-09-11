@@ -70,10 +70,48 @@ _ROOF_SAMPLES_PER_DECADE = 48
 _ROOF_SAMPLES_MIN = 64
 _ROOF_SAMPLES_MAX = 800
 
+# The precision the standalone page opens with when the run benchmarked it.
+_PREFERRED_DEFAULT_PRECISION = "FP32"
+
 
 def _figure_class(dtype: str) -> str:
     """Return OP or FLOP; integer datatypes use the ops figure."""
     return "OP" if str(dtype).startswith("I") else "FLOP"
+
+
+def _default_precisions(precisions: list[str]) -> list[str]:
+    """The precisions the page opens with: FP32 when the run has it, else the
+    first datatype plotted."""
+    if _PREFERRED_DEFAULT_PRECISION in precisions:
+        return [_PREFERRED_DEFAULT_PRECISION]
+    return precisions[:1]
+
+
+def _roof_clipped_to_peak(
+    sample_ai: list[float],
+    bandwidth: float,
+    top_peak: float,
+) -> tuple[list[float], list[float]]:
+    """The diagonal y = bandwidth * AI drawn only up to where it meets top_peak.
+
+    Mirrors the client's re-clipping so the shipped roof already matches the
+    precisions the page opens with.
+    """
+    knee_ai = top_peak / bandwidth
+    points = sorted(
+        (ai, bandwidth * ai)
+        for ai in sample_ai
+        if ai > 0 and math.isfinite(ai) and ai < knee_ai and bandwidth * ai < top_peak
+    )
+    xs: list[float] = []
+    ys: list[float] = []
+    for ai, perf in points:
+        if not xs or ai > xs[-1]:
+            xs.append(ai)
+            ys.append(perf)
+    xs.append(knee_ai)
+    ys.append(top_peak)
+    return xs, ys
 
 
 def get_color(category: str, backend: str = "html") -> str:
@@ -623,7 +661,7 @@ class Roofline:
             default_peak=source_model.default_peak,
             kernels=list(source_model.kernels),
             kernel_trace_indices=list(source_model.kernel_trace_indices),
-            roofline_traces=list(source_model.roofline_traces),
+            roofline_traces=[dict(roof) for roof in source_model.roofline_traces],
             compute_traces=list(source_model.compute_traces),
             compute_overlay_traces=list(source_model.compute_overlay_traces),
             frame=deepcopy(source_model.frame),
@@ -656,7 +694,54 @@ class Roofline:
         view_model.precisions = list(
             dict.fromkeys(trace["dtype"] for trace in view_model.compute_traces)
         )
+        view_model.default_precisions = _default_precisions(view_model.precisions)
+        self._preselect_default_precisions(figure, view_model)
         return figure, view_model
+
+    @staticmethod
+    def _preselect_default_precisions(
+        figure: go.Figure,
+        view_model: RooflineViewModel,
+    ) -> None:
+        """Ship the standalone figure already narrowed to the precisions the page
+        opens with, so the first paint matches the controller's initial state
+        instead of flashing every ceiling before the client hides them.
+
+        Only the standalone document is touched; the Dash figures keep every
+        ceiling because the WebUI has no precision selector to restore them.
+        """
+        selected = set(view_model.default_precisions)
+        if not selected:
+            return
+
+        for trace in view_model.compute_traces:
+            figure.data[trace["traceIndex"]].visible = trace["dtype"] in selected
+
+        top_peak = max(
+            (
+                trace["peakPerf"]
+                for trace in view_model.compute_traces
+                if trace["dtype"] in selected
+            ),
+            default=0.0,
+        )
+        if not top_peak > 0:
+            return
+
+        for roof in view_model.roofline_traces:
+            bandwidth = roof["bandwidth"]
+            if not bandwidth > 0:
+                continue
+            roof_trace = figure.data[roof["traceIndex"]]
+            # The client re-clips from this grid, so it keeps the full sample
+            # density when the reader selects a taller precision.
+            sample_ai = [float(ai) for ai in roof_trace.x]
+            roof["sampleAi"] = sample_ai
+            roof_trace.x, roof_trace.y = _roof_clipped_to_peak(
+                sample_ai, bandwidth, top_peak
+            )
+            roof["kneeAi"] = roof_trace.x[-1]
+            roof["kneePerf"] = roof_trace.y[-1]
 
     @staticmethod
     def generate_html_section(

@@ -54,6 +54,7 @@ class RooflineViewModel:
     compute_traces: List[Dict[str, Any]] = field(default_factory=list)
     compute_overlay_traces: List[Dict[str, Any]] = field(default_factory=list)
     precisions: List[str] = field(default_factory=list)
+    default_precisions: List[str] = field(default_factory=list)
     frame: Optional[Dict[str, List[float]]] = None
 
     def to_json(self) -> str:
@@ -69,6 +70,7 @@ class RooflineViewModel:
             "computeTraces": self.compute_traces,
             "computeOverlayTraces": self.compute_overlay_traces,
             "precisions": self.precisions,
+            "defaultPrecisions": self.default_precisions,
             "frame": self.frame,
             "roofExtremeMaxAi": ROOF_EXTRAP_MAX_AI,
             "allPeaksValue": ALL_PEAKS_VALUE,

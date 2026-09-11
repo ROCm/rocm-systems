@@ -554,6 +554,74 @@ def test_view_model_carries_the_drawn_knee(benchmarked_roofline) -> None:
         assert roof["kneePerf"] == pytest.approx(drawn_perf)
 
 
+def standalone_with_unselected_precision(benchmarked_roofline):
+    """The combined document for a run whose opening precision is not its
+    tallest, so the default selection is observable in what gets drawn."""
+    roofline, flops_figure = stacked_figure(benchmarked_roofline, ["BF16", "FP64"])
+    figure, view_model = roofline._combined_html_figure(None, flops_figure)
+    assert figure is not None
+    assert view_model.default_precisions == ["BF16"]
+    return figure, view_model
+
+
+def test_standalone_figure_opens_on_only_the_default_precisions(
+    benchmarked_roofline,
+) -> None:
+    """The page opens with one precision selected, so the document ships the
+    other ceilings already hidden. Leaving them visible would paint every roof
+    until the client's first restyle lands."""
+    figure, view_model = standalone_with_unselected_precision(benchmarked_roofline)
+    selected = set(view_model.default_precisions)
+    assert selected != set(view_model.precisions), "expected an unselected precision"
+
+    drawn = {
+        trace["label"]: figure.data[trace["traceIndex"]].visible
+        for trace in view_model.compute_traces
+    }
+    assert drawn == {
+        trace["label"]: trace["dtype"] in selected
+        for trace in view_model.compute_traces
+    }
+
+
+def test_standalone_roofs_open_at_the_selected_cap(benchmarked_roofline) -> None:
+    """Diagonals ship clipped to the opening selection's tallest ceiling, and
+    keep their full sample grid so the client can re-clip at a taller one
+    without losing hover density."""
+    figure, view_model = standalone_with_unselected_precision(benchmarked_roofline)
+    selected = set(view_model.default_precisions)
+    peaks = [trace["peakPerf"] for trace in view_model.compute_traces]
+    top_peak = max(
+        trace["peakPerf"]
+        for trace in view_model.compute_traces
+        if trace["dtype"] in selected
+    )
+    assert top_peak < max(peaks), "expected a taller unselected ceiling"
+
+    assert view_model.roofline_traces, "expected bandwidth roofs in the model"
+    for roof in view_model.roofline_traces:
+        drawn = figure.data[roof["traceIndex"]]
+        assert drawn.y[-1] == pytest.approx(top_peak)
+        assert drawn.x[-1] == pytest.approx(top_peak / roof["bandwidth"])
+        assert roof["kneeAi"] == pytest.approx(drawn.x[-1])
+        assert roof["kneePerf"] == pytest.approx(drawn.y[-1])
+        assert roof["sampleAi"][-1] == pytest.approx(max(peaks) / roof["bandwidth"])
+
+
+def test_dash_figures_keep_every_ceiling(benchmarked_roofline) -> None:
+    """The WebUI has no precision selector, so narrowing the standalone document
+    must not reach back into the figures Dash renders."""
+    roofline, flops_figure = stacked_figure(benchmarked_roofline, ["BF16", "FP64"])
+    source_model = roofline._Roofline__view_models["FLOP"]
+    ceiling_indices = [trace["traceIndex"] for trace in source_model.compute_traces]
+    roof_extents = drawn_roof_knees(flops_figure)
+
+    roofline._combined_html_figure(None, flops_figure)
+
+    assert all(flops_figure.data[index].visible is None for index in ceiling_indices)
+    assert drawn_roof_knees(flops_figure) == roof_extents
+
+
 def test_construct_plotly_figures_all_datatypes_ignores_cli_selection(
     benchmarked_roofline,
 ) -> None:

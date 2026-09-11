@@ -119,19 +119,38 @@
     if (bandwidthRoofSources[roof.traceIndex]) {
       return bandwidthRoofSources[roof.traceIndex];
     }
-    var traceData = gd && gd.data ? gd.data[roof.traceIndex] : null;
-    if (!traceData || !traceData.x || !traceData.y) {
-      return null;
+    // The drawn trace arrives clipped to the opening precisions, so re-clipping
+    // reads the server's full sample grid where one was shipped.
+    var xs = roof.sampleAi;
+    var ys = xs
+      ? xs.map(function (ai) {
+          return roof.bandwidth * ai;
+        })
+      : null;
+    if (!xs) {
+      var traceData = gd && gd.data ? gd.data[roof.traceIndex] : null;
+      if (!traceData || !traceData.x || !traceData.y) {
+        return null;
+      }
+      xs = traceData.x;
+      ys = traceData.y;
     }
     bandwidthRoofSources[roof.traceIndex] = Object.freeze({
-      x: Object.freeze(Array.prototype.slice.call(traceData.x)),
-      y: Object.freeze(Array.prototype.slice.call(traceData.y)),
+      x: Object.freeze(Array.prototype.slice.call(xs)),
+      y: Object.freeze(Array.prototype.slice.call(ys)),
     });
     return bandwidthRoofSources[roof.traceIndex];
   }
 
+  // The server paints the figure with exactly these precisions shown, so the
+  // opening state must agree with it or the first restyle would flash.
+  var defaultPrecisions =
+    model.defaultPrecisions && model.defaultPrecisions.length
+      ? model.defaultPrecisions
+      : [precisions.indexOf("FP32") !== -1 ? "FP32" : precisions[0] || ""];
+
   var state = {
-    precisions: new Set([precisions.indexOf("FP32") !== -1 ? "FP32" : (precisions[0] || "")]),
+    precisions: new Set(defaultPrecisions),
     peak: model.defaultPeak || ALL_PEAKS_VALUE,
     selected: new Set(),
     isolatedRoofs: new Set(),
