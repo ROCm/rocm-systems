@@ -48,6 +48,18 @@ enum class HookPolicy : uint8_t {
   Strict,
 };
 
+enum class ConSanEpochCheckpointStatus : uint32_t {
+  Complete = 0,
+  Inactive = 1,
+  NotMoi = 2,
+  ReportSnapshotFailed = 3,
+};
+
+struct AutoMoiReportCheckpointResult {
+  ConSanEpochCheckpointStatus status = ConSanEpochCheckpointStatus::Complete;
+  uint64_t report_count = 0;
+};
+
 // This is an implementation safety ceiling, not a user-facing selection
 // policy. It avoids the unbounded vector reservations that UINT32_MAX would
 // trigger in planners while exceeding the supported-site count of current
@@ -336,6 +348,11 @@ void bind_auto_moi_report_buffer_to_executable(uint64_t reader, uint64_t generat
                                                hsa_executable_t executable);
 void discard_auto_moi_report_buffer(CoreApiTable *core, uint64_t reader, uint64_t generation);
 void retire_auto_moi_report_buffers(CoreApiTable *core, hsa_executable_t executable);
+/// Analyze and recycle every live automatic MOI report after the caller has
+/// established device-wide quiescence. The operation is transactional: no
+/// report is reset unless every live report has a complete host snapshot.
+[[nodiscard]] AutoMoiReportCheckpointResult
+checkpoint_auto_moi_report_buffers_after_device_synchronize(CoreApiTable *core);
 [[nodiscard]] AutoMoiReportSummary summarize_and_clear_auto_moi_report_buffers(CoreApiTable *core);
 
 /// Fully typed transform seam observed by HSA-hook unit tests. A test double

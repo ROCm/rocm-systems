@@ -1704,6 +1704,7 @@ public:
     uint32_t required_private_bytes = 0;
     uint32_t dynamic_private_addend = 0;
     uint32_t required_group_bytes = 0;
+    bool instrumented = false;
 
     [[nodiscard]] bool has_segment_requirement() const {
       return required_private_bytes != 0u || dynamic_private_addend != 0u ||
@@ -1896,6 +1897,7 @@ public:
         .required_private_bytes = bound->required_private_bytes,
         .dynamic_private_addend = bound->dynamic_private_addend,
         .required_group_bytes = bound->required_group_bytes,
+        .instrumented = bound->has_instrumented_probe,
     };
   }
 
@@ -1961,6 +1963,137 @@ private:
   uint64_t instrumented_dispatch_count_ = 0;
 };
 
+/// Detects host-observable points at which every instrumented dispatch known
+/// to the packet interceptor has completed. Submission and recycling share one
+/// gate so a new report writer cannot appear between the quiescence check and
+/// the report reset.
+class AutoMoiEpochQuiescenceRegistry {
+public:
+  static AutoMoiEpochQuiescenceRegistry &instance() {
+    static auto *registry = new AutoMoiEpochQuiescenceRegistry;
+    return *registry;
+  }
+
+  [[nodiscard]] std::unique_lock<std::mutex> lock_submission() {
+    return std::unique_lock<std::mutex>(mutex_);
+  }
+
+  void note_instrumented_dispatch_locked(void *queue, hsa_signal_t signal,
+                                         decltype(hsa_signal_load_scacquire) *load_signal) {
+    if (signal.handle == 0u) {
+      note_queue_awaiting_completion_proxy_locked(queue);
+      return;
+    }
+    if (!note_completion_signal_locked(signal, load_signal))
+      note_queue_awaiting_completion_proxy_locked(queue);
+  }
+
+  void note_ordering_barrier_locked(void *queue, bool orders_prior_packets,
+                                    hsa_signal_t completion_signal,
+                                    decltype(hsa_signal_load_scacquire) *load_signal) {
+    if (queue == nullptr || !orders_prior_packets)
+      return;
+    const auto awaiting = std::ranges::find(queues_awaiting_completion_proxy_, queue);
+    if (awaiting == queues_awaiting_completion_proxy_.end())
+      return;
+    if (completion_signal.handle == 0u ||
+        !note_completion_signal_locked(completion_signal, load_signal))
+      return;
+    queues_awaiting_completion_proxy_.erase(awaiting);
+  }
+
+  void note_queue_awaiting_completion_proxy_locked(void *queue) {
+    if (queue == nullptr) {
+      untrackable_dispatch_ = true;
+    } else if (std::ranges::find(queues_awaiting_completion_proxy_, queue) ==
+               queues_awaiting_completion_proxy_.end()) {
+      queues_awaiting_completion_proxy_.push_back(queue);
+    }
+  }
+
+  [[nodiscard]] bool
+  note_completion_signal_locked(hsa_signal_t signal,
+                                decltype(hsa_signal_load_scacquire) *load_signal) {
+    if (load_signal == nullptr)
+      return false;
+    const hsa_signal_value_t current = load_signal(signal);
+    if (current == std::numeric_limits<hsa_signal_value_t>::min())
+      return false;
+    auto pending = std::ranges::find(pending_, signal.handle, &Pending::signal_handle);
+    if (pending == pending_.end()) {
+      pending_.push_back({signal.handle, current - 1});
+    } else if (current <= pending->target_value) {
+      // The signal was completed and then reused without an intervening wait
+      // visible to the hook. Start tracking its new countdown from the value
+      // observed at this submission.
+      pending->target_value = current - 1;
+    } else if (pending->target_value == std::numeric_limits<hsa_signal_value_t>::min()) {
+      return false;
+    } else {
+      --pending->target_value;
+    }
+    return true;
+  }
+
+  template <typename Checkpoint>
+  bool checkpoint_if_quiescent(decltype(hsa_signal_load_scacquire) *load_signal,
+                               Checkpoint &&checkpoint) {
+    std::lock_guard lock(mutex_);
+    if (untrackable_dispatch_ || !queues_awaiting_completion_proxy_.empty() || pending_.empty() ||
+        load_signal == nullptr)
+      return false;
+    if (!std::ranges::all_of(pending_, [&](const Pending &pending) {
+          return load_signal(hsa_signal_t{pending.signal_handle}) <= pending.target_value;
+        })) {
+      return false;
+    }
+    const AutoMoiReportCheckpointResult result = checkpoint();
+    if (result.status != ConSanEpochCheckpointStatus::Complete)
+      return false;
+    log_message(kLogVerbose,
+                "ConSan automatic MOI epoch checkpoint outcome=complete dispatch_signals=%zu "
+                "reports=%llu",
+                pending_.size(), static_cast<unsigned long long>(result.report_count));
+    pending_.clear();
+    return true;
+  }
+
+  void forget_signal(hsa_signal_t signal, decltype(hsa_signal_load_scacquire) *load_signal) {
+    std::lock_guard lock(mutex_);
+    const auto pending = std::ranges::find(pending_, signal.handle, &Pending::signal_handle);
+    if (pending == pending_.end())
+      return;
+    if (load_signal == nullptr || load_signal(signal) > pending->target_value)
+      untrackable_dispatch_ = true;
+    pending_.erase(pending);
+  }
+
+  void clear_after_explicit_checkpoint() {
+    std::lock_guard lock(mutex_);
+    pending_.clear();
+    queues_awaiting_completion_proxy_.clear();
+    untrackable_dispatch_ = false;
+  }
+
+  void clear() {
+    std::lock_guard lock(mutex_);
+    pending_.clear();
+    queues_awaiting_completion_proxy_.clear();
+    untrackable_dispatch_ = false;
+  }
+
+private:
+  struct Pending {
+    uint64_t signal_handle = 0;
+    hsa_signal_value_t target_value = 0;
+  };
+
+  std::mutex mutex_;
+  std::vector<Pending> pending_;
+  std::vector<void *> queues_awaiting_completion_proxy_;
+  bool untrackable_dispatch_ = false;
+};
+
 hsa_status_t HSA_API rj_dbi_code_object_reader_create_from_memory(
     const void *code_object, size_t size, hsa_code_object_reader_t *code_object_reader);
 hsa_status_t HSA_API rj_dbi_code_object_reader_create_from_file(
@@ -1968,6 +2101,17 @@ hsa_status_t HSA_API rj_dbi_code_object_reader_create_from_file(
 hsa_status_t HSA_API rj_dbi_loader_code_object_reader_create_from_file_with_offset_size(
     hsa_file_t file, size_t offset, size_t size, hsa_code_object_reader_t *code_object_reader);
 hsa_status_t HSA_API rj_dbi_code_object_reader_destroy(hsa_code_object_reader_t code_object_reader);
+hsa_status_t HSA_API rj_dbi_signal_destroy(hsa_signal_t signal);
+hsa_signal_value_t HSA_API rj_dbi_signal_wait_relaxed(hsa_signal_t signal,
+                                                      hsa_signal_condition_t condition,
+                                                      hsa_signal_value_t compare_value,
+                                                      uint64_t timeout_hint,
+                                                      hsa_wait_state_t wait_state_hint);
+hsa_signal_value_t HSA_API rj_dbi_signal_wait_scacquire(hsa_signal_t signal,
+                                                        hsa_signal_condition_t condition,
+                                                        hsa_signal_value_t compare_value,
+                                                        uint64_t timeout_hint,
+                                                        hsa_wait_state_t wait_state_hint);
 hsa_status_t HSA_API rj_dbi_system_get_extension_table(uint16_t extension, uint16_t version_major,
                                                        uint16_t version_minor, void *table);
 hsa_status_t HSA_API rj_dbi_system_get_major_extension_table(uint16_t extension,
@@ -2011,6 +2155,12 @@ hsa_status_t HSA_API rj_dbi_amd_queue_create(hsa_agent_t agent, hsa_amd_queue_cr
     decltype(hsa_code_object_reader_create_from_memory) *, true)                                   \
   X(destroy, hsa_code_object_reader_destroy_fn, rj_dbi_code_object_reader_destroy,                 \
     decltype(hsa_code_object_reader_destroy) *, true)                                              \
+  X(signal_destroy, hsa_signal_destroy_fn, rj_dbi_signal_destroy, decltype(hsa_signal_destroy) *,  \
+    intercept_dispatch_packets_)                                                                   \
+  X(signal_wait_relaxed, hsa_signal_wait_relaxed_fn, rj_dbi_signal_wait_relaxed,                   \
+    decltype(hsa_signal_wait_relaxed) *, intercept_dispatch_packets_)                              \
+  X(signal_wait_scacquire, hsa_signal_wait_scacquire_fn, rj_dbi_signal_wait_scacquire,             \
+    decltype(hsa_signal_wait_scacquire) *, intercept_dispatch_packets_)                            \
   X(get_extension_table, hsa_system_get_extension_table_fn, rj_dbi_system_get_extension_table,     \
     decltype(hsa_system_get_extension_table) *, true)                                              \
   X(get_major_extension_table, hsa_system_get_major_extension_table_fn,                            \
@@ -2095,6 +2245,10 @@ public:
         (intercept_dispatch_segments_ && (get_symbol_by_name_.original() == nullptr ||
                                           iterate_agent_symbols_.original() == nullptr ||
                                           symbol_get_info_.original() == nullptr)) ||
+        (intercept_dispatch_packets_ &&
+         (signal_destroy_.original() == nullptr || signal_wait_relaxed_.original() == nullptr ||
+          signal_wait_scacquire_.original() == nullptr ||
+          core_->hsa_signal_load_scacquire_fn == nullptr)) ||
         (require_dispatch_packets && !intercept_dispatch_packets_)) {
       std::fprintf(stderr, "[rocjitsu-dbi-hooks] HSA API table lacks a required DBI entry\n");
       clear_unlocked();
@@ -2109,6 +2263,7 @@ public:
     if (intercept_dispatch_packets_ && amd_queue_create_.original() != nullptr)
       amd_queue_create_.install(rj_dbi_amd_queue_create);
     KernelPrivateDispatchRegistry::instance().configure_allowlist(config.kernel_name_allowlist);
+    AutoMoiEpochQuiescenceRegistry::instance().clear();
     active_ = true;
     ConSanStaticCoverageRegistry::instance().clear();
 
@@ -2207,6 +2362,19 @@ public:
     return true;
   }
 
+  [[nodiscard]] ConSanEpochCheckpointStatus checkpoint_after_device_synchronize() {
+    std::lock_guard lock(mutex_);
+    if (!active_ || core_ == nullptr || !config_)
+      return ConSanEpochCheckpointStatus::Inactive;
+    if (config_->flavor != rocjitsu::ConSanFlavor::Moi)
+      return ConSanEpochCheckpointStatus::NotMoi;
+    const ConSanEpochCheckpointStatus status =
+        checkpoint_auto_moi_report_buffers_after_device_synchronize(core_).status;
+    if (status == ConSanEpochCheckpointStatus::Complete)
+      AutoMoiEpochQuiescenceRegistry::instance().clear_after_explicit_checkpoint();
+    return status;
+  }
+
   void uninstall() {
     std::lock_guard lock(mutex_);
     const bool supercollider_active =
@@ -2261,6 +2429,7 @@ public:
         fault_load_selector_;
     code_object_reader_registry().clear();
     KernelPrivateDispatchRegistry::instance().clear();
+    AutoMoiEpochQuiescenceRegistry::instance().clear();
     if (fault_application_snapshot &&
         (fault_require_exactly_one || fault_application_snapshot->exactly_one_requested)) {
       emit_process_fault_reservation_summary(fault_application_snapshot->reservation);
@@ -2314,12 +2483,14 @@ public:
     std::fprintf(
         stderr,
         "[rocjitsu-dbi-hooks] ConSan MOI report memory required_bytes=%llu "
-        "allocated_bytes=%llu live_before_cleanup=%llu live_after_cleanup=%llu "
+        "allocated_bytes=%llu completed_epochs=%llu live_before_cleanup=%llu "
+        "live_after_cleanup=%llu "
         "peak_live_bytes=%llu per_buffer_ceiling=%llu process_ceiling=%llu "
         "allocation_failures=%llu capacity_failures=%llu cleanup_failures=%llu "
         "fine_grained_snapshot_bytes=%llu coarse_grained_snapshot_bytes=%llu\n",
         static_cast<unsigned long long>(moi_report_summary.required_report_bytes),
         static_cast<unsigned long long>(moi_report_summary.allocated_report_bytes),
+        static_cast<unsigned long long>(moi_report_summary.completed_epoch_count),
         static_cast<unsigned long long>(moi_report_summary.current_live_report_bytes),
         static_cast<unsigned long long>(moi_report_summary.current_live_report_bytes_after_cleanup),
         static_cast<unsigned long long>(moi_report_summary.peak_live_report_bytes),
@@ -2763,6 +2934,54 @@ RjDbiHsaLayer &layer() {
   return state;
 }
 
+void try_automatic_moi_epoch_checkpoint() {
+  CoreApiTable *const core = layer().core_table();
+  if (core == nullptr)
+    return;
+  AutoMoiEpochQuiescenceRegistry::instance().checkpoint_if_quiescent(
+      core->hsa_signal_load_scacquire_fn,
+      [core] { return checkpoint_auto_moi_report_buffers_after_device_synchronize(core); });
+}
+
+hsa_status_t HSA_API rj_dbi_signal_destroy(hsa_signal_t signal) {
+  auto *const original = layer().signal_destroy();
+  if (original == nullptr)
+    return HSA_STATUS_ERROR_NOT_INITIALIZED;
+  try_automatic_moi_epoch_checkpoint();
+  CoreApiTable *const core = layer().core_table();
+  AutoMoiEpochQuiescenceRegistry::instance().forget_signal(
+      signal, core == nullptr ? nullptr : core->hsa_signal_load_scacquire_fn);
+  return original(signal);
+}
+
+hsa_signal_value_t HSA_API rj_dbi_signal_wait_relaxed(hsa_signal_t signal,
+                                                      hsa_signal_condition_t condition,
+                                                      hsa_signal_value_t compare_value,
+                                                      uint64_t timeout_hint,
+                                                      hsa_wait_state_t wait_state_hint) {
+  auto *const original = layer().signal_wait_relaxed();
+  if (original == nullptr)
+    return 0;
+  const hsa_signal_value_t value =
+      original(signal, condition, compare_value, timeout_hint, wait_state_hint);
+  try_automatic_moi_epoch_checkpoint();
+  return value;
+}
+
+hsa_signal_value_t HSA_API rj_dbi_signal_wait_scacquire(hsa_signal_t signal,
+                                                        hsa_signal_condition_t condition,
+                                                        hsa_signal_value_t compare_value,
+                                                        uint64_t timeout_hint,
+                                                        hsa_wait_state_t wait_state_hint) {
+  auto *const original = layer().signal_wait_scacquire();
+  if (original == nullptr)
+    return 0;
+  const hsa_signal_value_t value =
+      original(signal, condition, compare_value, timeout_hint, wait_state_hint);
+  try_automatic_moi_epoch_checkpoint();
+  return value;
+}
+
 void intercept_loader_extension_table(size_t table_length, void *table) {
   constexpr size_t required_length =
       offsetof(AmdLoaderExtTable102, create_from_file_with_offset_size) +
@@ -2956,7 +3175,7 @@ void rj_dbi_queue_write_interceptor(const void *packets, uint64_t packet_count,
                                     uint64_t user_packet_index, void *data,
                                     hsa_amd_queue_intercept_packet_writer_t writer) {
   (void)user_packet_index;
-  (void)data;
+  (void)user_packet_index;
   if (packets == nullptr || writer == nullptr || packet_count == 0) {
     if (writer != nullptr)
       writer(packets, packet_count);
@@ -2969,6 +3188,8 @@ void rj_dbi_queue_write_interceptor(const void *packets, uint64_t packet_count,
     return;
   }
 
+  CoreApiTable *const core = layer().core_table();
+  auto submission_lock = AutoMoiEpochQuiescenceRegistry::instance().lock_submission();
   std::vector<InterceptPacket> rewritten(static_cast<size_t>(packet_count));
   std::memcpy(rewritten.data(), packets, static_cast<size_t>(*total_packet_bytes));
   for (InterceptPacket &packet_bytes : rewritten) {
@@ -2980,10 +3201,25 @@ void rj_dbi_queue_write_interceptor(const void *packets, uint64_t packet_count,
     const bool is_extended_dispatch =
         extended_packet->amd_format == kAmdExtKernelDispatchFormat &&
         (type == HSA_PACKET_TYPE_VENDOR_SPECIFIC || type == HSA_PACKET_TYPE_INVALID);
+    if (type == HSA_PACKET_TYPE_BARRIER_AND || type == HSA_PACKET_TYPE_BARRIER_OR) {
+      const auto *barrier =
+          reinterpret_cast<const hsa_barrier_and_packet_t *>(packet_bytes.bytes.data());
+      const uint16_t barrier_bit =
+          static_cast<uint16_t>((barrier->header >> HSA_PACKET_HEADER_BARRIER) & 1u);
+      AutoMoiEpochQuiescenceRegistry::instance().note_ordering_barrier_locked(
+          data, barrier_bit != 0u, barrier->completion_signal,
+          core == nullptr ? nullptr : core->hsa_signal_load_scacquire_fn);
+    }
     if (type != HSA_PACKET_TYPE_KERNEL_DISPATCH && !is_extended_dispatch)
       continue;
     const KernelPrivateDispatchRegistry::DispatchRequirements requirements =
         KernelPrivateDispatchRegistry::instance().note_and_query_dispatch(packet->kernel_object);
+    if (requirements.instrumented) {
+      AutoMoiEpochQuiescenceRegistry::instance().note_instrumented_dispatch_locked(
+          data,
+          is_extended_dispatch ? extended_packet->completion_signal : packet->completion_signal,
+          core == nullptr ? nullptr : core->hsa_signal_load_scacquire_fn);
+    }
     if (requirements.has_segment_requirement()) {
       if (is_extended_dispatch) {
         log_message(kLogInfo,
@@ -3055,7 +3291,7 @@ hsa_status_t HSA_API rj_dbi_queue_create(hsa_agent_t agent, uint32_t size, hsa_q
   if (create_status != HSA_STATUS_SUCCESS || queue == nullptr || *queue == nullptr)
     return create_status;
   const hsa_status_t register_status =
-      intercept_register(*queue, rj_dbi_queue_write_interceptor, nullptr);
+      intercept_register(*queue, rj_dbi_queue_write_interceptor, *queue);
   if (register_status != HSA_STATUS_SUCCESS) {
     CoreApiTable *core = layer().core_table();
     if (core != nullptr && core->hsa_queue_destroy_fn != nullptr)
@@ -5008,4 +5244,8 @@ extern "C" RJ_HOOK_EXPORT size_t rj_dbi_test_consan_moi_retry_count() {
 
 extern "C" RJ_HOOK_EXPORT uint64_t rj_dbi_consan_instrumentation_nanoseconds() {
   return ConSanInstrumentationClock::instance().elapsed_nanoseconds();
+}
+
+extern "C" RJ_HOOK_EXPORT uint32_t rj_dbi_consan_checkpoint_after_device_synchronize() {
+  return static_cast<uint32_t>(layer().checkpoint_after_device_synchronize());
 }

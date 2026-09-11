@@ -346,6 +346,51 @@ The unload summary reports required and allocated bytes, per-region capacities,
 current and peak live bytes, private spill growth, Inline LDS shadow size,
 Sampled banks, saturation, undercoverage, overflow, and drops.
 
+### Repeated synchronized work
+
+Repeated synchronized work normally requires no ConSan-specific API. Automatic
+MOI reports are bounded epoch storage: ConSan tracks completion signals for
+instrumented dispatches, or for ordered barriers that cover signal-less
+dispatches, and observes ordinary HSA waits. Once all tracked instrumented work
+is quiescent, it analyzes and recycles the current report epoch automatically.
+Normal HIP and PyTorch launch-and-synchronize loops therefore keep working as
+their repetition count grows.
+
+The automatic transaction snapshots and analyzes every live report before it
+clears any of them. It preserves each allocation address, layout, reader, and
+generation embedded in instrumented code. Record/Replay access and dispatch
+tables, Sampled causal windows/publication state, and Inline Shadow ownership,
+ordering, and diagnostic state are all epoch-local and recycled. Final unload
+combines every completed epoch with the last live epoch, so earlier conflicts,
+diagnostics, saturation, and evidence are neither forgotten nor counted twice.
+
+#### Expert fallback for externally synchronized work
+
+A custom runtime may submit an instrumented dispatch without a trackable
+completion signal, or may establish quiescence through a mechanism that ConSan
+cannot observe. ConSan conservatively disables automatic recycling for that
+epoch rather than guessing that it is safe. Such a runtime may explicitly
+checkpoint after it has independently established device-wide quiescence:
+
+```c
+// First synchronize every queue that can write ConSan report state.
+hipDeviceSynchronize();
+
+// Resolve this exported symbol from the loaded HSA_TOOLS_LIB and call it.
+uint32_t status = rj_dbi_consan_checkpoint_after_device_synchronize();
+```
+
+The synchronization is a mandatory precondition, not an operation performed by
+the API. Calling while any queue can still write a report is invalid. The
+operation is all-or-nothing across live reports: a snapshot failure leaves all
+device evidence untouched and retryable. Status values are `0` for a completed
+MOI checkpoint, `1` when the hook is inactive, `2` for the intentional
+SuperCollider no-op, and `3` when a report snapshot or decode failed. Treat any
+status other than `0` or the expected SuperCollider `2` as an error.
+
+SuperCollider does not use the MOI report layout. Its mismatch marker is
+lifetime-sticky and capacity-independent, so status `2` leaves it unchanged.
+
 ## MOI event and sampling controls
 
 | Variable | Default | Meaning |

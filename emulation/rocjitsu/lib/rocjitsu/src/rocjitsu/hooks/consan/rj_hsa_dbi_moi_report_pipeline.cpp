@@ -10,9 +10,9 @@
 
 namespace rocjitsu::consan_hook {
 
-AutoMoiReportSummary summarize_auto_moi_report(const AutoMoiReportPipelineInput &input,
-                                               const AutoMoiReportSnapshot &snapshot,
-                                               AutoMoiReportSummary summary) {
+AutoMoiReportPipelineResult process_auto_moi_report(const AutoMoiReportPipelineInput &input,
+                                                    const AutoMoiReportSnapshot &snapshot,
+                                                    AutoMoiReportSummary summary) {
   if (const auto *sampled = input.static_metadata
                                 ? std::get_if<AutoMoiSampledStaticMetadata>(input.static_metadata)
                                 : nullptr;
@@ -32,7 +32,13 @@ AutoMoiReportSummary summarize_auto_moi_report(const AutoMoiReportPipelineInput 
       render_auto_moi_report({input, decoded, summary, analysis ? &analysis->mode : nullptr});
   for (const AutoMoiReportDiagnostic &diagnostic : diagnostics)
     log_message(kLogInfo, "%s", diagnostic.text.c_str());
-  return summary;
+  return {.summary = summary, .complete = decoded.complete()};
+}
+
+AutoMoiReportSummary summarize_auto_moi_report(const AutoMoiReportPipelineInput &input,
+                                               const AutoMoiReportSnapshot &snapshot,
+                                               AutoMoiReportSummary summary) {
+  return process_auto_moi_report(input, snapshot, summary).summary;
 }
 
 } // namespace rocjitsu::consan_hook

@@ -572,6 +572,8 @@ std::vector<void *> g_fake_freed_allocations;
 std::array<hsa_kernel_dispatch_packet_t, 4> g_fake_queue_packets{};
 hsa_queue_t g_fake_queue{};
 
+void reset_queue_fakes();
+
 void capture_log_sink(const char *bytes, size_t size) {
   ++g_log_sink_write_count;
   g_log_sink_max_write_size = std::max(g_log_sink_max_write_size, size);
@@ -883,6 +885,18 @@ hsa_signal_value_t HSA_API fake_signal_load_scacquire(hsa_signal_t signal) {
       return entry.value;
   }
   return 1;
+}
+
+hsa_signal_value_t HSA_API fake_signal_wait_relaxed(hsa_signal_t signal, hsa_signal_condition_t,
+                                                    hsa_signal_value_t, uint64_t,
+                                                    hsa_wait_state_t) {
+  return fake_signal_load_scacquire(signal);
+}
+
+hsa_signal_value_t HSA_API fake_signal_wait_scacquire(hsa_signal_t signal, hsa_signal_condition_t,
+                                                      hsa_signal_value_t, uint64_t,
+                                                      hsa_wait_state_t) {
+  return fake_signal_load_scacquire(signal);
 }
 
 hsa_status_t HSA_API
@@ -1643,6 +1657,8 @@ struct FakeApiTable {
     core.hsa_signal_load_scacquire_fn = fake_signal_load_scacquire;
     core.hsa_signal_store_relaxed_fn = fake_signal_store_relaxed;
     core.hsa_signal_store_screlease_fn = fake_signal_store_screlease;
+    core.hsa_signal_wait_relaxed_fn = fake_signal_wait_relaxed;
+    core.hsa_signal_wait_scacquire_fn = fake_signal_wait_scacquire;
     core.hsa_code_object_reader_create_from_file_fn = fake_code_object_reader_create_from_file;
     core.hsa_code_object_reader_create_from_memory_fn = fake_code_object_reader_create_from_memory;
     core.hsa_code_object_reader_destroy_fn = fake_code_object_reader_destroy;
@@ -1781,9 +1797,12 @@ public:
         reinterpret_cast<MoiRetryCountFn>(dlsym(library_, "rj_dbi_test_consan_moi_retry_count"));
     instrumentation_nanoseconds_ = reinterpret_cast<InstrumentationNanosecondsFn>(
         dlsym(library_, "rj_dbi_consan_instrumentation_nanoseconds"));
+    checkpoint_after_device_synchronize_ = reinterpret_cast<CheckpointAfterDeviceSynchronizeFn>(
+        dlsym(library_, "rj_dbi_consan_checkpoint_after_device_synchronize"));
     if (on_load_ == nullptr || on_unload_ == nullptr || set_override_ == nullptr ||
         set_log_sink_override_ == nullptr || moi_retry_count_ == nullptr ||
-        instrumentation_nanoseconds_ == nullptr) {
+        instrumentation_nanoseconds_ == nullptr ||
+        checkpoint_after_device_synchronize_ == nullptr) {
       error_ = dlerror();
       return;
     }
@@ -1810,6 +1829,9 @@ public:
   [[nodiscard]] size_t moi_retry_count() const { return moi_retry_count_(); }
   [[nodiscard]] uint64_t instrumentation_nanoseconds() const {
     return instrumentation_nanoseconds_();
+  }
+  [[nodiscard]] uint32_t checkpoint_after_device_synchronize() const {
+    return checkpoint_after_device_synchronize_();
   }
   void use_production_transform() { set_override_(nullptr); }
   void set_log_sink_override(rocjitsu::consan_hook::LogSinkOverride sink) {
@@ -1849,6 +1871,7 @@ private:
   using SetLogSinkOverrideFn = void (*)(rocjitsu::consan_hook::LogSinkOverride);
   using MoiRetryCountFn = size_t (*)();
   using InstrumentationNanosecondsFn = uint64_t (*)();
+  using CheckpointAfterDeviceSynchronizeFn = uint32_t (*)();
   rocjitsu::test::ScopedTempDirectory runtime_dir_;
   void *library_ = nullptr;
   OnLoadFn on_load_ = nullptr;
@@ -1857,6 +1880,7 @@ private:
   SetLogSinkOverrideFn set_log_sink_override_ = nullptr;
   MoiRetryCountFn moi_retry_count_ = nullptr;
   InstrumentationNanosecondsFn instrumentation_nanoseconds_ = nullptr;
+  CheckpointAfterDeviceSynchronizeFn checkpoint_after_device_synchronize_ = nullptr;
   bool installed_ = false;
   bool needs_unload_ = false;
   std::string error_;
@@ -5877,9 +5901,14 @@ rocjitsu::ConSanTransformArtifacts auto_report_atomic_transform_result() {
   atomic_plan.source = rocjitsu::ConSanRegisterAllocationSource::LivenessDead;
   result.resource_plans.push_back(atomic_plan);
   install_consan_test_program_inventory(result, [](rocjitsu::ProgramInventoryBuilder &builder) {
-    builder.add_kernel().name = "auto_report_atomic";
-    builder.add_semantic_site(rocjitsu::make_consan_program_site(builder.kernels().back().id,
-                                                                 rocjitsu::ConSanAtomicSite{}));
+    auto &kernel = builder.add_kernel();
+    kernel.name = "auto_report_atomic";
+    kernel.entry_text_offset = 0u;
+    kernel.code_size = 4u;
+    kernel.has_text_range = true;
+    auto site = rocjitsu::make_consan_program_site(kernel.id, rocjitsu::ConSanAtomicSite{});
+    site.execution_owners = {{.kernel = kernel.id}};
+    builder.add_semantic_site(std::move(site));
   });
   const rocjitsu::PhysicalSiteId physical{
       .code_object = result.program_inventory.code_object_id(),
@@ -6870,6 +6899,543 @@ TEST(HsaHooksUnitTest, ConSanAutoReportAllocationFailureFailsClosedWithoutLeakin
   g_fail_core_memory_allocate = false;
   EXPECT_EQ(g_core_memory_free_calls, 0);
   EXPECT_TRUE(g_core_memory_allocations.empty());
+}
+
+TEST(HsaHooksUnitTest, ConSanEpochCheckpointRecyclesEveryMoiEngineInPlace) {
+  struct Case {
+    const char *mode;
+    rocjitsu::ConSanMoiEngine engine;
+  };
+  const std::array cases = {
+      Case{"record-replay", rocjitsu::ConSanMoiEngine::RecordReplay},
+      Case{"sampled", rocjitsu::ConSanMoiEngine::Sampled},
+      Case{"inline-shadow", rocjitsu::ConSanMoiEngine::InlineShadow},
+  };
+
+  for (const Case &test : cases) {
+    SCOPED_TRACE(test.mode);
+    ScopedEnvVar mode("RJ_CONSAN_MODE", test.mode);
+    ScopedEnvVar fail_closed("RJ_CONSAN_FAIL_CLOSED", "0");
+    ScopedEnvVar report_buffer("RJ_CONSAN_MOI_REPORT_BUFFER", nullptr);
+    ScopedEnvVar report_size("RJ_CONSAN_MOI_REPORT_BUFFER_SIZE", nullptr);
+    ScopedEnvVar auto_report_size("RJ_CONSAN_MOI_AUTO_REPORT_BUFFER_SIZE", "67108864");
+    ScopedEnvVar dynamic_records("RJ_CONSAN_MOI_DYNAMIC_ACCESS_RECORDS", "0");
+    ScopedEnvVar require_records("RJ_CONSAN_MOI_REQUIRE_RECORDS", "0");
+
+    reset_code_object_observations();
+    reset_core_memory_observations();
+    g_transform_override_result = test.engine == rocjitsu::ConSanMoiEngine::RecordReplay
+                                      ? auto_report_replay_transform_result()
+                                  : test.engine == rocjitsu::ConSanMoiEngine::Sampled
+                                      ? auto_report_sampled_transform_result()
+                                      : auto_report_inline_shadow_transform_result();
+    {
+      FakeApiTable api;
+      InstalledDbiHook hook(api);
+      ASSERT_TRUE(hook.installed()) << hook.error();
+      constexpr std::array<uint8_t, 8> original = {0x7f, 'E', 'L', 'F', 1, 2, 3, 4};
+      hsa_code_object_reader_t reader{};
+      ASSERT_EQ(api.core.hsa_code_object_reader_create_from_memory_fn(original.data(),
+                                                                      original.size(), &reader),
+                HSA_STATUS_SUCCESS);
+      ASSERT_EQ(api.core.hsa_executable_load_agent_code_object_fn(hsa_executable_t{7}, kHostAgent,
+                                                                  reader, nullptr, nullptr),
+                HSA_STATUS_SUCCESS);
+      ASSERT_EQ(g_core_memory_allocations.size(), 1u);
+      ASSERT_EQ(g_core_memory_allocation_sizes.size(), 1u);
+
+      auto *const bytes = static_cast<uint8_t *>(g_core_memory_allocations.front());
+      const size_t size = g_core_memory_allocation_sizes.front();
+      ASSERT_GT(size, sizeof(rocjitsu::ConSanMoiReportHeader));
+      auto *const header = reinterpret_cast<rocjitsu::ConSanMoiReportHeader *>(bytes);
+      const rocjitsu::ConSanMoiReportHeader original_header = *header;
+      header->event_counter = 17u;
+      bytes[size - 1u] = 0xa5u;
+      void *const allocation = bytes;
+
+      EXPECT_EQ(hook.checkpoint_after_device_synchronize(), 0u);
+      EXPECT_EQ(g_core_memory_allocations.size(), 1u);
+      EXPECT_EQ(g_core_memory_allocations.front(), allocation);
+      EXPECT_EQ(header->generation, original_header.generation);
+      EXPECT_EQ(header->dispatch_id, original_header.dispatch_id);
+      EXPECT_EQ(header->engine, original_header.engine);
+      EXPECT_EQ(header->event_counter, 0u);
+      EXPECT_EQ(header->flags, 0u);
+      EXPECT_TRUE(std::ranges::all_of(
+          std::span<const uint8_t>(bytes + sizeof(*header), size - sizeof(*header)),
+          [](uint8_t byte) { return byte == 0u; }));
+
+      // Empty epochs are legal and recycling never reallocates the report.
+      EXPECT_EQ(hook.checkpoint_after_device_synchronize(), 0u);
+      EXPECT_EQ(g_core_memory_allocations.front(), allocation);
+    }
+    EXPECT_TRUE(g_core_memory_allocations.empty());
+  }
+}
+
+TEST(HsaHooksUnitTest, ConSanEpochCheckpointAccumulatesEvidenceAcrossEpochs) {
+  ScopedEnvVar mode("RJ_CONSAN_MODE", "inline-shadow");
+  ScopedEnvVar fail_closed("RJ_CONSAN_FAIL_CLOSED", "0");
+  ScopedEnvVar report_buffer("RJ_CONSAN_MOI_REPORT_BUFFER", nullptr);
+  ScopedEnvVar report_size("RJ_CONSAN_MOI_REPORT_BUFFER_SIZE", nullptr);
+  ScopedEnvVar auto_report_size("RJ_CONSAN_MOI_AUTO_REPORT_BUFFER_SIZE", "67108864");
+  ScopedEnvVar require_records("RJ_CONSAN_MOI_REQUIRE_RECORDS", "0");
+
+  reset_code_object_observations();
+  reset_core_memory_observations();
+  g_transform_override_result = auto_report_inline_shadow_transform_result();
+  testing::internal::CaptureStderr();
+  {
+    FakeApiTable api;
+    InstalledDbiHook hook(api);
+    ASSERT_TRUE(hook.installed()) << hook.error();
+    constexpr std::array<uint8_t, 8> original = {0x7f, 'E', 'L', 'F', 1, 2, 3, 4};
+    hsa_code_object_reader_t reader{};
+    ASSERT_EQ(api.core.hsa_code_object_reader_create_from_memory_fn(original.data(),
+                                                                    original.size(), &reader),
+              HSA_STATUS_SUCCESS);
+    ASSERT_EQ(api.core.hsa_executable_load_agent_code_object_fn(hsa_executable_t{7}, kHostAgent,
+                                                                reader, nullptr, nullptr),
+              HSA_STATUS_SUCCESS);
+    ASSERT_EQ(g_core_memory_allocations.size(), 1u);
+    auto *const header =
+        static_cast<rocjitsu::ConSanMoiReportHeader *>(g_core_memory_allocations.front());
+    header->event_counter = 3u;
+    ASSERT_EQ(hook.checkpoint_after_device_synchronize(), 0u);
+    header->event_counter = 5u;
+    ASSERT_EQ(hook.checkpoint_after_device_synchronize(), 0u);
+  }
+  const std::string log = testing::internal::GetCapturedStderr();
+  EXPECT_NE(log.find("completed_epochs=2"), std::string::npos) << log;
+  EXPECT_NE(log.find("visible_evidence=8"), std::string::npos) << log;
+}
+
+TEST(HsaHooksUnitTest, ConSanEpochCheckpointSustainsManyRepeatedRuns) {
+  ScopedEnvVar mode("RJ_CONSAN_MODE", "sampled");
+  ScopedEnvVar fail_closed("RJ_CONSAN_FAIL_CLOSED", "0");
+  ScopedEnvVar report_buffer("RJ_CONSAN_MOI_REPORT_BUFFER", nullptr);
+  ScopedEnvVar report_size("RJ_CONSAN_MOI_REPORT_BUFFER_SIZE", nullptr);
+  ScopedEnvVar auto_report_size("RJ_CONSAN_MOI_AUTO_REPORT_BUFFER_SIZE", "67108864");
+  ScopedEnvVar require_records("RJ_CONSAN_MOI_REQUIRE_RECORDS", "0");
+
+  reset_code_object_observations();
+  reset_core_memory_observations();
+  g_transform_override_result = auto_report_sampled_transform_result();
+  testing::internal::CaptureStderr();
+  {
+    FakeApiTable api;
+    InstalledDbiHook hook(api);
+    ASSERT_TRUE(hook.installed()) << hook.error();
+    constexpr std::array<uint8_t, 8> original = {0x7f, 'E', 'L', 'F', 1, 2, 3, 4};
+    hsa_code_object_reader_t reader{};
+    ASSERT_EQ(api.core.hsa_code_object_reader_create_from_memory_fn(original.data(),
+                                                                    original.size(), &reader),
+              HSA_STATUS_SUCCESS);
+    ASSERT_EQ(api.core.hsa_executable_load_agent_code_object_fn(hsa_executable_t{7}, kHostAgent,
+                                                                reader, nullptr, nullptr),
+              HSA_STATUS_SUCCESS);
+    ASSERT_EQ(g_core_memory_allocations.size(), 1u);
+    void *const allocation = g_core_memory_allocations.front();
+    auto *const header = static_cast<rocjitsu::ConSanMoiReportHeader *>(allocation);
+    for (uint32_t epoch = 0; epoch < 256u; ++epoch) {
+      header->event_counter = epoch + 1u;
+      ASSERT_EQ(hook.checkpoint_after_device_synchronize(), 0u) << epoch;
+      ASSERT_EQ(g_core_memory_allocations.size(), 1u) << epoch;
+      EXPECT_EQ(g_core_memory_allocations.front(), allocation) << epoch;
+      EXPECT_EQ(header->event_counter, 0u) << epoch;
+    }
+  }
+  const std::string log = testing::internal::GetCapturedStderr();
+  EXPECT_NE(log.find("completed_epochs=256"), std::string::npos) << log;
+  EXPECT_EQ(g_core_memory_allocate_calls, 1);
+}
+
+TEST(HsaHooksUnitTest, ConSanEpochCheckpointPreservesPriorSaturationAndClearsNextEpoch) {
+  ScopedEnvVar mode("RJ_CONSAN_MODE", "record-replay");
+  ScopedEnvVar fail_closed("RJ_CONSAN_FAIL_CLOSED", "0");
+  ScopedEnvVar report_buffer("RJ_CONSAN_MOI_REPORT_BUFFER", nullptr);
+  ScopedEnvVar report_size("RJ_CONSAN_MOI_REPORT_BUFFER_SIZE", nullptr);
+  ScopedEnvVar auto_report_size("RJ_CONSAN_MOI_AUTO_REPORT_BUFFER_SIZE", "16777216");
+  ScopedEnvVar dynamic_records("RJ_CONSAN_MOI_DYNAMIC_ACCESS_RECORDS", "0");
+  ScopedEnvVar require_records("RJ_CONSAN_MOI_REQUIRE_RECORDS", "0");
+
+  reset_code_object_observations();
+  reset_core_memory_observations();
+  g_transform_override_result = auto_report_replay_transform_result();
+  testing::internal::CaptureStderr();
+  {
+    FakeApiTable api;
+    InstalledDbiHook hook(api);
+    ASSERT_TRUE(hook.installed()) << hook.error();
+    constexpr std::array<uint8_t, 8> original = {0x7f, 'E', 'L', 'F', 1, 2, 3, 4};
+    hsa_code_object_reader_t reader{};
+    ASSERT_EQ(api.core.hsa_code_object_reader_create_from_memory_fn(original.data(),
+                                                                    original.size(), &reader),
+              HSA_STATUS_SUCCESS);
+    ASSERT_EQ(api.core.hsa_executable_load_agent_code_object_fn(hsa_executable_t{7}, kHostAgent,
+                                                                reader, nullptr, nullptr),
+              HSA_STATUS_SUCCESS);
+    ASSERT_EQ(g_core_memory_allocations.size(), 1u);
+    auto *const header =
+        static_cast<rocjitsu::ConSanMoiReportHeader *>(g_core_memory_allocations.front());
+    header->flags |= rocjitsu::kConSanMoiReportFlagRecordReplayBankSaturated;
+    ASSERT_EQ(hook.checkpoint_after_device_synchronize(), 0u);
+    EXPECT_EQ(header->flags, 0u);
+    header->event_counter = 1u;
+    ASSERT_EQ(hook.checkpoint_after_device_synchronize(), 0u);
+    EXPECT_EQ(header->event_counter, 0u);
+  }
+  const std::string log = testing::internal::GetCapturedStderr();
+  EXPECT_NE(log.find("completed_epochs=2"), std::string::npos) << log;
+  EXPECT_NE(log.find("record_replay_bank_saturation=1"), std::string::npos) << log;
+}
+
+TEST(HsaHooksUnitTest, ConSanEpochCheckpointIsTransactionalAcrossLiveReports) {
+  ScopedEnvVar mode("RJ_CONSAN_MODE", "record-replay");
+  ScopedEnvVar fail_closed("RJ_CONSAN_FAIL_CLOSED", "0");
+  ScopedEnvVar report_buffer("RJ_CONSAN_MOI_REPORT_BUFFER", nullptr);
+  ScopedEnvVar report_size("RJ_CONSAN_MOI_REPORT_BUFFER_SIZE", nullptr);
+  ScopedEnvVar auto_report_size("RJ_CONSAN_MOI_AUTO_REPORT_BUFFER_SIZE", "16777216");
+  ScopedEnvVar dynamic_records("RJ_CONSAN_MOI_DYNAMIC_ACCESS_RECORDS", "0");
+  ScopedEnvVar require_records("RJ_CONSAN_MOI_REQUIRE_RECORDS", "0");
+
+  reset_code_object_observations();
+  reset_core_memory_observations();
+  g_transform_override_result = auto_report_replay_transform_result();
+  {
+    FakeApiTable api;
+    InstalledDbiHook hook(api);
+    ASSERT_TRUE(hook.installed()) << hook.error();
+    constexpr std::array<uint8_t, 8> first = {0x7f, 'E', 'L', 'F', 1, 2, 3, 4};
+    constexpr std::array<uint8_t, 8> second = {0x7f, 'E', 'L', 'F', 5, 6, 7, 8};
+    hsa_code_object_reader_t first_reader{};
+    hsa_code_object_reader_t second_reader{};
+    ASSERT_EQ(api.core.hsa_code_object_reader_create_from_memory_fn(first.data(), first.size(),
+                                                                    &first_reader),
+              HSA_STATUS_SUCCESS);
+    ASSERT_EQ(api.core.hsa_code_object_reader_create_from_memory_fn(second.data(), second.size(),
+                                                                    &second_reader),
+              HSA_STATUS_SUCCESS);
+    ASSERT_EQ(api.core.hsa_executable_load_agent_code_object_fn(hsa_executable_t{7}, kHostAgent,
+                                                                first_reader, nullptr, nullptr),
+              HSA_STATUS_SUCCESS);
+    ASSERT_EQ(api.core.hsa_executable_load_agent_code_object_fn(hsa_executable_t{7}, kHostAgent,
+                                                                second_reader, nullptr, nullptr),
+              HSA_STATUS_SUCCESS);
+    ASSERT_EQ(g_core_memory_allocations.size(), 2u);
+    auto *const first_header =
+        static_cast<rocjitsu::ConSanMoiReportHeader *>(g_core_memory_allocations[0]);
+    auto *const second_header =
+        static_cast<rocjitsu::ConSanMoiReportHeader *>(g_core_memory_allocations[1]);
+    const rocjitsu::ConSanMoiReportHeader valid_second_header = *second_header;
+    first_header->event_counter = 11u;
+    second_header->magic = 0u;
+
+    EXPECT_EQ(hook.checkpoint_after_device_synchronize(), 3u);
+    EXPECT_EQ(first_header->event_counter, 11u);
+    EXPECT_EQ(second_header->magic, 0u);
+
+    *second_header = valid_second_header;
+    second_header->event_counter = 13u;
+    EXPECT_EQ(hook.checkpoint_after_device_synchronize(), 0u);
+    EXPECT_EQ(first_header->event_counter, 0u);
+    EXPECT_EQ(second_header->event_counter, 0u);
+  }
+}
+
+TEST(HsaHooksUnitTest, ConSanEpochCheckpointIsNoOpOutsideMoi) {
+  ScopedEnvVar mode("RJ_CONSAN_MODE", "supercollider");
+  ScopedEnvVar fail_closed("RJ_CONSAN_FAIL_CLOSED", "0");
+  ScopedEnvVar report_mode("RJ_CONSAN_SC_REPORT_MODE", nullptr);
+  ScopedEnvVar report_buffer("RJ_CONSAN_REPORT_BUFFER", nullptr);
+  ScopedEnvVar max_patches("RJ_CONSAN_MAX_PATCHES", nullptr);
+
+  reset_code_object_observations();
+  reset_core_memory_observations();
+  g_transform_override_result = auto_sc_transform_result();
+  FakeApiTable api;
+  InstalledDbiHook hook(api);
+  ASSERT_TRUE(hook.installed()) << hook.error();
+  constexpr std::array<uint8_t, 8> original = {0x7f, 'E', 'L', 'F', 1, 2, 3, 4};
+  hsa_code_object_reader_t reader{};
+  ASSERT_EQ(api.core.hsa_code_object_reader_create_from_memory_fn(original.data(), original.size(),
+                                                                  &reader),
+            HSA_STATUS_SUCCESS);
+  ASSERT_EQ(api.core.hsa_executable_load_agent_code_object_fn(hsa_executable_t{7}, kHostAgent,
+                                                              reader, nullptr, nullptr),
+            HSA_STATUS_SUCCESS);
+  ASSERT_EQ(g_core_memory_allocations.size(), 1u);
+  auto *const marker = static_cast<uint32_t *>(g_core_memory_allocations.front());
+  *marker = 1u;
+  EXPECT_EQ(hook.checkpoint_after_device_synchronize(), 2u);
+  EXPECT_EQ(*marker, 1u);
+  hook.unload();
+  EXPECT_EQ(hook.checkpoint_after_device_synchronize(), 1u);
+}
+
+TEST(HsaHooksUnitTest, ConSanAutomaticallyCheckpointsAtTrackedGlobalQuiescence) {
+  ScopedEnvVar mode("RJ_CONSAN_MODE", "record-replay");
+  ScopedEnvVar fail_closed("RJ_CONSAN_FAIL_CLOSED", "0");
+  ScopedEnvVar report_buffer("RJ_CONSAN_MOI_REPORT_BUFFER", nullptr);
+  ScopedEnvVar report_size("RJ_CONSAN_MOI_REPORT_BUFFER_SIZE", nullptr);
+  ScopedEnvVar auto_report_size("RJ_CONSAN_MOI_AUTO_REPORT_BUFFER_SIZE", "16777216");
+  ScopedEnvVar dynamic_records("RJ_CONSAN_MOI_DYNAMIC_ACCESS_RECORDS", "0");
+  ScopedEnvVar require_records("RJ_CONSAN_MOI_REQUIRE_RECORDS", "0");
+
+  reset_code_object_observations();
+  reset_core_memory_observations();
+  reset_queue_fakes();
+  g_fake_symbol_name = "auto_report_atomic.kd";
+  g_transform_override_result = auto_report_atomic_transform_result();
+  testing::internal::CaptureStderr();
+  {
+    FakeApiTable api;
+    api.amd.hsa_amd_queue_intercept_create_fn = fake_amd_queue_intercept_create;
+    api.amd.hsa_amd_queue_intercept_register_fn = fake_amd_queue_intercept_register;
+    InstalledDbiHook hook(api);
+    ASSERT_TRUE(hook.installed()) << hook.error();
+    EXPECT_NE(api.core.hsa_signal_wait_relaxed_fn, fake_signal_wait_relaxed);
+    EXPECT_NE(api.core.hsa_signal_wait_scacquire_fn, fake_signal_wait_scacquire);
+
+    constexpr std::array<uint8_t, 8> original = {0x7f, 'E', 'L', 'F', 1, 2, 3, 4};
+    hsa_code_object_reader_t reader{};
+    ASSERT_EQ(api.core.hsa_code_object_reader_create_from_memory_fn(original.data(),
+                                                                    original.size(), &reader),
+              HSA_STATUS_SUCCESS);
+    ASSERT_EQ(api.core.hsa_executable_load_agent_code_object_fn(kFakeExecutable, kHostAgent, reader,
+                                                                nullptr, nullptr),
+              HSA_STATUS_SUCCESS);
+    ASSERT_EQ(g_core_memory_allocations.size(), 1u);
+
+    hsa_queue_t *queue = nullptr;
+    ASSERT_EQ(api.core.hsa_queue_create_fn(kGuestAgent, 4, HSA_QUEUE_TYPE_SINGLE, nullptr, nullptr,
+                                           0, 0, &queue),
+              HSA_STATUS_SUCCESS);
+    ASSERT_NE(g_fake_intercept_handler, nullptr);
+
+    g_fake_symbol_kernel_object = 0x12345678u;
+    hsa_executable_symbol_t symbol{};
+    ASSERT_EQ(api.core.hsa_executable_get_symbol_by_name_fn(
+                  kFakeExecutable, g_fake_symbol_name.c_str(), &kGuestAgent, &symbol),
+              HSA_STATUS_SUCCESS);
+
+    constexpr hsa_signal_t first_signal{7001u};
+    constexpr hsa_signal_t second_signal{7002u};
+    set_fake_signal_value(first_signal, 1);
+    set_fake_signal_value(second_signal, 1);
+    std::array<hsa_kernel_dispatch_packet_t, 2> packets{};
+    for (auto &packet : packets) {
+      packet.header = HSA_PACKET_TYPE_KERNEL_DISPATCH << HSA_PACKET_HEADER_TYPE;
+      packet.kernel_object = g_fake_symbol_kernel_object;
+    }
+    packets[0].completion_signal = first_signal;
+    packets[1].completion_signal = second_signal;
+    g_fake_intercept_handler(packets.data(), packets.size(), 0u, g_fake_intercept_user_data,
+                             fake_intercept_packet_writer);
+
+    auto *const header =
+        static_cast<rocjitsu::ConSanMoiReportHeader *>(g_core_memory_allocations.front());
+    header->event_counter = 7u;
+    set_fake_signal_value(first_signal, 0);
+    EXPECT_EQ(api.core.hsa_signal_wait_scacquire_fn(first_signal, HSA_SIGNAL_CONDITION_LT, 1u,
+                                                    UINT64_MAX, HSA_WAIT_STATE_BLOCKED),
+              0);
+    EXPECT_EQ(header->event_counter, 7u);
+
+    set_fake_signal_value(second_signal, 0);
+    EXPECT_EQ(api.core.hsa_signal_wait_relaxed_fn(second_signal, HSA_SIGNAL_CONDITION_LT, 1u,
+                                                  UINT64_MAX, HSA_WAIT_STATE_BLOCKED),
+              0);
+    EXPECT_EQ(header->event_counter, 0u);
+
+    constexpr hsa_signal_t third_signal{7003u};
+    set_fake_signal_value(third_signal, 1);
+    packets[0].completion_signal = third_signal;
+    g_fake_intercept_handler(packets.data(), 1u, 2u, g_fake_intercept_user_data,
+                             fake_intercept_packet_writer);
+    header->event_counter = 9u;
+    set_fake_signal_value(third_signal, 0);
+    EXPECT_EQ(api.core.hsa_signal_wait_scacquire_fn(third_signal, HSA_SIGNAL_CONDITION_LT, 1u,
+                                                    UINT64_MAX, HSA_WAIT_STATE_BLOCKED),
+              0);
+    EXPECT_EQ(header->event_counter, 0u);
+    EXPECT_EQ(api.core.hsa_queue_destroy_fn(queue), HSA_STATUS_SUCCESS);
+  }
+  const std::string log = testing::internal::GetCapturedStderr();
+  EXPECT_NE(log.find("completed_epochs=2"), std::string::npos) << log;
+}
+
+TEST(HsaHooksUnitTest, ConSanUsesOrderedBarrierAsCompletionProxyForSignalLessDispatch) {
+  ScopedEnvVar mode("RJ_CONSAN_MODE", "record-replay");
+  ScopedEnvVar fail_closed("RJ_CONSAN_FAIL_CLOSED", "0");
+  ScopedEnvVar report_buffer("RJ_CONSAN_MOI_REPORT_BUFFER", nullptr);
+  ScopedEnvVar report_size("RJ_CONSAN_MOI_REPORT_BUFFER_SIZE", nullptr);
+  ScopedEnvVar auto_report_size("RJ_CONSAN_MOI_AUTO_REPORT_BUFFER_SIZE", "16777216");
+  ScopedEnvVar dynamic_records("RJ_CONSAN_MOI_DYNAMIC_ACCESS_RECORDS", "0");
+  ScopedEnvVar require_records("RJ_CONSAN_MOI_REQUIRE_RECORDS", "0");
+
+  reset_code_object_observations();
+  reset_core_memory_observations();
+  reset_queue_fakes();
+  g_fake_symbol_name = "auto_report_atomic.kd";
+  g_transform_override_result = auto_report_atomic_transform_result();
+  testing::internal::CaptureStderr();
+  {
+    FakeApiTable api;
+    api.amd.hsa_amd_queue_intercept_create_fn = fake_amd_queue_intercept_create;
+    api.amd.hsa_amd_queue_intercept_register_fn = fake_amd_queue_intercept_register;
+    InstalledDbiHook hook(api);
+    ASSERT_TRUE(hook.installed()) << hook.error();
+
+    constexpr std::array<uint8_t, 8> original = {0x7f, 'E', 'L', 'F', 1, 2, 3, 4};
+    hsa_code_object_reader_t reader{};
+    ASSERT_EQ(api.core.hsa_code_object_reader_create_from_memory_fn(original.data(),
+                                                                    original.size(), &reader),
+              HSA_STATUS_SUCCESS);
+    ASSERT_EQ(api.core.hsa_executable_load_agent_code_object_fn(kFakeExecutable, kHostAgent, reader,
+                                                                nullptr, nullptr),
+              HSA_STATUS_SUCCESS);
+    ASSERT_EQ(g_core_memory_allocations.size(), 1u);
+    hsa_queue_t *queue = nullptr;
+    ASSERT_EQ(api.core.hsa_queue_create_fn(kGuestAgent, 4, HSA_QUEUE_TYPE_SINGLE, nullptr, nullptr,
+                                           0, 0, &queue),
+              HSA_STATUS_SUCCESS);
+    EXPECT_EQ(g_fake_intercept_user_data, queue);
+
+    g_fake_symbol_kernel_object = 0x12345678u;
+    hsa_executable_symbol_t symbol{};
+    ASSERT_EQ(api.core.hsa_executable_get_symbol_by_name_fn(
+                  kFakeExecutable, g_fake_symbol_name.c_str(), &kGuestAgent, &symbol),
+              HSA_STATUS_SUCCESS);
+
+    auto submit_epoch = [&](hsa_signal_t proxy_signal, bool ordered) {
+      set_fake_signal_value(proxy_signal, 1);
+      std::array<hsa_kernel_dispatch_packet_t, 2> packets{};
+      packets[0].header = HSA_PACKET_TYPE_KERNEL_DISPATCH << HSA_PACKET_HEADER_TYPE;
+      packets[0].kernel_object = g_fake_symbol_kernel_object;
+      packets[0].completion_signal = {};
+      auto *const barrier = reinterpret_cast<hsa_barrier_and_packet_t *>(&packets[1]);
+      barrier->header =
+          static_cast<uint16_t>((HSA_PACKET_TYPE_BARRIER_AND << HSA_PACKET_HEADER_TYPE) |
+                                (static_cast<uint16_t>(ordered) << HSA_PACKET_HEADER_BARRIER));
+      barrier->completion_signal = proxy_signal;
+      g_fake_intercept_handler(packets.data(), packets.size(), 0u, g_fake_intercept_user_data,
+                               fake_intercept_packet_writer);
+    };
+
+    auto *const header =
+        static_cast<rocjitsu::ConSanMoiReportHeader *>(g_core_memory_allocations.front());
+    constexpr hsa_signal_t unordered_signal{7020u};
+    submit_epoch(unordered_signal, false);
+    header->event_counter = 5u;
+    set_fake_signal_value(unordered_signal, 0);
+    EXPECT_EQ(api.core.hsa_signal_wait_scacquire_fn(unordered_signal, HSA_SIGNAL_CONDITION_LT, 1u,
+                                                    UINT64_MAX, HSA_WAIT_STATE_BLOCKED),
+              0);
+    EXPECT_EQ(header->event_counter, 5u);
+
+    // An ordered barrier without its own completion signal is safe but cannot
+    // yet prove completion to the host. A later ordered barrier can still
+    // cover the whole prefix and restore automatic tracking.
+    hsa_barrier_and_packet_t unobservable_barrier{};
+    unobservable_barrier.header =
+        static_cast<uint16_t>((HSA_PACKET_TYPE_BARRIER_AND << HSA_PACKET_HEADER_TYPE) |
+                              (1u << HSA_PACKET_HEADER_BARRIER));
+    g_fake_intercept_handler(&unobservable_barrier, 1u, 2u, g_fake_intercept_user_data,
+                             fake_intercept_packet_writer);
+    EXPECT_EQ(header->event_counter, 5u);
+
+    // An observable ordered barrier on the same queue completes every
+    // preceding packet, including the signal-less dispatch above.
+    constexpr hsa_signal_t first_proxy{7021u};
+    set_fake_signal_value(first_proxy, 1);
+    hsa_barrier_and_packet_t first_barrier{};
+    first_barrier.header =
+        static_cast<uint16_t>((HSA_PACKET_TYPE_BARRIER_AND << HSA_PACKET_HEADER_TYPE) |
+                              (1u << HSA_PACKET_HEADER_BARRIER));
+    first_barrier.completion_signal = first_proxy;
+    g_fake_intercept_handler(&first_barrier, 1u, 3u, g_fake_intercept_user_data,
+                             fake_intercept_packet_writer);
+    set_fake_signal_value(first_proxy, 0);
+    EXPECT_EQ(api.core.hsa_signal_wait_relaxed_fn(first_proxy, HSA_SIGNAL_CONDITION_LT, 1u,
+                                                  UINT64_MAX, HSA_WAIT_STATE_BLOCKED),
+              0);
+    EXPECT_EQ(header->event_counter, 0u);
+
+    constexpr hsa_signal_t second_proxy{7022u};
+    submit_epoch(second_proxy, true);
+    header->event_counter = 9u;
+    set_fake_signal_value(second_proxy, 0);
+    EXPECT_EQ(api.core.hsa_signal_wait_scacquire_fn(second_proxy, HSA_SIGNAL_CONDITION_LT, 1u,
+                                                    UINT64_MAX, HSA_WAIT_STATE_BLOCKED),
+              0);
+    EXPECT_EQ(header->event_counter, 0u);
+    EXPECT_EQ(api.core.hsa_queue_destroy_fn(queue), HSA_STATUS_SUCCESS);
+  }
+  const std::string log = testing::internal::GetCapturedStderr();
+  EXPECT_NE(log.find("completed_epochs=2"), std::string::npos) << log;
+}
+
+TEST(HsaHooksUnitTest, ConSanExplicitCheckpointRecoversUntrackableDispatchEpoch) {
+  ScopedEnvVar mode("RJ_CONSAN_MODE", "record-replay");
+  ScopedEnvVar fail_closed("RJ_CONSAN_FAIL_CLOSED", "0");
+  ScopedEnvVar report_buffer("RJ_CONSAN_MOI_REPORT_BUFFER", nullptr);
+  ScopedEnvVar report_size("RJ_CONSAN_MOI_REPORT_BUFFER_SIZE", nullptr);
+  ScopedEnvVar auto_report_size("RJ_CONSAN_MOI_AUTO_REPORT_BUFFER_SIZE", "16777216");
+  ScopedEnvVar dynamic_records("RJ_CONSAN_MOI_DYNAMIC_ACCESS_RECORDS", "0");
+  ScopedEnvVar require_records("RJ_CONSAN_MOI_REQUIRE_RECORDS", "0");
+
+  reset_code_object_observations();
+  reset_core_memory_observations();
+  reset_queue_fakes();
+  g_fake_symbol_name = "auto_report_atomic.kd";
+  g_transform_override_result = auto_report_atomic_transform_result();
+  FakeApiTable api;
+  api.amd.hsa_amd_queue_intercept_create_fn = fake_amd_queue_intercept_create;
+  api.amd.hsa_amd_queue_intercept_register_fn = fake_amd_queue_intercept_register;
+  InstalledDbiHook hook(api);
+  ASSERT_TRUE(hook.installed()) << hook.error();
+
+  constexpr std::array<uint8_t, 8> original = {0x7f, 'E', 'L', 'F', 1, 2, 3, 4};
+  hsa_code_object_reader_t reader{};
+  ASSERT_EQ(api.core.hsa_code_object_reader_create_from_memory_fn(original.data(), original.size(),
+                                                                  &reader),
+            HSA_STATUS_SUCCESS);
+  ASSERT_EQ(api.core.hsa_executable_load_agent_code_object_fn(kFakeExecutable, kHostAgent, reader,
+                                                              nullptr, nullptr),
+            HSA_STATUS_SUCCESS);
+  ASSERT_EQ(g_core_memory_allocations.size(), 1u);
+  hsa_queue_t *queue = nullptr;
+  ASSERT_EQ(api.core.hsa_queue_create_fn(kGuestAgent, 2, HSA_QUEUE_TYPE_SINGLE, nullptr, nullptr, 0,
+                                         0, &queue),
+            HSA_STATUS_SUCCESS);
+  g_fake_symbol_kernel_object = 0x12345678u;
+  hsa_executable_symbol_t symbol{};
+  ASSERT_EQ(api.core.hsa_executable_get_symbol_by_name_fn(
+                kFakeExecutable, g_fake_symbol_name.c_str(), &kGuestAgent, &symbol),
+            HSA_STATUS_SUCCESS);
+
+  hsa_kernel_dispatch_packet_t packet{};
+  packet.header = HSA_PACKET_TYPE_KERNEL_DISPATCH << HSA_PACKET_HEADER_TYPE;
+  packet.kernel_object = g_fake_symbol_kernel_object;
+  packet.completion_signal = {};
+  ASSERT_NE(g_fake_intercept_handler, nullptr);
+  g_fake_intercept_handler(&packet, 1u, 0u, g_fake_intercept_user_data,
+                           fake_intercept_packet_writer);
+  auto *const header =
+      static_cast<rocjitsu::ConSanMoiReportHeader *>(g_core_memory_allocations.front());
+  header->event_counter = 5u;
+  constexpr hsa_signal_t unrelated_signal{7010u};
+  set_fake_signal_value(unrelated_signal, 0);
+  EXPECT_EQ(api.core.hsa_signal_wait_scacquire_fn(unrelated_signal, HSA_SIGNAL_CONDITION_LT, 1u,
+                                                  UINT64_MAX, HSA_WAIT_STATE_BLOCKED),
+            0);
+  EXPECT_EQ(header->event_counter, 5u);
+
+  // The caller has established device-wide quiescence out of band.
+  EXPECT_EQ(hook.checkpoint_after_device_synchronize(), 0u);
+  EXPECT_EQ(header->event_counter, 0u);
+  EXPECT_EQ(api.core.hsa_queue_destroy_fn(queue), HSA_STATUS_SUCCESS);
 }
 
 TEST(HsaHooksUnitTest, SampledAtomicPairAcceptsCompleteReleaseToAcquireEvidence) {

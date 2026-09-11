@@ -173,6 +173,7 @@ public:
           .fine_grained = allocation.fine_grained,
           .input_fingerprint = {},
           .static_metadata = {},
+          .static_metadata_counted = false,
           .executable = 0,
           .executable_bound = false,
       };
@@ -338,15 +339,103 @@ public:
   void retire(CoreApiTable *core, hsa_executable_t executable) {
     std::lock_guard lock(mutex_);
     detail::retire_auto_report_entries(
-        entries_, entry_count_, executable.handle, retired_summary_,
+        entries_, entry_count_, executable.handle, completed_summary_,
         [&](const Entry &entry) { return summarize(core, entry); },
         [&](Entry &entry) { return release_entry(core, entry, /*allow_runtime_reclaimed=*/false); },
         accumulate_summary);
   }
 
+  AutoMoiReportCheckpointResult checkpoint_after_device_synchronize(CoreApiTable *core) {
+    std::lock_guard lock(mutex_);
+    struct PreparedEpoch {
+      size_t entry_index = 0;
+      AutoMoiReportSnapshot snapshot;
+      AutoMoiReportSummary summary;
+    };
+    std::vector<PreparedEpoch> prepared;
+    prepared.reserve(entry_count_);
+
+    // Acquire every snapshot before changing any live report. A failed coarse
+    // copy or malformed header therefore leaves the complete current epoch in
+    // place and makes the checkpoint safely retryable.
+    for (size_t index = 0; index < entry_count_; ++index) {
+      const Entry &entry = entries_[index];
+      AutoMoiReportSnapshot snapshot = capture_snapshot(core, entry);
+      if (!snapshot.complete() || snapshot.bytes.size() < sizeof(ConSanMoiReportHeader)) {
+        log_message(kLogInfo, "ConSan MOI epoch checkpoint outcome=snapshot-failed reader=%llu",
+                    static_cast<unsigned long long>(entry.reader));
+        return {.status = ConSanEpochCheckpointStatus::ReportSnapshotFailed,
+                .report_count = entry_count_};
+      }
+      const auto *header = reinterpret_cast<const ConSanMoiReportHeader *>(snapshot.bytes.data());
+      if (!consan_moi_report_header_is_current(*header) ||
+          !consan_moi_report_layout_matches_header(*header, entry.layout, entry.layout.engine,
+                                                   entry.size)) {
+        log_message(kLogInfo,
+                    "ConSan MOI epoch checkpoint outcome=snapshot-failed reader=%llu "
+                    "reason=invalid-header-or-layout",
+                    static_cast<unsigned long long>(entry.reader));
+        return {.status = ConSanEpochCheckpointStatus::ReportSnapshotFailed,
+                .report_count = entry_count_};
+      }
+      prepared.push_back({.entry_index = index, .snapshot = std::move(snapshot), .summary = {}});
+    }
+
+    for (PreparedEpoch &epoch : prepared) {
+      const Entry &entry = entries_[epoch.entry_index];
+      const AutoMoiReportPipelineResult result =
+          process_auto_moi_report({.reader = entry.reader,
+                                   .source_address = reinterpret_cast<uint64_t>(entry.ptr),
+                                   .size = entry.size,
+                                   .layout = entry.layout,
+                                   .fine_grained = entry.fine_grained,
+                                   .input_fingerprint = entry.input_fingerprint,
+                                   .static_metadata = &entry.static_metadata},
+                                  epoch.snapshot);
+      if (!result.complete) {
+        log_message(kLogInfo,
+                    "ConSan MOI epoch checkpoint outcome=snapshot-failed reader=%llu "
+                    "reason=decode-failed",
+                    static_cast<unsigned long long>(entry.reader));
+        return {.status = ConSanEpochCheckpointStatus::ReportSnapshotFailed,
+                .report_count = entry_count_};
+      }
+      epoch.summary = result.summary;
+      if (entry.fine_grained)
+        epoch.summary.fine_grained_snapshot_bytes = epoch.snapshot.copied_bytes;
+      else
+        epoch.summary.coarse_grained_snapshot_bytes = epoch.snapshot.copied_bytes;
+    }
+
+    for (PreparedEpoch &epoch : prepared) {
+      Entry &entry = entries_[epoch.entry_index];
+      // Static metadata belongs to the allocation/code object, not to each
+      // dynamic epoch. Preserve it for analysis while accounting it once.
+      if (entry.static_metadata_counted)
+        epoch.summary.sampled_static_mapping_malformed_count = 0;
+      entry.static_metadata_counted = true;
+      // Instrumented code embeds the allocation generation for Sampled and
+      // InlineShadow. Preserve it while clearing all epoch-local state.
+      std::memset(entry.ptr, 0, entry.size);
+      *static_cast<ConSanMoiReportHeader *>(entry.ptr) =
+          make_consan_moi_report_header_for_layout(entry.generation, entry.reader, entry.layout);
+      std::atomic_thread_fence(std::memory_order_release);
+
+      // `buffer_count` describes physical allocations, not logical epochs.
+      // The same allocation remains live and will be counted exactly once at
+      // retirement or process unload.
+      epoch.summary.buffer_count = 0;
+      ++epoch.summary.completed_epoch_count;
+      accumulate_summary(completed_summary_, epoch.summary);
+    }
+    log_message(kLogInfo, "ConSan MOI epoch checkpoint outcome=complete reports=%zu",
+                prepared.size());
+    return {.status = ConSanEpochCheckpointStatus::Complete, .report_count = prepared.size()};
+  }
+
   Summary summarize_and_clear(CoreApiTable *core) {
     std::lock_guard lock(mutex_);
-    Summary total = retired_summary_;
+    Summary total = completed_summary_;
     total.required_report_bytes = required_report_bytes_;
     total.allocated_report_bytes = successful_allocated_bytes_;
     total.current_live_report_bytes = process_budget_.current_live_bytes;
@@ -368,7 +457,7 @@ public:
     allocation_failure_count_ = 0;
     capacity_failure_count_ = 0;
     cleanup_failure_count_ = 0;
-    retired_summary_ = {};
+    completed_summary_ = {};
     process_budget_.peak_live_bytes = process_budget_.current_live_bytes;
     return total;
   }
@@ -384,6 +473,7 @@ private:
     bool fine_grained = false;
     std::string input_fingerprint;
     AutoMoiRuntimeStaticMetadata static_metadata;
+    bool static_metadata_counted = false;
     uint64_t executable = 0;
     bool executable_bound = false;
   };
@@ -430,6 +520,7 @@ private:
 
   static void accumulate_summary(Summary &total, const Summary &entry) {
     total.buffer_count += entry.buffer_count;
+    total.completed_epoch_count += entry.completed_epoch_count;
     total.fine_grained_snapshot_bytes += entry.fine_grained_snapshot_bytes;
     total.coarse_grained_snapshot_bytes += entry.coarse_grained_snapshot_bytes;
     total.visible_access_record_count += entry.visible_access_record_count;
@@ -531,19 +622,23 @@ private:
     return process_budget_.peak_live_bytes;
   }
 
+  AutoMoiReportSnapshot capture_snapshot(CoreApiTable *core, const Entry &entry) const {
+    return capture_auto_moi_report_snapshot({.source = entry.ptr,
+                                             .size = entry.size,
+                                             .expected_layout = entry.layout,
+                                             .expected_engine = entry.layout.engine,
+                                             .fine_grained = entry.fine_grained},
+                                            core != nullptr && core->hsa_memory_copy_fn != nullptr
+                                                ? copy_coarse_report_snapshot
+                                                : nullptr,
+                                            core);
+  }
+
   Summary summarize(CoreApiTable *core, const Entry &entry) {
     Summary summary;
     summary.buffer_count = 1;
 
-    const AutoMoiReportSnapshot snapshot = capture_auto_moi_report_snapshot(
-        {.source = entry.ptr,
-         .size = entry.size,
-         .expected_layout = entry.layout,
-         .expected_engine = entry.layout.engine,
-         .fine_grained = entry.fine_grained},
-        core != nullptr && core->hsa_memory_copy_fn != nullptr ? copy_coarse_report_snapshot
-                                                               : nullptr,
-        core);
+    const AutoMoiReportSnapshot snapshot = capture_snapshot(core, entry);
     if (!snapshot.complete()) {
       if (snapshot.failure == AutoMoiReportSnapshotFailure::CopyUnavailable) {
         log_message(kLogInfo,
@@ -564,14 +659,17 @@ private:
     else
       summary.coarse_grained_snapshot_bytes = snapshot.copied_bytes;
 
-    return summarize_auto_moi_report({.reader = entry.reader,
-                                      .source_address = reinterpret_cast<uint64_t>(entry.ptr),
-                                      .size = entry.size,
-                                      .layout = entry.layout,
-                                      .fine_grained = entry.fine_grained,
-                                      .input_fingerprint = entry.input_fingerprint,
-                                      .static_metadata = &entry.static_metadata},
-                                     snapshot, summary);
+    summary = summarize_auto_moi_report({.reader = entry.reader,
+                                         .source_address = reinterpret_cast<uint64_t>(entry.ptr),
+                                         .size = entry.size,
+                                         .layout = entry.layout,
+                                         .fine_grained = entry.fine_grained,
+                                         .input_fingerprint = entry.input_fingerprint,
+                                         .static_metadata = &entry.static_metadata},
+                                        snapshot, summary);
+    if (entry.static_metadata_counted)
+      summary.sampled_static_mapping_malformed_count = 0;
+    return summary;
   }
 
   mutable std::mutex mutex_;
@@ -584,7 +682,7 @@ private:
   uint64_t allocation_failure_count_ = 0;
   uint64_t capacity_failure_count_ = 0;
   uint64_t cleanup_failure_count_ = 0;
-  Summary retired_summary_;
+  Summary completed_summary_;
   std::atomic<uint64_t> next_generation_{0};
 };
 
@@ -624,6 +722,11 @@ void discard_auto_moi_report_buffer(CoreApiTable *core, uint64_t reader, uint64_
 
 void retire_auto_moi_report_buffers(CoreApiTable *core, hsa_executable_t executable) {
   AutoMoiReportBufferRegistry::instance().retire(core, executable);
+}
+
+AutoMoiReportCheckpointResult
+checkpoint_auto_moi_report_buffers_after_device_synchronize(CoreApiTable *core) {
+  return AutoMoiReportBufferRegistry::instance().checkpoint_after_device_synchronize(core);
 }
 
 AutoMoiReportSummary summarize_and_clear_auto_moi_report_buffers(CoreApiTable *core) {

@@ -60,6 +60,19 @@ struct AutoMoiReportPipelineInput {
   const AutoMoiRuntimeStaticMetadata *static_metadata = nullptr;
 };
 
+struct AutoMoiReportPipelineResult {
+  AutoMoiReportSummary summary;
+  bool complete = false;
+};
+
+/// Decode, analyze, and render one quiescent automatic report. `complete` is
+/// false when the captured bytes cannot be decoded against the immutable
+/// layout contract. Lifecycle code must not recycle such an epoch.
+[[nodiscard]] AutoMoiReportPipelineResult
+process_auto_moi_report(const AutoMoiReportPipelineInput &input,
+                        const AutoMoiReportSnapshot &snapshot,
+                        AutoMoiReportSummary initial_summary = {});
+
 [[nodiscard]] AutoMoiReportSummary
 summarize_auto_moi_report(const AutoMoiReportPipelineInput &input,
                           const AutoMoiReportSnapshot &snapshot,

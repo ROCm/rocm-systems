@@ -425,6 +425,26 @@ generation-consistent snapshot
   -> bounded renderer
 ```
 
+The adapter automatically checkpoints the same pipeline when intercepted waits
+show that every tracked instrumented dispatch is complete. A dispatch's own
+completion signal is preferred; an ordered barrier completion signal safely
+proxies for preceding signal-less dispatches on the same queue. Submission and
+recycling share a gate, so a new report writer cannot appear between the
+quiescence check and reset. A checkpoint first captures and validates every
+live report, then analyzes every captured epoch, and only then reinitializes all
+allocations. This transaction prevents a bad snapshot in one code object from
+discarding evidence in another. Accumulated host summaries retain all earlier
+verdict-relevant evidence while only the current epoch occupies device storage.
+An explicit API is retained only for custom runtimes whose completion or
+synchronization cannot be observed safely.
+
+The checkpoint boundary is shared by all MOI engines because work separated by
+a device-wide synchronization cannot race across that boundary. Its reset is
+mode-complete: Record/Replay tables, Sampled windows and publication state, and
+Inline Shadow ownership and ordering state all begin a fresh epoch while the
+allocation identity and embedded generation stay stable. SuperCollider is not
+an MOI engine; its lifetime-sticky mismatch marker is deliberately not reset.
+
 Coarse-grained report memory is copied through the appropriate snapshot path.
 A decoder can recover records while also observing overflow, changed
 generation, malformed publication, missing dispatch, or saturation. Trust
