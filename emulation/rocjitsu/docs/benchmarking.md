@@ -8,6 +8,9 @@ Measure each revision in separate Release build directories and alternate their
 run order. Small simulator changes are easily hidden by CPU frequency, process
 startup, JIT caches, and unrelated host activity.
 
+For the in-tree fixed workload matrix and its JSON artifact runner, see the
+[automated benchmark suite](benchmark-suite.md).
+
 ## Metrics
 
 | Metric | Use |
