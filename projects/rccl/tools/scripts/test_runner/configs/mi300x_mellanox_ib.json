@@ -854,11 +854,16 @@
           "name": "DdaFabricEligibilityTest",
           "description": "Dda Fabric eligibility tests",
           "test_filter": "DdaFabricEligibilityTest.*"
-	},
-	{
+        },
+        {
           "name": "CeAlltoAllvEligibilityTest",
           "description": "CE AlltoAllv eligibility, metadata layout, and ncclCeImplemented/ncclCeAvailable gating tests",
           "test_filter": "CeAlltoAllvEligibilityTest.*"
+        },
+        {
+          "name": "CeAlltoAllEligibilityTest",
+          "description": "CE AlltoAll eligibility gating tests matching taskAppend (CTA_POLICY_ZERO, sysmem, capture, group depth)",
+          "test_filter": "CeAlltoAllEligibilityTest.*"
         },
         {
           "name": "TimeoutTests",

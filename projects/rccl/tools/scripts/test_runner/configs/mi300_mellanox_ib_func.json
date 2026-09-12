@@ -1242,6 +1242,11 @@
           "name": "DdaAlltoAllThresholdTest",
           "description": "DDA AlltoAll 4 MiB threshold and host staging-byte unit tests for gfx942/gfx950",
           "test_filter": "DdaAlltoAllThresholdTest.*:DdaAlltoAllThreshold.*"
+        },
+        {
+          "name": "CeAlltoAllEligibilityTest",
+          "description": "CE AlltoAll eligibility gating tests matching taskAppend (CTA_POLICY_ZERO, sysmem, capture, group depth)",
+          "test_filter": "CeAlltoAllEligibilityTest.*"
         }
       ]
     },
