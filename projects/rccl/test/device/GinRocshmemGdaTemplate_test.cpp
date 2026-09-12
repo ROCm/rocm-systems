@@ -10,11 +10,17 @@
 // specializations, so this suite unit-tests the GDA AllToAll device path
 // without a live network.
 //
-// The real rocshmem::QueuePair device methods (put_nbi/atomic_add/quiet) are
-// only declared in queue_pair_device.h (defined in rocSHMEM device bitcode).
-// This translation unit supplies inline stub definitions so the suite links
-// against no librocshmem device code, mirroring how Suite H shadows the SDMA
-// engine with test/device/sdma/anvil_device.hpp.
+// rocshmem::QueuePair is declared as a type alias for some QueuePair type by
+// the rocSHMEM-GDA header gda/queue_pair_provider.hpp. rocshmem::QueuePairMock
+// provides a mock QueuePair type that conforms to rocshmem::QueuePairInterface.
+// By defining GDA_QUEUEPAIR_MOCK prior to including queue_pair_provider.hpp,
+// rocshmem::QueuePair is aliased to rocshmem::QueuePairMock. The definition of
+// the rocshmem::QueuePairMock mock QueuePair object type mirrors how Suite H
+// shadows the SDMA engine with test/device/sdma/anvil_device.hpp.
+
+// define GDA_QUEUEPAIR_MOCK so that QueuePair is an alias for QueuePairMock
+#define GDA_QUEUEPAIR_MOCK
+#include "nccl_device/gin/rocshmem_gda/gda/queue_pair_provider.hpp"
 
 #include "DeviceTestBase.hpp"
 
@@ -37,43 +43,6 @@ __device__ unsigned long long g_gdaStubThreadfenceCount = 0;
 #include <vector>
 
 #if NCCL_GIN_ROCSHMEM_GDA_ENABLE
-
-// --------------------------------------------------------------------------
-// Stub definitions for rocshmem::QueuePair device methods.
-//   put_nbi       : byte-copy laddr -> raddr (observe data landing at remote VA)
-//   atomic_add   : atomic add into the remote signal word (observe signal deliver)
-//   quiet         : bump a device-global call counter (observe completion sync)
-// Non-RDC build: these must be defined in the same TU as the kernels that
-// (via the inlined template) call them.
-// --------------------------------------------------------------------------
-__device__ unsigned long long g_gdaStubQuietCount = 0;
-__device__ unsigned long long g_gdaStubPutNbiCount = 0;
-
-namespace rocshmem {
-
-__device__ void QueuePair::put_nbi(void* raddr, uint32_t /*rkey*/, const void* laddr, uint32_t /*lkey*/,
-                                   size_t length, ActiveWFInfo& /*wf_info*/, bool /*ring_db*/) {
-  if (raddr == nullptr || laddr == nullptr) return;
-  atomicAdd(&g_gdaStubPutNbiCount, 1ULL);
-  auto* d = static_cast<char*>(raddr);
-  const auto* s = static_cast<const char*>(laddr);
-  for (size_t i = 0; i < length; ++i) d[i] = s[i];
-}
-
-// Matches queue_pair_device.h: atomic_add(void* raddr, uint32_t rkey, int64_t
-// value, ActiveWFInfo&, bool fence). The template's signal path calls this
-// (gin_rocshmem_gda.h:54,101); rkey/fence are unused by the byte-accurate stub.
-__device__ void QueuePair::atomic_add(void* raddr, uint32_t /*rkey*/, int64_t value, ActiveWFInfo& /*wf_info*/,
-                                      bool /*fence*/) {
-  if (raddr == nullptr) return;
-  atomicAdd(reinterpret_cast<unsigned long long*>(raddr), static_cast<unsigned long long>(value));
-}
-
-__device__ void QueuePair::quiet(ActiveWFInfo& /*wf_info*/) {
-  atomicAdd(&g_gdaStubQuietCount, 1ULL);
-}
-
-}  // namespace rocshmem
 
 namespace RcclUnitTesting
 {
@@ -156,34 +125,56 @@ public:
 };
 
 static void resetQuietCount() {
-  unsigned long long z = 0;
-  HIP_CHECK(hipMemcpyToSymbol(HIP_SYMBOL(g_gdaStubQuietCount), &z, sizeof(z)));
+  size_t z = 0;
+  HIP_CHECK(hipMemcpyToSymbol(HIP_SYMBOL(rocshmem::QueuePairMock::quiet_count), &z, sizeof(z)));
 }
 
-static unsigned long long readQuietCount() {
-  unsigned long long q = 0;
-  HIP_EXPECT(hipMemcpyFromSymbol(&q, HIP_SYMBOL(g_gdaStubQuietCount), sizeof(q)));
+static size_t readQuietCount() {
+  size_t q = 0;
+  HIP_EXPECT(hipMemcpyFromSymbol(&q, HIP_SYMBOL(rocshmem::QueuePairMock::quiet_count), sizeof(q)));
   return q;
 }
 
 static void resetPutNbiCount() {
-  unsigned long long z = 0;
-  HIP_CHECK(hipMemcpyToSymbol(HIP_SYMBOL(g_gdaStubPutNbiCount), &z, sizeof(z)));
+  size_t z = 0;
+  HIP_CHECK(hipMemcpyToSymbol(HIP_SYMBOL(rocshmem::QueuePairMock::rma_count), &z, sizeof(z)));
 }
 
-static unsigned long long readPutNbiCount() {
-  unsigned long long n = 0;
-  HIP_EXPECT(hipMemcpyFromSymbol(&n, HIP_SYMBOL(g_gdaStubPutNbiCount), sizeof(n)));
+static size_t readPutNbiCount() {
+  size_t n = 0;
+  HIP_EXPECT(hipMemcpyFromSymbol(&n, HIP_SYMBOL(rocshmem::QueuePairMock::rma_count), sizeof(n)));
   return n;
 }
 
+static void resetPutValCount() {
+  size_t z = 0;
+  HIP_CHECK(hipMemcpyToSymbol(HIP_SYMBOL(rocshmem::QueuePairMock::rma_inline_count), &z, sizeof(z)));
+}
+
+static size_t readPutValCount() {
+  size_t v = 0;
+  HIP_EXPECT(hipMemcpyFromSymbol(&v, HIP_SYMBOL(rocshmem::QueuePairMock::rma_inline_count), sizeof(v)));
+  return v;
+}
+
+static void resetSignalCount() {
+  size_t z = 0;
+  HIP_CHECK(hipMemcpyToSymbol(HIP_SYMBOL(rocshmem::QueuePairMock::amo_count), &z, sizeof(z)));
+}
+
+static size_t readSignalCount() {
+  size_t s = 0;
+  HIP_EXPECT(hipMemcpyFromSymbol(&s, HIP_SYMBOL(rocshmem::QueuePairMock::amo_count), sizeof(s)));
+  return s;
+}
+
 static void resetThreadfenceCount() {
-  unsigned long long z = 0;
+  size_t z = 0;
   HIP_CHECK(hipMemcpyToSymbol(HIP_SYMBOL(g_gdaStubThreadfenceCount), &z, sizeof(z)));
 }
 
-static unsigned long long readThreadfenceCount() {
-  unsigned long long c = 0;
+static size_t readThreadfenceCount() {
+  size_t c = 0;
   HIP_EXPECT(hipMemcpyFromSymbol(&c, HIP_SYMBOL(g_gdaStubThreadfenceCount), sizeof(c)));
   return c;
 }
@@ -237,9 +228,11 @@ TEST_F(GinRocshmemGdaTemplateTest, Put_ZeroByteSkipsDataStillSignals) {
   env.dst.zero();
   env.build();
   resetPutNbiCount();
+  resetSignalCount();
   kernelPutZeroBytes<<<1, 1>>>(env.dHarness.ptr);
   syncAndCheck();
   EXPECT_EQ(readPutNbiCount(), 0ULL);  // production skips put_nbi when bytes==0
+  EXPECT_EQ(readSignalCount(), 1ULL);  // signal still dispatched
   auto got = env.dst.copyTo();
   for (int i = 0; i < kN; ++i) EXPECT_EQ(got[static_cast<size_t>(i)], 0u);  // data write skipped
   auto sigs = env.signals.copyTo();
@@ -264,8 +257,10 @@ TEST_F(GinRocshmemGdaTemplateTest, Put_SignalAddDeliversArg) {
   GdaEnv env(32);
   env.src.zero();
   env.build();
+  resetSignalCount();
   kernelPutSignalAdd<<<1, 1>>>(env.dHarness.ptr);
   syncAndCheck();
+  EXPECT_EQ(readSignalCount(), 1ULL);  // signal dispatched
   auto sigs = env.signals.copyTo();
   EXPECT_EQ(sigs[1], 7ULL);
   EXPECT_EQ(sigs[0], 0ULL);
@@ -414,9 +409,11 @@ TEST_F(GinRocshmemGdaTemplateTest, PutValue_InlineScalar) {
   GdaEnv env(sizeof(uint64_t));
   env.dst.zero();
   env.build();
+  resetPutValCount();
   const uint64_t kVal = 0xAABBCCDDEEFF0011ULL;
   kernelPutValueScalar<<<1, 1>>>(env.dHarness.ptr, kVal);
   syncAndCheck();
+  EXPECT_EQ(readPutValCount(), 1ULL);  // put inlined
   auto got = env.dst.copyTo();
   uint64_t observed = 0;
   std::memcpy(&observed, got.data(), sizeof(observed));
@@ -440,9 +437,13 @@ TEST_F(GinRocshmemGdaTemplateTest, PutValue_WithSignal) {
   GdaEnv env(sizeof(uint32_t));
   env.dst.zero();
   env.build();
+  resetPutValCount();
+  resetSignalCount();
   const uint32_t kVal = 0x12345678u;
   kernelPutValueSignal<<<1, 1>>>(env.dHarness.ptr, kVal);
   syncAndCheck();
+  EXPECT_EQ(readPutValCount(), 1ULL);  // put inlined
+  EXPECT_EQ(readSignalCount(), 1ULL);  // signal dispatched
   auto got = env.dst.copyTo();
   uint32_t observed = 0;
   std::memcpy(&observed, got.data(), sizeof(observed));
@@ -466,7 +467,7 @@ TEST_F(GinRocshmemGdaTemplateTest, Flush_QuietsAllPeers) {
   resetQuietCount();
   kernelFlush<<<1, 1>>>(env.dHarness.ptr);
   syncAndCheck();
-  EXPECT_EQ(readQuietCount(), static_cast<unsigned long long>(GdaEnv::kNRanks));
+  EXPECT_EQ(readQuietCount(), static_cast<size_t>(GdaEnv::kNRanks));
 }
 
 // G11: GetSignalPtr/ResetSignal and GetCounterPtr/ResetCounter round-trip.
