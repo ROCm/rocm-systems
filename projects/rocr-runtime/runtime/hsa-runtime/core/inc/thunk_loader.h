@@ -443,8 +443,35 @@ class ThunkLoader {
     ThunkLoader();
     ~ThunkLoader();
 
-    void LoadThunkApiTable();
+    /// @brief Bind the thunk API table, either to a loaded shared thunk or to
+    /// the statically linked one.
+    ///
+    /// @retval false A shared thunk was loaded but does not export everything
+    /// the table needs. Binding stops at the first missing entry point, so the
+    /// rest of the table is left null and calling into it would fault - the
+    /// caller has to abandon the load rather than carry on.
+    bool LoadThunkApiTable();
+
+    /// @brief Create the thunk's process-wide instance, where it has one.
+    ///
+    /// @details Only DTIF does. Both halves of the pair are resolved before
+    /// either is called, so a thunk that can create an instance but not
+    /// destroy one is refused rather than taken up on the offer: the
+    /// alternative is an instance that outlives the process's ability to give
+    /// it back. This is the rule KfdDriver::ImportExternalSemaphore() already
+    /// applies to the other optional acquire/release pair in the table.
+    ///
+    /// Ownership of the instance is recorded here and nowhere else, so that a
+    /// load which fails before or during this call leaves nothing for the
+    /// rollback to give back.
     bool CreateThunkInstance();
+
+    /// @brief Destroy the instance this loader owns, if it owns one.
+    ///
+    /// @details Owning nothing is success - the rollback path runs this after
+    /// failures at every stage of the load, including ones that never got as
+    /// far as creating an instance. Idempotent, so an unwind on the failure
+    /// path and a later normal shutdown cannot both release the same instance.
     bool DestroyThunkInstance();
     bool CheckThunkAbi();
     bool IsDXG() const { return is_win_dxg_ || is_wsl_dxg_; }
@@ -454,136 +481,147 @@ class ThunkLoader {
     bool IsSharedLibraryLoaded() const { return is_loaded_; }
     void* ThunkHandle() const { return thunk_handle; }
 
-    HSAKMT_DEF(hsaKmtOpenKFD)* HSAKMT_PFN(hsaKmtOpenKFD);
-    HSAKMT_DEF(hsaKmtCloseKFD)* HSAKMT_PFN(hsaKmtCloseKFD);
-    HSAKMT_DEF(hsaKmtGetVersion)* HSAKMT_PFN(hsaKmtGetVersion);
-    HSAKMT_DEF(hsaKmtAcquireSystemProperties)* HSAKMT_PFN(hsaKmtAcquireSystemProperties);
-    HSAKMT_DEF(hsaKmtReleaseSystemProperties)* HSAKMT_PFN(hsaKmtReleaseSystemProperties);
-    HSAKMT_DEF(hsaKmtGetNodeProperties)* HSAKMT_PFN(hsaKmtGetNodeProperties);
-    HSAKMT_DEF(hsaKmtGetNodeMemoryProperties)* HSAKMT_PFN(hsaKmtGetNodeMemoryProperties);
-    HSAKMT_DEF(hsaKmtGetNodeCacheProperties)* HSAKMT_PFN(hsaKmtGetNodeCacheProperties);
-    HSAKMT_DEF(hsaKmtGetNodeIoLinkProperties)* HSAKMT_PFN(hsaKmtGetNodeIoLinkProperties);
-    HSAKMT_DEF(hsaKmtCreateEvent)* HSAKMT_PFN(hsaKmtCreateEvent);
-    HSAKMT_DEF(hsaKmtDestroyEvent)* HSAKMT_PFN(hsaKmtDestroyEvent);
-    HSAKMT_DEF(hsaKmtSetEvent)* HSAKMT_PFN(hsaKmtSetEvent);
-    HSAKMT_DEF(hsaKmtResetEvent)* HSAKMT_PFN(hsaKmtResetEvent);
-    HSAKMT_DEF(hsaKmtQueryEventState)* HSAKMT_PFN(hsaKmtQueryEventState);
-    HSAKMT_DEF(hsaKmtWaitOnEvent)* HSAKMT_PFN(hsaKmtWaitOnEvent);
-    HSAKMT_DEF(hsaKmtWaitOnMultipleEvents)* HSAKMT_PFN(hsaKmtWaitOnMultipleEvents);
-    HSAKMT_DEF(hsaKmtCreateQueue)* HSAKMT_PFN(hsaKmtCreateQueue);
-    HSAKMT_DEF(hsaKmtCreateQueueExt)* HSAKMT_PFN(hsaKmtCreateQueueExt);
-    HSAKMT_DEF(hsaKmtCreateQueueV2)* HSAKMT_PFN(hsaKmtCreateQueueV2);
-    HSAKMT_DEF(hsaKmtUpdateQueue)* HSAKMT_PFN(hsaKmtUpdateQueue);
-    HSAKMT_DEF(hsaKmtDestroyQueue)* HSAKMT_PFN(hsaKmtDestroyQueue);
-    HSAKMT_DEF(hsaKmtSetQueueCUMask)* HSAKMT_PFN(hsaKmtSetQueueCUMask);
-    HSAKMT_DEF(hsaKmtSetMemoryPolicy)* HSAKMT_PFN(hsaKmtSetMemoryPolicy);
-    HSAKMT_DEF(hsaKmtAllocMemory)* HSAKMT_PFN(hsaKmtAllocMemory);
-    HSAKMT_DEF(hsaKmtAllocMemoryAlign)* HSAKMT_PFN(hsaKmtAllocMemoryAlign);
-    HSAKMT_DEF(hsaKmtFreeMemory)* HSAKMT_PFN(hsaKmtFreeMemory);
-    HSAKMT_DEF(hsaKmtAvailableMemory)* HSAKMT_PFN(hsaKmtAvailableMemory);
-    HSAKMT_DEF(hsaKmtGetDefaultHostGpu)* HSAKMT_PFN(hsaKmtGetDefaultHostGpu);
-    HSAKMT_DEF(hsaKmtRegisterMemory)* HSAKMT_PFN(hsaKmtRegisterMemory);
-    HSAKMT_DEF(hsaKmtRegisterMemoryToNodes)* HSAKMT_PFN(hsaKmtRegisterMemoryToNodes);
-    HSAKMT_DEF(hsaKmtRegisterMemoryWithFlags)* HSAKMT_PFN(hsaKmtRegisterMemoryWithFlags);
-    HSAKMT_DEF(hsaKmtRegisterGraphicsHandleToNodes)* HSAKMT_PFN(hsaKmtRegisterGraphicsHandleToNodes);
-    HSAKMT_DEF(hsaKmtRegisterGraphicsHandleToNodesExt)* HSAKMT_PFN(hsaKmtRegisterGraphicsHandleToNodesExt);
-    HSAKMT_DEF(hsaKmtShareMemory)* HSAKMT_PFN(hsaKmtShareMemory);
-    HSAKMT_DEF(hsaKmtRegisterSharedHandle)* HSAKMT_PFN(hsaKmtRegisterSharedHandle);
-    HSAKMT_DEF(hsaKmtRegisterSharedHandleToNodes)* HSAKMT_PFN(hsaKmtRegisterSharedHandleToNodes);
-    HSAKMT_DEF(hsaKmtProcessVMRead)* HSAKMT_PFN(hsaKmtProcessVMRead);
-    HSAKMT_DEF(hsaKmtProcessVMWrite)* HSAKMT_PFN(hsaKmtProcessVMWrite);
-    HSAKMT_DEF(hsaKmtDeregisterMemory)* HSAKMT_PFN(hsaKmtDeregisterMemory);
-    HSAKMT_DEF(hsaKmtMapMemoryToGPU)* HSAKMT_PFN(hsaKmtMapMemoryToGPU);
-    HSAKMT_DEF(hsaKmtMapMemoryToGPUNodes)* HSAKMT_PFN(hsaKmtMapMemoryToGPUNodes);
-    HSAKMT_DEF(hsaKmtUnmapMemoryToGPU)* HSAKMT_PFN(hsaKmtUnmapMemoryToGPU);
-    HSAKMT_DEF(hsaKmtDbgRegister)* HSAKMT_PFN(hsaKmtDbgRegister);
-    HSAKMT_DEF(hsaKmtDbgUnregister)* HSAKMT_PFN(hsaKmtDbgUnregister);
-    HSAKMT_DEF(hsaKmtDbgWavefrontControl)* HSAKMT_PFN(hsaKmtDbgWavefrontControl);
-    HSAKMT_DEF(hsaKmtDbgAddressWatch)* HSAKMT_PFN(hsaKmtDbgAddressWatch);
-    HSAKMT_DEF(hsaKmtDbgEnable)* HSAKMT_PFN(hsaKmtDbgEnable);
-    HSAKMT_DEF(hsaKmtDbgDisable)* HSAKMT_PFN(hsaKmtDbgDisable);
-    HSAKMT_DEF(hsaKmtDbgGetDeviceData)* HSAKMT_PFN(hsaKmtDbgGetDeviceData);
-    HSAKMT_DEF(hsaKmtDbgGetQueueData)* HSAKMT_PFN(hsaKmtDbgGetQueueData);
-    HSAKMT_DEF(hsaKmtGetClockCounters)* HSAKMT_PFN(hsaKmtGetClockCounters);
-    HSAKMT_DEF(hsaKmtPmcGetCounterProperties)* HSAKMT_PFN(hsaKmtPmcGetCounterProperties);
-    HSAKMT_DEF(hsaKmtPmcRegisterTrace)* HSAKMT_PFN(hsaKmtPmcRegisterTrace);
-    HSAKMT_DEF(hsaKmtPmcUnregisterTrace)* HSAKMT_PFN(hsaKmtPmcUnregisterTrace);
-    HSAKMT_DEF(hsaKmtPmcAcquireTraceAccess)* HSAKMT_PFN(hsaKmtPmcAcquireTraceAccess);
-    HSAKMT_DEF(hsaKmtPmcReleaseTraceAccess)* HSAKMT_PFN(hsaKmtPmcReleaseTraceAccess);
-    HSAKMT_DEF(hsaKmtPmcStartTrace)* HSAKMT_PFN(hsaKmtPmcStartTrace);
-    HSAKMT_DEF(hsaKmtPmcQueryTrace)* HSAKMT_PFN(hsaKmtPmcQueryTrace);
-    HSAKMT_DEF(hsaKmtPmcStopTrace)* HSAKMT_PFN(hsaKmtPmcStopTrace);
-    HSAKMT_DEF(hsaKmtMapGraphicHandle)* HSAKMT_PFN(hsaKmtMapGraphicHandle);
-    HSAKMT_DEF(hsaKmtUnmapGraphicHandle)* HSAKMT_PFN(hsaKmtUnmapGraphicHandle);
-    HSAKMT_DEF(hsaKmtSetTrapHandler)* HSAKMT_PFN(hsaKmtSetTrapHandler);
-    HSAKMT_DEF(hsaKmtSetSigbusDelay)* HSAKMT_PFN(hsaKmtSetSigbusDelay);
-    HSAKMT_DEF(hsaKmtGetTileConfig)* HSAKMT_PFN(hsaKmtGetTileConfig);
-    HSAKMT_DEF(hsaKmtQueryPointerInfo)* HSAKMT_PFN(hsaKmtQueryPointerInfo);
-    HSAKMT_DEF(hsaKmtSetMemoryUserData)* HSAKMT_PFN(hsaKmtSetMemoryUserData);
-    HSAKMT_DEF(hsaKmtGetQueueInfo)* HSAKMT_PFN(hsaKmtGetQueueInfo);
-    HSAKMT_DEF(hsaKmtGetKernelQueueId)* HSAKMT_PFN(hsaKmtGetKernelQueueId);
-    HSAKMT_DEF(hsaKmtAllocQueueGWS)* HSAKMT_PFN(hsaKmtAllocQueueGWS);
-    HSAKMT_DEF(hsaKmtRuntimeEnable)* HSAKMT_PFN(hsaKmtRuntimeEnable);
-    HSAKMT_DEF(hsaKmtRuntimeDisable)* HSAKMT_PFN(hsaKmtRuntimeDisable);
-    HSAKMT_DEF(hsaKmtCheckRuntimeDebugSupport)* HSAKMT_PFN(hsaKmtCheckRuntimeDebugSupport);
-    HSAKMT_DEF(hsaKmtGetRuntimeCapabilities)* HSAKMT_PFN(hsaKmtGetRuntimeCapabilities);
-    HSAKMT_DEF(hsaKmtGetCoreRuntimeInfo)* HSAKMT_PFN(hsaKmtGetCoreRuntimeInfo);
-    HSAKMT_DEF(hsaKmtGetCoreDeviceInfo)* HSAKMT_PFN(hsaKmtGetCoreDeviceInfo);
-    HSAKMT_DEF(hsaKmtDebugTrapIoctl)* HSAKMT_PFN(hsaKmtDebugTrapIoctl);
-    HSAKMT_DEF(hsaKmtSPMAcquire)* HSAKMT_PFN(hsaKmtSPMAcquire);
-    HSAKMT_DEF(hsaKmtSPMRelease)* HSAKMT_PFN(hsaKmtSPMRelease);
-    HSAKMT_DEF(hsaKmtSPMSetDestBuffer)* HSAKMT_PFN(hsaKmtSPMSetDestBuffer);
-    HSAKMT_DEF(hsaKmtSVMSetAttr)* HSAKMT_PFN(hsaKmtSVMSetAttr);
-    HSAKMT_DEF(hsaKmtSVMGetAttr)* HSAKMT_PFN(hsaKmtSVMGetAttr);
-    HSAKMT_DEF(hsaKmtSetXNACKMode)* HSAKMT_PFN(hsaKmtSetXNACKMode);
-    HSAKMT_DEF(hsaKmtGetXNACKMode)* HSAKMT_PFN(hsaKmtGetXNACKMode);
-    HSAKMT_DEF(hsaKmtOpenSMI)* HSAKMT_PFN(hsaKmtOpenSMI);
-    HSAKMT_DEF(hsaKmtExportDMABufHandle)* HSAKMT_PFN(hsaKmtExportDMABufHandle);
-    HSAKMT_DEF(hsaKmtWaitOnEvent_Ext)* HSAKMT_PFN(hsaKmtWaitOnEvent_Ext);
-    HSAKMT_DEF(hsaKmtWaitOnMultipleEvents_Ext)* HSAKMT_PFN(hsaKmtWaitOnMultipleEvents_Ext);
-    HSAKMT_DEF(hsaKmtReplaceAsanHeaderPage)* HSAKMT_PFN(hsaKmtReplaceAsanHeaderPage);
-    HSAKMT_DEF(hsaKmtReturnAsanHeaderPage)* HSAKMT_PFN(hsaKmtReturnAsanHeaderPage);
-    HSAKMT_DEF(hsaKmtGetAMDGPUDeviceHandle)* HSAKMT_PFN(hsaKmtGetAMDGPUDeviceHandle);
-    HSAKMT_DEF(hsaKmtPcSamplingQueryCapabilities)* HSAKMT_PFN(hsaKmtPcSamplingQueryCapabilities);
-    HSAKMT_DEF(hsaKmtPcSamplingCreate)* HSAKMT_PFN(hsaKmtPcSamplingCreate);
-    HSAKMT_DEF(hsaKmtPcSamplingDestroy)* HSAKMT_PFN(hsaKmtPcSamplingDestroy);
-    HSAKMT_DEF(hsaKmtPcSamplingStart)* HSAKMT_PFN(hsaKmtPcSamplingStart);
-    HSAKMT_DEF(hsaKmtPcSamplingStop)* HSAKMT_PFN(hsaKmtPcSamplingStop);
-    HSAKMT_DEF(hsaKmtPcSamplingSupport)* HSAKMT_PFN(hsaKmtPcSamplingSupport);
-    HSAKMT_DEF(hsaKmtModelEnabled)* HSAKMT_PFN(hsaKmtModelEnabled);
-    HSAKMT_DEF(hsaKmtQueueRingDoorbell)* HSAKMT_PFN(hsaKmtQueueRingDoorbell);
-    HSAKMT_DEF(hsaKmtAisReadWriteFile)* HSAKMT_PFN(hsaKmtAisReadWriteFile);
+    HSAKMT_DEF(hsaKmtOpenKFD) * HSAKMT_PFN(hsaKmtOpenKFD) = nullptr;
+    HSAKMT_DEF(hsaKmtCloseKFD) * HSAKMT_PFN(hsaKmtCloseKFD) = nullptr;
+    HSAKMT_DEF(hsaKmtGetVersion) * HSAKMT_PFN(hsaKmtGetVersion) = nullptr;
+    HSAKMT_DEF(hsaKmtAcquireSystemProperties) * HSAKMT_PFN(hsaKmtAcquireSystemProperties) = nullptr;
+    HSAKMT_DEF(hsaKmtReleaseSystemProperties) * HSAKMT_PFN(hsaKmtReleaseSystemProperties) = nullptr;
+    HSAKMT_DEF(hsaKmtGetNodeProperties) * HSAKMT_PFN(hsaKmtGetNodeProperties) = nullptr;
+    HSAKMT_DEF(hsaKmtGetNodeMemoryProperties) * HSAKMT_PFN(hsaKmtGetNodeMemoryProperties) = nullptr;
+    HSAKMT_DEF(hsaKmtGetNodeCacheProperties) * HSAKMT_PFN(hsaKmtGetNodeCacheProperties) = nullptr;
+    HSAKMT_DEF(hsaKmtGetNodeIoLinkProperties) * HSAKMT_PFN(hsaKmtGetNodeIoLinkProperties) = nullptr;
+    HSAKMT_DEF(hsaKmtCreateEvent) * HSAKMT_PFN(hsaKmtCreateEvent) = nullptr;
+    HSAKMT_DEF(hsaKmtDestroyEvent) * HSAKMT_PFN(hsaKmtDestroyEvent) = nullptr;
+    HSAKMT_DEF(hsaKmtSetEvent) * HSAKMT_PFN(hsaKmtSetEvent) = nullptr;
+    HSAKMT_DEF(hsaKmtResetEvent) * HSAKMT_PFN(hsaKmtResetEvent) = nullptr;
+    HSAKMT_DEF(hsaKmtQueryEventState) * HSAKMT_PFN(hsaKmtQueryEventState) = nullptr;
+    HSAKMT_DEF(hsaKmtWaitOnEvent) * HSAKMT_PFN(hsaKmtWaitOnEvent) = nullptr;
+    HSAKMT_DEF(hsaKmtWaitOnMultipleEvents) * HSAKMT_PFN(hsaKmtWaitOnMultipleEvents) = nullptr;
+    HSAKMT_DEF(hsaKmtCreateQueue) * HSAKMT_PFN(hsaKmtCreateQueue) = nullptr;
+    HSAKMT_DEF(hsaKmtCreateQueueExt) * HSAKMT_PFN(hsaKmtCreateQueueExt) = nullptr;
+    HSAKMT_DEF(hsaKmtCreateQueueV2) * HSAKMT_PFN(hsaKmtCreateQueueV2) = nullptr;
+    HSAKMT_DEF(hsaKmtUpdateQueue) * HSAKMT_PFN(hsaKmtUpdateQueue) = nullptr;
+    HSAKMT_DEF(hsaKmtDestroyQueue) * HSAKMT_PFN(hsaKmtDestroyQueue) = nullptr;
+    HSAKMT_DEF(hsaKmtSetQueueCUMask) * HSAKMT_PFN(hsaKmtSetQueueCUMask) = nullptr;
+    HSAKMT_DEF(hsaKmtSetMemoryPolicy) * HSAKMT_PFN(hsaKmtSetMemoryPolicy) = nullptr;
+    HSAKMT_DEF(hsaKmtAllocMemory) * HSAKMT_PFN(hsaKmtAllocMemory) = nullptr;
+    HSAKMT_DEF(hsaKmtAllocMemoryAlign) * HSAKMT_PFN(hsaKmtAllocMemoryAlign) = nullptr;
+    HSAKMT_DEF(hsaKmtFreeMemory) * HSAKMT_PFN(hsaKmtFreeMemory) = nullptr;
+    HSAKMT_DEF(hsaKmtAvailableMemory) * HSAKMT_PFN(hsaKmtAvailableMemory) = nullptr;
+    HSAKMT_DEF(hsaKmtGetDefaultHostGpu) * HSAKMT_PFN(hsaKmtGetDefaultHostGpu) = nullptr;
+    HSAKMT_DEF(hsaKmtRegisterMemory) * HSAKMT_PFN(hsaKmtRegisterMemory) = nullptr;
+    HSAKMT_DEF(hsaKmtRegisterMemoryToNodes) * HSAKMT_PFN(hsaKmtRegisterMemoryToNodes) = nullptr;
+    HSAKMT_DEF(hsaKmtRegisterMemoryWithFlags) * HSAKMT_PFN(hsaKmtRegisterMemoryWithFlags) = nullptr;
+    HSAKMT_DEF(hsaKmtRegisterGraphicsHandleToNodes) *
+        HSAKMT_PFN(hsaKmtRegisterGraphicsHandleToNodes) = nullptr;
+    HSAKMT_DEF(hsaKmtRegisterGraphicsHandleToNodesExt) *
+        HSAKMT_PFN(hsaKmtRegisterGraphicsHandleToNodesExt) = nullptr;
+    HSAKMT_DEF(hsaKmtShareMemory) * HSAKMT_PFN(hsaKmtShareMemory) = nullptr;
+    HSAKMT_DEF(hsaKmtRegisterSharedHandle) * HSAKMT_PFN(hsaKmtRegisterSharedHandle) = nullptr;
+    HSAKMT_DEF(hsaKmtRegisterSharedHandleToNodes) *
+        HSAKMT_PFN(hsaKmtRegisterSharedHandleToNodes) = nullptr;
+    HSAKMT_DEF(hsaKmtProcessVMRead) * HSAKMT_PFN(hsaKmtProcessVMRead) = nullptr;
+    HSAKMT_DEF(hsaKmtProcessVMWrite) * HSAKMT_PFN(hsaKmtProcessVMWrite) = nullptr;
+    HSAKMT_DEF(hsaKmtDeregisterMemory) * HSAKMT_PFN(hsaKmtDeregisterMemory) = nullptr;
+    HSAKMT_DEF(hsaKmtMapMemoryToGPU) * HSAKMT_PFN(hsaKmtMapMemoryToGPU) = nullptr;
+    HSAKMT_DEF(hsaKmtMapMemoryToGPUNodes) * HSAKMT_PFN(hsaKmtMapMemoryToGPUNodes) = nullptr;
+    HSAKMT_DEF(hsaKmtUnmapMemoryToGPU) * HSAKMT_PFN(hsaKmtUnmapMemoryToGPU) = nullptr;
+    HSAKMT_DEF(hsaKmtDbgRegister) * HSAKMT_PFN(hsaKmtDbgRegister) = nullptr;
+    HSAKMT_DEF(hsaKmtDbgUnregister) * HSAKMT_PFN(hsaKmtDbgUnregister) = nullptr;
+    HSAKMT_DEF(hsaKmtDbgWavefrontControl) * HSAKMT_PFN(hsaKmtDbgWavefrontControl) = nullptr;
+    HSAKMT_DEF(hsaKmtDbgAddressWatch) * HSAKMT_PFN(hsaKmtDbgAddressWatch) = nullptr;
+    HSAKMT_DEF(hsaKmtDbgEnable) * HSAKMT_PFN(hsaKmtDbgEnable) = nullptr;
+    HSAKMT_DEF(hsaKmtDbgDisable) * HSAKMT_PFN(hsaKmtDbgDisable) = nullptr;
+    HSAKMT_DEF(hsaKmtDbgGetDeviceData) * HSAKMT_PFN(hsaKmtDbgGetDeviceData) = nullptr;
+    HSAKMT_DEF(hsaKmtDbgGetQueueData) * HSAKMT_PFN(hsaKmtDbgGetQueueData) = nullptr;
+    HSAKMT_DEF(hsaKmtGetClockCounters) * HSAKMT_PFN(hsaKmtGetClockCounters) = nullptr;
+    HSAKMT_DEF(hsaKmtPmcGetCounterProperties) * HSAKMT_PFN(hsaKmtPmcGetCounterProperties) = nullptr;
+    HSAKMT_DEF(hsaKmtPmcRegisterTrace) * HSAKMT_PFN(hsaKmtPmcRegisterTrace) = nullptr;
+    HSAKMT_DEF(hsaKmtPmcUnregisterTrace) * HSAKMT_PFN(hsaKmtPmcUnregisterTrace) = nullptr;
+    HSAKMT_DEF(hsaKmtPmcAcquireTraceAccess) * HSAKMT_PFN(hsaKmtPmcAcquireTraceAccess) = nullptr;
+    HSAKMT_DEF(hsaKmtPmcReleaseTraceAccess) * HSAKMT_PFN(hsaKmtPmcReleaseTraceAccess) = nullptr;
+    HSAKMT_DEF(hsaKmtPmcStartTrace) * HSAKMT_PFN(hsaKmtPmcStartTrace) = nullptr;
+    HSAKMT_DEF(hsaKmtPmcQueryTrace) * HSAKMT_PFN(hsaKmtPmcQueryTrace) = nullptr;
+    HSAKMT_DEF(hsaKmtPmcStopTrace) * HSAKMT_PFN(hsaKmtPmcStopTrace) = nullptr;
+    HSAKMT_DEF(hsaKmtMapGraphicHandle) * HSAKMT_PFN(hsaKmtMapGraphicHandle) = nullptr;
+    HSAKMT_DEF(hsaKmtUnmapGraphicHandle) * HSAKMT_PFN(hsaKmtUnmapGraphicHandle) = nullptr;
+    HSAKMT_DEF(hsaKmtSetTrapHandler) * HSAKMT_PFN(hsaKmtSetTrapHandler) = nullptr;
+    HSAKMT_DEF(hsaKmtSetSigbusDelay) * HSAKMT_PFN(hsaKmtSetSigbusDelay) = nullptr;
+    HSAKMT_DEF(hsaKmtGetTileConfig) * HSAKMT_PFN(hsaKmtGetTileConfig) = nullptr;
+    HSAKMT_DEF(hsaKmtQueryPointerInfo) * HSAKMT_PFN(hsaKmtQueryPointerInfo) = nullptr;
+    HSAKMT_DEF(hsaKmtSetMemoryUserData) * HSAKMT_PFN(hsaKmtSetMemoryUserData) = nullptr;
+    HSAKMT_DEF(hsaKmtGetQueueInfo) * HSAKMT_PFN(hsaKmtGetQueueInfo) = nullptr;
+    HSAKMT_DEF(hsaKmtGetKernelQueueId) * HSAKMT_PFN(hsaKmtGetKernelQueueId) = nullptr;
+    HSAKMT_DEF(hsaKmtAllocQueueGWS) * HSAKMT_PFN(hsaKmtAllocQueueGWS) = nullptr;
+    HSAKMT_DEF(hsaKmtRuntimeEnable) * HSAKMT_PFN(hsaKmtRuntimeEnable) = nullptr;
+    HSAKMT_DEF(hsaKmtRuntimeDisable) * HSAKMT_PFN(hsaKmtRuntimeDisable) = nullptr;
+    HSAKMT_DEF(hsaKmtCheckRuntimeDebugSupport) *
+        HSAKMT_PFN(hsaKmtCheckRuntimeDebugSupport) = nullptr;
+    HSAKMT_DEF(hsaKmtGetRuntimeCapabilities) * HSAKMT_PFN(hsaKmtGetRuntimeCapabilities) = nullptr;
+    HSAKMT_DEF(hsaKmtGetCoreRuntimeInfo) * HSAKMT_PFN(hsaKmtGetCoreRuntimeInfo) = nullptr;
+    HSAKMT_DEF(hsaKmtGetCoreDeviceInfo) * HSAKMT_PFN(hsaKmtGetCoreDeviceInfo) = nullptr;
+    HSAKMT_DEF(hsaKmtDebugTrapIoctl) * HSAKMT_PFN(hsaKmtDebugTrapIoctl) = nullptr;
+    HSAKMT_DEF(hsaKmtSPMAcquire) * HSAKMT_PFN(hsaKmtSPMAcquire) = nullptr;
+    HSAKMT_DEF(hsaKmtSPMRelease) * HSAKMT_PFN(hsaKmtSPMRelease) = nullptr;
+    HSAKMT_DEF(hsaKmtSPMSetDestBuffer) * HSAKMT_PFN(hsaKmtSPMSetDestBuffer) = nullptr;
+    HSAKMT_DEF(hsaKmtSVMSetAttr) * HSAKMT_PFN(hsaKmtSVMSetAttr) = nullptr;
+    HSAKMT_DEF(hsaKmtSVMGetAttr) * HSAKMT_PFN(hsaKmtSVMGetAttr) = nullptr;
+    HSAKMT_DEF(hsaKmtSetXNACKMode) * HSAKMT_PFN(hsaKmtSetXNACKMode) = nullptr;
+    HSAKMT_DEF(hsaKmtGetXNACKMode) * HSAKMT_PFN(hsaKmtGetXNACKMode) = nullptr;
+    HSAKMT_DEF(hsaKmtOpenSMI) * HSAKMT_PFN(hsaKmtOpenSMI) = nullptr;
+    HSAKMT_DEF(hsaKmtExportDMABufHandle) * HSAKMT_PFN(hsaKmtExportDMABufHandle) = nullptr;
+    HSAKMT_DEF(hsaKmtWaitOnEvent_Ext) * HSAKMT_PFN(hsaKmtWaitOnEvent_Ext) = nullptr;
+    HSAKMT_DEF(hsaKmtWaitOnMultipleEvents_Ext) *
+        HSAKMT_PFN(hsaKmtWaitOnMultipleEvents_Ext) = nullptr;
+    HSAKMT_DEF(hsaKmtReplaceAsanHeaderPage) * HSAKMT_PFN(hsaKmtReplaceAsanHeaderPage) = nullptr;
+    HSAKMT_DEF(hsaKmtReturnAsanHeaderPage) * HSAKMT_PFN(hsaKmtReturnAsanHeaderPage) = nullptr;
+    HSAKMT_DEF(hsaKmtGetAMDGPUDeviceHandle) * HSAKMT_PFN(hsaKmtGetAMDGPUDeviceHandle) = nullptr;
+    HSAKMT_DEF(hsaKmtPcSamplingQueryCapabilities) *
+        HSAKMT_PFN(hsaKmtPcSamplingQueryCapabilities) = nullptr;
+    HSAKMT_DEF(hsaKmtPcSamplingCreate) * HSAKMT_PFN(hsaKmtPcSamplingCreate) = nullptr;
+    HSAKMT_DEF(hsaKmtPcSamplingDestroy) * HSAKMT_PFN(hsaKmtPcSamplingDestroy) = nullptr;
+    HSAKMT_DEF(hsaKmtPcSamplingStart) * HSAKMT_PFN(hsaKmtPcSamplingStart) = nullptr;
+    HSAKMT_DEF(hsaKmtPcSamplingStop) * HSAKMT_PFN(hsaKmtPcSamplingStop) = nullptr;
+    HSAKMT_DEF(hsaKmtPcSamplingSupport) * HSAKMT_PFN(hsaKmtPcSamplingSupport) = nullptr;
+    HSAKMT_DEF(hsaKmtModelEnabled) * HSAKMT_PFN(hsaKmtModelEnabled) = nullptr;
+    HSAKMT_DEF(hsaKmtQueueRingDoorbell) * HSAKMT_PFN(hsaKmtQueueRingDoorbell) = nullptr;
+    HSAKMT_DEF(hsaKmtAisReadWriteFile) * HSAKMT_PFN(hsaKmtAisReadWriteFile) = nullptr;
 #if defined(_WIN32)
-    HSAKMT_DEF(hsaKmtGetMemoryHandle)* HSAKMT_PFN(hsaKmtGetMemoryHandle);
+    HSAKMT_DEF(hsaKmtGetMemoryHandle) * HSAKMT_PFN(hsaKmtGetMemoryHandle) = nullptr;
 #endif
-    HSAKMT_DEF(hsaKmtHandleImport)* HSAKMT_PFN(hsaKmtHandleImport);
-    HSAKMT_DEF(hsaKmtImportExternalSemaphore)* HSAKMT_PFN(hsaKmtImportExternalSemaphore);
-    HSAKMT_DEF(hsaKmtDestroyExternalSemaphore)* HSAKMT_PFN(hsaKmtDestroyExternalSemaphore);
-    HSAKMT_DEF(hsaKmtQueueSignalExternalSemaphore)* HSAKMT_PFN(hsaKmtQueueSignalExternalSemaphore);
-    HSAKMT_DEF(hsaKmtQueueWaitExternalSemaphore)* HSAKMT_PFN(hsaKmtQueueWaitExternalSemaphore);
-    HSAKMT_DEF(hsaKmtHandleExport)* HSAKMT_PFN(hsaKmtHandleExport);
-    HSAKMT_DEF(hsaKmtMemoryVaMap)* HSAKMT_PFN(hsaKmtMemoryVaMap);
-    HSAKMT_DEF(hsaKmtMemoryVaUnmap)* HSAKMT_PFN(hsaKmtMemoryVaUnmap);
-    HSAKMT_DEF(hsaKmtMemHandleFree)* HSAKMT_PFN(hsaKmtMemHandleFree);
-    HSAKMT_DEF(hsaKmtMemHandleFreePreserveMetadata)* HSAKMT_PFN(hsaKmtMemHandleFreePreserveMetadata);
-    HSAKMT_DEF(hsaKmtMemoryGetCpuAddr)* HSAKMT_PFN(hsaKmtMemoryGetCpuAddr);
-    HSAKMT_DEF(hsaKmtGetAmdGPUDeviceFd)* HSAKMT_PFN(hsaKmtGetAmdGPUDeviceFd);
-    HSAKMT_DEF(hsaKmtMemoryCpuMap)* HSAKMT_PFN(hsaKmtMemoryCpuMap);
-    HSAKMT_DEF(hsaKmtGetNodeWallclockFrequency)* HSAKMT_PFN(hsaKmtGetNodeWallclockFrequency);
+    HSAKMT_DEF(hsaKmtHandleImport) * HSAKMT_PFN(hsaKmtHandleImport) = nullptr;
+    HSAKMT_DEF(hsaKmtImportExternalSemaphore) * HSAKMT_PFN(hsaKmtImportExternalSemaphore) = nullptr;
+    HSAKMT_DEF(hsaKmtDestroyExternalSemaphore) *
+        HSAKMT_PFN(hsaKmtDestroyExternalSemaphore) = nullptr;
+    HSAKMT_DEF(hsaKmtQueueSignalExternalSemaphore) *
+        HSAKMT_PFN(hsaKmtQueueSignalExternalSemaphore) = nullptr;
+    HSAKMT_DEF(hsaKmtQueueWaitExternalSemaphore) *
+        HSAKMT_PFN(hsaKmtQueueWaitExternalSemaphore) = nullptr;
+    HSAKMT_DEF(hsaKmtHandleExport) * HSAKMT_PFN(hsaKmtHandleExport) = nullptr;
+    HSAKMT_DEF(hsaKmtMemoryVaMap) * HSAKMT_PFN(hsaKmtMemoryVaMap) = nullptr;
+    HSAKMT_DEF(hsaKmtMemoryVaUnmap) * HSAKMT_PFN(hsaKmtMemoryVaUnmap) = nullptr;
+    HSAKMT_DEF(hsaKmtMemHandleFree) * HSAKMT_PFN(hsaKmtMemHandleFree) = nullptr;
+    HSAKMT_DEF(hsaKmtMemHandleFreePreserveMetadata) *
+        HSAKMT_PFN(hsaKmtMemHandleFreePreserveMetadata) = nullptr;
+    HSAKMT_DEF(hsaKmtMemoryGetCpuAddr) * HSAKMT_PFN(hsaKmtMemoryGetCpuAddr) = nullptr;
+    HSAKMT_DEF(hsaKmtGetAmdGPUDeviceFd) * HSAKMT_PFN(hsaKmtGetAmdGPUDeviceFd) = nullptr;
+    HSAKMT_DEF(hsaKmtMemoryCpuMap) * HSAKMT_PFN(hsaKmtMemoryCpuMap) = nullptr;
+    HSAKMT_DEF(hsaKmtGetNodeWallclockFrequency) *
+        HSAKMT_PFN(hsaKmtGetNodeWallclockFrequency) = nullptr;
 
-    DRM_DEF(amdgpu_device_initialize)* DRM_PFN(amdgpu_device_initialize);
-    DRM_DEF(amdgpu_device_deinitialize)* DRM_PFN(amdgpu_device_deinitialize);
-    DRM_DEF(amdgpu_query_gpu_info)* DRM_PFN(amdgpu_query_gpu_info);
-    DRM_DEF(amdgpu_bo_cpu_map)* DRM_PFN(amdgpu_bo_cpu_map);
-    DRM_DEF(amdgpu_bo_free)* DRM_PFN(amdgpu_bo_free);
-    DRM_DEF(amdgpu_bo_export)* DRM_PFN(amdgpu_bo_export);
-    DRM_DEF(amdgpu_bo_import)* DRM_PFN(amdgpu_bo_import);
-    DRM_DEF(amdgpu_bo_va_op)* DRM_PFN(amdgpu_bo_va_op);
-    DRM_DEF(amdgpu_bo_query_info)* DRM_PFN(amdgpu_bo_query_info);
-    DRM_DEF(amdgpu_bo_set_metadata)* DRM_PFN(amdgpu_bo_set_metadata);
-    DRM_DEF(drmCommandWriteRead)* DRM_PFN(drmCommandWriteRead);
+    DRM_DEF(amdgpu_device_initialize) * DRM_PFN(amdgpu_device_initialize) = nullptr;
+    DRM_DEF(amdgpu_device_deinitialize) * DRM_PFN(amdgpu_device_deinitialize) = nullptr;
+    DRM_DEF(amdgpu_query_gpu_info) * DRM_PFN(amdgpu_query_gpu_info) = nullptr;
+    DRM_DEF(amdgpu_bo_cpu_map) * DRM_PFN(amdgpu_bo_cpu_map) = nullptr;
+    DRM_DEF(amdgpu_bo_free) * DRM_PFN(amdgpu_bo_free) = nullptr;
+    DRM_DEF(amdgpu_bo_export) * DRM_PFN(amdgpu_bo_export) = nullptr;
+    DRM_DEF(amdgpu_bo_import) * DRM_PFN(amdgpu_bo_import) = nullptr;
+    DRM_DEF(amdgpu_bo_va_op) * DRM_PFN(amdgpu_bo_va_op) = nullptr;
+    DRM_DEF(amdgpu_bo_query_info) * DRM_PFN(amdgpu_bo_query_info) = nullptr;
+    DRM_DEF(amdgpu_bo_set_metadata) * DRM_PFN(amdgpu_bo_set_metadata) = nullptr;
+    DRM_DEF(drmCommandWriteRead) * DRM_PFN(drmCommandWriteRead) = nullptr;
 
-  private:
+   private:
     std::string whoami();
     void *thunk_handle;
     std::string library_name;
@@ -591,6 +629,11 @@ class ThunkLoader {
     bool is_wsl_dxg_;
     bool is_dtif_;
     bool is_loaded_;
+    /// The instance this loader owns, held as the means of giving it back
+    /// rather than as a flag saying that it should be. Non-null exactly when
+    /// DtifCreate() returned an instance, and it can only have been set if
+    /// DtifDestroy() was already known to exist.
+    DtifDestroyFunc* dtif_destroy_ = nullptr;
 };
 
 }   //  namespace core

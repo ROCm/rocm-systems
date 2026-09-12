@@ -1,9 +1,10 @@
 # Checks the built library's dynamic symbol table for the Dxg* entry points.
 #
 # The version script is text, not the library. Nothing else in this directory
-# links or loads librocdxg either - the refcount test compiles a header on its
-# own. So the one thing that decides whether ROCr's dlsym() finds these symbols,
-# the dynamic symbol table of the artifact we ship, had no test at all.
+# loads librocdxg either - the lifecycle test links amd_kfd_lifecycle.cpp out of
+# hsa-runtime and never touches this artifact. So the one thing that decides
+# whether ROCr's dlsym() finds these symbols, the dynamic symbol table of the
+# artifact we ship, had no test at all.
 #
 # The regression this exists to catch: an entry point's C linkage comes from a
 # declaration, not from its definition. Lose the declaration and the definition

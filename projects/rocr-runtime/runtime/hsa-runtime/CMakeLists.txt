@@ -221,6 +221,7 @@ set_property(TARGET ${CORE_RUNTIME_TARGET} PROPERTY LINK_FLAGS ${HSA_SHARED_LINK
 ## Source files.
 set ( SRCS core/driver/driver.cpp
            core/driver/kfd/amd_kfd_driver.cpp
+           core/driver/kfd/amd_kfd_lifecycle.cpp
            core/util/small_heap.cpp
            core/util/timer.cpp
            core/util/flag.cpp
