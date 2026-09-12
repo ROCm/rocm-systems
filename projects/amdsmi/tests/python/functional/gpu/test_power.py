@@ -90,31 +90,6 @@ class TestGpuPower(unittest.TestCase):
 
     # integration
 
-    def test_get_gpu_power_profile_presets(self):
-        self.common.print_func_name("")
-        self.common.Test_API_Per_GPU(
-            amdsmi_get_gpu_power_profile_presets=amdsmi.amdsmi_get_gpu_power_profile_presets,
-            index=0,
-        )
-        return
-
-    def test_get_power_cap_info(self):
-        self.common.print_func_name("")
-        self.common.Test_API_Per_GPU(amdsmi_get_power_cap_info=amdsmi.amdsmi_get_power_cap_info)
-        return
-
-    def test_get_power_info(self):
-        self.common.print_func_name("")
-        self.common.Test_API_Per_GPU(amdsmi_get_power_info=amdsmi.amdsmi_get_power_info)
-        return
-
-    def test_is_gpu_power_management_enabled(self):
-        self.common.print_func_name("")
-        self.common.Test_API_Per_GPU(
-            amdsmi_is_gpu_power_management_enabled=amdsmi.amdsmi_is_gpu_power_management_enabled
-        )
-        return
-
     def test_set_gpu_power_profile(self):
         self.common.print_func_name("")
         # Valid rejections (although driver may include others)

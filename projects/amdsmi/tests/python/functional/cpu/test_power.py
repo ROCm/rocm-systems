@@ -193,32 +193,6 @@ class TestCpuPower(unittest.TestCase):
             raise self.raise_exception
         return
 
-    def test_get_cpu_pwr_svi_telemetry_all_rails(self):
-        self.common.print_func_name("")
-        self.common.Test_API_Per_GPU(
-            amdsmi_get_cpu_pwr_svi_telemetry_all_rails=amdsmi.amdsmi_get_cpu_pwr_svi_telemetry_all_rails
-        )
-        return
-
-    def test_get_cpu_socket_power(self):
-        self.common.print_func_name("")
-        self.common.Test_API_Per_GPU(amdsmi_get_cpu_socket_power=amdsmi.amdsmi_get_cpu_socket_power)
-        return
-
-    def test_get_cpu_socket_power_cap(self):
-        self.common.print_func_name("")
-        self.common.Test_API_Per_GPU(
-            amdsmi_get_cpu_socket_power_cap=amdsmi.amdsmi_get_cpu_socket_power_cap
-        )
-        return
-
-    def test_get_cpu_socket_power_cap_max(self):
-        self.common.print_func_name("")
-        self.common.Test_API_Per_GPU(
-            amdsmi_get_cpu_socket_power_cap_max=amdsmi.amdsmi_get_cpu_socket_power_cap_max
-        )
-        return
-
     def test_set_cpu_pwr_efficiency_mode(self):
         self.common.print_func_name("")
         modes = [0, 1, 2]

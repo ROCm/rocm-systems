@@ -3,15 +3,16 @@
 # SPDX-License-Identifier: MIT
 
 """
-CLI unit test runner — discovers and runs all tests under cli/.
+Integration test runner — discovers and runs all tests under integration/.
+These tests require live hardware and may require elevated privileges (sudo/root).
 
 Usage (installed):
-    /opt/rocm/share/amd_smi/tests/python_unittest/cli_unit_test.py -v
-    /opt/rocm/share/amd_smi/tests/python_unittest/cli_unit_test.py -b -v
-    /opt/rocm/share/amd_smi/tests/python_unittest/cli_unit_test.py -k "gpu" -v
+    /opt/rocm/share/amd_smi/tests/python_unittest/integration_tests.py -v
+    /opt/rocm/share/amd_smi/tests/python_unittest/integration_tests.py -b -v
+    /opt/rocm/share/amd_smi/tests/python_unittest/integration_tests.py -k "power" -v
 
 Usage (source):
-    tests/python/cli_unit_test.py -v
+    tests/python/integration_tests.py -v
 
 Options:
     -v / --verbose    Verbose output (show per-test names)
@@ -31,4 +32,4 @@ sys.path.insert(0, _here)
 
 import common.common as common  # noqa: E402  (sys.path bootstrapped above)
 
-common.run_test_dir("cli", "AMD SMI CLI Tests", _here)
+common.run_test_dir("integration", "AMD SMI Integration Tests", _here)

@@ -17,7 +17,7 @@ Owns three responsibilities:
     printers used by the three top-level runners.
 
 Imported by every functional/unit leaf test and by all three runners
-(integration_test.py, cli_unit_test.py, unit_tests.py).
+(integration_tests.py, cli_tests.py, unit_tests.py).
 """
 
 import contextlib
@@ -98,6 +98,19 @@ def print_shadow_error(script, loaded_from, expected_path, file=sys.stderr):
     print(f"\nRefer to `{script} -h` for more details.", file=file)
 
 
+def _find_repo_root():
+    """Locate the amd-smi source checkout, or None when running from an install."""
+    for parent in pathlib.Path(__file__).resolve().parents:
+        if (parent / "amdsmi_cli").is_dir() and (parent / "CMakeLists.txt").is_file():
+            return str(parent)
+    return None
+
+
+# Source-tree root, so tests that load CLI modules under review do not each
+# hard-code a fragile chain of ".." segments that breaks whenever they move.
+REPO_ROOT = _find_repo_root()
+
+
 amdsmi_path = os.environ.get("AMDSMI_PATH") or os.path.join(
     os.environ.get("ROCM_HOME") or os.environ.get("ROCM_PATH") or "/opt/rocm", "share/amd_smi"
 )
@@ -130,7 +143,7 @@ except ImportError as e:
 # sys.modules.
 #
 # Example of how to trigger this error output (for test purposes):
-# sudo AMDSMI_PATH=/tmp /opt/rocm/share/amd_smi/tests/python_unittest/cli_unit_test.py -v
+# sudo AMDSMI_PATH=/tmp /opt/rocm/share/amd_smi/tests/python_unittest/cli_tests.py -v
 if _staged_amdsmi:
     _amdsmi_file = getattr(amdsmi, "__file__", None) or ""
     if not os.path.realpath(_amdsmi_file).startswith(os.path.realpath(amdsmi_path) + os.sep):
@@ -139,7 +152,13 @@ if _staged_amdsmi:
         # For direct test-script invocations use sys.exit so no Python traceback
         # clutters the remediation output.  For anything else (pytest, IDE runners,
         # ad-hoc imports) raise so the caller gets a clear error with location.
-        _known_scripts = ("unit_tests.py", "integration_test.py", "cli_unit_test.py")
+        _known_scripts = (
+            "run_tests.py",
+            "unit_tests.py",
+            "integration_tests.py",
+            "functional_tests.py",
+            "cli_tests.py",
+        )
         _main_file = getattr(sys.modules.get("__main__"), "__file__", "") or ""
         if os.path.basename(_main_file) in _known_scripts:
             sys.exit(1)
@@ -164,6 +183,45 @@ ERROR_MAP = {str(member.value): f"AMDSMI_STATUS_{member.name}" for member in amd
 VERBOSITY_QUIET = 0  # -q / --quiet
 VERBOSITY_NORMAL = 1  # default (dot-per-test)
 VERBOSITY_VERBOSE = 2  # -v / --verbose (per-test result lines)
+
+
+class ModuleIsolationMixin:
+    """Restores ``sys.modules``/``sys.path`` for suites that install stubs.
+
+    Set ``ISOLATED_MODULES`` to every name the suite writes into ``sys.modules``
+    and ``ISOLATED_PATH`` to any directory it prepends to ``sys.path``. Without
+    this a stub outlives its suite and shadows the real module for a sibling
+    test. Subclasses must raise ``SkipTest`` before calling ``super().setUpClass()``,
+    since unittest skips ``tearDownClass`` when ``setUpClass`` raises.
+    """
+
+    ISOLATED_MODULES = ()
+    ISOLATED_PATH = None
+
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        cls._saved_modules = {name: sys.modules.get(name) for name in cls.ISOLATED_MODULES}
+        cls._path_added = bool(cls.ISOLATED_PATH) and cls.ISOLATED_PATH not in sys.path
+        if cls._path_added:
+            sys.path.insert(0, cls.ISOLATED_PATH)
+
+    @classmethod
+    def tearDownClass(cls):
+        if getattr(cls, "_path_added", False) and cls.ISOLATED_PATH in sys.path:
+            sys.path.remove(cls.ISOLATED_PATH)
+        for name, module in getattr(cls, "_saved_modules", {}).items():
+            if module is None:
+                sys.modules.pop(name, None)
+            else:
+                sys.modules[name] = module
+        super().tearDownClass()
+
+    @classmethod
+    def clear_isolated_modules(cls):
+        """Drop the isolated names so a stub wins over an already-cached import."""
+        for name in cls.ISOLATED_MODULES:
+            sys.modules.pop(name, None)
 
 
 def build_type_lists():
@@ -255,9 +313,13 @@ def build_type_lists():
             cond = FAIL
         link_types.append((member.name, amdsmi.AmdSmiLinkType(member.value), cond))
 
+    # The *_LAST members mark the end of a range -- AMDSMI_TEMPERATURE_TYPE__MAX
+    # is an alias of one -- so they are bounds, not sensors, and querying them is
+    # meaningless.
     temperature_types = [
         (member.name, amdsmi.AmdSmiTemperatureType(member.value), PASS)
         for member in amdsmi.AmdSmiTemperatureType
+        if not member.name.endswith("_LAST")
     ]
 
     temperature_metrics = [
@@ -455,8 +517,8 @@ def _print_test_ids(suite):
 def print_test_ids(suite):
     """Print every test ID in an already-loaded *suite* to stdout.
 
-    Public entry point for the discover()-based runners (cli_unit_test.py,
-    integration_test.py, unit_tests.py), which build their suite from a
+    Public entry point for the discover()-based runners (cli_tests.py,
+    integration_tests.py, unit_tests.py), which build their suite from a
     directory rather than from a single module.  Emits an "Available tests:"
     header followed by one dotted test id per line.  Output goes to stdout so
     the listing can be captured/piped independently of the normal test-run
@@ -564,11 +626,14 @@ def _filter_suite_exclude(suite, pattern):
     return filtered
 
 
-def run_test_dir(subdir, title, top_level_dir):
-    """Discover and run every test under *top_level_dir*/*subdir*, then exit.
+def run_test_dir(subdirs, title, top_level_dir):
+    """Discover and run every test under *top_level_dir*/*subdirs*, then exit.
 
-    Single implementation of the runner boilerplate shared by the three entry
-    scripts (integration_test.py / cli_unit_test.py / unit_tests.py): it handles
+    *subdirs* is a single tier name or a sequence of them, so one tier can be
+    run alone or several together in one report.
+
+    Single implementation of the runner boilerplate shared by the entry
+    scripts (run_tests.py and the per-tier wrappers): it handles
     ``-h``/``--help``, ``-k``/``--keyword`` filtering, ``-l``/``--list``, the
     root-privilege check, the legend/title preamble, output buffering
     (``-b``/``--buffer``) and the GTest-style summary runner.  Never returns —
@@ -588,11 +653,22 @@ def run_test_dir(subdir, title, top_level_dir):
     if k_pattern:
         loader.testNamePatterns = [f"*{k_pattern}*"]
 
-    suite = loader.discover(
-        start_dir=os.path.join(top_level_dir, subdir),
-        pattern="test_*.py",
-        top_level_dir=top_level_dir,
-    )
+    tiers = [subdirs] if isinstance(subdirs, str) else list(subdirs)
+    suite = unittest.TestSuite()
+    for tier in tiers:
+        start_dir = os.path.join(top_level_dir, tier)
+        if not os.path.isdir(start_dir):
+            print(f"ERROR: no such test tier: {start_dir}", file=sys.stderr)
+            sys.exit(2)
+        suite.addTests(
+            loader.discover(start_dir=start_dir, pattern="test_*.py", top_level_dir=top_level_dir)
+        )
+
+    # An empty suite is "successful", so without this a mislaid or unpackaged
+    # test tree exits 0 and silently reports nothing. A -k miss is not an error.
+    if suite.countTestCases() == 0 and not k_pattern:
+        print(f"ERROR: no tests discovered under {', '.join(tiers)}", file=sys.stderr)
+        sys.exit(2)
 
     # -x/--exclude drops any test whose id contains the substring (the inverse of
     # -k), e.g. run everything but the perf suites with `-x performance`.
@@ -604,8 +680,9 @@ def run_test_dir(subdir, title, top_level_dir):
         print_test_ids(suite)
         sys.exit(0)
 
-    # Detect if ran without sudo or root privileges
-    if os.geteuid() != 0:
+    # Detect if ran without sudo or root privileges. The unit tier reaches no
+    # device, so root is only required once a device-driven tier is selected.
+    if os.geteuid() != 0 and not set(tiers) <= {"unit"}:
         print(
             "Warning: Some tests may require elevated privileges (sudo/root) to run completely.\n",
             file=sys.stderr,
@@ -803,7 +880,7 @@ class Common:
     for member in amdsmi.AmdSmiVirtualizationMode:
         VIRTUALIZATION_MODE_MAP[amdsmi.AmdSmiVirtualizationMode(member.value)] = member.name
 
-    def __init__(self, verbose, *args, **kwargs):
+    def __init__(self, verbose, *args, probe_devices=True, **kwargs):
         self.verbose = verbose
         self.max_num_physical_devices = (
             amdsmi.amdsmi_interface.AMDSMI_MAX_NUM_XCP * amdsmi.amdsmi_interface.AMDSMI_MAX_DEVICES
@@ -831,7 +908,9 @@ class Common:
             self.virt_mode = []
             self.asic_info = []
             self.board_info = []
-            for gpu in self.processors:
+            # Only print_device_header() reads these; skipping the probe saves an
+            # init/enumerate cycle plus three calls per device for callers that don't.
+            for gpu in self.processors if probe_devices else []:
                 # Get virtualization mode info
                 try:
                     ret = amdsmi.amdsmi_get_gpu_virtualization_mode(gpu)
@@ -1398,118 +1477,13 @@ class Common:
             raise raise_exception
         return
 
-    def Test_Per_GPU_With_Two_Enums(self, **kwargs):
-        """
-        Tests API per GPU per 2 Enums with zero or more arguments
 
-        Arguments:
-            func_name: API to be executed
-            value1_name=[(value_name, value, value_cond), ...]
-            value2_name=[(value_name, value, value_cond), ...]
-        Optional:
-            param1_name: Name of parameter 1
-            param2_name: Name of parameter 2
-        """
+#################################################
+#            Declarative API driver             #
+#################################################
 
-        params = kwargs
-        iterator = iter(params.items())
-        func_name, func = next(iterator)
-        _, values1 = next(iterator)
-        _, values2 = next(iterator)
-        del params[func_name]
+# reject() drives one deliberately invalid argument per call; expect() drives
+# valid arguments only and validates the payload. Both build on the Common
+# helpers above rather than reimplementing status handling.
 
-        raise_exception = None
-        for i in range(len(self.processors) + 1):
-            if i < len(self.processors):
-                gpu = self.processors[i]
-                self.print_device_header(i)
-            else:
-                # bad gpu
-                gpu = self.bad_gpu
-                i = "invalid"
-
-            for value1_name, value1, value1_cond in values1:
-                for value2_name, value2, value2_cond in values2:
-                    cond = self.PASS
-                    if i == "invalid" or value1_cond == self.FAIL or value2_cond == self.FAIL:
-                        cond = self.FAIL
-                    msg = self._build_call_msg(func_name, i, None, params)
-                    msg = msg.replace("{value}", value1_name, 1)
-                    msg = msg.replace("{value}", value2_name, 1)
-                    try:
-                        data = func(
-                            gpu,
-                            *[
-                                value
-                                if not isinstance(value, list)
-                                else value1
-                                if index == 0
-                                else value2
-                                for index, value in enumerate(params.values())
-                            ],
-                        )
-                        self.print(msg, data)
-                        self.check_ret("", "", cond)
-                    except (amdsmi.AmdSmiLibraryException, amdsmi.AmdSmiParameterException) as e:
-                        if value1_cond != self.PASS:
-                            if self.check_ret(msg, e, value1_cond):
-                                raise_exception = e
-                        elif value2_cond != self.PASS:
-                            if self.check_ret(msg, e, value2_cond):
-                                raise_exception = e
-                        else:
-                            if self.check_ret(msg, e, cond):
-                                raise_exception = e
-                    self.print("")
-        if raise_exception:
-            raise raise_exception
-        return
-
-    def Test_Per_GPU_With_GPU(self, **kwargs):
-        """
-        Tests API per GPU per GPU with zero or more arguments
-
-        Arguments:
-            func_name: API to be executed
-        Optional:
-            param1_name: Name of parameter 1
-            param2_name: Name of parameter 2
-        """
-        params = kwargs
-        iterator = iter(params.items())
-        func_name, func = next(iterator)
-        del params[func_name]
-
-        raise_exception = None
-        for i in range(len(self.processors) + 1):
-            if i < len(self.processors):
-                gpu_i = self.processors[i]
-                self.print_device_header(i)
-            else:
-                # bad gpu
-                gpu_i = self.bad_gpu
-                i = "invalid"
-            for j in range(len(self.processors) + 1):
-                if j < len(self.processors):
-                    gpu_j = self.processors[j]
-                    self.print_device_header(j)
-                else:
-                    # bad gpu
-                    gpu_j = self.bad_gpu
-                    j = "invalid"
-
-                cond = self.PASS
-                if i == "invalid" or j == "invalid" or i == j:
-                    cond = self.FAIL
-                msg = self._build_call_msg(func_name, i, j, params)
-                try:
-                    data = func(gpu_i, gpu_j, *[value for value in params.values()])
-                    self.print(msg, data)
-                    self.check_ret("", "", cond)
-                except (amdsmi.AmdSmiLibraryException, amdsmi.AmdSmiParameterException) as e:
-                    if self.check_ret(msg, e, cond):
-                        raise_exception = e
-                self.print("")
-        if raise_exception:
-            raise raise_exception
-        return
+# Values that violate the interface's isinstance() guard for each argument kind.

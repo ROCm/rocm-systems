@@ -50,13 +50,6 @@ class TestGpuProcess(unittest.TestCase):
         )
         return
 
-    def test_get_gpu_compute_process_info(self):
-        self.common.print_func_name("")
-        self.common.Test_API(
-            amdsmi_get_gpu_compute_process_info=amdsmi.amdsmi_get_gpu_compute_process_info
-        )
-        return
-
     def test_get_gpu_compute_process_info_by_pid(self):
         self.common.print_func_name("")
 
@@ -72,18 +65,6 @@ class TestGpuProcess(unittest.TestCase):
             amdsmi_get_gpu_compute_process_info_by_pid=amdsmi.amdsmi_get_gpu_compute_process_info_by_pid,
             pid=pid,
         )
-        return
-
-    def test_get_gpu_process_isolation(self):
-        self.common.print_func_name("")
-        self.common.Test_API_Per_GPU(
-            amdsmi_get_gpu_process_isolation=amdsmi.amdsmi_get_gpu_process_isolation
-        )
-        return
-
-    def test_get_gpu_process_list(self):
-        self.common.print_func_name("")
-        self.common.Test_API_Per_GPU(amdsmi_get_gpu_process_list=amdsmi.amdsmi_get_gpu_process_list)
         return
 
     def test_set_gpu_process_isolation(self):

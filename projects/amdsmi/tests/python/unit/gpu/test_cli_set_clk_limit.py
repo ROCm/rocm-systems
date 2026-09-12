@@ -17,26 +17,15 @@ import sys
 import types
 import unittest
 
-# ``common.common`` bootstraps the real amdsmi package at import time (sys.path
-# insert + ``import amdsmi`` + module-level ``build_type_lists()``), which fails
-# on a stale or mismatched install. This suite fully stubs ``amdsmi`` itself and
-# only needs ``amdsmi_path`` to locate the *installed* CLI fallback, so degrade
-# gracefully: if the shared harness cannot load, drop to ``None`` and rely on
-# the in-tree source checkout (resolved first below). Keeps this file runnable
-# from a plain checkout even when no matching amdsmi is installed.
-try:
-    from common.common import amdsmi_path
-except (ImportError, FileNotFoundError):  # pragma: no cover - harness/install unavailable
-    amdsmi_path = None
+from common.common import REPO_ROOT, ModuleIsolationMixin, amdsmi_path
 
 # set_value.py lives in the amd-smi CLI, which exists in two layouts:
-#   * source checkout: <repo>/projects/amdsmi/amdsmi_cli (sibling of tests/)
+#   * source checkout: <repo>/amdsmi_cli (sibling of tests/)
 #   * installed:       <rocm>/libexec/amdsmi_cli (amdsmi_path is the sibling
 #                      <rocm>/share/amd_smi)
 # Prefer the in-tree source when running from a checkout so the test exercises
 # the code under review; fall back to the installed CLI otherwise.
-_THIS_DIR = os.path.dirname(os.path.abspath(__file__))
-_SOURCE_CLI_DIR = os.path.normpath(os.path.join(_THIS_DIR, "..", "..", "..", "..", "amdsmi_cli"))
+_SOURCE_CLI_DIR = os.path.join(REPO_ROOT, "amdsmi_cli") if REPO_ROOT else ""
 _INSTALLED_CLI_DIR = (
     os.path.join(os.path.dirname(os.path.dirname(amdsmi_path)), "libexec", "amdsmi_cli")
     if amdsmi_path
@@ -109,47 +98,37 @@ def _install_fake_amdsmi():
 
 
 def _load_set_value_module():
-    # set_value.py imports the sibling ``amdsmi_cli_exceptions`` module by bare
-    # name, so the CLI dir must be importable before the module is executed.
-    if _CLI_DIR and _CLI_DIR not in sys.path:
-        sys.path.insert(0, _CLI_DIR)
     spec = importlib.util.spec_from_file_location("set_value_under_test", SET_VALUE_PATH)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
 
 
-class TestSnapClkLimitToDpm(unittest.TestCase):
+class TestSnapClkLimitToDpm(ModuleIsolationMixin, unittest.TestCase):
     """Unit tests for ``SetValueCommands._snap_clk_limit_to_dpm``."""
 
     # Example fclk DPM levels (Hz). Deliberately unsorted and seeded with a 0 Hz
     # entry to prove the helper sorts the levels and filters out f <= 0.
     FCLK_DPM_HZ = [1600_000_000, 0, 1200_000_000, 2000_000_000, 1900_000_000]
 
-    _SAVED_MODULE_NAMES = (
+    ISOLATED_MODULES = (
         "amdsmi",
         "amdsmi.amdsmi_interface",
         "amdsmi.amdsmi_exception",
         "amdsmi.amdsmi_wrapper",
+        # Loaded for real by set_value.py once _CLI_DIR is on sys.path.
+        "amdsmi_cli_exceptions",
     )
+    # set_value.py imports amdsmi_cli_exceptions by bare name at exec time.
+    ISOLATED_PATH = _CLI_DIR
 
     @classmethod
     def setUpClass(cls):
         if not SET_VALUE_PATH:
             raise unittest.SkipTest("amd-smi CLI set_value.py not found (source or installed)")
-        # Snapshot any real amdsmi already loaded so the stub does not leak into
-        # sibling suites sharing the interpreter; restored in tearDownClass.
-        cls._saved_modules = {name: sys.modules.get(name) for name in cls._SAVED_MODULE_NAMES}
+        super().setUpClass()
         cls.interface = _install_fake_amdsmi()
         cls.module = _load_set_value_module()
-
-    @classmethod
-    def tearDownClass(cls):
-        for name, saved in cls._saved_modules.items():
-            if saved is None:
-                sys.modules.pop(name, None)
-            else:
-                sys.modules[name] = saved
 
     def _snap(self, requested_mhz, frequency, min_mhz=None):
         # Shared harness: point the stubbed C entry point at a fixed DPM table
@@ -288,7 +267,7 @@ class _StubHelpers:
 _ClkLimit = collections.namedtuple("_ClkLimit", ["clk_type", "lim_type", "val"])
 
 
-class TestSetGpuClkLimitCallSite(unittest.TestCase):
+class TestSetGpuClkLimitCallSite(ModuleIsolationMixin, unittest.TestCase):
     """Call-site tests for the ``set_gpu`` clk-limit snap/validation branch.
 
     Complements ``TestSnapClkLimitToDpm`` (snap helper in isolation) by driving
@@ -297,13 +276,14 @@ class TestSetGpuClkLimitCallSite(unittest.TestCase):
     ``N/A`` opposing-bound skip that keeps the requested limit settable.
     """
 
-    _SAVED_MODULE_NAMES = TestSnapClkLimitToDpm._SAVED_MODULE_NAMES
+    ISOLATED_MODULES = TestSnapClkLimitToDpm.ISOLATED_MODULES
+    ISOLATED_PATH = _CLI_DIR
 
     @classmethod
     def setUpClass(cls):
         if not SET_VALUE_PATH:
             raise unittest.SkipTest("amd-smi CLI set_value.py not found (source or installed)")
-        cls._saved_modules = {name: sys.modules.get(name) for name in cls._SAVED_MODULE_NAMES}
+        super().setUpClass()
         cls.interface = _install_fake_amdsmi()
         # Extra surface the set_gpu clk-limit branch touches beyond the snap
         # helper: the clock-info entry point, the set entry point, the clk-type
@@ -312,14 +292,6 @@ class TestSetGpuClkLimitCallSite(unittest.TestCase):
         cls.interface.amdsmi_get_gpu_device_bdf = lambda _handle: "0000:00:00.0"
         cls.interface.amdsmi_wrapper.AMDSMI_STATUS_NO_PERM = 4
         cls.module = _load_set_value_module()
-
-    @classmethod
-    def tearDownClass(cls):
-        for name, saved in cls._saved_modules.items():
-            if saved is None:
-                sys.modules.pop(name, None)
-            else:
-                sys.modules[name] = saved
 
     def _run_clk_limit(
         self, clk_type, lim_type, val, min_clk, max_clk, dpm_hz=(), freq_raises=False

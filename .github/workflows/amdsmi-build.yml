@@ -283,8 +283,7 @@ jobs:
           ./amdsmitst --gtest_filter="-${GTEST_EXCLUDE}" > "$RESULTS_DIR/amdsmi_tests.log" 2>&1
 
           cd /opt/rocm/share/amd_smi/tests/python_unittest
-          ./integration_test.py -v > "$RESULTS_DIR/integration_test_output.txt" 2>&1
-          ./unit_tests.py -v > "$RESULTS_DIR/unit_test_output.txt" 2>&1
+          ./run_tests.py --unit --integration --functional -v > "$RESULTS_DIR/python_test_output.txt" 2>&1
           python3 test_abi_compat.py -v > "$RESULTS_DIR/abi_compat_output.txt" 2>&1
           if [ -f ./perf_tests.py ]; then
             ./perf_tests.py -v > "$RESULTS_DIR/perf_test_output.txt" 2>&1 || echo 'perf_tests.py failed'
@@ -304,13 +303,9 @@ jobs:
         if: always()
         run: cat /tmp/test-results-${{ matrix.os }}/amdsmi_tests.log || echo "No AMDSMI test results"
 
-      - name: Integration Test Results
+      - name: Python Test Results
         if: always()
-        run: cat /tmp/test-results-${{ matrix.os }}/integration_test_output.txt || echo "No integration test results"
-
-      - name: Unit Test Results
-        if: always()
-        run: cat /tmp/test-results-${{ matrix.os }}/unit_test_output.txt || echo "No unit test results"
+        run: cat /tmp/test-results-${{ matrix.os }}/python_test_output.txt || echo "No Python test results"
 
       - name: Perf Test Results
         if: always()

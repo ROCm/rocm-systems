@@ -30,26 +30,6 @@ class TestGpuRas(unittest.TestCase):
     def tearDown(self):
         amdsmi.amdsmi_shut_down()
 
-    def test_get_gpu_available_counters(self):
-        self.common.print_func_name("")
-        self.common.Test_Per_GPU_With_One_Enum(
-            amdsmi_get_gpu_available_counters=amdsmi.amdsmi_get_gpu_available_counters,
-            event_group=common.EVENT_GROUPS,
-        )
-        return
-
-    def test_get_gpu_ecc_count(self):
-        self.common.print_func_name("")
-        self.common.Test_Per_GPU_With_One_Enum(
-            amdsmi_get_gpu_ecc_count=amdsmi.amdsmi_get_gpu_ecc_count, gpu_block=common.GPU_BLOCKS
-        )
-        return
-
-    def test_get_gpu_ecc_enabled(self):
-        self.common.print_func_name("")
-        self.common.Test_API_Per_GPU(amdsmi_get_gpu_ecc_enabled=amdsmi.amdsmi_get_gpu_ecc_enabled)
-        return
-
     def test_get_gpu_ecc_status(self):
         self.common.print_func_name("")
 
@@ -60,35 +40,6 @@ class TestGpuRas(unittest.TestCase):
 
         self.common.Test_Per_GPU_With_One_Enum(
             amdsmi_get_gpu_ecc_status=amdsmi.amdsmi_get_gpu_ecc_status, gpu_block=common.GPU_BLOCKS
-        )
-        return
-
-    def test_get_gpu_ras_block_features_enabled(self):
-        self.common.print_func_name("")
-        self.common.Test_API_Per_GPU(
-            amdsmi_get_gpu_ras_block_features_enabled=amdsmi.amdsmi_get_gpu_ras_block_features_enabled
-        )
-        return
-
-    def test_get_gpu_ras_feature_info(self):
-        self.common.print_func_name("")
-        self.common.Test_API_Per_GPU(
-            amdsmi_get_gpu_ras_feature_info=amdsmi.amdsmi_get_gpu_ras_feature_info
-        )
-        return
-
-    def test_get_gpu_total_ecc_count(self):
-        self.common.print_func_name("")
-        self.common.Test_API_Per_GPU(
-            amdsmi_get_gpu_total_ecc_count=amdsmi.amdsmi_get_gpu_total_ecc_count
-        )
-        return
-
-    def test_gpu_counter_group_supported(self):
-        self.common.print_func_name("")
-        self.common.Test_Per_GPU_With_One_Enum(
-            amdsmi_gpu_counter_group_supported=amdsmi.amdsmi_gpu_counter_group_supported,
-            event_group=common.EVENT_GROUPS,
         )
         return
 

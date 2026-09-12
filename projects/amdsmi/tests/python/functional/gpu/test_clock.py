@@ -164,27 +164,3 @@ class TestGpuClock(unittest.TestCase):
         return
 
     # integration
-
-    def test_get_clk_freq(self):
-        self.common.print_func_name("")
-
-        if self.common.TODO_SKIP_FAIL:
-            msg = (
-                "\tSkipping test_get_clk_freq as it fails (MI350X, AMDSMI_STATUS_UNEXPECTED_DATA)."
-            )
-            self.common.print(msg)
-            self.skipTest(msg)
-
-        self.common.Test_API_Per_GPU(amdsmi_get_clk_freq=amdsmi.amdsmi_get_clk_freq)
-        return
-
-    def test_get_clock_info(self):
-        self.common.print_func_name("")
-
-        if self.common.TODO_SKIP_FAIL:
-            msg = "\tSkipping test_get_clock_info as it fails (MI350X, AMDSMI_STATUS_UNEXPECTED_DATA)."
-            self.common.print(msg)
-            self.skipTest(msg)
-
-        self.common.Test_API_Per_GPU(amdsmi_get_clock_info=amdsmi.amdsmi_get_clock_info)
-        return
