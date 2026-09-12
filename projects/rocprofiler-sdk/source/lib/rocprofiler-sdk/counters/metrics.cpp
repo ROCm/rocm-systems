@@ -47,6 +47,7 @@
 #include "yaml-cpp/parser.h"
 
 #include <dlfcn.h>  // for dladdr
+#include <charconv>
 #include <cstdint>
 #include <cstdlib>
 #include <fstream>
@@ -66,6 +67,44 @@ getCustomCounterDefinition()
 {
     static common::Synchronized<CustomCounterDefinition> def = {};
     return def;
+}
+
+struct yaml_counter_definition
+{
+    std::string description = {};
+    std::string block       = {};
+    std::string event       = {};
+    std::string expression  = {};
+};
+
+bool
+operator==(const yaml_counter_definition& lhs, const yaml_counter_definition& rhs)
+{
+    return std::tie(lhs.description, lhs.block, lhs.event, lhs.expression) ==
+           std::tie(rhs.description, rhs.block, rhs.event, rhs.expression);
+}
+
+std::string
+format_yaml_counter_definition(const yaml_counter_definition& definition)
+{
+    return fmt::format("description='{}', block='{}', event='{}', expression='{}'",
+                       definition.description,
+                       definition.block,
+                       definition.event,
+                       definition.expression);
+}
+
+std::optional<uint64_t>
+parse_unsigned_integer(const YAML::Node& node)
+{
+    if(!node || !node.IsScalar()) return std::nullopt;
+
+    auto value        = node.as<std::string>();
+    auto parsed_value = uint64_t{};
+    auto result       = std::from_chars(value.data(), value.data() + value.size(), parsed_value);
+    if(value.empty() || result.ec != std::errc{} || result.ptr != value.data() + value.size())
+        return std::nullopt;
+    return parsed_value;
 }
 
 /**
@@ -97,19 +136,7 @@ get_constants(uint64_t starting_id)
     }
     return constants;
 }
-/**
- * Expected YAML Format:
- * COUNTER_NAME:
- *  architectures:
- *   gfxXX: // Can be more than one, / delimited if they share identical data
- *     block: <Optional>
- *     event: <Optional>
- *     expression: <optional>
- *     description: <Optional>
- *   gfxYY:
- *      ...
- *  description: General counter description
- */
+
 counter_metrics_t
 loadYAML(const std::string& filename, std::optional<ArchMetric> add_metric)
 {
@@ -136,38 +163,64 @@ loadYAML(const std::string& filename, std::optional<ArchMetric> add_metric)
         counter_data << override.data;
     }
 
-    auto     yaml       = YAML::Load(counter_data.str());
-    auto     header     = yaml["rocprofiler-sdk"]["counters"];
-    uint64_t current_id = 0;
-    if(!override.data.empty() && override.append)
+    YAML::Node yaml;
+    YAML::Node header;
+    uint64_t   current_id = 0;
+
+    try
     {
-        append_yaml = YAML::Load(override.data);
-        if(append_yaml["rocprofiler-sdk"] && append_yaml["rocprofiler-sdk"]["counters"])
+        yaml = YAML::Load(counter_data.str());
+        if(!override.data.empty() && !override.append)
         {
-            for(const auto& counter : append_yaml["rocprofiler-sdk"]["counters"])
+            auto error = validateExtraCounterYAML(yaml);
+            if(error)
             {
-                header.push_back(counter);
+                ROCP_FATAL << "Invalid extra counters YAML: " << *error << "\n"
+                           << "Content:\n"
+                           << override.data;
             }
+        }
+        header = yaml["rocprofiler-sdk"]["counters"];
+    } catch(const YAML::Exception& e)
+    {
+        if(!override.data.empty() && !override.append)
+        {
+            ROCP_FATAL << "Failed to parse extra counters YAML: " << e.what() << "\n"
+                       << "Content:\n"
+                       << override.data;
         }
         else
         {
-            ROCP_ERROR << "Invalid extra counters YAML format. Expected structure:\n"
-                       << "rocprofiler-sdk:\n"
-                       << "  counters-schema-version: 1\n"
-                       << "  counters:\n"
-                       << "  - name: COUNTER_NAME\n"
-                       << "    description: 'Counter description'\n"
-                       << "    properties: []\n"
-                       << "    definitions:\n"
-                       << "    - architectures:\n"
-                       << "      - gfx942\n"
-                       << "      block: BLOCK_NAME\n"
-                       << "      event: EVENT_ID\n"
-                       << "Got:\n"
+            ROCP_FATAL << "Failed to parse counter file " << filename << ": " << e.what();
+        }
+    }
+
+    if(!override.data.empty() && override.append)
+    {
+        try
+        {
+            append_yaml = YAML::Load(override.data);
+
+            auto error = validateExtraCounterYAML(append_yaml);
+            if(error)
+            {
+                ROCP_FATAL << "Invalid extra counters YAML: " << *error << "\n"
+                           << "Content:\n"
+                           << override.data;
+            }
+
+            for(const auto& counter : append_yaml["rocprofiler-sdk"]["counters"])
+                header.push_back(counter);
+        } catch(const YAML::Exception& e)
+        {
+            ROCP_FATAL << "Failed to parse extra counters YAML: " << e.what() << "\n"
+                       << "Content:\n"
                        << override.data;
         }
     }
 
+    using definitions_by_name_t     = std::unordered_map<std::string, yaml_counter_definition>;
+    auto loaded_counter_definitions = std::unordered_map<std::string, definitions_by_name_t>{};
     for(const auto& counter : header)
     {
         auto counter_name = counter["name"].as<std::string>();
@@ -176,8 +229,40 @@ loadYAML(const std::string& filename, std::optional<ArchMetric> add_metric)
         {
             for(const auto& arch : definition["architectures"])
             {
-                auto& metricVec =
-                    ret.emplace(arch.as<std::string>(), std::vector<Metric>()).first->second;
+                auto arch_name = arch.as<std::string>();
+                auto block     = definition["block"] ? definition["block"].as<std::string>() : "";
+                auto event     = definition["event"] ? definition["event"].as<std::string>() : "";
+                auto expression =
+                    definition["expression"] ? definition["expression"].as<std::string>() : "";
+                auto definition_data =
+                    yaml_counter_definition{description, block, event, expression};
+                auto [existing_definition, inserted] =
+                    loaded_counter_definitions[arch_name].emplace(counter_name, definition_data);
+                if(!inserted)
+                {
+                    if(existing_definition->second == definition_data)
+                    {
+                        ROCP_WARNING << "Counter '" << counter_name << "' for architecture '"
+                                     << arch_name
+                                     << "' duplicates an identical definition; ignoring duplicate";
+                    }
+                    else
+                    {
+                        ROCP_FATAL
+                            << "Conflicting counter definitions for '" << counter_name
+                            << "' on architecture '" << arch_name << "'. Existing definition: "
+                            << format_yaml_counter_definition(existing_definition->second)
+                            << "; new definition: "
+                            << format_yaml_counter_definition(definition_data)
+                            << ". Counter names must resolve to one definition per architecture"
+                            << (override.append
+                                    ? "; append mode cannot override an existing counter"
+                                    : "");
+                    }
+                    continue;
+                }
+
+                auto& metricVec = ret.emplace(arch_name, std::vector<Metric>()).first->second;
                 if(metricVec.empty())
                 {
                     const auto constants = get_constants(current_id);
@@ -185,14 +270,7 @@ loadYAML(const std::string& filename, std::optional<ArchMetric> add_metric)
                     current_id += constants.size();
                 }
                 metricVec.emplace_back(
-                    arch.as<std::string>(),
-                    counter_name,
-                    (definition["block"] ? definition["block"].as<std::string>() : ""),
-                    (definition["event"] ? definition["event"].as<std::string>() : ""),
-                    description,
-                    (definition["expression"] ? definition["expression"].as<std::string>() : ""),
-                    "",
-                    current_id);
+                    arch_name, counter_name, block, event, description, expression, "", current_id);
                 current_id++;
             }
         }
@@ -222,8 +300,10 @@ loadYAML(const std::string& filename, std::optional<ArchMetric> add_metric)
         ret.emplace(add_metric->first, std::vector<Metric>{}).first->second.push_back(with_id);
     }
 
-    ROCP_FATAL_IF(current_id > 65536)
-        << "Counter count exceeds 16 bits, which may break counter id output";
+    if(current_id > 65536)
+    {
+        ROCP_FATAL << "Counter count exceeds 16 bits, which may break counter id output";
+    }
 
     return {.arch_to_metric = ret,
             .id_to_metric =
@@ -315,12 +395,114 @@ locateMetricsFile(std::string_view name)
     }
 
     ROCP_FATAL << "Metric file '" << name << "' not found.\n"
-               << "  Tried: ROCPROFILER_METRICS_PATH (" << metric_env_path << "), and"
+               << "  Tried: ROCPROFILER_METRICS_PATH (" << metric_env_path << "), and "
                << install_candidate;
-    return {};
 }
 
 }  // namespace
+
+std::optional<std::string>
+validateExtraCounterYAML(const YAML::Node& root)
+{
+    if(!root || !root.IsMap()) return "Top-level YAML node must be a map";
+
+    const auto sdk_node = root["rocprofiler-sdk"];
+    if(!sdk_node) return "Missing top-level 'rocprofiler-sdk' key";
+    if(!sdk_node.IsMap()) return "'rocprofiler-sdk' must be a map";
+
+    const auto schema_version = sdk_node["counters-schema-version"];
+    if(schema_version)
+    {
+        auto parsed_schema_version = parse_unsigned_integer(schema_version);
+        if(!parsed_schema_version || *parsed_schema_version != 1)
+            return "Unsupported 'counters-schema-version'; expected 1";
+    }
+
+    const auto counters_node = sdk_node["counters"];
+    if(!counters_node) return "Missing 'counters' array under 'rocprofiler-sdk'";
+
+    if(!counters_node.IsSequence()) return "'counters' must be a sequence";
+
+    for(size_t i = 0; i < counters_node.size(); ++i)
+    {
+        const auto& counter = counters_node[i];
+        auto        ctx     = fmt::format("counters[{}]", i);
+
+        if(!counter.IsMap()) return fmt::format("{}: counter must be a map", ctx);
+        if(!counter["name"]) return fmt::format("{}: missing 'name' field", ctx);
+        if(!counter["name"].IsScalar()) return fmt::format("{}: 'name' must be a string", ctx);
+
+        auto name = counter["name"].as<std::string>();
+        if(name.empty()) return fmt::format("{}: 'name' must not be empty", ctx);
+
+        const auto description = counter["description"];
+        if(!description) return fmt::format("Counter '{}': missing 'description'", name);
+        if(!description.IsScalar())
+            return fmt::format("Counter '{}': 'description' must be a string", name);
+
+        if(!counter["definitions"]) return fmt::format("Counter '{}': missing 'definitions'", name);
+        if(!counter["definitions"].IsSequence())
+            return fmt::format("Counter '{}': 'definitions' must be a sequence", name);
+        if(counter["definitions"].size() == 0)
+            return fmt::format("Counter '{}': 'definitions' is empty", name);
+
+        for(size_t j = 0; j < counter["definitions"].size(); ++j)
+        {
+            const auto& def     = counter["definitions"][j];
+            auto        def_ctx = fmt::format("Counter '{}', definition [{}]", name, j);
+
+            if(!def.IsMap()) return fmt::format("{}: definition must be a map", def_ctx);
+            if(!def["architectures"]) return fmt::format("{}: missing 'architectures'", def_ctx);
+            if(!def["architectures"].IsSequence())
+                return fmt::format("{}: 'architectures' must be a sequence", def_ctx);
+            if(def["architectures"].size() == 0)
+                return fmt::format("{}: 'architectures' is empty", def_ctx);
+
+            for(const auto& arch : def["architectures"])
+            {
+                if(!arch.IsScalar())
+                    return fmt::format("{}: architecture must be a string", def_ctx);
+                if(arch.as<std::string>().empty())
+                    return fmt::format("{}: architecture must not be empty", def_ctx);
+            }
+
+            const auto expression = def["expression"];
+            const auto event      = def["event"];
+            const auto block      = def["block"];
+
+            if(expression && !expression.IsScalar())
+                return fmt::format("{}: 'expression' must be a string", def_ctx);
+            if(event && !event.IsScalar())
+                return fmt::format("{}: 'event' must be an unsigned integer", def_ctx);
+            if(block && !block.IsScalar())
+                return fmt::format("{}: 'block' must be a string", def_ctx);
+
+            bool has_expr  = static_cast<bool>(expression);
+            bool has_event = static_cast<bool>(event);
+            bool has_block = static_cast<bool>(block);
+
+            if(has_expr && expression.as<std::string>().empty())
+                return fmt::format("{}: 'expression' must not be empty", def_ctx);
+            if(has_block && block.as<std::string>().empty())
+                return fmt::format("{}: 'block' must not be empty", def_ctx);
+            if(has_expr && (has_event || has_block))
+                return fmt::format("{}: 'expression' cannot be combined with 'event' or 'block'",
+                                   def_ctx);
+            if(has_event && !has_block) return fmt::format("{}: 'event' requires 'block'", def_ctx);
+            if(has_block && !has_event) return fmt::format("{}: 'block' requires 'event'", def_ctx);
+            if(!has_expr && !has_event)
+                return fmt::format("{}: must have 'expression' or 'event'+'block'", def_ctx);
+
+            if(has_event)
+            {
+                if(!parse_unsigned_integer(event))
+                    return fmt::format("{}: 'event' must be an unsigned integer", def_ctx);
+            }
+        }
+    }
+
+    return std::nullopt;
+}
 
 rocprofiler_status_t
 setCustomCounterDefinition(const CustomCounterDefinition& def)
