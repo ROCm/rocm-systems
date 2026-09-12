@@ -35,39 +35,48 @@ expect_buffer_registration(MHip &mhip, hipMemoryType memory_type)
 {
     hipPointerAttribute_t attrs{};
     attrs.type = memory_type;
-    HipMemAddressRange range{reinterpret_cast<void *>(0x1), UINT64_MAX - 1};
     EXPECT_CALL(mhip, hipPointerGetAttributes).WillOnce(testing::Return(attrs));
-    EXPECT_CALL(mhip, hipMemGetAddressRange).WillOnce(testing::Return(range));
+    if (memory_type == hipMemoryTypeDevice) {
+        HipMemAddressRange range{reinterpret_cast<void *>(0x1), UINT64_MAX - 1};
+        EXPECT_CALL(mhip, hipMemGetAddressRange).WillOnce(testing::Return(range));
+    }
 }
 
 struct HipFileBuffer : public HipFileOpened {
-    HipFileBuffer() : nonnull_ptr(reinterpret_cast<void *>(0x1))
+    HipFileBuffer()
+        : nonnull_ptr(reinterpret_cast<void *>(0x1)),
+          supported_memory_types(set_union(SupportedFastpathMemoryTypes, SupportedHostMemoryTypes)),
+          unsupported_memory_types(set_difference(KnownHipMemoryTypes, supported_memory_types))
     {
     }
-    void *nonnull_ptr;
+    void                      *nonnull_ptr;
+    std::vector<hipMemoryType> supported_memory_types;
+    std::vector<hipMemoryType> unsupported_memory_types;
 };
 
 TEST_F(HipFileBuffer, register_internal_supported_hip_memory)
 {
-    for (const auto memoryType : SupportedHipMemoryTypes) {
+    for (const auto memoryType : supported_memory_types) {
         StrictMock<MHip> mhip;
         expect_buffer_registration(mhip, memoryType);
         Context<DriverState>::get()->registerBuffer(nonnull_ptr, 0, 0);
+        Context<DriverState>::get()->deregisterBuffer(nonnull_ptr);
     }
 }
 
 TEST_F(HipFileBuffer, register_supported_hip_memory)
 {
-    for (const auto memoryType : SupportedHipMemoryTypes) {
+    for (const auto memoryType : supported_memory_types) {
         StrictMock<MHip> mhip;
         expect_buffer_registration(mhip, memoryType);
         ASSERT_EQ(hipFileBufRegister(nonnull_ptr, 0, 0), HIPFILE_SUCCESS);
+        ASSERT_EQ(hipFileBufDeregister(nonnull_ptr), HIPFILE_SUCCESS);
     }
 }
 
 TEST_F(HipFileBuffer, register_internal_unsupported_hip_memory)
 {
-    for (const auto memoryType : UnsupportedHipMemoryTypes) {
+    for (const auto memoryType : unsupported_memory_types) {
         StrictMock<MHip>      mhip;
         hipPointerAttribute_t attrs{};
         attrs.type = memoryType;
@@ -78,7 +87,7 @@ TEST_F(HipFileBuffer, register_internal_unsupported_hip_memory)
 
 TEST_F(HipFileBuffer, register_unsupported_hip_memory)
 {
-    for (const auto memoryType : UnsupportedHipMemoryTypes) {
+    for (const auto memoryType : unsupported_memory_types) {
         StrictMock<MHip>      mhip;
         hipPointerAttribute_t attrs{};
         attrs.type = memoryType;
