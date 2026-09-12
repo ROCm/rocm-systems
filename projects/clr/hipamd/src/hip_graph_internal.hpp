@@ -341,6 +341,23 @@ class GraphNode : public hipGraphNodeDOTAttribute {
     stream_ = stream;
     return hipSuccess;
   }
+  /// Create the stand-in command for a disabled node, which behaves as an
+  /// empty node and so still has to carry the ordering its edges describe.
+  ///
+  /// The marker has to live in commands_ rather than being created when the
+  /// node is enqueued: Graph::RunOneNode builds a dependent's cross-stream
+  /// wait list out of each dependency's GetCommands(), so a node that reports
+  /// no commands silently drops every edge through it. Being in commands_ also
+  /// gets the marker retained and gets the node's own incoming wait list
+  /// applied to it by UpdateEventWaitLists, exactly as for a real command.
+  hipError_t CreateDisabledCommand(hip::Stream* stream) {
+    hipError_t status = GraphNode::CreateCommand(stream);
+    if (status != hipSuccess) {
+      return status;
+    }
+    commands_.push_back(new amd::Marker(*stream, !kMarkerDisableFlush));
+    return hipSuccess;
+  }
   /// Return node unique ID
   int GetID() const { return id_; }
   /// Returns command for graph node
@@ -414,19 +431,8 @@ class GraphNode : public hipGraphNodeDOTAttribute {
   }
   /// Enqueue commands part of the node
   virtual hipError_t EnqueueCommands(hip::Stream* stream) {
-    // If the node is disabled it becomes empty node. To maintain ordering just enqueue marker.
-    // Node can be enabled/disabled only for kernel, memcpy and memset nodes.
-    if (!isEnabled_ && (type_ == hipGraphNodeTypeKernel || type_ == hipGraphNodeTypeMemcpy ||
-                        type_ == hipGraphNodeTypeMemset)) {
-      amd::Command::EventWaitList waitList;
-      if (!commands_.empty()) {
-        waitList = commands_[0]->eventWaitList();
-      }
-      amd::Command* command = new amd::Marker(*stream, !kMarkerDisableFlush, waitList);
-      command->enqueue();
-      command->release();
-      return hipSuccess;
-    }
+    // A disabled node's stand-in marker is an ordinary command in commands_,
+    // put there by CreateDisabledCommand, so it needs no special case here.
     for (auto& command : commands_) {
       command->enqueue();
       command->release();
@@ -1467,17 +1473,10 @@ class GraphKernelNode : public GraphNode {
  public:
   bool HasHiddenHeap() const { return hasHiddenHeap_; }
   hipError_t EnqueueCommands(hip::Stream* stream) override {
-    // If the node is disabled it becomes empty node. To maintain ordering just enqueue marker.
-    // Node can be enabled/disabled only for kernel, memcpy and memset nodes.
+    // A disabled node holds a stand-in marker, which needs none of the kernel
+    // bookkeeping below.
     if (!isEnabled_) {
-      amd::Command::EventWaitList waitList;
-      if (!commands_.empty()) {
-        waitList = commands_[0]->eventWaitList();
-      }
-      amd::Command* command = new amd::Marker(*stream, !kMarkerDisableFlush, waitList);
-      command->enqueue();
-      command->release();
-      return hipSuccess;
+      return GraphNode::EnqueueCommands(stream);
     }
     for (auto& command : commands_) {
       command->enqueue();
@@ -1739,7 +1738,7 @@ class GraphKernelNode : public GraphNode {
       return status;
     }
     if (!isEnabled_) {
-      return hipSuccess;
+      return CreateDisabledCommand(stream);
     }
     hipFunction_t func = resolvedFunc_;
     if (!func) {
@@ -1995,9 +1994,11 @@ class GraphMemcpyNode : public GraphNode {
     if (status != hipSuccess) {
       return status;
     }
-    if (!isEnabled_ ||
-        ((copyParams_.kind == hipMemcpyHostToHost || copyParams_.kind == hipMemcpyDefault) &&
-         IsHtoHMemcpy(copyParams_.dstPtr.ptr, copyParams_.srcPtr.ptr))) {
+    if (!isEnabled_) {
+      return CreateDisabledCommand(stream);
+    }
+    if ((copyParams_.kind == hipMemcpyHostToHost || copyParams_.kind == hipMemcpyDefault) &&
+        IsHtoHMemcpy(copyParams_.dstPtr.ptr, copyParams_.srcPtr.ptr)) {
       return hipSuccess;
     }
     commands_.reserve(1);
@@ -2226,8 +2227,11 @@ class GraphMemcpyNode1D : public GraphMemcpyNode {
     if (status != hipSuccess) {
       return status;
     }
-    if (!isEnabled_ ||
-        ((kind_ == hipMemcpyHostToHost || kind_ == hipMemcpyDefault) && IsHtoHMemcpy(dst_, src_))) {
+    if (!isEnabled_) {
+      return CreateDisabledCommand(stream);
+    }
+    if ((kind_ == hipMemcpyHostToHost || kind_ == hipMemcpyDefault) &&
+        IsHtoHMemcpy(dst_, src_)) {
       return hipSuccess;
     }
     commands_.reserve(1);
@@ -2279,57 +2283,55 @@ class GraphMemcpyNode1D : public GraphMemcpyNode {
   }
 
   virtual hipError_t EnqueueCommands(hip::Stream* stream) override {
+    // A disabled node holds a stand-in marker, which needs none of the copy
+    // bookkeeping below. Enqueueing the marker that CreateDisabledCommand put
+    // in commands_ is what keeps the node's edges: building a fresh one here
+    // would leave the marker the dependents were given through GetCommands()
+    // unsubmitted, and would drop the incoming wait list applied to it.
+    if (!isEnabled_) {
+      return GraphNode::EnqueueCommands(stream);
+    }
     bool isH2H = false;
     if ((kind_ == hipMemcpyHostToHost || kind_ == hipMemcpyDefault) && IsHtoHMemcpy(dst_, src_)) {
       isH2H = true;
     }
-    if (!isH2H) {
-      if (commands_.empty()) return hipSuccess;
-      // commands_ should have just 1 item
-      assert(commands_.size() == 1 && "Invalid command size in GraphMemcpyNode1D");
+    // HtoH
+    if (isH2H) {
+      ihipHtoHMemcpy(dst_, src_, count_, *stream);
+      return hipSuccess;
     }
-    if (isEnabled_) {
-      // HtoH
-      if (isH2H) {
-        ihipHtoHMemcpy(dst_, src_, count_, *stream);
-        return hipSuccess;
-      }
-      amd::Command* command = commands_[0];
-      amd::HostQueue* cmdQueue = command->queue();
+    if (commands_.empty()) return hipSuccess;
+    // commands_ should have just 1 item
+    assert(commands_.size() == 1 && "Invalid command size in GraphMemcpyNode1D");
+    amd::Command* command = commands_[0];
+    amd::HostQueue* cmdQueue = command->queue();
 
-      if (cmdQueue == stream) {
-        command->enqueue();
-        command->release();
-        return hipSuccess;
-      }
-
-      amd::Command::EventWaitList waitList;
-      amd::Command* depdentMarker = nullptr;
-      amd::Command* cmd = stream->getLastQueuedCommand(true);
-      if (cmd != nullptr) {
-        waitList.push_back(cmd);
-        amd::Command* depdentMarker = new amd::Marker(*cmdQueue, true, waitList);
-        depdentMarker->enqueue();  // Make sure command synced with last command of queue
-        depdentMarker->release();
-        cmd->release();
-      }
+    if (cmdQueue == stream) {
       command->enqueue();
       command->release();
+      return hipSuccess;
+    }
 
-      cmd = cmdQueue->getLastQueuedCommand(true);  // should be command
-      if (cmd != nullptr) {
-        waitList.clear();
-        waitList.push_back(cmd);
-        amd::Command* depdentMarker = new amd::Marker(*stream, true, waitList);
-        depdentMarker->enqueue();  // Make sure future commands of queue synced with command
-        depdentMarker->release();
-        cmd->release();
-      }
-    } else {
-      amd::Command::EventWaitList waitList;
-      amd::Command* command = new amd::Marker(*stream, !kMarkerDisableFlush, waitList);
-      command->enqueue();
-      command->release();
+    amd::Command::EventWaitList waitList;
+    amd::Command* cmd = stream->getLastQueuedCommand(true);
+    if (cmd != nullptr) {
+      waitList.push_back(cmd);
+      amd::Command* depdentMarker = new amd::Marker(*cmdQueue, true, waitList);
+      depdentMarker->enqueue();  // Make sure command synced with last command of queue
+      depdentMarker->release();
+      cmd->release();
+    }
+    command->enqueue();
+    command->release();
+
+    cmd = cmdQueue->getLastQueuedCommand(true);  // should be command
+    if (cmd != nullptr) {
+      waitList.clear();
+      waitList.push_back(cmd);
+      amd::Command* depdentMarker = new amd::Marker(*stream, true, waitList);
+      depdentMarker->enqueue();  // Make sure future commands of queue synced with command
+      depdentMarker->release();
+      cmd->release();
     }
     return hipSuccess;
   }
@@ -2772,6 +2774,9 @@ class GraphMemsetNode : public GraphNode {
     hipError_t status = GraphNode::CreateCommand(stream);
     if (status != hipSuccess) {
       return status;
+    }
+    if (!isEnabled_) {
+      return CreateDisabledCommand(stream);
     }
     if (memsetParams_.height == 1 && depth_ == 1) {
       size_t sizeBytes = memsetParams_.width * memsetParams_.elementSize;
@@ -3450,9 +3455,12 @@ class GraphDrvMemcpyNode : public GraphNode {
   GraphNode* clone() const override { return new GraphDrvMemcpyNode(*this); }
 
   hipError_t CreateCommand(hip::Stream* stream) override {
-    if (!isEnabled_ || (copyParams_.srcMemoryType == hipMemoryTypeHost &&
-                        copyParams_.dstMemoryType == hipMemoryTypeHost &&
-                        IsHtoHMemcpy(copyParams_.dstHost, copyParams_.srcHost))) {
+    if (!isEnabled_) {
+      return CreateDisabledCommand(stream);
+    }
+    if (copyParams_.srcMemoryType == hipMemoryTypeHost &&
+        copyParams_.dstMemoryType == hipMemoryTypeHost &&
+        IsHtoHMemcpy(copyParams_.dstHost, copyParams_.srcHost)) {
       return hipSuccess;
     }
     hipError_t status = GraphNode::CreateCommand(stream);

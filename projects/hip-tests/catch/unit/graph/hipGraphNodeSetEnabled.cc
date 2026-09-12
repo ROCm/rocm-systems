@@ -7,6 +7,7 @@
 #include <hip_test_common.hh>
 #include <hip_test_checkers.hh>
 #include <hip_test_kernels.hh>
+#include <hip_test_process.hh>
 
 #define N 1024
 
@@ -651,4 +652,65 @@ HIP_TEST_CASE(Unit_hipGraphNodeSetEnabled_Negative_Functional) {
   HIP_CHECK(hipGraphExecDestroy(clonedGraphExec));
   HIP_CHECK(hipGraphDestroy(clonedGraph));
   HIP_CHECK(hipGraphDestroy(graph2));
+}
+
+/* Functional Test for API - hipGraphNodeSetEnabled
+ 21) A disabled node is documented to behave as an empty node until it is
+     reenabled.  An empty node does no work but still orders its predecessors
+     ahead of its successors, so a disabled node has to do the same, including
+     when a successor is scheduled onto a different stream from it. */
+
+// The check itself lives in hipGraphNodeSetEnabledOrdering_Exe, because only the
+// classic graph execution path drops these edges, and selecting that path means
+// setting DEBUG_HIP_GRAPH_CLASSIC_PATH before the runtime reads its flags --
+// which a case running inside an already initialised process cannot do.  Each
+// shape is run twice, once on the platform's default path and once with the
+// classic path forced, in the same way unit/env spawns hipSetEnv_helper to
+// exercise GPU_ENABLE_PAL.
+static void checkOrdering(const char* shape, const char* variant) {
+  for (int forceClassic = 0; forceClassic <= 1; ++forceClassic) {
+    hip::SpawnProc proc("hipGraphNodeSetEnabledOrdering_Exe", true, /*captureStderr=*/true);
+    // Set explicitly either way, so an inherited setting cannot quietly turn the
+    // default-path run into a second classic-path one.  Zero means the platform
+    // default rather than the segmented path: the classic path is also taken
+    // when GPU_ENABLE_PAL is set, which this does not disturb.
+    proc.setEnv("DEBUG_HIP_GRAPH_CLASSIC_PATH", forceClassic ? "1" : "0");
+    int result = proc.run(std::string(shape) + " " + variant);
+    INFO("shape=" << shape << " variant=" << variant << " classic=" << forceClassic
+                  << " output: " << proc.getOutput());
+    REQUIRE(result == 0);
+  }
+}
+
+HIP_TEST_CASE(Unit_hipGraphNodeSetEnabled_Functional_DependencyOrdering) {
+  // An empty node in the place of the disabled one is the control for each
+  // shape.  It exercises the same graph, the same stream assignment and the same
+  // race window, so if it holds and the disabled node does not, the difference
+  // is the disabling and not the harness.
+  SECTION("An empty node orders its predecessor ahead of its successor") {
+    checkOrdering("fanout", "empty");
+    checkOrdering("inedge", "empty");
+  }
+
+  // The fanout shape puts the disabled node's successor on a foreign stream,
+  // which is what a node reporting no commands at all loses.
+  SECTION("A disabled kernel node orders its predecessor ahead of its successor") {
+    checkOrdering("fanout", "kernel");
+  }
+  SECTION("A disabled memcpy node orders its predecessor ahead of its successor") {
+    checkOrdering("fanout", "memcpy");
+  }
+
+  // The inedge shape puts the *predecessor* on a foreign stream instead, which
+  // is the edge a node loses when it does report a command but that command is
+  // never submitted.  The fanout shape cannot reach this, since it arrives at
+  // the disabled node by walking its predecessor and so shares a stream with it.
+  SECTION("A disabled memcpy node waits for a predecessor on another stream") {
+    checkOrdering("inedge", "memcpy");
+    // Controls for that shape: a disabled kernel node and an enabled copy in the
+    // same position must both hold, so a failure above is specific to a copy
+    // node being disabled.
+    checkOrdering("inedge", "kernel");
+    checkOrdering("inedge", "enabled");
+  }
 }

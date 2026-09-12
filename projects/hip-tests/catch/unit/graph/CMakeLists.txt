@@ -209,6 +209,18 @@ hip_add_exe_to_target(NAME GraphsTest2
                       TEST_SRC ${TEST_SRC}
                       TEST_TARGET_NAME build_tests)
 
+# Helper executable for Unit_hipGraphNodeSetEnabled_Functional_DependencyOrdering.
+# Its check has to select the graph execution path, which means setting
+# DEBUG_HIP_GRAPH_CLASSIC_PATH before the runtime reads its flags, so the test
+# case spawns this rather than running the check in process.
+add_executable(hipGraphNodeSetEnabledOrdering_Exe EXCLUDE_FROM_ALL
+               hipGraphNodeSetEnabledOrdering_Exe.cc)
+set_source_files_properties(hipGraphNodeSetEnabledOrdering_Exe.cc
+                            PROPERTIES LANGUAGE ${GPGPU_LANGUAGE})
+set_property(GLOBAL APPEND PROPERTY G_INSTALL_EXE_TARGETS hipGraphNodeSetEnabledOrdering_Exe)
+target_link_libraries(hipGraphNodeSetEnabledOrdering_Exe ${GPGPU_LINKER_LIBRARIES})
+add_dependencies(GraphsTest2 hipGraphNodeSetEnabledOrdering_Exe)
+
 # Wire kernel artifacts to the consuming test exes so `make GraphsTest1` /
 # `make GraphsTest2` builds all their dependencies. The kernels are loaded at
 # runtime by tests in either binary, so wire to both.
