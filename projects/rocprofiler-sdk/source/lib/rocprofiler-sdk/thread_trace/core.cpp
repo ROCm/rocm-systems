@@ -405,7 +405,14 @@ DispatchThreadTracer::resource_init()
                                rocp_agent->name);
             continue;
         }
-        agents[*cache] = std::make_unique<ThreadTracerAgent>(it->second, rocp_agent->id);
+        try
+        {
+            agents[*cache] = std::make_unique<ThreadTracerAgent>(it->second, rocp_agent->id);
+        } catch(const std::exception& e)
+        {
+            ROCP_FATAL << "ATT tracing could not be initialized: " << e.what()
+                       << ". Please verify the counter names and target architecture.";
+        }
     }
 }
 
