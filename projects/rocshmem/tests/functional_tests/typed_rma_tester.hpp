@@ -22,48 +22,38 @@
  * IN THE SOFTWARE.
  *****************************************************************************/
 
-#ifndef LIBRARY_SRC_REVERSE_OFFLOAD_COMMANDS_TYPES_HPP_
-#define LIBRARY_SRC_REVERSE_OFFLOAD_COMMANDS_TYPES_HPP_
+#ifndef _TYPED_RMA_TESTER_HPP_
+#define _TYPED_RMA_TESTER_HPP_
 
+#include "tester.hpp"
 
-namespace rocshmem {
+/******************************************************************************
+ * HOST TESTER CLASS
+ *
+ * Exercises the typed RMA device APIs (rocshmem_ctx_T_put/get/put_nbi/get_nbi
+ * and rocshmem_ctx_T_p/g) for a specific element type T.  Used to provide
+ * __half and __hip_bfloat16 coverage for GetTestType, GetNBITestType,
+ * PutTestType, PutNBITestType, PTestType, and GTestType.
+ *****************************************************************************/
+template <typename T>
+class TypedRMATester : public Tester {
+ public:
+  explicit TypedRMATester(TesterArguments args);
+  virtual ~TypedRMATester();
 
-enum ro_net_cmds {
-  RO_NET_PUT,
-  RO_NET_P,
-  RO_NET_GET,
-  RO_NET_PUT_NBI,
-  RO_NET_GET_NBI,
-  RO_NET_AMO_FOP,
-  RO_NET_AMO_FCAS,
-  RO_NET_FENCE,
-  RO_NET_QUIET,
-  RO_NET_FINALIZE,
-  RO_NET_TEAM_REDUCE,
-  RO_NET_SYNC,
-  RO_NET_BARRIER,
-  RO_NET_TEAM_BROADCAST,
-  RO_NET_ALLTOALL,
-  RO_NET_FCOLLECT,
-  RO_NET_TEAM_REDUCE_SCATTER,
+ protected:
+  virtual void resetBuffers(size_t size) override;
+
+  virtual void launchKernel(dim3 gridSize, dim3 blockSize, int loop,
+                            size_t size) override;
+
+  virtual void verifyResults(size_t size) override;
+
+  T *source = nullptr;
+  T *dest   = nullptr;
+  int *grid_psync = nullptr;
 };
 
-enum ro_net_types {
-  RO_NET_FLOAT,
-  RO_NET_CHAR,
-  RO_NET_SIGNED_CHAR,
-  RO_NET_UNSIGNED_CHAR,
-  RO_NET_DOUBLE,
-  RO_NET_INT,
-  RO_NET_LONG,
-  RO_NET_UNSIGNED_LONG,
-  RO_NET_LONG_LONG,
-  RO_NET_SHORT,
-  RO_NET_LONG_DOUBLE,
-  RO_NET_HALF,
-  RO_NET_BFLOAT16
-};
+#include "typed_rma_tester.cpp"
 
-}  // namespace rocshmem
-
-#endif  // LIBRARY_SRC_REVERSE_OFFLOAD_COMMANDS_TYPES_HPP_
+#endif

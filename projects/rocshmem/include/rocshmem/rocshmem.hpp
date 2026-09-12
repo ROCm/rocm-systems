@@ -26,6 +26,8 @@
 #define LIBRARY_INCLUDE_ROCSHMEM_HPP
 
 #include <hip/hip_runtime.h>
+#include <hip/hip_bf16.h>
+#include <hip/hip_fp16.h>
 
 #include "rocshmem_config.h"
 #include "rocshmem_common.hpp"

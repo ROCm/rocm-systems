@@ -65,6 +65,8 @@ TEAM_INT_REDUCTION_DEF_GEN(long, long)
 TEAM_INT_REDUCTION_DEF_GEN(long long, longlong)
 TEAM_FLOAT_REDUCTION_DEF_GEN(float, float)
 TEAM_FLOAT_REDUCTION_DEF_GEN(double, double)
+TEAM_FLOAT_REDUCTION_DEF_GEN(__half, half)
+TEAM_FLOAT_REDUCTION_DEF_GEN(__hip_bfloat16, bfloat16)
 // long double reduction fails. hipcc/device may not support long double.
 // so disable it for now.
 // FLOAT_REDUCTION_DEF_GEN(long double, longdouble)
