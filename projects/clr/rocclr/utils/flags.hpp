@@ -273,6 +273,12 @@ release(bool, HIP_FORCE_SPIRV_CODEOBJECT, false,                              \
         "Force use of SPIRV instead of device specific code object.")         \
 release(uint, DEBUG_CLR_BATCH_CPU_SYNC_SIZE, 16,                              \
         "Forces the minimum batch size for CPU sync")                         \
+release(bool, DEBUG_CLR_SDMA_BATCH, true,                                     \
+        "Coalesce H2D/D2H hipMemcpyAsync copies into a single batched SDMA "  \
+        "submission (1 = enabled, 0 = disabled)")                             \
+release(uint, DEBUG_CLR_SDMA_BATCH_DEPTH, 256,                                \
+        "Max H2D/D2H copies to accumulate before forcing an SDMA batch "      \
+        "flush (batch depth)")                                                \
 release(bool, DEBUG_CLR_DISABLE_IMAGE, false,                                 \
         "1 = Disable Image support for ROC path")                             \
 release(cstring, HIP_HRR_CAPTURE_OUTPUT, "",                                  \
