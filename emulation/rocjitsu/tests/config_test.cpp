@@ -2235,6 +2235,8 @@ TEST(CApiTest, ClockedDispatchStaysEventDriven) {
 }
 
 TEST(CApiTest, CheckpointRoundTrip) {
+  // functional_dispatch_threads_config() pins "num_threads":1, which
+  // rj_vm_step() requires; the restored VM inherits the saved count.
   const std::string json = functional_dispatch_threads_config(/*threads=*/2);
   rj_vm_t *raw_source = nullptr;
   ASSERT_EQ(rj_vm_create_from_string(json.c_str(), RJ_VM_MODE_DEFAULT, &raw_source),

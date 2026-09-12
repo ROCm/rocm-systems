@@ -11,7 +11,6 @@
 #include "library/thread_data.hpp"
 
 #include <timemory/backends/threading.hpp>
-#include <timemory/utility/macros.hpp>
 #include <timemory/utility/types.hpp>
 
 #include <pthread.h>

@@ -178,7 +178,7 @@ agent_label(const tool_agent* _agent)
     if(!_agent || !_agent->agent) return "?";
     auto type = _agent->agent->type;
     auto idx  = _agent->device_id;
-    return fmt::format("{} {}", type == agent_type::GPU ? "GPU" : "CPU", idx);
+    return fmt::format("{} {}", type == agent_type::gpu ? "GPU" : "CPU", idx);
 }
 
 // Resolve agent_id to node_id, matching rocprofiler-sdk's agent_node_id() behavior.
@@ -276,7 +276,7 @@ kfd_event_metadata_initialize(const client_data* tool_data)
         const auto dropped_dev_id =
             static_cast<std::uint32_t>(tool_data->gpu_agents.front().device_id);
         trace_cache::get_metadata_registry().add_pmc_info(
-            { agent_type::GPU, dropped_dev_id, "GPU", EVENT_CODE, INSTANCE_ID,
+            { agent_type::gpu, dropped_dev_id, "GPU", EVENT_CODE, INSTANCE_ID,
               trait::name<category::rocm_kfd_event_dropped_events>::value,
               "KFD Dropped Events",
               trait::name<category::rocm_kfd_event_dropped_events>::description,
@@ -291,14 +291,14 @@ kfd_event_metadata_initialize(const client_data* tool_data)
         auto dev_idx = static_cast<std::uint32_t>(gpu.device_id);
 
         trace_cache::get_metadata_registry().add_pmc_info(
-            { agent_type::GPU, dev_idx, "GPU", EVENT_CODE, INSTANCE_ID,
+            { agent_type::gpu, dev_idx, "GPU", EVENT_CODE, INSTANCE_ID,
               trait::name<category::rocm_kfd_page_fault>::value, "KFD Page Fault Events",
               trait::name<category::rocm_kfd_page_fault>::description,
               "KFD page fault paired records", COMPONENT, "events", trace_cache::ABSOLUTE,
               BLOCK, EXPRESSION, 0, 0, "{}" });
 
         trace_cache::get_metadata_registry().add_pmc_info(
-            { agent_type::GPU, dev_idx, "GPU", EVENT_CODE, INSTANCE_ID,
+            { agent_type::gpu, dev_idx, "GPU", EVENT_CODE, INSTANCE_ID,
               trait::name<category::rocm_kfd_page_migrate>::value,
               "KFD Page Migration Events",
               trait::name<category::rocm_kfd_page_migrate>::description,
@@ -306,14 +306,14 @@ kfd_event_metadata_initialize(const client_data* tool_data)
               trace_cache::ABSOLUTE, BLOCK, EXPRESSION, 0, 0, "{}" });
 
         trace_cache::get_metadata_registry().add_pmc_info(
-            { agent_type::GPU, dev_idx, "GPU", EVENT_CODE, INSTANCE_ID,
+            { agent_type::gpu, dev_idx, "GPU", EVENT_CODE, INSTANCE_ID,
               trait::name<category::rocm_kfd_queue>::value, "KFD Queue Events",
               trait::name<category::rocm_kfd_queue>::description,
               "KFD queue eviction/restore paired records", COMPONENT, "events",
               trace_cache::ABSOLUTE, BLOCK, EXPRESSION, 0, 0, "{}" });
 
         trace_cache::get_metadata_registry().add_pmc_info(
-            { agent_type::GPU, dev_idx, "GPU", EVENT_CODE, INSTANCE_ID,
+            { agent_type::gpu, dev_idx, "GPU", EVENT_CODE, INSTANCE_ID,
               trait::name<category::rocm_kfd_event_queue>::value,
               "KFD Event Queue Operations",
               trait::name<category::rocm_kfd_event_queue>::description,
@@ -321,7 +321,7 @@ kfd_event_metadata_initialize(const client_data* tool_data)
               trace_cache::ABSOLUTE, BLOCK, EXPRESSION, 0, 0, "{}" });
 
         trace_cache::get_metadata_registry().add_pmc_info(
-            { agent_type::GPU, dev_idx, "GPU", EVENT_CODE, INSTANCE_ID,
+            { agent_type::gpu, dev_idx, "GPU", EVENT_CODE, INSTANCE_ID,
               trait::name<category::rocm_kfd_event_unmap_from_gpu>::value,
               "KFD Unmap from GPU Events",
               trait::name<category::rocm_kfd_event_unmap_from_gpu>::description,
@@ -334,7 +334,7 @@ kfd_event_metadata_initialize(const client_data* tool_data)
     {
         auto dev_idx = static_cast<std::uint32_t>(cpu.device_id);
         trace_cache::get_metadata_registry().add_pmc_info(
-            { agent_type::CPU, dev_idx, "CPU", EVENT_CODE, INSTANCE_ID,
+            { agent_type::cpu, dev_idx, "CPU", EVENT_CODE, INSTANCE_ID,
               trait::name<category::rocm_kfd_page_migrate>::value,
               "KFD Page Migration Events",
               trait::name<category::rocm_kfd_page_migrate>::description,
@@ -381,7 +381,7 @@ tool_kfd_page_fault_callback(
         std::move(track_name),                                       // track_name
         "{}",                                                        // event_metadata
         static_cast<std::uint32_t>(_agent ? _agent->device_id : 0),  // device_id
-        static_cast<std::uint8_t>(agent_type::GPU),                  // device_type
+        static_cast<std::uint8_t>(agent_type::gpu),                  // device_type
         trait::name<category::rocm_kfd_page_fault>::value,           // pmc_info_name
         pmc_value,                                                   // value
         std::optional<std::int64_t>(_pid)                            // system_tid
@@ -446,7 +446,7 @@ tool_kfd_page_migrate_callback(
     auto src_dev_id   = _src_tool_agent ? _src_tool_agent->device_id : 0;
     auto src_dev_type = (_src_tool_agent && _src_tool_agent->agent)
                             ? _src_tool_agent->agent->type
-                            : agent_type::CPU;
+                            : agent_type::cpu;
 
     trace_cache::get_buffer_storage().store(trace_cache::kfd_sample{
         tid,                                                  // thread_id
@@ -499,7 +499,7 @@ tool_kfd_queue_callback(const client_data*                                   too
         std::move(track_name),                                       // track_name
         "{}",                                                        // event_metadata
         static_cast<std::uint32_t>(_agent ? _agent->device_id : 0),  // device_id
-        static_cast<std::uint8_t>(agent_type::GPU),                  // device_type
+        static_cast<std::uint8_t>(agent_type::gpu),                  // device_type
         trait::name<category::rocm_kfd_queue>::value,                // pmc_info_name
         pmc_value,                                                   // value
         std::optional<std::int64_t>(_pid)                            // system_tid
@@ -545,7 +545,7 @@ tool_kfd_event_queue_callback(
         std::move(track_name),                                       // track_name
         "{}",                                                        // event_metadata
         static_cast<std::uint32_t>(_agent ? _agent->device_id : 0),  // device_id
-        static_cast<std::uint8_t>(agent_type::GPU),                  // device_type
+        static_cast<std::uint8_t>(agent_type::gpu),                  // device_type
         trait::name<category::rocm_kfd_event_queue>::value,          // pmc_info_name
         pmc_value,                                                   // value
         std::optional<std::int64_t>(_pid)                            // system_tid
@@ -591,7 +591,7 @@ tool_kfd_event_unmap_from_gpu_callback(
         std::move(track_name),                                        // track_name
         "{}",                                                         // event_metadata
         static_cast<std::uint32_t>(_agent ? _agent->device_id : 0),   // device_id
-        static_cast<std::uint8_t>(agent_type::GPU),                   // device_type
+        static_cast<std::uint8_t>(agent_type::gpu),                   // device_type
         trait::name<category::rocm_kfd_event_unmap_from_gpu>::value,  // pmc_info_name
         pmc_value,                                                    // value
         std::optional<std::int64_t>(_pid)                             // system_tid
@@ -629,7 +629,7 @@ tool_kfd_event_dropped_events_callback(
         std::move(track_name),                                        // track_name
         "{}",                                                         // event_metadata
         0,                                           // device_id = 0 (no specific device)
-        static_cast<std::uint8_t>(agent_type::GPU),  // device_type
+        static_cast<std::uint8_t>(agent_type::gpu),  // device_type
         trait::name<category::rocm_kfd_event_dropped_events>::value,  // pmc_info_name
         pmc_value,                                                    // value
         std::optional<std::int64_t>(_pid)                             // system_tid
