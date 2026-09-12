@@ -2740,6 +2740,48 @@ TEST(ExecutionPluginTest, MemoryPipelineCompletionDoesNotObserveInstructionWrite
   EXPECT_EQ(cu->read_vgpr_storage(wf->vgpr_alloc().base + kDst, 0), kLoadedValue);
 }
 
+TEST(ExecutionPluginTest, FlatStoreDwordx4ReportsEverySourceRegisterAndActiveLane) {
+  PluginFixture f(/*num_wf_slots=*/1);
+  auto *plugin = f.attach_ordering_plugin();
+  auto *cu = f.cu();
+  auto *wf = cu->dispatch_wf(0, 0, /*sgprs=*/104, /*vgprs=*/256);
+  ASSERT_NE(wf, nullptr);
+
+  constexpr uint64_t kLaneMask = (uint64_t{1} << 1) | (uint64_t{1} << 5);
+  constexpr uint32_t kAddress = 0;
+  constexpr uint32_t kData = 4;
+  const uint32_t vgpr_base = wf->vgpr_alloc().base;
+  wf->set_exec(kLaneMask);
+  for (uint32_t lane : {1u, 5u}) {
+    cu->write_vgpr(vgpr_base + kAddress, lane, 0x1000u + lane * 16);
+    cu->write_vgpr(vgpr_base + kAddress + 1, lane, 0);
+    for (uint32_t reg = 0; reg < 4; ++reg)
+      cu->write_vgpr(vgpr_base + kData + reg, lane, lane * 0x100u + reg);
+  }
+
+  const auto words =
+      cdna4::build_flat(cdna4::kFlatStoreDwordx4Flat, {.addr = kAddress, .data = kData});
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
+  ASSERT_NE(decoder, nullptr);
+  std::unique_ptr<Instruction> store(decode_valid(*decoder, words.data()));
+  ASSERT_NE(store, nullptr);
+
+  plugin->events.clear();
+  cu->execute_instruction(store.get(), *wf);
+
+  expect_vgpr_read_set(vgpr_read_events(*plugin), vgpr_base, {0, 1, 4, 5, 6, 7}, kLaneMask);
+  const auto *state = store->data_as<VectorMemState>();
+  ASSERT_NE(state, nullptr);
+  for (uint32_t lane : {1u, 5u}) {
+    for (uint32_t reg = 0; reg < 4; ++reg) {
+      uint32_t stored = 0;
+      std::memcpy(&stored, state->store_data.data() + (lane * 4 + reg) * sizeof(uint32_t),
+                  sizeof(stored));
+      EXPECT_EQ(stored, lane * 0x100u + reg);
+    }
+  }
+}
+
 TEST(ExecutionPluginTest, MemoryPipelineCompletionDoesNotCrossWaveVgprBlock) {
   constexpr uint32_t kVgprsPerWave = 16;
   PluginFixture f(/*num_wf_slots=*/2, /*arch=*/"rdna4", /*wavefront_size=*/32,
