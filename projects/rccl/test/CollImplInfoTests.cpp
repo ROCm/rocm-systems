@@ -123,6 +123,26 @@ namespace RcclUnitTesting
           addon = {true, TokenAfter(line, "algo "), false, "", false, 0};
         }
 
+        // CE path logs "<Func> [Copy Engine]:" rather than "impl selected" / "Bytes -> Algo".
+        if (line.find(func + " [Copy Engine]:") != std::string::npos)
+        {
+          addon = {true, "CE", false, "", false, 0};
+        }
+
+        // Live SYM is scheduled in enqueue: "<Func> [Symmetric]: ... Kernel AllGather_LL nchannels N"
+        if (line.find(func + " [Symmetric]:") != std::string::npos)
+        {
+          std::string kernel = TokenAfter(line, "Kernel ");
+          std::string proto;
+          if (kernel.find("LL128") != std::string::npos)
+            proto = "LL128";
+          else if (kernel.find("LL") != std::string::npos)
+            proto = "LL";
+          else if (!kernel.empty())
+            proto = "SIMPLE";
+          addon = {true, "SYM", !proto.empty(), proto, false, 0};
+        }
+
         if (func == "AllGather")
         {
           if (line.find("DDA fabric LL128") != std::string::npos)
