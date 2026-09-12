@@ -586,3 +586,30 @@ deviceLib:
     # "=== This is newly added test to check ASAN memory errors deduced from rocDecode ==="
     # "=== during ASAN/memleak detection work on Linux ==="
     disabled: [amd_linux, amd_windows, amd_wsl]
+  Unit_coop_memcpy_async_thread_block_tile_Basic:
+    <<: *level_2
+    tags: [cooperative, ops]
+  Unit_coop_memcpy_async_coalesced_group_Basic:
+    <<: *level_2
+    tags: [cooperative, ops]
+  Unit_coop_memcpy_async_LayoutMin:
+    <<: *level_2
+    tags: [cooperative, ops]
+  Unit_coop_memcpy_async_ZeroCount:
+    <<: *level_2
+    tags: [cooperative, ops]
+  Unit_coop_memcpy_async_Unaligned:
+    <<: *level_2
+    tags: [cooperative, ops]
+  Unit_coop_memcpy_async_SyncPublishesCopy:
+    <<: *level_2
+    tags: [cooperative, ops]
+  Unit_coop_memcpy_async_SyncPublishesCopy_Tile:
+    <<: *level_2
+    tags: [cooperative, ops]
+  Unit_coop_memcpy_async_CrossWaveVisibility:
+    <<: *level_2
+    tags: [cooperative, ops]
+  Unit_coop_memcpy_async_GlobalToGlobal:
+    <<: *level_2
+    tags: [cooperative, ops]
