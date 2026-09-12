@@ -429,26 +429,10 @@ __device__ void GDAContext::alltoallmem_linear_thread_puts_wg(rocshmem_team_t te
   // Have each PE put their designated data to the other PEs
   for (int j = tid; j < pe_size; j += step_size) {
     int dest_pe = team_obj->get_pe_in_world(j);
-    uint64_t base_heap_offset = base_heap[dest_pe] - base_heap[constmem.my_pe];
-
-    /*
-     * dst may be a symmetric-heap object or a registered user buffer, so
-     * resolve its remote address and key through the QP. src and pSync are
-     * always heap; for a heap dst this reproduces the base_heap_offset math
-     * and default keys exactly.
-     */
     char *dst_local = reinterpret_cast<char *>(dst) + my_pe_in_team * nelems;
     const char *src_local = reinterpret_cast<const char *>(src) + j * nelems;
-    auto [dst_raddr, dst_rkey] = qps[dest_pe].get_raddr_info(dst_local);
-    uint32_t src_lkey =
-        (static_cast<int32_t>(nelems) <=
-         static_cast<int32_t>(qps[dest_pe].inline_threshold))
-            ? 0 : qps[dest_pe].get_lkey(reinterpret_cast<uintptr_t>(src_local));
-    qps[dest_pe].put_nbi_single(reinterpret_cast<void *>(dst_raddr), dst_rkey,
-                                src_local, src_lkey, nelems, false);
-    qps[dest_pe].atomic_add_single(
-      reinterpret_cast<char *>(&pSync[alltoall_pSync_offset + my_pe_in_team]) +
-      base_heap_offset, 1);
+    qps[dest_pe].put_nbi_single(dst_local, src_local, nelems, PostOpt{RingDB<false>});
+    qps[dest_pe].atomic_add_single(&pSync[alltoall_pSync_offset + my_pe_in_team], 1);
   }
 
   // wait until everyone has obtained their designated data
@@ -528,26 +512,10 @@ __device__ void GDAContext::alltoallmem_linear_thread_puts_wave(rocshmem_team_t 
   // Have each PE put their designated data to the other PEs
   for (int j = tid; j < pe_size; j += step_size) {
     int dest_pe = team_obj->get_pe_in_world(j);
-    uint64_t base_heap_offset = base_heap[dest_pe] - base_heap[constmem.my_pe];
-
-    /*
-     * dst may be a symmetric-heap object or a registered user buffer, so
-     * resolve its remote address and key through the QP. src and pSync are
-     * always heap; for a heap dst this reproduces the base_heap_offset math
-     * and default keys exactly.
-     */
     char *dst_local = reinterpret_cast<char *>(dst) + my_pe_in_team * nelems;
     const char *src_local = reinterpret_cast<const char *>(src) + j * nelems;
-    auto [dst_raddr, dst_rkey] = qps[dest_pe].get_raddr_info(dst_local);
-    uint32_t src_lkey =
-        (static_cast<int32_t>(nelems) <=
-         static_cast<int32_t>(qps[dest_pe].inline_threshold))
-            ? 0 : qps[dest_pe].get_lkey(reinterpret_cast<uintptr_t>(src_local));
-    qps[dest_pe].put_nbi_single(reinterpret_cast<void *>(dst_raddr), dst_rkey,
-                                src_local, src_lkey, nelems, false);
-    qps[dest_pe].atomic_add_single(
-      reinterpret_cast<char *>(&pSync[alltoall_pSync_offset + my_pe_in_team]) +
-      base_heap_offset, 1);
+    qps[dest_pe].put_nbi_single(dst_local, src_local, nelems, PostOpt{RingDB<false>});
+    qps[dest_pe].atomic_add_single(&pSync[alltoall_pSync_offset + my_pe_in_team], 1);
   }
 
   // wait until everyone has obtained their designated data
