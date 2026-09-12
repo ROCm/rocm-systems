@@ -217,7 +217,7 @@ class Context {
 
   template <typename T, ROCSHMEM_OP Op>
   __device__ int reduce_wave(rocshmem_team_t team, T* dest, const T* source, int nreduce);
-  
+
   template <typename T, ROCSHMEM_OP Op>
   __device__ int reduce_scatter_wave(rocshmem_team_t team, T* dest, const T* source, int nreduce);
 

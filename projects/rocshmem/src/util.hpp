@@ -552,7 +552,7 @@ template <MemcpyKind Kind = MemcpyKind::Put>
   // Remainder handled uniquely by the first thread in the wave
   if (wave_tid == 0) {
     copy_remainder<LP, SP>(static_cast<uint8_t*>(dst) + n_chunks * ChunkSize,
-                           static_cast<uint8_t*>(src) + n_chunks * ChunkSize, 
+                           static_cast<uint8_t*>(src) + n_chunks * ChunkSize,
                            remainder);
   }
 }

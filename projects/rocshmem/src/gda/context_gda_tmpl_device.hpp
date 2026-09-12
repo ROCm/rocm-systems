@@ -466,8 +466,8 @@ __device__ int GDAContext::reduce_wave(rocshmem_team_t team, T *dest,
         int p_chunk = p_count / PE_size;
 
         if (p_chunk > 0) {
-          internal_ring_allreduce_wave<T, Op>(p_dst, p_src, 
-            (p_chunk * PE_size), team_obj, 1, 
+          internal_ring_allreduce_wave<T, Op>(p_dst, p_src,
+            (p_chunk * PE_size), team_obj, 1,
             (p_chunk * PE_size), p_chunk, wf_info);
         }
 
@@ -577,7 +577,7 @@ __device__ void GDAContext::internal_ring_allreduce_wg(T *dst, const T *src,
       internal_putmem_wg(reinterpret_cast<void *>(&pWrk[off_send]),
         reinterpret_cast<void *>(&dst[off_send + off_seg]),
         chunk_size * sizeof(T), send_pe, send_pe, wf_info);
-      
+
       fence();
 
       if (is_thread_zero_in_block()) {
@@ -963,10 +963,10 @@ __device__ void GDAContext::internal_get_broadcast_wave(T *dst, const T *src,
 }
 
 template <typename T>
-__device__ int GDAContext::broadcast_wave(rocshmem_team_t team, T *dest, 
+__device__ int GDAContext::broadcast_wave(rocshmem_team_t team, T *dest,
     const T* source, int nelems, int PE_root) {
-  if (dest == nullptr || 
-    source == nullptr || 
+  if (dest == nullptr ||
+    source == nullptr ||
     team == ROCSHMEM_TEAM_INVALID)
     return ROCSHMEM_ERROR;
 
@@ -1211,7 +1211,7 @@ __device__ void GDAContext::alltoall_linear_wg(rocshmem_team_t team, T *dst,
 }
 
 template <typename T>
-__device__ int GDAContext::alltoall_wave(rocshmem_team_t team, 
+__device__ int GDAContext::alltoall_wave(rocshmem_team_t team,
                           T* dest, const T* source, int nelems) {
   if (dest == nullptr || source == nullptr)
     return ROCSHMEM_ERROR;
