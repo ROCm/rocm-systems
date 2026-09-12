@@ -108,11 +108,11 @@ set +a
 
 # 4) RCCL with GIN / rocSHMEM. Mirrors the Dockerfile: patch the rocSHMEM
 # threshold guard, then install.sh with ENABLE_ROCSHMEM_GIN. Build
-# rccl-UnitTestsFixtures in a second step (reconfigure BUILD_TESTS=ON,
-# GIN_ANVIL_UNIT_TESTS=ON, make only that target). Do not pass install.sh -t:
-# that builds every test executable and pulls in rccl-UnitTestsGinAnvilPlugin,
-# which can compile before hipify headers exist under parallel -j and aborts
-# before librccl.so is installed.
+# rccl-UnitTestsFixtures plus the GIN gtest binaries in a second step
+# (reconfigure BUILD_TESTS=ON, GIN_ANVIL_UNIT_TESTS=ON). Do not pass
+# install.sh -t: that builds every test executable and can compile plugin
+# tests before hipify headers exist under parallel -j and abort before
+# librccl.so is installed.
 echo "==> [4/6] build RCCL (GIN, targets=${gpu_targets})"
 rccl_src="${workdir}/projects/rccl"
 rccl_prefix="${workdir}/.ci-out/rccl-install"
@@ -135,6 +135,20 @@ if [[ ! -f "${rccl_prefix}/lib/librccl.so" && ! -f "${rccl_prefix}/lib/librccl.s
   ls -la "${rccl_prefix}/lib" 2>/dev/null >&2 || true
   exit 1
 fi
+librccl="${rccl_prefix}/lib/librccl.so"
+[[ -f "${librccl}" ]] || librccl="${rccl_prefix}/lib/librccl.so.1"
+# The #10930 regression was an unlinked conn-check fatbin. Pin the two kernel
+# names in the installed library, not in the unit-test binary that compiles the
+# device TU itself.
+if ! strings -a "${librccl}" | grep -q 'ginAnvilConnWriteKernel'; then
+  echo "ERROR: ginAnvilConnWriteKernel missing from ${librccl} (conn-check not device-linked)" >&2
+  exit 1
+fi
+if ! strings -a "${librccl}" | grep -q 'ginAnvilConnCheckKernel'; then
+  echo "ERROR: ginAnvilConnCheckKernel missing from ${librccl} (conn-check not device-linked)" >&2
+  exit 1
+fi
+echo "    conn-check kernels present in ${librccl}"
 
 echo "==> [4/6] build RCCL GIN unit tests (GIN_ANVIL_UNIT_TESTS=ON)"
 (
