@@ -20,6 +20,7 @@
 
 #include <cstdlib>
 #include <cstring>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -49,18 +50,31 @@ class ScopedEnv {
   bool had_{false};
 };
 
+struct HipFreeDeleter {
+  void operator()(void* ptr) const {
+    if (ptr) (void)hipFree(ptr);
+  }
+};
+using HipAllocation = std::unique_ptr<void, HipFreeDeleter>;
+
 struct GinAnvilMockComm {
   ncclComm comm{};
   char bootstrapPlaceholder{0};
+  int lsaRanks[16]{};
 
   GinAnvilMockComm() { reset(); }
 
   void reset() {
     std::memset(&comm, 0, sizeof(comm));
     comm.bootstrap = &bootstrapPlaceholder;
+    comm.commHash = 0xA11CEUL;
+    comm.rank = 0;
+    comm.nRanks = 2;
     comm.devrState.lsaSelf = 0;
     comm.devrState.lsaSize = 2;
     comm.devrState.bigSize = 0x100000;
+    for (int i = 0; i < 16; ++i) lsaRanks[i] = i;
+    comm.devrState.lsaRankList = lsaRanks;
   }
 
   ncclComm* get() { return &comm; }
@@ -77,9 +91,8 @@ class GinAnvilPluginTest : public ::testing::Test {
     GinAnvilPluginStubs::Reset();
     mockComm_.reset();
     int ndev = 0;
-    if (hipGetDeviceCount(&ndev) == hipSuccess && ndev > 0) {
-      ASSERT_EQ(hipSetDevice(0), hipSuccess);
-    }
+    if (hipGetDeviceCount(&ndev) != hipSuccess || ndev < 1) GTEST_SKIP() << "GPU required by GinAnvilPlugin fixture";
+    ASSERT_EQ(hipSetDevice(0), hipSuccess);
     // Anvil-SDMA is ncclNetDeviceType NCCL_NET_DEVICE_GIN_ANVIL_SDMA (=6); derive
     // from the enum so this never drifts from net_device.h (type 5 is ROCSHMEM_GDA).
     setenv("NCCL_GIN_TYPE", std::to_string(static_cast<int>(NCCL_NET_DEVICE_GIN_ANVIL_SDMA)).c_str(), 1);
@@ -94,13 +107,30 @@ class GinAnvilPluginTest : public ::testing::Test {
     ncclGinAnvilSetInitContext(*ictx, mockComm_.get());
   }
 
-  void connectColl(void* ictx, void** coll) {
+  void connectColl(void* ictx, void** coll, int nranks = 1) {
     void* listen = nullptr;
     char handle[NCCL_NET_HANDLE_MAXSIZE] = {};
     ASSERT_EQ(plugin_.listen(ictx, 0, handle, &listen), ncclSuccess);
-    void* handles[1] = {handle};
-    ASSERT_EQ(plugin_.connect(ictx, handles, 1, 0, listen, coll), ncclSuccess);
+    std::vector<void*> handles(static_cast<size_t>(nranks), handle);
+    ASSERT_EQ(plugin_.connect(ictx, handles.data(), nranks, 0, listen, coll), ncclSuccess);
     ASSERT_EQ(plugin_.closeListen(listen), ncclSuccess);
+  }
+
+  void startTwoRankGin(void** ictx, void** coll, void** ginCtx) {
+    GinAnvilPluginStubs::SetBootstrapNranks(2);
+    mockComm_.get()->devrState.lsaSize = 2;
+    initCtx(ictx);
+    connectColl(*ictx, coll, 2);
+    ncclGinConfig_t cfg{};
+    cfg.nSignals = 2;
+    ncclNetDeviceHandle_v11_t* devHandle = nullptr;
+    ASSERT_EQ(plugin_.createContext(*coll, &cfg, ginCtx, &devHandle), ncclSuccess);
+  }
+
+  void stopGin(void* ictx, void* coll, void* ginCtx) {
+    if (ginCtx) plugin_.destroyContext(ginCtx);
+    if (coll) plugin_.closeColl(coll);
+    if (ictx) plugin_.finalize(ictx);
   }
 };
 
@@ -436,6 +466,355 @@ TEST_F(GinAnvilPluginTest, CloseColl_AfterSignalBind) {
   EXPECT_EQ(plugin_.destroyContext(ginCtx), ncclSuccess);
   EXPECT_EQ(plugin_.closeColl(coll), ncclSuccess);
   plugin_.finalize(ictx);
+}
+
+// G20: conn-check skipped when nRanks != lsaSize (no gate on single-rank LSA team).
+TEST_F(GinAnvilPluginTest, ConnCheck_SkippedWhenLsaSizeMismatch) {
+  GinAnvilPluginStubs::SetBootstrapNranks(2);
+  mockComm_.get()->devrState.lsaSize = 1;
+  void* ictx = nullptr;
+  initCtx(&ictx);
+  void* coll = nullptr;
+  connectColl(ictx, &coll, 2);
+  ncclGinConfig_t cfg{};
+  cfg.nSignals = 2;
+  void* ginCtx = nullptr;
+  ncclNetDeviceHandle_v11_t* devHandle = nullptr;
+  ASSERT_EQ(plugin_.createContext(coll, &cfg, &ginCtx, &devHandle), ncclSuccess);
+
+  char arena[4096] = {};
+  EXPECT_EQ(ncclGinAnvilBindResourceWindowSignals(mockComm_.get(), arena, 0, 1, 2), ncclSuccess);
+  EXPECT_EQ(GinAnvilPluginStubs::GetConnCheckWriteCalls(), 0);
+  EXPECT_EQ(GinAnvilPluginStubs::GetConnCheckVerifyCalls(), 0);
+
+  plugin_.destroyContext(ginCtx);
+  plugin_.closeColl(coll);
+  plugin_.finalize(ictx);
+}
+
+// Conn-check also skips independently when its rank-indexed probe would exceed
+// the signal slot.
+TEST_F(GinAnvilPluginTest, ConnCheck_SkippedWhenSignalSlotTooSmall) {
+  GinAnvilPluginStubs::SetBootstrapNranks(2);
+  mockComm_.get()->devrState.lsaSize = 2;
+  void* ictx = nullptr;
+  initCtx(&ictx);
+  void* coll = nullptr;
+  connectColl(ictx, &coll, 2);
+  ncclGinConfig_t cfg{};
+  cfg.nSignals = 1;
+  void* ginCtx = nullptr;
+  ncclNetDeviceHandle_v11_t* devHandle = nullptr;
+  ASSERT_EQ(plugin_.createContext(coll, &cfg, &ginCtx, &devHandle), ncclSuccess);
+
+  char arena[4096] = {};
+  EXPECT_EQ(ncclGinAnvilBindResourceWindowSignals(mockComm_.get(), arena, 0, 1, 1), ncclSuccess);
+  EXPECT_EQ(GinAnvilPluginStubs::GetConnCheckWriteCalls(), 0);
+  EXPECT_EQ(GinAnvilPluginStubs::GetConnCheckVerifyCalls(), 0);
+
+  plugin_.destroyContext(ginCtx);
+  plugin_.closeColl(coll);
+  plugin_.finalize(ictx);
+}
+
+// G21: conn-check inject-fail env aborts bind when nRanks>=2.
+TEST_F(GinAnvilPluginTest, ConnCheck_InjectFailRankAbortsBind) {
+  void* rawDevLsa = nullptr;
+  ASSERT_EQ(hipMalloc(&rawDevLsa, sizeof(uint64_t) * 2), hipSuccess);
+  HipAllocation devLsa(rawDevLsa);
+  GinAnvilPluginStubs::SetLsaSelfAddr(devLsa.get());
+  GinAnvilPluginStubs::SetConnCheckVerifyMissing(true);
+
+  ScopedEnv inj("NCCL_GIN_ANVIL_SDMA_CONN_INJECT_FAIL_RANK", "0");
+  GinAnvilPluginStubs::SetBootstrapNranks(2);
+  mockComm_.get()->devrState.lsaSize = 2;
+  void* ictx = nullptr;
+  initCtx(&ictx);
+  void* coll = nullptr;
+  connectColl(ictx, &coll, 2);
+  ncclGinConfig_t cfg{};
+  cfg.nSignals = 2;
+  void* ginCtx = nullptr;
+  ncclNetDeviceHandle_v11_t* devHandle = nullptr;
+  ASSERT_EQ(plugin_.createContext(coll, &cfg, &ginCtx, &devHandle), ncclSuccess);
+
+  char arena[4096] = {};
+  EXPECT_EQ(ncclGinAnvilBindResourceWindowSignals(mockComm_.get(), arena, 0, 1, 2), ncclSystemError);
+  EXPECT_EQ(GinAnvilPluginStubs::GetConnCheckWriteCalls(), 0);
+  EXPECT_EQ(GinAnvilPluginStubs::GetConnCheckVerifyCalls(), 3);
+
+  plugin_.destroyContext(ginCtx);
+  plugin_.closeColl(coll);
+  plugin_.finalize(ictx);
+}
+
+// G22: conn-check bypassed when NCCL_GIN_ANVIL_SDMA_CONN_CHECK=0.
+TEST_F(GinAnvilPluginTest, ConnCheck_EnvBypassSkipsGate) {
+  ScopedEnv bypass("NCCL_GIN_ANVIL_SDMA_CONN_CHECK", "0");
+  GinAnvilPluginStubs::SetBootstrapNranks(2);
+  GinAnvilPluginStubs::SetConnCheckVerifyMissing(true);
+  mockComm_.get()->devrState.lsaSize = 2;
+  void* ictx = nullptr;
+  initCtx(&ictx);
+  void* coll = nullptr;
+  connectColl(ictx, &coll, 2);
+  ncclGinConfig_t cfg{};
+  cfg.nSignals = 2;
+  void* ginCtx = nullptr;
+  ncclNetDeviceHandle_v11_t* devHandle = nullptr;
+  ASSERT_EQ(plugin_.createContext(coll, &cfg, &ginCtx, &devHandle), ncclSuccess);
+
+  char arena[4096] = {};
+  EXPECT_EQ(ncclGinAnvilBindResourceWindowSignals(mockComm_.get(), arena, 0, 1, 2), ncclSuccess);
+  EXPECT_EQ(GinAnvilPluginStubs::GetConnCheckWriteCalls(), 0);
+  EXPECT_EQ(GinAnvilPluginStubs::GetConnCheckVerifyCalls(), 0);
+
+  plugin_.destroyContext(ginCtx);
+  plugin_.closeColl(coll);
+  plugin_.finalize(ictx);
+}
+
+TEST_F(GinAnvilPluginTest, ConnCheck_InconsistentEnvBypassFailsCollectively) {
+  ScopedEnv bypass("NCCL_GIN_ANVIL_SDMA_CONN_CHECK", "0");
+  GinAnvilPluginStubs::SetBootstrapNranks(2);
+  mockComm_.get()->devrState.lsaSize = 2;
+  void* ictx = nullptr;
+  initCtx(&ictx);
+  void* coll = nullptr;
+  connectColl(ictx, &coll, 2);
+  ncclGinConfig_t cfg{};
+  cfg.nSignals = 2;
+  void* ginCtx = nullptr;
+  ncclNetDeviceHandle_v11_t* devHandle = nullptr;
+  ASSERT_EQ(plugin_.createContext(coll, &cfg, &ginCtx, &devHandle), ncclSuccess);
+
+  const int setupStates[2] = {1, 0};
+  GinAnvilPluginStubs::SetBootstrapIntResult(setupStates, 2);
+  char arena[4096] = {};
+  EXPECT_EQ(ncclGinAnvilBindResourceWindowSignals(mockComm_.get(), arena, 0, 1, 2), ncclSystemError);
+  EXPECT_EQ(GinAnvilPluginStubs::GetConnCheckWriteCalls(), 0);
+  EXPECT_EQ(GinAnvilPluginStubs::GetConnCheckVerifyCalls(), 0);
+
+  plugin_.destroyContext(ginCtx);
+  plugin_.closeColl(coll);
+  plugin_.finalize(ictx);
+}
+
+// G23: healthy connectivity traverses the gate and succeeds.
+TEST_F(GinAnvilPluginTest, ConnCheck_HealthyConnectivitySucceeds) {
+  void* rawDevLsa = nullptr;
+  ASSERT_EQ(hipMalloc(&rawDevLsa, sizeof(uint64_t) * 2), hipSuccess);
+  HipAllocation devLsa(rawDevLsa);
+  GinAnvilPluginStubs::SetLsaSelfAddr(devLsa.get());
+  GinAnvilPluginStubs::SetBootstrapNranks(2);
+  mockComm_.get()->devrState.lsaSize = 2;
+
+  void* ictx = nullptr;
+  initCtx(&ictx);
+  void* coll = nullptr;
+  connectColl(ictx, &coll, 2);
+  ncclGinConfig_t cfg{};
+  cfg.nSignals = 2;
+  void* ginCtx = nullptr;
+  ncclNetDeviceHandle_v11_t* devHandle = nullptr;
+  ASSERT_EQ(plugin_.createContext(coll, &cfg, &ginCtx, &devHandle), ncclSuccess);
+
+  char arena[4096] = {};
+  EXPECT_EQ(ncclGinAnvilBindResourceWindowSignals(mockComm_.get(), arena, 0, 1, 2), ncclSuccess);
+  EXPECT_EQ(GinAnvilPluginStubs::GetConnCheckWriteCalls(), 1);
+  EXPECT_EQ(GinAnvilPluginStubs::GetConnCheckVerifyCalls(), 1);
+
+  plugin_.destroyContext(ginCtx);
+  plugin_.closeColl(coll);
+  plugin_.finalize(ictx);
+}
+
+TEST_F(GinAnvilPluginTest, ConnCheck_NonNumericEnvValueKeepsGateEnabled) {
+  ScopedEnv enabled("NCCL_GIN_ANVIL_SDMA_CONN_CHECK", "true");
+  void* rawDevLsa = nullptr;
+  ASSERT_EQ(hipMalloc(&rawDevLsa, sizeof(uint64_t) * 2), hipSuccess);
+  HipAllocation devLsa(rawDevLsa);
+  GinAnvilPluginStubs::SetLsaSelfAddr(devLsa.get());
+  GinAnvilPluginStubs::SetBootstrapNranks(2);
+  mockComm_.get()->devrState.lsaSize = 2;
+
+  void* ictx = nullptr;
+  initCtx(&ictx);
+  void* coll = nullptr;
+  connectColl(ictx, &coll, 2);
+  ncclGinConfig_t cfg{};
+  cfg.nSignals = 2;
+  void* ginCtx = nullptr;
+  ncclNetDeviceHandle_v11_t* devHandle = nullptr;
+  ASSERT_EQ(plugin_.createContext(coll, &cfg, &ginCtx, &devHandle), ncclSuccess);
+
+  char arena[4096] = {};
+  EXPECT_EQ(ncclGinAnvilBindResourceWindowSignals(mockComm_.get(), arena, 0, 1, 2), ncclSuccess);
+  EXPECT_EQ(GinAnvilPluginStubs::GetConnCheckWriteCalls(), 1);
+  EXPECT_EQ(GinAnvilPluginStubs::GetConnCheckVerifyCalls(), 1);
+
+  plugin_.destroyContext(ginCtx);
+  plugin_.closeColl(coll);
+  plugin_.finalize(ictx);
+}
+
+TEST_F(GinAnvilPluginTest, ConnCheck_DedupUsesCommObjectNotSharedHash) {
+  GinAnvilPluginStubs::SetBootstrapNranks(2);
+  auto secondComm = std::make_unique<GinAnvilMockComm>();
+  secondComm->comm.commHash = mockComm_.get()->commHash;
+
+  void* rawFirstLsa = nullptr;
+  void* rawSecondLsa = nullptr;
+  ASSERT_EQ(hipMalloc(&rawFirstLsa, sizeof(uint64_t) * 2), hipSuccess);
+  ASSERT_EQ(hipMalloc(&rawSecondLsa, sizeof(uint64_t) * 2), hipSuccess);
+  HipAllocation firstLsa(rawFirstLsa);
+  HipAllocation secondLsa(rawSecondLsa);
+
+  void* firstInit = nullptr;
+  initCtx(&firstInit);
+  void* firstColl = nullptr;
+  connectColl(firstInit, &firstColl, 2);
+  ncclGinConfig_t cfg{};
+  cfg.nSignals = 2;
+  void* firstGin = nullptr;
+  ncclNetDeviceHandle_v11_t* firstHandle = nullptr;
+  ASSERT_EQ(plugin_.createContext(firstColl, &cfg, &firstGin, &firstHandle), ncclSuccess);
+  GinAnvilPluginStubs::SetLsaSelfAddr(firstLsa.get());
+  char firstArena[4096] = {};
+  ASSERT_EQ(ncclGinAnvilBindResourceWindowSignals(mockComm_.get(), firstArena, 0, 1, 2), ncclSuccess);
+
+  void* secondInit = nullptr;
+  ASSERT_EQ(plugin_.init(&secondInit, 0, nullptr), ncclSuccess);
+  ncclGinAnvilSetInitContext(secondInit, secondComm->get());
+  void* secondColl = nullptr;
+  connectColl(secondInit, &secondColl, 2);
+  void* secondGin = nullptr;
+  ncclNetDeviceHandle_v11_t* secondHandle = nullptr;
+  ASSERT_EQ(plugin_.createContext(secondColl, &cfg, &secondGin, &secondHandle), ncclSuccess);
+  GinAnvilPluginStubs::SetLsaSelfAddr(secondLsa.get());
+  char secondArena[4096] = {};
+  EXPECT_EQ(ncclGinAnvilBindResourceWindowSignals(secondComm->get(), secondArena, 0, 1, 2), ncclSuccess);
+  EXPECT_EQ(GinAnvilPluginStubs::GetConnCheckWriteCalls(), 2);
+  EXPECT_EQ(GinAnvilPluginStubs::GetConnCheckVerifyCalls(), 2);
+
+  plugin_.destroyContext(firstGin);
+  plugin_.destroyContext(secondGin);
+  plugin_.closeColl(firstColl);
+  plugin_.closeColl(secondColl);
+  plugin_.finalize(firstInit);
+  plugin_.finalize(secondInit);
+}
+
+// G24: a transient miss retries with a new stamp and then succeeds.
+TEST_F(GinAnvilPluginTest, ConnCheck_TransientMissRetries) {
+  void* rawDevLsa = nullptr;
+  ASSERT_EQ(hipMalloc(&rawDevLsa, sizeof(uint64_t) * 2), hipSuccess);
+  HipAllocation devLsa(rawDevLsa);
+  GinAnvilPluginStubs::SetLsaSelfAddr(devLsa.get());
+  GinAnvilPluginStubs::SetConnCheckMissingCalls(1);
+  GinAnvilPluginStubs::SetBootstrapNranks(2);
+  mockComm_.get()->devrState.lsaSize = 2;
+
+  void* ictx = nullptr;
+  initCtx(&ictx);
+  void* coll = nullptr;
+  connectColl(ictx, &coll, 2);
+  ncclGinConfig_t cfg{};
+  cfg.nSignals = 2;
+  void* ginCtx = nullptr;
+  ncclNetDeviceHandle_v11_t* devHandle = nullptr;
+  ASSERT_EQ(plugin_.createContext(coll, &cfg, &ginCtx, &devHandle), ncclSuccess);
+
+  char arena[4096] = {};
+  EXPECT_EQ(ncclGinAnvilBindResourceWindowSignals(mockComm_.get(), arena, 0, 1, 2), ncclSuccess);
+  EXPECT_EQ(GinAnvilPluginStubs::GetConnCheckWriteCalls(), 2);
+  EXPECT_EQ(GinAnvilPluginStubs::GetConnCheckVerifyCalls(), 2);
+  EXPECT_NE(GinAnvilPluginStubs::GetConnCheckWriteStamp(0),
+            GinAnvilPluginStubs::GetConnCheckWriteStamp(1));
+
+  plugin_.destroyContext(ginCtx);
+  plugin_.closeColl(coll);
+  plugin_.finalize(ictx);
+}
+
+// Permanent missing from ginAnvilConnCheck itself (no inject-fail env), so
+// production still issues three writes and three verifies.
+TEST_F(GinAnvilPluginTest, ConnCheck_VerifyMissingAbortsBind) {
+  void* rawDevLsa = nullptr;
+  ASSERT_EQ(hipMalloc(&rawDevLsa, sizeof(uint64_t) * 2), hipSuccess);
+  HipAllocation devLsa(rawDevLsa);
+  GinAnvilPluginStubs::SetLsaSelfAddr(devLsa.get());
+  GinAnvilPluginStubs::SetConnCheckVerifyMissing(true);
+
+  void* ictx = nullptr;
+  void* coll = nullptr;
+  void* ginCtx = nullptr;
+  startTwoRankGin(&ictx, &coll, &ginCtx);
+
+  char arena[4096] = {};
+  EXPECT_EQ(ncclGinAnvilBindResourceWindowSignals(mockComm_.get(), arena, 0, 1, 2), ncclSystemError);
+  EXPECT_EQ(GinAnvilPluginStubs::GetConnCheckWriteCalls(), 3);
+  EXPECT_EQ(GinAnvilPluginStubs::GetConnCheckVerifyCalls(), 3);
+
+  stopGin(ictx, coll, ginCtx);
+}
+
+// This rank is clean; a peer reports missing via the allgather. Covers the
+// collective abort that replicating localMissing would hide.
+TEST_F(GinAnvilPluginTest, ConnCheck_PeerReportedMissingAbortsBind) {
+  void* rawDevLsa = nullptr;
+  ASSERT_EQ(hipMalloc(&rawDevLsa, sizeof(uint64_t) * 2), hipSuccess);
+  HipAllocation devLsa(rawDevLsa);
+  GinAnvilPluginStubs::SetLsaSelfAddr(devLsa.get());
+
+  void* ictx = nullptr;
+  void* coll = nullptr;
+  void* ginCtx = nullptr;
+  startTwoRankGin(&ictx, &coll, &ginCtx);
+
+  const int setupReady[2] = {0, 0};
+  const int peerMissing[2] = {0, 1};
+  GinAnvilPluginStubs::SetBootstrapIntResult(setupReady, 2);
+  for (int attempt = 0; attempt < 3; ++attempt) {
+    GinAnvilPluginStubs::SetBootstrapIntResult(peerMissing, 2);
+  }
+
+  char arena[4096] = {};
+  EXPECT_EQ(ncclGinAnvilBindResourceWindowSignals(mockComm_.get(), arena, 0, 1, 2), ncclSystemError);
+  EXPECT_EQ(GinAnvilPluginStubs::GetConnCheckWriteCalls(), 3);
+  EXPECT_EQ(GinAnvilPluginStubs::GetConnCheckVerifyCalls(), 3);
+
+  stopGin(ictx, coll, ginCtx);
+}
+
+// Failed bind must un-mark the comm so a later bind retries the gate.
+TEST_F(GinAnvilPluginTest, ConnCheck_FailedBindRetriesGate) {
+  void* rawDevLsa = nullptr;
+  ASSERT_EQ(hipMalloc(&rawDevLsa, sizeof(uint64_t) * 2), hipSuccess);
+  HipAllocation devLsa(rawDevLsa);
+  GinAnvilPluginStubs::SetLsaSelfAddr(devLsa.get());
+  GinAnvilPluginStubs::SetConnCheckVerifyMissing(true);
+
+  void* ictx = nullptr;
+  void* coll = nullptr;
+  void* ginCtx = nullptr;
+  startTwoRankGin(&ictx, &coll, &ginCtx);
+
+  char arena[4096] = {};
+  EXPECT_EQ(ncclGinAnvilBindResourceWindowSignals(mockComm_.get(), arena, 0, 1, 2), ncclSystemError);
+  EXPECT_EQ(GinAnvilPluginStubs::GetConnCheckVerifyCalls(), 3);
+
+  ASSERT_EQ(plugin_.destroyContext(ginCtx), ncclSuccess);
+  ginCtx = nullptr;
+  ncclGinConfig_t cfg{};
+  cfg.nSignals = 2;
+  ncclNetDeviceHandle_v11_t* devHandle = nullptr;
+  ASSERT_EQ(plugin_.createContext(coll, &cfg, &ginCtx, &devHandle), ncclSuccess);
+  EXPECT_EQ(ncclGinAnvilBindResourceWindowSignals(mockComm_.get(), arena, 0, 1, 2), ncclSystemError);
+  EXPECT_EQ(GinAnvilPluginStubs::GetConnCheckWriteCalls(), 6);
+  EXPECT_EQ(GinAnvilPluginStubs::GetConnCheckVerifyCalls(), 6);
+
+  stopGin(ictx, coll, ginCtx);
 }
 
 }  // namespace RcclUnitTesting

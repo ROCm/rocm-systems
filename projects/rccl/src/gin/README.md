@@ -52,6 +52,7 @@ for the alltoall\_wg offload path.  Does not enable GIN plugins.
 | `NCCL_GIN_TYPE` | (auto) | Force a specific backend: `5`=GDA, `6`=SDMA |
 | `NCCL_GIN_ANVIL_SDMA_THRESHOLD` | `128` | Minimum message size (bytes) to use SDMA; smaller messages fall back to the IB proxy |
 | `NCCL_GIN_ANVIL_SDMA_FUSED_SIGNAL` | `0` | Enable fused signal mode for SDMA (experimental) |
+| `NCCL_GIN_ANVIL_SDMA_CONN_CHECK` | `1` | Validate LSA signal connectivity on first bind; set exactly `0` to bypass |
 | `RCCL_GIN_ALLREDUCE_FORCE_ENABLE` | `0` | GIN AllReduce is used only for messages >= 256 MiB by default (smaller sizes use DDA). Set to `1` to also use GIN AllReduce for smaller messages (LSA one-shot / LSA two-shot). |
 | `NCCL_CUMEM_ENABLE` | `0` | Required: GIN needs `hipMemCreate`-based allocations |
 | `NCCL_DMABUF_ENABLE` | `0` | Recommended: enables dmabuf-based MR registration |
@@ -125,4 +126,4 @@ GIN plugin functions from the executable at runtime.
 | `gin_rocshmem_gda_factory.cc` | QueuePair creation, MR registration, topology discovery |
 | `gin_rocshmem_constmem.hip` | Stub `__constant__` definitions for device bitcode linking |
 | `gin_anvil_ipc_table_host.cc` | IPC table management for SDMA |
-| `gin_anvil_sdma_oss7_device.cc` | SDMA OSS7 device helpers |
+| `gin_anvil_conn_check_device.cc` | LSA signal connectivity self-test kernels (device-linked) |

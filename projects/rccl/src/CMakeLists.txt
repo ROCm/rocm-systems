@@ -143,7 +143,7 @@ set(SRC_FILES
   algorithms/gin/gin_alltoall.h
   algorithms/gin/gin_all_reduce.h
   algorithms/gin/gin_all_reduce_policy.h
-  algorithms/gin/sdma/all_reduce_gin_sdma.h 
+  algorithms/gin/sdma/all_reduce_gin_sdma.h
   include/alltoallv_meta.h
   include/alt_rsmi.h
   include/archinfo.h
@@ -191,6 +191,7 @@ set(SRC_FILES
   include/gin/gin_host_rocshmem_gda.h
   include/gin/gin_rocshmem_gda_factory.h
   include/gin/gin_host_anvil_sdma.h
+  include/gin/gin_anvil_conn_check.h
   include/hip_rocm_version_info.h
   include/ibvcore.h
   include/ibvsymbols.h
@@ -526,8 +527,9 @@ if(ENABLE_ROCSHMEM_GIN)
     src/gin/gin_rocshmem_gda_factory.cc
     src/gin/gin_plugin_anvil_sdma.cc
     src/gin/gin_anvil_ipc_table_host.cc
+    src/gin/gin_anvil_conn_check_device.cc
     src/algorithms/gin/sdma/gin_alltoall_sdma.cu
-    src/algorithms/gin/sdma/gin_all_reduce_sdma.cu 
+    src/algorithms/gin/sdma/gin_all_reduce_sdma.cu
   )
 endif()
 
@@ -824,6 +826,7 @@ if(ENABLE_DEVICE_LINKER)
   # needs full HIP compilation rather than --offload-host-only.
   list(FILTER HIP_SOURCES EXCLUDE REGEX "gin_alltoall_sdma\\.cu\\.cpp$")
   list(FILTER HIP_SOURCES EXCLUDE REGEX "gin_all_reduce_sdma\\.cu\\.cpp$")
+  list(FILTER HIP_SOURCES EXCLUDE REGEX "gin_anvil_conn_check_device\\.cc$")
   list(FILTER HIP_SOURCES EXCLUDE REGEX "dda_all_reduce_fabric\\.cu\\.cpp$")
   list(FILTER HIP_SOURCES EXCLUDE REGEX "dda_all_reduce_fabric_ll\\.cu\\.cpp$")
   list(FILTER HIP_SOURCES EXCLUDE REGEX "dda_all_reduce_fabric_ll128\\.cu\\.cpp$")
