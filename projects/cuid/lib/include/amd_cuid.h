@@ -20,7 +20,11 @@ extern "C" {
 
 //! Major version should be changed for every header change that breaks ABI
 //! Such as adding/deleting APIs, changing names, fields of structures, etc.
-#define AMDCUID_LIB_VERSION_MAJOR 1
+//!
+//! 2.0.0: amdcuid_device_type_t renumbered onto the specification's on-wire
+//! Component Type values and widened to all sixteen; amdcuid_get_key_info()
+//! and amdcuid_key_info_t added. Both break the 1.x ABI.
+#define AMDCUID_LIB_VERSION_MAJOR 2
 
 //! Minor version should be updated for each API change, but without changing
 //! headers
@@ -115,16 +119,54 @@ const char* amdcuid_id_to_string(amdcuid_id_t cuid_value);
 
 /**
  * @brief Enumeration of device types supported by the AMD CUID library.
+ *
+ * These are the CUID specification's on-wire Component Type values, so an
+ * enumerator can be written straight into the Component Type field (payload
+ * bits 118:121) with no translation step. They were previously offset by one,
+ * putting a GPU on the wire as 0x3, which a conforming reader decodes as a NIC.
+ * Renumbering therefore changes every primary CUID this library has emitted for
+ * a GPU, NIC or NPU.
+ *
+ * All sixteen values are named, not just the five this library discovers for
+ * itself, because a Component Type is also decoded from identifiers produced
+ * elsewhere. 0xb through 0xe are reserved and have no enumerator, so the valid
+ * range is not contiguous and validity is a helper, not a "last" sentinel.
+ * AMDCUID_DEVICE_TYPE_NONE is outside the range a 4-bit field can hold.
  */
 typedef enum {
-  AMDCUID_DEVICE_TYPE_NONE = 0,        ///< No device type
-  AMDCUID_DEVICE_TYPE_PLATFORM = 0x1,  ///< Platform device (chassis, motherboard)
-  AMDCUID_DEVICE_TYPE_CPU = 0x2,       ///< CPU core
-  AMDCUID_DEVICE_TYPE_GPU = 0x3,       ///< GPU
-  AMDCUID_DEVICE_TYPE_NIC = 0x4,       ///< NIC (Network Interface Controller)
-  AMDCUID_DEVICE_TYPE_NPU = 0x5,       ///< NPU (Neural Processing Unit, e.g. RyzenAI)
-  AMDCUID_DEVICE_TYPE_LAST = 0x5       ///< Last valid device type
+  AMDCUID_DEVICE_TYPE_PLATFORM = 0x0,  ///< Platform device (chassis, motherboard)
+  AMDCUID_DEVICE_TYPE_CPU = 0x1,       ///< CPU
+  AMDCUID_DEVICE_TYPE_GPU = 0x2,       ///< GPU
+  AMDCUID_DEVICE_TYPE_NIC = 0x3,       ///< NIC (Network Interface Controller)
+  AMDCUID_DEVICE_TYPE_NPU = 0x4,       ///< NPU (Neural Processing Unit, e.g. RyzenAI)
+  AMDCUID_DEVICE_TYPE_STORAGE = 0x5,   ///< Storage device
+  AMDCUID_DEVICE_TYPE_MEMORY = 0x6,    ///< Memory device
+  AMDCUID_DEVICE_TYPE_GENPCIE = 0x7,   ///< Generic PCIe device
+  AMDCUID_DEVICE_TYPE_GENC = 0x8,      ///< Generic component
+  AMDCUID_DEVICE_TYPE_RACKTRAY = 0x9,  ///< Rack tray
+  AMDCUID_DEVICE_TYPE_RACK = 0xa,      ///< Rack
+  //! 0xb - 0xe are reserved by the specification and have no enumerator.
+  AMDCUID_DEVICE_TYPE_OTHER = 0xf,  ///< Any component none of the above names
+  AMDCUID_DEVICE_TYPE_NONE = 0xFF   ///< No device type; not a valid Component Type
 } amdcuid_device_type_t;
+
+/**
+ * @brief Report whether a value is an assigned on-wire Component Type.
+ *
+ * True for 0x0 - 0xa and 0xf. False for the reserved 0xb - 0xe, for
+ * AMDCUID_DEVICE_TYPE_NONE, and for anything a 4-bit field cannot hold.
+ *
+ * @param[in] type The value to test.
+ * @return Non-zero when @p type is an assigned Component Type, zero otherwise.
+ */
+static inline int amdcuid_device_type_is_valid(amdcuid_device_type_t type) {
+  /* Through unsigned so that a value outside the enumeration (a negative one,
+     which the underlying type may be able to hold) fails rather than comparing
+     below AMDCUID_DEVICE_TYPE_RACK. */
+  const unsigned value = (unsigned)type;
+  return (value <= (unsigned)AMDCUID_DEVICE_TYPE_RACK) ||
+         (value == (unsigned)AMDCUID_DEVICE_TYPE_OTHER);
+}
 
 /**
  * @brief Retrieve a list of all CUID handles present in the system.
@@ -229,7 +271,7 @@ amdcuid_status_t amdcuid_get_handle_by_fd(int fd, amdcuid_device_type_t device_t
  *         AMDCUID_STATUS_DEVICE_NOT_FOUND if no devices are found
  * during discovery
  */
-amdcuid_status_t amdcuid_refresh();
+amdcuid_status_t amdcuid_refresh(void);
 
 /**
  * @brief Types of properties that can be queried from a device.
@@ -253,8 +295,9 @@ typedef enum {
   AMDCUID_QUERY_VENDOR_ID = 6,  ///< Query the vendor ID (uint16_t). Supported by all device types.
   AMDCUID_QUERY_DEVICE_ID = 7,  ///< Query the device ID (uint16_t). Supported by
                                 ///< GPU, NIC, and CPU device types.
-  AMDCUID_QUERY_REVISION_ID = 8,  ///< Query the revision ID (uint16_t). Supported by GPU, NIC, and
-                                  ///< CPU device types.
+  AMDCUID_QUERY_REVISION_ID = 8,  ///< Query the revision ID (uint8_t). Supported by GPU, NIC, and
+                                  ///< CPU device types. One octet is written, not two: the field
+                                  ///< is a PCI revision ID, which is a single byte.
   AMDCUID_QUERY_UNIT_ID = 9,      ///< Query the unit ID (uint16_t). Supported by GPU
                                   ///< and CPU device type.
   AMDCUID_QUERY_FAMILY = 10,   ///< Query the CPU family (uint16_t). Supported by CPU device type.
@@ -267,16 +310,15 @@ typedef enum {
   AMDCUID_QUERY_BDF = 15,  ///< Query the PCI BDF (string in format "bus:device.function", e.g.
                            ///< "0000:03:00.0"). Supported by GPU and NIC device types.
   AMDCUID_QUERY_TEMPORARY_CUID =
-      16,  ///< Query to determine if a CUID is temporary (bool). This is true if
-           ///< the CUID is not derived from a hardware fingerprint that is not
-           ///< stable or accessible, and thus the library generated a CUID based
-           ///< on non unique device information. Temporary CUIDs will be clearly
-           ///< indicated as such when converted to strings by
-           ///< amdcuid_id_to_string() to warn users that the CUID may not be
-           ///< unique or stable. Users should not rely on temporary CUIDs for
-           ///< use cases that require uniqueness or stability, as they may
-           ///< change or may not be unique if devices are shifted around within
-           ///< a system.
+      16,  ///< Query to determine if a CUID is temporary, that is auxiliary
+           ///< (bool). True when no stable or accessible hardware serial was
+           ///< available and the library built the identifier from
+           ///< non-privileged device information instead. This query is the
+           ///< only way to ask: amdcuid_id_to_string() does not mark it, so
+           ///< that a consumer needs one parser rather than two. The marker is
+           ///< payload bit 117, the Auxiliary Value Identifier. A temporary
+           ///< CUID is not unique across nodes and changes if the OS
+           ///< installation or the device topology changes.
   AMDCUID_QUERY_LAST
 } amdcuid_query_t;
 
@@ -333,6 +375,48 @@ amdcuid_status_t amdcuid_set_hash_key(const uint8_t key[32]);
  *         AMDCUID_STATUS_KEY_ERROR if there was an error generating the key.
  */
 amdcuid_status_t amdcuid_generate_hash_key(uint8_t key[32]);
+
+/** Length of a key fingerprint, in bytes. */
+#define AMDCUID_KEY_FINGERPRINT_SIZE 8
+
+/**
+ * @brief State of the node-wide derivation key.
+ *
+ * The key itself is absent: the operational question is whether two nodes carry
+ * the same secret, which a truncated digest answers without disclosing it.
+ */
+typedef struct {
+  /** Non-zero when a key file has been provisioned; zero when the public
+   *  canonical fallback seed is in use, in which case every derived CUID on
+   *  this node is reproducible by anyone. */
+  uint8_t provisioned;
+  uint8_t reserved[7];
+  /** First 8 octets of the unkeyed SHA-256 of the key in use. */
+  uint8_t fingerprint[AMDCUID_KEY_FINGERPRINT_SIZE];
+} amdcuid_key_info_t;
+
+/**
+ * @brief Report whether a key is provisioned, and a fingerprint of the key in
+ *        use.
+ *
+ * Never returns key material.
+ *
+ * An unprovisioned node is a success, not a failure: it is keyed with the
+ * public canonical fallback seed, @p provisioned reports zero and
+ * @p fingerprint is the fallback's. The two failure codes are distinct from it
+ * and from each other.
+ *
+ * @param[out] info Pointer to a caller-allocated ::amdcuid_key_info_t.
+ * @return AMDCUID_STATUS_SUCCESS on success, including on an unprovisioned
+ *                                node,
+ *         AMDCUID_STATUS_INVALID_ARGUMENT if @p info is NULL,
+ *         AMDCUID_STATUS_PERMISSION_DENIED if a key store exists but this
+ *                                caller cannot read it, which is what an
+ *                                unprivileged caller sees on a provisioned
+ *                                node,
+ *         AMDCUID_STATUS_KEY_ERROR if the key store exists and is not a key.
+ */
+amdcuid_status_t amdcuid_get_key_info(amdcuid_key_info_t* info);
 
 #ifdef __cplusplus
 }

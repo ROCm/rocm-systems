@@ -7,6 +7,7 @@
 #include "unit/acpi_parser_test.h"
 #include "unit/concurrency_test.h"
 #include "unit/cuid_gpu_test.h"
+#include "unit/driver_cuid_test.h"
 #include "unit/file_lock_test.h"
 #include "unit/gim_util_test.h"
 #include "unit/id_string_test.h"
@@ -14,6 +15,7 @@
 #include "unit/sha256_test.h"
 #include "unit/status_string_test.h"
 #include "unit/utilities_test.h"
+#include "unit/vectors_test.h"
 #include "unit/version_read_test.h"
 
 // Functional tests (device or root required)
@@ -48,6 +50,16 @@ TEST(cuidtstUnprivileged, IdString) {
 
 TEST(cuidtstUnprivileged, Utilities) {
   TestUtilities tst;
+  RunGenericTest(&tst);
+}
+
+TEST(cuidtstUnprivileged, DriverCuid) {
+  TestDriverCuid tst;
+  RunGenericTest(&tst);
+}
+
+TEST(cuidtstUnprivileged, ConformanceVectors) {
+  TestVectors tst;
   RunGenericTest(&tst);
 }
 
@@ -232,5 +244,6 @@ TEST(cuidtstPrivileged, GimDeviceEnumeration) {
 int main(int argc, char** argv) {
   ::testing::InitGoogleTest(&argc, argv);
   ProcessCmdline(&sCUIDGlvalues, argc, argv);
+  ::testing::AddGlobalTestEnvironment(new RecordStoreEnvironment());
   return RUN_ALL_TESTS();
 }

@@ -48,7 +48,7 @@ To build and install the CUID library from source, follow these steps:
 
       The default install directory is ``/opt/rocm/core``. However, you can choose a different directory using the ``-DCMAKE_INSTALL_PREFIX`` option.
 
-3. (Optional — daemon only) Configure the daemon mode by setting the ``daemonize`` variable in the ``amdcuid_daemon.conf`` file in the ``daemon`` directory before building. Setting ``daemonize`` to ``true`` installs a ``systemd`` service and a set of ``udev`` rules to detect devices and generate CUIDs automatically. Setting it to ``false`` installs a one-shot boot service that detects devices at startup only. The default is ``false``. Skip this step if you are not building the daemon (``-DBUILD_DAEMON=OFF``).
+3. (Optional, daemon only.) Configure the daemon mode by setting the ``daemonize`` variable in the ``amdcuid_daemon.conf`` file in the ``daemon`` directory before building. Setting ``daemonize`` to ``true`` installs a ``systemd`` service and a set of ``udev`` rules to detect devices and generate CUIDs automatically. Setting it to ``false`` installs a one-shot boot service that detects devices at startup only. The default is ``false``. Skip this step if you are not building the daemon (``-DBUILD_DAEMON=OFF``).
 
 4. Perform the install and post-install tasks. The unified post-install script at ``<install prefix>/share/amdcuid/amdcuid_postinst.sh`` handles all required setup automatically: it always provisions the HMAC key for the library, and also configures the ``systemd`` service and ``udev`` rules when the daemon is installed. Run it as root or with ``sudo``.
 

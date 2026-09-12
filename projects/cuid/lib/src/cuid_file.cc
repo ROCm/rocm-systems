@@ -8,7 +8,9 @@
 #include <unistd.h>
 
 #include <algorithm>
+#include <cctype>
 #include <cerrno>
+#include <cstdlib>
 #include <cstring>
 #include <fstream>
 #include <iomanip>
@@ -25,6 +27,176 @@
 #include "src/cuid_platform.h"
 #include "src/cuid_util.h"
 #include "src/hmac.h"
+
+namespace {
+
+// The lock file is 0666, so any local process can hold it indefinitely; no
+// acquisition here may block on that without a bound.
+constexpr int kLockTimeoutSeconds = 5;
+
+// Create the record directory 0755 when missing, as the packaging script would.
+// False for a non-root caller, which becomes PERMISSION_DENIED rather than a
+// fallback to anywhere more writable.
+bool ensure_parent_dir(const std::string& path) {
+  const size_t slash = path.find_last_of('/');
+  if (slash == std::string::npos || slash == 0) return true;
+  const std::string dir = path.substr(0, slash);
+
+  struct stat st;
+  if (stat(dir.c_str(), &st) == 0) return S_ISDIR(st.st_mode);
+  if (mkdir(dir.c_str(), S_IRWXU | S_IRGRP | S_IXGRP | S_IROTH | S_IXOTH) == 0) return true;
+  return errno == EEXIST;
+}
+
+// Write `content` to `path` atomically, with `mode`. Same shape as
+// cuid_hmac::store_key(). A predictable temp name (the old `path + ".tmp"`) in
+// a directory an unprivileged user can write lets that user pre-create it as a
+// symlink and have the next root-privileged refresh truncate the target, so the
+// name comes from mkstemp; and every write is checked, so an ENOSPC cannot
+// rename a truncated record over a complete one and return success.
+amdcuid_status_t write_record_file(const std::string& path, const std::string& content,
+                                   mode_t mode) {
+  if (!ensure_parent_dir(path)) {
+    LOG(ERROR, "CuidFile: cannot create the directory for " << path << ": "
+                                                            << CuidUtilities::errno_string(errno));
+    return AMDCUID_STATUS_PERMISSION_DENIED;
+  }
+
+  std::string temp_path = path + ".XXXXXX";
+  const int fd = mkstemp(&temp_path[0]);
+  if (fd < 0) {
+    const int err = errno;
+    LOG(ERROR, "CuidFile: cannot create a temporary file beside "
+                   << path << ": " << CuidUtilities::errno_string(err));
+    return (err == EACCES || err == EPERM || err == EROFS) ? AMDCUID_STATUS_PERMISSION_DENIED
+                                                           : AMDCUID_STATUS_FILE_ERROR;
+  }
+
+  auto fail = [&](const char* what) {
+    LOG(ERROR,
+        "CuidFile: " << what << " for " << path << ": " << CuidUtilities::errno_string(errno));
+    close(fd);
+    unlink(temp_path.c_str());
+    return AMDCUID_STATUS_FILE_ERROR;
+  };
+
+  // mkstemp() creates 0600; widen before there is anything in it to read.
+  if (fchmod(fd, mode) != 0) return fail("fchmod failed");
+
+  size_t written = 0;
+  while (written < content.size()) {
+    const ssize_t n = write(fd, content.data() + written, content.size() - written);
+    if (n < 0) {
+      if (errno == EINTR) continue;
+      return fail("write failed");
+    }
+    written += static_cast<size_t>(n);
+  }
+
+  // Durable before the rename: otherwise a crash leaves the record present and
+  // empty, which reads back as a node with no components.
+  if (fsync(fd) != 0) return fail("fsync failed");
+  if (close(fd) != 0) {
+    LOG(ERROR, "CuidFile: close failed for " << path << ": " << CuidUtilities::errno_string(errno));
+    unlink(temp_path.c_str());
+    return AMDCUID_STATUS_FILE_ERROR;
+  }
+
+  if (rename(temp_path.c_str(), path.c_str()) != 0) {
+    const int err = errno;
+    LOG(ERROR, "CuidFile: rename failed for " << path << ": " << CuidUtilities::errno_string(err));
+    unlink(temp_path.c_str());
+    return (err == EACCES || err == EPERM) ? AMDCUID_STATUS_PERMISSION_DENIED
+                                           : AMDCUID_STATUS_FILE_ERROR;
+  }
+
+  // Persist the directory entry so the rename survives power loss.
+  const size_t slash = path.find_last_of('/');
+  const std::string dir = (slash == std::string::npos) ? "." : path.substr(0, slash);
+  const int dir_fd = open(dir.empty() ? "/" : dir.c_str(), O_RDONLY | O_DIRECTORY | O_CLOEXEC);
+  if (dir_fd >= 0) {
+    (void)fsync(dir_fd);
+    close(dir_fd);
+  }
+
+  return AMDCUID_STATUS_SUCCESS;
+}
+
+// Open (creating if need be) the advisory lock file, for all three acquire
+// paths. Do not reintroduce the umask(0) dance around the O_CREAT: umask is
+// process-global, libamdcuid is linked into multithreaded hosts (libamd_smi.so
+// among them), and the fchmod below sets the mode without touching global
+// state. O_NOFOLLOW because the lock path is derived from the record path and
+// so predictable: a symlink there is somebody redirecting us.
+int open_lock_file(const std::string& path, CuidLockType lock_type) {
+  const int base_flags = O_CLOEXEC | O_NOFOLLOW;
+  int fd =
+      open(path.c_str(), ((lock_type == CuidLockType::EXCLUSIVE) ? O_RDWR : O_RDONLY) | base_flags);
+  if (fd >= 0 || errno != ENOENT) return fd;
+
+  fd = open(path.c_str(), O_RDWR | O_CREAT | base_flags, 0666);
+  if (fd >= 0) {
+    // An unprivileged reader has to be able to take a shared lock on a file
+    // root created, whatever the creator's umask was.
+    (void)fchmod(fd, 0666);
+    return fd;
+  }
+
+  // Ordinary, not an error: the store is root-owned, so where no refresh has
+  // run there is no directory to create it in, and load() reads on unlocked.
+  const int err = errno;
+  const LogLevel level = (err == ENOENT || err == EACCES || err == EPERM) ? DEBUG : ERROR;
+  LOG(level, "CuidFileLock: Failed to open lock file " << path << ": "
+                                                       << CuidUtilities::errno_string(err));
+  errno = err;
+  return fd;
+}
+
+// Parse an unsigned integer field of a record. The record is untrusted input,
+// and std::stoul/stoull/stol throw across the C entry points that reach here.
+// `max` is the width of the destination field: a value that does not fit is
+// malformed input, not something to truncate silently.
+bool parse_uint(const std::string& text, int base, uint64_t max, uint64_t& out) {
+  if (text.empty()) return false;
+  // strtoull accepts leading whitespace and a sign, so "-1" would arrive as
+  // ULLONG_MAX.
+  if (!std::isalnum(static_cast<unsigned char>(text[0]))) return false;
+
+  errno = 0;
+  char* end = nullptr;
+  const unsigned long long value = std::strtoull(text.c_str(), &end, base);
+  if (errno == ERANGE || end == text.c_str() || *end != '\0') return false;
+  if (value > max) return false;
+
+  out = static_cast<uint64_t>(value);
+  return true;
+}
+
+// Same, for the signed last_update timestamp.
+bool parse_time(const std::string& text, time_t& out) {
+  if (text.empty()) return false;
+
+  errno = 0;
+  char* end = nullptr;
+  const long long value = std::strtoll(text.c_str(), &end, 10);
+  if (errno == ERANGE || end == text.c_str() || *end != '\0') return false;
+
+  out = static_cast<time_t>(value);
+  return true;
+}
+
+// A record's CUID field, validated: uuid_string_to_uint8() rejects a non-hex
+// digit and a wrong length.
+bool parse_cuid(const std::string& text, amdcuid_id_t& id) {
+  memset(id.bytes, 0, sizeof(id.bytes));
+  if (CuidUtilities::uuid_string_to_uint8(text, id.bytes) != AMDCUID_STATUS_SUCCESS) {
+    memset(id.bytes, 0, sizeof(id.bytes));
+    return false;
+  }
+  return true;
+}
+
+}  // namespace
 
 // ============================================================================
 // CuidFileLock Implementation
@@ -43,42 +215,10 @@ bool CuidFileLock::acquire() {
     return true;  // Already locked
   }
 
-  // For shared (read) locks, we only need O_RDONLY access.
-  // For exclusive (write) locks, first open existing file with O_RDWR.
-  // Only create if missing to avoid sticky-dir O_CREAT restrictions in /tmp.
-  if (lock_type_ == CuidLockType::EXCLUSIVE) {
-    lock_fd_ = open(lock_file_path_.c_str(), O_RDWR, 0666);
-    if (lock_fd_ < 0 && errno == ENOENT) {
-      mode_t old_umask = umask(0);
-      lock_fd_ = open(lock_file_path_.c_str(), O_RDWR | O_CREAT, 0666);
-      umask(old_umask);
-      if (lock_fd_ >= 0) {
-        fchmod(lock_fd_, 0666);
-      }
-    }
-  } else {
-    // Try to open existing file for shared (read) lock
-    lock_fd_ = open(lock_file_path_.c_str(), O_RDONLY, 0666);
-  }
-
-  // If file doesn't exist and we need a shared lock, try to create it
-  if (lock_fd_ < 0 && lock_type_ == CuidLockType::SHARED && errno == ENOENT) {
-    // Try to create the lock file - may fail if not privileged, which is OK
-    // The file should be created by root when generating CUIDs
-    mode_t old_umask = umask(0);  // Temporarily clear umask for proper permissions
-    lock_fd_ = open(lock_file_path_.c_str(), O_RDWR | O_CREAT, 0666);
-    umask(old_umask);  // Restore umask
-
-    // If created successfully, also chmod to ensure permissions are correct
-    if (lock_fd_ >= 0) {
-      fchmod(lock_fd_, 0666);
-    }
-  }
+  lock_fd_ = open_lock_file(lock_file_path_, lock_type_);
 
   if (lock_fd_ < 0) {
-    LOG(ERROR, "CuidFileLock: Failed to open lock file " << lock_file_path_ << ": "
-                                                         << CuidUtilities::errno_string(errno));
-    return false;
+    return false;  // open_lock_file() has already said why
   }
 
   // Set up the lock structure
@@ -118,37 +258,10 @@ bool CuidFileLock::acquire_with_timeout(int timeout_seconds) {
     return true;  // Already locked
   }
 
-  // For shared (read) locks, we only need O_RDONLY access.
-  // For exclusive (write) locks, first open existing file with O_RDWR.
-  // Only create if missing to avoid sticky-dir O_CREAT restrictions in /tmp.
-  if (lock_type_ == CuidLockType::EXCLUSIVE) {
-    lock_fd_ = open(lock_file_path_.c_str(), O_RDWR, 0666);
-    if (lock_fd_ < 0 && errno == ENOENT) {
-      mode_t old_umask = umask(0);
-      lock_fd_ = open(lock_file_path_.c_str(), O_RDWR | O_CREAT, 0666);
-      umask(old_umask);
-      if (lock_fd_ >= 0) {
-        fchmod(lock_fd_, 0666);
-      }
-    }
-  } else {
-    lock_fd_ = open(lock_file_path_.c_str(), O_RDONLY, 0666);
-  }
-
-  // If file doesn't exist and we need a shared lock, try to create it
-  if (lock_fd_ < 0 && lock_type_ == CuidLockType::SHARED && errno == ENOENT) {
-    mode_t old_umask = umask(0);
-    lock_fd_ = open(lock_file_path_.c_str(), O_RDWR | O_CREAT, 0666);
-    umask(old_umask);
-    if (lock_fd_ >= 0) {
-      fchmod(lock_fd_, 0666);
-    }
-  }
+  lock_fd_ = open_lock_file(lock_file_path_, lock_type_);
 
   if (lock_fd_ < 0) {
-    LOG(ERROR, "CuidFileLock: Failed to open lock file " << lock_file_path_ << ": "
-                                                         << CuidUtilities::errno_string(errno));
-    return false;
+    return false;  // open_lock_file() has already said why
   }
 
   // Set up the lock structure
@@ -201,37 +314,10 @@ bool CuidFileLock::try_acquire() {
     return true;  // Already locked
   }
 
-  // For shared (read) locks, we only need O_RDONLY access.
-  // For exclusive (write) locks, first open existing file with O_RDWR.
-  // Only create if missing to avoid sticky-dir O_CREAT restrictions in /tmp.
-  if (lock_type_ == CuidLockType::EXCLUSIVE) {
-    lock_fd_ = open(lock_file_path_.c_str(), O_RDWR, 0666);
-    if (lock_fd_ < 0 && errno == ENOENT) {
-      mode_t old_umask = umask(0);
-      lock_fd_ = open(lock_file_path_.c_str(), O_RDWR | O_CREAT, 0666);
-      umask(old_umask);
-      if (lock_fd_ >= 0) {
-        fchmod(lock_fd_, 0666);
-      }
-    }
-  } else {
-    lock_fd_ = open(lock_file_path_.c_str(), O_RDONLY, 0666);
-  }
-
-  // If file doesn't exist and we need a shared lock, try to create it
-  if (lock_fd_ < 0 && lock_type_ == CuidLockType::SHARED && errno == ENOENT) {
-    mode_t old_umask = umask(0);
-    lock_fd_ = open(lock_file_path_.c_str(), O_RDWR | O_CREAT, 0666);
-    umask(old_umask);
-    if (lock_fd_ >= 0) {
-      fchmod(lock_fd_, 0666);
-    }
-  }
+  lock_fd_ = open_lock_file(lock_file_path_, lock_type_);
 
   if (lock_fd_ < 0) {
-    LOG(ERROR, "CuidFileLock: Failed to open lock file " << lock_file_path_ << ": "
-                                                         << CuidUtilities::errno_string(errno));
-    return false;
+    return false;  // open_lock_file() has already said why
   }
 
   // Set up the lock structure
@@ -312,29 +398,21 @@ amdcuid_device_type_t CuidFile::string_to_device_type(const std::string& str) co
   if (str == "GPU") return AMDCUID_DEVICE_TYPE_GPU;
   if (str == "NIC") return AMDCUID_DEVICE_TYPE_NIC;
   if (str == "NPU") return AMDCUID_DEVICE_TYPE_NPU;
+  if (str == "STORAGE") return AMDCUID_DEVICE_TYPE_STORAGE;
+  if (str == "MEMORY") return AMDCUID_DEVICE_TYPE_MEMORY;
+  if (str == "GENPCIE") return AMDCUID_DEVICE_TYPE_GENPCIE;
+  if (str == "GENC") return AMDCUID_DEVICE_TYPE_GENC;
+  if (str == "RACKTRAY") return AMDCUID_DEVICE_TYPE_RACKTRAY;
+  if (str == "RACK") return AMDCUID_DEVICE_TYPE_RACK;
+  if (str == "OTHER") return AMDCUID_DEVICE_TYPE_OTHER;
+  // Exact inverse of CuidUtilities::device_type_to_string() over every valid
+  // Component Type; anything else, its "UNKNOWN" included, is not one.
   return AMDCUID_DEVICE_TYPE_NONE;
 }
 
 amdcuid_id_t CuidFile::string_to_cuid(const std::string& str) const {
   amdcuid_id_t id;
-  memset(id.bytes, 0, sizeof(id.bytes));
-
-  // Parse UUID format: xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
-  // Remove dashes and parse hex bytes
-  std::string hex_only;
-  for (char c : str) {
-    if (c != '-') hex_only += c;
-  }
-
-  if (hex_only.length() != 32) {
-    return id;  // Return zero-filled ID on parse error
-  }
-
-  for (int i = 0; i < 16; ++i) {
-    std::string byte_str = hex_only.substr(static_cast<size_t>(i) * 2, 2);
-    id.bytes[i] = static_cast<uint8_t>(std::stoul(byte_str, nullptr, 16));
-  }
-
+  (void)parse_cuid(str, id);  // zero-filled on parse error, as before
   return id;
 }
 
@@ -353,7 +431,11 @@ bool CuidFile::parse_section_header(const std::string& line, amdcuid_device_type
     std::string type_str = content.substr(0, colon_pos);
     std::string index_str = content.substr(colon_pos + 1);
     type = string_to_device_type(type_str);
-    index = std::stoul(index_str, nullptr, 16);
+    uint64_t parsed = 0;
+    if (!parse_uint(index_str, 16, std::numeric_limits<uint32_t>::max(), parsed)) {
+      return false;
+    }
+    index = static_cast<uint32_t>(parsed);
   } else {
     // Format: PLATFORM (no index)
     type = string_to_device_type(content);
@@ -366,11 +448,14 @@ bool CuidFile::parse_section_header(const std::string& line, amdcuid_device_type
 amdcuid_status_t CuidFile::load() {
   entries_.clear();
 
-  // Acquire shared lock for reading
+  // Bounded rather than F_SETLKW: CuidDeviceManager reaches load() holding
+  // manager_mutex_ on some paths, and the 0666 lock file can be held by any
+  // local process. Failing to lock is not fatal, because the writer swaps the
+  // record in with rename(), so an unlocked reader still sees one whole version
+  // of it.
   CuidFileLock lock(file_path_, CuidLockType::SHARED);
-  if (!lock.acquire()) {
-    LOG(ERROR, "CuidFile::load: Failed to acquire shared lock for " << file_path_);
-    return AMDCUID_STATUS_FILE_ERROR;
+  if (!lock.acquire_with_timeout(kLockTimeoutSeconds)) {
+    LOG(DEBUG, "CuidFile::load: reading " << file_path_ << " without the shared lock");
   }
 
   std::ifstream file(file_path_);
@@ -378,89 +463,121 @@ amdcuid_status_t CuidFile::load() {
     return AMDCUID_STATUS_FILE_NOT_FOUND;
   }
 
-  std::string line;
-  CuidFileEntry current_entry;
-  bool in_section = false;
+  // No exception may leave this function: it is reached from
+  // amdcuid_query_device_property() and amdcuid_get_all_handles(), which are C
+  // entry points. The field parsers below do not throw; this is the backstop
+  // against std::bad_alloc and against a later edit.
+  try {
+    std::string line;
+    CuidFileEntry current_entry;
+    bool in_section = false;
 
-  while (std::getline(file, line)) {
-    line = trim(line);
+    while (std::getline(file, line)) {
+      line = trim(line);
 
-    // Skip empty lines and comments
-    if (line.empty() || line[0] == '#' || line[0] == ';') {
-      continue;
-    }
-
-    // Check for section header
-    if (line[0] == '[') {
-      // Save previous entry if valid
-      if (in_section) {
-        entries_.push_back(current_entry);
+      // Skip empty lines and comments
+      if (line.empty() || line[0] == '#' || line[0] == ';') {
+        continue;
       }
 
-      // Start new section
-      amdcuid_device_type_t type;
-      uint32_t index;
-      if (parse_section_header(line, type, index)) {
-        current_entry = CuidFileEntry();
-        current_entry.device_type = type;
-        current_entry.device_index = index;
-        in_section = true;
+      // Check for section header
+      if (line[0] == '[') {
+        // Save previous entry if valid
+        if (in_section) {
+          entries_.push_back(current_entry);
+        }
+
+        // Start new section
+        amdcuid_device_type_t type;
+        uint32_t index;
+        if (parse_section_header(line, type, index)) {
+          current_entry = CuidFileEntry();
+          current_entry.device_type = type;
+          current_entry.device_index = index;
+          in_section = true;
+        } else {
+          in_section = false;
+        }
+        continue;
+      }
+
+      // Parse key=value pairs
+      if (!in_section) continue;
+      const size_t eq_pos = line.find('=');
+      if (eq_pos == std::string::npos) continue;
+
+      const std::string key = trim(line.substr(0, eq_pos));
+      const std::string value = trim(line.substr(eq_pos + 1));
+
+      // A malformed record is rejected whole: defaulting the field would hand
+      // the caller a CUID association assembled partly out of zeroes.
+      bool ok = true;
+      uint64_t number = 0;
+      if (key == "primary_cuid") {
+        ok = parse_cuid(value, current_entry.primary_cuid);
+      } else if (key == "is_temporary") {
+        current_entry.is_temporary = (value == "true");
+      } else if (key == "derived_cuid") {
+        ok = parse_cuid(value, current_entry.derived_cuid);
+      } else if (key == "device_node") {
+        current_entry.device_node = value;
+      } else if (key == "bdf") {
+        current_entry.bdf = value;
+      } else if (key == "mac_address") {
+        current_entry.mac_address = value;
+      } else if (key == "hardware_fingerprint") {
+        ok = parse_uint(value, 16, std::numeric_limits<uint64_t>::max(), number);
+        current_entry.hardware_fingerprint = number;
+      } else if (key == "revision_id") {
+        ok = parse_uint(value, 16, std::numeric_limits<uint8_t>::max(), number);
+        current_entry.revision_id = static_cast<uint8_t>(number);
+      } else if (key == "last_update") {
+        ok = parse_time(value, current_entry.last_update);
       } else {
-        in_section = false;
-      }
-      continue;
-    }
-
-    // Parse key=value pairs
-    if (in_section) {
-      size_t eq_pos = line.find('=');
-      if (eq_pos != std::string::npos) {
-        std::string key = trim(line.substr(0, eq_pos));
-        std::string value = trim(line.substr(eq_pos + 1));
-
-        if (key == "primary_cuid") {
-          current_entry.primary_cuid = string_to_cuid(value);
-        } else if (key == "is_temporary") {
-          current_entry.is_temporary = (value == "true");
-        } else if (key == "derived_cuid") {
-          current_entry.derived_cuid = string_to_cuid(value);
-        } else if (key == "device_node") {
-          current_entry.device_node = value;
-        } else if (key == "package_id") {
-          current_entry.package_id = static_cast<uint16_t>(std::stoul(value, nullptr, 16));
+        // The uint16_t fields, which are all parsed identically.
+        uint16_t* field = nullptr;
+        if (key == "package_id") {
+          field = &current_entry.package_id;
         } else if (key == "core_id") {
-          current_entry.core_id = static_cast<uint16_t>(std::stoul(value, nullptr, 16));
-        } else if (key == "bdf") {
-          current_entry.bdf = value;
-        } else if (key == "mac_address") {
-          current_entry.mac_address = value;
-        } else if (key == "hardware_fingerprint") {
-          current_entry.hardware_fingerprint =
-              static_cast<uint64_t>(std::stoull(value, nullptr, 16));
+          field = &current_entry.core_id;
         } else if (key == "vendor_id") {
-          current_entry.vendor_id = static_cast<uint16_t>(std::stoul(value, nullptr, 16));
+          field = &current_entry.vendor_id;
         } else if (key == "device_id") {
-          current_entry.device_id = static_cast<uint16_t>(std::stoul(value, nullptr, 16));
-        } else if (key == "revision_id") {
-          current_entry.revision_id = static_cast<uint8_t>(std::stoul(value, nullptr, 16));
+          field = &current_entry.device_id;
         } else if (key == "family") {
-          current_entry.family = static_cast<uint16_t>(std::stoul(value, nullptr, 16));
+          field = &current_entry.family;
         } else if (key == "model") {
-          current_entry.model = static_cast<uint16_t>(std::stoul(value, nullptr, 16));
+          field = &current_entry.model;
         } else if (key == "pci_class") {
-          current_entry.pci_class = static_cast<uint16_t>(std::stoul(value, nullptr, 16));
+          field = &current_entry.pci_class;
         } else if (key == "unit_id") {
-          current_entry.unit_id = static_cast<uint16_t>(std::stoul(value, nullptr, 16));
-        } else if (key == "last_update") {
-          current_entry.last_update = std::stol(value, nullptr, 10);
+          field = &current_entry.unit_id;
+        }
+        if (field) {
+          ok = parse_uint(value, 16, std::numeric_limits<uint16_t>::max(), number);
+          *field = static_cast<uint16_t>(number);
         }
       }
-    }
-  }
 
-  // Save last entry
-  if (in_section) {
-    entries_.push_back(current_entry);
+      if (!ok) {
+        LOG(ERROR, "CuidFile::load: " << file_path_ << ": malformed value for '" << key << "'");
+        entries_.clear();
+        return AMDCUID_STATUS_FILE_ERROR;
+      }
+    }
+
+    // Save last entry
+    if (in_section) {
+      entries_.push_back(current_entry);
+    }
+  } catch (const std::exception& e) {
+    LOG(ERROR, "CuidFile::load: " << file_path_ << ": " << e.what());
+    entries_.clear();
+    return AMDCUID_STATUS_FILE_ERROR;
+  } catch (...) {
+    LOG(ERROR, "CuidFile::load: " << file_path_ << ": unknown error");
+    entries_.clear();
+    return AMDCUID_STATUS_FILE_ERROR;
   }
 
   file.close();
@@ -468,20 +585,24 @@ amdcuid_status_t CuidFile::load() {
 }
 
 amdcuid_status_t CuidFile::save() {
+  // Before the lock, which lives in the same directory: PERMISSION_DENIED here
+  // is a better answer than a lock failure reported as a file error.
+  if (!ensure_parent_dir(file_path_)) {
+    LOG(ERROR, "CuidFile::save: cannot create the directory for "
+                   << file_path_ << ": " << CuidUtilities::errno_string(errno));
+    return AMDCUID_STATUS_PERMISSION_DENIED;
+  }
+
   // Acquire exclusive lock for writing
   CuidFileLock lock(file_path_, CuidLockType::EXCLUSIVE);
-  if (!lock.acquire()) {
+  if (!lock.acquire_with_timeout(kLockTimeoutSeconds)) {
     LOG(ERROR, "CuidFile::save: Failed to acquire exclusive lock for " << file_path_);
     return AMDCUID_STATUS_FILE_ERROR;
   }
 
-  // Create temporary file first for atomic write
-  std::string temp_path = file_path_ + ".tmp";
-  std::ofstream file(temp_path);
-
-  if (!file.is_open()) {
-    return AMDCUID_STATUS_PERMISSION_DENIED;
-  }
+  // Rendered in memory; write_record_file() below owns the temp file, its mode
+  // and the rename.
+  std::ostringstream file;
 
   // Write header comment
   file << "# AMD CUID Device Information File\n";
@@ -501,10 +622,15 @@ amdcuid_status_t CuidFile::save() {
   std::map<amdcuid_device_type_t, std::vector<CuidFileEntry>> grouped;
   get_grouped_entries(grouped);
 
-  // Define output order
-  std::vector<amdcuid_device_type_t> order = {AMDCUID_DEVICE_TYPE_GPU, AMDCUID_DEVICE_TYPE_CPU,
-                                              AMDCUID_DEVICE_TYPE_NIC, AMDCUID_DEVICE_TYPE_NPU,
-                                              AMDCUID_DEVICE_TYPE_PLATFORM};
+  // A filter as much as an ordering: a type absent from this list is skipped
+  // and never written, so every named Component Type has to be listed. The
+  // first five keep their historical order so an existing record does not
+  // churn; the rest follow in on-wire order.
+  std::vector<amdcuid_device_type_t> order = {
+      AMDCUID_DEVICE_TYPE_GPU,      AMDCUID_DEVICE_TYPE_CPU,      AMDCUID_DEVICE_TYPE_NIC,
+      AMDCUID_DEVICE_TYPE_NPU,      AMDCUID_DEVICE_TYPE_PLATFORM, AMDCUID_DEVICE_TYPE_STORAGE,
+      AMDCUID_DEVICE_TYPE_MEMORY,   AMDCUID_DEVICE_TYPE_GENPCIE,  AMDCUID_DEVICE_TYPE_GENC,
+      AMDCUID_DEVICE_TYPE_RACKTRAY, AMDCUID_DEVICE_TYPE_RACK,     AMDCUID_DEVICE_TYPE_OTHER};
 
   for (auto type : order) {
     if (grouped.find(type) == grouped.end()) continue;
@@ -587,24 +713,12 @@ amdcuid_status_t CuidFile::save() {
     }
   }
 
-  file.close();
-
-  // Atomically move temp file to actual file
-  if (rename(temp_path.c_str(), file_path_.c_str()) != 0) {
-    unlink(temp_path.c_str());
-    return AMDCUID_STATUS_PERMISSION_DENIED;
-  }
-
-  // Set permissions
-  if (!is_privileged_) {
-    // Unprivileged file: readable by all (644)
-    chmod(file_path_.c_str(), S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH);
-  } else {
-    // Privileged file: readable by root only (600)
-    chmod(file_path_.c_str(), S_IRUSR | S_IWUSR);
-  }
-
-  return AMDCUID_STATUS_SUCCESS;
+  // The privileged record carries primary CUIDs and raw hardware fingerprints,
+  // so it is 0600 from the moment it exists rather than chmod'ed down
+  // afterwards. The unprivileged record is 0644; every consumer reads it.
+  const mode_t mode =
+      is_privileged_ ? (S_IRUSR | S_IWUSR) : (S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH);
+  return write_record_file(file_path_, file.str(), mode);
 }
 
 amdcuid_status_t CuidFile::add_entry(const CuidFileEntry& entry) {
@@ -761,8 +875,14 @@ amdcuid_status_t generate_from_devices(const std::vector<std::shared_ptr<CuidDev
     amdcuid_derived_id derived_id = {};
     status = device->get_derived_cuid(derived_id, &hmac);
     if (status != AMDCUID_STATUS_SUCCESS) {
+      // No entry at all, rather than an entry holding the zero-initialised
+      // derived_id: every device with no obtainable primary would otherwise be
+      // recorded under the same all-zero identifier. A device the record does
+      // not name is answered by the lookup path; one it names wrongly is not.
       std::cerr << "Warning: Failed to generate derived CUID for device type " << entry.device_type
-                << " status: " << status << std::endl;
+                << " status: " << status << "; omitting it from " << file << std::endl;
+      --device_counters[entry.device_type];
+      continue;
     }
     entry.derived_cuid = derived_id.UUIDv8_representation;
 
@@ -780,10 +900,16 @@ amdcuid_status_t generate_from_devices(const std::vector<std::shared_ptr<CuidDev
           entry.device_node = info.render_node;
           entry.bdf = info.bdf;
 
-          // if temp CUID, make the fallback fingerprint based on the GPU's PCIe
-          // BDF
+          // if temp CUID, rebuild the auxiliary fingerprint the device used
           if (is_temporary) {
-            CuidUtilities::make_fallback_fingerprint(info.bdf, entry.hardware_fingerprint);
+            CuidUtilities::AuxiliaryInput aux;
+            aux.format = CuidUtilities::kAuxFormatPcie;
+            aux.routing_id = CuidUtilities::routing_id_from_bdf(info.bdf);
+            aux.revision_id = info.header.fields.gpu.revision_id;
+            aux.device_id = info.header.fields.gpu.device_id;
+            aux.vendor_id = info.header.fields.gpu.vendor_id;
+            aux.component_type = static_cast<uint8_t>(AMDCUID_DEVICE_TYPE_GPU);
+            CuidUtilities::make_fallback_fingerprint(aux, entry.hardware_fingerprint);
           }
         }
         break;
@@ -805,11 +931,16 @@ amdcuid_status_t generate_from_devices(const std::vector<std::shared_ptr<CuidDev
           if (cpu->get_device_path(cpu_device_path) == AMDCUID_STATUS_SUCCESS) {
             entry.device_node = cpu_device_path;
           }
-          // if temp CUID, make the fallback fingerprint based on the CPU's
-          // package
+          // if temp CUID, rebuild the auxiliary fingerprint the device used
           if (is_temporary) {
-            CuidUtilities::make_fallback_fingerprint(std::to_string(entry.package_id),
-                                                     entry.hardware_fingerprint);
+            CuidUtilities::AuxiliaryInput aux;
+            aux.format = CuidUtilities::kAuxFormatCpu;
+            aux.routing_id = 0;
+            aux.revision_id = info.header.fields.cpu.revision_id;
+            aux.device_id = info.header.fields.cpu.device_id;
+            aux.vendor_id = info.header.fields.cpu.vendor_id;
+            aux.component_type = static_cast<uint8_t>(AMDCUID_DEVICE_TYPE_CPU);
+            CuidUtilities::make_fallback_fingerprint(aux, entry.hardware_fingerprint);
           }
         }
         break;
@@ -829,10 +960,16 @@ amdcuid_status_t generate_from_devices(const std::vector<std::shared_ptr<CuidDev
           }
           entry.bdf = info.bdf;
 
-          // if temp CUID, make the fallback fingerprint based on the NIC's PCIe
-          // BDF
+          // if temp CUID, rebuild the auxiliary fingerprint the device used
           if (is_temporary) {
-            CuidUtilities::make_fallback_fingerprint(info.bdf, entry.hardware_fingerprint);
+            CuidUtilities::AuxiliaryInput aux;
+            aux.format = CuidUtilities::kAuxFormatPcie;
+            aux.routing_id = CuidUtilities::routing_id_from_bdf(info.bdf);
+            aux.revision_id = info.header.fields.nic.revision_id;
+            aux.device_id = info.header.fields.nic.device_id;
+            aux.vendor_id = info.header.fields.nic.vendor_id;
+            aux.component_type = static_cast<uint8_t>(AMDCUID_DEVICE_TYPE_NIC);
+            CuidUtilities::make_fallback_fingerprint(aux, entry.hardware_fingerprint);
           }
         }
         break;
@@ -847,10 +984,16 @@ amdcuid_status_t generate_from_devices(const std::vector<std::shared_ptr<CuidDev
           entry.pci_class = info.header.fields.npu.pci_class;
           entry.device_node = info.accel_node;
           entry.bdf = info.bdf;
-          // if temp CUID, make the fallback fingerprint based on the NPU's PCIe
-          // BDF
+          // if temp CUID, rebuild the auxiliary fingerprint the device used
           if (is_temporary) {
-            CuidUtilities::make_fallback_fingerprint(info.bdf, entry.hardware_fingerprint);
+            CuidUtilities::AuxiliaryInput aux;
+            aux.format = CuidUtilities::kAuxFormatPcie;
+            aux.routing_id = CuidUtilities::routing_id_from_bdf(info.bdf);
+            aux.revision_id = info.header.fields.npu.revision_id;
+            aux.device_id = info.header.fields.npu.device_id;
+            aux.vendor_id = info.header.fields.npu.vendor_id;
+            aux.component_type = static_cast<uint8_t>(AMDCUID_DEVICE_TYPE_NPU);
+            CuidUtilities::make_fallback_fingerprint(aux, entry.hardware_fingerprint);
           }
         }
         break;
@@ -862,14 +1005,9 @@ amdcuid_status_t generate_from_devices(const std::vector<std::shared_ptr<CuidDev
           const auto& info = platform->get_info();
           entry.vendor_id = info.header.fields.platform.vendor_id;
 
-          // if temp CUID, make the fallback fingerprint based on the platform
-          // product name
-          if (is_temporary) {
-            std::string name = "";
-            std::string family_dummy = "";
-            SmbiosUtil::get_product_info(name, family_dummy);
-            CuidUtilities::make_fallback_fingerprint(name, entry.hardware_fingerprint);
-          }
+          // The Platform CUID has no auxiliary form: it is the SMBIOS system
+          // UUID verbatim, or built from the system serial through the normal
+          // layout, or absent. Nothing to synthesise.
         }
         break;
       }

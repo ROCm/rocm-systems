@@ -17,14 +17,6 @@
 #include "cuid_util.h"
 #include "include/amd_cuid.h"
 
-// Endianness conversion functions
-uint64_t PciUtil::le64_to_be64(uint64_t value) {
-  return ((value & 0x00000000000000FFULL) << 56) | ((value & 0x000000000000FF00ULL) << 40) |
-         ((value & 0x0000000000FF0000ULL) << 24) | ((value & 0x00000000FF000000ULL) << 8) |
-         ((value & 0x000000FF00000000ULL) >> 8) | ((value & 0x0000FF0000000000ULL) >> 24) |
-         ((value & 0x00FF000000000000ULL) >> 40) | ((value & 0xFF00000000000000ULL) >> 56);
-}
-
 // This function should only work with PCI devices, which currently includes
 // GPUs, NICs, and NPUs. It may later include storage devices as well.
 amdcuid_status_t PciUtil::read_pci_config_space(std::string bdf, uint8_t* buffer,

@@ -9,6 +9,8 @@
 
 #include <cstdio>
 
+#include "src/cuid_util.h"
+
 TestDeviceRefresh::TestDeviceRefresh() {
   SetTitle("Device Refresh");
   SetDescription(
@@ -30,17 +32,24 @@ void TestDeviceRefresh::Run() {
   }
 
   // The unprivileged CUID file must exist after any successful refresh.
-  struct stat st;
-  EXPECT_EQ(stat("/tmp/cuid", &st), 0)
-      << "Unprivileged CUID file /tmp/cuid not found after refresh";
+  //
+  // Asked for by accessor, never by literal path: the store moved off /tmp with
+  // the local-privilege-escalation fix, and a test naming the old path passes
+  // on a stale /tmp/cuid without the refresh having written anything.
+  const std::string& unpriv_path = CuidUtilities::cuid_file();
+  const std::string& priv_path = CuidUtilities::priv_cuid_file();
 
-  IF_VERB(1) { printf("  /tmp/cuid present: yes\n"); }
+  struct stat st;
+  EXPECT_EQ(stat(unpriv_path.c_str(), &st), 0)
+      << "Unprivileged CUID file " << unpriv_path << " not found after refresh";
+
+  IF_VERB(1) { printf("  %s present: yes\n", unpriv_path.c_str()); }
 
   // The privileged CUID file is only written when running as root.
   if (is_root) {
-    EXPECT_EQ(stat("/tmp/priv_cuid", &st), 0)
-        << "Privileged CUID file /tmp/priv_cuid not found after root refresh";
-    IF_VERB(1) { printf("  /tmp/priv_cuid present: yes\n"); }
+    EXPECT_EQ(stat(priv_path.c_str(), &st), 0)
+        << "Privileged CUID file " << priv_path << " not found after root refresh";
+    IF_VERB(1) { printf("  %s present: yes\n", priv_path.c_str()); }
   }
 
   // Device handles must still be obtainable after the refresh repopulates the

@@ -33,6 +33,26 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
   - Exposed under the same names in the Python `amdsmi_get_gpu_asic_info()` dictionary and in `amd-smi static --asic`. The C fields report `0xFFFFFFFF` when unsupported; Python and the CLI render that as `N/A`.
   - ABI-preserving: the two fields consume two `uint32_t` slots from `amdsmi_asic_info_t.reserved`, so the structure size and the offsets of every pre-existing named field except `reserved` are unchanged. `reserved` moves by two slots and shrinks from 17 to 15 entries.
 
+- **Added Component Unified ID (CUID) reporting and seed provisioning APIs**.  
+  - `amdsmi_get_gpu_cuid_info()` returns a device's primary and derived CUIDs together with the Component Type, the lookup stage that answered, and whether the value is auxiliary, in the new `amdsmi_cuid_info_t`. The new `amdsmi_cuid_source_t` and `amdsmi_cuid_component_type_t` enums name the on-wire values.
+  - `amdsmi_set_cuid_seed()` provisions the node-wide CUID derivation seed, and `amdsmi_get_cuid_seed_info()` reports whether one is provisioned along with a fingerprint of the seed in use, in the new `amdsmi_cuid_seed_info_t`. The seed itself is never returned.
+  - The entry points are exported whether or not the build links `libamdcuid`; without it they return `AMDSMI_STATUS_NOT_SUPPORTED`.
+  - CLI: `amd-smi static --cuid` reports the CUID block, `--cuid-primary` adds the serial-bearing primary CUID (requires elevation), and `amd-smi set --cuid-seed <file|->` provisions the node seed. `--cuid` is opt-in, so the default `amd-smi static` output is unchanged. The seed is a property of the node, so `seed_provisioned` and `seed_fingerprint` are reported once for the invocation, beside the per-GPU blocks rather than inside them; in JSON they are top-level keys next to `gpu_data`.
+
+  ```shell
+  $ amd-smi static --cuid
+      SEED_PROVISIONED: False
+      SEED_FINGERPRINT: be8937fba7ed4e6f
+
+  GPU: 0
+    CUID:
+        DERIVED_CUID: XXXXXXXX-XXXX-8XXX-XXXX-XXXXXXXXXXXX
+        PRIMARY_CUID: N/A (not requested)
+        COMPONENT_TYPE: GPU
+        AUXILIARY: False
+        SOURCE: DRIVER
+  ```
+
 ### Changed
 
 - **`amdsmi_get_clock_info()` now returns `AMDSMI_STATUS_INPUT_OUT_OF_BOUNDS` for clock values that exceed `INT_MAX`**.  

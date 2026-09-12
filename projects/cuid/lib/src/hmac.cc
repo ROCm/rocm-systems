@@ -46,12 +46,7 @@
 
 namespace {
 
-// Used when no secret is provisioned. Byte-identical to CUID_DEFAULT_SEED in
-// the kernel's amdgpu_cuid.c, so sysfs and this library agree on an
-// unprovisioned machine. Not a substitute for provisioning; callers can check
-// is_using_default_key().
-constexpr char kDefaultSeed[] = "AMD-CUID-DEFAULT-SEED-v1";
-constexpr size_t kDefaultSeedLen = sizeof(kDefaultSeed) - 1;
+// kDefaultSeed and kTemporaryKey are declared in hmac.h.
 
 // The only digest CUID uses. A wider one would overrun the caller's 32-byte
 // output buffer, so set_hmac_algorithm() rejects everything else.
@@ -115,7 +110,12 @@ struct cuid_hmac::Impl {
 };
 
 cuid_hmac::cuid_hmac()
-    : impl_(nullptr), key(nullptr), key_len(key_length), valid(false), using_default_key(false) {
+    : impl_(nullptr),
+      key(nullptr),
+      key_len(key_length),
+      valid(false),
+      using_default_key(false),
+      key_store_status_(AMDCUID_STATUS_SUCCESS) {
   // getenv races only against setenv, which this library never calls.
   // NOLINTNEXTLINE(concurrency-mt-unsafe)
   const char* env_path = std::getenv("AMDCUID_HMAC_KEY_PATH");
@@ -125,8 +125,15 @@ cuid_hmac::cuid_hmac()
 
   std::ifstream key_file_stream(key_file_path, std::ios::binary);
   if (!key_file_stream.is_open()) {
-    // No key provisioned: use the public default seed, as the kernel does,
-    // rather than failing every privileged lookup on an unprovisioned machine.
+    // Absence and inaccessibility are not the same answer: the key file is 0600
+    // root-owned, so conflating them makes amdcuid_get_key_info() report a
+    // provisioned node as unprovisioned, with the fallback seed's fingerprint,
+    // to every unprivileged caller. Record which it was. The default seed is
+    // adopted either way, as the kernel's is, so derivation keeps working.
+    struct stat st;
+    if (stat(key_file_path.c_str(), &st) == 0) {
+      key_store_status_ = AMDCUID_STATUS_PERMISSION_DENIED;
+    }
     use_default_key();
     return;
   }
@@ -139,6 +146,7 @@ cuid_hmac::cuid_hmac()
     std::cerr << "Invalid key length in " << key_file_path << " (" << file_len
               << " bytes, expected " << key_length << ")" << std::endl;
     key_file_stream.close();
+    key_store_status_ = AMDCUID_STATUS_KEY_ERROR;
     return;
   }
   key_file_stream.seekg(0, std::ios::beg);
@@ -153,6 +161,7 @@ cuid_hmac::cuid_hmac()
     delete[] key;
     key = nullptr;
     key_file_stream.close();
+    key_store_status_ = AMDCUID_STATUS_KEY_ERROR;
     return;
   }
   key_file_stream.close();
@@ -170,12 +179,38 @@ void cuid_hmac::use_default_key() {
 }
 
 cuid_hmac::cuid_hmac(uint8_t key_data[key_length])
-    : impl_(nullptr), key(nullptr), key_len(key_length), valid(false), using_default_key(false) {
+    : impl_(nullptr),
+      key(nullptr),
+      key_len(key_length),
+      valid(false),
+      using_default_key(false),
+      key_store_status_(AMDCUID_STATUS_SUCCESS) {
   impl_ = new Impl();
   impl_->digest_name = "SHA256";
 
   key = new uint8_t[key_length];
   std::memcpy(key, key_data, key_length);
+
+  valid = true;
+}
+
+cuid_hmac::cuid_hmac(const char* key_data, size_t len)
+    : impl_(nullptr),
+      key(nullptr),
+      key_len(len),
+      valid(false),
+      using_default_key(false),
+      key_store_status_(AMDCUID_STATUS_SUCCESS) {
+  impl_ = new Impl();
+  impl_->digest_name = "SHA256";
+
+  if (!key_data || len == 0) {
+    key_len = key_length;
+    return;  // leaves valid == false
+  }
+
+  key = new uint8_t[len];
+  std::memcpy(key, key_data, len);
 
   valid = true;
 }
@@ -204,6 +239,52 @@ amdcuid_status_t cuid_hmac::generate_hmac_sha256(const uint8_t* data, size_t dat
   rocm::sha2::hmac_sha256(key, key_len, data, data_len, out_hash);
   if (out_len) *out_len = rocm::sha2::SHA256_DIGEST_SIZE;
 
+  return AMDCUID_STATUS_SUCCESS;
+}
+
+amdcuid_status_t cuid_hmac::key_fingerprint(uint8_t out[8]) const {
+  if (!out) return AMDCUID_STATUS_INVALID_ARGUMENT;
+
+  // This hashes key[0..key_len), which set_hmac_key() zeroes, frees and
+  // reallocates under the same mutex; key_mutex_ is mutable so this const
+  // method can take it. Without it, amdcuid_get_key_info() racing
+  // amdcuid_set_hash_key() is a use-after-free on key material.
+  std::lock_guard<std::mutex> lock(key_mutex_);
+  if (!key || !valid) return AMDCUID_STATUS_KEY_ERROR;
+
+  uint8_t digest[32];
+  const amdcuid_status_t status = CuidUtilities::sha256_unkeyed(key, key_len, digest);
+  if (status != AMDCUID_STATUS_SUCCESS) return status;
+
+  std::memcpy(out, digest, 8);
+  rocm::sha2::secure_zero(digest, sizeof(digest));
+  return AMDCUID_STATUS_SUCCESS;
+}
+
+amdcuid_status_t cuid_hmac::get_key_info(amdcuid_key_info_t* info) const {
+  if (!info) return AMDCUID_STATUS_INVALID_ARGUMENT;
+
+  // One lock_guard for the whole read, so a concurrent set_hmac_key() can't
+  // land mid-read and mix status from one key with a fingerprint from
+  // another; the key is copied out so hashing runs outside the lock.
+  uint8_t key_copy[key_length];
+  size_t key_copy_len;
+  {
+    std::lock_guard<std::mutex> lock(key_mutex_);
+    if (key_store_status_ != AMDCUID_STATUS_SUCCESS) return key_store_status_;
+    if (!key || !valid) return AMDCUID_STATUS_KEY_ERROR;
+    key_copy_len = key_len;
+    std::memcpy(key_copy, key, key_copy_len);
+    info->provisioned = using_default_key ? 0 : 1;
+  }
+
+  uint8_t digest[32];
+  const amdcuid_status_t status = CuidUtilities::sha256_unkeyed(key_copy, key_copy_len, digest);
+  rocm::sha2::secure_zero(key_copy, sizeof(key_copy));
+  if (status != AMDCUID_STATUS_SUCCESS) return status;
+
+  std::memcpy(info->fingerprint, digest, sizeof(info->fingerprint));
+  rocm::sha2::secure_zero(digest, sizeof(digest));
   return AMDCUID_STATUS_SUCCESS;
 }
 
@@ -268,6 +349,13 @@ amdcuid_status_t cuid_hmac::store_key(const uint8_t key_data[key_length]) {
     std::remove(tmp_path.c_str());
     return AMDCUID_STATUS_KEY_ERROR;
   }
+  // Whatever was wrong with the store (absent, unreadable, not a key) has been
+  // replaced by a key this process wrote and can read. Under key_mutex_, which
+  // guards it: key_store_status() reads it concurrently.
+  {
+    std::lock_guard<std::mutex> lock(key_mutex_);
+    key_store_status_ = AMDCUID_STATUS_SUCCESS;
+  }
   return AMDCUID_STATUS_SUCCESS;
 #else
   // Unique per-call name (mkstemp) so concurrent callers can never collide on
@@ -321,6 +409,13 @@ amdcuid_status_t cuid_hmac::store_key(const uint8_t key_data[key_length]) {
     close(dir_fd);
   }
 
+  // Whatever was wrong with the store (absent, unreadable, not a key) has been
+  // replaced by a key this process wrote and can read. Under key_mutex_, which
+  // guards it: key_store_status() reads it concurrently.
+  {
+    std::lock_guard<std::mutex> lock(key_mutex_);
+    key_store_status_ = AMDCUID_STATUS_SUCCESS;
+  }
   return AMDCUID_STATUS_SUCCESS;
 #endif
 }
@@ -336,7 +431,8 @@ amdcuid_status_t cuid_hmac::generate_key(uint8_t out_key[key_length]) {
   return AMDCUID_STATUS_SUCCESS;
 }
 
-amdcuid_status_t sha256_unkeyed(const uint8_t* data, size_t data_len, uint8_t out[32]) {
+amdcuid_status_t CuidUtilities::sha256_unkeyed(const uint8_t* data, size_t data_len,
+                                               uint8_t out[32]) {
   if (!out || (!data && data_len > 0)) return AMDCUID_STATUS_INVALID_ARGUMENT;
   rocm::sha2::sha256_digest(data, data_len, out);
   return AMDCUID_STATUS_SUCCESS;

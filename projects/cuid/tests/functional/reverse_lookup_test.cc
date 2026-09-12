@@ -20,11 +20,18 @@
 //   [10..11] device_id (uint16_t, little-endian) (raw bits 80:95)
 //   [12..13] vendor_id (uint16_t, little-endian) (raw bits 96:111)
 //   [14]     bits[4:0]=unit_id upper 5 bits | bit[5]=aux_indicator |
-//            bits[7:6]=device_type[1:0]
-//   [15]     bits[7:6]=device_type[3:2] | bits[5:0]=padding
+//            bits[7:6]=device_type[1:0]   (payload bits 112:119)
+//   [15]     bits[1:0]=device_type[3:2] | bits[7:2]=padding (payload 120:127)
 static void extract_primary_raw_bits(const amdcuid_id_t& uuid, uint8_t raw_bits[16]) {
   amdcuid_id_t mutable_uuid = uuid;
-  CuidUtilities::remove_UUIDv8_bits(&mutable_uuid, raw_bits);
+  // An adopted Platform CUID (e.g. the SMBIOS system UUID) is not a framed
+  // UUIDv8: it has no version/variant bits to strip, so its raw bytes must be
+  // taken verbatim.
+  if (CuidUtilities::is_constructed(&mutable_uuid)) {
+    CuidUtilities::remove_UUIDv8_bits(&mutable_uuid, raw_bits);
+  } else {
+    memcpy(raw_bits, mutable_uuid.bytes, 16);
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -69,32 +76,52 @@ void TestReverseSerialNumber::Run() {
       amdcuid_query_device_property(device_handles_[i], AMDCUID_QUERY_DEVICE_TYPE, &device_type,
                                     &length);
 
+      // Rebuild the auxiliary input structure from the device's own published
+      // properties. The fixed-width structure removes the chance for test and
+      // library to disagree about formatting, as they did when the CPU seed was
+      // a string.
+      CuidUtilities::AuxiliaryInput aux;
+      aux.component_type = static_cast<uint8_t>(device_type);
+
+      uint16_t vendor_id = 0, device_id = 0;
+      length = sizeof(vendor_id);
+      amdcuid_query_device_property(device_handles_[i], AMDCUID_QUERY_VENDOR_ID, &vendor_id,
+                                    &length);
+      length = sizeof(device_id);
+      amdcuid_query_device_property(device_handles_[i], AMDCUID_QUERY_DEVICE_ID, &device_id,
+                                    &length);
+      aux.vendor_id = vendor_id;
+      aux.device_id = device_id;
+
+      // AMDCUID_QUERY_REVISION_ID is one octet: a uint16_t here leaves its high
+      // half untouched.
+      uint8_t revision_id = 0;
+      length = sizeof(revision_id);
+      amdcuid_query_device_property(device_handles_[i], AMDCUID_QUERY_REVISION_ID, &revision_id,
+                                    &length);
+      aux.revision_id = revision_id;
+
       switch (device_type) {
-        case AMDCUID_DEVICE_TYPE_PLATFORM: {
-          std::string name, family_dummy;
-          status = SmbiosUtil::get_product_info(name, family_dummy);
-          EXPECT_EQ(status, AMDCUID_STATUS_SUCCESS);
-          CuidUtilities::make_fallback_fingerprint(name, serial_number);
-        } break;
-        case AMDCUID_DEVICE_TYPE_CPU: {
-          uint16_t physical_id = 0, core_id = 0;
-          length = sizeof(physical_id);
-          amdcuid_query_device_property(device_handles_[i], AMDCUID_QUERY_PHYSICAL_ID, &physical_id,
-                                        &length);
-          length = sizeof(core_id);
-          amdcuid_query_device_property(device_handles_[i], AMDCUID_QUERY_CORE_ID, &core_id,
-                                        &length);
-          std::string physical_core_id =
-              std::to_string(physical_id) + ":" + std::to_string(core_id);
-          CuidUtilities::make_fallback_fingerprint(physical_core_id, serial_number);
-        } break;
+        case AMDCUID_DEVICE_TYPE_PLATFORM:
+          // The Platform CUID has no auxiliary form: it is the SMBIOS system
+          // UUID verbatim, or built from the system serial, or absent. Reaching
+          // here means the library reported a temporary Platform CUID.
+          FAIL() << "Platform CUID must not be temporary";
+          break;
+        case AMDCUID_DEVICE_TYPE_CPU:
+          aux.format = CuidUtilities::kAuxFormatCpu;
+          aux.routing_id = 0;
+          CuidUtilities::make_fallback_fingerprint(aux, serial_number);
+          break;
         case AMDCUID_DEVICE_TYPE_GPU:
         case AMDCUID_DEVICE_TYPE_NIC:
         case AMDCUID_DEVICE_TYPE_NPU: {
           char bdf[32] = {0};
           length = sizeof(bdf);
           amdcuid_query_device_property(device_handles_[i], AMDCUID_QUERY_BDF, bdf, &length);
-          CuidUtilities::make_fallback_fingerprint(bdf, serial_number);
+          aux.format = CuidUtilities::kAuxFormatPcie;
+          aux.routing_id = CuidUtilities::routing_id_from_bdf(bdf);
+          CuidUtilities::make_fallback_fingerprint(aux, serial_number);
         } break;
         default:
           FAIL() << "Unsupported device type for fallback fingerprint";
@@ -110,17 +137,24 @@ void TestReverseSerialNumber::Run() {
                                            &primary_id, &length);
     EXPECT_EQ(status, AMDCUID_STATUS_SUCCESS);
 
+    if (!CuidUtilities::is_constructed(&primary_id)) {
+      // An adopted firmware UUID (e.g. a Platform's SMBIOS system UUID) carries
+      // no packed info to reverse-check; it is opaque firmware bytes.
+      continue;
+    }
+
     uint8_t raw_bits[16] = {0};
     extract_primary_raw_bits(primary_id, raw_bits);
     uint64_t extracted_serial = 0;
     memcpy(&extracted_serial, raw_bits, sizeof(extracted_serial));
 
     EXPECT_EQ(serial_number, extracted_serial)
-        << "Serial number mismatch for device " << device_node;
+        << "Serial number mismatch for device " << amdcuid_id_to_string(device_handles_[i]);
 
     IF_VERB(1) {
-      printf("  Device [%s] serial: 0x%016llx (extracted: 0x%016llx)\n", device_node,
-             (unsigned long long)serial_number, (unsigned long long)extracted_serial);
+      printf("  Device [%s] serial: 0x%016llx (extracted: 0x%016llx)\n",
+             amdcuid_id_to_string(device_handles_[i]), (unsigned long long)serial_number,
+             (unsigned long long)extracted_serial);
     }
   }
 }
@@ -153,6 +187,12 @@ void TestReverseVendorId::Run() {
         device_handles_[i], AMDCUID_QUERY_PRIMARY_CUID, &primary_id, &length);
     EXPECT_EQ(status, AMDCUID_STATUS_SUCCESS);
 
+    if (!CuidUtilities::is_constructed(&primary_id)) {
+      // An adopted firmware UUID (e.g. a Platform's SMBIOS system UUID) carries
+      // no packed info to reverse-check; it is opaque firmware bytes.
+      continue;
+    }
+
     uint8_t raw_bits[16] = {0};
     extract_primary_raw_bits(primary_id, raw_bits);
     uint16_t extracted_vendor =
@@ -163,9 +203,13 @@ void TestReverseVendorId::Run() {
     status = amdcuid_query_device_property(device_handles_[i], AMDCUID_QUERY_VENDOR_ID,
                                            &queried_vendor, &length);
     EXPECT_EQ(status, AMDCUID_STATUS_SUCCESS);
-    EXPECT_EQ(extracted_vendor, queried_vendor) << "Vendor ID mismatch for device " << device_node;
+    EXPECT_EQ(extracted_vendor, queried_vendor)
+        << "Vendor ID mismatch for device " << amdcuid_id_to_string(device_handles_[i]);
 
-    IF_VERB(1) { printf("  Device [%s] vendor_id: 0x%04x\n", device_node, queried_vendor); }
+    IF_VERB(1) {
+      printf("  Device [%s] vendor_id: 0x%04x\n", amdcuid_id_to_string(device_handles_[i]),
+             queried_vendor);
+    }
   }
 }
 
@@ -197,6 +241,12 @@ void TestReverseDeviceId::Run() {
         device_handles_[i], AMDCUID_QUERY_PRIMARY_CUID, &primary_id, &length);
     EXPECT_EQ(status, AMDCUID_STATUS_SUCCESS);
 
+    if (!CuidUtilities::is_constructed(&primary_id)) {
+      // An adopted firmware UUID (e.g. a Platform's SMBIOS system UUID) carries
+      // no packed info to reverse-check; it is opaque firmware bytes.
+      continue;
+    }
+
     uint8_t raw_bits[16] = {0};
     extract_primary_raw_bits(primary_id, raw_bits);
     uint16_t extracted_device_id =
@@ -211,9 +261,12 @@ void TestReverseDeviceId::Run() {
     }
     EXPECT_EQ(status, AMDCUID_STATUS_SUCCESS);
     EXPECT_EQ(extracted_device_id, queried_device_id)
-        << "Device ID mismatch for device " << device_node;
+        << "Device ID mismatch for device " << amdcuid_id_to_string(device_handles_[i]);
 
-    IF_VERB(1) { printf("  Device [%s] device_id: 0x%04x\n", device_node, queried_device_id); }
+    IF_VERB(1) {
+      printf("  Device [%s] device_id: 0x%04x\n", amdcuid_id_to_string(device_handles_[i]),
+             queried_device_id);
+    }
   }
 }
 
@@ -245,11 +298,18 @@ void TestReverseRevisionId::Run() {
         device_handles_[i], AMDCUID_QUERY_PRIMARY_CUID, &primary_id, &length);
     EXPECT_EQ(status, AMDCUID_STATUS_SUCCESS);
 
+    if (!CuidUtilities::is_constructed(&primary_id)) {
+      // An adopted firmware UUID (e.g. a Platform's SMBIOS system UUID) carries
+      // no packed info to reverse-check; it is opaque firmware bytes.
+      continue;
+    }
+
     uint8_t raw_bits[16] = {0};
     extract_primary_raw_bits(primary_id, raw_bits);
-    uint16_t extracted_revision = static_cast<uint16_t>(raw_bits[9]);
+    uint8_t extracted_revision = raw_bits[9];
 
-    uint16_t queried_revision = 0;
+    // One octet, matching the property's contract.
+    uint8_t queried_revision = 0;
     length = sizeof(queried_revision);
     status = amdcuid_query_device_property(device_handles_[i], AMDCUID_QUERY_REVISION_ID,
                                            &queried_revision, &length);
@@ -258,9 +318,12 @@ void TestReverseRevisionId::Run() {
     }
     EXPECT_EQ(status, AMDCUID_STATUS_SUCCESS);
     EXPECT_EQ(extracted_revision, queried_revision)
-        << "Revision ID mismatch for device " << device_node;
+        << "Revision ID mismatch for device " << amdcuid_id_to_string(device_handles_[i]);
 
-    IF_VERB(1) { printf("  Device [%s] revision_id: 0x%04x\n", device_node, queried_revision); }
+    IF_VERB(1) {
+      printf("  Device [%s] revision_id: 0x%02x\n", amdcuid_id_to_string(device_handles_[i]),
+             queried_revision);
+    }
   }
 }
 
@@ -292,6 +355,12 @@ void TestReverseUnitId::Run() {
         device_handles_[i], AMDCUID_QUERY_PRIMARY_CUID, &primary_id, &length);
     EXPECT_EQ(status, AMDCUID_STATUS_SUCCESS);
 
+    if (!CuidUtilities::is_constructed(&primary_id)) {
+      // An adopted firmware UUID (e.g. a Platform's SMBIOS system UUID) carries
+      // no packed info to reverse-check; it is opaque firmware bytes.
+      continue;
+    }
+
     uint8_t raw_bits[16] = {0};
     extract_primary_raw_bits(primary_id, raw_bits);
     // unit_id is 13 bits: lower 8 in raw_bits[8], upper 5 in bits [4:0] of
@@ -307,9 +376,13 @@ void TestReverseUnitId::Run() {
       continue;
     }
     EXPECT_EQ(status, AMDCUID_STATUS_SUCCESS);
-    EXPECT_EQ(extracted_unit_id, queried_unit_id) << "Unit ID mismatch for device " << device_node;
+    EXPECT_EQ(extracted_unit_id, queried_unit_id)
+        << "Unit ID mismatch for device " << amdcuid_id_to_string(device_handles_[i]);
 
-    IF_VERB(1) { printf("  Device [%s] unit_id: 0x%04x\n", device_node, queried_unit_id); }
+    IF_VERB(1) {
+      printf("  Device [%s] unit_id: 0x%04x\n", amdcuid_id_to_string(device_handles_[i]),
+             queried_unit_id);
+    }
   }
 }
 
@@ -341,12 +414,19 @@ void TestReverseDeviceType::Run() {
         device_handles_[i], AMDCUID_QUERY_PRIMARY_CUID, &primary_id, &length);
     EXPECT_EQ(status, AMDCUID_STATUS_SUCCESS);
 
+    if (!CuidUtilities::is_constructed(&primary_id)) {
+      // An adopted firmware UUID (e.g. a Platform's SMBIOS system UUID) carries
+      // no packed info to reverse-check; it is opaque firmware bytes.
+      continue;
+    }
+
     uint8_t raw_bits[16] = {0};
     extract_primary_raw_bits(primary_id, raw_bits);
-    // device_type is 4 bits: bits [7:6] of raw_bits[14] hold bits [1:0],
-    // bits [7:6] of raw_bits[15] hold bits [3:2].
+    // device_type is 4 bits: bits [7:6] of raw_bits[14] hold bits [1:0]
+    // (payload 118:119), bits [1:0] of raw_bits[15] hold bits [3:2] (payload
+    // 120:121). This used to read raw_bits[15] bits [7:6], which is padding.
     uint8_t extracted_type =
-        static_cast<uint8_t>(((raw_bits[14] >> 6) & 0x3) | ((raw_bits[15] >> 4) & 0xC));
+        static_cast<uint8_t>(((raw_bits[14] >> 6) & 0x3) | ((raw_bits[15] << 2) & 0xC));
 
     amdcuid_device_type_t queried_type = AMDCUID_DEVICE_TYPE_NONE;
     length = sizeof(queried_type);
@@ -354,10 +434,11 @@ void TestReverseDeviceType::Run() {
                                            &queried_type, &length);
     EXPECT_EQ(status, AMDCUID_STATUS_SUCCESS);
     EXPECT_EQ(static_cast<amdcuid_device_type_t>(extracted_type), queried_type)
-        << "Device type mismatch for device " << device_node;
+        << "Device type mismatch for device " << amdcuid_id_to_string(device_handles_[i]);
 
     IF_VERB(1) {
-      printf("  Device [%s] device_type: %u\n", device_node, static_cast<unsigned>(queried_type));
+      printf("  Device [%s] device_type: %u\n", amdcuid_id_to_string(device_handles_[i]),
+             static_cast<unsigned>(queried_type));
     }
   }
 }
