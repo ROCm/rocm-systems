@@ -716,6 +716,13 @@ TEST(rocrtstFunc, VirtMemory_FabricExport_Readiness_Test) {
   RunCustomTestEpilog(&vmt);
 }
 
+TEST(rocrtstFunc, VirtMemory_Imported_Handle_Pointer_Info_Test) {
+  VirtMemoryTestBasic vmt;
+  if (!RunCustomTestProlog(&vmt)) return;
+  vmt.TestImportedHandlePointerInfo();
+  RunCustomTestEpilog(&vmt);
+}
+
 TEST(rocrtstFunc, Filter_Devices_Test) {
     FilterDevicesTest fd;
     if (!RunCustomTestProlog(&fd)) return;

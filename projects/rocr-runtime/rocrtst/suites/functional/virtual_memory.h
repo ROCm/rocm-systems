@@ -85,12 +85,16 @@ class VirtMemoryTestBasic : public TestBase {
 
   void TestFabricExportAcceleratorReadiness(void);
 
+  void TestImportedHandlePointerInfo(void);
+
   void TestGpuAccessToHostMemoryAllocation(void);
 
   void ImportedShareableHandleSetAccessAfterFdClose(void);
 
  private:
   void TestFabricExportAcceleratorReadiness(hsa_agent_t gpu_agent, hsa_amd_memory_pool_t pool);
+  void FabricImportedHandlePointerInfo(hsa_agent_t gpu_agent, hsa_amd_memory_pool_t pool);
+  void DmaBufImportedHandlePointerInfo(hsa_agent_t gpu_agent, hsa_amd_memory_pool_t pool);
   void TestCreateDestroy(hsa_agent_t agent, hsa_amd_memory_pool_t pool);
   void TestRefCount(hsa_agent_t agent, hsa_amd_memory_pool_t pool);
   void TestPartialMapping(hsa_agent_t agent, hsa_amd_memory_pool_t pool);
