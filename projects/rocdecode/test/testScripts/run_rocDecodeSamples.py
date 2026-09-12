@@ -19,13 +19,11 @@
 # THE SOFTWARE.
 
 from datetime import datetime
-from subprocess import Popen, PIPE
+from subprocess import Popen, PIPE, run
 import argparse
 import os
-import shutil
 import sys
 import platform
-import glob
 import pandas as pd
 from pathlib import Path
 
@@ -34,10 +32,22 @@ __version__ = "1.0"
 __status__ = "Shipping"
 
 
-def shell(cmd):
-    p = Popen(cmd, shell=True, stdout=PIPE, stderr=PIPE)
-    output = p.communicate()[0][0:-1]
-    return output
+def run_command(command):
+    try:
+        result = run(command, stdout=PIPE, stderr=PIPE, text=True, check=False)
+    except OSError as error:
+        return str(error)
+    return result.stdout.rstrip('\n')
+
+
+def run_and_tee(command, log_path):
+    with open(log_path, 'a') as outputLog:
+        with Popen(command, stdout=PIPE, text=True) as process:
+            for line in process.stdout:
+                sys.stdout.write(line)
+                sys.stdout.flush()
+                outputLog.write(line)
+        return process.returncode
 
 
 def write_formatted(output, f):
@@ -70,11 +80,9 @@ def print_bitrate(current_file):
     else:
         frame_rate = "n/a"
         bit_rate = "n/a"
-    orig_stdout = sys.stdout
-    sys.stdout = open(resultsPath+'/rocDecode_output.log', 'a')
-    print("Framerate: ", frame_rate)
-    print("Bitrate: ", bit_rate)
-    sys.stdout = orig_stdout
+    with open(outputLogPath, 'a') as outputLog:
+        print("Framerate: ", frame_rate, file=outputLog)
+        print("Bitrate: ", bit_rate, file=outputLog)
 
 # Import arguments
 parser = argparse.ArgumentParser()
@@ -143,7 +151,7 @@ else:
         resultsPath = resultsDir+'/rocDecode_videoDecodePerf_results'
 
 run_rocDecode_app = os.path.abspath(rocDecode_exe)
-os.system('(mkdir -p ' +  resultsPath + ')')
+os.makedirs(resultsPath, exist_ok=True)
 if(os.path.isfile(run_rocDecode_app)):
     print("STATUS: rocDecode path - "+run_rocDecode_app+"\n")
 else:
@@ -159,29 +167,40 @@ else:
     print("\nERROR: The input directory path is either for a file or directory does not exist!")
     exit()
 
-# Get cwd
-cwd = os.getcwd()
-if os.path.exists(resultsPath+'/rocDecode_output.log'):
-    os.remove(resultsPath+'/rocDecode_output.log')
+outputLogPath = os.path.join(resultsPath, 'rocDecode_output.log')
+resultsCsvPath = os.path.join(resultsPath, 'rocDecode_test_results.csv')
+if os.path.exists(outputLogPath):
+    os.remove(outputLogPath)
 
-if os.path.exists(resultsPath+'/rocDecode_test_results.csv'):
-    os.remove(resultsPath+'/rocDecode_test_results.csv')
+if os.path.exists(resultsCsvPath):
+    os.remove(resultsCsvPath)
 
 if sampleMode == 0:
     for current_file in iter_files(filesDirPath):
         print_bitrate(current_file)
 
-        os.system(run_rocDecode_app + ' -i ' + str(current_file) + ' -d ' + str(gpuDeviceID) + ' -f ' + str(maxNumFrames) + ' ' + str(bsReaderOption) + ' | tee -a '+resultsPath+'/rocDecode_output.log')
+        command = [
+            run_rocDecode_app,
+            '-i',
+            str(current_file),
+            '-d',
+            str(gpuDeviceID),
+            '-f',
+            str(maxNumFrames),
+        ]
+        if bsReaderOption:
+            command.append(bsReaderOption)
+        returnCode = run_and_tee(command, outputLogPath)
+        if returnCode != 0:
+            sys.exit(returnCode)
         print("\n\n")
 
     if checkDecStatus == 0:
-        orig_stdout = sys.stdout
-        sys.stdout = open(resultsPath+'/rocDecode_test_results.csv', 'a')
         echo_1 = 'File Name, Codec, Video Size, Bit Depth, Frame rate, Bit rate (Mb/s), Total Frames, Average decoding time per frame (ms), Avg FPS'
-        print(echo_1)
-        sys.stdout = orig_stdout
+        with open(resultsCsvPath, 'a') as resultsFile:
+            print(echo_1, file=resultsFile)
 
-        runAwk_csv = r'''awk '/Framerate: / {frameRate=$2; next}
+        awkProgram = r'''/Framerate: / {frameRate=$2; next}
                             /Bitrate: / {bitRate=$2; next}
                             /info: Input file: / {filename=$4; next}
                             /info: Using GPU device 0 - AMD Radeon Graphics[gfx1030] on PCI bus 0d:00.0/{next}
@@ -200,23 +219,39 @@ if sampleMode == 0:
                             /^$/{next}
                             /info: Total pictures decoded: / {totalFrames=$5; next}
                             /info: avg decoding time per picture: /{timePerFrame=$7; next}
-                            /info: avg decode FPS: / { printf("%s, %s, %s, %d, %s, %s, %d, %f, %f\n", filename, codec, videoSize, bitDepth, frameRate, bitRate, totalFrames, timePerFrame, $5) }' ''' + resultsPath + '''/rocDecode_output.log >> ''' + resultsPath + '''/rocDecode_test_results.csv'''
-        os.system(runAwk_csv)
+                            /info: avg decode FPS: / { printf("%s, %s, %s, %d, %s, %s, %d, %f, %f\n", filename, codec, videoSize, bitDepth, frameRate, bitRate, totalFrames, timePerFrame, $5) }'''
+        with open(resultsCsvPath, 'a') as resultsFile:
+            awkResult = run(
+                ['awk', awkProgram, outputLogPath],
+                stdout=resultsFile,
+                check=False,
+            )
+        if awkResult.returncode != 0:
+            sys.exit(awkResult.returncode)
 elif sampleMode == 1:
     for current_file in iter_files(filesDirPath):
         print_bitrate(current_file)
 
-        os.system(run_rocDecode_app+' -i '+str(current_file)+' -t '+str(numThreads)+' -f '+str(maxNumFrames)+' | tee -a '+resultsPath+'/rocDecode_output.log')
+        command = [
+            run_rocDecode_app,
+            '-i',
+            str(current_file),
+            '-t',
+            str(numThreads),
+            '-f',
+            str(maxNumFrames),
+        ]
+        returnCode = run_and_tee(command, outputLogPath)
+        if returnCode != 0:
+            sys.exit(returnCode)
         print("\n\n")
 
     if checkDecStatus == 0:
-        orig_stdout = sys.stdout
-        sys.stdout = open(resultsPath+'/rocDecode_test_results.csv', 'a')
         echo_1 = 'File Name, Num Threads, Codec, Video Size, Bit Depth, Frame rate, Bit rate (Mb/s), Total Frames, Average decoding time per frame (ms), Avg FPS'
-        print(echo_1)
-        sys.stdout = orig_stdout
+        with open(resultsCsvPath, 'a') as resultsFile:
+            print(echo_1, file=resultsFile)
 
-        runAwk_csv = r'''awk '/Framerate: / {frameRate=$2; next}
+        awkProgram = r'''/Framerate: / {frameRate=$2; next}
                             /Bitrate: / {bitRate=$2; next}
                             /info: Input file: / {filename=$4; next}
                             /info: Number of threads: / {numThreads=$5; next}
@@ -236,29 +271,36 @@ elif sampleMode == 1:
                             /^$/{next}
                             /info: Total pictures decoded: / {totalFrames=$5; next}
                             /info: avg decoding time per picture: /{timePerFrame=$7; next}
-                            /info: avg decode FPS: / { printf("%s, %d, %s, %s, %d, %s, %s, %d, %f, %f\n", filename, numThreads, codec, videoSize, bitDepth, frameRate, bitRate, totalFrames, timePerFrame, $5) }' ''' + resultsPath + '''/rocDecode_output.log >> ''' + resultsPath + '''/rocDecode_test_results.csv'''
-        os.system(runAwk_csv)
+                            /info: avg decode FPS: / { printf("%s, %d, %s, %s, %d, %s, %s, %d, %f, %f\n", filename, numThreads, codec, videoSize, bitDepth, frameRate, bitRate, totalFrames, timePerFrame, $5) }'''
+        with open(resultsCsvPath, 'a') as resultsFile:
+            awkResult = run(
+                ['awk', awkProgram, outputLogPath],
+                stdout=resultsFile,
+                check=False,
+            )
+        if awkResult.returncode != 0:
+            sys.exit(awkResult.returncode)
 
 # get data
 if checkDecStatus == 0:
     platform_name = platform.platform()
-    platform_name_fq = shell('hostname --all-fqdns')
-    platform_ip = shell('hostname -I')[0:-1]  # extra trailing space
+    platform_name_fq = run_command(['hostname', '--all-fqdns'])
+    platform_ip = run_command(['hostname', '-I']).rstrip()
 
     file_dtstr = datetime.now().strftime("%Y%m%d")
     reportFilename = 'rocDecode_report_%s_%s.md' % (platform_name, file_dtstr)
     report_dtstr = datetime.now().strftime("%Y-%m-%d %H:%M:%S %Z")
-    sys_info = shell('inxi -c0 -S')
-    cpu_info = shell('inxi -c0 -C')
-    gpu_info = shell('inxi -c0 -G')
-    memory_info = shell('inxi -c 0 -m')
-    board_info = shell('inxi -c0 -M')
+    sys_info = run_command(['inxi', '-c0', '-S'])
+    cpu_info = run_command(['inxi', '-c0', '-C'])
+    gpu_info = run_command(['inxi', '-c0', '-G'])
+    memory_info = run_command(['inxi', '-c', '0', '-m'])
+    board_info = run_command(['inxi', '-c0', '-M'])
 
-    lib_tree = shell('ldd '+run_rocDecode_app)
+    lib_tree = run_command(['ldd', run_rocDecode_app])
     lib_tree = strip_libtree_addresses(lib_tree)
 
     # Load the data
-    df = pd.read_csv(resultsPath+'/rocDecode_test_results.csv')
+    df = pd.read_csv(resultsCsvPath)
     # Generate the markdown table
     print(df.to_markdown(index=False))
 
@@ -307,7 +349,7 @@ else:
     decodeEndString = 'info: Total pictures decoded:'
     numFiles = 0
     numDecodedStreams = 0
-    with open(resultsPath + '/rocDecode_output.log', 'r') as logFile:
+    with open(outputLogPath, 'r') as logFile:
         line = logFile.readline()
         while line:
             if line.find(fileString) != -1:
