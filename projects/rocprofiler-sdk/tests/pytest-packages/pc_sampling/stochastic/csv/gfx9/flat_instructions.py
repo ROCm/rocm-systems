@@ -51,7 +51,7 @@ def validate_flat_instructions_issued(samples_issued):
 def validate_flat_instructions_stalled(samples):
     global_flat_regex = r"^(global|flat)_"
     flat_samples = samples[samples["Instruction"].str.match(global_flat_regex)]
-    flat_stalled = flat_samples[flat_samples["Wave_Issued_Instruction"] == False]
+    flat_stalled = flat_samples[flat_samples["Wave_Issued_Instruction"] is False]
 
     assert (
         flat_stalled["Stall_Reason"]

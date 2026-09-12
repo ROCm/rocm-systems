@@ -12,12 +12,11 @@
 import argparse
 import sys
 from pathlib import Path
-
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "perf-common"))
-
 from perf_cost_model import max_launch_scaling_ratio, model_max_ms
 from perf_stats import check_ceiling, repeat_measure, write_results
 from run_and_validate import run_case
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "perf-common"))
 
 
 def main() -> int:

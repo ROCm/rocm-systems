@@ -47,7 +47,7 @@ def validate_valu_instructions_stalled(samples):
     valu_samples = samples[
         samples["Instruction"].apply(lambda x: x.startswith("v_") and ("mfma" not in x))
     ]
-    valu_stalled = valu_samples[valu_samples["Wave_Issued_Instruction"] == False]
+    valu_stalled = valu_samples[valu_samples["Wave_Issued_Instruction"] is False]
 
     assert (
         valu_stalled["Stall_Reason"]

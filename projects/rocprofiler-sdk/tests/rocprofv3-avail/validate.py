@@ -33,8 +33,6 @@ def test_validate_metrics(rocm_path):
 
     from rocprofv3 import avail
 
-    lib = avail.get_library()
-
     agent_counters_dict = avail.get_counters()
     for agent, counters in agent_counters_dict.items():
         for counter in counters:
@@ -58,15 +56,13 @@ def test_validate_list_pc_sample_config(rocm_path):
 
     from rocprofv3 import avail
 
-    lib = avail.get_library()
-
     pc_sample_configs_dict = avail.get_pc_sample_configs()
     for agent, configs in pc_sample_configs_dict.items():
         for config in configs:
             assert config.method != ""
             assert config.unit != ""
-            assert isinstance(config.max_interval, ctypes.c_ulong) == True
-            assert isinstance(config.min_interval, ctypes.c_ulong) == True
+            assert isinstance(config.max_interval, ctypes.c_ulong) is True
+            assert isinstance(config.min_interval, ctypes.c_ulong) is True
             if config.method == "stochastic":
                 assert config.flags.value == 1
             elif config.method == "host_trap":
@@ -83,28 +79,26 @@ def test_counter_set(capsys, rocm_path):
 
         counter_names = []
         for counter_id in counter_ids:
-            counter = get_counter_info(counter_id)
+            counter = avail.get_counter_info(counter_id)
             if counter.counter_handle == counter_id:
                 counter_names.append(counter.name)
         return counter_names
 
     def get_agent_name(agent_id):
-        agent_info_map = get_agent_info_map()
+        agent_info_map = avail.get_agent_info_map()
         for agent, info in agent_info_map.items():
             if agent == agent_id:
                 return info["name"]
 
-    lib = avail.get_library()
     agent_counters = avail.get_counters()
-    pmc_input_1 = []
 
     for agent, counters in agent_counters.items():
         counter_ids = []
         for counter in counters:
             counter_ids.append(counter.counter_handle)
         input = {agent: [counter_ids[0]]}
-        assert avail.check_pmc(input) == True
-        with pytest.raises(SystemExit) as excinfo:
+        assert avail.check_pmc(input) is True
+        with pytest.raises(SystemExit):
             input = {agent: counter_ids}
             avail.check_pmc(input)
             output = capsys.readouterr()

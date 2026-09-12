@@ -23,7 +23,6 @@
 
 from __future__ import absolute_import
 
-import numpy as np
 import pandas as pd
 
 from .s_instructions import validate_s_instructions
@@ -100,7 +99,7 @@ def validate_stochastic_samples_csv(df: pd.DataFrame):
 
     # validating issued instructions for uncovered types
     valid_samples_issued = valid_samples[
-        valid_samples["Wave_Issued_Instruction"] == True
+        valid_samples["Wave_Issued_Instruction"] is True
     ].copy()
     validate_issued_instruction_type_no_inst(valid_samples_issued)
     validate_issued_instruction_type_other(valid_samples_issued)
