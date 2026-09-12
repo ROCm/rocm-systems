@@ -4792,6 +4792,12 @@ bool VirtualGPU::submitKernelInternal(const amd::NDRangeContainer& sizes, const 
               return false;
             }
             WriteAqlArgAt(hidden_arguments, buffer, it.size_, it.offset_);
+          } else if (HIP_HOSTCALL_ALLOW_MISSING) {
+            // Opted in: the kernel declares the buffer (printf/assert linked) but this
+            // device cannot provide one. Pass a null buffer instead of refusing: a kernel
+            // that never executes a hostcall runs; one that does will fault on the device.
+            const uintptr_t null_buffer = 0;
+            WriteAqlArgAt(hidden_arguments, null_buffer, it.size_, it.offset_);
           } else {
             LogError("Pcie atomics not enabled, hostcall not supported");
             return false;

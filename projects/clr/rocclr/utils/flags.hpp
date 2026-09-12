@@ -188,6 +188,8 @@ release(bool, ROC_SYSTEM_SCOPE_SIGNAL, true,                                  \
         "Enable system scope for signals (uses interrupts).")                 \
 release(bool, GPU_FORCE_QUEUE_PROFILING, false,                               \
         "Force command queue profiling by default")                           \
+release(bool, HIP_HOSTCALL_ALLOW_MISSING, false,                              \
+        "Dispatch a kernel that declares a hostcall buffer on a device without PCIe atomics anyway, with a null buffer; a hostcall from it will fault") \
 release(bool, HIP_MEM_POOL_SUPPORT, true,                                     \
         "Enables memory pool support in HIP")                                 \
 release(bool, HIP_MEM_POOL_USE_VM, true,                                      \
