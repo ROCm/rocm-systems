@@ -1116,6 +1116,11 @@ int KFDNode::Initialize(void) {
   uint64_t node_to_gpu_id;
   std::shared_ptr<IOLink> link;
   bool numa_node_found = false;
+  // init numa info to invalid value as sentinels
+  numa_node_number_ = kInvalidNumaNode;
+  numa_node_weight_ = kInvalidNumaNodeWeight;
+  numa_node_type_ = IOLINK_TYPE_UNDEFINED;
+
   for (it = io_link_map_tmp.begin(); it != io_link_map_tmp.end(); it++) {
     io_link_map_[it->first] = it->second;
     node_to = it->first;

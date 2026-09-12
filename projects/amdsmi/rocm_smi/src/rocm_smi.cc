@@ -1992,6 +1992,9 @@ static rsmi_status_t topo_get_numa_node_number(uint32_t dv_ind, uint32_t* numa_n
       GET_DEV_AND_KFDNODE_FROM_INDX
 
           * numa_node_number = kfd_node->numa_node_number();
+  if (*numa_node_number == amd::smi::kInvalidNumaNode) {
+    return RSMI_STATUS_NOT_SUPPORTED;
+  }
 
   return RSMI_STATUS_SUCCESS;
   CATCH
@@ -2003,6 +2006,9 @@ static rsmi_status_t topo_get_numa_node_weight(uint32_t dv_ind, uint64_t* weight
       GET_DEV_AND_KFDNODE_FROM_INDX
 
           * weight = kfd_node->numa_node_weight();
+  if (*weight == amd::smi::kInvalidNumaNodeWeight) {
+    return RSMI_STATUS_NOT_SUPPORTED;
+  }
 
   return RSMI_STATUS_SUCCESS;
   CATCH
@@ -5452,12 +5458,10 @@ rsmi_status_t rsmi_topo_get_link_weight(uint32_t dv_ind_src, uint32_t dv_ind_dst
           }
           status = RSMI_STATUS_SUCCESS;
         } else {
-          assert(false);  // Error to read numa node number
-          status = RSMI_STATUS_INIT_ERROR;
+          status = RSMI_STATUS_NOT_SUPPORTED;
         }
       } else {
-        assert(false);  // Error to read numa node weight
-        status = RSMI_STATUS_INIT_ERROR;
+        status = RSMI_STATUS_NOT_SUPPORTED;
       }
     } else {
       status = RSMI_STATUS_NOT_SUPPORTED;
@@ -5531,7 +5535,7 @@ rsmi_status_t rsmi_topo_get_link_type(uint32_t dv_ind_src, uint32_t dv_ind_dst, 
   // handle the link type for CPU
   if (dv_ind_dst == CPU_NODE_INDEX) {
     // No CPU connected
-    if (kfd_node->numa_node_weight() == 0) {
+    if (kfd_node->numa_node_weight() == amd::smi::kInvalidNumaNodeWeight) {
       return RSMI_STATUS_NOT_SUPPORTED;
     }
     amd::smi::IO_LINK_TYPE io_link_type = kfd_node->numa_node_type();
