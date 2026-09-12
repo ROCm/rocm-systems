@@ -27,6 +27,17 @@ enum class MemoryRoute : uint8_t {
   LOCAL,   ///< Local data share.
 };
 
+/// @brief Address space named by the decoded instruction, before routing or
+///        per-lane aperture resolution.
+enum class DecodedMemorySpace : uint8_t {
+  UNKNOWN, ///< The instruction family does not identify a supported space.
+  SCALAR,  ///< Scalar memory (SMEM).
+  GLOBAL,  ///< Explicit global or buffer memory.
+  LOCAL,   ///< Explicit local data share (DS).
+  SCRATCH, ///< Explicit scratch/private memory.
+  FLAT,    ///< Generic FLAT memory, resolved through the apertures.
+};
+
 /// @brief Report name for a route. Stable; consumers key output on it.
 constexpr const char *memory_route_name(MemoryRoute route) {
   switch (route) {
@@ -37,6 +48,26 @@ constexpr const char *memory_route_name(MemoryRoute route) {
   case MemoryRoute::LOCAL:
     return "local";
   case MemoryRoute::UNKNOWN:
+    break;
+  }
+  return "unknown";
+}
+
+/// @brief Report name for a decoded address space. Stable; consumers key
+///        diagnostics on it.
+constexpr const char *decoded_memory_space_name(DecodedMemorySpace space) {
+  switch (space) {
+  case DecodedMemorySpace::SCALAR:
+    return "scalar";
+  case DecodedMemorySpace::GLOBAL:
+    return "global";
+  case DecodedMemorySpace::LOCAL:
+    return "local";
+  case DecodedMemorySpace::SCRATCH:
+    return "scratch";
+  case DecodedMemorySpace::FLAT:
+    return "flat";
+  case DecodedMemorySpace::UNKNOWN:
     break;
   }
   return "unknown";
@@ -55,9 +86,9 @@ constexpr const char *memory_route_name(MemoryRoute route) {
 /// a lane whose address could not be resolved, a route with no pipeline --
 /// it is reported as such rather than filled in.
 ///
-/// The spans point into the instruction's own state and are valid only for
-/// the duration of the callback. A consumer that keeps an observation must
-/// copy them.
+/// The spans borrow execution-owned storage and are valid only for the
+/// duration of the callback. A consumer that keeps an observation must copy
+/// them.
 struct MemoryAccessObservation {
   /// @brief Instruction mnemonic; points at static storage.
   std::string_view mnemonic;
@@ -75,6 +106,13 @@ struct MemoryAccessObservation {
   /// its default and means nothing; only the identity above and the mnemonic
   /// describe the instruction. Check this before reading anything else.
   MemoryRoute route = MemoryRoute::UNKNOWN;
+  /// @brief Address space named by the decoded instruction.
+  ///
+  /// @details This is intentionally independent of @ref route. A FLAT access
+  /// remains FLAT here after an aperture check routes it to GLOBAL or LOCAL;
+  /// an explicit SCRATCH access remains distinguishable from FLAT lanes that
+  /// resolved to scratch.
+  DecodedMemorySpace decoded_space = DecodedMemorySpace::UNKNOWN;
   /// @brief Whether a FLAT access was rewritten from global into LDS.
   ///
   /// @details True only for the aperture case: the instruction decoded as
@@ -118,6 +156,14 @@ struct MemoryAccessObservation {
   /// @details Normally a snapshot of EXEC, but an ISA exception may replace it:
   /// a CDNA5 DS transpose load issues with every lane regardless of EXEC.
   uint64_t active_lane_mask = 0;
+  /// @brief The architectural EXEC mask before an instruction-specific
+  ///        all-lane execution rule was applied.
+  ///
+  /// @details This normally equals @ref active_lane_mask. It differs for ISA
+  /// operations such as CDNA5 transpose loads that execute with more lanes
+  /// than the incoming EXEC mask selects. It is always limited to
+  /// @ref wavefront_size lanes.
+  uint64_t architectural_exec_lane_mask = 0;
   /// @brief Lanes whose address resolved to something the memory system can
   ///        use. A lane that is active but not valid went out of bounds or
   ///        through an unmapped aperture.
@@ -133,6 +179,25 @@ struct MemoryAccessObservation {
   ///        @ref scratch_element_stride_bytes. A FLAT wave can mix these with
   ///        global lanes.
   uint64_t scratch_lane_mask = 0;
+  /// @brief Requesting FLAT lanes whose original addresses resolve to LDS.
+  ///
+  /// @details Computed before routing rewrites any address. This remains
+  /// meaningful when a FLAT wave mixes LDS and non-LDS lanes even though the
+  /// simulator currently selects one pipeline for the whole instruction. It
+  /// is a subset of @ref request_lane_mask, disjoint from
+  /// @ref scratch_lane_mask and @ref flat_dds_lane_mask, and always zero for
+  /// non-FLAT instructions.
+  uint64_t flat_local_lane_mask = 0;
+  /// @brief Requesting FLAT lanes whose original addresses resolve to DDS.
+  ///
+  /// @details GFX1250 splits its 4-GiB shared aperture at offset bit 31: the
+  /// lower half is LDS and the upper half is direct data share (DDS). FFM
+  /// reports both as LDS resources, but rejects DDS stores and atomics. This
+  /// mask preserves that distinction after RocJITsu routes both halves to the
+  /// local pipeline. It is a subset of @ref request_lane_mask, disjoint from
+  /// @ref scratch_lane_mask and @ref flat_local_lane_mask, and always zero for
+  /// non-FLAT instructions.
+  uint64_t flat_dds_lane_mask = 0;
   /// @brief Byte stride between consecutive elements of a scratch lane. Zero
   ///        when the access is contiguous, which every non-scratch access is.
   ///
@@ -156,6 +221,16 @@ struct MemoryAccessObservation {
   ///
   /// @details Only entries selected by @ref valid_lane_mask are meaningful.
   std::span<const uint64_t> addresses;
+  /// @brief Addresses before routing changed them, when it did.
+  ///
+  /// @details Empty when routing preserved every address. Otherwise it has
+  /// @ref wavefront_size entries corresponding one-for-one with @ref
+  /// addresses; only entries selected by @ref valid_lane_mask are meaningful.
+  /// The span is borrowed for the callback just like @ref addresses. A FLAT
+  /// access rewritten through the shared aperture uses this to retain the
+  /// original aperture addresses while @ref addresses reports the effective
+  /// LDS allocation addresses.
+  std::span<const uint64_t> pre_routing_addresses;
   /// @brief Per-element lane validity, when an access has narrower bounds for
   ///        later elements than for earlier ones. Empty means every element
   ///        uses @ref valid_lane_mask.

@@ -43,6 +43,7 @@
 #include "rocjitsu/isa/instruction.h"
 #include "rocjitsu/kmd/linux/kfd_process.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
+#include "rocjitsu/vm/amdgpu/dispatch_entry.h"
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"
 #include "rocjitsu/vm/amdgpu/l2_cache.h"
 #include "rocjitsu/vm/amdgpu/lds.h"
@@ -172,8 +173,9 @@ constexpr uint64_t kPartialExecMask = 0xA5A5'F0F0'1234'8001ULL;
 
 class TestMemoryInstruction : public Instruction {
 public:
-  explicit TestMemoryInstruction(std::unique_ptr<DynamicInstState> state)
-      : Instruction("test_mem", nullptr) {
+  explicit TestMemoryInstruction(std::unique_ptr<DynamicInstState> state,
+                                 std::string_view mnemonic = "test_mem")
+      : Instruction(mnemonic, nullptr) {
     flags_ |= MEMORY_OP;
     set_data(std::move(state));
   }
@@ -248,6 +250,12 @@ struct HookEvent {
   std::string mnemonic;
   std::string kernel_name;
   std::string kernel_symbol;
+  uint32_t lds_size_bytes = 0;
+  uint32_t wave_size = 0;
+  rj_code_target_id_t code_target = ROCJITSU_CODE_TARGET_INVALID;
+  uint32_t cluster_size_x = 0;
+  uint32_t cluster_size_y = 0;
+  uint32_t cluster_size_z = 0;
 };
 
 /// @brief One routed access, copied out of the callback's borrowed spans.
@@ -261,6 +269,7 @@ struct CapturedAccess {
   uint32_t process_id = 0;
   uint32_t queue_id = 0;
   MemoryRoute route = MemoryRoute::UNKNOWN;
+  DecodedMemorySpace decoded_space = DecodedMemorySpace::UNKNOWN;
   bool normalized_to_local = false;
   bool is_load = true;
   AtomicOp atomic_op = AtomicOp::NONE;
@@ -273,15 +282,19 @@ struct CapturedAccess {
   uint32_t elements_per_lane = 0;
   uint64_t bytes_per_lane = 0;
   uint64_t active_lane_mask = 0;
+  uint64_t architectural_exec_lane_mask = 0;
   uint64_t valid_lane_mask = 0;
   uint64_t request_lane_mask = 0;
   uint64_t inactive_lane_mask = 0;
   uint64_t unknown_lane_mask = 0;
   uint64_t scratch_lane_mask = 0;
+  uint64_t flat_local_lane_mask = 0;
+  uint64_t flat_dds_lane_mask = 0;
   uint32_t scratch_element_stride_bytes = 0;
   bool non_temporal = false;
   std::vector<uint64_t> element_lane_masks;
   std::vector<uint64_t> addresses;
+  std::vector<uint64_t> pre_routing_addresses;
   std::vector<uint64_t> secondary_addresses;
 };
 
@@ -292,8 +305,8 @@ public:
   /// @param wants_hook What observes_memory_routing() answers. False models a
   ///        plugin that implements the hook but never opts in, which must
   ///        receive nothing.
-  explicit MemoryObservationPlugin(bool wants_hook = true)
-      : ExecutionPlugin("memory_observation"), wants_hook_(wants_hook) {}
+  explicit MemoryObservationPlugin(bool wants_hook = true, std::string name = "memory_observation")
+      : ExecutionPlugin(std::move(name)), wants_hook_(wants_hook) {}
 
   bool observes_memory_routing() const override { return wants_hook_; }
 
@@ -320,6 +333,7 @@ public:
     captured.process_id = access.process_id;
     captured.queue_id = access.queue_id;
     captured.route = access.route;
+    captured.decoded_space = access.decoded_space;
     captured.normalized_to_local = access.normalized_to_local;
     captured.is_load = access.is_load;
     captured.atomic_op = access.atomic_op;
@@ -332,16 +346,21 @@ public:
     captured.elements_per_lane = access.elements_per_lane;
     captured.bytes_per_lane = access.bytes_per_lane();
     captured.active_lane_mask = access.active_lane_mask;
+    captured.architectural_exec_lane_mask = access.architectural_exec_lane_mask;
     captured.valid_lane_mask = access.valid_lane_mask;
     captured.request_lane_mask = access.request_lane_mask;
     captured.inactive_lane_mask = access.inactive_lane_mask();
     captured.unknown_lane_mask = access.unknown_lane_mask();
     captured.scratch_lane_mask = access.scratch_lane_mask;
+    captured.flat_local_lane_mask = access.flat_local_lane_mask;
+    captured.flat_dds_lane_mask = access.flat_dds_lane_mask;
     captured.scratch_element_stride_bytes = access.scratch_element_stride_bytes;
     captured.non_temporal = access.non_temporal;
     captured.element_lane_masks.assign(access.element_lane_masks.begin(),
                                        access.element_lane_masks.end());
     captured.addresses.assign(access.addresses.begin(), access.addresses.end());
+    captured.pre_routing_addresses.assign(access.pre_routing_addresses.begin(),
+                                          access.pre_routing_addresses.end());
     captured.secondary_addresses.assign(access.secondary_addresses.begin(),
                                         access.secondary_addresses.end());
     accesses.push_back(std::move(captured));
@@ -369,6 +388,12 @@ public:
     e.dispatch_id = info.dispatch_id;
     e.kernel_name = info.kernel_name;
     e.kernel_symbol = info.kernel_symbol;
+    e.lds_size_bytes = info.lds_size_bytes;
+    e.wave_size = info.wave_size;
+    e.code_target = info.code_target;
+    e.cluster_size_x = info.cluster_size_x;
+    e.cluster_size_y = info.cluster_size_y;
+    e.cluster_size_z = info.cluster_size_z;
     events.push_back(e);
   }
 
@@ -1046,7 +1071,8 @@ struct PluginFixture {
   amdgpu::CommandProcessor *cp() { return soc->xcd(0)->command_processor(); }
 
   uint64_t write_kernel(uint64_t addr, const uint32_t *code, size_t num_words,
-                        uint32_t granulated_sgpr_count = 12) {
+                        uint32_t granulated_sgpr_count = 12,
+                        uint32_t group_segment_fixed_size = 0) {
     using namespace rocr::llvm::amdhsa;
     kernel_descriptor_t kd{};
     kd.kernel_code_entry_byte_offset = sizeof(kernel_descriptor_t);
@@ -1054,6 +1080,7 @@ struct PluginFixture {
     AMDHSA_BITS_SET(kd.compute_pgm_rsrc1, COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT,
                     granulated_sgpr_count);
     AMDHSA_BITS_SET(kd.compute_pgm_rsrc2, COMPUTE_PGM_RSRC2_USER_SGPR_COUNT, 2);
+    kd.group_segment_fixed_size = group_segment_fixed_size;
     mem->load_image(reinterpret_cast<const uint8_t *>(&kd), sizeof(kd), addr);
     mem->load_image(reinterpret_cast<const uint8_t *>(code), num_words * 4,
                     addr + sizeof(kernel_descriptor_t));
@@ -1324,6 +1351,48 @@ TEST(ExecutionPluginTest, NoPluginNoCrash) {
   PluginFixture f;
   const uint32_t code[] = {S_NOP, S_ENDPGM};
   f.run_kernel(code, 2);
+}
+
+TEST(ExecutionPluginTest, DispatchPacketCarriesExecutionShapeAndTargetMetadata) {
+  PluginFixture fixture(/*num_wf_slots=*/16, /*arch=*/"cdna5", /*wavefront_size=*/32,
+                        /*sgprs_per_wf=*/128);
+  auto *plugin = fixture.attach_ordering_plugin();
+
+  constexpr uint32_t kCdna5Endpgm = 0xBFB00000u;
+  constexpr uint32_t kStaticLdsBytes = 1537;
+  constexpr uint32_t kDynamicLdsBytes = 2049;
+  const uint64_t kernel_object =
+      fixture.write_kernel(0x1000, &kCdna5Endpgm, 1, /*granulated_sgpr_count=*/15, kStaticLdsBytes);
+
+  amdgpu::AmdExtKernelDispatchPacket packet{};
+  packet.header = HSA_PACKET_TYPE_VENDOR_SPECIFIC;
+  packet.amd_format = amdgpu::kHsaAmdPacketTypeExtKernelDispatch;
+  packet.setup = 3;
+  packet.workgroup_size_x = 32;
+  packet.workgroup_size_y = 1;
+  packet.workgroup_size_z = 1;
+  packet.cluster_count_x = 1;
+  packet.cluster_count_y = 1;
+  packet.cluster_count_z = 1;
+  packet.cluster_size_x = 2;
+  packet.cluster_size_y = 2;
+  packet.cluster_size_z = 2;
+  packet.group_segment_size = kDynamicLdsBytes;
+  packet.kernel_object = kernel_object;
+  test::AqlQueue queue(fixture.mem, fixture.cp());
+  queue.submit(packet);
+  ASSERT_NO_THROW(fixture.run_until_idle());
+
+  auto dispatch = std::find_if(plugin->events.begin(), plugin->events.end(), [](const auto &event) {
+    return event.kind == HookEvent::DISPATCH_PACKET_PROCESSED;
+  });
+  ASSERT_NE(dispatch, plugin->events.end());
+  EXPECT_EQ(dispatch->lds_size_bytes, kDynamicLdsBytes);
+  EXPECT_EQ(dispatch->wave_size, 32u);
+  EXPECT_EQ(dispatch->code_target, ROCJITSU_CODE_TARGET_GFX1250);
+  EXPECT_EQ(dispatch->cluster_size_x, 2u);
+  EXPECT_EQ(dispatch->cluster_size_y, 2u);
+  EXPECT_EQ(dispatch->cluster_size_z, 2u);
 }
 
 class ThroughputTestInstruction final : public Instruction {
@@ -1656,6 +1725,44 @@ TEST(ExecutionPluginTest, InfrequentHooksSerializeAtGroupBoundary) {
   EXPECT_TRUE(result.first_entered);
   EXPECT_FALSE(result.overlap_observed);
   EXPECT_EQ(probe_ptr->cold_probe().max_active(), 1);
+}
+
+TEST(ExecutionPluginTest, MultiXcdBeginClaimCannotOutrunPublication) {
+  ExecutionPluginGroup group(PluginSinkConfig{});
+  auto recorder = std::make_unique<OrderingPlugin>();
+  auto *recorder_ptr = recorder.get();
+  ASSERT_TRUE(group.add(std::move(recorder)));
+
+  constexpr uint32_t kDispatchId = 97;
+  amdgpu::GridCompletion grid;
+  OverlapProbe claim_probe;
+  const auto publish_begin = [&]() {
+    group.onAmdgpuDispatchExecutionBeginOnce(kDispatchId, [&]() {
+      // Hold the winning XCD between entering the claim path and publishing
+      // begin. A peer must stop at the group lock rather than run this claim or
+      // its first workgroup callback in the gap.
+      claim_probe.observe();
+      return grid.claim_execution_begin();
+    });
+  };
+
+  const auto result =
+      run_staged_callbacks(claim_probe, std::chrono::milliseconds(20), publish_begin, [&]() {
+        publish_begin();
+        group.onAmdgpuWorkgroupDispatched(kDispatchId, /*wg_id=*/1,
+                                          /*physical_vgpr_count=*/0,
+                                          /*physical_sgpr_count=*/0,
+                                          std::span<amdgpu::Wavefront *>{});
+      });
+
+  EXPECT_TRUE(result.first_entered);
+  EXPECT_FALSE(result.overlap_observed);
+  EXPECT_EQ(claim_probe.max_active(), 1);
+  ASSERT_EQ(recorder_ptr->events.size(), 2u);
+  EXPECT_EQ(recorder_ptr->events[0].kind, HookEvent::DISPATCH_EXECUTION_BEGIN);
+  EXPECT_EQ(recorder_ptr->events[0].dispatch_id, kDispatchId);
+  EXPECT_EQ(recorder_ptr->events[1].kind, HookEvent::WORKGROUP_DISPATCHED);
+  EXPECT_EQ(recorder_ptr->events[1].dispatch_id, kDispatchId);
 }
 
 TEST(ExecutionPluginTest, HighFrequencyHooksRunConcurrentlyByDefault) {
@@ -4187,6 +4294,34 @@ TEST(HookOrderingTest, FiveDispatchLifecycle) {
   }
 }
 
+TEST(HookOrderingTest, NonKernelQueueEntriesDoNotEmitDispatchLifecycleHooks) {
+  PluginFixture f(/*num_wf_slots=*/1);
+  auto *p = f.attach_ordering_plugin();
+
+  const uint32_t code[] = {S_ENDPGM};
+  const uint64_t kernel_object = f.write_kernel(0x1000, code, std::size(code));
+
+  test::AqlQueue queue(f.mem, f.cp());
+  queue.barrier_and();
+  queue.pm4_ib();
+  queue.dispatch(kernel_object, /*grid_size_x=*/64);
+  f.run_until_idle();
+  f.shutdown();
+
+  EventLog log(p->events);
+  const auto dispatches = log.dispatchIds();
+  ASSERT_EQ(dispatches.size(), 1u);
+  const uint32_t kernel_dispatch_id = dispatches.front();
+
+  EXPECT_EQ(log.count(HookEvent::DISPATCH_EXECUTION_BEGIN), 1u);
+  EXPECT_EQ(log.count(HookEvent::DISPATCH_EXECUTION_END), 1u);
+  EXPECT_EQ(log.count(HookEvent::DISPATCH_EXECUTION_BEGIN, kernel_dispatch_id), 1u);
+  EXPECT_EQ(log.count(HookEvent::DISPATCH_EXECUTION_END, kernel_dispatch_id), 1u);
+
+  const std::set<uint32_t> expected_ids{kernel_dispatch_id};
+  EXPECT_EQ(log.allDispatchIds(), expected_ids);
+}
+
 TEST(HookOrderingTest, ParallelWorkgroupLifecycleRunsOnCommandProcessorAfterWorkersRejoin) {
   PluginFixture f(/*num_wf_slots=*/2, "cdna4", /*wavefront_size=*/64,
                   /*sgprs_per_wf=*/104, /*vgprs_per_wf=*/256, /*num_cus=*/2);
@@ -4685,6 +4820,8 @@ TEST(RoutedMemoryObservationTest, AScalarAccessCarriesItsFullIdentity) {
   // is indistinguishable.
   EXPECT_EQ(access.process_id, 9u);
   EXPECT_EQ(access.route, MemoryRoute::SCALAR);
+  EXPECT_EQ(access.decoded_space, DecodedMemorySpace::SCALAR);
+  EXPECT_EQ(std::string(decoded_memory_space_name(access.decoded_space)), "scalar");
   EXPECT_EQ(access.wait_counter, WaitCounterType::LGKMCNT);
   EXPECT_TRUE(access.is_load);
   // A scalar access is one address, reported as a one-lane wavefront so that
@@ -4697,6 +4834,7 @@ TEST(RoutedMemoryObservationTest, AScalarAccessCarriesItsFullIdentity) {
   EXPECT_EQ(access.bytes_per_lane, 16u);
   ASSERT_EQ(access.addresses.size(), 1u);
   EXPECT_EQ(access.addresses[0], 0x4000u);
+  EXPECT_TRUE(access.pre_routing_addresses.empty());
 }
 
 TEST(RoutedMemoryObservationTest, AFlatAccessToTheSharedApertureIsSeenAsTheLdsAccessItBecame) {
@@ -4727,8 +4865,8 @@ TEST(RoutedMemoryObservationTest, AFlatAccessToTheSharedApertureIsSeenAsTheLdsAc
   state->per_lane_addr[0] = kSharedBase + 0x20;
   state->per_lane_addr[2] = kSharedBase + 0x28;
   state->store_data.resize(static_cast<size_t>(state->wf_size) * state->elem_size);
-  test::ComputeUnitTestAccess::route_memory_inst(*cu, new TestMemoryInstruction(std::move(state)),
-                                                 *wave);
+  test::ComputeUnitTestAccess::route_memory_inst(
+      *cu, new TestMemoryInstruction(std::move(state), "flat_store_b32"), *wave);
 
   // What the pre-routing hook was shown.
   ASSERT_EQ(plugin->before_tag.size(), 1u);
@@ -4740,13 +4878,130 @@ TEST(RoutedMemoryObservationTest, AFlatAccessToTheSharedApertureIsSeenAsTheLdsAc
   ASSERT_EQ(plugin->accesses.size(), 1u);
   const auto &access = plugin->accesses.front();
   EXPECT_EQ(access.route, MemoryRoute::LOCAL);
+  EXPECT_EQ(access.decoded_space, DecodedMemorySpace::FLAT);
+  EXPECT_EQ(std::string(decoded_memory_space_name(access.decoded_space)), "flat");
   EXPECT_TRUE(access.normalized_to_local);
   EXPECT_EQ(access.wait_counter, WaitCounterType::LGKMCNT);
   EXPECT_EQ(access.addresses[0], 0x420u);
   EXPECT_EQ(access.addresses[2], 0x428u);
+  ASSERT_EQ(access.pre_routing_addresses.size(), wave->wf_size());
+  EXPECT_EQ(access.pre_routing_addresses[0], kSharedBase + 0x20);
+  EXPECT_EQ(access.pre_routing_addresses[2], kSharedBase + 0x28);
   EXPECT_EQ(access.active_lane_mask, 0b1111u);
   EXPECT_EQ(access.valid_lane_mask, 0b0101u);
+  EXPECT_EQ(access.flat_local_lane_mask, 0b0101u);
+  EXPECT_EQ(access.flat_dds_lane_mask, 0u);
   EXPECT_EQ(access.unknown_lane_mask, 0b1010u);
+}
+
+TEST(RoutedMemoryObservationTest, AFlatAccessSeparatesDdsFromLdsLanes) {
+  PluginFixture fixture;
+  auto *plugin = fixture.attach_memory_observation_plugin();
+  auto *cu = fixture.cu();
+  constexpr uint64_t kSharedBase = 0x1234'0000'0000'0000;
+  constexpr uint64_t kDdsAddress = kSharedBase | 0x8000'0040;
+  constexpr uint64_t kLdsAddress = kSharedBase | 0x0000'0020;
+  cu->set_apertures(kSharedBase, kSharedBase | 0xffff'ffff, 0, 0);
+  auto *wave = cu->dispatch_wf_at(/*wf_id=*/1, /*wg_id=*/7, /*pc=*/0x320,
+                                  /*num_sgprs=*/104, /*num_vgprs=*/256);
+  ASSERT_NE(wave, nullptr);
+  wave->set_exec(0b111);
+  wave->set_lds_base(0x400);
+
+  auto state = std::make_unique<VectorMemState>(GLOBAL_MEM);
+  state->wf_size = wave->wf_size();
+  state->elem_size = 4;
+  state->num_elems = 1;
+  state->is_load = true;
+  state->exec_mask = 0b111;
+  state->lane_mask = 0b111;
+  state->per_lane_addr[0] = kDdsAddress;
+  state->per_lane_addr[1] = kLdsAddress;
+  state->per_lane_addr[2] = 0x2000;
+  test::ComputeUnitTestAccess::route_memory_inst(
+      *cu, new TestMemoryInstruction(std::move(state), "flat_load_b32"), *wave);
+
+  ASSERT_EQ(plugin->accesses.size(), 1u);
+  const auto &access = plugin->accesses.front();
+  EXPECT_EQ(access.route, MemoryRoute::LOCAL);
+  EXPECT_EQ(access.decoded_space, DecodedMemorySpace::FLAT);
+  EXPECT_TRUE(access.normalized_to_local);
+  EXPECT_EQ(access.flat_local_lane_mask, 0b010u);
+  EXPECT_EQ(access.flat_dds_lane_mask, 0b001u);
+  EXPECT_EQ(access.scratch_lane_mask, 0u);
+  EXPECT_EQ(access.flat_local_lane_mask & access.flat_dds_lane_mask, 0u);
+  ASSERT_EQ(access.pre_routing_addresses.size(), wave->wf_size());
+  EXPECT_EQ(access.pre_routing_addresses[0], kDdsAddress);
+  EXPECT_EQ(access.pre_routing_addresses[1], kLdsAddress);
+  EXPECT_EQ(access.pre_routing_addresses[2], 0x2000u);
+}
+
+TEST(RoutedMemoryObservationTest, AFlatAccessRetainsPerLaneLdsRoutingWhenFirstLaneIsGlobal) {
+  PluginFixture fixture;
+  auto *plugin = fixture.attach_memory_observation_plugin();
+  auto *cu = fixture.cu();
+  constexpr uint64_t kSharedBase = 0x1000'0000;
+  cu->set_apertures(kSharedBase, kSharedBase + 0xffff, 0, 0);
+  auto *wave = cu->dispatch_wf_at(/*wf_id=*/1, /*wg_id=*/7, /*pc=*/0x340,
+                                  /*num_sgprs=*/104, /*num_vgprs=*/256);
+  ASSERT_NE(wave, nullptr);
+  wave->set_exec(0b1111);
+
+  auto state = std::make_unique<VectorMemState>(GLOBAL_MEM);
+  state->wf_size = wave->wf_size();
+  state->elem_size = 4;
+  state->num_elems = 1;
+  state->is_load = true;
+  state->exec_mask = 0b1111;
+  state->lane_mask = 0b0111;
+  state->per_lane_addr[0] = 0x2000;
+  state->per_lane_addr[1] = kSharedBase + 0x20;
+  state->per_lane_addr[2] = kSharedBase + 0x28;
+  test::ComputeUnitTestAccess::route_memory_inst(
+      *cu, new TestMemoryInstruction(std::move(state), "flat_load_b32"), *wave);
+
+  ASSERT_EQ(plugin->accesses.size(), 1u);
+  const auto &access = plugin->accesses.front();
+  EXPECT_EQ(access.route, MemoryRoute::GLOBAL);
+  EXPECT_EQ(access.decoded_space, DecodedMemorySpace::FLAT);
+  EXPECT_FALSE(access.normalized_to_local);
+  EXPECT_EQ(access.flat_local_lane_mask, 0b0110u);
+  EXPECT_TRUE(access.pre_routing_addresses.empty());
+  EXPECT_EQ(access.addresses[0], 0x2000u);
+  EXPECT_EQ(access.addresses[1], kSharedBase + 0x20);
+  EXPECT_EQ(access.addresses[2], kSharedBase + 0x28);
+}
+
+TEST(RoutedMemoryObservationTest, AnExplicitGlobalAccessIgnoresTheSharedAperture) {
+  PluginFixture fixture;
+  auto *plugin = fixture.attach_memory_observation_plugin();
+  auto *cu = fixture.cu();
+  constexpr uint64_t kSharedBase = 0x1000'0000;
+  cu->set_apertures(kSharedBase, kSharedBase + 0xffff, 0, 0);
+  auto *wave = cu->dispatch_wf(/*wg_id=*/7, /*pc=*/0x380, /*sgprs=*/104, /*vgprs=*/256);
+  ASSERT_NE(wave, nullptr);
+  wave->set_exec(1);
+
+  auto state = std::make_unique<VectorMemState>(GLOBAL_MEM);
+  state->wf_size = wave->wf_size();
+  state->elem_size = 4;
+  state->num_elems = 1;
+  state->is_load = true;
+  state->exec_mask = 1;
+  state->lane_mask = 1;
+  state->per_lane_addr[0] = kSharedBase + 0x20;
+  test::ComputeUnitTestAccess::route_memory_inst(
+      *cu, new TestMemoryInstruction(std::move(state), "global_load_b32"), *wave);
+
+  ASSERT_EQ(plugin->accesses.size(), 1u);
+  const auto &access = plugin->accesses.front();
+  EXPECT_EQ(access.route, MemoryRoute::GLOBAL);
+  EXPECT_EQ(access.decoded_space, DecodedMemorySpace::GLOBAL);
+  EXPECT_FALSE(access.normalized_to_local);
+  EXPECT_EQ(access.flat_local_lane_mask, 0u);
+  EXPECT_EQ(access.flat_dds_lane_mask, 0u);
+  EXPECT_TRUE(access.pre_routing_addresses.empty());
+  EXPECT_EQ(access.addresses[0], kSharedBase + 0x20);
 }
 
 TEST(RoutedMemoryObservationTest, AnLdsAccessThatWasAlwaysLdsIsNotMarkedNormalized) {
@@ -4777,7 +5032,9 @@ TEST(RoutedMemoryObservationTest, AnLdsAccessThatWasAlwaysLdsIsNotMarkedNormaliz
   ASSERT_EQ(plugin->accesses.size(), 1u);
   const auto &access = plugin->accesses.front();
   EXPECT_EQ(access.route, MemoryRoute::LOCAL);
+  EXPECT_EQ(access.decoded_space, DecodedMemorySpace::LOCAL);
   EXPECT_FALSE(access.normalized_to_local);
+  EXPECT_TRUE(access.pre_routing_addresses.empty());
   EXPECT_EQ(access.wait_counter, WaitCounterType::LGKMCNT);
   EXPECT_EQ(access.bytes_per_lane, 8u);
   // A wave64 with two lanes on: counting the other sixty-two would report a
@@ -4818,13 +5075,15 @@ TEST(RoutedMemoryObservationTest, AGlobalAtomicReportsItsOperationScratchAndPoli
   state->store_data.resize(static_cast<size_t>(state->wf_size) * sizeof(initial));
   uint32_t increment = 3;
   std::memcpy(state->store_data.data(), &increment, sizeof(increment));
-  test::ComputeUnitTestAccess::route_memory_inst(*cu, new TestMemoryInstruction(std::move(state)),
-                                                 *wave);
+  test::ComputeUnitTestAccess::route_memory_inst(
+      *cu, new TestMemoryInstruction(std::move(state), "flat_atomic_add"), *wave);
 
   ASSERT_EQ(plugin->accesses.size(), 1u);
   const auto &access = plugin->accesses.front();
   EXPECT_EQ(access.route, MemoryRoute::GLOBAL);
+  EXPECT_EQ(access.decoded_space, DecodedMemorySpace::FLAT);
   EXPECT_FALSE(access.normalized_to_local);
+  EXPECT_TRUE(access.pre_routing_addresses.empty());
   // An atomic is neither a plain load nor a plain store, and a model that
   // treated it as either would put it on the wrong side of a wait counter.
   EXPECT_EQ(access.atomic_op, AtomicOp::ADD);
@@ -4839,6 +5098,38 @@ TEST(RoutedMemoryObservationTest, AGlobalAtomicReportsItsOperationScratchAndPoli
   EXPECT_EQ(access.addresses[0], kAddress);
   // The atomic really ran; the observation describes an access that happened.
   EXPECT_EQ(fixture.mem->read32(kAddress), initial + increment);
+}
+
+TEST(RoutedMemoryObservationTest, DedicatedScratchIsDistinctFromFlatScratch) {
+  PluginFixture fixture;
+  auto *plugin = fixture.attach_memory_observation_plugin();
+  auto *cu = fixture.cu();
+  auto *wave = cu->dispatch_wf(/*wg_id=*/1, /*pc=*/0x3C0, /*sgprs=*/104, /*vgprs=*/256);
+  ASSERT_NE(wave, nullptr);
+  wave->set_exec(0b1);
+
+  auto state = std::make_unique<VectorMemState>(GLOBAL_MEM);
+  state->wf_size = wave->wf_size();
+  state->elem_size = 4;
+  state->num_elems = 1;
+  state->is_load = false;
+  state->exec_mask = 0b1;
+  state->lane_mask = 0b1;
+  state->scratch_swizzle = true;
+  state->scratch_lane_mask = 0b1;
+  state->scratch_addr_stride = wave->wf_size() * sizeof(uint32_t);
+  state->per_lane_addr[0] = 0x9800;
+  state->store_data.resize(static_cast<size_t>(state->wf_size) * state->elem_size);
+  test::ComputeUnitTestAccess::route_memory_inst(
+      *cu, new TestMemoryInstruction(std::move(state), "scratch_store_dword"), *wave);
+
+  ASSERT_EQ(plugin->accesses.size(), 1u);
+  const auto &access = plugin->accesses.front();
+  EXPECT_EQ(access.route, MemoryRoute::GLOBAL);
+  EXPECT_EQ(access.decoded_space, DecodedMemorySpace::SCRATCH);
+  EXPECT_EQ(std::string(decoded_memory_space_name(access.decoded_space)), "scratch");
+  EXPECT_EQ(access.scratch_lane_mask, 0b1u);
+  EXPECT_TRUE(access.pre_routing_addresses.empty());
 }
 
 TEST(RoutedMemoryObservationTest, ANonScratchAccessReportsNoSwizzleStride) {
@@ -4861,10 +5152,11 @@ TEST(RoutedMemoryObservationTest, ANonScratchAccessReportsNoSwizzleStride) {
   state->scratch_lane_mask = 0b1;
   state->scratch_addr_stride = 256;
   state->per_lane_addr[0] = 0xA000;
-  test::ComputeUnitTestAccess::route_memory_inst(*cu, new TestMemoryInstruction(std::move(state)),
-                                                 *wave);
+  test::ComputeUnitTestAccess::route_memory_inst(
+      *cu, new TestMemoryInstruction(std::move(state), "buffer_load_dword"), *wave);
 
   ASSERT_EQ(plugin->accesses.size(), 1u);
+  EXPECT_EQ(plugin->accesses.front().decoded_space, DecodedMemorySpace::GLOBAL);
   EXPECT_EQ(plugin->accesses.front().scratch_lane_mask, 0u);
   EXPECT_EQ(plugin->accesses.front().scratch_element_stride_bytes, 0u);
 }
@@ -4901,16 +5193,16 @@ TEST(RoutedMemoryObservationTest, TheLaneCountIsTheWavefrontsOwn) {
 }
 
 TEST(RoutedMemoryObservationTest, ATransposeLoadRequestsFromFewerLanesThanItFills) {
-  // The reason four lane masks exist rather than two. A wave64 B8 transpose
-  // load fills every valid lane but issues its requests through the low half,
-  // so a model that charged traffic per valid lane would double it.
+  // A wave64 B8 transpose load fills every valid lane but issues its requests
+  // through the low half, so a model that charged traffic per valid lane would
+  // double it. Its effective all-lane execution must not erase incoming EXEC.
   PluginFixture fixture;
   auto *plugin = fixture.attach_memory_observation_plugin();
   auto *cu = fixture.cu();
   auto *wave = cu->dispatch_wf(/*wg_id=*/1, /*pc=*/0x700, /*sgprs=*/104, /*vgprs=*/256);
   ASSERT_NE(wave, nullptr);
   ASSERT_EQ(wave->wf_size(), 64u);
-  wave->set_exec(~uint64_t{0});
+  wave->set_exec(0b0101);
 
   auto state = std::make_unique<VectorMemState>(LOCAL_MEM);
   state->wf_size = wave->wf_size();
@@ -4923,6 +5215,8 @@ TEST(RoutedMemoryObservationTest, ATransposeLoadRequestsFromFewerLanesThanItFill
                                                  *wave);
 
   ASSERT_EQ(plugin->accesses.size(), 1u);
+  EXPECT_EQ(plugin->accesses.front().active_lane_mask, ~uint64_t{0});
+  EXPECT_EQ(plugin->accesses.front().architectural_exec_lane_mask, 0b0101u);
   EXPECT_EQ(plugin->accesses.front().valid_lane_mask, ~uint64_t{0});
   EXPECT_EQ(plugin->accesses.front().request_lane_mask, 0xFFFF'FFFFu);
 }
@@ -5058,6 +5352,24 @@ TEST(RoutedMemoryObservationTest, APluginThatDoesNotWantTheHookDoesNotPayForIt) 
   EXPECT_TRUE(quiet->accesses.empty()) << "the observation was built for a plugin that declined it";
   // The pre-routing hook is not gated, so it still fired.
   EXPECT_EQ(quiet->before_tag.size(), 1u);
+
+  // A group-wide subscription is only the collection gate. Once another
+  // plugin enables collection, fanout must still exclude a plugin whose own
+  // policy was sampled as false when it was added.
+  ExecutionPluginGroup mixed{PluginSinkConfig{}};
+  auto quiet_member = std::make_unique<MemoryObservationPlugin>(false, "quiet_memory_observation");
+  auto *quiet_member_ptr = quiet_member.get();
+  auto wanting_member =
+      std::make_unique<MemoryObservationPlugin>(true, "wanting_memory_observation");
+  auto *wanting_member_ptr = wanting_member.get();
+  ASSERT_TRUE(mixed.add(std::move(quiet_member)));
+  ASSERT_TRUE(mixed.add(std::move(wanting_member)));
+  ASSERT_TRUE(mixed.observes_memory_routing());
+
+  MemoryAccessObservation observation;
+  mixed.onAmdgpuMemoryAccessRouted(observation);
+  EXPECT_TRUE(quiet_member_ptr->accesses.empty());
+  ASSERT_EQ(wanting_member_ptr->accesses.size(), 1u);
 }
 
 TEST(RoutedMemoryObservationTest, AnUnroutableAccessIsReportedRatherThanDropped) {

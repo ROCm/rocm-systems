@@ -242,6 +242,12 @@ public:
 The sink is assigned by the `ExecutionPluginGroup` when the plugin is
 added. If no group configures a sink, the default is stderr.
 
+`KernelDispatchInfo` reports the effective LDS allocation in
+`lds_size_bytes`, the descriptor-selected `wave_size`, the configured
+execution `code_target`, and the workgroup-cluster dimensions. The code target
+describes the simulator ISA selected for execution; it is not source-code-object
+or translation provenance.
+
 ## How it works
 
 The `ExecutionPlugin` interface (`execution_plugin.h`) defines hooks
@@ -288,10 +294,11 @@ group divides hooks by frequency and synchronization cost:
   the default hot-hook policy, an infrequent callback can still overlap a
   high-frequency callback. Recursive acquisition lets a callback synchronously
   read registers and fire register-observation hooks without deadlocking.
-- Instruction before/after, memory-routing, and register-access callbacks are
-  high-frequency and run concurrently with both other high-frequency callbacks
-  and infrequent callbacks by default. Each callback is scoped to a wavefront
-  below the simulation's shader-engine partition granularity.
+- Instruction before/after, memory-routing, tensor-DMA memory, and
+  register-access callbacks are high-frequency and run concurrently with both
+  other high-frequency callbacks and infrequent callbacks by default. Each
+  callback is scoped to a wavefront below the simulation's shader-engine
+  partition granularity.
 
 A plugin whose high-frequency callbacks reach shared mutable state may override
 `requires_serial_hot_hooks()` to return `true`. The group samples that stable
@@ -314,6 +321,14 @@ issued to the LDS pipeline with its addresses rewritten and its counter changed,
 so an observer using the earlier hook charges it against the wrong cache at an
 address the memory system never uses.
 
+`decoded_space` preserves the instruction's original address-space family
+independently of its effective `route`, so explicit SCRATCH remains distinct
+from a FLAT access that resolves to scratch or LDS. When routing changes an
+address, `pre_routing_addresses` contains the original per-lane span and
+`addresses` contains the effective span. The former is empty when no address
+changed; when present, both spans have `wavefront_size` entries and only lanes
+in `valid_lane_mask` are meaningful.
+
 Building the observation is real work on the per-instruction path, so it is
 skipped entirely unless a contained plugin asks for it. A plugin that overrides
 `onAmdgpuMemoryAccessRouted` must also override `observes_memory_routing()` to
@@ -321,8 +336,17 @@ return `true`; the group samples this policy when each plugin is added, and its
 conservative default is `false`. Overriding the hook alone is silent — the
 plugin simply never sees an access.
 
-The observation's spans point into the instruction's own state and are valid
-only for the duration of the callback. A plugin that keeps one must copy them.
+The observation's spans borrow execution-owned storage and are valid only for
+the duration of the callback. A plugin that keeps one must copy them.
+
+Tensor DMA transfers execute directly rather than through the ordinary memory
+routing path. `onAmdgpuTensorDmaMemoryAccess` reports them separately, after the
+complete transfer and any descriptor-requested atomic-barrier arrival succeed.
+Its `addresses` span contains only the in-bounds global element bases that were
+actually copied, in execution order with duplicates preserved. Empty, fully
+masked, and descriptor/copy exceptions produce no callback. Consumers must opt
+in through `observes_tensor_dma_memory_access()` and must copy the borrowed span
+if they retain it.
 
 SGPR owner resolution is skipped when no contained plugin observes scalar
 register reads. Plugins that consume neither `onAmdgpuReadScalarRegister` nor
@@ -352,6 +376,8 @@ concurrently.
    plugin.
 6. Override `observes_sgpr_reads()` to return `false` when the plugin does not
    consume `onAmdgpuReadSgpr`, and `observes_memory_routing()` to return `true`
-   when it does consume `onAmdgpuMemoryAccessRouted`.
+   when it does consume `onAmdgpuMemoryAccessRouted`. A consumer of
+   `onAmdgpuTensorDmaMemoryAccess` must likewise return `true` from
+   `observes_tensor_dma_memory_access()`.
 7. Enable it by adding `"myname": { ... }` to the `plugins` section of
    the config file.
