@@ -244,7 +244,7 @@ public:
  */
 private:
   template <typename T>
-  __host__ std::tuple<T*, struct ibv_mr*> allocate_and_register(size_t size, int access);
+  __host__ std::tuple<T*, struct ibv_mr*> allocate_and_register(size_t count, int access);
 /**@}*/
 
 

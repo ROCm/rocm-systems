@@ -1065,7 +1065,7 @@ if(BUILD_TESTS)
         ${CMAKE_CURRENT_SOURCE_DIR}/device
         ${PROJECT_BINARY_DIR}/include/nccl_device/gin/rocshmem_gda
       )
-      target_compile_definitions(rccl-UnitTestsFixtures PRIVATE GDA_QUEUEPAIR_MOCK)
+      target_compile_definitions(rccl-UnitTestsGinAnvilPlugin PRIVATE GDA_QUEUEPAIR_MOCK)
     endif()
   endif()
 

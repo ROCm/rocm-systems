@@ -183,15 +183,17 @@ class ActiveWFInfo {
  * @struct QueuePairTraits<Provider>
  * @brief Defines Provider-specific types and constants.
  *
- * Each Provider subclass of QueuePairBase<Provider> should also define a specialization
+ * Each Provider subclass of QueuePairInterface<Provider> should also define a specialization
  * for QueuePairTraits<Provider> that defines the documented members:
  *   - QueuePairTraits<Provider>::OpCode
- *   - QueuePairTraits<Provider>::Endianness
  *   - QueuePairTraits<Provider>::InlineMax
  *   - QueuePairTraits<Provider>::InlineThreshold
  *
+ * Additionally, Provider subclasses of QueuePairDevice<Provider> should also provide the member:
+ *   - QueuePairTraits<Provider>::Endianness
+ *
  * Sample specialization code for a QueuePairProvider subclass
- * of QueuePairBase<QueuePairProvider>:
+ * of QueuePairDevice<QueuePairProvider>:
  * @code
  * class QueuePairProvider;
  * template <> struct QueuePairTraits<QueuePairProvider> {
