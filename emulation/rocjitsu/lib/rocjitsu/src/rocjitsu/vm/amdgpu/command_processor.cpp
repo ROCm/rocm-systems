@@ -2427,28 +2427,21 @@ void CommandProcessor::fetch_from_queue(HwQueue &queue, HwQueueState &qs, simdoj
   if (queue.host_accessible ? (queue.doorbell_base == nullptr) : (queue.doorbell_va == 0))
     return;
 
-  // Read write and read indices. For KFD queues, pointers are in host memory
-  // and can be read directly. For internal test queues, they're in GpuMemory.
-  uint64_t write_idx = read_gpu_u64(queue.write_ptr_va, queue.process_id);
-  uint64_t read_idx = read_gpu_u64(queue.read_ptr_va, queue.process_id);
-  util::Logger::vm([&](auto &os) {
-    static uint64_t fetch_count = 0;
-    if (write_idx != read_idx && ++fetch_count <= 50)
-      os << std::format("FETCH q={} w={} r={} delta={} sdma={}", queue.queue_id, write_idx,
-                        read_idx, write_idx - read_idx, queue.is_sdma);
-  });
-
-  // SDMA queues use byte-granularity pointers and have their own doorbell
-  // semantics — skip the AQL doorbell clamping that assumes packet indices.
+  // The SDMA doorbell publishes a byte range. ROCr writes the producer pointer
+  // before its release-store to the doorbell, so reading ahead from that pointer
+  // can consume packets before observing their publication. Use the doorbell
+  // itself, including when a retry was scheduled for an older submission.
   if (queue.is_sdma) {
-    if (queue.doorbell_base) {
-      uint64_t db_val = std::atomic_ref<uint64_t>(
-                            *reinterpret_cast<uint64_t *>(static_cast<char *>(queue.doorbell_base) +
-                                                          queue.doorbell_offset))
-                            .load(std::memory_order_acquire);
-      if (db_val != std::numeric_limits<uint64_t>::max() && db_val > write_idx)
-        write_idx = db_val;
-    }
+    const uint64_t write_idx =
+        queue.host_accessible
+            ? std::atomic_ref<uint64_t>(
+                  *reinterpret_cast<uint64_t *>(static_cast<char *>(queue.doorbell_base) +
+                                                queue.doorbell_offset))
+                  .load(std::memory_order_acquire)
+            : read_gpu_u64(queue.doorbell_va, queue.process_id);
+    if (write_idx == std::numeric_limits<uint64_t>::max())
+      return;
+    const uint64_t read_idx = read_gpu_u64(queue.read_ptr_va, queue.process_id);
     util::Logger::cp([&](auto &os) {
       os << std::format("{}: SDMA_FETCH pid={} qid={} read={} write={} delta={}", name(),
                         queue.process_id, queue.queue_id, read_idx, write_idx,
@@ -2459,6 +2452,17 @@ void CommandProcessor::fetch_from_queue(HwQueue &queue, HwQueueState &qs, simdoj
     process_sdma_ring(queue, read_idx, write_idx, now);
     return;
   }
+
+  // Read write and read indices. For KFD queues, pointers are in host memory
+  // and can be read directly. For internal test queues, they're in GpuMemory.
+  uint64_t write_idx = read_gpu_u64(queue.write_ptr_va, queue.process_id);
+  uint64_t read_idx = read_gpu_u64(queue.read_ptr_va, queue.process_id);
+  util::Logger::vm([&](auto &os) {
+    static uint64_t fetch_count = 0;
+    if (write_idx != read_idx && ++fetch_count <= 50)
+      os << std::format("FETCH q={} w={} r={} delta={} sdma={}", queue.queue_id, write_idx,
+                        read_idx, write_idx - read_idx, queue.is_sdma);
+  });
 
   // AQL doorbell clamping (compute queues only).
   // Use the CP-private fetch cursor as the authoritative next-packet index. It
