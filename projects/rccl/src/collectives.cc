@@ -24,6 +24,7 @@
 #include "ce_coll.h"
 #include "alltoallv_meta.h"
 #include "strongstream.h"
+#include "mem_manager.h"
 
 #ifdef ENABLE_ROCSHMEM
 #include <rocshmem/rocshmem.hpp>
@@ -201,8 +202,32 @@ bool rcclAllReduceShouldTakeDdaPath(const ncclComm* comm, size_t count, ncclData
   // service this call; yielding on message size alone left comms without CE's prerequisites (e.g.
   // gfx950 with symmetricSupport off) with no DDA and no CE, falling back to the generic ring/tree
   // kernel across the whole 4 MiB+ range that DDA still wins.
+  //
+  // Do not gate gfx1250 on !symEligible. That flag is a per-rank window lookup, so mixed
+  // registration (one rank's send unregistered) sent one rank down DDA and the other down
+  // enqueue/symmetric and hung. ReduceScatter already uses (!symEligible || ddaFabricArch).
   const bool ddaFabricArch1250 = IsArchMatch(comm->archName, "gfx1250");
-  return !symEligible && (ddaFabricArch1250 || !ceAllReduceAllowed) && rcclDdaEnabled(comm, msgBytes, 8388608);
+  if (!rcclDdaEnabled(comm, msgBytes, 8388608)) return false;
+  if (ddaFabricArch1250) return true;
+  return !symEligible && !ceAllReduceAllowed;
+}
+
+// Addon backends (DDA / CE 2-shot / GIN-SDMA) return from the collective impl
+// without ncclEnqueueCheck, which is where NCCL_CHECK_MODE pointer checks and the
+// suspend-while-collective guard live. Divert those calls through enqueue so the
+// guards still fire; debug-mode collectives then use the native/CE path.
+bool rcclCollectiveMustUseEnqueuePath(ncclComm* comm) {
+  if (comm == nullptr) return true;
+  if (comm->checkMode != ncclCheckModeDefault) return true;
+#if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
+  if (comm->memManager) {
+    const bool commIsSuspended = ncclIntruQueueEmpty(&comm->resumeTaskQueue) &&
+                                  (!ncclIntruQueueEmpty(&comm->suspendTaskQueue) ||
+                                   __atomic_load_n(&comm->memManager->released, __ATOMIC_ACQUIRE));
+    if (commIsSuspended) return true;
+  }
+#endif
+  return false;
 }
 
 // Check if symmteric kernels is requested for this collective
@@ -334,6 +359,10 @@ ncclResult_t ncclAllGather_impl(const void* sendbuff, void* recvbuff, size_t sen
     INFO(NCCL_COLL, "AllGather impl selected: algo %s", an ? an : "?");
   }
 
+  if (rcclCollectiveMustUseEnqueuePath(comm)) {
+    return ncclEnqueueCheck(&info);
+  }
+
   switch (decision.algo) {
   case RCCL_DDA_FABRIC_LL:
     INFO(NCCL_COLL,
@@ -430,7 +459,8 @@ ncclResult_t ncclAlltoAll_impl(const void* sendbuff, void* recvbuff, size_t coun
 #if defined(ENABLE_ROCSHMEM_GIN)
     // GIN LSA/SDMA is checked before DDA on purpose, so an eligible call takes this path even below
     // the DDA threshold. It measured at parity or better on small sizes.
-    if (ncclAllToAllGinSdmaEligible(comm, sendbuff, recvbuff, count, datatype)) {
+    if (!rcclCollectiveMustUseEnqueuePath(comm) &&
+        ncclAllToAllGinSdmaEligible(comm, sendbuff, recvbuff, count, datatype)) {
       INFO(NCCL_COLL, "AllToAll: taking GIN-SDMA path: nRanks=%d count=%zu datatype=%d bytes=%zu inPlace=%d",
            comm->nRanks, count, (int)datatype, count * ncclTypeSize(datatype), sendbuff == recvbuff ? 1 : 0);
       NCCLCHECK(ncclAllToAllGinSdma(sendbuff, recvbuff, count, datatype, comm, stream));
@@ -438,7 +468,8 @@ ncclResult_t ncclAlltoAll_impl(const void* sendbuff, void* recvbuff, size_t coun
     }
 #endif
     // alltoall does not need symEligible check as symmetric kernel is not supported for alltoall
-    if (rcclDdaEnabled(comm, comm->nRanks * count * ncclTypeSize(datatype), kDdaAlltoAllGfx942ThresholdBytes,
+    if (!rcclCollectiveMustUseEnqueuePath(comm) &&
+        rcclDdaEnabled(comm, comm->nRanks * count * ncclTypeSize(datatype), kDdaAlltoAllGfx942ThresholdBytes,
                        kDdaAlltoAllGfx950ThresholdBytes, kDdaAlltoAllGfx1250ThresholdBytes)) {
       if (IsArchMatch(comm->archName, "gfx1250")) {
         const size_t a2aBytes = comm->nRanks * count * ncclTypeSize(datatype);
@@ -647,6 +678,10 @@ ncclResult_t ncclAllReduce_impl(const void* sendbuff, void* recvbuff, size_t cou
     const char* an = nullptr;
     rcclGetAlgoName(decision.algo, &an);
     INFO(NCCL_COLL, "AllReduce impl selected: algo %s", an ? an : "?");
+  }
+
+  if (rcclCollectiveMustUseEnqueuePath(comm)) {
+    return ncclEnqueueCheck(&info);
   }
 
   switch (decision.algo) {
@@ -941,6 +976,10 @@ ncclResult_t ncclReduceScatter_impl(const void* sendbuff, void* recvbuff, size_t
     const char* an = nullptr;
     rcclGetAlgoName(decision.algo, &an);
     INFO(NCCL_COLL, "ReduceScatter impl selected: algo %s", an ? an : "?");
+  }
+
+  if (rcclCollectiveMustUseEnqueuePath(comm)) {
+    return ncclEnqueueCheck(&info);
   }
 
   switch (decision.algo) {

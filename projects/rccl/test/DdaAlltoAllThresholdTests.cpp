@@ -127,11 +127,13 @@ TEST_F(DdaAlltoAllThresholdTest, FewerThanEightRanks_Disabled)
         mockComm_.get(), kAlltoAllFloat32CountAt4MbThreshold, ncclFloat32));
 }
 
-TEST_F(DdaAlltoAllThresholdTest, SymmetricSupport_Disabled)
+TEST_F(DdaAlltoAllThresholdTest, SymmetricSupport_DoesNotDisableAlltoAllDda)
 {
     mockComm_.reset("gfx950:sramecc+:xnack-");
     mockComm_.comm.symmetricSupport = 1;
-    EXPECT_FALSE(testRcclDdaAlltoAllThresholdEnabled(
+    // AlltoAll has no symmetric kernel. rcclDdaEnabled is arch + nRanks + size
+    // only, so a registered symmetric window does not turn DDA off.
+    EXPECT_TRUE(testRcclDdaAlltoAllThresholdEnabled(
         mockComm_.get(), kAlltoAllFloat32CountAt4MbThreshold, ncclFloat32));
 }
 
