@@ -57,9 +57,9 @@
 #endif
 
 // Test seam for the system-scope fence issued by the HIP GIN Put/PutValue
-// templates. Expands to the real fence in production (zero cost); unit tests may
-// override it (before including a backend header) to observe that the fence
-// branch actually executed.
+// templates, by the Anvil SDMA fenceBeforeSignal helper and by Anvil SDMA Wait.
+// Expands to the real fence in production (zero cost); unit tests may override
+// it (before including a backend header) to observe that the fence branch ran.
 #ifndef NCCL_GIN_THREADFENCE_SYSTEM
 #define NCCL_GIN_THREADFENCE_SYSTEM() __threadfence_system()
 #endif

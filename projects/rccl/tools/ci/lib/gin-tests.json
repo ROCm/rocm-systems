@@ -3,12 +3,16 @@
     "GIN / rocSHMEM test matrix for run-gin-ci.sh (baremetal translation of",
     "docker_build_test.bash). Each test runs as:",
     "  mpirun -np $NP <mca> <-x env> -x LD_LIBRARY_PATH <bin> <args>",
-    "kind: 'rocshmem' -> $ROCSHMEM_TESTS_BIN_DIR/<bin>; 'rccl-tests' -> $RCCL_TESTS_BIN_DIR/<bin>;",
+    "kind: 'rccl-tests' -> $RCCL_TESTS_BIN_DIR/<bin>;",
     "'fixtures' -> $RCCL_FIXTURES_BIN_DIR/<bin> (single-process gtest, no mpirun);",
     "'pytest' -> python3 -m pytest under $RCCL_TESTS_DIR/test/<bin> (opt-in rccl-tests",
     "regressions; exports RCCL_TESTS_GIN_SDMA_BCAST=1 and points BCAST_EXE at broadcast_perf)",
     "{E} is replaced with NP*MSG_SIZE bytes. Tests are non-gating for now.",
     "-D 3 is the rocSHMEM-SDMA path the script labels 'Crash' (kept for visibility).",
+    "rocshmem-a2a-sdma was removed: rocshmem_functional_tests -a 19 (IPC team Alltoall,",
+    "8 ranks, 256 MiB x 100, 600s cap) timed out independently of Anvil GIN fence work.",
+    "That binary does not compile gin_anvil_sdma.h; RCCL TYPE=6 alltoall_perf coverage",
+    "remains in rccl-gin-rocshmem-sdma-d3. The run-gin-ci.sh rocshmem) arm is now dead code.",
     "debug_env: -x added to every test only when RCCL_CI_DEBUG=1.",
     "  {LOGDIR} in debug_env is replaced by the runner with the per-job debug dir,",
     "  so NCCL_DEBUG_FILE writes per-rank logs there instead of flooding stdout."
@@ -19,13 +23,6 @@
   "debug_env": ["NCCL_DEBUG=INFO", "NCCL_DEBUG_SUBSYS=INIT,NET", "NCCL_DEBUG_FILE={LOGDIR}/nccl-debug.%h.%p.log"],
 
   "tests": [
-    {
-      "name": "rocshmem-a2a-sdma",
-      "kind": "rocshmem",
-      "bin": "rocshmem_functional_tests",
-      "env": ["NCCL_DEBUG=VERSION", "ROCSHMEM_DEBUG_LEVEL=info:noversion", "ROCSHMEM_TEST_UUID=1"],
-      "args": "-a 19 -w 1 -z 256 -v {E} -n 100 -noverif"
-    },
     {
       "name": "rccl-gin-hostproxy-d1",
       "kind": "rccl-tests",
