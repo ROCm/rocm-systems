@@ -77,6 +77,7 @@ jobs:
         -DROCPROFSYS_BUILD_TBB=ON
         -DROCPROFSYS_BUILD_ELFUTILS=ON
         -DROCPROFSYS_BUILD_LIBIBERTY=ON
+        -DDYNINST_BINUTILS_DOWNLOAD_URL=file:///opt/rocprofiler-systems-deps/binutils-libiberty-src.tar.gz
         -DROCPROFSYS_MAX_THREADS=64
         -DROCPROFSYS_PYTHON_PREFIX=/opt/conda/envs
 
