@@ -233,7 +233,8 @@ __device__ __forceinline__ QueuePairMock::amo_ret_t<Fetch> QueuePairMock::post_w
     const ActiveWFInfo& wf_info, PostOpt<Options...> options) {
   static_assert(Fetch != AMOFetchType::NonBlocking, "non-blocking AMOs not yet implemented");
   if (!raddr) {
-    return;
+    // Returns void{}, a prvalue of type void; or uint64_t{}, which performs zero-initialization
+    return amo_ret_t<Fetch>{};
   }
 
   if (wf_info.is_pe_group_first) {
@@ -271,7 +272,8 @@ __device__ __forceinline__ QueuePairMock::amo_ret_t<Fetch> QueuePairMock::post_w
     PostOpt<Options...> options) {
   static_assert(Fetch != AMOFetchType::NonBlocking, "non-blocking AMOs not yet implemented");
   if (!raddr) {
-    return;
+    // Returns void{}, a prvalue of type void; or uint64_t{}, which performs zero-initialization
+    return amo_ret_t<Fetch>{};
   }
 
   __hip_atomic_fetch_add(&amo_count, 1, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT);
