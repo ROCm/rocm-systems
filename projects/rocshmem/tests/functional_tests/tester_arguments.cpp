@@ -352,6 +352,7 @@ void TesterArguments::get_arguments() {
     case FloodFAddTestType:
     case FloodWaitAmoTestType:
     case DeviceBitcodeTestType:
+    case BufferRegisterSymmetricTestType:
     case TeamCtxSharedInfraTestType:
     case FenceOrderFanoutTestType:
     case TeamSplit2DTestType:
