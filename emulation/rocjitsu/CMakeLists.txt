@@ -1,6 +1,8 @@
 # Copyright (c) 2025-2026 Advanced Micro Devices, Inc.
 # SPDX-License-Identifier: MIT
 
+# Temporary no-op change on rocjitsu to exercise TheRock Multi-arch CI
+
 cmake_minimum_required(VERSION 3.22)
 
 set(_RJ_ROCM_PATH_EXPLICIT OFF)
