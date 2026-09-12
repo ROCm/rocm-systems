@@ -20,6 +20,8 @@
 # SOFTWARE.
 # ##############################################################################
 
+# Temporary no-op change on rocprofiler to exercise TheRock Multi-arch CI
+
 cmake_minimum_required(VERSION 3.18.0 FATAL_ERROR)
 set( ROCPROFILER "rocprofiler" )
 set( BUILD_ENABLE_LINTIAN_OVERRIDES ON CACHE BOOL "Enable/Disable Lintian Overrides" )
