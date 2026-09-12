@@ -4,6 +4,8 @@
  * See LICENSE.txt for license information.
  ************************************************************************/
 
+#include <cstring>
+#include <string.h>
 #include "algorithms/dda/fabric/fabric_init.h"
 
 #include "alloc.h"
@@ -35,6 +37,12 @@ bool ncclDdaUseFabricPath(ncclComm* comm) {
     return false;
   }
   return comm->MNNVL == 1 && IsArchMatch(comm->archName, "gfx1250");
+}
+
+bool ginAnvilUseFabricMem(ncclComm* comm) {
+  if (comm == nullptr) return false;
+  return ginAnvilUseFabricMemPredicate(ncclDdaUseFabricPath(comm), comm->clique.size, comm->nRanks,
+                                       ncclCuMemEnable());
 }
 
 ncclResult_t ncclDdaFabricCommInit(ncclComm* comm) {

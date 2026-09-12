@@ -9,10 +9,21 @@
 
 #include <chrono>
 #include <cstdint>
+#include <cstring>
 #include <deque>
+#include <string.h>
 #ifndef FMT_HEADER_ONLY
 #define FMT_HEADER_ONLY 1
 #endif
+// hipcc host compilation can see <string.h> without putting C string APIs in
+// namespace std; libfmt then fails on std::strlen/memcpy. Mirror libstdc++.
+namespace std {
+using ::strlen;
+using ::memchr;
+using ::memcpy;
+using ::memset;
+using ::memmove;
+}
 #include <fmt/format.h>
 #include <memory>
 #include <mutex>

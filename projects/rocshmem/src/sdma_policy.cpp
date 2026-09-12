@@ -69,7 +69,9 @@ __host__ void SdmaImpl::sdmaHostInit(int pe, int num_pes, int rank) {
     if (i != deviceId) {
       sdma_anvil::EnablePeerAccess(deviceId, i);
     }
-    sdma_anvil::anvil.connect(deviceId, i, numChannels);
+    if (!sdma_anvil::anvil.connect(deviceId, i, numChannels)) {
+      LOG_ERROR_ABORT("SDMA connect failed: src=%d dst=%d channels=%d", deviceId, i, numChannels);
+    }
   }
 
   // Total number of handles: shm_size * numChannels

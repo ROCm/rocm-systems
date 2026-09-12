@@ -13,8 +13,13 @@
 #include "register_inline.h"
 #include "gin/gin_host.h"
 #include "gin/gin_host_proxy.h"
+#include "algorithms/dda/fabric/fabric_init.h"
+#include "rccl_common.h"
+#include "nccl_device/gin/anvil_sdma/gin_fabric_ll_policy.h"
+#include "gin/gin_fabric_a2a_host.h"
 #include "compiler.h"
 #include <cmath>
+#include <cstring>
 
 NCCL_PARAM(GinEnable, "GIN_ENABLE", 1);
 NCCL_PARAM(DevApiJit, "DEV_API_JIT", 0);
@@ -341,6 +346,34 @@ ncclResult_t ncclGinDevCommSetup(struct ncclComm* comm, struct ncclDevCommRequir
     if (ginStateDevComm->devHandles[n]->needsProxyProgress) ginState->needsProxyProgress = 1;
   }
 
+  // Fabric LL lane lives off ncclDevComm (host table keyed by ginHandles[0]).
+  // ginAnvilUseFabricMem already requires a single clique; the clique WARN is unreachable.
+  if (ginState->ginType == NCCL_GIN_TYPE_ANVIL_SDMA && ginAnvilUseFabricMem(comm)) {
+    ncclGinFabricA2ALane lane{};
+    const gin::fabric::GinFabricA2ACommState commState{
+        comm->ddaFabricMemHandler,
+        (void**)comm->ddaPeerPtrsDev,
+        comm->ddaLLEpochDev,
+        comm->ddaScratch,
+        comm->ddaScratchBytes,
+        comm->ddaLLEpochLen,
+        comm->nRanks};
+    const size_t llThreshold = gin::fabric::resolveGinFabricLLThresholdAlltoAll();
+    const int localEnabled =
+        gin::fabric::ginFabricA2ALaneTryBuild(commState, rcclParamDdaLL() != 0, llThreshold, &lane) ? 1 : 0;
+    int allEnabled = 0;
+    if (ncclGinFabricA2ALaneAgreeEnabled(comm, localEnabled, &allEnabled) != ncclSuccess || !allEnabled) {
+      if (comm->ddaFabricMemHandler == nullptr || comm->ddaPeerPtrsDev == nullptr ||
+          comm->ddaLLEpochDev == nullptr || comm->ddaScratch == nullptr) {
+        WARN("GIN A2A: fabric small-msg lane unavailable: missing DDA fabric resources");
+      }
+    } else {
+      ncclGinFabricA2ALanePublish(devComm->ginHandles[0], lane);
+      INFO(NCCL_INIT, "GIN A2A: fabric LL small-msg lane enabled (nRanks=%d scratchBytes=%zu llThreshold=%zu)",
+           comm->nRanks, comm->ddaScratchBytes, llThreshold);
+    }
+  }
+
   if (ginState->needsProxyProgress && ginState->ginProgress == 0) {
     ginState->cpuAffinity = comm->cpuAffinity;
     ginState->ginProgress = 1;
@@ -362,6 +395,7 @@ ncclResult_t ncclGinDevCommSetup(struct ncclComm* comm, struct ncclDevCommRequir
 
 end:
   if (ret != ncclSuccess) {
+    if (devComm) ncclGinFabricA2ALaneErase(devComm->ginHandles[0]);
     for (int n = 0; n < ginState->ginCommCount; n++) {
       if (ginStateDevComm->ginCtx[n]) ginState->ncclGin->destroyContext(ginStateDevComm->ginCtx[n]);
     }
@@ -390,6 +424,8 @@ ncclResult_t ncclGinDevCommFree(struct ncclComm* comm, struct ncclDevComm const*
   else ginState->devComms = dc->next;
   lock.unlock();
 
+  ncclGinFabricA2ALaneErase(devComm->ginHandles[0]);
+
   // Free GIN contexts
   for (int n = 0; n < ginState->ginCommCount; n++) {
     NCCLCHECK(ginState->ncclGin->destroyContext(dc->ginCtx[n]));
@@ -415,6 +451,12 @@ ncclResult_t ncclGinHostFinalize(struct ncclComm* comm) {
     if (ginState->ginComms[n] != NULL) {
       NCCLCHECK(ginState->ncclGin->closeColl(ginState->ginComms[n]));
       ginState->ginComms[n] = NULL;
+    }
+  }
+  // Per-comm: do not wipe other live communicators' lanes in this process.
+  for (struct ncclGinStateDevComm* dc = ginState->devComms; dc != nullptr; dc = dc->next) {
+    if (dc->devHandles[0] && dc->devHandles[0]->handle) {
+      ncclGinFabricA2ALaneErase(dc->devHandles[0]->handle);
     }
   }
   memset((void*)ginState, 0, sizeof(*ginState));

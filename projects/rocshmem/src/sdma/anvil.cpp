@@ -38,8 +38,10 @@ namespace sdma_anvil {
 
 
 #define CHECK_HSAKMT_SUCCESS(call, msg) do {                                  \
-  if ((call) != HSAKMT_STATUS_SUCCESS)                                        \
-    LOG_ERROR_EXIT("%s", #call);                                              \
+  const HSAKMT_STATUS _hsakmt_status = (call);                                \
+  if (_hsakmt_status != HSAKMT_STATUS_SUCCESS)                                \
+    LOG_ERROR_EXIT("%s: %s status=%d", (msg), #call,                          \
+                   static_cast<int>(_hsakmt_status));                         \
 } while (0)
 
 // HSA agents discovered via hsa_iterate_agents (unordered).
@@ -149,10 +151,23 @@ SdmaQueue::SdmaQueue([[maybe_unused]] int localDeviceId, int remoteDeviceId,
   // Create SDMA Queue
   memset(&queue_, 0, sizeof(HsaQueueResource));
 
-  CHECK_HSAKMT_SUCCESS(hsaKmtCreateQueueExt(localNodeId, HSA_QUEUE_SDMA_BY_ENG_ID,
-                                            DEFAULT_QUEUE_PERCENTAGE, DEFAULT_PRIORITY, engineId,
-                                            queueBuffer_, SDMA_QUEUE_SIZE, nullptr, &queue_),
-                       "hsaKmtCreateQueueExt failed");
+  const HSAKMT_STATUS qstatus =
+      hsaKmtCreateQueueExt(localNodeId, HSA_QUEUE_SDMA_BY_ENG_ID, DEFAULT_QUEUE_PERCENTAGE,
+                           DEFAULT_PRIORITY, engineId, queueBuffer_, SDMA_QUEUE_SIZE, nullptr, &queue_);
+  if (qstatus != HSAKMT_STATUS_SUCCESS) {
+    LOG_ERROR("hsaKmtCreateQueueExt failed: node=%u engine=%u status=%d", localNodeId, engineId,
+              static_cast<int>(qstatus));
+    const HSAKMT_STATUS unmapSt = hsaKmtUnmapMemoryToGPU(queueBuffer_);
+    if (unmapSt != HSAKMT_STATUS_SUCCESS) {
+      LOG_ERROR("unmap after CreateQueueExt fail: status=%d", static_cast<int>(unmapSt));
+    }
+    const HSAKMT_STATUS freeSt = hsaKmtFreeMemory(queueBuffer_, SDMA_QUEUE_SIZE);
+    if (freeSt != HSAKMT_STATUS_SUCCESS) {
+      LOG_ERROR("free after CreateQueueExt fail: status=%d", static_cast<int>(freeSt));
+    }
+    queueBuffer_ = nullptr;
+    throw std::runtime_error("hsaKmtCreateQueueExt failed");
+  }
 
   // Populate Device Handle
   ANVIL_CHECK_HIP_ERROR(hipMalloc(&deviceHandle_, sizeof(SdmaQueueDeviceHandle)));
@@ -425,11 +440,36 @@ SdmaQueue* AnvilLib::createSdmaQueue(int srcDeviceId, int dstDeviceId, uint32_t 
 }
 
 bool AnvilLib::connect(int srcDeviceId, int dstDeviceId, int numChannels) {
-  uint32_t engineId = getSdmaEngineId(srcDeviceId, dstDeviceId);
-  LOG_TRACE("SDMA: Connect from %d to %d with %d channels using engine %d",
-            srcDeviceId, dstDeviceId, numChannels, engineId);
+  // engineSeed is the HSA preferred copy engine from getSdmaEngineId. The first
+  // try offsets by dstDeviceId so GIN destinations do not all land on engine 0
+  // (KFD per-engine queue cap).
+  const uint32_t engineSeed = getSdmaEngineId(srcDeviceId, dstDeviceId);
+  const uint32_t nEng = numSdmaEnginesTotal_ > 0 ? numSdmaEnginesTotal_ : 1;
+  const size_t before = sdma_channels_[dstDeviceId].size();
+  LOG_TRACE("SDMA: Connect from %d to %d with %d channels engineSeed=%u nEng=%u", srcDeviceId,
+            dstDeviceId, numChannels, engineSeed, nEng);
   for (int c = 0; c < numChannels; ++c) {
-    createSdmaQueue(srcDeviceId, dstDeviceId, engineId);
+    bool created = false;
+    for (uint32_t i = 0; i < nEng; ++i) {
+      const uint32_t engineId =
+          nEng > 1 ? (engineSeed + static_cast<uint32_t>(dstDeviceId) + static_cast<uint32_t>(c) + i) % nEng
+                   : engineSeed;
+      try {
+        createSdmaQueue(srcDeviceId, dstDeviceId, engineId);
+        created = true;
+        break;
+      } catch (const std::exception& e) {
+        LOG_WARN("anvil: SDMA queue %d->%d engine %u failed: %s", srcDeviceId, dstDeviceId, engineId,
+                 e.what());
+      }
+    }
+    if (!created) {
+      LOG_ERROR("anvil: connect(%d -> %d) failed: no SDMA engine accepted a queue", srcDeviceId,
+                dstDeviceId);
+      sdma_channels_[dstDeviceId].resize(static_cast<size_t>(before));
+      if (sdma_channels_[dstDeviceId].empty()) sdma_channels_.erase(dstDeviceId);
+      return false;
+    }
   }
   return true;
 }

@@ -16,7 +16,8 @@
 #   2. lib/build-ompi.sh      build OpenMPI (--with-rocm) -> ompi.env
 #   3. lib/build-rocshmem.sh  build rocSHMEM (IPC+SDMA)   -> rocshmem.env
 #   4. projects/rccl  install.sh  build RCCL (GIN/rocSHMEM), then build only
-#      rccl-UnitTestsFixtures and rccl-UnitTestsGinSdmaBroadcastPolicy
+#      rccl-UnitTestsFixtures, rccl-UnitTestsGinSdmaBroadcastPolicy,
+#      rccl-UnitTestsGinFabricLLPolicy, and rccl-UnitTestsGinAnvilPlugin
 #      (GIN_ANVIL_UNIT_TESTS=ON) -> rccl.env
 #   5. projects/rccl-tests        build rccl-tests (DEVICE_API + ROCSHMEM)
 #   6. run-gin-ci.sh              run the GIN/rocSHMEM tests (non-gating)
@@ -108,16 +109,17 @@ set +a
 # 4) RCCL with GIN / rocSHMEM. Mirrors the Dockerfile: patch the rocSHMEM
 # threshold guard, then install.sh with ENABLE_ROCSHMEM_GIN. Build
 # rccl-UnitTestsFixtures in a second step (reconfigure BUILD_TESTS=ON,
-# GIN_ANVIL_UNIT_TESTS=ON, make only that target). Do not pass install.sh -t:
-# that builds every test executable and pulls in rccl-UnitTestsGinAnvilPlugin,
-# which can compile before hipify headers exist under parallel -j and aborts
-# before librccl.so is installed.
+# GIN_ANVIL_UNIT_TESTS=ON, make only those gtest targets). Do not pass
+# install.sh -t: that builds every test before hipify headers exist.
+# rccl-UnitTestsGinAnvilPlugin is built here after hipify_all.
 echo "==> [4/6] build RCCL (GIN, targets=${gpu_targets})"
 rccl_src="${workdir}/projects/rccl"
 rccl_prefix="${workdir}/.ci-out/rccl-install"
 rccl_build="${rccl_src}/build/release"
 rccl_fixtures_bin="${rccl_build}/test/rccl-UnitTestsFixtures"
 rccl_bcast_policy_ut_bin="${rccl_build}/test/rccl-UnitTestsGinSdmaBroadcastPolicy"
+rccl_fabric_ll_policy_ut_bin="${rccl_build}/test/rccl-UnitTestsGinFabricLLPolicy"
+rccl_anvil_plugin_ut_bin="${rccl_build}/test/rccl-UnitTestsGinAnvilPlugin"
 rm -rf "${rccl_prefix}"
 (
   cd "${rccl_src}"
@@ -133,14 +135,14 @@ if [[ ! -f "${rccl_prefix}/lib/librccl.so" && ! -f "${rccl_prefix}/lib/librccl.s
   exit 1
 fi
 
-echo "==> [4/6] build rccl-UnitTestsFixtures + GinSdmaBroadcastPolicy (GIN_ANVIL_UNIT_TESTS=ON)"
+echo "==> [4/6] build rccl-UnitTestsFixtures + GinSdmaBroadcastPolicy + GinFabricLLPolicy + GinAnvilPlugin (GIN_ANVIL_UNIT_TESTS=ON)"
 (
   cd "${rccl_build}"
   cmake . \
     -DBUILD_TESTS=ON \
     -DGIN_ANVIL_UNIT_TESTS=ON \
     -DROCSHMEM_INSTALL_DIR="${ROCSHMEM_INSTALL_DIR}"
-  make -j"${build_jobs}" rccl-UnitTestsFixtures rccl-UnitTestsGinSdmaBroadcastPolicy
+  make -j"${build_jobs}" rccl-UnitTestsFixtures rccl-UnitTestsGinSdmaBroadcastPolicy rccl-UnitTestsGinFabricLLPolicy rccl-UnitTestsGinAnvilPlugin
 )
 if [[ ! -x "${rccl_fixtures_bin}" ]]; then
   echo "ERROR: rccl-UnitTestsFixtures not built at ${rccl_fixtures_bin}" >&2
@@ -152,8 +154,20 @@ if [[ ! -x "${rccl_bcast_policy_ut_bin}" ]]; then
   ls -la "$(dirname "${rccl_bcast_policy_ut_bin}")" 2>/dev/null >&2 || true
   exit 1
 fi
+if [[ ! -x "${rccl_fabric_ll_policy_ut_bin}" ]]; then
+  echo "ERROR: rccl-UnitTestsGinFabricLLPolicy not built at ${rccl_fabric_ll_policy_ut_bin}" >&2
+  ls -la "$(dirname "${rccl_fabric_ll_policy_ut_bin}")" 2>/dev/null >&2 || true
+  exit 1
+fi
+if [[ ! -x "${rccl_anvil_plugin_ut_bin}" ]]; then
+  echo "ERROR: rccl-UnitTestsGinAnvilPlugin not built at ${rccl_anvil_plugin_ut_bin}" >&2
+  ls -la "$(dirname "${rccl_anvil_plugin_ut_bin}")" 2>/dev/null >&2 || true
+  exit 1
+fi
 echo "    rccl-UnitTestsFixtures: ${rccl_fixtures_bin}"
 echo "    rccl-UnitTestsGinSdmaBroadcastPolicy: ${rccl_bcast_policy_ut_bin}"
+echo "    rccl-UnitTestsGinFabricLLPolicy: ${rccl_fabric_ll_policy_ut_bin}"
+echo "    rccl-UnitTestsGinAnvilPlugin: ${rccl_anvil_plugin_ut_bin}"
 
 # Locate the in-tree RCCL CMake package config. rccl-tests' find_package(RCCL)
 # otherwise resolves roc::rccl to the nightly ROCm (its toolchain prepends

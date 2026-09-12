@@ -1,6 +1,9 @@
 # Changelog for rocSHMEM
 ## Unreleased - rocSHMEM 3.8.0 for ROCm 10.x
 
+### Changed
+* Anvil `connect()` retries SDMA queue creation across copy engines when the preferred engine is at the KFD queue cap, rolls back queues created for that destination on failure, and returns false instead of aborting the process so GIN-SDMA AllToAll can fail the rank cleanly.
+
 ## rocSHMEM 3.7.0 for ROCm 10.1
 
 ### Added

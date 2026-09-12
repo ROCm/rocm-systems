@@ -443,6 +443,7 @@ if(BUILD_TESTS)
       gin/gin_anvil_plugin_test_stubs.cc
       ../src/gin/gin_plugin_anvil_sdma.cc
       ../src/gin/gin_anvil_ipc_table_host.cc
+      ../src/gin/gin_fabric_a2a_lane.cc
       common/main_fixtures.cpp
       common/EnvVars.cpp
       common/TestChecks.cpp
@@ -452,6 +453,8 @@ if(BUILD_TESTS)
     target_include_directories(rccl-UnitTestsGinAnvilPlugin PRIVATE
       ${PROJECT_BINARY_DIR}/hipify/src/include
       ${PROJECT_BINARY_DIR}/hipify/src/include/nccl_device
+      ${PROJECT_SOURCE_DIR}/src
+      ${PROJECT_SOURCE_DIR}/src/include
       ${CMAKE_CURRENT_SOURCE_DIR}/gin
     )
     if(ROCSHMEM_SOURCE_DIR)
@@ -462,7 +465,7 @@ if(BUILD_TESTS)
         ${CMAKE_SOURCE_DIR}/../rocshmem/include)
     endif()
 
-    target_compile_definitions(rccl-UnitTestsGinAnvilPlugin PRIVATE ENABLE_ROCSHMEM_GIN)
+    target_compile_definitions(rccl-UnitTestsGinAnvilPlugin PRIVATE ENABLE_ROCSHMEM_GIN GIN_ANVIL_PLUGIN_UNIT_TEST)
 
     # No rccl link below, so the implicit ordering after hipify has to be explicit.
     add_dependencies(rccl-UnitTestsGinAnvilPlugin hipify_all)
@@ -520,6 +523,18 @@ if(BUILD_TESTS)
     RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/test")
   add_test(NAME rccl-UnitTestsGinSdmaPolicy COMMAND rccl-UnitTestsGinSdmaPolicy)
   set_tests_properties(rccl-UnitTestsGinSdmaPolicy PROPERTIES LABELS "unit")
+
+  add_executable(rccl-UnitTestsGinFabricLLPolicy gin/gin_fabric_ll_policy_test.cpp)
+  set_source_files_properties(gin/gin_fabric_ll_policy_test.cpp PROPERTIES LANGUAGE CXX)
+  target_include_directories(rccl-UnitTestsGinFabricLLPolicy PRIVATE
+    ${PROJECT_SOURCE_DIR}/src/include)
+  target_compile_definitions(rccl-UnitTestsGinFabricLLPolicy PRIVATE GIN_FABRIC_LL_POLICY_HOST_TEST)
+  target_link_libraries(rccl-UnitTestsGinFabricLLPolicy PRIVATE
+    ${GTEST_BOTH_LIBRARIES} Threads::Threads)
+  set_target_properties(rccl-UnitTestsGinFabricLLPolicy PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/test")
+  add_test(NAME rccl-UnitTestsGinFabricLLPolicy COMMAND rccl-UnitTestsGinFabricLLPolicy)
+  set_tests_properties(rccl-UnitTestsGinFabricLLPolicy PROPERTIES LABELS "unit")
 
   # GIN Anvil-SDMA hybrid AllGather (-D 3) policy host unit test (no GPU).
   # Compiles gin_sdma_allgather_policy.h from the sibling rccl-tests project with
@@ -882,6 +897,8 @@ if(BUILD_TESTS)
     endif()
 
     add_executable(rccl-UnitTestsMPI ${MPI_TEST_SOURCE_FILES})
+
+    target_include_directories(rccl-UnitTestsMPI PRIVATE ${PROJECT_SOURCE_DIR}/src)
 
     # plugin/net_reload_plugin.cpp is compiled into rccl-UnitTestsMPI so
     # RmaExternalPluginPutSignalMPITests can load its ncclRmaPlugin_v13 in-process

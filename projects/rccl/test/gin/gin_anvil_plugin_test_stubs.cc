@@ -10,11 +10,13 @@
 
 #include <gin_anvil/sdma_factory.h>
 
+#include "alloc.h"
 #include "bootstrap.h"
 #include "debug.h"
 #include "dev_runtime.h"
 
 #include <hip/hip_runtime.h>
+#include <hip/hip_runtime_api.h>
 #include <cstdlib>
 #include <cstring>
 #include <vector>
@@ -29,6 +31,13 @@ struct State {
   bool factoryNullHandles = false;
   bool lsaAddrFail = false;
   void* lsaSelfAddr = reinterpret_cast<void*>(0x70001000ULL);
+  bool useFabricMem = false;
+  bool fabricAddSelfFail = false;
+  bool fabricExchangeFail = false;
+  void* fabricPeerBase = reinterpret_cast<void*>(0x80000000ULL);
+  size_t fabricPeerStride = 0x1000;
+  bool fabricVmmQueryOk = true;
+  bool fabricRetainOk = true;
 };
 
 struct FakeSdmaOpaque {
@@ -50,12 +59,44 @@ void SetFactoryCreateFail(bool fail) { g.factoryCreateFail = fail; }
 void SetFactoryNullHandles(bool nullHandles) { g.factoryNullHandles = nullHandles; }
 void SetLsaAddrFail(bool fail) { g.lsaAddrFail = fail; }
 void SetLsaSelfAddr(void* addr) { g.lsaSelfAddr = addr; }
+void SetUseFabricMem(bool use) { g.useFabricMem = use; }
+void SetFabricAddSelfFail(bool fail) { g.fabricAddSelfFail = fail; }
+void SetFabricExchangeFail(bool fail) { g.fabricExchangeFail = fail; }
+void SetFabricPeerBase(void* ptr) { g.fabricPeerBase = ptr; }
+void SetFabricPeerStride(size_t stride) { g.fabricPeerStride = stride; }
+void SetFabricVmmQueryOk(bool ok) { g.fabricVmmQueryOk = ok; }
+void SetFabricRetainOk(bool ok) { g.fabricRetainOk = ok; }
 
 }  // namespace GinAnvilPluginStubs
+
+namespace GinAnvilPluginTestHooks {
+
+ncclResult_t queryVmmRange(void* data, size_t size, CUdeviceptr* base, size_t* memSize, int* numSegments) {
+  if (!GinAnvilPluginStubs::g.fabricVmmQueryOk) return ncclSystemError;
+  if (base == nullptr || memSize == nullptr || numSegments == nullptr) return ncclInvalidArgument;
+  *base = reinterpret_cast<CUdeviceptr>(GinAnvilPluginStubs::g.fabricPeerBase);
+  *memSize = size + 0x1000;
+  *numSegments = 1;
+  (void)data;
+  return ncclSuccess;
+}
+
+CUresult retainAllocationHandle(CUmemGenericAllocationHandle* handle, void* addr) {
+  if (!GinAnvilPluginStubs::g.fabricRetainOk) return CUDA_ERROR_UNKNOWN;
+  if (handle == nullptr) return CUDA_ERROR_INVALID_VALUE;
+  *handle = CUmemGenericAllocationHandle{};
+  (void)addr;
+  return CUDA_SUCCESS;
+}
+
+}  // namespace GinAnvilPluginTestHooks
 
 int ncclDebugLevel = NCCL_LOG_VERSION;
 uint64_t ncclDebugMask = NCCL_INIT;
 thread_local int ncclDebugNoWarn = 0;
+
+int64_t rcclParamDdaLL() { return 1; }
+int64_t rcclParamDdaLLThreshold() { return 64 * 1024; }
 
 void ncclDebugLog(ncclDebugLogLevel level, unsigned long flags, const char* filefunc, int line,
                   const char* fmt, ...) {
@@ -69,9 +110,41 @@ void ncclDebugLog(ncclDebugLogLevel level, unsigned long flags, const char* file
 ncclResult_t bootstrapAllGather(void* commState, void* allData, int size) {
   (void)commState;
   if (GinAnvilPluginStubs::g.bootstrapFail) return ncclInternalError;
+  if (allData == nullptr || size <= 0) return ncclSuccess;
+  const int n = GinAnvilPluginStubs::g.bootstrapNranks;
+  auto* bytes = static_cast<unsigned char*>(allData);
+  int src = -1;
+  for (int i = 0; i < n; ++i) {
+    bool nonempty = false;
+    for (int b = 0; b < size; ++b) {
+      if (bytes[static_cast<size_t>(i) * static_cast<size_t>(size) + static_cast<size_t>(b)] != 0) {
+        nonempty = true;
+        break;
+      }
+    }
+    if (nonempty) {
+      src = i;
+      break;
+    }
+  }
+  if (src >= 0) {
+    for (int i = 0; i < n; ++i) {
+      bool empty = true;
+      for (int b = 0; b < size; ++b) {
+        if (bytes[static_cast<size_t>(i) * static_cast<size_t>(size) + static_cast<size_t>(b)] != 0) {
+          empty = false;
+          break;
+        }
+      }
+      if (empty) {
+        memcpy(bytes + static_cast<size_t>(i) * static_cast<size_t>(size),
+               bytes + static_cast<size_t>(src) * static_cast<size_t>(size), static_cast<size_t>(size));
+      }
+    }
+  }
   if (size == static_cast<int>(sizeof(int))) {
     int* devs = static_cast<int*>(allData);
-    for (int i = 0; i < GinAnvilPluginStubs::g.bootstrapNranks; ++i) {
+    for (int i = 0; i < n; ++i) {
       if (devs[i] < 0) devs[i] = 0;
     }
   }
@@ -162,4 +235,41 @@ extern "C" int gin_anvil_sdma_get_num_channels(gin_anvil_sdma_handle_t handle) {
 
 extern "C" int gin_anvil_sdma_get_channel_stride(gin_anvil_sdma_handle_t handle) {
   return handle ? reinterpret_cast<GinAnvilPluginStubs::FakeSdmaOpaque*>(handle)->sdmaChannelStride : 0;
+}
+
+#include "algorithms/dda/fabric/fabric_init.h"
+#include "algorithms/dda/fabric/fabric_mem_handler.h"
+
+bool ginAnvilUseFabricMem(struct ncclComm* comm) {
+  (void)comm;
+  return GinAnvilPluginStubs::g.useFabricMem;
+}
+
+ncclFabricMemHandler::ncclFabricMemHandler(void* bootstrap, int rank, int nranks, struct ncclMemManager* manager)
+  : bootstrap_(bootstrap), rank_(rank), nranks_(nranks), manager_(manager), selfPtr_(nullptr), selfHandle_{},
+    selfSize_(0), memPtrs_(static_cast<size_t>(nranks), nullptr), exchanged_(false) {}
+
+ncclFabricMemHandler::~ncclFabricMemHandler() {}
+
+ncclResult_t ncclFabricMemHandler::addSelfDeviceMem(void* deviceMemPtr, CUmemGenericAllocationHandle handle,
+                                                    size_t size) {
+  if (GinAnvilPluginStubs::g.fabricAddSelfFail) return ncclSystemError;
+  selfPtr_ = deviceMemPtr;
+  selfHandle_ = handle;
+  selfSize_ = size;
+  if (rank_ >= 0 && rank_ < nranks_) memPtrs_[static_cast<size_t>(rank_)] = deviceMemPtr;
+  return ncclSuccess;
+}
+
+ncclResult_t ncclFabricMemHandler::exchangeMemPtrs() {
+  if (GinAnvilPluginStubs::g.fabricExchangeFail) return ncclSystemError;
+  exchanged_ = true;
+  return ncclSuccess;
+}
+
+ncclResult_t ncclFabricMemHandler::getPeerDeviceMemPtr(int peerRank, void** outPeerPtr) const {
+  if (!outPeerPtr || peerRank < 0 || peerRank >= nranks_) return ncclInvalidArgument;
+  uintptr_t base = reinterpret_cast<uintptr_t>(GinAnvilPluginStubs::g.fabricPeerBase);
+  *outPeerPtr = reinterpret_cast<void*>(base + static_cast<uintptr_t>(peerRank) * GinAnvilPluginStubs::g.fabricPeerStride);
+  return ncclSuccess;
 }

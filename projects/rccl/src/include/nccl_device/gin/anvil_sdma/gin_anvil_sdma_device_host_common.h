@@ -12,10 +12,10 @@
 
 struct ncclGinAnvilIpcBufEntry;
 
-#define NCCL_GIN_ANVIL_SDMA_NET_VERSION 115
+#define NCCL_GIN_ANVIL_SDMA_NET_VERSION 116
 
 /** Must match host plugin and device kernel build; checked on device. */
-#define NCCL_GIN_ANVIL_SDMA_LAYOUT_MAGIC 0xA6E17111u
+#define NCCL_GIN_ANVIL_SDMA_LAYOUT_MAGIC 0xA6E17112u
 
 /** Default SDMA threshold (bytes). Transfers of at most this size use inlined IPC flat stores;
  *  larger transfers use direct Anvil SDMA. */
@@ -47,6 +47,15 @@ struct ncclGinAnvilSdmaGPUContext {
   uintptr_t* signal_remote_addrs;  // [nRanks] peer signal region bases (GDA signal_raddrs pattern)
   uint32_t ipcAgentFence;          // 0=__threadfence_system on IPC (default), 1=agent-scope release
   uint32_t ipcSignalPeer;          // 1=shader IPC atomic signalPeer, 0=SDMA ATOMIC packet (default)
+
+  // Private device-API DDA lane. Unlike ncclDevComm, this backend-owned
+  // context can evolve without changing the public device-communicator ABI.
+  void** fabricA2APeerScratch;
+  uint32_t* fabricA2ALlEpoch;
+  size_t fabricA2AScratchBytes;
+  size_t fabricA2ALlThreshold;
+  int fabricA2ALlEpochLen;
+  uint32_t fabricA2AEnabled;
 };
 
 struct ncclGinAnvilSdmaMemHandle {
