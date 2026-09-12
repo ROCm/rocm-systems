@@ -610,9 +610,10 @@ static ncclResult_t symMemoryRegisterGin(struct ncclComm* comm, struct ncclDevrM
   size_t* globalPaddedSegmentSizes = nullptr;
 
   if (!mem->globalHasSysmemSegment) {
-    NCCLCHECK(ncclGinRegister(comm, mem->primaryAddr, mem->size, mem->ginHostWins, mem->ginDevWins, mem->winFlags,
-                              mem->maxGlobalNumSegments > 1, NCCL_PTR_CUDA));
-    NCCLCHECK(ncclCalloc(&mem->ginSegmentInfos, 1));
+    NCCLCHECKGOTO(ncclGinRegister(comm, mem->primaryAddr, mem->size, mem->ginHostWins, mem->ginDevWins, mem->winFlags,
+                                   mem->maxGlobalNumSegments > 1, NCCL_PTR_CUDA),
+                  ret, fail_simple);
+    NCCLCHECKGOTO(ncclCalloc(&mem->ginSegmentInfos, 1), ret, fail_simple);
     mem->ginSegmentInfos[0].memType = CU_MEM_LOCATION_TYPE_DEVICE;
     mem->ginSegmentInfos[0].segmentSize = mem->size;
     for (int i = 0; i < NCCL_GIN_MAX_CONNECTIONS; i++) {
@@ -682,6 +683,11 @@ exit:
   free(paddedSegmentSizes);
   free(globalPaddedSegmentSizes);
   return ret;
+fail_simple:
+  if (!mem->globalHasSysmemSegment) {
+    (void)ncclGinDeregister(comm, mem->ginHostWins);
+  }
+  goto exit;
 fail:
   for (int i = 0; i < numSegmentsRegistered; i++) {
     ncclGinDeregister(comm, mem->ginSegmentInfos[i].ginHostWins);
@@ -695,6 +701,18 @@ static ncclResult_t symMemoryRegisterRma(struct ncclComm* comm, struct ncclDevrM
   NCCLCHECK(ncclRmaProxyConnectOnce(comm));
   NCCLCHECK(ncclRmaProxyRegister(comm, mem->primaryAddr, mem->size, mem->rmaHostWins));
   return ncclSuccess;
+}
+
+static void symMemoryUnregister(struct ncclComm* comm, struct ncclDevrMemory* mem) {
+  struct ncclDevrState* devr = &comm->devrState;
+  if (devr->ginEnabled && mem->ginSegmentInfos != nullptr) {
+    for (int segment = 0; segment < mem->numGinSegments; segment++) {
+      ncclGinDeregister(comm, mem->ginSegmentInfos[segment].ginHostWins);
+    }
+  }
+  if (devr->rmaProxyEnabled && mem->maxGlobalNumSegments == 1) {
+    (void)ncclRmaProxyDeregister(comm, mem->rmaHostWins);
+  }
 }
 
 // On success we take caller's reference on memHandle.
@@ -804,14 +822,7 @@ fail_mem_space_teams:
     while (*ptr != nullptr && *ptr != mem) ptr = &(*ptr)->next;
     if (*ptr == mem) *ptr = mem->next;
   }
-  if (mem->ginSegmentInfos != nullptr) {
-    for (int segment = 0; segment < mem->numGinSegments; segment++) {
-      ncclGinDeregister(comm, mem->ginSegmentInfos[segment].ginHostWins);
-    }
-  }
-  if (mem->rmaHostWins[0] != nullptr) {
-    (void)ncclRmaProxyDeregister(comm, mem->rmaHostWins);
-  }
+  symMemoryUnregister(comm, mem);
   for (struct ncclDevrTeam* t = devr->teamHead; t != nullptr; t = t->next) {
     symUnbindTeamMemory(comm, t, mem);
   }
@@ -844,14 +855,7 @@ static void symMemoryDestroy(struct ncclComm* comm, struct ncclDevrMemory* mem) 
     return;
   }
 
-  if (devr->ginEnabled && mem->ginSegmentInfos != nullptr) {
-    for (int segment = 0; segment < mem->numGinSegments; segment++) {
-      ncclGinDeregister(comm, mem->ginSegmentInfos[segment].ginHostWins);
-    }
-  }
-  if (devr->rmaProxyEnabled && mem->maxGlobalNumSegments == 1) {
-    ncclRmaProxyDeregister(comm, mem->rmaHostWins);
-  }
+  symMemoryUnregister(comm, mem);
   for (struct ncclDevrTeam* t = devr->teamHead; t != nullptr; t = t->next) {
     symUnbindTeamMemory(comm, t, mem);
   }

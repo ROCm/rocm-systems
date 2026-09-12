@@ -167,6 +167,9 @@ void* ncclMemoryStack::allocateSpilled(struct ncclMemoryStack*, size_t size, siz
 // ---------------------------------------------------------------------------
 // GIN host.
 // ---------------------------------------------------------------------------
+static int devRuntimeTestGinRegisterFail = 0;
+
+extern "C" void DevRuntimeTests_SetGinRegisterFail(int fail) { devRuntimeTestGinRegisterFail = fail; }
 ncclResult_t ncclGetGinType(struct ncclComm*, ncclGinType_t* ginType) {
   if (ginType) *ginType = NCCL_GIN_TYPE_NONE;
   return ncclSuccess;
@@ -182,6 +185,7 @@ ncclResult_t ncclGinDevCommSetup(struct ncclComm*, struct ncclDevCommRequirement
 ncclResult_t ncclGinDevCommFree(struct ncclComm*, struct ncclDevComm const*) { return ncclSuccess; }
 ncclResult_t ncclGinRegister(struct ncclComm*, void*, size_t, void*[NCCL_GIN_MAX_CONNECTIONS],
                              ncclGinWindow_t[NCCL_GIN_MAX_CONNECTIONS], int, bool, int) {
+  if (devRuntimeTestGinRegisterFail) return ncclInternalError;
   return ncclSuccess;
 }
 ncclResult_t ncclGinDeregister(struct ncclComm*, void*[NCCL_GIN_MAX_CONNECTIONS]) { return ncclSuccess; }
