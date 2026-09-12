@@ -74,7 +74,7 @@ jobs:
       - name: Fetch sources
         timeout-minutes: 30
         run: |
-          ./TheRock/build_tools/fetch_sources.py --jobs 12 --no-include-rocm-systems
+          ./TheRock/build_tools/fetch_sources.py --jobs 12 --depth 1 --no-include-rocm-systems
 
       - name: Patch rocm-systems
         run: |
