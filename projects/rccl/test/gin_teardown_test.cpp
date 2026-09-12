@@ -20,6 +20,7 @@
 
 extern int rcclTestHipMemAddressFreeCount;
 extern "C" void DevRuntimeTests_SetGinRegisterFail(int fail);
+extern "C" struct ncclDevrMemory* DevRuntimeTests_GinRegisterMemHeadAtCall();
 
 // Build the smallest ncclComm/ncclDevrState that symMemoryObtain will accept:
 // a single-rank, single-LSA-team comm with GIN and RMA proxy disabled.
@@ -124,6 +125,7 @@ TEST_F(SymMemoryObtainTest, ObtainFailureUnlinksMemHeadWhenGinRegisterFails) {
 
   EXPECT_NE(symMemoryObtain(comm, &memHandle, /*numSegments=*/1, userAddr, /*size=*/4096, /*winFlags=*/0, &mem),
             ncclSuccess);
+  EXPECT_NE(DevRuntimeTests_GinRegisterMemHeadAtCall(), nullptr);
   EXPECT_EQ(comm->devrState.memHead, nullptr);
 
   DevRuntimeTests_SetGinRegisterFail(0);
