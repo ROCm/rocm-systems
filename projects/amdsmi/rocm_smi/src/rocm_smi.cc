@@ -39,6 +39,7 @@
 #include "rocm_smi/rocm_smi_main.h"
 #include "rocm_smi/rocm_smi_npm.h"
 #include "rocm_smi/rocm_smi_utils.h"
+#include "rocm_smi/rocm_smi_vram.h"
 
 using amd::smi::AMDGpuMetricTypeId_t;
 using amd::smi::getRSMIStatusString;
@@ -2549,6 +2550,16 @@ static const std::map<rsmi_compute_partition_type_t, std::string>
         {RSMI_COMPUTE_PARTITION_SPX, "SPX"},         {RSMI_COMPUTE_PARTITION_DPX, "DPX"},
         {RSMI_COMPUTE_PARTITION_TPX, "TPX"},         {RSMI_COMPUTE_PARTITION_QPX, "QPX"}};
 
+// True for the multi-partition compute modes (anything other than SPX/unknown).
+// Reuses the compute-partition string map so the mode list has a single source.
+static bool is_multi_partition_mode(const std::string& compute_partition) {
+  auto it = mapStringToRSMIComputePartitionTypes.find(compute_partition);
+  if (it == mapStringToRSMIComputePartitionTypes.end()) {
+    return false;
+  }
+  return it->second != RSMI_COMPUTE_PARTITION_SPX;
+}
+
 static const std::map<std::string, rsmi_compute_partition_mem_alloc_mode_t>
     mapStringToRSMIMemAllocModeTypes{{"CAPPING", RSMI_COMPUTE_PARTITION_MEM_ALLOC_CAPPING},
                                      {"ALL", RSMI_COMPUTE_PARTITION_MEM_ALLOC_ALL}};
@@ -4174,6 +4185,24 @@ rsmi_status_t rsmi_dev_supported_power_cap_get(uint32_t dv_ind, uint32_t* sensor
   CATCH
 }
 
+namespace amd::smi {
+// APUs are detected by size (kfd_total > sysfs_total), not a flag, because the
+// driver exposes no APU marker (processor_type is AMD_GPU for APU and discrete
+// alike).
+// TODO(#8476): the size comparison is a proxy until APUs are directly
+// identifiable; a semantic check would compare only the KFD FB_PUBLIC banks.
+bool vram_total_prefer_kfd(bool sysfs_read_ok, uint64_t sysfs_total,
+                           const std::string& compute_partition, uint64_t kfd_total) {
+  if (!sysfs_read_ok || sysfs_total == 0) {
+    return true;
+  }
+  if (is_multi_partition_mode(compute_partition)) {
+    return true;
+  }
+  return kfd_total > 0 && kfd_total > sysfs_total;
+}
+}  // namespace amd::smi
+
 rsmi_status_t rsmi_dev_memory_total_get(uint32_t dv_ind, rsmi_memory_type_t mem_type,
                                         uint64_t* total) {
   TRY rsmi_status_t ret;
@@ -4207,14 +4236,47 @@ rsmi_status_t rsmi_dev_memory_total_get(uint32_t dv_ind, rsmi_memory_type_t mem_
   // This is needed to avoid returning garbage value in case of failure
   ret = get_dev_value_int(mem_type_file, dv_ind, total);
 
-  // Fallback to KFD reported memory if VRAM total is 0 or sysfs read fails
-  if (mem_type == RSMI_MEM_TYPE_VRAM && (*total == 0 || ret != RSMI_STATUS_SUCCESS)) {
-    GET_DEV_AND_KFDNODE_FROM_INDX
-    if (kfd_node->get_total_memory(total) == 0 && *total > 0) {
-      ss << __PRETTY_FUNCTION__ << " | inside success fallback... "
+  // See vram_total_prefer_kfd in rocm_smi_vram.h for when the KFD total wins.
+  if (mem_type == RSMI_MEM_TYPE_VRAM) {
+    bool sysfs_read_ok = (ret == RSMI_STATUS_SUCCESS);
+    // Look up the KFD per-partition total non-fatally: unlike
+    // GET_DEV_AND_KFDNODE_FROM_INDX, a missing node must not discard a valid
+    // sysfs value, so this does not early-return on absence.
+    uint64_t kfd_total = 0;
+    auto& kfd_nodes = smi.kfd_node_map();
+    auto kfd_it = kfd_nodes.find(dev->kfd_gpu_id());
+    if (kfd_it != kfd_nodes.end()) {
+      kfd_it->second->get_total_memory(&kfd_total);
+    }
+    // Reading current_compute_partition touches XCD registers and can wake the
+    // GPU, so only do it when the answer depends on it: when both sources are
+    // usable and KFD reports less. Sysfs being unusable, or KFD reporting more
+    // (the APU carveout), already decides the outcome on its own, and equal
+    // totals substitute the same value either way.
+    std::string compute_partition_str;
+    if (sysfs_read_ok && *total != 0 && kfd_total > 0 && kfd_total < *total) {
+      rsmi_status_t cp_ret =
+          get_dev_value_str(amd::smi::kDevComputePartition, dv_ind, &compute_partition_str);
+      if (cp_ret != RSMI_STATUS_SUCCESS) {
+        // Read failure leaves the string empty -> treated as single-partition,
+        // so the size-based KFD preference still applies; log it for triage.
+        std::ostringstream cp_ss;
+        cp_ss << __PRETTY_FUNCTION__ << " | compute_partition read failed"
+              << " | Device #: " << std::to_string(dv_ind)
+              << " | ret = " << getRSMIStatusString(cp_ret);
+        LOG_DEBUG(cp_ss);
+      }
+    }
+    if (kfd_total > 0 && kfd_total != *total &&
+        amd::smi::vram_total_prefer_kfd(sysfs_read_ok, *total, compute_partition_str, kfd_total)) {
+      uint64_t sysfs_total = *total;
+      *total = kfd_total;
+      ss << __PRETTY_FUNCTION__ << " | preferring KFD VRAM total"
          << " | Device #: " << std::to_string(dv_ind)
          << " | Type = " << amd::smi::Device::get_type_string(mem_type_file)
-         << " | Data: total = " << std::to_string(*total)
+         << " | partition = " << (compute_partition_str.empty() ? "<none>" : compute_partition_str)
+         << " | sysfs total = " << std::to_string(sysfs_total)
+         << " | kfd total = " << std::to_string(kfd_total)
          << " | ret = " << getRSMIStatusString(RSMI_STATUS_SUCCESS);
       LOG_DEBUG(ss);
       return RSMI_STATUS_SUCCESS;
