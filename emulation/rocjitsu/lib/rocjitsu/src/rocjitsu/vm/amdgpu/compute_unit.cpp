@@ -901,7 +901,7 @@ void ComputeUnitCore::issue_instruction(Wavefront *active) {
     throw;
   }
 
-  if (execution_result.failed()) {
+  if (execution_result.failed()) [[unlikely]] {
     const InstructionExecutionError error = active->instruction_execution_error();
     const std::string failure = std::format("CU {}: wf{} could not execute {} at pc={:#x}: {}",
                                             this->name(), active->wf_id(), inst->mnemonic(),
