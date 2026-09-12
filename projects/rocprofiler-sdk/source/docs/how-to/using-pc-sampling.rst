@@ -118,21 +118,69 @@ The output lists if ``rocprofv3`` supports PC sampling on the GPU and the suppor
 The preceding output shows that the GPU supports PC sampling with the ``ROCPROFILER_PC_SAMPLING_METHOD_HOST_TRAP`` method and the ``ROCPROFILER_PC_SAMPLING_UNIT_TIME`` unit. The minimum and maximum intervals are also displayed.
 
 .. note::
-   Important firmware fixes to host-trap and stochastic PC-sampling for AMD Instinct MI300X have been made in ROCm 7.0.
-   To ensure that you have the latest fixes, check if you have the correct firmware versions installed:
+   Important firmware fixes to host-trap and stochastic PC-sampling for AMD Instinct MI300A and MI300X
+   shipped in ROCm 7.0. Before enabling PC sampling, confirm that the GPU firmware revisions meet the
+   minimum levels below.
 
-   For host-trap PC-sampling on MI300X: PSP TOS Firmware >= version 00.36.02.59 or 0x00360259
-   For stochastic PC-sampling on MI300X  as described in the following section: MEC Firmware feature version: 50, firmware version >= 0x0000001a
+   The rocprofiler-sdk checks **firmware version** (not feature version) for ``gfx942`` agents when PC
+   sampling is configured:
 
-To check the firmware versions, use:
+   - **Host-trap** (PSP TOS / SOS): firmware version >= ``0x00360259`` (version 00.36.02.59)
+   - **Stochastic** (MEC): firmware version >= ``0x000000b9``
+
+   These values are read from the same sysfs files that ROCm SMI uses
+   (for example, ``.../fw_version/sos_fw_version`` and ``.../fw_version/mec_fw_version``). If a version
+   cannot be read, PC sampling configuration returns ``ROCPROFILER_STATUS_ERROR_INCOMPATIBLE_FIRMWARE``.
+
+Checking firmware versions (matches SDK checks)
+-----------------------------------------------
+
+Use the ``rocm-smi`` tool (ROCm SMI) to inspect the firmware revisions that the SDK compares. This does
+not require root access:
 
 .. code-block:: bash
 
-  # To check PSP TOS Firmware:
-  sudo cat /sys/kernel/debug/dri/0/amdgpu_firmware_info | grep SOS
+  rocm-smi --showfwinfo
 
-  # To check MEC Firmware:
-  sudo cat /sys/kernel/debug/dri/1/amdgpu_firmware_info | grep MEC
+On MI300 systems, look for **SOS firmware version** (host-trap) and **MEC firmware version**
+(stochastic). Example output:
+
+.. code-block:: text
+
+  GPU[0]          : SOS firmware version:         0x0036025d
+  GPU[0]          : MEC firmware version:         192
+
+``rocm-smi`` may print MEC as a decimal value; ``192`` is ``0x000000c0`` in hexadecimal. Ensure SOS is
+at least ``0x00360259`` and MEC is at least ``0x000000b9`` (decimal ``185``).
+
+Checking firmware feature versions (debugfs, optional)
+------------------------------------------------------
+
+Stochastic PC sampling on MI300 is also associated with **MEC feature version 50** in release notes.
+The SDK does **not** read feature version today—only the firmware revision fields above.
+
+To view both feature and firmware version for every engine, use the AMDGPU debugfs interface. This
+requires ``sudo`` and the correct DRI index under ``/sys/kernel/debug/dri/``:
+
+.. code-block:: bash
+
+  # List available debugfs DRI indices (one per DRM card)
+  ls /sys/kernel/debug/dri/
+
+  # Replace <N> with the index that corresponds to your GPU (often matches the card number)
+  sudo grep -E "MEC|SOS" /sys/kernel/debug/dri/<N>/amdgpu_firmware_info
+
+Example debugfs lines:
+
+.. code-block:: text
+
+  MEC feature version: 50, firmware version: 0x000000c0
+  SOS feature version: 3539549, firmware version: 0x0036025d
+
+The DRI index is not always the same as the ``GPU[i]`` index shown by ``rocm-smi``. On multi-GPU
+systems, inspect each ``/sys/kernel/debug/dri/<N>/amdgpu_firmware_info`` file (or correlate
+``/sys/class/drm/card<N>/`` with the target device) until the output matches the GPU you intend to
+profile.
 
 Based on the available PC-sampling configurations, use the following command to profile the application using PC-sampling:
 

@@ -1406,6 +1406,7 @@ save(ArchiveT& ar, const rocprofiler_agent_v0_t& data)
     ROCP_SDK_SAVE_DATA_FIELD(logical_node_type_id);
     ROCP_SDK_SAVE_DATA_FIELD(runtime_visibility);
     ROCP_SDK_SAVE_DATA_FIELD(uuid);
+    ROCP_SDK_SAVE_DATA_FIELD(fw_info);
 
     auto generate = [&](auto name, const auto* value, uint64_t size) {
         using value_type = std::remove_const_t<std::remove_pointer_t<decltype(value)>>;
@@ -1506,6 +1507,25 @@ save(ArchiveT& ar, rocprofiler_buffer_tracing_runtime_initialization_record_t da
     ROCP_SDK_SAVE_DATA_FIELD(thread_id);
     ROCP_SDK_SAVE_DATA_FIELD(version);
     ROCP_SDK_SAVE_DATA_FIELD(instance);
+}
+
+template <typename ArchiveT>
+void
+save(ArchiveT& ar, rocprofiler_agent_firmware_info_v0_t data)
+{
+    ROCP_SDK_SAVE_DATA_FIELD(mec2_version);
+    ROCP_SDK_SAVE_DATA_FIELD(mec_version);
+    ROCP_SDK_SAVE_DATA_FIELD(rlc_version);
+    ROCP_SDK_SAVE_DATA_FIELD(rlc_srlc_version);
+    ROCP_SDK_SAVE_DATA_FIELD(rlc_srlg_version);
+    ROCP_SDK_SAVE_DATA_FIELD(rlc_srls_version);
+    ROCP_SDK_SAVE_DATA_FIELD(sdma2_version);
+    ROCP_SDK_SAVE_DATA_FIELD(sdma_version);
+    ROCP_SDK_SAVE_DATA_FIELD(smc_version);
+    ROCP_SDK_SAVE_DATA_FIELD(sos_version);
+    ROCP_SDK_SAVE_DATA_FIELD(ta_ras_version);
+    ROCP_SDK_SAVE_DATA_FIELD(ta_xgmi_version);
+    ROCP_SDK_SAVE_DATA_FIELD(vcn_version);
 }
 
 template <typename ArchiveT, typename EnumT, typename ValueT>
