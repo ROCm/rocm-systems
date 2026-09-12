@@ -309,13 +309,16 @@ inline std::string mpiCoordinatedSkipReason(bool localSkip, const char* localRea
  * comm->globalGinSupport == NCCL_GIN_CONNECTION_NONE. Requires comm.h at the
  * expansion site. Does not replace ginProxyTestSkipReason env gates.
  */
-#define SKIP_IF_GIN_UNSUPPORTED()                                                              \
-    do                                                                                         \
-    {                                                                                          \
-        ncclComm_t skipGinComm = getActiveCommunicator();                                      \
-        if(skipGinComm != nullptr &&                                                           \
-           skipGinComm->globalGinSupport == NCCL_GIN_CONNECTION_NONE)                          \
-            GTEST_SKIP() << "GIN not supported on this communicator (plugin missing or NET backend has no GIN)"; \
+#define SKIP_IF_GIN_UNSUPPORTED()                                                     \
+    do                                                                                \
+    {                                                                                 \
+        ncclComm_t skipGinComm = getActiveCommunicator();                             \
+        if(skipGinComm != nullptr &&                                                  \
+           skipGinComm->globalGinSupport == NCCL_GIN_CONNECTION_NONE)                 \
+        {                                                                             \
+            GTEST_SKIP()                                                              \
+                << "GIN not supported on this communicator (plugin missing or NET backend has no GIN)"; \
+        }                                                                             \
     } while(0)
 
 // Debug Logging Macros (TEST_*)

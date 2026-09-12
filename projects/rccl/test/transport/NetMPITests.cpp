@@ -379,11 +379,12 @@ public:
         {
             if(config.world_rank == 0)
             {
-                TEST_WARN(
-                    "Skipping: MultipleBufferSizesTest requires an even number of nodes and a uniform ranks-per-node layout (nodes=%d, min_ranks_per_node=%d, max_ranks_per_node=%d)",
-                    num_nodes,
-                    min_ranks_per_node,
-                    max_ranks_per_node);
+                TEST_WARN("Skipping: MultipleBufferSizesTest requires an even number of "
+                          "nodes and a uniform ranks-per-node layout (nodes=%d, "
+                          "min_ranks_per_node=%d, max_ranks_per_node=%d)",
+                          num_nodes,
+                          min_ranks_per_node,
+                          max_ranks_per_node);
             }
             GTEST_SKIP() << "MultipleBufferSizesTest requires even node count and uniform ranks-per-node";
             return;
