@@ -1,0 +1,51 @@
+schema: spec-driven
+
+source: https://github.com/ROCm/rocm-systems/tree/develop/projects/amdsmi
+
+context: |
+  AMD SMI: C++ library (libamd_smi.so) plus Python bindings, CLI (amd-smi),
+  Go shim, and Rust bindings. Sources live at projects/amdsmi in the
+  ROCm/rocm-systems monorepo; PRs target develop. Titles use Conventional
+  Commits: type(amdsmi): description. The library version lives in
+  include/amd_smi/amdsmi.h and drives the SOVERSION, the wrapper's SONAME
+  constant, and the wheel version.
+
+  AMD SMI reaches users through FOUR independent delivery channels. Naming them
+  precisely matters -- most packaging confusion comes from conflating them:
+
+    1. amd-smi-lib deb/rpm   -- built by AMD SMI's own CPack. Prefix /opt/rocm.
+                                Python module installed BOTH into the system
+                                interpreter's site-packages AND share/amd_smi.
+                                Links host libnl/libmnl and dlopens the host
+                                libdrm_amdgpu.
+    2. amdsmi PyPI wheel     -- pip install amdsmi. Bundles a SONAME-renamed
+                                libamd_smi_python.so; system fallback disabled.
+                                Built only when BUILD_PYTHON_WHEEL=ON.
+    3. ROCm pip (rocm-sdk)   -- TheRock routes the core-amdsmi artifact's lib
+                                and run components into the rocm-sdk-core
+                                wheel. Prefix-relative tree inside
+                                site-packages. No site-packages copy of the
+                                module -- share/amd_smi only, and nothing puts
+                                it on sys.path, so only the amd-smi console
+                                script works out of the box.
+    4. amdrocm-amdsmi + tarballs -- TheRock's native deb/rpm and tarballs, also
+                                from the core-amdsmi artifact. Prefix
+                                /opt/rocm/core-X.Y. Vendored lib/rocm_sysdeps.
+                                Same "no site-packages copy" property as 3.
+
+  Channels 3 and 4 come from TheRock, which builds AMD SMI as a CMake subproject
+  with CMAKE_INSTALL_PREFIX=<stage> and NEVER sets DESTDIR -- so AMD SMI's
+  site-packages install is skipped by design there.
+
+  The current behavior is captured in openspec/specs/ across eight
+  capabilities, all delivery: how AMD SMI is laid out, packaged, and reaches a
+  user through each channel.
+
+  amdsmi-install-layout (the prefix-relative tree every channel inherits),
+  amdsmi-python-* (loader, wheel, system package), amdsmi-therock-*
+  (subproject, artifact), and amdsmi-rocm-* (pip distribution, OS packages).
+
+  Read the relevant capability before proposing a change; a delta usually
+  belongs to exactly one of them. A capability states a contract, not an
+  implementation: if a requirement cannot be traced to code that exists, it
+  does not belong here.
