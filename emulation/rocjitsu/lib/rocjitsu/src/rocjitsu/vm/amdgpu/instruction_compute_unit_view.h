@@ -53,10 +53,15 @@ public:
   std::string full_path() const;
   simdojo::ComponentID id() const;
   simdojo::SimulationEngine *engine() const;
+  uint32_t fetch_instruction_word(uint64_t address, uint32_t process_id) const;
   void request_functional_yield();
   bool handle_sendmsg(Wavefront &wf, uint32_t message);
   void notify_trap_complete(Wavefront &wf);
-  bool signal_queue_exception(uint32_t queue_id, uint32_t process_id, uint64_t status);
+  /// Queue a runtime exception for delivery after instruction execution drops
+  /// the compute unit's wave-state lock.
+  bool signal_queue_exception(uint32_t queue_id, uint32_t process_id, uint64_t status,
+                              bool clear_debug_stop_on_success = false,
+                              bool retain_failure_for_debugger = true);
 
 private:
   ComputeUnitCore &raw_cu() { return *cu_; }

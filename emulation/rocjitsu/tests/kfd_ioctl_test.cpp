@@ -19,11 +19,15 @@
 #include "simdojo/sim/simulation.h"
 #include "util/unique_handle.h"
 
+#include "hsa/amd_hsa_queue.h"
+
 #include <gtest/gtest.h>
 
 #include <cerrno>
 #include <csignal>
 #include <fcntl.h>
+#include <poll.h>
+#include <spawn.h>
 #include <sys/eventfd.h>
 #include <sys/mman.h>
 #include <sys/prctl.h>
@@ -38,16 +42,241 @@
 #include <array>
 #include <atomic>
 #include <chrono>
+#include <condition_variable>
 #include <cstring>
 #include <functional>
+#include <future>
 #include <limits>
+#include <optional>
+#include <string>
+#include <string_view>
 #include <thread>
 #include <vector>
 
+extern char **environ;
+
 namespace {
+
+constexpr std::string_view kIsolatedProbeEnvironment = "ROCJITSU_KFD_IOCTL_TEST_PROBE";
+
+bool is_isolated_probe(std::string_view name) {
+  const char *probe = std::getenv(kIsolatedProbeEnvironment.data());
+  return probe != nullptr && probe == name;
+}
+
+int wait_for_child_with_timeout(pid_t child, std::chrono::milliseconds timeout) {
+  int status = 0;
+  const auto deadline = std::chrono::steady_clock::now() + timeout;
+  while (std::chrono::steady_clock::now() < deadline) {
+    pid_t waited = -1;
+    do {
+      waited = ::waitpid(child, &status, WNOHANG);
+    } while (waited < 0 && errno == EINTR);
+    if (waited == child) {
+      if (WIFEXITED(status))
+        return WEXITSTATUS(status);
+      return WIFSIGNALED(status) ? 128 + WTERMSIG(status) : -EIO;
+    }
+    if (waited < 0)
+      return -errno;
+    static_cast<void>(::poll(nullptr, 0, 10));
+  }
+
+  static_cast<void>(::kill(child, SIGKILL));
+  pid_t waited = -1;
+  do {
+    waited = ::waitpid(child, &status, WNOHANG);
+  } while (waited < 0 && errno == EINTR);
+  return -ETIMEDOUT;
+}
+
+int run_isolated_test_probe(std::string_view name, std::string_view gtest_name,
+                            std::chrono::milliseconds timeout) {
+  const std::string environment_prefix = std::string(kIsolatedProbeEnvironment) + "=";
+  std::string probe_environment = environment_prefix + std::string(name);
+  std::vector<char *> child_environment;
+  for (char **entry = environ; entry != nullptr && *entry != nullptr; ++entry) {
+    if (!std::string_view(*entry).starts_with(environment_prefix))
+      child_environment.push_back(*entry);
+  }
+  child_environment.push_back(probe_environment.data());
+  child_environment.push_back(nullptr);
+
+  std::string filter = "--gtest_filter=" + std::string(gtest_name);
+  char executable[] = "/proc/self/exe";
+  char color[] = "--gtest_color=no";
+  std::array<char *, 4> arguments{executable, filter.data(), color, nullptr};
+  pid_t child = -1;
+  const int spawn_result = ::posix_spawn(&child, executable, nullptr, nullptr, arguments.data(),
+                                         child_environment.data());
+  if (spawn_result != 0)
+    return -spawn_result;
+  return wait_for_child_with_timeout(child, timeout);
+}
+
+TEST(CommandProcessorTest, InterruptCallbackRemovalWaitsForActiveCall) {
+  constexpr std::string_view kProbe = "interrupt-callback-removal";
+  if (!is_isolated_probe(kProbe)) {
+    EXPECT_EQ(run_isolated_test_probe(kProbe,
+                                      "CommandProcessorTest."
+                                      "InterruptCallbackRemovalWaitsForActiveCall",
+                                      std::chrono::seconds(10)),
+              0);
+    return;
+  }
+
+  rocjitsu::amdgpu::CommandProcessor cp("cp");
+  cp.startup();
+  std::promise<void> callback_entered;
+  std::promise<void> release_callback;
+  std::atomic<uint32_t> calls = 0;
+  cp.set_interrupt_callback([&](uint32_t, uint32_t event_id) {
+    ++calls;
+    if (event_id == 1)
+      return;
+    callback_entered.set_value();
+    release_callback.get_future().wait();
+  });
+
+  cp.invoke_completion_interrupt_callback_for_test(1, 1);
+  auto callback_entered_future = callback_entered.get_future();
+  std::jthread caller([&] { cp.invoke_interrupt_callback_for_test(1, 2); });
+  if (callback_entered_future.wait_for(std::chrono::seconds(1)) != std::future_status::ready) {
+    release_callback.set_value();
+    caller.join();
+    FAIL() << "interrupt callback was not entered";
+  }
+  std::promise<void> drain_reached;
+  auto drain_reached_future = drain_reached.get_future();
+  cp.set_interrupt_callback_drain_hook_for_testing([&] { drain_reached.set_value(); });
+  auto removal = std::async(std::launch::async, [&] { cp.set_interrupt_callback(nullptr); });
+  if (drain_reached_future.wait_for(std::chrono::seconds(1)) != std::future_status::ready) {
+    release_callback.set_value();
+    caller.join();
+    removal.wait();
+    FAIL() << "callback removal did not reach the active-call drain";
+  }
+  EXPECT_EQ(removal.wait_for(std::chrono::milliseconds(20)), std::future_status::timeout);
+
+  release_callback.set_value();
+  EXPECT_EQ(removal.wait_for(std::chrono::seconds(1)), std::future_status::ready);
+  caller.join();
+  cp.set_interrupt_callback_drain_hook_for_testing({});
+  cp.invoke_completion_interrupt_callback_for_test(1, 2);
+  EXPECT_EQ(calls.load(), 2u);
+  cp.shutdown();
+}
+
+TEST(CommandProcessorTest, DrainedInterruptCallbackLeaseDoesNotTouchDestroyedOwner) {
+  constexpr std::string_view kProbe = "drained-interrupt-callback-lease";
+  if (!is_isolated_probe(kProbe)) {
+    EXPECT_EQ(run_isolated_test_probe(
+                  kProbe,
+                  "CommandProcessorTest.DrainedInterruptCallbackLeaseDoesNotTouchDestroyedOwner",
+                  std::chrono::seconds(10)),
+              0);
+    return;
+  }
+
+  auto cp = std::make_unique<rocjitsu::amdgpu::CommandProcessor>("cp");
+  cp->set_interrupt_callback([](uint32_t, uint32_t) {});
+
+  std::promise<void> lease_drained;
+  auto lease_drained_future = lease_drained.get_future();
+  std::promise<void> release_lease;
+  auto release_lease_future = release_lease.get_future().share();
+  cp->set_interrupt_callback_release_hook_for_testing([&] {
+    lease_drained.set_value();
+    release_lease_future.wait();
+  });
+
+  auto *raw_cp = cp.get();
+  std::jthread caller([raw_cp] { raw_cp->invoke_interrupt_callback_for_test(1, 2); });
+  if (lease_drained_future.wait_for(std::chrono::seconds(1)) != std::future_status::ready) {
+    release_lease.set_value();
+    caller.join();
+    FAIL() << "callback lease did not publish its drained state";
+  }
+
+  auto removal =
+      std::async(std::launch::async, [raw_cp] { raw_cp->set_interrupt_callback(nullptr); });
+  if (removal.wait_for(std::chrono::seconds(1)) != std::future_status::ready) {
+    release_lease.set_value();
+    caller.join();
+    removal.wait();
+    FAIL() << "external removal did not observe the drained lease";
+  }
+  removal.get();
+
+  // Returning from external replacement is the quiescence boundary promised
+  // to callers. Destroy the owner while the lease destructor remains paused;
+  // after this point it may touch only its shared callback state.
+  cp.reset();
+  release_lease.set_value();
+  caller.join();
+}
+
+int run_interrupt_callback_self_removal() {
+  rocjitsu::amdgpu::CommandProcessor cp("cp");
+  std::promise<void> callback_removed_itself;
+  std::promise<void> release_callback;
+  std::atomic<uint32_t> calls = 0;
+  cp.set_interrupt_callback([&](uint32_t, uint32_t) {
+    ++calls;
+    cp.set_interrupt_callback(nullptr);
+    callback_removed_itself.set_value();
+    release_callback.get_future().wait();
+  });
+
+  std::jthread caller([&] { cp.invoke_interrupt_callback_for_test(1, 2); });
+  callback_removed_itself.get_future().wait();
+  std::promise<void> drain_reached;
+  cp.set_interrupt_callback_drain_hook_for_testing([&] { drain_reached.set_value(); });
+  auto external_replacement =
+      std::async(std::launch::async, [&] { cp.set_interrupt_callback([](uint32_t, uint32_t) {}); });
+
+  // The hook runs after the reentrancy scan and immediately before the drain,
+  // so the timeout cannot be explained by delayed async-worker scheduling.
+  auto drain_future = drain_reached.get_future();
+  if (drain_future.wait_for(std::chrono::seconds(1)) != std::future_status::ready) {
+    release_callback.set_value();
+    caller.join();
+    external_replacement.wait();
+    return 1;
+  }
+  if (external_replacement.wait_for(std::chrono::milliseconds(20)) != std::future_status::timeout) {
+    release_callback.set_value();
+    caller.join();
+    return 2;
+  }
+
+  release_callback.set_value();
+  if (external_replacement.wait_for(std::chrono::seconds(1)) != std::future_status::ready) {
+    caller.join();
+    return 3;
+  }
+  caller.join();
+  cp.set_interrupt_callback_drain_hook_for_testing({});
+  cp.invoke_interrupt_callback_for_test(1, 2);
+  return calls.load() == 1 ? 0 : 4;
+}
+
+TEST(CommandProcessorTest, InterruptCallbackCanRemoveItself) {
+  GTEST_FLAG_SET(death_test_style, "threadsafe");
+  ASSERT_EXIT(
+      {
+        // Reentrant removal is itself the deadlock probe. Isolate it so the
+        // alarm terminates only this child and CTest reports a bounded failure.
+        alarm(5);
+        _exit(run_interrupt_callback_self_removal());
+      },
+      ::testing::ExitedWithCode(0), "");
+}
 
 const std::string CONFIG_PATH = std::string(CONFIG_DIR) + "/gfx950_mi355x.json";
 constexpr uint32_t kGpuId = 38144;
+const std::string CDNA2_CONFIG_PATH = std::string(CONFIG_DIR) + "/gfx90a_mi210_kmd.json";
+constexpr uint32_t kCdna2GpuId = 50149;
 const std::string CDNA5_CONFIG_PATH = std::string(CONFIG_DIR) + "/gfx1250_mi455x.json";
 constexpr uint32_t kCdna5GpuId = 1250;
 
@@ -169,8 +398,8 @@ protected:
     engine_->register_as_primary();
 
     driver_->setup_topology(loaded_.device, num_xcds);
-    int fd = driver_->open();
-    ASSERT_GE(fd, 0);
+    kfd_fd_ = driver_->open();
+    ASSERT_GE(kfd_fd_, 0);
   }
 
   void TearDown() override {
@@ -186,16 +415,252 @@ protected:
   // rejects an unusable descriptor; enable-success tests therefore need a live
   // fd. Tracked here so TearDown closes it.
   int make_debug_fd() {
-    int fd = eventfd(0, EFD_CLOEXEC);
+    int fd = eventfd(0, EFD_CLOEXEC | EFD_NONBLOCK);
     EXPECT_GE(fd, 0);
     debug_fds_.push_back(fd);
     return fd;
+  }
+
+  void expect_combined_event_subscription_transition(uint64_t initial_mask, uint64_t updated_mask,
+                                                     bool publish_from_retry = false) {
+    constexpr uint64_t kMemoryViolation = KFD_EC_MASK(EC_QUEUE_WAVE_MEMORY_VIOLATION);
+    constexpr uint64_t kWaveTrap = KFD_EC_MASK(EC_QUEUE_WAVE_TRAP);
+    constexpr uint64_t kCombined = kMemoryViolation | kWaveTrap;
+    ASSERT_NE(initial_mask & kCombined, 0u);
+    ASSERT_NE(updated_mask & kCombined, 0u);
+
+    std::vector<uint8_t> ring(4096);
+    uint64_t read_pointer = 0;
+    uint64_t write_pointer = 0;
+    kfd_ioctl_create_queue_args create{};
+    create.gpu_id = kGpuId;
+    create.queue_type = KFD_IOC_QUEUE_TYPE_COMPUTE_AQL;
+    create.ring_base_address = reinterpret_cast<uint64_t>(ring.data());
+    create.ring_size = static_cast<uint32_t>(ring.size());
+    create.read_pointer_address = reinterpret_cast<uint64_t>(&read_pointer);
+    create.write_pointer_address = reinterpret_cast<uint64_t>(&write_pointer);
+    ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_CREATE_QUEUE, &create), 0);
+
+    const int notifier = eventfd(0, EFD_CLOEXEC | EFD_NONBLOCK);
+    ASSERT_GE(notifier, 0);
+    debug_fds_.push_back(notifier);
+    kfd_ioctl_dbg_trap_args enable{};
+    enable.pid = static_cast<uint32_t>(getpid());
+    enable.op = KFD_IOC_DBG_TRAP_ENABLE;
+    enable.enable.dbg_fd = notifier;
+    enable.enable.exception_mask = initial_mask;
+    ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &enable), 0);
+
+    kfd_queue_snapshot_entry snapshot_entry{};
+    kfd_ioctl_dbg_trap_args snapshot{};
+    snapshot.pid = static_cast<uint32_t>(getpid());
+    snapshot.op = KFD_IOC_DBG_TRAP_GET_QUEUE_SNAPSHOT;
+    snapshot.queue_snapshot.exception_mask = KFD_EC_MASK(EC_QUEUE_NEW);
+    snapshot.queue_snapshot.snapshot_buf_ptr = reinterpret_cast<uint64_t>(&snapshot_entry);
+    snapshot.queue_snapshot.num_queues = 1;
+    snapshot.queue_snapshot.entry_size = sizeof(snapshot_entry);
+    ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &snapshot), 0);
+
+    kfd_ioctl_dbg_trap_args exceptions{};
+    exceptions.pid = static_cast<uint32_t>(getpid());
+    exceptions.op = KFD_IOC_DBG_TRAP_SET_EXCEPTIONS_ENABLED;
+    int mask_update_result = -1;
+    if (publish_from_retry) {
+      driver_->set_debug_notifier_dup_error_for_testing(EMFILE);
+      EXPECT_FALSE(driver_->notify_debug_event_for_testing(create.queue_id, kCombined,
+                                                           /*retain_on_rejection=*/true));
+
+      auto write_entered = std::make_shared<std::promise<void>>();
+      auto write_entered_future = write_entered->get_future();
+      auto release_write = std::make_shared<std::promise<void>>();
+      auto release_write_future = release_write->get_future().share();
+      driver_->set_debug_notification_write_hook_for_testing([write_entered, release_write_future] {
+        write_entered->set_value();
+        release_write_future.wait();
+      });
+      driver_->set_debug_notifier_dup_error_for_testing(std::nullopt);
+      if (write_entered_future.wait_for(std::chrono::seconds(2)) != std::future_status::ready) {
+        release_write->set_value();
+        driver_->set_debug_notification_write_hook_for_testing({});
+        FAIL() << "background notification retry did not reach the writer";
+        return;
+      }
+
+      exceptions.set_exceptions_enabled.exception_mask = updated_mask;
+      mask_update_result = driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &exceptions);
+      release_write->set_value();
+      pollfd ready{notifier, POLLIN, 0};
+      EXPECT_EQ(::poll(&ready, 1, 2000), 1);
+      driver_->set_debug_notification_write_hook_for_testing({});
+    } else {
+      driver_->set_debug_notification_result_hook_for_testing([&](bool delivered) {
+        if (!delivered)
+          return;
+        exceptions.set_exceptions_enabled.exception_mask = updated_mask;
+        mask_update_result = driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &exceptions);
+      });
+      EXPECT_TRUE(driver_->notify_debug_event_for_testing(create.queue_id, kCombined,
+                                                          /*retain_on_rejection=*/true,
+                                                          /*reserve_runtime_on_rejection=*/true));
+      driver_->set_debug_notification_result_hook_for_testing({});
+    }
+    EXPECT_EQ(mask_update_result, 0);
+
+    uint64_t notifications = 0;
+    ASSERT_EQ(::read(notifier, &notifications, sizeof(notifications)),
+              static_cast<ssize_t>(sizeof(notifications)));
+    EXPECT_EQ(notifications, 1u);
+
+    auto process = driver_->find_process(driver_->local_process_id());
+    ASSERT_NE(process, nullptr);
+    {
+      std::lock_guard<std::mutex> lock(process->alloc_mutex_);
+      auto queue = process->queue_snapshot_map_.find(create.queue_id);
+      ASSERT_NE(queue, process->queue_snapshot_map_.end());
+      EXPECT_EQ(queue->second.runtime_exception_pending_status & kCombined, 0u);
+    }
+
+    kfd_ioctl_dbg_trap_args query{};
+    query.pid = static_cast<uint32_t>(getpid());
+    query.op = KFD_IOC_DBG_TRAP_QUERY_DEBUG_EVENT;
+    query.query_debug_event.exception_mask = kCombined;
+    int query_result = -EAGAIN;
+    for (int attempt = 0; attempt < 200 && query_result == -EAGAIN; ++attempt) {
+      query.query_debug_event.exception_mask = kCombined;
+      query_result = driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &query);
+      if (query_result == -EAGAIN)
+        static_cast<void>(::poll(nullptr, 0, 10));
+    }
+    ASSERT_EQ(query_result, 0);
+    EXPECT_EQ(query.query_debug_event.queue_id, create.queue_id);
+    EXPECT_EQ(query.query_debug_event.exception_mask, kCombined);
+  }
+
+  void expect_queue_wakeup_after_early_query(bool retry) {
+    constexpr uint64_t kException = KFD_EC_MASK(EC_QUEUE_WAVE_TRAP);
+    std::vector<uint8_t> ring(4096);
+    uint64_t read_pointer = 0;
+    uint64_t write_pointer = 0;
+    kfd_ioctl_create_queue_args create{};
+    create.gpu_id = kGpuId;
+    create.queue_type = KFD_IOC_QUEUE_TYPE_COMPUTE_AQL;
+    create.ring_base_address = reinterpret_cast<uint64_t>(ring.data());
+    create.ring_size = ring.size();
+    create.read_pointer_address = reinterpret_cast<uint64_t>(&read_pointer);
+    create.write_pointer_address = reinterpret_cast<uint64_t>(&write_pointer);
+    ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_CREATE_QUEUE, &create), 0);
+
+    const int notifier = make_debug_fd();
+    kfd_ioctl_dbg_trap_args enable{};
+    enable.pid = static_cast<uint32_t>(getpid());
+    enable.op = KFD_IOC_DBG_TRAP_ENABLE;
+    enable.enable.dbg_fd = notifier;
+    enable.enable.exception_mask = kException;
+    ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &enable), 0);
+    if (retry) {
+      driver_->set_debug_notifier_dup_error_for_testing(EMFILE);
+      EXPECT_FALSE(driver_->notify_debug_event_for_testing(create.queue_id, kException, true));
+    }
+    auto early_query_done = std::make_shared<std::promise<void>>();
+    auto early_query_done_future = early_query_done->get_future();
+    auto early_query_result = std::make_shared<std::atomic<int>>(-1);
+    driver_->set_debug_notification_result_hook_for_testing(
+        [this, notifier, pid = enable.pid, early_query_done, early_query_result](bool delivered) {
+          EXPECT_TRUE(delivered);
+          uint64_t notification = 0;
+          EXPECT_EQ(::read(notifier, &notification, sizeof(notification)),
+                    static_cast<ssize_t>(sizeof(notification)));
+          kfd_ioctl_dbg_trap_args query{};
+          query.pid = pid;
+          query.op = KFD_IOC_DBG_TRAP_QUERY_DEBUG_EVENT;
+          query.query_debug_event.exception_mask = kException;
+          early_query_result->store(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &query));
+          early_query_done->set_value();
+        });
+    if (retry) {
+      driver_->set_debug_notifier_dup_error_for_testing(std::nullopt);
+      EXPECT_EQ(early_query_done_future.wait_for(std::chrono::seconds(2)),
+                std::future_status::ready);
+    } else {
+      EXPECT_TRUE(driver_->notify_debug_event_for_testing(create.queue_id, kException, false));
+    }
+    driver_->set_debug_notification_result_hook_for_testing({});
+    ASSERT_TRUE(early_query_result->load() == 0 || early_query_result->load() == -EAGAIN);
+    if (early_query_result->load() == -EAGAIN) {
+      // A consumer goes back to poll after draining the first wake. It must
+      // not need timer-driven QUERY calls to discover the committed event.
+      pollfd ready{notifier, POLLIN, 0};
+      ASSERT_EQ(::poll(&ready, 1, 2000), 1);
+      uint64_t notification = 0;
+      ASSERT_EQ(::read(notifier, &notification, sizeof(notification)),
+                static_cast<ssize_t>(sizeof(notification)));
+      kfd_ioctl_dbg_trap_args query{};
+      query.pid = enable.pid;
+      query.op = KFD_IOC_DBG_TRAP_QUERY_DEBUG_EVENT;
+      query.query_debug_event.exception_mask = kException;
+      ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &query), 0);
+      EXPECT_EQ(query.query_debug_event.queue_id, create.queue_id);
+      EXPECT_NE(query.query_debug_event.exception_mask & kException, 0u);
+    }
+  }
+
+  void expect_process_notification_after_early_query(bool raise_before_commit,
+                                                     bool clear_exception_info = false) {
+    constexpr uint64_t kException = KFD_EC_MASK(EC_PROCESS_RUNTIME);
+    const int notifier = make_debug_fd();
+    kfd_ioctl_dbg_trap_args enable{};
+    enable.pid = static_cast<uint32_t>(getpid());
+    enable.op = KFD_IOC_DBG_TRAP_ENABLE;
+    enable.enable.dbg_fd = notifier;
+    enable.enable.exception_mask = kException;
+    ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &enable), 0);
+    auto consumed = std::make_shared<std::atomic<bool>>(false);
+    driver_->set_debug_notification_result_hook_for_testing([this, notifier, pid = enable.pid,
+                                                             consumed, raise_before_commit,
+                                                             clear_exception_info](bool delivered) {
+      if (consumed->exchange(true))
+        return;
+      EXPECT_TRUE(delivered);
+      uint64_t notification = 0;
+      EXPECT_EQ(::read(notifier, &notification, sizeof(notification)),
+                static_cast<ssize_t>(sizeof(notification)));
+      kfd_ioctl_dbg_trap_args query{};
+      query.pid = pid;
+      if (clear_exception_info) {
+        query.op = KFD_IOC_DBG_TRAP_QUERY_EXCEPTION_INFO;
+        query.query_exception_info.exception_code = EC_PROCESS_RUNTIME;
+        query.query_exception_info.clear_exception = 1;
+      } else {
+        query.op = KFD_IOC_DBG_TRAP_QUERY_DEBUG_EVENT;
+        query.query_debug_event.exception_mask = kException;
+      }
+      EXPECT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &query), 0);
+      if (raise_before_commit)
+        driver_->raise_process_debug_event_for_testing(pid, kException);
+    });
+    driver_->raise_process_debug_event_for_testing(enable.pid, kException);
+    driver_->set_debug_notification_result_hook_for_testing({});
+    EXPECT_TRUE(consumed->load());
+    if (!raise_before_commit)
+      driver_->raise_process_debug_event_for_testing(enable.pid, kException);
+    pollfd ready{notifier, POLLIN, 0};
+    ASSERT_EQ(::poll(&ready, 1, 2000), 1);
+    uint64_t notification = 0;
+    ASSERT_EQ(::read(notifier, &notification, sizeof(notification)),
+              static_cast<ssize_t>(sizeof(notification)));
+    kfd_ioctl_dbg_trap_args query{};
+    query.pid = enable.pid;
+    query.op = KFD_IOC_DBG_TRAP_QUERY_DEBUG_EVENT;
+    query.query_debug_event.exception_mask = kException;
+    ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &query), 0);
+    EXPECT_EQ(query.query_debug_event.exception_mask, kException);
   }
 
   rocjitsu::config::LoadedConfig loaded_;
   std::unique_ptr<simdojo::SimulationEngine> engine_;
   rocjitsu::SoC *soc_ = nullptr;
   rocjitsu::SimulatedKfd *driver_ = nullptr;
+  int kfd_fd_ = -1;
   std::vector<int> debug_fds_;
 };
 
@@ -206,6 +671,94 @@ class KfdIoctlRdna3Test : public KfdIoctlTest {
 protected:
   void SetUp() override { SetUpWithConfig(RDNA3_CONFIG_PATH); }
 };
+
+TEST_F(KfdIoctlRdna3Test, ConcurrentUnpublishableStopsAreRaceFree) {
+  constexpr uint32_t kThreadCount = 8;
+  std::atomic<uint32_t> ready = 0;
+  std::atomic<bool> start = false;
+  std::atomic<bool> unexpectedly_publishable = false;
+  {
+    std::vector<std::jthread> callers;
+    callers.reserve(kThreadCount);
+    for (uint32_t i = 0; i < kThreadCount; ++i) {
+      callers.emplace_back([&] {
+        ready.fetch_add(1, std::memory_order_release);
+        while (!start.load(std::memory_order_acquire))
+          std::this_thread::yield();
+        for (uint32_t call = 0; call < 100; ++call) {
+          if (driver_->debug_stop_publishable_for_testing(kRdna3GpuId))
+            unexpectedly_publishable.store(true, std::memory_order_relaxed);
+        }
+      });
+    }
+    while (ready.load(std::memory_order_acquire) != kThreadCount)
+      std::this_thread::yield();
+    start.store(true, std::memory_order_release);
+  }
+  EXPECT_FALSE(unexpectedly_publishable.load(std::memory_order_relaxed));
+}
+
+struct PreGfx12TrapParam {
+  const char *config_path;
+  uint32_t gpu_id;
+  uint32_t profiling_move;
+  uint32_t exception_move;
+  uint32_t sendmsg_interrupt;
+  uint32_t trap;
+};
+
+class KfdIoctlPreGfx12TrapTest : public KfdIoctlTest,
+                                 public ::testing::WithParamInterface<PreGfx12TrapParam> {
+protected:
+  void SetUp() override { SetUpWithConfig(GetParam().config_path); }
+};
+
+TEST(KfdIoctlHelpersTest, ClassifiesEveryPreGfx12TrapInterruptEncodingFamily) {
+  struct EncodingCase {
+    rj_code_arch_t arch;
+    uint32_t profiling_move;
+    uint32_t exception_move;
+  };
+  constexpr EncodingCase kCases[] = {
+      {ROCJITSU_CODE_ARCH_CDNA1, 0xBEFC0073u, 0xBEFC006Fu},
+      {ROCJITSU_CODE_ARCH_CDNA2, 0xBEFC0073u, 0xBEFC006Fu},
+      {ROCJITSU_CODE_ARCH_CDNA3, 0xBEFC0073u, 0xBEFC006Fu},
+      {ROCJITSU_CODE_ARCH_CDNA4, 0xBEFC0073u, 0xBEFC006Fu},
+      {ROCJITSU_CODE_ARCH_RDNA1, 0xBEFC0373u, 0xBEFC036Fu},
+      {ROCJITSU_CODE_ARCH_RDNA2, 0xBEFC0373u, 0xBEFC036Fu},
+      {ROCJITSU_CODE_ARCH_RDNA3, 0xBEFD0073u, 0xBEFD006Fu},
+      {ROCJITSU_CODE_ARCH_RDNA3_5, 0xBEFD0073u, 0xBEFD006Fu},
+  };
+  constexpr uint32_t kSNop0 = 0xBF800000u;
+
+  for (const auto &test_case : kCases) {
+    EXPECT_TRUE(rocjitsu::kmd::detail::uses_pre_gfx12_trap_interrupt_sites(test_case.arch));
+    EXPECT_EQ(rocjitsu::kmd::detail::classify_pre_gfx12_trap_interrupt_site(
+                  test_case.arch, test_case.profiling_move, kSNop0),
+              rocjitsu::kmd::detail::TrapInterruptSite::Profiling);
+    EXPECT_EQ(rocjitsu::kmd::detail::classify_pre_gfx12_trap_interrupt_site(
+                  test_case.arch, test_case.exception_move, kSNop0),
+              rocjitsu::kmd::detail::TrapInterruptSite::QueueException);
+    EXPECT_EQ(rocjitsu::kmd::detail::classify_pre_gfx12_trap_interrupt_site(
+                  test_case.arch, test_case.profiling_move, 0),
+              rocjitsu::kmd::detail::TrapInterruptSite::Unknown);
+  }
+
+  EXPECT_FALSE(
+      rocjitsu::kmd::detail::uses_pre_gfx12_trap_interrupt_sites(ROCJITSU_CODE_ARCH_CDNA5));
+  EXPECT_FALSE(
+      rocjitsu::kmd::detail::uses_pre_gfx12_trap_interrupt_sites(ROCJITSU_CODE_ARCH_RDNA4));
+  EXPECT_EQ(rocjitsu::kmd::detail::trap_interrupt_abi(ROCJITSU_CODE_ARCH_CDNA5),
+            rocjitsu::kmd::detail::TrapInterruptAbi::Gfx12);
+  EXPECT_EQ(rocjitsu::kmd::detail::trap_interrupt_abi(ROCJITSU_CODE_ARCH_RDNA4),
+            rocjitsu::kmd::detail::TrapInterruptAbi::Gfx12);
+  EXPECT_EQ(rocjitsu::kmd::detail::trap_interrupt_abi(ROCJITSU_CODE_ARCH_RV32I),
+            rocjitsu::kmd::detail::TrapInterruptAbi::Unsupported);
+  EXPECT_EQ(rocjitsu::kmd::detail::trap_interrupt_abi(ROCJITSU_CODE_ARCH_RV64I),
+            rocjitsu::kmd::detail::TrapInterruptAbi::Unsupported);
+  EXPECT_EQ(rocjitsu::kmd::detail::trap_interrupt_abi(ROCJITSU_CODE_ARCH_INVALID),
+            rocjitsu::kmd::detail::TrapInterruptAbi::Unsupported);
+}
 
 // A compute queue created through KFD is replicated onto every XCD so its
 // dispatches can be spread across the whole device; the XCD that owns the queue
@@ -478,9 +1031,7 @@ TEST_F(KfdIoctlTest, IdleNotificationComesOnlyFromTheOwningXcd) {
   std::set<uint32_t> seen_by_a_owner;
 
   // Installed before the first CREATE_QUEUE, which is what starts the doorbell
-  // monitors. interrupt_cb_ is a plain std::function that the poll loop reads
-  // without a lock, so assigning it once a monitor is live is a data race on the
-  // function object itself -- one TSan reports.
+  // monitors. This keeps the test's observers active for every idle transition.
   owner_of_b2->set_interrupt_callback([&](uint32_t pid, uint32_t) {
     std::lock_guard<std::mutex> lock(seen_mutex);
     seen_by_b2_owner.insert(pid);
@@ -561,6 +1112,652 @@ class KfdIoctlCdna5Test : public KfdIoctlTest {
 protected:
   void SetUp() override { SetUpWithConfig(CDNA5_CONFIG_PATH); }
 };
+
+TEST_F(KfdIoctlCdna5Test, RuntimeTrapInterruptSignalsQueueExceptionFromM0) {
+  constexpr uint64_t kKernelAddress = 0x600000000ULL;
+  constexpr uint64_t kTrapHandlerAddress = 0x600001000ULL;
+  constexpr uint32_t kExceptionEventId = 37;
+  constexpr uint64_t kWaveAbort = KFD_EC_MASK(EC_QUEUE_WAVE_ABORT);
+  constexpr uint64_t kWaveTrap = KFD_EC_MASK(EC_QUEUE_WAVE_TRAP);
+
+  std::array<uint8_t, 4096> code_page{};
+  std::array<uint8_t, 4096> trap_handler_page{};
+  alignas(4096) std::array<uint8_t, 4096> cwsr{};
+  alignas(4096) std::array<uint8_t, 4096> exception_page{};
+  auto process = driver_->find_process(driver_->local_process_id());
+  ASSERT_NE(process, nullptr);
+  process->map_pages(kKernelAddress, code_page.data(), code_page.size());
+  process->map_pages(kTrapHandlerAddress, trap_handler_page.data(), trap_handler_page.size());
+  const uint64_t exception_status_address = reinterpret_cast<uint64_t>(exception_page.data());
+  process->map_pages(exception_status_address, exception_page.data(), exception_page.size());
+
+  // ROCr allocates this header as host-backed identity memory rather than a
+  // KFD allocation. Queue creation must still discover the error signal and
+  // event from the first-level CWSR header.
+  std::memcpy(cwsr.data() + 6 * sizeof(uint32_t), &exception_status_address,
+              sizeof(exception_status_address));
+  std::memcpy(cwsr.data() + 6 * sizeof(uint32_t) + sizeof(uint64_t), &kExceptionEventId,
+              sizeof(kExceptionEventId));
+
+  kfd_ioctl_set_trap_handler_args set_handler{};
+  set_handler.gpu_id = kCdna5GpuId;
+  set_handler.tba_addr = kTrapHandlerAddress;
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_SET_TRAP_HANDLER, &set_handler), 0);
+
+  kfd_ioctl_runtime_enable_args runtime{};
+  runtime.mode_mask = KFD_RUNTIME_ENABLE_MODE_ENABLE_MASK;
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_RUNTIME_ENABLE, &runtime), 0);
+  const int debugger_notifier = eventfd(0, EFD_CLOEXEC | EFD_NONBLOCK);
+  ASSERT_GE(debugger_notifier, 0);
+  debug_fds_.push_back(debugger_notifier);
+  kfd_ioctl_dbg_trap_args enable{};
+  enable.pid = static_cast<uint32_t>(getpid());
+  enable.op = KFD_IOC_DBG_TRAP_ENABLE;
+  enable.enable.dbg_fd = debugger_notifier;
+  enable.enable.exception_mask = kWaveTrap;
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &enable), 0);
+
+  auto *cp = soc_->xcd(0)->command_processor();
+  ASSERT_NE(cp, nullptr);
+  ASSERT_FALSE(cp->compute_units().empty());
+  auto *cu = cp->compute_units().front();
+  ASSERT_NE(cu, nullptr);
+  auto *memory = soc_->memory();
+  ASSERT_NE(memory, nullptr);
+
+  std::mutex delivered_mutex;
+  uint64_t delivered_status = 0;
+  uint32_t delivered_event_id = 0;
+  cp->set_interrupt_callback([&](uint32_t process_id, uint32_t event_id) {
+    if (event_id != kExceptionEventId)
+      return;
+    EXPECT_EQ(process_id, driver_->local_process_id());
+    std::lock_guard<std::mutex> lock(delivered_mutex);
+    delivered_status = memory->read64(exception_status_address, process_id);
+    delivered_event_id = event_id;
+    // ROCr consumes and clears the queue error signal before returning from
+    // its asynchronous callback.
+    memory->write64(exception_status_address, 0, process_id);
+  });
+
+  struct ObserverGuard {
+    rocjitsu::SimulatedKfd *driver;
+    rocjitsu::amdgpu::CommandProcessor *cp;
+    uint32_t queue_id = 0;
+    ~ObserverGuard() {
+      if (queue_id != 0) {
+        kfd_ioctl_destroy_queue_args destroy{};
+        destroy.queue_id = queue_id;
+        driver->ioctl(AMDKFD_IOC_DESTROY_QUEUE, &destroy);
+      }
+      cp->set_interrupt_callback(nullptr);
+    }
+  } observer_guard{driver_, cp};
+
+  std::array<uint8_t, 4096> ring{};
+  uint64_t read_pointer = 0;
+  uint64_t write_pointer = 0;
+  kfd_ioctl_create_queue_args create{};
+  create.gpu_id = kCdna5GpuId;
+  create.queue_type = KFD_IOC_QUEUE_TYPE_COMPUTE_AQL;
+  create.ring_base_address = reinterpret_cast<uint64_t>(ring.data());
+  create.ring_size = static_cast<uint32_t>(ring.size());
+  create.read_pointer_address = reinterpret_cast<uint64_t>(&read_pointer);
+  create.write_pointer_address = reinterpret_cast<uint64_t>(&write_pointer);
+  create.ctx_save_restore_address = reinterpret_cast<uint64_t>(cwsr.data());
+  create.ctx_save_restore_size = static_cast<uint32_t>(cwsr.size());
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_CREATE_QUEUE, &create), 0);
+  observer_guard.queue_id = create.queue_id;
+
+  constexpr uint32_t kSTrapAbort = 0xBF900002u;
+  constexpr uint32_t kSSendmsgInterrupt = 0xBFB60001u;
+  const uint32_t handler[] = {
+      0xBEFD00FFu,        0x00000007u,              // s_mov_b32 m0, doorbell_id
+      kSSendmsgInterrupt, 0xBEFD00FFu, 0x00000400u, // s_mov_b32 m0, PC-sampling event 1024
+      kSSendmsgInterrupt, 0xBEFD00FFu, 0x00000400u, // s_mov_b32 m0, perf event 1024
+      kSSendmsgInterrupt, 0xBEFD00FFu, 0x00000407u, // s_mov_b32 m0, WAVE_ABORT | doorbell_id
+      kSSendmsgInterrupt,
+  };
+  memory->write32(kKernelAddress, kSTrapAbort, driver_->local_process_id());
+  for (uint32_t i = 0; i < std::size(handler); ++i)
+    memory->write32(kTrapHandlerAddress + i * sizeof(uint32_t), handler[i],
+                    driver_->local_process_id());
+
+  auto *wave = cu->dispatch_wf(/*wg_id=*/0, kKernelAddress, /*sgprs=*/16, /*vgprs=*/4);
+  ASSERT_NE(wave, nullptr);
+  wave->set_process_id(driver_->local_process_id());
+  wave->set_queue_id(create.queue_id);
+  auto *peer_cp = soc_->xcd(1)->command_processor();
+  ASSERT_NE(peer_cp, nullptr);
+  ASSERT_FALSE(peer_cp->compute_units().empty());
+  auto *peer = peer_cp->compute_units().front()->dispatch_wf(
+      /*wg_id=*/1, kKernelAddress, /*sgprs=*/16, /*vgprs=*/4);
+  ASSERT_NE(peer, nullptr);
+  peer->set_process_id(driver_->local_process_id());
+  peer->set_queue_id(create.queue_id);
+
+  rocjitsu::amdgpu::DispatchEntry pending_peer{};
+  pending_peer.dispatch_id = 99;
+  pending_peer.queue_id = create.queue_id;
+  pending_peer.process_id = driver_->local_process_id();
+  pending_peer.kernel_entry_pc = kKernelAddress;
+  pending_peer.sgprs_per_wf = 16;
+  pending_peer.vgprs_per_wf = 4;
+  pending_peer.grid_size_x = 64;
+  pending_peer.grid_wgs_x = 1;
+  pending_peer.total_wgs = 1;
+  pending_peer.kind = rocjitsu::amdgpu::DispatchPacketKind::Kernel;
+  const uint64_t peer_workgroups = peer_cp->dispatched_workgroups();
+  peer_cp->accept_fanout_shard(std::move(pending_peer));
+
+  cu->step(); // Enter the configured trap handler.
+  cu->step(); // Load a doorbell-only M0 value.
+  cu->step(); // A plain interrupt must not become a queue exception.
+  {
+    std::lock_guard<std::mutex> lock(delivered_mutex);
+    EXPECT_EQ(delivered_status, 0u);
+  }
+  cu->step(); // Load a PC-sampling event id that aliases WAVE_ABORT.
+  wave->set_trapsts(wave->trapsts() | (1u << 22));
+  cu->step(); // A profiling interrupt must not become a queue exception.
+  wave->set_trapsts(wave->trapsts() & ~(1u << 22));
+  {
+    std::lock_guard<std::mutex> lock(delivered_mutex);
+    EXPECT_EQ(delivered_status, 0u);
+  }
+  cu->step(); // Load a stochastic performance-sampling event id.
+  wave->set_trapsts(wave->trapsts() | (1u << 26));
+  cu->step(); // A performance-snapshot interrupt is not a queue exception.
+  wave->set_trapsts(wave->trapsts() & ~(1u << 26));
+  {
+    std::lock_guard<std::mutex> lock(delivered_mutex);
+    EXPECT_EQ(delivered_status, 0u);
+  }
+  memory->write64(exception_status_address, kWaveTrap, driver_->local_process_id());
+  cu->step(); // Add EC_QUEUE_WAVE_ABORT above the doorbell bits.
+  wave->set_trapsts(wave->trapsts() | (1u << 23));
+  cu->step(); // Deliver it after releasing the CU wave-state lock.
+  wave->set_trapsts(wave->trapsts() & ~(1u << 23));
+
+  {
+    std::lock_guard<std::mutex> lock(delivered_mutex);
+    EXPECT_EQ(delivered_status, kWaveTrap | kWaveAbort);
+    EXPECT_EQ(delivered_event_id, kExceptionEventId);
+  }
+  uint64_t debugger_notifications = 0;
+  EXPECT_EQ(::read(debugger_notifier, &debugger_notifications, sizeof(debugger_notifications)), -1);
+  EXPECT_EQ(errno, EAGAIN);
+  EXPECT_TRUE(wave->debug_suspended());
+  EXPECT_TRUE(peer->debug_suspended());
+  EXPECT_TRUE(peer->fatal_exception_pending());
+  soc_->for_each_cp([&](rocjitsu::amdgpu::CommandProcessor *replica) {
+    EXPECT_TRUE(
+        replica->queue_exception_suspended_for_test(create.queue_id, driver_->local_process_id()));
+  });
+
+  for (uint32_t attempt = 0; attempt < 16 && peer_cp->accepted_entry_count_for_test(
+                                                 create.queue_id, driver_->local_process_id()) == 0;
+       ++attempt)
+    ASSERT_TRUE(engine_->step());
+  EXPECT_EQ(peer_cp->accepted_entry_count_for_test(create.queue_id, driver_->local_process_id()),
+            1u);
+  EXPECT_EQ(peer_cp->dispatched_workgroups(), peer_workgroups)
+      << "the fatal queue gate must block an already-fanned-out peer shard";
+
+  hsa_kernel_dispatch_packet_t pending{};
+  pending.header = HSA_PACKET_TYPE_KERNEL_DISPATCH;
+  std::memcpy(ring.data(), &pending, sizeof(pending));
+  write_pointer = 1;
+  const uint64_t owner_passes = cp->doorbell_handle_count_for_test();
+  engine_->schedule_event_now(cp->doorbell_event());
+  for (uint32_t attempt = 0; attempt < 16 && cp->doorbell_handle_count_for_test() == owner_passes;
+       ++attempt)
+    ASSERT_TRUE(engine_->step());
+  EXPECT_GT(cp->doorbell_handle_count_for_test(), owner_passes);
+  EXPECT_EQ(read_pointer, 0u) << "the fatal queue gate must prevent pending packet fetch";
+}
+
+TEST_F(KfdIoctlCdna5Test, RuntimeExceptionFanoutCanDrainPendingCuNotification) {
+  GTEST_FLAG_SET(death_test_style, "threadsafe");
+  using Page = std::array<uint8_t, 4096>;
+  ASSERT_EXIT(
+      {
+        alarm(5);
+        constexpr uint64_t kExceptionStatusAddress = 0x600900000ULL;
+        constexpr uint32_t kExceptionEventId = 79;
+        constexpr uint64_t kWaveAbort = KFD_EC_MASK(EC_QUEUE_WAVE_ABORT);
+        constexpr uint64_t kWaveTrap = KFD_EC_MASK(EC_QUEUE_WAVE_TRAP);
+
+        Page ring{};
+        alignas(4096) Page cwsr{};
+        Page exception_page{};
+        auto process = driver_->find_process(driver_->local_process_id());
+        if (!process)
+          _exit(1);
+        process->map_pages(kExceptionStatusAddress, exception_page.data(), exception_page.size());
+        std::memcpy(cwsr.data() + 6 * sizeof(uint32_t), &kExceptionStatusAddress,
+                    sizeof(kExceptionStatusAddress));
+        std::memcpy(cwsr.data() + 6 * sizeof(uint32_t) + sizeof(uint64_t), &kExceptionEventId,
+                    sizeof(kExceptionEventId));
+
+        uint64_t read_pointer = 0;
+        uint64_t write_pointer = 0;
+        kfd_ioctl_create_queue_args create{};
+        create.gpu_id = kCdna5GpuId;
+        create.queue_type = KFD_IOC_QUEUE_TYPE_COMPUTE_AQL;
+        create.ring_base_address = reinterpret_cast<uint64_t>(ring.data());
+        create.ring_size = static_cast<uint32_t>(ring.size());
+        create.read_pointer_address = reinterpret_cast<uint64_t>(&read_pointer);
+        create.write_pointer_address = reinterpret_cast<uint64_t>(&write_pointer);
+        create.ctx_save_restore_address = reinterpret_cast<uint64_t>(cwsr.data());
+        create.ctx_save_restore_size = static_cast<uint32_t>(cwsr.size());
+        if (driver_->ioctl(AMDKFD_IOC_CREATE_QUEUE, &create) != 0)
+          _exit(2);
+
+        auto *cu = soc_->xcd(0)->command_processor()->compute_units().front();
+        auto *memory = soc_->memory();
+        soc_->for_each_cp([&](rocjitsu::amdgpu::CommandProcessor *cp) {
+          cp->set_interrupt_callback([&](uint32_t process_id, uint32_t event_id) {
+            if (event_id == kExceptionEventId)
+              memory->write64(kExceptionStatusAddress, 0, process_id);
+          });
+        });
+
+        std::promise<void> flush_boundary;
+        auto flush_boundary_future = flush_boundary.get_future();
+        std::promise<void> release_flush;
+        auto release_flush_future = release_flush.get_future().share();
+        cu->set_notification_flush_hook_for_testing([&] {
+          flush_boundary.set_value();
+          release_flush_future.wait();
+        });
+        auto pending = std::async(std::launch::async, [&] {
+          return cu->defer_queue_exception_for_testing(create.queue_id, driver_->local_process_id(),
+                                                       kWaveAbort);
+        });
+        if (flush_boundary_future.wait_for(std::chrono::seconds(1)) != std::future_status::ready)
+          _exit(3);
+
+        auto fanout = std::async(std::launch::async, [&] {
+          return driver_->signal_runtime_queue_exception_for_testing(
+              kCdna5GpuId, create.queue_id, driver_->local_process_id(), kWaveTrap);
+        });
+        if (fanout.wait_for(std::chrono::seconds(1)) != std::future_status::ready)
+          _exit(4);
+        if (!fanout.get())
+          _exit(5);
+
+        release_flush.set_value();
+        if (pending.wait_for(std::chrono::seconds(1)) != std::future_status::ready)
+          _exit(6);
+        if (!pending.get())
+          _exit(7);
+        _exit(0);
+      },
+      ::testing::ExitedWithCode(0), "");
+}
+
+TEST_F(KfdIoctlCdna5Test, RuntimeExceptionPublicationDoesNotBlockIndependentQueue) {
+  GTEST_FLAG_SET(death_test_style, "threadsafe");
+  using Page = std::array<uint8_t, 4096>;
+  ASSERT_EXIT(
+      {
+        alarm(5);
+        constexpr uint64_t kFirstStatusAddress = 0x600900000ULL;
+        constexpr uint64_t kSecondStatusAddress = 0x600901000ULL;
+        constexpr uint32_t kFirstEventId = 80;
+        constexpr uint32_t kSecondEventId = 81;
+        constexpr uint64_t kWaveAbort = KFD_EC_MASK(EC_QUEUE_WAVE_ABORT);
+
+        Page first_ring{};
+        Page second_ring{};
+        alignas(4096) Page first_cwsr{};
+        alignas(4096) Page second_cwsr{};
+        Page first_status{};
+        Page second_status{};
+        auto process = driver_->find_process(driver_->local_process_id());
+        if (!process)
+          _exit(1);
+        process->map_pages(kFirstStatusAddress, first_status.data(), first_status.size());
+        process->map_pages(kSecondStatusAddress, second_status.data(), second_status.size());
+
+        auto prepare_header = [](Page &cwsr, uint64_t status_address, uint32_t event_id) {
+          std::memcpy(cwsr.data() + 6 * sizeof(uint32_t), &status_address, sizeof(status_address));
+          std::memcpy(cwsr.data() + 6 * sizeof(uint32_t) + sizeof(uint64_t), &event_id,
+                      sizeof(event_id));
+        };
+        prepare_header(first_cwsr, kFirstStatusAddress, kFirstEventId);
+        prepare_header(second_cwsr, kSecondStatusAddress, kSecondEventId);
+
+        uint64_t first_read_pointer = 0;
+        uint64_t first_write_pointer = 0;
+        uint64_t second_read_pointer = 0;
+        uint64_t second_write_pointer = 0;
+        auto create_queue = [&](Page &ring, Page &cwsr, uint64_t &read_pointer,
+                                uint64_t &write_pointer) {
+          kfd_ioctl_create_queue_args create{};
+          create.gpu_id = kCdna5GpuId;
+          create.queue_type = KFD_IOC_QUEUE_TYPE_COMPUTE_AQL;
+          create.ring_base_address = reinterpret_cast<uint64_t>(ring.data());
+          create.ring_size = static_cast<uint32_t>(ring.size());
+          create.read_pointer_address = reinterpret_cast<uint64_t>(&read_pointer);
+          create.write_pointer_address = reinterpret_cast<uint64_t>(&write_pointer);
+          create.ctx_save_restore_address = reinterpret_cast<uint64_t>(cwsr.data());
+          create.ctx_save_restore_size = static_cast<uint32_t>(cwsr.size());
+          if (driver_->ioctl(AMDKFD_IOC_CREATE_QUEUE, &create) != 0)
+            return uint32_t{0};
+          return create.queue_id;
+        };
+        const uint32_t first_queue =
+            create_queue(first_ring, first_cwsr, first_read_pointer, first_write_pointer);
+        const uint32_t second_queue =
+            create_queue(second_ring, second_cwsr, second_read_pointer, second_write_pointer);
+        if (first_queue == 0 || second_queue == 0)
+          _exit(2);
+
+        auto *memory = soc_->memory();
+        std::promise<void> first_callback;
+        auto first_callback_future = first_callback.get_future();
+        std::promise<void> release_first;
+        auto release_first_future = release_first.get_future().share();
+        soc_->for_each_cp([&](rocjitsu::amdgpu::CommandProcessor *cp) {
+          cp->set_interrupt_callback([&](uint32_t process_id, uint32_t event_id) {
+            if (event_id == kFirstEventId) {
+              first_callback.set_value();
+              release_first_future.wait();
+              memory->write64(kFirstStatusAddress, 0, process_id);
+            } else if (event_id == kSecondEventId) {
+              memory->write64(kSecondStatusAddress, 0, process_id);
+            }
+          });
+        });
+
+        auto first = std::async(std::launch::async, [&] {
+          return driver_->signal_runtime_queue_exception_for_testing(
+              kCdna5GpuId, first_queue, driver_->local_process_id(), kWaveAbort);
+        });
+        if (first_callback_future.wait_for(std::chrono::seconds(1)) != std::future_status::ready)
+          _exit(3);
+
+        auto second = std::async(std::launch::async, [&] {
+          return driver_->signal_runtime_queue_exception_for_testing(
+              kCdna5GpuId, second_queue, driver_->local_process_id(), kWaveAbort);
+        });
+        if (second.wait_for(std::chrono::milliseconds(250)) != std::future_status::ready)
+          _exit(4);
+        if (!second.get())
+          _exit(5);
+
+        release_first.set_value();
+        if (first.wait_for(std::chrono::seconds(1)) != std::future_status::ready)
+          _exit(6);
+        if (!first.get())
+          _exit(7);
+        _exit(0);
+      },
+      ::testing::ExitedWithCode(0), "");
+}
+
+TEST_F(KfdIoctlCdna5Test, ConcurrentRuntimeExceptionPublicationReclaimsQueueLock) {
+  constexpr uint64_t kExceptionStatusAddress = 0x600900000ULL;
+  constexpr uint32_t kExceptionEventId = 82;
+  constexpr uint64_t kWaveAbort = KFD_EC_MASK(EC_QUEUE_WAVE_ABORT);
+
+  std::array<uint8_t, 4096> ring{};
+  alignas(4096) std::array<uint8_t, 4096> cwsr{};
+  std::array<uint8_t, 4096> exception_page{};
+  auto process = driver_->find_process(driver_->local_process_id());
+  ASSERT_NE(process, nullptr);
+  process->map_pages(kExceptionStatusAddress, exception_page.data(), exception_page.size());
+  std::memcpy(cwsr.data() + 6 * sizeof(uint32_t), &kExceptionStatusAddress,
+              sizeof(kExceptionStatusAddress));
+  std::memcpy(cwsr.data() + 6 * sizeof(uint32_t) + sizeof(uint64_t), &kExceptionEventId,
+              sizeof(kExceptionEventId));
+
+  uint64_t read_pointer = 0;
+  uint64_t write_pointer = 0;
+  kfd_ioctl_create_queue_args create{};
+  create.gpu_id = kCdna5GpuId;
+  create.queue_type = KFD_IOC_QUEUE_TYPE_COMPUTE_AQL;
+  create.ring_base_address = reinterpret_cast<uint64_t>(ring.data());
+  create.ring_size = static_cast<uint32_t>(ring.size());
+  create.read_pointer_address = reinterpret_cast<uint64_t>(&read_pointer);
+  create.write_pointer_address = reinterpret_cast<uint64_t>(&write_pointer);
+  create.ctx_save_restore_address = reinterpret_cast<uint64_t>(cwsr.data());
+  create.ctx_save_restore_size = static_cast<uint32_t>(cwsr.size());
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_CREATE_QUEUE, &create), 0);
+
+  auto *memory = soc_->memory();
+  ASSERT_NE(memory, nullptr);
+  soc_->for_each_cp([&](rocjitsu::amdgpu::CommandProcessor *cp) {
+    cp->set_interrupt_callback([&](uint32_t process_id, uint32_t event_id) {
+      if (event_id == kExceptionEventId)
+        memory->write64(kExceptionStatusAddress, 0, process_id);
+    });
+  });
+
+  std::thread::id first_thread;
+  struct CleanupHandshake {
+    std::mutex mutex;
+    std::condition_variable cv;
+    bool first_before = false;
+    bool second_before = false;
+    bool first_finished = false;
+    bool release_first = false;
+    bool abort = false;
+    bool timed_out = false;
+  } handshake;
+  driver_->set_queue_exception_cleanup_hook_for_testing([&](bool after_cleanup) {
+    const bool first = std::this_thread::get_id() == first_thread;
+    std::unique_lock<std::mutex> lock(handshake.mutex);
+    if (!after_cleanup && first) {
+      handshake.first_before = true;
+      handshake.cv.notify_all();
+      if (!handshake.cv.wait_for(lock, std::chrono::seconds(1),
+                                 [&] { return handshake.second_before || handshake.abort; }))
+        handshake.timed_out = true;
+    } else if (!after_cleanup) {
+      handshake.second_before = true;
+      handshake.cv.notify_all();
+      if (!handshake.cv.wait_for(lock, std::chrono::seconds(1),
+                                 [&] { return handshake.first_finished || handshake.abort; }))
+        handshake.timed_out = true;
+    } else if (first) {
+      handshake.first_finished = true;
+      handshake.cv.notify_all();
+      if (!handshake.cv.wait_for(lock, std::chrono::seconds(1),
+                                 [&] { return handshake.release_first || handshake.abort; }))
+        handshake.timed_out = true;
+    }
+  });
+
+  auto abort_handshake = [&] {
+    std::lock_guard<std::mutex> lock(handshake.mutex);
+    handshake.abort = true;
+    handshake.release_first = true;
+    handshake.cv.notify_all();
+  };
+
+  auto first = std::async(std::launch::async, [&] {
+    first_thread = std::this_thread::get_id();
+    return driver_->signal_runtime_queue_exception_for_testing(
+        kCdna5GpuId, create.queue_id, driver_->local_process_id(), kWaveAbort);
+  });
+  {
+    std::unique_lock<std::mutex> lock(handshake.mutex);
+    if (!handshake.cv.wait_for(lock, std::chrono::seconds(1),
+                               [&] { return handshake.first_before; })) {
+      lock.unlock();
+      abort_handshake();
+      EXPECT_EQ(first.wait_for(std::chrono::seconds(2)), std::future_status::ready);
+      if (first.wait_for(std::chrono::seconds(0)) == std::future_status::ready)
+        first.get();
+      driver_->set_queue_exception_cleanup_hook_for_testing({});
+      FAIL() << "first publisher did not reach registry cleanup";
+    }
+  }
+
+  auto second = std::async(std::launch::async, [&] {
+    return driver_->signal_runtime_queue_exception_for_testing(
+        kCdna5GpuId, create.queue_id, driver_->local_process_id(), kWaveAbort);
+  });
+  if (second.wait_for(std::chrono::seconds(1)) != std::future_status::ready) {
+    abort_handshake();
+    EXPECT_EQ(first.wait_for(std::chrono::seconds(2)), std::future_status::ready);
+    EXPECT_EQ(second.wait_for(std::chrono::seconds(2)), std::future_status::ready);
+    if (first.wait_for(std::chrono::seconds(0)) == std::future_status::ready)
+      first.get();
+    if (second.wait_for(std::chrono::seconds(0)) == std::future_status::ready)
+      second.get();
+    driver_->set_queue_exception_cleanup_hook_for_testing({});
+    FAIL() << "second publisher did not finish while the first retained its lock reference";
+  }
+
+  const bool second_published = second.get();
+  if (!second_published)
+    abort_handshake();
+  EXPECT_TRUE(second_published);
+  // The first publisher remains alive after its release check. A weak-pointer
+  // registry lets both publishers see the other's strong reference and leaves
+  // this entry expired but present; the explicit user count erases it here.
+  EXPECT_EQ(driver_->queue_exception_lock_count_for_testing(), 0u);
+  {
+    std::lock_guard<std::mutex> lock(handshake.mutex);
+    handshake.release_first = true;
+    handshake.cv.notify_all();
+  }
+  EXPECT_TRUE(first.get());
+  EXPECT_FALSE(handshake.timed_out);
+  driver_->set_queue_exception_cleanup_hook_for_testing({});
+}
+
+TEST_P(KfdIoctlPreGfx12TrapTest, ProfilingCompletionAndQueueExceptionUseDistinctSendSites) {
+  constexpr uint64_t kKernelAddress = 0x600000000ULL;
+  constexpr uint64_t kTrapHandlerAddress = 0x600001000ULL;
+  constexpr uint32_t kExceptionEventId = 41;
+
+  std::array<uint8_t, 4096> code_page{};
+  std::array<uint8_t, 4096> trap_handler_page{};
+  alignas(4096) std::array<uint8_t, 4096> cwsr{};
+  alignas(4096) std::array<uint8_t, 4096> exception_page{};
+  auto process = driver_->find_process(driver_->local_process_id());
+  ASSERT_NE(process, nullptr);
+  process->map_pages(kKernelAddress, code_page.data(), code_page.size());
+  process->map_pages(kTrapHandlerAddress, trap_handler_page.data(), trap_handler_page.size());
+  const uint64_t exception_status_address = reinterpret_cast<uint64_t>(exception_page.data());
+  process->map_pages(exception_status_address, exception_page.data(), exception_page.size());
+  std::memcpy(cwsr.data() + 6 * sizeof(uint32_t), &exception_status_address,
+              sizeof(exception_status_address));
+  std::memcpy(cwsr.data() + 6 * sizeof(uint32_t) + sizeof(uint64_t), &kExceptionEventId,
+              sizeof(kExceptionEventId));
+
+  kfd_ioctl_set_trap_handler_args set_handler{};
+  set_handler.gpu_id = GetParam().gpu_id;
+  set_handler.tba_addr = kTrapHandlerAddress;
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_SET_TRAP_HANDLER, &set_handler), 0);
+
+  auto *cp = soc_->xcd(0)->command_processor();
+  ASSERT_NE(cp, nullptr);
+  ASSERT_FALSE(cp->compute_units().empty());
+  auto *cu = cp->compute_units().front();
+  ASSERT_NE(cu, nullptr);
+  auto *memory = soc_->memory();
+  ASSERT_NE(memory, nullptr);
+
+  std::atomic<bool> delivered = false;
+  cp->set_interrupt_callback([&](uint32_t, uint32_t event_id) {
+    if (event_id == kExceptionEventId) {
+      delivered.store(true, std::memory_order_release);
+      memory->write64(exception_status_address, 0, driver_->local_process_id());
+    }
+  });
+  struct ObserverGuard {
+    rocjitsu::SimulatedKfd *driver;
+    rocjitsu::amdgpu::CommandProcessor *cp;
+    uint32_t queue_id = 0;
+    ~ObserverGuard() {
+      if (queue_id != 0) {
+        kfd_ioctl_destroy_queue_args destroy{};
+        destroy.queue_id = queue_id;
+        driver->ioctl(AMDKFD_IOC_DESTROY_QUEUE, &destroy);
+      }
+      cp->set_interrupt_callback(nullptr);
+    }
+  } observer_guard{driver_, cp};
+
+  std::array<uint8_t, 4096> ring{};
+  uint64_t read_pointer = 0;
+  uint64_t write_pointer = 0;
+  kfd_ioctl_create_queue_args create{};
+  create.gpu_id = GetParam().gpu_id;
+  create.queue_type = KFD_IOC_QUEUE_TYPE_COMPUTE_AQL;
+  create.ring_base_address = reinterpret_cast<uint64_t>(ring.data());
+  create.ring_size = static_cast<uint32_t>(ring.size());
+  create.read_pointer_address = reinterpret_cast<uint64_t>(&read_pointer);
+  create.write_pointer_address = reinterpret_cast<uint64_t>(&write_pointer);
+  create.ctx_save_restore_address = reinterpret_cast<uint64_t>(cwsr.data());
+  create.ctx_save_restore_size = static_cast<uint32_t>(cwsr.size());
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_CREATE_QUEUE, &create), 0);
+  observer_guard.queue_id = create.queue_id;
+
+  const uint32_t handler[] = {
+      GetParam().profiling_move,    // s_mov_b32 m0, ttmp7 (profiling event id)
+      0xBF800000u,                  // s_nop 0
+      GetParam().sendmsg_interrupt, // s_sendmsg sendmsg(MSG_INTERRUPT)
+      GetParam().exception_move,    // s_mov_b32 m0, ttmp3 (packed queue exception)
+      0xBF800000u,                  // s_nop 0
+      GetParam().sendmsg_interrupt, // s_sendmsg sendmsg(MSG_INTERRUPT)
+  };
+  memory->write32(kKernelAddress, GetParam().trap, driver_->local_process_id());
+  for (uint32_t i = 0; i < std::size(handler); ++i)
+    memory->write32(kTrapHandlerAddress + i * sizeof(uint32_t), handler[i],
+                    driver_->local_process_id());
+
+  auto *wave = cu->dispatch_wf(/*wg_id=*/0, kKernelAddress, /*sgprs=*/16, /*vgprs=*/4);
+  ASSERT_NE(wave, nullptr);
+  wave->set_process_id(driver_->local_process_id());
+  wave->set_queue_id(create.queue_id);
+  cu->step(); // Enter the pre-GFX12 trap handler.
+  // Make every register-value heuristic ambiguous: the profiling path's live
+  // value equals both saved-M0 candidates, while both architecture-specific
+  // provenance markers are present.
+  wave->set_ttmp(7, 0x400u);
+  wave->set_ttmp(2, 0x400u);
+  wave->set_ttmp(6, 0x400u);
+  wave->set_ttmp(13, 0x400u);
+  wave->set_ttmp(11, wave->ttmp(11) | (1u << 22));
+  wave->set_ttmp(13, wave->ttmp(13) | (1u << 21));
+  cu->step(); // s_mov_b32 m0, ttmp7
+  EXPECT_EQ(wave->m0(), 0x400u);
+  cu->step(); // s_nop
+  cu->step(); // Send the profiling completion from its distinct site.
+
+  EXPECT_FALSE(delivered.load(std::memory_order_acquire));
+  EXPECT_FALSE(
+      cp->queue_exception_suspended_for_test(create.queue_id, driver_->local_process_id()));
+  // Model a concurrent exception after send_signal changed its scratch state.
+  // The profiling marker remains set and saved-M0 values now differ, so only
+  // the actual send site reliably identifies this as a queue exception.
+  wave->set_ttmp(2, 0x400u);
+  wave->set_ttmp(6, 0x55u);
+  wave->set_ttmp(13, wave->ttmp(13) | 0x800u);
+  wave->set_ttmp(3, 0x407u);
+  cu->step(); // s_mov_b32 m0, ttmp3
+  EXPECT_EQ(wave->m0(), 0x407u);
+  cu->step(); // s_nop
+  cu->step(); // Route the queue exception from its distinct site.
+  EXPECT_TRUE(delivered.load(std::memory_order_acquire));
+  EXPECT_TRUE(cp->queue_exception_suspended_for_test(create.queue_id, driver_->local_process_id()));
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    PreGfx12Architectures, KfdIoctlPreGfx12TrapTest,
+    ::testing::Values(PreGfx12TrapParam{CDNA2_CONFIG_PATH.c_str(), kCdna2GpuId, 0xBEFC0073u,
+                                        0xBEFC006Fu, 0xBF900001u, 0xBF920001u},
+                      PreGfx12TrapParam{CONFIG_PATH.c_str(), kGpuId, 0xBEFC0073u, 0xBEFC006Fu,
+                                        0xBF900001u, 0xBF920001u},
+                      PreGfx12TrapParam{RDNA3_CONFIG_PATH.c_str(), kRdna3GpuId, 0xBEFD0073u,
+                                        0xBEFD006Fu, 0xBFB60001u, 0xBF900001u}));
 
 TEST_F(KfdIoctlTest, SetMemoryPolicy) {
   kfd_ioctl_set_memory_policy_args args{};
@@ -948,6 +2145,676 @@ TEST_F(KfdIoctlTest, DbgTrapEnableReadOnlyFdReturnsEBADF) {
   EXPECT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &after), -EINVAL);
 }
 
+TEST_F(KfdIoctlTest, DbgTrapEnableAcceptsPrimaryKfdDescriptor) {
+  constexpr uint64_t kException = KFD_EC_MASK(EC_QUEUE_WAVE_TRAP);
+  std::vector<uint8_t> ring(4096);
+  uint64_t read_pointer = 0;
+  uint64_t write_pointer = 0;
+  kfd_ioctl_create_queue_args create{};
+  create.gpu_id = kGpuId;
+  create.queue_type = KFD_IOC_QUEUE_TYPE_COMPUTE_AQL;
+  create.ring_base_address = reinterpret_cast<uint64_t>(ring.data());
+  create.ring_size = static_cast<uint32_t>(ring.size());
+  create.read_pointer_address = reinterpret_cast<uint64_t>(&read_pointer);
+  create.write_pointer_address = reinterpret_cast<uint64_t>(&write_pointer);
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_CREATE_QUEUE, &create), 0);
+
+  pollfd pfd{kfd_fd_, POLLIN, 0};
+  ASSERT_EQ(::poll(&pfd, 1, 0), 0);
+
+  kfd_ioctl_dbg_trap_args enable{};
+  enable.pid = static_cast<uint32_t>(getpid());
+  enable.op = KFD_IOC_DBG_TRAP_ENABLE;
+  enable.enable.dbg_fd = static_cast<uint32_t>(kfd_fd_);
+  enable.enable.exception_mask = kException;
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &enable), 0);
+
+  kfd_queue_snapshot_entry snapshot_entry{};
+  kfd_ioctl_dbg_trap_args snapshot{};
+  snapshot.pid = static_cast<uint32_t>(getpid());
+  snapshot.op = KFD_IOC_DBG_TRAP_GET_QUEUE_SNAPSHOT;
+  snapshot.queue_snapshot.exception_mask = KFD_EC_MASK(EC_QUEUE_NEW);
+  snapshot.queue_snapshot.snapshot_buf_ptr = reinterpret_cast<uint64_t>(&snapshot_entry);
+  snapshot.queue_snapshot.num_queues = 1;
+  snapshot.queue_snapshot.entry_size = sizeof(snapshot_entry);
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &snapshot), 0);
+  ASSERT_EQ(::poll(&pfd, 1, 0), 0);
+
+  ASSERT_TRUE(driver_->notify_debug_event_for_testing(create.queue_id, kException,
+                                                      /*retain_on_rejection=*/false));
+  ASSERT_EQ(::poll(&pfd, 1, 1000), 1);
+  uint64_t notifications = 0;
+  ASSERT_EQ(::read(kfd_fd_, &notifications, sizeof(notifications)),
+            static_cast<ssize_t>(sizeof(notifications)));
+  EXPECT_EQ(notifications, 1u);
+
+  kfd_ioctl_dbg_trap_args query{};
+  query.pid = static_cast<uint32_t>(getpid());
+  query.op = KFD_IOC_DBG_TRAP_QUERY_DEBUG_EVENT;
+  query.query_debug_event.exception_mask = kException;
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &query), 0);
+  EXPECT_EQ(query.query_debug_event.queue_id, create.queue_id);
+  EXPECT_EQ(query.query_debug_event.exception_mask, kException);
+
+  kfd_ioctl_dbg_trap_args disable{};
+  disable.pid = static_cast<uint32_t>(getpid());
+  disable.op = KFD_IOC_DBG_TRAP_DISABLE;
+  EXPECT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &disable), 0);
+}
+
+TEST_F(KfdIoctlTest, DbgTrapNotificationFallsBackWhenClone3IsUnavailable) {
+  constexpr uint64_t kException = KFD_EC_MASK(EC_QUEUE_WAVE_TRAP);
+  std::vector<uint8_t> ring(4096);
+  uint64_t read_pointer = 0;
+  uint64_t write_pointer = 0;
+  kfd_ioctl_create_queue_args create{};
+  create.gpu_id = kGpuId;
+  create.queue_type = KFD_IOC_QUEUE_TYPE_COMPUTE_AQL;
+  create.ring_base_address = reinterpret_cast<uint64_t>(ring.data());
+  create.ring_size = static_cast<uint32_t>(ring.size());
+  create.read_pointer_address = reinterpret_cast<uint64_t>(&read_pointer);
+  create.write_pointer_address = reinterpret_cast<uint64_t>(&write_pointer);
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_CREATE_QUEUE, &create), 0);
+
+  const int notifier = eventfd(0, EFD_CLOEXEC | EFD_NONBLOCK);
+  ASSERT_GE(notifier, 0);
+  debug_fds_.push_back(notifier);
+  kfd_ioctl_dbg_trap_args enable{};
+  enable.pid = static_cast<uint32_t>(getpid());
+  enable.op = KFD_IOC_DBG_TRAP_ENABLE;
+  enable.enable.dbg_fd = static_cast<uint32_t>(notifier);
+  enable.enable.exception_mask = kException;
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &enable), 0);
+
+  kfd_queue_snapshot_entry snapshot_entry{};
+  kfd_ioctl_dbg_trap_args snapshot{};
+  snapshot.pid = static_cast<uint32_t>(getpid());
+  snapshot.op = KFD_IOC_DBG_TRAP_GET_QUEUE_SNAPSHOT;
+  snapshot.queue_snapshot.exception_mask = KFD_EC_MASK(EC_QUEUE_NEW);
+  snapshot.queue_snapshot.snapshot_buf_ptr = reinterpret_cast<uint64_t>(&snapshot_entry);
+  snapshot.queue_snapshot.num_queues = 1;
+  snapshot.queue_snapshot.entry_size = sizeof(snapshot_entry);
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &snapshot), 0);
+
+  struct CloneFailures {
+    int clone3_error;
+    std::optional<int> clone_pidfd_error;
+  };
+  for (const auto &[clone3_error, clone_pidfd_error] :
+       std::array{CloneFailures{ENOSYS, std::nullopt}, CloneFailures{EPERM, std::nullopt},
+                  CloneFailures{ENOSYS, EINVAL}}) {
+    driver_->set_debug_notification_clone3_error_for_testing(clone3_error);
+    driver_->set_debug_notification_clone_pidfd_error_for_testing(clone_pidfd_error);
+    ASSERT_TRUE(driver_->notify_debug_event_for_testing(create.queue_id, kException,
+                                                        /*retain_on_rejection=*/false));
+    uint64_t notifications = 0;
+    ASSERT_EQ(::read(notifier, &notifications, sizeof(notifications)),
+              static_cast<ssize_t>(sizeof(notifications)));
+    EXPECT_EQ(notifications, 1u);
+
+    kfd_ioctl_dbg_trap_args query{};
+    query.pid = static_cast<uint32_t>(getpid());
+    query.op = KFD_IOC_DBG_TRAP_QUERY_DEBUG_EVENT;
+    query.query_debug_event.exception_mask = kException;
+    ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &query), 0);
+    EXPECT_EQ(query.query_debug_event.queue_id, create.queue_id);
+    EXPECT_EQ(query.query_debug_event.exception_mask, kException);
+
+    int status = 0;
+    errno = 0;
+    EXPECT_EQ(::waitpid(-1, &status, WNOHANG | __WCLONE), -1);
+    EXPECT_EQ(errno, ECHILD);
+  }
+  driver_->set_debug_notification_clone3_error_for_testing(std::nullopt);
+  driver_->set_debug_notification_clone_pidfd_error_for_testing(std::nullopt);
+}
+
+TEST_F(KfdIoctlTest, DbgTrapNotificationWriterStaysOutsidePtraceDomain) {
+  constexpr uint64_t kException = KFD_EC_MASK(EC_QUEUE_WAVE_TRAP);
+  std::vector<uint8_t> ring(4096);
+  uint64_t read_pointer = 0;
+  uint64_t write_pointer = 0;
+  kfd_ioctl_create_queue_args create{};
+  create.gpu_id = kGpuId;
+  create.queue_type = KFD_IOC_QUEUE_TYPE_COMPUTE_AQL;
+  create.ring_base_address = reinterpret_cast<uint64_t>(ring.data());
+  create.ring_size = static_cast<uint32_t>(ring.size());
+  create.read_pointer_address = reinterpret_cast<uint64_t>(&read_pointer);
+  create.write_pointer_address = reinterpret_cast<uint64_t>(&write_pointer);
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_CREATE_QUEUE, &create), 0);
+
+  const int notifier = eventfd(0, EFD_CLOEXEC | EFD_NONBLOCK);
+  ASSERT_GE(notifier, 0);
+  debug_fds_.push_back(notifier);
+  kfd_ioctl_dbg_trap_args enable{};
+  enable.pid = static_cast<uint32_t>(getpid());
+  enable.op = KFD_IOC_DBG_TRAP_ENABLE;
+  enable.enable.dbg_fd = static_cast<uint32_t>(notifier);
+  enable.enable.exception_mask = kException;
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &enable), 0);
+
+  kfd_queue_snapshot_entry snapshot_entry{};
+  kfd_ioctl_dbg_trap_args snapshot{};
+  snapshot.pid = static_cast<uint32_t>(getpid());
+  snapshot.op = KFD_IOC_DBG_TRAP_GET_QUEUE_SNAPSHOT;
+  snapshot.queue_snapshot.exception_mask = KFD_EC_MASK(EC_QUEUE_NEW);
+  snapshot.queue_snapshot.snapshot_buf_ptr = reinterpret_cast<uint64_t>(&snapshot_entry);
+  snapshot.queue_snapshot.num_queues = 1;
+  snapshot.queue_snapshot.entry_size = sizeof(snapshot_entry);
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &snapshot), 0);
+
+  int control[2];
+  ASSERT_EQ(::socketpair(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0, control), 0);
+  const pid_t tracer = ::fork();
+  ASSERT_GE(tracer, 0);
+  if (tracer == 0) {
+    ::close(control[0]);
+    char command = 0;
+    if (::read(control[1], &command, sizeof(command)) != sizeof(command))
+      _exit(2);
+    const pid_t tracee = getppid();
+    const long options = PTRACE_O_TRACECLONE | PTRACE_O_TRACEFORK | PTRACE_O_TRACEVFORK;
+    int attach_error = 0;
+    if (::ptrace(PTRACE_SEIZE, tracee, nullptr, options) != 0)
+      attach_error = errno;
+    if (::write(control[1], &attach_error, sizeof(attach_error)) != sizeof(attach_error) ||
+        attach_error != 0)
+      _exit(attach_error == 0 ? 3 : 0);
+
+    bool saw_helper = false;
+    bool parent_done = false;
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
+    while (!parent_done && std::chrono::steady_clock::now() < deadline) {
+      pollfd ready{control[1], POLLIN, 0};
+      if (::poll(&ready, 1, 10) == 1) {
+        if (::read(control[1], &command, sizeof(command)) == sizeof(command))
+          parent_done = true;
+      }
+      int status = 0;
+      pid_t stopped = -1;
+      while ((stopped = ::waitpid(-1, &status, WNOHANG | __WALL)) > 0) {
+        saw_helper = true;
+        if (WIFSTOPPED(status))
+          static_cast<void>(::ptrace(PTRACE_CONT, stopped, nullptr, nullptr));
+      }
+    }
+
+    if (::ptrace(PTRACE_INTERRUPT, tracee, nullptr, nullptr) == 0) {
+      int status = 0;
+      while (::waitpid(tracee, &status, __WALL) < 0 && errno == EINTR) {
+      }
+      static_cast<void>(::ptrace(PTRACE_DETACH, tracee, nullptr, nullptr));
+    }
+    const int observed = saw_helper ? 1 : 0;
+    if (::write(control[1], &observed, sizeof(observed)) != sizeof(observed))
+      _exit(5);
+    ::close(control[1]);
+    _exit(parent_done ? 0 : 4);
+  }
+
+  ChildProcessGuard tracer_guard(tracer);
+  ::close(control[1]);
+  ASSERT_EQ(::prctl(PR_SET_PTRACER, tracer), 0);
+  const char start = 1;
+  ASSERT_EQ(::write(control[0], &start, sizeof(start)), sizeof(start));
+  int attach_error = 0;
+  ASSERT_EQ(::read(control[0], &attach_error, sizeof(attach_error)), sizeof(attach_error));
+  if (attach_error != 0) {
+    int status = 0;
+    ASSERT_EQ(::waitpid(tracer, &status, 0), tracer);
+    tracer_guard.release();
+    ::close(control[0]);
+    GTEST_SKIP() << "ptrace unavailable: " << strerror(attach_error);
+  }
+
+  EXPECT_TRUE(driver_->notify_debug_event_for_testing(create.queue_id, kException,
+                                                      /*retain_on_rejection=*/false));
+  const char done = 1;
+  ASSERT_EQ(::write(control[0], &done, sizeof(done)), sizeof(done));
+  int observed = -1;
+  ASSERT_EQ(::read(control[0], &observed, sizeof(observed)), sizeof(observed));
+  EXPECT_EQ(observed, 0) << "notification helper entered the debugger's ptrace domain";
+  static_cast<void>(::prctl(PR_SET_PTRACER, 0));
+  int status = 0;
+  ASSERT_EQ(::waitpid(tracer, &status, 0), tracer);
+  EXPECT_TRUE(WIFEXITED(status));
+  EXPECT_EQ(WEXITSTATUS(status), 0);
+  tracer_guard.release();
+  ::close(control[0]);
+}
+
+TEST_F(KfdIoctlTest, DbgTrapDirectWakeSurvivesQueryBeforeCommit) {
+  expect_queue_wakeup_after_early_query(false);
+}
+
+TEST_F(KfdIoctlTest, DbgTrapRetryWakeSurvivesQueryBeforeCommit) {
+  expect_queue_wakeup_after_early_query(true);
+}
+
+TEST_F(KfdIoctlTest, DbgTrapProcessEventAfterEarlyQueryAndCommitGetsNewWake) {
+  expect_process_notification_after_early_query(false);
+}
+
+TEST_F(KfdIoctlTest, DbgTrapProcessEventBetweenEarlyQueryAndCommitGetsNewWake) {
+  expect_process_notification_after_early_query(true);
+}
+
+TEST_F(KfdIoctlTest, DbgTrapProcessEventAfterEarlyInfoClearGetsNewWake) {
+  expect_process_notification_after_early_query(false, true);
+}
+
+TEST_F(KfdIoctlTest, DbgTrapQueueNewSurvivesFailedWake) {
+  const int notifier = make_debug_fd();
+  kfd_ioctl_dbg_trap_args enable{};
+  enable.pid = static_cast<uint32_t>(getpid());
+  enable.op = KFD_IOC_DBG_TRAP_ENABLE;
+  enable.enable.dbg_fd = notifier;
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &enable), 0);
+  std::vector<uint8_t> ring(4096);
+  uint64_t read_pointer = 0;
+  uint64_t write_pointer = 0;
+  kfd_ioctl_create_queue_args create{};
+  create.gpu_id = kGpuId;
+  create.queue_type = KFD_IOC_QUEUE_TYPE_COMPUTE_AQL;
+  create.ring_base_address = reinterpret_cast<uint64_t>(ring.data());
+  create.ring_size = ring.size();
+  create.read_pointer_address = reinterpret_cast<uint64_t>(&read_pointer);
+  create.write_pointer_address = reinterpret_cast<uint64_t>(&write_pointer);
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_CREATE_QUEUE, &create), 0);
+  const uint64_t saturated = std::numeric_limits<uint64_t>::max() - 1;
+  ASSERT_EQ(::write(notifier, &saturated, sizeof(saturated)),
+            static_cast<ssize_t>(sizeof(saturated)));
+  kfd_ioctl_dbg_trap_args exceptions{};
+  exceptions.pid = enable.pid;
+  exceptions.op = KFD_IOC_DBG_TRAP_SET_EXCEPTIONS_ENABLED;
+  exceptions.set_exceptions_enabled.exception_mask = KFD_EC_MASK(EC_QUEUE_NEW);
+  driver_->set_debug_notification_result_hook_for_testing([&](bool delivered) {
+    EXPECT_FALSE(delivered);
+    driver_->set_debug_notifier_dup_error_for_testing(EMFILE);
+  });
+  EXPECT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &exceptions), -EAGAIN);
+  driver_->set_debug_notification_result_hook_for_testing({});
+  kfd_ioctl_dbg_trap_args query{};
+  query.pid = enable.pid;
+  query.op = KFD_IOC_DBG_TRAP_QUERY_DEBUG_EVENT;
+  query.query_debug_event.exception_mask = KFD_EC_MASK(EC_QUEUE_NEW);
+  EXPECT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &query), 0);
+  EXPECT_EQ(query.query_debug_event.queue_id, create.queue_id);
+}
+
+volatile sig_atomic_t notification_signal_marker_fd = -1;
+
+void record_notification_signal(int) {
+  const uint8_t marker = 1;
+  [[maybe_unused]] const auto written =
+      ::write(notification_signal_marker_fd, &marker, sizeof(marker));
+}
+
+TEST_F(KfdIoctlTest, DbgTrapNotifierChildDoesNotRunApplicationSignalHandler) {
+  int notifier[2];
+  int marker[2];
+  ASSERT_EQ(::pipe2(notifier, O_CLOEXEC | O_NONBLOCK), 0);
+  ASSERT_EQ(::pipe2(marker, O_CLOEXEC | O_NONBLOCK), 0);
+  ::close(notifier[0]);
+  debug_fds_.insert(debug_fds_.end(), {notifier[1], marker[0], marker[1]});
+  kfd_ioctl_dbg_trap_args enable{};
+  enable.pid = static_cast<uint32_t>(getpid());
+  enable.op = KFD_IOC_DBG_TRAP_ENABLE;
+  enable.enable.dbg_fd = notifier[1];
+  enable.enable.exception_mask = KFD_EC_MASK(EC_PROCESS_RUNTIME);
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &enable), 0);
+
+  struct sigaction action {};
+  struct sigaction previous_action {};
+  action.sa_handler = record_notification_signal;
+  sigemptyset(&action.sa_mask);
+  ASSERT_EQ(::sigaction(SIGPIPE, &action, &previous_action), 0);
+  notification_signal_marker_fd = marker[1];
+  sigset_t unblocked;
+  sigset_t previous_mask;
+  sigemptyset(&unblocked);
+  sigaddset(&unblocked, SIGPIPE);
+  EXPECT_EQ(::pthread_sigmask(SIG_UNBLOCK, &unblocked, &previous_mask), 0);
+  driver_->raise_process_debug_event_for_testing(enable.pid, KFD_EC_MASK(EC_PROCESS_RUNTIME));
+  driver_->set_debug_notifier_dup_error_for_testing(EMFILE);
+  sigset_t after_mask;
+  EXPECT_EQ(::pthread_sigmask(SIG_SETMASK, nullptr, &after_mask), 0);
+  EXPECT_EQ(sigismember(&after_mask, SIGPIPE), 0);
+  EXPECT_EQ(::pthread_sigmask(SIG_SETMASK, &previous_mask, nullptr), 0);
+  EXPECT_EQ(::sigaction(SIGPIPE, &previous_action, nullptr), 0);
+  notification_signal_marker_fd = -1;
+  uint8_t received = 0;
+  EXPECT_EQ(::read(marker[0], &received, sizeof(received)), -1);
+  EXPECT_EQ(errno, EAGAIN);
+}
+
+TEST_F(KfdIoctlTest, DbgTrapFifoNotifierWritesOneBytePerEvent) {
+  constexpr uint64_t kException = KFD_EC_MASK(EC_QUEUE_WAVE_TRAP);
+  std::vector<uint8_t> ring(4096);
+  uint64_t read_pointer = 0;
+  uint64_t write_pointer = 0;
+  kfd_ioctl_create_queue_args create{};
+  create.gpu_id = kGpuId;
+  create.queue_type = KFD_IOC_QUEUE_TYPE_COMPUTE_AQL;
+  create.ring_base_address = reinterpret_cast<uint64_t>(ring.data());
+  create.ring_size = static_cast<uint32_t>(ring.size());
+  create.read_pointer_address = reinterpret_cast<uint64_t>(&read_pointer);
+  create.write_pointer_address = reinterpret_cast<uint64_t>(&write_pointer);
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_CREATE_QUEUE, &create), 0);
+
+  rocjitsu::test::ScopedTempFile fifo_path("rocjitsu-debug-notifier-");
+  ASSERT_EQ(::unlink(fifo_path.path().c_str()), 0);
+  ASSERT_EQ(::mkfifo(fifo_path.path().c_str(), 0600), 0);
+  const int notifier = ::open(fifo_path.path().c_str(), O_RDWR | O_CLOEXEC | O_NONBLOCK);
+  ASSERT_GE(notifier, 0);
+  debug_fds_.push_back(notifier);
+
+  kfd_ioctl_dbg_trap_args enable{};
+  enable.pid = static_cast<uint32_t>(getpid());
+  enable.op = KFD_IOC_DBG_TRAP_ENABLE;
+  enable.enable.dbg_fd = static_cast<uint32_t>(notifier);
+  enable.enable.exception_mask = kException;
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &enable), 0);
+
+  kfd_queue_snapshot_entry snapshot_entry{};
+  kfd_ioctl_dbg_trap_args snapshot{};
+  snapshot.pid = static_cast<uint32_t>(getpid());
+  snapshot.op = KFD_IOC_DBG_TRAP_GET_QUEUE_SNAPSHOT;
+  snapshot.queue_snapshot.exception_mask = KFD_EC_MASK(EC_QUEUE_NEW);
+  snapshot.queue_snapshot.snapshot_buf_ptr = reinterpret_cast<uint64_t>(&snapshot_entry);
+  snapshot.queue_snapshot.num_queues = 1;
+  snapshot.queue_snapshot.entry_size = sizeof(snapshot_entry);
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &snapshot), 0);
+
+  for (int event = 0; event < 2; ++event) {
+    ASSERT_TRUE(driver_->notify_debug_event_for_testing(create.queue_id, kException,
+                                                        /*retain_on_rejection=*/false));
+    pollfd pfd{notifier, POLLIN, 0};
+    ASSERT_EQ(::poll(&pfd, 1, 1000), 1);
+    uint8_t notification = 0;
+    ASSERT_EQ(::read(notifier, &notification, sizeof(notification)),
+              static_cast<ssize_t>(sizeof(notification)));
+    EXPECT_EQ(notification, 1u);
+
+    // BaseDebug::QueryDebugEvent consumes exactly poll()'s return count (one
+    // byte). A wider write would leave stale readable bytes after this read.
+    pfd.revents = 0;
+    EXPECT_EQ(::poll(&pfd, 1, 0), 0);
+
+    kfd_ioctl_dbg_trap_args query{};
+    query.pid = static_cast<uint32_t>(getpid());
+    query.op = KFD_IOC_DBG_TRAP_QUERY_DEBUG_EVENT;
+    query.query_debug_event.exception_mask = kException;
+    ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &query), 0);
+    EXPECT_EQ(query.query_debug_event.queue_id, create.queue_id);
+    EXPECT_EQ(query.query_debug_event.exception_mask, kException);
+  }
+}
+
+TEST_F(KfdIoctlTest, DbgTrapCompetingNotifierWriterCannotBlockPublisher) {
+  constexpr std::string_view kProbe = "competing-notifier-writer";
+  if (!is_isolated_probe(kProbe)) {
+    EXPECT_EQ(run_isolated_test_probe(
+                  kProbe, "KfdIoctlTest.DbgTrapCompetingNotifierWriterCannotBlockPublisher",
+                  std::chrono::seconds(10)),
+              0);
+    return;
+  }
+
+  constexpr uint64_t kException = KFD_EC_MASK(EC_QUEUE_WAVE_TRAP);
+  std::vector<uint8_t> ring(4096);
+  uint64_t read_pointer = 0;
+  uint64_t write_pointer = 0;
+  kfd_ioctl_create_queue_args create{};
+  create.gpu_id = kGpuId;
+  create.queue_type = KFD_IOC_QUEUE_TYPE_COMPUTE_AQL;
+  create.ring_base_address = reinterpret_cast<uint64_t>(ring.data());
+  create.ring_size = static_cast<uint32_t>(ring.size());
+  create.read_pointer_address = reinterpret_cast<uint64_t>(&read_pointer);
+  create.write_pointer_address = reinterpret_cast<uint64_t>(&write_pointer);
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_CREATE_QUEUE, &create), 0);
+
+  int notifier = eventfd(0, EFD_CLOEXEC | EFD_NONBLOCK);
+  ASSERT_GE(notifier, 0);
+  debug_fds_.push_back(notifier);
+
+  kfd_ioctl_dbg_trap_args enable{};
+  enable.pid = static_cast<uint32_t>(getpid());
+  enable.op = KFD_IOC_DBG_TRAP_ENABLE;
+  enable.enable.dbg_fd = static_cast<uint32_t>(notifier);
+  enable.enable.exception_mask = kException;
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &enable), 0);
+
+  const uint64_t saturated = std::numeric_limits<uint64_t>::max() - 1;
+  bool competing_write_ran = false;
+  driver_->set_debug_notification_write_hook_for_testing([&] {
+    if (competing_write_ran)
+      return;
+    competing_write_ran = true;
+    const int flags = ::fcntl(notifier, F_GETFL);
+    ASSERT_GE(flags, 0);
+    ASSERT_EQ(::fcntl(notifier, F_SETFL, flags & ~O_NONBLOCK), 0);
+    ASSERT_EQ(::write(notifier, &saturated, sizeof(saturated)),
+              static_cast<ssize_t>(sizeof(saturated)));
+  });
+
+  // The hook clears O_NONBLOCK and consumes the capacity immediately before
+  // delivery. The helper writer blocks, but its deadline must keep the caller
+  // bounded even though the shared open-file description is now blocking.
+  // The complete test runs in a fresh exec-based helper with a parent-enforced
+  // deadline. Force the asynchronous reap branch to model waitpid(WNOHANG)
+  // observing a still-live notification writer.
+  driver_->set_debug_notification_deferred_reap_for_testing(true);
+  const auto start = std::chrono::steady_clock::now();
+  EXPECT_FALSE(driver_->notify_debug_event_for_testing(create.queue_id, kException,
+                                                       /*retain_on_rejection=*/true));
+  EXPECT_LT(std::chrono::steady_clock::now() - start, std::chrono::seconds(1));
+
+  driver_->set_debug_notification_deferred_reap_for_testing(false);
+  driver_->set_debug_notification_write_hook_for_testing({});
+  EXPECT_TRUE(competing_write_ran);
+  EXPECT_EQ(::fcntl(notifier, F_GETFL) & O_NONBLOCK, 0);
+
+  uint64_t notifications = 0;
+  ASSERT_EQ(::read(notifier, &notifications, sizeof(notifications)),
+            static_cast<ssize_t>(sizeof(notifications)));
+  EXPECT_EQ(notifications, saturated);
+  pollfd pfd{notifier, POLLIN, 0};
+  ASSERT_EQ(::poll(&pfd, 1, 1000), 1);
+  ASSERT_EQ(::read(notifier, &notifications, sizeof(notifications)),
+            static_cast<ssize_t>(sizeof(notifications)));
+  EXPECT_EQ(notifications, 1u);
+
+  // Stop fixture threads before fork so their temporary allocations are not
+  // orphaned in the child. The process-lifetime notification reaper stays alive.
+  driver_->close();
+  driver_ = nullptr;
+  engine_.reset();
+  soc_ = nullptr;
+
+  // Initializing the deferred reaper must not leave a joinable static thread
+  // that a later fork child tries to destroy. Use exit(), not _exit(), so the
+  // child runs process-lifetime destructors under a second bounded wait.
+  const pid_t exit_probe = ::fork();
+  ASSERT_GE(exit_probe, 0);
+  if (exit_probe == 0)
+    std::exit(0);
+  EXPECT_EQ(wait_for_child_with_timeout(exit_probe, std::chrono::seconds(2)), 0);
+}
+
+TEST_F(KfdIoctlTest, DbgTrapSubscriptionLossAfterWriteRejectsClaim) {
+  constexpr uint64_t kDebuggerOnly = KFD_EC_MASK(EC_QUEUE_WAVE_TRAP);
+  constexpr uint64_t kRuntimeRoutable = KFD_EC_MASK(EC_QUEUE_WAVE_MEMORY_VIOLATION);
+  std::vector<uint8_t> ring(4096);
+  uint64_t read_pointer = 0;
+  uint64_t write_pointer = 0;
+  kfd_ioctl_create_queue_args create{};
+  create.gpu_id = kGpuId;
+  create.queue_type = KFD_IOC_QUEUE_TYPE_COMPUTE_AQL;
+  create.ring_base_address = reinterpret_cast<uint64_t>(ring.data());
+  create.ring_size = static_cast<uint32_t>(ring.size());
+  create.read_pointer_address = reinterpret_cast<uint64_t>(&read_pointer);
+  create.write_pointer_address = reinterpret_cast<uint64_t>(&write_pointer);
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_CREATE_QUEUE, &create), 0);
+
+  const int notifier = eventfd(0, EFD_CLOEXEC | EFD_NONBLOCK);
+  ASSERT_GE(notifier, 0);
+  debug_fds_.push_back(notifier);
+  kfd_ioctl_dbg_trap_args enable{};
+  enable.pid = static_cast<uint32_t>(getpid());
+  enable.op = KFD_IOC_DBG_TRAP_ENABLE;
+  enable.enable.dbg_fd = notifier;
+  enable.enable.exception_mask = kDebuggerOnly | kRuntimeRoutable;
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &enable), 0);
+
+  kfd_ioctl_dbg_trap_args exceptions{};
+  exceptions.pid = static_cast<uint32_t>(getpid());
+  exceptions.op = KFD_IOC_DBG_TRAP_SET_EXCEPTIONS_ENABLED;
+  int mask_update_result = -1;
+  int resubscribe_result = -1;
+  driver_->set_debug_notification_result_hook_for_testing([&](bool delivered) {
+    if (!delivered)
+      return;
+    exceptions.set_exceptions_enabled.exception_mask = kRuntimeRoutable;
+    mask_update_result = driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &exceptions);
+    exceptions.set_exceptions_enabled.exception_mask = kDebuggerOnly | kRuntimeRoutable;
+    resubscribe_result = driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &exceptions);
+  });
+  EXPECT_FALSE(driver_->notify_debug_event_for_testing(create.queue_id, kDebuggerOnly,
+                                                       /*retain_on_rejection=*/false));
+  driver_->set_debug_notification_result_hook_for_testing({});
+  EXPECT_EQ(mask_update_result, 0);
+  EXPECT_EQ(resubscribe_result, 0);
+
+  uint64_t notifications = 0;
+  ASSERT_EQ(::read(notifier, &notifications, sizeof(notifications)),
+            static_cast<ssize_t>(sizeof(notifications)));
+  EXPECT_EQ(notifications, 1u);
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &exceptions), 0);
+  EXPECT_EQ(::read(notifier, &notifications, sizeof(notifications)), -1);
+  EXPECT_EQ(errno, EAGAIN);
+
+  mask_update_result = -1;
+  driver_->set_debug_notification_result_hook_for_testing([&](bool delivered) {
+    if (!delivered)
+      return;
+    exceptions.set_exceptions_enabled.exception_mask = kDebuggerOnly;
+    mask_update_result = driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &exceptions);
+  });
+  EXPECT_FALSE(driver_->notify_debug_event_for_testing(create.queue_id, kRuntimeRoutable,
+                                                       /*retain_on_rejection=*/true,
+                                                       /*reserve_runtime_on_rejection=*/true));
+  driver_->set_debug_notification_result_hook_for_testing({});
+  EXPECT_EQ(mask_update_result, 0);
+  ASSERT_EQ(::read(notifier, &notifications, sizeof(notifications)),
+            static_cast<ssize_t>(sizeof(notifications)));
+  EXPECT_EQ(notifications, 1u);
+
+  auto process = driver_->find_process(driver_->local_process_id());
+  ASSERT_NE(process, nullptr);
+  std::lock_guard<std::mutex> lock(process->alloc_mutex_);
+  auto queue = process->queue_snapshot_map_.find(create.queue_id);
+  ASSERT_NE(queue, process->queue_snapshot_map_.end());
+  EXPECT_NE(queue->second.runtime_exception_pending_status & kRuntimeRoutable, 0u);
+}
+
+TEST_F(KfdIoctlTest, DbgTrapUnrelatedMaskChangePreservesDebuggerOwnership) {
+  constexpr uint64_t kPublished = KFD_EC_MASK(EC_QUEUE_WAVE_MEMORY_VIOLATION);
+  constexpr uint64_t kUnrelated = KFD_EC_MASK(EC_QUEUE_WAVE_TRAP);
+  std::vector<uint8_t> ring(4096);
+  uint64_t read_pointer = 0;
+  uint64_t write_pointer = 0;
+  kfd_ioctl_create_queue_args create{};
+  create.gpu_id = kGpuId;
+  create.queue_type = KFD_IOC_QUEUE_TYPE_COMPUTE_AQL;
+  create.ring_base_address = reinterpret_cast<uint64_t>(ring.data());
+  create.ring_size = static_cast<uint32_t>(ring.size());
+  create.read_pointer_address = reinterpret_cast<uint64_t>(&read_pointer);
+  create.write_pointer_address = reinterpret_cast<uint64_t>(&write_pointer);
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_CREATE_QUEUE, &create), 0);
+
+  const int notifier = eventfd(0, EFD_CLOEXEC | EFD_NONBLOCK);
+  ASSERT_GE(notifier, 0);
+  debug_fds_.push_back(notifier);
+  kfd_ioctl_dbg_trap_args enable{};
+  enable.pid = static_cast<uint32_t>(getpid());
+  enable.op = KFD_IOC_DBG_TRAP_ENABLE;
+  enable.enable.dbg_fd = notifier;
+  enable.enable.exception_mask = kPublished | kUnrelated;
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &enable), 0);
+
+  kfd_queue_snapshot_entry snapshot_entry{};
+  kfd_ioctl_dbg_trap_args snapshot{};
+  snapshot.pid = static_cast<uint32_t>(getpid());
+  snapshot.op = KFD_IOC_DBG_TRAP_GET_QUEUE_SNAPSHOT;
+  snapshot.queue_snapshot.exception_mask = KFD_EC_MASK(EC_QUEUE_NEW);
+  snapshot.queue_snapshot.snapshot_buf_ptr = reinterpret_cast<uint64_t>(&snapshot_entry);
+  snapshot.queue_snapshot.num_queues = 1;
+  snapshot.queue_snapshot.entry_size = sizeof(snapshot_entry);
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &snapshot), 0);
+
+  kfd_ioctl_dbg_trap_args exceptions{};
+  exceptions.pid = static_cast<uint32_t>(getpid());
+  exceptions.op = KFD_IOC_DBG_TRAP_SET_EXCEPTIONS_ENABLED;
+  int mask_update_result = -1;
+  driver_->set_debug_notification_result_hook_for_testing([&](bool delivered) {
+    if (!delivered)
+      return;
+    exceptions.set_exceptions_enabled.exception_mask = kPublished;
+    mask_update_result = driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &exceptions);
+  });
+  EXPECT_TRUE(driver_->notify_debug_event_for_testing(create.queue_id, kPublished,
+                                                      /*retain_on_rejection=*/true,
+                                                      /*reserve_runtime_on_rejection=*/true));
+  driver_->set_debug_notification_result_hook_for_testing({});
+  EXPECT_EQ(mask_update_result, 0);
+
+  uint64_t notifications = 0;
+  ASSERT_EQ(::read(notifier, &notifications, sizeof(notifications)),
+            static_cast<ssize_t>(sizeof(notifications)));
+  EXPECT_EQ(notifications, 1u);
+
+  auto process = driver_->find_process(driver_->local_process_id());
+  ASSERT_NE(process, nullptr);
+  {
+    std::lock_guard<std::mutex> lock(process->alloc_mutex_);
+    auto queue = process->queue_snapshot_map_.find(create.queue_id);
+    ASSERT_NE(queue, process->queue_snapshot_map_.end());
+    EXPECT_EQ(queue->second.runtime_exception_pending_status & kPublished, 0u);
+  }
+
+  kfd_ioctl_dbg_trap_args query{};
+  query.pid = static_cast<uint32_t>(getpid());
+  query.op = KFD_IOC_DBG_TRAP_QUERY_DEBUG_EVENT;
+  query.query_debug_event.exception_mask = kPublished;
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &query), 0);
+  EXPECT_EQ(query.query_debug_event.queue_id, create.queue_id);
+  EXPECT_EQ(query.query_debug_event.exception_mask, kPublished);
+}
+
+TEST_F(KfdIoctlTest, DbgTrapAddingCombinedEventBitPreservesDebuggerOwnership) {
+  constexpr uint64_t kMemoryViolation = KFD_EC_MASK(EC_QUEUE_WAVE_MEMORY_VIOLATION);
+  constexpr uint64_t kCombined = kMemoryViolation | KFD_EC_MASK(EC_QUEUE_WAVE_TRAP);
+  expect_combined_event_subscription_transition(kMemoryViolation, kCombined);
+}
+
+TEST_F(KfdIoctlTest, DbgTrapReplacingCombinedEventBitPreservesDebuggerOwnership) {
+  expect_combined_event_subscription_transition(KFD_EC_MASK(EC_QUEUE_WAVE_MEMORY_VIOLATION),
+                                                KFD_EC_MASK(EC_QUEUE_WAVE_TRAP));
+}
+
+TEST_F(KfdIoctlTest, DbgTrapRetryPreservesCombinedEventOwnershipAcrossBitReplacement) {
+  expect_combined_event_subscription_transition(KFD_EC_MASK(EC_QUEUE_WAVE_MEMORY_VIOLATION),
+                                                KFD_EC_MASK(EC_QUEUE_WAVE_TRAP),
+                                                /*publish_from_retry=*/true);
+}
+
+TEST_F(KfdIoctlTest, DbgTrapNarrowingCombinedEventClaimPreservesDebuggerOwnership) {
+  constexpr uint64_t kMemoryViolation = KFD_EC_MASK(EC_QUEUE_WAVE_MEMORY_VIOLATION);
+  constexpr uint64_t kCombined = kMemoryViolation | KFD_EC_MASK(EC_QUEUE_WAVE_TRAP);
+  expect_combined_event_subscription_transition(kCombined, kMemoryViolation);
+}
+
 TEST_F(KfdIoctlTest, DbgTrapHwOpWithoutRuntimeReturnsEPERM) {
   kfd_ioctl_dbg_trap_args en{};
   en.pid = static_cast<uint32_t>(getpid());
@@ -1121,6 +2988,124 @@ TEST_F(KfdIoctlTest, RuntimeDisableReportsProcessRuntimeTransition) {
   resume.resume_queues.num_queues = 1;
   EXPECT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &resume), 0);
   EXPECT_NE(queue_id & kQueueInvalid, 0u);
+}
+
+TEST_F(KfdIoctlTest, RuntimeEnableRetainsMaskedProcessEventUntilEnabled) {
+  const auto pid = static_cast<uint32_t>(getpid());
+  const int notifier = eventfd(0, EFD_CLOEXEC | EFD_NONBLOCK);
+  ASSERT_GE(notifier, 0);
+  debug_fds_.push_back(notifier);
+
+  kfd_ioctl_dbg_trap_args enable{};
+  enable.pid = pid;
+  enable.op = KFD_IOC_DBG_TRAP_ENABLE;
+  enable.enable.dbg_fd = notifier;
+  enable.enable.exception_mask = KFD_EC_MASK(EC_QUEUE_WAVE_ABORT);
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &enable), 0);
+
+  kfd_ioctl_runtime_enable_args runtime{};
+  runtime.mode_mask = KFD_RUNTIME_ENABLE_MODE_ENABLE_MASK;
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_RUNTIME_ENABLE, &runtime), 0);
+
+  uint64_t notifications = 0;
+  EXPECT_EQ(::read(notifier, &notifications, sizeof(notifications)), -1);
+  EXPECT_EQ(errno, EAGAIN);
+
+  kfd_ioctl_dbg_trap_args query{};
+  query.pid = pid;
+  query.op = KFD_IOC_DBG_TRAP_QUERY_DEBUG_EVENT;
+  EXPECT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &query), -EAGAIN);
+
+  kfd_ioctl_dbg_trap_args exceptions{};
+  exceptions.pid = pid;
+  exceptions.op = KFD_IOC_DBG_TRAP_SET_EXCEPTIONS_ENABLED;
+  exceptions.set_exceptions_enabled.exception_mask = KFD_EC_MASK(EC_PROCESS_RUNTIME);
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &exceptions), 0);
+
+  ASSERT_EQ(::read(notifier, &notifications, sizeof(notifications)),
+            static_cast<ssize_t>(sizeof(notifications)))
+      << strerror(errno);
+  EXPECT_EQ(notifications, 1u);
+
+  query.query_debug_event.exception_mask = KFD_EC_MASK(EC_PROCESS_RUNTIME);
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &query), 0);
+  EXPECT_NE(query.query_debug_event.exception_mask & KFD_EC_MASK(EC_PROCESS_RUNTIME), 0u);
+
+  kfd_ioctl_dbg_trap_args acknowledge{};
+  acknowledge.pid = pid;
+  acknowledge.op = KFD_IOC_DBG_TRAP_SEND_RUNTIME_EVENT;
+  EXPECT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &acknowledge), 0);
+}
+
+TEST_F(KfdIoctlTest, DbgTrapProcessRetryPreservesCombinedEventOwnershipAcrossBitReplacement) {
+  constexpr uint64_t kRuntime = KFD_EC_MASK(EC_PROCESS_RUNTIME);
+  constexpr uint64_t kDeviceRemove = KFD_EC_MASK(EC_PROCESS_DEVICE_REMOVE);
+  constexpr uint64_t kCombined = kRuntime | kDeviceRemove;
+  const auto pid = static_cast<uint32_t>(getpid());
+  const int notifier = eventfd(0, EFD_CLOEXEC | EFD_NONBLOCK);
+  ASSERT_GE(notifier, 0);
+  debug_fds_.push_back(notifier);
+
+  kfd_ioctl_dbg_trap_args enable{};
+  enable.pid = pid;
+  enable.op = KFD_IOC_DBG_TRAP_ENABLE;
+  enable.enable.dbg_fd = notifier;
+  enable.enable.exception_mask = kRuntime;
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &enable), 0);
+
+  driver_->set_debug_notifier_dup_error_for_testing(EMFILE);
+  driver_->raise_process_debug_event_for_testing(pid, kCombined);
+
+  auto write_entered = std::make_shared<std::promise<void>>();
+  auto write_entered_future = write_entered->get_future();
+  auto release_write = std::make_shared<std::promise<void>>();
+  auto release_write_future = release_write->get_future().share();
+  driver_->set_debug_notification_write_hook_for_testing([write_entered, release_write_future] {
+    write_entered->set_value();
+    release_write_future.wait();
+  });
+  driver_->set_debug_notifier_dup_error_for_testing(std::nullopt);
+  if (write_entered_future.wait_for(std::chrono::seconds(2)) != std::future_status::ready) {
+    release_write->set_value();
+    driver_->set_debug_notification_write_hook_for_testing({});
+    FAIL() << "background process notification retry did not reach the writer";
+    return;
+  }
+
+  kfd_ioctl_dbg_trap_args exceptions{};
+  exceptions.pid = pid;
+  exceptions.op = KFD_IOC_DBG_TRAP_SET_EXCEPTIONS_ENABLED;
+  exceptions.set_exceptions_enabled.exception_mask = kDeviceRemove;
+  const int mask_update_result = driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &exceptions);
+  release_write->set_value();
+
+  pollfd ready{notifier, POLLIN, 0};
+  const int poll_result = ::poll(&ready, 1, 2000);
+  driver_->set_debug_notification_write_hook_for_testing({});
+  ASSERT_EQ(mask_update_result, 0);
+  ASSERT_EQ(poll_result, 1);
+  uint64_t notifications = 0;
+  ASSERT_EQ(::read(notifier, &notifications, sizeof(notifications)),
+            static_cast<ssize_t>(sizeof(notifications)));
+  EXPECT_EQ(notifications, 1u);
+
+  kfd_ioctl_dbg_trap_args query{};
+  query.pid = pid;
+  query.op = KFD_IOC_DBG_TRAP_QUERY_DEBUG_EVENT;
+  int query_result = -EAGAIN;
+  for (int attempt = 0; attempt < 200 && query_result == -EAGAIN; ++attempt) {
+    query.query_debug_event.exception_mask = kCombined;
+    query_result = driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &query);
+    if (query_result == -EAGAIN)
+      static_cast<void>(::poll(nullptr, 0, 10));
+  }
+  ASSERT_EQ(query_result, 0);
+  EXPECT_EQ(query.query_debug_event.queue_id, 0u);
+  EXPECT_EQ(query.query_debug_event.exception_mask, kCombined);
+  EXPECT_EQ(::poll(&ready, 1, 100), 0);
+
+  query.query_debug_event.exception_mask = kCombined;
+  EXPECT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &query), -EAGAIN);
 }
 
 TEST_F(KfdIoctlTest, DbgTrapAttachDetachConfigOpsValidateAndResetState) {
@@ -1594,7 +3579,7 @@ TEST_F(KfdIoctlTest, DbgTrapEnableOversizedRuntimeInfoPreservesTailInDaemonMode)
 
   // A live fd for the now-active daemon-mode validation; the daemon adopts it on
   // ENABLE and releases it on DISABLE (RAII), so it is not tracked/closed here.
-  int notifier = eventfd(0, EFD_CLOEXEC);
+  int notifier = eventfd(0, EFD_CLOEXEC | EFD_NONBLOCK);
   ASSERT_GE(notifier, 0);
 
   kfd_ioctl_dbg_trap_args args{};
@@ -1973,7 +3958,7 @@ TEST_F(DbgTrapDaemonTest, EnableRejectsAMemFdForADifferentProcess) {
   ASSERT_EQ(fstat(their_mem.get(), &theirs), 0);
   EXPECT_NE(ours.st_ino, theirs.st_ino);
 
-  int notifier = eventfd(0, EFD_CLOEXEC);
+  int notifier = eventfd(0, EFD_CLOEXEC | EFD_NONBLOCK);
   ASSERT_GE(notifier, 0);
   util::UniqueHandle notifier_closer{notifier};
 
@@ -1998,7 +3983,7 @@ TEST_F(DbgTrapDaemonTest, EnableRejectsAMemFdForADifferentProcess) {
   // The matching fd still works, so the gate rejects the mismatch and not the
   // transfer itself.
   mem_mismatch_path_.clear();
-  int notifier2 = eventfd(0, EFD_CLOEXEC);
+  int notifier2 = eventfd(0, EFD_CLOEXEC | EFD_NONBLOCK);
   ASSERT_GE(notifier2, 0);
   util::UniqueHandle notifier2_closer{notifier2};
   kfd_ioctl_dbg_trap_args ok{};
@@ -2018,7 +4003,7 @@ TEST_F(DbgTrapDaemonTest, EnableRejectsAMemFdForADifferentProcess) {
 // and the session takes ownership (in_handle cleared so the transport does not
 // reclaim it).
 TEST_F(DbgTrapDaemonTest, EnableAdoptsTransferredNotifierFd) {
-  int notifier = eventfd(0, EFD_CLOEXEC);
+  int notifier = eventfd(0, EFD_CLOEXEC | EFD_NONBLOCK);
   ASSERT_GE(notifier, 0);
 
   kfd_ioctl_dbg_trap_args en{};
@@ -2038,7 +4023,7 @@ TEST_F(DbgTrapDaemonTest, EnableAdoptsTransferredNotifierFd) {
 
 // DISABLE releases the fd the daemon owns; the descriptor is closed afterward.
 TEST_F(DbgTrapDaemonTest, DisableClosesAdoptedNotifierFd) {
-  int notifier = eventfd(0, EFD_CLOEXEC);
+  int notifier = eventfd(0, EFD_CLOEXEC | EFD_NONBLOCK);
   ASSERT_GE(notifier, 0);
 
   ASSERT_EQ(enable_with_notifier(notifier, nullptr), 0);
@@ -2076,7 +4061,7 @@ TEST_F(DbgTrapDaemonTest, EnableWithClientChosenFdNumberIsNotTrustedInDaemonName
   // A real, live fd in *this* (daemon) process. The client names exactly this
   // number in dbg_fd; without the scrub the handler's fcntl() would validate it
   // against the daemon's fd table and adopt it.
-  const int daemon_fd = eventfd(0, EFD_CLOEXEC);
+  const int daemon_fd = eventfd(0, EFD_CLOEXEC | EFD_NONBLOCK);
   ASSERT_GE(daemon_fd, 0);
 
   kfd_ioctl_dbg_trap_args en{};
@@ -2093,17 +4078,15 @@ TEST_F(DbgTrapDaemonTest, EnableWithClientChosenFdNumberIsNotTrustedInDaemonName
   ::close(daemon_fd);
 }
 
-// End-to-end: the RemoteDriver client hands the debugger's notifier fd to an
-// in-process daemon over SCM_RIGHTS (mirroring tools/rocjitsu's handle_client),
-// and the daemon-side rj_vm_execute_as() adopts it. Proven by having the daemon
-// write a sentinel through the *transferred* descriptor and reading it back on
-// the client's own eventfd — only possible if SCM_RIGHTS delivered a working
-// alias of the same kernel object.
+// End-to-end: RemoteDriver::open() returns the synthetic primary KFD eventfd,
+// the client passes that exact descriptor through DBG_TRAP_ENABLE, and the
+// in-process daemon adopts it over SCM_RIGHTS. Creating a queue in the daemon
+// then has to make the original client descriptor readable, and QUERY through
+// RemoteDriver must return the same event.
 TEST_F(DbgTrapDaemonTest, EnableSendsNotifierFdOverScmRights) {
   int sv[2];
   ASSERT_EQ(socketpair(AF_UNIX, SOCK_STREAM, 0, sv), 0) << strerror(errno);
 
-  constexpr uint64_t kSentinel = 0x0102030405060708ULL;
   constexpr uint64_t kMemorySentinel = 0x8877665544332211ULL;
   uint64_t target_memory = 0;
   std::atomic<int> fds_received{0};
@@ -2125,6 +4108,19 @@ TEST_F(DbgTrapDaemonTest, EnableSendsNotifierFdOverScmRights) {
       int in_fd = (num_in > 0) ? in_fds[0] : -1;
       int in_mem_fd = (num_in > 1) ? in_fds[1] : -1;
       int in_proc_fd = (num_in > 2) ? in_fds[2] : -1;
+
+      if (hdr.opcode == rocjitsu::RPC_HANDSHAKE) {
+        rocjitsu::RpcHeader resp{};
+        resp.opcode = rocjitsu::RPC_HANDSHAKE;
+        resp.request_id = hdr.request_id;
+        resp.payload_bytes = sizeof(rocjitsu::RpcHandshakeResponse);
+        rocjitsu::RpcHandshakeResponse handshake{};
+        handshake.version = rocjitsu::kRpcProtocolVersion;
+        if (!rocjitsu::rpc_send_exact(server_fd, &resp, sizeof(resp)) ||
+            !rocjitsu::rpc_send_exact(server_fd, &handshake, sizeof(handshake)))
+          break;
+        continue;
+      }
 
       if (hdr.opcode == rocjitsu::RPC_CLOSE) {
         rocjitsu::RpcHeader resp{};
@@ -2163,16 +4159,12 @@ TEST_F(DbgTrapDaemonTest, EnableSendsNotifierFdOverScmRights) {
       }
       auto *ireq = reinterpret_cast<rocjitsu::RpcIoctlRequest *>(payload.data());
 
-      // Prove the received descriptor is live and aliases the client's eventfd
-      // by writing a sentinel through it before the handler adopts it.
       if (in_fd >= 0) {
         fds_received.store(static_cast<int>(num_in));
         // rpc_recv_msg passes MSG_CMSG_CLOEXEC, so the transferred notifier must
         // arrive close-on-exec and cannot leak through a later exec.
         int fd_flags = ::fcntl(in_fd, F_GETFD);
         notifier_cloexec.store((fd_flags >= 0 && (fd_flags & FD_CLOEXEC)) ? 1 : 0);
-        uint64_t s = kSentinel;
-        [[maybe_unused]] ssize_t w = ::write(in_fd, &s, sizeof(s));
       }
       if (in_mem_fd >= 0) {
         [[maybe_unused]] ssize_t w =
@@ -2211,15 +4203,16 @@ TEST_F(DbgTrapDaemonTest, EnableSendsNotifierFdOverScmRights) {
   });
 
   rocjitsu::RemoteDriver rd(sv[0]);
-
-  // Non-blocking so a failed transfer fails the read below instead of hanging.
-  int notifier = eventfd(0, EFD_CLOEXEC | EFD_NONBLOCK);
+  const int notifier = rd.open();
   ASSERT_GE(notifier, 0);
+  pollfd pfd{notifier, POLLIN, 0};
+  ASSERT_EQ(::poll(&pfd, 1, 0), 0);
 
   kfd_ioctl_dbg_trap_args en{};
   en.pid = static_cast<uint32_t>(kClientPid);
   en.op = KFD_IOC_DBG_TRAP_ENABLE;
   en.enable.dbg_fd = static_cast<uint32_t>(notifier);
+  en.enable.exception_mask = KFD_EC_MASK(EC_QUEUE_NEW);
   ASSERT_EQ(rd.ioctl(AMDKFD_IOC_DBG_TRAP, &en), 0);
 
   // The client sent the notifier, target memory and pinned proc directory; the
@@ -2230,13 +4223,42 @@ TEST_F(DbgTrapDaemonTest, EnableSendsNotifierFdOverScmRights) {
   // it cannot leak through a later exec in the daemon.
   EXPECT_EQ(notifier_cloexec.load(), 1);
 
-  // The daemon's write through the transferred fd is visible on our eventfd,
-  // proving the descriptor was really carried across the process boundary.
+  ASSERT_EQ(::poll(&pfd, 1, 0), 0);
+
+  std::vector<uint8_t> ring(4096);
+  uint64_t read_pointer = 0;
+  uint64_t write_pointer = 0;
+  kfd_ioctl_create_queue_args create{};
+  create.gpu_id = kGpuId;
+  create.queue_type = KFD_IOC_QUEUE_TYPE_COMPUTE_AQL;
+  create.ring_base_address = reinterpret_cast<uint64_t>(ring.data());
+  create.ring_size = static_cast<uint32_t>(ring.size());
+  create.read_pointer_address = reinterpret_cast<uint64_t>(&read_pointer);
+  create.write_pointer_address = reinterpret_cast<uint64_t>(&write_pointer);
+  ASSERT_EQ(rd.ioctl(AMDKFD_IOC_CREATE_QUEUE, &create), 0);
+
+  // Queue creation retains EC_QUEUE_NEW in the daemon snapshot. The mask op is
+  // the production retry boundary that publishes already-retained events.
+  kfd_ioctl_dbg_trap_args exceptions{};
+  exceptions.pid = static_cast<uint32_t>(kClientPid);
+  exceptions.op = KFD_IOC_DBG_TRAP_SET_EXCEPTIONS_ENABLED;
+  exceptions.set_exceptions_enabled.exception_mask = KFD_EC_MASK(EC_QUEUE_NEW);
+  ASSERT_EQ(rd.ioctl(AMDKFD_IOC_DBG_TRAP, &exceptions), 0);
+
+  ASSERT_EQ(::poll(&pfd, 1, 1000), 1);
   uint64_t got = 0;
   ASSERT_EQ(::read(notifier, &got, sizeof(got)), static_cast<ssize_t>(sizeof(got)))
       << "notifier fd was not transferred: " << strerror(errno);
-  EXPECT_EQ(got, kSentinel);
+  EXPECT_EQ(got, 1u);
   EXPECT_EQ(target_memory, kMemorySentinel);
+
+  kfd_ioctl_dbg_trap_args query{};
+  query.pid = static_cast<uint32_t>(kClientPid);
+  query.op = KFD_IOC_DBG_TRAP_QUERY_DEBUG_EVENT;
+  query.query_debug_event.exception_mask = KFD_EC_MASK(EC_QUEUE_NEW);
+  ASSERT_EQ(rd.ioctl(AMDKFD_IOC_DBG_TRAP, &query), 0);
+  EXPECT_EQ(query.query_debug_event.queue_id, create.queue_id);
+  EXPECT_EQ(query.query_debug_event.exception_mask, KFD_EC_MASK(EC_QUEUE_NEW));
 
   // Release the adopted fd through the transport for symmetry.
   kfd_ioctl_dbg_trap_args dis{};
@@ -2254,7 +4276,7 @@ TEST_F(DbgTrapDaemonTest, EnableSendsNotifierFdOverScmRights) {
 // or the registered debugger passes the permission gate.
 TEST_F(DbgTrapDaemonTest, ForeignClientCannotDriveAnothersSession) {
   // Client A (kClientPid) self-enables debug, becoming its own debugger.
-  int notifier = eventfd(0, EFD_CLOEXEC);
+  int notifier = eventfd(0, EFD_CLOEXEC | EFD_NONBLOCK);
   ASSERT_GE(notifier, 0);
   ASSERT_EQ(enable_with_notifier(notifier, nullptr), 0);
 
@@ -2293,7 +4315,7 @@ TEST_F(DbgTrapDaemonTest, ForeignClientCannotDriveAnothersSession) {
 // so running the local contract through it is what makes the two transports
 // comparable rather than separately self-consistent.
 TEST_F(DbgTrapDaemonTest, DeviceSnapshotDispatchMatchesTheLocalContract) {
-  int notifier = eventfd(0, EFD_CLOEXEC);
+  int notifier = eventfd(0, EFD_CLOEXEC | EFD_NONBLOCK);
   ASSERT_GE(notifier, 0);
   ASSERT_EQ(enable_with_notifier(notifier, nullptr), 0);
 
@@ -2426,7 +4448,7 @@ TEST_F(DbgTrapDaemonTest, QueueSnapshotReconstructsInlineBufferAndValidatesError
   queue.ctx_save_restore_size = 0x8000;
   ASSERT_EQ(execute(AMDKFD_IOC_CREATE_QUEUE, &queue, sizeof(queue), -1, nullptr), 0);
 
-  int notifier = eventfd(0, EFD_CLOEXEC);
+  int notifier = eventfd(0, EFD_CLOEXEC | EFD_NONBLOCK);
   ASSERT_GE(notifier, 0);
   ASSERT_EQ(enable_with_notifier(notifier, nullptr), 0);
 
@@ -2525,7 +4547,7 @@ TEST_F(DbgTrapDaemonTest, QueueControlReconstructsRequestedIdsAndReportsInvalidQ
   queue.ctx_save_restore_size = 0x8000;
   ASSERT_EQ(execute(AMDKFD_IOC_CREATE_QUEUE, &queue, sizeof(queue), -1, nullptr), 0);
 
-  int notifier = eventfd(0, EFD_CLOEXEC);
+  int notifier = eventfd(0, EFD_CLOEXEC | EFD_NONBLOCK);
   ASSERT_GE(notifier, 0);
   ASSERT_EQ(enable_with_notifier(notifier, nullptr), 0);
 
@@ -3373,7 +5395,7 @@ TEST(RemoteDriverDbgNotifierTest, EnableWithClosedNotifierFdPreservesEbadf) {
   // send below takes it, the send then succeeds, and the test stops testing
   // what it is named for -- it reports whatever the daemon path answers instead,
   // and can block waiting for a reply that no one is serving.
-  int dead_fd = ::eventfd(0, EFD_CLOEXEC);
+  int dead_fd = ::eventfd(0, EFD_CLOEXEC | EFD_NONBLOCK);
   ASSERT_GE(dead_fd, 0);
   constexpr int kParkedFdBase = 4096;
   const int parked_fd = ::fcntl(dead_fd, F_DUPFD_CLOEXEC, kParkedFdBase);
@@ -3420,7 +5442,7 @@ TEST(RemoteDriverDbgEnableTest, FailedEnableLeavesCallerRuntimeInfoUntouched) {
   // A valid notifier fd so the SCM_RIGHTS send succeeds and the request reaches
   // the daemon, which then fails the op with -EBADF. Allocated after the driver
   // so its fd number is not reused by the driver's internal eventfd.
-  int notifier_fd = ::eventfd(0, EFD_CLOEXEC);
+  int notifier_fd = ::eventfd(0, EFD_CLOEXEC | EFD_NONBLOCK);
   ASSERT_GE(notifier_fd, 0);
 
   kfd_ioctl_dbg_trap_args en{};
@@ -4457,19 +6479,21 @@ TEST_F(KfdIoctlTest, DbgTrapQueueSnapshotEnumeratesQueues) {
   EXPECT_EQ(count2.queue_snapshot.num_queues, 0u);
 }
 
-TEST_F(KfdIoctlTest, DbgTrapRealWaveTrapReportsWhilePeerRunsBeforeExplicitCwsrSuspend) {
+TEST_F(KfdIoctlCdna5Test, DbgTrapHandlerExceptionReportsExactMaskBeforeExplicitCwsrSuspend) {
   constexpr uint64_t kKernelAddress = 0x600000000ULL;
   constexpr uint64_t kPeerAddress = 0x600001000ULL;
   constexpr uint64_t kTrapHandlerAddress = 0x600080000ULL;
   constexpr uint64_t kCwsrAddress = 0x600100000ULL;
   constexpr uint32_t kCwsrSize = 0x40000;
-  constexpr uint32_t kSTrapBreakpoint = 0xBF920001u;
+  constexpr uint32_t kSTrapBreakpoint = 0xBF900001u;
   constexpr uint32_t kSNop = 0xBF800000u;
+  constexpr uint64_t kReportedExceptions =
+      KFD_EC_MASK(EC_QUEUE_WAVE_ABORT) | KFD_EC_MASK(EC_QUEUE_WAVE_MATH_ERROR);
 
   std::vector<uint8_t> code_page(4096);
   std::vector<uint8_t> peer_page(4096);
   std::vector<uint8_t> trap_handler_page(4096);
-  std::vector<uint8_t> cwsr(kCwsrSize);
+  std::vector<uint8_t> cwsr(static_cast<size_t>(kCwsrSize) * soc_->num_xcds());
   auto process = driver_->find_process(driver_->local_process_id());
   ASSERT_NE(process, nullptr);
   process->map_pages(kKernelAddress, code_page.data(), code_page.size());
@@ -4489,19 +6513,20 @@ TEST_F(KfdIoctlTest, DbgTrapRealWaveTrapReportsWhilePeerRunsBeforeExplicitCwsrSu
   enable.pid = static_cast<uint32_t>(getpid());
   enable.op = KFD_IOC_DBG_TRAP_ENABLE;
   enable.enable.dbg_fd = notifier;
-  enable.enable.exception_mask = KFD_EC_MASK(EC_QUEUE_WAVE_TRAP);
+  enable.enable.exception_mask = KFD_EC_MASK(EC_QUEUE_WAVE_ABORT);
   ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &enable), 0);
 
   kfd_ioctl_set_trap_handler_args set_handler{};
-  set_handler.gpu_id = kGpuId;
+  set_handler.gpu_id = kCdna5GpuId;
   set_handler.tba_addr = kTrapHandlerAddress;
   ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_SET_TRAP_HANDLER, &set_handler), 0);
 
   std::vector<uint8_t> ring(4096);
-  uint64_t read_pointer = 0;
-  uint64_t write_pointer = 0;
+  alignas(4096) amd_queue_t queue_descriptor{};
+  volatile uint64_t &read_pointer = queue_descriptor.read_dispatch_id;
+  volatile uint64_t &write_pointer = queue_descriptor.write_dispatch_id;
   kfd_ioctl_create_queue_args create{};
-  create.gpu_id = kGpuId;
+  create.gpu_id = kCdna5GpuId;
   create.queue_type = KFD_IOC_QUEUE_TYPE_COMPUTE_AQL;
   create.ring_base_address = reinterpret_cast<uint64_t>(ring.data());
   create.ring_size = static_cast<uint32_t>(ring.size());
@@ -4510,6 +6535,8 @@ TEST_F(KfdIoctlTest, DbgTrapRealWaveTrapReportsWhilePeerRunsBeforeExplicitCwsrSu
   create.ctx_save_restore_address = kCwsrAddress;
   create.ctx_save_restore_size = kCwsrSize;
   ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_CREATE_QUEUE, &create), 0);
+  process->map_pages(reinterpret_cast<uint64_t>(&queue_descriptor), &queue_descriptor,
+                     sizeof(queue_descriptor));
 
   rocjitsu::amdgpu::ComputeUnitCore *cu = nullptr;
   soc_->for_each_cp([&](rocjitsu::amdgpu::CommandProcessor *cp) {
@@ -4526,10 +6553,9 @@ TEST_F(KfdIoctlTest, DbgTrapRealWaveTrapReportsWhilePeerRunsBeforeExplicitCwsrSu
   const uint32_t trap_handler[] = {
       0x806C846Cu,              // s_add_u32 ttmp0, ttmp0, 4
       0x826D806Du,              // s_addc_u32 ttmp1, ttmp1, 0
-      0xBEF800FFu, 0x00002000u, // s_mov_b32 ttmp12, STATUS.HALT
-      0xBF900001u,              // s_sendmsg sendmsg(MSG_INTERRUPT)
-      0xB978F802u,              // s_setreg_b32 hwreg(HW_REG_STATUS), ttmp12
-      0xBE801F6Cu,              // s_rfe_b64 ttmp[0:1]
+      0xB9800384u, 0x00000001u, // s_setreg_imm32_b32 WAVE_STATE_PRIV.HALT, 1
+      0xBFB60001u,              // s_sendmsg sendmsg(MSG_INTERRUPT)
+      0xBE804A6Cu,              // s_rfe_i64 ttmp[0:1]
   };
   for (uint32_t i = 0; i < std::size(trap_handler); ++i)
     memory->write32(kTrapHandlerAddress + i * 4, trap_handler[i], driver_->local_process_id());
@@ -4553,8 +6579,11 @@ TEST_F(KfdIoctlTest, DbgTrapRealWaveTrapReportsWhilePeerRunsBeforeExplicitCwsrSu
   snapshot.queue_snapshot.entry_size = sizeof(snapshot_entry);
   ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &snapshot), 0);
 
-  for (uint32_t i = 0; i < 8 && !wave->debug_halted(); ++i)
+  for (uint32_t i = 0; i < 8 && !wave->debug_halted(); ++i) {
+    if (wave->pc == kTrapHandlerAddress + 4 * sizeof(uint32_t))
+      wave->set_m0((kReportedExceptions << 10) | create.queue_id);
     cu->step();
+  }
   ASSERT_TRUE(wave->debug_halted());
   ASSERT_FALSE(peer->debug_halted());
   EXPECT_GT(peer->pc, kPeerAddress);
@@ -4565,14 +6594,33 @@ TEST_F(KfdIoctlTest, DbgTrapRealWaveTrapReportsWhilePeerRunsBeforeExplicitCwsrSu
       << strerror(errno);
   EXPECT_EQ(notifications, 1u);
 
+  // Pending status is retained when its subscription is removed, but QUERY
+  // filters it until the matching bit is enabled again.
+  kfd_ioctl_dbg_trap_args exceptions{};
+  exceptions.pid = static_cast<uint32_t>(getpid());
+  exceptions.op = KFD_IOC_DBG_TRAP_SET_EXCEPTIONS_ENABLED;
+  exceptions.set_exceptions_enabled.exception_mask = 0;
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &exceptions), 0);
+
   kfd_ioctl_dbg_trap_args query{};
   query.pid = static_cast<uint32_t>(getpid());
   query.op = KFD_IOC_DBG_TRAP_QUERY_DEBUG_EVENT;
   query.query_debug_event.exception_mask = 0;
+  EXPECT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &query), -EAGAIN);
+
+  exceptions.set_exceptions_enabled.exception_mask = KFD_EC_MASK(EC_QUEUE_WAVE_ABORT);
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &exceptions), 0);
+  notifications = 0;
+  ASSERT_EQ(::read(notifier, &notifications, sizeof(notifications)),
+            static_cast<ssize_t>(sizeof(notifications)))
+      << strerror(errno);
+  EXPECT_EQ(notifications, 1u);
+
+  query.query_debug_event.exception_mask = kReportedExceptions;
   ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &query), 0);
   EXPECT_EQ(query.query_debug_event.queue_id, create.queue_id);
-  EXPECT_EQ(query.query_debug_event.gpu_id, kGpuId);
-  EXPECT_NE(query.query_debug_event.exception_mask & KFD_EC_MASK(EC_QUEUE_WAVE_TRAP), 0u);
+  EXPECT_EQ(query.query_debug_event.gpu_id, kCdna5GpuId);
+  EXPECT_EQ(query.query_debug_event.exception_mask, kReportedExceptions);
 
   // Notification alone does not publish queue state. ROCdbgapi explicitly
   // suspends the queue before decoding its authoritative CWSR snapshot.
@@ -4583,7 +6631,7 @@ TEST_F(KfdIoctlTest, DbgTrapRealWaveTrapReportsWhilePeerRunsBeforeExplicitCwsrSu
   control.op = KFD_IOC_DBG_TRAP_SUSPEND_QUEUES;
   control.suspend_queues.queue_array_ptr = reinterpret_cast<uint64_t>(&queue_id);
   control.suspend_queues.num_queues = 1;
-  control.suspend_queues.exception_mask = KFD_EC_MASK(EC_QUEUE_WAVE_TRAP);
+  control.suspend_queues.exception_mask = KFD_EC_MASK(EC_QUEUE_WAVE_ABORT);
   ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &control), 1);
   EXPECT_EQ(memory->read32(kCwsrAddress, driver_->local_process_id()), 0x100u);
   EXPECT_NE(memory->read32(kCwsrAddress + 8, driver_->local_process_id()), 0u);
@@ -4596,7 +6644,7 @@ TEST_F(KfdIoctlTest, DbgTrapRealWaveTrapReportsWhilePeerRunsBeforeExplicitCwsrSu
   ASSERT_TRUE(rocjitsu::kmd::deserialize_queue_cwsr(
       kCwsrAddress, kCwsrSize, states,
       [&](uint64_t address) { return memory->read32(address, driver_->local_process_id()); },
-      ROCJITSU_CODE_ARCH_CDNA4));
+      ROCJITSU_CODE_ARCH_CDNA5));
   auto stopped = std::find_if(states.begin(), states.end(),
                               [](const auto &state) { return state.wave_stopped; });
   ASSERT_NE(stopped, states.end());
@@ -4604,8 +6652,423 @@ TEST_F(KfdIoctlTest, DbgTrapRealWaveTrapReportsWhilePeerRunsBeforeExplicitCwsrSu
                               [](const auto &state) { return !state.wave_stopped; });
   ASSERT_NE(running, states.end());
   EXPECT_FALSE(stopped->saved_status_halt);
-  EXPECT_NE(stopped->status & (1u << 13), 0u);
+  EXPECT_EQ(stopped->status & (1u << 13), 0u);
   EXPECT_EQ(running->status & (1u << 13), 0u);
+
+  // Exercise the opposite subscription transition on a separate queue. The
+  // sendmsg routes this exception to ROCr while it is unsubscribed; enabling
+  // the debugger before s_rfe must not let trap completion claim it again.
+  constexpr uint64_t kRuntimeCwsrAddress = 0x600500000ULL;
+  constexpr uint64_t kExceptionStatusAddress = 0x600900000ULL;
+  constexpr uint32_t kExceptionEventId = 73;
+  std::vector<uint8_t> runtime_cwsr(static_cast<size_t>(kCwsrSize) * soc_->num_xcds());
+  std::array<uint8_t, 4096> exception_page{};
+  process->map_pages(kRuntimeCwsrAddress, runtime_cwsr.data(), runtime_cwsr.size());
+  process->map_pages(kExceptionStatusAddress, exception_page.data(), exception_page.size());
+  memory->write64(kRuntimeCwsrAddress + 6 * sizeof(uint32_t), kExceptionStatusAddress,
+                  driver_->local_process_id());
+  memory->write64(kRuntimeCwsrAddress + 6 * sizeof(uint32_t) + sizeof(uint64_t), kExceptionEventId,
+                  driver_->local_process_id());
+
+  std::atomic<bool> runtime_notified = false;
+  std::atomic<bool> hold_runtime_ack = false;
+  std::atomic<bool> runtime_ack_announced = false;
+  std::atomic<bool> runtime_ack_timed_out = false;
+  std::promise<void> runtime_ack_entered;
+  auto runtime_ack_entered_future = runtime_ack_entered.get_future();
+  std::promise<void> release_runtime_ack;
+  auto release_runtime_ack_future = release_runtime_ack.get_future().share();
+  soc_->for_each_cp([&](rocjitsu::amdgpu::CommandProcessor *cp) {
+    cp->set_interrupt_callback([&](uint32_t process_id, uint32_t event_id) {
+      if (event_id != kExceptionEventId)
+        return;
+      runtime_notified.store(true, std::memory_order_release);
+      if (hold_runtime_ack.load(std::memory_order_acquire) &&
+          !runtime_ack_announced.exchange(true, std::memory_order_acq_rel)) {
+        runtime_ack_entered.set_value();
+        if (release_runtime_ack_future.wait_for(std::chrono::seconds(1)) !=
+            std::future_status::ready)
+          runtime_ack_timed_out.store(true, std::memory_order_release);
+      }
+      memory->write64(kExceptionStatusAddress, 0, process_id);
+    });
+  });
+
+  std::vector<uint8_t> runtime_ring(4096);
+  alignas(4096) amd_queue_t runtime_descriptor{};
+  volatile uint64_t &runtime_read_pointer = runtime_descriptor.read_dispatch_id;
+  volatile uint64_t &runtime_write_pointer = runtime_descriptor.write_dispatch_id;
+  kfd_ioctl_create_queue_args runtime_queue = create;
+  runtime_queue.ring_base_address = reinterpret_cast<uint64_t>(runtime_ring.data());
+  runtime_queue.read_pointer_address = reinterpret_cast<uint64_t>(&runtime_read_pointer);
+  runtime_queue.write_pointer_address = reinterpret_cast<uint64_t>(&runtime_write_pointer);
+  runtime_queue.ctx_save_restore_address = kRuntimeCwsrAddress;
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_CREATE_QUEUE, &runtime_queue), 0);
+  process->map_pages(reinterpret_cast<uint64_t>(&runtime_descriptor), &runtime_descriptor,
+                     sizeof(runtime_descriptor));
+  std::array<kfd_queue_snapshot_entry, 2> runtime_queue_entries{};
+  snapshot.queue_snapshot.snapshot_buf_ptr =
+      reinterpret_cast<uint64_t>(runtime_queue_entries.data());
+  snapshot.queue_snapshot.num_queues = runtime_queue_entries.size();
+  snapshot.queue_snapshot.exception_mask = KFD_EC_MASK(EC_QUEUE_NEW);
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &snapshot), 0);
+  auto *runtime_wave = cu->dispatch_wf(/*wg_id=*/2, kKernelAddress, /*sgprs=*/16, /*vgprs=*/4);
+  ASSERT_NE(runtime_wave, nullptr);
+  runtime_wave->set_process_id(driver_->local_process_id());
+  runtime_wave->set_queue_id(runtime_queue.queue_id);
+
+  exceptions.set_exceptions_enabled.exception_mask = 0;
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &exceptions), 0);
+  const uint64_t runtime_sendmsg_pc = kTrapHandlerAddress + 4 * sizeof(uint32_t);
+  for (uint32_t i = 0; i < 8 && runtime_wave->pc != runtime_sendmsg_pc; ++i)
+    cu->step();
+  ASSERT_EQ(runtime_wave->pc, runtime_sendmsg_pc);
+  runtime_wave->set_m0((kReportedExceptions << 10) | runtime_queue.queue_id);
+  hold_runtime_ack.store(true, std::memory_order_release);
+  auto runtime_publication = std::async(std::launch::async, [&] { cu->step(); });
+  if (runtime_ack_entered_future.wait_for(std::chrono::seconds(1)) != std::future_status::ready) {
+    release_runtime_ack.set_value();
+    runtime_publication.wait();
+    FAIL() << "runtime exception publication did not reach acknowledgement";
+  }
+
+  // The queue bit is reserved for ROCr until its acknowledgement resolves.
+  // A concurrent debugger mask transition must not wake or consume that event.
+  exceptions.set_exceptions_enabled.exception_mask = KFD_EC_MASK(EC_QUEUE_WAVE_ABORT);
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &exceptions), 0);
+  notifications = 0;
+  EXPECT_EQ(::read(notifier, &notifications, sizeof(notifications)), -1);
+  EXPECT_EQ(errno, EAGAIN);
+  query.query_debug_event.exception_mask = kReportedExceptions;
+  EXPECT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &query), -EAGAIN);
+
+  // A distinct debugger-owned occurrence of the same bit may arrive while
+  // ROCr still owns the earlier occurrence. Its successful notification must
+  // survive the runtime acknowledgement, while QUERY remains blocked until
+  // the earlier ownership decision completes.
+  EXPECT_TRUE(driver_->notify_debug_event_for_testing(runtime_queue.queue_id, kReportedExceptions,
+                                                      /*retain_on_rejection=*/false));
+  ASSERT_EQ(::read(notifier, &notifications, sizeof(notifications)),
+            static_cast<ssize_t>(sizeof(notifications)));
+  EXPECT_EQ(notifications, 1u);
+  query.query_debug_event.exception_mask = kReportedExceptions;
+  EXPECT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &query), -EAGAIN);
+
+  release_runtime_ack.set_value();
+  ASSERT_EQ(runtime_publication.wait_for(std::chrono::seconds(2)), std::future_status::ready);
+  runtime_publication.get();
+  EXPECT_FALSE(runtime_ack_timed_out.load(std::memory_order_acquire));
+  ASSERT_EQ(runtime_wave->pc, kTrapHandlerAddress + 5 * sizeof(uint32_t));
+  ASSERT_TRUE(runtime_notified.load(std::memory_order_acquire));
+  query.query_debug_event.exception_mask = kReportedExceptions;
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &query), 0);
+  EXPECT_EQ(query.query_debug_event.queue_id, runtime_queue.queue_id);
+  EXPECT_EQ(query.query_debug_event.exception_mask, kReportedExceptions);
+
+  // Runtime exception routing already froze this wave, but did not write its
+  // context. The debugger's later explicit suspension must still publish a
+  // usable CWSR image.
+  EXPECT_EQ(memory->read32(kRuntimeCwsrAddress, driver_->local_process_id()), 0u);
+  queue_id = runtime_queue.queue_id;
+  control.suspend_queues.exception_mask = KFD_EC_MASK(EC_QUEUE_WAVE_ABORT);
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &control), 1);
+  EXPECT_EQ(memory->read32(kRuntimeCwsrAddress, driver_->local_process_id()), 0x100u);
+  EXPECT_NE(memory->read32(kRuntimeCwsrAddress + 8, driver_->local_process_id()), 0u);
+  EXPECT_NE(memory->read32(kRuntimeCwsrAddress + 12, driver_->local_process_id()), 0u);
+  std::vector<rocjitsu::kmd::CwsrWaveState> runtime_states(1);
+  runtime_states.front().num_sgprs = 16;
+  runtime_states.front().num_vgprs = 4;
+  ASSERT_TRUE(rocjitsu::kmd::deserialize_queue_cwsr(
+      kRuntimeCwsrAddress, kCwsrSize, runtime_states,
+      [&](uint64_t address) { return memory->read32(address, driver_->local_process_id()); },
+      ROCJITSU_CODE_ARCH_CDNA5));
+  EXPECT_EQ(runtime_states.front().pc, runtime_wave->pc);
+  EXPECT_FALSE(runtime_states.front().wave_stopped)
+      << "the runtime freeze is not an architected debugger halt";
+
+  // A failed restore proves the submitted image unusable. Invalidate the
+  // cached-image marker so a retrying suspend replaces it from the still-frozen
+  // live wave rather than reporting success with the same malformed payload.
+  memory->write32(kRuntimeCwsrAddress, 0, driver_->local_process_id());
+  control.op = KFD_IOC_DBG_TRAP_RESUME_QUEUES;
+  control.resume_queues.queue_array_ptr = reinterpret_cast<uint64_t>(&queue_id);
+  control.resume_queues.num_queues = 1;
+  EXPECT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &control), 0);
+  EXPECT_NE(queue_id & KFD_DBG_QUEUE_ERROR_MASK, 0u);
+  EXPECT_FALSE(runtime_wave->fatal_exception_cwsr_valid());
+
+  queue_id = runtime_queue.queue_id;
+  control.op = KFD_IOC_DBG_TRAP_SUSPEND_QUEUES;
+  control.suspend_queues.queue_array_ptr = reinterpret_cast<uint64_t>(&queue_id);
+  control.suspend_queues.num_queues = 1;
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &control), 1);
+  EXPECT_TRUE(runtime_wave->fatal_exception_cwsr_valid());
+  std::vector<rocjitsu::kmd::CwsrWaveState> recovered_runtime_states(1);
+  recovered_runtime_states.front().num_sgprs = 16;
+  recovered_runtime_states.front().num_vgprs = 4;
+  ASSERT_TRUE(rocjitsu::kmd::deserialize_queue_cwsr(
+      kRuntimeCwsrAddress, kCwsrSize, recovered_runtime_states,
+      [&](uint64_t address) { return memory->read32(address, driver_->local_process_id()); },
+      ROCJITSU_CODE_ARCH_CDNA5));
+  EXPECT_EQ(recovered_runtime_states.front().pc, runtime_wave->pc);
+
+  // A debugger may edit the saved image before it resumes the queue. Repeating
+  // SUSPEND_QUEUES for an already-suspended runtime-fatal wave must be
+  // idempotent rather than overwrite that edit from the unchanged live wave.
+  const uint64_t edited_runtime_pc = runtime_states.front().pc + 4 * sizeof(uint32_t);
+  runtime_states.front().pc = edited_runtime_pc;
+  ASSERT_TRUE(rocjitsu::kmd::serialize_queue_cwsr(
+                  kRuntimeCwsrAddress, kCwsrSize, runtime_states,
+                  [&](uint64_t address, uint32_t value) {
+                    memory->write32(address, value, driver_->local_process_id());
+                  },
+                  ROCJITSU_CODE_ARCH_CDNA5)
+                  .ok);
+  queue_id = runtime_queue.queue_id;
+  control.op = KFD_IOC_DBG_TRAP_SUSPEND_QUEUES;
+  control.suspend_queues.queue_array_ptr = reinterpret_cast<uint64_t>(&queue_id);
+  control.suspend_queues.num_queues = 1;
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &control), 1);
+  std::vector<rocjitsu::kmd::CwsrWaveState> repeated_runtime_states(1);
+  repeated_runtime_states.front().num_sgprs = 16;
+  repeated_runtime_states.front().num_vgprs = 4;
+  ASSERT_TRUE(rocjitsu::kmd::deserialize_queue_cwsr(
+      kRuntimeCwsrAddress, kCwsrSize, repeated_runtime_states,
+      [&](uint64_t address) { return memory->read32(address, driver_->local_process_id()); },
+      ROCJITSU_CODE_ARCH_CDNA5));
+  EXPECT_EQ(repeated_runtime_states.front().pc, edited_runtime_pc);
+
+  static std::array<uint64_t, 8192> recovery_doorbells{};
+  recovery_doorbells.fill(std::numeric_limits<uint64_t>::max());
+  hsa_barrier_and_packet_t pending_barrier{};
+  pending_barrier.header = HSA_PACKET_TYPE_BARRIER_AND;
+  std::memcpy(runtime_ring.data(), &pending_barrier, sizeof(pending_barrier));
+  runtime_write_pointer = 1;
+  soc_->for_each_cp([&](rocjitsu::amdgpu::CommandProcessor *cp) {
+    cp->set_doorbell_base(driver_->local_process_id(), recovery_doorbells.data());
+    engine_->schedule_event_now(cp->doorbell_event());
+  });
+  static_cast<void>(engine_->step());
+  EXPECT_EQ(runtime_read_pointer, 0u);
+
+  control.op = KFD_IOC_DBG_TRAP_RESUME_QUEUES;
+  control.resume_queues.queue_array_ptr = reinterpret_cast<uint64_t>(&queue_id);
+  control.resume_queues.num_queues = 1;
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &control), 1);
+  EXPECT_EQ(runtime_wave->pc, edited_runtime_pc);
+  EXPECT_FALSE(runtime_wave->fatal_exception_cwsr_valid());
+  soc_->for_each_cp([&](rocjitsu::amdgpu::CommandProcessor *cp) {
+    EXPECT_FALSE(cp->queue_exception_suspended_for_test(runtime_queue.queue_id,
+                                                        driver_->local_process_id()));
+  });
+  for (uint32_t attempt = 0; attempt < 32 && runtime_read_pointer == 0; ++attempt)
+    static_cast<void>(engine_->step());
+  EXPECT_EQ(runtime_read_pointer, 1u);
+
+  std::memcpy(runtime_ring.data() + sizeof(pending_barrier), &pending_barrier,
+              sizeof(pending_barrier));
+  runtime_write_pointer = 2;
+  soc_->for_each_cp([&](rocjitsu::amdgpu::CommandProcessor *cp) {
+    engine_->schedule_event_now(cp->doorbell_event());
+  });
+  for (uint32_t attempt = 0; attempt < 32 && runtime_read_pointer != 2; ++attempt)
+    static_cast<void>(engine_->step());
+  EXPECT_EQ(runtime_read_pointer, 2u);
+
+  cu->step();
+
+  notifications = 0;
+  EXPECT_EQ(::read(notifier, &notifications, sizeof(notifications)), -1);
+  EXPECT_EQ(errno, EAGAIN);
+  EXPECT_FALSE(runtime_wave->debug_halted());
+  EXPECT_NE(runtime_wave->trap_runtime_exception_status(), 0u);
+  std::array<kfd_queue_snapshot_entry, 2> runtime_entries{};
+  kfd_ioctl_dbg_trap_args runtime_snapshot{};
+  runtime_snapshot.pid = static_cast<uint32_t>(getpid());
+  runtime_snapshot.op = KFD_IOC_DBG_TRAP_GET_QUEUE_SNAPSHOT;
+  runtime_snapshot.queue_snapshot.snapshot_buf_ptr =
+      reinterpret_cast<uint64_t>(runtime_entries.data());
+  runtime_snapshot.queue_snapshot.num_queues = runtime_entries.size();
+  runtime_snapshot.queue_snapshot.entry_size = sizeof(runtime_entries[0]);
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &runtime_snapshot), 0);
+  auto runtime_entry =
+      std::find_if(runtime_entries.begin(), runtime_entries.end(),
+                   [&](const auto &entry) { return entry.queue_id == runtime_queue.queue_id; });
+  ASSERT_NE(runtime_entry, runtime_entries.end());
+  EXPECT_EQ(runtime_entry->exception_status & kReportedExceptions, 0u);
+
+  // Now remove the session inside trap completion. The sendmsg initially
+  // assigns the event to the debugger, but publication must fall back to ROCr
+  // after the detach wins the race.
+  // SUSPEND_QUEUES replaced the runtime queue's bootstrap header with the
+  // debugger CWSR header. Restore the queue-error bootstrap fields before
+  // reusing this test buffer to create another queue.
+  memory->write64(kRuntimeCwsrAddress + 6 * sizeof(uint32_t), kExceptionStatusAddress,
+                  driver_->local_process_id());
+  memory->write64(kRuntimeCwsrAddress + 6 * sizeof(uint32_t) + sizeof(uint64_t), kExceptionEventId,
+                  driver_->local_process_id());
+  kfd_ioctl_create_queue_args rejected_queue = create;
+  rejected_queue.ctx_save_restore_address = kRuntimeCwsrAddress;
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_CREATE_QUEUE, &rejected_queue), 0);
+  auto *rejected_wave = cu->dispatch_wf(/*wg_id=*/3, kKernelAddress, /*sgprs=*/16, /*vgprs=*/4);
+  ASSERT_NE(rejected_wave, nullptr);
+  rejected_wave->set_process_id(driver_->local_process_id());
+  rejected_wave->set_queue_id(rejected_queue.queue_id);
+  runtime_notified.store(false, std::memory_order_release);
+  exceptions.set_exceptions_enabled.exception_mask = KFD_EC_MASK(EC_QUEUE_WAVE_ABORT);
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &exceptions), 0);
+  driver_->detach_debug_event_claim_for_testing();
+  for (uint32_t i = 0; i < 8 && rejected_wave->pc != kTrapHandlerAddress + 5 * sizeof(uint32_t);
+       ++i) {
+    if (rejected_wave->pc == kTrapHandlerAddress + 4 * sizeof(uint32_t))
+      rejected_wave->set_m0((kReportedExceptions << 10) | rejected_queue.queue_id);
+    cu->step();
+  }
+  ASSERT_EQ(rejected_wave->pc, kTrapHandlerAddress + 5 * sizeof(uint32_t));
+  EXPECT_FALSE(runtime_notified.load(std::memory_order_acquire));
+  cu->step();
+  EXPECT_TRUE(runtime_notified.load(std::memory_order_acquire));
+  notifications = 0;
+  EXPECT_EQ(::read(notifier, &notifications, sizeof(notifications)), -1);
+  EXPECT_EQ(errno, EAGAIN);
+  EXPECT_FALSE(rejected_wave->debug_halted());
+
+  enable.enable.exception_mask = KFD_EC_MASK(EC_QUEUE_WAVE_ABORT);
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &enable), 0);
+
+  std::array<kfd_queue_snapshot_entry, 3> rejected_entries{};
+  runtime_snapshot.queue_snapshot.snapshot_buf_ptr =
+      reinterpret_cast<uint64_t>(rejected_entries.data());
+  runtime_snapshot.queue_snapshot.num_queues = rejected_entries.size();
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &runtime_snapshot), 0);
+  auto rejected_entry =
+      std::find_if(rejected_entries.begin(), rejected_entries.end(),
+                   [&](const auto &entry) { return entry.queue_id == rejected_queue.queue_id; });
+  ASSERT_NE(rejected_entry, rejected_entries.end());
+  EXPECT_EQ(rejected_entry->exception_status & kReportedExceptions, 0u);
+  soc_->for_each_cp(
+      [&](rocjitsu::amdgpu::CommandProcessor *cp) { cp->set_interrupt_callback(nullptr); });
+}
+
+TEST_F(KfdIoctlCdna5Test, FailedRuntimeDeliveryDoesNotSuppressLaterDebuggerOwner) {
+  constexpr uint64_t kKernelAddress = 0x600000000ULL;
+  constexpr uint64_t kTrapHandlerAddress = 0x600080000ULL;
+  constexpr uint64_t kCwsrAddress = 0x600100000ULL;
+  constexpr uint32_t kCwsrSize = 0x40000;
+  constexpr uint32_t kSTrapBreakpoint = 0xBF900001u;
+  constexpr uint64_t kWaveAbort = KFD_EC_MASK(EC_QUEUE_WAVE_ABORT);
+
+  std::vector<uint8_t> code_page(4096);
+  std::vector<uint8_t> trap_handler_page(4096);
+  std::vector<uint8_t> cwsr(kCwsrSize);
+  auto process = driver_->find_process(driver_->local_process_id());
+  ASSERT_NE(process, nullptr);
+  process->map_pages(kKernelAddress, code_page.data(), code_page.size());
+  process->map_pages(kTrapHandlerAddress, trap_handler_page.data(), trap_handler_page.size());
+  process->map_pages(kCwsrAddress, cwsr.data(), cwsr.size());
+
+  kfd_ioctl_runtime_enable_args runtime{};
+  runtime.mode_mask = KFD_RUNTIME_ENABLE_MODE_ENABLE_MASK;
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_RUNTIME_ENABLE, &runtime), 0);
+
+  const int notifier = eventfd(0, EFD_CLOEXEC | EFD_NONBLOCK);
+  ASSERT_GE(notifier, 0);
+  debug_fds_.push_back(notifier);
+  kfd_ioctl_dbg_trap_args enable{};
+  enable.pid = static_cast<uint32_t>(getpid());
+  enable.op = KFD_IOC_DBG_TRAP_ENABLE;
+  enable.enable.dbg_fd = notifier;
+  enable.enable.exception_mask = 0;
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &enable), 0);
+
+  kfd_ioctl_set_trap_handler_args set_handler{};
+  set_handler.gpu_id = kCdna5GpuId;
+  set_handler.tba_addr = kTrapHandlerAddress;
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_SET_TRAP_HANDLER, &set_handler), 0);
+
+  std::vector<uint8_t> ring(4096);
+  uint64_t read_pointer = 0;
+  uint64_t write_pointer = 0;
+  kfd_ioctl_create_queue_args create{};
+  create.gpu_id = kCdna5GpuId;
+  create.queue_type = KFD_IOC_QUEUE_TYPE_COMPUTE_AQL;
+  create.ring_base_address = reinterpret_cast<uint64_t>(ring.data());
+  create.ring_size = static_cast<uint32_t>(ring.size());
+  create.read_pointer_address = reinterpret_cast<uint64_t>(&read_pointer);
+  create.write_pointer_address = reinterpret_cast<uint64_t>(&write_pointer);
+  create.ctx_save_restore_address = kCwsrAddress;
+  create.ctx_save_restore_size = kCwsrSize;
+  // Leave the ROCr exception-status header zero: the deferred handler must
+  // report rejection instead of creating a false runtime-ownership marker.
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_CREATE_QUEUE, &create), 0);
+
+  kfd_queue_snapshot_entry snapshot_entry{};
+  kfd_ioctl_dbg_trap_args snapshot{};
+  snapshot.pid = static_cast<uint32_t>(getpid());
+  snapshot.op = KFD_IOC_DBG_TRAP_GET_QUEUE_SNAPSHOT;
+  snapshot.queue_snapshot.exception_mask = KFD_EC_MASK(EC_QUEUE_NEW);
+  snapshot.queue_snapshot.snapshot_buf_ptr = reinterpret_cast<uint64_t>(&snapshot_entry);
+  snapshot.queue_snapshot.num_queues = 1;
+  snapshot.queue_snapshot.entry_size = sizeof(snapshot_entry);
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &snapshot), 0);
+
+  rocjitsu::amdgpu::ComputeUnitCore *cu = nullptr;
+  soc_->for_each_cp([&](rocjitsu::amdgpu::CommandProcessor *cp) {
+    if (cu == nullptr && !cp->compute_units().empty())
+      cu = cp->compute_units().front();
+  });
+  ASSERT_NE(cu, nullptr);
+  auto *memory = soc_->memory();
+  ASSERT_NE(memory, nullptr);
+  memory->write32(kKernelAddress, kSTrapBreakpoint, driver_->local_process_id());
+  const uint32_t trap_handler[] = {
+      0x806C846Cu,              // s_add_u32 ttmp0, ttmp0, 4
+      0x826D806Du,              // s_addc_u32 ttmp1, ttmp1, 0
+      0xB9800384u, 0x00000001u, // s_setreg_imm32_b32 WAVE_STATE_PRIV.HALT, 1
+      0xBFB60001u,              // s_sendmsg sendmsg(MSG_INTERRUPT)
+      0xBE804A6Cu,              // s_rfe_i64 ttmp[0:1]
+  };
+  for (uint32_t index = 0; index < std::size(trap_handler); ++index)
+    memory->write32(kTrapHandlerAddress + index * sizeof(uint32_t), trap_handler[index],
+                    driver_->local_process_id());
+
+  auto *wave = cu->dispatch_wf(/*wg_id=*/0, kKernelAddress, /*sgprs=*/16, /*vgprs=*/4);
+  ASSERT_NE(wave, nullptr);
+  wave->set_process_id(driver_->local_process_id());
+  wave->set_queue_id(create.queue_id);
+  wave->set_dispatch_id(7);
+  for (uint32_t step = 0; step < 8 && wave->pc != kTrapHandlerAddress + 5 * sizeof(uint32_t);
+       ++step) {
+    if (wave->pc == kTrapHandlerAddress + 4 * sizeof(uint32_t))
+      wave->set_m0((kWaveAbort << 10) | create.queue_id);
+    cu->step();
+  }
+  ASSERT_EQ(wave->pc, kTrapHandlerAddress + 5 * sizeof(uint32_t));
+  EXPECT_EQ(wave->trap_runtime_exception_status() & kWaveAbort, 0u);
+  soc_->for_each_cp([&](rocjitsu::amdgpu::CommandProcessor *cp) {
+    EXPECT_FALSE(
+        cp->queue_exception_suspended_for_test(create.queue_id, driver_->local_process_id()));
+  });
+
+  kfd_ioctl_dbg_trap_args exceptions{};
+  exceptions.pid = static_cast<uint32_t>(getpid());
+  exceptions.op = KFD_IOC_DBG_TRAP_SET_EXCEPTIONS_ENABLED;
+  exceptions.set_exceptions_enabled.exception_mask = kWaveAbort;
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &exceptions), 0);
+  uint64_t notifications = 0;
+  ASSERT_EQ(::read(notifier, &notifications, sizeof(notifications)),
+            static_cast<ssize_t>(sizeof(notifications)))
+      << strerror(errno);
+  EXPECT_EQ(notifications, 1u);
+
+  cu->step(); // s_rfe: the newly subscribed debugger must retain ownership.
+  EXPECT_TRUE(wave->debug_halted());
+  EXPECT_EQ(wave->trap_runtime_exception_status() & kWaveAbort, 0u);
+  notifications = 0;
+  ASSERT_EQ(::read(notifier, &notifications, sizeof(notifications)),
+            static_cast<ssize_t>(sizeof(notifications)))
+      << strerror(errno);
+  EXPECT_EQ(notifications, 1u);
 }
 
 // An unfetchable PC is the only wave stop that reaches the debug callbacks
@@ -4920,6 +7383,401 @@ TEST_F(KfdIoctlTest, DbgTrapMemoryViolationStopsTheWaveAndPublishesItsRecord) {
   EXPECT_EQ(notifications, 1u);
 }
 
+TEST_F(KfdIoctlTest, DbgTrapRejectedMemoryViolationFallsBackToRuntime) {
+  constexpr uint64_t kKernelAddress = 0x600000000ULL;
+  constexpr uint64_t kCwsrAddress = 0x600100000ULL;
+  constexpr uint64_t kExceptionStatusAddress = 0x600900000ULL;
+  constexpr uint32_t kCwsrSize = 0x40000;
+  constexpr uint32_t kExceptionEventId = 83;
+  constexpr uint64_t kMemoryViolation = KFD_EC_MASK(EC_QUEUE_WAVE_MEMORY_VIOLATION);
+
+  std::vector<uint8_t> code_page(4096);
+  std::vector<uint8_t> cwsr(kCwsrSize);
+  std::array<uint8_t, 4096> exception_page{};
+  auto process = driver_->find_process(driver_->local_process_id());
+  ASSERT_NE(process, nullptr);
+  process->map_pages(kKernelAddress, code_page.data(), code_page.size());
+  process->map_pages(kCwsrAddress, cwsr.data(), cwsr.size());
+  process->map_pages(kExceptionStatusAddress, exception_page.data(), exception_page.size());
+  std::memcpy(cwsr.data() + 6 * sizeof(uint32_t), &kExceptionStatusAddress,
+              sizeof(kExceptionStatusAddress));
+  std::memcpy(cwsr.data() + 6 * sizeof(uint32_t) + sizeof(uint64_t), &kExceptionEventId,
+              sizeof(kExceptionEventId));
+
+  kfd_ioctl_runtime_enable_args runtime{};
+  runtime.mode_mask = KFD_RUNTIME_ENABLE_MODE_ENABLE_MASK;
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_RUNTIME_ENABLE, &runtime), 0);
+
+  const int notifier = eventfd(0, EFD_CLOEXEC | EFD_NONBLOCK);
+  ASSERT_GE(notifier, 0);
+  debug_fds_.push_back(notifier);
+
+  kfd_ioctl_dbg_trap_args enable{};
+  enable.pid = static_cast<uint32_t>(getpid());
+  enable.op = KFD_IOC_DBG_TRAP_ENABLE;
+  enable.enable.dbg_fd = notifier;
+  enable.enable.exception_mask = kMemoryViolation;
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &enable), 0);
+
+  std::vector<uint8_t> ring(4096);
+  uint64_t read_pointer = 0;
+  uint64_t write_pointer = 0;
+  kfd_ioctl_create_queue_args create{};
+  create.gpu_id = kGpuId;
+  create.queue_type = KFD_IOC_QUEUE_TYPE_COMPUTE_AQL;
+  create.ring_base_address = reinterpret_cast<uint64_t>(ring.data());
+  create.ring_size = static_cast<uint32_t>(ring.size());
+  create.read_pointer_address = reinterpret_cast<uint64_t>(&read_pointer);
+  create.write_pointer_address = reinterpret_cast<uint64_t>(&write_pointer);
+  create.ctx_save_restore_address = kCwsrAddress;
+  create.ctx_save_restore_size = kCwsrSize;
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_CREATE_QUEUE, &create), 0);
+
+  kfd_queue_snapshot_entry snapshot_entry{};
+  kfd_ioctl_dbg_trap_args snapshot{};
+  snapshot.pid = static_cast<uint32_t>(getpid());
+  snapshot.op = KFD_IOC_DBG_TRAP_GET_QUEUE_SNAPSHOT;
+  snapshot.queue_snapshot.exception_mask = KFD_EC_MASK(EC_QUEUE_NEW);
+  snapshot.queue_snapshot.snapshot_buf_ptr = reinterpret_cast<uint64_t>(&snapshot_entry);
+  snapshot.queue_snapshot.num_queues = 1;
+  snapshot.queue_snapshot.entry_size = sizeof(snapshot_entry);
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &snapshot), 0);
+
+  auto *memory = soc_->memory();
+  ASSERT_NE(memory, nullptr);
+  std::atomic<uint64_t> runtime_status = 0;
+  soc_->for_each_cp([&](rocjitsu::amdgpu::CommandProcessor *cp) {
+    cp->set_interrupt_callback([&](uint32_t process_id, uint32_t event_id) {
+      if (event_id != kExceptionEventId)
+        return;
+      runtime_status.store(memory->read64(kExceptionStatusAddress, process_id),
+                           std::memory_order_release);
+      memory->write64(kExceptionStatusAddress, 0, process_id);
+    });
+  });
+
+  // The callback claims the stop while subscribed, then loses that claim only
+  // after CWSR serialization. It must roll the debugger stop back and hand the
+  // fatal exception to ROCr instead of continuing the faulting queue.
+  driver_->set_debug_event_claim_mask_for_testing(0);
+  auto *wave = fault_a_wave_on_a_scalar_load(soc_, driver_, kKernelAddress, create.queue_id);
+  ASSERT_NE(wave, nullptr);
+  EXPECT_EQ(runtime_status.load(std::memory_order_acquire), kMemoryViolation);
+  EXPECT_TRUE(wave->debug_suspended());
+  EXPECT_TRUE(wave->fatal_exception_pending());
+  EXPECT_FALSE(wave->fatal_exception_cwsr_valid());
+  soc_->for_each_cp([&](rocjitsu::amdgpu::CommandProcessor *cp) {
+    EXPECT_TRUE(
+        cp->queue_exception_suspended_for_test(create.queue_id, driver_->local_process_id()));
+  });
+  uint64_t notifications = 0;
+  EXPECT_EQ(::read(notifier, &notifications, sizeof(notifications)), -1);
+  EXPECT_EQ(errno, EAGAIN);
+
+  kfd_ioctl_dbg_trap_args exceptions{};
+  exceptions.pid = static_cast<uint32_t>(getpid());
+  exceptions.op = KFD_IOC_DBG_TRAP_SET_EXCEPTIONS_ENABLED;
+  exceptions.set_exceptions_enabled.exception_mask = kMemoryViolation;
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &exceptions), 0);
+  ASSERT_EQ(::read(notifier, &notifications, sizeof(notifications)),
+            static_cast<ssize_t>(sizeof(notifications)))
+      << strerror(errno);
+  EXPECT_EQ(notifications, 1u);
+
+  kfd_ioctl_dbg_trap_args query{};
+  query.pid = static_cast<uint32_t>(getpid());
+  query.op = KFD_IOC_DBG_TRAP_QUERY_DEBUG_EVENT;
+  query.query_debug_event.exception_mask = kMemoryViolation;
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &query), 0);
+  EXPECT_EQ(query.query_debug_event.queue_id, create.queue_id);
+  EXPECT_EQ(query.query_debug_event.exception_mask, kMemoryViolation);
+
+  uint32_t queue_id = create.queue_id;
+  kfd_ioctl_dbg_trap_args control{};
+  control.pid = static_cast<uint32_t>(getpid());
+  control.op = KFD_IOC_DBG_TRAP_SUSPEND_QUEUES;
+  control.suspend_queues.queue_array_ptr = reinterpret_cast<uint64_t>(&queue_id);
+  control.suspend_queues.num_queues = 1;
+  control.suspend_queues.exception_mask = kMemoryViolation;
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &control), 1);
+  EXPECT_TRUE(wave->fatal_exception_cwsr_valid());
+  std::vector<rocjitsu::kmd::CwsrWaveState> states(1);
+  states.front().num_sgprs = 16;
+  states.front().num_vgprs = 4;
+  ASSERT_TRUE(rocjitsu::kmd::deserialize_queue_cwsr(
+      kCwsrAddress, kCwsrSize, states,
+      [&](uint64_t address) { return memory->read32(address, driver_->local_process_id()); },
+      ROCJITSU_CODE_ARCH_CDNA4));
+  EXPECT_EQ(states.front().pc, wave->pc);
+  EXPECT_FALSE(states.front().wave_stopped);
+
+  // A saved runtime-fatal image belongs to one debugger session. Teardown
+  // invalidates it so a newly attached debugger republishes the live wave
+  // rather than inheriting edits left in the previous session's buffer.
+  const uint64_t stale_session_pc = states.front().pc + 8 * sizeof(uint32_t);
+  states.front().pc = stale_session_pc;
+  ASSERT_TRUE(rocjitsu::kmd::serialize_queue_cwsr(
+                  kCwsrAddress, kCwsrSize, states,
+                  [&](uint64_t address, uint32_t value) {
+                    memory->write32(address, value, driver_->local_process_id());
+                  },
+                  ROCJITSU_CODE_ARCH_CDNA4)
+                  .ok);
+  kfd_ioctl_dbg_trap_args disable{};
+  disable.pid = static_cast<uint32_t>(getpid());
+  disable.op = KFD_IOC_DBG_TRAP_DISABLE;
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &disable), 0);
+  EXPECT_FALSE(wave->fatal_exception_cwsr_valid());
+
+  kfd_ioctl_dbg_trap_args reenable{};
+  reenable.pid = static_cast<uint32_t>(getpid());
+  reenable.op = KFD_IOC_DBG_TRAP_ENABLE;
+  reenable.enable.dbg_fd = notifier;
+  reenable.enable.exception_mask = kMemoryViolation;
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &reenable), 0);
+  queue_id = create.queue_id;
+  control.op = KFD_IOC_DBG_TRAP_SUSPEND_QUEUES;
+  control.suspend_queues.queue_array_ptr = reinterpret_cast<uint64_t>(&queue_id);
+  control.suspend_queues.num_queues = 1;
+  control.suspend_queues.exception_mask = 0;
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &control), 1);
+  EXPECT_TRUE(wave->fatal_exception_cwsr_valid());
+  std::vector<rocjitsu::kmd::CwsrWaveState> reattached_states(1);
+  reattached_states.front().num_sgprs = 16;
+  reattached_states.front().num_vgprs = 4;
+  ASSERT_TRUE(rocjitsu::kmd::deserialize_queue_cwsr(
+      kCwsrAddress, kCwsrSize, reattached_states,
+      [&](uint64_t address) { return memory->read32(address, driver_->local_process_id()); },
+      ROCJITSU_CODE_ARCH_CDNA4));
+  EXPECT_EQ(reattached_states.front().pc, wave->pc);
+  EXPECT_NE(reattached_states.front().pc, stale_session_pc);
+}
+
+TEST_F(KfdIoctlTest, FailedDirectFatalDeliveryRemainsStoppedAcrossDetach) {
+  constexpr uint64_t kKernelAddress = 0x600000000ULL;
+  constexpr uint64_t kCwsrAddress = 0x600100000ULL;
+  constexpr uint32_t kCwsrSize = 0x40000;
+  constexpr uint64_t kMemoryViolation = KFD_EC_MASK(EC_QUEUE_WAVE_MEMORY_VIOLATION);
+
+  std::vector<uint8_t> code_page(4096);
+  std::vector<uint8_t> cwsr(kCwsrSize);
+  auto process = driver_->find_process(driver_->local_process_id());
+  ASSERT_NE(process, nullptr);
+  process->map_pages(kKernelAddress, code_page.data(), code_page.size());
+  process->map_pages(kCwsrAddress, cwsr.data(), cwsr.size());
+
+  kfd_ioctl_runtime_enable_args runtime{};
+  runtime.mode_mask = KFD_RUNTIME_ENABLE_MODE_ENABLE_MASK;
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_RUNTIME_ENABLE, &runtime), 0);
+
+  const int notifier = eventfd(0, EFD_CLOEXEC | EFD_NONBLOCK);
+  ASSERT_GE(notifier, 0);
+  debug_fds_.push_back(notifier);
+  kfd_ioctl_dbg_trap_args enable{};
+  enable.pid = static_cast<uint32_t>(getpid());
+  enable.op = KFD_IOC_DBG_TRAP_ENABLE;
+  enable.enable.dbg_fd = notifier;
+  enable.enable.exception_mask = 0;
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &enable), 0);
+
+  std::vector<uint8_t> ring(4096);
+  uint64_t read_pointer = 0;
+  uint64_t write_pointer = 0;
+  kfd_ioctl_create_queue_args create{};
+  create.gpu_id = kGpuId;
+  create.queue_type = KFD_IOC_QUEUE_TYPE_COMPUTE_AQL;
+  create.ring_base_address = reinterpret_cast<uint64_t>(ring.data());
+  create.ring_size = static_cast<uint32_t>(ring.size());
+  create.read_pointer_address = reinterpret_cast<uint64_t>(&read_pointer);
+  create.write_pointer_address = reinterpret_cast<uint64_t>(&write_pointer);
+  create.ctx_save_restore_address = kCwsrAddress;
+  create.ctx_save_restore_size = kCwsrSize;
+  // Keep the ROCr exception-status target zero so deferred delivery fails.
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_CREATE_QUEUE, &create), 0);
+
+  kfd_queue_snapshot_entry snapshot_entry{};
+  kfd_ioctl_dbg_trap_args snapshot{};
+  snapshot.pid = static_cast<uint32_t>(getpid());
+  snapshot.op = KFD_IOC_DBG_TRAP_GET_QUEUE_SNAPSHOT;
+  snapshot.queue_snapshot.exception_mask = KFD_EC_MASK(EC_QUEUE_NEW);
+  snapshot.queue_snapshot.snapshot_buf_ptr = reinterpret_cast<uint64_t>(&snapshot_entry);
+  snapshot.queue_snapshot.num_queues = 1;
+  snapshot.queue_snapshot.entry_size = sizeof(snapshot_entry);
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &snapshot), 0);
+
+  std::promise<void> runtime_failure_pending;
+  auto runtime_failure_pending_future = runtime_failure_pending.get_future();
+  std::promise<void> release_runtime_failure;
+  auto release_runtime_failure_future = release_runtime_failure.get_future().share();
+  std::atomic<bool> result_announced = false;
+  std::atomic<bool> result_timed_out = false;
+  driver_->set_runtime_exception_result_hook_for_testing([&](bool delivered) {
+    if (delivered || result_announced.exchange(true, std::memory_order_acq_rel))
+      return;
+    runtime_failure_pending.set_value();
+    if (release_runtime_failure_future.wait_for(std::chrono::seconds(1)) !=
+        std::future_status::ready)
+      result_timed_out.store(true, std::memory_order_release);
+  });
+  auto fault = std::async(std::launch::async, [&] {
+    return fault_a_wave_on_a_scalar_load(soc_, driver_, kKernelAddress, create.queue_id);
+  });
+  if (runtime_failure_pending_future.wait_for(std::chrono::seconds(1)) !=
+      std::future_status::ready) {
+    release_runtime_failure.set_value();
+    fault.wait();
+    driver_->set_runtime_exception_result_hook_for_testing({});
+    FAIL() << "failed runtime delivery did not reach ownership resolution";
+  }
+
+  // The mask transition cannot consume the event while ROCr owns its pending
+  // decision, but rejection must hand it to the now-subscribed debugger.
+  kfd_ioctl_dbg_trap_args exceptions{};
+  exceptions.pid = static_cast<uint32_t>(getpid());
+  exceptions.op = KFD_IOC_DBG_TRAP_SET_EXCEPTIONS_ENABLED;
+  exceptions.set_exceptions_enabled.exception_mask = kMemoryViolation;
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &exceptions), 0);
+  uint64_t notifications = 0;
+  EXPECT_EQ(::read(notifier, &notifications, sizeof(notifications)), -1);
+  EXPECT_EQ(errno, EAGAIN);
+  kfd_ioctl_dbg_trap_args query{};
+  query.pid = static_cast<uint32_t>(getpid());
+  query.op = KFD_IOC_DBG_TRAP_QUERY_DEBUG_EVENT;
+  query.query_debug_event.exception_mask = kMemoryViolation;
+  EXPECT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &query), -EAGAIN);
+
+  driver_->set_debug_notifier_dup_error_for_testing(EMFILE);
+  release_runtime_failure.set_value();
+  ASSERT_EQ(fault.wait_for(std::chrono::seconds(2)), std::future_status::ready);
+  auto *wave = fault.get();
+  driver_->set_runtime_exception_result_hook_for_testing({});
+  ASSERT_NE(wave, nullptr);
+  EXPECT_FALSE(result_timed_out.load(std::memory_order_acquire));
+  EXPECT_EQ(::read(notifier, &notifications, sizeof(notifications)), -1);
+  EXPECT_EQ(errno, EAGAIN);
+
+  // A failed duplicate has no ioctl caller to receive its errno. The reaper
+  // keeps the wakeup obligation live and retries as soon as the descriptor is
+  // available again.
+  driver_->set_debug_notifier_dup_error_for_testing(std::nullopt);
+  pollfd retry_poll{notifier, POLLIN, 0};
+  ASSERT_EQ(::poll(&retry_poll, 1, 1000), 1);
+  ASSERT_EQ(::read(notifier, &notifications, sizeof(notifications)),
+            static_cast<ssize_t>(sizeof(notifications)));
+  EXPECT_EQ(notifications, 1u);
+  EXPECT_EQ(wave->pc, kKernelAddress + 2 * sizeof(uint32_t));
+  EXPECT_TRUE(wave->debug_suspended());
+  EXPECT_TRUE(wave->fatal_exception_pending());
+  EXPECT_EQ(wave->trap_runtime_exception_status() & kMemoryViolation, 0u);
+
+  // The first wake established the asynchronous retry. Disable and re-enable
+  // the mask without querying so the same retained fatal event drives a
+  // session-generation race below.
+  exceptions.set_exceptions_enabled.exception_mask = 0;
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &exceptions), 0);
+
+  std::promise<void> notification_in_flight;
+  auto notification_in_flight_future = notification_in_flight.get_future();
+  std::promise<void> release_notification;
+  auto release_notification_future = release_notification.get_future().share();
+  std::promise<void> notification_released;
+  auto notification_released_future = notification_released.get_future();
+  std::atomic<bool> notification_announced = false;
+  std::atomic<bool> notification_timed_out = false;
+  driver_->set_debug_notification_result_hook_for_testing([&](bool delivered) {
+    if (!delivered || notification_announced.exchange(true, std::memory_order_acq_rel))
+      return;
+    notification_in_flight.set_value();
+    if (release_notification_future.wait_for(std::chrono::seconds(1)) != std::future_status::ready)
+      notification_timed_out.store(true, std::memory_order_release);
+    notification_released.set_value();
+  });
+
+  exceptions.set_exceptions_enabled.exception_mask = kMemoryViolation;
+  auto notification_commit = std::async(
+      std::launch::async, [&] { return driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &exceptions); });
+  ASSERT_EQ(notification_in_flight_future.wait_for(std::chrono::seconds(1)),
+            std::future_status::ready);
+  ASSERT_EQ(::read(notifier, &notifications, sizeof(notifications)),
+            static_cast<ssize_t>(sizeof(notifications)));
+  EXPECT_EQ(notifications, 1u);
+
+  // Replace session A's generation while its successful notification is still
+  // committing. Session B must be woken before QUERY; A's stale completion
+  // must not consume B's notification obligation. The test seam bypasses the
+  // self-debug ioctl mutex so it can exercise the asynchronous KFD handoff.
+  const int replacement_notifier = eventfd(0, EFD_CLOEXEC | EFD_NONBLOCK);
+  ASSERT_GE(replacement_notifier, 0);
+  debug_fds_.push_back(replacement_notifier);
+  ASSERT_EQ(
+      driver_->replace_debug_session_for_testing(getpid(), replacement_notifier, kMemoryViolation),
+      0);
+  ASSERT_EQ(::read(replacement_notifier, &notifications, sizeof(notifications)),
+            static_cast<ssize_t>(sizeof(notifications)));
+  EXPECT_EQ(notifications, 1u);
+
+  release_notification.set_value();
+  ASSERT_EQ(notification_released_future.wait_for(std::chrono::seconds(1)),
+            std::future_status::ready);
+  EXPECT_EQ(notification_commit.get(), 0);
+  driver_->set_debug_notification_result_hook_for_testing({});
+  EXPECT_FALSE(notification_timed_out.load(std::memory_order_acquire));
+
+  query.query_debug_event.exception_mask = kMemoryViolation;
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &query), 0);
+  EXPECT_EQ(query.query_debug_event.queue_id, create.queue_id);
+  EXPECT_EQ(query.query_debug_event.exception_mask, kMemoryViolation);
+
+  // Query acknowledges this session's notification but does not resolve the
+  // fatal stop. Detach and attach once more: the next session must rediscover
+  // the retained runtime ownership and can then suspend/resume it cleanly.
+  kfd_ioctl_dbg_trap_args disable{};
+  disable.pid = static_cast<uint32_t>(getpid());
+  disable.op = KFD_IOC_DBG_TRAP_DISABLE;
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &disable), 0);
+  const int final_notifier = eventfd(0, EFD_CLOEXEC | EFD_NONBLOCK);
+  ASSERT_GE(final_notifier, 0);
+  debug_fds_.push_back(final_notifier);
+  enable.enable.dbg_fd = final_notifier;
+  enable.enable.exception_mask = kMemoryViolation;
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &enable), 0);
+  ASSERT_EQ(::read(final_notifier, &notifications, sizeof(notifications)),
+            static_cast<ssize_t>(sizeof(notifications)));
+  query.query_debug_event.exception_mask = kMemoryViolation;
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &query), 0);
+
+  const uint64_t stopped_pc = wave->pc;
+  rocjitsu::amdgpu::ComputeUnitCore *owner = nullptr;
+  soc_->for_each_cp([&](rocjitsu::amdgpu::CommandProcessor *cp) {
+    for (auto *cu : cp->compute_units())
+      if (owner == nullptr)
+        for (uint32_t slot = 0; slot < cu->num_wf_slots(); ++slot)
+          if (cu->wf(slot) == wave)
+            owner = cu;
+  });
+  ASSERT_NE(owner, nullptr);
+  owner->step();
+  EXPECT_EQ(wave->pc, stopped_pc);
+
+  uint32_t queue_id = create.queue_id;
+  kfd_ioctl_dbg_trap_args control{};
+  control.pid = static_cast<uint32_t>(getpid());
+  control.op = KFD_IOC_DBG_TRAP_SUSPEND_QUEUES;
+  control.suspend_queues.queue_array_ptr = reinterpret_cast<uint64_t>(&queue_id);
+  control.suspend_queues.num_queues = 1;
+  control.suspend_queues.exception_mask = kMemoryViolation;
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &control), 1);
+  EXPECT_TRUE(wave->fatal_exception_cwsr_valid());
+
+  queue_id = create.queue_id;
+  control.op = KFD_IOC_DBG_TRAP_RESUME_QUEUES;
+  control.resume_queues.queue_array_ptr = reinterpret_cast<uint64_t>(&queue_id);
+  control.resume_queues.num_queues = 1;
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &control), 1);
+  EXPECT_FALSE(wave->fatal_exception_pending());
+  EXPECT_FALSE(wave->debug_suspended());
+}
+
 // The arch gate cannot be the only check: on a modelled part serialization can
 // still fail, and the wave is already stopped by then because the serializer
 // selects waves by debug_stopped(). An area too small for the queue's waves is
@@ -5187,6 +8045,354 @@ TEST_F(KfdIoctlTest, DbgTrapCwsrShadowsTrapHandlerRegistersAndRoutesDebuggerEdit
   EXPECT_EQ(wave->exec(), kDebuggerExec);
 }
 
+TEST_F(KfdIoctlTest, DbgTrapRejectedBreakpointDoesNotRetainAStaleEvent) {
+  constexpr uint64_t kKernelAddress = 0x600000000ULL;
+  constexpr uint64_t kTrapHandlerAddress = 0x600080000ULL;
+  constexpr uint64_t kCwsrAddress = 0x600100000ULL;
+  constexpr uint32_t kCwsrSize = 0x40000;
+  constexpr uint32_t kSTrapBreakpoint = 0xBF920001u;
+  constexpr uint32_t kSNop = 0xBF800000u;
+
+  std::vector<uint8_t> code_page(4096);
+  std::vector<uint8_t> trap_handler_page(4096);
+  std::vector<uint8_t> cwsr(kCwsrSize);
+  auto process = driver_->find_process(driver_->local_process_id());
+  ASSERT_NE(process, nullptr);
+  process->map_pages(kKernelAddress, code_page.data(), code_page.size());
+  process->map_pages(kTrapHandlerAddress, trap_handler_page.data(), trap_handler_page.size());
+  process->map_pages(kCwsrAddress, cwsr.data(), cwsr.size());
+
+  kfd_ioctl_runtime_enable_args runtime{};
+  runtime.mode_mask = KFD_RUNTIME_ENABLE_MODE_ENABLE_MASK;
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_RUNTIME_ENABLE, &runtime), 0);
+
+  const int notifier = eventfd(0, EFD_CLOEXEC | EFD_NONBLOCK);
+  ASSERT_GE(notifier, 0);
+  debug_fds_.push_back(notifier);
+
+  kfd_ioctl_dbg_trap_args enable{};
+  enable.pid = static_cast<uint32_t>(getpid());
+  enable.op = KFD_IOC_DBG_TRAP_ENABLE;
+  enable.enable.dbg_fd = notifier;
+  enable.enable.exception_mask = KFD_EC_MASK(EC_QUEUE_WAVE_TRAP);
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &enable), 0);
+
+  kfd_ioctl_set_trap_handler_args set_handler{};
+  set_handler.gpu_id = kGpuId;
+  set_handler.tba_addr = kTrapHandlerAddress;
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_SET_TRAP_HANDLER, &set_handler), 0);
+
+  std::vector<uint8_t> ring(4096);
+  uint64_t read_pointer = 0;
+  uint64_t write_pointer = 0;
+  kfd_ioctl_create_queue_args create{};
+  create.gpu_id = kGpuId;
+  create.queue_type = KFD_IOC_QUEUE_TYPE_COMPUTE_AQL;
+  create.ring_base_address = reinterpret_cast<uint64_t>(ring.data());
+  create.ring_size = static_cast<uint32_t>(ring.size());
+  create.read_pointer_address = reinterpret_cast<uint64_t>(&read_pointer);
+  create.write_pointer_address = reinterpret_cast<uint64_t>(&write_pointer);
+  create.ctx_save_restore_address = kCwsrAddress;
+  create.ctx_save_restore_size = kCwsrSize;
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_CREATE_QUEUE, &create), 0);
+
+  kfd_queue_snapshot_entry snapshot_entry{};
+  kfd_ioctl_dbg_trap_args snapshot{};
+  snapshot.pid = static_cast<uint32_t>(getpid());
+  snapshot.op = KFD_IOC_DBG_TRAP_GET_QUEUE_SNAPSHOT;
+  snapshot.queue_snapshot.exception_mask = KFD_EC_MASK(EC_QUEUE_NEW);
+  snapshot.queue_snapshot.snapshot_buf_ptr = reinterpret_cast<uint64_t>(&snapshot_entry);
+  snapshot.queue_snapshot.num_queues = 1;
+  snapshot.queue_snapshot.entry_size = sizeof(snapshot_entry);
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &snapshot), 0);
+
+  rocjitsu::amdgpu::ComputeUnitCore *cu = nullptr;
+  soc_->for_each_cp([&](rocjitsu::amdgpu::CommandProcessor *cp) {
+    if (cu == nullptr && !cp->compute_units().empty())
+      cu = cp->compute_units().front();
+  });
+  ASSERT_NE(cu, nullptr);
+  auto *memory = soc_->memory();
+  ASSERT_NE(memory, nullptr);
+  memory->write32(kKernelAddress, kSTrapBreakpoint, driver_->local_process_id());
+  for (uint32_t offset = sizeof(uint32_t); offset < 16 * sizeof(uint32_t);
+       offset += sizeof(uint32_t))
+    memory->write32(kKernelAddress + offset, kSNop, driver_->local_process_id());
+  const uint32_t trap_handler[] = {
+      0x806C846Cu,              // s_add_u32 ttmp0, ttmp0, 4
+      0x826D806Du,              // s_addc_u32 ttmp1, ttmp1, 0
+      0xBEF800FFu, 0x00002000u, // s_mov_b32 ttmp12, STATUS.HALT
+      0xBF900001u,              // s_sendmsg sendmsg(MSG_INTERRUPT)
+      0xB978F802u,              // s_setreg_b32 hwreg(HW_REG_STATUS), ttmp12
+      0xBE801F6Cu,              // s_rfe_b64 ttmp[0:1]
+  };
+  for (uint32_t index = 0; index < std::size(trap_handler); ++index)
+    memory->write32(kTrapHandlerAddress + index * sizeof(uint32_t), trap_handler[index],
+                    driver_->local_process_id());
+
+  auto *wave = cu->dispatch_wf(/*wg_id=*/0, kKernelAddress, /*sgprs=*/16, /*vgprs=*/4);
+  ASSERT_NE(wave, nullptr);
+  wave->set_process_id(driver_->local_process_id());
+  wave->set_queue_id(create.queue_id);
+  wave->set_dispatch_id(7);
+
+  // Lose the subscription after the trap was claimed. An ordinary breakpoint
+  // has no ROCr exception to route, so rolling its HALT back must also discard
+  // its debugger-only status rather than expose a trap after the wave advances.
+  driver_->set_debug_event_claim_mask_for_testing(0);
+  for (uint32_t step = 0; step < 16 && (wave->in_trap_handler() || wave->pc <= kKernelAddress + 4);
+       ++step)
+    cu->step();
+  EXPECT_FALSE(wave->in_trap_handler());
+  EXPECT_FALSE(wave->debug_halted());
+  EXPECT_FALSE(wave->is_halted());
+  EXPECT_GT(wave->pc, kKernelAddress + 4);
+
+  uint64_t notifications = 0;
+  EXPECT_EQ(::read(notifier, &notifications, sizeof(notifications)), -1);
+  EXPECT_EQ(errno, EAGAIN);
+  kfd_ioctl_dbg_trap_args exceptions{};
+  exceptions.pid = static_cast<uint32_t>(getpid());
+  exceptions.op = KFD_IOC_DBG_TRAP_SET_EXCEPTIONS_ENABLED;
+  exceptions.set_exceptions_enabled.exception_mask = KFD_EC_MASK(EC_QUEUE_WAVE_TRAP);
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &exceptions), 0);
+  EXPECT_EQ(::read(notifier, &notifications, sizeof(notifications)), -1);
+  EXPECT_EQ(errno, EAGAIN);
+
+  kfd_ioctl_dbg_trap_args query{};
+  query.pid = static_cast<uint32_t>(getpid());
+  query.op = KFD_IOC_DBG_TRAP_QUERY_DEBUG_EVENT;
+  query.query_debug_event.exception_mask = KFD_EC_MASK(EC_QUEUE_WAVE_TRAP);
+  EXPECT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &query), -EAGAIN);
+}
+
+TEST_F(KfdIoctlTest, DbgTrapFailedNotifierWriteRollsBackSingleStep) {
+  constexpr uint64_t kKernelAddress = 0x600000000ULL;
+  constexpr uint64_t kCwsrAddress = 0x600100000ULL;
+  constexpr uint32_t kCwsrSize = 0x40000;
+  constexpr uint32_t kSNop = 0xBF800000u;
+  constexpr uint32_t kTrapAfterInst = 1u << 25;
+
+  std::vector<uint8_t> code_page(4096);
+  std::vector<uint8_t> cwsr(kCwsrSize);
+  auto process = driver_->find_process(driver_->local_process_id());
+  ASSERT_NE(process, nullptr);
+  process->map_pages(kKernelAddress, code_page.data(), code_page.size());
+  process->map_pages(kCwsrAddress, cwsr.data(), cwsr.size());
+
+  kfd_ioctl_runtime_enable_args runtime{};
+  runtime.mode_mask = KFD_RUNTIME_ENABLE_MODE_ENABLE_MASK;
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_RUNTIME_ENABLE, &runtime), 0);
+
+  // ENABLE accepts a live writable descriptor. /dev/full satisfies that
+  // contract but deterministically refuses the later notification write.
+  const int failing_notifier = ::open("/dev/full", O_WRONLY | O_CLOEXEC | O_NONBLOCK);
+  ASSERT_GE(failing_notifier, 0);
+  debug_fds_.push_back(failing_notifier);
+  kfd_ioctl_dbg_trap_args enable{};
+  enable.pid = static_cast<uint32_t>(getpid());
+  enable.op = KFD_IOC_DBG_TRAP_ENABLE;
+  enable.enable.dbg_fd = failing_notifier;
+  enable.enable.exception_mask = KFD_EC_MASK(EC_QUEUE_WAVE_TRAP);
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &enable), 0);
+
+  std::vector<uint8_t> ring(4096);
+  uint64_t read_pointer = 0;
+  uint64_t write_pointer = 0;
+  kfd_ioctl_create_queue_args create{};
+  create.gpu_id = kGpuId;
+  create.queue_type = KFD_IOC_QUEUE_TYPE_COMPUTE_AQL;
+  create.ring_base_address = reinterpret_cast<uint64_t>(ring.data());
+  create.ring_size = static_cast<uint32_t>(ring.size());
+  create.read_pointer_address = reinterpret_cast<uint64_t>(&read_pointer);
+  create.write_pointer_address = reinterpret_cast<uint64_t>(&write_pointer);
+  create.ctx_save_restore_address = kCwsrAddress;
+  create.ctx_save_restore_size = kCwsrSize;
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_CREATE_QUEUE, &create), 0);
+
+  kfd_queue_snapshot_entry snapshot_entry{};
+  kfd_ioctl_dbg_trap_args snapshot{};
+  snapshot.pid = static_cast<uint32_t>(getpid());
+  snapshot.op = KFD_IOC_DBG_TRAP_GET_QUEUE_SNAPSHOT;
+  snapshot.queue_snapshot.exception_mask = KFD_EC_MASK(EC_QUEUE_NEW);
+  snapshot.queue_snapshot.snapshot_buf_ptr = reinterpret_cast<uint64_t>(&snapshot_entry);
+  snapshot.queue_snapshot.num_queues = 1;
+  snapshot.queue_snapshot.entry_size = sizeof(snapshot_entry);
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &snapshot), 0);
+
+  rocjitsu::amdgpu::ComputeUnitCore *cu = nullptr;
+  soc_->for_each_cp([&](rocjitsu::amdgpu::CommandProcessor *cp) {
+    if (cu == nullptr && !cp->compute_units().empty())
+      cu = cp->compute_units().front();
+  });
+  ASSERT_NE(cu, nullptr);
+  auto *memory = soc_->memory();
+  ASSERT_NE(memory, nullptr);
+  memory->write32(kKernelAddress, kSNop, driver_->local_process_id());
+  memory->write32(kKernelAddress + sizeof(uint32_t), kSNop, driver_->local_process_id());
+  auto *wave = cu->dispatch_wf(/*wg_id=*/0, kKernelAddress, /*sgprs=*/16, /*vgprs=*/4);
+  ASSERT_NE(wave, nullptr);
+  wave->set_process_id(driver_->local_process_id());
+  wave->set_queue_id(create.queue_id);
+  wave->set_dispatch_id(7);
+  wave->set_debug_single_step(true);
+
+  cu->step();
+  EXPECT_EQ(wave->pc, kKernelAddress + sizeof(uint32_t));
+  EXPECT_FALSE(wave->debug_halted());
+  EXPECT_FALSE(wave->debug_single_step());
+  EXPECT_EQ(wave->trapsts() & kTrapAfterInst, 0u);
+
+  kfd_ioctl_dbg_trap_args query{};
+  query.pid = static_cast<uint32_t>(getpid());
+  query.op = KFD_IOC_DBG_TRAP_QUERY_DEBUG_EVENT;
+  query.query_debug_event.exception_mask = KFD_EC_MASK(EC_QUEUE_WAVE_TRAP);
+  EXPECT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &query), -EAGAIN);
+
+  // Retained events are not rolled back when their wakeup fails, but the mask
+  // transition that attempted the wakeup must report the descriptor error.
+  kfd_ioctl_dbg_trap_args exceptions{};
+  exceptions.pid = static_cast<uint32_t>(getpid());
+  exceptions.op = KFD_IOC_DBG_TRAP_SET_EXCEPTIONS_ENABLED;
+  exceptions.set_exceptions_enabled.exception_mask = 0;
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &exceptions), 0);
+  constexpr uint64_t kRetainedException = KFD_EC_MASK(EC_QUEUE_WAVE_MEMORY_VIOLATION);
+  EXPECT_FALSE(driver_->notify_debug_event_for_testing(create.queue_id, kRetainedException,
+                                                       /*retain_on_rejection=*/true));
+  exceptions.set_exceptions_enabled.exception_mask = kRetainedException;
+  EXPECT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &exceptions), -ENOSPC);
+
+  query.query_debug_event.exception_mask = kRetainedException;
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &query), 0);
+  EXPECT_EQ(query.query_debug_event.queue_id, create.queue_id);
+  EXPECT_EQ(query.query_debug_event.exception_mask, kRetainedException);
+
+  // A failed notifier duplicate is just as observable as a failed write.
+  exceptions.set_exceptions_enabled.exception_mask = 0;
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &exceptions), 0);
+  EXPECT_FALSE(driver_->notify_debug_event_for_testing(create.queue_id, kRetainedException,
+                                                       /*retain_on_rejection=*/true));
+  driver_->set_debug_notifier_dup_error_for_testing(EMFILE);
+  exceptions.set_exceptions_enabled.exception_mask = kRetainedException;
+  EXPECT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &exceptions), -EMFILE);
+  driver_->set_debug_notifier_dup_error_for_testing(std::nullopt);
+  query.query_debug_event.exception_mask = kRetainedException;
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &query), 0);
+  EXPECT_EQ(query.query_debug_event.queue_id, create.queue_id);
+  EXPECT_EQ(query.query_debug_event.exception_mask, kRetainedException);
+}
+
+TEST_F(KfdIoctlTest, ConcurrentNotifierFailureCannotEraseSuccessfulPublication) {
+  constexpr uint64_t kCwsrAddress = 0x600100000ULL;
+  constexpr uint32_t kCwsrSize = 0x40000;
+  constexpr uint64_t kWaveTrap = KFD_EC_MASK(EC_QUEUE_WAVE_TRAP);
+
+  std::vector<uint8_t> cwsr(kCwsrSize);
+  auto process = driver_->find_process(driver_->local_process_id());
+  ASSERT_NE(process, nullptr);
+  process->map_pages(kCwsrAddress, cwsr.data(), cwsr.size());
+
+  kfd_ioctl_runtime_enable_args runtime{};
+  runtime.mode_mask = KFD_RUNTIME_ENABLE_MODE_ENABLE_MASK;
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_RUNTIME_ENABLE, &runtime), 0);
+
+  const int notifier = eventfd(0, EFD_CLOEXEC | EFD_NONBLOCK);
+  ASSERT_GE(notifier, 0);
+  debug_fds_.push_back(notifier);
+  const uint64_t saturated = std::numeric_limits<uint64_t>::max() - 1;
+  ASSERT_EQ(::write(notifier, &saturated, sizeof(saturated)),
+            static_cast<ssize_t>(sizeof(saturated)));
+
+  kfd_ioctl_dbg_trap_args enable{};
+  enable.pid = static_cast<uint32_t>(getpid());
+  enable.op = KFD_IOC_DBG_TRAP_ENABLE;
+  enable.enable.dbg_fd = notifier;
+  enable.enable.exception_mask = kWaveTrap;
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &enable), 0);
+
+  std::vector<uint8_t> ring(4096);
+  uint64_t read_pointer = 0;
+  uint64_t write_pointer = 0;
+  kfd_ioctl_create_queue_args create{};
+  create.gpu_id = kGpuId;
+  create.queue_type = KFD_IOC_QUEUE_TYPE_COMPUTE_AQL;
+  create.ring_base_address = reinterpret_cast<uint64_t>(ring.data());
+  create.ring_size = static_cast<uint32_t>(ring.size());
+  create.read_pointer_address = reinterpret_cast<uint64_t>(&read_pointer);
+  create.write_pointer_address = reinterpret_cast<uint64_t>(&write_pointer);
+  create.ctx_save_restore_address = kCwsrAddress;
+  create.ctx_save_restore_size = kCwsrSize;
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_CREATE_QUEUE, &create), 0);
+
+  kfd_queue_snapshot_entry snapshot_entry{};
+  kfd_ioctl_dbg_trap_args snapshot{};
+  snapshot.pid = static_cast<uint32_t>(getpid());
+  snapshot.op = KFD_IOC_DBG_TRAP_GET_QUEUE_SNAPSHOT;
+  snapshot.queue_snapshot.exception_mask = KFD_EC_MASK(EC_QUEUE_NEW);
+  snapshot.queue_snapshot.snapshot_buf_ptr = reinterpret_cast<uint64_t>(&snapshot_entry);
+  snapshot.queue_snapshot.num_queues = 1;
+  snapshot.queue_snapshot.entry_size = sizeof(snapshot_entry);
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &snapshot), 0);
+
+  std::mutex hook_mutex;
+  std::condition_variable hook_cv;
+  bool failed_write_paused = false;
+  bool release_failed_write = false;
+  bool hook_timed_out = false;
+  driver_->set_debug_notification_result_hook_for_testing([&](bool delivered) {
+    if (delivered)
+      return;
+    std::unique_lock<std::mutex> lock(hook_mutex);
+    failed_write_paused = true;
+    hook_cv.notify_all();
+    if (!hook_cv.wait_for(lock, std::chrono::seconds(1), [&] { return release_failed_write; }))
+      hook_timed_out = true;
+  });
+
+  auto failed = std::async(std::launch::async, [&] {
+    return driver_->notify_debug_event_for_testing(create.queue_id, kWaveTrap,
+                                                   /*retain_on_rejection=*/false);
+  });
+  {
+    std::unique_lock<std::mutex> lock(hook_mutex);
+    if (!hook_cv.wait_for(lock, std::chrono::seconds(1), [&] { return failed_write_paused; })) {
+      release_failed_write = true;
+      hook_cv.notify_all();
+      lock.unlock();
+      failed.wait();
+      driver_->set_debug_notification_result_hook_for_testing({});
+      FAIL() << "failed notifier write did not reach its pre-rollback hook";
+    }
+  }
+
+  uint64_t drained = 0;
+  ASSERT_EQ(::read(notifier, &drained, sizeof(drained)), static_cast<ssize_t>(sizeof(drained)));
+  EXPECT_EQ(drained, saturated);
+  EXPECT_TRUE(driver_->notify_debug_event_for_testing(create.queue_id, kWaveTrap,
+                                                      /*retain_on_rejection=*/false));
+  uint64_t notifications = 0;
+  ASSERT_EQ(::read(notifier, &notifications, sizeof(notifications)),
+            static_cast<ssize_t>(sizeof(notifications)));
+  EXPECT_EQ(notifications, 1u);
+
+  {
+    std::lock_guard<std::mutex> lock(hook_mutex);
+    release_failed_write = true;
+    hook_cv.notify_all();
+  }
+  EXPECT_FALSE(failed.get());
+  EXPECT_FALSE(hook_timed_out);
+  driver_->set_debug_notification_result_hook_for_testing({});
+
+  kfd_ioctl_dbg_trap_args query{};
+  query.pid = static_cast<uint32_t>(getpid());
+  query.op = KFD_IOC_DBG_TRAP_QUERY_DEBUG_EVENT;
+  query.query_debug_event.exception_mask = kWaveTrap;
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &query), 0);
+  EXPECT_EQ(query.query_debug_event.queue_id, create.queue_id);
+  EXPECT_EQ(query.query_debug_event.exception_mask, kWaveTrap);
+}
+
 TEST_F(KfdIoctlTest, DbgTrapSingleStepReportsWhilePeerWaveRuns) {
   constexpr uint64_t kSteppingAddress = 0x600200000ULL;
   constexpr uint64_t kPeerAddress = 0x600201000ULL;
@@ -5255,7 +8461,7 @@ TEST_F(KfdIoctlTest, DbgTrapSingleStepReportsWhilePeerWaveRuns) {
 
   auto *memory = soc_->memory();
   ASSERT_NE(memory, nullptr);
-  for (uint32_t step = 0; step < kStepCount; ++step) {
+  for (uint32_t step = 0; step <= kStepCount; ++step) {
     memory->write32(kSteppingAddress + step * sizeof(uint32_t), kSNop, driver_->local_process_id());
     memory->write32(kPeerAddress + step * sizeof(uint32_t), kSNop, driver_->local_process_id());
   }
@@ -5271,13 +8477,49 @@ TEST_F(KfdIoctlTest, DbgTrapSingleStepReportsWhilePeerWaveRuns) {
   }
   stepping->set_debug_single_step(true);
 
+  // Lose the debugger subscription at the exact claim-to-publication
+  // boundary. The completed step is still consumed, but its unpublished stop
+  // must be rolled back so the wave remains runnable and invisible to the
+  // debugger.
+  kfd_ioctl_dbg_trap_args exceptions{};
+  exceptions.pid = static_cast<uint32_t>(getpid());
+  exceptions.op = KFD_IOC_DBG_TRAP_SET_EXCEPTIONS_ENABLED;
+  driver_->set_debug_event_claim_mask_for_testing(0);
+  cu->step();
+  EXPECT_EQ(stepping->pc, kSteppingAddress + sizeof(uint32_t));
+  EXPECT_FALSE(stepping->debug_halted());
+  EXPECT_FALSE(stepping->debug_single_step());
+  EXPECT_EQ(stepping->trapsts() & kTrapAfterInst, 0u);
+  EXPECT_EQ(peer->pc, kPeerAddress + sizeof(uint32_t));
+  uint64_t rejected_notifications = 0;
+  EXPECT_EQ(::read(notifier, &rejected_notifications, sizeof(rejected_notifications)), -1);
+  EXPECT_EQ(errno, EAGAIN);
+  kfd_ioctl_dbg_trap_args rejected_query{};
+  rejected_query.pid = static_cast<uint32_t>(getpid());
+  rejected_query.op = KFD_IOC_DBG_TRAP_QUERY_DEBUG_EVENT;
+  EXPECT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &rejected_query), -EAGAIN);
+
+  exceptions.set_exceptions_enabled.exception_mask = KFD_EC_MASK(EC_QUEUE_WAVE_TRAP);
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &exceptions), 0);
+
+  // Single-step is a synthetic debugger-only stop. Losing the subscription
+  // rolls it back, so re-enabling the mask must not surface a stale event for
+  // a wave that has continued past the reported PC.
+  uint64_t retained_notifications = 0;
+  EXPECT_EQ(::read(notifier, &retained_notifications, sizeof(retained_notifications)), -1);
+  EXPECT_EQ(errno, EAGAIN);
+  rejected_query.query_debug_event.exception_mask = KFD_EC_MASK(EC_QUEUE_WAVE_TRAP);
+  EXPECT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &rejected_query), -EAGAIN);
+
+  stepping->set_debug_single_step(true);
+
   for (uint32_t step = 0; step < kStepCount; ++step) {
     cu->step();
 
     EXPECT_TRUE(stepping->debug_halted());
-    EXPECT_EQ(stepping->pc, kSteppingAddress + (step + 1) * sizeof(uint32_t));
+    EXPECT_EQ(stepping->pc, kSteppingAddress + (step + 2) * sizeof(uint32_t));
     EXPECT_FALSE(peer->debug_halted());
-    EXPECT_EQ(peer->pc, kPeerAddress + (step + 1) * sizeof(uint32_t));
+    EXPECT_EQ(peer->pc, kPeerAddress + (step + 2) * sizeof(uint32_t));
 
     uint64_t notifications = 0;
     ASSERT_EQ(::read(notifier, &notifications, sizeof(notifications)),
@@ -5323,7 +8565,7 @@ TEST_F(KfdIoctlTest, DbgTrapSingleStepReportsWhilePeerWaveRuns) {
                        : state.wave_id == kSteppingWaveId;
     });
     ASSERT_NE(selected, states.end());
-    EXPECT_EQ(selected->pc, kSteppingAddress + (step + 1) * sizeof(uint32_t));
+    EXPECT_EQ(selected->pc, kSteppingAddress + (step + 2) * sizeof(uint32_t));
     selected->wave_id = kSteppingWaveId;
     if (step != 0) {
       selected->queue_packet_id = 100 + step;
@@ -5429,7 +8671,7 @@ TEST_F(KfdIoctlTest, DbgTrapCrossProcessEnableAuthorizedByPtrace) {
   ASSERT_EQ(waitpid(child, &status, 0), child);
   ASSERT_TRUE(WIFSTOPPED(status));
 
-  int dbg_fd = eventfd(0, EFD_CLOEXEC);
+  int dbg_fd = eventfd(0, EFD_CLOEXEC | EFD_NONBLOCK);
   ASSERT_GE(dbg_fd, 0);
   kfd_ioctl_dbg_trap_args en{};
   en.pid = static_cast<uint32_t>(child);
@@ -5476,7 +8718,7 @@ TEST_F(KfdIoctlTest, DbgTrapExitedTargetDisableReturnsESRCHAndReleasesSession) {
   ASSERT_EQ(waitpid(child, &status, 0), child);
   ASSERT_TRUE(WIFSTOPPED(status));
 
-  int dbg_fd = eventfd(0, EFD_CLOEXEC);
+  int dbg_fd = eventfd(0, EFD_CLOEXEC | EFD_NONBLOCK);
   ASSERT_GE(dbg_fd, 0);
   kfd_ioctl_dbg_trap_args en{};
   en.pid = static_cast<uint32_t>(child);
@@ -5522,7 +8764,7 @@ TEST_F(KfdIoctlTest, DbgTrapIdentityChangeDuringAuthorizationReturnsESRCH) {
   uint32_t debugger = daemon.open_process(getpid());
   ASSERT_NE(debugger, 0u);
 
-  int dbg_fd = eventfd(0, EFD_CLOEXEC);
+  int dbg_fd = eventfd(0, EFD_CLOEXEC | EFD_NONBLOCK);
   ASSERT_GE(dbg_fd, 0);
   kfd_ioctl_dbg_trap_args en{};
   en.pid = static_cast<uint32_t>(child);
@@ -5554,7 +8796,7 @@ TEST_F(KfdIoctlTest, DbgTrapExitedTargetReturnsESRCHBeforePtraceAuthorization) {
   ASSERT_EQ(waitpid(child, &status, 0), child);
   ASSERT_TRUE(WIFSTOPPED(status));
 
-  int dbg_fd = eventfd(0, EFD_CLOEXEC);
+  int dbg_fd = eventfd(0, EFD_CLOEXEC | EFD_NONBLOCK);
   ASSERT_GE(dbg_fd, 0);
   kfd_ioctl_dbg_trap_args en{};
   en.pid = static_cast<uint32_t>(child);
@@ -5596,7 +8838,7 @@ TEST_F(KfdIoctlTest, DbgTrapSessionSurvivesTargetKfdConnectionClose) {
   int status = 0;
   ASSERT_EQ(waitpid(child, &status, 0), child);
 
-  int dbg_fd = eventfd(0, EFD_CLOEXEC);
+  int dbg_fd = eventfd(0, EFD_CLOEXEC | EFD_NONBLOCK);
   ASSERT_GE(dbg_fd, 0);
   kfd_ioctl_dbg_trap_args en{};
   en.pid = static_cast<uint32_t>(child);
@@ -5637,7 +8879,7 @@ TEST_F(KfdIoctlTest, DbgTrapDisableAfterTargetKfdCloseAndExitReturnsESRCH) {
   int status = 0;
   ASSERT_EQ(waitpid(child, &status, 0), child);
 
-  int dbg_fd = eventfd(0, EFD_CLOEXEC);
+  int dbg_fd = eventfd(0, EFD_CLOEXEC | EFD_NONBLOCK);
   ASSERT_GE(dbg_fd, 0);
   kfd_ioctl_dbg_trap_args en{};
   en.pid = static_cast<uint32_t>(child);
@@ -5697,7 +8939,7 @@ TEST_F(KfdIoctlTest, DbgTrapSessionSurvivesDebuggerKfdConnectionClose) {
   int status = 0;
   ASSERT_EQ(waitpid(child, &status, 0), child);
 
-  int dbg_fd = eventfd(0, EFD_CLOEXEC);
+  int dbg_fd = eventfd(0, EFD_CLOEXEC | EFD_NONBLOCK);
   ASSERT_GE(dbg_fd, 0);
   kfd_ioctl_dbg_trap_args en{};
   en.pid = static_cast<uint32_t>(child);
@@ -5782,7 +9024,7 @@ TEST_F(KfdIoctlTest, DbgTrapDebuggerExitReapsSessionAndAllowsReenable) {
   uint32_t debugger = daemon.open_process(debugger_pid);
   ASSERT_NE(debugger, 0u);
 
-  int first_notifier = eventfd(0, EFD_CLOEXEC);
+  int first_notifier = eventfd(0, EFD_CLOEXEC | EFD_NONBLOCK);
   ASSERT_GE(first_notifier, 0);
   kfd_ioctl_dbg_trap_args first_enable{};
   first_enable.pid = static_cast<uint32_t>(target_pid);
@@ -5896,7 +9138,7 @@ TEST_F(KfdIoctlTest, DbgTrapDebuggerExitReapsSessionAndAllowsReenable) {
 
   uint32_t replacement_debugger = daemon.open_process(getpid());
   ASSERT_NE(replacement_debugger, 0u);
-  int replacement_notifier = eventfd(0, EFD_CLOEXEC);
+  int replacement_notifier = eventfd(0, EFD_CLOEXEC | EFD_NONBLOCK);
   ASSERT_GE(replacement_notifier, 0);
   kfd_ioctl_dbg_trap_args replacement_enable{};
   replacement_enable.pid = static_cast<uint32_t>(target_pid);
