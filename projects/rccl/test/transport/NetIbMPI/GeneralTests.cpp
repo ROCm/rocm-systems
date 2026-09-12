@@ -855,7 +855,7 @@ TEST_F(NetIbMPITest, ListenCloseListen) {
         // so listen()/connect() must see pair.handle (8-byte aligned, same
         // layout SetupConnection relies on) rather than &handshake.handle
         // directly; the handshake only carries a byte-copy of it.
-        struct ListenHandshake {
+        struct SetupHandshake {
             int status;  // 1 when rank 0's listener is ready and the handle is valid
             ncclNetHandle_t handle;
         } handshake = {};

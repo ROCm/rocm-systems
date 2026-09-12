@@ -1284,8 +1284,25 @@ TEST_F(NetIbMPITest, CastStressMultiRoundTwoConns) {
     std::vector<void*> listenComms(kNConns, nullptr);
     std::vector<void*> sendComms(kNConns, nullptr);
     std::vector<void*> recvComms(kNConns, nullptr);
+    // Closed on any exit from here, not only at the teardown below. A setup failure
+    // returns from this body, and the connections already built would otherwise stay
+    // open for the rest of the process -- the same contamination the helper stopped
+    // creating inside itself. Disarmed once the teardown takes over.
+    bool connsOwned = true;
+    struct CastConnsScope {
+        bool& owned;
+        std::function<void()> close;
+        ~CastConnsScope() { if (owned) close(); }
+    } connsScope{connsOwned, [&]() {
+        for (int c = 0; c < kNConns; c++) {
+            if (recvComms[c])   CloseRecvComm(recvComms[c]);
+            if (sendComms[c])   CloseSendComm(sendComms[c]);
+            if (listenComms[c]) CloseListenComm(listenComms[c]);
+        }
+    }};
+
     for (int c = 0; c < kNConns; c++)
-        ASSERT_NO_FATAL_FAILURE(SetupCastConnection(/*dev=*/0, &listenComms[c], &sendComms[c], &recvComms[c]));
+        SetupCastConnection(/*dev=*/0, &listenComms[c], &sendComms[c], &recvComms[c]);
 
     // Scale msgs per connection inversely with connection count so total work stays constant.
     constexpr int kNMsgsTotal = 10000;
@@ -1465,6 +1482,7 @@ TEST_F(NetIbMPITest, CastStressMultiRoundTwoConns) {
     MPI_Barrier(MPI_COMM_WORLD);
 
     // ── Teardown ─────────────────────────────────────────────────────────────
+    connsOwned = false;
     for (int c = 0; c < kNConns; c++) {
         void* comm = (rank == 0) ? recvComms[c] : sendComms[c];
         ASSERT_EQ(DeregisterMemory(comm, rampHandles[c]), ncclSuccess);
@@ -1505,6 +1523,9 @@ TEST_F(NetIbMPITest, CastRegistrationRejectsBadArguments) {
                                          false, kMinGpusPerNode, kNoNodeLimit))
         << "Test requires exactly " << kExactTwoProcesses << " processes";
 
+    // No CAST_ENV_CHECK_OR_SKIP here, unlike the 16 tests above: the arms under test
+    // are argument checks that run before the scheduler, so the WRR env vars are not
+    // needed and the macro would only turn a pass into a skip.
     net_ = &netIbCast;
     AssertInitAndGetDevices(nullptr);
 
