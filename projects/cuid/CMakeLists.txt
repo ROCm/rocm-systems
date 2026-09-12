@@ -4,6 +4,7 @@
 #
 # Minimum version of cmake required
 #
+# Temporary no-op change on cuid to exercise TheRock Multi-arch CI
 cmake_minimum_required(VERSION 3.14)
 
 set(AMDCUID "amdcuid" CACHE INTERNAL "")
