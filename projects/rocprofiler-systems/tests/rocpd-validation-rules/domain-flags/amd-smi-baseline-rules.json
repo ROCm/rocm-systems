@@ -1,0 +1,44 @@
+{
+    "required_tables": [
+        {
+            "min_rows": 1,
+            "name_prefix": "rocpd_info_pmc_",
+            "required_columns": [
+                "agent_id",
+                "target_arch",
+                "name",
+                "symbol",
+                "description",
+                "units",
+                "value_type"
+            ],
+            "validation_queries": [
+                {
+                    "comparison": "greater_than",
+                    "description": "AMD-SMI PMC metadata registered",
+                    "error_message": "No GPU PMC metadata rows found",
+                    "expected_result": 0,
+                    "query": "SELECT COUNT(*) as count FROM {table_name} WHERE name LIKE 'device_%'"
+                }
+            ]
+        },
+        {
+            "min_rows": 1,
+            "name_prefix": "rocpd_pmc_event_",
+            "required_columns": [
+                "event_id",
+                "pmc_id",
+                "value"
+            ],
+            "validation_queries": [
+                {
+                    "comparison": "greater_than_or_equal",
+                    "description": "AMD-SMI samples recorded on short transpose run",
+                    "error_message": "Expected at least one AMD-SMI PMC event sample",
+                    "expected_result": 1,
+                    "query": "SELECT COUNT(*) as count FROM {table_name}"
+                }
+            ]
+        }
+    ]
+}

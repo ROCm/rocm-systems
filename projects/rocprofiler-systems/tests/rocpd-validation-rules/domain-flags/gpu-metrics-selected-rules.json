@@ -1,0 +1,59 @@
+{
+    "required_tables": [
+        {
+            "min_rows": 1,
+            "name_prefix": "rocpd_pmc_event_",
+            "required_columns": [
+                "event_id",
+                "pmc_id",
+                "value"
+            ],
+            "validation_queries": [
+                {
+                    "comparison": "greater_than_or_equal",
+                    "description": "Requested metric: GPU temperature is sampled (short transpose run)",
+                    "error_message": "--gpu=temp,power collected fewer than 5 device_temp samples",
+                    "expected_result": 5,
+                    "query": "SELECT COUNT(*) as count FROM {table_name} event JOIN rocpd_info_pmc info ON event.pmc_id = info.id WHERE info.name = 'device_temp'",
+                    "requires": "temp"
+                },
+                {
+                    "comparison": "greater_than_or_equal",
+                    "description": "Requested metric: GPU power is sampled (short transpose run)",
+                    "error_message": "--gpu=temp,power collected fewer than 5 device_power samples",
+                    "expected_result": 5,
+                    "query": "SELECT COUNT(*) as count FROM {table_name} event JOIN rocpd_info_pmc info ON event.pmc_id = info.id WHERE info.name = 'device_power'",
+                    "requires": "power"
+                },
+                {
+                    "comparison": "equals",
+                    "description": "Unrequested metric: GFX clock is not sampled",
+                    "error_message": "OVER-COLLECTION: device_gfx_clock sampled though --gpu=temp,power did not request it",
+                    "expected_result": 0,
+                    "query": "SELECT COUNT(*) as count FROM {table_name} event JOIN rocpd_info_pmc info ON event.pmc_id = info.id WHERE info.name = 'device_gfx_clock'"
+                },
+                {
+                    "comparison": "equals",
+                    "description": "Unrequested metric: memory clock is not sampled",
+                    "error_message": "OVER-COLLECTION: device_mem_clock sampled though --gpu=temp,power did not request it",
+                    "expected_result": 0,
+                    "query": "SELECT COUNT(*) as count FROM {table_name} event JOIN rocpd_info_pmc info ON event.pmc_id = info.id WHERE info.name = 'device_mem_clock'"
+                },
+                {
+                    "comparison": "equals",
+                    "description": "Unrequested metric: memory usage is not sampled",
+                    "error_message": "OVER-COLLECTION: device_memory_usage sampled though --gpu=temp,power did not request it",
+                    "expected_result": 0,
+                    "query": "SELECT COUNT(*) as count FROM {table_name} event JOIN rocpd_info_pmc info ON event.pmc_id = info.id WHERE info.name = 'device_memory_usage'"
+                },
+                {
+                    "comparison": "equals",
+                    "description": "No sampled metric carries a null value",
+                    "error_message": "Found PMC events with a null value",
+                    "expected_result": 0,
+                    "query": "SELECT COUNT(*) as count FROM {table_name} WHERE value IS NULL"
+                }
+            ]
+        }
+    ]
+}
