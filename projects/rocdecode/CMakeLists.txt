@@ -20,7 +20,7 @@
 # SOFTWARE.
 #
 # ##############################################################################
-
+# Temporary no-op change on rocdecode to exercise TheRock Multi-arch CI
 cmake_minimum_required(VERSION 3.15)
 # ROCM Path
 if(DEFINED ENV{ROCM_PATH})
