@@ -709,15 +709,14 @@ static ncclResult_t symMemoryRegisterGin(struct ncclComm* comm, struct ncclDevrM
       mem->ginHostWins[i] = mem->ginSegmentInfos[0].ginHostWins[i];
     }
   }
-exit:
   return ret;
 fail:
   for (int i = 0; i < numSegmentsRegistered; i++) {
-    ncclGinDeregister(comm, mem->ginSegmentInfos[i].ginHostWins);
+    (void)ncclGinDeregister(comm, mem->ginSegmentInfos[i].ginHostWins);
   }
   free(mem->ginSegmentInfos);
   mem->ginSegmentInfos = nullptr;
-  goto exit;
+  return ret;
 }
 
 static ncclResult_t symMemoryRegisterRma(struct ncclComm* comm, struct ncclDevrMemory* mem) {
@@ -726,6 +725,18 @@ static ncclResult_t symMemoryRegisterRma(struct ncclComm* comm, struct ncclDevrM
     NCCLCHECK(ncclRmaProxyRegister(comm, mem->primaryAddr, mem->size, mem->rmaHostWins));
   }
   return ncclSuccess;
+}
+
+static void symMemoryUnregister(struct ncclComm* comm, struct ncclDevrMemory* mem) {
+  struct ncclDevrState* devr = &comm->devrState;
+  if (devr->ginEnabled && mem->ginSegmentInfos != nullptr) {
+    for (int segment = 0; segment < mem->numGinSegments; segment++) {
+      ncclGinDeregister(comm, mem->ginSegmentInfos[segment].ginHostWins);
+    }
+  }
+  if (devr->rmaProxyEnabled && mem->maxGlobalNumSegments == 1) {
+    (void)ncclRmaProxyDeregister(comm, mem->rmaHostWins);
+  }
 }
 
 // On success we take caller's reference on memHandle.
@@ -874,18 +885,11 @@ static ncclResult_t symMemoryObtain(struct ncclComm* comm, CUmemGenericAllocatio
   return ret;
 
 fail_mem_space_teams:
+  symMemoryUnregister(comm, mem);
   {
     struct ncclDevrMemory** ptr = &devr->memHead;
     while (*ptr != nullptr && *ptr != mem) ptr = &(*ptr)->next;
     if (*ptr == mem) *ptr = mem->next;
-  }
-  if (mem->ginSegmentInfos != nullptr) {
-    for (int segment = 0; segment < mem->numGinSegments; segment++) {
-      ncclGinDeregister(comm, mem->ginSegmentInfos[segment].ginHostWins);
-    }
-  }
-  if (mem->rmaHostWins[0] != nullptr) {
-    (void)ncclRmaProxyDeregister(comm, mem->rmaHostWins);
   }
   for (struct ncclDevrTeam* t = devr->teamHead; t != nullptr; t = t->next) {
     symUnbindTeamMemory(comm, t, mem);
@@ -912,49 +916,50 @@ fail_mem:
 }
 
 static void symMemoryDestroy(struct ncclComm* comm, struct ncclDevrMemory* mem) {
-  if (mem != nullptr) {
-    struct ncclDevrState* devr = &comm->devrState;
-    if (devr->ginEnabled && mem->ginSegmentInfos != nullptr) {
-      for (int segment = 0; segment < mem->numGinSegments; segment++) {
-        ncclGinDeregister(comm, mem->ginSegmentInfos[segment].ginHostWins);
-      }
-    }
-    if (devr->rmaProxyEnabled && mem->maxGlobalNumSegments == 1) {
-      ncclRmaProxyDeregister(comm, mem->rmaHostWins);
-    }
-    ncclCftLeId leUcSelf = devr->le.baseId == NCCL_LE_ID_INVALID ? NCCL_LE_ID_INVALID : devr->le.baseId + devr->cftSelf;
-    symUnbindTeamLe(comm, mem, leUcSelf);
-    for (struct ncclDevrTeam* t = devr->teamHead; t != nullptr; t = t->next) {
-      symUnbindTeamMemory(comm, t, mem);
-      symUnbindTeamLe(comm, mem, t->mcLeId);
-    }
-    for (int r = 0; r < devr->lsaSize; r++) {
-      uintptr_t base = reinterpret_cast<uintptr_t>(devr->lsaFlatBase);
-      uintptr_t addr = base + r * devr->bigSize + mem->bigOffset;
-      for (int idx = 0; idx < mem->lsaNumSegments[r]; idx++) {
-        CUdeviceptr tmpBase;
-        size_t tmpBaseSize;
-        CUCHECKIGNORE(cuMemGetAddressRange(&tmpBase, &tmpBaseSize, reinterpret_cast<CUdeviceptr>(addr)));
-        CUCHECKIGNORE(cuMemUnmap(reinterpret_cast<CUdeviceptr>(addr), tmpBaseSize));
-        addr = addr + tmpBaseSize;
-      }
-    }
-
-    ncclSpaceFree(&devr->bigSpace, mem->bigOffset, mem->lsaMaxSize);
-    for (int segment = 0; segment < mem->numSegments; segment++) {
-      CUCHECKIGNORE(cuMemRelease(mem->memHandles[segment]));
-    }
-
-    struct ncclDevrMemory** ptr = &devr->memHead;
-    while (*ptr != mem) ptr = &(*ptr)->next;
-    *ptr = mem->next; // Remove from list.
-
-    free(mem->ginSegmentInfos);
-    free(mem->lsaNumSegments);
-    free(mem->segmentSizes);
-    free(mem->memHandles);
-    free(mem);
+  if (mem == nullptr) {
+    return;
   }
+  struct ncclDevrState* devr = &comm->devrState;
+  struct ncclDevrMemory** memLink = &devr->memHead;
+  while (*memLink != nullptr && *memLink != mem) {
+    memLink = &(*memLink)->next;
+  }
+  // Idempotent: a window pair or finalize drain may already have destroyed this mem.
+  if (*memLink != mem) {
+    return;
+  }
+
+  symMemoryUnregister(comm, mem);
+  ncclCftLeId leUcSelf = devr->le.baseId == NCCL_LE_ID_INVALID ? NCCL_LE_ID_INVALID : devr->le.baseId + devr->cftSelf;
+  symUnbindTeamLe(comm, mem, leUcSelf);
+  for (struct ncclDevrTeam* t = devr->teamHead; t != nullptr; t = t->next) {
+    symUnbindTeamMemory(comm, t, mem);
+    symUnbindTeamLe(comm, mem, t->mcLeId);
+  }
+  for (int r = 0; r < devr->lsaSize; r++) {
+    uintptr_t base = reinterpret_cast<uintptr_t>(devr->lsaFlatBase);
+    uintptr_t addr = base + r * devr->bigSize + mem->bigOffset;
+    for (int idx = 0; idx < mem->lsaNumSegments[r]; idx++) {
+      CUdeviceptr tmpBase;
+      size_t tmpBaseSize;
+      CUCHECKIGNORE(cuMemGetAddressRange(&tmpBase, &tmpBaseSize, reinterpret_cast<CUdeviceptr>(addr)));
+      CUCHECKIGNORE(cuMemUnmap(reinterpret_cast<CUdeviceptr>(addr), tmpBaseSize));
+      addr = addr + tmpBaseSize;
+    }
+  }
+
+  ncclSpaceFree(&devr->bigSpace, mem->bigOffset, mem->lsaMaxSize);
+  for (int segment = 0; segment < mem->numSegments; segment++) {
+    CUCHECKIGNORE(cuMemRelease(mem->memHandles[segment]));
+  }
+
+  *memLink = mem->next; // Remove from list.
+
+  free(mem->ginSegmentInfos);
+  free(mem->lsaNumSegments);
+  free(mem->segmentSizes);
+  free(mem->memHandles);
+  free(mem);
 }
 
 static ncclResult_t symWindowTableInitOnce(struct ncclComm* comm, cudaStream_t stream) {
