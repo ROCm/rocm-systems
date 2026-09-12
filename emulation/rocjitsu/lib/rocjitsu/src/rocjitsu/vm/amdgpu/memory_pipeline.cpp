@@ -3,6 +3,7 @@
 
 #include "rocjitsu/vm/amdgpu/memory_pipeline.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/ds_transpose.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/fp_mode.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/scalar_operand_read.h"
 #include "rocjitsu/isa/isa_traits.h"
 #include "rocjitsu/vm/amdgpu/cluster_lds_multicast.h"
@@ -312,6 +313,10 @@ template <typename F> F apply_fp_atomic(AtomicOp op, F old_val, F src_val) {
   }
 }
 
+bool is_packed_add(AtomicOp op) {
+  return op == AtomicOp::PK_ADD_F16 || op == AtomicOp::PK_ADD_BF16;
+}
+
 uint32_t atomic_source_stride(const VectorMemState &d, const std::vector<uint8_t> &store_data) {
   const bool uses_two_sources =
       (d.atomic_op == AtomicOp::CMPSWAP || d.atomic_op == AtomicOp::MSKOR);
@@ -353,7 +358,13 @@ void execute_atomic_rmw(VectorMemState &d, L2Cache *l2, uint32_t vmid) {
             std::memcpy(&old_val, line_data + offset, 4);
 
             uint32_t new_val;
-            if (is_fp) {
+            if (is_packed_add(d.atomic_op)) {
+              uint32_t src_val;
+              std::memcpy(&src_val, &d.store_data[lane * src_stride], 4);
+              new_val = fp_mode::atomic_add_packed_16(old_val, src_val,
+                                                      d.atomic_op == AtomicOp::PK_ADD_BF16,
+                                                      /*denorm_mode=*/3);
+            } else if (is_fp) {
               float old_f = std::bit_cast<float>(old_val);
               float src_f;
               std::memcpy(&src_f, &d.store_data[lane * src_stride], 4);
@@ -446,7 +457,12 @@ void execute_lds_atomic_rmw(VectorMemState &d, Lds *lds,
     if (esz == 4) {
       uint32_t old_val = lds->read32(addr);
       uint32_t new_val;
-      if (is_fp) {
+      if (is_packed_add(d.atomic_op)) {
+        uint32_t src_val;
+        std::memcpy(&src_val, &store_data[lane * src_stride], 4);
+        new_val = fp_mode::atomic_add_packed_16(
+            old_val, src_val, d.atomic_op == AtomicOp::PK_ADD_BF16, d.packed_denorm_mode);
+      } else if (is_fp) {
         float old_f = std::bit_cast<float>(old_val);
         float src_f;
         std::memcpy(&src_f, &store_data[lane * src_stride], 4);

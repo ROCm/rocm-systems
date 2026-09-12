@@ -2179,7 +2179,8 @@ void DsPkAddF16Vds::execute_impl(amdgpu::Wavefront &wf) {
   d->elem_size = 4;
   d->num_elems = 1;
   d->is_load = false;
-  d->atomic_op = amdgpu::AtomicOp::FADD;
+  d->atomic_op = amdgpu::AtomicOp::PK_ADD_F16;
+  d->packed_denorm_mode = wf.fp_denorm_mode_f16_f64();
   d->wait_counter_type = amdgpu::WaitCounterType::DSCNT;
   ds_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
@@ -2200,7 +2201,8 @@ void DsPkAddBf16Vds::execute_impl(amdgpu::Wavefront &wf) {
   d->elem_size = 4;
   d->num_elems = 1;
   d->is_load = false;
-  d->atomic_op = amdgpu::AtomicOp::FADD;
+  d->atomic_op = amdgpu::AtomicOp::PK_ADD_BF16;
+  d->packed_denorm_mode = wf.fp_denorm_mode_f16_f64();
   d->wait_counter_type = amdgpu::WaitCounterType::DSCNT;
   ds_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
@@ -2382,7 +2384,8 @@ void DsPkAddRtnF16Vds::execute_impl(amdgpu::Wavefront &wf) {
   d->elem_size = 4;
   d->num_elems = 1;
   d->is_load = true;
-  d->atomic_op = amdgpu::AtomicOp::FADD;
+  d->atomic_op = amdgpu::AtomicOp::PK_ADD_F16;
+  d->packed_denorm_mode = wf.fp_denorm_mode_f16_f64();
   d->wait_counter_type = amdgpu::WaitCounterType::DSCNT;
   ds_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
@@ -2404,7 +2407,8 @@ void DsPkAddRtnBf16Vds::execute_impl(amdgpu::Wavefront &wf) {
   d->elem_size = 4;
   d->num_elems = 1;
   d->is_load = true;
-  d->atomic_op = amdgpu::AtomicOp::FADD;
+  d->atomic_op = amdgpu::AtomicOp::PK_ADD_BF16;
+  d->packed_denorm_mode = wf.fp_denorm_mode_f16_f64();
   d->wait_counter_type = amdgpu::WaitCounterType::DSCNT;
   ds_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();

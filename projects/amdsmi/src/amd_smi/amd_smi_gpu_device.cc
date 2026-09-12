@@ -1224,7 +1224,7 @@ auto AMDSmiGPUDevice::get_fabric_info_from_ualoe(amdsmi_fabric_info_t& fabric_in
   }
 
   /**
-   * For cases where the 'ualink' directory exists in the sysfs path, but we can read any usable
+   * For cases where the 'ualink' directory exists in the sysfs path, but we cannot read any usable
    * content, return AMDSMI_STATUS_NO_DATA.
    */
   fabric_info = local_fabric_info;
@@ -1233,13 +1233,11 @@ auto AMDSmiGPUDevice::get_fabric_info_from_ualoe(amdsmi_fabric_info_t& fabric_in
   }
 
   /**
-   * For cases where the 'ualink' directory exists in the sysfs path, and we can read all files with
-   * usable content, return AMDSMI_STATUS_SUCCESS. Otherwise, return AMDSMI_STATUS_UNEXPECTED_DATA
-   * (some files are missing or empty).
+   * Return SUCCESS if at least one sysfs file yielded usable content, matching the API spec.
+   * If we reach here, link_info_files_in_scope > 0 (NO_DATA case already handled above).
    */
-  return (link_info_files_with_usable_content == link_info_files_in_scope)
-             ? amdsmi_status_t::AMDSMI_STATUS_SUCCESS
-             : amdsmi_status_t::AMDSMI_STATUS_UNEXPECTED_DATA;
+  return (link_info_files_with_usable_content > 0) ? amdsmi_status_t::AMDSMI_STATUS_SUCCESS
+                                                   : amdsmi_status_t::AMDSMI_STATUS_NO_DATA;
 }
 
 }  // namespace amd::smi

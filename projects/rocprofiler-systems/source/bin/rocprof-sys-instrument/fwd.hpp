@@ -281,13 +281,6 @@ extern std::unique_ptr<std::ofstream> log_ofs;
 
 //======================================================================================//
 
-template <typename... T>
-void
-consume_parameters(T&&...)
-{}
-
-//======================================================================================//
-
 void
 process_modules(const std::vector<module_t*>&);
 

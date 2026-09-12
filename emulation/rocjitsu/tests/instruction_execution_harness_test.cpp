@@ -33,12 +33,15 @@
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna2/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna3/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna3_5/opcodes.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna4/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/execution_backend.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/vop3.h"
+#include "rocjitsu/isa/arch/amdgpu/rdna4/isa.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/alu_exceptions.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/dpp_sdwa_ops.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/mma_exec.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/scalar_operand_selectors.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
@@ -7066,6 +7069,232 @@ TEST(Gfx1250DsSwizzleTest, VdsBroadcastReadsAddrSource) {
 
   if (!wf->is_halted())
     wf->halt();
+}
+
+TEST(Gfx1250AtomicReturnTest, PackedHalfAddPreservesComponentsAcrossMemoryForms) {
+  struct Case {
+    uint32_t old_value, source, expected;
+    bool input_denorm = false;
+    bool output_denorm = false;
+    uint32_t flushed_value = 0;
+  };
+  const std::array f16_cases{
+      Case{0x46004500, 0x40003c00, 0x48004600},
+      Case{0x3c013c00, 0x10001000, 0x3c023c00},
+      Case{0x00010001, 0x00010001, 0x00020002, true, true},
+      Case{0x04010401, 0x84008400, 0x00010001, false, true},
+      Case{0x7bff7bff, 0x7bff7bff, 0x7c007c00},
+      Case{0x80008000, 0x80008000, 0x80008000},
+      Case{0x7c007c00, 0x3c003c00, 0x7c007c00},
+      Case{0x7e027e00, 0x7e043c00, 0x7e027e00},
+      Case{0x3c00fc01, 0xfc023c00, 0xfe02fe01},
+      Case{0x7c00fc00, 0xfc007c00, 0xfe00fe00},
+      Case{0x00013c00, 0x00013c00, 0x00024000, true, true, 0x00004000},
+  };
+  const std::array bf16_cases{
+      Case{0x40c040a0, 0x40003f80, 0x410040c0},
+      Case{0x3f813f80, 0x3b803b80, 0x3f823f80},
+      Case{0x00010001, 0x00010001, 0x00020002, true, true},
+      Case{0x00810081, 0x80808080, 0x00010001, false, true},
+      Case{0x7f7f7f7f, 0x7f7f7f7f, 0x7f807f80},
+      Case{0x80008000, 0x80008000, 0x80008000},
+      Case{0x7f807f80, 0x3f803f80, 0x7f807f80},
+      Case{0x7fc27fc0, 0x7fc43f80, 0x7fc27fc0},
+      Case{0x3f80ff81, 0xff823f80, 0xffc2ffc1},
+      Case{0x7f80ff80, 0xff807f80, 0xffc0ffc0},
+      Case{0x00013f80, 0x00013f80, 0x00024000, true, true, 0x00004000},
+  };
+  enum class Form { Global, Buffer, Flat, Ds };
+  struct FormCase {
+    Form form;
+    const char *name;
+  };
+  const std::array forms{FormCase{Form::Global, "global"}, FormCase{Form::Buffer, "buffer"},
+                         FormCase{Form::Flat, "flat"}, FormCase{Form::Ds, "ds"}};
+  for (bool bf16 : {false, true}) {
+    for (const FormCase &form_case : forms) {
+      const Form form = form_case.form;
+      for (bool returns : {false, true}) {
+        amdgpu::GpuMemory memory("packed_atomic");
+        amdgpu::L2Cache l2("packed_atomic_l2");
+        amdgpu::ComputeUnitCore::Config cfg{};
+        cfg.arch = ROCJITSU_CODE_ARCH_CDNA5;
+        cfg.num_wf_slots = 1;
+        cfg.sgprs_per_wf = 106;
+        cfg.vgprs_per_wf = 256;
+        cfg.lds_size_kb = 64;
+        Gfx1250MemoryTestCu cu("packed_atomic_cu", cfg, &memory, &l2);
+        amdgpu::Wavefront *wf = cu.dispatch_wf(0, 0, cfg.sgprs_per_wf, cfg.vgprs_per_wf);
+        ASSERT_NE(wf, nullptr);
+        wf->set_exec(1);
+        std::unique_ptr<Decoder> decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
+        ASSERT_NE(decoder, nullptr);
+        const uint32_t vb = wf->vgpr_alloc().base;
+        const uint32_t sb = wf->sgpr_alloc().base;
+        constexpr uint64_t kAddr = 0x1000;
+        const uint8_t th = returns ? 1 : 0;
+        const uint16_t atomic_op =
+            bf16 ? cdna5::kGlobalAtomicPkAddBf16Vglobal : cdna5::kGlobalAtomicPkAddF16Vglobal;
+        std::array<uint32_t, 3> words{};
+        if (form == Form::Global) {
+          words = cdna5::build_vglobal(
+              atomic_op, {.saddr = 4, .vdst = 0, .scope = 2, .th = th, .vsrc = 1, .vaddr = 2});
+        } else if (form == Form::Buffer) {
+          words = cdna5::build_vbuffer(atomic_op, {.soffset = amdgpu::kModernNullSelector,
+                                                   .vdata = 1,
+                                                   .rsrc = 4,
+                                                   .scope = 2,
+                                                   .th = th,
+                                                   .offen = 1,
+                                                   .vaddr = 2});
+        } else if (form == Form::Flat) {
+          words = cdna5::build_vflat(atomic_op, {.saddr = amdgpu::kModernNullSelector,
+                                                 .vdst = 0,
+                                                 .scope = 2,
+                                                 .th = th,
+                                                 .vsrc = 1,
+                                                 .vaddr = 2});
+        } else {
+          const uint16_t ds_op =
+              bf16 ? (returns ? cdna5::kDsPkAddRtnBf16Vds : cdna5::kDsPkAddBf16Vds)
+                   : (returns ? cdna5::kDsPkAddRtnF16Vds : cdna5::kDsPkAddF16Vds);
+          const std::array<uint32_t, 2> ds =
+              cdna5::build_vds(ds_op, {.addr = 2, .data0 = 1, .vdst = 0});
+          std::copy(ds.begin(), ds.end(), words.begin());
+        }
+        cu.write_sgpr(sb + 4, kAddr);
+        cu.write_sgpr(sb + 5, 0);
+        cu.write_sgpr(sb + 6, 4096);
+        cu.write_sgpr(sb + 7, 0);
+        cu.write_vgpr(vb + 2, 0, (form == Form::Flat || form == Form::Ds) ? kAddr : 0);
+        cu.write_vgpr(vb + 3, 0, 0);
+        const uint32_t dst = form == Form::Buffer ? 1 : 0;
+        for (const Case &c : bf16 ? bf16_cases : f16_cases) {
+          for (uint32_t denorm = 0; denorm < 4; ++denorm) {
+            SCOPED_TRACE(::testing::Message()
+                         << "bf16=" << bf16 << " form=" << form_case.name << " returns=" << returns
+                         << " denorm=" << denorm << " old=" << std::hex << c.old_value);
+            // Atomics ignore round/VALU overflow controls. Opposing F32 and
+            // F16/F64 denorm fields also distinguish which field DS captures.
+            wf->set_mode_raw(0xf | ((denorm ^ 3u) << 4) | (denorm << 6) |
+                             amdgpu::Wavefront::FP16_OVFL_BIT);
+            if (form == Form::Ds)
+              cu.lds().write32(kAddr, c.old_value);
+            else
+              memory.write32(kAddr, c.old_value);
+            cu.write_vgpr(vb, 0, 0xdeadbeef);
+            cu.write_vgpr(vb + 1, 0, c.source);
+            cu.write_vgpr(vb + dst, 1, 0xdeadbeef);
+            std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
+            ASSERT_NE(inst, nullptr);
+            cu.execute_and_route(inst.release(), *wf);
+            uint32_t expected = c.expected;
+            if (form == Form::Ds &&
+                ((c.input_denorm && !(denorm & 1u)) || (c.output_denorm && !(denorm & 2u))))
+              expected = c.flushed_value;
+            EXPECT_EQ(form == Form::Ds ? cu.lds().read32(kAddr) : memory.read32(kAddr), expected);
+            EXPECT_EQ(cu.read_vgpr(vb + dst, 0),
+                      returns ? c.old_value : (form == Form::Buffer ? c.source : 0xdeadbeef));
+            EXPECT_EQ(cu.read_vgpr(vb + dst, 1), 0xdeadbeefu);
+          }
+        }
+        wf->halt();
+      }
+    }
+  }
+}
+
+TEST(Rdna4AtomicReturnTest, FlatPackedHalfAddPreservesLdsDenormals) {
+  class TestCu : public amdgpu::IsaExecComputeUnit<simdojo::ExecMode::FUNCTIONAL, rdna4::Isa> {
+  public:
+    using Base = amdgpu::IsaExecComputeUnit<simdojo::ExecMode::FUNCTIONAL, rdna4::Isa>;
+    using amdgpu::ComputeUnitCore::route_memory_inst;
+    using Base::Base;
+    using Base::execute_instruction;
+  };
+  for (bool bf16 : {false, true}) {
+    for (bool returns : {false, true}) {
+      amdgpu::GpuMemory memory("flat_packed_lds");
+      amdgpu::L2Cache l2("flat_packed_lds_l2");
+      l2.set_backing_memory(&memory);
+      amdgpu::ComputeUnitCore::Config config{};
+      config.arch = ROCJITSU_CODE_ARCH_RDNA4;
+      config.num_wf_slots = 1;
+      config.sgprs_per_wf = 106;
+      config.vgprs_per_wf = 256;
+      config.lds_size_kb = 64;
+      TestCu cu("flat_packed_lds_cu", config, &memory, &l2);
+      cu.set_memory(&memory);
+      cu.set_l2(&l2);
+      constexpr uint64_t kSharedBase = 0x100000000;
+      constexpr uint32_t kOffset = 0x80;
+      constexpr uint32_t kLdsBase = 0x100;
+      cu.set_apertures(kSharedBase, kSharedBase + 0xFFFF, 0, 0);
+      amdgpu::Wavefront *wave = cu.dispatch_wf(0, 0, config.sgprs_per_wf, config.vgprs_per_wf);
+      ASSERT_NE(wave, nullptr);
+      wave->set_exec(1);
+      wave->set_lds_base(kLdsBase);
+      const uint32_t vgpr_base = wave->vgpr_alloc().base;
+      std::unique_ptr<Decoder> decoder = Decoder::create(ROCJITSU_CODE_ARCH_RDNA4);
+      ASSERT_NE(decoder, nullptr);
+      struct Case {
+        uint32_t old_value;
+        uint32_t source;
+        uint32_t expected;
+        bool input_denorm;
+      };
+      const std::array<Case, 2> cases = {{
+          {0x00010001, 0x00010001, 0x00020002, true},
+          {bf16 ? 0x00810081u : 0x04010401u, bf16 ? 0x80808080u : 0x84008400u, 0x00010001, false},
+      }};
+      for (bool direct_ds : {false, true}) {
+        for (uint32_t denorm = 0; denorm < 4; ++denorm) {
+          for (const Case &test : cases) {
+            SCOPED_TRACE(::testing::Message()
+                         << "bf16=" << bf16 << " returns=" << returns << " ds=" << direct_ds
+                         << " mode=" << denorm << " input_denorm=" << test.input_denorm);
+            wave->set_mode_raw((denorm << 6) | ((denorm ^ 3u) << 4));
+            cu.lds().write32(kLdsBase + kOffset, test.old_value);
+            memory.write32(kSharedBase + kOffset, 0xDEADBEEF);
+            cu.write_vgpr(vgpr_base, 0, 0xDEADBEEF);
+            cu.write_vgpr(vgpr_base, 1, 0xDEADBEEF);
+            cu.write_vgpr(vgpr_base + 1, 0, test.source);
+            cu.write_vgpr(vgpr_base + 2, 0, kOffset);
+            cu.write_vgpr(vgpr_base + 3, 0, kSharedBase >> 32);
+            std::array<uint32_t, 3> words{};
+            if (direct_ds) {
+              const uint16_t opcode =
+                  bf16 ? (returns ? rdna4::kDsPkAddRtnBf16Vds : rdna4::kDsPkAddBf16Vds)
+                       : (returns ? rdna4::kDsPkAddRtnF16Vds : rdna4::kDsPkAddF16Vds);
+              const std::array<uint32_t, 2> ds =
+                  rdna4::build_vds(opcode, {.addr = 2, .data0 = 1, .vdst = 0});
+              std::copy(ds.begin(), ds.end(), words.begin());
+            } else {
+              const uint16_t opcode =
+                  bf16 ? rdna4::kFlatAtomicPkAddBf16Vflat : rdna4::kFlatAtomicPkAddF16Vflat;
+              words = rdna4::build_vflat(opcode, {.saddr = amdgpu::kModernNullSelector,
+                                                  .vdst = 0,
+                                                  .scope = 2,
+                                                  .th = static_cast<uint8_t>(returns ? 1 : 0),
+                                                  .vsrc = 1,
+                                                  .vaddr = 2});
+            }
+            std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
+            ASSERT_NE(inst, nullptr);
+            cu.execute_instruction(inst.get(), *wave);
+            cu.route_memory_inst(inst.release(), *wave);
+            const bool flush =
+                direct_ds && (!(denorm & 2u) || (test.input_denorm && !(denorm & 1u)));
+            EXPECT_EQ(cu.lds().read32(kLdsBase + kOffset), flush ? 0u : test.expected);
+            EXPECT_EQ(memory.read32(kSharedBase + kOffset), 0xDEADBEEFu);
+            EXPECT_EQ(cu.read_vgpr(vgpr_base, 0), returns ? test.old_value : 0xDEADBEEFu);
+            EXPECT_EQ(cu.read_vgpr(vgpr_base, 1), 0xDEADBEEFu);
+          }
+        }
+      }
+      wave->halt();
+    }
+  }
 }
 
 TEST(Gfx1250AtomicReturnTest, GlobalAtomicAddF32ReturnsOldValue) {

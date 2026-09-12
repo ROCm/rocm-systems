@@ -174,7 +174,9 @@ BasicBlock::build(const CodeObject &co, Decoder &decoder, rj_code_arch_t arch,
       };
       const DecodeErrorEmitter decode_error =
           emit_error.ignores_messages() ? DecodeErrorEmitter{} : DecodeErrorEmitter(emit_at_offset);
-      DecodeResult decode_result = decoder.decode(&inst_data[pc], byte_offset, decode_error);
+      DecodeResult decode_result =
+          decoder.decode_window(std::span<const uint32_t>(inst_data + pc, inst_data_size - pc),
+                                byte_offset, decode_error);
       if (decode_result.failed())
         return Result::failure();
       std::unique_ptr<Instruction> inst = std::move(decode_result).value();

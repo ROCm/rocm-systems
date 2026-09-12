@@ -43,10 +43,45 @@ add_subdirectory(src/rocjitsu/code/analysis)
 add_subdirectory(src/rocjitsu/code)
 add_subdirectory(src/rocjitsu/isa)
 
+# Private static-analysis composition. It owns no default ISA registry: each
+# final image supplies a model registry (or an execution-capable registry when
+# embedding analyses in the simulator). Reuse the existing compiled objects.
+set(ROCJITSU_ANALYSIS_OBJECT_LIBS
+    rocjitsu_analysis
+    rocjitsu_code_object
+    rocjitsu_isa
+)
+add_library(rocjitsu_analysis_internal STATIC)
+target_include_directories(
+    rocjitsu_analysis_internal
+    PUBLIC
+        $<BUILD_INTERFACE:${ROCJITSU_INCLUDE_DIR}>
+        $<BUILD_INTERFACE:${ROCJITSU_SRC_DIR}>
+)
+foreach(_object_lib IN LISTS ROCJITSU_ANALYSIS_OBJECT_LIBS)
+    target_sources(
+        rocjitsu_analysis_internal
+        PRIVATE $<TARGET_OBJECTS:${_object_lib}>
+    )
+endforeach()
+# Generated ISA headers currently include simdojo types. This is a header-only
+# requirement; the simulation library is deliberately absent from the link.
+target_link_libraries(
+    rocjitsu_analysis_internal
+    PUBLIC util Threads::Threads simdojo_headers
+)
+set_target_properties(
+    rocjitsu_analysis_internal
+    PROPERTIES POSITION_INDEPENDENT_CODE ON
+)
+
 # Private base archive for code-object translation frontends. Architecture
 # models and decoder factories are supplied by each frontend, so this target
 # does not pull in the simulator implementation or the all-ISA registry.
-set(ROCJITSU_DBT_BASE_OBJECT_LIBS rocjitsu_analysis rocjitsu_code rocjitsu_isa)
+set(ROCJITSU_DBT_BASE_OBJECT_LIBS
+    ${ROCJITSU_ANALYSIS_OBJECT_LIBS}
+    rocjitsu_code
+)
 add_library(rocjitsu_dbt_internal STATIC)
 foreach(_object_lib IN LISTS ROCJITSU_DBT_BASE_OBJECT_LIBS)
     target_sources(
