@@ -79,15 +79,16 @@ void simpleVectorAdd(size_t numElements, int iters, hipStream_t stream, bool thr
 
 template <typename T, class C>
 void test_multiThread_1(hipStream_t stream0, hipStream_t stream1, bool serialize) {
-  size_t numElements = N;
+  size_t numElements = isQuickLevel() ? N / 16 : N;
+  const int iters = isQuickLevel() ? 2 : p_iters;
 
   // Test 2 threads operating on same stream:
-  std::thread t1(simpleVectorAdd<T, HipTest::Pinned, C>, numElements, p_iters /*iters*/, stream0,
+  std::thread t1(simpleVectorAdd<T, HipTest::Pinned, C>, numElements, iters /*iters*/, stream0,
                  true);
   if (serialize) {
     t1.join();
   }
-  std::thread t2(simpleVectorAdd<T, HipTest::Pinned, C>, numElements, p_iters /*iters*/, stream1,
+  std::thread t2(simpleVectorAdd<T, HipTest::Pinned, C>, numElements, iters /*iters*/, stream1,
                  true);
   if (serialize) {
     t2.join();
@@ -106,8 +107,10 @@ HIP_TEST_CASE(Unit_hipMultiThreadStreams1_AsyncSync) {
   hipStream_t stream;
   HIPCHECK(hipStreamCreate(&stream));
 
-  simpleVectorAdd<float, HipTest::Pinned, HipTest::MemcpyAsync>(N /*mb*/, 10 /*iters*/, stream);
-  simpleVectorAdd<float, HipTest::Pinned, HipTest::Memcpy>(N /*mb*/, 10 /*iters*/, stream);
+  simpleVectorAdd<float, HipTest::Pinned, HipTest::MemcpyAsync>(
+      isQuickLevel() ? N / 16 : N /*mb*/, isQuickLevel() ? 2 : 10 /*iters*/, stream);
+  simpleVectorAdd<float, HipTest::Pinned, HipTest::Memcpy>(
+      isQuickLevel() ? N / 16 : N /*mb*/, isQuickLevel() ? 2 : 10 /*iters*/, stream);
 
   HIPCHECK(hipStreamDestroy(stream));
 }
