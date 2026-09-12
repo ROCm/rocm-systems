@@ -4,6 +4,8 @@
  * See LICENSE.txt for license information.
  ************************************************************************/
 
+#include <cstring>
+#include <string.h>
 #include "algorithms/dda/fabric/fabric_init.h"
 
 #include "alloc.h"
