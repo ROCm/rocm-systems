@@ -4613,11 +4613,7 @@ hsa_status_t GpuAgent::PcSamplingFlushDeviceBuffersPerXCC(
         to_copy = sample_count * session.sample_size();
         break;
       }
-#if defined(_MSC_VER)
-      _mm_pause();
-#elif defined(__x86_64__) || defined(__i386__)
-      __builtin_ia32_pause();
-#endif
+      cpu_relax();
     }
 
     // NOTE: Caller (PcSamplingFlush or PcSamplingThreadPerXCC) must hold host_buffer_mutex.

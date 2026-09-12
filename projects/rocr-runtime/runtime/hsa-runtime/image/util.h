@@ -77,7 +77,8 @@ namespace image {
 #include "mm_malloc.h"
 #if defined(__i386__) || defined(__x86_64__)
 #include <x86intrin.h>
-#elif defined(__loongarch64)
+#elif defined(__loongarch64) || defined(__aarch64__) || defined(__arm__) || defined(__riscv) ||    \
+    defined(__powerpc64__) || defined(__PPC64__)
 #else
 #error                                                                                             \
     "Processor not identified.  " \
