@@ -2830,6 +2830,17 @@ hipError_t hipGraphExecUpdate(hipGraphExec_t hGraphExec, hipGraph_t hGraph,
         auto graphExec = reinterpret_cast<hip::GraphExecBase*>(hGraphExec);
         if (newGraphNodes[i]->GraphCaptureEnabled()) {
           status = graphExec->UpdateAQLPacket(reinterpret_cast<hip::GraphKernelNode*>(oldGraphExecNodes[i]));
+          if (status != hipSuccess) {
+            // A packet re-capture failure (e.g. kernarg allocation under device-memory
+            // exhaustion) leaves the exec holding the previously captured packet.
+            // Reporting success here makes the next launch execute that stale packet:
+            // silent wrong output, and with kernarg-pool recycling a malformed AQL
+            // packet (see issue #10021). Surface the failure instead, matching the
+            // SetParams failure paths above.
+            *hErrorNode_out = reinterpret_cast<hipGraphNode_t>(newGraphNodes[i]);
+            *updateResult_out = hipGraphExecUpdateError;
+            HIP_RETURN(hipErrorGraphExecUpdateFailure);
+          }
         }
       }
     } else {
