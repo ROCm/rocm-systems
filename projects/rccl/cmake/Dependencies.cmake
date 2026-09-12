@@ -55,6 +55,7 @@ if(NOT GTest_FOUND AND BUILD_TESTS OR INSTALL_DEPENDENCIES)
                      GIT_TAG             release-1.12.0
                      INSTALL_DIR         ${GTEST_ROOT}
                      CMAKE_ARGS          -DBUILD_GTEST=ON -DCMAKE_INSTALL_PREFIX=<INSTALL_DIR> ${COMPILER_OVERRIDE} -DBUILD_SHARED_LIBS=OFF
+                                         -DCMAKE_POSITION_INDEPENDENT_CODE=ON
                      LOG_DOWNLOAD        TRUE
                      LOG_CONFIGURE       TRUE
                      LOG_BUILD           TRUE
