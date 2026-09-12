@@ -318,9 +318,9 @@ TEST_F(UnifiedMemoryProcessorTest,
        HostToDeviceMigrationsBucketByDestinationGpuUnderProducerSemantics)
 {
     processor->handle(make_kfd_page_migrate_sample(kCpu0, kGpu1, 1024, 100, /*dev=*/kCpu0,
-                                                   agent_type::CPU));
+                                                   agent_type::cpu));
     processor->handle(make_kfd_page_migrate_sample(kCpu0, kGpu2, 2048, 200, /*dev=*/kCpu0,
-                                                   agent_type::CPU));
+                                                   agent_type::cpu));
 
     processor->finalize_processing();
 
@@ -396,7 +396,7 @@ TEST_F(UnifiedMemoryProcessorTest, AgentLookupThrowFallsBackSafely)
 {
     auto sample =
         make_kfd_page_migrate_sample(kCpu0, kGpu1, /*size=*/1024,
-                                     /*duration=*/100, /*device_id=*/42, agent_type::CPU);
+                                     /*duration=*/100, /*device_id=*/42, agent_type::cpu);
     EXPECT_NO_THROW(processor->handle(sample));
 
     processor->finalize_processing();
@@ -575,7 +575,7 @@ TEST_F(UnifiedMemoryProcessorTest, TriggerTableCoversAllKfdNames)
         const char* name = (row.kfd_name != nullptr) ? row.kfd_name : kSentinelFedName;
         processor->handle(make_kfd_page_migrate_sample(kCpu0, kGpu1, /*size=*/1024,
                                                        /*duration=*/100, /*device_id=*/0,
-                                                       agent_type::CPU, name));
+                                                       agent_type::cpu, name));
     }
 
     processor->finalize_processing();
