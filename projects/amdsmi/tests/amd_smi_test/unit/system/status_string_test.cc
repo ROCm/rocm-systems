@@ -8,8 +8,6 @@
 
 #include "amd_smi/amdsmi.h"
 
-namespace {
-
 TEST(SystemUnit, StatusCodeToStringRejectsNullOutPtr) {
   EXPECT_EQ(amdsmi_status_code_to_string(AMDSMI_STATUS_SUCCESS, nullptr), AMDSMI_STATUS_INVAL);
 }
@@ -25,5 +23,3 @@ TEST(SystemUnit, EsmiErrMsgRejectsNullOutPtr) {
   EXPECT_EQ(amdsmi_get_esmi_err_msg(AMDSMI_STATUS_SUCCESS, nullptr), AMDSMI_STATUS_INVAL);
 }
 #endif
-
-}  // namespace

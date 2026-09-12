@@ -514,17 +514,22 @@ amdsmi_status_t smi_amdgpu_get_bad_page_info(amd::smi::AMDSmiGPUDevice* device, 
     badPagesVec.pop_back();
   }
 
+  // *num_pages arrives holding the caller's capacity; report the true count
+  // but never write past what the caller allocated.
+  const uint32_t caller_capacity = *num_pages;
   *num_pages = static_cast<uint32_t>(badPagesVec.size());
 
   if (info == nullptr) {
     return AMDSMI_STATUS_SUCCESS;
   }
 
+  const uint32_t writable = std::min(caller_capacity, *num_pages);
+
   char status_code;
   amdsmi_memory_page_status_t tmp_stat;
   std::string junk;
 
-  for (uint32_t i = 0; i < *num_pages; ++i) {
+  for (uint32_t i = 0; i < writable; ++i) {
     std::istringstream fs1(badPagesVec[i]);
 
     fs1 >> std::hex >> info[i].page_address;

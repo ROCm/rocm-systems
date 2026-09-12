@@ -11,6 +11,7 @@
 #include <string>
 
 #include "amd_smi/amdsmi.h"
+#include "api_test_framework.h"
 #include "test_common.h"
 
 static const std::map<uint32_t, std::string> kTempSensorNameMap = {

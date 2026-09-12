@@ -2973,6 +2973,7 @@ def amdsmi_get_gpu_kfd_info(processor_handle: processor_handle_t) -> Dict[str, A
 def amdsmi_get_supported_power_cap(processor_handle: processor_handle_t) -> Dict[str, Any]:
     if not isinstance(processor_handle, amdsmi_wrapper.amdsmi_processor_handle):
         raise AmdSmiParameterException(processor_handle, amdsmi_wrapper.amdsmi_processor_handle)
+    # Must match AMDSMI_MAX_POWER_CAP_SENSORS in amdsmi.h.
     CONST_AMDSMI_MAX_POWER_SENSORS = 2
 
     sensor_count = ctypes.c_uint32()

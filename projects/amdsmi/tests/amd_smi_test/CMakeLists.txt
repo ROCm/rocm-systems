@@ -54,19 +54,22 @@ message("--------Proj Lib Dir: " ${PROJECT_BINARY_DIR}/lib)
 message("--------Proj Exe Dir: " ${PROJECT_BINARY_DIR}/bin)
 message("")
 
-# Collect all sources under unit/ and functional/ recursively. CONFIGURE_DEPENDS
-# re-globs at build time, so a newly added test .cc is picked up without manually
-# re-running cmake.
+# Collect all sources under unit/, integration/ and functional/ recursively.
+# CONFIGURE_DEPENDS re-globs at build time, so a newly added test .cc is picked up
+# without manually re-running cmake.
 file(GLOB_RECURSE unitSources CONFIGURE_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/unit/*.cc)
+file(GLOB_RECURSE integSources CONFIGURE_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/integration/*.cc)
 file(GLOB_RECURSE functSources CONFIGURE_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/functional/*.cc)
 if(NOT ENABLE_WSL_BACKEND)
     list(FILTER unitSources EXCLUDE REGEX "/unit/wsl/")
+    list(FILTER integSources EXCLUDE REGEX "/integration/wsl/")
     list(FILTER functSources EXCLUDE REGEX "/functional/wsl/")
 elseif(ENABLE_WSL_BACKEND)
     # functional/wsl/smi tests directly link rocdxg_smi_* symbols and require
     # librocdxg at build time. Drop them when librocdxg is not staged yet (e.g.
     # TheRock CI compiler-runtime stage, which builds before wsl-rocdxg).
-    # unit/wsl tests only use the amdsmi API and are kept regardless.
+    # unit/ and integration/ wsl tests only use the amdsmi API and are kept
+    # regardless.
     find_library(ROCDXG_LIB rocdxg)
     if(NOT ROCDXG_LIB)
         list(FILTER functSources EXCLUDE REGEX "/functional/wsl/")
@@ -77,7 +80,7 @@ set(TEST "amdsmitst")
 
 # Harness sources at the root of this directory. Listed explicitly (rather than
 # aux_source_directory) so the set is stable and obvious; test sources live under
-# unit/ and functional/ and are globbed above.
+# unit/, integration/ and functional/ and are globbed above.
 set(tstSources
     ${CMAKE_CURRENT_SOURCE_DIR}/main.cc
     ${CMAKE_CURRENT_SOURCE_DIR}/test_base.cc
@@ -86,7 +89,7 @@ set(tstSources
 )
 
 # Build rules
-add_executable(${TEST} ${tstSources} ${unitSources} ${functSources})
+add_executable(${TEST} ${tstSources} ${unitSources} ${integSources} ${functSources})
 
 # Header include paths, scoped to the test target (consistent with the
 # target_* calls below). ${CMAKE_CURRENT_SOURCE_DIR} (= tests/amd_smi_test/) lets
