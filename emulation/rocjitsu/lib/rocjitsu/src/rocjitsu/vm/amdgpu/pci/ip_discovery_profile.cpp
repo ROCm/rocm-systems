@@ -22,15 +22,10 @@ namespace {
 // and not a corner: gfx_v12_1 alone uses 58 of them, and gfxhub_v12_1 reads
 // regGCMC_VM_FB_OFFSET during the GMC init this device has to survive.
 //
-// These lists are transcribed from a **shipping GFX12 part** reporting GC
-// 12.0.1, read out of the table the driver publishes for any bound GPU at
-// /sys/class/drm/card*/device/ip_discovery/die/0/<ip>/<inst>/base_addr. Reading
-// them off a part that answers beats deriving them: the values are what the
-// driver itself resolved, so misreading the format shows up as a mismatch
-// rather than as a plausible wrong number. MMHUB and ATHUB match that part's
-// versions exactly (4.1.0), so they are transcriptions rather than inferences;
-// the others are the same family at a different revision, so treat their higher
-// segments as unconfirmed until a table for this part can be read the same way.
+// These lists follow the register-base layout consumed by the public AMDGPU IP
+// discovery interface. Keeping the complete segment arrays here is necessary:
+// block register headers select a segment by index, and omitting an unused-looking
+// entry can silently redirect a later register into the wrong aperture.
 
 /// @brief GC's four segments, which SDMA shares verbatim on this family.
 constexpr uint64_t kGcBases[] = {0x00001260, 0x0000A000, 0x0001C000, 0x02402C00};
@@ -55,6 +50,21 @@ template <std::size_t N> std::vector<uint64_t> bases(const uint64_t (&list)[N]) 
 
 IpDiscoverySpec gfx1250_discovery_spec(const GpuDiscoveryTopology &topology) {
   IpDiscoverySpec spec;
+  spec.graphics = {
+      .shader_engines = topology.shader_engines,
+      .compute_units_per_shader_array = topology.compute_units_per_shader_array,
+      .shader_arrays_per_engine = topology.shader_arrays_per_engine,
+      // One compatibility backend and shader complex per advertised array is
+      // sufficient for compute and keeps the two driver divisors coherent.
+      .render_backends_per_engine = topology.shader_arrays_per_engine,
+      .texture_channel_caches = 1,
+      .wavefront_size = topology.wavefront_size,
+      .max_waves_per_simd = topology.max_waves_per_simd,
+      .max_scratch_slots_per_cu = topology.max_scratch_slots_per_cu,
+      .lds_size_kb = topology.lds_size_kb,
+      .shader_complexes_per_engine = topology.shader_arrays_per_engine,
+      .packers_per_shader_complex = 1,
+  };
 
   // Graphics and compute. Its instance count is what the driver turns into the
   // XCC mask, and a table with no graphics block at all is refused outright.
@@ -96,8 +106,8 @@ IpDiscoverySpec gfx1250_discovery_spec(const GpuDiscoveryTopology &topology) {
   // 7.0.0 rather than 7.1.0, deliberately. The driver's HDP switch has an arm
   // only for 7.0.0; 7.1.0 falls through its default and leaves `hdp.funcs`
   // null, so there is no HDP block driver at all and the flush path quietly
-  // does nothing. No hdp_v7_1 exists anywhere in the tree, and 7.0.0 is what
-  // the real part these bases came from reports, so nothing is given up.
+  // does nothing. No hdp_v7_1 implementation exists in the supported driver,
+  // so advertising 7.0.0 keeps the modeled flush path available.
   spec.blocks.push_back({.hardware_id = IpHardwareId::Hdp,
                          .instance = 0,
                          .major = 7,

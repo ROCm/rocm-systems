@@ -54,7 +54,11 @@ target_link_libraries(
 if(ROCJITSU_ENABLE_VFIO)
     target_link_libraries(
         rocjitsu_bin
-        PRIVATE rocjitsu_pci rocjitsu_vmm_vfu libvfio-user::libvfio-user
+        PRIVATE
+            rocjitsu_ip_discovery
+            rocjitsu_pci
+            rocjitsu_vmm_vfu
+            libvfio-user::libvfio-user
     )
     target_compile_definitions(rocjitsu_bin PRIVATE RJ_ENABLE_VFIO_USER)
 endif()
