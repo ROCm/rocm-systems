@@ -57,6 +57,14 @@ namespace {
 const char* const kCompiledInHostName = hostName;
 const int kCompiledInTimeout = timeout;
 const int kCompiledInSock = sock;
+
+// Mirrors of the default seams' own defaults (libc_fakes.cc:38, :46), used throughout this file so a
+// test failure names the value rather than a bare number. Scaffolding_DefaultSeams_AreReachableAndReset
+// ties each to its mirrored default, so drifting either one fails there by name instead of as a wall of
+// unrelated-looking mismatches everywhere the constant is used.
+constexpr int kSocketFd = 42;
+constexpr int kEntryPort0 = 28028;
+constexpr int kEntryPort1 = 28029;
 }  // namespace
 
 using RcclUnitTesting::CaptureLog;
@@ -122,6 +130,8 @@ TEST_F(RasClientMicrotest, Scaffolding_DefaultSeams_AreReachableAndReset) {
   EXPECT_STREQ(kCompiledInHostName, hostName);
   EXPECT_EQ(kCompiledInTimeout, timeout);
   EXPECT_EQ(kCompiledInSock, sock);
+  EXPECT_EQ(kSocketFd, g_nextSocketFd);
+  EXPECT_EQ(kEntryPort0, g_addrinfoBasePort);
 
   char buf[8] = {0};
   EXPECT_EQ(4, socketWrite(7, "abcd", 4));
@@ -797,7 +807,8 @@ class WriteRecorder {
  public:
   WriteRecorder(const char* base, std::vector<WriteStep> script) : base_(base), script_(std::move(script)) {}
 
-  ssize_t operator()(int, const void* buf, size_t count) {
+  ssize_t operator()(int fd, const void* buf, size_t count) {
+    g_writtenFds.push_back(fd);
     const char* p = static_cast<const char*>(buf);
     calls.push_back(WriteCall{static_cast<long long>(p - base_), count});
     if (calls.size() > kHardCap || step_ >= script_.size()) {
@@ -955,17 +966,14 @@ constexpr const char kUsageProg[] = "ras-client-argv0-probe";
 
 // --- printUsage, called directly -------------------------------------------
 
-// printUsage's entire product is the text it writes to stderr, so with output assertions gone there is nothing left
-// to check about WHAT it prints: the golden-string comparison, the per-line needles and the argv0 echo all went with
-// them. What remains observable is that it writes only to stderr, leaves every parse global alone and returns rather
-// than exiting, which is what the two exiting arms of parseArgs rely on.
-
 // printUsage writes nowhere but stderr and changes no parse state; without this
 // the two exiting arms cannot be told apart from the function they call.
 TEST_F(RasClientMicrotest, PrintUsage_CalledDirectly_TouchesNoParseStateAndDoesNotExit) {
   CaptureLog([]() { printUsage(kUsageProg); });
 
   ExpectAllGlobalsAtDefault();
+  EXPECT_TRUE(g_fwriteCalls.empty());
+  EXPECT_EQ("", g_stdoutData);
 }
 
 // --- case 'e': --help ------------------------------------------------------
@@ -1136,8 +1144,7 @@ TEST_F(RasClientMicrotest, SetOutputFormat_ServerAnswersOk_SendsExactCommandOnSo
 }
 
 // The response check is one strcasecmp against "OK\n", so every accepting and every rejecting response exercises the
-// same comparison and differs only in its input. One test per side, driven by a table, instead of one per response:
-// with the diagnostic no longer asserted the per-response tests held identical expectations anyway.
+// same comparison and differs only in its input. One test per side, driven by a table.
 TEST_F(RasClientMicrotest, SetOutputFormat_AcceptedResponses_ReturnZeroAndStillSendTheCommand) {
   for (const char* reply : {"OK\n", "ok\n", "Ok\n"}) {
     ResetLibcFakes();
@@ -1153,6 +1160,24 @@ TEST_F(RasClientMicrotest, SetOutputFormat_AcceptedResponses_ReturnZeroAndStillS
     EXPECT_EQ("SET FORMAT quokka\n", g_writtenData) << reply;
     ExpectPerrors({});
   }
+}
+
+// client.cc:316 calls rasRead with untilNewline defaulted to true, but every reply above arrives whole in one
+// read(), so nothing distinguishes that default from false: passing false there would leave every case above green.
+// Scripting "O" then "K\n" is what makes the default observable.
+TEST_F(RasClientMicrotest, SetOutputFormat_ReplySplitAcrossTwoReads_WaitsForTheNewline) {
+  sock = 77;
+  format = kOddFormat;
+  ScriptReadData("O");
+  ScriptReadData("K\n");
+
+  int rc = -1;
+  CaptureLog([&]() { rc = setOutputFormat(); });
+
+  EXPECT_EQ(0, rc);
+  EXPECT_EQ(2u, g_readScriptPos);
+  EXPECT_EQ("SET FORMAT quokka\n", g_writtenData);
+  ExpectPerrors({});
 }
 
 // The rejecting side, including the two that are not a mismatch at all but an empty read: "" is what the default read
@@ -1286,19 +1311,12 @@ void ScriptThreeChunks() {
 
 }  // namespace
 
-// getNCCLStatus runs on a distinctive fd so the descriptor the client forwards is provably its own. The suite used
-// to be a derived fixture only so it could clear its own fwrite record; ResetLibcFakes clears the shared one.
-class RasClientMicrotestGetStatus : public RasClientMicrotest {
- protected:
-  void SetUp() override {
-    RasClientMicrotest::SetUp();
-    sock = 17;
-  }
-};
-
 // Command arm, verbose off: exactly "STATUS\n" on the wire, and the empty read
 // script makes the first rasRead return 0, taking the EOF break to return 0.
-TEST_F(RasClientMicrotestGetStatus, GetNcclStatus_NonVerbose_SendsPlainStatusAndReturnsZeroOnEof) {
+// Runs on a distinctive fd so the descriptor getNCCLStatus forwards is provably its own; the other tests
+// in this section never read the descriptor, so only this one needs to set it.
+TEST_F(RasClientMicrotest, GetNcclStatus_NonVerbose_SendsPlainStatusAndReturnsZeroOnEof) {
+  sock = 17;
   verbose = false;
   int writeFd = -1;
   ScopedHook writeHook(g_write, [&](int fd, const void* buf, size_t count) -> ssize_t {
@@ -1319,7 +1337,7 @@ TEST_F(RasClientMicrotestGetStatus, GetNcclStatus_NonVerbose_SendsPlainStatusAnd
 }
 
 // Command arm, verbose on: the prefix is "VERBOSE " with its trailing space.
-TEST_F(RasClientMicrotestGetStatus, GetNcclStatus_Verbose_SendsVerbosePrefixedStatusAndReturnsZero) {
+TEST_F(RasClientMicrotest, GetNcclStatus_Verbose_SendsVerbosePrefixedStatusAndReturnsZero) {
   verbose = true;
 
   CaptureLog([]() { EXPECT_EQ(0, getNCCLStatus()); });
@@ -1330,7 +1348,7 @@ TEST_F(RasClientMicrotestGetStatus, GetNcclStatus_Verbose_SendsVerbosePrefixedSt
 
 // Loop body: three reads of different lengths each become their own
 // fwrite(buf, 1, bytes, stdout) + fflush, in order, then EOF returns 0.
-TEST_F(RasClientMicrotestGetStatus, GetNcclStatus_ThreeChunks_StreamsEachToStdoutInOrder) {
+TEST_F(RasClientMicrotest, GetNcclStatus_ThreeChunks_StreamsEachToStdoutInOrder) {
   ScriptThreeChunks();
   ScopedHook fflushHook(g_fflush, [](FILE*) { return 0; });
 
@@ -1351,7 +1369,7 @@ TEST_F(RasClientMicrotestGetStatus, GetNcclStatus_ThreeChunks_StreamsEachToStdou
 }
 
 // Write arm, EAGAIN: socketWrite returns -1 with a timeout errno.
-TEST_F(RasClientMicrotestGetStatus, GetNcclStatus_WriteFailsWithEagain_ReportsTimeoutAndReturnsOne) {
+TEST_F(RasClientMicrotest, GetNcclStatus_WriteFailsWithEagain_ReportsTimeoutAndReturnsOne) {
   ScriptThreeChunks();  // never consumed: the command write fails first
   ScopedHook writeHook(g_write, [](int, const void*, size_t) -> ssize_t {
     errno = EAGAIN;
@@ -1367,7 +1385,7 @@ TEST_F(RasClientMicrotestGetStatus, GetNcclStatus_WriteFailsWithEagain_ReportsTi
 }
 
 // Write arm, non-EAGAIN: perror prints the label, ": " and the strerror text.
-TEST_F(RasClientMicrotestGetStatus, GetNcclStatus_WriteFailsWithEpipe_ReportsWriteToSocketAndReturnsOne) {
+TEST_F(RasClientMicrotest, GetNcclStatus_WriteFailsWithEpipe_ReportsWriteToSocketAndReturnsOne) {
   ScopedHook writeHook(g_write, [](int, const void*, size_t) -> ssize_t {
     errno = EPIPE;
     return -1;
@@ -1382,7 +1400,7 @@ TEST_F(RasClientMicrotestGetStatus, GetNcclStatus_WriteFailsWithEpipe_ReportsWri
 
 // Read arm, EWOULDBLOCK: the first chunk has already been streamed, so the
 // "Connection timed out" here is provably the read site, not the write site.
-TEST_F(RasClientMicrotestGetStatus, GetNcclStatus_ReadFailsWithEwouldblock_ReportsTimeoutAndReturnsOne) {
+TEST_F(RasClientMicrotest, GetNcclStatus_ReadFailsWithEwouldblock_ReportsTimeoutAndReturnsOne) {
   ScriptReadData(kChunk1);
   ScriptRead(-1, EWOULDBLOCK, "");
 
@@ -1395,7 +1413,7 @@ TEST_F(RasClientMicrotestGetStatus, GetNcclStatus_ReadFailsWithEwouldblock_Repor
 }
 
 // Read arm, non-EAGAIN errno.
-TEST_F(RasClientMicrotestGetStatus, GetNcclStatus_ReadFailsWithEio_ReportsReadSocketAndReturnsOne) {
+TEST_F(RasClientMicrotest, GetNcclStatus_ReadFailsWithEio_ReportsReadSocketAndReturnsOne) {
   ScriptReadData(kChunk1);
   ScriptRead(-1, EIO, "");
 
@@ -1408,7 +1426,7 @@ TEST_F(RasClientMicrotestGetStatus, GetNcclStatus_ReadFailsWithEio_ReportsReadSo
 
 // fwrite arm: the second chunk is short-written, so the loop must abort there
 // without fflushing it and without touching the third chunk.
-TEST_F(RasClientMicrotestGetStatus, GetNcclStatus_ShortFwrite_ReportsFailureAndReturnsOne) {
+TEST_F(RasClientMicrotest, GetNcclStatus_ShortFwrite_ReportsFailureAndReturnsOne) {
   ScriptThreeChunks();
   ScopedHook fflushHook(g_fflush, [](FILE*) { return 0; });
   int fwriteSeq = 0;  // sequencing only; g_fwriteCalls is the assertion surface
@@ -1428,7 +1446,7 @@ TEST_F(RasClientMicrotestGetStatus, GetNcclStatus_ShortFwrite_ReportsFailureAndR
 }
 
 // fflush arm: the second flush fails, after its chunk already reached stdout.
-TEST_F(RasClientMicrotestGetStatus, GetNcclStatus_FflushFails_ReportsPerrorAndReturnsOne) {
+TEST_F(RasClientMicrotest, GetNcclStatus_FflushFails_ReportsPerrorAndReturnsOne) {
   ScriptThreeChunks();
   int fflushSeq = 0;  // sequencing only; fflushHook.calls stays the assertion surface
   ScopedHook fflushHook(g_fflush, [&](FILE*) {
@@ -1468,8 +1486,7 @@ constexpr const char kOtherHost[] = "rasnode7";
 constexpr const char kOtherPort[] = "31337";
 
 // The default getaddrinfo hands back entry i as 127.0.0.(1+i):(28028+i).
-constexpr int kEntryPort0 = 28028;
-constexpr int kEntryPort1 = 28029;
+// kEntryPort0/kEntryPort1 are defined above, tied to g_addrinfoBasePort's default in Scaffolding_...
 
 // One socket(2) call as connectToNCCL issued it.
 struct SocketCall {
@@ -1489,7 +1506,7 @@ struct ConnectCall {
 // One setsockopt(2) call: which fd, and the timeval it carried. Shared by every
 // setsockopt-recording test in this file, not just the connect-timeout block
 // that first needed it, so there is exactly one struct and one recorder.
-struct CtSetsockoptCall {
+struct SetsockoptCall {
   int fd;
   int level;
   int optname;
@@ -1499,9 +1516,9 @@ struct CtSetsockoptCall {
 
 // g_lastSetsockopt* keeps only the final call, which cannot see a dropped or
 // swapped call earlier in the walk; render the whole sequence as one string.
-std::string CtTrace(const std::vector<CtSetsockoptCall>& calls) {
+std::string TraceSetsockopt(const std::vector<SetsockoptCall>& calls) {
   std::string out;
-  for (const CtSetsockoptCall& c : calls) {
+  for (const SetsockoptCall& c : calls) {
     if (c.optname == SO_SNDTIMEO) {
       out += "SNDTIMEO";
     } else if (c.optname == SO_RCVTIMEO) {
@@ -1514,18 +1531,19 @@ std::string CtTrace(const std::vector<CtSetsockoptCall>& calls) {
   return out;
 }
 
-void CtRecord(std::vector<CtSetsockoptCall>* into, int fd, int level, int optname, const void* optval,
-              socklen_t optlen) {
+void RecordSetsockopt(std::vector<SetsockoptCall>* into, int fd, int level, int optname, const void* optval,
+                       socklen_t optlen) {
   struct timeval tv = {-1, -1};
   if (optval && optlen >= static_cast<socklen_t>(sizeof tv)) {
     std::memcpy(&tv, optval, sizeof tv);
   }
-  into->push_back(CtSetsockoptCall{fd, level, optname, static_cast<long>(tv.tv_sec), static_cast<long>(tv.tv_usec)});
+  into->push_back(SetsockoptCall{fd, level, optname, static_cast<long>(tv.tv_sec), static_cast<long>(tv.tv_usec)});
 }
 
-// Every setsockopt in client.cc is SOL_SOCKET; nothing else asserted it, so changing one was invisible.
-void ExpectAllSolSocket(const std::vector<CtSetsockoptCall>& calls) {
-  for (const CtSetsockoptCall& c : calls) {
+// Every setsockopt in client.cc is SOL_SOCKET. g_lastSetsockoptLevel pins the final call elsewhere;
+// this is for the multi-call tests, where only the full sequence proves none of the others drifted.
+void ExpectAllSolSocket(const std::vector<SetsockoptCall>& calls) {
+  for (const SetsockoptCall& c : calls) {
     EXPECT_EQ(SOL_SOCKET, c.level);
   }
 }
@@ -1553,11 +1571,6 @@ int PortOf(const struct sockaddr* sa) {
 uint32_t AddrOf(const struct sockaddr* sa) {
   return ntohl(reinterpret_cast<const struct sockaddr_in*>(sa)->sin_addr.s_addr);
 }
-
-
-
-// The one handshake outcome reachable from a successful connect that cannot
-// reach the `timeout:` label, whose `goto retry` would re-enter the walk.
 
 }  // namespace
 
@@ -1587,8 +1600,9 @@ TEST_F(RasClientMicrotest, ConnectToNccl_GetaddrinfoFails_ReportsResolveErrorAnd
   EXPECT_EQ(-1, sock);
 }
 
-// Arm: the two `hints` stores plus the (hostName, port) pair handed to
-// getaddrinfo -- a resolver fake that ignores them makes those stores invisible.
+// Arm: the (hostName, port) pair handed to getaddrinfo, plus its `hints`. Of the two hints fields only
+// `ai_socktype` is actually observable here: `ai_family` is AF_UNSPEC, which is 0, and client.cc:158
+// zero-initializes `hints` before either store, so deleting the `ai_family` store would still read 0.
 TEST_F(RasClientMicrotest, ConnectToNccl_ResolvesConfiguredEndpoint_PassesUnspecStreamHints) {
   hostName = kOtherHost;
   port = kOtherPort;
@@ -1695,9 +1709,7 @@ TEST_F(RasClientMicrotest, ConnectToNccl_MiddleEntryAccepts_BreaksWithThatEntrys
 // Arm: every entry's connect fails, so the walk runs to the end with sock == -1.
 //
 // The advice the unit then prints is chosen by a ternary on hostName/port (client.cc:213-216) that feeds nothing but
-// the fprintf, so which branch it took is not observable here. Two sibling tests used to drive a custom host and a
-// custom port to reach it; with the message unasserted they asserted exactly what this one does, so they are gone
-// rather than left implying a check they do not make.
+// the fprintf, so which branch it took is not observable here.
 TEST_F(RasClientMicrotest, ConnectToNccl_AllEntriesRefused_WalkExhaustsAndClosesEveryDescriptor) {
   g_addrinfoCount = 3;
   g_connectResult = -1;
@@ -1741,10 +1753,10 @@ TEST_F(RasClientMicrotest, ConnectToNccl_TimeoutEnabled_SetsSendThenReceiveTimeo
   timeout = 5;
   g_connectResult = -1;
 
-  std::vector<CtSetsockoptCall> opts;
+  std::vector<SetsockoptCall> opts;
   ScopedHook sockHook(g_socket, [](int, int, int) { return 340; });
   ScopedHook optHook(g_setsockopt, [&](int fd, int level, int optname, const void* val, socklen_t len) {
-    CtRecord(&opts, fd, level, optname, val, len);
+    RecordSetsockopt(&opts, fd, level, optname, val, len);
     return 0;
   });
 
@@ -1756,7 +1768,7 @@ TEST_F(RasClientMicrotest, ConnectToNccl_TimeoutEnabled_SetsSendThenReceiveTimeo
   EXPECT_EQ(SO_SNDTIMEO, opts[0].optname);
   EXPECT_EQ(SO_RCVTIMEO, opts[1].optname);
   ExpectAllSolSocket(opts);
-  for (const CtSetsockoptCall& o : opts) {
+  for (const SetsockoptCall& o : opts) {
     EXPECT_EQ(340, o.fd);
     EXPECT_EQ(1L, o.tvSec);
     EXPECT_EQ(0L, o.tvUsec);
@@ -1851,7 +1863,6 @@ TEST_F(RasClientMicrotest, ConnectToNccl_ConnectFails_QueriesNumericHostAndServi
 // so what this pins is that a failing getnameinfo does not abort the walk: all three entries are still tried.
 TEST_F(RasClientMicrotest, ConnectToNccl_GetnameinfoFailsOnEveryEntry_WalkStillVisitsThemAll) {
   hostName = kOtherHost;
-  port = kOtherPort;
   g_addrinfoCount = 3;
   g_connectResult = -1;
 
@@ -1933,8 +1944,8 @@ int RunConnectToNCCL() {
 // mutation of the string client.cc actually sends.
 constexpr const char kClientHello[] = "CLIENT PROTOCOL 2\n";
 
-// The fd DefaultSocket hands out; `fail:` and `timeout:` both close exactly this.
-constexpr int kSocketFd = 42;
+// kSocketFd (the fd DefaultSocket hands out; `fail:` and `timeout:` both close exactly this) is
+// defined above, tied to g_nextSocketFd's default in Scaffolding_DefaultSeams_AreReachableAndReset.
 
 void ExpectClosedExactlyOnce(int fd) {
   ASSERT_EQ(1u, g_closedFds.size());
@@ -1944,8 +1955,7 @@ void ExpectClosedExactlyOnce(int fd) {
 }  // namespace
 
 // The banner check is one strncasecmp over 16 bytes plus a strtol; the version compare only decides whether a warning
-// is printed, never whether the handshake succeeds. So every accepted banner leaves the same state, and with the
-// warning no longer asserted the five separate tests held identical expectations. One table per side.
+// is printed, never whether the handshake succeeds. So every accepted banner leaves the same state. One table per side.
 TEST_F(RasClientMicrotest, ConnectHandshake_AcceptedBanners_ReturnZeroAndLeaveTheSocketOpen) {
   for (const char* banner : {"SERVER PROTOCOL 2\n",    // exact match, no warning
                              "server protocol 2\n",    // strncasecmp folds case
@@ -1964,6 +1974,22 @@ TEST_F(RasClientMicrotest, ConnectHandshake_AcceptedBanners_ReturnZeroAndLeaveTh
     EXPECT_TRUE(g_closedFds.empty()) << banner;  // not the `fail:` arm
     ExpectPerrors({});
   }
+}
+
+// client.cc:229 calls rasRead with untilNewline defaulted to true, but every banner above arrives whole in one
+// read(), so nothing distinguishes that default from false: the loop already stops after one iteration either way.
+// Splitting the banner across two reads is what makes the default observable.
+TEST_F(RasClientMicrotest, ConnectHandshake_BannerSplitAcrossTwoReads_WaitsForTheNewline) {
+  ScriptReadData("SERVER PROTOCOL ");
+  ScriptReadData("2\n");
+
+  const int ret = RunConnectToNCCL();
+
+  EXPECT_EQ(0, ret);
+  EXPECT_EQ(2u, g_readScriptPos);
+  EXPECT_EQ(kClientHello, g_writtenData);
+  EXPECT_EQ(kSocketFd, sock);
+  EXPECT_TRUE(g_closedFds.empty());
 }
 
 // The rejecting side. "" is no script at all, i.e. rasRead reports EOF; the rest fail the 16-byte compare, including
@@ -2075,8 +2101,11 @@ namespace {
 // The handshake ahead of the block consumes one scripted read, so every pass
 // through connectToNCCL needs a server hello before the reply it waits on.
 // The client hello itself is kClientHello, defined above with the section this
-// one reuses it from.
-constexpr const char kCtServerHello[] = "SERVER PROTOCOL 2\n";
+// one reuses it from. Unlike kClientHello, the version number here is never
+// itself asserted on -- only whether the handshake as a whole succeeds -- so
+// deriving it from the same macro client.cc compares against does not launder
+// a mutation; it only keeps this from drifting from client.cc's real version.
+constexpr const char kCtServerHello[] = "SERVER PROTOCOL " STR(NCCL_RAS_CLIENT_PROTOCOL) "\n";
 
 // tv starts at {TIMEOUT_INCREMENT, 0} and the bump adds timeout + EXTRA(5), so
 // 37 yields 43 -- a value no operand-dropping mutant of that line also reaches.
@@ -2090,11 +2119,11 @@ TEST_F(RasClientMicrotest, ConnectTimeout_NegativeTimeout_SkipsNegotiationAndBum
   timeout = -1;
   ScriptReadData(kCtServerHello);
 
-  std::vector<CtSetsockoptCall> opts;
+  std::vector<SetsockoptCall> opts;
   int rc = -1;
   {
     ScopedHook sso(g_setsockopt, [&](int fd, int level, int optname, const void* optval, socklen_t optlen) {
-      CtRecord(&opts, fd, level, optname, optval, optlen);
+      RecordSetsockopt(&opts, fd, level, optname, optval, optlen);
       return 0;
     });
     CaptureLog([&]() { rc = connectToNCCL(); });
@@ -2103,9 +2132,9 @@ TEST_F(RasClientMicrotest, ConnectTimeout_NegativeTimeout_SkipsNegotiationAndBum
 
   EXPECT_EQ(0, rc);
   EXPECT_EQ(std::string(kClientHello), g_writtenData);  // no TIMEOUT line was sent
-  EXPECT_EQ("SNDTIMEO={1,0} RCVTIMEO={1,0} RCVTIMEO={11,0} ", CtTrace(opts));
+  EXPECT_EQ("SNDTIMEO={1,0} RCVTIMEO={1,0} RCVTIMEO={11,0} ", TraceSetsockopt(opts));
   ExpectAllSolSocket(opts);
-  EXPECT_EQ(42, sock);
+  EXPECT_EQ(kSocketFd, sock);
   EXPECT_TRUE(g_closedFds.empty());
   EXPECT_EQ(1, g_freeaddrinfoCalls);
 }
@@ -2117,11 +2146,11 @@ TEST_F(RasClientMicrotest, ConnectTimeout_ZeroTimeout_NegotiatesZeroAndIssuesNoS
   ScriptReadData(kCtServerHello);
   ScriptReadData("OK\n");
 
-  std::vector<CtSetsockoptCall> opts;
+  std::vector<SetsockoptCall> opts;
   int rc = -1;
   {
     ScopedHook sso(g_setsockopt, [&](int fd, int level, int optname, const void* optval, socklen_t optlen) {
-      CtRecord(&opts, fd, level, optname, optval, optlen);
+      RecordSetsockopt(&opts, fd, level, optname, optval, optlen);
       return 0;
     });
     CaptureLog([&]() { rc = connectToNCCL(); });
@@ -2130,8 +2159,8 @@ TEST_F(RasClientMicrotest, ConnectTimeout_ZeroTimeout_NegotiatesZeroAndIssuesNoS
 
   EXPECT_EQ(0, rc);
   EXPECT_EQ("CLIENT PROTOCOL 2\nTIMEOUT 0\n", g_writtenData);
-  EXPECT_EQ("", CtTrace(opts));
-  EXPECT_EQ(42, sock);
+  EXPECT_EQ("", TraceSetsockopt(opts));
+  EXPECT_EQ(kSocketFd, sock);
   EXPECT_TRUE(g_closedFds.empty());
 }
 
@@ -2141,11 +2170,11 @@ TEST_F(RasClientMicrotest, ConnectTimeout_PositiveTimeout_SendsExactTimeoutLineA
   ScriptReadData(kCtServerHello);
   ScriptReadData("OK\n");
 
-  std::vector<CtSetsockoptCall> opts;
+  std::vector<SetsockoptCall> opts;
   int rc = -1;
   {
     ScopedHook sso(g_setsockopt, [&](int fd, int level, int optname, const void* optval, socklen_t optlen) {
-      CtRecord(&opts, fd, level, optname, optval, optlen);
+      RecordSetsockopt(&opts, fd, level, optname, optval, optlen);
       return 0;
     });
     CaptureLog([&]() { rc = connectToNCCL(); });
@@ -2154,9 +2183,9 @@ TEST_F(RasClientMicrotest, ConnectTimeout_PositiveTimeout_SendsExactTimeoutLineA
 
   EXPECT_EQ(0, rc);
   EXPECT_EQ("CLIENT PROTOCOL 2\nTIMEOUT 37\n", g_writtenData);
-  EXPECT_EQ("SNDTIMEO={1,0} RCVTIMEO={1,0} RCVTIMEO={43,0} ", CtTrace(opts));
+  EXPECT_EQ("SNDTIMEO={1,0} RCVTIMEO={1,0} RCVTIMEO={43,0} ", TraceSetsockopt(opts));
   ExpectAllSolSocket(opts);
-  EXPECT_EQ(42, sock);
+  EXPECT_EQ(kSocketFd, sock);
   EXPECT_TRUE(g_closedFds.empty());
   EXPECT_EQ(1, g_freeaddrinfoCalls);
 }
@@ -2176,6 +2205,24 @@ TEST_F(RasClientMicrotest, ConnectTimeout_ServerAnswersLowercaseOk_IsAcceptedCas
   EXPECT_EQ(SO_RCVTIMEO, g_lastSetsockoptOptname);
   EXPECT_EQ(43, g_lastSetsockoptTimeval.tv_sec);
   EXPECT_EQ(0, g_lastSetsockoptTimeval.tv_usec);
+}
+
+// client.cc:261 calls rasRead with untilNewline defaulted to true, but every reply above arrives whole in one
+// read(), so nothing distinguishes that default from false. Splitting the reply across two reads is what makes it
+// observable: with false the loop would return after "O" alone and reject it.
+TEST_F(RasClientMicrotest, ConnectTimeout_ReplySplitAcrossTwoReads_WaitsForTheNewline) {
+  timeout = kCtDistinctTimeout;
+  ScriptReadData(kCtServerHello);
+  ScriptReadData("O");
+  ScriptReadData("K\n");
+
+  int rc = -1;
+  CaptureLog([&]() { rc = connectToNCCL(); });
+
+  EXPECT_EQ(0, rc);
+  EXPECT_EQ(3u, g_readScriptPos);  // hello, then the two split halves of the reply
+  EXPECT_EQ(SO_RCVTIMEO, g_lastSetsockoptOptname);
+  EXPECT_EQ(43, g_lastSetsockoptTimeval.tv_sec);
 }
 
 // bytes < 0 with a non-EAGAIN errno: perror and fail, never the retry label.
@@ -2245,8 +2292,8 @@ TEST_F(RasClientMicrotest, ConnectTimeout_RetryAlsoFails_ClosesTheSameDescriptor
 
   EXPECT_EQ(1, rc);
   EXPECT_EQ(2, resolveCalls);
-  EXPECT_EQ(std::vector<int>({42, 42}), g_closedFds);
-  EXPECT_EQ(42, sock);  // and `sock` is left holding the twice-closed descriptor
+  EXPECT_EQ(std::vector<int>({kSocketFd, kSocketFd}), g_closedFds);
+  EXPECT_EQ(kSocketFd, sock);  // and `sock` is left holding the twice-closed descriptor
 }
 
 // goto timeout from the reply read: close, retry the whole walk once, succeed.
@@ -2258,11 +2305,11 @@ TEST_F(RasClientMicrotest, ConnectTimeout_ReplyReadFailsWithEagain_RetriesOnceTh
   ScriptReadData(kCtServerHello);
   ScriptReadData("OK\n");
 
-  std::vector<CtSetsockoptCall> opts;
+  std::vector<SetsockoptCall> opts;
   int rc = -1;
   {
     ScopedHook sso(g_setsockopt, [&](int fd, int level, int optname, const void* optval, socklen_t optlen) {
-      CtRecord(&opts, fd, level, optname, optval, optlen);
+      RecordSetsockopt(&opts, fd, level, optname, optval, optlen);
       return 0;
     });
     CaptureLog([&]() { rc = connectToNCCL(); });
@@ -2270,11 +2317,11 @@ TEST_F(RasClientMicrotest, ConnectTimeout_ReplyReadFailsWithEagain_RetriesOnceTh
 
   EXPECT_EQ(0, rc);
   EXPECT_EQ("CLIENT PROTOCOL 2\nTIMEOUT 37\nCLIENT PROTOCOL 2\nTIMEOUT 37\n", g_writtenData);
-  EXPECT_EQ("SNDTIMEO={1,0} RCVTIMEO={1,0} SNDTIMEO={1,0} RCVTIMEO={1,0} RCVTIMEO={43,0} ", CtTrace(opts));
+  EXPECT_EQ("SNDTIMEO={1,0} RCVTIMEO={1,0} SNDTIMEO={1,0} RCVTIMEO={1,0} RCVTIMEO={43,0} ", TraceSetsockopt(opts));
   ExpectAllSolSocket(opts);
   ExpectClosedExactlyOnce(kSocketFd);
   EXPECT_EQ(2, g_freeaddrinfoCalls);
-  EXPECT_EQ(42, sock);
+  EXPECT_EQ(kSocketFd, sock);
 }
 
 // goto timeout from the TIMEOUT write. The hook fails exactly one write ever,
@@ -2317,12 +2364,12 @@ TEST_F(RasClientMicrotest, ConnectTimeout_BumpSetsockoptFails_ReportsPerrorAndSt
   ScriptReadData(kCtServerHello);
   ScriptReadData("OK\n");
 
-  std::vector<CtSetsockoptCall> opts;
+  std::vector<SetsockoptCall> opts;
   int rc = -1;
   {
     // Keyed on the bumped tv so the connect walk's two 1-second calls still pass.
     ScopedHook sso(g_setsockopt, [&](int fd, int level, int optname, const void* optval, socklen_t optlen) -> int {
-      CtRecord(&opts, fd, level, optname, optval, optlen);
+      RecordSetsockopt(&opts, fd, level, optname, optval, optlen);
       if (opts.back().tvSec != TIMEOUT_INCREMENT) {
         errno = ENOPROTOOPT;
         return -1;
@@ -2335,9 +2382,9 @@ TEST_F(RasClientMicrotest, ConnectTimeout_BumpSetsockoptFails_ReportsPerrorAndSt
 
   EXPECT_EQ(0, rc);
   ExpectPerrors({ENOPROTOOPT});  // exactly one, so the retry did not report the same failure twice
-  EXPECT_EQ("SNDTIMEO={1,0} RCVTIMEO={1,0} RCVTIMEO={43,0} ", CtTrace(opts));
+  EXPECT_EQ("SNDTIMEO={1,0} RCVTIMEO={1,0} RCVTIMEO={43,0} ", TraceSetsockopt(opts));
   ExpectAllSolSocket(opts);
-  EXPECT_EQ(42, sock);
+  EXPECT_EQ(kSocketFd, sock);
   EXPECT_TRUE(g_closedFds.empty());
 }
 
@@ -2360,7 +2407,7 @@ TEST_F(RasClientMicrotest, ConnectTimeout_RejectedReplies_CloseTheSocketOnceAndR
     EXPECT_EQ(1, rc) << reply;
     EXPECT_EQ("CLIENT PROTOCOL 2\nTIMEOUT 37\n", g_writtenData) << reply;
     ASSERT_EQ(1u, g_closedFds.size()) << reply;
-    EXPECT_EQ(42, g_closedFds[0]) << reply;
+    EXPECT_EQ(kSocketFd, g_closedFds[0]) << reply;
     EXPECT_EQ(1, g_freeaddrinfoCalls) << reply;  // fail: sees addrInfo already nulled
     ExpectPerrors({});
   }
@@ -2534,6 +2581,22 @@ TEST_F(RasClientMicrotest, MonitorEvents_AcceptedActivationReplies_ReturnZeroAnd
       EXPECT_EQ(stdout, g_fwriteCalls.back().stream) << c.reply;
     }
   }
+}
+
+// client.cc:386 calls rasRead with untilNewline defaulted to true, but every reply above arrives whole in one
+// read(), so nothing distinguishes that default from false. Splitting the reply across two reads is what makes it
+// observable: with false the loop would see "O" alone and reject it as a mismatch.
+TEST_F(RasClientMicrotest, MonitorEvents_ActivationReplySplitAcrossTwoReads_WaitsForTheNewline) {
+  sock = kMonitorSock;
+  ScriptReadData("O");
+  ScriptReadData("K\n");
+
+  int rc = -1;
+  CaptureLog([&]() { rc = monitorNCCLEvents(); });
+
+  EXPECT_EQ(0, rc);
+  EXPECT_EQ(2u, g_readScriptPos);
+  EXPECT_EQ("", g_stdoutData);
 }
 
 // --- stage 1: disabling the receive timeout ---------------------------------

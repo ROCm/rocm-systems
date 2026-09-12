@@ -109,7 +109,7 @@ static int DefaultSetsockopt(int, int level, int optname, const void* optval, so
 }
 
 // Builds g_addrinfoCount single-linked IPv4 entries. Paired with
-// DefaultFreeaddrinfo; a test that overrides one must override both.
+// DefaultFreeaddrinfo; an override of either half must use the same allocator.
 // Deliberately unlike getaddrinfo(3) in one respect: g_addrinfoCount == 0
 // returns success with an empty list, where the real call returns EAI_NONAME.
 // That is how a test reaches a caller's address-walk with no candidate at all

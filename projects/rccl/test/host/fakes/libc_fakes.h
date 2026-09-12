@@ -103,14 +103,14 @@ extern std::vector<int> g_readFds;
 extern std::vector<MicroReadStep> g_readScript;  // consumed front-to-back by the default read
 extern size_t g_readScriptPos;
 extern int g_nextSocketFd;              // what the default socket() hands back (-1 to fail it)
-extern int g_socketFailErrno;           // errno the default socket() sets when g_nextSocketFd is -1; no test drives it
-                                        // yet, since the one socket-failure test needs per-call behaviour and hooks
+extern int g_socketFailErrno;           // UNDRIVEN: errno the default socket() sets when g_nextSocketFd is -1; the
+                                        // one socket-failure test needs per-call behaviour and uses a hook instead
 extern int g_lastSetsockoptLevel;       // level of the last setsockopt; without it SOL_SOCKET is unasserted
 extern int g_lastSetsockoptOptname;     // SO_SNDTIMEO / SO_RCVTIMEO of the last setsockopt
 extern struct timeval g_lastSetsockoptTimeval;
 extern int g_getaddrinfoResult;         // non-zero makes the default getaddrinfo fail with that code
 extern int g_addrinfoCount;             // how many entries the default getaddrinfo returns
-extern int g_addrinfoBasePort;          // entry i gets port g_addrinfoBasePort + i; no test drives it yet,
+extern int g_addrinfoBasePort;          // UNDRIVEN: entry i gets port g_addrinfoBasePort + i;
                                         // ras-client-test.cc mirrors the default as kEntryPort0 instead
 extern int g_freeaddrinfoCalls;
 extern int g_connectResult;             // 0 succeeds; non-zero fails and sets errno to g_connectErrno
