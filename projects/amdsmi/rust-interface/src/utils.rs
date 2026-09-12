@@ -24,7 +24,7 @@ pub use crate::amdsmi_wrapper::{
     AmdsmiDriverInfoT, AmdsmiEngineUsageT, AmdsmiErrorCountT, AmdsmiEvtNotificationDataT,
     AmdsmiFreqVoltRegionT, AmdsmiFrequenciesT, AmdsmiFrequencyRangeT, AmdsmiFwInfoT,
     AmdsmiGpuCacheInfoT, AmdsmiGpuCacheInfoTCache, AmdsmiGpuMetricsT, AmdsmiKfdInfoT,
-    AmdsmiLinkMetricsT, AmdsmiLinkMetricsTLinks, AmdsmiNameValueT,
+    AmdsmiLinkMetricsT, AmdsmiLinkMetricsTLinks, AmdsmiLinkTopologyT, AmdsmiNameValueT,
     AmdsmiOdVoltFreqDataT, AmdsmiP2pCapabilityT, AmdsmiPcieBandwidthT, AmdsmiPcieInfoT,
     AmdsmiPcieInfoTPcieMetric, AmdsmiPcieInfoTPcieStatic, AmdsmiPowerCapInfoT, AmdsmiPowerInfoT,
     AmdsmiPowerProfileStatusT, AmdsmiProcInfoT, AmdsmiProcInfoTEngineUsage,

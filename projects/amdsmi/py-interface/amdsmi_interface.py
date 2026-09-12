@@ -4344,6 +4344,49 @@ def amdsmi_topo_get_link_type(
     return {"hops": hops_64.value, "type": type_32.value}
 
 
+def amdsmi_get_link_topology(
+    processor_handle_src: processor_handle_t, processor_handle_dst: processor_handle_t
+):
+    """Return the unified link topology information between two GPUs.
+
+    Aggregates link weight, link status, link type, abstracted hop count, and
+    the framebuffer-sharing flag into a single result, matching the host
+    ``amdsmi_get_link_topology`` interface.
+
+    Returns:
+        dict: ``{"weight": int, "link_status": int, "link_type": int,
+        "num_hops": int, "fb_sharing": int}`` where ``link_status`` is one of
+        the ``AMDSMI_LINK_STATUS_*`` values and ``link_type`` is one of the
+        ``AMDSMI_LINK_TYPE_*`` values.
+
+    Note:
+        ``fb_sharing`` is best-effort: it reports 0 both when P2P framebuffer
+        access is unavailable and when the underlying P2P query could not be
+        completed. The two cases are indistinguishable.
+    """
+    if not isinstance(processor_handle_src, amdsmi_wrapper.amdsmi_processor_handle):
+        raise AmdSmiParameterException(processor_handle_src, amdsmi_wrapper.amdsmi_processor_handle)
+
+    if not isinstance(processor_handle_dst, amdsmi_wrapper.amdsmi_processor_handle):
+        raise AmdSmiParameterException(processor_handle_dst, amdsmi_wrapper.amdsmi_processor_handle)
+
+    topology_info = amdsmi_wrapper.amdsmi_link_topology_t()
+
+    _check_res(
+        amdsmi_wrapper.amdsmi_get_link_topology(
+            processor_handle_src, processor_handle_dst, ctypes.byref(topology_info)
+        )
+    )
+
+    return {
+        "weight": topology_info.weight,
+        "link_status": topology_info.link_status,
+        "link_type": topology_info.link_type,
+        "num_hops": topology_info.num_hops,
+        "fb_sharing": topology_info.fb_sharing,
+    }
+
+
 def amdsmi_topo_get_p2p_status(
     processor_handle_src: processor_handle_t, processor_handle_dst: processor_handle_t
 ):
