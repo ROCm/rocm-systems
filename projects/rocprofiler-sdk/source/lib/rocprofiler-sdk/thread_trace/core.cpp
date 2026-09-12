@@ -66,10 +66,10 @@ constexpr uint64_t MIN_BUFFER_SIZE = 1 << 20;  // 1MB minimum to give the GPU ro
 
 struct cbdata_t
 {
-    rocprofiler_agent_id_t                          agent      = {.handle = 0};
-    rocprofiler_thread_trace_shader_data_callback_t cb_fn      = nullptr;
-    const rocprofiler_user_data_t*                  userdata   = nullptr;
-    uint64_t                                        next_chunk = 0;
+    rocprofiler_agent_id_t                          agent    = {.handle = 0};
+    rocprofiler_thread_trace_shader_data_callback_t cb_fn    = nullptr;
+    const rocprofiler_user_data_t*                  userdata = nullptr;
+    std::vector<uint64_t>                           next_chunks{};
 };
 
 // Keeps track of a single client registering for serialized thread trace
@@ -95,7 +95,7 @@ thread_trace_callback(uint32_t shader, void* buffer, uint64_t size, void* callba
     shader_data.data             = buffer;
     shader_data.data_size        = size;
     shader_data.shader_engine_id = shader;
-    shader_data.chunk_index      = cb_data.next_chunk++;
+    shader_data.chunk_index      = cb_data.next_chunks[shader]++;
     shader_data.read_offset      = 0;
     shader_data.agent            = cb_data.agent;
     shader_data.flags            = ROCPROFILER_THREAD_TRACE_SHADER_DATA_FLAGS_END;
@@ -144,6 +144,9 @@ ThreadTracerAgent::ThreadTracerAgent(thread_trace_parameter_pack _params,
 
     const auto* agent =
         CHECK_NOTNULL(rocprofiler::agent::get_agent_cache(rocprofiler::agent::get_agent(agent_id)));
+
+    num_shader_engines = agent->get_rocp_agent()->num_shader_banks;
+    params.shader_engine_mask &= (uint64_t{1} << num_shader_engines) - 1;
 
     size_t staging_size = (params.num_buffers > 1) ? params.buffer_size : 0ul;
     size_t staging_n    = (params.num_buffers > 1) ? params.num_buffers : 0ul;
@@ -208,6 +211,7 @@ ThreadTracerAgent::iterate_data(aqlprofile_handle_t handle, rocprofiler_user_dat
     cbdata_t cb_dt{};
 
     cb_dt.agent = agent_id;
+    cb_dt.next_chunks.resize(num_shader_engines);
     // Walk each buffer produced by the ATT runtime and forward it to the
     // registered shader callback.
     cb_dt.cb_fn    = params.shader_cb_fn;
@@ -295,16 +299,16 @@ ThreadTracerAgent::start_thread_trace(std::shared_ptr<std::atomic<int>> _flag)
 
     if(params.num_buffers > 1)
     {
-        // Find unique shader engine ID from mask
-        int64_t shader_engine_id = 0;
-        for(uint64_t i = 0; (params.shader_engine_mask >> i) != 0; i++)
-            if((params.shader_engine_mask >> i) % 2 == 1) shader_engine_id = i;
+        std::vector<std::unique_ptr<hsa::SQTTBufferingPackets>> buffer_packets{};
 
-        auto buffer_packet = std::make_unique<rocprofiler::hsa::SQTTBufferingPackets>(
-            control_packet_copy->GetHandle(), shader_engine_id);
-        // Emit the optional buffer header first so consumers can prime state
-        // before the main payload arrives. The header is chunk_index 0; the
-        // producer thread continues the sequence from 1.
+        for(uint64_t i = 0; (params.shader_engine_mask >> i) != 0; i++)
+        {
+            if((params.shader_engine_mask >> i) % 2 == 1)
+            {
+                auto handle = control_packet_copy->GetHandle();
+                buffer_packets.emplace_back(std::make_unique<hsa::SQTTBufferingPackets>(handle, i));
+            }
+        }
 
         auto worker_data         = std::make_shared<triple_buffer_shared_data_t>();
         worker_data->queue       = queue.get();  // non-owning; ThreadTracerAgent owns queue
@@ -314,14 +318,14 @@ ThreadTracerAgent::start_thread_trace(std::shared_ptr<std::atomic<int>> _flag)
         for(size_t i = 0; i < worker_data->num_buffers; i++)
             worker_data->buffers[i].memory = worker_data->queue->cpu_buffers.at(i);
 
-        auto producer_data             = triple_buffer_producer_data_t{};
-        producer_data.producer_running = worker_flag;
-        producer_data.start_pkt_signal = shared_signal;
-        producer_data.control_packet   = std::move(control_packet_copy);
-        producer_data.copy_data_fn     = copy_data_sync;
-        producer_data.shared           = worker_data;
-        producer_data.buffer_packet    = std::move(buffer_packet);
-        producer_data.shader_engine_id = shader_engine_id;
+        auto producer_data               = triple_buffer_producer_data_t{};
+        producer_data.producer_running   = worker_flag;
+        producer_data.start_pkt_signal   = shared_signal;
+        producer_data.control_packet     = std::move(control_packet_copy);
+        producer_data.copy_data_fn       = copy_data_sync;
+        producer_data.shared             = worker_data;
+        producer_data.num_shader_engines = num_shader_engines;
+        producer_data.buffer_packets     = std::move(buffer_packets);
 
         // Other call sites (kfd, internal_threading) wrap each std::thread
         // creation in its own pre/post pair, so match that convention.
