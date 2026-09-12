@@ -929,16 +929,14 @@ public:
   /// Each call clears the previous error; a failed call does not halt the wavefront.
   /// Validation inside implemented instructions can still raise exceptions.
   util::Result execute_instruction(Instruction *inst, Wavefront &wf) {
+    assert(inst->execute && "instruction execution backend is not linked");
     wf.clear_instruction_execution_error();
-    execute_instruction_impl(inst, wf);
+    // The decoded instruction already selects its ISA execution callback.
+    inst->execute(*inst, &wf);
     return wf.instruction_execution_failed() ? util::Result::failure() : util::Result::success();
   }
 
 protected:
-  /// ISA-specific dispatch; keeping result handling in the inline public wrapper
-  /// lets the backend tail-call the instruction callback.
-  virtual void execute_instruction_impl(Instruction *inst, Wavefront &wf) = 0;
-
   ComputeUnitCore(std::string name, const Config &config, GpuMemory *memory, L2Cache *l2,
                   uint32_t wf_size);
 
@@ -1444,15 +1442,6 @@ protected:
 public:
   uint32_t vgpr_allocation_block_size() const override { return vgprs_per_block_; }
   uint32_t vgpr_storage_lane_count() const override { return Isa::WF_SIZE_MAX; }
-
-protected:
-  /// @brief Execute one instruction on the given wavefront.
-  ///
-  /// @brief Execute one instruction on the given wavefront via direct dispatch.
-  void execute_instruction_impl(Instruction *inst, Wavefront &wf) override {
-    assert(inst->execute && "instruction execution backend is not linked");
-    inst->execute(*inst, &wf);
-  }
 
 private:
   VgprFile vgpr_file_{"vgpr"};
