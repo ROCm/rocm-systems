@@ -20,6 +20,10 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
+#ifndef _GNU_SOURCE
+#    define _GNU_SOURCE 1  // for RTLD_NEXT
+#endif
+
 #include "lib/rocprofiler-sdk/ompt/ompt.hpp"
 #include "lib/common/logging.hpp"
 #include "lib/common/static_object.hpp"
@@ -32,8 +36,11 @@
 #include <rocprofiler-sdk/ompt/api_args.h>
 #include <rocprofiler-sdk/ompt/omp-tools.h>
 
+#include <dlfcn.h>
 #include <fmt/format.h>
 #include <cstdint>
+#include <cstdlib>
+#include <cstring>
 #include <iostream>
 
 namespace rocprofiler
@@ -247,7 +254,12 @@ rocprofiler_ompt_start_tool(unsigned int omp_version, const char* /*runtime_vers
 
     ::rocprofiler::ompt::omp_version_value.store(static_cast<uint64_t>(omp_version));
 
-    // don't check contexts here, client tool may not be initialized
+    // Initialize so client tool_init callbacks have registered their OMPT contexts
+    // before the runtime calls initialize() and arms the callbacks. Needed when a
+    // user OMPT tool hands the role back to us by calling this directly; harmless
+    // otherwise, since registration::initialize() is idempotent.
+    ::rocprofiler::registration::initialize();
+
     auto* _result = ::rocprofiler::ompt::get_start_tool_result();
 
     if(_result)
@@ -262,11 +274,51 @@ rocprofiler_ompt_start_tool(unsigned int omp_version, const char* /*runtime_vers
 ompt_start_tool_result_t*
 ompt_start_tool(unsigned int omp_version, const char* runtime_version) ROCPROFILER_PUBLIC_API;
 
+namespace
+{
+// RTLD_NEXT because the runtime binds only the first ompt_start_tool and would otherwise skip a
+// preloaded sibling. Returning NULL here leaves the runtime to do its own OMP_TOOL_LIBRARIES walk.
+ompt_start_tool_result_t*
+find_next_ompt_tool(unsigned int omp_version, const char* runtime_version)
+{
+    // never resurrect a tool the user disabled
+    if(const char* _omp_tool = ::getenv("OMP_TOOL");
+       _omp_tool != nullptr && ::strcmp(_omp_tool, "disabled") == 0)
+        return nullptr;
+
+    using ompt_start_tool_t = ompt_start_tool_result_t* (*) (unsigned int, const char*);
+
+    auto* _next = reinterpret_cast<ompt_start_tool_t>(::dlsym(RTLD_NEXT, "ompt_start_tool"));
+    if(_next == nullptr || _next == reinterpret_cast<ompt_start_tool_t>(&ompt_start_tool))
+        return nullptr;
+
+    ROCP_INFO << "rocprofiler-sdk OMPT deferring: invoking next ompt_start_tool via RTLD_NEXT";
+    return _next(omp_version, runtime_version);
+}
+}  // namespace
+
 ompt_start_tool_result_t*
 ompt_start_tool(unsigned int omp_version, const char* runtime_version)
 {
     ::rocprofiler::registration::init_logging();
+    // Initialize now (typically before main) so client tool_init callbacks have
+    // registered their contexts: the keep-or-defer decision below depends on them.
+    // Note this closes the configuration window for any later force_configure.
+    ROCP_INFO << "ompt_start_tool() invoked by the OpenMP runtime; triggering rocprofiler "
+                 "initialization";
     ::rocprofiler::registration::initialize();
-    return rocprofiler_ompt_start_tool(omp_version, runtime_version);
+
+    // Keep the OMPT tool role iff a client consumes OMPT, otherwise defer so a
+    // user OMPT tool (TAU/Score-P/...) can run while the SDK still provides its
+    // HIP/HSA/kernel tracing. Exactly one OMPT tool wins; there is no env var,
+    // a user just leaves the SDK's OMPT services unconfigured.
+    if(::rocprofiler::ompt::ompt_service_requested())
+    {
+        ROCP_INFO << "rocprofiler-sdk is the OMPT tool (a client requested OMPT services)";
+        return rocprofiler_ompt_start_tool(omp_version, runtime_version);
+    }
+
+    ROCP_INFO << "no rocprofiler client requested OMPT services; deferring the OMPT tool role";
+    return find_next_ompt_tool(omp_version, runtime_version);
 }
 }
