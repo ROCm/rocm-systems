@@ -2106,19 +2106,22 @@ ncclResult_t ncclLaunchPrepare(struct ncclComm* comm) {
       // secondary captureStream. Serialize graph launches by waiting on serialEvent via
       // hipEventWaitExternal, which HIP allows on the origin stream during capture.
       struct ncclStrongStream* ss = &comm->sharedRes->deviceStream;
-      bool firstCapture = !COMPILER_ATOMIC_LOAD(&ss->everCaptured, std::memory_order_relaxed);
-      COMPILER_ATOMIC_STORE(&ss->everCaptured, true, std::memory_order_relaxed);
-      if (firstCapture) {
+      if (!COMPILER_ATOMIC_LOAD(&ss->graphOriginCaptured, std::memory_order_relaxed)) {
         // Bootstrap: signal serialEvent on the live stream so the first graph's ExternalWait
-        // node can fire immediately. This keeps graph structure identical across all
-        // captures (ExternalWait always present), so hipGraphExecUpdate succeeds.
+        // node can fire immediately. The wait stays unconditional, so graph structure is identical
+        // across all captures (ExternalWait always present) and hipGraphExecUpdate succeeds.
+        // Latch after the record so a failed record is retried instead of suppressed for good.
         CUDACHECKGOTO(cudaEventRecord(ss->serialEvent, ss->liveStream), result, failure);
+        COMPILER_ATOMIC_STORE(&ss->graphOriginCaptured, true, std::memory_order_relaxed);
       }
+      // everCaptured still has to be set: ncclStrongStream{Acquire,Release} read it to interlock
+      // non-captured work with graphs when a comm sharing this sharedRes uses graphUsageMode=2.
+      COMPILER_ATOMIC_STORE(&ss->everCaptured, true, std::memory_order_relaxed);
       CUDACHECKGOTO(cudaStreamWaitEvent(launchStream, ss->serialEvent, hipEventWaitExternal), result, failure);
       deviceStream = launchStream;
     } else {
-      NCCLCHECKGOTO(ncclStrongStreamAcquire(planner->capturingGraph, &comm->sharedRes->deviceStream, /*concurrent=*/false,
-                                            &deviceStream),
+      NCCLCHECKGOTO(ncclStrongStreamAcquire(planner->capturingGraph, &comm->sharedRes->deviceStream,
+                                            /*concurrent=*/false, &deviceStream),
                     result, failure);
     }
 
@@ -2475,9 +2478,7 @@ ncclResult_t ncclLaunchFinish(struct ncclComm* comm) {
       }
     }
     if (!useLaunchStream) {
-      if (capturing || planner->numStreams != 1 || ncclParamLaunchOrderImplicit()) {
-        NCCLCHECK(ncclStrongStreamRelease(planner->capturingGraph, &comm->sharedRes->deviceStream, /*concurrent=*/false));
-      }
+      NCCLCHECK(ncclStrongStreamRelease(planner->capturingGraph, &comm->sharedRes->deviceStream, /*concurrent=*/false));
     } else {
       NCCLCHECK(ncclCudaGraphRecordEvent(planner->capturingGraph, comm->sharedRes->deviceStream.serialEvent,
                                          launchStream));

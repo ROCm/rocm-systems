@@ -2364,18 +2364,21 @@ protected:
             GTEST_SKIP() << "Requires 2+ ranks";
         }
 
+        MPIHelpers::TestLogAssertionContext logCtx(
+            MPIHelpers::makePerRankStderrAssertionOptions(getTestMpiRank()));
+
         ASSERT_MPI_EQ(ncclSuccess, createTestCommunicator());
 
-        ASSERT_TRUE(isCuMemEnabled()) << "NCCL_CUMEM_ENABLE must be set to 1";
-        ASSERT_TRUE(isWinEnabled()) << "NCCL_WIN_ENABLE must not be set to 0";
+        ASSERT_MPI_TRUE(isCuMemEnabled());
+        ASSERT_MPI_TRUE(isWinEnabled());
 
         using T = RegTestConfig::DefaultType;
         const size_t count = RegTestConfig::MEDIUM_COUNT;
 
         int rank = 0;
         int nRanks = 0;
-        ncclCommUserRank(getActiveCommunicator(), &rank);
-        ncclCommCount(getActiveCommunicator(), &nRanks);
+        ASSERT_MPI_EQ(ncclSuccess, ncclCommUserRank(getActiveCommunicator(), &rank));
+        ASSERT_MPI_EQ(ncclSuccess, ncclCommCount(getActiveCommunicator(), &nRanks));
 
         size_t sendCount = count;
         size_t recvCount = count;
@@ -2394,21 +2397,45 @@ protected:
         void* recvBuf = nullptr;
 
         ASSERT_MPI_EQ(ncclSuccess, ncclMemAlloc(&sendBuf, sendBytes));
+        auto sendBufGuard = makeHipMemBufferAutoGuard(sendBuf);
         ASSERT_MPI_EQ(ncclSuccess, ncclMemAlloc(&recvBuf, recvBytes));
+        auto recvBufGuard = makeHipMemBufferAutoGuard(recvBuf);
 
-        auto bufCleanup = makeScopeGuard([&]() {
-            if(sendBuf) (void)ncclMemFree(sendBuf);
-            if(recvBuf) (void)ncclMemFree(recvBuf);
-        });
-
-        initSendBuffer<T>(sendBuf, sendCount, rank);
+        ASSERT_MPI_EQ(
+            hipSuccess,
+            initializeBufferWithPattern<T>(
+                sendBuf,
+                sendCount,
+                [rank](size_t) { return static_cast<T>(static_cast<float>(rank + 1)); }));
 
         hipGraph_t graph = nullptr;
         hipGraphExec_t graphExec = nullptr;
         ncclWindow_t sendWin = nullptr;
         ncclWindow_t recvWin = nullptr;
 
-        ASSERT_MPI_EQ(hipSuccess, hipStreamBeginCapture(getActiveStream(), hipStreamCaptureModeThreadLocal));
+        bool captureActive = false;
+
+        auto windowCleanup = makeScopeGuard([&]() {
+            if(sendWin) (void)ncclCommWindowDeregister(getActiveCommunicator(), sendWin);
+            if(recvWin) (void)ncclCommWindowDeregister(getActiveCommunicator(), recvWin);
+        });
+
+        // Declared after windowCleanup so it unwinds first: an early return before
+        // hipStreamEndCapture must leave the stream idle, because the deregisters above cannot
+        // be issued into a capturing stream.
+        auto captureCleanup = makeScopeGuard([&]() {
+            if(captureActive)
+            {
+                hipGraph_t abandonedGraph = nullptr;
+                if(hipStreamEndCapture(getActiveStream(), &abandonedGraph) == hipSuccess && abandonedGraph)
+                    (void)hipGraphDestroy(abandonedGraph);
+            }
+        });
+
+        const hipError_t captureBeginStatus =
+            hipStreamBeginCapture(getActiveStream(), hipStreamCaptureModeThreadLocal);
+        captureActive = (captureBeginStatus == hipSuccess);
+        ASSERT_MPI_EQ(hipSuccess, captureBeginStatus);
 
         ASSERT_MPI_EQ(ncclSuccess, ncclCommWindowRegister(getActiveCommunicator(), sendBuf, sendBytes, &sendWin, NCCL_WIN_COLL_SYMMETRIC));
         ASSERT_MPI_EQ(ncclSuccess, ncclCommWindowRegister(getActiveCommunicator(), recvBuf, recvBytes, &recvWin, NCCL_WIN_COLL_SYMMETRIC));
@@ -2428,8 +2455,16 @@ protected:
             break;
         }
 
-        ASSERT_MPI_EQ(hipSuccess, hipStreamEndCapture(getActiveStream(), &graph));
+        const hipError_t captureEndStatus = hipStreamEndCapture(getActiveStream(), &graph);
+        if(captureEndStatus == hipSuccess) captureActive = false;
+        ASSERT_MPI_EQ(hipSuccess, captureEndStatus);
         ASSERT_MPI_NE(nullptr, graph);
+
+        // Guard the graph as soon as it exists; graphExec is null-checked until instantiated.
+        auto graphCleanup = makeScopeGuard([&]() {
+            if(graphExec) (void)hipGraphExecDestroy(graphExec);
+            if(graph) (void)hipGraphDestroy(graph);
+        });
 
         size_t numGraphNodes = 0;
         ASSERT_MPI_EQ(hipSuccess, hipGraphGetNodes(graph, nullptr, &numGraphNodes));
@@ -2437,15 +2472,6 @@ protected:
         TEST_INFO("GraphCapture_WindowRegister %s captured graph with %zu nodes", collectiveName(collective), numGraphNodes);
 
         ASSERT_MPI_EQ(hipSuccess, hipGraphInstantiate(&graphExec, graph, nullptr, nullptr, 0));
-
-        auto graphCleanup = makeScopeGuard([&]() {
-            if(graphExec) (void)hipGraphExecDestroy(graphExec);
-            if(graph) (void)hipGraphDestroy(graph);
-        });
-        auto windowCleanup = makeScopeGuard([&]() {
-            if(sendWin) (void)ncclCommWindowDeregister(getActiveCommunicator(), sendWin);
-            if(recvWin) (void)ncclCommWindowDeregister(getActiveCommunicator(), recvWin);
-        });
 
         constexpr int kGraphLaunches = 2;
         for(int launch = 0; launch < kGraphLaunches; ++launch)
@@ -2477,7 +2503,7 @@ protected:
             comm->symmetricSupport && comm->isAllDirectNvlink;
 
         bool expectSymmetric = symmetricRuntimeAvailable;
-        if(comm->nNodes > 1)
+        if(comm->devrState.lsaSize < comm->nRanks)
         {
             switch(collective)
             {
@@ -2497,13 +2523,13 @@ protected:
             }
         }
 
-        const REGLogChecker checker = getLogChecker();
+        const REGLogChecker checker(logCtx.readPerRankStderrLog());
         const bool sawSymmetric = checker.usedSymmetricCollective(collectiveName(collective));
         const bool sawLegacy = checker.usedLegacyCollective(collectiveName(collective));
-        TEST_INFO("%s path: nNodes=%d symmetricSupport=%d isAllDirectNvlink=%d "
+        TEST_INFO("%s path: nNodes=%d lsaSize=%d nRanks=%d symmetricSupport=%d isAllDirectNvlink=%d "
                   "hasLsaMultimem=%d expected=%s observedSymmetric=%d observedLegacy=%d",
-                  collectiveName(collective), comm->nNodes, comm->symmetricSupport,
-                  static_cast<int>(comm->isAllDirectNvlink),
+                  collectiveName(collective), comm->nNodes, comm->devrState.lsaSize, comm->nRanks,
+                  comm->symmetricSupport, static_cast<int>(comm->isAllDirectNvlink),
                   static_cast<int>(comm->symkState.hasLsaMultimem),
                   expectSymmetric ? "symmetric" : "legacy", static_cast<int>(sawSymmetric),
                   static_cast<int>(sawLegacy));
@@ -2533,10 +2559,15 @@ protected:
                       collectiveName(collective));
         }
 
-        ASSERT_MPI_EQ(ncclSuccess,ncclCommWindowDeregister(getActiveCommunicator(), sendWin));
-        ASSERT_MPI_EQ(ncclSuccess, ncclCommWindowDeregister(getActiveCommunicator(), recvWin));
+        // Hand each window off before deregistering it: ASSERT_MPI_EQ returns on every rank when
+        // any one rank fails, so a rank that already succeeded must not leave the handle set for
+        // windowCleanup to deregister a second time.
+        ncclWindow_t sendWinToRelease = sendWin;
         sendWin = nullptr;
+        ASSERT_MPI_EQ(ncclSuccess, ncclCommWindowDeregister(getActiveCommunicator(), sendWinToRelease));
+        ncclWindow_t recvWinToRelease = recvWin;
         recvWin = nullptr;
+        ASSERT_MPI_EQ(ncclSuccess, ncclCommWindowDeregister(getActiveCommunicator(), recvWinToRelease));
 
         TEST_INFO("GraphCapture_WindowRegister %s completed via %s path",
                   collectiveName(collective), expectSymmetric ? "symmetric" : "legacy fallback");

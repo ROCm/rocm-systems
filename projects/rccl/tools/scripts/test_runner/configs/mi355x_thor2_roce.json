@@ -2165,7 +2165,8 @@
       "env_variables": {
         "NCCL_DEBUG": "INFO",
         "NCCL_DEBUG_SUBSYS": "INIT,TUNING",
-        "NCCL_CUMEM_ENABLE": "1"
+        "NCCL_CUMEM_ENABLE": "1",
+        "RCCL_MPI_LOG_ALL_RANKS": "1"
       },
       "tests": [
         {

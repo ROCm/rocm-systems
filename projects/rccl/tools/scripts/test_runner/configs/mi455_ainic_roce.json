@@ -2132,7 +2132,7 @@
         },
         {
           "name": "GraphCapture_WindowRegister_SymmetricAllGather_MultiNode",
-          "description": "Graph-captured symmetric AllGather on two nodes; expects fallback on gfx950 (no LSA multimem)",
+          "description": "Graph-captured symmetric AllGather on two nodes; expects fallback when LSA store multimem is unavailable",
           "test_filter": "GraphCapture_WindowRegister.SymmetricAllGather",
           "env_variables": {
             "NCCL_CUMEM_ENABLE": "1"
