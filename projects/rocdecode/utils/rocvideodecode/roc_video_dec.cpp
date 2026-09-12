@@ -21,6 +21,7 @@ THE SOFTWARE.
 */
 
 #include "roc_video_dec.h"
+#include "surface_format_utils.h"
 
 RocVideoDecoder::RocVideoDecoder(int device_id, OutputSurfaceMemoryType out_mem_type, rocDecVideoCodec codec, bool force_zero_latency,
               const Rect *p_crop_rect, bool extract_user_sei_Message, uint32_t disp_delay, int max_width, int max_height, uint32_t clk_rate, bool skip_init) :
@@ -306,12 +307,7 @@ int RocVideoDecoder::HandleVideoSequence(RocdecVideoFormat *p_video_format) {
     byte_per_pixel_ = bitdepth_minus_8_ > 0 ? 2 : 1;
 
     // Set the output surface format same as chroma format
-    if (video_chroma_format_ == rocDecVideoChromaFormat_420 || rocDecVideoChromaFormat_Monochrome)
-        video_surface_format_ = bitdepth_minus_8_ ? rocDecVideoSurfaceFormat_P016 : rocDecVideoSurfaceFormat_NV12;
-    else if (video_chroma_format_ == rocDecVideoChromaFormat_444)
-        video_surface_format_ = bitdepth_minus_8_ ? rocDecVideoSurfaceFormat_YUV444_16Bit : rocDecVideoSurfaceFormat_YUV444;
-    else if (video_chroma_format_ == rocDecVideoChromaFormat_422)
-        video_surface_format_ = bitdepth_minus_8_ ? rocDecVideoSurfaceFormat_YUV422_16Bit : rocDecVideoSurfaceFormat_YUV422;
+    video_surface_format_ = SelectSurfaceFormat(video_chroma_format_, bitdepth_minus_8_);
 
     // Check if output format supported. If not, check fallback options
     if (!(decode_caps.output_format_mask & (1 << video_surface_format_))){
@@ -550,12 +546,7 @@ int RocVideoDecoder::ReconfigureDecoder(RocdecVideoFormat *p_video_format) {
         byte_per_pixel_ = bitdepth_minus_8_ > 0 ? 2 : 1;
     
         // Set the output surface format same as chroma format
-        if (video_chroma_format_ == rocDecVideoChromaFormat_420 || video_chroma_format_ == rocDecVideoChromaFormat_Monochrome)
-            video_surface_format_ = bitdepth_minus_8_ ? rocDecVideoSurfaceFormat_P016 : rocDecVideoSurfaceFormat_NV12;
-        else if (video_chroma_format_ == rocDecVideoChromaFormat_444)
-            video_surface_format_ = bitdepth_minus_8_ ? rocDecVideoSurfaceFormat_YUV444_16Bit : rocDecVideoSurfaceFormat_YUV444;
-        else if (video_chroma_format_ == rocDecVideoChromaFormat_422)
-            video_surface_format_ = bitdepth_minus_8_ ? rocDecVideoSurfaceFormat_YUV422_16Bit : rocDecVideoSurfaceFormat_YUV422;
+        video_surface_format_ = SelectSurfaceFormat(video_chroma_format_, bitdepth_minus_8_);
     }
 
     num_decode_surfaces_ = p_video_format->min_num_decode_surfaces;

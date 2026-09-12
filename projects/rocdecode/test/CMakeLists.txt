@@ -396,3 +396,17 @@ else()
     message("-- ${Yellow}${PROJECT_NAME} FFmpeg NOT found. rocdecode tests requiring FFmpeg excluded")
   endif()
 endif(FFMPEG_FOUND AND ENABLE_EXTENDED_TESTS)
+
+# ##############################################################################
+# CPU-only unit tests (no GPU / HIP). Host-only; compiles the production
+# surface_format_utils.h in standalone mode. Skipped if GTest is unavailable.
+# ##############################################################################
+option(ROCDECODE_BUILD_UNIT_TESTS "Build CPU-only unit tests (no GPU/HIP)" ON)
+if(ROCDECODE_BUILD_UNIT_TESTS)
+  find_package(GTest QUIET)
+  if(GTest_FOUND)
+    add_subdirectory(unit)
+  else()
+    message("-- ${Yellow}GTest NOT found. rocdecode CPU-only unit tests excluded${ColourReset}")
+  endif()
+endif()
