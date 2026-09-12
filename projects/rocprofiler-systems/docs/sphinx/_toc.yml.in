@@ -49,6 +49,8 @@ subtrees:
           title: VCN and JPEG sampling and tracing
         - file: how-to/xgmi-pcie-sdma-sampling.rst
           title: XGMI, PCIe, and SDMA metrics monitoring
+        - file: how-to/hipfile-telemetry.rst
+          title: hipFile GPU-direct storage I/O telemetry
     - file: how-to/understanding-rocprof-sys-output.rst
       title: Understanding the output
     - file: how-to/using-preset-profiles.rst
