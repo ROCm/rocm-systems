@@ -152,11 +152,12 @@ void InvokeParseArgs(std::vector<std::string>& storage) {
 }
 
 // The catch must sit inside CaptureLog: gtest has a single stderr capture slot
-// and an exception escaping the body would leave it open for the next test.
-ParseArgsOutcome RunParseArgs(const std::vector<std::string>& args) {
+// and an exception escaping the body would leave it open for the next test. `prog`
+// becomes argv[0]; a test that cares what argv[0] is (printUsage's echo) passes its own.
+ParseArgsOutcome RunParseArgs(const std::vector<std::string>& args, const char* prog = "rccl-ras-client") {
   ParseArgsOutcome out;
   out.argvStorage.reserve(args.size() + 1);
-  out.argvStorage.emplace_back("rccl-ras-client");
+  out.argvStorage.emplace_back(prog);
   out.argvStorage.insert(out.argvStorage.end(), args.begin(), args.end());
   CaptureLog([&]() {
     try {
@@ -538,7 +539,8 @@ class RecordingReader {
  public:
   RecordingReader(const char* base, std::vector<MicroReadStep> steps) : base_(base), steps_(std::move(steps)) {}
 
-  ssize_t operator()(int, void* buf, size_t count) {
+  ssize_t operator()(int fd, void* buf, size_t count) {
+    g_readFds.push_back(fd);
     requests.push_back(ReadRequest{static_cast<const char*>(buf) - base_, count});
     if (count == 0 || pos_ >= steps_.size()) return 0;
     const MicroReadStep& step = steps_[pos_++];
@@ -925,21 +927,6 @@ namespace {
 // so a distinctive value separates "the unit printed it" from "it was there".
 constexpr const char kUsageProg[] = "ras-client-argv0-probe";
 
-// Runs parseArgs over a caller-supplied argv (argv[0] included) and records both
-// the status the default exit seam threw and everything written to stderr.
-ParseArgsOutcome RunParseArgv(std::initializer_list<const char*> args) {
-  ParseArgsOutcome out;
-  out.argvStorage.assign(args.begin(), args.end());
-  CaptureLog([&]() {
-    try {
-      InvokeParseArgs(out.argvStorage);
-    } catch (const MicroExit& e) {
-      out.exitStatus = e.status;
-    }
-  });
-  return out;
-}
-
 // Every global parseArgs can write, still at its compiled-in default. The exiting
 // arms must reach exit without touching any of them.
 void ExpectAllGlobalsAtDefault() {
@@ -973,7 +960,7 @@ TEST_F(RasClientMicrotest, PrintUsage_CalledDirectly_TouchesNoParseStateAndDoesN
 
 // --help must exit before any option after it is looked at.
 TEST_F(RasClientMicrotest, ParseArgsHelp_FollowedByOtherOptions_ExitsBeforeApplyingThem) {
-  const ParseArgsOutcome out = RunParseArgv({kUsageProg, "--help", "-v", "-p", "31337"});
+  const ParseArgsOutcome out = RunParseArgs({"--help", "-v", "-p", "31337"}, kUsageProg);
 
   EXPECT_EQ(0, out.exitStatus);
   EXPECT_FALSE(verbose);
@@ -982,7 +969,7 @@ TEST_F(RasClientMicrotest, ParseArgsHelp_FollowedByOtherOptions_ExitsBeforeApply
 
 // --help is no_argument: an earlier option's value must not be swallowed by it.
 TEST_F(RasClientMicrotest, ParseArgsHelp_AfterAnAppliedOption_StillExitsZeroWithUsage) {
-  const ParseArgsOutcome out = RunParseArgv({kUsageProg, "-p", "31337", "--help"});
+  const ParseArgsOutcome out = RunParseArgs({"-p", "31337", "--help"}, kUsageProg);
 
   EXPECT_EQ(0, out.exitStatus);
   EXPECT_STREQ("31337", port);
@@ -993,7 +980,7 @@ TEST_F(RasClientMicrotest, ParseArgsHelp_AfterAnAppliedOption_StillExitsZeroWith
 // --version exits before later options are applied, and 'r' is unreachable via
 // any short option, so "-r" is an unknown option instead.
 TEST_F(RasClientMicrotest, ParseArgsVersion_FollowedByOtherOptions_ExitsBeforeApplyingThem) {
-  const ParseArgsOutcome out = RunParseArgv({kUsageProg, "--version", "-v"});
+  const ParseArgsOutcome out = RunParseArgs({"--version", "-v"}, kUsageProg);
 
   EXPECT_EQ(0, out.exitStatus);
   EXPECT_FALSE(verbose);
@@ -1006,7 +993,7 @@ TEST_F(RasClientMicrotest, ParseArgsVersion_FollowedByOtherOptions_ExitsBeforeAp
 // An applied option before the bad one proves default: aborts the loop rather
 // than the loop never having run.
 TEST_F(RasClientMicrotest, ParseArgsDefault_AfterAnAppliedOption_ExitsOneAndStopsParsing) {
-  const ParseArgsOutcome out = RunParseArgv({kUsageProg, "-v", "-z", "-p", "31337"});
+  const ParseArgsOutcome out = RunParseArgs({"-v", "-z", "-p", "31337"}, kUsageProg);
 
   EXPECT_EQ(1, out.exitStatus);
   EXPECT_TRUE(verbose);
@@ -1024,7 +1011,7 @@ TEST_F(RasClientMicrotest, ParseArgsExitingArms_ExitZeroInputs_LeaveEveryGlobalA
   for (const char* opt : {"--help", "--hel", "--version"}) {
     ResetLibcFakes();
     ResetRasClientGlobals();
-    const ParseArgsOutcome out = RunParseArgv({kUsageProg, opt});
+    const ParseArgsOutcome out = RunParseArgs({opt}, kUsageProg);
 
     EXPECT_EQ(0, out.exitStatus) << opt;
     ExpectAllGlobalsAtDefault();
@@ -1039,7 +1026,7 @@ TEST_F(RasClientMicrotest, ParseArgsExitingArms_ExitOneInputs_LeaveEveryGlobalAt
   for (const char* opt : {"-z", "--bogus", "--ver", "-r", "-p", "--port"}) {
     ResetLibcFakes();
     ResetRasClientGlobals();
-    const ParseArgsOutcome out = RunParseArgv({kUsageProg, opt});
+    const ParseArgsOutcome out = RunParseArgs({opt}, kUsageProg);
 
     EXPECT_EQ(1, out.exitStatus) << opt;
     ExpectAllGlobalsAtDefault();
@@ -2995,7 +2982,7 @@ TEST_F(RasClientMicrotest, RasClientMain_FinalCloseFails_ReportsPerrorAndReturns
 // The optstring's "p:" carries the short spelling's arity; "p" alone would make
 // a trailing -p a valid no-argument option and skip the default: exit entirely.
 TEST_F(RasClientMicrotest, ParseArgsPort_ShortFormMissingArgument_ExitsOneWithUsage) {
-  const ParseArgsOutcome out = RunParseArgv({kUsageProg, "-v", "-p"});
+  const ParseArgsOutcome out = RunParseArgs({"-v", "-p"}, kUsageProg);
 
   EXPECT_EQ(1, out.exitStatus);
   ASSERT_NE(nullptr, port);
