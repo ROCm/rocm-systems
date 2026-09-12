@@ -988,6 +988,60 @@ rdc_status_t RdcMetricFetcherImpl::fetch_gpu_field_(uint32_t gpu_index, rdc_fiel
       }
       break;
     }
+    case RDC_FI_GPU_CU_OCCUPANCY:
+    case RDC_FI_GPU_CU_OCCUPANCY_PERCENT: {
+      // Unlike gfx_activity, CU occupancy is only exposed per process, so the
+      // per-GPU value is the sum over every process holding this device.
+      //
+      // Two caveats worth knowing before acting on this field. It is an
+      // instantaneous wave-count snapshot taken by KFD at read time with no
+      // averaging, so a duty-cycled workload reads low unless sampled fast.
+      // And on gfx942 the kernel derives it from XCC0 alone and scales by the
+      // XCC count, so it is exact only when workgroups divide evenly across
+      // XCCs and biased high otherwise.
+      value->type = INTEGER;
+
+      uint32_t num_proc = 0;
+      value->status = amdsmi_get_gpu_process_list(processor_handle, &num_proc, nullptr);
+      if (value->status != AMDSMI_STATUS_SUCCESS) {
+        break;
+      }
+
+      int64_t cu_sum = 0;
+      if (num_proc > 0) {
+        std::vector<amdsmi_proc_info_t> procs(num_proc);
+        value->status = amdsmi_get_gpu_process_list(processor_handle, &num_proc, procs.data());
+        if (value->status != AMDSMI_STATUS_SUCCESS) {
+          break;
+        }
+        // num_proc is updated to what was actually written; do not trust the
+        // original request size.
+        for (uint32_t i = 0; i < num_proc && i < procs.size(); ++i) {
+          // KFD reports 0xFFFFFFFF when the stats file is absent for a device.
+          if (procs[i].cu_occupancy == UINT32_MAX) {
+            continue;
+          }
+          cu_sum += static_cast<int64_t>(procs[i].cu_occupancy);
+        }
+      }
+
+      if (field_id == RDC_FI_GPU_CU_OCCUPANCY) {
+        value->value.l_int = cu_sum;
+        break;
+      }
+
+      amdsmi_asic_info_t asic_info = {};
+      value->status = amdsmi_get_gpu_asic_info(processor_handle, &asic_info);
+      if (value->status != AMDSMI_STATUS_SUCCESS) {
+        break;
+      }
+      if (asic_info.num_of_compute_units == 0xFFFFFFFF || asic_info.num_of_compute_units == 0) {
+        value->status = AMDSMI_STATUS_NOT_SUPPORTED;
+        break;
+      }
+      value->value.l_int = (cu_sum * 100) / static_cast<int64_t>(asic_info.num_of_compute_units);
+      break;
+    }
     case RDC_FI_DEV_NAME: {
       // source values from asic_info
       amdsmi_asic_info_t asic_info;

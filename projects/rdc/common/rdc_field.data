@@ -93,6 +93,8 @@ FLD_DESC_ENT(RDC_FI_GPU_GTT_FREE,        "Free GTT memory in bytes",            
 FLD_DESC_ENT(RDC_FI_GPU_GFX_BUSY_INST,   "Instantaneous GFX busy percentage",           "GFX_BUSY_INST",    true)
 FLD_DESC_ENT(RDC_FI_GPU_VCN_BUSY_INST,   "Instantaneous VCN busy percentage",           "VCN_BUSY_INST",    true)
 FLD_DESC_ENT(RDC_FI_GPU_JPEG_BUSY_INST,  "Instantaneous JPEG busy percentage",          "JPEG_BUSY_INST",   true)
+FLD_DESC_ENT(RDC_FI_GPU_CU_OCCUPANCY,    "Compute units occupied by all processes",     "CU_OCCUPANCY",     true)
+FLD_DESC_ENT(RDC_FI_GPU_CU_OCCUPANCY_PERCENT, "Percent of compute units occupied",      "CU_OCCUPANCY_PERCENT", true)
 FLD_DESC_ENT(RDC_FI_GPU_PAGE_RETRIED,    "Retried page of the GPU instance",            "GPU_PAGE_RETRIED", true)
 
 // ECC totals
