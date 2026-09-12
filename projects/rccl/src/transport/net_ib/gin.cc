@@ -89,9 +89,11 @@ ncclResult_t ncclGinIbGdakiInitOnce() {
 ncclResult_t ncclGinIbInitType(void** ctx, uint64_t commId, ncclDebugLogger_t logFunction, int type) {
   // Anvil-SDMA does not use the IB RMA proxy. commAlloc still walks internal RMA
   // plugins, and a second ibv_get_device_list after NET/IB-CAST loaded providers
-  // SIGSEGVs on some MI455 rdma-core stacks (ionic / bng_re).
-  if (type == (int)NCCL_NET_DEVICE_GIN_ANVIL_SDMA) {
-    INFO(NCCL_INIT | NCCL_NET, "RMA/IB: skip verbs init for Anvil-SDMA (NCCL_GIN_TYPE=%d)", type);
+  // SIGSEGVs on some MI455 rdma-core stacks (ionic / bng_re). NCCL_GIN_TYPE
+  // defaults to -1, so skip for unset as well as Anvil-SDMA (6). GDAKI still
+  // initializes verbs via ncclGinIbGdakiInit.
+  if (type < 0 || type == (int)NCCL_NET_DEVICE_GIN_ANVIL_SDMA) {
+    INFO(NCCL_INIT | NCCL_NET, "RMA/IB: skip verbs init (NCCL_GIN_TYPE=%d)", type);
     return ncclInternalError;
   }
   NCCLCHECK(ncclIbInitDevices(logFunction, nullptr));

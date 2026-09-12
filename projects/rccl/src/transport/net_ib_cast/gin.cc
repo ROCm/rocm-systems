@@ -89,8 +89,9 @@ extern ncclGin_t IbCastGinIbGdaki;
 // IB-CAST is provided generically by ncclGinProxy layered on top of the RMA
 // backend, so there is no bespoke IB-CAST GIN proxy vtable anymore.
 ncclResult_t IbCastGinIbInitType(void** ctx, uint64_t commId, ncclDebugLogger_t logFunction, int type) {
-  if (type == (int)NCCL_NET_DEVICE_GIN_ANVIL_SDMA) {
-    INFO(NCCL_INIT | NCCL_NET, "RMA/IB-CAST: skip verbs init for Anvil-SDMA (NCCL_GIN_TYPE=%d)", type);
+  // Same skip as net_ib/gin.cc: unset NCCL_GIN_TYPE (-1) still walks RMA_IB_PROXY.
+  if (type < 0 || type == (int)NCCL_NET_DEVICE_GIN_ANVIL_SDMA) {
+    INFO(NCCL_INIT | NCCL_NET, "RMA/IB-CAST: skip verbs init (NCCL_GIN_TYPE=%d)", type);
     return ncclInternalError;
   }
   NCCLCHECK(IbCastInitDevices(logFunction, nullptr));
