@@ -247,9 +247,15 @@ jobs:
         include:
           - { family: gfx90a, runner: "${{ needs.ci_config.outputs.gfx90a_runner }}" }
           # The T3 tier needs two visible devices. There is no 2-GPU pool, so
-          # gfx942 and gfx950 use the 8-GPU machines and select two; every other
-          # family is 1-GPU only and skips T3.
-          - { family: gfx94x, runner: "linux-gfx942-8gpu-ossci-rocm", devices: "0,1" }
+          # gfx950 uses an 8-GPU machine and selects two; every other family is
+          # 1-GPU only and skips T3.
+          #
+          # gfx94x does not join it there: linux-gfx942-8gpu-ossci-rocm exposes
+          # /dev/kfd and /dev/dri only to a job with a container spec (see the
+          # RCCL workflows), so a direct job on it finds no agent at all and
+          # every workload fails hipSetDevice with hipErrorNoDevice. Use the
+          # resolved 1-GPU runner and leave the two-device tier to gfx950.
+          - { family: gfx94x, runner: "${{ needs.ci_config.outputs.gfx94x_runner }}" }
           - { family: gfx950, runner: "linux-gfx950-8gpu-ccs-ossci-rocm", devices: "0,1" }
           - { family: gfx103x, runner: "${{ needs.ci_config.outputs.gfx103x_runner }}" }
           - { family: gfx110x, runner: "${{ needs.ci_config.outputs.gfx110x_runner }}" }
