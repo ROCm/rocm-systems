@@ -505,10 +505,32 @@ static ncclResult_t ginAnvilCheckSignalConnectivity(ginAnvilGinCtx* ctx, void* l
     WARN("GIN anvil-sdma: conn-check hipMalloc failed (rank %d)", rank);
     setupState = kSetupFailed;
   }
+  // Conn-check collectives must use the LSA team (lsaRankList/lsaSelf/lsaSize),
+  // not the GIN team's ctx->rank/nRanks on comm->bootstrap. Under
+  // NCCL_GIN_CONNECTION_RAIL those spaces differ: bootstrapAllGather writes
+  // comm->nRanks entries and bootstrapBarrier addresses world ranks 0..nRanks-1.
+  if (devr->lsaRankList == nullptr || devr->lsaSelf < 0 || devr->lsaSelf >= nRanks) {
+    WARN("GIN anvil-sdma: conn-check setup has invalid LSA team (rank %d, lsaSelf=%d, lsaRankList=%p)",
+         rank, devr->lsaSelf, (void*)devr->lsaRankList);
+    ret = ncclSystemError;
+    goto cleanup;
+  }
+
+  {
+  const int lsaTeamRank = devr->lsaSelf;
+  auto lsaAllgatherInts = [&](int* buf) -> int {
+    return (bootstrapIntraNodeAllGather(comm->bootstrap, devr->lsaRankList, lsaTeamRank, nRanks, buf,
+                                        sizeof(int)) == ncclSuccess)
+               ? 0
+               : -1;
+  };
+  auto lsaBarrier = [&](int tag) -> ncclResult_t {
+    return bootstrapIntraNodeBarrier(comm->bootstrap, devr->lsaRankList, lsaTeamRank, nRanks, tag);
+  };
 
   std::fill_n(gathered, nRanks, -1);
-  gathered[rank] = setupState;
-  if (ginAnvilBootstrapAllgather(comm->bootstrap, gathered, sizeof(int)) != 0) {
+  gathered[lsaTeamRank] = setupState;
+  if (lsaAllgatherInts(gathered) != 0) {
     WARN("GIN anvil-sdma: conn-check setup allgather failed (rank %d)", rank);
     ret = ncclSystemError;
     goto cleanup;
@@ -561,7 +583,7 @@ static ncclResult_t ginAnvilCheckSignalConnectivity(ginAnvilGinCtx* ctx, void* l
       failAt(kConnCheckWrite);
     }
 
-    ret = bootstrapBarrier(comm->bootstrap, rank, nRanks, 0x51611);
+    ret = lsaBarrier(0x51611);
     if (ret != ncclSuccess) {
       WARN("GIN anvil-sdma: conn-check step '%s' failed (rank %d, attempt %d/%d)",
            ginAnvilConnCheckStepName(kConnCheckBarrierAfterWrite), rank, attempt + 1, MAX_ATTEMPTS);
@@ -590,8 +612,8 @@ static ncclResult_t ginAnvilCheckSignalConnectivity(ginAnvilGinCtx* ctx, void* l
 
     if (localFail) localMissing = nRanks;
     std::fill_n(gathered, nRanks, -1);
-    gathered[rank] = localMissing;
-    if (ginAnvilBootstrapAllgather(comm->bootstrap, gathered, sizeof(int)) != 0) {
+    gathered[lsaTeamRank] = localMissing;
+    if (lsaAllgatherInts(gathered) != 0) {
       WARN("GIN anvil-sdma: conn-check step '%s' failed (rank %d, attempt %d/%d)",
            ginAnvilConnCheckStepName(kConnCheckAllgather), rank, attempt + 1, MAX_ATTEMPTS);
       ret = ncclSystemError;
@@ -603,7 +625,7 @@ static ncclResult_t ginAnvilCheckSignalConnectivity(ginAnvilGinCtx* ctx, void* l
     }
     int globalMissing = 0;
     for (int r = 0; r < nRanks; r++) globalMissing += gathered[r];
-    ret = bootstrapBarrier(comm->bootstrap, rank, nRanks, 0x51612);
+    ret = lsaBarrier(0x51612);
     if (ret != ncclSuccess) {
       WARN("GIN anvil-sdma: conn-check step '%s' failed (rank %d, attempt %d/%d)",
            ginAnvilConnCheckStepName(kConnCheckBarrierAfterAllgather), rank, attempt + 1, MAX_ATTEMPTS);
@@ -634,6 +656,7 @@ static ncclResult_t ginAnvilCheckSignalConnectivity(ginAnvilGinCtx* ctx, void* l
     ret = ncclSystemError;
   } else {
     INFO(NCCL_INIT, "GIN anvil-sdma: LSA signal connectivity OK (rank %d, nRanks %d)", rank, nRanks);
+  }
   }
 
 cleanup:
