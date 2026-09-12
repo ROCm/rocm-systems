@@ -165,6 +165,73 @@ __CG_STATIC_QUALIFIER__ void dispatch_async_memcpy(const TyGroup& group, TyElem*
 }
 #endif
 
+#if __has_builtin(__builtin_amdgcn_load_to_lds)
+// LDS DMA does not write to the per-lane address it is handed: the destination is a wave uniform
+// base and the hardware adds lane_id * 4. So the copy has to be partitioned by rank stride, which
+// puts consecutive lanes on consecutive dwords, rather than by the contiguous per-thread chunks
+// dispatch_async_memcpy uses. That also requires the group's ranks to be contiguous within a wave,
+// which holds for a thread_block but not for a tile or a coalesced group, and it restricts the
+// transfer to a dword: narrower transfers keep the four byte lane stride and cannot pack.
+template <typename TyGroup> struct can_group_use_lds_dma : public std::false_type {};
+template <> struct can_group_use_lds_dma<cooperative_groups::thread_block>
+    : public std::true_type {};
+
+template <class TyGroup, typename TyElem,
+          typename std::enable_if<!details::can_group_use_lds_dma<TyGroup>{}, bool>::type = true>
+__CG_STATIC_QUALIFIER__ bool dispatch_lds_dma_memcpy(const TyGroup&, TyElem* __restrict__,
+                                                     const TyElem* __restrict__, const size_t) {
+  return false;
+}
+
+template <class TyGroup, typename TyElem,
+          typename std::enable_if<details::can_group_use_lds_dma<TyGroup>{}, bool>::type = true>
+__CG_STATIC_QUALIFIER__ bool dispatch_lds_dma_memcpy(const TyGroup& group,
+                                                     TyElem* __restrict__ dst,
+                                                     const TyElem* __restrict__ src,
+                                                     const size_t count) {
+  if (count == 0) {
+    return true;
+  }
+
+  // LDS DMA only moves global -> LDS.
+  if (!__builtin_amdgcn_is_shared((const __attribute__((address_space(0))) void*)dst) ||
+      __builtin_amdgcn_is_shared((const __attribute__((address_space(0))) void*)src)) {
+    return false;
+  }
+
+  // Callers reach this only for element types aligned to at least a dword, so every dword
+  // transfer below is naturally aligned.
+  char* c_dst = (char*)dst;
+  const char* c_src = (const char*)src;
+
+  const size_t ndwords = count / 4;
+  const unsigned int num_threads = group.num_threads();
+  const unsigned int rank = group.thread_rank();
+  const unsigned int lane = __builtin_amdgcn_mbcnt_hi(~0u, __builtin_amdgcn_mbcnt_lo(~0u, 0u));
+  const unsigned int wave_first_rank = rank - lane;
+
+  // base_idx is uniform across the wave, so it can be handed to the hardware as the destination
+  // base while each lane supplies its own source address.
+  for (size_t base_idx = wave_first_rank; base_idx < ndwords; base_idx += num_threads) {
+    const size_t idx = base_idx + lane;
+    if (idx < ndwords) {
+      __builtin_amdgcn_load_to_lds((__attribute__((address_space(1))) int*)(c_src + idx * 4),
+                                   (__attribute__((address_space(3))) int*)(c_dst + base_idx * 4),
+                                   4 /* size */, 0 /* offset */, 0 /* cache policy */);
+    }
+  }
+
+  // At most three bytes cannot fill a dword, so one thread stores them without LDS DMA.
+  if (rank == 0) {
+    for (size_t i = ndwords * 4; i < count; i++) {
+      c_dst[i] = c_src[i];
+    }
+  }
+
+  return true;
+}
+#endif
+
 // Traditional Copy used when memcpy_async builtins are unavailable or not invocable on the target.
 // Partition the memory into segments which each thread copies a portion of, similar to the
 // accelerated copy.
@@ -208,12 +275,20 @@ __CG_STATIC_QUALIFIER__ void memcpy_async_bytes(const TyGroup& group, TyElem* __
       __builtin_amdgcn_is_invocable(__builtin_amdgcn_global_load_async_to_lds_b128) &&
       src_is_shared != dst_is_shared) {
     details::dispatch_async_memcpy(group, dst, src, count);
-  } else {
-    traditional_memcpy_bytes(group, dst, src, count);
+    return;
   }
-#else
-  traditional_memcpy_bytes(group, dst, src, count);
 #endif
+#if __has_builtin(__builtin_amdgcn_load_to_lds)
+  // Targets without the async builtins can still move global->LDS without staging the data
+  // through the VGPRs, which the traditional copy below cannot avoid. LDS DMA transfers a dword
+  // per lane, so it is only used for element types that guarantee dword alignment; Hint is a
+  // constant, which keeps the unused path out of the generated code.
+  if ((Hint % 4) == 0 && __builtin_amdgcn_is_invocable(__builtin_amdgcn_load_to_lds) &&
+      details::dispatch_lds_dma_memcpy(group, dst, src, count)) {
+    return;
+  }
+#endif
+  traditional_memcpy_bytes(group, dst, src, count);
 }
 }  // namespace details
 
