@@ -1994,6 +1994,37 @@ NCCL_PARAM(GraphStreamOrdering, "GRAPH_STREAM_ORDERING", NCCL_CONFIG_UNDEF_INT);
 // sentinel. See ncclComm::lastStreamTag.
 static inline uintptr_t ncclStreamTag(hipStream_t s) { return (uintptr_t)s + 1; }
 
+ncclResult_t rcclAddonLaunchBegin(struct ncclComm* comm, cudaStream_t stream, int* savedDev) {
+  *savedDev = -1;
+
+  CUDACHECK(hipGetDevice(savedDev));
+  if (*savedDev != comm->cudaDev) {
+    CUDACHECK(hipSetDevice(comm->cudaDev));
+  }
+
+  if (comm->lastStreamTag != 0 && comm->lastStreamTag != ncclStreamTag(stream)) {
+    CUDACHECK(hipStreamWaitEvent(stream, comm->doneEvent, 0));
+  }
+
+  return ncclSuccess;
+}
+
+ncclResult_t rcclAddonLaunchEnd(struct ncclComm* comm, cudaStream_t stream, int savedDev,
+                                ncclResult_t launchRes) {
+  ncclResult_t result = launchRes;
+
+  if (result == ncclSuccess) {
+    CUDACHECKGOTO(hipEventRecord(comm->doneEvent, stream), result, restore);
+    comm->lastStreamTag = ncclStreamTag(stream);
+  }
+
+restore:
+  if (savedDev != -1 && savedDev != comm->cudaDev) {
+    CUDACHECK(hipSetDevice(savedDev));
+  }
+  return result;
+}
+
 namespace {
 enum ncclImplicitOrder {
   ncclImplicitOrderNone,

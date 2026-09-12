@@ -2589,6 +2589,28 @@
       ]
     },
 
+    "mpi_8rank_single_node": {
+      "extends": "default",
+      "is_gtest": true,
+      "binary": "rccl-UnitTestsMPI",
+      "num_ranks": 8,
+      "num_gpus": 8,
+      "num_nodes": 1,
+      "timeout": 240,
+      "tests": [
+        {
+          "name": "DDA_ForeignCurrentDevice_8Ranks",
+          "description": "AllReduce issued with another device current runs on the communicator's device and leaves the caller's current device unchanged",
+          "test_filter": "DdaMPI_AllReduce.ForeignCurrentDeviceUngrouped"
+        },
+        {
+          "name": "DDA_StreamAlternation_8Ranks",
+          "description": "Consecutive AllReduces alternating between two streams on one communicator stay ordered; a missing done-event edge lets them overlap and corrupt the result",
+          "test_filter": "DdaMPI_AllReduce.StreamAlternationUngrouped"
+        }
+      ]
+    },
+
     "ce_internal": {
       "extends": "ce_base",
       "num_ranks": 2,
@@ -4338,6 +4360,12 @@
       "name": "CE Tests - 8-Rank (AllGather, AlltoAll, Scatter, Gather)",
       "description": "CE collective tests on 8 GPUs/ranks — default production topology. Skips automatically on unsupported driver version.",
       "config": "ce_8rank",
+      "enabled": true
+    },
+    {
+      "name": "MPI Tests (8-rank, single node)",
+      "description": "MPI unit tests that need eight ranks on one node, one rank per process",
+      "config": "mpi_8rank_single_node",
       "enabled": true
     },
     {
