@@ -113,7 +113,7 @@ public:
     if constexpr (hasPreviousMemAccess) {
       __syncthreads();
     }
-    if (threadIdx.x < NRANKS) {
+    if (threadIdx.x < nRanks_) {  // active peers only; NRANKS would deadlock for <8
       auto peerRank = threadIdx.x;
       if constexpr (fenceType == MemFenceType::ACQUIRE_ONLY) {
         allMailboxes_[peerRank].setFlagNoMemFence(selfRank_, blockIdx.x);
@@ -135,6 +135,7 @@ public:
 private:
   int nBlocks_{-1};
   int selfRank_{-1};
+  int nRanks_{NRANKS};
   std::array<DeviceMailbox, NRANKS> allMailboxes_;
 
   __host__ IpcGpuBarrier(int nRanks, int nBlocks, int selfRank, const std::array<DeviceMailbox, NRANKS>& allMailboxes);

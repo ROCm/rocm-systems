@@ -14,7 +14,10 @@
 
 struct ncclComm;
 
-// IPC path (single node, fixed kDdaNranks ranks).
+// True when RCCL_DDA_NRANKS_RELAX=1 (allow 2..8-rank DDA IPC AllReduce). Default 0.
+bool ncclDdaNranksRelaxEnabled();
+
+// IPC path (single node, kDdaNranks ranks by default; any 2..kDdaNranks when relax is set).
 bool ncclAllReduceDdaIpcEligible(ncclComm* comm, const void* sendbuff, void* recvbuff, size_t count,
                                  ncclDataType_t datatype, ncclRedOp_t op);
 
