@@ -1341,8 +1341,8 @@ if(ROCM_MAJOR_VERSION GREATER_EQUAL 6)
 endif()
 # Wrap fmt in $<BUILD_INTERFACE:...> so it's only used while building rccl
 # and is omitted from the exported rccl-targets export set. Without this,
-# a FetchContent-built fmt-header-only target leaks into rccl's link
-# interface and breaks install(EXPORT) for static builds.
+# a fmt-header-only target leaks into rccl's link interface and breaks
+# install(EXPORT) for static builds.
 target_link_libraries(rccl PRIVATE $<BUILD_INTERFACE:fmt::fmt-header-only>)
 if(ENABLE_ROCSHMEM OR ENABLE_ROCSHMEM_GIN)
   # Resolve to a full path: nothing on the link line supplies ${ROCM_PATH}/lib, so a bare

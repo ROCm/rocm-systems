@@ -504,16 +504,10 @@ if(TARGET GTest::gtest AND NOT TARGET GTest::GTest)
   add_library(GTest::GTest ALIAS GTest::gtest)
 endif()
 
-# --- Resolve fmt: system -> FetchContent fallback ---
-find_package(fmt QUIET)
-if(NOT fmt_FOUND)
-  message(STATUS "Downloading fmt via FetchContent")
-  FetchContent_Declare(fmt
-    GIT_REPOSITORY https://github.com/fmtlib/fmt.git
-    GIT_TAG        10.2.1
-    GIT_SHALLOW    TRUE
-  )
-  FetchContent_MakeAvailable(fmt)
+# --- fmt: the RCCL-vendored header-only copy (already defined for in-tree builds) ---
+if(NOT TARGET fmt::fmt-header-only)
+  add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/../../external/fmt"
+                   "${CMAKE_BINARY_DIR}/external/fmt")
 endif()
 
 # --- Resolve RCCL build directory ---
