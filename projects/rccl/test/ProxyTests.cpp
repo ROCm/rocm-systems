@@ -13,6 +13,7 @@
 #include "socket.h"
 #define ENABLE_TIMER 0
 #include <assert.h>
+#include <netinet/in.h>
 #include <poll.h>
 #include <sched.h>
 #include <sys/mman.h>
@@ -68,6 +69,7 @@ void ncclDumpProxyState(int signal);
 // Defined in proxy.cc, not exported through proxy.h.
 ncclResult_t ncclProxyPost(struct ncclProxyOpsPool* pool, int nextOps, int nextOpsEnd);
 ncclResult_t ncclProxyProgressDestroy(struct ncclProxyState* proxyState);
+void* ncclProxyService(void* _args);
 
 #define PROXYARGS_ALLOCATE_SIZE NCCL_MAX_OPS
 
@@ -742,5 +744,190 @@ TEST(ProxyTests, ProxyProgressDestroyJoinsAndFreesPools)
 
     TEST_INFO("[ProxyTests] ProxyProgressDestroyJoinsAndFreesPools PASSED");
 }
+
+// Validates the atomic stop fallback path in ncclProxyService deterministically.
+// Pre-sets proxyState->stop=1 BEFORE starting the service thread so the first
+// loop iteration takes the atomic fallback path — no timing dependencies.
+TEST(ProxyTests, ProxyServiceHonorsPresetAtomicStop)
+{
+    using Config = ProcessIsolatedTestRunner::TestConfig;
+
+    RUN_ISOLATED_TESTS(
+        Config(
+            "ProxyServiceHonorsPresetAtomicStop",
+            []()
+            {
+                auto* proxyState = new ncclProxyState{};
+                ASSERT_NE(proxyState, nullptr);
+
+                auto* listenSock = (ncclSocket*)calloc(1, sizeof(ncclSocket));
+                ASSERT_NE(listenSock, nullptr);
+
+                uint32_t abortFlag = 0;
+
+                proxyState->abortFlag     = &abortFlag;
+                proxyState->listenSock    = listenSock;
+                proxyState->tpRank        = 0;
+                proxyState->tpnRanks      = 1;
+                proxyState->tpLocalnRanks = 1;
+                proxyState->cudaDev       = 0;
+
+                ncclSocketAddress listenAddr{};
+                listenAddr.sin.sin_family      = AF_INET;
+                listenAddr.sin.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+                listenAddr.sin.sin_port        = 0;
+
+                ASSERT_EQ(
+                    ncclSocketInit(
+                        listenSock,
+                        &listenAddr,
+                        NCCL_SOCKET_MAGIC,
+                        ncclSocketTypeProxy,
+                        &abortFlag),
+                    ncclSuccess);
+                ASSERT_EQ(ncclSocketListen(listenSock), ncclSuccess);
+
+                // Pre-set the flag so the first service-loop iteration takes the
+                // atomic fallback deterministically, without sleeps or fault injection.
+                COMPILER_ATOMIC_STORE(&proxyState->stop, 1, std::memory_order_release);
+
+                proxyState->thread = std::thread(ncclProxyService, proxyState);
+
+                // A regression hangs here; the isolated-test deadline terminates
+                // the child and reports a failure.
+                proxyState->thread.join();
+
+                // ncclProxyService frees listenSock internally on exit.
+                delete proxyState;
+            })
+            .withTimeout(std::chrono::seconds(5))
+            .withNumGpus(1));
+}
+
+#ifdef ENABLE_FAULT_INJECTION
+static bool waitForProxyServiceLoop(ncclProxyState* proxyState, std::chrono::milliseconds timeout)
+{
+    const auto deadline = std::chrono::steady_clock::now() + timeout;
+    while(!COMPILER_ATOMIC_LOAD(&proxyState->testServiceLoopEntered, std::memory_order_acquire))
+    {
+        if(std::chrono::steady_clock::now() >= deadline)
+        {
+            return false;
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+    return true;
+}
+
+static void runProxyStopFailureCase(ncclProxyStopFault fault, ncclResult_t expectedStopResult)
+{
+    ncclComm            comm{};
+    ncclSharedResources sharedRes{};
+    uint32_t            abortFlag       = 0;
+    int                 topParentRanks[] = {0};
+    ncclSocketAddress   peerAddresses[1]{};
+
+    auto* proxyState = new ncclProxyState{};
+    ASSERT_NE(proxyState, nullptr);
+
+    auto* listenSock = (ncclSocket*)calloc(1, sizeof(ncclSocket));
+    ASSERT_NE(listenSock, nullptr);
+
+    ncclSocketAddress listenAddr{};
+    listenAddr.sin.sin_family      = AF_INET;
+    listenAddr.sin.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+    listenAddr.sin.sin_port        = 0;
+
+    ASSERT_EQ(
+        ncclSocketInit(
+            listenSock,
+            &listenAddr,
+            NCCL_SOCKET_MAGIC,
+            ncclSocketTypeProxy,
+            &abortFlag),
+        ncclSuccess);
+    ASSERT_EQ(ncclSocketListen(listenSock), ncclSuccess);
+
+    peerAddresses[0] = listenSock->addr;
+
+    sharedRes.magic      = NCCL_SOCKET_MAGIC;
+    sharedRes.proxyState = proxyState;
+
+    comm.rank           = 0;
+    comm.sharedRes      = &sharedRes;
+    comm.proxyState     = proxyState;
+    comm.abortFlag      = &abortFlag;
+    comm.topParentRanks = topParentRanks;
+
+    proxyState->refCount      = 1;
+    proxyState->abortFlag     = &abortFlag;
+    proxyState->listenSock    = listenSock;
+    proxyState->peerAddresses = peerAddresses;
+    proxyState->tpRank        = 0;
+    proxyState->tpnRanks      = 1;
+    proxyState->tpLocalnRanks = 1;
+    proxyState->cudaDev       = 0;
+
+    proxyState->thread = std::thread(ncclProxyService, proxyState);
+
+    if(!waitForProxyServiceLoop(proxyState, std::chrono::seconds(2)))
+    {
+        COMPILER_ATOMIC_STORE(&proxyState->stop, 1, std::memory_order_release);
+        proxyState->thread.join();
+        // Service took goto-fail path before reaching main loop, so listenSock
+        // was not freed internally. Clean it up here to avoid leak.
+        (void)ncclSocketClose(proxyState->listenSock);
+        free(proxyState->listenSock);
+        delete proxyState;
+        FAIL() << "proxy service did not reach its polling loop";
+        return;
+    }
+
+    ncclProxyTestArmStopFault(fault);
+
+    const auto start      = std::chrono::steady_clock::now();
+    const auto stopResult = ncclProxyStop(&comm);
+    proxyState->thread.join();
+    const auto elapsed = std::chrono::steady_clock::now() - start;
+
+    EXPECT_EQ(stopResult, expectedStopResult);
+    EXPECT_EQ(proxyState->refCount, 0);
+    EXPECT_EQ(comm.proxyRefCountOld, 0);
+    EXPECT_LT(elapsed, std::chrono::milliseconds(1500));
+
+    delete proxyState;
+}
+
+TEST(ProxyTests, ProxyStopFailuresStillStopService)
+{
+    using Config = ProcessIsolatedTestRunner::TestConfig;
+
+    RUN_ISOLATED_TESTS(
+        Config(
+            "ProxyStopConnectFailure",
+            []()
+            {
+                runProxyStopFailureCase(ncclProxyStopFaultSocketConnect, ncclSuccess);
+            })
+            .withTimeout(std::chrono::seconds(5))
+            .withNumGpus(1),
+        Config(
+            "ProxyStopSendFailure",
+            []()
+            {
+                runProxyStopFailureCase(ncclProxyStopFaultSocketSend, ncclSuccess);
+            })
+            .withTimeout(std::chrono::seconds(5))
+            .withNumGpus(1),
+        Config(
+            "ProxyStopInitFailure",
+            []()
+            {
+                runProxyStopFailureCase(ncclProxyStopFaultSocketInit, ncclSystemError);
+            })
+            .withTimeout(std::chrono::seconds(5))
+            .withNumGpus(1));
+}
+#endif
 
 } // namespace RcclUnitTesting
