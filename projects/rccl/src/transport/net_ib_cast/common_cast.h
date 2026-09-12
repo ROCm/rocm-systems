@@ -67,7 +67,7 @@ extern union ncclSocketAddress IbCastIfAddr;
 enum ncclIbRequestMatchingScheme {
   BY_INDEX = 0,
   BY_ID = 1,
-  BY_ORDER = 2, // send requests are posted in the order they are received (CTS OFFLOAD)
+  BY_ORDER = 2, // completions matched by posted WR identity (CTS offload, or software CTS with on-demand recvs)
 };
 
 struct ncclIbMr {
@@ -725,6 +725,8 @@ ncclResult_t IbCastBaseCommInit(struct ncclIbNetCommBase* baseComm, bool isSend)
 ncclResult_t IbCastRecvCommInit(struct ncclIbRecvComm* recvComm);
 ncclResult_t IbCastSendCommInit(struct ncclIbSendComm* sendComm);
 
+bool IbCastByOrderRequested();
+
 struct ncclIbListenComm {
   int dev;
   struct ncclSocket sock;
@@ -841,6 +843,7 @@ extern int64_t rcclParamIbQpSchedUpdateInterval();
 extern int64_t rcclParamIbQpSchedSplitDataMin();
 extern int64_t rcclParamIbQpSchedLogInterval();
 
+void IbCastReportMatchingScheme();
 #define QP_SCHED_WEIGHT_ENV_VAR "RCCL_IB_QP_SCHED_WEIGHT"
 #define QP_SCHED_WEIGHT_ENV_VAR_ALIAS "NCCL_IB_QP_SCHED_WEIGHT"
 #define QP_SCHED_LOG_PATH_ENV_VAR "RCCL_IB_QP_SCHED_LOG_PATH"
