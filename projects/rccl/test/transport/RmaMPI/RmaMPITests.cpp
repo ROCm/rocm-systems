@@ -774,6 +774,189 @@ INSTANTIATE_TEST_SUITE_P(
         ::testing::Bool()),
     CtxOnlyName);
 
+// The RMA IB proxy is documented as not supporting NCCL_IB_MERGE_NICS, and it
+// reads mrs[0] and posts on qps[0], so a fused vNIC costs it the second NIC's
+// bandwidth. "Not supported" has to mean exactly that and no more: the bytes
+// still have to arrive, because the capability derivation in init.cc offers the
+// proxy to GIN on fused NICs. This is the same put as IPutBasic, over a vNIC
+// built from two physical NICs rather than over a single one.
+TEST_F(RmaMPIFusedNicTest, IPutOverFusedVNic)
+{
+    if(!SetUpFixture(/*minProcs=*/2, /*maxProcs=*/2))
+    {
+        return;
+    }
+
+    constexpr size_t kSize = 1 * 1024 * 1024;
+
+    void* sendBuf = AllocBuf(kSize);
+    void* recvBuf = AllocBuf(kSize);
+
+    if(worldRank_ == 0 && sendBuf != nullptr)
+    {
+        FillBuf(sendBuf, kSize, /*seed=*/0xE7);
+    }
+
+    // Setup runs on both ranks, but it can fail on one of them alone, so the
+    // verdict is agreed before anyone leaves the test.
+    void *sendMh = nullptr, *recvMh = nullptr;
+    bool setupFailed = sendBuf == nullptr || recvBuf == nullptr
+                       || RegMr(sendBuf, kSize, &sendMh) != ncclSuccess
+                       || RegMr(recvBuf, kSize, &recvMh) != ncclSuccess;
+    if(AnyRankFailed(setupFailed))
+    {
+        if(setupFailed) ADD_FAILURE() << "buffer allocation or registration failed";
+        return;
+    }
+
+    Barrier();
+
+    // Non-fatal on purpose: a fatal assertion here would return from the test
+    // on rank 0 only, and rank 1 would then wait in the barrier below until the
+    // suite timed out, reporting a hang instead of this failure.
+    bool putFailed = false;
+    if(worldRank_ == 0)
+    {
+        void* req = nullptr;
+        putFailed = rma_->iput(rmaCtx_, /*context=*/0,
+                               /*srcOff=*/0, sendMh, kSize,
+                               /*dstOff=*/0, recvMh,
+                               /*peerRank=*/1, &req) != ncclSuccess;
+        if(putFailed) ADD_FAILURE() << "iput over a fused vNIC was rejected";
+        else if(!PollUntilDone(req))
+        {
+            putFailed = true;
+            ADD_FAILURE() << "iput over a fused vNIC never completed";
+        }
+    }
+    Barrier();
+
+    // Skip verification when the put never landed: the payload mismatch that
+    // rank 1 would report says nothing beyond what rank 0 already reported.
+    if(AnyRankFailed(putFailed)) return;
+
+    if(worldRank_ == 1)
+    {
+        EXPECT_TRUE(VerifyBuf(recvBuf, kSize, /*seed=*/0xE7));
+    }
+}
+
+// RDMA_READ rather than RDMA_WRITE: ncclRmaIbProxyIGet builds its own work
+// request and takes the remote rkey from the peer's handle, so a fused vNIC
+// exercises a second addressing path that IPutOverFusedVNic does not reach.
+TEST_F(RmaMPIFusedNicTest, IGetOverFusedVNic)
+{
+    if(!SetUpFixture(/*minProcs=*/2, /*maxProcs=*/2))
+    {
+        return;
+    }
+
+    constexpr size_t kSize = 1 * 1024 * 1024;
+
+    void* buf = AllocBuf(kSize);
+    if(worldRank_ == 1 && buf != nullptr)
+    {
+        FillBuf(buf, kSize, /*seed=*/0xD4);
+    }
+
+    void* mh = nullptr;
+    bool setupFailed = buf == nullptr || RegMr(buf, kSize, &mh) != ncclSuccess;
+    if(AnyRankFailed(setupFailed))
+    {
+        if(setupFailed) ADD_FAILURE() << "buffer allocation or registration failed";
+        return;
+    }
+
+    Barrier();
+    // Non-fatal for the same reason as IPutOverFusedVNic: rank 1 is waiting in
+    // the barrier below and a fatal assertion here would leave it there.
+    if(worldRank_ == 0)
+    {
+        void* req = nullptr;
+        if(rma_->iget(rmaCtx_, /*context=*/0,
+                      /*remoteOff=*/0, mh, kSize,
+                      /*localOff=*/0, mh,
+                      /*peerRank=*/1, &req) != ncclSuccess)
+        {
+            ADD_FAILURE() << "iget over a fused vNIC was rejected";
+        }
+        else if(!PollUntilDone(req))
+        {
+            ADD_FAILURE() << "iget over a fused vNIC never completed";
+        }
+        else
+        {
+            EXPECT_TRUE(VerifyBuf(buf, kSize, /*seed=*/0xD4));
+        }
+    }
+    Barrier();
+}
+
+// The third and last send path: ncclRmaIbProxyIPutSignal posts two chained work
+// requests, payload then signal. Both land on qps[0] of the vNIC, so a fused
+// device has to leave the ordering between them intact as well as the data.
+TEST_F(RmaMPIFusedNicTest, IPutSignalOverFusedVNic)
+{
+    if(!SetUpFixture(/*minProcs=*/2, /*maxProcs=*/2))
+    {
+        return;
+    }
+
+    constexpr size_t kSize = 1 * 1024 * 1024;
+
+    void* sendBuf = AllocBuf(kSize);
+    void* recvBuf = AllocBuf(kSize);
+    void* sigBuf  = AllocBuf(kSignalSize);
+
+    if(worldRank_ == 0 && sendBuf != nullptr)
+    {
+        FillBuf(sendBuf, kSize, /*seed=*/0x3C);
+    }
+
+    void *sendMh = nullptr, *recvMh = nullptr, *sigMh = nullptr;
+    bool setupFailed = sendBuf == nullptr || recvBuf == nullptr || sigBuf == nullptr
+                       || RegMr(sendBuf, kSize, &sendMh) != ncclSuccess
+                       || RegMr(recvBuf, kSize, &recvMh) != ncclSuccess
+                       || RegMr(sigBuf, kSignalSize, &sigMh) != ncclSuccess;
+    if(AnyRankFailed(setupFailed))
+    {
+        if(setupFailed) ADD_FAILURE() << "buffer allocation or registration failed";
+        return;
+    }
+
+    Barrier();
+    // Non-fatal for the same reason as IPutOverFusedVNic: rank 1 is waiting in
+    // the barrier below and a fatal assertion here would leave it there.
+    bool putFailed = false;
+    if(worldRank_ == 0)
+    {
+        void* req = nullptr;
+        putFailed = IPutSignal(/*context=*/0,
+                               /*srcOff=*/0, sendMh, kSize,
+                               /*dstOff=*/0, recvMh,
+                               /*peerRank=*/1,
+                               /*signalOff=*/0, sigMh,
+                               /*signalValue=*/0, // unused for INC
+                               NCCL_NET_SIGNAL_OP_INC,
+                               &req) != ncclSuccess;
+        if(putFailed) ADD_FAILURE() << "iputSignal over a fused vNIC was rejected";
+        else if(!PollUntilDone(req))
+        {
+            putFailed = true;
+            ADD_FAILURE() << "iputSignal over a fused vNIC never completed";
+        }
+    }
+    Barrier();
+
+    if(AnyRankFailed(putFailed)) return;
+
+    if(worldRank_ == 1)
+    {
+        EXPECT_TRUE(VerifyBuf(recvBuf, kSize, /*seed=*/0x3C));
+        EXPECT_EQ(ReadSignal(sigBuf), 1u);
+    }
+}
+
 } // namespace RCCLRmaTests
 
 #else // !RCCL_HAS_RMA_IB_PROXY
