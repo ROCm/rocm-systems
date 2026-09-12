@@ -166,3 +166,46 @@ def to_mod(
 
 def to_concat(a: Any, b: Any) -> str:  # noqa: ANN401
     return str(a) + str(b)
+
+
+def merge_dispatch_weighted_avg(
+    ratio_series_list: list[pd.Series],
+    weight_series_list: list[pd.Series],
+) -> float:
+    """Combine per-dispatch submetric ratios with weight counters.
+
+    For each dispatch index present in all series, compute
+    M_i = sum_k(M_{k,i} * C_{k,i}) / sum_k(C_{k,i}), then aggregate
+    dispatch values with to_avg (avg-only Phase 2 semantics).
+    """
+    if not ratio_series_list or len(ratio_series_list) != len(weight_series_list):
+        return np.nan
+
+    all_series = ratio_series_list + weight_series_list
+    index_sets = [set(series.index) for series in all_series]
+    common_idx = set.intersection(*index_sets) if index_sets else set()
+    if not common_idx:
+        return np.nan
+
+    dispatch_values: list[float] = []
+    for dispatch_id in sorted(common_idx, key=lambda x: (str(type(x)), x)):
+        numerator = 0.0
+        denominator = 0.0
+        skip_dispatch = False
+        for ratio_series, weight_series in zip(
+            ratio_series_list, weight_series_list, strict=True
+        ):
+            weight = weight_series.loc[dispatch_id]
+            ratio = ratio_series.loc[dispatch_id]
+            if pd.isna(weight) or pd.isna(ratio):
+                skip_dispatch = True
+                break
+            numerator += float(ratio) * float(weight)
+            denominator += float(weight)
+        if skip_dispatch or denominator == 0.0:
+            continue
+        dispatch_values.append(numerator / denominator)
+
+    if not dispatch_values:
+        return np.nan
+    return float(to_avg(pd.Series(dispatch_values)))

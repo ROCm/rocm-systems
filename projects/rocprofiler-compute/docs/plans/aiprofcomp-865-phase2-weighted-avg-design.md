@@ -1,6 +1,6 @@
 # AIPROFCOMP-865 Phase 2 — `WEIGHTED_AVG` design and implementation plan
 
-**Status:** Design (handoff to implementation agent)
+**Status:** Milestone A implemented on branch (parser, aggregation, analyze wiring); pilot YAML pending SLOT_LIMIT sign-off
 **JIRA:** AIPROFCOMP-865 (bullet 2–3), parent AIPROFCOMP-864
 **Prerequisite:** Phase 1 worksheet classifies metrics as `SLOT_LIMIT` with inspector evidence
 **Out of scope:** `BOUND_RATIO`, partition normalization (AIPROFCOMP-798), alola-only workflows
