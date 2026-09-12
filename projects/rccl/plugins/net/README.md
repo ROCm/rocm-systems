@@ -424,3 +424,9 @@ the `test` code to improve latency of `LL*` protocols, as those are capable of d
 data is valid or not.
 
 `iflush` returns a request which needs to be queried with `test` until it completes.
+
+# In-tree plugins
+
+- `example/` — skeleton net plugin used by RCCL unit tests.
+- `google-fastsocket/` — Google FastSocket plugin (cloned at build time).
+- `odinlink-tb5/` — OdinLink Thunderbolt 5 / USB4 plugin (`librccl-net-odl_tb5.so`). See `odinlink-tb5/README.md`. Load with `NCCL_NET_PLUGIN=odl_tb5`. Requires the out-of-tree `odl_tb5.ko` kernel module at runtime.
