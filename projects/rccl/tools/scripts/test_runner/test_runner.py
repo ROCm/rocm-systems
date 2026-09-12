@@ -19,6 +19,27 @@ logging.basicConfig(
     format='%(asctime)s - %(levelname)s - %(message)s'
 )
 
+def validate_arg_combinations(args):
+    """
+    Validate mutually-dependent / mutually-exclusive CLI flag combinations.
+
+    Returns an error message string for the first invalid combination, or None when the
+    combination is valid. Kept side-effect free (no printing/exit) so it is unit-testable.
+    """
+    if args.stop_on_rerun_failure and not args.rerun_failed:
+        return "--stop-on-rerun-failure requires --rerun-failed to be set"
+
+    # Parallel mode does not apply immediate --rerun-failed (reruns are inherently serial,
+    # order-dependent, and would contend for the same GPUs as the in-flight co-tenants).
+    # Fail fast rather than silently dropping reruns the user asked for.
+    if getattr(args, "jobs", 1) > 1 and args.rerun_failed:
+        return ("--rerun-failed is not supported together with --jobs>1 (parallel mode). "
+                "Re-run failures serially with --jobs 1, or drop --rerun-failed to run in "
+                "parallel.")
+
+    return None
+
+
 def main():
     """Main entry point for test runner"""
 
@@ -27,8 +48,9 @@ def main():
     args = parser_interface.process_arguments()
 
     # Validate flag combinations
-    if args.stop_on_rerun_failure and not args.rerun_failed:
-        print("ERROR: --stop-on-rerun-failure requires --rerun-failed to be set")
+    arg_error = validate_arg_combinations(args)
+    if arg_error:
+        print(f"ERROR: {arg_error}")
         if args.verbose:
             print("Exiting: Invalid flag combination")
         sys.exit(1)

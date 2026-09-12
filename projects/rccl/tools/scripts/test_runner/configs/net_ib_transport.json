@@ -1081,6 +1081,7 @@
   "test_suites": [
     {
       "name": "Bootstrap socket poll - no busy loop",
+      "serial_only": true,
       "description": "AICOMRCCL-1322: NCCL_SOCKET_POLL_TIMEOUT_MSEC makes a blocked bootstrap socket recv wait in poll() instead of busy-spinning a CPU core (Debug only, no NIC/GPU required)",
       "config": "socket_poll_bootstrap",
       "enabled": true
@@ -1117,6 +1118,7 @@
     },
     {
       "name": "NET IB - Data Transfer",
+      "serial_only": true,
       "description": "InfiniBand send/recv with various sizes",
       "config": "net_ib_transfer",
       "enabled": true
@@ -1147,48 +1149,56 @@
     },
     {
       "name": "NET IB - vNIC Stress",
+      "serial_only": true,
       "description": "Virtual NIC stress, reconnect, and repeated-operation tests",
       "config": "net_ib_vnic_stress",
       "enabled": true
     },
     {
       "name": "NET IB - MultiRecv",
+      "serial_only": true,
       "description": "irecv(n>1) multi-slot batching tests",
       "config": "net_ib_multirecv",
       "enabled": true
     },
     {
       "name": "NET IB - CTS Depth Stress",
+      "serial_only": true,
       "description": "CTS match-table depth stress / overflow reproducer (AINIC); fully under RCCL_IB_P2P_DISABLE_CTS=1 workaround so passes cleanly on healthy stacks",
       "config": "net_ib_cts_stress",
       "enabled": true
     },
     {
       "name": "NET IB - CAST WRR+Split (QPS=2, splitData=1)",
+      "serial_only": true,
       "description": "White-box WRR scheduler tests with split-data path enabled: token counts, threshold boundary, split/WRR token accounting, sched enable/disable",
       "config": "cast_wrr_split",
       "enabled": true
     },
     {
       "name": "NET IB - CAST WRR only (QPS=2, splitData=0)",
+      "serial_only": true,
       "description": "White-box WRR scheduler tests without split-data: weights distribution, doWrr toggle, splitData toggle, sched parms reflection",
       "config": "cast_wrr_no_split",
       "enabled": true
     },
     {
       "name": "NET IB - CAST Single QP (QPS=1)",
+      "serial_only": true,
       "description": "WRR bypass path: single-QP connection must skip scheduler initialisation",
       "config": "cast_single_qp",
       "enabled": true
     },
     {
       "name": "NET IB - CAST Four QPs (QPS=4)",
+      "serial_only": true,
       "description": "Cursor wrap and monotonic token order with up to 4 QPs",
       "config": "cast_four_qp",
       "enabled": true
     },
     {
       "name": "NET IB - CAST Max QPs (QPS=128)",
+      "serial_only": true,
       "description": "Full round-robin with 1 token per QP at maximum QP count (hardware-capped)",
       "config": "cast_max_qp",
       "enabled": true
@@ -1201,90 +1211,105 @@
     },
     {
       "name": "NET IB - CAST Stress (QPS=2)",
+      "serial_only": true,
       "description": "5000 sends on 2 concurrent connections + large-size split-path stress (1MB/4MB/16MB × 20): RTT timer fires mid-run, consistency invariants verified",
       "config": "cast_stress",
       "enabled": true
     },
     {
       "name": "NET IB - Initialization (ib-cast)",
+      "serial_only": true,
       "description": "InfiniBand plugin initialization and device enumeration via ib-cast plugin (NCCL_NET=ib-cast)",
       "config": "net_ib_initialization_cast",
       "enabled": true
     },
     {
       "name": "NET IB - Device Properties (ib-cast)",
+      "serial_only": true,
       "description": "InfiniBand device property queries via ib-cast plugin (NCCL_NET=ib-cast)",
       "config": "net_ib_properties_cast",
       "enabled": true
     },
     {
       "name": "NET IB - Connection Setup (ib-cast)",
+      "serial_only": true,
       "description": "InfiniBand listen/connect/accept and error handling via ib-cast plugin (NCCL_NET=ib-cast)",
       "config": "net_ib_connection_cast",
       "enabled": true
     },
     {
       "name": "NET IB - Memory Registration (ib-cast)",
+      "serial_only": true,
       "description": "InfiniBand memory registration and deregistration via ib-cast plugin (NCCL_NET=ib-cast)",
       "config": "net_ib_memory_cast",
       "enabled": true
     },
     {
       "name": "NET IB - Data Transfer (ib-cast)",
+      "serial_only": true,
       "description": "InfiniBand send/recv with various sizes via ib-cast plugin (NCCL_NET=ib-cast)",
       "config": "net_ib_transfer_cast",
       "enabled": true
     },
     {
       "name": "NET IB - Flush (ib-cast)",
+      "serial_only": true,
       "description": "InfiniBand GPU flush (iflush) with GDR via ib-cast plugin (NCCL_NET=ib-cast)",
       "config": "net_ib_flush_cast",
       "enabled": true
     },
     {
       "name": "NET IB - Virtual Device API (ib-cast)",
+      "serial_only": true,
       "description": "makeVDevice creation and error paths via ib-cast plugin (NCCL_NET=ib-cast)",
       "config": "net_ib_vdevice_cast",
       "enabled": true
     },
     {
       "name": "NET IB - vNIC Functional (ib-cast)",
+      "serial_only": true,
       "description": "Virtual NIC functional validation via ib-cast plugin (NCCL_NET=ib-cast)",
       "config": "net_ib_vnic_functional_cast",
       "enabled": true
     },
     {
       "name": "NET IB - vNIC Edge (ib-cast)",
+      "serial_only": true,
       "description": "Virtual NIC edge cases via ib-cast plugin (NCCL_NET=ib-cast)",
       "config": "net_ib_vnic_edge_cast",
       "enabled": true
     },
     {
       "name": "NET IB - vNIC Stress (ib-cast)",
+      "serial_only": true,
       "description": "Virtual NIC stress tests via ib-cast plugin (NCCL_NET=ib-cast)",
       "config": "net_ib_vnic_stress_cast",
       "enabled": true
     },
     {
       "name": "NET IB - Fault Injection (CAST path)",
+      "serial_only": true,
       "description": "Per-QP fault injection: error detection, WRR rebalancing under artificial delay, data integrity on CAST multi-QP path",
       "config": "fault_inject_cast",
       "enabled": true
     },
     {
       "name": "NET IB - Stress (2-rank)",
+      "serial_only": true,
       "description": "Resource exhaustion, connection lifecycle, endurance, bidirectional, GPU stress",
       "config": "net_ib_stress",
       "enabled": true
     },
     {
       "name": "NET IB - Branch Coverage",
+      "serial_only": true,
       "description": "Targeted branch-coverage tests: irecv overflow, MR cache ref-count, send-size clamping, null-comm close, setAttr no-op",
       "config": "net_ib_branch_coverage",
       "enabled": true
     },
     {
       "name": "NET IB - Stress (4-rank)",
+      "serial_only": true,
       "description": "Fan-in, fan-out, all-to-all, multi-rank endurance",
       "config": "net_ib_stress_4rank",
       "enabled": true
@@ -1303,6 +1328,7 @@
     },
     {
       "name": "NET IB - Stress Multi-QP Fan-In",
+      "serial_only": true,
       "description": "Multi-QP fan-in 3->1 with 4 ranks",
       "config": "net_ib_stress_multi_qp_fanin",
       "enabled": true
@@ -1321,42 +1347,49 @@
     },
     {
       "name": "NET IB - GIN Peermem",
+      "serial_only": true,
       "description": "GIN plugin tests with peermem support",
       "config": "net_ib_gin_peermem",
       "enabled": true
     },
     {
       "name": "NET IB - GIN DmaBuf",
+      "serial_only": true,
       "description": "GIN plugin tests with dma-buf support",
       "config": "net_ib_gin_dmabuf",
       "enabled": true
     },
     {
       "name": "NET IB-CAST - GIN Peermem",
+      "serial_only": true,
       "description": "GIN plugin tests with peermem support",
       "config": "net_ib_cast_gin_peermem",
       "enabled": true
     },
     {
       "name": "NET IB-CAST - GIN DmaBuf",
+      "serial_only": true,
       "description": "GIN plugin tests with dma-buf support",
       "config": "net_ib_cast_gin_dmabuf",
       "enabled": true
     },
     {
       "name": "NET IB - Multithread Independent Connections (2)",
+      "serial_only": true,
       "description": "2 worker threads/rank, each using an independent NET/IB context and connection",
       "config": "net_ib_multithread_independent_2",
       "enabled": true
     },
     {
       "name": "NET IB - Multithread Independent Connections (4)",
+      "serial_only": true,
       "description": "4 worker threads/rank, each using an independent NET/IB context and connection",
       "config": "net_ib_multithread_independent_4",
       "enabled": true
     },
     {
       "name": "NET IB - Multithread Independent Connections (16)",
+      "serial_only": true,
       "description": "16 worker threads/rank, each using an independent NET/IB context and connection",
       "config": "net_ib_multithread_independent_16",
       "enabled": true
