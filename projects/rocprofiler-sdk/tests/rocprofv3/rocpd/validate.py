@@ -22,7 +22,9 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 # THE SOFTWARE.
 
+import sqlite3
 import sys
+from collections import defaultdict
 import pytest
 
 
@@ -69,6 +71,115 @@ def test_csv_data(csv_data, json_data):
             "regions",
         ),
     )
+
+
+def test_counter_collection_fields_match_across_rocpd_csv_json(
+    csv_data, json_data, db_input
+):
+    def aggregate(records):
+        result = defaultdict(float)
+        for dispatch_id, counter_name, value in records:
+            result[(int(dispatch_id), counter_name)] += float(value)
+        return dict(result)
+
+    data = json_data["rocprofiler-sdk-tool"]
+    counter_names = {
+        counter["id"]["handle"]: counter["name"] for counter in data["counters"]
+    }
+    json_records = []
+    for entry in data["callback_records"]["counter_collection"]:
+        dispatch_id = entry["dispatch_data"]["dispatch_info"]["dispatch_id"]
+        for record in entry["records"]:
+            json_records.append(
+                (
+                    int(dispatch_id),
+                    counter_names[record["counter_id"]["handle"]],
+                    float(record["value"]),
+                )
+            )
+
+    counter_csv = next(
+        rows for filename, rows in csv_data if "counter_collection" in filename
+    )
+    csv_records = [
+        (
+            int(row["Dispatch_Id"]),
+            row["Counter_Name"],
+            float(row["Counter_Value"]),
+        )
+        for row in counter_csv
+    ]
+
+    with sqlite3.connect(db_input) as connection:
+        tables = {
+            name
+            for (name,) in connection.execute(
+                "SELECT name FROM sqlite_master WHERE type = 'table'"
+            )
+        }
+        event_tables = sorted(
+            name for name in tables if name.startswith("rocpd_pmc_event_")
+        )
+        assert event_tables
+
+        db_records = []
+        for event_table in event_tables:
+            suffix = event_table.split("rocpd_pmc_event_", 1)[1]
+            info_table = "rocpd_info_pmc_{}".format(suffix)
+            dispatch_table = "rocpd_kernel_dispatch_{}".format(suffix)
+            assert info_table in tables and dispatch_table in tables
+            db_records.extend(
+                connection.execute(
+                    """
+                    SELECT dispatch.dispatch_id, info.name, event.value
+                    FROM {event} AS event
+                    JOIN {info} AS info ON event.pmc_id = info.id
+                    JOIN {dispatch} AS dispatch ON event.event_id = dispatch.event_id
+                    """.format(
+                        event=event_table,
+                        info=info_table,
+                        dispatch=dispatch_table,
+                    )
+                )
+            )
+
+    json_aggregates = aggregate(json_records)
+    assert aggregate(csv_records) == json_aggregates
+    assert aggregate(db_records) == json_aggregates
+    assert all(value >= 0.0 for value in json_aggregates.values())
+    assert any(value > 0.0 for value in json_aggregates.values())
+
+
+def test_counter_collection_fields_match_perfetto(pftrace_reader, json_data):
+    samples = pftrace_reader.query_tp("""
+        SELECT counter_track.name AS track_name, counter.ts, counter.value
+        FROM counter
+        JOIN counter_track ON counter.track_id = counter_track.id
+        WHERE counter_track.name GLOB 'Agent * PMC *'
+        """)
+    assert not samples.empty
+    assert (samples["ts"] > 0).all()
+    assert (samples["value"] >= 0).all()
+
+    data = json_data["rocprofiler-sdk-tool"]
+    counter_names = {
+        counter["id"]["handle"]: counter["name"] for counter in data["counters"]
+    }
+    agent_nodes = {
+        agent["id"]["handle"]: agent["logical_node_id"] for agent in data["agents"]
+    }
+    expected_tracks = {
+        "Agent [{}] PMC {}".format(
+            agent_nodes[entry["dispatch_data"]["dispatch_info"]["agent_id"]["handle"]],
+            counter_names[record["counter_id"]["handle"]],
+        )
+        for entry in data["callback_records"]["counter_collection"]
+        for record in entry["records"]
+    }
+    actual_tracks = set(samples["track_name"])
+    assert expected_tracks == actual_tracks
+    maxima = samples.groupby("track_name")["value"].max()
+    assert all(maxima[track] > 0 for track in expected_tracks)
 
 
 def test_arg_annotations_exist(pftrace_reader):

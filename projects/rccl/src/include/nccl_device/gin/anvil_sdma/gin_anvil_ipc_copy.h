@@ -21,8 +21,8 @@ namespace detail {
 
 // Relaxed: ordering is provided by the caller's fence (signalPeer).
 NCCL_DEVICE_INLINE void ipcFlatAtomicAddSys64(uint64_t* dst, uint64_t val) {
-  __hip_atomic_fetch_add(reinterpret_cast<unsigned long long*>(dst), static_cast<unsigned long long>(val),
-                         __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_SYSTEM);
+  __scoped_atomic_fetch_add(reinterpret_cast<unsigned long long*>(dst), static_cast<unsigned long long>(val),
+                            __ATOMIC_RELAXED, __MEMORY_SCOPE_SYSTEM);
 }
 
 }  // namespace detail
