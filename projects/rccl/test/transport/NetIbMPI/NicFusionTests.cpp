@@ -755,7 +755,7 @@ TEST_F(NetIbMPITest, LargeTransfer_VNic) {
             "threaded LargeTransfer_VNic",
             [&](int threadIdx, ConnectionPair& pair) -> ThreadResult {
                 return WorkerHostTransfer(rank, pair, threadedSize, 540,
-                                          WorkerSeed(threadIdx, 5400), kLargeTransferTimeout);
+                                          WorkerSeed(threadIdx, 5400), kLargeTransferTimeoutMs);
             });
         return;
     }
@@ -917,8 +917,6 @@ TEST_F(NetIbMPITest, UnalignedSizeTransfer_VNic) {
         << "Failed to create fused vNIC from devices 0 and 1";
     ASSERT_GE(vdev, 0);
 
-    // Parameterized by MPIEnvironment::nThreads: concurrent workers hit the
-    // 128-byte striping boundary on both members of the fused device at once.
     // Sizes around 128-byte QP striping alignment boundaries.
     // ncclIbMultiSend computes chunkSize = DIVUP(DIVUP(size, nqps), 128) * 128.
     // These sizes produce uneven QP splits where one QP gets more data than the other.
@@ -927,6 +925,8 @@ TEST_F(NetIbMPITest, UnalignedSizeTransfer_VNic) {
     // Shared by both halves: a size added for one of them belongs to the other too.
     const std::vector<size_t> testSizes = {127, 129, 255, 257, 511, 513};
 
+    // Parameterized by MPIEnvironment::nThreads: concurrent workers hit the
+    // 128-byte striping boundary on both members of the fused device at once.
     if (MPIEnvironment::nThreads > 1) {
         RunThreadedSizeSweep(ThreadDevPolicy::Fixed(vdev), MPIEnvironment::nThreads, testSizes,
                              /*repeats=*/2, "threaded UnalignedSizeTransfer_VNic",
