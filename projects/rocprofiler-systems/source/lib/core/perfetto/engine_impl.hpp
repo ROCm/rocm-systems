@@ -6,11 +6,12 @@
 #include "engine.hpp"
 #include "logger/debug.hpp"
 #include "packet_framing.hpp"
+#include "sinks/trace_sink.hpp"
 
 #include <cstdint>
 #include <exception>
+#include <memory>
 #include <utility>
-#include <variant>
 
 namespace rocprofsys::core
 {
@@ -48,7 +49,8 @@ basic_cached_perfetto_engine<Backend>::init_sdk()
 
 template <perfetto_backend Backend>
 void
-basic_cached_perfetto_engine<Backend>::start(trace_sink& sink)
+basic_cached_perfetto_engine<Backend>::start(
+    const std::shared_ptr<trace_sink_interface>& sink)
 {
     if(is_system_backend())
     {
@@ -88,7 +90,10 @@ template <perfetto_backend Backend>
 void
 basic_cached_perfetto_engine<Backend>::stop()
 {
-    if(!m_running) return;
+    if(!m_running)
+    {
+        return;
+    }
 
     void* observed = nullptr;
     if(!clear_active_cached_engine(this, &observed) && observed != nullptr)
@@ -115,14 +120,20 @@ basic_cached_perfetto_engine<Backend>::stop()
         drained.swap(m_collected_bytes);
     }
 
-    if(!m_active_sink.has_value())
+    auto sink = m_active_sink.lock();
+    m_active_sink.reset();
+
+    if(!sink)
     {
+        if(!drained.empty())
+        {
+            LOG_ERROR("cached_perfetto_engine::stop(): trace sink was destroyed before "
+                      "stop() could drain {} source(s); drained bytes discarded",
+                      drained.size());
+        }
         if(first_exc) std::rethrow_exception(first_exc);
         return;
     }
-
-    auto& sink = m_active_sink->get();
-    m_active_sink.reset();
 
     const auto dropped = m_dropped_packet_count.exchange(0, std::memory_order_relaxed);
     if(dropped > 0)
@@ -136,11 +147,7 @@ basic_cached_perfetto_engine<Backend>::stop()
         if(bytes.empty()) continue;
         try
         {
-            std::visit(
-                [source_pid, &bytes](auto& s) {
-                    s.on_source_drained(source_pid, std::move(bytes));
-                },
-                sink);
+            sink->on_source_drained(source_pid, std::move(bytes));
         } catch(...)
         {
             if(!first_exc) first_exc = std::current_exception();
@@ -149,7 +156,7 @@ basic_cached_perfetto_engine<Backend>::stop()
 
     try
     {
-        std::visit([](auto& s) { s.finalize(); }, sink);
+        sink->finalize();
     } catch(...)
     {
         if(!first_exc) first_exc = std::current_exception();

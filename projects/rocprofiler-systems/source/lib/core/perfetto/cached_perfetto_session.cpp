@@ -7,6 +7,11 @@
 #include "core/config.hpp"
 #include "core/output_file_registry.hpp"
 #include "core/perfetto/engine.hpp"
+#include "core/perfetto/fwd.hpp"
+#include "core/perfetto/sinks/append_mode.hpp"
+#include "core/perfetto/sinks/per_pid_file_sink.hpp"
+#include "core/perfetto/sinks/single_file_sink.hpp"
+#include "core/perfetto/sinks/trace_sink.hpp"
 #include "core/trace_cache/post_processor.hpp"
 #include "core/track_registry.hpp"
 #include "logger/debug.hpp"
@@ -36,13 +41,13 @@ rank_from_env() noexcept
     return 0;
 }
 
-single_file_sink
+std::unique_ptr<single_file_sink>
 make_merged_append_sink(output_file_registry& registry, std::size_t source_count)
 {
     const auto base_filename = config::get_perfetto_output_filename();
     const auto merged_path =
         (std::filesystem::path{ base_filename }.parent_path() / "merged.proto").string();
-    auto       sink        = single_file_sink{ registry, merged_path };
+    auto       sink        = std::make_unique<single_file_sink>(registry, merged_path);
     const auto env_rank    = rank_from_env();
     const auto seq_id_base = append_seq_id_base_for_rank(env_rank);
     if(!seq_id_base)
@@ -50,26 +55,25 @@ make_merged_append_sink(output_file_registry& registry, std::size_t source_count
         LOG_ERROR("cached Perfetto merged output skipped: launcher rank {} exceeds "
                   "the trusted_packet_sequence_id merge window",
                   env_rank);
-        sink.set_append_mode(append_mode_config{ .source_count = 0 });
+        sink->set_append_mode(append_mode_config{ .source_count = 0 });
         return sink;
     }
 
-    sink.set_append_mode(
+    sink->set_append_mode(
         append_mode_config{ .seq_id_base = *seq_id_base, .source_count = source_count });
     return sink;
 }
 
-std::unique_ptr<trace_sink>
+std::unique_ptr<trace_sink_interface>
 make_sink(output_file_registry& registry, pid_t root_pid, bool combine_traces,
           std::size_t source_count)
 {
     if(combine_traces)
     {
-        return std::make_unique<trace_sink>(
-            make_merged_append_sink(registry, source_count));
+        return make_merged_append_sink(registry, source_count);
     }
 
-    return std::make_unique<trace_sink>(per_pid_file_sink{ root_pid, registry });
+    return std::make_unique<per_pid_file_sink>(root_pid, registry);
 }
 }  // namespace
 
@@ -77,13 +81,13 @@ cached_perfetto_session::cached_perfetto_session(output_file_registry& registry,
                                                  pid_t root_pid, bool combine_traces,
                                                  const std::vector<int>&      source_pids,
                                                  trace_cache::post_processor& processor)
-: m_engine{ std::make_unique<cached_perfetto_engine>(
+: m_sink{ make_sink(registry, root_pid, combine_traces, source_pids.size()) }
+, m_engine{ std::make_unique<cached_perfetto_engine>(
       build_engine_config_from_settings()) }
-, m_sink{ make_sink(registry, root_pid, combine_traces, source_pids.size()) }
 , m_tracks{ std::make_unique<track_registry>() }
 {
     m_engine->init_sdk();
-    m_engine->start(*m_sink);
+    m_engine->start(m_sink);
     m_engine->preregister_pids(source_pids);
     processor.set_cached_perfetto_context(*m_engine, *m_tracks);
     m_started = true;

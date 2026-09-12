@@ -7,7 +7,11 @@
 #include <string>
 #include <string_view>
 
-namespace rocprofsys::core
+namespace rocprofsys
+{
+class output_file_registry;
+
+namespace core
 {
 enum class locked_append_status
 {
@@ -16,9 +20,6 @@ enum class locked_append_status
     lock_failed,
     write_failed,
 };
-
-[[nodiscard]] locked_append_status
-append_with_file_lock(const std::string& filename, const char* data, std::size_t size);
 
 [[nodiscard]] constexpr std::string_view
 status_name(locked_append_status status) noexcept
@@ -32,4 +33,12 @@ status_name(locked_append_status status) noexcept
     }
     return "unknown";
 }
-}  // namespace rocprofsys::core
+
+[[nodiscard]] bool
+write_proto_to(const std::string& filename, const char* data, std::size_t size,
+               output_file_registry& registry);
+
+[[nodiscard]] locked_append_status
+append_with_file_lock(const std::string& filename, const char* data, std::size_t size);
+}  // namespace core
+}  // namespace rocprofsys
