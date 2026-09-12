@@ -36,6 +36,8 @@ THE SOFTWARE.
 
 using __hip_uint32x4 = __NATIVE_VECTOR__(4, uint32_t);
 using __hip_uint32x8 = __NATIVE_VECTOR__(8, uint32_t);
+using __hip_int32x4 = __NATIVE_VECTOR__(4, int32_t);
+using __hip_int32x8 = __NATIVE_VECTOR__(8, int32_t);
 
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wshift-count-overflow" // we're going to be using overflow on purpose
@@ -73,8 +75,8 @@ union gfx1250_TDM_GROUP0
                 uint32_t m_scope_trait : 2;
                 uint32_t m_th :3;
                 uint32_t m_reserved_space : 20;
-                uint32_t m_gather_index_size : 1;
                 uint32_t m_gather_mode : 1;
+                uint32_t m_gather_index_size : 1;
             };
 
             uint32_t m_reserved0;
@@ -196,7 +198,7 @@ union gfx1250_TDM_GROUP1
             uint32_t m_sgpr7;
         };
     };
-    __hip_uint32x8 m_bitfield;
+    __hip_int32x8 m_bitfield;
 
     // setters for all fields
     void __device__ inline workgroupMask(uint32_t value)
@@ -268,16 +270,16 @@ union gfx1250_TDM_GROUP1
         m_tensor_dim1_lo = value & 0xFFFF;
         m_tensor_dim1_hi = (value >> 16);
     }
-    void __device__ inline tensorDim0Stride(uint32_t value)
+    void __device__ inline tensorDim0Stride(uint64_t value)
     {
         m_tensor_dim0_stride_lo = value & 0xFFFFFFFF;
         m_tensor_dim0_stride_hi = (value >> 32);
     }
 
-    void __device__ inline tensorDim1Stride(uint32_t value)
+    void __device__ inline tensorDim1Stride(uint64_t value)
     {
-        m_tensor_dim1_stride_lo = value & 0xFFFFFFFF;
-        m_tensor_dim1_stride_hi = (value >> 32);
+        m_tensor_dim1_stride_lo = value & 0xFFFF;
+        m_tensor_dim1_stride_hi = (value >> 16);
     }
 };
 
@@ -300,12 +302,27 @@ union gfx1250_TDM_GROUP2
             uint32_t m_sgpr3;
         };
     };
-    __hip_uint32x4 m_bitfield;
+    __hip_int32x4 m_bitfield;
+
+    void __device__ inline tensorDim2(uint32_t value)
+    {
+        m_tensor_dim2 = value;
+    }
+
+    void __device__ inline tensorDim3(uint32_t value)
+    {
+        m_tensor_dim3 = value;
+    }
 
     void __device__ inline tensorDim2Stride(uint64_t value)
     {
         m_tensor_dim2_stride_lo = value & 0xFFFFFFFF;
         m_tensor_dim2_stride_hi = value >> 32;
+    }
+
+    void __device__ inline tileDim3(uint32_t value)
+    {
+        m_tile_dim3 = value;
     }
 };
 
@@ -336,7 +353,7 @@ union gfx1250_TDM_GROUP3
         };
         uint32_t m_sgpr3_reserved;
     };
-    __hip_uint32x4 m_bitfield;
+    __hip_int32x4 m_bitfield;
 
     void __device__ inline tensorDim3Stride(uint64_t value)
     {
