@@ -8,7 +8,8 @@ subtrees:
 - entries:
   - file: what_is_hip
   - file: hip-7-changes
-  - file: faq
+  - file: frequently_asked_questions
+  - file: banner_fallback_test
 
 - caption: Install
   entries:
@@ -113,7 +114,7 @@ subtrees:
     title: List of deprecated APIs
   - file: reference/low_fp_types
     title: Low Precision Floating Point Types
-  - file: reference/hardware_features
+  - file: reference/gpu_hardware_features
 
 - caption: Tutorials
   entries:
