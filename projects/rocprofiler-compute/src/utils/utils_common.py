@@ -1163,6 +1163,7 @@ def create_temp_rocprofiler_metrics_path(sdk_config: dict[str, Any]) -> str:
     Returns:
         Path to the temporary directory (for ROCPROFILER_METRICS_PATH env var).
     """
+    sdk_config = omit_sqg_counters_from_sdk_config(sdk_config)
     tmpfile_parent = Path(
         tempfile.mkdtemp(prefix="rocprof_compute_sdk_config_", dir="/tmp")
     )
