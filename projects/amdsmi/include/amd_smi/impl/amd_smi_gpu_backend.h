@@ -17,63 +17,70 @@ class IGPUBackend {
  public:
   virtual ~IGPUBackend() = default;
 
-  virtual amdsmi_status_t GetAsicInfo(amdsmi_asic_info_t*) { return AMDSMI_STATUS_NOT_SUPPORTED; }
-  virtual amdsmi_status_t GetBoardInfo(amdsmi_board_info_t*) { return AMDSMI_STATUS_NOT_SUPPORTED; }
-  virtual amdsmi_status_t GetKfdInfo(amdsmi_kfd_info_t*) { return AMDSMI_STATUS_NOT_SUPPORTED; }
-  virtual amdsmi_status_t GetVramInfo(amdsmi_vram_info_t*) { return AMDSMI_STATUS_NOT_SUPPORTED; }
-  virtual amdsmi_status_t GetMemoryTotal(amdsmi_memory_type_t, uint64_t*) {
+  virtual amdsmi_status_t get_asic_info(amdsmi_asic_info_t*) { return AMDSMI_STATUS_NOT_SUPPORTED; }
+  virtual amdsmi_status_t get_board_info(amdsmi_board_info_t*) {
     return AMDSMI_STATUS_NOT_SUPPORTED;
   }
-  virtual amdsmi_status_t GetMemoryUsage(amdsmi_memory_type_t, uint64_t*) {
+  virtual amdsmi_status_t get_kfd_info(amdsmi_kfd_info_t*) { return AMDSMI_STATUS_NOT_SUPPORTED; }
+  virtual amdsmi_status_t get_vram_info(amdsmi_vram_info_t*) { return AMDSMI_STATUS_NOT_SUPPORTED; }
+  virtual amdsmi_status_t get_memory_total(amdsmi_memory_type_t, uint64_t*) {
     return AMDSMI_STATUS_NOT_SUPPORTED;
   }
-  virtual amdsmi_status_t GetTempMetric(amdsmi_temperature_type_t, amdsmi_temperature_metric_t,
-                                        int64_t*) {
+  virtual amdsmi_status_t get_memory_usage(amdsmi_memory_type_t, uint64_t*) {
     return AMDSMI_STATUS_NOT_SUPPORTED;
   }
-  virtual amdsmi_status_t GetVoltMetric(amdsmi_voltage_type_t, amdsmi_voltage_metric_t, int64_t*) {
+  virtual amdsmi_status_t get_temp_metric(amdsmi_temperature_type_t, amdsmi_temperature_metric_t,
+                                          int64_t*) {
     return AMDSMI_STATUS_NOT_SUPPORTED;
   }
-  virtual amdsmi_status_t GetPowerInfo(amdsmi_power_info_t*) { return AMDSMI_STATUS_NOT_SUPPORTED; }
-  virtual amdsmi_status_t GetGpuActivity(amdsmi_engine_usage_t*) {
+  virtual amdsmi_status_t get_volt_metric(amdsmi_voltage_type_t, amdsmi_voltage_metric_t,
+                                          int64_t*) {
     return AMDSMI_STATUS_NOT_SUPPORTED;
   }
-  virtual amdsmi_status_t GetBusyPercent(uint32_t*) { return AMDSMI_STATUS_NOT_SUPPORTED; }
-  virtual amdsmi_status_t GetClockInfo(amdsmi_clk_type_t, amdsmi_clk_info_t*) {
+  virtual amdsmi_status_t get_power_info(amdsmi_power_info_t*) {
     return AMDSMI_STATUS_NOT_SUPPORTED;
   }
-  virtual amdsmi_status_t GetPcieInfo(amdsmi_pcie_info_t*) { return AMDSMI_STATUS_NOT_SUPPORTED; }
-  virtual amdsmi_status_t GetDriverInfo(amdsmi_driver_info_t*) {
+  virtual amdsmi_status_t get_gpu_activity(amdsmi_engine_usage_t*) {
     return AMDSMI_STATUS_NOT_SUPPORTED;
   }
-  virtual amdsmi_status_t GetVbiosInfo(amdsmi_vbios_info_t*) { return AMDSMI_STATUS_NOT_SUPPORTED; }
-  virtual amdsmi_status_t GetUuid(unsigned int*, char*) { return AMDSMI_STATUS_NOT_SUPPORTED; }
-  virtual amdsmi_status_t GetGpuCacheInfo(amdsmi_gpu_cache_info_t*) {
+  virtual amdsmi_status_t get_busy_percent(uint32_t*) { return AMDSMI_STATUS_NOT_SUPPORTED; }
+  virtual amdsmi_status_t get_clock_info(amdsmi_clk_type_t, amdsmi_clk_info_t*) {
     return AMDSMI_STATUS_NOT_SUPPORTED;
   }
-  virtual amdsmi_status_t GetFwInfo(amdsmi_fw_info_t*) { return AMDSMI_STATUS_NOT_SUPPORTED; }
-  virtual amdsmi_status_t GetGpuMetricsInfo(amdsmi_gpu_metrics_t*) {
+  virtual amdsmi_status_t get_pcie_info(amdsmi_pcie_info_t*) { return AMDSMI_STATUS_NOT_SUPPORTED; }
+  virtual amdsmi_status_t get_driver_info(amdsmi_driver_info_t*) {
     return AMDSMI_STATUS_NOT_SUPPORTED;
   }
-  virtual amdsmi_status_t GetPowerCapInfo(amdsmi_power_cap_info_t*) {
+  virtual amdsmi_status_t get_vbios_info(amdsmi_vbios_info_t*) {
     return AMDSMI_STATUS_NOT_SUPPORTED;
   }
-  virtual amdsmi_status_t GetFanRpms(uint32_t, int64_t*) { return AMDSMI_STATUS_NOT_SUPPORTED; }
-  virtual amdsmi_status_t GetFanSpeed(uint32_t, int64_t*) { return AMDSMI_STATUS_NOT_SUPPORTED; }
-  virtual amdsmi_status_t GetFanSpeedMax(uint32_t, uint64_t*) {
+  virtual amdsmi_status_t get_uuid(unsigned int*, char*) { return AMDSMI_STATUS_NOT_SUPPORTED; }
+  virtual amdsmi_status_t get_gpu_cache_info(amdsmi_gpu_cache_info_t*) {
     return AMDSMI_STATUS_NOT_SUPPORTED;
   }
-  virtual amdsmi_status_t GetVcnBusyPercent(uint32_t*) { return AMDSMI_STATUS_NOT_SUPPORTED; }
-  virtual amdsmi_status_t AllocFabricTelemetry(uint32_t, amdsmi_fabric_telemetry_t**) {
+  virtual amdsmi_status_t get_fw_info(amdsmi_fw_info_t*) { return AMDSMI_STATUS_NOT_SUPPORTED; }
+  virtual amdsmi_status_t get_gpu_metrics_info(amdsmi_gpu_metrics_t*) {
     return AMDSMI_STATUS_NOT_SUPPORTED;
   }
-  virtual amdsmi_status_t GetFabricTelemetryData(amdsmi_fabric_telemetry_t*) {
+  virtual amdsmi_status_t get_power_cap_info(amdsmi_power_cap_info_t*) {
     return AMDSMI_STATUS_NOT_SUPPORTED;
   }
-  virtual amdsmi_status_t FreeFabricTelemetry(amdsmi_fabric_telemetry_t*) {
+  virtual amdsmi_status_t get_fan_rpms(uint32_t, int64_t*) { return AMDSMI_STATUS_NOT_SUPPORTED; }
+  virtual amdsmi_status_t get_fan_speed(uint32_t, int64_t*) { return AMDSMI_STATUS_NOT_SUPPORTED; }
+  virtual amdsmi_status_t get_fan_speed_max(uint32_t, uint64_t*) {
     return AMDSMI_STATUS_NOT_SUPPORTED;
   }
-  virtual amdsmi_status_t GetGpuFabricInfo(amdsmi_fabric_info_t*) {
+  virtual amdsmi_status_t get_vcn_busy_percent(uint32_t*) { return AMDSMI_STATUS_NOT_SUPPORTED; }
+  virtual amdsmi_status_t alloc_fabric_telemetry(uint32_t, amdsmi_fabric_telemetry_t**) {
+    return AMDSMI_STATUS_NOT_SUPPORTED;
+  }
+  virtual amdsmi_status_t get_fabric_telemetry_data(amdsmi_fabric_telemetry_t*) {
+    return AMDSMI_STATUS_NOT_SUPPORTED;
+  }
+  virtual amdsmi_status_t free_fabric_telemetry(amdsmi_fabric_telemetry_t*) {
+    return AMDSMI_STATUS_NOT_SUPPORTED;
+  }
+  virtual amdsmi_status_t get_gpu_fabric_info(amdsmi_fabric_info_t*) {
     return AMDSMI_STATUS_NOT_SUPPORTED;
   }
 
