@@ -19,7 +19,8 @@ from utils import schema
 from utils.file_io import validate_kernel_filter_ids
 from utils.logger import console_error, console_warning, demarcate
 from utils.metrics.evaluation_pipeline import eval_metric
-from utils.metrics.expression import gen_counter_list
+from utils.metrics.expression import gen_counter_list, parse_weighted_avg_submetrics
+from utils.metrics.weighted_avg import WEIGHTED_AVG_ATTR
 from utils.pattern_matching import fnmatch_glob_matches
 from utils.specs import MachineSpecs
 from utils.utils_common import (
@@ -222,6 +223,8 @@ def _build_metric_table_df(
 
     rows: list[list[Any]] = []
     expressions: list[str] = []
+    weighted_avg_specs: dict[str, dict[str, Any]] = {}
+    weighted_avg_subs: dict[str, list[str]] = {}
     metric_entries = data_config["metric"]
     for i, (key, entries) in enumerate(metric_entries.items()):
         metric_idx = f"{table_data_source_idx}.{i}"
@@ -234,6 +237,15 @@ def _build_metric_table_df(
             profile_panel_filter=profile_panel_filter,
         ):
             continue
+
+        avg_entry = entries.get("avg")
+        if isinstance(avg_entry, str):
+            weighted_subs = parse_weighted_avg_submetrics(avg_entry)
+            if weighted_subs:
+                weighted_avg_subs[metric_idx] = weighted_subs
+        weighted_meta = entries.get("_weighted_avg")
+        if isinstance(weighted_meta, dict):
+            weighted_avg_specs[metric_idx] = weighted_meta
 
         values: list[Any] = [metric_idx, key]
         eqn_content: list[Any] = []
@@ -277,6 +289,8 @@ def _build_metric_table_df(
 
     df = pd.DataFrame(rows, columns=headers)
     df.set_index("Metric_ID", inplace=True)
+    df.attrs[WEIGHTED_AVG_ATTR] = weighted_avg_specs
+    df.attrs["weighted_avg_subs"] = weighted_avg_subs
     return df, expressions
 
 

@@ -21,6 +21,7 @@ from utils.metrics.noise_clamper import (
     get_noise_clamp_warnings,
     print_noise_clamp_summary,
 )
+from utils.metrics.weighted_avg import apply_weighted_avg_metrics
 from utils.mi_gpu_spec import mi_gpu_specs
 from utils.utils_analysis import PEAK_COL_PREFERENCE, VALUE_COL_PREFERENCE
 from utils.utils_common import SUPPORTED_FIELD
@@ -274,6 +275,14 @@ def eval_metric(
                 f"Variance corrected for metric: {row_id} {metric_name} {col}"
             )
         dfs[df_id].loc[row_id, col] = eval_result
+
+    apply_weighted_avg_metrics(
+        dfs,
+        dfs_type,
+        raw_pmc_df,
+        sys_vars,
+        empirical_peaks,
+    )
 
     # Print aggregated summary of any noise clamping warnings
     print_noise_clamp_summary()
