@@ -406,9 +406,10 @@ struct RunWorkBatch {
       int subtn = work->nWarps * WARP_SIZE;
 #ifdef ENABLE_WARP_SPEED
       if (tid < subtn) {
+        int ch = ncclShmem.warpChannelId[tid / WARP_SIZE];
         if (ncclShmem.warpComm == 0 || Algo != NCCL_ALGO_RING)
           RunWorkColl<Fn, T, RedOp, Algo, Proto>().run(tid, subtn, work);
-        else if (ncclShmem.warpChannelId[tid / WARP_SIZE] >= 0)
+        else if (ch >= 0 && ch >= work->channelLo && ch <= work->channelHi)
           RunWorkColl<Fn, T, RedOp, Algo, Proto>().run(tid % WARP_SIZE, WARP_SIZE, work);
       }
 #else
@@ -469,6 +470,12 @@ __device__ __forceinline__ void ncclKernelMain(struct ncclDevKernelArgs const* a
   int localWarpId = tid / WARP_SIZE;
   int globalWarpId = (warpCount * blockIdx.x) + localWarpId;
   int laneId = tid % WARP_SIZE;
+  // Under WarpSpeed the launch grid is compressed: block b covers logical
+  // channels [b*warpsPerBlock .. (b+1)*warpsPerBlock-1]. Map blockIdx.x to
+  // the lead warp's index among enabled channels for channelId/workCounter.
+  int channelNth = args->warpLevelComm ? (warpCount * blockIdx.x) : blockIdx.x;
+#else
+  int channelNth = blockIdx.x;
 #endif
   // Copy kernel args to shmem and then only read those. Otherwise the compiler
   // will end up putting the args into thread local stack which is very wasteful.
@@ -491,7 +498,7 @@ __device__ __forceinline__ void ncclKernelMain(struct ncclDevKernelArgs const* a
       if (args->channelMask.masks[i] & (1ull << x)) {
         y = __popcll(args->channelMask.masks[i] & ((1ull << x) - 1));
         y = total + y;
-        if (blockIdx.x == y) {
+        if (channelNth == y) {
           // channelId is the absolute bit position in the global mask:
           // i*CHANNELS_PER_MASK_WORD + x. Using `x + total` was only correct
           // when prior mask words were densely packed (which broke for sparse
@@ -506,7 +513,7 @@ __device__ __forceinline__ void ncclKernelMain(struct ncclDevKernelArgs const* a
         if (args->channelMask.masks[i] & (1ull << x)) {
           y = __popcll(args->channelMask.masks[i] & ((1ull << x) - 1));
           y = y + total;
-          if (blockIdx.x == y) {
+          if (channelNth == y) {
             ncclShmem.channelId = x + i * CHANNELS_PER_MASK_WORD;
             break;
           }
@@ -571,7 +578,14 @@ __device__ __forceinline__ void ncclKernelMain(struct ncclDevKernelArgs const* a
       // Coverity reports a possible thread divergence due to not all threads participating in the collective.
       // However, the code ensures that the participation is on a per-warp basis.
       // coverity[device_thread_diverged:FALSE]
+#ifdef ENABLE_WARP_SPEED
+      // batchZero is dense in enabled-channel order (finishPlan), not keyed by
+      // absolute channel id. WarpSpeed packs warpCount logical channels per block.
+      int batchIx = args->warpLevelComm ? (warpCount * blockIdx.x) : blockIdx.x;
+      loadWorkBatchToShmem(subtid, subtn, args, batchIx);
+#else
       loadWorkBatchToShmem(subtid, subtn, args, /*batchIx=*/blockIdx.x);
+#endif
     }
     break;
   }

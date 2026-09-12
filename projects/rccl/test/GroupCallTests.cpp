@@ -7,6 +7,57 @@
 
 namespace RcclUnitTesting
 {
+#ifdef ENABLE_WARP_SPEED
+  // Use a per-collective pattern offset so two same-shape AllGathers cannot pass
+  // by accidentally sharing or exchanging their buffers.
+  static ErrCode PrepareTaggedAllGatherData(CollectiveArgs& collArgs)
+  {
+    CHECK_CALL(CheckAllocation(collArgs));
+    if (collArgs.totalRanks * collArgs.numInputElements != collArgs.numOutputElements)
+    {
+      TEST_ERROR("# of output elements must be total ranks * # input elements for AllGather");
+      return TEST_FAIL;
+    }
+
+    size_t const numInputBytes  = collArgs.numInputElements * DataTypeToBytes(collArgs.dataType);
+    size_t const numOutputBytes = collArgs.numOutputElements * DataTypeToBytes(collArgs.dataType);
+    CHECK_CALL(collArgs.inputGpu.ClearGpuMem(numInputBytes));
+    CHECK_CALL(collArgs.outputGpu.ClearGpuMem(numOutputBytes));
+
+    PtrUnion result;
+    CHECK_CALL(result.Attach(collArgs.expected.ptr));
+    CHECK_CALL(result.ClearCpuMem(numOutputBytes));
+
+    PtrUnion tempInputCpu;
+    CHECK_CALL(tempInputCpu.Attach(collArgs.outputCpu.ptr));
+
+    int const patternOffset = collArgs.options.inputConstantValue;
+    for (int rank = 0; rank < collArgs.totalRanks; ++rank)
+    {
+      CHECK_CALL(tempInputCpu.FillPattern(collArgs.dataType, collArgs.numInputElements, patternOffset + rank, false));
+      if (rank == collArgs.globalRank)
+      {
+        CHECK_HIP(hipMemcpy(collArgs.inputGpu.ptr, tempInputCpu.ptr, numInputBytes, hipMemcpyHostToDevice));
+      }
+      memcpy(result.I1 + rank * numInputBytes, tempInputCpu.ptr, numInputBytes);
+    }
+    return TEST_SUCCESS;
+  }
+
+  static void RequireGfx95EightRank(TestBed& testBed, int totalRanks)
+  {
+    if (!testBed.ev.isGfx95)
+    {
+      GTEST_SKIP() << "WarpSpeed multi-collective tests require gfx95 GPUs";
+    }
+    auto const& numGpusList = testBed.ev.GetNumGpusList();
+    if (std::find(numGpusList.begin(), numGpusList.end(), totalRanks) == numGpusList.end())
+    {
+      GTEST_SKIP() << "Test requires exactly 8 ranks; adjust UT_MIN_GPUS/UT_MAX_GPUS if 8 GPUs are available";
+    }
+  }
+#endif
+
   // Test identical collectives within the same group call
   TEST(GroupCall, Identical)
   {
@@ -669,4 +720,167 @@ namespace RcclUnitTesting
     }
     testBed.Finalize();
   }
+
+#ifdef ENABLE_WARP_SPEED
+  // Two AllGathers in one group with WarpSpeed forced on. Exercises packed-warp
+  // batch indexing when collOpCount > 1 and distinct work lives on higher channels.
+  TEST(GroupCall, WarpSpeedMultipleAllGatherEnabled)
+  {
+    TestBed testBed;
+
+    int const totalRanks      = 8;
+    int const numCollPerGroup = 2;
+    size_t const numElements  = 4194304;
+    bool const inPlace        = false;
+    bool const useManagedMem  = false;
+
+    RequireGfx95EightRank(testBed, totalRanks);
+
+    std::vector<ncclDataType_t> dataTypes;
+    testBed.GetSupportedDataTypes(dataTypes, {ncclBfloat16});
+    if (dataTypes.empty())
+    {
+      GTEST_SKIP() << "ncclBfloat16 excluded by UT_DATATYPES";
+    }
+
+    setenv("RCCL_WARP_SPEED_FORCE_ENABLE", "1", 1);
+
+    bool isCorrect = true;
+    for (int isMultiProcess : testBed.ev.GetIsMultiProcessList())
+    {
+      int const numProcesses = isMultiProcess ? totalRanks : 1;
+      auto const& gpuPriorityOrder = testBed.ev.GetGpuPriorityOrder();
+      testBed.InitComms(TestBed::GetDeviceIdsList(numProcesses, totalRanks, gpuPriorityOrder), numCollPerGroup);
+
+      if (testBed.ev.showNames)
+        TEST_INFO("%s 8-ranks GroupCall WarpSpeedMultipleAllGatherEnabled", isMultiProcess ? "MP" : "SP");
+
+      for (int collIdx = 0; collIdx < numCollPerGroup; ++collIdx)
+      {
+        OptionalColArgs options;
+        options.inputConstantValue = collIdx * totalRanks;
+        testBed.SetCollectiveArgs(ncclCollAllGather, dataTypes[0], numElements, totalRanks * numElements, options,
+                                  collIdx);
+      }
+
+      testBed.AllocateMem(inPlace, useManagedMem);
+      testBed.PrepareData(/*groupId=*/-1, /*collId=*/-1, /*rank=*/-1, PrepareTaggedAllGatherData);
+      testBed.ExecuteCollectives();
+      testBed.ValidateResults(isCorrect);
+      testBed.DeallocateMem();
+      testBed.DestroyComms();
+    }
+
+    unsetenv("RCCL_WARP_SPEED_FORCE_ENABLE");
+    testBed.Finalize();
+  }
+
+  // Two AllReduces in one group with WarpSpeed forced on.
+  TEST(GroupCall, WarpSpeedMultipleAllReduceEnabled)
+  {
+    TestBed testBed;
+
+    int const totalRanks      = 8;
+    int const numCollPerGroup = 2;
+    size_t const numElements  = 4194304;
+    bool const inPlace        = false;
+    bool const useManagedMem  = false;
+
+    RequireGfx95EightRank(testBed, totalRanks);
+
+    std::vector<ncclDataType_t> dataTypes;
+    testBed.GetSupportedDataTypes(dataTypes, {ncclFloat});
+    if (dataTypes.empty())
+    {
+      GTEST_SKIP() << "ncclFloat excluded by UT_DATATYPES";
+    }
+
+    setenv("RCCL_WARP_SPEED_FORCE_ENABLE", "1", 1);
+
+    bool isCorrect = true;
+    for (int isMultiProcess : testBed.ev.GetIsMultiProcessList())
+    {
+      int const numProcesses = isMultiProcess ? totalRanks : 1;
+      auto const& gpuPriorityOrder = testBed.ev.GetGpuPriorityOrder();
+      testBed.InitComms(TestBed::GetDeviceIdsList(numProcesses, totalRanks, gpuPriorityOrder), numCollPerGroup);
+
+      if (testBed.ev.showNames)
+        TEST_INFO("%s 8-ranks GroupCall WarpSpeedMultipleAllReduceEnabled", isMultiProcess ? "MP" : "SP");
+
+      for (int collIdx = 0; collIdx < numCollPerGroup; ++collIdx)
+      {
+        OptionalColArgs options;
+        options.redOp = ncclSum;
+        options.inputConstantValue = collIdx + 1;
+        testBed.SetCollectiveArgs(ncclCollAllReduce, dataTypes[0], numElements, numElements, options, collIdx);
+      }
+
+      testBed.AllocateMem(inPlace, useManagedMem);
+      testBed.PrepareData();
+      testBed.ExecuteCollectives();
+      testBed.ValidateResults(isCorrect);
+      testBed.DeallocateMem();
+      testBed.DestroyComms();
+    }
+
+    unsetenv("RCCL_WARP_SPEED_FORCE_ENABLE");
+    testBed.Finalize();
+  }
+
+  // AllGather + AllReduce in one group with WarpSpeed forced on.
+  TEST(GroupCall, WarpSpeedMixedAllGatherAllReduceEnabled)
+  {
+    TestBed testBed;
+
+    int const totalRanks      = 8;
+    int const numCollPerGroup = 2;
+    size_t const agElements   = 4194304;
+    size_t const arElements   = 4194304;
+    bool const inPlace        = false;
+    bool const useManagedMem  = false;
+
+    RequireGfx95EightRank(testBed, totalRanks);
+
+    std::vector<ncclDataType_t> dataTypes;
+    testBed.GetSupportedDataTypes(dataTypes, {ncclBfloat16});
+    if (dataTypes.empty())
+    {
+      GTEST_SKIP() << "ncclBfloat16 excluded by UT_DATATYPES";
+    }
+
+    setenv("RCCL_WARP_SPEED_FORCE_ENABLE", "1", 1);
+
+    bool isCorrect = true;
+    for (int isMultiProcess : testBed.ev.GetIsMultiProcessList())
+    {
+      int const numProcesses = isMultiProcess ? totalRanks : 1;
+      auto const& gpuPriorityOrder = testBed.ev.GetGpuPriorityOrder();
+      testBed.InitComms(TestBed::GetDeviceIdsList(numProcesses, totalRanks, gpuPriorityOrder), numCollPerGroup);
+
+      if (testBed.ev.showNames)
+        TEST_INFO("%s 8-ranks GroupCall WarpSpeedMixedAllGatherAllReduceEnabled", isMultiProcess ? "MP" : "SP");
+
+      OptionalColArgs agOptions;
+      agOptions.inputConstantValue = 0;
+      testBed.SetCollectiveArgs(ncclCollAllGather, dataTypes[0], agElements, totalRanks * agElements, agOptions,
+                                /*collIdx=*/0);
+
+      OptionalColArgs arOptions;
+      arOptions.redOp = ncclSum;
+      arOptions.inputConstantValue = 3;
+      testBed.SetCollectiveArgs(ncclCollAllReduce, dataTypes[0], arElements, arElements, arOptions, /*collIdx=*/1);
+
+      testBed.AllocateMem(inPlace, useManagedMem);
+      testBed.PrepareData(/*groupId=*/-1, /*collId=*/0, /*rank=*/-1, PrepareTaggedAllGatherData);
+      testBed.PrepareData(/*groupId=*/-1, /*collId=*/1, /*rank=*/-1, nullptr);
+      testBed.ExecuteCollectives();
+      testBed.ValidateResults(isCorrect);
+      testBed.DeallocateMem();
+      testBed.DestroyComms();
+    }
+
+    unsetenv("RCCL_WARP_SPEED_FORCE_ENABLE");
+    testBed.Finalize();
+  }
+#endif
 }

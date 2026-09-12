@@ -1530,7 +1530,8 @@ void rcclSetWarpSpeedCUs(struct ncclComm* comm, int algo, int threadsPerBlock, i
   }
 }
 
-bool rcclWarpSpeedSupported(struct ncclComm* comm, struct ncclKernelPlan* plan) {
+bool rcclWarpSpeedSupported(struct ncclComm* comm, struct ncclKernelPlan* plan,
+                            struct ncclTaskColl* collHead, int nCollTasks) {
   if (!comm->topo->warpSpeedEnabled || plan->isSymColl) {
     return false;
   }
@@ -1542,16 +1543,17 @@ bool rcclWarpSpeedSupported(struct ncclComm* comm, struct ncclKernelPlan* plan) 
   // 3. or any collective task is not using RING algorithm
   bool hasP2p = !ncclIntruQueueEmpty(&plan->p2pTaskQueue);
   bool hasBcast = !ncclIntruQueueEmpty(&plan->bcastTaskQueue);
-  bool hasNonRing = false;
-  struct ncclTaskColl* task = ncclIntruQueueHead(&plan->collTaskQueue);
-  while (task != nullptr) {
-    if (task->algorithm != NCCL_ALGO_RING || !(task->useWarpSpeed)) {
-      hasNonRing = true;
-      break;
-    }
-    task = task->next;
+  while (collHead != nullptr && nCollTasks != 0) {
+    if (collHead->algorithm != NCCL_ALGO_RING || !collHead->useWarpSpeed) return false;
+    collHead = collHead->next;
+    if (nCollTasks > 0) nCollTasks--;
   }
-  return (!hasP2p && !hasBcast && !hasNonRing);
+  return !hasP2p && !hasBcast && nCollTasks <= 0;
+}
+
+bool rcclWarpSpeedSupported(struct ncclComm* comm, struct ncclKernelPlan* plan) {
+  return rcclWarpSpeedSupported(comm, plan, ncclIntruQueueHead(&plan->collTaskQueue),
+                                /*nCollTasks=*/-1);
 }
 
 bool rcclIsAboveWarpSpeedThreshold(struct ncclComm* comm, struct ncclTaskColl* info, size_t nBytes) {

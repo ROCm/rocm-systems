@@ -1997,11 +1997,76 @@ TEST(RcclCeGraphLatch, NeverLatchedAllowsCeAllReduceByDefault)
 // WarpSpeed enablement / channel-math helpers (rccl_wrap.cc)
 //
 // These exercise the pure decision/tuning helpers that gate WarpSpeed:
+//   - rcclWarpSpeedSupported      (plan-wide collective eligibility)
 //   - rcclCanUseWarpSpeedAuto     (arch/node/env eligibility)
 //   - rcclGetMaxWarpsPerBlock     (warps-per-block multiplier)
 //   - rcclWarpSpeedComputeNChannels (connect.cc channel math)
 //   - rcclWarpSpeedAdjustChannels   (enqueue.cc per-collective channel adj.)
 // ---------------------------------------------------------------------------
+
+TEST(Rcclwrap, WarpSpeedSupported_AllEligible)
+{
+    ncclComm comm{};
+    auto topo = std::make_unique<ncclTopoSystem>();
+    ncclKernelPlan plan{};
+    comm.topo = topo.get();
+    topo->warpSpeedEnabled = true;
+    ncclIntruQueueConstruct(&plan.p2pTaskQueue);
+    ncclIntruQueueConstruct(&plan.bcastTaskQueue);
+
+    ncclTaskColl first{};
+    ncclTaskColl second{};
+    first.algorithm     = NCCL_ALGO_RING;
+    first.useWarpSpeed  = true;
+    first.next          = &second;
+    second.algorithm    = NCCL_ALGO_RING;
+    second.useWarpSpeed = true;
+
+    EXPECT_TRUE(rcclWarpSpeedSupported(&comm, &plan, &first, /*nCollTasks=*/2));
+}
+
+TEST(Rcclwrap, WarpSpeedSupported_RejectsIneligibleTask)
+{
+    ncclComm comm{};
+    auto topo = std::make_unique<ncclTopoSystem>();
+    ncclKernelPlan plan{};
+    comm.topo = topo.get();
+    topo->warpSpeedEnabled = true;
+    ncclIntruQueueConstruct(&plan.p2pTaskQueue);
+    ncclIntruQueueConstruct(&plan.bcastTaskQueue);
+
+    ncclTaskColl first{};
+    ncclTaskColl second{};
+    first.algorithm     = NCCL_ALGO_RING;
+    first.useWarpSpeed  = true;
+    first.next          = &second;
+    second.algorithm    = NCCL_ALGO_RING;
+    second.useWarpSpeed = false;
+
+    EXPECT_FALSE(rcclWarpSpeedSupported(&comm, &plan, &first, /*nCollTasks=*/2));
+}
+
+TEST(Rcclwrap, WarpSpeedSupported_OnlyChecksBudgetedPrefix)
+{
+    ncclComm comm{};
+    auto topo = std::make_unique<ncclTopoSystem>();
+    ncclKernelPlan plan{};
+    comm.topo = topo.get();
+    topo->warpSpeedEnabled = true;
+    ncclIntruQueueConstruct(&plan.p2pTaskQueue);
+    ncclIntruQueueConstruct(&plan.bcastTaskQueue);
+
+    ncclTaskColl first{};
+    ncclTaskColl excluded{};
+    first.algorithm      = NCCL_ALGO_RING;
+    first.useWarpSpeed   = true;
+    first.next           = &excluded;
+    excluded.algorithm   = NCCL_ALGO_RING;
+    excluded.useWarpSpeed = false;
+
+    EXPECT_TRUE(rcclWarpSpeedSupported(&comm, &plan, &first, /*nCollTasks=*/1));
+    EXPECT_FALSE(rcclWarpSpeedSupported(&comm, &plan, &first, /*nCollTasks=*/-1));
+}
 
 // rcclCanUseWarpSpeedAuto: gfx950 single-node with auto mode on -> eligible.
 TEST(Rcclwrap, CanUseWarpSpeedAuto_Gfx950SingleNode_True)
