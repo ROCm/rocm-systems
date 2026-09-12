@@ -1680,7 +1680,7 @@ ib_recv:
         }
 #endif
 #if defined(__HIP_PLATFORM_AMD__)
-        if (!gpuFlushRegistered) {
+        if (!gpuFlushRegistered && ncclCuMemEnable()) {
           // The cuMem attempt above may have left a buffer behind before failing.
           (void)ncclIbFreeGpuFlushMem(&rCommDev->gpuFlush);
 #if defined(HIP_UNCACHED_MEMORY)
