@@ -1315,13 +1315,16 @@
       "extends": "fault_inject_multithread",
       "command_args": "--net_ib_nthreads=4"
     },
-    "fault_recovery_nightly_drift": {
+    "fault_recovery_base": {
       "extends": "fault_multithread_base",
       "timeout": 900,
       "command_args": "--net_ib_nthreads=2",
       "env_variables": {
         "NCCL_IB_RESILIENCY_PORT_RECOVERY": "1"
-      },
+      }
+    },
+    "fault_recovery_nightly_drift": {
+      "extends": "fault_recovery_base",
       "tests": [
         {
           "name": "FaultInj_MultiThread_PostRecoveryPingPongHoldsSync",
@@ -1331,12 +1334,7 @@
       ]
     },
     "fault_recovery_multithread_2": {
-      "extends": "fault_multithread_base",
-      "timeout": 900,
-      "command_args": "--net_ib_nthreads=2",
-      "env_variables": {
-        "NCCL_IB_RESILIENCY_PORT_RECOVERY": "1"
-      },
+      "extends": "fault_recovery_base",
       "tests": [
         {
           "name": "FaultInj_MultiThread_RecoverySuccessRestoresTraffic",
