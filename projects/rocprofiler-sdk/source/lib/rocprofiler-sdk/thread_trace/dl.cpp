@@ -125,12 +125,15 @@ AQLProfileDL::AQLProfileDL()
     // and would not see handles registered by the vendored aqlprofile_att_create_packets.
     get_buffer_packets_fn   = &aqlprofile_att_get_buffer_packets;
     update_buffer_status_fn = &aqlprofile_att_update_buffer_status;
+    get_gpu_clock_fn        = &aqlprofile_att_get_gpu_clock;
 #else
     // External aqlprofile: load symbols from libhsa-amd-aqlprofile64.so
     get_buffer_packets_fn = reinterpret_cast<GetBufferPacketsFn*>(
         dlsym(RTLD_DEFAULT, "aqlprofile_att_get_buffer_packets"));
     update_buffer_status_fn = reinterpret_cast<UpdateBufferStatusFn*>(
         dlsym(RTLD_DEFAULT, "aqlprofile_att_update_buffer_status"));
+    get_gpu_clock_fn =
+        reinterpret_cast<GetGPUClockFn*>(dlsym(RTLD_DEFAULT, "aqlprofile_att_get_gpu_clock"));
 
     if(valid()) return;
 
@@ -155,6 +158,8 @@ AQLProfileDL::AQLProfileDL()
         reinterpret_cast<GetBufferPacketsFn*>(dlsym(handle, "aqlprofile_att_get_buffer_packets"));
     update_buffer_status_fn = reinterpret_cast<UpdateBufferStatusFn*>(
         dlsym(handle, "aqlprofile_att_update_buffer_status"));
+    get_gpu_clock_fn =
+        reinterpret_cast<GetGPUClockFn*>(dlsym(handle, "aqlprofile_att_get_gpu_clock"));
 #endif
 }
 

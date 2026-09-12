@@ -458,6 +458,12 @@ typedef hsa_status_t (*aqlprofile_pmc_data_callback_t)(aqlprofile_pmc_event_t ev
                                                        uint64_t               counter_value,
                                                        void*                  userdata);
 
+typedef struct aqlprofile_att_gpu_clock_t
+{
+    uint64_t start;   ///< Most recent start-packet clock.
+    uint64_t latest;  ///< Most recent swap- or stop-packet clock.
+} aqlprofile_att_gpu_clock_t;
+
 /**
  * @brief Data callback for thread trace. This will be called at least once per shader engine
  * @param[in] shader Shader Engine ID
@@ -628,6 +634,20 @@ typedef struct aqlprofile_att_buffer_status_t
     bool     error;
     uint64_t read_offset;
 } aqlprofile_att_buffer_status_t;
+
+/**
+ * @brief Read GPU clocks written by the ATT start/stop/swap packets.
+ *
+ * This query only reads the trace control buffer and does not update buffer status.
+ *
+ * @param[out] out Latest GPU clock values.
+ * @param[in] handle Handle returned by aqlprofile_att_create_packets().
+ * @param[in] shader_engine_id Shader engine (SE) ID.
+ */
+hsa_status_t
+aqlprofile_att_get_gpu_clock(aqlprofile_att_gpu_clock_t* out,
+                             aqlprofile_handle_t         handle,
+                             int                         shader_engine_id);
 
 /**
  * @brief Fn to retrieve buffer status.
