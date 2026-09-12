@@ -209,6 +209,7 @@ had become before this map existed.
 | `src/sym_kernels.cc` | `fakes/sym_kernels_fakes.cc` |
 | `src/transport/*`, `src/plugin/net.cc` | `fakes/transport_stubs.cc` |
 | libc (`gethostname`, `dladdr`) | `fakes/libc_interposers.cc` |
+| `src/ras/client.cc`'s libc surface (`write`/`read`/`close`/`socket`/`connect`/`setsockopt`/`getaddrinfo`/`freeaddrinfo`/`getnameinfo`/`gai_strerror`/`fwrite`/`fflush`/`perror`/`exit`) | `fakes/libc_fakes.cc` |
 | core/lifecycle floor + data symbols | `fakes/nccl_stubs.cc` |
 | reusable `nccl*` seams | `fakes/nccl_fakes.cc` |
 | HIP runtime | `fakes/hip_fakes.cc` |
