@@ -195,6 +195,7 @@ if(CLANG_OFFLOAD_BUNDLER)
     rj_add_probe_object(rj_nop_probe gfx90a OUTPUT_NAME rj_nop_probe_gfx90a)
     rj_add_probe_object(rj_nop_probe gfx950 OUTPUT_NAME rj_nop_probe_gfx950)
     rj_add_probe_object(rj_nop_probe gfx1201 OUTPUT_NAME rj_nop_probe_gfx1201)
+    rj_add_probe_object(rj_arg_probe gfx90a OUTPUT_NAME rj_arg_probe_gfx90a)
     rj_add_probe_object(
         callable_sgpr_probe
         gfx950
@@ -226,6 +227,7 @@ if(CLANG_OFFLOAD_BUNDLER)
                 ${KERNEL_OUTPUT_DIR}/rj_nop_probe_gfx90a.hsaco
                 ${KERNEL_OUTPUT_DIR}/rj_nop_probe_gfx950.hsaco
                 ${KERNEL_OUTPUT_DIR}/rj_nop_probe_gfx1201.hsaco
+                ${KERNEL_OUTPUT_DIR}/rj_arg_probe_gfx90a.hsaco
                 ${KERNEL_OUTPUT_DIR}/callable_sgpr_probe_gfx950.hsaco
             DESTINATION ${CMAKE_INSTALL_DATADIR}/rocjitsu/tests/kernels
         )

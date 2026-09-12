@@ -451,6 +451,7 @@ add_executable(
     patch/spill_manager_test.cpp
     patch/log_buffer_test.cpp
     patch/instruction_builder_test.cpp
+    patch/vector_builder_test.cpp
     patch/kernarg_extension_test.cpp
     patch/sidecar_metadata_test.cpp
     patch/trampoline_builder_test.cpp
@@ -461,6 +462,7 @@ add_executable(
     patch/probe_live_in_test.cpp
     patch/error_report_test.cpp
     dbi/dbi_spill_sim_test.cpp
+    dbi/dbi_arg_sim_test.cpp
     code/code_object_target_id_test.cpp
     code/relocation_function_table_test.cpp
     dbt/semantic_scratch_test.cpp
@@ -907,6 +909,7 @@ if(HAS_DEVICE_KERNELS AND HAS_PROBE_FIXTURES)
     add_dependencies(
         probe_fixture_test
         probe_rj_nop_probe_gfx90a
+        probe_rj_arg_probe_gfx90a
         probe_callable_sgpr_probe_gfx950
     )
     rj_configure_target(probe_fixture_test TEST)
@@ -918,6 +921,16 @@ if(HAS_DEVICE_KERNELS AND HAS_PROBE_FIXTURES)
         COMMAND probe_fixture_test
         WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
         INSTALL_COMMAND "bin/probe_fixture_test"
+    )
+    rj_add_test(
+        NAME "ProbeFixture.ArgProbeReceivesItsArgumentInV0"
+        COMMAND
+            probe_fixture_test
+            --gtest_filter=ProbeFixture.ArgProbeReceivesItsArgumentInV0
+        WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+        INSTALL_COMMAND
+            "bin/probe_fixture_test"
+            "--gtest_filter=ProbeFixture.ArgProbeReceivesItsArgumentInV0"
     )
     rj_add_test(
         NAME "ProbeFixture.CallableSgprUseExceedsKernelDescriptor"

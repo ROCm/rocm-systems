@@ -135,7 +135,8 @@ protected:
     std::string err;
     const auto resolved = resolve_probe_symbol(*probe_co, "rj_nop_probe", &err);
     ASSERT_TRUE(resolved.has_value()) << "resolve_probe_symbol(rj_nop_probe) failed: " << err;
-    const auto callable = build_probe_callable(*probe_co, *resolved, params_.arch, &err);
+    const auto callable =
+        build_probe_callable(*probe_co, *resolved, params_.arch, /*num_arg_dwords=*/0, &err);
     ASSERT_TRUE(callable.has_value()) << "build_probe_callable failed: " << err;
     probe_body_words_ = callable->body_words;
     ASSERT_FALSE(probe_body_words_.empty());
