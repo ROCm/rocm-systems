@@ -248,6 +248,7 @@ static void hipDeviceGetGraphMemAttribute_Functional_Test(unsigned deviceId = 0)
 
   HIP_CHECK(hipGraphInstantiate(&graphExec, graph, nullptr, nullptr, 0));
   HIP_CHECK(hipGraphLaunch(graphExec, stream));
+  HIP_CHECK(hipStreamSynchronize(stream));
   HIP_CHECK(hipGraphDestroy(graph));
   HIP_CHECK(hipGraphExecDestroy(graphExec));
   HIP_CHECK(hipStreamDestroy(stream));
