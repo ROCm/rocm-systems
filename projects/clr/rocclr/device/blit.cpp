@@ -767,29 +767,39 @@ void HostBlitManager::FillBufferInfo::PackInfo(const device::Memory& memory, siz
                                                size_t pattern_size,
                                                std::vector<FillBufferInfo>& packed_info) {
   // 1. Validate input arguments
-  guarantee(fill_size >= pattern_size, "Pattern Size: %u cannot be greater than fill size: %u \n",
-            pattern_size, fill_size);
+  if (fill_size < pattern_size) {
+    LogPrintfError("Pattern Size: %u cannot be greater than fill size: %u \n",
+                   pattern_size, fill_size);
+    return;
+  }
 
   // 2. Calculate the next closest dword aligned address for faster processing
   size_t dst_addr = memory.virtualAddress() + fill_origin;
   size_t aligned_dst_addr = amd::alignUp(dst_addr, kExtendedSize);
-  guarantee(aligned_dst_addr >= dst_addr,
-            "Aligned address: %u cannot be greater than destination"
-            "address :%u \n",
-            aligned_dst_addr, dst_addr);
+  if (aligned_dst_addr < dst_addr) {
+    LogPrintfError("Aligned address: %u cannot be greater than destination"
+                   "address :%u \n",
+                   aligned_dst_addr, dst_addr);
+    return;
+  }
 
   // 3. If given address is not aligned calculate head and tail size.
   size_t head_size = std::min(aligned_dst_addr - dst_addr, fill_size);
   size_t aligned_size = ((fill_size - head_size) / kExtendedSize) * kExtendedSize;
   size_t tail_size = (fill_size - head_size) % kExtendedSize;
-  guarantee((head_size + aligned_size + tail_size) <= fill_size,
-            "Head size, aligned size & tail"
-            "size together cannot cross fill size");
+  if ((head_size + aligned_size + tail_size) > fill_size) {
+    LogPrintfError("Head size, aligned size & tail"
+                   "size together cannot cross fill size");
+    return;
+  }
 
   // 4. Fill the head, aligned, tail info if they exist.
   if (head_size > 0) {
     // Offsetted ptrs should align with pattern size. Runtime not responsible for rotating pattern.
-    guarantee((head_size % pattern_size) == 0, "Offseted ptr should align with pattern_size");
+    if ((head_size % pattern_size) != 0) {
+      LogPrintfError("Offseted ptr should align with pattern_size");
+      return;
+    }
 
     FillBufferInfo fill_info(head_size);
     packed_info.push_back(fill_info);
@@ -797,7 +807,10 @@ void HostBlitManager::FillBufferInfo::PackInfo(const device::Memory& memory, siz
 
   if (aligned_size > 0) {
     // Offsetted ptrs should align with pattern size. Runtime not responsible for rotating pattern.
-    guarantee((aligned_size % pattern_size) == 0, "Offseted ptr should align with pattern_size");
+    if ((aligned_size % pattern_size) != 0) {
+      LogPrintfError("Offseted ptr should align with pattern_size");
+      return;
+    }
 
     FillBufferInfo fill_info(aligned_size);
     fill_info.ExpandPattern(pattern_size, pattern_ptr);
@@ -806,7 +819,10 @@ void HostBlitManager::FillBufferInfo::PackInfo(const device::Memory& memory, siz
 
   if (tail_size > 0) {
     // Offsetted ptrs should align with pattern size. Runtime not responsible for rotating pattern.
-    guarantee((tail_size % pattern_size) == 0, "Offseted ptr should align with pattern_size");
+    if ((tail_size % pattern_size) != 0) {
+      LogPrintfError("Offseted ptr should align with pattern_size");
+      return;
+    }
 
     FillBufferInfo fill_info(tail_size);
     packed_info.push_back(fill_info);
