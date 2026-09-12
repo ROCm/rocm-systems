@@ -112,6 +112,11 @@ namespace RcclUnitTesting
   class CollectiveArgs
   {
   public:
+    // Which side owns the single in-place allocation. An enum, not a PtrUnion*: a member
+    // pointing at a sibling member would dangle once CollectiveArgs is shallow-copied or
+    // its holding vector reallocates.
+    enum class InPlaceOwnerId : uint8_t { None = 0, Input, Output };
+
     // Arguments to execute
     int             globalRank;
     int             totalRanks;
@@ -132,6 +137,9 @@ namespace RcclUnitTesting
     PtrUnion       expectedGpu;        // Device-built expected (UT_DEVICE_DATA mode)
     bool           expectedOnDevice = false; // True once a prep func fills expectedGpu
     bool           inPlace;
+    // Defaulted: instances are value-initialized by vector::resize, so zero must mean "no owner".
+    InPlaceOwnerId inPlaceOwner      = InPlaceOwnerId::None;
+    size_t         inPlaceOwnedBytes = 0;
     bool           useManagedMem;
     bool           userRegistered;
     void*          commRegHandle;

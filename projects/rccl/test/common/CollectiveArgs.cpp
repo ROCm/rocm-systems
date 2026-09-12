@@ -4,6 +4,8 @@
  * See LICENSE.txt for license information
  ************************************************************************/
 
+#include <algorithm>
+
 #include "CollectiveArgs.hpp"
 #include "gtest/gtest.h"
 
@@ -77,17 +79,23 @@ namespace RcclUnitTesting
       {
         CHECK_CALL(this->inputGpu.AllocateGpuMem(this->numInputBytesAllocated, useManagedMem, userRegistered));
         this->outputGpu.Attach(this->inputGpu.U1 + (this->globalRank  * this->numOutputBytesAllocated));
+        this->inPlaceOwner      = InPlaceOwnerId::Input;
+        this->inPlaceOwnedBytes = this->numInputBytesAllocated;
       }
       else if (this->funcType == ncclCollGather || this->funcType == ncclCollAllGather)
       {
         CHECK_CALL(this->outputGpu.AllocateGpuMem(this->numOutputBytesAllocated, useManagedMem, userRegistered));
         this->inputGpu.Attach(this->outputGpu.U1 + (this->globalRank * this->numInputBytesAllocated));
+        this->inPlaceOwner      = InPlaceOwnerId::Output;
+        this->inPlaceOwnedBytes = this->numOutputBytesAllocated;
       }
       else
       {
         size_t const numBytes = std::max(this->numInputBytesAllocated, this->numOutputBytesAllocated);
         CHECK_CALL(this->inputGpu.AllocateGpuMem(numBytes, useManagedMem, userRegistered));
         this->outputGpu.Attach(this->inputGpu.ptr);
+        this->inPlaceOwner      = InPlaceOwnerId::Input;
+        this->inPlaceOwnedBytes = numBytes;
       }
       CHECK_CALL(this->expected.AllocateCpuMem(this->numOutputBytesAllocated));
     }
@@ -96,6 +104,9 @@ namespace RcclUnitTesting
       CHECK_CALL(this->inputGpu.AllocateGpuMem(this->numInputBytesAllocated, useManagedMem, userRegistered));
       CHECK_CALL(this->outputGpu.AllocateGpuMem(this->numOutputBytesAllocated, useManagedMem, userRegistered));
       CHECK_CALL(this->expected.AllocateCpuMem(this->numOutputBytesAllocated));
+      // Cleared explicitly, not left to the default: AllocateMem can run again on the same object.
+      this->inPlaceOwner      = InPlaceOwnerId::None;
+      this->inPlaceOwnedBytes = 0;
     }
     CHECK_CALL(this->outputCpu.AllocateCpuMem(this->numOutputBytesAllocated));
 
@@ -178,15 +189,40 @@ namespace RcclUnitTesting
 
   ErrCode CollectiveArgs::DeallocateMem()
   {
-    // If in-place, either only inputGpu or outputGpu was allocated
+    // Mitigation (AICOMRCCL-2275): zeroing device buffers at teardown removes the pooled-worker
+    // corruption (60/0, against 40/20 unscrubbed). Neither the contents nor the size of the write
+    // tracks the effect, so no mechanism is claimed here; just zero what was allocated.
+    hipError_t errIn  = hipSuccess;
+    hipError_t errOut = hipSuccess;
+    // In-place attaches one buffer as an interior alias of the other, so there is a single
+    // allocation; AllocateMem recorded which side owns it, and the other side must not be freed.
     if (this->inPlace)
     {
-      if (this->funcType == ncclCollGather)
-        this->outputGpu.FreeGpuMem();
-      else
-        this->inputGpu.FreeGpuMem(this->userRegistered);
+      // No recorded owner means we cannot tell which side is the alias, so touch neither:
+      // guessing risks freeing an interior pointer, which is worse than leaking.
+      if (this->inPlaceOwner != InPlaceOwnerId::None)
+      {
+        PtrUnion& owner = (this->inPlaceOwner == InPlaceOwnerId::Output) ? this->outputGpu : this->inputGpu;
+        if (owner.ptr && this->inPlaceOwnedBytes)
+        {
+          errIn = hipMemset(owner.ptr, 0, this->inPlaceOwnedBytes);
+        }
+        owner.FreeGpuMem(this->userRegistered);
+      }
     }
     else
+    {
+      if (this->inputGpu.ptr && this->numInputBytesAllocated)
+      {
+        errIn = hipMemset(this->inputGpu.ptr, 0, this->numInputBytesAllocated);
+      }
+      if (this->outputGpu.ptr && this->numOutputBytesAllocated)
+      {
+        errOut = hipMemset(this->outputGpu.ptr, 0, this->numOutputBytesAllocated);
+      }
+    }
+
+    if (!this->inPlace)
     {
       this->inputGpu.FreeGpuMem(this->userRegistered);
       this->outputGpu.FreeGpuMem(this->userRegistered);
@@ -214,6 +250,19 @@ namespace RcclUnitTesting
       this->biasRegHandle = nullptr;
     }
 
+    // Report, do not fail. TestBedChild wraps this in CHECK_CALL inside its per-collective
+    // loop, so returning TEST_FAIL would skip the frees of every later collective in the
+    // group and leak them into the next test on a reused pool worker.
+    if (errIn != hipSuccess)
+    {
+      TEST_ERROR("Teardown scrub failed for %s: %s", this->GetDescription().c_str(),
+                 hipGetErrorString(errIn));
+    }
+    if (errOut != hipSuccess)
+    {
+      TEST_ERROR("Teardown scrub failed for %s: %s", this->GetDescription().c_str(),
+                 hipGetErrorString(errOut));
+    }
     return TEST_SUCCESS;
   }
 
