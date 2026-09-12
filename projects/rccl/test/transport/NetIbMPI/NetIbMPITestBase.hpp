@@ -241,7 +241,6 @@ protected:
     static constexpr int kTransferTagBase = 300;
 
     // Timeout constants
-    static constexpr int kLargeTransferTimeout = 30000;
 
     ncclNet_t* net_;
     int numDevices_;
@@ -1276,6 +1275,22 @@ protected:
                                       const std::string& where) {
         ThreadResult result;
         std::vector<void*> requests(slots, nullptr);
+
+        // One deadline for the whole batch rather than kStressTimeoutMs per slot. Each
+        // slot taking its own 60 s is 32 minutes across a full batch, and the suite's
+        // own 300 s timeout kills the process long before the loop returns, so the
+        // readable failure below never gets printed. Every slot is still waited on,
+        // with what is left of the budget and a floor so a drain that starts past the
+        // deadline still gets a chance to retire its work.
+        const auto deadline = std::chrono::steady_clock::now()
+                              + std::chrono::milliseconds(kStressTimeoutMs);
+        auto budgetMs = [&](int floorMs) {
+            const auto left = std::chrono::duration_cast<std::chrono::milliseconds>(
+                                  deadline - std::chrono::steady_clock::now()).count();
+            return std::max(static_cast<int>(left), floorMs);
+        };
+
+        int posted = 0;
         for (int i = 0; i < slots; i++) {
             char* slot = static_cast<char*>(buffer) + i * slotSize;
             if (rank == 0) {
@@ -1283,23 +1298,27 @@ protected:
                 result = WorkerPostRecv(pair.recvComm, slot, slotSize, i, mhandle, &requests[i]);
             } else {
                 fillHostBufferWithPattern<uint8_t>(slot, slotSize, makeBytePattern(pattern));
-                // kStressTimeoutMs rather than the default slot wait: this post has
-                // to outlast the peer rank publishing all of its own slots under
-                // N-way contention on one NIC, which the drain below also budgets for.
+                // The batch budget rather than the default slot wait: this post has to
+                // outlast the peer rank publishing all of its own slots under N-way
+                // contention on one NIC.
                 result = WorkerPostSend(pair.sendComm, slot, slotSize, i, mhandle, &requests[i],
-                                        /*busyPoll=*/false, kStressTimeoutMs);
+                                        /*busyPoll=*/false, budgetMs(/*floorMs=*/1000));
             }
-            if (!result.ok) return result;
+            if (!result.ok) break;
+            posted = i + 1;
         }
-        // Every slot is waited on even after one of them fails. Returning at the first
-        // failure left the rest of the batch outstanding, and the caller's
-        // WorkerHostBuffer then deregistered the memory and freed it while the device
-        // could still be writing into those slots -- a crash in teardown instead of a
-        // readable failure. The first failure is what gets reported.
+        // A failed post is not a reason to return either: the slots already posted are
+        // in flight, and the caller's WorkerHostBuffer would deregister the memory and
+        // free it while the device can still be writing into them -- a crash in teardown
+        // instead of a readable failure. Reached when a peer worker stalls, not only on a
+        // misbehaving plugin. So the posted prefix is drained below whatever happened,
+        // and every slot is waited on even after one of them fails. The first failure is
+        // what gets reported.
         ThreadResult firstFailure;
-        for (int i = 0; i < slots; i++) {
+        if (!result.ok) firstFailure = result;
+        for (int i = 0; i < posted; i++) {
             int sizes[1] = {0};
-            const ThreadResult waited = WorkerWait(requests[i], sizes, kStressTimeoutMs);
+            const ThreadResult waited = WorkerWait(requests[i], sizes, budgetMs(/*floorMs=*/1000));
             if (!waited.ok) {
                 if (firstFailure.ok) firstFailure = waited;
                 continue;
@@ -1823,8 +1842,23 @@ protected:
                               const std::vector<size_t>& sizes, int repeats,
                               const char* label) {
         const int rank = MPIEnvironment::world_rank;
+
+        // Capped by worker count, the way MemoryRegistrationStorm holds its own
+        // aggregate near the serial body's: this registers the largest step once per
+        // worker, so a ladder topping out at 64 MB means 1 GB of registered host memory
+        // per rank at sixteen workers where the serial body holds 64 MB. Steps above the
+        // per-worker share are dropped rather than every step being shrunk, so the sizes
+        // that do run are sizes the serial body runs too.
+        static constexpr size_t kSweepRegBudget = 64 * 1024 * 1024;
+        const size_t perWorker = std::max<size_t>(kSweepRegBudget / std::max(nThreads, 1), 1);
+        std::vector<size_t> steps;
+        for (size_t size : sizes)
+            if (size <= perWorker) steps.push_back(size);
+        if (steps.empty() && !sizes.empty())
+            steps.push_back(*std::min_element(sizes.begin(), sizes.end()));
+
         size_t maxSize = 1;
-        for (size_t size : sizes) maxSize = std::max(maxSize, size);
+        for (size_t size : steps) maxSize = std::max(maxSize, size);
 
         RunThreadedBody(
             policy, nThreads, label, [&](int threadIdx, ConnectionPair& pair) -> ThreadResult {
@@ -1843,7 +1877,7 @@ protected:
                 // step; the payload identifies the worker.
                 const int workerPattern = WorkerSeed(threadIdx, 0);
                 int tag = 0;
-                for (size_t size : sizes) {
+                for (size_t size : steps) {
                     for (int repeat = 0; repeat < repeats; repeat++) {
                         const int timeout = (size > 1024 * 1024) ? kLargeTransferTimeoutMs
                                                                  : kDefaultTimeoutMs;

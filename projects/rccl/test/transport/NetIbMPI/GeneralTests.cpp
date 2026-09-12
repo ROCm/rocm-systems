@@ -800,7 +800,7 @@ TEST_F(NetIbMPITest, LargeTransfer) {
             [&](int threadIdx, ConnectionPair& pair) -> ThreadResult {
                 return WorkerHostTransfer(rank, pair, kLargeBufferSize, 400,
                                           WorkerSeed(threadIdx, kBaseSeedOffset),
-                                          kLargeTransferTimeout);
+                                          kLargeTransferTimeoutMs);
             });
         return;
     }
@@ -837,7 +837,7 @@ TEST_F(NetIbMPITest, LargeTransfer) {
     // Wait for completion with longer timeout for large transfer
     int sizes[1] = {0};
     ASSERT_NE(request, nullptr) << "Request must be non-NULL before waiting";
-    ASSERT_EQ(WaitForCompletion(request, sizes, kLargeTransferTimeout), ncclSuccess);
+    ASSERT_EQ(WaitForCompletion(request, sizes, kLargeTransferTimeoutMs), ncclSuccess);
 
     if (rank == 0) {
         EXPECT_EQ(sizes[0], bufferSize) << "Large transfer size mismatch";

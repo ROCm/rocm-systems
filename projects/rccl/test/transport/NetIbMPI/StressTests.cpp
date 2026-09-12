@@ -559,6 +559,18 @@ TEST_F(NetIbMPITest, FifoPressureSenderFast) {
                                      "FIFO backpressure is not being reported ("
                                      + std::to_string(nullCount)
                                      + " NULL requests during the loop)";
+                        // The probe is in flight with no receive that can ever match it, so
+                        // returning straight away would let this worker's buffer be freed
+                        // under it and turn the contract violation this test reports into an
+                        // abort in teardown. Waited on first, and if it does not retire the
+                        // memory is kept rather than freed.
+                        int probeSizes[1] = {0};
+                        if (!WorkerWait(probe, probeSizes, kDefaultTimeoutMs).ok) {
+                            result.msg += "; the probe request never completed, so its buffer "
+                                          "and registration are retained";
+                            h.mhandleGuard.release();
+                            h.bufferGuard.release();
+                        }
                     }
                 }
                 return result;
@@ -1288,9 +1300,10 @@ TEST_F(NetIbMPITest, MultiQpSplitDataStress) {
     // point is the QPs a single device carries: with four workers over four NICs
     // every device would end up with one connection again, which is what the
     // single-worker body already covers.
-    if (MPIEnvironment::nThreads > 1) {
-        RunThreadedSizeSweep(ThreadDevPolicy::Fixed(0), MPIEnvironment::nThreads,
-                             kMultiQpAlignmentSizes, /*repeats=*/2, "threaded MultiQpSplitDataStress");
+    const int nThreads = MPIEnvironment::nThreads;
+    if (nThreads > 1) {
+        RunThreadedSizeSweep(ThreadDevPolicy::Fixed(0), nThreads, kMultiQpAlignmentSizes,
+                             /*repeats=*/2, "threaded MultiQpSplitDataStress");
         return;
     }
 
