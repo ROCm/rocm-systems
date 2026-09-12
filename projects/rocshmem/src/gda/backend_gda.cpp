@@ -36,6 +36,7 @@
 #include "debug_gda.hpp"
 #include "ibv_wrapper.hpp"
 #include "envvar.hpp"
+#include "gda_enums.hpp"
 #include "gda_team.hpp"
 #include "log.hpp"
 #include "mpi_instance.hpp"
@@ -1324,15 +1325,15 @@ bool GDABackend::device_matches_provider_vendor(GDAProvider provider,
 
   switch (provider) {
     case GDAProvider::BNXT:
-      expected_vendor_id = GDA_BNXT_VENDOR_ID;
+      expected_vendor_id = static_cast<uint32_t>(gda::vendor_id::BNXT);
       vendor_name = "BNXT/Broadcom";
       break;
     case GDAProvider::IONIC:
-      expected_vendor_id = GDA_IONIC_VENDOR_ID;
+      expected_vendor_id = static_cast<uint32_t>(gda::vendor_id::IONIC);
       vendor_name = "IONIC/Pensando";
       break;
     case GDAProvider::MLX5:
-      expected_vendor_id = GDA_MLX5_VENDOR_ID;
+      expected_vendor_id = static_cast<uint32_t>(gda::vendor_id::MLX5);
       vendor_name = "MLX5/Mellanox";
       break;
     case GDAProvider::UNSET:
@@ -1856,7 +1857,7 @@ void GDABackend::validate_ib_device(NicDevice &nic) {
     const std::set<uint32_t> supported_bnxt_part_ids = { 0x1760 /* BCM57608 */};
     const char min_supported_bnxt_fw_ver[12] = "233.2.104.0";
 
-    if (nic.device_attr.vendor_id != GDA_BNXT_VENDOR_ID) {
+    if (nic.device_attr.vendor_id != static_cast<uint32_t>(gda::vendor_id::BNXT)) {
       LOG_ERROR_EXIT("%s GDAProvider::BNXT requested but an invalid device is selected", debug_str.c_str());
     }
 

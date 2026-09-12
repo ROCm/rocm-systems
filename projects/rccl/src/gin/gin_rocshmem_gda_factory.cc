@@ -91,10 +91,6 @@ int wrap_ibv_dereg_mr(struct ibv_mr* mr);
 // Internal types
 ///////////////////////////////////////////////////////////////////////////////
 
-static inline constexpr uint32_t GDA_IONIC_VENDOR_ID = 0x1DD8;
-static inline constexpr uint32_t GDA_MLX5_VENDOR_ID  = 0x02c9; //PCI-ID is 15b3
-static inline constexpr uint32_t GDA_BNXT_VENDOR_ID  = 0x14E4;
-
 struct GinNicDevice {
   std::string nic_name;
   struct ibv_device* device = nullptr;
@@ -242,15 +238,17 @@ static int gin_memory_lock_to_fine_grain(void* ptr, size_t size, void** gpu_ptr,
 ///////////////////////////////////////////////////////////////////////////////
 
 static GDAProvider gin_detect_provider(struct ibv_device_attr* attr) {
+  switch (static_cast<gda::vendor_id>(attr->vendor_id)) {
 #if defined(GDA_BNXT)
-  if (attr->vendor_id == GDA_BNXT_VENDOR_ID) return GDAProvider::BNXT;
+  case gda::vendor_id::BNXT:  return GDAProvider::BNXT;
 #endif
 #if defined(GDA_IONIC)
-  if (attr->vendor_id == GDA_IONIC_VENDOR_ID) return GDAProvider::IONIC;
+  case gda::vendor_id::IONIC: return GDAProvider::IONIC;
 #endif
 #if defined(GDA_MLX5)
-  if (attr->vendor_id == GDA_MLX5_VENDOR_ID) return GDAProvider::MLX5;
+  case gda::vendor_id::MLX5:  return GDAProvider::MLX5;
 #endif
+  }
   return GDAProvider::UNSET;
 }
 
