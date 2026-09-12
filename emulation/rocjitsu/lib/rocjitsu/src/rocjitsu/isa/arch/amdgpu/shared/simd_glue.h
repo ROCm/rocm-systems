@@ -67,6 +67,11 @@ inline bool pk16_src_needs_narrowing(uint32_t selector, int src_size_bits) {
   return is_inline_float_src(selector) && src_size_bits != 16;
 }
 
+/// @brief True16 DOT2 replicates integer and floating inline constants into both halves.
+inline bool dot2_src_needs_half_replication(uint32_t selector) {
+  return (selector >= 128u && selector <= 208u) || is_inline_float_src(selector);
+}
+
 /// @brief Return whether floating CLAMP converts a NaN result to positive zero.
 /// @details GFX12 and gfx1250 always convert NaN. Earlier profiles require MODE.DX10_CLAMP.
 inline bool floating_clamp_nan_to_zero(rj_code_arch_t arch, bool dx10_clamp) {
@@ -737,7 +742,7 @@ inline util::native<double> fma_f64_mode_simd(util::native<double> src0, util::n
 
   util::native<double> result;
   {
-    fp_mode::detail::ScopedFenv environment(round_mode);
+    fp_mode::ScopedEnvironment environment(round_mode);
     result = util::stdx::fma(src0, src1, src2);
   }
   if ((denorm_mode & 2u) == 0)
@@ -3805,13 +3810,8 @@ template <typename Inst, typename Op>
   return false;
 }
 
-/// VOP3P packed-16 floating-point binary SIMD fast path (pk_add/mul/min/
-/// max_f16 family). Each 32-bit lane holds two f16 values; the SIMD path
-/// widens to f32, applies per-half sign-flip from neg/neg_hi, runs the
-/// functor in f32, narrows back to f16, and packs. Same default-packing
-/// gate as the integer pk family. Scalar bodies for pk_*_f16 do NOT apply
-/// clamp (verified inline pk_add_f16 at line 15109, pk_max_f16 at 15519),
-/// so the SIMD path also ignores it.
+/// VOP3P packed F16 ADD/MUL use SIMD for default MODE with no clamp.
+/// Directed rounding, flushing, clamp and MIN/MAX use the shared scalar helper.
 template <typename Inst, typename Op>
   requires(util::has_stdx_simd)
 [[nodiscard]] inline bool try_execute_vop3p_pk_binary_fp16_simd(Inst &inst, Wavefront &wf, Op op) {
@@ -3826,6 +3826,10 @@ template <typename Inst, typename Op>
   if (pk16_src_needs_narrowing(inst.inst_.src0, inst.src0.size_bits()) ||
       pk16_src_needs_narrowing(inst.inst_.src1, inst.src1.size_bits()))
     return false;
+  // Directed rounding, flushing and CLAMP use the shared exact F16 helper.
+  if (wf.fp_round_mode_f16_f64() != 0 || wf.fp_denorm_mode_f16_f64() != 3 || inst.inst_.clamp)
+    return false;
+  fp_mode::ScopedEnvironment nearest_environment(0);
   using T = uint32_t;
   constexpr std::size_t W = util::native_width_v<T>;
   const uint64_t chunk_full = util::mask<uint64_t>(static_cast<int>(W));
@@ -3986,8 +3990,8 @@ template <typename Inst, typename Op>
 /// and the per-half arithmetic runs at full native width. Default-packing gate
 /// (op_sel == 0, op_sel_hi == 3) bails to scalar otherwise — under default
 /// packing the lo result comes from the lo halves and hi from the hi halves.
-/// neg/neg_hi bits 0/1 sign-flip the respective half. No clamp on any pk_f32
-/// scalar body. Scalar-backed sources use the same pair-or-splat contract as
+/// neg/neg_hi bits 0/1 sign-flip the respective half. MODE and CLAMP match
+/// the scalar helper. Scalar-backed sources use the same pair-or-splat contract as
 /// read_lane_pair32.
 template <typename Inst, typename Op>
   requires(util::has_stdx_simd)
@@ -3999,6 +4003,15 @@ template <typename Inst, typename Op>
     return false;
   if (op_sel != 0u || op_sel_hi != 3u)
     return false;
+  fp_mode::ScopedEnvironment environment(wf.fp_round_mode_f32());
+  auto flush_input = [&wf](util::native<float> value) {
+    return (wf.fp_denorm_mode_f32() & 1u) ? value : util::flush_denorm_f32_simd(value);
+  };
+  auto flush_output = [&wf, &inst](util::native<float> value) {
+    if (inst.inst_.clamp)
+      value = apply_vop3_dst_mod_f32(value, 0, 1, floating_clamp_nan_to_zero(wf));
+    return (wf.fp_denorm_mode_f32() & 2u) ? value : util::flush_denorm_f32_simd(value);
+  };
   constexpr std::size_t W = util::native_width_v<float>;
   const uint64_t chunk_full = util::mask<uint64_t>(static_cast<int>(W));
   const uint64_t exec = dpp::execution_lane_mask(inst, wf);
@@ -4016,9 +4029,11 @@ template <typename Inst, typename Op>
       continue;
     const PkF32Halves a = read_pkf32_halves(src0, base);
     const PkF32Halves b = read_pkf32_halves(src1, base);
-    const util::native<float> r_lo = op(pkf32_neg(a.lo, neg0_lo), pkf32_neg(b.lo, neg1_lo));
-    const util::native<float> r_hi = op(pkf32_neg(a.hi, neg0_hi), pkf32_neg(b.hi, neg1_hi));
-    dst.template store_native_pair<float>(base, r_lo, r_hi, chunk);
+    const util::native<float> r_lo =
+        op(flush_input(pkf32_neg(a.lo, neg0_lo)), flush_input(pkf32_neg(b.lo, neg1_lo)));
+    const util::native<float> r_hi =
+        op(flush_input(pkf32_neg(a.hi, neg0_hi)), flush_input(pkf32_neg(b.hi, neg1_hi)));
+    dst.template store_native_pair<float>(base, flush_output(r_lo), flush_output(r_hi), chunk);
   }
   return true;
 }
@@ -4044,7 +4059,8 @@ template <typename Inst, typename Op>
 /// VOP3P packed-f32 ternary fast path (v_pk_fma_f32). 3-source FMA per half;
 /// same per-register native<float> read/write as the binary form. Default-
 /// packing gate adds op_sel_hi_2 == 1 (the src2-hi select). neg/neg_hi bits
-/// 0/1/2 sign-flip the respective half. No clamp. NaN-input payload divergence
+/// 0/1/2 sign-flip the respective half. MODE and CLAMP match the scalar helper.
+/// NaN-input payload divergence
 /// between stdx::fma and std::fma accepted (same carve-out as the f16 pk ternary
 /// / fma_mix slices).
 template <typename Inst, typename Op>
@@ -4057,6 +4073,15 @@ template <typename Inst, typename Op>
     return false;
   if (op_sel != 0u || op_sel_hi != 3u || op_sel_hi_2 != 1u)
     return false;
+  fp_mode::ScopedEnvironment environment(wf.fp_round_mode_f32());
+  auto flush_input = [&wf](util::native<float> value) {
+    return (wf.fp_denorm_mode_f32() & 1u) ? value : util::flush_denorm_f32_simd(value);
+  };
+  auto flush_output = [&wf, &inst](util::native<float> value) {
+    if (inst.inst_.clamp)
+      value = apply_vop3_dst_mod_f32(value, 0, 1, floating_clamp_nan_to_zero(wf));
+    return (wf.fp_denorm_mode_f32() & 2u) ? value : util::flush_denorm_f32_simd(value);
+  };
   constexpr std::size_t W = util::native_width_v<float>;
   const uint64_t chunk_full = util::mask<uint64_t>(static_cast<int>(W));
   const uint64_t exec = dpp::execution_lane_mask(inst, wf);
@@ -4079,10 +4104,12 @@ template <typename Inst, typename Op>
     const PkF32Halves b = read_pkf32_halves(src1, base);
     const PkF32Halves c = read_pkf32_halves(src2, base);
     const util::native<float> r_lo =
-        op(pkf32_neg(a.lo, neg0_lo), pkf32_neg(b.lo, neg1_lo), pkf32_neg(c.lo, neg2_lo));
+        op(flush_input(pkf32_neg(a.lo, neg0_lo)), flush_input(pkf32_neg(b.lo, neg1_lo)),
+           flush_input(pkf32_neg(c.lo, neg2_lo)));
     const util::native<float> r_hi =
-        op(pkf32_neg(a.hi, neg0_hi), pkf32_neg(b.hi, neg1_hi), pkf32_neg(c.hi, neg2_hi));
-    dst.template store_native_pair<float>(base, r_lo, r_hi, chunk);
+        op(flush_input(pkf32_neg(a.hi, neg0_hi)), flush_input(pkf32_neg(b.hi, neg1_hi)),
+           flush_input(pkf32_neg(c.hi, neg2_hi)));
+    dst.template store_native_pair<float>(base, flush_output(r_lo), flush_output(r_hi), chunk);
   }
   return true;
 }

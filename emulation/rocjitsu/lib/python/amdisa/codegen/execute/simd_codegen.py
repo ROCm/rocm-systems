@@ -1248,14 +1248,12 @@ SIMD_VOP3P_PK_TERNARY_INT: dict[str, str] = {
 
 # VOP3P packed-16 f16 binary family. Each 32-bit lane holds 2 f16 values.
 # Glue widens halves to f32, applies neg/neg_hi (sign-bit toggle), runs the
-# per-half functor in f32, narrows back to f16, packs. No clamp on any
-# pk_*_f16 scalar body (verified line 15109, 15519). NaN-input lanes can
-# diverge in payload (same as the existing f16 ternary slice).
+# per-half functor in f32, narrows back to f16, packs. Directed rounding,
+# flushing and clamp use the scalar helper. MIN/MAX also use that helper
+# to preserve signed-zero selection independently of host SIMD min/max.
 SIMD_VOP3P_PK_BINARY_FP16: dict[str, str] = {
     'v_pk_add_f16_vop3p': '[](auto a, auto b) { return a + b; }',
     'v_pk_mul_f16_vop3p': '[](auto a, auto b) { return a * b; }',
-    'v_pk_max_f16_vop3p': '[](auto a, auto b) { return util::stdx::fmax(a, b); }',
-    'v_pk_min_f16_vop3p': '[](auto a, auto b) { return util::stdx::fmin(a, b); }',
 }
 
 # Packed F16 FMA must round directly to F16. The available SIMD path computes

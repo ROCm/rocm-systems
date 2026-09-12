@@ -5457,26 +5457,6 @@ class CodeGenerator:
             '  }\n'
             '}\n'
             '\n'
-            'uint16_t read_fma_mix_bf16_bits(uint32_t raw, uint32_t src_selector, bool high_half) {\n'
-            '  switch (src_selector) {\n'
-            '  case OpSelSrc::OPR_SRC_FLOAT_HALF:\n'
-            '  case OpSelSrc::OPR_SRC_FLOAT_NEG_HALF:\n'
-            '  case OpSelSrc::OPR_SRC_FLOAT_ONE:\n'
-            '  case OpSelSrc::OPR_SRC_FLOAT_NEG_ONE:\n'
-            '  case OpSelSrc::OPR_SRC_FLOAT_TWO:\n'
-            '  case OpSelSrc::OPR_SRC_FLOAT_NEG_TWO:\n'
-            '  case OpSelSrc::OPR_SRC_FLOAT_FOUR:\n'
-            '  case OpSelSrc::OPR_SRC_FLOAT_NEG_FOUR:\n'
-            '  case OpSelSrc::OPR_SRC_FLOAT_ONE_OVER_TWO_PI: {\n'
-            '    float value = std::bit_cast<float>(raw);\n'
-            '    return util::f32_to_bf16(value);\n'
-            '  }\n'
-            '  default: {\n'
-            '    return static_cast<uint16_t>(high_half ? (raw >> 16) : raw);\n'
-            '  }\n'
-            '  }\n'
-            '}\n'
-            '\n'
             'float read_fma_mix_source_f32(const Operand &src, const amdgpu::Wavefront &wf, uint32_t lane,\n'
             '                              uint32_t src_selector, bool src_is_f16, bool high_half) {\n'
             '  uint32_t raw = amdgpu::RegisterAccess(wf).read_lane(src, lane);\n'
@@ -5486,11 +5466,12 @@ class CodeGenerator:
             '}\n'
             '\n'
             'float read_fma_mix_bf16_source_f32(const Operand &src, const amdgpu::Wavefront &wf, uint32_t lane,\n'
-            '                                   uint32_t src_selector, bool src_is_bf16, bool high_half) {\n'
+            '                                   bool src_is_bf16, bool high_half) {\n'
             '  uint32_t raw = amdgpu::RegisterAccess(wf).read_lane(src, lane);\n'
             '  if (!src_is_bf16)\n'
             '    return std::bit_cast<float>(raw);\n'
-            '  return util::bf16_to_f32(read_fma_mix_bf16_bits(raw, src_selector, high_half));\n'
+            '  // CDNA5 inline BF16 sources retain the FP32 bits for OPSEL.\n'
+            '  return util::bf16_to_f32(static_cast<uint16_t>(high_half ? (raw >> 16) : raw));\n'
             '}\n'
             '} // namespace'
         )
@@ -7217,7 +7198,11 @@ class CodeGenerator:
         # ----- VOP3P: packed / dot / mix / MFMA -----
         if cls.startswith('dot2_'):
             return gen_dot2(
-                dst_ops, src_ops, cls, opsel_exprs=self._vop3p_opsel_exprs()
+                dst_ops,
+                src_ops,
+                cls,
+                opsel_exprs=self._vop3p_opsel_exprs(),
+                replicate_inline=self.isa_spec.arch_name == 'rdna4',
             )
 
         if cls.startswith('dot4_'):
