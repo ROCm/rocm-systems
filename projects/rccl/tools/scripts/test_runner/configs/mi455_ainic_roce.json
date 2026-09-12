@@ -2224,6 +2224,16 @@
           "test_filter": "RevokeMPITest.IncompleteCollective_Revoke_Shrink_Collective"
         },
         {
+          "name": "IncompleteCollective_DdaLlTwoShot",
+          "description": "Rank np-1 skips DDA fabric LL two-shot AllReduce; COLL needle required; revoke must unblock stream sync then shrink",
+          "test_filter": "RevokeDdaMPITest.IncompleteCollective_DdaLlTwoShot"
+        },
+        {
+          "name": "IncompleteCollective_DdaLlOneShot",
+          "description": "Rank np-1 skips DDA fabric LL one-shot AllReduce; COLL needle required; revoke must unblock stream sync then shrink",
+          "test_filter": "RevokeDdaMPITest.IncompleteCollective_DdaLlOneShot"
+        },
+        {
           "name": "ShrinkAbort_InFlight_ChildWorks_RankRenumbering",
           "description": "ncclCommShrink with NCCL_SHRINK_ABORT terminates in-flight collective and the child reports correct renumbered rank/size and runs AllReduce",
           "test_filter": "RevokeMPITest.ShrinkAbort_InFlight_ChildWorks_RankRenumbering"

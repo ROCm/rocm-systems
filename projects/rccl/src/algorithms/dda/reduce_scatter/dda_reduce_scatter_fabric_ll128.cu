@@ -89,17 +89,17 @@ static ncclResult_t ncclReduceScatterDdaFabricLL128Typed(const void* sendbuff, v
   case 4:
     dda::common::ddaReduceScatterFabricLL128<T, 4>
       <<<grid, block, 0, stream>>>(peers, static_cast<T*>(recvbuff), static_cast<const T*>(sendbuff), recvcount,
-                                   comm->rank, nRanks, epochDev, epochLen);
+                                   comm->rank, nRanks, epochDev, epochLen, comm->abortFlagDev);
     break;
   case 8:
     dda::common::ddaReduceScatterFabricLL128<T, 8>
       <<<grid, block, 0, stream>>>(peers, static_cast<T*>(recvbuff), static_cast<const T*>(sendbuff), recvcount,
-                                   comm->rank, nRanks, epochDev, epochLen);
+                                   comm->rank, nRanks, epochDev, epochLen, comm->abortFlagDev);
     break;
   default:
     dda::common::ddaReduceScatterFabricLL128<T, 0>
       <<<grid, block, 0, stream>>>(peers, static_cast<T*>(recvbuff), static_cast<const T*>(sendbuff), recvcount,
-                                   comm->rank, nRanks, epochDev, epochLen);
+                                   comm->rank, nRanks, epochDev, epochLen, comm->abortFlagDev);
     break;
   }
 
