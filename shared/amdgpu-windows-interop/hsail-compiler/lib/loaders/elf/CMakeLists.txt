@@ -4,6 +4,7 @@
 #  Copyright (C) 2020 Advanced Micro Devices, Inc.  All rights reserved.
 #
 ########################################################################################################################
+# Temporary no-op change on amdgpu-windows-interop to exercise TheRock Multi-arch CI
 
 cmake_minimum_required(VERSION 3.10)
 
