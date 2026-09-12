@@ -1,0 +1,253 @@
+# Copyright Advanced Micro Devices, Inc.
+# SPDX-License-Identifier: MIT
+#
+# Configuration for the CLR language-runtime OrchestrAI CI
+# (.github/workflows/clr-orchestrai-nightly.yml).
+#
+# This is the ONE place that holds environment-specific values. Everything the
+# workflow needs to know about the upstream TheRock build and the OrchestrAI test
+# fleet lives here, so the workflow YAML and the .github/scripts/orchestrai_*.py
+# helpers stay generic.
+#
+# NOTE: this repo is PUBLIC. Internal coordinates (pipeline host, MAAS broker
+# tags, driver package URLs) are NOT committed here — they are injected at run
+# time from repo variables/secrets and take precedence over the empty fallbacks
+# below. See the workflow header for the full list.
+
+# ---------------------------------------------------------------------------
+# OrchestrAI pipeline entry point
+# ---------------------------------------------------------------------------
+# Set as repo variables (Settings -> Secrets and variables -> Actions -> Variables):
+#   ORCHESTRAI_PIPELINE_URL   e.g. https://<pipeline-host>
+#   ORCHESTRAI_PIPELINE_JOB   e.g. <pipeline-job>
+# The pipeline URL MUST be a variable, not a secret: the build URL derived from
+# it is passed between jobs as a job output, and GitHub redacts secret values
+# from job outputs, which would blank the build_urls handed to the test jobs.
+pipeline:
+  url: ""
+  job: ""
+
+# ---------------------------------------------------------------------------
+# Upstream TheRock build to test
+# ---------------------------------------------------------------------------
+# We do not build anything here. Each run picks up the most recent
+# TheRock Multi-Arch CI run on this repo that actually published artifacts for
+# the families we need, and points the test machines at those artifacts.
+#
+# Artifacts land at:
+#   {artifact_base_url}/{artifact_prefix_template}/<artifact>.tar.zst
+# e.g.
+#   https://therock-ci-artifacts-external.s3.us-east-2.amazonaws.com/
+#     ROCm-rocm-systems/32676513434-linux/core-hiptests_test_generic.tar.zst
+source_build:
+  # Workflow whose artifacts we consume. therock-multi-arch-ci.yml is the one
+  # that builds the client families (gfx110X / gfx120X) on BOTH Linux and
+  # Windows. therock-multi-arch-ci-nightly.yml is data-center only
+  # (gfx94X/gfx950/gfx125X + Windows gfx1151) and is deliberately NOT used here.
+  workflow: "therock-multi-arch-ci.yml"
+  branch: "develop"
+
+  # Repo that runs the workflow above. Empty = this repo, which is what we want
+  # once this lands on ROCm/rocm-systems. Set the ORCHESTRAI_SOURCE_REPOSITORY
+  # repo variable to "ROCm/rocm-systems" when running from a FORK, so a test run
+  # reads the real builds instead of the fork's (empty) workflow history. Using a
+  # variable rather than editing this line keeps a fork's branch byte-identical
+  # to what eventually merges.
+  repository: ""
+
+  # Only completed runs started by this GitHub user are considered. The resolver
+  # scans newest-first among matching runs and picks the first one whose
+  # artifacts are present in S3. Override at run time with the
+  # ORCHESTRAI_SOURCE_TRIGGERED_BY repo variable.
+  triggered_by: "gopalakrishnand"
+
+  # How far back to look for a usable run. The build jobs of a Multi-Arch CI run
+  # frequently succeed while some downstream test job fails, so the run's overall
+  # conclusion is NOT a useful signal — a run is usable when its artifacts exist.
+  # Runs are scanned newest-first and the first one carrying every required
+  # artifact wins.
+  max_runs_to_scan: 40
+  max_age_hours: 48
+
+  artifact_base_url: "https://therock-ci-artifacts-external.s3.us-east-2.amazonaws.com"
+  artifact_prefix_template: "ROCm-rocm-systems/{run_id}-{platform}"
+
+  # Artifacts that must exist for a run to count as usable on a platform. These
+  # are the CLR/language-runtime pieces the suites below consume.
+  # NOTE: core-runtime (ROCr) is Linux-only — Windows gets its GPU runtime from
+  # the AMD display driver — so it is deliberately absent from the Windows list.
+  required_artifacts:
+    linux:
+      - "core-hip_lib_generic.tar.zst"
+      - "core-runtime_lib_generic.tar.zst"
+      - "core-hiptests_test_generic.tar.zst"
+      - "core-ocl_test_generic.tar.zst"
+    windows:
+      - "core-hip_lib_generic.tar.zst"
+      - "core-hiptests_test_generic.tar.zst"
+      - "core-ocl_test_generic.tar.zst"
+
+  # Per-family marker proving the family was part of that run's dist. The core-*
+  # artifacts above are family-independent ("generic"), so they cannot tell us
+  # which GPU families a run actually built. Any artifact carrying the family's
+  # gfx suffix works; blas_lib_<target> is published on both platforms.
+  family_markers:
+    gfx110X-all: "blas_lib_gfx1100.tar.zst"
+    gfx120X-all: "blas_lib_gfx1200.tar.zst"
+    gfx1151: "blas_lib_gfx1151.tar.zst"
+
+# ---------------------------------------------------------------------------
+# Test suites
+# ---------------------------------------------------------------------------
+# Each suite becomes one group in the OrchestrAI pipeline plan and one GitHub
+# Actions job. `test` is a path in the OrchestrAI test library; {platform} is
+# filled in (linux|windows).
+#
+# Adding a suite is a config-only change: import the test into the test library,
+# then add an entry here. `required: true` makes a failure fail the run's gate;
+# start new suites at false while they stabilise.
+suites:
+  hip-catch2:
+    description: "HIP Catch2 unit tests (projects/hip-tests/catch)"
+    test: "L1-whb/hip/{platform}/unit_func-hip_catch2"
+    platforms: ["linux"]
+    devices: ["navi3x", "navi4x"]
+    required: false
+
+  # Placeholders for the suites the language-runtime CQE team is still migrating
+  # out of Skynet. Uncomment each one once its test exists in the test library
+  # under the path below; the workflow needs no change.
+  #
+  # hip-catch2-windows:
+  #   description: "HIP Catch2 unit tests on Windows"
+  #   test: "L1-whb/hip/{platform}/unit_func-hip_catch2"
+  #   platforms: ["windows"]
+  #   devices: ["navi3x", "navi4x"]
+  #   required: false
+  #
+  # opencl-conformance:
+  #   description: "OpenCL CTS subset against the CLR OpenCL runtime"
+  #   test: "L1-whb/opencl/{platform}/unit_func-opencl_cts"
+  #   platforms: ["linux", "windows"]
+  #   devices: ["navi3x", "navi4x"]
+  #   required: false
+
+# ---------------------------------------------------------------------------
+# Device fleet
+# ---------------------------------------------------------------------------
+# Device -> MAAS broker tags. These are internal fleet tag names, so they are
+# NOT committed to this public repo — set them via the ORCHESTRAI_DEVICE_TAGS
+# repo variable as a JSON map, e.g.
+#   {"navi3x":["gpuarch_rdna3"],"navi4x":["gpuarch_rdna4"],"stxh":["apu_stxh"]}
+# A device with no entry is skipped with a warning (the broker could never
+# satisfy a batch tagged with a raw device name — it would queue and time out).
+device_to_tags: {}
+
+# Device -> TheRock AMDGPU family. Selects which per-family artifacts are
+# installed on the machine, and which family_marker above must be present in the
+# source run for this device to be scheduled.
+# Device keys are GPU ARCHITECTURES, not SKUs. The OrchestrAI broker selects by
+# architecture tag (gpuarch_rdna3 matches every RDNA3 board in the fleet), so
+# naming a device "rx7900xt" here would imply a precision the tag does not have.
+device_to_family:
+  navi3x: "gfx110X-all"
+  navi4x: "gfx120X-all"
+  stxh: "gfx1151" # Strix Halo APU
+
+# Device family controls Linux kernel-driver policy. Radeon discrete GPUs use
+# AMD's packaged amdgpu/DKMS driver; Ryzen APUs use the Ubuntu inbox amdgpu
+# module. An unclassified Linux device is rejected before hardware is acquired
+# rather than silently getting the wrong driver policy.
+device_families:
+  navi3x: "radeon"
+  navi4x: "radeon"
+  stxh: "ryzen_apu"
+
+# Devices to skip entirely (e.g. temporarily offline hardware).
+#
+# stxh is skipped because therock-multi-arch-ci.yml does not build gfx1151
+# today. To light up the APU leg: add gfx1151 to the workflow's
+# linux_amdgpu_families / windows_amdgpu_families, then remove it from this list
+# and add it to the relevant suites' `devices`. Until then the resolver would
+# drop it anyway (no gfx1151 family marker), so skipping keeps the log quiet.
+skip_devices: ["stxh"]
+
+# ---------------------------------------------------------------------------
+# Per-run pipeline settings
+# ---------------------------------------------------------------------------
+run_settings:
+  max_duration: 300 # minutes, whole batch
+  max_test_case_duration: 120 # minutes, single suite
+  acquire_timeout: 30 # minutes, machine acquire
+  # Machines to acquire per hardware group. 1 = all suites on the same device
+  # share one machine and run sequentially (saves scarce hardware). Overridable
+  # per run via the machines_per_hw_group workflow_dispatch input.
+  default_machines_per_hw_group: 1
+
+# ---------------------------------------------------------------------------
+# Provisioning: GPU stack installed on the acquired machine before the tests.
+# ---------------------------------------------------------------------------
+# Script paths resolve inside the OrchestrAI provisioning repository.
+#
+# linux-therock-artifacts.sh is the artifact-based counterpart of the existing
+# linux-therock-tarball.sh, and is what makes these runs possible: TheRock's
+# Multi-Arch CI publishes per-component artifacts but no single dist tarball,
+# so a host cannot be provisioned from one URL. Its Windows equivalent,
+# windows-therock-artifacts.ps1, is not written yet — which is why no suite
+# below lists windows.
+#
+# The script receives these env vars from `vars` in the pipeline build payload
+# and installs ROCm by running TheRock's own installer:
+#
+#   THEROCK_RUN_ID            GitHub Actions run id of the source build
+#   THEROCK_RUN_REPO          repo that run belongs to (ROCm/rocm-systems)
+#   THEROCK_AMDGPU_FAMILY     e.g. gfx110X-all
+#   THEROCK_ARTIFACT_BASE_URL fully-resolved S3 prefix for that run+platform
+#
+#   git clone --depth 1 https://github.com/ROCm/TheRock
+#   python build_tools/install_rocm_from_artifacts.py \
+#     --run-id "$THEROCK_RUN_ID" --run-github-repo "$THEROCK_RUN_REPO" \
+#     --amdgpu-family "$THEROCK_AMDGPU_FAMILY" \
+#     --output-dir "${DEPS_DIR:-/var/tmp/_testdeps}/therock_sdk"
+#
+# The output dir matters: the test library's app.hip.catch2-tests hard-codes
+# SDK_DIR="${DEPS_DIR}/therock_sdk" and only checks that the directory exists.
+# Installing there means the existing HIP Catch2 test needs no change, and its
+# app.therock.sdk-test-collection dependency (which wants a THEROCK_SDK_URL
+# tarball we deliberately do not produce) is skipped by its own
+# only_if_missing guard on "${DEPS_DIR}/therock_sdk/bin".
+provisioning:
+  linux_install_scripts:
+    - script: "InstallationScripts/gfx/linux-therock-artifacts.sh"
+      reboot_after: false
+
+  # Two ways to supply the amdgpu package, both injected from repo variables:
+  #   ORCHESTRAI_LINUX_DRIVER_SOURCE        a single URL (all Radeon hosts)
+  #   ORCHESTRAI_LINUX_DRIVER_SOURCES_JSON  a per-release map, e.g.
+  #     {"ubuntu:24.04":"https://.../ubuntu/noble/amdgpu-install_X_all.deb"}
+  # The map is resolved ON each machine from /etc/os-release, so an allocation
+  # that returns different Ubuntu releases still installs the right package.
+  # These install_scripts run BEFORE linux_install_scripts: the kernel driver
+  # must be active before TheRock user-space is installed.
+  linux_kernel_driver:
+    source: ""
+    sources_json: ""
+    install_scripts:
+      - script: "InstallationScripts/common/install-kernel-headers.sh"
+        reboot_after: false
+      - script: "InstallationScripts/gfx/linux.sh"
+        reboot_after: true
+
+  # Windows gets its GPU runtime from the AMD display driver (windows.ps1),
+  # which needs a reboot; TheRock user-space is layered on after it.
+  windows_install_scripts:
+    - script: "InstallationScripts/gfx/windows.ps1"
+      reboot_after: true
+    - script: "InstallationScripts/gfx/windows-therock-artifacts.ps1"
+      reboot_after: false
+
+  # Windows AMD GPU driver source (UNC path) copied onto the machine. Internal —
+  # set it as the ORCHESTRAI_WINDOWS_DRIVER_SOURCE repo secret, not here.
+  windows_driver:
+    source: ""
+    copy: "direct"
