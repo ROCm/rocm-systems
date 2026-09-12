@@ -943,10 +943,11 @@ hsa_status_t Runtime::GetSystemInfo(hsa_system_info_t attribute, void* value) {
       // Host memory DMA-BUF allocation via vmem APIs requires:
       //  - Virtual Memory APIs supported by the driver
       //  - At least one GPU agent (needed for DRM operations)
-      //  - Requires vmem support, a GPU agent, and a non-DXG backend (WDDM/DXG has no host-memory VMM).
+      //  - Requires vmem support, a GPU agent, and a non-DXG backend (WDDM/DXG has no host-memory
+      //  VMM).
       auto* runtime = core::Runtime::runtime_singleton_;
       *((bool*)value) = runtime->VirtualMemApiSupported() && !runtime->gpu_agents().empty() &&
-                        !runtime->thunkLoader()->IsDXG();
+          !runtime->thunkLoader()->IsDXG();
       break;
     }
     default:
@@ -1806,7 +1807,8 @@ hsa_status_t Runtime::IPCAttach(const hsa_amd_ipc_memory_t* handle, size_t len, 
     if (intermediateAddr) allocation_map_.erase(*intermediateAddr);
     auto [it, inserted] = allocation_map_.try_emplace(importAddress, nullptr, len, len,
                                                       core::MemoryRegion::AllocateNoFlags);
-    // A prior attach of the same handle may already be registered here. Release it before overwriting.
+    // A prior attach of the same handle may already be registered here. Release it before
+    // overwriting.
     if (new_thunk_bo) {
       if (it->second.thunk_bo)
         ReleaseImportHandles(it->second.thunk_bo, it->second.thunk_peer_imports);
@@ -1921,8 +1923,7 @@ hsa_status_t Runtime::IPCAttach(const hsa_amd_ipc_memory_t* handle, size_t len, 
     // importing process is not restricted to the exporting node, and for an IPC
     // signal the command processor writes the completion value to this page.
     for (const auto& peer : peerImports) {
-      status = HSAKMT_CALL(hsaKmtMemoryVaMap(peer.thunk_bo, 0,
-                                             static_cast<HSAuint64>(importSize),
+      status = HSAKMT_CALL(hsaKmtMemoryVaMap(peer.thunk_bo, 0, static_cast<HSAuint64>(importSize),
                                              reinterpret_cast<HSAuint64>(cpuPtr),
                                              HSA_MEMORY_ACCESS_RW, peer.node_id));
       if (status != HSAKMT_STATUS_SUCCESS) {
@@ -1969,10 +1970,9 @@ hsa_status_t Runtime::IPCDetach(void* ptr) {
       if (it->second.thunk_bo) {
         HSAuint32 gpu_node_id = it->second.thunk_node_id;
         for (const auto& peer : it->second.thunk_peer_imports) {
-          if (HSAKMT_CALL(hsaKmtMemoryVaUnmap(peer.thunk_bo, 0,
-                                              static_cast<HSAuint64>(it->second.size),
-                                              reinterpret_cast<HSAuint64>(ptr), peer.node_id)) !=
-              HSAKMT_STATUS_SUCCESS)
+          if (HSAKMT_CALL(hsaKmtMemoryVaUnmap(
+                  peer.thunk_bo, 0, static_cast<HSAuint64>(it->second.size),
+                  reinterpret_cast<HSAuint64>(ptr), peer.node_id)) != HSAKMT_STATUS_SUCCESS)
             debug_warning(false && "Peer dma-buf unmap failed");
         }
         if (gpu_node_id != AllocationRegion::kNodeUnmapped &&
@@ -3231,11 +3231,11 @@ void Runtime::LoadTools() {
   }
 }
 
-// Load the rocjitsu hotswap hook through the existing HSA tool lifecycle.
+// When enabled, load the rocjitsu hotswap hook through the existing HSA tool lifecycle.
 // Keeping its handle in tool_libs_ gives it the normal reverse-order OnUnload
 // and CloseTools handling without dedicated runtime state.
 hsa_status_t Runtime::LoadHotswapTool() {
-  if (flag().hotswap_disable()) return HSA_STATUS_SUCCESS;
+  if (!flag().hotswap_enable()) return HSA_STATUS_SUCCESS;
 
   bool has_gfx1250_a0_agent = false;
   for (const Agent* agent : gpu_agents_) {
@@ -4109,8 +4109,7 @@ hsa_status_t Runtime::SvmBatchDiscard(void** ptrs, size_t* sizes, uint32_t count
 
 hsa_status_t Runtime::SvmDiscardAndPrefetchBatch(void** ptrs, size_t* sizes, uint32_t count,
                                                  const hsa_agent_t* dst_agents,
-                                                 uint32_t num_dst_agents,
-                                                 uint32_t num_dep_signals,
+                                                 uint32_t num_dst_agents, uint32_t num_dep_signals,
                                                  const hsa_signal_t* dep_signals,
                                                  hsa_signal_t completion_signal) {
 #if !defined(__linux__)
@@ -4142,7 +4141,7 @@ hsa_status_t Runtime::SvmDiscardAndPrefetchBatch(void** ptrs, size_t* sizes, uin
 
   // Operation context
   struct DiscardAndPrefetchOp {
-    std::vector<uint32_t> target_gpus;    // per-region dest gpu node for prefetch
+    std::vector<uint32_t> target_gpus;  // per-region dest gpu node for prefetch
     std::vector<std::pair<void*, size_t>> regions;
     std::atomic<uint32_t> remaining_deps;
     hsa_signal_t completion;
@@ -4169,8 +4168,7 @@ hsa_status_t Runtime::SvmDiscardAndPrefetchBatch(void** ptrs, size_t* sizes, uin
   std::vector<hsa_signal_t> pending_deps;
   pending_deps.reserve(num_dep_signals);
   for (uint32_t i = 0; i < num_dep_signals; i++) {
-    if (Signal::Convert(dep_signals[i])->LoadRelaxed() != 0)
-      pending_deps.push_back(dep_signals[i]);
+    if (Signal::Convert(dep_signals[i])->LoadRelaxed() != 0) pending_deps.push_back(dep_signals[i]);
   }
 
   static auto discard_and_prefetch_all = [](DiscardAndPrefetchOp* op) {
@@ -4189,15 +4187,15 @@ hsa_status_t Runtime::SvmDiscardAndPrefetchBatch(void** ptrs, size_t* sizes, uin
       gpu_attr.value = target_gpu;
       HSAKMT_STATUS err = HSAKMT_CALL(hsaKmtSVMSetAttr(base, size, 1, &gpu_attr));
       if (err != HSAKMT_STATUS_SUCCESS)
-        debug_warning(false && "hsaKmtSVMSetAttr gpu prefetch failed in SvmDiscardAndPrefetchBatch");
+        debug_warning(false &&
+                      "hsaKmtSVMSetAttr gpu prefetch failed in SvmDiscardAndPrefetchBatch");
     }
 
-    if (op->completion.handle != 0)
-      Signal::Convert(op->completion)->SubRelaxed(1);
+    if (op->completion.handle != 0) Signal::Convert(op->completion)->SubRelaxed(1);
     delete op;
   };
 
-  /* Every dep signal calls this handler when it reaches 0. The last one to decrement 
+  /* Every dep signal calls this handler when it reaches 0. The last one to decrement
   remaining_deps to 0 triggers the discard-and-prefetch op on all memory ranges */
   static hsa_amd_signal_handler signal_handler = [](hsa_signal_value_t value, void* arg) {
     DiscardAndPrefetchOp* op = reinterpret_cast<DiscardAndPrefetchOp*>(arg);

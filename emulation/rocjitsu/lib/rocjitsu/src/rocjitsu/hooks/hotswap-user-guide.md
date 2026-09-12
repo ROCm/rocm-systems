@@ -10,20 +10,29 @@ A0 and B0 share one machine identity (`amdgcn-amd-amdhsa--gfx1250`), so the
 compiler cannot tell them apart and the loader would otherwise hand B0-only
 encodings to an A0 part.
 
-## When it engages
+## Enable the hook
 
-The hook only translates when **every** one of these holds. If any fails, loads
-take the untouched path and translation never runs:
+HotSwap is disabled by default. Enable it for a workload with:
 
-1. Linux. On other platforms `Runtime::LoadHotswapTool()` reports
-   `HSA_STATUS_ERROR_NOT_SUPPORTED`.
-2. `HSA_HOTSWAP_DISABLE` is unset or set to an off value (see below).
-3. At `hsa_init` time at least one agent is named `gfx1250` **and** reports
+```bash
+HSA_HOTSWAP_ENABLE=1 <your workload>
+```
+
+ROCr loads the hook only when **every** one of these holds:
+
+1. `HSA_HOTSWAP_ENABLE` is set to an on value (see below).
+2. At `hsa_init` time at least one agent is named `gfx1250` **and** reports
    `HSA_AMD_AGENT_INFO_ASIC_REVISION == 0`. With no such agent ROCr skips the
    dlopen entirely — on a B0-only or non-gfx1250 machine the hook is never
    loaded, so it cannot be the cause of a problem there.
+3. The runtime is Linux. On other platforms `Runtime::LoadHotswapTool()` reports
+   `HSA_STATUS_ERROR_NOT_SUPPORTED`.
 4. `libhsa_hotswap_rocjitsu.so` resolves, either next to `libhsa-runtime64.so`
    or on the default search path.
+
+When the flag is off or no supported agent is present, code objects take the
+untouched path. When HotSwap is requested on an unsupported platform or the DSO
+cannot be loaded, `hsa_init` reports the loader error.
 
 Once loaded, each individual load is still decided on its own:
 
@@ -45,15 +54,15 @@ turn one bad moment into a permanent refusal.
 
 | Variable | Read by | Effect |
 | --- | --- | --- |
-| `HSA_HOTSWAP_DISABLE` | ROCr | Stops the tool being loaded at all. **Tolerant parsing**: unset, empty, `0`, `off`, `false`, `no`, `n`, `f` (any case) all mean "load it". Anything else disables. |
+| `HSA_HOTSWAP_ENABLE` | ROCr | Enables loading the tool. **Tolerant parsing**: unset, empty, `0`, `off`, `false`, `no`, `n`, `f` (any case) all leave it disabled. Anything else enables it. |
 | `HSA_HOTSWAP_VERBOSE` | the hook | Diagnostic logging to stderr. **Strict parsing**: only unset, empty, or `0` are off. |
 | `HSA_HOTSWAP_DUMP_SOURCE` | the hook | Write the source object to disk when translation is refused. Strict parsing, as above. |
 | `HSA_HOTSWAP_DUMP_DIR` | the hook | Where those artifacts go. Falls back to `TMPDIR`, then `/tmp`. |
 
-The two parsings genuinely differ, and it is the most common way to mislead
-yourself here. `HSA_HOTSWAP_DISABLE=false` leaves hotswap **on**, while
-`HSA_HOTSWAP_VERBOSE=false` turns verbose logging **on**, because the hook only
-special-cases `0`. Use `1` and `0` and the distinction never bites.
+The two parsings genuinely differ. `HSA_HOTSWAP_ENABLE=false` leaves hotswap
+**off**, while `HSA_HOTSWAP_VERBOSE=false` turns verbose logging **on**, because
+the hook only special-cases `0`. Use `1` and `0` for both variables to avoid
+that difference.
 
 Errors are always reported regardless of `HSA_HOTSWAP_VERBOSE`; the flag governs
 what else is reported, never what is done.
@@ -128,14 +137,15 @@ to a system that just ran out, and the bytes are not what failed.
 
 Work down this list; each step is cheap and rules out a class.
 
-**1. Did the hook even load?** On a machine with no gfx1250 A0 agent it never
-does, and it cannot be your problem. Confirm with `HSA_HOTSWAP_VERBOSE=1` — no
+**1. Did the hook even load?** It is disabled unless
+`HSA_HOTSWAP_ENABLE=1` is set, and on a machine with no gfx1250 A0 agent it
+never loads even when enabled. Confirm with `HSA_HOTSWAP_VERBOSE=1` — no
 `[hsa-hotswap-rj]` output at all means it is not in the picture.
 
-**2. Bisect with the kill switch.**
+**2. Compare with the hook disabled.**
 
 ```bash
-HSA_HOTSWAP_DISABLE=1 <your workload>
+HSA_HOTSWAP_ENABLE=0 <your workload>
 ```
 
 Read the result carefully, because it is easy to over-read:

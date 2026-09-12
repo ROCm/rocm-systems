@@ -463,7 +463,7 @@ jobs:
           # hook explicitly so the candidate leg qualifies this checkout. Keep
           # every env option before the shared NAME=VALUE assignment.
           COMMON_UNSETS="-u LD_PRELOAD"
-          COMMON_HOTSWAP_ENV="HSA_HOTSWAP_DISABLE=1"
+          COMMON_HOTSWAP_ENV="HSA_HOTSWAP_ENABLE=0"
           PLAIN_WRAPPER="env ${COMMON_UNSETS} -u HSA_TOOLS_LIB -u HSA_TOOLS_DISABLE_REGISTER -u HSA_HOTSWAP_VERBOSE ${COMMON_HOTSWAP_ENV} ${LAUNCHER} --config ${B0_CONFIG} --"
           TRANSLATED_WRAPPER="env ${COMMON_UNSETS} ${COMMON_HOTSWAP_ENV} HSA_TOOLS_DISABLE_REGISTER=1 HSA_TOOLS_LIB=${HOTSWAP} HSA_HOTSWAP_VERBOSE=1 ${LAUNCHER} --config ${A0_CONFIG} --"
 
