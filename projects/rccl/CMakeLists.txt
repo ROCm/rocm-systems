@@ -88,6 +88,16 @@ option(BUILD_PROFILER_INSPECTOR                "Build the NCCL Inspector profile
 option(BUILD_PLUGIN_EXAMPLES                      "Build plugin example libraries (net, tuner, profiler, env)" OFF)
 option(DUMP_ASM                                "Disassemble and dump"                          OFF)
 option(ENABLE_CODE_COVERAGE                    "Enable code coverage"                          OFF)
+set(ENABLE_FULL_COVERAGE "OFF" CACHE STRING
+  "Enable host and device coverage: AUTO, ON, or OFF")
+set_property(CACHE ENABLE_FULL_COVERAGE PROPERTY STRINGS AUTO ON OFF)
+string(TOUPPER "${ENABLE_FULL_COVERAGE}" ENABLE_FULL_COVERAGE)
+set(_enable_full_coverage_request "${ENABLE_FULL_COVERAGE}")
+if(NOT ENABLE_FULL_COVERAGE MATCHES "^(AUTO|ON|OFF)$")
+  message(FATAL_ERROR
+    "ENABLE_FULL_COVERAGE must be AUTO, ON, or OFF; "
+    "received '${ENABLE_FULL_COVERAGE}'.")
+endif()
 option(ENABLE_IFC                              "Enable indirect function call"                 OFF)
 option(ENABLE_DEVICE_LINKER                    "Build with assembly-extract device linker"     ON)
 option(EMIT_LLVM_IR                            "Emit LLVM IR/bitcode for nccl_device APIs"     OFF)
@@ -110,6 +120,7 @@ option(TRACE                                   "Enable additional tracing"      
 option(QP_TRACKING                             "Enable per-device QP tracking"                 OFF)
 option(FAULT_INJECTION                         "Enable fault injection"                        ON)
 option(QUIET_WARNINGS                          "Supress compiler warnings"                     OFF)
+option(RCCL_POISON_HIP_ATOMICS                 "Reject __hip_atomic_* builtins in RCCL sources" ON)
 option(DWORDX4_INTRINSICS                      "Turn off compilation with dwordx4 intrinsics"  ON)
 if(ENABLE_TDM_SIMPLE)
   add_compile_definitions(ENABLE_TDM_SIMPLE=1)
@@ -307,7 +318,10 @@ if(NOT "${HIP_COMPILER}" MATCHES "clang")
 endif()
 
 ## Check for compiler version
-find_program(compiler_executable ${COMPILER_EXE_NAME})
+# Keep version detection on the same toolchain selected for the build.
+get_filename_component(_cxx_compiler_dir "${CMAKE_CXX_COMPILER}" DIRECTORY)
+find_program(compiler_executable ${COMPILER_EXE_NAME}
+  HINTS "${_cxx_compiler_dir}")
 message(STATUS "${COMPILER_EXE_NAME} executable: ${compiler_executable}")
 execute_process(
   COMMAND         bash "-c" "${compiler_executable} --version | grep \"${COMPILER_GREP_STRING}\" | ${COMPILER_AWK_CMD}"
@@ -345,6 +359,22 @@ else()
   message(FATAL_ERROR "Could not determine ROCM version (set EXPLICIT_ROCM_VERSION or set ROCM_PATH to a valid installation)")
 endif()
 string(REGEX MATCH "([0-9]+)\\.([0-9]+)\\.([0-9]+)" rocm_version_matches ${rocm_version_string})
+set(RCCL_DEVICE_PROFILE_RT "")
+set(RCCL_HOST_ROCM_PROFILE_RT "")
+set(_device_coverage_capability_error "")
+if(NOT _enable_full_coverage_request STREQUAL "OFF")
+  include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/DeviceCoverage.cmake")
+  if(ENABLE_DEVICE_LINKER)
+    rccl_find_device_profile_runtime(
+      "${CMAKE_CXX_COMPILER}"
+      RCCL_DEVICE_PROFILE_RT
+      _device_coverage_capability_error)
+    rccl_find_host_rocm_profile_runtime(
+      "${CMAKE_CXX_COMPILER}"
+      RCCL_HOST_ROCM_PROFILE_RT)
+  endif()
+endif()
+
 if (rocm_version_matches)
     set(ROCM_MAJOR_VERSION ${CMAKE_MATCH_1})
     set(ROCM_MINOR_VERSION ${CMAKE_MATCH_2})
@@ -367,8 +397,49 @@ if (rocm_version_matches)
         add_definitions("-DSQTT_ENABLED=1")
       endif()
     endif()
+
 else()
     message(WARNING "Failed to extract ROCm version.")
+endif()
+
+set(_full_coverage_resolved "${ENABLE_FULL_COVERAGE}")
+set(_full_coverage_blocker "")
+if(NOT _enable_full_coverage_request STREQUAL "OFF")
+  rccl_resolve_full_coverage(
+    "${_enable_full_coverage_request}"
+    "${ENABLE_DEVICE_LINKER}"
+    "${rocm_version_matches}"
+    "${ROCM_VERSION}"
+    "${ROCM_MAJOR_VERSION}.${ROCM_MINOR_VERSION}.${ROCM_PATCH_VERSION}"
+    "${_device_coverage_capability_error}"
+    _full_coverage_resolved
+    _full_coverage_blocker)
+endif()
+
+if(ENABLE_FULL_COVERAGE STREQUAL "AUTO")
+  # FORCE the resolved ON/OFF into the cache so cmake -LAH matches the build.
+  # Keep AUTO in _enable_full_coverage_request; a later cmake on this tree
+  # without -DENABLE_FULL_COVERAGE=AUTO reads the answer, not the request.
+  set(ENABLE_FULL_COVERAGE "${_full_coverage_resolved}" CACHE STRING
+    "Enable host and device coverage: AUTO, ON, or OFF" FORCE)
+  if(_full_coverage_blocker)
+    message(STATUS
+      "Full coverage is unavailable because ${_full_coverage_blocker}. "
+      "Falling back to host-only coverage.")
+  else()
+    message(STATUS
+      "Full coverage is supported by ROCm "
+      "${ROCM_MAJOR_VERSION}.${ROCM_MINOR_VERSION}.${ROCM_PATCH_VERSION}; "
+      "device profile runtime: ${RCCL_DEVICE_PROFILE_RT}")
+    if(RCCL_HOST_ROCM_PROFILE_RT)
+      message(STATUS "Host ROCm profile runtime: ${RCCL_HOST_ROCM_PROFILE_RT}")
+    endif()
+  endif()
+endif()
+
+if(NOT _enable_full_coverage_request STREQUAL "OFF" AND NOT ENABLE_CODE_COVERAGE)
+  message(STATUS "Full coverage request implies ENABLE_CODE_COVERAGE=ON")
+  set(ENABLE_CODE_COVERAGE ON CACHE BOOL "Enable code coverage" FORCE)
 endif()
 
 ### Required for checking HIP device symbols when building with amdclang++

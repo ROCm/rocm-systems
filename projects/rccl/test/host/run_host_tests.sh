@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 #
 # Build and run the RCCL CPU-only host unit tests: rccl-HostUnitTests plus the
-# host-only microtests (rccl-UnitTestsMicro, rccl-UnitTestsMicroInit[-uncached],
-# rccl-UnitTestsMicroEnqueue[-devlinker]).
+# host-only microtests (rccl-UnitTestsMicro, rccl-UnitTestsMicroInit[-uncached|-faultinj],
+# rccl-UnitTestsMicroEnqueue[-devlinker], rccl-UnitTestsMicroDevRuntime).
 #
 # Single source of truth for every command the host-test pipeline needs, so the
 # same steps run locally and in CI and nothing is scattered in the workflow YAML.
@@ -22,10 +22,13 @@
 #                   prerequisite the host tests compile against
 #   configure       configure test/host
 #   build           build all host binaries (default target)
+#   guards          kernel-count pytest plus src/include/test_poison_hip_atomics.py
 #   run             run the suite (timestamped log + JUnit XML). Always emits
 #                   llvm source-based coverage profiles (*.profraw) into
 #                   <BUILD_DIR>/coverage (requires the host tests to be built
-#                   with -DHOST_TEST_COVERAGE=ON, the default)
+#                   with -DHOST_TEST_COVERAGE=ON, the default). Also runs the
+#                   CPU-only guards: kernel-count pytest plus the
+#                   __hip_atomic_* poison compile probe.
 #   coverage        turn the per-binary *.profraw profiles from `run` into
 #                   reports: a per-binary text/HTML report + lcov tracefile
 #                   (clean, no hash mismatch), plus an overall line/branch union
@@ -147,11 +150,16 @@ do_host_tests() {
     "rccl-UnitTestsMicro:$SCRIPT_DIR/host_tests_micro.xml"
     "rccl-UnitTestsMicroInit:$SCRIPT_DIR/host_tests_micro_init.xml"
     "rccl-UnitTestsMicroInit-uncached:$SCRIPT_DIR/host_tests_micro_init_uncached.xml"
+    # FAULT_INJECTION defaults ON, so this variant is the arm that ships; init.cc
+    # gates its fault-mask blocks on ENABLE_FAULT_INJECTION at the preprocessor,
+    # so one compile cannot cover both. See test/host/CMakeLists.txt.
+    "rccl-UnitTestsMicroInit-faultinj:$SCRIPT_DIR/host_tests_micro_init_faultinj.xml"
     "rccl-UnitTestsMicroEnqueue:$SCRIPT_DIR/host_tests_micro_enqueue.xml"
     # ENABLE_DEVICE_LINKER defaults ON, so this variant is the arm that ships;
     # enqueue.cc gates rcclShmemDynamicSize on RCCL_DEVICE_LINKER at the
     # preprocessor, so one compile cannot cover both. See test/host/CMakeLists.txt.
     "rccl-UnitTestsMicroEnqueue-devlinker:$SCRIPT_DIR/host_tests_micro_enqueue_devlinker.xml"
+    "rccl-UnitTestsMicroDevRuntime:$SCRIPT_DIR/host_tests_micro_dev_runtime.xml"
   )
 
   : > "$LOG_FILE"   # truncate; each binary appends below
@@ -195,17 +203,41 @@ do_host_tests() {
   return "$rc"
 }
 
+# CPU-only compile probes that #pragma GCC poison in poison_hip_atomics.h
+# actually rejects __hip_atomic_* (in particular __hip_atomic_load). Needs
+# amdclang++ and HIP headers from ROCM_PATH; no GPU and no librccl.so.
+# A missing compiler fails here rather than skipping: the probes can only skip,
+# and a fully skipped unittest run exits 0. Export RCCL_POISON_TEST_ALLOW_SKIP=1
+# to opt out when running this phase on a box without ROCm.
+do_poison_hip_atomics() {
+  echo "==> Poison HIP atomics (src/include/test_poison_hip_atomics.py)"
+  python3 "$RCCL_ROOT/src/include/test_poison_hip_atomics.py"
+}
+
 # Run the kernel-count guard pytest suite (test/kernel-count) in a local venv so
 # the lean host-test image needs no system pytest. See that dir's README.
-do_guards() {
+do_kernel_count_guards() {
   echo "==> Kernel-count guards (pytest: test/kernel-count)"
   local gd="$RCCL_ROOT/test/kernel-count"
   local venv="$gd/venv"
   if [ ! -x "$venv/bin/pytest" ]; then
-    python3 -m venv "$venv"
-    "$venv/bin/pip" install -q --disable-pip-version-check -r "$gd/requirements.txt"
+    python3 -m venv "$venv" \
+      && "$venv/bin/pip" install -q --disable-pip-version-check -r "$gd/requirements.txt" \
+      || { echo "ERROR: could not provision $venv" >&2; return 1; }
   fi
   "$venv/bin/python" -m pytest "$gd/tests" -v
+}
+
+# All CPU-only guards: the kernel-count pytest suite, then the __hip_atomic_*
+# poison compile probe. Collected with `|| rc=1` rather than run back to back so
+# that under `set -e` (line 53) a kernel-count failure still leaves the poison
+# probe running and reported, instead of aborting the phase at the first one.
+# Same idiom as do_host_tests above.
+do_guards() {
+  local rc=0
+  do_kernel_count_guards || rc=1
+  do_poison_hip_atomics || rc=1
+  return "$rc"
 }
 
 # Turn the per-binary profraw sets produced by the `run` phase into coverage
@@ -366,10 +398,14 @@ do_coverage() {
 # (and `all` ends with it), so adding a future check here makes both CI and
 # local runs pick it up automatically -- no dispatch or workflow-YAML change.
 # do_host_tests runs first so the JUnit XML artifact is always produced before a
-# later guard can gate.
+# later guard can gate. Both are collected rather than chained: under `set -e` a
+# gtest failure would otherwise abort the phase and drop the guards entirely, so
+# one red signal would hide the other.
 do_run() {
-  do_host_tests "$@"
-  do_guards
+  local rc=0
+  do_host_tests "$@" || rc=1
+  do_guards || rc=1
+  return "$rc"
 }
 
 case "$PHASE" in

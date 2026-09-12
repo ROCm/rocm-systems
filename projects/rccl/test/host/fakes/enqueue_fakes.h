@@ -26,6 +26,7 @@
 #include "env_fakes.h"           // src/misc/param.cc + getenv interposition
 #include "hip_fakes.h"           // HIP runtime seams
 #include "nccl_fakes.h"          // reusable nccl* seams
+#include "nccl_stubs.h"          // core/lifecycle functors; nccl_stubs.cc is linked into this binary too
 #include "proxy_fakes.h"         // src/proxy.cc
 #include "rccl_wrap_fakes.h"     // src/rccl_wrap.cc
 #include "recorder_fakes.h"      // src/recorder.cc

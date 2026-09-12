@@ -146,7 +146,29 @@ void ResetRcclWrapFakes() {
   g_rcclSetWarpSpeedAutoResult = ncclSuccess;
   g_rcclSetWarpSpeedAutoCalls = 0;
   g_rcclSetWarpSpeedCUsCalls = 0;
+  g_validHsaScratch = true;
+  g_lastHsaScratchEnv = nullptr;
+  g_firmwareVersion = 0;
 }
+
+bool g_validHsaScratch = true;
+// Records the argument so a test can observe that checkHsaEnvSetting actually read the environment.
+const char* g_lastHsaScratchEnv = nullptr;
+bool validHsaScratchEnvSetting(const char* hsaScratchEnv, int /*hipRuntimeVersion*/,
+                               int /*firmwareVersion*/, const char* /*gcnArchName*/) {
+  g_lastHsaScratchEnv = hsaScratchEnv;
+  return g_validHsaScratch;
+}
+
+int g_firmwareVersion = 0;
+int getFirmwareVersion() { return g_firmwareVersion; }
+
+void rcclSetDefaultBuffSizes(struct ncclComm*, int* defaults) {
+  defaults[0] = 1 << 18;  // LL
+  defaults[1] = 1 << 18;  // LL128
+  defaults[2] = 1 << 22;  // SIMPLE
+}
+void rcclSetP2pNetChunkSize(struct ncclComm*, int& sz) { sz = 1 << 17; }
 
 // ===========================================================================
 // Fail-loud floor -- rccl_wrap.cc entry points no host-only microtest executes.
