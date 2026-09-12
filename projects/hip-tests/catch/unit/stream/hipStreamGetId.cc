@@ -12,6 +12,8 @@ Testcase Scenarios :
 
 #include <hip_test_common.hh>
 
+#include <unordered_set>
+
 #if __linux__
 #include <sys/types.h>
 #include <sys/wait.h>
