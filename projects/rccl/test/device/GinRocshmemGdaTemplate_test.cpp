@@ -451,6 +451,54 @@ TEST_F(GinRocshmemGdaTemplateTest, PutValue_WithSignal) {
   EXPECT_EQ(sigs[2], 4ULL);
 }
 
+// G9b: PutValue required=system, given=block -> HIP guard fires (given < required)
+// and the inline scalar still lands. Mirrors G7 for the Put path; PutValue has its
+// own copy of the fence guard in gin_rocshmem_gda.h so it needs its own coverage.
+__global__ void kernelPutValueScopeFence(GdaHarness* h, uint64_t val) {
+  ncclGinCtx ginCtx{};
+  ginCtx.handle = &h->ctx;
+  ginCtx.nRanks = 2;
+  ncclGinSignalDescriptor sig{};
+  sig.type = NCCL_GIN_SIGNAL_TYPE_NONE;
+  ncclGinApi_PutValue<NCCL_NET_DEVICE_GIN_ROCSHMEM_GDA>::call(
+      ginCtx, ncclCoopThread{}, 1, reinterpret_cast<ncclGinWindow_t>(&h->dstMh), 0, val, sig,
+      ncclGinSignalInc, 0, false, nullptr, cuda::thread_scope_system, cuda::thread_scope_block);
+}
+
+TEST_F(GinRocshmemGdaTemplateTest, PutValue_WeakerGivenScopeFencesAndPuts) {
+  GdaEnv env(sizeof(uint64_t));
+  env.dst.zero();
+  env.build();
+  resetThreadfenceCount();
+  const uint64_t kVal = 0x0102030405060708ULL;
+  kernelPutValueScopeFence<<<1, 1>>>(env.dHarness.ptr, kVal);
+  syncAndCheck();
+  EXPECT_EQ(readThreadfenceCount(), 1ULL);
+  auto got = env.dst.copyTo();
+  uint64_t observed = 0;
+  std::memcpy(&observed, got.data(), sizeof(observed));
+  EXPECT_EQ(observed, kVal);
+}
+
+// G9c: PutValue required=given=system -> guard does not fire (given < required is
+// false) and the inline scalar still lands. Distinguishes the guard's direction:
+// a pre-fix (given > required) predicate would also fire here (system > system is
+// false too), so pair with G9b to pin the actual (given < required) comparison.
+TEST_F(GinRocshmemGdaTemplateTest, PutValue_EqualScopeTakesNoFence) {
+  GdaEnv env(sizeof(uint64_t));
+  env.dst.zero();
+  env.build();
+  resetThreadfenceCount();
+  const uint64_t kVal = 0xAABBCCDDEEFF0011ULL;
+  kernelPutValueScalar<<<1, 1>>>(env.dHarness.ptr, kVal);
+  syncAndCheck();
+  EXPECT_EQ(readThreadfenceCount(), 0ULL);
+  auto got = env.dst.copyTo();
+  uint64_t observed = 0;
+  std::memcpy(&observed, got.data(), sizeof(observed));
+  EXPECT_EQ(observed, kVal);
+}
+
 // G10: Flush quiets every peer QP (one quiet per rank for a single-thread coop).
 __global__ void kernelFlush(GdaHarness* h) {
   ncclGinCtx ginCtx{};
