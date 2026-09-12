@@ -35,42 +35,48 @@ target_compile_features(pal INTERFACE cxx_std_20)
 if (NOT PAL_CLIENT_INTERFACE_MAJOR_VERSION EQUAL 995)
     message(WARNING "PAL: PAL_CLIENT_INTERFACE_MAJOR_VERSION ${PAL_CLIENT_INTERFACE_MAJOR_VERSION} not supported !!!")
 endif()
+if(CMAKE_SIZEOF_VOID_P EQUAL 4)
+    set(_pal_arch_dir "x86")
+else()
+    set(_pal_arch_dir "x64")
+endif()
+set(_pal_lib_dir "${CMAKE_CURRENT_SOURCE_DIR}/lib/Release/${_pal_arch_dir}")
 target_link_libraries(pal
     INTERFACE
-        ${CMAKE_CURRENT_SOURCE_DIR}/lib/Release/x64/pal.lib
-        ${CMAKE_CURRENT_SOURCE_DIR}/lib/Release/x64/palCompilerDeps.lib
-        ${CMAKE_CURRENT_SOURCE_DIR}/lib/Release/x64/palUtil.lib
-        ${CMAKE_CURRENT_SOURCE_DIR}/lib/Release/x64/pal_uuid.lib
-        ${CMAKE_CURRENT_SOURCE_DIR}/lib/Release/x64/cwpack.lib
-        ${CMAKE_CURRENT_SOURCE_DIR}/lib/Release/x64/pal_lz4.lib
-        ${CMAKE_CURRENT_SOURCE_DIR}/lib/Release/x64/addrlib.lib
-        ${CMAKE_CURRENT_SOURCE_DIR}/lib/Release/x64/amdrdf.lib
-        ${CMAKE_CURRENT_SOURCE_DIR}/lib/Release/x64/zstd.lib
-        ${CMAKE_CURRENT_SOURCE_DIR}/lib/Release/x64/vam.lib
-        ${CMAKE_CURRENT_SOURCE_DIR}/lib/Release/x64/UberTraceService.lib
-        ${CMAKE_CURRENT_SOURCE_DIR}/lib/Release/x64/DriverUtilsService.lib
-        ${CMAKE_CURRENT_SOURCE_DIR}/lib/Release/x64/dd_settings.lib
-        ${CMAKE_CURRENT_SOURCE_DIR}/lib/Release/x64/SettingsRpcService2.lib
-        ${CMAKE_CURRENT_SOURCE_DIR}/lib/Release/x64/dd_crc32.lib
-        ${CMAKE_CURRENT_SOURCE_DIR}/lib/Release/x64/ddApi.lib
-        ${CMAKE_CURRENT_SOURCE_DIR}/lib/Release/x64/ddRpcServer.lib
-        ${CMAKE_CURRENT_SOURCE_DIR}/lib/Release/x64/ddNet.lib
-        ${CMAKE_CURRENT_SOURCE_DIR}/lib/Release/x64/ddRpcShared.lib
-        ${CMAKE_CURRENT_SOURCE_DIR}/lib/Release/x64/ddSocket.lib
-        ${CMAKE_CURRENT_SOURCE_DIR}/lib/Release/x64/devdriver.lib
-        ${CMAKE_CURRENT_SOURCE_DIR}/lib/Release/x64/dd_common.lib
-        ${CMAKE_CURRENT_SOURCE_DIR}/lib/Release/x64/ddCommon.lib
-        ${CMAKE_CURRENT_SOURCE_DIR}/lib/Release/x64/ddCore.lib
-        ${CMAKE_CURRENT_SOURCE_DIR}/lib/Release/x64/dd_libyaml.lib
-        ${CMAKE_CURRENT_SOURCE_DIR}/lib/Release/x64/mpack.lib
-        ${CMAKE_CURRENT_SOURCE_DIR}/lib/Release/x64/metrohash.lib
-        ${CMAKE_CURRENT_SOURCE_DIR}/lib/Release/x64/stb_sprintf.lib
-        ${CMAKE_CURRENT_SOURCE_DIR}/lib/Release/x64/ddRpcClient.lib
-        ${CMAKE_CURRENT_SOURCE_DIR}/lib/Release/x64/ddEventStreamer.lib
-        ${CMAKE_CURRENT_SOURCE_DIR}/lib/Release/x64/ddEventClient.lib
-        ${CMAKE_CURRENT_SOURCE_DIR}/lib/Release/x64/ddEventParser.lib
-        ${CMAKE_CURRENT_SOURCE_DIR}/lib/Release/x64/ddEventServer.lib
-        ${CMAKE_CURRENT_SOURCE_DIR}/lib/Release/x64/ddYaml.lib
+        ${_pal_lib_dir}/pal.lib
+        ${_pal_lib_dir}/palCompilerDeps.lib
+        ${_pal_lib_dir}/palUtil.lib
+        ${_pal_lib_dir}/pal_uuid.lib
+        ${_pal_lib_dir}/cwpack.lib
+        ${_pal_lib_dir}/pal_lz4.lib
+        ${_pal_lib_dir}/addrlib.lib
+        ${_pal_lib_dir}/amdrdf.lib
+        ${_pal_lib_dir}/zstd.lib
+        ${_pal_lib_dir}/vam.lib
+        ${_pal_lib_dir}/UberTraceService.lib
+        ${_pal_lib_dir}/DriverUtilsService.lib
+        ${_pal_lib_dir}/dd_settings.lib
+        ${_pal_lib_dir}/SettingsRpcService2.lib
+        ${_pal_lib_dir}/dd_crc32.lib
+        ${_pal_lib_dir}/ddApi.lib
+        ${_pal_lib_dir}/ddRpcServer.lib
+        ${_pal_lib_dir}/ddNet.lib
+        ${_pal_lib_dir}/ddRpcShared.lib
+        ${_pal_lib_dir}/ddSocket.lib
+        ${_pal_lib_dir}/devdriver.lib
+        ${_pal_lib_dir}/dd_common.lib
+        ${_pal_lib_dir}/ddCommon.lib
+        ${_pal_lib_dir}/ddCore.lib
+        ${_pal_lib_dir}/dd_libyaml.lib
+        ${_pal_lib_dir}/mpack.lib
+        ${_pal_lib_dir}/metrohash.lib
+        ${_pal_lib_dir}/stb_sprintf.lib
+        ${_pal_lib_dir}/ddRpcClient.lib
+        ${_pal_lib_dir}/ddEventStreamer.lib
+        ${_pal_lib_dir}/ddEventClient.lib
+        ${_pal_lib_dir}/ddEventParser.lib
+        ${_pal_lib_dir}/ddEventServer.lib
+        ${_pal_lib_dir}/ddYaml.lib
         SetupAPI.Lib
 )
 target_compile_definitions(pal
