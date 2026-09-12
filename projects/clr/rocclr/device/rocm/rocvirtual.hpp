@@ -654,6 +654,7 @@ class VirtualGPU : public device::VirtualDevice {
     addSystemScope_ = true;
     fence_state_ = amd::Device::CacheState::kCacheStateInvalid;
   }
+  void addGraphDependencyWait(void* hw_event) override;
   void SetCopyCommandType(cl_command_type type) { copy_command_type_ = type; }
 
   HwQueueTracker& Barriers() { return barriers_; }

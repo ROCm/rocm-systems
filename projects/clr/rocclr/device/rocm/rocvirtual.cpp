@@ -951,6 +951,13 @@ std::vector<hsa_signal_t>& VirtualGPU::HwQueueTracker::WaitingSignal(HwQueueEngi
   return waiting_signals_;
 }
 
+// Queue an existing graph HW event signal as a wait for the next op on this queue.
+void VirtualGPU::addGraphDependencyWait(void* hw_event) {
+  if (hw_event == nullptr) return;
+  std::scoped_lock lock(execution());
+  Barriers().AddDynamicQueueWait(reinterpret_cast<ProfilingSignal*>(hw_event)->signal_);
+}
+
 // ================================================================================================
 bool VirtualGPU::HwQueueTracker::CpuWaitForSignal(ProfilingSignal* signal) {
   // Wait for the current signal to complete

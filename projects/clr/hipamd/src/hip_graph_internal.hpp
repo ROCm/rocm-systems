@@ -961,6 +961,9 @@ class Graph {
     // Hierarchical child graph information
     Graph* child_graph_ptr = nullptr;           // Direct pointer to child graph for quick access
 
+    //! Same-stream producers whose completion signal this segment's leading uncaptured
+    //! SDMA memcpy must wait on; the HW event slot is looked up at dispatch.
+    std::vector<int> sdma_wait_producers;
     bool needs_completion_signal = false;        // True if any downstream segment is on a different stream/device, or this is a leaf
   };
 
@@ -1166,6 +1169,7 @@ class GraphExecSegmented : public GraphExecBase {
                                       hipError_t* out_status = nullptr,
                                       std::vector<void*>* out_signal_set = nullptr);
   hipError_t EnqueueSegment(const Segment& segment, hip::Stream* stream,
+                            const std::vector<void*>& hw_events,
                             amd::AccumulateCommand* accumulate);
 
   //! Find the number of streams required per device for packet engine mode

@@ -1118,6 +1118,14 @@ graph:
   Unit_hipGraphLaunch_Functional_MultipleLaunch:
     <<: *level_2
     tags: [exec]
+  Unit_hipGraphLaunch_SdmaMemcpyOrderedAfterProducer:
+    <<: *level_2
+    tags: [exec]
+  # Spawned by name from the test above; never run standalone.
+  Unit_hipGraphLaunch_SdmaMemcpyOrderedAfterProducer_Child:
+    <<: *level_2
+    disabled: [amd_wsl, amd_linux, amd_windows, nvidia_windows, nvidia_linux]
+    tags: [exec]
   Unit_hipGraphMemcpyNodeSetParams1D_Positive_Basic:
     <<: *level_2
     tags: [node]

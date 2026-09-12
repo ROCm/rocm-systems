@@ -1371,6 +1371,9 @@ class VirtualDevice : public amd::ReferenceCountedObject {
   //!< Request a system-scope release fence on the next AQL packet (ROCm specific)
   virtual void addSystemScope() {}
 
+  //! Make the next op on this queue wait on an existing graph HW event signal.
+  virtual void addGraphDependencyWait(void* hw_event) {}
+
   //! Get the blit manager object
   device::BlitManager& blitMgr() const { return *blitMgr_; }
 
