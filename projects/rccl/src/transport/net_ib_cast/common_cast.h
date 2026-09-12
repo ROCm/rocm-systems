@@ -149,10 +149,17 @@ extern struct ncclIbDev IbCastDevs[MAX_IB_DEVS];
 extern int IbCastRelaxedOrderingEnabled;
 extern bool IbCastUseInline;
 
+#define WR_ID_RX_COMM_ID_MASK  0xffff
+#define WR_ID_RX_COMM_ID_SHIFT 48
 #define WR_IMM_RX_REQ_IDX_MASK 0xff
 #define WR_IMM_RX_REQ_IDX_SHIFT 24
 #define WR_IMM_SPLIT_DATA_FLAG 0x00800000
 #define WR_IMM_SIZE_MASK 0x007fffff
+// QP sharing BY_ID imm_data layout: reqId in bits[7:0], receiver commId in bits[23:8].
+// reqId fits in 8 bits (NET_IB_MAX_REQUESTS <= 256); commId fits in 16 bits.
+#define WR_IMM_BYID_REQ_ID_MASK   0xff
+#define WR_IMM_BYID_COMM_ID_SHIFT 8
+#define WR_IMM_BYID_COMM_ID_MASK  0xffff
 extern int IbCastGdrFlushDisable;
 extern bool IbCastAinicRoce;
 extern bool IbCastAinicCtsInlineData;
@@ -525,6 +532,13 @@ struct alignas(32) ncclIbNetCommBase {
   bool faultQpError[NCCL_IB_MAX_QPS];
 #endif
   struct ncclIbResiliency* resiliency;
+
+  // QP Sharing fields
+  uint16_t commId;              // 0 = not shared
+  bool     isSharedQpPrimary;
+  int      sharedGroupIdx;      // -1 = not shared
+  int      remIbDevIdx;
+  int      sharedPrimaryNqps;
 };
 
 struct ncclIbNetCommDevBase* IbCastGetNetCommDevBase(ncclIbNetCommBase* base, int devIndex);
@@ -625,6 +639,7 @@ struct ncclIbSendComm {
   // Resolved slot for telChId on this comm's first device (NULL if untracked).
   // Same reasoning as ncclIbQp::telQpStats: avoid re-resolving per completion.
   RcclChannelStats* telChStats;
+  uint16_t remCommId;           // receiver's commId for imm_data encoding (QP sharing)
 };
 // The SendFifo needs to be 32-byte aligned and each element needs
 // to be a 32-byte multiple, so that an entry does not get split and
