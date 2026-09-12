@@ -524,6 +524,8 @@ NOOP_PLAYBACK_APIS: Set[str] = {
     "hipModuleUnload",
     # hipModuleGetFunctionCount — output uint* stale
     "hipModuleGetFunctionCount",
+    # hipModuleEnumerateFunctions — hipFunction_t* output buffer stale at playback
+    "hipModuleEnumerateFunctions",
     # hipModuleLoadFatBinary — fat binary ptr stale at playback (code object already loaded via registered binary)
     "hipModuleLoadFatBinary",
     # hipModule occupancy — hipFunction_t stale handle
