@@ -264,6 +264,7 @@ using kernel_symbol_info_list_t = std::vector<kernel_symbol_info_ptr_t>;
 
 struct track_info_t
 {
+    size_t      id{};
     std::string name{};
     std::string extdata{};
 
