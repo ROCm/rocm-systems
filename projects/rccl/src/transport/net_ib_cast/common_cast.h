@@ -575,12 +575,17 @@ static inline ncclResult_t IbCastCommBaseGetQpByQpNum(struct ncclIbNetCommBase* 
   return ncclInternalError;
 }
 
-// Each request is transfered over all devices, and depending on the
-// "splitDataOnQps" configuration parameter, a request may be transffered over
-// a single QP per device or on all QPs of each device.
-static inline int IbCastCommBaseGetNqpsPerRequest(struct ncclIbNetCommBase* baseComm) {
+static inline void IbCastCommBaseInitSchedParms(struct ncclIbNetCommBase* baseComm) {
+  if (baseComm->schedParmsInit) return;
+  baseComm->schedParms = castGlobalQpSchedParms;
+  baseComm->schedParmsInit = true;
+}
+
+// Number of QPs a request is transferred over when the CAST scheduler is disabled
+static inline int IbCastCommBaseGetDefaultNqpsPerRequest(struct ncclIbNetCommBase* baseComm) {
   assert(baseComm->nqps != -1);
-  return (baseComm->schedParms.splitData || baseComm->schedParms.doWrr) ? baseComm->nqps : 1;
+  assert(baseComm->nDataQps != -1);
+  return (baseComm->splitDataOnQps == 1) ? baseComm->nqps : baseComm->nDataQps;
 }
 
 static inline ncclResult_t IbCastPostRecvWorkRequest(struct ibv_qp* qp, struct ibv_recv_wr* wr) {
