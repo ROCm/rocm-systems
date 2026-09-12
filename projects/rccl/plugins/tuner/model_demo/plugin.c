@@ -65,6 +65,12 @@ float latencies[NCCL_NUM_FUNCTIONS][NCCL_NUM_ALGORITHMS][NCCL_NUM_PROTOCOLS];
 float bandwidths[NCCL_NUM_FUNCTIONS][NCCL_NUM_ALGORITHMS][NCCL_NUM_PROTOCOLS];
 
 ncclResult_t ncclTopoGetAlgoTime_Tuner(ncclFunc_t collType, int algorithm, int protocol, int numPipeOps, float* time, size_t nBytes) {
+  // collType is an ncclFunc_t, which runs past the five collectives the model covers.
+  if (collType < 0 || collType >= NCCL_NUM_FUNCTIONS ||
+      algorithm < 0 || algorithm >= NCCL_NUM_ALGORITHMS ||
+      protocol < 0 || protocol >= NCCL_NUM_PROTOCOLS) {
+    *time = -1.0; return ncclSuccess;
+  }
   float bw = bandwidths[collType][algorithm][protocol];
   float lat = latencies[collType][algorithm][protocol];
 
@@ -86,7 +92,9 @@ ncclResult_t ncclTopoGetAlgoTime_Tuner(ncclFunc_t collType, int algorithm, int p
   return ncclSuccess;
 }
 
-__hidden ncclResult_t pluginInit(size_t nRanks, size_t nNodes, ncclDebugLogger_t logFunction) { 
+__hidden ncclResult_t pluginInit(size_t nRanks, size_t nNodes, ncclDebugLogger_t logFunction, void** context) {
+  // The model is held in file-scope tables, so no per-communicator state is needed.
+  if (context) *context = NULL;
   if (nRanks <= 1) return ncclSuccess;
   int compCapIndex = HOPPER_COMPCAP_IDX;
   int index2 = nNodes <= 2 ? nNodes-1 : 2;
@@ -196,27 +204,24 @@ __hidden ncclResult_t pluginInit(size_t nRanks, size_t nNodes, ncclDebugLogger_t
 }
 
 __hidden ncclResult_t pluginGetCollInfo(void* context, ncclFunc_t collType, size_t nBytes,
-                              int collNetSupport, int nvlsSupport, int numPipeOps,
-                              int *algorithm, int *protocol, int* nChannels) {
-                                
-  float minTime = 3600000000.0; // Hopefully no operation will take an hour to complete.
-  // Find algorithm / protocol.
-  *algorithm = -1;
-  *protocol = -1;
-  int nAlgos = NCCL_NUM_ALGORITHMS;
+                              int numPipeOps, float** collCostTable, int numAlgo, int numProto,
+                              int regBuff, int* nChannels) {
+  float (*table)[NCCL_NUM_PROTOCOLS] = (float (*)[NCCL_NUM_PROTOCOLS])collCostTable;
+
+  // Leave channel count to RCCL's own selection logic.
+  *nChannels = 0;
+
+  int nAlgos = numAlgo < NCCL_NUM_ALGORITHMS ? numAlgo : NCCL_NUM_ALGORITHMS;
+  int nProtos = numProto < NCCL_NUM_PROTOCOLS ? numProto : NCCL_NUM_PROTOCOLS;
   for (int a=0; a<nAlgos; a++) {
-    if ((a == NCCL_ALGO_COLLNET_DIRECT || a == NCCL_ALGO_COLLNET_CHAIN) && collNetSupport != 1) continue;
-    if ((a == NCCL_ALGO_NVLS || a == NCCL_ALGO_NVLS_TREE) && nvlsSupport != 1) continue;
-    if (a == NCCL_ALGO_NVLS && collNetSupport != 1) continue;
-    for (int p=0; p<NCCL_NUM_PROTOCOLS; p++) {
-      if (p == NCCL_PROTO_LL128) continue;
+    for (int p=0; p<nProtos; p++) {
+      // RCCL marks combinations it cannot use; leave those untouched.
+      if (table[a][p] == NCCL_ALGO_PROTO_IGNORE) continue;
       float time;
       ncclTopoGetAlgoTime_Tuner(collType, a, p, numPipeOps, &time, nBytes);
-        if (time >= 0 && time < minTime) {
-          *algorithm = a;
-          *protocol = p;
-          minTime = time;
-        }
+      // A negative time means the model has no bandwidth data for this
+      // combination, so keep the cost RCCL estimated itself.
+      if (time >= 0) table[a][p] = time;
     }
   }
   return ncclSuccess;

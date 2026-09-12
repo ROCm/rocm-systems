@@ -24,7 +24,8 @@ extern double gettime(void);
 // External reference to startTime from plugin.cc
 extern double getProfilerStartTime(void);
 
-// CE profiler global state
+// CE profiler global state. Lock order: ceProfilerCtxt.mutex before any
+// ctx->ceEvents.mutex, never the reverse.
 static struct {
   pthread_t pollerThread;
   bool pollerRunning;
@@ -229,7 +230,10 @@ ncclResult_t ceProfilerInitGlobal(void) {
 
   const char* intervalStr = getenv("NCCL_PROFILER_CE_POLLER_INTERVAL_MICROSECONDS");
   if (intervalStr) {
-    ceProfilerCtxt.pollerIntervalUs = atoi(intervalStr);
+    // A non-positive interval would turn the poller into a busy spin, so keep
+    // the default rather than honoring garbage input.
+    int interval = atoi(intervalStr);
+    if (interval > 0) ceProfilerCtxt.pollerIntervalUs = interval;
   }
 
   ceProfilerCtxt.contextCapacity = 16;
@@ -354,6 +358,11 @@ void ceProfilerCleanupPendingEvents(struct context* ctx) {
     if (ceBatch->stopEvent) cudaEventDestroy(ceBatch->stopEvent);
     ceBatch = ceBatch->pollerNext;
   }
+
+  // Drop the lists so nothing can walk handles that are now destroyed.
+  ctx->ceEvents.ceCollHead = NULL;
+  ctx->ceEvents.ceSyncHead = NULL;
+  ctx->ceEvents.ceBatchHead = NULL;
 
   pthread_mutex_unlock(&ctx->ceEvents.mutex);
 }
