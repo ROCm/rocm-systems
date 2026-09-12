@@ -820,6 +820,61 @@ HIP_TEST_CASE(Unit_bf162_operators_host) {
     REQUIRE((l + -l) == __hip_bfloat162{HIPRT_ZERO_BF16, HIPRT_ZERO_BF16});
     REQUIRE((l / -l) == -__hip_bfloat162{HIPRT_ONE_BF16, HIPRT_ONE_BF16});
   }
+
+  SECTION("Compare mismatched lanes") {
+    // Regression: the __hip_bfloat162 relational operators must compare each lane
+    // against its counterpart. A prior bug compared l.x against both r.x and r.y
+    // (ignoring l.y), so vectors whose two lanes differ were mis-compared.
+    __hip_bfloat162 la = {__float2bfloat16(1.0f), __float2bfloat16(4.0f)};
+    __hip_bfloat162 ra = {__float2bfloat16(2.0f), __float2bfloat16(3.0f)};
+    // lane0: 1<2 (true), lane1: 4<3 (false) -> overall false
+    REQUIRE_FALSE(la < ra);
+    REQUIRE_FALSE(la <= ra);
+
+    __hip_bfloat162 lc = {__float2bfloat16(4.0f), __float2bfloat16(1.0f)};
+    __hip_bfloat162 rc = {__float2bfloat16(3.0f), __float2bfloat16(2.0f)};
+    // lane0: 4>3 (true), lane1: 1>2 (false) -> overall false
+    REQUIRE_FALSE(lc > rc);
+    REQUIRE_FALSE(lc >= rc);
+
+    // sanity: both lanes satisfy the relation -> true
+    __hip_bfloat162 lo = {__float2bfloat16(1.0f), __float2bfloat16(2.0f)};
+    __hip_bfloat162 hi = {__float2bfloat16(3.0f), __float2bfloat16(4.0f)};
+    REQUIRE(lo < hi);
+    REQUIRE(lo <= hi);
+    REQUIRE(hi > lo);
+    REQUIRE(hi >= lo);
+  }
+
+  SECTION("__hbneu2 both-lane reduction") {
+    // Regression: __hbneu2 (unordered not-equal) must be true only when BOTH lanes
+    // are not-equal (&&), not when either lane differs (||).
+    __hip_bfloat162 a = {__float2bfloat16(1.0f), __float2bfloat16(2.0f)};
+    __hip_bfloat162 eq_x = {__float2bfloat16(1.0f), __float2bfloat16(3.0f)};  // lane0 equal
+    __hip_bfloat162 eq_y = {__float2bfloat16(9.0f), __float2bfloat16(2.0f)};  // lane1 equal
+    __hip_bfloat162 both = {__float2bfloat16(5.0f), __float2bfloat16(6.0f)};  // both differ
+    __hip_bfloat162 same = a;                                                // both equal
+
+    REQUIRE(__hbneu2(a, both));        // both lanes not-equal -> true
+    REQUIRE_FALSE(__hbneu2(a, eq_x));  // one lane equal -> false (was true with ||)
+    REQUIRE_FALSE(__hbneu2(a, eq_y));  // one lane equal -> false (was true with ||)
+    REQUIRE_FALSE(__hbneu2(a, same));  // both equal -> false
+  }
+
+  SECTION("__hgt2 / __hisnan2 high-lane mask") {
+    // Regression: __hgt2 and __hisnan2 returned 1.0 for the high (.y) lane
+    // unconditionally (both ternary branches were HIPRT_ONE_BF16).
+    __hip_bfloat162 a = {__float2bfloat16(5.0f), __float2bfloat16(1.0f)};
+    __hip_bfloat162 b = {__float2bfloat16(2.0f), __float2bfloat16(3.0f)};
+    float2 gt = __hgt2(a, b);  // lane0: 5>2 -> 1.0, lane1: 1>3 -> 0.0
+    REQUIRE(gt.x == 1.0f);
+    REQUIRE(gt.y == 0.0f);     // was 1.0f with the bug
+
+    __hip_bfloat162 n = {__float2bfloat16(NAN), __float2bfloat16(1.0f)};
+    float2 isn = __hisnan2(n);  // lane0: NaN -> 1.0, lane1: not NaN -> 0.0
+    REQUIRE(isn.x == 1.0f);
+    REQUIRE(isn.y == 0.0f);     // was 1.0f with the bug
+  }
 }
 
 // Bunch of tests which make sure we are packaging stuff correctly.
