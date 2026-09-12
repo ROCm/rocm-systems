@@ -19,7 +19,7 @@ on:
         default: "gfx94X-dcgpu"
       build_runs_on:
         type: string
-        default: "azure-linux-scale-rocm"
+        default: "aws-linux-scale-rocm-prod"
 
 permissions:
   contents: read
