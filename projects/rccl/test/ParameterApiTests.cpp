@@ -147,7 +147,9 @@ TEST(ParameterApiTests, Bind_KnownKey_ReturnsSameHandleOnRebind) {
 }
 
 // ncclParamBind succeeds for every flag combination, and PUBLISHED decides enumeration: only
-// published params appear in ncclParamGetAllParameterKeys, whatever their other flags.
+// ncclParamBind succeeds for every flag combination ncclParamCheckFlag branches on, and PUBLISHED
+// decides enumeration: only published params appear in ncclParamGetAllParameterKeys, whatever their
+// other flags.
 // clearVariable, not plain RUN_ISOLATED_TEST: NCCL_PARAM_DUMP_ALL drops the PUBLISHED filter in
 // ncclParamGetAllParameterKeys, and an exported one would flip every published == false row.
 TEST(ParameterApiTests, Bind_AllFlagCombinations_Succeed) {
