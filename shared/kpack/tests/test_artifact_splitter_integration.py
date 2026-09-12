@@ -760,6 +760,91 @@ class TestArtifactSplitterIntegration:
         # Verify the symlink chain works (can resolve to real file)
         assert (generic_lib_dir / "librocrand.so").resolve().name == "librocrand.so.1.1"
 
+    def test_split_never_copies_onto_existing_destination(self, toolchain, tmp_path):
+        """
+        Re-driving a split into an output tree that already has content must not
+        copy2() onto a pre-existing destination file.
+
+        shutil.copy2() calls copystat(), which chmod/utimes the destination. If
+        the destination already exists and is owned by a *different* user - the
+        case when a prebuilt artifacts tree is re-driven by another user, e.g. a
+        container build whose tree was staged by another UID - those calls fail
+        with EPERM ("Operation not permitted") and the split aborts, even though
+        the file contents themselves are writable.
+
+        Creating a second UID requires root, so rather than reproduce the
+        ownership itself this test asserts the invariant that makes the failure
+        impossible: every destination is unlinked before copy2() runs, exactly as
+        the symlink branch of GenericCopyVisitor.visit_file() already does.
+
+        Covers both copy2() call sites: GenericCopyVisitor.visit_file() (regular
+        files) and ArtifactSplitter.process_database_files() (database files).
+        """
+        input_dir = tmp_path / "test_artifact"
+        input_dir.mkdir()
+
+        prefix = "math-libs/BLAS/rocBLAS/stage"
+        write_artifact_manifest(input_dir, [prefix])
+
+        lib_dir = input_dir / prefix / "lib"
+        lib_dir.mkdir(parents=True)
+        (lib_dir / "libtest.so").write_text("mock host library")
+
+        # A database file exercises the second copy2() call site.
+        db_dir = lib_dir / "rocblas" / "library"
+        db_dir.mkdir(parents=True)
+        (db_dir / "TensileLibrary_gfx1100.dat").write_text("mock tensile data")
+
+        output_dir = tmp_path / "output"
+
+        def make_splitter():
+            return ArtifactSplitter(
+                artifact_prefix="blas_lib",
+                toolchain=toolchain,
+                database_handlers=[RocBLASHandler()],
+                verbose=False,
+            )
+
+        # First split populates the output tree.
+        make_splitter().split(input_dir, output_dir)
+
+        generic_lib = output_dir / "blas_lib_generic" / prefix / "lib" / "libtest.so"
+        arch_db = (
+            output_dir
+            / "blas_lib_gfx1100"
+            / prefix
+            / "lib/rocblas/library/TensileLibrary_gfx1100.dat"
+        )
+        assert generic_lib.exists(), "first split should populate the generic artifact"
+        assert arch_db.exists(), "first split should populate the per-arch artifact"
+
+        # Second split re-drives the same output tree. Emulate a destination
+        # owned by another user: copystat() on an existing destination raises
+        # EPERM. If the splitter unlinks first, this never triggers.
+        real_copy2 = shutil.copy2
+        copied_onto_existing = []
+
+        def guarded_copy2(src, dst, *args, **kwargs):
+            if Path(dst).exists() or Path(dst).is_symlink():
+                copied_onto_existing.append(str(dst))
+                raise PermissionError(1, "Operation not permitted")
+            return real_copy2(src, dst, *args, **kwargs)
+
+        with patch.object(shutil, "copy2", guarded_copy2):
+            make_splitter().split(input_dir, output_dir)
+
+        assert not copied_onto_existing, (
+            "copy2() was called onto pre-existing destination(s), which EPERMs in "
+            "copystat() when the destination is owned by another user: "
+            f"{copied_onto_existing}"
+        )
+
+        # The re-driven split still produces correct output.
+        assert generic_lib.exists()
+        assert generic_lib.read_text() == "mock host library"
+        assert arch_db.exists()
+        assert arch_db.read_text() == "mock tensile data"
+
     def test_overlay_produces_merged_kpack_directory(
         self, test_assets_dir, toolchain, tmp_path
     ):
