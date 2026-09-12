@@ -48,6 +48,11 @@ Environment Variables:
         default=5,
         help="Base delay in seconds between retries (default: 5).",
     )
+    parser.add_argument(
+        "--skip-unit",
+        action="store_true",
+        help="Skip unit tests even if the binary is found.",
+    )
 
     return parser.parse_args()
 
@@ -136,27 +141,29 @@ def get_rocm_tree_root(try_rocm_path: bool = False) -> Path:
     return rocm_root
 
 
-def get_default_paths(try_rocm_path: bool = False) -> Tuple[Path, Path]:
+def get_default_paths(try_rocm_path: bool = False) -> Tuple[Path, Path, Optional[Path]]:
     """
-    Get default paths for test binary and script.
+    Get default paths for test binary, script, and unit test binary.
 
     Args:
         try_rocm_path: If True, try ROCM_PATH environment variable first.
 
     Returns:
-        Tuple of (test_bin, test_script) paths.
+        Tuple of (test_bin, test_script, unit_test_bin) paths.
+        unit_test_bin is None if not found (non-fatal).
 
     Raises:
-        SystemExit: If paths cannot be resolved or don't exist.
+        SystemExit: If integration test paths cannot be resolved or don't exist.
     """
     rocm_root = get_rocm_tree_root(try_rocm_path)
 
-    # Both test binary and script are in <root>/tests/rocm-debug-agent/
+    # Test binaries and script are in <root>/tests/rocm-debug-agent/
     test_dir = rocm_root / "tests" / "rocm-debug-agent"
     test_bin = test_dir / "rocm-debug-agent-test"
     test_script = test_dir / "run-test.py"
+    unit_test_bin = test_dir / "unit" / "rocm-debug-agent-unit-tests"
 
-    # Validate that the paths exist.
+    # Validate that integration test paths exist.
     if not test_bin.exists():
         logger.error(f"[X] Error: Test binary not found: {test_bin}")
         sys.exit(1)
@@ -165,7 +172,13 @@ def get_default_paths(try_rocm_path: bool = False) -> Tuple[Path, Path]:
         logger.error(f"[X] Error: Test script not found: {test_script}")
         sys.exit(1)
 
-    return test_bin, test_script
+    # Unit test binary is optional.
+    if not unit_test_bin.exists():
+        logger.warning(f"[!] Warning: Unit test binary not found: {unit_test_bin}")
+        logger.warning("Skipping unit tests.")
+        unit_test_bin = None
+
+    return test_bin, test_script, unit_test_bin
 
 
 def print_section(
@@ -296,6 +309,57 @@ def run_tests(
                 sys.exit(1)
 
 
+def run_unit_tests(
+    unit_test_bin: Path,
+    max_retries: int = 3,
+    retry_delay: int = 5,
+) -> None:
+    """
+    Runs the unit tests with a retry mechanism.
+
+    Args:
+        unit_test_bin: Path to unit test binary.
+        max_retries: Maximum number of retry attempts.
+        retry_delay: Base delay in seconds between retries.
+
+    Raises:
+        SystemExit: If all retry attempts fail.
+    """
+    cmd = [str(unit_test_bin)]
+    test_bin_dir = unit_test_bin.parent
+
+    for attempt in range(1, max_retries + 1):
+        print_section(f"Running unit tests (Attempt {attempt}/{max_retries})")
+
+        logger.info(f"Exec [{test_bin_dir}]$ {shlex.join(cmd)}")
+
+        start_time = time.perf_counter()
+        try:
+            subprocess.run(cmd, cwd=str(test_bin_dir), check=True)
+
+            duration = time.perf_counter() - start_time
+
+            print_section(
+                f"[✓] Unit tests succeeded on attempt {attempt}. Duration: {duration:.2f}s"
+            )
+            return
+
+        except subprocess.CalledProcessError as e:
+            duration = time.perf_counter() - start_time
+            logger.error(
+                f"[X] Attempt {attempt}/{max_retries} failed with exit code {e.returncode} "
+                f"after {duration:.2f}s"
+            )
+
+            if attempt < max_retries:
+                wait_time = attempt * retry_delay
+                logger.info(f"Retrying in {wait_time}s...")
+                time.sleep(wait_time)
+            else:
+                print_section(f"[X] All {max_retries} attempts failed for unit tests.")
+                sys.exit(1)
+
+
 def main() -> None:
     """
     Main entry point for the script.
@@ -305,25 +369,41 @@ def main() -> None:
 
     print_section("Path discovery")
     # Discover paths using automatic logic.
-    test_bin, test_script = get_default_paths(try_rocm_path=args.try_rocm_path)
+    test_bin, test_script, unit_test_bin = get_default_paths(try_rocm_path=args.try_rocm_path)
     test_bin_dir = test_bin.parent
 
-    logger.info(f"Test Binary: {test_bin}")
-    logger.info(f"Test Script: {test_script}")
+    logger.info(f"Integration Test Binary: {test_bin}")
+    logger.info(f"Integration Test Script: {test_script}")
     logger.info(f"Test Bin Dir: {test_bin_dir}")
+    if unit_test_bin:
+        logger.info(f"Unit Test Binary: {unit_test_bin}")
+    else:
+        logger.info("Unit Test Binary: Not found (will skip)")
 
     print_section("Disabling core file generation")
 
     # Set core dump limit to 0 (ulimit -c 0).
     set_core_dump_limit()
 
-    # Run tests.
+    # Run integration tests.
     run_tests(
         test_script=test_script,
         test_bin_dir=test_bin_dir,
         max_retries=args.max_retries,
         retry_delay=args.retry_delay,
     )
+
+    # Run unit tests if binary exists and not skipped.
+    if args.skip_unit:
+        logger.info("Skipping unit tests (--skip-unit flag)")
+    elif unit_test_bin:
+        run_unit_tests(
+            unit_test_bin=unit_test_bin,
+            max_retries=args.max_retries,
+            retry_delay=args.retry_delay,
+        )
+    else:
+        logger.info("Skipping unit tests (binary not found)")
 
 
 if __name__ == "__main__":
