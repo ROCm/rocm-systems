@@ -1,21 +1,61 @@
 #!/usr/bin/env python3
 """Submit a SLURM batch job, wait for it, and verify it succeeded.
 
-`sbatch --wait` exits 0 even when the scheduler kills a job (TIMEOUT, OOM, node
-failure), so this cross-checks the terminal state via `sacct`.
+Does **not** use `sbatch --wait`. GitHub Actions cancel-in-progress sends
+SIGINT/SIGTERM (and eventually SIGKILL) to the step; `sbatch --wait` then dies
+without cancelling the allocation, and the compute nodes stay occupied until
+the wall clock expires. Submit with `--parsable`, remember the job id, and
+`scancel` it on INT/TERM/HUP so a superseded PR run releases the nodes.
+
+A bare `sbatch --wait` also exits 0 when the scheduler kills a job (TIMEOUT,
+OOM, node failure), so this still cross-checks the terminal state via `sacct`.
 """
 
+from __future__ import annotations
+
 import argparse
+import signal
 import subprocess
 import sys
 import time
 from dataclasses import dataclass
 from pathlib import Path
+from types import FrameType
+from typing import Callable
 
 # Non-terminal sacct states (and a missing row); keep polling while we see these.
+# This is the complement of the terminal set (BOOT_FAIL, CANCELLED, COMPLETED,
+# DEADLINE, FAILED, NODE_FAIL, OUT_OF_MEMORY, PREEMPTED, TIMEOUT) -- it is the
+# wait predicate now that `sbatch --wait` no longer guarantees terminality, so a
+# state missing from here is silently read as "job finished" while it is still
+# holding the reservation. Held/suspended states are the ones that used to be
+# absent; keep this list exhaustive.
 NON_TERMINAL_STATES = frozenset(
-    {"", "RUNNING", "PENDING", "REQUEUED", "COMPLETING", "RESIZING"}
+    {
+        "",  # sacct has no accounting row (yet)
+        "COMPLETING",
+        "CONFIGURING",
+        "PENDING",
+        "REQUEUED",
+        "REQUEUE_FED",
+        "REQUEUE_HOLD",
+        "RESIZING",
+        "RESV_DEL_HOLD",
+        "REVOKED",
+        "RUNNING",
+        "SIGNALING",
+        "SPECIAL_EXIT",
+        "STAGE_OUT",
+        "STOPPED",
+        "SUSPENDED",
+    }
 )
+
+# How long to keep polling when sacct never produces a row for a job id that
+# sbatch accepted. Past this the accounting DB is unusable, so we cannot verify
+# success anyway -- give up loudly and scancel rather than hold nodes until the
+# GitHub job timeout.
+MISSING_ROW_TIMEOUT = 600.0
 
 
 @dataclass
@@ -31,46 +71,131 @@ def log(*args: object) -> None:
     sys.stdout.flush()
 
 
+def parse_parsable_job_id(stdout: str) -> str:
+    """Extract the job id from `sbatch --parsable` stdout (`<id>` or `<id>;<cluster>`).
+
+    Returns "" for anything not purely numeric: `--parsable` only ever prints
+    digits (optionally `;<cluster>`), so banner text landing on the last line
+    -- the mirror image of the banner-before-id case this already handles --
+    must not be handed to sacct/scancel as if it were a real job id.
+    """
+    text = stdout.strip()
+    if not text:
+        return ""
+    candidate = text.splitlines()[-1].split(";")[0].strip()
+    return candidate if candidate.isdigit() else ""
+
+
+def scancel_job(job_id: str) -> None:
+    """Best-effort cancel. Missing scancel/job is not fatal; the wait loop will still end."""
+    if not job_id:
+        return
+    # Cancel first, log after. This runs from a signal handler, and if the
+    # signal lands while the main thread is inside print/flush, CPython raises
+    # RuntimeError ("reentrant call") out of the handler -- which would abort it
+    # before the one thing it exists to do.
+    try:
+        subprocess.run(
+            ["scancel", job_id],
+            check=False,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+    except FileNotFoundError:
+        log(f"WARNING: scancel not found; job {job_id} may keep running")
+        return
+    log(f"==> scancel {job_id}")
+
+
 def submit_and_wait(
     script: Path,
     export: str,
     chdir: Path | None,
     partition: str | None,
     reservation: str | None = None,
-) -> tuple[int, str]:
-    """Run `sbatch --parsable --wait` and return (returncode, job_id).
+    wait_poll_interval: float = 15.0,
+) -> tuple[int, str, JobResult | None]:
+    """Submit with `sbatch --parsable`, wait, scancel on INT/TERM/HUP.
 
-    `--parsable` makes stdout just the job id (optionally `<id>;<cluster>`);
-    `--wait` blocks until the job reaches a terminal state. A non-empty
-    `partition` is passed as `--partition`, overriding the script's
-    `#SBATCH --partition` directive so one script runs on any cluster. A
-    non-empty `reservation` is passed as `--reservation` to pin the job to a
-    named SLURM reservation (e.g. dedicated CI nodes).
+    Returns (returncode, job_id, result). returncode is 0 only if we did not
+    cancel the job from this process; sacct is still the source of truth for
+    success. result is the terminal JobResult wait_for_job observed (or None
+    if the job never reached one from this process's point of view) -- pass
+    it straight to evaluate() instead of re-querying sacct.
     """
-    cmd = ["sbatch", "--parsable", "--wait", f"--export={export}"]
+    cmd = ["sbatch", "--parsable", f"--export={export}"]
     if partition:
         cmd.append(f"--partition={partition}")
     if reservation:
         cmd.append(f"--reservation={reservation}")
     cmd.append(str(script))
     log(f"==> {' '.join(cmd)}")
+
+    cancel_requested = False
+    job_id = ""
+
+    def _on_signal(signum: int, _frame: FrameType | None) -> None:
+        nonlocal cancel_requested
+        cancel_requested = True
+        scancel_job(job_id)
+        log(f"==> caught signal {signum}; cancelled Slurm job {job_id or '<pending>'}")
+
+    previous: dict[int, object] = {}
+    for sig in (signal.SIGINT, signal.SIGTERM, signal.SIGHUP):
+        previous[sig] = signal.signal(sig, _on_signal)
+
     try:
-        proc = subprocess.run(
-            cmd,
-            cwd=str(chdir) if chdir else None,
-            text=True,
-            capture_output=True,
+        try:
+            proc = subprocess.run(
+                cmd,
+                cwd=str(chdir) if chdir else None,
+                text=True,
+                capture_output=True,
+            )
+        except FileNotFoundError as e:
+            raise RuntimeError("sbatch not found on PATH") from e
+
+        sys.stdout.write(proc.stdout)
+        sys.stderr.write(proc.stderr)
+        sys.stdout.flush()
+
+        job_id = parse_parsable_job_id(proc.stdout)
+        if proc.returncode != 0:
+            return proc.returncode, job_id, None
+        if job_id and chdir is not None:
+            # So a later `if: cancelled()` step can scancel if this process is
+            # SIGKILL'd before the handler runs (GHA signals the step PID).
+            (chdir / "slurm-job-id").write_text(f"{job_id}\n")
+            log(f"==> wrote {chdir / 'slurm-job-id'}")
+        if not job_id:
+            # sbatch exited 0 but printed nothing parsable: there is nothing
+            # to wait on or scancel, so trusting rc=0 here would report a
+            # queued-but-unknown job as success. Fail loud instead.
+            log("ERROR: sbatch succeeded (rc=0) but printed no parsable job id")
+            return 1, job_id, None
+        if cancel_requested:
+            scancel_job(job_id)
+            return 1, job_id, None
+
+        log(f"==> waiting for job {job_id} (scancel on INT/TERM/HUP)")
+        wait_rc, result = wait_for_job(
+            job_id, wait_poll_interval, lambda: cancel_requested
         )
-    except FileNotFoundError as e:
-        raise RuntimeError("sbatch not found on PATH") from e
-
-    sys.stdout.write(proc.stdout)
-    sys.stderr.write(proc.stderr)
-    sys.stdout.flush()
-
-    stdout = proc.stdout.strip()
-    job_id = stdout.splitlines()[-1].split(";")[0] if stdout else ""
-    return proc.returncode, job_id
+        return wait_rc, job_id, result
+    except KeyboardInterrupt:
+        cancel_requested = True
+        scancel_job(job_id)
+        return 130, job_id, None
+    except Exception:
+        # An unexpected failure here (e.g. sacct/scancel vanishing from PATH
+        # mid-run) must not leave the allocation running: the `if: cancelled()`
+        # backup step only fires on an actual GitHub cancellation, not on an
+        # ordinary crash, so this is the last chance to release the node.
+        scancel_job(job_id)
+        raise
+    finally:
+        for sig, handler in previous.items():
+            signal.signal(sig, handler)
 
 
 def query_job(job_id: str, retries: int, interval: float) -> JobResult:
@@ -104,11 +229,66 @@ def query_job(job_id: str, retries: int, interval: float) -> JobResult:
     return JobResult(state=state, exit_code=exit_code)
 
 
+def wait_for_job(
+    job_id: str,
+    poll_interval: float,
+    cancelled: Callable[[], bool],
+    missing_row_timeout: float = MISSING_ROW_TIMEOUT,
+) -> tuple[int, JobResult | None]:
+    """Block until sacct reports a terminal state, or until a cancel flag is set.
+
+    Returns (rc, result). rc is 0 if the job reached a terminal state on its
+    own, 1 if we scancelled it or gave up waiting. result is the terminal
+    JobResult this function actually observed, or None if it gave up/cancelled
+    without ever seeing one. Callers must use this result rather than
+    re-querying sacct themselves: right after a job finishes, sacct's
+    accounting DB can lag and briefly return nothing, so a second, independent
+    query can read a real FAILED job as "no data" and report success.
+
+    A real PENDING/RUNNING state is waited on without a deadline -- the queue is
+    allowed to be slow, and the GitHub job timeout is the backstop. What *is*
+    bounded is a *continuously* empty state: sbatch handed us this id, so an
+    accounting row should appear within seconds, and `""` is a member of
+    NON_TERMINAL_STATES, so a permanently broken sacct would otherwise spin here
+    forever. The clock resets on every non-empty answer, so a transient sacct
+    outage (query_job maps CalledProcessError to `""`) mid-run does not count
+    against a job that is already reporting state.
+    """
+    last_state_seen = time.monotonic()
+    while True:
+        if cancelled():
+            scancel_job(job_id)
+            return 1, None
+        result = query_job(job_id, retries=1, interval=0)
+        if result.state:
+            if result.state not in NON_TERMINAL_STATES:
+                return (1 if cancelled() else 0), result
+            last_state_seen = time.monotonic()
+        elif time.monotonic() - last_state_seen >= missing_row_timeout:
+            # Cancel: sacct is the only success oracle we have, so this run is
+            # already lost -- do not also leave the job holding the reservation.
+            scancel_job(job_id)
+            log(
+                f"ERROR: sacct reported no state for job {job_id} for "
+                f"{missing_row_timeout:.0f}s; giving up and cancelling it"
+            )
+            return 1, None
+        deadline = time.monotonic() + poll_interval
+        while time.monotonic() < deadline:
+            if cancelled():
+                scancel_job(job_id)
+                return 1, None
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                break
+            time.sleep(min(1.0, remaining))
+
+
 def evaluate(sbatch_rc: int, job_id: str, result: JobResult) -> int:
-    """Decide the overall exit code from the sbatch rc and sacct result."""
+    """Decide the overall exit code from the wait rc and sacct result."""
     if sbatch_rc != 0:
-        log(f"ERROR: sbatch reported failure (rc={sbatch_rc})")
-        return sbatch_rc
+        log(f"ERROR: slurm job did not complete cleanly (rc={sbatch_rc})")
+        return sbatch_rc if sbatch_rc > 0 else 1
 
     if not job_id:
         log("WARNING: no job id from sbatch; trusting rc=0")
@@ -138,7 +318,8 @@ def evaluate(sbatch_rc: int, job_id: str, result: JobResult) -> int:
 
 def main(argv: list[str]) -> int:
     parser = argparse.ArgumentParser(
-        description="Submit a SLURM job with sbatch --wait and verify it via sacct."
+        description="Submit a SLURM job, wait for a terminal sacct state, "
+        "scancel on INT/TERM/HUP, and verify the result via sacct."
     )
     parser.add_argument(
         "--script",
@@ -185,6 +366,12 @@ def main(argv: list[str]) -> int:
         default=3.0,
         help="Seconds between sacct polls (default: 3)",
     )
+    parser.add_argument(
+        "--wait-poll-interval",
+        type=float,
+        default=15.0,
+        help="Seconds between sacct polls while waiting for the job (default: 15)",
+    )
     args = parser.parse_args(argv)
 
     if not args.script.exists():
@@ -192,14 +379,29 @@ def main(argv: list[str]) -> int:
     if args.chdir:
         args.chdir.mkdir(parents=True, exist_ok=True)
 
-    sbatch_rc, job_id = submit_and_wait(
-        args.script, args.export, args.chdir, args.partition, args.reservation
+    sbatch_rc, job_id, wait_result = submit_and_wait(
+        args.script,
+        args.export,
+        args.chdir,
+        args.partition,
+        args.reservation,
+        wait_poll_interval=args.wait_poll_interval,
     )
-    log(f"sbatch --wait rc={sbatch_rc}, job_id={job_id}")
+    log(f"slurm wait rc={sbatch_rc}, job_id={job_id}")
 
-    result = JobResult(state="", exit_code="")
-    if sbatch_rc == 0 and job_id:
-        result = query_job(job_id, args.poll_retries, args.poll_interval)
+    # wait_for_job already saw a terminal sacct row -- trust it rather than
+    # re-querying, since a second query right after the job ends can race
+    # sacct's accounting-DB lag and read a real failure as "no data".
+    result = wait_result
+    if result is None:
+        result = JobResult(state="", exit_code="")
+        # wait_result is only None when sbatch_rc != 0 (empty job id, a
+        # cancel before wait_for_job ran, or wait_for_job itself giving up);
+        # evaluate() discards result in all of those cases, so querying sacct
+        # here would just be wasted time -- up to 30s on top of the 600s
+        # wait_for_job already spent if this is the missing-row-timeout path.
+        if sbatch_rc == 0 and job_id:
+            result = query_job(job_id, args.poll_retries, args.poll_interval)
 
     return evaluate(sbatch_rc, job_id, result)
 
