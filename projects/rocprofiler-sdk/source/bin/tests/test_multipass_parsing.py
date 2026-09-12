@@ -24,6 +24,7 @@
 
 """GPU-free unit tests for the rocprofv3 multi-pass helpers."""
 
+import json
 import os
 import sys
 
@@ -96,6 +97,63 @@ def test_parse_input_text_uses_pmc_subdir(rocprofv3, tmp_path):
     jobs = rocprofv3.parse_input(path)
     assert len(jobs) == 2
     assert [j["sub_directory"] for j in jobs] == ["pmc_", "pmc_"]
+
+
+@pytest.mark.parametrize(
+    "jobs,cli_args,expected",
+    [
+        (
+            [{"pmc": ["SQ_WAVES"]}, {"pmc": ["GRBM_COUNT"]}],
+            ["--pid", "12345"],
+            "[rocprofv3] Fatal error: Multi-pass counter collection "
+            "(multiple input-file jobs) is not compatible with attach mode (--pid)\n",
+        ),
+        (
+            [{"pmc": ["SQ_WAVES"]}, {"pmc": ["GRBM_COUNT"]}],
+            ["--collection-period", "0:100:1"],
+            "[rocprofv3] Fatal error: Multi-pass counter collection "
+            "(multiple input-file jobs) is not compatible with --collection-period\n",
+        ),
+        (
+            [{"pmc": ["SQ_WAVES"]}, {"pmc": ["GRBM_COUNT"], "pid": 12345}],
+            [],
+            "[rocprofv3] Fatal error: Multi-pass counter collection "
+            "(multiple input-file jobs) is not compatible with attach mode (--pid)\n",
+        ),
+        (
+            [
+                {"pmc": ["SQ_WAVES"]},
+                {"pmc": ["GRBM_COUNT"], "collection_period": ["0:100:1"]},
+            ],
+            [],
+            "[rocprofv3] Fatal error: Multi-pass counter collection "
+            "(multiple input-file jobs) is not compatible with --collection-period\n",
+        ),
+        (
+            [{"pmc": ["GRBM_COUNT"]}],
+            ["--pmc", "SQ_WAVES", "--pid", "12345"],
+            "[rocprofv3] Fatal error: Multi-pass counter collection "
+            "(--pmc combined with input-file pmc) is not compatible with attach mode "
+            "(--pid)\n",
+        ),
+    ],
+)
+def test_multipass_incompatible_options_fail_before_launch(
+    rocprofv3, tmp_path, capsys, jobs, cli_args, expected
+):
+    input_path = _write(
+        tmp_path, "input.json", json.dumps({"jobs": jobs}, separators=(",", ":"))
+    )
+    output_path = tmp_path / "output"
+
+    with pytest.raises(SystemExit) as exc_info:
+        rocprofv3.main(
+            ["-i", input_path, *cli_args, "-d", str(output_path), "--", "/bin/true"]
+        )
+
+    assert exc_info.value.code == 1
+    assert capsys.readouterr().err == expected
+    assert not output_path.exists()
 
 
 if __name__ == "__main__":

@@ -33,8 +33,9 @@ project(
 find_package(rocprofiler-sdk REQUIRED)
 
 rocprofiler_configure_pytest_files(
-    CONFIG pytest.ini COPY validate.py validate_no_output.py conftest.py input.json
-                           input.yml input-combined.json input-pmc-groups.json)
+    CONFIG pytest.ini
+    COPY validate.py validate_no_output.py conftest.py input.json input.yml
+         input-combined.json input-pmc-groups.json input-pid.json)
 
 string(REPLACE "LD_PRELOAD=" "ROCPROF_PRELOAD=" PRELOAD_ENV
                "${ROCPROFILER_MEMCHECK_PRELOAD_ENV}")
@@ -166,6 +167,50 @@ rocprofiler_add_integration_execute_test(
     PRELOAD "${PRELOAD_ENV}"
     PASS_REGULAR_EXPRESSION "Cannot specify both --pmc and \\(input file\\) pmc_groups")
 
+# input-file multi-pass (>1 job) with --pid
+rocprofiler_add_integration_execute_test(
+    rocprofv3-test-counter-collection-cli-multipass-input-file-rejects-pid
+    COMMAND
+        $<TARGET_FILE:rocprofiler-sdk::rocprofv3> -i
+        ${CMAKE_CURRENT_BINARY_DIR}/input.json --pid 12345 -d
+        ${CMAKE_CURRENT_BINARY_DIR}/%argt%-cc-err-inp-pid -o out -f csv --
+        $<TARGET_FILE:simple-transpose>
+    DEPENDS simple-transpose
+    TIMEOUT 45
+    PRELOAD "${PRELOAD_ENV}"
+    PASS_REGULAR_EXPRESSION
+        "multiple input-file jobs\\) is not compatible with attach mode")
+
+# input-file multi-pass (>1 job) with --collection-period
+rocprofiler_add_integration_execute_test(
+    rocprofv3-test-counter-collection-cli-multipass-input-file-rejects-collection-period
+    COMMAND
+        $<TARGET_FILE:rocprofiler-sdk::rocprofv3> -i
+        ${CMAKE_CURRENT_BINARY_DIR}/input.json --collection-period 0:100:1 -d
+        ${CMAKE_CURRENT_BINARY_DIR}/%argt%-cc-err-inp-cp -o out -f csv --
+        $<TARGET_FILE:simple-transpose>
+    DEPENDS simple-transpose
+    TIMEOUT 45
+    PRELOAD "${PRELOAD_ENV}"
+    PASS_REGULAR_EXPRESSION
+        "multiple input-file jobs\\) is not compatible with --collection-period")
+
+# pid set by an input-file job rather than on the command line. pid is not in
+# rocprofv3_input_schema.json, but input keys are merged onto argparse dests without
+# validation, so it reaches args.pid and has to be guarded on the merged view.
+rocprofiler_add_integration_execute_test(
+    rocprofv3-test-counter-collection-cli-multipass-input-file-job-rejects-pid
+    COMMAND
+        $<TARGET_FILE:rocprofiler-sdk::rocprofv3> -i
+        ${CMAKE_CURRENT_BINARY_DIR}/input-pid.json -d
+        ${CMAKE_CURRENT_BINARY_DIR}/%argt%-cc-err-job-pid -o out -f csv --
+        $<TARGET_FILE:simple-transpose>
+    DEPENDS simple-transpose
+    TIMEOUT 45
+    PRELOAD "${PRELOAD_ENV}"
+    PASS_REGULAR_EXPRESSION
+        "multiple input-file jobs\\) is not compatible with attach mode")
+
 # A rejected run must fail before the tool library loads, so none of the negative tests
 # above may leave an output directory behind.
 rocprofiler_add_integration_validate_test(
@@ -181,8 +226,14 @@ rocprofiler_add_integration_validate_test(
          "*-cc-err-pid"
          "*-cc-err-cp"
          "*-cc-err-groups"
+         "*-cc-err-inp-pid"
+         "*-cc-err-inp-cp"
+         "*-cc-err-job-pid"
     TIMEOUT 45
     FIXTURES_REQUIRED
         rocprofv3-test-counter-collection-cli-multipass-rejects-pid
         rocprofv3-test-counter-collection-cli-multipass-rejects-collection-period
-        rocprofv3-test-counter-collection-cli-multipass-rejects-pmc-groups)
+        rocprofv3-test-counter-collection-cli-multipass-rejects-pmc-groups
+        rocprofv3-test-counter-collection-cli-multipass-input-file-rejects-pid
+        rocprofv3-test-counter-collection-cli-multipass-input-file-rejects-collection-period
+        rocprofv3-test-counter-collection-cli-multipass-input-file-job-rejects-pid)
