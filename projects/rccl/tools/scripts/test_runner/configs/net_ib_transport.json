@@ -1074,6 +1074,36 @@
           "name": "NetIB_MultiThread_GpuMemoryTransfer",
           "description": "Concurrent GPU-buffer registrations drive the peer-memory path into the shared MR cache",
           "test_filter": "NetIbMPITest.GpuMemoryTransferStress"
+        },
+        {
+          "name": "NetIB_MultiThread_VNicRegDeregCycling",
+          "description": "Concurrent register/deregister cycling on a fused device, fanning out across both members' protection domains",
+          "test_filter": "NetIbMPITest.RegDeregCycling_VNic"
+        },
+        {
+          "name": "NetIB_MultiThread_VNicSequentialTransfers",
+          "description": "Concurrent long-lived registrations on one fused device",
+          "test_filter": "NetIbMPITest.SequentialTransfers_VNic"
+        },
+        {
+          "name": "NetIB_MultiThread_VNicMixedSizes",
+          "description": "Concurrent uneven QP splits across a fused device",
+          "test_filter": "NetIbMPITest.MixedSizes_VNic"
+        },
+        {
+          "name": "NetIB_MultiThread_VNicLargeTransfer",
+          "description": "Concurrent striped transfers over a fused device, 64 MB divided by the worker count so the registrations stay within the device limits",
+          "test_filter": "NetIbMPITest.LargeTransfer_VNic"
+        },
+        {
+          "name": "NetIB_MultiThread_VNicUnalignedSizes",
+          "description": "Concurrent transfers at the 128-byte striping boundary of a fused device",
+          "test_filter": "NetIbMPITest.UnalignedSizeTransfer_VNic"
+        },
+        {
+          "name": "NetIB_MultiThread_VNicFlushRepeated",
+          "description": "Concurrent GPU receives and flushes on one fused device",
+          "test_filter": "NetIbMPITest.FlushRepeated_VNic"
         }
       ]
     },
@@ -1124,6 +1154,54 @@
     "net_ib_multithread_multiqp_nosplit_4": {
       "extends": "net_ib_multithread_multiqp_nosplit",
       "command_args": "--net_ib_nthreads=4"
+    },
+    "cast_multithread": {
+      "extends": "cast_base",
+      "timeout": 300,
+      "env_variables": {
+        "NCCL_IB_QPS_PER_CONNECTION": "2",
+        "NCCL_IB_SPLIT_DATA_ON_QPS": "1",
+        "RCCL_IB_QP_SCHED_UPDATE_INTERVAL": "10000000"
+      },
+      "tests": [
+        {
+          "name": "Cast_MultiThread_StressMultiRound",
+          "description": "Every worker drives its own CAST connection, so the WRR schedulers advance simultaneously instead of one after another",
+          "test_filter": "NetIbMPITest.CastStressMultiRoundTwoConns"
+        },
+        {
+          "name": "Cast_MultiThread_SendRecvMultipleSizes",
+          "description": "Concurrent schedulers sweep both sides of the WRR/split boundary, each auditing its own token ledger",
+          "test_filter": "NetIbMPITest.CastSendRecvMultipleSizes"
+        },
+        {
+          "name": "Cast_MultiThread_LargeTransfer",
+          "description": "Concurrent 16 MB split-path transfers, each confirming its scheduler consumed no tokens",
+          "test_filter": "NetIbMPITest.CastLargeTransfer"
+        },
+        {
+          "name": "Cast_MultiThread_SendRecvZeroSize",
+          "description": "Zero-byte sends still take the WRR path on every worker's scheduler",
+          "test_filter": "NetIbMPITest.CastSendRecvZeroSize"
+        },
+        {
+          "name": "Cast_MultiThread_SplitDataThresholdBoundary",
+          "description": "Concurrent schedulers decide the split boundary at the same time, each auditing its own tokens",
+          "test_filter": "NetIbMPITest.CastSplitDataThresholdBoundary"
+        }
+      ]
+    },
+    "cast_multithread_2": {
+      "extends": "cast_multithread",
+      "command_args": "--net_ib_nthreads=2"
+    },
+    "cast_multithread_4": {
+      "extends": "cast_multithread",
+      "command_args": "--net_ib_nthreads=4"
+    },
+    "cast_multithread_16": {
+      "extends": "cast_multithread",
+      "command_args": "--net_ib_nthreads=16"
     },
     "cast_wrr_split_long_interval": {
       "extends": "cast_base",
@@ -1463,6 +1541,24 @@
       "name": "NET IB - Multithread Multi-QP NoSplit (4)",
       "description": "4 worker threads/rank with 4 QPs per connection on the nDataQps path",
       "config": "net_ib_multithread_multiqp_nosplit_4",
+      "enabled": true
+    },
+    {
+      "name": "NET IB - CAST Multithread (2)",
+      "description": "2 worker threads/rank driving independent IB-CAST connections and WRR schedulers",
+      "config": "cast_multithread_2",
+      "enabled": true
+    },
+    {
+      "name": "NET IB - CAST Multithread (4)",
+      "description": "4 worker threads/rank driving independent IB-CAST connections and WRR schedulers",
+      "config": "cast_multithread_4",
+      "enabled": true
+    },
+    {
+      "name": "NET IB - CAST Multithread (16)",
+      "description": "16 worker threads/rank driving independent IB-CAST connections and WRR schedulers",
+      "config": "cast_multithread_16",
       "enabled": true
     },
     {
