@@ -9,7 +9,7 @@
 
 #include "../gin_device_common.h"
 #include "gin_rocshmem_device_host_common_gda.h"
-#include "queue_pair_device.h"
+#include "gda/queue_pair_provider.hpp"
 
 template <>
 struct ncclGinApi_Put<NCCL_NET_DEVICE_GIN_ROCSHMEM_GDA> {
@@ -21,6 +21,7 @@ struct ncclGinApi_Put<NCCL_NET_DEVICE_GIN_ROCSHMEM_GDA> {
                                       ncclGinDescriptorSmem* descriptor, cuda::thread_scope required,
                                       cuda::thread_scope given, uint32_t optFlags = ncclGinOptFlagsDefault) {
     using nccl::utility::loadConst;
+    using rocshmem::PostOpt, rocshmem::RingDB;
     bool hasSignal = signal.type != NCCL_GIN_SIGNAL_TYPE_NONE;
 
     coop.sync();
@@ -45,7 +46,21 @@ struct ncclGinApi_Put<NCCL_NET_DEVICE_GIN_ROCSHMEM_GDA> {
         uint32_t dstRkey = loadConst(loadConst(&dstMh->rkeys) + peer);
         uint32_t srcLkey = loadConst(&srcMh->lkey);
 
-        qp->put_nbi((void*)dstAddr, dstRkey, (void*)srcAddr, srcLkey, bytes, wf_info, !hasSignal);
+#if 1 // TODO: does this work like I think it should?
+        if constexpr (__builtin_constant_p(hasSignal) && hasSignal) {
+          // we know at compile time that we have a signal afterwards, so don't ring the doorbell
+          qp->put_nbi(dstAddr, dstRkey, srcAddr, srcLkey, bytes, wf_info, PostOpt{RingDB<false>});
+        } else {
+          // we either don't have a signal or don't know at compile time, so be safe
+          qp->put_nbi(dstAddr, dstRkey, srcAddr, srcLkey, bytes, wf_info, PostOpt{RingDB<true>});
+        }
+#else
+        if (hasSignal) {
+          qp->put_nbi(dstAddr, dstRkey, srcAddr, srcLkey, bytes, wf_info, PostOpt{RingDB<false>});
+        } else {
+          qp->put_nbi(dstAddr, dstRkey, srcAddr, srcLkey, bytes, wf_info, PostOpt{RingDB<true>});
+        }
+#endif
       }
 
       if (hasSignal) {
@@ -53,7 +68,7 @@ struct ncclGinApi_Put<NCCL_NET_DEVICE_GIN_ROCSHMEM_GDA> {
         uintptr_t sigAddr =
           loadConst(loadConst(&rsCtx->signal_raddrs) + peer) + sizeof(uint64_t) * signal.indexedSignal.signalId;
         uint32_t sigRkey = loadConst(loadConst(&rsCtx->signal_rkeys) + peer);
-        qp->atomic_add((void*)sigAddr, sigRkey, (int64_t)signalOpArg, wf_info);
+        qp->atomic_add(sigAddr, sigRkey, signalOpArg, wf_info, PostOpt{RingDB<true>});
       } else if (hasCounter) {
         qp->quiet(wf_info);
       }
@@ -75,6 +90,7 @@ struct ncclGinApi_PutValue<NCCL_NET_DEVICE_GIN_ROCSHMEM_GDA> {
                                       cuda::thread_scope required, cuda::thread_scope given,
                                       uint32_t optFlags = ncclGinOptFlagsDefault) {
     using nccl::utility::loadConst;
+    using rocshmem::PostOpt, rocshmem::RingDB;
     bool hasSignal = signal.type != NCCL_GIN_SIGNAL_TYPE_NONE;
 
     coop.sync();
@@ -85,6 +101,7 @@ struct ncclGinApi_PutValue<NCCL_NET_DEVICE_GIN_ROCSHMEM_GDA> {
 
       ncclGinRocshmemGdaMemHandle* dstMh = (ncclGinRocshmemGdaMemHandle*)dstWin;
       uintptr_t dstAddr = loadConst(loadConst(&dstMh->remote_vas) + peer) + dstOff;
+      uintptr_t srcAddr = reinterpret_cast<uintptr_t>(&srcVal);
       uint32_t dstRkey = loadConst(loadConst(&dstMh->rkeys) + peer);
 
       // HIP thread_scope (hip_compat.h): system is the MAX value, so a caller that
@@ -95,14 +112,30 @@ struct ncclGinApi_PutValue<NCCL_NET_DEVICE_GIN_ROCSHMEM_GDA> {
 
       // lkey=0: put_nbi copies srcVal inline into the WQE
       // (inline_threshold >= sizeof(T)), so no registered MR is needed.
-      qp->put_nbi((void*)dstAddr, dstRkey, &srcVal, 0, sizeof(T), wf_info, !hasSignal);
+      static_assert(rocshmem::QueuePair::can_inline<rocshmem::QueuePair::OpCode::RDMA_WRITE>(sizeof(T)),
+                    "ncclGin::putValue must inline srcVal into WQE");
+#if 1 // TODO: does this work like I think it should?
+      if constexpr (__builtin_constant_p(hasSignal) && hasSignal) {
+        // we know at compile time that we have a signal afterwards, so don't ring the doorbell
+        qp->put_nbi(dstAddr, dstRkey, srcAddr, 0, sizeof(T), wf_info, PostOpt{RingDB<false>});
+      } else {
+        // we either don't have a signal or don't know at compile time, so be safe
+        qp->put_nbi(dstAddr, dstRkey, srcAddr, 0, sizeof(T), wf_info, PostOpt{RingDB<true>});
+      }
+#else
+      if (hasSignal) {
+        qp->put_nbi(dstAddr, dstRkey, srcAddr, 0, sizeof(T), wf_info, PostOpt{RingDB<false>});
+      } else {
+        qp->put_nbi(dstAddr, dstRkey, srcAddr, 0, sizeof(T), wf_info, PostOpt{RingDB<true>});
+      }
+#endif
 
       if (hasSignal) {
         if (signalOp == ncclGinSignalInc) signalOpArg = 1;
         uintptr_t sigAddr =
           loadConst(loadConst(&rsCtx->signal_raddrs) + peer) + sizeof(uint64_t) * signal.indexedSignal.signalId;
         uint32_t sigRkey = loadConst(loadConst(&rsCtx->signal_rkeys) + peer);
-        qp->atomic_add((void*)sigAddr, sigRkey, (int64_t)signalOpArg, wf_info);
+        qp->atomic_add(sigAddr, sigRkey, signalOpArg, wf_info, PostOpt{RingDB<true>});
       }
     }
     coop.sync();

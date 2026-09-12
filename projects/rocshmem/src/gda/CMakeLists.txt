@@ -34,10 +34,11 @@ target_sources(
     backend_gda.cpp
     ibv_wrapper.cpp
     gda_team.cpp
-    queue_pair.cpp
     topology.cpp
 )
 
-add_subdirectory(mlx5)
-add_subdirectory(bnxt)
+add_subdirectory(queue_pair)
+
 add_subdirectory(ionic)
+add_subdirectory(bnxt)
+add_subdirectory(mlx5)

@@ -90,6 +90,7 @@ static void dump_ibv_port_attr([[maybe_unused]] struct ibv_port_attr* x) {
             x->link_layer, x->flags, x->port_cap_flags2);
 }
 
+[[maybe_unused]]
 static void dump_ibv_qp([[maybe_unused]] struct ibv_qp *qp, [[maybe_unused]] int conn_num) {
   LOG_TRACE("== IBV_QP CONNECTION#%d ======================================\n"
             "  (ibv_context*)      context          = %p\n"
