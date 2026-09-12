@@ -21,6 +21,8 @@
 #include <assert.h>
 #include <string.h>
 #include <algorithm>
+#include <atomic>
+#include <chrono>
 #include <new>
 #include <set>
 
@@ -386,29 +388,68 @@ constexpr static uint64_t kSignalTimeout = K * K;
 constexpr static uint64_t kTimeoutFloor = K * K * 4;
 constexpr static uint64_t kTimeoutCeil = K * K * 16;
 #endif  // USE_NEW_HOSTCALL_IMPL
+// @note: Under Linux thread destruction can be delayed and ROCR may crash in a
+// wait for event occasionally. Hence the runtime must not finalize while a
+// hostcall listener thread is still running. The logic isn't required for
+// Windows.
+//
+// `running` counts listener threads that are live right now. It is raised by
+// the thread's creator before the thread is able to run, and lowered by the
+// thread itself on its way out, so `running == 0` implies that no listener is
+// executing and that none can start without raising it first. Counting live
+// threads rather than recording a state keeps this correct when a listener is
+// started and stopped repeatedly, and when a new listener overlaps one that is
+// still winding down.
+//
+// Both members are constant-initialized, so this object is valid from load
+// time and carries no static initialization order dependency.
 static struct Init {
-  enum class State { kDefault = 0, kInit, kDestroy, kExit };
-  volatile State state = State::kDefault;
+  std::atomic<uint32_t> running{0};
+  std::atomic<bool> shutdown{false};
+
+  //! Called before a listener thread is able to run.
+  void threadCreated() { running.fetch_add(1, std::memory_order_relaxed); }
+
+  //! Called by a listener thread on its way out.
+  void threadFinished() {
+    uint32_t previous = running.fetch_sub(1, std::memory_order_release);
+    assert(previous > 0 && "hostcall listener count underflow");
+    (void)previous;
+  }
+
+  //! Polled by listener threads, which must return promptly once this is set.
+  bool shutdownRequested() const { return shutdown.load(std::memory_order_acquire); }
+
   ~Init() {
-    if (state == State::kInit) {
-      state = State::kDestroy;
-      // @note: Under Linux thread destruction can be delayed and
-      // ROCR may crash in a wait for event occasionally. Hence, runtime needs
-      // an early exit. The logic isn't required for Windows.
-      while (IS_LINUX && (state == State::kDestroy)) {
+    shutdown.store(true, std::memory_order_release);
+    // A running listener notices the request within one wait timeout, so this
+    // is bounded in practice. The deadline is only a backstop against a wedged
+    // thread: proceeding is what the runtime did before the handshake existed,
+    // and is preferable to hanging the process forever.
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+    while (IS_LINUX && running.load(std::memory_order_acquire) != 0) {
+      if (std::chrono::steady_clock::now() > deadline) {
+        ClPrint(amd::LOG_ERROR, amd::LOG_INIT,
+                "Hostcall listener failed to stop; continuing teardown");
+        break;
       }
+      amd::Os::yield();
     }
   }
 } kHostThreadActive;
+
+//! Lowers the live listener count on every exit path out of consumePackets().
+struct ListenerExitGuard {
+  ~ListenerExitGuard() { kHostThreadActive.threadFinished(); }
+};
 #ifdef USE_NEW_HOSTCALL_IMPL
 void HostcallListener::consumePackets() {
+  ListenerExitGuard exit_guard;
   uint64_t signal_value = SIGNAL_INIT;
-  kHostThreadActive.state = Init::State::kInit;
   uint32_t yield_spins = 0;
 
   while (true) {
-    if (kHostThreadActive.state == Init::State::kDestroy) {
-      kHostThreadActive.state = Init::State::kExit;
+    if (kHostThreadActive.shutdownRequested()) {
       return;
     }
 
@@ -446,13 +487,12 @@ void HostcallListener::consumePackets() {
 }
 #else  // !USE_NEW_HOSTCALL_IMPL
 void HostcallListener::consumePackets() {
+  ListenerExitGuard exit_guard;
   uint64_t timeout = kTimeoutFloor;
   uint64_t signal_value = SIGNAL_INIT;
-  kHostThreadActive.state = Init::State::kInit;
   while (true) {
     while (true) {
-      if (kHostThreadActive.state == Init::State::kDestroy) {
-        kHostThreadActive.state = Init::State::kExit;
+      if (kHostThreadActive.shutdownRequested()) {
         return;
       }
       uint64_t new_value = doorbell_->Wait(signal_value, device::Signal::Condition::Ne, timeout);
@@ -487,7 +527,6 @@ void HostcallListener::consumePackets() {
 
 void HostcallListener::terminate() {
   if (thread_.state() >= Thread::FINISHED || amd::Os::isThreadAlive(thread_)) {
-    kHostThreadActive.state = Init::State::kExit;
     doorbell_->Reset(SIGNAL_DONE);
 
     // FIXME_lmoriche: fix termination handshake
@@ -538,9 +577,13 @@ bool HostcallListener::initSignal(const amd::Device& dev) {
   urilocator = dev.createUriLocator();
 #endif
 #endif
-  // If the listener thread was not successfully initialized, clean
-  // everything up and bail out.
-  if (thread_.state() < Thread::INITIALIZED) {
+  // Count the thread as live before it is able to run, so that a finalizer
+  // racing with listener creation cannot conclude that nothing is running.
+  // If the listener thread was not successfully initialized or could not be
+  // started, drop the count again, clean everything up and bail out.
+  kHostThreadActive.threadCreated();
+  if (thread_.state() < Thread::INITIALIZED || !thread_.start(this)) {
+    kHostThreadActive.threadFinished();
     delete doorbell_;
 #ifdef USE_NEW_HOSTCALL_IMPL
     doorbell_ = nullptr;
@@ -556,7 +599,6 @@ bool HostcallListener::initSignal(const amd::Device& dev) {
 #endif
     return false;
   }
-  thread_.start(this);
   return true;
 }
 
