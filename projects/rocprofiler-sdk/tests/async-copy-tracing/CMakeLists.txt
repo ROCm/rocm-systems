@@ -20,7 +20,7 @@ endif()
 
 rocprofiler_add_integration_execute_test(
     async-copy-tracing
-    TARGET transpose
+    TARGET hip-memcpy
     TIMEOUT 45
     LABELS "integration-tests"
     PRELOAD "${PRELOAD_ENV}"

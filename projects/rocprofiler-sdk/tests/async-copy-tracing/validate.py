@@ -118,11 +118,11 @@ def test_data_structure(input_data):
     node_exists("hip_api_traces", sdk_data["callback_records"], 0)
     node_exists("marker_api_traces", sdk_data["callback_records"])
     node_exists("kernel_dispatch", sdk_data["callback_records"])
-    node_exists("memory_copies", sdk_data["callback_records"], 24)
+    node_exists("memory_copies", sdk_data["callback_records"], 40)
 
     node_exists("names", sdk_data["buffer_records"])
     node_exists("kernel_dispatch", sdk_data["buffer_records"])
-    node_exists("memory_copies", sdk_data["buffer_records"], 12)
+    node_exists("memory_copies", sdk_data["buffer_records"], 20)
     node_exists("hsa_api_traces", sdk_data["buffer_records"])
     node_exists("hip_api_traces", sdk_data["buffer_records"], 0)
     node_exists("marker_api_traces", sdk_data["buffer_records"])
@@ -331,12 +331,14 @@ def test_async_copy_direction(input_data):
     #   2 == H2D (host to device)
     #   3 == D2H (device to host)
     #   4 == D2D (device to device)
-    default_async_dir_cnt = dict([(idx, 0) for idx in range(0, 5)])
+    def _new_dir_cnt():
+        return dict([(idx, 0) for idx in range(0, 5)])
+
     thread_async_dir_cnt = {}
     for itr in sdk_data.buffer_records.memory_copies:
         tid = itr.thread_id
         if tid not in thread_async_dir_cnt.keys():
-            thread_async_dir_cnt[tid] = default_async_dir_cnt
+            thread_async_dir_cnt[tid] = _new_dir_cnt()
         op_id = itr.operation
         assert op_id > 1, f"{itr}"
         assert op_id < 4, f"{itr}"
@@ -345,7 +347,7 @@ def test_async_copy_direction(input_data):
     for itr in sdk_data.callback_records.memory_copies:
         tid = itr.thread_id
         if tid not in thread_async_dir_cnt.keys():
-            thread_async_dir_cnt[tid] = default_async_dir_cnt
+            thread_async_dir_cnt[tid] = _new_dir_cnt()
         op_id = itr.operation
         assert op_id > 1, f"{itr}"
         assert op_id < 4, f"{itr}"
@@ -367,22 +369,32 @@ def test_async_copy_direction(input_data):
         else:
             assert phase == 1 or phase == 2, f"{itr}"
 
-    # in the transpose test which generates the input file,
-    # two threads each perform one H2D + one D2H memory copy.
-    # there are at least two callback records (phase start +
-    # phase end) and one buffer record for each memory copy,
-    # i.e., at least 3 records per memory copy
+    # The hip-memcpy binary uses two host threads. Each thread issues one
+    # hipMemcpyAsync H2D/D2H pair and kCopiesPerDirection hipMemcpyBatchAsync
+    # H2D/D2H calls.
     assert len(thread_async_dir_cnt) == 2, f"{thread_async_dir_cnt}"
+    min_copy_records = 3
+    normal_records_per_direction = min_copy_records
+    batch_records_per_direction = (
+        min_copy_records * 4
+    )  # 4 count==1 batches * 3 records each
+    total_records_per_direction = (
+        normal_records_per_direction + batch_records_per_direction
+    )
+
     for tid, async_dir_cnt in thread_async_dir_cnt.items():
-        min_copy_records = 3
         assert async_dir_cnt[0] == 0
         assert async_dir_cnt[1] == 0
-        assert async_dir_cnt[2] >= min_copy_records, f"TID={tid}:\n\t{async_dir_cnt}"
-        assert async_dir_cnt[3] >= min_copy_records, f"TID={tid}:\n\t{async_dir_cnt}"
         assert async_dir_cnt[4] == 0
-        # HIP memory copies may be decomposed into more than one
-        # memory copy at the HSA level so require it to be a multiple
-        # of min_copy_records
+        assert (
+            async_dir_cnt[2] >= total_records_per_direction
+        ), f"TID={tid}:\n\t{async_dir_cnt}"
+        assert (
+            async_dir_cnt[3] >= total_records_per_direction
+        ), f"TID={tid}:\n\t{async_dir_cnt}"
+        # HIP memory copies may be decomposed into more than one memory
+        # copy at the HSA level so require it to be a multiple of
+        # min_copy_records.
         assert (
             async_dir_cnt[2] % min_copy_records
         ) == 0, f"TID={tid}:\n\t{async_dir_cnt}"
@@ -390,14 +402,135 @@ def test_async_copy_direction(input_data):
             async_dir_cnt[3] % min_copy_records
         ) == 0, f"TID={tid}:\n\t{async_dir_cnt}"
 
+    buffer_records = sdk_data.buffer_records
+    hip_memcopy_id = get_operation(buffer_records, "HIP_RUNTIME_API", "hipMemcpyAsync")
+    assert (
+        hip_memcopy_id is not None
+    ), "rocprofiler-sdk does not expose hipMemcpyAsync as a HIP op"
+    hip_memcopy_batch_id = get_operation(
+        buffer_records, "HIP_RUNTIME_API", "hipMemcpyBatchAsync"
+    )
+    assert (
+        hip_memcopy_batch_id is not None
+    ), "rocprofiler-sdk does not expose hipMemcpyBatchAsync as a HIP op"
+    batch_thread_ids = {
+        x.thread_id
+        for x in buffer_records.hip_api_traces
+        if x.operation == hip_memcopy_batch_id
+    }
+    async_thread_ids = {
+        x.thread_id
+        for x in buffer_records.hip_api_traces
+        if x.operation == hip_memcopy_id
+    }
+    assert (
+        len(async_thread_ids) == 2
+    ), f"expected exactly two threads to issue hipMemcpyAsync, got {async_thread_ids}"
+    assert (
+        len(batch_thread_ids) == 2
+    ), f"expected exactly two threads to issue hipMemcpyBatchAsync, got {batch_thread_ids}"
+    assert (
+        batch_thread_ids == async_thread_ids
+    ), f"{batch_thread_ids} != {async_thread_ids}"
+    assert batch_thread_ids == set(thread_async_dir_cnt.keys()), f"{thread_async_dir_cnt}"
+    for tid in batch_thread_ids:
+        for op_id in (2, 3):
+            assert thread_async_dir_cnt[tid][op_id] >= batch_records_per_direction, (
+                f"thread {tid} should have at least {batch_records_per_direction} "
+                f"direction={op_id} records: "
+                f"{thread_async_dir_cnt}"
+            )
+
+
+def test_hip_memcpy_batch_async(input_data):
+    """
+    Validates that hipMemcpyBatchAsync HIP records are forwarded to
+    hsa_amd_memory_async_batch_copy and produce H2D + D2H MEMORY_COPY
+    records linked back through the ancestor chain.
+    """
+    data = input_data
+    sdk_data = data["rocprofiler-sdk-json-tool"]
+    buffer_records = sdk_data.buffer_records
+
+    hip_memcopy_batch_id = get_operation(
+        buffer_records, "HIP_RUNTIME_API", "hipMemcpyBatchAsync"
+    )
+    assert (
+        hip_memcopy_batch_id is not None
+    ), "rocprofiler-sdk does not expose hipMemcpyBatchAsync as a HIP op"
+
+    hsa_amdext_kind, hsa_amdext_ops = get_operation(buffer_records, "HSA_AMD_EXT_API")
+    assert hsa_amdext_kind is not None, "HSA_AMD_EXT_API kind missing"
+    hsa_batch_copy_op = None
+    for oidx, oname in enumerate(hsa_amdext_ops):
+        if oname == "hsa_amd_memory_async_batch_copy":
+            hsa_batch_copy_op = oidx
+            break
+    assert (
+        hsa_batch_copy_op is not None
+    ), "rocprofiler-sdk does not expose hsa_amd_memory_async_batch_copy"
+
+    hip_batch_records = [
+        x for x in buffer_records.hip_api_traces if x.operation == hip_memcopy_batch_id
+    ]
+    hsa_batch_records = [
+        x for x in buffer_records.hsa_api_traces if x.operation == hsa_batch_copy_op
+    ]
+
+    # Two threads each issue kCopiesPerDirection (4) H2D + kCopiesPerDirection (4) D2H grouped copies.
+    expected_hip_batches_min = 2 * 4 * 2
+
+    assert (
+        len(hip_batch_records) >= expected_hip_batches_min
+    ), f"expected >= {expected_hip_batches_min} hipMemcpyBatchAsync records, got {len(hip_batch_records)}"
+    assert len(hsa_batch_records) >= len(
+        hip_batch_records
+    ), "expected at least one hsa_amd_memory_async_batch_copy per hipMemcpyBatchAsync"
+
+    hip_batch_ids = {x.correlation_id.internal for x in hip_batch_records}
+    hsa_records_by_corr = groupby_corr_id(buffer_records.hsa_api_traces)
+
+    hsa_batch_with_hip_parent = []
+    for hsa_call in hsa_batch_records:
+        ancestor = hsa_call.correlation_id.ancestor
+        if ancestor in hip_batch_ids:
+            hsa_batch_with_hip_parent.append(hsa_call.correlation_id.internal)
+
+    assert hsa_batch_with_hip_parent, (
+        "expected at least one hsa_amd_memory_async_batch_copy whose ancestor "
+        "is a hipMemcpyBatchAsync HIP call"
+    )
+
+    # MEMORY_COPY -> batch_copy HSA -> batch_async HIP lineage, by direction.
+    matched_directions = {2: 0, 3: 0}  # 2 == H2D, 3 == D2H
+    for memcpy in buffer_records.memory_copies:
+        cid = memcpy.correlation_id.internal
+        if cid not in hsa_records_by_corr:
+            continue
+        hsa_parent = hsa_records_by_corr[cid]
+        if hsa_parent.operation != hsa_batch_copy_op:
+            continue
+        if hsa_parent.correlation_id.ancestor not in hip_batch_ids:
+            continue
+        matched_directions[memcpy.operation] = (
+            matched_directions.get(memcpy.operation, 0) + 1
+        )
+
+    expected_per_direction_min = 2 * 4
+
+    assert (
+        matched_directions[2] >= expected_per_direction_min
+    ), f"expected >= {expected_per_direction_min} batch H2D MEMORY_COPY records, got {matched_directions[2]}"
+    assert (
+        matched_directions[3] >= expected_per_direction_min
+    ), f"expected >= {expected_per_direction_min} batch D2H MEMORY_COPY records, got {matched_directions[3]}"
+
 
 def test_ancestor_ids(input_data):
     """
-    This test ensures that each memcpy can be traced back to
-    a hipMemcpyAsync through ancestor IDs
+    This test ensures that each memcpy can be traced back to either a
+    hipMemcpyAsync or a hipMemcpyBatchAsync through ancestor IDs.
     """
-    from rocprofiler_sdk.pytest_utils.dotdict import dotdict
-
     data = input_data
     sdk_data = data["rocprofiler-sdk-json-tool"]
     buffer_records = sdk_data.buffer_records
@@ -405,14 +538,27 @@ def test_ancestor_ids(input_data):
 
     _, hip_op_ids = get_operation(buffer_records, "HIP_RUNTIME_API")
     hip_memcopy_id = get_operation(buffer_records, "HIP_RUNTIME_API", "hipMemcpyAsync")
+    assert hip_memcopy_id is not None, "rocprofiler-sdk does not expose hipMemcpyAsync"
+    hip_memcopy_batch_id = get_operation(
+        buffer_records, "HIP_RUNTIME_API", "hipMemcpyBatchAsync"
+    )
+    assert (
+        hip_memcopy_batch_id is not None
+    ), "rocprofiler-sdk does not expose hipMemcpyBatchAsync"
 
     # dict with { internal id : record }
     hip_memcopies = groupby_corr_id(buffer_records.hip_api_traces, hip_memcopy_id)
+    hip_memcopy_batches = groupby_corr_id(
+        buffer_records.hip_api_traces, hip_memcopy_batch_id
+    )
 
     hsa_records = groupby_corr_id(buffer_records.hsa_api_traces)
     hip_records = groupby_corr_id(buffer_records.hip_api_traces)
 
+    expected_parent_ops = {"hipMemcpyAsync", "hipMemcpyBatchAsync"}
+
     accounted_for_hip_ids = []
+    matched_async_directions = {2: 0, 3: 0}  # 2 == H2D, 3 == D2H
 
     for memcpy in memcopies:
         parent_hsa_call = hsa_records[memcpy.correlation_id.internal]
@@ -421,14 +567,27 @@ def test_ancestor_ids(input_data):
         assert (
             parent_hip_call.thread_id == parent_hsa_call.thread_id
         ), "Expected hsa and hip calls to be on the same thread"
-        assert hip_op_ids[parent_hip_call.operation] == "hipMemcpyAsync"
+        assert (
+            hip_op_ids[parent_hip_call.operation] in expected_parent_ops
+        ), f"Unexpected memcpy parent op: {hip_op_ids[parent_hip_call.operation]}"
+        if parent_hip_call.operation == hip_memcopy_id:
+            matched_async_directions[memcpy.operation] = (
+                matched_async_directions.get(memcpy.operation, 0) + 1
+            )
         accounted_for_hip_ids.append(parent_hip_call.correlation_id.internal)
 
-    # Ensure we looked through all HIP entries
     assert (
-        set(accounted_for_hip_ids) == set(hip_memcopies.keys()),
-        "Expected to account for all HIP memcpy calls through ancestor ID lookup",
-    )
+        matched_async_directions[2] >= 2
+    ), "expected at least two hipMemcpyAsync H2D records"
+    assert (
+        matched_async_directions[3] >= 2
+    ), "expected at least two hipMemcpyAsync D2H records"
+
+    # Ensure we looked through all HIP memcpy entries.
+    expected_hip_ids = set(hip_memcopies.keys()) | set(hip_memcopy_batches.keys())
+    assert (
+        set(accounted_for_hip_ids) == expected_hip_ids
+    ), "Expected to account for all HIP memcpy calls through ancestor ID lookup"
 
 
 def test_retired_correlation_ids(input_data):
