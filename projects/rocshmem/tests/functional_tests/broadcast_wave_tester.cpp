@@ -41,10 +41,20 @@ __device__ void wave_broadcast([[maybe_unused]] rocshmem_ctx_t ctx, [[maybe_unus
 
 BROADCAST_WAVE_DEF_GEN(float, float)
 BROADCAST_WAVE_DEF_GEN(double, double)
+BROADCAST_WAVE_DEF_GEN(char, char)
+// BROADCAST_WAVE_DEF_GEN(long double, longdouble)
+BROADCAST_WAVE_DEF_GEN(signed char, schar)
 BROADCAST_WAVE_DEF_GEN(short, short)
 BROADCAST_WAVE_DEF_GEN(int, int)
 BROADCAST_WAVE_DEF_GEN(long, long)
 BROADCAST_WAVE_DEF_GEN(long long, longlong)
+BROADCAST_WAVE_DEF_GEN(unsigned char, uchar)
+BROADCAST_WAVE_DEF_GEN(unsigned short, ushort)
+BROADCAST_WAVE_DEF_GEN(unsigned int, uint)
+BROADCAST_WAVE_DEF_GEN(unsigned long, ulong)
+BROADCAST_WAVE_DEF_GEN(unsigned long long, ulonglong)
+BROADCAST_WAVE_DEF_GEN(__half, half)
+BROADCAST_WAVE_DEF_GEN(__hip_bfloat16, bfloat16)
 
 /******************************************************************************
  * DEVICE TEST KERNEL
@@ -185,7 +195,11 @@ void BroadcastWaveTester<T1>::resetBuffers(size_t size) {
   for (int wave_id = 0; wave_id < total_waves; wave_id++) {
     for (int i = 0; i < num_elems; i++) {
       int idx = wave_id * num_elems + i;
-      if constexpr (std::is_floating_point<T1>::value) {
+      if constexpr (std::is_same<T1, __half>::value ||
+                    std::is_same<T1, __hip_bfloat16>::value) {
+        source_buf[idx] = static_cast<T1>(3.14f + n_pes + wave_id);
+        dest_buf[idx]   = static_cast<T1>(3.14f + wave_id);
+      } else if constexpr (std::is_floating_point<T1>::value) {
         source_buf[idx] = static_cast<T1>(3.14 + n_pes + wave_id);
         dest_buf[idx]   = static_cast<T1>(3.14 + wave_id);
       } else {
@@ -205,7 +219,10 @@ void BroadcastWaveTester<T1>::verifyResults(size_t size) {
     for (int i = 0; i < num_elems; i++) {
       int idx = wave_id * num_elems + i;
       T1 expected;
-      if constexpr (std::is_floating_point<T1>::value) {
+      if constexpr (std::is_same<T1, __half>::value ||
+                    std::is_same<T1, __hip_bfloat16>::value) {
+        expected = static_cast<T1>(3.14f + wave_id + n_pes);
+      } else if constexpr (std::is_floating_point<T1>::value) {
         expected = static_cast<T1>(3.14 + wave_id + n_pes);
       } else {
         expected = static_cast<T1>('a' + wave_id + n_pes);
@@ -213,8 +230,14 @@ void BroadcastWaveTester<T1>::verifyResults(size_t size) {
       if (dest_buf[idx] != expected) {
         std::cerr << "Data validation error at wave " << wave_id
                   << " idx " << i << std::endl;
-        std::cerr << "PE " << my_pe << " Got " << dest_buf[idx]
-                  << ", Expected " << expected << std::endl;
+        if constexpr (std::is_same<T1, __half>::value ||
+                      std::is_same<T1, __hip_bfloat16>::value) {
+          std::cerr << "PE " << my_pe << " Got " << static_cast<float>(dest_buf[idx])
+                    << ", Expected " << static_cast<float>(expected) << std::endl;
+        } else {
+          std::cerr << "PE " << my_pe << " Got " << dest_buf[idx]
+                    << ", Expected " << expected << std::endl;
+        }
         exit(-1);
       }
     }

@@ -191,6 +191,72 @@ __host__ void rocshmem_ctx_ulonglong_put(
 __host__ void rocshmem_ulonglong_put(unsigned long long *dest,
     const unsigned long long *source, size_t nelems, int pe);
 
+__device__ ATTR_NO_INLINE void rocshmem_ctx_half_put(
+    rocshmem_ctx_t ctx, __half *dest, const __half *source,
+    size_t nelems, int pe);
+__device__ ATTR_NO_INLINE void rocshmem_half_put(
+    __half *dest, const __half *source, size_t nelems, int pe);
+__host__ void rocshmem_ctx_half_put(
+    rocshmem_ctx_t ctx, __half *dest, const __half *source,
+    size_t nelems, int pe);
+__host__ void rocshmem_half_put(__half *dest,
+    const __half *source, size_t nelems, int pe);
+
+__device__ ATTR_NO_INLINE void rocshmem_ctx_bfloat16_put(
+    rocshmem_ctx_t ctx, __hip_bfloat16 *dest, const __hip_bfloat16 *source,
+    size_t nelems, int pe);
+__device__ ATTR_NO_INLINE void rocshmem_bfloat16_put(
+    __hip_bfloat16 *dest, const __hip_bfloat16 *source, size_t nelems, int pe);
+__host__ void rocshmem_ctx_bfloat16_put(
+    rocshmem_ctx_t ctx, __hip_bfloat16 *dest, const __hip_bfloat16 *source,
+    size_t nelems, int pe);
+__host__ void rocshmem_bfloat16_put(__hip_bfloat16 *dest,
+    const __hip_bfloat16 *source, size_t nelems, int pe);
+
+__device__ ATTR_NO_INLINE void rocshmem_ctx_int8_put(
+    rocshmem_ctx_t ctx, int8_t *dest, const int8_t *source,
+    size_t nelems, int pe);
+__device__ ATTR_NO_INLINE void rocshmem_int8_put(
+    int8_t *dest, const int8_t *source, size_t nelems, int pe);
+__host__ void rocshmem_ctx_int8_put(
+    rocshmem_ctx_t ctx, int8_t *dest, const int8_t *source,
+    size_t nelems, int pe);
+__host__ void rocshmem_int8_put(int8_t *dest,
+    const int8_t *source, size_t nelems, int pe);
+
+__device__ ATTR_NO_INLINE void rocshmem_ctx_int16_put(
+    rocshmem_ctx_t ctx, int16_t *dest, const int16_t *source,
+    size_t nelems, int pe);
+__device__ ATTR_NO_INLINE void rocshmem_int16_put(
+    int16_t *dest, const int16_t *source, size_t nelems, int pe);
+__host__ void rocshmem_ctx_int16_put(
+    rocshmem_ctx_t ctx, int16_t *dest, const int16_t *source,
+    size_t nelems, int pe);
+__host__ void rocshmem_int16_put(int16_t *dest,
+    const int16_t *source, size_t nelems, int pe);
+
+__device__ ATTR_NO_INLINE void rocshmem_ctx_uint8_put(
+    rocshmem_ctx_t ctx, uint8_t *dest, const uint8_t *source,
+    size_t nelems, int pe);
+__device__ ATTR_NO_INLINE void rocshmem_uint8_put(
+    uint8_t *dest, const uint8_t *source, size_t nelems, int pe);
+__host__ void rocshmem_ctx_uint8_put(
+    rocshmem_ctx_t ctx, uint8_t *dest, const uint8_t *source,
+    size_t nelems, int pe);
+__host__ void rocshmem_uint8_put(uint8_t *dest,
+    const uint8_t *source, size_t nelems, int pe);
+
+__device__ ATTR_NO_INLINE void rocshmem_ctx_uint16_put(
+    rocshmem_ctx_t ctx, uint16_t *dest, const uint16_t *source,
+    size_t nelems, int pe);
+__device__ ATTR_NO_INLINE void rocshmem_uint16_put(
+    uint16_t *dest, const uint16_t *source, size_t nelems, int pe);
+__host__ void rocshmem_ctx_uint16_put(
+    rocshmem_ctx_t ctx, uint16_t *dest, const uint16_t *source,
+    size_t nelems, int pe);
+__host__ void rocshmem_uint16_put(uint16_t *dest,
+    const uint16_t *source, size_t nelems, int pe);
+
 
 /**
  * @brief Writes contiguous data of \p nelems bytes from \p source on the
@@ -405,6 +471,72 @@ __host__ void rocshmem_ctx_ulonglong_p(
 __host__ void rocshmem_ulonglong_p(
     unsigned long long *dest, unsigned long long value, int pe);
 
+__device__ ATTR_NO_INLINE void rocshmem_ctx_half_p(
+    rocshmem_ctx_t ctx, __half *dest, __half value,
+    int pe);
+__device__ ATTR_NO_INLINE void rocshmem_half_p(
+    __half *dest, __half value, int pe);
+__host__ void rocshmem_ctx_half_p(
+    rocshmem_ctx_t ctx, __half *dest, __half value,
+    int pe);
+__host__ void rocshmem_half_p(
+    __half *dest, __half value, int pe);
+
+__device__ ATTR_NO_INLINE void rocshmem_ctx_bfloat16_p(
+    rocshmem_ctx_t ctx, __hip_bfloat16 *dest, __hip_bfloat16 value,
+    int pe);
+__device__ ATTR_NO_INLINE void rocshmem_bfloat16_p(
+    __hip_bfloat16 *dest, __hip_bfloat16 value, int pe);
+__host__ void rocshmem_ctx_bfloat16_p(
+    rocshmem_ctx_t ctx, __hip_bfloat16 *dest, __hip_bfloat16 value,
+    int pe);
+__host__ void rocshmem_bfloat16_p(
+    __hip_bfloat16 *dest, __hip_bfloat16 value, int pe);
+
+__device__ ATTR_NO_INLINE void rocshmem_ctx_int8_p(
+    rocshmem_ctx_t ctx, int8_t *dest, int8_t value,
+    int pe);
+__device__ ATTR_NO_INLINE void rocshmem_int8_p(
+    int8_t *dest, int8_t value, int pe);
+__host__ void rocshmem_ctx_int8_p(
+    rocshmem_ctx_t ctx, int8_t *dest, int8_t value,
+    int pe);
+__host__ void rocshmem_int8_p(
+    int8_t *dest, int8_t value, int pe);
+
+__device__ ATTR_NO_INLINE void rocshmem_ctx_int16_p(
+    rocshmem_ctx_t ctx, int16_t *dest, int16_t value,
+    int pe);
+__device__ ATTR_NO_INLINE void rocshmem_int16_p(
+    int16_t *dest, int16_t value, int pe);
+__host__ void rocshmem_ctx_int16_p(
+    rocshmem_ctx_t ctx, int16_t *dest, int16_t value,
+    int pe);
+__host__ void rocshmem_int16_p(
+    int16_t *dest, int16_t value, int pe);
+
+__device__ ATTR_NO_INLINE void rocshmem_ctx_uint8_p(
+    rocshmem_ctx_t ctx, uint8_t *dest, uint8_t value,
+    int pe);
+__device__ ATTR_NO_INLINE void rocshmem_uint8_p(
+    uint8_t *dest, uint8_t value, int pe);
+__host__ void rocshmem_ctx_uint8_p(
+    rocshmem_ctx_t ctx, uint8_t *dest, uint8_t value,
+    int pe);
+__host__ void rocshmem_uint8_p(
+    uint8_t *dest, uint8_t value, int pe);
+
+__device__ ATTR_NO_INLINE void rocshmem_ctx_uint16_p(
+    rocshmem_ctx_t ctx, uint16_t *dest, uint16_t value,
+    int pe);
+__device__ ATTR_NO_INLINE void rocshmem_uint16_p(
+    uint16_t *dest, uint16_t value, int pe);
+__host__ void rocshmem_ctx_uint16_p(
+    rocshmem_ctx_t ctx, uint16_t *dest, uint16_t value,
+    int pe);
+__host__ void rocshmem_uint16_p(
+    uint16_t *dest, uint16_t value, int pe);
+
 __device__ ATTR_NO_INLINE void rocshmem_ctx_int64_p(
     rocshmem_ctx_t ctx, int64_t *dest, int64_t value,
     int pe);
@@ -573,6 +705,72 @@ __host__ void rocshmem_ctx_ulonglong_get(
     size_t nelems, int pe);
 __host__ void rocshmem_ulonglong_get(unsigned long long *dest,
     const unsigned long long *source, size_t nelems, int pe);
+
+__device__ ATTR_NO_INLINE void rocshmem_ctx_half_get(
+    rocshmem_ctx_t ctx, __half *dest, const __half *source,
+    size_t nelems, int pe);
+__device__ ATTR_NO_INLINE void rocshmem_half_get(
+    __half *dest, const __half *source, size_t nelems, int pe);
+__host__ void rocshmem_ctx_half_get(
+    rocshmem_ctx_t ctx, __half *dest, const __half *source,
+    size_t nelems, int pe);
+__host__ void rocshmem_half_get(__half *dest,
+    const __half *source, size_t nelems, int pe);
+
+__device__ ATTR_NO_INLINE void rocshmem_ctx_bfloat16_get(
+    rocshmem_ctx_t ctx, __hip_bfloat16 *dest, const __hip_bfloat16 *source,
+    size_t nelems, int pe);
+__device__ ATTR_NO_INLINE void rocshmem_bfloat16_get(
+    __hip_bfloat16 *dest, const __hip_bfloat16 *source, size_t nelems, int pe);
+__host__ void rocshmem_ctx_bfloat16_get(
+    rocshmem_ctx_t ctx, __hip_bfloat16 *dest, const __hip_bfloat16 *source,
+    size_t nelems, int pe);
+__host__ void rocshmem_bfloat16_get(__hip_bfloat16 *dest,
+    const __hip_bfloat16 *source, size_t nelems, int pe);
+
+__device__ ATTR_NO_INLINE void rocshmem_ctx_int8_get(
+    rocshmem_ctx_t ctx, int8_t *dest, const int8_t *source,
+    size_t nelems, int pe);
+__device__ ATTR_NO_INLINE void rocshmem_int8_get(
+    int8_t *dest, const int8_t *source, size_t nelems, int pe);
+__host__ void rocshmem_ctx_int8_get(
+    rocshmem_ctx_t ctx, int8_t *dest, const int8_t *source,
+    size_t nelems, int pe);
+__host__ void rocshmem_int8_get(int8_t *dest,
+    const int8_t *source, size_t nelems, int pe);
+
+__device__ ATTR_NO_INLINE void rocshmem_ctx_int16_get(
+    rocshmem_ctx_t ctx, int16_t *dest, const int16_t *source,
+    size_t nelems, int pe);
+__device__ ATTR_NO_INLINE void rocshmem_int16_get(
+    int16_t *dest, const int16_t *source, size_t nelems, int pe);
+__host__ void rocshmem_ctx_int16_get(
+    rocshmem_ctx_t ctx, int16_t *dest, const int16_t *source,
+    size_t nelems, int pe);
+__host__ void rocshmem_int16_get(int16_t *dest,
+    const int16_t *source, size_t nelems, int pe);
+
+__device__ ATTR_NO_INLINE void rocshmem_ctx_uint8_get(
+    rocshmem_ctx_t ctx, uint8_t *dest, const uint8_t *source,
+    size_t nelems, int pe);
+__device__ ATTR_NO_INLINE void rocshmem_uint8_get(
+    uint8_t *dest, const uint8_t *source, size_t nelems, int pe);
+__host__ void rocshmem_ctx_uint8_get(
+    rocshmem_ctx_t ctx, uint8_t *dest, const uint8_t *source,
+    size_t nelems, int pe);
+__host__ void rocshmem_uint8_get(uint8_t *dest,
+    const uint8_t *source, size_t nelems, int pe);
+
+__device__ ATTR_NO_INLINE void rocshmem_ctx_uint16_get(
+    rocshmem_ctx_t ctx, uint16_t *dest, const uint16_t *source,
+    size_t nelems, int pe);
+__device__ ATTR_NO_INLINE void rocshmem_uint16_get(
+    uint16_t *dest, const uint16_t *source, size_t nelems, int pe);
+__host__ void rocshmem_ctx_uint16_get(
+    rocshmem_ctx_t ctx, uint16_t *dest, const uint16_t *source,
+    size_t nelems, int pe);
+__host__ void rocshmem_uint16_get(uint16_t *dest,
+    const uint16_t *source, size_t nelems, int pe);
 
 
 /**
@@ -763,6 +961,60 @@ __host__ unsigned long long rocshmem_ctx_ulonglong_g(
 __host__ unsigned long long rocshmem_ulonglong_g(
     const unsigned long long *source, int pe);
 
+__device__ ATTR_NO_INLINE __half rocshmem_ctx_half_g(
+    rocshmem_ctx_t ctx, const __half *source, int pe);
+__device__ ATTR_NO_INLINE __half rocshmem_half_g(
+    const __half *source, int pe);
+__host__ __half rocshmem_ctx_half_g(
+    rocshmem_ctx_t ctx, const __half *source, int pe);
+__host__ __half rocshmem_half_g(
+    const __half *source, int pe);
+
+__device__ ATTR_NO_INLINE __hip_bfloat16 rocshmem_ctx_bfloat16_g(
+    rocshmem_ctx_t ctx, const __hip_bfloat16 *source, int pe);
+__device__ ATTR_NO_INLINE __hip_bfloat16 rocshmem_bfloat16_g(
+    const __hip_bfloat16 *source, int pe);
+__host__ __hip_bfloat16 rocshmem_ctx_bfloat16_g(
+    rocshmem_ctx_t ctx, const __hip_bfloat16 *source, int pe);
+__host__ __hip_bfloat16 rocshmem_bfloat16_g(
+    const __hip_bfloat16 *source, int pe);
+
+__device__ ATTR_NO_INLINE int8_t rocshmem_ctx_int8_g(
+    rocshmem_ctx_t ctx, const int8_t *source, int pe);
+__device__ ATTR_NO_INLINE int8_t rocshmem_int8_g(
+    const int8_t *source, int pe);
+__host__ int8_t rocshmem_ctx_int8_g(
+    rocshmem_ctx_t ctx, const int8_t *source, int pe);
+__host__ int8_t rocshmem_int8_g(
+    const int8_t *source, int pe);
+
+__device__ ATTR_NO_INLINE int16_t rocshmem_ctx_int16_g(
+    rocshmem_ctx_t ctx, const int16_t *source, int pe);
+__device__ ATTR_NO_INLINE int16_t rocshmem_int16_g(
+    const int16_t *source, int pe);
+__host__ int16_t rocshmem_ctx_int16_g(
+    rocshmem_ctx_t ctx, const int16_t *source, int pe);
+__host__ int16_t rocshmem_int16_g(
+    const int16_t *source, int pe);
+
+__device__ ATTR_NO_INLINE uint8_t rocshmem_ctx_uint8_g(
+    rocshmem_ctx_t ctx, const uint8_t *source, int pe);
+__device__ ATTR_NO_INLINE uint8_t rocshmem_uint8_g(
+    const uint8_t *source, int pe);
+__host__ uint8_t rocshmem_ctx_uint8_g(
+    rocshmem_ctx_t ctx, const uint8_t *source, int pe);
+__host__ uint8_t rocshmem_uint8_g(
+    const uint8_t *source, int pe);
+
+__device__ ATTR_NO_INLINE uint16_t rocshmem_ctx_uint16_g(
+    rocshmem_ctx_t ctx, const uint16_t *source, int pe);
+__device__ ATTR_NO_INLINE uint16_t rocshmem_uint16_g(
+    const uint16_t *source, int pe);
+__host__ uint16_t rocshmem_ctx_uint16_g(
+    rocshmem_ctx_t ctx, const uint16_t *source, int pe);
+__host__ uint16_t rocshmem_uint16_g(
+    const uint16_t *source, int pe);
+
 
 /**
  * @name SHMEM_PUT_NBI
@@ -779,7 +1031,7 @@ __host__ unsigned long long rocshmem_ulonglong_g(
  *
  * @param[in] ctx     Context with which to perform this operation.
  * @param[in] dest    Destination address. Must be an address on the symmetric
-                      heap.
+ *                    heap.
  * @param[in] source  Source address. Must be an address on the symmetric heap.
  * @param[in] nelems  Size of the transfer in bytes.
  * @param[in] pe      PE of the remote process.
@@ -929,6 +1181,72 @@ __host__ void rocshmem_ctx_ulonglong_put_nbi(
 __host__ void rocshmem_ulonglong_put_nbi(
     unsigned long long *dest, const unsigned long long *source, size_t nelems, int pe);
 
+__device__ ATTR_NO_INLINE void rocshmem_ctx_half_put_nbi(
+    rocshmem_ctx_t ctx, __half *dest, const __half *source,
+    size_t nelems, int pe);
+__device__ ATTR_NO_INLINE void rocshmem_half_put_nbi(
+    __half *dest, const __half *source, size_t nelems, int pe);
+__host__ void rocshmem_ctx_half_put_nbi(
+    rocshmem_ctx_t ctx, __half *dest, const __half *source,
+    size_t nelems, int pe);
+__host__ void rocshmem_half_put_nbi(
+    __half *dest, const __half *source, size_t nelems, int pe);
+
+__device__ ATTR_NO_INLINE void rocshmem_ctx_bfloat16_put_nbi(
+    rocshmem_ctx_t ctx, __hip_bfloat16 *dest, const __hip_bfloat16 *source,
+    size_t nelems, int pe);
+__device__ ATTR_NO_INLINE void rocshmem_bfloat16_put_nbi(
+    __hip_bfloat16 *dest, const __hip_bfloat16 *source, size_t nelems, int pe);
+__host__ void rocshmem_ctx_bfloat16_put_nbi(
+    rocshmem_ctx_t ctx, __hip_bfloat16 *dest, const __hip_bfloat16 *source,
+    size_t nelems, int pe);
+__host__ void rocshmem_bfloat16_put_nbi(
+    __hip_bfloat16 *dest, const __hip_bfloat16 *source, size_t nelems, int pe);
+
+__device__ ATTR_NO_INLINE void rocshmem_ctx_int8_put_nbi(
+    rocshmem_ctx_t ctx, int8_t *dest, const int8_t *source,
+    size_t nelems, int pe);
+__device__ ATTR_NO_INLINE void rocshmem_int8_put_nbi(
+    int8_t *dest, const int8_t *source, size_t nelems, int pe);
+__host__ void rocshmem_ctx_int8_put_nbi(
+    rocshmem_ctx_t ctx, int8_t *dest, const int8_t *source,
+    size_t nelems, int pe);
+__host__ void rocshmem_int8_put_nbi(
+    int8_t *dest, const int8_t *source, size_t nelems, int pe);
+
+__device__ ATTR_NO_INLINE void rocshmem_ctx_int16_put_nbi(
+    rocshmem_ctx_t ctx, int16_t *dest, const int16_t *source,
+    size_t nelems, int pe);
+__device__ ATTR_NO_INLINE void rocshmem_int16_put_nbi(
+    int16_t *dest, const int16_t *source, size_t nelems, int pe);
+__host__ void rocshmem_ctx_int16_put_nbi(
+    rocshmem_ctx_t ctx, int16_t *dest, const int16_t *source,
+    size_t nelems, int pe);
+__host__ void rocshmem_int16_put_nbi(
+    int16_t *dest, const int16_t *source, size_t nelems, int pe);
+
+__device__ ATTR_NO_INLINE void rocshmem_ctx_uint8_put_nbi(
+    rocshmem_ctx_t ctx, uint8_t *dest, const uint8_t *source,
+    size_t nelems, int pe);
+__device__ ATTR_NO_INLINE void rocshmem_uint8_put_nbi(
+    uint8_t *dest, const uint8_t *source, size_t nelems, int pe);
+__host__ void rocshmem_ctx_uint8_put_nbi(
+    rocshmem_ctx_t ctx, uint8_t *dest, const uint8_t *source,
+    size_t nelems, int pe);
+__host__ void rocshmem_uint8_put_nbi(
+    uint8_t *dest, const uint8_t *source, size_t nelems, int pe);
+
+__device__ ATTR_NO_INLINE void rocshmem_ctx_uint16_put_nbi(
+    rocshmem_ctx_t ctx, uint16_t *dest, const uint16_t *source,
+    size_t nelems, int pe);
+__device__ ATTR_NO_INLINE void rocshmem_uint16_put_nbi(
+    uint16_t *dest, const uint16_t *source, size_t nelems, int pe);
+__host__ void rocshmem_ctx_uint16_put_nbi(
+    rocshmem_ctx_t ctx, uint16_t *dest, const uint16_t *source,
+    size_t nelems, int pe);
+__host__ void rocshmem_uint16_put_nbi(
+    uint16_t *dest, const uint16_t *source, size_t nelems, int pe);
+
 
 /**
  * @brief Writes contiguous data of \p nelems bytes from \p source on the
@@ -944,7 +1262,7 @@ __host__ void rocshmem_ulonglong_put_nbi(
  *
  * @param[in] ctx     Context with which to perform this operation.
  * @param[in] dest    Destination address. Must be an address on the symmetric
-                      heap.
+ *                    heap.
  * @param[in] source  Source address. Must be an address on the symmetric heap.
  * @param[in] nelems  Size of the transfer in bytes.
  * @param[in] pe      PE of the remote process.
@@ -965,11 +1283,11 @@ __device__ ATTR_NO_INLINE void rocshmem_putmem_nbi(void *dest,
  * @brief Writes contiguous data of \p nelems bytes from \p source on the
  * calling PE to \p dest on \p pe. The operation is not blocking. The caller
  * will return as soon as the request is posted. The caller must call
- * _host__ rocshmem_quiet() if completion notification is required.
+ * __host__ rocshmem_quiet() if completion notification is required.
  *
  * @param[in] ctx     Context with which to perform this operation.
  * @param[in] dest    Destination address. Must be an address on the symmetric
-                      heap.
+ *                    heap.
  * @param[in] source  Source address. Must be an address on the symmetric heap.
  * @param[in] nelems  Size of the transfer in bytes.
  * @param[in] pe      PE of the remote process.
@@ -1148,6 +1466,72 @@ __host__ void rocshmem_ctx_ulonglong_get_nbi(
     size_t nelems, int pe);
 __host__ void rocshmem_ulonglong_get_nbi(unsigned long long *dest,
     const unsigned long long *source, size_t nelems, int pe);
+
+__device__ ATTR_NO_INLINE void rocshmem_ctx_half_get_nbi(
+    rocshmem_ctx_t ctx, __half *dest, const __half *source,
+    size_t nelems, int pe);
+__device__ ATTR_NO_INLINE void rocshmem_half_get_nbi(
+    __half *dest, const __half *source, size_t nelems, int pe);
+__host__ void rocshmem_ctx_half_get_nbi(
+    rocshmem_ctx_t ctx, __half *dest, const __half *source,
+    size_t nelems, int pe);
+__host__ void rocshmem_half_get_nbi(__half *dest,
+    const __half *source, size_t nelems, int pe);
+
+__device__ ATTR_NO_INLINE void rocshmem_ctx_bfloat16_get_nbi(
+    rocshmem_ctx_t ctx, __hip_bfloat16 *dest, const __hip_bfloat16 *source,
+    size_t nelems, int pe);
+__device__ ATTR_NO_INLINE void rocshmem_bfloat16_get_nbi(
+    __hip_bfloat16 *dest, const __hip_bfloat16 *source, size_t nelems, int pe);
+__host__ void rocshmem_ctx_bfloat16_get_nbi(
+    rocshmem_ctx_t ctx, __hip_bfloat16 *dest, const __hip_bfloat16 *source,
+    size_t nelems, int pe);
+__host__ void rocshmem_bfloat16_get_nbi(__hip_bfloat16 *dest,
+    const __hip_bfloat16 *source, size_t nelems, int pe);
+
+__device__ ATTR_NO_INLINE void rocshmem_ctx_int8_get_nbi(
+    rocshmem_ctx_t ctx, int8_t *dest, const int8_t *source,
+    size_t nelems, int pe);
+__device__ ATTR_NO_INLINE void rocshmem_int8_get_nbi(
+    int8_t *dest, const int8_t *source, size_t nelems, int pe);
+__host__ void rocshmem_ctx_int8_get_nbi(
+    rocshmem_ctx_t ctx, int8_t *dest, const int8_t *source,
+    size_t nelems, int pe);
+__host__ void rocshmem_int8_get_nbi(int8_t *dest,
+    const int8_t *source, size_t nelems, int pe);
+
+__device__ ATTR_NO_INLINE void rocshmem_ctx_int16_get_nbi(
+    rocshmem_ctx_t ctx, int16_t *dest, const int16_t *source,
+    size_t nelems, int pe);
+__device__ ATTR_NO_INLINE void rocshmem_int16_get_nbi(
+    int16_t *dest, const int16_t *source, size_t nelems, int pe);
+__host__ void rocshmem_ctx_int16_get_nbi(
+    rocshmem_ctx_t ctx, int16_t *dest, const int16_t *source,
+    size_t nelems, int pe);
+__host__ void rocshmem_int16_get_nbi(int16_t *dest,
+    const int16_t *source, size_t nelems, int pe);
+
+__device__ ATTR_NO_INLINE void rocshmem_ctx_uint8_get_nbi(
+    rocshmem_ctx_t ctx, uint8_t *dest, const uint8_t *source,
+    size_t nelems, int pe);
+__device__ ATTR_NO_INLINE void rocshmem_uint8_get_nbi(
+    uint8_t *dest, const uint8_t *source, size_t nelems, int pe);
+__host__ void rocshmem_ctx_uint8_get_nbi(
+    rocshmem_ctx_t ctx, uint8_t *dest, const uint8_t *source,
+    size_t nelems, int pe);
+__host__ void rocshmem_uint8_get_nbi(uint8_t *dest,
+    const uint8_t *source, size_t nelems, int pe);
+
+__device__ ATTR_NO_INLINE void rocshmem_ctx_uint16_get_nbi(
+    rocshmem_ctx_t ctx, uint16_t *dest, const uint16_t *source,
+    size_t nelems, int pe);
+__device__ ATTR_NO_INLINE void rocshmem_uint16_get_nbi(
+    uint16_t *dest, const uint16_t *source, size_t nelems, int pe);
+__host__ void rocshmem_ctx_uint16_get_nbi(
+    rocshmem_ctx_t ctx, uint16_t *dest, const uint16_t *source,
+    size_t nelems, int pe);
+__host__ void rocshmem_uint16_get_nbi(uint16_t *dest,
+    const uint16_t *source, size_t nelems, int pe);
 
 
 /**

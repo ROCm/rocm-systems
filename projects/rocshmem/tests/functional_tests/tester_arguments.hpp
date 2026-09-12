@@ -25,11 +25,15 @@
 #ifndef _TESTER_ARGUMENTS_HPP_
 #define _TESTER_ARGUMENTS_HPP_
 
+#include <algorithm>
 #include <climits>
 #include <cstdint>
 #include <rocshmem/rocshmem.hpp>
 #include <string>
 #include <iostream>
+#include <unordered_set>
+
+enum class TypeCoverage { Minimal, Full, Custom };
 
 
 enum TeamSplitType {
@@ -116,6 +120,37 @@ public:
   size_t large_message_size = 32768;
 
   TeamSplitType team_type = ROCSHMEM_TEST_TEAM_DUP;
+
+  TypeCoverage type_coverage = TypeCoverage::Minimal;
+
+  /**
+   * Types requested via -tc, stored in normalized form. Only consulted when
+   * type_coverage is Custom.
+   */
+  std::unordered_set<std::string> type_filter;
+
+  /**
+   * Spaces are folded to underscores so that "unsigned int" and unsigned_int
+   * compare equal. This lets -tc take multi-word types without shell quoting.
+   * Folding in this direction (rather than underscores to spaces) leaves
+   * int32_t / int64_t intact.
+   */
+  static std::string normalize_type_name(std::string name) {
+    std::replace(name.begin(), name.end(), ' ', '_');
+    return name;
+  }
+
+  /**
+   * Whether a tester should be instantiated for the named type. Always true in
+   * Full mode; a filter lookup in Custom mode. Returns false in Minimal mode --
+   * each switch case spells out its own minimal type list instead.
+   */
+  bool type_enabled(const char* name) const {
+    if (type_coverage == TypeCoverage::Full)   return true;
+    if (type_coverage == TypeCoverage::Custom)
+      return type_filter.count(normalize_type_name(name)) > 0;
+    return false;
+  }
 };
 
 #endif
