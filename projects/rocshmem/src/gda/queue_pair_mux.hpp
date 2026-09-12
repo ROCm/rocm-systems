@@ -466,11 +466,11 @@ __host__ __device__ __forceinline__ constexpr bool QueuePairMux::can_inline(size
 #endif
     default:
 #ifdef __HIP_DEVICE_COMPILE__
-    assert(false /* invalid GDAProvider */);
-    __builtin_unreachable();
+      assert(false /* invalid GDAProvider */);
+      __builtin_unreachable();
 #else
-    static_assert(std::is_same_v<std::underlying_type_t<GDAProvider>, int>);
-    LOG_ERROR_ABORT("Invalid GDAProvider (%d)", static_cast<int>(get_provider()));
+      static_assert(std::is_same_v<std::underlying_type_t<GDAProvider>, int>);
+      LOG_ERROR_ABORT("Invalid GDAProvider (%d)", static_cast<int>(get_provider()));
 #endif
     }
   }
