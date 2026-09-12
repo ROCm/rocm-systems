@@ -2413,45 +2413,58 @@ void CommandProcessor::fetch_from_queue(HwQueue &queue, HwQueueState &qs, simdoj
   // suspension flags are the owner's copy rather than state this CP maintains.
   if (queue.fanout_replica)
     return;
-  if (queue.debug_suspended || queue.runtime_suspended) {
-    // A command-processor event can race a debugger suspension even when this
-    // queue has no new packets. Do not turn that stale event into an endless
-    // resume/event chain: request a resume pass only when packet fetch really
-    // was deferred. Compute queues count packets; SDMA queues count bytes.
-    const uint64_t write_idx = read_gpu_u64(queue.write_ptr_va, queue.process_id);
-    const uint64_t read_idx = read_gpu_u64(queue.read_ptr_va, queue.process_id);
-    const uint64_t fetch_idx = queue.is_sdma ? read_idx : std::max(read_idx, queue.fetch_cursor);
-    queue.debug_work_deferred |= fetch_idx < write_idx;
-    return;
-  }
-  if (queue.host_accessible ? (queue.doorbell_base == nullptr) : (queue.doorbell_va == 0))
-    return;
-
   // The SDMA doorbell publishes a byte range. ROCr writes the producer pointer
   // before its release-store to the doorbell, so reading ahead from that pointer
   // can consume packets before observing their publication. Use the doorbell
   // itself, including when a retry was scheduled for an older submission.
   if (queue.is_sdma) {
-    const uint64_t write_idx =
-        queue.host_accessible
-            ? std::atomic_ref<uint64_t>(
-                  *reinterpret_cast<uint64_t *>(static_cast<char *>(queue.doorbell_base) +
-                                                queue.doorbell_offset))
-                  .load(std::memory_order_acquire)
-            : read_gpu_u64(queue.doorbell_va, queue.process_id);
-    if (write_idx == std::numeric_limits<uint64_t>::max())
+    uint64_t published_bytes;
+    if (queue.host_accessible) {
+      if (!queue.doorbell_base)
+        return;
+      published_bytes = std::atomic_ref<uint64_t>(
+                            *reinterpret_cast<uint64_t *>(static_cast<char *>(queue.doorbell_base) +
+                                                          queue.doorbell_offset))
+                            .load(std::memory_order_acquire);
+    } else {
+      if (queue.doorbell_va == 0)
+        return;
+      published_bytes = read_gpu_u64(queue.doorbell_va, queue.process_id);
+    }
+    if (published_bytes == std::numeric_limits<uint64_t>::max())
       return;
     const uint64_t read_idx = read_gpu_u64(queue.read_ptr_va, queue.process_id);
+    if (queue.debug_suspended || queue.runtime_suspended) {
+      // Resume must revisit published packets even if the producer writeback
+      // has not advanced. Both suspension reasons share this deferral.
+      queue.debug_work_deferred |= read_idx < published_bytes;
+      return;
+    }
     util::Logger::cp([&](auto &os) {
       os << std::format("{}: SDMA_FETCH pid={} qid={} read={} write={} delta={}", name(),
-                        queue.process_id, queue.queue_id, read_idx, write_idx,
-                        write_idx - read_idx);
+                        queue.process_id, queue.queue_id, read_idx, published_bytes,
+                        published_bytes - read_idx);
     });
-    if (read_idx >= write_idx)
+    if (read_idx >= published_bytes)
       return;
-    process_sdma_ring(queue, read_idx, write_idx, now);
+    process_sdma_ring(queue, read_idx, published_bytes, now);
     return;
   }
+
+  if (queue.debug_suspended || queue.runtime_suspended) {
+    // A command-processor event can race a debugger suspension even when this
+    // queue has no new packets. Do not turn that stale event into an endless
+    // resume/event chain: request a resume pass only when packet fetch really
+    // was deferred. The fetch cursor stays ahead of the read pointer when
+    // the debugger holds that pointer at a trapped dispatch.
+    const uint64_t write_idx = read_gpu_u64(queue.write_ptr_va, queue.process_id);
+    const uint64_t read_idx = read_gpu_u64(queue.read_ptr_va, queue.process_id);
+    const uint64_t fetch_idx = std::max(read_idx, queue.fetch_cursor);
+    queue.debug_work_deferred |= fetch_idx < write_idx;
+    return;
+  }
+  if (queue.host_accessible ? (queue.doorbell_base == nullptr) : (queue.doorbell_va == 0))
+    return;
 
   // Read write and read indices. For KFD queues, pointers are in host memory
   // and can be read directly. For internal test queues, they're in GpuMemory.
@@ -2964,13 +2977,9 @@ void CommandProcessor::handle_doorbell_sync(simdojo::Tick now) {
     // (e.g., barrier packets queued after a kernel dispatch). Process them
     // immediately so host signal waits see completed barriers before returning.
     //
-    // SDMA queues are re-fetched only on the first pass. The compute (AQL) re-fetch
-    // is clamped to last_doorbell so repeating it is safe, but the SDMA path reads
-    // the live doorbell value and would read ahead of an observed doorbell —
-    // re-polling the ring across rescan iterations races with the host's
-    // concurrent ring writes (torn packet -> bad copy). Late *kernel* packets,
-    // which is all the rescan needs, only arrive on the compute queue anyway;
-    // SDMA packets are picked up by their own doorbell-driven passes.
+    // Re-fetch SDMA only on the first pass to bound its work during this
+    // compute rescan. SDMA fetches stay within the doorbell-published byte range;
+    // later submissions are picked up by their own doorbell-driven passes.
     const uint32_t dispatch_id_before_refetch = next_dispatch_id_;
     for (size_t i = 0; i < hw_queues_.size(); ++i) {
       if (hw_queues_[i].is_sdma && !first_pass)
