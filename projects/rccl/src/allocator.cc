@@ -81,10 +81,23 @@ ncclResult_t ncclMemAlloc_impl(void** ptr, size_t size) {
     for (int i = 0; i < dcnt; ++i) {
       int p2p = 0;
       if (i == cudaDev || (CUDASUCCESS(cudaDeviceCanAccessPeer(&p2p, i, cudaDev)) && p2p)) {
-        accessDesc.location.type = CU_MEM_LOCATION_TYPE_DEVICE;
-        accessDesc.location.id = i;
-        accessDesc.flags = CU_MEM_ACCESS_FLAGS_PROT_READWRITE;
-        CUCHECK(cuMemSetAccess((CUdeviceptr)*ptr, handleSize, &accessDesc, 1));
+        // Initialize & increment refcount for GPU i
+        hipCtx_t ctx;
+        hipError_t err = hipDevicePrimaryCtxRetain(&ctx, i); 
+        if (err == hipSuccess) {
+          accessDesc.location.type = CU_MEM_LOCATION_TYPE_DEVICE;
+          accessDesc.location.id = i;
+          accessDesc.flags = CU_MEM_ACCESS_FLAGS_PROT_READWRITE;
+          CUCHECK(cuMemSetAccess((CUdeviceptr)*ptr, handleSize, &accessDesc, 1));
+          hipDevicePrimaryCtxRelease(i);
+        }
+        else {
+          WARN("hipDevicePrimaryCtxRetain failed for GPU %d with error %d: %s", i, err, hipGetErrorString(err));
+          cuMemUnmap((CUdeviceptr)*ptr, handleSize);
+          cuMemAddressFree((CUdeviceptr)*ptr, handleSize);
+          *ptr = NULL;
+          goto fallback;
+        }
       }
       if (0 == p2p && i != cudaDev) INFO(NCCL_ALLOC, "P2P not supported between GPU%d and GPU%d", cudaDev, i);
     }

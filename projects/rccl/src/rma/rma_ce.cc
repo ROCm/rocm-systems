@@ -103,6 +103,10 @@ fail:
 }
 
 ncclResult_t ncclRmaCeFinalize(struct ncclComm* comm) {
+  if (!comm || !comm->rmaState.rmaCeState.initialized) {
+    return ncclSuccess;
+  }
+  
   ncclResult_t ret = ncclSuccess;
 
   // Clean up rmaCeInitTaskQueue

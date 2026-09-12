@@ -5,6 +5,8 @@
  ************************************************************************/
 #include "TestBed.hpp"
 #include "CallCollectiveForked.hpp"
+#include "ScopedEnvVar.hpp"
+#include "StandaloneUtils.hpp"
 
 namespace RcclUnitTesting
 {
@@ -149,6 +151,40 @@ namespace RcclUnitTesting
     testBed.Finalize();
   }
 
+  TEST(AllReduce, SingleProcMemReg)
+  {
+    int hipRuntimeVer = 0;
+    HIPCALL(hipRuntimeGetVersion(&hipRuntimeVer));
+    if (hipRuntimeVer < 71260540) {
+      GTEST_SKIP() << "Skipping SingleProcMemReg: HIP runtime version (" 
+                   << hipRuntimeVer << ") is lower than 71260540";
+    }
+    ScopedEnvVar pool("UT_COMM_POOL", "0");
+    ScopedEnvVar singleProcMemReg("NCCL_SINGLE_PROC_MEM_REG_ENABLE", "1");
+    ScopedEnvVar cuMem("NCCL_CUMEM_ENABLE", "1");
+    TestBed testBed;
+
+    // Configuration
+    std::vector<ncclFunc_t>     const funcTypes       = {ncclCollAllReduce};
+    std::vector<ncclDataType_t> const dataTypes       = {ncclFloat64, ncclFloat32, ncclFloat16, ncclBfloat16, ncclFloat8e4m3, ncclFloat8e5m2};
+    std::vector<ncclRedOp_t>    const redOps          = {ncclSum};
+    std::vector<int>            const roots           = {0};
+    // Unaligned element counts designed to break 16-byte alignment:
+    // - 1 elem of FP16 = 2 bytes   (NOT 16-byte aligned)
+    // - 3 elems of FP32 = 12 bytes (NOT 16-byte aligned)
+    // - 7 elems of FP16 = 14 bytes (NOT 16-byte aligned)
+    // - 4314 elems of FP16 = 8,628 bytes (8628 / 16 = 539.25 -> NOT 16-byte aligned)
+    // - 5003 elems of FP32 = 20,012 bytes (20012 / 16 = 1250.75 -> NOT 16-byte aligned)
+    std::vector<int>            const numElements     = {1,3,7,4314,5003,10000001};
+    std::vector<bool>           const inPlaceList     = {true,false};
+    std::vector<bool>           const managedMemList  = {false};
+    std::vector<bool>           const useHipGraphList = {true,false};
+
+    testBed.RunSimpleSweep(funcTypes, dataTypes, redOps, roots, numElements,
+                           inPlaceList, managedMemList, useHipGraphList,true,MEM_ALLOC_SYMMETRIC_WIN);
+    
+    testBed.Finalize();
+  }
   // This tests using custom pre-mult scalars reductions
   TEST(AllReduce, PreMultScalar)
   {

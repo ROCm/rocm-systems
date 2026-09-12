@@ -12,6 +12,12 @@
 
 namespace RcclUnitTesting
 {
+  enum MemAllocType
+  {
+    MEM_ALLOC_HIP           = 0, // Standard hipMalloc
+    MEM_ALLOC_MANAGED       = 1, // hipMallocManaged
+    MEM_ALLOC_SYMMETRIC_WIN = 2  // ncclMemAlloc + ncclCommWindowRegister
+  };
   // Enumeration of all collective functions currently supported
   typedef enum
   {
@@ -134,7 +140,11 @@ namespace RcclUnitTesting
     bool           inPlace;
     bool           useManagedMem;
     bool           userRegistered;
-    void*          commRegHandle;
+    void*          outputRegHandle;
+    void*          inputRegHandle;
+
+    ncclWindow_t    inputWin      = nullptr;      // Handle for ncclCommWindowRegister (input)
+    ncclWindow_t    outputWin     = nullptr;      // Handle for ncclCommWindowRegister (output)
     size_t         numInputBytesAllocated;
     size_t         numOutputBytesAllocated;
     size_t         numInputElementsAllocated;
@@ -188,5 +198,6 @@ namespace RcclUnitTesting
 
     // Returns true if collective function utilizes a root rank
     static bool UsesRoot(ncclFunc_t const funcType);
+    ErrCode AttachMem();
   };
 }

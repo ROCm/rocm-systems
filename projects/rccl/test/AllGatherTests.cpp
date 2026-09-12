@@ -5,6 +5,8 @@
  ************************************************************************/
 #include "TestBed.hpp"
 #include "CallCollectiveForked.hpp"
+#include "ScopedEnvVar.hpp"
+#include "StandaloneUtils.hpp"
 
 namespace RcclUnitTesting
 {
@@ -122,6 +124,35 @@ namespace RcclUnitTesting
     testBed.Finalize();
   }
 
+  TEST(AllGather, SingleProcMemReg)
+  {
+    int hipRuntimeVer = 0;
+    HIPCALL(hipRuntimeGetVersion(&hipRuntimeVer));
+    if (hipRuntimeVer < 71260540) {
+      GTEST_SKIP() << "Skipping SingleProcMemReg: HIP runtime version (" 
+                   << hipRuntimeVer << ") is lower than 71260540";
+    }
+    ScopedEnvVar pool("UT_COMM_POOL", "0");
+    ScopedEnvVar singleProcMemReg("NCCL_SINGLE_PROC_MEM_REG_ENABLE", "1");
+    ScopedEnvVar cuMem("NCCL_CUMEM_ENABLE", "1");
+    TestBed testBed;
+
+    // Configuration
+    std::vector<ncclFunc_t>     const funcTypes       = {ncclCollAllGather};
+    std::vector<ncclDataType_t> const dataTypes       = {ncclUint64,ncclUint32,ncclBfloat16,ncclUint8};
+    std::vector<ncclRedOp_t>    const redOps          = {ncclSum};
+    std::vector<int>            const roots           = {0};
+    std::vector<int>            const numElements     = {1,3,7,4314,5003,1048575,1048576};
+    std::vector<bool>           const inPlaceList     = {true,false};
+    std::vector<bool>           const managedMemList  = {false};
+    std::vector<bool>           const useHipGraphList = {true,false};
+
+    testBed.RunSimpleSweep(funcTypes, dataTypes, redOps, roots, numElements,
+                           inPlaceList, managedMemList, useHipGraphList,true,MEM_ALLOC_SYMMETRIC_WIN);
+    
+    testBed.Finalize();
+  }
+  
   TEST(AllGather, UserBufferRegistration)
   {          
     const int nranks = 8;
