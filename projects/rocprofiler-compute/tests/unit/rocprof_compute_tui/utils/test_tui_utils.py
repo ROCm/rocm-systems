@@ -161,25 +161,30 @@ class TestProcessPanelsToDataframes:
         ],
     )
     def test_membw_analysis_panel_gate(self, membw_analysis: bool) -> None:
-        """Panel 3000 is included only when memory bandwidth analysis is enabled."""
+        """Panel 3000 is included only when present in arch_configs."""
         mock_args = MagicMock()
         mock_args.decimal = 2
         mock_args.membw_analysis = membw_analysis
 
-        mock_arch_configs = MagicMock()
-        mock_arch_configs.panel_configs = {
-            3000: {
-                "title": "Memory Bandwidth Analysis",
-                "data source": [
-                    {
-                        "metric_table": {
-                            "id": 3013,
-                            "title": "EA Interface",
+        panel_configs = (
+            {
+                3000: {
+                    "title": "Memory Bandwidth Analysis",
+                    "data source": [
+                        {
+                            "metric_table": {
+                                "id": 3013,
+                                "title": "EA Interface",
+                            }
                         }
-                    }
-                ],
+                    ],
+                }
             }
-        }
+            if membw_analysis
+            else {}
+        )
+        mock_arch_configs = MagicMock()
+        mock_arch_configs.panel_configs = panel_configs
         metric_dataframe = pd.DataFrame({
             "Metric": ["EA read request fraction - HBM"],
             "Avg": [50.0],

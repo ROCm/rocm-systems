@@ -280,9 +280,22 @@ void mock_filesystem_wrapper_t::set_create_directories_error(std::error_code err
     m_create_directories_error = error;
 }
 
+void mock_filesystem_wrapper_t::write_file(const std::filesystem::path& path,
+                                           const std::string&           contents,
+                                           std::error_code&             error)
+{
+    m_write_file_calls.push_back({path, contents});
+    error = m_write_file_error;
+}
+
 void mock_filesystem_wrapper_t::set_copy_file_error(std::error_code error)
 {
     m_copy_file_error = error;
+}
+
+void mock_filesystem_wrapper_t::set_write_file_error(std::error_code error)
+{
+    m_write_file_error = error;
 }
 
 const std::vector<std::filesystem::path>& mock_filesystem_wrapper_t::get_absolute_calls() const
@@ -318,4 +331,9 @@ const std::vector<std::filesystem::path>& mock_filesystem_wrapper_t::get_create_
 const std::vector<mock_filesystem_wrapper_t::copy_file_call_t>& mock_filesystem_wrapper_t::get_copy_file_calls() const
 {
     return m_copy_file_calls;
+}
+
+const std::vector<mock_filesystem_wrapper_t::write_file_call_t>& mock_filesystem_wrapper_t::get_write_file_calls() const
+{
+    return m_write_file_calls;
 }

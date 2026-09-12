@@ -11,6 +11,7 @@ from unittest.mock import patch
 import pandas as pd
 import pytest
 
+from pc_sampling import pc_sampling_analysis
 from pc_sampling.pc_sampling_analysis import (
     aggregate_pc_sample_records,
     detect_pc_sampling_method,
@@ -46,6 +47,14 @@ HIP_RUNTIME_SOURCE = (
 
 PREFIX = "ROCPROFILER_PC_SAMPLING_INSTRUCTION_NOT_ISSUED_REASON_"
 INST_PREFIX = "ROCPROFILER_PC_SAMPLING_INSTRUCTION_TYPE_"
+
+
+@pytest.fixture(autouse=True)
+def reset_wave_size_clamp_warning():
+    """The capped-percentage warning fires once per process, so reset it."""
+    pc_sampling_analysis.WAVE_SIZE_CLAMP_WARNED = False
+
+
 HOST_TRAP_DISPLAY_COLUMNS = [
     "pid",
     "source_line",
@@ -53,6 +62,7 @@ HOST_TRAP_DISPLAY_COLUMNS = [
     "code_object_id",
     "offset",
     "count",
+    "active_thread_percent",
     "Kernel_Name",
 ]
 STOCHASTIC_DISPLAY_COLUMNS = [
@@ -62,8 +72,10 @@ STOCHASTIC_DISPLAY_COLUMNS = [
     "code_object_id",
     "offset",
     "count",
+    "active_thread_percent",
     "count_issued",
     "count_stalled",
+    "wave_occupancy_percent",
     "stall_reason",
     "Kernel_Name",
 ]
@@ -80,6 +92,8 @@ def make_record(
     wave_issued: bool = True,
     stall_reason: str | None = None,
     inst_type: str | None = None,
+    exec_mask: int | None = None,
+    wave_cnt: int | None = None,
 ) -> dict:
     snapshot = {}
     if stall_reason is not None:
@@ -95,6 +109,10 @@ def make_record(
     }
     if inst_type is not None:
         record["inst_type"] = inst_type
+    if exec_mask is not None:
+        record["exec_mask"] = exec_mask
+    if wave_cnt is not None:
+        record["wave_cnt"] = wave_cnt
     return {"inst_index": inst_index, "record": record}
 
 
@@ -103,17 +121,24 @@ def make_host_trap_record(
     offset: int,
     inst_index: int,
     dispatch_id: int,
+    exec_mask: int | None = None,
+    wave_cnt: int | None = None,
 ) -> dict:
     """A host_trap sample: no wave_issued / snapshot (no issue/stall info)."""
+    record = {
+        "pc": {
+            "code_object_id": code_object_id,
+            "code_object_offset": offset,
+        },
+        "dispatch_id": dispatch_id,
+    }
+    if exec_mask is not None:
+        record["exec_mask"] = exec_mask
+    if wave_cnt is not None:
+        record["wave_cnt"] = wave_cnt
     return {
         "inst_index": inst_index,
-        "record": {
-            "pc": {
-                "code_object_id": code_object_id,
-                "code_object_offset": offset,
-            },
-            "dispatch_id": dispatch_id,
-        },
+        "record": record,
     }
 
 
@@ -417,6 +442,34 @@ def test_load_pc_sample_records_unmapped_dispatch_kernel_id_none() -> None:
     assert df.iloc[0]["kernel_id"] is None
 
 
+def test_load_pc_sample_records_missing_wave_measurements_are_none() -> None:
+    """A record may omit either wave measurement without failing to normalize."""
+    sample = make_record(1, 0x10, 0, dispatch_id=0)
+    assert "exec_mask" not in sample["record"]
+    assert "wave_cnt" not in sample["record"]
+
+    records = load_pc_sample_records(make_tool_data(stochastic=[sample]))
+
+    assert {"exec_mask", "wave_cnt"}.issubset(records.columns)
+    assert pd.isna(records.iloc[0]["exec_mask"])
+    assert pd.isna(records.iloc[0]["wave_cnt"])
+
+
+def test_load_pc_sample_records_keeps_full_width_exec_mask() -> None:
+    """A full wave64 mask survives normalization bit for bit."""
+    all_ones_wave64 = 2**64 - 1
+    records = load_pc_sample_records(
+        make_tool_data(
+            stochastic=[
+                make_record(1, 0x10, 0, dispatch_id=0, exec_mask=all_ones_wave64),
+                make_record(1, 0x10, 1, dispatch_id=0),
+            ]
+        )
+    )
+
+    assert records.iloc[0]["exec_mask"] == all_ones_wave64
+
+
 # ═══════════════════════════════════════════════════════════════
 # aggregate_pc_sample_records
 # ═══════════════════════════════════════════════════════════════
@@ -426,7 +479,7 @@ def test_aggregate_empty_records_returns_columns() -> None:
     """Aggregating an empty record df returns the expected (empty) columns."""
     empty = load_pc_sample_records(make_tool_data())
     result = aggregate_pc_sample_records(
-        empty, group_by=["code_object_id", "code_object_offset"]
+        empty, group_by=["code_object_id", "code_object_offset"], sys_info={}
     )
     assert result.empty
     for column in ("count", "count_issued", "count_stalled", "stall_reason"):
@@ -454,7 +507,7 @@ def test_aggregate_counts_issued_and_stalled() -> None:
         )
     )
     result = aggregate_pc_sample_records(
-        records, group_by=["code_object_id", "code_object_offset"]
+        records, group_by=["code_object_id", "code_object_offset"], sys_info={}
     )
     row = result.iloc[0]
     assert row["count"] == 2
@@ -469,7 +522,7 @@ def test_aggregate_host_trap_counts_are_none() -> None:
         make_tool_data(host_trap=[make_host_trap_record(1, 0x10, 0, dispatch_id=0)])
     )
     result = aggregate_pc_sample_records(
-        records, group_by=["code_object_id", "code_object_offset"]
+        records, group_by=["code_object_id", "code_object_offset"], sys_info={}
     )
     row = result.iloc[0]
     assert row["count"] == 1
@@ -495,7 +548,7 @@ def test_aggregate_unknown_stall_key_dropped() -> None:
         )
     )
     result = aggregate_pc_sample_records(
-        records, group_by=["code_object_id", "code_object_offset"]
+        records, group_by=["code_object_id", "code_object_offset"], sys_info={}
     )
     assert result.iloc[0]["stall_reason"] == {}
 
@@ -512,10 +565,386 @@ def test_aggregate_group_by_kernel_id_separates_shared_code_object() -> None:
         )
     )
     result = aggregate_pc_sample_records(
-        records, group_by=["code_object_id", "code_object_offset", "kernel_id"]
+        records,
+        group_by=["code_object_id", "code_object_offset", "kernel_id"],
+        sys_info={},
     )
     assert len(result) == 2
     assert set(result["kernel_id"]) == {100, 101}
+
+
+def test_aggregate_active_threads_reports_full_wave_for_all_ones_mask() -> None:
+    """A fully-active wave64 reports 100 percent, the physical upper bound."""
+    all_ones_wave64 = 2**64 - 1
+    records = load_pc_sample_records(
+        make_tool_data(
+            stochastic=[
+                make_record(
+                    1,
+                    0x10,
+                    0,
+                    dispatch_id=0,
+                    exec_mask=all_ones_wave64,
+                    wave_cnt=8,
+                )
+            ]
+        )
+    )
+
+    result = aggregate_pc_sample_records(
+        records,
+        group_by=["code_object_id", "code_object_offset"],
+        sys_info={"wave_size": "64", "max_waves_per_cu": "32"},
+    )
+
+    assert bin(all_ones_wave64).count("1") == 64
+    assert result.iloc[0]["active_thread_percent"] == 100.0
+
+
+def test_aggregate_wave_means_include_every_sample_regardless_of_issue_state() -> None:
+    """Wave measurements are independent of issue, stall, and instruction state."""
+    records = load_pc_sample_records(
+        make_tool_data(
+            stochastic=[
+                make_record(
+                    1,
+                    0x10,
+                    0,
+                    dispatch_id=0,
+                    wave_issued=True,
+                    inst_type=f"{INST_PREFIX}VALU",
+                    exec_mask=0b1,
+                    wave_cnt=2,
+                ),
+                make_record(
+                    1,
+                    0x10,
+                    0,
+                    dispatch_id=0,
+                    wave_issued=False,
+                    stall_reason=f"{PREFIX}WAITCNT",
+                    inst_type=f"{INST_PREFIX}VALU",
+                    exec_mask=0b11,
+                    wave_cnt=7,
+                ),
+                make_record(
+                    1,
+                    0x10,
+                    0,
+                    dispatch_id=0,
+                    wave_issued=True,
+                    inst_type=f"{INST_PREFIX}NO_INST",
+                    exec_mask=0b11111111,
+                    wave_cnt=20,
+                ),
+            ]
+        )
+    )
+
+    aggregated = aggregate_pc_sample_records(
+        records,
+        group_by=["code_object_id", "code_object_offset"],
+        sys_info={"wave_size": "64", "max_waves_per_cu": "32"},
+    )
+    row = aggregated.iloc[0]
+
+    assert row["active_thread_percent"] == pytest.approx((11 / 3) / 64 * 100), (
+        "active_thread_percent must include all samples; filtering by "
+        "wave_issued, stall_reason, or inst_type is wrong"
+    )
+    assert row["wave_occupancy_percent"] == pytest.approx((29 / 3) / 32 * 100), (
+        "wave_occupancy_percent must include all samples; filtering by "
+        "wave_issued, stall_reason, or inst_type is wrong"
+    )
+
+
+@pytest.mark.parametrize(
+    (
+        "method",
+        "exec_mask",
+        "wave_cnt",
+        "expected_active_thread_percent",
+        "expected_wave_occupancy_percent",
+    ),
+    [
+        pytest.param("host_trap", 0b1111, None, 6.25, None, id="host-mask-only"),
+        pytest.param("stochastic", 0b11, 8, 3.125, 25.0, id="stochastic-both"),
+        pytest.param("stochastic", None, None, None, None, id="stochastic-neither"),
+    ],
+)
+def test_aggregate_wave_measurements_follow_field_presence_not_method(
+    method: str,
+    exec_mask: int | None,
+    wave_cnt: int | None,
+    expected_active_thread_percent: float | None,
+    expected_wave_occupancy_percent: float | None,
+) -> None:
+    """Each sample contributes the measurements it carries, for either method."""
+    if method == "host_trap":
+        sample = make_host_trap_record(
+            1,
+            0x10,
+            0,
+            dispatch_id=0,
+            exec_mask=exec_mask,
+            wave_cnt=wave_cnt,
+        )
+    else:
+        sample = make_record(
+            1,
+            0x10,
+            0,
+            dispatch_id=0,
+            exec_mask=exec_mask,
+            wave_cnt=wave_cnt,
+        )
+    tool_data = make_tool_data(**{method: [sample]})
+    records = load_pc_sample_records(tool_data)
+
+    aggregated = aggregate_pc_sample_records(
+        records,
+        group_by=["code_object_id", "code_object_offset"],
+        sys_info={"wave_size": "64", "max_waves_per_cu": "32"},
+    )
+    row = aggregated.iloc[0]
+
+    if expected_active_thread_percent is None:
+        assert pd.isna(row["active_thread_percent"])
+    else:
+        assert row["active_thread_percent"] == expected_active_thread_percent
+    if expected_wave_occupancy_percent is None:
+        assert pd.isna(row["wave_occupancy_percent"])
+    else:
+        assert row["wave_occupancy_percent"] == expected_wave_occupancy_percent
+
+
+def test_aggregate_wave_measurements_exclude_missing_fields_independently() -> None:
+    """Missing one field never prevents the other field from contributing."""
+    records = load_pc_sample_records(
+        make_tool_data(
+            stochastic=[
+                make_record(1, 0x10, 0, dispatch_id=0, exec_mask=0b1),
+                make_record(1, 0x10, 0, dispatch_id=0, wave_cnt=16),
+                make_record(
+                    1,
+                    0x10,
+                    0,
+                    dispatch_id=0,
+                    exec_mask=0b111,
+                    wave_cnt=8,
+                ),
+            ]
+        )
+    )
+
+    aggregated = aggregate_pc_sample_records(
+        records,
+        group_by=["code_object_id", "code_object_offset"],
+        sys_info={"wave_size": "64", "max_waves_per_cu": "32"},
+    )
+    row = aggregated.iloc[0]
+
+    assert row["active_thread_percent"] == 3.125, (
+        "exec_mask mean must use exactly the samples carrying exec_mask"
+    )
+    assert row["wave_occupancy_percent"] == 37.5, (
+        "wave_cnt mean must use exactly the samples carrying wave_cnt"
+    )
+
+
+def test_aggregate_wave_measurements_are_none_without_sys_info() -> None:
+    """System information without the machine specs leaves both unknown."""
+    records = load_pc_sample_records(
+        make_tool_data(
+            stochastic=[
+                make_record(
+                    1,
+                    0x10,
+                    0,
+                    dispatch_id=0,
+                    exec_mask=0b1111,
+                    wave_cnt=8,
+                )
+            ]
+        )
+    )
+    group_by = ["code_object_id", "code_object_offset"]
+
+    result = aggregate_pc_sample_records(records, group_by=group_by, sys_info={})
+
+    assert {
+        "active_thread_percent",
+        "wave_occupancy_percent",
+    }.issubset(result.columns)
+    assert pd.isna(result.iloc[0]["active_thread_percent"])
+    assert pd.isna(result.iloc[0]["wave_occupancy_percent"])
+
+
+@pytest.mark.parametrize(
+    ("sys_info", "expected_active_thread_percent", "expected_wave_occupancy_percent"),
+    [
+        pytest.param(
+            {"max_waves_per_cu": "32"},
+            None,
+            25.0,
+            id="missing-wave-size",
+        ),
+        pytest.param(
+            {"wave_size": "64"},
+            6.25,
+            None,
+            id="missing-max-waves",
+        ),
+        pytest.param(
+            {"wave_size": "", "max_waves_per_cu": "32"},
+            None,
+            25.0,
+            id="blank-wave-size",
+        ),
+        pytest.param(
+            {"wave_size": "many", "max_waves_per_cu": "32"},
+            None,
+            25.0,
+            id="nonnumeric-wave-size",
+        ),
+        pytest.param(
+            {"wave_size": "64", "max_waves_per_cu": ""},
+            6.25,
+            None,
+            id="blank-max-waves",
+        ),
+        pytest.param(
+            {"wave_size": "64", "max_waves_per_cu": "many"},
+            6.25,
+            None,
+            id="nonnumeric-max-waves",
+        ),
+    ],
+)
+def test_aggregate_wave_measurements_require_usable_denominators(
+    sys_info: dict[str, str],
+    expected_active_thread_percent: float | None,
+    expected_wave_occupancy_percent: float | None,
+) -> None:
+    """Each percentage is None unless its own denominator is usable."""
+    records = load_pc_sample_records(
+        make_tool_data(
+            stochastic=[
+                make_record(
+                    1,
+                    0x10,
+                    0,
+                    dispatch_id=0,
+                    exec_mask=0b1111,
+                    wave_cnt=8,
+                )
+            ]
+        )
+    )
+
+    aggregated = aggregate_pc_sample_records(
+        records,
+        group_by=["code_object_id", "code_object_offset"],
+        sys_info=sys_info,
+    )
+    row = aggregated.iloc[0]
+
+    if expected_active_thread_percent is None:
+        assert pd.isna(row["active_thread_percent"])
+    else:
+        assert row["active_thread_percent"] == expected_active_thread_percent
+    if expected_wave_occupancy_percent is None:
+        assert pd.isna(row["wave_occupancy_percent"])
+    else:
+        assert row["wave_occupancy_percent"] == expected_wave_occupancy_percent
+
+
+def test_aggregate_caps_active_threads_at_a_full_wave() -> None:
+    """A wave64 mask on a wave32 machine reports 100 percent, and warns."""
+    records = load_pc_sample_records(
+        make_tool_data(
+            stochastic=[
+                make_record(1, 0x10, 0, dispatch_id=0, exec_mask=2**64 - 1),
+                make_record(1, 0x20, 1, dispatch_id=0, exec_mask=0b11),
+            ]
+        )
+    )
+
+    with patch("pc_sampling.pc_sampling_analysis.console_warning") as warning_mock:
+        result = aggregate_pc_sample_records(
+            records,
+            group_by=["code_object_id", "code_object_offset"],
+            sys_info={"wave_size": "32"},
+        )
+
+    by_offset = result.set_index("code_object_offset")["active_thread_percent"]
+    assert by_offset[0x10] == 100.0
+    assert by_offset[0x20] == 6.25
+    warning_mock.assert_called_once()
+    assert "capped at 100" in warning_mock.call_args.args[0]
+
+
+def test_aggregate_warns_about_capping_only_once() -> None:
+    """A second workload with the same mismatch does not repeat the warning."""
+    records = load_pc_sample_records(
+        make_tool_data(
+            stochastic=[make_record(1, 0x10, 0, dispatch_id=0, exec_mask=2**64 - 1)]
+        )
+    )
+    aggregate_pc_sample_records(
+        records,
+        group_by=["code_object_id", "code_object_offset"],
+        sys_info={"wave_size": "32"},
+    )
+
+    with patch("pc_sampling.pc_sampling_analysis.console_warning") as warning_mock:
+        aggregate_pc_sample_records(
+            records,
+            group_by=["code_object_id", "code_object_offset"],
+            sys_info={"wave_size": "32"},
+        )
+
+    warning_mock.assert_not_called()
+
+
+def test_aggregate_caps_wave_occupancy_at_max_waves_per_cu() -> None:
+    """wave_cnt exceeding max_waves_per_cu is capped at 100 percent."""
+    records = load_pc_sample_records(
+        make_tool_data(
+            stochastic=[
+                make_record(1, 0x10, 0, dispatch_id=0, exec_mask=0b1, wave_cnt=40),
+                make_record(1, 0x20, 1, dispatch_id=0, exec_mask=0b1, wave_cnt=4),
+            ]
+        )
+    )
+
+    result = aggregate_pc_sample_records(
+        records,
+        group_by=["code_object_id", "code_object_offset"],
+        sys_info={"wave_size": "64", "max_waves_per_cu": "32"},
+    )
+
+    by_offset = result.set_index("code_object_offset")["wave_occupancy_percent"]
+    assert by_offset[0x10] == 100.0
+    assert by_offset[0x20] == pytest.approx(4 / 32 * 100)
+
+
+def test_aggregate_does_not_warn_when_every_mask_fits() -> None:
+    """A mask within the wave size stays silent."""
+    records = load_pc_sample_records(
+        make_tool_data(
+            stochastic=[make_record(1, 0x10, 0, dispatch_id=0, exec_mask=0b11)]
+        )
+    )
+
+    with patch("pc_sampling.pc_sampling_analysis.console_warning") as warning_mock:
+        aggregate_pc_sample_records(
+            records,
+            group_by=["code_object_id", "code_object_offset"],
+            sys_info={"wave_size": "64"},
+        )
+
+    warning_mock.assert_not_called()
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -585,11 +1014,56 @@ def test_load_aggregated_pc_sampling_happy_path() -> None:
         kernel_dispatch=[make_dispatch(0, 100)],
         code_objects=[make_code_object(5)],
     )
-    line = load_aggregated_pc_sampling(tool_data)[0].instruction_lines[0]
+    line = load_aggregated_pc_sampling(tool_data, {})[0].instruction_lines[0]
     assert line.total_count == 1
     assert line.instruction == "v_mov"
     assert line.source == "/s/a.cpp:1"
     assert line.kernel_name == "vecCopy"
+
+
+@pytest.mark.parametrize("method", ["host_trap", "stochastic"])
+def test_wave_measurements_reach_both_the_terminal_frame_and_the_database(
+    method: str,
+) -> None:
+    """Both surfaces derive the same values from the same machine specs."""
+    if method == "host_trap":
+        sample = make_host_trap_record(
+            5,
+            0x10,
+            0,
+            dispatch_id=0,
+            exec_mask=0b1111,
+            wave_cnt=8,
+        )
+    else:
+        sample = make_record(
+            5,
+            0x10,
+            0,
+            dispatch_id=0,
+            exec_mask=0b1111,
+            wave_cnt=8,
+        )
+    tool_data = make_tool_data(
+        **{method: [sample]},
+        instructions=["v_mov"],
+        comments=["/s/a.cpp:1"],
+        kernel_symbols=[make_kernel_symbol(100, 5, "vecCopy")],
+        kernel_dispatch=[make_dispatch(0, 100)],
+        code_objects=[make_code_object(5)],
+    )
+
+    sys_info = {"wave_size": "64", "max_waves_per_cu": "32"}
+    workload = schema.Workload(sys_info=pd.DataFrame([sys_info]))
+
+    display_frame = load_pc_sampling_data(workload, "count", [tool_data])
+    assert display_frame.iloc[0]["active_thread_percent"] == 6.25
+    if method == "stochastic":
+        assert display_frame.iloc[0]["wave_occupancy_percent"] == 25.0
+
+    line = load_aggregated_pc_sampling(tool_data, sys_info)[0].instruction_lines[0]
+    assert line.active_thread_percent == 6.25
+    assert line.wave_occupancy_percent == 25.0
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -1124,8 +1598,8 @@ def test_load_pc_sampling_data_rejects_conflicting_methods() -> None:
 @pytest.mark.parametrize(
     "populated, expected_column_count",
     [
-        ("host_trap", 7),  # host_trap-only is detected
-        ("both", 10),  # stochastic wins when both arrays are populated
+        ("host_trap", 8),  # host_trap-only is detected
+        ("both", 12),  # stochastic wins when both arrays are populated
     ],
 )
 def test_load_pc_sampling_data_method_detection(
@@ -1687,7 +2161,7 @@ def test_pc_sampling_kernel_traces_renumber_colliding_dispatch_ids() -> None:
     )
 
     # Both records carry a process-local dispatch 0.
-    assert combined_trace["Dispatch_Id"].tolist() == [0, 1, 2]
+    assert combined_trace["Dispatch_Id"].tolist() == [1, 2, 3]
     assert combined_trace["PID"].tolist() == [101, 101, 202]
     assert combined_trace["Dispatch_Id"].is_unique
 
@@ -1698,7 +2172,7 @@ def test_pc_sampling_kernel_traces_preserve_single_process_ids() -> None:
 
     combined_trace = process_pc_sampling_kernel_traces(single_record)
 
-    assert combined_trace["Dispatch_Id"].tolist() == [0, 1]
+    assert combined_trace["Dispatch_Id"].tolist() == [1, 2]
 
 
 def test_pc_sampling_multiprocess_dispatch_statistics_include_every_row(
@@ -1706,7 +2180,7 @@ def test_pc_sampling_multiprocess_dispatch_statistics_include_every_row(
 ) -> None:
     """Include every process-local dispatch in workload statistics."""
     workload = schema.Workload()
-    args = argparse.Namespace(time_unit="ns", kernel_verbose=5)
+    args = argparse.Namespace(time_unit="ns")
     instance = make_db_analysis(str(tmp_path))
 
     instance.build_pc_sampling_only_workload(
@@ -1716,13 +2190,13 @@ def test_pc_sampling_multiprocess_dispatch_statistics_include_every_row(
         make_multiprocess_dispatch_tool_data(),
     )
 
-    assert workload.raw_pmc["Dispatch_ID"].tolist() == [0, 1, 2]
+    assert workload.raw_pmc["Dispatch_ID"].tolist() == [1, 2, 3]
     assert workload.raw_pmc["PID"].tolist() == [101, 101, 202]
     kernel_top = workload.dfs[PMC_KERNEL_TOP_TABLE_ID].iloc[0]
     assert kernel_top["Count"] == 3
     assert kernel_top["Sum(ns)"] == 60
     dispatch_info = workload.dfs[PMC_DISPATCH_INFO_TABLE_ID]
-    assert dispatch_info["Dispatch_ID"].tolist() == [0, 1, 2]
+    assert dispatch_info["Dispatch_ID"].tolist() == [1, 2, 3]
     assert dispatch_info["PID"].tolist() == [101, 101, 202]
 
 
@@ -1730,8 +2204,8 @@ def test_pc_sampling_dispatch_filter_selects_one_process(
     tmp_path: Path,
 ) -> None:
     """Resolve a filtered dispatch ID to exactly one process's dispatch."""
-    workload = schema.Workload(filter_dispatch_ids=["2"])
-    args = argparse.Namespace(time_unit="ns", kernel_verbose=5)
+    workload = schema.Workload(filter_dispatch_ids=["3"])
+    args = argparse.Namespace(time_unit="ns")
     instance = make_db_analysis(str(tmp_path))
 
     instance.build_pc_sampling_only_workload(
@@ -1741,13 +2215,13 @@ def test_pc_sampling_dispatch_filter_selects_one_process(
         make_multiprocess_dispatch_tool_data(),
     )
 
-    # Dispatch 2 is the second process's only dispatch; before renumbering it
-    # shared id 0 with the first process and both were selected.
+    # Dispatch 3 is the second process's only dispatch; before renumbering it
+    # shared id 1 with the first process and both were selected.
     kernel_top = workload.dfs[PMC_KERNEL_TOP_TABLE_ID].iloc[0]
     assert kernel_top["Count"] == 1
     assert kernel_top["Sum(ns)"] == 30
     dispatch_info = workload.dfs[PMC_DISPATCH_INFO_TABLE_ID]
-    assert dispatch_info["Dispatch_ID"].tolist() == [2]
+    assert dispatch_info["Dispatch_ID"].tolist() == [3]
     assert dispatch_info["PID"].tolist() == [202]
 
 
@@ -1813,14 +2287,14 @@ def test_aggregate_adds_inst_type_dict() -> None:
     )
     records_df = load_pc_sample_records(tool_data)
     aggregated = aggregate_pc_sample_records(
-        records_df, group_by=["code_object_id", "code_object_offset"]
+        records_df, group_by=["code_object_id", "code_object_offset"], sys_info={}
     )
     assert aggregated.iloc[0]["inst_type"] == {"VALU": 2, "FLAT": 1}
 
 
 def test_normalize_missing_tool_data_returns_empty() -> None:
     """An empty tool record yields no code-object records."""
-    assert load_aggregated_pc_sampling(make_tool_data()) == []
+    assert load_aggregated_pc_sampling(make_tool_data(), {}) == []
 
 
 def test_normalize_groups_by_code_object_with_catalog() -> None:
@@ -1848,7 +2322,7 @@ def test_normalize_groups_by_code_object_with_catalog() -> None:
             make_code_object(6, load_base=0x2000),
         ],
     )
-    records = {r.code_object_id: r for r in load_aggregated_pc_sampling(tool_data)}
+    records = {r.code_object_id: r for r in load_aggregated_pc_sampling(tool_data, {})}
     assert records[5].load_base == 0x1000
     assert len(records[5].instruction_lines) == 2
     assert len(records[6].instruction_lines) == 1
@@ -1872,7 +2346,7 @@ def test_normalize_attributes_line_to_kernel_via_dispatch() -> None:
         kernel_dispatch=[make_dispatch(0, 100), make_dispatch(1, 101)],
         code_objects=[make_code_object(5)],
     )
-    lines = load_aggregated_pc_sampling(tool_data)[0].instruction_lines
+    lines = load_aggregated_pc_sampling(tool_data, {})[0].instruction_lines
     by_offset = {line.code_object_offset: line.kernel_name for line in lines}
     assert by_offset[0x10] == "vecCopy"
     assert by_offset[0x20] == "vecAdd"
@@ -1906,7 +2380,7 @@ def test_normalize_instruction_line_counts_and_dicts() -> None:
         kernel_dispatch=[make_dispatch(0, 100)],
         code_objects=[make_code_object(5)],
     )
-    line = load_aggregated_pc_sampling(tool_data)[0].instruction_lines[0]
+    line = load_aggregated_pc_sampling(tool_data, {})[0].instruction_lines[0]
     assert line.code_object_offset == 0x10
     assert line.instruction == "v_mov"
     assert line.total_count == 2
@@ -1925,7 +2399,7 @@ def test_normalize_host_trap_line_has_null_issue_stall() -> None:
         kernel_symbols=[make_kernel_symbol(100, 5, "vecCopy")],
         code_objects=[make_code_object(5)],
     )
-    line = load_aggregated_pc_sampling(tool_data)[0].instruction_lines[0]
+    line = load_aggregated_pc_sampling(tool_data, {})[0].instruction_lines[0]
     assert line.total_count == 1
     assert line.issue_count is None
     assert line.stall_count is None
@@ -1959,7 +2433,7 @@ def test_normalize_unmapped_dispatch_yields_none_kernel() -> None:
         kernel_symbols=[make_kernel_symbol(100, 100, "vecCopy")],
         code_objects=[make_code_object(999)],
     )
-    record = load_aggregated_pc_sampling(tool_data)[0]
+    record = load_aggregated_pc_sampling(tool_data, {})[0]
     assert record.code_object_id == 999
     assert record.instruction_lines[0].kernel_name is None
 
@@ -2015,4 +2489,4 @@ def test_calc_dispatch_data_stitches_pc_sampling_tool_records(
 
     df = result[str(tmp_path)]
     assert df["kernel_name"].tolist() == ["vecCopy", "vecCopy", "vecCopy"]
-    assert df["dispatch_id"].tolist() == [0, 1, 2]
+    assert df["dispatch_id"].tolist() == [1, 2, 3]

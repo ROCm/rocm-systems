@@ -4,13 +4,17 @@
 """Unit tests for src/utils/tty.py."""
 
 import argparse
+import sys
 from io import StringIO
 from types import SimpleNamespace
 
 import pandas as pd
 import pytest
 
+from membw_analysis.models import BottleneckNode, MemBwAnalysisResult
+from utils.mem_chart_common import strip_ansi
 from utils.tty import (
+    _render_membw_guidance,
     convert_time_columns,
     format_duration,
     format_node_stats,
@@ -27,7 +31,7 @@ from utils.utils_analysis import (
     build_call_trees,
     build_operator_summary,
 )
-from utils.utils_common import is_gfx115x
+from utils.utils_common import is_gfx115x, is_gfx1250
 
 TIME_UNITS = {"s": 10**9, "ms": 10**6, "us": 10**3, "ns": 1}
 
@@ -46,17 +50,53 @@ _OPERATOR_SUMMARY_COLUMNS = [
 ]
 
 
-def _build_summary_from_dataframe(rows):
+def build_summary_from_dataframe(rows):
     call_trees = build_call_trees(pd.DataFrame(rows))
     return build_operator_summary(call_trees)
 
 
-def make_args() -> argparse.Namespace:
-    """Minimal args for the plain-table render path."""
-    return argparse.Namespace(decimal=2, view=None, normal_unit="per_wave")
+def make_args(**overrides) -> argparse.Namespace:
+    """Minimal args for the plain-table render path, plus any overrides."""
+    defaults = {"decimal": 2, "view": None, "normal_unit": "per_wave"}
+    return argparse.Namespace(**{**defaults, **overrides})
 
 
-def _sample_time_data() -> pd.DataFrame:
+def make_membw_panel(*, include_panel: bool = True) -> SimpleNamespace:
+    """Arch configs and runs holding the single EA Interface table of panel 3000."""
+    metric_dataframe = pd.DataFrame({
+        "Metric": ["EA read request fraction - HBM"],
+        "Avg": [50.0],
+        "Unit": ["Percent"],
+    })
+    table_config = {
+        "id": 3013,
+        "title": "EA Interface",
+        "header": {"metric": "Metric", "value": "Avg", "unit": "Unit"},
+    }
+    panel_configs = (
+        {
+            3000: {
+                "id": 3000,
+                "title": "Memory Bandwidth Analysis",
+                "data source": [{"metric_table": table_config}],
+            }
+        }
+        if include_panel
+        else {}
+    )
+    arch_configs = SimpleNamespace(panel_configs=panel_configs)
+    runs = {
+        "fixture": SimpleNamespace(
+            dfs={3013: metric_dataframe},
+            sys_info=pd.DataFrame([{"gpu_arch": "gfx950"}]),
+        )
+    }
+    return SimpleNamespace(
+        metric_dataframe=metric_dataframe, arch_configs=arch_configs, runs=runs
+    )
+
+
+def sample_time_data() -> pd.DataFrame:
     """Metric table mixing a time row, a cycle row, and a count row."""
     return pd.DataFrame({
         "Metric_ID": ["7.2.0", "7.2.1", "7.2.2"],
@@ -68,8 +108,8 @@ def _sample_time_data() -> pd.DataFrame:
     })
 
 
-def _original_ns_values() -> dict[str, float]:
-    """Original nanosecond values for the time row of _sample_time_data."""
+def original_ns_values() -> dict[str, float]:
+    """Original nanosecond values for the time row of sample_time_data."""
     return {"Avg": 3446.64, "Min": 1769.25, "Max": 12532.12}
 
 
@@ -102,11 +142,74 @@ def test_format_table_output_keeps_pc_sampling_table_21_1() -> None:
     )
     assert content != ""
     assert "v_mov" in content
+    assert content.index("Stall reason definitions:") < content.index("v_mov")
+
+
+def test_format_table_output_scales_bytes_per_second_for_gfx9() -> None:
+    df = pd.DataFrame({
+        "Metric": ["DRAM Read Bandwidth"],
+        "Value": [1e9],
+        "Unit": ["Bytes/s"],
+    })
+
+    content = format_table_output(
+        make_args(),
+        {"id": 300, "title": "Memory Chart"},
+        df,
+        "metric_table",
+        runs={"only": object()},
+        gpu_arch="gfx942",
+    )
+
+    assert "GB/s" in content
+    assert "1000000000" not in content
+
+
+def test_format_table_output_mem_chart_uses_unscaled_bytes(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: dict[str, dict] = {}
+
+    def gfx9_stub(
+        mem_data: dict,
+        *,
+        chart_title: str,
+        gpu_arch: str = "",
+    ) -> str:
+        calls["gfx9"] = {
+            "mem_data": mem_data,
+            "chart_title": chart_title,
+            "gpu_arch": gpu_arch,
+        }
+        return "rendered CDNA memory chart"
+
+    monkeypatch.setattr("utils.tty.mem_chart_gfx9.plot_mem_chart", gfx9_stub)
+    df = pd.DataFrame({
+        "Metric": ["DRAM Read Bandwidth"],
+        "Value": [1e9],
+        "Unit": ["Bytes/s"],
+    })
+
+    content = format_table_output(
+        make_args(),
+        {
+            "id": 300,
+            "title": "Memory Chart",
+            "cli_style": "mem_chart",
+        },
+        df,
+        "metric_table",
+        runs={"only": object()},
+        gpu_arch="gfx942",
+    )
+
+    assert calls["gfx9"]["mem_data"] == {"DRAM Read Bandwidth": 1e9}
+    assert content == "rendered CDNA memory chart\n"
 
 
 def test_has_time_data_detection() -> None:
     """has_time_data is True only when a 'ns' Unit column is present."""
-    assert has_time_data(_sample_time_data())
+    assert has_time_data(sample_time_data())
 
     no_time_data = pd.DataFrame({
         "Metric": ["Non-Time Metric"],
@@ -121,26 +224,26 @@ def test_has_time_data_detection() -> None:
 
 def test_default_unit_is_nanoseconds() -> None:
     """The fixture's time row defaults to nanoseconds."""
-    sample_time_data = _sample_time_data()
-    time_rows = sample_time_data["Unit"].str.lower().str.contains("ns", na=False)
+    time_data = sample_time_data()
+    time_rows = time_data["Unit"].str.lower().str.contains("ns", na=False)
     assert time_rows.any()
-    assert sample_time_data.loc[0, "Unit"] == "ns"
+    assert time_data.loc[0, "Unit"] == "ns"
 
 
 def test_conversion_to_seconds() -> None:
     """Converting to seconds divides the time row and leaves others untouched."""
-    original_ns_values = _original_ns_values()
-    converted_df = convert_time_columns(_sample_time_data(), "s")
+    ns_values = original_ns_values()
+    converted_df = convert_time_columns(sample_time_data(), "s")
 
     assert converted_df.loc[0, "Unit"] == "s"
     assert converted_df.loc[0, "Avg"] == pytest.approx(
-        original_ns_values["Avg"] / TIME_UNITS["s"], abs=1e-10
+        ns_values["Avg"] / TIME_UNITS["s"], abs=1e-10
     )
     assert converted_df.loc[0, "Min"] == pytest.approx(
-        original_ns_values["Min"] / TIME_UNITS["s"], abs=1e-10
+        ns_values["Min"] / TIME_UNITS["s"], abs=1e-10
     )
     assert converted_df.loc[0, "Max"] == pytest.approx(
-        original_ns_values["Max"] / TIME_UNITS["s"], abs=1e-10
+        ns_values["Max"] / TIME_UNITS["s"], abs=1e-10
     )
     assert converted_df.loc[1, "Unit"] == "Cycle"
     assert converted_df.loc[2, "Unit"] == "Count"
@@ -148,58 +251,52 @@ def test_conversion_to_seconds() -> None:
 
 def test_conversion_to_milliseconds() -> None:
     """Converting to milliseconds divides the time row by 10^6."""
-    original_ns_values = _original_ns_values()
-    converted_df = convert_time_columns(_sample_time_data(), "ms")
+    ns_values = original_ns_values()
+    converted_df = convert_time_columns(sample_time_data(), "ms")
 
     assert converted_df.loc[0, "Unit"] == "ms"
     assert converted_df.loc[0, "Avg"] == pytest.approx(
-        original_ns_values["Avg"] / TIME_UNITS["ms"], abs=1e-6
+        ns_values["Avg"] / TIME_UNITS["ms"], abs=1e-6
     )
     assert converted_df.loc[0, "Min"] == pytest.approx(
-        original_ns_values["Min"] / TIME_UNITS["ms"], abs=1e-6
+        ns_values["Min"] / TIME_UNITS["ms"], abs=1e-6
     )
     assert converted_df.loc[0, "Max"] == pytest.approx(
-        original_ns_values["Max"] / TIME_UNITS["ms"], abs=1e-6
+        ns_values["Max"] / TIME_UNITS["ms"], abs=1e-6
     )
 
 
 def test_conversion_to_microseconds() -> None:
     """Converting to microseconds divides the time row by 10^3."""
-    original_ns_values = _original_ns_values()
-    converted_df = convert_time_columns(_sample_time_data(), "us")
+    ns_values = original_ns_values()
+    converted_df = convert_time_columns(sample_time_data(), "us")
 
     assert converted_df.loc[0, "Unit"] == "us"
     assert converted_df.loc[0, "Avg"] == pytest.approx(
-        original_ns_values["Avg"] / TIME_UNITS["us"], abs=1e-3
+        ns_values["Avg"] / TIME_UNITS["us"], abs=1e-3
     )
     assert converted_df.loc[0, "Min"] == pytest.approx(
-        original_ns_values["Min"] / TIME_UNITS["us"], abs=1e-3
+        ns_values["Min"] / TIME_UNITS["us"], abs=1e-3
     )
     assert converted_df.loc[0, "Max"] == pytest.approx(
-        original_ns_values["Max"] / TIME_UNITS["us"], abs=1e-3
+        ns_values["Max"] / TIME_UNITS["us"], abs=1e-3
     )
 
 
 def test_conversion_to_nanoseconds() -> None:
     """Converting to nanoseconds leaves the time row unchanged."""
-    original_ns_values = _original_ns_values()
-    converted_df = convert_time_columns(_sample_time_data(), "ns")
+    ns_values = original_ns_values()
+    converted_df = convert_time_columns(sample_time_data(), "ns")
 
     assert converted_df.loc[0, "Unit"] == "ns"
-    assert converted_df.loc[0, "Avg"] == pytest.approx(
-        original_ns_values["Avg"], abs=1e-10
-    )
-    assert converted_df.loc[0, "Min"] == pytest.approx(
-        original_ns_values["Min"], abs=1e-10
-    )
-    assert converted_df.loc[0, "Max"] == pytest.approx(
-        original_ns_values["Max"], abs=1e-10
-    )
+    assert converted_df.loc[0, "Avg"] == pytest.approx(ns_values["Avg"], abs=1e-10)
+    assert converted_df.loc[0, "Min"] == pytest.approx(ns_values["Min"], abs=1e-10)
+    assert converted_df.loc[0, "Max"] == pytest.approx(ns_values["Max"], abs=1e-10)
 
 
 def test_non_time_rows_unchanged() -> None:
     """Cycle and Count rows keep their unit and value after conversion."""
-    converted_df = convert_time_columns(_sample_time_data(), "ms")
+    converted_df = convert_time_columns(sample_time_data(), "ms")
 
     assert converted_df.loc[1, "Unit"] == "Cycle"
     assert converted_df.loc[2, "Unit"] == "Count"
@@ -209,9 +306,9 @@ def test_non_time_rows_unchanged() -> None:
 
 def test_invalid_time_unit_is_noop() -> None:
     """An unrecognised target unit leaves the frame unchanged."""
-    sample_time_data = _sample_time_data()
-    original_df = sample_time_data.copy()
-    converted_df = convert_time_columns(sample_time_data, "invalid_unit")
+    time_data = sample_time_data()
+    original_df = time_data.copy()
+    converted_df = convert_time_columns(time_data, "invalid_unit")
     pd.testing.assert_frame_equal(converted_df, original_df)
 
 
@@ -224,30 +321,30 @@ def test_missing_unit_column_is_noop() -> None:
 
 def test_conversion_with_missing_columns() -> None:
     """Conversion works when Min/Max columns are absent."""
-    original_ns_values = _original_ns_values()
-    df_partial = _sample_time_data()[["Metric_ID", "Metric", "Avg", "Unit"]].copy()
+    ns_values = original_ns_values()
+    df_partial = sample_time_data()[["Metric_ID", "Metric", "Avg", "Unit"]].copy()
     converted_df = convert_time_columns(df_partial, "ms")
 
     assert converted_df.loc[0, "Unit"] == "ms"
     assert converted_df.loc[0, "Avg"] == pytest.approx(
-        original_ns_values["Avg"] / TIME_UNITS["ms"], abs=1e-6
+        ns_values["Avg"] / TIME_UNITS["ms"], abs=1e-6
     )
 
 
 def test_mathematical_correctness_all_units() -> None:
     """Every supported unit divides the time row by the correct factor."""
-    original_ns_values = _original_ns_values()
+    ns_values = original_ns_values()
     for target_unit, divisor in TIME_UNITS.items():
-        converted_df = convert_time_columns(_sample_time_data(), target_unit)
+        converted_df = convert_time_columns(sample_time_data(), target_unit)
 
         assert converted_df.loc[0, "Avg"] == pytest.approx(
-            original_ns_values["Avg"] / divisor, abs=1e-10
+            ns_values["Avg"] / divisor, abs=1e-10
         )
         assert converted_df.loc[0, "Min"] == pytest.approx(
-            original_ns_values["Min"] / divisor, abs=1e-10
+            ns_values["Min"] / divisor, abs=1e-10
         )
         assert converted_df.loc[0, "Max"] == pytest.approx(
-            original_ns_values["Max"] / divisor, abs=1e-10
+            ns_values["Max"] / divisor, abs=1e-10
         )
         assert converted_df.loc[0, "Unit"] == target_unit
 
@@ -306,47 +403,20 @@ def test_show_all_membw_analysis_panel_gate(
     monkeypatch: pytest.MonkeyPatch,
     membw_analysis: bool,
 ) -> None:
-    """Panel 3000 is rendered only when memory bandwidth analysis is enabled."""
-    args = argparse.Namespace(
-        decimal=2,
+    """Panel 3000 is rendered only when present in arch_configs."""
+    args = make_args(
         filter_metrics=None,
         include_cols=None,
         membw_analysis=membw_analysis,
-        normal_unit="per_wave",
         path=[["fixture"]],
         time_unit="ns",
-        view=None,
     )
-    metric_dataframe = pd.DataFrame({
-        "Metric": ["EA read request fraction - HBM"],
-        "Avg": [50.0],
-        "Unit": ["Percent"],
-    })
-    table_config = {
-        "id": 3013,
-        "title": "EA Interface",
-        "header": {"metric": "Metric", "value": "Avg", "unit": "Unit"},
-    }
-    arch_configs = SimpleNamespace(
-        panel_configs={
-            3000: {
-                "id": 3000,
-                "title": "Memory Bandwidth Analysis",
-                "data source": [{"metric_table": table_config}],
-            }
-        }
-    )
-    runs = {
-        "fixture": SimpleNamespace(
-            dfs={3013: metric_dataframe},
-            sys_info=pd.DataFrame([{"gpu_arch": "gfx950"}]),
-        )
-    }
+    panel = make_membw_panel(include_panel=membw_analysis)
     actual_calls: list[str] = []
 
     def record_process_table_data(*_args, **_kwargs):
         actual_calls.append("process_table_data")
-        return metric_dataframe
+        return panel.metric_dataframe
 
     def record_format_table_output(*args, **kwargs):
         actual_calls.append("format_table_output")
@@ -358,8 +428,8 @@ def test_show_all_membw_analysis_panel_gate(
 
     show_all(
         args,
-        runs,
-        arch_configs,
+        panel.runs,
+        panel.arch_configs,
         rendered_output,
         profiling_config={"filter_blocks": []},
     )
@@ -376,6 +446,119 @@ def test_show_all_membw_analysis_panel_gate(
 
     assert "30. Memory Bandwidth Analysis" in output_lines
     assert "30.13 EA Interface" in output_lines
+
+
+def test_show_all_dispatches_gfx1250_memory_chart(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    args = argparse.Namespace(
+        decimal=2,
+        filter_metrics=None,
+        include_cols=None,
+        membw_analysis=False,
+        normal_unit="per_wave",
+        path=[["fixture"]],
+        time_unit="ns",
+        view=None,
+    )
+    metric_dataframe = pd.DataFrame({
+        "Metric": ["DRAM Read Bandwidth"],
+        "Value": [512e9],
+        "Unit": ["Bytes/s"],
+    })
+    table_config = {
+        "id": 301,
+        "title": "Instruction Cache",
+        "cli_style": "mem_chart",
+        "header": {"metric": "Metric", "value": "Value", "unit": "Unit"},
+    }
+    arch_configs = SimpleNamespace(
+        panel_configs={
+            300: {
+                "id": 300,
+                "title": "Memory Chart",
+                "data source": [{"metric_table": table_config}],
+            }
+        }
+    )
+    runs = {
+        "fixture": SimpleNamespace(
+            dfs={301: metric_dataframe},
+            sys_info=pd.DataFrame([{"gpu_arch": "gfx1250"}]),
+        )
+    }
+    calls: list[tuple[dict, str]] = []
+
+    monkeypatch.setattr(
+        "utils.tty.process_table_data",
+        lambda *_args, **_kwargs: metric_dataframe,
+    )
+
+    def gfx1250_stub(mem_data: dict, *, chart_title: str) -> str:
+        calls.append((mem_data, chart_title))
+        return "rendered gfx1250 memory chart"
+
+    monkeypatch.setattr(
+        "utils.tty.mem_chart_gfx1250.plot_mem_chart",
+        gfx1250_stub,
+    )
+    rendered_output = StringIO()
+
+    show_all(
+        args,
+        runs,
+        arch_configs,
+        rendered_output,
+        profiling_config={"filter_blocks": []},
+    )
+
+    assert calls == [
+        (
+            {"DRAM Read Bandwidth": 512e9},
+            "3. Memory Chart (Normalization: per_wave)",
+        )
+    ]
+    assert "rendered gfx1250 memory chart" in rendered_output.getvalue()
+
+
+def test_show_all_renders_identically_to_file_and_stdout(
+    tmp_path, monkeypatch: pytest.MonkeyPatch, capsys
+) -> None:
+    """A report is the same whether analyze writes it to a .txt file or stdout."""
+    args = make_args(
+        filter_metrics=None,
+        include_cols=None,
+        membw_analysis=True,
+        path=[["fixture"]],
+        time_unit="ns",
+    )
+    panel = make_membw_panel()
+    monkeypatch.setattr(
+        "utils.tty.process_table_data", lambda *_args, **_kwargs: panel.metric_dataframe
+    )
+
+    report_path = tmp_path / "analysis_report.txt"
+    with open(report_path, "w", encoding="utf-8") as report_file:
+        show_all(
+            args,
+            panel.runs,
+            panel.arch_configs,
+            report_file,
+            profiling_config={"filter_blocks": []},
+        )
+
+    capsys.readouterr()
+    show_all(
+        args,
+        panel.runs,
+        panel.arch_configs,
+        sys.stdout,
+        profiling_config={"filter_blocks": []},
+    )
+
+    file_report = report_path.read_text(encoding="utf-8")
+    assert file_report == capsys.readouterr().out
+    assert "30. Memory Bandwidth Analysis" in file_report
 
 
 def test_edge_cases_and_error_handling() -> None:
@@ -404,6 +587,7 @@ def test_edge_cases_and_error_handling() -> None:
     [
         pytest.param("gfx1151", id="rdna35"),
         pytest.param("gfx942", id="cdna"),
+        pytest.param("gfx1250", id="gfx1250"),
     ],
 )
 def test_format_table_output_dispatches_memory_chart_renderer(
@@ -413,23 +597,44 @@ def test_format_table_output_dispatches_memory_chart_renderer(
     """Memory Chart output uses the architecture renderer and shared heading."""
     calls: dict[str, dict] = {}
 
-    def record(name: str, return_value: str):
-        def stub(mem_data: dict, *, chart_title: str) -> str:
-            calls[name] = {
-                "mem_data": mem_data,
-                "chart_title": chart_title,
-            }
-            return return_value
+    def gfx11_stub(mem_data: dict, *, chart_title: str) -> str:
+        calls["gfx11"] = {
+            "mem_data": mem_data,
+            "chart_title": chart_title,
+        }
+        return "rendered RDNA3.5 memory chart"
 
-        return stub
+    def gfx9_stub(
+        mem_data: dict,
+        *,
+        chart_title: str = "",
+        gpu_arch: str = "",
+    ) -> str:
+        calls["gfx9"] = {
+            "mem_data": mem_data,
+            "chart_title": chart_title,
+        }
+        return "rendered CDNA memory chart"
 
     monkeypatch.setattr(
         "utils.tty.mem_chart_gfx11.plot_mem_chart",
-        record("gfx11", "rendered RDNA3.5 memory chart"),
+        gfx11_stub,
     )
+
+    def gfx1250_stub(mem_data: dict, *, chart_title: str) -> str:
+        calls["gfx1250"] = {
+            "mem_data": mem_data,
+            "chart_title": chart_title,
+        }
+        return "rendered gfx1250 memory chart"
+
     monkeypatch.setattr(
         "utils.tty.mem_chart_gfx9.plot_mem_chart",
-        record("gfx9", "rendered CDNA memory chart"),
+        gfx9_stub,
+    )
+    monkeypatch.setattr(
+        "utils.tty.mem_chart_gfx1250.plot_mem_chart",
+        gfx1250_stub,
     )
     df = pd.DataFrame({"Metric": ["Metric A"], "Value": [1]})
 
@@ -446,18 +651,19 @@ def test_format_table_output_dispatches_memory_chart_renderer(
         gpu_arch=gpu_arch,
     )
 
-    expected = "gfx11" if is_gfx115x(gpu_arch) else "gfx9"
-    unexpected = "gfx9" if is_gfx115x(gpu_arch) else "gfx11"
+    if is_gfx115x(gpu_arch):
+        expected, return_value = "gfx11", "rendered RDNA3.5 memory chart"
+    elif is_gfx1250(gpu_arch):
+        expected, return_value = "gfx1250", "rendered gfx1250 memory chart"
+    else:
+        expected, return_value = "gfx9", "rendered CDNA memory chart"
+
     assert calls[expected] == {
         "mem_data": {"Metric A": 1},
         "chart_title": "7. Memory Chart (Normalization: per_wave)",
     }
-    assert unexpected not in calls
-    return_value = (
-        "rendered RDNA3.5 memory chart"
-        if is_gfx115x(gpu_arch)
-        else "rendered CDNA memory chart"
-    )
+    for other in {"gfx11", "gfx9", "gfx1250"} - {expected}:
+        assert other not in calls
     assert content == f"{return_value}\n"
 
 
@@ -624,7 +830,7 @@ def test_show_operator_summary_empty_prints_no_dispatches_message(capsys):
 
 
 def test_show_operator_summary_renders_per_cell_unit_suffix(capsys):
-    summary = _build_summary_from_dataframe([
+    summary = build_summary_from_dataframe([
         {
             "Operator_Name": "op_a",
             "Kernel_Name": "kern",
@@ -651,3 +857,104 @@ def test_show_operator_summary_renders_na_for_nan_cells(capsys):
     show_operator_summary(summary)
     output = capsys.readouterr().out
     assert "N/A" in output
+
+
+# ---------------------------------------------------------------------------
+# _render_membw_guidance
+# ---------------------------------------------------------------------------
+
+
+def make_membw_result(
+    availability="full",
+    availability_reason=None,
+    guidance_blocks=(),
+    nodes=(),
+):
+    return MemBwAnalysisResult(
+        arch="gfx950",
+        availability=availability,
+        availability_reason=availability_reason,
+        nodes=nodes,
+        guidance_blocks=guidance_blocks,
+    )
+
+
+class TestRenderMembwGuidance:
+    def test_no_bottlenecks_shows_status_line(self):
+        result = make_membw_result()
+        output = _render_membw_guidance(result)
+        assert "No bottlenecks detected (GL1 / GL2 / EA)" in output
+
+    def test_active_bottleneck_shows_guidance_panel(self):
+        active_node = BottleneckNode(
+            id="gl1_tcp_utcl1_stall",
+            label="TCP UTCL1 stall",
+            level="GL1",
+            state="active",
+            supporting=(),
+            children=(),
+            guidance_id="g1",
+        )
+        result = make_membw_result(
+            guidance_blocks=(
+                "[GL1] TCP stalled by UTCL1\n"
+                "  Condition : >= 10%\n"
+                "  Measured  : 18.7%\n"
+                "  Impact    : Address translation pressure",
+            ),
+            nodes=(active_node,),
+        )
+        output = _render_membw_guidance(result)
+        plain = strip_ansi(output)
+        assert "Memory Bandwidth Guided Analysis" in plain
+        assert "TCP stalled by UTCL1" in plain
+        assert "18.7%" in plain
+        assert "╭" in output or "│" in output
+
+    def test_unavailable_shows_unavailable_message(self):
+        result = make_membw_result(
+            availability="unavailable",
+            availability_reason="no data",
+        )
+        output = _render_membw_guidance(result)
+        assert "Unavailable" in output
+        assert "no data" in output
+
+    def test_partial_shows_partial_message(self):
+        result = make_membw_result(
+            availability="partial",
+            availability_reason="missing: key1, key2",
+        )
+        output = _render_membw_guidance(result)
+        assert "Partial data" in output
+        assert "missing: key1, key2" in output
+
+    def test_all_indeterminate_shows_inconclusive(self):
+        indeterminate_node = BottleneckNode(
+            id="n1",
+            label="test",
+            level="GL1",
+            state="indeterminate",
+            supporting=(),
+            children=(),
+        )
+        result = make_membw_result(
+            nodes=(indeterminate_node,),
+        )
+        output = _render_membw_guidance(result)
+        assert "Inconclusive" in output
+        assert "insufficient counter data" in output
+
+    def test_active_node_without_guidance_shows_fallback(self):
+        active_parent = BottleneckNode(
+            id="gl2_mem_bw_bound",
+            label="GL2 memory BW bound",
+            level="GL2",
+            state="active",
+            supporting=(),
+            children=(),
+        )
+        result = make_membw_result(nodes=(active_parent,), guidance_blocks=())
+        output = _render_membw_guidance(result)
+        assert "No bottlenecks detected" not in output
+        assert "Bottlenecks detected" in output

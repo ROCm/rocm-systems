@@ -60,22 +60,22 @@ class rocprof_v3_profiler(RocProfCompute_Base):
         if args.kernel:
             profiling_options.extend(["--kernel-include-regex", "|".join(args.kernel)])
 
-        # Dispatch filtering
-        dispatch = []
-        # rocprofv3 dispatch indexing is inclusive and starts from 1
-        if args.dispatch:
-            for dispatch_id in args.dispatch:
-                if ":" in dispatch_id:
+        # Kernel iteration filtering
+        iterations = []
+        # rocprofv3 iteration indexing is inclusive and starts from 1
+        if args.kernel_iteration_range:
+            for iteration in args.kernel_iteration_range:
+                if ":" in iteration:
                     # 4:7 -> 4-7
-                    start, end = dispatch_id.split(":")
-                    dispatch.append(f"{start}-{end}")
+                    start, end = iteration.split(":")
+                    iterations.append(f"{start}-{end}")
                 else:
                     # 4 -> 4
-                    dispatch.append(f"{dispatch_id}")
-        if dispatch:
+                    iterations.append(f"{iteration}")
+        if iterations:
             profiling_options.extend([
                 "--kernel-iteration-range",
-                f"[{','.join(dispatch)}]",
+                f"[{','.join(iterations)}]",
             ])
 
         if not args.attach_pid:

@@ -5,6 +5,7 @@
 
 import tempfile
 
+import common
 import pandas as pd
 import pytest
 
@@ -12,6 +13,8 @@ from utils.file_io import (
     create_df_kernel_top_stats,
     create_df_pmc,
     is_single_panel_config,
+    rank_kernels_by_total_duration,
+    validate_kernel_filter_ids,
 )
 
 
@@ -26,6 +29,26 @@ def _raw_pmc() -> pd.DataFrame:
     })
 
 
+def make_repeated_dispatch_frame() -> pd.DataFrame:
+    """Frame where the longest kernel by total time is not the longest dispatch.
+
+    ``kernel_frequent`` runs three times for 500ns each, ``kernel_long`` once
+    for 1000ns.
+    """
+    return pd.DataFrame({
+        "Kernel_Name": [
+            "kernel_long",
+            "kernel_frequent",
+            "kernel_frequent",
+            "kernel_frequent",
+        ],
+        "GPU_ID": [0, 0, 0, 0],
+        "Dispatch_ID": [1, 2, 3, 4],
+        "Start_Timestamp": [0, 2000, 3000, 4000],
+        "End_Timestamp": [1000, 2500, 3500, 4500],
+    })
+
+
 def test_returns_valid_dataframes() -> None:
     """create_df_kernel_top_stats returns valid DFs with correct structure."""
     with tempfile.TemporaryDirectory() as temp_dir:
@@ -35,8 +58,6 @@ def test_returns_valid_dataframes() -> None:
             filter_gpu_ids=None,
             filter_dispatch_ids=None,
             time_unit="ns",
-            kernel_verbose=0,
-            sortby="sum",
         )
 
         assert isinstance(kernel_top_df, pd.DataFrame)
@@ -70,8 +91,6 @@ def test_grouping_and_aggregation() -> None:
             filter_gpu_ids=None,
             filter_dispatch_ids=None,
             time_unit="ns",
-            kernel_verbose=0,
-            sortby="sum",
         )
 
         # kernel_a appears twice in input and must group into one row.
@@ -83,19 +102,66 @@ def test_grouping_and_aggregation() -> None:
         sum_values = kernel_top_df["Sum(ns)"].tolist()
         assert sum_values == sorted(sum_values, reverse=True)
 
-        kernel_top_df_sorted, _ = create_df_kernel_top_stats(
-            df_in=_raw_pmc(),
+
+def test_ranking_uses_total_duration_not_longest_dispatch() -> None:
+    """A kernel that runs often outranks one with a single longer dispatch."""
+    assert rank_kernels_by_total_duration(make_repeated_dispatch_frame()) == [
+        "kernel_frequent",
+        "kernel_long",
+    ]
+
+
+def test_kernel_top_stats_rows_follow_the_ranking() -> None:
+    """Top stats rows are ordered by the ranking that -k indexes into."""
+    dispatch_frame = make_repeated_dispatch_frame()
+    with tempfile.TemporaryDirectory() as temp_dir:
+        kernel_top_df, _ = create_df_kernel_top_stats(
+            df_in=dispatch_frame,
             raw_data_dir=temp_dir,
             filter_gpu_ids=None,
             filter_dispatch_ids=None,
             time_unit="ns",
-            kernel_verbose=0,
-            sortby="kernel",
         )
 
-        # Sorting by kernel name is ascending.
-        kernel_names = kernel_top_df_sorted["Kernel_Name"].tolist()
-        assert kernel_names == sorted(kernel_names)
+        assert kernel_top_df["Kernel_Name"].tolist() == (
+            rank_kernels_by_total_duration(dispatch_frame)
+        )
+
+
+class TestValidateKernelFilterIds:
+    """Tests for utils.file_io.validate_kernel_filter_ids."""
+
+    def test_ids_within_range_are_accepted(self, monkeypatch) -> None:
+        mock_error = common.patch_console(monkeypatch, "utils.file_io", "error")[
+            "error"
+        ]
+        validate_kernel_filter_ids([0, 2], kernel_count=3)
+        mock_error.assert_not_called()
+
+    @pytest.mark.parametrize("kernel_id", [99, -1])
+    def test_id_outside_range_reports_the_valid_range(
+        self, monkeypatch, kernel_id
+    ) -> None:
+        """Ids above the last kernel and negative ids both name no kernel."""
+        mock_error = common.patch_console(monkeypatch, "utils.file_io", "error")[
+            "error"
+        ]
+
+        # The mock records instead of exiting, so validation runs to completion.
+        validate_kernel_filter_ids([kernel_id], kernel_count=3)
+
+        assert f"{kernel_id} is an invalid kernel id" in mock_error.call_args.args[1]
+        assert "0-2" in mock_error.call_args.args[1]
+
+    def test_no_kernels_is_reported_as_such(self, monkeypatch) -> None:
+        """A workload with no kernels reports that, not an empty range."""
+        mock_error = common.patch_console(monkeypatch, "utils.file_io", "error")[
+            "error"
+        ]
+
+        validate_kernel_filter_ids([0], kernel_count=0)
+
+        assert "No kernels found" in mock_error.call_args_list[0].args[1]
 
 
 def test_filters() -> None:
@@ -108,7 +174,6 @@ def test_filters() -> None:
             filter_gpu_ids="0",
             filter_dispatch_ids=None,
             time_unit="ns",
-            kernel_verbose=0,
         )
         assert len(dispatch_df) == 3
 
@@ -119,7 +184,6 @@ def test_filters() -> None:
             filter_gpu_ids=None,
             filter_dispatch_ids=["> 2"],
             time_unit="ns",
-            kernel_verbose=0,
         )
         assert len(dispatch_df) == 2
         assert all(dispatch_df["Dispatch_ID"] > 2)
@@ -131,7 +195,6 @@ def test_filters() -> None:
             filter_gpu_ids=None,
             filter_dispatch_ids=["1", "2"],
             time_unit="ns",
-            kernel_verbose=0,
         )
         assert len(dispatch_df) == 2
 
@@ -149,14 +212,13 @@ def test_filters() -> None:
             filter_gpu_ids=None,
             filter_dispatch_ids=None,
             time_unit="ns",
-            kernel_verbose=0,
         )
         assert len(kernel_top_df) == 0
         assert len(dispatch_df) == 0
 
 
 # =============================================================================
-# create_df_pmc: long-form vs wide pmc_perf.csv
+# create_df_pmc: long-form vs wide pmc_perf.csv.gz
 # =============================================================================
 
 
@@ -171,9 +233,9 @@ def test_create_df_pmc_pivots_long_form_without_a_profiling_config(tmp_path) -> 
         "0,0,256,64,0,0,8,0,16,kernel_a,10,20,0,SQ_WAVES,4\n"
         "0,0,256,64,0,0,8,0,16,kernel_a,10,20,0,SQ_BUSY_CYCLES,100\n"
     )
-    (tmp_path / "pmc_perf.csv").write_text(long_form_csv)
+    common.write_pmc_perf(tmp_path, long_form_csv)
 
-    df = create_df_pmc(str(tmp_path), kernel_verbose=0, verbose=0)
+    df = create_df_pmc(str(tmp_path), verbose=0)
 
     assert len(df) == 1
     assert df["SQ_WAVES"].iloc[0] == 4
@@ -182,7 +244,7 @@ def test_create_df_pmc_pivots_long_form_without_a_profiling_config(tmp_path) -> 
 
 
 def test_create_df_pmc_rejects_wide_pmc_perf(tmp_path) -> None:
-    """A wide pmc_perf.csv was written by a removed backend; analyze only
+    """A wide pmc_perf.csv.gz was written by a removed backend; analyze only
     supports the rocpd long format, so it is rejected with a re-profile error."""
     wide_csv = (
         "GPU_ID,Dispatch_ID,Grid_Size,Workgroup_Size,LDS_Per_Workgroup,"
@@ -190,14 +252,14 @@ def test_create_df_pmc_rejects_wide_pmc_perf(tmp_path) -> None:
         "Start_Timestamp,End_Timestamp,Kernel_ID,SQ_WAVES,SQ_BUSY_CYCLES\n"
         "0,0,256,64,0,0,8,0,16,kernel_a,10,20,0,4,100\n"
     )
-    (tmp_path / "pmc_perf.csv").write_text(wide_csv)
+    common.write_pmc_perf(tmp_path, wide_csv)
 
     with pytest.raises(SystemExit):
-        create_df_pmc(str(tmp_path), kernel_verbose=0, verbose=0)
+        create_df_pmc(str(tmp_path), verbose=0)
 
 
 def test_create_df_pmc_missing_file_returns_empty(tmp_path) -> None:
-    assert create_df_pmc(str(tmp_path), kernel_verbose=0, verbose=0).empty
+    assert create_df_pmc(str(tmp_path), verbose=0).empty
 
 
 @pytest.mark.misc

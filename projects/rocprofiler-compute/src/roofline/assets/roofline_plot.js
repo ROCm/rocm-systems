@@ -51,6 +51,9 @@
 
   // ---- DOM handles --------------------------------------------------------
   var gd = document.getElementById(model.divId);
+  var precisionBtn = document.getElementById("roofline-precision-btn");
+  var precisionMenu = document.getElementById("roofline-precision-menu");
+  var precisionLabel = document.getElementById("roofline-precision-label");
   var peakSelect = document.getElementById("roofline-peak-select");
   var peakControl = document.getElementById("roofline-peak-control");
   var peakControlTitle = peakControl ? peakControl.title : "";
@@ -84,6 +87,7 @@
   var rooflineTraces = model.rooflineTraces;
   var computeTraces = model.computeTraces;
   var computeOverlayTraces = model.computeOverlayTraces;
+  var precisions = model.precisions || [];
   var peakColors = model.peakColors;
   var initialRange = null;
 
@@ -104,6 +108,7 @@
   });
 
   var state = {
+    precisions: new Set([precisions.indexOf("FP32") !== -1 ? "FP32" : (precisions[0] || "")]),
     peak: model.defaultPeak || ALL_PEAKS_VALUE,
     selected: new Set(),
     isolatedRoofs: new Set(),
@@ -271,7 +276,10 @@
     var visibility = [];
     computeOverlayTraces.forEach(function (overlay) {
       indices.push(overlay.traceIndex);
-      if (isolating && refBw) {
+      var source = computeTraces.find(function (trace) {
+        return trace.traceIndex === overlay.sourceTraceIndex;
+      });
+      if (isolating && refBw && source && state.precisions.has(source.dtype)) {
         var left = overlay.peakPerf / refBw;
         xs.push([left, ROOF_EXTREME_MAX_AI]);
         ys.push([overlay.peakPerf, overlay.peakPerf]);
@@ -306,6 +314,65 @@
       Plotly.restyle(gd, { opacity: opacities }, indices);
     }
     applyRoofEmphasis();
+    updateCeilings();
+  }
+
+  function topVisibleComputePeak() {
+    var max = 0;
+    computeTraces.forEach(function (trace) {
+      if (state.precisions.has(trace.dtype) && trace.peakPerf > max) {
+        max = trace.peakPerf;
+      }
+    });
+    return max;
+  }
+
+  function updateBandwidthRooflines() {
+    if (!plotlyReady() || !rooflineTraces.length) {
+      return;
+    }
+    var topPeak = topVisibleComputePeak();
+    if (!(topPeak > 0)) {
+      return;
+    }
+    var indices = [];
+    var xs = [];
+    var ys = [];
+    rooflineTraces.forEach(function (roof) {
+      if (!(roof.bandwidth > 0)) {
+        return;
+      }
+      var traceData = gd.data[roof.traceIndex];
+      if (!traceData || !traceData.x || !traceData.y) {
+        return;
+      }
+      var newX = traceData.x.slice();
+      var newY = traceData.y.slice();
+      newX[newX.length - 1] = topPeak / roof.bandwidth;
+      newY[newY.length - 1] = topPeak;
+      indices.push(roof.traceIndex);
+      xs.push(newX);
+      ys.push(newY);
+    });
+    if (indices.length) {
+      Plotly.restyle(gd, { x: xs, y: ys }, indices);
+    }
+  }
+
+  function applyPrecision() {
+    if (!plotlyReady()) {
+      return;
+    }
+    Plotly.restyle(
+      gd,
+      {
+        visible: computeTraces.map(function (trace) {
+          return state.precisions.has(trace.dtype);
+        }),
+      },
+      computeCeilingIndices
+    );
+    updateBandwidthRooflines();
     updateCeilings();
   }
 
@@ -1202,6 +1269,37 @@
     peakSelect.value = state.peak;
   }
 
+  function updatePrecisionLabel() {
+    if (!precisionLabel) {
+      return;
+    }
+    if (state.precisions.size === precisions.length) {
+      precisionLabel.textContent = "All";
+    } else if (state.precisions.size === 1) {
+      precisionLabel.textContent = Array.from(state.precisions)[0];
+    } else {
+      precisionLabel.textContent = state.precisions.size + " selected";
+    }
+  }
+
+  function buildPrecisionOptions() {
+    if (!precisionMenu) {
+      return;
+    }
+    precisions.forEach(function (precision) {
+      var item = document.createElement("label");
+      item.className = "roofline-precision-item";
+      var cb = document.createElement("input");
+      cb.type = "checkbox";
+      cb.value = precision;
+      cb.checked = state.precisions.has(precision);
+      item.appendChild(cb);
+      item.appendChild(document.createTextNode(precision));
+      precisionMenu.appendChild(item);
+    });
+    updatePrecisionLabel();
+  }
+
   function buildKernelPanel() {
     if (!kernelList) {
       return;
@@ -1317,6 +1415,37 @@
   }
 
   function wireEvents() {
+    if (precisionBtn && precisionMenu) {
+      precisionBtn.addEventListener("click", function (e) {
+        e.stopPropagation();
+        var opening = precisionMenu.hidden;
+        precisionMenu.hidden = !opening;
+        precisionBtn.setAttribute("aria-expanded", String(opening));
+      });
+      // Keep clicks inside the menu from reaching the close-on-outside-click
+      // handler below, so ticking a box does not shut the menu.
+      precisionMenu.addEventListener("click", function (e) {
+        e.stopPropagation();
+      });
+      precisionMenu.addEventListener("change", function (e) {
+        if (e.target.type !== "checkbox") {
+          return;
+        }
+        if (e.target.checked) {
+          state.precisions.add(e.target.value);
+        } else {
+          state.precisions.delete(e.target.value);
+        }
+        updatePrecisionLabel();
+        applyPrecision();
+      });
+      document.addEventListener("click", function () {
+        if (!precisionMenu.hidden) {
+          precisionMenu.hidden = true;
+          precisionBtn.setAttribute("aria-expanded", "false");
+        }
+      });
+    }
     if (peakSelect) {
       peakSelect.addEventListener("change", function () {
         state.peak = peakSelect.value;
@@ -1461,6 +1590,7 @@
       KERNEL_NAME_FONT_FAMILY
     );
     buildPeakOptions();
+    buildPrecisionOptions();
     buildKernelPanel();
     buildRoofPanel();
     computeRuntimeBreakpoints();
@@ -1477,6 +1607,7 @@
       resizePlot();
       applyPlotTheme();
       render();
+      applyPrecision();
       resetView();
     }, PLOT_READY_MAX_ATTEMPTS);
   }

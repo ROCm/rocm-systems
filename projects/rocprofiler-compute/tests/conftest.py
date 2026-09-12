@@ -130,13 +130,6 @@ class ProfileModeImportGuard:
 
 def pytest_addoption(parser):
     parser.addoption(
-        "--call-binary",
-        action="store_true",
-        default=False,
-        help="Call standalone binary instead of main function during tests",
-    )
-
-    parser.addoption(
         "--rocprofiler-sdk-tool-path",
         type=str,
         default=str(
@@ -155,6 +148,9 @@ def pytest_addoption(parser):
     parser.addoption(
         "--coverage-n",
         type=int,
-        default=100,
-        help="Random ATen sample budget (default 100).",
+        default=20,
+        help=(
+            "Sample budget for test_torch_trace_coverage (default 20). "
+            "Structural operators are always included. Use 100 for a nightly run."
+        ),
     )

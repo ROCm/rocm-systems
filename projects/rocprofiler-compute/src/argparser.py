@@ -232,7 +232,7 @@ Examples:
 \trocprof-compute profile -n vcopy_all -- ./vcopy -n 1048576 -b 256
 \trocprof-compute profile -n vcopy_blocks -b sol -- ./vcopy -n 1048576 -b 256
 \trocprof-compute profile -n vcopy_kernel -k vecCopy -- ./vcopy -n 1048576 -b 256
-\trocprof-compute profile -n vcopy_disp -d 0 -- ./vcopy -n 1048576 -b 256
+\trocprof-compute profile -n vcopy_iter --kernel-iteration-range 1 -- ./vcopy -n 1048576 -b 256
 \trocprof-compute profile -n vcopy_roof --roof-only -- ./vcopy -n 1048576 -b 256
 \trocprof-compute profile -n my_bench --bench-only
 ---------------------------------------------------------------------------------
@@ -295,6 +295,7 @@ Examples:
         ),
     )
     profile_group.add_argument(
+        "-d",
         "--output-directory",
         metavar="",
         type=str,
@@ -348,7 +349,7 @@ Examples:
         feature_label="Torch trace",
         help=(
             "\t\t\tTorch Trace, maps PyTorch operators to performance counters.\n"
-            "\t\t\tShould be used only when profiling PyTorch applications."
+            "\t\t\tRequires PyTorch 2.13 or 2.14."
         ),
     )
     profile_group.add_argument(
@@ -363,15 +364,14 @@ Examples:
         help="\t\t\tKernel filtering.",
     )
     profile_group.add_argument(
-        "-d",
-        "--dispatch",
+        "--kernel-iteration-range",
         type=str,
         metavar="",
         nargs="+",
-        dest="dispatch",
+        dest="kernel_iteration_range",
         required=False,
         help=(
-            "\t\t\tWhich dispatch iterations of each kernel to filter \n"
+            "\t\t\tWhich iterations of each kernel to profile \n"
             "\t\t\t(1-based; positive integer or 'start:end'/'start-end' \n"
             "\t\t\trange, e.g. 1 3:5 captures 1st, 3rd, 4th and 5th \n"
             "\t\t\titerations)."
@@ -783,7 +783,7 @@ Examples:
         metavar="",
         nargs="+",
         action="append",
-        help="\t\tSpecify dispatch id(s) for filtering.",
+        help="\t\tSpecify dispatch id(s) for filtering (1-based).",
     )
     analyze_group.add_argument(
         "-b",
@@ -1014,16 +1014,6 @@ Examples:
         "--dependency",
         action="store_true",
         help="\t\tList the installation dependency.",
-    )
-    analyze_advanced_group.add_argument(
-        "--kernel-verbose",
-        required=False,
-        metavar="",
-        help="\t\tSpecify Kernel Name verbose level 1-5. "
-        "Lower the level, shorter the kernel name. "
-        "(DEFAULT: 5) (DISABLE: 5)",
-        default=5,
-        type=int,
     )
     analyze_advanced_group.add_argument(
         "--report-diff", default=0, nargs="?", type=int, help=argparse.SUPPRESS

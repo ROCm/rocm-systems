@@ -3,9 +3,11 @@
 
 from collections import OrderedDict
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Optional
 
 import pandas as pd
+
+from membw_analysis.models import MemBwAnalysisResult
 
 
 @dataclass
@@ -50,7 +52,8 @@ class Workload:
     filter_top_n: str = field(default_factory=str)
     # Matched ML API trace rows keyed by backend, populated by operator filters.
     matched_ml_api_trace_dfs: dict[str, pd.DataFrame] = field(default_factory=dict)
+    membw_result: Optional[MemBwAnalysisResult] = None
 
 
-# The prefix of raw pmc_perf.csv
+# Stem of the merged counter intermediate; csv_compression owns the suffix.
 PMC_PERF_FILE_PREFIX = "pmc_perf"

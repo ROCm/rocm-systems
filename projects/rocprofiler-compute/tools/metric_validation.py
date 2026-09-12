@@ -65,7 +65,6 @@ class Analyzer(OmniAnalyze_Base):
             "GPU_ID",
             "Kernel_Name",
             "Metric",
-            "Channel",
         ]
 
         # Define the end columns for the final output of metrics
@@ -93,7 +92,6 @@ class Analyzer(OmniAnalyze_Base):
             # create 'mega dataframe'
             raw_pmc = file_io.create_df_pmc(
                 path_info[0],
-                args.kernel_verbose,
                 args.verbose,
             )
 

@@ -21,9 +21,14 @@ import pytest
 from sqlalchemy import text
 
 from pc_sampling import per_kernel_isa_export, source_snapshot_analysis
-from rocprof_compute_analyze.analysis_db import SourceFrameCollector, db_analysis
+from rocprof_compute_analyze.analysis_db import (
+    SourceFrameCollector,
+    db_analysis,
+    filter_dispatch_frame,
+)
 from utils import analysis_orm as orm
 from utils import schema
+from utils.file_io import create_df_kernel_top_stats
 from utils.metrics.noise_clamper import (
     clear_noise_clamp_warnings,
     get_noise_clamp_warnings,
@@ -113,6 +118,7 @@ def make_pc_sampling_database_analyzer(
     filter_gpu_ids=(),
     filter_kernel_ids=(),
     filter_dispatch_ids=(),
+    sys_info_row=None,
 ):
     """Build a database analyzer configured for sampling-only workloads."""
     analyzer = db_analysis(
@@ -121,7 +127,13 @@ def make_pc_sampling_database_analyzer(
     )
     analyzer._runs = {
         workload_path: schema.Workload(
-            sys_info=pd.DataFrame([{"gpu_arch": "gfx942"}]),
+            sys_info=pd.DataFrame([
+                (
+                    dict(sys_info_row)
+                    if sys_info_row is not None
+                    else {"gpu_arch": "gfx942"}
+                )
+            ]),
             filter_gpu_ids=list(filter_gpu_ids),
             filter_kernel_ids=list(filter_kernel_ids),
             filter_dispatch_ids=list(filter_dispatch_ids),
@@ -643,7 +655,7 @@ def test_calc_metrics_data_builds_rows_and_preserves_schema():
         index=pd.Index(["7.1.0"], name="Metric_ID"),
     )
     arch_config = schema.ArchConfig()
-    # Table 1 has no Metric/Channel column and is skipped; table 701 maps to
+    # Table 1 has no Metric column and is skipped; table 701 maps to
     # panel 700 (table_name) and sub-table 701 (sub_table_name).
     arch_config.dfs = {
         1: pd.DataFrame({"from_csv": ["pmc_kernel_top.csv"]}),
@@ -683,6 +695,147 @@ def test_calc_metrics_data_builds_rows_and_preserves_schema():
     assert list(exprs["value_name"]) == ["Avg", "Min", "Max"]
     assert list(exprs["value"]) == ["10", "5", "20"]
     assert set(exprs["metric_id"]) == {"7.1.0"}
+
+
+LONG_FORM_PMC_PERF = (
+    "GPU_ID,Dispatch_ID,Grid_Size,Workgroup_Size,LDS_Per_Workgroup,"
+    "Scratch_Per_Workitem,Arch_VGPR,Accum_VGPR,SGPR,Kernel_Name,"
+    "Start_Timestamp,End_Timestamp,Kernel_ID,Counter_Name,Counter_Value\n"
+    "0,0,256,64,0,0,8,0,16,kernel_a,10,20,0,SQ_WAVES,4\n"
+)
+
+
+def test_calc_pmc_df_data_reads_the_compressed_merge(tmp_path):
+    """The merged intermediate is discovered through the compression interface."""
+    common.write_pmc_perf(tmp_path, LONG_FORM_PMC_PERF)
+
+    analyzer = db_analysis(MagicMock(), {})
+    analyzer._runs = {str(tmp_path): MagicMock()}
+    analyzer._profiling_config = {}
+
+    pmc_df_per_workload = analyzer.calc_pmc_df_data()
+
+    assert pmc_df_per_workload[str(tmp_path)]["SQ_WAVES"].tolist() == [4]
+
+
+def test_calc_pmc_df_data_skips_workload_without_a_merge(tmp_path):
+    """A workload with no merged intermediate is skipped, not read as plain CSV."""
+    (tmp_path / f"{schema.PMC_PERF_FILE_PREFIX}.csv").write_text(LONG_FORM_PMC_PERF)
+
+    analyzer = db_analysis(MagicMock(), {})
+    analyzer._runs = {str(tmp_path): MagicMock()}
+    analyzer._profiling_config = {}
+
+    assert analyzer.calc_pmc_df_data() == {}
+
+
+def test_calc_metrics_data_exports_qualified_per_channel_names():
+    """
+    Panel 18's per-channel rows reach the database as "Channel N", not as a
+    bare index.
+    """
+    workload_path = "/fake/workload"
+    metric_df = pd.DataFrame(
+        {
+            "Metric": ["Channel 0", "Channel 1"],
+            "Min": [" 33.29 ", " 33.33 "],
+            "Max": [" 33.51 ", " 33.33 "],
+        },
+        index=pd.Index(["18.2.0", "18.2.1"], name="Metric_ID"),
+    )
+    arch_config = schema.ArchConfig()
+    arch_config.dfs = {1802: metric_df}
+    arch_config.panel_configs = {
+        1800: {
+            "id": 1800,
+            "title": "L2 Cache (per Channel)",
+            "data source": [
+                {"metric_table": {"id": 1802, "title": "L2 Cache Hit Rate (Percent)"}}
+            ],
+        }
+    }
+
+    analyzer = db_analysis(MagicMock(), {})
+    analyzer._pmc_df_per_workload = {workload_path: pd.DataFrame({"Counter1": [1]})}
+    analyzer._runs = {
+        workload_path: MagicMock(sys_info=pd.DataFrame([{"gpu_arch": "gfx942"}]))
+    }
+    analyzer._arch_configs = {"gfx942": arch_config}
+
+    metrics_info, expressions = analyzer.calc_metrics_data()
+
+    info = metrics_info[workload_path]
+    assert list(info["name"]) == ["Channel 0", "Channel 1"]
+    assert list(info["table_name"]) == ["L2 Cache (per Channel)"] * 2
+    assert list(info["sub_table_name"]) == ["L2 Cache Hit Rate (Percent)"] * 2
+
+    # The label column is non-expression, so only Min/Max become expressions.
+    exprs = expressions[workload_path]
+    assert set(exprs["value_name"]) == {"Min", "Max"}
+
+
+# =============================================================================
+# filter_dispatch_frame tests
+# =============================================================================
+
+
+def make_repeated_dispatch_frame():
+    """Frame where the longest kernel by total time is not the longest dispatch.
+
+    ``kernel_frequent`` runs three times for 500ns each, ``kernel_long`` once
+    for 1000ns.
+    """
+    return pd.DataFrame({
+        "Kernel_Name": [
+            "kernel_long",
+            "kernel_frequent",
+            "kernel_frequent",
+            "kernel_frequent",
+        ],
+        "GPU_ID": [0, 0, 0, 0],
+        "Dispatch_ID": [1, 2, 3, 4],
+        "Start_Timestamp": [0, 2000, 3000, 4000],
+        "End_Timestamp": [1000, 2500, 3500, 4500],
+    })
+
+
+def test_filter_dispatch_frame_kernel_ids_match_the_cli_top_stats(tmp_path):
+    """-k selects the same kernel here as it does in the cli top stats table."""
+    dispatch_frame = make_repeated_dispatch_frame()
+    kernel_top_df, _ = create_df_kernel_top_stats(
+        df_in=dispatch_frame,
+        raw_data_dir=str(tmp_path),
+        filter_gpu_ids=None,
+        filter_dispatch_ids=None,
+        time_unit="ns",
+    )
+
+    filtered_df = filter_dispatch_frame(dispatch_frame, None, [0], None)
+
+    assert filtered_df["Kernel_Name"].unique().tolist() == [
+        kernel_top_df.loc[0, "Kernel_Name"]
+    ]
+
+
+@pytest.mark.parametrize("kernel_id", [99, -1])
+def test_filter_dispatch_frame_rejects_out_of_range_kernel_id(kernel_id):
+    """An out-of-range -k exits instead of raising IndexError."""
+    with pytest.raises(SystemExit):
+        filter_dispatch_frame(make_repeated_dispatch_frame(), None, [kernel_id], None)
+
+
+def test_filter_dispatch_frame_bounds_kernel_ids_by_the_filtered_frame():
+    """Kernel ids are bounded by the frame left after the gpu and dispatch filters.
+
+    Dispatch 1 leaves one kernel, so id 1 is out of range here even though the
+    unfiltered frame has two kernels.
+    """
+    assert not filter_dispatch_frame(
+        make_repeated_dispatch_frame(), None, [1], None
+    ).empty
+
+    with pytest.raises(SystemExit):
+        filter_dispatch_frame(make_repeated_dispatch_frame(), None, [1], ["1"])
 
 
 # =============================================================================
@@ -1065,7 +1218,12 @@ def test_add_pc_sampling_data_no_tool_data_is_noop(db_session):
     analyzer._pc_sampling_tool_data_per_workload = {"/fake/workload": []}
 
     code_object_stores = analyzer.add_pc_sampling_data(
-        "/fake/workload", workload, {}, {}, make_source_frame_collector(workload)
+        "/fake/workload",
+        workload,
+        {},
+        {},
+        make_source_frame_collector(workload),
+        sys_info={},
     )
     db_session.commit()
 
@@ -1091,7 +1249,12 @@ def test_add_pc_sampling_data_populates_and_attributes_kernels(db_session):
         workload_path: [make_pc_sampling_tool_data()]
     }
     code_object_stores = analyzer.add_pc_sampling_data(
-        workload_path, workload, kernel_objs, {}, make_source_frame_collector(workload)
+        workload_path,
+        workload,
+        kernel_objs,
+        {},
+        make_source_frame_collector(workload),
+        sys_info={},
     )
     db_session.commit()
 
@@ -1114,6 +1277,69 @@ def test_add_pc_sampling_data_populates_and_attributes_kernels(db_session):
     assert {
         r.stall_reason_lookup.text for r in stalled.pc_sample_state.stall_reasons
     } == {"WAITCNT"}
+
+
+def test_add_pc_sampling_data_inserts_wave_measurements_from_sys_info(
+    db_session,
+):
+    """Configured denominators populate percentages; absent ones stay null."""
+    tool_data = make_pc_sampling_tool_data()
+    samples = tool_data["buffer_records"]["pc_sample_stochastic"]
+    samples[0]["record"].update({"exec_mask": 0b1111, "wave_cnt": 8})
+    samples[1]["record"].update({"exec_mask": 0b11, "wave_cnt": 16})
+    cases = [
+        (
+            "/fake/workload/missing-wave-denominators",
+            {"gpu_arch": "gfx942"},
+            {0x10: (None, None), 0x20: (None, None)},
+        ),
+        (
+            "/fake/workload/configured-wave-denominators",
+            {
+                "gpu_arch": "gfx942",
+                "wave_size": "64",
+                "max_waves_per_cu": "32",
+            },
+            {0x10: (6.25, 25.0), 0x20: (3.125, 50.0)},
+        ),
+    ]
+
+    for workload_path, sys_info_row, expected_by_offset in cases:
+        workload = orm.Workload(name=workload_path, sub_name="sampling")
+        db_session.add(workload)
+        kernel_objs = {
+            kernel_name: orm.Kernel(kernel_name=kernel_name, workload=workload)
+            for kernel_name in ("vecCopy", "vecAdd")
+        }
+        db_session.add_all(kernel_objs.values())
+        analyzer = make_pc_sampling_database_analyzer(
+            {workload_path: [copy.deepcopy(tool_data)]},
+            sys_info_row=sys_info_row,
+        )
+
+        code_object_stores = analyzer.add_pc_sampling_data(
+            workload_path,
+            workload,
+            kernel_objs,
+            {},
+            make_source_frame_collector(workload, workload_path),
+            sys_info=sys_info_row,
+        )
+        db_session.commit()
+
+        sample_states_by_offset = {
+            line.code_object_offset: line.pc_sample_state
+            for code_object_store in code_object_stores.values()
+            for line in store_instruction_lines(code_object_store)
+        }
+        actual_by_offset = {
+            offset: (
+                sample_state.active_thread_percent,
+                sample_state.wave_occupancy_percent,
+            )
+            for offset, sample_state in sample_states_by_offset.items()
+        }
+        assert actual_by_offset == expected_by_offset
 
 
 def test_add_pc_sampling_data_separates_shared_code_object_ids_across_pids(
@@ -1143,7 +1369,12 @@ def test_add_pc_sampling_data_separates_shared_code_object_ids_across_pids(
         workload_path: [first_tool_data, second_tool_data]
     }
     code_object_stores = analyzer.add_pc_sampling_data(
-        workload_path, workload, kernel_objs, {}, make_source_frame_collector(workload)
+        workload_path,
+        workload,
+        kernel_objs,
+        {},
+        make_source_frame_collector(workload),
+        sys_info={},
     )
     db_session.commit()
 
@@ -1230,9 +1461,9 @@ def test_run_analysis_scopes_pc_sampling_uuids_by_process(db_session):
     assert [
         (dispatch.dispatch_id, dispatch.kernel.kernel_name) for dispatch in dispatches
     ] == [
-        (0, "vecCopy"),
         (1, "vecCopy"),
         (2, "vecCopy"),
+        (3, "vecCopy"),
     ]
     assert len({dispatch.kernel_uuid for dispatch in dispatches}) == 1
     assert len({dispatch.dispatch_uuid for dispatch in dispatches}) == 3
@@ -1297,8 +1528,8 @@ def test_run_analysis_materialized_views_keep_pc_sampling_origins(
     assert [
         (dispatch.dispatch_id, dispatch.kernel.kernel_name) for dispatch in dispatches
     ] == [
-        (0, "vecCopy"),
         (1, "vecCopy"),
+        (2, "vecCopy"),
     ]
     assert len({dispatch.dispatch_uuid for dispatch in dispatches}) == 2
     assert len({dispatch.kernel_uuid for dispatch in dispatches}) == 1
@@ -1734,10 +1965,12 @@ def make_source_workload_tool_data_records(
     workload_path,
     snapshot_sources,
     sampled_sources,
+    source_path_map=None,
 ):
     """Create PC-sampling inputs whose comments point at snapshot sources.
 
     A path named only in sampled_sources is absent from the snapshot.
+    source_path_map pairs raw DWARF paths with canonical ones.
     """
     workload_path.mkdir(parents=True, exist_ok=True)
     for original_source_path, content in snapshot_sources.items():
@@ -1746,6 +1979,13 @@ def make_source_workload_tool_data_records(
         )
         snapshot_path.parent.mkdir(parents=True, exist_ok=True)
         snapshot_path.write_text(content, encoding="utf-8")
+
+    if source_path_map:
+        map_path = workload_path / "src" / "42_source_map.json"
+        map_path.parent.mkdir(parents=True, exist_ok=True)
+        map_path.write_text(
+            json.dumps({"source_paths": source_path_map}), encoding="utf-8"
+        )
 
     tool_data = make_pc_sampling_tool_data()
     tool_data["strings"]["pc_sample_comments"] = list(sampled_sources)
@@ -2012,6 +2252,33 @@ def test_run_analysis_records_source_file_missing_from_snapshot(db_session, tmp_
     ]
 
 
+def test_run_analysis_resolves_raw_dwarf_path_to_canonical_path(db_session, tmp_path):
+    """A file whose raw DWARF path is not canonical is read from its copy."""
+    workload_path = tmp_path / "workload"
+    raw_dwarf_path = "/home/u/app/build/../include/vcopy.hpp"
+    canonical_path = "/home/u/app/include/vcopy.hpp"
+    tool_data_records = make_source_workload_tool_data_records(
+        workload_path,
+        {canonical_path: "int first;\nint second;\n"},
+        [f"{raw_dwarf_path}:2"],
+        source_path_map={raw_dwarf_path: canonical_path},
+    )
+    analyzer = make_pc_sampling_database_analyzer({
+        str(workload_path): tool_data_records
+    })
+
+    run_analysis_with_materialized_views(analyzer)
+
+    source_file = db_session.query(orm.SourceFile).one()
+    assert source_file.file_path == canonical_path
+    # A checksum at all means the snapshot copy was found.
+    assert source_file.md5_checksum is not None
+    assert [
+        (source_line.line_number, source_line.content)
+        for source_line in source_file.source_lines
+    ] == [(1, "int first;"), (2, "int second;")]
+
+
 def test_run_analysis_records_line_past_end_of_source_file(db_session, tmp_path):
     """A frame naming a line the snapshot copy lacks gets a contentless row."""
     workload_path = tmp_path / "workload"
@@ -2170,7 +2437,12 @@ def test_add_code_object_isa_adds_unsampled_lines(db_session):
         kernel_symbols = {}
         source_frames = make_source_frame_collector(workload)
         code_object_stores = analyzer.add_pc_sampling_data(
-            workload_path, workload, kernel_objs, kernel_symbols, source_frames
+            workload_path,
+            workload,
+            kernel_objs,
+            kernel_symbols,
+            source_frames,
+            sys_info={},
         )
         analyzer.add_code_object_isa(
             workload_path,
@@ -2278,7 +2550,12 @@ def test_add_code_object_isa_scopes_unsampled_code_objects_by_process(db_session
         kernel_symbols = {}
         source_frames = make_source_frame_collector(workload, workload_path)
         code_object_stores = analyzer.add_pc_sampling_data(
-            workload_path, workload, kernel_objs, kernel_symbols, source_frames
+            workload_path,
+            workload,
+            kernel_objs,
+            kernel_symbols,
+            source_frames,
+            sys_info={},
         )
         assert code_object_stores == {}
         analyzer.add_code_object_isa(
@@ -2349,7 +2626,12 @@ def test_add_code_object_isa_skips_code_object_without_load_base(db_session):
         kernel_symbols = {}
         source_frames = make_source_frame_collector(workload)
         code_object_stores = analyzer.add_pc_sampling_data(
-            workload_path, workload, kernel_objs, kernel_symbols, source_frames
+            workload_path,
+            workload,
+            kernel_objs,
+            kernel_symbols,
+            source_frames,
+            sys_info={},
         )
         analyzer.add_code_object_isa(
             workload_path,
@@ -2436,7 +2718,12 @@ def test_add_code_object_isa_scopes_duplicate_offsets_by_process(db_session):
         kernel_symbols = {}
         source_frames = make_source_frame_collector(workload)
         code_object_stores = analyzer.add_pc_sampling_data(
-            workload_path, workload, kernel_objs, kernel_symbols, source_frames
+            workload_path,
+            workload,
+            kernel_objs,
+            kernel_symbols,
+            source_frames,
+            sys_info={},
         )
         analyzer.add_code_object_isa(
             workload_path,
@@ -2579,7 +2866,12 @@ def test_add_pc_sampling_data_drops_lines_without_kernel(db_session):
         workload_path: [make_pc_sampling_tool_data()]
     }
     analyzer.add_pc_sampling_data(
-        workload_path, workload, kernel_objs, {}, make_source_frame_collector(workload)
+        workload_path,
+        workload,
+        kernel_objs,
+        {},
+        make_source_frame_collector(workload),
+        sys_info={},
     )
     db_session.commit()
 
@@ -2876,7 +3168,7 @@ def test_run_analysis_kernel_filter_reaches_a_sampling_only_workload(tmp_path):
     ]
 
 
-@pytest.mark.parametrize("filter_dispatch_ids", [["1"], [">0"], ["> 0"]])
+@pytest.mark.parametrize("filter_dispatch_ids", [["2"], [">1"], ["> 1"]])
 def test_run_analysis_dispatch_filter_reaches_a_sampling_only_workload(
     tmp_path, filter_dispatch_ids
 ):

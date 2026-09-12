@@ -361,10 +361,7 @@ class PCSampleState(Base):
     total_count = Column(Integer)
     issue_count = Column(Integer, nullable=True)
     stall_count = Column(Integer, nullable=True)
-    # TODO: populate from the popcount of record.exec_mask over the wave size
-    # (64 on CDNA, 32 or 64 on RDNA), averaged across the samples in this group.
     active_thread_percent = Column(Float, nullable=True)
-    # TODO: populate from record.wave_cnt.
     wave_occupancy_percent = Column(Float, nullable=True)
     # TODO: populate from record.dispatch_id, resolved to its dispatch row.
     # Blocked: this table aggregates samples grouped by
@@ -1034,6 +1031,8 @@ class Database:
                 PCSampleState.total_count.label("count"),
                 PCSampleState.issue_count.label("count_issue"),
                 PCSampleState.stall_count.label("count_stall"),
+                PCSampleState.wave_occupancy_percent,
+                PCSampleState.active_thread_percent,
                 stall_reason_json_subquery.c.stall_reason,
             )
             .select_from(PCSampleState)

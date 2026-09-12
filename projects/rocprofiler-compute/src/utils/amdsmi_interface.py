@@ -212,3 +212,13 @@ def get_gpu_num_compute_units(device: Any, amdsmi: Any) -> int:  # noqa: ANN401
     cu_count = int(amdsmi.amdsmi_get_gpu_asic_info(device)["num_compute_units"])
     console_debug(f"GPU compute units count: {cu_count}")
     return cu_count
+
+
+@functools.partial(
+    _per_device_query, default_return=None, warning_label="GPU performance level"
+)
+def get_gpu_perf_level(device: Any, amdsmi: Any) -> str:  # noqa: ANN401
+    """Get the GPU PowerPlay performance level (AUTO, STABLE_STD, ...)."""
+    perf_level = str(amdsmi.amdsmi_get_gpu_perf_level(device))
+    console_debug(f"GPU performance level: {perf_level}")
+    return perf_level

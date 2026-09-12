@@ -198,6 +198,7 @@ def test_rdna35_finalize_soc_fields(
         "num_compute_units": 0,
         "gpu_cache_info": {},
         "vram_bit_width": vram_bit_width,
+        "perf_level": "AUTO",
     }
     with patch.object(specs, "set_cache_sizes", return_value={}), patch.object(
         specs.mi_gpu_specs, "get_num_dies", return_value=1
@@ -206,6 +207,37 @@ def test_rdna35_finalize_soc_fields(
 
     assert spec.num_gl1c == expected_gl1c
     assert spec.num_memory_channels == expected_channels
+    assert spec.perf_level == "AUTO"
+
+
+@pytest.mark.misc
+@pytest.mark.parametrize(
+    "memory_partition, expected_channels",
+    [
+        ("NPS1", "128"),
+        ("nps2", "64"),
+        ("NPS4", "32"),
+    ],
+    ids=["nps1", "nps2", "nps4"],
+)
+def test_cdna_hbm_channels_nps_divisors(memory_partition, expected_channels):
+    """NPS memory partitions divide HBM channel count by the NPS denominator.
+
+    Uses whole-chip (SPX) XCD count, independent of the active compute partition.
+    """
+    spec = MachineSpecsCDNA(
+        gpu_arch="gfx942",
+        gpu_model="mi300x_a1",
+        l2_banks="16",
+        total_l2_chan="64",
+        memory_partition=memory_partition,
+        compute_partition="CPX",
+    )
+    with patch.object(
+        specs.mi_gpu_specs, "get_num_xcds", return_value=8
+    ) as get_num_xcds_mock:
+        assert spec._get_hbm_channels() == expected_channels
+        get_num_xcds_mock.assert_called_once_with("gfx942", "mi300x_a1", "SPX")
 
 
 @pytest.mark.misc

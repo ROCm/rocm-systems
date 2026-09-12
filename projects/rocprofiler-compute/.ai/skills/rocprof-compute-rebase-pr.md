@@ -1,6 +1,17 @@
-# Rebase PR onto origin/rocprofiler-compute-develop
+# Re-land a PR branch after the sprint-end force-push
 
 Follow **[`AGENTS.md`](../../AGENTS.md)** and the full redirect chain it references.
+
+## When to use this
+
+Use this only after [`rocprof-compute-sprint-end-rebase`](rocprof-compute-sprint-end-rebase.md)
+has force-pushed a linearized `rocprofiler-compute-develop`. The PR branch is then built on
+commits that no longer exist, so a plain `git rebase` walks history that is gone and cascades
+conflicts. Reset + cherry-pick re-lands the PR's commits on the new base instead.
+
+Do NOT use this to bring a PR up to date with a base that merely moved forward. That is an
+ordinary `git rebase origin/rocprofiler-compute-develop`, and rewriting the whole branch for it
+throws away authorship and commit dates for no reason.
 
 ## Goal
 
