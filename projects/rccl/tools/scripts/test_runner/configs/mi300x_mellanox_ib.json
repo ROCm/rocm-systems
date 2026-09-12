@@ -80,7 +80,6 @@
         "NCCL_SHM_USE_CUDA_MEMCPY": "1"
       },
       "tests": [
-        
         {
           "name": "SHM_CEMemcpy_SendSide",
           "description": "Shared memory test with compute engine memcpy on send side",
@@ -161,8 +160,6 @@
             "NCCL_P2P_DISABLE": "0"
           }
         },
-        
-        
         {
           "name": "P2P_IpcReg_VerySmallBuffer",
           "description": "Test P2P IPC buffer registration with very small buffer sizes and SHM disabled",
@@ -330,7 +327,6 @@
           "test_filter": "NetTransportMPITest.*",
           "timeout": 600
         },
-        
         {
           "name": "NET_NetGraphRegister_2Nodes",
           "description": "Network transport test with graph buffer registration across two nodes",
@@ -790,14 +786,6 @@
         "NCCL_DEBUG": "INFO"
       },
       "tests": [
-        
-        
-        
-        
-        
-        
-        
-        
         {
           "name": "Fixtures_All",
           "description": "All release fixture tests"
@@ -1585,11 +1573,6 @@
           "test_filter": "UBR_ConcurrentRegHang.SeparateBuffers_Grouped_EXPECTED_HANG",
           "timeout": 30
         },
-        
-        
-        
-        
-        
         {
           "name": "UBR_ConcurrentRegHang_AllWorkingTests",
           "description": "Run all tests that should work (excludes the hang test)",

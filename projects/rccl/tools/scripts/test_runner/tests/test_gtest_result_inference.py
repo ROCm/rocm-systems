@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# Copyright (c) Advanced Micro Devices, Inc. All rights reserved.
+#
+# See LICENSE.txt for license information
 """Unit tests for test_executor's gtest result inference.
 
 The regression these guard: a --gtest_filter matching no test makes Google Test
