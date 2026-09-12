@@ -27,6 +27,7 @@ THE SOFTWARE.
 #include <vector>
 #include <string>
 #include <iostream>
+#include <limits>
 #include <sstream>
 #include <iomanip>
 #include <string.h>
@@ -273,7 +274,11 @@ class RocVideoDecoder {
         /**
         *   @brief  This function is used to get the current frame size based on pixel format.
         */
-        virtual int GetFrameSize() {CHECK_ZERO("Display width", disp_width_); return disp_width_ * (disp_height_ + (chroma_height_ * num_chroma_planes_)) * byte_per_pixel_; }
+        virtual int GetFrameSize() {
+            CHECK_ZERO("Display width", disp_width_);
+            return CalculateFrameSize(disp_width_, disp_height_, disp_width_, chroma_height_,
+                                      num_chroma_planes_, byte_per_pixel_);
+        }
 
 
         /**
@@ -426,6 +431,32 @@ class RocVideoDecoder {
         virtual int ReconfigureDecoder(RocdecVideoFormat *p_video_format);
 
     protected:
+        static int CalculateFrameSize(uint32_t luma_width, uint32_t luma_height, uint32_t chroma_width,
+                                      uint32_t chroma_height, uint32_t num_chroma_planes,
+                                      uint32_t bytes_per_pixel) {
+            const auto checked_multiply = [](size_t lhs, size_t rhs) {
+                const size_t max_frame_size = std::numeric_limits<int>::max();
+                if (lhs && rhs > max_frame_size / lhs) {
+                    ROCDEC_THROW("Frame size exceeds INT_MAX", ROCDEC_INVALID_PARAMETER);
+                }
+                return lhs * rhs;
+            };
+
+            const size_t luma_size = checked_multiply(luma_width, luma_height);
+            size_t chroma_size = 0;
+            if (num_chroma_planes) {
+                chroma_size = checked_multiply(checked_multiply(chroma_width, chroma_height),
+                                               num_chroma_planes);
+            }
+
+            const size_t max_frame_size = std::numeric_limits<int>::max();
+            if (chroma_size > max_frame_size - luma_size) {
+                ROCDEC_THROW("Frame size exceeds INT_MAX", ROCDEC_INVALID_PARAMETER);
+            }
+
+            return static_cast<int>(checked_multiply(luma_size + chroma_size, bytes_per_pixel));
+        }
+
         /**
          *   @brief  Callback function to be registered for getting a callback when decoding of sequence starts
          */
