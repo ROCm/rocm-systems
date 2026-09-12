@@ -84,6 +84,15 @@ Settings::Settings() {
   max_hw_queues_ = GPU_MAX_HW_QUEUES;
   aql_barrier_opt_ = amd::IS_HIP && DEBUG_CLR_AQL_BARRIER_OPT;
 
+  // The multi-producer AQL ring race this ordering avoids has only been observed on Intel hosts,
+  // but nothing rules it out elsewhere, so the default orders every host. kOrderDoorbellIntelHosts
+  // narrows that to the hosts where it has been seen, and 0 turns the ordering off entirely.
+  constexpr uint kOrderDoorbellIntelHosts = 1;
+  constexpr uint kOrderDoorbellAllHosts = 2;
+  isOrderedDoorbell_ =
+      DEBUG_CLR_ORDER_DOORBELL >= kOrderDoorbellAllHosts ||
+      (DEBUG_CLR_ORDER_DOORBELL == kOrderDoorbellIntelHosts && amd::Os::isIntelCpu());
+
   queue_pipe_dist_ = false;
 }
 

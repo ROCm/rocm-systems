@@ -101,6 +101,9 @@ class Os : AllStatic {
   //! Return the number of active processors in the system.
   inline static int processorCount();
 
+  //! Return true when the host CPU reports the GenuineIntel vendor ID. False on non-x86 hosts.
+  static bool isIntelCpu();
+
 #if defined(ATI_ARCH_X86)
   //! Query the processor information about supported features and CPU type.
   static void cpuid(int regs[4], int info);
