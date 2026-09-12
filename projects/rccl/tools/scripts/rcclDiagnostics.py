@@ -190,7 +190,9 @@ def get_ROCm_version():
 
 # Get HIP Version
 def get_HIP_version():
-	result = run_cli_command("hipconfig --version")
+	rocm_path = os.environ.get("ROCM_PATH", "/opt/rocm")
+	version_file = os.path.join(rocm_path, ".info", "version")
+	result = run_cli_command(f"cat {version_file}")
 	if result.stdout:
 		summary = result.stdout.strip()
 	else:
