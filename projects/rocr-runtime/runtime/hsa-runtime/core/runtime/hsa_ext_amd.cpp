@@ -1056,10 +1056,18 @@ uint32_t hsa_amd_signal_wait_all(uint32_t signal_count, hsa_signal_t* hsa_signal
   // Treat NULL and invalid signals as already satisfied their condition and skip them
   std::vector<hsa_signal_t> valid_signals;
   std::vector<uint32_t> valid_signal_ids;
+  std::vector<hsa_signal_condition_t> valid_conds;
+  std::vector<hsa_signal_value_t> valid_values;
+  valid_signals.reserve(signal_count);
+  valid_signal_ids.reserve(signal_count);
+  valid_conds.reserve(signal_count);
+  valid_values.reserve(signal_count);
   for (uint32_t i = 0; i < signal_count; i++){
     if (hsa_signals[i].handle != 0 && core::SharedSignal::Convert(hsa_signals[i])->IsValid()){
       valid_signals.emplace_back(hsa_signals[i]);
       valid_signal_ids.emplace_back(i);
+      valid_conds.emplace_back(conds[i]);
+      valid_values.emplace_back(values[i]);
     }
   }
 
@@ -1075,9 +1083,9 @@ uint32_t hsa_amd_signal_wait_all(uint32_t signal_count, hsa_signal_t* hsa_signal
   uint32_t valid_signal_count = valid_signals.size();
 
   std::vector<hsa_signal_value_t> satisfying_values_vec(valid_signal_count);
-  uint32_t first_satysifying_signal_idx =
-      core::Signal::WaitMultiple(valid_signal_count, valid_signals.data(), conds, values, timeout_hint, wait_hint,
-                                 satisfying_values_vec, true);
+  uint32_t first_satysifying_signal_idx = core::Signal::WaitMultiple(
+      valid_signal_count, valid_signals.data(), valid_conds.data(), valid_values.data(),
+      timeout_hint, wait_hint, satisfying_values_vec, true);
 
   if (satisfying_values) {
     // Set 0 as satisfying value for NULL and invalid signals
@@ -1104,10 +1112,18 @@ uint32_t hsa_amd_signal_wait_any(uint32_t signal_count, hsa_signal_t* hsa_signal
   // Ignore NULL and invalid signals
   std::vector<hsa_signal_t> valid_signals;
   std::vector<uint32_t> valid_signal_ids;
+  std::vector<hsa_signal_condition_t> valid_conds;
+  std::vector<hsa_signal_value_t> valid_values;
+  valid_signals.reserve(signal_count);
+  valid_signal_ids.reserve(signal_count);
+  valid_conds.reserve(signal_count);
+  valid_values.reserve(signal_count);
   for (uint32_t i = 0; i < signal_count; i++){
     if (hsa_signals[i].handle != 0 && core::SharedSignal::Convert(hsa_signals[i])->IsValid()){
       valid_signals.emplace_back(hsa_signals[i]);
       valid_signal_ids.emplace_back(i);
+      valid_conds.emplace_back(conds[i]);
+      valid_values.emplace_back(values[i]);
     }
   }
 
@@ -1117,16 +1133,20 @@ uint32_t hsa_amd_signal_wait_any(uint32_t signal_count, hsa_signal_t* hsa_signal
     return std::numeric_limits<uint32_t>::max();
   }
 
-  std::vector<hsa_signal_value_t> satisfying_value_vec(1);
-  uint32_t satisfying_signal_idx =
-      core::Signal::WaitMultiple(valid_signals.size(), valid_signals.data(), conds, values, timeout_hint, wait_hint,
-                                 satisfying_value_vec, false);
-  //  Map back the index
-  satisfying_signal_idx = valid_signal_ids[satisfying_signal_idx];
+  std::vector<hsa_signal_value_t> satisfying_value_vec(valid_signals.size());
+  uint32_t valid_satisfying_signal_idx = core::Signal::WaitMultiple(
+      valid_signals.size(), valid_signals.data(), valid_conds.data(), valid_values.data(),
+      timeout_hint, wait_hint, satisfying_value_vec, false);
+  if (valid_satisfying_signal_idx >= valid_signals.size()) {
+    return std::numeric_limits<uint32_t>::max();
+  }
 
-  if (satisfying_value) *satisfying_value = satisfying_value_vec.at(0);
+  if (satisfying_value) {
+    *satisfying_value = satisfying_value_vec[valid_satisfying_signal_idx];
+  }
 
-  return satisfying_signal_idx;
+  // Map the compacted valid-signal index back to the caller's input array.
+  return valid_signal_ids[valid_satisfying_signal_idx];
   CATCHRET(uint32_t);
 }
 
