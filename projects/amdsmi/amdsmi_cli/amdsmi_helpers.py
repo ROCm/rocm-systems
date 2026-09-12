@@ -2249,7 +2249,26 @@ class AMDSMIHelpers:
 
         return True
 
-    def _severity_as_string(self, error_severity, notify_type, for_filename):
+    def _severity_as_string(self, error_severity, notify_type, for_filename, source=None):
+        if source == "fabric":
+            # IFoE reports a link going down as non-fatal uncorrected and a link
+            # coming back up as non-fatal corrected; there is no other carrier.
+            if error_severity == "non_fatal_uncorrected":
+                if for_filename:
+                    return "fabric-linkdown"
+                return "FABRIC-LINKDOWN"
+            if error_severity == "non_fatal_corrected":
+                if for_filename:
+                    return "fabric-linkup"
+                return "FABRIC-LINKUP"
+            if error_severity == "fatal":
+                if for_filename:
+                    return "fabric-fatal"
+                return "FABRIC-FATAL"
+            if for_filename:
+                return "fabric-unknown"
+            return "FABRIC-UNKNOWN"
+
         if error_severity == "non_fatal_uncorrected":
             if for_filename:
                 return "uncorrected"
@@ -2296,6 +2315,7 @@ class AMDSMIHelpers:
                     entry.get("error_severity", "Unknown"),
                     entry.get("notify_type", "Unknown"),
                     False,
+                    entry.get("source"),
                 )
                 output = f"{timestamp:<20} {gpu_id:<7} {prefix:<20}"
 
@@ -2357,7 +2377,8 @@ class AMDSMIHelpers:
             # Determine prefix/severity
             error_severity = entry.get("error_severity", "").lower()
             notify_type = entry.get("notify_type", "")
-            prefix = self._severity_as_string(error_severity, notify_type, True)
+            source = entry.get("source")
+            prefix = self._severity_as_string(error_severity, notify_type, True, source)
 
             # Generate filenames
             count = cper_counter[0] + 1
@@ -2396,7 +2417,7 @@ class AMDSMIHelpers:
             gpu_id = "-"
             if not isinstance(device_handle, Path):
                 gpu_id = self.get_gpu_id_from_device_handle(device_handle)
-            severity = self._severity_as_string(error_severity, notify_type, False)
+            severity = self._severity_as_string(error_severity, notify_type, False, source)
             output_rows[cper_path] = [
                 timestamp,
                 gpu_id,
@@ -2525,6 +2546,7 @@ class AMDSMIHelpers:
                             entry.get("error_severity", "Unknown"),
                             entry.get("notify_type", "Unknown"),
                             False,
+                            entry.get("source"),
                         )
                         json_rows.append(
                             {
@@ -2757,6 +2779,49 @@ class AMDSMIHelpers:
             self._emit_cper_output(
                 entries,
                 cper_data,
+                device_handle,
+                args,
+                logger,
+                collected_json_rows,
+                emit_inline,
+                cper_counter,
+            )
+
+        # Fetch fabric CPER entries (IFoE RAS events). Fabric cursors live in a
+        # separate list so --follow does not interleave them with the GPU cursors.
+        fabric_cursors = getattr(args, "fabric_cursor", None)
+        if fabric_cursors is None:
+            fabric_cursors = []
+            args.fabric_cursor = fabric_cursors
+        while len(fabric_cursors) <= gpu_idx:
+            fabric_cursors.append(0)
+
+        while True:
+            try:
+                fabric_entries, new_fabric_cursor, fabric_cper_data, _fabric_status_code = (
+                    amdsmi_interface.amdsmi_get_fabric_cper_entries(
+                        device_handle, severity_mask, buffer_size, fabric_cursors[gpu_idx]
+                    )
+                )
+                logging.debug(f"fabric_cper_entries | entries: {fabric_entries}")
+                num_entries = num_entries + len(fabric_entries)
+            except amdsmi_exception.AmdSmiLibraryException as e:
+                if (
+                    e.get_error_code()
+                    == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NOT_SUPPORTED
+                ):
+                    logging.debug("Fabric CPER not supported on this device")
+                    break
+                logging.debug(f"Cannot retrieve fabric CPER entries: {e}")
+                break
+
+            fabric_cursors[gpu_idx] = new_fabric_cursor
+            if len(fabric_entries) == 0:
+                break
+
+            self._emit_cper_output(
+                fabric_entries,
+                fabric_cper_data,
                 device_handle,
                 args,
                 logger,
