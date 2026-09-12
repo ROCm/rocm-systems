@@ -215,6 +215,18 @@ add_to_config(_versionInfo HIP_VERSION_MINOR)
 add_to_config(_versionInfo HIP_VERSION_PATCH)
 add_to_config(_versionInfo HIP_VERSION_GITHASH)
 
+# Record which sanitizer (if any) hipamd was compiled with
+# (This should match fsanitize values, except in the none case)
+if(NOT DEFINED THEROCK_SANITIZER)
+  set(THEROCK_SANITIZER)
+endif()
+if(ADDRESS_SANITIZER OR THEROCK_SANITIZER STREQUAL "ASAN" OR THEROCK_SANITIZER STREQUAL "HOST_ASAN")
+  set(HIP_RUNTIME_SANITIZER "address")
+else()
+  set(HIP_RUNTIME_SANITIZER "none")
+endif()
+add_to_config(_versionInfo HIP_RUNTIME_SANITIZER)
+
 set (HIP_LIB_VERSION_MAJOR ${HIP_VERSION_MAJOR})
 set (HIP_LIB_VERSION_MINOR ${HIP_VERSION_MINOR})
 if (${ROCM_PATCH_VERSION} )
