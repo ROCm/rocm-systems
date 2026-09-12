@@ -572,11 +572,12 @@
 
   v_mov_b32         v0, 1
   v_mov_b32         v1, 0
-.if .amdgcn.gfx_generation_minor >= 5
-  global_atomic_add_u64 v[0:1], v1, v[0:1], ttmp[14:15], scope:SCOPE_DEV th:TH_ATOMIC_RETURN
-.else
+  // Use SYSTEM scope on the reservation counter for gfx12.5 too. The PM4 drain
+  // routes every per-XCC completion poll through XCC0's CP; a DEVICE-scope counter
+  // write from another XCC settles in that XCC's GL2 slice and is not visible to
+  // XCC0's CP, so the drain's WAIT_REG_MEM never converges and the CP hangs. Matching
+  // the older generations' SYSTEM scope makes the counter visible past GL2.
   global_atomic_add_u64 v[0:1], v1, v[0:1], ttmp[14:15], scope:SCOPE_SYS th:TH_ATOMIC_RETURN
-.endif
   s_wait_loadcnt    0                                       // Wait for atomic operation to complete and return value
 
   // At this point, ttmp[4:5] is free. ttmp13 is free
@@ -1009,11 +1010,10 @@
   v_mov_b32         v1, 1                                   // buf_written_valX
  
   // Perform atomic add and return previous value
-.if .amdgcn.gfx_generation_minor >= 5
-  global_atomic_add_u32 v0, v0, v1, ttmp[14:15], offset:SAMPLE_OFF_BUF_WRITTEN_VAL, scope:SCOPE_DEV th:TH_ATOMIC_RETURN
-.else
+  // Use SYSTEM scope on the completion counter for gfx12.5 too (see reservation-counter
+  // note above). This is the value XCC0's CP polls in the PM4 drain; SYSTEM scope makes
+  // each XCC's completion write visible to XCC0's command processor.
   global_atomic_add_u32 v0, v0, v1, ttmp[14:15], offset:SAMPLE_OFF_BUF_WRITTEN_VAL, scope:SCOPE_SYS th:TH_ATOMIC_RETURN
-.endif
   s_wait_loadcnt    0
 
   // Check Watermark and Signal Host
