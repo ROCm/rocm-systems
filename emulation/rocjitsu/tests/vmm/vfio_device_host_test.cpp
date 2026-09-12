@@ -577,15 +577,20 @@ TEST(VfioServerSignals, MapsEachHandledSignalToItsAction) {
 // reported as work that ran and failed -- indistinguishable from work that
 // could not be done -- while the single slot is spent on nothing.
 TEST(VfioDeviceHost, RefusesEmptyWorkRatherThanThrowingOnTheServingThread) {
+  // Declared before the fixture so it outlives the join, and joined
+  // explicitly before returning: the serving thread may still hold the
+  // request when the assertions end, and std::atomic does not extend the
+  // object's lifetime.
+  std::atomic<bool> ran = false;
   ServedDevice served;
   ASSERT_TRUE(served.built());
 
   EXPECT_FALSE(served.host().ask_serving_thread({})) << "an empty target was accepted";
 
   // And the slot is still free, so a real request is not lost behind it.
-  std::atomic<bool> ran = false;
   EXPECT_TRUE(served.host().ask_serving_thread([&ran] { ran = true; }))
       << "the refused request consumed the one outstanding slot";
+  served.stop_serving();
 }
 
 TEST(VfioDeviceHost, RunsAskedWorkOnTheServingThread) {
@@ -609,25 +614,33 @@ TEST(VfioDeviceHost, RunsAskedWorkOnTheServingThread) {
 // a 64-deep queue and discarded silently past that, which gave a caller no way to
 // tell that its request had been thrown away.
 TEST(VfioDeviceHost, RefusesASecondRequestWhileOneIsOutstanding) {
+  // Declared before the fixture so destruction order is the reverse of what
+  // it would be otherwise: everything the callbacks touch outlives the join
+  // in the fixture destructor, on every return path.
+  std::promise<void> running;
+  std::future<void> is_running = running.get_future();
+  std::promise<void> release;
+  std::future<void> may_finish = release.get_future();
+  bool second_ran = false;
+
   ServedDevice served;
   ASSERT_TRUE(served.built());
 
   // Block the first request inside the serving thread so it stays outstanding
   // while the second is offered.
-  std::promise<void> running;
-  std::future<void> is_running = running.get_future();
-  std::promise<void> release;
-  std::future<void> may_finish = release.get_future();
   ASSERT_TRUE(served.host().ask_serving_thread([&running, &may_finish] {
     running.set_value();
     (void)may_finish.wait_for(std::chrono::seconds(10));
   }));
   ASSERT_EQ(is_running.wait_for(std::chrono::seconds(10)), std::future_status::ready);
 
-  bool second_ran = false;
   EXPECT_FALSE(served.host().ask_serving_thread([&second_ran] { second_ran = true; }))
       << "a second request must be refused while one is outstanding";
   release.set_value();
+
+  // Join before reading anything the callbacks wrote, so the write above is
+  // visible here and the bounded wait in the first callback has ended.
+  served.stop_serving();
   EXPECT_FALSE(second_ran) << "a refused request must not run";
 }
 
