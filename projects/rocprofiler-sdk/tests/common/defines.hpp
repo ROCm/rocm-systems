@@ -22,6 +22,12 @@
 
 #pragma once
 
+#include <rocprofiler-sdk/defines.h>
+
+#if !defined(ROCPROFILER_TEST_PUBLIC_API)
+#    define ROCPROFILER_TEST_PUBLIC_API ROCPROFILER_ATTRIBUTE(visibility("default"))
+#endif
+
 #define ROCPROFILER_CALL(result, msg)                                                              \
     {                                                                                              \
         rocprofiler_status_t CHECKSTATUS = result;                                                 \

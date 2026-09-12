@@ -547,6 +547,8 @@ target_link_libraries(
     test-amdhip-hsart-roctx PRIVATE rocprofiler-register::tests-common
                                     hsa-runtime::hsa-runtime amdhip::amdhip roctx::roctx)
 
+add_subdirectory(attachment-selection)
+
 add_test(
     NAME test-force-rocprofiler-dlopen
     COMMAND $<TARGET_FILE:test-amdhip-hsart-roctx>

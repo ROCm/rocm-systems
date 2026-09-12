@@ -30,6 +30,8 @@
 #include <rocshmem/rocshmem.hpp>
 #include <roctx/roctx.hpp>
 
+#include "common/defines.hpp"
+
 #include <dlfcn.h>
 #include <pthread.h>
 #include <sstream>
@@ -129,6 +131,26 @@ check_registration_info(const char*          name,
 }  // namespace rocprofiler
 
 extern "C" {
+int
+rocprofiler_attach() ROCPROFILER_REGISTER_TEST_PUBLIC_API;
+
+int
+rocprofiler_attach()
+{
+    printf("[%s] rocprofiler_attach\n", ROCP_REG_FILE_NAME);
+    return 0;
+}
+
+int
+rocprofiler_detach() ROCPROFILER_REGISTER_TEST_PUBLIC_API;
+
+int
+rocprofiler_detach()
+{
+    printf("[%s] rocprofiler_detach\n", ROCP_REG_FILE_NAME);
+    return 0;
+}
+
 int
 rocprofiler_set_api_table(const char*, uint64_t, uint64_t, void**, uint64_t)
     __attribute__((visibility("default")));
