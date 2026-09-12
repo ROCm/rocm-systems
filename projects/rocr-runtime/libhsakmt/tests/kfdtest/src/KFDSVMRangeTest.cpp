@@ -1784,7 +1784,8 @@ void KFDSVMRangeTest::SVMApiDeregisterTest(int gpuNode) {
         /* One of two dropped: still accessible (refcount > 0). */
         EXPECT_SUCCESS_GPU(HSAKMT_CALL(hsaKmtDeregisterMemory, m_hsakmt_current_ctx,
                                        buf), gpuNode);
-        EXPECT_EQ_GPU(HSA_SVM_ATTR_ACCESS, GetSvmGpuAccess(buf, PG, gpuNode), gpuNode);
+        EXPECT_EQ_GPU(HSA_SVM_ATTR_ACCESS_IN_PLACE,
+                      GetSvmGpuAccess(buf, PG, gpuNode), gpuNode);
 
         /* Last dropped: revoked across the full grown extent (both pages). */
         EXPECT_SUCCESS_GPU(HSAKMT_CALL(hsaKmtDeregisterMemory, m_hsakmt_current_ctx,
@@ -1812,7 +1813,8 @@ void KFDSVMRangeTest::SVMApiDeregisterTest(int gpuNode) {
         /* One of two references dropped: still accessible. */
         EXPECT_SUCCESS_GPU(HSAKMT_CALL(hsaKmtDeregisterMemory, m_hsakmt_current_ctx,
                                        buf), gpuNode);
-        EXPECT_EQ_GPU(HSA_SVM_ATTR_ACCESS, GetSvmGpuAccess(buf, PG, gpuNode), gpuNode);
+        EXPECT_EQ_GPU(HSA_SVM_ATTR_ACCESS_IN_PLACE,
+                      GetSvmGpuAccess(buf, PG, gpuNode), gpuNode);
 
         /* Last reference dropped: now revoked. */
         EXPECT_SUCCESS_GPU(HSAKMT_CALL(hsaKmtDeregisterMemory, m_hsakmt_current_ctx,
@@ -1842,14 +1844,47 @@ void KFDSVMRangeTest::SVMApiDeregisterTest(int gpuNode) {
         EXPECT_SUCCESS_GPU(HSAKMT_CALL(hsaKmtDeregisterMemory, m_hsakmt_current_ctx,
                                        buf), gpuNode);
         EXPECT_EQ_GPU(HSA_SVM_ATTR_NO_ACCESS, GetSvmGpuAccess(buf,          PG, gpuNode), gpuNode);
-        EXPECT_EQ_GPU(HSA_SVM_ATTR_ACCESS,    GetSvmGpuAccess(buf + PG,     PG, gpuNode), gpuNode);
-        EXPECT_EQ_GPU(HSA_SVM_ATTR_ACCESS,    GetSvmGpuAccess(buf + 2 * PG, PG, gpuNode), gpuNode);
+        EXPECT_EQ_GPU(HSA_SVM_ATTR_ACCESS_IN_PLACE,
+                      GetSvmGpuAccess(buf + PG,     PG, gpuNode), gpuNode);
+        EXPECT_EQ_GPU(HSA_SVM_ATTR_ACCESS_IN_PLACE,
+                      GetSvmGpuAccess(buf + 2 * PG, PG, gpuNode), gpuNode);
 
-        /* Drop B: pages 1 and 2 are now revoked. */
+        /* Drop B. It covers page 1 whole but only the first byte of page 2,
+         * so page 2 is left alone.
+         */
         EXPECT_SUCCESS_GPU(HSAKMT_CALL(hsaKmtDeregisterMemory, m_hsakmt_current_ctx,
                                        buf + PG), gpuNode);
         EXPECT_EQ_GPU(HSA_SVM_ATTR_NO_ACCESS, GetSvmGpuAccess(buf + PG,     PG, gpuNode), gpuNode);
+        EXPECT_EQ_GPU(HSA_SVM_ATTR_ACCESS_IN_PLACE,
+                      GetSvmGpuAccess(buf + 2 * PG, PG, gpuNode), gpuNode);
+        munmap(buf, 3 * PG);
+    }
+
+    /* ---- 4. Whole-page overlap, so the subtraction still gets exercised ---- */
+    LOG() << "Phase 4: shared whole page kept by the survivor" << std::endl;
+    {
+        char *buf = (char *)mmap(0, 3 * PG, PROT_READ | PROT_WRITE,
+                                 MAP_ANONYMOUS | MAP_PRIVATE, -1, 0);
+        ASSERT_NE_GPU(MAP_FAILED, buf, gpuNode);
+        memset(buf, 0, 3 * PG);
+        SetSvmGpuAccess(buf, 3 * PG, gpuNode);
+
+        EXPECT_SUCCESS_GPU(HSAKMT_CALL(hsaKmtRegisterMemory, m_hsakmt_current_ctx,
+                                       buf, 3 * PG), gpuNode);
+        EXPECT_SUCCESS_GPU(HSAKMT_CALL(hsaKmtRegisterMemory, m_hsakmt_current_ctx,
+                                       buf + PG, PG), gpuNode);
+
+        /* Drop A: pages 0 and 2 go, page 1 stays with B. */
+        EXPECT_SUCCESS_GPU(HSAKMT_CALL(hsaKmtDeregisterMemory, m_hsakmt_current_ctx,
+                                       buf), gpuNode);
+        EXPECT_EQ_GPU(HSA_SVM_ATTR_NO_ACCESS, GetSvmGpuAccess(buf,      PG, gpuNode), gpuNode);
+        EXPECT_EQ_GPU(HSA_SVM_ATTR_ACCESS_IN_PLACE,
+                      GetSvmGpuAccess(buf + PG, PG, gpuNode), gpuNode);
         EXPECT_EQ_GPU(HSA_SVM_ATTR_NO_ACCESS, GetSvmGpuAccess(buf + 2 * PG, PG, gpuNode), gpuNode);
+
+        EXPECT_SUCCESS_GPU(HSAKMT_CALL(hsaKmtDeregisterMemory, m_hsakmt_current_ctx,
+                                       buf + PG), gpuNode);
+        EXPECT_EQ_GPU(HSA_SVM_ATTR_NO_ACCESS, GetSvmGpuAccess(buf + PG, PG, gpuNode), gpuNode);
         munmap(buf, 3 * PG);
     }
 }
@@ -1948,16 +1983,16 @@ void KFDSVMRangeTest::SVMApiOverlapReproTest(int gpuNode) {
               << (acc == HSA_SVM_ATTR_ACCESS ? "ACCESS"
                   : acc == HSA_SVM_ATTR_NO_ACCESS ? "NO_ACCESS" : "OTHER")
               << std::dec << std::endl;
-        EXPECT_EQ_GPU(sharedWithSurvivor ? HSA_SVM_ATTR_ACCESS
-                                         : HSA_SVM_ATTR_NO_ACCESS,
-                      acc, gpuNode);
+        /* 5000 bytes at offset 100 fills no page, so nothing is revoked. */
+        (void)sharedWithSurvivor;
+        EXPECT_EQ_GPU(HSA_SVM_ATTR_ACCESS_IN_PLACE, acc, gpuNode);
     }
 
-    /* Drop the high range. Now its pages are revoked too. */
+    /* Same for the high range, 1000 bytes cannot fill a page either. */
     EXPECT_SUCCESS_GPU(HSAKMT_CALL(hsaKmtDeregisterMemory, m_hsakmt_current_ctx,
                                    ptr + 5000), gpuNode);
     for (HSAuint64 p = highBase; p < highEnd; p += PG)
-        EXPECT_EQ_GPU(HSA_SVM_ATTR_NO_ACCESS,
+        EXPECT_EQ_GPU(HSA_SVM_ATTR_ACCESS_IN_PLACE,
                       GetSvmGpuAccess((void *)p, PG, gpuNode), gpuNode);
 
     munmap(base, allocSize + 2 * PG);
@@ -2030,13 +2065,15 @@ void KFDSVMRangeTest::SVMApiSharedPageTest(int gpuNode) {
     /* Drop b1: page0 is still owned by b2, so it must stay accessible. */
     EXPECT_SUCCESS_GPU(HSAKMT_CALL(hsaKmtDeregisterMemory, m_hsakmt_current_ctx,
                                    b1), gpuNode);
-    EXPECT_EQ_GPU(HSA_SVM_ATTR_ACCESS, GetSvmGpuAccess(page0, PG, gpuNode), gpuNode);
+    EXPECT_EQ_GPU(HSA_SVM_ATTR_ACCESS_IN_PLACE, GetSvmGpuAccess(page0, PG, gpuNode), gpuNode);
 
-    /* Drop b2: now both pages are revoked. */
+    /* Drop b2. Neither buffer fills a page on its own, so nothing is revoked;
+     * those pages still hold data nobody registered.
+     */
     EXPECT_SUCCESS_GPU(HSAKMT_CALL(hsaKmtDeregisterMemory, m_hsakmt_current_ctx,
                                    b2), gpuNode);
-    EXPECT_EQ_GPU(HSA_SVM_ATTR_NO_ACCESS, GetSvmGpuAccess(page0, PG, gpuNode), gpuNode);
-    EXPECT_EQ_GPU(HSA_SVM_ATTR_NO_ACCESS, GetSvmGpuAccess(page1, PG, gpuNode), gpuNode);
+    EXPECT_EQ_GPU(HSA_SVM_ATTR_ACCESS_IN_PLACE, GetSvmGpuAccess(page0, PG, gpuNode), gpuNode);
+    EXPECT_EQ_GPU(HSA_SVM_ATTR_ACCESS_IN_PLACE, GetSvmGpuAccess(page1, PG, gpuNode), gpuNode);
 
     munmap(base, 3 * PG);
 }
