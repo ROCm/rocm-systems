@@ -570,6 +570,32 @@ if(BUILD_TESTS)
       CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
     add_test(NAME rccl-UnitTestsGinSdmaAllGatherGpu COMMAND rccl-UnitTestsGinSdmaAllGatherGpu)
     set_tests_properties(rccl-UnitTestsGinSdmaAllGatherGpu PROPERTIES LABELS "unit;gpu")
+
+    add_executable(rccl-UnitTestsGinSdmaReduceScatterPolicy gin/gin_sdma_reducescatter_policy_test.cpp)
+    set_source_files_properties(gin/gin_sdma_reducescatter_policy_test.cpp PROPERTIES LANGUAGE CXX)
+    target_include_directories(rccl-UnitTestsGinSdmaReduceScatterPolicy PRIVATE
+      "${_gin_sdma_ag_hdr_dir}")
+    target_compile_definitions(rccl-UnitTestsGinSdmaReduceScatterPolicy PRIVATE GIN_SDMA_HOST_ONLY)
+    target_link_libraries(rccl-UnitTestsGinSdmaReduceScatterPolicy PRIVATE ${GTEST_BOTH_LIBRARIES} Threads::Threads)
+    set_target_properties(rccl-UnitTestsGinSdmaReduceScatterPolicy PROPERTIES
+      RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/test")
+    add_test(NAME rccl-UnitTestsGinSdmaReduceScatterPolicy COMMAND rccl-UnitTestsGinSdmaReduceScatterPolicy)
+    set_tests_properties(rccl-UnitTestsGinSdmaReduceScatterPolicy PROPERTIES LABELS "unit")
+
+    add_executable(rccl-UnitTestsGinSdmaReduceScatterGpu gin/gin_sdma_reducescatter_gpu_test.cpp)
+    target_include_directories(rccl-UnitTestsGinSdmaReduceScatterGpu PRIVATE
+      "${_gin_sdma_ag_hdr_dir}")
+    if(_gin_sdma_ag_gpu_offload)
+      target_compile_options(rccl-UnitTestsGinSdmaReduceScatterGpu PRIVATE ${_gin_sdma_ag_gpu_offload})
+      target_link_options(rccl-UnitTestsGinSdmaReduceScatterGpu PRIVATE ${_gin_sdma_ag_gpu_offload})
+    endif()
+    target_link_libraries(rccl-UnitTestsGinSdmaReduceScatterGpu PRIVATE
+      ${GTEST_BOTH_LIBRARIES} hip::host hip::device Threads::Threads)
+    set_target_properties(rccl-UnitTestsGinSdmaReduceScatterGpu PROPERTIES
+      RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/test"
+      CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
+    add_test(NAME rccl-UnitTestsGinSdmaReduceScatterGpu COMMAND rccl-UnitTestsGinSdmaReduceScatterGpu)
+    set_tests_properties(rccl-UnitTestsGinSdmaReduceScatterGpu PROPERTIES LABELS "unit;gpu")
   endif()
 
   # GIN Anvil-SDMA hybrid Broadcast (-D 3) policy host unit test (no GPU).
