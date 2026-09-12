@@ -669,6 +669,47 @@ HIP_TEST_CASE(Unit_hipMemPoolExportToShareableHandle_Negative) {
   HIP_CHECK(hipMemPoolDestroy(mempoolwoPfd));
 }
 /**
+ * Test Description
+ * ------------------------
+ *    - Test hipMemPoolExportToShareableHandle while a stream is capturing. The API
+ * is allowed in relaxed capture mode and must return hipErrorStreamCaptureUnsupported
+ * in the global and thread-local capture modes.
+ * ------------------------
+ *    - unit/memory/hipMemPoolExportToShareableHandle.cc
+ * Test requirements
+ * ------------------------
+ *    - HIP_VERSION >= 6.2
+ */
+HIP_TEST_CASE(Unit_hipMemPoolExportToShareableHandle_Capture) {
+  checkMempoolSupported(0)
+  HIP_CHECK(hipSetDevice(0));
+
+#if HT_WIN
+  hipMemAllocationHandleType handleType = hipMemHandleTypeWin32;
+#else
+  hipMemAllocationHandleType handleType = hipMemHandleTypePosixFileDescriptor;
+#endif
+
+  hipMemPoolProps pool_props{};
+  pool_props.allocType = hipMemAllocationTypePinned;
+  pool_props.location.id = 0;
+  pool_props.location.type = hipMemLocationTypeDevice;
+  pool_props.handleTypes = handleType;
+  hipMemPool_t mempool;
+  HIP_CHECK(hipMemPoolCreate(&mempool, &pool_props));
+
+  hipShareableHdl sharedHandle;
+  hipError_t capture_err = hipSuccess;
+  constexpr bool kRelaxedModeAllowed = true;
+  BEGIN_CAPTURE_SYNC(capture_err, kRelaxedModeAllowed);
+  HIP_CHECK_ERROR(hipMemPoolExportToShareableHandle(&sharedHandle, mempool, handleType, 0),
+                  capture_err);
+  END_CAPTURE_SYNC(capture_err);
+
+  HIP_CHECK(hipMemPoolDestroy(mempool));
+}
+
+/**
  * End doxygen group MemoryTest.
  * @}
  */
