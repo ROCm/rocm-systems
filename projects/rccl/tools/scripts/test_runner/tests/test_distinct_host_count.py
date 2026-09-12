@@ -14,13 +14,10 @@ source, mpirun places all ranks locally, so the correct answer is 1.
 """
 
 import os
-import sys
 import tempfile
 import unittest
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-
-from test_executor import _distinct_host_count
+from lib.test_executor import _distinct_host_count
 
 
 class TestDistinctHostCount(unittest.TestCase):

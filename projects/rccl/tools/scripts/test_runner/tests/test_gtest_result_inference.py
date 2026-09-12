@@ -13,13 +13,10 @@ for "no tests collected".
 
 import json
 import os
-import sys
 import tempfile
 import unittest
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-
-from test_executor import (
+from lib.test_executor import (
     collect_gtest_case_details,
     count_gtest_cases_from_json,
     count_gtest_cases_from_json_file,
