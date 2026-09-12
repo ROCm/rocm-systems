@@ -1,2 +1,2 @@
-rocm-docs-core[api_reference,llms]==1.38.0
+rocm-docs-core[api_reference,llms]==1.40.2
 sphinxcontrib.doxylink
