@@ -44,6 +44,15 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
     (`DEVCOMM_V22902_CC_PATH` / `DEVCOMM_V22907_CC_PATH`, both from
     `devcomm-test.cc`); suites `Devcomm*`. `devcomm/devcomm_v23000.cc` is not
     covered yet.
+  - `ras/client.cc` (`RAS_CLIENT_CC_PATH`, from `ras-client-test.cc`); suite
+    `RasClientMicrotest.*`. With
+    `NCCL_RAS_CLIENT` defined, `ras_internal.h` reduces to four macros, so this
+    unit's whole dependency surface is libc, not HIP/nccl; it seams that
+    surface through `fakes/libc_fakes.{h,cc}` plus the `fakes/libc_seam.h` /
+    `fakes/libc_seam_undef.h` positional rename pair (guard-less by design, so
+    every header declaring a renamed name must precede it and the undef half
+    must immediately follow the unit -- see `fakes/libc_seam.h:9-19`) instead
+    of the shared `fakes/nccl_fakes.cc` the other units in this binary use.
 - **`rccl-UnitTestsMicroEnqueue`** — `enqueue.cc` (via `ENQUEUE_CC_PATH`); suite
   `EnqueueMicrotest.*`. All tests live in `enqueue-test.cc`, grouped by unit under
   test; several fixtures are reused by later groups, so the order within the file
@@ -203,6 +212,7 @@ had become before this map existed.
 | `src/sym_kernels.cc` | `fakes/sym_kernels_fakes.cc` |
 | `src/transport/*`, `src/plugin/net.cc` | `fakes/transport_stubs.cc` |
 | libc (`gethostname`, `dladdr`) | `fakes/libc_interposers.cc` |
+| `src/ras/client.cc`'s libc surface (sockets/stdio/exit; see `fakes/libc_seam.h`) | `fakes/libc_fakes.cc` |
 | core/lifecycle floor + data symbols | `fakes/nccl_stubs.cc` |
 | reusable `nccl*` seams | `fakes/nccl_fakes.cc` |
 | HIP runtime | `fakes/hip_fakes.cc` |
