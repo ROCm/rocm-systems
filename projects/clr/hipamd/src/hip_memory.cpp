@@ -170,6 +170,13 @@ hipError_t ihipFree(void* ptr) {
 
     // Find out if memory belongs to any memory pool
     if (!g_devices[device_id]->FreeMemory(memory_object, nullptr)) {
+      // FreeMemory returns false when memory is not in any pool's busy heap.
+      // Check if it was already freed (may still be in a pool's free heap),
+      // or was a graph pool allocation whose physical backing was already released.
+      if (g_devices[device_id]->IsFreedPoolMemory(memory_object) ||
+          memory_object->getUserData().phys_mem_obj != nullptr) {
+        return hipErrorInvalidValue;
+      }
       // Wait on the device, associated with the current memory object during allocation
       g_devices[device_id]->SyncAllStreams();
 
