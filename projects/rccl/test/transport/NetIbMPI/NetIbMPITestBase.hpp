@@ -1538,8 +1538,13 @@ protected:
     // nqps is the live count ThreadedCastAgreedNqps agreed on the main thread, so both
     // ranks size their transfers the same way and merged devices work; the sender
     // confirms its own connection reports the same count.
+    // totTokens is the ledger to arm. Callers whose audit asserts the ledger ends empty
+    // pass the number of sub-threshold sends they make, so the two cannot drift into a
+    // false "the sends did not take the WRR path"; the serial bodies couple them the
+    // same way with their own kTotTokens.
     ThreadResult WorkerCastPrepareTokens(int rank, ConnectionPair& pair, void* buffer,
-                                         void* mhandle, int nqps, int tag, int seed) {
+                                         void* mhandle, int nqps, int tag, int seed,
+                                         int totTokens = 100) {
         ThreadResult result = WorkerSendRecvPattern(rank, pair, buffer, 64, tag, mhandle, seed);
         if (!result.ok || rank != 1) return result;
 
@@ -1550,16 +1555,12 @@ protected:
         result = WorkerCastLiveNqps(pair.sendComm, &liveNqps);
         if (!result.ok) return result;
         if (liveNqps != nqps) {
-            // Both ranks sized their buffers from the value the main thread agreed,
-            // so a worker's connection reporting something else means the
-            // expectations below are about a different connection than the one
-            // carrying the data.
             result.ok = false;
             result.msg = "this worker's connection reports nqps=" + std::to_string(liveNqps)
                          + " but the run agreed on " + std::to_string(nqps);
             return result;
         }
-        return WorkerCastSetTokens(pair.sendComm, EqualTokens(liveNqps));
+        return WorkerCastSetTokens(pair.sendComm, EqualTokens(liveNqps, totTokens));
     }
 
     // Worker-safe CAST transfer with a token-consumption expectation. Only the
@@ -2039,20 +2040,19 @@ protected:
         RunThreadedBody(ThreadDevPolicy::Fixed(dev), nThreads, label, std::move(body));
     }
 
+    // How a threaded size sweep gets its memory. On a fused device the PerSize shape is
+    // the point of the test, since every registration fans out across both members'
+    // protection domains and caches. The allocation churns with it, as the serial body
+    // does: registering sub-ranges of one block would keep handing back the same cache
+    // entry once a covering registration were live. The threaded branch has to match
+    // whichever its serial body does, or it quietly covers less.
+    enum class SweepRegistration { Once, PerSize };
+
     // Threaded size sweep: every worker walks the list on its own connection with
     // a per-worker payload seed, so a transfer delivered on the wrong connection
     // fails verification. Memory comes from `registration`: Once registers a buffer
     // covering the largest step and reuses that handle, PerSize allocates and
     // registers each step fresh. Wraps the run in an RDMA resource leak check.
-    // How a threaded size sweep gets its memory. Some serial bodies allocate and
-    // register once and reuse that for every step; others allocate and register
-    // exactly the current size on each step. On a fused device the second shape is
-    // the point of the test, since every registration fans out across both members'
-    // protection domains and caches. The allocation churns with it, as the serial
-    // body does: registering sub-ranges of one block would keep handing back the
-    // same cache entry once a covering registration were live. The threaded branch
-    // has to match whichever its serial body does, or it quietly covers less.
-    enum class SweepRegistration { Once, PerSize };
 
     void RunThreadedSizeSweep(ThreadDevPolicy policy, int nThreads,
                               const std::vector<size_t>& sizes, int repeats,

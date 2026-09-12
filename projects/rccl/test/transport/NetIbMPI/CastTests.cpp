@@ -11,6 +11,9 @@
 // ThreadedCastAgreedNqps returns this when the connection uses one queue pair: real,
 // but the scheduler then returns before split selection and token accounting, so the
 // threaded branches skip rather than assert.
+// ThreadedCastAgreedNqps returns this when the connection uses one queue pair: real,
+// but the scheduler then returns before split selection and token accounting, so the
+// threaded branches skip rather than assert.
 static constexpr int kThreadedNqpsSingleQp = 1;
 
 #ifdef MPI_TESTS_ENABLED
@@ -1535,7 +1538,7 @@ TEST_F(NetIbMPITest, CastStressMultiRoundTwoConns) {
                 const int tagBase = 10000 + threadIdx * 200;
                 const int seedBase = WorkerSeed(threadIdx, 3999);
                 result = WorkerCastPrepareTokens(rank, pair, buffer, mhandle, nqps, tagBase,
-                                                 seedBase);
+                                                 seedBase, /*totTokens=*/kThreadedMsgs);
                 if (!result.ok) return result;
 
                 // Phase 1: small messages, all on the WRR path.
