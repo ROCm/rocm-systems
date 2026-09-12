@@ -74,8 +74,6 @@ THE SOFTWARE.
  * \brief AMD The rocDecode video decoder for AMD’s GPUs.
  */
 
-#define MAX_FRAME_NUM       16
-
 typedef int (ROCDECAPI *PFNRECONFIGUEFLUSHCALLBACK)(void *, uint32_t, void *);
 
 typedef enum SeiAvcHevcPayloadType_enum {
@@ -467,6 +465,16 @@ class RocVideoDecoder {
          *   @brief  This function gets called when all unregistered user SEI messages are parsed for a frame
          */
         int GetSEIMessage(RocdecSeiMessageInfo *p_sei_message_info);
+
+        struct SeiMessageEntry {
+            std::vector<uint8_t> data;
+            std::vector<RocdecSeiMessage> messages;
+        };
+
+        /**
+         *   @brief Write and release a queued SEI message for a displayed picture.
+         */
+        bool HandleSeiMessageDisplay(int picture_index);
         
         /**
          * @brief function to release all internal frames and clear the vp_frames_q_ (used with reconfigure): Only used with "OUT_SURFACE_MEM_DEV_INTERNAL"
@@ -510,12 +518,10 @@ class RocVideoDecoder {
         hipStream_t hip_stream_ = nullptr;
         rocDecVideoChromaFormat video_chroma_format_ = rocDecVideoChromaFormat_420;
         rocDecVideoSurfaceFormat video_surface_format_ = rocDecVideoSurfaceFormat_NV12;
-        RocdecSeiMessageInfo *curr_sei_message_ptr_ = nullptr;
-        RocdecSeiMessageInfo sei_message_display_q_[MAX_FRAME_NUM];
+        std::vector<SeiMessageEntry> sei_message_display_q_;
         RocdecVideoFormat *curr_video_format_ptr_ = nullptr;
         int output_frame_cnt_ = 0, output_frame_cnt_ret_ = 0;
         int decoded_pic_cnt_ = 0;
-        int decode_poc_ = 0, pic_num_in_dec_order_[MAX_FRAME_NUM];
         int num_alloced_frames_ = 0;
         int last_decode_surf_idx_ = 0;
         std::ostringstream input_video_info_str_;
