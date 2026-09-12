@@ -344,6 +344,10 @@ AqlQueue::AqlQueue(core::SharedQueue* shared_queue, GpuAgent* agent, size_t req_
 
   active_ = true;
 
+  if (core::Runtime::runtime_singleton_->flag().debug_set_resource_limits()) {
+    SetResourceLimits(core::Runtime::runtime_singleton_->flag().debug_set_resource_limits());
+  }
+
   PM4IBGuard.Dismiss();
   RingGuard.Dismiss();
   QueueGuard.Dismiss();
@@ -1582,6 +1586,70 @@ hsa_status_t AqlQueue::GetCUMasking(uint32_t num_cu_mask_count, uint32_t* cu_mas
   }
   memcpy(cu_mask, &cu_mask_[0], sizeof(uint32_t) * user_dword_count);
   return HSA_STATUS_SUCCESS;
+}
+
+void AqlQueue::SetResourceLimits(uint32_t limit) {
+  // Instrumentation tag so we can grep the logs to confirm the chosen
+  // value and exactly what was programmed. This path is only reached when
+  // HSA_NPI_SET_RESOURCE_LIMITS is set to a non-zero value.
+  static const char* kTag = "[HSA_NPI_SET_RESOURCE_LIMITS]";
+  auto isa = agent_->supported_isas()[0];
+  const std::string isa_name = isa->GetProcessorName();
+
+  fprintf(stderr, "%s chosen=%u target_isa=%s (gfx%d.%d.%d)\n", kTag, limit,
+          isa_name.c_str(), isa->GetMajorVersion(), isa->GetMinorVersion(),
+          isa->GetStepping());
+
+  // COMPUTE_RESOURCE_LIMITS.WAVES_PER_SH is a 10-bit field (0..1023).
+  if (limit > 1023) {
+    fprintf(stderr, "%s ERROR invalid limit=%u (valid range 0..1023) - NOT programmed\n",
+            kTag, limit);
+    return;
+  }
+
+  // Supported on gfx9.4+ and the gfx12 family. The CP SH-register offset for
+  // COMPUTE_RESOURCE_LIMITS is a stable CP ABI (0x0215) across these gens; see
+  // the derivation note at COMPUTE_RESOURCE_LIMITS_OFFSET below.
+  const bool supported = (isa->GetMajorVersion() == 9 && isa->GetMinorVersion() >= 4) ||
+                         (isa->GetMajorVersion() == 12);
+  if (!supported) {
+    fprintf(stderr, "%s ERROR resource limits not supported on %s - NOT programmed\n",
+            kTag, isa_name.c_str());
+    return;
+  }
+
+  const uint32_t sh_reg_pkt_size_dw = 3;
+  uint32_t sh_reg_pkt[sh_reg_pkt_size_dw] = {};
+
+  /*
+   * COMPUTE_RESOURCE_LIMITS SET_SH_REG offset = 0x0215.
+   *
+   * A SET_SH_REG packet takes the register's offset within the CP SH-register
+   * aperture, i.e. (CP_absolute_reg_addr - PACKET3_SET_SH_REG_START), where
+   * PACKET3_SET_SH_REG_START = 0x2c00. This offset is a stable CP microcode ABI,
+   * not the GRBM number: on gfx12.5 the asic_reg header renumbers the compute
+   * block (regCOMPUTE_RESOURCE_LIMITS = 0x1bb5, gc_12_1_0) so it cannot be used
+   * directly; the CP SH offset is still 0x0215.
+   *
+   * Validated on gfx12.5 silicon: capping WAVES_PER_SH via this packet throttles
+   * wave occupancy inversely with the cap (wall time scales ~1/cap), with no
+   * neighbouring SH register clobbered and no GPU faults.
+   */
+  const uint32_t COMPUTE_RESOURCE_LIMITS_OFFSET = 0x0215;
+
+  sh_reg_pkt[0] = PM4_HDR(PM4_HDR_IT_OPCODE_SET_SH_REG, sh_reg_pkt_size_dw, isa->GetMajorVersion());
+  sh_reg_pkt[1] = PM4_SET_SH_REG_DW1_REG_OFFSET(COMPUTE_RESOURCE_LIMITS_OFFSET);
+  sh_reg_pkt[2] = PM4_SET_SH_REG_DW2_DATA(limit);
+
+  fprintf(stderr,
+          "%s programming COMPUTE_RESOURCE_LIMITS: WAVES_PER_SH=%u reg_value=0x%08x "
+          "set_sh_reg_offset=0x%04x pkt=[0x%08x 0x%08x 0x%08x]\n",
+          kTag, limit & 0x3ff, limit, COMPUTE_RESOURCE_LIMITS_OFFSET,
+          sh_reg_pkt[0], sh_reg_pkt[1], sh_reg_pkt[2]);
+
+  ExecutePM4(sh_reg_pkt, sh_reg_pkt_size_dw * sizeof(uint32_t));
+
+  fprintf(stderr, "%s enqueued SET_SH_REG on %s (limit=%u)\n", kTag, isa_name.c_str(), limit);
 }
 
 void AqlQueue::SetProfiling(bool enabled) {
