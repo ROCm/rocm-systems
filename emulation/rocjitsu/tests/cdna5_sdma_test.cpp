@@ -5,7 +5,10 @@
 
 #include <sys/mman.h>
 
+#include <algorithm>
+#include <chrono>
 #include <limits>
+#include <thread>
 
 namespace {
 
@@ -24,11 +27,15 @@ constexpr uint32_t kSdmaSubopCopyLinear = 0;
 constexpr uint32_t kSdmaSubopFence64 = 2;
 constexpr uint32_t kSdmaSubopPollMem64 = 5;
 
+enum class SuspensionGate { Runtime, Debug };
+
 class HostSdmaQueueForTest {
 public:
   explicit HostSdmaQueueForTest(Gfx1250Sim &sim, uint64_t initial_doorbell = 0,
-                                uint64_t last_doorbell = 0, bool host_accessible = true)
-      : sim_(sim), doorbells_{initial_doorbell} {
+                                uint64_t last_doorbell = 0, bool host_accessible = true,
+                                uint64_t initial_cursor = 0)
+      : sim_(sim), read_idx_(initial_cursor), write_idx_(initial_cursor),
+        doorbells_{initial_doorbell} {
     sim_.memory->set_passthrough(true);
 
     amdgpu::HwQueue queue{};
@@ -51,6 +58,15 @@ public:
 
   uint32_t *ring() { return ring_.data(); }
 
+  void set_suspended(SuspensionGate gate, bool suspended) {
+    if (gate == SuspensionGate::Runtime)
+      sim_.cp()->update_queue(kQueueId, kProcessId, reinterpret_cast<uint64_t>(ring_.data()),
+                              static_cast<uint32_t>(ring_.size() * sizeof(uint32_t)),
+                              suspended ? 0 : 100);
+    else
+      sim_.cp()->set_queue_debug_suspended(kQueueId, kProcessId, suspended);
+  }
+
   void submit(uint32_t dwords) {
     publish_write_pointer(dwords);
     ring_doorbell(dwords);
@@ -65,6 +81,13 @@ public:
     uint64_t write_idx = static_cast<uint64_t>(dwords) * sizeof(uint32_t);
     std::atomic_ref<uint64_t>(doorbells_[0]).store(write_idx, std::memory_order_release);
     sim_.engine->schedule_event_now(sim_.cp()->doorbell_event());
+  }
+
+  void publish_bytes_with_relaxed_doorbell(uint64_t bytes) {
+    // Model the direct ROCr producer without a C++ data race on its volatile
+    // doorbell: packet visibility must come from the write pointer's release.
+    std::atomic_ref<uint64_t>(write_idx_).store(bytes, std::memory_order_release);
+    std::atomic_ref<uint64_t>(doorbells_[0]).store(bytes, std::memory_order_relaxed);
   }
 
   uint64_t read_idx() const {
@@ -295,6 +318,189 @@ TEST(Gfx1250SdmaTest, DoorbellPublishesPacketsWithoutWritePointerUpdate) {
     ASSERT_TRUE(sim.engine->step());
     EXPECT_EQ(queue.read_idx(), 5u * sizeof(uint32_t));
     EXPECT_EQ(value, 42u);
+  }
+}
+
+TEST(Gfx1250SdmaTest, UnreadablePublicationWordsDeferPacketFetch) {
+  constexpr uint32_t kProcessId = 1251;
+  constexpr uint32_t kQueueId = 1251;
+  enum class InvalidWord { UnalignedAddress, PartialMapping, UnalignedBacking };
+  for (bool invalid_doorbell : {true, false}) {
+    for (InvalidWord invalid : {InvalidWord::UnalignedAddress, InvalidWord::PartialMapping,
+                                InvalidWord::UnalignedBacking}) {
+      SCOPED_TRACE(invalid_doorbell);
+      SCOPED_TRACE(static_cast<int>(invalid));
+      Gfx1250Sim sim;
+      KfdProcess process(kProcessId);
+      sim.memory->register_process(kProcessId, &process.page_table_, &process.page_table_mutex_,
+                                   process.page_table_generation());
+      constexpr uint64_t kControlVa = 0x1000'0000'0000ULL;
+      alignas(4096) std::array<uint64_t, 512> control{};
+      alignas(4096) std::array<uint32_t, 1024> ring{};
+      constexpr uint64_t kRingVa = kControlVa + 4096;
+      constexpr uint64_t kEnd = 4 * sizeof(uint32_t);
+      control[1] = control[2] = kEnd; // Write pointer and doorbell.
+      ring[0] = kSdmaOpFence;
+      write_sdma_qword_va(ring.data(), 1, 2, kRingVa + 512);
+      ring[3] = 42;
+      process.map_pages(kRingVa, ring.data(), sizeof(ring));
+      process.map_pages(kControlVa, control.data(), sizeof(control));
+      const uint64_t invalid_va =
+          invalid == InvalidWord::UnalignedBacking
+              ? kControlVa + 8192
+              : kControlVa + 24 + (invalid == InvalidWord::UnalignedAddress);
+      auto *invalid_backing = reinterpret_cast<uint8_t *>(control.data()) + 24 +
+                              (invalid != InvalidWord::PartialMapping);
+      std::memcpy(invalid_backing, &kEnd, sizeof(kEnd));
+      if (invalid == InvalidWord::UnalignedBacking) {
+        process.map_pages(invalid_va, invalid_backing, sizeof(kEnd));
+      } else if (invalid == InvalidWord::PartialMapping) {
+        // The publication word is only partially mapped, despite readable
+        // storage following it. A byte-wise read must not publish the packets.
+        process.unmap_pages(kControlVa, sizeof(control));
+        process.map_pages(kControlVa, control.data(), 28);
+      }
+      amdgpu::HwQueue queue{};
+      queue.process_id = kProcessId;
+      queue.queue_id = kQueueId;
+      queue.ring_base_va = kRingVa;
+      queue.ring_size = sizeof(ring);
+      queue.read_ptr_va = kControlVa;
+      queue.write_ptr_va = invalid_doorbell ? kControlVa + 8 : invalid_va;
+      queue.doorbell_va = invalid_doorbell ? invalid_va : kControlVa + 16;
+      queue.is_sdma = true;
+      sim.cp()->register_queue(queue);
+      sim.engine->schedule_event_now(sim.cp()->doorbell_event());
+      ASSERT_TRUE(sim.engine->step());
+      EXPECT_EQ(control[0], 0u);
+      EXPECT_EQ(ring[128], 0u);
+      if (invalid == InvalidWord::PartialMapping) {
+        process.unmap_pages(kControlVa, sizeof(control));
+        process.map_pages(kControlVa, control.data(), sizeof(control));
+        // Restoring the mapping must be enough: do not ring the doorbell or
+        // schedule another fetch to rescue the previously observed publication.
+        sim.engine->run();
+        EXPECT_EQ(control[0], kEnd);
+        EXPECT_EQ(ring[128], 42u);
+      }
+      sim.cp()->unregister_queue(queue.queue_id, queue.process_id);
+      sim.memory->unregister_process(queue.process_id);
+    }
+  }
+}
+
+TEST(Gfx1250SdmaTest, ConcurrentPublicationAcross32BitBoundary) {
+  for (bool host_accessible : {true, false}) {
+    SCOPED_TRACE(host_accessible);
+    Gfx1250Sim sim;
+    constexpr uint64_t kStart = (uint64_t{1} << 32) - 32;
+    constexpr uint32_t kIterations = 1024;
+    HostSdmaQueueForTest queue(sim, kStart, kStart, host_accessible, kStart);
+    alignas(8) std::array<uint64_t, 2> values{};
+    std::atomic<uint32_t> completed{0};
+    std::atomic<bool> invalid_read{false};
+    std::jthread producer([&](std::stop_token stop) {
+      for (uint32_t i = 1; i <= kIterations && !stop.stop_requested(); ++i) {
+        const uint64_t begin = kStart + (i - 1) * 32;
+        auto *packet = queue.ring() + (begin % 256) / sizeof(uint32_t);
+        std::fill_n(packet, 8, 0u);
+        packet[0] = kSdmaOpFence | (i % 2 ? kSdmaSubopFence64 << 8 : 0);
+        write_sdma_qword_address(packet, 1, 2, &values[i % 2]);
+        packet[3] = i;
+        packet[4] = 0;
+        const uint64_t end = begin + 32;
+        queue.publish_bytes_with_relaxed_doorbell(end);
+        while (queue.read_idx() < end && !stop.stop_requested())
+          std::this_thread::yield();
+        if (stop.stop_requested())
+          return;
+        if (queue.read_idx() != end || values[i % 2] != i || values[1 - i % 2] != i - 1) {
+          invalid_read.store(true, std::memory_order_relaxed);
+          return;
+        }
+        completed.store(i, std::memory_order_relaxed);
+      }
+    });
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
+    while (completed.load(std::memory_order_relaxed) != kIterations &&
+           !invalid_read.load(std::memory_order_relaxed) &&
+           std::chrono::steady_clock::now() < deadline) {
+      sim.engine->schedule_event_now(sim.cp()->doorbell_event());
+      ASSERT_TRUE(sim.engine->step());
+    }
+    producer.request_stop();
+    producer.join();
+    EXPECT_FALSE(invalid_read.load());
+    EXPECT_EQ(completed.load(), kIterations);
+    EXPECT_EQ(queue.read_idx(), kStart + kIterations * 32);
+  }
+}
+
+TEST(Gfx1250SdmaTest, DoorbellOnlySubmissionResumesAfterSuspension) {
+  // GPU-addressed doorbells have no polling thread: only the explicit fetch
+  // below can record deferred work, so a later poll cannot rescue a lost resume.
+  for (SuspensionGate gate : {SuspensionGate::Runtime, SuspensionGate::Debug}) {
+    SCOPED_TRACE(gate == SuspensionGate::Runtime ? "runtime" : "debug");
+    for (bool both_gates : {true, false}) {
+      SCOPED_TRACE(both_gates);
+      Gfx1250Sim sim;
+      HostSdmaQueueForTest queue(sim, 0, 0, /*host_accessible=*/false);
+      simdojo::Event checkpoint{sim.cp(), simdojo::EventType::TIMER_CALLBACK,
+                                [](simdojo::Tick, simdojo::Message *) {}};
+      alignas(8) uint64_t value = 0;
+      auto *packet = queue.ring();
+      packet[0] = kSdmaOpFence | (kSdmaSubopFence64 << 8) | (3u << 16);
+      write_sdma_qword_address(packet, 1, 2, &value);
+      packet[3] = 42;
+      packet[4] = 0;
+
+      const SuspensionGate other_gate =
+          gate == SuspensionGate::Runtime ? SuspensionGate::Debug : SuspensionGate::Runtime;
+      queue.set_suspended(gate, true);
+      if (both_gates)
+        queue.set_suspended(other_gate, true);
+      queue.ring_doorbell(5);
+      ASSERT_TRUE(sim.engine->step());
+      EXPECT_EQ(queue.read_idx(), 0u);
+      EXPECT_EQ(value, 0u);
+      const uint64_t passes_before_resume = sim.cp()->doorbell_handle_count_for_test();
+
+      queue.set_suspended(gate, false);
+      if (both_gates) {
+        // Observe this tick without stepping straight to the fixture timeout.
+        sim.engine->schedule_event_now(&checkpoint);
+        ASSERT_TRUE(sim.engine->step());
+        EXPECT_EQ(sim.cp()->doorbell_handle_count_for_test(), passes_before_resume);
+        EXPECT_EQ(queue.read_idx(), 0u);
+        EXPECT_EQ(value, 0u);
+        queue.set_suspended(other_gate, false);
+      }
+      // Resume must schedule the fetch itself, without another doorbell.
+      sim.engine->run();
+      EXPECT_EQ(queue.read_idx(), 5u * sizeof(uint32_t));
+      EXPECT_EQ(value, 42u);
+    }
+  }
+}
+
+TEST(Gfx1250SdmaTest, UnpublishedWritePointerDoesNotScheduleResumePass) {
+  for (SuspensionGate gate : {SuspensionGate::Runtime, SuspensionGate::Debug}) {
+    SCOPED_TRACE(gate == SuspensionGate::Runtime ? "runtime" : "debug");
+    for (uint64_t initial : {uint64_t{0}, std::numeric_limits<uint64_t>::max()}) {
+      SCOPED_TRACE(initial);
+      Gfx1250Sim sim;
+      HostSdmaQueueForTest queue(sim, initial, initial, /*host_accessible=*/false);
+      queue.set_suspended(gate, true);
+      queue.publish_write_pointer(5);
+      sim.engine->schedule_event_now(sim.cp()->doorbell_event());
+      ASSERT_TRUE(sim.engine->step());
+      const uint64_t passes_before_resume = sim.cp()->doorbell_handle_count_for_test();
+
+      queue.set_suspended(gate, false);
+      sim.engine->run();
+      EXPECT_EQ(sim.cp()->doorbell_handle_count_for_test(), passes_before_resume);
+      EXPECT_EQ(queue.read_idx(), 0u);
+    }
   }
 }
 
