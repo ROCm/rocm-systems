@@ -1,7 +1,19 @@
 [
     {
+        "header": "timemory/compat/macros.h",
+        "hint": "use the ROCPROFSYS_* macros in \"common/defines.h\""
+    },
+    {
+        "header": "timemory/defines.h",
+        "hint": "don't use defines from Timemory"
+    },
+    {
         "header": "timemory/environment/declaration.hpp",
         "hint": "use \"common/environment.hpp\""
+    },
+    {
+        "header": "timemory/macros/language.hpp",
+        "hint": "use relevant C++ features directly"
     },
     {
         "header": "timemory/units.hpp",
@@ -22,5 +34,9 @@
     {
         "header": "timemory/utility/join.hpp",
         "hint": "use \"common/join.hpp\""
+    },
+    {
+        "header": "timemory/utility/macros.hpp",
+        "hint": "use the ROCPROFSYS_* macros in \"common/defines.h\""
     }
 ]

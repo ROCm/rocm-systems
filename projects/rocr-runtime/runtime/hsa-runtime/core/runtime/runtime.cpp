@@ -943,8 +943,10 @@ hsa_status_t Runtime::GetSystemInfo(hsa_system_info_t attribute, void* value) {
       // Host memory DMA-BUF allocation via vmem APIs requires:
       //  - Virtual Memory APIs supported by the driver
       //  - At least one GPU agent (needed for DRM operations)
+      //  - Requires vmem support, a GPU agent, and a non-DXG backend (WDDM/DXG has no host-memory VMM).
       auto* runtime = core::Runtime::runtime_singleton_;
-      *((bool*)value) = runtime->VirtualMemApiSupported() && !runtime->gpu_agents().empty();
+      *((bool*)value) = runtime->VirtualMemApiSupported() && !runtime->gpu_agents().empty() &&
+                        !runtime->thunkLoader()->IsDXG();
       break;
     }
     default:

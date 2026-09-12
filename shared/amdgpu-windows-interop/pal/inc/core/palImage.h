@@ -726,6 +726,31 @@ struct SubresRange
     uint16   numSlices;    ///< Number of slices in the range.
 };
 
+// Helper functions for checking if a subresource is in a given range.
+inline bool MipInRange(uint8 mip, const SubresRange& subresRange)
+{
+    return Util::InRange(
+            mip,
+            static_cast<uint8>(subresRange.startSubres.mipLevel),
+            static_cast<uint8>(subresRange.startSubres.mipLevel + subresRange.numMips - 1));
+}
+
+inline bool SliceInRange(uint16 slice, const SubresRange& subresRange)
+{
+    return Util::InRange(
+            slice,
+            static_cast<uint16>(subresRange.startSubres.arraySlice),
+            static_cast<uint16>(subresRange.startSubres.arraySlice + subresRange.numSlices - 1));
+}
+
+inline bool PlaneInRange(uint8 plane, const SubresRange& subresRange)
+{
+    return Util::InRange(
+            plane,
+            static_cast<uint8>(subresRange.startSubres.plane),
+            static_cast<uint8>(subresRange.startSubres.plane + subresRange.numPlanes - 1));
+}
+
 /// A variant struct of MemoryImageCopyRegion
 /// Specifies parameters for a copy from CPU memory to Image.
 /// An input for Image::CopyMemoryToImage().
@@ -791,6 +816,47 @@ inline constexpr bool OverlappedSubresRanges(
            (aStart.arraySlice < (bStart.arraySlice + b.numSlices)) &&
            (bStart.arraySlice < (aStart.arraySlice + a.numSlices));
 }
+
+/// Contains constant properties of a living IImage which the client might want to query, currently the image's
+/// Display DCC and Distributed Compression properties.  Output structure for @ref IImage::Properties().
+///
+/// @note Anything added here must be constant for the life of the image.  @ref flags.hasDisplayDcc and
+///       @ref flags.hasDistCompr are independent (both may be set); @ref displayDcc / @ref distCompr is valid only
+///       when its corresponding flag is set.
+struct ImageProperties
+{
+    union
+    {
+        struct
+        {
+            uint32 hasDisplayDcc :  1; ///< True if this image contains a Display DCC metadata surface; @ref displayDcc
+                                       ///  is valid.
+            uint32 hasDistCompr  :  1; ///< True if this image has Distributed Compression properties; @ref distCompr
+                                       ///  is valid.
+            uint32 reserved      : 30; ///< Reserved for future use.
+        };
+        uint32 u32All;                 ///< Flags packed as a 32-bit value.
+    } flags;
+
+    /// Display DCC metadata.  Valid only when @ref flags.hasDisplayDcc is set.
+    struct
+    {
+        gpusize offset;             ///< DCC key byte offset from the start of the image (not the bound GPU memory).
+        uint32  pitch;              ///< DCC key pitch, in pixels.
+        bool    independentBlk64B;  ///< DCC was created with 64-byte independent blocks.
+        bool    independentBlk128B; ///< DCC was created with 128-byte independent blocks.
+    } displayDcc;
+
+    /// Distributed compression block sizes.  Valid only when @ref flags.hasDistCompr is set.  Each value is the base-2
+    /// logarithm of the block size in bytes (e.g. 6 == 64 bytes, 7 == 128 bytes, 8 == 256 bytes).
+    struct
+    {
+        uint8 log2MaxUncomprBlockSizePlane0; ///< Log2 of the max uncompressed block size, in bytes, for plane 0.
+        uint8 log2MaxComprBlockSizePlane0;   ///< Log2 of the max compressed block size, in bytes, for plane 0.
+        uint8 log2MaxUncomprBlockSizePlane1; ///< Log2 of the max uncompressed block size, in bytes, for plane 1.
+        uint8 log2MaxComprBlockSizePlane1;   ///< Log2 of the max compressed block size, in bytes, for plane 1.
+    } distCompr;
+};
 
 /**
  ***********************************************************************************************************************
@@ -982,6 +1048,29 @@ public:
         const SubresRange subresRange,
         const ImageLayout oldLayout,
         const ImageLayout newLayout) const = 0;
+
+    /// @brief Reports this image's constant, hardware-internal compression properties.
+    ///
+    /// @returns A reference to this image's @ref ImageProperties, valid for the life of the image.
+    virtual const ImageProperties& Properties() const = 0;
+
+    /// @brief Clips a view's requested compression mode down to what this image actually supports.
+    ///
+    /// @param [in] viewCompressionMode  The compression mode requested by the view.
+    ///
+    /// @returns The effective compression mode for a view of this image.
+    virtual CompressionMode GetImageViewCompressionMode(
+        CompressionMode viewCompressionMode) const = 0;
+
+    /// @brief Reports whether this image is compatible with Display DCC in the specified layout.
+    ///
+    /// Only meaningful when @ref ImageProperties::flags.hasDisplayDcc is set.
+    ///
+    /// @param [in] layout  The image layout to evaluate.
+    ///
+    /// @returns True if Display DCC may be used for this image in the specified layout.
+    virtual bool IsLayoutDisplayDccCompatible(
+        ImageLayout layout) const = 0;
 
 protected:
     /// @internal Constructor.

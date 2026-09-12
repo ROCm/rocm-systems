@@ -54,6 +54,15 @@ Copy operations at or below the 256-row threshold are unchanged.
     - Streamlined batch grouping:
       * Removed the `AgentGroup/src_agent` mapping for D2D broadcasts.
       * Processed `H2D` and `D2H` LINEAR operations directly, bypassing the broadcast map.
+      
+## HIP 8.0 for ROCm 8.0
+
+### Added
+* An optional `HIP_FORCE_API_VERSION` macro can be used to select an older version of the HIP APIs. For example, `HIP_FORCE_API_VERSION=600` selects the HIP 6.0 APIs. This macro must be defined before including `hip_runtime_api.h`.
+
+### Deprecated
+
+* `hipMemAdvise` is now an alias for `hipMemAdvise_v2`. To use the previous version of `hipMemAdvise`, define `HIP_FORCE_API_VERSION` as a non-zero value less than 800.
 
 ## HIP 7.14 for ROCm 7.14
 

@@ -7,9 +7,11 @@
 
 #include <algorithm>
 #include <cassert>
+#include <chrono>
 #include <exception>
 #include <stdexcept>
 #include <string>
+#include <thread>
 
 namespace simdojo {
 
@@ -430,8 +432,20 @@ void SimulationEngine::worker_loop(PartitionID partition_id) {
       drain_async_for_partition(ctx);
 
       // Phase 2: Process all events with timestamp <= global LBTS.
+      //
+      // TICK_MAX is the absence of a horizon, not an infinite one: it says every
+      // partition published "nothing scheduled" at the last barrier, so this
+      // epoch has no bound to process against. Treating it as one lets a
+      // partition whose handlers keep re-arming (the command processor's stall
+      // re-check does, once per doorbell wait) run the entire simulation inside
+      // a single epoch while every peer sits in the barrier waiting for it --
+      // which is the multi-partition hang. Skip processing instead: whatever the
+      // drain above just pulled in is published below, the barrier turns it into
+      // a finite LBTS, and the next epoch processes it. The cost is one extra
+      // epoch per idle-to-busy transition.
       Tick lbts = global_lbts_.load(std::memory_order_acquire);
-      while (!ctx.event_queue.empty() && ctx.event_queue.next_event_time() <= lbts) {
+      while (lbts != TICK_MAX && !ctx.event_queue.empty() &&
+             ctx.event_queue.next_event_time() <= lbts) {
         auto entry = ctx.event_queue.pop();
         process_event(ctx, entry);
         if (done_.load(std::memory_order_acquire)) {
@@ -475,6 +489,45 @@ void SimulationEngine::barrier_completion() {
 
   if (check_termination(new_lbts))
     return;
+
+  if (new_lbts == TICK_MAX)
+    idle_wait_quiescent();
+}
+
+void SimulationEngine::idle_wait_quiescent() {
+  // Every partition published TICK_MAX, so nothing in the simulation can advance
+  // until a foreign thread posts an async event -- a doorbell, a primary
+  // releasing, or request_exit(). Without a wait here the epoch loop runs flat
+  // out, and an idle engine pins one host core per partition. That is not just
+  // waste: rocjitsu's own suite runs many emulators at once under `ctest -j`, and
+  // the spinning partitions starve the guest process that has to ring the
+  // doorbell, so a run that is merely idle never becomes busy again.
+  //
+  // This runs in the barrier's completion function, which means every other
+  // worker is already parked inside the barrier -- so one bounded sleep here
+  // idles the whole engine, with no wakeup to lose and no peer left waiting on a
+  // partition that decided to sleep on its own.
+  //
+  // Bounded rather than unbounded: the loop must come back often enough to keep
+  // re-checking termination, and the exit paths that set done_ do not all post an
+  // async event. A 1ms cap costs an idle engine a thousand near-empty epochs a
+  // second, and the 50us poll keeps the added doorbell latency well inside the
+  // 100us cadence the command processor's own poll thread already runs at.
+  using namespace std::chrono_literals;
+  const auto deadline = std::chrono::steady_clock::now() + 1ms;
+  while (!done_.load(std::memory_order_acquire) && !any_async_pending()) {
+    if (std::chrono::steady_clock::now() >= deadline)
+      return;
+    std::this_thread::sleep_for(50us);
+  }
+}
+
+bool SimulationEngine::any_async_pending() const {
+  for (const auto &aq : async_queues_) {
+    if (aq->pending.load(std::memory_order_acquire))
+      return true;
+  }
+  return false;
 }
 
 void SimulationEngine::process_event(PartitionContext &ctx, EventQueueEntry &entry) {

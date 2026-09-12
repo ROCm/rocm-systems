@@ -568,10 +568,10 @@ discover_torch_libpath(const std::string& python_binary)
 /// @brief How @ref update_env combines a new value with an existing entry.
 enum class update_mode : std::uint8_t
 {
-    REPLACE = 0,  ///< Overwrite the value and drop duplicate entries.
-    PREPEND,      ///< Insert the new value before the existing one.
-    APPEND,       ///< Insert the new value after the existing one.
-    WEAK,         ///< Update only when the current entry matches the original env.
+    replace = 0,  ///< Overwrite the value and drop duplicate entries.
+    prepend,      ///< Insert the new value before the existing one.
+    append,       ///< Insert the new value after the existing one.
+    weak,         ///< Update only when the current entry matches the original env.
 };
 
 /// @brief Render @p val as an environment-variable string.
@@ -606,7 +606,7 @@ to_env_string(Tp&& val)
 /// @param _mode         Combination strategy.
 /// @param _join_delim   Delimiter used when prepending/appending.
 /// @param _updated_envs Set receiving the names touched by this call.
-/// @param _original_envs Baseline entries consulted by @ref update_mode::WEAK.
+/// @param _original_envs Baseline entries consulted by @ref update_mode::weak.
 template <typename Tp, typename UpdatedEnvsT>
 inline void
 update_env(std::vector<std::string>& _environ, std::string_view _env_var, Tp&& _env_val,
@@ -632,24 +632,24 @@ update_env(std::vector<std::string>& _environ, std::string_view _env_var, Tp&& _
 
     switch(_mode)
     {
-        case update_mode::WEAK:
+        case update_mode::weak:
             if(_original_envs.find(*first) == _original_envs.end()) return;
             *first = fmt::format("{}={}", _env_var, _env_val_str);
             return;
 
-        case update_mode::PREPEND:
-        case update_mode::APPEND:
+        case update_mode::prepend:
+        case update_mode::append:
         {
             if(first->find(_env_val_str) != std::string::npos) return;
             auto _val = first->substr(_key.size());
             *first =
-                (_mode == update_mode::PREPEND)
+                (_mode == update_mode::prepend)
                     ? fmt::format("{}={}{}{}", _env_var, _env_val_str, _join_delim, _val)
                     : fmt::format("{}={}{}{}", _env_var, _val, _join_delim, _env_val_str);
             return;
         }
 
-        case update_mode::REPLACE:
+        case update_mode::replace:
             *first = fmt::format("{}={}", _env_var, _env_val_str);
             _environ.erase(std::remove_if(std::next(first), _environ.end(), matches_key),
                            _environ.end());

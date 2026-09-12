@@ -762,10 +762,9 @@ inline native<float> flush_denorm_f32_simd(native<float> v) {
 /// Vector ports of `amdgpu::transcendental::*_f32`, mirroring the scalar
 /// reference body bit-for-bit so the VOP1 SIMD fast path agrees with the
 /// forced-scalar path on every lane. The ±0/Inf special cases fall out of IEEE
-/// div/sqrt after the FTZ input flush; only NaN-input preservation (scalar
-/// returns the input NaN unchanged) and the negative-domain canonical qNaN
-/// (0x7FC00000) need explicit blends. The 16-bit (f16) ops reuse these on the
-/// f16->f32 intermediate, matching the scalar `f32_to_f16(rcp_f32(f16_to_f32))`.
+/// div/sqrt after the FTZ input flush; only NaN payload preservation with signaling NaNs quieted
+/// and the negative-domain canonical qNaN (0x7FC00000) need explicit blends. The 16-bit (f16) ops
+/// reuse these on the f16->f32 intermediate, matching the scalar `f32_to_f16(rcp_f32(f16_to_f32))`.
 // Canonical positive quiet-NaN (f32), broadcast across the vector. Shared by
 // the transcendental fast paths below, which blend it into out-of-domain
 // lanes (negative sqrt/rsqrt, log of a negative) to match the scalar refs.
@@ -774,7 +773,8 @@ inline const native<float> kQNaN = std::bit_cast<native<float>>(native<uint32_t>
 inline native<float> rcp_f32_simd(native<float> a) {
   native<float> x = flush_denorm_f32_simd(a);
   native<float> r = flush_denorm_f32_simd(native<float>(1.0f) / x);
-  stdx::where(stdx::isnan(a), r) = a;
+  stdx::where(stdx::isnan(a), r) =
+      std::bit_cast<native<float>>(std::bit_cast<native<uint32_t>>(a) | 0x00400000u);
   return r;
 }
 
@@ -782,14 +782,17 @@ inline native<float> rsq_f32_simd(native<float> a) {
   native<float> x = flush_denorm_f32_simd(a);
   native<float> r = flush_denorm_f32_simd(native<float>(1.0f) / stdx::sqrt(x));
   stdx::where(x < native<float>(0.0f), r) = kQNaN; // negatives incl -Inf -> qNaN
-  stdx::where(stdx::isnan(a), r) = a;
+  stdx::where(stdx::isnan(a), r) =
+      std::bit_cast<native<float>>(std::bit_cast<native<uint32_t>>(a) | 0x00400000u);
   return r;
 }
 
 inline native<float> sqrt_f32_simd(native<float> a) {
-  native<float> r = stdx::sqrt(a); // no FTZ flush: scalar sqrt_f32 keeps denormals
-  stdx::where(a < native<float>(0.0f), r) = kQNaN;
-  stdx::where(stdx::isnan(a), r) = a;
+  native<float> x = flush_denorm_f32_simd(a);
+  native<float> r = stdx::sqrt(x);
+  stdx::where(x < native<float>(0.0f), r) = kQNaN;
+  stdx::where(stdx::isnan(a), r) =
+      std::bit_cast<native<float>>(std::bit_cast<native<uint32_t>>(a) | 0x00400000u);
   return r;
 }
 
@@ -797,14 +800,16 @@ inline native<float> log_f32_simd(native<float> a) {
   native<float> x = flush_denorm_f32_simd(a);
   native<float> r = stdx::log2(x); // input-flush only; scalar log_f32 has no out-flush
   stdx::where(x < native<float>(0.0f), r) = kQNaN;
-  stdx::where(stdx::isnan(a), r) = a;
+  stdx::where(stdx::isnan(a), r) =
+      std::bit_cast<native<float>>(std::bit_cast<native<uint32_t>>(a) | 0x00400000u);
   return r;
 }
 
 inline native<float> exp_f32_simd(native<float> a) {
   native<float> x = flush_denorm_f32_simd(a);
   native<float> r = flush_denorm_f32_simd(stdx::exp2(x));
-  stdx::where(stdx::isnan(a), r) = a;
+  stdx::where(stdx::isnan(a), r) =
+      std::bit_cast<native<float>>(std::bit_cast<native<uint32_t>>(a) | 0x00400000u);
   return r;
 }
 

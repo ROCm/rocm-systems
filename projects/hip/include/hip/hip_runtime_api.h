@@ -30,6 +30,10 @@
 #include <hip/hip_common.h>
 #include <hip/linker_types.h>
 
+#if HIP_FORCE_API_VERSION > HIP_API_VERSION
+#  error "HIP_FORCE_API_VERSION is newer than the installed HIP headers"
+#endif
+
 enum {
   HIP_SUCCESS = 0,
   HIP_ERROR_INVALID_VALUE,
@@ -84,9 +88,163 @@ typedef struct hipUUID_t {
 //---
 // Common headers for both NVCC and HIP-Clang paths:
 
-#define hipGetDeviceProperties hipGetDevicePropertiesR0600
-#define hipDeviceProp_t hipDeviceProp_tR0600
-#define hipChooseDevice hipChooseDeviceR0600
+// Ignoring error-code return values from hip APIs is discouraged. On C++17,
+// we can make that yield a warning
+#if __cplusplus >= 201703L
+#define __HIP_NODISCARD [[nodiscard]]
+#else
+#define __HIP_NODISCARD
+#endif
+
+/**
+ * HIP error type
+ *
+ */
+// Developer note - when updating these, update the hipErrorName and hipErrorString functions in
+// NVCC and HIP-Clang paths Also update the hipCUDAErrorTohipError function in NVCC path.
+
+typedef enum __HIP_NODISCARD hipError_t {
+  hipSuccess = 0,            ///< Successful completion.
+  hipErrorInvalidValue = 1,  ///< One or more of the parameters passed to the API call is NULL
+                             ///< or not in an acceptable range.
+  hipErrorOutOfMemory = 2,   ///< out of memory range.
+  // Deprecated
+  hipErrorMemoryAllocation = 2,  ///< Memory allocation error.
+  hipErrorNotInitialized = 3,    ///< Invalid not initialized
+  // Deprecated
+  hipErrorInitializationError = 3,
+  hipErrorDeinitialized = 4,  ///< Deinitialized
+  hipErrorProfilerDisabled = 5,
+  hipErrorProfilerNotInitialized = 6,
+  hipErrorProfilerAlreadyStarted = 7,
+  hipErrorProfilerAlreadyStopped = 8,
+  hipErrorInvalidConfiguration = 9,     ///< Invalide configuration
+  hipErrorInvalidPitchValue = 12,       ///< Invalid pitch value
+  hipErrorInvalidSymbol = 13,           ///< Invalid symbol
+  hipErrorInvalidDevicePointer = 17,    ///< Invalid Device Pointer
+  hipErrorInvalidMemcpyDirection = 21,  ///< Invalid memory copy direction
+  hipErrorInsufficientDriver = 35,
+  hipErrorMissingConfiguration = 52,
+  hipErrorPriorLaunchFailure = 53,
+  hipErrorInvalidDeviceFunction = 98,  ///< Invalid device function
+  hipErrorNoDevice = 100,              ///< Call to hipGetDeviceCount returned 0 devices
+  hipErrorInvalidDevice = 101,         ///< DeviceID must be in range from 0 to compute-devices.
+  hipErrorInvalidImage = 200,          ///< Invalid image
+  hipErrorInvalidContext = 201,        ///< Produced when input context is invalid.
+  hipErrorContextAlreadyCurrent = 202,
+  hipErrorMapFailed = 205,
+  // Deprecated
+  hipErrorMapBufferObjectFailed = 205,  ///< Produced when the IPC memory attach failed from ROCr.
+  hipErrorUnmapFailed = 206,
+  hipErrorArrayIsMapped = 207,
+  hipErrorAlreadyMapped = 208,
+  hipErrorNoBinaryForGpu = 209,
+  hipErrorAlreadyAcquired = 210,
+  hipErrorNotMapped = 211,
+  hipErrorNotMappedAsArray = 212,
+  hipErrorNotMappedAsPointer = 213,
+  hipErrorECCNotCorrectable = 214,
+  hipErrorUnsupportedLimit = 215,     ///< Unsupported limit
+  hipErrorContextAlreadyInUse = 216,  ///< The context is already in use
+  hipErrorPeerAccessUnsupported = 217,
+  hipErrorInvalidKernelFile = 218,  ///< In CUDA DRV, it is CUDA_ERROR_INVALID_PTX
+  hipErrorInvalidGraphicsContext = 219,
+  hipErrorInvalidSource = 300,  ///< Invalid source.
+  hipErrorFileNotFound = 301,   ///< the file is not found.
+  hipErrorSharedObjectSymbolNotFound = 302,
+  hipErrorSharedObjectInitFailed = 303,  ///< Failed to initialize shared object.
+  hipErrorOperatingSystem = 304,         ///< Not the correct operating system
+  hipErrorInvalidHandle = 400,           ///< Invalide handle
+  // Deprecated
+  hipErrorInvalidResourceHandle = 400,  ///< Resource handle (hipEvent_t or hipStream_t) invalid.
+  hipErrorIllegalState = 401,  ///< Resource required is not in a valid state to perform operation.
+  hipErrorNotFound = 500,      ///< Not found
+  hipErrorNotReady = 600,      ///< Indicates that asynchronous operations enqueued earlier are not
+                           ///< ready.  This is not actually an error, but is used to distinguish
+                           ///< from hipSuccess (which indicates completion).  APIs that return
+                           ///< this error include hipEventQuery and hipStreamQuery.
+  hipErrorIllegalAddress = 700,
+  hipErrorLaunchOutOfResources = 701,      ///< Out of resources error.
+  hipErrorLaunchTimeOut = 702,             ///< Timeout for the launch.
+  hipErrorPeerAccessAlreadyEnabled = 704,  ///< Peer access was already enabled from the current
+                                           ///< device.
+  hipErrorPeerAccessNotEnabled = 705,  ///< Peer access was never enabled from the current device.
+  hipErrorSetOnActiveProcess = 708,    ///< The process is active.
+  hipErrorContextIsDestroyed = 709,    ///< The context is already destroyed
+  hipErrorAssert = 710,                ///< Produced when the kernel calls assert.
+  hipErrorHostMemoryAlreadyRegistered = 712,  ///< Produced when trying to lock a page-locked
+                                              ///< memory.
+  hipErrorHostMemoryNotRegistered = 713,      ///< Produced when trying to unlock a non-page-locked
+                                              ///< memory.
+  hipErrorLaunchFailure = 719,  ///< An exception occurred on the device while executing a kernel.
+  hipErrorCooperativeLaunchTooLarge = 720,  ///< This error indicates that the number of blocks
+                                            ///< launched per grid for a kernel that was launched
+                                            ///< via cooperative launch APIs exceeds the maximum
+                                            ///< number of allowed blocks for the current device.
+  hipErrorNotSupported = 801,  ///< Produced when the hip API is not supported/implemented
+  hipErrorStreamCaptureUnsupported = 900,  ///< The operation is not permitted when the stream
+                                           ///< is capturing.
+  hipErrorStreamCaptureInvalidated = 901,  ///< The current capture sequence on the stream
+                                           ///< has been invalidated due to a previous error.
+  hipErrorStreamCaptureMerge = 902,        ///< The operation would have resulted in a merge of
+                                           ///< two independent capture sequences.
+  hipErrorStreamCaptureUnmatched = 903,    ///< The capture was not initiated in this stream.
+  hipErrorStreamCaptureUnjoined = 904,     ///< The capture sequence contains a fork that was not
+                                           ///< joined to the primary stream.
+  hipErrorStreamCaptureIsolation = 905,    ///< A dependency would have been created which crosses
+                                           ///< the capture sequence boundary. Only implicit
+                                           ///< in-stream ordering dependencies  are allowed
+                                           ///< to cross the boundary
+  hipErrorStreamCaptureImplicit = 906,     ///< The operation would have resulted in a disallowed
+                                           ///< implicit dependency on a current capture sequence
+                                           ///< from hipStreamLegacy.
+  hipErrorCapturedEvent = 907,  ///< The operation is not permitted on an event which was last
+                                ///< recorded in a capturing stream.
+  hipErrorStreamCaptureWrongThread = 908,  ///< A stream capture sequence not initiated with
+                                           ///< the hipStreamCaptureModeRelaxed argument to
+                                           ///< hipStreamBeginCapture was passed to
+                                           ///< hipStreamEndCapture in a different thread.
+  hipErrorGraphExecUpdateFailure = 910,    ///< This error indicates that the graph update
+                                           ///< not performed because it included changes which
+                                           ///< violated constraintsspecific to instantiated graph
+                                           ///< update.
+  hipErrorInvalidChannelDescriptor = 911,  ///< Invalid channel descriptor.
+  hipErrorInvalidTexture = 912,            ///< Invalid texture.
+  hipErrorInvalidResourceType = 914,       ///< Resource type is not valid for the operation.
+  hipErrorInvalidResourceConfiguration = 915,  ///< Resource configuration is not valid for
+                                               ///< the operation.
+  hipErrorStreamDetached = 916,            ///< The stream is detached.
+  hipErrorUnknown = 999,                   ///< Unknown error.
+  // HSA Runtime Error Codes start here.
+  hipErrorRuntimeMemory = 1052,  ///< HSA runtime memory call returned error.  Typically not seen
+                                 ///< in production systems.
+  hipErrorRuntimeOther = 1053,   ///< HSA runtime call other than memory returned error.  Typically
+                                 ///< not seen in production systems.
+  hipErrorInvalidClusterSize = 1054,    ///< The specified cluster size is invalid, for instance
+                                       ///< when passing launch configurations to occupancy
+                                      ///< calculations
+  hipErrorTbd                    ///< Marker that more error codes are needed.
+} hipError_t;
+
+#undef __HIP_NODISCARD
+
+/*
+ Versioning struct. Because each public API must use the versioned struct to
+ ensure ABI compatibility, we must typedef the actual struct name here.
+*/
+
+#if HIP_FORCE_API_VERSION < 600
+
+#include <hip/hip_deprecated.h>
+// Legacy version, HIP_ABI_IMPL is on the latest version, so it must not see this.
+typedef hipDeviceProp_tR0000 hipDeviceProp_t;
+// Dummy struct for hip_prof_str.h
+typedef struct hipDeviceProp_tR0600 {} hipDeviceProp_tR0600;
+
+#endif
+
+#if HIP_FORCE_API_VERSION >= 600
+// Latest version.
 
 /**
  * hipDeviceProp
@@ -237,6 +395,10 @@ typedef struct hipDeviceProp_t {
   int asicRevision;                              ///< Revision of the GPU in this device
 } hipDeviceProp_t;
 
+// Latest version, HIP_ABI_IMPL should see this.
+typedef hipDeviceProp_t hipDeviceProp_tR0600;
+#endif
+
 /**
  * hipMemoryType (for pointer attributes)
  *
@@ -270,146 +432,6 @@ typedef struct hipPointerAttribute_t {
   unsigned allocationFlags; /* flags specified when memory was allocated*/
                             /* peers? */
 } hipPointerAttribute_t;
-
-// Ignoring error-code return values from hip APIs is discouraged. On C++17,
-// we can make that yield a warning
-#if __cplusplus >= 201703L
-#define __HIP_NODISCARD [[nodiscard]]
-#else
-#define __HIP_NODISCARD
-#endif
-
-/**
- * HIP error type
- *
- */
-// Developer note - when updating these, update the hipErrorName and hipErrorString functions in
-// NVCC and HIP-Clang paths Also update the hipCUDAErrorTohipError function in NVCC path.
-
-typedef enum __HIP_NODISCARD hipError_t {
-  hipSuccess = 0,            ///< Successful completion.
-  hipErrorInvalidValue = 1,  ///< One or more of the parameters passed to the API call is NULL
-                             ///< or not in an acceptable range.
-  hipErrorOutOfMemory = 2,   ///< out of memory range.
-  // Deprecated
-  hipErrorMemoryAllocation = 2,  ///< Memory allocation error.
-  hipErrorNotInitialized = 3,    ///< Invalid not initialized
-  // Deprecated
-  hipErrorInitializationError = 3,
-  hipErrorDeinitialized = 4,  ///< Deinitialized
-  hipErrorProfilerDisabled = 5,
-  hipErrorProfilerNotInitialized = 6,
-  hipErrorProfilerAlreadyStarted = 7,
-  hipErrorProfilerAlreadyStopped = 8,
-  hipErrorInvalidConfiguration = 9,     ///< Invalide configuration
-  hipErrorInvalidPitchValue = 12,       ///< Invalid pitch value
-  hipErrorInvalidSymbol = 13,           ///< Invalid symbol
-  hipErrorInvalidDevicePointer = 17,    ///< Invalid Device Pointer
-  hipErrorInvalidMemcpyDirection = 21,  ///< Invalid memory copy direction
-  hipErrorInsufficientDriver = 35,
-  hipErrorMissingConfiguration = 52,
-  hipErrorPriorLaunchFailure = 53,
-  hipErrorInvalidDeviceFunction = 98,  ///< Invalid device function
-  hipErrorNoDevice = 100,              ///< Call to hipGetDeviceCount returned 0 devices
-  hipErrorInvalidDevice = 101,         ///< DeviceID must be in range from 0 to compute-devices.
-  hipErrorInvalidImage = 200,          ///< Invalid image
-  hipErrorInvalidContext = 201,        ///< Produced when input context is invalid.
-  hipErrorContextAlreadyCurrent = 202,
-  hipErrorMapFailed = 205,
-  // Deprecated
-  hipErrorMapBufferObjectFailed = 205,  ///< Produced when the IPC memory attach failed from ROCr.
-  hipErrorUnmapFailed = 206,
-  hipErrorArrayIsMapped = 207,
-  hipErrorAlreadyMapped = 208,
-  hipErrorNoBinaryForGpu = 209,
-  hipErrorAlreadyAcquired = 210,
-  hipErrorNotMapped = 211,
-  hipErrorNotMappedAsArray = 212,
-  hipErrorNotMappedAsPointer = 213,
-  hipErrorECCNotCorrectable = 214,
-  hipErrorUnsupportedLimit = 215,     ///< Unsupported limit
-  hipErrorContextAlreadyInUse = 216,  ///< The context is already in use
-  hipErrorPeerAccessUnsupported = 217,
-  hipErrorInvalidKernelFile = 218,  ///< In CUDA DRV, it is CUDA_ERROR_INVALID_PTX
-  hipErrorInvalidGraphicsContext = 219,
-  hipErrorInvalidSource = 300,  ///< Invalid source.
-  hipErrorFileNotFound = 301,   ///< the file is not found.
-  hipErrorSharedObjectSymbolNotFound = 302,
-  hipErrorSharedObjectInitFailed = 303,  ///< Failed to initialize shared object.
-  hipErrorOperatingSystem = 304,         ///< Not the correct operating system
-  hipErrorInvalidHandle = 400,           ///< Invalide handle
-  // Deprecated
-  hipErrorInvalidResourceHandle = 400,  ///< Resource handle (hipEvent_t or hipStream_t) invalid.
-  hipErrorIllegalState = 401,  ///< Resource required is not in a valid state to perform operation.
-  hipErrorNotFound = 500,      ///< Not found
-  hipErrorNotReady = 600,      ///< Indicates that asynchronous operations enqueued earlier are not
-                           ///< ready.  This is not actually an error, but is used to distinguish
-                           ///< from hipSuccess (which indicates completion).  APIs that return
-                           ///< this error include hipEventQuery and hipStreamQuery.
-  hipErrorIllegalAddress = 700,
-  hipErrorLaunchOutOfResources = 701,      ///< Out of resources error.
-  hipErrorLaunchTimeOut = 702,             ///< Timeout for the launch.
-  hipErrorPeerAccessAlreadyEnabled = 704,  ///< Peer access was already enabled from the current
-                                           ///< device.
-  hipErrorPeerAccessNotEnabled = 705,  ///< Peer access was never enabled from the current device.
-  hipErrorSetOnActiveProcess = 708,    ///< The process is active.
-  hipErrorContextIsDestroyed = 709,    ///< The context is already destroyed
-  hipErrorAssert = 710,                ///< Produced when the kernel calls assert.
-  hipErrorHostMemoryAlreadyRegistered = 712,  ///< Produced when trying to lock a page-locked
-                                              ///< memory.
-  hipErrorHostMemoryNotRegistered = 713,      ///< Produced when trying to unlock a non-page-locked
-                                              ///< memory.
-  hipErrorLaunchFailure = 719,  ///< An exception occurred on the device while executing a kernel.
-  hipErrorCooperativeLaunchTooLarge = 720,  ///< This error indicates that the number of blocks
-                                            ///< launched per grid for a kernel that was launched
-                                            ///< via cooperative launch APIs exceeds the maximum
-                                            ///< number of allowed blocks for the current device.
-  hipErrorNotSupported = 801,  ///< Produced when the hip API is not supported/implemented
-  hipErrorStreamCaptureUnsupported = 900,  ///< The operation is not permitted when the stream
-                                           ///< is capturing.
-  hipErrorStreamCaptureInvalidated = 901,  ///< The current capture sequence on the stream
-                                           ///< has been invalidated due to a previous error.
-  hipErrorStreamCaptureMerge = 902,        ///< The operation would have resulted in a merge of
-                                           ///< two independent capture sequences.
-  hipErrorStreamCaptureUnmatched = 903,    ///< The capture was not initiated in this stream.
-  hipErrorStreamCaptureUnjoined = 904,     ///< The capture sequence contains a fork that was not
-                                           ///< joined to the primary stream.
-  hipErrorStreamCaptureIsolation = 905,    ///< A dependency would have been created which crosses
-                                           ///< the capture sequence boundary. Only implicit
-                                           ///< in-stream ordering dependencies  are allowed
-                                           ///< to cross the boundary
-  hipErrorStreamCaptureImplicit = 906,     ///< The operation would have resulted in a disallowed
-                                           ///< implicit dependency on a current capture sequence
-                                           ///< from hipStreamLegacy.
-  hipErrorCapturedEvent = 907,  ///< The operation is not permitted on an event which was last
-                                ///< recorded in a capturing stream.
-  hipErrorStreamCaptureWrongThread = 908,  ///< A stream capture sequence not initiated with
-                                           ///< the hipStreamCaptureModeRelaxed argument to
-                                           ///< hipStreamBeginCapture was passed to
-                                           ///< hipStreamEndCapture in a different thread.
-  hipErrorGraphExecUpdateFailure = 910,    ///< This error indicates that the graph update
-                                           ///< not performed because it included changes which
-                                           ///< violated constraintsspecific to instantiated graph
-                                           ///< update.
-  hipErrorInvalidChannelDescriptor = 911,  ///< Invalid channel descriptor.
-  hipErrorInvalidTexture = 912,            ///< Invalid texture.
-  hipErrorInvalidResourceType = 914,       ///< Resource type is not valid for the operation.
-  hipErrorInvalidResourceConfiguration = 915,  ///< Resource configuration is not valid for
-                                               ///< the operation.
-  hipErrorStreamDetached = 916,            ///< The stream is detached.                                              
-  hipErrorUnknown = 999,                   ///< Unknown error.
-  // HSA Runtime Error Codes start here.
-  hipErrorRuntimeMemory = 1052,  ///< HSA runtime memory call returned error.  Typically not seen
-                                 ///< in production systems.
-  hipErrorRuntimeOther = 1053,   ///< HSA runtime call other than memory returned error.  Typically
-                                 ///< not seen in production systems.
-  hipErrorInvalidClusterSize = 1054,    ///< The specified cluster size is invalid, for instance
-                                       ///< when passing launch configurations to occupancy
-                                      ///< calculations
-  hipErrorTbd                    ///< Marker that more error codes are needed.
-} hipError_t;
-
-#undef __HIP_NODISCARD
 
 /**
  * hipDeviceAttribute_t
@@ -657,11 +679,16 @@ enum hipGPUDirectRDMAWritesOrdering {
 #include <hip/driver_types.h>
 #include <hip/texture_types.h>
 #include <hip/surface_types.h>
-#if defined(_MSC_VER)
+
+#if defined(HIP_ABI_IMPL)
+// Nothing is deprecated if we are implementing the HIP ABI.
+#define HIP_DEPRECATED(x)
+#elif defined(_MSC_VER)
 #define HIP_DEPRECATED(msg) __declspec(deprecated(msg))
 #else  // !defined(_MSC_VER)
 #define HIP_DEPRECATED(msg) __attribute__((deprecated(msg)))
 #endif  // !defined(_MSC_VER)
+
 #define HIP_DEPRECATED_MSG                                                                         \
   "This API is marked as deprecated and might not be supported in future releases. For more "      \
   "details please refer "                                                                          \
@@ -2199,6 +2226,7 @@ typedef enum hipMemRangeFlags {
   hipMemRangeFlagsMax = 0x7fffffff
 } hipMemRangeFlags;
 
+
 // Doxygen end group GlobalDefs
 /**
  * @}
@@ -2527,6 +2555,14 @@ hipError_t hipDeviceSetMemPool(int device, hipMemPool_t mem_pool);
  *          change and might have outstanding issues.
  */
 hipError_t hipDeviceGetMemPool(hipMemPool_t* mem_pool, int device);
+
+// hipDeviceProp_t and hipGetDeviceProperties/hipChooseDevice are versioned.
+// See HIP_FORCE_API_VERSION in hip_common.h.
+
+#if HIP_FORCE_API_VERSION >= 600
+
+hipError_t hipGetDevicePropertiesR0600(hipDeviceProp_tR0600* prop, int deviceId);
+
 /**
  * @brief Returns device properties.
  *
@@ -2540,7 +2576,13 @@ hipError_t hipDeviceGetMemPool(hipMemPool_t* mem_pool, int device);
  *
  * Populates hipGetDeviceProperties with information for the specified device.
  */
-hipError_t hipGetDeviceProperties(hipDeviceProp_t* prop, int deviceId);
+static inline hipError_t hipGetDeviceProperties(hipDeviceProp_t* prop, int deviceId) {
+  return hipGetDevicePropertiesR0600(prop, deviceId);
+}
+
+#endif
+
+
 /**
  * @brief Gets the maximum width for 1D linear textures on the specified device
  *
@@ -2680,6 +2722,24 @@ hipError_t hipDeviceSetSharedMemConfig(hipSharedMemConfig config);
  *
  */
 hipError_t hipSetDeviceFlags(unsigned flags);
+
+#if HIP_FORCE_API_VERSION >= 600
+hipError_t hipChooseDeviceR0600(int* device, const hipDeviceProp_tR0600* prop);
+
+/**
+ * @brief Device which matches hipDeviceProp_t is returned
+ *
+ * @param [out] device Pointer of the device
+ * @param [in]  prop Pointer of the properties
+ *
+ * @returns #hipSuccess, #hipErrorInvalidValue
+ */
+static inline hipError_t hipChooseDevice(int* device, const hipDeviceProp_t* prop) {
+  return hipChooseDeviceR0600(device, prop);
+}
+
+#endif
+
 /**
  * @brief Initialize the specified device to be used for GPU executions.
  *
@@ -2703,16 +2763,9 @@ hipError_t hipSetDeviceFlags(unsigned flags);
  *
  * @see hipSetDevice, hipSetDeviceFlags
  */
+
 hipError_t hipInitDevice(int device, unsigned int deviceFlags, unsigned int flags);
-/**
- * @brief Device which matches hipDeviceProp_t is returned
- *
- * @param [out] device Pointer of the device
- * @param [in]  prop Pointer of the properties
- *
- * @returns #hipSuccess, #hipErrorInvalidValue
- */
-hipError_t hipChooseDevice(int* device, const hipDeviceProp_t* prop);
+
 /**
  * @brief Returns the link type and hop count between two devices
  *
@@ -4285,26 +4338,10 @@ hipError_t hipDrvMemDiscardAndPrefetchBatchAsync(hipDeviceptr_t* dptrs, size_t* 
                                                  size_t* prefetchLocIdxs,
                                                  size_t numPrefetchLocs,
                                                  unsigned long long flags, hipStream_t stream);
-/**
- * @brief Advise about the usage of a given memory range to HIP.
- *
- * @param [in] dev_ptr  pointer to memory to set the advice for
- * @param [in] count    size in bytes of the memory range, it should be CPU page size alligned.
- * @param [in] advice   advice to be applied for the specified memory range
- * @param [in] device   device to apply the advice for
- *
- * @returns #hipSuccess, #hipErrorInvalidValue
- *
- * This HIP API advises about the usage to be applied on unified memory allocation in the
- * range starting from the pointer address devPtr, with the size of count bytes.
- * The memory range must refer to managed memory allocated via the API hipMallocManaged, and the
- * range will be handled with proper round down and round up respectively in the driver to
- * be aligned to CPU page size, the same way as corresponding CUDA API behaves in CUDA version 8.0
- * and afterwards.
- *
- * @note  This API is implemented on Linux and is under development on Microsoft Windows.
- */
-hipError_t hipMemAdvise(const void* dev_ptr, size_t count, hipMemoryAdvise advice, int device);
+
+// Deprecated since 800. Introduced in 700.
+#if (HIP_FORCE_API_VERSION >= 700 && HIP_FORCE_API_VERSION < 800) || defined(HIP_ABI_IMPL)
+
 /**
  * @brief Advise about the usage of a given memory range to HIP.
  *
@@ -4326,6 +4363,68 @@ hipError_t hipMemAdvise(const void* dev_ptr, size_t count, hipMemoryAdvise advic
  */
 hipError_t hipMemAdvise_v2(const void* dev_ptr, size_t count, hipMemoryAdvise advice,
                            hipMemLocation location);
+
+#endif
+
+// Deprecated since 800.
+#if HIP_FORCE_API_VERSION < 800 || defined(HIP_ABI_IMPL)
+
+/**
+ * @brief Advise about the usage of a given memory range to HIP.
+ *
+ * @param [in] dev_ptr  pointer to memory to set the advice for
+ * @param [in] count    size in bytes of the memory range, it should be CPU page size alligned.
+ * @param [in] advice   advice to be applied for the specified memory range
+ * @param [in] device   device to apply the advice for
+ *
+ * @returns #hipSuccess, #hipErrorInvalidValue
+ *
+ * This HIP API advises about the usage to be applied on unified memory allocation in the
+ * range starting from the pointer address devPtr, with the size of count bytes.
+ * The memory range must refer to managed memory allocated via the API hipMallocManaged, and the
+ * range will be handled with proper round down and round up respectively in the driver to
+ * be aligned to CPU page size, the same way as corresponding CUDA API behaves in CUDA version 8.0
+ * and afterwards.
+ *
+ * @note  This API is implemented on Linux and is under development on Microsoft Windows.
+ */
+hipError_t hipMemAdvise(const void* dev_ptr, size_t count, hipMemoryAdvise advice, int device);
+
+#endif
+
+// Latest
+#if HIP_FORCE_API_VERSION >= 800 && !defined(HIP_ABI_IMPL)
+
+hipError_t hipMemAdvise_v2(const void* dev_ptr, size_t count, hipMemoryAdvise advice,
+                           hipMemLocation location);
+
+/**
+ * @brief Advise about the usage of a given memory range to HIP.
+ *
+ * @param [in] dev_ptr    pointer to memory to set the advice for
+ * @param [in] count      size in bytes of the memory range, it should be CPU page size alligned.
+ * @param [in] advice     advice to be applied for the specified memory range
+ * @param [in] location   location to apply the advice for
+ *
+ * @returns #hipSuccess, #hipErrorInvalidValue
+ *
+ * This HIP API advises about the usage to be applied on unified memory allocation in the
+ * range starting from the pointer address devPtr, with the size of count bytes.
+ * The memory range must refer to managed memory allocated via the API hipMallocManaged, and the
+ * range will be handled with proper round down and round up respectively in the driver to
+ * be aligned to CPU page size, the same way as corresponding CUDA API behaves in CUDA version 8.0
+ * and afterwards.
+ *
+ * @note  This API is implemented on Linux and is under development on Microsoft Windows.
+ * @note  Since 7.16, this API is an alias to the old hipMemAdvise_v2 API.
+ */
+static inline hipError_t hipMemAdvise(const void* dev_ptr, size_t count, hipMemoryAdvise advice,
+                        hipMemLocation location) {
+  return hipMemAdvise_v2(dev_ptr, count, advice, location);
+}
+
+#endif
+
 /**
  * @brief Query an attribute of a given memory range in HIP.
  *
@@ -10028,7 +10127,7 @@ hipError_t hipMemAddressReserve(void** ptr, size_t size, size_t alignment, void*
  * @param [in] prop - properties of the allocation.
  * @param [in] flags - currently unused, must be zero.
  * @returns #hipSuccess, #hipErrorInvalidValue, #hipErrorNotSupported
- * 
+ *
  * This API creates a memory allocation on the target device specified through the prop structure.
  * The prop allocation type must be specified as either #hipMemAllocationTypePinned or
  * #hipMemAllocationTypeUncached.
@@ -10327,6 +10426,7 @@ hipError_t hipExtDisableLogging();
  * @see hipExtEnableLogging, hipExtDisableLogging
  */
 hipError_t hipExtSetLoggingParams(size_t log_level, size_t log_size, size_t log_mask);
+
 /**
 * @}
 */
@@ -11078,7 +11178,6 @@ static inline hipError_t hipMallocManaged(T** devPtr, size_t size,
                                           unsigned int flags = hipMemAttachGlobal) {
   return hipMallocManaged((void**)devPtr, size, flags);
 }
-
 
 #endif
 #endif

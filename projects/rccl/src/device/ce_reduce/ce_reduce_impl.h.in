@@ -38,12 +38,12 @@ __device__ __forceinline__ void ncclCeGlobalBlockBarrier(uint32_t* d_barrierSync
   uint32_t* doneGen = d_barrierSync + 1;
   __syncthreads();
   if (threadIdx.x == 0) {
-    uint32_t prev = __hip_atomic_fetch_add(arrival, 1, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT);
+    uint32_t prev = __scoped_atomic_fetch_add(arrival, 1, __ATOMIC_RELAXED, __MEMORY_SCOPE_DEVICE);
     if (prev + 1 == (uint32_t)numBlocks) {
-      __hip_atomic_store(arrival, 0, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT);
-      __hip_atomic_store(doneGen, gen, __ATOMIC_RELEASE, __HIP_MEMORY_SCOPE_AGENT);
+      __scoped_atomic_store_n(arrival, 0, __ATOMIC_RELAXED, __MEMORY_SCOPE_DEVICE);
+      __scoped_atomic_store_n(doneGen, gen, __ATOMIC_RELEASE, __MEMORY_SCOPE_DEVICE);
     } else {
-      while (__hip_atomic_load(doneGen, __ATOMIC_ACQUIRE, __HIP_MEMORY_SCOPE_AGENT) != gen) {
+      while (__scoped_atomic_load_n(doneGen, __ATOMIC_ACQUIRE, __MEMORY_SCOPE_DEVICE) != gen) {
         __builtin_amdgcn_s_sleep(1);
       }
     }
@@ -249,8 +249,8 @@ __global__ __launch_bounds__(256) void ncclCeLocalReduceKernelVec(
         while (true) {
           int ready = 0;
           for (int r = 0; r < nRanks; r++) {
-            uint32_t sv = __hip_atomic_load((uint32_t*)&signalBuffer[(size_t)slot * nRanks + r], __ATOMIC_ACQUIRE,
-                                            __HIP_MEMORY_SCOPE_SYSTEM);
+            uint32_t sv = __scoped_atomic_load_n((uint32_t*)&signalBuffer[(size_t)slot * nRanks + r], __ATOMIC_ACQUIRE,
+                                                 __MEMORY_SCOPE_SYSTEM);
             if (sv == 1) {
               ready++;
             }
@@ -354,8 +354,8 @@ __global__ __launch_bounds__(256) void ncclCeLocalReduceKernelVec(
       }
       if (blockIdx.x == 0) {
         for (int r = (int)threadIdx.x; r < nRanks; r += (int)blockDim.x) {
-          __hip_atomic_store((uint32_t*)&signalBuffer[(size_t)slot * nRanks + r], 0, __ATOMIC_RELEASE,
-                             __HIP_MEMORY_SCOPE_SYSTEM);
+          __scoped_atomic_store_n((uint32_t*)&signalBuffer[(size_t)slot * nRanks + r], 0, __ATOMIC_RELEASE,
+                                  __MEMORY_SCOPE_SYSTEM);
         }
       }
     }

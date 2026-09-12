@@ -81,4 +81,10 @@
 #pragma clang diagnostic pop
 #endif
 
+#define HIP_API_VERSION (HIP_VERSION_MAJOR * 100 + HIP_VERSION_MINOR)
+
+#ifndef HIP_FORCE_API_VERSION
+#  define HIP_FORCE_API_VERSION HIP_API_VERSION
+#endif
+
 #endif

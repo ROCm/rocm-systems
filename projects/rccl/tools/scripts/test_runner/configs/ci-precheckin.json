@@ -162,6 +162,17 @@
         {"name": "InitMicrotestsUncached", "description": "Host-only init.cc microtests, HIP_*_UNCACHED_MEMORY arm; covers the preprocessor-gated paths the base binary cannot", "test_filter": "*"}
       ]
     },
+    "unit_tests_micro_init_faultinj": {
+      "is_gtest": true,
+      "binary": "host/rccl-UnitTestsMicroInit-faultinj",
+      "num_ranks": 1,
+      "num_nodes": 1,
+      "num_gpus": 1,
+      "timeout": 60,
+      "tests": [
+        {"name": "InitMicrotestsFaultInj", "description": "Host-only init.cc microtests, ENABLE_FAULT_INJECTION arm (the one that ships); covers the preprocessor-gated paths the base binary cannot", "test_filter": "*"}
+      ]
+    },
     "unit_tests_micro_enqueue": {
       "is_gtest": true,
       "binary": "host/rccl-UnitTestsMicroEnqueue",
@@ -209,6 +220,12 @@
       "name": "RCCL Microtests - init.cc (uncached)",
       "description": "rccl-UnitTestsMicroInit-uncached (init.cc HIP_*_UNCACHED_MEMORY arm)",
       "config": "unit_tests_micro_init_uncached",
+      "enabled": true
+    },
+    {
+      "name": "RCCL Microtests - init.cc (fault injection)",
+      "description": "rccl-UnitTestsMicroInit-faultinj (init.cc ENABLE_FAULT_INJECTION arm)",
+      "config": "unit_tests_micro_init_faultinj",
       "enabled": true
     },
     {

@@ -148,11 +148,9 @@ regex_match(const std::string& _line)
 std::string
 regex_replace(const std::string& _line)
 {
-#if defined(TIMEMORY_UNIX)
     if(get_regex_pattern().empty()) return _line;
     if(regex_match(_line))
         return std::regex_replace(_line, get_regex().at(0), "\33[01;04;36;40m$&\33[0m");
-#endif
     return _line;
 }
 

@@ -77,9 +77,6 @@ using strset_t               = std::set<string_t>;
 using regexvec_t             = std::vector<std::regex>;
 using fmodset_t              = std::set<module_function>;
 using fixed_modset_t         = std::map<fmodset_t*, bool>;
-using exec_callback_t        = BPatchExecCallback;
-using exit_callback_t        = BPatchExitCallback;
-using fork_callback_t        = BPatchForkCallback;
 using patch_t                = BPatch;
 using process_t              = BPatch_process;
 using thread_t               = BPatch_thread;
@@ -138,9 +135,6 @@ constexpr auto SL_END_V =
 
 constexpr auto SV_END_V =
     std::max({ SV_UNKNOWN, SV_DEFAULT, SV_INTERNAL, SV_HIDDEN, SV_PROTECTED }) + 1;
-
-void
-rocprofsys_prefork_callback(thread_t* parent, thread_t* child);
 
 enum CodeCoverageMode
 {
@@ -202,7 +196,6 @@ extern string_t prefer_library;
 //  global variables
 //
 extern patch_pointer_t  bpatch;
-extern call_expr_t*     terminate_expr;
 extern snippet_vec_t    init_names;
 extern snippet_vec_t    fini_names;
 extern fmodset_t        available_module_functions;
@@ -285,13 +278,6 @@ extern std::unique_ptr<std::ofstream> log_ofs;
         if(debug_print || verbose_level >= LEVEL) fprintf(stdout, __VA_ARGS__);          \
         fflush(stdout);                                                                  \
     }
-
-//======================================================================================//
-
-template <typename... T>
-void
-consume_parameters(T&&...)
-{}
 
 //======================================================================================//
 

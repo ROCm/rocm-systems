@@ -19,7 +19,8 @@ Stage selection is delegated to TheRock's build topology (the single source of
 truth), imported from the TheRock checkout so this script owns no dependency
 math and cannot drift from the actual build graph:
 
-    BuildTopology.get_stages_for_projects(projects)
+    BuildTopology.resolve_alias_to_artifact(project)  # project -> artifact
+    BuildTopology.get_stages_for_artifacts(artifacts)
         -> the minimal set of stages needed to BUILD the changed projects
            (impacted stages plus their upstream build dependencies).
 
@@ -122,16 +123,23 @@ def compute_build_stages(
         logger.warning(f"Topology load failed ({e}) -> build all stages")
         return []
 
-    # Fail safe on ANY unrecognized project. get_stages_for_projects() silently
+    # Fail safe on ANY unrecognized project. get_stages_for_artifacts() silently
     # ignores names it cannot resolve, so a mixed input like "rdc,unknown" would
     # otherwise return only rdc's stages and wrongly narrow the build. Require
     # every changed project to resolve to an artifact before narrowing.
-    unknown = [p for p in projects if topology.resolve_project_to_artifact(p) is None]
+    #
+    # NOTE: TheRock removed get_stages_for_projects()/resolve_project_to_artifact()
+    # after the previously pinned ref. We resolve projects -> artifacts with
+    # resolve_alias_to_artifact() (which understands artifact names, subproject
+    # aliases from artifact_subprojects.json, split_databases, and BUILD_TOPOLOGY
+    # source_paths) and then map artifacts -> stages with get_stages_for_artifacts().
+    resolved = {p: topology.resolve_alias_to_artifact(p) for p in projects}
+    unknown = [p for p, art in resolved.items() if art is None]
     if unknown:
         logger.info(f"Unrecognized project(s) {sorted(unknown)} -> build all stages")
         return []
 
-    required = set(topology.get_stages_for_projects(projects))
+    required = set(topology.get_stages_for_artifacts(list(resolved.values())))
     if not required:
         logger.info("No stages mapped for changed projects -> build all stages")
         return []

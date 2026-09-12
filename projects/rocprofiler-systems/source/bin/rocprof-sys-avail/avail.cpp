@@ -52,13 +52,6 @@
 #include <utility>
 #include <vector>
 
-#if defined(TIMEMORY_UNIX)
-#    include <sys/ioctl.h>  // ioctl() and TIOCGWINSZ
-#    include <unistd.h>     // for STDOUT_FILENO
-#elif defined(TIMEMORY_WINDOWS)
-#    include <windows.h>
-#endif
-
 using namespace tim;
 
 //--------------------------------------------------------------------------------------//

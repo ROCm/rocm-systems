@@ -78,8 +78,10 @@ public:
     template <typename Device>
     [[nodiscard]] std::vector<std::shared_ptr<Device>> get_devices(device_type type)
     {
-        if(type != device_type::GPU) return {};
-        return { m_devices.begin(), m_devices.end() };
+        return type != device_type::gpu
+                   ? std::vector<std::shared_ptr<Device>>{}
+                   : std::vector<std::shared_ptr<Device>>{ m_devices.begin(),
+                                                           m_devices.end() };
     }
 
 private:

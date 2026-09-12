@@ -20,7 +20,7 @@ namespace test
 make_cpu_agent(std::uint32_t node_id, std::string name = "AMD CPU")
 {
     agent a{};
-    a.type      = agent_type::CPU;
+    a.type      = agent_type::cpu;
     a.node_id   = node_id;
     a.name      = std::move(name);
     a.device_id = node_id;
@@ -31,7 +31,7 @@ make_cpu_agent(std::uint32_t node_id, std::string name = "AMD CPU")
 make_gpu_agent(std::uint32_t node_id, std::string name = "gfx950")
 {
     agent a{};
-    a.type      = agent_type::GPU;
+    a.type      = agent_type::gpu;
     a.node_id   = node_id;
     a.name      = std::move(name);
     a.device_id = node_id;
@@ -52,7 +52,7 @@ make_kfd_page_migrate_sample_raw_args(
     s.args_str        = std::move(args_str);
     s.category        = "rocm_kfd_page_migrate";
     s.device_id       = 0;
-    s.device_type     = static_cast<std::uint8_t>(agent_type::CPU);
+    s.device_type     = static_cast<std::uint8_t>(agent_type::cpu);
     s.value           = kDefaultMigrateSizeBytes;
     return s;
 }
@@ -61,7 +61,7 @@ make_kfd_page_migrate_sample_raw_args(
 make_kfd_page_migrate_sample(std::uint32_t src_node, std::uint32_t dst_node,
                              std::uint64_t size_bytes, std::uint64_t duration_ns,
                              std::uint32_t device_id,
-                             agent_type    device_type  = agent_type::CPU,
+                             agent_type    device_type  = agent_type::cpu,
                              std::string   trigger_name = "PAGE_MIGRATE_PAGEFAULT_GPU")
 {
     auto args = "0;;std::uint64_t;;start_address;;0x0;;"
@@ -82,7 +82,7 @@ make_kfd_page_migrate_sample(std::uint32_t src_node, std::uint32_t dst_node,
 
 [[nodiscard]] inline kfd_sample
 make_kfd_page_fault_sample(std::uint32_t agent_id, bool is_read,
-                           agent_type device_type = agent_type::GPU)
+                           agent_type device_type = agent_type::gpu)
 {
     kfd_sample s;
     s.thread_id       = 1;

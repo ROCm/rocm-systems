@@ -11,6 +11,7 @@ add_subdirectory(kernels)
 set(RJ_OBJECT_LIBS
     rocjitsu_analysis
     rocjitsu_code
+    rocjitsu_code_object
     rocjitsu_isa
     rocjitsu_isa_registry
     simdojo
@@ -446,7 +447,6 @@ add_executable(
     shared_infra_test.cpp
     transcendental_test.cpp
     amdgpu_elf_test_support.cpp
-    analysis/free_registers_test.cpp
     analysis/liveness_test.cpp
     patch/spill_manager_test.cpp
     patch/log_buffer_test.cpp
@@ -462,10 +462,7 @@ add_executable(
     patch/error_report_test.cpp
     dbi/dbi_spill_sim_test.cpp
     code/code_object_target_id_test.cpp
-    code/amdgpu_code_object_test.cpp
     code/relocation_function_table_test.cpp
-    code/kernel_descriptor_scan_test.cpp
-    code/kernel_scope_test.cpp
     dbt/semantic_scratch_test.cpp
     dbt/waitcnt_translator_test.cpp
     dbt/virtual_lds_dispatch_rewrite_test.cpp
@@ -483,6 +480,8 @@ add_executable(
     simd_correctness/mfma_lazy_storage_test.cpp
     vgpr_redispatch_test.cpp
     instruction_execution_harness_test.cpp
+    valu_floating_policy_test.cpp
+    atomic_semantics_and_decode_test.cpp
     isa_target_registry_test.cpp
     pseudo_scalar_exec_test.cpp
     scalar_scc_test.cpp
@@ -666,6 +665,40 @@ rj_add_test(
         "bin/rocjitsu_tests"
         "--gtest_filter=SimulatedKfdTest.DispatchedWaitSurvivesAConcurrentFinalClose"
 )
+
+# These existing suites exercise ELF inspection, CFG construction, kernel
+# reachability, and register queries using only the static-analysis composition.
+add_executable(
+    rocjitsu_analysis_tests
+    analysis/decoder_window_test.cpp
+    analysis/free_registers_test.cpp
+    code/amdgpu_code_object_test.cpp
+    code/kernel_descriptor_scan_test.cpp
+    code/kernel_scope_test.cpp
+)
+target_include_directories(
+    rocjitsu_analysis_tests
+    PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}
+)
+target_link_libraries(
+    rocjitsu_analysis_tests
+    PRIVATE
+        rocjitsu_analysis_internal
+        rocjitsu_amdgpu_isa_model_registry
+        GTest::gtest_main
+)
+rj_configure_target(rocjitsu_analysis_tests PRIVATE_INCLUDES WARNINGS)
+rj_add_gtest_tests(rocjitsu_analysis_tests)
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    add_test(
+        NAME StaticAnalysis.SymbolBoundary
+        COMMAND
+            ${CMAKE_COMMAND} -DNM=${CMAKE_NM}
+            -DMODEL_BINARY=$<TARGET_FILE:rocjitsu_analysis_tests>
+            -DANALYSIS_ARCHIVE=$<TARGET_FILE:rocjitsu_analysis_internal> -P
+            ${CMAKE_CURRENT_SOURCE_DIR}/check_static_analysis_symbols.cmake
+    )
+endif()
 
 # Exercise the Linux-only model ISA contract in a decoder-only final link.
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")

@@ -5457,26 +5457,6 @@ class CodeGenerator:
             '  }\n'
             '}\n'
             '\n'
-            'uint16_t read_fma_mix_bf16_bits(uint32_t raw, uint32_t src_selector, bool high_half) {\n'
-            '  switch (src_selector) {\n'
-            '  case OpSelSrc::OPR_SRC_FLOAT_HALF:\n'
-            '  case OpSelSrc::OPR_SRC_FLOAT_NEG_HALF:\n'
-            '  case OpSelSrc::OPR_SRC_FLOAT_ONE:\n'
-            '  case OpSelSrc::OPR_SRC_FLOAT_NEG_ONE:\n'
-            '  case OpSelSrc::OPR_SRC_FLOAT_TWO:\n'
-            '  case OpSelSrc::OPR_SRC_FLOAT_NEG_TWO:\n'
-            '  case OpSelSrc::OPR_SRC_FLOAT_FOUR:\n'
-            '  case OpSelSrc::OPR_SRC_FLOAT_NEG_FOUR:\n'
-            '  case OpSelSrc::OPR_SRC_FLOAT_ONE_OVER_TWO_PI: {\n'
-            '    float value = std::bit_cast<float>(raw);\n'
-            '    return util::f32_to_bf16(value);\n'
-            '  }\n'
-            '  default: {\n'
-            '    return static_cast<uint16_t>(high_half ? (raw >> 16) : raw);\n'
-            '  }\n'
-            '  }\n'
-            '}\n'
-            '\n'
             'float read_fma_mix_source_f32(const Operand &src, const amdgpu::Wavefront &wf, uint32_t lane,\n'
             '                              uint32_t src_selector, bool src_is_f16, bool high_half) {\n'
             '  uint32_t raw = amdgpu::RegisterAccess(wf).read_lane(src, lane);\n'
@@ -5486,11 +5466,12 @@ class CodeGenerator:
             '}\n'
             '\n'
             'float read_fma_mix_bf16_source_f32(const Operand &src, const amdgpu::Wavefront &wf, uint32_t lane,\n'
-            '                                   uint32_t src_selector, bool src_is_bf16, bool high_half) {\n'
+            '                                   bool src_is_bf16, bool high_half) {\n'
             '  uint32_t raw = amdgpu::RegisterAccess(wf).read_lane(src, lane);\n'
             '  if (!src_is_bf16)\n'
             '    return std::bit_cast<float>(raw);\n'
-            '  return util::bf16_to_f32(read_fma_mix_bf16_bits(raw, src_selector, high_half));\n'
+            '  // CDNA5 inline BF16 sources retain the FP32 bits for OPSEL.\n'
+            '  return util::bf16_to_f32(static_cast<uint16_t>(high_half ? (raw >> 16) : raw));\n'
             '}\n'
             '} // namespace'
         )
@@ -7217,7 +7198,11 @@ class CodeGenerator:
         # ----- VOP3P: packed / dot / mix / MFMA -----
         if cls.startswith('dot2_'):
             return gen_dot2(
-                dst_ops, src_ops, cls, opsel_exprs=self._vop3p_opsel_exprs()
+                dst_ops,
+                src_ops,
+                cls,
+                opsel_exprs=self._vop3p_opsel_exprs(),
+                replicate_inline=self.isa_spec.arch_name == 'rdna4',
             )
 
         if cls.startswith('dot4_'):
@@ -8051,11 +8036,7 @@ class CodeGenerator:
         L.append('    d->wf_size = wf.wf_size();')
         L.append('    d->wg_id = wf.wg_id(); d->wf_id = wf.wf_id();')
         L.append('    uint64_t base = amdgpu::RegisterAccess(wf).read_scalar64(saddr);')
-        offset_expr = (
-            'signed_ioffset(inst_.ioffset)'
-            if self.isa_spec.arch_name == 'cdna5'
-            else 'static_cast<int32_t>(inst_.ioffset << 8) >> 8'
-        )
+        offset_expr = self.isa_spec.profile.global_addtid_offset_expr
         L.append(f'    int64_t offset = static_cast<int64_t>({offset_expr});')
         L.append('    for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {')
         L.append('      if (!(exec & (1ULL << lane))) continue;')
@@ -8099,7 +8080,9 @@ class CodeGenerator:
         self._append_global_addtid_addresses(L)
         L.append('  auto &cu = wf.cu();')
         L.append('  uint64_t exec = wf.exec();')
-        L.append(f"  uint32_t data_base = {self._vgpr_base_expr('vsrc')};")
+        L.append(
+            f"  uint32_t data_base = {self._vgpr_base_expr(self.isa_spec.profile.flat_store_src_field)};"
+        )
         L.append('  d->store_data.resize(wf.wf_size() * 4);')
         L.append('  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {')
         L.append('    if (!(exec & (1ULL << lane))) continue;')
@@ -8114,9 +8097,13 @@ class CodeGenerator:
     _ATOMIC_OP_ENUM: dict[str, str] = {
         'swap': 'amdgpu::AtomicOp::SWAP',
         'cmpswap': 'amdgpu::AtomicOp::CMPSWAP',
+        'condxchg32': 'amdgpu::AtomicOp::CONDXCHG32',
+        'fcmpswap': 'amdgpu::AtomicOp::FCMPSWAP',
         'mskor': 'amdgpu::AtomicOp::MSKOR',
         'add': 'amdgpu::AtomicOp::ADD',
         'sub': 'amdgpu::AtomicOp::SUB',
+        'sub_clamp': 'amdgpu::AtomicOp::SUB_CLAMP',
+        'cond_sub': 'amdgpu::AtomicOp::COND_SUB',
         'rsub': 'amdgpu::AtomicOp::RSUB',
         'smin': 'amdgpu::AtomicOp::SMIN',
         'umin': 'amdgpu::AtomicOp::UMIN',
@@ -8128,6 +8115,8 @@ class CodeGenerator:
         'inc': 'amdgpu::AtomicOp::INC',
         'dec': 'amdgpu::AtomicOp::DEC',
         'fadd': 'amdgpu::AtomicOp::FADD',
+        'pk_add_f16': 'amdgpu::AtomicOp::PK_ADD_F16',
+        'pk_add_bf16': 'amdgpu::AtomicOp::PK_ADD_BF16',
         'fmin': 'amdgpu::AtomicOp::FMIN',
         'fmax': 'amdgpu::AtomicOp::FMAX',
         'append': 'amdgpu::AtomicOp::APPEND',
@@ -8140,14 +8129,30 @@ class CodeGenerator:
             return 'd->exec_mask'
         return 'wf.exec()'
 
+    def _append_atomic_fp_policy(
+        self, lines: list[str], sem: InstructionSemantics, *, ds: bool
+    ) -> None:
+        """Carry manual-defined scalar FP policies through deferred memory execution."""
+        if sem.operation not in ('fadd', 'fmin', 'fmax', 'fcmpswap'):
+            return
+        profile = self.isa_spec.profile
+        memory_mode, lds_mode = profile.scalar_atomic_denorm_modes(
+            sem.operation, sem.elem_size, ds=ds
+        )
+        lines.append(f'  d->atomic_denorm_mode = {memory_mode};')
+        lines.append(f'  d->atomic_lds_denorm_mode = {lds_mode};')
+        lines.append(
+            f'  d->atomic_legacy_minmax = {str(profile.atomic_legacy_minmax).lower()};'
+        )
+
     def _gen_flat_atomic(
         self, dst: list[str], src: list[str], sem: InstructionSemantics
     ) -> str:
         """Generate flat_atomic execute() body.
 
         If the operation is recognized, emits a full VectorMemState setup
-        with AtomicOp for the pipeline. Unrecognized variants (FP atomics,
-        etc.) fall back to a TODO stub.
+        with AtomicOp for the pipeline. Unrecognized variants raise an
+        explicit unimplemented-instruction error.
         """
         if sem.operation is None or sem.operation not in self._ATOMIC_OP_ENUM:
             return f'  (void)wf;\n  throw util::UnimplementedInst(mnemonic()); // TODO: unhandled flat_atomic variant ({sem.name})'
@@ -8167,6 +8172,7 @@ class CodeGenerator:
         L.append('  d->num_elems = 1;')
         L.append(f'  d->is_load = {self._atomic_return_expr(sc0)};')
         L.append(f'  d->atomic_op = {op_enum};')
+        self._append_atomic_fp_policy(L, sem, ds=False)
         self._append_wait_counter_type(L, 'flat_atomic')
         L.append(f'  d->mtype = {self._mtype_expr()};')
         L.append(f'  d->non_temporal = {nt};')
@@ -8214,6 +8220,7 @@ class CodeGenerator:
         L.append('  d->num_elems = 1;')
         L.append(f'  d->is_load = {self._atomic_return_expr(sc0)};')
         L.append(f'  d->atomic_op = {op_enum};')
+        self._append_atomic_fp_policy(L, sem, ds=False)
         self._append_wait_counter_type(L, 'buffer_atomic')
         L.append(f'  d->mtype = {self._mtype_expr()};')
         L.append(f'  d->non_temporal = {nt};')
@@ -8250,7 +8257,7 @@ class CodeGenerator:
         returns_data = 'vdst' in dst
 
         L = []
-        is_cmpswap = sem.operation == 'cmpswap'
+        is_cmpswap = sem.operation in ('cmpswap', 'fcmpswap')
         L.append(
             '  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);'
         )
@@ -8260,8 +8267,19 @@ class CodeGenerator:
         L.append('  d->num_elems = 1;')
         L.append(f'  d->is_load = {str(returns_data).lower()};')
         L.append(f'  d->atomic_op = {op_enum};')
+        self._append_atomic_fp_policy(L, sem, ds=True)
+        if sem.operation in ('pk_add_f16', 'pk_add_bf16'):
+            # CDNA5 ISA 12.2 groups packed F16/BF16 under DS denorm_double controls.
+            L.append('  d->packed_denorm_mode = wf.fp_denorm_mode_f16_f64();')
         self._append_wait_counter_type(L, 'ds_atomic')
         L.append('  ds_calculate_addresses(inst_, wf, *d);')
+        if sem.operation == 'condxchg32':
+            # Conditional exchange uses a qword-aligned 16-bit LDS address.
+            L.append('  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {')
+            L.append('    d->per_lane_addr[lane] = wf.lds_base() +')
+            L.append('        ((d->per_lane_addr[lane] - wf.lds_base()) & 0xfff8u);')
+            L.append('  }')
+
         L.append('  auto &cu = wf.cu();')
         L.append('  uint64_t exec = wf.exec();')
         L.append(
@@ -8271,6 +8289,9 @@ class CodeGenerator:
             L.append(
                 f"  uint32_t data1_base = {self._vgpr_base_expr('data1', role='Src2')};"
             )
+        if is_cmpswap and self.isa_spec.profile.ds_compare_store_compare_first:
+            # Normalize older DS comparison/replacement order to the pipeline contract.
+            L.append('  std::swap(data_base, data1_base);')
         stride = data_dwords * 4
         L.append(f'  d->store_data.resize(wf.wf_size() * {stride});')
         L.append('  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {')
@@ -9721,6 +9742,14 @@ class CodeGenerator:
                     cdna5_swmmac_has_modifiers = self._cdna5_swmmac_has_modifiers(inst)
                     operand_size_exprs: dict[str, str] = {}
                     for opnd in inst.operands:
+                        # FLAT's optional scalar address is constructed below,
+                        # including when a GLOBAL-only XML form lists it explicitly.
+                        if (
+                            enc.enc_name == 'ENC_FLAT'
+                            and opnd.name == 'saddr'
+                            and any(o.name == 'addr' for o in inst.operands)
+                        ):
+                            continue
                         opnd_size_expr = self._operand_size_override(
                             enc.enc_name, opnd, inst_sem
                         )
@@ -9841,7 +9870,7 @@ class CodeGenerator:
                         _needs_atomic_return_view = (
                             _is_optional_atomic_return
                             and inst_sem.semantic_class == 'buffer_atomic'
-                            and inst_sem.operation == 'cmpswap'
+                            and inst_sem.operation in ('cmpswap', 'fcmpswap')
                             and opnd.name == 'vdata'
                         )
                         atomic_return_operand = (
@@ -9992,7 +10021,7 @@ class CodeGenerator:
                     _has_flat_saddr = self.isa_spec.profile.mnemonic_rule(
                         enc.enc_name
                     ).use_flat_mnemonic
-                    if _has_flat_saddr:
+                    if _has_flat_saddr and any(o.name == 'addr' for o in inst.operands):
                         saddr_null = self._saddr_null_expr(enc.enc_name)
                         private_members.append(cgen.Statement('Operand saddr'))
                         opnd_ctor_init.append('saddr(0, OperandType::OPR_SREG, 0)')
@@ -10323,6 +10352,13 @@ class CodeGenerator:
                             'OpSelSdstExec::OPR_SDST_EXEC_EXEC_LO) '
                             f'[[unlikely]] return emit_error.emit() << "{inst.name} has an invalid '
                             'SReg_32_XEXEC destination";'
+                        )
+
+                    if inst.required_flat_segment is not None:
+                        factory_validation_parts.append(
+                            f'if (reinterpret_cast<const {factory_op_encoding}*>(inst)->seg != '
+                            f'{inst.required_flat_segment}u) [[unlikely]] return emit_error.emit() '
+                            f'<< "{inst.name} requires its GLOBAL segment";'
                         )
 
                     # Flat segment-aware operands: adjust addr width and add

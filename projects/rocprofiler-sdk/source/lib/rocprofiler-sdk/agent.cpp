@@ -248,13 +248,13 @@ update_agent_runtime_visibility(rocprofiler_agent_t& agent_info)
             }
             else if(secondary_visible && hip_visible && *secondary_visible != *hip_visible)
             {
-                ROCP_CI_LOG(WARNING) << fmt::format("Conflicting visibility of agent-{} between "
-                                                    "{} and {}. Assuming {} supersedes {}",
-                                                    agent_info.node_id,
-                                                    env_primary,
-                                                    env_secondary,
-                                                    env_primary,
-                                                    env_secondary);
+                ROCP_WARNING << fmt::format("Conflicting visibility of agent-{} between "
+                                            "{} and {}. Assuming {} supersedes {}",
+                                            agent_info.node_id,
+                                            env_primary,
+                                            env_secondary,
+                                            env_primary,
+                                            env_secondary);
             }
             return env_primary;
         };

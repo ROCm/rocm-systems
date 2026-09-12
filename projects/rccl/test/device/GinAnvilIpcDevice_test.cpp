@@ -185,7 +185,7 @@ __global__ void kernelDetailHelpers(const ncclGinAnvilSdmaGPUContext* ctx, int b
   fusedOut[0] = useSdmaFusedSignal(mut, true, true, false, ncclGinSignalInc);
   markSdmaDirty(mut, 1, mut->numChannels, effChOut[0]);
   if (mut->sdmaDirty) {
-    dirtyOut[0] = __hip_atomic_load(mut->sdmaDirty, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT);
+    dirtyOut[0] = __scoped_atomic_load_n(mut->sdmaDirty, __ATOMIC_RELAXED, __MEMORY_SCOPE_DEVICE);
   }
 }
 

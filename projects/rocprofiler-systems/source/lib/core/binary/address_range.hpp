@@ -7,7 +7,6 @@
 #include "core/common.hpp"
 
 #include <timemory/hash/types.hpp>
-#include <timemory/utility/macros.hpp>
 
 #include <cstdint>
 #include <limits>

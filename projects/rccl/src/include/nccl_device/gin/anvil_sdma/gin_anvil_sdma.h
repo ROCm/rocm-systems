@@ -100,7 +100,7 @@ NCCL_DEVICE_INLINE void markSdmaDirty(ncclGinAnvilSdmaGPUContext* rsCtx, int pee
   const int bitIdx = peer * numCh + effCh;
   if (bitIdx < 0 || bitIdx >= kSdmaDirtyBitWidth) return;
   uint64_t bit = 1ULL << bitIdx;
-  __hip_atomic_fetch_or(dirty, bit, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT);
+  __scoped_atomic_fetch_or(dirty, bit, __ATOMIC_RELAXED, __MEMORY_SCOPE_DEVICE);
 }
 
 NCCL_DEVICE_INLINE int effectiveChannel(ncclGinAnvilSdmaGPUContext* rsCtx, int blockId) {
@@ -426,7 +426,7 @@ struct ncclGinApi_Flush<NCCL_NET_DEVICE_GIN_ANVIL_SDMA> {
     uint64_t* sdmaDirty = loadConst(&rsCtx->sdmaDirty);
     uint64_t dirty = 0;
     if (sdmaDirty != nullptr) {
-      dirty = __hip_atomic_load(sdmaDirty, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT);
+      dirty = __scoped_atomic_load_n(sdmaDirty, __ATOMIC_RELAXED, __MEMORY_SCOPE_DEVICE);
     }
     if (dirty != 0) {
       auto** handles = (::sdma_anvil::SdmaQueueDeviceHandle**)loadConst(&rsCtx->queueHandles);
@@ -447,7 +447,7 @@ struct ncclGinApi_Flush<NCCL_NET_DEVICE_GIN_ANVIL_SDMA> {
       }
       coop.sync();
       if (coop.thread_rank() == 0 && sdmaDirty != nullptr) {
-        __hip_atomic_store(sdmaDirty, 0, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT);
+        __scoped_atomic_store_n(sdmaDirty, 0, __ATOMIC_RELAXED, __MEMORY_SCOPE_DEVICE);
       }
       coop.sync();
     }

@@ -128,10 +128,19 @@ resolve_kfd_migration_gpu_bucket(
 
     const auto src_type = find_type(src_node_id);
     const auto dst_type = find_type(dst_node_id);
-    if(!src_type.has_value() || !dst_type.has_value()) return std::nullopt;
+    if(!src_type.has_value() || !dst_type.has_value())
+    {
+        return std::nullopt;
+    }
 
-    if(*src_type == agent_type::CPU && *dst_type == agent_type::GPU) return dst_node_id;
-    if(*src_type == agent_type::GPU) return src_node_id;
+    if(*src_type == agent_type::cpu && *dst_type == agent_type::gpu)
+    {
+        return dst_node_id;
+    }
+    if(*src_type == agent_type::gpu)
+    {
+        return src_node_id;
+    }
 
     return std::nullopt;
 }
@@ -477,9 +486,11 @@ perfetto_processor_t::perfetto_processor_t(
     {
         if(!agent_ptr) continue;
         m_kfd_node_type_cache[agent_ptr->node_id] = agent_ptr->type;
-        if(agent_ptr->type == agent_type::GPU)
+        if(agent_ptr->type == agent_type::gpu)
+        {
             m_kfd_node_to_gpu_index_cache[agent_ptr->node_id] =
                 static_cast<std::uint32_t>(agent_ptr->device_type_index);
+        }
     }
 }
 
