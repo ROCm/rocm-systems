@@ -22,6 +22,7 @@
 
 #include "lib/rocprofiler-sdk/counters/controller.hpp"
 #include "lib/common/environment.hpp"
+#include "lib/common/logging.hpp"
 #include "lib/rocprofiler-sdk/agent.hpp"
 #include "lib/rocprofiler-sdk/buffer.hpp"
 #include "lib/rocprofiler-sdk/context/context.hpp"
@@ -166,6 +167,22 @@ CounterController::configure_dispatch(rocprofiler_context_id_t                  
 
         ctx.dispatch_counter_collection =
             std::make_unique<rocprofiler::context::dispatch_counter_collection_service>();
+
+        // On WSL2/DXG the KFD device node is absent (/dev/dxg is exposed but not
+        // /dev/kfd), so hardware counters are not armed through the KFD profiler
+        // ioctl; instead aqlprofile's vendor-specific PM4 IB is submitted through
+        // the dxg path in libhsakmt, gated by WSLKMT_VENDOR_PACKET (enabled by
+        // default by the WSL platform layer). Both single- and multi-counter
+        // collection are supported this way (the per-queue PM4 command-buffer
+        // frame size is computed from the device geometry). The /dev/kfd
+        // capability probe is shared at the topology level (rocprofiler::agent)
+        // so this stays consistent with KFD event tracing rather than being an
+        // ad-hoc check here.
+        LOG_IF_FIRST_N(WARNING, !::rocprofiler::agent::kfd_device_available(), 1)
+            << "/dev/kfd is not available (expected under WSL/DXG). Hardware performance "
+               "counters are collected via the dxg vendor-packet path in libhsakmt (requires "
+               "WSLKMT_VENDOR_PACKET=1, enabled automatically by the WSL platform layer). "
+               "Single- and multi-counter collection are supported.";
     }
 
     auto& cb = *ctx.dispatch_counter_collection->callbacks.emplace_back(

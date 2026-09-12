@@ -43,10 +43,16 @@ target_link_libraries(
     code-object-tracing PRIVATE code-object-tracing-client Threads::Threads
                                 rocprofiler-sdk::samples-build-flags)
 
+# WSL2/DXG has no /dev/kfd and schedules GPU work through the dxg path. Under WSL2/DXG
+# these workloads run slower in practice and need more timeout headroom (root cause TBD),
+# so scale the timeout only there. Non-WSL keeps the develop baseline (45); WSL scales it
+# up.
+rocprofiler_sdk_wsl_timeout_scale(_CODE_OBJECT_TRACING_TIMEOUT BASE 45)
+
 add_test(NAME code-object-tracing COMMAND $<TARGET_FILE:code-object-tracing>)
 
 set_tests_properties(
     code-object-tracing
-    PROPERTIES TIMEOUT 45 LABELS "samples" ENVIRONMENT
+    PROPERTIES TIMEOUT ${_CODE_OBJECT_TRACING_TIMEOUT} LABELS "samples" ENVIRONMENT
                "${ROCPROFILER_MEMCHECK_PRELOAD_ENV}" FAIL_REGULAR_EXPRESSION
                "${ROCPROFILER_DEFAULT_FAIL_REGEX}")

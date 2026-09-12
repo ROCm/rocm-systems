@@ -22,6 +22,7 @@ rocprofiler_add_integration_execute_test(
     async-copy-tracing
     TARGET transpose
     TIMEOUT 45
+    WSL_TIMEOUT_SCALE
     LABELS "integration-tests"
     PRELOAD "${PRELOAD_ENV}"
     ENVIRONMENT "ROCPROFILER_TOOL_OUTPUT_FILE=async-copy-tracing-test.json"

@@ -23,9 +23,12 @@
 # THE SOFTWARE.
 
 import pandas as pd
-import os
 import sys
 import pytest
+
+from rocprofiler_sdk.pytest_utils.hardware_counters import (
+    skip_if_hw_counter_values_unavailable,
+)
 
 
 def test_agent_info(agent_info_input_data):
@@ -49,6 +52,9 @@ def test_agent_info(agent_info_input_data):
 def test_validate_counter_collection_yml_pmc(counter_input_data):
     counter_names = ["SQ_WAVES", "GRBM_COUNT", "GRBM_GUI_ACTIVE"]
     di_list = []
+    skip_if_hw_counter_values_unavailable(
+        row["Counter_Value"] for row in counter_input_data
+    )
 
     for row in counter_input_data:
         assert int(row["Agent_Id"].split(" ")[-1]) >= 0

@@ -34,6 +34,7 @@ subtrees:
     - file: how-to/using-pc-sampling
     - file: how-to/cdna3-cdna4-pc-sampling
     - file: how-to/using-thread-trace
+    - file: how-to/using-rocprofv3-on-wsl
     - file: how-to/using-spm
     - file: how-to/using-kernel-replay
     - file: how-to/samples

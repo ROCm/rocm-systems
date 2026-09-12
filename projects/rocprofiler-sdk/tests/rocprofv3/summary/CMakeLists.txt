@@ -38,6 +38,7 @@ rocprofiler_add_integration_execute_test(
         "KERNEL_DISPATCH|MEMORY_COPY" ".*_API" -- $<TARGET_FILE:transpose> 2 500 10
     DEPENDS transpose
     TIMEOUT 45
+    WSL_TIMEOUT_SCALE
     LABELS "integration-tests"
     ENVIRONMENT "${PRELOAD_ENV}" "ARBITRARY_ENV_VARIABLE=%tag%-trace-cmd-line"
     FIXTURES_SETUP rocprofv3-test-summary-cmd-line)
