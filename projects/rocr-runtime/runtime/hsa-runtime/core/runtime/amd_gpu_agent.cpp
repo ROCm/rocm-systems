@@ -1097,6 +1097,15 @@ void GpuAgent::PreloadBlits() {
 
 void GpuAgent::ReleaseResources() {
   if (this->Enabled()) {
+    // Stop any PC sampling session left active by a client at shutdown time
+    // to prevent a shutdown race condition between GpuAgent's members and 
+    // the client's atexit-based cleanup.
+    for (pcs_data_t* pcs_data : {&pcs_hosttrap_data_, &pcs_stochastic_data_}) {
+      if (pcs_data->session != nullptr && pcs_data->session->isActive()) {
+        PcSamplingStop(*pcs_data->session);
+      }
+    }
+
     this->Disable();
 
     // Remove all shared hardware queues from pool
