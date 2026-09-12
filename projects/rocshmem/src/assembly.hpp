@@ -760,11 +760,23 @@ make_buffer_resource(const void* base, uint32_t num_bytes) {
   i32x4_t rsrc;
   rsrc[0] = static_cast<int32_t>(addr & 0xFFFFFFFFu);
   rsrc[1] = static_cast<int32_t>(addr >> 32);
+#if defined(__gfx1250__)
+  // gfx1250 V# descriptor:
+  //   bits  56:0   base address
+  //   bits 101:57  num_records; all ones disables OOB checking
+  //   bits 127:102 zero, including Type[127:126] == 0 for buffer
+  rsrc[1] = static_cast<int32_t>(((addr >> 32) & 0x01FFFFFFull) |
+                                 (0x7Full << 25));
+  rsrc[2] = static_cast<int32_t>(0xFFFFFFFFu);
+  rsrc[3] = 0x0000003F;
+#elif defined(__gfx1201__) || defined(__gfx1100__)
+  // GFX12 gaming (Navi4/gfx1201, gfx1100)
   rsrc[2] = static_cast<int32_t>(num_bytes);
-#if defined(__gfx1201__) || defined(__gfx1100__)
-  rsrc[3] = 0x31014000;  // raw buffer descriptor: no stride/swizzle
+  rsrc[3] = 0x31014000;
 #else
-  rsrc[3] = 0x00020000;  // raw buffer descriptor: no stride/swizzle
+  // GFX9
+  rsrc[2] = static_cast<int32_t>(num_bytes);
+  rsrc[3] = 0x00020000;
 #endif
   return rsrc;
 }
@@ -872,17 +884,30 @@ struct AsmAccess<16, LoadPolicy, StorePolicy> {
   static __device__ __forceinline__ type load_buffer(const void *ptr,
                                                      uint32_t buf_size,
                                                      uint32_t offset) {
-    i32x4_t rsrc = make_buffer_resource(ptr, buf_size);
-    constexpr uint32_t aux = cache_policy_aux(LoadPolicy);
-    return __builtin_bit_cast(type,
-        llvm_amdgcn_raw_buffer_load_b128(rsrc, offset, 0, aux));
+    return load_buffer(make_buffer_resource(ptr, buf_size), offset);
   }
 
   static __device__ __forceinline__ void store_buffer(void *ptr,
                                                       uint32_t buf_size,
                                                       uint32_t offset,
                                                       type val) {
-    i32x4_t rsrc = make_buffer_resource(ptr, buf_size);
+    store_buffer(make_buffer_resource(ptr, buf_size), offset, val);
+  }
+
+  // rsrc-taking overloads: let callers hoist make_buffer_resource() out of a
+  // loop so the compiler doesn't have to prove src/dst are wave-uniform on
+  // every iteration (it can't, across a __noinline__ boundary, and falls
+  // back to an expensive v_readfirstlane waterfall per call otherwise).
+  static __device__ __forceinline__ type load_buffer(i32x4_t rsrc,
+                                                     uint32_t offset) {
+    constexpr uint32_t aux = cache_policy_aux(LoadPolicy);
+    return __builtin_bit_cast(type,
+        llvm_amdgcn_raw_buffer_load_b128(rsrc, offset, 0, aux));
+  }
+
+  static __device__ __forceinline__ void store_buffer(i32x4_t rsrc,
+                                                      uint32_t offset,
+                                                      type val) {
     constexpr uint32_t aux = cache_policy_aux(StorePolicy);
     llvm_amdgcn_raw_buffer_store_b128(static_cast<__uint128_t>(val),
                                       rsrc, offset, 0, aux);
@@ -988,17 +1013,26 @@ struct AsmAccess<8, LoadPolicy, StorePolicy> {
   static __device__ __forceinline__ type load_buffer(const void *ptr,
                                                      uint32_t buf_size,
                                                      uint32_t offset) {
-    i32x4_t rsrc = make_buffer_resource(ptr, buf_size);
-    constexpr uint32_t aux = cache_policy_aux(LoadPolicy);
-    return __builtin_bit_cast(type,
-        llvm_amdgcn_raw_buffer_load_b64(rsrc, offset, 0, aux));
+    return load_buffer(make_buffer_resource(ptr, buf_size), offset);
   }
 
   static __device__ __forceinline__ void store_buffer(void *ptr,
                                                       uint32_t buf_size,
                                                       uint32_t offset,
                                                       type val) {
-    i32x4_t rsrc = make_buffer_resource(ptr, buf_size);
+    store_buffer(make_buffer_resource(ptr, buf_size), offset, val);
+  }
+
+  static __device__ __forceinline__ type load_buffer(i32x4_t rsrc,
+                                                     uint32_t offset) {
+    constexpr uint32_t aux = cache_policy_aux(LoadPolicy);
+    return __builtin_bit_cast(type,
+        llvm_amdgcn_raw_buffer_load_b64(rsrc, offset, 0, aux));
+  }
+
+  static __device__ __forceinline__ void store_buffer(i32x4_t rsrc,
+                                                      uint32_t offset,
+                                                      type val) {
     constexpr uint32_t aux = cache_policy_aux(StorePolicy);
     llvm_amdgcn_raw_buffer_store_b64(static_cast<uint64_t>(val),
                                      rsrc, offset, 0, aux);
@@ -1104,17 +1138,26 @@ struct AsmAccess<4, LoadPolicy, StorePolicy> {
   static __device__ __forceinline__ type load_buffer(const void *ptr,
                                                      uint32_t buf_size,
                                                      uint32_t offset) {
-    i32x4_t rsrc = make_buffer_resource(ptr, buf_size);
-    constexpr uint32_t aux = cache_policy_aux(LoadPolicy);
-    return __builtin_bit_cast(type,
-        llvm_amdgcn_raw_buffer_load_b32(rsrc, offset, 0, aux));
+    return load_buffer(make_buffer_resource(ptr, buf_size), offset);
   }
 
   static __device__ __forceinline__ void store_buffer(void *ptr,
                                                       uint32_t buf_size,
                                                       uint32_t offset,
                                                       type val) {
-    i32x4_t rsrc = make_buffer_resource(ptr, buf_size);
+    store_buffer(make_buffer_resource(ptr, buf_size), offset, val);
+  }
+
+  static __device__ __forceinline__ type load_buffer(i32x4_t rsrc,
+                                                     uint32_t offset) {
+    constexpr uint32_t aux = cache_policy_aux(LoadPolicy);
+    return __builtin_bit_cast(type,
+        llvm_amdgcn_raw_buffer_load_b32(rsrc, offset, 0, aux));
+  }
+
+  static __device__ __forceinline__ void store_buffer(i32x4_t rsrc,
+                                                      uint32_t offset,
+                                                      type val) {
     constexpr uint32_t aux = cache_policy_aux(StorePolicy);
     llvm_amdgcn_raw_buffer_store_b32(static_cast<uint32_t>(val),
                                      rsrc, offset, 0, aux);
@@ -1251,17 +1294,26 @@ struct AsmAccess<2, LoadPolicy, StorePolicy> {
   static __device__ __forceinline__ type load_buffer(const void *ptr,
                                                      uint32_t buf_size,
                                                      uint32_t offset) {
-    i32x4_t rsrc = make_buffer_resource(ptr, buf_size);
-    constexpr uint32_t aux = cache_policy_aux(LoadPolicy);
-    return static_cast<type>(
-        llvm_amdgcn_raw_buffer_load_b16(rsrc, offset, 0, aux));
+    return load_buffer(make_buffer_resource(ptr, buf_size), offset);
   }
 
   static __device__ __forceinline__ void store_buffer(void *ptr,
                                                       uint32_t buf_size,
                                                       uint32_t offset,
                                                       type val) {
-    i32x4_t rsrc = make_buffer_resource(ptr, buf_size);
+    store_buffer(make_buffer_resource(ptr, buf_size), offset, val);
+  }
+
+  static __device__ __forceinline__ type load_buffer(i32x4_t rsrc,
+                                                     uint32_t offset) {
+    constexpr uint32_t aux = cache_policy_aux(LoadPolicy);
+    return static_cast<type>(
+        llvm_amdgcn_raw_buffer_load_b16(rsrc, offset, 0, aux));
+  }
+
+  static __device__ __forceinline__ void store_buffer(i32x4_t rsrc,
+                                                      uint32_t offset,
+                                                      type val) {
     constexpr uint32_t aux = cache_policy_aux(StorePolicy);
     llvm_amdgcn_raw_buffer_store_b16(static_cast<uint16_t>(val),
                                      rsrc, offset, 0, aux);
@@ -1398,17 +1450,26 @@ struct AsmAccess<1, LoadPolicy, StorePolicy> {
   static __device__ __forceinline__ type load_buffer(const void *ptr,
                                                      uint32_t buf_size,
                                                      uint32_t offset) {
-    i32x4_t rsrc = make_buffer_resource(ptr, buf_size);
-    constexpr uint32_t aux = cache_policy_aux(LoadPolicy);
-    return static_cast<type>(
-        llvm_amdgcn_raw_buffer_load_b8(rsrc, offset, 0, aux));
+    return load_buffer(make_buffer_resource(ptr, buf_size), offset);
   }
 
   static __device__ __forceinline__ void store_buffer(void *ptr,
                                                       uint32_t buf_size,
                                                       uint32_t offset,
                                                       type val) {
-    i32x4_t rsrc = make_buffer_resource(ptr, buf_size);
+    store_buffer(make_buffer_resource(ptr, buf_size), offset, val);
+  }
+
+  static __device__ __forceinline__ type load_buffer(i32x4_t rsrc,
+                                                     uint32_t offset) {
+    constexpr uint32_t aux = cache_policy_aux(LoadPolicy);
+    return static_cast<type>(
+        llvm_amdgcn_raw_buffer_load_b8(rsrc, offset, 0, aux));
+  }
+
+  static __device__ __forceinline__ void store_buffer(i32x4_t rsrc,
+                                                      uint32_t offset,
+                                                      type val) {
     constexpr uint32_t aux = cache_policy_aux(StorePolicy);
     llvm_amdgcn_raw_buffer_store_b8(val, rsrc, offset, 0, aux);
   }
