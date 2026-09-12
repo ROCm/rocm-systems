@@ -43,8 +43,6 @@ CUmemAllocationHandleType ncclCuMemHandleType = CU_MEM_HANDLE_TYPE_POSIX_FILE_DE
 
 static int ncclCuMemSupported = 0;
 
-#define KERNEL_VERSION_CODE(major, minor) ((major << 16) | (minor << 8))
-
 static int ncclGetKernelVersionCode() {
   struct utsname u;
   int major = 0, minor = 0;
@@ -53,7 +51,7 @@ static int ncclGetKernelVersionCode() {
   sscanf(u.release, "%d.%d", &major, &minor);
   INFO(NCCL_INIT, "Kernel version %d.%d", major, minor);
 
-  return KERNEL_VERSION_CODE(major, minor);
+  return NCCL_KERNEL_VERSION_CODE(major, minor);
 }
 
 // Runtime probe: run the cuMem VMM cycle + register.cc pointer queries once; some ROCm builds advertise cuMem but reject the ops at runtime. Returns 1 if all succeed, 0 otherwise; never fatal.
@@ -137,9 +135,17 @@ static int ncclCuMemCapabilityCheck(int requireGfx1250ForAutoEnable) {
     }
   }
 
-  if (ncclGetKernelVersionCode() < KERNEL_VERSION_CODE(6, 8)) {
-    WARN("cuMem support requires Linux kernel >= 6.8");
-    supported = 0;
+  {
+    // Kernel < 6.8 still runs cuMem; only expected performance is worse. Do not
+    // clear `supported` here -- HIP/VMM/probe gates below remain the real checks.
+    // Advisory only when NCCL_CUMEM_ENABLE is auto (-2) or force (>0), not when
+    // the user explicitly disabled cuMem.
+    const int kernelVersionCode = ncclGetKernelVersionCode();
+    if (NCCL_CUMEM_KERNEL_PERF_ADVISORY(kernelVersionCode, ncclParamCuMemEnable())) {
+      INFO(NCCL_INIT,
+           "cuMem on Linux kernel < 6.8 is functional but may not be performant; "
+           "kernel >= 6.8 is recommended");
+    }
   }
   CUDACHECKGOTO(cudaDriverGetVersion(&cudaDriverVersion), ret, error);
   {
