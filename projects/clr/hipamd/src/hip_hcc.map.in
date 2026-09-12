@@ -696,3 +696,8 @@ global:
 local:
     *;
 } hip_7.15;
+
+hip_10.2 {
+global:
+    hipDeviceFlushGPUDirectRDMAWrites;
+} hip_10.2;
