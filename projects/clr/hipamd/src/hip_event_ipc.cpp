@@ -8,6 +8,14 @@
 
 #include "hip_event.hpp"
 #if !defined(_MSC_VER)
+#include <cerrno>
+#include <cstdio>
+#include <cstring>
+#include <atomic>
+#include <random>
+#include <fcntl.h>
+#include <sys/mman.h>
+#include <sys/stat.h>
 #include <unistd.h>
 #else
 #include <io.h>
@@ -20,6 +28,90 @@ hipError_t ihipEventCreateWithFlags(hipEvent_t* event, unsigned flags);
 hipError_t ihipCreateIpcEventByType(hipEvent_t* event, ihipIpcEventHandleType type);
 void ihipDestroyIpcEvent(hipEvent_t event);
 
+#if !defined(_MSC_VER)
+namespace {
+// Name of the POSIX shm object backing an IPC event: "/hip_<pid>_<nonce>_<counter>", all hex.
+// The pid alone is not unique on a host: processes in different PID namespaces that share
+// /dev/shm (e.g. containers started with --ipc=host) get identical pids, and "/hip_<pid>_<n>"
+// then names the same object in both processes -- one silently re-initializes the other's live
+// event. The random per-process nonce keeps names unique; it is regenerated after fork().
+// At most 5 + 8 + 1 + 8 + 1 + 8 = 31 characters, so the name always fits the 32-byte handle.
+// Lock-free on purpose: a mutex held by another thread during fork() would stay locked forever
+// in the child.
+std::atomic<uint64_t> ipc_name_id{0};  // (pid << 32) | nonce of the current process
+std::atomic<uint32_t> ipc_name_counter{0};
+
+std::string ipcNamePrefix() {
+  const uint64_t pid = static_cast<uint32_t>(getpid());
+  uint64_t id = ipc_name_id.load(std::memory_order_acquire);
+  while ((id >> 32) != pid) {  // first use in this process, e.g. after fork()
+    const uint64_t fresh = (pid << 32) | std::random_device{}();
+    if (ipc_name_id.compare_exchange_weak(id, fresh, std::memory_order_acq_rel)) {
+      id = fresh;
+    }
+  }
+  char buf[24];
+  snprintf(buf, sizeof(buf), "/hip_%x_%08x_", static_cast<unsigned>(id >> 32),
+           static_cast<unsigned>(id));
+  return buf;
+}
+
+std::string newIpcName() {
+  char buf[9];
+  snprintf(buf, sizeof(buf), "%x",
+           static_cast<unsigned>(ipc_name_counter.fetch_add(1, std::memory_order_relaxed)));
+  return ipcNamePrefix() + buf;
+}
+
+// True if this process created `name`. Replaces the pid comparison against owners_process_id,
+// which reports "same process" for any process with the same pid in another PID namespace.
+bool isOwnIpcName(const std::string& name) {
+  const std::string prefix = ipcNamePrefix();
+  return name.compare(0, prefix.size(), prefix) == 0;
+}
+
+// Creates (exclusively) or opens (must exist) the shm object of an IPC event and maps it.
+// Returns 0 or an errno value. Opening never creates: a missing object used to be re-created
+// zero-filled by the importer, which turned its stream wait into a silent no-op.
+int mapIpcShmem(const std::string& name, bool create, ihipIpcEventShmem_t** shmem) {
+  constexpr size_t kSize = sizeof(ihipIpcEventShmem_t);
+  const int fd = create
+      ? shm_open(name.c_str(), O_RDWR | O_CREAT | O_EXCL, S_IRWXU | S_IRWXG | S_IRWXO)
+      : shm_open(name.c_str(), O_RDWR, 0);
+  if (fd < 0) {
+    return errno;
+  }
+  int err = 0;
+  struct stat st;
+  if (create) {
+    if (ftruncate(fd, kSize) != 0) {
+      err = errno;
+    }
+  } else if (fstat(fd, &st) != 0) {
+    err = errno;
+  } else if (static_cast<size_t>(st.st_size) < kSize) {
+    err = EINVAL;
+  }
+  void* ptr = MAP_FAILED;
+  if (err == 0) {
+    ptr = mmap(nullptr, kSize, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
+    if (ptr == MAP_FAILED) {
+      err = errno;
+    }
+  }
+  close(fd);
+  if (err != 0) {
+    if (create) {
+      shm_unlink(name.c_str());
+    }
+    return err;
+  }
+  *shmem = static_cast<ihipIpcEventShmem_t*>(ptr);
+  return 0;
+}
+}  // namespace
+#endif
+
 // ================================================================================================
 bool IPCEventEmulated::createIpcEventShmemIfNeeded() {
   // Early return if shared memory already exists
@@ -27,16 +119,22 @@ bool IPCEventEmulated::createIpcEventShmemIfNeeded() {
     return true;
   }
 
-  // Generate unique IPC name
+  // Generate a unique IPC name and create the shared memory object exclusively
 #if !defined(_MSC_VER)
-  static std::atomic<int> counter{0};
-  ipc_evt_.ipc_name_ = "/hip_" + std::to_string(getpid()) + "_" + std::to_string(counter++);
+  int err = EEXIST;
+  for (int attempt = 0; err == EEXIST && attempt < 4; ++attempt) {
+    ipc_evt_.ipc_name_ = newIpcName();
+    err = mapIpcShmem(ipc_evt_.ipc_name_, true, &ipc_evt_.ipc_shmem_);
+  }
+  if (err != 0) {
+    ipc_evt_.ipc_shmem_ = nullptr;
+    return false;
+  }
 #else
   char name_template[] = "/hip_XXXXXX";
   _mktemp_s(name_template, sizeof(name_template));
   ipc_evt_.ipc_name_ = name_template;
   ipc_evt_.ipc_name_.replace(0, 5, "/hip_");
-#endif
 
   // Create memory-mapped file for shared memory
   auto** shmem_ptr = reinterpret_cast<void**>(&ipc_evt_.ipc_shmem_);
@@ -45,6 +143,8 @@ bool IPCEventEmulated::createIpcEventShmemIfNeeded() {
                                        sizeof(hip::ihipIpcEventShmem_t))) {
     return false;
   }
+#endif
+  ipc_evt_.ipc_creator_ = true;
 
   // Initialize shared memory fields
   auto* const shmem = ipc_evt_.ipc_shmem_;
@@ -64,6 +164,10 @@ hipError_t IPCEventEmulated::query() {
   std::scoped_lock lock(lock_);
   if (ipc_evt_.ipc_shmem_) {
     const int prev_read_idx = ipc_evt_.ipc_shmem_->read_index;
+    if (prev_read_idx < 0) {
+      // Never recorded: -1 % IPC_SIGNALS_PER_EVENT would index signal[-1].
+      return hipSuccess;
+    }
     const int offset = prev_read_idx % IPC_SIGNALS_PER_EVENT;
 
     if (ipc_evt_.ipc_shmem_->read_index < prev_read_idx + IPC_SIGNALS_PER_EVENT &&
@@ -93,7 +197,20 @@ hipError_t IPCEventEmulated::synchronize() {
 // ================================================================================================
 hipError_t IPCEventEmulated::streamWait(hip::Stream* stream, uint flags) {
   std::scoped_lock lock(lock_);
-  const int offset = ipc_evt_.ipc_shmem_->read_index;
+  // Waiting on an event that was never recorded is a no-op (as for cudaStreamWaitEvent);
+  // before, a local interprocess event without shm dereferenced a null pointer here.
+  if (ipc_evt_.ipc_shmem_ == nullptr) {
+    return hipSuccess;
+  }
+  const int read_index = ipc_evt_.ipc_shmem_->read_index;
+  if (read_index < 0) {
+    return hipSuccess;
+  }
+  // read_index counts every record of the event, the signal ring has IPC_SIGNALS_PER_EVENT
+  // slots (see enqueueRecordCommand/query/synchronize). Without the modulo, from the 33rd
+  // record on every wait addressed memory past the registered signal array:
+  // hipErrorInvalidValue, or a wait on unrelated memory.
+  const int offset = read_index % IPC_SIGNALS_PER_EVENT;
   return ihipStreamOperation(
       reinterpret_cast<hipStream_t>(stream),
       ROCCLR_COMMAND_STREAM_WAIT_VALUE,
@@ -116,7 +233,10 @@ hipError_t IPCEventEmulated::enqueueRecordCommand(hip::Stream* stream, amd::Comm
   // Guard event_/shmem against concurrent query/synchronize/streamWait. Graph
   // event-record nodes call this directly; lock_ is recursive.
   std::scoped_lock lock(lock_);
-  createIpcEventShmemIfNeeded();
+  if (!createIpcEventShmemIfNeeded()) {
+    command->release();  // ownership passed to us; it was never enqueued
+    return hipErrorInvalidValue;
+  }
 
   // Allocate signal slot for this event
   auto* const shmem = ipc_evt_.ipc_shmem_;
@@ -163,6 +283,9 @@ hipError_t IPCEventEmulated::GetHandle(ihipIpcEventHandle_t* handle) {
   if (!createIpcEventShmemIfNeeded()) {
     return hipErrorInvalidValue;
   }
+  if (ipc_evt_.ipc_name_.size() >= sizeof(handle->shmem_name)) {
+    return hipErrorInvalidValue;  // the name plus NUL must fit into shmem_name
+  }
   ipc_evt_.ipc_shmem_->owners_device_id = deviceId();
   ipc_evt_.ipc_shmem_->owners_process_id = amd::Os::getProcessId();
   handle->type = kIpcEventHandleEmulated;
@@ -175,6 +298,21 @@ hipError_t IPCEventEmulated::GetHandle(ihipIpcEventHandle_t* handle) {
 // ================================================================================================
 hipError_t IPCEventEmulated::OpenHandle(ihipIpcEventHandle_t* handle) {
   std::scoped_lock lock(lock_);
+#if !defined(_MSC_VER)
+  ipc_evt_.ipc_name_ =
+      std::string(handle->shmem_name, strnlen(handle->shmem_name, sizeof(handle->shmem_name)));
+  // Prevent opening in the same process (by name: pids are not unique across PID namespaces)
+  if (isOwnIpcName(ipc_evt_.ipc_name_)) {
+    return hipErrorInvalidContext;
+  }
+  // Map the exporter's shared memory; never create it (a missing object used to be re-created
+  // zero-filled, turning the stream wait into a silent no-op)
+  if (mapIpcShmem(ipc_evt_.ipc_name_, false, &ipc_evt_.ipc_shmem_) != 0) {
+    ipc_evt_.ipc_shmem_ = nullptr;
+    return hipErrorInvalidValue;
+  }
+  auto* const shmem = ipc_evt_.ipc_shmem_;
+#else
   ipc_evt_.ipc_name_ = handle->shmem_name;
 
   // Map shared memory from IPC handle
@@ -192,6 +330,7 @@ hipError_t IPCEventEmulated::OpenHandle(ihipIpcEventHandle_t* handle) {
   if (current_process_id == shmem->owners_process_id.load()) {
     return hipErrorInvalidContext;
   }
+#endif
 
   shmem->owners += 1;
 

@@ -138,6 +138,12 @@ event:
   Unit_hipEventIpc_shm_cleanup:
     <<: *level_2
     tags: [ipc]
+  Unit_hipEventIpc_RecordReuse:
+    <<: *level_2
+    tags: [ipc, synchronization]
+  Unit_hipEventIpc_RecordReuse_Child:
+    <<: *level_2
+    disabled: [amd_wsl, amd_linux, nvidia_windows, nvidia_linux, amd_windows]
   Unit_hipEventCoalescing_CrossStreamWait:
     <<: *level_2
     tags: [synchronization]
