@@ -208,12 +208,29 @@ def _build_args():
 
 
 class TestCliCacheLabels(unittest.TestCase):
+    _SAVED_MODULE_NAMES = (
+        "amdsmi",
+        "amdsmi.amdsmi_interface",
+        "amdsmi.amdsmi_exception",
+        "amdsmi_helpers",
+        "amdsmi_cli_exceptions",
+    )
+
     @classmethod
     def setUpClass(cls):
         if not os.path.isfile(STATIC_PATH):
             raise unittest.SkipTest(f"amd-smi CLI static.py not found at {STATIC_PATH}")
+        cls._saved_modules = {name: sys.modules.get(name) for name in cls._SAVED_MODULE_NAMES}
         cls.interface = _install_fake_modules()
         cls.static_module = _load_static_module()
+
+    @classmethod
+    def tearDownClass(cls):
+        for name, saved in cls._saved_modules.items():
+            if saved is None:
+                sys.modules.pop(name, None)
+            else:
+                sys.modules[name] = saved
 
     def _run_cache(self, fmt):
         commands = object.__new__(self.static_module.StaticCommands)
