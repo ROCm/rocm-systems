@@ -7,8 +7,8 @@ namespace sdma_anvil {
 
 // Declared here; the single definition lives in anvil_stub_quiet_count.cpp
 // because every TU that includes gin_anvil_sdma.h would otherwise emit one.
-// test/CMakeLists.txt keeps IPC, Suite H and that TU -fgpu-rdc so the
-// device link merges them; those three must stay in that set.
+// test/CMakeLists.txt compiles IPC, Suite H and that TU -fgpu-rdc and
+// device-links rccl-UnitTestsFixtures whenever ENABLE_ROCSHMEM_GIN is on.
 extern __device__ unsigned long long g_sdmaStubQuietCount;
 
 struct SdmaQueueDeviceHandle {

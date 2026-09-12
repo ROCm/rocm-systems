@@ -1579,8 +1579,7 @@ __global__ void barrierFenceVisibilityKernel(
     syncFenceVisibilityBarrier(gin, operation, defaultFence);
   }
 
-  int sourceRank = operation == BarrierFenceOperation::SelfPut ? rank : (rank + devComm.nRanks - 1) % devComm.nRanks;
-  if (operation == BarrierFenceOperation::Get) sourceRank = peer;
+  int sourceRank = operation == BarrierFenceOperation::Put ? (rank + devComm.nRanks - 1) % devComm.nRanks : peer;
   for (size_t i = threadIdx.x; i < bytes; i += blockDim.x) {
     uint8_t expected = static_cast<uint8_t>(0x20 + sourceRank + (i & 0x3f));
     if (dst[i] != expected) atomicCAS(error, 0, static_cast<int>(i + 1));

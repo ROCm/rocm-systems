@@ -5,8 +5,8 @@
  ************************************************************************/
 
 // Single definition of the stub quiet counter declared in anvil_device.hpp.
-// Keep this out of the header: IPC and Suite H both include gin_anvil_sdma.h,
-// and rccl-UnitTestsFixtures does not compile those TUs relocatable by default.
+// Keep this out of the header: IPC and Suite H both include gin_anvil_sdma.h.
+// rccl-UnitTestsFixtures device-links this TU under ENABLE_ROCSHMEM_GIN.
 
 #include <hip/hip_runtime.h>
 

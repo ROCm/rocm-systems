@@ -496,14 +496,31 @@ TEST_F(GinAnvilSdmaTemplateTest, Flush_MultiDirtyBits) {
 
 using nccl::gin::anvil::detail::ncclGinAnvilSdmaRequest;
 
+template <typename T>
+static ncclGinAnvilIpcBufEntry makeIpcEntry(DeviceBuffer<T>* buf, size_t bytes) {
+  ncclGinAnvilIpcBufEntry entry{};
+  entry.local_base = reinterpret_cast<uintptr_t>(buf->ptr);
+  entry.length = bytes;
+  entry.remote_bases[1] = reinterpret_cast<uintptr_t>(buf->ptr);
+  return entry;
+}
+
+template <typename T>
 static void mapIpcTo(TemplateHarness* host, DeviceBuffer<ncclGinAnvilIpcBufEntry>* d_entry,
-                     DeviceBuffer<uint8_t>* buf, size_t bytes) {
-  host->ipcEntry.local_base = reinterpret_cast<uintptr_t>(buf->ptr);
-  host->ipcEntry.length = bytes;
-  host->ipcEntry.remote_bases[1] = reinterpret_cast<uintptr_t>(buf->ptr);
+                     DeviceBuffer<T>* buf, size_t bytes) {
+  host->ipcEntry = makeIpcEntry(buf, bytes);
   d_entry->upload(host->ipcEntry);
   host->ctx.ipcTable = d_entry->ptr;
   host->ctx.ipcTableCount = 1;
+}
+
+template <typename A, typename B>
+static void mapIpcToTwo(TemplateHarness* host, DeviceBuffer<ncclGinAnvilIpcBufEntry>* d_entry,
+                        DeviceBuffer<A>* a, size_t aBytes, DeviceBuffer<B>* b, size_t bBytes) {
+  ncclGinAnvilIpcBufEntry table[2] = {makeIpcEntry(a, aBytes), makeIpcEntry(b, bBytes)};
+  d_entry->copyFrom(table, 2);
+  host->ctx.ipcTable = d_entry->ptr;
+  host->ctx.ipcTableCount = 2;
 }
 
 // H13: Get below the SDMA threshold copies via ipcPut (reverse copy).
@@ -672,7 +689,8 @@ TEST_F(GinAnvilSdmaTemplateTest, FlushAsync_CleanPeerDoesNotQuiet) {
   DeviceBuffer<uint64_t> d_dirty(1);
   DeviceBuffer<ncclGinRequest_t> d_req(1);
   DeviceBuffer<uint32_t> d_complete(1);
-  d_dirty.zero();
+  uint64_t peer0Bit = 1ULL << 0;  // peer 0 dirty; flush peer 1 so a bitIdx that drops peer still quiets
+  d_dirty.copyFrom(&peer0Bit, 1);
   d_req.zero();
   d_complete.zero();
   TemplateHarness host{};
@@ -683,7 +701,7 @@ TEST_F(GinAnvilSdmaTemplateTest, FlushAsync_CleanPeerDoesNotQuiet) {
   kernelFlushAsync<<<1, 1>>>(d_h.ptr, d_req.ptr, /*peer=*/1, d_complete.ptr);
   syncAndCheck();
   EXPECT_EQ(d_complete.download(), 1u);
-  EXPECT_EQ(d_dirty.download(), 0ULL);
+  EXPECT_EQ(d_dirty.download(), peer0Bit);
   EXPECT_EQ(readQuietCount(), 0ULL);
 }
 
@@ -743,9 +761,10 @@ TEST_F(GinAnvilSdmaTemplateTest, Wait_NoFenceWhenIncomplete) {
   EXPECT_EQ(readThreadfenceCount(), 0ULL);
 }
 
-// H21: a standalone strong signal (no windows) still resolves the peer queue so
-// fenceBeforeSignal quiets SDMA instead of racing the payload via IPC.
-__global__ void kernelPutStandaloneSignal(TemplateHarness* h) {
+// H21/H22: a strong signal still resolves the peer queue so fenceBeforeSignal
+// quiets SDMA instead of racing the payload via IPC. hasWins=false is a
+// standalone barrier signal; hasWins=true is a windowed sub-threshold put.
+__global__ void kernelPutSignalQuiesce(TemplateHarness* h, bool hasWins, size_t bytes) {
   if (threadIdx.x != 0) return;
   ncclGinCtx ginCtx{};
   ginCtx.handle = &h->ctx;
@@ -754,8 +773,8 @@ __global__ void kernelPutStandaloneSignal(TemplateHarness* h) {
   sig.type = NCCL_GIN_SIGNAL_TYPE_INDEXED;
   sig.indexedSignal.signalId = 0;
   ncclGinApi_Put<NCCL_NET_DEVICE_GIN_ANVIL_SDMA>::call(
-      ginCtx, ncclCoopThread{}, 1, /*hasWins=*/false, reinterpret_cast<ncclGinWindow_t>(&h->dstMh), 0,
-      reinterpret_cast<ncclGinWindow_t>(&h->srcMh), 0, 0, sig, ncclGinSignalInc, 0, false, 0, false,
+      ginCtx, ncclCoopThread{}, 1, hasWins, reinterpret_cast<ncclGinWindow_t>(&h->dstMh), 0,
+      reinterpret_cast<ncclGinWindow_t>(&h->srcMh), 0, bytes, sig, ncclGinSignalInc, 0, false, 0, false,
       nullptr, cuda::thread_scope_system, cuda::thread_scope_system);
 }
 
@@ -772,16 +791,11 @@ TEST_F(GinAnvilSdmaTemplateTest, Put_StandaloneSignalResolvesQueue) {
   uploadHarness(&d_h, &host, &d_src, &d_dst, &d_entry, &d_q, &d_row, 0);
   host.ctx.signals = d_signals.ptr;
   host.ctx.nSignals = 2;
-  host.ipcEntry.local_base = reinterpret_cast<uintptr_t>(d_signals.ptr);
-  host.ipcEntry.length = 2 * sizeof(uint64_t);
-  host.ipcEntry.remote_bases[1] = reinterpret_cast<uintptr_t>(d_signals.ptr);
-  d_entry.upload(host.ipcEntry);
-  host.ctx.ipcTable = d_entry.ptr;
-  host.ctx.ipcTableCount = 1;
+  mapIpcTo(&host, &d_entry, &d_signals, 2 * sizeof(uint64_t));
   d_h.upload(host);
   resetQuietCount();
   resetThreadfenceCount();
-  kernelPutStandaloneSignal<<<1, 1>>>(d_h.ptr);
+  kernelPutSignalQuiesce<<<1, 1>>>(d_h.ptr, /*hasWins=*/false, /*bytes=*/0);
   syncAndCheck();
   EXPECT_EQ(d_signals.download(), 1ULL);
   EXPECT_EQ(readQuietCount(), 1ULL);
@@ -790,26 +804,17 @@ TEST_F(GinAnvilSdmaTemplateTest, Put_StandaloneSignalResolvesQueue) {
 
 // H22: a windowed sub-threshold put with a strong signal still resolves the peer
 // queue so fenceBeforeSignal quiets in-flight SDMA from earlier large puts.
-__global__ void kernelPutWindowedIpcSignalQuiesce(TemplateHarness* h) {
-  if (threadIdx.x != 0) return;
-  ncclGinCtx ginCtx{};
-  ginCtx.handle = &h->ctx;
-  ginCtx.nRanks = 2;
-  ncclGinSignalDescriptor sig{};
-  sig.type = NCCL_GIN_SIGNAL_TYPE_INDEXED;
-  sig.indexedSignal.signalId = 0;
-  ncclGinApi_Put<NCCL_NET_DEVICE_GIN_ANVIL_SDMA>::call(
-      ginCtx, ncclCoopThread{}, 1, /*hasWins=*/true, reinterpret_cast<ncclGinWindow_t>(&h->dstMh), 0,
-      reinterpret_cast<ncclGinWindow_t>(&h->srcMh), 0, 64, sig, ncclGinSignalInc, 0, false, 0, false,
-      nullptr, cuda::thread_scope_system, cuda::thread_scope_system);
-}
-
 TEST_F(GinAnvilSdmaTemplateTest, Put_WindowedIpcPutStrongSignalResolvesQueue) {
-  DeviceBuffer<uint8_t> d_src(64);
-  DeviceBuffer<uint8_t> d_dst(64);
+  constexpr int kN = 64;
+  std::vector<uint8_t> pat(kN);
+  for (int i = 0; i < kN; ++i) pat[static_cast<size_t>(i)] = static_cast<uint8_t>(0x51 + i);
+  DeviceBuffer<uint8_t> d_src(static_cast<size_t>(kN));
+  DeviceBuffer<uint8_t> d_dst(static_cast<size_t>(kN));
+  d_src.copyFrom(pat);
+  d_dst.zero();
   DeviceBuffer<uint64_t> d_signals(2);
   d_signals.zero();
-  DeviceBuffer<ncclGinAnvilIpcBufEntry> d_entry(1);
+  DeviceBuffer<ncclGinAnvilIpcBufEntry> d_entry(2);
   DeviceBuffer<sdma_anvil::SdmaQueueDeviceHandle> d_q(1);
   DeviceBuffer<sdma_anvil::SdmaQueueDeviceHandle*> d_row(2);
   DeviceBuffer<TemplateHarness> d_h(1);
@@ -817,20 +822,62 @@ TEST_F(GinAnvilSdmaTemplateTest, Put_WindowedIpcPutStrongSignalResolvesQueue) {
   uploadHarness(&d_h, &host, &d_src, &d_dst, &d_entry, &d_q, &d_row, 128);
   host.ctx.signals = d_signals.ptr;
   host.ctx.nSignals = 2;
-  host.ipcEntry.local_base = reinterpret_cast<uintptr_t>(d_signals.ptr);
-  host.ipcEntry.length = 2 * sizeof(uint64_t);
-  host.ipcEntry.remote_bases[1] = reinterpret_cast<uintptr_t>(d_signals.ptr);
-  d_entry.upload(host.ipcEntry);
-  host.ctx.ipcTable = d_entry.ptr;
-  host.ctx.ipcTableCount = 1;
+  mapIpcToTwo(&host, &d_entry, &d_dst, static_cast<size_t>(kN), &d_signals, 2 * sizeof(uint64_t));
   d_h.upload(host);
   resetQuietCount();
   resetThreadfenceCount();
-  kernelPutWindowedIpcSignalQuiesce<<<1, 1>>>(d_h.ptr);
+  kernelPutSignalQuiesce<<<1, 1>>>(d_h.ptr, /*hasWins=*/true, static_cast<size_t>(kN));
   syncAndCheck();
   EXPECT_EQ(d_signals.download(), 1ULL);
   EXPECT_EQ(readQuietCount(), 1ULL);
   EXPECT_EQ(readThreadfenceCount(), 1ULL);
+  auto got = d_dst.copyTo();
+  for (int i = 0; i < kN; ++i) {
+    EXPECT_EQ(got[static_cast<size_t>(i)], pat[static_cast<size_t>(i)]);
+  }
+}
+
+// H23: windowed PutValue with a strong signal also resolves the peer queue.
+__global__ void kernelPutValueIpcSignalQuiesce(TemplateHarness* h, uint64_t value) {
+  if (threadIdx.x != 0) return;
+  ncclGinCtx ginCtx{};
+  ginCtx.handle = &h->ctx;
+  ginCtx.nRanks = 2;
+  ncclGinSignalDescriptor sig{};
+  sig.type = NCCL_GIN_SIGNAL_TYPE_INDEXED;
+  sig.indexedSignal.signalId = 0;
+  ncclGinApi_PutValue<NCCL_NET_DEVICE_GIN_ANVIL_SDMA>::call(
+      ginCtx, ncclCoopThread{}, 1, reinterpret_cast<ncclGinWindow_t>(&h->dstMh), 0, value, sig,
+      ncclGinSignalInc, 0, false, nullptr, cuda::thread_scope_system, cuda::thread_scope_system);
+}
+
+TEST_F(GinAnvilSdmaTemplateTest, PutValue_WindowedIpcPutStrongSignalResolvesQueue) {
+  constexpr uint64_t kVal = 0xAABBCCDDEEFF0011ULL;
+  DeviceBuffer<uint8_t> d_dst(sizeof(uint64_t));
+  d_dst.zero();
+  DeviceBuffer<uint64_t> d_signals(2);
+  d_signals.zero();
+  DeviceBuffer<ncclGinAnvilIpcBufEntry> d_entry(2);
+  DeviceBuffer<sdma_anvil::SdmaQueueDeviceHandle> d_q(1);
+  DeviceBuffer<sdma_anvil::SdmaQueueDeviceHandle*> d_row(2);
+  DeviceBuffer<TemplateHarness> d_h(1);
+  TemplateHarness host{};
+  uploadHarness(&d_h, &host, &d_dst, &d_dst, &d_entry, &d_q, &d_row, 128);
+  host.ctx.signals = d_signals.ptr;
+  host.ctx.nSignals = 2;
+  mapIpcToTwo(&host, &d_entry, &d_dst, sizeof(uint64_t), &d_signals, 2 * sizeof(uint64_t));
+  d_h.upload(host);
+  resetQuietCount();
+  resetThreadfenceCount();
+  kernelPutValueIpcSignalQuiesce<<<1, 1>>>(d_h.ptr, kVal);
+  syncAndCheck();
+  EXPECT_EQ(d_signals.download(), 1ULL);
+  EXPECT_EQ(readQuietCount(), 1ULL);
+  EXPECT_EQ(readThreadfenceCount(), 1ULL);
+  auto got = d_dst.copyTo();
+  uint64_t landed = 0;
+  std::memcpy(&landed, got.data(), sizeof(landed));
+  EXPECT_EQ(landed, kVal);
 }
 
 #endif  // NCCL_GIN_ANVIL_SDMA_ENABLE
