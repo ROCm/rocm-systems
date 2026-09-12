@@ -221,6 +221,11 @@ typedef struct ReconfigParams_t {
     uint32_t reconfig_flush_mode;
 } ReconfigParams;
 
+/**
+ * \ingroup group_amd_roc_video_dec
+ * \brief High-level video decoder utility class that wraps the rocDecode core APIs to
+ * create, control, and destroy the hardware decoder, and to decode and retrieve frames on the GPU.
+ */
 class RocVideoDecoder {
     public:
         /**
