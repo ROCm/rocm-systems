@@ -39,10 +39,12 @@ default_unrolls = ["1", "2", "4"] + list(unroll_arch_requirement)
 # STRAGGLER_UNROLL picks the unroll those bodies are compiled at, and is read
 # when CMake configures. The default 32 is a no-op, being the unroll this set already
 # advertises; lowering it trades gfx1250 AllReduce throughput for build time. On that
-# build the 4171s becomes 3203s at 28, 2350s at 24 and 1501s at 16 -- the response is
-# not smooth, as the ring MinMax kernels fall off a cliff between 28 and 24. The value
-# must be even: the Unroll*(16/sizeof(T))/2 expansion in reduceCopy() truncates odd
-# ones.
+# build the 4171s becomes 3203s at 28, 2350s at 24, 1501s at 16 and 668s at 8, while
+# the build itself goes 447s, 228s, 121s, 93s, 82s. The response is not smooth: the
+# ring MinMax kernels fall off a cliff between 28 and 24, and below 16 the critical
+# path moves to kernels outside this set, so 8 compiles these much faster for almost
+# no wall-clock gain. The value must be even: the Unroll*(16/sizeof(T))/2 expansion in
+# reduceCopy() truncates odd ones.
 unroll_override_env = "STRAGGLER_UNROLL"
 unroll_override_unroll = (os.environ.get(unroll_override_env) or "32").strip()
 if not (unroll_override_unroll.isdigit()
