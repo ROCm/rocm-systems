@@ -1136,6 +1136,9 @@ memory:
   Unit_hipMemcpyDeviceToDeviceNoCU_Memcpy_Kernel_InParallel:
     <<: *level_2
     tags: [transfer, P1]
+  Unit_hipMemcpyDeviceToDeviceNoCU_PeerDevice:
+    <<: *level_2
+    tags: [multigpu, transfer, P1]
   Unit_hipGetProcAddress_MemoryApisMallocFree:
     <<: *level_2
     tags: [P1]

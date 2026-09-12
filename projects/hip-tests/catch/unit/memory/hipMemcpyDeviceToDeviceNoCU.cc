@@ -265,6 +265,74 @@ HIP_TEST_CASE(Unit_hipMemcpyDeviceToDeviceNoCU_Memcpy_Kernel_InParallel) {
 }
 
 /**
+ * Test Description
+ * ------------------------
+ *    - For every peer capable device pair, seed a source chunk on the first device
+ * and zero a destination chunk on the second. On a freshly created stream, copy
+ * from device to peer device using hipMemcpyDeviceToDeviceNoCU (Async Copy) and
+ * validate the data landed on the destination device. The copy is the first SDMA
+ * transfer issued on the source device, so it exercises engine selection without
+ * any host transfer having already reserved an engine.
+ * ------------------------
+ *    - catch\unit\memory\hipMemcpyDeviceToDeviceNoCU.cc
+ * Test requirements
+ * ------------------------
+ *    - Multi device
+ *    - HIP_VERSION >= 6.1
+ */
+HIP_TEST_CASE(Unit_hipMemcpyDeviceToDeviceNoCU_PeerDevice) {
+  int numDevices = 0;
+  HIP_CHECK(hipGetDeviceCount(&numDevices));
+  if (numDevices < 2) {
+    HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
+  }
+  constexpr int N = 1 << 22;
+  constexpr int pattern = 0x5A5A5A5A;
+  size_t buffer_size = N * sizeof(int);
+  int* Bh = new int[N];
+  REQUIRE(Bh != nullptr);
+
+  for (int srcDev = 0; srcDev < numDevices; srcDev++) {
+    for (int dstDev = 0; dstDev < numDevices; dstDev++) {
+      if (srcDev == dstDev) continue;
+      int canAccessPeer = 0;
+      HIP_CHECK(hipDeviceCanAccessPeer(&canAccessPeer, srcDev, dstDev));
+      if (!canAccessPeer) continue;
+      INFO("src device: " << srcDev << " dst device: " << dstDev);
+
+      int *Ad, *Bd;
+      HIP_CHECK(hipSetDevice(dstDev));
+      HIP_CHECK(hipMalloc(&Bd, buffer_size));
+      HIP_CHECK(hipMemset(Bd, 0, buffer_size));
+      HIP_CHECK(hipDeviceSynchronize());
+      HIP_CHECK(hipSetDevice(srcDev));
+      HIP_CHECK(hipMalloc(&Ad, buffer_size));
+      HIP_CHECK(hipMemsetD32(reinterpret_cast<hipDeviceptr_t>(Ad), pattern, N));
+      HIP_CHECK(hipDeviceSynchronize());
+
+      hipStream_t strm;
+      HIP_CHECK(hipStreamCreate(&strm));
+      HIP_CHECK(hipMemcpyAsync(Bd, Ad, buffer_size, hipMemcpyDeviceToDeviceNoCU, strm));
+      HIP_CHECK(hipStreamSynchronize(strm));
+      HIP_CHECK(hipStreamDestroy(strm));
+      HIP_CHECK(hipFree(Ad));
+
+      HIP_CHECK(hipSetDevice(dstDev));
+      HIP_CHECK(hipMemcpy(Bh, Bd, buffer_size, hipMemcpyDeviceToHost));
+      HIP_CHECK(hipFree(Bd));
+      size_t mismatches = 0;
+      for (int i = 0; i < N; i++) {
+        if (Bh[i] != pattern) mismatches++;
+      }
+      INFO("mismatches: " << mismatches << " out of : " << N);
+      REQUIRE(mismatches == 0);
+    }
+  }
+  HIP_CHECK(hipSetDevice(0));
+  delete[] Bh;
+}
+
+/**
  * End doxygen group MemoryTest.
  * @}
  */

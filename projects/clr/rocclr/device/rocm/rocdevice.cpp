@@ -4218,10 +4218,7 @@ uint32_t Device::SdmaEngineAllocator::AllocateEngine(VirtualGPU* vgpu, HwQueueEn
                                                       hsa_agent_t peerAgent, hsa_agent_t copyAgent) {
   std::scoped_lock lock(lock_);
 
-  // Get valid engine mask based on operation type (read vs write)
-  uint32_t validEngineMask = (engine_type == HwQueueEngine::SdmaD2H)
-                              ? device_.maxSdmaReadMask_
-                              : device_.maxSdmaWriteMask_;
+  uint32_t validEngineMask = device_.GetSdmaValidMask(engine_type);
 
   // Query HSA for engine status and preferences
   uint32_t freeEngineMask = 0;
