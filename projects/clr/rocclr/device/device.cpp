@@ -5,6 +5,7 @@
  */
 
 #include "device/device.hpp"
+#include "device/memobjmap_erase.hpp"
 #include "thread/monitor.hpp"
 #include "utils/options.hpp"
 #include "comgrctx.hpp"
@@ -362,6 +363,39 @@ void MemObjMap::RemoveMemObj(const void* k) {
   guarantee(rval == 1, "Memobj map does not have ptr: 0x%x", reinterpret_cast<uintptr_t>(k));
 }
 
+namespace {
+// Byte span an entry covers in the mem-obj maps: physical memory is keyed by
+// its handle, everything else by its allocation size.
+size_t MemObjSpan(amd::Memory* mem) {
+  return (mem->getMemFlags() & ROCCLR_MEM_PHYMEM) ? sizeof(mem->getUserData().hsa_handle)
+                                                  : mem->getSize();
+}
+}  // namespace
+
+bool MemObjMap::TryRemoveMemObj(const void* k, const amd::Memory* expected) {
+  // Non-fatal removal for user-facing frees (hipFree), where a pointer can
+  // legitimately be absent from the global map: on Windows an allocation may
+  // be tracked only in a per-device VA map, and external / host-registered
+  // memory is indexed elsewhere. Range-aware like FindMemObj, but the erase
+  // fires only when the covering entry is `expected` -- per-device VA ranges
+  // can numerically overlap an unrelated allocation's [base, base + size) in
+  // the global map, and erasing whatever covers the pointer would de-index a
+  // live allocation. A miss degrades to a warning instead of killing the
+  // process; the diagnostic lets a repro pin which allocation class is missing.
+  std::unique_lock lock(AllocatedLock_);
+  amd::Memory* removed =
+      EraseCoveringMemObjIf(MemObjMap_, reinterpret_cast<uintptr_t>(k), MemObjSpan,
+                            [expected](const amd::Memory* mem) { return mem == expected; });
+  if (removed != nullptr) {
+    return true;
+  }
+  ClPrint(amd::LOG_WARNING, amd::LOG_MEM,
+          "TryRemoveMemObj: global map has no entry for ptr 0x%zx owned by memory %p "
+          "(per-device VA or external memory?); skipping global de-index",
+          reinterpret_cast<uintptr_t>(k), expected);
+  return false;
+}
+
 MemObjMap::LookupResult MemObjMap::findMemObjNoLock(const void* ptr, Device* dev) {
   uintptr_t key = reinterpret_cast<uintptr_t>(ptr);
 
@@ -422,25 +456,7 @@ amd::Memory* MemObjMap::FindOverlap(const void* ptr, size_t size) {
 
 amd::Memory* MemObjMap::FindAndRemoveMemObj(const void* k) {
   std::unique_lock lock(AllocatedLock_);
-  uintptr_t key = reinterpret_cast<uintptr_t>(k);
-
-  // Find the memory object in the map using upper_bound
-  auto it = MemObjMap_.upper_bound(key);
-  if (it == MemObjMap_.begin()) {
-    return nullptr;
-  }
-  --it;
-  amd::Memory* mem = it->second;
-  size_t mem_size = (mem->getMemFlags() & ROCCLR_MEM_PHYMEM)
-                        ? sizeof(mem->getUserData().hsa_handle)
-                        : mem->getSize();
-  if (key < it->first || key >= (it->first + mem_size)) {
-    return nullptr;
-  }
-
-  // Found - remove and return
-  MemObjMap_.erase(it);
-  return mem;
+  return EraseCoveringMemObj(MemObjMap_, reinterpret_cast<uintptr_t>(k), MemObjSpan);
 }
 
 void MemObjMap::FindMemObjBatch(const void* const* ptrs, size_t count,
