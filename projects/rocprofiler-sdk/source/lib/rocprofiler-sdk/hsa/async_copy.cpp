@@ -30,6 +30,7 @@
 #include "lib/rocprofiler-sdk/agent.hpp"
 #include "lib/rocprofiler-sdk/context/context.hpp"
 #include "lib/rocprofiler-sdk/hsa/hsa.hpp"
+#include "lib/rocprofiler-sdk/range_replay/range_state.hpp"
 #include "lib/rocprofiler-sdk/registration.hpp"
 #include "lib/rocprofiler-sdk/tracing/fwd.hpp"
 #include "lib/rocprofiler-sdk/tracing/profiling_time.hpp"
@@ -662,6 +663,14 @@ async_copy_impl(Args... args)
                 << _hsa_dst_agent.handle;
         }
     }
+
+    // Range replay: a copy that writes device memory while a range is open on that agent writes
+    // state the recorded dispatch sequence does not contain, so a replayed pass would run without
+    // it. Decline the range. Checked before the tracing early-out below because the decline must
+    // happen whether or not anything is tracing memory copies.
+    if(range_replay::any_range_open() && (_direction == ROCPROFILER_MEMORY_COPY_HOST_TO_DEVICE ||
+                                          _direction == ROCPROFILER_MEMORY_COPY_DEVICE_TO_DEVICE))
+        range_replay::note_device_write(_dst_agent_id.handle);
 
     async_copy_data* _data = nullptr;
 
