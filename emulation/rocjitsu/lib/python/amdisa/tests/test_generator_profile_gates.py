@@ -2420,6 +2420,53 @@ def test_matrix_acc_cd_destination_uses_encoding_field_presence(mnemonic):
     assert 'inst_.acc_cd' not in without_acc_cd
 
 
+@pytest.mark.parametrize(
+    ('body', 'expected'),
+    [
+        ('(void)wf; throw util::UnimplementedInst(mnemonic());', True),
+        (
+            '// Unimplemented sparse matrix operation.\n'
+            '(void)wf;\nthrow util::UnimplementedInst(mnemonic()); // detail',
+            True,
+        ),
+        (
+            '/* Multi-line\ncomment. */\n(void)wf;\n\n'
+            'throw util::UnimplementedInst(mnemonic());',
+            True,
+        ),
+        (
+            '(void)wf; if (unsupported) throw util::UnimplementedInst(mnemonic());',
+            False,
+        ),
+        ('(void)wf; wf.halt(); throw util::UnimplementedInst(mnemonic());', False),
+        ('(void)wf; throw util::UnimplementedInst(mnemonic()); wf.halt();', False),
+    ],
+)
+def test_unimplemented_execute_stub_requires_unconditional_failure(body, expected):
+    assert CodeGenerator._is_unimplemented_execute_stub(body) is expected
+
+
+@pytest.mark.parametrize(
+    ('arch', 'class_name'),
+    [
+        ('cdna3', 'VSmfmacI3216x16x64I8Vop3pMfma'),
+        ('cdna3', 'VSmfmacI3232x32x32I8Vop3pMfma'),
+        ('cdna4', 'VSmfmacI3216x16x128I8Vop3pMfma'),
+        ('cdna4', 'VSmfmacI3232x32x64I8Vop3pMfma'),
+        ('cdna4', 'VSmfmacI3216x16x64I8Vop3pMfma'),
+        ('cdna4', 'VSmfmacI3232x32x32I8Vop3pMfma'),
+    ],
+)
+def test_generated_sparse_integer_mma_stubs_report_failure(
+    amdgpu_generated_root: Path, arch: str, class_name: str
+):
+    source = (amdgpu_generated_root / arch / 'vop3p_exec.cpp').read_text()
+    body = _generated_function_body(source, f'void {class_name}::execute_impl')
+    assert 'wf.report_instruction_execution_error(' in body
+    assert 'InstructionExecutionError::UnimplementedInstruction' in body
+    assert 'throw ' not in body
+
+
 def test_cdna3_real_spec_mfma_destination_uses_acc_cd(tmp_path):
     isa_xml = _mrisa_dir() / 'amdgpu_isa_cdna3.xml'
     if not isa_xml.is_file():
