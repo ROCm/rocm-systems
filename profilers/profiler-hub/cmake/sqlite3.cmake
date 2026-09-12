@@ -3,104 +3,123 @@
 
 # ----------------------------------------------------------------------------------------#
 #
-# SQLite3 - cloned from upstream and built from the amalgamation
+# SQLite3 - built from the pre-generated amalgamation stored in this repository
 #
-# Mirrors the pattern used by sibling rocprofiler-systems
-# (projects/rocprofiler-systems/cmake/SQLite3.cmake): fetch the upstream
-# git repository at a pinned tag, then build locally. Avoids vendoring
-# any binary blobs in the source tree.
+# The amalgamation (sqlite3.c + sqlite3.h) is upstream's published release
+# artifact, kept under `profilers/profiler-hub/external/sqlite3/`. Configure
+# reads it straight off disk, so building SQLite3 needs no network access, no
+# git clone, and - crucially - no `tclsh`. SQLite's own `make sqlite3.c` target
+# runs `tool/mksqlite3c.tcl`, which `./configure --disable-tcl` does not lift.
+#
+# `external/sqlite3/README.md` is the maintenance entry point: it records the
+# exact upstream release and checksums, and documents how to regenerate,
+# verify and re-publish the amalgamation when SQLite is bumped.
 #
 # ----------------------------------------------------------------------------------------#
 
-set(SQLITE3_GIT_URL
-    "https://github.com/sqlite/sqlite.git"
+set(SQLITE3_AMALGAMATION_VERSION
+    "3.45.3"
     CACHE STRING
-    "Upstream SQLite3 git repository URL"
+    "Upstream SQLite3 release that the bundled amalgamation was taken from"
 )
-set(SQLITE3_GIT_TAG
-    "version-3.45.3"
+
+get_filename_component(
+    _sqlite3_default_dir
+    "${CMAKE_CURRENT_LIST_DIR}/../external/sqlite3"
+    ABSOLUTE
+)
+set(SQLITE3_AMALGAMATION_DIR
+    "${_sqlite3_default_dir}"
+    CACHE PATH
+    "Directory holding the pre-generated SQLite3 amalgamation (sqlite3.c and sqlite3.h)"
+)
+unset(_sqlite3_default_dir)
+
+set(SQLITE3_AMALGAMATION_SHA256_C
+    "9ca336fbcbff9f1d78b4f45b6a19583fcc097192310dd2f5f6cd43b9a33d7d69"
     CACHE STRING
-    "Upstream SQLite3 git tag to check out"
+    "Expected SHA256 of sqlite3.c; set to an empty string to skip verification"
+)
+set(SQLITE3_AMALGAMATION_SHA256_H
+    "882ad3c0448d0324fb3a6b1a85333a9173d539ac669c9972ae1f03722ff86282"
+    CACHE STRING
+    "Expected SHA256 of sqlite3.h; set to an empty string to skip verification"
 )
 
-message(
-    STATUS
-    "[profiler-hub] Cloning SQLite3 from ${SQLITE3_GIT_URL} @ ${SQLITE3_GIT_TAG}"
-)
-
-find_package(Git REQUIRED)
-find_program(MAKE_COMMAND NAMES make gmake REQUIRED)
-
-set(SQLITE3_SOURCE_DIR "${PROJECT_BINARY_DIR}/external/sqlite3")
+set(SQLITE3_SOURCE_DIR "${SQLITE3_AMALGAMATION_DIR}")
 set(SQLITE3_AMALG_C "${SQLITE3_SOURCE_DIR}/sqlite3.c")
 set(SQLITE3_AMALG_H "${SQLITE3_SOURCE_DIR}/sqlite3.h")
 
-# checkout: shallow + partial first, retry full on failure
-if(NOT EXISTS "${SQLITE3_SOURCE_DIR}/configure")
-    if(EXISTS "${SQLITE3_SOURCE_DIR}")
-        file(REMOVE_RECURSE "${SQLITE3_SOURCE_DIR}")
-    endif()
-    execute_process(
-        COMMAND
-            ${GIT_EXECUTABLE} clone --depth 1 --filter=blob:none --branch
-            ${SQLITE3_GIT_TAG} ${SQLITE3_GIT_URL} ${SQLITE3_SOURCE_DIR}
-        RESULT_VARIABLE _sqlite3_clone_rc
-    )
-    if(NOT _sqlite3_clone_rc EQUAL 0)
-        message(
-            STATUS
-            "[profiler-hub] Optimized clone failed; retrying full clone"
-        )
-        if(EXISTS "${SQLITE3_SOURCE_DIR}")
-            file(REMOVE_RECURSE "${SQLITE3_SOURCE_DIR}")
-        endif()
-        execute_process(
-            COMMAND
-                ${GIT_EXECUTABLE} clone --branch ${SQLITE3_GIT_TAG}
-                ${SQLITE3_GIT_URL} ${SQLITE3_SOURCE_DIR}
-            RESULT_VARIABLE _sqlite3_clone_rc
-        )
-    endif()
-    if(NOT _sqlite3_clone_rc EQUAL 0)
-        message(
-            FATAL_ERROR
-            "[profiler-hub] git clone of SQLite3 failed (rc=${_sqlite3_clone_rc})"
-        )
-    endif()
-endif()
+set(_sqlite3_readme "profilers/profiler-hub/external/sqlite3/README.md")
 
-# generate amalgamation (sqlite3.c + sqlite3.h) via upstream autotools
-if(NOT EXISTS "${SQLITE3_AMALG_C}" OR NOT EXISTS "${SQLITE3_AMALG_H}")
-    message(STATUS "[profiler-hub] Generating SQLite3 amalgamation")
-    execute_process(
-        COMMAND ./configure --disable-tcl
-        WORKING_DIRECTORY ${SQLITE3_SOURCE_DIR}
-        RESULT_VARIABLE _sqlite3_configure_rc
-    )
-    if(NOT _sqlite3_configure_rc EQUAL 0)
+# ----------------------------------------------------------------------------------------#
+# Presence and integrity checks
+#
+# Presence: the amalgamation is committed to git, so a normal checkout always
+# has it. The two ways it can legitimately be absent are a partial/sparse
+# checkout that excludes `external/`, and a tree where these sources have been
+# moved to DVC (see the README). Name both, rather than letting the compiler
+# report a missing input file.
+#
+# Integrity: guards against a truncated checkout, an accidental in-place edit,
+# and against a stale artifact if these sources are ever served from a content
+# store rather than from git.
+# ----------------------------------------------------------------------------------------#
+
+foreach(_sqlite3_kind IN ITEMS C H)
+    set(_sqlite3_file "${SQLITE3_AMALG_${_sqlite3_kind}}")
+    set(_sqlite3_sha_var "SQLITE3_AMALGAMATION_SHA256_${_sqlite3_kind}")
+
+    if(NOT EXISTS "${_sqlite3_file}")
+        if(EXISTS "${_sqlite3_file}.dvc")
+            message(
+                FATAL_ERROR
+                "[profiler-hub] SQLite3 amalgamation is tracked by DVC but has not been "
+                "materialised:\n"
+                "    ${_sqlite3_file}\n"
+                "Fetch it from the repository's DVC remote before configuring:\n"
+                "    pip install 'dvc[s3]'\n"
+                "    dvc pull ${_sqlite3_file}.dvc\n"
+                "`dvc pull` must run from a checkout that contains the top-level "
+                "`.dvc/` directory. See ${_sqlite3_readme}."
+            )
+        endif()
         message(
             FATAL_ERROR
-            "[profiler-hub] SQLite3 ./configure failed (rc=${_sqlite3_configure_rc})"
+            "[profiler-hub] SQLite3 amalgamation not found:\n"
+            "    ${_sqlite3_file}\n"
+            "This file is committed to the repository, so it is normally present. If "
+            "this is a partial or sparse checkout, include "
+            "`profilers/profiler-hub/external/sqlite3`. To build against an "
+            "amalgamation held elsewhere, pass -DSQLITE3_AMALGAMATION_DIR=<dir> (that "
+            "directory must contain both sqlite3.c and sqlite3.h). See "
+            "${_sqlite3_readme}."
         )
     endif()
-    execute_process(
-        COMMAND ${MAKE_COMMAND} sqlite3.c
-        WORKING_DIRECTORY ${SQLITE3_SOURCE_DIR}
-        RESULT_VARIABLE _sqlite3_make_rc
-    )
-    if(NOT _sqlite3_make_rc EQUAL 0)
-        message(
-            FATAL_ERROR
-            "[profiler-hub] SQLite3 amalgamation generation failed (rc=${_sqlite3_make_rc})"
-        )
+
+    if(${_sqlite3_sha_var})
+        file(SHA256 "${_sqlite3_file}" _sqlite3_actual_sha256)
+        if(NOT _sqlite3_actual_sha256 STREQUAL "${${_sqlite3_sha_var}}")
+            message(
+                FATAL_ERROR
+                "[profiler-hub] SQLite3 amalgamation checksum mismatch:\n"
+                "    file:     ${_sqlite3_file}\n"
+                "    expected: ${${_sqlite3_sha_var}}\n"
+                "    actual:   ${_sqlite3_actual_sha256}\n"
+                "If you are deliberately supplying a different amalgamation via "
+                "-DSQLITE3_AMALGAMATION_DIR, disable this check with "
+                "-D${_sqlite3_sha_var}= . If you are bumping the bundled SQLite "
+                "release, update ${_sqlite3_readme} and the checksums in "
+                "profilers/profiler-hub/cmake/sqlite3.cmake together."
+            )
+        endif()
     endif()
-    if(NOT EXISTS "${SQLITE3_AMALG_C}" OR NOT EXISTS "${SQLITE3_AMALG_H}")
-        message(
-            FATAL_ERROR
-            "[profiler-hub] SQLite3 amalgamation files not found after build"
-        )
-    endif()
-endif()
+endforeach()
+
+message(
+    STATUS
+    "[profiler-hub] Using bundled SQLite3 ${SQLITE3_AMALGAMATION_VERSION} amalgamation: ${SQLITE3_SOURCE_DIR}"
+)
 
 add_library(profiler-hub-sqlite3-static STATIC ${SQLITE3_AMALG_C})
 
@@ -138,9 +157,4 @@ add_library(profiler-hub-sqlite3 INTERFACE)
 target_link_libraries(
     profiler-hub-sqlite3
     INTERFACE profiler-hub-sqlite3-static ${CMAKE_DL_LIBS}
-)
-
-message(
-    STATUS
-    "[profiler-hub] SQLite3 amalgamation source: ${SQLITE3_SOURCE_DIR}"
 )
