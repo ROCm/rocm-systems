@@ -40,6 +40,9 @@ void
 pause();
 
 void
+flush_pending_pause();
+
+void
 postfork_child_cleanup();
 
 void
