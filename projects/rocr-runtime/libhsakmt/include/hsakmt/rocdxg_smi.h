@@ -31,6 +31,7 @@ typedef struct rocdxg_smi_asic_info {
   uint64_t asic_serial;
   char market_name[ROCDXG_SMI_MAX_STRING_LENGTH];
   uint32_t num_of_compute_units;
+  uint32_t num_xcc;
   uint64_t target_graphics_version;
 } rocdxg_smi_asic_info_t;
 
@@ -167,12 +168,15 @@ HSAKMT_STATUS HSAKMTAPI rocdxg_smi_enum_processes(uint32_t node_id,
                                                   uint32_t* num_processes,
                                                   rocdxg_smi_process_info_t* processes);
 
-#ifdef __cplusplus
-}  // extern "C"
-#endif
-
-
+/* Callers must set struct_size to sizeof(rocdxg_smi_device_info_t) before every
+ * rocdxg_smi_get_device_info() call; the call clears the struct, so a reused one
+ * has to be set again. librocdxg is loaded with dlopen and ships separately from
+ * its consumers, so the two can disagree about this layout; the size check turns
+ * that into HSAKMT_STATUS_BUFFER_TOO_SMALL instead of a write past the end of the
+ * caller's struct. struct_size must stay first so it is readable regardless of
+ * what follows. */
 typedef struct rocdxg_smi_device_info {
+  uint32_t                struct_size;
   rocdxg_smi_bdf_info_t   bdf;
   rocdxg_smi_asic_info_t  asic;
   rocdxg_smi_board_info_t board;
@@ -183,12 +187,9 @@ typedef struct rocdxg_smi_device_info {
   rocdxg_smi_fw_info_t     fw;
 } rocdxg_smi_device_info_t;
 
-#ifdef __cplusplus
-extern "C" {
-#endif
 HSAKMT_STATUS HSAKMTAPI rocdxg_smi_get_device_info(uint32_t node_id,
                                                    rocdxg_smi_device_info_t* info);
 #ifdef __cplusplus
-}
+}  // extern "C"
 #endif
 #endif  // ROCDXG_SMI_H_
