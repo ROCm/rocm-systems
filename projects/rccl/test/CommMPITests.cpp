@@ -1429,4 +1429,221 @@ TEST_F(GinRmaContextMPITest, RmaAndGinFinalizeWithSplitComm)
     ASSERT_MPI_EQ(ncclSuccess, ncclCommDestroy(splitComm));
 }
 
+/**
+ * @class GraphStreamOrderingConfigMPITest
+ * @brief Validates NCCL 2.30 graphStreamOrdering config parsing and compatibility
+ *        rules (see NCCL_GRAPH_STREAM_ORDERING in env.rst).
+ */
+class GraphStreamOrderingConfigMPITest : public ConfigCommMPITestBase
+{
+protected:
+    int configured_graph_stream_ordering_ = NCCL_CONFIG_UNDEF_INT;
+    int configured_graph_usage_mode_      = NCCL_CONFIG_UNDEF_INT;
+
+    void applyConfig(ncclConfig_t& config) override
+    {
+        config.graphStreamOrdering = configured_graph_stream_ordering_;
+        config.graphUsageMode      = configured_graph_usage_mode_;
+    }
+
+    std::string configLabel() const override
+    {
+        return "graphStreamOrdering=" + std::to_string(configured_graph_stream_ordering_)
+             + " graphUsageMode=" + std::to_string(configured_graph_usage_mode_);
+    }
+
+    static int graphStreamOrderingEnv()
+    {
+        return MPIHelpers::getEnvParam<int>("NCCL_GRAPH_STREAM_ORDERING",
+                                            NCCL_CONFIG_UNDEF_INT);
+    }
+};
+
+/**
+ * @test GraphStreamOrderingConfigMPITest.ConfigOverrideAppliesGraphStreamOrdering
+ * @brief ncclConfig_t graphStreamOrdering is stored on comm->config when env is unset.
+ *
+ * NCCL 2.30.7 upstream applies NCCL_GRAPH_STREAM_ORDERING after ncclConfig_t in
+ * envConfigOverride(), so this test requires the env var to be absent.
+ */
+TEST_F(GraphStreamOrderingConfigMPITest, ConfigOverrideAppliesGraphStreamOrdering)
+{
+    ASSERT_MPI_TRUE(validateTestPrerequisites(kMinProcessesForMPI));
+
+    if(graphStreamOrderingEnv() != NCCL_CONFIG_UNDEF_INT)
+    {
+        GTEST_SKIP() << "NCCL_GRAPH_STREAM_ORDERING must not be set; upstream NCCL "
+                        "envConfigOverride() overrides explicit ncclConfig_t graphStreamOrdering.";
+    }
+
+    configured_graph_stream_ordering_ = 0;
+    configured_graph_usage_mode_      = 1;
+
+    ASSERT_MPI_EQ(ncclSuccess, createTestCommunicator());
+
+    ncclComm_t comm = getActiveCommunicator();
+    ASSERT_MPI_TRUE(comm != nullptr);
+    ASSERT_MPI_EQ(comm->config.graphStreamOrdering, 0);
+    ASSERT_MPI_EQ(comm->config.graphUsageMode, 1);
+}
+
+/**
+ * @test GraphStreamOrderingConfigMPITest.IncompatibleMixingFallsBackToEnabledOrdering
+ * @brief graphStreamOrdering=0 with graphUsageMode=2 is unsupported and falls back to 1.
+ */
+TEST_F(GraphStreamOrderingConfigMPITest, IncompatibleMixingFallsBackToEnabledOrdering)
+{
+    ASSERT_MPI_TRUE(validateTestPrerequisites(kMinProcessesForMPI));
+
+    const int graphStreamOrdering = graphStreamOrderingEnv();
+    if(graphStreamOrdering != NCCL_CONFIG_UNDEF_INT && graphStreamOrdering != 0)
+    {
+        GTEST_SKIP() << "NCCL_GRAPH_STREAM_ORDERING must be unset or 0; value 1 sets "
+                        "graphStreamOrdering=1 before the incompatible-mixing fallback, which "
+                        "would then not be exercised.";
+    }
+
+    configured_graph_stream_ordering_ = 0;
+    configured_graph_usage_mode_      = 2;
+
+    ASSERT_MPI_EQ(ncclSuccess, createTestCommunicator());
+
+    ncclComm_t comm = getActiveCommunicator();
+    ASSERT_MPI_TRUE(comm != nullptr);
+    ASSERT_MPI_EQ(comm->config.graphStreamOrdering, 1);
+    ASSERT_MPI_EQ(comm->config.graphUsageMode, 2);
+}
+
+/**
+ * @test GraphStreamOrderingConfigMPITest.EnvOverrideAppliesGraphStreamOrdering
+ * @brief NCCL_GRAPH_STREAM_ORDERING overrides ncclConfig_t graphStreamOrdering at init.
+ */
+TEST_F(GraphStreamOrderingConfigMPITest, EnvOverrideAppliesGraphStreamOrdering)
+{
+    ASSERT_MPI_TRUE(validateTestPrerequisites(kMinProcessesForMPI));
+
+    const int expected = graphStreamOrderingEnv();
+    if(expected != 0 && expected != 1)
+    {
+        GTEST_SKIP() << "NCCL_GRAPH_STREAM_ORDERING must be set to 0 or 1";
+    }
+
+    // Set config to the opposite value; upstream NCCL envConfigOverride() must win.
+    configured_graph_stream_ordering_ = (expected == 0) ? 1 : 0;
+    configured_graph_usage_mode_      = 1;
+
+    ASSERT_MPI_EQ(ncclSuccess, createTestCommunicator());
+
+    ncclComm_t comm = getActiveCommunicator();
+    ASSERT_MPI_TRUE(comm != nullptr);
+    ASSERT_MPI_EQ(comm->config.graphStreamOrdering, expected);
+}
+
+/**
+ * @test GraphStreamOrderingConfigMPITest.DisabledOrderingGraphCaptureSmoke
+ * @brief graphStreamOrdering=0 with graphUsageMode=1 captures and replays AllReduce.
+ *
+ * Captures the same collective into two graphs and replays both, so the first/subsequent
+ * capture split of the origin-stream path is covered rather than just the single-capture
+ * case. Both graphs are launched on one stream with a host sync between them, so the
+ * cross-graph serialEvent dependency is not itself exercised.
+ *
+ * Requires effective ordering 0. Skips when NCCL_GRAPH_STREAM_ORDERING is set to 1,
+ * because upstream NCCL envConfigOverride() would override config graphStreamOrdering=0.
+ */
+TEST_F(GraphStreamOrderingConfigMPITest, DisabledOrderingGraphCaptureSmoke)
+{
+    ASSERT_MPI_TRUE(validateTestPrerequisites(kMinProcessesForMPI));
+
+    const int graphStreamOrdering = graphStreamOrderingEnv();
+    if(graphStreamOrdering != NCCL_CONFIG_UNDEF_INT && graphStreamOrdering != 0)
+    {
+        GTEST_SKIP() << "NCCL_GRAPH_STREAM_ORDERING must be unset or 0; value 1 overrides config "
+                        "graphStreamOrdering=0 in upstream NCCL.";
+    }
+
+    configured_graph_stream_ordering_ = 0;
+    configured_graph_usage_mode_      = 1;
+
+    ASSERT_MPI_EQ(ncclSuccess, createTestCommunicator());
+
+    ncclComm_t comm = getActiveCommunicator();
+    ASSERT_MPI_TRUE(comm != nullptr);
+    ASSERT_MPI_EQ(comm->config.graphStreamOrdering, 0);
+
+    void* sendBuf = nullptr;
+    void* recvBuf = nullptr;
+    ASSERT_MPI_EQ(hipSuccess, hipMalloc(&sendBuf, sizeof(float)));
+    auto sendGuard = makeDeviceBufferAutoGuard(sendBuf);
+    ASSERT_MPI_EQ(hipSuccess, hipMalloc(&recvBuf, sizeof(float)));
+    auto recvGuard = makeDeviceBufferAutoGuard(recvBuf);
+
+    const float sendVal = static_cast<float>(getTestMpiRank() + 1.0f);
+    ASSERT_MPI_EQ(hipSuccess, hipMemcpy(sendBuf, &sendVal, sizeof(float), hipMemcpyHostToDevice));
+
+    constexpr int  kGraphs             = 2;
+    hipGraph_t     graphs[kGraphs]     = {};
+    hipGraphExec_t graphExecs[kGraphs] = {};
+
+    auto graphCleanup = makeScopeGuard([&]() {
+        for(int i = 0; i < kGraphs; ++i)
+        {
+            if(graphExecs[i]) (void)hipGraphExecDestroy(graphExecs[i]);
+            if(graphs[i]) (void)hipGraphDestroy(graphs[i]);
+        }
+    });
+
+    bool captureActive = false;
+    auto captureCleanup = makeScopeGuard([&]() {
+        if(captureActive)
+        {
+            hipGraph_t abandonedGraph = nullptr;
+            if(hipStreamEndCapture(getActiveStream(), &abandonedGraph) == hipSuccess &&
+               abandonedGraph)
+                (void)hipGraphDestroy(abandonedGraph);
+        }
+    });
+
+    // Capture twice so both halves of the origin-stream path run: the first capture bootstraps
+    // serialEvent on the live stream, the second must take the already-bootstrapped path.
+    for(int i = 0; i < kGraphs; ++i)
+    {
+        const hipError_t captureBeginStatus =
+            hipStreamBeginCapture(getActiveStream(), hipStreamCaptureModeThreadLocal);
+        captureActive = (captureBeginStatus == hipSuccess);
+        ASSERT_MPI_EQ(hipSuccess, captureBeginStatus);
+        ASSERT_MPI_EQ(ncclSuccess,
+                      ncclAllReduce(sendBuf, recvBuf, 1, ncclFloat, ncclSum, comm, getActiveStream()));
+        const hipError_t captureEndStatus = hipStreamEndCapture(getActiveStream(), &graphs[i]);
+        if(captureEndStatus == hipSuccess) captureActive = false;
+        ASSERT_MPI_EQ(hipSuccess, captureEndStatus);
+        ASSERT_MPI_NE(nullptr, graphs[i]);
+        ASSERT_MPI_EQ(hipSuccess, hipGraphInstantiate(&graphExecs[i], graphs[i], nullptr, nullptr, 0));
+    }
+
+#if ROCM_VERSION >= 60100
+    // graphStreamOrdering=0 must launch directly on the graph origin instead of acquiring
+    // deviceStream.captureStream. This assertion fails if the enqueue.cc feature is reverted.
+    ASSERT_MPI_TRUE(comm->sharedRes->deviceStream.captureHead == nullptr);
+#endif
+
+    const int   worldSize = MPIEnvironment::world_size;
+    const float expected  = static_cast<float>(worldSize * (worldSize + 1) / 2);
+
+    for(int i = 0; i < kGraphs; ++i)
+    {
+        ASSERT_MPI_EQ(hipSuccess, hipMemset(recvBuf, 0, sizeof(float)));
+        ASSERT_MPI_EQ(hipSuccess, hipGraphLaunch(graphExecs[i], getActiveStream()));
+        ASSERT_MPI_EQ(hipSuccess, hipStreamSynchronize(getActiveStream()));
+
+        float result = 0.0f;
+        ASSERT_MPI_EQ(hipSuccess, hipMemcpy(&result, recvBuf, sizeof(float), hipMemcpyDeviceToHost));
+
+        // EXPECT_NEAR reports the values; the fatal check must be MPI-aware so one mismatching
+        // rank cannot leave the others waiting in the next iteration's collective asserts.
+        EXPECT_NEAR(result, expected, 1e-3f) << "graph " << i;
+        ASSERT_MPI_TRUE(result >= expected - 1e-3f && result <= expected + 1e-3f);
+    }
+}
+
 #endif // MPI_TESTS_ENABLED
