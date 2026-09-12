@@ -96,8 +96,18 @@ using rocjitsu::Sysfs;
 
 namespace {
 
+static_assert(std::atomic<bool>::is_always_lock_free,
+              "fork child initialization requires a lock-free backend flag");
+
 static_assert(std::atomic<uint32_t>::is_always_lock_free,
               "futex-backed state requires a lock-free uint32_t atomic");
+
+/// @brief Classify real GPU device identities without locks or context access.
+[[nodiscard]] bool is_real_gpu_device(const struct stat &info, dev_t host_kfd) {
+  constexpr unsigned kDrmMajor = 226;
+  return S_ISCHR(info.st_mode) &&
+         (major(info.st_rdev) == kDrmMajor || (host_kfd != 0 && info.st_rdev == host_kfd));
+}
 
 /// @brief Sleep while @p word still equals @p expected, until @p deadline or a signal.
 long futex_wait_until(std::atomic<uint32_t> &word, uint32_t expected, const timespec *deadline) {
@@ -382,26 +392,96 @@ public:
     // socket. Fall back to this process's PID-scoped default in that case.
     const char *dir = getenv(rocjitsu::kRpcInvocationDirEnv);
     if (dir && *dir)
-      ctx.invocation_runtime_dir_ = dir;
+      ctx.invocation_runtime_dir_ = new const std::string(dir);
     else
-      ctx.invocation_runtime_dir_ = rocjitsu::rpc_invocation_runtime_dir(getpid());
-    // NO pthread_atfork handlers, deliberately. rocJITsu's local mode keeps the
-    // simulator's state -- the VM, its engine thread, the driver objects and their
-    // private mutexes -- inside this address space, and a driver call holds those
-    // private locks for its whole duration, sometimes across a blocking wait. A
-    // prepare handler therefore cannot drain them: waiting on a lock held by a
-    // thread parked in an indefinite WAIT_EVENTS would hang fork() itself. The
-    // allocator-style "lock everything in prepare" pattern only works when no lock
-    // is ever held across a blocking call, which is false here.
-    //
-    // So local mode takes the same contract as every comparable in-process GPU
-    // runtime (CUDA, HSA/ROCr) and as ThreadSanitizer: rocJITsu services are
-    // UNAVAILABLE between fork/vfork and exec. Enforcement is owner_pid_, compared
-    // at the top of every interposed entry point before any inherited lock,
-    // container, driver or shared_ptr is touched, so a child can never reach state a
-    // vanished parent thread was mutating. That is a structural guarantee rather
-    // than a narrowed race, and it needs no child-side cleanup at all.
+      ctx.invocation_runtime_dir_ =
+          new const std::string(rocjitsu::rpc_invocation_runtime_dir(getpid()));
+    // A child may start its own backend only if none was ever started in the
+    // parent. Forkserver workers satisfy this condition; a process that already
+    // used a GPU may hold driver locks across blocking waits and still requires
+    // exec. Never try to drain or destroy that inherited backend state.
+    // Initialize this lock before registering the handler, so the child cannot
+    // inherit its function-local initialization guard in progress.
+    (void)rocjitsu::host_mapping_lock();
+    const int fork_error = pthread_atfork(nullptr, nullptr, reset_unused_context_after_fork);
+    if (fork_error != 0)
+      std::fprintf(stderr, "rocjitsu: cannot register fork child initialization: %s\n",
+                   std::strerror(fork_error));
     real().resolve();
+  }
+
+  /// @brief Conservatively detect real GPU descriptors inherited outside this backend.
+  /// @details Only raw syscalls and stack storage are used in the child handler.
+  static bool inherits_real_gpu_descriptor() {
+    const int directory = static_cast<int>(
+        syscall(SYS_openat, AT_FDCWD, "/proc/self/fd", O_RDONLY | O_DIRECTORY | O_CLOEXEC, 0));
+    if (directory < 0)
+      return true;
+    struct DirectoryEntry {
+      uint64_t inode;
+      int64_t offset;
+      uint16_t record_size;
+      uint8_t type;
+      char name[1];
+    };
+    alignas(DirectoryEntry) char entries[4096];
+    bool found = false;
+    for (;;) {
+      const long count = syscall(SYS_getdents64, directory, entries, sizeof(entries));
+      if (count < 0 && errno == EINTR)
+        continue;
+      if (count <= 0) {
+        found = count < 0;
+        break;
+      }
+      for (long offset = 0; offset < count;) {
+        const DirectoryEntry *entry = reinterpret_cast<const DirectoryEntry *>(entries + offset);
+        if (entry->record_size < offsetof(DirectoryEntry, name) + 2 ||
+            entry->record_size > count - offset) {
+          found = true;
+          break;
+        }
+        const char *name = entries + offset + offsetof(DirectoryEntry, name);
+        offset += entry->record_size;
+        if (*name < '0' || *name > '9')
+          continue;
+        int fd = 0;
+        for (const char *digit = name; *digit >= '0' && *digit <= '9'; ++digit)
+          fd = fd * 10 + (*digit - '0');
+        struct stat info {};
+        if (syscall(SYS_fstat, fd, &info) == 0 && is_real_gpu_device(info, ctx.host_kfd_rdev_)) {
+          found = true;
+          break;
+        }
+      }
+      if (found)
+        break;
+    }
+    (void)syscall(SYS_close, directory);
+    return found;
+  }
+
+  /// @brief Give a forkserver child fresh interposer state before any GPU use.
+  /// @details No inherited mutex is acquired or destroyed. The backend flag is
+  /// monotonic and is set before starting local or remote initialization. All
+  /// remaining context state is bookkeeping; immutable launch metadata can be
+  /// shared across fork. This handler does not run for vfork/posix_spawn.
+  static void reset_unused_context_after_fork() {
+    if (ctx.backend_started_.load(std::memory_order_acquire))
+      return;
+    const int saved_errno = errno;
+    const bool inherited_gpu = inherits_real_gpu_descriptor();
+    errno = saved_errno;
+    if (inherited_gpu)
+      return;
+    const std::string *invocation_dir = ctx.invocation_runtime_dir_;
+    const dev_t host_kfd = ctx.host_kfd_rdev_;
+    new (storage_) InterposerContext();
+    ctx.invocation_runtime_dir_ = invocation_dir;
+    ctx.host_kfd_rdev_ = host_kfd;
+    in_construction = false;
+    rocjitsu::reset_host_mapping_lock_after_fork();
+    ctx.owner_pid_ = getpid();
   }
 
   std::shared_ptr<LinuxKfd> driver() const {
@@ -548,7 +628,7 @@ public:
   /// a lock-free immutable read. A forked app child inherits the parent's value
   /// (the child never mutates it) and thus would reconnect to
   /// the same daemon rather than recomputing a dir under its own PID.
-  const std::string &invocation_runtime_dir() const { return invocation_runtime_dir_; }
+  const std::string &invocation_runtime_dir() const { return *invocation_runtime_dir_; }
 
   bool owned_by_current_process() const { return owner_pid_ == getpid(); }
   /// @brief st_rdev of the host's real KFD, or 0 when the host has none.
@@ -624,6 +704,7 @@ public:
   };
 
   RemoteOpenResult get_or_create_remote() {
+    backend_started_.store(true, std::memory_order_release);
     std::lock_guard lock(remote_mutex_);
     auto active_remote = remote();
     if (active_remote) {
@@ -2066,6 +2147,7 @@ public:
   /// application's open(), which is what keeps the shutdown policy from retiring a
   /// backend in between.
   std::shared_ptr<LinuxKfd> get_or_create_locked() {
+    backend_started_.store(true, std::memory_order_release);
     if (driver() == nullptr) {
       // Fail closed once process-exit shutdown has been requested: the local VM is
       // a one-shot per process. Recreating it after the finalizer ran would start
@@ -2232,11 +2314,14 @@ public:
   }
 
 private:
-  /// @brief PID of the process that constructed this context. Set once in init()
-  /// and NEVER mutated, including in a forked child: a child must be able to detect
-  /// that it does not own this state, and a writable marker would be a mutation of
-  /// the parent's memory in the vfork window.
+  /// @brief PID of the process that owns this context.
+  /// @details Assigned in init() and when the child handler creates a fresh unused
+  /// context. Kept unchanged after backend initialization and for vfork children,
+  /// which share the parent's memory and must not modify its ownership marker.
   pid_t owner_pid_ = 0;
+  /// @brief Monotonic flag set before starting either backend.
+  /// @details The child handler samples this without touching inherited locks.
+  std::atomic<bool> backend_started_{false};
   /// @brief st_rdev of the host's real /dev/kfd, or 0 if none exists.
   /// @details Immutable after init(). Used only by the forked-child classifier.
   dev_t host_kfd_rdev_ = 0;
@@ -2506,7 +2591,10 @@ private:
     return false;
   }
 
-  std::string invocation_runtime_dir_;
+  /// @brief Process-lifetime immutable launch metadata.
+  /// @details Stored outside this context so the child can preserve its pointer
+  /// when reconstructing unused state without copying or destroying the string.
+  const std::string *invocation_runtime_dir_ = nullptr;
 
   alignas(16) static uint8_t storage_[];
 };
@@ -2532,9 +2620,9 @@ namespace {
 /// syscall is covered: the driver's own mapping paths re-enter the memory model
 /// and take its VMID lock, and the emulated atomic reaches this lock while
 /// already holding that one, so widening the region would invert them.
-/// @pre The caller owns the interposer state. A forked child must not reach
-/// this: the lock is inherited, its holder may not have survived the fork, and
-/// the process contract forbids touching inherited state before exec.
+/// @pre The caller owns the interposer state. A child that inherited an active
+/// backend must not reach this: the lock's holder may not have survived fork.
+/// Children of an unused context get a fresh lock in the atfork handler.
 template <typename F> auto with_host_mapping_held(F &&syscall) {
   auto lock = rocjitsu::host_mapping_lock().lock_exclusive();
   return syscall();
@@ -2665,13 +2753,7 @@ static SyntheticDrmOpenResult open_synthetic_drm_fd(const char *path) {
 /// No pathname inspection at all -- a name can lie (a chained alias, a dirfd-relative
 /// spelling, or an unrelated node whose name merely contains "kfd"), a dev_t cannot.
 [[nodiscard]] inline bool rj_is_gpu_device_stat(const struct stat &st) {
-  if (!S_ISCHR(st.st_mode))
-    return false;
-  constexpr unsigned kDrmMajor = 226;
-  if (major(st.st_rdev) == kDrmMajor)
-    return true;
-  const dev_t host_kfd = InterposerContext::ctx.host_kfd_rdev();
-  return host_kfd != 0 && st.st_rdev == host_kfd;
+  return is_real_gpu_device(st, InterposerContext::ctx.host_kfd_rdev());
 }
 
 /// @brief Append @p src_len bytes of @p src to @p out, bounded.
@@ -2929,10 +3011,9 @@ inline void rj_path_normalize(char *p) {
 
 /// @brief True when this process owns the interposer state and may touch it.
 /// @details False in a process that inherited this address space through fork/vfork
-/// and has not yet exec'd. rocJITsu registers NO atfork handlers (see
-/// InterposerContext::init()), so such a child may hold locks whose owners no longer
-/// exist and containers a vanished thread was mid-mutation on. Every interposed entry
-/// point must therefore test this BEFORE in_construction, any driver or remote
+/// after backend initialization and has not yet exec'd. Such a child may hold locks
+/// whose owners no longer exist and containers a vanished thread was mid-mutation on. Every
+/// interposed entry point must therefore test this BEFORE in_construction, any driver or remote
 /// snapshot, fd classification, path redirection, logging that reaches context state,
 /// or any mutex -- i.e. before touching anything inherited at all.
 ///
@@ -4168,10 +4249,8 @@ RJ_INTERPOSER_EXPORT FILE *fopen(const char *path, const char *mode) {
       actual = redirected.c_str();
   }
 
-  int fd = InterposerContext::real().openat(AT_FDCWD, actual, open_flags, 0644);
-  if (fd < 0)
-    return nullptr;
-  return fdopen(fd, mode);
+  // Preserve libc's creation permissions and mode extensions (x/e) after redirection.
+  return InterposerContext::real().fopen(actual, mode);
 }
 
 RJ_INTERPOSER_EXPORT FILE *fopen64(const char *path, const char *mode) { return fopen(path, mode); }
@@ -4677,10 +4756,8 @@ RJ_INTERPOSER_EXPORT int __lxstat64(int ver, const char *path, struct stat64 *bu
   return real.lxstat64_fn(ver, redirected.c_str(), reinterpret_cast<void *>(buf));
 }
 
-// fork() is intentionally NOT interposed, and needs no wrapper: the child performs
-// no rocJITsu work at all. Every interposed entry point compares owner_pid_ first
-// and passes a child straight through to libc, which covers fork-family primitives
-// that never bind our symbols anyway (system/popen/posix_spawn). See
-// InterposerContext::init() for why local mode is fork-then-exec only.
+// fork() is not interposed. The child handler resets only an unused context;
+// after backend initialization the owner-PID gate still requires exec. The gate
+// also covers primitives that do not run handlers, including vfork/posix_spawn.
 
 } // extern "C"

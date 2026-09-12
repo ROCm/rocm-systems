@@ -1157,11 +1157,78 @@ TEST(InterposerSyncobjTest, TimelineWaitReturnsEintrForSignal) {
   EXPECT_EQ(close(kfd), 0);
 }
 
-// rocJITsu local mode supports fork-then-exec only: its simulator state lives in
+namespace {
+
+void check_fresh_fork_backends(bool concurrent_mappings) {
+  std::jthread mappings;
+  if (concurrent_mappings) {
+    mappings = std::jthread([](std::stop_token stop) {
+      while (!stop.stop_requested()) {
+        void *page =
+            mmap(nullptr, 4096, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+        if (page != MAP_FAILED)
+          munmap(page, 4096);
+      }
+    });
+  }
+  for (int iteration = 0; iteration < 4; ++iteration) {
+    const pid_t child = fork();
+    ASSERT_GE(child, 0);
+    if (child == 0) {
+      alarm(10);
+      const pid_t grandchild = fork();
+      if (grandchild < 0)
+        _exit(10);
+      if (grandchild > 0) {
+        int status = 0;
+        if (waitpid(grandchild, &status, 0) != grandchild || !WIFEXITED(status) ||
+            WEXITSTATUS(status) != 0)
+          _exit(11);
+      }
+      const int kfd = open_kfd();
+      if (kfd < 0 || !kfd_version_ok(kfd))
+        _exit(12);
+      struct stat info {};
+      if (syscall(SYS_fstat, kfd, &info) != 0 || S_ISCHR(info.st_mode))
+        _exit(13); // The child must use a simulator descriptor, never host KFD.
+      if (close(kfd) != 0)
+        _exit(14);
+      _exit(0);
+    }
+    int status = 0;
+    ASSERT_EQ(waitpid(child, &status, 0), child);
+    ASSERT_TRUE(WIFEXITED(status));
+    ASSERT_EQ(WEXITSTATUS(status), 0);
+  }
+  if (mappings.joinable()) {
+    mappings.request_stop();
+    mappings.join();
+  }
+  const int kfd = open_kfd();
+  ASSERT_GE(kfd, 0);
+  EXPECT_TRUE(kfd_version_ok(kfd));
+  EXPECT_EQ(close(kfd), 0);
+}
+
+} // namespace
+
+// Run in a fresh executable so the parent has not used a GPU backend. Keep the
+// parent single-threaded here so TSan can instrument the new child backend threads.
+TEST(InterposerFreshForkTest, ChildAndGrandchildInitializeIndependentBackends) {
+  check_fresh_fork_backends(/*concurrent_mappings=*/false);
+}
+
+// This separately exercises integration under mapping traffic. HostMappingLockTest
+// guarantees that a vanished thread holds the inherited lock when it is reset.
+TEST(InterposerFreshForkTest, ConcurrentMappingsPreserveIndependentChildBackends) {
+  check_fresh_fork_backends(/*concurrent_mappings=*/true);
+}
+
+// After GPU initialization, local mode supports fork-then-exec only: state lives in
 // this address space, and a driver call holds private driver locks for its whole
 // duration -- sometimes across a blocking wait -- so no atfork prepare handler could
-// drain them without risking hanging fork() itself. Same contract as CUDA, HSA/ROCr
-// and ThreadSanitizer. Enforcement is an immutable owner PID checked at the top of
+// drain them without risking hanging fork() itself. Children of a parent that
+// used a backend are rejected by an immutable owner PID checked at the top of
 // every interposed entry point, before any inherited lock, container or pointer.
 //
 // These cover the contract from a MULTITHREADED parent, which is the case that
@@ -1586,7 +1653,7 @@ TEST(InterposerForkTest, ChildRefusesMmap64OnInheritedGpuFd) {
 // open flags and used fdopen, which silently lost the 0666 creation mode for "w"/"a"
 // (files came out mode 0000) and the "x" exclusive modifier (truncating instead of
 // failing EEXIST).
-TEST(InterposerForkTest, ChildFopenPreservesLibcModeSemantics) {
+void check_child_fopen_modes() {
   rocjitsu::test::ScopedTempDirectory tmp("rj_fopen_");
   const std::string target = tmp.path() + "/created";
 
@@ -1643,6 +1710,15 @@ TEST(InterposerForkTest, ChildFopenPreservesLibcModeSemantics) {
       << "80/81=fopen(\"w\") failed, 82=creation mode was not 0666 under umask(0), "
       << "83=seeding failed, 84=\"wx\" opened an existing file, 85=wrong errno, "
       << "86/87=\"wx\" truncated the file before failing";
+}
+
+TEST(InterposerFreshForkTest, ChildFopenPreservesLibcModeSemantics) { check_child_fopen_modes(); }
+
+TEST(InterposerForkTest, ChildFopenPreservesLibcModeSemantics) {
+  const int kfd = open_kfd();
+  ASSERT_GE(kfd, 0);
+  check_child_fopen_modes();
+  EXPECT_EQ(close(kfd), 0);
 }
 
 // Names lie; device identity does not. A symlink can point at the real KFD under any
@@ -1821,8 +1897,8 @@ TEST(InterposerForkTest, PosixSpawnFromAMultithreadedParent) {
   EXPECT_EQ(close(kfd), 0);
 }
 
-// RETIRED: this exercised fork-WITHOUT-exec in local mode -- the child re-opened
-// KFD/DRM and ran GEM + syncobj work with no intervening exec. That contradicts the
+// RETIRED: this exercised fork-WITHOUT-exec after the parent started a local GPU
+// backend. The child re-opened KFD/DRM and ran GEM + syncobj work. That contradicts the
 // contract local mode can actually honour (see InterposerForkTest above): the
 // simulator lives in this address space and its driver locks cannot be drained by an
 // atfork handler. The capability is only supportable where the state is NOT in the
