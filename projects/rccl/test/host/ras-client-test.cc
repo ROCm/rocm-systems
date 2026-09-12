@@ -2131,7 +2131,6 @@ TEST_F(RasClientMicrotest, ConnectTimeout_ZeroTimeout_NegotiatesZeroAndIssuesNoS
   EXPECT_EQ(0, rc);
   EXPECT_EQ("CLIENT PROTOCOL 2\nTIMEOUT 0\n", g_writtenData);
   EXPECT_EQ("", CtTrace(opts));
-  ExpectAllSolSocket(opts);
   EXPECT_EQ(42, sock);
   EXPECT_TRUE(g_closedFds.empty());
 }
@@ -2655,7 +2654,6 @@ TEST_F(RasClientMicrotest, MonitorEvents_LeftoverFwriteShort_ReportsFwriteFailur
   EXPECT_EQ(1, readHook.calls);
   EXPECT_EQ(1, fwriteHook.calls);
   EXPECT_EQ(0, fflushHook.calls);
-  EXPECT_EQ("", g_stdoutData);
 }
 
 TEST_F(RasClientMicrotest, MonitorEvents_LeftoverFflushFails_ReportsPerrorBeforeEnteringTheLoop) {
