@@ -154,6 +154,10 @@ Notes:
 
 ## Phase 2 — Weighted submetrics (`WEIGHTED_AVG`)
 
+Implementation detail and milestones: [`aiprofcomp-865-phase2-weighted-avg-design.md`](aiprofcomp-865-phase2-weighted-avg-design.md).
+Test-only pilot YAML (not production gfx942): `tests/fixtures/weighted_avg/`.
+Inspector lists `WEIGHTED_AVG` parents in text output (`counter_grouping_inspector.py --output plan.txt`).
+
 **Design handoff:** [`aiprofcomp-865-phase2-weighted-avg-design.md`](aiprofcomp-865-phase2-weighted-avg-design.md) (implementation agent: parser, aggregation, pilot YAML, milestones A–C).
 
 **Start only after** Phase 1 sign-off on P0 metrics **or** explicit **SLOT_LIMIT** classification with inspector evidence.
