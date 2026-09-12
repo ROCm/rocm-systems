@@ -1187,7 +1187,7 @@ process_dbgapi_events (amd_dbgapi_process_id_t process_id, bool all_wavefronts,
   /* TODO, we  should have a RAII object to handle forward progress wave
      creation mode override.  */
   DBGAPI_CHECK (amd_dbgapi_process_set_progress (
-      process_id, AMD_DBGAPI_PROGRESS_NO_FORWARD));
+      process_id, AMD_DBGAPI_PROCESS_ATTACH_FLAGS_NO_FORWARD_PROGRESS));
 
   DBGAPI_CHECK (amd_dbgapi_process_set_wave_creation (
       process_id, AMD_DBGAPI_WAVE_CREATION_STOP));
@@ -1362,7 +1362,7 @@ dbgapi_worker (int listen_fd, bool all_wavefronts, bool precise_memory,
 
   DBGAPI_CHECK (amd_dbgapi_process_attach (
       reinterpret_cast<amd_dbgapi_client_process_id_t> (&self_mem_fd),
-      &process_id));
+      &process_id, PROCESS_ATTACH_FLAGS_NONE));
 
   /* Runtime has been activated just before tools are loaded.  We do expect
      a runtime loaded event to be ready to be consumed.  */
