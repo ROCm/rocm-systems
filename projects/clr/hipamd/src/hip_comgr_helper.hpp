@@ -84,13 +84,16 @@ typedef ComgrUniqueHandle<amd_comgr_data_t> ComgrDataUniqueHandle;
 }  // namespace comgr_helper
 
 namespace helpers {
-bool UnbundleBitCode(std::string_view bundled_bit_code, const std::string& isa, size_t& co_offset,
-                     size_t& co_size);
 bool addCodeObjData(comgr_helper::ComgrDataSetUniqueHandle& input, std::string_view source,
                     const std::string& name, const amd_comgr_data_kind_t type);
 bool extractBuildLog(comgr_helper::ComgrDataSetUniqueHandle& dataSet, std::string& buildLog);
 bool extractByteCodeBinary(const comgr_helper::ComgrDataSetUniqueHandle& inDataSet,
                            const amd_comgr_data_kind_t dataKind, std::vector<char>& bin);
+bool CheckIfBundled(std::string_view llvm_bitcode);
+bool UnbundleUsingComgr(std::string_view source, const std::string& isa,
+                        const std::vector<std::string>& linkOptions, std::string& buildLog,
+                        std::vector<char>& unbundled_spirv_bitcode, const char* bundleEntryIDs[],
+                        size_t bundleEntryIDsCount);
 bool createAction(comgr_helper::ComgrActionInfoUniqueHandle& action,
                   const std::vector<std::string>& options, const std::string& isa,
                   const amd_comgr_language_t lang = AMD_COMGR_LANGUAGE_NONE);
@@ -116,13 +119,6 @@ std::string handleMangledName(std::string loweredName);
 bool fillMangledNames(const std::vector<char>& executable,
                       std::map<std::string, std::string>& mangledNames, bool isBitcode);
 void GenerateUniqueFileName(std::string& name);
-
-bool CheckIfBundled(std::string_view llvm_bitcode);
-
-bool UnbundleUsingComgr(std::string_view source, const std::string& isa,
-                        const std::vector<std::string>& linkOptions, std::string& buildLog,
-                        std::vector<char>& unbundled_spirv_bitcode, const char* bundleEntryIDs[],
-                        size_t bundleEntryIDsCount);
 
 // Mapping from targets to generic targets
 const std::map<std::string, std::string>& GenericTargetMapping();
