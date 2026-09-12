@@ -44,7 +44,7 @@ namespace rocshmem {
  *****************************************************************************/
 template <typename T>
 __device__ void IPCContext::p(T *dest, T value, int pe) {
-  putmem_nbi(dest, &value, sizeof(T), pe);
+  putmem_scalar(dest, &value, sizeof(T), pe);
 }
 
 template <typename T>
@@ -60,7 +60,7 @@ __device__ void IPCContext::put_nbi(T *dest, const T *source, size_t nelems, int
 template <typename T>
 __device__ T IPCContext::g(const T *source, int pe) {
   T ret;
-  getmem(&ret, source, sizeof(T), pe);
+  getmem_scalar(&ret, source, sizeof(T), pe);
   return ret;
 }
 
