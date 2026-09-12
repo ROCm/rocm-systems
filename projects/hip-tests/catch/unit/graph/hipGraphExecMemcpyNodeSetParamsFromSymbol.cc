@@ -174,6 +174,46 @@ HIP_TEST_CASE(Unit_hipGraphExecMemcpyNodeSetParamsFromSymbol_Negative_Parameters
 }
 
 /**
+ * Test Description
+ * ------------------------
+ *  - Verify that a symbol node instantiated in generic capture mode can return to symbol mode.
+ * Test source
+ * ------------------------
+ *  - unit/graph/hipGraphExecMemcpyNodeSetParamsFromSymbol.cc
+ */
+HIP_TEST_CASE(Unit_hipGraphExecMemcpyNodeSetParamsFromSymbol_CaptureDemotion) {
+  LinearAllocGuard<int> src(LinearAllocs::hipMalloc, sizeof(int));
+  LinearAllocGuard<int> dst(LinearAllocs::hipMalloc, sizeof(int));
+  int symbol_value = 81;
+  int generic_value = 82;
+  int zero = 0;
+  HIP_CHECK(hipMemcpyToSymbol(HIP_SYMBOL(int_device_var), &symbol_value, sizeof(int)));
+  HIP_CHECK(hipMemcpy(src.ptr(), &generic_value, sizeof(int), hipMemcpyHostToDevice));
+  HIP_CHECK(hipMemcpy(dst.ptr(), &zero, sizeof(int), hipMemcpyHostToDevice));
+
+  hipGraph_t graph = nullptr;
+  hipGraphNode_t node = nullptr;
+  hipGraphExec_t exec = nullptr;
+  HIP_CHECK(hipGraphCreate(&graph, 0));
+  HIP_CHECK(hipGraphAddMemcpyNodeFromSymbol(&node, graph, nullptr, 0, dst.ptr(),
+                                            SYMBOL(int_device_var), sizeof(int), 0,
+                                            hipMemcpyDefault));
+  HIP_CHECK(
+      hipGraphMemcpyNodeSetParams1D(node, dst.ptr(), src.ptr(), sizeof(int), hipMemcpyDefault));
+  HIP_CHECK(hipGraphInstantiate(&exec, graph, nullptr, nullptr, 0));
+  HIP_CHECK(hipGraphExecMemcpyNodeSetParamsFromSymbol(exec, node, dst.ptr(), SYMBOL(int_device_var),
+                                                      sizeof(int), 0, hipMemcpyDefault));
+  HIP_CHECK(hipGraphLaunch(exec, hipStreamPerThread));
+  HIP_CHECK(hipStreamSynchronize(hipStreamPerThread));
+
+  int actual = 0;
+  HIP_CHECK(hipMemcpy(&actual, dst.ptr(), sizeof(int), hipMemcpyDeviceToHost));
+  REQUIRE(actual == symbol_value);
+  HIP_CHECK(hipGraphExecDestroy(exec));
+  HIP_CHECK(hipGraphDestroy(graph));
+}
+
+/**
  * End doxygen group GraphTest.
  * @}
  */
