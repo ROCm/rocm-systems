@@ -50,6 +50,24 @@ constexpr int NextPollNapUs(int current_us, int ceiling_us = kPollNapCeilingUs) 
                                        : std::min(current_us * 2, ceiling_us);
 }
 
+// Hot-spin window (microseconds) a poll that cannot sleep in the kernel spins
+// before it starts napping. A BusyWaitSignal wait (default_signal.cpp) has no
+// interrupt event at all, so it spins this long -- long enough that a GPU
+// completion which lands promptly keeps full latency -- and then falls back to
+// NextPollNapUs() napping so a wait that drags on for seconds (e.g. a host<->
+// device copy stalled under memory pressure) costs almost no CPU.
+inline constexpr int kHotPollUs = 200;
+
+// HSA_WAIT_STATE_ACTIVE widens the window: the caller asked to trade CPU for
+// latency. It does not remove the nap fallback -- clr's WaitForSignal() re-arms
+// the wait every 4s with the active hint, so "active" is not a licence to spin a
+// core unbounded.
+inline constexpr int kHotPollActiveUs = 10000;
+
+constexpr int HotPollUs(bool active_hint) {
+  return active_hint ? kHotPollActiveUs : kHotPollUs;
+}
+
 }  // namespace core
 }  // namespace rocr
 

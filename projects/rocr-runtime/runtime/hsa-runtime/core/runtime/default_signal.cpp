@@ -42,6 +42,11 @@
 
 #include "core/inc/default_signal.h"
 
+#include <chrono>
+
+#include "core/util/os.h"
+#include "core/util/poll_backoff.h"
+
 #if defined(__i386__) || defined(__x86_64__)
 #include <mwaitxintrin.h>
 #define MWAITX_ECX_TIMER_ENABLE 0x2  // BIT(1)
@@ -89,6 +94,25 @@ hsa_signal_value_t BusyWaitSignal::WaitRelaxed(hsa_signal_condition_t condition,
   const timer::fast_clock::time_point start_time = timer::fast_clock::now();
   const timer::fast_clock::duration fast_timeout = timer::GetFastTimeout(timeout);
 
+  // A BusyWaitSignal has no interrupt event to sleep on, so this loop can only
+  // poll.  Polling flat-out pegs a CPU core for the whole wait - and a
+  // host<->device copy's completion signal (a GPU-only signal, i.e. a
+  // BusyWaitSignal) can go unsatisfied for tens of seconds under host-memory
+  // pressure (ROCm/TheRock#7832): the core spins at 100% the entire time while
+  // the GPU is idle and the process barely responds.  clr's WaitForSignal()
+  // re-arms this every 4s with HSA_WAIT_STATE_ACTIVE, so the active hint cannot
+  // be taken here to mean "spin without bound".
+  //
+  // Use the same polling-fallback shape as AsyncEventsLoop's no-interrupt path
+  // (core/util/poll_backoff.h): spin hot for a short window so a wait that
+  // completes quickly keeps its latency, then nap between scans, doubling
+  // kPollNapFloorUs -> kPollNapCeilingUs, so a long wait costs almost no CPU.
+  // The signal value is still checked every iteration.  An explicit
+  // HSA_WAIT_STATE_ACTIVE hint widens the hot-spin window but still backs off.
+  const timer::fast_clock::duration kHotPoll =
+      std::chrono::microseconds(HotPollUs(wait_hint == HSA_WAIT_STATE_ACTIVE));
+  int poll_nap_us = kPollNapFloorUs;
+
   while (true) {
     if (!IsValid()) return 0;
 
@@ -98,16 +122,24 @@ hsa_signal_value_t BusyWaitSignal::WaitRelaxed(hsa_signal_condition_t condition,
       return value;
     }
 
-    if (timer::fast_clock::now() - start_time > fast_timeout) {
+    const timer::fast_clock::time_point now = timer::fast_clock::now();
+    if (now - start_time > fast_timeout) {
       return value;
     }
 
     timer::CheckAbortTimeout(start_time, signal_abort_timeout);
 
-    if (g_use_mwaitx) {
-      // Use timer-enabled mwaitx for busy waiting
-      timer::DoMwaitx(const_cast<int64_t*>(&signal_.value), value, 60000, true);
+    if (now - start_time < kHotPoll) {
+      if (g_use_mwaitx) {
+        // Use timer-enabled mwaitx for busy waiting
+        timer::DoMwaitx(const_cast<int64_t*>(&signal_.value), value, 60000, true);
+      }
+      continue;
     }
+
+    // Past the hot-spin window: nap between scans instead of burning the core.
+    os::uSleep(poll_nap_us);
+    poll_nap_us = NextPollNapUs(poll_nap_us);
   }
 }
 
