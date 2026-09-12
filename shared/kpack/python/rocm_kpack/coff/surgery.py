@@ -181,7 +181,23 @@ class CoffSurgery:
 
     @staticmethod
     def has_fatbin_section(file_path: Path) -> bool:
-        """Fast check for .hip_fat section without loading the full binary.
+        """Fast check for .hip_fat section without loading the full binary."""
+        return CoffSurgery._has_section_named(file_path, b".hip_fat")
+
+    @staticmethod
+    def has_kpack_ref_section(file_path: Path) -> bool:
+        """Fast check for the .kpackrf marker without loading the full binary.
+
+        Its presence means the binary has already been through
+        kpack_offload_binary(): the device code lives in a .kpack archive and
+        the .hip_fat section header that remains is a leftover, not splittable
+        content.
+        """
+        return CoffSurgery._has_section_named(file_path, b".kpackrf")
+
+    @staticmethod
+    def _has_section_named(file_path: Path, target: bytes) -> bool:
+        """Scan the PE section header table for an 8-byte section name.
 
         Reads only the DOS header, PE signature, COFF header, and section
         headers — a few KB total even for large binaries.
@@ -215,8 +231,6 @@ class CoffSurgery:
             if len(section_data) < num_sections * SECTION_HEADER_SIZE:
                 return False
 
-            # Check each section name for ".hip_fat"
-            target = b".hip_fat"
             for i in range(num_sections):
                 name = section_data[
                     i * SECTION_HEADER_SIZE : i * SECTION_HEADER_SIZE + 8
