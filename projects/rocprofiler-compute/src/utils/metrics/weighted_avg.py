@@ -5,16 +5,20 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 
 import pandas as pd
 
 from utils.logger import console_warning
 from utils.metrics.aggregation import merge_dispatch_weighted_avg
+from utils.metrics.expression import parse_weighted_avg_submetrics
 from utils.metrics.metric_evaluator import MetricEvaluator
+from vendored import yaml
 
 WEIGHTED_AVG_FIELD_NAMES = frozenset({"avg", "average"})
 WEIGHTED_AVG_ATTR = "weighted_avg_specs"
+WEIGHTED_AVG_SUB_EXPR_ATTR = "weighted_avg_sub_avg_expr"
 METRIC_NAME_COLUMN = "Metric"
 
 
@@ -82,11 +86,43 @@ def _weight_counter_per_dispatch(
     return pd.Series({0: float(total)})
 
 
+def cache_weighted_avg_sub_expressions(
+    dfs: dict[int, pd.DataFrame],
+    dfs_type: dict[int, str],
+) -> None:
+    """Snapshot submetric built Avg strings before eval_metric overwrites them."""
+    for df_id, df in dfs.items():
+        if dfs_type.get(df_id) != "metric_table":
+            continue
+        if not df.attrs.get(WEIGHTED_AVG_ATTR):
+            continue
+        name_col = _metric_column_name(df)
+        avg_col = _avg_column_name(df)
+        if name_col is None or avg_col is None:
+            continue
+        by_name: dict[str, str] = {}
+        for _, row in df.iterrows():
+            metric_name = row[name_col]
+            if not isinstance(metric_name, str):
+                continue
+            built = row[avg_col]
+            if not isinstance(built, str) or not built:
+                continue
+            if parse_weighted_avg_submetrics(built) is not None:
+                continue
+            by_name[metric_name] = built
+        df.attrs[WEIGHTED_AVG_SUB_EXPR_ATTR] = by_name
+
+
 def _lookup_submetric_built_avg(
     df: pd.DataFrame,
     metric_name: str,
     avg_col: str,
 ) -> str | None:
+    cached = df.attrs.get(WEIGHTED_AVG_SUB_EXPR_ATTR, {})
+    if isinstance(cached, dict) and metric_name in cached:
+        return cached[metric_name]
+
     name_col = _metric_column_name(df)
     if name_col is None:
         return None
@@ -183,3 +219,61 @@ def apply_weighted_avg_metrics(
                 empirical_peaks,
             )
             df.at[metric_id, avg_col] = result
+
+
+def scan_weighted_avg_parents(
+    config_arch_path: Path,
+) -> list[tuple[str, str, list[str]]]:
+    """Return (yaml file, metric key, submetric names) for WEIGHTED_AVG parents."""
+    if not config_arch_path.is_dir():
+        return []
+
+    found: list[tuple[str, str, list[str]]] = []
+    for ypath in sorted(config_arch_path.glob("*.yaml")):
+        try:
+            with open(ypath, encoding="utf-8") as stream:
+                doc = yaml.safe_load(stream)
+        except (OSError, UnicodeError, yaml.YAMLError):
+            continue
+        if not isinstance(doc, dict):
+            continue
+        panel_cfg = doc.get("Panel Config")
+        if not isinstance(panel_cfg, dict):
+            continue
+        sources = panel_cfg.get("data source")
+        if not isinstance(sources, list):
+            continue
+        for section in sources:
+            if not isinstance(section, dict):
+                continue
+            metric_table = section.get("metric_table")
+            if not isinstance(metric_table, dict):
+                continue
+            metrics = metric_table.get("metric")
+            if not isinstance(metrics, dict):
+                continue
+            for metric_key, body in metrics.items():
+                if not isinstance(body, dict):
+                    continue
+                avg_formula = body.get("avg")
+                if not isinstance(avg_formula, str):
+                    continue
+                subs = parse_weighted_avg_submetrics(avg_formula)
+                if subs and isinstance(body.get("_weighted_avg"), dict):
+                    found.append((ypath.name, metric_key, subs))
+    return found
+
+
+def format_weighted_avg_inspector_section(
+    config_arch_path: Path,
+) -> str:
+    """Text block for counter_grouping_inspector (Milestone C hint)."""
+    parents = scan_weighted_avg_parents(config_arch_path)
+    lines = ["WEIGHTED_AVG parent metrics (analyze-only composites):"]
+    if not parents:
+        lines.append("  (none in analysis_configs for this arch)")
+        return "\n".join(lines) + "\n\n"
+    for file_name, metric_key, subs in parents:
+        lines.append(f"  - {file_name}: {metric_key} -> submetrics {subs}")
+    lines.append("  Verify each submetric id is single-bucket in the plan above.")
+    return "\n".join(lines) + "\n\n"

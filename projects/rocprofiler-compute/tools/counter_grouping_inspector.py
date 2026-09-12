@@ -616,6 +616,13 @@ Examples:
         _emit_inspector_output(args, output_files, config_dir, arch)
 
 
+def _weighted_avg_section(config_dir: Path, arch: str) -> str:
+    from utils.metrics.weighted_avg import format_weighted_avg_inspector_section
+
+    config_arch_path = config_dir / canonical_config_arch(arch)
+    return format_weighted_avg_inspector_section(config_arch_path)
+
+
 def _emit_inspector_output(
     args: argparse.Namespace,
     output_files: list[CounterFile],
@@ -623,6 +630,7 @@ def _emit_inspector_output(
     arch: str,
 ) -> None:
     """Write or print bucket plan and multi-bucket metrics (stdout or --output)."""
+    weighted_section = _weighted_avg_section(config_dir, arch)
     # Handle output formats
     if args.output:
         output_path = args.output
@@ -641,7 +649,10 @@ def _emit_inspector_output(
             bucket_output = generate_bucket_plan(output_files, arch)
             metrics_output = generate_bucket_metrics(output_files, config_dir, arch)
             try:
-                output_path.write_text(bucket_output + metrics_output, encoding="utf-8")
+                output_path.write_text(
+                    bucket_output + metrics_output + weighted_section,
+                    encoding="utf-8",
+                )
             except OSError as exc:
                 console_error(
                     f"Error: could not write text output to {output_path}: {exc}"
@@ -656,9 +667,11 @@ def _emit_inspector_output(
             print("Falling back to stdout output.\n", file=sys.stderr)
             print_bucket_plan(output_files, arch)
             print_bucket_metrics(output_files, config_dir, arch)
+            print(weighted_section, end="")
     else:
         print_bucket_plan(output_files, arch)
         print_bucket_metrics(output_files, config_dir, arch)
+        print(weighted_section, end="")
 
 
 if __name__ == "__main__":

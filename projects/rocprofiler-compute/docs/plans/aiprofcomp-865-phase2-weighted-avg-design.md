@@ -124,17 +124,20 @@ Lower than `BOUND_RATIO` if weights are raw counters and submetrics are single-p
 
 ### Milestone B — Pilot YAML (1 PR, stacks on A)
 
+**Status:** test-only pilot under `tests/fixtures/weighted_avg/` (production gfx942
+YAML deferred until Phase 1 `SLOT_LIMIT` sign-off).
+
 | Task | Files | Tests |
 |------|-------|-------|
 | B1 Pick pilot metric from Phase 1 `SLOT_LIMIT` | `gfx942/*.yaml` | Inspector single-bucket per sub-id |
 | B2 Document in metric description | same | — |
-| B3 Integration test or workload fixture | `tests/integration` or analyze golden | Optional if hardware fixture exists |
+| B3 Integration test or workload fixture | `tests/fixtures/weighted_avg`, `test_weighted_avg_pipeline.py` | Done for pilot fragment |
 
 ### Milestone C — Tooling and docs (1 PR)
 
 | Task | Files |
 |------|-------|
-| C1 Inspector hint for `WEIGHTED_AVG` parents | `counter_grouping_inspector.py` |
+| C1 Inspector hint for `WEIGHTED_AVG` parents | `counter_grouping_inspector.py` (text output; done) |
 | C2 Update Phase 1 plan cross-link | `aiprofcomp-865-single-run-collection-phases.md` |
 | C3 Design review closure | Jira AIPROFCOMP-865 comment |
 
