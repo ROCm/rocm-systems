@@ -124,7 +124,6 @@ target_sources(amdhip64 PRIVATE
   hip_vm.cpp
   hip_api_trace.cpp
   hip_table_interface.cpp
-  hip_table_interface_c.cpp
   hip_deprecated_abi.cpp
   hip_comgr_helper.cpp
   hip_library.cpp
@@ -157,6 +156,11 @@ if(BUILD_SHARED_LIBS)
     target_link_options(amdhip64 PRIVATE "/DEF:${AMDHIP_DEF_OUTPUT_NATIVE}")
     set_target_properties(amdhip64 PROPERTIES LINK_DEPENDS "${AMDHIP_DEF_OUTPUT}")
   else()
+    # Unix compiler and linker default visibility to visible. Let's change to
+    # hidden so we only expose what we need.
+    set_target_properties(amdhip64 PROPERTIES
+      CXX_VISIBILITY_PRESET hidden
+      VISIBILITY_INLINES_HIDDEN ON)
     target_link_libraries(amdhip64 PRIVATE "-Wl,--version-script=${CMAKE_CURRENT_LIST_DIR}/hip_hcc.map.in")
     set_target_properties(amdhip64 PROPERTIES LINK_DEPENDS "${CMAKE_CURRENT_LIST_DIR}/hip_hcc.map.in")
   endif()
@@ -182,7 +186,7 @@ target_link_libraries(amdhip64 PRIVATE ${CMAKE_DL_LIBS})
 # This is required for static libraries
 if(NOT BUILD_SHARED_LIBS)
   find_package(hsa-runtime64)
-  find_package(amd_comgr 3.2 REQUIRED)
+  find_package(amd_comgr)
   target_link_libraries(amdhip64 PRIVATE
     pthread numa rt c amd_comgr hsa-runtime64::hsa-runtime64)
 endif()
