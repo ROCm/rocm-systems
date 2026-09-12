@@ -31,6 +31,7 @@ RJ_DIAGNOSTIC_POP
 #include <format>
 #include <limits>
 #include <optional>
+#include <span>
 #include <stdexcept>
 #include <string>
 #include <sys/mman.h>
@@ -1130,17 +1131,14 @@ uint64_t CommandProcessor::read_gpu_u64(uint64_t va, uint32_t vmid) const {
 }
 
 uint32_t CommandProcessor::read_gpu_u32(uint64_t va, uint32_t vmid) const {
+  // Block read (one translate per page) instead of 4 per-byte read8 calls.
   uint32_t val = 0;
-  auto *dst = reinterpret_cast<uint8_t *>(&val);
-  for (uint32_t i = 0; i < sizeof(val); ++i)
-    dst[i] = memory_->read8(va + i, vmid);
+  read_gpu_block(va, &val, sizeof(val), vmid);
   return val;
 }
 
 void CommandProcessor::read_gpu_block(uint64_t va, void *dst, size_t size, uint32_t vmid) const {
-  auto *p = static_cast<uint8_t *>(dst);
-  for (size_t i = 0; i < size; ++i)
-    p[i] = memory_->read8(va + i, vmid);
+  memory_->read_block(va, std::span<uint8_t>(static_cast<uint8_t *>(dst), size), vmid);
 }
 
 amdgpu::AccessOutcome CommandProcessor::write_gpu_block(uint64_t va, const void *src, size_t size,

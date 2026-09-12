@@ -3165,6 +3165,62 @@ TEST_P(IsaTest, RegisterAccess) {
   EXPECT_EQ(cu->read_vgpr(vb + 1, 1), 0u);
 }
 
+TEST(VgprBulkWriteTest, FullWave64WritesEveryLane) {
+  VmFixture f("cdna4");
+  auto *cu = f.cu();
+  auto *w = cu->dispatch_wf(/*wg_id=*/0, /*pc=*/0x1040, /*num_sgprs=*/104,
+                            /*num_vgprs=*/256, /*wave_size=*/64);
+  ASSERT_NE(w, nullptr);
+
+  std::array<uint32_t, 64> src{};
+  for (uint32_t lane = 0; lane < src.size(); ++lane)
+    src[lane] = 0xa5000000u | lane;
+  const uint32_t reg = w->vgpr_alloc().base;
+  cu->write_vgpr_lanes32(reg, ~uint64_t{0}, reinterpret_cast<const uint8_t *>(src.data()),
+                         sizeof(uint32_t), w->wf_size());
+
+  for (uint32_t lane = 0; lane < src.size(); ++lane)
+    EXPECT_EQ(cu->read_vgpr(reg, lane), src[lane]);
+}
+
+TEST(VgprBulkWriteTest, Wave32MasksUpperLanesAndHonorsStride) {
+  VmFixture f("rdna4");
+  auto *cu = f.cu();
+  auto *w = cu->dispatch_wf(/*wg_id=*/0, /*pc=*/0x1040, /*num_sgprs=*/104,
+                            /*num_vgprs=*/256, /*wave_size=*/32);
+  ASSERT_NE(w, nullptr);
+  ASSERT_EQ(w->wf_size(), 32u);
+
+  const uint32_t full_reg = w->vgpr_alloc().base;
+  std::array<uint32_t, 64> contiguous{};
+  for (uint32_t lane = 0; lane < contiguous.size(); ++lane) {
+    contiguous[lane] = 0xb6000000u | lane;
+    cu->write_vgpr(full_reg, lane, 0xfeed0000u | lane);
+  }
+  cu->write_vgpr_lanes32(full_reg, ~uint64_t{0},
+                         reinterpret_cast<const uint8_t *>(contiguous.data()), sizeof(uint32_t),
+                         w->wf_size());
+  for (uint32_t lane = 0; lane < 64; ++lane)
+    EXPECT_EQ(cu->read_vgpr(full_reg, lane), lane < 32 ? contiguous[lane] : (0xfeed0000u | lane));
+
+  constexpr uint64_t kMask = (uint64_t{1} << 1) | (uint64_t{1} << 17) | (uint64_t{1} << 40);
+  constexpr uint32_t kStride = 4 * sizeof(uint32_t);
+  std::array<uint32_t, 64 * 4> strided{};
+  for (uint32_t lane = 0; lane < 64; ++lane)
+    strided[lane * 4] = 0xc7000000u | lane;
+  const uint32_t strided_reg = full_reg + 1;
+  cu->write_vgpr_lanes32(strided_reg, kMask, reinterpret_cast<const uint8_t *>(strided.data()),
+                         kStride, w->wf_size());
+  EXPECT_EQ(cu->read_vgpr(strided_reg, 1), strided[4]);
+  EXPECT_EQ(cu->read_vgpr(strided_reg, 17), strided[17 * 4]);
+  EXPECT_EQ(cu->read_vgpr(strided_reg, 40), 0u);
+
+  cu->write_vgpr(strided_reg + 1, 3, 0x12345678u);
+  cu->write_vgpr_lanes32(strided_reg + 1, 0, reinterpret_cast<const uint8_t *>(strided.data()),
+                         kStride, w->wf_size());
+  EXPECT_EQ(cu->read_vgpr(strided_reg + 1, 3), 0x12345678u);
+}
+
 TEST(RdnaDispatchTest, PackedTidHonorsRequestedComponents) {
   const uint32_t code[] = {SOPP_S_ENDPGM};
 

@@ -40,6 +40,7 @@
 #include <cassert>
 #include <cstddef>
 #include <cstdint>
+#include <cstring>
 #include <functional>
 #include <limits>
 #include <memory>
@@ -343,7 +344,10 @@ public:
 
   /// @brief Register a new workgroup with its expected WF count.
   /// @details Called by the DispatchController when assigning a WG to this CU.
-  /// Initializes the refcount so release_wf() can detect WG completion.
+  /// Initializes the refcount so release_wf() can detect WG completion. This
+  /// also performs the once-per-dispatch launch cache invalidation, so direct
+  /// callers of dispatch_wf() must call begin_workgroup() first when modeling
+  /// a kernel launch.
   void begin_workgroup(uint32_t dispatch_id, uint32_t wg_id, uint32_t wf_count,
                        uint32_t num_named_barriers = 0);
 
@@ -511,6 +515,7 @@ public:
     memory_ = memory;
     l1_vector_.set_memory(memory);
     l1_scalar_.set_memory(memory);
+    inst_cache_.invalidate_all();
   }
 
   /// @brief Set (or replace) the L2 cache pointer.
@@ -795,6 +800,15 @@ public:
   /// @param val Value to write.
   virtual void write_vgpr(uint32_t reg_idx, uint32_t lane, uint32_t val) = 0;
 
+  /// @brief Write 32-bit lane values into one VGPR.
+  /// @param reg_idx Physical register index.
+  /// @param lane_mask Enabled lanes to write.
+  /// @param src Source bytes, indexed as src[lane * src_stride].
+  /// @param src_stride Byte stride between source lane values.
+  /// @param wf_size Runtime wavefront size; lanes outside it are ignored.
+  virtual void write_vgpr_lanes32(uint32_t reg_idx, uint64_t lane_mask, const uint8_t *src,
+                                  uint32_t src_stride, uint32_t wf_size) = 0;
+
   /// @brief Return a pointer to a wavefront's SGPR data in the physical file.
   /// @param base Base register index in the SGPR file.
   /// @returns Pointer to the contiguous SGPR data.
@@ -1044,7 +1058,7 @@ protected:
   /// @details Held as 64 bits so the initial value is outside the 32-bit
   /// dispatch-ID space and the first dispatch, including ID 0, still
   /// invalidates.
-  uint64_t inst_cache_dispatch_id_ = ~uint64_t{0};
+  uint64_t launch_cache_dispatch_id_ = ~uint64_t{0};
   Lds lds_;
   ImmediateClusterLdsMulticastEngine default_cluster_lds_multicast_engine_;
   ClusterLdsMulticastEngine *cluster_lds_multicast_engine_ = &default_cluster_lds_multicast_engine_;
@@ -1376,6 +1390,27 @@ public:
   void write_vgpr(uint32_t reg_idx, uint32_t lane, uint32_t val) override {
     if (reg_idx < vgpr_file_.total_regs() && lane < Isa::WF_SIZE_MAX)
       vgpr_file_[reg_idx][lane] = val;
+  }
+
+  void write_vgpr_lanes32(uint32_t reg_idx, uint64_t lane_mask, const uint8_t *src,
+                          uint32_t src_stride, uint32_t wf_size) override {
+    if (reg_idx >= vgpr_file_.total_regs() || wf_size == 0 || wf_size > Isa::WF_SIZE_MAX)
+      return;
+    const uint64_t full_lane_mask = wf_size >= 64 ? ~uint64_t{0} : (uint64_t{1} << wf_size) - 1;
+    lane_mask &= full_lane_mask;
+    if (lane_mask == 0)
+      return;
+
+    auto &reg = vgpr_file_[reg_idx];
+    if (lane_mask == full_lane_mask && src_stride == sizeof(uint32_t)) {
+      std::memcpy(&reg[0], src, wf_size * sizeof(uint32_t));
+      return;
+    }
+    for (uint32_t lane = 0; lane < wf_size; ++lane) {
+      if (!(lane_mask & (uint64_t{1} << lane)))
+        continue;
+      std::memcpy(&reg[lane], src + lane * src_stride, sizeof(uint32_t));
+    }
   }
 
   /// @returns Const pointer to one VGPR's raw lane data.
