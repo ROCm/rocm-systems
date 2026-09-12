@@ -10,7 +10,7 @@ This directory contains automated tests for RCCL (ROCm Communication Collectives
 
 3. **Inspector Plugin**: Validates the inspector plugin that produces structured JSONL output for collective operations. Tests cover schema correctness, per-rank output files, timing source validation, and verbose event trace fields across single-node and multi-node configurations.
 
-4. **Mixed Plugin**: Validates that a single shared object can export multiple plugin types. It builds `plugins/mixed/example/libnccl-mixed.so` (net + tuner), checks that both plugin symbols are exported, and runs a collective to confirm RCCL loads both the net and tuner plugins from the same object (`ext-mixed`, marker `ext_mixed`).
+4. **Mixed Plugin**: Validates that a single shared object can export multiple plugin types. It builds `plugins/mixed/example/librccl-mixed.so` (net + tuner), checks that both plugin symbols are exported, and runs a collective to confirm RCCL loads both the net and tuner plugins from the same object (`ext-mixed`, marker `ext_mixed`).
 
 The tests are written in Python using the pytest framework, making it easy to run, maintain, and extend the test coverage.
 
@@ -97,7 +97,7 @@ cd rccl/plugins/tuner/example
 make
 ```
 
-This will compile the plugin and create `libnccl-tuner-example.so` in the same directory.
+This will compile the plugin and create `librccl-tuner-example.so` in the same directory.
 
 #### Building the Profiler Plugin
 

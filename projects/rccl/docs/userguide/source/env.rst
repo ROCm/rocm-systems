@@ -454,11 +454,11 @@ NCCL_NET_PLUGIN
 
 Set it to either a suffix string or to a library name to choose among multiple NCCL net plugins. This setting will cause NCCL to look for the net plugin library using the following strategy:
  - If NCCL_NET_PLUGIN is set, attempt loading the library with name specified by NCCL_NET_PLUGIN;
- - If NCCL_NET_PLUGIN is set and previous failed, attempt loading libnccl-net-<NCCL_NET_PLUGIN>.so;
- - If NCCL_NET_PLUGIN is not set, attempt loading libnccl-net.so;
+ - If NCCL_NET_PLUGIN is set and previous failed, attempt loading librccl-net-<NCCL_NET_PLUGIN>.so;
+ - If NCCL_NET_PLUGIN is not set, attempt loading librccl-net.so;
  - If no plugin was found (neither user defined nor default), use internal network plugin.
 
-For example, setting ``NCCL_NET_PLUGIN=foo`` will cause NCCL to try to load ``foo`` and, if ``foo`` cannot be found, ``libnccl-net-foo.so`` (provided that it exists on the system).
+For example, setting ``NCCL_NET_PLUGIN=foo`` will cause NCCL to try to load ``foo`` and, if ``foo`` cannot be found, ``librccl-net-foo.so`` (provided that it exists on the system).
 
 Values accepted
 ^^^^^^^^^^^^^^^
@@ -470,12 +470,12 @@ NCCL_TUNER_PLUGIN
 
 Set it to either a suffix string or to a library name to choose among multiple NCCL tuner plugins. This setting will cause NCCL to look for the tuner plugin library using the following strategy:
  - If NCCL_TUNER_PLUGIN is set, attempt loading the library with name specified by NCCL_TUNER_PLUGIN;
- - If NCCL_TUNER_PLUGIN is set and previous failed, attempt loading libnccl-net-<NCCL_TUNER_PLUGIN>.so;
- - If NCCL_TUNER_PLUGIN is not set, attempt loading libnccl-tuner.so;
+ - If NCCL_TUNER_PLUGIN is set and previous failed, attempt loading librccl-tuner-<NCCL_TUNER_PLUGIN>.so;
+ - If NCCL_TUNER_PLUGIN is not set, attempt loading librccl-tuner.so;
  - If no plugin was found look for the tuner symbols in the net plugin (refer to ``NCCL_NET_PLUGIN``);
  - If no plugin was found (neither through NCCL_TUNER_PLUGIN nor NCCL_NET_PLUGIN), use internal tuner plugin.
 
-For example, setting ``NCCL_TUNER_PLUGIN=foo`` will cause NCCL to try to load ``foo`` and, if ``foo`` cannot be found, ``libnccl-tuner-foo.so`` (provided that it exists on the system).
+For example, setting ``NCCL_TUNER_PLUGIN=foo`` will cause NCCL to try to load ``foo`` and, if ``foo`` cannot be found, ``librccl-tuner-foo.so`` (provided that it exists on the system).
 
 Values accepted
 ^^^^^^^^^^^^^^^
@@ -487,12 +487,12 @@ NCCL_PROFILER_PLUGIN
 
 Set it to either a suffix string or to a library name to choose among multiple NCCL profiler plugins. This setting will cause NCCL to look for the profiler plugin library using the following strategy:
  - If NCCL_PROFILER_PLUGIN is set, attempt loading the library with name specified by NCCL_PROFILER_PLUGIN;
- - If NCCL_PROFILER_PLUGIN is set and previous failed, attempt loading libnccl-profiler-<NCCL_PROFILER_PLUGIN>.so;
- - If NCCL_PROFILER_PLUGIN is not set, attempt loading libnccl-profiler.so;
+ - If NCCL_PROFILER_PLUGIN is set and previous failed, attempt loading librccl-profiler-<NCCL_PROFILER_PLUGIN>.so;
+ - If NCCL_PROFILER_PLUGIN is not set, attempt loading librccl-profiler.so;
  - If no plugin was found (neither user defined nor default), do not enable profiling.
  - If NCCL_PROFILER_PLUGIN is set to ``STATIC_PLUGIN``, the plugin symbols are searched in the program binary.
 
-For example, setting ``NCCL_PROFILER_PLUGIN=foo`` will cause NCCL to try to load ``foo`` and, if ``foo`` cannot be found, ``libnccl-profiler-foo.so`` (provided that it exists on the system).
+For example, setting ``NCCL_PROFILER_PLUGIN=foo`` will cause NCCL to try to load ``foo`` and, if ``foo`` cannot be found, ``librccl-profiler-foo.so`` (provided that it exists on the system).
 
 Values accepted
 ^^^^^^^^^^^^^^^
@@ -506,9 +506,9 @@ NCCL_ENV_PLUGIN
 The ``NCCL_ENV_PLUGIN`` variable can be used to let NCCL load an external environment plugin. Set it to either a library name or a suffix string to choose among multiple NCCL environment plugins. This setting will cause NCCL to look for the environment plugin library using the following strategy:
  - If ``NCCL_ENV_PLUGIN`` is set to a library name, attempt loading that library (e.g.
    ``NCCL_ENV_PLUGIN=/path/to/library/libfoo.so`` will cause NCCL to try to load ``/path/to/library/libfoo.so``);
- - If ``NCCL_ENV_PLUGIN`` is set to a suffix string, attempt loading ``libnccl-env-<NCCL_ENV_PLUGIN>.so`` (e.g.
-   ``NCCL_ENV_PLUGIN=foo`` will cause NCCL to try to load ``libnccl-env-foo.so`` from the system library path);
- - If ``NCCL_ENV_PLUGIN`` is not set, attempt loading the default ``libnccl-env.so`` library from the system library path;
+ - If ``NCCL_ENV_PLUGIN`` is set to a suffix string, attempt loading ``librccl-env-<NCCL_ENV_PLUGIN>.so`` (e.g.
+   ``NCCL_ENV_PLUGIN=foo`` will cause NCCL to try to load ``librccl-env-foo.so`` from the system library path);
+ - If ``NCCL_ENV_PLUGIN`` is not set, attempt loading the default ``librccl-env.so`` library from the system library path;
  - If ``NCCL_ENV_PLUGIN`` is set to "none", explicitly disable the external plugin and use the internal one;
  - If no plugin was found (neither user defined nor default) or the variable is set to "none", use the internal environment
    plugin.
@@ -1801,7 +1801,7 @@ ranging from 5 to 60 seconds, to determine the state of the application and to m
 complex interdependencies between different timeouts. This variable can be used to scale up all these timeouts in a
 safe, consistent manner, should any of the defaults turn out to be too small; e.g., if the NCCL application is subject
 to high-overhead debugging/tracing/etc., which makes its execution less predictable. If one wants to use the
-``ncclras`` client in such circumstances, its timeout may need to be increased as well (or disabled).
+``rcclras`` client in such circumstances, its timeout may need to be increased as well (or disabled).
 
 Values accepted
 ^^^^^^^^^^^^^^^

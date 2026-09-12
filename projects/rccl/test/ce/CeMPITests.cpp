@@ -322,6 +322,9 @@ protected:
         if(!validateTestPrerequisites(minRanks))
             GTEST_SKIP() << "Need >= " << minRanks << " MPI ranks";
 
+        if(isCeDispatchConfigured() && !isCeAlltoAllDispatchConfigured())
+            GTEST_SKIP() << "CE AlltoAll needs RCCL_DDA_ENABLE=0; DDA IPC claims AlltoAll first";
+
         ASSERT_EQ(ncclSuccess, createTestCommunicator());
 
         int rank{}, nRanks{};

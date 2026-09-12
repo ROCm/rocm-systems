@@ -19,14 +19,14 @@ separate `.so` files.
 
 ```shell
 cd example
-make            # produces libnccl-mixed.so
+make            # produces librccl-mixed.so
 make test       # builds, then checks both plugin symbols are exported
 ```
 
 You can also inspect the exported symbols directly:
 
 ```shell
-nm -D libnccl-mixed.so | grep -E "NetPlugin|TunerPlugin"
+nm -D librccl-mixed.so | grep -E "NetPlugin|TunerPlugin"
 ```
 
 ## Using it at runtime
@@ -35,7 +35,7 @@ Point RCCL at the mixed library through the network plugin variable, and leave t
 dedicated tuner/profiler variables unset so RCCL reuses the same object for them:
 
 ```shell
-export NCCL_NET_PLUGIN=/path/to/libnccl-mixed.so
+export NCCL_NET_PLUGIN=/path/to/librccl-mixed.so
 unset NCCL_TUNER_PLUGIN
 unset NCCL_PROFILER_PLUGIN
 ```
@@ -45,7 +45,7 @@ net plugin and the tuner plugin being loaded from the same object:
 
 ```text
 NET/Plugin: Loaded net plugin Plugin (v12)
-Successfully loaded external network plugin /path/to/libnccl-mixed.so
+Successfully loaded external network plugin /path/to/librccl-mixed.so
 TUNER/Plugin: Using Plugin (v6)
 ```
 

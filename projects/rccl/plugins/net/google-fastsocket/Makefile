@@ -1,11 +1,17 @@
-CUDA_HOME?=/usr/local/cuda
-INC:=-I$(CUDA_HOME)/include
-PLUGIN_SO:=libnccl-net.so
+RCCL_ROOT := ../../..
+ROCM_PATH ?= /opt/rocm
+# ?= would lose to make's built-in CXX default (g++); only replace that default.
+ifeq ($(origin CXX),default)
+CXX := $(ROCM_PATH)/bin/amdclang++
+endif
+INC := -I$(RCCL_ROOT)/plugins/net/example/nccl -I$(ROCM_PATH)/include -I$(CURDIR)
+CXXFLAGS := -D__HIP_PLATFORM_AMD__ -include rccl_compat_v5.h
+PLUGIN_SO := librccl-net.so
 
 default: $(PLUGIN_SO)
 
 $(PLUGIN_SO): nccl-fastsocket/*.cc
-	$(CC) $(INC) -fPIC -shared -o $@ -Wl,-soname,$(PLUGIN_SO) $^
+	$(CXX) $(CXXFLAGS) $(INC) -fPIC -shared -o $@ -Wl,-soname,$(PLUGIN_SO) $^
 
 nccl-fastsocket/*.cc:
 	git clone https://github.com/google/nccl-fastsocket.git
@@ -20,3 +26,5 @@ $(BUILDDIR)/lib/$(PLUGIN_SO): $(PLUGIN_SO)
 clean:
 	rm -f $(PLUGIN_SO)
 	rm -Rf nccl-fastsocket
+
+.PHONY: default install clean

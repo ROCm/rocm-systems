@@ -20,7 +20,7 @@ OMPI_INSTALL_DIR = os.environ.get("OMPI_INSTALL_DIR", "path/to/ompi/install")
 RCCL_TESTS_DIR = os.environ.get("RCCL_TESTS_DIR", "path/to/rccl-tests")
 
 PLUGIN_DIR = f"{RCCL_INSTALL_DIR}/plugins/tuner/example"
-PLUGIN_SO = f"{PLUGIN_DIR}/libnccl-tuner-example.so"
+PLUGIN_SO = f"{PLUGIN_DIR}/librccl-tuner-example.so"
 
 PROFILER_DIR = f"{RCCL_INSTALL_DIR}/plugins/profiler/example"
 PROFILER_SO = f"{PROFILER_DIR}/librccl-profiler-example.so"
@@ -77,7 +77,16 @@ def check_node_interface(node: str, interface: str) -> bool:
 
 def find_common_interface(nodelist):
     """Find a common network interface across all nodes"""
-    interfaces_to_check = ["eth0", "eth1"]
+    configured_interfaces = os.environ.get("RCCL_TEST_INTERFACES", "")
+    if configured_interfaces:
+        # Cluster launchers may not permit peer SSH from compute nodes. An
+        # explicitly supplied interface comes from the scheduler/catalog and
+        # is authoritative, so do not require an SSH-based rediscovery.
+        return configured_interfaces.split(",", 1)[0].strip()
+
+    interfaces_to_check = (
+        ["eth0", "eth1"]
+    )
 
     for interface in interfaces_to_check:
         all_nodes_have_interface = True
