@@ -91,6 +91,7 @@
 #include "suites/functional/fp_exception_shutdown.h"
 #include "suites/functional/gpu_coredump.h"
 #include "suites/functional/gpu_discovery_deprecated.h"
+#include "suites/functional/gl2_cache_test.h"
 #include "amd_smi/amdsmi.h"
 #include "common/common.h"
 #include "suites/functional/counted_queues.h"
@@ -422,6 +423,47 @@ TEST(rocrtstFunc, FP_Exception_Shutdown) {
     RunCustomTestEpilog(&fpx);
 }
 
+TEST(rocrtstFunc, GL2_PersistingCache_QueryMax) {
+    GL2CacheTest gl2;
+    if (!RunCustomTestProlog(&gl2)) return;
+    gl2.QueryMaxPersistingCacheSize();
+    RunCustomTestEpilog(&gl2);
+}
+
+TEST(rocrtstFunc, GL2_PersistingCache_QueryRequest) {
+    GL2CacheTest gl2;
+    if (!RunCustomTestProlog(&gl2)) return;
+    gl2.QueryRequestPersistingCacheSize();
+    RunCustomTestEpilog(&gl2);
+}
+
+TEST(rocrtstFunc, GL2_PersistingCache_Set) {
+    GL2CacheTest gl2;
+    if (!RunCustomTestProlog(&gl2)) return;
+    gl2.SetPersistingCacheSize();
+    RunCustomTestEpilog(&gl2);
+}
+
+TEST(rocrtstFunc, GL2_PersistingCache_SetAndReadBack) {
+    GL2CacheTest gl2;
+    if (!RunCustomTestProlog(&gl2)) return;
+    gl2.SetAndReadBackPersistingCacheSize();
+    RunCustomTestEpilog(&gl2);
+}
+
+TEST(rocrtstFunc, GL2_PersistingCache_NegativeInvalidSize) {
+    GL2CacheTest gl2;
+    if (!RunCustomTestProlog(&gl2)) return;
+    gl2.NegativeInvalidSize();
+    RunCustomTestEpilog(&gl2);
+}
+
+TEST(rocrtstFunc, GL2_PersistingCache_NegativeCPUAgent) {
+    GL2CacheTest gl2;
+    if (!RunCustomTestProlog(&gl2)) return;
+    gl2.NegativeCPUAgent();
+    RunCustomTestEpilog(&gl2);
+}
 
 TEST(rocrtstFunc, Memory_Atomic_Add_Test) {
     MemoryAtomic ma(ADD);

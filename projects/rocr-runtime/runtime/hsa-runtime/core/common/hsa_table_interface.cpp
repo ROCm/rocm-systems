@@ -1460,6 +1460,13 @@ hsa_status_t HSA_API hsa_amd_svm_discard_and_prefetch_batch_async(
       num_dep_signals, dep_signals, completion_signal);
 }
 
+// Mirrors Amd Extension Apis
+hsa_status_t HSA_API hsa_amd_agent_set_attribute(hsa_agent_t agent,
+                                                  hsa_amd_agent_attribute_t attribute,
+                                                  void* value) {
+  return amdExtTable->hsa_amd_agent_set_attribute_fn(agent, attribute, value);
+}
+
 // Tools only table interfaces.
 namespace rocr {
 

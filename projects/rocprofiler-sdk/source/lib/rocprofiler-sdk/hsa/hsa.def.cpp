@@ -668,6 +668,15 @@ HSA_API_INFO_DEFINITION_V(
     dep_signals,
     completion_signal)
 #        endif
+#        if HSA_AMD_EXT_API_TABLE_STEP_VERSION >= 0x14
+HSA_API_INFO_DEFINITION_V(ROCPROFILER_HSA_TABLE_ID_AmdExt,
+                          ROCPROFILER_HSA_AMD_EXT_API_ID_hsa_amd_agent_set_attribute,
+                          hsa_amd_agent_set_attribute,
+                          hsa_amd_agent_set_attribute_fn,
+                          agent,
+                          attribute,
+                          value)
+#        endif
 #    endif
 
 #elif defined(ROCPROFILER_LIB_ROCPROFILER_HSA_ASYNC_COPY_CPP_IMPL) &&                              \

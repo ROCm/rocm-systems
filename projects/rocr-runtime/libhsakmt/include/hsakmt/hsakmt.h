@@ -1510,6 +1510,22 @@ hsaKmtGetAmdGPUDeviceFd(
   int *fd //OUT
 );
 
+
+HSAKMT_STATUS
+HSAKMTAPI
+hsaKmtSetPersistingCacheSizeCtx(
+    HsaKFDContext *ctx,
+    HSAuint32 Node,
+    HSAuint64 CacheSize
+    );
+
+HSAKMT_STATUS
+HSAKMTAPI
+hsaKmtSetPersistingCacheSize(
+    HSAuint32 Node,
+    HSAuint64 CacheSize
+    );
+
 #ifdef __cplusplus
 }   //extern "C"
 #endif

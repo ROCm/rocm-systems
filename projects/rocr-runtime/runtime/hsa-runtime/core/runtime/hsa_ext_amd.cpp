@@ -1819,6 +1819,24 @@ hsa_status_t hsa_amd_spm_set_dest_buffer(hsa_agent_t preferred_agent, size_t siz
   CATCH;
 }
 
+hsa_status_t HSA_API hsa_amd_agent_set_attribute(hsa_agent_t agent,
+                                                  hsa_amd_agent_attribute_t attribute,
+                                                  void* value) {
+  TRY;
+  IS_OPEN();
+  const rocr::core::Agent* base_agent = rocr::core::Agent::Convert(agent);
+  if (base_agent == NULL || !base_agent->IsValid() ||
+      base_agent->device_type() != rocr::core::Agent::kAmdGpuDevice)
+    return HSA_STATUS_ERROR_INVALID_AGENT;
+
+  rocr::AMD::GpuAgent* agent =
+      const_cast<rocr::AMD::GpuAgent*>(
+          static_cast<const rocr::AMD::GpuAgent*>(base_agent));
+  return agent->SetAgentAttribute(
+      static_cast<hsa_agent_info_t>(attribute), value);
+  CATCH;
+}
+
 hsa_status_t hsa_amd_portable_export_dmabuf(const void* ptr, size_t size, int* dmabuf,
   uint64_t* offset) {
 TRY;
