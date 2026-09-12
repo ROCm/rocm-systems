@@ -110,6 +110,37 @@ User-facing capture, replay, and validation knobs. Implementation details can be
 | `--progress-kernels N` | Heartbeat every `N` launched kernels |
 | `--progress-seconds S` | Heartbeat at most every `S` seconds |
 | `--version` | Print the archive format version this build reads, the revision it was built from, and the HIP runtime it is linked against, then exit (no GPU) |
+| `--warn-untranslated-args` | Report kernel-arg pointers that resolve in no allocation, VMM reservation or region (they reach the GPU as null) — the measurement that says a capture lost allocations below the HIP API |
+| `--no-regions` | Ignore any external region annotations in the archive |
+| `--regions-strict` | Count intra-segment out-of-bounds findings toward the exit code (default: report only) |
+| `--guard-segments` | VMM-back every device allocation and leave an unmapped span after it (diagnostic) |
+| `--guard-blocks` | Relocate each annotated block behind a guard page for one launch (diagnostic; needs region annotations) |
+| `--guard-min-bytes N` / `--guard-max-bytes N` | Size window for `--guard-blocks` |
+| `--guard-budget-mb N` | Cap guarded memory per launch (default `4096`) |
+| `--guard-exact-align` | Reproduce each guarded pointer's offset within an allocation granule bit for bit, at the cost of a larger unguarded tail |
+
+### External region annotations
+
+HRR interposes the HIP dispatch table, so it records the memory that crosses a
+HIP API and nothing else. A framework allocator that carves per-object blocks out
+of one large `hipMalloc` (PyTorch's HIP caching allocator) and a library that
+allocates below HIP entirely (direct HSA, a foreign VMM pool, imported memory)
+both leave HRR with a device VA range it cannot account for. A **producer**
+outside the runtime writes those ranges down as
+`pid-<pid>/regions/<name>.hrrr`; `hrr-playback` loads them automatically. See
+[`producers/README.md`](producers/README.md) for the format and
+[`producers/pytorch/hrr_torch_regions.py`](producers/pytorch/hrr_torch_regions.py)
+for the reference PyTorch producer.
+
+**Fidelity.** With annotations present and no guard flag, replay's memory layout
+is exactly what it would have been without them; the annotations are read, not
+acted on, except that a segment HIP never saw now gets allocated, so pointers
+into it resolve instead of reaching the GPU as an address from another process.
+Fidelity therefore only increases. The two `--guard-*` flags are the deliberate
+exception: they move memory so that an out-of-bounds access faults instead of
+landing in a live neighbour, and are off by default for that reason.
+`--guard-blocks` restores every guarded block and releases the relocation before
+the next event, so the divergence is confined to the launch under examination.
 
 ### Replay environment
 
@@ -128,7 +159,13 @@ User-facing capture, replay, and validation knobs. Implementation details can be
 | `HIP_HRR_REPLAY_NO_RESCAN` | off | Disable suballoc pointer rescan at replay |
 | `HIP_HRR_PTR_RELAX` | off | Disable replay-side stale-pointer guard (debug only) |
 | `HIP_HRR_REPLAY_FORCE_EXT_CIJK` | off | Force external Cijk kernel binding workaround (debug) |
-| `HIP_HRR_REPLAY_DUMP_PTRS_ORDINAL` | `0` | Dump pointer translation map at event ordinal `N` (debug) |
+| `HIP_HRR_REPLAY_DUMP_PTRS_ORDINAL` | `0` | Dump pointer translation map, and the allocation each argument lands in, at kernel ordinal `N` (debug) |
+| `HIP_HRR_REPLAY_SCAN_ARGS_ORDINAL` | `0` | Before kernel `N`, read back each pointer argument's allocation and report words that are recorded addresses (debug) |
+| `HIP_HRR_REPLAY_SCAN_ARGS_BYTES` | `4096` | Per-allocation cap for the argument scan |
+| `HIP_HRR_REPLAY_SCAN_H2D` | off | Report recorded addresses inside replayed H2D payloads (debug) |
+| `HIP_HRR_REPLAY_AUDIT_HOST_ARGS` | off | Report kernels taking a pointer into host memory, whose contents replay cannot restore (debug) |
+| `HIP_HRR_REPLAY_FILL_BYTE` | `0` | Byte to fill fresh allocations with; set it to e.g. `0xa5` to expose kernels reading memory nothing wrote (debug) |
+| `HIP_HRR_REPLAY_EXPLAIN_ADDR` | unset | At the scan ordinal, report whether an address is recorded, live, or neither, and whether the GPU can read it (debug) |
 
 ### D2H validation
 
@@ -148,10 +185,14 @@ capture.hrr/
   pid-<pid>/
     events.bin
     blobs/
+    regions/          (optional)
     manifest.json
 ```
 
 - **events.bin** — HIP API event stream
+- **regions/** — external region annotations, if a producer ran: memory the HIP
+  dispatch table never saw. Written by code outside the runtime, never by
+  capture itself
 - **blobs/** — host payloads referenced by the trace
 - **Complete: NO** — original run crashed before clean shutdown; reader still recovers complete events
 

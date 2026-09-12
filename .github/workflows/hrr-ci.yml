@@ -1,0 +1,392 @@
+name: HRR CI
+
+on:
+  pull_request:
+    paths:
+      - "projects/hrr/**"
+      - "projects/clr/hipamd/src/hrr/**"
+      - ".github/workflows/hrr-ci.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: hrr-ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  # One fat binary covers every family that has a test runner, so the GPU jobs
+  # download a single artifact instead of rebuilding per architecture.
+  #
+  # Every arch a pool can hand out has to be listed, not one representative per
+  # family: linux-gfx110X-gpu-rocm and linux-gfx120X-gpu-rocm are wildcard
+  # pools, and a machine whose arch is missing from the binary fails every
+  # workload with hipErrorInvalidImage (200) rather than skipping.
+  HRR_ARCHS: "gfx90a;gfx942;gfx950;gfx1030;gfx1100;gfx1101;gfx1102;gfx1150;gfx1151;gfx1153;gfx1200;gfx1201"
+  ROCM_INDEX_URL: "https://rocm.nightlies.amd.com/whl-multi-arch/"
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # Host-only unit suite. These 23 cases link nothing but libstdc++/libc: they
+  # include <hip/hip_runtime.h> for types but issue no HIP calls, so they need
+  # neither a GPU nor the capture library and can run on any platform.
+  # ---------------------------------------------------------------------------
+  unit:
+    name: "Unit (${{ matrix.os }})"
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-2022]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          sparse-checkout: |
+            projects/hrr
+          set-safe-directory: true
+
+      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        with:
+          python-version: "3.12"
+
+      - name: Install ROCm SDK (headers and toolchain only)
+        shell: bash
+        run: |
+          pip install --no-cache-dir --index-url "${ROCM_INDEX_URL}" "rocm[devel]"
+          rocm-sdk init
+          echo "ROCM_SDK=$(python -c 'import _rocm_sdk_devel,os;print(os.path.dirname(_rocm_sdk_devel.__file__))')" >> "$GITHUB_ENV"
+
+      - name: Configure
+        shell: bash
+        run: |
+          extra=()
+          if [ "${RUNNER_OS}" = "Windows" ]; then
+            # The runner builds with MinGW, whose libstdc++/libgcc/winpthread
+            # DLLs are not on PATH for later steps, so a dynamically linked
+            # binary fails to start at all. Link them in instead.
+            extra+=(-DCMAKE_EXE_LINKER_FLAGS=-static)
+          fi
+          cmake -S projects/hrr -B build -GNinja -Wno-dev \
+            "${extra[@]}" \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_PREFIX_PATH="${ROCM_SDK}" \
+            -DROCM_PATH="${ROCM_SDK}" \
+            -DHRR_BUILD_PLAYBACK=ON \
+            -DHRR_BUILD_TESTS=ON \
+            -DHRR_BUILD_INTEGRATION_TESTS=OFF
+
+      - name: Build
+        run: cmake --build build -j
+
+      - name: Run unit suite
+        shell: bash
+        run: |
+          # Named hrr-unit-tests.exe on Windows. Resolved with a bash glob
+          # rather than find, which on a Windows runner resolves to FIND.EXE.
+          if [ "${RUNNER_OS}" = "Windows" ]; then
+            # The recovery cases spawn hrr-playback.exe, which loads the SDK's
+            # HIP DLLs. Without them on PATH it dies with STATUS_DLL_NOT_FOUND
+            # before running anything.
+            PATH="$(cygpath -u "${ROCM_SDK}")/bin:${PATH}"
+            export PATH
+          fi
+          shopt -s nullglob
+          bin=(build/tests/unit/hrr-unit-tests*)
+          if [ ${#bin[@]} -eq 0 ]; then
+            echo "::error::no unit binary under build/tests/unit"
+            ls -R build/tests || true
+            exit 1
+          fi
+          ls -l "${bin[0]}"
+          "${bin[0]}" \
+            --reporter console \
+            --reporter junit::out=unit-${{ matrix.os }}.xml
+
+      - name: Upload results
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: results-unit-${{ matrix.os }}
+          path: unit-${{ matrix.os }}.xml
+          retention-days: 3
+
+  # ---------------------------------------------------------------------------
+  # Resolve the GPU runner labels from the shared CI config, the same way the
+  # rocprofiler-sdk workflows do.
+  # ---------------------------------------------------------------------------
+  ci_config:
+    name: "Resolve runners"
+    runs-on: ubuntu-24.04
+    outputs:
+      gfx90a_runner: ${{ steps.runner.outputs.gfx90a_runner }}
+      gfx94x_runner: ${{ steps.runner.outputs.gfx94x_runner }}
+      gfx950_runner: ${{ steps.runner.outputs.gfx950_runner }}
+      gfx103x_runner: ${{ steps.runner.outputs.gfx103x_runner }}
+      gfx110x_runner: ${{ steps.runner.outputs.gfx110x_runner }}
+      gfx120x_runner: ${{ steps.runner.outputs.gfx120x_runner }}
+      gfx1151_runner: ${{ steps.runner.outputs.gfx1151_runner }}
+    steps:
+      - name: Checkout workflow actions
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          sparse-checkout: .github/actions/rocprofiler-sdk-util/resolve-ci-config
+          set-safe-directory: true
+
+      - name: Resolve runner labels
+        id: runner
+        uses: ./.github/actions/rocprofiler-sdk-util/resolve-ci-config
+
+  # ---------------------------------------------------------------------------
+  # Builds CLR (which brings in-tree ROCr with it) to get an amdhip64 carrying
+  # the HRR capture shims, then projects/hrr against the SDK. The capture build
+  # is substituted at run time via LD_LIBRARY_PATH, not linked here. Produces
+  # one multi-architecture artifact consumed by every GPU job below.
+  # ---------------------------------------------------------------------------
+  build:
+    name: "Build (multi-arch)"
+    runs-on: azure-linux-scale-rocm
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          sparse-checkout: |
+            projects/hrr
+            projects/clr
+            projects/hip
+            projects/rocr-runtime
+          set-safe-directory: true
+
+      # ROCclr pulls in OpenGL through ROCclrHSA.cmake even with CLR_BUILD_OCL
+      # off, so the GL development packages are required to configure CLR.
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y --no-install-recommends \
+            ninja-build pkg-config libnuma-dev libelf-dev libdrm-dev \
+            libgl1-mesa-dev libglx-dev mesa-common-dev \
+            libclang-rt-18-dev
+
+      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        with:
+          python-version: "3.12"
+
+      - name: Install ROCm SDK
+        run: |
+          # CppHeaderParser is required by hipamd/src/CMakeLists.txt.
+          pip install --no-cache-dir CppHeaderParser
+          pip install --no-cache-dir --index-url "${ROCM_INDEX_URL}" "rocm[libraries,devel]"
+          rocm-sdk init
+          echo "ROCM_SDK=$(python -c 'import _rocm_sdk_devel,os;print(os.path.dirname(_rocm_sdk_devel.__file__))')" >> "$GITHUB_ENV"
+
+      - name: Build amdhip64 with the HRR capture shims
+        run: |
+          cmake -S projects/clr -B build/clr -GNinja -Wno-dev \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_PREFIX_PATH="${ROCM_SDK}" \
+            -DROCM_PATH="${ROCM_SDK}" \
+            -DHIP_COMMON_DIR="${GITHUB_WORKSPACE}/projects/hip" \
+            -DHIP_PLATFORM=amd \
+            -DCLR_BUILD_HIP=ON \
+            -DCLR_BUILD_OCL=OFF
+          cmake --build build/clr --target amdhip64 -j
+
+      - name: Build projects/hrr for every testable architecture
+        run: |
+          cmake -S projects/hrr -B build/hrr -GNinja -Wno-dev \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_PREFIX_PATH="${ROCM_SDK}" \
+            -DROCM_PATH="${ROCM_SDK}" \
+            -DCMAKE_HIP_COMPILER="${ROCM_SDK}/bin/amdclang++" \
+            -DCMAKE_HIP_FLAGS="--rocm-device-lib-path=${ROCM_SDK}/lib/llvm/amdgcn/bitcode" \
+            -DGPU_TARGETS="${HRR_ARCHS}" \
+            -DCMAKE_HIP_ARCHITECTURES="${HRR_ARCHS}" \
+            -DHRR_BUILD_PLAYBACK=ON \
+            -DHRR_BUILD_TESTS=ON \
+            -DHRR_BUILD_INTEGRATION_TESTS=ON
+          cmake --build build/hrr -j
+
+      - name: Confirm every architecture is embedded
+        run: |
+          found=$("${ROCM_SDK}"/lib/llvm/bin/llvm-objdump --offloading \
+            build/hrr/tests/integration/hrr-integration-tests \
+            | grep -o 'gfx[0-9a-z]*' | sort -u | tr '\n' ' ')
+          echo "embedded: ${found}"
+          for arch in ${HRR_ARCHS//;/ }; do
+            case " ${found} " in
+              *" ${arch} "*) ;;
+              *) echo "::error::${arch} missing from the fat binary"; exit 1 ;;
+            esac
+          done
+
+      - name: Upload build
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: hrr-build
+          path: |
+            build/hrr
+            build/clr/hipamd/lib
+          retention-days: 3
+
+  # ---------------------------------------------------------------------------
+  # Integration suite on every family that has a test runner.
+  # ---------------------------------------------------------------------------
+  integration:
+    name: "Integration (${{ matrix.family }})"
+    needs: [ci_config, build]
+    runs-on: ${{ matrix.runner }}
+    # The suite runs in about 90 seconds. These are scarce single-GPU machines
+    # and the default timeout is six hours, so a workload that deadlocks on one
+    # part would hold a runner for the rest of the day and publish no log to
+    # say why. Fail instead, while the log still gets uploaded.
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { family: gfx90a, runner: "${{ needs.ci_config.outputs.gfx90a_runner }}" }
+          # The T3 tier needs two visible devices. There is no 2-GPU pool, so
+          # gfx950 uses an 8-GPU machine and selects two; every other family is
+          # 1-GPU only and skips T3.
+          #
+          # gfx94x does not join it there: linux-gfx942-8gpu-ossci-rocm exposes
+          # /dev/kfd and /dev/dri only to a job with a container spec (see the
+          # RCCL workflows), so a direct job on it finds no agent at all and
+          # every workload fails hipSetDevice with hipErrorNoDevice. Use the
+          # resolved 1-GPU runner and leave the two-device tier to gfx950.
+          - { family: gfx94x, runner: "${{ needs.ci_config.outputs.gfx94x_runner }}" }
+          - { family: gfx950, runner: "linux-gfx950-8gpu-ccs-ossci-rocm", devices: "0,1" }
+          - { family: gfx103x, runner: "${{ needs.ci_config.outputs.gfx103x_runner }}" }
+          - { family: gfx110x, runner: "${{ needs.ci_config.outputs.gfx110x_runner }}" }
+          - { family: gfx120x, runner: "${{ needs.ci_config.outputs.gfx120x_runner }}" }
+          - { family: gfx1151, runner: "${{ needs.ci_config.outputs.gfx1151_runner }}" }
+          # Not exposed by resolve-ci-config; taken from TheRock's family matrix.
+          - { family: gfx1150, runner: "linux-gfx1150-gpu-rocm" }
+          - { family: gfx1153, runner: "linux-gfx1153-gpu-rocm" }
+    steps:
+      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        with:
+          python-version: "3.12"
+
+      # Invoked through "python -m" and by script path throughout: on some of
+      # these self-hosted machines the console-script wrappers cannot execute,
+      # and the system Python has no ensurepip to build a virtualenv with.
+      - name: Install ROCm SDK
+        run: |
+          # devel as well as libraries: rocm-sdk init refuses to run without it.
+          python -m pip install --no-cache-dir \
+            --index-url "${ROCM_INDEX_URL}" "rocm[libraries,devel]"
+          # Run as a module where possible. Falling back to the script means
+          # locating it: some of these machines install into a --user bin that
+          # is not on PATH, leaving command -v empty.
+          if ! python -m rocm_sdk init; then
+            cli="$(command -v rocm-sdk || true)"
+            if [ -z "${cli}" ]; then
+              cli="$(python -c 'import site;print(site.USER_BASE)')/bin/rocm-sdk"
+            fi
+            python "${cli}" init
+          fi
+          echo "ROCM_SDK=$(python -c 'import _rocm_sdk_devel,os;print(os.path.dirname(_rocm_sdk_devel.__file__))')" >> "$GITHUB_ENV"
+
+      # Unpacked under build/ so the tree matches the build machine's layout.
+      # The suite spawns each workload by re-execing HRR_TEST_EXE, which CMake
+      # bakes in as an absolute path, so the binary has to sit where it was
+      # built or every workload dies in execvp with 127.
+      - name: Download build
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: hrr-build
+          path: build
+
+      - name: Restore executable bits
+        run: chmod +x build/hrr/playback/hrr-playback build/hrr/tests/*/hrr-*tests
+
+      # The binaries carry no RUNPATH, so the capture build is selected here:
+      # clr-prefix supplies the libamdhip64.so.7 carrying the HRR shims, and
+      # rocr-prefix the in-tree libhsa the capture path needs. Both must precede
+      # the SDK, which ships its own older copies under the same sonames.
+      - name: Run integration suite
+        env:
+          # Left unset on 1-GPU runners: an empty HIP_VISIBLE_DEVICES would hide
+          # every device rather than meaning "no restriction".
+          DEVICES: ${{ matrix.devices }}
+        run: |
+          # hipamd/lib holds the amdhip64 carrying the capture shims and must
+          # precede the SDK, which ships a plain build under the same soname.
+          # No ROCr preload here: CLR was built against the SDK's ROCr, so the
+          # two agree and there is no in-tree runtime to substitute.
+          export LD_LIBRARY_PATH="${PWD}/build/clr/hipamd/lib:${ROCM_SDK}/lib"
+          if [ -n "${DEVICES}" ]; then
+            export HIP_VISIBLE_DEVICES="${DEVICES}"
+          fi
+          ./build/hrr/tests/integration/hrr-integration-tests \
+            --reporter console \
+            --reporter junit::out=integration-${{ matrix.family }}.xml
+
+      # Unit_HRR_StreamWriteValueRoundtrip fails on every RDNA family:
+      # hipStreamWriteValue64 returns hipSuccess and the value never lands. The
+      # suite only ever runs that workload under capture, so it cannot say
+      # whether HRR is responsible. Run it twice more to find out, reporting
+      # rather than asserting so the suite's own verdict above is untouched:
+      #
+      #   stock SDK runtime  fails -> the part does this without HRR present
+      #   HRR runtime, no capture  fails -> the shims break it while idle
+      #   both pass                       -> capture itself is at fault
+      - name: Diagnose hipStreamWriteValue64
+        if: always()
+        continue-on-error: true
+        env:
+          DEVICES: ${{ matrix.devices }}
+        run: |
+          if [ -n "${DEVICES}" ]; then
+            export HIP_VISIBLE_DEVICES="${DEVICES}"
+          fi
+          # HIP_HRR_CAPTURE_OUTPUT is deliberately unset in both runs.
+          for variant in "stock SDK runtime:${ROCM_SDK}/lib" \
+                         "HRR runtime, capture off:${PWD}/build/clr/hipamd/lib:${ROCM_SDK}/lib"; do
+            echo "::group::${variant%%:*}"
+            LD_LIBRARY_PATH="${variant#*:}" \
+              ./build/hrr/tests/integration/hrr-integration-tests \
+              "Unit_HRR_StreamWriteValue_Direct" && verdict=pass || verdict=FAIL
+            echo "${{ matrix.family }} / ${variant%%:*}: ${verdict}"
+            echo "::endgroup::"
+          done
+
+      - name: Upload results
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: results-integration-${{ matrix.family }}
+          path: integration-${{ matrix.family }}.xml
+          retention-days: 3
+
+  # ---------------------------------------------------------------------------
+  # Per-test reporting for every job above. Collected centrally because the
+  # publishing action is a container action and so cannot run on the Windows
+  # runners.
+  # ---------------------------------------------------------------------------
+  report:
+    name: "Test results"
+    needs: [unit, integration]
+    if: always()
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      checks: write
+      pull-requests: write
+    steps:
+      - name: Download all results
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: results-*
+          merge-multiple: true
+
+      - name: Publish
+        uses: EnricoMi/publish-unit-test-result-action@d0a4676d0e0b938bc201470d88276b7c74c712b3 # v2.24.0
+        with:
+          files: "*.xml"
+          check_name: "HRR test results"
+          comment_mode: "off"
+          check_run: false
+          job_summary: true

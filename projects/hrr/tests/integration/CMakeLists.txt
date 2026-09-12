@@ -9,16 +9,41 @@
 # runs hrr-playback to validate replayed device-to-host buffers byte-for-byte.
 # The workload translation units (hrr_workload / hrr_repro_workload / hrr_spt_workload)
 # provide those hidden _Direct cases and must be linked into the same executable.
+#
+# hrr_regions_test.cc covers the external region annotation channel
+# (hrr/hrr_regions.h): CPU-only sidecar framing tests, plus its own hidden
+# [.][hrr-direct] workload that carves blocks out of a single hipMalloc by
+# pointer arithmetic and is replayed against a synthetic sidecar.
+#
+# hrr_api_matrix_test.cc is the per-API replay matrix: Unit_HRR_ApiMatrix_T*_Roundtrip
+# captures each tier's workloads from hrr_api_matrix_workload_test.cc — one call
+# site per API family, including APIs whose replay is known to be wrong, because
+# a captured no-op is exactly what the matrix needs to observe — and asserts
+# every API's replay class still matches what HRR's generator declares.
+#
+# hrr_api_matrix_expectations.h is GENERATED from the pair api_classes.json +
+# api_matrix.yaml, both in ../../tools/api-matrix.  Regenerate after an upstream
+# classification change with:
+#   ../../tools/api-matrix/check_matrix.py --emit-cxx
+#
+# hrr_kernel_args_test.cc covers what replay does with a pointer-typed kernel
+# argument no allocation explains: a sentinel keeps its value, an
+# address-shaped lost pointer becomes null. Contains its own hidden
+# [.][hrr-direct] workload.
 
 # The workload translation units carry __global__ kernels, device built-ins
 # (blockIdx/blockDim/threadIdx), hipLaunchKernelGGL, and HIP_SYMBOL, so they must
 # be compiled with the HIP device toolchain rather than a plain C++ compiler.
-# hrr_roundtrip_test.cc is a host-only driver (subprocess orchestration + hipRTC
-# host calls) and stays a plain C++ translation unit.
+# hrr_roundtrip_test.cc and hrr_api_matrix_test.cc are host-only drivers
+# (subprocess orchestration + hipRTC host calls) and stay plain C++ translation
+# units.
 set(HRR_GPU_WORKLOAD_SOURCES
   hrr_workload_test.cc
   hrr_repro_workload_test.cc
   hrr_spt_workload_test.cc
+  hrr_regions_test.cc
+  hrr_api_matrix_workload_test.cc
+  hrr_kernel_args_test.cc
 )
 
 if(NOT DEFINED HIP_PLATFORM)
@@ -33,6 +58,7 @@ endif()
 add_executable(hrr-integration-tests
   ${HRR_GPU_WORKLOAD_SOURCES}
   hrr_roundtrip_test.cc
+  hrr_api_matrix_test.cc
 )
 set_target_properties(hrr-integration-tests PROPERTIES
   CXX_STANDARD 17
@@ -67,6 +93,16 @@ target_link_libraries(hrr-integration-tests PRIVATE
   hip::host
   hiprtc::hiprtc
   Catch2::Catch2WithMain)
+
+# hrr_repro_workload_test.cc zeroes a device allocation with hsa_amd_memory_fill
+# so the fill itself is never recorded. hip::host resolves ROCr for its own
+# needs but does not carry it in its link interface, so a direct call from our
+# objects needs the runtime named here. Windows has no ROCr and the call site is
+# compiled out there.
+if(NOT WIN32)
+  find_package(hsa-runtime64 CONFIG REQUIRED)
+  target_link_libraries(hrr-integration-tests PRIVATE hsa-runtime64::hsa-runtime64)
+endif()
 
 # Optional: hip_raw_trace, a genuine multi-threaded capture workload used only by
 # Unit_HRR_MultiThreadRoundtrip. If it is not found, HRR_RAW_TRACE_EXE is defined

@@ -7,6 +7,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <cstdio>
 #include <cstring>
 #include <string>
 #include <vector>
@@ -194,6 +195,40 @@ struct Archive {
 
 // Load an archive from disk. Returns false on error.
 bool load_archive(const std::string& path, Archive& archive);
+
+// ---------------------------------------------------------------------------
+// Record-stream primitives
+//
+// events.bin and the external-region sidecars (regions/*.hrrr, see
+// hrr_regions.h) share one on-disk shape: an 8-byte hrr_file_header followed by
+// self-delimiting hrr_event_header + payload records. These primitives are that
+// shared framing, so both readers get the same torn-tail recovery.
+// ---------------------------------------------------------------------------
+
+enum class RecordStatus {
+  Ok,           // a complete record was read into the output buffer
+  EndOfStream,  // clean EOF exactly at a record boundary
+  Torn          // partial record at the tail; everything before it is intact
+};
+
+// Read one framed record into `out` (resized to the record's full length,
+// header included). Only the final record of a stream can ever be Torn, because
+// the writer appends whole records.
+RecordStatus read_raw_record(FILE* f, std::vector<uint8_t>& out);
+
+// Open a record stream and validate its 8-byte header. `expected_magic` selects
+// the stream kind (HRR_MAGIC for events.bin, HRR_REGION_MAGIC for a region
+// sidecar). On success returns the open FILE* positioned at the first record
+// and stores the file's format version in *version; returns nullptr and logs on
+// a missing file, bad magic, or version mismatch.
+FILE* open_record_stream(const std::string& file_path, uint32_t expected_magic,
+                         uint16_t expected_version, uint16_t* version);
+
+// Sidecar region streams for a resolved archive directory: every
+// <archive_dir>/regions/*.hrrr, sorted by name for a deterministic merge order.
+// Returns an empty vector when the directory does not exist, which is the
+// normal case for a capture with no external producer.
+std::vector<std::string> find_region_streams(const std::string& archive_dir);
 
 // Read a blob's bytes given its hash. Returns false if not found.
 bool read_blob(const Archive& archive, uint64_t hash_lo, uint64_t hash_hi,

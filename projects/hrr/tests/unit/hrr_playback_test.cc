@@ -19,13 +19,6 @@
 #include <cstdlib>
 #include <string>
 
-// Platform path separator for setEnv("PATH", ...): ';' on Windows, ':' on POSIX.
-#ifdef _WIN32
-static constexpr char kPathSep = ';';
-#else
-static constexpr char kPathSep = ':';
-#endif
-
 // ROCM-27985: the post-H2D-restore drain (hrr_sync_after_replayed_h2d) must
 // be skipped while a stream graph is being captured, because a device/stream
 // synchronize is illegal mid-capture (HIP 900/901). Lock that guard down: a
@@ -58,10 +51,8 @@ HRR_TEST_CASE(Unit_HRR_Playback_ZeroInitDrainGuard) {
 // all. Tie it to HRR_VERSION rather than to a literal, so a future format bump
 // cannot leave the tool reporting a version it no longer reads.
 HRR_TEST_CASE(Unit_HRR_Playback_VersionOption) {
-  hrr::test::SpawnProc proc(HRR_PLAYBACK_EXE, /*capture_stdout=*/true);
-  const char* cur_path = getenv("PATH");
-  proc.setEnv("PATH",
-              std::string(ROCM_BIN_PATH) + kPathSep + (cur_path ? cur_path : ""));
+  hrr::test::SpawnProc proc(hrr_playback_exe(), /*capture_stdout=*/true);
+  set_proc_search_path(proc);
 
   REQUIRE(proc.run("--version") == 0);
 
