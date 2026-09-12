@@ -1,6 +1,6 @@
 ##Copyright © Advanced Micro Devices, Inc., or its affiliates.
 ##SPDX-License-Identifier: MIT
-
+# Temporary no-op change on rocm-core to exercise TheRock Multi-arch CI
 cmake_minimum_required( VERSION 3.16 )
 set( CORE_TARGET "rocm-core" )
 
