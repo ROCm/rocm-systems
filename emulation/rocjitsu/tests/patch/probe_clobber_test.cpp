@@ -50,7 +50,7 @@ ProbeCallable make_callable(std::vector<uint32_t> body) {
   callable.symbol = "rj_nop_probe";
   callable.arch = kArch;
   callable.body_words = std::move(body);
-  callable.cc = ProbeCallingConvention::AmdGpuFuncNoArgsReturnS30S31;
+  callable.abi = *derive_probe_abi(ProbeCallingConvention::AmdGpuFuncReturnS30S31);
   return callable;
 }
 

@@ -79,11 +79,10 @@ std::string format_register_set(const RegisterSet &regs) {
 
 std::optional<RegisterSet> analyze_probe_live_ins(const AmdGpuCodeObject &probe_obj,
                                                   const ResolvedProbeSymbol &sym,
-                                                  rj_code_arch_t arch, ProbeCallingConvention cc,
+                                                  rj_code_arch_t arch, const ProbeAbi &abi,
                                                   std::string *error_out) {
-  const std::optional<uint16_t> link_pair = link_pair_for(cc);
-  if (!link_pair) {
-    report(error_out, "probe calling convention is not recognized, cannot analyze live-ins");
+  if (!is_valid_probe_abi(abi)) {
+    report(error_out, "probe ABI is not usable, cannot analyze live-ins");
     return std::nullopt;
   }
 
@@ -188,11 +187,11 @@ std::optional<RegisterSet> analyze_probe_live_ins(const AmdGpuCodeObject &probe_
     return std::nullopt;
   }
 
-  // The link pair is a genuine live-in -- the closing s_setpc_b64 reads it and
-  // nothing writes it -- but the trampoline supplies it.
-  RegisterSet live_in = liveness.block_liveness(*entry).live_in;
-  live_in.erase(RegisterRef{RegClass::SGPR, *link_pair, 2});
-  return live_in;
+  // What the convention supplies is a genuine live-in -- the closing
+  // s_setpc_b64 reads the link pair and nothing writes it -- but the trampoline
+  // produces it, so it is not a dependence on kernel-entry state.
+  const RegisterSet live_in = liveness.block_liveness(*entry).live_in;
+  return live_in - supplied_registers(abi);
 }
 
 } // namespace rocjitsu
