@@ -34,13 +34,13 @@ git checkout develop
 
 cd projects/rocprofiler-compute
 
-# Initialize submodule dependencies (vendored Python deps and src/lib/external C++ libs)
-git submodule update --init --recursive -- src/
+# Initialize submodule dependencies (vendored Python deps and external/ C++ libs)
+git submodule update --init --recursive -- src/ external/
 
 python3 -m pip install -r requirements.txt
 ```
 
-**Note**: When working from source, submodules live under `src/` (vendored Python dependencies like PyYAML in `src/vendored/`, and C++ libraries like googletest, fmt, and json in `src/lib/external/`). If you see import errors about missing vendored modules or missing C++ externals during a build, run `git submodule update --init --recursive -- src/`.
+**Note**: When working from source, submodules live under `src/vendored/` (vendored Python dependencies like PyYAML, which must stay inside the package tree so they remain importable) and `external/` (C++ libraries like googletest, fmt, and json). If you see import errors about missing vendored modules or missing C++ externals during a build, run `git submodule update --init --recursive -- src/ external/`.
 
 ### Development dependencies
 
