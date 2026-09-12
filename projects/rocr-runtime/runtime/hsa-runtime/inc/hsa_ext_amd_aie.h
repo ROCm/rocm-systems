@@ -127,6 +127,18 @@ typedef struct hsa_amd_aie_kernel_dispatch_packet_s {
    * - entries [0 .. ::num_kernargs - 1] are the argument addresses
    * - entries [::num_kernargs .. 2 * ::num_kernargs - 1] are the corresponding argument sizes in
    * bytes
+   *
+   * An argument's size is the length of the range the runtime keeps coherent for it: before the
+   * dispatch it writes back the host's cached copy so the AIE agent sees host writes, and after the
+   * dispatch it invalidates that copy so the host sees agent writes. The device is given the
+   * argument's address only, so the size bounds this synchronization and nothing else.
+   *
+   * A size of zero means the caller synchronizes that range itself, and the runtime leaves it
+   * alone. This is for an argument the host writes once and the device then owns -- a weight set,
+   * for instance -- where the synchronization would otherwise be repeated in full on every
+   * dispatch, at a cost proportional to the argument's size rather than to the work. A caller that
+   * takes this on must write back the range after the host writes to it and invalidate it before
+   * the host reads what the agent wrote; getting that wrong shows up as stale data on either side.
    */
   void* kernarg_address;
 

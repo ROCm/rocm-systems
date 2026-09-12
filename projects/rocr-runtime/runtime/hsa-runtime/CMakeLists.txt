@@ -288,6 +288,14 @@ add_dependencies( ${CORE_RUNTIME_TARGET} amd_trap_handler_v2 )
 add_subdirectory( ${CMAKE_CURRENT_SOURCE_DIR}/core/runtime/blit_shaders )
 add_dependencies( ${CORE_RUNTIME_TARGET} amd_blit_shaders_v2)
 
+## Unit tests. Off by default; see test/unit/CMakeLists.txt.
+option(BUILD_UNIT_TESTS "Build unit tests that need no device (default: OFF)" OFF)
+
+if(${BUILD_UNIT_TESTS})
+  enable_testing()
+  add_subdirectory( ${CMAKE_CURRENT_SOURCE_DIR}/test/unit )
+endif()
+
 option(PC_SAMPLING_SUPPORT "Enable PC Sampling Support" ON)
 
 if (${PC_SAMPLING_SUPPORT})

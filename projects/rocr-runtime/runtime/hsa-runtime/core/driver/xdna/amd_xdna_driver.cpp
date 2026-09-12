@@ -60,6 +60,7 @@
 #include <unistd.h>
 
 #include "inc/hsa_ext_amd_aie.h"
+#include "core/inc/amd_aie_arg_sync.h"
 #include "core/inc/amd_memory_region.h"
 #include "core/inc/runtime.h"
 #include "core/inc/signal.h"
@@ -303,17 +304,13 @@ struct KmqMetadata {
 /**
  * @brief Flushes the CPU cache for the packet's arguments.
  *
- * The sizes of the arguments are after the pointers of the arguments.
+ * An argument declared with a size of zero is skipped: its caller keeps that
+ * range coherent itself. See ForEachArgumentSyncRange.
  *
  * @param pkt pointer to the packet
  */
 static void FlushArguments(const hsa_amd_aie_kernel_dispatch_packet_t* pkt) {
-  auto* kernarg_address = static_cast<uint64_t*>(pkt->kernarg_address);
-  for (uint32_t kernarg_idx = 0; kernarg_idx < pkt->num_kernargs; ++kernarg_idx) {
-    void* ptr = reinterpret_cast<void*>(kernarg_address[kernarg_idx]);
-    size_t size = kernarg_address[kernarg_idx + pkt->num_kernargs];
-    FlushCpuCache(ptr, 0, size);
-  }
+  ForEachArgumentSyncRange(pkt, [](void* ptr, size_t size) { FlushCpuCache(ptr, 0, size); });
 }
 
 /**
