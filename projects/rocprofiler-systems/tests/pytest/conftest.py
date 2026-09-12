@@ -325,6 +325,7 @@ def pytest_configure(config: pytest.Config) -> None:
         "presets",
         "tool_runner",
         "cli_help",
+        "rocsys",
         "hpc",
         "hip",
         "scratch_memory",

@@ -18,6 +18,13 @@ Full documentation for ROCm Systems Profiler is available at [https://rocm.docs.
 
 ## ROCm Systems Profiler 1.9.0 for ROCm 10.1
 
+### Added
+
+- `rocsys` unified CLI entry point. `rocsys -- ./app` produces a full trace
+  profile; `rocsys sample -- ./app` produces a sampling profile. Other
+  subcommands (`instrument`, `causal`, `avail`, `python`, `attach`) forward
+  to the existing tools. The `rocprof-sys-*` binaries are unchanged.
+
 ### Changed
 
 - **rocpd is now the default output format.** When no output format is specified,
