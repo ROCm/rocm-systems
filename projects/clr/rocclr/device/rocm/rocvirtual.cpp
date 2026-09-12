@@ -4935,8 +4935,16 @@ bool VirtualGPU::submitKernelInternal(const amd::NDRangeContainer& sizes, const 
   if (!kernel.parameters().deviceKernelArgs() || gpuKernel.isInternalKernel()) {
     // Allocate buffer to hold kernel arguments
     if (isGraphCapture) {
-      argBuffer = command_->getGraphKernArg(gpuKernel.KernargSegmentByteSize(),
-                                            gpuKernel.KernargSegmentAlignment(), dev().index());
+      const size_t kernarg_size = gpuKernel.KernargSegmentByteSize();
+      argBuffer =
+          command_->getGraphKernArg(kernarg_size, gpuKernel.KernargSegmentAlignment(), dev().index());
+      if (argBuffer == nullptr && kernarg_size != 0) {
+        LogError("Graph kernarg allocation failed");
+        if (vcmd != nullptr) {
+          vcmd->setStatus(CL_OUT_OF_RESOURCES);
+        }
+        return false;
+      }
       command_->SetKernelName(gpuKernel.getDemangledName());
     } else {
       argBuffer = reinterpret_cast<address>(
@@ -5208,7 +5216,9 @@ void VirtualGPU::submitKernel(amd::NDRangeKernelCommand& vcmd) {
                                      static_cast<void*>(as_cl(&vcmd.event())),
                                      vcmd.sharedMemBytes(), &vcmd)) {
       LogError("AQL dispatch failed!");
-      vcmd.setStatus(CL_INVALID_OPERATION);
+      if (vcmd.status() != CL_OUT_OF_RESOURCES) {
+        vcmd.setStatus(CL_INVALID_OPERATION);
+      }
     }
     // Wait for the execution on the device queue. Keep the current queue in-order
     queue->releaseGpuMemoryFence(kSkipCpuWait);
@@ -5234,7 +5244,9 @@ void VirtualGPU::submitKernel(amd::NDRangeKernelCommand& vcmd) {
                               static_cast<void*>(as_cl(&vcmd.event())), vcmd.sharedMemBytes(),
                               &vcmd)) {
       LogError("AQL dispatch failed!");
-      vcmd.setStatus(CL_INVALID_OPERATION);
+      if (vcmd.status() != CL_OUT_OF_RESOURCES) {
+        vcmd.setStatus(CL_INVALID_OPERATION);
+      }
     }
 
     metadata_preloader_.ClearDynDataPrefetchConfig();

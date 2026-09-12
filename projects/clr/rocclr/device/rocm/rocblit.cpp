@@ -2471,6 +2471,13 @@ bool KernelBlitManager::fillBuffer1D(device::Memory& memory, const void* pattern
       isGraphPktCapturing
           ? (unsigned char*)gpu().command()->getGraphKernArg(kCBSize, kCBAlignment, dev().index())
           : (unsigned char*)gpu().allocKernArg(kCBSize, kCBAlignment);
+  if (kernArgBase == nullptr) {
+    LogError("Fill buffer kernarg allocation failed");
+    if (isGraphPktCapturing) {
+      gpu().command()->setStatus(CL_OUT_OF_RESOURCES);
+    }
+    return false;
+  }
 
   assert((patternSize == 1 || patternSize == 2 || patternSize == 4 || patternSize == 8 ||
           patternSize == 16) &&
@@ -2651,6 +2658,13 @@ bool KernelBlitManager::fillBuffer2D(device::Memory& memory, const void* pattern
     auto constBuf = isGraphPktCapturing
                         ? gpu().command()->getGraphKernArg(kCBSize, kCBAlignment, dev().index())
                         : gpu().allocKernArg(kCBSize, kCBAlignment);
+    if (constBuf == nullptr) {
+      LogError("Fill buffer kernarg allocation failed");
+      if (isGraphPktCapturing) {
+        gpu().command()->setStatus(CL_OUT_OF_RESOURCES);
+      }
+      return false;
+    }
     memcpy(constBuf, pattern, patternSize);
 
     constexpr bool kDirectVa = true;
@@ -3631,6 +3645,13 @@ bool KernelBlitManager::batchMemOps(const void* paramArray, size_t paramSize,
   auto constBuf = isGraphPktCapturing
       ? gpu().command()->getGraphKernArg(count * paramSize, kCBAlignment, dev().index())
       : gpu().allocKernArg(count * paramSize, kCBAlignment);
+  if (constBuf == nullptr) {
+    LogError("Batch memory operation kernarg allocation failed");
+    if (isGraphPktCapturing) {
+      gpu().command()->setStatus(CL_OUT_OF_RESOURCES);
+    }
+    return false;
+  }
   memcpy(constBuf, paramArray, (count * paramSize));
 
   setArgument(kernels_[blitType], 0, sizeof(cl_mem), constBuf, 0, nullptr, kDirectVa);

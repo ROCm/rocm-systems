@@ -2113,7 +2113,7 @@ hipError_t hipGraphExecChildGraphNodeSetParams(hipGraphExec_t hGraphExec, hipGra
     for (std::vector<hip::GraphNode*>::size_type i = 0; i != childGraphNodes.size(); i++) {
       if (childGraphNodes[i]->GraphCaptureEnabled()) {
         status =
-            childNode->UpdateAQLPacket(reinterpret_cast<hip::GraphKernelNode*>(childGraphNodes[i]));
+            childNode->UpdateAQLPacket(childGraphNodes[i]);
         if (status != hipSuccess) {
           return status;
         }
@@ -2829,7 +2829,12 @@ hipError_t hipGraphExecUpdate(hipGraphExec_t hGraphExec, hipGraph_t hGraph,
       } else {
         auto graphExec = reinterpret_cast<hip::GraphExecBase*>(hGraphExec);
         if (newGraphNodes[i]->GraphCaptureEnabled()) {
-          status = graphExec->UpdateAQLPacket(reinterpret_cast<hip::GraphKernelNode*>(oldGraphExecNodes[i]));
+          status = graphExec->UpdateAQLPacket(oldGraphExecNodes[i]);
+          if (status != hipSuccess) {
+            *hErrorNode_out = reinterpret_cast<hipGraphNode_t>(newGraphNodes[i]);
+            *updateResult_out = hipGraphExecUpdateError;
+            HIP_RETURN(status);
+          }
         }
       }
     } else {
