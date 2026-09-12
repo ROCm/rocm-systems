@@ -22,8 +22,7 @@
 namespace RcclUnitTesting
 {
 
-// Caller owns mockTopo and mockGpuNode. mockComm is heap allocated and released
-// by CleanupMockComm.
+// Caller owns mockTopo and mockGpuNode; CleanupMockComm deletes the heap mockComm.
 inline void CreateMockComm(
     ncclComm_t&            mockComm,
     struct ncclTopoSystem& mockTopo,
@@ -32,9 +31,8 @@ inline void CreateMockComm(
     int                    nRanks
 )
 {
-    // Allocate memory for the communicator
+    // Value-init on the heap so POD is zeroed and rmaState's thread/mutex/cv are constructed.
     mockComm = new ncclComm();
-    memset(mockComm, 0, sizeof(ncclComm));
 
     // Initialize basic communicator fields
     mockComm->nRanks = nRanks;

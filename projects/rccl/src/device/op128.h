@@ -272,8 +272,8 @@ __device__ __forceinline__ void st_global<0>(uintptr_t addr, BytePack<0> value) 
 // template<> __device__ __forceinline__ void st_relaxed_gpu_global<0>(uintptr_t addr, BytePack<0> value) {}
 
 // Used to define implementations for above prototypes.
-#define DEFINE_ld_st__size_space_hip_atomic(bytes, data_cxx_ty, data_ptx_ty, data_reg_ty, space, addr_cxx_ty, \
-                                            addr_reg_ty) \
+#define DEFINE_ld_st__size_space_scoped_atomic(bytes, data_cxx_ty, data_ptx_ty, data_reg_ty, space, addr_cxx_ty, \
+                                               addr_reg_ty) \
   template <> \
   __device__ __forceinline__ BytePack<bytes> ld_##space<bytes>(addr_cxx_ty addr) { \
     data_cxx_ty tmp; \
@@ -285,16 +285,16 @@ __device__ __forceinline__ void st_global<0>(uintptr_t addr, BytePack<0> value) 
   template <> \
   __device__ __forceinline__ BytePack<bytes> ld_volatile_##space<bytes>(addr_cxx_ty addr) { \
     data_cxx_ty tmp; \
-    tmp = __hip_atomic_load((__attribute__((address_space(1))) data_cxx_ty*)addr, __ATOMIC_RELAXED, \
-                            __HIP_MEMORY_SCOPE_SYSTEM); \
+    tmp = __scoped_atomic_load_n((__attribute__((address_space(1))) data_cxx_ty*)addr, __ATOMIC_RELAXED, \
+                                 __MEMORY_SCOPE_SYSTEM); \
     BytePack<bytes> ans; \
     ans.native = tmp; \
     return ans; \
   } \
   template <> \
   __device__ __forceinline__ void st_##space<bytes>(addr_cxx_ty addr, BytePack<bytes> value) { \
-    __hip_atomic_store((__attribute__((address_space(1))) data_cxx_ty*)addr, value.native, __ATOMIC_RELAXED, \
-                       __HIP_MEMORY_SCOPE_SYSTEM); \
+    __scoped_atomic_store_n((__attribute__((address_space(1))) data_cxx_ty*)addr, value.native, __ATOMIC_RELAXED, \
+                            __MEMORY_SCOPE_SYSTEM); \
   }
 
 #define DEFINE_ld_st__size_space_fallback(bytes, data_cxx_ty, data_ptx_ty, data_reg_ty, space, addr_cxx_ty, \
@@ -322,7 +322,7 @@ __device__ __forceinline__ void st_global<0>(uintptr_t addr, BytePack<0> value) 
 
 #if RCCL_HAVE_GLOBAL_DWORDX4_BUILTINS
 #define DEFINE_ld_st__size_space(bytes, data_cxx_ty, data_ptx_ty, data_reg_ty, space, addr_cxx_ty, addr_reg_ty) \
-  DEFINE_ld_st__size_space_hip_atomic(bytes, data_cxx_ty, data_ptx_ty, data_reg_ty, space, addr_cxx_ty, addr_reg_ty)
+  DEFINE_ld_st__size_space_scoped_atomic(bytes, data_cxx_ty, data_ptx_ty, data_reg_ty, space, addr_cxx_ty, addr_reg_ty)
 #else
 #define DEFINE_ld_st__size_space(bytes, data_cxx_ty, data_ptx_ty, data_reg_ty, space, addr_cxx_ty, addr_reg_ty) \
   DEFINE_ld_st__size_space_fallback(bytes, data_cxx_ty, data_ptx_ty, data_reg_ty, space, addr_cxx_ty, addr_reg_ty)
@@ -359,7 +359,7 @@ __device__ __forceinline__ void st_global<0>(uintptr_t addr, BytePack<0> value) 
 DEFINE_ld_st__size(1, uint8_t, b8, r) DEFINE_ld_st__size(2, uint16_t, b16, h) DEFINE_ld_st__size(4, uint32_t, b32, r)
   DEFINE_ld_st__size(8, uint64_t, b64, l)
 #undef DEFINE_ld_st__size_space
-#undef DEFINE_ld_st__size_space_hip_atomic
+#undef DEFINE_ld_st__size_space_scoped_atomic
 #undef DEFINE_ld_st__size_space_fallback
 #undef DEFINE_ld_st__size
 
@@ -427,13 +427,13 @@ DEFINE_ld_st_16__space(global, uintptr_t, l)
   __device__ __forceinline__ uint64_t ld_volatile_global(uint64_t* ptr) {
   uint64_t ans;
   ans =
-    __hip_atomic_load((__attribute__((address_space(1))) uint64_t*)ptr, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_SYSTEM);
+    __scoped_atomic_load_n((__attribute__((address_space(1))) uint64_t*)ptr, __ATOMIC_RELAXED, __MEMORY_SCOPE_SYSTEM);
   return ans;
 }
 __device__ __forceinline__ uint64_t ld_relaxed_sys_global(uint64_t* ptr) {
   uint64_t ans;
   ans =
-    __hip_atomic_load((__attribute__((address_space(1))) uint64_t*)ptr, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_SYSTEM);
+    __scoped_atomic_load_n((__attribute__((address_space(1))) uint64_t*)ptr, __ATOMIC_RELAXED, __MEMORY_SCOPE_SYSTEM);
   return ans;
 }
 
@@ -450,21 +450,21 @@ __device__ __forceinline__ uint64_t ld_relaxed_sys_global(uint64_t* ptr) {
 __device__ __forceinline__ uint64_t ld_acquire_sys_global(uint64_t* ptr) {
   uint64_t ans;
   ans =
-    __hip_atomic_load((__attribute__((address_space(1))) uint64_t*)ptr, __ATOMIC_ACQUIRE, __HIP_MEMORY_SCOPE_SYSTEM);
+    __scoped_atomic_load_n((__attribute__((address_space(1))) uint64_t*)ptr, __ATOMIC_ACQUIRE, __MEMORY_SCOPE_SYSTEM);
   return ans;
 }
 
 __device__ __forceinline__ void st_volatile_global(uint64_t* ptr, uint64_t val) {
-  __hip_atomic_store((__attribute__((address_space(1))) uint64_t*)ptr, val, __ATOMIC_RELAXED,
-                     __HIP_MEMORY_SCOPE_SYSTEM);
+  __scoped_atomic_store_n((__attribute__((address_space(1))) uint64_t*)ptr, val, __ATOMIC_RELAXED,
+                          __MEMORY_SCOPE_SYSTEM);
 }
 __device__ __forceinline__ void st_relaxed_sys_global(uint64_t* ptr, uint64_t val) {
-  __hip_atomic_store((__attribute__((address_space(1))) uint64_t*)ptr, val, __ATOMIC_RELAXED,
-                     __HIP_MEMORY_SCOPE_SYSTEM);
+  __scoped_atomic_store_n((__attribute__((address_space(1))) uint64_t*)ptr, val, __ATOMIC_RELAXED,
+                          __MEMORY_SCOPE_SYSTEM);
 }
 __device__ __forceinline__ void st_release_sys_global(uint64_t* ptr, uint64_t val) {
-  __hip_atomic_store((__attribute__((address_space(1))) uint64_t*)ptr, val, __ATOMIC_RELEASE,
-                     __HIP_MEMORY_SCOPE_SYSTEM);
+  __scoped_atomic_store_n((__attribute__((address_space(1))) uint64_t*)ptr, val, __ATOMIC_RELEASE,
+                          __MEMORY_SCOPE_SYSTEM);
 }
 
 __device__ __forceinline__ void fence_acq_rel_sys() {

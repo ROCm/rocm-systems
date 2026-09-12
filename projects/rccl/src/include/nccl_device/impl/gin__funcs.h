@@ -839,7 +839,7 @@ template <unsigned beMask>
 NCCL_DEVICE_INLINE void ncclGin_BackendMask<beMask>::increaseSignalShadow(ncclGinSignal_t signal,
                                                                           uint64_t delta) const {
 #if defined(__HIP_PLATFORM_AMD__)
-  __hip_atomic_fetch_add(this->_signalShadows + signal, delta, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_WORKGROUP);
+  __scoped_atomic_fetch_add(this->_signalShadows + signal, delta, __ATOMIC_RELAXED, __MEMORY_SCOPE_WRKGRP);
 #else
   asm volatile("red.relaxed.cta.add.u64 [%0],%1;" ::"l"(this->_signalShadows + signal), "l"(delta) : "memory");
 #endif

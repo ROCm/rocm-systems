@@ -411,6 +411,12 @@ DecodeResult decodeFlatStoreD16HiB16Flat(const MachineInst *opcode,
                                          const DecodeErrorEmitter &emit_error);
 DecodeResult decodeFlatStoreD16HiB8Flat(const MachineInst *opcode,
                                         const DecodeErrorEmitter &emit_error);
+DecodeResult decodeGlobalAtomicCsubU32Flat(const MachineInst *opcode,
+                                           const DecodeErrorEmitter &emit_error);
+DecodeResult decodeGlobalLoadAddtidB32Flat(const MachineInst *opcode,
+                                           const DecodeErrorEmitter &emit_error);
+DecodeResult decodeGlobalStoreAddtidB32Flat(const MachineInst *opcode,
+                                            const DecodeErrorEmitter &emit_error);
 DecodeResult decodeImageAtomicAddMimg(const MachineInst *opcode,
                                       const DecodeErrorEmitter &emit_error);
 DecodeResult decodeImageAtomicAndMimg(const MachineInst *opcode,
@@ -5007,8 +5013,8 @@ const std::array<DecoderImpl::DecodeFunc, 128> DecoderImpl::sub_decode_flat = {
     &detail::decodeFlatStoreD16HiB16Flat,
     &DecoderImpl::decodeInvalid,
     &DecoderImpl::decodeInvalid,
-    &DecoderImpl::decodeInvalid,
-    &DecoderImpl::decodeInvalid,
+    &detail::decodeGlobalLoadAddtidB32Flat,
+    &detail::decodeGlobalStoreAddtidB32Flat,
     &DecoderImpl::decodeInvalid,
     &DecoderImpl::decodeInvalid,
     &DecoderImpl::decodeInvalid,
@@ -5022,7 +5028,7 @@ const std::array<DecoderImpl::DecodeFunc, 128> DecoderImpl::sub_decode_flat = {
     &detail::decodeFlatAtomicCmpswapB32Flat,
     &detail::decodeFlatAtomicAddU32Flat,
     &detail::decodeFlatAtomicSubU32Flat,
-    &DecoderImpl::decodeInvalid,
+    &detail::decodeGlobalAtomicCsubU32Flat,
     &detail::decodeFlatAtomicMinI32Flat,
     &detail::decodeFlatAtomicMinU32Flat,
     &detail::decodeFlatAtomicMaxI32Flat,
