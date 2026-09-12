@@ -115,3 +115,17 @@ rocprofiler_add_integration_validate_test(
     PRELOAD "${PRELOAD_ENV}"
     LABELS "integration-tests"
     DISABLED "${IS_DISABLED}")
+
+rocprofiler_add_integration_validate_test(
+    rocprofv3-avail-cli-test
+    TEST_PATHS validate_cli.py
+    COPY conftest.py
+    CONFIG pytest.ini
+    BUNDLE_TESTS
+    ARGS --rocm-path ${rocprofiler-sdk_ROOT_DIR}
+    TIMEOUT 120
+    PRELOAD "${PRELOAD_ENV}"
+    ENVIRONMENT "ROCPROFILER_PC_SAMPLING_BETA_ENABLED=on"
+    TARGET_DEPENDS "rocprofiler-sdk::rocprofv3;rocprofiler-sdk::rocprofv3-avail"
+    LABELS "integration-tests"
+    DISABLED "${IS_DISABLED}")

@@ -2,7 +2,7 @@
 
 # MIT License
 #
-# Copyright (c) 2024-2025 Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (c) 2024-2026 Advanced Micro Devices, Inc. All rights reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -23,6 +23,7 @@
 # THE SOFTWARE.
 
 
+import os
 import sys
 import ctypes
 import json
@@ -280,6 +281,51 @@ def get_library():
 
 def get_string_value(str_ptr):
     return ctypes.cast(str_ptr, ctypes.c_char_p).value.decode("utf-8")
+
+
+def get_status_string(status):
+    lib = get_library()
+    try:
+        describe = lib.rocprofiler_get_status_string
+    except AttributeError:
+        return "status {}".format(status)
+
+    describe.argtypes = [ctypes.c_int]
+    describe.restype = ctypes.c_char_p
+    return describe(status).decode("utf-8")
+
+
+def get_list_avail_output_filename(output_path, output_file):
+    lib = get_library()
+    try:
+        resolve = lib.list_avail_output_filename
+    except AttributeError:
+        fatal_error(
+            "{} does not provide list_avail_output_filename".format(loadLibrary.libname)
+        )
+
+    resolve.argtypes = [
+        ctypes.c_char_p,
+        ctypes.c_char_p,
+        ctypes.POINTER(ctypes.c_char_p),
+    ]
+    resolve.restype = ctypes.c_int
+
+    filename = ctypes.c_char_p()
+    status = resolve(
+        os.fsencode(output_path) if output_path else None,
+        os.fsencode(output_file) if output_file else None,
+        ctypes.byref(filename),
+    )
+    if status != 0:
+        requested = ", ".join(itr for itr in (output_path, output_file) if itr)
+        fatal_error(
+            "Could not resolve the list-avail output path ({}): {}".format(
+                requested, get_status_string(status)
+            )
+        )
+
+    return os.fsdecode(filename.value)
 
 
 def get_agent_info(agent_handle):
