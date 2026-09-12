@@ -18,6 +18,7 @@ import unittest
 
 from lib.test_executor import (
     collect_gtest_case_details,
+    collect_gtest_case_details_from_file,
     count_gtest_cases_from_json,
     count_gtest_cases_from_json_file,
     count_pytest_cases_from_junit,
@@ -153,6 +154,51 @@ class TestInferFromJsonFile(unittest.TestCase):
         self.assertFalse(os.path.exists(missing))
         self.assertEqual(infer_gtest_result_from_json_file(missing, 0), "PASSED")
         self.assertEqual(infer_gtest_result_from_json_file(missing, 1), "FAILED")
+
+    def test_leaf_without_result_agrees_with_details(self):
+        path = _write_json({
+            "tests": 1,
+            "testsuites": [
+                {"name": "Suite", "testsuite": [{"name": "Case"}]}
+            ],
+        })
+        try:
+            details = collect_gtest_case_details_from_file(path)
+            self.assertEqual(details[0]["status"], "FAILED")
+            self.assertEqual(
+                infer_gtest_result_from_json_file(path, 0, details=details),
+                "FAILED",
+            )
+        finally:
+            os.unlink(path)
+
+    def test_started_leaf_without_result_is_failed(self):
+        path = _write_json({
+            "tests": 1,
+            "testsuites": [
+                {"name": "Suite", "testsuite": [{"name": "Case", "status": "RUN"}]}
+            ],
+        })
+        try:
+            details = collect_gtest_case_details_from_file(path)
+            self.assertEqual(details[0]["status"], "FAILED")
+            self.assertEqual(infer_gtest_result_from_json_file(path, 0, details=details), "FAILED")
+        finally:
+            os.unlink(path)
+
+    def test_notrun_leaf_without_result_is_skipped(self):
+        path = _write_json({
+            "tests": 1,
+            "testsuites": [
+                {"name": "Suite", "testsuite": [{"name": "Case", "status": "NOTRUN"}]}
+            ],
+        })
+        try:
+            details = collect_gtest_case_details_from_file(path)
+            self.assertEqual(details[0]["status"], "SKIPPED")
+            self.assertEqual(infer_gtest_result_from_json_file(path, 0, details=details), "SKIPPED")
+        finally:
+            os.unlink(path)
 
 
 WILDCARD_SUITE_JSON = {
