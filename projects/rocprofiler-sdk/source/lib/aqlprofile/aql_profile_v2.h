@@ -873,6 +873,16 @@ aqlprofile_spm_start(aqlprofile_handle_t            handle,
 hsa_status_t
 aqlprofile_spm_stop(aqlprofile_handle_t handle);
 
+/**
+ * @brief Callback invoked for each decoded SPM sample.
+ *
+ * The `shader_engine` argument uses the following contract:
+ * - `-1` for global SPM samples
+ * - otherwise a packed topology value compatible with
+ *   ::aqlprofile_spm_decode_shader_engine(). For the base non-global sample,
+ *   that packed value is numerically equal to the shader-engine index because
+ *   `sa_index` and `wgp_index` are both zero.
+ */
 typedef void (*aqlprofile_spm_decode_callback_v1_t)(uint64_t timestamp,
                                                     uint64_t value,
                                                     uint64_t index,
@@ -910,6 +920,26 @@ hsa_status_t
 aqlprofile_spm_decode_query(aqlprofile_spm_buffer_desc_t  desc,
                             aqlprofile_spm_decode_query_t query,
                             uint64_t*                     param_out);
+
+/**
+ * @brief Decode the topology information packed into the `shader_engine`
+ *        value returned by ::aqlprofile_spm_decode_callback_v1_t.
+ *
+ * For global SPM events, `shader_engine` is `-1` and this helper returns
+ * `se_index = sa_index = wgp_index = -1`.
+ *
+ * @param[in] shader_engine Packed `shader_engine` value from the decode callback
+ * @param[out] se_index     Decoded shader-engine index, or `-1` for global events
+ * @param[out] sa_index     Decoded shader-array index, or `-1` if not encoded
+ * @param[out] wgp_index    Decoded workgroup-processor index, or `-1` if not encoded
+ * @retval HSA_STATUS_SUCCESS                if decode successful
+ * @retval HSA_STATUS_ERROR_INVALID_ARGUMENT if any output pointer is null
+ */
+hsa_status_t
+aqlprofile_spm_decode_shader_engine(int  shader_engine,
+                                    int* se_index,
+                                    int* sa_index,
+                                    int* wgp_index);
 
 bool
 aqlprofile_spm_is_event_supported(aqlprofile_agent_handle_t agent, aqlprofile_pmc_event_t event);

@@ -23,6 +23,16 @@ add_library(rocprofiler-sdk-aqlprofile STATIC)
 add_library(rocprofiler-sdk::rocprofiler-sdk-aqlprofile ALIAS rocprofiler-sdk-aqlprofile)
 target_include_directories(rocprofiler-sdk-aqlprofile
                            INTERFACE $<BUILD_INTERFACE:${PROJECT_BINARY_DIR}/source>)
+
+if(DEFINED ENV{CMAKE_DEBUG_TRACE})
+    if("$ENV{CMAKE_DEBUG_TRACE}" STREQUAL "1")
+        target_compile_definitions(rocprofiler-sdk-aqlprofile PRIVATE DEBUG_TRACE=1)
+    endif()
+    if("$ENV{CMAKE_DEBUG_TRACE}" STREQUAL "2")
+        target_compile_definitions(rocprofiler-sdk-aqlprofile PRIVATE DEBUG_TRACE=2)
+    endif()
+endif()
+
 target_link_libraries(
     rocprofiler-sdk-aqlprofile
     PRIVATE $<BUILD_INTERFACE:rocprofiler-sdk::rocprofiler-sdk-headers>

@@ -388,5 +388,19 @@ public:
         outputbuf_size    = size;
     }
 
+    void CreateSampleCountBuf()
+    {
+        aqlprofile_buffer_desc_flags_t flags{};
+        flags.host_access   = true;
+        flags.device_access = true;
+        flags.memory_hint   = AQLPROFILE_MEMORY_HINT_DEVICE_NONCOHERENT;
+        sample_count_buf_   = AllocMemory(sizeof(uint32_t), flags);
+    }
+
+    void* GetSampleCountBuf() const { return sample_count_buf_.get(); }
+
     pm4_builder::TraceConfig config{};
+
+private:
+    std::unique_ptr<void, MemoryDeleter> sample_count_buf_ = nullptr;
 };
