@@ -13,7 +13,7 @@ when setting up a fresh checkout and the ``isa/`` directory is missing.
 We found out the hard way that stale ISA files silently break downstream
 validation, so re-downloading after every GPUOpen update became a habit.
 """
-
+# Temporary no-op change on machine-readable-isa to exercise TheRock Multi-arch CI
 import argparse
 import io
 import json
