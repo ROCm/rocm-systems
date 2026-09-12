@@ -76,7 +76,7 @@ rocprofiler_add_integration_execute_test(
     TIMEOUT 45
     LABELS "integration-tests"
     DISABLED ${IS_DISABLED}
-    PRELOAD "${PRELOAD_ENV}"
+    ENVIRONMENT "${PRELOAD_ENV}"
     FIXTURES_SETUP rocprofv3-test-att-consecutive-kernels)
 
 rocprofiler_add_integration_validate_test(

@@ -44,7 +44,7 @@ rocprofiler_add_integration_execute_test(
     TARGET openmp-target
     TIMEOUT 100
     LABELS "integration-tests;openmp-target"
-    PRELOAD "$<TARGET_FILE:rocprofiler-sdk-json-tool>" "${PRELOAD_ENV}"
+    PRELOAD "$<TARGET_FILE:rocprofiler-sdk-json-tool>"
     ENVIRONMENT "${openmp-tools-env}"
     DISABLED "${IS_DISABLED}"
     FIXTURES_SETUP openmp-tools)

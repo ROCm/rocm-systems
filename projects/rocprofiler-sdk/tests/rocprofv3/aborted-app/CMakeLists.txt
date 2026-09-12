@@ -35,8 +35,7 @@ rocprofiler_add_integration_execute_test(
     LABELS "integration-tests"
     WILL_FAIL
     DISABLED ${IS_DISABLED}
-    PRELOAD "${PRELOAD_ENV}"
-    ENVIRONMENT "ROCPROF_TESTING_RAISE_SIGNAL=1"
+    ENVIRONMENT "${PRELOAD_ENV}" "ROCPROF_TESTING_RAISE_SIGNAL=1"
                 "ROCPROF_INTERNAL_TEST_SIGNAL_HANDLER_VIA_EXIT=1"
     FIXTURES_SETUP rocprofv3-test-app-abort)
 

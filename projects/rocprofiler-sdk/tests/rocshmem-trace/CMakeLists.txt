@@ -51,17 +51,9 @@ endif()
 set(MPI_ENV_VARS OMPI_ALLOW_RUN_AS_ROOT=1 OMPI_ALLOW_RUN_AS_ROOT_CONFIRM=1
                  OMPI_MCA_btl=self,vader OMPI_MCA_pml=ob1 PSM3_DEVICES=self,shm)
 
-# Build the LD_PRELOAD value: the rocprofiler-sdk-json-tool library captures every tracing
-# domain it knows about (including ROCSHMEM_API on this branch) and writes a single JSON
-# file at tool finalization. Memory checker preload (if set) is concatenated in front so
-# memcheck still works.
-if(ROCPROFILER_MEMCHECK_PRELOAD_ENV_VALUE)
-    set(PRELOAD_ENV
-        "${ROCPROFILER_MEMCHECK_PRELOAD_ENV_VALUE}:$<TARGET_FILE:rocprofiler-sdk-json-tool>"
-        )
-else()
-    set(PRELOAD_ENV "$<TARGET_FILE:rocprofiler-sdk-json-tool>")
-endif()
+# The rocprofiler-sdk-json-tool library captures every tracing domain it knows about
+# (including ROCSHMEM_API on this branch) and writes a single JSON file at tool
+# finalization.
 
 # Each MPI rank writes to its own JSON file so the two rocshmem-demo processes do not race
 # on the same path. json-tool reads ROCPROFILER_TOOL_OUTPUT_FILE verbatim (no built-in
@@ -82,7 +74,7 @@ if(TARGET rocshmem-demo)
         TIMEOUT 45
         LABELS "integration-tests"
         ENVIRONMENT ${MPI_ENV_VARS}
-        PRELOAD "${PRELOAD_ENV}"
+        PRELOAD "$<TARGET_FILE:rocprofiler-sdk-json-tool>"
         PASS_REGULAR_EXPRESSION "Finalization complete"
         FIXTURES_SETUP rocshmem-tracing
         DISABLED "${IS_DISABLED}")

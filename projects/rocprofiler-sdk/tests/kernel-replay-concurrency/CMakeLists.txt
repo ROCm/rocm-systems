@@ -52,14 +52,6 @@ target_sources(kernel-replay-concurrency-testapp PRIVATE main.cpp)
 target_link_libraries(kernel-replay-concurrency-testapp PRIVATE Threads::Threads
                                                                 ${CMAKE_DL_LIBS})
 
-if(ROCPROFILER_MEMCHECK_PRELOAD_ENV_VALUE)
-    set(PRELOAD_ENV
-        "${ROCPROFILER_MEMCHECK_PRELOAD_ENV_VALUE}:$<TARGET_FILE:kernel-replay-concurrency-client>"
-        )
-else()
-    set(PRELOAD_ENV "$<TARGET_FILE:kernel-replay-concurrency-client>")
-endif()
-
 # Args: cycles n hog_reps. Each cycle forces exactly one victim write into one replay
 # window, so a regressed build corrupts on cycle 1 (deterministic); 50 cycles keeps a
 # safety margin well under the timeout.
@@ -69,6 +61,6 @@ rocprofiler_add_integration_execute_test(
     DEPENDS kernel-replay-concurrency-client
     TIMEOUT 120
     LABELS "integration-tests;kernel-replay"
-    PRELOAD "${PRELOAD_ENV}"
+    PRELOAD "$<TARGET_FILE:kernel-replay-concurrency-client>"
     PASS_REGULAR_EXPRESSION "\\[repro\\] PASS"
     FAIL_REGULAR_EXPRESSION "\\[repro\\] FAIL|${ROCPROFILER_DEFAULT_FAIL_REGEX}")

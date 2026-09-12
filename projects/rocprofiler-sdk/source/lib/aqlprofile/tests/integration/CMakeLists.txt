@@ -86,18 +86,22 @@ endif()
 set(_v2_ld_library_path
     "${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR}:${CMAKE_LIBRARY_OUTPUT_DIRECTORY}:${CMAKE_INSTALL_PREFIX}/lib:${ROCM_PATH}/lib:${ROCM_PATH}/llvm/lib:$ENV{LD_LIBRARY_PATH}"
     )
+set(_v2_test_environment "HSA_TOOLS_LIB=$<TARGET_FILE:aqlprofile-v2-intercept>"
+                         "LD_LIBRARY_PATH=${_v2_ld_library_path}")
+if(ROCPROFILER_MEMCHECK_PRELOAD_ENV)
+    list(PREPEND _v2_test_environment "${ROCPROFILER_MEMCHECK_PRELOAD_ENV}")
+endif()
 
 add_test(NAME tests.integration.aqlprofile.v2 COMMAND $<TARGET_FILE:aqlprofile-v2-test>)
 set_tests_properties(
     tests.integration.aqlprofile.v2
-    PROPERTIES
-        ENVIRONMENT
-        "HSA_TOOLS_LIB=$<TARGET_FILE:aqlprofile-v2-intercept>;LD_LIBRARY_PATH=${_v2_ld_library_path}"
-        WORKING_DIRECTORY
-        ${CMAKE_CURRENT_BINARY_DIR}
-        LABELS
-        "integration-tests;aqlprofile"
-        TIMEOUT
-        30
-        FAIL_REGULAR_EXPRESSION
-        "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
+    PROPERTIES ENVIRONMENT
+               "${_v2_test_environment}"
+               WORKING_DIRECTORY
+               ${CMAKE_CURRENT_BINARY_DIR}
+               LABELS
+               "integration-tests;aqlprofile"
+               TIMEOUT
+               30
+               FAIL_REGULAR_EXPRESSION
+               "${ROCPROFILER_DEFAULT_FAIL_REGEX}")

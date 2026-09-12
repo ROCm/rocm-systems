@@ -19,6 +19,9 @@ rocprofiler_configure_pytest_files(CONFIG pytest.ini COPY conftest.py validate.p
 
 find_package(Python3 REQUIRED)
 
+string(REPLACE "LD_PRELOAD=" "ROCPROF_PRELOAD=" PRELOAD_ENV
+               "${ROCPROFILER_MEMCHECK_PRELOAD_ENV}")
+
 #########################################################################################
 #
 # generate rocpd database and json for comparison
@@ -34,8 +37,7 @@ rocprofiler_add_integration_execute_test(
     DEPENDS scratch-memory
     TIMEOUT 120
     LABELS "integration-tests;rocpd"
-    PRELOAD "${ROCPROFILER_MEMCHECK_PRELOAD_ENV_VALUE}"
-    ENVIRONMENT "${rocprofv3-rocpd-scratch-env}"
+    ENVIRONMENT "${PRELOAD_ENV}" "${rocprofv3-rocpd-scratch-env}"
     FIXTURES_SETUP rocprofv3-test-rocpd-scratch)
 
 #########################################################################################
@@ -53,7 +55,6 @@ rocprofiler_add_integration_execute_test(
     DEPENDS rocprofiler-sdk::rocprofv3
     TIMEOUT 120
     LABELS "integration-tests;rocpd"
-    PRELOAD "${ROCPROFILER_MEMCHECK_PRELOAD_ENV_VALUE}"
     ENVIRONMENT "${rocprofv3-rocpd-scratch-env}"
     FIXTURES_SETUP rocprofv3-test-rocpd-scratch-generation
     FIXTURES_REQUIRED rocprofv3-test-rocpd-scratch)

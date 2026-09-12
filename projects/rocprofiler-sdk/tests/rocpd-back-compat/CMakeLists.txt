@@ -141,7 +141,6 @@ foreach(VERSION IN LISTS ROCPD_COMPAT_TESTED_SCHEMAS)
         DEPENDS rocprofiler-sdk::rocprofv3
         TIMEOUT 30
         LABELS "integration-tests;rocpd"
-        PRELOAD "${ROCPROFILER_MEMCHECK_PRELOAD_ENV_VALUE}"
         ENVIRONMENT "${rocpd-back-compat-env}"
         FIXTURES_SETUP rocpd-back-compat-${VT}-db)
 
@@ -155,7 +154,6 @@ foreach(VERSION IN LISTS ROCPD_COMPAT_TESTED_SCHEMAS)
         DEPENDS rocprofiler-sdk::rocprofv3
         TIMEOUT 60
         LABELS "integration-tests;rocpd"
-        PRELOAD "${ROCPROFILER_MEMCHECK_PRELOAD_ENV_VALUE}"
         ENVIRONMENT "${rocpd-back-compat-env}"
         FIXTURES_REQUIRED rocpd-back-compat-${VT}-db
         FIXTURES_SETUP rocpd-back-compat-${VT}-gen)
@@ -170,7 +168,6 @@ foreach(VERSION IN LISTS ROCPD_COMPAT_TESTED_SCHEMAS)
         DEPENDS rocprofiler-sdk::rocprofv3
         TIMEOUT 60
         LABELS "integration-tests;rocpd"
-        PRELOAD "${ROCPROFILER_MEMCHECK_PRELOAD_ENV_VALUE}"
         ENVIRONMENT "${rocpd-back-compat-env}"
         FIXTURES_REQUIRED rocpd-back-compat-${VT}-db
         FIXTURES_SETUP rocpd-back-compat-${VT}-gen)
@@ -185,7 +182,6 @@ foreach(VERSION IN LISTS ROCPD_COMPAT_TESTED_SCHEMAS)
         DEPENDS rocprofiler-sdk::rocprofv3
         TIMEOUT 60
         LABELS "integration-tests;rocpd"
-        PRELOAD "${ROCPROFILER_MEMCHECK_PRELOAD_ENV_VALUE}"
         ENVIRONMENT "${rocpd-back-compat-env}"
         FIXTURES_REQUIRED rocpd-back-compat-${VT}-db
         FIXTURES_SETUP rocpd-back-compat-${VT}-gen

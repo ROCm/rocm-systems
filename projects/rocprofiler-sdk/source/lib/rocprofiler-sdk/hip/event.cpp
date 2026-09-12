@@ -517,14 +517,19 @@ using event_record_with_flags_fn_t = hipError_t (*)(hipEvent_t, hipStream_t, uns
 using stream_wait_event_fn_t       = hipError_t (*)(hipStream_t, hipEvent_t, unsigned int);
 using event_destroy_fn_t           = hipError_t (*)(hipEvent_t);
 
+using atomic_event_record_fn_t            = std::atomic<event_record_fn_t>;
+using atomic_event_record_with_flags_fn_t = std::atomic<event_record_with_flags_fn_t>;
+using atomic_stream_wait_event_fn_t       = std::atomic<stream_wait_event_fn_t>;
+using atomic_event_destroy_fn_t           = std::atomic<event_destroy_fn_t>;
+
 struct saved_table_t
 {
-    event_record_fn_t            hipEventRecord_fn          = nullptr;
-    event_record_fn_t            hipEventRecord_spt_fn      = nullptr;
-    event_record_with_flags_fn_t hipEventRecordWithFlags_fn = nullptr;
-    stream_wait_event_fn_t       hipStreamWaitEvent_fn      = nullptr;
-    stream_wait_event_fn_t       hipStreamWaitEvent_spt_fn  = nullptr;
-    event_destroy_fn_t           hipEventDestroy_fn         = nullptr;
+    atomic_event_record_fn_t            hipEventRecord_fn          = nullptr;
+    atomic_event_record_fn_t            hipEventRecord_spt_fn      = nullptr;
+    atomic_event_record_with_flags_fn_t hipEventRecordWithFlags_fn = nullptr;
+    atomic_stream_wait_event_fn_t       hipStreamWaitEvent_fn      = nullptr;
+    atomic_stream_wait_event_fn_t       hipStreamWaitEvent_spt_fn  = nullptr;
+    atomic_event_destroy_fn_t           hipEventDestroy_fn         = nullptr;
 };
 
 saved_table_t&
@@ -534,14 +539,15 @@ get_saved_table()
     return _v;
 }
 
-template <event_record_fn_t saved_table_t::*SavedField>
+template <atomic_event_record_fn_t saved_table_t::*SavedField>
 hipError_t
 event_record_impl(hipEvent_t event, hipStream_t stream)
 {
     g_active_event_ctx = {
         ROCPROFILER_HIP_EVENT_RECORD, reinterpret_cast<uint64_t>(event), false, stream};
     auto _cleanup = common::scope_destructor{[]() { g_active_event_ctx = {}; }};
-    auto ret      = (get_saved_table().*SavedField)(event, stream);
+    auto saved_fn = (get_saved_table().*SavedField).load(std::memory_order_acquire);
+    auto ret      = saved_fn(event, stream);
     if(ret == hipSuccess) check_coalesced_record(reinterpret_cast<uint64_t>(event), stream);
     return ret;
 }
@@ -553,7 +559,8 @@ event_record_with_flags_impl(hipEvent_t event, hipStream_t stream, unsigned int 
     g_active_event_ctx = {
         ROCPROFILER_HIP_EVENT_RECORD, reinterpret_cast<uint64_t>(event), false, stream};
     auto _cleanup = common::scope_destructor{[]() { g_active_event_ctx = {}; }};
-    auto ret      = get_saved_table().hipEventRecordWithFlags_fn(event, stream, flags);
+    auto saved_fn = get_saved_table().hipEventRecordWithFlags_fn.load(std::memory_order_acquire);
+    auto ret      = saved_fn(event, stream, flags);
     if(ret == hipSuccess) check_coalesced_record(reinterpret_cast<uint64_t>(event), stream);
     return ret;
 }
@@ -649,7 +656,7 @@ register_deferred_wait(uint64_t hip_event_handle, hipStream_t wait_stream)
     return event_info.original_signal;
 }
 
-template <stream_wait_event_fn_t saved_table_t::*SavedField>
+template <atomic_stream_wait_event_fn_t saved_table_t::*SavedField>
 hipError_t
 stream_wait_event_impl(hipStream_t stream, hipEvent_t event, unsigned int flags)
 {
@@ -663,7 +670,8 @@ stream_wait_event_impl(hipStream_t stream, hipEvent_t event, unsigned int flags)
     // even if another thread concurrently submits work to the waiting stream.
     const auto registered_signal = register_deferred_wait(hip_event_handle, stream);
 
-    auto ret = (get_saved_table().*SavedField)(stream, event, flags);
+    auto saved_fn = (get_saved_table().*SavedField).load(std::memory_order_acquire);
+    auto ret      = saved_fn(stream, event, flags);
 
     // Discard the pre-registered entry in cases where no GPU-side dependency was created:
     // - Error return: CLR did nothing.
@@ -682,7 +690,8 @@ stream_wait_event_impl(hipStream_t stream, hipEvent_t event, unsigned int flags)
 hipError_t
 event_destroy_impl(hipEvent_t event)
 {
-    auto ret = get_saved_table().hipEventDestroy_fn(event);
+    auto saved_fn = get_saved_table().hipEventDestroy_fn.load(std::memory_order_acquire);
+    auto ret      = saved_fn(event);
     if(ret == hipSuccess) erase_event_info(reinterpret_cast<uint64_t>(event));
     return ret;
 }
@@ -1368,14 +1377,11 @@ update_table<::HipDispatchTable>(::HipDispatchTable* table)
         auto& saved_fn = saved.*saved_fn_ptr;
         if(!table_fn || table_fn == wrapper) return;
         ROCP_TRACE << "hip::event wrapping table entry at ABI offset " << abi_offset;
-        saved_fn = table_fn;
-        // Publish the wrapper only after the saved pointer is visible. late.cpp
-        // re-propagates API tables into a running process during attach, so an application
-        // thread can be calling through this entry while it is being replaced. The two
-        // stores are independent, so without this fence the compiler or a weakly ordered
-        // CPU could publish the wrapper first and the thread would call a null saved
-        // pointer.
-        std::atomic_thread_fence(std::memory_order_release);
+        // Publish the saved pointer before installing the wrapper. A wrapper reached by a
+        // concurrently running application thread acquires this value before calling it.
+        // Using the atomic object as the synchronization edge also keeps this publication
+        // visible to ThreadSanitizer, which does not support standalone fences.
+        saved_fn.store(table_fn, std::memory_order_release);
         table_fn = wrapper;
     };
 

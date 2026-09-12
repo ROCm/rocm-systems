@@ -73,7 +73,7 @@ rocprofiler_add_integration_execute_test(
     DEPENDS transpose
     TIMEOUT 45
     LABELS "integration-tests"
-    PRELOAD "${PRELOAD_ENV}"
+    ENVIRONMENT "${PRELOAD_ENV}"
     FIXTURES_SETUP rocprofv3-test-kernel-rename-inp-yaml)
 
 rocprofiler_add_integration_validate_test(

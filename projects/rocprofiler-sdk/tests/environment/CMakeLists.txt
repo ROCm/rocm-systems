@@ -15,6 +15,9 @@ project(
 
 find_package(rocprofiler-sdk REQUIRED)
 
+string(REPLACE "LD_PRELOAD=" "ROCPROF_PRELOAD=" PRELOAD_ENV
+               "${ROCPROFILER_MEMCHECK_PRELOAD_ENV}")
+
 # Note: bash is invoked unconditionally (no find_program guard) because these tests are
 # the regression coverage for the bash-specific getenv() bug — silently skipping them when
 # bash is absent would hide the bug they exist to catch.
@@ -27,7 +30,7 @@ rocprofiler_add_integration_execute_test(
     DEPENDS rocprofiler-sdk::rocprofv3
     TIMEOUT 30
     LABELS "integration-tests" "environment"
-    ENVIRONMENT "ROCPROFILER_METRICS_PATH=/nonexistent/bash/test/path"
+    ENVIRONMENT "${PRELOAD_ENV}" "ROCPROFILER_METRICS_PATH=/nonexistent/bash/test/path"
     # Expect warning about missing config file - proves env var was read
     PASS_REGULAR_EXPRESSION
         "Counter definitions file '/nonexistent/bash/test/path/config.yaml' does not exist"
@@ -41,7 +44,7 @@ rocprofiler_add_integration_execute_test(
     DEPENDS rocprofiler-sdk::rocprofv3
     TIMEOUT 30
     LABELS "integration-tests" "environment" "bash"
-    ENVIRONMENT "ROCPROFILER_METRICS_PATH=/path/with spaces/metrics"
+    ENVIRONMENT "${PRELOAD_ENV}" "ROCPROFILER_METRICS_PATH=/path/with spaces/metrics"
     # Should see the path with spaces in the error message
     PASS_REGULAR_EXPRESSION "Counter definitions file '/path/with spaces/metrics"
     FIXTURES_SETUP environment-bash-spaces)
@@ -54,7 +57,8 @@ rocprofiler_add_integration_execute_test(
     DEPENDS rocprofiler-sdk::rocprofv3
     TIMEOUT 30
     LABELS "integration-tests" "environment" "bash"
-    ENVIRONMENT "ROCPROFILER_METRICS_PATH=/test/path/one" "ROCPROFILER_LOG_LEVEL=trace"
+    ENVIRONMENT "${PRELOAD_ENV}" "ROCPROFILER_METRICS_PATH=/test/path/one"
+                "ROCPROFILER_LOG_LEVEL=trace"
     # Should see both env vars being used
     PASS_REGULAR_EXPRESSION "Counter definitions file '/test/path/one"
     FIXTURES_SETUP environment-bash-multiple)
@@ -69,7 +73,7 @@ if(SH_EXECUTABLE)
         DEPENDS rocprofiler-sdk::rocprofv3
         TIMEOUT 30
         LABELS "integration-tests" "environment" "sh"
-        ENVIRONMENT "ROCPROFILER_METRICS_PATH=/nonexistent/sh/test"
+        ENVIRONMENT "${PRELOAD_ENV}" "ROCPROFILER_METRICS_PATH=/nonexistent/sh/test"
         PASS_REGULAR_EXPRESSION "Counter definitions file '/nonexistent/sh/test"
         FIXTURES_SETUP environment-sh-test)
 endif()
@@ -84,7 +88,7 @@ if(ZSH_EXECUTABLE)
         DEPENDS rocprofiler-sdk::rocprofv3
         TIMEOUT 30
         LABELS "integration-tests" "environment" "zsh"
-        ENVIRONMENT "ROCPROFILER_METRICS_PATH=/nonexistent/zsh/test"
+        ENVIRONMENT "${PRELOAD_ENV}" "ROCPROFILER_METRICS_PATH=/nonexistent/zsh/test"
         PASS_REGULAR_EXPRESSION "Counter definitions file '/nonexistent/zsh/test"
         FIXTURES_SETUP environment-zsh-test)
 endif()
@@ -101,6 +105,7 @@ rocprofiler_add_integration_execute_test(
     DEPENDS rocprofiler-sdk::rocprofv3
     TIMEOUT 30
     LABELS "integration-tests" "environment" "bash" "real-world"
+    ENVIRONMENT "${PRELOAD_ENV}"
     # Should see the inline-set env var
     PASS_REGULAR_EXPRESSION "Counter definitions file '/inline/test"
     FIXTURES_SETUP environment-bash-inline)

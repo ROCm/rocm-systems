@@ -73,8 +73,8 @@ __libc_start_main(int (*)(int, char**, char**),
 sighandler_t
 signal(int signum, sighandler_t handler) ROCPROFV3_PUBLIC_API;
 
-#if !defined(ROCPROFV3_THREAD_SANITIZER)
-// breaks thread sanitizer
+#if !defined(ROCPROFV3_THREAD_SANITIZER) && !defined(ROCPROFV3_DISABLE_SIGACTION_INTERPOSITION)
+// Interposing sigaction conflicts with sanitizer runtime initialization.
 int
 sigaction(int                              signum,
           const struct sigaction* restrict act,
@@ -157,11 +157,13 @@ signal(int signum, sighandler_t handler)
     return rocprofv3_signal(signum, handler);
 }
 
+#if !defined(ROCPROFV3_THREAD_SANITIZER) && !defined(ROCPROFV3_DISABLE_SIGACTION_INTERPOSITION)
 int
 sigaction(int signum, const struct sigaction* restrict act, struct sigaction* restrict oldact)
 {
     return rocprofv3_sigaction(signum, act, oldact);
 }
+#endif
 
 int
 __libc_start_main(int (*_main)(int, char**, char**),

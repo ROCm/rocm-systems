@@ -31,8 +31,7 @@ rocprofiler_add_integration_execute_test(
     DEPENDS reproducible-runtime
     TIMEOUT 120
     LABELS "integration-tests"
-    PRELOAD "${PRELOAD_ENV}"
-    ENVIRONMENT "ROCPROF_COLLECTION_PERIOD_TESTING=true"
+    ENVIRONMENT "${PRELOAD_ENV}" "ROCPROF_COLLECTION_PERIOD_TESTING=true"
     FIXTURES_SETUP rocprofv3-test-collection-period)
 
 rocprofiler_add_integration_validate_test(
@@ -62,5 +61,6 @@ rocprofiler_add_integration_execute_test(
     TIMEOUT 45
     LABELS "integration-tests"
     WILL_FAIL
+    ENVIRONMENT "${PRELOAD_ENV}"
     FAIL_REGULAR_EXPRESSION
         "--selected-regions and --collection-period are mutually exclusive")

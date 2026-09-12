@@ -34,13 +34,15 @@ project(
 
 set(CMAKE_MESSAGE_INDENT "[${PROJECT_NAME}] ")
 
+find_package(rocprofiler-sdk REQUIRED)
+
 string(REPLACE "LD_PRELOAD=" "--preload;" PRELOAD_ARGS
+               "${ROCPROFILER_MEMCHECK_PRELOAD_ENV}")
+string(REPLACE "LD_PRELOAD=" "ROCPROF_PRELOAD=" PRELOAD_ENV
                "${ROCPROFILER_MEMCHECK_PRELOAD_ENV}")
 
 rocprofiler_configure_pytest_files(CONFIG pytest.ini COPY validate.py conftest.py
                                                           att_input.json)
-
-find_package(rocprofiler-sdk REQUIRED)
 
 find_library(
     attdecoder_LIBRARY
@@ -59,6 +61,7 @@ find_package_handle_standard_args(attdecoder REQUIRED_VARS attdecoder_LIB_DIR
 set(COMMON_PARAMS_NO_LIB ${PRELOAD_ARGS} --att --output-format json --log-level env -d
                          ${CMAKE_CURRENT_BINARY_DIR}/%argt%-trace/)
 
+set(COMMON_PARAMS ${COMMON_PARAMS_NO_LIB})
 set(IS_DISABLED ON)
 if(attdecoder_FOUND)
     set(IS_DISABLED OFF)
@@ -159,7 +162,8 @@ rocprofiler_add_integration_execute_test(
     TIMEOUT 45
     LABELS "integration-tests"
     WILL_FAIL
-    DISABLED ${IS_DISABLED})
+    DISABLED ${IS_DISABLED}
+    ENVIRONMENT "${PRELOAD_ENV}")
 
 rocprofiler_add_integration_execute_test(
     rocprofv3-test-att-library-path-cmd-line-will-fail
@@ -169,7 +173,8 @@ rocprofiler_add_integration_execute_test(
     TIMEOUT 45
     LABELS "integration-tests"
     WILL_FAIL
-    DISABLED ${IS_DISABLED})
+    DISABLED ${IS_DISABLED}
+    ENVIRONMENT "${PRELOAD_ENV}")
 
 rocprofiler_add_integration_execute_test(
     rocprofv3-test-att-library-path-env-var-will-fail
@@ -273,7 +278,7 @@ rocprofiler_add_integration_execute_test(
     TIMEOUT 45
     LABELS "integration-tests"
     DISABLED ${ROCPROFILER_DISABLE_UNSTABLE_CTESTS}
-    ENVIRONMENT "ROCPROF_ATT_LIBRARY_PATH=${attdecoder_LIB_DIR}"
+    ENVIRONMENT "${PRELOAD_ENV}" "ROCPROF_ATT_LIBRARY_PATH=${attdecoder_LIB_DIR}"
     FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
     FIXTURES_SETUP rocprofv3-test-att-gpu-index-two-gpus)
 
@@ -376,7 +381,7 @@ rocprofiler_add_integration_execute_test(
     TIMEOUT 45
     LABELS "integration-tests;thread-trace"
     DISABLED ${IS_DISABLED}
-    ENVIRONMENT "ROCPROF_ATT_LIBRARY_PATH=${attdecoder_LIB_DIR}"
+    ENVIRONMENT "${PRELOAD_ENV}" "ROCPROF_ATT_LIBRARY_PATH=${attdecoder_LIB_DIR}"
     FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
     FIXTURES_SETUP rocprofv3-test-att-no-detail)
 
@@ -410,7 +415,7 @@ rocprofiler_add_integration_execute_test(
     TIMEOUT 45
     LABELS "integration-tests"
     DISABLED ${IS_DISABLED_OTHER_SIMD}
-    ENVIRONMENT "ROCPROF_ATT_LIBRARY_PATH=${attdecoder_LIB_DIR}"
+    ENVIRONMENT "${PRELOAD_ENV}" "ROCPROF_ATT_LIBRARY_PATH=${attdecoder_LIB_DIR}"
     FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
     FIXTURES_SETUP rocprofv3-test-att-other-simd)
 
@@ -440,7 +445,7 @@ rocprofiler_add_integration_execute_test(
     LABELS "integration-tests;thread-trace"
     TIMEOUT 45
     DISABLED ${IS_DISABLED}
-    ENVIRONMENT "ROCPROF_ATT_LIBRARY_PATH=${attdecoder_LIB_DIR}"
+    ENVIRONMENT "${PRELOAD_ENV}" "ROCPROF_ATT_LIBRARY_PATH=${attdecoder_LIB_DIR}"
     FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
     FIXTURES_SETUP rocprofv3-test-att-marker-trace)
 
@@ -468,6 +473,7 @@ rocprofiler_add_integration_execute_test(
     LABELS "integration-tests;thread-trace"
     WILL_FAIL
     DISABLED ${IS_DISABLED}
+    ENVIRONMENT "${PRELOAD_ENV}"
     FAIL_REGULAR_EXPRESSION
         "--selected-regions and --att-consecutive-kernels are mutually exclusive")
 
@@ -483,7 +489,7 @@ rocprofiler_add_integration_execute_test(
     LABELS "integration-tests;thread-trace"
     TIMEOUT 45
     DISABLED ${IS_DISABLED}
-    ENVIRONMENT "ROCPROF_ATT_LIBRARY_PATH=${attdecoder_LIB_DIR}"
+    ENVIRONMENT "${PRELOAD_ENV}" "ROCPROF_ATT_LIBRARY_PATH=${attdecoder_LIB_DIR}"
     FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
     SKIP_REGULAR_EXPRESSION "HW Exception by GPU"
     FIXTURES_SETUP rocprofv3-test-att-no-intercept)
@@ -511,7 +517,7 @@ rocprofiler_add_integration_execute_test(
     TIMEOUT 45
     LABELS "integration-tests"
     DISABLED ${IS_DISABLED}
-    ENVIRONMENT "ROCPROF_ATT_LIBRARY_PATH=${attdecoder_LIB_DIR}"
+    ENVIRONMENT "${PRELOAD_ENV}" "ROCPROF_ATT_LIBRARY_PATH=${attdecoder_LIB_DIR}"
     FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
     FIXTURES_SETUP rocprofv3-test-att-shaderdata)
 
