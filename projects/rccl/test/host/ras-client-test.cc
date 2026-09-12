@@ -1970,6 +1970,8 @@ TEST_F(RasClientMicrotest, ConnectHandshake_AcceptedBanners_ReturnZeroAndLeaveTh
 
     EXPECT_EQ(0, ret) << banner;
     EXPECT_EQ(kClientHello, g_writtenData) << banner;
+    EXPECT_EQ(std::vector<int>({kSocketFd}), g_writtenFds) << banner;
+    EXPECT_EQ(std::vector<int>({kSocketFd}), g_readFds) << banner;
     EXPECT_EQ(kSocketFd, sock) << banner;
     EXPECT_TRUE(g_closedFds.empty()) << banner;  // not the `fail:` arm
     ExpectPerrors({});
@@ -2183,6 +2185,8 @@ TEST_F(RasClientMicrotest, ConnectTimeout_PositiveTimeout_SendsExactTimeoutLineA
 
   EXPECT_EQ(0, rc);
   EXPECT_EQ("CLIENT PROTOCOL 2\nTIMEOUT 37\n", g_writtenData);
+  EXPECT_EQ(std::vector<int>({kSocketFd, kSocketFd}), g_writtenFds);
+  EXPECT_EQ(std::vector<int>({kSocketFd, kSocketFd}), g_readFds);
   EXPECT_EQ("SNDTIMEO={1,0} RCVTIMEO={1,0} RCVTIMEO={43,0} ", TraceSetsockopt(opts));
   ExpectAllSolSocket(opts);
   EXPECT_EQ(kSocketFd, sock);
