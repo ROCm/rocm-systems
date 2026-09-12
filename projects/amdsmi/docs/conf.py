@@ -73,6 +73,7 @@ extensions = [
     "rocm_docs.doxygen",
     "amdsmi_docs.doxygen",
     "amdsmi_docs.go_api_ref",
+    "amdsmi_docs.install_selector",
     "sphinxcontrib.mermaid",
 ]
 
