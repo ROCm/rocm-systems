@@ -22,6 +22,18 @@ rj_add_object_library(
     throughput/plugin.cpp
 )
 
+if(ROCJITSU_ENABLE_PFFM_PLUGIN)
+    rj_add_object_library(
+        rocjitsu_plugin_pffm
+        pffm/plugin.cpp
+    )
+    target_link_libraries(
+        rocjitsu_plugin_pffm
+        PRIVATE flatbuffers
+        PUBLIC ${CMAKE_DL_LIBS}
+    )
+endif()
+
 # Host-side loader: discovers and dlopen()s plugin shared objects named in the
 # config file. Linked into the interposer and main shared library.
 rj_add_object_library(
@@ -114,4 +126,14 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     rj_add_plugin_so(throughput rocjitsu_plugin_throughput
         ${CMAKE_CURRENT_SOURCE_DIR}/throughput/plugin_export.cpp
     )
+    if(ROCJITSU_ENABLE_PFFM_PLUGIN)
+        rj_add_plugin_so(pffm rocjitsu_plugin_pffm
+            ${CMAKE_CURRENT_SOURCE_DIR}/pffm/plugin_export.cpp
+        )
+        # pFFM builds may run LLVM-global cleanup from an ELF destructor.
+        # Keep this adapter and its backend-handle registry mapped across a
+        # loader dlclose() after a failed factory call. The registry's retained
+        # handles keep the pFFM backends themselves mapped for the process lifetime.
+        target_link_options(rocjitsu_plugin_pffm_so PRIVATE "-Wl,-z,nodelete")
+    endif()
 endif()
