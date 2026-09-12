@@ -24,6 +24,8 @@ THE SOFTWARE.
 #ifndef ELFIO_NOTE_HPP
 #define ELFIO_NOTE_HPP
 
+#include <cstring>
+
 namespace amd {
 namespace ELFIO {
 
@@ -54,26 +56,49 @@ template <class S> class note_section_accessor_template {
   //------------------------------------------------------------------------------
   bool get_note(Elf_Word index, Elf_Word& type, std::string& name, void*& desc,
                 Elf_Word& descSize) const {
-    if (index >= note_section->get_size()) {
+    if (index >= note_start_positions.size()) {
       return false;
     }
 
-    const char* pData = note_section->get_data() + note_start_positions[index];
-    int align = sizeof(Elf_Word);
+    const char* data = note_section->get_data();
+    const Elf_Xword data_size = note_section->get_size();
+    const Elf_Xword position = note_start_positions[index];
+    const Elf_Xword align = sizeof(Elf_Word);
+    const Elf_Xword header_size = 3 * align;
+    if (data == nullptr || position > data_size || header_size > data_size - position) {
+      return false;
+    }
 
     const endianess_convertor& convertor = elf_file.get_convertor();
-    type = convertor(*(const Elf_Word*)(pData + 2 * align));
-    Elf_Word namesz = convertor(*(const Elf_Word*)(pData));
-    descSize = convertor(*(const Elf_Word*)(pData + sizeof(namesz)));
-    Elf_Xword max_name_size = note_section->get_size() - note_start_positions[index];
-    if (namesz < 1 || namesz > max_name_size || namesz + descSize > max_name_size) {
+    const char* pData = data + position;
+    Elf_Word raw_namesz;
+    Elf_Word raw_descsz;
+    Elf_Word raw_type;
+    std::memcpy(&raw_namesz, pData, sizeof(raw_namesz));
+    std::memcpy(&raw_descsz, pData + align, sizeof(raw_descsz));
+    std::memcpy(&raw_type, pData + 2 * align, sizeof(raw_type));
+    const Elf_Word namesz = convertor(raw_namesz);
+    const Elf_Word parsed_descsz = convertor(raw_descsz);
+    const Elf_Word parsed_type = convertor(raw_type);
+    const Elf_Xword padded_name = (static_cast<Elf_Xword>(namesz) + align - 1) / align * align;
+    const Elf_Xword padded_desc =
+        (static_cast<Elf_Xword>(parsed_descsz) + align - 1) / align * align;
+    const Elf_Xword remaining = data_size - position - header_size;
+    if (padded_name > remaining || padded_desc > remaining - padded_name) {
       return false;
     }
-    name.assign(pData + 3 * align, namesz - 1);
-    if (0 == descSize) {
+
+    type = parsed_type;
+    descSize = parsed_descsz;
+    if (namesz == 0) {
+      name.clear();
+    } else {
+      name.assign(pData + header_size, namesz - 1);
+    }
+    if (0 == parsed_descsz) {
       desc = 0;
     } else {
-      desc = const_cast<char*>(pData + 3 * align + ((namesz + align - 1) / align) * align);
+      desc = const_cast<char*>(pData + header_size + padded_name);
     }
 
     return true;
@@ -123,14 +148,24 @@ template <class S> class note_section_accessor_template {
       return;
     }
 
-    int align = sizeof(Elf_Word);
-    while (current + 3 * align <= size) {
-      note_start_positions.push_back(current);
-      Elf_Word namesz = convertor(*(const Elf_Word*)(data + current));
-      Elf_Word descsz = convertor(*(const Elf_Word*)(data + current + sizeof(namesz)));
+    const Elf_Xword align = sizeof(Elf_Word);
+    const Elf_Xword header_size = 3 * align;
+    while (current <= size && header_size <= size - current) {
+      Elf_Word raw_namesz;
+      Elf_Word raw_descsz;
+      std::memcpy(&raw_namesz, data + current, sizeof(raw_namesz));
+      std::memcpy(&raw_descsz, data + current + sizeof(raw_namesz), sizeof(raw_descsz));
+      const Elf_Word namesz = convertor(raw_namesz);
+      const Elf_Word descsz = convertor(raw_descsz);
+      const Elf_Xword padded_name = (static_cast<Elf_Xword>(namesz) + align - 1) / align * align;
+      const Elf_Xword padded_desc = (static_cast<Elf_Xword>(descsz) + align - 1) / align * align;
+      const Elf_Xword remaining = size - current - header_size;
+      if (padded_name > remaining || padded_desc > remaining - padded_name) {
+        break;
+      }
 
-      current += 3 * sizeof(Elf_Word) + ((namesz + align - 1) / align) * align +
-                 ((descsz + align - 1) / align) * align;
+      note_start_positions.push_back(current);
+      current += header_size + padded_name + padded_desc;
     }
   }
 
