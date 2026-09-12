@@ -34,6 +34,7 @@
 
 #include <deque>
 #include <mutex>
+#include <optional>
 #include <string>
 #include <tuple>
 #include <type_traits>
@@ -50,6 +51,9 @@ using tmp_file_name_callback_t = std::function<std::string(domain_type)>;
 
 std::string
 compose_tmp_file_name(const output_config& cfg, domain_type buffer_type);
+
+std::optional<std::string>
+prepare_required_storage(const output_config& cfg);
 
 tmp_file_name_callback_t&
 get_tmp_file_name_callback();
@@ -106,7 +110,7 @@ get_tmp_file_buffer(domain_type type)
 }
 
 template <typename Tp>
-void
+bool
 offload_buffer(domain_type type)
 {
     auto* filebuf = get_tmp_file_buffer<Tp>(type);
@@ -115,12 +119,20 @@ offload_buffer(domain_type type)
     {
         ROCP_CI_LOG(WARNING) << "rocprofv3 cannot offload buffer for "
                              << get_domain_column_name(type) << ". Buffer has been destroyed.";
-        return;
+        return false;
     }
 
-    auto                  _lk      = std::lock_guard<std::mutex>(filebuf->file.file_mutex);
-    [[maybe_unused]] auto _success = filebuf->file.open();
-    auto&                 _fs      = filebuf->file.stream;
+    auto _lk = std::lock_guard<std::mutex>(filebuf->file.file_mutex);
+    if(!filebuf->file.open())
+    {
+        auto _nbytes = (filebuf->buffer.count() * filebuf->buffer.data_size());
+        ROCP_ERROR << fmt::format("failed to offload {} B from {} buffer to temporary file '{}'",
+                                  _nbytes,
+                                  get_domain_column_name(type),
+                                  filebuf->file.filename);
+        return false;
+    }
+    auto& _fs = filebuf->file.stream;
 
     ROCP_CI_LOG_IF(WARNING, _fs.tellg() != _fs.tellp())  // this should always be true
         << "tellg=" << _fs.tellg() << ", tellp=" << _fs.tellp();
@@ -130,13 +142,23 @@ offload_buffer(domain_type type)
     ROCP_TRACE << fmt::format(
         "offloading {} B from {} buffer to tmp file", _nbytes, get_domain_column_name(type));
 
-    filebuf->file.file_pos.emplace(_fs.tellp());
+    auto _pos = _fs.tellp();
+    if(!filebuf->buffer.save(_fs))
+    {
+        ROCP_ERROR << fmt::format("failed to offload {} B from {} buffer to temporary file '{}'",
+                                  _nbytes,
+                                  get_domain_column_name(type),
+                                  filebuf->file.filename);
+        return false;
+    }
+
+    filebuf->file.file_pos.emplace(_pos);
     filebuf->nbytes += _nbytes;
-    filebuf->buffer.save(_fs);
     filebuf->buffer.clear();
 
     ROCP_CI_LOG_IF(ERROR, !filebuf->buffer.is_empty())
         << "buffer is not empty after offload: count=" << filebuf->buffer.count();
+    return true;
 }
 
 template <typename Tp>
@@ -161,7 +183,14 @@ write_ring_buffer(Tp _v, domain_type type)
     auto* ptr = filebuf->buffer.request(false);
     if(ptr == nullptr)
     {
-        offload_buffer<Tp>(type);
+        if(!offload_buffer<Tp>(type))
+        {
+            ROCP_ERROR << "rocprofv3 is dropping record from domain "
+                       << get_domain_column_name(type)
+                       << " because temporary storage is unavailable.";
+            return;
+        }
+
         ptr = filebuf->buffer.request(false);
 
         // if failed, try again
