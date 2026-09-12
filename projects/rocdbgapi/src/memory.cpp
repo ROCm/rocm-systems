@@ -1156,7 +1156,8 @@ amd_dbgapi_dwarf_address_space_to_address_space (
 
 amd_dbgapi_status_t AMD_DBGAPI
 amd_dbgapi_convert_address_space (
-  amd_dbgapi_wave_id_t wave_id, amd_dbgapi_lane_id_t lane_id,
+  amd_dbgapi_process_id_t process_id, amd_dbgapi_wave_id_t wave_id,
+  amd_dbgapi_lane_id_t lane_id,
   amd_dbgapi_address_space_id_t source_address_space_id,
   amd_dbgapi_segment_address_t source_segment_address,
   amd_dbgapi_address_space_id_t destination_address_space_id,
@@ -1164,8 +1165,9 @@ amd_dbgapi_convert_address_space (
   amd_dbgapi_size_t *destination_contiguous_bytes)
 {
   TRACE_BEGIN (
-    param_in (wave_id), param_in (lane_id), param_in (source_address_space_id),
-    param_in (source_segment_address), param_in (destination_address_space_id),
+    param_in (process_id), param_in (wave_id), param_in (lane_id),
+    param_in (source_address_space_id), param_in (source_segment_address),
+    param_in (destination_address_space_id),
     param_in (destination_segment_address),
     param_in (destination_contiguous_bytes));
   TRY
@@ -1176,6 +1178,11 @@ amd_dbgapi_convert_address_space (
     if (destination_segment_address == nullptr
         || destination_contiguous_bytes == nullptr)
       THROW (AMD_DBGAPI_STATUS_ERROR_INVALID_ARGUMENT);
+
+    process_t *process = process_t::find (process_id);
+
+    if (process == nullptr)
+      THROW (AMD_DBGAPI_STATUS_ERROR_INVALID_PROCESS_ID);
 
     const address_space_t *source_address_space
       = find (source_address_space_id);
@@ -1190,7 +1197,8 @@ amd_dbgapi_convert_address_space (
 
     if (wave != nullptr)
       {
-        if (!wave->architecture ().is_address_space_supported (
+        if (&(wave->process ()) != process
+            || !wave->architecture ().is_address_space_supported (
               *destination_address_space)
             || !wave->architecture ().is_address_space_supported (
               *source_address_space))
@@ -1204,15 +1212,35 @@ amd_dbgapi_convert_address_space (
     else if (lane_id != AMD_DBGAPI_LANE_NONE)
       THROW (AMD_DBGAPI_STATUS_ERROR_INVALID_LANE_ID);
 
-    /* Handle global->global conversions early since it does not require to
-       pass in a wave_id.  */
-    if (source_address_space->kind () == address_space_t::kind_t::global
-        && destination_address_space->kind ()
-             == address_space_t::kind_t::global)
+    /* Handle global->global and generic->global conversions early
+       since it does not require to pass in a wave_id.  */
+    if ((source_address_space->kind () == address_space_t::kind_t::generic
+         || source_address_space->kind () == address_space_t::kind_t::global)
+        && (destination_address_space->kind ()
+            == address_space_t::kind_t::global))
       {
+        /* Without a wave, we do not know which agent to use.  All
+           agents should give the same result for the conversion to
+           global to be valid.  */
+        for (auto &agent : process->range<agent_t> ())
+          {
+            auto [lowered_aspace, lowered_addr]
+              = source_address_space->lower (agent, source_segment_address);
+
+            if (lowered_aspace.kind () != address_space_t::kind_t::global
+                || lowered_addr != source_segment_address)
+              THROW (AMD_DBGAPI_STATUS_ERROR_INVALID_ADDRESS_SPACE_CONVERSION);
+          }
+
         *destination_segment_address = source_segment_address;
-        *destination_contiguous_bytes
-          = source_address_space->last_address () - source_segment_address + 1;
+
+        if (*destination_segment_address
+            == destination_address_space->null_address ())
+          *destination_contiguous_bytes = 0;
+        else
+          *destination_contiguous_bytes
+            = destination_address_space->last_address ()
+            - *destination_segment_address + 1;
       }
     else
       {
@@ -1227,6 +1255,7 @@ amd_dbgapi_convert_address_space (
       }
   }
   CATCH (AMD_DBGAPI_STATUS_ERROR_NOT_INITIALIZED,
+         AMD_DBGAPI_STATUS_ERROR_INVALID_PROCESS_ID,
          AMD_DBGAPI_STATUS_ERROR_INVALID_WAVE_ID,
          AMD_DBGAPI_STATUS_ERROR_INVALID_LANE_ID,
          AMD_DBGAPI_STATUS_ERROR_INVALID_ADDRESS_SPACE_ID,
@@ -1354,16 +1383,25 @@ amd_dbgapi_address_dependency (
         if (wave_id != AMD_DBGAPI_WAVE_NONE)
           THROW (AMD_DBGAPI_STATUS_ERROR_INVALID_WAVE_ID);
 
-        if (address_space->address_dependency (segment_address)
-            != AMD_DBGAPI_SEGMENT_ADDRESS_DEPENDENCE_PROCESS)
-          THROW (AMD_DBGAPI_STATUS_ERROR_INVALID_ARGUMENT_COMPATIBILITY);
+        /* Without a wave, we do not know which agent to use.  Try all
+           agents.  Results should be consistent.  */
+        for (auto &agent : process->range<agent_t> ())
+          {
+            auto [lowered_aspace, lowered_addr]
+              = address_space->lower (agent, segment_address);
+
+            if (lowered_aspace.address_dependency (lowered_addr)
+                != AMD_DBGAPI_SEGMENT_ADDRESS_DEPENDENCE_PROCESS)
+              THROW (AMD_DBGAPI_STATUS_ERROR_INVALID_ARGUMENT_COMPATIBILITY);
+          }
 
         *segment_address_dependency
           = AMD_DBGAPI_SEGMENT_ADDRESS_DEPENDENCE_PROCESS;
       }
     else
       {
-        if (!wave->architecture ().is_address_space_supported (*address_space))
+        if (!wave->architecture ().is_address_space_supported (*address_space)
+            || &(wave->process ()) != process)
           THROW (AMD_DBGAPI_STATUS_ERROR_INVALID_ARGUMENT_COMPATIBILITY);
 
         auto [lowered_address_space, lowered_address]
