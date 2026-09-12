@@ -242,6 +242,17 @@ def test_dispatch_id_constant_across_replay_passes(json_data, expected_passes):
         )
 
 
+def test_expected_logical_dispatch_count(json_data, expected_dispatch_count):
+    if expected_dispatch_count is None:
+        pytest.skip("--expected-dispatch-count was not specified")
+
+    table = _dispatch_passes(_sdk(json_data))
+    assert len(table) == expected_dispatch_count, (
+        f"expected {expected_dispatch_count} selected logical dispatches, found {len(table)}: "
+        f"dispatch_ids={sorted(table)}"
+    )
+
+
 def test_dispatch_ids_increment_sequentially(json_data):
     # Across distinct dispatches the dispatch_id increments sequentially -- one fresh id per logical
     # dispatch, none skipped, none reused. Replay passes reuse their dispatch's reserved id (they
