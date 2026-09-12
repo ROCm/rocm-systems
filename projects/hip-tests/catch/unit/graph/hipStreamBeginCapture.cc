@@ -1395,6 +1395,152 @@ HIP_TEST_CASE(Unit_hipStreamBeginCapture_Positive_captureEmptyStreams) {
 /**
  * Test Description
  * ------------------------
+ *    - Test to verify that the stream which began the capture can wait on an event it recorded
+ *      itself. Same-stream ordering already satisfies the wait, so it must be a no-op: the
+ *      capture must end successfully and produce the same graph the two kernels would have
+ *      produced without the self-wait.
+ * Test source
+ * ------------------------
+ *    - catch\unit\graph\hipStreamBeginCapture.cc
+ * Test requirements
+ * ------------------------
+ *    - HIP_VERSION >= 5.6
+ */
+HIP_TEST_CASE(Unit_hipStreamBeginCapture_Positive_SelfWaitOnCaptureStream) {
+  constexpr size_t kExpectedNodes = 2;
+  constexpr size_t kExpectedEdges = 1;
+  constexpr int kExpectedIncrements = 2;
+
+  LinearAllocGuard<int> devMem_g(LinearAllocs::hipMalloc, sizeof(int));
+  StreamsGuard streams(1);
+  EventsGuard events(1);
+
+  int* devMem = devMem_g.ptr();
+  hipStream_t captureStream = streams[0];
+  hipEvent_t selfEvent = events[0];
+
+  HIP_CHECK(hipMemset(devMem, 0, sizeof(int)));
+  HIP_CHECK(hipDeviceSynchronize());
+
+  HIP_CHECK(hipStreamBeginCapture(captureStream, hipStreamCaptureModeThreadLocal));
+
+  incrementKernel<<<1, 1, 0, captureStream>>>(devMem);
+  HIP_CHECK(hipGetLastError());
+
+  // The capture stream records an event, then waits on that same event.
+  HIP_CHECK(hipEventRecord(selfEvent, captureStream));
+  HIP_CHECK(hipStreamWaitEvent(captureStream, selfEvent, 0));
+
+  incrementKernel<<<1, 1, 0, captureStream>>>(devMem);
+  HIP_CHECK(hipGetLastError());
+
+  hipGraph_t graph = nullptr;
+  HIP_CHECK(hipStreamEndCapture(captureStream, &graph));
+  REQUIRE(graph != nullptr);
+
+  size_t numNodes = 0;
+  size_t numEdges = 0;
+  HIP_CHECK(hipGraphGetNodes(graph, nullptr, &numNodes));
+  HIP_CHECK(hipGraphGetEdges(graph, nullptr, nullptr, &numEdges));
+  REQUIRE(numNodes == kExpectedNodes);
+  REQUIRE(numEdges == kExpectedEdges);
+
+  hipGraphExec_t graphExec = nullptr;
+  HIP_CHECK(hipGraphInstantiate(&graphExec, graph, nullptr, nullptr, 0));
+  HIP_CHECK(hipGraphLaunch(graphExec, captureStream));
+  HIP_CHECK(hipStreamSynchronize(captureStream));
+
+  // Every kernel node adds one to devMem, so the total counts the nodes that actually ran.
+  int increments = 0;
+  HIP_CHECK(hipMemcpy(&increments, devMem, sizeof(int), hipMemcpyDeviceToHost));
+  REQUIRE(increments == kExpectedIncrements);
+
+  HIP_CHECK(hipGraphExecDestroy(graphExec));
+  HIP_CHECK(hipGraphDestroy(graph));
+}
+
+/**
+ * Test Description
+ * ------------------------
+ *    - Test to verify that a stream forked from an active capture can wait on an event it
+ *      recorded itself. The capture must end successfully and produce the same graph the
+ *      three kernels would have produced without the self-wait.
+ * Test source
+ * ------------------------
+ *    - catch\unit\graph\hipStreamBeginCapture.cc
+ * Test requirements
+ * ------------------------
+ *    - HIP_VERSION >= 5.6
+ */
+HIP_TEST_CASE(Unit_hipStreamBeginCapture_Positive_SelfWaitOnForkedStream) {
+  constexpr size_t kExpectedNodes = 3;
+  constexpr size_t kExpectedEdges = 2;
+  constexpr int kExpectedIncrements = 3;
+
+  LinearAllocGuard<int> devMem_g(LinearAllocs::hipMalloc, sizeof(int));
+  StreamsGuard streams(2);
+  EventsGuard events(3);
+
+  int* devMem = devMem_g.ptr();
+  hipStream_t captureStream = streams[0];
+  hipStream_t forkedStream = streams[1];
+  hipEvent_t forkEvent = events[0];
+  hipEvent_t selfEvent = events[1];
+  hipEvent_t joinEvent = events[2];
+
+  HIP_CHECK(hipMemset(devMem, 0, sizeof(int)));
+  HIP_CHECK(hipDeviceSynchronize());
+
+  HIP_CHECK(hipStreamBeginCapture(captureStream, hipStreamCaptureModeThreadLocal));
+
+  incrementKernel<<<1, 1, 0, captureStream>>>(devMem);
+  HIP_CHECK(hipGetLastError());
+
+  // Fork: the second stream joins the capture by waiting on the capture stream's event.
+  HIP_CHECK(hipEventRecord(forkEvent, captureStream));
+  HIP_CHECK(hipStreamWaitEvent(forkedStream, forkEvent, 0));
+
+  incrementKernel<<<1, 1, 0, forkedStream>>>(devMem);
+  HIP_CHECK(hipGetLastError());
+
+  // The forked stream records an event, then waits on that same event.
+  HIP_CHECK(hipEventRecord(selfEvent, forkedStream));
+  HIP_CHECK(hipStreamWaitEvent(forkedStream, selfEvent, 0));
+
+  incrementKernel<<<1, 1, 0, forkedStream>>>(devMem);
+  HIP_CHECK(hipGetLastError());
+
+  // Join the forked stream back so the capture is closeable.
+  HIP_CHECK(hipEventRecord(joinEvent, forkedStream));
+  HIP_CHECK(hipStreamWaitEvent(captureStream, joinEvent, 0));
+
+  hipGraph_t graph = nullptr;
+  HIP_CHECK(hipStreamEndCapture(captureStream, &graph));
+  REQUIRE(graph != nullptr);
+
+  size_t numNodes = 0;
+  size_t numEdges = 0;
+  HIP_CHECK(hipGraphGetNodes(graph, nullptr, &numNodes));
+  HIP_CHECK(hipGraphGetEdges(graph, nullptr, nullptr, &numEdges));
+  REQUIRE(numNodes == kExpectedNodes);
+  REQUIRE(numEdges == kExpectedEdges);
+
+  hipGraphExec_t graphExec = nullptr;
+  HIP_CHECK(hipGraphInstantiate(&graphExec, graph, nullptr, nullptr, 0));
+  HIP_CHECK(hipGraphLaunch(graphExec, captureStream));
+  HIP_CHECK(hipStreamSynchronize(captureStream));
+
+  int increments = 0;
+  HIP_CHECK(hipMemcpy(&increments, devMem, sizeof(int), hipMemcpyDeviceToHost));
+  REQUIRE(increments == kExpectedIncrements);
+
+  HIP_CHECK(hipGraphExecDestroy(graphExec));
+  HIP_CHECK(hipGraphDestroy(graph));
+}
+
+/**
+ * Test Description
+ * ------------------------
  *    - Test to verify hipStreamSynchronize on a stream works when stream capture
  * on another stream is ongoing.
  * Test source
