@@ -372,6 +372,35 @@ inline std::pair<int, std::string> hrr_playback_merged(
   int ret = proc.run(path_arg + (extra_args.empty() ? "" : " " + extra_args));
   return {ret, proc.getOutput()};
 }
+// Exit code hrr_playback_watchdog reports when it had to kill the replay.
+// 128 + SIGKILL matches the encoding SpawnProc uses for a signalled child, so
+// callers that only distinguish "crashed" from "clean" need no special case;
+// callers that care about the hang specifically check for it.
+inline constexpr int kHrrWatchdogKilled = hrr::test::SpawnProc::kKilledOnTimeout;
+
+// ---------------------------------------------------------------------------
+// hrr_playback_watchdog — replay under a deadline.
+//
+// Some replays do not fail, they hang: hipStreamWriteValue64 is a no-op at
+// replay, so a program that waits on the value it was supposed to write waits
+// forever (section 7 hazard H2 of HRR-Use-Case-Priorities.md). Without a
+// deadline that turns into a CI job that runs until the harness kills it,
+// which is both slower to diagnose and easy to misread as infrastructure
+// flake. Killing the child ourselves turns the hang into an assertable
+// outcome.
+// ---------------------------------------------------------------------------
+inline std::pair<int, std::string> hrr_playback_watchdog(
+    const fs::path& cap_path, int timeout_seconds,
+    const std::string& extra_args = "") {
+  hrr::test::SpawnProc proc(HRR_PLAYBACK_EXE, /*capture_stdout=*/true,
+                            /*capture_stderr=*/true);
+  set_proc_search_path(proc);
+  std::string path_arg = hrr_quote_path(cap_path);
+  int ret = proc.runWithTimeout(
+      path_arg + (extra_args.empty() ? "" : " " + extra_args), timeout_seconds);
+  return {ret, proc.getOutput()};
+}
+
 
 // The exact one-time warnings the generator emits.  Matching on a substring
 // rather than the whole sentence keeps these robust against rewording of the
