@@ -1415,9 +1415,9 @@ graph:
   Unit_hipGraphStreamPool_InstantiateFootprint:
     <<: *level_2
     tags: [exec]
-    # (amd_windows) PAL backend does not charge device memory for eager internal
-    # stream allocation at instantiate, so the footprint is unmeasurable there.
-    disabled: [amd_windows]
+    unsupported:
+      targets: [amd_windows]
+      reason: PAL backend does not charge device memory for eager internal stream allocation at instantiate; footprint is unmeasurable there
   Unit_hipGraphKernelNodeCopyAttributes_Functional:
     <<: *level_2
     tags: [node]
