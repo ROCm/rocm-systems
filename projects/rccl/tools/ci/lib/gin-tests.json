@@ -6,7 +6,8 @@
     "kind: 'rocshmem' -> $ROCSHMEM_TESTS_BIN_DIR/<bin>; 'rccl-tests' -> $RCCL_TESTS_BIN_DIR/<bin>;",
     "'fixtures' -> $RCCL_FIXTURES_BIN_DIR/<bin> (single-process gtest, no mpirun);",
     "'pytest' -> python3 -m pytest under $RCCL_TESTS_DIR/test/<bin> (opt-in rccl-tests",
-    "regressions; exports RCCL_TESTS_GIN_SDMA_BCAST=1 and points BCAST_EXE at broadcast_perf)",
+    "regressions; Broadcast sets RCCL_TESTS_GIN_SDMA_BCAST=1 / BCAST_EXE, ReduceScatter",
+    "sets RCCL_TESTS_GIN_SDMA_RS=1 / RS_EXE)",
     "{E} is replaced with NP*MSG_SIZE bytes. Tests are non-gating for now.",
     "-D 3 is the rocSHMEM-SDMA path the script labels 'Crash' (kept for visibility).",
     "debug_env: -x added to every test only when RCCL_CI_DEBUG=1.",
@@ -74,6 +75,13 @@
       "bin": "rccl-UnitTestsGinSdmaReduceScatterPolicy",
       "env": [],
       "args": ""
+    },
+    {
+      "name": "rccl-gin-rs-pytest",
+      "kind": "pytest",
+      "bin": "test_ReduceScatterGinSdma.py",
+      "env": ["NCCL_CUMEM_ENABLE=1", "RCCL_ENABLE_INTRANET=1", "NCCL_DMABUF_ENABLE=1", "HSA_NO_SCRATCH_RECLAIM=1", "NCCL_MSCCL_ENABLE=0"],
+      "args": "-k GinSdma -v"
     },
     {
       "name": "rccl-gin-fixtures-anvil-gda",
