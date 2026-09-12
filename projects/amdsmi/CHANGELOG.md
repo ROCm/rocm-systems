@@ -33,6 +33,10 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
   - Exposed under the same names in the Python `amdsmi_get_gpu_asic_info()` dictionary and in `amd-smi static --asic`. The C fields report `0xFFFFFFFF` when unsupported; Python and the CLI render that as `N/A`.
   - ABI-preserving: the two fields consume two `uint32_t` slots from `amdsmi_asic_info_t.reserved`, so the structure size and the offsets of every pre-existing named field except `reserved` are unchanged. `reserved` moves by two slots and shrinks from 17 to 15 entries.
 
+- **Added `AMDSMI_VRAM_TYPE_HBM4` to `amdsmi_vram_type_t`**.  
+  - Identifies HBM Generation 4 VRAM, reported by `amdsmi_get_gpu_vram_info()`.
+  - Also added the pre-existing `HBM3E` value to the Python `AmdSmiVramType` enum, which had been missing it.
+
 ### Changed
 
 - **`amdsmi_get_clock_info()` now returns `AMDSMI_STATUS_INPUT_OUT_OF_BOUNDS` for clock values that exceed `INT_MAX`**.  
