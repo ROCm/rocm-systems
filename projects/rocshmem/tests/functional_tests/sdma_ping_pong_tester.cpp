@@ -33,6 +33,8 @@
 
 using namespace rocshmem;
 
+namespace atomic = rocshmem::detail::atomic;
+
 /******************************************************************************
  * DEVICE TEST KERNEL
  *
@@ -114,15 +116,15 @@ __global__ void SdmaPingPongTest(int loop, int skip,
         if (pe == 0) {
           sdma_anvil::put(*handle, remote_r_buf, my_s, size);
           sdma_anvil::quiet(*handle);
-          __hip_atomic_fetch_add(remote_sig, 1ULL, __ATOMIC_RELAXED,
-                                 __HIP_MEMORY_SCOPE_SYSTEM);
+          atomic::fetch_add<atomic::memory_scope::system,
+                            atomic::memory_order::relaxed>(remote_sig, 1ULL);
           sdma_anvil::waitSignal(my_sig, expected);
         } else {
           sdma_anvil::waitSignal(my_sig, expected);
           sdma_anvil::put(*handle, remote_r_buf, my_s, size);
           sdma_anvil::quiet(*handle);
-          __hip_atomic_fetch_add(remote_sig, 1ULL, __ATOMIC_RELAXED,
-                                 __HIP_MEMORY_SCOPE_SYSTEM);
+          atomic::fetch_add<atomic::memory_scope::system,
+                            atomic::memory_order::relaxed>(remote_sig, 1ULL);
         }
       }
     }

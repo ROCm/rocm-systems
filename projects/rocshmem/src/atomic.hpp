@@ -26,122 +26,170 @@
 #define LIBRARY_SRC_ATOMIC_HPP
 
 #include <hip/hip_runtime.h>
+#include <type_traits>
 
 namespace rocshmem {
 namespace detail {
 namespace atomic {
 
-typedef enum rocshmem_memory_scope {
-  memory_scope_thread = __HIP_MEMORY_SCOPE_SINGLETHREAD,
-  memory_scope_wavefront = __HIP_MEMORY_SCOPE_WAVEFRONT,
-  memory_scope_workgroup = __HIP_MEMORY_SCOPE_WORKGROUP,
-  memory_scope_agent = __HIP_MEMORY_SCOPE_AGENT,
-  memory_scope_system = __HIP_MEMORY_SCOPE_SYSTEM,
-} rocshmem_memory_scope;
-
-typedef enum rocshmem_memory_order {
-  memory_order_relaxed = __ATOMIC_RELAXED,
-  memory_order_consume = __ATOMIC_CONSUME,
-  memory_order_acquire = __ATOMIC_ACQUIRE,
-  memory_order_release = __ATOMIC_RELEASE,
-  memory_order_acq_rel = __ATOMIC_ACQ_REL,
-  memory_order_seq_cst = __ATOMIC_SEQ_CST
-} rocshmem_memory_order;
-
-struct rocshmem_memory_orders {
-  rocshmem_memory_order load {memory_order_acquire};
-  rocshmem_memory_order store {memory_order_release};
-  rocshmem_memory_order atomic {memory_order_acq_rel};
-  rocshmem_memory_order weak_cas_success {memory_order_acq_rel};
-  rocshmem_memory_order weak_cas_failure {memory_order_acq_rel};
-  rocshmem_memory_order strong_cas_success {memory_order_acq_rel};
-  rocshmem_memory_order strong_cas_failure {memory_order_acq_rel};
+enum class memory_scope : int {
+  single    = __MEMORY_SCOPE_SINGLE,
+  wavefront = __MEMORY_SCOPE_WVFRNT,
+  workgroup = __MEMORY_SCOPE_WRKGRP,
+  device    = __MEMORY_SCOPE_DEVICE,
+  system    = __MEMORY_SCOPE_SYSTEM,
+#if defined(__MEMORY_SCOPE_CLUSTR)
+  cluster   = __MEMORY_SCOPE_CLUSTR,
+#else
+  cluster   = __MEMORY_SCOPE_DEVICE,
+#endif
 };
 
-template <typename T, rocshmem_memory_scope s>
+enum class memory_order : int {
+  relaxed = __ATOMIC_RELAXED,
+  consume = __ATOMIC_CONSUME,
+  acquire = __ATOMIC_ACQUIRE,
+  release = __ATOMIC_RELEASE,
+  acq_rel = __ATOMIC_ACQ_REL,
+  seq_cst = __ATOMIC_SEQ_CST,
+};
+
+// Suppresses template argument deduction for a function parameter so that the
+// value type is fixed by the object pointer alone (C++17-safe stand-in for
+// std::type_identity, which is C++20).
+template <typename T>
+struct type_identity { using type = T; };
+
+template <typename T>
+using type_identity_t = typename type_identity<T>::type;
+
+template <memory_scope scope = memory_scope::system,
+          memory_order order = memory_order::seq_cst, typename T>
 __host__ __device__
-T load(const T* address, rocshmem_memory_orders o) {
-  return __hip_atomic_load(address, o.load, s);
+T load(const T* address) {
+  return __scoped_atomic_load_n(address, static_cast<int>(order),
+                                static_cast<int>(scope));
 }
 
-template <typename T, rocshmem_memory_scope s>
+template <memory_scope scope = memory_scope::system,
+          memory_order order = memory_order::seq_cst, typename T>
 __host__ __device__
-void store(T* address, const T value, rocshmem_memory_orders o) {
-  return __hip_atomic_store(address, value, o.store, s);
+void store(T* address, type_identity_t<T> value) {
+  return __scoped_atomic_store_n(address, value, static_cast<int>(order),
+                                 static_cast<int>(scope));
 }
 
-template <typename T, rocshmem_memory_scope s>
+template <memory_scope scope = memory_scope::system,
+          memory_order order = memory_order::seq_cst, typename T>
 __host__ __device__
-bool compare_exchange_weak(T& expected, T desired, rocshmem_memory_orders o) {
-  return __hip_atomic_compare_exchange_weak(expected, desired, o.weak_cas_success, o.weak_cas_failure, s);
+T exchange(T* obj, type_identity_t<T> desired) {
+  return __scoped_atomic_exchange_n(obj, desired, static_cast<int>(order),
+                                    static_cast<int>(scope));
 }
 
-template <typename T, rocshmem_memory_scope s>
+template <memory_scope scope   = memory_scope::system,
+          memory_order success = memory_order::seq_cst,
+          memory_order failure = memory_order::seq_cst, typename T>
 __host__ __device__
-bool compare_exchange_strong(T& expected, T desired, rocshmem_memory_orders o) {
-  return __hip_atomic_compare_exchange_strong(expected, desired, o.strong_cas_success, o.strong_cas_failure, s);
+bool compare_exchange_weak(T* obj, T& expected, type_identity_t<T> desired) {
+  return __scoped_atomic_compare_exchange_n(obj, &expected, desired, true,
+                                            static_cast<int>(success),
+                                            static_cast<int>(failure),
+                                            static_cast<int>(scope));
 }
 
-template <class T, class U, rocshmem_memory_scope s>
+template <memory_scope scope   = memory_scope::system,
+          memory_order success = memory_order::seq_cst,
+          memory_order failure = memory_order::seq_cst, typename T>
 __host__ __device__
-T fetch_add(T* obj, U arg, rocshmem_memory_orders o) {
-  return __hip_atomic_fetch_add(obj, arg, o.atomic, s);
+bool compare_exchange_strong(T* obj, T& expected, type_identity_t<T> desired) {
+  return __scoped_atomic_compare_exchange_n(obj, &expected, desired, false,
+                                            static_cast<int>(success),
+                                            static_cast<int>(failure),
+                                            static_cast<int>(scope));
 }
 
-template <class T, class U, rocshmem_memory_scope s>
+template <memory_scope scope = memory_scope::system,
+          memory_order order = memory_order::seq_cst, typename T>
 __host__ __device__
-T fetch_sub(T* obj, U arg, rocshmem_memory_orders o) {
-  return __hip_atomic_fetch_sub(obj, arg, o.atomic, s);
+T fetch_add(T* obj, type_identity_t<T> arg) {
+  // __scoped_atomic_fetch_add does not scale the addend by sizeof(T) for
+  // pointer types (unlike __hip_atomic_fetch_add), so pointer atomics would
+  // silently change behavior. Reject them until a scaled path is needed.
+  static_assert(!std::is_pointer_v<T>,
+                "atomic::fetch_add does not support pointer element types");
+  return __scoped_atomic_fetch_add(obj, arg, static_cast<int>(order),
+                                   static_cast<int>(scope));
 }
 
-template <class T, class U, rocshmem_memory_scope s>
+template <memory_scope scope = memory_scope::system,
+          memory_order order = memory_order::seq_cst, typename T>
 __host__ __device__
-T fetch_and(T* obj, U arg, rocshmem_memory_orders o) {
-  return __hip_atomic_fetch_and(obj, arg, o.atomic, s);
+T fetch_sub(T* obj, type_identity_t<T> arg) {
+  static_assert(!std::is_pointer_v<T>,
+                "atomic::fetch_sub does not support pointer element types");
+  return __scoped_atomic_fetch_sub(obj, arg, static_cast<int>(order),
+                                   static_cast<int>(scope));
 }
 
-template <class T, class U, rocshmem_memory_scope s>
+template <memory_scope scope = memory_scope::system,
+          memory_order order = memory_order::seq_cst, typename T>
 __host__ __device__
-T fetch_or(T* obj, U arg, rocshmem_memory_orders o) {
-  return __hip_atomic_fetch_or(obj, arg, o, s);
+T fetch_and(T* obj, type_identity_t<T> arg) {
+  return __scoped_atomic_fetch_and(obj, arg, static_cast<int>(order),
+                                   static_cast<int>(scope));
 }
 
-template <class T, class U, rocshmem_memory_scope s>
+template <memory_scope scope = memory_scope::system,
+          memory_order order = memory_order::seq_cst, typename T>
 __host__ __device__
-T fetch_xor(T* obj, U arg, rocshmem_memory_orders o) {
-  return __hip_atomic_fetch_xor(obj, arg, o.atomic, s);
+T fetch_or(T* obj, type_identity_t<T> arg) {
+  return __scoped_atomic_fetch_or(obj, arg, static_cast<int>(order),
+                                  static_cast<int>(scope));
 }
 
-template <class T, class U, rocshmem_memory_scope s>
+template <memory_scope scope = memory_scope::system,
+          memory_order order = memory_order::seq_cst, typename T>
 __host__ __device__
-T fetch_max(T* obj, U arg, rocshmem_memory_orders o) {
-  return __hip_atomic_fetch_max(obj, arg, o.atomic, s);
+T fetch_xor(T* obj, type_identity_t<T> arg) {
+  return __scoped_atomic_fetch_xor(obj, arg, static_cast<int>(order),
+                                   static_cast<int>(scope));
 }
 
-template <class T, class U, rocshmem_memory_scope s>
+template <memory_scope scope = memory_scope::system,
+          memory_order order = memory_order::seq_cst, typename T>
 __host__ __device__
-T fetch_min(T* obj, U arg, rocshmem_memory_orders o) {
-  return __hip_atomic_fetch_min(obj, arg, o.atomic, s);
+T fetch_max(T* obj, type_identity_t<T> arg) {
+  return __scoped_atomic_fetch_max(obj, arg, static_cast<int>(order),
+                                   static_cast<int>(scope));
+}
+
+template <memory_scope scope = memory_scope::system,
+          memory_order order = memory_order::seq_cst, typename T>
+__host__ __device__
+T fetch_min(T* obj, type_identity_t<T> arg) {
+  return __scoped_atomic_fetch_min(obj, arg, static_cast<int>(order),
+                                   static_cast<int>(scope));
 }
 
 #define ROCSHMEM_DISPATCH_FENCE_ORDER(SCOPE_STR)         \
-  if constexpr (order == memory_order_acquire)           \
+  if constexpr (order == memory_order::acquire)          \
     __builtin_amdgcn_fence(__ATOMIC_ACQUIRE, SCOPE_STR); \
-  else if constexpr (order == memory_order_release)      \
+  else if constexpr (order == memory_order::release)     \
     __builtin_amdgcn_fence(__ATOMIC_RELEASE, SCOPE_STR); \
-  else if constexpr (order == memory_order_acq_rel)      \
+  else if constexpr (order == memory_order::acq_rel)     \
     __builtin_amdgcn_fence(__ATOMIC_ACQ_REL, SCOPE_STR); \
   else                                                   \
     __builtin_amdgcn_fence(__ATOMIC_SEQ_CST, SCOPE_STR)
 
-template <rocshmem_memory_scope scope = memory_scope_system,
-          rocshmem_memory_order order = memory_order_seq_cst>
+template <memory_scope scope = memory_scope::system,
+          memory_order order = memory_order::seq_cst>
 __device__ __forceinline__ void threadfence() {
-  if constexpr (scope == memory_scope_thread ||
-                scope == memory_scope_wavefront ||
-                scope == memory_scope_workgroup) {
+  if constexpr (scope == memory_scope::single ||
+                scope == memory_scope::wavefront ||
+                scope == memory_scope::workgroup) {
     ROCSHMEM_DISPATCH_FENCE_ORDER("workgroup");
-  } else if constexpr (scope == memory_scope_agent) {
+  } else if constexpr (scope == memory_scope::device) {
     ROCSHMEM_DISPATCH_FENCE_ORDER("agent");
   } else {
     ROCSHMEM_DISPATCH_FENCE_ORDER("");  // system scope

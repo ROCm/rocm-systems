@@ -27,6 +27,7 @@
  *****************************************************************************/
 
 #include <rocshmem/rocshmem.hpp>
+#include "atomic.hpp"
 #include "../util.h"
 
 #define NUM_WORKSPACE_BYTES (32 * 1024 * 1024)
@@ -59,14 +60,17 @@ __forceinline__ __device__ void grid_barrier(int* global_counter,
   __threadfence();
   __syncthreads();
   if (threadIdx.x == 0) {
-    __hip_atomic_fetch_add(&global_counter[0], 1,
-                           __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT);
+    detail::atomic::fetch_add<
+      detail::atomic::memory_scope::device,
+      detail::atomic::memory_order::relaxed>(
+        &global_counter[0], 1);
   }
   __syncthreads();
   if (threadIdx.x == 0) {
-    while (__hip_atomic_load(global_counter,
-                             __ATOMIC_RELAXED,
-                             __HIP_MEMORY_SCOPE_AGENT) != num_blocks);
+    while (detail::atomic::load<
+             detail::atomic::memory_scope::device,
+             detail::atomic::memory_order::relaxed>(
+               global_counter) != num_blocks);
   }
   __syncthreads();
 }
@@ -192,8 +196,10 @@ void dispatch_kernel(void *packed_recv_x, int *packed_recv_src_info,
         warp_sync();
         // Increment local counter after ensuring PUTs are issued
         lane_id == 0 ?
-          __hip_atomic_fetch_add(atomic_finish_counter_per_expert + dst_expert_idx, 1,
-                                 __ATOMIC_RELEASE, __HIP_MEMORY_SCOPE_AGENT) : 0;
+          detail::atomic::fetch_add<
+            detail::atomic::memory_scope::device,
+            detail::atomic::memory_order::release>(
+              atomic_finish_counter_per_expert + dst_expert_idx, 1) : 0;
       }
     }
   }
@@ -203,9 +209,10 @@ void dispatch_kernel(void *packed_recv_x, int *packed_recv_src_info,
       for (int i = lane_id; i < num_next_clean_int; i += kWaveSize)
         next_clean[i] = 0;
       for (int i = lane_id; i < num_experts; i += kWaveSize) {
-        __hip_atomic_fetch_add(atomic_finish_counter_per_expert + i,
-                               FINISHED_SUM_TAG, __ATOMIC_RELEASE,
-                               __HIP_MEMORY_SCOPE_AGENT);
+        detail::atomic::fetch_add<
+          detail::atomic::memory_scope::device,
+          detail::atomic::memory_order::release>(
+            atomic_finish_counter_per_expert + i, FINISHED_SUM_TAG);
       }
     }
     /**
@@ -230,9 +237,10 @@ void dispatch_kernel(void *packed_recv_x, int *packed_recv_src_info,
       int sum = warp_reduce_sum(expert_count[i - expert_begin_idx]);
       if (lane_id == 0) {
         shared_num_tokens_sent_per_expert[i - expert_begin_idx] = sum;
-        __hip_atomic_fetch_add(atomic_finish_counter_per_expert + i,
-                               FINISHED_SUM_TAG - sum, __ATOMIC_RELEASE,
-                               __HIP_MEMORY_SCOPE_AGENT);
+        detail::atomic::fetch_add<
+          detail::atomic::memory_scope::device,
+          detail::atomic::memory_order::release>(
+            atomic_finish_counter_per_expert + i, FINISHED_SUM_TAG - sum);
       }
     }
   }
@@ -248,9 +256,11 @@ void dispatch_kernel(void *packed_recv_x, int *packed_recv_src_info,
                                           wg_id * kNumWaveGroups];
 
     // Wait until all tokens have been sent and counted
-    while(__hip_atomic_load(atomic_finish_counter_per_expert + responsible_expert_id,
-                             __ATOMIC_ACQUIRE, __HIP_MEMORY_SCOPE_AGENT) !=
-          FINISHED_SUM_TAG * 2);
+    while(detail::atomic::load<
+            detail::atomic::memory_scope::device,
+            detail::atomic::memory_order::acquire>(
+              atomic_finish_counter_per_expert +
+                responsible_expert_id) != FINISHED_SUM_TAG * 2);
 
     if (dst_rank != rank) {
       rocshmem_long_atomic_add(
@@ -261,9 +271,11 @@ void dispatch_kernel(void *packed_recv_x, int *packed_recv_src_info,
        * Local store for same-rank communication
        * TODO: Does it require atomic store? each store is to a unique location
        */
-      __hip_atomic_store(rdma_recv_count + dst_expert_local_idx * num_ranks + rank,
-                         -num_tokens_sent - 1, __ATOMIC_RELEASE,
-                         __HIP_MEMORY_SCOPE_AGENT);
+      detail::atomic::store<
+        detail::atomic::memory_scope::device,
+        detail::atomic::memory_order::release>(
+          rdma_recv_count + dst_expert_local_idx * num_ranks + rank,
+            - num_tokens_sent - 1);
     }
 
     // Clean workspace for next use
@@ -324,10 +336,11 @@ void dispatch_kernel(void *packed_recv_x, int *packed_recv_src_info,
      */
     int num_recv_tokens, recv_token_begin_idx;
     if (sub_wave_id == 0 && lane_id == 0) {
-      while ((num_recv_tokens = __hip_atomic_load(
+      while ((num_recv_tokens = detail::atomic::load<
+                detail::atomic::memory_scope::device,
+                detail::atomic::memory_order::acquire>(
                   reinterpret_cast<int*>(rdma_recv_count + local_expert_idx *
-                                         num_ranks + src_rank),
-                  __ATOMIC_ACQUIRE, __HIP_MEMORY_SCOPE_AGENT)) == 0);
+                    num_ranks + src_rank))) == 0);
       num_recv_tokens = -num_recv_tokens - 1;
       /**
        * Once the number of received tokens is known, pack the data from
@@ -486,8 +499,10 @@ void combine_kernel(T* combined_x, void* rdma_recv_x, int64_t* rdma_recv_flag,
 
     warp_sync();
     if (lane_id == 0)
-      __hip_atomic_fetch_add(atomic_clean_flag, num_experts,
-                             __ATOMIC_RELEASE, __HIP_MEMORY_SCOPE_AGENT);
+      detail::atomic::fetch_add<
+        detail::atomic::memory_scope::device,
+        detail::atomic::memory_order::release>(
+          atomic_clean_flag, num_experts);
   }
 
   // Issue rocSHMEM puts
@@ -543,16 +558,19 @@ void combine_kernel(T* combined_x, void* rdma_recv_x, int64_t* rdma_recv_flag,
 
     // Synchronize sub-warps in the warp group
     if (lane_id == 0) {
-      __hip_atomic_fetch_add(&sync_large_warp_counters[wave_group_id], 1,
-          __ATOMIC_RELEASE, __HIP_MEMORY_SCOPE_AGENT);
+      detail::atomic::fetch_add<
+        detail::atomic::memory_scope::device,
+        detail::atomic::memory_order::release>(
+          &sync_large_warp_counters[wave_group_id], 1);
       warp_sync();
       while (sync_large_warp_counters[wave_group_id] < kNumWavesPerGroup);
     }
 
     if (sub_wave_id == 0 && lane_id == 0) {
       //
-      while (__hip_atomic_load(atomic_clean_flag, __ATOMIC_ACQUIRE,
-                               __HIP_MEMORY_SCOPE_AGENT) == 0);
+      while (detail::atomic::load<
+              detail::atomic::memory_scope::device,
+              detail::atomic::memory_order::acquire>(atomic_clean_flag) == 0);
 
       // Issue atomic add to notify expert about completed sends
       if (dst_rank != rank) {
@@ -560,18 +578,23 @@ void combine_kernel(T* combined_x, void* rdma_recv_x, int64_t* rdma_recv_flag,
                                  dst_rank);
       } else {
         // Local store for same-rank communication
-        __hip_atomic_store(rdma_recv_flag + global_expert_idx, 1,
-                           __ATOMIC_RELEASE, __HIP_MEMORY_SCOPE_AGENT);
+        detail::atomic::store<
+          detail::atomic::memory_scope::device,
+          detail::atomic::memory_order::release>(
+            rdma_recv_flag + global_expert_idx, 1);
       }
-      __hip_atomic_fetch_add(atomic_clean_flag, -1,
-                             __ATOMIC_RELEASE, __HIP_MEMORY_SCOPE_AGENT);
+      detail::atomic::fetch_add<
+        detail::atomic::memory_scope::device,
+        detail::atomic::memory_order::release>(atomic_clean_flag, -1);
     }
   }
 
   // Wait until data is received for the assigned expert
   if (responsible_expert_id < num_experts && sub_wave_id == 0 && lane_id == 0) {
-    while (__hip_atomic_load(rdma_recv_flag + responsible_expert_id,
-                             __ATOMIC_ACQUIRE, __HIP_MEMORY_SCOPE_AGENT) == 0);
+    while (detail::atomic::load<
+             detail::atomic::memory_scope::device,
+             detail::atomic::memory_order::acquire>(
+              rdma_recv_flag + responsible_expert_id) == 0);
   }
 
   /**

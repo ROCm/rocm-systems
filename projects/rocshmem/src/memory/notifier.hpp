@@ -32,32 +32,34 @@
 
 namespace rocshmem {
 
-template<detail::atomic::rocshmem_memory_scope scope>
+namespace atomic = detail::atomic;
+
+template<atomic::memory_scope scope>
 class Notifier {
 
  public:
   __device__ uint64_t load() {
-    return detail::atomic::load<uint64_t, scope>(&value_, orders_);
+    return atomic::load<scope, atomic::memory_order::acquire>(&value_);
   }
 
   __device__ void store(uint64_t val) {
-    detail::atomic::store<uint64_t, scope>(&value_, val, orders_);
+    atomic::store<scope, atomic::memory_order::release>(&value_, val);
   }
 
   __device__ void fence() {
-    detail::atomic::threadfence<scope>();
+    atomic::threadfence<scope>();
   }
 
   __device__ void sync() {
-    if constexpr (scope == detail::atomic::memory_scope_thread ||
-                  scope == detail::atomic::memory_scope_wavefront) {
+    if constexpr (scope == atomic::memory_scope::single ||
+                  scope == atomic::memory_scope::wavefront) {
       return;
     }
-    if constexpr (scope == detail::atomic::memory_scope_workgroup) {
+    if constexpr (scope == atomic::memory_scope::workgroup) {
       __syncthreads();
       return;
     }
-    if constexpr (scope == detail::atomic::memory_scope_system) {
+    if constexpr (scope == atomic::memory_scope::system) {
       static_assert(false);
       return;
     }
@@ -68,21 +70,22 @@ class Notifier {
     uint32_t retval {0};
     bool executor {!threadIdx.x && !threadIdx.y && !threadIdx.z};
     if (executor) {
-      retval = detail::atomic::fetch_add<uint32_t, uint32_t, scope>(&count_, 1, orders_);
+      retval = atomic::fetch_add<scope, atomic::memory_order::acq_rel>(&count_, 1);
       fence();
     }
     __syncthreads();
 
     if (retval == ((gridDim.x * gridDim.y * gridDim.z) - 1)) {
       if (executor) {
-        detail::atomic::store<uint32_t, scope>(&count_, 0, orders_);
+        atomic::store<scope, atomic::memory_order::release>(&count_, 0);
         fence();
-        detail::atomic::fetch_add<uint32_t, uint32_t, scope>(&signal_, 1, orders_);
+        atomic::fetch_add<scope, atomic::memory_order::acq_rel>(&signal_, 1);
       }
     }
 
     if (executor) {
-      while (detail::atomic::load<uint32_t, scope>(&signal_, orders_) != done) {
+      while (atomic::load<scope, atomic::memory_order::acquire>(
+               &signal_) != done) {
         ;
       }
     }
@@ -90,8 +93,6 @@ class Notifier {
   }
 
  private:
-  detail::atomic::rocshmem_memory_orders orders_{};
-
   uint64_t value_{};
 
   uint32_t signal_ {};
@@ -99,7 +100,7 @@ class Notifier {
   uint32_t count_ {};
 };
 
-template <detail::atomic::rocshmem_memory_scope scope>
+template <atomic::memory_scope scope>
 class NotifierProxy {
   using ProxyT = DeviceProxy<Notifier<scope>>;
 
