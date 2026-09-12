@@ -87,6 +87,24 @@ def glob_filter_matches(name: str, pattern_str: str) -> bool:
     return (not pos) or any(p.match(name) for p in pos)
 
 
+def suite_disposition(suite, smoke_only, suite_name_filter=None):
+    """Classify a parsed suite for the banner and the run/record loop.
+
+    Order is scope, then --suite-name, then enabled. A disabled suite outside
+    smoke or off the name filter is skip, not disabled, so the banner and the
+    summary stay in agreement.
+    """
+    details = suite["suite_details"]
+    if smoke_only and not details.get("smoke", False):
+        return "skip_scope"
+    name = details["name"]
+    if suite_name_filter and not glob_filter_matches(name, suite_name_filter):
+        return "skip_name"
+    if not details.get("enabled", True):
+        return "disabled"
+    return "run"
+
+
 def configure_coverage_build(install_flags, cmake_options, coverage_report):
     """Return build options for the requested coverage mode."""
     install_flags = list(install_flags)
@@ -149,6 +167,7 @@ class TestResult(str, Enum):
     RESULT_FAILED = "FAILED"
     RESULT_TIMEOUT = "TIMEOUT"
     RESULT_SKIPPED = "SKIPPED"
+    RESULT_DISABLED = "DISABLED"
 
 
 # Google Test's own "nothing was selected" banner, e.g. a --gtest_filter that
@@ -287,7 +306,10 @@ def collect_gtest_case_details(obj):
 
 
 def _counts_from_details(details):
-    counts = {"cases": 0, "passed": 0, "failed": 0, "skipped": 0, "timeout": 0}
+    counts = {
+        "cases": 0, "passed": 0, "failed": 0, "skipped": 0, "timeout": 0,
+        "disabled": 0,
+    }
     for item in details or []:
         counts["cases"] += 1
         status = item.get("status")
@@ -299,6 +321,8 @@ def _counts_from_details(details):
             counts["skipped"] += 1
         elif status == "TIMEOUT":
             counts["timeout"] += 1
+        elif status == "DISABLED":
+            counts["disabled"] += 1
     return counts
 
 
@@ -424,6 +448,7 @@ _UNIQUE_STATUS_RANK = {
     "TIMEOUT": 1,
     "SKIPPED": 2,
     "PASSED": 3,
+    "DISABLED": 4,
 }
 _IDENTITY_ENV_IGNORE = frozenset({
     "LD_LIBRARY_PATH",
@@ -686,6 +711,7 @@ def _tally_status(counts, prefix, status):
         "FAILED": f"{prefix}failed",
         "SKIPPED": f"{prefix}skipped",
         "TIMEOUT": f"{prefix}timeout",
+        "DISABLED": f"{prefix}disabled",
     }.get(status, f"{prefix}other")
     counts[key] += 1
 
@@ -699,9 +725,11 @@ def summarize_case_uniqueness(entries):
 
     Invariants:
       unique + duplicate_extra == total
-      executed_{passed,failed,skipped,timeout,other} sum to total
-      unique_{passed,failed,skipped,timeout,other} sum to unique
-    When duplicate_cases == 0 the executed and unique status buckets match.
+      total_{passed,failed,skipped,timeout,disabled,other} sum to total
+      unique_{passed,failed,skipped,timeout,disabled,other} sum to unique
+    When duplicate_cases == 0 the total and unique status buckets match.
+    Disabled config entries (enabled: false) are included in total and unique
+    so those two still add up after the Disabled metric is printed.
     """
     groups = {}
     order = []
@@ -717,15 +745,17 @@ def summarize_case_uniqueness(entries):
         "unique": 0,
         "duplicate_extra": 0,
         "duplicate_cases": 0,
-        "executed_passed": 0,
-        "executed_failed": 0,
-        "executed_skipped": 0,
-        "executed_timeout": 0,
-        "executed_other": 0,
+        "total_passed": 0,
+        "total_failed": 0,
+        "total_skipped": 0,
+        "total_timeout": 0,
+        "total_disabled": 0,
+        "total_other": 0,
         "unique_passed": 0,
         "unique_failed": 0,
         "unique_skipped": 0,
         "unique_timeout": 0,
+        "unique_disabled": 0,
         "unique_other": 0,
     }
     unique_loc = {}
@@ -736,7 +766,7 @@ def summarize_case_uniqueness(entries):
         unique_counts["total"] += len(records)
         unique_counts["unique"] += 1
         for record in records:
-            _tally_status(unique_counts, "executed_", record.get("status"))
+            _tally_status(unique_counts, "total_", record.get("status"))
         extra = len(records) - 1
         if extra:
             unique_counts["duplicate_extra"] += extra
@@ -776,7 +806,7 @@ def summarize_case_uniqueness(entries):
 
 
 def format_case_counts(counts):
-    """One-line expansion of a config entry into executed gtest/pytest cases."""
+    """One-line expansion of a config entry into counted gtest/pytest cases."""
     if not counts:
         return ""
     cases = counts.get("cases", 0)
@@ -786,6 +816,7 @@ def format_case_counts(counts):
         ("failed", "failed"),
         ("skipped", "skipped"),
         ("timeout", "timed out"),
+        ("disabled", "disabled"),
     ):
         n = counts.get(key, 0)
         if n:
@@ -797,7 +828,10 @@ def format_case_counts(counts):
 
 def _sum_case_counts(list_of_counts):
     """Sum case_counts dicts; ignore None/missing (timeouts, pre-launch skips)."""
-    total = {"cases": 0, "passed": 0, "failed": 0, "skipped": 0, "timeout": 0}
+    total = {
+        "cases": 0, "passed": 0, "failed": 0, "skipped": 0, "timeout": 0,
+        "disabled": 0,
+    }
     for counts in list_of_counts or []:
         if not counts:
             continue
@@ -2610,21 +2644,7 @@ class TestExecutor:
 
             result = self.run_test(test, suite_config)
             results.append(result)
-
-            self.test_names.append(test_name)
-            self.test_results.append(result["result"])
-            self.test_durations.append(result["duration"])
-            self.test_suites.append(suite_name)
-            self.test_case_counts.append(result.get("case_counts"))
-            self.test_case_details.append(result.get("case_details"))
-            self.test_run_identities.append(result.get("run_identity", ""))
-            self.test_executed.append(bool(result.get("executed")))
-
-            if self.emit_enabled:
-                record = dict(result)
-                record["suite"] = suite_name
-                record["test_name"] = test_name
-                self.test_records.append(record)
+            self._record_result(suite_name, test_name, result)
 
             # If test failed and rerun flag is set, rerun immediately
             if self.args.rerun_failed and result["result"] in [TestResult.RESULT_FAILED.value, TestResult.RESULT_TIMEOUT.value]:
@@ -2685,6 +2705,64 @@ class TestExecutor:
 
         return results
 
+    def _record_result(self, suite_name, test_name, result):
+        """Append one config-entry result to the summary lists and emit records.
+
+        Used by both launched runs and enabled:false DISABLED rows so a later
+        list or emit field cannot update one site and miss the other.
+        """
+        duration = float(result.get("duration") or 0)
+        self.test_names.append(test_name)
+        self.test_results.append(result["result"])
+        self.test_durations.append(duration)
+        self.test_suites.append(suite_name)
+        self.test_case_counts.append(result.get("case_counts"))
+        self.test_case_details.append(result.get("case_details"))
+        self.test_run_identities.append(result.get("run_identity", ""))
+        self.test_executed.append(bool(result.get("executed")))
+        if self.emit_enabled:
+            record = dict(result)
+            record["suite"] = suite_name
+            record["test_name"] = test_name
+            record["duration"] = duration
+            self.test_records.append(record)
+
+    def record_disabled_suite(self, suite_config):
+        """Record each config test as DISABLED without launching it.
+
+        ``enabled: false`` suites are omitted from the run, so they never
+        appear in the summary table or the Total/Unique case counts. Recording
+        them as DISABLED rows makes Config entries = Passed+Failed+Skipped+
+        Timeout+Disabled. The same leaves are included in Total and Unique so
+        those two still add up.
+        """
+        suite_name = suite_config["suite_details"]["name"]
+        tests = suite_config.get("tests") or []
+        for test in tests:
+            test_name = test.get("name") or "(test)"
+            if self.args.test_name and not glob_filter_matches(
+                test_name, self.args.test_name
+            ):
+                continue
+            test_filter = test.get("test_filter", "*")
+            detail = synthetic_case_detail(
+                test_name, test_filter, status=TestResult.RESULT_DISABLED.value
+            )
+            identity = make_run_identity_key(
+                extra=f"disabled:{suite_name}:{test_name}",
+            )
+            details = stamp_run_identity([detail], identity)
+            counts = _counts_from_details(details)
+            self._record_result(suite_name, test_name, {
+                "name": test_name,
+                "result": TestResult.RESULT_DISABLED.value,
+                "duration": 0.0,
+                "executed": False,
+                "case_counts": counts,
+                "case_details": details,
+                "run_identity": identity,
+            })
+
     def _format_duration(self, seconds):
         """
         Format duration in a human-readable format
@@ -2734,6 +2812,7 @@ class TestExecutor:
         failed = self.test_results.count(TestResult.RESULT_FAILED.value)
         timeout = self.test_results.count(TestResult.RESULT_TIMEOUT.value)
         skipped = self.test_results.count(TestResult.RESULT_SKIPPED.value)
+        disabled = self.test_results.count(TestResult.RESULT_DISABLED.value)
 
         # Calculate total test time
         total_time_seconds = sum(self.test_durations) if self.test_durations else 0
@@ -2775,21 +2854,14 @@ class TestExecutor:
                 print(dup_tree)
             else:
                 print("Duplicate cases: (none)")
-            unique_tree = format_unique_tree(
-                uniqueness["unique_entries"],
-                title=f"Unique test cases ({uniqueness['unique']}):",
-            )
-            if unique_tree:
-                print(unique_tree)
-            else:
-                print("Unique test cases: (none)")
-            # Counts last so they are visible at EOF after the case trees.
+            # Counts last so they are visible at EOF after the issue and duplicate trees.
             print(f"Config entries: {total_tests}")
             print(f"Passed:         {passed}")
             print(f"Failed:         {failed}")
             print(f"Skipped:        {skipped}")
             print(f"Timeout:        {timeout}")
-            print("Test cases executed (gtest/pytest; wildcards expanded):")
+            print(f"Disabled:       {disabled}")
+            print("Test cases (gtest/pytest; wildcards expanded):")
             print(f"  Total:        {uniqueness['total']}")
             print(f"  Unique:       {uniqueness['unique']}")
             if uniqueness["duplicate_cases"]:
@@ -2799,12 +2871,13 @@ class TestExecutor:
                 )
             else:
                 print("  Duplicate:    none")
-            print(f"  Passed:       {uniqueness['executed_passed']}")
-            print(f"  Failed:       {uniqueness['executed_failed']}")
-            print(f"  Skipped:      {uniqueness['executed_skipped']}")
-            print(f"  Timeout:      {uniqueness['executed_timeout']}")
-            if uniqueness["executed_other"]:
-                print(f"  Other:        {uniqueness['executed_other']}")
+            print(f"  Passed:       {uniqueness['total_passed']}")
+            print(f"  Failed:       {uniqueness['total_failed']}")
+            print(f"  Skipped:      {uniqueness['total_skipped']}")
+            print(f"  Timeout:      {uniqueness['total_timeout']}")
+            print(f"  Disabled:     {uniqueness['total_disabled']}")
+            if uniqueness["total_other"]:
+                print(f"  Other:        {uniqueness['total_other']}")
             print(f"Total Time:     {self._format_duration(total_time_seconds)}")
             print("="*120)
 
@@ -3459,13 +3532,15 @@ class TestExecutor:
             "failed": self.test_results.count(TestResult.RESULT_FAILED.value),
             "timeout": self.test_results.count(TestResult.RESULT_TIMEOUT.value),
             "skipped": self.test_results.count(TestResult.RESULT_SKIPPED.value),
+            "disabled": self.test_results.count(TestResult.RESULT_DISABLED.value),
             "duration_s": sum(self.test_durations) if self.test_durations else 0,
             "cases_total": uniqueness["total"],
             "cases_unique": uniqueness["unique"],
-            "cases_passed": uniqueness["executed_passed"],
-            "cases_failed": uniqueness["executed_failed"],
-            "cases_skipped": uniqueness["executed_skipped"],
-            "cases_timeout": uniqueness["executed_timeout"],
+            "cases_passed": uniqueness["total_passed"],
+            "cases_failed": uniqueness["total_failed"],
+            "cases_skipped": uniqueness["total_skipped"],
+            "cases_timeout": uniqueness["total_timeout"],
+            "cases_disabled": uniqueness["total_disabled"],
         }
         emitter.finalize_summary(summary)
 

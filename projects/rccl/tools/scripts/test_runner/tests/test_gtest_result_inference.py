@@ -14,12 +14,16 @@ Zero selected tests is now SKIPPED, matching what the pytest path already does
 for "no tests collected".
 """
 
+import argparse
+import io
 import json
 import os
 import tempfile
 import unittest
+from contextlib import redirect_stdout
 
 from lib.test_executor import (
+    TestExecutor,
     collect_gtest_case_details,
     collect_gtest_case_details_from_file,
     count_gtest_cases_from_json,
@@ -34,6 +38,7 @@ from lib.test_executor import (
     make_run_identity_key,
     merge_timeout_details,
     stamp_run_identity,
+    suite_disposition,
     summarize_case_uniqueness,
     synthetic_case_detail,
     wrap_mpi_program,
@@ -228,6 +233,7 @@ class TestCountGtestCases(unittest.TestCase):
         counts = count_gtest_cases_from_json(WILDCARD_SUITE_JSON)
         self.assertEqual(counts, {
             "cases": 4, "passed": 2, "failed": 1, "skipped": 1, "timeout": 0,
+            "disabled": 0,
         })
 
     def test_empty_report_is_zero_cases(self):
@@ -239,7 +245,8 @@ class TestCountGtestCases(unittest.TestCase):
         try:
             self.assertEqual(
                 count_gtest_cases_from_json_file(path),
-                {"cases": 4, "passed": 2, "failed": 1, "skipped": 1, "timeout": 0},
+                {"cases": 4, "passed": 2, "failed": 1, "skipped": 1, "timeout": 0,
+                 "disabled": 0},
             )
         finally:
             os.unlink(path)
@@ -264,7 +271,15 @@ class TestCountGtestCases(unittest.TestCase):
         ])
         self.assertEqual(total, {
             "cases": 5, "passed": 3, "failed": 1, "skipped": 1, "timeout": 0,
+            "disabled": 0,
         })
+        self.assertEqual(
+            format_case_counts({
+                "cases": 2, "passed": 0, "failed": 0, "skipped": 0,
+                "timeout": 0, "disabled": 2,
+            }),
+            "2 cases (2 disabled)",
+        )
 
     def test_collect_names_and_statuses(self):
         details = collect_gtest_case_details(WILDCARD_SUITE_JSON)
@@ -542,6 +557,7 @@ class TestUniqueAndDuplicateCases(unittest.TestCase):
         counts = count_gtest_cases_from_json(payload)
         self.assertEqual(counts, {
             "cases": 1, "passed": 1, "failed": 0, "skipped": 0, "timeout": 0,
+            "disabled": 0,
         })
 
     def test_missing_report_counts_as_one_executed_and_unique_case(self):
@@ -581,8 +597,8 @@ class TestUniqueAndDuplicateCases(unittest.TestCase):
         self.assertEqual(summary["total"], 3)
         self.assertEqual(summary["unique"], 3)
         self.assertEqual(summary["duplicate_cases"], 0)
-        self.assertEqual(summary["executed_passed"], 1)
-        self.assertEqual(summary["executed_failed"], 2)
+        self.assertEqual(summary["total_passed"], 1)
+        self.assertEqual(summary["total_failed"], 2)
         self.assertEqual(summary["unique_passed"], 1)
         self.assertEqual(summary["unique_failed"], 2)
         self._assert_count_invariants(summary)
@@ -596,7 +612,7 @@ class TestUniqueAndDuplicateCases(unittest.TestCase):
         self.assertEqual(leaf["full_name"], "SymCheckMode_Local.DebugLocal_HostPointer_Rejected")
         self.assertEqual(leaf["status"], "FAILED")
 
-    def test_no_duplicate_executed_matches_unique(self):
+    def test_no_duplicate_total_matches_unique(self):
         identity = make_run_identity_key(binary="rccl-UnitTests", env_vars={})
         entries = [
             {
@@ -611,8 +627,8 @@ class TestUniqueAndDuplicateCases(unittest.TestCase):
             },
         ]
         summary = summarize_case_uniqueness(entries)
-        self.assertEqual(summary["executed_failed"], summary["unique_failed"])
-        self.assertEqual(summary["executed_passed"], summary["unique_passed"])
+        self.assertEqual(summary["total_failed"], summary["unique_failed"])
+        self.assertEqual(summary["total_passed"], summary["unique_passed"])
         self._assert_count_invariants(summary)
 
     def _assert_count_invariants(self, summary):
@@ -621,11 +637,12 @@ class TestUniqueAndDuplicateCases(unittest.TestCase):
             summary["total"],
         )
         self.assertEqual(
-            summary["executed_passed"]
-            + summary["executed_failed"]
-            + summary["executed_skipped"]
-            + summary["executed_timeout"]
-            + summary["executed_other"],
+            summary["total_passed"]
+            + summary["total_failed"]
+            + summary["total_skipped"]
+            + summary["total_timeout"]
+            + summary["total_disabled"]
+            + summary["total_other"],
             summary["total"],
         )
         self.assertEqual(
@@ -633,6 +650,7 @@ class TestUniqueAndDuplicateCases(unittest.TestCase):
             + summary["unique_failed"]
             + summary["unique_skipped"]
             + summary["unique_timeout"]
+            + summary["unique_disabled"]
             + summary["unique_other"],
             summary["unique"],
         )
@@ -655,10 +673,182 @@ class TestCountPytestCases(unittest.TestCase):
         try:
             self.assertEqual(
                 count_pytest_cases_from_junit(path),
-                {"cases": 3, "passed": 1, "failed": 1, "skipped": 1, "timeout": 0},
+                {"cases": 3, "passed": 1, "failed": 1, "skipped": 1, "timeout": 0,
+                 "disabled": 0},
             )
         finally:
             os.unlink(path)
+
+
+class TestDisabledConfigAccounting(unittest.TestCase):
+    def _executor(self, test_name=None):
+        ex = TestExecutor.__new__(TestExecutor)
+        ex.args = argparse.Namespace(test_name=test_name)
+        ex.emit_enabled = False
+        ex.test_results = []
+        ex.test_names = []
+        ex.test_durations = []
+        ex.test_suites = []
+        ex.test_case_counts = []
+        ex.test_case_details = []
+        ex.test_run_identities = []
+        ex.test_executed = []
+        ex.test_records = []
+        ex.rerun_results = []
+        return ex
+
+    def test_disabled_entries_are_in_total_and_unique(self):
+        identity = make_run_identity_key(extra="disabled:NET IB:InitA")
+        entries = [
+            {
+                "config_suite": "Unit Tests",
+                "config_entry": "ArgCheck",
+                "details": [
+                    _leaf("ArgCheckTest.Ok", "PASSED",
+                          make_run_identity_key(binary="rccl-UnitTests")),
+                ],
+            },
+            {
+                "config_suite": "NET IB - Initialization Tests",
+                "config_entry": "InitA",
+                "details": [
+                    _leaf("NetIbMPITest.InitA", "DISABLED", identity),
+                ],
+            },
+            {
+                "config_suite": "NET IB - Initialization Tests",
+                "config_entry": "InitB",
+                "details": [
+                    _leaf("NetIbMPITest.InitB", "DISABLED",
+                          make_run_identity_key(extra="disabled:NET IB:InitB")),
+                ],
+            },
+        ]
+        summary = summarize_case_uniqueness(entries)
+        self.assertEqual(summary["total"], 3)
+        self.assertEqual(summary["unique"], 3)
+        self.assertEqual(summary["duplicate_cases"], 0)
+        self.assertEqual(summary["total_passed"], 1)
+        self.assertEqual(summary["total_disabled"], 2)
+        self.assertEqual(summary["unique_disabled"], 2)
+        self._assert_count_invariants(summary)
+
+    def test_record_disabled_suite_counts_each_config_test(self):
+        ex = self._executor()
+        ex.record_disabled_suite({
+            "suite_details": {"name": "NET IB - Initialization Tests"},
+            "tests": [
+                {"name": "InitA", "test_filter": "NetIbMPITest.InitA"},
+                {"name": "InitB", "test_filter": "NetIbMPITest.InitB"},
+            ],
+        })
+        self.assertEqual(ex.test_results, ["DISABLED", "DISABLED"])
+        self.assertEqual(ex.test_names, ["InitA", "InitB"])
+        self.assertEqual(
+            [c["cases"] for c in ex.test_case_counts],
+            [1, 1],
+        )
+        summary = summarize_case_uniqueness(ex._summary_case_entries())
+        self.assertEqual(summary["total"], 2)
+        self.assertEqual(summary["unique"], 2)
+        self.assertEqual(summary["total_disabled"], 2)
+        self._assert_count_invariants(summary)
+
+    def test_record_disabled_suite_honors_test_name_filter(self):
+        ex = self._executor(test_name="InitA")
+        ex.record_disabled_suite({
+            "suite_details": {"name": "NET IB"},
+            "tests": [
+                {"name": "InitA", "test_filter": "NetIbMPITest.InitA"},
+                {"name": "InitB", "test_filter": "NetIbMPITest.InitB"},
+            ],
+        })
+        self.assertEqual(ex.test_names, ["InitA"])
+
+    def test_record_disabled_suite_emit_duration_is_float(self):
+        ex = self._executor()
+        ex.emit_enabled = True
+        ex.record_disabled_suite({
+            "suite_details": {"name": "NET IB"},
+            "tests": [{"name": "InitA", "test_filter": "NetIbMPITest.InitA"}],
+        })
+        self.assertEqual(ex.test_durations, [0.0])
+        self.assertIsInstance(ex.test_durations[0], float)
+        self.assertEqual(ex.test_records[0]["duration"], 0.0)
+        self.assertIsInstance(ex.test_records[0]["duration"], float)
+
+    def test_print_summary_adds_disabled_into_total_and_unique(self):
+        ex = self._executor()
+        ex.test_suites = ["Unit Tests", "NET IB"]
+        ex.test_names = ["ArgCheck", "InitA"]
+        ex.test_results = ["PASSED", "DISABLED"]
+        ex.test_durations = [1.5, 0.0]
+        ex.test_case_counts = [
+            {"cases": 1, "passed": 1, "failed": 0, "skipped": 0,
+             "timeout": 0, "disabled": 0},
+            {"cases": 1, "passed": 0, "failed": 0, "skipped": 0,
+             "timeout": 0, "disabled": 1},
+        ]
+        passed_id = make_run_identity_key(binary="rccl-UnitTests")
+        disabled_id = make_run_identity_key(extra="disabled:NET IB:InitA")
+        ex.test_case_details = [
+            [_leaf("ArgCheckTest.Ok", "PASSED", passed_id)],
+            [_leaf("NetIbMPITest.InitA", "DISABLED", disabled_id)],
+        ]
+        ex.test_run_identities = [passed_id, disabled_id]
+        ex.test_executed = [True, False]
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            ex.print_summary()
+        out = buf.getvalue()
+        self.assertIn("DISABLED", out)
+        self.assertRegex(out, r"Config entries:\s+2")
+        self.assertRegex(out, r"Passed:\s+1")
+        self.assertRegex(out, r"Disabled:\s+1")
+        self.assertRegex(out, r"Total:\s+2")
+        self.assertRegex(out, r"Unique:\s+2")
+        self.assertRegex(out, r"Disabled:\s+1")
+        self.assertNotIn("Failed/skipped/timeout cases:\n  +- NET IB", out)
+
+    def _assert_count_invariants(self, summary):
+        TestUniqueAndDuplicateCases()._assert_count_invariants(summary)
+
+
+class TestSuiteDisposition(unittest.TestCase):
+    def _suite(self, name, enabled=True, smoke=False):
+        return {
+            "suite_details": {
+                "name": name,
+                "enabled": enabled,
+                "smoke": smoke,
+            }
+        }
+
+    def test_disabled_outside_smoke_is_skip_not_disabled(self):
+        suite = self._suite("NET IB", enabled=False, smoke=False)
+        self.assertEqual(suite_disposition(suite, smoke_only=True), "skip_scope")
+
+    def test_disabled_smoke_suite_is_disabled(self):
+        suite = self._suite("Smoke Off", enabled=False, smoke=True)
+        self.assertEqual(suite_disposition(suite, smoke_only=True), "disabled")
+
+    def test_disabled_off_suite_name_filter_is_skip(self):
+        suite = self._suite("NET IB", enabled=False)
+        self.assertEqual(
+            suite_disposition(suite, smoke_only=False, suite_name_filter="Unit*"),
+            "skip_name",
+        )
+
+    def test_disabled_matching_suite_name_is_disabled(self):
+        suite = self._suite("NET IB Tests", enabled=False)
+        self.assertEqual(
+            suite_disposition(suite, smoke_only=False, suite_name_filter="NET*"),
+            "disabled",
+        )
+
+    def test_enabled_all_scope_is_run(self):
+        suite = self._suite("Unit Tests", enabled=True)
+        self.assertEqual(suite_disposition(suite, smoke_only=False), "run")
 
 
 if __name__ == "__main__":
