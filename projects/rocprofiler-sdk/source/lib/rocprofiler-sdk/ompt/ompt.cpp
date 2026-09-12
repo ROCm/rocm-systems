@@ -24,6 +24,7 @@
 #include "lib/common/logging.hpp"
 #include "lib/common/string_entry.hpp"
 #include "lib/common/utility.hpp"
+#include "lib/rocprofiler-sdk/context/context.hpp"
 #include "lib/rocprofiler-sdk/context/correlation_id.hpp"
 #include "lib/rocprofiler-sdk/tracing/fwd.hpp"
 #include "lib/rocprofiler-sdk/tracing/tracing.hpp"
@@ -1112,6 +1113,7 @@ update_table(ompt_update_func f, std::index_sequence<OpIdx, OpIdxTail...>)
     update_table(f, std::integral_constant<size_t, OpIdx>{});
     if constexpr(sizeof...(OpIdxTail) > 0) update_table(f, std::index_sequence<OpIdxTail...>{});
 }
+
 }  // namespace
 
 template <size_t OpIdx>
@@ -1206,6 +1208,28 @@ void
 update_table(ompt_update_func f)
 {
     update_table(f, std::make_index_sequence<ompt::ompt_domain_info::ompt_last>{});
+}
+
+// Returns true if any registered rocprofiler client subscribes to the OMPT
+// callback or buffered tracing domain, i.e. the SDK has a reason to be the OMPT
+// tool. Must be called *after* registration::initialize() so that client
+// tool_init callbacks have run and contexts exist.
+//
+// Deliberately domain-level: this answers the once-per-process question of
+// whether the OMPT tool role belongs to us, asked at ompt_start_tool() before
+// any operation exists. should_enable_callback() above answers the narrower
+// per-operation "which callbacks do I register" question and reads the same
+// context domains() bitsets, so the two cannot disagree.
+bool
+ompt_service_requested()
+{
+    for(const auto& itr : context::get_registered_contexts())
+    {
+        if(!itr) continue;
+        if(itr->is_tracing(ROCPROFILER_CALLBACK_TRACING_OMPT)) return true;
+        if(itr->is_tracing(ROCPROFILER_BUFFER_TRACING_OMPT)) return true;
+    }
+    return false;
 }
 
 }  // namespace ompt

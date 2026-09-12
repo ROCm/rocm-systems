@@ -912,7 +912,7 @@ def test_implicit_operand_accesses_covers_filters_merging_and_compat_insts():
         ''')
     parser.profile = SimpleNamespace(
         skip_encodings={'ENC_SKIP'},
-        skip_inst_encoding=lambda _name, condition: condition == 'skip_me',
+        skip_inst_encoding=lambda _name, condition, **_kwargs: condition == 'skip_me',
     )
     active = [
         ('READ', 'ENC_READ'),
@@ -927,6 +927,11 @@ def test_implicit_operand_accesses_covers_filters_merging_and_compat_insts():
             for name, encoding in active
         ]
     )
+
+    parser._unique_flat_segment_opcodes = {}
+    for form in parser.insts_node.iter('InstructionEncoding'):
+        opcode = elem_tree.SubElement(form, 'Opcode')
+        opcode.text = '0'
 
     assert parser.implicit_operand_accesses('OPR_SCC') == {
         ('READ', 'ENC_READ'): (True, False),
@@ -6051,7 +6056,7 @@ def test_generated_vop3_dot2_true16_uses_true16_helpers(
     assert 'uint32_t raw1 = amdgpu::RegisterAccess(wf).read_lane(src1, lane);' in body
     assert 'read_vop3_true16_src(src2, wf, lane, opsel, 2)' in body
     assert 'util::f16_to_f32' in body
-    assert 'util::f32_to_f16_mode(result, wf.fp16_ovfl())' in body
+    assert 'amdgpu::fp_mode::dot2_f16(a0, b0, a1, b1, acc, wf.fp16_ovfl())' in body
     assert 'write_vop3_true16_dst(vdst, wf, lane, opsel, result_bits, true)' in body
     assert 'throw util::UnimplementedInst' not in body
 
@@ -7465,6 +7470,22 @@ def test_generated_atomic_def_use_follows_return_control(
         assert 'src_operands_[0] = &vdata;' in cmpswap
         assert 'dst_operands_[num_dst_++] = &vdata_return;' in cmpswap
 
+    for arch, mnemonic, payload_bits, return_bits in (
+        ('rdna1', 'BufferAtomicFcmpswapMubuf', 64, 32),
+        ('rdna1', 'BufferAtomicFcmpswapX2Mubuf', 128, 64),
+        ('rdna2', 'BufferAtomicFcmpswapMubuf', 64, 32),
+        ('rdna2', 'BufferAtomicFcmpswapX2Mubuf', 128, 64),
+        ('rdna3', 'BufferAtomicCmpswapF32Mubuf', 64, 32),
+        ('rdna3_5', 'BufferAtomicCmpswapF32Mubuf', 64, 32),
+    ):
+        buffer = (amdgpu_generated_root / arch / 'mubuf.cpp').read_text()
+        cmpswap = buffer.split(f'{mnemonic}::{mnemonic}')[1]
+        cmpswap = cmpswap.split(f'void {mnemonic}::execute_impl')[0]
+        assert f'vdata({payload_bits}, OperandType::OPR_VGPR' in cmpswap
+        assert f'vdata_return({return_bits}, OperandType::OPR_VGPR' in cmpswap
+        assert 'src_operands_[0] = &vdata;' in cmpswap
+        assert 'dst_operands_[num_dst_++] = &vdata_return;' in cmpswap
+
 
 def test_generated_flat_saddr_null_selector_follows_encoding(
     amdgpu_generated_root: Path,
@@ -7686,3 +7707,57 @@ def test_cdna4_d16_load_does_not_preserve_destination(
     assert 'dst_operands_[0] = &vdata;' in ctor
     assert not re.search(r'src_operands_\[[^\]]*\]\s*=\s*&vdata;', ctor)
     assert f'void {class_name}::implicit_uses(RegisterSet &uses) const' not in cpp
+
+
+@pytest.mark.parametrize(
+    'arch,profile_type,instruction_name,operation',
+    [
+        ('cdna1', Cdna1Profile, 'GLOBAL_ATOMIC_PK_ADD_F16', 'pk_add_f16'),
+        ('cdna2', Cdna2Profile, 'GLOBAL_ATOMIC_PK_ADD_F16', 'pk_add_f16'),
+        ('cdna1', Cdna1Profile, 'GLOBAL_ATOMIC_ADD_F32', 'fadd'),
+        ('rdna2', Rdna2Profile, 'GLOBAL_ATOMIC_CSUB', 'sub_clamp'),
+        ('rdna3', Rdna3Profile, 'GLOBAL_ATOMIC_CSUB_U32', 'sub_clamp'),
+        ('rdna3_5', Rdna3_5Profile, 'GLOBAL_ATOMIC_CSUB_U32', 'sub_clamp'),
+    ],
+)
+def test_global_only_atomics_retain_segment_and_semantics(
+    arch, profile_type, instruction_name, operation
+):
+    spec = Parser(str(_mrisa_dir() / f'amdgpu_isa_{arch}.xml'), profile_type()).parse()
+    matches = [
+        inst
+        for enc in spec.inst_encodings
+        for inst in enc.insts
+        if inst.name == instruction_name
+    ]
+    assert len(matches) == 1
+    inst = matches[0]
+    assert inst.enc_name == 'ENC_FLAT'
+    assert inst.required_flat_segment == 2
+    sem = derive_all_semantics(spec).instructions[instruction_name]
+    assert sem.semantic_class == 'flat_atomic'
+    assert sem.operation == operation
+    assert sem.elem_size == 4
+    assert sem.num_elems == 1
+    assert any(
+        entry is not None
+        and (
+            entry.inst_name == inst.fmt_name
+            or f'decode{inst.fmt_name}' in (entry.sub_decode_funcs or [])
+        )
+        for entry in spec.primary_decode_table
+    )
+
+
+@pytest.mark.parametrize('profile_type', [Cdna5Profile, Rdna4Profile])
+@pytest.mark.parametrize('returning', [False, True])
+def test_ds_subtraction_keeps_underflow_policy(profile_type, returning):
+    suffix = '_RTN_U32' if returning else '_U32'
+    for name, operation in (
+        ('DS_SUB', 'sub'),
+        ('DS_COND_SUB', 'cond_sub'),
+        ('DS_SUB_CLAMP', 'sub_clamp'),
+    ):
+        sem = derive_semantics(name + suffix, 'ENC_VDS', profile_type())
+        assert sem is not None
+        assert sem.operation == operation
