@@ -47,6 +47,7 @@
 #endif
 
 #include <algorithm>
+#include <atomic>
 #include <chrono>
 #include <cinttypes>
 #include <cstring>
@@ -79,6 +80,14 @@ extern const char* HipExtraSourceCodeNoGWS;
 }  // namespace amd::device
 
 namespace amd::roc {
+struct DeviceSignalAllocation {
+  DeviceSignalAllocation(void* address, uint32_t signal_count)
+      : address_(address), remaining_signals_(signal_count) {}
+
+  void* address_;
+  std::atomic<uint32_t> remaining_signals_;
+};
+
 bool roc::Device::isHsaInitialized_ = false;
 bool roc::Device::hostVmemSupported_ = false;
 std::vector<hsa_agent_t> roc::Device::gpu_agents_ ROCCLR_INIT_PRIORITY(101);
@@ -3251,13 +3260,13 @@ bool Device::IsHwEventReady(const amd::Event& event, bool wait, amd::SyncPolicy 
     bool active_wait =
         !((policy == amd::SyncPolicy::Blocking) & kHipEventBlockingSync) && ActiveWait();
     bool yield = (policy == amd::SyncPolicy::Yield);
-    return WaitForSignal(reinterpret_cast<ProfilingSignal*>(hw_event)->signal_, active_wait, yield);
+    return reinterpret_cast<ProfilingSignal*>(hw_event)->WaitUntilDone(active_wait || yield);
   }
 
-  auto signal = reinterpret_cast<ProfilingSignal*>(hw_event)->signal_;
-  ClPrint(amd::LOG_INFO, amd::LOG_SIG, "Check HW event = 0x%lx", signal.handle);
+  auto* ps = reinterpret_cast<ProfilingSignal*>(hw_event);
+  ClPrint(amd::LOG_INFO, amd::LOG_SIG, "Check HW event = 0x%lx", ps->signal_.handle);
 
-  return (Hsa::signal_load_relaxed(signal) == 0);
+  return (ps->LoadRelaxed() == 0);
 }
 
 // ================================================================================================
@@ -3268,8 +3277,13 @@ void Device::getHwEventTime(const amd::Event& event, uint64_t* start, uint64_t* 
     ClPrint(amd::LOG_INFO, amd::LOG_SIG, "No HW event to read time");
     *start = *end = 0;
   } else {
-    fetchSignalTime(reinterpret_cast<ProfilingSignal*>(hw_event)->signal_, getBackendDevice(),
-                    start, end);
+    auto* ps = reinterpret_cast<ProfilingSignal*>(hw_event);
+    if (ps->flags_.device_backed_) {
+      ps->CacheTimingData(getBackendDevice());
+      ps->GetCachedTiming(*start, *end);
+    } else {
+      fetchSignalTime(ps->signal_, getBackendDevice(), start, end);
+    }
   }
 }
 
@@ -4035,10 +4049,52 @@ void Device::RetainGlobalSignal(void* signal) const {
 // ================================================================================================
 bool Device::CreateHwEvents(int count, std::vector<void*>& hw_events) const {
   hw_events.resize(count, nullptr);
+  if (count <= 0) {
+    return true;
+  }
+
+  void* device_block = nullptr;
+  DeviceSignalAllocation* device_allocation = nullptr;
+  size_t block_bytes = 0;
+  const bool want_device = HIP_GRAPH_DEVICE_SIGNALS && info().largeBar_;
+  if (want_device) {
+    block_bytes = amd::alignUp(static_cast<size_t>(count) * sizeof(amd_signal_t), 256);
+    AllocationFlags flags{};
+    flags.atomics_ = true;
+    device_block = deviceLocalAlloc(block_bytes, flags, false);
+    if (device_block != nullptr) {
+      // KFD/TTM maps CPU PTEs lazily; touch so launch-path stores don't fault.
+      constexpr size_t kCpuPtePrefaultSpan = 64 * Ki;
+      volatile unsigned char* ptr = static_cast<volatile unsigned char*>(device_block);
+      for (size_t offset = 0; offset < block_bytes; offset += kCpuPtePrefaultSpan) {
+        ptr[offset] = 0;
+      }
+      std::memset(device_block, 0, block_bytes);
+      auto* sigs = reinterpret_cast<amd_signal_t*>(device_block);
+      for (int i = 0; i < count; ++i) {
+        sigs[i].kind = AMD_SIGNAL_KIND_USER;
+        sigs[i].value = kInitSignalValueOne;
+      }
+      device_allocation =
+          new DeviceSignalAllocation(device_block, static_cast<uint32_t>(count));
+      ClPrint(amd::LOG_INFO, amd::LOG_SIG,
+              "[hipGraph] device-backed signals: %d x amd_signal_t at %p (%zu bytes)", count,
+              device_block, block_bytes);
+    } else {
+      ClPrint(amd::LOG_WARNING, amd::LOG_SIG,
+              "[hipGraph] device signal alloc failed, falling back to host signals");
+    }
+  }
+
   for (int i = 0; i < count; ++i) {
     ProfilingSignal* ps = new ProfilingSignal();
-    if (HSA_STATUS_SUCCESS !=
-        Hsa::signal_create(1, 0, nullptr, HSA_AMD_SIGNAL_AMD_GPU_ONLY, &ps->signal_)) {
+    if (device_block != nullptr) {
+      auto* slot = &reinterpret_cast<amd_signal_t*>(device_block)[i];
+      ps->flags_.device_backed_ = true;
+      ps->signal_.handle = reinterpret_cast<uint64_t>(slot);
+      ps->device_allocation_ = device_allocation;
+    } else if (HSA_STATUS_SUCCESS !=
+               Hsa::signal_create(1, 0, nullptr, HSA_AMD_SIGNAL_AMD_GPU_ONLY, &ps->signal_)) {
       delete ps;
       for (int j = 0; j < i; ++j) {
         reinterpret_cast<ProfilingSignal*>(hw_events[j])->release();
@@ -4065,7 +4121,7 @@ void Device::ResetHwEvents(const std::vector<void*>& hw_events) const {
   for (void* hw_event : hw_events) {
     if (hw_event != nullptr) {
       auto* ps = reinterpret_cast<ProfilingSignal*>(hw_event);
-      Hsa::signal_silent_store_relaxed(ps->signal_, 1);
+      ps->StoreRelaxed(kInitSignalValueOne);
       ps->flags_.done_ = true;
       ps->ResetCachedTiming();
     }
@@ -4080,7 +4136,7 @@ void Device::QuiesceHwEvents(const std::vector<void*>& hw_events) const {
   for (void* hw_event : hw_events) {
     if (hw_event != nullptr) {
       auto* ps = reinterpret_cast<ProfilingSignal*>(hw_event);
-      Hsa::signal_silent_store_relaxed(ps->signal_, 0);
+      ps->StoreRelaxed(0);
     }
   }
 }
@@ -4382,17 +4438,65 @@ void Device::RemoveKernel(Kernel& gpuKernel) const {
 }
 
 // ================================================================================================
-ProfilingSignal::~ProfilingSignal() {
-  if (signal_.handle != 0) {
-    if (Hsa::signal_load_relaxed(signal_) > 0
-        && !(HIP_SKIP_ABORT_ON_GPU_ERROR && amd::Device::IsGPUInError())) {
-      LogError("Runtime shouldn't destroy a signal that is still busy!");
-      if (Hsa::signal_wait_scacquire(signal_, HSA_SIGNAL_CONDITION_LT, kInitSignalValueOne,
-                                    kUnlimitedWait, HSA_WAIT_STATE_BLOCKED) != 0) {
-      }
-    }
-    Hsa::signal_destroy(signal_);
+// ================================================================================================
+hsa_signal_value_t ProfilingSignal::LoadRelaxed() const {
+  if (flags_.device_backed_) {
+    return reinterpret_cast<volatile amd_signal_t*>(signal_.handle)->value;
   }
+  return Hsa::signal_load_relaxed(signal_);
+}
+
+void ProfilingSignal::StoreRelaxed(hsa_signal_value_t value) {
+  if (flags_.device_backed_) {
+    auto* sig = reinterpret_cast<volatile amd_signal_t*>(signal_.handle);
+    sig->start_ts = 0;
+    sig->end_ts = 0;
+    // Publish the rearmed value only after the stale timestamps are cleared.
+    std::atomic_thread_fence(std::memory_order_release);
+    sig->value = value;
+    return;
+  }
+  Hsa::signal_silent_store_relaxed(signal_, value);
+}
+
+bool ProfilingSignal::WaitUntilDone(bool active_wait) {
+  if (!flags_.device_backed_) {
+    return WaitForSignal(signal_, active_wait);
+  }
+  auto* sig = reinterpret_cast<volatile amd_signal_t*>(signal_.handle);
+  while (sig->value > 0) {
+    if (HIP_SKIP_ABORT_ON_GPU_ERROR && amd::Device::IsGPUInError()) {
+      return true;
+    }
+    if (active_wait) {
+      amd::Os::yield();
+    } else {
+      amd::Os::sleep(1);
+    }
+  }
+  return true;
+}
+
+// ================================================================================================
+ProfilingSignal::~ProfilingSignal() {
+  if (signal_.handle == 0) {
+    return;
+  }
+  if (LoadRelaxed() > 0 && !(HIP_SKIP_ABORT_ON_GPU_ERROR && amd::Device::IsGPUInError())) {
+    LogError("Runtime shouldn't destroy a signal that is still busy!");
+    WaitUntilDone(false);
+  }
+  if (flags_.device_backed_) {
+    assert(device_allocation_ != nullptr);
+    if (device_allocation_->remaining_signals_.fetch_sub(1, std::memory_order_acq_rel) == 1) {
+      Hsa::memory_pool_free(device_allocation_->address_);
+      delete device_allocation_;
+    }
+    device_allocation_ = nullptr;
+    signal_.handle = 0;
+    return;
+  }
+  Hsa::signal_destroy(signal_);
 }
 
 // ================================================================================================
