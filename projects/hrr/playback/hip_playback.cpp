@@ -916,10 +916,12 @@ hipError_t playback___hipRegisterFatBinary(PlaybackContext& ctx,
     std::string hex = hrr::hash_hex(blob_hash_lo, blob_hash_hi);
 
     // Deduplicate: if already loaded (e.g. multiple __hipRegisterFatBinary events
-    // for the same binary), skip the load.
+    // for the same binary), skip the load. Binaries already known to hold no code
+    // for this GPU are skipped the same way.
     {
         std::shared_lock lk(ctx.map_mutex);
         if (ctx.co_modules.count(hex)) return hipSuccess;
+        if (ctx.co_no_device_code.count(hex)) return hipSuccess;
     }
 
     size_t sz = 0;
@@ -932,6 +934,18 @@ hipError_t playback___hipRegisterFatBinary(PlaybackContext& ctx,
     hipModule_t mod = nullptr;
     hipError_t err = hipModuleLoadData(&mod, blob);
     if (err != hipSuccess) {
+        // A bundle with nothing built for the live GPU is expected, not a defect:
+        // see co_no_device_code. No launch in the archive can reference it, since
+        // the capture ran on this same architecture, so record it and move on
+        // rather than reporting a failure the recorded process never saw.
+        if (err == hipErrorInvalidImage || err == hipErrorNoBinaryForGpu) {
+            std::unique_lock lk(ctx.map_mutex);
+            ctx.co_no_device_code.insert(hex);
+            if (ctx.verbose)
+                fprintf(stderr, "[HRR] Fat binary %s holds no code for this GPU — skipped\n",
+                        hex.c_str());
+            return hipSuccess;
+        }
         fprintf(stderr, "[HRR] __hipRegisterFatBinary: hipModuleLoadData failed: %d (%s)\n",
                 err, hipGetErrorString(err));
         return hipSuccess;  // non-fatal

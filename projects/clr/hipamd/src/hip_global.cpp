@@ -206,7 +206,8 @@ static hipError_t createVarMem(amd::Memory** mem_out, const std::string& name,
   void* device_ptr = nullptr;
   size_t size = 0;
   if (!dev_program->createGlobalVarObj(&mem, &device_ptr, &size, name.c_str())) {
-    guarantee(false, "Cannot create GlobalVar Obj for symbol: %s", name.c_str());
+    LogPrintfError("Cannot create GlobalVar Obj for symbol: %s", name.c_str());
+    return hipErrorInvalidSymbol;
   }
   // Handle size 0 symbols
   if (size != 0) {
