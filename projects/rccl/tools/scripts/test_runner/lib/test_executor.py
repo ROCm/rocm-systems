@@ -192,25 +192,26 @@ def infer_gtest_result_from_output(captured_output: str, returncode: int) -> str
     return TestResult.RESULT_PASSED.value
 
 
-def _gtest_json_accumulate(obj, stats):
-    """Walk gtest JSON (--gtest_output=json); set stats keys failed/passed/skipped."""
-    if isinstance(obj, dict):
-        if "result" in obj and isinstance(obj.get("name"), str):
-            fails = obj.get("failures")
-            if isinstance(fails, list) and len(fails) > 0:
-                stats["failed"] = True
-            else:
-                res = obj.get("result")
-                if res == "SKIPPED":
-                    stats["skipped"] = True
-                elif res == "COMPLETED":
-                    stats["passed"] = True
-            return
-        for v in obj.values():
-            _gtest_json_accumulate(v, stats)
-    elif isinstance(obj, list):
-        for item in obj:
-            _gtest_json_accumulate(item, stats)
+def _result_from_gtest_details(details):
+    """Map executed leaf statuses to an entry TestResult.
+
+    Same walk as collect_gtest_case_details: FAILED beats PASSED beats SKIPPED.
+    An empty leaf list is SKIPPED (filter matched nothing).
+    """
+    failed = passed = skipped = False
+    for item in details or []:
+        status = item.get("status")
+        if status == "FAILED":
+            failed = True
+        elif status == "PASSED":
+            passed = True
+        elif status == "SKIPPED":
+            skipped = True
+    if failed:
+        return TestResult.RESULT_FAILED.value
+    if passed:
+        return TestResult.RESULT_PASSED.value
+    return TestResult.RESULT_SKIPPED.value
 
 
 def _gtest_leaf_not_run(case):
@@ -232,6 +233,12 @@ def _leaf_case_status(case):
 
     Returns None for leaves that were not run (DISABLED / SUPPRESSED). Those
     must not inflate "test cases executed" or the unique-case counts.
+
+    A missing or empty ``result`` is not PASSED. Google Test writes COMPLETED
+    or SKIPPED on a finished leaf. If the case was started (``status`` is RUN,
+    or status is omitted on a truncated abort report) the missing result is
+    FAILED. If it was never started (NOTRUN), it is SKIPPED. The entry verdict
+    uses this same walk, so infer and the issue tree cannot disagree.
     """
     if _gtest_leaf_not_run(case):
         return None
@@ -241,8 +248,13 @@ def _leaf_case_status(case):
     result = case.get("result")
     if result == "SKIPPED":
         return "SKIPPED"
-    if result in ("COMPLETED", None, ""):
+    if result == "COMPLETED":
         return "PASSED"
+    run_status = case.get("status")
+    if result in (None, "") and run_status in ("NOTRUN", "NOT_RUN"):
+        return "SKIPPED"
+    if result in (None, ""):
+        return "FAILED"
     return str(result)
 
 
@@ -794,11 +806,12 @@ def _sum_case_counts(list_of_counts):
     return total
 
 
-def infer_gtest_result_from_json_file(json_path: str, returncode: int) -> str:
+def infer_gtest_result_from_json_file(json_path: str, returncode: int, details=None) -> str:
     """
     Map gtest exit code + JSON report to TestResult.
 
-    When returncode is 0, inspects leaf tests for failures/SKIPPED/COMPLETED.
+    When returncode is 0, scores the same leaf list collect_gtest_case_details
+    uses. Pass *details* to avoid a second json.load of the same report.
     Falls back to infer_gtest_result_from_output(\"\", rc) if the file is missing
     or invalid JSON.
     """
@@ -806,24 +819,11 @@ def infer_gtest_result_from_json_file(json_path: str, returncode: int) -> str:
         return TestResult.RESULT_TIMEOUT.value
     if returncode != ExitCode.EXIT_SUCCESS:
         return TestResult.RESULT_FAILED.value
-    if not json_path or not os.path.isfile(json_path):
+    if details is None:
+        details = collect_gtest_case_details_from_file(json_path)
+    if details is None:
         return infer_gtest_result_from_output("", returncode)
-    try:
-        with open(json_path, encoding="utf-8") as f:
-            data = json.load(f)
-    except (OSError, json.JSONDecodeError, UnicodeDecodeError):
-        return infer_gtest_result_from_output("", returncode)
-    stats = {"failed": False, "passed": False, "skipped": False}
-    _gtest_json_accumulate(data, stats)
-    if stats["failed"]:
-        return TestResult.RESULT_FAILED.value
-    if stats["passed"]:
-        return TestResult.RESULT_PASSED.value
-    if stats["skipped"]:
-        return TestResult.RESULT_SKIPPED.value
-    # No leaf test in the report: the filter selected nothing. Reporting PASSED
-    # here would turn a typo'd or renamed test_filter into a silent green.
-    return TestResult.RESULT_SKIPPED.value
+    return _result_from_gtest_details(details)
 
 
 def infer_pytest_result_from_junit(junit_path: str, returncode: int) -> str:
@@ -2275,8 +2275,10 @@ class TestExecutor:
             case_details = None
             if is_gtest:
                 rc = returncode if returncode is not None else -1
-                test_result = infer_gtest_result_from_json_file(gtest_json_path or "", rc)
                 case_details = collect_gtest_case_details_from_file(gtest_json_path or "")
+                test_result = infer_gtest_result_from_json_file(
+                    gtest_json_path or "", rc, details=case_details
+                )
                 # MPI abort / JSON races leave no report; still count the entry.
                 if case_details is None and test_result in (
                     TestResult.RESULT_PASSED.value,
