@@ -615,10 +615,70 @@ class SystemCapabilities:
         return False
 
     @persistent_cached_property
+    def is_ci(self) -> bool:
+        """Return True when tests are running under a CI environment."""
+        ci_tokens = {"1", "on", "true", "yes"}
+        for var in ("CI", "GITHUB_ACTIONS", "ROCPROFSYS_CI"):
+            if os.environ.get(var, "").strip().lower() in ci_tokens:
+                return True
+        return False
+
+    @persistent_cached_property
     def oshrun_exec(self) -> Optional[Path]:
         """Get the path to the oshrun executable."""
         result = shutil.which("oshrun")
         return Path(result) if result else None
+
+    @persistent_cached_property
+    def rocprofv3_avail_exec(self) -> Optional[Path]:
+        """Get the path to the rocprofv3-avail executable."""
+        if self.rocm_path is not None:
+            candidate = self.rocm_path / "bin" / "rocprofv3-avail"
+            if candidate.exists() and candidate.is_file():
+                return candidate
+
+        result = shutil.which("rocprofv3-avail")
+        return Path(result) if result else None
+
+    @persistent_cached_property
+    def spm_sq_waves_available(self) -> tuple[bool, str]:
+        """Check whether the SDK reports SQ_WAVES as an SPM-capable counter."""
+        rocprofv3_avail = self.rocprofv3_avail_exec
+        if rocprofv3_avail is None:
+            return False, "rocprofv3-avail not found"
+
+        env = os.environ.copy()
+        if self.rocm_path is not None:
+            env["ROCM_PATH"] = str(self.rocm_path)
+            env["PATH"] = f"{self.rocm_path / 'bin'}:{env.get('PATH', '')}"
+
+        try:
+            result = subprocess.run(
+                [str(rocprofv3_avail), "list", "--spm"],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                timeout=10,
+                env=env,
+            )
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            return False, f"failed to run rocprofv3-avail: {exc}"
+
+        if result.returncode != 0:
+            # An SDK predating "list --spm" rejects the flag outright. That is a
+            # tooling mismatch, not a hardware capability result, and reporting it
+            # as a plain skip makes a stale SDK look like a GPU without SPM.
+            if "unrecognized arguments" in result.stdout and "--spm" in result.stdout:
+                return (
+                    False,
+                    "rocprofv3-avail does not support SPM listing; SDK/tool is too old",
+                )
+            return False, f"rocprofv3-avail failed: {result.stdout}"
+
+        if "SQ_WAVES" not in result.stdout:
+            return False, "SQ_WAVES was not reported as SPM-capable"
+
+        return True, ""
 
     @persistent_cached_property
     def oshrun_version(self) -> Optional[tuple[int, ...]]:

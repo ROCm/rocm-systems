@@ -1,10 +1,16 @@
 # Copyright (c) Advanced Micro Devices, Inc.
 # SPDX-License-Identifier: MIT
 
+cmake_path(GET CMAKE_CURRENT_LIST_DIR PARENT_PATH _rocprofiler_sdk_source_dir)
+
 set(rocprofiler_sdk_components_unit_tests_sources
     test_rccl_unit.cpp
     test_roctx_client.cpp
-    ${PROJECT_SOURCE_DIR}/source/lib/rocprof-sys/library/rocprofiler-sdk/trace_control.cpp
+    test_service_compatibility.cpp
+    test_spm.cpp
+    ${_rocprofiler_sdk_source_dir}/service_compatibility.cpp
+    ${_rocprofiler_sdk_source_dir}/trace_control.cpp
+    ${_rocprofiler_sdk_source_dir}/spm.cpp
 )
 
 add_library(
@@ -12,6 +18,17 @@ add_library(
     OBJECT
     ${rocprofiler_sdk_components_unit_tests_sources}
 )
+
+# Unit tests intentionally compile only SDK-independent service policy, SPM
+# configuration validation, and the no-SDK runtime fallback path here.
+# The SDK runtime helpers are compile-checked by the normal SPM-enabled
+# rocprofiler-systems-object-library target.
+set_source_files_properties(
+    ${_rocprofiler_sdk_source_dir}/spm.cpp
+    PROPERTIES COMPILE_DEFINITIONS ROCPROFSYS_DISABLE_SPM_RUNTIME=1
+)
+
+unset(_rocprofiler_sdk_source_dir)
 
 target_link_libraries(
     rocprofiler-sdk-components-unit-tests

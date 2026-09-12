@@ -9,13 +9,17 @@
 #include "core/perfetto/fwd.hpp"
 #include "core/trace_cache/metadata_registry.hpp"
 #include "core/trace_cache/sample_processor.hpp"
+#include "library/rocprofiler-sdk/spm_sample.hpp"
 #include <cstdint>
 
 #include "core/perfetto/category_registry.hpp"
 #include <functional>
+#include <map>
 #include <memory>
 #include <optional>
+#include <set>
 #include <unordered_map>
+#include <utility>
 
 namespace rocprofsys
 {
@@ -57,6 +61,9 @@ public:
     void handle(const ainic_pmc_sample& sample);
     void handle(const cpu_pmc_sample& sample);
     void handle(const gpu_perf_counter_sample& sample);
+    // processor_t intentionally forwards each sample overload through CRTP.
+    // NOLINTNEXTLINE(bugprone-derived-method-shadowing-base-method)
+    void handle(const spm_sample& sample);
     void handle(const backtrace_region_sample& sample);
     void handle(const kfd_sample& sample);
 
@@ -93,10 +100,11 @@ private:
     std::unordered_map<std::uint64_t, ::perfetto::ThreadTrack> m_thread_track_cache;
     std::unordered_map<std::uint32_t, agent_type>              m_kfd_node_type_cache;
     // KFD node_id -> per-type GPU index matching kfd_sample.device_id.
-    std::unordered_map<std::uint32_t, std::uint32_t> m_kfd_node_to_gpu_index_cache;
-    std::map<std::uint32_t, std::uint64_t>           m_unified_memory_fault_counts;
-    bool                                             m_cpu_pmc_initialized{ false };
-    std::optional<std::uint32_t>                     m_cpu_pmc_owner_device_id{};
+    std::unordered_map<std::uint32_t, std::uint32_t>  m_kfd_node_to_gpu_index_cache;
+    std::map<std::uint32_t, std::uint64_t>            m_unified_memory_fault_counts;
+    std::set<std::pair<std::uint32_t, std::uint64_t>> m_missing_spm_counter_metadata;
+    bool                                              m_cpu_pmc_initialized{ false };
+    std::optional<std::uint32_t>                      m_cpu_pmc_owner_device_id;
 };
 }  // namespace trace_cache
 }  // namespace rocprofsys

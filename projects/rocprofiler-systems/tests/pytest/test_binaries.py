@@ -98,6 +98,8 @@ ENV_VAR_TO_JSON_PATH: dict[str, str] = {
     "ROCPROFSYS_USE_PID": "output.use_pid",
     # --- Hardware counters ---
     "ROCPROFSYS_ROCM_EVENTS": "hardware_counters.rocm_events",
+    "ROCPROFSYS_ROCM_SPM_EVENTS": "hardware_counters.spm.events",
+    "ROCPROFSYS_ROCM_SPM_SAMPLE_INTERVAL": "hardware_counters.spm.sample_interval",
     "ROCPROFSYS_PAPI_EVENTS": "hardware_counters.papi_events",
     "ROCPROFSYS_PAPI_MULTIPLEXING": "hardware_counters.papi_multiplexing",
     "ROCPROFSYS_GPU_PERF_COUNTERS": "hardware_counters.gpu_perf_counters",
