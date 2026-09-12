@@ -1665,9 +1665,9 @@ __global__ void ColorConvertNV12ToRGBBatchedKernel(const NV12ToRGBBatchParams *p
         v1.x = v0.x;
         v1.y = v0.y;
 
-        float2 cr = make_float2( 0.0000f,  1.5748f);
-        float2 cg = make_float2(-0.1873f, -0.4681f);
-        float2 cb = make_float2( 1.8556f,  0.0000f);
+        float2 cr = make_float2(CC_CR0, CC_CR1);
+        float2 cg = make_float2(CC_CG0, CC_CG1);
+        float2 cb = make_float2(CC_CB0, CC_CB1);
         float3 yuv;
         DUINT6 rgb0, rgb1;
 
