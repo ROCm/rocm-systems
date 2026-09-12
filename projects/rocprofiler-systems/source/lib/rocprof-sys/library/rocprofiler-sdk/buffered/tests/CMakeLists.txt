@@ -1,24 +1,21 @@
 # Copyright (c) Advanced Micro Devices, Inc.
 # SPDX-License-Identifier: MIT
 
-set(rocprofiler_sdk_components_unit_tests_sources
-    test_rccl_unit.cpp
-    test_roctx_client.cpp
-    test_buffered_domain.cpp
-    test_callback_domain.cpp
-    test_domain_registry.cpp
-    test_domain_service.cpp
-    ${PROJECT_SOURCE_DIR}/source/lib/rocprof-sys/library/rocprofiler-sdk/trace_control.cpp
-)
-
 add_library(
-    rocprofiler-sdk-components-unit-tests
+    rocprofiler-sdk-kfd-events-unit-tests
     OBJECT
-    ${rocprofiler_sdk_components_unit_tests_sources}
+    test_kfd_queue.cpp
+    test_kfd_page_fault.cpp
+    test_kfd_page_migrate.cpp
+    test_kfd_event_queue.cpp
+    test_kfd_event_unmap_from_gpu.cpp
+    test_kfd_event_dropped_events.cpp
+    test_kfd_event_page_fault.cpp
+    test_kfd_event_page_migrate.cpp
 )
 
 target_link_libraries(
-    rocprofiler-sdk-components-unit-tests
+    rocprofiler-sdk-kfd-events-unit-tests
     PRIVATE
         rocprofiler-systems-googletest-library
         rocprofiler-systems::rocprofiler-systems-core
@@ -29,7 +26,7 @@ target_link_libraries(
 )
 
 target_include_directories(
-    rocprofiler-sdk-components-unit-tests
+    rocprofiler-sdk-kfd-events-unit-tests
     PRIVATE
         ${PROJECT_SOURCE_DIR}/source/lib
         ${PROJECT_SOURCE_DIR}/source/lib/rocprof-sys

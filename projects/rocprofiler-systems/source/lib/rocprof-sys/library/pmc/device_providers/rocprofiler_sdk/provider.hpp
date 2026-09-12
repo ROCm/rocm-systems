@@ -122,11 +122,13 @@ private:
             m_profile_configs[gpu_agent->handle] = profile;
 
             typename backend_t::context_id_t counter_context{};
-            status = m_backend_api->create_context(&counter_context);
-            if(status != backend_t::status_success)
+            try
             {
-                LOG_WARNING("Failed to create context for agent {} (status={})",
-                            gpu_agent->handle, static_cast<int>(status));
+                m_backend_api->create_context(&counter_context);
+            } catch(const std::exception& e)
+            {
+                LOG_WARNING("Failed to create context for agent {} ({})",
+                            gpu_agent->handle, e.what());
                 continue;
             }
 

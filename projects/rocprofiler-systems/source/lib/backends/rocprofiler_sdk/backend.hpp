@@ -59,6 +59,8 @@ struct backend
     using buffer_policy_t              = Wrapper::buffer_policy_t;
     using buffer_tracing_cb_t          = Wrapper::buffer_tracing_cb_t;
     using callback_tracing_cb_t        = Wrapper::callback_tracing_cb_t;
+    using on_records_cb_t              = buffer_tracing_cb_t;
+    using on_record_cb_t               = callback_tracing_cb_t;
     using callback_tracing_kind_t      = Wrapper::callback_tracing_kind;
     using buffer_tracing_kind_t        = Wrapper::buffer_tracing_kind;
     using tracing_operation_t          = Wrapper::tracing_operation;
@@ -79,6 +81,7 @@ struct backend
     using dispatch_counting_record_cb_t  = Wrapper::dispatch_counting_record_cb;
     using callback_name_info_t           = Wrapper::callback_name_info_t;
     using buffer_name_info_t             = Wrapper::buffer_name_info_t;
+    using record_header_t                = Wrapper::record_header_t;
 
     static constexpr auto           compile_time_version = Wrapper::compile_time_version;
     static constexpr counter_flag_t flag_none            = Wrapper::COUNTER_FLAG_NONE;
@@ -86,6 +89,10 @@ struct backend
     static constexpr status_t       status_error         = Wrapper::STATUS_ERROR;
     static constexpr status_t       status_hsa_not_loaded =
         Wrapper::STATUS_ERROR_HSA_NOT_LOADED;
+
+    // NOLINTNEXTLINE(readability-identifier-naming)
+    static constexpr buffer_policy_t BUFFER_POLICY_LOSSLESS =
+        Wrapper::BUFFER_POLICY_LOSSLESS;
 
     // ─── Callback tracing kind constants ─────────────────────────────────────────
     static constexpr callback_tracing_kind_t CALLBACK_TRACING_HSA_CORE_API =
@@ -174,21 +181,39 @@ struct backend
         Wrapper::BUFFER_TRACING_KFD_EVENT_UNMAP_FROM_GPU;
     static constexpr buffer_tracing_kind_t BUFFER_TRACING_KFD_EVENT_DROPPED_EVENTS =
         Wrapper::BUFFER_TRACING_KFD_EVENT_DROPPED_EVENTS;
+    // NOLINTNEXTLINE(readability-identifier-naming)
+    static constexpr buffer_tracing_kind_t BUFFER_TRACING_KFD_EVENT_PAGE_MIGRATE =
+        Wrapper::BUFFER_TRACING_KFD_EVENT_PAGE_MIGRATE;
+    // NOLINTNEXTLINE(readability-identifier-naming)
+    static constexpr buffer_tracing_kind_t BUFFER_TRACING_KFD_EVENT_PAGE_FAULT =
+        Wrapper::BUFFER_TRACING_KFD_EVENT_PAGE_FAULT;
+
+    using kfd_page_fault_record         = Wrapper::kfd_page_fault_record;
+    using kfd_page_migrate_record       = Wrapper::kfd_page_migrate_record;
+    using kfd_queue_record              = Wrapper::kfd_queue_record;
+    using kfd_event_queue_record        = Wrapper::kfd_event_queue_record;
+    using kfd_event_unmap_record        = Wrapper::kfd_event_unmap_record;
+    using kfd_event_dropped_record      = Wrapper::kfd_event_dropped_record;
+    using kfd_event_page_migrate_record = Wrapper::kfd_event_page_migrate_record;
+    using kfd_event_page_fault_record   = Wrapper::kfd_event_page_fault_record;
 #endif
 
     static agent_id_t make_agent_id(std::uint64_t handle) { return agent_id_t{ handle }; }
 
-    static status_t create_context(context_id_t* ctx)
+    static void create_context(context_id_t* ctx)
     {
-        return Wrapper::create_context(ctx);
+        sdk_check<Wrapper>(Wrapper::create_context(ctx));
     }
 
-    static status_t start_context(context_id_t ctx)
+    static void start_context(context_id_t ctx)
     {
-        return Wrapper::start_context(ctx);
+        sdk_check<Wrapper>(Wrapper::start_context(ctx));
     }
 
-    static status_t stop_context(context_id_t ctx) { return Wrapper::stop_context(ctx); }
+    static void stop_context(context_id_t ctx)
+    {
+        sdk_check<Wrapper>(Wrapper::stop_context(ctx));
+    }
 
     static status_t sample_device_counting_service(context_id_t      ctx,
                                                    user_data_t       user_data,

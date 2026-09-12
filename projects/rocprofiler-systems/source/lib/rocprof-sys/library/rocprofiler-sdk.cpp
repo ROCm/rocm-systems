@@ -10,6 +10,8 @@
 #include "common/env_vars.hpp"
 #include "common/path.hpp"
 #include "common/synchronized.hpp"
+#include "core/agent.hpp"
+#include "core/agent_manager.hpp"
 #include "core/common.hpp"
 #include "core/common_types.hpp"
 #include "core/config.hpp"
@@ -23,13 +25,13 @@
 #include "core/sdk/tracing-config.hpp"
 #include "core/state.hpp"
 #include "core/trace_cache/cache_manager.hpp"
+#include "core/trace_cache/cacheable.hpp"
 #include "core/trace_cache/metadata_registry.hpp"
 #include "core/trace_cache/sample_type.hpp"
 #include "library/pmc/sampler.hpp"
 #include "library/process_sampler.hpp"
 #include "library/rocprofiler-sdk/counters.hpp"
 #include "library/rocprofiler-sdk/fwd.hpp"
-#include "library/rocprofiler-sdk/kfd_events.hpp"
 #include "library/rocprofiler-sdk/rccl.hpp"
 #include "library/rocprofiler-sdk/trace_control.hpp"
 #include "library/thread_info.hpp"
@@ -41,7 +43,10 @@
 #include <timemory/hash/types.hpp>
 #include <timemory/unwind/processed_entry.hpp>
 #include <timemory/variadic/lightweight_tuple.hpp>
+
+#include <string_view>
 #include <type_traits>
+#include <utility>
 
 #include <rocprofiler-sdk/agent.h>
 #include <rocprofiler-sdk/callback_tracing.h>
@@ -85,6 +90,8 @@
 #include <unordered_set>
 #include <vector>
 
+#include "library/rocprofiler-sdk/domain_service.hpp"
+
 namespace rocprofsys
 {
 namespace rocprofiler_sdk
@@ -97,6 +104,90 @@ namespace
 using rocprofiler_sdk::default_externals;
 using rocprofiler_sdk::tracing_config;
 using rocprofiler_sdk::wrapper;
+
+using production_backend = backends::rocprofiler_sdk::backend<rocprofiler_sdk::wrapper>;
+
+struct external_dependencies
+{
+    using agent_t         = ::rocprofsys::agent;
+    using agent_type_t    = ::rocprofsys::agent_type;
+    using agent_manager_t = ::rocprofsys::agent_manager;
+    using track_t         = trace_cache::info::track;
+    using thread_info_t   = trace_cache::info::thread;
+    using pmc_info_t      = trace_cache::info::pmc;
+    using kfd_sample_t    = trace_cache::kfd_sample;
+
+    static constexpr agent_type_t k_agent_type_gpu = agent_type_t::gpu;
+    static constexpr agent_type_t k_agent_type_cpu = agent_type_t::cpu;
+
+    static agent_manager_t& get_agent_manager()
+    {
+        return ::rocprofsys::get_agent_manager_instance();
+    }
+
+    static void add_string(std::string_view value)
+    {
+        trace_cache::get_metadata_registry().add_string(value);
+    }
+
+    static void add_thread_info(const thread_info_t& info)
+    {
+        trace_cache::get_metadata_registry().add_thread_info(info);
+    }
+
+    static void add_track(const track_t& info)
+    {
+        trace_cache::get_metadata_registry().add_track(info);
+    }
+
+    static void add_pmc_info(const pmc_info_t& info)
+    {
+        trace_cache::get_metadata_registry().add_pmc_info(info);
+    }
+
+    static void buffer_storage_store(kfd_sample_t&& sample)
+    {
+        trace_cache::get_buffer_storage().store(sample);
+    }
+
+    static std::int32_t get_pid() { return static_cast<std::int32_t>(::getpid()); }
+    static std::int32_t get_ppid() { return static_cast<std::int32_t>(::getppid()); }
+
+    // Single source of truth is core/trace_cache/cacheable.hpp's ABSOLUTE constant;
+    // kfd_events.hpp never includes that header, so the value is surfaced here.
+    static constexpr std::string_view k_pmc_value_type_absolute = trace_cache::ABSOLUTE;
+
+    // Single source of truth for these strings is core/categories.hpp's
+    // trait::name<category::X>; kfd_events.hpp itself never includes
+    // categories.hpp, so the values are surfaced here instead.
+    static constexpr std::string_view k_kfd_page_fault_category_name =
+        trait::name<category::rocm_kfd_page_fault>::value;
+    static constexpr std::string_view k_kfd_page_fault_category_description =
+        trait::name<category::rocm_kfd_page_fault>::description;
+    static constexpr std::string_view k_kfd_page_migrate_category_name =
+        trait::name<category::rocm_kfd_page_migrate>::value;
+    static constexpr std::string_view k_kfd_page_migrate_category_description =
+        trait::name<category::rocm_kfd_page_migrate>::description;
+    static constexpr std::string_view k_kfd_queue_category_name =
+        trait::name<category::rocm_kfd_queue>::value;
+    static constexpr std::string_view k_kfd_queue_category_description =
+        trait::name<category::rocm_kfd_queue>::description;
+    static constexpr std::string_view k_kfd_event_queue_category_name =
+        trait::name<category::rocm_kfd_event_queue>::value;
+    static constexpr std::string_view k_kfd_event_queue_category_description =
+        trait::name<category::rocm_kfd_event_queue>::description;
+    static constexpr std::string_view k_kfd_event_unmap_from_gpu_category_name =
+        trait::name<category::rocm_kfd_event_unmap_from_gpu>::value;
+    static constexpr std::string_view k_kfd_event_unmap_from_gpu_category_description =
+        trait::name<category::rocm_kfd_event_unmap_from_gpu>::description;
+    static constexpr std::string_view k_kfd_event_dropped_events_category_name =
+        trait::name<category::rocm_kfd_event_dropped_events>::value;
+    static constexpr std::string_view k_kfd_event_dropped_events_category_description =
+        trait::name<category::rocm_kfd_event_dropped_events>::description;
+};
+
+std::shared_ptr<domain_service<production_backend, external_dependencies>>
+    g_domain_service;
 
 using tool_agent_vec_t                         = std::vector<tool_agent>;
 client_data*                    tool_data      = new client_data{};
@@ -2098,50 +2189,6 @@ tool_tracing_buffered(rocprofiler_context_id_t /*context*/,
                 }
             }
 #endif
-#if(ROCPROFILER_VERSION >= 10202)
-            else if(header->kind == ROCPROFILER_BUFFER_TRACING_KFD_PAGE_FAULT)
-            {
-                auto* record =
-                    static_cast<rocprofiler_buffer_tracing_kfd_page_fault_record_t*>(
-                        header->payload);
-                tool_kfd_page_fault_callback(tool_data, record);
-            }
-            else if(header->kind == ROCPROFILER_BUFFER_TRACING_KFD_PAGE_MIGRATE)
-            {
-                auto* record =
-                    static_cast<rocprofiler_buffer_tracing_kfd_page_migrate_record_t*>(
-                        header->payload);
-                tool_kfd_page_migrate_callback(tool_data, record);
-            }
-            else if(header->kind == ROCPROFILER_BUFFER_TRACING_KFD_QUEUE)
-            {
-                auto* record =
-                    static_cast<rocprofiler_buffer_tracing_kfd_queue_record_t*>(
-                        header->payload);
-                tool_kfd_queue_callback(tool_data, record);
-            }
-            else if(header->kind == ROCPROFILER_BUFFER_TRACING_KFD_EVENT_QUEUE)
-            {
-                auto* record =
-                    static_cast<rocprofiler_buffer_tracing_kfd_event_queue_record_t*>(
-                        header->payload);
-                tool_kfd_event_queue_callback(tool_data, record);
-            }
-            else if(header->kind == ROCPROFILER_BUFFER_TRACING_KFD_EVENT_UNMAP_FROM_GPU)
-            {
-                auto* record = static_cast<
-                    rocprofiler_buffer_tracing_kfd_event_unmap_from_gpu_record_t*>(
-                    header->payload);
-                tool_kfd_event_unmap_from_gpu_callback(tool_data, record);
-            }
-            else if(header->kind == ROCPROFILER_BUFFER_TRACING_KFD_EVENT_DROPPED_EVENTS)
-            {
-                auto* record = static_cast<
-                    rocprofiler_buffer_tracing_kfd_event_dropped_events_record_t*>(
-                    header->payload);
-                tool_kfd_event_dropped_events_callback(tool_data, record);
-            }
-#endif
             else if(header->kind == ROCPROFILER_BUFFER_TRACING_HSA_CORE_API ||
                     header->kind == ROCPROFILER_BUFFER_TRACING_HSA_AMD_EXT_API)
             {
@@ -2399,6 +2446,11 @@ flush()
             }
         }
     }
+
+    if(g_domain_service)
+    {
+        g_domain_service->flush();
+    }
 }
 
 int
@@ -2644,94 +2696,64 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* user_data)
 #endif
 
 #if(ROCPROFILER_VERSION >= 10202)
-    // Initialize KFD event metadata
-    if(_buffered_domain.count(ROCPROFILER_BUFFER_TRACING_KFD_PAGE_FAULT) > 0 ||
-       _buffered_domain.count(ROCPROFILER_BUFFER_TRACING_KFD_PAGE_MIGRATE) > 0 ||
-       _buffered_domain.count(ROCPROFILER_BUFFER_TRACING_KFD_QUEUE) > 0 ||
-       _buffered_domain.count(ROCPROFILER_BUFFER_TRACING_KFD_EVENT_QUEUE) > 0 ||
-       _buffered_domain.count(ROCPROFILER_BUFFER_TRACING_KFD_EVENT_UNMAP_FROM_GPU) > 0 ||
-       _buffered_domain.count(ROCPROFILER_BUFFER_TRACING_KFD_EVENT_DROPPED_EVENTS) > 0)
+    g_domain_service =
+        std::make_shared<domain_service<production_backend, external_dependencies>>();
+
+    std::vector<domain_selection> domain_selection_list;
+
+    if(_buffered_domain.contains(ROCPROFILER_BUFFER_TRACING_KFD_PAGE_FAULT))
     {
-        rocprofiler_sdk::kfd_event_metadata_initialize(tool_data);
+        domain_selection selection;
+        selection.name = "kfd_page_fault";
+        domain_selection_list.push_back(selection);
     }
 
-    if(_buffered_domain.count(ROCPROFILER_BUFFER_TRACING_KFD_PAGE_FAULT) > 0)
+    if(_buffered_domain.contains(ROCPROFILER_BUFFER_TRACING_KFD_PAGE_MIGRATE))
     {
-        ROCPROFILER_CALL(rocprofiler_create_buffer(
-            _data->primary_ctx, buffer_size, watermark,
-            ROCPROFILER_BUFFER_POLICY_LOSSLESS, tool_tracing_buffered, tool_data,
-            &_data->kfd_page_fault_buffer));
-
-        ROCPROFILER_CALL(rocprofiler_configure_buffer_tracing_service(
-            _data->primary_ctx, ROCPROFILER_BUFFER_TRACING_KFD_PAGE_FAULT, nullptr, 0,
-            _data->kfd_page_fault_buffer));
+        domain_selection selection;
+        selection.name = "kfd_page_migrate";
+        domain_selection_list.push_back(selection);
     }
 
-    if(_buffered_domain.count(ROCPROFILER_BUFFER_TRACING_KFD_PAGE_MIGRATE) > 0)
+    if(_buffered_domain.contains(ROCPROFILER_BUFFER_TRACING_KFD_QUEUE))
     {
-        ROCPROFILER_CALL(rocprofiler_create_buffer(
-            _data->primary_ctx, buffer_size, watermark,
-            ROCPROFILER_BUFFER_POLICY_LOSSLESS, tool_tracing_buffered, tool_data,
-            &_data->kfd_page_migrate_buffer));
-
-        ROCPROFILER_CALL(rocprofiler_configure_buffer_tracing_service(
-            _data->primary_ctx, ROCPROFILER_BUFFER_TRACING_KFD_PAGE_MIGRATE, nullptr, 0,
-            _data->kfd_page_migrate_buffer));
+        domain_selection selection;
+        selection.name = "kfd_queue";
+        domain_selection_list.push_back(selection);
     }
 
-    if(_buffered_domain.count(ROCPROFILER_BUFFER_TRACING_KFD_QUEUE) > 0)
+    if(_buffered_domain.contains(ROCPROFILER_BUFFER_TRACING_KFD_EVENT_QUEUE))
     {
-        ROCPROFILER_CALL(rocprofiler_create_buffer(
-            _data->primary_ctx, buffer_size, watermark,
-            ROCPROFILER_BUFFER_POLICY_LOSSLESS, tool_tracing_buffered, tool_data,
-            &_data->kfd_queue_buffer));
+        domain_selection selection;
+        selection.name       = "kfd_event_queue";
+        selection.operations = { "ROCPROFILER_KFD_EVENT_QUEUE_RESTORE_RESCHEDULED" };
 
-        ROCPROFILER_CALL(rocprofiler_configure_buffer_tracing_service(
-            _data->primary_ctx, ROCPROFILER_BUFFER_TRACING_KFD_QUEUE, nullptr, 0,
-            _data->kfd_queue_buffer));
+        domain_selection_list.push_back(selection);
     }
 
-    if(_buffered_domain.count(ROCPROFILER_BUFFER_TRACING_KFD_EVENT_QUEUE) > 0)
+    if(_buffered_domain.contains(ROCPROFILER_BUFFER_TRACING_KFD_EVENT_UNMAP_FROM_GPU))
     {
-        ROCPROFILER_CALL(rocprofiler_create_buffer(
-            _data->primary_ctx, buffer_size, watermark,
-            ROCPROFILER_BUFFER_POLICY_LOSSLESS, tool_tracing_buffered, tool_data,
-            &_data->kfd_event_queue_buffer));
+        domain_selection selection;
+        selection.name = "kfd_event_unmap_from_gpu";
 
-        // The only KFD_EVENT_QUEUE operation we want to process is RESTORE_RESCHEDULED.
-        // All others are captured within paired KFD_QUEUE operations
-        auto kfd_event_queue_ops = std::array<rocprofiler_tracing_operation_t, 1>{
-            ROCPROFILER_KFD_EVENT_QUEUE_RESTORE_RESCHEDULED
-        };
-
-        ROCPROFILER_CALL(rocprofiler_configure_buffer_tracing_service(
-            _data->primary_ctx, ROCPROFILER_BUFFER_TRACING_KFD_EVENT_QUEUE,
-            kfd_event_queue_ops.data(), kfd_event_queue_ops.size(),
-            _data->kfd_event_queue_buffer));
+        domain_selection_list.push_back(selection);
     }
 
-    if(_buffered_domain.count(ROCPROFILER_BUFFER_TRACING_KFD_EVENT_UNMAP_FROM_GPU) > 0)
+    if(_buffered_domain.contains(ROCPROFILER_BUFFER_TRACING_KFD_EVENT_DROPPED_EVENTS))
     {
-        ROCPROFILER_CALL(rocprofiler_create_buffer(
-            _data->primary_ctx, buffer_size, watermark,
-            ROCPROFILER_BUFFER_POLICY_LOSSLESS, tool_tracing_buffered, tool_data,
-            &_data->kfd_event_unmap_buffer));
+        domain_selection selection;
+        selection.name = "kfd_event_dropped_events";
 
-        ROCPROFILER_CALL(rocprofiler_configure_buffer_tracing_service(
-            _data->primary_ctx, ROCPROFILER_BUFFER_TRACING_KFD_EVENT_UNMAP_FROM_GPU,
-            nullptr, 0, _data->kfd_event_unmap_buffer));
+        domain_selection_list.push_back(selection);
     }
 
-    if(_buffered_domain.count(ROCPROFILER_BUFFER_TRACING_KFD_EVENT_DROPPED_EVENTS) > 0)
+    try
     {
-        ROCPROFILER_CALL(rocprofiler_create_buffer(
-            _data->primary_ctx, buffer_size, watermark,
-            ROCPROFILER_BUFFER_POLICY_LOSSLESS, tool_tracing_buffered, tool_data,
-            &_data->kfd_event_dropped_buffer));
-
-        ROCPROFILER_CALL(rocprofiler_configure_buffer_tracing_service(
-            _data->primary_ctx, ROCPROFILER_BUFFER_TRACING_KFD_EVENT_DROPPED_EVENTS,
-            nullptr, 0, _data->kfd_event_dropped_buffer));
+        g_domain_service->configure(domain_selection_list);
+    } catch(const std::exception& e)
+    {
+        LOG_CRITICAL("domain_service::configure failed: {}", e.what());
+        throw;
     }
 #endif
 
