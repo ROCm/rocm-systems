@@ -41,6 +41,7 @@ cmake \
     -DBUILD_EXAMPLES=ON \
     -DBUILD_CTESTS=ON \
     -DPROFILE=OFF \
+    -DSQTT_ENABLED=${SQTT_ENABLED:-OFF} \
     -DUSE_GDA=OFF \
     -DUSE_RO=ON \
     -DUSE_IPC=OFF \
