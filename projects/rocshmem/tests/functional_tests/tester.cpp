@@ -455,12 +455,14 @@ std::vector<Tester*> Tester::create(TesterArguments args) {
       break;
     case HostAmoFAddTestType:
       test_name = "Host_Amo_FAdd";
-      if (BackendType::IPC_BACKEND == backend_type)
+      if (BackendType::IPC_BACKEND == backend_type ||
+          BackendType::GDA_BACKEND == backend_type)
         testers.push_back(new HostRmaTester(args));
       break;
     case HostAmoFCswapTestType:
       test_name = "Host_Amo_FCswap";
-      if (BackendType::IPC_BACKEND == backend_type)
+      if (BackendType::IPC_BACKEND == backend_type ||
+          BackendType::GDA_BACKEND == backend_type)
         testers.push_back(new HostRmaTester(args));
       break;
     case HostCtxPutmemTestType:
