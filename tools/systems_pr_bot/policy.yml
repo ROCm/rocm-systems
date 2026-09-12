@@ -153,6 +153,8 @@ checks:
     - pre-commit
 
   failure_comments:
+    # Keep the project list below in step with the root .pre-commit-config.yaml `exclude:` block:
+    # for anything listed there the root config checks nothing and exits 0.
     pre-commit:
       title: "Pre-commit check failed"
       body: |
@@ -164,3 +166,20 @@ checks:
         - `pre-commit run --all-files --show-diff-on-failure`
 
         This repo uses `.pre-commit-config.yaml`.
+
+        **If you changed one of these projects, pass its own config instead** —
+        they are in the root config's `exclude:` block, so the command above
+        checks *nothing* under them and exits 0:
+
+        `projects/amdsmi` · `projects/rccl` · `projects/rdc` ·
+        `projects/rocm-smi-lib` · `projects/rocprofiler-compute`
+
+        ```bash
+        pre-commit run -c projects/<name>/.pre-commit-config.yaml \
+          --all-files --show-diff-on-failure
+        ```
+
+        The same applies to the hook `pre-commit install` writes, which is
+        hard-wired to the root config.
+
+        📖 [Pre-commit section of the PR Bot FAQ](https://github.com/ROCm/rocm-systems/blob/develop/docs/SYSTEMS_PR_BOT_FAQ.md)

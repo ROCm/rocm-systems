@@ -9,6 +9,9 @@ exclude: |
     | shared/amdgpu-windows-interop
     # these projects have their own pre-commit-config.yaml
     | projects/amdsmi/
+    # Load-bearing: rccl's .clang-format uses v22 keys the v18.1.4 pin below cannot parse, so
+    # removing this exits 1 on 946 files -- and newly subjects rccl to black and gersemi.
+    | projects/rccl/
     | projects/cuid/
     | projects/rdc/
     | projects/rocm-smi-lib/

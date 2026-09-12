@@ -1,50 +1,65 @@
+# Shared pre-commit formatting gate.
+#
+# The job below MUST stay named `pre-commit`: that is the check-run name
+# therock-pr-bot requires (`required_check_runs` in
+# tools/systems_pr_bot/policy.yml). Renaming it, or making it a matrix, makes
+# the bot wait 900s for a check that never appears.
+#
+# To onboard a project: see ONBOARDED_SUBTREES in
+# .github/scripts/run_pre_commit_by_subtree.py, which lists all of the steps.
 name: "Pre-commit Format & Lint"
 on:
   pull_request:
     branches:
-      - testbranch
+      - develop
+    paths:
+      - "projects/rccl/**"
+      - ".github/workflows/pre-formatting.yml"
+      - ".github/scripts/run_pre_commit_by_subtree.py"
+      - ".github/scripts/tests/test_run_pre_commit_by_subtree.py"
+      # conftest.py puts .github/scripts on sys.path; without it the test step above cannot import.
+      - ".github/scripts/tests/conftest.py"
+      # Both feed this job's file list; a change to either can silently empty the gate.
+      - ".github/scripts/pr_detect_changed_subtrees.py"
+      - ".github/repos-config.json"
+      - ".pre-commit-config.yaml"
+      # No '!**/*.md'-style negations: a paths: miss publishes no check-run at all, which the bot
+      # waits 900s for. Skipping is not an option here, only not-running.
 
 permissions:
   contents: read
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   pre-commit:
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
     steps:
-#      - name: Generate a token
-#        id: generate-token
-#        uses: actions/create-github-app-token@df432ceedc7162793a195dd1713ff69aefc7379e
-#        with:
-#          app-id: ${{ secrets.APP_ID }}
-#          private-key: ${{ secrets.APP_PRIVATE_KEY }}
-#          owner: ${{ github.repository_owner }}
-
       - name: Checkout code (initial)
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           ref: refs/pull/${{ github.event.pull_request.number }}/merge
           sparse-checkout: .github
           sparse-checkout-cone-mode: true
-          token: ${{ secrets.GITHUB_TOKEN }}
+          # Merge ref plus its first parent, which is the base it was computed against.
+          fetch-depth: 2
 
       - name: Set up Python
-        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with:
           python-version: '3.12'
 
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install pydantic requests pre-commit
-          sudo apt-get update
-          sudo apt-get install -y clang-format
+          pip install pydantic pytest requests pre-commit
 
-      - name: Configure Git
-        run: |
-          git config user.name "systems-assistant[bot]"
-          git config user.email "systems-assistant[bot]@users.noreply.github.com"
+      - name: Unit-test the subtree runner
+        # This verdict is only as good as the script that picks the files.
+        run: python -m pytest .github/scripts/tests/test_run_pre_commit_by_subtree.py
 
       - name: Detect changed subtrees
         id: detect
@@ -60,57 +75,32 @@ jobs:
 
       - name: Checkout full repo with changed subtrees
         if: steps.detect.outputs.subtrees
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           ref: refs/pull/${{ github.event.pull_request.number }}/merge
           sparse-checkout: |
             .github
             ${{ steps.detect.outputs.subtrees }}
-          fetch-depth: 0
-          token: ${{ secrets.GITHUB_TOKEN }}
+          fetch-depth: 2
           submodules: false
 
       - name: Get list of changed files
         id: changed-files
         shell: bash
-        env:
-          BASE_REF: ${{ github.event.pull_request.base.ref }}
         run: |
-          git fetch --depth=1 origin -- "$BASE_REF"
-          changed=$(git diff --name-only FETCH_HEAD HEAD)
-          files=$(echo "$changed" | tr '\n' ' ' | sed 's/ *$//')
-          echo "all_modified_files=$files" >> $GITHUB_OUTPUT
+          set -euo pipefail
+          # HEAD^1 is the base the merge ref was built on. Do NOT diff a freshly fetched base tip:
+          # the merge ref is recomputed lazily, so a moved develop makes this red for other
+          # people's files. ACMR drops deletions, which pre-commit cannot check.
+          git diff --name-only --diff-filter=ACMR HEAD^1 HEAD \
+            > "$RUNNER_TEMP/changed-files.txt"
+          echo "Changed files:"
+          sed 's/^/  /' "$RUNNER_TEMP/changed-files.txt"
 
-      - name: Show changed-files output
-        env:
-          ALL_MODIFIED_FILES: ${{ steps.changed-files.outputs.all_modified_files }}
+      - name: Run pre-commit
+        shell: bash
         run: |
-          echo "Changed files are: $ALL_MODIFIED_FILES"
-
-      - name: Disable submodule recursion
-        run: git config submodule.recurse false
-
-      - name: Run and auto-commit pre-commit fixes
-        env:
-          GIT_AUTHOR_NAME: "systems-assistant[bot]"
-          GIT_AUTHOR_EMAIL: "systems-assistant[bot]@users.noreply.github.com"
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          ALL_MODIFIED_FILES: ${{ steps.changed-files.outputs.all_modified_files }}
-          HEAD_REF: ${{ github.head_ref }}
-        run: |
-          read -r -a files <<<"$ALL_MODIFIED_FILES"
-          if [ ${#files[@]} -eq 0 ]; then
-            echo "No files changed, skipping pre-commit."
-            exit 0
-          fi
-          echo "Running pre-commit on these files:"
-          printf "  %s\n" "${files[@]}"
-          set +e
-          pre-commit run --files "${files[@]}" --show-diff-on-failure
-          set -e
-          git add "${files[@]}"
-          git fetch origin -- "$HEAD_REF"
-          if ! git diff --cached --quiet; then
-            git commit -m "ci: apply pre-commit fixes"
-            git push --force-with-lease origin -- "HEAD:$HEAD_REF"
-          fi
+          set -euo pipefail
+          # Check-only: this publishes the check-run the bot requires, so a failure must fail here.
+          python .github/scripts/run_pre_commit_by_subtree.py \
+            --files-from "$RUNNER_TEMP/changed-files.txt"
