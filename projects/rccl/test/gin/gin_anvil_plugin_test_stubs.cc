@@ -83,34 +83,37 @@ void ncclDebugLog(ncclDebugLogLevel level, unsigned long flags, const char* file
   (void)fmt;
 }
 
-ncclResult_t bootstrapAllGather(void* commState, void* allData, int size) {
-  (void)commState;
+static ncclResult_t stubIntAllGather(void* allData, int nranks, int size) {
   if (GinAnvilPluginStubs::g.bootstrapFail) return ncclInternalError;
-  if (size == static_cast<int>(sizeof(int))) {
-    int* devs = static_cast<int*>(allData);
-    if (!GinAnvilPluginStubs::g.bootstrapIntResult.empty()) {
-      for (int i = 0; i < GinAnvilPluginStubs::g.bootstrapNranks; ++i) {
-        devs[i] = GinAnvilPluginStubs::g.bootstrapIntResult[static_cast<size_t>(i)];
-      }
-      GinAnvilPluginStubs::g.bootstrapIntResult.clear();
-      return ncclSuccess;
+  if (size != static_cast<int>(sizeof(int)) || nranks < 1) return ncclSuccess;
+  int* devs = static_cast<int*>(allData);
+  if (!GinAnvilPluginStubs::g.bootstrapIntResult.empty()) {
+    for (int i = 0; i < nranks; ++i) {
+      devs[i] = GinAnvilPluginStubs::g.bootstrapIntResult[static_cast<size_t>(i)];
     }
-    int known = -1;
-    int maxv = 0;
-    for (int i = 0; i < GinAnvilPluginStubs::g.bootstrapNranks; ++i) {
-      if (devs[i] >= 0) known = devs[i];
-      if (devs[i] > maxv) maxv = devs[i];
-    }
-    for (int i = 0; i < GinAnvilPluginStubs::g.bootstrapNranks; ++i) {
-      if (devs[i] < 0 && known >= 0) devs[i] = known;
-      if (devs[i] < 0) devs[i] = 0;
-    }
-    // Conn-check allgather: replicate the max missing count (single-process sim).
-    if (maxv > 0) {
-      for (int i = 0; i < GinAnvilPluginStubs::g.bootstrapNranks; ++i) devs[i] = maxv;
-    }
+    GinAnvilPluginStubs::g.bootstrapIntResult.clear();
+    return ncclSuccess;
+  }
+  int known = -1;
+  int maxv = 0;
+  for (int i = 0; i < nranks; ++i) {
+    if (devs[i] >= 0) known = devs[i];
+    if (devs[i] > maxv) maxv = devs[i];
+  }
+  for (int i = 0; i < nranks; ++i) {
+    if (devs[i] < 0 && known >= 0) devs[i] = known;
+    if (devs[i] < 0) devs[i] = 0;
+  }
+  // Conn-check allgather: replicate the max missing count (single-process sim).
+  if (maxv > 0) {
+    for (int i = 0; i < nranks; ++i) devs[i] = maxv;
   }
   return ncclSuccess;
+}
+
+ncclResult_t bootstrapAllGather(void* commState, void* allData, int size) {
+  (void)commState;
+  return stubIntAllGather(allData, GinAnvilPluginStubs::g.bootstrapNranks, size);
 }
 
 ncclResult_t bootstrapBarrier(void* commState, int rank, int nranks, int tag) {
@@ -120,6 +123,19 @@ ncclResult_t bootstrapBarrier(void* commState, int rank, int nranks, int tag) {
   (void)tag;
   if (GinAnvilPluginStubs::g.bootstrapFail) return ncclInternalError;
   return ncclSuccess;
+}
+
+ncclResult_t bootstrapIntraNodeAllGather(void* commState, int* ranks, int rank, int nranks, void* allData,
+                                         int size) {
+  (void)commState;
+  (void)ranks;
+  (void)rank;
+  return stubIntAllGather(allData, nranks, size);
+}
+
+ncclResult_t bootstrapIntraNodeBarrier(void* commState, int* ranks, int rank, int nranks, int tag) {
+  (void)ranks;
+  return bootstrapBarrier(commState, rank, nranks, tag);
 }
 
 ncclResult_t ncclDevrGetLsaSelfAddr(struct ncclDevrState* devr, void* addr, void** outAddr) {
