@@ -50,7 +50,8 @@ __launch_bounds__(512)
                                       size_t perChunkBytes,                  // per-peer chunk payload; multiple of 16
                                       int selfRank, int nRanksRt,
                                       uint32_t* __restrict__ epochDev,       // per-block LL epoch cells
-                                      int epochLen) {                        // number of cells in epochDev
+                                      int epochLen,                          // number of cells in epochDev
+                                      const uint32_t* __restrict__ abortFlag) { // comm->abortFlagDev
 
   const int nRanks = NRANKS_CT ? NRANKS_CT : nRanksRt;
   const int peer = blockIdx.x;             // grid.x == nRanks: one column/peer
@@ -112,9 +113,10 @@ __launch_bounds__(512)
     uint32_t* out = reinterpret_cast<uint32_t*>(reinterpret_cast<char*>(recvbuff) + (size_t)peer * perChunkBytes);
     for (size_t pk = pkBegin + tid; pk < pkEnd; pk += nthreads) {
       uint32_t d0, f0, d1, f1;
-      do {
-        ddaLLLoadLineB128(reinterpret_cast<const uint32_t*>(const_cast<LLPacket16*>(&src[pk])), d0, f0, d1, f1);
-      } while (f0 != flag || f1 != flag);
+      if (!ddaLLWaitLineFlags(reinterpret_cast<const uint32_t*>(const_cast<LLPacket16*>(&src[pk])), flag, abortFlag, d0,
+                              f0, d1, f1)) {
+        break;
+      }
       out[2 * pk] = d0;
       out[2 * pk + 1] = d1;
     }

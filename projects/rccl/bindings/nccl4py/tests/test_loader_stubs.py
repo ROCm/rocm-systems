@@ -28,6 +28,12 @@ def test_import_bindings_does_not_raise():
     import nccl.bindings  # noqa: F401
 
 
+def test_import_top_level_without_ep_bindings():
+    import nccl
+
+    assert nccl.get_version().nccl_ep is None
+
+
 def test_comm_grow_raises_not_implemented():
     import nccl.bindings as b
 

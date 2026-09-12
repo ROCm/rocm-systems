@@ -25,7 +25,10 @@ from packaging.version import Version as _Version
 
 from nccl._version import __version__
 from nccl.bindings import nccl as _nccl_bindings
-from nccl.bindings import nccl_ep as _ep_bindings
+try:
+    from nccl.bindings import nccl_ep as _ep_bindings
+except ImportError:
+    _ep_bindings = None
 
 __all__ = ["LibraryInfo", "VersionInfo", "get_version", "show_versions"]
 
@@ -158,7 +161,7 @@ def _nccl_ep_importable() -> bool:
 
 
 def _nccl_ep_library_info() -> LibraryInfo | None:
-    if not _nccl_ep_importable():
+    if _ep_bindings is None or not _nccl_ep_importable():
         return None
     version = _decode_version(_ep_bindings.get_version())
     path = _resolve_so_path("libnccl_ep.so")

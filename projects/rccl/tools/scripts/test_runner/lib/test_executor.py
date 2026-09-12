@@ -35,6 +35,28 @@ except ImportError:
 sys.stdout.reconfigure(line_buffering=True)
 
 
+def wrap_mpi_program(program, gtest_json_path=None):
+    """bash -c wrapper for one MPI rank: ulimit, glob-safe exec, JSON on rank 0.
+
+    Every rank used to get ``--gtest_output=json:<same file>``. Google Test
+    truncates that path at start-up, so N ranks racing on it leave an empty or
+    corrupt report even when the test passed (Grow_ConfigInheritance).
+    Rank 0 alone sets GTEST_OUTPUT; other ranks exec the same binary without it.
+    """
+    preamble = "ulimit -l unlimited 2>/dev/null; set -f; "
+    if gtest_json_path:
+        json_env = f"GTEST_OUTPUT=json:{shlex.quote(gtest_json_path)}"
+        inner = (
+            preamble
+            + 'rank="${OMPI_COMM_WORLD_RANK:-${PMIX_RANK:-${PMI_RANK:-0}}}"; '
+            + f'if [ "$rank" = "0" ]; then exec env {json_env} {program}; '
+            + f"else exec {program}; fi"
+        )
+    else:
+        inner = preamble + f"exec {program}"
+    return f"bash -c {shlex.quote(inner)}"
+
+
 def glob_filter_matches(name: str, pattern_str: str) -> bool:
     """Return True if *name* matches the gtest-style glob filter *pattern_str*.
 
@@ -129,14 +151,27 @@ class TestResult(str, Enum):
     RESULT_SKIPPED = "SKIPPED"
 
 
+# Google Test's own "nothing was selected" banner, e.g. a --gtest_filter that
+# matches no test. Exit status is 0 and no per-test line is printed, so this is
+# the only positive evidence that the run executed nothing.
+_GTEST_RAN_NOTHING_RE = re.compile(
+    r"Running 0 tests from 0 test (?:suites|cases)|0 tests from 0 test (?:suites|cases) ran"
+)
+
+
 def infer_gtest_result_from_output(captured_output: str, returncode: int) -> str:
     """
     Map gtest process exit + stdout/stderr to a TestResult string.
 
     Google Test returns exit 0 when failures are absent, including when all
-    selected tests are SKIPPED. Prefer ``infer_gtest_result_from_json_file`` when
-    ``--gtest_output=json:…`` is used; this function is the stdout fallback (e.g.
-    ``[  SKIPPED ]`` / ``[  OK ]`` patterns).
+    selected tests are SKIPPED and when the filter selected nothing at all.
+    A filter that matches no test must not report PASSED -- that turns a typo'd
+    or renamed test_filter into a silent green result. Report it SKIPPED, which
+    is what the pytest path already does for "no tests collected".
+
+    Prefer ``infer_gtest_result_from_json_file`` when ``--gtest_output=json:…``
+    is used; this function is the stdout fallback (e.g. ``[  SKIPPED ]`` /
+    ``[  OK ]`` patterns).
     """
     if returncode == ExitCode.EXIT_TIMEOUT:
         return TestResult.RESULT_TIMEOUT.value
@@ -151,6 +186,8 @@ def infer_gtest_result_from_output(captured_output: str, returncode: int) -> str
     if has_ok:
         return TestResult.RESULT_PASSED.value
     if has_skipped:
+        return TestResult.RESULT_SKIPPED.value
+    if _GTEST_RAN_NOTHING_RE.search(out):
         return TestResult.RESULT_SKIPPED.value
     return TestResult.RESULT_PASSED.value
 
@@ -168,11 +205,593 @@ def _gtest_json_accumulate(obj, stats):
                     stats["skipped"] = True
                 elif res == "COMPLETED":
                     stats["passed"] = True
+            return
         for v in obj.values():
             _gtest_json_accumulate(v, stats)
     elif isinstance(obj, list):
         for item in obj:
             _gtest_json_accumulate(item, stats)
+
+
+def _gtest_leaf_not_run(case):
+    """True for DISABLED tests listed in JSON but never executed (SUPPRESSED)."""
+    result = case.get("result")
+    if result in ("SUPPRESSED", "NOT_RUN"):
+        return True
+    disabled = case.get("disabled")
+    if disabled in (True, 1, "1", "true", "True") and result not in (
+        "COMPLETED",
+        "SKIPPED",
+    ):
+        return True
+    return False
+
+
+def _leaf_case_status(case):
+    """Map one executed gtest JSON leaf to PASSED / FAILED / SKIPPED / UNKNOWN.
+
+    Returns None for leaves that were not run (DISABLED / SUPPRESSED). Those
+    must not inflate "test cases executed" or the unique-case counts.
+    """
+    if _gtest_leaf_not_run(case):
+        return None
+    fails = case.get("failures")
+    if isinstance(fails, list) and fails:
+        return "FAILED"
+    result = case.get("result")
+    if result == "SKIPPED":
+        return "SKIPPED"
+    if result in ("COMPLETED", None, ""):
+        return "PASSED"
+    return str(result)
+
+
+def collect_gtest_case_details(obj):
+    """Leaf cases from a gtest JSON object (suite, case, full_name, status).
+
+    DISABLED / SUPPRESSED entries are omitted; they were not executed.
+    """
+    details = []
+    if not isinstance(obj, dict):
+        return details
+    for suite in obj.get("testsuites") or []:
+        if not isinstance(suite, dict):
+            continue
+        suite_name = suite.get("name") or ""
+        for case in suite.get("testsuite") or []:
+            if not isinstance(case, dict) or not isinstance(case.get("name"), str):
+                continue
+            status = _leaf_case_status(case)
+            if status is None:
+                continue
+            name = case["name"]
+            details.append({
+                "suite": suite_name,
+                "case": name,
+                "full_name": f"{suite_name}.{name}" if suite_name else name,
+                "status": status,
+            })
+    return details
+
+
+def _counts_from_details(details):
+    counts = {"cases": 0, "passed": 0, "failed": 0, "skipped": 0, "timeout": 0}
+    for item in details or []:
+        counts["cases"] += 1
+        status = item.get("status")
+        if status == "PASSED":
+            counts["passed"] += 1
+        elif status == "FAILED":
+            counts["failed"] += 1
+        elif status == "SKIPPED":
+            counts["skipped"] += 1
+        elif status == "TIMEOUT":
+            counts["timeout"] += 1
+    return counts
+
+
+def _issues_only(details):
+    return [d for d in details or [] if d.get("status") in ("FAILED", "SKIPPED", "TIMEOUT")]
+
+
+def synthetic_case_detail(test_name, test_filter=None, status="FAILED"):
+    """One leaf when the gtest/pytest report was missing or unreadable.
+
+    MPI abort and multi-rank races on ``--gtest_output=json`` often leave no
+    parseable report even though the config entry ran. Count that as one case
+    using the gtest filter when it names a single test.
+    """
+    full_name = test_name or "(test)"
+    if (
+        test_filter
+        and test_filter not in ("*", "ALL")
+        and "*" not in test_filter
+        and "?" not in test_filter
+        and "-" not in test_filter
+    ):
+        full_name = test_filter
+    suite, _, case = full_name.partition(".")
+    if not case:
+        suite = test_name or full_name
+        case = full_name
+    return {
+        "suite": suite,
+        "case": case,
+        "full_name": full_name,
+        "status": status,
+    }
+
+
+def timeout_placeholder_detail(test_name, test_filter=None, timeout_s=None):
+    """Synthetic leaf used when the process dies before gtest/pytest finishes."""
+    label = test_filter if test_filter and test_filter not in ("*", "ALL") else (test_name or "(test)")
+    if timeout_s is not None:
+        full_name = f"{label} (timed out after {timeout_s}s)"
+    else:
+        full_name = f"{label} (timed out)"
+    return {
+        "suite": test_name or label,
+        "case": label,
+        "full_name": full_name,
+        "status": "TIMEOUT",
+    }
+
+
+def merge_timeout_details(details, test_name, test_filter=None, timeout_s=None):
+    """Keep any parsed leaves and add a TIMEOUT leaf if the run itself timed out."""
+    merged = list(details or [])
+    if not any(item.get("status") == "TIMEOUT" for item in merged):
+        merged.append(timeout_placeholder_detail(test_name, test_filter, timeout_s))
+    return merged
+
+
+def collect_gtest_case_details_from_file(json_path):
+    """Return leaf-case details from a gtest JSON report, or None if unreadable."""
+    if not json_path or not os.path.isfile(json_path):
+        return None
+    try:
+        with open(json_path, encoding="utf-8") as f:
+            data = json.load(f)
+    except (OSError, json.JSONDecodeError, UnicodeDecodeError):
+        return None
+    return collect_gtest_case_details(data)
+
+
+def count_gtest_cases_from_json(obj):
+    """Count leaf gtest cases. Wildcard ``test_filter`` values expand here."""
+    return _counts_from_details(collect_gtest_case_details(obj))
+
+
+def count_gtest_cases_from_json_file(json_path):
+    """Return leaf-case counts from a gtest JSON report, or None if unreadable."""
+    details = collect_gtest_case_details_from_file(json_path)
+    if details is None:
+        return None
+    return _counts_from_details(details)
+
+
+def collect_pytest_case_details_from_junit(junit_path):
+    """Return leaf-case details from a pytest JUnit XML report, or None."""
+    if not junit_path or not os.path.isfile(junit_path):
+        return None
+    try:
+        root = ET.parse(junit_path).getroot()
+    except (OSError, ET.ParseError):
+        return None
+    details = []
+    for tc in root.iter("testcase"):
+        classname = tc.get("classname") or ""
+        name = tc.get("name") or ""
+        kinds = {child.tag for child in tc}
+        if kinds & {"failure", "error"}:
+            status = "FAILED"
+        elif "skipped" in kinds:
+            status = "SKIPPED"
+        else:
+            status = "PASSED"
+        details.append({
+            "suite": classname,
+            "case": name,
+            "full_name": f"{classname}::{name}" if classname else name,
+            "status": status,
+        })
+    return details
+
+
+def count_pytest_cases_from_junit(junit_path):
+    """Return per-testcase counts from a pytest JUnit XML report, or None."""
+    details = collect_pytest_case_details_from_junit(junit_path)
+    if details is None:
+        return None
+    return _counts_from_details(details)
+
+
+_ISSUE_STATUSES = ("FAILED", "SKIPPED", "TIMEOUT")
+_UNIQUE_STATUS_RANK = {
+    "FAILED": 0,
+    "TIMEOUT": 1,
+    "SKIPPED": 2,
+    "PASSED": 3,
+}
+_IDENTITY_ENV_IGNORE = frozenset({
+    "LD_LIBRARY_PATH",
+    "LLVM_PROFILE_FILE",
+    "RCCL_BUILD",
+})
+
+
+def make_run_identity_key(
+    binary="",
+    num_ranks=0,
+    num_nodes=0,
+    num_gpus=0,
+    custom_args="",
+    env_vars=None,
+    extra="",
+):
+    """Stable identity for "same env, same test setup" duplicate detection.
+
+    JSON-merged test env is used (not the full process environment).
+    LD_LIBRARY_PATH / LLVM_PROFILE_FILE / RCCL_BUILD are omitted because the
+    runner always rewrites those. ``extra`` holds mpi_args or pytest test_dir.
+    """
+    env_norm = {
+        str(k): str(v)
+        for k, v in sorted((env_vars or {}).items())
+        if k not in _IDENTITY_ENV_IGNORE
+    }
+    try:
+        gpus = int(num_gpus or 0)
+    except (TypeError, ValueError):
+        gpus = 0
+    payload = {
+        "args": " ".join(str(custom_args or "").split()),
+        "binary": os.path.basename(str(binary or "")),
+        "env": env_norm,
+        "extra": str(extra or ""),
+        "gpus": gpus,
+        "nodes": int(num_nodes or 0),
+        "ranks": int(num_ranks or 0),
+    }
+    return json.dumps(payload, sort_keys=True, separators=(",", ":"))
+
+
+def stamp_run_identity(details, identity):
+    """Copy leaf dicts and attach ``run_identity`` for unique/duplicate accounting."""
+    if not details:
+        return details
+    stamped = []
+    for item in details:
+        copied = dict(item)
+        copied["run_identity"] = identity
+        stamped.append(copied)
+    return stamped
+
+
+def format_issue_leaves(details, indent="    "):
+    """ASCII tree of FAILED/SKIPPED/TIMEOUT leaves for one config entry."""
+    issues = _issues_only(details)
+    if not issues:
+        return ""
+    lines = []
+    for i, item in enumerate(issues):
+        branch = "`- " if i == len(issues) - 1 else "+- "
+        lines.append(f"{indent}{branch}{item['status']:<7} {item['full_name']}")
+    return "\n".join(lines)
+
+
+def format_status_tree(entries, title, statuses=None, status_width=7):
+    """ASCII tree of selected leaves grouped by config suite and entry.
+
+    ``entries`` is a list of dicts with keys config_suite, config_entry, details.
+    When ``statuses`` is None every leaf is included.
+    """
+    grouped = {}
+    for entry in entries or []:
+        details = entry.get("details") or []
+        if statuses is None:
+            selected = list(details)
+        else:
+            selected = [d for d in details if d.get("status") in statuses]
+        if not selected:
+            continue
+        suite = entry.get("config_suite") or "(suite)"
+        name = entry.get("config_entry") or "(test)"
+        grouped.setdefault(suite, []).append((name, selected))
+    if not grouped:
+        return ""
+
+    lines = [title]
+    suite_items = list(grouped.items())
+    for si, (suite, named_issues) in enumerate(suite_items):
+        last_suite = si == len(suite_items) - 1
+        s_branch, s_pipe = ("`- ", "   ") if last_suite else ("+- ", "|  ")
+        lines.append(f"  {s_branch}{suite}")
+        for ei, (name, issues) in enumerate(named_issues):
+            last_entry = ei == len(named_issues) - 1
+            e_branch, e_pipe = ("`- ", "   ") if last_entry else ("+- ", "|  ")
+            lines.append(f"  {s_pipe}{e_branch}{name}")
+            by_gtest = {}
+            for item in issues:
+                by_gtest.setdefault(item.get("suite") or name, []).append(item)
+            show_inner = len(by_gtest) > 1
+            if show_inner:
+                inner_items = list(by_gtest.items())
+                for gi, (gtest_suite, cases) in enumerate(inner_items):
+                    last_g = gi == len(inner_items) - 1
+                    g_branch, g_pipe = ("`- ", "   ") if last_g else ("+- ", "|  ")
+                    lines.append(f"  {s_pipe}{e_pipe}{g_branch}{gtest_suite}")
+                    for ci, item in enumerate(cases):
+                        last_c = ci == len(cases) - 1
+                        c_branch = "`- " if last_c else "+- "
+                        label = item.get("label") or item.get("case")
+                        lines.append(
+                            f"  {s_pipe}{e_pipe}{g_pipe}{c_branch}"
+                            f"{item['status']:<{status_width}} {label}"
+                        )
+            else:
+                for ci, item in enumerate(issues):
+                    last_c = ci == len(issues) - 1
+                    c_branch = "`- " if last_c else "+- "
+                    label = item.get("label") or item.get("full_name")
+                    lines.append(
+                        f"  {s_pipe}{e_pipe}{c_branch}"
+                        f"{item['status']:<{status_width}} {label}"
+                    )
+    return "\n".join(lines)
+
+
+def format_issue_tree(entries):
+    """ASCII tree of FAILED/SKIPPED/TIMEOUT cases grouped by config suite and entry.
+
+    Uses the same leaf walk as uniqueness accounting so a config entry that ran
+    (including MPI abort with no gtest JSON) still appears.
+    """
+    loc_map = {}
+    for record in iter_case_records(entries):
+        if record.get("status") not in _ISSUE_STATUSES:
+            continue
+        loc = (record["config_suite"], record["config_entry"])
+        loc_map.setdefault(loc, []).append({
+            "suite": record["suite"],
+            "case": record["case"],
+            "full_name": record["full_name"],
+            "label": record.get("label") or record.get("full_name"),
+            "status": record["status"],
+        })
+    rebuilt = _entries_from_location_map(loc_map, entries)
+    return format_status_tree(
+        rebuilt,
+        "Failed/skipped/timeout cases:",
+        statuses=_ISSUE_STATUSES,
+        status_width=7,
+    )
+
+
+def format_unique_tree(entries, title=None):
+    """ASCII tree of unique executed leaves (first occurrence of each identity)."""
+    return format_status_tree(
+        entries,
+        title or "Unique test cases:",
+        statuses=None,
+        status_width=7,
+    )
+
+
+def format_duplicate_tree(entries, title=None):
+    """ASCII tree of leaves that ran more than once with the same env/setup."""
+    return format_status_tree(
+        entries,
+        title or "Duplicate cases:",
+        statuses=("DUPLICATE",),
+        status_width=9,
+    )
+
+
+def _case_record_key(record):
+    return (record.get("full_name") or "", record.get("run_identity") or "")
+
+
+def _worst_case_status(statuses):
+    return min(
+        statuses,
+        key=lambda status: _UNIQUE_STATUS_RANK.get(status, 99),
+        default="UNKNOWN",
+    )
+
+
+def _duplicate_run_suffix(records):
+    """e.g. '(2 runs)' or '(2 runs: PASSED, SKIPPED)'."""
+    n = len(records)
+    seen = []
+    for record in records:
+        status = record.get("status") or "UNKNOWN"
+        if status not in seen:
+            seen.append(status)
+    if len(seen) == 1:
+        return f"({n} runs)"
+    return f"({n} runs: {', '.join(seen)})"
+
+
+def iter_case_records(entries):
+    """Yield one record per executed gtest/pytest leaf (and synthetic non-gtest runs)."""
+    for entry in entries or []:
+        suite = entry.get("config_suite") or "(suite)"
+        name = entry.get("config_entry") or "(test)"
+        identity = entry.get("run_identity") or ""
+        details = entry.get("details")
+        if details:
+            for item in details:
+                yield {
+                    "config_suite": suite,
+                    "config_entry": name,
+                    "run_identity": item.get("run_identity") or identity,
+                    "suite": item.get("suite") or name,
+                    "case": item.get("case") or item.get("full_name") or name,
+                    "full_name": item.get("full_name") or item.get("case") or name,
+                    "status": item.get("status") or "UNKNOWN",
+                }
+            continue
+        if not entry.get("executed"):
+            continue
+        result = entry.get("config_result") or "UNKNOWN"
+        if result == "SKIPPED":
+            # Pre-launch skip (missing binary, too few GPUs, etc.) did not run a case.
+            continue
+        yield {
+            "config_suite": suite,
+            "config_entry": name,
+            "run_identity": identity,
+            "suite": name,
+            "case": name,
+            "full_name": name,
+            "status": result,
+        }
+
+
+def _entries_from_location_map(loc_map, original_entries):
+    """Preserve first-seen config suite/entry order when rebuilding tree entries."""
+    rebuilt = []
+    seen = set()
+    for entry in original_entries or []:
+        loc = (
+            entry.get("config_suite") or "(suite)",
+            entry.get("config_entry") or "(test)",
+        )
+        if loc in loc_map and loc not in seen:
+            seen.add(loc)
+            rebuilt.append({
+                "config_suite": loc[0],
+                "config_entry": loc[1],
+                "details": loc_map[loc],
+            })
+    return rebuilt
+
+
+def _tally_status(counts, prefix, status):
+    key = {
+        "PASSED": f"{prefix}passed",
+        "FAILED": f"{prefix}failed",
+        "SKIPPED": f"{prefix}skipped",
+        "TIMEOUT": f"{prefix}timeout",
+    }.get(status, f"{prefix}other")
+    counts[key] += 1
+
+
+def summarize_case_uniqueness(entries):
+    """Count unique leaves and build unique/duplicate trees.
+
+    A duplicate is the same leaf name with the same run identity (env, ranks,
+    binary, args). Duplicate runs are not removed; they are reported so a human
+    can decide whether the extra execution is intentional.
+
+    Invariants:
+      unique + duplicate_extra == total
+      executed_{passed,failed,skipped,timeout,other} sum to total
+      unique_{passed,failed,skipped,timeout,other} sum to unique
+    When duplicate_cases == 0 the executed and unique status buckets match.
+    """
+    groups = {}
+    order = []
+    for record in iter_case_records(entries):
+        key = _case_record_key(record)
+        if key not in groups:
+            groups[key] = []
+            order.append(key)
+        groups[key].append(record)
+
+    unique_counts = {
+        "total": 0,
+        "unique": 0,
+        "duplicate_extra": 0,
+        "duplicate_cases": 0,
+        "executed_passed": 0,
+        "executed_failed": 0,
+        "executed_skipped": 0,
+        "executed_timeout": 0,
+        "executed_other": 0,
+        "unique_passed": 0,
+        "unique_failed": 0,
+        "unique_skipped": 0,
+        "unique_timeout": 0,
+        "unique_other": 0,
+    }
+    unique_loc = {}
+    duplicate_loc = {}
+
+    for key in order:
+        records = groups[key]
+        unique_counts["total"] += len(records)
+        unique_counts["unique"] += 1
+        for record in records:
+            _tally_status(unique_counts, "executed_", record.get("status"))
+        extra = len(records) - 1
+        if extra:
+            unique_counts["duplicate_extra"] += extra
+            unique_counts["duplicate_cases"] += 1
+        worst = _worst_case_status([r.get("status") for r in records])
+        _tally_status(unique_counts, "unique_", worst)
+
+        first = records[0]
+        loc = (first["config_suite"], first["config_entry"])
+        unique_loc.setdefault(loc, []).append({
+            "suite": first["suite"],
+            "case": first["case"],
+            "full_name": first["full_name"],
+            "status": first["status"],
+        })
+
+        if extra:
+            suffix = _duplicate_run_suffix(records)
+            seen_loc_leaf = set()
+            for record in records:
+                loc = (record["config_suite"], record["config_entry"])
+                loc_leaf = loc + (record["full_name"],)
+                if loc_leaf in seen_loc_leaf:
+                    continue
+                seen_loc_leaf.add(loc_leaf)
+                duplicate_loc.setdefault(loc, []).append({
+                    "suite": record["suite"],
+                    "case": record["case"],
+                    "full_name": record["full_name"],
+                    "label": f"{record['full_name']} {suffix}",
+                    "status": "DUPLICATE",
+                })
+
+    unique_counts["unique_entries"] = _entries_from_location_map(unique_loc, entries)
+    unique_counts["duplicate_entries"] = _entries_from_location_map(duplicate_loc, entries)
+    return unique_counts
+
+
+def format_case_counts(counts):
+    """One-line expansion of a config entry into executed gtest/pytest cases."""
+    if not counts:
+        return ""
+    cases = counts.get("cases", 0)
+    details = []
+    for key, label in (
+        ("passed", "passed"),
+        ("failed", "failed"),
+        ("skipped", "skipped"),
+        ("timeout", "timed out"),
+    ):
+        n = counts.get(key, 0)
+        if n:
+            details.append(f"{n} {label}")
+    if details:
+        return f"{cases} cases ({', '.join(details)})"
+    return f"{cases} cases"
+
+
+def _sum_case_counts(list_of_counts):
+    """Sum case_counts dicts; ignore None/missing (timeouts, pre-launch skips)."""
+    total = {"cases": 0, "passed": 0, "failed": 0, "skipped": 0, "timeout": 0}
+    for counts in list_of_counts or []:
+        if not counts:
+            continue
+        for key in total:
+            total[key] += int(counts.get(key, 0) or 0)
+    return total
 
 
 def infer_gtest_result_from_json_file(json_path: str, returncode: int) -> str:
@@ -202,7 +821,9 @@ def infer_gtest_result_from_json_file(json_path: str, returncode: int) -> str:
         return TestResult.RESULT_PASSED.value
     if stats["skipped"]:
         return TestResult.RESULT_SKIPPED.value
-    return TestResult.RESULT_PASSED.value
+    # No leaf test in the report: the filter selected nothing. Reporting PASSED
+    # here would turn a typo'd or renamed test_filter into a silent green.
+    return TestResult.RESULT_SKIPPED.value
 
 
 def infer_pytest_result_from_junit(junit_path: str, returncode: int) -> str:
@@ -246,11 +867,18 @@ def infer_pytest_result_from_junit(junit_path: str, returncode: int) -> str:
 def _distinct_host_count(mpi_hosts: dict) -> int:
     """
     Count distinct hosts from SLURM host_list or Open MPI hostfile.
-    Returns 0 if unknown (no host list / file), so callers skip the insufficient-nodes
-    check when topology cannot be determined.
+
+    An empty dict is not an unknown topology: it means neither a hostfile nor a
+    SLURM allocation was found, so mpirun is invoked with no host argument and
+    places every rank on the local host. That is exactly one host, and reporting
+    it as such lets the insufficient-nodes check below skip a multi-node test
+    instead of launching it oversubscribed on a single node.
+
+    Returns 0 only when a host source exists but cannot be read, so callers skip
+    the insufficient-nodes check when topology genuinely cannot be determined.
     """
     if not mpi_hosts:
-        return 0
+        return 1
     if "host_list" in mpi_hosts:
         seen = set()
         for part in mpi_hosts["host_list"].split(","):
@@ -344,6 +972,11 @@ class TestExecutor:
         self.test_names = []
         self.test_durations = []
         self.test_suites = []
+        # Per config-entry gtest/pytest leaf counts (wildcards expanded).
+        self.test_case_counts = []
+        self.test_case_details = []
+        self.test_run_identities = []
+        self.test_executed = []
 
         # Structured result emission (dashboard). Enabling either --emit-results or
         # --db-push turns on per-test log capture so perf output can be parsed.
@@ -1197,6 +1830,31 @@ class TestExecutor:
             **env_vars
         }
 
+        mpi_extra = " ".join(
+            p for p in (
+                self._normalize_mpi_args(suite_config.get("mpi_args")),
+                self._normalize_mpi_args(test_config.get("mpi_args")),
+            ) if p
+        )
+        run_identity = make_run_identity_key(
+            binary=binary,
+            num_ranks=num_ranks,
+            num_nodes=num_nodes,
+            num_gpus=num_gpus,
+            custom_args=custom_args,
+            env_vars=merged_env,
+            extra=mpi_extra,
+        )
+
+        def _done(result, executed=True):
+            result["run_identity"] = run_identity
+            result["executed"] = executed
+            if result.get("case_details"):
+                result["case_details"] = stamp_run_identity(
+                    result["case_details"], run_identity
+                )
+            return result
+
         print(f"\n{'='*80}")
         print(f"Test: {test_name}")
         print(f"{'='*80}")
@@ -1501,21 +2159,16 @@ class TestExecutor:
             # Build the program (test binary + its arguments) that mpirun will
             # launch as a single string, so the locked-memory wrapper below can be
             # applied directly instead of re-parsing the assembled command.
+            # Do not pass --gtest_output to every rank: they would race on one file.
             if is_gtest and not (test_filter == "ALL" or test_filter == "*"):
                 program = f"{exe} --gtest_filter={test_filter}"
             else:
                 program = exe
             if custom_args:
                 program += f" {custom_args}"
-            program += gtest_out_arg
-
-            # RDMA QP/CQ creation pins memory and fails with "Cannot allocate
-            # memory" under SLURM's low inherited locked-memory soft limit, so
-            # raise it per rank before exec. `set -f` keeps gtest filter globs
-            # literal; wrapping the program (not the assembled command) means it
-            # always applies for MPI launches.
-            inner = f"ulimit -l unlimited 2>/dev/null; set -f; exec {program}"
-            wrapped_program = f"bash -c {shlex.quote(inner)}"
+            wrapped_program = wrap_mpi_program(
+                program, gtest_json_path if is_gtest else None
+            )
             cmd = f"{mpi_cmd} {mpi_args} {wrapped_program}"
 
         # Working directory: gtest binaries live in <build_dir>/test, but a
@@ -1573,10 +2226,22 @@ class TestExecutor:
                 returncode = proc.wait(timeout=timeout if timeout > 0 else None)
             except subprocess.TimeoutExpired:
                 duration = time.time() - start_time
-                print(f"\n  Result: {TestResult.RESULT_TIMEOUT.value} after {timeout} seconds")
+                parsed = collect_gtest_case_details_from_file(gtest_json_path or "") if is_gtest else None
+                case_details = merge_timeout_details(
+                    parsed, test_name, test_filter, timeout
+                )
+                case_counts = _counts_from_details(case_details)
+                cases_suffix = format_case_counts(case_counts)
+                if cases_suffix:
+                    print(f"\n  Result: {TestResult.RESULT_TIMEOUT.value} [{cases_suffix}] after {timeout} seconds")
+                else:
+                    print(f"\n  Result: {TestResult.RESULT_TIMEOUT.value} after {timeout} seconds")
+                issue_tree = format_issue_leaves(case_details)
+                if issue_tree:
+                    print(issue_tree)
                 print("  Killing process group (mpirun and all ranks)...")
                 self._terminate_process_group(proc)
-                return {
+                return _done({
                     "name": test_name,
                     "result": TestResult.RESULT_TIMEOUT.value,
                     "duration": duration,
@@ -1585,7 +2250,9 @@ class TestExecutor:
                     "num_nodes": num_nodes, "num_gpus": num_gpus,
                     "num_ranks": num_ranks, "log_file": emit_log_path,
                     "exec_mode": exec_mode, "nthreads": perf_nthreads,
-                }
+                    "case_counts": case_counts,
+                    "case_details": case_details,
+                })
             except KeyboardInterrupt:
                 # Make sure Ctrl-C tears down the whole MPI job, not just the shell.
                 print("\n  Interrupted -- killing process group (mpirun and all ranks)...")
@@ -1595,18 +2262,32 @@ class TestExecutor:
                 duration = time.time() - start_time
                 self._terminate_process_group(proc)
                 print(f"\n  ERROR: {e}")
-                return {
+                return _done({
                     "name": test_name,
                     "result": TestResult.RESULT_FAILED.value,
                     "duration": duration,
                     "error": str(e)
-                }
+                })
 
             duration = time.time() - start_time
 
+            case_counts = None
+            case_details = None
             if is_gtest:
                 rc = returncode if returncode is not None else -1
                 test_result = infer_gtest_result_from_json_file(gtest_json_path or "", rc)
+                case_details = collect_gtest_case_details_from_file(gtest_json_path or "")
+                # MPI abort / JSON races leave no report; still count the entry.
+                if case_details is None and test_result in (
+                    TestResult.RESULT_PASSED.value,
+                    TestResult.RESULT_FAILED.value,
+                    TestResult.RESULT_TIMEOUT.value,
+                ):
+                    case_details = [
+                        synthetic_case_detail(test_name, test_filter, test_result)
+                    ]
+                if case_details is not None:
+                    case_counts = _counts_from_details(case_details)
             else:
                 if returncode == ExitCode.EXIT_SUCCESS:
                     test_result = TestResult.RESULT_PASSED.value
@@ -1615,9 +2296,16 @@ class TestExecutor:
                 else:
                     test_result = TestResult.RESULT_FAILED.value
 
-            print(f"\n  Result: {test_result} ({duration:.3f} seconds)")
+            cases_suffix = format_case_counts(case_counts)
+            if cases_suffix:
+                print(f"\n  Result: {test_result} [{cases_suffix}] ({duration:.3f} seconds)")
+            else:
+                print(f"\n  Result: {test_result} ({duration:.3f} seconds)")
+            issue_tree = format_issue_leaves(case_details)
+            if issue_tree:
+                print(issue_tree)
 
-            return {
+            result = {
                 "name": test_name,
                 "result": test_result,
                 "duration": duration,
@@ -1627,6 +2315,11 @@ class TestExecutor:
                 "num_ranks": num_ranks, "log_file": emit_log_path,
                 "exec_mode": exec_mode, "nthreads": perf_nthreads,
             }
+            if case_counts is not None:
+                result["case_counts"] = case_counts
+            if case_details is not None:
+                result["case_details"] = case_details
+            return _done(result)
         finally:
             if gtest_json_path:
                 try:
@@ -1729,6 +2422,23 @@ class TestExecutor:
             else:
                 select_args = ["-k", test_filter]
 
+        run_identity = make_run_identity_key(
+            binary="pytest",
+            num_ranks=1,
+            num_nodes=1,
+            env_vars=merged_env,
+            extra=f"pytest:{os.path.normpath(test_dir)}",
+        )
+
+        def _done(result, executed=True):
+            result["run_identity"] = run_identity
+            result["executed"] = executed
+            if result.get("case_details"):
+                result["case_details"] = stamp_run_identity(
+                    result["case_details"], run_identity
+                )
+            return result
+
         # Env: build_dir first on LD_LIBRARY_PATH, then a per-test LD_LIBRARY_PATH
         # from the JSON env (mirrors the gtest/MPI path), then rocm/mpi libs.
         # RCCL_BUILD defaults to build_dir; remaining config env is applied as-is.
@@ -1783,35 +2493,69 @@ class TestExecutor:
             result = subprocess.run(cmd, **run_kwargs)
         except subprocess.TimeoutExpired:
             duration = time.time() - start_time
-            print(f"\n  Result: {TestResult.RESULT_TIMEOUT.value} after {timeout} seconds")
-            return {
+            parsed = collect_pytest_case_details_from_junit(junit_path)
+            case_details = merge_timeout_details(
+                parsed, test_name, test_filter, timeout
+            )
+            case_counts = _counts_from_details(case_details)
+            cases_suffix = format_case_counts(case_counts)
+            if cases_suffix:
+                print(f"\n  Result: {TestResult.RESULT_TIMEOUT.value} [{cases_suffix}] after {timeout} seconds")
+            else:
+                print(f"\n  Result: {TestResult.RESULT_TIMEOUT.value} after {timeout} seconds")
+            issue_tree = format_issue_leaves(case_details)
+            if issue_tree:
+                print(issue_tree)
+            return _done({
                 "name": test_name,
                 "result": TestResult.RESULT_TIMEOUT.value,
                 "duration": duration,
                 "error": f"Test timed out after {timeout} seconds",
-            }
+                "case_counts": case_counts,
+                "case_details": case_details,
+            })
         except Exception as e:
             duration = time.time() - start_time
             print(f"\n  ERROR: {e}")
-            return {
+            return _done({
                 "name": test_name,
                 "result": TestResult.RESULT_FAILED.value,
                 "duration": duration,
                 "error": str(e),
-            }
+            })
 
         duration = time.time() - start_time
         rc = result.returncode if result.returncode is not None else -1
         test_result = infer_pytest_result_from_junit(junit_path, rc)
-        print(f"\n  Result: {test_result} ({duration:.3f} seconds)")
+        case_details = collect_pytest_case_details_from_junit(junit_path)
+        if case_details is None and test_result in (
+            TestResult.RESULT_PASSED.value,
+            TestResult.RESULT_FAILED.value,
+            TestResult.RESULT_TIMEOUT.value,
+        ):
+            case_details = [synthetic_case_detail(test_name, test_filter, test_result)]
+        case_counts = _counts_from_details(case_details) if case_details is not None else None
+        cases_suffix = format_case_counts(case_counts)
+        if cases_suffix:
+            print(f"\n  Result: {test_result} [{cases_suffix}] ({duration:.3f} seconds)")
+        else:
+            print(f"\n  Result: {test_result} ({duration:.3f} seconds)")
+        issue_tree = format_issue_leaves(case_details)
+        if issue_tree:
+            print(issue_tree)
         if self.args.verbose:
             print(f"  JUnit report: {junit_path}")
-        return {
+        out = {
             "name": test_name,
             "result": test_result,
             "duration": duration,
             "exit_code": int(rc),
         }
+        if case_counts is not None:
+            out["case_counts"] = case_counts
+        if case_details is not None:
+            out["case_details"] = case_details
+        return _done(out)
 
     def run_test_suite(self, suite_config):
         """
@@ -1869,6 +2613,10 @@ class TestExecutor:
             self.test_results.append(result["result"])
             self.test_durations.append(result["duration"])
             self.test_suites.append(suite_name)
+            self.test_case_counts.append(result.get("case_counts"))
+            self.test_case_details.append(result.get("case_details"))
+            self.test_run_identities.append(result.get("run_identity", ""))
+            self.test_executed.append(bool(result.get("executed")))
 
             if self.emit_enabled:
                 record = dict(result)
@@ -1957,6 +2705,26 @@ class TestExecutor:
             secs = seconds % 60
             return f"{hours} hr {minutes} min {secs:.2f} sec"
 
+    def _summary_case_entries(self):
+        """Config-entry records used for unique/duplicate case accounting."""
+        entries = []
+        for i in range(len(self.test_results)):
+            entries.append({
+                "config_suite": self.test_suites[i],
+                "config_entry": self.test_names[i],
+                "details": self.test_case_details[i] if i < len(self.test_case_details) else None,
+                "run_identity": (
+                    self.test_run_identities[i]
+                    if i < len(self.test_run_identities) else ""
+                ),
+                "executed": (
+                    self.test_executed[i]
+                    if i < len(self.test_executed) else False
+                ),
+                "config_result": self.test_results[i],
+            })
+        return entries
+
     def print_summary(self):
         """Print test execution summary"""
         total_tests = len(self.test_results)
@@ -1974,24 +2742,68 @@ class TestExecutor:
         if total_tests > 0:
             print("\nDetailed Results:")
             print("-"*120)
-            print(f"{'Test Suite':<40} {'Test Name':<40} {'Result':<10} {'Duration'}")
+            print(f"{'Test Suite':<40} {'Test Name':<32} {'Result':<10} {'Cases':<8} {'Duration'}")
             print("-"*120)
             for i in range(total_tests):
+                counts = self.test_case_counts[i] if i < len(self.test_case_counts) else None
+                cases_cell = str(counts["cases"]) if counts else "-"
                 print(
                     f"{self.test_suites[i]:<40} "
-                    f"{self.test_names[i]:<40} "
+                    f"{self.test_names[i]:<32} "
                     f"{self.test_results[i]:<10} "
+                    f"{cases_cell:<8} "
                     f"{self.test_durations[i]:.3f} seconds"
                 )
             print("-"*120)
-            print(f"Total Tests:   {total_tests}")
-            print(f"Passed:        {passed}")
-            print(f"Failed:        {failed}")
-            print(f"Skipped:       {skipped}")
-            print(f"Timeout:       {timeout}")
-            if skipped > 0:
-                print(f"Skipped:       {skipped}")
-            print(f"Total Time:    {self._format_duration(total_time_seconds)}")
+            issue_entries = self._summary_case_entries()
+            uniqueness = summarize_case_uniqueness(issue_entries)
+            issue_tree = format_issue_tree(issue_entries)
+            if issue_tree:
+                print(issue_tree)
+            else:
+                print("Failed/skipped/timeout cases: (none)")
+            dup_tree = format_duplicate_tree(
+                uniqueness["duplicate_entries"],
+                title=(
+                    f"Duplicate cases ({uniqueness['duplicate_cases']} cases, "
+                    f"{uniqueness['duplicate_extra']} extra runs):"
+                ),
+            )
+            if dup_tree:
+                print(dup_tree)
+            else:
+                print("Duplicate cases: (none)")
+            unique_tree = format_unique_tree(
+                uniqueness["unique_entries"],
+                title=f"Unique test cases ({uniqueness['unique']}):",
+            )
+            if unique_tree:
+                print(unique_tree)
+            else:
+                print("Unique test cases: (none)")
+            # Counts last so they are visible at EOF after the case trees.
+            print(f"Config entries: {total_tests}")
+            print(f"Passed:         {passed}")
+            print(f"Failed:         {failed}")
+            print(f"Skipped:        {skipped}")
+            print(f"Timeout:        {timeout}")
+            print("Test cases executed (gtest/pytest; wildcards expanded):")
+            print(f"  Total:        {uniqueness['total']}")
+            print(f"  Unique:       {uniqueness['unique']}")
+            if uniqueness["duplicate_cases"]:
+                print(
+                    f"  Duplicate:    {uniqueness['duplicate_extra']} extra "
+                    f"({uniqueness['duplicate_cases']} cases ran more than once)"
+                )
+            else:
+                print("  Duplicate:    none")
+            print(f"  Passed:       {uniqueness['executed_passed']}")
+            print(f"  Failed:       {uniqueness['executed_failed']}")
+            print(f"  Skipped:      {uniqueness['executed_skipped']}")
+            print(f"  Timeout:      {uniqueness['executed_timeout']}")
+            if uniqueness["executed_other"]:
+                print(f"  Other:        {uniqueness['executed_other']}")
+            print(f"Total Time:     {self._format_duration(total_time_seconds)}")
             print("="*120)
 
         # Print rerun results if any
@@ -2638,6 +3450,7 @@ class TestExecutor:
             )
         emitter.set_coverage(cov)
 
+        uniqueness = summarize_case_uniqueness(self._summary_case_entries())
         summary = {
             "total": len(self.test_results),
             "passed": self.test_results.count(TestResult.RESULT_PASSED.value),
@@ -2645,6 +3458,12 @@ class TestExecutor:
             "timeout": self.test_results.count(TestResult.RESULT_TIMEOUT.value),
             "skipped": self.test_results.count(TestResult.RESULT_SKIPPED.value),
             "duration_s": sum(self.test_durations) if self.test_durations else 0,
+            "cases_total": uniqueness["total"],
+            "cases_unique": uniqueness["unique"],
+            "cases_passed": uniqueness["executed_passed"],
+            "cases_failed": uniqueness["executed_failed"],
+            "cases_skipped": uniqueness["executed_skipped"],
+            "cases_timeout": uniqueness["executed_timeout"],
         }
         emitter.finalize_summary(summary)
 
