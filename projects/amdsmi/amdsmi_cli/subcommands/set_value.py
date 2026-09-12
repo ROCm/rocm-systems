@@ -1898,7 +1898,7 @@ class SetValueCommands:
                     "Invalid accelerator partition memory allocation mode "
                     f"{args.compute_partition_mem_alloc_mode}"
                 )
-                self.logger.store_output(args.gpu, "accelerator_partition_mem_alloc_mode", out)
+                self.logger.store_output(args.gpu, "compute_partition_mem_alloc_mode", out)
                 self.logger.print_output()
                 self.logger.clear_multiple_devices_output()
                 return
@@ -1906,16 +1906,16 @@ class SetValueCommands:
                 out = f"[{e.get_error_info(detailed=False)}] Unable to set accelerator partition memory allocation mode to {args.compute_partition_mem_alloc_mode}"
                 if e.get_error_code() == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NO_PERM:
                     out = "[AMDSMI_STATUS_NO_PERM] Command requires elevation"
-                    self.logger.store_output(args.gpu, "accelerator_partition_mem_alloc_mode", out)
+                    self.logger.store_output(args.gpu, "compute_partition_mem_alloc_mode", out)
                     self.logger.print_output()
                     self.logger.clear_multiple_devices_output()
                     raise PermissionError("Command requires elevation") from e
                 else:
-                    self.logger.store_output(args.gpu, "accelerator_partition_mem_alloc_mode", out)
+                    self.logger.store_output(args.gpu, "compute_partition_mem_alloc_mode", out)
                     self.logger.print_output()
                     self.logger.clear_multiple_devices_output()
                     return
-            self.logger.store_output(args.gpu, "accelerator_partition_mem_alloc_mode", out)
+            self.logger.store_output(args.gpu, "compute_partition_mem_alloc_mode", out)
             self.logger.print_output()
             self.logger.clear_multiple_devices_output()
             return
