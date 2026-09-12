@@ -37,6 +37,14 @@ Full documentation for RDC is available at [ROCm DataCenter Tool User Guide](htt
 
 - The `Failed to insert module: N3amd3rdc10RdcRVSLibE` error no longer occurs.
 
+- **Fixed health watches on MI300-series and later GPUs and stopped the 1 Hz fetch error flood**.
+  - `rdci health -s` / `-c` no longer abort priming, refreshing, or `memory_check` on the first field that fails, so the pending/retired page checks (see #8488) are actually evaluated; each sub-check is independent.
+  - XGMI health falls back to `RDC_FI_ECC_XGMI_WAFL_UE` where the legacy `xgmi_error` sysfs node is unreadable (MI300-series and later). The fallback is a cumulative uncorrectable count, so an XGMI error keeps the component at FAIL until driver reload.
+  - Health fields the platform cannot serve are probed at `rdci health -s`, reported per GPU at default verbosity (naming the fallback source where one exists), and left out of the 1 s watch where no GPU in the group supports them; `-c` skips them per GPU. Re-run `-s` after changing a group's GPUs.
+  - The EEPROM health component watches the field `eeprom_check` reads (`RDC_FI_ECC_UNCORRECT_TOTAL`) instead of polling `RDC_HEALTH_EEPROM_CONFIG_VALID`, which no check consumes and which AMDSMI reports as unsupported on every platform. `eeprom_check` reports a corrupt EEPROM only if SMI returns `CORRUPTED_EEPROM` from that read; current AMDSMI does not.
+  - Per-fetch capability misses on health fields log at INFO instead of ERROR; the watch-set report above is the user-visible line.
+  - `rdc_health_set` returns `RDC_ST_NOT_SUPPORTED` when none of the requested fields can be read on any GPU in the group.
+
 ## RDC 1.3.0 for ROCm 7.13.0
 
 ### Added
