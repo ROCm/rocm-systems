@@ -10,6 +10,7 @@
 
 #include "comm.h"
 #include "device.h"
+#include "nccl_fakes.h"  // g_loadParam, for the NCCL_PARAM default this stands in for
 
 // Defaults to ncclSystemError, NOT success. Production wraps this in NCCLCHECK,
 // so the effect is that the FIRST eligible lookup aborts the caller with an
@@ -34,6 +35,8 @@ int64_t g_paramMinNchannels = 0;
 int64_t g_paramMaxNchannels = MAXCHANNELS;
 int64_t ncclParamMinNchannels() { return g_paramMinNchannels; }
 int64_t ncclParamMaxNchannels() { return g_paramMaxNchannels; }
+// Referenced by init.cc but not declared inside it, so the redirected NCCL_PARAM does not cover it.
+int64_t ncclParamPatEnable() { return g_loadParam("PAT_ENABLE", 0); }  // graph/tuning.cc:1105
 
 int g_tuningIndexValue = 0;
 std::string g_tuningIndexLastArch;

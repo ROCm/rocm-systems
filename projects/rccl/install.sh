@@ -21,6 +21,7 @@ build_verbose=false
 clean_build=true
 dump_asm=false
 enable_code_coverage=false
+enable_full_coverage=false
 enable_ninja=""
 install_dependencies=false
 install_library=false
@@ -36,6 +37,7 @@ run_tests_all=false
 time_trace=false
 use_ninja=false
 force_reduce_pipeline=false
+enable_tdm_simple=false
 generate_sym_kernels=true
 device_linker=true
 warp_speed_enabled=true # note that this flag will be overridden to false for non MI350/MI300 platforms
@@ -81,9 +83,11 @@ function display_help()
     echo "       --disable-warp-speed    Disable WARP_SPEED kernel optimizations"
     echo "       --disable-kernarg-preload  Disable -mllvm --amdgpu-kernarg-preload-count=16 compile/link flag"
     echo "       --dump-asm              Disassemble code and dump assembly with inline code"
-    echo "    -c|--enable-code-coverage  Enable code coverage"
+    echo "    -c|--enable-code-coverage  Enable host-side code coverage instrumentation (requires --debug)"
+    echo "       --enable-full-coverage  Enable host + device code coverage (requires --debug and ROCm 7.15+)"
     echo "       --enable_backtrace      Build with custom backtrace support"
     echo "       --enable-mpi-tests      Enable MPI-based tests (requires --debug and MPI installation; set MPI_PATH if not in /opt/ompi)"
+    echo "       --enable-tdm-simple     Build the experimental gfx1250 TDM SIMPLE copy path"
     echo "    -f|--fast                  Quick-build RCCL (local gpu arch only, no backtrace)"
     echo "       --force-reduce-pipeline Force reduce_copy sw pipeline to be used for every reduce-based collectives and datatypes"
     echo "    -h|--help                  Prints this help message"
@@ -103,6 +107,7 @@ function display_help()
     echo "                                resolved at runtime from the executable (no librocshmem in librccl)"
     echo "       --run_tests_all         Run all rccl unit tests (must be built already)"
     echo "    -r|--run_tests_quick       Run small subset of rccl unit tests (must be built already)"
+    echo "       --sqtt-enable           Enable SQTT instrumentation (requires ROCm >= 7.13)"
     echo "       --static                Build RCCL as a static library instead of shared library"
     echo "    -t|--tests_build           Build rccl unit tests, but do not run"
     echo "       --time-trace            Plot the build time of RCCL (requires \`ninja-build\` package installed on the system)"
@@ -115,6 +120,7 @@ function display_help()
     echo "    -DENABLE_COMPRESS=OFF                 Disable GPU code compression (default: ON)"
     echo "    -DENABLE_IFC=ON                       Enable indirect function call (default: OFF)"
     echo "    -DFAULT_INJECTION=OFF                 Disable fault injection (default: ON)"
+    echo "    -DRCCL_POISON_HIP_ATOMICS=OFF         Allow __hip_atomic_* builtins in RCCL sources (default: ON)"
     echo "    -DRCCL_ROCPROFILER_REGISTER=OFF       Disable rocprofiler-register support (default: ON)"
     echo "    -DTIMETRACE=ON                        Enable time-trace during compilation (default: OFF)"
     echo ""
@@ -137,7 +143,7 @@ function display_help()
 # check if we have a modern version of getopt that can handle whitespace and long parameters
 getopt -T
 if [[ "$?" -eq 4 ]]; then
-    GETOPT_PARSE=$(getopt --name "${0}" --options cdfhij:lprtq --longoptions address-sanitizer,amdgpu_targets:,cmake-options:,debug,debug-fast,dependencies,device-linker,disable-colltrace,disable-kernarg-preload,disable-roctx,disable-sym-kernels,disable-warp-speed,dump-asm,enable-code-coverage,enable_backtrace,enable-mpi-tests,fast,force-reduce-pipeline,generate-sym-kernels,help,install,jobs:,kernel-resource-use,local_gpu_only,log-trace,ninja,no_clean,no-device-linker,npkit-enable,openmp-test-enable,package_build,prefix:,quiet-warnings,rm-legacy-include-dir,rocshmem,rocshmem-gin,roctx-enable,run_tests_all,run_tests_quick,static,tests_build,time-trace,verbose -- "$@")
+    GETOPT_PARSE=$(getopt --name "${0}" --options cdfhij:lprtq --longoptions address-sanitizer,amdgpu_targets:,cmake-options:,debug,debug-fast,dependencies,device-linker,disable-colltrace,disable-kernarg-preload,disable-roctx,disable-sym-kernels,disable-warp-speed,dump-asm,enable-code-coverage,enable-full-coverage,enable_backtrace,enable-mpi-tests,enable-tdm-simple,fast,force-reduce-pipeline,generate-sym-kernels,help,install,jobs:,kernel-resource-use,local_gpu_only,log-trace,ninja,no_clean,no-device-linker,npkit-enable,openmp-test-enable,package_build,prefix:,quiet-warnings,rm-legacy-include-dir,rocshmem,rocshmem-gin,roctx-enable,sqtt-enable,run_tests_all,run_tests_quick,static,tests_build,time-trace,verbose -- "$@")
 else
     echo "Need a new version of getopt"
     exit 1
@@ -165,8 +171,10 @@ while true; do
          --disable-kernarg-preload)  kernarg_preload=false;                                                                            shift ;;
          --dump-asm)                 dump_asm=true;                                                                                    shift ;;
     -c | --enable-code-coverage)     enable_code_coverage=true;                                                                        shift ;;
+         --enable-full-coverage)     enable_code_coverage=true; enable_full_coverage=true;                                              shift ;;
          --enable_backtrace)         build_bfd=true;                                                                                   shift ;;
          --enable-mpi-tests)         enable_mpi_tests=true;                                                                            shift ;;
+         --enable-tdm-simple)        enable_tdm_simple=true;                                                                           shift ;;
     -f | --fast)                     build_local_gpu_only=true;                                                                        shift ;;
          --force-reduce-pipeline)    force_reduce_pipeline=true;                                                                       shift ;;
     -h | --help)                     display_help;                                                                                     exit 0 ;;
@@ -186,6 +194,7 @@ while true; do
          --rocshmem-gin)             build_rocshmem_gin=true;                                                                          shift ;;
          --run_tests_all)            run_tests=true; run_tests_all=true;                                                               shift ;;
     -r | --run_tests_quick)          run_tests=true;                                                                                   shift ;;
+         --sqtt-enable)              sqtt_enabled=true;                                                                                shift ;;
          --static)                   build_static=true;                                                                                shift ;;
     -t | --tests_build)              build_tests=true;                                                                                 shift ;;
          --time-trace)               time_trace=true;                                                                                  shift ;;
@@ -199,6 +208,15 @@ done
 
 if [[ "${build_rocshmem_support}" == true && "${build_rocshmem_gin}" == true ]]; then
     echo "Error: --rocshmem and --rocshmem-gin are mutually exclusive"
+    exit 1
+fi
+
+# Coverage requires the Debug-only symbol visibility contract used by the tests.
+# Validate up front (before any build/release tree is removed below) so a bad
+# invocation like `./install.sh -c` without --debug fails fast instead of first
+# wiping the existing build tree.
+if [[ "${enable_code_coverage}" == true && "${build_release}" == true ]]; then
+    echo "ERROR: code coverage requires --debug. Please re-run with --debug."
     exit 1
 fi
 
@@ -357,6 +375,11 @@ if [[ "${enable_code_coverage}" == true ]]; then
     cmake_common_options="${cmake_common_options} -DENABLE_CODE_COVERAGE=ON"
 fi
 
+# Enable host and device code coverage
+if [[ "${enable_full_coverage}" == true ]]; then
+    cmake_common_options="${cmake_common_options} -DENABLE_FULL_COVERAGE=ON"
+fi
+
 # Backtrace support
 if [[ "${build_bfd}" == true ]]; then
     cmake_common_options="${cmake_common_options} -DBUILD_BFD=ON"
@@ -401,6 +424,11 @@ if [[ "${roctx_enabled}" == false ]]; then
     cmake_common_options="${cmake_common_options} -DROCTX=OFF"
 fi
 
+# Enable SQTT instrumentation
+if [[ "${sqtt_enabled}" == true ]]; then
+    cmake_common_options="${cmake_common_options} -DSQTT_ENABLED=ON"
+fi
+
 # Dump ASM files from GPU compilation
 if [[ "${dump_asm}" == true ]]; then
     cmake_common_options="${cmake_common_options} -DDUMP_ASM=ON"
@@ -423,6 +451,11 @@ fi
 # Force Reduce pipeline
 if [[ "${force_reduce_pipeline}" == true ]]; then
     cmake_common_options="${cmake_common_options} -DFORCE_REDUCE_PIPELINING=ON"
+fi
+
+# Experimental gfx1250 TDM SIMPLE copy path
+if [[ "${enable_tdm_simple}" == true ]]; then
+    cmake_common_options="${cmake_common_options} -DENABLE_TDM_SIMPLE=ON"
 fi
 
 # Disable symmetric memory kernels

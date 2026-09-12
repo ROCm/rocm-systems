@@ -125,20 +125,26 @@ __device__ __attribute__((noinline)) void runRing(int tid, int nthreads, struct 
     dataOffset = gridOffset + elemOffset;
         /////////////// begin ReduceScatter steps ///////////////
         // step 0: push data to next GPU
+    sqtt_marker_enter("REDUCE_SCATTER_RING_SEND");
     rankDest = ringRanks[nranks - 1];
     offset = dataOffset + rankDest * count;
     prims.send(offset, nelem);
+    sqtt_marker_exit("REDUCE_SCATTER_RING_SEND");
         // k-2 steps: reduce and copy to next GPU
+    sqtt_marker_enter("REDUCE_SCATTER_RING_RECV_REDUCE_SEND");
     for (int j = 2; j < nranks; ++j) {
       rankDest = ringRanks[nranks - j];
       offset = dataOffset + rankDest * count;
       prims.recvReduceSend(offset, nelem);
     }
+    sqtt_marker_exit("REDUCE_SCATTER_RING_RECV_REDUCE_SEND");
 
         // step k-1: reduce this buffer and data, which will produce the final result
+    sqtt_marker_enter("REDUCE_SCATTER_RING_RECV_REDUCE_COPY");
     rankDest = ringRanks[0];
     offset = dataOffset + rankDest * count;
     prims.recvReduceCopy(offset, dataOffset, nelem, /*postOp=*/true);
+    sqtt_marker_exit("REDUCE_SCATTER_RING_RECV_REDUCE_COPY");
   }
 }
 } // namespace
@@ -217,7 +223,7 @@ struct RunWorkColl<ncclFuncReduceScatter, T, RedOp, NCCL_ALGO_PAT, NCCL_PROTO_SI
       while (1) {
         struct ncclPatStep* ps = shmem->patSteps + (step % NCCL_SHMEM_PAT_STEPS);
         int* poll = &ps->flags;
-        while (__hip_atomic_load(poll, __ATOMIC_ACQUIRE, __HIP_MEMORY_SCOPE_WORKGROUP) != 0) {
+        while (__scoped_atomic_load_n(poll, __ATOMIC_ACQUIRE, __MEMORY_SCOPE_WRKGRP) != 0) {
           // pollCount++;// unused variable - compiler warning // Wait for workers to be done with step 'step-NCCL_SHMEM_PAT_STEPS'
         }
         patAlgo.getNextOp(ps);
@@ -245,14 +251,14 @@ struct RunWorkColl<ncclFuncReduceScatter, T, RedOp, NCCL_ALGO_PAT, NCCL_PROTO_SI
       while (1) {
         struct ncclPatStep* ps = shmem->patSteps + (step % NCCL_SHMEM_PAT_STEPS);
         int* poll = &ps->flags;
-        while (__hip_atomic_load(poll, __ATOMIC_ACQUIRE, __HIP_MEMORY_SCOPE_WORKGROUP) == 0) {
+        while (__scoped_atomic_load_n(poll, __ATOMIC_ACQUIRE, __MEMORY_SCOPE_WRKGRP) == 0) {
           // pollCount++; // unused variable - compiler warning // Wait for compute thread
         }
         int last = ps->last;
         prims.patReduce(ps, shmem);
         if (tidInGroup == 0)
-          __hip_atomic_store(poll, 0, __ATOMIC_RELEASE,
-                             __HIP_MEMORY_SCOPE_WORKGROUP); // Return element to compute thread
+          __scoped_atomic_store_n(poll, 0, __ATOMIC_RELEASE,
+                                  __MEMORY_SCOPE_WRKGRP); // Return element to compute thread
         if (last) break;
         step += nGroups;
       }

@@ -32,7 +32,10 @@
 #include <vector>
 
 #include "nccl.h"
+#include "nccl_fakes.h"  // g_loadParam, for the NCCL_PARAM defaults this floor stands in for
 #include "os.h"
+
+#include "nccl_stubs.h"
 
 struct ncclAsyncJob;
 struct ncclChannel;
@@ -44,17 +47,24 @@ struct ncclTopoGraph;
 
 ncclResult_t commSetUnrollFactor(struct ncclComm* comm) { ::abort(); }
 // This fake does NOT allocate ring->userRanks/rankToIndex like the real initChannel; callers must supply storage.
-extern ncclResult_t g_initChannelResult;
-extern int g_initChannelLastId;
+ncclResult_t g_initChannelResult = ncclSuccess;
+int g_initChannelLastId = -1;
 ncclResult_t initChannel(struct ncclComm* comm, int channelid) {
   g_initChannelLastId = channelid;
   return g_initChannelResult;
 }
 
-ncclResult_t ncclCeFinalize(struct ncclComm* comm) { return ncclSuccess; }
+// Controllable (was hardcoded success). This is commFree's FIRST NCCLCHECK, so it doubles as the
+// "commFree entered" marker for commCleanup's ordering oracle and as the only knob that fails commFree.
+std::vector<std::string> g_cleanupCallOrder;
+ncclResult_t g_ncclCeFinalizeResult = ncclSuccess;
+ncclResult_t ncclCeFinalize(struct ncclComm* comm) {
+  g_cleanupCallOrder.push_back("commFree");
+  return g_ncclCeFinalizeResult;
+}
 ncclResult_t ncclCheckMultiRank(struct ncclComm* comm) { ::abort(); }
 void ncclCudaContextDrop(struct ncclCudaContext* cxt) { ::abort(); }
-ncclResult_t ncclCudaContextTrack(struct ncclCudaContext** out) { ::abort(); }
+// ncclCudaContextTrack and the rest of src/misc/strongstream.cc: strongstream_stubs.cc.
 ncclResult_t ncclDdaFabricCommFini(struct ncclComm* comm) { return ncclSuccess; }
 ncclResult_t ncclDdaFabricCommInit(struct ncclComm* comm) { ::abort(); }
 ncclResult_t ncclDdaIpcCommFini(struct ncclComm* comm) { return ncclSuccess; }
@@ -69,53 +79,23 @@ ncclResult_t ncclGinHostFinalize(struct ncclComm* comm) { return ncclSuccess; }
 // Omitted when RCCL_STUBS_OMIT_ncclInitKernelsForDevice is defined -- the unit
 // under test defines this itself (enqueue.cc:90).
 #ifndef RCCL_STUBS_OMIT_ncclInitKernelsForDevice
-ncclResult_t ncclInitKernelsForDevice(int cudaArch, int maxSharedMem, size_t* maxStackSize) { ::abort(); }
+static ncclResult_t DefaultNcclInitKernelsForDevice(int, int, size_t*) { ::abort(); }
+std::function<ncclResult_t(int, int, size_t*)> g_ncclInitKernelsForDevice = DefaultNcclInitKernelsForDevice;
+ncclResult_t ncclInitKernelsForDevice(int cudaArch, int maxSharedMem, size_t* maxStackSize) {
+  return g_ncclInitKernelsForDevice(cudaArch, maxSharedMem, maxStackSize);
+}
 #endif
 // Controllable (was fail-loud). initTransportsRank:1508 calls this only when the MNNVL scope test at :1507 passes,
 // so the CALL COUNTER -- not the result -- is the oracle for that enable/auto/disable logic.
-extern ncclResult_t g_ncclMnnvlCheckResult;
-extern int g_ncclMnnvlCheckCalls;
+ncclResult_t g_ncclMnnvlCheckResult = ncclSuccess;
+int g_ncclMnnvlCheckCalls = 0;
 ncclResult_t ncclMnnvlCheck(struct ncclComm* comm) {
   g_ncclMnnvlCheckCalls++;
   return g_ncclMnnvlCheckResult;
 }
 ncclResult_t ncclNetFinalize(struct ncclComm* comm) { return ncclSuccess; }
-// Controllable (was fail-loud). initTransportsRank's exit: block (:2403) calls ncclOsCpuCount on EVERY path, so
-// nothing in that function is testable until this is seamed; the counter separates exit: from the :1488 bare return.
-// Records the mask too: :1608 and exit::2403 both call this, and without the recorder either call site
-// could be handed the wrong affinity (affinitySave instead of comm->cpuAffinity) with nothing noticing.
-extern int g_ncclOsCpuCountValue;
-extern int g_ncclOsCpuCountCalls;
-extern std::vector<ncclAffinity> g_ncclOsCpuCountMasks;
-int ncclOsCpuCount(const ncclAffinity& affinity) {
-  g_ncclOsCpuCountCalls++;
-  g_ncclOsCpuCountMasks.push_back(affinity);
-  return g_ncclOsCpuCountValue;
-}
-// Controllable (was fail-loud). A std::function because :1609 writes through the pointer -- though nothing
-// ever reads affinitySave back, which is what the AffinitySaveIsNeverRestored test pins.
-extern std::function<ncclResult_t(ncclAffinity*)> g_ncclOsGetAffinity;
-ncclResult_t ncclOsGetAffinity(ncclAffinity* affinity) { return g_ncclOsGetAffinity(affinity); }
-// Controllable (was fail-loud). Records the affinity it was handed: without that, exit::2404 forwarding
-// comm->cpuAffinity vs any other mask is unobservable -- a fake that drops an argument untests it.
-// Keeps EVERY mask, not just the latest: :1610 and exit::2404 both call this, so a single "last"
-// slot lets the exit: write mask what :1610 forwarded -- which left a mutant swapping :1610 to
-// affinitySave alive. Tests index the call site they mean.
-extern ncclResult_t g_ncclOsSetAffinityResult;
-extern std::vector<ncclAffinity> g_ncclOsSetAffinityMasks;
-ncclResult_t ncclOsSetAffinity(const ncclAffinity& affinity) {
-  g_ncclOsSetAffinityMasks.push_back(affinity);
-  return g_ncclOsSetAffinityResult;
-}
-// Must be non-empty and multi-token: ncclInit() strstr()s the strtok_r() of this, and strtok_r("") returns NULL.
-// Also not "1" and not the Hyper-V BIOS string, so numa_balancing / bios_version stay on their benign arms.
-ncclResult_t ncclOsTopoGetStrFromSys(const char* path, const char* fileName, char* strValue, int maxLen)
-{
-    if (strValue && maxLen > 0) {
-        std::snprintf(strValue, maxLen, "Linux version 6.8.0-microtest");
-    }
-    return ncclSuccess;
-}
+// The src/os/*.cc entry points (ncclOsCpuCount, ncclOsGetAffinity, ncclOsSetAffinity,
+// ncclOsTopoGetStrFromSys) and their seams: os_fakes.cc.
 ncclResult_t ncclProfilerPluginFinalize(struct ncclComm* comm) { return ncclSuccess; }
 ncclResult_t ncclProfilerPluginInit(struct ncclComm* comm) { ::abort(); }
 // src/plugin/profiler.cc:871. Not fail-loud: ncclPrepareTasks:601 reaches this on
@@ -129,9 +109,22 @@ ncclResult_t ncclRmaInit(struct ncclComm* comm) { return ncclSuccess; }
 ncclResult_t ncclRmaInitFromParent(struct ncclComm* comm, struct ncclComm* parent) { return ncclSuccess; }
 ncclResult_t ncclRmaProxyFinalize(struct ncclComm* comm) { return ncclSuccess; }
 // ncclStrongStreamDestruct and the rest of src/misc/strongstream.cc: strongstream_stubs.cc.
-ncclResult_t ncclSymkFinalize(struct ncclComm* comm) { ::abort(); }
+static ncclResult_t DefaultNcclSymkFinalize(struct ncclComm*) { return ncclSuccess; }
+std::function<ncclResult_t(struct ncclComm*)> g_ncclSymkFinalize = DefaultNcclSymkFinalize;
+ncclResult_t ncclSymkFinalize(struct ncclComm* comm) { return g_ncclSymkFinalize(comm); }
 ncclResult_t ncclTunerPluginLoad(struct ncclComm* comm) { ::abort(); }
-ncclResult_t ncclTunerPluginUnload(struct ncclComm* comm) { ::abort(); }
+// Recording the comm matters: commCleanup forwards its own argument, so passing anything else would be invisible.
+// TRAP: the recording must live here, not in the functor's default -- the default is reachable from the
+// std::function's dynamic initializer, which --gc-sections cannot drop, so an extern this file does not
+// itself define would become an undefined symbol in every other micro binary that links it.
+struct ncclComm* g_ncclTunerPluginUnloadLastComm = nullptr;
+static ncclResult_t DefaultNcclTunerPluginUnload(struct ncclComm*) { return ncclSuccess; }
+std::function<ncclResult_t(struct ncclComm*)> g_ncclTunerPluginUnload = DefaultNcclTunerPluginUnload;
+ncclResult_t ncclTunerPluginUnload(struct ncclComm* comm) {
+  g_cleanupCallOrder.push_back("tunerUnload");
+  g_ncclTunerPluginUnloadLastComm = comm;
+  return g_ncclTunerPluginUnload(comm);
+}
 // src/rccl_wrap.cc symbols (rcclCommSetP2pShiftSize, rcclCanUseWarpSpeedAuto,
 // rcclHierarchicalTempBufferSize, rcclParamWarpSpeedForceEnable,
 // rcclParamHierarchicalAllGather, rcclParamHierarchicalReduceScatter):
@@ -140,15 +133,41 @@ ncclResult_t ncclTunerPluginUnload(struct ncclComm* comm) { ::abort(); }
 // rcclUseAinic (src/transport/net.cc): transport_stubs.cc.
 
 ncclResult_t freeChannel(struct ncclChannel*, int, int, int, struct ncclComm*) { return ncclSuccess; }
-ncclResult_t ncclAsyncLaunch(struct ncclAsyncJob*, ncclResult_t(*)(struct ncclAsyncJob*), void(*)(struct ncclAsyncJob*), void(*)(void*), struct ncclComm*) { ::abort(); }
+static ncclResult_t DefaultNcclAsyncLaunch(struct ncclAsyncJob* job, ncclResult_t (*func)(struct ncclAsyncJob*),
+                                           void (*undo)(struct ncclAsyncJob*), void (*destructor)(void*),
+                                           struct ncclComm*) {
+  ncclResult_t ret = func(job);
+  if (ret != ncclSuccess && undo) undo(job);
+  if (destructor) destructor(job);
+  return ret;
+}
+std::function<ncclResult_t(struct ncclAsyncJob*, ncclResult_t (*)(struct ncclAsyncJob*),
+                           void (*)(struct ncclAsyncJob*), void (*)(void*), struct ncclComm*)>
+    g_ncclAsyncLaunch = DefaultNcclAsyncLaunch;
+ncclResult_t ncclAsyncLaunch(struct ncclAsyncJob* job, ncclResult_t (*func)(struct ncclAsyncJob*),
+                             void (*undo)(struct ncclAsyncJob*), void (*destructor)(void*), struct ncclComm* comm) {
+  return g_ncclAsyncLaunch(job, func, undo, destructor, comm);
+}
 // Omitted when RCCL_STUBS_OMIT_ncclParamGraphStreamOrdering is defined -- the
-// unit under test emits this via NCCL_PARAM (enqueue.cc:1986).
+// unit under test emits this via NCCL_PARAM (enqueue.cc:1986). Reads the env
+// rather than a hardcoded 0, which forced config.graphStreamOrdering on every
+// envConfigOverride call and hid the field.
 #ifndef RCCL_STUBS_OMIT_ncclParamGraphStreamOrdering
-int64_t ncclParamGraphStreamOrdering() { return 0; }
+int64_t ncclParamGraphStreamOrdering() {
+  return g_loadParam("GRAPH_STREAM_ORDERING", NCCL_CONFIG_UNDEF_INT);
+}
 #endif
 int64_t rcclParamPxnOptQpUsage() { ::abort(); }  // src/channel.cc:14
-namespace latency_profiler { ncclResult_t collTraceInit(struct ncclComm*) { ::abort(); } ncclResult_t collTraceDestroy(struct ncclComm*) { ::abort(); } }
-ncclResult_t ncclCommDestroy(ncclComm_t) { ::abort(); }
+static ncclResult_t DefaultCollTraceDestroy(struct ncclComm*) { return ncclSuccess; }
+std::function<ncclResult_t(struct ncclComm*)> g_collTraceDestroy = DefaultCollTraceDestroy;
+namespace latency_profiler {
+ncclResult_t collTraceInit(struct ncclComm*) { ::abort(); }
+ncclResult_t collTraceDestroy(struct ncclComm* comm) { return g_collTraceDestroy(comm); }
+}  // namespace latency_profiler
+
+static ncclResult_t DefaultNcclCommDestroy(ncclComm_t) { return ncclSuccess; }
+std::function<ncclResult_t(ncclComm_t)> g_ncclCommDestroy = DefaultNcclCommDestroy;
+ncclResult_t ncclCommDestroy(ncclComm_t comm) { return g_ncclCommDestroy(comm); }
 ncclResult_t ncclCommInitRank(ncclComm_t*, int, ncclUniqueId, int) { ::abort(); }
 ncclResult_t ncclCommSplit(ncclComm_t, int, int, ncclComm_t*, ncclConfig_t*) { ::abort(); }
 char ncclLastError[1024] = {};
@@ -165,10 +184,14 @@ bool ncclCudaLaunchBlocking = false;          // src/misc/cudawrap.cc
 int ncclProfilerEventMask = 0;                // src/profiler.cc
 std::unordered_map<uint64_t, int> ncclDevFuncNameToId;  // generated device table
 
-extern int g_getROCmVersionResult;
-extern unsigned int g_rocmVersionMajor;
-extern unsigned int g_rocmVersionMinor;
-extern unsigned int g_rocmVersionPatch;
+// Default 1 (!= VerSuccess) means "version unknown", so showVersion()'s runtime-ROCm block is skipped.
+int g_getROCmVersionResult = 1;
+unsigned int g_rocmVersionMajor = 0;
+unsigned int g_rocmVersionMinor = 0;
+unsigned int g_rocmVersionPatch = 0;
+
+static ncclResult_t DefaultNcclMemFree(void*) { return ncclSuccess; }
+std::function<ncclResult_t(void*)> g_ncclMemFree = DefaultNcclMemFree;
 
 extern "C" {
 ncclResult_t ncclMemManagerDestroy(struct ncclComm*) { return ncclSuccess; }
@@ -180,7 +203,30 @@ int getROCmVersion(unsigned int* major, unsigned int* minor, unsigned int* patch
   return g_getROCmVersionResult;
 }
 ncclResult_t ncclMemAlloc(void** ptr, size_t size) { ::abort(); }
-ncclResult_t ncclMemFree(void* ptr) { ::abort(); }
+ncclResult_t ncclMemFree(void* ptr) { return g_ncclMemFree(ptr); }
 }
 
 ncclResult_t ncclSymkInitOnce(struct ncclComm* comm) { ::abort(); }
+
+void ResetNcclStubs() {
+#ifndef RCCL_STUBS_OMIT_ncclInitKernelsForDevice
+  g_ncclInitKernelsForDevice = DefaultNcclInitKernelsForDevice;
+#endif
+  g_ncclAsyncLaunch = DefaultNcclAsyncLaunch;
+  g_ncclMemFree = DefaultNcclMemFree;
+  g_ncclSymkFinalize = DefaultNcclSymkFinalize;
+  g_ncclCommDestroy = DefaultNcclCommDestroy;
+  g_collTraceDestroy = DefaultCollTraceDestroy;
+  g_ncclTunerPluginUnload = DefaultNcclTunerPluginUnload;
+  g_initChannelResult = ncclSuccess;
+  g_initChannelLastId = -1;
+  g_cleanupCallOrder.clear();
+  g_ncclCeFinalizeResult = ncclSuccess;
+  g_ncclMnnvlCheckResult = ncclSuccess;
+  g_ncclMnnvlCheckCalls = 0;
+  g_ncclTunerPluginUnloadLastComm = nullptr;
+  g_getROCmVersionResult = 1;
+  g_rocmVersionMajor = 0;
+  g_rocmVersionMinor = 0;
+  g_rocmVersionPatch = 0;
+}

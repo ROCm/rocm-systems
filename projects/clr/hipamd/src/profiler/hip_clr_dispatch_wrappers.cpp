@@ -183,7 +183,7 @@ static hipError_t hipBindTextureToMipmappedArrayLayer(const textureReference* te
 }
 
 // api_id = 11
-static hipError_t hipChooseDeviceLayerR0600(int* device, const hipDeviceProp_tR0600* prop) {
+static hipError_t hipChooseDeviceLayer(int* device, const hipDeviceProp_t* prop) {
   auto* _rec = HipGetActiveRecordExt(11u);
   auto _r = g_next.hipChooseDevice_fn(device, prop);
   _rec->end_ns = NowNs();
@@ -5592,7 +5592,7 @@ void HipProfilerBuildWrapperTableExt(HipDispatchTable* tbl) {
   g_wrapper_tbl.hipBindTexture2D_fn = hipBindTexture2DLayer;
   g_wrapper_tbl.hipBindTextureToArray_fn = hipBindTextureToArrayLayer;
   g_wrapper_tbl.hipBindTextureToMipmappedArray_fn = hipBindTextureToMipmappedArrayLayer;
-  g_wrapper_tbl.hipChooseDevice_fn = hipChooseDeviceLayerR0600;
+  g_wrapper_tbl.hipChooseDevice_fn = hipChooseDeviceLayer;
   g_wrapper_tbl.hipChooseDeviceR0000_fn = hipChooseDeviceR0000Layer;
   g_wrapper_tbl.hipConfigureCall_fn = hipConfigureCallLayer;
   g_wrapper_tbl.hipCreateSurfaceObject_fn = hipCreateSurfaceObjectLayer;

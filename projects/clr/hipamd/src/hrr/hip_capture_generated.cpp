@@ -289,7 +289,7 @@ static hipError_t capture_hipBindTextureToMipmappedArray(const textureReference*
 }
 
 // Generated shim
-static hipError_t capture_hipChooseDevice(int* device, const hipDeviceProp_tR0600* prop) {
+static hipError_t capture_hipChooseDevice(int* device, const hipDeviceProp_t* prop) {
   hipError_t r = g_real_table.hipChooseDevice_fn(device, prop);
   if (r == hipSuccess) {
     hrr_args_hipChooseDevice a{};
