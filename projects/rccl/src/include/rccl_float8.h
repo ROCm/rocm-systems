@@ -47,10 +47,13 @@ typedef struct {
 #if __HIP_DEVICE_COMPILE__ && (defined(__gfx942__))
 typedef __hip_fp8_e4m3_fnuz rccl_float8;
 typedef __hip_fp8_e5m2_fnuz rccl_bfloat8;
+#define RCCL_FP8_MAX_FINITE 240.0f
 #else
 typedef __hip_fp8_e4m3 rccl_float8;
 typedef __hip_fp8_e5m2 rccl_bfloat8;
+#define RCCL_FP8_MAX_FINITE 448.0f
 #endif
+#define RCCL_BF8_MAX_FINITE 57344.0f
 
 typedef _Float16 half_t;
 typedef _Float16 half2_t __attribute__((ext_vector_type(2)));
@@ -59,6 +62,63 @@ typedef short shortx2_t __attribute__((ext_vector_type(2)));
 typedef short __attribute__((ext_vector_type(2))) __amd_shortx2_storage_t;
 typedef float float2_t __attribute__((ext_vector_type(2)));
 
+// The packed converts the adds below finish with round rather than saturate, so
+// a sum that leaves the destination's range comes back as Inf, or as NaN for
+// e4m3, which has no Inf encoding: Sum(448, 18) returned the 0x7f that means NaN
+// rather than the 0x7e that encodes 448. Clamping the intermediate first makes
+// such a sum saturate to +/-max_finite, which is what the hip_fp8 constructors
+// do in __HIP_SATFINITE mode and so what the paths that go through float() have
+// always done. A sum is Inf only when an operand is.
+//
+// These are the IEEE-754-2019 minimum/maximum operations, which propagate NaN
+// rather than returning the other operand, so a NaN sum survives the clamp
+// without a separate guard.
+#if __HIP_DEVICE_COMPILE__ && defined(__gfx950__)
+inline __device__ half2_t rccl_clamp2_f16(half2_t v, half2_t bound) {
+  return __builtin_elementwise_minimum(__builtin_elementwise_maximum(v, -bound), bound);
+}
+
+// e5m2 shares f16's exponent range, so unlike e4m3 -- whose sums stop at 896 --
+// its sums can leave f16: 57344+57344 is 114688 and f16 stops at 65504. That
+// overflow produces the same Inf an Inf operand does, and the two have to end up
+// in different places, so the sum alone cannot decide it. The operands can. No
+// finite e5m2 value exceeds max_finite, so widening the clamp's limits to
+// max(x, y, max_finite) above and min(x, y, -max_finite) below leaves them at
+// +/-max_finite for finite operands and opens the relevant side to infinity
+// exactly when an operand is the infinity that has to survive. A NaN operand
+// makes both limits NaN, which the clamp then propagates -- the wanted answer,
+// since the sum is NaN too.
+//
+// Taking the limits from the operands rather than their magnitudes is what keeps
+// this to four instructions: each limit is one v_pk_maximum3_f16 or
+// v_pk_minimum3_f16, and no absolute value has to be materialized first.
+inline __device__ half2_t rccl_add_clamp2_bf8_f16(half2_t a, half2_t b) {
+  const half2_t maxFinite = {(half_t)RCCL_BF8_MAX_FINITE, (half_t)RCCL_BF8_MAX_FINITE};
+  half2_t hi = __builtin_elementwise_maximum(__builtin_elementwise_maximum(a, b), maxFinite);
+  half2_t lo = __builtin_elementwise_minimum(__builtin_elementwise_minimum(a, b), -maxFinite);
+  half2_t v;
+  asm volatile("v_pk_add_f16 %0, %1, %2" : "=v"(v) : "v"(a), "v"(b));
+  return __builtin_elementwise_minimum(__builtin_elementwise_maximum(v, lo), hi);
+}
+#endif
+
+// gfx942 and gfx1250 add in f32, which holds every sum exactly, so the bound is
+// always max_finite and only the clamp is needed. Neither has a NaN-propagating
+// min/max, so this is written as the v_med3_f32 plus a compare and a select that
+// the hip_fp8 constructors emit for the paths that go through float(), and it
+// guards the clamp the way they do, letting every non-finite value through
+// rather than only NaN. NaN has to survive on both targets. Inf only arises on
+// gfx1250, whose types are the OCP variants: an Inf operand there gives an Inf
+// sum, which has to stay Inf rather than saturate to max_finite. gfx942's fnuz
+// types have no Inf encoding, so nothing it can decode reaches that case and its
+// behavior is the same either way.
+#if __HIP_DEVICE_COMPILE__ && (defined(__gfx942__) || defined(__gfx1250__))
+inline __device__ float rccl_clamp_f32(float v, float maxFinite) {
+  float clamped = __builtin_amdgcn_fmed3f(v, -maxFinite, maxFinite);
+  return __builtin_isfinite(v) ? clamped : v;
+}
+#endif
+
 inline __device__ rccl_float8 hadd(rccl_float8 x, rccl_float8 y) {
 #if __HIP_DEVICE_COMPILE__ && defined(__gfx950__)
   half2_t v1;
@@ -66,6 +126,8 @@ inline __device__ rccl_float8 hadd(rccl_float8 x, rccl_float8 y) {
                : "=v"(v1)
                : "v"(__builtin_amdgcn_cvt_scalef32_pk_f16_fp8(x.__x, 1.f, 0)),
                  "v"(__builtin_amdgcn_cvt_scalef32_pk_f16_fp8(y.__x, 1.f, 0)));
+  const half2_t maxFinite = {(half_t)RCCL_FP8_MAX_FINITE, (half_t)RCCL_FP8_MAX_FINITE};
+  v1 = rccl_clamp2_f16(v1, maxFinite);
   union {
     shortx2_t i16_vec;
     rccl_float8 fp8[4];
@@ -79,7 +141,16 @@ inline __device__ rccl_float8 hadd(rccl_float8 x, rccl_float8 y) {
   asm volatile("v_pk_add_f32 %0, %1, %2"
                : "=v"(v)
                : "v"(__builtin_amdgcn_cvt_pk_f32_fp8(x.__x, 0)), "v"(__builtin_amdgcn_cvt_pk_f32_fp8(y.__x, 0)));
-  return __builtin_amdgcn_cvt_pk_fp8_f32(v[0], v[0], ival, false);
+  v[0] = rccl_clamp_f32(v[0], RCCL_FP8_MAX_FINITE);
+  // The builtin returns the packed fp8 bytes in an int. Returning that int
+  // directly would select rccl_float8's numeric int constructor, which converts
+  // the bit pattern as a value, so reinterpret it as raw storage instead.
+  union {
+    fp8x2_storage_t fp8x2;
+    rccl_float8 fp8[2];
+  } u{0};
+  u.fp8x2 = (fp8x2_storage_t)__builtin_amdgcn_cvt_pk_fp8_f32(v[0], v[0], ival, false);
+  return u.fp8[0];
 #else
   return rccl_float8(float(x) + float(y));
 #endif
@@ -87,11 +158,8 @@ inline __device__ rccl_float8 hadd(rccl_float8 x, rccl_float8 y) {
 
 inline __device__ rccl_bfloat8 hadd_b(rccl_bfloat8 x, rccl_bfloat8 y) {
 #if __HIP_DEVICE_COMPILE__ && defined(__gfx950__)
-  half2_t v1;
-  asm volatile("v_pk_add_f16 %0, %1, %2"
-               : "=v"(v1)
-               : "v"(__builtin_amdgcn_cvt_scalef32_pk_f16_bf8(x.__x, 1.f, 0)),
-                 "v"(__builtin_amdgcn_cvt_scalef32_pk_f16_bf8(y.__x, 1.f, 0)));
+  half2_t v1 = rccl_add_clamp2_bf8_f16(__builtin_amdgcn_cvt_scalef32_pk_f16_bf8(x.__x, 1.f, 0),
+                                       __builtin_amdgcn_cvt_scalef32_pk_f16_bf8(y.__x, 1.f, 0));
   union {
     shortx2_t i16_vec;
     rccl_bfloat8 fp8[4];
@@ -105,7 +173,15 @@ inline __device__ rccl_bfloat8 hadd_b(rccl_bfloat8 x, rccl_bfloat8 y) {
   asm volatile("v_pk_add_f32 %0, %1, %2"
                : "=v"(v)
                : "v"(__builtin_amdgcn_cvt_pk_f32_bf8(x.__x, 0)), "v"(__builtin_amdgcn_cvt_pk_f32_bf8(y.__x, 0)));
-  return __builtin_amdgcn_cvt_pk_bf8_f32(v[0], v[0], ival, false);
+  v[0] = rccl_clamp_f32(v[0], RCCL_BF8_MAX_FINITE);
+  // See hadd: reinterpret the packed bytes rather than letting the int
+  // constructor convert them numerically.
+  union {
+    fp8x2_storage_t bfp8x2;
+    rccl_bfloat8 bfp8[2];
+  } u{0};
+  u.bfp8x2 = (fp8x2_storage_t)__builtin_amdgcn_cvt_pk_bf8_f32(v[0], v[0], ival, false);
+  return u.bfp8[0];
 #else
   return rccl_bfloat8(float(x) + float(y));
 #endif
@@ -118,6 +194,8 @@ inline __device__ fp8x2_storage_t hadd2(fp8x2_storage_t x, fp8x2_storage_t y) {
                : "=v"(v1)
                : "v"(__builtin_amdgcn_cvt_scalef32_pk_f16_fp8(x, 1.f, 0)),
                  "v"(__builtin_amdgcn_cvt_scalef32_pk_f16_fp8(y, 1.f, 0)));
+  const half2_t maxFinite = {(half_t)RCCL_FP8_MAX_FINITE, (half_t)RCCL_FP8_MAX_FINITE};
+  v1 = rccl_clamp2_f16(v1, maxFinite);
   union {
     shortx2_t i16_vec;
     fp8x2_storage_t fp8;
@@ -130,7 +208,8 @@ inline __device__ fp8x2_storage_t hadd2(fp8x2_storage_t x, fp8x2_storage_t y) {
   asm volatile("v_pk_add_f32 %0, %1, %2"
                : "=v"(v)
                : "v"(__builtin_amdgcn_cvt_pk_f32_fp8(x, 0)), "v"(__builtin_amdgcn_cvt_pk_f32_fp8(y, 0)));
-  return __builtin_amdgcn_cvt_pk_fp8_f32(v[0], v[1], ival, false);
+  return __builtin_amdgcn_cvt_pk_fp8_f32(rccl_clamp_f32(v[0], RCCL_FP8_MAX_FINITE),
+                                         rccl_clamp_f32(v[1], RCCL_FP8_MAX_FINITE), ival, false);
 #else
   union {
     rccl_float8 fp8[2];
@@ -146,11 +225,8 @@ inline __device__ fp8x2_storage_t hadd2(fp8x2_storage_t x, fp8x2_storage_t y) {
 
 inline __device__ fp8x2_storage_t hadd2_b(fp8x2_storage_t x, fp8x2_storage_t y) {
 #if __HIP_DEVICE_COMPILE__ && defined(__gfx950__)
-  half2_t v1;
-  asm volatile("v_pk_add_f16 %0, %1, %2"
-               : "=v"(v1)
-               : "v"(__builtin_amdgcn_cvt_scalef32_pk_f16_bf8(x, 1.f, 0)),
-                 "v"(__builtin_amdgcn_cvt_scalef32_pk_f16_bf8(y, 1.f, 0)));
+  half2_t v1 = rccl_add_clamp2_bf8_f16(__builtin_amdgcn_cvt_scalef32_pk_f16_bf8(x, 1.f, 0),
+                                       __builtin_amdgcn_cvt_scalef32_pk_f16_bf8(y, 1.f, 0));
   union {
     shortx2_t i16_vec;
     fp8x2_storage_t fp8;
@@ -163,7 +239,8 @@ inline __device__ fp8x2_storage_t hadd2_b(fp8x2_storage_t x, fp8x2_storage_t y) 
   asm volatile("v_pk_add_f32 %0, %1, %2"
                : "=v"(v)
                : "v"(__builtin_amdgcn_cvt_pk_f32_bf8(x, 0)), "v"(__builtin_amdgcn_cvt_pk_f32_bf8(y, 0)));
-  return __builtin_amdgcn_cvt_pk_bf8_f32(v[0], v[1], ival, false);
+  return __builtin_amdgcn_cvt_pk_bf8_f32(rccl_clamp_f32(v[0], RCCL_BF8_MAX_FINITE),
+                                         rccl_clamp_f32(v[1], RCCL_BF8_MAX_FINITE), ival, false);
 #else
   union {
     rccl_bfloat8 bfp8[2];

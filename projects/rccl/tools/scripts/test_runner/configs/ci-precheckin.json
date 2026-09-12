@@ -115,7 +115,8 @@
         {"name": "MiscTests.Sorter", "description": "Task coll sorter unit test", "test_filter": "MiscTests.Sorter"},
         {"name": "VersionInfoTests", "description": "HIP/ROCm version string formatting tests", "test_filter": "VersionInfoTests.*"},
         {"name": "GinDeviceTest", "description": "GIN proxy backend device-leaf tests", "test_filter": "GinDeviceTest.*"},
-        {"name": "DdaCollCommon", "description": "DDA collective common helper tests", "test_filter": "DdaCollCommon.*"}
+        {"name": "DdaCollCommon", "description": "DDA collective common helper tests", "test_filter": "DdaCollCommon.*"},
+        {"name": "NarrowFloatSumTest", "description": "fp8/bf8 Sum helpers over every byte pair (rccl_float8.h hadd/hadd2)", "test_filter": "NarrowFloatSumTest.*"}
       ]
     },
     "unit_tests_gdr": {
