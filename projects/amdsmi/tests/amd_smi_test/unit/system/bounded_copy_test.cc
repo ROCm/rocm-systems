@@ -1,9 +1,11 @@
 // Copyright Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-// Regression coverage for the unterminated process-name copy in
-// gpuvsmi_get_pid_info(): strncpy() appends no NUL once it copies its full
-// count, so a name of AMDSMI_MAX_STRING_LENGTH bytes or more left info.name
+// Coverage for CopyBounded, the single bounded-copy used by both
+// gpuvsmi_get_pid_info() and smi_clear_char_and_reinitialize().
+//
+// It replaced an strncpy() that appended no NUL once it copied its full count,
+// so a name of AMDSMI_MAX_STRING_LENGTH bytes or more left info.name
 // unterminated. Reachable in production, where `name` is a readlink() of
 // /proc/<pid>/exe into a PATH_MAX buffer.
 
@@ -13,7 +15,7 @@
 #include <string>
 
 #include "amd_smi/amdsmi.h"
-#include "amd_smi/impl/amd_smi_container_id_parser.h"
+#include "amd_smi/impl/amd_smi_utils.h"
 #include "guarded_buffer.h"
 
 using amd::smi::CopyBounded;
@@ -66,6 +68,14 @@ TEST(SystemUnit, BoundedCopyEmptySourceYieldsEmptyString) {
 TEST(SystemUnit, BoundedCopyZeroCapacityWritesNothing) {
   GuardedBuffer<1> gb;
   EXPECT_EQ(CopyBounded(gb.buf, 0, "anything"), 0u);
+  EXPECT_TRUE(gb.CanariesIntact());
+}
+
+// One byte of capacity leaves room for the terminator and nothing else.
+TEST(SystemUnit, BoundedCopyCapacityOfOneWritesOnlyTheTerminator) {
+  GuardedBuffer<1> gb;
+  EXPECT_EQ(CopyBounded(gb.buf, sizeof(gb.buf), "anything"), 0u);
+  EXPECT_EQ(gb.buf[0], '\0');
   EXPECT_TRUE(gb.CanariesIntact());
 }
 
