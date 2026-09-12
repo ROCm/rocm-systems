@@ -13,6 +13,8 @@ void Reset();
 void SetProbeResult(int result);
 void SetBootstrapFail(bool fail);
 void SetBootstrapNranks(int nranks);
+// Queue one allgather payload. Each sizeof(int) allgather consumes the front
+// entry, so a second call can inject a peer-reported missing vector.
 void SetBootstrapIntResult(const int* values, int count);
 void SetFactoryCreateFail(bool fail);
 void SetFactoryNullHandles(bool nullHandles);
