@@ -2,6 +2,18 @@ name: LSTT Formatting
 
 on:
   workflow_dispatch:
+  push:
+    branches:
+      - develop
+    paths:
+      - ".github/workflows/lstt-formatting.yml"
+      - "projects/rdc/**"
+      - "projects/amdsmi/**"
+      - "projects/rocm-smi-lib/**"
+      - "!**/*.md"
+      - "!**/*.rtf"
+      - "!**/*.rst"
+      - "!**/.readthedocs.yaml"
   pull_request:
     paths:
       - ".github/workflows/lstt-formatting.yml"
@@ -18,7 +30,8 @@ permissions:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  # Every merged commit needs its own verdict, so only PR pushes supersede.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   pre-commit:
@@ -47,9 +60,13 @@ jobs:
 
       - name: Run pre-commit
         working-directory: projects/${{ matrix.project }}
+        env:
+          FROM_REF: >-
+            ${{ github.event_name == 'push' && github.event.before
+            || format('origin/{0}', github.event.pull_request.base.ref || 'develop') }}
         run: >
           pre-commit run
           --show-diff-on-failure
           --color=always
-          --from-ref origin/${{ github.event.pull_request.base.ref || 'develop' }}
+          --from-ref "$FROM_REF"
           --to-ref HEAD
