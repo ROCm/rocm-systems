@@ -4,6 +4,11 @@
  * SPDX-License-Identifier: MIT
  */
 
+#include <unistd.h>
+
+#include <atomic>
+#include <cstring>
+
 #include "suites/functional/queue_create.h"
 #include "hsa/hsa_ext_amd.h"
 #include "hsa/hsa.h"
@@ -15,6 +20,41 @@ static constexpr uint32_t kQueueSizePackets = 1024;
 static constexpr uint32_t kQueueSizeBytes =
     kQueueSizePackets * sizeof(hsa_kernel_dispatch_packet_t);
 static constexpr uint32_t kSdmaQueueSizeBytes = 4096;
+
+namespace {
+
+// SDMA write-linear ("write untiled") packet. Declared here because this is the
+// only packet rocrtst builds by hand for an SDMA queue.
+struct SdmaWriteLinearPacket {
+  uint32_t header;
+  uint32_t dst_addr_lo;
+  uint32_t dst_addr_hi;
+  uint32_t count;
+  uint32_t data0;
+};
+
+constexpr uint32_t kSdmaOpWrite = 2;
+constexpr uint32_t kSdmaSubOpWriteLinear = 0;
+
+// Bytes withheld from the ring when submitting the malformed packet, matching
+// the packetSizeOffset KFDNegativeTest uses to provoke an SDMA queue reset.
+constexpr uint32_t kSdmaBadPacketByteOffset = 6;
+
+// Records what the queue's asynchronous error callback observed.
+struct SdmaErrorCallbackState {
+  std::atomic<uint32_t> invocations{0};
+  hsa_status_t status{HSA_STATUS_SUCCESS};
+  hsa_queue_t* source{nullptr};
+};
+
+void SdmaErrorCallback(hsa_status_t status, hsa_queue_t* source, void* data) {
+  auto* state = reinterpret_cast<SdmaErrorCallbackState*>(data);
+  state->status = status;
+  state->source = source;
+  state->invocations.fetch_add(1, std::memory_order_release);
+}
+
+}  // namespace
 
 static bool VerifySquareResult(uint32_t* ar, size_t sz) {
   for (size_t i = 0; i < sz; ++i) {
@@ -354,6 +394,87 @@ void QueueCreateTest::SdmaQueueCreateDestroyTest() {
   fprintf(stdout, "[ SKIPPED ] SdmaQueueCreateDestroyTest: HSA headers predate "
                   "queue read/write pointer queries\n");
 #endif
+}
+
+void QueueCreateTest::SdmaQueueErrorCallbackTest() {
+  ASSERT_SUCCESS(rocrtst::SetDefaultAgents(this));
+  ASSERT_SUCCESS(rocrtst::SetPoolsTypical(this));
+
+  // Destination of the malformed write. The engine never retires the packet, so
+  // the contents are never inspected.
+  hsa_agent_t ag_list[2] = {*gpu_device1(), *cpu_device()};
+  void* dst_buffer = nullptr;
+  ASSERT_SUCCESS(hsa_amd_memory_pool_allocate(cpu_pool(), sizeof(uint32_t), 0, &dst_buffer));
+  ASSERT_SUCCESS(hsa_amd_agents_allow_access(2, ag_list, NULL, dst_buffer));
+
+  SdmaErrorCallbackState state;
+
+  hsa_amd_queue_create_desc_t desc = {};
+  desc.version = HSA_AMD_QUEUE_CREATE_DESC_VERSION;
+  desc.engine_type = HSA_AMD_QUEUE_ENGINE_SDMA;
+  desc.queue_size_bytes = kSdmaQueueSizeBytes;
+  desc.priority = HSA_AMD_QUEUE_PRIORITY_NORMAL;
+  desc.flags = static_cast<hsa_amd_queue_create_flag_t>(HSA_AMD_QUEUE_CREATE_SYSTEM_MEM);
+  desc.engine.sdma.sdma_engine_id = HSA_AMD_SDMA_ENGINE_ID_ANY;
+  desc.callback = SdmaErrorCallback;
+  desc.callback_data = &state;
+
+  hsa_status_t status = hsa_amd_queue_create(*gpu_device1(), &desc, 1);
+  if (status == HSA_STATUS_ERROR_INVALID_QUEUE_CREATION) {
+    printf("  SdmaQueueErrorCallbackTest: SKIPPED (agent or driver does not support "
+           "SDMA queue creation)\n");
+    ASSERT_SUCCESS(hsa_amd_memory_pool_free(dst_buffer));
+    return;
+  }
+  ASSERT_SUCCESS(status);
+  ASSERT_NE(desc.queue, nullptr);
+
+  hsa_queue_t* queue = desc.queue;
+  const uint64_t dst_address = reinterpret_cast<uint64_t>(dst_buffer);
+
+  SdmaWriteLinearPacket pkt = {};
+  pkt.header = kSdmaOpWrite | (kSdmaSubOpWriteLinear << 8);
+  pkt.dst_addr_lo = static_cast<uint32_t>(dst_address);
+  pkt.dst_addr_hi = static_cast<uint32_t>(dst_address >> 32);
+  // The count field holds dwords minus one, so 0 requests a single dword.
+  pkt.count = 0;
+  pkt.data0 = 0;
+
+  memcpy(queue->base_address, &pkt, sizeof(pkt));
+
+  // Publish fewer bytes than the packet the engine will parse. The engine is
+  // left reading a truncated packet and hangs, which is what makes the driver
+  // reset the queue once it is destroyed. SDMA write and read pointers are byte
+  // offsets, so the doorbell value is a byte count.
+  const uint32_t published_bytes = sizeof(pkt) - kSdmaBadPacketByteOffset;
+  hsa_signal_store_screlease(queue->doorbell_signal, published_bytes);
+
+  // Give the engine time to fetch the malformed packet and hang on it.
+  usleep(50 * 1000);
+
+  ASSERT_SUCCESS(hsa_queue_destroy(queue));
+
+  // The queue reset is triggered by the destroy above, so the notification is
+  // expected to arrive after the queue is already gone.
+  const int kCallbackTimeoutMs = 10000;
+  const int kPollIntervalMs = 10;
+  for (int waited_ms = 0;
+       state.invocations.load(std::memory_order_acquire) == 0 && waited_ms < kCallbackTimeoutMs;
+       waited_ms += kPollIntervalMs) {
+    usleep(kPollIntervalMs * 1000);
+  }
+
+  ASSERT_EQ(state.invocations.load(std::memory_order_acquire), 1u)
+      << "No error callback within " << kCallbackTimeoutMs
+      << " ms of destroying the queue. This requires a driver that supports "
+         "per-SDMA-queue reset.";
+  EXPECT_EQ(state.status, HSA_STATUS_ERROR_EXCEPTION);
+  EXPECT_EQ(state.source, queue);
+
+  printf("  SdmaQueueErrorCallbackTest: error callback reported status %d for queue %p\n",
+         state.status, state.source);
+
+  ASSERT_SUCCESS(hsa_amd_memory_pool_free(dst_buffer));
 }
 
 void QueueCreateTest::InvalidArgsTest() {

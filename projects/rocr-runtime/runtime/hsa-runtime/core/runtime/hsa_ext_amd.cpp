@@ -2478,7 +2478,12 @@ hsa_status_t hsa_amd_queue_create(hsa_agent_t agent_handle,
         sdma_engine_id = static_cast<int32_t>(sp.sdma_engine_id);
       }
 
-      auto* sdma_queue = new AMD::SdmaQueue(agent, d.queue_size_bytes, d.flags, sdma_engine_id);
+      // Unlike compute queues, an SDMA queue without a caller-supplied callback
+      // is left with no handler at all. Substituting the runtime's default
+      // handler would make every SDMA hardware exception look handled and
+      // suppress the abort that reports it.
+      auto* sdma_queue = new AMD::SdmaQueue(agent, d.queue_size_bytes, d.flags, sdma_engine_id,
+                                            d.callback, d.callback_data);
       status = sdma_queue->Initialize();
       if (status != HSA_STATUS_SUCCESS) {
         sdma_queue->Destroy();

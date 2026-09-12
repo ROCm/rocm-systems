@@ -36,6 +36,14 @@ class QueueCreateTest : public TestBase {
   /// hsa_queue_t can be destroyed through the standard queue API.
   void SdmaQueueCreateDestroyTest();
 
+  /// @brief Submit a malformed SDMA packet, destroy the queue to make the
+  /// driver reset it, and verify the queue's error callback reports the
+  /// resulting hardware exception.
+  ///
+  /// @note This test deliberately hangs an SDMA engine and relies on the
+  /// driver resetting only the offending queue.
+  void SdmaQueueErrorCallbackTest();
+
   /// @brief Validate descriptor argument checks for hsa_amd_queue_create.
   void InvalidArgsTest();
 
