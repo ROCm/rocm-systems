@@ -592,17 +592,18 @@ size_t ddaTwoShotCountForRanks(int nRanks)
     return 0;
 }
 
-std::string ddaSnapshotLogs(const MPIHelpers::TestLogAssertionContext& logCtx)
+/**
+ * COLL path needles are written to NCCL_DEBUG_FILE, not the per-rank TEST INFO
+ * tee. Slice only that file: concatenating stderr and then substr(before.size())
+ * skips the COLL lines on rank 0, whose TEST INFO is larger than the NCCL delta,
+ * so ASSERT_MPI_TRUE fires before ncclCommRevoke and the incomplete AllReduce hangs.
+ */
+bool ddaNcclDebugContainsNeedleSince(const MPIHelpers::TestLogAssertionContext& logCtx,
+                                     const std::string& ncclBefore, const char* needle)
 {
-    return logCtx.readNcclDebugLog() + logCtx.readPerRankStderrLog();
-}
-
-bool ddaLogsContainNeedleSince(const MPIHelpers::TestLogAssertionContext& logCtx,
-                               const std::string& before, const char* needle)
-{
-    const std::string now = ddaSnapshotLogs(logCtx);
+    const std::string ncclNow = logCtx.readNcclDebugLog();
     const std::string delta =
-        now.size() >= before.size() ? now.substr(before.size()) : now;
+        ncclNow.size() >= ncclBefore.size() ? ncclNow.substr(ncclBefore.size()) : ncclNow;
     return delta.find(needle) != std::string::npos;
 }
 } // namespace
@@ -664,7 +665,7 @@ void RevokeDdaMPITest::runIncompleteDdaRevokeShrink(size_t count, const char* ne
     HIP_TEST_CHECK_GTEST_FAIL(zeroInitializeBuffer<float>(sendBuf, count));
     HIP_TEST_CHECK_GTEST_FAIL(zeroInitializeBuffer<float>(recvBuf, count));
 
-    const std::string beforeParent = ddaSnapshotLogs(*logCtx_);
+    const std::string ncclBefore = logCtx_->readNcclDebugLog();
     if(rank != skipRank)
     {
         ASSERT_EQ(ncclSuccess,
@@ -674,7 +675,7 @@ void RevokeDdaMPITest::runIncompleteDdaRevokeShrink(size_t count, const char* ne
     MPI_Barrier(MPI_COMM_WORLD);
 
     const bool tookExpectedDdaPath =
-        rank == skipRank || ddaLogsContainNeedleSince(*logCtx_, beforeParent, needle);
+        rank == skipRank || ddaNcclDebugContainsNeedleSince(*logCtx_, ncclBefore, needle);
     ASSERT_MPI_TRUE(tookExpectedDdaPath);
 
     ASSERT_MPI_EQ(ncclSuccess, ncclCommRevoke(parent, NCCL_REVOKE_DEFAULT));
