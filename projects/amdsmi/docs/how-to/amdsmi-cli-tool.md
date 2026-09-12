@@ -1001,7 +1001,7 @@ not supported.
 
 ```shell-session
 ~$ amd-smi fabric --help
-usage: amd-smi fabric [-h] [-t] [-i] [-g GPU [GPU ...]] [--json | --csv]
+usage: amd-smi fabric [-h] [-t] [-T] [-g GPU [GPU ...]] [--json | --csv]
                       [--file FILE] [--loglevel LEVEL]
 
 If no GPU is specified, returns information for all GPUs on the system.
@@ -1009,8 +1009,8 @@ If no fabric argument is provided, all fabric information will be displayed.
 
 Fabric arguments:
   -h, --help               show this help message and exit
-  -t, --topology           Display fabric topology data (counters per category, instance, and item)
-  -i, --info               Display fabric device configuration (BDF, bandwidth, latency, vPoD/pPoD, accelerator state)
+  -t, --topology           Display fabric device configuration (BDF, bandwidth, latency, vPoD/pPoD, accelerator state)
+  -T, --telemetry          Display fabric telemetry data (counters per category, instance, and item)
 
 Device Arguments:
   -g, --gpu GPU [GPU ...]  Select a GPU ID, BDF, or UUID from the possible choices:

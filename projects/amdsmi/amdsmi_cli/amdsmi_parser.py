@@ -3284,8 +3284,8 @@ class AMDSMIParser(argparse.ArgumentParser):
         fabric_optionals_title = "Fabric arguments"
 
         # Help text for arguments
-        topology_help = "Display fabric topology data (counters per category, instance, and item)"
-        info_help = "Display fabric device configuration (BDF, bandwidth, latency, vPoD/pPoD, accelerator state)"
+        topology_help = "Display fabric device configuration (BDF, bandwidth, latency, vPoD/pPoD, accelerator state)"
+        telemetry_help = "Display fabric telemetry data (counters per category, instance, and item)"
 
         # Create fabric subparser
         fabric_parser = subparsers.add_parser(
@@ -3295,12 +3295,31 @@ class AMDSMIParser(argparse.ArgumentParser):
         fabric_parser.formatter_class = lambda prog: AMDSMISubparserHelpFormatter(prog)
         fabric_parser.set_defaults(func=func)
 
+        # --topology changed meaning without failing to parse, so warn on explicit use.
+        # The no-flag default that turns both flags on is not a user asking for it.
+        class _WarnTopologySemanticsChange(argparse.Action):
+            def __init__(self, option_strings, dest, **kwargs):
+                super().__init__(option_strings, dest, nargs=0, **kwargs)
+
+            def __call__(self, parser, args, values, option_string=None):
+                print(
+                    "amd-smi fabric: warning: --topology now reports fabric device "
+                    "configuration; the counters it previously reported moved to --telemetry",
+                    file=sys.stderr,
+                )
+                setattr(args, self.dest, True)
+
         # Optional Args
         fabric_parser.add_argument(
-            "-t", "--topology", action="store_true", required=False, help=topology_help
+            "-t",
+            "--topology",
+            action=_WarnTopologySemanticsChange,
+            default=False,
+            required=False,
+            help=topology_help,
         )
         fabric_parser.add_argument(
-            "-i", "--info", action="store_true", required=False, help=info_help
+            "-T", "--telemetry", action="store_true", required=False, help=telemetry_help
         )
 
         # Add Universal Arguments
