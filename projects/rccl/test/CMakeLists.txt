@@ -623,6 +623,7 @@ if(BUILD_TESTS)
       ProxyTests.cpp
       PatAlgorithmTests.cpp
       RcclWrapTests.cpp
+      SymkBlockWidthTests.cpp
       SocketPollTests.cpp
       TransportTests.cpp
       TimeoutTests.cpp

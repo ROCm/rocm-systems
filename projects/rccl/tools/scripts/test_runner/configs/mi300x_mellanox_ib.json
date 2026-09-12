@@ -851,6 +851,11 @@
           "test_filter": "DdaAlltoAllThresholdTest.*:DdaAlltoAllThreshold.*"
         },
         {
+          "name": "SymkBlockWidthTest",
+          "description": "Symmetric kernel block-width selection unit tests (host-side, no GPU required)",
+          "test_filter": "SymkBlockWidthTest.*"
+        },
+        {
           "name": "DdaFabricEligibilityTest",
           "description": "Dda Fabric eligibility tests",
           "test_filter": "DdaFabricEligibilityTest.*"
@@ -3959,6 +3964,32 @@
           "timeout": 300
         }
       ]
+    },
+    "symmetric_kernel_mpi_8rank": {
+      "extends": "default",
+      "is_gtest": true,
+      "binary": "rccl-UnitTestsMPI",
+      "num_ranks": 8,
+      "num_nodes": 1,
+      "num_gpus": 8,
+      "timeout": 300,
+      "description": "Symmetric ReduceScatter and AllReduce partitioning correctness on 8 co-located ranks. Requires NCCL_CUMEM_ENABLE=1 for symmetric window registration.",
+      "env_variables": {
+        "NCCL_CUMEM_ENABLE": "1",
+        "HSA_NO_SCRATCH_RECLAIM": "1"
+      },
+      "tests": [
+        {
+          "name": "Symk_CountSweep",
+          "description": "ReduceScatter and AllReduce across LL and LD sizes, including partial final chunk waves",
+          "test_filter": "SymmetricKernelCorruptionTest.CountSweep_PartitioningAndSlots"
+        },
+        {
+          "name": "Symk_MisalignedPacks",
+          "description": "ReduceScatter and AllReduce with a 4-byte but not 16-byte aligned relative buffer offset",
+          "test_filter": "SymmetricKernelCorruptionTest.MisalignedBuffers_FourBytePackTier"
+        }
+      ]
     }
   },
   "test_suites": [
@@ -4638,6 +4669,12 @@
       "name": "Device API MPI - ReduceSumCopy Different Teams [5.1e]",
       "description": "ncclLsaReduceSumCopy with different LSA sub-teams (full LSA src, innerFactor dst) on 4 co-located ranks, single node (NCCL_CUMEM_ENABLE=1)",
       "config": "device_api_mpi_different_teams",
+      "enabled": true
+    },
+    {
+      "name": "Symmetric Kernels (8-rank)",
+      "description": "Symmetric ReduceScatter and AllReduce partitioning and buffer-alignment correctness on 8 co-located ranks (NCCL_CUMEM_ENABLE=1)",
+      "config": "symmetric_kernel_mpi_8rank",
       "enabled": true
     },
     {
