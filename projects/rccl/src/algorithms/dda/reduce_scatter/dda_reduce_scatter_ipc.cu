@@ -13,6 +13,7 @@
 #include "debug.h"
 #include "algorithms/dda/ipc/ipc_gpu_barrier.h"
 #include "algorithms/dda/dda_init_detail.h"
+#include "algorithms/dda/all_reduce/dda_all_reduce.h"
 
 #include <cuda_runtime.h>
 
@@ -27,9 +28,9 @@ using nccl_dda_detail::DdaIpcBarrierState;
 using nccl_dda_detail::ddaMaxNBlocksForScratch;
 using nccl_dda_detail::kDdaNranks;
 
-template <typename T>
-static ncclResult_t ncclReduceScatterDdaIpcTyped(const void* sendbuff, void* recvbuff, size_t recvcount, ncclComm* comm,
-                                                 cudaStream_t stream) {
+template <typename T, int NRANKS>
+static ncclResult_t ncclReduceScatterDdaIpcLaunch(const void* sendbuff, void* recvbuff, size_t recvcount, ncclComm* comm,
+                                                  cudaStream_t stream) {
   if (comm->ddaIpcMemHandler == nullptr || comm->ddaScratch == nullptr || comm->ddaPeerPtrsDev == nullptr ||
       comm->ddaIpcBarrierState == nullptr) {
     return ncclInvalidUsage;
@@ -55,11 +56,27 @@ static ncclResult_t ncclReduceScatterDdaIpcTyped(const void* sendbuff, void* rec
   T** d_ipcbuffs = reinterpret_cast<T**>(peerPtrsDev);
 
   CUDACHECK(cudaMemcpyAsync(comm->ddaScratch, sendbuff, totalCount * sizeof(T), cudaMemcpyDeviceToDevice, stream));
-  dda::common::ddaReduceScatterIpc<T, kDdaNranks, false><<<grid, block, 0, stream>>>(
+  dda::common::ddaReduceScatterIpc<T, NRANKS, false><<<grid, block, 0, stream>>>(
     d_ipcbuffs, static_cast<T*>(recvbuff), recvcount, static_cast<const T*>(sendbuff), comm->rank, barrierHost);
   CUDACHECK(cudaGetLastError());
 
   return ncclSuccess;
+}
+
+// Dispatch to the template instantiation for the active participant count (2..kDdaNranks).
+template <typename T>
+static ncclResult_t ncclReduceScatterDdaIpcTyped(const void* sendbuff, void* recvbuff, size_t recvcount, ncclComm* comm,
+                                                 cudaStream_t stream) {
+  switch (comm->nRanks) {
+  case 8: return ncclReduceScatterDdaIpcLaunch<T, 8>(sendbuff, recvbuff, recvcount, comm, stream);
+  case 7: return ncclReduceScatterDdaIpcLaunch<T, 7>(sendbuff, recvbuff, recvcount, comm, stream);
+  case 6: return ncclReduceScatterDdaIpcLaunch<T, 6>(sendbuff, recvbuff, recvcount, comm, stream);
+  case 5: return ncclReduceScatterDdaIpcLaunch<T, 5>(sendbuff, recvbuff, recvcount, comm, stream);
+  case 4: return ncclReduceScatterDdaIpcLaunch<T, 4>(sendbuff, recvbuff, recvcount, comm, stream);
+  case 3: return ncclReduceScatterDdaIpcLaunch<T, 3>(sendbuff, recvbuff, recvcount, comm, stream);
+  case 2: return ncclReduceScatterDdaIpcLaunch<T, 2>(sendbuff, recvbuff, recvcount, comm, stream);
+  default: WARN("DDA IPC reduce-scatter: unsupported nRanks %d", comm->nRanks); return ncclInvalidUsage;
+  }
 }
 
 } // namespace
@@ -79,7 +96,7 @@ bool ncclReduceScatterDdaIpcEligible(ncclComm* comm, const void* sendbuff, void*
   if (comm->nNodes != 1) {
     return false;
   }
-  if (comm->nRanks != nccl_dda_detail::kDdaNranks) {
+  if (!ncclDdaNranksSupported(comm->nRanks)) {
     return false;
   }
   if (op != ncclSum) {
