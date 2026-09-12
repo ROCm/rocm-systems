@@ -1,4 +1,4 @@
-# Formatting checks for emulation/rocjitsu/.
+# Formatting checks for the emulation/ subtrees.
 name: "rocjitsu-formatting"
 
 on:
@@ -8,7 +8,12 @@ on:
     # `pre-commit run --all-files` locally to catch issues outside this
     # scope. We should incrementally add more paths here as projects
     # adopt pre-commit.
+    # This job is named `pre-commit`, which is the one entry in
+    # `checks.required_check_runs` in tools/systems_pr_bot/policy.yml, so a
+    # path that is missing here leaves therock-pr-bot waiting out its timeout
+    # on a check run that is never created.
     paths:
+      - "emulation/mirage/**"
       - "emulation/rocjitsu/**"
       - ".github/workflows/rocjitsu-*.yml"
       - ".pre-commit-config.yaml"
@@ -31,6 +36,7 @@ jobs:
           # which files pre-commit can check. To add a new project to this
           # CI job, add its path here. That's the only change needed.
           sparse-checkout: |
+            emulation/mirage
             emulation/rocjitsu
             .github
 

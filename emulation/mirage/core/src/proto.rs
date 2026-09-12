@@ -140,6 +140,13 @@ pub enum Response {
 pub struct SessionDescription {
     /// The session this describes.
     pub session: SessionId,
+    /// The ISA the session's emulator presents to ROCr, when it presents
+    /// an emulated GPU rather than retargeting onto host hardware.
+    ///
+    /// Optional on the wire so a newer `mirage exec` can still attach to
+    /// an older run process.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub emulated_isa: Option<String>,
     /// Number of nodes in the session's topology.
     pub node_count: u32,
     /// Processes per node in the job this session was created to run,

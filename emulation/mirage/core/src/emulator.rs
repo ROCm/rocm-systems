@@ -232,10 +232,11 @@ pub trait EmulatorBackend: Sync + Send + std::fmt::Debug {
     fn health(&self, ctx: &SessionContext) -> SessionHealth;
 
     /// Compute the env vars / `LD_PRELOAD` / files to inject into a
-    /// workload run under this emulator. Returns an error when the
-    /// emulator is selected but its runtime library or assets are
-    /// missing, so a misconfigured session fails loudly instead of
-    /// silently running unemulated.
+    /// workload run under this emulator, plus any emulated ISA metadata
+    /// derived from the exact configuration materialised here. Returns
+    /// an error when the emulator is selected but its runtime library or
+    /// assets are missing, so a misconfigured session fails loudly
+    /// instead of silently running unemulated.
     ///
     /// `ctx` carries the session's resolved profile and a scratch
     /// directory the backend may materialise runtime assets in.

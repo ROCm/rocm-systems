@@ -272,6 +272,7 @@ impl RocjitsuDbt {
             ld_preload: None,
             files: Default::default(),
             env,
+            emulated_isa: None,
             mounts,
             libraries: Default::default(),
             // DBT runs the translated code on the host's physical GPU, so
