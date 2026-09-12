@@ -26,6 +26,7 @@
 #include "ce_coll.h"
 #include "alltoallv_meta.h"
 #include "strongstream.h"
+#include "mem_manager.h"
 
 #ifdef ENABLE_ROCSHMEM
 #include <rocshmem/rocshmem.hpp>
@@ -256,6 +257,24 @@ bool rcclAllReduceShouldTakeDdaPath(const ncclComm* comm, size_t count, ncclData
   return result;
 }
 
+// Addon backends (DDA / CE 2-shot / GIN-SDMA) return from the collective impl
+// without ncclEnqueueCheck, which is where NCCL_CHECK_MODE pointer checks and the
+// suspend-while-collective guard live. Divert those calls through enqueue so the
+// guards still fire; debug-mode collectives then use the native/CE path.
+bool rcclCollectiveMustUseEnqueuePath(ncclComm* comm) {
+  if (comm == nullptr) return true;
+  if (comm->checkMode != ncclCheckModeDefault) return true;
+#if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
+  if (comm->memManager) {
+    const bool commIsSuspended = ncclIntruQueueEmpty(&comm->resumeTaskQueue) &&
+                                  (!ncclIntruQueueEmpty(&comm->suspendTaskQueue) ||
+                                   __atomic_load_n(&comm->memManager->released, __ATOMIC_ACQUIRE));
+    if (commIsSuspended) return true;
+  }
+#endif
+  return false;
+}
+
 bool rcclAlltoAllShouldTakeDdaPath(const ncclComm* comm, size_t totalBytes, bool ceAlltoAllAllowed) {
   // AlltoAll has no symmetric kernel, so DDA must yield here or registered-window
   // CE never dispatches. Full contract is on the declaration in rccl_common.h.
@@ -417,6 +436,10 @@ ncclResult_t ncclAllGather_impl(const void* sendbuff, void* recvbuff, size_t sen
     INFO(NCCL_COLL, "AllGather impl selected: algo %s", an ? an : "?");
   }
 
+  if (rcclCollectiveMustUseEnqueuePath(comm)) {
+    return ncclEnqueueCheck(&info);
+  }
+
   switch (decision.algo) {
   case RCCL_DDA_FABRIC_LL:
     INFO(NCCL_COLL,
@@ -463,24 +486,6 @@ ncclResult_t ncclAllGather_impl(const void* sendbuff, void* recvbuff, size_t sen
 
 RCCL_PARAM(AlltoAllPivotEnable, "ALL_TO_ALL_PIVOT_ENABLE", 0);
 
-// Window/graph prologue, then ncclCeAlltoAllEligible. CTA_POLICY_ZERO is also
-// checked by the caller so the default AlltoAll path skips this lookup.
-static ncclResult_t alltoAllRegisteredCeAllowed(ncclComm* comm, const void* sendbuff, void* recvbuff,
-                                                ncclDataType_t datatype, cudaStream_t stream, bool* allowed) {
-  *allowed = false;
-  struct ncclDevrWindow* sendWin = nullptr;
-  struct ncclDevrWindow* recvWin = nullptr;
-  NCCLCHECK(ncclDevrFindWindow(comm, sendbuff, &sendWin));
-  NCCLCHECK(ncclDevrFindWindow(comm, recvbuff, &recvWin));
-  const bool hasSysmemSegment = ncclDevrWindowHasSysmemSegment(sendWin) || ncclDevrWindowHasSysmemSegment(recvWin);
-  ncclSymRegType_t winRegType;
-  NCCLCHECK(ncclGetSymRegType(sendWin, recvWin, &winRegType));
-  struct ncclCudaGraph ceGraph;
-  NCCLCHECK(ncclCudaGetCapturingGraph(&ceGraph, stream, comm->config.graphUsageMode));
-  *allowed = ncclCeAlltoAllEligible(comm, datatype, winRegType, hasSysmemSegment, ncclCudaGraphValid(ceGraph));
-  return ncclSuccess;
-}
-
 NCCL_API(ncclResult_t, ncclAlltoAll, const void* sendbuff, void* recvbuff, size_t count, ncclDataType_t datatype,
          ncclComm* comm, cudaStream_t stream);
 ncclResult_t ncclAlltoAll_impl(const void* sendbuff, void* recvbuff, size_t count, ncclDataType_t datatype,
@@ -504,19 +509,29 @@ ncclResult_t ncclAlltoAll_impl(const void* sendbuff, void* recvbuff, size_t coun
     INFO(NCCL_COLL, "AlltoAll impl selected: algo %s", an ? an : "?");
   }
 
+  struct ncclInfo info = {
+    ncclFuncAlltoAll, "AlltoAll", sendbuff, recvbuff, count, datatype, ncclSum, 0, comm, stream,
+    ALLTOALL_CHUNKSTEPS, ALLTOALL_SLICESTEPS
+  };
+  info.decision = decision;
+  info.decisionValid = true;
+  if (rcclCollectiveMustUseEnqueuePath(comm)) {
+    return ncclEnqueueCheck(&info);
+  }
+
   switch (decision.algo) {
     case RCCL_A2A_PIVOT: {
-      struct ncclInfo info = {ncclFuncAlltoAllPivot, "AlltoAllPivot",
+      struct ncclInfo pivotInfo = {ncclFuncAlltoAllPivot, "AlltoAllPivot",
                               sendbuff, recvbuff, count, datatype, ncclSum, 0, comm, stream,
                               ALLTOALL_PIVOT_CHUNKSTEPS, ALLTOALL_PIVOT_SLICESTEPS, nullptr};
-      return ncclEnqueueCheck(&info);
+      return ncclEnqueueCheck(&pivotInfo);
     }
 #ifdef ENABLE_ROCSHMEM
     case RCCL_A2A_GDA: {
-      struct ncclInfo info = {ncclFuncAlltoAllGda, "AlltoAllGda",
+      struct ncclInfo gdaInfo = {ncclFuncAlltoAllGda, "AlltoAllGda",
                               sendbuff, recvbuff, count, datatype, ncclSum, 0, comm, stream,
                               ALLTOALL_PIVOT_CHUNKSTEPS, ALLTOALL_PIVOT_SLICESTEPS, nullptr};
-      return ncclEnqueueCheck(&info);
+      return ncclEnqueueCheck(&gdaInfo);
     }
 #endif
 #if defined(ENABLE_ROCSHMEM_GIN)
@@ -543,12 +558,6 @@ ncclResult_t ncclAlltoAll_impl(const void* sendbuff, void* recvbuff, size_t coun
 
   // CE and Direct (per-peer Send/Recv) share this enqueue; taskAppend honors
   // info.decision instead of re-selecting.
-  struct ncclInfo info = {
-    ncclFuncAlltoAll, "AlltoAll", sendbuff, recvbuff, count, datatype, ncclSum, 0, comm, stream,
-    ALLTOALL_CHUNKSTEPS, ALLTOALL_SLICESTEPS
-  };
-  info.decision = decision;
-  info.decisionValid = true;
   return ncclEnqueueCheck(&info);
 }
 
@@ -740,6 +749,10 @@ ncclResult_t ncclAllReduce_impl(const void* sendbuff, void* recvbuff, size_t cou
     const char* an = nullptr;
     rcclGetAlgoName(decision.algo, &an);
     INFO(NCCL_COLL, "AllReduce impl selected: algo %s", an ? an : "?");
+  }
+
+  if (rcclCollectiveMustUseEnqueuePath(comm)) {
+    return ncclEnqueueCheck(&info);
   }
 
   switch (decision.algo) {
@@ -1145,6 +1158,10 @@ ncclResult_t ncclReduceScatter_impl(const void* sendbuff, void* recvbuff, size_t
     const char* an = nullptr;
     rcclGetAlgoName(decision.algo, &an);
     INFO(NCCL_COLL, "ReduceScatter impl selected: algo %s", an ? an : "?");
+  }
+
+  if (rcclCollectiveMustUseEnqueuePath(comm)) {
+    return ncclEnqueueCheck(&info);
   }
 
   switch (decision.algo) {

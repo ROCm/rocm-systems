@@ -792,6 +792,13 @@ protected:
             && ncclCuMemRuntimeSupported();
     }
 
+    void skipIfGinUnsupported()
+    {
+        ncclComm_t comm = getActiveCommunicator();
+        if (comm != nullptr && comm->globalGinSupport == NCCL_GIN_CONNECTION_NONE)
+            GTEST_SKIP() << "GIN not supported on this communicator (plugin missing or NET backend has no GIN)";
+    }
+
     static std::array<int, 2> collectiveBoolSummary(bool value)
     {
         int minimum = value ? 1 : 0;
@@ -955,6 +962,7 @@ TEST_F(GinTrafficClassMPITest, DeviceHostPrecedence)
 
     configured_traffic_class_ = kHostCommTrafficClass;
     ASSERT_MPI_EQ(ncclSuccess, createTestCommunicator());
+    skipIfGinUnsupported();
 
     GinTrafficClassCapture device =
         captureGinQpTrafficClass(kDeviceCommTrafficClass, log_ctx);
@@ -1025,6 +1033,7 @@ TEST_F(GinTrafficClassMPITest, ExplicitIbEnvironmentOverrides)
 
     configured_traffic_class_ = kHostCommTrafficClass;
     ASSERT_MPI_EQ(ncclSuccess, createTestCommunicator());
+    skipIfGinUnsupported();
     GinTrafficClassCapture capture =
         captureGinQpTrafficClass(kDeviceCommTrafficClass, log_ctx);
     ASSERT_MPI_EQ(ncclSuccess, capture.create_result);

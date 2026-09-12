@@ -23,6 +23,7 @@
 #include "enqueue.h"
 #include "graph.h"
 #include "graph/topo.h"
+#include "mem_manager.h"
 #include "net.h"
 #include "plugin/nccl_tuner.h"
 #include "rccl_common.h"
@@ -2627,6 +2628,19 @@ TEST(RcclAllReduceDdaDecision, Gfx1250_CeEligible_StillTakesDda)
                                                /*symEligible=*/false, /*ceAllReduceAllowed=*/true, /*query=*/false));
 }
 
+// gfx1250 still requires !symEligible: mixed-registration hangs are handled
+// by agreeing across ranks in the symmetric path, not by taking DDA when
+// one rank's windows look eligible. 256 KiB matches CHECK_COUNT in
+// SymmetricAbortCheckModeMPITests.
+TEST(RcclAllReduceDdaDecision, Gfx1250_SymEligible_StillTakesDda)
+{
+    ncclComm comm{};
+    InitDdaDecisionComm(comm, "gfx1250", 2, 1, /*symmetricSupport=*/true);
+    size_t   count = CountForBytes(256ull * 1024, ncclFloat32);
+    EXPECT_FALSE(rcclAllReduceShouldTakeDdaPath(&comm, count, ncclFloat32,
+                                                /*symEligible=*/true, /*ceAllReduceAllowed=*/false, /*query=*/false));
+}
+
 // An arch DDA never runs on: rcclDdaEnabled returns false, so no DDA on any size.
 TEST(RcclAllReduceDdaDecision, UnsupportedArch_NoDda)
 {
@@ -2705,6 +2719,44 @@ TEST(RcclAllReduceDdaDecision, SymEligible_YieldsToSymmetricKernel)
     size_t   count = CountForBytes(2ull * 1024 * 1024, ncclFloat32);
     EXPECT_FALSE(rcclAllReduceShouldTakeDdaPath(comm.get(), count, ncclFloat32,
                                                 /*symEligible=*/true, /*ceAllReduceAllowed=*/true, /*query=*/false));
+}
+
+// ---------------------------------------------------------------------------
+// rcclCollectiveMustUseEnqueuePath: DDA/CE/GIN early-returns skip ncclEnqueueCheck.
+// NCCL_CHECK_MODE and a suspended communicator must divert to enqueue so pointer
+// checks and the suspend guard still run. Named Rcclwrap so fixtures-debug CI
+// selects them (Rcclwrap.* is the listed prefix for this file).
+// ---------------------------------------------------------------------------
+
+TEST(Rcclwrap, EnqueueGuards_DefaultCheckModeAllowsAddonEarlyReturn)
+{
+    ncclComm comm{};
+    comm.checkMode = ncclCheckModeDefault;
+    EXPECT_FALSE(rcclCollectiveMustUseEnqueuePath(&comm));
+}
+
+TEST(Rcclwrap, EnqueueGuards_DebugLocalForcesEnqueue)
+{
+    ncclComm comm{};
+    comm.checkMode = ncclCheckModeDebugLocal;
+    EXPECT_TRUE(rcclCollectiveMustUseEnqueuePath(&comm));
+}
+
+TEST(Rcclwrap, EnqueueGuards_DebugGlobalForcesEnqueue)
+{
+    ncclComm comm{};
+    comm.checkMode = ncclCheckModeDebugGlobal;
+    EXPECT_TRUE(rcclCollectiveMustUseEnqueuePath(&comm));
+}
+
+TEST(Rcclwrap, EnqueueGuards_SuspendedForcesEnqueue)
+{
+    ncclComm comm{};
+    comm.checkMode = ncclCheckModeDefault;
+    ncclMemManager mgr{};
+    comm.memManager = &mgr;
+    __atomic_store_n(&mgr.released, 1, __ATOMIC_RELAXED);
+    EXPECT_TRUE(rcclCollectiveMustUseEnqueuePath(&comm));
 }
 
 // ---------------------------------------------------------------------------
