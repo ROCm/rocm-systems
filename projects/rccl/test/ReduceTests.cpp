@@ -4,6 +4,7 @@
  * See LICENSE.txt for license information
  ************************************************************************/
 #include "TestBed.hpp"
+#include "ScopedEnvVar.hpp"
 #include "StandaloneUtils.hpp"
 
 namespace RcclUnitTesting
@@ -130,6 +131,9 @@ namespace RcclUnitTesting
       GTEST_SKIP() << "Skipping SingleProcMemReg: HIP runtime version (" 
                    << hipRuntimeVer << ") is lower than 71260540";
     }
+    ScopedEnvVar pool("UT_COMM_POOL", "0");
+    ScopedEnvVar singleProcMemReg("NCCL_SINGLE_PROC_MEM_REG_ENABLE", "1");
+    ScopedEnvVar cuMem("NCCL_CUMEM_ENABLE", "1");
     TestBed testBed;
 
     // Configuration
@@ -142,13 +146,9 @@ namespace RcclUnitTesting
     std::vector<bool>           const managedMemList  = {false};
     std::vector<bool>           const useHipGraphList = {true,false};
 
-    setenv("NCCL_SINGLE_PROC_MEM_REG_ENABLE", "1", 1);
-    setenv("NCCL_CUMEM_ENABLE","1",1);
     testBed.RunSimpleSweep(funcTypes, dataTypes, redOps, roots, numElements,
                            inPlaceList, managedMemList, useHipGraphList,true,MEM_ALLOC_SYMMETRIC_WIN);
     
     testBed.Finalize();
-    unsetenv("NCCL_SINGLE_PROC_MEM_REG_ENABLE");
-    unsetenv("NCCL_CUMEM_ENABLE");
   }
 }
