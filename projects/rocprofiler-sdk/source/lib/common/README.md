@@ -181,8 +181,6 @@ g++ test_old_abi.o test_new_abi.o -o cross_abi_test
 
 The current implementation achieves ABI independence by avoiding `std::regex` entirely, relying instead on minimal standard library components and custom string processing that remains stable across ABI versions.
 
-## SHA-256 Standalone Compilation
+## SHA-256
 
-`sha256.hpp`/`sha256.cpp` are written so that other repositories can vendor a copy of the implementation without pulling in any rocprofiler-sdk internals (e.g. the CUID library does this to avoid third party dependencies).
-
-`sha256.cpp` normally includes `lib/common/logging.hpp` and routes its diagnostic through `ROCP_CI_LOG_IF`. A standalone consumer, built outside this tree, won't have that header on its include path, so it must define `ROCPROFILER_SDK_SHA256_STANDALONE` for its build of `sha256.cpp`; this swaps in a no-op stub for `ROCP_CI_LOG_IF` instead. In-tree builds of rocprofiler-sdk must leave this macro undefined.
+`sha256.hpp` is a shim over `shared/sha256`, which `projects/cuid` compiles too, so there is one implementation rather than two kept in step by hand.

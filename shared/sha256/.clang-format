@@ -1,0 +1,6 @@
+---
+# LLVM style. Pinned explicitly: there is no repo-root .clang-format, so
+# -style=file would otherwise fall back to the built-in default by accident.
+BasedOnStyle: LLVM
+Language: Cpp
+Standard: c++17
