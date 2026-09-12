@@ -22,12 +22,12 @@
  * IN THE SOFTWARE.
  *****************************************************************************/
 
+#ifndef LIBRARY_SRC_LOG_HPP_
+#define LIBRARY_SRC_LOG_HPP_
+
 #include <cstdlib>
 
 #include <hip/hip_runtime.h>
-
-#ifndef LIBRARY_SRC_LOG_HPP_
-#define LIBRARY_SRC_LOG_HPP_
 
 namespace rocshmem {
   // __attribute__((error(...))) causes a compile error at the call site

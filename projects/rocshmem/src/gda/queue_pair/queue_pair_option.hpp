@@ -38,6 +38,8 @@
 
 #include <hip/hip_runtime.h>
 
+#include "queue_pair_common.hpp"
+
 namespace rocshmem {
 
 namespace QueuePairOption {

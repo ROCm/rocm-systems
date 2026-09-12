@@ -29,9 +29,6 @@
 
 #include "gda/endian.hpp"
 
-#include "queue_pair_interface.hpp"
-#include "queue_pair_shmem.hpp"
-
 #include "queue_pair_common.hpp"
 #include "queue_pair_interface.hpp"
 #include "queue_pair_option.hpp"

@@ -30,7 +30,6 @@
 #include "log.hpp"
 #include "util.hpp"
 
-//#include "containers/free_list_impl.hpp"
 #include "gda/endian.hpp"
 #include "gda/ionic/provider_gda_ionic.hpp"
 #include "gda/queue_pair/queue_pair_device.hpp"
