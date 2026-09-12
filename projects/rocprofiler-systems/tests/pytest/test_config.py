@@ -69,6 +69,36 @@ VALID_BOOLEAN_VALUES = [
     pytest.param("Y", id="Y"),
 ]
 
+CONFIG_READ_ERROR_REGEX = r"Exception reading|Error reading configuration"
+CONFIG_SIGABRT_REGEX = r"terminate called"
+
+BAD_XML_CASES = [
+    pytest.param(
+        "malformed.xml",
+        "<rocprofiler-systems><settings><ROCPROFSYS_TRACE>false</settings></rocprofiler-systems>",
+        [CONFIG_READ_ERROR_REGEX],
+        id="malformed",
+    ),
+    pytest.param(
+        "wrong_root.xml",
+        "<wrong-root><settings/></wrong-root>",
+        [CONFIG_READ_ERROR_REGEX],
+        id="wrong-root",
+    ),
+    pytest.param(
+        "empty.xml",
+        "",
+        [CONFIG_READ_ERROR_REGEX],
+        id="empty",
+    ),
+    pytest.param(
+        "random.xml",
+        "<not-timemory-xml/>",
+        [CONFIG_READ_ERROR_REGEX],
+        id="random",
+    ),
+]
+
 VALID_NON_BOOLEAN_TYPED_VALUE_CASES = [
     pytest.param(
         {"ROCPROFSYS_MODE": "trace"},
@@ -98,6 +128,19 @@ VALID_NON_BOOLEAN_TYPED_VALUE_CASES = [
 # =============================================================================
 
 
+def _write_text(test_output_dir: Path, name: str, content: str) -> Path:
+    path = test_output_dir / name
+    path.write_text(content)
+    return path
+
+
+def _true_cmd() -> str:
+    cmd = shutil.which("true")
+    if cmd is None:
+        pytest.skip("true not found")
+    return cmd
+
+
 # `ls` cannot be used as the config-invalid target as it has no instrumentable
 # functions in the executable itself, so the instrumented process never
 # initializes the runtime far enough to validate the config and abort
@@ -117,6 +160,24 @@ def config_target(rocprof_config) -> str:
 # =============================================================================
 # Configuration file tests
 # =============================================================================
+
+
+def _run_invalid_config_via_c_flag(
+    test: RocprofsysTest, config_target: str, config_file: Path, pass_regex: list[str]
+) -> None:
+    result = test.run_test(
+        "sys_run",
+        target=config_target,
+        env=MINIMAL_RUNTIME_ENV,
+        sys_run_args=["-c", str(config_file)],
+        fail_on_pass=True,
+    )
+    test.assert_regex(
+        result,
+        pass_regex=pass_regex,
+        fail_regex=[CONFIG_SIGABRT_REGEX],
+        use_abort_fail_regex=False,
+    )
 
 
 class TestConfig(RocprofsysTest):
@@ -317,4 +378,114 @@ class TestConfig(RocprofsysTest):
                 r"ROCPROFSYS_TRACE\s+=\s+(true|false)",
                 r"ROCPROFSYS_PERFETTO_\w+\s+=",
             ],
+        )
+
+
+@pytest.mark.sys_run
+@pytest.mark.timeout(120)
+@pytest.mark.class_name("config-xml")
+class TestConfigXml(RocprofsysTest):
+    """Load and reject XML configs through rocprof-sys-run -c."""
+
+    def _generate_avail_xml(
+        self,
+        test_output_dir: Path,
+        *,
+        basename: str = "rocprof-sys-test",
+        env: dict[str, str] | None = None,
+    ) -> Path:
+        config_base = test_output_dir / basename
+        self.run_test(
+            "baseline",
+            target="rocprof-sys-avail",
+            run_args=["-G", str(config_base) + ".cfg", "-F", "xml", "--force"],
+            env=env,
+            fail_on_not_found=True,
+        )
+        return test_output_dir / f"{basename}.xml"
+
+    @pytest.mark.parametrize(
+        "basename, avail_env",
+        [
+            pytest.param("rocprof-sys-test", None, id="avail-default"),
+            pytest.param(
+                "rocprof-sys-tweak",
+                {
+                    "ROCPROFSYS_TRACE": "OFF",
+                    "ROCPROFSYS_PROFILE": "ON",
+                    "ROCPROFSYS_USE_SAMPLING": "OFF",
+                },
+                id="avail-env-tweak",
+            ),
+        ],
+    )
+    def test_good_via_c_flag(self, config_target, test_output_dir, basename, avail_env):
+        xml_path = self._generate_avail_xml(
+            test_output_dir, basename=basename, env=avail_env
+        )
+        result = self.run_test(
+            "sys_run",
+            target=config_target,
+            env=MINIMAL_RUNTIME_ENV,
+            sys_run_args=["-c", str(xml_path), "-v", "2"],
+        )
+        self.assert_regex(
+            result,
+            pass_regex=[rf"ROCPROFSYS_CONFIG_FILE\s*=\s*.*{xml_path.name}"],
+        )
+
+    @pytest.mark.parametrize("filename, content, pass_regex", BAD_XML_CASES)
+    def test_invalid_via_c_flag(
+        self, config_target, test_output_dir, filename, content, pass_regex
+    ):
+        xml_path = _write_text(test_output_dir, filename, content)
+        _run_invalid_config_via_c_flag(self, config_target, xml_path, pass_regex)
+
+    def test_missing_via_c_flag(self, test_output_dir, config_target):
+        missing_xml = test_output_dir / "missing.xml"
+        _run_invalid_config_via_c_flag(
+            self, config_target, missing_xml, [CONFIG_READ_ERROR_REGEX]
+        )
+
+
+@pytest.mark.sys_run
+@pytest.mark.timeout(120)
+@pytest.mark.class_name("export-config-reload")
+class TestExportConfigReload(RocprofsysTest):
+    """Reload --export-config JSON with -c (must fail) vs --preset (must load)."""
+
+    def _export_balanced(self, test_output_dir: Path) -> Path:
+        exported = test_output_dir / "cfg.json"
+        self.run_test(
+            "baseline",
+            target="rocprof-sys-run",
+            run_args=[
+                f"--export-config={exported}",
+                "--preset=balanced",
+                "--",
+                _true_cmd(),
+            ],
+            fail_on_not_found=True,
+        )
+        return exported
+
+    def test_rejected_via_c_flag(self, config_target, test_output_dir):
+        exported = self._export_balanced(test_output_dir)
+        _run_invalid_config_via_c_flag(
+            self,
+            config_target,
+            exported,
+            [
+                rf"Exception reading.*{exported.name}"
+                r"|missing the expected '.*' root object",
+            ],
+        )
+
+    def test_loaded_via_preset_flag(self, config_target, test_output_dir):
+        exported = self._export_balanced(test_output_dir)
+        self.run_test(
+            "sys_run",
+            target=config_target,
+            env=MINIMAL_RUNTIME_ENV,
+            sys_run_args=[f"--preset={exported}"],
         )
