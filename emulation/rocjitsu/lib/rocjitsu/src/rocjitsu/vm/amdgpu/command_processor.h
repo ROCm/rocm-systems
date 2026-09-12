@@ -85,8 +85,9 @@ struct HwQueue {
   bool faulted = false;
   bool debug_suspended = false;
   bool runtime_suspended = false;
-  /// A command-processor pass observed this queue while its debugger gate was closed.
-  /// Cleared on resume after scheduling one pass to process the deferred work.
+  /// Queue work was deferred while either the runtime or debugger gate was
+  /// closed. SDMA work is bounded by the published doorbell.
+  /// Cleared after both gates reopen and a pass is scheduled for the deferred work.
   bool debug_work_deferred = false;
   uint64_t queue_desc_va = 0;
   uint64_t exception_status_va = 0;
