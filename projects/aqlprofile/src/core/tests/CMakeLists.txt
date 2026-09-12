@@ -46,6 +46,7 @@ gtest_discover_tests(
 add_executable(aqlprofile-test)
 SET(AQLPROFILE_TEST_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/aql_profile_tests.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/error_string_util_test.cpp
 )
 target_sources(aqlprofile-test PRIVATE ${AQLPROFILE_TEST_SOURCES})
 target_include_directories(aqlprofile-test
