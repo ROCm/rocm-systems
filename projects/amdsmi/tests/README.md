@@ -244,6 +244,43 @@ sudo ./amdsmitst --gtest_filter="*Functional*.*-${BLACKLIST_ALL_ASICS}" -v 1 > _
 sudo ./amdsmitst --gtest_filter="*Integration*.*-${BLACKLIST_ALL_ASICS}" -v 1 > _c_intg_test.log 2> _c_intg_test_err.log
 ```
 
+## Running by CTest category
+
+The `amdsmitst` tests are grouped into the quality categories defined in
+`amd_smi_test/test_categories.yaml` (`quick`/`standard`/`comprehensive`/`full`)
+and can be run through CTest labels.
+
+> **Keep in sync:** the per-ASIC exclusions are maintained by hand in **both**
+> `amd_smi_test/test_categories.yaml` (this ctest label path) and
+> `amd_smi_test/amdsmitst.exclude` (the `detect_asic_filter.sh` runtime path).
+> Update both together until they are consolidated into a single source.
+
+Each category is generated once per GPU arch that has a known-issue list, so a
+bare `-L <category>` selects **every** per-arch suite (7 today) — 6 of which
+skip the wrong ASIC's tests and go red. Always narrow to your GPU with a second
+`-L ^ex_gpu_<arch>$` label, which is exactly what CI does:
+
+```
+# Pick the suite for your GPU (this is what TheRock CI does):
+ctest --test-dir <install>/share/amd_smi/tests/ctest -L '^standard$' -L '^ex_gpu_gfx90a$'
+
+# Discover which ex_gpu_* labels exist for your build:
+ctest --test-dir <install>/share/amd_smi/tests/ctest --print-labels
+```
+
+Installed tree (how TheRock CI runs it):
+```
+ctest --test-dir <install>/share/amd_smi/tests/ctest -L '^<category>$' -L '^ex_gpu_<arch>$'
+```
+
+Local dev build (the amdsmi top-level `enable_testing()` is not set, so `ctest`
+from the build root won't discover these — run from the test dir):
+```
+cd <build>/projects/amdsmi/tests/amd_smi_test
+ctest -L '^quick$' -L '^ex_gpu_gfx90a$'
+# or: ctest --test-dir <build>/projects/amdsmi/tests/amd_smi_test -L '^quick$' -L '^ex_gpu_gfx90a$'
+```
+
 ## How to Run Summary Report
 ### Command Line Options
 
