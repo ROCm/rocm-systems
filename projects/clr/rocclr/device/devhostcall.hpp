@@ -80,6 +80,10 @@ bool enableHostcalls(const amd::Device& dev, void* buffer, uint32_t numPackets);
 #endif  // USE_NEW_HOSTCALL_IMPL
 void disableHostcalls(void* buffer);
 
+bool enableRpc(const amd::Device& dev, void* buffer, uint32_t num_ports);
+void flushRpc(void* buffer);
+void disableRpc(void* buffer);
+
 enum SignalValue { SIGNAL_DONE = 0, SIGNAL_INIT = 1 };
 
 /** \brief Packet payload

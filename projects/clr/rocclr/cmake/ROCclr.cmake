@@ -48,6 +48,7 @@ target_sources(rocclr PRIVATE
   ${ROCCLR_SRC_DIR}/device/devhcmessages.cpp
   ${ROCCLR_SRC_DIR}/device/devhcprintf.cpp
   ${ROCCLR_SRC_DIR}/device/devhostcall.cpp
+  ${ROCCLR_SRC_DIR}/device/devrpc.cpp
   ${ROCCLR_SRC_DIR}/device/device.cpp
   ${ROCCLR_SRC_DIR}/device/devkernel.cpp
   ${ROCCLR_SRC_DIR}/device/devprogram.cpp
@@ -127,6 +128,13 @@ target_include_directories(rocclr PUBLIC
   ${ROCCLR_SRC_DIR}/elf
   ${ROCCLR_SRC_DIR}/include
   ${AMD_OPENCL_INCLUDE_DIRS})
+
+# Add the compiler's LLVM libc shared include directory for the RPC interface.
+# The headers live at <compiler_bin>/../include/shared/rpc*.h.
+get_filename_component(_COMPILER_BIN_DIR "${CMAKE_CXX_COMPILER}" DIRECTORY)
+get_filename_component(_RPC_INCLUDE_DIR "${_COMPILER_BIN_DIR}/../include" REALPATH)
+set_source_files_properties(${ROCCLR_SRC_DIR}/device/devrpc.cpp PROPERTIES
+  COMPILE_OPTIONS "-I${_RPC_INCLUDE_DIR}")
 
 target_link_libraries(rocclr PUBLIC Threads::Threads)
 # IPC on Windows is not supported
