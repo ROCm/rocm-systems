@@ -5024,9 +5024,16 @@ bool VirtualGPU::submitKernelInternal(const amd::NDRangeContainer& sizes, const 
     }
 
     if (dev().settings().groupMemCarveout_) {
-      uint8_t percent = devKernel->workGroupInfo()->groupMemCarveout_
-          ? devKernel->workGroupInfo()->groupMemCarveout_
-          : dev().GetGroupMemCarveout();
+      // Synchronize with setters
+      int requestedPercent = -1;
+      {
+        std::scoped_lock attribute_lock(devKernel->attributeLock());
+        requestedPercent = devKernel->workGroupInfo()->groupMemCarveout_;
+      }
+      // Signed storage preserves -1 (device default) and explicit 0; cast only resolved 0..100.
+      const uint8_t percent = requestedPercent >= 0
+                                  ? static_cast<uint8_t>(requestedPercent)
+                                  : dev().GetGroupMemCarveout();
       auto& dispatchPacketExt = dispatchPacketUnion.extKernelDispatch;
       // Encodings [1, 127] represent a range from 0% (no group memory) to 100% (maximum
       // group memory)

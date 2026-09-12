@@ -543,6 +543,7 @@ hipMemGetMemPool
 hipMipmappedArrayGetMemoryRequirements
 hipKernelGetAttribute
 hipKernelSetAttribute
+hipKernelSetAttributeForDevice
 hipKernelGetFunction
 hipOccupancyMaxPotentialClusterSize
 hipOccupancyMaxActiveClusters

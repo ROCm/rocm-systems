@@ -10,6 +10,7 @@
 #include <vector>
 
 #include "hip/hip_runtime.h"
+#include "hip_internal.hpp"
 #include "hip_library.hpp"
 #include "hip_platform.hpp"
 #include "utils/debug.hpp"
@@ -83,6 +84,43 @@ hipError_t LibraryContainer::Kernel(hipKernel_t* k, const std::string &name) {
   return hipSuccess;
 }
 
+hipError_t LibraryContainer::ResolveKernelForDevice(hipKernel_t* k, const std::string& name,
+                                                    int device) {
+  if (k == nullptr) {
+    return hipErrorInvalidValue;
+  }
+
+  if (device < 0 || static_cast<size_t>(device) >= hip::g_devices.size()) {
+    return hipErrorInvalidDevice;
+  }
+
+  IHIP_RETURN_ONFAIL(BuildIt());
+  if (device == DeviceId()) {
+    return Kernel(k, name);
+  }
+
+  // The first setter/getter for a non-primary device loads its code object. Later calls from
+  // either API reuse this entry and the kernel cached internally by Function::GetDynFunc.
+  std::scoped_lock<std::mutex> lock(lib_mutex_);
+  auto dynco = code_objects_by_device_.find(device);
+  if (dynco == code_objects_by_device_.end()) {
+    auto target = std::make_unique<hip::DynCO>(device);
+    const char* fname = filename_.empty() ? nullptr : filename_.c_str();
+    const void* image = filename_.empty() ? image_storage_.data() : nullptr;
+    // This code object is used only to resolve functions for the requested device, no need to
+    // initialize global and managed variables.
+    constexpr bool init_global_vars = false;
+    IHIP_RETURN_ONFAIL(target->loadCodeObject(fname, image, init_global_vars));
+    dynco = code_objects_by_device_.emplace(device, std::move(target)).first;
+  }
+
+  hipFunction_t function = nullptr;
+  IHIP_RETURN_ONFAIL(dynco->second->getDynFunc(&function, name));
+  *k = reinterpret_cast<hipKernel_t>(function);
+
+  return hipSuccess;
+}
+
 size_t LibraryContainer::KernelCount() {
   unsigned int count = 0;
   if (dynco_) {
@@ -99,7 +137,7 @@ hipError_t LibraryContainer::GetManaged(const std::string& name, void** dptr, si
   return dynco_->GetManaged(name, dptr, bytes);
 }
 
-LibraryContainer::LibraryContainer(const char* code_object) : image_(code_object) {}
+LibraryContainer::LibraryContainer(const char* code_object) : input_image_(code_object) {}
 
 LibraryContainer::LibraryContainer(const std::string &file_name) : filename_(file_name) {}
 
@@ -111,6 +149,7 @@ LibraryContainer::~LibraryContainer() {
   for (const auto& k : kernels_) {
     (void)hip::PlatformState::Instance().UnregisterLibraryFunction(k.second);
   }
+  code_objects_by_device_.clear();
   kernels_.clear();
   // dynco_ unique_ptr destruction frees vars, functions, and the underlying fatbin.
 }
@@ -125,13 +164,16 @@ hipError_t LibraryContainer::BuildIt() {
   if (built_.load(std::memory_order_relaxed)) {
     return hipSuccess;
   }
-  if (filename_.empty() && image_ == nullptr) {
+  if (filename_.empty() && input_image_ == nullptr) {
     return hipErrorInvalidValue;
   }
 
   dynco_ = std::make_unique<hip::DynCO>();
   const char* fname = filename_.empty() ? nullptr : filename_.c_str();
-  IHIP_RETURN_ONFAIL(dynco_->loadCodeObject(fname, image_));
+  std::vector<char>* input_storage = filename_.empty() ? &image_storage_ : nullptr;
+  // The primary code object (for current device) owns the library's global and managed-variable state.
+  constexpr bool init_global_vars = true;
+  IHIP_RETURN_ONFAIL(dynco_->loadCodeObject(fname, input_image_, init_global_vars, input_storage));
 
   built_.store(true, std::memory_order_release);
   return hipSuccess;
@@ -322,17 +364,36 @@ hipError_t hipKernelGetAttribute(int* pi, hipFunction_attribute attrib, hipKerne
     HIP_RETURN(hipErrorInvalidValue);
   }
 
-  const auto* const d_kernel = hip::asKernel(kernel);
+  if (kernel == nullptr) {
+    HIP_RETURN(hipErrorInvalidHandle);
+  }
+
+  if (dev < 0 || static_cast<size_t>(dev) >= hip::g_devices.size()) {
+    HIP_RETURN(hipErrorInvalidDevice);
+  }
+
+
+  // Load code object for the target device if not already loaded
+  hipKernel_t target_kernel = kernel;
+  hipLibrary_t library = nullptr;
+  if (hip::PlatformState::Instance().GetFunctionLibrary(kernel, &library)) {
+    auto* container = reinterpret_cast<hip::LibraryContainer*>(library);
+    const char* kernel_name = nullptr;
+    if (container->GetKernelName(&kernel_name, kernel) != hipSuccess || kernel_name == nullptr) {
+      HIP_RETURN(hipErrorInvalidHandle);
+    }
+    hipError_t status = container->ResolveKernelForDevice(&target_kernel, kernel_name, dev);
+    if (status != hipSuccess) {
+      HIP_RETURN(status);
+    }
+  }
+
+  const auto* const d_kernel = hip::asKernel(target_kernel);
   if (d_kernel == nullptr) {
     HIP_RETURN(hipErrorInvalidHandle);
   }
 
-  auto* currentDevice = hip::getCurrentDevice();
-  const auto& devices = currentDevice->devices();
-  if (dev < 0 || static_cast<size_t>(dev) >= devices.size()) {
-    HIP_RETURN(hipErrorInvalidDevice);
-  }
-  const auto& device = *devices[dev];
+  const auto& device = *hip::g_devices[dev]->devices()[0];
 
   auto* dev_kernel = d_kernel->getDeviceKernel(device);
   if (dev_kernel == nullptr) {
@@ -343,6 +404,7 @@ hipError_t hipKernelGetAttribute(int* pi, hipFunction_attribute attrib, hipKerne
     HIP_RETURN(hipErrorMissingConfiguration);
   }
   const auto& wrkGrpInfo = *wrkGrpInfoPtr;
+  std::scoped_lock lock(dev_kernel->attributeLock());
 
   switch (attrib) {
     case HIP_FUNC_ATTRIBUTE_MAX_THREADS_PER_BLOCK:
@@ -368,14 +430,31 @@ hipError_t hipKernelGetAttribute(int* pi, hipFunction_attribute attrib, hipKerne
       *pi = 0;
       break;
     case HIP_FUNC_ATTRIBUTE_PREFERRED_SHARED_MEMORY_CARVEOUT:
-      *pi = 0;
+      *pi = wrkGrpInfo.kernelPreferredShmemCarveout_;
       break;
     case HIP_FUNC_ATTRIBUTE_MAX_DYNAMIC_SHARED_SIZE_BYTES: {
-      int maxDynamicSharedSizeBytes = static_cast<int>(wrkGrpInfo.maxDynamicSharedSizeBytes_);
       const int alignmentSize = device.isa().ldsAlignment();
-      *pi = amd::alignDown(maxDynamicSharedSizeBytes, alignmentSize);
+      *pi = amd::alignDown(wrkGrpInfo.kernelMaxDynamicSharedSizeBytes_, alignmentSize);
       break;
     }
+    case HIP_FUNC_ATTRIBUTE_CLUSTER_DIM_MUST_BE_SET:
+      *pi = wrkGrpInfo.hasClusterAttr_;
+      break;
+    case HIP_FUNC_ATTRIBUTE_REQUIRED_CLUSTER_WIDTH:
+    case HIP_FUNC_ATTRIBUTE_REQUIRED_CLUSTER_HEIGHT:
+    case HIP_FUNC_ATTRIBUTE_REQUIRED_CLUSTER_DEPTH: {
+      const int index = attrib - HIP_FUNC_ATTRIBUTE_REQUIRED_CLUSTER_WIDTH;
+      *pi = wrkGrpInfo.hasClusterAttr_ && wrkGrpInfo.clusterSize_[index] != 0
+                ? static_cast<int>(wrkGrpInfo.clusterSize_[index])
+                : wrkGrpInfo.runtimeClusterSize_[index];
+      break;
+    }
+    case HIP_FUNC_ATTRIBUTE_NON_PORTABLE_CLUSTER_SIZE_ALLOWED:
+      *pi = wrkGrpInfo.nonPortableClusterSizeAllowed_;
+      break;
+    case HIP_FUNC_ATTRIBUTE_CLUSTER_SCHEDULING_POLICY_PREFERENCE:
+      *pi = wrkGrpInfo.clusterSchedulingPolicyPreference_;
+      break;
     default:
       HIP_RETURN(hipErrorInvalidValue);
   }
@@ -413,6 +492,7 @@ hipError_t hipKernelSetAttribute(hipFunction_attribute attrib, int value, hipKer
   if (wrkGrpInfo == nullptr) {
     HIP_RETURN(hipErrorMissingConfiguration);
   }
+  std::scoped_lock lock(deviceKernel->attributeLock());
 
   switch (attrib) {
     case HIP_FUNC_ATTRIBUTE_MAX_THREADS_PER_BLOCK:
@@ -429,9 +509,126 @@ hipError_t hipKernelSetAttribute(hipFunction_attribute attrib, int value, hipKer
       if ((value < 0) || (value > (wrkGrpInfo->availableLDSSize_ - wrkGrpInfo->localMemSize_))) {
         HIP_RETURN(hipErrorInvalidValue);
       }
-      wrkGrpInfo->maxDynamicSharedSizeBytes_ = value;
+      wrkGrpInfo->kernelMaxDynamicSharedSizeBytes_ = value;
+      if (!wrkGrpInfo->hasFuncMaxDynamicSharedSize_) {
+        wrkGrpInfo->maxDynamicSharedSizeBytes_ = value;
+      }
       break;
     case HIP_FUNC_ATTRIBUTE_PREFERRED_SHARED_MEMORY_CARVEOUT:
+      break;
+    default:
+      HIP_RETURN(hipErrorInvalidValue);
+  }
+
+  HIP_RETURN(hipSuccess);
+}
+
+hipError_t hipKernelSetAttributeForDevice(hipKernel_t kernel, hipFuncAttribute attr, int value,
+                                          int device) {
+  HIP_INIT_API(hipKernelSetAttributeForDevice, kernel, attr, value, device);
+
+  if (kernel == nullptr) {
+    HIP_RETURN(hipErrorInvalidResourceHandle);
+  }
+  if (device < 0 || static_cast<size_t>(device) >= hip::g_devices.size()) {
+    HIP_RETURN(hipErrorInvalidDevice);
+  }
+
+  switch (attr) {
+    case hipFuncAttributeMaxDynamicSharedMemorySize:
+    case hipFuncAttributePreferredSharedMemoryCarveout:
+    case hipFuncAttributeRequiredClusterWidth:
+    case hipFuncAttributeRequiredClusterHeight:
+    case hipFuncAttributeRequiredClusterDepth:
+    case hipFuncAttributeNonPortableClusterSizeAllowed:
+    case hipFuncAttributeClusterSchedulingPolicyPreference:
+      break;
+    default:
+      HIP_RETURN(hipErrorInvalidValue);
+  }
+
+  // Load code object for the target device if not already loaded
+  hipKernel_t target_kernel = kernel;
+  hipLibrary_t library = nullptr;
+  if (hip::PlatformState::Instance().GetFunctionLibrary(kernel, &library)) {
+    auto* container = reinterpret_cast<hip::LibraryContainer*>(library);
+    const char* kernel_name = nullptr;
+    if (container->GetKernelName(&kernel_name, kernel) != hipSuccess || kernel_name == nullptr) {
+      HIP_RETURN(hipErrorInvalidResourceHandle);
+    }
+    hipError_t status = container->ResolveKernelForDevice(&target_kernel, kernel_name, device);
+    if (status != hipSuccess) {
+      HIP_RETURN(status);
+    }
+  }
+
+  amd::Kernel* amd_kernel = hip::asKernel(target_kernel);
+  if (amd_kernel == nullptr) {
+    HIP_RETURN(hipErrorInvalidResourceHandle);
+  }
+
+  const amd::Device& amd_device = *hip::g_devices[device]->devices()[0];
+  amd::device::Kernel* device_kernel =
+      const_cast<amd::device::Kernel*>(amd_kernel->getDeviceKernel(amd_device));
+  if (device_kernel == nullptr) {
+    HIP_RETURN(hipErrorInvalidDevice);
+  }
+
+  std::scoped_lock lock(device_kernel->attributeLock());
+  amd::device::Kernel::WorkGroupInfo* work_group_info = device_kernel->workGroupInfo();
+  if (work_group_info == nullptr) {
+    HIP_RETURN(hipErrorInvalidDeviceFunction);
+  }
+
+  switch (attr) {
+    case hipFuncAttributeMaxDynamicSharedMemorySize: {
+      if (work_group_info->localMemSize_ > work_group_info->availableLDSSize_) {
+        HIP_RETURN(hipErrorInvalidValue);
+      }
+      const size_t maximum = work_group_info->availableLDSSize_ - work_group_info->localMemSize_;
+      if (value < 0 || static_cast<size_t>(value) > maximum) {
+        HIP_RETURN(hipErrorInvalidValue);
+      }
+      work_group_info->kernelMaxDynamicSharedSizeBytes_ = value;
+      if (!work_group_info->hasFuncMaxDynamicSharedSize_) {
+        work_group_info->maxDynamicSharedSizeBytes_ = value;
+      }
+      break;
+    }
+    case hipFuncAttributePreferredSharedMemoryCarveout:
+      if (value < -1 || value > 100) {
+        HIP_RETURN(hipErrorInvalidValue);
+      }
+      work_group_info->kernelPreferredShmemCarveout_ = value;
+      if (!work_group_info->hasFuncPreferredShmemCarveout_) {
+        work_group_info->groupMemCarveout_ = value;
+      }
+      break;
+    case hipFuncAttributeRequiredClusterWidth:
+    case hipFuncAttributeRequiredClusterHeight:
+    case hipFuncAttributeRequiredClusterDepth: {
+      if (value < 0) {
+        HIP_RETURN(hipErrorInvalidValue);
+      }
+      const int index = attr - hipFuncAttributeRequiredClusterWidth;
+      if (work_group_info->hasClusterAttr_ && work_group_info->clusterSize_[index] != 0) {
+        if (value != static_cast<int>(work_group_info->clusterSize_[index])) {
+          HIP_RETURN(hipErrorInvalidValue);
+        }
+      } else {
+        work_group_info->runtimeClusterSize_[index] = value;
+      }
+      break;
+    }
+    case hipFuncAttributeNonPortableClusterSizeAllowed:
+      work_group_info->nonPortableClusterSizeAllowed_ = value;
+      break;
+    case hipFuncAttributeClusterSchedulingPolicyPreference:
+      if (value < hipClusterSchedulingPolicyDefault ||
+          value > hipClusterSchedulingPolicyLoadBalancing) {
+        HIP_RETURN(hipErrorInvalidValue);
+      }
+      work_group_info->clusterSchedulingPolicyPreference_ = value;
       break;
     default:
       HIP_RETURN(hipErrorInvalidValue);
