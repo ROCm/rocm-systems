@@ -109,6 +109,7 @@ static const char* kTempSensorTypeJunctionName = "junction";
 static const char* kTempSensorTypeEdgeName = "edge";
 
 static const char* kTempSensorTypeVddgfxName = "vddgfx";
+static const char *kTempSensorTypeVddnbName = "vddnb";
 static const char* kTempSensorTypeVddboardName = "vddboard";
 
 static const std::map<std::string, rsmi_temperature_type_t> kTempSensorNameMap = {
@@ -119,6 +120,7 @@ static const std::map<std::string, rsmi_temperature_type_t> kTempSensorNameMap =
 
 static const std::map<std::string, rsmi_voltage_type_t> kVoltSensorNameMap = {
     {kTempSensorTypeVddgfxName, RSMI_VOLT_TYPE_VDDGFX},
+    {kTempSensorTypeVddnbName, RSMI_VOLT_TYPE_VDDNB},
     {kTempSensorTypeVddboardName, RSMI_VOLT_TYPE_VDDBOARD},
 };
 
@@ -348,9 +350,15 @@ int32_t Monitor::setTempSensorLabelMap(void) {
     if (ret) {
       index_temp_type_map_.insert({file_index, RSMI_TEMP_TYPE_INVALID});
     } else {
-      t_type = kTempSensorNameMap.at(type_str);
-      temp_type_index_map_[t_type] = file_index;
-      index_temp_type_map_.insert({file_index, t_type});
+      auto it = kTempSensorNameMap.find(type_str);
+      if (it == kTempSensorNameMap.end()) {
+        // Unknown sensor type label, treat as invalid
+        index_temp_type_map_.insert({file_index, RSMI_TEMP_TYPE_INVALID});
+      } else {
+        t_type = it->second;
+        temp_type_index_map_[t_type] = file_index;
+        index_temp_type_map_.insert({file_index, t_type});
+      }
     }
     return 0;
   };
@@ -384,21 +392,21 @@ int32_t Monitor::setVoltSensorLabelMap(void) {
     if (ret) {
       index_volt_type_map_.insert({file_index, RSMI_VOLT_TYPE_INVALID});
     } else {
-      t_type = kVoltSensorNameMap.at(type_str);
-      volt_type_index_map_[t_type] = file_index;
-      index_volt_type_map_.insert({file_index, t_type});
+      auto it = kVoltSensorNameMap.find(type_str);
+      if (it == kVoltSensorNameMap.end()) {
+        // Unknown sensor type label, treat as invalid
+        index_volt_type_map_.insert({file_index, RSMI_VOLT_TYPE_INVALID});
+      } else {
+        t_type = it->second;
+        volt_type_index_map_[t_type] = file_index;
+        index_volt_type_map_.insert({file_index, t_type});
+      }
     }
     return 0;
   };
 
   for (uint32_t i = 0; i < RSMI_VOLT_TYPE_LAST + 1; ++i) {
-    // VDDGFX -> 0, VDDNB -> 1, VDDBOARD -> 2
-    // Here the VDDNB will be skipped as it is not defined in the enum and not supported by AMD.
-    auto file_index = i;
-    if (i >= RSMI_VOLT_TYPE_VDDBOARD) {
-      file_index = i + 1;
-    }
-    ret = add_volt_sensor_entry(file_index);
+    ret = add_volt_sensor_entry(i);
     if (ret) {
       return ret;
     }
@@ -467,7 +475,11 @@ uint32_t Monitor::getTempSensorIndex(rsmi_temperature_type_t type) {
 }
 
 rsmi_temperature_type_t Monitor::getTempSensorEnum(uint64_t ind) {
-  return index_temp_type_map_.at(ind);
+  auto it = index_temp_type_map_.find(ind);
+  if (it == index_temp_type_map_.end()) {
+    return RSMI_TEMP_TYPE_INVALID;
+  }
+  return it->second;
 }
 
 uint32_t Monitor::getVoltSensorIndex(rsmi_voltage_type_t type) {
@@ -475,7 +487,11 @@ uint32_t Monitor::getVoltSensorIndex(rsmi_voltage_type_t type) {
 }
 
 rsmi_voltage_type_t Monitor::getVoltSensorEnum(uint64_t ind) {
-  return index_volt_type_map_.at(ind);
+  auto it = index_volt_type_map_.find(ind);
+  if (it == index_volt_type_map_.end()) {
+    return RSMI_VOLT_TYPE_INVALID;
+  }
+  return it->second;
 }
 
 static std::vector<uint64_t> get_intersection(std::vector<uint64_t>* v1,
@@ -614,11 +630,19 @@ void Monitor::fillSupportedFuncs(SupportedFuncMap* supported_funcs) {
           } else if (m_type == eTempMonitor) {
             // Temp sensor file names are 1-based
             assert(supported_monitor > 0);
-            supported_monitor |= static_cast<uint64_t>(getTempSensorEnum(supported_monitor))
+            auto t_enum = getTempSensorEnum(supported_monitor);
+            if (t_enum == RSMI_TEMP_TYPE_INVALID) {
+              continue;
+            }
+            supported_monitor |= static_cast<uint64_t>(t_enum)
                                  << MONITOR_TYPE_BIT_POSITION;
           } else if (m_type == eVoltMonitor) {
             // Voltage sensor file names are 0-based
-            supported_monitor |= static_cast<uint64_t>(getVoltSensorEnum(supported_monitor))
+            auto v_enum = getVoltSensorEnum(supported_monitor);
+            if (v_enum == RSMI_VOLT_TYPE_INVALID) {
+              continue;
+            }
+            supported_monitor |= static_cast<uint64_t>(v_enum)
                                  << MONITOR_TYPE_BIT_POSITION;
           } else {
             assert(false);  // Unexpected monitor type
