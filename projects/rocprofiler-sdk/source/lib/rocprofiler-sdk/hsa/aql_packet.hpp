@@ -39,6 +39,12 @@
 
 namespace rocprofiler
 {
+namespace thread_trace
+{
+class kfd_copy_queue_t;
+class kfd_memory_pool_t;
+}  // namespace thread_trace
+
 namespace spm
 {
 /**
@@ -181,15 +187,20 @@ struct TraceMemoryPool
 {
     using desc_t = aqlprofile_buffer_desc_flags_t;
 
-    hsa_agent_t                             gpu_agent;
-    hsa_amd_memory_pool_t                   cpu_pool_;
-    hsa_amd_memory_pool_t                   gpu_pool_;
-    decltype(hsa_amd_memory_pool_allocate)* allocate_fn;
-    decltype(hsa_amd_agents_allow_access)*  allow_access_fn;
-    decltype(hsa_amd_memory_pool_free)*     free_fn;
-    decltype(hsa_memory_copy)*              api_copy_fn;
+    hsa_agent_t                             gpu_agent{};
+    rocprofiler_agent_id_t                  agent_id{};
+    aqlprofile_agent_handle_t               aql_agent{};
+    hsa_amd_memory_pool_t                   cpu_pool_{};
+    hsa_amd_memory_pool_t                   gpu_pool_{};
+    decltype(hsa_amd_memory_pool_allocate)* allocate_fn{};
+    decltype(hsa_amd_agents_allow_access)*  allow_access_fn{};
+    decltype(hsa_amd_memory_pool_free)*     free_fn{};
+    decltype(hsa_memory_copy)*              api_copy_fn{};
 
-    aqlprofile_handle_t handle;
+    std::shared_ptr<thread_trace::kfd_memory_pool_t> kfd_memory{};
+    std::shared_ptr<thread_trace::kfd_copy_queue_t>  kfd_copy_queue{};
+
+    aqlprofile_handle_t handle{};
     ~TraceMemoryPool() { aqlprofile_att_delete_packets(this->handle); };
 
     static hsa_status_t Alloc(void** ptr, size_t size, desc_t flags, void* data);
@@ -214,7 +225,6 @@ public:
     void populate_after() override{};
 
     aqlprofile_handle_t GetHandle() const { return tracepool.handle; }
-    hsa_agent_t         GetAgent() const { return tracepool.gpu_agent; }
 
     hsa_ext_amd_aql_pm4_packet_t packet;
 
@@ -240,8 +250,8 @@ public:
         this->loaded_codeobj = other.loaded_codeobj;
     }
 
-    aqlprofile_handle_t GetHandle() const { return tracepool->handle; }
-    hsa_agent_t         GetAgent() const { return tracepool->gpu_agent; }
+    aqlprofile_handle_t    GetHandle() const { return tracepool->handle; }
+    rocprofiler_agent_id_t GetAgent() const { return tracepool->agent_id; }
 
     void populate_before() override
     {
