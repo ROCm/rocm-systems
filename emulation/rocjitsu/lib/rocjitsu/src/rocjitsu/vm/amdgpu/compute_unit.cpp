@@ -66,6 +66,8 @@ std::string_view instruction_execution_error_name(InstructionExecutionError erro
     return "none";
   case InstructionExecutionError::UnsupportedOperandValue:
     return "unsupported operand value";
+  case InstructionExecutionError::UnimplementedInstruction:
+    return "unimplemented instruction";
   }
   return "unknown instruction execution error";
 }
@@ -891,14 +893,15 @@ void ComputeUnitCore::issue_instruction(Wavefront *active) {
   // transition rather than a per-ISA mnemonic list. See its use.
   const bool was_in_trap_handler = active->in_trap_handler();
 
+  util::Result execution_result;
   try {
-    execute_instruction(inst, *active);
+    execution_result = execute_instruction(inst, *active);
   } catch (...) {
     delete inst;
     throw;
   }
 
-  if (active->instruction_execution_failed()) {
+  if (execution_result.failed()) {
     const InstructionExecutionError error = active->instruction_execution_error();
     const std::string failure = std::format("CU {}: wf{} could not execute {} at pc={:#x}: {}",
                                             this->name(), active->wf_id(), inst->mnemonic(),

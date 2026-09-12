@@ -58,7 +58,7 @@ public:
   }
 
   void execute_and_route(std::unique_ptr<Instruction> instruction, amdgpu::Wavefront &wave) {
-    execute_instruction(instruction.get(), wave);
+    EXPECT_TRUE(execute_instruction(instruction.get(), wave).succeeded());
     if (instruction->is_memory_op())
       route_memory_inst(instruction.release(), wave);
   }
@@ -1428,7 +1428,7 @@ TEST(Gfx1250ExecutionTest, IreeF16ReductionTailKeepsLane31Sum) {
   for (const auto &inst_words : words) {
     std::unique_ptr<Instruction> inst(decode_valid(*decoder, inst_words.data()));
     ASSERT_NE(inst, nullptr);
-    cu->execute_instruction(inst.get(), *wf);
+    EXPECT_TRUE(cu->execute_instruction(inst.get(), *wf).succeeded());
   }
 
   EXPECT_EQ(read_wave_sgpr(*cu, *wf, 0) & 0xffffu, 0x6480u);
@@ -1639,7 +1639,7 @@ TEST(Gfx1250LiteralOperandTest, NegativeI64CompareCoversScalarAndAvailableSimdPa
       write_wave_sgpr(*cu, *wf, 1, 0u);
     }
 
-    cu->execute_instruction(compare.get(), *wf);
+    EXPECT_TRUE(cu->execute_instruction(compare.get(), *wf).succeeded());
     EXPECT_EQ(read_wave_sgpr(*cu, *wf, 0), 0x3u);
   };
 
@@ -1724,7 +1724,7 @@ TEST(Gfx1250LiteralOperandTest, PkF32LiteralReplicatesAndUsesAvailableSimdPath) 
       }
     }
 
-    cu->execute_instruction(add.get(), *wf);
+    EXPECT_TRUE(cu->execute_instruction(add.get(), *wf).succeeded());
     for (uint32_t lane = 0; lane < 2; ++lane) {
       EXPECT_EQ(cu->read_vgpr(vgpr_base, lane), literal);
       EXPECT_EQ(cu->read_vgpr(vgpr_base + 1, lane), literal);
@@ -1847,7 +1847,7 @@ TEST(Gfx1251PackedU64ExecutionTest, PublicVgprVectorExecutesSupportedShiftsAndAc
     write_vgpr_packed_u64(*cu, *wf, 4, lane, kInactiveSeed);
   }
 
-  cu->execute_instruction(decoded.get(), *wf);
+  EXPECT_TRUE(cu->execute_instruction(decoded.get(), *wf).succeeded());
 
   EXPECT_EQ(read_vgpr_packed_u64(*cu, *wf, 4, 0), (PackedU64Pair{7u, 13u}));
   EXPECT_EQ(read_vgpr_packed_u64(*cu, *wf, 4, 1), (PackedU64Pair{15u, 0u}));
@@ -1892,7 +1892,7 @@ TEST(Gfx1251PackedU64ExecutionTest, RejectsUnprovenShiftCountsBeforeAnyDestinati
     write_vgpr_packed_u64(*cu, *wf, 4, 0, kLane0Seed);
     write_vgpr_packed_u64(*cu, *wf, 4, 1, kLane1Seed);
 
-    cu->execute_instruction(decoded.get(), *wf);
+    EXPECT_TRUE(cu->execute_instruction(decoded.get(), *wf).failed());
 
     EXPECT_EQ(wf->instruction_execution_error(),
               amdgpu::InstructionExecutionError::UnsupportedOperandValue);
@@ -2001,7 +2001,7 @@ TEST(Gfx1251PackedU64ExecutionTest, ExecutesEveryPublicLlvmSourceForm) {
     std::unique_ptr<Instruction> decoded(decode_valid(*decoder, test_case.words.data()));
     ASSERT_NE(decoded, nullptr);
     ASSERT_NE(decoded->execute, nullptr);
-    cu->execute_instruction(decoded.get(), *wf);
+    EXPECT_TRUE(cu->execute_instruction(decoded.get(), *wf).succeeded());
     EXPECT_EQ(read_vgpr_packed_u64(*cu, *wf, 4, 0), test_case.expected);
   }
 }
@@ -2043,7 +2043,7 @@ TEST(Gfx1251PackedU64ExecutionTest, SplitsVccAndExecShiftSourcesIntoLowAndHighDw
     std::unique_ptr<Instruction> decoded(decode_valid(*decoder, test_case.words.data()));
     ASSERT_NE(decoded, nullptr);
     ASSERT_NE(decoded->execute, nullptr);
-    cu->execute_instruction(decoded.get(), *wf);
+    EXPECT_TRUE(cu->execute_instruction(decoded.get(), *wf).succeeded());
     EXPECT_EQ(read_vgpr_packed_u64(*cu, *wf, 4, 0), (PackedU64Pair{11u, 23u}));
   }
 }
@@ -2067,7 +2067,7 @@ TEST(Gfx1251PackedU64ExecutionTest, ReadsOverlappingSourcesBeforeWritingDestinat
   write_vgpr_packed_u32(*cu, *wf, 12, 0, {4u, 4u});
   write_vgpr_packed_u64(*cu, *wf, 16, 0, {7u, 11u});
 
-  cu->execute_instruction(decoded.get(), *wf);
+  EXPECT_TRUE(cu->execute_instruction(decoded.get(), *wf).succeeded());
   EXPECT_EQ(read_vgpr_packed_u64(*cu, *wf, 8, 0), (PackedU64Pair{0x0000000000000017ULL, 59u}));
 }
 
@@ -2162,7 +2162,7 @@ TEST(Gfx1250LiteralOperandTest, PkF32MixedLiteralVgprSourcesUseAvailableSimdPath
 
     cu->write_vgpr(vgpr_base + 6, 0, 0u);
     cu->write_vgpr(vgpr_base + 7, 0, 0u);
-    cu->execute_instruction(instruction.get(), *wf);
+    EXPECT_TRUE(cu->execute_instruction(instruction.get(), *wf).succeeded());
     EXPECT_EQ(cu->read_vgpr(vgpr_base + 6, 0), std::bit_cast<uint32_t>(test_case.expected_lo));
     EXPECT_EQ(cu->read_vgpr(vgpr_base + 7, 0), std::bit_cast<uint32_t>(test_case.expected_hi));
   }
@@ -2193,7 +2193,7 @@ TEST(Gfx1250LiteralOperandTest, PkF32MixedLiteralSourceSpecificSelectorFallsBack
 
   EXPECT_FALSE(amdgpu::try_execute_vop3p_pk_binary_f32_simd(*typed, *wf, 0u, 2u,
                                                             [](auto a, auto b) { return a + b; }));
-  cu->execute_instruction(instruction.get(), *wf);
+  EXPECT_TRUE(cu->execute_instruction(instruction.get(), *wf).succeeded());
   EXPECT_EQ(cu->read_vgpr(vgpr_base + 4, 0), std::bit_cast<uint32_t>(7.0f));
   EXPECT_EQ(cu->read_vgpr(vgpr_base + 5, 0), std::bit_cast<uint32_t>(8.0f));
 }
@@ -2264,7 +2264,7 @@ TEST(Gfx1250ExecutionTest, PkF32AddMulSimdMatchesScalarWithPartialExec) {
         }
       }
 
-      cu->execute_instruction(instruction.get(), *wf);
+      EXPECT_TRUE(cu->execute_instruction(instruction.get(), *wf).succeeded());
       for (uint32_t lane = 0; lane < 32; ++lane) {
         result[lane * 2] = cu->read_vgpr(vgpr_base + 4, lane);
         result[lane * 2 + 1] = cu->read_vgpr(vgpr_base + 5, lane);
@@ -2370,7 +2370,7 @@ TEST(Gfx1250ExecutionTest, PkF32EveryNondefaultSelectorGateFallsBackToScalar) {
               [](auto a, auto b) { return a + b; }));
         }
       }
-      cu->execute_instruction(instruction.get(), *wf);
+      EXPECT_TRUE(cu->execute_instruction(instruction.get(), *wf).succeeded());
       for (uint32_t lane = 0; lane < 32; ++lane) {
         result[lane * 2] = cu->read_vgpr(vgpr_base + 6, lane);
         result[lane * 2 + 1] = cu->read_vgpr(vgpr_base + 7, lane);
@@ -2438,7 +2438,7 @@ TEST(Gfx1250ExecutionTest, PkFmaF32SimdMatchesScalarWithPartialExec) {
       }
     }
 
-    cu->execute_instruction(instruction.get(), *wf);
+    EXPECT_TRUE(cu->execute_instruction(instruction.get(), *wf).succeeded());
     for (uint32_t lane = 0; lane < 32; ++lane) {
       result[lane * 2] = cu->read_vgpr(vgpr_base + 6, lane);
       result[lane * 2 + 1] = cu->read_vgpr(vgpr_base + 7, lane);
@@ -2556,7 +2556,7 @@ TEST(Gfx1250ExecutionTest, FmaMixBf16ResultsHonorRoundModeAndClamp) {
             cu->write_vgpr(vgpr_base + 3, lane, kDstSeed);
           }
 
-          cu->execute_instruction(instruction.get(), *wf);
+          EXPECT_TRUE(cu->execute_instruction(instruction.get(), *wf).succeeded());
           for (uint32_t lane = 0; lane < test_cases.size(); ++lane) {
             const uint32_t expected =
                 opcode == cdna5::kVFmaMixloBf16Vop3p
@@ -2640,7 +2640,7 @@ TEST(Gfx1250ExecutionTest, Wave32ScalarVccHiWritePreservesUpperHalf) {
   std::unique_ptr<Instruction> inst(decode_valid(*decoder, words));
   ASSERT_NE(inst, nullptr);
   ASSERT_EQ(std::string_view(inst->mnemonic()), "s_or_b32");
-  cu->execute_instruction(inst.get(), *wf);
+  EXPECT_TRUE(cu->execute_instruction(inst.get(), *wf).succeeded());
 
   EXPECT_EQ(wf->vcc(), 0xffff0000'00000000ULL);
 }
@@ -2757,7 +2757,7 @@ TEST(Gfx1250ExecutionTest, Perlane64CompatibilityEncodingDecodesAndIsWave32Nop) 
     cu->write_vgpr(base, lane, 0xA5A50000u | lane);
     cu->write_vgpr(base + 1, lane, 0x5A5A0000u | lane);
   }
-  cu->execute_instruction(inst.get(), *wf);
+  EXPECT_TRUE(cu->execute_instruction(inst.get(), *wf).succeeded());
 
   // The instruction swaps Wave64 halves; on gfx1250's Wave32 it is a NOP,
   // including for active lanes and a partial EXEC mask.

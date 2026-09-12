@@ -21,6 +21,26 @@ Do not substitute one metric for another. For example, lazy allocation may
 improve process wall time and RSS without changing instruction-handler
 throughput.
 
+### Instruction execution failures
+
+With tests enabled, `ExecutionDispatchBenchmark` measures the CU execution API
+using predecoded RDNA4 instructions. Its three cases execute a supported scalar
+add, an unimplemented packed D16 buffer load, or a mix with 10% rejected
+instructions. Each case checks the observed failure count outside the timed
+loop and reports nanoseconds per instruction. Decoding and wavefront allocation
+are outside that timing; `DecodeExecuteBenchmark` covers the combined pipeline.
+
+```bash
+cmake --build "$build" --target rocjitsu_tests
+taskset -c "$cpu" "$build/tests/rocjitsu_tests" \
+  --gtest_filter='ExecutionDispatchBenchmark.*:DecodeExecuteBenchmark.*'
+```
+
+Alternate baseline and changed executables on the same CPU after warmup and
+compare medians across several runs. Include the success case: reducing rejection
+cost does not establish that successful execution is unchanged. These benchmarks
+measure host simulator throughput, and do not establish GPU hardware performance.
+
 ## Build and record provenance
 
 Use the same compiler, SDK, CMake options, and workload artifacts for both

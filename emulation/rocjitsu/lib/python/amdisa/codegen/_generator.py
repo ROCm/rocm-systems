@@ -11823,7 +11823,10 @@ class CodeGenerator:
                         if body_throws:
                             exec_impl = cgen.Line(
                                 f'void {inst.fmt_name}::execute_impl'
-                                f'(amdgpu::Wavefront &wf) {{ (void)wf; throw util::UnimplementedInst(mnemonic()); }}'
+                                f'(amdgpu::Wavefront &wf) {{\n'
+                                '  wf.report_instruction_execution_error(\n'
+                                '      amdgpu::InstructionExecutionError::UnimplementedInstruction);\n'
+                                '}'
                             )
                         elif can_share or _portable_probe:
                             enc_key = enc.enc_name.lower().replace('enc_', '')
@@ -11962,7 +11965,10 @@ class CodeGenerator:
                     else:
                         exec_impl = cgen.Line(
                             f'void {inst.fmt_name}::execute_impl'
-                            f'(amdgpu::Wavefront &wf) {{ (void)wf; throw util::UnimplementedInst(mnemonic()); }}'
+                            f'(amdgpu::Wavefront &wf) {{\n'
+                            '  wf.report_instruction_execution_error(\n'
+                            '      amdgpu::InstructionExecutionError::UnimplementedInstruction);\n'
+                            '}'
                         )
 
                     s = cgen.Struct(
@@ -15962,8 +15968,7 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
 
         Produces ``test_encodings.h`` containing a constexpr array of
         ``{mnemonic, {word0, word1}}`` entries.  The test harness decodes
-        each entry and calls ``execute()`` to verify no ``UnimplementedInst``
-        is thrown.
+        each entry and checks execution results against the expected coverage.
         """
         entries: list[str] = []
         profile = self.isa_spec.profile

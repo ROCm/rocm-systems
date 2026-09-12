@@ -289,8 +289,8 @@ void SAtcProbeSmem::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
 void SAtcProbeBufferSmem::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
 
 void SGetWaveidInWorkgroupSmem::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+  wf.report_instruction_execution_error(
+      amdgpu::InstructionExecutionError::UnimplementedInstruction);
 }
 
 } // namespace rdna1

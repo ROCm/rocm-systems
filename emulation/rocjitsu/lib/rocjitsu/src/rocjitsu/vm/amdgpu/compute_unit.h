@@ -28,6 +28,7 @@
 #include "simdojo/components/vector_reg.h"
 #include "util/bit.h"
 #include "util/log.h"
+#include "util/result.h"
 
 #include "simdojo/sim/component.h"
 #include "simdojo/sim/exec_mode.h"
@@ -923,9 +924,21 @@ public:
   /// thread or from single-threaded test contexts only.
   /// @param inst The decoded instruction.
   /// @param wf The wavefront executing the instruction.
-  virtual void execute_instruction(Instruction *inst, Wavefront &wf) = 0;
+  /// @returns Failure for an unimplemented instruction stub or a reported operand
+  /// failure. The wavefront retains the reason for caller-owned diagnostics.
+  /// Each call clears the previous error; a failed call does not halt the wavefront.
+  /// Validation inside implemented instructions can still raise exceptions.
+  util::Result execute_instruction(Instruction *inst, Wavefront &wf) {
+    wf.clear_instruction_execution_error();
+    execute_instruction_impl(inst, wf);
+    return wf.instruction_execution_failed() ? util::Result::failure() : util::Result::success();
+  }
 
 protected:
+  /// ISA-specific dispatch; keeping result handling in the inline public wrapper
+  /// lets the backend tail-call the instruction callback.
+  virtual void execute_instruction_impl(Instruction *inst, Wavefront &wf) = 0;
+
   ComputeUnitCore(std::string name, const Config &config, GpuMemory *memory, L2Cache *l2,
                   uint32_t wf_size);
 
@@ -1436,9 +1449,8 @@ protected:
   /// @brief Execute one instruction on the given wavefront.
   ///
   /// @brief Execute one instruction on the given wavefront via direct dispatch.
-  void execute_instruction(Instruction *inst, Wavefront &wf) override {
+  void execute_instruction_impl(Instruction *inst, Wavefront &wf) override {
     assert(inst->execute && "instruction execution backend is not linked");
-    wf.clear_instruction_execution_error();
     inst->execute(*inst, &wf);
   }
 
