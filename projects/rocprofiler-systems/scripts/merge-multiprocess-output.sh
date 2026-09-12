@@ -37,16 +37,36 @@ if [ ! -d "$FOLDER_PATH" ]; then
   exit 1
 fi
 
-# Check if there are more than one .proto files
-PROTO_FILES=("$FOLDER_PATH"/*.proto)
-if [ ${#PROTO_FILES[@]} -le 1 ]; then
+# Output file name
+OUTPUT_FILE="merged.pftrace"
+# Legacy output file name, excluded below so a stale merged.proto from a
+# pre-rename run is not folded back in as if it were an unmerged per-process
+# trace.
+LEGACY_OUTPUT_FILE="merged.proto"
+
+# Collect the per-process traces. '.proto' is still accepted so that output
+# directories produced by older versions, or by an explicitly configured
+# ROCPROFSYS_PERFETTO_FILE, still merge. Previously merged output (current or
+# legacy name) is excluded so that re-running the merge does not fold its own
+# result back in.
+shopt -s nullglob
+TRACE_FILES=()
+for file in "$FOLDER_PATH"/*.pftrace "$FOLDER_PATH"/*.proto; do
+  base=$(basename "$file")
+  if [ "$base" != "$OUTPUT_FILE" ] && [ "$base" != "$LEGACY_OUTPUT_FILE" ]; then
+    TRACE_FILES+=("$file")
+  fi
+done
+
+# Check if there is more than one trace file
+if [ ${#TRACE_FILES[@]} -le 1 ]; then
   exit 0
 fi
 
 echo "Merging multiprocess files ..."
-# Check if all .proto files have been fully written or wait
+# Check if all trace files have been fully written or wait
 TIMEOUT=60  # Timeout in seconds
-for file in "${PROTO_FILES[@]}"; do
+for file in "${TRACE_FILES[@]}"; do
   SECONDS=0
   while lsof "$file" > /dev/null 2>&1; do
     if [ $SECONDS -ge $TIMEOUT ]; then
@@ -58,10 +78,7 @@ for file in "${PROTO_FILES[@]}"; do
   done
 done
 
-# Output file name
-OUTPUT_FILE="merged.proto"
+# Merge all trace files into one file
+cat "${TRACE_FILES[@]}" > "$FOLDER_PATH"/"$OUTPUT_FILE"
 
-# Merge all .proto files into one file
-cat "$FOLDER_PATH"/*.proto > "$FOLDER_PATH"/"$OUTPUT_FILE"
-
-echo "All multiprocess .proto files in '$FOLDER_PATH' have been merged into '$OUTPUT_FILE'."
+echo "All multiprocess trace files in '$FOLDER_PATH' have been merged into '$OUTPUT_FILE'."

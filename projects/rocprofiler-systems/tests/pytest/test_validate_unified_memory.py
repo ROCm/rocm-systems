@@ -233,7 +233,7 @@ def test_is_fault_only_output_depends_on_positive_integer_migrations(
     payload["devices"][0]["migrations"]["host_to_device"]["count"] = count
     write_text_output(tmp_path)
     write_json_output(tmp_path, payload)
-    (tmp_path / "perfetto-trace.proto").write_bytes(
+    (tmp_path / "perfetto-trace.pftrace").write_bytes(
         b"Unified Memory Page Faults Unified Memory Migration Throughput"
     )
 
@@ -270,7 +270,7 @@ def test_validate_perfetto_fault_only_trace_checks_track_names(
     """Fault-only traces require the fault track and reject throughput tracks."""
     write_text_output(tmp_path)
     write_json_output(tmp_path, valid_data)
-    (tmp_path / "perfetto-trace.proto").write_bytes(trace_content)
+    (tmp_path / "perfetto-trace.pftrace").write_bytes(trace_content)
 
     result = run_validator(tests_dir, tmp_path)
 

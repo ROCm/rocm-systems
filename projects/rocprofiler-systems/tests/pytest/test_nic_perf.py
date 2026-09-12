@@ -54,8 +54,8 @@ def nic_perf_download_url_2() -> str:
 class TestNIC(RocprofsysTest):
     """Tests for NIC performance."""
 
-    PERFETTO_PASS_REGEX = [r"perfetto-trace\.proto validated"]
-    PERFETTO_FAIL_REGEX = [r"Failure validating.*perfetto-trace\.proto"]
+    PERFETTO_PASS_REGEX = [r"perfetto-trace\.pftrace validated"]
+    PERFETTO_FAIL_REGEX = [r"Failure validating.*perfetto-trace\.pftrace"]
 
     def test_performance(
         self,

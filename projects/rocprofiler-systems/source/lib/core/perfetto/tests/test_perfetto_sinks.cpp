@@ -65,7 +65,7 @@ TEST(locked_file_append, creates_parent_directory_and_appends_in_order)
 {
     const auto root = std::filesystem::path{ ::testing::TempDir() } /
                       "rocprofsys-locked-file-append-test";
-    const auto path = root / "nested" / "merged.proto";
+    const auto path = root / "nested" / "merged.pftrace";
 
     std::filesystem::remove_all(root);
 
@@ -408,7 +408,7 @@ TEST(single_file_sink, finalize_creates_parent_directories)
 {
     const auto root = std::filesystem::path{ ::testing::TempDir() } /
                       "rocprofsys-single-file-sink-test";
-    const auto path = root / "nested" / "trace.proto";
+    const auto path = root / "nested" / "trace.pftrace";
     std::filesystem::remove_all(root);
 
     rocprofsys::output_file_registry   registry;

@@ -1916,6 +1916,9 @@ def _cleanup_temp_patterns() -> list[str]:
                 f"{d}/rocprofsys-*.tmp",
                 f"{d}/buffered_storage*.bin",
                 f"{d}/metadata*.json",
+                f"{d}/perfetto-*.pftrace",
+                f"{d}/perfetto_trace*.pftrace",
+                # retained so stale artifacts from older builds are cleaned too
                 f"{d}/perfetto-*.proto",
                 f"{d}/perfetto_trace*.proto",
                 f"{d}/hsa-*.tmp",
@@ -2541,7 +2544,7 @@ def assert_perfetto(subtests, tests_dir, request, test_output_dir):
 
     Args not from validate_perfetto_trace:
         subtest_name: Name shown in subtest output (defaults to "Perfetto validation")
-        perfetto_file: (Optional) Name of the perfetto file in the test output directory (e.g., for merged.proto)
+        perfetto_file: (Optional) Name of the perfetto file in the test output directory (e.g., for merged.pftrace)
         pass_regex: (Optional) Regex patterns that must be found in validation.stdout
         fail_regex: (Optional) Regex patterns that must NOT be found in validation.stdout
         skip_on_fail: If True, skip instead of fail when validation fails

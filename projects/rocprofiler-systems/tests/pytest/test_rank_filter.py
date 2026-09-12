@@ -44,7 +44,7 @@ def assert_per_rank_outputs(
     (`check_use_rocpd()` — requires GPU and ROCm >= 7.0)
     """
     per_rank_files = [
-        "perfetto-trace-{rank}.proto",
+        "perfetto-trace-{rank}.pftrace",
         "wall_clock-{rank}.txt",
         "wall_clock-{rank}.json",
         "functions-{rank}.json",

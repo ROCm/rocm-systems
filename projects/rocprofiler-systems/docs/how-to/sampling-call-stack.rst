@@ -401,7 +401,7 @@ Here is the full output from the previous
    [rocprof-sys][1785877][0][rocprofsys_finalize] rocprof-sys/process/1785877/thread/4 : 0.212029 sec wall_clock, 0.211694 sec thread_cpu_clock,   99.8 % thread_cpu_util,    1.152 MB peak_rss [laps: 1]
    [rocprof-sys][1785877][0][rocprofsys_finalize]
    [rocprof-sys][1785877][0][rocprofsys_finalize] Finalizing perfetto...
-   [rocprof-sys][1785877][perfetto]> Outputting '/home/user/code/rocprofiler-systems/build-release/rocprofiler-systems-output/2024-07-15_16.21/parallel-overhead-locksperfetto-trace-1785877.proto' (39.12 KB / 0.04 MB / 0.00 GB)... Done
+   [rocprof-sys][1785877][perfetto]> Outputting '/home/user/code/rocprofiler-systems/build-release/rocprofiler-systems-output/2024-07-15_16.21/parallel-overhead-locksperfetto-trace-1785877.pftrace' (39.12 KB / 0.04 MB / 0.00 GB)... Done
    [rocprof-sys][1785877][wall_clock]> Outputting 'rocprof-sys-output/2024-07-15_16.21/parallel-overhead-lockswall_clock-1785877.json'
    [rocprof-sys][1785877][wall_clock]> Outputting 'rocprof-sys-output/2024-07-15_16.21/parallel-overhead-lockswall_clock-1785877.txt'
    [rocprof-sys][1785877][metadata]> Outputting 'rocprof-sys-output/2024-07-15_16.21/parallel-overhead-locksmetadata-1785877.json' and 'rocprof-sys-output/2024-07-15_16.21/parallel-overhead-locksfunctions-1785877.json'
