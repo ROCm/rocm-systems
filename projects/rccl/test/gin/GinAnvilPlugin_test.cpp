@@ -302,7 +302,7 @@ TEST_F(GinAnvilPluginTest, CreateContext_PublishesDeviceFabricA2ALane) {
   EXPECT_EQ(hostCtx.fabricA2APeerScratch, reinterpret_cast<void**>(mockComm_.comm.ddaPeerPtrsDev));
   EXPECT_EQ(hostCtx.fabricA2ALlEpoch, mockComm_.comm.ddaLLEpochDev);
   EXPECT_EQ(hostCtx.fabricA2ALlEpochLen, mockComm_.comm.ddaLLEpochLen);
-  EXPECT_EQ(hostCtx.fabricA2ALlThreshold, 64u * 1024u);
+  EXPECT_EQ(hostCtx.fabricA2ALlThreshold, 256u * 1024u);
   EXPECT_EQ(hostCtx.fabricA2AScratchBytes, mockComm_.comm.ddaScratchBytes);
 
   plugin_.destroyContext(ginCtx);

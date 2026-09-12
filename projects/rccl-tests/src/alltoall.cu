@@ -270,9 +270,27 @@ using bf16 = __hip_bfloat16;
 #include <cuda_bf16.h>
 using bf16 = __nv_bfloat16;
 #endif
+#include <cstdlib>
 using gin::fabric::kGinFabricLlAgMaxBlocksPerPeer;
+using gin::fabric::kGinFabricLlA2ADefaultMaxBpp;
 using gin::fabric::ginFabricLlAlltoAllBlocksPerPeer;
 using gin::fabric::ginFabricLlAlltoAllSizeOk;
+
+// Cap on fabric-LL blocks-per-peer (1–8). Default 4. Hard max 8.
+static int AlltoAllGinFabricLlMaxBpp() {
+  static int cached = -1;
+  if (cached >= 0) return cached;
+  const char* e = getenv("RCCL_GIN_FABRIC_LL_A2A_MAX_BPP");
+  if (!e || !e[0]) e = getenv("NCCL_GIN_FABRIC_LL_A2A_MAX_BPP");
+  int v = kGinFabricLlA2ADefaultMaxBpp;
+  if (e && e[0]) {
+    char* end = nullptr;
+    const long n = strtol(e, &end, 10);
+    if (end != e && end && *end == '\0' && n >= 1 && n <= kGinFabricLlAgMaxBlocksPerPeer) v = (int)n;
+  }
+  cached = v;
+  return cached;
+}
 
 // --device_timing still uses a gin.put-only 1D timed kernel; skip it when the
 // production path would take fabric LL. Production does not use this helper.
@@ -337,7 +355,7 @@ __device__ void ginAlltoAllBody(ncclWindow_t sendwin, size_t sendoffset, ncclWin
 // One launch; the GPU picks fabric LL vs gin.put from the backend context + size.
 template <typename T, int NRANKS_CT>
 __global__ void GinAlltoAllKernel(ncclWindow_t sendwin, size_t sendoffset, ncclWindow_t recvwin, size_t recvoffset,
-                                  size_t count, int ginPutCtas, struct ncclDevComm devComm) {
+                                  size_t count, int ginPutCtas, int llMaxBpp, struct ncclDevComm devComm) {
   auto* ctx = reinterpret_cast<ncclGinAnvilSdmaGPUContext*>(devComm.ginHandles[0]);
   const size_t perChunkBytes = count * sizeof(T);
   const bool useLL =
@@ -345,7 +363,8 @@ __global__ void GinAlltoAllKernel(ncclWindow_t sendwin, size_t sendoffset, ncclW
       ginFabricLlAlltoAllSizeOk(devComm.nRanks, perChunkBytes, ctx->fabricA2ALlThreshold, ctx->fabricA2AScratchBytes);
 
   if (useLL) {
-    const int bpp = ginFabricLlAlltoAllBlocksPerPeer(perChunkBytes);
+    int bpp = ginFabricLlAlltoAllBlocksPerPeer(perChunkBytes);
+    if (llMaxBpp > 0 && bpp > llMaxBpp) bpp = llMaxBpp;
     if ((int)blockIdx.x >= devComm.nRanks || (int)blockIdx.y >= bpp) return;
     T* sendPtr = static_cast<T*>(ncclGetLsaPointer(sendwin, sendoffset, devComm.lsaRank));
     T* recvPtr = static_cast<T*>(ncclGetLsaPointer(recvwin, recvoffset, devComm.lsaRank));
@@ -370,17 +389,21 @@ template <typename T>
 static testResult_t AlltoAllLaunchGinA2A(void* sendbuff, size_t sendoffset, void* recvbuff, size_t recvoffset,
                                          size_t count, ncclDevComm* devComm, cudaStream_t stream) {
   const int gx = devComm->nRanks > deviceCtaCount ? devComm->nRanks : deviceCtaCount;
+  const int llMaxBpp = AlltoAllGinFabricLlMaxBpp();
+  // grid.y follows size-derived bpp, capped by RCCL_GIN_FABRIC_LL_A2A_MAX_BPP (default 4, max 8).
+  int bpp = ginFabricLlAlltoAllBlocksPerPeer(count * sizeof(T));
+  if (bpp > llMaxBpp) bpp = llMaxBpp;
   dim3 block(256);
-  dim3 grid((unsigned)gx, (unsigned)kGinFabricLlAgMaxBlocksPerPeer);
+  dim3 grid((unsigned)gx, (unsigned)(bpp > 0 ? bpp : 1));
   if (devComm->nRanks == 4) {
     GinAlltoAllKernel<T, 4><<<grid, block, 0, stream>>>((ncclWindow_t)sendbuff, sendoffset, (ncclWindow_t)recvbuff,
-                                                        recvoffset, count, deviceCtaCount, *devComm);
+                                                        recvoffset, count, deviceCtaCount, llMaxBpp, *devComm);
   } else if (devComm->nRanks == 8) {
     GinAlltoAllKernel<T, 8><<<grid, block, 0, stream>>>((ncclWindow_t)sendbuff, sendoffset, (ncclWindow_t)recvbuff,
-                                                        recvoffset, count, deviceCtaCount, *devComm);
+                                                        recvoffset, count, deviceCtaCount, llMaxBpp, *devComm);
   } else {
     GinAlltoAllKernel<T, 0><<<grid, block, 0, stream>>>((ncclWindow_t)sendbuff, sendoffset, (ncclWindow_t)recvbuff,
-                                                        recvoffset, count, deviceCtaCount, *devComm);
+                                                        recvoffset, count, deviceCtaCount, llMaxBpp, *devComm);
   }
   CUDACHECK(cudaGetLastError());
   return testSuccess;

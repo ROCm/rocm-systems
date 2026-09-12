@@ -358,8 +358,7 @@ ncclResult_t ncclGinDevCommSetup(struct ncclComm* comm, struct ncclDevCommRequir
         comm->ddaScratchBytes,
         comm->ddaLLEpochLen,
         comm->nRanks};
-    const size_t llThreshold =
-        gin::fabric::resolveGinFabricLLThresholdAlltoAll((size_t)rcclParamDdaLLThreshold());
+    const size_t llThreshold = gin::fabric::resolveGinFabricLLThresholdAlltoAll();
     const int localEnabled =
         gin::fabric::ginFabricA2ALaneTryBuild(commState, rcclParamDdaLL() != 0, llThreshold, &lane) ? 1 : 0;
     int allEnabled = 0;

@@ -6,7 +6,7 @@
 
 // AllToAll fabric LL vs gin.put/SDMA total-size gate (bytes, nRanks * per-peer).
 // If RCCL_GIN_FABRIC_LL_THRESHOLD_ALLTOALL is set (explicit 0 is honored),
-// use it; otherwise fall back to RCCL_DDA_LL_THRESHOLD.
+// use it; otherwise kGinFabricLlAlltoAllThresholdDefault (256 KiB).
 
 #ifndef _NCCL_DEVICE_GIN_ANVIL_SDMA_GIN_FABRIC_LL_POLICY_H_
 #define _NCCL_DEVICE_GIN_ANVIL_SDMA_GIN_FABRIC_LL_POLICY_H_
@@ -31,6 +31,10 @@ constexpr size_t kGinFabricLlPacketBytes = 16;
 constexpr size_t kGinFabricLlA2ASlotStridePkts = kGinFabricLlMaxBytes / kGinFabricLlPacketBytes;
 constexpr size_t kGinFabricLlA2APktsPerBlock = 256;
 constexpr int kGinFabricLlAgMaxBlocksPerPeer = 8;
+// Test#5 / gin-sdma A2A launch default. Hard max remains 8 (epoch slots).
+constexpr int kGinFabricLlA2ADefaultMaxBpp = 4;
+// Unset RCCL_GIN_FABRIC_LL_THRESHOLD_ALLTOALL: LL for total size <= 256 KiB.
+constexpr size_t kGinFabricLlAlltoAllThresholdDefault = (size_t)256 * 1024;
 
 GIN_FABRIC_LL_HD inline size_t ginFabricLlA2AScratchBytes(int nRanks) {
   return (size_t)2 * (size_t)nRanks * kGinFabricLlA2ASlotStridePkts * kGinFabricLlPacketBytes;
@@ -66,10 +70,9 @@ inline bool ginAnvilUseFabricMemPredicate(bool ddaFabricPath, int cliqueSize, in
   return ddaFabricPath && cliqueSize == nRanks && cuMemEnabled;
 }
 
-inline size_t pickGinFabricLLThresholdAlltoAll(bool alltoallSet, unsigned long long alltoallVal,
-                                               size_t ddaLLThreshold) {
+inline size_t pickGinFabricLLThresholdAlltoAll(bool alltoallSet, unsigned long long alltoallVal) {
   if (alltoallSet) return (size_t)alltoallVal;
-  return ddaLLThreshold;
+  return kGinFabricLlAlltoAllThresholdDefault;
 }
 
 #if !defined(__CUDA_ARCH__) && !defined(__HIP_DEVICE_COMPILE__)
@@ -102,12 +105,12 @@ inline bool parseGinFabricLLThresholdEnv(const char* name, unsigned long long* v
   return true;
 }
 
-inline size_t resolveGinFabricLLThresholdAlltoAll(size_t ddaLLThreshold) {
+inline size_t resolveGinFabricLLThresholdAlltoAll() {
   unsigned long long alltoallVal = 0;
   const bool alltoallSet =
       parseGinFabricLLThresholdEnv("RCCL_GIN_FABRIC_LL_THRESHOLD_ALLTOALL", &alltoallVal) ||
       parseGinFabricLLThresholdEnv("NCCL_GIN_FABRIC_LL_THRESHOLD_ALLTOALL", &alltoallVal);
-  return pickGinFabricLLThresholdAlltoAll(alltoallSet, alltoallVal, ddaLLThreshold);
+  return pickGinFabricLLThresholdAlltoAll(alltoallSet, alltoallVal);
 }
 
 struct GinFabricA2ACommState {

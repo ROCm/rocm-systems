@@ -920,8 +920,7 @@ static ncclResult_t ginAnvilCreateContext(void* collComm, ncclGinConfig_t* confi
   ctx->gpuCtxHost.fabricA2AEnabled = 0;
 
   if (ginAnvilUseFabricMem(cctx->comm)) {
-    const size_t llThreshold =
-        gin::fabric::resolveGinFabricLLThresholdAlltoAll((size_t)rcclParamDdaLLThreshold());
+    const size_t llThreshold = gin::fabric::resolveGinFabricLLThresholdAlltoAll();
     const gin::fabric::GinFabricA2ACommState commState{
         cctx->comm->ddaFabricMemHandler,
         (void**)cctx->comm->ddaPeerPtrsDev,
