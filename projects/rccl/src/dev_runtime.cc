@@ -690,7 +690,7 @@ fail_simple:
   goto exit;
 fail:
   for (int i = 0; i < numSegmentsRegistered; i++) {
-    ncclGinDeregister(comm, mem->ginSegmentInfos[i].ginHostWins);
+    (void)ncclGinDeregister(comm, mem->ginSegmentInfos[i].ginHostWins);
   }
   free(mem->ginSegmentInfos);
   mem->ginSegmentInfos = nullptr;
