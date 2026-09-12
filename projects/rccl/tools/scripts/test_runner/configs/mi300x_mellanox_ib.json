@@ -80,11 +80,7 @@
         "NCCL_SHM_USE_CUDA_MEMCPY": "1"
       },
       "tests": [
-        {
-          "name": "SHM_ComprehensiveWorkflow",
-          "description": "Comprehensive workflow test for shared memory transport",
-          "test_filter": "ShmMPITest.ShmWorkflow"
-        },
+        
         {
           "name": "SHM_CEMemcpy_SendSide",
           "description": "Shared memory test with compute engine memcpy on send side",
@@ -165,16 +161,8 @@
             "NCCL_P2P_DISABLE": "0"
           }
         },
-        {
-          "name": "P2P_WithMemcpy",
-          "description": "Peer-to-peer test with CUDA memcpy and legacy buffer registration",
-          "test_filter": "P2pMPITest.P2pWithMemcpyTest"
-        },
-        {
-          "name": "P2P_SendRecvRegistration",
-          "description": "Test peer-to-peer send/receive buffer registration mechanisms",
-          "test_filter": "P2pMPITest.P2pSendRecvRegistrationTest"
-        },
+        
+        
         {
           "name": "P2P_IpcReg_VerySmallBuffer",
           "description": "Test P2P IPC buffer registration with very small buffer sizes and SHM disabled",
@@ -347,12 +335,7 @@
           "test_filter": "NetTransportMPITest.*",
           "timeout": 600
         },
-        {
-          "name": "NET_MultipleBufferSizes_2Nodes",
-          "description": "Network transport test with multiple buffer sizes across two nodes",
-          "test_filter": "NetTransportMPITest.MultipleBufferSizesTest",
-          "timeout": 180
-        },
+        
         {
           "name": "NET_NetGraphRegister_2Nodes",
           "description": "Network transport test with graph buffer registration across two nodes",
@@ -705,46 +688,14 @@
         "NCCL_DEBUG": "INFO"
       },
       "tests": [
-        {
-          "name": "BitOps",
-          "description": "Bit operation utility tests",
-          "test_filter": "ALIGN_*:DIVUP:ROUNDUP:u32fp*:*Hash:BitOpsTemplate*"
-        },
-        {
-          "name": "MiscTests",
-          "description": "Miscellaneous header-level unit tests (e.g. task coll sorter)",
-          "test_filter": "MiscTests.*"
-        },
-        {
-          "name": "EnqueueCountTests",
-          "description": "Enqueue count operation tests",
-          "test_filter": "EnqueueCountTests.*"
-        },
-        {
-          "name": "DdaCollCommonTests",
-          "description": "Dda collective tests",
-          "test_filter": "DdaCollCommon.*"
-        },
-        {
-          "name": "DeviceOp128_PtrLoadStore",
-          "description": "Pointer-based volatile, relaxed, and acquire/release global load/store roundtrips",
-          "test_filter": "PackRoundtripTest.LdStVolatileGlobalPtr:PackRoundtripTest.LdStRelaxedSysGlobal:PackRoundtripTest.LdStAcquireReleaseSysGlobal:PackRoundtripTest.L2_VolatileGlobalPtr_MultiElement:PackRoundtripTest.CvtaFromGlobal"
-        },
-        {
-          "name": "DeviceOp128_SharedMem",
-          "description": "Shared memory pointer cast, 128-bit load/store, and misaligned load paths",
-          "test_filter": "PackRoundtripTest.ShmemCvtPtr:PackRoundtripTest.LoadStoreShmem128:PackRoundtripTest.LoadShmemMisaligned128_*"
-        },
-        {
-          "name": "DeviceOp128_LoadStorePack",
-          "description": "loadPack/storePack three internal paths (direct cast, funnel-shift, element-by-element) and boundary",
-          "test_filter": "PackRoundtripTest.LoadStorePack_*:PackRoundtripTest.L2_StorePackBoundary:PackRoundtripTest.Store16Load16Global_Direct"
-        },
-        {
-          "name": "DeviceApi",
-          "description": "Verify RCCL Device API: symmetric window registration and ncclDevCommCreate gating",
-          "test_filter": "DeviceApi.*"
-        },
+        
+        
+        
+        
+        
+        
+        
+        
         {
           "name": "Fixtures_All",
           "description": "All release fixture tests"
@@ -1381,32 +1332,6 @@
           "description": "Concurrent AlltoAll on multiple communicators with separate streams",
           "test_filter": "UBR_AllToAllStress.ConcurrentMultiComm_MultiNode",
           "timeout": 300
-        },
-        {
-          "name": "UBR_ConcurrentRegHang_ContiguousBuffer_Grouped",
-          "description": "Grouped send/recv with contiguous buffer views (should pass)",
-          "test_filter": "UBR_ConcurrentRegHang.ContiguousBuffer_Grouped_SHOULD_WORK"
-        },
-        {
-          "name": "UBR_ConcurrentRegHang_AlltoAll_Contiguous",
-          "description": "ncclAlltoAll with contiguous registered buffers (should pass)",
-          "test_filter": "UBR_ConcurrentRegHang.AllToAll_ContiguousBuffer_SHOULD_WORK"
-        },
-        {
-          "name": "UBR_ConcurrentRegHang_AlltoAll_Stress",
-          "description": "Stress test: 50 iterations of ncclAlltoAll with contiguous buffers",
-          "test_filter": "UBR_ConcurrentRegHang.AllToAll_ContiguousBuffer_Stress_SHOULD_WORK",
-          "timeout": 300
-        },
-        {
-          "name": "UBR_ConcurrentRegHang_Comparison",
-          "description": "Side-by-side comparison of contiguous vs separate buffer patterns",
-          "test_filter": "UBR_ConcurrentRegHang.ContiguousVsSeparate_Comparison_SHOULD_WORK"
-        },
-        {
-          "name": "UBR_ConcurrentRegHang_NoRegistration",
-          "description": "Baseline: separate buffers without UBR registration (should pass)",
-          "test_filter": "UBR_ConcurrentRegHang.SeparateBuffers_NoRegistration_SHOULD_WORK"
         }
       ]
     },
@@ -1470,36 +1395,16 @@
           "test_filter": "UBR_ConcurrentRegHang.SeparateBuffers_Grouped_EXPECTED_HANG",
           "timeout": 30
         },
-        {
-          "name": "UBR_ContiguousBuffer_Success",
-          "description": "Demonstrates fix: Grouped send/recv with contiguous buffer views",
-          "test_filter": "UBR_ConcurrentRegHang.ContiguousBuffer_Grouped_SHOULD_WORK"
-        },
-        {
-          "name": "UBR_AlltoAll_Contiguous_Success",
-          "description": "ncclAlltoAll with contiguous registered buffers",
-          "test_filter": "UBR_ConcurrentRegHang.AllToAll_ContiguousBuffer_SHOULD_WORK"
-        },
-        {
-          "name": "UBR_AlltoAll_Stress_Success",
-          "description": "Stress test: 50 iterations of ncclAlltoAll with contiguous buffers",
-          "test_filter": "UBR_ConcurrentRegHang.AllToAll_ContiguousBuffer_Stress_SHOULD_WORK",
-          "timeout": 300
-        },
-        {
-          "name": "UBR_ContiguousVsSeparate_Comparison",
-          "description": "Side-by-side comparison showing contiguous pattern works",
-          "test_filter": "UBR_ConcurrentRegHang.ContiguousVsSeparate_Comparison_SHOULD_WORK"
-        },
-        {
-          "name": "UBR_NoRegistration_Baseline",
-          "description": "Baseline: separate buffers work when not registered",
-          "test_filter": "UBR_ConcurrentRegHang.SeparateBuffers_NoRegistration_SHOULD_WORK"
-        },
+        
+        
+        
+        
+        
         {
           "name": "UBR_ConcurrentRegHang_AllWorkingTests",
           "description": "Run all tests that should work (excludes the hang test)",
-          "test_filter": "UBR_ConcurrentRegHang.*SHOULD_WORK"
+          "test_filter": "UBR_ConcurrentRegHang.*SHOULD_WORK",
+          "timeout": 300
         }
       ]
     },
@@ -3637,7 +3542,7 @@
         {
           "name": "GIN_DeviceMPI_AllTests",
           "description": "GIN proxy device-side MPI tests over IB across two nodes (put/signal/counter/barrier/alltoall)",
-          "test_filter": "GinMPIDeviceTests.*:-GinMPIDeviceTests.VASignal_*:-GinMPIDeviceTests.SignalAdd_PutValue:-GinMPIDeviceTests.SignalInc_MixingRule:-GinMPIDeviceTests.Signal_WaitRead_Low32Bits:-GinMPIDeviceTests.SignalShadow_GetPtr:-GinMPIDeviceTests.MultiContext_NonPowerOf2:-GinMPIDeviceTests.RailConnection_Create:-GinMPIDeviceTests.*_MultiContext",
+          "test_filter": "GinMPIDeviceTests.*-GinMPIDeviceTests.MultiContext_NonPowerOf2:GinMPIDeviceTests.RailConnection_Create:GinMPIDeviceTests.*_MultiContext",
           "timeout": 600
         },
         {
@@ -3836,65 +3741,7 @@
         }
       ]
     },
-    "gin_device_signal_phase1": {
-      "extends": "default",
-      "is_gtest": true,
-      "binary": "rccl-UnitTestsMPI",
-      "num_ranks": 2,
-      "num_nodes": 2,
-      "num_gpus": 1,
-      "timeout": 300,
-      "env_variables": {
-        "NCCL_GIN_TYPE": "2",
-        "NCCL_GIN_ENABLE": "1",
-        "NCCL_CUMEM_ENABLE": "1",
-        "NCCL_DMABUF_ENABLE": "1",
-        "NCCL_ENV_PLUGIN": "none",
-        "HSA_NO_SCRATCH_RECLAIM": "1"
-      },
-      "tests": [
-        {
-          "name": "GIN_VASignal_Put",
-          "description": "put + ncclGin_VASignalInc on a dedicated VA signal window; consumer waitSignal",
-          "test_filter": "GinMPIDeviceTests.VASignal_Put"
-        },
-        {
-          "name": "GIN_VASignal_NoPayload_IncAndAdd",
-          "description": "Zero-byte gin.signal() phases: VASignalInc, VASignalAdd, indexed SignalAdd",
-          "test_filter": "GinMPIDeviceTests.VASignal_NoPayload_IncAndAdd"
-        },
-        {
-          "name": "GIN_VASignal_ReadAndReset",
-          "description": "put + VASignalAdd (non-zero VA offset, STRICT_ORDERING) with payload verify; waitSignal/readSignal/resetSignal on VA and indexed cells",
-          "test_filter": "GinMPIDeviceTests.VASignal_ReadAndReset"
-        },
-        {
-          "name": "GIN_SignalAdd_PutValue",
-          "description": "putValue inline payload plus indexed ncclGin_SignalAdd",
-          "test_filter": "GinMPIDeviceTests.SignalAdd_PutValue"
-        },
-        {
-          "name": "GIN_SignalInc_MixingRule",
-          "description": "SignalInc/SignalAdd mixing and resetSignal recovery on indexed pool",
-          "test_filter": "GinMPIDeviceTests.SignalInc_MixingRule"
-        },
-        {
-          "name": "GIN_Signal_WaitRead_Low32Bits",
-          "description": "waitSignal/readSignal with 32-bit masked low-bit compare and readback",
-          "test_filter": "GinMPIDeviceTests.Signal_WaitRead_Low32Bits"
-        },
-        {
-          "name": "GIN_VASignal_StrictOrderingFlag",
-          "description": "gin.signal() + VASignalAdd with NCCL_WIN_STRICT_ORDERING registration",
-          "test_filter": "GinMPIDeviceTests.VASignal_StrictOrderingFlag"
-        },
-        {
-          "name": "GIN_SignalShadow_GetPtr",
-          "description": "getSignalShadowPtr/increaseSignalShadow local indexed shadow table (no network)",
-          "test_filter": "GinMPIDeviceTests.SignalShadow_GetPtr"
-        }
-      ]
-    },
+    
     "device_api_mpi_lsa": {
       "extends": "default",
       "is_gtest": true,
@@ -4622,12 +4469,7 @@
       "config": "gin_device_mpi",
       "enabled": true
     },
-    {
-      "name": "GIN Device MPI - Phase-1 Signal Coverage",
-      "description": "GIN IB PROXY Phase-1 device signal tests: VASignalInc/Add, read/reset, indexed SignalAdd, rolling bits, strict ordering, shadow ptr (2 ranks, cross-node)",
-      "config": "gin_device_signal_phase1",
-      "enabled": true
-    },
+    
     {
       "name": "Device API MPI - LSA Reduce/Copy",
       "description": "DeviceApiMPITests memory/LSA pointer, barrier, reduce/copy, and custom RedOp coverage on 2 co-located ranks (NCCL_CUMEM_ENABLE=1)",

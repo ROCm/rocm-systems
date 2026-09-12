@@ -59,11 +59,7 @@
         "NCCL_SHM_USE_CUDA_MEMCPY": "1"
       },
       "tests": [
-        {
-          "name": "SHM_ComprehensiveWorkflow",
-          "description": "Comprehensive workflow test for shared memory transport",
-          "test_filter": "ShmMPITest.ShmWorkflow"
-        },
+        
         {
           "name": "SHM_CEMemcpy_SendSide",
           "description": "Shared memory test with compute engine memcpy on send side",
@@ -121,16 +117,8 @@
             "NCCL_P2P_DISABLE": "0"
           }
         },
-        {
-          "name": "P2P_WithMemcpy",
-          "description": "Peer-to-peer test with CUDA memcpy and legacy buffer registration",
-          "test_filter": "P2pMPITest.P2pWithMemcpyTest"
-        },
-        {
-          "name": "P2P_SendRecvRegistration",
-          "description": "Test peer-to-peer send/receive buffer registration mechanisms",
-          "test_filter": "P2pMPITest.P2pSendRecvRegistrationTest"
-        },
+        
+        
         {
           "name": "P2P_IpcReg_VerySmallBuffer",
           "description": "Test P2P IPC buffer registration with very small buffer sizes and SHM disabled",
@@ -167,12 +155,7 @@
           "test_filter": "NetTransportMPITest.*",
           "timeout": 600
         },
-        {
-          "name": "NET_MultipleBufferSizes_2Nodes",
-          "description": "Network transport test with multiple buffer sizes across two nodes",
-          "test_filter": "NetTransportMPITest.MultipleBufferSizesTest",
-          "timeout": 180
-        },
+        
         {
           "name": "NET_NetGraphRegister_2Nodes",
           "description": "Network transport test with graph buffer registration across two nodes",
@@ -1119,41 +1102,13 @@
         "NCCL_DEBUG": "INFO"
       },
       "tests": [
-        {
-          "name": "BitOps",
-          "description": "Bit operation utility tests",
-          "test_filter": "ALIGN_*:DIVUP:ROUNDUP:u32fp*:*Hash:BitOpsTemplate*"
-        },
-        {
-          "name": "MiscTests",
-          "description": "Miscellaneous header-level unit tests (e.g. task coll sorter)",
-          "test_filter": "MiscTests.*"
-        },
-        {
-          "name": "EnqueueCountTests",
-          "description": "Enqueue count operation tests",
-          "test_filter": "EnqueueCountTests.*"
-        },
-        {
-          "name": "DdaCollCommonTests",
-          "description": "Dda collective tests",
-          "test_filter": "DdaCollCommon.*"
-        },
-        {
-          "name": "DeviceOp128_PtrLoadStore",
-          "description": "Pointer-based volatile, relaxed, and acquire/release global load/store roundtrips",
-          "test_filter": "PackRoundtripTest.LdStVolatileGlobalPtr:PackRoundtripTest.LdStRelaxedSysGlobal:PackRoundtripTest.LdStAcquireReleaseSysGlobal:PackRoundtripTest.L2_VolatileGlobalPtr_MultiElement:PackRoundtripTest.CvtaFromGlobal"
-        },
-        {
-          "name": "DeviceOp128_SharedMem",
-          "description": "Shared memory pointer cast, 128-bit load/store, and misaligned load paths",
-          "test_filter": "PackRoundtripTest.ShmemCvtPtr:PackRoundtripTest.LoadStoreShmem128:PackRoundtripTest.LoadShmemMisaligned128_*"
-        },
-        {
-          "name": "DeviceOp128_LoadStorePack",
-          "description": "loadPack/storePack three internal paths (direct cast, funnel-shift, element-by-element) and boundary",
-          "test_filter": "PackRoundtripTest.LoadStorePack_*:PackRoundtripTest.L2_StorePackBoundary:PackRoundtripTest.Store16Load16Global_Direct"
-        },
+        
+        
+        
+        
+        
+        
+        
         {
           "name": "Fixtures_All",
           "description": "All release fixture tests"
@@ -2041,32 +1996,6 @@
           "description": "Concurrent AlltoAll on multiple communicators with separate streams",
           "test_filter": "UBR_AllToAllStress.ConcurrentMultiComm_MultiNode",
           "timeout": 300
-        },
-        {
-          "name": "UBR_ConcurrentRegHang_ContiguousBuffer_Grouped",
-          "description": "Grouped send/recv with contiguous buffer views (should pass)",
-          "test_filter": "UBR_ConcurrentRegHang.ContiguousBuffer_Grouped_SHOULD_WORK"
-        },
-        {
-          "name": "UBR_ConcurrentRegHang_AlltoAll_Contiguous",
-          "description": "ncclAlltoAll with contiguous registered buffers (should pass)",
-          "test_filter": "UBR_ConcurrentRegHang.AllToAll_ContiguousBuffer_SHOULD_WORK"
-        },
-        {
-          "name": "UBR_ConcurrentRegHang_AlltoAll_Stress",
-          "description": "Stress test: 50 iterations of ncclAlltoAll with contiguous buffers",
-          "test_filter": "UBR_ConcurrentRegHang.AllToAll_ContiguousBuffer_Stress_SHOULD_WORK",
-          "timeout": 300
-        },
-        {
-          "name": "UBR_ConcurrentRegHang_Comparison",
-          "description": "Side-by-side comparison of contiguous vs separate buffer patterns",
-          "test_filter": "UBR_ConcurrentRegHang.ContiguousVsSeparate_Comparison_SHOULD_WORK"
-        },
-        {
-          "name": "UBR_ConcurrentRegHang_NoRegistration",
-          "description": "Baseline: separate buffers without UBR registration (should pass)",
-          "test_filter": "UBR_ConcurrentRegHang.SeparateBuffers_NoRegistration_SHOULD_WORK"
         }
       ]
     },
@@ -2093,36 +2022,16 @@
           "test_filter": "UBR_ConcurrentRegHang.SeparateBuffers_Grouped_EXPECTED_HANG",
           "timeout": 30
         },
-        {
-          "name": "UBR_ContiguousBuffer_Success",
-          "description": "Demonstrates fix: Grouped send/recv with contiguous buffer views",
-          "test_filter": "UBR_ConcurrentRegHang.ContiguousBuffer_Grouped_SHOULD_WORK"
-        },
-        {
-          "name": "UBR_AlltoAll_Contiguous_Success",
-          "description": "ncclAlltoAll with contiguous registered buffers",
-          "test_filter": "UBR_ConcurrentRegHang.AllToAll_ContiguousBuffer_SHOULD_WORK"
-        },
-        {
-          "name": "UBR_AlltoAll_Stress_Success",
-          "description": "Stress test: 50 iterations of ncclAlltoAll with contiguous buffers",
-          "test_filter": "UBR_ConcurrentRegHang.AllToAll_ContiguousBuffer_Stress_SHOULD_WORK",
-          "timeout": 300
-        },
-        {
-          "name": "UBR_ContiguousVsSeparate_Comparison",
-          "description": "Side-by-side comparison showing contiguous pattern works",
-          "test_filter": "UBR_ConcurrentRegHang.ContiguousVsSeparate_Comparison_SHOULD_WORK"
-        },
-        {
-          "name": "UBR_NoRegistration_Baseline",
-          "description": "Baseline: separate buffers work when not registered",
-          "test_filter": "UBR_ConcurrentRegHang.SeparateBuffers_NoRegistration_SHOULD_WORK"
-        },
+        
+        
+        
+        
+        
         {
           "name": "UBR_ConcurrentRegHang_AllWorkingTests",
           "description": "Run all tests that should work (excludes the hang test)",
-          "test_filter": "UBR_ConcurrentRegHang.*SHOULD_WORK"
+          "test_filter": "UBR_ConcurrentRegHang.*SHOULD_WORK",
+          "timeout": 300
         }
       ]
     },
