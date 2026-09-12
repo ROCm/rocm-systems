@@ -111,10 +111,26 @@ class GinAnvilPluginTest : public ::testing::Test {
     void* listen = nullptr;
     char handle[NCCL_NET_HANDLE_MAXSIZE] = {};
     ASSERT_EQ(plugin_.listen(ictx, 0, handle, &listen), ncclSuccess);
-    void* handles[8] = {};
-    for (int i = 0; i < nranks; ++i) handles[i] = handle;
-    ASSERT_EQ(plugin_.connect(ictx, handles, nranks, 0, listen, coll), ncclSuccess);
+    std::vector<void*> handles(static_cast<size_t>(nranks), handle);
+    ASSERT_EQ(plugin_.connect(ictx, handles.data(), nranks, 0, listen, coll), ncclSuccess);
     ASSERT_EQ(plugin_.closeListen(listen), ncclSuccess);
+  }
+
+  void startTwoRankGin(void** ictx, void** coll, void** ginCtx) {
+    GinAnvilPluginStubs::SetBootstrapNranks(2);
+    mockComm_.get()->devrState.lsaSize = 2;
+    initCtx(ictx);
+    connectColl(*ictx, coll, 2);
+    ncclGinConfig_t cfg{};
+    cfg.nSignals = 2;
+    ncclNetDeviceHandle_v11_t* devHandle = nullptr;
+    ASSERT_EQ(plugin_.createContext(*coll, &cfg, ginCtx, &devHandle), ncclSuccess);
+  }
+
+  void stopGin(void* ictx, void* coll, void* ginCtx) {
+    if (ginCtx) plugin_.destroyContext(ginCtx);
+    if (coll) plugin_.closeColl(coll);
+    if (ictx) plugin_.finalize(ictx);
   }
 };
 
@@ -644,8 +660,8 @@ TEST_F(GinAnvilPluginTest, ConnCheck_NonNumericEnvValueKeepsGateEnabled) {
 
 TEST_F(GinAnvilPluginTest, ConnCheck_DedupUsesCommObjectNotSharedHash) {
   GinAnvilPluginStubs::SetBootstrapNranks(2);
-  GinAnvilMockComm secondComm;
-  secondComm.comm.commHash = mockComm_.get()->commHash;
+  auto secondComm = std::make_unique<GinAnvilMockComm>();
+  secondComm->comm.commHash = mockComm_.get()->commHash;
 
   void* rawFirstLsa = nullptr;
   void* rawSecondLsa = nullptr;
@@ -669,7 +685,7 @@ TEST_F(GinAnvilPluginTest, ConnCheck_DedupUsesCommObjectNotSharedHash) {
 
   void* secondInit = nullptr;
   ASSERT_EQ(plugin_.init(&secondInit, 0, nullptr), ncclSuccess);
-  ncclGinAnvilSetInitContext(secondInit, secondComm.get());
+  ncclGinAnvilSetInitContext(secondInit, secondComm->get());
   void* secondColl = nullptr;
   connectColl(secondInit, &secondColl, 2);
   void* secondGin = nullptr;
@@ -677,7 +693,7 @@ TEST_F(GinAnvilPluginTest, ConnCheck_DedupUsesCommObjectNotSharedHash) {
   ASSERT_EQ(plugin_.createContext(secondColl, &cfg, &secondGin, &secondHandle), ncclSuccess);
   GinAnvilPluginStubs::SetLsaSelfAddr(secondLsa.get());
   char secondArena[4096] = {};
-  EXPECT_EQ(ncclGinAnvilBindResourceWindowSignals(secondComm.get(), secondArena, 0, 1, 2), ncclSuccess);
+  EXPECT_EQ(ncclGinAnvilBindResourceWindowSignals(secondComm->get(), secondArena, 0, 1, 2), ncclSuccess);
   EXPECT_EQ(GinAnvilPluginStubs::GetConnCheckWriteCalls(), 2);
   EXPECT_EQ(GinAnvilPluginStubs::GetConnCheckVerifyCalls(), 2);
 
@@ -719,6 +735,86 @@ TEST_F(GinAnvilPluginTest, ConnCheck_TransientMissRetries) {
   plugin_.destroyContext(ginCtx);
   plugin_.closeColl(coll);
   plugin_.finalize(ictx);
+}
+
+// Permanent missing from ginAnvilConnCheck itself (no inject-fail env), so
+// production still issues three writes and three verifies.
+TEST_F(GinAnvilPluginTest, ConnCheck_VerifyMissingAbortsBind) {
+  void* rawDevLsa = nullptr;
+  ASSERT_EQ(hipMalloc(&rawDevLsa, sizeof(uint64_t) * 2), hipSuccess);
+  HipAllocation devLsa(rawDevLsa);
+  GinAnvilPluginStubs::SetLsaSelfAddr(devLsa.get());
+  GinAnvilPluginStubs::SetConnCheckVerifyMissing(true);
+
+  void* ictx = nullptr;
+  void* coll = nullptr;
+  void* ginCtx = nullptr;
+  startTwoRankGin(&ictx, &coll, &ginCtx);
+
+  char arena[4096] = {};
+  EXPECT_EQ(ncclGinAnvilBindResourceWindowSignals(mockComm_.get(), arena, 0, 1, 2), ncclSystemError);
+  EXPECT_EQ(GinAnvilPluginStubs::GetConnCheckWriteCalls(), 3);
+  EXPECT_EQ(GinAnvilPluginStubs::GetConnCheckVerifyCalls(), 3);
+
+  stopGin(ictx, coll, ginCtx);
+}
+
+// This rank is clean; a peer reports missing via the allgather. Covers the
+// collective abort that replicating localMissing would hide.
+TEST_F(GinAnvilPluginTest, ConnCheck_PeerReportedMissingAbortsBind) {
+  void* rawDevLsa = nullptr;
+  ASSERT_EQ(hipMalloc(&rawDevLsa, sizeof(uint64_t) * 2), hipSuccess);
+  HipAllocation devLsa(rawDevLsa);
+  GinAnvilPluginStubs::SetLsaSelfAddr(devLsa.get());
+
+  void* ictx = nullptr;
+  void* coll = nullptr;
+  void* ginCtx = nullptr;
+  startTwoRankGin(&ictx, &coll, &ginCtx);
+
+  const int setupReady[2] = {0, 0};
+  const int peerMissing[2] = {0, 1};
+  GinAnvilPluginStubs::SetBootstrapIntResult(setupReady, 2);
+  for (int attempt = 0; attempt < 3; ++attempt) {
+    GinAnvilPluginStubs::SetBootstrapIntResult(peerMissing, 2);
+  }
+
+  char arena[4096] = {};
+  EXPECT_EQ(ncclGinAnvilBindResourceWindowSignals(mockComm_.get(), arena, 0, 1, 2), ncclSystemError);
+  EXPECT_EQ(GinAnvilPluginStubs::GetConnCheckWriteCalls(), 3);
+  EXPECT_EQ(GinAnvilPluginStubs::GetConnCheckVerifyCalls(), 3);
+
+  stopGin(ictx, coll, ginCtx);
+}
+
+// Failed bind must un-mark the comm so a later bind retries the gate.
+TEST_F(GinAnvilPluginTest, ConnCheck_FailedBindRetriesGate) {
+  void* rawDevLsa = nullptr;
+  ASSERT_EQ(hipMalloc(&rawDevLsa, sizeof(uint64_t) * 2), hipSuccess);
+  HipAllocation devLsa(rawDevLsa);
+  GinAnvilPluginStubs::SetLsaSelfAddr(devLsa.get());
+  GinAnvilPluginStubs::SetConnCheckVerifyMissing(true);
+
+  void* ictx = nullptr;
+  void* coll = nullptr;
+  void* ginCtx = nullptr;
+  startTwoRankGin(&ictx, &coll, &ginCtx);
+
+  char arena[4096] = {};
+  EXPECT_EQ(ncclGinAnvilBindResourceWindowSignals(mockComm_.get(), arena, 0, 1, 2), ncclSystemError);
+  EXPECT_EQ(GinAnvilPluginStubs::GetConnCheckVerifyCalls(), 3);
+
+  ASSERT_EQ(plugin_.destroyContext(ginCtx), ncclSuccess);
+  ginCtx = nullptr;
+  ncclGinConfig_t cfg{};
+  cfg.nSignals = 2;
+  ncclNetDeviceHandle_v11_t* devHandle = nullptr;
+  ASSERT_EQ(plugin_.createContext(coll, &cfg, &ginCtx, &devHandle), ncclSuccess);
+  EXPECT_EQ(ncclGinAnvilBindResourceWindowSignals(mockComm_.get(), arena, 0, 1, 2), ncclSystemError);
+  EXPECT_EQ(GinAnvilPluginStubs::GetConnCheckWriteCalls(), 6);
+  EXPECT_EQ(GinAnvilPluginStubs::GetConnCheckVerifyCalls(), 6);
+
+  stopGin(ictx, coll, ginCtx);
 }
 
 }  // namespace RcclUnitTesting
