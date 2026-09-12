@@ -63,6 +63,7 @@ using HipAllocation = std::unique_ptr<void, HipFreeDeleter>;
 struct GinAnvilMockComm {
   ncclComm comm{};
   char bootstrapPlaceholder{0};
+  int lsaRanks[16]{};
 
   GinAnvilMockComm() { reset(); }
 
@@ -76,6 +77,8 @@ struct GinAnvilMockComm {
     comm.devrState.lsaSelf = 0;
     comm.devrState.lsaSize = 2;
     comm.devrState.bigSize = 0x100000;
+    for (int i = 0; i < 16; ++i) lsaRanks[i] = i;
+    comm.devrState.lsaRankList = lsaRanks;
   }
 
   ncclComm* get() { return &comm; }
