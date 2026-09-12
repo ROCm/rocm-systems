@@ -26,6 +26,7 @@
 #include "lib/rocprofiler-sdk/spm/decode.hpp"
 #include "lib/rocprofiler-sdk/spm/interface.hpp"
 #include "lib/rocprofiler-sdk/thread_trace/dl.hpp"
+#include "lib/rocprofiler-sdk/thread_trace/shared_trace_resources.hpp"
 
 #include <fmt/format.h>
 #include <cstddef>
@@ -166,10 +167,9 @@ TraceMemoryPool::Alloc(void** ptr, size_t size, desc_t flags, void* data)
     }
     else
     {
-        // Return page aligned data to avoid cache flush overlap
-        status = pool.allocate_fn(
-            pool.gpu_pool_, size + 0x2000, hsa_amd_memory_pool_executable_flag, ptr);
-        *ptr = (void*) ((uintptr_t(*ptr) + 0xFFF) & ~0xFFFul);  // NOLINT(performance-no-int-to-ptr)
+        // Device (SQTT output) buffer: borrowed from the per-agent resource handle.
+        *ptr   = pool.allocate_output(size);
+        status = (*ptr != nullptr) ? HSA_STATUS_SUCCESS : HSA_STATUS_ERROR;
     }
     return status;
 }
@@ -177,10 +177,23 @@ TraceMemoryPool::Alloc(void** ptr, size_t size, desc_t flags, void* data)
 void
 TraceMemoryPool::Free(void* ptr, void* data)
 {
+    if(ptr == nullptr) return;
+
     assert(data);
     auto& pool = *reinterpret_cast<TraceMemoryPool*>(data);
 
+    // Output buffers are borrowed from the retained per-agent resource handle.
+    // AQLProfile still invokes this callback for them, so skip the per-packet free.
+    if(pool.resources && pool.resources->owns_output_buffer(ptr)) return;
+
     if(pool.free_fn) pool.free_fn(ptr);
+}
+
+void*
+TraceMemoryPool::allocate_output(size_t requested_size)
+{
+    auto* resources_ptr = CHECK_NOTNULL(resources.get());
+    return resources_ptr->acquire_output_buffer(*this, output_buffer_index++, requested_size);
 }
 
 hsa_status_t

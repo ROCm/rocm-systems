@@ -26,6 +26,7 @@
 
 #include "lib/rocprofiler-sdk/hsa/aql_packet.hpp"
 #include "lib/rocprofiler-sdk/thread_trace/hsa_util.hpp"
+#include "lib/rocprofiler-sdk/thread_trace/shared_trace_resources.hpp"
 
 #include <array>
 #include <atomic>
@@ -88,7 +89,8 @@ struct triple_buffer_shared_data_t
     /// count bounded; the public API rejects values above this.
     static constexpr size_t MAX_SLOTS = 16;
 
-    att_queue_t* queue{nullptr};  // non-owning; ThreadTracerAgent owns the queue
+    // Keeps the queue and its staging allocations alive until every worker exits.
+    agent_trace_resources_ptr_t resources = {};
 
     /// Global shutdown flag. Producer sets true after draining final chunks
     /// and notifies every slot's cv so consumers can exit.
@@ -122,6 +124,7 @@ struct triple_buffer_producer_data_t
     std::shared_ptr<triple_buffer_shared_data_t> shared{};
     std::unique_ptr<hsa::SQTTBufferingPackets>   buffer_packet{};
     int64_t                                      shader_engine_id{0};
+    size_t                                       active_buffer_size{0};
 };
 
 // Worker flags have three states: stop (either stopped or stopping), running and (global)destructor

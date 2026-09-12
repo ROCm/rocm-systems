@@ -134,10 +134,12 @@ CounterPacketConstruct::construct_packet(const CoreApiTable& coreapi, const AmdE
     return std::make_unique<hsa::CounterAQLPacket>(*aql_agent, pool, _events);
 }
 
-ThreadTraceAQLPacketFactory::ThreadTraceAQLPacketFactory(const hsa::AgentCache&             agent,
-                                                         const thread_trace_parameter_pack& params,
-                                                         const CoreApiTable&                coreapi,
-                                                         const AmdExtTable&                 ext)
+ThreadTraceAQLPacketFactory::ThreadTraceAQLPacketFactory(
+    const hsa::AgentCache&                    agent,
+    const thread_trace_parameter_pack&        params,
+    const CoreApiTable&                       coreapi,
+    const AmdExtTable&                        ext,
+    thread_trace::agent_trace_resources_ptr_t resources)
 {
     this->tracepool                 = hsa::TraceMemoryPool{};
     this->tracepool.allocate_fn     = ext.hsa_amd_memory_pool_allocate_fn;
@@ -147,6 +149,7 @@ ThreadTraceAQLPacketFactory::ThreadTraceAQLPacketFactory(const hsa::AgentCache& 
     this->tracepool.gpu_agent       = agent.get_hsa_agent();
     this->tracepool.cpu_pool_       = agent.cpu_pool();
     this->tracepool.gpu_pool_       = agent.gpu_pool();
+    this->tracepool.resources       = std::move(resources);
 
     uint32_t cu                 = static_cast<uint32_t>(params.target_cu);
     uint32_t shader_engine_mask = static_cast<uint32_t>(params.shader_engine_mask);

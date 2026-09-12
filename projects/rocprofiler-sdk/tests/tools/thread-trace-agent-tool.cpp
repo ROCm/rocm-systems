@@ -35,9 +35,17 @@ namespace ATTTest
 {
 namespace Agent
 {
-rocprofiler_client_id_t* client_id   = nullptr;
-rocprofiler_context_id_t agent_ctx   = {};
-rocprofiler_context_id_t tracing_ctx = {};
+rocprofiler_client_id_t*              client_id   = nullptr;
+rocprofiler_context_id_t              agent_ctx   = {};
+rocprofiler_context_id_t              tracing_ctx = {};
+std::vector<rocprofiler_context_id_t> extra_contexts{};
+
+size_t
+context_count()
+{
+    const char* value = std::getenv("ATT_NUM_CONTEXTS");
+    return value ? std::strtoul(value, nullptr, 10) : 1;
+}
 
 // Callback state allocated on heap to control destruction order
 struct CallbackState
@@ -135,8 +143,8 @@ query_available_agents(rocprofiler_agent_version_t /* version */,
                        size_t       num_agents,
                        void*        user_data)
 {
-    rocprofiler_user_data_t user{};
-    user.ptr = user_data;
+    auto context = *static_cast<rocprofiler_context_id_t*>(user_data);
+    auto user    = rocprofiler_user_data_t{};
 
     for(size_t idx = 0; idx < num_agents; idx++)
     {
@@ -181,7 +189,7 @@ query_available_agents(rocprofiler_agent_version_t /* version */,
         }
 
         ROCPROFILER_CALL(
-            rocprofiler_configure_device_thread_trace_service(agent_ctx,
+            rocprofiler_configure_device_thread_trace_service(context,
                                                               agent->id,
                                                               parameters.data(),
                                                               parameters.size(),
@@ -224,8 +232,22 @@ tool_init(rocprofiler_client_finalize_t /* fini_func */, void* /* tool_data */)
     ROCPROFILER_CALL(rocprofiler_query_available_agents(ROCPROFILER_AGENT_INFO_VERSION_0,
                                                         &query_available_agents,
                                                         sizeof(rocprofiler_agent_t),
-                                                        nullptr),
+                                                        &agent_ctx),
                      "Failed to find GPU agents");
+
+    const auto num_contexts = context_count();
+    if(num_contexts > 1) extra_contexts.reserve(num_contexts - 1);
+    for(size_t i = 1; i < num_contexts; ++i)
+    {
+        auto context = rocprofiler_context_id_t{};
+        ROCPROFILER_CALL(rocprofiler_create_context(&context), "context creation");
+        ROCPROFILER_CALL(rocprofiler_query_available_agents(ROCPROFILER_AGENT_INFO_VERSION_0,
+                                                            &query_available_agents,
+                                                            sizeof(rocprofiler_agent_t),
+                                                            &context),
+                         "Failed to find GPU agents");
+        extra_contexts.emplace_back(context);
+    }
 
     int valid_ctx = 0;
     ROCPROFILER_CALL(rocprofiler_context_is_valid(agent_ctx, &valid_ctx), "validity check");
