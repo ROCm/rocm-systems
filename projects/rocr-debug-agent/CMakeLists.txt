@@ -52,6 +52,8 @@
 # GIT (optional)
 # Threads
 
+# Temporary no-op change on rocr-debug-agent to exercise TheRock Multi-arch CI
+
 cmake_minimum_required(VERSION 3.21)
 
 project(rocm-debug-agent VERSION 2.2.0 LANGUAGES CXX)
