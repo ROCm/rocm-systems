@@ -231,6 +231,7 @@ ncclResult_t rcclGetAlgoProtoIndex(const char* envStr, const char* algoProtoStri
 extern int64_t ncclParamMinNchannels();
 extern int64_t ncclParamMaxNchannels();
 extern int64_t rcclParamForceCe();
+extern int64_t ncclParamSymCeThreshold();
 RCCL_PARAM(ChannelTuningEnable, "CHANNEL_TUNING_ENABLE", 1);
 
 ncclResult_t rcclOverrideChannels(struct ncclComm* comm, ncclFunc_t coll, size_t nBytes, int& nc) {
@@ -1208,6 +1209,12 @@ ncclResult_t rcclSelectAllGather(struct ncclComm* comm, const void* sendbuff, vo
     const bool ceAvailable =
       !ceCapturing && ncclCeAvailable(comm, ncclFuncAllGather, (int)ncclSum, datatype, winRegType);
     if (ceAvailable && !hasSysmemSegment && (comm->config.CTAPolicy & NCCL_CTA_POLICY_ZERO)) {
+      decision->algo = RCCL_CE_REGISTERED;
+      return ncclSuccess;
+    }
+    // Mirror taskAppend's AllGather CE fallback (SYM_CE_THRESHOLD, minCompCap>=100, all-direct NVLink).
+    if (ceAvailable && comm->symmetricSupport && sendcount > (size_t)ncclParamSymCeThreshold() &&
+        comm->minCompCap >= 100 && comm->isAllDirectNvlink) {
       decision->algo = RCCL_CE_REGISTERED;
       return ncclSuccess;
     }
