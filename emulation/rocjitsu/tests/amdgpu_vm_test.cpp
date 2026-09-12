@@ -770,6 +770,28 @@ TEST(RdnaDispatchTest, ZeroLdsReservationKeepsWgpBackingUnmaterialized) {
   EXPECT_TRUE(f.se()->spi().release_wgp_workgroup(entry.dispatch_id, /*global_wg_id=*/0));
 }
 
+TEST(RdnaDispatchTest, WgpLdsContentsSurviveWorkgroupAllocationReuse) {
+  VmFixture f("rdna4", 2, 10, /*lds_size_kb=*/64, /*sgprs_per_wf=*/128);
+  amdgpu::DispatchEntry entry{};
+  entry.dispatch_id = 1;
+  entry.wgp_mode = true;
+  entry.group_segment_fixed_size = 128 * 1024;
+
+  auto first = f.se()->spi().allocate_workgroup(entry, /*global_wg_id=*/0);
+  ASSERT_TRUE(first.has_value());
+  first->lds->write32(0, 0x12345678u);
+  first->lds->write32(64 * 1024, 0x87654321u);
+  ASSERT_TRUE(f.se()->spi().release_wgp_workgroup(entry.dispatch_id, /*global_wg_id=*/0));
+
+  entry.dispatch_id = 2;
+  auto second = f.se()->spi().allocate_workgroup(entry, /*global_wg_id=*/0);
+  ASSERT_TRUE(second.has_value());
+  ASSERT_EQ(second->lds, first->lds);
+  EXPECT_EQ(second->lds->read32(0), 0x12345678u);
+  EXPECT_EQ(second->lds->read32(64 * 1024), 0x87654321u);
+  EXPECT_TRUE(f.se()->spi().release_wgp_workgroup(entry.dispatch_id, /*global_wg_id=*/0));
+}
+
 TEST(AqlDispatchTest, InitializesModeFromComputePgmRsrc1) {
   using namespace rocr::llvm::amdhsa;
 
@@ -3931,6 +3953,46 @@ TEST(ClusterDispatchTest, ParallelCdna5RetiresClusterAfterWorkersRejoin) {
   ASSERT_NO_THROW(f.engine->run());
   EXPECT_FALSE(f.cu(0)->has_active_wfs());
   EXPECT_FALSE(f.cu(1)->has_active_wfs());
+  EXPECT_TRUE(f.cp()
+                  ->cluster_lds_targets(/*dispatch_id=*/1, /*wg_id=*/0,
+                                        /*mcast_mask=*/0x3)
+                  .empty());
+}
+
+TEST(ClusterDispatchTest, CuMaskRestrictsEveryClusterWorkgroup) {
+  VmFixture f("cdna5", /*num_cus=*/4, /*num_wf_slots=*/1, /*lds_size_kb=*/64,
+              /*sgprs_per_wf=*/128);
+  const uint32_t code[] = {0xBFB00000u}; // s_endpgm
+  const uint64_t ko = f.write_kernel(0x1000, code, sizeof(code), /*sgprs=*/128);
+  constexpr uint64_t signal = 0x7000;
+  f.mem()->write64(signal + 8, 1);
+  test::AqlQueue queue(f.mem(), f.cp());
+  amdgpu::QueueCuSelection selected(std::in_place);
+  selected->push_back(f.cu(1));
+  selected->push_back(f.cu(3));
+  f.cp()->set_queue_cu_selection(/*queue_id=*/1, /*process_id=*/0, selected);
+
+  amdgpu::AmdExtKernelDispatchPacket ext{};
+  ext.header = HSA_PACKET_TYPE_VENDOR_SPECIFIC;
+  ext.amd_format = amdgpu::kHsaAmdPacketTypeExtKernelDispatch;
+  ext.setup = 1;
+  ext.workgroup_size_x = 32;
+  ext.workgroup_size_y = ext.workgroup_size_z = 1;
+  ext.cluster_count_x = 3;
+  ext.cluster_count_y = ext.cluster_count_z = 1;
+  ext.cluster_size_x = 2;
+  ext.cluster_size_y = ext.cluster_size_z = 1;
+  ext.kernel_object = ko;
+  ext.completion_signal.handle = signal;
+  queue.submit(ext);
+
+  ASSERT_NO_THROW(f.engine->run());
+  EXPECT_EQ(f.mem()->read64(signal + 8), 0u);
+  EXPECT_EQ(f.cp()->dispatched_workgroups(), 6u);
+  for (uint32_t cu = 0; cu < 4; ++cu) {
+    EXPECT_FALSE(f.cu(cu)->has_active_wfs());
+    EXPECT_EQ(f.cu(cu)->cycle_count() > 0, cu == 1 || cu == 3) << "CU=" << cu;
+  }
   EXPECT_TRUE(f.cp()
                   ->cluster_lds_targets(/*dispatch_id=*/1, /*wg_id=*/0,
                                         /*mcast_mask=*/0x3)

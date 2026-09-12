@@ -1311,6 +1311,8 @@ int SimulatedKfd::dispatch_ioctl(KfdProcess &proc, unsigned long request, void *
       return set_xnack_mode_ioctl(arg);
     case AMDKFD_IOC_SET_MEMORY_POLICY:
       return set_memory_policy_ioctl(proc, arg);
+    case AMDKFD_IOC_SET_CU_MASK:
+      return set_cu_mask_ioctl(proc, arg);
     case AMDKFD_IOC_AVAILABLE_MEMORY:
       return get_available_memory_ioctl(proc, arg);
     // RUNTIME_ENABLE is handled before op_mutex_ above (it blocks on the
@@ -2393,6 +2395,68 @@ int SimulatedKfd::create_queue_ioctl(KfdProcess &proc, void *arg) {
         .exception_status = KFD_EC_MASK(EC_QUEUE_NEW),
     };
   }
+  return 0;
+}
+
+int SimulatedKfd::set_cu_mask_ioctl(KfdProcess &proc, void *arg) {
+  const auto *args = static_cast<const kfd_ioctl_set_cu_mask_args *>(arg);
+  if (!args || args->num_cu_mask == 0 || args->num_cu_mask % 32 != 0)
+    return -EINVAL;
+  if (args->cu_mask_ptr == 0)
+    return -EFAULT;
+  // KFD clips masks to 1024 bits before copying them from userspace.
+  const uint32_t bit_count = std::min(args->num_cu_mask, 1024u);
+  std::vector<uint32_t> mask(bit_count / 32);
+  if (copy_ioctl_user_buffer(mask.data(), args->cu_mask_ptr, mask.size() * sizeof(uint32_t)) != 0)
+    return -EFAULT;
+
+  uint32_t gpu_id = 0;
+  {
+    std::lock_guard<std::mutex> lock(proc.alloc_mutex_);
+    const auto queue = proc.queue_snapshot_map_.find(args->queue_id);
+    if (queue == proc.queue_snapshot_map_.end())
+      return -EINVAL;
+    const auto type = queue->second.queue_type;
+    if (type != KFD_IOC_QUEUE_TYPE_COMPUTE && type != KFD_IOC_QUEUE_TYPE_COMPUTE_AQL)
+      return -EINVAL;
+    gpu_id = queue->second.gpu_id;
+  }
+  auto *gpu = find_gpu(gpu_id);
+  if (!gpu || !gpu->soc)
+    return -EINVAL;
+  const auto &info = gpu_infos_[gpu_ordinal(gpu_id)];
+  const uint32_t arrays = std::max(1u, info.num_shader_arrays_per_engine);
+  const uint32_t cu_per_array = info.num_cu_per_sh;
+  const uint32_t active_cus = info.simd_count / std::max(1u, info.simd_per_cu);
+  const uint32_t step = arch_is_rdna(gpu->soc->arch()) ? 2u : 1u;
+  amdgpu::QueueCuSelection selected(std::in_place);
+  uint32_t bit = 0;
+  // KFD numbers the logical mask symmetrically: XCC, SE, SH, then CU.
+  // RDNA enables sibling CU pairs, so each pair stays adjacent in the mask.
+  for (uint32_t cu = 0; cu < cu_per_array && bit < bit_count && bit < active_cus; cu += step) {
+    for (uint32_t sh = 0; sh < arrays; ++sh) {
+      for (uint32_t se = 0; se < info.num_shader_engines; ++se) {
+        for (auto *xcd : gpu->soc->xcds()) {
+          if (se >= xcd->num_shader_engines())
+            continue;
+          auto *shader = xcd->shader_engine(se);
+          const uint32_t local = sh * cu_per_array + cu;
+          if (local + step > shader->num_compute_units())
+            continue;
+          const bool enabled = bit < bit_count && bit < active_cus &&
+                               ((mask[bit / 32] >> (bit % 32)) & ((1u << step) - 1));
+          for (uint32_t half = 0; half < step; ++half, ++bit) {
+            if (enabled)
+              selected->push_back(shader->compute_unit(local + half));
+          }
+        }
+      }
+    }
+  }
+  // Never hold alloc_mutex_ while taking a CP's queue lock.
+  gpu->soc->for_each_cp([&](amdgpu::CommandProcessor *cp) {
+    cp->set_queue_cu_selection(args->queue_id, proc.process_id(), selected);
+  });
   return 0;
 }
 

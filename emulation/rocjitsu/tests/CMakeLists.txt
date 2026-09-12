@@ -3008,6 +3008,11 @@ if(RJ_ENABLE_HIP_TESTS)
         rj_add_hip_test(hip_memcpy_test ARCH ${RJ_HIP_TEST_ARCH})
         rj_add_hip_test_case(
             hip_memcpy_test
+            "HipMemcpyTest.MaskedStreamLdsReuse"
+            CONFIG ${RJ_HIP_TEST_CONFIG}
+        )
+        rj_add_hip_test_case(
+            hip_memcpy_test
             "HipMemcpyTest.RoundTripFloat"
             CONFIG ${RJ_HIP_TEST_CONFIG}
         )
@@ -3133,6 +3138,7 @@ if(RJ_ENABLE_HIP_TESTS)
             DaemonTest.HipMemcpyRoundTripFloat
             DaemonTest.HipMemcpyRoundTripInt
             DaemonTest.HipMemcpyDeviceToDevice
+            DaemonTest.HipMaskedStreamLdsReuse
             DaemonTest.TwoIndependentClients
             DaemonTest.InterposerDupReopenAfterPrimaryOverwriteRemote
             DaemonTest.InterposerDupSerializedReopenUnderContentionRemote

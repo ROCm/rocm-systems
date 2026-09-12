@@ -1,6 +1,7 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
+#include "rocjitsu/code/builders/instruction_builder.h"
 #include "rocjitsu/config/config_loader.h"
 #include "rocjitsu/kmd/linux/cwsr.h"
 #include "rocjitsu/kmd/linux/kfd_ioctl_utils.h"
@@ -18,6 +19,13 @@
 #include "rocjitsu/kmd/linux/kfd_topology.h"
 #include "simdojo/sim/simulation.h"
 #include "util/unique_handle.h"
+
+#include "rocjitsu/base/rj_compiler.h"
+RJ_DIAGNOSTIC_PUSH
+RJ_DIAGNOSTIC_IGNORE_PEDANTIC
+#include "hsa/AMDHSAKernelDescriptor.h"
+#include "hsa/hsa.h"
+RJ_DIAGNOSTIC_POP
 
 #include <gtest/gtest.h>
 
@@ -246,6 +254,158 @@ TEST_F(KfdIoctlTest, CreateQueueReplicatesComputeQueueAcrossXcds) {
   ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_DESTROY_QUEUE, &destroy), 0);
   EXPECT_EQ(total_registered(), 0u) << "destroying the queue should drop every replica";
 }
+
+TEST_F(KfdIoctlTest, CuMaskValidatesBitCountAndQueueIdentity) {
+  alignas(4096) std::array<std::byte, 8192> ring{};
+  alignas(64) std::array<uint64_t, 8> ptrs{};
+  kfd_ioctl_create_queue_args queue{};
+  queue.gpu_id = kGpuId;
+  queue.queue_type = KFD_IOC_QUEUE_TYPE_COMPUTE_AQL;
+  queue.ring_base_address = reinterpret_cast<uint64_t>(ring.data());
+  queue.ring_size = ring.size();
+  queue.read_pointer_address = reinterpret_cast<uint64_t>(&ptrs[0]);
+  queue.write_pointer_address = reinterpret_cast<uint64_t>(&ptrs[1]);
+  queue.queue_percentage = 100;
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_CREATE_QUEUE, &queue), 0);
+  std::array<uint32_t, 32> mask{};
+  mask[0] = 1;
+  kfd_ioctl_set_cu_mask_args args{};
+  args.queue_id = queue.queue_id;
+  args.cu_mask_ptr = reinterpret_cast<uint64_t>(mask.data());
+  EXPECT_EQ(driver_->ioctl(AMDKFD_IOC_SET_CU_MASK, &args), -EINVAL);
+  args.num_cu_mask = 31;
+  EXPECT_EQ(driver_->ioctl(AMDKFD_IOC_SET_CU_MASK, &args), -EINVAL);
+  args.num_cu_mask = 32;
+  EXPECT_EQ(driver_->ioctl(AMDKFD_IOC_SET_CU_MASK, &args), 0);
+  args.num_cu_mask = 1056;
+  EXPECT_EQ(driver_->ioctl(AMDKFD_IOC_SET_CU_MASK, &args), 0);
+  args.cu_mask_ptr = 0;
+  EXPECT_EQ(driver_->ioctl(AMDKFD_IOC_SET_CU_MASK, &args), -EFAULT);
+  args.cu_mask_ptr = 1;
+  EXPECT_EQ(driver_->ioctl(AMDKFD_IOC_SET_CU_MASK, &args), -EFAULT);
+  args.cu_mask_ptr = reinterpret_cast<uint64_t>(mask.data());
+  args.queue_id = queue.queue_id + 1;
+  EXPECT_EQ(driver_->ioctl(AMDKFD_IOC_SET_CU_MASK, &args), -EINVAL);
+  kfd_ioctl_destroy_queue_args destroy{};
+  destroy.queue_id = queue.queue_id;
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_DESTROY_QUEUE, &destroy), 0);
+}
+
+struct CuMaskPlacementCase {
+  const char *config;
+  int bit; // -1 enables all 256 advertised CUs on CDNA4.
+  uint32_t xcd;
+  uint32_t se;
+  uint32_t cu;
+};
+
+void PrintTo(const CuMaskPlacementCase &test, std::ostream *out) {
+  *out << test.config << "_";
+  if (test.bit < 0)
+    *out << "AllAdvertised";
+  else
+    *out << "Bit" << test.bit;
+}
+
+class KfdCuMaskPlacementTest : public KfdIoctlTest,
+                               public ::testing::WithParamInterface<CuMaskPlacementCase> {
+protected:
+  void SetUp() override { SetUpWithConfig(std::string(CONFIG_DIR) + "/" + GetParam().config); }
+};
+
+TEST_P(KfdCuMaskPlacementTest, CuMaskSelectsOnlyTheRequestedPhysicalUnits) {
+  using namespace rocr::llvm::amdhsa;
+  const auto &test = GetParam();
+  const bool rdna = soc_->arch() == ROCJITSU_CODE_ARCH_RDNA4;
+  const uint32_t wave_size = rdna ? 32u : 64u;
+  const uint32_t workgroups = test.bit < 0 ? 256u : 8u;
+  constexpr uint64_t kKernelAddress = 0x10000;
+  alignas(4096) std::array<uint8_t, 4096> code{};
+  kernel_descriptor_t kd{};
+  kd.kernel_code_entry_byte_offset = sizeof(kd);
+  kd.group_segment_fixed_size = 128 * 1024;
+  AMDHSA_BITS_SET(kd.kernel_code_properties, KERNEL_CODE_PROPERTY_ENABLE_WAVEFRONT_SIZE32, rdna);
+  AMDHSA_BITS_SET(kd.compute_pgm_rsrc1, COMPUTE_PGM_RSRC1_WGP_MODE, rdna);
+  std::memcpy(code.data(), &kd, sizeof(kd));
+  const uint32_t endpgm = rocjitsu::build_s_endpgm(soc_->arch());
+  std::memcpy(code.data() + sizeof(kd), &endpgm, sizeof(endpgm));
+  auto *process = driver_->find_process(driver_->local_process_id()).get();
+  ASSERT_NE(process, nullptr);
+  process->map_pages(kKernelAddress, code.data(), code.size());
+
+  alignas(4096) std::array<hsa_kernel_dispatch_packet_t, 64> ring{};
+  alignas(64) std::array<uint64_t, 8> pointers{};
+  kfd_ioctl_create_queue_args queue{};
+  queue.gpu_id = rdna ? 8716u : kGpuId;
+  queue.queue_type = KFD_IOC_QUEUE_TYPE_COMPUTE_AQL;
+  queue.ring_base_address = reinterpret_cast<uint64_t>(ring.data());
+  queue.ring_size = sizeof(ring);
+  queue.read_pointer_address = reinterpret_cast<uint64_t>(&pointers[0]);
+  queue.write_pointer_address = reinterpret_cast<uint64_t>(&pointers[1]);
+  queue.queue_percentage = 100;
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_CREATE_QUEUE, &queue), 0);
+  void *doorbell = driver_->mmap(nullptr, 4096, PROT_READ | PROT_WRITE, MAP_SHARED,
+                                 static_cast<off_t>(queue.doorbell_offset));
+  ASSERT_NE(doorbell, MAP_FAILED);
+
+  // RDNA odd bits exercise pair enablement across SEs, SHs, and CU pairs.
+  // CDNA4 bits 0/1 select different XCDs; an all-ones mask must exclude the
+  // ninth CU in each SE, beyond the device's advertised 256 active CUs.
+  std::array<uint32_t, 8> mask{};
+  if (test.bit < 0)
+    mask.fill(UINT32_MAX);
+  else
+    mask[test.bit / 32] = 1u << (test.bit % 32);
+  kfd_ioctl_set_cu_mask_args args{};
+  args.queue_id = queue.queue_id;
+  args.num_cu_mask = mask.size() * 32;
+  args.cu_mask_ptr = reinterpret_cast<uint64_t>(mask.data());
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_SET_CU_MASK, &args), 0);
+
+  auto &packet = ring[0];
+  packet.header = HSA_PACKET_TYPE_KERNEL_DISPATCH;
+  packet.setup = 1;
+  packet.workgroup_size_x = wave_size;
+  packet.workgroup_size_y = packet.workgroup_size_z = 1;
+  packet.grid_size_x = workgroups * wave_size;
+  packet.grid_size_y = packet.grid_size_z = 1;
+  packet.kernel_object = kKernelAddress;
+  pointers[1] = 1;
+  std::atomic_ref<uint64_t>(*static_cast<uint64_t *>(doorbell)).store(0, std::memory_order_release);
+  auto *cp = soc_->xcd(0)->command_processor();
+  engine_->schedule_event_now(cp->doorbell_event());
+  for (unsigned i = 0; i < 200; ++i)
+    (void)engine_->step();
+  EXPECT_EQ(pointers[0], 1u);
+  uint64_t dispatched = 0;
+  for (uint32_t xcd = 0; xcd < soc_->num_xcds(); ++xcd) {
+    auto *chiplet = soc_->xcd(xcd);
+    dispatched += chiplet->command_processor()->dispatched_workgroups();
+    for (uint32_t se = 0; se < chiplet->num_shader_engines(); ++se) {
+      auto *shader = chiplet->shader_engine(se);
+      for (uint32_t cu = 0; cu < shader->num_compute_units(); ++cu) {
+        const bool selected = test.bit < 0 ? cu < 8
+                                           : xcd == test.xcd && se == test.se &&
+                                                 (cu == test.cu || (rdna && cu == test.cu + 1));
+        EXPECT_EQ(shader->compute_unit(cu)->cycle_count() > 0, selected)
+            << "XCD=" << xcd << " SE=" << se << " CU=" << cu;
+      }
+    }
+  }
+  EXPECT_EQ(dispatched, workgroups);
+  kfd_ioctl_destroy_queue_args destroy{};
+  destroy.queue_id = queue.queue_id;
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_DESTROY_QUEUE, &destroy), 0);
+  // The driver retains doorbell mappings until process teardown in TearDown().
+  process->unmap_pages(kKernelAddress, code.size());
+}
+
+INSTANTIATE_TEST_SUITE_P(KfdMasks, KfdCuMaskPlacementTest,
+                         ::testing::Values(CuMaskPlacementCase{"gfx950_mi355x.json", 0, 0, 0, 0},
+                                           CuMaskPlacementCase{"gfx950_mi355x.json", 1, 1, 0, 0},
+                                           CuMaskPlacementCase{"gfx950_mi355x.json", -1, 0, 0, 0},
+                                           CuMaskPlacementCase{"gfx1201_r9700.json", 9, 0, 0, 8},
+                                           CuMaskPlacementCase{"gfx1201_r9700.json", 19, 0, 1, 2}));
 
 TEST_F(KfdIoctlTest, CreateQueueDoesNotReplicateSdmaQueue) {
   const uint32_t num_xcds = soc_->num_xcds();
@@ -1668,6 +1828,40 @@ TEST(RemoteDriverEmbeddedArrayTest, MapMemorySerializesDeviceIdsAcrossBufferGrow
   args.device_ids_array_ptr = reinterpret_cast<uint64_t>(device_ids.data());
   args.n_devices = device_ids.size();
   EXPECT_EQ(driver.ioctl(AMDKFD_IOC_MAP_MEMORY_TO_GPU, &args), -EINVAL);
+}
+
+TEST(RemoteDriverEmbeddedArrayTest, CuMaskClipsInlineArrayAndPreservesCallerPointer) {
+  int sv[2];
+  ASSERT_EQ(socketpair(AF_UNIX, SOCK_STREAM, 0, sv), 0) << strerror(errno);
+  std::array<uint32_t, 32> mask{};
+  mask.front() = 1;
+  mask.back() = 0x80000000u;
+  std::jthread server([server_fd = sv[1], mask] {
+    rocjitsu::RpcHeader header{};
+    ASSERT_TRUE(rocjitsu::rpc_recv_exact(server_fd, &header, sizeof(header)));
+    std::vector<uint8_t> payload(header.payload_bytes);
+    ASSERT_TRUE(rocjitsu::rpc_recv_exact(server_fd, payload.data(), payload.size()));
+    const auto *request = reinterpret_cast<const rocjitsu::RpcIoctlRequest *>(payload.data());
+    ASSERT_EQ(request->ioctl_cmd, AMDKFD_IOC_SET_CU_MASK);
+    ASSERT_EQ(payload.size(), sizeof(*request) + sizeof(kfd_ioctl_set_cu_mask_args) + sizeof(mask));
+    auto *args = reinterpret_cast<kfd_ioctl_set_cu_mask_args *>(payload.data() + sizeof(*request));
+    EXPECT_EQ(args->num_cu_mask, 1056u);
+    EXPECT_EQ(std::memcmp(args + 1, mask.data(), sizeof(mask)), 0);
+    // Model the daemon's reconstructed pointer in its reply.
+    args->cu_mask_ptr = 0xDEADBEEF;
+    header.result = 0;
+    header.payload_bytes = sizeof(*args);
+    ASSERT_TRUE(rocjitsu::rpc_send_exact(server_fd, &header, sizeof(header)));
+    ASSERT_TRUE(rocjitsu::rpc_send_exact(server_fd, args, sizeof(*args)));
+    ::close(server_fd);
+  });
+  rocjitsu::RemoteDriver driver(sv[0]);
+  kfd_ioctl_set_cu_mask_args args{};
+  args.queue_id = 1;
+  args.num_cu_mask = 1056;
+  args.cu_mask_ptr = reinterpret_cast<uint64_t>(mask.data());
+  EXPECT_EQ(driver.ioctl(AMDKFD_IOC_SET_CU_MASK, &args), 0);
+  EXPECT_EQ(args.cu_mask_ptr, reinterpret_cast<uint64_t>(mask.data()));
 }
 
 TEST(RemoteDriverEmbeddedArrayTest, WaitEventsSerializesEventsAcrossBufferGrowth) {
