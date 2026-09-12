@@ -494,7 +494,15 @@ void IPCTest::ParentProcessImpl() {
   while(true) {
     ret = hsa_signal_wait_acquire(ipc_signal, HSA_SIGNAL_CONDITION_GTE, 2, timeout_, HSA_WAIT_STATE_BLOCKED);
     if (shared_->child_status == -1) {
-      exit(0);
+      err = hsa_amd_memory_pool_free(gpuBuf);
+      FORK_ASSERT_EQ(HSA_STATUS_SUCCESS, err);
+
+      int exit_status = 0;
+      pid_t waited_pid = waitpid(child_, &exit_status, 0);
+      ASSERT_EQ(child_, waited_pid);
+
+      munmap(shared_, sizeof(Shared));
+      FAIL() << "Parent: child process reported failure";
     }
     if (ret >= 2) {
       break;
@@ -514,7 +522,15 @@ void IPCTest::ParentProcessImpl() {
   while(true) {
     ret = hsa_signal_wait_acquire(ipc_signal, HSA_SIGNAL_CONDITION_GTE, 4, timeout_, HSA_WAIT_STATE_BLOCKED);
     if (shared_->child_status == -1) {
-      exit(0);
+      err = hsa_amd_memory_pool_free(gpuBuf);
+      FORK_ASSERT_EQ(HSA_STATUS_SUCCESS, err);
+
+      int exit_status = 0;
+      pid_t waited_pid = waitpid(child_, &exit_status, 0);
+      ASSERT_EQ(child_, waited_pid);
+
+      munmap(shared_, sizeof(Shared));
+      FAIL() << "Parent: child process reported failure";
     }
     if (ret >= 4) {
       break;
