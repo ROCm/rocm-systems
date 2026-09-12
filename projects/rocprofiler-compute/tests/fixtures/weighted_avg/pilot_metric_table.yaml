@@ -1,0 +1,25 @@
+# Pilot metric_table fragment (tests only). Parent recombines read/write HBM
+# submetrics using request counters as weights.
+Panel Config:
+  data source:
+  - metric_table:
+      id: 1702
+      title: Pilot WEIGHTED_AVG
+      header:
+        metric: Metric
+        avg: Avg
+      metric:
+        hbm_read_sub:
+          avg: 100 * SUM(TCC_EA0_RDREQ_DRAM_sum) / SUM(TCC_EA0_RDREQ_sum)
+          unit: Percent
+        hbm_write_sub:
+          avg: 100 * SUM(TCC_EA0_WRREQ_DRAM_sum) / SUM(TCC_EA0_WRREQ_sum)
+          unit: Percent
+        hbm_combined_traffic:
+          avg: WEIGHTED_AVG(hbm_read_sub, hbm_write_sub)
+          unit: Percent
+          _weighted_avg:
+            hbm_read_sub:
+              weight_counter: TCC_EA0_RDREQ_sum
+            hbm_write_sub:
+              weight_counter: TCC_EA0_WRREQ_sum

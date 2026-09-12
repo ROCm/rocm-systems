@@ -10,6 +10,7 @@ from utils.metrics.aggregation import merge_dispatch_weighted_avg
 from utils.metrics.expression import build_eval_string, parse_weighted_avg_submetrics
 from utils.metrics.weighted_avg import (
     evaluate_weighted_avg_parent,
+    scan_weighted_avg_parents,
 )
 
 
@@ -92,3 +93,19 @@ def test_evaluate_weighted_avg_parent_end_to_end():
         {},
     )
     assert result == pytest.approx(83.3333333333, rel=1e-6)
+
+
+@pytest.mark.misc
+def test_scan_weighted_avg_parents_reads_pilot_fixture():
+    from pathlib import Path
+
+    fixture_dir = Path(__file__).resolve().parents[3] / "fixtures" / "weighted_avg"
+    parents = scan_weighted_avg_parents(fixture_dir)
+    assert (
+        "pilot_metric_table.yaml",
+        "hbm_combined_traffic",
+        [
+            "hbm_read_sub",
+            "hbm_write_sub",
+        ],
+    ) in parents

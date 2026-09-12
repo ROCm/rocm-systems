@@ -21,7 +21,10 @@ from utils.metrics.noise_clamper import (
     get_noise_clamp_warnings,
     print_noise_clamp_summary,
 )
-from utils.metrics.weighted_avg import apply_weighted_avg_metrics
+from utils.metrics.weighted_avg import (
+    apply_weighted_avg_metrics,
+    cache_weighted_avg_sub_expressions,
+)
 from utils.mi_gpu_spec import mi_gpu_specs
 from utils.utils_analysis import PEAK_COL_PREFERENCE, VALUE_COL_PREFERENCE
 from utils.utils_common import SUPPORTED_FIELD
@@ -209,6 +212,7 @@ def eval_metric(
 
     sys_vars = create_sys_vars(sys_info)
     empirical_peaks = create_empirical_peaks_dict(empirical_peaks_df)
+    cache_weighted_avg_sub_expressions(dfs, dfs_type)
     expressions = [
         expr
         for df_id in dfs
