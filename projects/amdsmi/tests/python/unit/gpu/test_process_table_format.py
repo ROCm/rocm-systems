@@ -62,8 +62,17 @@ class TestProcessTableFormat(unittest.TestCase):
     def setUpClass(cls):
         if not os.path.isfile(LOGGER_PATH):
             raise unittest.SkipTest(f"amdsmi_logger not installed at {LOGGER_PATH}")
+        # Restored in tearDownClass so the stub never reaches a sibling suite.
+        cls._saved_helpers = sys.modules.get("amdsmi_helpers")
         _install_fake_helpers()
         cls.logger = _load_logger_module()
+
+    @classmethod
+    def tearDownClass(cls):
+        if cls._saved_helpers is None:
+            sys.modules.pop("amdsmi_helpers", None)
+        else:
+            sys.modules["amdsmi_helpers"] = cls._saved_helpers
 
     def _assert_boxed(self, line):
         self.assertTrue(line.startswith("|") and line.endswith("|"), line)
