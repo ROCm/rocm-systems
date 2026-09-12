@@ -248,22 +248,40 @@ hipError_t hipMemPoolSetAccess(hipMemPool_t mem_pool, const hipMemAccessDesc* de
     HIP_RETURN(hipErrorInvalidDevice);
   }
   auto hip_mem_pool = reinterpret_cast<hip::MemoryPool*>(mem_pool);
-  for (int i = 0; i < count; ++i) {
-    if (desc_list[i].location.type == hipMemLocationTypeDevice) {
-      if (desc_list[i].location.id >= g_devices.size()) {
-        HIP_RETURN(hipErrorInvalidDevice);
-      }
-      if (desc_list[i].flags == hipMemAccessFlagsProtNone) {
-        HIP_RETURN(hipErrorInvalidDevice);
-      }
-      if (desc_list[i].flags > hipMemAccessFlagsProtReadWrite) {
-        HIP_RETURN(hipErrorInvalidValue);
-      }
-      auto device = g_devices[desc_list[i].location.id];
-      hip_mem_pool->SetAccess(device, desc_list[i].flags);
-    } else {
+
+  // hipMemPoolSetAccess validation matrix
+  //
+  //   target / flags  | ProtNone        | ProtRead        | ProtReadWrite
+  //   own-device      | InvalidDevice   | NotSupported    | apply (impl no-op)
+  //   peer            | apply           | apply           | apply
+  //   invalid id      | InvalidDevice   | InvalidDevice   | InvalidDevice
+
+  // Validate descriptors
+  const int pool_device_id = hip_mem_pool->Device()->deviceId();
+  for (size_t i = 0; i < count; ++i) {
+    const auto& d = desc_list[i];
+    if (d.location.type != hipMemLocationTypeDevice) {
       HIP_RETURN(hipErrorInvalidValue);
     }
+    if (d.location.id >= g_devices.size()) {
+      HIP_RETURN(hipErrorInvalidDevice);
+    }
+    if (d.flags > hipMemAccessFlagsProtReadWrite) {
+      HIP_RETURN(hipErrorInvalidValue);
+    }
+    const bool is_own = (static_cast<int>(d.location.id) == pool_device_id);
+    if (is_own && d.flags == hipMemAccessFlagsProtNone) {
+      HIP_RETURN(hipErrorInvalidDevice);
+    }
+    if (is_own && d.flags == hipMemAccessFlagsProtRead) {
+      HIP_RETURN(hipErrorNotSupported);
+    }
+  }
+
+  // Apply descriptors
+  for (size_t i = 0; i < count; ++i) {
+    const auto& d = desc_list[i];
+    hip_mem_pool->SetAccess(g_devices[d.location.id], d.flags);
   }
   HIP_RETURN(hipSuccess);
 }
