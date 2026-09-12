@@ -450,6 +450,10 @@ ncclResult_t ncclGinRegister(struct ncclComm* comm, void* address, size_t size,
 ncclResult_t ncclGinDeregister(struct ncclComm* comm, void* ginHostWins[NCCL_GIN_MAX_CONNECTIONS]) {
   struct ncclGinState* ginState = &comm->sharedRes->ginState;
   for (int n = 0; n < ginState->ginCommCount; n++) {
+    // ncclGinRegister returns at the first failing index, and the multi-segment
+    // DMABUF bail leaves every slot null. deregMrSym implementations deref the
+    // handle without a null check.
+    if (ginHostWins[n] == nullptr) continue;
     NCCLCHECK(ginState->ncclGin->deregMrSym(ginState->ginComms[n], ginHostWins[n]));
   }
   return ncclSuccess;

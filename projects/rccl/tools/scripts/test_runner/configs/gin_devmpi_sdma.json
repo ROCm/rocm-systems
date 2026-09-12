@@ -1,0 +1,96 @@
+{
+  "system_configurations": {
+    "name": "RCCL-GIN-Device-MPI-SDMA-MI300X-Mellanox-IB",
+    "description": "Anvil SDMA (NCCL_GIN_TYPE=6) GinMPIDeviceTests that catch post-ncclDevCommCreate window register. Single node, no GDA, no alltoall_perf."
+  },
+  "paths": {
+    "workdir": "${WORKDIR:-$PWD}",
+    "rocm_path": "${ROCM_PATH:-/opt/rocm}",
+    "mpi_path": "${MPI_PATH:-/opt/shared/ompi}"
+  },
+  "env_variables": {
+    "NCCL_SOCKET_IFNAME": "eth0,eth1",
+    "HSA_NO_SCRATCH_RECLAIM": "1",
+    "NCCL_DEBUG": "INFO"
+  },
+  "build_configuration": {
+    "install_flags": [
+      "-l",
+      "--debug",
+      "-t",
+      "--enable-mpi-tests",
+      "--enable-code-coverage",
+      "--rocshmem-gin",
+      "--prefix",
+      "${WORKDIR}/install"
+    ],
+    "parallel_jobs": 64
+  },
+  "rccl_tests_build_configuration": {
+    "enabled": false
+  },
+  "test_configurations": {
+    "default": {
+      "env_variables": {},
+      "rerun_env_variables": {
+        "NCCL_DEBUG": "INFO"
+      }
+    },
+    "gin_devmpi_sdma": {
+      "extends": "default",
+      "description": "AICOMRCCL-2241 Anvil SDMA subset: WindowRegister_AfterDevCommCreate plus the device-API cases that also register after ncclDevCommCreate. Omits cross-node, VA-signal, and Anvil ReduceScatter cases that self-skip at NCCL_GIN_TYPE=6 on one node.",
+      "is_gtest": true,
+      "binary": "rccl-UnitTestsMPI",
+      "num_ranks": 2,
+      "num_nodes": 1,
+      "num_gpus": 2,
+      "timeout": 180,
+      "env_variables": {
+        "NCCL_GIN_ENABLE": "1",
+        "NCCL_CUMEM_ENABLE": "1",
+        "NCCL_ENV_PLUGIN": "none",
+        "NCCL_DMABUF_ENABLE": "1",
+        "NCCL_GIN_TYPE": "6"
+      },
+      "tests": [
+        {
+          "name": "BarrierSession_LsaOnly",
+          "description": "ncclBarrierSession LSA-only (2 ranks/node, non-trivial LSA team)",
+          "test_filter": "GinMPIDeviceTests.BarrierSession_LsaOnly",
+          "num_ranks": 4,
+          "num_gpus": 4
+        },
+        {
+          "name": "WindowRegister_AfterDevCommCreate",
+          "description": "Symmetric window register after ncclDevCommCreate (AICOMRCCL-2241)",
+          "test_filter": "GinMPIDeviceTests.WindowRegister_AfterDevCommCreate"
+        },
+        {
+          "name": "SignalAdd_AndShadow",
+          "description": "GIN device signal-add and shadow counter",
+          "test_filter": "GinMPIDeviceTests.SignalAdd_AndShadow"
+        },
+        {
+          "name": "Alltoall_PureReference",
+          "description": "GIN pure-reference alltoall kernel (registers after ncclDevCommCreate)",
+          "test_filter": "GinMPIDeviceTests.Alltoall_PureReference"
+        },
+        {
+          "name": "AlltoallHybrid_Reference",
+          "description": "GIN hybrid (LSA + GIN) alltoall reference (2 ranks/node)",
+          "test_filter": "GinMPIDeviceTests.AlltoallHybrid_Reference",
+          "num_ranks": 4,
+          "num_gpus": 4
+        }
+      ]
+    }
+  },
+  "test_suites": [
+    {
+      "name": "GIN Device MPI Tests - SDMA (AICOMRCCL-2241)",
+      "description": "Anvil SDMA post-DevCommCreate window-register subset, one mpirun per test",
+      "config": "gin_devmpi_sdma",
+      "enabled": true
+    }
+  ]
+}

@@ -610,9 +610,10 @@ static ncclResult_t symMemoryRegisterGin(struct ncclComm* comm, struct ncclDevrM
   size_t* globalPaddedSegmentSizes = nullptr;
 
   if (!mem->globalHasSysmemSegment) {
-    NCCLCHECK(ncclGinRegister(comm, mem->primaryAddr, mem->size, mem->ginHostWins, mem->ginDevWins, mem->winFlags,
-                              mem->maxGlobalNumSegments > 1, NCCL_PTR_CUDA));
-    NCCLCHECK(ncclCalloc(&mem->ginSegmentInfos, 1));
+    NCCLCHECKGOTO(ncclGinRegister(comm, mem->primaryAddr, mem->size, mem->ginHostWins, mem->ginDevWins, mem->winFlags,
+                                   mem->maxGlobalNumSegments > 1, NCCL_PTR_CUDA),
+                  ret, fail_simple);
+    NCCLCHECKGOTO(ncclCalloc(&mem->ginSegmentInfos, 1), ret, fail_simple);
     mem->ginSegmentInfos[0].memType = CU_MEM_LOCATION_TYPE_DEVICE;
     mem->ginSegmentInfos[0].segmentSize = mem->size;
     for (int i = 0; i < NCCL_GIN_MAX_CONNECTIONS; i++) {
@@ -682,9 +683,14 @@ exit:
   free(paddedSegmentSizes);
   free(globalPaddedSegmentSizes);
   return ret;
+fail_simple:
+  if (!mem->globalHasSysmemSegment) {
+    (void)ncclGinDeregister(comm, mem->ginHostWins);
+  }
+  goto exit;
 fail:
   for (int i = 0; i < numSegmentsRegistered; i++) {
-    ncclGinDeregister(comm, mem->ginSegmentInfos[i].ginHostWins);
+    (void)ncclGinDeregister(comm, mem->ginSegmentInfos[i].ginHostWins);
   }
   free(mem->ginSegmentInfos);
   mem->ginSegmentInfos = nullptr;
@@ -695,6 +701,18 @@ static ncclResult_t symMemoryRegisterRma(struct ncclComm* comm, struct ncclDevrM
   NCCLCHECK(ncclRmaProxyConnectOnce(comm));
   NCCLCHECK(ncclRmaProxyRegister(comm, mem->primaryAddr, mem->size, mem->rmaHostWins));
   return ncclSuccess;
+}
+
+static void symMemoryUnregister(struct ncclComm* comm, struct ncclDevrMemory* mem) {
+  struct ncclDevrState* devr = &comm->devrState;
+  if (devr->ginEnabled && mem->ginSegmentInfos != nullptr) {
+    for (int segment = 0; segment < mem->numGinSegments; segment++) {
+      ncclGinDeregister(comm, mem->ginSegmentInfos[segment].ginHostWins);
+    }
+  }
+  if (devr->rmaProxyEnabled && mem->maxGlobalNumSegments == 1) {
+    (void)ncclRmaProxyDeregister(comm, mem->rmaHostWins);
+  }
 }
 
 // On success we take caller's reference on memHandle.
@@ -771,6 +789,13 @@ static ncclResult_t symMemoryObtain(struct ncclComm* comm, CUmemGenericAllocatio
     NCCLCHECKGOTO(symBindTeamMemory(comm, t, mem), ret, fail_mem_space_teams);
   }
 
+  // Link before GIN/RMA registration. Plugins such as Anvil SDMA resolve the
+  // user VA through ncclDevrGetLsaSelfAddr, which only searches memHead (and
+  // the LSA flat range). Registering after ncclDevCommCreate is legal, so the
+  // in-flight mem must already be on the list. Unlink on the failure path.
+  mem->next = devr->memHead;
+  devr->memHead = mem;
+
   if (devr->ginEnabled) {
     NCCLCHECKGOTO(symMemoryRegisterGin(comm, mem), ret, fail_mem_space_teams);
   } else {
@@ -787,15 +812,17 @@ static ncclResult_t symMemoryObtain(struct ncclComm* comm, CUmemGenericAllocatio
     NCCLCHECKGOTO(symMemoryRegisterRma(comm, mem), ret, fail_mem_space_teams);
   }
 
-  // Add to list of mems.
-  mem->next = devr->memHead;
-  devr->memHead = mem;
-
   *outMem = mem;
   free(globalSegmentInfo);
   return ret;
 
 fail_mem_space_teams:
+  {
+    struct ncclDevrMemory** ptr = &devr->memHead;
+    while (*ptr != nullptr && *ptr != mem) ptr = &(*ptr)->next;
+    if (*ptr == mem) *ptr = mem->next;
+  }
+  symMemoryUnregister(comm, mem);
   for (struct ncclDevrTeam* t = devr->teamHead; t != nullptr; t = t->next) {
     symUnbindTeamMemory(comm, t, mem);
   }
@@ -803,6 +830,7 @@ fail_mem_space:
   ncclSpaceFree(&devr->bigSpace, bigOffset, mem->lsaMaxSize);
 fail_mem:
   if (mem != nullptr) {
+    free(mem->ginSegmentInfos);
     free(mem->memHandles);
     free(mem->segmentSizes);
     free(mem->lsaNumSegments);
@@ -827,14 +855,7 @@ static void symMemoryDestroy(struct ncclComm* comm, struct ncclDevrMemory* mem) 
     return;
   }
 
-  if (devr->ginEnabled && mem->ginSegmentInfos != nullptr) {
-    for (int segment = 0; segment < mem->numGinSegments; segment++) {
-      ncclGinDeregister(comm, mem->ginSegmentInfos[segment].ginHostWins);
-    }
-  }
-  if (devr->rmaProxyEnabled && mem->maxGlobalNumSegments == 1) {
-    ncclRmaProxyDeregister(comm, mem->rmaHostWins);
-  }
+  symMemoryUnregister(comm, mem);
   for (struct ncclDevrTeam* t = devr->teamHead; t != nullptr; t = t->next) {
     symUnbindTeamMemory(comm, t, mem);
   }
