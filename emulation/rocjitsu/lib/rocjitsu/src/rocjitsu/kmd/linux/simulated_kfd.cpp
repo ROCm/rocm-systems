@@ -2164,7 +2164,11 @@ int SimulatedKfd::free_memory_ioctl(KfdProcess &proc, void *arg) {
         proc.imported_dmabufs_.erase(dmabuf_it);
       }
     }
-    if (alloc.host_ptr && !alloc.user_va)
+    // unmap_from_gpu only drops page-table entries; it never munmaps, so it is
+    // safe for a caller-placed range whose pages the driver does not own. FREE
+    // erases the allocation record below, so skipping it here would strand live
+    // PTEs pointing into memory the caller is free to reuse.
+    if (alloc.host_ptr)
       unmap_from_gpu(proc, alloc.gpu_va, alloc.size);
     if (alloc.memfd >= 0) {
       {
@@ -2211,6 +2215,45 @@ int SimulatedKfd::map_memory_ioctl(KfdProcess &proc, void *arg) {
                       alloc.handle, alloc.gpu_va, alloc.size, args->n_devices,
                       alloc.host_ptr != nullptr);
   });
+  // A caller-placed allocation reaches MAP with no backing store: ROCr reserves
+  // the VA itself with a PROT_NONE mmap and asks the driver to back it, and for
+  // such an allocation alloc_memory_ioctl deliberately creates neither a memfd
+  // nor a host mapping. MAP is then the only chance to back it (no mmap of the
+  // KFD fd follows for device memory), so adopt the caller's reservation the way
+  // dispatch_mmap adopts MAP_FIXED pages: lift the PROT_NONE and keep the pages
+  // caller-owned so teardown never unmaps them. USERPTR already carries the
+  // caller's own pages, and a DOORBELL range must keep reaching the doorbell
+  // path rather than become ordinary memory. Daemon mode is excluded because
+  // the guest's pages are in another process there and MAP has a memfd to work
+  // with; backing it is a separate change.
+  //
+  // The cost is that the caller's PROT_NONE reservation becomes readable and
+  // writable for the life of the allocation, so a stray host dereference of a
+  // device pointer no longer faults the way it would on real hardware. That is
+  // the same trade dispatch_mmap already makes, and the alternative is a range
+  // the GPU cannot translate at all.
+  const bool is_userptr = (alloc.flags & KFD_IOC_ALLOC_MEM_FLAGS_USERPTR) != 0;
+  const bool is_doorbell = (alloc.flags & KFD_IOC_ALLOC_MEM_FLAGS_DOORBELL) != 0;
+  if (!daemon_mode_ && alloc.user_va && alloc.host_ptr == nullptr && !is_userptr && !is_doorbell) {
+    auto *reserved = reinterpret_cast<void *>(alloc.gpu_va);
+    if (libc_passthrough().mprotect(reserved, alloc.size, PROT_READ | PROT_WRITE) == 0) {
+      alloc.host_ptr = reserved;
+      alloc.host_ptr_owned = false;
+    } else {
+      // mprotect failing says the range is not wholly mapped in this process,
+      // which for a local caller means it never reserved this VA. Report
+      // success anyway and leave the range unbacked: such a client used to fall
+      // through to passthrough, and a newly failing ioctl would regress it.
+      // Note mprotect is not required to be atomic -- on a range with a hole
+      // Linux may widen the mapped prefix before returning ENOMEM -- so the
+      // caller's pages can come back readable even down this path.
+      const int mprotect_errno = errno; // Logger::cp below may clobber it.
+      util::Logger::cp([&](auto &os) {
+        os << std::format("MAP_MEMORY_UNBACKED handle={} gpu_va={:#x} size={} errno={}",
+                          alloc.handle, alloc.gpu_va, alloc.size, mprotect_errno);
+      });
+    }
+  }
   if (alloc.host_ptr)
     map_to_gpu(proc, alloc.gpu_va, alloc.host_ptr, alloc.size, pte_mtype_for_flags(alloc.flags));
   args->n_success = args->n_devices;
