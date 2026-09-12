@@ -619,6 +619,14 @@ hsa_status_t KfdDriver::ImportMemoryHandle(const core::Agent& agent, core::Drive
     handle->owner = this;
     // hsaKmtHandleImport creates a distinct object per import, so this handle owns it.
     handle->owns_allocation = true;
+    // Record the DRM mmap offset of the imported BO so the CPU mapping can be established
+    // later in Runtime::MappedHandleAllowedAgent::EnableAccess. This is best effort: a BO that
+    // is not CPU mappable must still import successfully for GPU access, so leave the offset
+    // marked invalid and let the CPU-access path reject it if a CPU mapping is requested.
+    handle->mmap_offset_valid =
+        HSAKMT_CALL(hsaKmtMemoryGetCpuAddr(gpu_agent.libThunkDev(), res.buf_handle,
+                                           &handle->mmap_offset)) == HSAKMT_STATUS_SUCCESS;
+    if (!handle->mmap_offset_valid) handle->mmap_offset = 0;
     return HSA_STATUS_SUCCESS;
   }
   case core::ShareType::FABRIC_HANDLE: {
@@ -646,6 +654,11 @@ hsa_status_t KfdDriver::ImportMemoryHandle(const core::Agent& agent, core::Drive
     handle->owner = this;
     // hsaKmtHandleImport creates a distinct object per import, so this handle owns it.
     handle->owns_allocation = true;
+    // See the DMABUF_FD case above: best-effort mmap offset for the CPU-access path.
+    handle->mmap_offset_valid =
+        HSAKMT_CALL(hsaKmtMemoryGetCpuAddr(gpu_agent.libThunkDev(), res.buf_handle,
+                                           &handle->mmap_offset)) == HSAKMT_STATUS_SUCCESS;
+    if (!handle->mmap_offset_valid) handle->mmap_offset = 0;
     return HSA_STATUS_SUCCESS;
   }
   default:
@@ -723,6 +736,9 @@ hsa_status_t KfdDriver::CreateShareableHandle(core::DriverMemoryHandle* handle,
     DestroyMemoryHandle(&targetHandle);
     return HSA_STATUS_ERROR;
   }
+  // Unlike the import path this is not best effort: a locally created shareable handle always
+  // carries a usable CPU mmap offset, or CreateShareableHandle fails above.
+  handle->mmap_offset_valid = true;
 
   // handle->handle is replaced by the imported BO; handle->size carries over from allocation.
   handle->handle = targetHandle.handle;
