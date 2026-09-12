@@ -2405,10 +2405,16 @@ uint64_t Device::deviceVmemAlloc(size_t size, uint64_t flags) const {
     return 0;
   }
 
+  uint64_t hsa_mem_flags = 0;
+  // gfx120x does not support extended-scope fine-grained memory. So explicitly force the uncached flag.
+  if (uncached && isa().versionMajor() == 12 && isa().versionMinor() == 0) {
+    hsa_mem_flags |= HSA_AMD_MEMORY_POOL_UNCACHED_FLAG;
+  }
+
   hsa_amd_vmem_alloc_handle_t hsa_vmem_handle{};
 
   // We only allow pinned memory at this time.
-  hsa_status_t hsa_status = Hsa::vmem_handle_create(pool, size, MEMORY_TYPE_PINNED, 0,
+  hsa_status_t hsa_status = Hsa::vmem_handle_create(pool, size, MEMORY_TYPE_PINNED, hsa_mem_flags,
                                                     &hsa_vmem_handle);
 
   if (hsa_status != HSA_STATUS_SUCCESS) {
@@ -2508,7 +2514,9 @@ void* Device::deviceLocalAlloc(size_t size, const AllocationFlags& flags, bool a
   if (flags.executable_) {
     hsa_mem_flags |= HSA_AMD_MEMORY_POOL_EXECUTABLE_FLAG;
   }
-  if (flags.uncached_ && isa().versionMajor() == 12) {
+
+  // gfx120x does not support extended-scope fine-grained memory. So explicitly force the uncached flag.
+  if (flags.uncached_ && isa().versionMajor() == 12 && isa().versionMinor() == 0) {
     hsa_mem_flags |= HSA_AMD_MEMORY_POOL_UNCACHED_FLAG;
   }
 
