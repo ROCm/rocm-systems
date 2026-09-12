@@ -244,7 +244,7 @@
       "tests": [
         {
           "name": "A19_Cast_FaultIsolationAcrossWorkers",
-          "description": "Injected fault state stays inside its communicator; bystander connections stay clean.",
+          "description": "One worker breaks its own connection while the others keep transferring: the bystanders' transfers must all verify while the fault is live",
           "test_filter": "NetIbMPITest.FaultIsolationAcrossWorkers"
         },
         {

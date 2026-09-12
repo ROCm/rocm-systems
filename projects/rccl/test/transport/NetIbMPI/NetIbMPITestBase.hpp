@@ -1715,6 +1715,31 @@ protected:
                 usleep(kPollIntervalUs);
             }
         }
+
+        // Never returns with the request still outstanding. Its three callers read an
+        // uncompleted outcome as the signal they were looking for and return, and their
+        // guards would then deregister and free memory the NIC can still be writing into.
+        //
+        // An error from TestRequest ends it: the queue pair is in error and the work is
+        // flushed, which is the expected outcome once the injected fault fires -- so the
+        // usual path costs one poll and leaves the connection usable for the recovery
+        // checks that follow. Only a request that is neither done nor errored gets this
+        // side's queue pairs driven to error, and in that case the caller is failing.
+        if (request != nullptr && !outcome.completed) {
+            static constexpr int kSettlePolls = 100;  // 100 * 10ms = 1s
+            bool retired = false;
+            for (int poll = 0; poll < kSettlePolls && !retired; poll++) {
+                int done = 0;
+                int sizes[1] = {0};
+                if (TestRequest(request, &done, sizes) != ncclSuccess || done) retired = true;
+                else usleep(kPollIntervalUs);
+            }
+            if (!retired) {
+                int nqps = 0;
+                if (!WorkerCastLiveNqps(sendComm, &nqps).ok || nqps <= 0) nqps = 1;
+                for (int qp = 0; qp < nqps; qp++) WorkerCastDriveQpToError(sendComm, qp);
+            }
+        }
         return outcome;
     }
 
@@ -1810,7 +1835,10 @@ protected:
             if (!WorkerCastLiveNqps(pair.sendComm, &nqps).ok || nqps <= 0) nqps = 1;
             for (int qp = 0; qp < nqps; qp++) WorkerCastDriveQpToError(pair.sendComm, qp);
         } else {
-            for (int qp = 0; ; qp++) {
+            // Bounded as well as stopping at the first refusal: the API refusing an
+            // index past the count is what ends this walk, and a plugin that answered
+            // every index would otherwise spin here forever.
+            for (int qp = 0; qp < kQpProbeLimit; qp++) {
                 if (ncclIbCastFaultDriveRecvQpToError(pair.recvComm, qp) != ncclSuccess) break;
             }
         }
@@ -2046,6 +2074,24 @@ protected:
         return result;
     }
 
+    // The API rejects an index past the connection's QP count, which is how the walks
+    // below learn where to stop; the bound is there for a plugin that does not.
+    static constexpr int kQpProbeLimit = 64;
+
+    // Tells the siblings that this worker is not coming. Constructed before anything
+    // that can fail -- the allocation and the registration included, which is what the
+    // local copies of this got wrong -- and disarmed on the line that reaches the gate,
+    // so no exit above the gate has to remember to report itself. Without it a worker
+    // that returns early never arrives, and the survivors spin the whole gate and report
+    // a rendezvous timeout on top of the real error.
+    struct WorkerGateAbort {
+        std::atomic<bool>& flag;
+        bool armed = true;
+        explicit WorkerGateAbort(std::atomic<bool>& f) : flag(f) {}
+        void reached() { armed = false; }
+        ~WorkerGateAbort() { if (armed) flag.store(true, std::memory_order_release); }
+    };
+
     // Poll a receive the peer may never satisfy, and report whether it finished.
     bool WorkerDrainRecv(void* request, int pollIterations) {
         if (!request) return true;
@@ -2069,9 +2115,6 @@ protected:
         ThreadResult result;
         if (!request) return result;
 
-        // The API rejects an index past the connection's QP count, which is how
-        // the loop learns where to stop.
-        static constexpr int kQpProbeLimit = 64;
         for (int qp = 0; qp < kQpProbeLimit; qp++) {
             if (ncclIbCastFaultDriveRecvQpToError(recvComm, qp) != ncclSuccess) break;
         }
