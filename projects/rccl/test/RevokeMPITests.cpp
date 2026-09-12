@@ -10,8 +10,8 @@
 #include "ResourceGuards.hpp"
 #include "TestChecks.hpp"
 #include "nccl.h"
+#include "rccl_common.h"
 
-#include <memory>
 #include <sched.h>
 #include <string>
 #include <vector>
@@ -544,15 +544,15 @@ TEST_F(RevokeMPITest, IncompleteCollective_Revoke_Shrink_Collective)
 /**
  * DDA fabric LL incomplete AllReduce + revoke. IncompleteCollective_Revoke_Shrink_Collective
  * uses 1M floats and can take DDA two-shot on gfx1250 by accident, but it does not
- * assert the COLL path. These two cases require the one-shot / two-shot log needle
- * so a generic-kernel fallback cannot mask a DDA abortFlag wait regression.
+ * assert the path. These two cases pin DDA fabric LL via rcclGetCollImplInfo so a
+ * generic-kernel fallback cannot mask a DDA abortFlag wait regression. The
+ * reporting API names DDA LL, not the one-shot vs two-shot kernel; the two tests
+ * still use those sizes so each wait loop is the one that size selects.
  */
 namespace
 {
 constexpr size_t kDdaOneShotCount     = 65536; // 256 KiB f32; below the 1 MiB one-shot threshold
 constexpr size_t kDdaTwoShotBaseCount = 262176;
-constexpr char   kDdaOneShotNeedle[]  = "taking DDA fabric LL one-shot path";
-constexpr char   kDdaTwoShotNeedle[]  = "taking DDA fabric LL two-shot path";
 
 bool ddaIsGfx1250Device()
 {
@@ -591,58 +591,22 @@ size_t ddaTwoShotCountForRanks(int nRanks)
     }
     return 0;
 }
-
-std::string ddaLogDelta(const std::string& now, const std::string& before)
-{
-    return now.size() >= before.size() ? now.substr(before.size()) : now;
-}
-
-// NCCL_DEBUG_FILE and the per-rank stderr tee grow independently. A suffix of
-// their concatenation is not the AllReduce delta (it can skip the COLL line
-// entirely). Slice each source, then search.
-bool ddaLogsContainNeedleSince(const MPIHelpers::TestLogAssertionContext& logCtx,
-                               const std::string& beforeNccl, const std::string& beforeStderr,
-                               const char* needle)
-{
-    const std::string ncclDelta =
-        ddaLogDelta(logCtx.readNcclDebugLog(), beforeNccl);
-    const std::string stderrDelta =
-        ddaLogDelta(logCtx.readPerRankStderrLog(), beforeStderr);
-    return ncclDelta.find(needle) != std::string::npos ||
-           stderrDelta.find(needle) != std::string::npos;
-}
 } // namespace
 
 class RevokeDdaMPITest : public MPITestBase
 {
 protected:
-    std::unique_ptr<MPIHelpers::MpiEnvGuard>             debugGuard_;
-    std::unique_ptr<MPIHelpers::MpiEnvGuard>             debugSubsysGuard_;
-    std::unique_ptr<MPIHelpers::TestLogAssertionContext> logCtx_;
-
     void SetUp() override
     {
         MPITestBase::SetUp();
         if(!ddaAllRanksTrue(ddaIsGfx1250Device()))
             GTEST_SKIP() << "DDA fabric LL AllReduce requires gfx1250 on every rank";
-        debugGuard_       = std::make_unique<MPIHelpers::MpiEnvGuard>("NCCL_DEBUG", "INFO");
-        debugSubsysGuard_ = std::make_unique<MPIHelpers::MpiEnvGuard>("NCCL_DEBUG_SUBSYS", "NET,INIT,COLL,TUNING");
-        logCtx_           = std::make_unique<MPIHelpers::TestLogAssertionContext>(
-            MPIHelpers::makeCombinedAssertionLogOptions(getTestMpiRank()));
     }
 
-    void TearDown() override
-    {
-        MPITestBase::TearDown();
-        logCtx_.reset();
-        debugSubsysGuard_.reset();
-        debugGuard_.reset();
-    }
-
-    void runIncompleteDdaRevokeShrink(size_t count, const char* needle);
+    void runIncompleteDdaRevokeShrink(size_t count);
 };
 
-void RevokeDdaMPITest::runIncompleteDdaRevokeShrink(size_t count, const char* needle)
+void RevokeDdaMPITest::runIncompleteDdaRevokeShrink(size_t count)
 {
     ASSERT_TRUE(validateTestPrerequisites(4,
                                           kNoProcessLimit,
@@ -670,8 +634,16 @@ void RevokeDdaMPITest::runIncompleteDdaRevokeShrink(size_t count, const char* ne
     HIP_TEST_CHECK_GTEST_FAIL(zeroInitializeBuffer<float>(sendBuf, count));
     HIP_TEST_CHECK_GTEST_FAIL(zeroInitializeBuffer<float>(recvBuf, count));
 
-    const std::string beforeNccl   = logCtx_->readNcclDebugLog();
-    const std::string beforeStderr = logCtx_->readPerRankStderrLog();
+    int algo        = -1;
+    int protocol    = -1;
+    int maxChannels = -1;
+    ASSERT_MPI_EQ(ncclSuccess,
+                  rcclGetCollImplInfo(parent, ncclFuncAllReduce, count, ncclFloat32, ncclSum,
+                                      sendBuf, recvBuf, /*graphCapturing=*/0, &algo, &protocol,
+                                      &maxChannels));
+    ASSERT_MPI_TRUE(algo == static_cast<int>(rcclAddonAlgos_t::RCCL_DDA_FABRIC_LL) &&
+                    protocol == NCCL_PROTO_LL);
+
     if(rank != skipRank)
     {
         ASSERT_EQ(ncclSuccess,
@@ -679,11 +651,6 @@ void RevokeDdaMPITest::runIncompleteDdaRevokeShrink(size_t count, const char* ne
     }
 
     MPI_Barrier(MPI_COMM_WORLD);
-
-    const bool tookExpectedDdaPath =
-        rank == skipRank ||
-        ddaLogsContainNeedleSince(*logCtx_, beforeNccl, beforeStderr, needle);
-    ASSERT_MPI_TRUE(tookExpectedDdaPath);
 
     ASSERT_MPI_EQ(ncclSuccess, ncclCommRevoke(parent, NCCL_REVOKE_DEFAULT));
 
@@ -728,12 +695,12 @@ TEST_F(RevokeDdaMPITest, IncompleteCollective_DdaLlTwoShot)
     if(count == 0)
         GTEST_SKIP() << "Could not find a two-shot-aligned element count";
 
-    runIncompleteDdaRevokeShrink(count, kDdaTwoShotNeedle);
+    runIncompleteDdaRevokeShrink(count);
 }
 
 TEST_F(RevokeDdaMPITest, IncompleteCollective_DdaLlOneShot)
 {
-    runIncompleteDdaRevokeShrink(kDdaOneShotCount, kDdaOneShotNeedle);
+    runIncompleteDdaRevokeShrink(kDdaOneShotCount);
 }
 
 static void computeAsymmetricExclude(int worldRank, int worldSize,
