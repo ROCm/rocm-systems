@@ -43,9 +43,6 @@
 #ifndef HSA_RUNTIME_CORE_INC_AMD_XDNA_DRIVER_H_
 #define HSA_RUNTIME_CORE_INC_AMD_XDNA_DRIVER_H_
 
-#include <array>
-#include <climits>
-#include <map>
 #include <memory>
 
 #include "core/inc/amd_aie_agent.h"
@@ -143,10 +140,9 @@ public:
   /// driver needs to create a new hardware context.
   /// @param[in] first_pkt_idx index of the first packet in the queue
   /// @param[in] num_pkts number of packets in the queue to be submitted. Must be greater than 0.
-  /// @param[in] num_core_tiles number of core tiles in the AIE device
   /// @param[in] agent agent that owns the queue
   hsa_status_t SubmitCmdChain(hsa_queue_t& q, void* queue_metadata, uint64_t first_pkt_idx,
-                              uint64_t num_pkts, uint32_t num_core_tiles, const core::Agent& agent);
+                              uint64_t num_pkts, const core::Agent& agent);
 
   hsa_status_t SPMAcquire(uint32_t preferred_node_id) const override;
   hsa_status_t SPMRelease(uint32_t preferred_node_id) const override;

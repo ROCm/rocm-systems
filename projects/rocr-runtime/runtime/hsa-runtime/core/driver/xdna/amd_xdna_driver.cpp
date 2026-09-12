@@ -46,6 +46,7 @@
 #include <array>
 #include <cassert>
 #include <cerrno>
+#include <climits>
 #include <fstream>
 #include <map>
 #include <memory>
@@ -202,7 +203,8 @@ enum class XDNADeviceType {
   Unknown = 0,
   /// @brief Phoenix (npu1), aie2. PDI + instruction sequence dispatch only.
   Phx,
-  /// @brief Strix / Strix Halo / Krackan (npu4/5/6), aie2p. Also supports full-ELF dispatch.
+  /// @brief Strix / Strix Halo / Krackan (npu4/5/6), aie2p. PDI + instruction sequence and full-ELF
+  /// dispatch.
   Stx,
 };
 
@@ -238,7 +240,7 @@ constexpr uint32_t DEV_ADDR_OFFSET_MASK = 0x02FFFFFF;
 /// driver takes that count straight from this command: amdxdna_cmd_get_payload() reports
 /// (count - 1) dwords and aie2_cmdlist_fill_one_slot_cf() uses it as arg_cnt. This command's real
 /// payload after the CU mask is an odd number of dwords, so it needs an odd amount of padding to
-/// come out even, and one dword is the least that does it.
+/// come out even.
 constexpr uint32_t CMD_COUNT_SIZE_INCREASE = 1;
 
 /// @brief Size of the driver's per-command chain buffer, from MAX_CHAIN_CMDBUF_SIZE in
@@ -249,11 +251,6 @@ constexpr uint32_t MAX_CHAIN_CMDBUF_SIZE = 4096;
 /// xdna-driver (aie2_msg_priv.h). The slot is the header plus the command's argument dwords.
 constexpr uint32_t CHAIN_SLOT_HEADER_BYTESIZE = 52;
 
-/// @brief Returns the bytes a command with @p arg_cnt argument dwords occupies in a chain.
-static constexpr uint32_t ChainSlotBytesize(uint32_t arg_cnt) {
-  return CHAIN_SLOT_HEADER_BYTESIZE + arg_cnt * sizeof(uint32_t);
-}
-
 /// @brief Largest value ert_start_kernel_cmd::count can hold; it is an 11-bit field.
 constexpr uint32_t MAX_CMD_COUNT = (1u << 11) - 1;
 
@@ -262,7 +259,7 @@ constexpr uint32_t MAX_CMD_COUNT = (1u << 11) - 1;
 /// Not documented anywhere; established by sweeping the control code across offsets within its
 /// allocation on npu4 and observing which dispatches complete. Every 16 KiB-aligned address
 /// works and every other one hangs, so the runtime rejects the misaligned ones up front. The
-/// PDI has no such requirement -- its address is a plain 64-bit store into the control code.
+/// PDI has no such requirement - its address is a plain 64-bit store into the control code.
 constexpr uint32_t CTRL_CODE_DEV_ADDR_ALIGNMENT = 16384;
 
 /// @brief Number of argument dwords a full-ELF command carries.
@@ -273,6 +270,13 @@ constexpr uint32_t ELF_CMD_ARG_DWORDS = sizeof(uint64_t) / sizeof(uint32_t);
 
 /// @brief Default amdxdna_cu_config::cu_func when configuring a CU.
 constexpr uint32_t default_cu_func = 0;
+
+/// @brief Returns the bytes a command with @p arg_cnt argument dwords occupies in a chain.
+///
+/// @param[in] arg_cnt argument count
+constexpr uint32_t ChainSlotBytesize(uint32_t arg_cnt) {
+  return CHAIN_SLOT_HEADER_BYTESIZE + arg_cnt * sizeof(uint32_t);
+}
 
 /// @brief Calls ioctl with the given request and argument, and retries if the call is interrupted
 /// by a signal or if it returns EAGAIN.
@@ -305,16 +309,13 @@ static hsa_status_t xdna_ioctl(int fd, unsigned long request, void* arg) {
 
 /// @brief BO handle information.
 struct BOHandle {
-  /// Mapped address.
+  /// @brief Mapped address.
   void* vaddr = nullptr;
-  /// Handle returned by xdna, or AMDXDNA_INVALID_BO_HANDLE when this holds no BO.
+  /// @brief Handle returned by xdna, or AMDXDNA_INVALID_BO_HANDLE when this holds no BO.
   uint32_t handle = AMDXDNA_INVALID_BO_HANDLE;
-  /// Size in bytes.
+  /// @brief Size in bytes.
   size_t size = 0;
 
-  constexpr BOHandle() = default;
-  constexpr BOHandle(void* vaddr, uint32_t handle, size_t size)
-      : vaddr{vaddr}, handle{handle}, size{size} {}
   constexpr bool IsValid() const { return handle != AMDXDNA_INVALID_BO_HANDLE; }
 };
 
@@ -374,8 +375,7 @@ class PDICache {
   constexpr uint32_t operator[](size_type index) const { return entries[index]; }
 };
 
-/// @brief Pool of reusable command BOs, so dispatch does not pay a create/destroy ioctl pair per
-/// command.
+/// @brief Pool of reusable command BOs to avoid create/destroy ioctl pair per command.
 ///
 /// Entries are fixed-size and allocated once for the life of the queue; @ref AcquireCmdBO hands
 /// them out round-robin. This assumes no more entries are in flight on the device at once than the
@@ -391,7 +391,7 @@ struct CmdBOPool {
 
   BOHandle& AcquireCmdBO() {
     assert(!entries.empty());
-    auto idx = next & (entries.size() - 1);
+    auto idx = next % entries.size();
     assert(entries[idx].IsValid());
     ++next;
     return entries[idx];
@@ -426,8 +426,12 @@ static QueueMode PacketMode(const hsa_amd_aie_kernel_dispatch_packet_t* pkt) {
 struct KmqMetadata {
   uint32_t hw_ctx_handle = AMDXDNA_INVALID_CTX_HANDLE;
   uint32_t syncobj_handle = 0;
+  /// @brief Core tiles the queue's hardware context is created with. Fixed for the life of the
+  /// queue.
+  uint32_t num_core_tiles = 0;
   PDICache pdi_cache;
   QueueMode mode = QueueMode::Undecided;
+  /// @brief BO pool.
   CmdBOPool cmd_bo_pool;
 };
 
@@ -468,10 +472,9 @@ static hsa_status_t DestroyHwCtx(int fd, uint32_t hw_ctx_handle) {
 /// CONFIG_CU on the same context, so a CU configuration set now could not be undone later.
 ///
 /// @param[in] fd driver file descriptor
-/// @param[in] num_core_tiles number of core tiles to configure the hardware context with
-/// @param[in,out] kmq_metadata KMQ metadata to update with the hardware context handle and syncobj
-/// handle
-static hsa_status_t CreateHwCtx(int fd, uint32_t num_core_tiles, KmqMetadata* kmq_metadata) {
+/// @param[in,out] kmq_metadata KMQ metadata supplying the core tile count, and updated with the
+/// hardware context handle and syncobj handle
+static hsa_status_t CreateHwCtx(int fd, KmqMetadata* kmq_metadata) {
   // Create QoS information; we don't leverage any external Qos hints.
   amdxdna_qos_info qos_info = {};
   qos_info.user_start_col = USER_START_COL_NOT_REQUESTED;
@@ -480,27 +483,25 @@ static hsa_status_t CreateHwCtx(int fd, uint32_t num_core_tiles, KmqMetadata* km
   amdxdna_drm_create_hwctx create_hwctx_args = {};
   create_hwctx_args.qos_p = reinterpret_cast<uintptr_t>(&qos_info);
   create_hwctx_args.max_opc = 0x800;
-  create_hwctx_args.num_tiles = num_core_tiles;
+  create_hwctx_args.num_tiles = kmq_metadata->num_core_tiles;
   hsa_status_t err = xdna_ioctl(fd, DRM_IOCTL_AMDXDNA_CREATE_HWCTX, &create_hwctx_args);
   if (err != HSA_STATUS_SUCCESS) {
     assert(false && "Failed to create hardware context for KMQ");
     return err;
   }
 
+  // Destroys the context unless it comes out of this function fully configured.
+  MAKE_NAMED_SCOPE_GUARD(hw_ctx_guard, [&] { DestroyHwCtx(fd, create_hwctx_args.handle); });
+
   if (!kmq_metadata->pdi_cache.empty()) {
-    // Create hardware context configuration.
+    // Create hardware context configuration. The parameter ends in a cu_configs[] array, so it is
+    // built in a byte buffer sized to hold the array too.
     const size_t num_cus = kmq_metadata->pdi_cache.size();
     const size_t config_cu_param_size =
         sizeof(amdxdna_hwctx_param_config_cu) + num_cus * sizeof(amdxdna_cu_config);
-
+    std::vector<std::byte> config_cu_param_buf(config_cu_param_size);
     auto* xdna_config_cu_param =
-        static_cast<amdxdna_hwctx_param_config_cu*>(malloc(config_cu_param_size));
-    if (xdna_config_cu_param == nullptr) {
-      DestroyHwCtx(fd, create_hwctx_args.handle);
-      return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
-    }
-    MAKE_SCOPE_GUARD([xdna_config_cu_param] { free(xdna_config_cu_param); });
-    memset(xdna_config_cu_param, 0, config_cu_param_size);
+        reinterpret_cast<amdxdna_hwctx_param_config_cu*>(config_cu_param_buf.data());
 
     xdna_config_cu_param->num_cus = static_cast<uint16_t>(num_cus);
     for (size_t i = 0; i < num_cus; i++) {
@@ -516,11 +517,12 @@ static hsa_status_t CreateHwCtx(int fd, uint32_t num_core_tiles, KmqMetadata* km
     config_hw_ctx_args.param_val_size = static_cast<uint32_t>(config_cu_param_size);
     err = xdna_ioctl(fd, DRM_IOCTL_AMDXDNA_CONFIG_HWCTX, &config_hw_ctx_args);
     if (err != HSA_STATUS_SUCCESS) {
-      DestroyHwCtx(fd, create_hwctx_args.handle);
       assert(false && "Failed to configure hardware context for KMQ");
       return err;
     }
   }
+
+  hw_ctx_guard.Dismiss();
 
   kmq_metadata->hw_ctx_handle = create_hwctx_args.handle;
   kmq_metadata->syncobj_handle = create_hwctx_args.syncobj_handle;
@@ -588,6 +590,7 @@ static hsa_status_t WaitCommand(int fd, ert_start_kernel_cmd* cmd, uint32_t hw_c
       return HSA_STATUS_ERROR;
   }
 
+  hsa_status_t err = HSA_STATUS_SUCCESS;
   // Prefer DRM syncobj timeline wait when available.
   if (syncobj_handle != 0) {
     drm_syncobj_timeline_wait timeline_wait = {};
@@ -596,20 +599,17 @@ static hsa_status_t WaitCommand(int fd, ert_start_kernel_cmd* cmd, uint32_t hw_c
     timeline_wait.count_handles = 1;
     timeline_wait.timeout_nsec = INT64_MAX;
     timeline_wait.flags = DRM_SYNCOBJ_WAIT_FLAGS_WAIT_ALL | DRM_SYNCOBJ_WAIT_FLAGS_WAIT_FOR_SUBMIT;
-    hsa_status_t err = xdna_ioctl(fd, DRM_IOCTL_SYNCOBJ_TIMELINE_WAIT, &timeline_wait);
-    if (err != HSA_STATUS_SUCCESS) {
-      return err;
-    }
+    err = xdna_ioctl(fd, DRM_IOCTL_SYNCOBJ_TIMELINE_WAIT, &timeline_wait);
   } else {
     // Fallback: XDNA-specific wait.
     amdxdna_drm_wait_cmd wait_cmd = {};
     wait_cmd.hwctx = hw_ctx_handle;
     wait_cmd.timeout = 0;  // no timeout, wait until the command finishes
     wait_cmd.seq = seq;
-    hsa_status_t err = xdna_ioctl(fd, DRM_IOCTL_AMDXDNA_WAIT_CMD, &wait_cmd);
-    if (err != HSA_STATUS_SUCCESS) {
-      return err;
-    }
+    err = xdna_ioctl(fd, DRM_IOCTL_AMDXDNA_WAIT_CMD, &wait_cmd);
+  }
+  if (err != HSA_STATUS_SUCCESS) {
+    return err;
   }
 
   // Check if command failed.
@@ -752,15 +752,12 @@ static hsa_status_t CreateCmdBO(int fd, const void* heap_base, uint32_t size,
 static hsa_status_t CreateCommand(KmqMetadata* kmq_metadata, uint32_t declared_dwords,
                                   uint32_t opcode, uint32_t cu_mask, BOHandle* cmd_bo,
                                   ert_start_kernel_cmd** cmd) {
-  if (declared_dwords > MAX_CMD_COUNT) {
-    // count is an 11-bit field and the chain slot is sized from it, so letting it wrap would
-    // under-size the slot and overflow the chain buffer.
-    return HSA_STATUS_ERROR_INVALID_PACKET_FORMAT;
-  }
-
   const uint32_t cmd_bytesize = sizeof(ert_start_kernel_cmd) + declared_dwords * sizeof(uint32_t);
   if (cmd_bytesize > CmdBOPool::kEntryByteSize) {
-    // Pool entries are fixed-size; a command that does not fit cannot be pooled.
+    // Pool entries are fixed-size; a command that does not fit cannot be pooled. Entries are
+    // sized to MAX_CMD_COUNT dwords of payload, so this also rejects a declared_dwords that would
+    // not fit the 11-bit count field -- letting that wrap would under-size the chain slot the
+    // driver derives from it and overflow the chain buffer.
     return HSA_STATUS_ERROR_INVALID_PACKET_FORMAT;
   }
   *cmd_bo = kmq_metadata->cmd_bo_pool.AcquireCmdBO();
@@ -811,14 +808,12 @@ hsa_status_t XdnaDriver::QueryKernelModeDriver(core::DriverQuery query) {
     default:
       return HSA_STATUS_ERROR_INVALID_ARGUMENT;
   }
-  return HSA_STATUS_ERROR_INVALID_ARGUMENT;
 }
 
 
-/// @brief Reads the PCI device ID of @p devnode_name from sysfs.
-static hsa_status_t ReadDeviceId(const std::string& devnode_name, uint16_t* device_id) {
-  const std::string device_id_file =
-      std::string(sysfs_path) + "/" + devnode_name + "/device/device";
+/// @brief Reads the PCI device ID from the sysfs device directory @p sysfs_device_path.
+static hsa_status_t ReadDeviceId(const std::string& sysfs_device_path, uint16_t* device_id) {
+  const std::string device_id_file = sysfs_device_path + "/device";
 
   // Device ID is in hex, with a "0x" prefix.
   std::ifstream is(device_id_file);
@@ -969,7 +964,7 @@ hsa_status_t XdnaDriver::GetNodeProperties(HsaNodeProperties& node_props, uint32
   const std::string sysfs_device_path = std::string(sysfs_path) + "/" + devnode_name_ + "/device";
 
   uint16_t device_id = 0;
-  err = ReadDeviceId(devnode_name_, &device_id);
+  err = ReadDeviceId(sysfs_device_path, &device_id);
   if (err != HSA_STATUS_SUCCESS) {
     assert(false && "Failed to read the XDNA device ID from sysfs.");
     return err;
@@ -1154,14 +1149,15 @@ hsa_status_t XdnaDriver::DestroyQueue(HSA_QUEUEID queue_id) const {
 
 hsa_status_t XdnaDriver::CreateKernelModeQueue(size_t queue_size, uint32_t num_core_tiles,
                                                void** queue_metadata) const {
-  // AcquireCmdBO() indexes the pool with a power-of-two mask; a zero-sized pool would underflow
-  // that mask and index an empty vector.
+  // A queue with no packet slots would give the pool no entries, and an empty pool cannot hand
+  // one out.
   if (queue_size == 0) {
     return HSA_STATUS_ERROR_INVALID_ARGUMENT;
   }
 
   auto kmq_metadata = std::make_unique<KmqMetadata>();
-  hsa_status_t err = CreateHwCtx(fd_, num_core_tiles, kmq_metadata.get());
+  kmq_metadata->num_core_tiles = num_core_tiles;
+  hsa_status_t err = CreateHwCtx(fd_, kmq_metadata.get());
   if (err != HSA_STATUS_SUCCESS) {
     return err;
   }
@@ -1175,8 +1171,8 @@ hsa_status_t XdnaDriver::CreateKernelModeQueue(size_t queue_size, uint32_t num_c
   });
 
   // Pre-allocate the command BO pool for the life of the queue, so dispatch never pays a
-  // create/destroy ioctl pair per command. AcquireCmdBO() indexes with a power-of-two mask, and
-  // queue_size is already a power of two (enforced by the HSA runtime), so double it.
+  // create/destroy ioctl pair per command. A full queue needs one entry per packet plus one for
+  // the chain wrapper; the pool is sized to twice the queue so a batch never laps itself.
   const size_t pooled_cmd_bo_count = 2 * queue_size;
   kmq_metadata->cmd_bo_pool.entries.reserve(pooled_cmd_bo_count);
   for (size_t i = 0; i < pooled_cmd_bo_count; ++i) {
@@ -1764,67 +1760,60 @@ static void LogChainFailure(const volatile ert_start_kernel_cmd* chain_cmd,
 static hsa_status_t SubmitAndWaitChain(int fd, const BOHandle* cmd_bos, size_t num_commands,
                                        const std::vector<uint32_t>& bo_handles,
                                        KmqMetadata* kmq_metadata) {
-  if (num_commands == 1) {
-    // Single command: submit the per-kernel cmd BO directly, no chain wrapper.
-    uint64_t seq = 0;
-    hsa_status_t status =
-        SubmitCommand(fd, cmd_bos[0].handle, bo_handles, kmq_metadata->hw_ctx_handle, seq);
-    if (status != HSA_STATUS_SUCCESS) {
-      assert(false && "Failed to submit command.");
-      return status;
+  // A lone command is submitted directly; several are wrapped in one ERT_CMD_CHAIN command that
+  // names them all. Either way one BO is submitted and waited on, and chain_cmd records which of
+  // the two shapes it is so a failure can be reported against the right layout.
+  const BOHandle* submit_bo = &cmd_bos[0];
+  ert_start_kernel_cmd* chain_cmd = nullptr;
+
+  if (num_commands > 1) {
+    const size_t cmd_chain_data_bytesize = num_commands * sizeof(uint64_t);
+    const size_t cmd_data_bytesize = sizeof(ert_cmd_chain_data) + cmd_chain_data_bytesize;
+    const size_t cmd_bytesize = sizeof(ert_start_kernel_cmd) + cmd_data_bytesize;
+    // MAX_CHAIN_CMDBUF_SIZE is the driver's real chain-buffer ceiling; it is smaller than
+    // CmdBOPool::kEntryByteSize (which is sized for the largest non-chained command), so it, not
+    // the pool entry size, is the bound to enforce here.
+    if (cmd_bytesize > MAX_CHAIN_CMDBUF_SIZE) {
+      assert(false && "Command chain BO does not fit in a pooled entry.");
+      return HSA_STATUS_ERROR_INVALID_PACKET_FORMAT;
     }
-    status = WaitCommand(fd, static_cast<ert_start_kernel_cmd*>(cmd_bos[0].vaddr),
-                         kmq_metadata->hw_ctx_handle, kmq_metadata->syncobj_handle, seq);
-    if (status != HSA_STATUS_SUCCESS) {
-      log_warning_n(
-          10, "AIE command failed: state '%s'.\n",
-          ErtStateName(static_cast<volatile ert_start_kernel_cmd*>(cmd_bos[0].vaddr)->state));
-      assert(false && "Failed waiting for command.");
-      return status;
+    BOHandle& cmd_bo_handle = kmq_metadata->cmd_bo_pool.AcquireCmdBO();
+
+    chain_cmd = static_cast<ert_start_kernel_cmd*>(cmd_bo_handle.vaddr);
+    memset(chain_cmd, 0, cmd_bytesize);
+    chain_cmd->state = ERT_CMD_STATE_NEW;
+    chain_cmd->count = static_cast<uint32_t>(cmd_data_bytesize / sizeof(uint32_t));
+    chain_cmd->opcode = ERT_CMD_CHAIN;
+    auto* cmd_chain = reinterpret_cast<ert_cmd_chain_data*>(chain_cmd->data);
+    cmd_chain->command_count = static_cast<uint32_t>(num_commands);
+    for (size_t i = 0; i < num_commands; i++) {
+      cmd_chain->data[i] = cmd_bos[i].handle;
     }
-    return HSA_STATUS_SUCCESS;
+    submit_bo = &cmd_bo_handle;
   }
 
-  // Create command chain for multi-command dispatches.
-  const size_t cmd_chain_data_bytesize = num_commands * sizeof(uint64_t);
-  const size_t cmd_data_bytesize = sizeof(ert_cmd_chain_data) + cmd_chain_data_bytesize;
-  const size_t cmd_bytesize = sizeof(ert_start_kernel_cmd) + cmd_data_bytesize;
-  // MAX_CHAIN_CMDBUF_SIZE is the driver's real chain-buffer ceiling; it is smaller than
-  // CmdBOPool::kEntryByteSize (which is sized for the largest non-chained command), so it, not
-  // the pool entry size, is the bound to enforce here.
-  if (cmd_bytesize > MAX_CHAIN_CMDBUF_SIZE) {
-    assert(false && "Command chain BO does not fit in a pooled entry.");
-    return HSA_STATUS_ERROR_INVALID_PACKET_FORMAT;
-  }
-  BOHandle& cmd_bo_handle = kmq_metadata->cmd_bo_pool.AcquireCmdBO();
-
-  auto* cmd = static_cast<ert_start_kernel_cmd*>(cmd_bo_handle.vaddr);
-  memset(cmd, 0, cmd_bytesize);
-  cmd->state = ERT_CMD_STATE_NEW;
-  cmd->count = static_cast<uint32_t>(cmd_data_bytesize / sizeof(uint32_t));
-  cmd->opcode = ERT_CMD_CHAIN;
-  auto* cmd_chain = reinterpret_cast<ert_cmd_chain_data*>(cmd->data);
-  cmd_chain->command_count = static_cast<uint32_t>(num_commands);
-  for (size_t i = 0; i < num_commands; i++) {
-    cmd_chain->data[i] = cmd_bos[i].handle;
-  }
-
-  // Execute all commands in the command chain.
   uint64_t seq = 0;
   hsa_status_t status =
-      SubmitCommand(fd, cmd_bo_handle.handle, bo_handles, kmq_metadata->hw_ctx_handle, seq);
+      SubmitCommand(fd, submit_bo->handle, bo_handles, kmq_metadata->hw_ctx_handle, seq);
   if (status != HSA_STATUS_SUCCESS) {
-    assert(false && "Failed to submit command chain.");
+    assert(false && "Failed to submit command.");
     return status;
   }
-  status = WaitCommand(fd, static_cast<ert_start_kernel_cmd*>(cmd_bo_handle.vaddr),
+
+  status = WaitCommand(fd, static_cast<ert_start_kernel_cmd*>(submit_bo->vaddr),
                        kmq_metadata->hw_ctx_handle, kmq_metadata->syncobj_handle, seq);
   if (status != HSA_STATUS_SUCCESS) {
     // Re-read through volatile: the firmware writes these while the wait above is blocked.
-    LogChainFailure(static_cast<volatile ert_start_kernel_cmd*>(cmd_bo_handle.vaddr),
-                    reinterpret_cast<volatile ert_cmd_chain_data*>(cmd->data), cmd_bos,
-                    num_commands);
-    assert(false && "Failed waiting for command chain.");
+    if (chain_cmd != nullptr) {
+      LogChainFailure(static_cast<volatile ert_start_kernel_cmd*>(submit_bo->vaddr),
+                      reinterpret_cast<volatile ert_cmd_chain_data*>(chain_cmd->data), cmd_bos,
+                      num_commands);
+    } else {
+      log_warning_n(
+          10, "AIE command failed: state '%s'.\n",
+          ErtStateName(static_cast<volatile ert_start_kernel_cmd*>(submit_bo->vaddr)->state));
+    }
+    assert(false && "Failed waiting for command.");
     return status;
   }
 
@@ -1833,7 +1822,7 @@ static hsa_status_t SubmitAndWaitChain(int fd, const BOHandle* cmd_bos, size_t n
 
 hsa_status_t XdnaDriver::SubmitCmdChain(hsa_queue_t& q, void* queue_metadata,
                                         uint64_t first_pkt_idx, uint64_t num_pkts,
-                                        uint32_t num_core_tiles, const core::Agent& agent) {
+                                        const core::Agent& agent) {
   auto kmq_metadata = static_cast<KmqMetadata*>(queue_metadata);
 
   auto* queue = static_cast<hsa_amd_aie_kernel_dispatch_packet_t*>(q.base_address);
@@ -1925,7 +1914,7 @@ hsa_status_t XdnaDriver::SubmitCmdChain(hsa_queue_t& q, void* queue_metadata,
     kmq_metadata->syncobj_handle = 0;
 
     // Create a new hardware context.
-    err = CreateHwCtx(fd_, num_core_tiles, kmq_metadata);
+    err = CreateHwCtx(fd_, kmq_metadata);
     if (err != HSA_STATUS_SUCCESS) {
       assert(false && "Failed to configure hardware context for queue.");
       return err;
@@ -1992,8 +1981,6 @@ hsa_status_t XdnaDriver::SubmitCmdChain(hsa_queue_t& q, void* queue_metadata,
       sig->SubRelease(1);
     }
   }
-
-  // Guards will unmap and close cmd BOs and cmd_chain BO.
 
   return HSA_STATUS_SUCCESS;
 }
