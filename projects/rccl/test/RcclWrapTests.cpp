@@ -30,6 +30,7 @@
 #include "rocmwrap.h"
 
 #include <algorithm>
+#include <chrono>
 
 namespace RcclUnitTesting
 {
@@ -2645,6 +2646,60 @@ TEST(Rcclwrap, EnqueueGuards_SuspendedForcesEnqueue)
     comm.memManager = &mgr;
     __atomic_store_n(&mgr.released, 1, __ATOMIC_RELAXED);
     EXPECT_TRUE(rcclCollectiveMustUseEnqueuePath(&comm));
+}
+
+// Call sites: DebugLocal must divert AllReduce / AllGather / AlltoAll / ReduceScatter
+// through enqueue ArgsCheck. Two ranks so gfx1250 DDA is eligible if the guard is
+// skipped; a host pointer then hangs in DDA waiting for rank 1. The isolated
+// runner times that out. With the guard, ArgsCheck rejects the host pointer.
+TEST(Rcclwrap, EnqueueGuards_DebugLocal_CollectivesRejectHostPointers)
+{
+    RUN_ISOLATED_TESTS(
+        ProcessIsolatedTestRunner::TestConfig(
+            "EnqueueGuards_DebugLocal_CollectivesRejectHostPointers",
+            []()
+            {
+                int numDevices = 0;
+                ASSERT_EQ(hipGetDeviceCount(&numDevices), hipSuccess);
+                if(numDevices < 2)
+                {
+                    GTEST_SKIP() << "Needs 2 devices so DDA is eligible if enqueue is skipped.";
+                }
+
+                int        devs[2]   = {0, 1};
+                ncclComm_t comms[2]  = {};
+                ASSERT_EQ(ncclCommInitAll(comms, 2, devs), ncclSuccess);
+                comms[0]->checkMode = ncclCheckModeDebugLocal;
+
+                int cudaDev = 0;
+                ASSERT_EQ(ncclCommCuDevice(comms[0], &cudaDev), ncclSuccess);
+                ASSERT_EQ(hipSetDevice(cudaDev), hipSuccess);
+                hipStream_t stream = nullptr;
+                ASSERT_EQ(hipStreamCreate(&stream), hipSuccess);
+
+                float        hostSend = 1.f;
+                float        hostRecv = 0.f;
+                constexpr size_t kCount = 65536; // 256 KiB f32; gfx1250 DDA LL band
+
+                EXPECT_EQ(ncclInvalidArgument,
+                          ncclAllReduce(&hostSend, &hostRecv, kCount, ncclFloat32, ncclSum,
+                                        comms[0], stream));
+                EXPECT_EQ(ncclInvalidArgument,
+                          ncclAllGather(&hostSend, &hostRecv, kCount, ncclFloat32, comms[0],
+                                        stream));
+                EXPECT_EQ(ncclInvalidArgument,
+                          ncclAlltoAll(&hostSend, &hostRecv, kCount, ncclFloat32, comms[0],
+                                       stream));
+                EXPECT_EQ(ncclInvalidArgument,
+                          ncclReduceScatter(&hostSend, &hostRecv, kCount, ncclFloat32, ncclSum,
+                                            comms[0], stream));
+
+                ASSERT_EQ(hipStreamDestroy(stream), hipSuccess);
+                ASSERT_EQ(ncclCommDestroy(comms[0]), ncclSuccess);
+                ASSERT_EQ(ncclCommDestroy(comms[1]), ncclSuccess);
+            })
+            .withNumGpus(2)
+            .withTimeout(std::chrono::seconds(120)));
 }
 
 // ---------------------------------------------------------------------------
