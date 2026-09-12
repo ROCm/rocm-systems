@@ -263,23 +263,34 @@ extern "C" void __hipOnError(const void *err_info);
     HIP_RETURN(hipErrorStreamCaptureUnsupported);                                                  \
   }
 
-// Helper: invalidate all capturing streams and return an error code.
-#define INVALIDATE_ALL_CAPTURING_AND_RETURN(err)                                                   \
-  if (!g_allCapturingStreams.empty()) {                                                            \
-    for (auto stream : g_allCapturingStreams) {                                                    \
-      stream->SetCaptureStatus(hipStreamCaptureStatusInvalidated);                                 \
+// Helper: invalidate all capturing streams on the current device and return an error.
+// Invalidation is device-scoped, not thread-scoped or mode-scoped. A sync API invalidates
+// all captures on the same device, regardless of which thread they belong to or what
+// capture mode they use.
+#define INVALIDATE_DEVICE_CAPTURING_AND_RETURN(err)                                                \
+  {                                                                                                \
+    int _devId = hip::ihipGetDevice();                                                             \
+    bool _found = false;                                                                           \
+    {                                                                                              \
+      amd::ScopedLock lock(g_streamSetLock);                                                      \
+      for (auto* _s : g_allCapturingStreams) {                                                    \
+        if (_s->DeviceId() == _devId) {                                                           \
+          _s->SetCaptureStatus(hipStreamCaptureStatusInvalidated);                                 \
+          _found = true;                                                                           \
+        }                                                                                          \
+      }                                                                                            \
     }                                                                                              \
-    return err;                                                                                    \
+    if (_found) return err;                                                                        \
   }
 
 // Device sync is not supported during capture.
 #define CHECK_SUPPORTED_DURING_CAPTURE()                                                           \
-  INVALIDATE_ALL_CAPTURING_AND_RETURN(hipErrorStreamCaptureUnsupported)
+  INVALIDATE_DEVICE_CAPTURING_AND_RETURN(hipErrorStreamCaptureUnsupported)
 
 // Sync APIs (hipMemset, hipMemcpy, etc.) cannot be called when stream capture is active
 // for any capture mode (Global, ThreadLocal, or Relaxed).
 #define CHECK_STREAM_CAPTURING()                                                                   \
-  INVALIDATE_ALL_CAPTURING_AND_RETURN(hipErrorStreamCaptureImplicit)
+  INVALIDATE_DEVICE_CAPTURING_AND_RETURN(hipErrorStreamCaptureImplicit)
 
 #define STREAM_CAPTURE(name, stream, ...)                                                          \
   hip::getStreamPerThread(stream);                                                                 \
