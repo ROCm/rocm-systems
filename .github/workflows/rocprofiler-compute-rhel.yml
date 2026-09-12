@@ -97,7 +97,7 @@ jobs:
             yum install -y rocm-smi-lib roctracer-dev rocprofiler-dev rocprofiler-sdk rocm-device-libs hip-devel libpciaccess
 
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           sparse-checkout: |
             projects/rocprofiler-compute
