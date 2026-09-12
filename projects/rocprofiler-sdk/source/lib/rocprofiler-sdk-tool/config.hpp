@@ -224,6 +224,8 @@ config::get_attach_invariants() const
                            hsa_image_ext_api_trace,
                            hsa_finalizer_ext_api_trace,
                            marker_api_trace,
+                           selected_regions,
+                           selected_regions_ref_count,
                            memory_copy_trace,
                            memory_allocation_trace,
                            scratch_memory_trace,
