@@ -97,20 +97,30 @@ extern ncclNet_t ncclNetIb;
 // External NET IB-CAST plugin (WRR scheduler, multi-QP, AINIC features)
 extern ncclNet_t netIbCast;
 
-// Select plugin by NCCL_NET env var name; falls back to ncclNetIb.
-inline ncclNet_t* GetPlugin() {
-    static ncclNet_t* plugins[] = {&ncclNetIb, &netIbCast};
-    const char* env = getenv("NCCL_NET");
-    if (env) {
-        for (auto* p : plugins) {
-            if (strcmp(env, p->name) == 0) {
-                TEST_INFO("Rank %d: Using plugin %s", MPIEnvironment::world_rank, p->name);
-                return p;
-            }
-        }
+// Keep the next three in sync with src/plugin/net.cc: if the library and the
+// tests disagree about which plugin an NCCL_NET value selects, a suite can
+// silently exercise a plugin it was not meant to cover.
+inline const char* CanonicalNetName(const char* env) {
+    return rcclCanonicalNetName(env);
+}
+
+// nullptr means "names no internal IB plugin", so the caller can tell "wrong
+// suite for this config" from "typo" instead of silently falling back to IB.
+inline ncclNet_t* ResolveNetPlugin(const char* env) {
+    static ncclNet_t* const plugins[] = {&ncclNetIb, &netIbCast};
+    const char* name = CanonicalNetName(env);
+    // Unset: the library picks IB-CAST on AINIC and IB elsewhere.
+    if (name == nullptr) return rcclUseAinic() ? &netIbCast : &ncclNetIb;
+    for (auto* p : plugins) {
+        if (strcasecmp(name, p->name) == 0) return p;
     }
-    TEST_INFO("Rank %d: Using default plugin %s", MPIEnvironment::world_rank, ncclNetIb.name);
-    return &ncclNetIb;
+    return nullptr;
+}
+
+// A real plugin outside this suite's scope: a deliberate config, so skip.
+inline bool IsSocketNetName(const char* env) {
+    const char* name = CanonicalNetName(env);
+    return name != nullptr && strcasecmp(name, ncclNetSocket.name) == 0;
 }
 
 // NET IB-specific resource deleters
@@ -250,9 +260,23 @@ protected:
 
     void SetUp() override {
         MPITestBase::SetUp();
-        net_ = GetPlugin();
         numDevices_ = 0;
         initCtx_ = nullptr;
+
+        const char* env = getenv("NCCL_NET");
+        net_ = ResolveNetPlugin(env);
+        if (net_ == nullptr) {
+            // Never fall back silently -- that is what hid the original defect.
+            if (IsSocketNetName(env)) {
+                GTEST_SKIP() << "NCCL_NET=" << env << " selects a non-IB plugin";
+            }
+            net_ = &ncclNetIb;
+            FAIL() << "NCCL_NET=" << env << " names no internal IB plugin; expected one of "
+                   << ncclNetIb.name << ", " << netIbCast.name << " or ROCM-IB (alias for "
+                   << netIbCast.name << ")";
+        }
+        TEST_INFO("Rank %d: Using plugin %s (NCCL_NET=%s)", MPIEnvironment::world_rank,
+                  net_->name, env ? env : "<unset>");
     }
 
     void TearDown() override {

@@ -65,6 +65,56 @@
           "name": "A3_NetIB_SimpleSendRecv",
           "description": "Verifies basic send/recv over AINIC data path (no collectives).",
           "test_filter": "NetIbMPITest.SimpleSendRecv"
+        },
+        {
+          "name": "A17_NetIB_PluginMatchesNcclNetEnv",
+          "description": "The plugin the fixture loaded is the one NCCL_NET names. Unset here, so this pins the AINIC default to IB-CAST.",
+          "test_filter": "NetIbMPITest.PluginMatchesNcclNetEnv"
+        }
+      ]
+    },
+
+    "net_plugin_selection": {
+      "extends": "gtest_base",
+      "num_ranks": 1,
+      "num_nodes": 1,
+      "timeout": 60,
+      "description": "NCCL_NET name resolution. Pure logic, single rank, no NIC/GPU required.",
+      "tests": [
+        {
+          "name": "A18_NetPlugin_Selection",
+          "description": "NCCL_NET resolves case-insensitively, ROCM-IB selects the ib-cast plugin, unset follows the detected NIC, and unknown names resolve to nothing instead of falling back to plain IB.",
+          "test_filter": "NetPluginSelection.*"
+        }
+      ]
+    },
+
+    "netib_rocmib": {
+      "extends": "gtest_base",
+      "description": "netib_core re-run under the ROCM-IB alias, which forces AINIC mode and so makes libionic.so mandatory. AINIC-only by construction.",
+      "env_variables": {
+        "NCCL_NET": "ROCM-IB"
+      },
+      "tests": [
+        {
+          "name": "A19_NetIB_RocmIb_PluginMatchesNcclNetEnv",
+          "description": "ROCM-IB actually loads the ib-cast plugin rather than silently falling back to plain IB.",
+          "test_filter": "NetIbMPITest.PluginMatchesNcclNetEnv"
+        },
+        {
+          "name": "A20_NetIB_RocmIb_InitializePlugin",
+          "description": "Plugin init under forced-AINIC mode, including the libionic.so load.",
+          "test_filter": "NetIbMPITest.InitializePlugin"
+        },
+        {
+          "name": "A21_NetIB_RocmIb_GetDeviceProperties",
+          "description": "IONIC devices visible and properties valid under the alias.",
+          "test_filter": "NetIbMPITest.GetDeviceProperties"
+        },
+        {
+          "name": "A22_NetIB_RocmIb_SimpleSendRecv",
+          "description": "Send/recv over the AINIC data path under the alias.",
+          "test_filter": "NetIbMPITest.SimpleSendRecv"
         }
       ]
     },
@@ -460,6 +510,8 @@
 
   "test_suites": [
     { "config": "netib_core",            "enabled": true, "smoke": true },
+    { "config": "net_plugin_selection",  "enabled": true, "smoke": true },
+    { "config": "netib_rocmib",          "enabled": true },
     { "config": "cts_off_stress",        "enabled": true, "smoke": true },
     { "config": "cts_on_depth32",        "enabled": true, "smoke": true },
     { "config": "cast_wrr",              "enabled": true, "smoke": true },
