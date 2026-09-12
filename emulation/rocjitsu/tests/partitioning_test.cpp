@@ -13,11 +13,14 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <array>
 #include <cstdint>
+#include <filesystem>
 #include <fstream>
 #include <iterator>
 #include <memory>
+#include <set>
 #include <span>
 #include <stdexcept>
 #include <string>
@@ -32,19 +35,32 @@ const std::string CONFIG_KMD_PATH = std::string(CONFIG_DIR) + "/gfx950_mi355x_km
 const std::string CONFIG_2GPU_PATH = std::string(CONFIG_DIR) + "/gfx950_mi355x_kmd_2gpu.json";
 const std::string CONFIG_1XCD_PATH = std::string(CONFIG_DIR) + "/gfx1100_w7900.json";
 
+// Most shipped configs omit num_threads so they pick up the default; the 2-GPU
+// KMD config pins it. Replace the pin when there is one, otherwise insert an
+// override after the opening brace.
 std::string config_json_with_num_threads(const std::string &path, uint32_t num_threads) {
   std::ifstream input(path);
   if (!input.is_open())
     throw std::runtime_error("Failed to open config: " + path);
 
   std::string json((std::istreambuf_iterator<char>(input)), std::istreambuf_iterator<char>());
-  const std::string configured_threads = "\"num_threads\": 1";
-  const auto num_threads_pos = json.find(configured_threads);
-  if (num_threads_pos == std::string::npos)
-    throw std::runtime_error("Config does not have the expected num_threads field: " + path);
+  const std::string field = "\"num_threads\":";
+  const std::string replacement = field + " " + std::to_string(num_threads);
 
-  std::string replacement = "\"num_threads\": " + std::to_string(num_threads);
-  json.replace(num_threads_pos, configured_threads.size(), replacement);
+  const size_t field_pos = json.find(field);
+  if (field_pos != std::string::npos) {
+    const size_t value_end = json.find_first_of(",}\n", field_pos + field.size());
+    if (value_end == std::string::npos)
+      throw std::runtime_error("Unterminated num_threads field: " + path);
+    json.replace(field_pos, value_end - field_pos, replacement);
+    return json;
+  }
+
+  const size_t brace_pos = json.find('{');
+  if (brace_pos == std::string::npos)
+    throw std::runtime_error("Config is not a JSON object: " + path);
+
+  json.insert(brace_pos + 1, "\n  " + replacement + ",");
   return json;
 }
 
@@ -320,7 +336,7 @@ TEST(XcdPartitioningTest, VmStepSucceedsWithSingleEnginePartition) {
   EXPECT_EQ(active, 0);
 }
 
-TEST(XcdPartitioningTest, CApiClampsZeroThreadsToOne) {
+TEST(XcdPartitioningTest, CApiResolvesZeroThreadsToDefault) {
   auto json = config_json_with_num_threads(CONFIG_1XCD_PATH, 0);
 
   rj_vm_t *raw_vm = nullptr;
@@ -361,6 +377,173 @@ TEST(XcdPartitioningTest, CApiDoesNotWarnWhenThreadCountIsUnchanged) {
   std::unique_ptr<rj_vm_t, decltype(&rj_vm_destroy)> vm(raw_vm, &rj_vm_destroy);
 
   EXPECT_EQ(warning.find("num_threads clamped"), std::string::npos);
+}
+
+TEST(XcdPartitioningTest, DefaultThreadCountIsHostCappedXcdCount) {
+  auto loaded = config::load_config(CONFIG_PATH, rocjitsu::kEmbeddedSchema);
+  auto *soc = loaded.soc();
+  ASSERT_NE(soc, nullptr);
+  ASSERT_EQ(soc->num_xcds(), 8u);
+
+  // Stated host widths, so the assertions describe the rule instead of
+  // recomputing it. Deriving the expectation from available_host_threads() the
+  // way the resolver does leaves the test green under any rule the two sides
+  // share -- swapping affinity for hardware_concurrency(), say, would move both.
+  EXPECT_EQ(amdgpu::default_xcd_partition_count(soc, 1u), 1u);
+  EXPECT_EQ(amdgpu::default_xcd_partition_count(soc, 3u), 3u);
+  EXPECT_EQ(amdgpu::default_xcd_partition_count(soc, 8u), 8u);
+  EXPECT_EQ(amdgpu::default_xcd_partition_count(soc, 64u), 8u) << "must cap at the XCD count";
+  EXPECT_EQ(amdgpu::default_xcd_partition_count(soc, 0u), 1u) << "indeterminate host floors at 1";
+
+  // The measuring overload has to agree with the stated-width one for the width
+  // this process actually has; that is the only part affinity is load-bearing for.
+  const uint32_t host_threads = amdgpu::available_host_threads();
+  const uint32_t expected = host_threads == 0 ? 1u : std::min(host_threads, 8u);
+  EXPECT_EQ(amdgpu::default_xcd_partition_count(soc), expected);
+
+  // The shipped config omits num_threads, so loading it resolves the default.
+  EXPECT_EQ(loaded.engine_config.num_threads, expected);
+  EXPECT_EQ(config::load_config(CONFIG_PATH, rocjitsu::kEmbeddedSchema, /*host_threads=*/4)
+                .engine_config.num_threads,
+            4u);
+}
+
+TEST(XcdPartitioningTest, DefaultThreadCountAggregatesSocsAndFloorsAtOne) {
+  auto loaded = config::load_config(CONFIG_PATH, rocjitsu::kEmbeddedSchema);
+  auto *soc = loaded.soc();
+  ASSERT_NE(soc, nullptr);
+
+  // Two views of the same 8-XCD SoC stand in for a 16-XCD multi-GPU VM: the
+  // default counts XCDs across every SoC it is given.
+  std::array<SoC *, 2> pair = {soc, soc};
+
+  // A stated width above one SoC's XCD count is what separates aggregation from
+  // counting only the first SoC: at 16 the correct answer is 16, and a
+  // first-SoC-only implementation says 8. A width measured on a narrow runner
+  // saturates first and hides the difference.
+  EXPECT_EQ(amdgpu::default_xcd_partition_count(std::span<SoC *>(pair), 16u), 16u);
+  EXPECT_EQ(amdgpu::default_xcd_partition_count(std::span<SoC *>(pair), 64u), 16u);
+  EXPECT_EQ(amdgpu::default_xcd_partition_count(std::span<SoC *>(pair), 12u), 12u);
+  EXPECT_EQ(amdgpu::default_xcd_partition_count(std::span<SoC *>(pair), 0u), 1u);
+
+  const uint32_t host_threads = amdgpu::available_host_threads();
+  const uint32_t expected = host_threads == 0 ? 1u : std::min(host_threads, 16u);
+  EXPECT_EQ(amdgpu::default_xcd_partition_count(std::span<SoC *>(pair)), expected);
+
+  // No SoCs at all still yields a runnable engine.
+  std::array<SoC *, 1> none = {nullptr};
+  EXPECT_EQ(amdgpu::default_xcd_partition_count(std::span<SoC *>(none)), 1u);
+}
+
+// 0 must mean "use the default" through the loader's own multi-GPU path. The
+// one-XCD C API case above cannot show this: it yields 1 under both the old
+// 0 -> 1 clamp and the new default, so only an aggregate config distinguishes
+// them, and only load_config() covers extra_gpu_builds.
+TEST(XcdPartitioningTest, LoaderResolvesZeroThreadsAcrossExtraGpuBuilds) {
+  const std::string json = config_json_with_num_threads(CONFIG_2GPU_PATH, 0);
+  config::LoadedConfig loaded = config::load_config_from_string(json, rocjitsu::kEmbeddedSchema);
+
+  SoC *soc = loaded.soc();
+  ASSERT_NE(soc, nullptr);
+  ASSERT_EQ(loaded.num_gpus, 2u);
+  ASSERT_EQ(loaded.extra_gpu_builds.size(), 1u);
+
+  SoC *extra_soc = dynamic_cast<SoC *>(loaded.extra_gpu_builds[0].root.get());
+  ASSERT_NE(extra_soc, nullptr);
+  ASSERT_EQ(soc->num_xcds(), 8u);
+  ASSERT_EQ(extra_soc->num_xcds(), 8u);
+
+  // The literal 16 is the point: a default derived from the first SoC alone
+  // caps at 8. Stating the host width is what keeps that distinction alive on a
+  // constrained runner -- under `taskset -c 0` a measured width resolves both
+  // the correct and the first-SoC-only implementation to 1.
+  EXPECT_EQ(config::load_config_from_string(json, rocjitsu::kEmbeddedSchema, /*host_threads=*/16)
+                .engine_config.num_threads,
+            16u);
+  EXPECT_EQ(config::load_config_from_string(json, rocjitsu::kEmbeddedSchema, /*host_threads=*/9)
+                .engine_config.num_threads,
+            9u)
+      << "a first-SoC-only default would clamp this to 8";
+  EXPECT_EQ(config::load_config_from_string(json, rocjitsu::kEmbeddedSchema, /*host_threads=*/64)
+                .engine_config.num_threads,
+            16u);
+
+  const uint32_t host_threads = amdgpu::available_host_threads();
+  const uint32_t expected = host_threads == 0 ? 1u : std::min(host_threads, 16u);
+  EXPECT_EQ(loaded.engine_config.num_threads, expected);
+}
+
+// The shipped topology configs take the default by omitting num_threads. Only
+// the multi-GPU KMD configs pin it, because any multi-partition setting there
+// hangs RCCL collectives (see docs/configuration.md). Enforcing that here rather
+// than in a CI grep keeps every config covered as new ones are added.
+TEST(XcdPartitioningTest, ShippedConfigsOmitNumThreadsExceptTheDocumentedPin) {
+  const std::set<std::string> kPinnedConfigs = {
+      "gfx950_mi355x_kmd_2gpu.json",
+      "gfx1250_mi455x_kmd_4gpu.json",
+  };
+  std::set<std::string> saw_pinned_configs;
+  uint32_t configs_checked = 0;
+
+  for (const std::filesystem::directory_entry &entry :
+       std::filesystem::directory_iterator(CONFIG_DIR)) {
+    if (!entry.is_regular_file() || entry.path().extension() != ".json")
+      continue;
+
+    std::ifstream input(entry.path());
+    ASSERT_TRUE(input.is_open()) << entry.path();
+    const std::string json((std::istreambuf_iterator<char>(input)),
+                           std::istreambuf_iterator<char>());
+    const bool pins_num_threads = json.find("\"num_threads\"") != std::string::npos;
+    ++configs_checked;
+
+    if (kPinnedConfigs.count(entry.path().filename().string()) != 0) {
+      saw_pinned_configs.insert(entry.path().filename().string());
+      EXPECT_TRUE(pins_num_threads) << entry.path().filename() << " must keep its documented pin";
+      // The pin's whole purpose is a single partition: docs/configuration.md
+      // says any multi-partition value hangs RCCL collectives on these configs.
+      // Checking only that the key is present would let 2 or 64 through, which
+      // is the exact state the pin exists to prevent.
+      //
+      // The stated width has to exceed 1, or the assertion cannot see the
+      // difference: resolving against the live affinity of a one-CPU runner
+      // turns a pin of 0 -- which opts back into the default -- into 1 as
+      // surely as a real pin does. At 64 the config has to carry the literal 1.
+      const config::LoadedConfig pinned =
+          config::load_config(entry.path().string(), rocjitsu::kEmbeddedSchema,
+                              /*host_threads=*/64);
+      EXPECT_EQ(pinned.engine_config.num_threads, 1u)
+          << entry.path().filename() << " must pin num_threads to exactly 1";
+    } else {
+      EXPECT_FALSE(pins_num_threads)
+          << entry.path().filename()
+          << " pins num_threads, so it no longer exercises the default partition count";
+    }
+  }
+
+  EXPECT_EQ(saw_pinned_configs, kPinnedConfigs)
+      << "expected every documented pinned config in " << CONFIG_DIR;
+  EXPECT_GT(configs_checked, 1u);
+}
+
+TEST(XcdPartitioningTest, CApiDefaultsToOnePartitionPerXcdAndRuns) {
+  rj_vm_t *raw_vm = nullptr;
+  testing::internal::CaptureStderr();
+  const rj_status_t status = rj_vm_create(CONFIG_PATH.c_str(), RJ_VM_MODE_DEFAULT, &raw_vm);
+  const std::string warning = testing::internal::GetCapturedStderr();
+  ASSERT_EQ(status, ROCJITSU_STATUS_SUCCESS);
+  ASSERT_NE(raw_vm, nullptr);
+  std::unique_ptr<rj_vm_t, decltype(&rj_vm_destroy)> vm(raw_vm, &rj_vm_destroy);
+
+  // Resolving the default is not a clamp, so it must not warn.
+  EXPECT_EQ(warning.find("num_threads clamped"), std::string::npos);
+  EXPECT_EQ(vm->engine_config.num_threads, amdgpu::default_xcd_partition_count(vm->soc));
+
+  ASSERT_NE(vm->soc, nullptr);
+  for (uint32_t i = 0; i < vm->soc->num_xcds(); ++i)
+    expect_subtree_partition(vm->soc->xcd(i), i % vm->engine_config.num_threads);
+
+  EXPECT_EQ(rj_vm_run(vm.get(), nullptr), ROCJITSU_STATUS_SUCCESS);
 }
 
 TEST(XcdPartitioningTest, CApiClampsMultiGpuThreadsToTotalXcdCountAndRuns) {

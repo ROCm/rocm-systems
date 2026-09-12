@@ -41,13 +41,6 @@
 #    include <mpi.h>
 #endif
 
-#if defined(MPICH) && MPICH > 0
-#    define ROCPROFSYS_MPI_MPICH 1
-#elif defined(OMPI_MAJOR_VERSION) && defined(OMPI_MINOR_VERSION) &&                      \
-    defined(OMPI_PATCH_VERSION)
-#    define ROCPROFSYS_MPI_OPENMPI 1
-#endif
-
 namespace rocprofsys
 {
 namespace mpi
@@ -242,7 +235,8 @@ quiet()
 //--------------------------------------------------------------------------------------//
 
 inline bool
-check_error(const char* _func, int err_code, comm_t _comm = mpi::comm_world_v)
+check_error([[maybe_unused]] const char* _func, [[maybe_unused]] int err_code,
+            [[maybe_unused]] comm_t _comm = mpi::comm_world_v)
 {
 #if defined(ROCPROFSYS_USE_MPI)
     bool _success = (err_code == MPI_SUCCESS);
@@ -260,7 +254,6 @@ check_error(const char* _func, int err_code, comm_t _comm = mpi::comm_world_v)
     if(!_success && fail_on_error()) PMPI_Abort(_comm, err_code);
     return (err_code == MPI_SUCCESS);
 #else
-    tim::consume_parameters(_func, err_code, _comm);
     return false;
 #endif
 }
@@ -328,7 +321,7 @@ is_initialized()
 //--------------------------------------------------------------------------------------//
 
 inline void
-initialize(int& argc, char**& argv)
+initialize([[maybe_unused]] int& argc, [[maybe_unused]] char**& argv)
 {
 #if defined(ROCPROFSYS_USE_MPI)
     if(!is_initialized())
@@ -376,8 +369,6 @@ initialize(int& argc, char**& argv)
 
         if(!_success_v) ROCPROFSYS_MPI_ERROR_CHECK(MPI_Init(&argc, &argv));
     }
-#else
-    tim::consume_parameters(argc, argv);
 #endif
 }
 
@@ -517,32 +508,31 @@ set_size(std::int32_t _size, comm_t comm)
 //--------------------------------------------------------------------------------------//
 
 inline void
-barrier(comm_t comm)
+barrier([[maybe_unused]] comm_t comm)
 {
 #if defined(ROCPROFSYS_USE_MPI)
     if(is_initialized()) PMPI_Barrier(comm);
-#else
-    tim::consume_parameters(comm);
 #endif
 }
 
 //--------------------------------------------------------------------------------------//
 
 inline void
-comm_split(comm_t comm, int split_size, int rank, comm_t* local_comm)
+comm_split([[maybe_unused]] comm_t comm, [[maybe_unused]] int split_size,
+           [[maybe_unused]] int rank, [[maybe_unused]] comm_t* local_comm)
 {
 #if defined(ROCPROFSYS_USE_MPI)
     if(is_initialized())
         ROCPROFSYS_MPI_ERROR_CHECK(PMPI_Comm_split(comm, split_size, rank, local_comm));
-#else
-    tim::consume_parameters(comm, split_size, rank, local_comm);
 #endif
 }
 
 //--------------------------------------------------------------------------------------//
 
 inline void
-comm_split_type(comm_t comm, int split_size, int key, info_t info, comm_t* local_comm)
+comm_split_type([[maybe_unused]] comm_t comm, [[maybe_unused]] int split_size,
+                [[maybe_unused]] int key, [[maybe_unused]] info_t info,
+                [[maybe_unused]] comm_t* local_comm)
 {
 #if defined(ROCPROFSYS_USE_MPI)
     if(is_initialized())
@@ -550,8 +540,6 @@ comm_split_type(comm_t comm, int split_size, int key, info_t info, comm_t* local
         ROCPROFSYS_MPI_ERROR_CHECK(
             PMPI_Comm_split_type(comm, split_size, key, info, local_comm));
     }
-#else
-    tim::consume_parameters(comm, split_size, key, info, local_comm);
 #endif
 }
 
@@ -603,7 +591,8 @@ get_node_index()
 //--------------------------------------------------------------------------------------//
 
 inline void
-send(const std::string& str, int dest, int tag, comm_t comm = mpi::comm_world_v)
+send([[maybe_unused]] const std::string& str, [[maybe_unused]] int dest,
+     [[maybe_unused]] int tag, [[maybe_unused]] comm_t comm = mpi::comm_world_v)
 {
 #if defined(ROCPROFSYS_USE_MPI)
     using ulli_t = unsigned long long;
@@ -632,15 +621,14 @@ send(const std::string& str, int dest, int tag, comm_t comm = mpi::comm_world_v)
                                                  MPI_LONG, dest, tag, comm));
         }
     }
-#else
-    tim::consume_parameters(str, dest, tag, comm);
 #endif
 }
 
 //--------------------------------------------------------------------------------------//
 
 inline void
-recv(std::string& str, int src, int tag, comm_t comm = mpi::comm_world_v)
+recv([[maybe_unused]] std::string& str, [[maybe_unused]] int src,
+     [[maybe_unused]] int tag, [[maybe_unused]] comm_t comm = mpi::comm_world_v)
 {
 #if defined(ROCPROFSYS_USE_MPI)
     using ulli_t   = unsigned long long;
@@ -684,16 +672,16 @@ recv(std::string& str, int src, int tag, comm_t comm = mpi::comm_world_v)
     {
         str.clear();
     }
-#else
-    tim::consume_parameters(str, src, tag, comm);
 #endif
 }
 
 //--------------------------------------------------------------------------------------//
 
 inline void
-gather(const void* sendbuf, int sendcount, data_type_t sendtype, void* recvbuf,
-       int recvcount, data_type_t recvtype, int root, comm_t comm = mpi::comm_world_v)
+gather([[maybe_unused]] const void* sendbuf, [[maybe_unused]] int sendcount,
+       [[maybe_unused]] data_type_t sendtype, [[maybe_unused]] void* recvbuf,
+       [[maybe_unused]] int recvcount, [[maybe_unused]] data_type_t recvtype,
+       [[maybe_unused]] int root, [[maybe_unused]] comm_t comm = mpi::comm_world_v)
 {
 #if defined(ROCPROFSYS_USE_MPI)
     if(is_initialized())
@@ -701,18 +689,17 @@ gather(const void* sendbuf, int sendcount, data_type_t sendtype, void* recvbuf,
         ROCPROFSYS_MPI_ERROR_CHECK(PMPI_Gather(sendbuf, sendcount, sendtype, recvbuf,
                                                recvcount, recvtype, root, comm));
     }
-#else
-    tim::consume_parameters(sendbuf, sendcount, sendtype, recvbuf, recvcount, recvtype,
-                            root, comm);
 #endif
 }
 
 //--------------------------------------------------------------------------------------//
 
 inline void
-comm_spawn_multiple(int count, char** commands, char*** argv, const int* maxprocs,
-                    const info_t* info, int root, comm_t comm, comm_t* intercomm,
-                    int* errcodes)
+comm_spawn_multiple([[maybe_unused]] int count, [[maybe_unused]] char** commands,
+                    [[maybe_unused]] char*** argv, [[maybe_unused]] const int* maxprocs,
+                    [[maybe_unused]] const info_t* info, [[maybe_unused]] int root,
+                    [[maybe_unused]] comm_t comm, [[maybe_unused]] comm_t* intercomm,
+                    [[maybe_unused]] int* errcodes)
 {
 #if defined(ROCPROFSYS_USE_MPI)
     if(is_initialized())
@@ -720,9 +707,6 @@ comm_spawn_multiple(int count, char** commands, char*** argv, const int* maxproc
         ROCPROFSYS_MPI_ERROR_CHECK(PMPI_Comm_spawn_multiple(
             count, commands, argv, maxprocs, info, root, comm, intercomm, errcodes));
     }
-#else
-    tim::consume_parameters(count, commands, argv, maxprocs, info, root, comm, intercomm,
-                            errcodes);
 #endif
 }
 

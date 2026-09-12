@@ -52,7 +52,7 @@ snippet_pointer_vec_t
 get_snippets(Args&&... args)
 {
     snippet_pointer_vec_t _tmp{};
-    TIMEMORY_FOLD_EXPRESSION(_tmp.push_back(get_snippet(std::forward<Args>(args))));
+    (_tmp.push_back(get_snippet(std::forward<Args>(args))), ...);
     return _tmp;
 }
 //

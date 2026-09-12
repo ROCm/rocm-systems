@@ -76,19 +76,31 @@ struct TopologyBuildResult {
 /// Contains the engine configuration and the built component tree. Provides
 /// convenience accessors for the SoC and GPU memory. After loading, wire
 /// the topology into a SimulationEngine. Multi-threaded rocjitsu topologies
-/// use the XCD-aware policy from rocjitsu/vm/amdgpu/partitioning.h:
+/// use the XCD-aware policy from rocjitsu/vm/amdgpu/partitioning.h.
+///
+/// load_config() has already resolved engine_config.num_threads by the time it
+/// returns: a config that omits the field (or sets it to 0) comes back holding
+/// min(available host threads, XCD count). Overriding it here is what the clamp
+/// is for; pin 1 when the consumer needs SimulationEngine::step(), which
+/// rejects a multi-partition engine.
 /// @code
 ///   #include "rocjitsu/vm/amdgpu/partitioning.h"
 ///
-///   auto loaded = load_config("config.json", kEmbeddedSchema);
-///   auto *soc = loaded.soc();
+///   config::LoadedConfig loaded = load_config("config.json", kEmbeddedSchema);
+///   SoC *soc = loaded.soc();
 ///   loaded.apply_cpu_dispatch_threads();
+///
+///   // Only needed to override the resolved default; requested_threads may
+///   // exceed the XCD count, and the clamp brings it back into range.
 ///   loaded.engine_config.num_threads =
-///       rocjitsu::amdgpu::clamp_xcd_partition_count(
-///           soc, loaded.engine_config.num_threads);
+///       rocjitsu::amdgpu::clamp_xcd_partition_count(soc, requested_threads);
+///
 ///   simdojo::SimulationEngine engine(loaded.engine_config);
 ///   engine.topology().set_root(loaded.take_root());
 ///   loaded.wire_links(engine.topology());
+///
+///   // A multi-partition engine must have a partition policy installed before
+///   // create(), which otherwise throws.
 ///   if (loaded.engine_config.num_threads > 1 &&
 ///       !rocjitsu::amdgpu::partition_topology_by_xcds(
 ///           engine.topology(), soc, loaded.engine_config.num_threads))
@@ -172,12 +184,39 @@ simdojo::ExecMode parse_exec_mode(const std::string &mode_str);
 /// @throws std::runtime_error on file I/O, parse errors, or invalid config.
 LoadedConfig load_config(const std::string &json_path, const std::string &schema_text);
 
+/// @brief Load simulation config from a JSON file against a stated host width.
+///
+/// @details Like the two-argument overload, but resolves an unset (or zero)
+/// `num_threads` against @p host_threads instead of the process's own affinity,
+/// making host-dependent policy explicit for embedding callers and
+/// deterministic tests. @p host_threads is always the width used, including 0,
+/// which means indeterminate and resolves to a single partition.
+/// @param json_path Path to the JSON config file.
+/// @param schema_text FlatBuffers schema text (the .fbs content).
+/// @param host_threads Host width to resolve the default partition count
+/// against.
+/// @returns LoadedConfig with engine parameters and built topology.
+/// @throws std::runtime_error on file I/O, parse errors, or invalid config.
+LoadedConfig load_config(const std::string &json_path, const std::string &schema_text,
+                         uint32_t host_threads);
+
 /// @brief Load simulation config from a JSON string.
 /// @param json JSON configuration string.
 /// @param schema_text FlatBuffers schema text (the .fbs content).
 /// @returns LoadedConfig with engine parameters and built topology.
 /// @throws std::runtime_error on parse errors or invalid config.
 LoadedConfig load_config_from_string(const std::string &json, const std::string &schema_text);
+
+/// @brief Load simulation config from a JSON string against a stated host width.
+/// @details See the three-argument @ref load_config overload.
+/// @param json JSON configuration string.
+/// @param schema_text FlatBuffers schema text (the .fbs content).
+/// @param host_threads Host width to resolve the default partition count
+/// against; 0 means indeterminate and resolves to a single partition.
+/// @returns LoadedConfig with engine parameters and built topology.
+/// @throws std::runtime_error on parse errors or invalid config.
+LoadedConfig load_config_from_string(const std::string &json, const std::string &schema_text,
+                                     uint32_t host_threads);
 
 } // namespace config
 } // namespace rocjitsu
