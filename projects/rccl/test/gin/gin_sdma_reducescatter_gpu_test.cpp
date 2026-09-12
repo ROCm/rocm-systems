@@ -96,6 +96,31 @@ TEST(ReduceScatterGpu, CtaLadderMatchesHost) {
   HIP_OK(hipFree(dOut));
 }
 
+__global__ void sdmaTierKernel(const int* grids, int* out, int n) {
+  int i = threadIdx.x + blockIdx.x * blockDim.x;
+  if (i < n) out[i] = gin_sdma_reducescatter::usesSdmaTier(grids[i]) ? 1 : 0;
+}
+
+TEST(ReduceScatterGpu, SdmaTierMatchesHost) {
+  if (!gpuAvailable()) GTEST_SKIP() << "no visible GPU";
+  const int grids[] = {0, 1, 4, 15, 16, 32, 48};
+  const int n = (int)(sizeof(grids) / sizeof(grids[0]));
+  int *dGrids = nullptr, *dOut = nullptr;
+  HIP_OK(hipMalloc(&dGrids, n * sizeof(int)));
+  HIP_OK(hipMalloc(&dOut, n * sizeof(int)));
+  HIP_OK(hipMemcpy(dGrids, grids, n * sizeof(int), hipMemcpyHostToDevice));
+  sdmaTierKernel<<<1, 64>>>(dGrids, dOut, n);
+  HIP_OK(hipGetLastError());
+  HIP_OK(hipDeviceSynchronize());
+  int out[8];
+  HIP_OK(hipMemcpy(out, dOut, n * sizeof(int), hipMemcpyDeviceToHost));
+  for (int i = 0; i < n; i++) {
+    EXPECT_EQ(out[i] != 0, gin_sdma_reducescatter::usesSdmaTier(grids[i])) << "grid=" << grids[i];
+  }
+  HIP_OK(hipFree(dGrids));
+  HIP_OK(hipFree(dOut));
+}
+
 // ---- (B) read-reduce addressing + ascending-rank sum -------------------------
 //
 // Layout mirrors GinReduceScatterKernel: send is [nRanks, nRanks, count] flattened

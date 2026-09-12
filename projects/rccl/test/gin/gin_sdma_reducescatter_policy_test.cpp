@@ -131,6 +131,43 @@ TEST(ReduceScatterPolicyCtas, MaxCtasIsTheMidBandValue) {
   EXPECT_EQ(reduceScatterMaxCtas(), 48);
 }
 
+TEST(ReduceScatterPolicySdmaTier, GridBelowCeilIsSdma) {
+  EXPECT_FALSE(usesSdmaTier(0));
+  EXPECT_TRUE(usesSdmaTier(1));
+  EXPECT_TRUE(usesSdmaTier(4));
+  EXPECT_TRUE(usesSdmaTier(15));
+  EXPECT_FALSE(usesSdmaTier(16));
+  EXPECT_FALSE(usesSdmaTier(32));
+  EXPECT_FALSE(usesSdmaTier(48));
+}
+
+TEST(ReduceScatterPolicySdmaTier, SdmaCtasCapsAtFourOrNRanks) {
+  EXPECT_EQ(reduceScatterSdmaCtas(8), 4);
+  EXPECT_EQ(reduceScatterSdmaCtas(2), 2);
+  EXPECT_EQ(reduceScatterSdmaCtas(1), 1);
+}
+
+TEST(ReduceScatterPolicyLaunchCtas, SmallEnvPinSelectsSdmaGrid) {
+  EXPECT_EQ(reduceScatterLaunchCtas(33ull * 1024 * 1024, 4), 4);
+  EXPECT_TRUE(usesSdmaTier(reduceScatterLaunchCtas(33ull * 1024 * 1024, 4)));
+  EXPECT_EQ(reduceScatterLaunchCtas(33ull * 1024 * 1024, 8), 8);
+  EXPECT_TRUE(usesSdmaTier(reduceScatterLaunchCtas(1, 8)));
+}
+
+TEST(ReduceScatterPolicyLaunchCtas, UnsetEnvKeepsLsaLadder) {
+  EXPECT_EQ(reduceScatterLaunchCtas(33ull * 1024 * 1024, kThresholdUnset), 48);
+  EXPECT_FALSE(usesSdmaTier(reduceScatterLaunchCtas(33ull * 1024 * 1024, kThresholdUnset)));
+  EXPECT_EQ(reduceScatterLaunchCtas(64ull * 1024 * 1024, kThresholdUnset), 32);
+}
+
+TEST(ReduceScatterPolicyScratchFits, NeedsNSlots) {
+  EXPECT_FALSE(sdmaScratchFits(0, 8, 1024));
+  EXPECT_FALSE(sdmaScratchFits(1024, 8, 1024 * 7));
+  EXPECT_TRUE(sdmaScratchFits(1024, 8, 1024 * 8));
+  EXPECT_EQ(reduceScatterSdmaScratchBytes(8, kReduceScatterSdmaSlotMaxDefault),
+            reduceScatterScratchBytes(8ull * kReduceScatterSdmaSlotMaxDefault));
+}
+
 // ---- reduceScatterDevReqs: one barrier/lsaBarrier/signal per CTA, needs GIN --
 
 TEST(ReduceScatterPolicyDevReqs, PerCtaBarriersNeedGin) {

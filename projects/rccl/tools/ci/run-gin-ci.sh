@@ -43,9 +43,9 @@ GIN_PYTEST_TIMEOUT="${GIN_PYTEST_TIMEOUT:-1800s}"
 # Hardware launches selected by rccl-gin-bcast-pytest (-k GinSdma): 6 segmented
 # (2 sizes x 3 dtypes) + scatter-allgather + 2 hang guards.
 GIN_PYTEST_HW_CASES="${GIN_PYTEST_HW_CASES:-9}"
-# Hardware launches in test_ReduceScatterGinSdma.py: 8 CTA-ladder (4 sizes/ops x
-# 2 dtypes) + 3 hang-guard dtypes.
-GIN_PYTEST_RS_HW_CASES="${GIN_PYTEST_RS_HW_CASES:-11}"
+# Hardware launches in test_ReduceScatterGinSdma.py: 8 CTA-ladder + 2 low-CTA
+# SDMA + 3 hang-guard dtypes.
+GIN_PYTEST_RS_HW_CASES="${GIN_PYTEST_RS_HW_CASES:-13}"
 
 script_dir="$(cd "$(dirname "$0")" && pwd)"
 WORKDIR="$(cd "${script_dir}/../../../.." && pwd)"

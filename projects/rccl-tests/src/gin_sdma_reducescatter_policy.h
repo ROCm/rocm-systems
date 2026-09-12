@@ -16,12 +16,14 @@
 // GIN_SDMA_HOST_ONLY the __host__/__device__ attributes drop to no-ops so the
 // header compiles as plain C++ for the host unit test.
 //
-// NOTE on the tier: the shipped GinReduceScatterKernel is SINGLE-TIER (a direct
-// LSA read-reduce for all sizes; the load SCHEDULE adapts by total bytes, but the
-// algorithm never changes). The RSTier / threshold helpers below are retained for
-// documentation and forward-compatibility (a future put-partials large tier, see
-// reducescatter-gin-sdma-phase2.md) and to give NCCL_GIN_ANVIL_SDMA_THRESHOLD_-
-// REDUCESCATTER a defined meaning; the current kernel does not branch on them.
+// NOTE on the tiers: GinReduceScatterKernel is CTA-BUDGET hybrid.
+//   * gridDim.x >= kReduceScatterSdmaCtaCeil (16): single-tier LSA read-reduce
+//     (the occupancy-bound path; default self-select is 32 or 48 CTAs).
+//   * gridDim.x <  16: GIN/SDMA scatter of each rank's per-dest slice into the
+//     owner's resource-window slots, then a local SM reduce. That is the
+//     low-occupancy path (WarpSpeed / compute-overlap / NCCL_GIN_ANVIL_RS_CTAS
+//     pin). SDMA engines move bytes; a handful of CTAs only submit puts and
+//     fold local HBM. Size-based RSTier helpers remain for documentation.
 
 #ifndef GIN_SDMA_REDUCESCATTER_POLICY_H_
 #define GIN_SDMA_REDUCESCATTER_POLICY_H_
@@ -65,20 +67,55 @@ GIN_SDMA_RS_HD inline size_t sliceBytes(size_t perRankCount, size_t eltSize) {
 }
 
 // Compiled default ReduceScatter LSA<->GIN crossover (bytes per rank slice).
-// 256 KiB/rank is the provisional cutover from the Phase-2 design plan. RETAINED
-// FOR DOCUMENTATION ONLY: the shipped kernel is single-tier LSA read-reduce and
-// does not branch on this value (see the file-top NOTE and
-// reducescatter-gin-sdma-phase2.md). Used by pickSdmaThreshold as the fallback.
+// RETAINED FOR DOCUMENTATION: the shipped kernel keys the SDMA tier off CTA
+// count (usesSdmaTier), not this slice threshold. Used by pickSdmaThreshold.
 static constexpr size_t kReduceScatterSdmaThresholdDefault = 262144;  // 256 KiB/rank slice
 
 enum class RSTier { LSA, Gin };
 
-// Reserved tier predicate (parity with the AllGather / movement collectives): a
-// per-rank slice at/below the threshold would take the LSA read-reduce, above it
-// the (future) put-partials GIN tier. The current kernel is single-tier LSA, so
-// this is used only by the host unit test / forward-compat callers.
+// Size-based predicate (parity with AllGather). The launched kernel uses
+// usesSdmaTier(gridDim.x) instead.
 GIN_SDMA_RS_HD inline RSTier reduceScatterKernelTier(size_t sliceBytes_, size_t sdmaThreshold) {
   return (sliceBytes_ <= sdmaThreshold) ? RSTier::LSA : RSTier::Gin;
+}
+
+// Grids smaller than this take the SDMA-scatter + local-reduce path. 16 is the
+// occupancy where LSA mid-band already falls to ~half of host; below it, copy
+// engines beat starved CU remote loads. Default self-select (32/48) never
+// enters this range unless NCCL_GIN_ANVIL_RS_CTAS pins a small grid.
+static constexpr int kReduceScatterSdmaCtaCeil = 16;
+// Put-side grid, matching AllGather/Broadcast GIN-put (one slot per peer on
+// 8-rank; extra CTAs are barrier overhead).
+static constexpr int kReduceScatterCtasSdma = 4;
+// Max bytes per source slot in the SDMA scratch window. Slice larger than this
+// falls back to LSA at the same small grid (cannot stage). 64 MiB/slot covers
+// the occupancy-bound mid-band with headroom (8-rank -> 512 MiB window).
+static constexpr size_t kReduceScatterSdmaSlotMaxDefault = 64ull * 1024 * 1024;
+
+GIN_SDMA_RS_HD inline int reduceScatterCtas(size_t totalBytes, size_t envCtas);
+
+GIN_SDMA_RS_HD inline bool usesSdmaTier(int gridCtas) {
+  return gridCtas > 0 && gridCtas < kReduceScatterSdmaCtaCeil;
+}
+
+GIN_SDMA_RS_HD inline int reduceScatterSdmaCtas(int nRanks) {
+  const int n = (nRanks > 0) ? nRanks : 1;
+  return (kReduceScatterCtasSdma < n) ? kReduceScatterCtasSdma : n;
+}
+
+// Launch grid: a small NCCL_GIN_ANVIL_RS_CTAS pin (< 16) is the occupancy cap
+// and selects SDMA. Otherwise the size-adaptive LSA ladder (32/48).
+GIN_SDMA_RS_HD inline int reduceScatterLaunchCtas(size_t totalBytes, size_t envCtas) {
+  if (envCtas != kThresholdUnset && envCtas > 0) {
+    const int c = (envCtas > 128) ? 128 : (int)envCtas;
+    return (c < 1) ? 1 : c;
+  }
+  return reduceScatterCtas(totalBytes, kThresholdUnset);
+}
+
+GIN_SDMA_RS_HD inline bool sdmaScratchFits(size_t sliceBytes, int nRanks, size_t scratchBytes) {
+  if (nRanks <= 0 || sliceBytes == 0) return false;
+  return scratchBytes >= sliceBytes * (size_t)nRanks;
 }
 
 // Resolve the per-collective ReduceScatter threshold with precedence:
@@ -139,15 +176,17 @@ GIN_SDMA_RS_HD inline int reduceScatterMaxCtas() {
                                                            : kReduceScatterCtasOther;
 }
 
-// Bytes of scratch-window a future put-partials large tier would need per rank: it
-// stages N incoming per-source partials, each up to the largest per-rank slice, so
-// it needs the full per-rank send-buffer worth (N * maxChunkBytes ==
-// maxSendBytesPerRank), rounded up to the 128 B resource-buffer granularity. Zero
-// -> zero (the shipped single-tier kernel registers NO scratch). Retained for
-// forward-compat / documentation.
+// Bytes of scratch-window the SDMA-scatter tier needs per rank: N incoming
+// per-source partials, each up to slotMax, rounded up to 128 B. Zero if either
+// input is zero. Registered only when a small CTA pin selects the SDMA path.
 GIN_SDMA_RS_HD inline size_t reduceScatterScratchBytes(size_t maxSendBytesPerRank) {
   if (maxSendBytesPerRank == 0) return 0;
   return (maxSendBytesPerRank + 127) & ~(size_t)127;
+}
+
+GIN_SDMA_RS_HD inline size_t reduceScatterSdmaScratchBytes(int nRanks, size_t slotMax) {
+  if (nRanks <= 0 || slotMax == 0) return 0;
+  return reduceScatterScratchBytes((size_t)nRanks * slotMax);
 }
 
 // ReduceScatter algorithm / bus bandwidth (GB/s) given the per-rank output-slice

@@ -19,29 +19,18 @@
 #include "gin_sdma_reduce.h"  // device Apply<op,T>, mirrors verifiable.cu exactly
 #include "gin_sdma_devtime.h" // shared device-side (wall_clock64) timing scaffold
 
-// ReduceScatter (-D 3): the first reduction collective. Single tier -- balanced
-// LSA read-reduce for all sizes. Every rank reads its owned output slice
-// [rank*count] directly from EVERY peer's sendbuff via ncclGetLsaPointer, folds
-// the N contributions with gin_sdma_reduce (ascending source-rank order, matching
-// the verifier bit-for-bit) and writes its local recvbuff. This is the same
-// direct-parallel-pull algorithm RCCL's symmetric ReduceScatter LD kernel uses.
-// Balanced egress, no scratch/signals -- entry LSA barrier only. Reads are
-// 128-bit packed and pack-unrolled (see GinReduceScatterKernel) to keep the xGMI
-// read pipe full.
-//
-// An earlier size-hybrid design added a large-tier "put-partials + SM reduce"
-// path that staged into the GIN resource window and SM-reduced it. That was slow
-// for two reasons: (1) the extra staging round-trip, and (2) the reduce read all
-// N partials from a SINGLE local buffer, whereas the direct LSA pull spreads the
-// reduce reads across N peers' memories / xGMI links in parallel. (Note: under a
-// HIP_VMM_UNCACHED_MEMORY build -- active here -- both the resource window and
-// ncclMemAlloc'd send/recv buffers are UNCACHED, so caching is not the
-// differentiator; read parallelism + load scheduling are.) The launch still
-// carries the (unused) sdmaThreshold/scratch args for ABI stability; scratch is
-// no longer registered. PreMulSum/mulsum is deferred (SPECIALIZE_REDUCE_KERNEL
-// returns nullptr -> testNotImplemented); fp8 prod is excluded there and by the
-// ReduceScatterRunTest skip.
-static ncclDevResourceHandle g_rsScratchHandle = 0;  // unused (no scratch); passed to kernel as 0
+// ReduceScatter (-D 3): CTA-budget hybrid.
+//   * Default (32/48 CTAs): balanced LSA read-reduce. Every rank reads its owned
+//     output slice from every peer's sendbuff via ncclGetLsaPointer, folds with
+//     gin_sdma_reduce, writes local recvbuff. Occupancy-bound; SDMA staging lost
+//     here because of the extra hop and serialized local reduce.
+//   * Low CTA pin (NCCL_GIN_ANVIL_RS_CTAS < 16): GIN/SDMA scatter of each per-dest
+//     slice into the owner's resource-window slots, then a local SM reduce. Copy
+//     engines move bytes so a handful of CTAs only submit puts and fold HBM.
+// PreMulSum/mulsum is deferred; fp8 prod is skipped.
+static ncclDevResourceHandle g_rsScratchHandle = 0;
+static size_t g_rsScratchBytes = 0;
+thread_local ncclDevResourceRequirements g_rsScratchReq = {};
 
 // Thin getenv() wrapper: parse a decimal CTA-count env var (NCCL_GIN_ANVIL_RS_CTAS)
 // into a size_t, returning the policy "unset" sentinel when absent/empty/unparseable
@@ -185,8 +174,29 @@ testResult_t ReduceScatterGetDevCommRequirements(int deviceImpl, ncclDevCommRequ
       reqs->barrierCount = dr.barrierCount;
       reqs->lsaBarrierCount = dr.lsaBarrierCount;
       reqs->ginSignalCount = dr.ginSignalCount;
-      // No resource/scratch window: the LSA read-reduce reads peers' sendbuffs
-      // directly, so nothing needs to be staged.
+#if defined(ENABLE_DEVICE_API) && NCCL_VERSION_CODE >= NCCL_VERSION(2,28,0)
+      // SDMA-scatter scratch: N slots of up to kReduceScatterSdmaSlotMaxDefault
+      // (64 MiB) each, registered only when NCCL_GIN_ANVIL_RS_CTAS pins a grid
+      // below kReduceScatterSdmaCtaCeil so GetDevCommRequirements matches the
+      // kernel's usesSdmaTier predicate.
+      {
+        const size_t rsCtasEnv = ReduceScatterParseCtasEnv("NCCL_GIN_ANVIL_RS_CTAS");
+        const int launchCtas = gin_sdma_reducescatter::reduceScatterLaunchCtas(0, rsCtasEnv);
+        if (gin_sdma_reducescatter::usesSdmaTier(launchCtas)) {
+          g_rsScratchBytes = gin_sdma_reducescatter::reduceScatterSdmaScratchBytes(
+              commProperties.nRanks, gin_sdma_reducescatter::kReduceScatterSdmaSlotMaxDefault);
+          g_rsScratchReq = {};
+          g_rsScratchReq.bufferSize = g_rsScratchBytes;
+          g_rsScratchReq.bufferAlign = 128;
+          g_rsScratchReq.outBufferHandle = &g_rsScratchHandle;
+          g_rsScratchReq.next = reqs->resourceRequirementsList;
+          reqs->resourceRequirementsList = &g_rsScratchReq;
+        } else {
+          g_rsScratchBytes = 0;
+          g_rsScratchHandle = 0;
+        }
+      }
+#endif
 #if NCCL_VERSION_CODE >= NCCL_VERSION(2,29,7)
       reqs->ginConnectionType = NCCL_GIN_CONNECTION_FULL;
 #else
@@ -261,8 +271,77 @@ bool ReduceScatterGetDevCommRequirements(int deviceImpl, ncclDevCommRequirements
 // avoids the staging round-trip and spreads reduce reads across N peers' links
 // (see the file-top note). The sdmaThreshold/scratch launch args are retained for
 // ABI compatibility but unused.
+// Low-occupancy SDMA-scatter + local reduce. Each rank GIN-puts send slice r to
+// rank r's resource-window slot [myRank], waits for nRanks inbound completions,
+// then SM-reduces the N local slots into recvbuff (same ascending-source fold as
+// the LSA path). waitSignal + flush make the SDMA writes visible before the
+// local LSA barrier joins sibling CTAs onto the reduce.
 template <typename T>
-__device__ __forceinline__ void ginReduceScatterBody(ncclWindow_t sendwin, size_t sendoffset, ncclWindow_t recvwin, size_t recvoffset, size_t count, struct ncclDevComm devComm, int redOp, size_t unrollMinBytes) {
+__device__ __forceinline__ void ginReduceScatterSdmaBody(ncclWindow_t sendwin, size_t sendoffset, ncclWindow_t recvwin, size_t recvoffset, size_t count, struct ncclDevComm devComm, int redOp, ncclDevResourceHandle scratchHandle) {
+  const int nRanks = devComm.nRanks;
+  const size_t sliceBytes = count * sizeof(T);
+  const int ginContext = 0;
+  const unsigned int signalIndex = (unsigned int)blockIdx.x;
+  ncclGin gin { devComm, ginContext };
+  const uint64_t signalValue = gin.readSignal(signalIndex);
+
+  ncclBarrierSession<ncclCoopCta> bar { ncclCoopCta(), ncclTeamTagWorld(), gin, blockIdx.x };
+  bar.sync(ncclCoopCta(), cuda::memory_order_acquire, ncclGinFenceLevel::Relaxed);
+
+  const int peerStride = gridDim.x;
+  const size_t dstBase = ncclGetResourceBufferOffset(scratchHandle);
+  for (int r = blockIdx.x + (int)threadIdx.x * peerStride; r < nRanks;
+       r += peerStride * (int)blockDim.x) {
+    gin.put(ncclTeamWorld(devComm), r,
+        devComm.resourceWindow, dstBase + (size_t)devComm.rank * sliceBytes,
+        sendwin, sendoffset + (size_t)r * sliceBytes,
+        sliceBytes, ncclGin_SignalInc{signalIndex});
+  }
+  __syncthreads();
+
+  if (blockIdx.x == (devComm.rank % peerStride))
+    gin.waitSignal(ncclCoopCta(), signalIndex, signalValue + (uint64_t)nRanks);
+  gin.flush(ncclCoopCta());
+
+  ncclTeam lsa = ncclTeamLsa(devComm);
+  ncclLsaBarrierSession<ncclCoopCta> lsaBar { ncclCoopCta(), devComm, lsa, devComm.lsaBarrier, blockIdx.x };
+  lsaBar.sync(ncclCoopCta(), cuda::memory_order_acquire);
+
+  constexpr int VEC = (sizeof(T) <= 16) ? (int)(16 / sizeof(T)) : 1;
+  struct alignas(16) Pack { T e[VEC]; };
+  Pack* dstP = (Pack*)ncclGetLocalPointer(recvwin, recvoffset);
+  const size_t nPacks = count / (size_t)VEC;
+  char* scratchBase = (char*)ncclGetResourceBufferLocalPointer(devComm, scratchHandle);
+  const int tid = threadIdx.x + blockIdx.x * blockDim.x;
+  const int nthreads = blockDim.x * gridDim.x;
+  for (size_t pk = (size_t)tid; pk < nPacks; pk += (size_t)nthreads) {
+    T acc[VEC];
+    Pack v0 = ((const Pack*)(scratchBase + 0 * sliceBytes))[pk];
+    #pragma unroll
+    for (int e = 0; e < VEC; e++) acc[e] = gin_sdma_reduce::preOp(redOp, v0.e[e], nRanks);
+    for (int s = 1; s < nRanks; s++) {
+      Pack vs = ((const Pack*)(scratchBase + (size_t)s * sliceBytes))[pk];
+      #pragma unroll
+      for (int e = 0; e < VEC; e++)
+        acc[e] = gin_sdma_reduce::combine(redOp, acc[e], gin_sdma_reduce::preOp(redOp, vs.e[e], nRanks));
+    }
+    Pack o;
+    #pragma unroll
+    for (int e = 0; e < VEC; e++) o.e[e] = gin_sdma_reduce::postOp(redOp, acc[e], nRanks);
+    dstP[pk] = o;
+  }
+
+  bar.sync(ncclCoopCta(), cuda::memory_order_release, ncclGinFenceLevel::Relaxed);
+}
+
+template <typename T>
+__device__ __forceinline__ void ginReduceScatterBody(ncclWindow_t sendwin, size_t sendoffset, ncclWindow_t recvwin, size_t recvoffset, size_t count, struct ncclDevComm devComm, int redOp, size_t unrollMinBytes, size_t scratchCap, ncclDevResourceHandle scratchHandle) {
+  const size_t sliceBytes = count * sizeof(T);
+  if (gin_sdma_reducescatter::usesSdmaTier((int)gridDim.x) && scratchHandle != 0 &&
+      gin_sdma_reducescatter::sdmaScratchFits(sliceBytes, devComm.nRanks, scratchCap)) {
+    ginReduceScatterSdmaBody<T>(sendwin, sendoffset, recvwin, recvoffset, count, devComm, redOp, scratchHandle);
+    return;
+  }
   const int nRanks = devComm.nRanks;
   const int tid = threadIdx.x + blockIdx.x * blockDim.x;
   const int nthreads = blockDim.x * gridDim.x;
@@ -516,8 +595,8 @@ __device__ __forceinline__ void ginReduceScatterBody(ncclWindow_t sendwin, size_
 // -D 3 kernel: one ReduceScatter. sdmaThreshold/scratch args retained for ABI.
 template <typename T>
 __global__ void GinReduceScatterKernel(ncclWindow_t sendwin, size_t sendoffset, ncclWindow_t recvwin, size_t recvoffset, size_t count, int root, struct ncclDevComm devComm, size_t sdmaThresholdOverride, int redOp, ncclDevResourceHandle scratchHandle, size_t unrollMinBytes) {
-  (void)sdmaThresholdOverride; (void)scratchHandle; (void)root;
-  ginReduceScatterBody<T>(sendwin, sendoffset, recvwin, recvoffset, count, devComm, redOp, unrollMinBytes);
+  (void)root;
+  ginReduceScatterBody<T>(sendwin, sendoffset, recvwin, recvoffset, count, devComm, redOp, unrollMinBytes, sdmaThresholdOverride, scratchHandle);
 }
 
 // Device-timing kernel (shared gin_devtime methodology): run skip+loop back-to-back
@@ -526,14 +605,14 @@ __global__ void GinReduceScatterKernel(ncclWindow_t sendwin, size_t sendoffset, 
 // is itself a full inter-iteration sync, so looping is correct with no extra
 // bookkeeping (pure LSA -> no GIN cadence concern).
 template <typename T>
-__global__ void GinReduceScatterTimedKernel(ncclWindow_t sendwin, size_t sendoffset, ncclWindow_t recvwin, size_t recvoffset, size_t count, int root, struct ncclDevComm devComm, int redOp, int loop, int skip, long long* start_time, long long* end_time, size_t unrollMinBytes) {
+__global__ void GinReduceScatterTimedKernel(ncclWindow_t sendwin, size_t sendoffset, ncclWindow_t recvwin, size_t recvoffset, size_t count, int root, struct ncclDevComm devComm, int redOp, int loop, int skip, long long* start_time, long long* end_time, size_t unrollMinBytes, size_t scratchCap, ncclDevResourceHandle scratchHandle) {
   (void)root;
   for (int i = 0; i < skip + loop; i++) {
     if (i == skip) {
       __syncthreads();
       if (threadIdx.x == 0) start_time[blockIdx.x] = wall_clock64();
     }
-    ginReduceScatterBody<T>(sendwin, sendoffset, recvwin, recvoffset, count, devComm, redOp, unrollMinBytes);
+    ginReduceScatterBody<T>(sendwin, sendoffset, recvwin, recvoffset, count, devComm, redOp, unrollMinBytes, scratchCap, scratchHandle);
   }
   __syncthreads();
   if (threadIdx.x == 0) end_time[blockIdx.x] = wall_clock64();
@@ -545,9 +624,8 @@ __global__ void GinReduceScatterTimedKernel(ncclWindow_t sendwin, size_t sendoff
 // broadcast/reduce rings. gridCtas must be <= the barrier/lsaBarrier count
 // registered in ReduceScatterGetDevCommRequirements (sized to
 // max(deviceCtaCount, tuned)); the kernel indexes devComm.lsaBarrier by blockIdx.x,
-// so over-launching would corrupt/hang. sdmaThreshold/scratch args are forwarded
-// (inert; retained for ABI). Self-contained here (the target common.h has no
-// testLaunchDeviceKernelThresholdScratchGrid).
+// so over-launching would corrupt/hang. sdmaThresholdOverride carries the
+// registered scratch byte cap (0 when the LSA tier is used).
 template <typename F>
 static testResult_t ReduceScatterLaunchDeviceKernelGrid(F kernel, void* sendbuff, size_t sendoffset, void* recvbuff, size_t recvoffset, size_t count, ncclRedOp_t op, int root, ncclComm_t comm, cudaStream_t stream, size_t sdmaThresholdOverride, ncclDevResourceHandle scratchHandle, int gridCtas, size_t unrollMinBytes) {
   if (kernel == nullptr) return testNotImplemented;
@@ -583,9 +661,9 @@ testResult_t ReduceScatterRunColl(void* sendbuff, size_t sendoffset, void* recvb
         const int rsNRanks = (rsDc != nullptr) ? rsDc->nRanks : 1;
         const size_t rsTotalBytes = count * (size_t)wordSize(type) * (size_t)rsNRanks;
         static const size_t rsCtasEnv = ReduceScatterParseCtasEnv("NCCL_GIN_ANVIL_RS_CTAS");
-        const int rsGridCtas = gin_sdma_reducescatter::reduceScatterCtas(rsTotalBytes, rsCtasEnv);
+        int rsGridCtas = gin_sdma_reducescatter::reduceScatterLaunchCtas(rsTotalBytes, rsCtasEnv);
         static const size_t rsUnrollMin = ReduceScatterUnrollMinBytes();
-        TESTCHECK(ReduceScatterLaunchDeviceKernelGrid(SPECIALIZE_REDUCE_KERNEL(GinReduceScatterKernel, type, op), sendbuff, sendoffset, recvbuff, recvoffset, count, op, root, comm, stream, gin_sdma_reducescatter::kThresholdUnset, g_rsScratchHandle, rsGridCtas, rsUnrollMin));
+        TESTCHECK(ReduceScatterLaunchDeviceKernelGrid(SPECIALIZE_REDUCE_KERNEL(GinReduceScatterKernel, type, op), sendbuff, sendoffset, recvbuff, recvoffset, count, op, root, comm, stream, g_rsScratchBytes, g_rsScratchHandle, rsGridCtas, rsUnrollMin));
         return testSuccess;
       }
 #endif
@@ -633,7 +711,7 @@ testResult_t ReduceScatterDeviceTime(struct threadArgs* args, ncclDataType_t typ
   // Match the perf path: self-select the size-adaptive CTA count (decoupled from
   // -V) so the device-timed number reflects the launched configuration.
   static const size_t rsCtasEnv = ReduceScatterParseCtasEnv("NCCL_GIN_ANVIL_RS_CTAS");
-  const int gridCtas = gin_sdma_reducescatter::reduceScatterCtas(totalBytesCta, rsCtasEnv);
+  int gridCtas = gin_sdma_reducescatter::reduceScatterLaunchCtas(totalBytesCta, rsCtasEnv);
   static const size_t rsUnrollMin = ReduceScatterUnrollMinBytes();
   double devUs = 0.0;
   TESTCHECK(gin_devtime::measure(args, gridCtas, loop,
@@ -644,7 +722,7 @@ testResult_t ReduceScatterDeviceTime(struct threadArgs* args, ncclDataType_t typ
         size_t sendoff = in_place ? args->sendInplaceOffset * (size_t)devComm->rank : 0;
         size_t recvoff = in_place ? args->recvInplaceOffset * (size_t)devComm->rank : 0;
         kernel<<<gridCtas, 512, 0, args->streams[i]>>>(sendwin, sendoff, recvwin, recvoff, count, root, *devComm,
-                 (int)op, loop, skip, d_start, d_end, rsUnrollMin);
+                 (int)op, loop, skip, d_start, d_end, rsUnrollMin, g_rsScratchBytes, g_rsScratchHandle);
       },
       &devUs));
 
