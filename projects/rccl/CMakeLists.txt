@@ -327,7 +327,7 @@ find_program(compiler_executable ${COMPILER_EXE_NAME}
   HINTS "${_cxx_compiler_dir}")
 message(STATUS "${COMPILER_EXE_NAME} executable: ${compiler_executable}")
 execute_process(
-  COMMAND         bash "-c" "${compiler_executable} --version | grep \"${COMPILER_GREP_STRING}\" | ${COMPILER_AWK_CMD}"
+  COMMAND         sh "-c" "${compiler_executable} --version | grep \"${COMPILER_GREP_STRING}\" | ${COMPILER_AWK_CMD}"
   OUTPUT_VARIABLE compiler_version_string)
 message(STATUS "${COMPILER_EXE_NAME} version:    ${compiler_version_string}")
 
@@ -335,7 +335,7 @@ message(STATUS "${COMPILER_EXE_NAME} version:    ${compiler_version_string}")
 find_program(hipconfig_executable hipconfig)
 message(STATUS "hipconfig executable: ${hipconfig_executable}")
 execute_process(
-  COMMAND         bash "-c" "${hipconfig_executable} -v | awk -F\"-\" '{ printf $1 }'"
+  COMMAND         sh "-c" "${hipconfig_executable} -v | awk -F\"-\" '{ printf $1 }'"
   OUTPUT_VARIABLE hip_version_string)
 message(STATUS "${COMPILER_EXE_NAME} HIP version:    ${hip_version_string}")
 
@@ -685,13 +685,13 @@ endif()
 
 # cmake_host_system_information(RESULT HOST_OS_ID QUERY DISTRIB_ID) ## Requires cmake 3.22
 execute_process(
-  COMMAND bash -c "grep '^ID=' /etc/os-release | cut -d'=' -f2 | cut -d'\"' -f2"
+  COMMAND sh -c "grep '^ID=' /etc/os-release | cut -d'=' -f2 | cut -d'\"' -f2"
   OUTPUT_VARIABLE HOST_OS_ID
   OUTPUT_STRIP_TRAILING_WHITESPACE
 )
 
 execute_process(
-  COMMAND bash -c "grep '^ID_LIKE=' /etc/os-release | cut -d'=' -f2 | cut -d'\"' -f2"
+  COMMAND sh -c "grep '^ID_LIKE=' /etc/os-release | cut -d'=' -f2 | cut -d'\"' -f2"
   OUTPUT_VARIABLE HOST_OS_FAMILY
   OUTPUT_STRIP_TRAILING_WHITESPACE
 )
@@ -879,7 +879,7 @@ License: See LICENSE.txt for license information\n")
 
  -- RCCL Maintainer <rccl-maintainer@amd.com>  ${TIMESTAMP}\n")
   find_program( gzip_executable gzip )
-  execute_process(COMMAND bash "-c" "${gzip_executable} -9 -c -n ${CMAKE_BINARY_DIR}/changelog"
+  execute_process(COMMAND sh "-c" "${gzip_executable} -9 -c -n ${CMAKE_BINARY_DIR}/changelog"
     WORKING_DIRECTORY ${CMAKE_BINARY_DIR} OUTPUT_FILE "${CMAKE_BINARY_DIR}/changelog.Debian.gz")
   rocm_install(FILES "${CMAKE_BINARY_DIR}/changelog.Debian.gz" DESTINATION ${CMAKE_INSTALL_DATADIR}/rccl)
   set(CPACK_DEBIAN_PACKAGE_DESCRIPTION "ROCm Communication Collectives Library
