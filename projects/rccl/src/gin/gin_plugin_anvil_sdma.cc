@@ -13,6 +13,7 @@
  */
 
 #include "gin/gin_host_anvil_sdma.h"
+#include "gin/gin_fabric_a2a_host.h"
 #include "algorithms/dda/fabric/fabric_init.h"
 #include "algorithms/dda/fabric/fabric_mem_handler.h"
 #include "alloc.h"

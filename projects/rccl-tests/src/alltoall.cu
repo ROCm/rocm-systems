@@ -270,110 +270,22 @@ using bf16 = __hip_bfloat16;
 #include <cuda_bf16.h>
 using bf16 = __nv_bfloat16;
 #endif
+using gin::fabric::kGinFabricLlAgMaxBlocksPerPeer;
 using gin::fabric::ginFabricLlAlltoAllBlocksPerPeer;
+using gin::fabric::ginFabricLlAlltoAllSizeOk;
 
-static bool AlltoAllStreamIsCapturing(cudaStream_t stream) {
-  if (stream == nullptr) return false;
-  cudaStreamCaptureStatus status = cudaStreamCaptureStatusNone;
-  unsigned long long id = 0;
-  if (cudaStreamGetCaptureInfo(stream, &status, &id) != cudaSuccess) return false;
-  return status != cudaStreamCaptureStatusNone;
-}
-
-// Host launch gate reads the same backend GPU context the device kernel uses.
-// Do not call ncclGinQueryFabricA2ALane here: hip-link of alltoall_perf does not
-// resolve that librccl host export from this .cu translation unit.
-// Blocking D2H is illegal inside -G capture; skip LL there (optional -G then
-// uses gin.put). Cache the result per (devComm, count, type) for the timed loop.
-static bool AlltoAllGinFabricLLEligibleHost(ncclDevComm* devComm, size_t count, ncclDataType_t type,
-                                            cudaStream_t stream) {
+// --device_timing still uses a gin.put-only 1D timed kernel; skip it when the
+// production path would take fabric LL. Production does not use this helper.
+static bool AlltoAllGinFabricLLEligibleHost(ncclDevComm* devComm, size_t count, ncclDataType_t type) {
   if (!devComm || devComm->ginHandles[0] == nullptr) return false;
-  const bool dtypeOk = type == ncclFloat32 || type == ncclFloat16 || type == ncclBfloat16;
-  if (!dtypeOk || count == 0) return false;
-  if (AlltoAllStreamIsCapturing(stream)) return false;
-
-  struct Cache {
-    ncclDevComm* devComm;
-    size_t count;
-    ncclDataType_t type;
-    bool eligible;
-    bool valid;
-  };
-  static Cache cache{};
-  if (cache.valid && cache.devComm == devComm && cache.count == count && cache.type == type) {
-    return cache.eligible;
-  }
-
+  if (!(type == ncclFloat32 || type == ncclFloat16 || type == ncclBfloat16) || count == 0) return false;
   ncclGinAnvilSdmaGPUContext ctx{};
   if (cudaMemcpy(&ctx, devComm->ginHandles[0], sizeof(ctx), cudaMemcpyDeviceToHost) != cudaSuccess) {
-    cache = Cache{devComm, count, type, false, true};
     return false;
   }
-  if (ctx.layoutMagic != NCCL_GIN_ANVIL_SDMA_LAYOUT_MAGIC || ctx.fabricA2AEnabled == 0) {
-    cache = Cache{devComm, count, type, false, true};
-    return false;
-  }
-  const size_t perChunkBytes = count * wordSize(type);
-  bool ok = true;
-  if (devComm->nRanks < 2 || devComm->nRanks > gin::fabric::kGinFabricLlMaxNranks) ok = false;
-  else if (perChunkBytes % 16 != 0) ok = false;
-  else if (perChunkBytes * 2 > gin::fabric::kGinFabricLlMaxBytes) ok = false;
-  else if (static_cast<size_t>(devComm->nRanks) * perChunkBytes > ctx.fabricA2ALlThreshold) ok = false;
-  else if (gin::fabric::ginFabricLlA2AScratchBytes(devComm->nRanks) > ctx.fabricA2AScratchBytes) ok = false;
-  cache = Cache{devComm, count, type, ok, true};
-  return ok;
-}
-
-// Device-API DDA entry point. The host chooses the required 2D launch geometry,
-// but the GPU kernel obtains its DDA lane from the backend-owned GIN context and
-// invokes the same body as the host-initiated ncclAllToAll DDA launcher.
-template <typename T, int N>
-__global__ void GinDdaAllToAllFabricLLKernel(ncclWindow_t sendwin, size_t sendoffset,
-                                              ncclWindow_t recvwin, size_t recvoffset,
-                                              size_t perChunkBytes, ncclDevComm devComm) {
-  auto* ctx = reinterpret_cast<ncclGinAnvilSdmaGPUContext*>(devComm.ginHandles[0]);
-  if (ctx == nullptr || ctx->layoutMagic != NCCL_GIN_ANVIL_SDMA_LAYOUT_MAGIC ||
-      ctx->fabricA2AEnabled == 0) {
-    return;
-  }
-  const size_t requiredScratch =
-      static_cast<size_t>(2) * static_cast<size_t>(devComm.nRanks) *
-      gin::fabric::kGinFabricLlA2ASlotStridePkts * gin::fabric::kGinFabricLlPacketBytes;
-  if (devComm.nRanks < 2 || devComm.nRanks > gin::fabric::kGinFabricLlMaxNranks ||
-      perChunkBytes == 0 || perChunkBytes % 16 != 0 ||
-      perChunkBytes * 2 > gin::fabric::kGinFabricLlMaxBytes ||
-      static_cast<size_t>(devComm.nRanks) * perChunkBytes > ctx->fabricA2ALlThreshold ||
-      requiredScratch > ctx->fabricA2AScratchBytes) {
-    return;
-  }
-
-  T* sendPtr = static_cast<T*>(ncclGetLsaPointer(sendwin, sendoffset, devComm.lsaRank));
-  T* recvPtr = static_cast<T*>(ncclGetLsaPointer(recvwin, recvoffset, devComm.lsaRank));
-  dda::common::ddaAllToAllFabricLLBody<T, N>(
-      reinterpret_cast<T**>(ctx->fabricA2APeerScratch), recvPtr, sendPtr, perChunkBytes,
-      devComm.rank, devComm.nRanks, ctx->fabricA2ALlEpoch, ctx->fabricA2ALlEpochLen);
-}
-
-template <typename T>
-static testResult_t AlltoAllLaunchFabricLL(void* sendbuff, size_t sendoffset, void* recvbuff, size_t recvoffset,
-                                           size_t count, ncclDevComm* devComm, cudaStream_t stream) {
-  const size_t perChunkBytes = count * sizeof(T);
-  const int blocksPerPeer = ginFabricLlAlltoAllBlocksPerPeer(perChunkBytes);
-  dim3 block(256);
-  dim3 grid((unsigned)devComm->nRanks, (unsigned)blocksPerPeer);
-
-  if (devComm->nRanks == 4) {
-    GinDdaAllToAllFabricLLKernel<T, 4><<<grid, block, 0, stream>>>(
-        (ncclWindow_t)sendbuff, sendoffset, (ncclWindow_t)recvbuff, recvoffset, perChunkBytes, *devComm);
-  } else if (devComm->nRanks == 8) {
-    GinDdaAllToAllFabricLLKernel<T, 8><<<grid, block, 0, stream>>>(
-        (ncclWindow_t)sendbuff, sendoffset, (ncclWindow_t)recvbuff, recvoffset, perChunkBytes, *devComm);
-  } else {
-    GinDdaAllToAllFabricLLKernel<T, 0><<<grid, block, 0, stream>>>(
-        (ncclWindow_t)sendbuff, sendoffset, (ncclWindow_t)recvbuff, recvoffset, perChunkBytes, *devComm);
-  }
-  CUDACHECK(cudaGetLastError());
-  return testSuccess;
+  if (ctx.layoutMagic != NCCL_GIN_ANVIL_SDMA_LAYOUT_MAGIC || ctx.fabricA2AEnabled == 0) return false;
+  return ginFabricLlAlltoAllSizeOk(devComm->nRanks, count * wordSize(type), ctx.fabricA2ALlThreshold,
+                                   ctx.fabricA2AScratchBytes);
 }
 #endif
 
@@ -384,17 +296,18 @@ static testResult_t AlltoAllLaunchFabricLL(void* sendbuff, size_t sendoffset, vo
 // accumulated signal), so calling it back-to-back in a loop yields a sequence of
 // complete, correct alltoalls with no external bookkeeping.
 template <typename T>
-__device__ void ginAlltoAllBody(ncclWindow_t sendwin, size_t sendoffset, ncclWindow_t recvwin, size_t recvoffset, size_t count, int root, struct ncclDevComm devComm) {
+__device__ void ginAlltoAllBody(ncclWindow_t sendwin, size_t sendoffset, ncclWindow_t recvwin, size_t recvoffset,
+                                size_t count, int root, struct ncclDevComm devComm, int ctaIndex, int nCtas) {
   int ginContext = 0;
-  unsigned int signalIndex = blockIdx.x;
+  unsigned int signalIndex = (unsigned int)ctaIndex;
   ncclGin gin { devComm, ginContext };
   uint64_t signalValue = gin.readSignal(signalIndex);
 
-  ncclBarrierSession<ncclCoopCta> bar { ncclCoopCta(), ncclTeamTagWorld(), gin, blockIdx.x };
+  ncclBarrierSession<ncclCoopCta> bar { ncclCoopCta(), ncclTeamTagWorld(), gin, (uint32_t)ctaIndex };
   bar.sync(ncclCoopCta(), cuda::memory_order_acquire, ncclGinFenceLevel::Relaxed);
 
-  int tid = threadIdx.x + blockIdx.x * blockDim.x;
-  int nthreads = blockDim.x * gridDim.x;
+  int tid = threadIdx.x + ctaIndex * blockDim.x;
+  int nthreads = blockDim.x * nCtas;
 
   /* send to all peers via GIN; the Anvil-SDMA backend segments large puts
    * internally (<=128 MiB per SDMA copy) so a single gin.put() is safe at any
@@ -408,18 +321,69 @@ __device__ void ginAlltoAllBody(ncclWindow_t sendwin, size_t sendoffset, ncclWin
   }
 
   int receivingCta = (devComm.rank % nthreads) / blockDim.x;
-  if (blockIdx.x == receivingCta)
+  if (ctaIndex == receivingCta)
     gin.waitSignal(ncclCoopCta(), signalIndex, signalValue + devComm.nRanks);
   gin.flush(ncclCoopCta());
 
   bar.sync(ncclCoopCta(), cuda::memory_order_release, ncclGinFenceLevel::Relaxed);
 }
 
-// Production entry: one collective call. Thin wrapper over the body so the
-// device-timed kernel and the production path share identical code.
 template <typename T>
-__global__ void GinAlltoAllKernel(ncclWindow_t sendwin, size_t sendoffset, ncclWindow_t recvwin, size_t recvoffset, size_t count, int root, struct ncclDevComm devComm) {
+__device__ void ginAlltoAllBody(ncclWindow_t sendwin, size_t sendoffset, ncclWindow_t recvwin, size_t recvoffset,
+                                size_t count, int root, struct ncclDevComm devComm) {
+  ginAlltoAllBody<T>(sendwin, sendoffset, recvwin, recvoffset, count, root, devComm, (int)blockIdx.x, (int)gridDim.x);
+}
+
+// One launch; the GPU picks fabric LL vs gin.put from the backend context + size.
+template <typename T, int NRANKS_CT>
+__global__ void GinAlltoAllKernel(ncclWindow_t sendwin, size_t sendoffset, ncclWindow_t recvwin, size_t recvoffset,
+                                  size_t count, int ginPutCtas, struct ncclDevComm devComm) {
+  auto* ctx = reinterpret_cast<ncclGinAnvilSdmaGPUContext*>(devComm.ginHandles[0]);
+  const size_t perChunkBytes = count * sizeof(T);
+  const bool useLL =
+      ctx != nullptr && ctx->layoutMagic == NCCL_GIN_ANVIL_SDMA_LAYOUT_MAGIC && ctx->fabricA2AEnabled != 0 &&
+      ginFabricLlAlltoAllSizeOk(devComm.nRanks, perChunkBytes, ctx->fabricA2ALlThreshold, ctx->fabricA2AScratchBytes);
+
+  if (useLL) {
+    const int bpp = ginFabricLlAlltoAllBlocksPerPeer(perChunkBytes);
+    if ((int)blockIdx.x >= devComm.nRanks || (int)blockIdx.y >= bpp) return;
+    T* sendPtr = static_cast<T*>(ncclGetLsaPointer(sendwin, sendoffset, devComm.lsaRank));
+    T* recvPtr = static_cast<T*>(ncclGetLsaPointer(recvwin, recvoffset, devComm.lsaRank));
+    dda::common::ddaAllToAllFabricLLBody<T, NRANKS_CT>(
+        reinterpret_cast<T**>(ctx->fabricA2APeerScratch), recvPtr, sendPtr, perChunkBytes, devComm.rank, devComm.nRanks,
+        ctx->fabricA2ALlEpoch, ctx->fabricA2ALlEpochLen, bpp);
+    return;
+  }
+
+  if ((int)blockIdx.y != 0 || (int)blockIdx.x >= ginPutCtas) return;
+  ginAlltoAllBody<T>(sendwin, sendoffset, recvwin, recvoffset, count, /*root*/ 0, devComm, (int)blockIdx.x, ginPutCtas);
+}
+
+// gin.put-only 1D entry for types that do not take the fabric-LL path.
+template <typename T>
+__global__ void GinAlltoAllPutKernel(ncclWindow_t sendwin, size_t sendoffset, ncclWindow_t recvwin, size_t recvoffset,
+                                     size_t count, int root, struct ncclDevComm devComm) {
   ginAlltoAllBody<T>(sendwin, sendoffset, recvwin, recvoffset, count, root, devComm);
+}
+
+template <typename T>
+static testResult_t AlltoAllLaunchGinA2A(void* sendbuff, size_t sendoffset, void* recvbuff, size_t recvoffset,
+                                         size_t count, ncclDevComm* devComm, cudaStream_t stream) {
+  const int gx = devComm->nRanks > deviceCtaCount ? devComm->nRanks : deviceCtaCount;
+  dim3 block(256);
+  dim3 grid((unsigned)gx, (unsigned)kGinFabricLlAgMaxBlocksPerPeer);
+  if (devComm->nRanks == 4) {
+    GinAlltoAllKernel<T, 4><<<grid, block, 0, stream>>>((ncclWindow_t)sendbuff, sendoffset, (ncclWindow_t)recvbuff,
+                                                        recvoffset, count, deviceCtaCount, *devComm);
+  } else if (devComm->nRanks == 8) {
+    GinAlltoAllKernel<T, 8><<<grid, block, 0, stream>>>((ncclWindow_t)sendbuff, sendoffset, (ncclWindow_t)recvbuff,
+                                                        recvoffset, count, deviceCtaCount, *devComm);
+  } else {
+    GinAlltoAllKernel<T, 0><<<grid, block, 0, stream>>>((ncclWindow_t)sendbuff, sendoffset, (ncclWindow_t)recvbuff,
+                                                        recvoffset, count, deviceCtaCount, *devComm);
+  }
+  CUDACHECK(cudaGetLastError());
+  return testSuccess;
 }
 
 // Hybrid LSA+GIN alltoall: CTA 0 handles remote peers via GIN,
@@ -591,28 +555,15 @@ testResult_t AlltoAllRunColl(void* sendbuff, size_t sendoffset, void* recvbuff, 
 #if defined(ENABLE_DEVICE_API) && NCCL_VERSION_CODE >= NCCL_VERSION(2,28,7) && defined(NCCL_OS_LINUX)
       case 3: {
         ncclDevComm* devComm = (ncclDevComm*)comm;
-        auto kernel = SPECIALIZE_KERNEL(GinAlltoAllKernel, type, op);
-#if defined(__HIP_PLATFORM_AMD__) || defined(__HIP_PLATFORM_HCC__)
-        if (kernel == nullptr && type == ncclBfloat16 && op == ncclSum) {
-          kernel = GinAlltoAllKernel<bf16>;
-        }
-#endif
-        if (AlltoAllGinFabricLLEligibleHost(devComm, count, type, stream)) {
-          if (type == ncclFloat32) {
-            TESTCHECK(AlltoAllLaunchFabricLL<float>(sendbuff, sendoffset, recvbuff, recvoffset, count, devComm,
-                                                    stream));
-          } else if (type == ncclFloat16) {
-            TESTCHECK(AlltoAllLaunchFabricLL<half>(sendbuff, sendoffset, recvbuff, recvoffset, count, devComm,
-                                                   stream));
-          } else if (type == ncclBfloat16) {
-            TESTCHECK(AlltoAllLaunchFabricLL<bf16>(sendbuff, sendoffset, recvbuff, recvoffset, count, devComm,
-                                                   stream));
-          } else {
-            return testNotImplemented;
-          }
+        if (type == ncclFloat32) {
+          TESTCHECK(AlltoAllLaunchGinA2A<float>(sendbuff, sendoffset, recvbuff, recvoffset, count, devComm, stream));
+        } else if (type == ncclFloat16) {
+          TESTCHECK(AlltoAllLaunchGinA2A<half>(sendbuff, sendoffset, recvbuff, recvoffset, count, devComm, stream));
+        } else if (type == ncclBfloat16) {
+          TESTCHECK(AlltoAllLaunchGinA2A<bf16>(sendbuff, sendoffset, recvbuff, recvoffset, count, devComm, stream));
         } else {
-          TESTCHECK(testLaunchDeviceKernel(kernel, sendbuff, sendoffset, recvbuff, recvoffset, count, type, op, root,
-                                           comm, stream));
+          TESTCHECK(testLaunchDeviceKernel(SPECIALIZE_KERNEL(GinAlltoAllPutKernel, type, op), sendbuff, sendoffset,
+                                           recvbuff, recvoffset, count, type, op, root, comm, stream));
         }
         return testSuccess;
       }
@@ -630,14 +581,10 @@ testResult_t AlltoAllRunColl(void* sendbuff, size_t sendoffset, void* recvbuff, 
 // Device-side (in-kernel wall_clock64) timing for AllToAll (GIN SDMA and Hybrid
 // tiers). Opt-in via --device_timing: launches the persistent timed kernel once
 // for the current size, brackets only the (skip+loop) steady-state collectives.
-// The fabric DDA LL small-message path is host-launched and is skipped here.
-// with the GPU wall clock, reduces the grid busy window (min start .. max end
-// over CTAs) and the slowest rank (MPI MAX), and reports the per-iteration
-// device latency. loop/skip come from --devtime_loop/--devtime_skip (default
-// 10/10); size-tier overrides via --devtime_loop_mid/_large and
-// --devtime_skip_mid/_large. The timed kernel launches with the same
-// <<<deviceCtaCount, 512>>> grid the production path uses, and selects the
-// GIN (deviceImpl 3) or Hybrid (deviceImpl 4) body to match RunColl.
+// The fabric DDA LL small-message path is selected on the GPU inside
+// GinAlltoAllKernel; the timed kernel is gin.put-only and is skipped here
+// when the production path would take LL. Hybrid still uses
+// <<<deviceCtaCount, 512>>>; GIN gin.put timing uses that same 1D grid.
 #if defined(ENABLE_DEVICE_API) && NCCL_VERSION_CODE >= NCCL_VERSION(2,28,7)
 testResult_t AlltoAllDeviceTime(struct threadArgs* args, ncclDataType_t type, ncclRedOp_t op, int root, int in_place, double* outDeltaSec) {
   if (!deviceTimingMode) return testSuccess;
@@ -652,9 +599,9 @@ testResult_t AlltoAllDeviceTime(struct threadArgs* args, ncclDataType_t type, nc
   if (count == 0 || devtimeLoop < 1) return testSuccess;
 
 #if defined(ENABLE_DEVICE_API) && NCCL_VERSION_CODE >= NCCL_VERSION(2,28,7) && defined(NCCL_OS_LINUX)
-  // Fabric LL uses a host-launched DDA kernel, not GinAlltoAllTimedKernel.
+  // Fabric LL is selected inside GinAlltoAllKernel; GinAlltoAllTimedKernel is gin.put-only.
   if (deviceImpl == 3) {
-    if (AlltoAllGinFabricLLEligibleHost(args->devComms, count, type, args->streams[0])) return testSuccess;
+    if (AlltoAllGinFabricLLEligibleHost(args->devComms, count, type)) return testSuccess;
   }
 #endif
   const size_t perPeerBytes = count * wordSize(type);

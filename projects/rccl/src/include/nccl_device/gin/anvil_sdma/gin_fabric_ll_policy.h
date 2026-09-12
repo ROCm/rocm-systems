@@ -13,7 +13,13 @@
 
 #include <cstddef>
 #include <cstdint>
-#include "nccl_device/gin/anvil_sdma/gin_fabric_a2a_lane.h"
+#include "gin_fabric_a2a_lane.h"
+
+#if defined(__CUDACC__) || defined(__HIPCC__)
+#define GIN_FABRIC_LL_HD __host__ __device__
+#else
+#define GIN_FABRIC_LL_HD
+#endif
 
 namespace gin {
 namespace fabric {
@@ -26,11 +32,11 @@ constexpr size_t kGinFabricLlA2ASlotStridePkts = kGinFabricLlMaxBytes / kGinFabr
 constexpr size_t kGinFabricLlA2APktsPerBlock = 256;
 constexpr int kGinFabricLlAgMaxBlocksPerPeer = 8;
 
-inline size_t ginFabricLlA2AScratchBytes(int nRanks) {
+GIN_FABRIC_LL_HD inline size_t ginFabricLlA2AScratchBytes(int nRanks) {
   return (size_t)2 * (size_t)nRanks * kGinFabricLlA2ASlotStridePkts * kGinFabricLlPacketBytes;
 }
 
-inline int ginFabricLlAlltoAllBlocksPerPeer(size_t perChunkBytes) {
+GIN_FABRIC_LL_HD inline int ginFabricLlAlltoAllBlocksPerPeer(size_t perChunkBytes) {
   const size_t nPk = perChunkBytes >> 3;
   if (nPk <= kGinFabricLlA2APktsPerBlock) return 1;
   size_t bpp = (nPk + kGinFabricLlA2APktsPerBlock - 1) / kGinFabricLlA2APktsPerBlock;
@@ -38,10 +44,20 @@ inline int ginFabricLlAlltoAllBlocksPerPeer(size_t perChunkBytes) {
   return (int)bpp;
 }
 
-inline bool ginFabricLlLaneResourcesOk(int nRanks, size_t scratchBytes, size_t llThreshold) {
+GIN_FABRIC_LL_HD inline bool ginFabricLlLaneResourcesOk(int nRanks, size_t scratchBytes, size_t llThreshold) {
   if (llThreshold == 0) return false;
   if (nRanks < 2 || nRanks > kGinFabricLlMaxNranks) return false;
   if (ginFabricLlA2AScratchBytes(nRanks) > scratchBytes) return false;
+  return true;
+}
+
+// Size/scratch/threshold gate used by the device-API kernel to pick LL vs gin.put.
+GIN_FABRIC_LL_HD inline bool ginFabricLlAlltoAllSizeOk(int nRanks, size_t perChunkBytes, size_t llThreshold,
+                                                       size_t scratchBytes) {
+  if (!ginFabricLlLaneResourcesOk(nRanks, scratchBytes, llThreshold)) return false;
+  if (perChunkBytes == 0 || (perChunkBytes % 16) != 0) return false;
+  if (perChunkBytes * 2 > kGinFabricLlMaxBytes) return false;
+  if ((size_t)nRanks * perChunkBytes > llThreshold) return false;
   return true;
 }
 
@@ -126,5 +142,7 @@ inline bool ginFabricA2ALaneTryBuild(GinFabricA2ACommState const& comm, bool dda
 
 } // namespace fabric
 } // namespace gin
+
+#undef GIN_FABRIC_LL_HD
 
 #endif // _NCCL_DEVICE_GIN_ANVIL_SDMA_GIN_FABRIC_LL_POLICY_H_

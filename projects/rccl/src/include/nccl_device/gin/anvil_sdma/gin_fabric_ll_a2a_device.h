@@ -23,19 +23,21 @@ constexpr size_t kDdaLLA2ASlotStridePkts = kDdaLLMaxBytes / sizeof(LLPacket16);
 template <typename T, int NRANKS_CT>
 __device__ __forceinline__ void ddaAllToAllFabricLLBody(
     T* const* __restrict__ peerScratch, T* __restrict__ recvbuff, const T* __restrict__ sendbuff,
-    size_t perChunkBytes, int selfRank, int nRanksRt, uint32_t* __restrict__ epochDev, int epochLen) {
+    size_t perChunkBytes, int selfRank, int nRanksRt, uint32_t* __restrict__ epochDev, int epochLen,
+    int nChunksRt = 0) {
   const int nRanks = NRANKS_CT ? NRANKS_CT : nRanksRt;
   const int peer = blockIdx.x;
   if (peer >= nRanks) return;
   const int chunk = blockIdx.y;
-  const int nChunks = gridDim.y;
+  const int nChunks = nChunksRt > 0 ? nChunksRt : (int)gridDim.y;
+  if (chunk >= nChunks) return;
   const int tid = threadIdx.x;
   const int nthreads = blockDim.x;
   const size_t nPk = perChunkBytes >> 3;
   const size_t slot = kDdaLLA2ASlotStridePkts;
 
-  const int flatBlockId = blockIdx.x * gridDim.y + blockIdx.y;
-  const int total = gridDim.x * gridDim.y;
+  const int flatBlockId = peer * nChunks + chunk;
+  const int total = nRanks * nChunks;
   const uint32_t flag = ddaGetLLEpochInc(epochDev, flatBlockId, 1);
   const size_t bankOffsetPkts = (size_t)(flag & 1u) * (size_t)nRanks * slot;
 
