@@ -35,13 +35,13 @@ flowchart LR
 
 Local (in-process) mode cannot host ROCgdb: the debugger and inferior would each
 get a private `SimulatedDriver`, so the debugger's dbgapi would never see the
-inferior's process table. **Daemon mode is mandatory**, and `mirage run` drives
+inferior's process table. **Daemon mode is mandatory**, and `rocjitsu run` drives
 it in one command — it starts the session daemon, runs ROCgdb under the
 interposer connected to that session, and ROCgdb launches the inferior into the
 same session. The `--gdb` flag wraps the workload for you:
 
 ```bash
-mirage run --profile mi350x --gdb -- ./my_hip_app
+rocjitsu run --profile mi350x --gdb -- ./my_hip_app
 ```
 
 is shorthand for `-- rocgdb -ex 'set breakpoint pending on' --args ./my_hip_app`;
@@ -49,19 +49,19 @@ drop `--gdb` to pass your own `rocgdb` invocation for full control.
 
 ## 2. Debugging your own kernel
 
-1. Compile with device debug info, matching the mirage profile's arch
+1. Compile with device debug info, matching the rocjitsu profile's arch
    (`mi350x` = `gfx950`):
    ```bash
    hipcc --offload-arch=gfx950 -g -O0 -o app app.hip
    ```
-2. Run under `mirage run --gdb` — one command drops you into ROCgdb with
+2. Run under `rocjitsu run --gdb` — one command drops you into ROCgdb with
    kernel breakpoints already pending:
    ```bash
-   mirage run --profile mi350x --gdb -- ./app
+   rocjitsu run --profile mi350x --gdb -- ./app
    ```
    Script the session with repeatable `--gdb-ex` commands (implies `--gdb`):
    ```bash
-   mirage run --profile mi350x --gdb-ex 'break add_one' --gdb-ex run -- ./app
+   rocjitsu run --profile mi350x --gdb-ex 'break add_one' --gdb-ex run -- ./app
    ```
 3. In ROCgdb: `break <kernel>`, `run`. (`--gdb` already applied
    `set breakpoint pending on`, so the kernel symbol resolves at dispatch.)
@@ -78,14 +78,14 @@ Recorded, runnable walkthroughs live in `emulation/rocjitsu/demos/` (each has a
 | [rocgdb-fault](../demos/rocgdb-fault.md) | Catch a GPU memory-access fault (SIGSEGV) |
 | [rocgdb-multiwave](../demos/rocgdb-multiwave.md) | Debug a real multi-wave kernel: both waves, each with its own private data |
 
-Regenerate a `.cast` with `emulation/mirage/scripts/record_demo.sh <demo>.sh`.
+Regenerate a `.cast` with `emulation/rocjitsu/cli/scripts/record_demo.sh <demo>.sh`.
 That script requires `asciinema` on `PATH` and will not install it for you --
 provision it in your container or dev environment (`apt-get install asciinema`,
 `pipx install asciinema`).
 
 ## 4. Status
 
-Real ROCgdb, driven by `mirage run`, **debugs an emulated GPU kernel end to
+Real ROCgdb, driven by `rocjitsu run`, **debugs an emulated GPU kernel end to
 end**: it attaches, enumerates the GPU agent, stops at a kernel breakpoint, reads
 wave registers / PC / disassembly, single-steps instructions, resolves
 source-level arguments and locals from private/scratch memory (`print`,
@@ -109,7 +109,7 @@ memory.
 | GET_QUEUE_SNAPSHOT (real queues) | done |
 | Wave stop on `s_trap` + CWSR serialization | done |
 | Debug events + register write-back (breakpoint stop end to end) | done |
-| One-command debugging (`mirage run --gdb` / `--gdb-ex`) | done |
+| One-command debugging (`rocjitsu run --gdb` / `--gdb-ex`) | done |
 | Deterministic single-step (`stepi`) | done |
 | Displaced stepping / step-over (debugger memory reserved) | done |
 | GPU address watchpoints (`watch`/`rwatch`/`awatch`) | done |

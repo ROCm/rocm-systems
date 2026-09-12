@@ -5,13 +5,13 @@
 #
 # Demo: debug a real multi-wave GPU kernel with ROCgdb, entirely in software
 # with no AMD GPU. See rocgdb-multiwave.md. Regenerate the .cast with:
-#   emulation/mirage/scripts/record_demo.sh emulation/rocjitsu/demos/rocgdb-multiwave.sh
+#   emulation/rocjitsu/cli/scripts/record_demo.sh emulation/rocjitsu/demos/rocgdb-multiwave.sh
 
 set -euo pipefail
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 kernel="$here/../tests/rocgdb/multi_wave.hip"
-mirage="${MIRAGE_BIN:-mirage}"
+rocjitsu="${ROCJITSU_BIN:-rocjitsu}"
 
 say() { printf '\n\033[1;36m# %s\033[0m\n' "$*"; }
 
@@ -29,7 +29,7 @@ line="$(grep -nE 'data\[i\] = local' "$kernel" | head -1 | cut -d: -f1)"
 
 say "Break inside the kernel: both waves of the workgroup stop together:"
 ( set -x
-  "$mirage" run --profile mi350x --gdb \
+  "$rocjitsu" run --profile mi350x --gdb \
     --gdb-ex "break multi_wave.hip:${line}" \
     --gdb-ex 'run' \
     --gdb-ex 'info threads' \

@@ -13,7 +13,7 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 - Use the shared daemon lifecycle implementation from both the RocJitsu CLI and
-  Mirage, eliminating their duplicate RPC server implementations
+  RocJITsu, eliminating their duplicate RPC server implementations
 - Accept JSON configuration contents directly in `rj_daemon_start()` while
   retaining path-based configuration at the frontend command-line interfaces
 - Harden daemon startup and shutdown with stale-socket recovery, socket

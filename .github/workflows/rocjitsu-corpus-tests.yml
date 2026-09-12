@@ -113,7 +113,6 @@ jobs:
             dbt_timeout: 30
             dbt_memory_limit_mib: 4096
             dbt_job_timeout: 20
-            run_static_asan_launch: true
             test_regex: ''
             build_type: RelWithDebInfo
             enable_asan: 0
@@ -156,11 +155,26 @@ jobs:
             build-essential \
             ca-certificates \
             cmake \
+            curl \
             git \
             libclang-rt-dev \
             libdrm-dev \
             ninja-build \
             clang
+
+      # The CLI is a cargo workspace wired into the same cmake build, and
+      # the test suite launches almost everything through it, so a build
+      # without cargo silently skips most of what this job exists to run.
+      # rustup rather than apt: the workspace is edition 2024 and needs
+      # 1.85, well past what Ubuntu 24.04 packages. The minimal profile
+      # omits clippy and rustfmt, which the `cargo_clippy` and `cargo_fmt`
+      # ctest cases invoke.
+      - name: Install Rust
+        run: |
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
+            | sh -s -- -y --profile minimal --default-toolchain stable \
+              --component clippy,rustfmt
+          echo "${HOME}/.cargo/bin" >> "${GITHUB_PATH}"
 
       - name: Checkout rocm-systems
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
@@ -329,7 +343,6 @@ jobs:
             --output-on-failure \
             -j "${WORKERS}"
 
-          echo "${ROCJITSU_BUILD_DIR}/tools/rocjitsu" >> "${GITHUB_PATH}"
           echo "CXXFLAGS=" >> "${GITHUB_ENV}"
 
       # This lane exists to race the engine's worker threads against each
@@ -351,29 +364,6 @@ jobs:
             echo "::error::TSan lane needs more than one usable CPU (nproc=$(nproc))"
             exit 1
           fi
-
-      - name: Test static ASan launcher preload
-        if: matrix.run_static_asan_launch
-        working-directory: ${{ env.ROCJITSU_SOURCE_DIR }}
-        shell: bash
-        run: |
-          STATIC_ASAN_BUILD_DIR="${ROCJITSU_BUILD_DIR}-asan-static-launch-preload"
-          CXXFLAGS="-Wno-error=unknown-warning-option -Wno-error=nested-anon-types"
-          ROCM_PATH="$(rocm-sdk path --root)" \
-            cmake -B "${STATIC_ASAN_BUILD_DIR}" -G Ninja \
-            -DCMAKE_BUILD_TYPE=RelWithDebInfo \
-            -DCMAKE_CXX_FLAGS="${CXXFLAGS}" \
-            -DRJ_ENABLE_ASAN=1 \
-            -DRJ_ENABLE_UBSAN=0 \
-            -DRJ_ENABLE_TSAN=0 \
-            -DRJ_ENABLE_EXPENSIVE_CHECKS=0 \
-            -DRJ_SANITIZER_RUNTIME=STATIC
-
-          cmake --build "${STATIC_ASAN_BUILD_DIR}" \
-            --target launch_preload_test
-          ctest --test-dir "${STATIC_ASAN_BUILD_DIR}" \
-            -R '^LaunchPreloadTest\.' \
-            --output-on-failure
 
       - name: Install corpus test dependencies
         if: matrix.run_simulator_corpus
@@ -453,7 +443,12 @@ jobs:
         run: |
           ROCM_PATH="$(rocm-sdk path --root)"
           export ROCM_PATH
-          LAUNCHER="${ROCJITSU_BUILD_DIR}/tools/rocjitsu/rocjitsu"
+          # Asked of the configured build rather than assumed: cargo's
+          # output directory moves with `$CARGO_TARGET_DIR`, so the build
+          # records where it actually put the binary.
+          LAUNCHER="$(cmake -LA -N "${ROCJITSU_BUILD_DIR}" \
+            | sed -n 's/^RJ_CLI_BIN:FILEPATH=//p')"
+          test -x "${LAUNCHER}"
           B0_CONFIG="${ROCJITSU_SOURCE_DIR}/configs/gfx1250_mi455x.json"
           A0_CONFIG="${RUNNER_TEMP}/gfx1250_mi455x_a0.json"
           jq '.vm.gpu.device.revision_id = 0' "${B0_CONFIG}" > "${A0_CONFIG}"

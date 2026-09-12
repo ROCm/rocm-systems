@@ -194,19 +194,90 @@ function(rj_installed_test_runtime_dir_env out name)
     set(${out} "ROCJITSU_RUNTIME_DIR=runtime/${_runtime_name}" PARENT_SCOPE)
 endfunction()
 
-function(rj_environment_has_runtime_dir out)
-    set(_has_runtime_dir FALSE)
+# The sanitizer runtime(s) a shared-sanitizer build has to load ahead of
+# everything else, as an LD_PRELOAD-ordered list.
+#
+# A shared-ASan build of librocjitsu.so cannot be preloaded on its own:
+# libasan has to be the first object in the initial library list or ld.so
+# refuses the process. Tests that preload the interposer themselves use
+# RJ_SANITIZER_PRELOAD_PREFIX below; tests that go through the CLI cannot,
+# because the CLI composes LD_PRELOAD for the workload it launches — they
+# are told the path instead, via ROCJITSU_SANITIZER_PRELOAD, and the CLI
+# puts it in front of its own interposer. The C++ CLI found it for itself
+# with dladdr(&__asan_init); the Rust one forbids unsafe, and the build
+# that computed the path can simply say what it is.
+#
+# Empty on a normal build, which is every build but the sanitizer ones.
+set(RJ_SANITIZER_PRELOAD "")
+if(RJ_ASAN_SHARED_LIBRARY)
+    list(APPEND RJ_SANITIZER_PRELOAD "${RJ_ASAN_SHARED_LIBRARY}")
+endif()
+if(RJ_TSAN_SHARED_LIBRARY)
+    list(APPEND RJ_SANITIZER_PRELOAD "${RJ_TSAN_SHARED_LIBRARY}")
+endif()
+list(JOIN RJ_SANITIZER_PRELOAD ":" RJ_SANITIZER_PRELOAD)
+set(RJ_SANITIZER_PRELOAD_PREFIX "")
+if(RJ_SANITIZER_PRELOAD)
+    set(RJ_SANITIZER_PRELOAD_PREFIX "${RJ_SANITIZER_PRELOAD}:")
+endif()
+
+# The CLI that almost every test here runs its workload through, as
+# `${RJ_CLI_LOCAL} --config <cfg> -- <app>`.
+#
+# Supplied by the enclosing build from the Rust workspace's cargo
+# wrapper: `RJ_CLI_BIN` is where cargo puts the binary and
+# `RJ_CLI_TARGET` is the target that puts it there. A generator
+# expression would be the obvious spelling and is not available, because
+# a cargo build is not a CMake target and has no `$<TARGET_FILE:…>`.
+#
+# Both are unset when cargo is missing. That has to skip rather than fail:
+# the C++ tree builds and its unit tests run perfectly well without a
+# CLI, and an offline or vendored build has no cargo at all. The
+# placeholder below is what `rj_add_test` matches on to tell a
+# CLI-launched COMMAND from any other.
+set(RJ_HAVE_CLI TRUE)
+set(RJ_CLI "${RJ_CLI_BIN}")
+if(NOT RJ_CLI)
+    set(RJ_HAVE_CLI FALSE)
+    set(RJ_CLI "RJ_CLI-NOTFOUND")
+    message(
+        STATUS
+        "rocjitsu tests: no CLI was built; tests that launch through it are \
+not registered"
+    )
+endif()
+
+# The CLI told to emulate inside the workload's own process, which is what
+# every case below is written against: an interposer loaded into the test
+# binary, and a device that binary stands up itself. The CLI's own default
+# is a daemon — that being what lets several processes share one emulated
+# machine — and the cases that want one say so themselves, in
+# `daemon_test.cpp`. Launching the rest through a daemon would quietly move
+# what is under test out of the process under test: the `Interposer*` suites
+# would exercise the remote driver rather than the simulated one they were
+# written for, which is the distinction their `*Remote` daemon-mode
+# registrations exist to draw.
+set(RJ_CLI_LOCAL ${RJ_CLI} --in-process)
+
+# The same, on the installed tree, where the CLI's directory is known only
+# to the generated CTest file and so stays unexpanded here.
+set(RJ_INSTALLED_CLI "\${RJ_INSTALLED_BINDIR}/rocjitsu" --in-process)
+
+# Whether an ENVIRONMENT list already names `variable`, so a default is
+# added only where the caller has not stated one.
+function(rj_environment_has out variable)
+    set(_found FALSE)
     foreach(_entry IN LISTS ARGN)
-        if(_entry MATCHES "^ROCJITSU_RUNTIME_DIR=")
-            set(_has_runtime_dir TRUE)
+        if(_entry MATCHES "^${variable}=")
+            set(_found TRUE)
         endif()
     endforeach()
-    set(${out} "${_has_runtime_dir}" PARENT_SCOPE)
+    set(${out} "${_found}" PARENT_SCOPE)
 endfunction()
 
 function(rj_set_default_runtime_dir name)
     get_property(_env TEST "${name}" PROPERTY ENVIRONMENT)
-    rj_environment_has_runtime_dir(_has_runtime_dir ${_env})
+    rj_environment_has(_has_runtime_dir "ROCJITSU_RUNTIME_DIR" ${_env})
     if(NOT _has_runtime_dir)
         rj_test_runtime_dir_env(_runtime_dir_env "${name}")
         list(APPEND _env "${_runtime_dir_env}")
@@ -239,13 +310,52 @@ function(rj_add_test)
         message(FATAL_ERROR "rj_add_test(${ARG_NAME}) requires COMMAND")
     endif()
 
-    rj_environment_has_runtime_dir(_has_runtime_dir ${ARG_ENVIRONMENT})
+    # A test whose command starts with the CLI has nothing to run without
+    # one. Registering it anyway would produce a case that can only fail
+    # on a tree that is not broken.
+    if(NOT RJ_HAVE_CLI AND "${ARG_COMMAND}" MATCHES "RJ_CLI-NOTFOUND")
+        return()
+    endif()
+
+    rj_environment_has(_has_runtime_dir "ROCJITSU_RUNTIME_DIR" ${ARG_ENVIRONMENT})
     if(NOT _has_runtime_dir)
         # Each launcher test writes the active config into its runtime dir for
         # the preloaded interposer. Use a per-test default so ctest -j runs
         # cannot overwrite another test's config or daemon socket.
         rj_test_runtime_dir_env(_runtime_dir_env "${ARG_NAME}")
         list(APPEND ARG_ENVIRONMENT "${_runtime_dir_env}")
+    endif()
+
+    # Both are set on every test rather than on the CLI-driven ones: only
+    # the CLI reads them, and picking out which COMMANDs are a CLI
+    # invocation would be a second, drifting copy of a fact the command
+    # line already states.
+    if(RJ_SANITIZER_PRELOAD)
+        list(
+            APPEND ARG_ENVIRONMENT
+            "ROCJITSU_SANITIZER_PRELOAD=${RJ_SANITIZER_PRELOAD}"
+        )
+    endif()
+    # The CLI otherwise searches the ROCm install locations for the two
+    # libraries it launches a workload with — the KMD interposer and the
+    # HSA tools hook DBT guest mode translates through — and an installed
+    # copy from another build would answer first. Naming this build's
+    # outright is what makes a test result a statement about this tree.
+    # Not needed for the installed registrations: there the CLI finds
+    # both packaged beside it.
+    rj_environment_has(_has_lib "ROCJITSU_LIB" ${ARG_ENVIRONMENT})
+    if(NOT _has_lib)
+        list(
+            APPEND ARG_ENVIRONMENT
+            "ROCJITSU_LIB=$<TARGET_FILE:rocjitsu_shared>"
+        )
+    endif()
+    rj_environment_has(_has_hooks "ROCJITSU_HOOKS_LIB" ${ARG_ENVIRONMENT})
+    if(NOT _has_hooks)
+        list(
+            APPEND ARG_ENVIRONMENT
+            "ROCJITSU_HOOKS_LIB=$<TARGET_FILE:rocjitsu_hooks>"
+        )
     endif()
 
     add_test(NAME "${ARG_NAME}" COMMAND ${ARG_COMMAND})
@@ -293,8 +403,17 @@ function(rj_add_test)
             "ROCJITSU_CONFIG_DIR=\${RJ_INSTALLED_CONFIG_DIR}"
             "ROCJITSU_KERNEL_DIR=\${RJ_INSTALLED_KERNEL_DIR}"
         )
-        rj_environment_has_runtime_dir(
+        # An absolute path into the toolchain that built this tree, so it
+        # is the same value on the installed side.
+        if(RJ_SANITIZER_PRELOAD)
+            list(
+                APPEND _install_env
+                "ROCJITSU_SANITIZER_PRELOAD=${RJ_SANITIZER_PRELOAD}"
+            )
+        endif()
+        rj_environment_has(
             _install_has_runtime_dir
+            "ROCJITSU_RUNTIME_DIR"
             ${ARG_INSTALL_ENVIRONMENT}
         )
         if(NOT _install_has_runtime_dir)
@@ -330,13 +449,25 @@ endfunction()
 
 # --- Unit / integration test suite ---
 
-add_test(NAME RocjitsuVersion COMMAND $<TARGET_FILE:rocjitsu_bin> --version)
-set_tests_properties(
-    RocjitsuVersion
-    PROPERTIES
-        PASS_REGULAR_EXPRESSION
-            "rocjitsu ${PROJECT_VERSION}[\r\n]+git revision: .+[\r\n]+git commit: .+"
-)
+# The CLI prints its own version and then, verbatim, the build identity
+# the shared library exports (rj_get_version_string) — so this asserts
+# that the CLI on this tree is talking to the library from this tree, not
+# just that it can print a number. ROCJITSU_LIB names the one it must
+# load: the CLI otherwise searches ROCm install locations, where an older
+# librocjitsu.so would answer instead and the test would pass against it.
+if(RJ_HAVE_CLI)
+    rj_add_test(
+        NAME RocjitsuVersion
+        COMMAND ${RJ_CLI} --version
+        ENVIRONMENT "ROCJITSU_LIB=$<TARGET_FILE:rocjitsu_shared>"
+    )
+    set_tests_properties(
+        RocjitsuVersion
+        PROPERTIES
+            PASS_REGULAR_EXPRESSION
+                "rocjitsu ${PROJECT_VERSION}[\r\n]+git revision: .+[\r\n]+git commit: .+"
+    )
+endif()
 
 add_executable(rj_decode_fuzz_test fuzz/decode/decode_fuzz_test.cpp)
 target_link_libraries(
@@ -840,43 +971,11 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     )
 endif()
 
-# --- CLI launcher preload tests ---
-
-add_executable(launch_preload_test launch_preload_test.cpp)
-target_link_libraries(
-    launch_preload_test
-    PRIVATE rocjitsu_cli_launch_preload GTest::gtest_main
-)
-if(RJ_ENABLE_ASAN AND RJ_SANITIZER_USE_SHARED)
-    target_compile_definitions(
-        launch_preload_test
-        PRIVATE
-            RJ_EXPECT_SHARED_ASAN_RUNTIME=1
-            RJ_EXPECTED_SHARED_ASAN_RUNTIME="${RJ_ASAN_SHARED_LIBRARY}"
-    )
-endif()
-if(RJ_ENABLE_TSAN AND RJ_SANITIZER_USE_SHARED)
-    target_compile_definitions(
-        launch_preload_test
-        PRIVATE
-            RJ_EXPECT_SHARED_TSAN_RUNTIME=1
-            RJ_EXPECTED_SHARED_TSAN_RUNTIME="${RJ_TSAN_SHARED_LIBRARY}"
-    )
-endif()
-rj_configure_target(launch_preload_test TEST)
-rj_add_gtest_tests(launch_preload_test)
-
-# --- CLI ROCm visibility tests ---
-# rocm_visibility.cpp ships in the launch-preload library for build convenience,
-# but its tests get their own executable so they mirror the source structure.
-
-add_executable(rocm_visibility_test rocm_visibility_test.cpp)
-target_link_libraries(
-    rocm_visibility_test
-    PRIVATE rocjitsu_cli_launch_preload GTest::gtest_main
-)
-rj_configure_target(rocm_visibility_test TEST)
-rj_add_gtest_tests(rocm_visibility_test)
+# The CLI's preload-ordering and ROCm-visibility suites used to live here,
+# against the C++ launcher's own static library. Both moved into the CLI
+# with the code they cover: `supervisor/src/spec.rs` composes the preload
+# and `core/src/visibility.rs` resolves the visible devices, and each is
+# tested beside its implementation. `cargo_test` runs them.
 
 # --- DBI probe fixture test ---
 # Loads a real amdclang++-compiled rj_nop_probe device ELF and exercises the
@@ -1054,8 +1153,6 @@ get_filename_component(
     "${RJ_HIP_TEST_2GPU_CONFIG}"
     NAME
 )
-set(RJ_CLI "$<TARGET_FILE:rocjitsu_bin>")
-
 function(rj_detect_kfd_gfx_target_versions out_var)
     set(_versions)
     foreach(
@@ -1103,13 +1200,6 @@ if("120001" IN_LIST RJ_KFD_GFX_TARGET_VERSIONS)
     set(RJ_HAS_GFX1201_GPU TRUE)
 endif()
 
-set(RJ_SANITIZER_PRELOAD_PREFIX "")
-if(RJ_ASAN_SHARED_LIBRARY)
-    set(RJ_SANITIZER_PRELOAD_PREFIX "${RJ_ASAN_SHARED_LIBRARY}:")
-elseif(RJ_TSAN_SHARED_LIBRARY)
-    set(RJ_SANITIZER_PRELOAD_PREFIX "${RJ_TSAN_SHARED_LIBRARY}:")
-endif()
-
 set(RJ_KMD_PRELOAD_ENV
     "LD_PRELOAD=${RJ_SANITIZER_PRELOAD_PREFIX}$<TARGET_FILE:rocjitsu_shared>"
     "RJ_CONFIG=${CMAKE_SOURCE_DIR}/configs/gfx950_mi355x.json"
@@ -1122,17 +1212,17 @@ target_include_directories(
 )
 target_link_libraries(guest_kfd_test PRIVATE Threads::Threads GTest::gtest_main)
 rj_configure_target(guest_kfd_test TEST)
-add_dependencies(guest_kfd_test rocjitsu_bin rocjitsu_shared rocjitsu_hooks)
+add_dependencies(guest_kfd_test ${RJ_CLI_TARGET} rocjitsu_shared rocjitsu_hooks)
 rj_add_test(
     NAME "GuestKfdFailureTest.NonexistentSimulatorConfigFailsCleanly"
     COMMAND
-        ${RJ_CLI} --config ${RJ_CDNA3_KMD_CONFIG} --
+        ${RJ_CLI_LOCAL} --config ${RJ_CDNA3_KMD_CONFIG} --
         $<TARGET_FILE:guest_kfd_test>
         --gtest_filter=GuestKfdFailureTest.NonexistentSimulatorConfigFailsCleanly
     WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
     TIMEOUT 60
     INSTALL_COMMAND
-        "\${RJ_INSTALLED_BINDIR}/rocjitsu"
+        ${RJ_INSTALLED_CLI}
         "--config"
         "\${RJ_INSTALLED_CONFIG_DIR}/${RJ_CDNA3_KMD_CONFIG_NAME}"
         "--"
@@ -1142,13 +1232,13 @@ rj_add_test(
 rj_add_test(
     NAME "GuestKfdFailureTest.SimulatorHostIsaMismatchFailsCleanly"
     COMMAND
-        ${RJ_CLI} --config ${RJ_CDNA3_KMD_CONFIG} --
+        ${RJ_CLI_LOCAL} --config ${RJ_CDNA3_KMD_CONFIG} --
         $<TARGET_FILE:guest_kfd_test>
         --gtest_filter=GuestKfdFailureTest.SimulatorHostIsaMismatchFailsCleanly
     WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
     TIMEOUT 60
     INSTALL_COMMAND
-        "\${RJ_INSTALLED_BINDIR}/rocjitsu"
+        ${RJ_INSTALLED_CLI}
         "--config"
         "\${RJ_INSTALLED_CONFIG_DIR}/${RJ_CDNA3_KMD_CONFIG_NAME}"
         "--"
@@ -1158,13 +1248,13 @@ rj_add_test(
 rj_add_test(
     NAME "GuestKfdFailureTest.SimulatorOversizedLdsFailsCleanly"
     COMMAND
-        ${RJ_CLI} --config ${RJ_CDNA3_KMD_CONFIG} --
+        ${RJ_CLI_LOCAL} --config ${RJ_CDNA3_KMD_CONFIG} --
         $<TARGET_FILE:guest_kfd_test>
         --gtest_filter=GuestKfdFailureTest.SimulatorOversizedLdsFailsCleanly
     WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
     TIMEOUT 60
     INSTALL_COMMAND
-        "\${RJ_INSTALLED_BINDIR}/rocjitsu"
+        ${RJ_INSTALLED_CLI}
         "--config"
         "\${RJ_INSTALLED_CONFIG_DIR}/${RJ_CDNA3_KMD_CONFIG_NAME}"
         "--"
@@ -1174,13 +1264,13 @@ rj_add_test(
 rj_add_test(
     NAME "GuestKfdFailureTest.PathOnlyAutomaticDbtHandoffFailsClosed"
     COMMAND
-        ${RJ_CLI} --config ${RJ_CDNA3_KMD_CONFIG} --
+        ${RJ_CLI_LOCAL} --config ${RJ_CDNA3_KMD_CONFIG} --
         $<TARGET_FILE:guest_kfd_test>
         --gtest_filter=GuestKfdFailureTest.PathOnlyAutomaticDbtHandoffFailsClosed
     WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
     TIMEOUT 60
     INSTALL_COMMAND
-        "\${RJ_INSTALLED_BINDIR}/rocjitsu"
+        ${RJ_INSTALLED_CLI}
         "--config"
         "\${RJ_INSTALLED_CONFIG_DIR}/${RJ_CDNA3_KMD_CONFIG_NAME}"
         "--"
@@ -1190,7 +1280,7 @@ rj_add_test(
 rj_add_test(
     NAME "GuestKfdConfigTest.ReadsRuntimeHandoffLargerThan4095Bytes"
     COMMAND
-        ${RJ_CLI} --config ${RJ_CDNA3_KMD_CONFIG} --
+        ${RJ_CLI_LOCAL} --config ${RJ_CDNA3_KMD_CONFIG} --
         $<TARGET_FILE:guest_kfd_test>
         --gtest_filter=GuestKfdConfigTest.ReadsRuntimeHandoffLargerThan4095Bytes
     WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
@@ -1200,7 +1290,7 @@ rj_add_test(
     # as a pass and the lost coverage would be invisible.
     SKIP_REGULAR_EXPRESSION "\\[  SKIPPED \\]"
     INSTALL_COMMAND
-        "\${RJ_INSTALLED_BINDIR}/rocjitsu"
+        ${RJ_INSTALLED_CLI}
         "--config"
         "\${RJ_INSTALLED_CONFIG_DIR}/${RJ_CDNA3_KMD_CONFIG_NAME}"
         "--"
@@ -1224,7 +1314,7 @@ if(RJ_HAS_GFX1201_GPU)
         NAME
             "GuestKfdMultiprocessTest.ForkedChildrenRefuseGpuAndLeaveParentOverlayIntact"
         COMMAND
-            ${RJ_CLI} --config
+            ${RJ_CLI_LOCAL} --config
             ${CMAKE_SOURCE_DIR}/configs/guest_gfx950_on_gfx1201.json --
             $<TARGET_FILE:guest_kfd_test>
             --gtest_filter=GuestKfdMultiprocessTest.ForkedChildrenRefuseGpuAndLeaveParentOverlayIntact
@@ -1233,7 +1323,7 @@ if(RJ_HAS_GFX1201_GPU)
     add_test(
         NAME "GuestKfdMultiprocessTest.ForkedChildCannotUseInheritedGuestDriver"
         COMMAND
-            ${RJ_CLI} --config
+            ${RJ_CLI_LOCAL} --config
             ${CMAKE_SOURCE_DIR}/configs/guest_gfx950_on_gfx1201.json --
             $<TARGET_FILE:guest_kfd_test>
             --gtest_filter=GuestKfdMultiprocessTest.ForkedChildCannotUseInheritedGuestDriver
@@ -1242,7 +1332,7 @@ if(RJ_HAS_GFX1201_GPU)
     add_test(
         NAME "GuestKfdConcurrencyTest.ConcurrentOpenIoctlAndSysfsRedirect"
         COMMAND
-            ${RJ_CLI} --config
+            ${RJ_CLI_LOCAL} --config
             ${CMAKE_SOURCE_DIR}/configs/guest_gfx950_on_gfx1201.json --
             $<TARGET_FILE:guest_kfd_test>
             --gtest_filter=GuestKfdConcurrencyTest.ConcurrentOpenIoctlAndSysfsRedirect
@@ -1251,7 +1341,7 @@ if(RJ_HAS_GFX1201_GPU)
     add_test(
         NAME "GuestKfdLifecycleTest.ReopensAfterLastClose"
         COMMAND
-            ${RJ_CLI} --config
+            ${RJ_CLI_LOCAL} --config
             ${CMAKE_SOURCE_DIR}/configs/guest_gfx950_on_gfx1201.json --
             $<TARGET_FILE:guest_kfd_test>
             --gtest_filter=GuestKfdLifecycleTest.ReopensAfterLastClose
@@ -1260,7 +1350,7 @@ if(RJ_HAS_GFX1201_GPU)
     add_test(
         NAME "GuestKfdMemoryTest.GuestAllocationMmapOffsetIsRejected"
         COMMAND
-            ${RJ_CLI} --config
+            ${RJ_CLI_LOCAL} --config
             ${CMAKE_SOURCE_DIR}/configs/guest_gfx950_on_gfx1201.json --
             $<TARGET_FILE:guest_kfd_test>
             --gtest_filter=GuestKfdMemoryTest.GuestAllocationMmapOffsetIsRejected
@@ -1269,7 +1359,7 @@ if(RJ_HAS_GFX1201_GPU)
     add_test(
         NAME "GuestKfdFdReuseTest.OverwritingHiddenRealFdKeepsRoutingCorrect"
         COMMAND
-            ${RJ_CLI} --config
+            ${RJ_CLI_LOCAL} --config
             ${CMAKE_SOURCE_DIR}/configs/guest_gfx950_on_gfx1201.json --
             $<TARGET_FILE:guest_kfd_test>
             --gtest_filter=GuestKfdFdReuseTest.OverwritingHiddenRealFdKeepsRoutingCorrect
@@ -1509,7 +1599,7 @@ target_link_libraries(
     interposer_dup_test
     PRIVATE GTest::gtest_main ${CMAKE_DL_LIBS}
 )
-add_dependencies(interposer_dup_test rocjitsu_bin rocjitsu_shared)
+add_dependencies(interposer_dup_test ${RJ_CLI_TARGET} rocjitsu_shared)
 if(RJ_INSTALL_TESTS)
     rj_install_test_target(interposer_dup_test)
 endif()
@@ -1518,7 +1608,7 @@ function(rj_add_interposer_test_suite _suite)
         rj_add_test(
             NAME "${_suite}.${_case}"
             COMMAND
-                ${RJ_CLI}
+                ${RJ_CLI_LOCAL}
                 --config
                 ${RJ_CDNA4_KMD_CONFIG}
                 --
@@ -1527,7 +1617,7 @@ function(rj_add_interposer_test_suite _suite)
             WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
             SKIP_REGULAR_EXPRESSION "\\[  SKIPPED \\]"
             INSTALL_COMMAND
-                "\${RJ_INSTALLED_BINDIR}/rocjitsu"
+                ${RJ_INSTALLED_CLI}
                 "--config"
                 "\${RJ_INSTALLED_CONFIG_DIR}/${RJ_CDNA4_KMD_CONFIG_NAME}"
                 "--"
@@ -1649,13 +1739,13 @@ if(ROCMINFO_EXECUTABLE AND RJ_HAS_KFD_DEVICE)
         rocminfo_test
         PRIVATE
             ROCMINFO_PATH="${ROCMINFO_EXECUTABLE}"
-            ROCJITSU_BIN="$<TARGET_FILE:rocjitsu_bin>"
+            ROCJITSU_BIN="${RJ_CLI_BIN}"
             RJ_CONFIG_PATH="${RJ_CDNA4_KMD_CONFIG}"
             RJ_INSTALLED_ROCJITSU_BIN="${_rj_installed_rocjitsu_bin}"
             RJ_INSTALLED_CONFIG_PATH="${_rj_installed_cdna4_kmd_config}"
     )
     target_link_libraries(rocminfo_test PRIVATE GTest::gtest_main)
-    add_dependencies(rocminfo_test rocjitsu_bin rocjitsu_shared)
+    add_dependencies(rocminfo_test ${RJ_CLI_TARGET} rocjitsu_shared)
 
     if(RJ_INSTALL_TESTS)
         rj_install_test_target(rocminfo_test)
@@ -1700,7 +1790,7 @@ if(ROCMINFO_EXECUTABLE AND RJ_HAS_KFD_DEVICE)
         dbt_guest_rocminfo_test
         PRIVATE
             ROCMINFO_PATH="${ROCMINFO_EXECUTABLE}"
-            ROCJITSU_BIN="$<TARGET_FILE:rocjitsu_bin>"
+            ROCJITSU_BIN="${RJ_CLI_BIN}"
             RJ_CONFIG_PATH="${CMAKE_SOURCE_DIR}/configs/guest_gfx950_on_gfx1201.json"
             RJ_INSTALLED_ROCJITSU_BIN="${_rj_installed_rocjitsu_bin}"
             RJ_INSTALLED_CONFIG_PATH="${_rj_installed_dbt_guest_config}"
@@ -1708,7 +1798,7 @@ if(ROCMINFO_EXECUTABLE AND RJ_HAS_KFD_DEVICE)
     target_link_libraries(dbt_guest_rocminfo_test PRIVATE GTest::gtest_main)
     add_dependencies(
         dbt_guest_rocminfo_test
-        rocjitsu_bin
+        ${RJ_CLI_TARGET}
         rocjitsu_shared
         rocjitsu_hooks
     )
@@ -1806,7 +1896,7 @@ if(HSA_RUNTIME64)
     )
     target_link_libraries(hsa_init_test PRIVATE ${HSA_RUNTIME64} GTest::gtest)
     target_link_options(hsa_init_test PRIVATE -Wl,-rpath,${RJ_HSA_LIBRARY_DIR})
-    add_dependencies(hsa_init_test rocjitsu_bin rocjitsu_shared)
+    add_dependencies(hsa_init_test ${RJ_CLI_TARGET} rocjitsu_shared)
     if(RJ_INSTALL_TESTS)
         rj_install_test_target(hsa_init_test)
     endif()
@@ -1814,7 +1904,7 @@ if(HSA_RUNTIME64)
         rj_add_test(
             NAME "HsaTest.${_hsa_test}"
             COMMAND
-                ${RJ_CLI}
+                ${RJ_CLI_LOCAL}
                 --config
                 ${RJ_CDNA4_KMD_CONFIG}
                 --
@@ -1823,7 +1913,7 @@ if(HSA_RUNTIME64)
             WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
             SKIP_REGULAR_EXPRESSION "\\[  SKIPPED \\]"
             INSTALL_COMMAND
-                "\${RJ_INSTALLED_BINDIR}/rocjitsu"
+                ${RJ_INSTALLED_CLI}
                 "--config"
                 "\${RJ_INSTALLED_CONFIG_DIR}/${RJ_CDNA4_KMD_CONFIG_NAME}"
                 "--"
@@ -1941,7 +2031,7 @@ if(HSA_RUNTIME64)
         add_dependencies(
             hsa_hooks_test
             device_kernels
-            rocjitsu_bin
+            ${RJ_CLI_TARGET}
             rocjitsu_hooks
         )
         rj_configure_target(hsa_hooks_test TEST)
@@ -1964,14 +2054,14 @@ if(HSA_RUNTIME64)
             rj_add_test(
                 NAME "HsaHooksTest.TranslateGfx950Mfma16x16ThroughToolsLib"
                 COMMAND
-                    $<TARGET_FILE:rocjitsu_bin> --config
+                    ${RJ_CLI_LOCAL} --config
                     ${CMAKE_SOURCE_DIR}/configs/guest_gfx950_on_gfx1201.json --
                     $<TARGET_FILE:hsa_hooks_test>
                     --gtest_filter=HsaHooksTest.TranslateGfx950Mfma16x16ThroughToolsLib
                 WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
                 TIMEOUT 60
                 INSTALL_COMMAND
-                    "\${RJ_INSTALLED_BINDIR}/rocjitsu"
+                    ${RJ_INSTALLED_CLI}
                     "--config"
                     "\${RJ_INSTALLED_CONFIG_DIR}/guest_gfx950_on_gfx1201.json"
                     "--"
@@ -2029,7 +2119,7 @@ if(HSA_RUNTIME64)
         add_dependencies(
             ${RJ_CDNA4_TO_CDNA3_DISPATCH_TEST_EXE}
             device_kernels
-            rocjitsu_bin
+            ${RJ_CLI_TARGET}
             rocjitsu_shared
             rocjitsu_hooks
         )
@@ -2077,13 +2167,13 @@ if(HSA_RUNTIME64)
             rj_add_test(
                 NAME "Cdna4ToCdna3SimulatedDispatchTest.${_test_name}"
                 COMMAND
-                    ${RJ_CLI} --config ${RJ_CDNA3_KMD_CONFIG} --
+                    ${RJ_CLI_LOCAL} --config ${RJ_CDNA3_KMD_CONFIG} --
                     $<TARGET_FILE:${RJ_CDNA4_TO_CDNA3_DISPATCH_TEST_EXE}>
                     --gtest_filter=Cdna4ToCdna3DispatchTest.${_test_name}
                 WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
                 TIMEOUT 300
                 INSTALL_COMMAND
-                    "\${RJ_INSTALLED_BINDIR}/rocjitsu"
+                    ${RJ_INSTALLED_CLI}
                     "--config"
                     "\${RJ_INSTALLED_CONFIG_DIR}/${RJ_CDNA3_KMD_CONFIG_NAME}"
                     "--"
@@ -2107,13 +2197,13 @@ if(HSA_RUNTIME64)
             rj_add_test(
                 NAME "Cdna4ToCdna3DbtGuestTest.${_test_name}"
                 COMMAND
-                    ${RJ_CLI} --config ${RJ_CDNA4_TO_CDNA3_SIM_DBT_CONFIG} --
+                    ${RJ_CLI_LOCAL} --config ${RJ_CDNA4_TO_CDNA3_SIM_DBT_CONFIG} --
                     $<TARGET_FILE:${RJ_CDNA4_TO_CDNA3_DISPATCH_TEST_EXE}>
                     --gtest_filter=Cdna4ToCdna3DbtGuestTest.${_test_name}
                 WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
                 TIMEOUT 300
                 INSTALL_COMMAND
-                    "\${RJ_INSTALLED_BINDIR}/rocjitsu"
+                    ${RJ_INSTALLED_CLI}
                     "--config"
                     "\${RJ_INSTALLED_CONFIG_DIR}/${RJ_CDNA4_TO_CDNA3_SIM_DBT_CONFIG_NAME}"
                     "--"
@@ -2175,13 +2265,13 @@ if(HSA_RUNTIME64)
             hsa_dbi_nop_asm_test
             PRIVATE HAS_HOST_AMDGPU=1 KERNEL_DIR="${KERNEL_OUTPUT_DIR}"
         )
-        # rocjitsu_bin/rocjitsu_shared are needed by the Sim registrations
+        # The CLI and rocjitsu_shared are needed by the Sim registrations
         # below, which launch this binary through the CLI. A generator
         # expression in a test COMMAND does not create a build dependency.
         add_dependencies(
             hsa_dbi_nop_asm_test
             device_kernels
-            rocjitsu_bin
+            ${RJ_CLI_TARGET}
             rocjitsu_shared
         )
         rj_configure_target(hsa_dbi_nop_asm_test TEST)
@@ -2502,7 +2592,7 @@ if(HSA_RUNTIME64)
                 hsa_dbi_nop_probe_test
                 PRIVATE HAS_HOST_AMDGPU=1 KERNEL_DIR="${KERNEL_OUTPUT_DIR}"
             )
-            # rocjitsu_bin/rocjitsu_shared are needed by the Sim registrations
+            # The CLI and rocjitsu_shared are needed by the Sim registrations
             # below, which launch this binary through the CLI. A generator
             # expression in a test COMMAND does not create a build dependency.
             add_dependencies(
@@ -2511,7 +2601,7 @@ if(HSA_RUNTIME64)
                 probe_rj_nop_probe_gfx90a
                 probe_rj_nop_probe_gfx950
                 probe_rj_nop_probe_gfx1201
-                rocjitsu_bin
+                ${RJ_CLI_TARGET}
                 rocjitsu_shared
             )
             rj_configure_target(hsa_dbi_nop_probe_test TEST)
@@ -2902,7 +2992,7 @@ if(RJ_ENABLE_HIP_TESTS)
             VERBATIM
         )
         add_custom_target(${TEST_NAME}_target ALL DEPENDS ${HIP_TEST_BIN})
-        add_dependencies(${TEST_NAME}_target rocjitsu_bin rocjitsu_shared)
+        add_dependencies(${TEST_NAME}_target ${RJ_CLI_TARGET} rocjitsu_shared)
         if(RJ_INSTALL_TESTS)
             rj_install_test_program(${HIP_TEST_BIN})
         endif()
@@ -3094,10 +3184,9 @@ if(RJ_ENABLE_HIP_TESTS)
         target_compile_definitions(
             daemon_test
             PRIVATE
-                RJ_DAEMON_BIN="$<TARGET_FILE:rocjitsu_bin>"
+                RJ_CLI_BIN="${RJ_CLI_BIN}"
                 RJ_DAEMON_CONFIG="${RJ_HIP_TEST_CONFIG}"
                 RJ_DAEMON_CONFIG_2GPU="${RJ_HIP_TEST_2GPU_CONFIG}"
-                RJ_DAEMON_SANITIZER_PRELOAD="${RJ_SANITIZER_PRELOAD_PREFIX}"
                 RJ_PRELOAD_LIB="$<TARGET_FILE:rocjitsu_shared>"
                 RJ_HIP_VECTOR_ADD_BIN="${CMAKE_CURRENT_BINARY_DIR}/hip_vector_add_test"
                 RJ_HIP_MEMCPY_BIN="${CMAKE_CURRENT_BINARY_DIR}/hip_memcpy_test"
@@ -3105,7 +3194,7 @@ if(RJ_ENABLE_HIP_TESTS)
                 RJ_INTERPOSER_DUP_BIN="$<TARGET_FILE:interposer_dup_test>"
                 RJ_DAEMON_LOGGING_CONFIG="${CMAKE_CURRENT_BINARY_DIR}/daemon_logging_config.json"
                 RJ_DAEMON_LOGGING_SINK_TOKEN="__RJ_DAEMON_SINK_DIR__"
-                RJ_INSTALLED_DAEMON_BIN="${_rj_installed_rocjitsu_bin}"
+                RJ_INSTALLED_CLI_BIN="${_rj_installed_rocjitsu_bin}"
                 RJ_INSTALLED_DAEMON_CONFIG="${_rj_installed_daemon_config}"
                 RJ_INSTALLED_DAEMON_CONFIG_2GPU="${_rj_installed_daemon_config_2gpu}"
                 RJ_INSTALLED_PRELOAD_LIB="${_rj_installed_preload_lib}"
@@ -3118,7 +3207,7 @@ if(RJ_ENABLE_HIP_TESTS)
         target_link_libraries(daemon_test PRIVATE GTest::gtest_main)
         add_dependencies(
             daemon_test
-            rocjitsu_bin
+            ${RJ_CLI_TARGET}
             hip_vector_add_test_target
             hip_memcpy_test_target
             interposer_dup_test
@@ -3129,7 +3218,7 @@ if(RJ_ENABLE_HIP_TESTS)
         set(RJ_DAEMON_TESTS
             RocjitsuCliDaemon.LaunchesApplicationAfterDaemonIsReady
             DaemonTest.HipVectorAdd
-            DaemonTest.AttachExecFailurePreservesDaemonSocket
+            DaemonTest.ExecFailureLeavesTheSessionUsable
             DaemonTest.HipMemcpyRoundTripFloat
             DaemonTest.HipMemcpyRoundTripInt
             DaemonTest.HipMemcpyDeviceToDevice
@@ -3367,17 +3456,21 @@ if(RJ_ENABLE_HIP_TESTS AND RJ_HIP_RUNTIME_SUPPORTS_GFX950)
         VERBATIM
     )
     add_custom_target(hip_cvt_narrow_test_target ALL DEPENDS ${CVT_NARROW_BIN})
-    add_dependencies(hip_cvt_narrow_test_target rocjitsu_bin rocjitsu_shared)
+    add_dependencies(
+        hip_cvt_narrow_test_target
+        ${RJ_CLI_TARGET}
+        rocjitsu_shared
+    )
     if(RJ_INSTALL_TESTS)
         rj_install_test_program(${CVT_NARROW_BIN})
     endif()
 
     rj_add_test(
         NAME "CvtNarrow.AllTests"
-        COMMAND ${RJ_CLI} --config ${RJ_CDNA4_KMD_CONFIG} -- ${CVT_NARROW_BIN}
+        COMMAND ${RJ_CLI_LOCAL} --config ${RJ_CDNA4_KMD_CONFIG} -- ${CVT_NARROW_BIN}
         TIMEOUT 300
         INSTALL_COMMAND
-            "\${RJ_INSTALLED_BINDIR}/rocjitsu"
+            ${RJ_INSTALLED_CLI}
             "--config"
             "\${RJ_INSTALLED_CONFIG_DIR}/${RJ_CDNA4_KMD_CONFIG_NAME}"
             "--"
@@ -3385,11 +3478,11 @@ if(RJ_ENABLE_HIP_TESTS AND RJ_HIP_RUNTIME_SUPPORTS_GFX950)
     )
 endif()
 
-# --- rocgdb wave-debugging smoke test (requires rocgdb + hipcc + mirage) ---
-# Drives real ROCgdb through `mirage run` to set a GPU kernel breakpoint, stop,
+# --- rocgdb wave-debugging smoke test (requires rocgdb + hipcc + the CLI) ---
+# Drives real ROCgdb through `rocjitsu run` to set a GPU kernel breakpoint, stop,
 # inspect wave registers, and continue to a correct result (see
 # tests/rocgdb/debug_kernel.sh). Gated on the debugger and HIP compiler being
-# present; the harness itself skips (printing "SKIP:") if mirage is not found.
+# present.
 find_program(
     ROCGDB_EXECUTABLE
     NAMES rocgdb
@@ -3402,93 +3495,27 @@ find_program(
     HINTS "${ROCM_PATH}"
     PATH_SUFFIXES bin
 )
-# NO_DEFAULT_PATH: only an in-tree Mirage qualifies. An unrelated one installed
-# on PATH would be a different build than the librocjitsu.so staged below, and
-# the mismatch surfaces as an opaque "enable_debug failed (STATUS_ERROR)" rather
-# than as a version error.
-#
-# A fresh cache entry name (not MIRAGE_EXECUTABLE) is deliberate: find_program is
-# a no-op when its cache variable is already set, so any build tree configured
-# while this used HINTS -- which does not suppress the default PATH search --
-# would keep an out-of-tree hit forever and NO_DEFAULT_PATH would never apply to
-# the very trees it was added for.
-#
-# build/manylinux/bin is where emulation/mirage/scripts/mirage.sh installs, so it
-# belongs beside the two cargo target dirs; PATH_SUFFIXES covers it without
-# reopening the default search.
-find_program(
-    RJ_MIRAGE_EXECUTABLE
-    NAMES mirage
-    PATHS
-        "${CMAKE_SOURCE_DIR}/../mirage/target/release"
-        "${CMAKE_SOURCE_DIR}/../mirage/target/debug"
-        "${CMAKE_SOURCE_DIR}/../mirage/build/manylinux"
-    PATH_SUFFIXES bin
-    NO_DEFAULT_PATH
-)
-set(MIRAGE_EXECUTABLE "${RJ_MIRAGE_EXECUTABLE}")
-# Mirage is as much a prerequisite as rocgdb and hipcc: without it the harness
-# has nothing to run the debuggee under. Registering the test anyway produced a
-# test that could only skip, or -- worse -- one that ran a Mirage which then
-# loaded whatever librocjitsu.so it happened to find, or none at all and exited
-# 127 long before reaching ROCgdb.
-# A Mirage binary older than Mirage's own sources is not usable here: this
-# branch changes the ctl and rocjitsu_sys crates, and a prebuilt binary that
-# predates them fails attachment with an opaque "enable_debug failed
-# (STATUS_ERROR)". CMake deliberately does not drive cargo, so refuse to
-# register rather than test a binary that does not match the tree, and say what
-# to run. Configure-time only, so `cargo build` needs a re-run of cmake -- which
-# the message states.
-#
-# No CONFIGURE_DEPENDS: it re-runs cmake when the *set* of matched files changes,
-# never when an existing file's mtime does, which is the only thing this gate
-# reads -- so it cannot fire for the case that matters and costs a recursive walk
-# of the whole mirage tree on every build.
-set(_rocgdb_mirage_stale FALSE)
-if(MIRAGE_EXECUTABLE)
-    # mirage is a workspace whose root package is the `mirage` binary itself
-    # (src/main.rs, declared by the top-level Cargo.toml), so the per-crate
-    # patterns alone would miss the entry point most likely to change.
-    file(
-        GLOB_RECURSE _rocgdb_mirage_sources
-        "${CMAKE_SOURCE_DIR}/../mirage/*/src/*.rs"
-        "${CMAKE_SOURCE_DIR}/../mirage/*/Cargo.toml"
-        "${CMAKE_SOURCE_DIR}/../mirage/src/*.rs"
-        "${CMAKE_SOURCE_DIR}/../mirage/build.rs"
-        "${CMAKE_SOURCE_DIR}/../mirage/Cargo.toml"
-        "${CMAKE_SOURCE_DIR}/../mirage/Cargo.lock"
-    )
-    # Phrased as "the binary is not newer than the source" rather than the
-    # reverse: CMake's IS_NEWER_THAN is also true when the two timestamps are
-    # *equal*, so testing the source directly calls a tie stale. Ties are the
-    # common case after a checkout, a container copy, or a CI cache restore, and
-    # calling them stale silently deregisters the test with a message telling the
-    # developer to run a build they already ran.
-    foreach(_src IN LISTS _rocgdb_mirage_sources)
-        if(NOT "${MIRAGE_EXECUTABLE}" IS_NEWER_THAN "${_src}")
-            set(_rocgdb_mirage_stale TRUE)
-            break()
-        endif()
-    endforeach()
-endif()
+# This used to find_program a `rocjitsu` in one of the cargo target dirs and
+# then compare its mtime against every .rs file in the tree, because CMake
+# did not drive cargo and a prebuilt binary older than the crates it is
+# tested against fails attachment with an opaque "enable_debug failed
+# (STATUS_ERROR)". CMake drives cargo now, so the binary is a build
+# artifact of this very configure: the gate is whether it exists at all,
+# and its freshness is the build system's job like any other target's.
+set(ROCJITSU_EXECUTABLE "${RJ_CLI_BIN}")
 
-if(
-    ROCGDB_EXECUTABLE
-    AND HIPCC_EXECUTABLE
-    AND MIRAGE_EXECUTABLE
-    AND NOT _rocgdb_mirage_stale
-)
+if(ROCGDB_EXECUTABLE AND HIPCC_EXECUTABLE AND RJ_HAVE_CLI)
     # Stage the librocjitsu.so this build just produced into a stub ROCm root
-    # and point Mirage at it. $ROCM_HOME/lib is one of Mirage's documented
-    # search locations (emulation/mirage/core/src/discovery.rs, module docs),
+    # and point RocJITsu at it. $ROCM_HOME/lib is one of RocJITsu's documented
+    # search locations (emulation/rocjitsu/cli/core/src/discovery.rs, module docs),
     # and the search is additive, so a stub root cannot shadow anything else.
     set(_rocgdb_rocm_home ${CMAKE_CURRENT_BINARY_DIR}/rocgdb_rocm_home)
-    # Stage Mirage next to the library as <prefix>/bin/mirage + <prefix>/lib.
-    # The search (emulation/mirage/core/src/discovery.rs search_dirs, with the
-    # rocjitsu build shapes from emulation/mirage/rocjitsu/src/lib.rs
+    # Stage RocJITsu next to the library as <prefix>/bin/rocjitsu + <prefix>/lib.
+    # The search (emulation/rocjitsu/cli/core/src/discovery.rs search_dirs, with the
+    # rocjitsu build shapes from emulation/rocjitsu/cli/rocjitsu/src/lib.rs
     # in_tree_relative_dirs) probes <prefix>/lib beside the binary first, then
     # <exe_dir>/../..{,/..}/rocjitsu/build, and $ROCM_HOME/lib after both. Run
-    # in place from emulation/mirage/target/debug there is no <prefix>/lib, so
+    # in place from emulation/rocjitsu/cli/target/debug there is no <prefix>/lib, so
     # the rocjitsu/build probes resolve to emulation/rocjitsu/build -- the
     # developer's own tree -- and ROCM_HOME never gets a look in. Running the
     # staged copy puts none of the rocjitsu/build probes on a real directory,
@@ -3497,25 +3524,25 @@ if(
     add_custom_command(
         OUTPUT
             ${_rocgdb_rocm_home}/lib/librocjitsu.so
-            ${_rocgdb_rocm_home}/bin/mirage
+            ${_rocgdb_rocm_home}/bin/rocjitsu
         COMMAND ${CMAKE_COMMAND} -E make_directory ${_rocgdb_rocm_home}/lib
         COMMAND ${CMAKE_COMMAND} -E make_directory ${_rocgdb_rocm_home}/bin
         COMMAND
             ${CMAKE_COMMAND} -E copy_if_different $<TARGET_FILE:rocjitsu_shared>
             ${_rocgdb_rocm_home}/lib/librocjitsu.so
         COMMAND
-            ${CMAKE_COMMAND} -E copy_if_different ${MIRAGE_EXECUTABLE}
-            ${_rocgdb_rocm_home}/bin/mirage
+            ${CMAKE_COMMAND} -E copy_if_different ${ROCJITSU_EXECUTABLE}
+            ${_rocgdb_rocm_home}/bin/rocjitsu
         # copy_if_different leaves the destination's mtime alone when the bytes
         # already match, so without this the outputs stay older than their inputs
         # and the generator re-issues all four commands -- a byte-compare of a
         # 69 MB binary and the shared library -- on every incremental build.
         COMMAND
             ${CMAKE_COMMAND} -E touch ${_rocgdb_rocm_home}/lib/librocjitsu.so
-            ${_rocgdb_rocm_home}/bin/mirage
-        DEPENDS rocjitsu_shared ${MIRAGE_EXECUTABLE}
+            ${_rocgdb_rocm_home}/bin/rocjitsu
+        DEPENDS rocjitsu_shared ${RJ_CLI_TARGET}
         COMMENT
-            "Staging mirage + librocjitsu.so for the rocgdb debug smoke test"
+            "Staging rocjitsu + librocjitsu.so for the rocgdb debug smoke test"
         VERBATIM
     )
     add_custom_target(
@@ -3523,7 +3550,7 @@ if(
         ALL
         DEPENDS
             ${_rocgdb_rocm_home}/lib/librocjitsu.so
-            ${_rocgdb_rocm_home}/bin/mirage
+            ${_rocgdb_rocm_home}/bin/rocjitsu
     )
 
     rj_add_test(
@@ -3532,12 +3559,12 @@ if(
         WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
         TIMEOUT 300
         ENVIRONMENT
-            "MIRAGE_BIN=${_rocgdb_rocm_home}/bin/mirage"
+            "ROCJITSU_BIN=${_rocgdb_rocm_home}/bin/rocjitsu"
             "ROCM_HOME=${_rocgdb_rocm_home}"
-            "MIRAGE_PROFILE=mi350x"
+            "ROCJITSU_PROFILE=mi350x"
             "OFFLOAD_ARCH=gfx950"
-            "XDG_CONFIG_HOME=${CMAKE_CURRENT_BINARY_DIR}/rocgdb_mirage_gfx950/config"
-            "XDG_STATE_HOME=${CMAKE_CURRENT_BINARY_DIR}/rocgdb_mirage_gfx950/state"
+            "XDG_CONFIG_HOME=${CMAKE_CURRENT_BINARY_DIR}/rocgdb_rocjitsu_gfx950/config"
+            "XDG_STATE_HOME=${CMAKE_CURRENT_BINARY_DIR}/rocgdb_rocjitsu_gfx950/state"
         SKIP_REGULAR_EXPRESSION "SKIP:"
     )
     rj_add_test(
@@ -3546,12 +3573,12 @@ if(
         WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
         TIMEOUT 300
         ENVIRONMENT
-            "MIRAGE_BIN=${_rocgdb_rocm_home}/bin/mirage"
+            "ROCJITSU_BIN=${_rocgdb_rocm_home}/bin/rocjitsu"
             "ROCM_HOME=${_rocgdb_rocm_home}"
-            "MIRAGE_PROFILE=mi450x"
+            "ROCJITSU_PROFILE=mi450x"
             "OFFLOAD_ARCH=gfx1250"
-            "XDG_CONFIG_HOME=${CMAKE_CURRENT_BINARY_DIR}/rocgdb_mirage_gfx1250/config"
-            "XDG_STATE_HOME=${CMAKE_CURRENT_BINARY_DIR}/rocgdb_mirage_gfx1250/state"
+            "XDG_CONFIG_HOME=${CMAKE_CURRENT_BINARY_DIR}/rocgdb_rocjitsu_gfx1250/config"
+            "XDG_STATE_HOME=${CMAKE_CURRENT_BINARY_DIR}/rocgdb_rocjitsu_gfx1250/state"
         SKIP_REGULAR_EXPRESSION "SKIP:"
     )
     message(
@@ -3559,9 +3586,8 @@ if(
         "rocgdb debug smoke test enabled (found ${ROCGDB_EXECUTABLE})"
     )
 else()
-    # One message naming every unmet reason. Reporting only staleness when rocgdb
-    # is also missing sends the developer to `cargo build`, after which the test
-    # still does not register and nothing new is printed to say why.
+    # One message naming every unmet reason, so a developer who installs
+    # the first one does not have to re-run cmake to discover the second.
     set(_rocgdb_missing "")
     if(NOT ROCGDB_EXECUTABLE)
         list(APPEND _rocgdb_missing "rocgdb")
@@ -3569,14 +3595,8 @@ else()
     if(NOT HIPCC_EXECUTABLE)
         list(APPEND _rocgdb_missing "hipcc")
     endif()
-    if(NOT MIRAGE_EXECUTABLE)
-        list(APPEND _rocgdb_missing "mirage")
-    endif()
-    if(_rocgdb_mirage_stale)
-        list(
-            APPEND _rocgdb_missing
-            "a mirage newer than its sources (run `cargo build` in emulation/mirage, then re-run cmake)"
-        )
+    if(NOT RJ_HAVE_CLI)
+        list(APPEND _rocgdb_missing "cargo (to build the CLI)")
     endif()
     list(JOIN _rocgdb_missing ", " _rocgdb_missing)
     message(STATUS "rocgdb debug smoke test disabled (need ${_rocgdb_missing})")

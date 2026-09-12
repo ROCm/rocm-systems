@@ -11,19 +11,19 @@ on the emulated MI350X the memory pipeline detects the unmapped access, raises
 faulting instruction.
 
 This demo builds a tiny HIP kernel that stores through a wild pointer
-(`0x0000dead0000`) and runs it under `mirage run --gdb`: ROCgdb stops the GPU
+(`0x0000dead0000`) and runs it under `rocjitsu run --gdb`: ROCgdb stops the GPU
 wave with a segmentation fault at the offending store, so you can see the PC and
 backtrace of the wave that went out of bounds.
 
 ## Run it
 
-Record (builds a portable mirage + rocjitsu, then captures the `.cast`):
+Record (builds a portable rocjitsu + rocjitsu, then captures the `.cast`):
 
-    emulation/mirage/scripts/record_demo.sh emulation/rocjitsu/demos/rocgdb-fault.sh
+    emulation/rocjitsu/cli/scripts/record_demo.sh emulation/rocjitsu/demos/rocgdb-fault.sh
 
-Or run against an already-built `mirage`:
+Or run against an already-built `rocjitsu`:
 
-    MIRAGE_BIN=/path/to/mirage bash emulation/rocjitsu/demos/rocgdb-fault.sh
+    ROCJITSU_BIN=/path/to/rocjitsu bash emulation/rocjitsu/demos/rocgdb-fault.sh
 
 Requires `hipcc` and `rocgdb` on `PATH` (from a ROCm install).
 

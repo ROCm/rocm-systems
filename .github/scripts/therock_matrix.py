@@ -4,12 +4,10 @@ This dictionary is used to map specific file directory changes to the correspond
 
 subtree_to_project_map = {
     "emulation/rocjitsu": "emulation",
-    "emulation/mirage": "emulation",
     "projects/amdsmi": "amdsmi",  # amdsmi changes run amdsmi + its downstream dependents
     "projects/aqlprofile": "profiler",
     "projects/clr": "runtimes",
     "projects/hrr": "hrr",
-
     "projects/cuid": "rdc",
     "projects/hipfile": "storage_libs",
     "projects/hip": "runtimes",
@@ -36,7 +34,11 @@ subtree_to_project_map = {
 
 project_map = {
     "core": {
-        "cmake_options": ["-DTHEROCK_ENABLE_CORE=ON", "-DTHEROCK_ENABLE_ALL=OFF", "-DTHEROCK_ENABLE_PROFILER=ON"],
+        "cmake_options": [
+            "-DTHEROCK_ENABLE_CORE=ON",
+            "-DTHEROCK_ENABLE_ALL=OFF",
+            "-DTHEROCK_ENABLE_PROFILER=ON",
+        ],
         "projects_to_test": "amdsmi, aqlprofile, rocprofiler-compute, rocprofiler-sdk, rocprofiler-systems",  # will run sanity test to cover rocminfo
     },
     # amdsmi changes fan out to its downstream dependents across rocm-systems
