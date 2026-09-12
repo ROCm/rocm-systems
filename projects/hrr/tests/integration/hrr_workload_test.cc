@@ -943,6 +943,18 @@ TEST_CASE("Unit_HRR_StreamWriteValue_Direct", "[.][hrr-direct]") {
   HRR_HIP_CHECK(hipMalloc(&inc, sizeof(uint64_t)));
   HRR_HIP_CHECK(hipMemset(inc, 0, sizeof(uint64_t)));
 
+  // Both hipMemsets above are asynchronous: ihipMemset() forces isAsync for
+  // device memory at offset 0 — "spec says hipMemset will be asynchronous when
+  // destination memory is device memory and pointer is non-offseted"
+  // (clr/hipamd/src/hip_memory.cpp:3444-3454) — so each is only enqueued on the
+  // null stream. s was created with hipStreamNonBlocking and so never joins the
+  // null stream (Device::WaitActiveStreams(), clr/hipamd/src/hip_device.cpp),
+  // leaving the writes below unordered against the zeroing. A memset that lands
+  // after a write reads back as 0 rather than the sentinel, which is the
+  // failure in issue #10967. Draining after the writes cannot fix this: by then
+  // the zeroing may already have overwritten them. Order it here instead.
+  HRR_HIP_CHECK(hipDeviceSynchronize());
+
   // 64-bit stream write into slot0.
   HRR_HIP_CHECK(hipStreamWriteValue64(s, d, kVal64, 0));
   // 32-bit stream write into slot1 (low 32 bits); the high 32 bits stay zero.
