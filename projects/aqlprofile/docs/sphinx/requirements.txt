@@ -43,7 +43,7 @@ comm==0.2.3
     # via ipykernel
 contourpy==1.3.2
     # via matplotlib
-cryptography==45.0.7
+cryptography==50.0.0
     # via pyjwt
 cycler==0.12.1
     # via matplotlib
@@ -298,6 +298,7 @@ traitlets==5.14.3
 typing-extensions==4.15.0
     # via
     #   beautifulsoup4
+    #   cryptography
     #   exceptiongroup
     #   ipython
     #   myst-nb
