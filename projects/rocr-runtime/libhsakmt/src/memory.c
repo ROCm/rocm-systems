@@ -1135,6 +1135,11 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtMemoryVaMap(HsaMemoryObjectHandle Handle,
 				&drm_fd, &vm_timeline_syncobj, &vm_timeline_seqnum);
 	if (result != HSAKMT_STATUS_SUCCESS)
 		return result;
+	if (!vm_timeline_syncobj) {
+		int ret = amdgpu_bo_va_op(drmhandle, offset, size, addr,
+				MapDrmPerm(flags), AMDGPU_VA_OP_MAP);
+		return ret ? HSAKMT_STATUS_ERROR : HSAKMT_STATUS_SUCCESS;
+	}
 
 	uint32_t gem_handle = 0;
 	int ret = amdgpu_bo_export(drmhandle, amdgpu_bo_handle_type_kms, &gem_handle);
@@ -1194,6 +1199,11 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtMemoryVaUnmap(HsaMemoryObjectHandle Handle,
 				&drm_fd, &vm_timeline_syncobj, &vm_timeline_seqnum);
 	if (result != HSAKMT_STATUS_SUCCESS)
 		return result;
+	if (!vm_timeline_syncobj) {
+		int ret = amdgpu_bo_va_op(drmhandle, offset, size, addr, 0,
+				AMDGPU_VA_OP_UNMAP);
+		return ret ? HSAKMT_STATUS_ERROR : HSAKMT_STATUS_SUCCESS;
+	}
 
 	uint32_t gem_handle = 0;
 	int ret = amdgpu_bo_export(drmhandle, amdgpu_bo_handle_type_kms, &gem_handle);
