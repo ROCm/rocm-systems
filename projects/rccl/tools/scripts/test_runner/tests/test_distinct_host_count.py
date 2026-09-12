@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# Copyright (c) Advanced Micro Devices, Inc. All rights reserved.
+#
+# See LICENSE.txt for license information
 """Unit tests for test_executor._distinct_host_count().
 
 The runner uses this count to decide whether a multi-node test can run: a test
