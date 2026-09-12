@@ -118,8 +118,7 @@
 #    define ROCPROFSYS_ROCM_MAX_COUNTERS 25
 #endif
 
-#define ROCPROFSYS_ATTRIBUTE(...)   __attribute__((__VA_ARGS__))
-#define ROCPROFSYS_VISIBILITY(MODE) ROCPROFSYS_ATTRIBUTE(visibility(MODE))
+#define ROCPROFSYS_VISIBILITY(MODE) __attribute__((visibility(MODE)))
 #if !defined(ROCPROFSYS_PUBLIC_API)
 #    define ROCPROFSYS_PUBLIC_API ROCPROFSYS_VISIBILITY("default")
 #endif
@@ -129,16 +128,9 @@
 #if !defined(ROCPROFSYS_INTERNAL_API)
 #    define ROCPROFSYS_INTERNAL_API ROCPROFSYS_VISIBILITY("internal")
 #endif
-#define ROCPROFSYS_INLINE   ROCPROFSYS_ATTRIBUTE(always_inline) inline
-#define ROCPROFSYS_NOINLINE ROCPROFSYS_ATTRIBUTE(noinline)
-#define ROCPROFSYS_HOT      ROCPROFSYS_ATTRIBUTE(hot)
-#define ROCPROFSYS_COLD     ROCPROFSYS_ATTRIBUTE(cold)
-#define ROCPROFSYS_CONST    ROCPROFSYS_ATTRIBUTE(const)
-#define ROCPROFSYS_PURE     ROCPROFSYS_ATTRIBUTE(pure)
-#define ROCPROFSYS_WEAK     ROCPROFSYS_ATTRIBUTE(weak)
-#define ROCPROFSYS_PACKED   ROCPROFSYS_ATTRIBUTE(__packed__)
-#define ROCPROFSYS_PACKED_ALIGN(VAL)                                                     \
-    ROCPROFSYS_PACKED ROCPROFSYS_ATTRIBUTE(__aligned__(VAL))
+#define ROCPROFSYS_INLINE        __attribute__((always_inline)) inline
+#define ROCPROFSYS_HOT           __attribute__((hot))
+#define ROCPROFSYS_PURE          __attribute__((pure))
 #define ROCPROFSYS_LIKELY(...)   __builtin_expect((__VA_ARGS__), 1)
 #define ROCPROFSYS_UNLIKELY(...) __builtin_expect((__VA_ARGS__), 0)
 
@@ -156,15 +148,5 @@
 #    endif
 #endif
 
-#define ROCPROFSYS_STRINGIZE(X)           ROCPROFSYS_STRINGIZE2(X)
-#define ROCPROFSYS_STRINGIZE2(X)          #X
 #define ROCPROFSYS_VAR_NAME_COMBINE(X, Y) X##Y
 #define ROCPROFSYS_VARIABLE(X, Y)         ROCPROFSYS_VAR_NAME_COMBINE(X, Y)
-#define ROCPROFSYS_LINESTR                ROCPROFSYS_STRINGIZE(__LINE__)
-#define ROCPROFSYS_ESC(...)               __VA_ARGS__
-
-#if defined(__cplusplus)
-#    if !defined(ROCPROFSYS_FOLD_EXPRESSION)
-#        define ROCPROFSYS_FOLD_EXPRESSION(...) ((__VA_ARGS__), ...)
-#    endif
-#endif

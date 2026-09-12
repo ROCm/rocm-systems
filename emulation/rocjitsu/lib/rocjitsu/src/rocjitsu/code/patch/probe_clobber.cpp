@@ -169,9 +169,11 @@ std::optional<ProbeClobberSummary> build_probe_clobber_summary(const ProbeCallab
       return std::nullopt;
     }
 
-    // Ordinary clobbers (SGPR/VGPR/AccVGPR), including implicit defs.
+    // Ordinary clobbers (SGPR/VGPR/AccVGPR), including implicit defs. Special
+    // singletons in du.defs are projected out — they are summarized separately
+    // via scan_special_state below and must not enter ordinary_clobbers.
     const InstDefUse du(*inst);
-    summary.ordinary_clobbers |= du.defs;
+    summary.ordinary_clobbers |= du.defs.ordinary_only();
 
     scan_special_state(*inst, summary);
 

@@ -1577,11 +1577,19 @@ bool Program::setBinary(const char* binaryIn, size_t size, const device::Program
       break;
     }
     case ET_REL: {
+      // isSPIR()/isSPIRV() inspect ELF sections, which requires elfIn_ to be
+      // set up. Do it only for this (relocatable) case so the common
+      // executable path avoids the amd::Elf copy cost.
+      if (!clBinary()->setElfIn()) {
+        // setElfIn() already logs on the amd::Elf failure path.
+        return false;
+      }
       if (clBinary()->isSPIR() || clBinary()->isSPIRV()) {
         setType(TYPE_INTERMEDIATE);
       } else {
         setType(TYPE_COMPILED);
       }
+      clBinary()->resetElfIn();
       break;
     }
     case ET_DYN: {

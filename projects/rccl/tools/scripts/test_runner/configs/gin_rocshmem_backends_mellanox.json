@@ -133,6 +133,11 @@
           "name": "BarrierSession_Hybrid", "description": "ncclBarrierSession hybrid inner-LSA + outer rail-GIN (2 ranks/node)", "test_filter": "GinMPIDeviceTests.BarrierSession_Hybrid",
           "num_ranks": 4, "num_gpus": 2
         },
+        { "name": "Barrier_WorldMultiIndex", "description": "World-team GIN barrier, 4 concurrent barrier indices", "test_filter": "GinMPIDeviceTests.Barrier_WorldMultiIndex" },
+        {
+          "name": "BarrierPools_NoCrossTalk", "description": "Generic and specialized GIN barrier sessions keep separate signal pools (2 ranks/node, self-skips on a single node)", "test_filter": "GinMPIDeviceTests.BarrierPools_NoCrossTalk",
+          "num_ranks": 4, "num_gpus": 2
+        },
         { "name": "SignalAdd_AndShadow",      "description": "GIN device signal-add and shadow counter",              "test_filter": "GinMPIDeviceTests.SignalAdd_AndShadow" },
         { "name": "SymPtr_PutAndPutValue",    "description": "GIN symmetric-pointer put and put-value",               "test_filter": "GinMPIDeviceTests.SymPtr_PutAndPutValue" },
         { "name": "Alltoall_PureReference",   "description": "GIN pure-reference alltoall kernel",                    "test_filter": "GinMPIDeviceTests.Alltoall_PureReference" },
@@ -143,7 +148,7 @@
         },
         {
           "name": "Alltoall_SdmaInternal", "description": "GIN-SDMA alltoall via ncclAlltoAll (SDMA only, 8 ranks)", "test_filter": "GinMPIDeviceTests.Alltoall_SdmaInternal",
-          "num_ranks": 8, "num_gpus": 8
+          "num_ranks": 8, "num_nodes": 1, "num_gpus": 8
         },
         { "name": "MultiContext_AllFourRoute","description": "GIN multi-context, all four routes",                    "test_filter": "GinMPIDeviceTests.MultiContext_AllFourRoute" },
         {
@@ -193,9 +198,18 @@
       "extends": "gin_devmpi_common",
       "description": "SDMA is a single-node backend: every GinMPIDeviceTests case runs on a single node (num_nodes=1). Cross-node cases (Put_CrossNode/Alltoall_CrossNode/ReduceScatter_Symmetric*) self-skip.",
       "num_nodes": 1,
+      "num_gpus": 2,
       "env_variables": {
         "NCCL_GIN_TYPE": "6"
-      }
+      },
+      "tests": [
+        { "name": "BarrierSession_LsaOnly",      "num_gpus": 4 },
+        { "name": "BarrierSession_Hybrid",       "num_gpus": 4 },
+        { "name": "BarrierPools_NoCrossTalk",    "num_gpus": 4 },
+        { "name": "AlltoallHybrid_Reference",    "num_gpus": 4 },
+        { "name": "ReduceScatter_Symmetric",     "num_gpus": 4 },
+        { "name": "ReduceScatter_Symmetric_Avg", "num_gpus": 4 }
+      ]
     },
 
     "gin_a2a_eligibility": {

@@ -687,7 +687,9 @@ void VQsadPkU16U8Vop3::execute_impl(amdgpu::Wavefront &wf) {
         sum += a > b ? a - b : b - a;
       }
       uint32_t value = sum + ((accum >> (window * 16)) & 0xffffu);
-      packed_result |= static_cast<uint64_t>(value & 0xffffu) << (window * 16);
+      packed_result |=
+          static_cast<uint64_t>(inst_.clamp ? std::min(value, 0xffffu) : (value & 0xffffu))
+          << (window * 16);
     }
     amdgpu::sdwa::write_lane64<false>(*this, wf, vdst, lane, packed_result);
   }
@@ -711,7 +713,9 @@ void VMqsadPkU16U8Vop3::execute_impl(amdgpu::Wavefront &wf) {
           sum += a > b ? a - b : b - a;
       }
       uint32_t value = sum + ((accum >> (window * 16)) & 0xffffu);
-      packed_result |= static_cast<uint64_t>(value & 0xffffu) << (window * 16);
+      packed_result |=
+          static_cast<uint64_t>(inst_.clamp ? std::min(value, 0xffffu) : (value & 0xffffu))
+          << (window * 16);
     }
     amdgpu::sdwa::write_lane64<false>(*this, wf, vdst, lane, packed_result);
   }
@@ -753,7 +757,9 @@ void VMqsadU32U8Vop3::execute_impl(amdgpu::Wavefront &wf) {
           sum += a > b ? a - b : b - a;
       }
       dst_word.encoding_value_ = vdst.encoding_value_ + static_cast<int>(window);
-      amdgpu::sdwa::write_lane<false>(*this, wf, dst_word, lane, accum[window] + sum);
+      amdgpu::sdwa::write_lane<false>(
+          *this, wf, dst_word, lane,
+          amdgpu::vop3_integer_add<uint32_t>(accum[window], sum, inst_.clamp));
     }
   }
 }

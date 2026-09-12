@@ -1579,6 +1579,56 @@ class TestDeriveVectorBinop:
                     not in cpp
                 )
 
+    @pytest.mark.parametrize(
+        'op,dtype,expected',
+        [
+            ('add', 'u32', 'vop3_integer_add<uint32_t>'),
+            ('sub', 'u32', 'vop3_integer_sub<uint32_t>'),
+            ('subrev', 'u32', 'vop3_integer_sub<uint32_t>'),
+            ('add', 'i32', 'vop3_integer_add<int32_t>'),
+            ('sub', 'i32', 'vop3_integer_sub<int32_t>'),
+            ('add', 'u16', 'vop3_integer_add<uint16_t>'),
+            ('sub', 'i16', 'vop3_integer_sub<int16_t>'),
+            ('add', 'u64', 'vop3_integer_add<uint64_t>'),
+            ('sub', 'u64', 'vop3_integer_sub<uint64_t>'),
+        ],
+    )
+    def test_vop3_integer_clamp_saturates_before_narrowing(self, op, dtype, expected):
+        sem = _FakeSem(f'V_{op.upper()}_{dtype.upper()}', 'vector_binop', op, dtype)
+        block = derive_sema_block(sem)
+        ctx = LoweringContext(
+            exec_model=block.pragma,
+            integer_saturation_dtype=dtype,
+        )
+
+        cpp = lower_sema_block(block, ctx)
+
+        assert 'inst_.clamp' in cpp
+        assert expected in cpp
+
+    @pytest.mark.parametrize(
+        'name,op,dtype,helper',
+        [
+            ('V_MUL_I32_I24', 'mul', 'i24', 'vop3_integer_mul<int32_t, 24>'),
+            ('V_MUL_U32_U24', 'mul', 'u24', 'vop3_integer_mul<uint32_t, 24>'),
+            ('V_MAD_I32_I24', 'mad', 'i24', 'vop3_integer_mad<int32_t, 24>'),
+            ('V_MAD_U32_U24', 'mad', 'u24', 'vop3_integer_mad<uint32_t, 24>'),
+        ],
+    )
+    def test_vop3_integer_mul_mad_use_exact_saturating_intermediate(
+        self, name, op, dtype, helper
+    ):
+        sem_class = 'vector_binop' if op == 'mul' else 'vector_ternary'
+        sem = _FakeSem(name, sem_class, op, dtype)
+        block = derive_sema_block(sem)
+        cpp = lower_sema_block(
+            block,
+            LoweringContext(exec_model=block.pragma, integer_saturation_dtype=dtype),
+        )
+
+        assert helper in cpp
+        assert 'inst_.clamp' in cpp
+
     def test_lshlrev(self):
         sem = _FakeSem('V_LSHLREV_B32', 'vector_binop', 'lshlrev', 'b32')
         block = derive_sema_block(sem)
@@ -1655,7 +1705,7 @@ class TestDeriveVectorTernary:
         cpp = lower_sema_block(block)
         assert 'std::fma(' in cpp
 
-    def test_add_minmax_i32_u32_wraps_add_before_clamp(self):
+    def test_add_minmax_i32_u32_intrinsically_saturates_add_before_selection(self):
         cases = [
             ('V_ADD_MAX_I32', 'add_max', 'i32', 'std::max'),
             ('V_ADD_MAX_U32', 'add_max', 'u32', 'std::max'),
@@ -1670,10 +1720,17 @@ class TestDeriveVectorTernary:
             assert sem.data_type == dtype
 
             block = derive_sema_block(sem)
-            cpp = lower_sema_block(block)
-            assert clamp_fn in cpp
-            assert 'static_cast<uint32_t>' in cpp
-            assert f'{op}_{dtype}(' not in cpp
+            cpp = lower_sema_block(
+                block,
+                LoweringContext(
+                    exec_model=ExecModel.VECTOR,
+                    integer_saturation_dtype=dtype,
+                ),
+            )
+            select_max = 'true' if clamp_fn == 'std::max' else 'false'
+            assert f'vop3_integer_add_minmax<' in cpp
+            assert f', {select_max}>' in cpp
+            assert 'inst_.clamp' not in cpp
 
     def test_ashr_pk_i8_u8_i32_packs_shifted_saturated_bytes(self):
         cases = [
@@ -1852,6 +1909,33 @@ class TestDeriveVectorAddCo:
             n.call_name for n in block.body.walk() if n.kind == SemaNodeKind.CALL
         }
         assert 'sub_co' in call_names
+
+    @pytest.mark.parametrize(
+        ('operation', 'expected'),
+        [
+            ('add', 'inst_.clamp && w > 0xFFFFFFFFULL ? UINT32_MAX'),
+            ('sub', 'inst_.clamp && a < b ? 0u'),
+            ('rsub', 'inst_.clamp && a < b ? 0u'),
+            ('addc', 'inst_.clamp && w > 0xFFFFFFFFULL ? UINT32_MAX'),
+            ('subbc', 'inst_.clamp && a < b ? 0u'),
+            ('subbrevco', 'inst_.clamp && a < b ? 0u'),
+        ],
+    )
+    def test_vop3_clamp_saturates_result_without_changing_carry(
+        self, operation, expected
+    ):
+        sem = _FakeSem('V_CARRY_U32', 'vector_add_co', operation, 'u32')
+        block = derive_sema_block(sem)
+        cpp = lower_sema_block(
+            block,
+            LoweringContext(
+                exec_model=block.pragma,
+                integer_saturation_dtype='u32',
+            ),
+        )
+
+        assert expected in cpp
+        assert 'vcc |= (1ULL << lane)' in cpp
 
 
 class TestDeriveVectorCndmask:
@@ -2356,6 +2440,27 @@ class TestDeriveDsSwizzle:
         assert block is not None
 
 
+@pytest.mark.parametrize('dtype', ['f16', 'bf16'])
+@pytest.mark.parametrize(
+    ('prefix', 'encoding', 'semantic_class'),
+    [
+        ('GLOBAL_ATOMIC_PK_ADD_', 'ENC_VGLOBAL', 'flat_atomic'),
+        ('FLAT_ATOMIC_PK_ADD_', 'ENC_VFLAT', 'flat_atomic'),
+        ('BUFFER_ATOMIC_PK_ADD_', 'ENC_VBUFFER', 'buffer_atomic'),
+        ('DS_PK_ADD_', 'ENC_VDS', 'ds_atomic'),
+        ('DS_PK_ADD_RTN_', 'ENC_VDS', 'ds_atomic'),
+    ],
+)
+def test_packed_atomic_add_keeps_component_type(
+    dtype, prefix, encoding, semantic_class
+):
+    sem = derive_semantics(prefix + dtype.upper(), encoding)
+    assert sem is not None
+    assert sem.operation == 'pk_add_' + dtype
+    assert sem.semantic_class == semantic_class
+    assert sem.num_elems == 1
+
+
 class TestDeriveMemoryLowerAll:
     def test_all_memory_classes_lower(self):
         classes = [
@@ -2418,13 +2523,51 @@ class TestDerivePacked:
         assert sem.operation == operation
         assert sem.data_type == 'bf16'
 
-    def test_pk_binop_bf16_generator_uses_bf16_helpers(self):
+    @pytest.mark.parametrize(
+        ('operation', 'helper'),
+        [
+            ('add', 'packed_add_bf16'),
+            ('mul', 'packed_mul_bf16'),
+            ('min', 'packed_select_bf16'),
+            ('max', 'packed_select_bf16'),
+        ],
+    )
+    def test_pk_binop_bf16_generator_uses_bf16_helpers(self, operation, helper):
         cpp = gen_pk_binop(
-            ['vdst'], ['src0', 'src1'], 'add', 'bf16', ('inst_.opsel', 'inst_.opsel_hi')
+            ['vdst'],
+            ['src0', 'src1'],
+            operation,
+            'bf16',
+            ('inst_.opsel', 'inst_.opsel_hi'),
         )
         assert 'util::bf16_to_f32' in cpp
-        assert 'util::f32_to_bf16' in cpp
+        assert cpp.count(helper) == 2
+        if operation in ('add', 'mul'):
+            assert cpp.count('wf.fp16_ovfl()') == 2
         assert 'util::f32_to_f16' not in cpp
+
+    @pytest.mark.parametrize(
+        ('operation', 'data_type', 'helper'),
+        [
+            ('add', 'i16', 'vop3_integer_add<int16_t>'),
+            ('sub', 'i16', 'vop3_integer_sub<int16_t>'),
+            ('add', 'u16', 'vop3_integer_add<uint16_t>'),
+            ('sub', 'u16', 'vop3_integer_sub<uint16_t>'),
+        ],
+    )
+    def test_pk_integer_add_sub_clamps_each_selected_half(
+        self, operation, data_type, helper
+    ):
+        cpp = gen_pk_binop(
+            ['vdst'],
+            ['src0', 'src1'],
+            operation,
+            data_type,
+            ('inst_.opsel', 'inst_.opsel_hi'),
+        )
+
+        assert cpp.count(helper) == 2
+        assert cpp.count('inst_.clamp') == 2
 
     def test_pk_ternary_bf16_generator_uses_fma_and_bf16_helpers(self):
         cpp = gen_pk_ternary(
@@ -2435,9 +2578,14 @@ class TestDerivePacked:
             '((inst_.opsel_hi >> 2) & 1)',
             ('inst_.opsel', 'inst_.opsel_hi'),
         )
-        assert 'std::fma' in cpp
+        assert cpp.count('amdgpu::fp_mode::packed_fma_bf16') == 2
+        assert cpp.count('wf.fp16_ovfl()') == 2
+        assert 'std::fma' not in cpp
         assert 'util::bf16_to_f32' in cpp
-        assert 'util::f32_to_bf16' in cpp
+
+    def test_pk_ternary_bf16_rejects_nonfused_operations(self):
+        with pytest.raises(ValueError, match='Unsupported packed BF16 ternary'):
+            gen_pk_ternary(['vdst'], ['src0', 'src1', 'src2'], 'mad', 'bf16')
 
     @pytest.mark.parametrize(
         ('name', 'operation', 'data_type'),
@@ -3076,3 +3224,33 @@ class TestDeriveFlatLoadD16:
         assert sem is not None
         assert sem.semantic_class == 'flat_load'
         assert sem.d16_hi and not sem.d16_lo
+
+
+@pytest.mark.parametrize(
+    ('name', 'encoding', 'width', 'source_dwords'),
+    [
+        ('DS_CMPST_F32', 'ENC_DS', 4, 2),
+        ('DS_CMPST_RTN_F64', 'ENC_DS', 8, 4),
+        ('DS_CMPSTORE_RTN_F32', 'ENC_DS', 4, 2),
+        ('DS_CMPSTORE_F64', 'ENC_DS', 8, 4),
+        ('GLOBAL_ATOMIC_CMPSWAP_F32', 'ENC_FLAT', 4, 2),
+        ('GLOBAL_ATOMIC_CMPSWAP_F64', 'ENC_FLAT', 8, 4),
+        ('BUFFER_ATOMIC_FCMPSWAP', 'ENC_MUBUF', 4, 2),
+        ('BUFFER_ATOMIC_FCMPSWAP_X2', 'ENC_MUBUF', 8, 4),
+    ],
+)
+def test_floating_compare_swap_retains_type_and_payload(
+    name, encoding, width, source_dwords
+):
+    semantics = derive_semantics(name, encoding)
+    assert semantics.operation == 'fcmpswap'
+    assert semantics.elem_size == width
+    assert semantics.num_elems == source_dwords
+
+
+@pytest.mark.parametrize('encoding', ['ENC_DS', 'ENC_VDS'])
+def test_conditional_exchange_has_one_qword_payload(encoding):
+    semantics = derive_semantics('DS_CONDXCHG32_RTN_B64', encoding)
+    assert semantics.operation == 'condxchg32'
+    assert semantics.elem_size == 8
+    assert semantics.num_elems == 2

@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "library/components/backtrace_metrics.hpp"
-#include "common/units.hpp"
+#include "common/units/data_size.hpp"
 #include "core/common.hpp"
 #include "core/components/fwd.hpp"
 #include "core/config.hpp"
@@ -43,6 +43,7 @@
 #include "logger/debug.hpp"
 
 #include <array>
+#include <chrono>
 #include <cstring>
 #include <ctime>
 #include <initializer_list>
@@ -56,6 +57,10 @@
 
 #include <pthread.h>
 #include <signal.h>
+
+using rocprofsys::common::units::bytes;
+using rocprofsys::common::units::data_size_cast;
+using rocprofsys::common::units::megabytes;
 
 namespace tracing
 {
@@ -226,7 +231,7 @@ metadata_initialize_backtrace_metrics_pmc(size_t dev_id, const char* _units,
 
     apply_for_all_thread_names<Category>(_tid, [&](const std::string& _track_name) {
         trace_cache::get_metadata_registry().add_pmc_info(
-            { agent_type::CPU, dev_id, TARGET_ARCH, EVENT_CODE, INSTANCE_ID, _track_name,
+            { agent_type::cpu, dev_id, TARGET_ARCH, EVENT_CODE, INSTANCE_ID, _track_name,
               trait::name<Category>::value, trait::name<Category>::description,
               LONG_DESCRIPTION, COMPONENT, _units, trace_cache::ABSOLUTE, BLOCK,
               EXPRESSION, 0, 0, "{}" });
@@ -258,7 +263,7 @@ cache_backtrace_metrics_events(const std::uint32_t device_id, std::uint64_t time
         trace_cache::get_buffer_storage().store(trace_cache::pmc_event_with_sample{
             static_cast<size_t>(category_enum_id<Category>::value), _track_name,
             timestamp_ns, event_metadata, stack_id, parent_stack_id, correlation_id,
-            call_stack, line_info, device_id, static_cast<std::uint8_t>(agent_type::CPU),
+            call_stack, line_info, device_id, static_cast<std::uint8_t>(agent_type::cpu),
             _track_name, _value, _system_tid });
     };
 
@@ -540,16 +545,18 @@ backtrace_metrics::post_process_perfetto(std::int64_t _tid, std::uint64_t _ts) c
 
     if((*this)(category::thread_cpu_time{}))
     {
-        TRACE_COUNTER(trait::name<category::thread_cpu_time>::value,
-                      perfetto_counter_track<perfetto_rusage>::at(_tid, _rusage_idx++),
-                      _ts, m_cpu / units::sec);
+        TRACE_COUNTER(
+            trait::name<category::thread_cpu_time>::value,
+            perfetto_counter_track<perfetto_rusage>::at(_tid, _rusage_idx++), _ts,
+            std::chrono::duration<double>{ std::chrono::nanoseconds{ m_cpu } }.count());
     }
 
     if((*this)(category::thread_peak_memory{}))
     {
-        TRACE_COUNTER(trait::name<category::thread_peak_memory>::value,
-                      perfetto_counter_track<perfetto_rusage>::at(_tid, _rusage_idx++),
-                      _ts, m_mem_peak / units::megabyte);
+        TRACE_COUNTER(
+            trait::name<category::thread_peak_memory>::value,
+            perfetto_counter_track<perfetto_rusage>::at(_tid, _rusage_idx++), _ts,
+            data_size_cast<megabytes>(bytes{ static_cast<double>(m_mem_peak) }).count());
     }
 
     if((*this)(category::thread_context_switch{}))
@@ -588,13 +595,17 @@ backtrace_metrics::cache_backtrace_data(std::int64_t _tid, std::uint64_t _ts) co
     if(is_category_enabled(category::thread_cpu_time{}))
     {
         cache_backtrace_metrics_events<category::thread_cpu_time, double>(
-            0, _ts, m_cpu / units::sec, _tid);
+            0, _ts,
+            std::chrono::duration<double>{ std::chrono::nanoseconds{ m_cpu } }.count(),
+            _tid);
     }
 
     if(is_category_enabled(category::thread_peak_memory{}))
     {
         cache_backtrace_metrics_events<category::thread_peak_memory, double>(
-            0, _ts, m_mem_peak / units::megabyte, _tid);
+            0, _ts,
+            data_size_cast<megabytes>(bytes{ static_cast<double>(m_mem_peak) }).count(),
+            _tid);
     }
 
     if(is_category_enabled(category::thread_context_switch{}))

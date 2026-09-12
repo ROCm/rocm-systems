@@ -758,10 +758,6 @@ __CG_QUALIFIER__ void thread_group::sync() const {
       __hip_assert(false && "invalid cooperative group type");
     }
   }
-#if __has_builtin(__builtin_amdgcn_s_wait_asynccnt)
-  if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_s_wait_asynccnt))
-    __builtin_amdgcn_s_wait_asynccnt(0);
-#endif
 }
 
 #endif

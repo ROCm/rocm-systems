@@ -16,6 +16,11 @@ Full documentation for ROCprofiler-SDK is available at [rocm.docs.amd.com/projec
     - Individual kernels can be traced without serialization, and the path is independent of the ROCm runtime version.
     - Experimental: intended to validate the new collection path and to enable out-of-process thread trace and long-kernel tracing in future releases.
 
+  - HIP event tracing: GPU-side barrier tracing for `hipEventRecord` and `hipStreamWaitEvent`:
+    - New tracing kinds `ROCPROFILER_CALLBACK_TRACING_HIP_EVENT` and `ROCPROFILER_BUFFER_TRACING_HIP_EVENT` with operation enum `rocprofiler_hip_event_operation_t` (RECORD, WAIT).
+    - New `--hip-event-trace` CLI flag, automatically enabled by `--hip-trace` and `--hip-runtime-trace`.
+    - rocpd schema bumped to 3.0.4 with new `rocpd_hip_event` table and `hip_events` data view.
+
 **rocprof-trace-decoder:**
 
   - Python API for decoding Advanced Thread Trace (ATT) / SQTT data directly from Python, without writing a C++ consumer:
@@ -30,6 +35,10 @@ Full documentation for ROCprofiler-SDK is available at [rocm.docs.amd.com/projec
 
   - Fixed `rocprofv3` crashing during output generation when a second tool subscribed to code object tracing in the same process, which blocked profiling PyTorch and Triton workloads through rocprofiler-compute.
   - Fixed `rocprofv3` hanging instead of exiting when a fatal signal arrives while it is already handling one, for example when output generation aborts. It previously left GPU child processes running and required killing the process manually.
+
+### Known issues
+
+- Dynamic attachment with `rocprofv3 --attach` can fail when the target process already exposes `rocprofiler_configure`. `rocprofiler-register` can interpret this symbol as an active profiling tool, preventing the attachment listener from starting. For example, some PyTorch workloads are affected because `libtorch_cpu.so` exports this symbol.
 
 ### Removed
 

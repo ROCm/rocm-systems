@@ -1584,6 +1584,19 @@ typedef union rocprofiler_hsa_api_args_t
         const void** metadata;
     } hsa_amd_interop_map_buffer_with_size;
 #    endif
+#    if HSA_AMD_EXT_API_TABLE_STEP_VERSION >= 0x13
+    struct
+    {
+        void**              ptrs;
+        size_t*             sizes;
+        uint32_t            count;
+        const hsa_agent_t*  dst_agents;
+        uint32_t            num_dst_agents;
+        uint32_t            num_dep_signals;
+        const hsa_signal_t* dep_signals;
+        hsa_signal_t        completion_signal;
+    } hsa_amd_svm_discard_and_prefetch_batch_async;
+#    endif
 #endif
 } rocprofiler_hsa_api_args_t;
 

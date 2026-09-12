@@ -70,8 +70,7 @@ __launch_bounds__(1024)
   // On-device, graph-safe flag/bank derivation.
   const int flatBlockId = blockIdx.x * gridDim.y + blockIdx.y;
   const int total = gridDim.x * gridDim.y;
-  __shared__ uint32_t s_flag;
-  const uint32_t flag = ddaLLEpochBegin(epochDev, flatBlockId, s_flag);
+  const uint32_t flag = ddaGetLLEpochInc(epochDev, flatBlockId, 1);
   const size_t bankOffsetLines = (size_t)(flag & 1u) * (size_t)nRanks * slot;
 
   // This block's line range [lnBegin, lnEnd); [0, numLines) when nChunks == 1.
@@ -145,7 +144,7 @@ __launch_bounds__(1024)
     }
   }
 
-  ddaLLEpochEnd(epochDev, flatBlockId, total, epochLen, flag);
+  ddaSetLLEpoch(epochDev, epochLen, flatBlockId, total, flag);
 }
 
 } // namespace dda::common

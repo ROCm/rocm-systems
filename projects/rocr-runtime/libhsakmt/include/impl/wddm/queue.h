@@ -88,6 +88,9 @@ public:
   virtual void RingDoorbell(uint64_t value) { }
   virtual void* GetHsaQueueAddr(void) const { return reinterpret_cast<void*>(GetCmdbufAddr()); }
 
+  // amd_queue_t backing memory; only ComputeQueue has one, SDMAQueue returns nullptr.
+  virtual GpuMemory* GetAmdQueueMemory(void) const { return nullptr; }
+
   hsa_status_t SwsInit(void);
   hsa_status_t SwsFini(void);
   hsa_status_t SwsSubmit(uint64_t command_addr,
@@ -141,6 +144,12 @@ public:
   std::atomic<uint64_t>* ring_rptr = nullptr;
 
   uint32_t aql_doorbell_offset_ = 0; //!< Doorbell offset for this AQL queue
+
+  bool needs_cwsr_ = true;                        //!< false for SDMA queues (mirrors Linux handle_concrete_asic() SDMA early-return)
+  GpuMemoryHandle cwsr_mem_ = nullptr;           //!< CWSR (Context Wave Save/Restore) memory allocation
+  D3DKMT_HANDLE cwsr_mem_handle_ = 0;           //!< KMT allocation handle of CWSR region (passed as CwsrMemHandle)
+  volatile int64_t* error_reason_ = nullptr;     //!< ErrorReason payload ptr (QueueResource::ErrorReason)
+  HSAuint32 error_event_id_ = 0;                 //!< ErrorEventId from HsaEvent::EventId (0 if no event)
 };
 
 class ComputeQueue : public WDDMQueue {
@@ -153,7 +162,8 @@ public:
                volatile int64_t *error_addr,
                uint32_t cmdbuf_size,
                uint32_t engine,
-               bool use_hws = true);
+               bool use_hws = true,
+               HSAuint32 event_id = 0);
 
   ~ComputeQueue();
 
@@ -183,7 +193,7 @@ public:
   hsa_status_t Process(void);
   uint64_t * GetDoorbellPtr() const { return (uint64_t *)&doorbell_signal_value_; }
   void RingDoorbell(uint64_t value);
-  GpuMemory* GetAmdQueueMemory() const { return amd_queue_memory_; }
+  GpuMemory* GetAmdQueueMemory() const override { return amd_queue_memory_; }
 
  private:
   hsa_status_t KernelDispatchAqlToPm4(char *cpu, hsa_kernel_dispatch_packet_t *packet);

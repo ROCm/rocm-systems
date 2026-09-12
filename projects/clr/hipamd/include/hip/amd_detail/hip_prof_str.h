@@ -5542,6 +5542,9 @@ typedef struct hip_api_data_s {
 };
 // hipGraphKernelNodeGetAttribute[('hipGraphNode_t', 'hNode'), ('hipLaunchAttributeID', 'attr'), ('hipLaunchAttributeValue*', 'value')]
 #define INIT_hipGraphKernelNodeGetAttribute_CB_ARGS_DATA(cb_data) { \
+  cb_data.args.hipGraphKernelNodeGetAttribute.hNode = (hipGraphNode_t)hNode; \
+  cb_data.args.hipGraphKernelNodeGetAttribute.attr = (hipLaunchAttributeID)attr; \
+  cb_data.args.hipGraphKernelNodeGetAttribute.value = (hipLaunchAttributeValue*)value; \
 };
 // hipGraphKernelNodeGetParams[('hipGraphNode_t', 'node'), ('hipKernelNodeParams*', 'pNodeParams')]
 #define INIT_hipGraphKernelNodeGetParams_CB_ARGS_DATA(cb_data) { \
@@ -5550,6 +5553,9 @@ typedef struct hip_api_data_s {
 };
 // hipGraphKernelNodeSetAttribute[('hipGraphNode_t', 'hNode'), ('hipLaunchAttributeID', 'attr'), ('const hipLaunchAttributeValue*', 'value')]
 #define INIT_hipGraphKernelNodeSetAttribute_CB_ARGS_DATA(cb_data) { \
+  cb_data.args.hipGraphKernelNodeSetAttribute.hNode = (hipGraphNode_t)hNode; \
+  cb_data.args.hipGraphKernelNodeSetAttribute.attr = (hipLaunchAttributeID)attr; \
+  cb_data.args.hipGraphKernelNodeSetAttribute.value = (const hipLaunchAttributeValue*)value; \
 };
 // hipGraphKernelNodeSetParams[('hipGraphNode_t', 'node'), ('const hipKernelNodeParams*', 'pNodeParams')]
 #define INIT_hipGraphKernelNodeSetParams_CB_ARGS_DATA(cb_data) { \
@@ -7086,6 +7092,9 @@ typedef struct hip_api_data_s {
 };
 // hipStreamGetAttribute[('hipStream_t', 'stream'), ('hipLaunchAttributeID', 'attr'), ('hipLaunchAttributeValue*', 'value_out')]
 #define INIT_hipStreamGetAttribute_CB_ARGS_DATA(cb_data) { \
+  cb_data.args.hipStreamGetAttribute.stream = (hipStream_t)stream; \
+  cb_data.args.hipStreamGetAttribute.attr = (hipLaunchAttributeID)attr; \
+  cb_data.args.hipStreamGetAttribute.value_out = (hipLaunchAttributeValue*)value_out; \
 };
 // hipStreamGetCaptureInfo[('hipStream_t', 'stream'), ('hipStreamCaptureStatus*', 'pCaptureStatus'), ('unsigned long long*', 'pId')]
 #define INIT_hipStreamGetCaptureInfo_CB_ARGS_DATA(cb_data) { \
@@ -7139,6 +7148,9 @@ typedef struct hip_api_data_s {
 };
 // hipStreamSetAttribute[('hipStream_t', 'stream'), ('hipLaunchAttributeID', 'attr'), ('const hipLaunchAttributeValue*', 'value')]
 #define INIT_hipStreamSetAttribute_CB_ARGS_DATA(cb_data) { \
+  cb_data.args.hipStreamSetAttribute.stream = (hipStream_t)stream; \
+  cb_data.args.hipStreamSetAttribute.attr = (hipLaunchAttributeID)attr; \
+  cb_data.args.hipStreamSetAttribute.value = (const hipLaunchAttributeValue*)value; \
 };
 // hipStreamSynchronize[('hipStream_t', 'stream')]
 #define INIT_hipStreamSynchronize_CB_ARGS_DATA(cb_data) { \

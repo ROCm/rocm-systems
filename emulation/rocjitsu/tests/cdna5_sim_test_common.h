@@ -129,6 +129,10 @@ struct Gfx1250Sim {
   void build() {
     soc = loaded.soc();
     memory = loaded.memory();
+    // This fixture drives the engine directly and inspects single-partition
+    // state, so pin one worker instead of taking the config's default of one
+    // partition per XCD.
+    loaded.engine_config.num_threads = 1;
     engine = std::make_unique<simdojo::SimulationEngine>(loaded.engine_config);
     engine->topology().set_root(loaded.take_root());
     loaded.wire_links(engine->topology());

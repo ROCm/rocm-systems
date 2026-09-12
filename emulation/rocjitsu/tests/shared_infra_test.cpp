@@ -88,6 +88,7 @@
 #include "rocjitsu/isa/arch/amdgpu/rdna3_5/isa.h"
 #include "rocjitsu/isa/arch/amdgpu/rdna4/addr_calc.h"
 #include "rocjitsu/isa/arch/amdgpu/rdna4/isa.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/addr_calc_buffer.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/addr_calc_flat.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/addr_calc_scalar.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/alu_exceptions.h"
@@ -2239,6 +2240,40 @@ TEST(L1VectorCacheTest, ScratchDwordCrossesInterleaveBoundary) {
   EXPECT_EQ(mem.read8((kAddr & ~uint64_t{3}) + kScratchStride), 0x87);
 }
 
+TEST(L1VectorCacheTest, SwizzlePostAddressOffsetsDoNotShiftDwordBoundaries) {
+  amdgpu::GpuMemory mem("test_mem");
+  amdgpu::L2Cache l2("test_l2");
+  amdgpu::L1VectorCache l1(&l2);
+  l2.set_backing_memory(&mem);
+
+  constexpr uint32_t kSwizzleStride = 64 * sizeof(uint32_t);
+  constexpr std::array<uint32_t, 2> kInitial = {0x55443322, 0xDDCCBBAA};
+  constexpr std::array<uint32_t, 2> kStored = {0x87654321, 0xFEDCBA98};
+  for (uint32_t post_swizzle_offset : {1u, 2u, 3u}) {
+    const uint64_t addr = 0x7A00 + post_swizzle_offset * 0x400 + post_swizzle_offset;
+    mem.write32(addr, kInitial[0]);
+    mem.write32(addr + kSwizzleStride, kInitial[1]);
+
+    uint64_t addrs[64] = {};
+    addrs[0] = addr;
+    std::array<uint8_t, 64 * sizeof(kInitial)> bytes{};
+    l1.load(addrs, /*lane_mask=*/0x1, /*elem_size=*/4, /*num_elems=*/2, bytes.data(),
+            amdgpu::Mtype::UC, /*non_temporal=*/false, /*request_l1_bypass=*/false,
+            cdna3::Isa::WF_SIZE, /*vmid=*/0, kSwizzleStride, post_swizzle_offset);
+    std::array<uint32_t, 2> loaded{};
+    std::memcpy(loaded.data(), bytes.data(), sizeof(loaded));
+    EXPECT_EQ(loaded, kInitial) << "post-swizzle offset " << post_swizzle_offset;
+
+    std::memcpy(bytes.data(), kStored.data(), sizeof(kStored));
+    l1.store(addrs, /*lane_mask=*/0x1, /*elem_size=*/4, /*num_elems=*/2, bytes.data(),
+             amdgpu::Mtype::UC, /*non_temporal=*/false, cdna3::Isa::WF_SIZE, /*vmid=*/0,
+             kSwizzleStride, post_swizzle_offset);
+    EXPECT_EQ(mem.read32(addr), kStored[0]) << "post-swizzle offset " << post_swizzle_offset;
+    EXPECT_EQ(mem.read32(addr + kSwizzleStride), kStored[1])
+        << "post-swizzle offset " << post_swizzle_offset;
+  }
+}
+
 TEST(L1VectorCacheTest, PartialElementMasksSkipMaskedLoads) {
   amdgpu::GpuMemory mem("test_mem");
   amdgpu::L2Cache l2("test_l2");
@@ -2260,7 +2295,8 @@ TEST(L1VectorCacheTest, PartialElementMasksSkipMaskedLoads) {
   std::array<uint8_t, 64 * 4 * sizeof(uint32_t)> bytes{};
   l1.load(addrs, /*lane_mask=*/0x3, /*elem_size=*/4, /*num_elems=*/4, bytes.data(),
           amdgpu::Mtype::UC, /*non_temporal=*/false, /*request_l1_bypass=*/false,
-          cdna3::Isa::WF_SIZE, /*vmid=*/0, /*addr_stride=*/0, kElementMasks);
+          cdna3::Isa::WF_SIZE, /*vmid=*/0, /*addr_stride=*/0, /*addr_base_offset=*/0,
+          kElementMasks);
 
   std::array<uint32_t, 4> lane0{};
   std::array<uint32_t, 4> lane1{};
@@ -2289,7 +2325,7 @@ TEST(L1VectorCacheTest, PartialElementMasksDropSkippedStores) {
   constexpr std::array<uint64_t, 4> kElementMasks = {0x1, 0x1, 0x0, 0x0};
   l1.store(addrs, /*lane_mask=*/0x1, /*elem_size=*/4, /*num_elems=*/4, bytes.data(),
            amdgpu::Mtype::UC, /*non_temporal=*/false, cdna3::Isa::WF_SIZE, /*vmid=*/0,
-           /*addr_stride=*/0, kElementMasks);
+           /*addr_stride=*/0, /*addr_base_offset=*/0, kElementMasks);
 
   EXPECT_EQ(mem.read32(kAddr), kStored[0]);
   EXPECT_EQ(mem.read32(kAddr + 4), kStored[1]);
@@ -2319,7 +2355,7 @@ TEST(L1VectorCacheTest, PartialElementMasksCoalesceFullyValidLanes) {
 
   l1.store(addrs, /*lane_mask=*/0x7, /*elem_size=*/4, /*num_elems=*/4, store_bytes.data(),
            amdgpu::Mtype::UC, /*non_temporal=*/false, cdna3::Isa::WF_SIZE, /*vmid=*/0,
-           /*addr_stride=*/0, kElementMasks);
+           /*addr_stride=*/0, /*addr_base_offset=*/0, kElementMasks);
   EXPECT_EQ(l1.store_l2_writes(), 3u);
   EXPECT_EQ(l2.backing_write_transactions(), 3u);
   EXPECT_EQ(mem.read32(kAddr + 0), kLane0[0]);
@@ -2338,7 +2374,8 @@ TEST(L1VectorCacheTest, PartialElementMasksCoalesceFullyValidLanes) {
   std::array<uint8_t, 64 * sizeof(kLane0)> load_bytes{};
   l1.load(addrs, /*lane_mask=*/0x7, /*elem_size=*/4, /*num_elems=*/4, load_bytes.data(),
           amdgpu::Mtype::UC, /*non_temporal=*/false, /*request_l1_bypass=*/false,
-          cdna3::Isa::WF_SIZE, /*vmid=*/0, /*addr_stride=*/0, kElementMasks);
+          cdna3::Isa::WF_SIZE, /*vmid=*/0, /*addr_stride=*/0, /*addr_base_offset=*/0,
+          kElementMasks);
   EXPECT_EQ(l2.backing_read_transactions(), 3u);
   EXPECT_EQ(std::memcmp(load_bytes.data(), kLane0.data(), sizeof(kLane0)), 0);
   EXPECT_EQ(std::memcmp(load_bytes.data() + sizeof(kLane0), kLane1.data(), sizeof(kLane1)), 0);
@@ -5929,6 +5966,45 @@ TEST(RdnaAddrCalcTest, Rdna3MubufWrapsOffsetPartBeforeBoundsCheck) {
   EXPECT_EQ(d.per_lane_addr[0], kBase);
 }
 
+TEST(RdnaAddrCalcTest, Rdna3MubufIgnoresSoffsetInRangeCheck) {
+  amdgpu::GpuMemory mem("rdna3_mubuf_soffset_mem");
+  amdgpu::L2Cache l2("rdna3_mubuf_soffset_l2");
+  amdgpu::ComputeUnitCore::Config cfg{};
+  cfg.arch = ROCJITSU_CODE_ARCH_RDNA3;
+  cfg.num_wf_slots = 1;
+  cfg.sgprs_per_wf = 128;
+  cfg.vgprs_per_wf = 16;
+  cfg.lds_size_kb = 64;
+  auto cu = amdgpu::ComputeUnitCore::create("rdna3_mubuf_soffset_cu", cfg, &mem, &l2);
+  ASSERT_NE(cu, nullptr);
+
+  auto *wf = cu->dispatch_wf(0, 0, 128, 16);
+  ASSERT_NE(wf, nullptr);
+  wf->set_exec(1ULL);
+
+  constexpr uint64_t kBase = 0x2'0000'1000ULL;
+  uint32_t sbase = wf->sgpr_alloc().base;
+  uint32_t vbase = wf->vgpr_alloc().base;
+  cu->write_sgpr(sbase, static_cast<uint32_t>(kBase));
+  cu->write_sgpr(sbase + 1, static_cast<uint32_t>(kBase >> 32));
+  cu->write_sgpr(sbase + 2, 120);
+  cu->write_sgpr(sbase + 3, 0);
+  cu->write_sgpr(sbase + 8, 64);
+  cu->write_vgpr(vbase + 4, 0, 116);
+
+  rdna3::MubufMachineInst inst{};
+  inst.srsrc = 0;
+  inst.soffset = 8;
+  inst.offen = 1;
+  inst.idxen = 0;
+  inst.vaddr = 4;
+
+  amdgpu::VectorMemState d(amdgpu::GLOBAL_MEM);
+  rdna3::mubuf_calculate_addresses(inst, *wf, d);
+  EXPECT_EQ(d.lane_mask, 1ULL);
+  EXPECT_EQ(d.per_lane_addr[0], kBase + 64 + 116);
+}
+
 TEST(RdnaAddrCalcTest, Rdna4Saddr7cCoversGlobalFlatAndScratch) {
   amdgpu::GpuMemory mem("rdna4_addr_mem");
   amdgpu::L2Cache l2("rdna4_addr_l2");
@@ -7055,6 +7131,469 @@ TEST(Gfx1250AddrCalcTest, VbufferAtomicChecksWholePayload) {
   EXPECT_EQ(atomic_state.lane_mask, 0ULL);
   expect_element_lane_masks(atomic_state.element_lane_masks, {0ULL});
   EXPECT_EQ(atomic_state.per_lane_addr[0], 0ULL);
+}
+
+constexpr uint32_t kGfx9DataFormat32 = 4u << 15; // V# word3 DATA_FORMAT = 32
+constexpr uint32_t kGfx9AddTidEnable = 1u << 23; // V# word3 ADD_TID_ENABLE
+
+std::array<uint32_t, 4> encode_gfx9_buffer_resource(uint64_t base, uint32_t num_records,
+                                                    uint32_t stride = 0,
+                                                    uint32_t word3 = kGfx9DataFormat32,
+                                                    bool swizzle_enable = false) {
+  return {static_cast<uint32_t>(base),
+          (static_cast<uint32_t>(base >> 32) & 0xFFFFu) | ((stride & 0x3FFFu) << 16) |
+              (static_cast<uint32_t>(swizzle_enable) << 31),
+          num_records, word3};
+}
+
+/// One CDNA wave with a GFX9 V# at s[40:43]; MUBUF VADDR starts at v4.
+struct CdnaBufferWave {
+  static constexpr uint32_t kSrd = 40;
+  static constexpr uint32_t kSoffset = 8;
+
+  explicit CdnaBufferWave(rj_code_arch_t arch)
+      : cu(amdgpu::ComputeUnitCore::create("cdna_mubuf_cu",
+                                           {.arch = arch,
+                                            .num_wf_slots = 1,
+                                            .sgprs_per_wf = 128,
+                                            .vgprs_per_wf = 16,
+                                            .lds_size_kb = 64},
+                                           &mem, &l2)),
+        wf(cu ? cu->dispatch_wf(0, 0, 128, 16) : nullptr) {}
+
+  void set_resource(const std::array<uint32_t, 4> &resource) {
+    for (uint32_t i = 0; i < resource.size(); ++i)
+      cu->write_sgpr(wf->sgpr_alloc().base + kSrd + i, resource[i]);
+  }
+  void set_soffset(uint32_t value) { cu->write_sgpr(wf->sgpr_alloc().base + kSoffset, value); }
+  // Lane i of v[vgpr] = values[i]; EXEC covers exactly those lanes.
+  void set_lanes(uint32_t vgpr, std::initializer_list<uint32_t> values) {
+    uint32_t lane = 0;
+    for (uint32_t value : values)
+      cu->write_vgpr(wf->vgpr_alloc().base + vgpr, lane++, value);
+    wf->set_exec((1ULL << values.size()) - 1);
+  }
+  // Every lane of v[vgpr] = value; EXEC covers the whole wave.
+  void set_all_lanes(uint32_t vgpr, uint32_t value) {
+    for (uint32_t lane = 0; lane < 64; ++lane)
+      cu->write_vgpr(wf->vgpr_alloc().base + vgpr, lane, value);
+    wf->set_exec(~0ULL);
+  }
+
+  amdgpu::GpuMemory mem{"cdna_mubuf_mem"};
+  amdgpu::L2Cache l2{"cdna_mubuf_l2"};
+  std::unique_ptr<amdgpu::ComputeUnitCore> cu;
+  amdgpu::Wavefront *wf;
+};
+
+cdna4::MubufMachineInst cdna_mubuf_offen_inst(uint32_t op) {
+  cdna4::MubufMachineInst inst{};
+  inst.op = op;
+  inst.srsrc = CdnaBufferWave::kSrd / 4;
+  inst.soffset = 0x80;
+  inst.offen = 1;
+  inst.vaddr = 4;
+  return inst;
+}
+
+cdna4::MtbufMachineInst cdna_mtbuf_inst(uint32_t op, bool offen) {
+  cdna4::MtbufMachineInst inst{};
+  inst.op = op;
+  inst.srsrc = CdnaBufferWave::kSrd / 4;
+  inst.soffset = 0x80;
+  inst.offen = offen;
+  inst.vaddr = 4;
+  return inst;
+}
+
+amdgpu::VectorMemState cdna_mubuf_addresses(const cdna4::MubufMachineInst &inst,
+                                            amdgpu::Wavefront &wf, uint32_t elem_size,
+                                            uint32_t num_elems,
+                                            amdgpu::AtomicOp atomic_op = amdgpu::AtomicOp::NONE) {
+  amdgpu::VectorMemState d(amdgpu::GLOBAL_MEM);
+  d.elem_size = elem_size;
+  d.num_elems = num_elems;
+  d.atomic_op = atomic_op;
+  amdgpu::addr_calc::mubuf_calculate_addresses(inst, wf, d);
+  return d;
+}
+
+constexpr uint64_t kCdnaBufferBase = 0x2'0000'1000ULL;
+
+TEST(CdnaAddrCalcTest, Gfx9BufferElemsInRange) {
+  // ({add_tid_enable, idxen, stride, num_records, index, byte_offset}, elem_size, num_elems)
+  constexpr auto in_range = amdgpu::addr_calc::gfx9_buffer_elems_in_range;
+  // Byte check: element i is in range iff byte_offset + (i + 1) * elem_size <= NUM_RECORDS.
+  static_assert(in_range({false, false, 0, 120, 0, 104}, 4, 4) == 4);
+  static_assert(in_range({false, false, 0, 120, 0, 108}, 4, 4) == 3);
+  static_assert(in_range({false, false, 0, 120, 0, 116}, 4, 1) == 1);
+  static_assert(in_range({false, false, 0, 120, 0, 117}, 4, 1) == 0);
+  static_assert(in_range({false, false, 0, 120, 0, 119}, 1, 1) == 1);
+  static_assert(in_range({false, false, 0, 0, 0, 0}, 4, 1) == 0);
+  static_assert(in_range({false, false, 0, ~0u, 0, 0x1'0000'0010ULL}, 4, 1) == 0);
+  static_assert(in_range({false, false, 16, 4, 0, 16}, 4, 1) == 0);
+  // IDXEN && STRIDE != 0: index check only.
+  static_assert(in_range({false, true, 16, 4, 3, 1000}, 4, 4) == 4);
+  static_assert(in_range({false, true, 16, 4, 4, 0}, 4, 4) == 0);
+  static_assert(in_range({false, true, 0, 120, 0, 120}, 4, 1) == 0);
+  // ADD_TID_ENABLE && !IDXEN: unchecked.
+  static_assert(in_range({true, false, 0, 0, 0, 1u << 20}, 4, 2) == 2);
+  static_assert(in_range({true, true, 16, 4, 4, 0}, 4, 1) == 0);
+}
+
+TEST(CdnaAddrCalcTest, MubufRangeCheckCountsSoffsetAndInstOffset) {
+  for (rj_code_arch_t arch : {ROCJITSU_CODE_ARCH_CDNA3, ROCJITSU_CODE_ARCH_CDNA4}) {
+    CdnaBufferWave wave(arch);
+    ASSERT_NE(wave.wf, nullptr) << arch;
+    wave.set_resource(encode_gfx9_buffer_resource(kCdnaBufferBase, /*num_records=*/120));
+    auto inst = cdna_mubuf_offen_inst(cdna4::kBufferLoadDwordMubuf);
+
+    wave.set_lanes(4, {0, 116, 117, 120, 0xFFFF'FF80u});
+    auto exact_end = cdna_mubuf_addresses(inst, *wave.wf, 4, 1);
+    EXPECT_EQ(exact_end.lane_mask, 0x3ULL) << arch;
+    EXPECT_TRUE(exact_end.element_lane_masks.empty()) << arch;
+    EXPECT_EQ(exact_end.per_lane_addr[1], kCdnaBufferBase + 116) << arch;
+    EXPECT_EQ(exact_end.per_lane_addr[2], 0u) << arch;
+
+    wave.set_soffset(64);
+    inst.soffset = CdnaBufferWave::kSoffset;
+    wave.set_lanes(4, {52, 56});
+    auto with_soffset = cdna_mubuf_addresses(inst, *wave.wf, 4, 1);
+    EXPECT_EQ(with_soffset.lane_mask, 0x1ULL) << arch;
+    EXPECT_EQ(with_soffset.per_lane_addr[0], kCdnaBufferBase + 64 + 52) << arch;
+
+    inst.soffset = 0x80;
+    inst.offset = 4;
+    wave.set_lanes(4, {112, 116});
+    auto with_inst_offset = cdna_mubuf_addresses(inst, *wave.wf, 4, 1);
+    EXPECT_EQ(with_inst_offset.lane_mask, 0x1ULL) << arch;
+    EXPECT_EQ(with_inst_offset.per_lane_addr[0], kCdnaBufferBase + 116) << arch;
+  }
+}
+
+TEST(CdnaAddrCalcTest, MubufRangeCheckWrapsVoffsetPlusInstOffset) {
+  for (rj_code_arch_t arch : {ROCJITSU_CODE_ARCH_CDNA3, ROCJITSU_CODE_ARCH_CDNA4}) {
+    CdnaBufferWave wave(arch);
+    ASSERT_NE(wave.wf, nullptr) << arch;
+    wave.set_resource(encode_gfx9_buffer_resource(kCdnaBufferBase, /*num_records=*/65536));
+    auto inst = cdna_mubuf_offen_inst(cdna4::kBufferLoadDwordMubuf);
+    wave.set_lanes(4, {0xFFFF'FFF0u});
+
+    // VOFFSET + inst_offset wraps to 32 bits: byte 16.
+    inst.offset = 32;
+    auto wrapped = cdna_mubuf_addresses(inst, *wave.wf, 4, 1);
+    EXPECT_EQ(wrapped.lane_mask, 0x1ULL) << arch;
+    EXPECT_EQ(wrapped.per_lane_addr[0], kCdnaBufferBase + 16) << arch;
+
+    // VOFFSET + SOFFSET does not wrap.
+    inst.offset = 0;
+    inst.soffset = CdnaBufferWave::kSoffset;
+    wave.set_soffset(32);
+    EXPECT_EQ(cdna_mubuf_addresses(inst, *wave.wf, 4, 1).lane_mask, 0u) << arch;
+
+    // The wrapped offset is what NUM_RECORDS is checked against: 28 + 4 <= 32 < 32 + 4.
+    wave.set_resource(encode_gfx9_buffer_resource(kCdnaBufferBase, /*num_records=*/32));
+    inst.soffset = 0x80;
+    inst.offset = 44;
+    EXPECT_EQ(cdna_mubuf_addresses(inst, *wave.wf, 4, 1).lane_mask, 0x1ULL) << arch;
+    inst.offset = 48;
+    EXPECT_EQ(cdna_mubuf_addresses(inst, *wave.wf, 4, 1).lane_mask, 0u) << arch;
+  }
+}
+
+TEST(CdnaAddrCalcTest, MubufRangeCheckClampsDwordsIndependently) {
+  for (rj_code_arch_t arch : {ROCJITSU_CODE_ARCH_CDNA3, ROCJITSU_CODE_ARCH_CDNA4}) {
+    CdnaBufferWave wave(arch);
+    ASSERT_NE(wave.wf, nullptr) << arch;
+    wave.set_resource(encode_gfx9_buffer_resource(kCdnaBufferBase, /*num_records=*/120));
+    wave.set_lanes(4, {104, 108, 112, 116, 120});
+    for (uint32_t op : {cdna4::kBufferLoadDwordx4Mubuf, cdna4::kBufferStoreDwordx4Mubuf}) {
+      auto dwordx4 = cdna_mubuf_addresses(cdna_mubuf_offen_inst(op), *wave.wf, 4, 4);
+      EXPECT_EQ(dwordx4.lane_mask, 0xFULL) << arch << " op " << op;
+      expect_element_lane_masks(dwordx4.element_lane_masks, {0xFULL, 0x7ULL, 0x3ULL, 0x1ULL});
+      EXPECT_EQ(dwordx4.per_lane_addr[3], kCdnaBufferBase + 116) << arch << " op " << op;
+      EXPECT_EQ(dwordx4.per_lane_addr[4], 0u) << arch << " op " << op;
+    }
+  }
+}
+
+TEST(CdnaAddrCalcTest, MubufFormatAtomicAndMtbufCheckWholePayload) {
+  for (rj_code_arch_t arch : {ROCJITSU_CODE_ARCH_CDNA3, ROCJITSU_CODE_ARCH_CDNA4}) {
+    CdnaBufferWave wave(arch);
+    ASSERT_NE(wave.wf, nullptr) << arch;
+    wave.set_resource(encode_gfx9_buffer_resource(kCdnaBufferBase, /*num_records=*/120));
+    wave.set_lanes(4, {104, 108});
+    auto format_xyzw = cdna_mubuf_addresses(
+        cdna_mubuf_offen_inst(cdna4::kBufferLoadFormatXyzwMubuf), *wave.wf, 4, 4);
+    EXPECT_EQ(format_xyzw.lane_mask, 0x1ULL) << arch;
+    EXPECT_TRUE(format_xyzw.element_lane_masks.empty()) << arch;
+
+    amdgpu::VectorMemState tbuffer_xyzw(amdgpu::GLOBAL_MEM);
+    tbuffer_xyzw.elem_size = 4;
+    tbuffer_xyzw.num_elems = 4;
+    amdgpu::addr_calc::mtbuf_calculate_addresses(
+        cdna_mtbuf_inst(cdna4::kTbufferLoadFormatXyzwMtbuf, /*offen=*/true), *wave.wf,
+        tbuffer_xyzw);
+    EXPECT_EQ(tbuffer_xyzw.lane_mask, 0x1ULL) << arch;
+    EXPECT_TRUE(tbuffer_xyzw.element_lane_masks.empty()) << arch;
+
+    wave.set_resource(encode_gfx9_buffer_resource(kCdnaBufferBase, /*num_records=*/116));
+    wave.set_lanes(4, {104, 112});
+    auto atomic_x2 = cdna_mubuf_addresses(cdna_mubuf_offen_inst(cdna4::kBufferAtomicAddX2Mubuf),
+                                          *wave.wf, 8, 1, amdgpu::AtomicOp::ADD);
+    EXPECT_EQ(atomic_x2.lane_mask, 0x1ULL) << arch;
+    EXPECT_TRUE(atomic_x2.element_lane_masks.empty()) << arch;
+    EXPECT_EQ(atomic_x2.per_lane_addr[1], 0u) << arch;
+  }
+}
+
+TEST(CdnaAddrCalcTest, MubufStructuredChecksIndexOnly) {
+  for (rj_code_arch_t arch : {ROCJITSU_CODE_ARCH_CDNA3, ROCJITSU_CODE_ARCH_CDNA4}) {
+    CdnaBufferWave wave(arch);
+    ASSERT_NE(wave.wf, nullptr) << arch;
+    wave.set_resource(
+        encode_gfx9_buffer_resource(kCdnaBufferBase, /*num_records=*/4, /*stride=*/16));
+    auto inst = cdna_mubuf_offen_inst(cdna4::kBufferLoadDwordMubuf);
+
+    // IDXEN: index < NUM_RECORDS; the offset is not checked against the stride.
+    inst.idxen = 1;
+    wave.set_lanes(4, {3, 4});
+    wave.set_lanes(5, {252, 0});
+    auto indexed = cdna_mubuf_addresses(inst, *wave.wf, 4, 1);
+    EXPECT_EQ(indexed.lane_mask, 0x1ULL) << arch;
+    EXPECT_EQ(indexed.per_lane_addr[0], kCdnaBufferBase + 3 * 16 + 252) << arch;
+
+    // OFFEN only: byte check against NUM_RECORDS despite STRIDE != 0.
+    inst.idxen = 0;
+    wave.set_lanes(4, {0, 4});
+    auto offset_only = cdna_mubuf_addresses(inst, *wave.wf, 4, 1);
+    EXPECT_EQ(offset_only.lane_mask, 0x1ULL) << arch;
+    EXPECT_EQ(offset_only.per_lane_addr[0], kCdnaBufferBase) << arch;
+  }
+}
+
+TEST(CdnaAddrCalcTest, MubufAddTidAddsLaneTimesStride) {
+  constexpr std::array<uint32_t, 4> kLanes = {0, 1, 17, 63};
+  for (rj_code_arch_t arch : {ROCJITSU_CODE_ARCH_CDNA3, ROCJITSU_CODE_ARCH_CDNA4}) {
+    CdnaBufferWave wave(arch);
+    ASSERT_NE(wave.wf, nullptr) << arch;
+    // STRIDE 4, NUM_RECORDS 16, ADD_TID_ENABLE, DATA_FORMAT 0: base + 4 * lane, unchecked.
+    wave.set_resource(encode_gfx9_buffer_resource(kCdnaBufferBase, /*num_records=*/16,
+                                                  /*stride=*/4, kGfx9AddTidEnable));
+    wave.wf->set_exec(~0ULL);
+    auto inst = cdna_mubuf_offen_inst(cdna4::kBufferLoadDwordMubuf);
+    inst.offen = 0;
+    for (uint32_t op : {cdna4::kBufferLoadDwordMubuf, cdna4::kBufferStoreDwordMubuf}) {
+      inst.op = op;
+      auto no_vaddr = cdna_mubuf_addresses(inst, *wave.wf, 4, 1);
+      EXPECT_EQ(no_vaddr.lane_mask, ~0ULL) << arch << " op " << op;
+      EXPECT_TRUE(no_vaddr.element_lane_masks.empty()) << arch << " op " << op;
+      EXPECT_FALSE(no_vaddr.scratch_swizzle) << arch << " op " << op;
+      for (uint32_t lane : kLanes)
+        EXPECT_EQ(no_vaddr.per_lane_addr[lane], kCdnaBufferBase + 4 * lane) << arch << " op " << op;
+    }
+    inst.op = cdna4::kBufferLoadDwordMubuf;
+    inst.offen = 1;
+    wave.set_all_lanes(4, 256);
+    auto with_voffset = cdna_mubuf_addresses(inst, *wave.wf, 4, 1);
+    EXPECT_EQ(with_voffset.lane_mask, ~0ULL) << arch;
+    for (uint32_t lane : kLanes)
+      EXPECT_EQ(with_voffset.per_lane_addr[lane], kCdnaBufferBase + 256 + 4 * lane) << arch;
+
+    // DATA_FORMAT extends STRIDE to 18 bits for non-format ops only; MTBUF keeps 14 bits.
+    wave.set_resource(encode_gfx9_buffer_resource(kCdnaBufferBase, /*num_records=*/16,
+                                                  /*stride=*/4, kGfx9AddTidEnable | 1u << 15));
+    inst.offen = 0;
+    auto dfmt_stride = cdna_mubuf_addresses(inst, *wave.wf, 4, 1);
+    inst.op = cdna4::kBufferLoadFormatXMubuf;
+    auto format_x = cdna_mubuf_addresses(inst, *wave.wf, 4, 1);
+    amdgpu::VectorMemState tbuffer_x(amdgpu::GLOBAL_MEM);
+    tbuffer_x.elem_size = 4;
+    tbuffer_x.num_elems = 1;
+    amdgpu::addr_calc::mtbuf_calculate_addresses(
+        cdna_mtbuf_inst(cdna4::kTbufferLoadFormatXMtbuf, /*offen=*/false), *wave.wf, tbuffer_x);
+    EXPECT_EQ(format_x.lane_mask, ~0ULL) << arch;
+    EXPECT_EQ(tbuffer_x.lane_mask, ~0ULL) << arch;
+    for (uint32_t lane : kLanes) {
+      EXPECT_EQ(dfmt_stride.per_lane_addr[lane], kCdnaBufferBase + 16388 * lane) << arch;
+      EXPECT_EQ(format_x.per_lane_addr[lane], kCdnaBufferBase + 4 * lane) << arch;
+      EXPECT_EQ(tbuffer_x.per_lane_addr[lane], kCdnaBufferBase + 4 * lane) << arch;
+    }
+
+    // IDXEN: index * 14-bit STRIDE and no lane term.
+    inst.op = cdna4::kBufferLoadDwordMubuf;
+    inst.idxen = 1;
+    wave.set_all_lanes(4, 1);
+    auto indexed = cdna_mubuf_addresses(inst, *wave.wf, 4, 1);
+    EXPECT_EQ(indexed.lane_mask, ~0ULL) << arch;
+    for (uint32_t lane : kLanes)
+      EXPECT_EQ(indexed.per_lane_addr[lane], kCdnaBufferBase + 4) << arch;
+  }
+}
+
+TEST(CdnaAddrCalcTest, MubufSwizzledAddTidScratchLayout) {
+  constexpr std::array<uint32_t, 4> kLanes = {0, 1, 17, 63};
+  // dst_sel xyzw, uint, DATA_FORMAT 32, INDEX_STRIDE 64, ADD_TID_ENABLE: a swizzled scratch V#.
+  constexpr uint32_t kScratchWord3 = 0x00EA4FACu;
+  constexpr uint32_t kIndexStride16 = 1u << 21;
+  for (rj_code_arch_t arch : {ROCJITSU_CODE_ARCH_CDNA3, ROCJITSU_CODE_ARCH_CDNA4}) {
+    CdnaBufferWave wave(arch);
+    ASSERT_NE(wave.wf, nullptr) << arch;
+    wave.set_resource(encode_gfx9_buffer_resource(kCdnaBufferBase, /*num_records=*/1u << 20,
+                                                  /*stride=*/0, kScratchWord3,
+                                                  /*swizzle_enable=*/true));
+    auto inst = cdna_mubuf_offen_inst(cdna4::kBufferLoadDwordMubuf);
+    // offset / 4 selects a row of INDEX_STRIDE dwords, the lane a dword within it.
+    for (auto [voffset, row] : {std::pair{0u, 0u}, {4u, 256u}, {8u, 512u}, {256u, 16384u}}) {
+      wave.set_all_lanes(4, voffset);
+      auto swizzled = cdna_mubuf_addresses(inst, *wave.wf, 4, 1);
+      EXPECT_EQ(swizzled.lane_mask, ~0ULL) << arch << " voffset " << voffset;
+      EXPECT_TRUE(swizzled.scratch_swizzle) << arch << " voffset " << voffset;
+      EXPECT_EQ(swizzled.scratch_lane_mask, ~0ULL) << arch << " voffset " << voffset;
+      EXPECT_EQ(swizzled.scratch_addr_stride, 256u) << arch << " voffset " << voffset;
+      for (uint32_t lane : kLanes)
+        EXPECT_EQ(swizzled.per_lane_addr[lane], kCdnaBufferBase + row + 4 * lane)
+            << arch << " voffset " << voffset;
+    }
+    inst.offen = 0;
+    inst.offset = 4;
+    auto inst_offset = cdna_mubuf_addresses(inst, *wave.wf, 4, 1);
+    for (uint32_t lane : kLanes)
+      EXPECT_EQ(inst_offset.per_lane_addr[lane], kCdnaBufferBase + 256 + 4 * lane) << arch;
+    // dwordx2: the second dword of each lane is one row (scratch_addr_stride) further on.
+    wave.set_all_lanes(4, 0);
+    auto dwordx2 =
+        cdna_mubuf_addresses(cdna_mubuf_offen_inst(cdna4::kBufferLoadDwordx2Mubuf), *wave.wf, 4, 2);
+    EXPECT_EQ(dwordx2.lane_mask, ~0ULL) << arch;
+    EXPECT_TRUE(dwordx2.scratch_swizzle) << arch;
+    EXPECT_EQ(dwordx2.scratch_addr_stride, 256u) << arch;
+    for (uint32_t lane : kLanes)
+      EXPECT_EQ(dwordx2.per_lane_addr[lane], kCdnaBufferBase + 4 * lane) << arch;
+
+    // INDEX_STRIDE 16: lane / 16 steps by STRIDE rows; DATA_FORMAT 0 keeps STRIDE at 256.
+    wave.set_resource(encode_gfx9_buffer_resource(kCdnaBufferBase, /*num_records=*/1u << 20,
+                                                  /*stride=*/256,
+                                                  kIndexStride16 | kGfx9AddTidEnable,
+                                                  /*swizzle_enable=*/true));
+    inst = cdna_mubuf_offen_inst(cdna4::kBufferLoadDwordMubuf);
+    auto stride_256 = cdna_mubuf_addresses(inst, *wave.wf, 4, 1);
+    EXPECT_EQ(stride_256.scratch_addr_stride, 64u) << arch;
+    EXPECT_EQ(stride_256.per_lane_addr[15], kCdnaBufferBase + 60) << arch;
+    EXPECT_EQ(stride_256.per_lane_addr[16], kCdnaBufferBase + 4096) << arch;
+    EXPECT_EQ(stride_256.per_lane_addr[17], kCdnaBufferBase + 4100) << arch;
+    EXPECT_EQ(stride_256.per_lane_addr[32], kCdnaBufferBase + 8192) << arch;
+    // DATA_FORMAT 32 extends the swizzled STRIDE: 0 -> 65536, 256 -> 65792.
+    for (auto [stride, stride18] : {std::pair{0u, 65536u}, {256u, 65792u}}) {
+      wave.set_resource(encode_gfx9_buffer_resource(
+          kCdnaBufferBase, /*num_records=*/1u << 20, stride,
+          kIndexStride16 | kGfx9DataFormat32 | kGfx9AddTidEnable, /*swizzle_enable=*/true));
+      auto dfmt_stride = cdna_mubuf_addresses(inst, *wave.wf, 4, 1);
+      EXPECT_EQ(dfmt_stride.per_lane_addr[16], kCdnaBufferBase + 16 * stride18) << arch;
+      EXPECT_EQ(dfmt_stride.per_lane_addr[17], kCdnaBufferBase + 16 * stride18 + 4) << arch;
+      EXPECT_EQ(dfmt_stride.per_lane_addr[63], kCdnaBufferBase + 48 * stride18 + 60) << arch;
+    }
+  }
+}
+
+TEST(CdnaAddrCalcTest, NonAddTidSwizzleKeepsMultiDwordPayloadContiguous) {
+  constexpr uint32_t kNonScratchWord3 = 0x00110000u; // Representative corpus V#; ADD_TID is clear.
+  for (rj_code_arch_t arch : {ROCJITSU_CODE_ARCH_CDNA3, ROCJITSU_CODE_ARCH_CDNA4}) {
+    CdnaBufferWave wave(arch);
+    ASSERT_NE(wave.wf, nullptr) << arch;
+    wave.set_resource(encode_gfx9_buffer_resource(kCdnaBufferBase, /*num_records=*/1u << 20,
+                                                  /*stride=*/512, kNonScratchWord3,
+                                                  /*swizzle_enable=*/true));
+    wave.set_lanes(4, {4});
+
+    auto dwordx4 =
+        cdna_mubuf_addresses(cdna_mubuf_offen_inst(cdna4::kBufferLoadDwordx4Mubuf), *wave.wf, 4, 4);
+    EXPECT_EQ(dwordx4.per_lane_addr[0], kCdnaBufferBase + 4) << arch;
+    EXPECT_FALSE(dwordx4.scratch_swizzle) << arch;
+    EXPECT_EQ(dwordx4.scratch_addr_stride, 0u) << arch;
+  }
+}
+
+TEST(CdnaAddrCalcTest, BufferSwizzleTracksPostSwizzleBaseOffset) {
+  constexpr uint32_t kScratchWord3 = 0x00EA4FACu;
+  for (rj_code_arch_t arch : {ROCJITSU_CODE_ARCH_CDNA3, ROCJITSU_CODE_ARCH_CDNA4}) {
+    CdnaBufferWave wave(arch);
+    ASSERT_NE(wave.wf, nullptr) << arch;
+    wave.set_resource(encode_gfx9_buffer_resource(kCdnaBufferBase, /*num_records=*/1u << 20,
+                                                  /*stride=*/0, kScratchWord3,
+                                                  /*swizzle_enable=*/true));
+    wave.set_lanes(4, {0});
+    cdna4::MubufMachineInst inst = cdna_mubuf_offen_inst(cdna4::kBufferLoadDwordMubuf);
+    inst.soffset = CdnaBufferWave::kSoffset;
+    for (uint32_t soffset : {1u, 2u, 3u}) {
+      wave.set_soffset(soffset);
+      amdgpu::VectorMemState swizzled = cdna_mubuf_addresses(inst, *wave.wf, 4, 1);
+      EXPECT_EQ(swizzled.per_lane_addr[0], kCdnaBufferBase + soffset) << arch;
+      EXPECT_EQ(swizzled.scratch_addr_base_offset, soffset) << arch;
+
+      amdgpu::VectorMemState typed(amdgpu::GLOBAL_MEM);
+      typed.elem_size = 4;
+      typed.num_elems = 1;
+      cdna4::MtbufMachineInst mtbuf =
+          cdna_mtbuf_inst(cdna4::kTbufferLoadFormatXMtbuf, /*offen=*/true);
+      mtbuf.soffset = CdnaBufferWave::kSoffset;
+      amdgpu::addr_calc::mtbuf_calculate_addresses(mtbuf, *wave.wf, typed);
+      EXPECT_EQ(typed.per_lane_addr[0], kCdnaBufferBase + soffset) << arch;
+      EXPECT_EQ(typed.scratch_addr_base_offset, soffset) << arch;
+    }
+  }
+}
+
+TEST(CdnaAddrCalcTest, MubufSwizzleIgnoresUserVmBits) {
+  constexpr std::array<uint32_t, 4> kLanes = {0, 1, 17, 63};
+  // word3[20:19] is User VM Enable/Mode on GFX9, not ELEMENT_SIZE: addressing must not see it.
+  constexpr uint32_t kScratchWord3 = 0x00EA4FACu;
+  constexpr uint32_t kUserVmBits = 3u << 19;
+  for (rj_code_arch_t arch : {ROCJITSU_CODE_ARCH_CDNA3, ROCJITSU_CODE_ARCH_CDNA4}) {
+    for (uint32_t word3 : {kScratchWord3 & ~kUserVmBits, kScratchWord3 | kUserVmBits}) {
+      CdnaBufferWave wave(arch);
+      ASSERT_NE(wave.wf, nullptr) << arch << " word3 " << word3;
+      wave.set_resource(encode_gfx9_buffer_resource(kCdnaBufferBase, /*num_records=*/1u << 20,
+                                                    /*stride=*/0, word3,
+                                                    /*swizzle_enable=*/true));
+      auto inst = cdna_mubuf_offen_inst(cdna4::kBufferLoadDwordMubuf);
+      for (auto [voffset, row] : {std::pair{0u, 0u}, {4u, 256u}}) {
+        wave.set_all_lanes(4, voffset);
+        auto swizzled = cdna_mubuf_addresses(inst, *wave.wf, 4, 1);
+        EXPECT_EQ(swizzled.scratch_addr_stride, 256u) << arch << " word3 " << word3;
+        for (uint32_t lane : kLanes)
+          EXPECT_EQ(swizzled.per_lane_addr[lane], kCdnaBufferBase + row + 4 * lane)
+              << arch << " word3 " << word3 << " voffset " << voffset;
+      }
+      // dwordx2 keeps the same per-element stride, so the element is still a dword.
+      wave.set_all_lanes(4, 0);
+      auto dwordx2 = cdna_mubuf_addresses(cdna_mubuf_offen_inst(cdna4::kBufferLoadDwordx2Mubuf),
+                                          *wave.wf, 4, 2);
+      EXPECT_EQ(dwordx2.scratch_addr_stride, 256u) << arch << " word3 " << word3;
+      for (uint32_t lane : kLanes)
+        EXPECT_EQ(dwordx2.per_lane_addr[lane], kCdnaBufferBase + 4 * lane)
+            << arch << " word3 " << word3;
+    }
+  }
+}
+
+TEST(CdnaAddrCalcTest, MubufSubDwordExactEnd) {
+  for (rj_code_arch_t arch : {ROCJITSU_CODE_ARCH_CDNA3, ROCJITSU_CODE_ARCH_CDNA4}) {
+    CdnaBufferWave wave(arch);
+    ASSERT_NE(wave.wf, nullptr) << arch;
+    wave.set_resource(encode_gfx9_buffer_resource(kCdnaBufferBase, /*num_records=*/120));
+    wave.set_lanes(4, {119, 120});
+    auto ubyte_load =
+        cdna_mubuf_addresses(cdna_mubuf_offen_inst(cdna4::kBufferLoadUbyteMubuf), *wave.wf, 1, 1);
+    EXPECT_EQ(ubyte_load.lane_mask, 0x1ULL) << arch;
+    wave.set_lanes(4, {118, 119});
+    auto ushort_load =
+        cdna_mubuf_addresses(cdna_mubuf_offen_inst(cdna4::kBufferLoadUshortMubuf), *wave.wf, 2, 1);
+    EXPECT_EQ(ushort_load.lane_mask, 0x1ULL) << arch;
+    wave.set_lanes(4, {116, 117});
+    auto dword_load =
+        cdna_mubuf_addresses(cdna_mubuf_offen_inst(cdna4::kBufferLoadDwordMubuf), *wave.wf, 4, 1);
+    EXPECT_EQ(dword_load.lane_mask, 0x1ULL) << arch;
+  }
 }
 
 void expect_vector_lane_reads_use_own_wave_vgprs(rj_code_arch_t arch) {

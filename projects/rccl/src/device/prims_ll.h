@@ -288,8 +288,8 @@ class Primitives<T, RedOp, Fan, Direct, ProtoLL, P2p, isNetOffload, Metadata, Pi
     *((u64_gptr)dst->v + 1) = *((u64_gptr)i4.v + 1);
 #else
 #if defined(__gfx1200__) || defined(__gfx1201__)
-    __hip_atomic_store((u64_gptr)dst->v, i4.v[0], __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_SYSTEM);
-    __hip_atomic_store((u64_gptr)dst->v + 1, i4.v[1], __ATOMIC_RELEASE, __HIP_MEMORY_SCOPE_SYSTEM);
+    __scoped_atomic_store_n((u64_gptr)dst->v, i4.v[0], __ATOMIC_RELAXED, __MEMORY_SCOPE_SYSTEM);
+    __scoped_atomic_store_n((u64_gptr)dst->v + 1, i4.v[1], __ATOMIC_RELEASE, __MEMORY_SCOPE_SYSTEM);
 #else
     *((u64_gptr)dst->v) = *((u64_gptr)i4.v);
     *((u64_gptr)dst->v + 1) = *((u64_gptr)i4.v + 1);
@@ -321,17 +321,17 @@ class Primitives<T, RedOp, Fan, Direct, ProtoLL, P2p, isNetOffload, Metadata, Pi
 #if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
 #if RCCL_HAVE_GLOBAL_DWORDX4_BUILTINS
     if (sizeof(U) == 1)
-      u1 =
-        __hip_atomic_load((__attribute__((address_space(1))) uint8_t*)src, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_SYSTEM);
+      u1 = __scoped_atomic_load_n((__attribute__((address_space(1))) uint8_t*)src, __ATOMIC_RELAXED,
+                                  __MEMORY_SCOPE_SYSTEM);
     else if (sizeof(U) == 2)
-      u2 = __hip_atomic_load((__attribute__((address_space(1))) uint16_t*)src, __ATOMIC_RELAXED,
-                             __HIP_MEMORY_SCOPE_SYSTEM);
+      u2 = __scoped_atomic_load_n((__attribute__((address_space(1))) uint16_t*)src, __ATOMIC_RELAXED,
+                                  __MEMORY_SCOPE_SYSTEM);
     else if (sizeof(U) == 4)
-      u4 = __hip_atomic_load((__attribute__((address_space(1))) uint32_t*)src, __ATOMIC_RELAXED,
-                             __HIP_MEMORY_SCOPE_SYSTEM);
+      u4 = __scoped_atomic_load_n((__attribute__((address_space(1))) uint32_t*)src, __ATOMIC_RELAXED,
+                                  __MEMORY_SCOPE_SYSTEM);
     else
-      u8 = __hip_atomic_load((__attribute__((address_space(1))) uint64_t*)src, __ATOMIC_RELAXED,
-                             __HIP_MEMORY_SCOPE_SYSTEM);
+      u8 = __scoped_atomic_load_n((__attribute__((address_space(1))) uint64_t*)src, __ATOMIC_RELAXED,
+                                  __MEMORY_SCOPE_SYSTEM);
 #else
     if (sizeof(U) == 1)
 #ifdef __GFX11__
@@ -380,17 +380,17 @@ class Primitives<T, RedOp, Fan, Direct, ProtoLL, P2p, isNetOffload, Metadata, Pi
 #if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
 #if RCCL_HAVE_GLOBAL_DWORDX4_BUILTINS
     if (sizeof(U) == 1)
-      __hip_atomic_store((__attribute__((address_space(1))) uint8_t*)dst, u1, __ATOMIC_RELAXED,
-                         __HIP_MEMORY_SCOPE_SYSTEM);
+      __scoped_atomic_store_n((__attribute__((address_space(1))) uint8_t*)dst, u1, __ATOMIC_RELAXED,
+                              __MEMORY_SCOPE_SYSTEM);
     else if (sizeof(U) == 2)
-      __hip_atomic_store((__attribute__((address_space(1))) uint16_t*)dst, u2, __ATOMIC_RELAXED,
-                         __HIP_MEMORY_SCOPE_SYSTEM);
+      __scoped_atomic_store_n((__attribute__((address_space(1))) uint16_t*)dst, u2, __ATOMIC_RELAXED,
+                              __MEMORY_SCOPE_SYSTEM);
     else if (sizeof(U) == 4)
-      __hip_atomic_store((__attribute__((address_space(1))) uint32_t*)dst, u4, __ATOMIC_RELAXED,
-                         __HIP_MEMORY_SCOPE_SYSTEM);
+      __scoped_atomic_store_n((__attribute__((address_space(1))) uint32_t*)dst, u4, __ATOMIC_RELAXED,
+                              __MEMORY_SCOPE_SYSTEM);
     else
-      __hip_atomic_store((__attribute__((address_space(1))) uint64_t*)dst, u8, __ATOMIC_RELAXED,
-                         __HIP_MEMORY_SCOPE_SYSTEM);
+      __scoped_atomic_store_n((__attribute__((address_space(1))) uint64_t*)dst, u8, __ATOMIC_RELAXED,
+                              __MEMORY_SCOPE_SYSTEM);
 #else
     if (sizeof(U) == 1) __builtin_nontemporal_store(u1, (uint8_t*)dst);
     else if (sizeof(U) == 2) __builtin_nontemporal_store(u2, (uint16_t*)dst);
@@ -479,6 +479,7 @@ class Primitives<T, RedOp, Fan, Direct, ProtoLL, P2p, isNetOffload, Metadata, Pi
     nelem = nelem < 0 ? 0 : nelem;
     if (SEND) waitSend(divUp(nelem, EltPerLine) * sizeof(ncclLLFifoLine));
 
+    sqtt_marker_enter("PRIM_LL_DATA_PROCESS");
     nelem -= tid * EltPerLine;
     srcElts += tid * EltPerLine;
     dstElts += tid * EltPerLine;
@@ -538,6 +539,7 @@ class Primitives<T, RedOp, Fan, Direct, ProtoLL, P2p, isNetOffload, Metadata, Pi
       offset += nthreads;
     }
 
+    sqtt_marker_exit("PRIM_LL_DATA_PROCESS");
     if (RECV) {
       for (int i = 0; i < MaxRecv; i++) incRecv(i);
       postRecv();

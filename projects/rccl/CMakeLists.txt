@@ -80,6 +80,7 @@ include(cmake/NcclCompat.cmake)
 rccl_define_nccl_compat_options()
 
 option(BUILD_ADDRESS_SANITIZER                 "Enable address sanitizer"                      ${RCCL_DEFAULT_BUILD_ADDRESS_SANITIZER})
+option(BUILD_ALL_UNROLLS                       "Generate every unroll factor (1,2,4,8,16,32) for the targeted GPU arch(es)" OFF)
 option(BUILD_BFD                               "Enable custom backtrace (if bfd.h exists)"     OFF)
 option(BUILD_LOCAL_GPU_TARGET_ONLY             "Build only for GPUs detected on this machine"  OFF)
 option(BUILD_SHARED_LIBS                       "Build as shared library"                       ON)
@@ -88,6 +89,16 @@ option(BUILD_PROFILER_INSPECTOR                "Build the NCCL Inspector profile
 option(BUILD_PLUGIN_EXAMPLES                      "Build plugin example libraries (net, tuner, profiler, env)" OFF)
 option(DUMP_ASM                                "Disassemble and dump"                          OFF)
 option(ENABLE_CODE_COVERAGE                    "Enable code coverage"                          OFF)
+set(ENABLE_FULL_COVERAGE "OFF" CACHE STRING
+  "Enable host and device coverage: AUTO, ON, or OFF")
+set_property(CACHE ENABLE_FULL_COVERAGE PROPERTY STRINGS AUTO ON OFF)
+string(TOUPPER "${ENABLE_FULL_COVERAGE}" ENABLE_FULL_COVERAGE)
+set(_enable_full_coverage_request "${ENABLE_FULL_COVERAGE}")
+if(NOT ENABLE_FULL_COVERAGE MATCHES "^(AUTO|ON|OFF)$")
+  message(FATAL_ERROR
+    "ENABLE_FULL_COVERAGE must be AUTO, ON, or OFF; "
+    "received '${ENABLE_FULL_COVERAGE}'.")
+endif()
 option(ENABLE_IFC                              "Enable indirect function call"                 OFF)
 option(ENABLE_DEVICE_LINKER                    "Build with assembly-extract device linker"     ON)
 option(EMIT_LLVM_IR                            "Emit LLVM IR/bitcode for nccl_device APIs"     OFF)
@@ -100,15 +111,21 @@ option(BUILD_NCCL4PY                           "Build the nccl4py Python binding
 # layout for diagnostics.  See cmake/linker_scripts/hip_fatbin_tail.ld.
 option(RCCL_HIP_FATBIN_AT_TAIL                 "Place .hip_fatbin at the end of librccl.so"    ON)
 option(GENERATE_SYM_KERNELS                    "Generate symmetric memory kernels"             ON)
+option(ENABLE_TDM_SIMPLE                       "Build the experimental gfx1250 TDM SIMPLE copy path" OFF)
 option(INSTALL_DEPENDENCIES                    "Force install dependencies"                    OFF)
 option(REPORT_KERNEL_RESOURCE_USE              "Append -Rpass-analysis=kernel to CXX flags"    OFF)
 option(ROCTX                                   "Enable ROCTX"                                  ${RCCL_DEFAULT_ROCTX})
+option(SQTT_ENABLED                            "Enable SQTT instrumentation"                   OFF)
 option(TIMETRACE                               "Enable time-trace during compilation"          OFF)
 option(TRACE                                   "Enable additional tracing"                     OFF)
 option(QP_TRACKING                             "Enable per-device QP tracking"                 OFF)
 option(FAULT_INJECTION                         "Enable fault injection"                        ON)
 option(QUIET_WARNINGS                          "Supress compiler warnings"                     OFF)
+option(RCCL_POISON_HIP_ATOMICS                 "Reject __hip_atomic_* builtins in RCCL sources" ON)
 option(DWORDX4_INTRINSICS                      "Turn off compilation with dwordx4 intrinsics"  ON)
+if(ENABLE_TDM_SIMPLE)
+  add_compile_definitions(ENABLE_TDM_SIMPLE=1)
+endif()
 # rocSHMEM integration (mutually exclusive — enabling both causes duplicate
 # rocshmem state between librccl.so and the executable at runtime):
 #   ENABLE_ROCSHMEM: alltoall_wg offload.  Links librocshmem.a into librccl.so
@@ -124,6 +141,8 @@ endif()
 set(ROCSHMEM_CMAKE_OPTIONS "" CACHE STRING     "Extra cmake options passed to the rocSHMEM ExternalProject build")
 option(GIN_ANVIL_UNIT_TESTS                    "Build GIN Anvil device-template unit tests (ENABLE_ROCSHMEM_GIN on Fixtures; no full librocshmem in librccl)" OFF)
 option(ENABLE_WARP_SPEED                       "Enable WARP_SPEED optimizations"               OFF)
+option(ENABLE_RCCL_EP_TESTS                    "Build rccl_ep multi-GPU tests; needs ENABLE_MPI_TESTS and a runtime with working cuMem symmetric memory" OFF)
+option(ENABLE_RCCL_EP_IN_LIBRCCL               "Compile rccl_ep into librccl.so instead of the standalone librccl_ep.so; gfx9 only" OFF)
 
 # Default GPU architectures to build
 #==================================================================================================
@@ -302,7 +321,10 @@ if(NOT "${HIP_COMPILER}" MATCHES "clang")
 endif()
 
 ## Check for compiler version
-find_program(compiler_executable ${COMPILER_EXE_NAME})
+# Keep version detection on the same toolchain selected for the build.
+get_filename_component(_cxx_compiler_dir "${CMAKE_CXX_COMPILER}" DIRECTORY)
+find_program(compiler_executable ${COMPILER_EXE_NAME}
+  HINTS "${_cxx_compiler_dir}")
 message(STATUS "${COMPILER_EXE_NAME} executable: ${compiler_executable}")
 execute_process(
   COMMAND         bash "-c" "${compiler_executable} --version | grep \"${COMPILER_GREP_STRING}\" | ${COMPILER_AWK_CMD}"
@@ -340,6 +362,22 @@ else()
   message(FATAL_ERROR "Could not determine ROCM version (set EXPLICIT_ROCM_VERSION or set ROCM_PATH to a valid installation)")
 endif()
 string(REGEX MATCH "([0-9]+)\\.([0-9]+)\\.([0-9]+)" rocm_version_matches ${rocm_version_string})
+set(RCCL_DEVICE_PROFILE_RT "")
+set(RCCL_HOST_ROCM_PROFILE_RT "")
+set(_device_coverage_capability_error "")
+if(NOT _enable_full_coverage_request STREQUAL "OFF")
+  include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/DeviceCoverage.cmake")
+  if(ENABLE_DEVICE_LINKER)
+    rccl_find_device_profile_runtime(
+      "${CMAKE_CXX_COMPILER}"
+      RCCL_DEVICE_PROFILE_RT
+      _device_coverage_capability_error)
+    rccl_find_host_rocm_profile_runtime(
+      "${CMAKE_CXX_COMPILER}"
+      RCCL_HOST_ROCM_PROFILE_RT)
+  endif()
+endif()
+
 if (rocm_version_matches)
     set(ROCM_MAJOR_VERSION ${CMAKE_MATCH_1})
     set(ROCM_MINOR_VERSION ${CMAKE_MATCH_2})
@@ -350,8 +388,61 @@ if (rocm_version_matches)
     # Convert the version components to int for comparison
     math(EXPR ROCM_VERSION "(10000 * ${ROCM_MAJOR_VERSION}) + (100 * ${ROCM_MINOR_VERSION}) + ${ROCM_PATCH_VERSION}")
     add_definitions("-DROCM_VERSION=${ROCM_VERSION}")
+
+    # SQTT instrumentation requires ROCm >= 7.13
+    if(SQTT_ENABLED)
+      set(ROCM_VERSION_STRING "${ROCM_MAJOR_VERSION}.${ROCM_MINOR_VERSION}")
+      if(ROCM_VERSION_STRING VERSION_LESS "7.13")
+        message(WARNING "SQTT instrumentation requires ROCm version >= 7.13. Current version: ${ROCM_VERSION_STRING}. Disabling SQTT_ENABLED.")
+        set(SQTT_ENABLED OFF CACHE BOOL "Enable SQTT instrumentation" FORCE)
+      else()
+        message(STATUS "SQTT instrumentation enabled (ROCm ${ROCM_VERSION_STRING})")
+        add_definitions("-DSQTT_ENABLED=1")
+      endif()
+    endif()
+
 else()
     message(WARNING "Failed to extract ROCm version.")
+endif()
+
+set(_full_coverage_resolved "${ENABLE_FULL_COVERAGE}")
+set(_full_coverage_blocker "")
+if(NOT _enable_full_coverage_request STREQUAL "OFF")
+  rccl_resolve_full_coverage(
+    "${_enable_full_coverage_request}"
+    "${ENABLE_DEVICE_LINKER}"
+    "${rocm_version_matches}"
+    "${ROCM_VERSION}"
+    "${ROCM_MAJOR_VERSION}.${ROCM_MINOR_VERSION}.${ROCM_PATCH_VERSION}"
+    "${_device_coverage_capability_error}"
+    _full_coverage_resolved
+    _full_coverage_blocker)
+endif()
+
+if(ENABLE_FULL_COVERAGE STREQUAL "AUTO")
+  # FORCE the resolved ON/OFF into the cache so cmake -LAH matches the build.
+  # Keep AUTO in _enable_full_coverage_request; a later cmake on this tree
+  # without -DENABLE_FULL_COVERAGE=AUTO reads the answer, not the request.
+  set(ENABLE_FULL_COVERAGE "${_full_coverage_resolved}" CACHE STRING
+    "Enable host and device coverage: AUTO, ON, or OFF" FORCE)
+  if(_full_coverage_blocker)
+    message(STATUS
+      "Full coverage is unavailable because ${_full_coverage_blocker}. "
+      "Falling back to host-only coverage.")
+  else()
+    message(STATUS
+      "Full coverage is supported by ROCm "
+      "${ROCM_MAJOR_VERSION}.${ROCM_MINOR_VERSION}.${ROCM_PATCH_VERSION}; "
+      "device profile runtime: ${RCCL_DEVICE_PROFILE_RT}")
+    if(RCCL_HOST_ROCM_PROFILE_RT)
+      message(STATUS "Host ROCm profile runtime: ${RCCL_HOST_ROCM_PROFILE_RT}")
+    endif()
+  endif()
+endif()
+
+if(NOT _enable_full_coverage_request STREQUAL "OFF" AND NOT ENABLE_CODE_COVERAGE)
+  message(STATUS "Full coverage request implies ENABLE_CODE_COVERAGE=ON")
+  set(ENABLE_CODE_COVERAGE ON CACHE BOOL "Enable code coverage" FORCE)
 endif()
 
 ### Required for checking HIP device symbols when building with amdclang++

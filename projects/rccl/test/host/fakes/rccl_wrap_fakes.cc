@@ -123,12 +123,27 @@ ncclResult_t rcclSetWarpSpeedAuto(struct ncclComm*, struct ncclTaskColl*, size_t
 int g_rcclSetWarpSpeedCUsCalls = 0;
 void rcclSetWarpSpeedCUs(struct ncclComm*, int, int, int&) { ++g_rcclSetWarpSpeedCUsCalls; }
 
+int64_t g_rcclParamWarpSpeedForceEnable = 0;  // rccl_wrap.cc:81 RCCL_PARAM default
+int g_rcclParamWarpSpeedForceEnableCalls = 0;
+int64_t rcclParamWarpSpeedForceEnable() {                      // rccl_wrap.cc:78
+  ++g_rcclParamWarpSpeedForceEnableCalls;
+  return g_rcclParamWarpSpeedForceEnable;
+}
+
+bool g_rcclCanUseWarpSpeedAutoResult = false;
+int g_rcclCanUseWarpSpeedAutoCalls = 0;
+bool rcclCanUseWarpSpeedAuto(struct ncclComm*, int) {
+  ++g_rcclCanUseWarpSpeedAutoCalls;
+  return g_rcclCanUseWarpSpeedAutoResult;
+}
+
 void ResetRcclWrapFakes() {
   g_rcclUpdateCollectiveProtocol = DefaultNoOpTune;
   g_rcclSetPipelining = DefaultNoOpTune;
   g_rcclOverrideChannels = DefaultOverrideChannels;
   g_rcclOverrideChannelsCalls = 0;
   g_rcclIsArchSupportedForFunc = true;
+  g_rcclParamDirectReduceScatterThreshold = 8388608;
   g_rcclUpdateCollectiveProtocolCalls = 0;
   g_rcclSetPipeliningCalls = 0;
   g_rcclUpdateThreadThresholdCalls = 0;
@@ -146,7 +161,33 @@ void ResetRcclWrapFakes() {
   g_rcclSetWarpSpeedAutoResult = ncclSuccess;
   g_rcclSetWarpSpeedAutoCalls = 0;
   g_rcclSetWarpSpeedCUsCalls = 0;
+  g_rcclParamWarpSpeedForceEnable = 0;
+  g_rcclParamWarpSpeedForceEnableCalls = 0;
+  g_rcclCanUseWarpSpeedAutoResult = false;
+  g_rcclCanUseWarpSpeedAutoCalls = 0;
+  g_validHsaScratch = true;
+  g_lastHsaScratchEnv = nullptr;
+  g_firmwareVersion = 0;
 }
+
+bool g_validHsaScratch = true;
+// Records the argument so a test can observe that checkHsaEnvSetting actually read the environment.
+const char* g_lastHsaScratchEnv = nullptr;
+bool validHsaScratchEnvSetting(const char* hsaScratchEnv, int /*hipRuntimeVersion*/,
+                               int /*firmwareVersion*/, const char* /*gcnArchName*/) {
+  g_lastHsaScratchEnv = hsaScratchEnv;
+  return g_validHsaScratch;
+}
+
+int g_firmwareVersion = 0;
+int getFirmwareVersion() { return g_firmwareVersion; }
+
+void rcclSetDefaultBuffSizes(struct ncclComm*, int* defaults) {
+  defaults[0] = 1 << 18;  // LL
+  defaults[1] = 1 << 18;  // LL128
+  defaults[2] = 1 << 22;  // SIMPLE
+}
+void rcclSetP2pNetChunkSize(struct ncclComm*, int& sz) { sz = 1 << 17; }
 
 // ===========================================================================
 // Fail-loud floor -- rccl_wrap.cc entry points no host-only microtest executes.
@@ -157,14 +198,12 @@ void ResetRcclWrapFakes() {
 size_t rcclHierarchicalTempBufferSize(int, bool, bool) {
   FailLoudUnfaked("rccl_wrap_fakes", "rcclHierarchicalTempBufferSize");
 }
-bool rcclCanUseWarpSpeedAuto(struct ncclComm*, int) {
-  FailLoudUnfaked("rccl_wrap_fakes", "rcclCanUseWarpSpeedAuto");
-}
 ncclResult_t rcclCommSetP2pShiftSize(struct ncclComm*) {
   FailLoudUnfaked("rccl_wrap_fakes", "rcclCommSetP2pShiftSize");
 }
-int64_t rcclParamWarpSpeedForceEnable() {                      // rccl_wrap.cc:78
-  FailLoudUnfaked("rccl_wrap_fakes", "rcclParamWarpSpeedForceEnable");
+int64_t g_rcclParamDirectReduceScatterThreshold = 8388608;     // rccl_wrap.cc:51 default
+int64_t rcclParamDirectReduceScatterThreshold() {              // rccl_wrap.cc:51
+  return g_rcclParamDirectReduceScatterThreshold;
 }
 int64_t rcclParamHierarchicalAllGather() {                     // rccl_wrap.cc:704
   FailLoudUnfaked("rccl_wrap_fakes", "rcclParamHierarchicalAllGather");

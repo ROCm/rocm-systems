@@ -113,6 +113,8 @@ public:
 
   void onAmdgpuReadScalarRegister(const amdgpu::Wavefront *wf, RegisterRef reg) override;
 
+  void onAmdgpuWriteScalarRegister(const amdgpu::Wavefront *wf, RegisterRef reg) override;
+
   void onAmdgpuBeforeExecuteInstruction(uint64_t pc, const Instruction &inst,
                                         amdgpu::Wavefront &wf) override;
 

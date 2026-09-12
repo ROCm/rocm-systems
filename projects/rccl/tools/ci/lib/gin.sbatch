@@ -16,7 +16,8 @@
 #   2. lib/build-ompi.sh      build OpenMPI (--with-rocm) -> ompi.env
 #   3. lib/build-rocshmem.sh  build rocSHMEM (IPC+SDMA)   -> rocshmem.env
 #   4. projects/rccl  install.sh  build RCCL (GIN/rocSHMEM), then build only
-#      rccl-UnitTestsFixtures (GIN_ANVIL_UNIT_TESTS=ON) -> rccl.env
+#      rccl-UnitTestsFixtures and rccl-UnitTestsGinSdmaBroadcastPolicy
+#      (GIN_ANVIL_UNIT_TESTS=ON) -> rccl.env
 #   5. projects/rccl-tests        build rccl-tests (DEVICE_API + ROCSHMEM)
 #   6. run-gin-ci.sh              run the GIN/rocSHMEM tests (non-gating)
 #
@@ -116,6 +117,7 @@ rccl_src="${workdir}/projects/rccl"
 rccl_prefix="${workdir}/.ci-out/rccl-install"
 rccl_build="${rccl_src}/build/release"
 rccl_fixtures_bin="${rccl_build}/test/rccl-UnitTestsFixtures"
+rccl_bcast_policy_ut_bin="${rccl_build}/test/rccl-UnitTestsGinSdmaBroadcastPolicy"
 rm -rf "${rccl_prefix}"
 (
   cd "${rccl_src}"
@@ -131,21 +133,27 @@ if [[ ! -f "${rccl_prefix}/lib/librccl.so" && ! -f "${rccl_prefix}/lib/librccl.s
   exit 1
 fi
 
-echo "==> [4/6] build rccl-UnitTestsFixtures (GIN_ANVIL_UNIT_TESTS=ON)"
+echo "==> [4/6] build rccl-UnitTestsFixtures + GinSdmaBroadcastPolicy (GIN_ANVIL_UNIT_TESTS=ON)"
 (
   cd "${rccl_build}"
   cmake . \
     -DBUILD_TESTS=ON \
     -DGIN_ANVIL_UNIT_TESTS=ON \
     -DROCSHMEM_INSTALL_DIR="${ROCSHMEM_INSTALL_DIR}"
-  make -j"${build_jobs}" rccl-UnitTestsFixtures
+  make -j"${build_jobs}" rccl-UnitTestsFixtures rccl-UnitTestsGinSdmaBroadcastPolicy
 )
 if [[ ! -x "${rccl_fixtures_bin}" ]]; then
   echo "ERROR: rccl-UnitTestsFixtures not built at ${rccl_fixtures_bin}" >&2
   ls -la "$(dirname "${rccl_fixtures_bin}")" 2>/dev/null >&2 || true
   exit 1
 fi
+if [[ ! -x "${rccl_bcast_policy_ut_bin}" ]]; then
+  echo "ERROR: rccl-UnitTestsGinSdmaBroadcastPolicy not built at ${rccl_bcast_policy_ut_bin}" >&2
+  ls -la "$(dirname "${rccl_bcast_policy_ut_bin}")" 2>/dev/null >&2 || true
+  exit 1
+fi
 echo "    rccl-UnitTestsFixtures: ${rccl_fixtures_bin}"
+echo "    rccl-UnitTestsGinSdmaBroadcastPolicy: ${rccl_bcast_policy_ut_bin}"
 
 # Locate the in-tree RCCL CMake package config. rccl-tests' find_package(RCCL)
 # otherwise resolves roc::rccl to the nightly ROCm (its toolchain prepends
@@ -185,6 +193,11 @@ if [[ ! -x "${rccl_tests_build}/alltoall_perf" ]]; then
   ls -la "${rccl_tests_build}" 2>/dev/null >&2 || true
   exit 1
 fi
+if [[ ! -x "${rccl_tests_build}/broadcast_perf" ]]; then
+  echo "ERROR: broadcast_perf not built under ${rccl_tests_build}" >&2
+  ls -la "${rccl_tests_build}" 2>/dev/null >&2 || true
+  exit 1
+fi
 
 # Diag: confirm alltoall_perf exports the rocSHMEM host symbol librccl.so resolves
 # at runtime (log_flags); a miss here => runtime 'undefined symbol'.
@@ -200,6 +213,7 @@ nm -CD "${librccl}" 2>/dev/null | grep -E " U .*${sym}" || echo "  not undefined
 {
   printf 'export RCCL_INSTALL_PREFIX=%q\n' "${rccl_prefix}"
   printf 'export RCCL_TESTS_BIN_DIR=%q\n' "${rccl_tests_build}"
+  printf 'export RCCL_TESTS_DIR=%q\n' "${rccl_tests_src}"
   printf 'export RCCL_FIXTURES_BIN_DIR=%q\n' "$(dirname "${rccl_fixtures_bin}")"
 } > "${workdir}/.ci-out/rccl.env"
 ) > "${build_out}" 2> "${build_err}" || build_rc=$?

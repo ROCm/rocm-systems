@@ -18,13 +18,15 @@
 # Because the same helpers are both shipped to CI and exercised by --test, the
 # two can never drift.
 
-NIGHTLY_DEB_BASE="https://rocm.nightlies.amd.com/packages-multi-arch/deb"
+NIGHTLY_DEB_BASE="https://nightly.repo.amd.com/rocm/core/packages/ubuntu2404"
 
 # --- pure helpers ---------------------------------------------------------
 
-# Reads a /deb/ directory index on stdin and prints the latest build id.
+# Reads the nightly directory index on stdin and prints the latest build id.
 # Build ids are YYYYMMDD-<gha_run_id>; the date dominates, the numeric run id
 # breaks ties so same-day builds resolve to a single deterministic match.
+# The listing links entries as either "<build>/" or "<build>/index.html"
+# depending on the host; matching the bare id covers both.
 select_latest_build() {
     # awk 'NR==1' (rather than head) consumes the whole stream so sort does not
     # receive SIGPIPE under pipefail. The `|| true` keeps a no-match grep (exit 1)
@@ -92,14 +94,15 @@ _run_tests() {
     set -uo pipefail
     local failures=0
 
-    # Sample /deb/ index, mixing dates and same-date run ids, with href + text
-    # duplicates as the real S3 listing produces.
+    # Sample nightly index, mixing dates and same-date run ids, with href + text
+    # duplicates as the real listing produces. The last two entries use the
+    # "<build>/index.html" href form served by nightly.repo.amd.com.
     local INDEX_FIXTURE
     read -r -d '' INDEX_FIXTURE <<'EOF'
 <a href="20260530-26673017729/">20260530-26673017729/</a>
 <a href="20260602-26796000000/">20260602-26796000000/</a>
-<a href="20260601-26733368587/">20260601-26733368587/</a>
-<a href="20260602-26796279962/">20260602-26796279962/</a>
+<a href="20260601-26733368587/index.html">20260601-26733368587/</a>
+<a href="20260602-26796279962/index.html">20260602-26796279962/</a>
 EOF
 
     # Sample Packages: the versioned -dev7.14 stanza must NOT be matched; only the

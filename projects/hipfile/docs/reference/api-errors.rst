@@ -38,3 +38,4 @@ Error types
 
 .. doxygengroup:: error
    :content-only:
+   :members:

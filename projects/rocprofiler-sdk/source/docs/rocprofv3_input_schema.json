@@ -90,6 +90,14 @@
                           "type": "boolean",
                           "description": "For Collecting hipFILE Traces"
                      },
+                     "hip_event_trace": {
+                          "type": "boolean",
+                          "description": "For Collecting HIP Event Traces (hipEventRecord/hipStreamWaitEvent GPU barriers)"
+                     },
+                     "hip_graph_trace": {
+                          "type": "boolean",
+                          "description": "For Collecting HIP Graph Traces"
+                     },
                      "scratch_memory_trace": {
                           "type": "boolean",
                           "description": "For Collecting Scratch Memory operations Traces"

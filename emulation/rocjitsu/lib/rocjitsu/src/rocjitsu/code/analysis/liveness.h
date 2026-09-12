@@ -54,6 +54,9 @@ struct ScopedCfgEdge {
 /// block. The standard backward equations are:
 ///   live_out(B) = union(live_in(S) for S in successors(B))
 ///   live_in(B)  = gen(B) union (live_out(B) - kill(B))
+///
+/// All four sets are ordinary-register-only; special singletons are projected
+/// out of each instruction's def/use before the transfer function runs.
 struct BlockLiveness {
   RegisterSet live_in;
   RegisterSet live_out;
@@ -96,6 +99,24 @@ struct LivenessAnalysisOptions {
   /// prevents 8-bit destination fields from truncating v256 and above.
   uint16_t max_free_vgpr = static_cast<uint16_t>(
       std::min(amdgpu::CdnaIsaBase::MAX_VGPRS_PER_WF, amdgpu::RdnaIsaBase::MAX_VGPRS_PER_WF));
+
+  /// @brief Treat an EXEC-masked vector def as a kill.
+  ///
+  /// @details Defaults to false: a masked vector def preserves inactive lanes'
+  /// old values, so it is a kill only where an ExecMaskAnalysis proves EXEC
+  /// full, and a scope with no such analysis kills no VGPR at all. That is the
+  /// right conservatism for a whole kernel, whose divergence the caller does not
+  /// control while allocating registers around it.
+  ///
+  /// Set this when the analyzed body is responsible for its own EXEC. The
+  /// obligation that carries is that no read sees lanes no def in the body
+  /// wrote: narrowing EXEC keeps it, widening between a def and a read of that
+  /// register breaks it, and either way this option calls the register dead.
+  ///
+  /// An ExecMaskAnalysis, if supplied, takes precedence — where it reports
+  /// `Unknown` the result is the conservative one, so do not supply one
+  /// alongside this flag.
+  bool exec_masked_defs_kill = false;
 
   /// @brief Restrict instruction-level live-before materialization to selected instructions.
   ///
@@ -189,9 +210,15 @@ public:
   [[nodiscard]] bool has_live_before(const Instruction &inst) const;
 
   /// @brief Registers live immediately before @p inst executes.
+  ///
+  /// @details Ordinary registers only. Special singletons (EXEC/M0/PC/...) are
+  /// deliberately excluded: implicit special uses are not yet fully modeled, so
+  /// this analysis does not answer special-register liveness.
   [[nodiscard]] const RegisterSet &live_before(const Instruction &inst) const;
 
-  /// @brief Convenience predicate for one register reference.
+  /// @brief Convenience predicate for one register reference. Only meaningful
+  /// for ordinary classes; special-register liveness is not tracked (see
+  /// live_before()).
   [[nodiscard]] bool is_live_before(const Instruction &inst, RegisterRef ref) const;
 
   /// @brief gfx1250 VGPR bank selected for @p role before @p inst.
@@ -288,6 +315,7 @@ private:
 
   bool available_ = true;
   mutable bool analyzed_ = false;
+  bool exec_masked_defs_kill_ = false;
   bool global_vgpr_usage_is_complete_ = true;
   uint16_t min_free_vgpr_ = 0;
   uint16_t max_free_vgpr_ = 0;

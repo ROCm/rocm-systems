@@ -224,7 +224,7 @@ math:
   Unit_Device_modf_modff_Negative_RTC:
     <<: *level_2
     # float* can be casted to double* [math_remainder_rounding_negative_kernels_rtc.hh:247]
-    disabled: [amd_linux, nvidia_linux, amd_wsl]
+    disabled: [nvidia_linux, amd_wsl]
     tags: [deviceLib]
   Unit_Device___frcp_rn_Accuracy_Positive:
     <<: *level_2
@@ -343,8 +343,7 @@ math:
   Unit_Device___clz_Sanity_Positive: *level_2
   Unit_Device___clzll_Sanity_Positive:
     <<: *level_2
-    # Rock_Linux_Failures_on_gfx94X
-    disabled: [amd_linux, amd_wsl]
+    disabled: [amd_wsl]
   Unit_Device___ffs_Sanity_Positive: *level_2
   Unit_Device___ffsll_Sanity_Positive: *level_2
   Unit_Device___popc_Sanity_Positive:
@@ -495,7 +494,7 @@ math:
   Unit_Device_log1p_Accuracy_Positive_double:
     <<: *level_2
     # special values test, fix: comment out [HEX_DBL(-, 0, 0000000000001, -, 1022)]
-    disabled: [amd_linux, amd_wsl]
+    disabled: [amd_wsl]
   Unit_Device_log1p_log1pf_Negative_RTC:
     <<: *level_2
     tags: [deviceLib]
@@ -1161,7 +1160,7 @@ math:
   Unit_Device_scalbln_Accuracy_Positive:
     <<: *level_2
     # long int exponents are too large, works fine with int
-    disabled: [amd_linux, amd_wsl]
+    disabled: [amd_wsl]
   Unit_Device_scalbln_scalblnf_Negative_RTC:
     <<: *level_2
     tags: [deviceLib]
@@ -1247,24 +1246,20 @@ math:
     tags: [deviceLib]
   Unit_Device_hcos_Accuracy_Positive:
     <<: *level_2
-    # (amd_linux) Float16 problem
     # (amd_windows) Below tests cause timeout in stress test of 09/02/24
-    disabled: [amd_linux, amd_windows, amd_wsl]
+    disabled: [amd_windows, amd_wsl]
   Unit_Device_h2cos_Accuracy_Positive:
     <<: *level_2
-    # (amd_linux) Float16 problem
     # (amd_windows) Below tests cause timeout in stress test of 09/02/24
-    disabled: [amd_linux, amd_windows, amd_wsl]
+    disabled: [amd_windows, amd_wsl]
   Unit_Device_hsin_Accuracy_Positive:
     <<: *level_2
-    # (amd_linux) Float16 problem
     # (amd_windows) Below tests cause timeout in stress test of 09/02/24
-    disabled: [amd_linux, amd_windows, amd_wsl]
+    disabled: [amd_windows, amd_wsl]
   Unit_Device_h2sin_Accuracy_Positive:
     <<: *level_2
-    # (amd_linux) Float16 problem
     # (amd_windows) Below tests cause timeout in stress test of 09/02/24
-    disabled: [amd_linux, amd_windows, amd_wsl]
+    disabled: [amd_windows, amd_wsl]
   Unit_Device_hexp_Accuracy_Positive:
     <<: *level_2
     # Below tests cause timeout in stress test of 09/02/24
@@ -1447,9 +1442,8 @@ math:
     disabled: [amd_windows, amd_wsl]
   Unit_Device___hfma2_Accuracy_Positive:
     <<: *level_2
-    # (amd_linux) TODO === fail on 100% test data
     # (amd_windows )Below tests cause timeout in stress test of 09/02/24
-    disabled: [amd_linux, amd_windows, amd_wsl]
+    disabled: [amd_windows, amd_wsl]
   Unit_Device___hfma_sat_Accuracy_Positive:
     <<: *level_2
     # Below tests cause timeout in stress test of 09/02/24

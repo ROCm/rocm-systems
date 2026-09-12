@@ -84,7 +84,6 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtCreateQueueV2(HSAuint32 NodeId,
   HSAKMT_STATUS result;
 
   CHECK_DXG_OPEN();
-  assert(Event == nullptr);
 
 #if defined(__linux__)
   // Defer resolving libhsa-runtime64 symbols until a queue is actually needed.
@@ -117,13 +116,14 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtCreateQueueV2(HSAuint32 NodeId,
     uint32_t cmdbuf_size = device_->GetCmdbufSize();
     uint32_t queue_engine = device_->GetComputeEngine();
     bool use_hws = device_->IsHwsEnabled(queue_engine);
+    HSAuint32 event_id = Event ? Event->EventId : 0;
     auto queue_ = new wsl::thunk::ComputeQueue(
         device_, QueueAddress, pkg_num,
         reinterpret_cast<std::atomic<uint64_t> *>(
             QueueResource->Queue_write_ptr_aql),
         reinterpret_cast<std::atomic<uint64_t> *>(
             QueueResource->Queue_read_ptr_aql),
-        QueueResource->ErrorReason, cmdbuf_size, queue_engine, use_hws);
+        QueueResource->ErrorReason, cmdbuf_size, queue_engine, use_hws, event_id);
 
     QueueResource->QueueId = reinterpret_cast<HSA_QUEUEID>(queue_);
     // for doorbell_signal.hardware_doorbell_ptr

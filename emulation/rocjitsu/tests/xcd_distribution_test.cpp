@@ -23,11 +23,16 @@
 RJ_DIAGNOSTIC_PUSH
 RJ_DIAGNOSTIC_IGNORE_PEDANTIC
 #include "hsa/AMDHSAKernelDescriptor.h"
+#include "hsa/amd_hsa_queue.h"
 RJ_DIAGNOSTIC_POP
 
 #include <gtest/gtest.h>
 
+#include <sys/mman.h>
+
 #include <algorithm>
+#include <array>
+#include <atomic>
 #include <cstdint>
 #include <limits>
 #include <map>
@@ -51,9 +56,8 @@ constexpr uint32_t kWavefrontSize = 64;
 
 /// How many worker threads the fixture's engine runs on.
 enum class Threading {
-  /// One thread drives every XCD, as the config ships. Any ordering between two
-  /// XCDs is then a property of the single drain loop rather than of the code
-  /// under test.
+  /// One thread drives every XCD. Any ordering between two XCDs is then a
+  /// property of the single drain loop rather than of the code under test.
   Single,
   /// One thread per XCD, via the XCD-aware partitioning policy. This is what puts
   /// two command processors on genuinely opposing threads, so the cross-CP inbox
@@ -72,9 +76,12 @@ struct XcdDistributionFixture {
       : loaded(config::load_config(CONFIG_PATH, rocjitsu::kEmbeddedSchema)) {
     soc = loaded.soc();
     memory = loaded.memory();
-    if (threading == Threading::ThreadPerXcd)
-      loaded.engine_config.num_threads =
-          amdgpu::clamp_xcd_partition_count(soc, static_cast<uint32_t>(soc->num_xcds()));
+    // load_config() resolves an unset num_threads to one partition per XCD, so
+    // Single has to pin one worker rather than just leave the config alone.
+    loaded.engine_config.num_threads =
+        threading == Threading::ThreadPerXcd
+            ? amdgpu::clamp_xcd_partition_count(soc, static_cast<uint32_t>(soc->num_xcds()))
+            : 1u;
     engine = std::make_unique<simdojo::SimulationEngine>(loaded.engine_config);
     engine->topology().set_root(loaded.take_root());
     loaded.wire_links(engine->topology());
@@ -836,6 +843,91 @@ TEST(XcdDistributionTest, FanoutReportsOneExecutionPairWhenTheOwnerShareIsEmpty)
       << "execution end was reported before the grid's last workgroup retired";
 }
 
+TEST(XcdDistributionTest, ScratchAllocationProbeDoesNotFaultAndReusesBacking) {
+  XcdDistributionFixture fx;
+  KfdProcess process(7);
+  fx.memory->set_passthrough(true);
+  fx.memory->register_process(process.process_id(), &process.page_table_,
+                              &process.page_table_mutex_, process.page_table_generation());
+  class Reporter : public amdgpu::MemoryFaultReporter {
+  public:
+    std::atomic_uint faults{0};
+    void report_memory_fault(uint32_t, uint64_t, amdgpu::MemoryFaultCause) override {
+      faults.fetch_add(1, std::memory_order_relaxed);
+    }
+  } reporter;
+  fx.memory->set_memory_fault_reporter(&reporter);
+
+  constexpr uint32_t kPrivateBytes = 16;
+  constexpr size_t kScratchSize = kPrivateBytes * kWavefrontSize * kTotalCus;
+  void *const mapping = mmap(nullptr, kScratchSize, PROT_NONE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+  ASSERT_NE(mapping, MAP_FAILED);
+  auto release = [](void *address) { munmap(address, kScratchSize); };
+  std::unique_ptr<void, decltype(release)> reservation(mapping, release);
+  const uint64_t scratch_va = reinterpret_cast<uint64_t>(reservation.get());
+  std::vector<uint8_t> backing(kScratchSize);
+  std::atomic_uint allocations{0};
+  for (uint32_t xi = 0; xi < kTotalXcds; ++xi) {
+    amdgpu::CommandProcessor *cp = fx.soc->xcd(xi)->command_processor();
+    cp->set_scratch_backing_resolver([&](uint32_t) { return scratch_va; });
+    cp->set_scratch_backing_allocator([&](uint32_t pid, uint64_t va, size_t size) {
+      allocations.fetch_add(1, std::memory_order_relaxed);
+      EXPECT_EQ(pid, process.process_id());
+      EXPECT_EQ(va, scratch_va);
+      EXPECT_EQ(size, backing.size());
+      EXPECT_EQ(reporter.faults.load(std::memory_order_relaxed), 0u);
+      process.map_pages(va, backing.data(), backing.size());
+      return true;
+    });
+  }
+
+  using namespace rocr::llvm::amdhsa;
+  struct alignas(64) Kernel {
+    kernel_descriptor_t kd{};
+    uint32_t endpgm = build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4);
+  } kernel;
+  kernel.kd.kernel_code_entry_byte_offset = sizeof(kernel_descriptor_t);
+  kernel.kd.private_segment_fixed_size = kPrivateBytes;
+  AMDHSA_BITS_SET(kernel.kd.compute_pgm_rsrc1, COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT, 3);
+  AMDHSA_BITS_SET(kernel.kd.compute_pgm_rsrc1, COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT,
+                  1);
+  alignas(64) std::array<hsa_kernel_dispatch_packet_t, 64> ring{};
+  hsa_kernel_dispatch_packet_t &pkt = ring[0];
+  pkt.header = HSA_PACKET_TYPE_KERNEL_DISPATCH;
+  pkt.setup = 1;
+  pkt.workgroup_size_x = kWavefrontSize;
+  pkt.workgroup_size_y = pkt.workgroup_size_z = 1;
+  pkt.grid_size_x = kTotalCus * kWavefrontSize;
+  pkt.grid_size_y = pkt.grid_size_z = 1;
+  pkt.kernel_object = reinterpret_cast<uint64_t>(&kernel);
+  amd_queue_t queue_desc{};
+  queue_desc.write_dispatch_id = 1;
+  uint64_t doorbell = 1;
+  amdgpu::HwQueue hw{};
+  hw.process_id = process.process_id();
+  hw.queue_id = 1;
+  hw.ring_base_va = reinterpret_cast<uint64_t>(ring.data());
+  hw.ring_size = sizeof(ring);
+  hw.read_ptr_va = reinterpret_cast<uint64_t>(&queue_desc.read_dispatch_id);
+  hw.write_ptr_va = reinterpret_cast<uint64_t>(&queue_desc.write_dispatch_id);
+  hw.doorbell_base = &doorbell;
+  hw.host_accessible = true;
+  hw.xcd_fanout = true;
+  amdgpu::CommandProcessor *cp = fx.soc->assign_queue_owner_cp(0);
+  cp->register_queue(std::move(hw));
+  fx.engine->schedule_event_now(cp->doorbell_event());
+  fx.engine->run();
+
+  EXPECT_EQ(queue_desc.read_dispatch_id, 1u);
+  EXPECT_EQ(allocations.load(std::memory_order_relaxed), 1u);
+  EXPECT_EQ(reporter.faults.load(std::memory_order_relaxed), 0u);
+  for (uint64_t count : fx.soc->dispatched_workgroups_per_xcd())
+    EXPECT_EQ(count, kTotalCus / kTotalXcds);
+  cp->unregister_queue(1, process.process_id());
+  fx.memory->set_memory_fault_reporter(nullptr);
+  fx.memory->unregister_process(process.process_id());
+}
+
 // Scratch is the one resource a shard cannot size from its own share. A wave's
 // scratch slot is indexed by its *grid-wide* workgroup id, so the high-index
 // workgroups a peer XCD runs address the far end of the pool. Sizing the
@@ -923,7 +1015,7 @@ TEST(XcdDistributionTest, FanoutSizesScratchForTheWholeGridNotOneShare) {
 
   // NOTE: the companion claim -- that the pool is *mapped* once rather than once
   // per XCD -- is deliberately not asserted here. The allocator is skipped only
-  // when resolve_host_ptr() already answers for the pool, which needs a KFD
+  // when has_host_backing() already answers for the pool, which needs a KFD
   // process page table; this fixture dispatches on vmid 0, where nothing
   // resolves, so the allocator is re-entered per wave and the idempotent path is
   // unreachable. Pinning it needs a KFD-backed dispatch.

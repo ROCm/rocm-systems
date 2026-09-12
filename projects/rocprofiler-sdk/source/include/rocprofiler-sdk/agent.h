@@ -100,7 +100,7 @@ typedef struct rocprofiler_agent_mem_bank_t
 /**
  * @brief Provides an *estimate* about the runtime visibility of an agent based on the environment
  * variables (ROCR_VISIBLE_DEVICES, HIP_VISIBLE_DEVICES, GPU_DEVICE_ORDINAL, CUDA_VISIBLE_DEVICES).
- * Reference: https://rocm.docs.amd.com/en/latest/conceptual/gpu-isolation.html
+ * Reference: https://rocm.docs.amd.com/en/latest/reference/system-optimization/gpu-isolation.html
  */
 typedef struct rocprofiler_agent_runtime_visiblity_t
 {

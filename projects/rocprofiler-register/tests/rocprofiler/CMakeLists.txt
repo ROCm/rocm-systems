@@ -26,6 +26,6 @@ target_include_directories(
 set_target_properties(
     rocprofiler
     PROPERTIES OUTPUT_NAME rocprofiler-sdk
-               SOVERSION 0
-               VERSION 0.0.0)
+               SOVERSION 1
+               VERSION 1.0.0)
 rocp_register_strip_target(rocprofiler)

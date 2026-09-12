@@ -17,14 +17,17 @@ Pre-built configurations ship in the `configs/` directory:
 
 | File | Description |
 | --- | --- |
-| `amdgpu_cdna4.json` | Single CDNA4 GPU (standalone simulation) |
-| `amdgpu_cdna4_kmd.json` | Single CDNA4 GPU (daemon or KFD mode) |
-| `amdgpu_cdna4_kmd_2gpu.json` | Two CDNA4 GPUs (multi-GPU daemon mode) |
-| `amdgpu_cdna3.json` | Single CDNA3 GPU (standalone simulation) |
-| `amdgpu_cdna3_kmd.json` | Single CDNA3 GPU (daemon or KFD mode) |
-| `amdgpu_rdna3_gfx1100_w7900_kmd.json` | Single RDNA3 gfx1100 GPU (KFD mode) |
-| `amdgpu_rdna4_gfx1201_r9700_kmd.json` | Single RDNA4 gfx1201 GPU (KFD mode) |
-| `amdgpu_gfx1250.json` | Single gfx1250 GPU (standalone simulation, no KMD) |
+| `gfx90a_mi210_kmd.json` | Single CDNA2 GPU (daemon or KFD mode) |
+| `gfx942_cdna3.json` | Single CDNA3 GPU (standalone simulation) |
+| `gfx942_cdna3_kmd.json` | Single CDNA3 GPU (daemon or KFD mode) |
+| `gfx950_mi355x.json` | Single CDNA4 GPU (standalone simulation) |
+| `gfx950_mi355x_kmd.json` | Single CDNA4 GPU (daemon or KFD mode) |
+| `gfx950_mi355x_kmd_2gpu.json` | Two CDNA4 GPUs (multi-GPU daemon mode) |
+| `gfx1250_mi455x.json` | Single CDNA5 GPU (standalone simulation) |
+| `gfx1250_mi455x_kmd_4gpu.json` | Four CDNA5 GPUs (multi-GPU daemon mode) |
+| `gfx1100_w7900.json` | Single RDNA3 GPU (standalone simulation) |
+| `gfx1151.json` | Single RDNA3.5 GPU (standalone simulation) |
+| `gfx1201_r9700.json` | Single RDNA4 GPU (standalone simulation) |
 
 Standalone configs (without `_kmd` in the name) are intended for caller-driven simulation where you step or run the VM directly. KMD configs initialize the emulated kernel driver so that an unmodified HIP or HSA application can issue ioctls through the LD_PRELOAD interposer.
 
@@ -36,6 +39,7 @@ Copy a pre-built config and modify the fields that matter for your workload. The
 {
   "max_ticks": 100000,
   "num_threads": 1,
+  "cpu_dispatch_threads": 0,
   "exec_mode": "functional",
   "vm": { "arch": "cdna4" },
   "topology": { "..." : "..." }
@@ -48,11 +52,26 @@ An integer that caps the number of simulation ticks. The VM stops when all prima
 
 ### `num_threads`
 
-The number of worker threads the PDES simulation engine uses. Set to `1` for single-threaded execution.
+The number of Simdojo engine partitions. rocJITsu assigns whole XCD subtrees to
+these partitions and clamps the value to the aggregate XCD count. Set to `1` to
+keep all XCDs on one engine partition.
+
+### `cpu_dispatch_threads`
+
+The host-thread width used to execute accepted CU work in functional mode. A
+nonzero value is applied per SoC and shared by all command processors in that
+SoC. The default, `1`, keeps dispatch serial. Setting the field explicitly to
+`0` creates one automatic host-wide budget from the available hardware threads,
+caps it at 32, and divides it as evenly as possible across the SoCs. After
+either selection, each SoC's effective width is capped at the largest number of
+CUs owned by any one command processor in that SoC. This control does not
+change XCD partitioning, queue ownership, or XCD fan-out. Clocked mode always
+uses an effective value of `1`.
 
 ### `exec_mode`
 
-The execution model for compute units. Accepted values are `"functional"` (instruction-accurate, no timing) and `"cycle"` (cycle-accurate timing).
+The execution model for compute units. Accepted values are `"functional"`
+(instruction-accurate, no timing) and `"clocked"` (cycle-accurate timing).
 
 ### `vm.arch`
 
@@ -66,7 +85,8 @@ KFD-mode configs include a `vm.gpu.device` section that defines the properties r
 
 Multi-GPU configs define multiple SoCs, each with a distinct GPU ID and location ID. Every GPU receives its own command processor, memory model, and cache hierarchy. The daemon manages all GPUs and routes KFD ioctls to the correct device based on `gpu_id`.
 
-The file `configs/amdgpu_cdna4_kmd_2gpu.json` is a working two-GPU configuration used by the RCCL collective tests. To extend it:
+The file `configs/gfx950_mi355x_kmd_2gpu.json` is a working two-GPU
+configuration used by the RCCL collective tests. To extend it:
 
 1.  Duplicate the SoC subtree in the `topology.root.children` array.
 2.  Assign each SoC a unique `gpu_id` and `location_id` in its device section.
@@ -93,7 +113,7 @@ Both functions take a `rj_vm_mode_t` parameter that controls initialization dept
 #include "rocjitsu/vm/rj_vm.h"
 
 rj_vm_t *vm = NULL;
-rj_status_t status = rj_vm_create("configs/amdgpu_cdna4_kmd.json",
+rj_status_t status = rj_vm_create("configs/gfx950_mi355x_kmd.json",
                                    RJ_VM_MODE_LOCAL, &vm);
 if (status != ROCJITSU_STATUS_SUCCESS) {
     fprintf(stderr, "rj_vm_create failed: %d\n", status);

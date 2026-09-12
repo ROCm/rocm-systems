@@ -121,10 +121,19 @@ jobs:
             exit 1
           fi
 
-          # Build the library
+          # Build the library, and with it the DXG unit tests: they are off by
+          # default so that a packaging build is unaffected, which leaves this
+          # job as the only place they ever get built and run.
           mkdir -p build
           cd build
-          cmake .. -G Ninja -DWIN_SDK="${win_sdk}/shared"
+          cmake .. -G Ninja -DWIN_SDK="${win_sdk}/shared" -DBUILD_ROCDXG_TESTS=ON
           ninja
 
           echo "libhsakmt build completed successfully!"
+
+      - name: Run DXG unit tests
+        shell: wsl-bash {0}
+        run: |
+          set -euo pipefail
+          cd ~/rocm-systems/projects/rocr-runtime/libhsakmt/build
+          ctest --output-on-failure

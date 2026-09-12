@@ -60,6 +60,7 @@ def get_perfetto_category_name(category):
         "HIPFILE_API": "hipfile_api",
         "HIP_STREAM": "hip_api",
         "HIP_GRAPH": "hip_api",
+        "HIP_EVENT": "hip_event",
         "HIP_RUNTIME_API_EXT": "hip_api",
         "HIP_COMPILER_API_EXT": "hip_api",
         "ROCDECODE_API_EXT": "rocdecode_api",
@@ -100,7 +101,13 @@ def allocation_level_type_name(level, type):
 def write_otf2(importData, config):
     try:
         import otf2
-        from otf2.enums import LocationType, LocationGroupType, RegionRole, Paradigm
+        from otf2.enums import (
+            LocationType,
+            LocationGroupType,
+            RegionRole,
+            Paradigm,
+            Type,
+        )
     except ImportError as e:
         raise ImportError(
             "otf2 module not found. Please install it using 'pip install otf2' to convert to OTF2 format"
@@ -168,6 +175,23 @@ def write_otf2(importData, config):
                         name="kernel_dispatch_count",
                         description="kernel dispatch packets written during a HIP graph launch",
                     )
+                    hip_event_attributes = {perfetto_category: "hip_event"}
+                    # OTF2 attributes default to Type.STRING; both of these carry
+                    # integer identifiers, so the type must be declared explicitly or
+                    # writing the value fails with a string-reference error.
+                    hip_event_handle_attribute = archive.definitions.attribute(
+                        name="hip_event_handle",
+                        description="hipEvent_t the record or wait barrier belongs to",
+                        type=Type.UINT64,
+                    )
+                    hip_event_source_queue_attribute = archive.definitions.attribute(
+                        name="source_queue_id",
+                        description=(
+                            "Queue the awaited event was recorded on; equals queue_id "
+                            "for a record"
+                        ),
+                        type=Type.UINT64,
+                    )
 
                     def add_graph_attributes(
                         attributes, graph_exec_id=None, graph_node_id=None
@@ -216,6 +240,7 @@ def write_otf2(importData, config):
                             memory_unknown = defaultdict(list)
                             kernel_dispatches = defaultdict(list)
                             graph_launches = defaultdict(list)
+                            hip_event_records = defaultdict(list)
                             agents = {}
 
                             cursor = conn.cursor()
@@ -320,6 +345,36 @@ def write_otf2(importData, config):
                                             end,
                                             graph_exec_id,
                                             kernel_dispatch_count,
+                                        )
+                                    )
+
+                            if "hip_event" in importData.supported_features:
+                                cursor = conn.cursor()
+                                cursor.execute(
+                                    """SELECT tid, agent_abs_index, queue_id, start, end,
+                                    name, hip_event_handle, source_queue_id
+                                    FROM hip_events WHERE guid = ? AND nid = ?
+                                    AND pid = ? ORDER BY start ASC""",
+                                    (guid, nid, pid),
+                                )
+                                for row in cursor:
+                                    (
+                                        tid,
+                                        agent,
+                                        queue,
+                                        start,
+                                        end,
+                                        name,
+                                        hip_event_handle,
+                                        source_queue_id,
+                                    ) = row
+                                    hip_event_records[(tid, agent, queue)].append(
+                                        (
+                                            start,
+                                            end,
+                                            name,
+                                            hip_event_handle,
+                                            source_queue_id,
                                         )
                                     )
 
@@ -592,6 +647,67 @@ def write_otf2(importData, config):
                                         memory_unknown_writer.leave(timestamp, region)
 
                             # Write Kernel Dispatch Events
+                            # Write HIP Event Records. Placed on the accelerator stream
+                            # rather than a CPU thread: these are GPU barrier completions
+                            # on a specific agent and queue, so they belong next to the
+                            # kernel dispatches they order against.
+                            if "hip_event" in importData.supported_features:
+                                for (
+                                    tid,
+                                    agent_id,
+                                    queue,
+                                ), data in hip_event_records.items():
+                                    agent_name, agent_location_group = agents.get(
+                                        agent_id, (f"Unknown Agent {agent_id}", None)
+                                    )
+                                    hip_event_location = archive.definitions.location(
+                                        name=f"Thread {tid}, HIP Event on {agent_name}, Queue {queue}",
+                                        type=LocationType.ACCELERATOR_STREAM,
+                                        group=agent_location_group,
+                                    )
+                                    hip_event_writer = otf2.writer.EventWriter(
+                                        archive, hip_event_location
+                                    )
+                                    hip_events_out = []
+                                    for (
+                                        start,
+                                        end,
+                                        name,
+                                        hip_event_handle,
+                                        source_queue_id,
+                                    ) in data:
+                                        region = archive.definitions.region(
+                                            name=name,
+                                            region_role=RegionRole.FUNCTION,
+                                            paradigm=Paradigm.HIP,
+                                        )
+                                        attributes = dict(hip_event_attributes)
+                                        attributes[hip_event_handle_attribute] = (
+                                            hip_event_handle
+                                        )
+                                        attributes[hip_event_source_queue_attribute] = (
+                                            source_queue_id
+                                        )
+                                        hip_events_out.append(
+                                            (start, "enter", region, attributes)
+                                        )
+                                        hip_events_out.append(
+                                            (end, "leave", region, None)
+                                        )
+                                    hip_events_out.sort(key=lambda x: x[0])
+                                    for (
+                                        timestamp,
+                                        event_type,
+                                        region,
+                                        attributes,
+                                    ) in hip_events_out:
+                                        if event_type == "enter":
+                                            hip_event_writer.enter(
+                                                timestamp, region, attributes=attributes
+                                            )
+                                        else:  # if event_type == "leave":
+                                            hip_event_writer.leave(timestamp, region)
+
                             for (tid, agent_id, queue), data in kernel_dispatches.items():
                                 agent_name, agent_location_group = agents.get(
                                     agent_id, (f"Unknown Agent {agent_id}", None)

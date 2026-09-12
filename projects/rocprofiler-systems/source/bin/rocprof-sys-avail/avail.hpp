@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include "common/string_utility.hpp"
 #include "core/demangler.hpp"
 #include "defines.hpp"
 #include <cstdint>
@@ -99,9 +100,7 @@ public:
         current_entry->insert({ "identifier", name });
         std::string       func   = name;
         const std::string prefix = TIMEMORY_SETTINGS_PREFIX;
-        func                     = func.erase(0, prefix.length());
-        std::transform(func.begin(), func.end(), func.begin(),
-                       [](char& c) { return tolower(c); });
+        func = rocprofsys::utility::string::to_lower(func.erase(0, prefix.length()));
         {
             std::stringstream ss;
             ss << "settings::" << func << "()";

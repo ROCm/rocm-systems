@@ -6,6 +6,7 @@
 
 #pragma once
 
+#include <cstdint>
 #include <mutex>
 #include "top.hpp"
 
@@ -116,7 +117,7 @@ struct RocrEntryPoints {
   decltype(hsa_amd_svm_attributes_get)* hsa_amd_svm_attributes_get_;
   decltype(hsa_amd_svm_prefetch_async)* hsa_amd_svm_prefetch_async_;
   decltype(hsa_amd_svm_discard_batch_async)* hsa_amd_svm_discard_batch_async_;
-  decltype(hsa_amd_portable_export_dmabuf)* hsa_amd_portable_export_dmabuf_;
+  decltype(hsa_amd_portable_export_dmabuf_v2)* hsa_amd_portable_export_dmabuf_v2_;
   decltype(hsa_amd_portable_close_dmabuf)* hsa_amd_portable_close_dmabuf_;  // CLR doesn't use it?
   decltype(hsa_amd_vmem_address_reserve)* hsa_amd_vmem_address_reserve_;
   decltype(hsa_amd_vmem_address_free)* hsa_amd_vmem_address_free_;
@@ -502,9 +503,9 @@ class Hsa : public amd::AllStatic {
     return ROCR_DYN(hsa_amd_svm_discard_batch_async)(ptrs, sizes, count, num_dep_signals,
         dep_signals, completion_signal);
   }
-  static hsa_status_t portable_export_dmabuf(const void* ptr, size_t size, int* dmabuf,
-    uint64_t* offset) {
-    return ROCR_DYN(hsa_amd_portable_export_dmabuf)(ptr, size, dmabuf, offset);
+  static hsa_status_t portable_export_dmabuf_v2(const void* ptr, size_t size, int* dmabuf,
+    uint64_t* offset, uint64_t flags) {
+    return ROCR_DYN(hsa_amd_portable_export_dmabuf_v2)(ptr, size, dmabuf, offset, flags);
   }
   static hsa_status_t vmem_address_reserve(void** ptr, size_t size, uint64_t address,
     uint64_t flags) {

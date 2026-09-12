@@ -30,12 +30,14 @@
 #include "lib/common/environment.hpp"
 #include "lib/common/filesystem.hpp"
 #include "lib/common/logging.hpp"
+#include "lib/common/scope_destructor.hpp"
 #include "lib/common/static_object.hpp"
 #include "lib/common/static_tl_object.hpp"
 #include "lib/rocprofiler-sdk/agent.hpp"
 #include "lib/rocprofiler-sdk/code_object/code_object.hpp"
 #include "lib/rocprofiler-sdk/context/context.hpp"
 #include "lib/rocprofiler-sdk/context/correlation_id.hpp"
+#include "lib/rocprofiler-sdk/hip/event.hpp"
 #include "lib/rocprofiler-sdk/hip/graph.hpp"
 #include "lib/rocprofiler-sdk/hip/hip.hpp"
 #include "lib/rocprofiler-sdk/hip/stream.hpp"
@@ -162,6 +164,23 @@ resolved_exists(std::string_view fname)
     return fs::exists(fname);
 }
 
+fs::path
+normalized_library_path(const fs::path& path)
+{
+    auto ec       = std::error_code{};
+    auto resolved = fs::weakly_canonical(path, ec);
+    return (ec) ? path.lexically_normal() : resolved;
+}
+
+bool
+same_library_path(const fs::path& lhs, const fs::path& rhs)
+{
+    auto ec = std::error_code{};
+    if(fs::equivalent(lhs, rhs, ec)) return true;
+
+    return normalized_library_path(lhs) == normalized_library_path(rhs);
+}
+
 auto
 get_this_library_path()
 {
@@ -231,16 +250,18 @@ set_rocprofiler_register_library()
             else
             {
                 // only report conflict if existing value differs from this library path
-                auto _existing_path = fs::path{_existing};
+                auto _existing_path     = fs::path{_existing};
+                auto _current_path      = fs::path{_this_library_path};
+                auto _existing_resolved = normalized_library_path(_existing_path);
                 ROCP_CI_LOG_IF(WARNING,
                                _existing_path.is_absolute() &&
-                                   fs::canonical(_existing_path).string() != _this_library_path)
+                                   !same_library_path(_existing_path, _current_path))
                     << fmt::format(
                            "ROCPROFILER_REGISTER_LIBRARY is already set to '{}' (resolves to "
                            "'{}'), not overriding with '{}'",
                            _existing,
-                           fs::canonical(_existing_path).string(),
-                           _this_library_path);
+                           _existing_resolved.string(),
+                           _current_path.string());
             }
         }
     });
@@ -406,7 +427,7 @@ emplace_client(Tp&                                 data,
     {
         if(itr && *itr == _client_v)
         {
-            ROCP_WARNING << fmt::format(
+            ROCP_INFO << fmt::format(
                 "found matching client library for '{}' :: {}", _name, itr->get_name());
             return itr;
         }
@@ -740,12 +761,12 @@ invoke_client_configure(std::optional<client_library>& itr)
             }
         }
 
-        ROCP_WARNING << fmt::format("initialized tool configure for {} :: {} :: {} :: {} :: {}",
-                                    itr->get_name(),
-                                    sdk::utility::as_hex(itr->configure_func),
-                                    sdk::utility::as_hex(itr->configure_result),
-                                    sdk::utility::as_hex(itr->configure_result->initialize),
-                                    sdk::utility::as_hex(itr->configure_result->finalize));
+        ROCP_INFO << fmt::format("initialized tool configure for {} :: {} :: {} :: {} :: {}",
+                                 itr->get_name(),
+                                 sdk::utility::as_hex(itr->configure_func),
+                                 sdk::utility::as_hex(itr->configure_result),
+                                 sdk::utility::as_hex(itr->configure_result->initialize),
+                                 sdk::utility::as_hex(itr->configure_result->finalize));
     }
     else
     {
@@ -790,12 +811,12 @@ invoke_client_initializer(std::optional<client_library>& itr)
                 invoke_client_finalizer(_id);
         };
 
-        ROCP_WARNING << fmt::format("invoking tool initialize for {} :: {} :: {} :: {} :: {}",
-                                    itr->get_name(),
-                                    sdk::utility::as_hex(itr->configure_func),
-                                    sdk::utility::as_hex(itr->configure_result),
-                                    sdk::utility::as_hex(itr->configure_result->initialize),
-                                    sdk::utility::as_hex(itr->configure_result->finalize));
+        ROCP_INFO << fmt::format("invoking tool initialize for {} :: {} :: {} :: {} :: {}",
+                                 itr->get_name(),
+                                 sdk::utility::as_hex(itr->configure_func),
+                                 sdk::utility::as_hex(itr->configure_result),
+                                 sdk::utility::as_hex(itr->configure_result->initialize),
+                                 sdk::utility::as_hex(itr->configure_result->finalize));
         context::push_client(itr->internal_client_id.handle);
         itr->configure_result->initialize(client_fini_func, itr->configure_result->tool_data);
         context::pop_client(itr->internal_client_id.handle);
@@ -950,12 +971,12 @@ invoke_client_finalizer(rocprofiler_client_id_t client_id)
             context::stop_client_contexts(itr->internal_client_id);
             if(itr->configure_result && itr->configure_result->finalize)
             {
-                ROCP_WARNING << fmt::format("invoking tool finalize for {} :: {} :: {} :: {} :: {}",
-                                            itr->get_name(),
-                                            sdk::utility::as_hex(itr->configure_func),
-                                            sdk::utility::as_hex(itr->configure_result),
-                                            sdk::utility::as_hex(itr->configure_result->initialize),
-                                            sdk::utility::as_hex(itr->configure_result->finalize));
+                ROCP_INFO << fmt::format("invoking tool finalize for {} :: {} :: {} :: {} :: {}",
+                                         itr->get_name(),
+                                         sdk::utility::as_hex(itr->configure_func),
+                                         sdk::utility::as_hex(itr->configure_result),
+                                         sdk::utility::as_hex(itr->configure_result->initialize),
+                                         sdk::utility::as_hex(itr->configure_result->finalize));
 
                 // set to nullptr so finalize only gets called once
                 rocprofiler_tool_finalize_t _finalize_func = nullptr;
@@ -1061,14 +1082,27 @@ initialize()
 
     ROCP_INFO << "rocprofiler initialize called...";
 
-    if(get_init_status() != 0)
+    if(get_init_status() == 1) return;
+
+    // A re-entrant call from the thread that is currently running the call_once
+    // below must return instead of blocking: invoke_client_configures() dlopens
+    // the tool library, whose constructor can call back into initialize(), and
+    // std::call_once on an in-progress once_flag deadlocks the thread executing
+    // it. Any *other* thread falls through and blocks until initialization
+    // completes, rather than proceeding against a partially initialized SDK.
+    static thread_local bool _initializing = false;
+    if(_initializing)
     {
-        ROCP_INFO << "rocprofiler initialize ignored...";
+        ROCP_INFO << "rocprofiler initialize ignored (re-entrant call during "
+                     "initialization)...";
         return;
     }
 
     static auto _once = std::once_flag{};
     std::call_once(_once, []() {
+        auto _initializing_scope = common::scope_destructor{[]() { _initializing = false; },
+                                                            []() { _initializing = true; }};
+
         ROCP_INFO << "rocprofiler initialize started...";
         // set the "ROCPROFILER_REGISTER_LIBRARY" env var
         set_rocprofiler_register_library();
@@ -1274,10 +1308,20 @@ rocprofiler_force_configure(rocprofiler_configure_func_t configure_func)
         return status;
     }
 
-    // init status may be -1 (currently initializing) or 1 (already initialized).
-    // if either case, we want to ignore this function call but if this is
-    if(rocprofiler::registration::get_init_status() != 0)
+    // An already initialized SDK (init_status > 0) took the anytime-initialization
+    // path above, so a non-zero status here means init_status < 0: initialization
+    // is in progress and the configuration window is closed. init_status == 0 is
+    // the normal first forced configure and falls through to the code below.
+    if(auto _init_status = rocprofiler::registration::get_init_status(); _init_status != 0)
+    {
+        ROCP_WARNING << "rocprofiler_force_configure() ignored (CONFIGURATION_LOCKED): "
+                        "rocprofiler-sdk initialization is already in progress (init_status="
+                     << _init_status
+                     << "). The configuration window is closed; this commonly occurs when the "
+                        "OpenMP runtime invoked the SDK's ompt_start_tool() before the application "
+                        "called rocprofiler_force_configure().";
         return ROCPROFILER_STATUS_ERROR_CONFIGURATION_LOCKED;
+    }
 
     // ROCPROFILER_REGISTER_FORCE_LOAD=1 forces rocprofiler-register to load rocprofiler-sdk
     rocprofiler::common::set_env("ROCPROFILER_REGISTER_FORCE_LOAD", "1", 1);
@@ -1400,6 +1444,7 @@ rocprofiler_set_api_table(const char* name,
         // copy or else those modifications will be lost when HIP API tracing is enabled
         // because the HIP API tracing invokes the function pointers from the copy below
         rocprofiler::hip::graph::update_table(hip_runtime_api_table);
+        rocprofiler::hip::event::update_table(hip_runtime_api_table);
 
         rocprofiler::hip::copy_table(hip_runtime_api_table, lib_instance);
 
@@ -1563,6 +1608,8 @@ rocprofiler_set_api_table(const char* name,
                             ctx->dispatch_spm != nullptr ||
                             ctx->is_tracing(ROCPROFILER_BUFFER_TRACING_HIP_GRAPH) ||
                             ctx->is_tracing(ROCPROFILER_CALLBACK_TRACING_KERNEL_REPLAY) ||
+                            ctx->is_tracing(ROCPROFILER_CALLBACK_TRACING_HIP_EVENT) ||
+                            ctx->is_tracing(ROCPROFILER_BUFFER_TRACING_HIP_EVENT) ||
                             (ctx->device_thread_trace != nullptr &&
                              ctx->device_thread_trace->requires_queue_intercept()));
                 });

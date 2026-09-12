@@ -61,7 +61,6 @@
 #include <rocprofiler-sdk/marker/api_id.h>
 #include <rocprofiler-sdk/rocprofiler.h>
 
-#include <timemory/defines.h>
 #include <timemory/process/threading.hpp>
 #include <timemory/utility/types.hpp>
 
@@ -654,6 +653,7 @@ void
 cache_scratch_memory(rocprofiler_buffer_tracing_scratch_memory_record_t* record,
                      std::uint64_t                                       stream_handle)
 {
+    trace_cache::get_metadata_registry().add_queue(record->queue_id.handle);
     trace_cache::get_metadata_registry().add_stream(stream_handle);
     trace_cache::get_buffer_storage().store(trace_cache::scratch_memory_sample{
         record->start_timestamp, record->end_timestamp, record->thread_id,
@@ -2766,7 +2766,7 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* user_data)
     if(!gpu_perf_counters_setting.empty() && !_data->gpu_agents.empty())
     {
         pmc::register_gpu_perf_counter_source(
-            get_agent_manager_instance().get_agents_by_type(agent_type::GPU));
+            get_agent_manager_instance().get_agents_by_type(agent_type::gpu));
     }
 #endif
 

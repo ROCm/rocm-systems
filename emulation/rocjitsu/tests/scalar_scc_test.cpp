@@ -285,10 +285,10 @@ void expect_wrexec_def_use(const ScalarSccProfile &profile, const WrexecPair &pa
 
     const RegisterRef source{RegClass::SGPR, kSourceSgpr, width};
     const RegisterRef destination{RegClass::SGPR, kDestSgpr, width};
-    // The implicit EXEC read/write and SCC def are modeled as inert fieldless
-    // operands (to_register_ref() == nullopt): they add to the operand counts
-    // but contribute nothing to def/use at this time. The field-bearing SGPR
-    // source/dest stay at index 0.
+    // The implicit EXEC read/write and SCC def are fieldless special operands
+    // (to_register_ref() == nullopt): they become singleton special members of
+    // the def/use sets, but stay out of the ordinary projection asserted below.
+    // The field-bearing SGPR source/dest stay at index 0.
     ASSERT_EQ(inst->num_src_operands(), 2) << profile.name << " " << mnemonic;
     ASSERT_EQ(inst->num_dst_operands(), 3) << profile.name << " " << mnemonic;
     EXPECT_EQ(inst->src_operand(0)->to_register_ref(), source) << profile.name << " " << mnemonic;
@@ -308,8 +308,20 @@ void expect_wrexec_def_use(const ScalarSccProfile &profile, const WrexecPair &pa
     EXPECT_FALSE(def_use.uses.contains(destination)) << profile.name << " " << mnemonic;
     EXPECT_TRUE(def_use.defs.contains(destination)) << profile.name << " " << mnemonic;
     EXPECT_FALSE(def_use.defs.contains(source)) << profile.name << " " << mnemonic;
-    EXPECT_EQ(def_use.uses.size(), static_cast<size_t>(width)) << profile.name << " " << mnemonic;
-    EXPECT_EQ(def_use.defs.size(), static_cast<size_t>(width)) << profile.name << " " << mnemonic;
+    EXPECT_EQ(def_use.uses.ordinary_size(), static_cast<size_t>(width))
+        << profile.name << " " << mnemonic;
+    EXPECT_EQ(def_use.defs.ordinary_size(), static_cast<size_t>(width))
+        << profile.name << " " << mnemonic;
+
+    // wrexec reads and writes EXEC and sets SCC: these fieldless special
+    // operands are singleton members of the def/use sets (outside the ordinary
+    // projection asserted above).
+    EXPECT_TRUE(def_use.uses.contains(RegisterRef{RegClass::EXEC, 0, 1}))
+        << profile.name << " " << mnemonic;
+    EXPECT_TRUE(def_use.defs.contains(RegisterRef{RegClass::EXEC, 0, 1}))
+        << profile.name << " " << mnemonic;
+    EXPECT_TRUE(def_use.defs.contains(RegisterRef{RegClass::SCC, 0, 1}))
+        << profile.name << " " << mnemonic;
   }
 }
 
@@ -689,8 +701,9 @@ TEST(ScalarSccTest, AddkAndMulkRegisterDestinationRead) {
       ASSERT_NE(inst, nullptr) << profile.name << " " << mnemonic;
       ASSERT_EQ(std::string_view(inst->mnemonic()), mnemonic) << profile.name;
 
-      // s_addk_i32 sets SCC, modeled as an inert fieldless dst operand;
-      // s_mulk_i32 does not touch SCC. SCC carries no def/use either way.
+      // s_addk_i32 sets SCC through a fieldless dst operand (no RegisterRef);
+      // s_mulk_i32 does not. InstDefUse records that SCC write as a singleton
+      // special member of defs, kept out of the ordinary projection below.
       const bool sets_scc = mnemonic != std::string_view{"s_mulk_i32"};
       ASSERT_EQ(inst->num_src_operands(), 2) << profile.name << " " << mnemonic;
       ASSERT_EQ(inst->num_dst_operands(), sets_scc ? 2 : 1) << profile.name << " " << mnemonic;
@@ -713,8 +726,12 @@ TEST(ScalarSccTest, AddkAndMulkRegisterDestinationRead) {
           << profile.name << " " << mnemonic;
       EXPECT_TRUE(def_use.defs.contains(RegisterRef{RegClass::SGPR, 4, 1}))
           << profile.name << " " << mnemonic;
-      EXPECT_EQ(def_use.uses.size(), 1u) << profile.name << " " << mnemonic;
-      EXPECT_EQ(def_use.defs.size(), 1u) << profile.name << " " << mnemonic;
+      // The implicit SCC def is a special member of defs; the ordinary
+      // projection is just the s4 read-modify-write.
+      EXPECT_EQ(def_use.defs.contains(RegisterRef{RegClass::SCC, 0, 1}), sets_scc)
+          << profile.name << " " << mnemonic;
+      EXPECT_EQ(def_use.uses.ordinary_size(), 1u) << profile.name << " " << mnemonic;
+      EXPECT_EQ(def_use.defs.ordinary_size(), 1u) << profile.name << " " << mnemonic;
     }
   }
 }

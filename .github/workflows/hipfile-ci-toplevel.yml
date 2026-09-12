@@ -41,7 +41,7 @@ jobs:
           "g++"
         ]
       # C++20 is the production standard. C++23 is a forward-compat smoke test
-      # run once via MATRIX_INCLUDE (ubuntu + amdclang++ + 7.2.2), not fanned out.
+      # run once via MATRIX_INCLUDE (ubuntu + amdclang++ + 10.0.0), not fanned out.
       CXX_STANDARD: >-
         [
           20
@@ -56,8 +56,8 @@ jobs:
         ]
       ROCM_VERSIONS: >-
         [
-          "7.2.2",
-          "7.13.0",
+          "7.14.0",
+          "10.0.0",
           "nightly"
         ]
       # MATRIX_INCLUDE / MATRIX_EXCLUDE: extra/removed matrix entries, passed
@@ -65,20 +65,17 @@ jobs:
       # combinations can be expressed without abandoning the base cross-product.
       MATRIX_INCLUDE: >-
         [
-          {"supported_platforms": "ubuntu", "rocm_versions": "7.2.2", "cxx_compiler": "amdclang++", "cxx_standard": 23}
+          {"supported_platforms": "ubuntu", "rocm_versions": "10.0.0", "cxx_compiler": "amdclang++", "cxx_standard": 23}
         ]
-      # 7.13.0 and nightly are ubuntu-only targets. They live in the base
-      # ROCM_VERSIONS axis and are removed from every other distro via
-      # MATRIX_EXCLUDE below. This is cleaner than specifying the full
-      # combination of CI parameters in include as the matrix axes grow.
+      # Only test nightly ROCm on non-ubuntu distros.
       MATRIX_EXCLUDE: >-
         [
-          {"supported_platforms": "rocky", "rocm_versions": "7.13.0"},
-          {"supported_platforms": "rocky", "rocm_versions": "nightly"},
-          {"supported_platforms": "rocky8", "rocm_versions": "7.13.0"},
-          {"supported_platforms": "rocky8", "rocm_versions": "nightly"},
-          {"supported_platforms": "suse", "rocm_versions": "7.13.0"},
-          {"supported_platforms": "suse", "rocm_versions": "nightly"}
+          {"supported_platforms": "rocky", "rocm_versions": "7.14.0"},
+          {"supported_platforms": "rocky", "rocm_versions": "10.0.0"},
+          {"supported_platforms": "rocky8", "rocm_versions": "7.14.0"},
+          {"supported_platforms": "rocky8", "rocm_versions": "10.0.0"},
+          {"supported_platforms": "suse", "rocm_versions": "7.14.0"},
+          {"supported_platforms": "suse", "rocm_versions": "10.0.0"}
         ]
     steps:
       - name: Fetching code repository...
@@ -255,7 +252,7 @@ jobs:
       security-events: write
     uses: ./.github/workflows/hipfile-codeql.yml
     with:
-      ci_image: ${{ fromJSON(needs.Precheck.outputs.ci_images)['ubuntu-7.2.2'].ci_image }}
+      ci_image: ${{ fromJSON(needs.Precheck.outputs.ci_images)['ubuntu-7.14.0'].ci_image }}
 
   # Sanitizer-instrumented unit tests are clang-only and platform/standard
   # independent, so run them exactly once against a single fixed image rather
@@ -272,7 +269,7 @@ jobs:
     needs: [Precheck, build_CI_image]
     uses: ./.github/workflows/hipfile-sanitizers.yml
     with:
-      ci_image: ${{ fromJSON(needs.Precheck.outputs.ci_images)['ubuntu-7.2.2'].ci_image }}
+      ci_image: ${{ fromJSON(needs.Precheck.outputs.ci_images)['ubuntu-7.14.0'].ci_image }}
 
   # clang-tidy findings are compiler- and standard-independent, so run the
   # analysis exactly once against a single fixed image rather than fanning out
@@ -289,7 +286,7 @@ jobs:
     needs: [Precheck, build_CI_image]
     uses: ./.github/workflows/hipfile-clang-tidy.yml
     with:
-      ci_image: ${{ fromJSON(needs.Precheck.outputs.ci_images)['ubuntu-7.2.2'].ci_image }}
+      ci_image: ${{ fromJSON(needs.Precheck.outputs.ci_images)['ubuntu-7.14.0'].ci_image }}
 
   # Compile-only check that hipFile's dispatch-table ABI still satisfies the
   # rocprofiler-sdk profiler's static_asserts. Guards against the profiler build
@@ -307,4 +304,4 @@ jobs:
     needs: [Precheck, build_CI_image]
     uses: ./.github/workflows/hipfile-profiler-abi.yml
     with:
-      ci_image: ${{ fromJSON(needs.Precheck.outputs.ci_images)['ubuntu-7.2.2'].ci_image }}
+      ci_image: ${{ fromJSON(needs.Precheck.outputs.ci_images)['ubuntu-7.14.0'].ci_image }}

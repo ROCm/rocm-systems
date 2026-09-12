@@ -62,17 +62,34 @@ jobs:
     with:
       ais_hipfile_pkg_dev_filename: ${{ needs.build_and_test.outputs.ais_hipfile_pkg_dev_filename }}
       ais_hipfile_pkg_filename: ${{ needs.build_and_test.outputs.ais_hipfile_pkg_filename }}
+      ais_mount_path: /mnt/ais/ext4
       ci_image: ${{ needs.build_and_test.outputs.ci_image }}
       cxx_compiler: ${{ inputs.cxx_compiler }}
       cxx_standard: ${{ inputs.cxx_standard }}
+      mount_label: system_ext4
+      platform: ${{ inputs.platform }}
+      rocm_version: ${{ inputs.rocm_version }}
+
+  AIS_system_lvm_tests:
+    needs: [build_and_test]
+    uses: ./.github/workflows/hipfile-ci-system.yml
+    with:
+      ais_hipfile_pkg_dev_filename: ${{ needs.build_and_test.outputs.ais_hipfile_pkg_dev_filename }}
+      ais_hipfile_pkg_filename: ${{ needs.build_and_test.outputs.ais_hipfile_pkg_filename }}
+      ais_mount_path: /mnt/ais/lvm
+      ci_image: ${{ needs.build_and_test.outputs.ci_image }}
+      cxx_compiler: ${{ inputs.cxx_compiler }}
+      cxx_standard: ${{ inputs.cxx_standard }}
+      mount_label: system_lvm
       platform: ${{ inputs.platform }}
       rocm_version: ${{ inputs.rocm_version }}
 
   build_and_test_NVIDIA:
     # NVIDIA can't build with amdclang++; its meaningful compilers (clang++, g++)
     # arrive via the cxx_compiler axis, so skip the amdclang++ legs here. Only
-    # run on the default C++20 standard.
-    if: ${{ !startsWith(inputs.rocm_version, '7.13.') && inputs.rocm_version != 'nightly' && inputs.cxx_compiler != 'amdclang++' && inputs.cxx_standard == 20 }}
+    # run on the default C++20 standard. Only legacy ROCm supports building hipFile
+    # targeted to NVIDIA.
+    if: ${{ startsWith(inputs.rocm_version, '7.2.') && inputs.cxx_compiler != 'amdclang++' && inputs.cxx_standard == 20 }}
     uses: ./.github/workflows/hipfile-build-nvidia.yml
     with:
       ci_image: ${{ inputs.ci_image_nvidia }}

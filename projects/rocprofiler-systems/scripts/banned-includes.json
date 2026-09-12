@@ -1,0 +1,42 @@
+[
+    {
+        "header": "timemory/compat/macros.h",
+        "hint": "use the ROCPROFSYS_* macros in \"common/defines.h\""
+    },
+    {
+        "header": "timemory/defines.h",
+        "hint": "don't use defines from Timemory"
+    },
+    {
+        "header": "timemory/environment/declaration.hpp",
+        "hint": "use \"common/environment.hpp\""
+    },
+    {
+        "header": "timemory/macros/language.hpp",
+        "hint": "use relevant C++ features directly"
+    },
+    {
+        "header": "timemory/units.hpp",
+        "hint": "use \"common/units/*.hpp\""
+    },
+    {
+        "header": "timemory/utility/delimit.hpp",
+        "hint": "use \"common/delimit.hpp\""
+    },
+    {
+        "header": "timemory/utility/demangle.hpp",
+        "hint": "use \"core/demangler.hpp\""
+    },
+    {
+        "header": "timemory/utility/filepath.hpp",
+        "hint": "use \"common/path.hpp\" (rocprofsys::path::)"
+    },
+    {
+        "header": "timemory/utility/join.hpp",
+        "hint": "use \"common/join.hpp\""
+    },
+    {
+        "header": "timemory/utility/macros.hpp",
+        "hint": "use the ROCPROFSYS_* macros in \"common/defines.h\""
+    }
+]

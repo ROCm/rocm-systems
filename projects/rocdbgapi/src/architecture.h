@@ -74,59 +74,7 @@ struct legal_instruction_t
 };
 inline constexpr legal_instruction_t legal_instruction{};
 
-/* Holds one instruction's words. A word is the smallest type on which the
-   instruction is aligned.  The ::instruction_t is associated with an
-   architecture, and can be validated for that architecture.  Once validated,
-   the exact instruction size is known if it is a valid encoding for that
-   architecture.  */
-class instruction_t
-{
-private:
-  std::vector<std::byte> m_bytes;
-  mutable std::optional<size_t> m_size{};
-  std::reference_wrapper<const architecture_t> m_architecture;
-
-public:
-  instruction_t (const architecture_t &architecture,
-                 std::vector<std::byte> bytes)
-    : m_bytes (std::move (bytes)), m_architecture (architecture)
-  {
-  }
-  instruction_t (legal_instruction_t, const architecture_t &architecture,
-                 std::vector<std::byte> bytes)
-    : m_bytes (std::move (bytes)), m_architecture (architecture)
-  {
-    /* The instruction is guaranteed to be valid, and its byte size is exactly
-       that of the bytes vector passed in.  */
-    m_size.emplace (m_bytes.size ());
-  }
-
-  /* The number of bytes reserved in the instruction bytes storage.  Not all
-     bytes in the storage belong to the instruction, the instruction could have
-     been created from memory for the largest instruction byte size the
-     architecture supports.  */
-  size_t capacity () const { return m_bytes.size (); }
-
-  /* The instruction size in bytes, or 0 if the instruction is invalid.  An
-     instruction is invalid if the architecture's disassembler does not
-     recognize the instruction, or if the instruction's encoding is known to be
-     invalid (for example, misaligned register pair index).  */
-  size_t size () const;
-
-  /* Return a pointer to the instruction bytes.  */
-  const void *data () const { return m_bytes.data (); }
-
-  /* A valid instruction has a non-zero size.  */
-  bool is_valid () const { return size () != 0; }
-
-  /* Return the Nth instruction word.  */
-  template <size_t pos> uint32_t word () const
-  {
-    dbgapi_assert (capacity () >= sizeof (uint32_t[pos + 1]));
-    return *std::launder (
-      reinterpret_cast<const uint32_t *> (&m_bytes[pos * sizeof (uint32_t)]));
-  }
-};
+class instruction_t;
 
 /* Architecture.  */
 
@@ -536,6 +484,60 @@ public:
 
     return std::get<handle_object_set_t<object_type>> (m_handle_object_sets)
       .find_if (predicate, all);
+  }
+};
+
+/* Holds one instruction's words. A word is the smallest type on which the
+   instruction is aligned.  The ::instruction_t is associated with an
+   architecture, and can be validated for that architecture.  Once validated,
+   the exact instruction size is known if it is a valid encoding for that
+   architecture.  */
+class instruction_t
+{
+private:
+  std::vector<std::byte> m_bytes;
+  mutable std::optional<size_t> m_size{};
+  std::reference_wrapper<const architecture_t> m_architecture;
+
+public:
+  instruction_t (const architecture_t &architecture,
+                 std::vector<std::byte> bytes)
+    : m_bytes (std::move (bytes)), m_architecture (architecture)
+  {
+  }
+  instruction_t (legal_instruction_t, const architecture_t &architecture,
+                 std::vector<std::byte> bytes)
+    : m_bytes (std::move (bytes)), m_architecture (architecture)
+  {
+    /* The instruction is guaranteed to be valid, and its byte size is exactly
+       that of the bytes vector passed in.  */
+    m_size.emplace (m_bytes.size ());
+  }
+
+  /* The number of bytes reserved in the instruction bytes storage.  Not all
+     bytes in the storage belong to the instruction, the instruction could have
+     been created from memory for the largest instruction byte size the
+     architecture supports.  */
+  size_t capacity () const { return m_bytes.size (); }
+
+  /* The instruction size in bytes, or 0 if the instruction is invalid.  An
+     instruction is invalid if the architecture's disassembler does not
+     recognize the instruction, or if the instruction's encoding is known to be
+     invalid (for example, misaligned register pair index).  */
+  size_t size () const;
+
+  /* Return a pointer to the instruction bytes.  */
+  const void *data () const { return m_bytes.data (); }
+
+  /* A valid instruction has a non-zero size.  */
+  bool is_valid () const { return size () != 0; }
+
+  /* Return the Nth instruction word.  */
+  template <size_t pos> uint32_t word () const
+  {
+    dbgapi_assert (capacity () >= sizeof (uint32_t[pos + 1]));
+    return *std::launder (
+      reinterpret_cast<const uint32_t *> (&m_bytes[pos * sizeof (uint32_t)]));
   }
 };
 

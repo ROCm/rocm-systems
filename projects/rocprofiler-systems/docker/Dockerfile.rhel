@@ -13,8 +13,8 @@ SHELL [ "/bin/bash", "-c" ]
 ENV PATH /usr/lib64/openmpi/bin:/usr/local/bin:${PATH}
 ENV LIBRARY_PATH ${LIBRARY_PATH}:/opt/amdgpu/lib64
 
-# Dyninst needs GCC >= 10; RHEL 8 base is GCC 8 — use gcc-toolset on el8 only (install step below).
-ARG GCC_TOOLSET_VERSION=10
+# ROCm Systems Profiler needs GCC >= 11 for C++20; RHEL 8 base is GCC 8 — use gcc-toolset on el8 only (install step below).
+ARG GCC_TOOLSET_VERSION=11
 
 RUN OS_VERSION_MAJOR=$(grep '^VERSION_ID=' /etc/os-release | cut -d'=' -f2 | tr -d '"' | cut -d'.' -f1) && \
     yum install -y epel-release && crb enable && \

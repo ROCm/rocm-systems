@@ -23,9 +23,9 @@ make_agent_uid(const agent& agnt)
     const auto type_to_string = [](agent_type type) -> std::optional<std::string_view> {
         switch(type)
         {
-            case agent_type::GPU: return "GPU";
-            case agent_type::CPU: return "CPU";
-            case agent_type::NIC: return "NIC";
+            case agent_type::gpu: return "GPU";
+            case agent_type::cpu: return "CPU";
+            case agent_type::nic: return "NIC";
             default: return std::nullopt;
         }
     };
