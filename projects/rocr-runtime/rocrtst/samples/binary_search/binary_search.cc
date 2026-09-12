@@ -399,8 +399,23 @@ hsa_status_t LoadKernelFromObjFile(BinarySearch* bs) {
     char agent_name[64];
     err = hsa_agent_get_info(bs->gpu_dev, HSA_AGENT_INFO_NAME, agent_name);
     RET_IF_HSA_ERR(err);
-    std::string fileName = std::string("./") + agent_name + "/" + bs->kernel_file_name;
-    hsa_file_t file_handle = open(fileName.c_str(), O_RDONLY);
+
+    // Try ./<device>/<kernel>. On A0 silicon the runtime reports the "-strict"
+    // ISA variant (e.g. gfx1250-strict), but kernels are installed under the
+    // base device name (gfx1250); both are the same ISA version, so fall back
+    // to the base name with "-strict" removed. Non-strict names are unchanged.
+    std::string dev_name = agent_name;
+    std::string fileName = std::string("./") + dev_name + "/" + bs->kernel_file_name;
+    file_handle = open(fileName.c_str(), O_RDONLY);
+
+    const std::string kStrictSuffix = "-strict";
+    if (file_handle == -1 && dev_name.size() > kStrictSuffix.size() &&
+        dev_name.compare(dev_name.size() - kStrictSuffix.size(), kStrictSuffix.size(),
+                         kStrictSuffix) == 0) {
+      dev_name.erase(dev_name.size() - kStrictSuffix.size());
+      fileName = std::string("./") + dev_name + "/" + bs->kernel_file_name;
+      file_handle = open(fileName.c_str(), O_RDONLY);
+    }
   }
 
   if (file_handle == -1) {
