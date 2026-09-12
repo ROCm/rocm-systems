@@ -996,7 +996,7 @@ class GpuAgent : public GpuAgentInt {
     uint8_t* host_buffer_begin;               // Cached: start of this XCC's host buffer partition
     std::atomic<size_t> lost_sample_count;    // Per-XCC lost sample counter (atomic for lock-free access)
 
-    /* PM4 fallback resources (per-XCC to avoid races on multi-XCC non-large-BAR systems) */
+    /* PM4 drain resources (per-XCC to avoid races when multiple XCC threads submit concurrently) */
     uint64_t* old_val;                        // Staging area for PM4 atomic return value
     uint32_t* cmd_data;                       // PM4 command buffer
     size_t cmd_data_sz;                       // PM4 command buffer size
@@ -1057,7 +1057,7 @@ class GpuAgent : public GpuAgentInt {
                                                   pcs::PcsRuntime::PcSamplingSession& session,
                                                   uint32_t xcc_id);
 
-  // @brief Flush device buffers using PM4 commands (fallback for non-large-BAR systems)
+  // @brief Flush device buffers using PM4 commands on the command processor (fallback for non-large-BAR systems)
   hsa_status_t PcSamplingFlushDeviceBuffersPerXCC_PM4(pcs_data_t* pcs_data,
                                                       pcs::PcsRuntime::PcSamplingSession& session,
                                                       uint32_t xcc_id);
@@ -1085,6 +1085,14 @@ class GpuAgent : public GpuAgentInt {
 
   // structure for stochastic sampling
   pcs_data_t pcs_stochastic_data_;
+
+  // Serializes PM4 submit-and-wait sequences on queues_[QueuePCSampling].
+  // AqlQueue::ExecutePM4 stages commands in a single per-queue indirect buffer that it
+  // reuses as soon as it returns, so only one asynchronous PM4 submission may be in
+  // flight on that queue at a time. The per-XCC flush threads and PcSamplingFlush all
+  // share the queue, as do the hosttrap and stochastic sessions.
+  // Lock order: host_buffer_mutex -> pcs_pm4_mutex_.
+  std::mutex pcs_pm4_mutex_;
 
   /// @brief XGMI CPU<->GPU
   bool xgmi_cpu_gpu_;
