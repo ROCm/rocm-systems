@@ -7,6 +7,8 @@ message("&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&")
 cmake_minimum_required(VERSION 3.14)
 project(rocm_smi_lib)
 
+# Temporary no-op change on rocm-smi-lib to exercise TheRock Multi-arch CI
+
 # ROCm SMI is deprecated in favor of AMD SMI. Builds (including TheRock) set
 # ROCM_SMI_DISABLE=True to skip building the library entirely. Honor both the
 # cache variable and the environment variable of the same name.
