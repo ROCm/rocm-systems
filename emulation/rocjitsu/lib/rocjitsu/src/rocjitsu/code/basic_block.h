@@ -29,6 +29,73 @@ class Decoder;
 /// at a branch, conditional branch, or program terminator instruction.
 class BasicBlock : public util::IListNode<BasicBlock> {
 public:
+  /// @brief Half-open byte interval within the single text section being analyzed.
+  struct CodeRange {
+    uint64_t start_offset = 0;
+    uint64_t size = 0;
+  };
+
+  /// @brief Which instruction stream indirect discovery and finalization consume.
+  enum class DecodePolicy : uint8_t {
+    /// Decode all text before indirect discovery, preserving eager DBT behavior.
+    FullSection,
+    /// Decode entries and discovered targets, skipping unrelated bytes.
+    Reachable,
+  };
+
+  /// @brief Construction inputs with distinct entry states, decode roots and boundaries.
+  ///
+  /// @details Both policies share indirect discovery and block/call finalization.
+  /// Input spans are borrowed only during construction, not retained by the CFG.
+  struct BuildOptions {
+    /// @brief Select reachable decoding by default; DBT can explicitly retain eager decoding.
+    ///
+    /// @details FullSection avoids repeated recovery on workloads that inspect all text anyway.
+    DecodePolicy decode_policy = DecodePolicy::Reachable;
+
+    /// @brief Section-relative external entry offsets, matching build_reachable's entry_offsets.
+    ///
+    /// @details These establish external states, unlike seeds and split points. They correspond
+    /// to build's extra_leaders. Reachable requires valid, permitted instruction boundaries.
+    std::span<const uint64_t> entries = {};
+
+    /// @brief Allowed byte intervals for Reachable; empty permits the entire text section.
+    ///
+    /// @details FullSection rejects nonempty ranges. See build_reachable for range validation.
+    std::span<const CodeRange> permitted_ranges = {};
+
+    /// @brief Optional Reachable code roots, processed after the real entry closure stabilizes.
+    ///
+    /// @details These also split blocks without creating external states. FullSection rejects
+    /// nonempty seeds. They root indirect discovery across block boundaries without weakening
+    /// incoming register facts or assuming default mode values. Processed in address order;
+    /// each seed's indirect closure completes before considering the next. Seeds inside
+    /// established instructions or padding are ignored; other incompatible boundaries and
+    /// malformed code fail.
+    std::span<const uint64_t> decode_seeds = {};
+
+    /// @brief Block boundaries that neither seed decoding nor introduce external entry states.
+    ///
+    /// @details Accepted by both policies; these match the wrappers' extra_split_points.
+    std::span<const uint64_t> split_points = {};
+
+    /// @brief How discovery identifies external states; Reachable requires ExplicitOnly.
+    ///
+    /// @details FullSection additionally preserves its historical implicit first external entry.
+    /// Unlike these options, the legacy build() wrapper defaults to InferPredecessorless.
+    ExternalEntryPolicy entry_policy = ExternalEntryPolicy::ExplicitOnly;
+  };
+
+  /// @brief First missing successor, or control flow requiring indirect analysis.
+  enum class SuccessorIssue : uint8_t {
+    None,
+    MissingBranchTarget,
+    MissingCallTarget,
+    MissingFallthrough,
+    MissingCallContinuation,
+    IndirectControlFlow,
+  };
+
   /// @brief Kind of call-like edge recorded outside the local CFG successor list.
   enum class CallEdgeKind {
     DirectCall,
@@ -95,12 +162,20 @@ public:
   /// @brief CFG successor blocks.
   ///
   /// @details Edges are local, context-free CFG links between blocks returned
-  /// by build(). Function-call targets are exposed through call_edges() instead
-  /// of this list because their return flow depends on the call site.
+  /// by CFG construction. Function-call targets are exposed through call_edges()
+  /// instead of this list because their return flow depends on the call site.
   [[nodiscard]] const std::vector<BasicBlock *> &successors() const { return successors_; }
 
   /// @brief CFG predecessor blocks, inverse of successors().
   [[nodiscard]] const std::vector<BasicBlock *> &predecessors() const { return predecessors_; }
+
+  /// @brief Whether construction omitted a required edge or deferred indirect flow.
+  ///
+  /// @details A missing edge does not make decoding fail. Consumers must check this
+  /// status before treating the graph as complete. Indirect control flow is marked
+  /// conservatively even when some target fixups or call edges are available.
+  /// Only the first issue is retained; this is not an exhaustive diagnosis.
+  [[nodiscard]] SuccessorIssue successor_issue() const { return successor_issue_; }
 
   /// @brief Function-call edges that leave this block.
   [[nodiscard]] const std::vector<CallEdge> &call_edges() const { return call_edges_; }
@@ -115,7 +190,7 @@ public:
 
   /// @brief Static indirect branch fixup metadata rooted in this block.
   ///
-  /// @details BasicBlock::build() computes these while all decoded instructions
+  /// @details Block construction computes these while all decoded instructions
   /// and source offsets are still adjacent. The fixups are grouped on the block
   /// that contains the recovered setpc/swappc consumer. The same target metadata
   /// may become either an ordinary CFG successor or a call_edges() record:
@@ -145,6 +220,20 @@ public:
   /// @returns Const reference to the instruction list.
   const InstructionList &instructions() const { return instructions_; }
 
+  /// @brief Build a CFG using the selected decode policy and entry model.
+  ///
+  /// @details Reachable construction requires ExplicitOnly entry states; FullSection rejects
+  /// ranges and decode seeds. See build_reachable() for reachability and completeness contracts.
+  /// @param[in] co Code object to analyze; must outlive the returned blocks.
+  /// @param[in] decoder Decoder for the selected architecture.
+  /// @param[in] arch Architecture used by decoding, discovery and padding policies.
+  /// @param[in] options Borrowed construction inputs, used only for the duration of the call.
+  /// @param[in] emit_error Destination for validation and offset-bearing decode diagnostics.
+  /// @returns Ordered blocks, or failure on invalid inputs or exhausted discovery budgets.
+  static FailureOr<std::vector<std::unique_ptr<BasicBlock>>>
+  build_cfg(const CodeObject &co, Decoder &decoder, rj_code_arch_t arch,
+            const BuildOptions &options, DecodeErrorEmitter emit_error = {});
+
   /// @brief Build basic blocks from a code object's .text sections.
   ///
   /// @details Recovered indirect branch targets are added as block leaders before
@@ -173,7 +262,55 @@ public:
         ExternalEntryPolicy entry_policy = ExternalEntryPolicy::InferPredecessorless,
         std::span<const uint64_t> extra_split_points = {});
 
+  /// @brief Decode reachable text, extending direct control flow with discovered indirect targets.
+  ///
+  /// @details Requires exactly one text section when entries or decode seeds are nonempty.
+  /// No entries or seeds produce an empty graph. Entries and optional permitted ranges are byte
+  /// offsets within that section; every entry must lie in a permitted range.
+  /// Ranges must be aligned, nonempty and contained in the section; overlapping
+  /// or adjacent ranges are united. An empty range list permits the whole section.
+  /// Decode fallthrough, direct branches/calls and possible continuations, then
+  /// repeat indirect discovery and decoding until no new targets are found.
+  /// Unrelated bytes are not decoded. Indirect control flow remains explicit in
+  /// successor_issue(): discovering concrete edges alone does not certify a
+  /// complete target set or context-specific returns. Edges leaving permitted ranges
+  /// also set successor_issue(). Reached malformed/truncated instructions, invalid
+  /// entries/ranges and overlapping instruction boundaries return failure and emit
+  /// a diagnostic. Exceeding a root closure's bounded discovery rounds also returns failure.
+  /// @param[in] co Code object with one text section; must outlive the returned blocks.
+  /// @param[in] decoder Decoder for the selected ISA architecture.
+  /// @param[in] arch Architecture used by control-flow and padding policies.
+  /// @param[in] entry_offsets External entries in section-relative bytes.
+  /// @param[in] emit_error Destination for validation and offset-bearing decode diagnostics.
+  /// @param[in] permitted_ranges Allowed code intervals; empty permits the whole section.
+  /// @param[in] decode_seeds Additional code roots to decode after the entry closure,
+  /// without introducing external entry states. These also split blocks. Seeds inside decoded
+  /// instructions or padding are ignored; consumers must validate any seed they later use as an
+  /// actual entry.
+  /// @param[in] extra_split_points Block boundaries that do not seed decoding or external states.
+  /// @returns Blocks ordered by text offset, or failure with a diagnostic.
+  static FailureOr<std::vector<std::unique_ptr<BasicBlock>>>
+  build_reachable(const CodeObject &co, Decoder &decoder, rj_code_arch_t arch,
+                  std::span<const uint64_t> entry_offsets, DecodeErrorEmitter emit_error = {},
+                  std::span<const CodeRange> permitted_ranges = {},
+                  std::span<const uint64_t> decode_seeds = {},
+                  std::span<const uint64_t> extra_split_points = {});
+
 private:
+  struct DecodedSection;
+  /// Consume prepared instructions and discovery facts while retaining permitted_ranges
+  /// for padding and missing-edge decisions.
+  static FailureOr<std::vector<std::unique_ptr<BasicBlock>>>
+  build_impl(const CodeObject &co, Decoder &decoder, rj_code_arch_t arch,
+             DecodeErrorEmitter emit_error, std::span<const uint64_t> extra_leaders,
+             ExternalEntryPolicy entry_policy, std::span<const uint64_t> extra_split_points,
+             DecodedSection *prepared, std::span<const CodeRange> permitted_ranges);
+
+  void note_successor_issue(SuccessorIssue issue) {
+    if (successor_issue_ == SuccessorIssue::None)
+      successor_issue_ = issue;
+  }
+
   void add_instruction(std::unique_ptr<Instruction> inst);
   void add_successor(BasicBlock &successor);
   /// Remove one proven-dead edge while preserving the inverse predecessor list.
@@ -181,6 +318,7 @@ private:
   void add_static_indirect_call_fixup(IndirectCallFixup fixup);
   void add_static_pc_address_builder(PcAddressBuilder builder);
 
+  SuccessorIssue successor_issue_ = SuccessorIssue::None;
   uint64_t start_offset_;
   uint32_t size_ = 0;
   uint32_t num_instructions_ = 0;
