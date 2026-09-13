@@ -539,6 +539,7 @@ struct alignas(32) ncclIbNetCommBase {
   int      sharedGroupIdx;      // -1 = not shared
   int      remIbDevIdx;
   int      sharedPrimaryNqps;
+  uint64_t peerProcTag;         // remote process identity, 0 = unknown
 };
 
 struct ncclIbNetCommDevBase* IbCastGetNetCommDevBase(ncclIbNetCommBase* base, int devIndex);
