@@ -419,3 +419,30 @@ The K32 control still submits no jobs: wall medians are 3.485 s ordinary and
 filter cost remains; the new wait code is not reached on this workload.
 Raw data, CPU-cost comparisons, policy controls and reproduction scripts are in
 `/home/jakub/rocjitsu/misc/async-scoreboard-benchmark/eligibility/warm-report.md`.
+
+### K32 with warm waits
+
+Re-enabling K32 on the same final runtime does not justify widening the default
+allowlist. Six balanced rounds retain numerical checks and complete throughput
+signatures, with two CU workers, one engine and four helpers on reserved cores.
+
+| K32 workload | Ordinary / warm async dispatch s | Change | Ordinary / warm process wall s | Change |
+|---|---:|---:|---:|---:|
+| IREE f16, 1024 cubed | 3.0031 / 3.6321 | +20.9% | 3.460 / 4.110 | +18.8% |
+| Gluon f16, 1024 cubed | 3.7633 / 3.6598 | -2.8% | 6.360 / 6.280 | -1.3% |
+| HIP, four independent chains | 3.8727 / 1.7517 | -54.8% | 4.210 / 2.110 | -49.9% |
+
+Warm waits improve HIP dispatch a further 17.7% over blocking offload, but only
+0.8% for IREE and 1.2% for Gluon. IREE still encounters about 60,800 boundary
+drains for 65,800 submitted MMAs. Its separate zero-helper control adds 1.2%
+versus 19.5% with offload, showing that most of the loss requires submission,
+including queue/operand work and completion waits. The modest Gluon speedup
+also increases total CPU time by 29%. Equal-core scaling was not measured here.
+
+Decoded K32 calibration lowers serialized handoff overhead from 9.70 to 2.65 us;
+its independent pairs improve about 49%. A warm empty-job cost of 1 us therefore
+does not imply that all K32 schedules become profitable. Keep K32 opt-in until
+admission can reject jobs with insufficient overlap before a drain, or those
+conservative boundaries are improved. All 72 application samples and twelve
+callback calibration runs passed their checks. Full data and reproduction are in
+`/home/jakub/rocjitsu/misc/async-scoreboard-benchmark/eligibility/k32-warm-report.md`.
