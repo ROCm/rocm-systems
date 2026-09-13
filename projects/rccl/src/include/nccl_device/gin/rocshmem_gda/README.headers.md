@@ -34,6 +34,9 @@ during RCCL configuration and installation, from CMakeLists.txt.
 * `gda/mlx5/mlx5dv_core.hpp`
 * `gda/mlx5/mlx5_ifc_core.hpp`
 
+### GDA\_QUEUEPAIR\_MOCK (QueuePair mock object)
+* `gda/queue_pair/queue_pair_mock.hpp`
+
 ### rocSHMEM internals / miscellaneous
 * `gda/endian.hpp`
 * `gda/gda_enums.hpp`
