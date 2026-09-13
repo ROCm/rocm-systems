@@ -47,6 +47,7 @@
 #include <cassert>
 #include <cerrno>
 #include <climits>
+#include <cstddef>
 #include <fstream>
 #include <map>
 #include <memory>
@@ -85,7 +86,7 @@ static_assert((sizeof(DriverMemoryHandleWord) >= sizeof(uint32_t)) &&
 
 /// @brief Opcode types for commands.
 ///
-/// This should match the opcode types defined in xdna-driver and XRT ERT (ert_cmd_opcode).
+/// This is the opcode type defined in xdna-driver and XRT ERT (ert_cmd_opcode).
 enum ert_cmd_opcode {
   /// @brief Invalid command.
   ERT_INVALID_CMD = ~0U,
@@ -103,7 +104,7 @@ enum ert_cmd_opcode {
 
 /// @brief Command state.
 ///
-/// This should match the command states defined in xdna-driver and XRT ERT (ert_cmd_state).
+/// This is the command state struct defined in xdna-driver and XRT ERT (ert_cmd_state).
 enum ert_cmd_state {
   /// @brief Invalid state.
   ERT_CMD_STATE_INVALID,
@@ -129,7 +130,7 @@ enum ert_cmd_state {
 
 /// @brief Start kernel command packet.
 ///
-/// This should match the command format defined in xdna-driver (amdxdna_cmd) and XRT ERT
+/// This is the command format defined in xdna-driver (amdxdna_cmd) and XRT ERT
 /// (ert_start_kernel_cmd).
 struct ert_start_kernel_cmd {
   union {
@@ -159,9 +160,11 @@ struct ert_start_kernel_cmd {
 
 /// @brief Payload of an @ref ERT_START_NPU_PREEMPT_ELF command, placed after the CU mask.
 ///
-/// This should match the command format defined in xdna-driver (amdxdna_cmd_preempt_data) and XRT
-/// ERT (ert_npu_preempt_data). The save and restore buffers are for preemption; a design without
-/// preemption sections leaves them null, which the aie2p firmware accepts.
+/// This is the command struct defined in xdna-driver (amdxdna_cmd_preempt_data) and XRT
+/// ERT (ert_npu_preempt_data).
+///
+/// The save and restore buffers are for preemption; a design without preemption sections leaves
+/// them null, which the aie2p firmware accepts.
 struct ert_npu_preempt_data {
   /// @brief Device address of the control code.
   uint64_t instruction_buffer;
@@ -181,7 +184,7 @@ struct ert_npu_preempt_data {
 
 /// @brief Command chain packet.
 ///
-/// This should match the command format defined in xdna-driver (amdxdna_cmd_chain) and XRT ERT
+/// This is the command srtuct defined in xdna-driver (amdxdna_cmd_chain) and XRT ERT
 /// (ert_cmd_chain).
 struct ert_cmd_chain_data {
   /// @brief Number of commands in the chain.
@@ -238,9 +241,7 @@ constexpr uint32_t DEV_ADDR_OFFSET_MASK = 0x02FFFFFF;
 ///
 /// The firmware aborts a command chain whose slot carries an odd argument count below 15. The
 /// driver takes that count straight from this command: amdxdna_cmd_get_payload() reports
-/// (count - 1) dwords and aie2_cmdlist_fill_one_slot_cf() uses it as arg_cnt. This command's real
-/// payload after the CU mask is an odd number of dwords, so it needs an odd amount of padding to
-/// come out even.
+/// (count - 1) dwords and aie2_cmdlist_fill_one_slot_cf() uses it as arg_cnt.
 constexpr uint32_t CMD_COUNT_SIZE_INCREASE = 1;
 
 /// @brief Size of the driver's per-command chain buffer, from MAX_CHAIN_CMDBUF_SIZE in
@@ -256,10 +257,10 @@ constexpr uint32_t MAX_CMD_COUNT = (1u << 11) - 1;
 
 /// @brief Required alignment of a full-ELF control code's device address.
 ///
-/// Not documented anywhere; established by sweeping the control code across offsets within its
-/// allocation on npu4 and observing which dispatches complete. Every 16 KiB-aligned address
-/// works and every other one hangs, so the runtime rejects the misaligned ones up front. The
-/// PDI has no such requirement - its address is a plain 64-bit store into the control code.
+/// Undocumented but established by sweeping the control code across offsets within its allocation
+/// on aie2p and observing which dispatches complete. Every 16 KiB-aligned address works and every
+/// other one hangs, so the runtime rejects the misaligned ones up front. The PDI has no such
+/// requirement - its address is a plain 64-bit store into the control code.
 constexpr uint32_t CTRL_CODE_DEV_ADDR_ALIGNMENT = 16384;
 
 /// @brief Number of argument dwords a full-ELF command carries.
@@ -319,7 +320,7 @@ struct BOHandle {
   constexpr bool IsValid() const { return handle != AMDXDNA_INVALID_BO_HANDLE; }
 };
 
-/// @brief Per hardware context PDI cache.
+/// @brief PDI cache for a hardware context.
 class PDICache {
  private:
   /// @brief CU mask size.
@@ -400,8 +401,8 @@ struct CmdBOPool {
 
 /// @brief Which dispatch ABI a queue is using.
 ///
-/// A queue is homogeneous. The two modes need incompatible hardware contexts -- PDI + instruction
-/// sequence needs CU configuration, full-ELF must not have any -- and a hardware context's CU
+/// A queue is homogeneous. The two modes need incompatible hardware contexts - PDI + instruction
+/// sequence needs CU configuration, full-ELF must not have any - and a hardware context's CU
 /// configuration cannot be changed once set, so switching a live queue between them is not
 /// possible.
 enum class QueueMode {
@@ -418,12 +419,15 @@ enum class QueueMode {
 /// A packet asks for a full-ELF dispatch by giving the offset at which its control code takes the
 /// PDI's device address; a PDI plus instruction sequence has no such patch site and leaves the
 /// field zero.
+///
+/// @param[in] pkt packet to classify
 static QueueMode PacketMode(const hsa_amd_aie_kernel_dispatch_packet_t* pkt) {
   return (pkt->pdi_patch_offset != 0) ? QueueMode::FullElf : QueueMode::PdiInsts;
 }
 
 /// @brief Metadata for a Kernel Mode Queue (KMQ).
 struct KmqMetadata {
+  /// @brief Hardware context.
   uint32_t hw_ctx_handle = AMDXDNA_INVALID_CTX_HANDLE;
   uint32_t syncobj_handle = 0;
   /// @brief Core tiles the queue's hardware context is created with. Fixed for the life of the
@@ -447,12 +451,14 @@ static void FlushArguments(const hsa_amd_aie_kernel_dispatch_packet_t* pkt) {
   for (uint32_t kernarg_idx = 0; kernarg_idx < pkt->num_kernargs; ++kernarg_idx) {
     void* ptr = reinterpret_cast<void*>(kernarg_address[kernarg_idx]);
     size_t size = kernarg_address[kernarg_idx + pkt->num_kernargs];
-    FlushCpuCache(ptr, 0, size);
+    if (size > 0) {
+      FlushCpuCache(ptr, 0, size);
+    }
   }
 }
 
 /**
- * @brief Destroys the amdxdna_hwctx with the given handle.
+ * @brief Destroys the hardware context with the given handle.
  *
  * @param[in] fd driver file descriptor
  * @param[in] hw_ctx_handle handle of the hardware context to destroy
@@ -468,8 +474,8 @@ static hsa_status_t DestroyHwCtx(int fd, uint32_t hw_ctx_handle) {
 /// @brief Creates and configures a hardware context for the KMQ, and updates the KMQ metadata.
 ///
 /// The context is given a CU configuration only if the KMQ has PDIs to configure it with. A
-/// full-ELF queue never does, and configuring one would be wrong: the driver rejects a second
-/// CONFIG_CU on the same context, so a CU configuration set now could not be undone later.
+/// full-ELF queue never does: the driver rejects a second CONFIG_CU on the same context, so a CU
+/// configuration set now could not be undone later.
 ///
 /// @param[in] fd driver file descriptor
 /// @param[in,out] kmq_metadata KMQ metadata supplying the core tile count, and updated with the
@@ -491,7 +497,14 @@ static hsa_status_t CreateHwCtx(int fd, KmqMetadata* kmq_metadata) {
   }
 
   // Destroys the context unless it comes out of this function fully configured.
-  MAKE_NAMED_SCOPE_GUARD(hw_ctx_guard, [&] { DestroyHwCtx(fd, create_hwctx_args.handle); });
+  MAKE_NAMED_SCOPE_GUARD(hw_ctx_guard, [&] {
+    if (DestroyHwCtx(fd, create_hwctx_args.handle) != HSA_STATUS_SUCCESS) {
+      // The caller is already returning the error that brought us here, so this can only be
+      // reported: a context that failed to tear down stays allocated in the driver, and without
+      // this nothing anywhere records that it was stranded.
+      log_warning_n(10, "AIE: failed to destroy a hardware context after a failed setup.\n");
+    }
+  });
 
   if (!kmq_metadata->pdi_cache.empty()) {
     // Create hardware context configuration. The parameter ends in a cu_configs[] array, so it is
@@ -619,6 +632,23 @@ static hsa_status_t WaitCommand(int fd, ert_start_kernel_cmd* cmd, uint32_t hw_c
   return HSA_STATUS_SUCCESS;
 }
 
+// ---------------------------------------------------------------------------
+// Buffer object (BO) helpers
+// ---------------------------------------------------------------------------
+
+/// @brief Queries the driver's record for @p bo_handle.
+///
+/// Zeroes @p info before the call, so a caller only supplies the handle.
+///
+/// @param[in] fd driver file descriptor
+/// @param[in] bo_handle BO to query
+/// @param[out] info the BO's record: its device address, virtual address and mmap offset
+static hsa_status_t GetBOInfo(int fd, uint32_t bo_handle, amdxdna_drm_get_bo_info* info) {
+  *info = {};
+  info->handle = bo_handle;
+  return xdna_ioctl(fd, DRM_IOCTL_AMDXDNA_GET_BO_INFO, info);
+}
+
 /**
  * @brief Resolves a virtual address to the BO handle, along with its allocation base and size.
  *
@@ -645,12 +675,68 @@ static hsa_status_t ResolveBOHandle(void* mem, const core::Agent& agent, uint32_
   return HSA_STATUS_SUCCESS;
 }
 
+/// @brief Queries the device address the NPU sees for @p bo_handle.
+///
+/// @param[in] fd driver file descriptor
+/// @param[in] bo_handle BO to query
+/// @param[out] dev_addr device address, or 0 if the BO has none. A BO shared with the host has
+/// none: the NPU walks the same page tables, so its host VA is already the address the hardware
+/// uses.
+static hsa_status_t GetBODevAddr(int fd, uint32_t bo_handle, uint64_t* dev_addr) {
+  amdxdna_drm_get_bo_info get_bo_info_args;
+  const hsa_status_t err = GetBOInfo(fd, bo_handle, &get_bo_info_args);
+  if (err != HSA_STATUS_SUCCESS) {
+    return err;
+  }
+
+  *dev_addr = (get_bo_info_args.xdna_addr == AMDXDNA_INVALID_ADDR) ? 0 : get_bo_info_args.xdna_addr;
+  return HSA_STATUS_SUCCESS;
+}
+
+/// @brief Resolves @p ptr to its BO handle, the device address the NPU sees for it, and how many
+/// bytes of the allocation follow it.
+///
+/// @param[in] fd driver file descriptor
+/// @param[in] ptr virtual address to resolve
+/// @param[in] agent agent that owns the memory pool the allocation came from
+/// @param[out] bo_handle BO handle backing @p ptr
+/// @param[out] dev_addr device address of @p ptr, or 0 if the allocation has none. A buffer
+/// shared with the host has none, which also means the NPU cannot fetch from it directly.
+/// @param[out] bytes_from_ptr bytes between @p ptr and the end of its allocation.
+static hsa_status_t ResolveDeviceBuffer(int fd, void* ptr, const core::Agent& agent,
+                                        uint32_t* bo_handle, uint64_t* dev_addr,
+                                        size_t* bytes_from_ptr) {
+  void* base = nullptr;
+  size_t alloc_size = 0;
+  hsa_status_t err = ResolveBOHandle(ptr, agent, bo_handle, &base, &alloc_size);
+  if (err != HSA_STATUS_SUCCESS) {
+    return err;
+  }
+
+  err = GetBODevAddr(fd, *bo_handle, dev_addr);
+  if (err != HSA_STATUS_SUCCESS) {
+    return err;
+  }
+
+  // ResolveBOHandle reports the allocation; the packet may point part-way into it.
+  const size_t offset = static_cast<uint8_t*>(ptr) - static_cast<uint8_t*>(base);
+  if (offset > alloc_size) {
+    return HSA_STATUS_ERROR_INVALID_ALLOCATION;
+  }
+  *bytes_from_ptr = alloc_size - offset;
+  if (*dev_addr != 0) *dev_addr += offset;
+  return HSA_STATUS_SUCCESS;
+}
+
 
 /// @brief Returns true if @p vaddr lies within the device heap mapping at @p heap_base.
 ///
 /// Dev heap BOs carve their VA out of the device heap and borrow its mapping, so DestroyBOHandle
 /// must not unmap them. This lets it distinguish those from BO_SHAREs (which own an independent
 /// mmap) by the VA alone, without the caller tracking mapping ownership.
+///
+/// @param[in] heap_base base of the device heap mapping, or nullptr if there is none
+/// @param[in] vaddr virtual address to test
 static bool IsDevHeapVA(const void* heap_base, const void* vaddr) {
   if (heap_base == nullptr) return false;
   const auto addr = reinterpret_cast<uintptr_t>(vaddr);
@@ -698,6 +784,11 @@ static hsa_status_t DestroyBOHandle(int fd, const void* heap_base, BOHandle& bo_
 }
 
 /// @brief Creates a command BO of @p size bytes and returns it in @p cmd_bo_handle.
+///
+/// @param[in] fd driver file descriptor
+/// @param[in] heap_base base of the device heap mapping, used to unmap correctly on failure
+/// @param[in] size size of the command BO in bytes
+/// @param[out] cmd_bo_handle the created BO, mapped and ready to be written
 static hsa_status_t CreateCmdBO(int fd, const void* heap_base, uint32_t size,
                                 BOHandle& cmd_bo_handle) {
   amdxdna_drm_create_bo create_cmd_bo = {};
@@ -716,9 +807,8 @@ static hsa_status_t CreateCmdBO(int fd, const void* heap_base, uint32_t size,
   MAKE_NAMED_SCOPE_GUARD(tmp_cmd_bo_handle_guard,
                          [&] { DestroyBOHandle(fd, heap_base, tmp_cmd_bo_handle); });
 
-  amdxdna_drm_get_bo_info cmd_bo_get_bo_info = {};
-  cmd_bo_get_bo_info.handle = tmp_cmd_bo_handle.handle;
-  err = xdna_ioctl(fd, DRM_IOCTL_AMDXDNA_GET_BO_INFO, &cmd_bo_get_bo_info);
+  amdxdna_drm_get_bo_info cmd_bo_get_bo_info;
+  err = GetBOInfo(fd, tmp_cmd_bo_handle.handle, &cmd_bo_get_bo_info);
   if (err != HSA_STATUS_SUCCESS) {
     return err;
   }
@@ -737,14 +827,66 @@ static hsa_status_t CreateCmdBO(int fd, const void* heap_base, uint32_t size,
   return HSA_STATUS_SUCCESS;
 }
 
+/// @brief Resolves each of the packet's kernel arguments and adds its BO to @p bo_handles.
+///
+/// The hardware reaches argument buffers through DMA descriptors rather than fetching them, so
+/// they need no device address.
+///
+/// @param[in] pkt packet whose kernel arguments are resolved
+/// @param[in] agent agent that owns the memory pools the arguments came from
+/// @param[in,out] bo_handles list each argument's BO is appended to
+static hsa_status_t AddKernargBOs(const hsa_amd_aie_kernel_dispatch_packet_t* pkt,
+                                  const core::Agent& agent, std::vector<uint32_t>* bo_handles) {
+  if (pkt->num_kernargs == 0) return HSA_STATUS_SUCCESS;
+  if (pkt->kernarg_address == nullptr) return HSA_STATUS_ERROR_INVALID_PACKET_FORMAT;
+
+  // The packet promises 2 * num_kernargs entries, the addresses followed by their sizes, and
+  // this function and FlushArguments between them read every one. num_kernargs comes straight off
+  // the packet, so it has to be shown to fit before either of them touches the buffer: a packet
+  // claiming the uint16 maximum would otherwise walk half a megabyte past the caller's
+  // allocation. Resolving the buffer is a runtime lookup, not an ioctl.
+  uint32_t kernarg_bo = AMDXDNA_INVALID_BO_HANDLE;
+  void* kernarg_base = nullptr;
+  size_t kernarg_alloc_size = 0;
+  hsa_status_t bound_err =
+      ResolveBOHandle(pkt->kernarg_address, agent, &kernarg_bo, &kernarg_base, &kernarg_alloc_size);
+  if (bound_err != HSA_STATUS_SUCCESS) {
+    return bound_err;
+  }
+  const size_t kernarg_offset =
+      static_cast<uint8_t*>(pkt->kernarg_address) - static_cast<uint8_t*>(kernarg_base);
+  const size_t kernarg_avail =
+      (kernarg_offset <= kernarg_alloc_size) ? kernarg_alloc_size - kernarg_offset : 0;
+  if (pkt->num_kernargs > kernarg_avail / (2 * sizeof(uint64_t))) {
+    assert(false && "Packet declares more kernel arguments than its buffer holds.");
+    return HSA_STATUS_ERROR_INVALID_PACKET_FORMAT;
+  }
+
+  auto* kernarg_address = static_cast<uint64_t*>(pkt->kernarg_address);
+  for (uint32_t kernarg_idx = 0; kernarg_idx < pkt->num_kernargs; ++kernarg_idx) {
+    void* ptr = reinterpret_cast<void*>(kernarg_address[kernarg_idx]);
+    uint32_t arg_handle = AMDXDNA_INVALID_BO_HANDLE;
+    const hsa_status_t err = ResolveBOHandle(ptr, agent, &arg_handle, nullptr, nullptr);
+    if (err != HSA_STATUS_SUCCESS) {
+      assert(false && "Failed to find argument BO for command packet.");
+      return err;
+    }
+    bo_handles->push_back(arg_handle);
+  }
+  return HSA_STATUS_SUCCESS;
+}
+
 /// @brief Creates a command BO with @p declared_dwords of payload and fills in its header.
 ///
 /// @p declared_dwords is what the command reports in its count field, and the driver reads that
 /// straight back: amdxdna_cmd_get_payload() hands the chain fill path (declared_dwords - 1) dwords
 /// starting at data[1], and the fill path memcpy()s all of them into the chain slot. So the whole
 /// declared payload is allocated and zeroed here, including any padding a caller declares but does
-/// not write -- otherwise the driver copies uninitialised memory to the device.
+/// not write otherwise the driver copies uninitialised memory to the device.
 ///
+/// @param[in,out] kmq_metadata KMQ metadata supplying the command BO pool
+/// @param[in] declared_dwords payload dwords the command reports in its count field
+/// @param[in] opcode command opcode, one of the values in @ref ert_cmd_opcode
 /// @param[in] cu_mask value for data[0]. The driver derives a CU index from it with ffs() - 1 and
 /// rejects a command with no bit set, even on the paths that then ignore the index.
 /// @param[out] cmd_bo the command BO, drawn from @p kmq_metadata's command BO pool.
@@ -752,11 +894,13 @@ static hsa_status_t CreateCmdBO(int fd, const void* heap_base, uint32_t size,
 static hsa_status_t CreateCommand(KmqMetadata* kmq_metadata, uint32_t declared_dwords,
                                   uint32_t opcode, uint32_t cu_mask, BOHandle* cmd_bo,
                                   ert_start_kernel_cmd** cmd) {
-  const uint32_t cmd_bytesize = sizeof(ert_start_kernel_cmd) + declared_dwords * sizeof(uint32_t);
+  // size_t, not uint32_t: the expression is computed in 64 bits, and narrowing it here would make
+  // the bound below depend on declared_dwords never being large enough to wrap.
+  const size_t cmd_bytesize = sizeof(ert_start_kernel_cmd) + declared_dwords * sizeof(uint32_t);
   if (cmd_bytesize > CmdBOPool::kEntryByteSize) {
     // Pool entries are fixed-size; a command that does not fit cannot be pooled. Entries are
     // sized to MAX_CMD_COUNT dwords of payload, so this also rejects a declared_dwords that would
-    // not fit the 11-bit count field -- letting that wrap would under-size the chain slot the
+    // not fit the 11-bit count field letting that wrap would under-size the chain slot the
     // driver derives from it and overflow the chain buffer.
     return HSA_STATUS_ERROR_INVALID_PACKET_FORMAT;
   }
@@ -812,6 +956,9 @@ hsa_status_t XdnaDriver::QueryKernelModeDriver(core::DriverQuery query) {
 
 
 /// @brief Reads the PCI device ID from the sysfs device directory @p sysfs_device_path.
+///
+/// @param[in] sysfs_device_path sysfs directory holding the device's attributes
+/// @param[out] device_id PCI device ID read from that directory
 static hsa_status_t ReadDeviceId(const std::string& sysfs_device_path, uint16_t* device_id) {
   const std::string device_id_file = sysfs_device_path + "/device";
 
@@ -823,101 +970,10 @@ static hsa_status_t ReadDeviceId(const std::string& sysfs_device_path, uint16_t*
   return HSA_STATUS_SUCCESS;
 }
 
-/// @brief Queries the device address the NPU sees for @p bo_handle.
-///
-/// @param[out] dev_addr device address, or 0 if the BO has none. A BO shared with the host has
-/// none: the NPU walks the same page tables, so its host VA is already the address the hardware
-/// uses.
-static hsa_status_t GetBODevAddr(int fd, uint32_t bo_handle, uint64_t* dev_addr) {
-  amdxdna_drm_get_bo_info get_bo_info_args = {};
-  get_bo_info_args.handle = bo_handle;
-  const hsa_status_t err = xdna_ioctl(fd, DRM_IOCTL_AMDXDNA_GET_BO_INFO, &get_bo_info_args);
-  if (err != HSA_STATUS_SUCCESS) {
-    return err;
-  }
-
-  *dev_addr = (get_bo_info_args.xdna_addr == AMDXDNA_INVALID_ADDR) ? 0 : get_bo_info_args.xdna_addr;
-  return HSA_STATUS_SUCCESS;
-}
-
-/// @brief Resolves @p ptr to its BO handle, the device address the NPU sees for it, and how many
-/// bytes of the allocation follow it.
-///
-/// @param[out] dev_addr device address of @p ptr, or 0 if the allocation has none. A buffer
-/// shared with the host has none, which also means the NPU cannot fetch from it directly.
-/// @param[out] bytes_from_ptr bytes between @p ptr and the end of its allocation.
-static hsa_status_t ResolveDeviceBuffer(int fd, void* ptr, const core::Agent& agent,
-                                        uint32_t* bo_handle, uint64_t* dev_addr,
-                                        size_t* bytes_from_ptr) {
-  void* base = nullptr;
-  size_t alloc_size = 0;
-  hsa_status_t err = ResolveBOHandle(ptr, agent, bo_handle, &base, &alloc_size);
-  if (err != HSA_STATUS_SUCCESS) {
-    return err;
-  }
-
-  err = GetBODevAddr(fd, *bo_handle, dev_addr);
-  if (err != HSA_STATUS_SUCCESS) {
-    return err;
-  }
-
-  // ResolveBOHandle reports the allocation; the packet may point part-way into it.
-  const size_t offset = static_cast<uint8_t*>(ptr) - static_cast<uint8_t*>(base);
-  if (offset > alloc_size) {
-    return HSA_STATUS_ERROR_INVALID_ALLOCATION;
-  }
-  *bytes_from_ptr = alloc_size - offset;
-  if (*dev_addr != 0) *dev_addr += offset;
-  return HSA_STATUS_SUCCESS;
-}
-
-/// @brief Resolves each of the packet's kernel arguments and adds its BO to @p bo_handles.
-///
-/// The hardware reaches argument buffers through DMA descriptors rather than fetching them, so
-/// they need no device address -- only to be listed so the driver keeps them resident.
-static hsa_status_t AddKernargBOs(const hsa_amd_aie_kernel_dispatch_packet_t* pkt,
-                                  const core::Agent& agent, std::vector<uint32_t>& bo_handles) {
-  if (pkt->num_kernargs == 0) return HSA_STATUS_SUCCESS;
-  if (pkt->kernarg_address == nullptr) return HSA_STATUS_ERROR_INVALID_PACKET_FORMAT;
-
-  // The packet promises 2 * num_kernargs entries -- the addresses followed by their sizes -- and
-  // this function and FlushArguments between them read every one. num_kernargs comes straight off
-  // the packet, so it has to be shown to fit before either of them touches the buffer: a packet
-  // claiming the uint16 maximum would otherwise walk half a megabyte past the caller's
-  // allocation. Resolving the buffer is a runtime lookup, not an ioctl.
-  uint32_t kernarg_bo = AMDXDNA_INVALID_BO_HANDLE;
-  void* kernarg_base = nullptr;
-  size_t kernarg_alloc_size = 0;
-  hsa_status_t bound_err =
-      ResolveBOHandle(pkt->kernarg_address, agent, &kernarg_bo, &kernarg_base, &kernarg_alloc_size);
-  if (bound_err != HSA_STATUS_SUCCESS) {
-    return bound_err;
-  }
-  const size_t kernarg_offset =
-      static_cast<uint8_t*>(pkt->kernarg_address) - static_cast<uint8_t*>(kernarg_base);
-  const size_t kernarg_avail =
-      (kernarg_offset <= kernarg_alloc_size) ? kernarg_alloc_size - kernarg_offset : 0;
-  if (pkt->num_kernargs > kernarg_avail / (2 * sizeof(uint64_t))) {
-    log_warning_n(10, "AIE packet declares more kernel arguments than its buffer holds.\n");
-    return HSA_STATUS_ERROR_INVALID_PACKET_FORMAT;
-  }
-
-  auto* kernarg_address = static_cast<uint64_t*>(pkt->kernarg_address);
-  for (uint32_t kernarg_idx = 0; kernarg_idx < pkt->num_kernargs; ++kernarg_idx) {
-    void* ptr = reinterpret_cast<void*>(kernarg_address[kernarg_idx]);
-    uint32_t arg_handle = AMDXDNA_INVALID_BO_HANDLE;
-    const hsa_status_t err = ResolveBOHandle(ptr, agent, &arg_handle, nullptr, nullptr);
-    if (err != HSA_STATUS_SUCCESS) {
-      assert(false && "Failed to find argument BO for command packet.");
-      return err;
-    }
-    bo_handles.push_back(arg_handle);
-  }
-  return HSA_STATUS_SUCCESS;
-}
-
 /// @brief Maps a PCI device ID to its device type, or @ref XDNADeviceType::Unknown if this
 /// runtime does not support it.
+///
+/// @param[in] device_id PCI device ID to map
 static XDNADeviceType DeviceTypeOf(uint16_t device_id) {
   const auto it = supported_xdna_devices.find({device_id});
   return (it == supported_xdna_devices.end()) ? XDNADeviceType::Unknown : it->second;
@@ -1074,9 +1130,8 @@ hsa_status_t XdnaDriver::AllocateMemory(const core::MemoryRegion& mem_region,
   // Close the BO in case of error.
   MAKE_NAMED_SCOPE_GUARD(bo_guard, [&] { DestroyBOHandle(fd_, dev_heap_vaddr, bo_handle); });
 
-  amdxdna_drm_get_bo_info get_bo_info_args = {};
-  get_bo_info_args.handle = create_bo_args.handle;
-  err = xdna_ioctl(fd_, DRM_IOCTL_AMDXDNA_GET_BO_INFO, &get_bo_info_args);
+  amdxdna_drm_get_bo_info get_bo_info_args;
+  err = GetBOInfo(fd_, create_bo_args.handle, &get_bo_info_args);
   if (err != HSA_STATUS_SUCCESS) {
     return err;
   }
@@ -1165,9 +1220,15 @@ hsa_status_t XdnaDriver::CreateKernelModeQueue(size_t queue_size, uint32_t num_c
   // fails partway through; dismissed once the queue is fully constructed.
   MAKE_NAMED_SCOPE_GUARD(kmq_metadata_guard, [&] {
     for (auto& bo_handle : kmq_metadata->cmd_bo_pool.entries) {
-      DestroyBOHandle(fd_, dev_heap_vaddr, bo_handle);
+      if (DestroyBOHandle(fd_, dev_heap_vaddr, bo_handle) != HSA_STATUS_SUCCESS) {
+        log_warning_n(10, "AIE: failed to destroy a command BO while unwinding queue creation.\n");
+      }
     }
-    DestroyHwCtx(fd_, kmq_metadata->hw_ctx_handle);
+    if (DestroyHwCtx(fd_, kmq_metadata->hw_ctx_handle) != HSA_STATUS_SUCCESS) {
+      log_warning_n(10,
+                    "AIE: failed to destroy a hardware context while unwinding queue "
+                    "creation.\n");
+    }
   });
 
   // Pre-allocate the command BO pool for the life of the queue, so dispatch never pays a
@@ -1357,9 +1418,8 @@ hsa_status_t XdnaDriver::CreateShareableHandle(core::DriverMemoryHandle* handle,
   }
 
   // Get offset.
-  amdxdna_drm_get_bo_info get_bo_info_args = {};
-  get_bo_info_args.handle = bo_handle;
-  hsa_status_t err = xdna_ioctl(fd_, DRM_IOCTL_AMDXDNA_GET_BO_INFO, &get_bo_info_args);
+  amdxdna_drm_get_bo_info get_bo_info_args;
+  hsa_status_t err = GetBOInfo(fd_, bo_handle, &get_bo_info_args);
   if (err != HSA_STATUS_SUCCESS) {
     return err;
   }
@@ -1439,9 +1499,8 @@ hsa_status_t XdnaDriver::InitDeviceHeap() {
   // Unmap memory and close the dev heap BO in case of error.
   MAKE_NAMED_SCOPE_GUARD(dev_heap_guard, [&] { FreeDeviceHeap(); });
 
-  amdxdna_drm_get_bo_info get_bo_info_args = {};
-  get_bo_info_args.handle = dev_heap_bo;
-  err = xdna_ioctl(fd_, DRM_IOCTL_AMDXDNA_GET_BO_INFO, &get_bo_info_args);
+  amdxdna_drm_get_bo_info get_bo_info_args;
+  err = GetBOInfo(fd_, dev_heap_bo, &get_bo_info_args);
   if (err != HSA_STATUS_SUCCESS) {
     return err;
   }
@@ -1500,15 +1559,18 @@ hsa_status_t XdnaDriver::FreeDeviceHeap() {
 /// Adds the packet's instruction and argument BOs to @p bo_handles, and sets @p reconfigure if the
 /// packet introduced a PDI the hardware context does not know about yet.
 ///
+/// @param[in] pkt packet to build the command from
+/// @param[in] agent agent that owns the queue
+/// @param[in,out] kmq_metadata KMQ metadata supplying the command BO pool and the PDI cache
+/// @param[in,out] bo_handles list the packet's BOs are appended to
+/// @param[out] reconfigure set when the packet introduced a PDI the hardware context lacks
 /// @param[out] cmd_bo the command BO, drawn from @p kmq_metadata's command BO pool.
 /// @param[out] arg_cnt number of argument dwords the driver will see, which determines how many of
 /// these commands fit in one chain.
-static hsa_status_t BuildPdiInstsCommand(const void* packet, const core::Agent& agent,
-                                         KmqMetadata* kmq_metadata,
-                                         std::vector<uint32_t>& bo_handles, bool* reconfigure,
+static hsa_status_t BuildPdiInstsCommand(const hsa_amd_aie_kernel_dispatch_packet_t* pkt,
+                                         const core::Agent& agent, KmqMetadata* kmq_metadata,
+                                         std::vector<uint32_t>* bo_handles, bool* reconfigure,
                                          BOHandle* cmd_bo, uint32_t* arg_cnt) {
-  const auto* pkt = static_cast<const hsa_amd_aie_kernel_dispatch_packet_t*>(packet);
-
   // Determine if the PDI is cached, if not it will be added to the PDI cache and the hardware
   // context will be reconfigured.
   void* pdi_base = nullptr;
@@ -1538,7 +1600,7 @@ static hsa_status_t BuildPdiInstsCommand(const void* packet, const core::Agent& 
     assert(false && "Failed to find instruction sequence BO for command packet.");
     return err;
   }
-  bo_handles.push_back(instr_handle);
+  bo_handles->push_back(instr_handle);
   FlushCpuCache(insts_addr, 0, pkt->insts_size);
 
   err = AddKernargBOs(pkt, agent, bo_handles);
@@ -1584,14 +1646,17 @@ static hsa_status_t BuildPdiInstsCommand(const void* packet, const core::Agent& 
 /// this writes the PDI's device address into it, which the application cannot know, and points the
 /// command at it.
 ///
+/// @param[in] fd driver file descriptor
+/// @param[in] pkt packet to build the command from
+/// @param[in] agent agent that owns the queue
+/// @param[in,out] kmq_metadata KMQ metadata supplying the command BO pool
+/// @param[in,out] bo_handles list the packet's BOs are appended to
 /// @param[out] cmd_bo the command BO, drawn from @p kmq_metadata's command BO pool.
 /// @param[out] arg_cnt number of argument dwords the driver will see.
-static hsa_status_t BuildFullElfCommand(int fd, const void* packet, const core::Agent& agent,
-                                        KmqMetadata* kmq_metadata,
-                                        std::vector<uint32_t>& bo_handles, BOHandle* cmd_bo,
+static hsa_status_t BuildFullElfCommand(int fd, const hsa_amd_aie_kernel_dispatch_packet_t* pkt,
+                                        const core::Agent& agent, KmqMetadata* kmq_metadata,
+                                        std::vector<uint32_t>* bo_handles, BOHandle* cmd_bo,
                                         uint32_t* arg_cnt) {
-  const auto* pkt = static_cast<const hsa_amd_aie_kernel_dispatch_packet_t*>(packet);
-
   // The control code comes from the application already patched with its argument addresses; all
   // this path adds is the PDI's device address, which only the runtime can know. A packet only
   // reaches here when it asked for that patch, so pdi_patch_offset is non-zero.
@@ -1621,16 +1686,13 @@ static hsa_status_t BuildFullElfCommand(int fd, const void* packet, const core::
   if (ctrl_code_dev_addr == 0) {
     // The control code has to be somewhere the NPU can fetch it from directly, which means the
     // device heap. A host-only buffer has no device address and would not be reachable.
-    log_warning_n(10, "AIE full-ELF control code must be allocated from device memory.\n");
+    assert(false && "Full-ELF control code must be allocated from device memory.");
     return HSA_STATUS_ERROR_INVALID_PACKET_FORMAT;
   }
   if ((ctrl_code_dev_addr % CTRL_CODE_DEV_ADDR_ALIGNMENT) != 0) {
-    // Measured on npu4 (Strix, aie2p): the dispatch only completes when the control code's device
-    // address is 16 KiB aligned. At 2 KiB, 4 KiB, 8 KiB, 12 KiB, 20 KiB and 24 KiB offsets the
-    // packet is accepted and then never signals, so the failure surfaces as a hang rather than an
-    // error. Reject it here, where it can still be reported.
-    log_warning_n(10, "AIE full-ELF control code must be %u-byte aligned in device memory.\n",
-                  CTRL_CODE_DEV_ADDR_ALIGNMENT);
+    // Measured on aie2p: the dispatch only completes when the control code's device
+    // address is 16 KiB aligned.
+    assert(false && "Full-ELF control code must be 16KiB aligned in device memory.");
     return HSA_STATUS_ERROR_INVALID_PACKET_FORMAT;
   }
   // insts_size comes from the packet, so it has to be shown to fit before anything reads or
@@ -1638,7 +1700,7 @@ static hsa_status_t BuildFullElfCommand(int fd, const void* packet, const core::
   if (pkt->insts_size > ctrl_code_avail) {
     return HSA_STATUS_ERROR_INVALID_PACKET_FORMAT;
   }
-  bo_handles.push_back(ctrl_code_handle);
+  bo_handles->push_back(ctrl_code_handle);
 
   // Write the PDI's device address into the control code where the application asked.
   uint32_t pdi_handle = AMDXDNA_INVALID_BO_HANDLE;
@@ -1649,7 +1711,7 @@ static hsa_status_t BuildFullElfCommand(int fd, const void* packet, const core::
     return err;
   }
   if (pdi_dev_addr == 0) {
-    log_warning_n(10, "AIE full-ELF PDI must be allocated from device memory.\n");
+    assert(false && "Full-ELF PDI must be allocated from device memory.");
     return HSA_STATUS_ERROR_INVALID_PACKET_FORMAT;
   }
 
@@ -1661,12 +1723,12 @@ static hsa_status_t BuildFullElfCommand(int fd, const void* packet, const core::
   // The PDI is reached only through the address just written, so the command still has to list it
   // for the driver to keep it resident.
   FlushCpuCache(pkt->pdi_addr, 0, pdi_avail);
-  bo_handles.push_back(pdi_handle);
+  bo_handles->push_back(pdi_handle);
 
   FlushCpuCache(ctrl_code, 0, pkt->insts_size);
 
   // The arguments are already patched into the control code, so they are not passed to the
-  // hardware -- but they still have to be resident for the duration of the dispatch.
+  // hardware but they still have to be resident for the duration of the dispatch.
   err = AddKernargBOs(pkt, agent, bo_handles);
   if (err != HSA_STATUS_SUCCESS) {
     return err;
@@ -1691,7 +1753,7 @@ static hsa_status_t BuildFullElfCommand(int fd, const void* packet, const core::
   // preemption sections, and aie2p firmware accepts null preemption buffers.
   //
   // A zeroed 64-bit kernel opcode follows. The driver overwrites its low dword with its own TXN
-  // constant, so there is nothing for this code to fill in -- but the space has to be there,
+  // constant, so there is nothing for this code to fill in but the space has to be there,
   // because the driver sizes the chain slot from it.
 
   *arg_cnt = ELF_CMD_ARG_DWORDS;
@@ -1699,6 +1761,8 @@ static hsa_status_t BuildFullElfCommand(int fd, const void* packet, const core::
 }
 
 /// @brief Returns a name for an @ref ert_cmd_state value, for diagnostics.
+///
+/// @param[in] state command state to name
 static const char* ErtStateName(uint32_t state) {
   switch (state) {
     case ERT_CMD_STATE_INVALID:
@@ -1731,6 +1795,12 @@ static const char* ErtStateName(uint32_t state) {
 /// The firmware records how far it got in the chain itself. Without this a failed chain is only
 /// a status code: the caller cannot tell whether the first command was malformed, whether the chain
 /// was too long, or whether one dispatch in the middle timed out.
+///
+/// @param[in] chain_cmd the chain command itself, read through volatile because the firmware
+/// writes it while the host is blocked
+/// @param[in] chain the chain's payload, carrying the device's submit and error indices
+/// @param[in] cmd_bos the commands the chain named, indexed by the device's error index
+/// @param[in] num_commands number of commands in @p cmd_bos
 static void LogChainFailure(const volatile ert_start_kernel_cmd* chain_cmd,
                             const volatile ert_cmd_chain_data* chain, const BOHandle* cmd_bos,
                             size_t num_commands) {
@@ -1757,6 +1827,13 @@ static void LogChainFailure(const volatile ert_start_kernel_cmd* chain_cmd,
 
 /// @brief Submits @p num_commands commands as one chain (or directly, if there is only one) and
 /// waits for them to complete.
+///
+/// @param[in] fd driver file descriptor
+/// @param[in] cmd_bos commands to submit
+/// @param[in] num_commands number of commands in @p cmd_bos. Must be greater than 0.
+/// @param[in] bo_handles BOs the commands reference, which the driver keeps resident
+/// @param[in,out] kmq_metadata KMQ metadata supplying the hardware context, syncobj and, for a
+/// chain, the command BO pool the wrapper is drawn from
 static hsa_status_t SubmitAndWaitChain(int fd, const BOHandle* cmd_bos, size_t num_commands,
                                        const std::vector<uint32_t>& bo_handles,
                                        KmqMetadata* kmq_metadata) {
@@ -1849,7 +1926,7 @@ hsa_status_t XdnaDriver::SubmitCmdChain(hsa_queue_t& q, void* queue_metadata,
       return HSA_STATUS_ERROR_INVALID_PACKET_FORMAT;
     }
   } else if (kmq_metadata->mode != mode) {
-    log_warning_n(10, "AIE queue cannot mix full-ELF and PDI dispatches.\n");
+    assert(false && "AIE queue cannot mix full-ELF and PDI dispatches.");
     return HSA_STATUS_ERROR_INVALID_PACKET_FORMAT;
   }
 
@@ -1887,8 +1964,8 @@ hsa_status_t XdnaDriver::SubmitCmdChain(hsa_queue_t& q, void* queue_metadata,
     BOHandle cmd_bo_handle;
     uint32_t arg_cnt = 0;
     const hsa_status_t err = (mode == QueueMode::FullElf)
-        ? BuildFullElfCommand(fd_, pkt, agent, kmq_metadata, bo_handles, &cmd_bo_handle, &arg_cnt)
-        : BuildPdiInstsCommand(pkt, agent, kmq_metadata, bo_handles, &reconfigure_queue,
+        ? BuildFullElfCommand(fd_, pkt, agent, kmq_metadata, &bo_handles, &cmd_bo_handle, &arg_cnt)
+        : BuildPdiInstsCommand(pkt, agent, kmq_metadata, &bo_handles, &reconfigure_queue,
                                &cmd_bo_handle, &arg_cnt);
     if (err != HSA_STATUS_SUCCESS) return err;
 
@@ -1943,7 +2020,7 @@ hsa_status_t XdnaDriver::SubmitCmdChain(hsa_queue_t& q, void* queue_metadata,
   size_t chunk_start = 0;
   while (chunk_start < cmd_bo_handles.size()) {
     // Every command in a chain shares one buffer, so take commands until the next one would not
-    // fit -- the same accounting the driver does as it packs the slots.
+    // fit the same accounting the driver does as it packs the slots.
     size_t chunk_len = 0;
     uint32_t chunk_bytesize = 0;
     for (size_t i = chunk_start; i < cmd_bo_handles.size(); ++i) {
