@@ -16,6 +16,7 @@
 #include <barrier>
 #include <bit>
 #include <memory>
+#include <semaphore>
 #include <stdexcept>
 #include <vector>
 
@@ -59,9 +60,9 @@ TEST(MatrixCoexecutionTest, BatchOverlapsEightCallbacksAndJoinsBeforeReturning) 
   });
   std::array<Instruction *, 8> instructions;
   instructions.fill(&instruction);
-  mc::execute_batch(instructions, &context);
+  mc::execute_private_batch(instructions, &context);
   EXPECT_EQ(context.finished.load(), 8u);
-  mc::execute_batch(instructions, &context);
+  mc::execute_private_batch(instructions, &context);
   EXPECT_EQ(context.finished.load(), 16u);
 }
 
@@ -210,6 +211,102 @@ TEST(MatrixCoexecutionTest, WiderBatchChecksNonAdjacentDependenciesAndAllocatesB
       const auto expected = execute(false);
       EXPECT_EQ(execute(true), expected);
     }
+  }
+}
+
+TEST(MatrixCoexecutionTest, SharedPoolDoesNotWaitForBusyHelpersAndReusesThemAcrossIssuers) {
+  mc::SharedPool pool(1);
+  struct Context {
+    std::binary_semaphore started{0};
+    std::binary_semaphore unblock{0};
+    std::atomic<unsigned> finished{0};
+  } context;
+  Instruction blocked("block", [](Instruction &, void *opaque) {
+    auto &ctx = *static_cast<Context *>(opaque);
+    ctx.started.release();
+    ctx.unblock.acquire();
+    ++ctx.finished;
+  });
+  Instruction increment(
+      "increment", [](Instruction &, void *opaque) { ++static_cast<Context *>(opaque)->finished; });
+  std::array<Instruction *, 2> first{&blocked, &increment};
+  std::thread issuer([&] { pool.execute(first, &context); });
+  context.started.acquire();
+  std::array<Instruction *, 2> fallback{&increment, &increment};
+  const auto full = mc::stats.shared_full;
+  pool.execute(fallback, &context);
+  EXPECT_EQ(mc::stats.shared_full - full, 1u);
+  // This call returned while the other issuer's helper is still blocked.
+  EXPECT_GE(context.finished.load(), 2u);
+  context.unblock.release();
+  issuer.join();
+  EXPECT_EQ(context.finished.load(), 4u);
+  const auto submitted = mc::stats.shared_submitted;
+  pool.execute(fallback, &context);
+  EXPECT_EQ(mc::stats.shared_submitted - submitted, 1u);
+  EXPECT_EQ(context.finished.load(), 6u);
+}
+
+TEST(MatrixCoexecutionTest, SharedPoolReleasesClaimsAfterHelperAndInlineFailures) {
+  mc::SharedPool pool(1);
+  Instruction failure("failure", [](Instruction &, void *) {
+    throw std::runtime_error("injected shared helper failure");
+  });
+  Instruction increment("increment", [](Instruction &, void *opaque) {
+    ++*static_cast<std::atomic<unsigned> *>(opaque);
+  });
+  std::atomic<unsigned> finished{0};
+  std::array<Instruction *, 2> instructions{&failure, &increment};
+  EXPECT_THROW(pool.execute(instructions, &finished), std::runtime_error);
+  EXPECT_EQ(finished.load(), 1u);
+  std::swap(instructions[0], instructions[1]);
+  EXPECT_THROW(pool.execute(instructions, &finished), std::runtime_error);
+  EXPECT_EQ(finished.load(), 2u);
+  instructions.fill(&increment);
+  const auto submitted = mc::stats.shared_submitted;
+  pool.execute(instructions, &finished);
+  EXPECT_EQ(mc::stats.shared_submitted - submitted, 1u);
+  EXPECT_EQ(finished.load(), 4u);
+}
+
+TEST(MatrixCoexecutionTest, SharedPoolHandlesConcurrentIssuersAndZeroCapacity) {
+  for (unsigned capacity : {0u, 1u, 4u}) {
+    mc::SharedPool pool(capacity);
+    struct Context {
+      unsigned input = 0;
+      std::array<unsigned, 8> output{};
+    };
+    // Disjoint non-atomic outputs exercise publication and completion ordering,
+    // including changing an issuer's inputs after every joined batch.
+    std::array<std::unique_ptr<Instruction>, 8> owned;
+    std::array<Instruction *, 8> instructions;
+    for (size_t i = 0; i != instructions.size(); ++i) {
+      owned[i] = std::make_unique<Instruction>(
+          "copy",
+          [](Instruction &self, void *opaque) {
+            auto &ctx = *static_cast<Context *>(opaque);
+            ctx.output[self.src_loc()] = ctx.input + self.src_loc();
+          },
+          i);
+      instructions[i] = owned[i].get();
+    }
+    std::atomic<bool> matched{true};
+    std::array<std::thread, 8> issuers;
+    for (size_t i = 0; i != issuers.size(); ++i)
+      issuers[i] = std::thread([&, i] {
+        Context ctx;
+        for (unsigned iteration = 0; iteration != 100; ++iteration) {
+          ctx.input = i * 100 + iteration;
+          ctx.output.fill(0);
+          pool.execute(instructions, &ctx);
+          for (size_t j = 0; j != ctx.output.size(); ++j)
+            if (ctx.output[j] != ctx.input + j)
+              matched.store(false, std::memory_order_relaxed);
+        }
+      });
+    for (auto &issuer : issuers)
+      issuer.join();
+    EXPECT_TRUE(matched.load());
   }
 }
 
