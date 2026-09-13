@@ -1115,8 +1115,10 @@ if(BUILD_TESTS)
       ${CMAKE_CURRENT_SOURCE_DIR}/device/sdma/anvil_stub_quiet_count.cpp
       PROPERTIES COMPILE_OPTIONS "-fgpu-rdc")
     # install.sh --rocshmem-gin -t (GIN CI) sets ENABLE_ROCSHMEM_GIN without
-    # GIN_ANVIL_UNIT_TESTS. Those three TUs still compile relocatable, so the
-    # fixtures binary must device-link here or g_sdmaStubQuietCount is unresolved.
+    # GIN_ANVIL_UNIT_TESTS, so the gate at line 372 keeps Suite H out of that
+    # build and only the IPC test and the counter TU compile relocatable there.
+    # The fixtures binary must still device-link here or g_sdmaStubQuietCount
+    # is unresolved.
     set(_ROCSHMEM_FIXTURES_RDC_OFFLOAD_FLAGS "")
     foreach(_g IN LISTS GPU_TARGETS)
       if(_g)
