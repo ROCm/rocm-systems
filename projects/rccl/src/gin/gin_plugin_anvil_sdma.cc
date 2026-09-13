@@ -456,20 +456,8 @@ static ncclResult_t ginAnvilCheckSignalConnectivity(ginAnvilGinCtx* ctx, void* l
     WARN("GIN anvil-sdma: conn-check supports at most %d ranks (got %d)", kMaxConnCheckRanks, nRanks);
     return ncclSystemError;
   }
-  if (nRanks != devr->lsaSize) {
-    INFO(NCCL_INIT,
-         "GIN anvil-sdma: skipping LSA signal conn-check (nRanks=%d != lsaSize=%d, rank %d)", nRanks,
-         devr->lsaSize, rank);
-    return ncclSuccess;
-  }
-  if (ctx->nSignals < nRanks) {
-    INFO(NCCL_INIT,
-         "GIN anvil-sdma: skipping LSA signal conn-check (nSignals=%d < nRanks=%d, rank %d)",
-         ctx->nSignals, nRanks, rank);
-    return ncclSuccess;
-  }
-
   ncclResult_t ret = ncclSuccess;
+  bool markedComm = false;
   hipStream_t connStream = nullptr;
   int* missingDev = nullptr;
   int missingHost[kMaxConnCheckRanks] = {};
@@ -487,8 +475,14 @@ static ncclResult_t ginAnvilCheckSignalConnectivity(ginAnvilGinCtx* ctx, void* l
     kSetupReady = 0,
     kSetupBypass = 1,
     kSetupFailed = 2,
+    kSetupSkip = 3,
   };
-  int setupState = ginAnvilConnCheckEnabledFromEnv() ? kSetupReady : kSetupBypass;
+  int setupState = kSetupReady;
+  if (!ginAnvilConnCheckEnabledFromEnv()) {
+    setupState = kSetupBypass;
+  } else if (nRanks != devr->lsaSize || ctx->nSignals < nRanks) {
+    setupState = kSetupSkip;
+  }
   if (setupState == kSetupReady &&
       (ctx->signal_remote_addrs_dev == nullptr || lsaSelf == nullptr)) {
     WARN("GIN anvil-sdma: conn-check setup has null address (rank %d, remote-addrs=%p, lsaSelf=%p)",
@@ -557,6 +551,32 @@ static ncclResult_t ginAnvilCheckSignalConnectivity(ginAnvilGinCtx* ctx, void* l
       }
       goto cleanup;
     }
+    int skipRanks = 0;
+    for (int r = 0; r < nRanks; r++) skipRanks += gathered[r] == kSetupSkip;
+    if (skipRanks != 0) {
+      if (skipRanks != nRanks) {
+        WARN("GIN anvil-sdma: conn-check skip differs across ranks (%d/%d ineligible)", skipRanks, nRanks);
+        ret = ncclSystemError;
+        goto cleanup;
+      }
+      if (nRanks != devr->lsaSize) {
+        INFO(NCCL_INIT,
+             "GIN anvil-sdma: skipping LSA signal conn-check (nRanks=%d != lsaSize=%d, rank %d)", nRanks,
+             devr->lsaSize, rank);
+      } else {
+        INFO(NCCL_INIT,
+             "GIN anvil-sdma: skipping LSA signal conn-check (nSignals=%d < nRanks=%d, rank %d)",
+             ctx->nSignals, nRanks, rank);
+      }
+      goto cleanup;
+    }
+  }
+
+  {
+    std::lock_guard<std::mutex> lock(pluginMutex);
+    if (ginAnvilConnCheckedComms.count(comm) != 0) goto cleanup;
+    if (!ginAnvilConnCheckedComms.insert(comm).second) goto cleanup;
+    markedComm = true;
   }
 
 #ifdef ENABLE_FAULT_INJECTION
@@ -660,6 +680,10 @@ static ncclResult_t ginAnvilCheckSignalConnectivity(ginAnvilGinCtx* ctx, void* l
   }
 
 cleanup:
+  if (markedComm && ret != ncclSuccess) {
+    std::lock_guard<std::mutex> lock(pluginMutex);
+    ginAnvilConnCheckedComms.erase(comm);
+  }
   if (missingDev) CUDACHECKIGNORE(hipFree(missingDev));
   if (connStream) (void)hipStreamDestroy(connStream);
   return ret;
@@ -742,20 +766,16 @@ static ncclResult_t ginAnvilRegisterLsaSignals(ginAnvilGinCtx* ctx, void* lsaSel
        (unsigned long)remote0, (unsigned long)remoteSelf);
 
   // [GIN-CONN-CHECK] Validate peer signal connectivity once per comm (on the first
-  // signal bind). Detects the intermittent gfx950 cuMem-VMM peer-map fault and
-  // fails loudly here instead of letting the first collective hang forever.
-  bool doConnCheck = false;
+  // signal bind that is eligible for the gate). Detects the intermittent gfx950
+  // cuMem-VMM peer-map fault and fails loudly here instead of letting the first
+  // collective hang forever.
+  bool alreadyChecked = false;
   {
     std::lock_guard<std::mutex> lock(pluginMutex);
-    if (ginAnvilConnCheckedComms.insert(comm).second) doConnCheck = true;
+    alreadyChecked = ginAnvilConnCheckedComms.count(comm) != 0;
   }
-  if (doConnCheck) {
-    ncclResult_t checkResult = ginAnvilCheckSignalConnectivity(ctx, lsaSelf);
-    if (checkResult != ncclSuccess) {
-      std::lock_guard<std::mutex> lock(pluginMutex);
-      ginAnvilConnCheckedComms.erase(comm);
-      return checkResult;
-    }
+  if (!alreadyChecked) {
+    NCCLCHECK(ginAnvilCheckSignalConnectivity(ctx, lsaSelf));
   }
 
   return ncclSuccess;
