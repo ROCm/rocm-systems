@@ -25,6 +25,8 @@
 #ifndef LIBRARY_SRC_GDA_QUEUE_PAIR_MOCK_HPP_
 #define LIBRARY_SRC_GDA_QUEUE_PAIR_MOCK_HPP_
 
+#include <cassert>
+
 #include <hip/hip_runtime.h>
 
 #include "gda/endian.hpp"

@@ -26,6 +26,7 @@
 #define LIBRARY_SRC_GDA_QUEUE_PAIR_MUX_HPP_
 
 #include <algorithm>
+#include <cassert>
 #include <tuple>
 #include <type_traits>
 #include <utility>
