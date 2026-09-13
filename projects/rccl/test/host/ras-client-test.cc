@@ -59,7 +59,12 @@
 // so it actually pins client.cc:26-33 rather than merely re-checking the reset helper.
 namespace {
 const char* const kCompiledInHostName = hostName;
+const char* const kCompiledInPort = port;
 const int kCompiledInTimeout = timeout;
+const bool kCompiledInVerbose = verbose;
+const bool kCompiledInMonitorMode = monitorMode;
+const char* const kCompiledInFormat = format;
+const char* const kCompiledInEvents = events;
 const int kCompiledInSock = sock;
 
 // Mirrors of the default seams' own defaults (libc_fakes.cc:40, :48), used throughout this file so a
@@ -143,7 +148,12 @@ class RasClientMicrotest : public ::testing::Test {
 // file-scope statics of client.cc are reachable and resettable from this TU.
 TEST_F(RasClientMicrotest, Scaffolding_DefaultSeams_AreReachableAndReset) {
   EXPECT_STREQ(kCompiledInHostName, hostName);
+  EXPECT_STREQ(kCompiledInPort, port);
   EXPECT_EQ(kCompiledInTimeout, timeout);
+  EXPECT_EQ(kCompiledInVerbose, verbose);
+  EXPECT_EQ(kCompiledInMonitorMode, monitorMode);
+  EXPECT_STREQ(kCompiledInFormat, format);
+  EXPECT_STREQ(kCompiledInEvents, events);
   EXPECT_EQ(kCompiledInSock, sock);
   EXPECT_EQ(kSocketFd, g_nextSocketFd);
   EXPECT_EQ(kEntryPort0, g_addrinfoBasePort);
@@ -2135,6 +2145,9 @@ TEST_F(RasClientMicrotest, ConnectTimeout_NegativeTimeout_SkipsNegotiationAndBum
   EXPECT_EQ(std::string(kClientHello), g_writtenData);  // no TIMEOUT line was sent
   EXPECT_EQ("SNDTIMEO={1,0} RCVTIMEO={1,0} RCVTIMEO={11,0} ", TraceSetsockopt(opts));
   ExpectAllSolSocket(opts);
+  for (const SetsockoptCall& o : opts) {
+    EXPECT_EQ(kSocketFd, o.fd);
+  }
   EXPECT_EQ(kSocketFd, sock);
   EXPECT_TRUE(g_closedFds.empty());
   EXPECT_EQ(1, g_freeaddrinfoCalls);
@@ -2182,6 +2195,9 @@ TEST_F(RasClientMicrotest, ConnectTimeout_PositiveTimeout_SendsExactTimeoutLineA
   EXPECT_EQ(std::vector<int>({kSocketFd, kSocketFd}), g_readFds);
   EXPECT_EQ("SNDTIMEO={1,0} RCVTIMEO={1,0} RCVTIMEO={43,0} ", TraceSetsockopt(opts));
   ExpectAllSolSocket(opts);
+  for (const SetsockoptCall& o : opts) {
+    EXPECT_EQ(kSocketFd, o.fd);
+  }
   EXPECT_EQ(kSocketFd, sock);
   EXPECT_TRUE(g_closedFds.empty());
   EXPECT_EQ(1, g_freeaddrinfoCalls);
@@ -2590,14 +2606,19 @@ TEST_F(RasClientMicrotest, MonitorEvents_ActivationSucceeds_DisablesTheReceiveTi
   sock = kMonitorSock;
   ScriptReadData("OK\n");
 
+  std::vector<SetsockoptCall> opts;
+  ScopedHook optHook(g_setsockopt, RecordingSetsockopt(&opts));
+
   int rc = -1;
   CaptureLog([&]() { rc = monitorNCCLEvents(); });
 
   EXPECT_EQ(0, rc);
-  EXPECT_EQ(SOL_SOCKET, g_lastSetsockoptLevel);
-  EXPECT_EQ(SO_RCVTIMEO, g_lastSetsockoptOptname);
-  EXPECT_EQ(0, g_lastSetsockoptTimeval.tv_sec);
-  EXPECT_EQ(0, g_lastSetsockoptTimeval.tv_usec);
+  ASSERT_EQ(1u, opts.size());
+  EXPECT_EQ(kMonitorSock, opts[0].fd);
+  EXPECT_EQ(SOL_SOCKET, opts[0].level);
+  EXPECT_EQ(SO_RCVTIMEO, opts[0].optname);
+  EXPECT_EQ(0L, opts[0].tvSec);
+  EXPECT_EQ(0L, opts[0].tvUsec);
 }
 
 // Unlike connectToNCCL's setsockopt, this one is fatal: no banners, no loop.
