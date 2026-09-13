@@ -324,6 +324,7 @@ TEST(ParameterApiTests, GetU16_MatchingType_ReturnsValue) {
       },
         ASSERT_EQ(v, static_cast<uint16_t>(40000));
         ASSERT_EQ(v, static_cast<uint16_t>(40000));
+        ASSERT_EQ(v, static_cast<uint16_t>(40000));
       },
       {{"NCCL_TEST_PARAM_U16", "40000"}});
 }
