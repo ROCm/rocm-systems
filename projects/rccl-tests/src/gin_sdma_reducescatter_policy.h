@@ -1,5 +1,5 @@
 /*************************************************************************
- * Copyright (c) Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (c) 2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * See LICENSE.txt for license information
  ************************************************************************/
@@ -137,6 +137,27 @@ GIN_SDMA_RS_HD inline int reduceScatterCtas(size_t totalBytes, size_t envCtas) {
 GIN_SDMA_RS_HD inline int reduceScatterMaxCtas() {
   return (kReduceScatterCtasMid > kReduceScatterCtasOther) ? kReduceScatterCtasMid
                                                            : kReduceScatterCtasOther;
+}
+
+// Size of the barrier/lsaBarrier/signal pools the ReduceScatter kernel launches
+// with: max(-V/deviceCtaCount, the size-adaptive ladder's peak). This is BOTH the
+// pool allocated in ReduceScatterGetDevCommRequirements AND the ceiling that
+// reduceScatterGridCtas() clamps any launched grid to, so the "grid <= pool"
+// invariant lives in one place. Mirrors gin_sdma_allgather::allGatherPoolCtas.
+GIN_SDMA_RS_HD inline int reduceScatterPoolCtas(int deviceCtaCount) {
+  const int maxTier = reduceScatterMaxCtas();
+  return (deviceCtaCount > maxTier) ? deviceCtaCount : maxTier;
+}
+
+// Launched grid CTA count: the size-adaptive ladder (or an NCCL_GIN_ANVIL_RS_CTAS
+// pin) clamped to poolCtas. The kernel indexes devComm.lsaBarrier by blockIdx.x,
+// so a grid above the pool would index past the array -- reduceScatterCtas() alone
+// caps a pin at 128, which exceeds the default pool of max(-V, 48).
+GIN_SDMA_RS_HD inline int reduceScatterGridCtas(size_t totalBytes, size_t envCtas,
+                                                int poolCtas) {
+  if (poolCtas < 1) poolCtas = 1;
+  const int c = reduceScatterCtas(totalBytes, envCtas);
+  return (c > poolCtas) ? poolCtas : c;
 }
 
 // Bytes of scratch-window a future put-partials large tier would need per rank: it

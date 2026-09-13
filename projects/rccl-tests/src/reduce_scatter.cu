@@ -47,12 +47,23 @@ static ncclDevResourceHandle g_rsScratchHandle = 0;  // unused (no scratch); pas
 // into a size_t, returning the policy "unset" sentinel when absent/empty/unparseable
 // so gin_sdma_reducescatter::reduceScatterCtas() falls back to its size-adaptive
 // ladder. Self-contained here (the target common.h has no testParseSdmaThresholdEnv).
+// Rejects a leading '-' (strtoull would wrap it to a huge unsigned, which then
+// clamps to the CTA ceiling instead of being ignored) and trailing garbage, so
+// "8foo" is not silently read as 8. Matches gin_sdma_allgather_policy.h's
+// parseAllGatherCtasEnv and BroadcastParseCtasEnv.
 static inline size_t ReduceScatterParseCtasEnv(const char* name) {
   const char* e = getenv(name);
-  if (e == nullptr || e[0] == '\0') return gin_sdma_reducescatter::kThresholdUnset;
+  if (e == nullptr || e[0] == '\0' || e[0] == '-') {
+    return gin_sdma_reducescatter::kThresholdUnset;
+  }
   char* end = nullptr;
   unsigned long long v = strtoull(e, &end, 10);
-  if (end == e) return gin_sdma_reducescatter::kThresholdUnset;
+  if (end == e || *end != '\0') {
+    return gin_sdma_reducescatter::kThresholdUnset;
+  }
+  if ((size_t)v == gin_sdma_reducescatter::kThresholdUnset) {
+    return gin_sdma_reducescatter::kThresholdUnset;
+  }
   return (size_t)v;
 }
 
@@ -191,8 +202,9 @@ testResult_t ReduceScatterGetDevCommRequirements(int deviceImpl, ncclDevCommRequ
       // Cover both the -V/deviceCtaCount launch and the size-adaptive CTA count the
       // kernel self-selects (reduceScatterCtas, up to reduceScatterMaxCtas()),
       // decoupled from -V -- the read-reduce indexes devComm.lsaBarrier by blockIdx.x.
-      const int rsBarCtas = (deviceCtaCount > gin_sdma_reducescatter::reduceScatterMaxCtas())
-                              ? deviceCtaCount : gin_sdma_reducescatter::reduceScatterMaxCtas();
+      // reduceScatterPoolCtas is also the ceiling reduceScatterGridCtas() clamps the
+      // launched grid to, so "grid <= pool" is decided in one place.
+      const int rsBarCtas = gin_sdma_reducescatter::reduceScatterPoolCtas(deviceCtaCount);
       gin_sdma_reducescatter::DevReqs dr = gin_sdma_reducescatter::reduceScatterDevReqs(rsBarCtas);
       reqs->barrierCount = dr.barrierCount;
       reqs->lsaBarrierCount = dr.lsaBarrierCount;
@@ -217,8 +229,7 @@ bool ReduceScatterGetDevCommRequirements(int deviceImpl, ncclDevCommRequirements
   switch(deviceImpl) {
 #if NCCL_VERSION_CODE >= NCCL_VERSION(2,28,7)
     case 3: { // single-tier LSA read-reduce: barriers only, no scratch
-      const int rsBarCtas = (deviceCtaCount > gin_sdma_reducescatter::reduceScatterMaxCtas())
-                              ? deviceCtaCount : gin_sdma_reducescatter::reduceScatterMaxCtas();
+      const int rsBarCtas = gin_sdma_reducescatter::reduceScatterPoolCtas(deviceCtaCount);
       gin_sdma_reducescatter::DevReqs dr = gin_sdma_reducescatter::reduceScatterDevReqs(rsBarCtas);
       reqs->barrierCount = dr.barrierCount;
       reqs->lsaBarrierCount = dr.lsaBarrierCount;
@@ -595,7 +606,9 @@ testResult_t ReduceScatterRunColl(void* sendbuff, size_t sendoffset, void* recvb
         const int rsNRanks = (rsDc != nullptr) ? rsDc->nRanks : 1;
         const size_t rsTotalBytes = count * (size_t)wordSize(type) * (size_t)rsNRanks;
         static const size_t rsCtasEnv = ReduceScatterParseCtasEnv("NCCL_GIN_ANVIL_RS_CTAS");
-        const int rsGridCtas = gin_sdma_reducescatter::reduceScatterCtas(rsTotalBytes, rsCtasEnv);
+        const int rsGridCtas = gin_sdma_reducescatter::reduceScatterGridCtas(
+            rsTotalBytes, rsCtasEnv,
+            gin_sdma_reducescatter::reduceScatterPoolCtas(deviceCtaCount));
         static const size_t rsUnrollMin = ReduceScatterUnrollMinBytes();
         TESTCHECK(ReduceScatterLaunchDeviceKernelGrid(SPECIALIZE_REDUCE_KERNEL(GinReduceScatterKernel, type, op), sendbuff, sendoffset, recvbuff, recvoffset, count, op, root, comm, stream, gin_sdma_reducescatter::kThresholdUnset, g_rsScratchHandle, rsGridCtas, rsUnrollMin));
         return testSuccess;
@@ -645,7 +658,9 @@ testResult_t ReduceScatterDeviceTime(struct threadArgs* args, ncclDataType_t typ
   // Match the perf path: self-select the size-adaptive CTA count (decoupled from
   // -V) so the device-timed number reflects the launched configuration.
   static const size_t rsCtasEnv = ReduceScatterParseCtasEnv("NCCL_GIN_ANVIL_RS_CTAS");
-  const int gridCtas = gin_sdma_reducescatter::reduceScatterCtas(totalBytesCta, rsCtasEnv);
+  const int gridCtas = gin_sdma_reducescatter::reduceScatterGridCtas(
+      totalBytesCta, rsCtasEnv,
+      gin_sdma_reducescatter::reduceScatterPoolCtas(deviceCtaCount));
   static const size_t rsUnrollMin = ReduceScatterUnrollMinBytes();
   double devUs = 0.0;
   TESTCHECK(gin_devtime::measure(args, gridCtas, loop,
