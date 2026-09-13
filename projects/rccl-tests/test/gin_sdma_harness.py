@@ -109,7 +109,7 @@ def launch_mpi_shell(cmd, timeout_s, hang_msg):
         except ProcessLookupError:
             pass
         out, _ = proc.communicate()
-        pytest.fail(hang_msg.format(out=(out or "")[-2000:]))
+        pytest.fail(hang_msg.format((out or "")[-2000:]))
     print(out)
     return proc.returncode, out
 
@@ -164,7 +164,10 @@ BCAST_ROW_RE = re.compile(
     r"\s+{n}\s+{n}\s+{n}\s+({w})"
     r"\s+{n}\s+{n}\s+{n}\s+({w})".format(n=_NUM, w=_WRONG)
 )
+# Deliberately not end-anchored: rccl-tests may append an algo/proto/nchannels
+# group and a timestamp, and concurrent rank output can splice onto the line.
 BCAST_OOB_RE = re.compile(r"Out of bounds values\s*:\s*(\d+)")
+# Matches the tier emitted by bcastReportTier() in src/broadcast.cu.
 BCAST_TIER_RE = re.compile(r"^#\[bcast-tier\]\s+(\S+)", re.M)
 
 

@@ -63,7 +63,7 @@ build_jobs="${RCCL_BUILD_JOBS}"
 {
 # 1) ROCm: provisioned on the head node from TheRock CI artifacts; consume the
 # workspace tree via rocm.env.
-echo "==> [1/5] use ROCm (provisioned from TheRock artifacts on head node)"
+echo "==> [1/6] use ROCm (provisioned from TheRock artifacts on head node)"
 rocm_env="${workdir}/.ci-out/rocm.env"
 if [[ ! -f "${rocm_env}" ]]; then
   echo "ERROR: ${rocm_env} not found. The workflow must run the 'Provision ROCm" >&2
@@ -84,7 +84,7 @@ echo "    hipcc: $("${ROCM_PATH}/bin/hipcc" --version 2>/dev/null | head -n1)"
 
 # 2) OpenMPI: built here against ROCM_PATH into the per-job workspace cache
 # (no shared cache), then ompi.env (MPI_HOME) is sourced below.
-echo "==> [2/5] build OpenMPI"
+echo "==> [2/6] build OpenMPI"
 "${ci_dir}/lib/build-ompi.sh"
 set -a
 # shellcheck source=/dev/null  # runtime fragment written by build-ompi.sh
@@ -152,13 +152,19 @@ rm -rf "${rccl_tests_build}"; mkdir -p "${rccl_tests_build}"
     -DCMAKE_PREFIX_PATH="${rccl_prefix};${MPI_HOME}" \
     -DGPU_TARGETS="${amdgpu_targets}" \
     "${rccl_tests_src}"
-  make -j"${build_jobs}" -k all_gather_perf alltoall_perf all_reduce_perf || true
+  make -j"${build_jobs}" -k || true
 )
-if [[ ! -x "${rccl_tests_build}/all_reduce_perf" ]]; then
-  echo "ERROR: all_reduce_perf not built under ${rccl_tests_build}" >&2
-  ls -la "${rccl_tests_build}" 2>/dev/null >&2 || true
-  exit 1
-fi
+required_perf_bins=(
+  all_gather_perf all_reduce_perf alltoall_perf broadcast_perf
+  gather_perf reduce_perf scatter_perf sendrecv_perf
+)
+for perf_bin in "${required_perf_bins[@]}"; do
+  if [[ ! -x "${rccl_tests_build}/${perf_bin}" ]]; then
+    echo "ERROR: ${perf_bin} not built under ${rccl_tests_build}" >&2
+    ls -la "${rccl_tests_build}" 2>/dev/null >&2 || true
+    exit 1
+  fi
+done
 export RCCL_TESTS_BIN_DIR="${rccl_tests_build}"
 } > "${build_out}" 2> "${build_err}"
 echo "==> build phase logs: ${build_out} / ${build_err}"

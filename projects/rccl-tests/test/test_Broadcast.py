@@ -27,29 +27,21 @@ import math
 
 import pytest
 
-from gin_sdma_harness import (
+from .gin_sdma_harness import (
     GiB,
     MiB,
     assert_bcast_ok,
     bcast_data_failed,
     bcast_rows,
     bcast_tiers,
+    detect_ngpus,
     env_int,
     launch_bcast_gin_sdma,
     run_bcast_with_conn_gate_retry,
+    run_with_conn_gate_retry,
 )
 
-ngpus = 0
-if os.environ.get("ROCR_VISIBLE_DEVICES") is not None:
-    ngpus = len(os.environ["ROCR_VISIBLE_DEVICES"].split(","))
-elif os.environ.get("HIP_VISIBLE_DEVICES") is not None:
-    ngpus = len(os.environ["HIP_VISIBLE_DEVICES"].split(","))
-else:
-    ngpus = int(
-        subprocess.check_output(
-            'rocminfo | grep "Device Type:.\\s*.GPU" | wc -l', shell=True
-        )
-    )
+ngpus = max(1, detect_ngpus())
 log_ngpus = int(math.log2(ngpus))
 
 nthreads = ["1"]
@@ -292,6 +284,42 @@ def test_BroadcastGinSdmaDataFailedTreatsNaAsUncheckedNotFailed():
         "  12.34  1.00  1.00  0"
     )
     assert not bcast_data_failed(line)
+
+
+def test_BroadcastGinSdmaConnRetryReturnsCleanPassWithoutRetry():
+    calls = []
+
+    def launch():
+        calls.append(None)
+        return 0, "clean"
+
+    assert run_with_conn_gate_retry(launch, 5, settle_s=0) == (0, "clean")
+    assert len(calls) == 1
+
+
+def test_BroadcastGinSdmaConnRetryExhaustsConnectivityAborts():
+    calls = []
+
+    def launch():
+        calls.append(None)
+        return 1, "LSA signal connectivity gate failed"
+
+    assert run_with_conn_gate_retry(launch, 3, settle_s=0) == (
+        1,
+        "LSA signal connectivity gate failed",
+    )
+    assert len(calls) == 3
+
+
+def test_BroadcastGinSdmaConnRetryNeverRetriesDataFailure():
+    calls = []
+
+    def launch():
+        calls.append(None)
+        return 1, "#wrong = 1"
+
+    assert run_with_conn_gate_retry(launch, 5, settle_s=0) == (1, "#wrong = 1")
+    assert len(calls) == 1
 
 
 def _clean_bcast_output(tier):

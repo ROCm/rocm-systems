@@ -418,21 +418,34 @@ if(BUILD_TESTS)
     target_compile_definitions(rccl-UnitTestsFixtures PRIVATE ENABLE_ROCSHMEM)
   endif()
 
-  if(ENABLE_ROCSHMEM_GIN OR GIN_ANVIL_UNIT_TESTS)
+  function(_rccl_test_add_rocshmem_includes target)
+    set(_rocshmem_test_includes "")
     if(ROCSHMEM_INCLUDE_DIR)
-      target_include_directories(rccl-UnitTestsFixtures PRIVATE ${ROCSHMEM_INCLUDE_DIR})
+      list(APPEND _rocshmem_test_includes "${ROCSHMEM_INCLUDE_DIR}")
     elseif(ROCSHMEM_INSTALL_DIR)
-      target_include_directories(rccl-UnitTestsFixtures PRIVATE
-        "${ROCSHMEM_INSTALL_DIR}/include")
+      list(APPEND _rocshmem_test_includes "${ROCSHMEM_INSTALL_DIR}/include")
     endif()
     if(ROCSHMEM_SOURCE_DIR)
-      target_include_directories(rccl-UnitTestsFixtures PRIVATE
+      list(APPEND _rocshmem_test_includes
         "${ROCSHMEM_SOURCE_DIR}/src"
         "${ROCSHMEM_SOURCE_DIR}/include")
+    elseif(EXISTS "${CMAKE_SOURCE_DIR}/../rocshmem")
+      list(APPEND _rocshmem_test_includes
+        "${CMAKE_SOURCE_DIR}/../rocshmem/src"
+        "${CMAKE_SOURCE_DIR}/../rocshmem/include")
     endif()
     if(ROCSHMEM_BUILD_DIR)
-      target_include_directories(rccl-UnitTestsFixtures PRIVATE ${ROCSHMEM_BUILD_DIR})
+      list(APPEND _rocshmem_test_includes "${ROCSHMEM_BUILD_DIR}")
+    elseif(ROCSHMEM_SOURCE_DIR AND EXISTS "${ROCSHMEM_SOURCE_DIR}/build/include")
+      list(APPEND _rocshmem_test_includes "${ROCSHMEM_SOURCE_DIR}/build/include")
     endif()
+    if(_rocshmem_test_includes)
+      target_include_directories(${target} PRIVATE ${_rocshmem_test_includes})
+    endif()
+  endfunction()
+
+  if(ENABLE_ROCSHMEM_GIN OR GIN_ANVIL_UNIT_TESTS)
+    _rccl_test_add_rocshmem_includes(rccl-UnitTestsFixtures)
   endif()
 
   if(ENABLE_ROCSHMEM_GIN AND ROCM_VERSION VERSION_GREATER_EQUAL "60400")
@@ -682,27 +695,9 @@ if(BUILD_TESTS)
       -Wl,--export-dynamic-symbol=ncclNetPlugin_v11
       -Wl,--export-dynamic-symbol=ncclCollNetPlugin_v11)
 
-    # Transitive nccl_device/gin headers pull sdma/anvil_device.hpp from rocSHMEM.
+    # GIN-enabled Debug fixtures need the same rocSHMEM header layout as fixtures.
     if(ENABLE_ROCSHMEM_GIN)
-      if(ROCSHMEM_SOURCE_DIR)
-        target_include_directories(rccl-UnitTestsFixturesDebug PRIVATE
-          "${ROCSHMEM_SOURCE_DIR}/src"
-          "${ROCSHMEM_SOURCE_DIR}/include")
-      else()
-        target_include_directories(rccl-UnitTestsFixturesDebug PRIVATE
-          ${CMAKE_SOURCE_DIR}/../rocshmem/src
-          ${CMAKE_SOURCE_DIR}/../rocshmem/include)
-      endif()
-      if(ROCSHMEM_INCLUDE_DIR)
-        target_include_directories(rccl-UnitTestsFixturesDebug PRIVATE ${ROCSHMEM_INCLUDE_DIR})
-      elseif(ROCSHMEM_INSTALL_DIR)
-        target_include_directories(rccl-UnitTestsFixturesDebug PRIVATE "${ROCSHMEM_INSTALL_DIR}/include")
-      endif()
-      if(ROCSHMEM_BUILD_DIR)
-        target_include_directories(rccl-UnitTestsFixturesDebug PRIVATE ${ROCSHMEM_BUILD_DIR})
-      elseif(ROCSHMEM_SOURCE_DIR AND EXISTS "${ROCSHMEM_SOURCE_DIR}/build/include")
-        target_include_directories(rccl-UnitTestsFixturesDebug PRIVATE "${ROCSHMEM_SOURCE_DIR}/build/include")
-      endif()
+      _rccl_test_add_rocshmem_includes(rccl-UnitTestsFixturesDebug)
     endif()
   endif()
 

@@ -4,9 +4,9 @@
 # rocJenkins "device-api" testCommand.
 #
 # Consumes ROCM_PATH (rocm.env), MPI_HOME (ompi.env), the in-tree RCCL build at
-# projects/rccl/build/release, and rccl-tests/build. ROCM_PATH / MPI_HOME come
-# from the environment (device-api.sbatch exports them) or, when run standalone,
-# from $WORKDIR/.ci-out/{rocm,ompi}.env.
+# projects/rccl/build/release, and rccl-tests/build. Build paths come from the
+# environment (device-api.sbatch exports them) or, when run standalone, from
+# $WORKDIR/.ci-out/{rocm,ompi,rocshmem}.env.
 #
 # Each bench is wrapped in `timeout` so a hung mpirun/driver can't wedge the job;
 # failures are collected and surfaced at the end (exit non-zero iff any failed).
@@ -17,7 +17,9 @@
 # debug_env to every run.
 #
 # Environment overrides:
-#   ROCM_PATH / MPI_HOME   Else read from .ci-out/{rocm,ompi}.env
+#   ROCM_PATH / MPI_HOME / ROCSHMEM_INSTALL_DIR
+#                          Else read from matching .ci-out/*.env fragments
+#   RCCL_TESTS_BIN_DIR     rccl-tests build directory (default: rccl-tests/build)
 #   NP                     MPI ranks per run         (default: 8)
 #   BENCH_ARGS             Common bench args         (default: from JSON bench_args)
 #   BENCH_TIMEOUT          Per-bench wall-clock cap  (default: 600s)
@@ -41,11 +43,12 @@ RCCL_LIB_DIR="${WORKDIR}/projects/rccl/build/release"
 RCCL_TESTS_DIR="${WORKDIR}/projects/rccl-tests"
 CONFIG="${CONFIG:-${script_dir}/lib/device-api-tests.json}"
 
-# Prefer the build stages' env fragments over any ambient ROCM_PATH / MPI_HOME.
-# shellcheck source=/dev/null  # runtime fragment written by the provision step
-[[ -f "${WORKDIR}/.ci-out/rocm.env" ]] && source "${WORKDIR}/.ci-out/rocm.env"
-# shellcheck source=/dev/null  # runtime fragment written by build-ompi.sh
-[[ -f "${WORKDIR}/.ci-out/ompi.env" ]] && source "${WORKDIR}/.ci-out/ompi.env"
+# Prefer the build stages' env fragments over ambient build paths.
+for frag in rocm ompi rocshmem; do
+  env_file="${WORKDIR}/.ci-out/${frag}.env"
+  # shellcheck source=/dev/null  # runtime fragment written by the build stages
+  [[ -f "${env_file}" ]] && source "${env_file}"
+done
 
 : "${ROCM_PATH:?run-device-api-ci.sh: ROCM_PATH unset (provisioned via rocm.env / sbatch)}"
 : "${MPI_HOME:?run-device-api-ci.sh: MPI_HOME unset (run build-ompi.sh / via sbatch)}"

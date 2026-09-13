@@ -42,6 +42,12 @@
       "env": ["NCCL_DMABUF_ENABLE=1", "NCCL_GIN_TYPE=2", "HSA_NO_SCRATCH_RECLAIM=1", "NCCL_ENV_PLUGIN=none", "RCCL_ENABLE_INTRANET=1"]
     },
     {
+      "name": "gin-d3-allgather",
+      "bins": ["all_gather_perf"],
+      "args": "-R 2 -D 3",
+      "env": ["NCCL_DMABUF_ENABLE=1", "NCCL_GIN_TYPE=6", "HSA_NO_SCRATCH_RECLAIM=1", "NCCL_ENV_PLUGIN=none", "RCCL_ENABLE_INTRANET=1"]
+    },
+    {
       "name": "gin-d4",
       "bins": ["alltoall_perf"],
       "args": "-R 2 -D 4",

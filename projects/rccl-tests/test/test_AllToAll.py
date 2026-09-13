@@ -47,8 +47,9 @@
 #   RCCL_TESTS_MPI_OPTS      extra launcher opts (e.g. --allow-run-as-root -mca ...)
 #   RCCL_TESTS_A2A_XENV      extra "-x K=V" env the backend needs on this cluster
 #   RCCL_TESTS_A2A_EXE       path to alltoall_perf (default: ../build/alltoall_perf)
+#   RCCL_TESTS_A2A_CTAS      device CTA count (-V) (default: 16)
 #   RCCL_TESTS_A2A_TIMEOUT_S per-run hang timeout in seconds (default: 900)
-#   RCCL_TESTS_A2A_CONN_RETRIES  connectivity-gate retries (default: 3)
+#   RCCL_TESTS_A2A_CONN_RETRIES  connectivity-gate retries (default: 5)
 #
 # Verified on 8x MI355X (ROCm 7.13, NCCL_GIN_TYPE=6, force1ch): 256 MiB/peer and
 # 2 GiB/peer int32 and the 2 GiB-total guard all pass with #wrong=0, no hang
@@ -59,7 +60,7 @@ import shlex
 
 import pytest
 
-from gin_sdma_harness import (
+from .gin_sdma_harness import (
     GiB,
     MiB,
     detect_ngpus,
@@ -86,7 +87,7 @@ NP = env_int("RCCL_TESTS_A2A_NP", 0) or detect_ngpus()
 LAUNCHER = os.environ.get("RCCL_TESTS_MPI_LAUNCHER", "mpirun")
 CTAS = os.environ.get("RCCL_TESTS_A2A_CTAS", "16")
 TIMEOUT_S = env_int("RCCL_TESTS_A2A_TIMEOUT_S", 900)
-CONN_RETRIES = env_int("RCCL_TESTS_A2A_CONN_RETRIES", 3)
+CONN_RETRIES = env_int("RCCL_TESTS_A2A_CONN_RETRIES", 5)
 MPI_OPTS = shlex.split(os.environ.get("RCCL_TESTS_MPI_OPTS", ""))
 XENV = shlex.split(os.environ.get("RCCL_TESTS_A2A_XENV", ""))
 

@@ -28,9 +28,10 @@ import math
 
 import pytest
 
-from gin_sdma_harness import (
+from .gin_sdma_harness import (
     GiB,
     MiB,
+    detect_ngpus,
     env_int,
     gin_env_xflags,
     launch_mpi_shell,
@@ -38,13 +39,7 @@ from gin_sdma_harness import (
     run_with_conn_gate_retry,
 )
 
-ngpus = 0
-if os.environ.get('ROCR_VISIBLE_DEVICES') is not None:
-    ngpus = len(os.environ['ROCR_VISIBLE_DEVICES'].split(","))
-elif os.environ.get('HIP_VISIBLE_DEVICES') is not None:
-    ngpus = len(os.environ['HIP_VISIBLE_DEVICES'].split(","))
-else:
-    ngpus = int(subprocess.check_output("rocminfo | grep \"Device Type:.\s*.GPU\" | wc -l",shell=True))
+ngpus = max(1, detect_ngpus())
 log_ngpus = int(math.log2(ngpus))
 
 nthreads = ["1"]
