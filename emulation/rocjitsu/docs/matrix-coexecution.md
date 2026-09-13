@@ -19,7 +19,7 @@ describe the earlier adjacent-batch experiment.
 | `RJ_MMA_HELPERS` | Maximum batch width minus one, clamped to 0-7; also the private helper limit | 1 |
 | `RJ_MMA_SHARED_HELPERS` | If set, process-wide helper capacity, clamped to 0-128; 0 forces inline fallback | unset: private pools |
 | `RJ_MMA_WAIT` | 0 standard atomic wait; 1 private Linux futex protocol | 1 on Linux |
-| `RJ_MMA_SPINS` | Additional CPU pause iterations before sleeping, on either side | 0 |
+| `RJ_MMA_SPINS` | Bounded CPU pause iterations before sleeping, on either side | 512 |
 
 Helpers are created lazily. A helper has one atomic job slot; publication and
 completion synchronize with release/acquire operations. The Linux protocol

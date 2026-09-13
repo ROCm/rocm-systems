@@ -21,7 +21,10 @@ overwrite must wait while a helper still reads them.
 
 The issuing thread calls the helper's blocking completion primitive when it
 needs an unfinished result. Linux private futexes are the default; standard
-`std::atomic::wait` is also supported. Additional spinning defaults to zero.
+`std::atomic::wait` is also supported. A bounded 512-pause warm period precedes
+blocking on both the idle helper and the issuer waiting for completion. Setting
+`RJ_MMA_SPINS=0` restores immediate blocking; each side can also be tuned
+separately. Helpers block after the warm period when no work arrives.
 The completion word includes sleep intent to avoid missed wakeups and needless
 wake syscalls. Both completion and job publication synchronize with
 release/acquire operations. No coroutine or condition-variable mutex is needed.
@@ -123,7 +126,9 @@ and architectural tracing with jobs in flight remain unqualified.
 | `RJ_ASYNC_WMMA_MIN_K` | Additional f16/bf16 WMMA selection: 32 enables K32; 16 enables K16 too; original large shapes remain eligible | 64 |
 | `RJ_ASYNC_MFMA` | Bitmask: 1 multi-block f16/f32; 2 scaled f8f6f4; 4 regular f16 control shapes | 0 |
 | `RJ_MMA_WAIT` | 0 atomic wait; 1 private Linux futex | 1 on Linux |
-| `RJ_MMA_SPINS` | Optional bounded spin before blocking | 0 |
+| `RJ_MMA_SPINS` | Bounded pause iterations before blocking | 512 |
+| `RJ_MMA_IDLE_SPINS` | Override the helper's idle warm period | `RJ_MMA_SPINS` |
+| `RJ_MMA_COMPLETION_SPINS` | Override the issuer's completion warm period | `RJ_MMA_SPINS` |
 
 `RJ_ASYNC` counters report submitted MMA jobs, ordinary instructions issued
 while work remains pending, dependency waits, boundary drains, capacity
@@ -380,3 +385,37 @@ candidate, outside the runtime allowlist; no end-to-end sparse-kernel gain or
 hardware qualification is claimed. Full data, failed intermediate comparisons,
 test logs and reproduction scripts are in
 `/home/jakub/rocjitsu/misc/async-scoreboard-benchmark/eligibility/report.md`.
+
+### Bounded warm waits
+
+An empty job using the actual helper/pool protocol takes 10.51 us with
+immediate blocking and 1.00 us with 512 pause iterations before blocking,
+a 10.5x reduction over six balanced rounds. Its payload contains instruction
+and wave pointers plus the floating-point environment, with no matrix copy.
+Saving/restoring the floating-point environment costs about 0.137 us. The burst
+also reduces whole-process CPU time from 196 to 52 ms and context switches
+from approximately 42,000 to four; the large cost was sleeping and waking.
+
+The selected budget is bounded. Over a 100 ms idle interval, the helper consumes
+about 0.061 ms of CPU, including surrounding wakeup work. A cold submission
+still pays wakeup latency. An issuer immediately joining a long MMA may also
+exhaust its completion budget and sleep: dense K128 serialized overhead falls
+from 9.2 to 3.4 us and sparse K128 from 11.5 to 5.8 us. Independent pairs keep
+the issuer busy and hide more of that cost. A 1 us transport measurement is not
+a promise of 1 us total overhead for every instruction schedule.
+
+Final runtime `0026` uses 512 pauses on each side and retains helper rotation.
+Against immediate-blocking async, six-round medians improve synthetic K128
+dispatch by 15.9% (0.9150 to 0.7691 s) and Gluon K128 by 0.9% (2.3433 to
+2.3213 s). Their process wall times fall from 1.285 to 1.130 s and 4.985 to
+4.960 s respectively. Longer spinning and last-helper reuse were tested but
+not selected. All 48 final application runs passed numerical and complete
+instruction-signature checks; final default settings passed 55 focused tests.
+The queue/helper stress passed ThreadSanitizer across eight experimental
+wait/budget/selection configurations.
+
+The K32 control still submits no jobs: wall medians are 3.485 s ordinary and
+3.500 s with the adapter (+0.4%), with overlapping ranges. The small eligibility
+filter cost remains; the new wait code is not reached on this workload.
+Raw data, CPU-cost comparisons, policy controls and reproduction scripts are in
+`/home/jakub/rocjitsu/misc/async-scoreboard-benchmark/eligibility/warm-report.md`.

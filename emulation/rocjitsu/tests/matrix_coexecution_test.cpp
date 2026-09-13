@@ -20,6 +20,7 @@
 #include "rocjitsu/vm/amdgpu/matrix_coexecution.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
 #include <chrono>
+#include <ctime>
 
 #include <gtest/gtest.h>
 
@@ -731,6 +732,9 @@ TEST(MatrixHandlerBenchmark, DenseAndSparseAdjacentPairs) {
       return std::unique_ptr<Instruction>(decode_valid(*decoder, words.data()));
     };
     auto a = make(64), b = make(96);
+    if (const char *filter = std::getenv("RJ_MMA_PAIR_FILTER");
+        filter && a->mnemonic().find(filter) == std::string_view::npos)
+      continue;
     SCOPED_TRACE(a->mnemonic());
     amdgpu::GpuMemory memory("pair_memory");
     amdgpu::L2Cache l2("pair_l2");
@@ -798,5 +802,64 @@ TEST(MatrixHandlerBenchmark, DenseAndSparseAdjacentPairs) {
                 a->mnemonic().data(), ns[0], ns[1], ns[2]);
   }
 }
+
+TEST(MatrixHandlerBenchmark, EmptyHelperHandoff) {
+  // No matrix inputs, outputs or register file: only the real job protocol.
+  Instruction empty(
+      "empty", [](Instruction &, void *) { std::atomic_signal_fence(std::memory_order_seq_cst); });
+  mc::SharedPool pool(1);
+  auto handoff = [&] {
+    auto ticket = pool.submit(empty, nullptr);
+    assert(ticket);
+    if (auto error = pool.finish(ticket))
+      std::rethrow_exception(error);
+  };
+  for (unsigned i = 0; i != 1000; ++i)
+    handoff();
+  constexpr unsigned iterations = 20000;
+  auto begin = std::chrono::steady_clock::now();
+  for (unsigned i = 0; i != iterations; ++i)
+    handoff();
+  const double handoff_ns =
+      std::chrono::duration<double, std::nano>(std::chrono::steady_clock::now() - begin).count() /
+      iterations;
+  std::fenv_t environment;
+  begin = std::chrono::steady_clock::now();
+  for (unsigned i = 0; i != iterations; ++i) {
+    std::fegetenv(&environment);
+    std::fesetenv(&environment);
+  }
+  const double fenv_ns =
+      std::chrono::duration<double, std::nano>(std::chrono::steady_clock::now() - begin).count() /
+      iterations;
+  std::printf("EMPTY_HANDOFF spins=%u idle_spins=%u completion_spins=%u iterations=%u "
+              "ns=%.3f fenv_pair_ns=%.3f\n",
+              mc::spin_count(), mc::idle_spin_count(), mc::completion_spin_count(), iterations,
+              handoff_ns, fenv_ns);
+}
+
+#if defined(__linux__)
+TEST(MatrixHandlerBenchmark, IdleHelperCpuCost) {
+  struct Context {
+    timespec cpu_time;
+  } context;
+  Instruction read_clock("clock", [](Instruction &, void *opaque) {
+    clock_gettime(CLOCK_THREAD_CPUTIME_ID, &static_cast<Context *>(opaque)->cpu_time);
+  });
+  mc::SharedPool pool(1);
+  auto sample = [&] {
+    auto ticket = pool.submit(read_clock, &context);
+    assert(ticket);
+    if (auto error = pool.finish(ticket))
+      std::rethrow_exception(error);
+    return context.cpu_time.tv_sec * 1000000000LL + context.cpu_time.tv_nsec;
+  };
+  const auto begin = sample();
+  std::this_thread::sleep_for(std::chrono::milliseconds(100));
+  const auto end = sample();
+  std::printf("IDLE_HELPER idle_spins=%u completion_spins=%u wall_ms=100 cpu_us=%.3f\n",
+              mc::idle_spin_count(), mc::completion_spin_count(), (end - begin) / 1000.0);
+}
+#endif
 
 } // namespace

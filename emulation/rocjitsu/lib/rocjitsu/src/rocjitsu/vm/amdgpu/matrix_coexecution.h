@@ -54,8 +54,25 @@ inline unsigned width() {
 inline unsigned spin_count() {
   static const unsigned value = [] {
     const char *text = std::getenv("RJ_MMA_SPINS");
-    const int spins = text ? std::atoi(text) : 0;
+    const int spins = text ? std::atoi(text) : 512;
     return static_cast<unsigned>(spins < 0 ? 0 : spins);
+  }();
+  return value;
+}
+
+// Separate the short warm period after completing a job from the issuer's
+// completion wait. Both are bounded and then use the existing blocking wait.
+inline unsigned idle_spin_count() {
+  static const unsigned value = [] {
+    const char *text = std::getenv("RJ_MMA_IDLE_SPINS");
+    return text ? static_cast<unsigned>(std::max(0, std::atoi(text))) : spin_count();
+  }();
+  return value;
+}
+inline unsigned completion_spin_count() {
+  static const unsigned value = [] {
+    const char *text = std::getenv("RJ_MMA_COMPLETION_SPINS");
+    return text ? static_cast<unsigned>(std::max(0, std::atoi(text))) : spin_count();
   }();
   return value;
 }
@@ -263,7 +280,8 @@ private:
   }
 
   void wait_while(int expected) {
-    for (unsigned i = 0; i != spin_count(); ++i) {
+    const unsigned spins = expected == 0 ? idle_spin_count() : completion_spin_count();
+    for (unsigned i = 0; i != spins; ++i) {
       if ((state_.load(std::memory_order_acquire) & ~kSleeping) != expected)
         return;
       relax_cpu();
