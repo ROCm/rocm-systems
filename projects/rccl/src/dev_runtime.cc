@@ -716,6 +716,10 @@ fail:
   }
   free(mem->ginSegmentInfos);
   mem->ginSegmentInfos = nullptr;
+  for (int i = 0; i < NCCL_GIN_MAX_CONNECTIONS * NCCL_GIN_MAX_ACTIVE_BACKENDS; i++) {
+    mem->ginHostWins[i] = nullptr;
+    mem->ginDevWins[i] = nullptr;
+  }
   return ret;
 }
 
@@ -731,7 +735,7 @@ static void symMemoryUnregister(struct ncclComm* comm, struct ncclDevrMemory* me
   struct ncclDevrState* devr = &comm->devrState;
   if (devr->ginEnabled && mem->ginSegmentInfos != nullptr) {
     for (int segment = 0; segment < mem->numGinSegments; segment++) {
-      ncclGinDeregister(comm, mem->ginSegmentInfos[segment].ginHostWins);
+      (void)ncclGinDeregister(comm, mem->ginSegmentInfos[segment].ginHostWins);
     }
   }
   if (devr->rmaProxyEnabled && mem->maxGlobalNumSegments == 1) {
