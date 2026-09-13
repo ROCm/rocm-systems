@@ -1284,25 +1284,26 @@ TEST_F(NetIbMPITest, CastStressMultiRoundTwoConns) {
     std::vector<void*> listenComms(kNConns, nullptr);
     std::vector<void*> sendComms(kNConns, nullptr);
     std::vector<void*> recvComms(kNConns, nullptr);
-    // Closed on any exit from here, not only at the teardown below. A setup failure
-    // returns from this body, and the connections already built would otherwise stay
-    // open for the rest of the process -- the same contamination the helper stopped
-    // creating inside itself. Disarmed once the teardown takes over.
-    bool connsOwned = true;
-    struct CastConnsScope {
-        bool& owned;
-        std::function<void()> close;
-        ~CastConnsScope() { if (owned) close(); }
-    } connsScope{connsOwned, [&]() {
+    // Closes whatever is still open on any exit from here, the teardown's own failures
+    // included: otherwise a setup or close failure returns from this body and leaves the
+    // connections already built open for the rest of the process, which is the
+    // contamination the helper stopped creating inside itself. The teardown nulls each
+    // slot as it closes it, so this never closes anything twice.
+    auto connsScope = makeScopeGuard([&]() {
         for (int c = 0; c < kNConns; c++) {
             if (recvComms[c])   CloseRecvComm(recvComms[c]);
             if (sendComms[c])   CloseSendComm(sendComms[c]);
             if (listenComms[c]) CloseListenComm(listenComms[c]);
         }
-    }};
+    });
 
-    for (int c = 0; c < kNConns; c++)
-        SetupCastConnection(/*dev=*/0, &listenComms[c], &sendComms[c], &recvComms[c]);
+    // Wrapped, because the helper ends in a fatal assertion: without this a failed setup
+    // returns from the helper and not from here, and the loop would work through the
+    // remaining connections at up to 30 s each instead of reporting what went wrong.
+    for (int c = 0; c < kNConns; c++) {
+        ASSERT_NO_FATAL_FAILURE(
+            SetupCastConnection(/*dev=*/0, &listenComms[c], &sendComms[c], &recvComms[c]));
+    }
 
     // Scale msgs per connection inversely with connection count so total work stays constant.
     constexpr int kNMsgsTotal = 10000;
@@ -1482,18 +1483,27 @@ TEST_F(NetIbMPITest, CastStressMultiRoundTwoConns) {
     MPI_Barrier(MPI_COMM_WORLD);
 
     // ── Teardown ─────────────────────────────────────────────────────────────
-    connsOwned = false;
+    // Each slot is nulled as it is closed and its status checked afterwards, so a failure
+    // here returns with the guard still armed and the connections past this one closed by
+    // it, rather than leaking them the way dismissing the guard before the loop did.
     for (int c = 0; c < kNConns; c++) {
         void* comm = (rank == 0) ? recvComms[c] : sendComms[c];
         ASSERT_EQ(DeregisterMemory(comm, rampHandles[c]), ncclSuccess);
         ASSERT_EQ(DeregisterMemory(comm, mhandles[c]), ncclSuccess);
         if (rank == 0) {
-            ASSERT_EQ(CloseRecvComm(recvComms[c]), ncclSuccess);
-            ASSERT_EQ(CloseListenComm(listenComms[c]), ncclSuccess);
+            const ncclResult_t closedRecv = CloseRecvComm(recvComms[c]);
+            recvComms[c] = nullptr;
+            const ncclResult_t closedListen = CloseListenComm(listenComms[c]);
+            listenComms[c] = nullptr;
+            ASSERT_EQ(closedRecv, ncclSuccess);
+            ASSERT_EQ(closedListen, ncclSuccess);
         } else {
-            ASSERT_EQ(CloseSendComm(sendComms[c]), ncclSuccess);
+            const ncclResult_t closedSend = CloseSendComm(sendComms[c]);
+            sendComms[c] = nullptr;
+            ASSERT_EQ(closedSend, ncclSuccess);
         }
     }
+    connsScope.dismiss();
 
     MPI_Barrier(MPI_COMM_WORLD);
 }
