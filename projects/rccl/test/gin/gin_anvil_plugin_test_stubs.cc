@@ -37,7 +37,6 @@ struct State {
   bool factoryCreateFail = false;
   bool factoryNullHandles = false;
   bool lsaAddrFail = false;
-  bool connCheckVerifyMissing = false;
   int connCheckMissingCalls = 0;
   int connCheckWriteCalls = 0;
   int connCheckVerifyCalls = 0;
@@ -67,7 +66,6 @@ void SetFactoryCreateFail(bool fail) { g.factoryCreateFail = fail; }
 void SetFactoryNullHandles(bool nullHandles) { g.factoryNullHandles = nullHandles; }
 void SetLsaAddrFail(bool fail) { g.lsaAddrFail = fail; }
 void SetLsaSelfAddr(void* addr) { g.lsaSelfAddr = addr; }
-void SetConnCheckVerifyMissing(bool missing) { g.connCheckVerifyMissing = missing; }
 void SetConnCheckMissingCalls(int calls) { g.connCheckMissingCalls = calls; }
 int GetConnCheckWriteCalls() { return g.connCheckWriteCalls; }
 int GetConnCheckVerifyCalls() { return g.connCheckVerifyCalls; }
@@ -265,6 +263,7 @@ extern "C" int ginAnvilConnCheck(void* localSignals, int nRanks, unsigned long l
   (void)stream;
   ++GinAnvilPluginStubs::g.connCheckVerifyCalls;
   if (missingDev && nRanks > 0) {
+    const bool alwaysMissing = GinAnvilPluginStubs::g.connCheckMissingCalls < 0;
     bool missingForRetry = GinAnvilPluginStubs::g.connCheckMissingCalls > 0;
     if (missingForRetry) --GinAnvilPluginStubs::g.connCheckMissingCalls;
     bool injectMissing = false;
@@ -273,8 +272,7 @@ extern "C" int ginAnvilConnCheck(void* localSignals, int nRanks, unsigned long l
       injectMissing = atoi(injEnv) >= 0;
     }
 #endif
-    const bool simulateMissing =
-        GinAnvilPluginStubs::g.connCheckVerifyMissing || missingForRetry || injectMissing;
+    const bool simulateMissing = alwaysMissing || missingForRetry || injectMissing;
     std::vector<int> missing(static_cast<size_t>(nRanks), simulateMissing ? 1 : 0);
     if (hipMemcpy(missingDev, missing.data(), sizeof(int) * static_cast<size_t>(nRanks),
                   hipMemcpyHostToDevice) != hipSuccess) {

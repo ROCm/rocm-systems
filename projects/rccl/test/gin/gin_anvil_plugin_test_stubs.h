@@ -22,7 +22,7 @@ void SetFactoryCreateFail(bool fail);
 void SetFactoryNullHandles(bool nullHandles);
 void SetLsaAddrFail(bool fail);
 void SetLsaSelfAddr(void* addr);
-void SetConnCheckVerifyMissing(bool missing);
+// Positive: simulate missing for the next N verify calls. Negative: always simulate missing.
 void SetConnCheckMissingCalls(int calls);
 int GetConnCheckWriteCalls();
 int GetConnCheckVerifyCalls();
