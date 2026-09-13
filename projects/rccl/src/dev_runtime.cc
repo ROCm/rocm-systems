@@ -686,6 +686,10 @@ exit:
 fail_simple:
   if (!mem->globalHasSysmemSegment) {
     (void)ncclGinDeregister(comm, mem->ginHostWins);
+    for (int i = 0; i < NCCL_GIN_MAX_CONNECTIONS; i++) {
+      mem->ginHostWins[i] = nullptr;
+      mem->ginDevWins[i] = nullptr;
+    }
   }
   goto exit;
 fail:
@@ -707,7 +711,7 @@ static void symMemoryUnregister(struct ncclComm* comm, struct ncclDevrMemory* me
   struct ncclDevrState* devr = &comm->devrState;
   if (devr->ginEnabled && mem->ginSegmentInfos != nullptr) {
     for (int segment = 0; segment < mem->numGinSegments; segment++) {
-      ncclGinDeregister(comm, mem->ginSegmentInfos[segment].ginHostWins);
+      (void)ncclGinDeregister(comm, mem->ginSegmentInfos[segment].ginHostWins);
     }
   }
   if (devr->rmaProxyEnabled && mem->maxGlobalNumSegments == 1) {
@@ -817,12 +821,12 @@ static ncclResult_t symMemoryObtain(struct ncclComm* comm, CUmemGenericAllocatio
   return ret;
 
 fail_mem_space_teams:
+  symMemoryUnregister(comm, mem);
   {
     struct ncclDevrMemory** ptr = &devr->memHead;
     while (*ptr != nullptr && *ptr != mem) ptr = &(*ptr)->next;
     if (*ptr == mem) *ptr = mem->next;
   }
-  symMemoryUnregister(comm, mem);
   for (struct ncclDevrTeam* t = devr->teamHead; t != nullptr; t = t->next) {
     symUnbindTeamMemory(comm, t, mem);
   }
