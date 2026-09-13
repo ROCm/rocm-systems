@@ -232,7 +232,7 @@ run_devtime_smoke() {
     RCCL_TESTS_GIN_SDMA_DEVTIME=1 \
     RCCL_TESTS_RS_EXE="${rs_bin}" \
     RCCL_TESTS_RS_NP="${NP}" \
-    RCCL_TESTS_RS_GIN_TYPE="${RCCL_TESTS_RS_GIN_TYPE:-6}" \
+    RCCL_TESTS_RS_GIN_TYPE="${RCCL_TESTS_RS_GIN_TYPE:-2}" \
     RCCL_TESTS_RS_TIMEOUT_S="${RCCL_TESTS_RS_TIMEOUT_S:-300}" \
       python3 -m pytest "${pytest_dir}/test_ReduceScatterDevtime.py" -v -p no:cacheprovider
     rc=$?
@@ -248,6 +248,9 @@ run_devtime_smoke() {
   return ${failed}
 }
 
+# Failures are already recorded in FAILED_RUNS; the summary block below owns the
+# exit code. Swallow the return status so a non-zero one does not trip
+# `set -e` on this bare call and abort before that summary ever prints.
 run_devtime_smoke || true
 
 if [[ ${#FAILED_RUNS[@]} -ne 0 ]]; then
