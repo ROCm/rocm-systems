@@ -17,10 +17,8 @@
 // rocshmem::QueuePair is aliased to rocshmem::QueuePairMock. The definition of
 // the rocshmem::QueuePairMock mock QueuePair object type mirrors how Suite H
 // shadows the SDMA engine with test/device/sdma/anvil_device.hpp.
-
-// define GDA_QUEUEPAIR_MOCK so that QueuePair is an alias for QueuePairMock
-#define GDA_QUEUEPAIR_MOCK
-#include "nccl_device/gin/rocshmem_gda/gda/queue_pair_provider.hpp"
+// projects/rccl/test/CMakeLists.txt defines GDA_QUEUEPAIR_MOCK for targets
+// rccl-UnitTestsFixtures and rccl-UnitTestsGinAnvilPlugin
 
 #include "DeviceTestBase.hpp"
 
@@ -28,6 +26,7 @@
 #include "nccl_device/gin/gin_device_host_common.h"
 #include "nccl_device/gin/gin_device_common.h"
 #include "nccl_device/gin/rocshmem_gda/gin_rocshmem_device_host_common_gda.h"
+#include "nccl_device/gin/rocshmem_gda/gda/queue_pair_provider.hpp"
 
 #if NCCL_GIN_ROCSHMEM_GDA_ENABLE
 // Count invocations of the Put/PutValue system-scope fence seam (gin_device_common.h).
