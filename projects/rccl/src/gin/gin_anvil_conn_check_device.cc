@@ -16,9 +16,6 @@
 namespace gin_anvil {
 namespace conn_check {
 
-// HIP blockDim.x must cover nRanks threads (one per peer/source rank).
-static constexpr int kMaxConnCheckRanks = 1024;
-
 __global__ void ginAnvilConnWriteKernel(uintptr_t* remoteAddrs, int nRanks, int selfRank,
                                         unsigned long long stamp) {
   int p = threadIdx.x;
@@ -49,7 +46,8 @@ static int connCheckLaunchOk() {
 
 extern "C" int ginAnvilConnWrite(void* remoteAddrsDev, int nRanks, int selfRank,
                                  unsigned long long stamp, hipStream_t stream) {
-  if (nRanks <= 0 || nRanks > gin_anvil::conn_check::kMaxConnCheckRanks) return -1;
+  if (remoteAddrsDev == nullptr) return -1;
+  if (nRanks <= 0 || nRanks > gin_anvil::conn_check::kMaxConnCheckKernelRanks) return -1;
   (void)hipGetLastError();
   hipLaunchKernelGGL(gin_anvil::conn_check::ginAnvilConnWriteKernel, dim3(1), dim3(nRanks), 0, stream,
                      reinterpret_cast<uintptr_t*>(remoteAddrsDev), nRanks, selfRank, stamp);
@@ -58,7 +56,8 @@ extern "C" int ginAnvilConnWrite(void* remoteAddrsDev, int nRanks, int selfRank,
 
 extern "C" int ginAnvilConnCheck(void* localSignals, int nRanks, unsigned long long stamp, int* missingDev,
                                  hipStream_t stream) {
-  if (nRanks <= 0 || nRanks > gin_anvil::conn_check::kMaxConnCheckRanks) return -1;
+  if (localSignals == nullptr || missingDev == nullptr) return -1;
+  if (nRanks <= 0 || nRanks > gin_anvil::conn_check::kMaxConnCheckKernelRanks) return -1;
   (void)hipGetLastError();
   hipLaunchKernelGGL(gin_anvil::conn_check::ginAnvilConnCheckKernel, dim3(1), dim3(nRanks), 0, stream,
                      reinterpret_cast<unsigned long long*>(localSignals), nRanks, stamp, missingDev);

@@ -99,8 +99,17 @@ TEST_F(GinAnvilConnCheckDeviceTest, ReportsAnUnwrittenSourceSlot) {
 }
 
 TEST(GinAnvilConnCheckDeviceValidationTest, RejectsTooManyRanksBeforeLaunch) {
-  EXPECT_EQ(ginAnvilConnWrite(nullptr, 1025, 0, 1, nullptr), -1);
-  EXPECT_EQ(ginAnvilConnCheck(nullptr, 1025, 1, nullptr, nullptr), -1);
+  const int tooMany = gin_anvil::conn_check::kMaxConnCheckKernelRanks + 1;
+  EXPECT_EQ(ginAnvilConnWrite(reinterpret_cast<void*>(1), tooMany, 0, 1, nullptr), -1);
+  EXPECT_EQ(ginAnvilConnCheck(reinterpret_cast<void*>(1), tooMany, 1, reinterpret_cast<int*>(1),
+                              nullptr),
+            -1);
+}
+
+TEST(GinAnvilConnCheckDeviceValidationTest, RejectsNullPointersBeforeLaunch) {
+  EXPECT_EQ(ginAnvilConnWrite(nullptr, 2, 0, 1, nullptr), -1);
+  EXPECT_EQ(ginAnvilConnCheck(nullptr, 2, 1, reinterpret_cast<int*>(1), nullptr), -1);
+  EXPECT_EQ(ginAnvilConnCheck(reinterpret_cast<void*>(1), 2, 1, nullptr, nullptr), -1);
 }
 
 }  // namespace
