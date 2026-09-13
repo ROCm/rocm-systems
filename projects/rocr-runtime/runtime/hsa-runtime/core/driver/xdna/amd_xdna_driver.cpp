@@ -49,7 +49,6 @@
 #include <climits>
 #include <cstddef>
 #include <fstream>
-#include <map>
 #include <memory>
 #include <string>
 #include <string_view>
@@ -64,7 +63,6 @@
 #include <unistd.h>
 
 #include "inc/hsa_ext_amd_aie.h"
-#include "core/inc/amd_aie_agent.h"
 #include "core/inc/amd_memory_region.h"
 #include "core/inc/runtime.h"
 #include "core/inc/signal.h"
@@ -209,19 +207,6 @@ enum class XDNADeviceType {
   /// @brief Strix / Strix Halo / Krackan (npu4/5/6), aie2p. PDI + instruction sequence and full-ELF
   /// dispatch.
   Stx,
-};
-
-/// @brief XDNA device ID.
-struct XDNADeviceId {
-  uint16_t device;
-
-  bool operator<(const XDNADeviceId& other) const { return device < other.device; }
-};
-
-/// @brief Supported XDNA devices.
-static const std::map<XDNADeviceId, XDNADeviceType> supported_xdna_devices = {
-    {{0x1502}, XDNADeviceType::Phx},  // Phoenix (npu1, aie2)
-    {{0x17f0}, XDNADeviceType::Stx},  // Strix / Strix Halo / Krackan (npu4/5/6, aie2p)
 };
 
 /// @brief Devnode path for XDNA devices.
@@ -434,6 +419,8 @@ struct KmqMetadata {
   /// @brief Core tiles the queue's hardware context is created with. Fixed for the life of the
   /// queue.
   uint32_t num_core_tiles = 0;
+  /// @brief Device the queue dispatches to, resolved once at creation.
+  XDNADeviceType device_type = XDNADeviceType::Unknown;
   PDICache pdi_cache;
   QueueMode mode = QueueMode::Undecided;
   /// @brief BO pool.
@@ -976,8 +963,14 @@ static hsa_status_t ReadDeviceId(const std::string& sysfs_device_path, uint16_t*
 ///
 /// @param[in] device_id PCI device ID to map
 static XDNADeviceType DeviceTypeOf(uint16_t device_id) {
-  const auto it = supported_xdna_devices.find({device_id});
-  return (it == supported_xdna_devices.end()) ? XDNADeviceType::Unknown : it->second;
+  switch (device_id) {
+    case 0x1502:
+      return XDNADeviceType::Phx;  // Phoenix (npu1, aie2)
+    case 0x17f0:
+      return XDNADeviceType::Stx;  // Strix / Strix Halo / Krackan (npu4/5/6, aie2p)
+    default:
+      return XDNADeviceType::Unknown;
+  }
 }
 
 hsa_status_t XdnaDriver::Open() {
@@ -1204,7 +1197,7 @@ hsa_status_t XdnaDriver::DestroyQueue(HSA_QUEUEID queue_id) const {
 }
 
 hsa_status_t XdnaDriver::CreateKernelModeQueue(size_t queue_size, uint32_t num_core_tiles,
-                                               void** queue_metadata) const {
+                                               uint16_t device_id, void** queue_metadata) const {
   // A queue with no packet slots would give the pool no entries, and an empty pool cannot hand
   // one out.
   if (queue_size == 0) {
@@ -1213,6 +1206,7 @@ hsa_status_t XdnaDriver::CreateKernelModeQueue(size_t queue_size, uint32_t num_c
 
   auto kmq_metadata = std::make_unique<KmqMetadata>();
   kmq_metadata->num_core_tiles = num_core_tiles;
+  kmq_metadata->device_type = DeviceTypeOf(device_id);
   hsa_status_t err = CreateHwCtx(fd_, kmq_metadata.get());
   if (err != HSA_STATUS_SUCCESS) {
     return err;
@@ -1915,14 +1909,6 @@ hsa_status_t XdnaDriver::SubmitCmdChain(hsa_queue_t& q, void* queue_metadata,
   // other one, and the rebuild below switches the context to it.
   const QueueMode mode = PacketMode(&queue[first_pkt_idx & mask]);
 
-  // Full ELF is an aie2p feature.
-  if (mode == QueueMode::FullElf) {
-    const auto& aie_agent = static_cast<const AieAgent&>(agent);
-    if (DeviceTypeOf(aie_agent.properties().DeviceId) != XDNADeviceType::Stx) {
-      return HSA_STATUS_ERROR_INVALID_PACKET_FORMAT;
-    }
-  }
-
   // Instruction and arguments BOs (performance hint: up to 3 argument BOs per packet).
   std::vector<uint32_t> bo_handles;
   bo_handles.reserve(num_pkts * 4);
@@ -1985,7 +1971,13 @@ hsa_status_t XdnaDriver::SubmitCmdChain(hsa_queue_t& q, void* queue_metadata,
     // A full-ELF context must carry no CU configuration, and CreateHwCtx derives that from the
     // PDI cache, so the cache is dropped before the rebuild. Switching back later finds it empty
     // and re-adds each PDI, which is what forces the reconfigure that restores the CU config.
-    if (mode == QueueMode::FullElf) kmq_metadata->pdi_cache.Truncate(0);
+    if (mode == QueueMode::FullElf) {
+      kmq_metadata->pdi_cache.Truncate(0);
+      if (kmq_metadata->device_type != XDNADeviceType::Stx) {
+        // Full ELF is an aie2p feature.
+        return HSA_STATUS_ERROR_INVALID_PACKET_FORMAT;
+      }
+    }
 
     if (kmq_metadata->hw_ctx_handle != AMDXDNA_INVALID_CTX_HANDLE) {
       const hsa_status_t err = DestroyHwCtx(fd_, kmq_metadata->hw_ctx_handle);
