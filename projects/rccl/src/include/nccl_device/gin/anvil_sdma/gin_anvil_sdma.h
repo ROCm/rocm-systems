@@ -520,7 +520,8 @@ struct ncclGinApi_FlushAsync<NCCL_NET_DEVICE_GIN_ANVIL_SDMA> {
     if (nccl::gin::anvil::detail::anvilCtxValid(rsCtx)) {
       uint64_t* dirtyPtr = loadConst(&rsCtx->sdmaDirty);
       uint64_t dirty =
-        dirtyPtr == nullptr ? 0 : __hip_atomic_load(dirtyPtr, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT);
+        dirtyPtr == nullptr ? 0
+                            : __scoped_atomic_load_n(dirtyPtr, __ATOMIC_RELAXED, __MEMORY_SCOPE_DEVICE);
       int numCh = loadConst(&rsCtx->numChannels);
       auto** handles = (::sdma_anvil::SdmaQueueDeviceHandle**)loadConst(&rsCtx->queueHandles);
       for (int ch = 0; ch < numCh; ++ch) {
