@@ -11,9 +11,6 @@
 // ThreadedCastAgreedNqps returns this when the connection uses one queue pair: real,
 // but the scheduler then returns before split selection and token accounting, so the
 // threaded branches skip rather than assert.
-// ThreadedCastAgreedNqps returns this when the connection uses one queue pair: real,
-// but the scheduler then returns before split selection and token accounting, so the
-// threaded branches skip rather than assert.
 static constexpr int kThreadedNqpsSingleQp = 1;
 
 #ifdef MPI_TESTS_ENABLED
@@ -1541,10 +1538,17 @@ TEST_F(NetIbMPITest, CastStressMultiRoundTwoConns) {
                                                  seedBase, /*totTokens=*/kThreadedMsgs);
                 if (!result.ok) return result;
 
-                // Phase 1: small messages, all on the WRR path.
+                // Phase 1: small messages, all on the WRR path. One pattern for the
+                // whole phase rather than seedBase + i: makeBytePattern keeps the seed
+                // modulo 256, and the worker stride is 161 there, so a per-message seed
+                // collides across workers -- worker t at message 0 and worker t+1 at
+                // message 95 produce the same byte. Every worker sends the same msgSize,
+                // so the size check cannot separate the pair either, and a payload
+                // delivered on the wrong connection would verify clean. Freshness per
+                // message survives because the receiver is cleared before each transfer.
                 for (int i = 0; i < kThreadedMsgs; i++) {
                     result = WorkerSendRecvPattern(rank, pair, buffer, msgSize, tagBase + 1 + i,
-                                                   mhandle, seedBase + i);
+                                                   mhandle, seedBase);
                     if (!result.ok) return result;
                 }
 

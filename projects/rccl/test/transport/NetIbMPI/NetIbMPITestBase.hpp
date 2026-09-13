@@ -1429,9 +1429,9 @@ protected:
     }
 
     // QPs the connection actually uses. NCCL_IB_QPS_PER_CONNECTION states only a
-    // request: on a merged device the plugin creates that many per member, so
-    // arming faults from the environment would leave the remaining QPs healthy
-    // and "the send must fail" would depend on which QP the scheduler picked.
+    // request: on a merged device the plugin creates that many per member, so a
+    // count taken from the environment would not describe this connection, and a
+    // split threshold built from it would sit on the wrong side of the boundary.
     // Valid once the scheduler is warm, which the first successful send does.
     ThreadResult WorkerCastLiveNqps(void* sendComm, int* nqps) {
         struct ncclIbCastSchedState state;
