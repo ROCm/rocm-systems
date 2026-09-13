@@ -44,7 +44,7 @@ using EventHandler = std::function<void(Tick, Message *)>;
 /// handler callback. Per-firing state (timestamp, message payload) is stored
 /// in EventQueueEntry, not in the Event itself. The same Event object can
 /// appear in the event queue multiple times at different timestamps.
-class Event {
+class Event final {
 public:
   /// @brief Construct an event.
   /// @param target Component that will process this event.
@@ -52,12 +52,12 @@ public:
   /// @param handler Optional callback invoked when the event executes.
   Event(Component *target, EventType type, EventHandler handler = nullptr)
       : target_(target), type_(type), handler_(std::move(handler)) {}
-  virtual ~Event() = default;
+  ~Event() = default;
 
   /// @brief Execute the event's handler with the given firing context.
   /// @param timestamp The simulation tick at which this firing occurs.
   /// @param message Optional message payload for this firing.
-  virtual void execute(Tick timestamp, Message *message) {
+  void execute(Tick timestamp, Message *message) {
     assert(handler_ && "execute() called on event with no handler");
     handler_(timestamp, message);
   }

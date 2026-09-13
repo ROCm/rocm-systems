@@ -102,9 +102,11 @@ template <GpuIsa Isa> void validate_compute_unit_config(const ComputeUnitCore::C
 }
 
 ComputeUnitCore::ComputeUnitCore(std::string name, const Config &config, GpuMemory *memory,
-                                 L2Cache *l2, uint32_t wf_size)
+                                 L2Cache *l2, uint32_t wf_size, uint32_t vgprs_per_block,
+                                 uint32_t vgpr_storage_lane_count)
     : simdojo::CompositeComponent(std::move(name)), config_(config), memory_(memory),
-      wf_size_(wf_size),
+      wf_size_(wf_size), vgprs_per_block_(vgprs_per_block),
+      vgpr_storage_lane_count_(vgpr_storage_lane_count),
       decoder_(config.target == ROCJITSU_CODE_TARGET_INVALID
                    ? Decoder::create(config.arch)
                    : Decoder::create(default_isa_target_registry(), config.target)),
@@ -643,7 +645,7 @@ void ComputeUnitCore::route_memory_inst(Instruction *inst, Wavefront &wf) {
       }
       inst->data()->set_tag(LOCAL_MEM);
       d.wait_counter_type = WaitCounterType::LGKMCNT;
-      local_mem_pipeline_.issue(inst, wf);
+      local_mem_pipeline_.issue_concrete(inst, wf);
       return;
     }
   }
@@ -651,13 +653,13 @@ void ComputeUnitCore::route_memory_inst(Instruction *inst, Wavefront &wf) {
   const uint8_t route_tag = inst->data()->tag();
   switch (route_tag) {
   case SCALAR_MEM:
-    scalar_mem_pipeline_.issue(inst, wf);
+    scalar_mem_pipeline_.issue_concrete(inst, wf);
     break;
   case LOCAL_MEM:
-    local_mem_pipeline_.issue(inst, wf);
+    local_mem_pipeline_.issue_concrete(inst, wf);
     break;
   case GLOBAL_MEM:
-    global_mem_pipeline_.issue(inst, wf);
+    global_mem_pipeline_.issue_concrete(inst, wf);
     break;
   default:
     break;

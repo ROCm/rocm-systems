@@ -864,10 +864,10 @@ public:
   }
 
   /// @brief Number of physical VGPR registers in one allocation block.
-  virtual uint32_t vgpr_allocation_block_size() const = 0;
+  uint32_t vgpr_allocation_block_size() const { return vgprs_per_block_; }
 
   /// @brief Number of physically stored lanes in each VGPR.
-  virtual uint32_t vgpr_storage_lane_count() const = 0;
+  uint32_t vgpr_storage_lane_count() const { return vgpr_storage_lane_count_; }
 
   /// @brief Raw typed view of a single VGPR as the file's @c simdojo::VectorReg.
   /// @details The abstract CU exposes the VGPR file only as a byte pointer
@@ -938,7 +938,7 @@ public:
 
 protected:
   ComputeUnitCore(std::string name, const Config &config, GpuMemory *memory, L2Cache *l2,
-                  uint32_t wf_size);
+                  uint32_t wf_size, uint32_t vgprs_per_block, uint32_t vgpr_storage_lane_count);
 
   /// @brief Allocate a contiguous block of VGPRs.
   /// @param count Number of VGPRs to allocate.
@@ -995,6 +995,8 @@ protected:
   Config config_;
   GpuMemory *memory_;
   uint32_t wf_size_ = 0;
+  const uint32_t vgprs_per_block_;
+  const uint32_t vgpr_storage_lane_count_;
   uint32_t shader_engine_id_ = 0;
   uint32_t scratch_scoreboard_base_ = 0;
   bool sram_ecc_ = false;
@@ -1305,6 +1307,7 @@ class IsaExecComputeUnit : public ExecComputeUnit<Mode> {
 public:
   static_assert(Isa::WF_SIZE_MAX <= 64, "AMDGPU VGPR storage supports at most Wave64");
   using Vgpr = simdojo::VectorReg<Isa::WF_SIZE_MAX, uint32_t>;
+  // AccVGPR operands address the same physical file after the ordinary VGPR bank.
   static constexpr uint32_t MAX_ACCVGPR_PHYSICAL_LIMIT =
       Isa::MAX_ACC_VGPRS_PER_WF == 0 ? 0 : ACC_VGPR_OFFSET + Isa::MAX_ACC_VGPRS_PER_WF;
   static constexpr uint32_t MAX_VGPRS_PER_BLOCK =
@@ -1321,16 +1324,12 @@ public:
   /// @param l2 Shared L2 cache (not owned).
   IsaExecComputeUnit(std::string name, const ComputeUnitCore::Config &config, GpuMemory *memory,
                      L2Cache *l2)
-      : ExecComputeUnit<Mode>(std::move(name), config, memory, l2, Isa::WF_SIZE) {
+      : ExecComputeUnit<Mode>(std::move(name), config, memory, l2, Isa::WF_SIZE,
+                              std::max(config.vgprs_per_wf, MAX_ACCVGPR_PHYSICAL_LIMIT),
+                              Isa::WF_SIZE_MAX) {
     static_assert(!HasAccVgpr<Isa> || Isa::MAX_VGPRS_PER_WF == ACC_VGPR_OFFSET,
                   "AccVGPR allocation base must match execution-side addressing");
-    // AccVGPR operands are addressed after the normal VGPR bank in the same
-    // physical file, so acc0 lives at base + ACC_VGPR_OFFSET.
-    constexpr uint32_t accvgpr_physical_base = ACC_VGPR_OFFSET;
-    constexpr uint32_t accvgpr_physical_limit =
-        Isa::MAX_ACC_VGPRS_PER_WF == 0 ? 0 : accvgpr_physical_base + Isa::MAX_ACC_VGPRS_PER_WF;
-    vgprs_per_block_ = std::max(config.vgprs_per_wf, accvgpr_physical_limit);
-    vgpr_file_.init(config.num_wf_slots * vgprs_per_block_, vgprs_per_block_);
+    vgpr_file_.init(config.num_wf_slots * this->vgprs_per_block_, this->vgprs_per_block_);
     for (uint32_t i = 0; i < config.num_wf_slots; ++i)
       this->wfs_[i] = std::make_unique<IsaWavefront<Isa>>(*this, i);
     this->sram_ecc_ = Isa::SRAM_ECC;
@@ -1359,9 +1358,9 @@ public:
   }
 
   const Wavefront *vgpr_owner(uint32_t reg_idx) const override {
-    if (vgprs_per_block_ == 0)
+    if (this->vgprs_per_block_ == 0)
       return nullptr;
-    const size_t block = reg_idx / vgprs_per_block_;
+    const size_t block = reg_idx / this->vgprs_per_block_;
     return block < this->config_.num_wf_slots ? vgpr_block_owners_[block] : nullptr;
   }
 
@@ -1377,8 +1376,8 @@ private:
 
 public:
   void set_vgpr_block_owner(uint32_t base, Wavefront *wf) override {
-    assert(vgprs_per_block_ != 0 && base % vgprs_per_block_ == 0);
-    const size_t block = base / vgprs_per_block_;
+    assert(this->vgprs_per_block_ != 0 && base % this->vgprs_per_block_ == 0);
+    const size_t block = base / this->vgprs_per_block_;
     assert(block < this->config_.num_wf_slots);
     vgpr_block_owners_[block] = wf;
   }
@@ -1439,10 +1438,6 @@ protected:
     });
   }
 
-public:
-  uint32_t vgpr_allocation_block_size() const override { return vgprs_per_block_; }
-  uint32_t vgpr_storage_lane_count() const override { return Isa::WF_SIZE_MAX; }
-
 private:
   VgprFile vgpr_file_{"vgpr"};
   /// One owner per register-file allocation block. Every VGPR in a block has
@@ -1450,7 +1445,6 @@ private:
   /// @c vgprs_per_block_ times. The array is sized by wave slots because the
   /// register file currently contains exactly one allocation block per slot.
   std::array<Wavefront *, Isa::MAX_WF_SLOTS> vgpr_block_owners_{};
-  uint32_t vgprs_per_block_ = 0;
 };
 
 } // namespace amdgpu

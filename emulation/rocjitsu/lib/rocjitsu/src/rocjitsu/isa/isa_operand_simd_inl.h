@@ -45,7 +45,7 @@ template <typename Op> amdgpu::VgprMsbRole write_vgpr_role(const Op &op) {
 }
 } // namespace detail
 
-template <typename Isa> bool AmdgpuIsaOperand<Isa>::simd_capable() const {
+template <typename Isa> bool AmdgpuIsaOperand<Isa>::simd_capable_fallback() const {
   if (this->delegate())
     return this->delegate()->simd_capable();
   // Operands that do not read a real value (inert placeholder / side-effect
@@ -57,8 +57,9 @@ template <typename Isa> bool AmdgpuIsaOperand<Isa>::simd_capable() const {
 }
 
 template <typename Isa>
-void AmdgpuIsaOperand<Isa>::read_lane_chunk(const amdgpu::Wavefront &wf, uint32_t lane_base,
-                                            uint32_t count, uint32_t *out) const {
+void AmdgpuIsaOperand<Isa>::read_lane_chunk_fallback(const amdgpu::Wavefront &wf,
+                                                     uint32_t lane_base, uint32_t count,
+                                                     uint32_t *out) const {
   if (this->delegate()) {
     this->delegate()->read_lane_chunk(wf, lane_base, count, out);
     return;
@@ -83,15 +84,15 @@ void AmdgpuIsaOperand<Isa>::read_lane_chunk(const amdgpu::Wavefront &wf, uint32_
 }
 
 template <typename Isa>
-void AmdgpuIsaOperand<Isa>::write_lane_chunk(amdgpu::Wavefront &wf, uint32_t lane_base,
-                                             uint32_t count, const uint32_t *vals,
-                                             uint64_t mask) const {
+void AmdgpuIsaOperand<Isa>::write_lane_chunk_fallback(amdgpu::Wavefront &wf, uint32_t lane_base,
+                                                      uint32_t count, const uint32_t *vals,
+                                                      uint64_t mask) const {
   // Non-writable operand: inert write.
   if (!this->is_writable())
     return;
   auto off = detail::resolved_vgpr_offset_for_operand<Isa>(wf, *this);
   if (!off) {
-    Operand::write_lane_chunk(wf, lane_base, count, vals, mask);
+    Operand::write_lane_chunk_fallback(wf, lane_base, count, vals, mask);
     return;
   }
   uint32_t voff = amdgpu::apply_gpr_idx(wf, *off, detail::write_vgpr_role(*this));
@@ -113,14 +114,14 @@ namespace detail {
 template <typename Isa>
 void amdgpu_isa_read_lane_chunk_base(const AmdgpuIsaOperand<Isa> &op, const amdgpu::Wavefront &wf,
                                      uint32_t lane_base, uint32_t count, uint32_t *out) {
-  op.AmdgpuIsaOperand<Isa>::read_lane_chunk(wf, lane_base, count, out);
+  op.AmdgpuIsaOperand<Isa>::read_lane_chunk_fallback(wf, lane_base, count, out);
 }
 
 template <typename Isa>
 void amdgpu_isa_write_lane_chunk_base(const AmdgpuIsaOperand<Isa> &op, amdgpu::Wavefront &wf,
                                       uint32_t lane_base, uint32_t count, const uint32_t *vals,
                                       uint64_t mask) {
-  op.AmdgpuIsaOperand<Isa>::write_lane_chunk(wf, lane_base, count, vals, mask);
+  op.AmdgpuIsaOperand<Isa>::write_lane_chunk_fallback(wf, lane_base, count, vals, mask);
 }
 } // namespace detail
 

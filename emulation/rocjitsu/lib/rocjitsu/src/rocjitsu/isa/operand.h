@@ -160,13 +160,59 @@ public:
   friend class ScopedOperandDelegate;
   template <typename Isa> friend class AmdgpuIsaOperand;
 
+protected:
+  /// Shared ordinary callbacks for one execution backend. Decoded operands store
+  /// one table pointer; execution-only targets provide concrete callbacks while
+  /// the default table preserves legacy operand overrides.
+  struct ExecutionBackend {
+    bool (*simd_capable)(const Operand &) = nullptr;
+    void (*read_lane_chunk)(const Operand &, const amdgpu::Wavefront &, uint32_t, uint32_t,
+                            uint32_t *) = nullptr;
+    void (*write_lane_chunk)(const Operand &, amdgpu::Wavefront &, uint32_t, uint32_t,
+                             const uint32_t *, uint64_t) = nullptr;
+    uint32_t (*read_scalar)(const Operand &, const amdgpu::Wavefront &) = nullptr;
+    uint32_t (*read_lane)(const Operand &, const amdgpu::Wavefront &, uint32_t) = nullptr;
+    void (*write_scalar)(const Operand &, amdgpu::Wavefront &, uint32_t) = nullptr;
+    void (*write_lane)(const Operand &, amdgpu::Wavefront &, uint32_t, uint32_t) = nullptr;
+    uint64_t (*read_lane64)(const Operand &, const amdgpu::Wavefront &, uint32_t) = nullptr;
+    void (*write_lane64)(const Operand &, amdgpu::Wavefront &, uint32_t, uint64_t) = nullptr;
+    uint64_t (*read_scalar64)(const Operand &, const amdgpu::Wavefront &) = nullptr;
+    void (*write_scalar64)(const Operand &, amdgpu::Wavefront &, uint64_t) = nullptr;
+    std::optional<uint32_t> (*simd_vgpr_base)(const Operand &, const amdgpu::Wavefront &) = nullptr;
+    std::optional<uint32_t> (*simd_vgpr_base_mut)(const Operand &, amdgpu::Wavefront &) = nullptr;
+    amdgpu::ConstVgprStorage (*simd_vgpr_storage)(const Operand &,
+                                                  const amdgpu::Wavefront &) = nullptr;
+    amdgpu::VgprStorage (*simd_vgpr_storage_mut)(const Operand &, amdgpu::Wavefront &) = nullptr;
+    amdgpu::ConstVgprStoragePair64 (*simd_vgpr_storage64)(const Operand &,
+                                                          const amdgpu::Wavefront &) = nullptr;
+    amdgpu::VgprStoragePair64 (*simd_vgpr_storage64_mut)(const Operand &,
+                                                         amdgpu::Wavefront &) = nullptr;
+    void (*simd_notify_read)(const Operand &, const amdgpu::Wavefront &, uint64_t,
+                             uint8_t) = nullptr;
+    void (*simd_notify_read_mut)(const Operand &, amdgpu::Wavefront &, uint64_t, uint8_t) = nullptr;
+    void (*simd_notify_read64)(const Operand &, const amdgpu::Wavefront &, uint64_t,
+                               uint8_t) = nullptr;
+    void (*simd_notify_read64_mut)(const Operand &, amdgpu::Wavefront &, uint64_t,
+                                   uint8_t) = nullptr;
+    void (*simd_notify_write_mut)(const Operand &, amdgpu::Wavefront &, uint64_t,
+                                  uint8_t) = nullptr;
+    void (*simd_notify_write64_mut)(const Operand &, amdgpu::Wavefront &, uint64_t,
+                                    uint8_t) = nullptr;
+  };
+
+  static const ExecutionBackend default_execution_backend_;
+  static const ExecutionBackend model_execution_backend_;
+
+public:
   Operand() = default;
 
   /// @brief Construct an operand with the given size and encoding value.
   /// @param size_bits Operand width in bits.
   /// @param encoding_value ISA-specific encoding value identifying the register or literal.
-  Operand(int size_bits, int encoding_value)
-      : size_bits_(size_bits), encoding_value_(encoding_value) {}
+  Operand(int size_bits, int encoding_value,
+          const ExecutionBackend *backend = &default_execution_backend_)
+      : size_bits_(size_bits), encoding_value_(encoding_value),
+        execution_backend_(backend ? backend : &model_execution_backend_) {}
   virtual ~Operand() = default;
 
   /// Validate encoding constraints deferred until the complete instruction is
@@ -297,11 +343,17 @@ private:
 
   // Value access is intentionally private. Instruction implementations use
   // RegisterAccess; Operand remains the ISA-specific resolver/backend.
+  // Built-in execution calls the shared table directly. The virtual fallback
+  // hooks preserve custom operands and non-split generator profiles.
 
   /// @brief Read this operand as a scalar 32-bit value.
   /// @param wf Wavefront providing register state.
   /// @returns The 32-bit scalar value.
-  virtual uint32_t read_scalar(const amdgpu::Wavefront &wf) const;
+  uint32_t read_scalar(const amdgpu::Wavefront &wf) const {
+    return execution_backend_->read_scalar(*this, wf);
+  }
+
+  virtual uint32_t read_scalar_fallback(const amdgpu::Wavefront &wf) const;
 
   /// @brief Read this operand's value for a specific SIMD lane.
   ///
@@ -310,40 +362,68 @@ private:
   /// @param wf Wavefront providing register state.
   /// @param lane SIMD lane index.
   /// @returns The 32-bit lane value.
-  virtual uint32_t read_lane(const amdgpu::Wavefront &wf, uint32_t lane) const;
+  uint32_t read_lane(const amdgpu::Wavefront &wf, uint32_t lane) const {
+    return execution_backend_->read_lane(*this, wf, lane);
+  }
+
+  virtual uint32_t read_lane_fallback(const amdgpu::Wavefront &wf, uint32_t lane) const;
 
   /// @brief Write a scalar 32-bit value to this operand's destination.
   /// @param[in,out] wf Wavefront providing register state.
   /// @param val Value to write.
-  virtual void write_scalar(amdgpu::Wavefront &wf, uint32_t val) const;
+  void write_scalar(amdgpu::Wavefront &wf, uint32_t val) const {
+    return execution_backend_->write_scalar(*this, wf, val);
+  }
+
+  virtual void write_scalar_fallback(amdgpu::Wavefront &wf, uint32_t val) const;
 
   /// @brief Write a 32-bit value to a specific SIMD lane of this operand.
   /// @param[in,out] wf Wavefront providing register state.
   /// @param lane SIMD lane index.
   /// @param val Value to write.
-  virtual void write_lane(amdgpu::Wavefront &wf, uint32_t lane, uint32_t val) const;
+  void write_lane(amdgpu::Wavefront &wf, uint32_t lane, uint32_t val) const {
+    return execution_backend_->write_lane(*this, wf, lane, val);
+  }
+
+  virtual void write_lane_fallback(amdgpu::Wavefront &wf, uint32_t lane, uint32_t val) const;
 
   /// @brief Read a 64-bit value from a SIMD lane (VGPR pair).
   /// @param wf Wavefront providing register state.
   /// @param lane SIMD lane index.
   /// @returns The 64-bit lane value.
-  virtual uint64_t read_lane64(const amdgpu::Wavefront &wf, uint32_t lane) const;
+  uint64_t read_lane64(const amdgpu::Wavefront &wf, uint32_t lane) const {
+    return execution_backend_->read_lane64(*this, wf, lane);
+  }
+
+  virtual uint64_t read_lane64_fallback(const amdgpu::Wavefront &wf, uint32_t lane) const;
 
   /// @brief Write a 64-bit value to a SIMD lane (VGPR pair).
   /// @param[in,out] wf Wavefront providing register state.
   /// @param lane SIMD lane index.
   /// @param val Value to write.
-  virtual void write_lane64(amdgpu::Wavefront &wf, uint32_t lane, uint64_t val) const;
+  void write_lane64(amdgpu::Wavefront &wf, uint32_t lane, uint64_t val) const {
+    return execution_backend_->write_lane64(*this, wf, lane, val);
+  }
+
+  virtual void write_lane64_fallback(amdgpu::Wavefront &wf, uint32_t lane, uint64_t val) const;
 
   /// @brief Read this operand as a 64-bit scalar (e.g., SGPR pair, VCC, EXEC).
   /// @param wf Wavefront providing register state.
   /// @returns The 64-bit scalar value.
-  virtual uint64_t read_scalar64(const amdgpu::Wavefront &wf) const;
+  uint64_t read_scalar64(const amdgpu::Wavefront &wf) const {
+    return execution_backend_->read_scalar64(*this, wf);
+  }
+
+  virtual uint64_t read_scalar64_fallback(const amdgpu::Wavefront &wf) const;
 
   /// @brief Write a 64-bit scalar value (e.g., SGPR pair, VCC, EXEC).
   /// @param[in,out] wf Wavefront providing register state.
   /// @param val Value to write.
-  virtual void write_scalar64(amdgpu::Wavefront &wf, uint64_t val) const;
+  void write_scalar64(amdgpu::Wavefront &wf, uint64_t val) const {
+    return execution_backend_->write_scalar64(*this, wf, val);
+  }
+
+  virtual void write_scalar64_fallback(amdgpu::Wavefront &wf, uint64_t val) const;
 
 public:
   /// @brief Return the active read delegate, if any.
@@ -360,7 +440,9 @@ public:
   /// uint32_t buffer (VGPRs, SGPR/immediate/inline-const broadcasts, DPP/SDWA
   /// delegated operands). Kernels gate SIMD fast paths on this predicate; if
   /// any source/dest reports false, the kernel falls back to its scalar loop.
-  virtual bool simd_capable() const {
+  bool simd_capable() const { return execution_backend_->simd_capable(*this); }
+
+  virtual bool simd_capable_fallback() const {
     if (delegate_)
       return delegate_->simd_capable();
     return false;
@@ -375,8 +457,13 @@ private:
   /// @details Default implementation calls `read_lane` per element so any
   /// operand stays correct without an override. Arch subclasses override with
   /// memcpy-based VGPR reads or scalar broadcasts.
-  virtual void read_lane_chunk(const amdgpu::Wavefront &wf, uint32_t lane_base, uint32_t count,
-                               uint32_t *out) const {
+  void read_lane_chunk(const amdgpu::Wavefront &wf, uint32_t lane_base, uint32_t count,
+                       uint32_t *out) const {
+    return execution_backend_->read_lane_chunk(*this, wf, lane_base, count, out);
+  }
+
+  virtual void read_lane_chunk_fallback(const amdgpu::Wavefront &wf, uint32_t lane_base,
+                                        uint32_t count, uint32_t *out) const {
     if (delegate_) {
       delegate_->read_lane_chunk(wf, lane_base, count, out);
       return;
@@ -387,8 +474,13 @@ private:
 
   /// @brief Apply masked write of `vals[0..count)` to lanes
   /// `[lane_base, lane_base + count)`. Bit `i` of `mask` enables lane `i`.
-  virtual void write_lane_chunk(amdgpu::Wavefront &wf, uint32_t lane_base, uint32_t count,
-                                const uint32_t *vals, uint64_t mask) const {
+  void write_lane_chunk(amdgpu::Wavefront &wf, uint32_t lane_base, uint32_t count,
+                        const uint32_t *vals, uint64_t mask) const {
+    return execution_backend_->write_lane_chunk(*this, wf, lane_base, count, vals, mask);
+  }
+
+  virtual void write_lane_chunk_fallback(amdgpu::Wavefront &wf, uint32_t lane_base, uint32_t count,
+                                         const uint32_t *vals, uint64_t mask) const {
     for (uint32_t i = 0; i < count; ++i)
       if (mask & (1ULL << i))
         write_lane(wf, lane_base + i, vals[i]);
@@ -443,21 +535,21 @@ private:
   std::optional<uint32_t> simd_vgpr_base(const amdgpu::Wavefront &wf) const {
     if (delegate_)
       return delegate_->simd_vgpr_base(wf);
-    return simd_vgpr_base_impl(wf);
+    return execution_backend_->simd_vgpr_base(*this, wf);
   }
 
   std::optional<uint32_t> simd_vgpr_base_mut(amdgpu::Wavefront &wf) const {
-    return simd_vgpr_base_mut_impl(wf);
+    return execution_backend_->simd_vgpr_base_mut(*this, wf);
   }
 
   amdgpu::ConstVgprStorage simd_vgpr_storage(const amdgpu::Wavefront &wf) const {
     if (delegate_)
       return delegate_->simd_vgpr_storage(wf);
-    return simd_vgpr_storage_impl(wf);
+    return execution_backend_->simd_vgpr_storage(*this, wf);
   }
 
   amdgpu::VgprStorage simd_vgpr_storage_mut(amdgpu::Wavefront &wf) const {
-    return simd_vgpr_storage_mut_impl(wf);
+    return execution_backend_->simd_vgpr_storage_mut(*this, wf);
   }
 
   void simd_notify_read(const amdgpu::Wavefront &wf, uint64_t lane_mask, uint8_t byte_mask) const {
@@ -465,11 +557,11 @@ private:
       delegate_->simd_notify_read(wf, lane_mask, byte_mask);
       return;
     }
-    simd_notify_read_impl(wf, lane_mask, byte_mask);
+    execution_backend_->simd_notify_read(*this, wf, lane_mask, byte_mask);
   }
 
   void simd_notify_read_mut(amdgpu::Wavefront &wf, uint64_t lane_mask, uint8_t byte_mask) const {
-    simd_notify_read_mut_impl(wf, lane_mask, byte_mask);
+    execution_backend_->simd_notify_read_mut(*this, wf, lane_mask, byte_mask);
   }
 
   void simd_notify_read64(const amdgpu::Wavefront &wf, uint64_t lane_mask,
@@ -478,29 +570,29 @@ private:
       delegate_->simd_notify_read64(wf, lane_mask, byte_mask);
       return;
     }
-    simd_notify_read64_impl(wf, lane_mask, byte_mask);
+    execution_backend_->simd_notify_read64(*this, wf, lane_mask, byte_mask);
   }
 
   void simd_notify_read64_mut(amdgpu::Wavefront &wf, uint64_t lane_mask, uint8_t byte_mask) const {
-    simd_notify_read64_mut_impl(wf, lane_mask, byte_mask);
+    execution_backend_->simd_notify_read64_mut(*this, wf, lane_mask, byte_mask);
   }
 
   void simd_notify_write_mut(amdgpu::Wavefront &wf, uint64_t lane_mask, uint8_t byte_mask) const {
-    simd_notify_write_mut_impl(wf, lane_mask, byte_mask);
+    execution_backend_->simd_notify_write_mut(*this, wf, lane_mask, byte_mask);
   }
 
   void simd_notify_write64_mut(amdgpu::Wavefront &wf, uint64_t lane_mask, uint8_t byte_mask) const {
-    simd_notify_write64_mut_impl(wf, lane_mask, byte_mask);
+    execution_backend_->simd_notify_write64_mut(*this, wf, lane_mask, byte_mask);
   }
 
   amdgpu::ConstVgprStoragePair64 simd_vgpr_storage64(const amdgpu::Wavefront &wf) const {
     if (delegate_)
       return delegate_->simd_vgpr_storage64(wf);
-    return simd_vgpr_storage64_impl(wf);
+    return execution_backend_->simd_vgpr_storage64(*this, wf);
   }
 
   amdgpu::VgprStoragePair64 simd_vgpr_storage64_mut(amdgpu::Wavefront &wf) const {
-    return simd_vgpr_storage64_mut_impl(wf);
+    return execution_backend_->simd_vgpr_storage64_mut(*this, wf);
   }
 
   /// @brief If this operand resolves to per-lane VGPR storage, return its
@@ -526,7 +618,7 @@ private:
   /// @brief If this operand resolves to per-lane VGPR storage, return a typed
   /// const view of that register. Otherwise an empty view — the caller falls
   /// back to a scalar broadcast via `read_scalar`. Resolves the storage in a
-  /// SINGLE virtual dispatch — the SIMD hot path reads through this without a
+  /// legacy fallback dispatch. Built-in callbacks bypass this hook without a
   /// raw pointer crossing the instruction-facing RegisterAccess API.
   virtual amdgpu::ConstVgprStorage simd_vgpr_storage_impl(const amdgpu::Wavefront &wf) const {
     (void)wf;
@@ -571,7 +663,7 @@ private:
   /// @brief 64-bit-lane counterpart of `simd_vgpr_storage`. A per-lane f64/i64
   /// value occupies two consecutive VGPRs (reg N + reg N+1), so this returns a
   /// `{lo, hi}` pair of typed register views (lo = reg N, hi = reg N+1) in a
-  /// SINGLE virtual dispatch. Returns empty views when the operand is
+  /// legacy fallback dispatch. Returns empty views when the operand is
   /// not contiguous VGPR storage — the caller broadcasts via `read_scalar64`.
   virtual amdgpu::ConstVgprStoragePair64
   simd_vgpr_storage64_impl(const amdgpu::Wavefront &wf) const {
@@ -588,6 +680,7 @@ private:
   }
 
 private:
+  const ExecutionBackend *execution_backend_ = &default_execution_backend_;
   Operand *delegate_ = nullptr;
 };
 
@@ -601,8 +694,9 @@ public:
   /// @param size_bits Operand width in bits.
   /// @param opr_type ISA-specific operand type (e.g. SGPR, VGPR, literal).
   /// @param encoding_value ISA-specific encoding value identifying the register or literal.
-  IsaOperand(int size_bits, typename Isa::OperandType opr_type, int encoding_value = 0)
-      : Operand(size_bits, encoding_value), opr_type_(opr_type) {}
+  IsaOperand(int size_bits, typename Isa::OperandType opr_type, int encoding_value = 0,
+             const ExecutionBackend *backend = &default_execution_backend_)
+      : Operand(size_bits, encoding_value, backend), opr_type_(opr_type) {}
 
   /// @brief ISA-specific operand type tag.
   typename Isa::OperandType opr_type_{};
@@ -629,7 +723,7 @@ template <typename Isa> class AmdgpuIsaOperand : public IsaOperand<Isa> {
 public:
   using IsaOperand<Isa>::IsaOperand;
 
-  bool simd_capable() const override;
+  bool simd_capable_fallback() const override;
 
 private:
   template <typename OtherIsa>
@@ -643,10 +737,10 @@ private:
                                                        uint32_t count, const uint32_t *vals,
                                                        uint64_t mask);
 
-  void read_lane_chunk(const amdgpu::Wavefront &wf, uint32_t lane_base, uint32_t count,
-                       uint32_t *out) const override;
-  void write_lane_chunk(amdgpu::Wavefront &wf, uint32_t lane_base, uint32_t count,
-                        const uint32_t *vals, uint64_t mask) const override;
+  void read_lane_chunk_fallback(const amdgpu::Wavefront &wf, uint32_t lane_base, uint32_t count,
+                                uint32_t *out) const override;
+  void write_lane_chunk_fallback(amdgpu::Wavefront &wf, uint32_t lane_base, uint32_t count,
+                                 const uint32_t *vals, uint64_t mask) const override;
 
   std::optional<uint32_t> simd_vgpr_base_impl(const amdgpu::Wavefront &wf) const override;
   std::optional<uint32_t> simd_vgpr_base_mut_impl(amdgpu::Wavefront &wf) const override;

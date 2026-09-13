@@ -25,8 +25,8 @@ std::string reg_name(const char *prefix, int reg_num, int size_bits) {
 } // namespace
 
 Operand::Operand(int size_bits, OperandType opr_type, int encoding_value)
-    : IsaOperand<Isa>(size_bits, opr_type, encoding_value),
-      execution_backend_(static_cast<const ExecutionBackend *>(current_isa_operand_backend())) {
+    : IsaOperand<Isa>(size_bits, opr_type, encoding_value,
+                      static_cast<const ExecutionBackend *>(current_isa_operand_backend())) {
   switch (opr_type) {
   case OperandType::OPR_ACCVGPR:
     if (!((encoding_value >= 512 && encoding_value <= 767)))
@@ -160,8 +160,8 @@ Operand::Operand(int size_bits, OperandType opr_type, int encoding_value,
 }
 
 Operand::Operand(int size_bits, OperandType opr_type, uint64_t literal64_value, bool is_literal64)
-    : IsaOperand<Isa>(size_bits, opr_type, static_cast<int>(literal64_value)),
-      execution_backend_(static_cast<const ExecutionBackend *>(current_isa_operand_backend())),
+    : IsaOperand<Isa>(size_bits, opr_type, static_cast<int>(literal64_value),
+                      static_cast<const ExecutionBackend *>(current_isa_operand_backend())),
       literal64_value_(literal64_value), has_literal64_(is_literal64) {
   is_vgpr_ = is_vgpr_operand_type(opr_type);
 }
@@ -1293,173 +1293,6 @@ std::optional<RegClass> Operand::to_special_reg_class() const {
     break;
   }
   return std::nullopt;
-}
-
-bool Operand::simd_capable() const {
-  decltype(ExecutionBackend::simd_capable) callback =
-      execution_backend_ ? execution_backend_->simd_capable : nullptr;
-  return callback ? (this->*callback)() : false;
-}
-
-void Operand::read_lane_chunk(const amdgpu::Wavefront &wf, uint32_t lane_base, uint32_t count,
-                              uint32_t *out) const {
-  decltype(ExecutionBackend::read_lane_chunk) callback =
-      execution_backend_ ? execution_backend_->read_lane_chunk : nullptr;
-  if (!callback)
-    throw std::logic_error("operand execution backend is not linked");
-  (this->*callback)(wf, lane_base, count, out);
-}
-
-void Operand::write_lane_chunk(amdgpu::Wavefront &wf, uint32_t lane_base, uint32_t count,
-                               const uint32_t *vals, uint64_t mask) const {
-  decltype(ExecutionBackend::write_lane_chunk) callback =
-      execution_backend_ ? execution_backend_->write_lane_chunk : nullptr;
-  if (!callback)
-    throw std::logic_error("operand execution backend is not linked");
-  (this->*callback)(wf, lane_base, count, vals, mask);
-}
-
-uint32_t Operand::read_scalar(const amdgpu::Wavefront &wf) const {
-  decltype(ExecutionBackend::read_scalar) callback =
-      execution_backend_ ? execution_backend_->read_scalar : nullptr;
-  if (!callback)
-    throw std::logic_error("operand execution backend is not linked");
-  return (this->*callback)(wf);
-}
-
-uint32_t Operand::read_lane(const amdgpu::Wavefront &wf, uint32_t lane) const {
-  decltype(ExecutionBackend::read_lane) callback =
-      execution_backend_ ? execution_backend_->read_lane : nullptr;
-  if (!callback)
-    throw std::logic_error("operand execution backend is not linked");
-  return (this->*callback)(wf, lane);
-}
-
-void Operand::write_scalar(amdgpu::Wavefront &wf, uint32_t val) const {
-  decltype(ExecutionBackend::write_scalar) callback =
-      execution_backend_ ? execution_backend_->write_scalar : nullptr;
-  if (!callback)
-    throw std::logic_error("operand execution backend is not linked");
-  (this->*callback)(wf, val);
-}
-
-void Operand::write_lane(amdgpu::Wavefront &wf, uint32_t lane, uint32_t val) const {
-  decltype(ExecutionBackend::write_lane) callback =
-      execution_backend_ ? execution_backend_->write_lane : nullptr;
-  if (!callback)
-    throw std::logic_error("operand execution backend is not linked");
-  (this->*callback)(wf, lane, val);
-}
-
-uint64_t Operand::read_lane64(const amdgpu::Wavefront &wf, uint32_t lane) const {
-  decltype(ExecutionBackend::read_lane64) callback =
-      execution_backend_ ? execution_backend_->read_lane64 : nullptr;
-  if (!callback)
-    throw std::logic_error("operand execution backend is not linked");
-  return (this->*callback)(wf, lane);
-}
-
-void Operand::write_lane64(amdgpu::Wavefront &wf, uint32_t lane, uint64_t val) const {
-  decltype(ExecutionBackend::write_lane64) callback =
-      execution_backend_ ? execution_backend_->write_lane64 : nullptr;
-  if (!callback)
-    throw std::logic_error("operand execution backend is not linked");
-  (this->*callback)(wf, lane, val);
-}
-
-uint64_t Operand::read_scalar64(const amdgpu::Wavefront &wf) const {
-  decltype(ExecutionBackend::read_scalar64) callback =
-      execution_backend_ ? execution_backend_->read_scalar64 : nullptr;
-  if (!callback)
-    throw std::logic_error("operand execution backend is not linked");
-  return (this->*callback)(wf);
-}
-
-void Operand::write_scalar64(amdgpu::Wavefront &wf, uint64_t val) const {
-  decltype(ExecutionBackend::write_scalar64) callback =
-      execution_backend_ ? execution_backend_->write_scalar64 : nullptr;
-  if (!callback)
-    throw std::logic_error("operand execution backend is not linked");
-  (this->*callback)(wf, val);
-}
-
-std::optional<uint32_t> Operand::simd_vgpr_base_impl(const amdgpu::Wavefront &wf) const {
-  decltype(ExecutionBackend::simd_vgpr_base) callback =
-      execution_backend_ ? execution_backend_->simd_vgpr_base : nullptr;
-  return callback ? (this->*callback)(wf) : std::nullopt;
-}
-
-std::optional<uint32_t> Operand::simd_vgpr_base_mut_impl(amdgpu::Wavefront &wf) const {
-  decltype(ExecutionBackend::simd_vgpr_base_mut) callback =
-      execution_backend_ ? execution_backend_->simd_vgpr_base_mut : nullptr;
-  return callback ? (this->*callback)(wf) : std::nullopt;
-}
-
-amdgpu::ConstVgprStorage Operand::simd_vgpr_storage_impl(const amdgpu::Wavefront &wf) const {
-  decltype(ExecutionBackend::simd_vgpr_storage) callback =
-      execution_backend_ ? execution_backend_->simd_vgpr_storage : nullptr;
-  return callback ? (this->*callback)(wf) : amdgpu::ConstVgprStorage{};
-}
-
-amdgpu::VgprStorage Operand::simd_vgpr_storage_mut_impl(amdgpu::Wavefront &wf) const {
-  decltype(ExecutionBackend::simd_vgpr_storage_mut) callback =
-      execution_backend_ ? execution_backend_->simd_vgpr_storage_mut : nullptr;
-  return callback ? (this->*callback)(wf) : amdgpu::VgprStorage{};
-}
-
-amdgpu::ConstVgprStoragePair64
-Operand::simd_vgpr_storage64_impl(const amdgpu::Wavefront &wf) const {
-  decltype(ExecutionBackend::simd_vgpr_storage64) callback =
-      execution_backend_ ? execution_backend_->simd_vgpr_storage64 : nullptr;
-  return callback ? (this->*callback)(wf) : amdgpu::ConstVgprStoragePair64{};
-}
-
-amdgpu::VgprStoragePair64 Operand::simd_vgpr_storage64_mut_impl(amdgpu::Wavefront &wf) const {
-  decltype(ExecutionBackend::simd_vgpr_storage64_mut) callback =
-      execution_backend_ ? execution_backend_->simd_vgpr_storage64_mut : nullptr;
-  return callback ? (this->*callback)(wf) : amdgpu::VgprStoragePair64{};
-}
-
-void Operand::simd_notify_read_impl(const amdgpu::Wavefront &wf, uint64_t lane_mask,
-                                    uint8_t byte_mask) const {
-  if (decltype(ExecutionBackend::simd_notify_read) callback =
-          execution_backend_ ? execution_backend_->simd_notify_read : nullptr)
-    (this->*callback)(wf, lane_mask, byte_mask);
-}
-
-void Operand::simd_notify_read_mut_impl(amdgpu::Wavefront &wf, uint64_t lane_mask,
-                                        uint8_t byte_mask) const {
-  if (decltype(ExecutionBackend::simd_notify_read_mut) callback =
-          execution_backend_ ? execution_backend_->simd_notify_read_mut : nullptr)
-    (this->*callback)(wf, lane_mask, byte_mask);
-}
-
-void Operand::simd_notify_read64_impl(const amdgpu::Wavefront &wf, uint64_t lane_mask,
-                                      uint8_t byte_mask) const {
-  if (decltype(ExecutionBackend::simd_notify_read64) callback =
-          execution_backend_ ? execution_backend_->simd_notify_read64 : nullptr)
-    (this->*callback)(wf, lane_mask, byte_mask);
-}
-
-void Operand::simd_notify_read64_mut_impl(amdgpu::Wavefront &wf, uint64_t lane_mask,
-                                          uint8_t byte_mask) const {
-  if (decltype(ExecutionBackend::simd_notify_read64_mut) callback =
-          execution_backend_ ? execution_backend_->simd_notify_read64_mut : nullptr)
-    (this->*callback)(wf, lane_mask, byte_mask);
-}
-
-void Operand::simd_notify_write_mut_impl(amdgpu::Wavefront &wf, uint64_t lane_mask,
-                                         uint8_t byte_mask) const {
-  if (decltype(ExecutionBackend::simd_notify_write_mut) callback =
-          execution_backend_ ? execution_backend_->simd_notify_write_mut : nullptr)
-    (this->*callback)(wf, lane_mask, byte_mask);
-}
-
-void Operand::simd_notify_write64_mut_impl(amdgpu::Wavefront &wf, uint64_t lane_mask,
-                                           uint8_t byte_mask) const {
-  if (decltype(ExecutionBackend::simd_notify_write64_mut) callback =
-          execution_backend_ ? execution_backend_->simd_notify_write64_mut : nullptr)
-    (this->*callback)(wf, lane_mask, byte_mask);
 }
 
 } // namespace cdna4

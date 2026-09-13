@@ -475,29 +475,93 @@ void Operand::simd_notify_write64_mut_exec(amdgpu::Wavefront &wf, uint64_t lane_
 
 const void *Operand::full_execution_backend() {
   static const ExecutionBackend backend{
-      &Operand::simd_capable_exec,
-      &Operand::read_lane_chunk_exec,
-      &Operand::write_lane_chunk_exec,
-      &Operand::read_scalar_exec,
-      &Operand::read_lane_exec,
-      &Operand::write_scalar_exec,
-      &Operand::write_lane_exec,
-      &Operand::read_lane64_exec,
-      &Operand::write_lane64_exec,
-      &Operand::read_scalar64_exec,
-      &Operand::write_scalar64_exec,
-      &Operand::simd_vgpr_base_exec,
-      &Operand::simd_vgpr_base_mut_exec,
-      &Operand::simd_vgpr_storage_exec,
-      &Operand::simd_vgpr_storage_mut_exec,
-      &Operand::simd_vgpr_storage64_exec,
-      &Operand::simd_vgpr_storage64_mut_exec,
-      &Operand::simd_notify_read_exec,
-      &Operand::simd_notify_read_mut_exec,
-      &Operand::simd_notify_read64_exec,
-      &Operand::simd_notify_read64_mut_exec,
-      &Operand::simd_notify_write_mut_exec,
-      &Operand::simd_notify_write64_mut_exec,
+      .simd_capable = [](const rocjitsu::Operand &base) -> bool {
+        return static_cast<const Operand &>(base).simd_capable_exec();
+      },
+      .read_lane_chunk = [](const rocjitsu::Operand &base, const amdgpu::Wavefront &wf,
+                            uint32_t lane_base, uint32_t count, uint32_t *out) -> void {
+        return static_cast<const Operand &>(base).read_lane_chunk_exec(wf, lane_base, count, out);
+      },
+      .write_lane_chunk = [](const rocjitsu::Operand &base, amdgpu::Wavefront &wf,
+                             uint32_t lane_base, uint32_t count, const uint32_t *vals,
+                             uint64_t mask) -> void {
+        return static_cast<const Operand &>(base).write_lane_chunk_exec(wf, lane_base, count, vals,
+                                                                        mask);
+      },
+      .read_scalar = [](const rocjitsu::Operand &base, const amdgpu::Wavefront &wf) -> uint32_t {
+        return static_cast<const Operand &>(base).read_scalar_exec(wf);
+      },
+      .read_lane = [](const rocjitsu::Operand &base, const amdgpu::Wavefront &wf, uint32_t lane)
+          -> uint32_t { return static_cast<const Operand &>(base).read_lane_exec(wf, lane); },
+      .write_scalar = [](const rocjitsu::Operand &base, amdgpu::Wavefront &wf, uint32_t val)
+          -> void { return static_cast<const Operand &>(base).write_scalar_exec(wf, val); },
+      .write_lane = [](const rocjitsu::Operand &base, amdgpu::Wavefront &wf, uint32_t lane,
+                       uint32_t val) -> void {
+        return static_cast<const Operand &>(base).write_lane_exec(wf, lane, val);
+      },
+      .read_lane64 = [](const rocjitsu::Operand &base, const amdgpu::Wavefront &wf, uint32_t lane)
+          -> uint64_t { return static_cast<const Operand &>(base).read_lane64_exec(wf, lane); },
+      .write_lane64 = [](const rocjitsu::Operand &base, amdgpu::Wavefront &wf, uint32_t lane,
+                         uint64_t val) -> void {
+        return static_cast<const Operand &>(base).write_lane64_exec(wf, lane, val);
+      },
+      .read_scalar64 = [](const rocjitsu::Operand &base, const amdgpu::Wavefront &wf) -> uint64_t {
+        return static_cast<const Operand &>(base).read_scalar64_exec(wf);
+      },
+      .write_scalar64 = [](const rocjitsu::Operand &base, amdgpu::Wavefront &wf, uint64_t val)
+          -> void { return static_cast<const Operand &>(base).write_scalar64_exec(wf, val); },
+      .simd_vgpr_base = [](const rocjitsu::Operand &base,
+                           const amdgpu::Wavefront &wf) -> std::optional<uint32_t> {
+        return static_cast<const Operand &>(base).simd_vgpr_base_exec(wf);
+      },
+      .simd_vgpr_base_mut = [](const rocjitsu::Operand &base,
+                               amdgpu::Wavefront &wf) -> std::optional<uint32_t> {
+        return static_cast<const Operand &>(base).simd_vgpr_base_mut_exec(wf);
+      },
+      .simd_vgpr_storage = [](const rocjitsu::Operand &base,
+                              const amdgpu::Wavefront &wf) -> amdgpu::ConstVgprStorage {
+        return static_cast<const Operand &>(base).simd_vgpr_storage_exec(wf);
+      },
+      .simd_vgpr_storage_mut = [](const rocjitsu::Operand &base,
+                                  amdgpu::Wavefront &wf) -> amdgpu::VgprStorage {
+        return static_cast<const Operand &>(base).simd_vgpr_storage_mut_exec(wf);
+      },
+      .simd_vgpr_storage64 = [](const rocjitsu::Operand &base,
+                                const amdgpu::Wavefront &wf) -> amdgpu::ConstVgprStoragePair64 {
+        return static_cast<const Operand &>(base).simd_vgpr_storage64_exec(wf);
+      },
+      .simd_vgpr_storage64_mut = [](const rocjitsu::Operand &base,
+                                    amdgpu::Wavefront &wf) -> amdgpu::VgprStoragePair64 {
+        return static_cast<const Operand &>(base).simd_vgpr_storage64_mut_exec(wf);
+      },
+      .simd_notify_read = [](const rocjitsu::Operand &base, const amdgpu::Wavefront &wf,
+                             uint64_t lane_mask, uint8_t byte_mask) -> void {
+        return static_cast<const Operand &>(base).simd_notify_read_exec(wf, lane_mask, byte_mask);
+      },
+      .simd_notify_read_mut = [](const rocjitsu::Operand &base, amdgpu::Wavefront &wf,
+                                 uint64_t lane_mask, uint8_t byte_mask) -> void {
+        return static_cast<const Operand &>(base).simd_notify_read_mut_exec(wf, lane_mask,
+                                                                            byte_mask);
+      },
+      .simd_notify_read64 = [](const rocjitsu::Operand &base, const amdgpu::Wavefront &wf,
+                               uint64_t lane_mask, uint8_t byte_mask) -> void {
+        return static_cast<const Operand &>(base).simd_notify_read64_exec(wf, lane_mask, byte_mask);
+      },
+      .simd_notify_read64_mut = [](const rocjitsu::Operand &base, amdgpu::Wavefront &wf,
+                                   uint64_t lane_mask, uint8_t byte_mask) -> void {
+        return static_cast<const Operand &>(base).simd_notify_read64_mut_exec(wf, lane_mask,
+                                                                              byte_mask);
+      },
+      .simd_notify_write_mut = [](const rocjitsu::Operand &base, amdgpu::Wavefront &wf,
+                                  uint64_t lane_mask, uint8_t byte_mask) -> void {
+        return static_cast<const Operand &>(base).simd_notify_write_mut_exec(wf, lane_mask,
+                                                                             byte_mask);
+      },
+      .simd_notify_write64_mut = [](const rocjitsu::Operand &base, amdgpu::Wavefront &wf,
+                                    uint64_t lane_mask, uint8_t byte_mask) -> void {
+        return static_cast<const Operand &>(base).simd_notify_write64_mut_exec(wf, lane_mask,
+                                                                               byte_mask);
+      },
   };
   return &backend;
 }

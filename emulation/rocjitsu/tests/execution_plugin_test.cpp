@@ -2709,6 +2709,55 @@ TEST(ExecutionPluginTest, SdwaPartialPreserveClampReportsFullDwordWrite) {
   EXPECT_EQ(writes[0].byte_mask, ExecutionPlugin::kFullByteMask);
 }
 
+TEST(ExecutionPluginTest, DerivedMemoryPipelineRetainsDeferredInstructionOwnership) {
+  class DeferredPipeline final : public GlobalMemPipeline {
+  public:
+    DeferredPipeline() : GlobalMemPipeline(nullptr, nullptr) {}
+    bool initiated = false;
+    MemoryAccessDeferredCompletion pending;
+
+  protected:
+    void initiate_access(Instruction &, Wavefront &wf) override {
+      initiated = true;
+      EXPECT_EQ(wf.wait_counters().asynccnt, 1u);
+    }
+    MemoryAccessCompletion complete_access(Instruction &, Wavefront &,
+                                           MemoryAccessDeferredCompletion complete) override {
+      pending = std::move(complete);
+      return MemoryAccessCompletion::Deferred;
+    }
+  } pipeline;
+
+  class TrackedInstruction final : public TestMemoryInstruction {
+  public:
+    TrackedInstruction(std::unique_ptr<DynamicInstState> state, bool &destroyed)
+        : TestMemoryInstruction(std::move(state)), destroyed_(destroyed) {}
+    ~TrackedInstruction() override { destroyed_ = true; }
+
+  private:
+    bool &destroyed_;
+  };
+
+  PluginFixture f(/*num_wf_slots=*/1);
+  auto *wf = f.cu()->dispatch_wf(0, 0, /*sgprs=*/104, /*vgprs=*/256);
+  ASSERT_NE(wf, nullptr);
+  auto state = std::make_unique<VectorMemState>(GLOBAL_MEM);
+  state->wait_counter_type = WaitCounterType::ASYNCCNT;
+  bool destroyed = false;
+
+  GlobalMemPipeline &dynamic_pipeline = pipeline;
+  dynamic_pipeline.issue(new TrackedInstruction(std::move(state), destroyed), *wf);
+
+  EXPECT_TRUE(pipeline.initiated);
+  ASSERT_TRUE(pipeline.pending);
+  EXPECT_FALSE(destroyed);
+  EXPECT_EQ(wf->wait_counters().asynccnt, 1u);
+  auto complete = std::move(pipeline.pending);
+  complete();
+  EXPECT_TRUE(destroyed);
+  EXPECT_TRUE(wf->wait_counters().empty());
+}
+
 TEST(ExecutionPluginTest, MemoryPipelineCompletionDoesNotObserveInstructionWrite) {
   PluginFixture f(/*num_wf_slots=*/1);
   auto *plugin = f.attach_ordering_plugin();
@@ -2734,7 +2783,7 @@ TEST(ExecutionPluginTest, MemoryPipelineCompletionDoesNotObserveInstructionWrite
 
   plugin->events.clear();
   GlobalMemPipeline pipeline(&cu->l1_vector(), cu->l2());
-  pipeline.issue(new TestMemoryInstruction(std::move(state)), *wf);
+  pipeline.issue_concrete(new TestMemoryInstruction(std::move(state)), *wf);
 
   EXPECT_TRUE(vgpr_write_events(*plugin).empty());
   EXPECT_EQ(cu->read_vgpr_storage(wf->vgpr_alloc().base + kDst, 0), kLoadedValue);
@@ -2770,7 +2819,7 @@ TEST(ExecutionPluginTest, MemoryPipelineCompletionDoesNotCrossWaveVgprBlock) {
   state->per_lane_addr[0] = kAddress;
 
   GlobalMemPipeline pipeline(&cu->l1_vector(), cu->l2());
-  pipeline.issue(new TestMemoryInstruction(std::move(state)), *wf);
+  pipeline.issue_concrete(new TestMemoryInstruction(std::move(state)), *wf);
 
   EXPECT_EQ(cu->read_vgpr_storage(wf->vgpr_alloc().base + kVgprsPerWave - 1, 0), kLastSentinel);
   EXPECT_EQ(cu->read_vgpr_storage(adjacent->vgpr_alloc().base, 0), kAdjacentSentinel);
@@ -2797,7 +2846,7 @@ TEST(ExecutionPluginTest, ScalarMemoryCompletionDoesNotObserveInstructionWrite) 
 
   plugin->events.clear();
   TestScalarMemPipeline pipeline(&cu->l1_scalar());
-  pipeline.issue(new TestMemoryInstruction(std::move(state)), *wf);
+  pipeline.issue_concrete(new TestMemoryInstruction(std::move(state)), *wf);
 
   EXPECT_EQ(cu->read_sgpr_storage(wf->sgpr_alloc().base + kDst), kLoadedValue);
   EXPECT_TRUE(
@@ -2813,7 +2862,7 @@ TEST(ExecutionPluginTest, ScalarMemoryCompletionDoesNotObserveInstructionWrite) 
   ttmp_state->dst_register = {ScalarRegisterStorage::TTMP, 0, 1};
   ttmp_state->num_dwords = 1;
   ttmp_state->is_load = true;
-  pipeline.issue(new TestMemoryInstruction(std::move(ttmp_state)), *wf);
+  pipeline.issue_concrete(new TestMemoryInstruction(std::move(ttmp_state)), *wf);
 
   EXPECT_EQ(wf->ttmp(0), kTtmpValue);
 
@@ -2826,7 +2875,7 @@ TEST(ExecutionPluginTest, ScalarMemoryCompletionDoesNotObserveInstructionWrite) 
   vcc_state->dst_register = {ScalarRegisterStorage::VCC, 0, 1};
   vcc_state->num_dwords = 1;
   vcc_state->is_load = true;
-  pipeline.issue(new TestMemoryInstruction(std::move(vcc_state)), *wf);
+  pipeline.issue_concrete(new TestMemoryInstruction(std::move(vcc_state)), *wf);
 
   EXPECT_EQ(wf->vcc(), 0xAABBCCDD55667788ull);
   EXPECT_TRUE(
@@ -2878,7 +2927,7 @@ TEST(ExecutionPluginTest, Gfx1250ScalarMemoryRoutesSpecialSelectorsAtNonzeroSgpr
     EXPECT_NE(load->data(), nullptr);
     if (!load->data())
       return;
-    pipeline.issue(load.release(), *wf);
+    pipeline.issue_concrete(load.release(), *wf);
   };
 
   wf->set_vcc_raw(0x1122334455667788ull);
@@ -3005,7 +3054,7 @@ TEST(ExecutionPluginTest, D16MemoryCompletionPreservesHalfWithoutObservation) {
     state->d16_hi = high_half;
 
     plugin->events.clear();
-    pipeline.issue(new TestMemoryInstruction(std::move(state)), *wf);
+    pipeline.issue_concrete(new TestMemoryInstruction(std::move(state)), *wf);
 
     EXPECT_TRUE(vgpr_read_events(*plugin).empty());
     EXPECT_TRUE(vgpr_write_events(*plugin).empty());

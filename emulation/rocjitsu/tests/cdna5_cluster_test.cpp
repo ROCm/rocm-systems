@@ -1036,7 +1036,7 @@ TEST(Gfx1250ExecutionTest, ClusterLdsFallbackSkipsSelfWhenMaskExcludesSource) {
   DeferredClusterLdsMulticastEngine deferred_engine;
   cu->set_cluster_lds_multicast_engine(&deferred_engine);
   amdgpu::GlobalMemPipeline pipeline(&cu->l1_vector(), cu->l2());
-  pipeline.issue(new TestMemoryInstruction(std::move(state)), *wf);
+  pipeline.issue_concrete(new TestMemoryInstruction(std::move(state)), *wf);
 
   EXPECT_EQ(wf->wait_counters().asynccnt, 1u);
   ASSERT_TRUE(static_cast<bool>(deferred_engine.completion));
