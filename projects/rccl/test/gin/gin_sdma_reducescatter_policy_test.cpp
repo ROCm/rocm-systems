@@ -131,6 +131,53 @@ TEST(ReduceScatterPolicyCtas, MaxCtasIsTheMidBandValue) {
   EXPECT_EQ(reduceScatterMaxCtas(), 48);
 }
 
+// ---- grid <= pool ------------------------------------------------------------
+// The kernel indexes devComm.lsaBarrier/barrier/signal by blockIdx.x, and the
+// pools are sized by reduceScatterPoolCtas in ReduceScatterGetDevCommRequirements.
+// These lock the invariant that makes that safe rather than restating the ladder.
+
+TEST(ReduceScatterPolicyPool, PoolCoversTheSelfSelectedLadderAtEveryBandEdge) {
+  // With no env pin, whatever the ladder picks must fit the pool for any -V.
+  const size_t edges[] = {0,
+                          1ull * 1024 * 1024,
+                          8ull * 1024 * 1024 - 1,
+                          8ull * 1024 * 1024,
+                          33ull * 1024 * 1024,
+                          48ull * 1024 * 1024 - 1,
+                          48ull * 1024 * 1024,
+                          2ull * 1024 * 1024 * 1024};
+  for (int v : {1, 8, 16, 48, 96}) {
+    const int pool = reduceScatterPoolCtas(v);
+    for (size_t b : edges) {
+      EXPECT_LE(reduceScatterGridCtas(b, kThresholdUnset, pool), pool)
+          << "-V " << v << " bytes " << b;
+    }
+  }
+}
+
+TEST(ReduceScatterPolicyPool, EnvPinIsClampedToThePool) {
+  // Regression: -V 8 with NCCL_GIN_ANVIL_RS_CTAS=64 registered max(8,48)=48 slots
+  // but launched 64 CTAs, so blockIdx.x 48..63 indexed past the barrier pools.
+  const int pool = reduceScatterPoolCtas(8);
+  EXPECT_EQ(pool, 48);
+  EXPECT_EQ(reduceScatterGridCtas(16ull * 1024 * 1024, 64, pool), 48);
+  EXPECT_EQ(reduceScatterGridCtas(1024, 256, pool), 48);  // past the 128 cap too
+  // A pin that already fits is honored untouched.
+  EXPECT_EQ(reduceScatterGridCtas(1024, 16, pool), 16);
+}
+
+TEST(ReduceScatterPolicyPool, LargeMinusVRaisesBothPoolAndCeiling) {
+  const int pool = reduceScatterPoolCtas(96);  // -V above the ladder peak
+  EXPECT_EQ(pool, 96);
+  EXPECT_EQ(reduceScatterGridCtas(16ull * 1024 * 1024, 64, pool), 64);
+  EXPECT_EQ(reduceScatterGridCtas(1024, 256, pool), 96);  // 128 cap, then pool
+}
+
+TEST(ReduceScatterPolicyPool, DegeneratePoolNeverYieldsZeroCtas) {
+  EXPECT_EQ(reduceScatterGridCtas(1024, kThresholdUnset, 0), 1);
+  EXPECT_EQ(reduceScatterGridCtas(1024, 64, -1), 1);
+}
+
 // ---- reduceScatterDevReqs: one barrier/lsaBarrier/signal per CTA, needs GIN --
 
 TEST(ReduceScatterPolicyDevReqs, PerCtaBarriersNeedGin) {
