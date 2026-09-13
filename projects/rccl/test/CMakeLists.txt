@@ -960,8 +960,8 @@ if(BUILD_TESTS)
     target_include_directories(${test_executable} PRIVATE ${RCCL_COMMON_INCLUDE_DIRS})
     target_compile_definitions(${test_executable} PRIVATE ${RCCL_COMMON_COMPILE_DEFS})
 
-    # RCCL_COMMON_COMPILE_DEFS inherits ENABLE_ROCSHMEM_GIN from rccl's COMPILE_DEFINITIONS,
-    # which defaults NCCL_GIN_ANVIL_SDMA_ENABLE to 1 and pulls in rocSHMEM's sdma headers.
+    # Belt-and-suspenders: Anvil-SDMA device headers are opt-in per TU. Keep the
+    # explicit 0 on non-stub tests so ENABLE_ROCSHMEM_GIN cannot leak them back in.
     if(ENABLE_ROCSHMEM_GIN AND NOT "${test_executable}" IN_LIST RCCL_ANVIL_SDMA_STUB_TARGETS)
       target_compile_definitions(${test_executable} PRIVATE NCCL_GIN_ANVIL_SDMA_ENABLE=0)
     endif()
@@ -1094,8 +1094,7 @@ if(BUILD_TESTS)
   endforeach()
 
   # Suite H: shadow rocSHMEM sdma headers with no-op test stubs (higher-priority include path).
-  # Gated on ENABLE_ROCSHMEM_GIN because that is what now turns on NCCL_GIN_ANVIL_SDMA_ENABLE,
-  # and these are the only two test targets that define it.
+  # These two targets opt into NCCL_GIN_ANVIL_SDMA_ENABLE=1; other tests keep it at 0.
   if(ENABLE_ROCSHMEM_GIN)
     if(ROCSHMEM_SOURCE_DIR)
       target_include_directories(rccl-UnitTestsFixtures PRIVATE ${ROCSHMEM_SOURCE_DIR}/src)

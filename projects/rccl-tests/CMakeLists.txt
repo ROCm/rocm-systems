@@ -238,12 +238,11 @@ if (ENABLE_ROCSHMEM_GIN)
     if (NOT ROCSHMEM_SOURCE_DIR AND EXISTS "${_mono_root}/projects/rocshmem/CMakeLists.txt")
         set(ROCSHMEM_SOURCE_DIR "${_mono_root}/projects/rocshmem")
     endif()
-    # Installed rocshmem headers (rocshmem_config.h) are needed globally:
-    # RCCL's public nccl_device.h → gin_anvil_sdma.h → anvil_device.hpp
-    # → log.hpp → rocshmem/rocshmem_config.h.  Must come before source
-    # includes so the generated config is found first.
+    # Installed rocshmem headers (rocshmem_config.h) for GIN-SDMA perf binaries
+    # that set NCCL_GIN_ANVIL_SDMA_ENABLE=1. Must come before source includes
+    # so the generated config is found first.
     include_directories(BEFORE ${ROCSHMEM_INSTALL_DIR}/include)
-    # Internal rocshmem headers (sdma/anvil_device.hpp) needed globally.
+    # Internal rocshmem headers (sdma/anvil_device.hpp) for those same TUs.
     if (ROCSHMEM_SOURCE_DIR)
         include_directories(${ROCSHMEM_SOURCE_DIR}/src)
     endif()

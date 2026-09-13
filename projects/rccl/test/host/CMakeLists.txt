@@ -49,8 +49,6 @@ if(BUILD_TESTS)
   target_compile_definitions(rccl-UnitTestsMicro PRIVATE ${RCCL_COMMON_COMPILE_DEFS})
 
   # Mirrors the opt-out in test/CMakeLists.txt, whose loop does not reach this target.
-  # Inheriting ENABLE_ROCSHMEM_GIN defaults NCCL_GIN_ANVIL_SDMA_ENABLE to 1, which pulls
-  # in rocSHMEM's sdma device headers.
   if(ENABLE_ROCSHMEM_GIN)
     target_compile_definitions(rccl-UnitTestsMicro PRIVATE NCCL_GIN_ANVIL_SDMA_ENABLE=0)
   endif()
@@ -364,8 +362,6 @@ if(BUILD_TESTS)
     ENQUEUE_CC_PATH="${PROJECT_BINARY_DIR}/hipify/src/enqueue.cc")
 
   # Mirrors the opt-out in test/CMakeLists.txt, whose loop does not reach this target.
-  # Inheriting ENABLE_ROCSHMEM_GIN defaults NCCL_GIN_ANVIL_SDMA_ENABLE to 1, which pulls
-  # in rocSHMEM's sdma device headers.
   if(ENABLE_ROCSHMEM_GIN)
     target_compile_definitions(rccl-UnitTestsMicroEnqueue PRIVATE NCCL_GIN_ANVIL_SDMA_ENABLE=0)
   endif()
