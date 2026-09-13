@@ -91,6 +91,7 @@ public:
 /// `Isa` struct adds `Decoder`, `MachineInst`, `OperandType`, and `StatusReg`
 /// type aliases.
 struct CdnaIsaBase {
+  static constexpr bool HAS_WMMA_K64 = false;       ///< No WMMA with K >= 64.
   static constexpr uint32_t WF_SIZE = 64;           ///< Lanes per wavefront (Wave64).
   static constexpr uint32_t WF_SIZE_MAX = 64;       ///< CDNA is Wave64-only.
   static constexpr uint32_t MAX_WF_SLOTS = 32;      ///< Maximum simulated CU wave slots.

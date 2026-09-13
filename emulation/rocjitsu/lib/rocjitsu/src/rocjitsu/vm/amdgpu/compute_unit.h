@@ -61,6 +61,7 @@ class ComputeUnitTestAccess;
 namespace amdgpu {
 
 class CommandProcessor;
+class AsyncInstructionWindow;
 
 inline constexpr int32_t kWorkgroupBarrierId = -1;
 inline constexpr int32_t kWorkgroupTrapBarrierId = -2;
@@ -106,6 +107,8 @@ struct FunctionalQuantumResult {
 /// implemented by IsaExecComputeUnit<Mode, Isa>. Use the create() factory
 /// to construct.
 class ComputeUnitCore : public simdojo::CompositeComponent {
+  friend class AsyncInstructionWindow;
+
 public:
   static constexpr uint32_t kFunctionalQuantum = 1024;
   static constexpr uint32_t kDebugFunctionalQuantum = 64;
@@ -961,6 +964,13 @@ protected:
 
   /// @brief Fetch, decode, execute one instruction from the given wavefront.
   void issue_instruction(Wavefront *wf);
+  void issue_async_instruction(Wavefront *wf);
+  struct NoAsyncWindow {};
+  template <bool EnableAsync>
+  void issue_instruction_impl(
+      Wavefront *wf,
+      std::conditional_t<EnableAsync, AsyncInstructionWindow *, NoAsyncWindow> window = {});
+  template <bool EnableAsync> bool step_impl();
 
   /// @brief Apply any I$ invalidation a debug attach or detach published.
   /// @details Runs on this CU's own thread, which is the I$'s sole accessor.
@@ -1134,7 +1144,6 @@ protected:
   simdojo::Port *req_ = nullptr; ///< Requester port: L2 cache request (structural).
   uint64_t step_count_ = 0;
   bool functional_yield_requested_ = false;
-  bool matrix_coexecution_functional_ = false;
 
   friend class CommandProcessor;
   friend class ::rocjitsu::test::ComputeUnitTestAccess;
@@ -1307,6 +1316,9 @@ private:
 template <simdojo::ExecMode Mode, GpuIsa Isa>
 class IsaExecComputeUnit : public ExecComputeUnit<Mode> {
 public:
+  static constexpr bool supports_async_execution =
+      Mode == simdojo::ExecMode::FUNCTIONAL && HasLargeWmma<Isa>;
+
   static_assert(Isa::WF_SIZE_MAX <= 64, "AMDGPU VGPR storage supports at most Wave64");
   using Vgpr = simdojo::VectorReg<Isa::WF_SIZE_MAX, uint32_t>;
   // AccVGPR operands address the same physical file after the ordinary VGPR bank.
@@ -1335,7 +1347,6 @@ public:
     for (uint32_t i = 0; i < config.num_wf_slots; ++i)
       this->wfs_[i] = std::make_unique<IsaWavefront<Isa>>(*this, i);
     this->sram_ecc_ = Isa::SRAM_ECC;
-    this->matrix_coexecution_functional_ = Mode == simdojo::ExecMode::FUNCTIONAL;
   }
 
   /// @returns Lane value from the VGPR file.

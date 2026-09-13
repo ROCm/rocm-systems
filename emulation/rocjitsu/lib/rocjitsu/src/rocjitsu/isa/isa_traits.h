@@ -63,6 +63,11 @@ concept GpuIsa = requires {
   typename Isa::StatusReg;
 };
 
+/// @brief ISA supplies WMMA instructions with K >= 64.
+/// Optional for custom ISA adapters; missing capability means unsupported.
+template <typename Isa>
+concept HasLargeWmma = GpuIsa<Isa> && requires { requires Isa::HAS_WMMA_K64; };
+
 /// @brief Derived concept: ISA has a dedicated AccVGPR register file.
 ///
 /// @details True for CDNA2/3/4 (`MAX_ACC_VGPRS_PER_WF > 0`).

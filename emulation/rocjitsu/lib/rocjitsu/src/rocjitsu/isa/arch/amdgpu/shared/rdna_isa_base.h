@@ -48,6 +48,7 @@ class Wavefront;
 /// Each per-ISA `Isa` struct adds `Decoder`, `MachineInst`, `OperandType`, and
 /// `StatusReg` type aliases.
 struct RdnaIsaBase {
+  static constexpr bool HAS_WMMA_K64 = false;       ///< No WMMA with K >= 64.
   static constexpr uint32_t WF_SIZE = 32;           ///< Default wave size (Wave32).
   static constexpr uint32_t WF_SIZE_MAX = 64;       ///< Maximum wave size (Wave64 capable).
   static constexpr uint32_t MAX_WF_SLOTS = 32;      ///< Maximum simulated CU wave slots.

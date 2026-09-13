@@ -7,6 +7,10 @@ itself when the shared pool is busy. All finish before the CU returns to
 its scheduler. No coroutines are needed: these handlers perform synchronous
 CPU arithmetic, so actual overlap requires multiple CPU threads.
 
+The [scoreboard experiment](async-instructions.md) adds independent completion
+and overlap across supported non-matrix instructions. The measurements below
+describe the earlier adjacent-batch experiment.
+
 ## Controls
 
 | Environment variable | Meaning | Default |
@@ -32,9 +36,9 @@ adding helpers to a busy host can oversubscribe it. `RJ_MMA_SHARED_HELPERS`
 bounds the total helpers independently of the batch width. There is no
 automatic tuning in this prototype.
 
-The shared pool uses cache-line-separated atomic claims and the same persistent
-helper protocol. Submission probes at most the configured number of slots,
-skipping occupied slots with an ordinary atomic load. If every slot is busy,
+The shared pool now uses two atomic free-slot bitmaps and the same persistent
+helper protocol. Submission checks availability without scanning individual
+slots and makes bounded reservation attempts. If every slot is busy,
 the issuer immediately executes that instruction inline; it does not wait for
 capacity or enqueue work. The final instruction always stays on the issuer.
 Claims remain held through completion and joining, so another issuer cannot

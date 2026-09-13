@@ -2,8 +2,11 @@
 // SPDX-License-Identifier: MIT
 
 #include "decode_test_util.h"
+#include "rocjitsu/isa/arch/amdgpu/cdna4/isa.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/opcodes.h"
+#include "rocjitsu/isa/arch/amdgpu/rdna4/isa.h"
+#include "rocjitsu/vm/amdgpu/async_scoreboard.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"
 #include "rocjitsu/vm/amdgpu/l2_cache.h"
@@ -23,6 +26,24 @@
 namespace {
 using namespace rocjitsu;
 namespace mc = amdgpu::matrix_coexecution;
+static_assert(HasLargeWmma<cdna5::Isa>);
+static_assert(!HasLargeWmma<cdna4::Isa>);
+static_assert(!HasLargeWmma<rdna4::Isa>);
+static_assert(
+    std::is_same_v<
+        decltype(&amdgpu::IsaExecComputeUnit<simdojo::ExecMode::FUNCTIONAL, rdna4::Isa>::step),
+        bool (amdgpu::ComputeUnitCore::*)()>);
+static_assert(std::is_same_v<
+              decltype(&amdgpu::IsaExecComputeUnit<simdojo::ExecMode::CLOCKED, cdna5::Isa>::step),
+              bool (amdgpu::ComputeUnitCore::*)()>);
+static_assert(amdgpu::IsaExecComputeUnit<simdojo::ExecMode::FUNCTIONAL,
+                                         cdna5::Isa>::supports_async_execution);
+static_assert(
+    !amdgpu::IsaExecComputeUnit<simdojo::ExecMode::CLOCKED, cdna5::Isa>::supports_async_execution);
+static_assert(!amdgpu::IsaExecComputeUnit<simdojo::ExecMode::FUNCTIONAL,
+                                          cdna4::Isa>::supports_async_execution);
+static_assert(!amdgpu::IsaExecComputeUnit<simdojo::ExecMode::FUNCTIONAL,
+                                          rdna4::Isa>::supports_async_execution);
 
 TEST(MatrixCoexecutionTest, RejectsAllRegisterHazardsButAllowsSharedInputs) {
   const mc::Footprint a{{64, 16}, {{{0, 16}, {32, 8}, {64, 16}}}};
@@ -137,13 +158,14 @@ TEST(MatrixCoexecutionTest, IssueMatchesSerialForLargeShapesAndHazards) {
         memory.write32(pc + i * 4, a[i]);
         memory.write32(pc + 8 + i * 4, b[i]);
       }
+      memory.write32(pc + 16, cdna5::build_sopp(cdna5::kSBranchSopp, {.simm16 = 0xffff})[0]);
       const auto pairs = mc::stats.batches;
       for (int steps = 0; wf->pc < pc + 16 && steps != 2; ++steps)
         cu->step();
       EXPECT_EQ(wf->pc, pc + 16);
       EXPECT_EQ(snapshot(), expected);
       EXPECT_EQ(mc::stats.batches - pairs,
-                mc::mode() >= 2 && mc::width() > 1 && hazard == 0 ? 1u : 0u);
+                mc::mode() >= 2 && mc::mode() <= 3 && mc::width() > 1 && hazard == 0 ? 1u : 0u);
     }
   }
 }
@@ -194,10 +216,12 @@ TEST(MatrixCoexecutionTest, WiderBatchChecksNonAdjacentDependenciesAndAllocatesB
           }
         }
         if (issue) {
+          memory.write32(pc + 24, cdna5::build_sopp(cdna5::kSBranchSopp, {.simm16 = 0xffff})[0]);
           for (int step = 0; wf->pc < pc + 24 && step != 3; ++step)
             cu->step();
           EXPECT_EQ(wf->pc, pc + 24);
-          const bool batches_enabled = !clocked && mc::mode() >= 2 && mc::width() > 1;
+          const bool batches_enabled =
+              !clocked && mc::mode() >= 2 && mc::mode() <= 3 && mc::width() > 1;
           EXPECT_EQ(mc::stats.batches - batches, batches_enabled ? 1u : 0u);
           EXPECT_EQ(mc::stats.widths[3] - triples,
                     batches_enabled && mc::width() >= 3 && !hazard ? 1u : 0u);
@@ -212,6 +236,101 @@ TEST(MatrixCoexecutionTest, WiderBatchChecksNonAdjacentDependenciesAndAllocatesB
       EXPECT_EQ(execute(true), expected);
     }
   }
+}
+
+TEST(AsyncInstructionQueueTest, FootprintResolvesInlineConstantsAndPackedHalfAliases) {
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
+  const auto encoding = cdna5::build_vop3(cdna5::kVAlignbitB32Vop3,
+                                          {.vdst = 8, .src0 = 264, .src1 = 264, .src2 = 128 + 27});
+  std::unique_ptr<Instruction> inst(decode_valid(*decoder, encoding.data()));
+  const auto access = amdgpu::async_execution::footprint(*inst, 16);
+  ASSERT_TRUE(access);
+  EXPECT_EQ(access->reads.count(), 1u);
+  EXPECT_TRUE(access->reads.test(8));
+  EXPECT_EQ(access->writes.count(), 1u);
+  EXPECT_TRUE(access->writes.test(8));
+  // Packed f16 selectors encode the upper half using bit 7 of the register
+  // selector. Both halves must conflict through the same physical VGPR.
+  cdna5::Operand low(16, cdna5::OperandType::OPR_VGPR, 7, false, true);
+  cdna5::Operand high(16, cdna5::OperandType::OPR_VGPR, 135, false, true);
+  ASSERT_TRUE(low.to_register_ref());
+  EXPECT_EQ(low.to_register_ref(), high.to_register_ref());
+}
+
+TEST(AsyncInstructionQueueTest, InterleavedMemoryMmaAndRegisterReuseMatchSerial) {
+  constexpr uint64_t pc = 0x230000, address = 0x300000;
+  std::vector<uint32_t> program;
+  auto append = [&](auto words) { program.insert(program.end(), words.begin(), words.end()); };
+  append(
+      cdna5::build_vglobal(cdna5::kGlobalLoadB128Vglobal, {.saddr = 0, .vdst = 0, .vaddr = 120}));
+  append(cdna5::build_vop1(cdna5::kVMovB32Vop1, {.src0 = 128 + 1, .vdst = 112}));
+  append(cdna5::build_sopp(cdna5::kSWaitLoadcntSopp, {.simm16 = 0}));
+  append(cdna5::build_vop3p(cdna5::kVWmmaF3216x16x128Fp8Fp8Vop3p,
+                            {.vdst = 64, .src0 = 256, .src1 = 288, .src2 = 320, .opsel_hi = 3}));
+  append(cdna5::build_vop1(cdna5::kVMovB32Vop1, {.src0 = 368, .vdst = 113}));
+  append(cdna5::build_vop3p(cdna5::kVWmmaF3216x16x128Fp8Fp8Vop3p,
+                            {.vdst = 96, .src0 = 256, .src1 = 288, .src2 = 352, .opsel_hi = 3}));
+  append(cdna5::build_vop1(cdna5::kVMovB32Vop1, {.src0 = 352, .vdst = 114}));
+  append(
+      cdna5::build_vglobal(cdna5::kGlobalStoreB128Vglobal, {.saddr = 0, .vsrc = 64, .vaddr = 120}));
+  // The store already captured its source; this reuse must remain safe.
+  append(cdna5::build_vop1(cdna5::kVMovB32Vop1, {.src0 = 128, .vdst = 64}));
+  append(
+      cdna5::build_vglobal(cdna5::kGlobalLoadB128Vglobal, {.saddr = 0, .vdst = 116, .vaddr = 120}));
+  append(cdna5::build_vop1(cdna5::kVMovB32Vop1, {.src0 = 372, .vdst = 115}));
+  append(cdna5::build_vop1(cdna5::kVMovB32Vop1, {.src0 = 128, .vdst = 0}));
+  auto execute = [&](bool issue) {
+    amdgpu::GpuMemory memory("interleave_memory");
+    amdgpu::L2Cache l2("interleave_l2");
+    l2.set_backing_memory(&memory);
+    amdgpu::ComputeUnitCore::Config config{};
+    config.arch = ROCJITSU_CODE_ARCH_CDNA5;
+    config.num_wf_slots = 1;
+    config.sgprs_per_wf = 106;
+    config.vgprs_per_wf = 128;
+    auto cu = amdgpu::ComputeUnitCore::create("interleave_cu", config, &memory, &l2);
+    auto *wf = cu->dispatch_wf(0, pc, 106, 128);
+    wf->set_exec(0xFFFFFFFFu);
+    const auto base = wf->vgpr_alloc().base;
+    cu->write_sgpr(wf->sgpr_alloc().base, address);
+    cu->write_sgpr(wf->sgpr_alloc().base + 1, 0);
+    for (unsigned reg = 0; reg != 128; ++reg)
+      for (unsigned lane = 0; lane != 32; ++lane)
+        cu->write_vgpr(base + reg, lane, reg < 48 ? 0x38383838 : 0);
+    for (unsigned lane = 0; lane != 32; ++lane) {
+      cu->write_vgpr(base + 120, lane, 16 * lane);
+      for (unsigned elem = 0; elem != 4; ++elem)
+        memory.write32(address + 16 * lane + elem * 4, 0x38383838);
+    }
+    const uint64_t end = pc + program.size() * 4;
+    for (unsigned i = 0; i != program.size(); ++i)
+      memory.write32(pc + i * 4, program[i]);
+    memory.write32(end, cdna5::build_sopp(cdna5::kSBranchSopp, {.simm16 = 0xffff})[0]);
+    if (issue) {
+      for (unsigned step = 0; wf->pc < end && step != program.size(); ++step)
+        cu->step();
+      EXPECT_EQ(wf->pc, end);
+    } else {
+      auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
+      amdgpu::GlobalMemPipeline pipeline(&cu->l1_vector(), &l2);
+      for (unsigned i = 0; i != program.size();) {
+        std::unique_ptr<Instruction> inst(decode_valid(*decoder, program.data() + i));
+        i += inst->size() / 4;
+        EXPECT_TRUE(cu->execute_instruction(inst.get(), *wf).succeeded());
+        if (inst->is_memory_op())
+          pipeline.issue_concrete(inst.release(), *wf);
+      }
+    }
+    EXPECT_TRUE(wf->wait_counters().empty());
+    std::vector<uint32_t> result;
+    for (unsigned reg = 0; reg != 128; ++reg)
+      for (unsigned lane = 0; lane != 32; ++lane)
+        result.push_back(cu->read_vgpr(base + reg, lane));
+    for (unsigned i = 0; i != 128; ++i)
+      result.push_back(memory.read32(address + 4 * i));
+    return result;
+  };
+  EXPECT_EQ(execute(true), execute(false));
 }
 
 TEST(MatrixCoexecutionTest, SharedPoolDoesNotWaitForBusyHelpersAndReusesThemAcrossIssuers) {
@@ -308,6 +427,96 @@ TEST(MatrixCoexecutionTest, SharedPoolHandlesConcurrentIssuersAndZeroCapacity) {
       issuer.join();
     EXPECT_TRUE(matched.load());
   }
+}
+
+TEST(AsyncInstructionQueueTest, IndependentCompletionReleasesOnlyItsOwnDependencies) {
+  using Queue = amdgpu::AsyncInstructionQueue;
+  mc::SharedPool pool(2);
+  struct State {
+    std::binary_semaphore started{0}, unblock{0};
+    std::vector<unsigned> retired;
+  } state;
+  Instruction first(
+      "blocked",
+      [](Instruction &, void *ctx) {
+        auto &s = *static_cast<State *>(ctx);
+        s.started.release();
+        s.unblock.acquire();
+      },
+      0);
+  Instruction second("ready", [](Instruction &, void *) {}, 1);
+  Queue queue(
+      &state,
+      [](void *ctx, Instruction *inst, bool failed) {
+        EXPECT_FALSE(failed);
+        static_cast<State *>(ctx)->retired.push_back(inst->src_loc());
+      },
+      Queue::Completion::Independent, pool);
+  amdgpu::async_execution::Access a, b, consumer;
+  a.reads.set(0);
+  a.writes.set(64);
+  b.reads.set(0);
+  b.writes.set(96);
+  ASSERT_TRUE(queue.submit(&first, first, &state, a));
+  state.started.acquire();
+  EXPECT_TRUE(queue.submit(&second, second, &state, b));
+  EXPECT_FALSE(pool.available());
+  // This dependency must not join the still-blocked earlier instruction.
+  consumer.reads.set(96);
+  EXPECT_TRUE(queue.wait_conflicts(consumer));
+  EXPECT_EQ(state.retired, std::vector<unsigned>({1}));
+  EXPECT_EQ(queue.size(), 1u);
+  EXPECT_TRUE(pool.available());
+  EXPECT_FALSE(queue.wait_conflicts(consumer));
+  consumer.reads.reset();
+  consumer.writes.set(0);
+  EXPECT_TRUE(a.conflicts(consumer)); // The first job still owns this input.
+  state.unblock.release();
+  queue.drain();
+  EXPECT_EQ(state.retired, std::vector<unsigned>({1, 0}));
+}
+
+TEST(AsyncInstructionQueueTest, OrderedCompletionRetainsThePrefixAndRejectsFullPoolImmediately) {
+  using Queue = amdgpu::AsyncInstructionQueue;
+  mc::SharedPool pool(2);
+  struct State {
+    std::binary_semaphore started{0}, unblock{0}, second_done{0};
+    std::vector<unsigned> retired;
+  } state;
+  Instruction first(
+      "blocked",
+      [](Instruction &, void *ctx) {
+        auto &s = *static_cast<State *>(ctx);
+        s.started.release();
+        s.unblock.acquire();
+      },
+      0);
+  Instruction second(
+      "ready", [](Instruction &, void *ctx) { static_cast<State *>(ctx)->second_done.release(); },
+      1);
+  Queue queue(
+      &state,
+      [](void *ctx, Instruction *inst, bool failed) {
+        EXPECT_FALSE(failed);
+        static_cast<State *>(ctx)->retired.push_back(inst->src_loc());
+      },
+      Queue::Completion::Ordered, pool);
+  ASSERT_TRUE(queue.submit(&first, first, &state, {}));
+  state.started.acquire();
+  EXPECT_TRUE(queue.submit(&second, second, &state, {}));
+  state.second_done.acquire();
+  queue.poll();
+  EXPECT_TRUE(state.retired.empty());
+  EXPECT_EQ(queue.size(), 2u);
+  EXPECT_FALSE(pool.available());
+  EXPECT_FALSE(queue.submit(&second, second, &state, {}));
+  // Synchronous fallback is available even though the first job is blocked.
+  second.execute(second, &state);
+  state.second_done.acquire();
+  state.unblock.release();
+  queue.drain();
+  EXPECT_EQ(state.retired, std::vector<unsigned>({0, 1}));
+  EXPECT_TRUE(pool.available());
 }
 
 } // namespace

@@ -69,6 +69,7 @@ struct Isa : amdgpu::RdnaIsaBase {
   using OperandType = rocjitsu::cdna5::OperandType;
   using StatusReg = rocjitsu::cdna5::StatusReg;
 
+  static constexpr bool HAS_WMMA_K64 = true;  ///< Large WMMA supports host async execution.
   static constexpr uint32_t WF_SIZE_MAX = 32; ///< gfx1250 is Wave32-only.
   static constexpr uint32_t MAX_WF_SLOTS = 64;
   static constexpr bool SRAM_ECC = true; ///< gfx1250 enables SRAM ECC.

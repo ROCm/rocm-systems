@@ -3,6 +3,7 @@
 
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 
+#include "rocjitsu/vm/amdgpu/async_scoreboard.h"
 #include "rocjitsu/vm/amdgpu/command_processor.h"
 
 #include "rocjitsu/isa/arch/amdgpu/cdna1/isa.h"
@@ -138,6 +139,24 @@ ComputeUnitCore::ComputeUnitCore(std::string name, const Config &config, GpuMemo
                                                   simdojo::PortProtocol::MEMORY));
 }
 
+template <GpuIsa Isa>
+static std::unique_ptr<ComputeUnitCore> create_functional_cu(std::string name,
+                                                             const ComputeUnitCore::Config &config,
+                                                             GpuMemory *memory, L2Cache *l2) {
+  using Base = IsaExecComputeUnit<simdojo::ExecMode::FUNCTIONAL, Isa>;
+  if constexpr (HasLargeWmma<Isa>) {
+    // Select the existing virtual step entry once at construction, so mode
+    // zero needs no runtime async check even on an eligible ISA.
+    struct Asynchronous final : Base {
+      using Base::Base;
+      bool step() override { return this->template step_impl<true>(); }
+    };
+    if (matrix_coexecution::mode() != 0)
+      return std::make_unique<Asynchronous>(std::move(name), config, memory, l2);
+  }
+  return std::make_unique<Base>(std::move(name), config, memory, l2);
+}
+
 std::unique_ptr<ComputeUnitCore> ComputeUnitCore::create(std::string name, const Config &config,
                                                          GpuMemory *memory, L2Cache *l2,
                                                          simdojo::ExecMode exec_mode) {
@@ -160,8 +179,7 @@ std::unique_ptr<ComputeUnitCore> ComputeUnitCore::create(std::string name, const
     validate_compute_unit_config<ISA_TYPE>(config);                                                \
     switch (exec_mode) {                                                                           \
     case simdojo::ExecMode::FUNCTIONAL:                                                            \
-      return std::make_unique<IsaExecComputeUnit<simdojo::ExecMode::FUNCTIONAL, ISA_TYPE>>(        \
-          std::move(name), config, memory, l2);                                                    \
+      return create_functional_cu<ISA_TYPE>(std::move(name), config, memory, l2);                  \
     case simdojo::ExecMode::CLOCKED:                                                               \
       return std::make_unique<IsaExecComputeUnit<simdojo::ExecMode::CLOCKED, ISA_TYPE>>(           \
           std::move(name), config, memory, l2);                                                    \
@@ -709,7 +727,40 @@ void ComputeUnitCore::update_wf_states() {
   }
 }
 
-void ComputeUnitCore::issue_instruction(Wavefront *active) {
+void ComputeUnitCore::issue_async_instruction(Wavefront *active) {
+  const int mode = matrix_coexecution::mode();
+  if (mode < 4 || mode > 6 || arch() != ROCJITSU_CODE_ARCH_CDNA5 || active->wf_size() != 32 ||
+      active->exec() != 0xFFFFFFFFu || active->vgpr_msb_mode() != 0 || debug_active() ||
+      active->debug_single_step() || active->in_trap_handler() ||
+      !plugin_group_->permits_matrix_coexecution_prototype()) {
+    issue_instruction_impl<true>(active);
+    return;
+  }
+  AsyncInstructionWindow window(*this, *active);
+  try {
+    unsigned issued = 0;
+    do {
+      issue_instruction_impl<true>(active, &window);
+      window.poll();
+      if (active->state() == WfState::WAITCNT) {
+        ++async_execution::stats.waits;
+        window.wait_memory();
+      }
+    } while (++issued < async_execution::window_limit() && window.pending() && !window.stopped() &&
+             active->state() == WfState::RUNNING);
+    window.drain();
+  } catch (...) {
+    window.abandon();
+    throw;
+  }
+  if (active->is_halted())
+    async_execution::stats.flush();
+}
+
+template <bool EnableAsync>
+[[gnu::always_inline]] inline void ComputeUnitCore::issue_instruction_impl(
+    Wavefront *active,
+    std::conditional_t<EnableAsync, AsyncInstructionWindow *, NoAsyncWindow> window) {
   uint32_t vmid = active->process_id();
 
   // Deliberately not gated on debug_active_, unlike the data-side probe below.
@@ -721,6 +772,10 @@ void ComputeUnitCore::issue_instruction(Wavefront *active) {
       vmid == 0 || (debug_active() ? memory_->is_fetchable(active->pc, vmid)
                                    : memory_->is_fetchable(active->pc, vmid, fetchability_cache_));
   if (!fetchable) {
+    if constexpr (EnableAsync) {
+      if (window)
+        window->drain();
+    }
     if (memory_violation_handler_ && memory_violation_handler_(*active, active->pc, false))
       return;
     // Wavefront::halt() is silent, so say why this wave stopped. Without this
@@ -752,6 +807,10 @@ void ComputeUnitCore::issue_instruction(Wavefront *active) {
   util::StringDiagnostic decode_error;
   DecodeResult decoded = decoder_->decode(words, decode_error.emitter());
   if (decoded.failed()) {
+    if constexpr (EnableAsync) {
+      if (window)
+        window->drain();
+    }
     util::Logger::vm("CU ", this->name(), ": wf", active->wf_id(), " HALT(decode rejection) pc=0x",
                      std::hex, active->pc, " words=[0x", words[0], ",0x", words[1], ",0x", words[2],
                      ",0x", words[3], "]", std::dec, " what=", decode_error.message());
@@ -769,108 +828,133 @@ void ComputeUnitCore::issue_instruction(Wavefront *active) {
   assert(inst_size_signed > 0 && "instruction size must be positive");
   auto inst_size = static_cast<uint64_t>(inst_size_signed);
 
+  if constexpr (EnableAsync) {
+    if (window) {
+      bool transferred = false;
+      try {
+        window->before(*inst);
+        if (window->submit_mma(inst)) {
+          decoded.value().release();
+          transferred = true;
+          // Only count/dispatch observers are admitted. Architectural snapshots
+          // and per-handler timing are intentionally unavailable for this mode.
+          plugin_group_->onAmdgpuBeforeExecuteInstruction(active->pc, *inst, *active);
+          plugin_group_->onAmdgpuAfterExecuteInstruction(active->pc, *inst, *active);
+          active->pc += inst_size;
+          return;
+        }
+      } catch (...) {
+        if (!transferred)
+          decoded.value().reset();
+        throw;
+      }
+    }
+  }
+
   // Bounded experiment: adjacent gfx1250 K>=64 f32-output WMMA, full EXEC,
   // valid low-bank registers, no debugger or architectural observer plugins.
-  if (matrix_coexecution::mode() != 0 && matrix_coexecution_functional_ &&
-      arch() == ROCJITSU_CODE_ARCH_CDNA5 && matrix_coexecution::candidate(inst->mnemonic()) &&
-      inst_size == 8 && active->wf_size() == 32 && active->exec() == 0xFFFFFFFFu &&
-      active->vgpr_msb_mode() == 0 && !debug_active() && !active->debug_single_step() &&
-      !active->in_trap_handler() && plugin_group_->permits_matrix_coexecution_prototype()) {
-    auto &stats = matrix_coexecution::stats;
-    ++stats.candidates;
-    auto footprint =
-        [&](const Instruction &instruction) -> std::optional<matrix_coexecution::Footprint> {
-      matrix_coexecution::Footprint result;
-      for (unsigned i = 0; i != 4; ++i) {
-        const Operand *operand =
-            i == 0 ? instruction.dst_operand(0) : instruction.src_operand(i - 1);
-        if (!operand || !operand->is_vgpr())
-          return std::nullopt;
-        const uint32_t reg = operand->unified_vgpr_index();
-        const uint32_t count = operand->vgpr_count();
-        if (reg > active->num_vgprs() || count > active->num_vgprs() - reg)
-          return std::nullopt;
-        const matrix_coexecution::Range range{active->vgpr_alloc().base + reg, count};
-        if (i == 0)
-          result.output = range;
-        else
-          result.inputs[i - 1] = range;
-      }
-      return result;
-    };
-    if (const auto first = footprint(*inst)) {
-      std::array<Instruction *, 8> instructions{inst};
-      std::array<std::unique_ptr<Instruction>, 8> owned;
-      std::array<matrix_coexecution::Footprint, 8> accesses;
-      accesses[0] = *first;
-      unsigned count = 1;
-      while (count < matrix_coexecution::width() &&
-             (active->pc % GpuMemory::PAGE_SIZE) + (count + 1) * 8 <= GpuMemory::PAGE_SIZE) {
-        rj_code_binary_inst_t lookahead[4]{};
-        if (count == 1) {
-          lookahead[0] = words[2];
-          lookahead[1] = words[3];
-        } else {
-          inst_cache_.fetch(*memory_, active->pc + count * 8, vmid,
-                            reinterpret_cast<uint8_t *>(lookahead));
-        }
-        if ((lookahead[0] & 0xFFFF0000u) != (words[0] & 0xFFFF0000u))
-          break;
-        auto next = decoder_->decode(lookahead, decode_error.emitter());
-        if (next.failed())
-          break;
-        auto candidate = std::move(next).value();
-        if (candidate->size() != 8 || std::string_view(candidate->mnemonic()) != inst->mnemonic())
-          break;
-        ++stats.adjacent;
-        const auto access = footprint(*candidate);
-        if (!access)
-          break;
-        bool independent = true;
-        for (unsigned i = 0; i != count; ++i)
-          independent &= matrix_coexecution::independent(accesses[i], *access);
-        if (!independent) {
-          ++stats.conflicts;
-          break;
-        }
-        accesses[count] = *access;
-        instructions[count] = candidate.get();
-        owned[count] = std::move(candidate);
-        ++count;
-      }
-      if (count > 1 && matrix_coexecution::mode() >= 2) {
-        // Allocate lazy storage before publication: different output registers
-        // can share a chunk and its allocation metadata is not concurrent.
-        for (unsigned i = 0; i != count; ++i)
-          for (uint32_t reg = 0; reg != accesses[i].output.count; ++reg)
-            (void)raw_vgpr_data(accesses[i].output.base + reg);
-        active->clear_pending_alu_causes();
-        active->clear_instruction_execution_error();
-        plugin_group_->onAmdgpuBeforeExecuteInstruction(active->pc, *inst, *active);
-        try {
-          if (matrix_coexecution::mode() == 3)
-            matrix_coexecution::execute_batch({instructions.data(), count}, active);
+  if constexpr (EnableAsync) {
+    if (matrix_coexecution::mode() > 0 && matrix_coexecution::mode() <= 3 &&
+        arch() == ROCJITSU_CODE_ARCH_CDNA5 && matrix_coexecution::candidate(inst->mnemonic()) &&
+        inst_size == 8 && active->wf_size() == 32 && active->exec() == 0xFFFFFFFFu &&
+        active->vgpr_msb_mode() == 0 && !debug_active() && !active->debug_single_step() &&
+        !active->in_trap_handler() && plugin_group_->permits_matrix_coexecution_prototype()) {
+      auto &stats = matrix_coexecution::stats;
+      ++stats.candidates;
+      auto footprint =
+          [&](const Instruction &instruction) -> std::optional<matrix_coexecution::Footprint> {
+        matrix_coexecution::Footprint result;
+        for (unsigned i = 0; i != 4; ++i) {
+          const Operand *operand =
+              i == 0 ? instruction.dst_operand(0) : instruction.src_operand(i - 1);
+          if (!operand || !operand->is_vgpr())
+            return std::nullopt;
+          const uint32_t reg = operand->unified_vgpr_index();
+          const uint32_t count = operand->vgpr_count();
+          if (reg > active->num_vgprs() || count > active->num_vgprs() - reg)
+            return std::nullopt;
+          const matrix_coexecution::Range range{active->vgpr_alloc().base + reg, count};
+          if (i == 0)
+            result.output = range;
           else
-            for (unsigned i = 0; i != count; ++i)
-              instructions[i]->execute(*instructions[i], active);
-        } catch (...) {
-          delete inst;
-          throw;
+            result.inputs[i - 1] = range;
         }
-        assert(!active->instruction_execution_failed());
-        plugin_group_->onAmdgpuAfterExecuteInstruction(active->pc, *inst, *active);
-        active->pc += 8;
-        for (unsigned i = 1; i != count; ++i) {
-          ++active->trace_inst_count_;
-          plugin_group_->onAmdgpuBeforeExecuteInstruction(active->pc, *instructions[i], *active);
-          plugin_group_->onAmdgpuAfterExecuteInstruction(active->pc, *instructions[i], *active);
+        return result;
+      };
+      if (const auto first = footprint(*inst)) {
+        std::array<Instruction *, 8> instructions{inst};
+        std::array<std::unique_ptr<Instruction>, 8> owned;
+        std::array<matrix_coexecution::Footprint, 8> accesses;
+        accesses[0] = *first;
+        unsigned count = 1;
+        while (count < matrix_coexecution::width() &&
+               (active->pc % GpuMemory::PAGE_SIZE) + (count + 1) * 8 <= GpuMemory::PAGE_SIZE) {
+          rj_code_binary_inst_t lookahead[4]{};
+          if (count == 1) {
+            lookahead[0] = words[2];
+            lookahead[1] = words[3];
+          } else {
+            inst_cache_.fetch(*memory_, active->pc + count * 8, vmid,
+                              reinterpret_cast<uint8_t *>(lookahead));
+          }
+          if ((lookahead[0] & 0xFFFF0000u) != (words[0] & 0xFFFF0000u))
+            break;
+          auto next = decoder_->decode(lookahead, decode_error.emitter());
+          if (next.failed())
+            break;
+          auto candidate = std::move(next).value();
+          if (candidate->size() != 8 || std::string_view(candidate->mnemonic()) != inst->mnemonic())
+            break;
+          ++stats.adjacent;
+          const auto access = footprint(*candidate);
+          if (!access)
+            break;
+          bool independent = true;
+          for (unsigned i = 0; i != count; ++i)
+            independent &= matrix_coexecution::independent(accesses[i], *access);
+          if (!independent) {
+            ++stats.conflicts;
+            break;
+          }
+          accesses[count] = *access;
+          instructions[count] = candidate.get();
+          owned[count] = std::move(candidate);
+          ++count;
+        }
+        if (count > 1 && matrix_coexecution::mode() >= 2) {
+          // Allocate lazy storage before publication: different output registers
+          // can share a chunk and its allocation metadata is not concurrent.
+          for (unsigned i = 0; i != count; ++i)
+            for (uint32_t reg = 0; reg != accesses[i].output.count; ++reg)
+              (void)raw_vgpr_data(accesses[i].output.base + reg);
+          active->clear_pending_alu_causes();
+          active->clear_instruction_execution_error();
+          plugin_group_->onAmdgpuBeforeExecuteInstruction(active->pc, *inst, *active);
+          try {
+            if (matrix_coexecution::mode() == 3)
+              matrix_coexecution::execute_batch({instructions.data(), count}, active);
+            else
+              for (unsigned i = 0; i != count; ++i)
+                instructions[i]->execute(*instructions[i], active);
+          } catch (...) {
+            decoded.value().reset();
+            throw;
+          }
+          assert(!active->instruction_execution_failed());
+          plugin_group_->onAmdgpuAfterExecuteInstruction(active->pc, *inst, *active);
           active->pc += 8;
+          for (unsigned i = 1; i != count; ++i) {
+            ++active->trace_inst_count_;
+            plugin_group_->onAmdgpuBeforeExecuteInstruction(active->pc, *instructions[i], *active);
+            plugin_group_->onAmdgpuAfterExecuteInstruction(active->pc, *instructions[i], *active);
+            active->pc += 8;
+          }
+          ++stats.batches;
+          stats.covered += count;
+          ++stats.widths[count];
+          decoded.value().reset();
+          return;
         }
-        ++stats.batches;
-        stats.covered += count;
-        ++stats.widths[count];
-        delete inst;
-        return;
       }
     }
   }
@@ -1006,6 +1090,10 @@ void ComputeUnitCore::issue_instruction(Wavefront *active) {
   const util::Result execution_result = execute_instruction(inst, *active);
 
   if (execution_result.failed()) [[unlikely]] {
+    if constexpr (EnableAsync) {
+      if (window)
+        window->drain();
+    }
     const InstructionExecutionError error = active->instruction_execution_error();
     const std::string failure = std::format("CU {}: wf{} could not execute {} at pc={:#x}: {}",
                                             this->name(), active->wf_id(), inst->mnemonic(),
@@ -1156,7 +1244,14 @@ void ComputeUnitCore::issue_instruction(Wavefront *active) {
       auto *d = inst->data_as<VectorMemState>();
       d->issue_pc = active->pc;
     }
-    route_memory_inst(decoded.value().release(), *active);
+    if constexpr (EnableAsync) {
+      if (window && window->submit_memory(inst))
+        decoded.value().release();
+      else
+        route_memory_inst(decoded.value().release(), *active);
+    } else {
+      route_memory_inst(decoded.value().release(), *active);
+    }
   } else {
     decoded.value().reset();
   }
@@ -1198,7 +1293,13 @@ void ComputeUnitCore::issue_instruction(Wavefront *active) {
   }
 }
 
-bool ComputeUnitCore::step() {
+// Keep ordinary issue and step as concrete entry points. Async execution
+// uses a separate entry selected when constructing the CU.
+void ComputeUnitCore::issue_instruction(Wavefront *active) {
+  issue_instruction_impl<false>(active);
+}
+
+template <bool EnableAsync> [[gnu::always_inline]] inline bool ComputeUnitCore::step_impl() {
   // A wave reaching s_endpgm in this loop retires its workgroup; the guard sends
   // the CP its completion after the lock is released. See WaveStateGuard.
   WaveStateGuard wave_state_lock(*this);
@@ -1217,7 +1318,13 @@ bool ComputeUnitCore::step() {
         wf->set_sleep_cycles(0);
       }
       const bool single_step = wf->debug_single_step();
-      issue_instruction(wf.get());
+      if constexpr (EnableAsync) {
+        issue_async_instruction(wf.get());
+        if (wf->is_halted())
+          matrix_coexecution::stats.flush();
+      } else {
+        issue_instruction(wf.get());
+      }
       if (single_step && !wf->in_trap_handler() && !wf->debug_halted() && single_step_handler_)
         single_step_handler_(*wf);
     }
@@ -1242,6 +1349,8 @@ bool ComputeUnitCore::step() {
 
   return has_runnable_wfs();
 }
+
+bool ComputeUnitCore::step() { return step_impl<false>(); }
 
 // Explicit template instantiations for all AMDGPU ISAs and execution modes.
 #define ROCJITSU_CU_INSTANTIATE(ISA_TYPE)                                                          \
