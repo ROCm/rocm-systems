@@ -85,9 +85,12 @@ public:
 
   /// @brief Discard every cached line (s_icache_inv).
   void invalidate_all() {
+    ++epoch_;
     for (Line &line : lines_)
       line.valid = false;
   }
+
+  uint64_t epoch() const { return epoch_; }
 
   /// @brief Read an already cached instruction word without fetching or filling.
   /// @details This is only a hint for choosing an execution path. The caller
@@ -123,6 +126,7 @@ private:
   }
 
   Line lines_[kNumLines];
+  uint64_t epoch_ = 0;
 };
 
 } // namespace amdgpu

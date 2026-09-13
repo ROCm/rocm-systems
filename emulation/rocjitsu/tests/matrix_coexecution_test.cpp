@@ -18,6 +18,7 @@
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"
 #include "rocjitsu/vm/amdgpu/l2_cache.h"
 #include "rocjitsu/vm/amdgpu/matrix_coexecution.h"
+#include "rocjitsu/vm/amdgpu/mma_admission.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
 #include <chrono>
 #include <ctime>
@@ -35,6 +36,164 @@
 namespace {
 using namespace rocjitsu;
 namespace mc = amdgpu::matrix_coexecution;
+
+TEST(MmaAdmissionCacheTest, ReusesDecodedInstructionsAndPlansAcrossLoopsAndInvalidation) {
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
+  decoder->enable_pool();
+  amdgpu::MmaAdmissionCache cache(3);
+  amdgpu::GpuMemory memory("admission");
+  amdgpu::InstructionCache icache;
+  constexpr uint64_t pc = 0x480000;
+  const auto a =
+      cdna5::build_vop3p(cdna5::kVWmmaF3216x16x64Fp8Fp8Vop3p,
+                         {.vdst = 64, .src0 = 256, .src1 = 288, .src2 = 320, .opsel_hi = 3});
+  const auto b =
+      cdna5::build_vop3p(cdna5::kVWmmaF3216x16x64Fp8Fp8Vop3p,
+                         {.vdst = 96, .src0 = 256, .src1 = 288, .src2 = 352, .opsel_hi = 3});
+  for (unsigned i = 0; i != 2; ++i) {
+    memory.write32(pc + 4 * i, a[i]);
+    memory.write32(pc + 8 + 4 * i, b[i]);
+  }
+  memory.write32(pc + 16, cdna5::build_sopp(cdna5::kSBranchSopp, {.simm16 = 0xffff})[0]);
+  amdgpu::MmaAdmissionCache::Words first;
+  icache.fetch(memory, pc, 0, reinterpret_cast<uint8_t *>(first.data()));
+  for (unsigned i = 0; i != 1000; ++i)
+    EXPECT_EQ(cache.inspect(*decoder, icache, memory, pc, 0, 128, false, first), pc + 8);
+  EXPECT_EQ(cache.stats.decodes, 3u);
+  EXPECT_EQ(cache.stats.plans, 1u);
+  EXPECT_EQ(cache.stats.hits, 999u);
+  icache.invalidate_all();
+  icache.fetch(memory, pc, 0, reinterpret_cast<uint8_t *>(first.data()));
+  EXPECT_EQ(cache.inspect(*decoder, icache, memory, pc, 0, 128, false, first), pc + 8);
+  EXPECT_EQ(cache.stats.decodes, 3u);
+  EXPECT_EQ(cache.stats.plans, 1u);
+  EXPECT_EQ(cache.stats.validations, 1u);
+
+  // A changed future word outside the initial fetch must invalidate the plan.
+  memory.write32(pc + 16, 0xbf800001); // s_nop, changes the saved decode window.
+  icache.invalidate_all();
+  icache.fetch(memory, pc, 0, reinterpret_cast<uint8_t *>(first.data()));
+  EXPECT_EQ(cache.inspect(*decoder, icache, memory, pc, 0, 128, false, first), pc + 8);
+  EXPECT_EQ(cache.stats.plans, 2u);
+  EXPECT_GT(cache.stats.decodes, 3u);
+
+  memory.write32(pc + 8, cdna5::build_sopp(cdna5::kSBranchSopp, {.simm16 = 0xffff})[0]);
+  icache.invalidate_all();
+  icache.fetch(memory, pc, 0, reinterpret_cast<uint8_t *>(first.data()));
+  EXPECT_FALSE(cache.inspect(*decoder, icache, memory, pc, 0, 128, false, first));
+  const auto decodes = cache.stats.decodes;
+  const auto plans = cache.stats.plans;
+  for (unsigned i = 0; i != 1000; ++i)
+    EXPECT_FALSE(cache.inspect(*decoder, icache, memory, pc, 0, 128, false, first));
+  EXPECT_EQ(cache.stats.decodes, decodes);
+  EXPECT_EQ(cache.stats.plans, plans);
+}
+
+TEST(MmaAdmissionCacheTest, RejectsDependenciesBoundsAndUnknownInstructions) {
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
+  constexpr uint64_t pc = 0x490000;
+  for (unsigned hazard = 0; hazard != 5; ++hazard) {
+    amdgpu::MmaAdmissionCache cache(3);
+    amdgpu::GpuMemory memory("admission_hazard");
+    amdgpu::InstructionCache icache;
+    const auto a =
+        cdna5::build_vop3p(cdna5::kVWmmaF3216x16x64Fp8Fp8Vop3p,
+                           {.vdst = 64, .src0 = 256, .src1 = 288, .src2 = 320, .opsel_hi = 3});
+    const uint8_t dst = hazard == 2 ? 0 : hazard == 3 ? 64 : 96;
+    const auto b = cdna5::build_vop3p(cdna5::kVWmmaF3216x16x64Fp8Fp8Vop3p,
+                                      {.vdst = dst,
+                                       .src0 = static_cast<uint16_t>(hazard == 1 ? 320 : 256),
+                                       .src1 = 288,
+                                       .src2 = static_cast<uint16_t>(256 + dst),
+                                       .opsel_hi = 3});
+    for (unsigned i = 0; i != 2; ++i) {
+      memory.write32(pc + i * 4, a[i]);
+      memory.write32(pc + 8 + i * 4, hazard == 4 ? 0xffffffffu : b[i]);
+    }
+    amdgpu::MmaAdmissionCache::Words first;
+    icache.fetch(memory, pc, 0, reinterpret_cast<uint8_t *>(first.data()));
+    EXPECT_EQ(cache.inspect(*decoder, icache, memory, pc, 0, 128, false, first).has_value(),
+              hazard == 0);
+    if (hazard == 0) {
+      EXPECT_FALSE(cache.inspect(*decoder, icache, memory, pc, 0, 96, false, first));
+      EXPECT_FALSE(cache.inspect(*decoder, icache, memory, pc + amdgpu::GpuMemory::PAGE_SIZE - 8, 0,
+                                 128, false, first));
+    }
+  }
+}
+
+TEST(MmaAdmissionBenchmark, ColdAndWarmProgramSizeScaling) {
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
+  for (unsigned size : {100u, 1000u, 10000u}) {
+    amdgpu::MmaAdmissionCache cache(3);
+    amdgpu::GpuMemory memory("admission_scaling");
+    amdgpu::InstructionCache icache;
+    const auto a =
+        cdna5::build_vop3p(cdna5::kVWmmaF3216x16x64Fp8Fp8Vop3p,
+                           {.vdst = 64, .src0 = 256, .src1 = 288, .src2 = 320, .opsel_hi = 3});
+    const auto b =
+        cdna5::build_vop3p(cdna5::kVWmmaF3216x16x64Fp8Fp8Vop3p,
+                           {.vdst = 96, .src0 = 256, .src1 = 288, .src2 = 352, .opsel_hi = 3});
+    const amdgpu::MmaAdmissionCache::Words first{a[0], a[1], b[0], b[1]};
+    constexpr uint64_t start = 0x500000;
+    for (unsigned i = 0; i != size; ++i) {
+      const auto pc = start + i * 64;
+      for (unsigned j = 0; j != 4; ++j)
+        memory.write32(pc + j * 4, first[j]);
+      memory.write32(
+          pc + 16, cdna5::build_sopp(cdna5::kSBranchSopp, {.simm16 = static_cast<uint16_t>(i)})[0]);
+    }
+    const auto begin = std::chrono::steady_clock::now();
+    unsigned accepted = 0;
+    for (unsigned i = 0; i != size; ++i)
+      accepted +=
+          cache.inspect(*decoder, icache, memory, start + i * 64, 0, 128, false, first).has_value();
+    const auto warm = std::chrono::steady_clock::now();
+    const auto cold_decodes = cache.stats.decodes;
+    constexpr unsigned repeats = 100;
+    for (unsigned r = 0; r != repeats; ++r)
+      for (unsigned i = 0; i != size; ++i)
+        accepted += cache.inspect(*decoder, icache, memory, start + i * 64, 0, 128, false, first)
+                        .has_value();
+    const auto end = std::chrono::steady_clock::now();
+    EXPECT_EQ(accepted, size * (repeats + 1));
+    EXPECT_EQ(cache.stats.plans, size);
+    EXPECT_EQ(cache.stats.decodes, cold_decodes);
+    std::printf(
+        "ADMISSION_SCALE sites=%u cold_ns=%.3f warm_ns=%.3f decodes=%llu plans=%llu hits=%llu\n",
+        size, std::chrono::duration<double, std::nano>(warm - begin).count() / size,
+        std::chrono::duration<double, std::nano>(end - warm).count() / (size * repeats),
+        (unsigned long long)cache.stats.decodes, (unsigned long long)cache.stats.plans,
+        (unsigned long long)cache.stats.hits);
+  }
+}
+
+TEST(MmaAdmissionCacheTest, KeepsWiderGroupsAndStopsAtANonAdjacentHazard) {
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
+  constexpr uint64_t pc = 0x4a0000;
+  for (bool hazard : {false, true}) {
+    amdgpu::MmaAdmissionCache cache(3);
+    amdgpu::GpuMemory memory("admission_group");
+    amdgpu::InstructionCache icache;
+    for (unsigned i = 0; i != 4; ++i) {
+      const uint8_t dst = 64 + 16 * i;
+      const auto words =
+          cdna5::build_vop3p(cdna5::kVWmmaF3216x16x64Fp8Fp8Vop3p,
+                             {.vdst = dst,
+                              .src0 = static_cast<uint16_t>(hazard && i == 3 ? 320 : 256),
+                              .src1 = 288,
+                              .src2 = static_cast<uint16_t>(256 + dst),
+                              .opsel_hi = 3});
+      for (unsigned j = 0; j != 2; ++j)
+        memory.write32(pc + i * 8 + j * 4, words[j]);
+    }
+    memory.write32(pc + 32, cdna5::build_sopp(cdna5::kSBranchSopp, {.simm16 = 0xffff})[0]);
+    amdgpu::MmaAdmissionCache::Words first;
+    icache.fetch(memory, pc, 0, reinterpret_cast<uint8_t *>(first.data()));
+    EXPECT_EQ(cache.inspect(*decoder, icache, memory, pc, 0, 128, false, first),
+              pc + (hazard ? 16 : 24));
+  }
+}
 static_assert(HasLargeWmma<cdna5::Isa>);
 static_assert(HasAsyncMma<cdna5::Isa> && HasAsyncMma<cdna4::Isa> && HasAsyncMma<rdna4::Isa>);
 static_assert(!HasAsyncMma<rdna3::Isa>);

@@ -9,6 +9,7 @@
 #include <bitset>
 
 namespace rocjitsu::amdgpu {
+class MmaAdmissionCache;
 namespace async_execution {
 namespace mc = matrix_coexecution;
 inline unsigned window_limit() {
@@ -214,6 +215,13 @@ public:
                                         cu.arch() == ROCJITSU_CODE_ARCH_CDNA4) {}
   bool pending() const { return arithmetic_ && !arithmetic_->empty(); }
   bool stopped() const { return stopped_; }
+  void reserve_issuer(uint64_t pc) { issuer_pc_ = std::min(issuer_pc_, pc); }
+  bool take_issuer(uint64_t pc) {
+    if (issuer_pc_ != pc)
+      return false;
+    issuer_pc_ = ~uint64_t{0};
+    return true;
+  }
 
   void before(const Instruction &inst) {
     poll();
@@ -327,6 +335,7 @@ private:
   std::optional<AsyncInstructionQueue> arithmetic_;
   bool has_accvgprs_;
   bool stopped_ = false, started_ = false, materialized_ = false;
+  uint64_t issuer_pc_ = ~uint64_t{0};
 };
 
 // An issuer with no eligible instruction initializes only the optional's tag.
@@ -334,5 +343,6 @@ private:
 // decoded, and still lives on the issuing thread's stack.
 struct AsyncInstructionWindowStorage {
   std::optional<AsyncInstructionWindow> window;
+  MmaAdmissionCache *admission = nullptr;
 };
 } // namespace rocjitsu::amdgpu
