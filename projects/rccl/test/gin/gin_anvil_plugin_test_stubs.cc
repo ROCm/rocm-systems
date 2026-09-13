@@ -20,11 +20,20 @@
 
 namespace GinAnvilPluginStubs {
 
+struct IntraNodeBootstrapCall {
+  std::vector<int> ranks;
+  int rank = -1;
+  int nranks = 0;
+  int tag = -1;
+};
+
 struct State {
   int probeResult = 1;
   bool bootstrapFail = false;
   int bootstrapNranks = 1;
   std::vector<std::vector<int>> bootstrapIntResults;
+  IntraNodeBootstrapCall lastIntraNodeAllGather;
+  IntraNodeBootstrapCall lastIntraNodeBarrier;
   bool factoryCreateFail = false;
   bool factoryNullHandles = false;
   bool lsaAddrFail = false;
@@ -67,6 +76,12 @@ unsigned long long GetConnCheckWriteStamp(int call) {
              ? g.connCheckWriteStamps[static_cast<size_t>(call)]
              : 0;
 }
+const std::vector<int>& GetLastIntraNodeAllGatherRanks() { return g.lastIntraNodeAllGather.ranks; }
+int GetLastIntraNodeAllGatherRank() { return g.lastIntraNodeAllGather.rank; }
+int GetLastIntraNodeAllGatherNranks() { return g.lastIntraNodeAllGather.nranks; }
+const std::vector<int>& GetLastIntraNodeBarrierRanks() { return g.lastIntraNodeBarrier.ranks; }
+int GetLastIntraNodeBarrierRank() { return g.lastIntraNodeBarrier.rank; }
+int GetLastIntraNodeBarrierTag() { return g.lastIntraNodeBarrier.tag; }
 
 }  // namespace GinAnvilPluginStubs
 
@@ -129,13 +144,17 @@ ncclResult_t bootstrapBarrier(void* commState, int rank, int nranks, int tag) {
 ncclResult_t bootstrapIntraNodeAllGather(void* commState, int* ranks, int rank, int nranks, void* allData,
                                          int size) {
   (void)commState;
-  (void)ranks;
-  (void)rank;
+  GinAnvilPluginStubs::g.lastIntraNodeAllGather.ranks.assign(ranks, ranks + nranks);
+  GinAnvilPluginStubs::g.lastIntraNodeAllGather.rank = rank;
+  GinAnvilPluginStubs::g.lastIntraNodeAllGather.nranks = nranks;
   return stubIntAllGather(allData, nranks, size);
 }
 
 ncclResult_t bootstrapIntraNodeBarrier(void* commState, int* ranks, int rank, int nranks, int tag) {
-  (void)ranks;
+  GinAnvilPluginStubs::g.lastIntraNodeBarrier.ranks.assign(ranks, ranks + nranks);
+  GinAnvilPluginStubs::g.lastIntraNodeBarrier.rank = rank;
+  GinAnvilPluginStubs::g.lastIntraNodeBarrier.nranks = nranks;
+  GinAnvilPluginStubs::g.lastIntraNodeBarrier.tag = tag;
   return bootstrapBarrier(commState, rank, nranks, tag);
 }
 

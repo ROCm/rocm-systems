@@ -6,6 +6,8 @@
 
 #pragma once
 
+#include <vector>
+
 namespace GinAnvilPluginStubs {
 
 void Reset();
@@ -25,5 +27,11 @@ void SetConnCheckMissingCalls(int calls);
 int GetConnCheckWriteCalls();
 int GetConnCheckVerifyCalls();
 unsigned long long GetConnCheckWriteStamp(int call);
+const std::vector<int>& GetLastIntraNodeAllGatherRanks();
+int GetLastIntraNodeAllGatherRank();
+int GetLastIntraNodeAllGatherNranks();
+const std::vector<int>& GetLastIntraNodeBarrierRanks();
+int GetLastIntraNodeBarrierRank();
+int GetLastIntraNodeBarrierTag();
 
 }  // namespace GinAnvilPluginStubs
