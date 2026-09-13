@@ -94,6 +94,46 @@ unused reserved SMT siblings. Gluon calls its original CPU reference; IREE
 uses the source-built end-to-end matmul runner. The throughput plugin measures
 active-dispatch wall time; process wall time includes startup and validation.
 
+### Primary comparison: eight CU workers for K32, K64 and K128
+
+Every policy uses eight CU workers. Both async policies add four shared MMA
+helpers. The ordinary CU count stays fixed when enabling helpers. All Gluon
+cases use the original 1024-cubed GEMM with tile 64x64x128; K32 uses f16/bf16
+and K64/K128 use FP8. Admission mode 3 evaluates lookahead for all three sizes.
+Entries are medians across six rotated rounds, in dispatch / process wall
+seconds:
+
+| Workload | Ordinary | Unrestricted offload | Cached admission |
+|---|---:|---:|---:|
+| Gluon K32 f16 | 1.3859 / 3.990 | 1.2993 / 3.930 | 1.2942 / 3.915 |
+| Gluon K32 bf16 | 1.3788 / 4.000 | 1.2879 / 3.905 | 1.2755 / 3.900 |
+| Gluon K64 FP8 | 1.2529 / 3.875 | 0.9913 / 3.610 | 0.9990 / 3.625 |
+| Gluon K128 FP8 | 1.2479 / 3.880 | 0.9611 / 3.590 | 0.9754 / 3.600 |
+| IREE K32 f16 | 0.9828 / 1.450 | 1.0214 / 1.490 | 0.9600 / 1.435 |
+
+Cached admission reduces Gluon dispatch / wall time by 6.6% / 1.9% for K32
+f16, 7.5% / 2.5% for K32 bf16, 20.3% / 6.5% for K64 and 21.8% / 7.2% for
+K128. Most of these gains come from offload itself. Admission's differences
+from unrestricted offload on these Gluon kernels are small: dispatch changes
+range from -1.0% to +1.5%, with overlapping sample ranges. On IREE, admission
+reduces helper submissions from about 40,344 to 3,142 and avoids the
+unrestricted policy's slowdown.
+
+Independent HIP streams improve 26.3%, 41.3% and 42.1% in dispatch time for
+K32/K64/K128, with wall reductions of 20.0%, 25.3% and 32.1%. The dependent
+K32 chain submits no jobs and matches ordinary wall time; its dispatch delta
+is +0.3%. All 162 timed processes pass numerical checks and identical complete
+throughput signatures across policies. Every generated configuration and
+reserved-core wrapper command was checked, along with workload/runtime hashes.
+
+The full report includes HIP independent/dependent controls, observed ranges,
+paired changes, CPU counters, exact commands and configuration checks:
+`/home/jakub/rocjitsu/misc/async-scoreboard-benchmark/admission/eight-cu-report.md`.
+Comparisons below that reduce CU workers to hold total workers fixed are
+secondary allocation controls. Whole-machine scaling remains unmeasured.
+
+### Earlier two-CU and worker-allocation controls
+
 With two CU workers and four shared helpers, gated K32 returns the IREE
 1024-cubed f16 kernel from 3.631 seconds unrestricted async to 3.024 seconds,
 matching ordinary execution at 3.026 seconds. Its process wall time returns
@@ -108,7 +148,7 @@ measurement variability, while retired instructions increase about 0.22%.
 An early cached-rejection bypass retired fewer instructions but did not improve
 wall time, so it was dropped.
 
-At a matched budget of twelve execution workers, the measured tradeoff is:
+A separate allocation control holds total execution workers at twelve:
 
 | Workload | 12 ordinary CUs: dispatch / wall s | 8 CUs + 4 helpers: dispatch / wall s | Dispatch / wall change |
 |---|---:|---:|---:|
@@ -145,7 +185,7 @@ Keep K32 admission opt-in: the experiment demonstrates selective profitability,
 with meaningful workload and CPU-budget limitations.
 
 
-### K64 and K128 admission follow-up
+### Earlier K64 and K128 allocation follow-up
 
 A further 108 timed runs explicitly enable admission mode 3 for both large
 FP8 shapes. The earlier K128 control used mode 2 and did not run lookahead for
