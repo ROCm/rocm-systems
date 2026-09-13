@@ -66,30 +66,43 @@ global-to-LDS loads, LDS operations, tensor DMA, transposed loads and partial
 D16 destinations. They execute through the existing path after draining the
 window. The large Gluon GEMM's input transfers go directly to LDS, so its memory
 offload coverage consists of output stores. The IREE f16 GEMM exercises ordinary
-loads, but its K=32 WMMAs are outside the MMA eligibility set.
+loads and K=32 WMMAs; the latter require the separate smaller-WMMA opt-in below.
+The memory adapter remains restricted to gfx1250.
 
 ## Scope
 
-The `HAS_WMMA_K64` ISA capability selects the CU step/issue specialization at
-compile time. The factory creates an async `step()` override only for an eligible
-ISA with the experiment enabled. Ordinary CUs inherit the original virtual entry;
+The `ASYNC_MMA_WAVE_SIZE` ISA property selects eligible CU step/issue adapters at
+compile time: zero disables the adapter, 32 enables gfx1250/gfx1201 wave32, and
+64 enables gfx942/gfx950 wave64. `HAS_WMMA_K64` retains its separate meaning.
+The factory creates an async `step()` override only when the target's instruction
+family is selected. Enabling only the original K>=64 experiment still leaves
+gfx1201/gfx942/gfx950 on their ordinary entry. Ordinary CUs inherit that entry;
 unsupported ISAs and clocked execution have no async environment lookups, queue
 checks, helper initialization or per-wave statistics. The active window lives
 on the issuing stack and is passed only to the async specialization, preserving
-the ordinary CU object layout. Adding a large-WMMA ISA requires opting into the
-property and supplying its ISA adapter.
+the ordinary CU object layout. Adding an ISA requires opting into the property
+and supplying its ISA adapter.
 
-The prototype requires functional execution, gfx1250 wave32, full EXEC, the low
-VGPR bank, and no active debugger, trap handler or architectural observer
+The prototype requires functional execution, the adapter's wave size, full EXEC,
+no VGPRMSB or GPRIDX addressing, and no active debugger, trap handler or architectural observer
 plugin. Only the throughput plugin is admitted. Its instruction counts and
 dispatch wall times remain useful; its per-handler timing does not include
 background execution and must not be used to estimate concurrent CPU work.
 
-Eligible arithmetic is f32-output FP8/BF8 16x16x64/128 WMMA and 32x16x128 FP4
-WMMA. MFMA and other matrix shapes are not implemented. Supported scalar/vector
-arithmetic can run between these operations. The scoreboard resolves actual
-ISA register selectors, including inline constants and packed-half aliases;
-the operand's `is_vgpr()` capability flag alone is insufficient.
+The original arithmetic selection is f32-output FP8/BF8 16x16x64/128 WMMA and
+32x16x128 FP4 WMMA. Separate controls add f32-output f16/bf16 K=32/K=16 WMMA,
+multi-block MFMA, scaled MFMA, and regular f16 MFMA controls. Multi-block means
+one ISA instruction computes several matrices, such as `32x32x4_2B`; it does
+not mean submitting several decoded instructions as one helper job.
+
+Supported scalar/vector arithmetic can run between these operations. The
+scoreboard resolves actual ISA register selectors, including inline constants
+and packed-half aliases; the operand's `is_vgpr()` capability flag alone is
+insufficient. VGPRs and AccVGPRs occupy distinct 256-register dependency banks.
+MFMA scale VGPRs are reads, including the entire register containing a selected
+scale byte. Immutable inline accumulators and scales are allowed; SGPR and
+special-register MMA sources are excluded. Both lazy register banks are
+materialized before publication on CDNA3/4.
 
 Unknown instructions, control flow, barriers, EXEC/MODE changes and register
 indexing operations drain the window. All work also drains at the instruction
@@ -112,6 +125,8 @@ and architectural tracing with jobs in flight remain unqualified.
 | `RJ_MMA_SHARED_HELPERS` | Process-wide capacity, 0–128; zero forces synchronous execution | 4 in modes 4–6; unset means private helpers in mode 3 |
 | `RJ_MMA_HELPERS` | Outstanding background MMAs per wave, 0–7 | 1 |
 | `RJ_ASYNC_WINDOW` | Maximum issued instructions before draining, 1–256 | 32 |
+| `RJ_ASYNC_WMMA_MIN_K` | Additional f16/bf16 WMMA selection: 32 enables K32; 16 enables K16 too; original large shapes remain eligible | 64 |
+| `RJ_ASYNC_MFMA` | Bitmask: 1 multi-block f16/f32; 2 scaled f8f6f4; 4 regular f16 control shapes | 0 |
 | `RJ_ASYNC_MEM_MIN_BYTES` | Minimum full-wave bytes for a memory offload | 512 |
 | `RJ_MMA_WAIT` | 0 atomic wait; 1 private Linux futex | 1 on Linux |
 | `RJ_MMA_SPINS` | Optional bounded spin before blocking | 0 |
@@ -148,9 +163,31 @@ RJ_MATRIX_COEXEC=5 RJ_MMA_SHARED_HELPERS=4 RJ_MMA_SPINS=0 \
 
 Unit tests cover independent versus ordered completion, immediate capacity
 fallback, helper reuse and failures, real interleaved memory/MMA execution,
-register hazards, and inline-constant operand resolution. The separate queue
+register hazards, and inline-constant operand resolution. Extended MMA cases
+compare both register banks bit-for-bit across independent execution, RAW, WAR,
+WAW and scale-register reuse. The separate queue
 stress test instruments the queue and helpers with ThreadSanitizer; it does not
 constitute full-simulator ThreadSanitizer qualification.
+
+`tests/async_mma_hip_benchmark.cpp` covers four independent or dependent chains
+of smaller WMMA, multi-block MFMA, regular MFMA controls, and MXFP4 MFMA. Its
+one-wave launch bounds prevent the large multi-block outputs from spilling.
+Check code-object scratch metadata when changing the compiler or launch shape.
+
+```sh
+"$ROCM_PATH/bin/hipcc" -O2 --offload-arch=gfx950 -DMMA_TARGET=950 \
+  tests/async_mma_hip_benchmark.cpp -o mma-hip
+RJ_MATRIX_COEXEC=4 RJ_ASYNC_MFMA=1 RJ_MMA_HELPERS=7 \
+  RJ_MMA_SHARED_HELPERS=4 agent-reserved-run taskset -c 80-95 \
+  /path/to/rocjitsu --config /path/to/gfx950-throughput-config.json -- \
+  ./mma-hip 2 128 512 0
+```
+
+Arguments are shape, block count, iterations, and dependent-chain flag. For
+gfx942/gfx950, shapes 2/4/16 select `32x32x4_2B`/`16x16x4_4B`/`4x4x4_16B` f16;
+8/116 select regular `32x32x8`/`16x16x16` f16. On gfx950, 128/64 select
+`16x16x128`/`32x32x64` MXFP4. Compile separately with `MMA_TARGET=1250` or 1201
+and the corresponding target for shape 32 or 16 WMMA.
 
 ## Measurements (2026-09-13)
 
@@ -209,3 +246,51 @@ profiles and the code-layout investigation are under
 `/home/jakub/rocjitsu/misc/async-scoreboard-benchmark/`. `report.md` documents the
 complete experiment; `gluon/aligned*.json` and runtime `0018` supply the final
 tables. Earlier negative results remain available.
+
+### Smaller WMMA and multi-block/scaled MFMA extension
+
+The extension uses frozen runtime `0020`, the same toolchain/reserved-core
+protocol, four balanced rounds, numerical checks and complete instruction
+signatures. New families are explicitly enabled. Main comparisons retain two
+ordinary CU workers for HIP or eight for real kernels and add four helpers.
+Negative changes below mean less time.
+
+| Workload | Dispatch change | Process wall change |
+|---|---:|---:|
+| HIP gfx950 two-block / four-block f16 MFMA | -42.9% / -32.4% | -37.8% / -26.7% |
+| HIP gfx950 MXFP4 16x16x128 / 32x32x64 | -60.8% / -55.6% | -52.3% / -50.3% |
+| Gluon 1024³ K32 f16 / bf16 | -6.1% / -3.7% | -2.1% / -1.1% |
+| Gluon 1024³ K16 f16 | +6.2% | +3.2% |
+| Triton MXFP4 1024³, MFMA non-K dimension 16 / 32 | -19.5% / +4.2% | -5.4% / +1.8% |
+| Original Gluon f16/bf16 suite, 32 cases | +5.2% | +3.5% |
+| IREE f16 matmul, 14 dispatches | +3.5% | +3.1% |
+
+The equal-worker-budget controls qualify these gains. HIP MXFP4 16x16x128
+takes 0.8072 s with two CU workers plus four helpers, versus 1.0691 s with six
+ordinary workers (-24.5%). The multi-block HIP cases favor ordinary workers.
+The real K32 f16 GEMM takes 1.2688 s with eight plus four, versus 1.3177 s with
+twelve ordinary workers (-3.7%). Both real MXFP4 variants favor twelve ordinary
+workers: the 16x16 variant takes 0.7398 s ordinarily versus 0.7959 s asynchronously.
+Useful same-wave overlap therefore depends on the kernel and available CU work.
+
+For K16, the zero-helper async path already adds 2.6%; handoffs and dependency
+waits raise the loss to 6.2%. The 32x32 MXFP4 kernel encounters register
+dependencies on roughly three quarters of submitted MMAs; offloading loses even
+though the zero-helper async entry is faster. Limiting each wave to one job does
+not remove either slowdown. Small 32x32 Gluon tiles explain most of the suite
+loss; their standalone zero-helper control reproduces the bookkeeping cost.
+IREE's wide, overlapping timing ranges do not establish a stable change.
+
+These results support keeping the new selections opt-in. The wider correctness
+run passes 998/999 tests; the remaining DBT byte-identity failure reproduces in
+the earlier build and with async disabled. All extended register-hazard cases
+pass across eighteen mode/capacity/wait combinations, and both queue/helper
+ThreadSanitizer stress variants pass. Emitted-code checks confirm the original
+ordinary entries and the four intended optional ISA adapters.
+
+The full report, all eleven HIP shapes, real-workload adaptations, zero-helper
+controls, ranges, profiles and frozen provenance are in
+`/home/jakub/rocjitsu/misc/async-scoreboard-benchmark/small-mma/report.md`.
+The gfx950 GPU kernels are original Gluon/Triton kernels; their preparation and
+reference checks run on CPU because the installed PyTorch failed to load a
+gfx950 reference kernel. Hardware numerical qualification remains outstanding.

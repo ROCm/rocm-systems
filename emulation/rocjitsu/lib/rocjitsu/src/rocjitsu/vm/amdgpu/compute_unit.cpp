@@ -144,14 +144,20 @@ static std::unique_ptr<ComputeUnitCore> create_functional_cu(std::string name,
                                                              const ComputeUnitCore::Config &config,
                                                              GpuMemory *memory, L2Cache *l2) {
   using Base = IsaExecComputeUnit<simdojo::ExecMode::FUNCTIONAL, Isa>;
-  if constexpr (HasLargeWmma<Isa>) {
+  if constexpr (HasAsyncMma<Isa>) {
     // Select the existing virtual step entry once at construction, so mode
     // zero needs no runtime async check even on an eligible ISA.
     struct Asynchronous final : Base {
       using Base::Base;
       bool step() override { return this->template step_impl<true>(); }
     };
-    if (matrix_coexecution::mode() != 0)
+    const int mode = matrix_coexecution::mode();
+    const bool enabled = HasLargeWmma<Isa> ? mode != 0
+                                           : mode >= 4 && mode <= 6 &&
+                                                 (Isa::ASYNC_MMA_WAVE_SIZE == 64
+                                                      ? matrix_coexecution::mfma_families() != 0
+                                                      : matrix_coexecution::min_wmma_k() <= 16);
+    if (enabled)
       return std::make_unique<Asynchronous>(std::move(name), config, memory, l2);
   }
   return std::make_unique<Base>(std::move(name), config, memory, l2);
@@ -729,9 +735,14 @@ void ComputeUnitCore::update_wf_states() {
 
 void ComputeUnitCore::issue_async_instruction(Wavefront *active) {
   const int mode = matrix_coexecution::mode();
-  if (mode < 4 || mode > 6 || arch() != ROCJITSU_CODE_ARCH_CDNA5 || active->wf_size() != 32 ||
-      active->exec() != 0xFFFFFFFFu || active->vgpr_msb_mode() != 0 || debug_active() ||
-      active->debug_single_step() || active->in_trap_handler() ||
+  const bool mfma_isa = arch() == ROCJITSU_CODE_ARCH_CDNA3 || arch() == ROCJITSU_CODE_ARCH_CDNA4;
+  const bool supported_isa =
+      mfma_isa || arch() == ROCJITSU_CODE_ARCH_CDNA5 || arch() == ROCJITSU_CODE_ARCH_RDNA4;
+  const unsigned wave_size = mfma_isa ? 64 : 32;
+  const uint64_t full_exec = mfma_isa ? ~uint64_t{0} : uint64_t{0xFFFFFFFF};
+  if (mode < 4 || mode > 6 || !supported_isa || active->wf_size() != wave_size ||
+      active->exec() != full_exec || active->vgpr_msb_mode() != 0 || active->gpr_idx_en() ||
+      debug_active() || active->debug_single_step() || active->in_trap_handler() ||
       !plugin_group_->permits_matrix_coexecution_prototype()) {
     issue_instruction_impl<true>(active);
     return;

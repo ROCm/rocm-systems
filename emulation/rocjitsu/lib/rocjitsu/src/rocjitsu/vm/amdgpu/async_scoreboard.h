@@ -3,7 +3,6 @@
 
 #pragma once
 
-#include "rocjitsu/isa/arch/amdgpu/generated/cdna5/operand.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/matrix_coexecution.h"
 
@@ -27,7 +26,7 @@ inline unsigned memory_min_bytes() {
   return value;
 }
 struct Access {
-  std::bitset<256> reads, writes;
+  std::bitset<512> reads, writes;
   bool conflicts(const Access &next) const {
     return (writes & (next.reads | next.writes)).any() || (reads & next.writes).any();
   }
@@ -43,7 +42,7 @@ inline bool safe_inline(const Instruction &inst) {
   const auto name = inst.mnemonic();
   if (name == "s_delay_alu" || name == "s_nop" || name == "v_nop")
     return true;
-  if (mc::candidate(name) || ordinary_memory(name))
+  if (mc::async_candidate(name) || ordinary_memory(name))
     return true;
   if (inst.is_waitcnt())
     return !name.starts_with("s_wait_alu");
@@ -68,7 +67,8 @@ inline bool safe_inline(const Instruction &inst) {
   }
   return true;
 }
-inline std::optional<Access> footprint(const Instruction &inst, uint32_t num_vgprs) {
+inline std::optional<Access> footprint(const Instruction &inst, uint32_t num_vgprs,
+                                       bool has_accvgprs = false) {
   Access access;
   for (bool dst : {false, true}) {
     const int count = dst ? inst.num_dst_operands() : inst.num_src_operands();
@@ -79,12 +79,15 @@ inline std::optional<Access> footprint(const Instruction &inst, uint32_t num_vgp
       // is_vgpr() describes selector capability, including scalar and inline
       // encodings. Resolve the actual register and packed-half aliases using
       // the ISA adapter; the queue itself stays independent of the ISA.
-      const auto ref = static_cast<const cdna5::Operand *>(op)->cdna5::Operand::to_register_ref();
-      if (!ref || ref->cls != RegClass::VGPR)
+      const auto ref = op->to_register_ref();
+      if (!ref || (ref->cls != RegClass::VGPR && ref->cls != RegClass::ACC_VGPR))
         continue;
-      const uint32_t reg = ref->index, width = ref->width;
-      if (reg >= 256 || width > 256 - reg || reg >= num_vgprs || width > num_vgprs - reg)
+      const bool acc = ref->cls == RegClass::ACC_VGPR;
+      const uint32_t limit = acc ? (has_accvgprs ? 256 : 0) : std::min(256u, num_vgprs);
+      const uint32_t index = ref->index, width = ref->width;
+      if (index >= limit || width > limit - index)
         return std::nullopt;
+      const uint32_t reg = index + (acc ? 256 : 0);
       for (uint32_t r = reg; r != reg + width; ++r) {
         (dst ? access.writes : access.reads).set(r);
         // A store's encoding can describe its data as a destination operand.
@@ -218,7 +221,9 @@ class AsyncInstructionWindow {
   using Access = async_execution::Access;
 
 public:
-  AsyncInstructionWindow(ComputeUnitCore &cu, Wavefront &wf) : cu_(cu), wf_(wf) {}
+  AsyncInstructionWindow(ComputeUnitCore &cu, Wavefront &wf)
+      : cu_(cu), wf_(wf), has_accvgprs_(cu.arch() == ROCJITSU_CODE_ARCH_CDNA3 ||
+                                        cu.arch() == ROCJITSU_CODE_ARCH_CDNA4) {}
   bool pending() const {
     return (arithmetic_ && !arithmetic_->empty()) || (memory_ && !memory_->empty());
   }
@@ -228,7 +233,7 @@ public:
     poll();
     if (!pending())
       return;
-    auto access = async_execution::footprint(inst, wf_.num_vgprs());
+    auto access = async_execution::footprint(inst, wf_.num_vgprs(), has_accvgprs_);
     if (!async_execution::safe_inline(inst) || !access) {
       if (pending())
         ++async_execution::stats.boundaries;
@@ -250,23 +255,27 @@ public:
     if (arithmetic_ && arithmetic_->wait_conflicts(*access))
       ++async_execution::stats.hazards;
     check_errors();
-    if (pending() && !matrix_coexecution::candidate(inst.mnemonic()) && !inst.is_memory_op())
+    if (pending() && !matrix_coexecution::async_candidate(inst.mnemonic()) && !inst.is_memory_op())
       ++async_execution::stats.inline_overlap;
   }
 
   bool submit_mma(Instruction *inst) {
     namespace ae = async_execution;
     if (stopped_ || matrix_coexecution::mode() == 5 ||
-        !matrix_coexecution::candidate(inst->mnemonic()))
+        !matrix_coexecution::async_candidate(inst->mnemonic()))
       return false;
-    auto access = ae::footprint(*inst, wf_.num_vgprs());
-    if (!access || inst->num_dst_operands() != 1 || inst->num_src_operands() != 3)
+    auto access = ae::footprint(*inst, wf_.num_vgprs(), has_accvgprs_);
+    const int sources = inst->num_src_operands();
+    if (!access || inst->num_dst_operands() != 1 || (sources != 3 && sources != 5))
       return false;
-    for (int i = 0; i != 4; ++i) {
-      const auto *operand = i == 3 ? inst->dst_operand(0) : inst->src_operand(i);
-      const auto ref =
-          static_cast<const cdna5::Operand *>(operand)->cdna5::Operand::to_register_ref();
-      if (!ref || ref->cls != RegClass::VGPR)
+    for (int i = 0; i <= sources; ++i) {
+      const auto *operand = i == sources ? inst->dst_operand(0) : inst->src_operand(i);
+      const auto ref = operand->to_register_ref();
+      if (ref && (ref->cls == RegClass::VGPR || (has_accvgprs_ && ref->cls == RegClass::ACC_VGPR)))
+        continue;
+      // Inline accumulator/scale constants are immutable. SGPRs and special
+      // registers are not covered by the vector-register scoreboard.
+      if (i == sources || !operand->const_value())
         return false;
     }
     const size_t limit = matrix_coexecution::width() - 1;
@@ -293,8 +302,9 @@ public:
 
   bool submit_memory(Instruction *inst) {
     namespace ae = async_execution;
-    if (stopped_ || matrix_coexecution::mode() == 4 || !ae::ordinary_memory(inst->mnemonic()) ||
-        !inst->data() || inst->data()->tag() != GLOBAL_MEM)
+    if (stopped_ || cu_.arch() != ROCJITSU_CODE_ARCH_CDNA5 || matrix_coexecution::mode() == 4 ||
+        !ae::ordinary_memory(inst->mnemonic()) || !inst->data() ||
+        inst->data()->tag() != GLOBAL_MEM)
       return false;
     auto &d = *inst->data_as<VectorMemState>();
     if (d.atomic_op != AtomicOp::NONE || d.lds_dst || d.transpose || d.scratch_swizzle ||
@@ -388,6 +398,9 @@ private:
     // all lazy chunks before that can race with worker register-file access.
     for (uint32_t reg = 0; reg != wf_.num_vgprs(); ++reg)
       (void)cu_.raw_vgpr_data(wf_.vgpr_alloc().base + reg);
+    if (has_accvgprs_)
+      for (uint32_t reg = 256; reg != 512; ++reg)
+        (void)cu_.raw_vgpr_data(wf_.vgpr_alloc().base + reg);
     materialized_ = true;
   }
   void check_errors() {
@@ -409,6 +422,7 @@ private:
                                  window.cu_.global_mem_pipeline_.run_async_access(
                                      *window.memory_inst_, window.wf_);
                                }};
+  bool has_accvgprs_;
   bool stopped_ = false, started_ = false, materialized_ = false;
 };
 } // namespace rocjitsu::amdgpu
