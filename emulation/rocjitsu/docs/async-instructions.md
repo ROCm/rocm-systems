@@ -35,39 +35,23 @@ dependencies. It does not wait for an unrelated earlier MMA or enqueue work
 behind a busy worker. A completed helper becomes reusable when its owner polls
 or joins it; the worker does not recycle its own completion record.
 
-Instruction destruction, architectural memory writeback, and wait-counter
-updates stay on the issuing thread. Decoder allocation is thread-local.
+Instruction destruction stays on the issuing thread. Decoder allocation is
+thread-local; memory pipelines retain their existing ownership and accounting.
 Exceptions from unexpected callback failures are collected after outstanding
 work is joined; precise asynchronous exception rollback is not implemented.
 
-## Memory experiment
+## Memory accesses
 
-Ordinary global/buffer loads and stores can use the same executor pool, with an
-ordered completion policy. ISA execution captures addresses, masks and store
-bytes on the issuer. The helper performs the cache/memory access; the issuer
-writes load results and releases the ISA wait counter at completion.
+Memory offloading has been removed. Its measured host access costs did not
+amortize publication, synchronization and retirement, even in the synthetic
+case with independent ALU work. The executor has a single MMA queue; loads and
+stores always use the existing memory pipelines and wait-counter handling.
 
-Only **one data-memory operation per CU** may be outstanding in this prototype.
-Every subsequent memory instruction drains it, including instructions that
-will run synchronously. This preserves the CU's mutable L1 cache ownership and
-same-wave store-to-load ordering. A store's captured source can be overwritten
-after issue. Existing outstanding wait counters prevent starting an offload.
-This stronger ordering does not model separate GPU load/store pipelines.
-
-CDNA5 ISA sections 5.7 and 5.7.1 distinguish data writeback from ordered counter
-completion. They also require same-wave, same-address store/load ordering, and
-describe separate counters for flat, LDS, asynchronous and tensor operations.
-Supporting more memory concurrency needs explicit cache ownership, ordered
-counter accounting and cross-queue address dependencies. Simply offloading all
-memory handlers would violate these requirements.
-
-Excluded memory operations include scalar memory, flat/scratch, atomics,
-global-to-LDS loads, LDS operations, tensor DMA, transposed loads and partial
-D16 destinations. They execute through the existing path after draining the
-window. The large Gluon GEMM's input transfers go directly to LDS, so its memory
-offload coverage consists of output stores. The IREE f16 GEMM exercises ordinary
-loads and K=32 WMMAs; the latter require the separate smaller-WMMA opt-in below.
-The memory adapter remains restricted to gfx1250.
+The scoreboard still checks memory instruction operands against pending MMA
+reads and writes. Supported ordinary memory instructions may execute on the
+issuer while independent MMAs run. LDS, atomics, direct-to-LDS transfers and
+other excluded instructions drain the MMA window before executing. This does
+not introduce background cache access or change memory completion ordering.
 
 ## Scope
 
@@ -78,9 +62,10 @@ The factory creates an async `step()` override only when the target's instructio
 family is selected. Enabling only the original K>=64 experiment still leaves
 gfx1201/gfx942/gfx950 on their ordinary entry. Ordinary CUs inherit that entry;
 unsupported ISAs and clocked execution have no async environment lookups, queue
-checks, helper initialization or per-wave statistics. The active window lives
-on the issuing stack and is passed only to the async specialization, preserving
-the ordinary CU object layout. Adding an ISA requires opting into the property
+checks, helper initialization or per-wave statistics. The active window is constructed lazily on the issuing stack after decoding
+an eligible MMA and checking helper availability. Ineligible instructions skip
+queue construction, polling and draining. The window is passed only to the
+async specialization, preserving the ordinary CU object layout. Adding an ISA requires opting into the property
 and supplying its ISA adapter.
 
 The prototype requires functional execution, the adapter's wave size, full EXEC,
@@ -94,6 +79,16 @@ The original arithmetic selection is f32-output FP8/BF8 16x16x64/128 WMMA and
 multi-block MFMA, scaled MFMA, and regular f16 MFMA controls. Multi-block means
 one ISA instruction computes several matrices, such as `32x32x4_2B`; it does
 not mean submitting several decoded instructions as one helper job.
+
+Keep the default arithmetic allowlist limited to the large gfx1250 shapes.
+This is a conservative instruction-cost policy: the host handler must be long
+enough to amortize publication, completion and lost locality. K alone is not a
+cost estimate across instruction families, and a long handler still needs
+independent work to overlap. K32 stays synchronous unless explicitly enabled
+for an experiment; its synthetic gain did not generalize to the source-built
+IREE kernel. K16 and MFMA extensions likewise remain separate opt-ins. Bounded
+decode lookahead could refine profitability within an eligible family later;
+it is not required to exclude K32 from the current selection.
 
 Supported scalar/vector arithmetic can run between these operations. The
 scoreboard resolves actual ISA register selectors, including inline constants
@@ -121,18 +116,17 @@ and architectural tracing with jobs in flight remain unqualified.
 
 | Variable | Meaning | Default |
 |---|---|---|
-| `RJ_MATRIX_COEXEC` | 0 ordinary; 1 scan; 2 serial adjacent batch; 3 parallel adjacent batch; 4 scoreboard MMA; 5 scoreboard memory; 6 both | 0 |
-| `RJ_MMA_SHARED_HELPERS` | Process-wide capacity, 0–128; zero forces synchronous execution | 4 in modes 4–6; unset means private helpers in mode 3 |
+| `RJ_MATRIX_COEXEC` | 0 ordinary; 1 scan; 2 serial adjacent batch; 3 parallel adjacent batch; 4 scoreboard MMA | 0 |
+| `RJ_MMA_SHARED_HELPERS` | Process-wide capacity, 0–128; zero forces synchronous execution | 4 in mode 4; unset means private helpers in mode 3 |
 | `RJ_MMA_HELPERS` | Outstanding background MMAs per wave, 0–7 | 1 |
 | `RJ_ASYNC_WINDOW` | Maximum issued instructions before draining, 1–256 | 32 |
 | `RJ_ASYNC_WMMA_MIN_K` | Additional f16/bf16 WMMA selection: 32 enables K32; 16 enables K16 too; original large shapes remain eligible | 64 |
 | `RJ_ASYNC_MFMA` | Bitmask: 1 multi-block f16/f32; 2 scaled f8f6f4; 4 regular f16 control shapes | 0 |
-| `RJ_ASYNC_MEM_MIN_BYTES` | Minimum full-wave bytes for a memory offload | 512 |
 | `RJ_MMA_WAIT` | 0 atomic wait; 1 private Linux futex | 1 on Linux |
 | `RJ_MMA_SPINS` | Optional bounded spin before blocking | 0 |
 
-`RJ_ASYNC` counters report submitted MMA/load/store jobs, ordinary instructions
-issued while work remains pending, dependency waits, boundary drains, capacity
+`RJ_ASYNC` counters report submitted MMA jobs, ordinary instructions issued
+while work remains pending, dependency waits, boundary drains, capacity
 fallbacks and owner-thread retirements. Pending does not prove that the worker
 was actively computing for the entire overlap interval.
 
@@ -156,10 +150,13 @@ compiler barriers keep each loop iteration's access and the vector result live.
 ```sh
 "$ROCM_PATH/bin/hipcc" -O2 --offload-arch=gfx1250 \
   tests/async_memory_hip_benchmark.cpp -o memory-hip
-RJ_MATRIX_COEXEC=5 RJ_MMA_SHARED_HELPERS=4 RJ_MMA_SPINS=0 \
+RJ_MATRIX_COEXEC=4 RJ_MMA_SHARED_HELPERS=4 RJ_MMA_SPINS=0 \
   agent-reserved-run taskset -c 80-95 /path/to/rocjitsu \
   --config /path/to/throughput-config.json -- ./memory-hip 32 0 256 256
 ```
+
+This memory-only workload must submit no async jobs; it now checks the
+synchronous fallback with the MMA adapter enabled.
 
 Unit tests cover independent versus ordered completion, immediate capacity
 fallback, helper reuse and failures, real interleaved memory/MMA execution,
@@ -190,6 +187,10 @@ gfx942/gfx950, shapes 2/4/16 select `32x32x4_2B`/`16x16x4_4B`/`4x4x4_16B` f16;
 and the corresponding target for shape 32 or 16 WMMA.
 
 ## Measurements (2026-09-13)
+
+The following tables preserve the earlier experiments, including the memory
+offload modes that have since been removed. Modes 5 and 6 no longer select an
+async adapter. Current policy and fallback measurements follow the tables.
 
 Four alternating rounds on the reserved 16 physical host cores, with numerical
 validation and identical throughput-plugin dispatch/instruction signatures.
@@ -225,8 +226,8 @@ Memory offload loses even with real overlap: the load/ALU case issues about 13.4
 ordinary instructions per offloaded load while work remains pending. Its short
 accesses do not amortize queue bookkeeping, publication, wakeups and retirement.
 With zero helpers, memory mode takes 0.9777 s versus ordinary 0.8701 s; four
-helpers raise it to 1.0478 s. Six ordinary CU workers take only 0.3697 s. Keep
-memory experimental; these results support MMA as the useful acceleration path.
+helpers raise it to 1.0478 s. Six ordinary CU workers take only 0.3697 s. These results motivated removing memory offloading and retaining MMA as the
+acceleration path.
 
 The ISA gate adds no executor checks or storage to unsupported CUs, confirmed
 in emitted code. Whole-binary timing still depends on layout. The final gfx1201
@@ -343,3 +344,39 @@ before simulator execution and was excluded; its diagnostics are retained. The
 full tables, zero-helper controls, emitted ISA, generator snapshot, compiler and
 artifact hashes, ranges and CPU-use counters are in
 `/home/jakub/rocjitsu/misc/async-scoreboard-benchmark/iree-source/report.md`.
+
+### MMA-only policy and synchronous fallback
+
+Memory offloading has been removed. The default large-WMMA allowlist keeps K32
+synchronous. A non-filling peek of the instruction cache sends cached words
+outside that allowlist through ordinary issue, preserving its fetchability,
+debugger and decode checks. Cache misses use full decoding. An MMA window is
+constructed only after an eligible instruction is decoded and helper capacity
+is observed. A busy pool still falls back immediately.
+
+Six balanced IREE K32 rounds with runtime `0023` give 3.050 s ordinary versus
+2.964 s with the large-only adapter, with zero offloads; process wall time is
+3.510 versus 3.425 s. The ranges overlap, so this supports no observed wall-time
+regression. The filter is not free: retired instructions rise 0.49% and user
+cycles 1.17%. Merely making the window lazy, without bypassing the async issue
+body, had retained a 4.3% dispatch slowdown in its separate comparison.
+
+Four Gluon K128 rounds retain a 28.1% dispatch improvement (3.266 to 2.350 s)
+and 15.3% wall improvement (5.860 to 4.965 s). Both workloads use two CU workers,
+one engine and four helpers on the reserved cores, with numerical checks and
+identical throughput signatures. Final cache/fetchability/queue/memory testing
+passes 55 focused tests.
+
+`MatrixHandlerBenchmark.DenseAndSparseAdjacentPairs` measures actual decoded
+callbacks with one helper MMA and one issuer MMA, without intervening ALU.
+Four rounds put sparse f32-output K64 f16/bf16 callbacks at 145-151 us and K128
+FP8/BF8 callbacks at 195-199 us. Their independent pairs improve 47-49%.
+Serialized offload adds roughly 9-11 us: K32 rises from 31.94 to 41.38 us
+(29.6%). Large dense and sparse handlers amortize that cost better.
+
+Passing the pair calibration alone is insufficient: K32 also improves 37% on
+independent pairs, yet regresses in the IREE kernel. Sparse remains a measured
+candidate, outside the runtime allowlist; no end-to-end sparse-kernel gain or
+hardware qualification is claimed. Full data, failed intermediate comparisons,
+test logs and reproduction scripts are in
+`/home/jakub/rocjitsu/misc/async-scoreboard-benchmark/eligibility/report.md`.

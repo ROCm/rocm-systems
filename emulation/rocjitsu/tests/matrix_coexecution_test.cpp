@@ -696,4 +696,107 @@ TEST(MatrixHandlerBenchmark, SmallerWmmaMultiBlockAndScaledMfma) {
   }
 }
 
+// Measure the conservative case with no intervening ALU: one independent MMA
+// stays on the issuer and one uses the real persistent helper protocol. Sparse
+// instructions are measured directly here, without expanding async eligibility.
+TEST(MatrixHandlerBenchmark, DenseAndSparseAdjacentPairs) {
+  struct Case {
+    uint16_t opcode;
+    uint32_t a, b;
+    bool sparse;
+  };
+  const Case cases[] = {
+      {cdna5::kVWmmaF3216x16x32F16Vop3p, 0x3c003c00, 0x3c003c00, false},
+      {cdna5::kVWmmaF3216x16x64Fp8Fp8Vop3p, 0x38383838, 0x38383838, false},
+      {cdna5::kVWmmaF3216x16x128Fp8Fp8Vop3p, 0x38383838, 0x38383838, false},
+      {cdna5::kVWmmaF3232x16x128F4Vop3p, 0x22222222, 0x22222222, false},
+      {cdna5::kVSwmmacF3216x16x64F16Vop3p, 0x3c003c00, 0x3c003c00, true},
+      {cdna5::kVSwmmacF3216x16x64Bf16Vop3p, 0x3f803f80, 0x3f803f80, true},
+      {cdna5::kVSwmmacF3216x16x128Fp8Fp8Vop3p, 0x38383838, 0x38383838, true},
+      {cdna5::kVSwmmacF3216x16x128Fp8Bf8Vop3p, 0x38383838, 0x3c3c3c3c, true},
+      {cdna5::kVSwmmacF3216x16x128Bf8Fp8Vop3p, 0x3c3c3c3c, 0x38383838, true},
+      {cdna5::kVSwmmacF3216x16x128Bf8Bf8Vop3p, 0x3c3c3c3c, 0x3c3c3c3c, true},
+  };
+  mc::SharedPool pool(1);
+  constexpr unsigned iterations = 2000;
+  for (const auto &c : cases) {
+    auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
+    auto make = [&](uint8_t dst) {
+      const auto words =
+          cdna5::build_vop3p(c.opcode, {.vdst = dst,
+                                        .src0 = 256,
+                                        .src1 = 288,
+                                        .src2 = static_cast<uint16_t>(c.sparse ? 448 : 256 + dst),
+                                        .opsel_hi = 3});
+      return std::unique_ptr<Instruction>(decode_valid(*decoder, words.data()));
+    };
+    auto a = make(64), b = make(96);
+    SCOPED_TRACE(a->mnemonic());
+    amdgpu::GpuMemory memory("pair_memory");
+    amdgpu::L2Cache l2("pair_l2");
+    amdgpu::ComputeUnitCore::Config config{};
+    config.arch = ROCJITSU_CODE_ARCH_CDNA5;
+    config.num_wf_slots = 1;
+    config.sgprs_per_wf = 106;
+    config.vgprs_per_wf = 256;
+    auto cu = amdgpu::ComputeUnitCore::create("pair_cu", config, &memory, &l2);
+    auto *wf = cu->dispatch_wf(0, 0, 106, 256);
+    ASSERT_NE(wf, nullptr);
+    wf->set_exec(0xffffffff);
+    const auto base = wf->vgpr_alloc().base;
+    auto seed = [&] {
+      // Materialize all lazy chunks before another thread can access them.
+      for (unsigned reg = 0; reg != 256; ++reg)
+        for (unsigned lane = 0; lane != 32; ++lane)
+          cu->write_vgpr(base + reg, lane,
+                         reg < 32                   ? c.a
+                         : reg < 64                 ? c.b
+                         : reg == 192 || reg == 193 ? 0x44444444
+                                                    : 0);
+    };
+    auto snapshot = [&] {
+      std::vector<uint32_t> result;
+      for (unsigned reg = 64; reg != 128; ++reg)
+        for (unsigned lane = 0; lane != 32; ++lane)
+          result.push_back(cu->read_vgpr(base + reg, lane));
+      return result;
+    };
+    std::array<Instruction *, 2> pair{a.get(), b.get()};
+    seed();
+    for (unsigned i = 0; i != 100; ++i)
+      pool.execute(pair, wf);
+    std::array<double, 3> ns{};
+    std::array<std::vector<uint32_t>, 3> results;
+    const bool reverse = std::getenv("RJ_MMA_PAIR_REVERSE") != nullptr;
+    for (unsigned phase = 0; phase != ns.size(); ++phase) {
+      const unsigned mode = reverse ? 2 - phase : phase;
+      seed();
+      const auto begin = std::chrono::steady_clock::now();
+      for (unsigned i = 0; i != iterations; ++i) {
+        if (mode == 0) {
+          a->execute(*a, wf);
+          b->execute(*b, wf);
+        } else if (mode == 1) {
+          pool.execute(pair, wf);
+        } else {
+          // A serialized offload isolates the handoff cost without overlap.
+          auto ticket = pool.submit(*a, wf);
+          assert(ticket);
+          if (auto error = pool.finish(ticket))
+            std::rethrow_exception(error);
+        }
+      }
+      ns[mode] = std::chrono::duration<double, std::nano>(std::chrono::steady_clock::now() - begin)
+                     .count() /
+                 iterations;
+      EXPECT_FALSE(wf->instruction_execution_failed());
+      results[mode] = snapshot();
+    }
+    EXPECT_EQ(results[1], results[0]);
+    EXPECT_TRUE(std::equal(results[2].begin(), results[2].begin() + 32 * 32, results[0].begin()));
+    std::printf("MMA_PAIR name=%s serial_pair_ns=%.3f parallel_pair_ns=%.3f handoff_one_ns=%.3f\n",
+                a->mnemonic().data(), ns[0], ns[1], ns[2]);
+  }
+}
+
 } // namespace

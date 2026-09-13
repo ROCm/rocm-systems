@@ -18,13 +18,6 @@ inline unsigned window_limit() {
   }();
   return value;
 }
-inline unsigned memory_min_bytes() {
-  static const unsigned value = [] {
-    const char *text = std::getenv("RJ_ASYNC_MEM_MIN_BYTES");
-    return static_cast<unsigned>(std::max(0, text ? std::atoi(text) : 512));
-  }();
-  return value;
-}
 struct Access {
   std::bitset<512> reads, writes;
   bool conflicts(const Access &next) const {
@@ -99,32 +92,27 @@ inline std::optional<Access> footprint(const Instruction &inst, uint32_t num_vgp
   return access;
 }
 struct Stats {
-  uint64_t windows = 0, mma = 0, loads = 0, stores = 0, inline_overlap = 0;
-  uint64_t hazards = 0, boundaries = 0, full = 0, memory_order = 0, waits = 0;
-  uint64_t retired_mma = 0, retired_memory = 0;
+  uint64_t windows = 0, mma = 0, inline_overlap = 0;
+  uint64_t hazards = 0, boundaries = 0, full = 0, retired_mma = 0;
   ~Stats() { flush(); }
   void flush() {
     if (windows)
       std::fprintf(stderr,
-                   "RJ_ASYNC windows=%llu mma=%llu loads=%llu stores=%llu inline_overlap=%llu "
-                   "hazards=%llu boundaries=%llu full=%llu memory_order=%llu waits=%llu "
-                   "retired_mma=%llu retired_memory=%llu\n",
-                   (unsigned long long)windows, (unsigned long long)mma, (unsigned long long)loads,
-                   (unsigned long long)stores, (unsigned long long)inline_overlap,
-                   (unsigned long long)hazards, (unsigned long long)boundaries,
-                   (unsigned long long)full, (unsigned long long)memory_order,
-                   (unsigned long long)waits, (unsigned long long)retired_mma,
-                   (unsigned long long)retired_memory);
-    windows = mma = loads = stores = inline_overlap = hazards = boundaries = full = 0;
-    memory_order = waits = retired_mma = retired_memory = 0;
+                   "RJ_ASYNC windows=%llu mma=%llu inline_overlap=%llu "
+                   "hazards=%llu boundaries=%llu full=%llu retired_mma=%llu\n",
+                   (unsigned long long)windows, (unsigned long long)mma,
+                   (unsigned long long)inline_overlap, (unsigned long long)hazards,
+                   (unsigned long long)boundaries, (unsigned long long)full,
+                   (unsigned long long)retired_mma);
+    windows = mma = inline_overlap = hazards = boundaries = full = retired_mma = 0;
   }
 };
 inline thread_local Stats stats;
 } // namespace async_execution
 
-// Publication follows issue order. Completion policy is separate: memory can
-// require an ordered prefix, while independent arithmetic releases only its
-// own dependencies. Retirement always runs on the instruction allocator's owner.
+// Publication follows issue order. Completion can require an ordered prefix
+// or release independent arithmetic dependencies individually. Retirement
+// always runs on the instruction allocator's owner.
 class AsyncInstructionQueue {
 public:
   using Access = async_execution::Access;
@@ -224,9 +212,7 @@ public:
   AsyncInstructionWindow(ComputeUnitCore &cu, Wavefront &wf)
       : cu_(cu), wf_(wf), has_accvgprs_(cu.arch() == ROCJITSU_CODE_ARCH_CDNA3 ||
                                         cu.arch() == ROCJITSU_CODE_ARCH_CDNA4) {}
-  bool pending() const {
-    return (arithmetic_ && !arithmetic_->empty()) || (memory_ && !memory_->empty());
-  }
+  bool pending() const { return arithmetic_ && !arithmetic_->empty(); }
   bool stopped() const { return stopped_; }
 
   void before(const Instruction &inst) {
@@ -242,16 +228,6 @@ public:
       stopped_ = true;
       return;
     }
-    // One data-cache access at a time per CU. Even a synchronous next access
-    // waits: this preserves L1 ownership and same-address load/store ordering.
-    // Separate load/store queues can replace this stronger ordering once cache
-    // ownership and inter-queue memory dependencies have been implemented.
-    if (inst.is_memory_op() && memory_ && !memory_->empty()) {
-      ++async_execution::stats.memory_order;
-      memory_->drain();
-    }
-    if (memory_ && memory_->wait_conflicts(*access))
-      ++async_execution::stats.hazards;
     if (arithmetic_ && arithmetic_->wait_conflicts(*access))
       ++async_execution::stats.hazards;
     check_errors();
@@ -261,8 +237,7 @@ public:
 
   bool submit_mma(Instruction *inst) {
     namespace ae = async_execution;
-    if (stopped_ || matrix_coexecution::mode() == 5 ||
-        !matrix_coexecution::async_candidate(inst->mnemonic()))
+    if (stopped_ || !matrix_coexecution::async_candidate(inst->mnemonic()))
       return false;
     auto access = ae::footprint(*inst, wf_.num_vgprs(), has_accvgprs_);
     const int sources = inst->num_src_operands();
@@ -300,71 +275,14 @@ public:
     return false;
   }
 
-  bool submit_memory(Instruction *inst) {
-    namespace ae = async_execution;
-    if (stopped_ || cu_.arch() != ROCJITSU_CODE_ARCH_CDNA5 || matrix_coexecution::mode() == 4 ||
-        !ae::ordinary_memory(inst->mnemonic()) || !inst->data() ||
-        inst->data()->tag() != GLOBAL_MEM)
-      return false;
-    auto &d = *inst->data_as<VectorMemState>();
-    if (d.atomic_op != AtomicOp::NONE || d.lds_dst || d.transpose || d.scratch_swizzle ||
-        d.d16_hi || d.d16_lo || d.wf_size * d.elem_size * d.num_elems < ae::memory_min_bytes())
-      return false;
-    assert(!memory_ || memory_->empty());
-    if (!wf_.wait_counters().empty())
-      return false;
-    if (!matrix_coexecution::shared_pool().available()) {
-      ++ae::stats.full;
-      return false;
-    }
-    materialize();
-    Access access;
-    if (d.is_load) {
-      const uint32_t count = std::max(1u, (d.elem_size * d.num_elems + 3) / 4);
-      if (d.dst_reg_base < wf_.vgpr_alloc().base)
-        return false;
-      const auto reg = d.dst_reg_base - wf_.vgpr_alloc().base;
-      if (reg >= 256 || count > 256 - reg)
-        return false;
-      for (uint32_t i = 0; i != count; ++i)
-        access.writes.set(reg + i);
-    }
-    memory_inst_ = inst;
-    // ISA execution already captured addresses, masks and store bytes. Only
-    // access runs on a helper; writeback and counter release happen at retirement.
-    if (!memory_)
-      memory_.emplace(this, retire_memory, AsyncInstructionQueue::Completion::Ordered);
-    if (!memory_->submit(inst, memory_callback_, this, access)) {
-      memory_inst_ = nullptr;
-      ++ae::stats.full;
-      return false;
-    }
-    cu_.global_mem_pipeline_.begin_async_access(*inst, wf_);
-    if (d.is_load)
-      ++ae::stats.loads;
-    else
-      ++ae::stats.stores;
-    started();
-    return true;
-  }
-
   void poll() {
     if (arithmetic_)
       arithmetic_->poll();
-    if (memory_)
-      memory_->poll();
-    check_errors();
-  }
-  void wait_memory() {
-    if (memory_)
-      memory_->drain();
     check_errors();
   }
   void drain() {
     if (arithmetic_)
       arithmetic_->drain();
-    if (memory_)
-      memory_->drain();
     check_errors();
   }
   void abandon() noexcept {
@@ -378,12 +296,6 @@ private:
   static void retire_arithmetic(void *, Instruction *inst, bool) {
     delete inst;
     ++async_execution::stats.retired_mma;
-  }
-  static void retire_memory(void *owner, Instruction *inst, bool failed) {
-    auto &window = *static_cast<AsyncInstructionWindow *>(owner);
-    window.memory_inst_ = nullptr;
-    window.cu_.global_mem_pipeline_.retire_async_access(inst, window.wf_, failed);
-    ++async_execution::stats.retired_memory;
   }
   void started() {
     if (!started_) {
@@ -405,9 +317,6 @@ private:
   }
   void check_errors() {
     auto error = arithmetic_ ? arithmetic_->take_error() : std::exception_ptr{};
-    auto memory_error = memory_ ? memory_->take_error() : std::exception_ptr{};
-    if (!error)
-      error = memory_error;
     if (error) {
       abandon();
       std::rethrow_exception(error);
@@ -415,14 +324,15 @@ private:
   }
   ComputeUnitCore &cu_;
   Wavefront &wf_;
-  std::optional<AsyncInstructionQueue> arithmetic_, memory_;
-  Instruction *memory_inst_ = nullptr;
-  Instruction memory_callback_{"host_memory_access", [](Instruction &, void *context) {
-                                 auto &window = *static_cast<AsyncInstructionWindow *>(context);
-                                 window.cu_.global_mem_pipeline_.run_async_access(
-                                     *window.memory_inst_, window.wf_);
-                               }};
+  std::optional<AsyncInstructionQueue> arithmetic_;
   bool has_accvgprs_;
   bool stopped_ = false, started_ = false, materialized_ = false;
+};
+
+// An issuer with no eligible instruction initializes only the optional's tag.
+// Queue state is constructed after the first eligible instruction has been
+// decoded, and still lives on the issuing thread's stack.
+struct AsyncInstructionWindowStorage {
+  std::optional<AsyncInstructionWindow> window;
 };
 } // namespace rocjitsu::amdgpu
