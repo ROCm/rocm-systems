@@ -1270,9 +1270,17 @@ protected:
     // flight at once a per-slot seed would alias into another worker's patterns
     // modulo 256, so every slot carries this worker's single pattern and a payload
     // arriving on the wrong connection is a mismatch rather than a clean pass.
+    // The guards are optional and taken rather than left to the caller because this
+    // helper is the one that knows whether a slot is still in flight: a drain that times
+    // out leaves that request live, and the caller's WorkerHostBuffer would then
+    // deregister the memory and free it while the device can still write into the slot.
+    // Callers that pass them get the buffer retained in that case instead, which is the
+    // cheaper mistake on a test that is failing anyway.
     ThreadResult WorkerBatchPostDrain(int rank, ConnectionPair& pair, void* buffer,
                                       size_t slotSize, int slots, void* mhandle, int pattern,
-                                      const std::string& where) {
+                                      const std::string& where,
+                                      NetMHandleWorkerGuard* registration = nullptr,
+                                      HostBufferAutoGuard* allocation = nullptr) {
         ThreadResult result;
         std::vector<void*> requests(slots, nullptr);
 
@@ -1323,10 +1331,13 @@ protected:
             firstFailure.msg = where + "slot " + std::to_string(posted) + ": post failed: "
                                + result.msg;
         }
+        int outstanding = 0;
         for (int i = 0; i < posted; i++) {
             int sizes[1] = {0};
             const ThreadResult waited = WorkerWait(requests[i], sizes, budgetMs(/*floorMs=*/1000));
             if (!waited.ok) {
+                // A timed-out wait does not cancel the work, so this slot is still live.
+                outstanding++;
                 if (firstFailure.ok) {
                     firstFailure = waited;
                     firstFailure.msg = where + "slot " + std::to_string(i) + ": drain failed: "
@@ -1353,6 +1364,16 @@ protected:
                 }
                 continue;
             }
+        }
+
+        // Nothing here can prove those requests are gone, so the memory they may still
+        // reference is kept rather than freed under them.
+        if (outstanding > 0 && (registration || allocation)) {
+            firstFailure.msg += "; " + std::to_string(outstanding)
+                                + " slot(s) were still outstanding, so the buffer and its "
+                                  "registration are retained";
+            if (registration) registration->release();
+            if (allocation) allocation->release();
         }
         return firstFailure;
     }

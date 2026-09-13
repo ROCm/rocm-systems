@@ -698,7 +698,8 @@ TEST_F(NetIbMPITest, RequestSlotExhaustion) {
                 for (int round = 0; round < kRounds; round++) {
                     result = WorkerBatchPostDrain(rank, pair, buffer, sz, kMaxReqsPerComm, mh,
                                                   workerPattern,
-                                                  "round " + std::to_string(round) + " ");
+                                                  "round " + std::to_string(round) + " ",
+                                                  &h.mhandleGuard, &h.bufferGuard);
                     if (!result.ok) return result;
                 }
 
@@ -2080,7 +2081,8 @@ TEST_F(NetIbMPITest, RapidRecvPostDrain) {
                 for (int cycle = 0; cycle < kThreadedCycles; cycle++) {
                     result = WorkerBatchPostDrain(rank, pair, buffer, sz, kDrainBatch, mh,
                                                   workerPattern,
-                                                  "cycle " + std::to_string(cycle) + " ");
+                                                  "cycle " + std::to_string(cycle) + " ",
+                                                  &h.mhandleGuard, &h.bufferGuard);
                     if (!result.ok) return result;
                 }
                 return result;
