@@ -14,6 +14,7 @@
 #include "comm.h"
 
 #include "nccl_device.h"
+#include "nccl_device/gin/anvil_sdma/gin_anvil_sdma_device_host_common.h"
 
 #include <algorithm>
 #include <chrono>
@@ -165,6 +166,22 @@ std::string vaSignalTestSkipReason() {
 }
 
 // The GIN-SDMA alltoall exists only on the SDMA backend.
+// BarrierFence uses kBytes=4096 to exercise the SDMA queue; a raised
+// NCCL_GIN_ANVIL_SDMA_THRESHOLD sends the traffic down the IPC fallback instead.
+std::string sdmaBarrierFenceEnvSkipReason() {
+  if (requestedGinType() != NCCL_NET_DEVICE_GIN_ANVIL_SDMA) return "";
+  constexpr size_t kBarrierFenceBytes = 4096;
+  size_t threshold = NCCL_GIN_ANVIL_SDMA_THRESHOLD_DEFAULT;
+  if (const char* e = std::getenv("NCCL_GIN_ANVIL_SDMA_THRESHOLD"); e && e[0] && *e != '-') {
+    char* end = nullptr;
+    unsigned long long v = std::strtoull(e, &end, 10);
+    if (end != e && *end == '\0') threshold = static_cast<size_t>(v);
+  }
+  if (threshold >= kBarrierFenceBytes)
+    return "BarrierFence tests assume NCCL_GIN_ANVIL_SDMA_THRESHOLD is below 4096 bytes";
+  return "";
+}
+
 std::string sdmaInternalA2AEnvSkipReason() {
   if (requestedGinType() != NCCL_NET_DEVICE_GIN_ANVIL_SDMA)
     return "GIN-SDMA alltoall requires NCCL_GIN_TYPE=" +
@@ -1589,6 +1606,8 @@ __global__ void barrierFenceVisibilityKernel(
 void GinMPIDeviceTests::runBarrierFenceVisibility(
     BarrierFenceOperation operation, bool allContexts, bool defaultFence) {
   if (auto reason = ginProxyTestSkipReason(); !reason.empty())
+    GTEST_SKIP() << reason;
+  if (auto reason = sdmaBarrierFenceEnvSkipReason(); !reason.empty())
     GTEST_SKIP() << reason;
   if (auto reason = singleNodeReason(); !reason.empty())
     GTEST_SKIP() << reason;

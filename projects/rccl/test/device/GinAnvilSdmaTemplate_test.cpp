@@ -851,6 +851,53 @@ __global__ void kernelPutValueIpcSignalQuiesce(TemplateHarness* h, uint64_t valu
       ncclGinSignalInc, 0, false, nullptr, cuda::thread_scope_system, cuda::thread_scope_system);
 }
 
+// H24: counter-only windowed put below the SDMA threshold still resolves the
+// peer queue via the || hasCounter disjunct so fenceBeforeSignal can quiet.
+__global__ void kernelPutCounterOnlyIpcQuiesce(TemplateHarness* h, size_t bytes) {
+  if (threadIdx.x != 0) return;
+  ncclGinCtx ginCtx{};
+  ginCtx.handle = &h->ctx;
+  ginCtx.nRanks = 2;
+  ncclGinSignalDescriptor sig{};
+  sig.type = NCCL_GIN_SIGNAL_TYPE_NONE;
+  ncclGinApi_Put<NCCL_NET_DEVICE_GIN_ANVIL_SDMA>::call(
+      ginCtx, ncclCoopThread{}, 1, true, reinterpret_cast<ncclGinWindow_t>(&h->dstMh), 0,
+      reinterpret_cast<ncclGinWindow_t>(&h->srcMh), 0, bytes, sig, ncclGinSignalInc, 0, true, 0, false,
+      nullptr, cuda::thread_scope_system, cuda::thread_scope_system);
+}
+
+TEST_F(GinAnvilSdmaTemplateTest, Put_WindowedIpcPutCounterOnlyResolvesQueue) {
+  constexpr int kN = 64;
+  std::vector<uint8_t> pat(kN);
+  for (int i = 0; i < kN; ++i) pat[static_cast<size_t>(i)] = static_cast<uint8_t>(0x33 + i);
+  DeviceBuffer<uint8_t> d_src(static_cast<size_t>(kN));
+  DeviceBuffer<uint8_t> d_dst(static_cast<size_t>(kN));
+  d_src.copyFrom(pat);
+  d_dst.zero();
+  DeviceBuffer<uint64_t> d_counters(1);
+  d_counters.zero();
+  DeviceBuffer<ncclGinAnvilIpcBufEntry> d_entry(1);
+  DeviceBuffer<sdma_anvil::SdmaQueueDeviceHandle> d_q(1);
+  DeviceBuffer<sdma_anvil::SdmaQueueDeviceHandle*> d_row(2);
+  DeviceBuffer<TemplateHarness> d_h(1);
+  TemplateHarness host{};
+  uploadHarness(&d_h, &host, &d_src, &d_dst, &d_entry, &d_q, &d_row, 128);
+  host.ctx.counters = d_counters.ptr;
+  mapIpcTo(&host, &d_entry, &d_dst, static_cast<size_t>(kN));
+  d_h.upload(host);
+  resetQuietCount();
+  resetThreadfenceCount();
+  kernelPutCounterOnlyIpcQuiesce<<<1, 1>>>(d_h.ptr, static_cast<size_t>(kN));
+  syncAndCheck();
+  EXPECT_EQ(d_counters.download(), 1ULL);
+  EXPECT_EQ(readQuietCount(), 1ULL);
+  EXPECT_EQ(readThreadfenceCount(), 1ULL);
+  auto got = d_dst.copyTo();
+  for (int i = 0; i < kN; ++i) {
+    EXPECT_EQ(got[static_cast<size_t>(i)], pat[static_cast<size_t>(i)]);
+  }
+}
+
 TEST_F(GinAnvilSdmaTemplateTest, PutValue_WindowedIpcPutStrongSignalResolvesQueue) {
   constexpr uint64_t kVal = 0xAABBCCDDEEFF0011ULL;
   DeviceBuffer<uint8_t> d_dst(sizeof(uint64_t));
