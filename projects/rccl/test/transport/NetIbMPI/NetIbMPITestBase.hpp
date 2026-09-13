@@ -1875,9 +1875,6 @@ protected:
 
     // Bounded gate for the failure point: 30 s is well past the setup a sibling
     // still has to finish, and a worker that already failed must not hang the rest.
-    // One name for the 30 s worker gate, shared by every rendezvous and flag wait in
-    // the suite, so raising it is one edit.
-    static constexpr int kWorkerGatePolls = 3000;  // 3000 * 10ms = 30s
 
     // Failover with requests already in flight. isend only gets a request once the
     // receiver has published a FIFO slot, so "all sends posted" implies "all receives
@@ -2738,6 +2735,12 @@ protected:
     static constexpr int kMinFourProcesses = 4;
     // Timeout for stress tests
     static constexpr int kStressTimeoutMs  = 60000;   // 60s
+
+    // One name for the 30 s worker gate, shared by every rendezvous and flag wait in the
+    // suite, so raising it is one edit. Declared outside the fault-injection block that
+    // most of its users live in: the stress tests use it too and are compiled whenever
+    // MPI tests are, so a -DFAULT_INJECTION=OFF build had no declaration for it.
+    static constexpr int kWorkerGatePolls = 3000;    // 3000 * 10ms = 30s
 
     // ── RDMA resource leak detection ─────────────────────────────────
     struct RdmaResourceCounts {
