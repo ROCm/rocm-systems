@@ -861,8 +861,8 @@ TEST_F(GinAnvilPluginTest, ConnCheck_UsesLsaTeamForBootstrap) {
   HipAllocation devLsa(rawDevLsa);
   GinAnvilPluginStubs::SetLsaSelfAddr(devLsa.get());
   mockComm_.get()->devrState.lsaSelf = 1;
-  mockComm_.get()->lsaRanks[0] = 1;
-  mockComm_.get()->lsaRanks[1] = 0;
+  mockComm_.lsaRanks[0] = 1;
+  mockComm_.lsaRanks[1] = 0;
 
   void* ictx = nullptr;
   void* coll = nullptr;
