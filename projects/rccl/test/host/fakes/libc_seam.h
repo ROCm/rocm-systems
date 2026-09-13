@@ -25,6 +25,9 @@
 // Not seamed here: getopt_long, and the str*/snprintf family. Their behaviour
 // is usually part of what the unit is being tested for, and faking them would
 // assert the test's model of libc rather than the unit's use of it.
+//
+// fprintf is seamed but not swappable per test: it always forwards to the real vfprintf so stderr output still
+// happens, and only records the call count and the FILE* argument, never the formatted text.
 
 // The headers that declare the names renamed below, so this file satisfies its own ordering rule and a unit following
 // the recipe above cannot get it wrong by forgetting one. Include guards make the includer's own copies free.
@@ -51,6 +54,7 @@ size_t micro_fwrite(const void*, size_t, size_t, FILE*);
 int micro_fflush(FILE*);
 void micro_perror(const char*);
 void micro_exit(int) __attribute__((noreturn));
+int micro_fprintf(FILE*, const char*, ...);
 }  // extern "C"
 
 #define write micro_write
@@ -67,3 +71,4 @@ void micro_exit(int) __attribute__((noreturn));
 #define fflush micro_fflush
 #define perror micro_perror
 #define exit micro_exit
+#define fprintf micro_fprintf

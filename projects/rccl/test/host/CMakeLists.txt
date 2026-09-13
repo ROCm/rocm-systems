@@ -709,9 +709,8 @@ target_link_libraries(rccl-HostUnitTests PRIVATE
 # rccl-UnitTestsMicro: same host-only model as rccl-HostUnitTests (hipcc
 # --offload-host-only, -no-hip-rt), built from the hipified snapshot. It
 # #includes each unit-under-test production .cc directly (via the *_CC_PATH
-# definitions below) and
-# satisfies every HIP/nccl symbol from fakes/ rather than librccl.so or the
-# HIP runtime.
+# definitions below) and satisfies every HIP/nccl symbol from fakes/ rather
+# than librccl.so or the HIP runtime.
 add_test_executable(rccl-UnitTestsMicro ${RCCL_MICRO_TEST_SOURCES})
 
 target_compile_options(rccl-UnitTestsMicro PRIVATE

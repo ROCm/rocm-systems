@@ -6,7 +6,7 @@
 
 #include "fakes/libc_fakes.h"
 
-// Puts the seam's 14 micro_* prototypes in scope so the compiler checks them against the definitions at the bottom of
+// Puts the seam's 15 micro_* prototypes in scope so the compiler checks them against the definitions at the bottom of
 // this file. Without it the two lists are hand-maintained and both extern "C", so a drifted parameter type would link
 // cleanly and corrupt arguments at run time. Include the undef half immediately: this file's defaults call real libc.
 #include "fakes/libc_seam.h"
@@ -19,6 +19,7 @@
 #include <algorithm>
 #include <cassert>
 #include <cerrno>
+#include <cstdarg>
 #include <cstdlib>
 #include <cstring>
 
@@ -31,6 +32,7 @@ std::string g_stdoutData;
 std::vector<MicroFwriteCall> g_fwriteCalls;
 std::vector<MicroPerrorCall> g_perrorCalls;
 std::vector<int> g_closedFds;
+std::vector<FILE*> g_fprintfCalls;
 std::vector<int> g_writtenFds;
 std::vector<int> g_readFds;
 std::vector<MicroReadStep> g_readScript;
@@ -239,6 +241,7 @@ void ResetLibcFakes() {
   g_fwriteCalls.clear();
   g_perrorCalls.clear();
   g_closedFds.clear();
+  g_fprintfCalls.clear();
   g_writtenFds.clear();
   g_readFds.clear();
   g_readScript.clear();
@@ -286,6 +289,17 @@ size_t micro_fwrite(const void* ptr, size_t size, size_t nmemb, FILE* stream) {
 }
 int micro_fflush(FILE* stream) { return g_fflush(stream); }
 void micro_perror(const char* prefix) { g_perror(prefix); }
+
+// Always forwards to the real vfprintf so stderr output still happens; records only the FILE* and never the
+// formatted text, since no test needs the diagnostic's wording, only whether and where one was printed.
+int micro_fprintf(FILE* stream, const char* fmt, ...) {
+  g_fprintfCalls.push_back(stream);
+  va_list args;
+  va_start(args, fmt);
+  const int ret = vfprintf(stream, fmt, args);
+  va_end(args);
+  return ret;
+}
 
 // noreturn: the default throws MicroExit. If a hook ever returns normally
 // the unit would fall through a path production treats as unreachable, so make

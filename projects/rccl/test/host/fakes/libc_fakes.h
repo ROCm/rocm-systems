@@ -96,6 +96,9 @@ extern std::string g_stdoutData;        // every byte the unit fwrite()'d, which
 extern std::vector<MicroFwriteCall> g_fwriteCalls;   // every fwrite(), in order, with its stream
 extern std::vector<MicroPerrorCall> g_perrorCalls;  // every perror(), in order; prefer this over matching stderr text
 extern std::vector<int> g_closedFds;    // fds passed to close(), in order
+// FILE* argument of every fprintf() the unit made, in order. Never the formatted text: fprintf always forwards to
+// the real vfprintf, so this only proves whether and where a diagnostic was printed, not what it said.
+extern std::vector<FILE*> g_fprintfCalls;
 // fds passed to write() and read(), in order. Without them a unit writing to the wrong descriptor still produces
 // the expected bytes and no test notices.
 extern std::vector<int> g_writtenFds;
