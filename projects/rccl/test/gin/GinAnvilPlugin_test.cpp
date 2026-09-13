@@ -817,4 +817,67 @@ TEST_F(GinAnvilPluginTest, ConnCheck_FailedBindRetriesGate) {
   stopGin(ictx, coll, ginCtx);
 }
 
+// A qualifying bind must still run the gate after an earlier ineligible bind on
+// the same comm (nSignals < nRanks must not mark the comm checked).
+TEST_F(GinAnvilPluginTest, ConnCheck_SkipThenQualifyingBindStillRunsGate) {
+  void* rawDevLsa = nullptr;
+  ASSERT_EQ(hipMalloc(&rawDevLsa, sizeof(uint64_t) * 2), hipSuccess);
+  HipAllocation devLsa(rawDevLsa);
+  GinAnvilPluginStubs::SetLsaSelfAddr(devLsa.get());
+  GinAnvilPluginStubs::SetBootstrapNranks(2);
+  mockComm_.get()->devrState.lsaSize = 2;
+
+  void* ictx = nullptr;
+  initCtx(&ictx);
+  void* coll = nullptr;
+  connectColl(ictx, &coll, 2);
+
+  ncclGinConfig_t smallCfg{};
+  smallCfg.nSignals = 1;
+  void* smallGin = nullptr;
+  ncclNetDeviceHandle_v11_t* smallHandle = nullptr;
+  ASSERT_EQ(plugin_.createContext(coll, &smallCfg, &smallGin, &smallHandle), ncclSuccess);
+  char arena[4096] = {};
+  EXPECT_EQ(ncclGinAnvilBindResourceWindowSignals(mockComm_.get(), arena, 0, 1, 1), ncclSuccess);
+  EXPECT_EQ(GinAnvilPluginStubs::GetConnCheckWriteCalls(), 0);
+  EXPECT_EQ(GinAnvilPluginStubs::GetConnCheckVerifyCalls(), 0);
+  ASSERT_EQ(plugin_.destroyContext(smallGin), ncclSuccess);
+
+  ncclGinConfig_t fullCfg{};
+  fullCfg.nSignals = 2;
+  void* fullGin = nullptr;
+  ncclNetDeviceHandle_v11_t* fullHandle = nullptr;
+  ASSERT_EQ(plugin_.createContext(coll, &fullCfg, &fullGin, &fullHandle), ncclSuccess);
+  EXPECT_EQ(ncclGinAnvilBindResourceWindowSignals(mockComm_.get(), arena, 0, 1, 2), ncclSuccess);
+  EXPECT_EQ(GinAnvilPluginStubs::GetConnCheckWriteCalls(), 1);
+  EXPECT_EQ(GinAnvilPluginStubs::GetConnCheckVerifyCalls(), 1);
+
+  stopGin(ictx, coll, fullGin);
+}
+
+TEST_F(GinAnvilPluginTest, ConnCheck_UsesLsaTeamForBootstrap) {
+  void* rawDevLsa = nullptr;
+  ASSERT_EQ(hipMalloc(&rawDevLsa, sizeof(uint64_t) * 2), hipSuccess);
+  HipAllocation devLsa(rawDevLsa);
+  GinAnvilPluginStubs::SetLsaSelfAddr(devLsa.get());
+  mockComm_.get()->devrState.lsaSelf = 1;
+  mockComm_.get()->lsaRanks[0] = 1;
+  mockComm_.get()->lsaRanks[1] = 0;
+
+  void* ictx = nullptr;
+  void* coll = nullptr;
+  void* ginCtx = nullptr;
+  startTwoRankGin(&ictx, &coll, &ginCtx);
+
+  char arena[4096] = {};
+  EXPECT_EQ(ncclGinAnvilBindResourceWindowSignals(mockComm_.get(), arena, 0, 1, 2), ncclSuccess);
+  EXPECT_EQ(GinAnvilPluginStubs::GetLastIntraNodeAllGatherRank(), 1);
+  EXPECT_EQ(GinAnvilPluginStubs::GetLastIntraNodeAllGatherNranks(), 2);
+  EXPECT_EQ(GinAnvilPluginStubs::GetLastIntraNodeAllGatherRanks(), std::vector<int>({1, 0}));
+  EXPECT_EQ(GinAnvilPluginStubs::GetLastIntraNodeBarrierRank(), 1);
+  EXPECT_EQ(GinAnvilPluginStubs::GetLastIntraNodeBarrierRanks(), std::vector<int>({1, 0}));
+
+  stopGin(ictx, coll, ginCtx);
+}
+
 }  // namespace RcclUnitTesting

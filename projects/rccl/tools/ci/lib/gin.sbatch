@@ -138,17 +138,37 @@ fi
 librccl="${rccl_prefix}/lib/librccl.so"
 [[ -f "${librccl}" ]] || librccl="${rccl_prefix}/lib/librccl.so.1"
 # The #10930 regression was an unlinked conn-check fatbin. Pin the two kernel
-# names in the installed library, not in the unit-test binary that compiles the
-# device TU itself.
-if ! strings -a "${librccl}" | grep -q 'ginAnvilConnWriteKernel'; then
-  echo "ERROR: ginAnvilConnWriteKernel missing from ${librccl} (conn-check not device-linked)" >&2
-  exit 1
-fi
-if ! strings -a "${librccl}" | grep -q 'ginAnvilConnCheckKernel'; then
-  echo "ERROR: ginAnvilConnCheckKernel missing from ${librccl} (conn-check not device-linked)" >&2
-  exit 1
-fi
-echo "    conn-check kernels present in ${librccl}"
+# names in the shipped .hip_fatbin section, not host stubs / registration text.
+assert_conn_check_kernels_in_fatbin() {
+  local lib="$1"
+  if ! readelf -S "${lib}" 2>/dev/null | grep -q '\.hip_fatbin'; then
+    echo "ERROR: ${lib} has no .hip_fatbin section" >&2
+    exit 1
+  fi
+  local fatbin
+  fatbin="$(mktemp)"
+  if llvm-objcopy -O binary --only-section=.hip_fatbin "${lib}" "${fatbin}" 2>/dev/null \
+     || objcopy -O binary --only-section=.hip_fatbin "${lib}" "${fatbin}" 2>/dev/null; then
+    :
+  else
+    echo "ERROR: could not extract .hip_fatbin from ${lib}" >&2
+    rm -f "${fatbin}"
+    exit 1
+  fi
+  if ! strings -a "${fatbin}" | grep -q 'ginAnvilConnWriteKernel'; then
+    echo "ERROR: ginAnvilConnWriteKernel missing from ${lib} .hip_fatbin (conn-check not device-linked)" >&2
+    rm -f "${fatbin}"
+    exit 1
+  fi
+  if ! strings -a "${fatbin}" | grep -q 'ginAnvilConnCheckKernel'; then
+    echo "ERROR: ginAnvilConnCheckKernel missing from ${lib} .hip_fatbin (conn-check not device-linked)" >&2
+    rm -f "${fatbin}"
+    exit 1
+  fi
+  rm -f "${fatbin}"
+}
+assert_conn_check_kernels_in_fatbin "${librccl}"
+echo "    conn-check kernels present in ${librccl} .hip_fatbin"
 
 echo "==> [4/6] build RCCL GIN unit tests (GIN_ANVIL_UNIT_TESTS=ON)"
 (
