@@ -2,9 +2,16 @@
 // SPDX-License-Identifier: MIT
 
 #include "decode_test_util.h"
+#include "mma_test_util.h"
 #include "rocjitsu/isa/arch/amdgpu/cdna4/isa.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna4/builders.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna4/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/opcodes.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna5/operand.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna4/builders.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna4/opcodes.h"
+#include "rocjitsu/isa/arch/amdgpu/rdna3/isa.h"
 #include "rocjitsu/isa/arch/amdgpu/rdna4/isa.h"
 #include "rocjitsu/vm/amdgpu/async_scoreboard.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
@@ -12,6 +19,7 @@
 #include "rocjitsu/vm/amdgpu/l2_cache.h"
 #include "rocjitsu/vm/amdgpu/matrix_coexecution.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
+#include <chrono>
 
 #include <gtest/gtest.h>
 
@@ -27,6 +35,8 @@ namespace {
 using namespace rocjitsu;
 namespace mc = amdgpu::matrix_coexecution;
 static_assert(HasLargeWmma<cdna5::Isa>);
+static_assert(HasAsyncMma<cdna5::Isa> && HasAsyncMma<cdna4::Isa> && HasAsyncMma<rdna4::Isa>);
+static_assert(!HasAsyncMma<rdna3::Isa>);
 static_assert(!HasLargeWmma<cdna4::Isa>);
 static_assert(!HasLargeWmma<rdna4::Isa>);
 static_assert(
@@ -40,10 +50,10 @@ static_assert(amdgpu::IsaExecComputeUnit<simdojo::ExecMode::FUNCTIONAL,
                                          cdna5::Isa>::supports_async_execution);
 static_assert(
     !amdgpu::IsaExecComputeUnit<simdojo::ExecMode::CLOCKED, cdna5::Isa>::supports_async_execution);
-static_assert(!amdgpu::IsaExecComputeUnit<simdojo::ExecMode::FUNCTIONAL,
-                                          cdna4::Isa>::supports_async_execution);
-static_assert(!amdgpu::IsaExecComputeUnit<simdojo::ExecMode::FUNCTIONAL,
-                                          rdna4::Isa>::supports_async_execution);
+static_assert(amdgpu::IsaExecComputeUnit<simdojo::ExecMode::FUNCTIONAL,
+                                         cdna4::Isa>::supports_async_execution);
+static_assert(amdgpu::IsaExecComputeUnit<simdojo::ExecMode::FUNCTIONAL,
+                                         rdna4::Isa>::supports_async_execution);
 
 TEST(MatrixCoexecutionTest, RejectsAllRegisterHazardsButAllowsSharedInputs) {
   const mc::Footprint a{{64, 16}, {{{0, 16}, {32, 8}, {64, 16}}}};
@@ -517,6 +527,173 @@ TEST(AsyncInstructionQueueTest, OrderedCompletionRetainsThePrefixAndRejectsFullP
   queue.drain();
   EXPECT_EQ(state.retired, std::vector<unsigned>({0, 1}));
   EXPECT_TRUE(pool.available());
+}
+
+struct ExtendedMmaCase {
+  rj_code_arch_t arch;
+  std::vector<uint32_t> words;
+  uint32_t input;
+  bool mfma;
+};
+std::vector<ExtendedMmaCase> extended_mma_cases() {
+  std::vector<ExtendedMmaCase> cases;
+  auto add = [&](rj_code_arch_t arch, auto words, uint32_t input, bool mfma) {
+    cases.push_back({arch, {words.begin(), words.end()}, input, mfma});
+  };
+  for (auto opcode : {cdna5::kVWmmaF3216x16x32F16Vop3p, cdna5::kVWmmaF3216x16x32Bf16Vop3p})
+    add(ROCJITSU_CODE_ARCH_CDNA5,
+        cdna5::build_vop3p(opcode,
+                           {.vdst = 64, .src0 = 256, .src1 = 288, .src2 = 320, .opsel_hi = 3}),
+        opcode == cdna5::kVWmmaF3216x16x32F16Vop3p ? 0x3c003c00u : 0x3f803f80u, false);
+  for (auto opcode : {rdna4::kVWmmaF3216x16x16F16Vop3p, rdna4::kVWmmaF3216x16x16Bf16Vop3p})
+    add(ROCJITSU_CODE_ARCH_RDNA4,
+        rdna4::build_vop3p(opcode,
+                           {.vdst = 64, .src0 = 256, .src1 = 288, .src2 = 320, .opsel_hi = 3}),
+        opcode == rdna4::kVWmmaF3216x16x16F16Vop3p ? 0x3c003c00u : 0x3f803f80u, false);
+  for (auto arch : {ROCJITSU_CODE_ARCH_CDNA3, ROCJITSU_CODE_ARCH_CDNA4})
+    for (auto opcode : {cdna4::kVMfmaF3232x32x42bF16Vop3pMfma,
+                        cdna4::kVMfmaF3216x16x44bF16Vop3pMfma, cdna4::kVMfmaF324x4x416bF16Vop3pMfma,
+                        cdna4::kVMfmaF3232x32x8F16Vop3pMfma, cdna4::kVMfmaF3216x16x16F16Vop3pMfma})
+      for (uint8_t acc : {0, 1})
+        add(arch,
+            cdna4::build_vop3p_mfma(
+                opcode, {.vdst = 64, .acc_cd = acc, .src0 = 256, .src1 = 288, .src2 = 320}),
+            0x3c003c00, true);
+  for (auto arch : {ROCJITSU_CODE_ARCH_CDNA3, ROCJITSU_CODE_ARCH_CDNA4})
+    for (auto opcode :
+         {cdna4::kVMfmaF3232x32x12bF32Vop3pMfma, cdna4::kVMfmaF3216x16x14bF32Vop3pMfma})
+      for (uint8_t acc : {0, 1})
+        add(arch,
+            cdna4::build_vop3p_mfma(
+                opcode, {.vdst = 64, .acc_cd = acc, .src0 = 256, .src1 = 288, .src2 = 320}),
+            0x3f800000, true);
+  for (auto opcode : {cdna4::kVMfmaF3232x32x16F16Vop3pMfma, cdna4::kVMfmaF3216x16x32F16Vop3pMfma})
+    for (uint8_t acc : {0, 1})
+      add(ROCJITSU_CODE_ARCH_CDNA4,
+          cdna4::build_vop3p_mfma(
+              opcode, {.vdst = 64, .acc_cd = acc, .src0 = 256, .src1 = 288, .src2 = 320}),
+          0x3c003c00, true);
+  for (unsigned opcode : {45, 46})
+    for (bool inline_scale : {false, true})
+      add(ROCJITSU_CODE_ARCH_CDNA4,
+          mma_test::make_cdna4_mfma_scale_words(opcode, 1, inline_scale ? 242 : 448,
+                                                inline_scale ? 242 : 449, 0, 0, 4, 4, 64, 256, 288,
+                                                320),
+          0x22222222, true);
+  return cases;
+}
+
+TEST(AsyncInstructionQueueTest, SmallerWmmaAndMultiBlockMfmaMatchSerialAcrossRegisterHazards) {
+  constexpr uint64_t pc = 0x250000;
+  for (const auto &c : extended_mma_cases()) {
+    auto decoder = Decoder::create(c.arch);
+    std::unique_ptr<Instruction> first(decode_valid(*decoder, c.words.data()));
+    SCOPED_TRACE(first->mnemonic());
+    SCOPED_TRACE(c.arch);
+    const size_t suffix = c.words.size() - 2;
+    const bool acc = c.mfma && ((c.words[suffix] >> 15) & 1);
+    for (unsigned hazard = 0; hazard != 5; ++hazard) {
+      SCOPED_TRACE(hazard);
+      auto second_words = c.words;
+      const unsigned dst = hazard == 2 ? 0 : hazard == 3 ? 64 : hazard == 4 ? 192 : 128;
+      const unsigned src0 = hazard == 1 ? 320 : 256;
+      second_words[suffix] = (second_words[suffix] & ~255u) | dst;
+      second_words[suffix + 1] =
+          (second_words[suffix + 1] & ~(511u | (511u << 18))) | src0 | ((256u + dst) << 18);
+      if (acc && hazard == 1)
+        second_words[suffix + 1] |= 1u << 27; // Read the first MMA's AccVGPR output.
+      std::unique_ptr<Instruction> second(decode_valid(*decoder, second_words.data()));
+      const auto access = amdgpu::async_execution::footprint(*first, 256, c.mfma);
+      ASSERT_TRUE(access);
+      EXPECT_TRUE(access->writes.test((acc ? 256 : 0) + 64));
+      if (c.words.size() == 4 && (c.words[1] & 511) == 448)
+        EXPECT_TRUE(access->reads.test(192));
+      amdgpu::GpuMemory memory("extended_matrix_memory");
+      amdgpu::L2Cache l2("extended_matrix_l2");
+      amdgpu::ComputeUnitCore::Config config{};
+      config.arch = c.arch;
+      config.num_wf_slots = 1;
+      config.sgprs_per_wf = 106;
+      config.vgprs_per_wf = 256;
+      auto cu = amdgpu::ComputeUnitCore::create("extended_matrix_cu", config, &memory, &l2);
+      auto *wf = cu->dispatch_wf(0, pc, 106, 256);
+      ASSERT_NE(wf, nullptr);
+      const unsigned wave_size = c.mfma ? 64 : 32;
+      const unsigned registers = c.mfma ? 512 : 256;
+      wf->set_exec(c.mfma ? ~uint64_t{0} : 0xffffffff);
+      const auto base = wf->vgpr_alloc().base;
+      auto seed = [&] {
+        for (unsigned reg = 0; reg != registers; ++reg)
+          for (unsigned lane = 0; lane != wave_size; ++lane)
+            cu->write_vgpr(base + reg, lane,
+                           reg < 48                   ? c.input
+                           : reg == 192 || reg == 193 ? 0x7f7f7f7fu
+                                                      : 0);
+      };
+      auto snapshot = [&] {
+        std::vector<uint32_t> result;
+        for (unsigned reg = 0; reg != registers; ++reg)
+          for (unsigned lane = 0; lane != wave_size; ++lane)
+            result.push_back(cu->read_vgpr(base + reg, lane));
+        return result;
+      };
+      seed();
+      ASSERT_TRUE(cu->execute_instruction(first.get(), *wf).succeeded());
+      ASSERT_TRUE(cu->execute_instruction(second.get(), *wf).succeeded());
+      const auto expected = snapshot();
+      seed();
+      std::vector<uint32_t> program = c.words;
+      program.insert(program.end(), second_words.begin(), second_words.end());
+      for (size_t i = 0; i != program.size(); ++i)
+        memory.write32(pc + 4 * i, program[i]);
+      const auto end = pc + 4 * program.size();
+      const auto branch = c.mfma ? cdna4::build_sopp(cdna4::kSBranchSopp, {.simm16 = 0xffff})
+                          : c.arch == ROCJITSU_CODE_ARCH_RDNA4
+                              ? rdna4::build_sopp(rdna4::kSBranchSopp, {.simm16 = 0xffff})
+                              : cdna5::build_sopp(cdna5::kSBranchSopp, {.simm16 = 0xffff});
+      memory.write32(end, branch[0]);
+      for (unsigned steps = 0; wf->pc < end && steps != 3; ++steps)
+        cu->step();
+      EXPECT_EQ(wf->pc, end);
+      EXPECT_EQ(snapshot(), expected);
+    }
+  }
+}
+
+// Cost model input: actual decoded callbacks, with decode/setup outside timing.
+TEST(MatrixHandlerBenchmark, SmallerWmmaMultiBlockAndScaledMfma) {
+  for (const auto &c : extended_mma_cases()) {
+    auto decoder = Decoder::create(c.arch);
+    std::unique_ptr<Instruction> inst(decode_valid(*decoder, c.words.data()));
+    amdgpu::GpuMemory memory("handler_memory");
+    amdgpu::L2Cache l2("handler_l2");
+    amdgpu::ComputeUnitCore::Config config{};
+    config.arch = c.arch;
+    config.num_wf_slots = 1;
+    config.sgprs_per_wf = 106;
+    config.vgprs_per_wf = 256;
+    auto cu = amdgpu::ComputeUnitCore::create("handler_cu", config, &memory, &l2);
+    auto *wf = cu->dispatch_wf(0, 0, 106, 256);
+    ASSERT_NE(wf, nullptr);
+    wf->set_exec(c.mfma ? ~uint64_t{0} : 0xffffffff);
+    for (unsigned reg = 0; reg != (c.mfma ? 512 : 256); ++reg)
+      for (unsigned lane = 0; lane != (c.mfma ? 64 : 32); ++lane)
+        cu->write_vgpr(wf->vgpr_alloc().base + reg, lane,
+                       reg < 48                   ? c.input
+                       : reg == 192 || reg == 193 ? 0x7f7f7f7f
+                                                  : 0);
+    for (int i = 0; i != 100; ++i)
+      inst->execute(*inst, wf);
+    const auto begin = std::chrono::steady_clock::now();
+    for (int i = 0; i != 4000; ++i)
+      inst->execute(*inst, wf);
+    const double ns =
+        std::chrono::duration<double, std::nano>(std::chrono::steady_clock::now() - begin).count() /
+        4000;
+    EXPECT_FALSE(wf->instruction_execution_failed());
+    std::printf("MMA_HANDLER arch=%d name=%s destination=%s ns=%.3f\n", int(c.arch),
+                inst->mnemonic().data(), inst->dst_operand(0)->name().c_str(), ns);
+  }
 }
 
 } // namespace

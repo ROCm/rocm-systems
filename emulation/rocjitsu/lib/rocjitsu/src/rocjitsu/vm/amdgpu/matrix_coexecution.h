@@ -5,6 +5,7 @@
 
 #include "rocjitsu/isa/instruction.h"
 
+#include <algorithm>
 #include <array>
 #include <atomic>
 #include <bit>
@@ -100,6 +101,42 @@ inline bool candidate(std::string_view mnemonic) {
           (mnemonic.ends_with("fp8_fp8") || mnemonic.ends_with("fp8_bf8") ||
            mnemonic.ends_with("bf8_fp8") || mnemonic.ends_with("bf8_bf8"))) ||
          mnemonic == "v_wmma_f32_32x16x128_f4";
+}
+
+// The smaller shapes and MFMA families remain separate opt-in experiments.
+inline unsigned min_wmma_k() {
+  static const unsigned value = [] {
+    const char *text = std::getenv("RJ_ASYNC_WMMA_MIN_K");
+    return static_cast<unsigned>(std::clamp(text ? std::atoi(text) : 64, 16, 64));
+  }();
+  return value;
+}
+inline unsigned mfma_families() {
+  static const unsigned value = [] {
+    const char *text = std::getenv("RJ_ASYNC_MFMA");
+    return static_cast<unsigned>(text ? std::atoi(text) : 0) & 7u;
+  }();
+  return value;
+}
+inline bool async_candidate(std::string_view name) {
+  if (candidate(name))
+    return true;
+  if (name == "v_wmma_f32_16x16x32_f16" || name == "v_wmma_f32_16x16x32_bf16")
+    return min_wmma_k() <= 32;
+  if (name == "v_wmma_f32_16x16x16_f16" || name == "v_wmma_f32_16x16x16_bf16")
+    return min_wmma_k() <= 16;
+  const auto families = mfma_families();
+  if ((families & 1u) &&
+      (name == "v_mfma_f32_32x32x4_2b_f16" || name == "v_mfma_f32_16x16x4_4b_f16" ||
+       name == "v_mfma_f32_4x4x4_16b_f16" || name == "v_mfma_f32_32x32x1_2b_f32" ||
+       name == "v_mfma_f32_16x16x1_4b_f32"))
+    return true;
+  if ((families & 2u) &&
+      (name == "v_mfma_scale_f32_16x16x128_f8f6f4" || name == "v_mfma_scale_f32_32x32x64_f8f6f4"))
+    return true;
+  return (families & 4u) &&
+         (name == "v_mfma_f32_32x32x8_f16" || name == "v_mfma_f32_16x16x16_f16" ||
+          name == "v_mfma_f32_32x32x16_f16" || name == "v_mfma_f32_16x16x32_f16");
 }
 
 struct Range {

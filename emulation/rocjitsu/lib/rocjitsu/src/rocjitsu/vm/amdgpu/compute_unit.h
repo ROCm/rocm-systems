@@ -1317,7 +1317,7 @@ template <simdojo::ExecMode Mode, GpuIsa Isa>
 class IsaExecComputeUnit : public ExecComputeUnit<Mode> {
 public:
   static constexpr bool supports_async_execution =
-      Mode == simdojo::ExecMode::FUNCTIONAL && HasLargeWmma<Isa>;
+      Mode == simdojo::ExecMode::FUNCTIONAL && HasAsyncMma<Isa>;
 
   static_assert(Isa::WF_SIZE_MAX <= 64, "AMDGPU VGPR storage supports at most Wave64");
   using Vgpr = simdojo::VectorReg<Isa::WF_SIZE_MAX, uint32_t>;

@@ -68,6 +68,10 @@ concept GpuIsa = requires {
 template <typename Isa>
 concept HasLargeWmma = GpuIsa<Isa> && requires { requires Isa::HAS_WMMA_K64; };
 
+/// @brief ISA has an opt-in host asynchronous MMA adapter.
+template <typename Isa>
+concept HasAsyncMma = GpuIsa<Isa> && requires { requires Isa::ASYNC_MMA_WAVE_SIZE != 0; };
+
 /// @brief Derived concept: ISA has a dedicated AccVGPR register file.
 ///
 /// @details True for CDNA2/3/4 (`MAX_ACC_VGPRS_PER_WF > 0`).

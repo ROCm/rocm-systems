@@ -68,6 +68,7 @@ public:
 /// S_WAIT_DSCNT / S_WAIT_KMCNT instructions, while the decoder also accepts
 /// LLVM's monolithic S_WAITCNT compatibility encoding.
 struct Isa : amdgpu::RdnaIsaBase {
+  static constexpr uint32_t ASYNC_MMA_WAVE_SIZE = 32; ///< Async MMA adapter wave size.
   using Decoder = rdna4::Decoder;
   using MachineInst = rdna4::MachineInst;
   using OperandType = rdna4::OperandType;
