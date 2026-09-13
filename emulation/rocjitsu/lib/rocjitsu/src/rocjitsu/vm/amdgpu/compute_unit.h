@@ -62,6 +62,7 @@ namespace amdgpu {
 
 class CommandProcessor;
 class AsyncInstructionWindow;
+class MmaAdmissionCache;
 struct AsyncInstructionWindowStorage;
 
 inline constexpr int32_t kWorkgroupBarrierId = -1;
@@ -965,14 +966,14 @@ protected:
 
   /// @brief Fetch, decode, execute one instruction from the given wavefront.
   void issue_instruction(Wavefront *wf);
-  void issue_async_instruction(Wavefront *wf);
+  void issue_async_instruction(Wavefront *wf, MmaAdmissionCache *admission);
   struct NoAsyncWindow {};
   template <bool EnableAsync>
   void issue_instruction_impl(
       Wavefront *wf,
       std::conditional_t<EnableAsync, AsyncInstructionWindow *, NoAsyncWindow> window = {},
       std::conditional_t<EnableAsync, AsyncInstructionWindowStorage *, NoAsyncWindow> storage = {});
-  template <bool EnableAsync> bool step_impl();
+  template <bool EnableAsync> bool step_impl(MmaAdmissionCache *admission = nullptr);
 
   /// @brief Apply any I$ invalidation a debug attach or detach published.
   /// @details Runs on this CU's own thread, which is the I$'s sole accessor.

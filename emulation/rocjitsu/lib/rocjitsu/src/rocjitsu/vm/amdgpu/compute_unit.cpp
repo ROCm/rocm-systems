@@ -5,6 +5,7 @@
 
 #include "rocjitsu/vm/amdgpu/async_scoreboard.h"
 #include "rocjitsu/vm/amdgpu/command_processor.h"
+#include "rocjitsu/vm/amdgpu/mma_admission.h"
 
 #include "rocjitsu/isa/arch/amdgpu/cdna1/isa.h"
 #include "rocjitsu/isa/arch/amdgpu/cdna2/isa.h"
@@ -150,7 +151,12 @@ static std::unique_ptr<ComputeUnitCore> create_functional_cu(std::string name,
     // zero needs no runtime async check even on an eligible ISA.
     struct Asynchronous final : Base {
       using Base::Base;
-      bool step() override { return this->template step_impl<true>(); }
+      std::unique_ptr<MmaAdmissionCache> admission =
+          MmaAdmissionCache::configured_mode() && matrix_coexecution::mode() == 4
+              ? std::make_unique<MmaAdmissionCache>(MmaAdmissionCache::configured_mode(),
+                                                    MmaAdmissionCache::configured_limit())
+              : nullptr;
+      bool step() override { return this->template step_impl<true>(admission.get()); }
     };
     const int mode = matrix_coexecution::mode();
     const bool enabled = HasLargeWmma<Isa>
@@ -733,13 +739,13 @@ void ComputeUnitCore::update_wf_states() {
   }
 }
 
-void ComputeUnitCore::issue_async_instruction(Wavefront *active) {
+void ComputeUnitCore::issue_async_instruction(Wavefront *active, MmaAdmissionCache *admission) {
   const int mode = matrix_coexecution::mode();
   // The default gfx1250 allowlist has a cheap encoding filter. On a cache hit,
   // non-candidates use the ordinary issue body, including its fetchability and
   // debugger checks. A miss or an experimental family uses full decoding below.
   // This hint never executes a cached word or bypasses instruction validation.
-  if (mode == 4 && arch() == ROCJITSU_CODE_ARCH_CDNA5 && matrix_coexecution::min_wmma_k() == 64) {
+  if (mode == 4 && arch() == ROCJITSU_CODE_ARCH_CDNA5 && matrix_coexecution::min_wmma_k() >= 32) {
     uint32_t word;
     if (inst_cache_.peek_word(active->pc, active->process_id(), word)) {
       const uint32_t opcode = word >> 16;
@@ -748,7 +754,10 @@ void ComputeUnitCore::issue_async_instruction(Wavefront *active) {
                               opcode <= encoding + cdna5::kVWmmaF3216x16x64Bf8Bf8Vop3p) ||
                              (opcode >= encoding + cdna5::kVWmmaF3216x16x128Fp8Fp8Vop3p &&
                               opcode <= encoding + cdna5::kVWmmaF3216x16x128Bf8Bf8Vop3p) ||
-                             opcode == encoding + cdna5::kVWmmaF3232x16x128F4Vop3p;
+                             opcode == encoding + cdna5::kVWmmaF3232x16x128F4Vop3p ||
+                             (matrix_coexecution::min_wmma_k() <= 32 &&
+                              (opcode == encoding + cdna5::kVWmmaF3216x16x32F16Vop3p ||
+                               opcode == encoding + cdna5::kVWmmaF3216x16x32Bf16Vop3p));
       if (!candidate) {
         issue_instruction(active);
         if (active->is_halted())
@@ -770,6 +779,7 @@ void ComputeUnitCore::issue_async_instruction(Wavefront *active) {
     return;
   }
   AsyncInstructionWindowStorage storage;
+  storage.admission = admission;
   try {
     unsigned issued = 0;
     do {
@@ -865,15 +875,36 @@ template <bool EnableAsync>
   auto inst_size = static_cast<uint64_t>(inst_size_signed);
 
   if constexpr (EnableAsync) {
-    if (!window && storage && matrix_coexecution::async_candidate(inst->mnemonic()) &&
+    bool may_submit = true;
+    std::optional<uint64_t> issuer;
+    auto *admission = storage ? storage->admission : nullptr;
+    if (window && window->take_issuer(active->pc)) {
+      may_submit = false;
+      if (admission)
+        ++admission->stats.issuer;
+    } else if (admission && matrix_coexecution::async_candidate(inst->mnemonic()) &&
+               admission->applies(*inst) && matrix_coexecution::shared_pool().available()) {
+      MmaAdmissionCache::Words first;
+      std::copy_n(words, first.size(), first.begin());
+      issuer = admission->inspect(
+          *decoder_, inst_cache_, *memory_, active->pc, vmid, active->num_vgprs(),
+          arch() == ROCJITSU_CODE_ARCH_CDNA3 || arch() == ROCJITSU_CODE_ARCH_CDNA4, first);
+      if (admission->observe_only())
+        issuer.reset();
+      else
+        may_submit = issuer.has_value();
+    }
+    if (may_submit && !window && storage && matrix_coexecution::async_candidate(inst->mnemonic()) &&
         matrix_coexecution::width() > 1 && matrix_coexecution::shared_pool().available())
       window = &storage->window.emplace(*this, *active);
     if (window) {
       bool transferred = false;
       try {
         window->before(*inst);
-        if (window->submit_mma(inst)) {
+        if (may_submit && window->submit_mma(inst)) {
           transferred = true;
+          if (issuer)
+            window->reserve_issuer(*issuer);
           // Only count/dispatch observers are admitted. Architectural snapshots
           // and per-handler timing are intentionally unavailable for this mode.
           plugin_group_->onAmdgpuBeforeExecuteInstruction(active->pc, *inst, *active);
@@ -1346,7 +1377,8 @@ void ComputeUnitCore::issue_instruction(Wavefront *active) {
   issue_instruction_impl<false>(active);
 }
 
-template <bool EnableAsync> [[gnu::always_inline]] inline bool ComputeUnitCore::step_impl() {
+template <bool EnableAsync>
+[[gnu::always_inline]] inline bool ComputeUnitCore::step_impl(MmaAdmissionCache *admission) {
   // A wave reaching s_endpgm in this loop retires its workgroup; the guard sends
   // the CP its completion after the lock is released. See WaveStateGuard.
   WaveStateGuard wave_state_lock(*this);
@@ -1366,9 +1398,12 @@ template <bool EnableAsync> [[gnu::always_inline]] inline bool ComputeUnitCore::
       }
       const bool single_step = wf->debug_single_step();
       if constexpr (EnableAsync) {
-        issue_async_instruction(wf.get());
-        if (wf->is_halted())
+        issue_async_instruction(wf.get(), admission);
+        if (wf->is_halted()) {
           matrix_coexecution::stats.flush();
+          if (admission)
+            admission->flush();
+        }
       } else {
         issue_instruction(wf.get());
       }

@@ -67,8 +67,9 @@ gfx1201/gfx942/gfx950 on their ordinary entry. Ordinary CUs inherit that entry;
 unsupported ISAs and clocked execution have no async environment lookups, queue
 checks, helper initialization or per-wave statistics. The active window is constructed lazily on the issuing stack after decoding
 an eligible MMA and checking helper availability. Ineligible instructions skip
-queue construction, polling and draining. The window is passed only to the
-async specialization, preserving the ordinary CU object layout. Adding an ISA requires opting into the property
+queue construction, polling and draining. The window is passed only to the async specialization. Admission adds one
+epoch word to the shared instruction cache, updated only on invalidation;
+its maps and decoded objects belong to the optional adapter. Adding an ISA requires opting into the property
 and supplying its ISA adapter.
 
 The prototype requires functional execution, the adapter's wave size, full EXEC,
@@ -89,9 +90,10 @@ enough to amortize publication, completion and lost locality. K alone is not a
 cost estimate across instruction families, and a long handler still needs
 independent work to overlap. K32 stays synchronous unless explicitly enabled
 for an experiment; its synthetic gain did not generalize to the source-built
-IREE kernel. K16 and MFMA extensions likewise remain separate opt-ins. Bounded
-decode lookahead could refine profitability within an eligible family later;
-it is not required to exclude K32 from the current selection.
+IREE kernel. K16 and MFMA extensions likewise remain separate opt-ins. The optional [cached lookahead admission](mma-admission.md) prototype now
+refines K32 profitability by requiring another independent MMA for the issuer.
+It remains a separate opt-in while evaluating workload and CPU-placement
+sensitivity.
 
 Supported scalar/vector arithmetic can run between these operations. The
 scoreboard resolves actual ISA register selectors, including inline constants
@@ -124,6 +126,8 @@ and architectural tracing with jobs in flight remain unqualified.
 | `RJ_MMA_HELPERS` | Outstanding background MMAs per wave, 0–7 | 1 |
 | `RJ_ASYNC_WINDOW` | Maximum issued instructions before draining, 1–256 | 32 |
 | `RJ_ASYNC_WMMA_MIN_K` | Additional f16/bf16 WMMA selection: 32 enables K32; 16 enables K16 too; original large shapes remain eligible | 64 |
+| `RJ_MMA_ADMISSION` | Cached lookahead: 0 off; 1 observe K32; 2 gate K32; 3 gate all selected MMA | 0 |
+| `RJ_MMA_LOOKAHEAD` | Following instructions examined by admission, 1–16 | 8 |
 | `RJ_ASYNC_MFMA` | Bitmask: 1 multi-block f16/f32; 2 scaled f8f6f4; 4 regular f16 control shapes | 0 |
 | `RJ_MMA_WAIT` | 0 atomic wait; 1 private Linux futex | 1 on Linux |
 | `RJ_MMA_SPINS` | Bounded pause iterations before blocking | 512 |
