@@ -6,6 +6,7 @@
  ************************************************************************/
 
 #include "qp_sharing.h"
+#include "utils.h"
 #include <cassert>
 
 // QP sharing configuration parameters
@@ -37,12 +38,18 @@ void IbCastStripPort(union ncclSocketAddress* addr) {
     }
 }
 
+uint64_t IbCastLocalProcTag(void) {
+    static const uint64_t tag = hashCombine(getHostHash(), getPidHash());
+    return tag;
+}
+
 bool IbCastSharedQpKeyMatch(const IbCastSharedQpKey* a, const IbCastSharedQpKey* b) {
     if (a->ibDevN != b->ibDevN) return false;
     if (a->isSend != b->isSend) return false;
     if (a->groupIdx != b->groupIdx) return false;
     if (a->qpIdx != b->qpIdx) return false;
     if (a->remIbDevIdx != b->remIbDevIdx) return false;
+    if (a->peerProcTag != b->peerProcTag) return false;
     if (memcmp(&a->peerAddr, &b->peerAddr, sizeof(union ncclSocketAddress)) != 0) return false;
     return true;
 }
@@ -102,13 +109,14 @@ void IbCastUnregisterSharedQpLocked(struct IbCastSharedQp* entry) {
 }
 
 int IbCastCountGroupQpSlots(const union ncclSocketAddress* peerAddr,
-    int remIbDevIdx, bool isSend, int groupIdx) {
+    uint64_t peerProcTag, int remIbDevIdx, bool isSend, int groupIdx) {
     int count = 0;
     for (int i = 0; i < g_IbCastSharedQpPoolCount; i++) {
         if (!g_IbCastSharedQpPool[i].used) continue;
         if (g_IbCastSharedQpPool[i].key.isSend != isSend) continue;
         if (g_IbCastSharedQpPool[i].key.groupIdx != groupIdx) continue;
         if (g_IbCastSharedQpPool[i].key.remIbDevIdx != remIbDevIdx) continue;
+        if (g_IbCastSharedQpPool[i].key.peerProcTag != peerProcTag) continue;
         if (memcmp(&g_IbCastSharedQpPool[i].key.peerAddr, peerAddr, sizeof(union ncclSocketAddress)) == 0) {
             count++;
         }
@@ -117,13 +125,14 @@ int IbCastCountGroupQpSlots(const union ncclSocketAddress* peerAddr,
 }
 
 int IbCastCountPeerTotalRefcount(int ibDevN, const union ncclSocketAddress* peerAddr,
-    int remIbDevIdx, bool isSend) {
+    uint64_t peerProcTag, int remIbDevIdx, bool isSend) {
     int total = 0;
     for (int i = 0; i < g_IbCastSharedQpPoolCount; i++) {
         if (!g_IbCastSharedQpPool[i].used) continue;
         if (g_IbCastSharedQpPool[i].key.qpIdx != 0) continue;
         if (g_IbCastSharedQpPool[i].key.isSend != isSend) continue;
         if (g_IbCastSharedQpPool[i].key.remIbDevIdx != remIbDevIdx) continue;
+        if (g_IbCastSharedQpPool[i].key.peerProcTag != peerProcTag) continue;
         if (memcmp(&g_IbCastSharedQpPool[i].key.peerAddr, peerAddr, sizeof(union ncclSocketAddress)) == 0) {
             total += g_IbCastSharedQpPool[i].refcount;
         }
@@ -201,6 +210,7 @@ void IbCastCleanupGroupCqs(struct IbCastSharedQp* slot0Entry) {
         if (g_IbCastSharedQpPool[i].key.isSend != slot0Entry->key.isSend) continue;
         if (g_IbCastSharedQpPool[i].key.groupIdx != slot0Entry->key.groupIdx) continue;
         if (g_IbCastSharedQpPool[i].key.remIbDevIdx != slot0Entry->key.remIbDevIdx) continue;
+        if (g_IbCastSharedQpPool[i].key.peerProcTag != slot0Entry->key.peerProcTag) continue;
         if (memcmp(&g_IbCastSharedQpPool[i].key.peerAddr, &slot0Entry->key.peerAddr,
                    sizeof(union ncclSocketAddress)) != 0) continue;
 
