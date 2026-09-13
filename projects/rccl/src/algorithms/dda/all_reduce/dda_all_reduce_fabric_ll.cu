@@ -539,8 +539,12 @@ bool ddaLL128ArTwoShotEligible(ncclComm* comm, const void* sendbuff, void* recvb
 bool ncclAllReduceDdaFabricLLEligible(ncclComm* comm, const void* sendbuff, void* recvbuff, size_t count,
                                       ncclDataType_t datatype, ncclRedOp_t op) {
   return ddaLLArOneShotEligible(comm, sendbuff, recvbuff, count, datatype, op) ||
-         ddaLLArTwoShotEligible(comm, sendbuff, recvbuff, count, datatype, op) ||
-         ddaLL128ArOneShotEligible(comm, sendbuff, recvbuff, count, datatype, op) ||
+         ddaLLArTwoShotEligible(comm, sendbuff, recvbuff, count, datatype, op);
+}
+
+bool ncclAllReduceDdaFabricLL128Eligible(ncclComm* comm, const void* sendbuff, void* recvbuff, size_t count,
+                                         ncclDataType_t datatype, ncclRedOp_t op) {
+  return ddaLL128ArOneShotEligible(comm, sendbuff, recvbuff, count, datatype, op) ||
          ddaLL128ArTwoShotEligible(comm, sendbuff, recvbuff, count, datatype, op);
 }
 
@@ -579,6 +583,17 @@ ncclResult_t ncclAllReduceDdaFabricLL(const void* sendbuff, void* recvbuff, size
     }
   }
 
+  // Callers gate on ncclAllReduceDdaFabricLLEligible, which is the disjunction of
+  // the two selectors above, so neither matching means the caller skipped it.
+  WARN("ncclAllReduceDdaFabricLL called for a message no LL tier claims: count=%zu datatype=%d bytes=%zu", count,
+       (int)datatype, bytes);
+  return ncclInternalError;
+}
+
+ncclResult_t ncclAllReduceDdaFabricLL128(const void* sendbuff, void* recvbuff, size_t count, ncclDataType_t datatype,
+                                         ncclRedOp_t op, ncclComm* comm, cudaStream_t stream) {
+  const size_t bytes = count * ncclTypeSize(datatype);
+
   if (ddaLL128ArOneShotEligible(comm, sendbuff, recvbuff, count, datatype, op)) {
     INFO(NCCL_COLL,
          "AllReduce: taking DDA fabric LL128 one-shot path: nRanks=%d nNodes=%d count=%zu datatype=%d bytes=%zu",
@@ -611,9 +626,7 @@ ncclResult_t ncclAllReduceDdaFabricLL(const void* sendbuff, void* recvbuff, size
     }
   }
 
-  // Callers gate on ncclAllReduceDdaFabricLLEligible, which is the disjunction of
-  // the tier selectors above, so none matching means the caller skipped it.
-  WARN("ncclAllReduceDdaFabricLL called for a message no LL tier claims: count=%zu datatype=%d bytes=%zu", count,
+  WARN("ncclAllReduceDdaFabricLL128 called for a message no LL128 tier claims: count=%zu datatype=%d bytes=%zu", count,
        (int)datatype, bytes);
   return ncclInternalError;
 }
@@ -621,4 +634,24 @@ ncclResult_t ncclAllReduceDdaFabricLL(const void* sendbuff, void* recvbuff, size
 uint32_t ncclAllReduceDdaFabricLLBlocks(ncclComm* comm, size_t count, ncclDataType_t datatype) {
   const auto grid = ddaAllReduceFabricLLGeom(comm, count, ncclTypeSize(datatype)).first;
   return grid.x * grid.y;
+}
+
+// Reports the one-shot tier's grid, as the LL counterpart above reports the LL
+// one-shot's: the two-shot tier sizes its grid on a shard rather than the whole
+// message, so it runs on no more blocks than this.
+uint32_t ncclAllReduceDdaFabricLL128Blocks(ncclComm* comm, size_t count, ncclDataType_t datatype) {
+  const size_t slices = ddaLL128Slices(count * ncclTypeSize(datatype));
+  const size_t warps = 512 / (size_t)kDdaLL128Warp;
+  int nBlocksMax = comm->ddaFabricMaxBlocks;
+  if (nBlocksMax < 1) {
+    nBlocksMax = 1;
+  }
+  size_t blocks = (slices + warps - 1) / warps;
+  if (blocks > (size_t)nBlocksMax) {
+    blocks = (size_t)nBlocksMax;
+  }
+  if (blocks < 1) {
+    blocks = 1;
+  }
+  return (uint32_t)blocks;
 }
