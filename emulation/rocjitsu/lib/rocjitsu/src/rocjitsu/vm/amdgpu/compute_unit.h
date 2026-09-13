@@ -1134,6 +1134,7 @@ protected:
   simdojo::Port *req_ = nullptr; ///< Requester port: L2 cache request (structural).
   uint64_t step_count_ = 0;
   bool functional_yield_requested_ = false;
+  bool matrix_coexecution_functional_ = false;
 
   friend class CommandProcessor;
   friend class ::rocjitsu::test::ComputeUnitTestAccess;
@@ -1334,6 +1335,7 @@ public:
     for (uint32_t i = 0; i < config.num_wf_slots; ++i)
       this->wfs_[i] = std::make_unique<IsaWavefront<Isa>>(*this, i);
     this->sram_ecc_ = Isa::SRAM_ECC;
+    this->matrix_coexecution_functional_ = Mode == simdojo::ExecMode::FUNCTIONAL;
   }
 
   /// @returns Lane value from the VGPR file.

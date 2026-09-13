@@ -118,6 +118,16 @@ public:
   uint32_t num_plugins() const { return static_cast<uint32_t>(plugins_.size()); }
   bool empty() const { return plugins_.empty(); }
 
+  // Prototype batching preserves instruction counts and dispatch wall time,
+  // but reports the batch's elapsed handler time on its first instruction.
+  // Other observers require individual architectural snapshots and are excluded.
+  bool permits_matrix_coexecution_prototype() const {
+    for (const auto &entry : plugins_)
+      if (entry.plugin->name() != "throughput")
+        return false;
+    return true;
+  }
+
   /// Whether high-frequency callbacks are serialized for this group. Plugin
   /// policy is sampled when each plugin is added so hot dispatch stays O(1).
   bool requires_serial_hot_hooks() const { return serialize_hot_hooks_; }
