@@ -1042,7 +1042,7 @@
         },
         {
           "name": "NetIB_MultiThread_MixedSizeBarrage",
-          "description": "Concurrent workers walk 1 B to 64 MB, exercising alignment and chunking under bandwidth pressure",
+          "description": "Concurrent workers walk the ladder steps that fit their share of the sweep registration budget (16 MB and below at these worker counts), exercising alignment and chunking under bandwidth pressure",
           "test_filter": "NetIbMPITest.MixedSizeBarrage"
         },
         {

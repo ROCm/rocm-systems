@@ -411,8 +411,11 @@ TEST_F(NetIbMPITest, InlineSendBoundary) {
 //      Exercises alignment boundaries, AR threshold, inline paths, and
 //      large-MR registration.
 //      Parameterized by MPIEnvironment::nThreads: concurrent workers sweep the
-//      whole ladder at once, so alignment and chunking paths run under real
-//      bandwidth pressure.
+//      ladder at once, so alignment and chunking paths run under real bandwidth
+//      pressure. The threaded arm walks the steps that fit its per-worker share of
+//      the sweep's registration budget rather than the whole ladder -- 16 MB and
+//      below at 2 or 4 workers, 4 MB and below at 16 -- so the largest steps are
+//      covered by the serial body.
 TEST_F(NetIbMPITest, MixedSizeBarrage) {
     ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
                                          false, kMinGpusPerNode, kNoNodeLimit));
@@ -504,8 +507,8 @@ TEST_F(NetIbMPITest, FifoPressureSenderFast) {
                         fillHostBufferWithPattern<uint8_t>(buffer, sz, makeBytePattern(seed));
                         // The shared helper, with the retry count handed back: it
                         // carries the same deadline semantics as every other post in
-                        // the suite, and the count is the backpressure evidence this
-                        // test asserts on below.
+                        // the suite, and the count is what this test reports in its
+                        // failure messages below.
                         result = WorkerPostSend(pair.sendComm, buffer, sz, i, mh, &request,
                                                 /*busyPoll=*/false, kStressTimeoutMs,
                                                 &nullCount);
@@ -1347,9 +1350,10 @@ TEST_F(NetIbMPITest, MultiQpNoSplitStress) {
 
     // Parameterized by MPIEnvironment::nThreads: same sweep on the nDataQps path,
     // and pinned to one device for the same reason as the split variant.
-    if (MPIEnvironment::nThreads > 1) {
-        RunThreadedSizeSweep(ThreadDevPolicy::Fixed(0), MPIEnvironment::nThreads,
-                             kMultiQpAlignmentSizes, /*repeats=*/2, "threaded MultiQpNoSplitStress");
+    const int nThreads = MPIEnvironment::nThreads;
+    if (nThreads > 1) {
+        RunThreadedSizeSweep(ThreadDevPolicy::Fixed(0), nThreads, kMultiQpAlignmentSizes,
+                             /*repeats=*/2, "threaded MultiQpNoSplitStress");
         return;
     }
 

@@ -1314,13 +1314,24 @@ protected:
         // misbehaving plugin. So the posted prefix is drained below whatever happened,
         // and every slot is waited on even after one of them fails. The first failure is
         // what gets reported.
+        // Both of these carry `where` and the slot, as the mismatch branches below do:
+        // a stalled peer takes one of these two paths, and "request did not complete
+        // within the timeout" on its own names neither the round nor the slot.
         ThreadResult firstFailure;
-        if (!result.ok) firstFailure = result;
+        if (!result.ok) {
+            firstFailure = result;
+            firstFailure.msg = where + "slot " + std::to_string(posted) + ": post failed: "
+                               + result.msg;
+        }
         for (int i = 0; i < posted; i++) {
             int sizes[1] = {0};
             const ThreadResult waited = WorkerWait(requests[i], sizes, budgetMs(/*floorMs=*/1000));
             if (!waited.ok) {
-                if (firstFailure.ok) firstFailure = waited;
+                if (firstFailure.ok) {
+                    firstFailure = waited;
+                    firstFailure.msg = where + "slot " + std::to_string(i) + ": drain failed: "
+                                       + waited.msg;
+                }
                 continue;
             }
             if (rank != 0) continue;
@@ -1834,10 +1845,11 @@ protected:
         AssertNoRdmaLeaks(before, CaptureRdmaResources(), label);
     }
 
-    // Threaded size sweep: every worker walks the list on its own connection with
-    // a per-worker payload seed, so a transfer delivered on the wrong connection
-    // fails verification. Registers the whole buffer once and reuses that handle
-    // for every size. Wraps the run in an RDMA resource leak check.
+    // Threaded size sweep: every worker walks the steps that fit its share of the
+    // registration budget, on its own connection and with a per-worker payload seed, so
+    // a transfer delivered on the wrong connection fails verification. Registers one
+    // buffer covering the largest step it will run and reuses that handle. Wraps the run
+    // in an RDMA resource leak check.
     void RunThreadedSizeSweep(ThreadDevPolicy policy, int nThreads,
                               const std::vector<size_t>& sizes, int repeats,
                               const char* label) {
