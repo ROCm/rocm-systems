@@ -1483,24 +1483,28 @@ TEST_F(NetIbMPITest, CastStressMultiRoundTwoConns) {
     MPI_Barrier(MPI_COMM_WORLD);
 
     // ── Teardown ─────────────────────────────────────────────────────────────
-    // Each slot is nulled as it is closed and its status checked afterwards, so a failure
-    // here returns with the guard still armed and the connections past this one closed by
-    // it, rather than leaking them the way dismissing the guard before the loop did.
+    // Reported, not asserted, and for the barrier below: these checks are rank-local, so a
+    // fatal one would return from this rank while its peer waited in that collective --
+    // the hang ListenCloseListen was rewritten to remove. Each slot is also nulled as it
+    // is closed, so the guard can stay armed through the loop and close whatever a failure
+    // leaves behind.
     for (int c = 0; c < kNConns; c++) {
         void* comm = (rank == 0) ? recvComms[c] : sendComms[c];
-        ASSERT_EQ(DeregisterMemory(comm, rampHandles[c]), ncclSuccess);
-        ASSERT_EQ(DeregisterMemory(comm, mhandles[c]), ncclSuccess);
+        EXPECT_EQ(DeregisterMemory(comm, rampHandles[c]), ncclSuccess)
+            << "deregistering the ramp buffer failed on conn " << c;
+        EXPECT_EQ(DeregisterMemory(comm, mhandles[c]), ncclSuccess)
+            << "deregistering the phase-1 buffer failed on conn " << c;
         if (rank == 0) {
             const ncclResult_t closedRecv = CloseRecvComm(recvComms[c]);
             recvComms[c] = nullptr;
             const ncclResult_t closedListen = CloseListenComm(listenComms[c]);
             listenComms[c] = nullptr;
-            ASSERT_EQ(closedRecv, ncclSuccess);
-            ASSERT_EQ(closedListen, ncclSuccess);
+            EXPECT_EQ(closedRecv, ncclSuccess) << "CloseRecvComm failed on conn " << c;
+            EXPECT_EQ(closedListen, ncclSuccess) << "CloseListenComm failed on conn " << c;
         } else {
             const ncclResult_t closedSend = CloseSendComm(sendComms[c]);
             sendComms[c] = nullptr;
-            ASSERT_EQ(closedSend, ncclSuccess);
+            EXPECT_EQ(closedSend, ncclSuccess) << "CloseSendComm failed on conn " << c;
         }
     }
     connsScope.dismiss();
