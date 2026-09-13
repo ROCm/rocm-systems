@@ -1900,15 +1900,6 @@ TEST_F(FullElfDispatchTest, ElfSingleDispatch) {
   EXPECT_EQ(hsa_queue_destroy(queue), HSA_STATUS_SUCCESS);
 }
 
-TEST_F(FullElfDispatchTest, ElfMultiDispatch) {
-  hsa_queue_t* queue = nullptr;
-  ASSERT_EQ(hsa_queue_create(aie_agents.front(), min_queue_size, HSA_QUEUE_TYPE_SINGLE, nullptr,
-                             nullptr, 0, 0, &queue),
-            HSA_STATUS_SUCCESS);
-  RunChain(queue, 32);
-  EXPECT_EQ(hsa_queue_destroy(queue), HSA_STATUS_SUCCESS);
-}
-
 TEST_F(FullElfDispatchTest, ElfFullQueueDispatch) {
   // A chain as long as the queue allows. A full-ELF command occupies 60 bytes of
   // the driver's 4 KiB chain buffer, so 68 would fit; the queue tops out first.
@@ -2272,194 +2263,6 @@ TEST_F(FullElfDispatchTest, ElfMalformedPacketsRejected) {
   }
 }
 
-TEST_F(FullElfDispatchTest, ElfRejectedFirstPacketLeavesQueueUnpinned) {
-  // A queue's mode is committed only once every packet in the batch has been accepted. If a
-  // rejected packet pinned the queue anyway, this queue would be stuck in full-ELF mode and the
-  // PDI + instruction sequence dispatch below would be refused for the wrong reason.
-  hsa_queue_t* queue = nullptr;
-  ASSERT_EQ(hsa_queue_create(aie_agents.front(), min_queue_size, HSA_QUEUE_TYPE_SINGLE, nullptr,
-                             nullptr, 0, 0, &queue),
-            HSA_STATUS_SUCCESS);
-
-  pool_buffer input, output, kernargs, ctrl_code;
-  ASSERT_EQ(input.allocate(data_pool, aie_full_elf_kernel::element_bytes), HSA_STATUS_SUCCESS);
-  ASSERT_EQ(output.allocate(data_pool, aie_full_elf_kernel::element_bytes), HSA_STATUS_SUCCESS);
-  ASSERT_EQ(kernargs.allocate(kernarg_pool, aie_full_elf_kernel::kernarg_bytes),
-            HSA_STATUS_SUCCESS);
-
-  auto* in = input.as<std::uint32_t>();
-  auto* out = output.as<std::uint32_t>();
-  std::iota(in, in + aie_full_elf_kernel::element_count, 0);
-  constexpr std::uint32_t sentinel = 0xD0D0D0D0;
-  std::fill_n(out, aie_full_elf_kernel::element_count, sentinel);
-
-  ASSERT_TRUE(make_ctrl_code(
-      &ctrl_code, {reinterpret_cast<std::uint64_t>(in), reinterpret_cast<std::uint64_t>(out)}));
-
-  // A full-ELF packet that will be rejected: its control code is not where it claims to be.
-  hsa_signal_t signal{};
-  ASSERT_EQ(hsa_signal_create(1, 0, nullptr, &signal), HSA_STATUS_SUCCESS);
-  auto wr_idx = aie_full_elf_kernel::dispatch_packet(
-      ctrl_code.get(), kernel.ctrl_code.size(), pdi.get(), kernel.pdi_patch_offset, in, out,
-      kernargs.as<std::uint64_t>(), signal, queue, [](hsa_amd_aie_kernel_dispatch_packet_t& p) {
-        p.insts_addr_low = 0;
-        p.insts_addr_high = 0;
-      });
-  hsa_signal_store_screlease(queue->doorbell_signal, wr_idx);
-  hsa_signal_wait_scacquire(signal, HSA_SIGNAL_CONDITION_EQ, 0, UINT64_MAX, HSA_WAIT_STATE_BLOCKED);
-  for (std::size_t i = 0; i < aie_full_elf_kernel::element_count; ++i) {
-    ASSERT_EQ(out[i], sentinel) << "rejected dispatch wrote output at index " << i;
-  }
-  EXPECT_EQ(hsa_signal_destroy(signal), HSA_STATUS_SUCCESS);
-
-  // The queue never ran anything, so it is still free to become a PDI + instruction sequence
-  // queue.
-  void* pdi_buf = nullptr;
-  std::size_t pdi_size = 0;
-  ASSERT_TRUE(load_binary(dev_pool, aie_vector_scalar_kernel::pdiPath, &pdi_buf, pdi_size));
-  void* insts_buf = nullptr;
-  std::size_t insts_size = 0;
-  ASSERT_TRUE(load_binary(dev_pool, aie_vector_scalar_kernel::instsPath, &insts_buf, insts_size));
-
-  std::fill_n(out, aie_full_elf_kernel::element_count, 0);
-  ASSERT_EQ(hsa_signal_create(1, 0, nullptr, &signal), HSA_STATUS_SUCCESS);
-  wr_idx = aie_vector_scalar_kernel::dispatch_packet(pdi_buf, insts_buf, insts_size, in, out,
-                                                     kernargs.as<std::uint64_t>(), signal, queue);
-  hsa_signal_store_screlease(queue->doorbell_signal, wr_idx);
-  hsa_signal_wait_scacquire(signal, HSA_SIGNAL_CONDITION_EQ, 0, UINT64_MAX, HSA_WAIT_STATE_BLOCKED);
-  for (std::size_t i = 0; i < aie_full_elf_kernel::element_count; ++i) {
-    ASSERT_EQ(out[i], in[i] + 1) << "PDI dispatch mismatch at index " << i;
-  }
-
-  EXPECT_EQ(hsa_signal_destroy(signal), HSA_STATUS_SUCCESS);
-  EXPECT_EQ(hsa_queue_destroy(queue), HSA_STATUS_SUCCESS);
-  EXPECT_EQ(hsa_amd_memory_pool_free(insts_buf), HSA_STATUS_SUCCESS);
-  EXPECT_EQ(hsa_amd_memory_pool_free(pdi_buf), HSA_STATUS_SUCCESS);
-}
-
-TEST_F(FullElfDispatchTest, PdiThenElfQueueRejected) {
-  // The other mixing direction from ElfMixedQueueRejected, and the dangerous one: once a context
-  // has had its compute units configured for the PDI path that cannot be undone, so a full-ELF
-  // packet must be refused rather than dispatched against a context it cannot run in.
-  hsa_queue_t* queue = nullptr;
-  ASSERT_EQ(hsa_queue_create(aie_agents.front(), min_queue_size, HSA_QUEUE_TYPE_SINGLE, nullptr,
-                             nullptr, 0, 0, &queue),
-            HSA_STATUS_SUCCESS);
-
-  pool_buffer input, output, kernargs;
-  ASSERT_EQ(input.allocate(data_pool, aie_full_elf_kernel::element_bytes), HSA_STATUS_SUCCESS);
-  ASSERT_EQ(output.allocate(data_pool, aie_full_elf_kernel::element_bytes), HSA_STATUS_SUCCESS);
-  ASSERT_EQ(kernargs.allocate(kernarg_pool, aie_full_elf_kernel::kernarg_bytes),
-            HSA_STATUS_SUCCESS);
-  auto* in = input.as<std::uint32_t>();
-  auto* out = output.as<std::uint32_t>();
-  std::iota(in, in + aie_full_elf_kernel::element_count, 0);
-  std::fill_n(out, aie_full_elf_kernel::element_count, 0);
-
-  // First a PDI + instruction sequence packet, which fixes the queue's shape and must succeed.
-  void* pdi_buf = nullptr;
-  std::size_t pdi_size = 0;
-  ASSERT_TRUE(load_binary(dev_pool, aie_vector_scalar_kernel::pdiPath, &pdi_buf, pdi_size));
-  void* insts_buf = nullptr;
-  std::size_t insts_size = 0;
-  ASSERT_TRUE(load_binary(dev_pool, aie_vector_scalar_kernel::instsPath, &insts_buf, insts_size));
-
-  hsa_signal_t signal{};
-  ASSERT_EQ(hsa_signal_create(1, 0, nullptr, &signal), HSA_STATUS_SUCCESS);
-  auto wr_idx = aie_vector_scalar_kernel::dispatch_packet(
-      pdi_buf, insts_buf, insts_size, in, out, kernargs.as<std::uint64_t>(), signal, queue);
-  hsa_signal_store_screlease(queue->doorbell_signal, wr_idx);
-  hsa_signal_wait_scacquire(signal, HSA_SIGNAL_CONDITION_EQ, 0, UINT64_MAX, HSA_WAIT_STATE_BLOCKED);
-  for (std::size_t i = 0; i < aie_full_elf_kernel::element_count; ++i) {
-    ASSERT_EQ(out[i], in[i] + 1) << "PDI dispatch mismatch at index " << i;
-  }
-  EXPECT_EQ(hsa_signal_destroy(signal), HSA_STATUS_SUCCESS);
-
-  // Now a full-ELF packet on the same queue. It must not run.
-  pool_buffer ctrl_code;
-  ASSERT_TRUE(make_ctrl_code(
-      &ctrl_code, {reinterpret_cast<std::uint64_t>(in), reinterpret_cast<std::uint64_t>(out)}));
-
-  constexpr std::uint32_t sentinel = 0xD0D0D0D0;
-  std::fill_n(out, aie_full_elf_kernel::element_count, sentinel);
-
-  ASSERT_EQ(hsa_signal_create(1, 0, nullptr, &signal), HSA_STATUS_SUCCESS);
-  wr_idx = aie_full_elf_kernel::dispatch_packet(ctrl_code.get(), kernel.ctrl_code.size(), pdi.get(),
-                                                kernel.pdi_patch_offset, in, out,
-                                                kernargs.as<std::uint64_t>(), signal, queue);
-  hsa_signal_store_screlease(queue->doorbell_signal, wr_idx);
-  hsa_signal_wait_scacquire(signal, HSA_SIGNAL_CONDITION_EQ, 0, UINT64_MAX, HSA_WAIT_STATE_BLOCKED);
-  for (std::size_t i = 0; i < aie_full_elf_kernel::element_count; ++i) {
-    ASSERT_EQ(out[i], sentinel) << "rejected dispatch wrote output at index " << i;
-  }
-
-  EXPECT_EQ(hsa_signal_destroy(signal), HSA_STATUS_SUCCESS);
-  EXPECT_EQ(hsa_queue_destroy(queue), HSA_STATUS_SUCCESS);
-  EXPECT_EQ(hsa_amd_memory_pool_free(insts_buf), HSA_STATUS_SUCCESS);
-  EXPECT_EQ(hsa_amd_memory_pool_free(pdi_buf), HSA_STATUS_SUCCESS);
-}
-
-TEST_F(FullElfDispatchTest, ElfMixedQueueRejected) {
-  // A queue is homogeneous: the two dispatch shapes need hardware contexts whose
-  // compute-unit configuration cannot be reconciled after the fact.
-  hsa_queue_t* queue = nullptr;
-  ASSERT_EQ(hsa_queue_create(aie_agents.front(), min_queue_size, HSA_QUEUE_TYPE_SINGLE, nullptr,
-                             nullptr, 0, 0, &queue),
-            HSA_STATUS_SUCCESS);
-
-  pool_buffer input, output, kernargs;
-  ASSERT_EQ(input.allocate(data_pool, aie_full_elf_kernel::element_bytes), HSA_STATUS_SUCCESS);
-  ASSERT_EQ(output.allocate(data_pool, aie_full_elf_kernel::element_bytes), HSA_STATUS_SUCCESS);
-  ASSERT_EQ(kernargs.allocate(kernarg_pool, aie_full_elf_kernel::kernarg_bytes),
-            HSA_STATUS_SUCCESS);
-  auto* in = input.as<std::uint32_t>();
-  auto* out = output.as<std::uint32_t>();
-  std::iota(in, in + aie_full_elf_kernel::element_count, 0);
-  std::fill_n(out, aie_full_elf_kernel::element_count, 0);
-
-  pool_buffer ctrl_code;
-  ASSERT_TRUE(make_ctrl_code(
-      &ctrl_code, {reinterpret_cast<std::uint64_t>(in), reinterpret_cast<std::uint64_t>(out)}));
-
-  // First a full-ELF packet, which fixes the queue's shape and must succeed.
-  hsa_signal_t signal{};
-  ASSERT_EQ(hsa_signal_create(1, 0, nullptr, &signal), HSA_STATUS_SUCCESS);
-  auto wr_idx = aie_full_elf_kernel::dispatch_packet(ctrl_code.get(), kernel.ctrl_code.size(),
-                                                     pdi.get(), kernel.pdi_patch_offset, in, out,
-                                                     kernargs.as<std::uint64_t>(), signal, queue);
-  hsa_signal_store_screlease(queue->doorbell_signal, wr_idx);
-  hsa_signal_wait_scacquire(signal, HSA_SIGNAL_CONDITION_EQ, 0, UINT64_MAX, HSA_WAIT_STATE_BLOCKED);
-  for (std::size_t i = 0; i < aie_full_elf_kernel::element_count; ++i) {
-    ASSERT_EQ(out[i], in[i] + 1) << "full-ELF dispatch mismatch at index " << i;
-  }
-  EXPECT_EQ(hsa_signal_destroy(signal), HSA_STATUS_SUCCESS);
-
-  // Now a PDI + instruction sequence packet on the same queue. It must not run.
-  void* pdi_buf = nullptr;
-  std::size_t pdi_size = 0;
-  ASSERT_TRUE(load_binary(dev_pool, aie_vector_scalar_kernel::pdiPath, &pdi_buf, pdi_size));
-  void* insts_buf = nullptr;
-  std::size_t insts_size = 0;
-  ASSERT_TRUE(load_binary(dev_pool, aie_vector_scalar_kernel::instsPath, &insts_buf, insts_size));
-
-  constexpr std::uint32_t sentinel = 0xD0D0D0D0;
-  std::fill_n(out, aie_full_elf_kernel::element_count, sentinel);
-
-  ASSERT_EQ(hsa_signal_create(1, 0, nullptr, &signal), HSA_STATUS_SUCCESS);
-  wr_idx = aie_vector_scalar_kernel::dispatch_packet(pdi_buf, insts_buf, insts_size, in, out,
-                                                     kernargs.as<std::uint64_t>(), signal, queue);
-  hsa_signal_store_screlease(queue->doorbell_signal, wr_idx);
-  hsa_signal_wait_scacquire(signal, HSA_SIGNAL_CONDITION_EQ, 0, UINT64_MAX, HSA_WAIT_STATE_BLOCKED);
-  for (std::size_t i = 0; i < aie_full_elf_kernel::element_count; ++i) {
-    ASSERT_EQ(out[i], sentinel) << "rejected dispatch wrote output at index " << i;
-  }
-
-  EXPECT_EQ(hsa_signal_destroy(signal), HSA_STATUS_SUCCESS);
-  EXPECT_EQ(hsa_queue_destroy(queue), HSA_STATUS_SUCCESS);
-  EXPECT_EQ(hsa_amd_memory_pool_free(insts_buf), HSA_STATUS_SUCCESS);
-  EXPECT_EQ(hsa_amd_memory_pool_free(pdi_buf), HSA_STATUS_SUCCESS);
-}
-
 TEST_F(DispatchTest, PdiCacheRolledBackOnFailedBatch) {
   // Building a command records its PDI in the queue's cache, but the hardware context is only
   // reconfigured to match after the whole batch is built. A batch that fails in between must not
@@ -2603,6 +2406,67 @@ TEST_F(DispatchTest, PdiCacheRejectsThirtyThree) {
   // Both are what the planned ReportSubmitFailure path does, so the assertion below is written
   // against that behaviour.
   ASSERT_NO_FATAL_FAILURE(DispatchAddAndVerify(queue, pdis[0].get(), add, in, out, args));
+
+  EXPECT_EQ(hsa_queue_destroy(queue), HSA_STATUS_SUCCESS);
+}
+
+// Grouping dispatches by mode is the caller's job. A batch whose packets do not agree is
+// refused outright rather than split: splitting would mean rebuilding the hardware context with
+// packets of the same batch still in flight, which the two modes' incompatible CU configurations
+// make unsafe. Switching between *batches* is supported -- see ModeSwitchAlternatingBatches.
+TEST_F(FullElfDispatchTest, MixedModeBatchRejected) {
+  static_assert(aie_vector_scalar_kernel::element_count == aie_full_elf_kernel::element_count);
+  constexpr std::size_t n = aie_vector_scalar_kernel::element_count;
+
+  hsa_queue_t* queue = nullptr;
+  ASSERT_EQ(hsa_queue_create(aie_agents.front(), min_queue_size, HSA_QUEUE_TYPE_SINGLE, nullptr,
+                             nullptr, 0, 0, &queue),
+            HSA_STATUS_SUCCESS);
+  ASSERT_GE(queue->size, 2u);
+
+  kernel_artifacts add;
+  ASSERT_TRUE(add.load_add(dev_pool));
+
+  pool_buffer input, output, pdi_kernargs, elf_kernargs, ctrl_code;
+  ASSERT_EQ(input.allocate(data_pool, aie_vector_scalar_kernel::element_bytes * 2),
+            HSA_STATUS_SUCCESS);
+  ASSERT_EQ(output.allocate(data_pool, aie_vector_scalar_kernel::element_bytes * 2),
+            HSA_STATUS_SUCCESS);
+  ASSERT_EQ(pdi_kernargs.allocate(kernarg_pool, aie_vector_scalar_kernel::kernarg_bytes),
+            HSA_STATUS_SUCCESS);
+  ASSERT_EQ(elf_kernargs.allocate(kernarg_pool, aie_full_elf_kernel::kernarg_bytes),
+            HSA_STATUS_SUCCESS);
+
+  auto* in = input.as<std::uint32_t>();
+  auto* out = output.as<std::uint32_t>();
+  std::iota(in, in + n * 2, 0);
+  constexpr std::uint32_t sentinel = 0xD0D0D0D0;
+  std::fill_n(out, n * 2, sentinel);
+
+  ASSERT_TRUE(make_ctrl_code(
+      &ctrl_code,
+      {reinterpret_cast<std::uint64_t>(in + n), reinterpret_cast<std::uint64_t>(out + n)}));
+
+  // One PDI packet and one full-ELF packet staged together and released with a single doorbell.
+  // The first fixes the batch's mode, the second contradicts it, so neither runs.
+  hsa_signal_t signal{};
+  ASSERT_EQ(hsa_signal_create(2, 0, nullptr, &signal), HSA_STATUS_SUCCESS);
+  aie_vector_scalar_kernel::dispatch_packet(add.pdi.get(), add.insts.get(), add.insts_size, in, out,
+                                            pdi_kernargs.as<std::uint64_t>(), signal, queue);
+  const auto wr_idx = aie_full_elf_kernel::dispatch_packet(
+      ctrl_code.get(), kernel.ctrl_code.size(), pdi.get(), kernel.pdi_patch_offset, in + n, out + n,
+      elf_kernargs.as<std::uint64_t>(), signal, queue);
+  hsa_signal_store_screlease(queue->doorbell_signal, wr_idx);
+  hsa_signal_wait_scacquire(signal, HSA_SIGNAL_CONDITION_EQ, 0, UINT64_MAX, HSA_WAIT_STATE_BLOCKED);
+
+  for (std::size_t i = 0; i < n * 2; ++i) {
+    ASSERT_EQ(out[i], sentinel) << "rejected batch wrote output at index " << i;
+  }
+  EXPECT_EQ(hsa_signal_destroy(signal), HSA_STATUS_SUCCESS);
+
+  // The queue is not poisoned by the refusal: a well-formed batch still runs.
+  ASSERT_NO_FATAL_FAILURE(
+      DispatchAddAndVerify(queue, add.pdi.get(), add, in, out, pdi_kernargs.as<std::uint64_t>()));
 
   EXPECT_EQ(hsa_queue_destroy(queue), HSA_STATUS_SUCCESS);
 }
@@ -2979,5 +2843,86 @@ TEST_F(FullElfInterleaveTest, ElfInterleavedKernels) {
   ASSERT_NO_FATAL_FAILURE(VerifyMul(mio, n * num_pairs, 0));
 
   EXPECT_EQ(hsa_signal_destroy(signal), HSA_STATUS_SUCCESS);
+  EXPECT_EQ(hsa_queue_destroy(queue), HSA_STATUS_SUCCESS);
+}
+
+// Modes alternate across batches, several packets at a time. Each batch is one mode, rung and
+// waited on before the next is staged, so the queue is idle whenever the runtime rebuilds the
+// hardware context for the incoming mode.
+//
+// ModeSwitchAcrossBatches covers the single-packet case; this one checks that a switch still works
+// when each batch carries several packets and the PDI path has a populated cache to drop.
+TEST_F(FullElfDispatchTest, ModeSwitchAlternatingBatches) {
+  static_assert(aie_vector_scalar_kernel::element_count == aie_full_elf_kernel::element_count);
+  constexpr std::size_t n = aie_vector_scalar_kernel::element_count;
+  constexpr std::uint32_t pkts_per_batch = 2;
+  // true = PDI + instruction sequence, false = full ELF. Starts and ends on different modes so
+  // both switch directions are exercised twice.
+  constexpr bool batch_is_pdi[] = {true, false, true, false};
+
+  hsa_queue_t* queue = nullptr;
+  ASSERT_EQ(hsa_queue_create(aie_agents.front(), min_queue_size, HSA_QUEUE_TYPE_SINGLE, nullptr,
+                             nullptr, 0, 0, &queue),
+            HSA_STATUS_SUCCESS);
+  ASSERT_GE(queue->size, pkts_per_batch);
+
+  kernel_artifacts add;
+  ASSERT_TRUE(add.load_add(dev_pool));
+
+  pool_buffer input, output, pdi_kernargs, elf_kernargs;
+  ASSERT_EQ(input.allocate(data_pool, aie_vector_scalar_kernel::element_bytes * pkts_per_batch),
+            HSA_STATUS_SUCCESS);
+  ASSERT_EQ(output.allocate(data_pool, aie_vector_scalar_kernel::element_bytes * pkts_per_batch),
+            HSA_STATUS_SUCCESS);
+  ASSERT_EQ(
+      pdi_kernargs.allocate(kernarg_pool, aie_vector_scalar_kernel::kernarg_bytes * pkts_per_batch),
+      HSA_STATUS_SUCCESS);
+  ASSERT_EQ(
+      elf_kernargs.allocate(kernarg_pool, aie_full_elf_kernel::kernarg_bytes * pkts_per_batch),
+      HSA_STATUS_SUCCESS);
+
+  auto* in = input.as<std::uint32_t>();
+  auto* out = output.as<std::uint32_t>();
+  std::iota(in, in + n * pkts_per_batch, 0);
+
+  for (std::uint32_t b = 0; b < std::size(batch_is_pdi); ++b) {
+    SCOPED_TRACE(b);
+    std::fill_n(out, n * pkts_per_batch, 0);
+
+    // A full-ELF dispatch carries its arguments in its control code, so each packet needs its own.
+    std::vector<pool_buffer> ctrl_codes(pkts_per_batch);
+    if (!batch_is_pdi[b]) {
+      for (std::uint32_t i = 0; i < pkts_per_batch; ++i) {
+        ASSERT_TRUE(make_ctrl_code(&ctrl_codes[i],
+                                   {reinterpret_cast<std::uint64_t>(in + i * n),
+                                    reinterpret_cast<std::uint64_t>(out + i * n)}));
+      }
+    }
+
+    hsa_signal_t signal{};
+    ASSERT_EQ(hsa_signal_create(pkts_per_batch, 0, nullptr, &signal), HSA_STATUS_SUCCESS);
+
+    std::uint64_t wr_idx = 0;
+    for (std::uint32_t i = 0; i < pkts_per_batch; ++i) {
+      wr_idx = batch_is_pdi[b]
+          ? aie_vector_scalar_kernel::dispatch_packet(
+                add.pdi.get(), add.insts.get(), add.insts_size, in + i * n, out + i * n,
+                pdi_kernargs.as<std::uint64_t>() + i * aie_vector_scalar_kernel::num_kernargs_sizes,
+                signal, queue)
+          : aie_full_elf_kernel::dispatch_packet(
+                ctrl_codes[i].get(), kernel.ctrl_code.size(), pdi.get(), kernel.pdi_patch_offset,
+                in + i * n, out + i * n,
+                elf_kernargs.as<std::uint64_t>() + i * aie_full_elf_kernel::num_kernargs_sizes,
+                signal, queue);
+    }
+    hsa_signal_store_screlease(queue->doorbell_signal, wr_idx);
+    hsa_signal_wait_scacquire(signal, HSA_SIGNAL_CONDITION_EQ, 0, UINT64_MAX,
+                              HSA_WAIT_STATE_BLOCKED);
+    EXPECT_EQ(hsa_signal_destroy(signal), HSA_STATUS_SUCCESS);
+
+    // Both designs add one, so a batch is checked the same way whichever mode ran it.
+    ASSERT_NO_FATAL_FAILURE(VerifyAdd(in, out, n * pkts_per_batch));
+  }
+
   EXPECT_EQ(hsa_queue_destroy(queue), HSA_STATUS_SUCCESS);
 }

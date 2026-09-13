@@ -401,12 +401,13 @@ struct CmdBOPool {
 
 /// @brief Which dispatch ABI a queue is using.
 ///
-/// A queue is homogeneous. The two modes need incompatible hardware contexts - PDI + instruction
-/// sequence needs CU configuration, full-ELF must not have any - and a hardware context's CU
-/// configuration cannot be changed once set, so switching a live queue between them is not
-/// possible.
+/// The two modes need incompatible hardware contexts - PDI + instruction sequence needs CU
+/// configuration, full-ELF must not have any - and a hardware context's CU configuration cannot
+/// be changed once set. That rules out switching a *live* context, not a queue: one batch is one
+/// mode, and between batches the queue is drained, so the context can be torn down and rebuilt
+/// then. This records which mode the current context was built for.
 enum class QueueMode {
-  /// @brief No packet submitted yet; the first one decides.
+  /// @brief No context has been built for either mode yet.
   Undecided,
   /// @brief PDI plus a separate instruction sequence, dispatched as ERT_START_CU.
   PdiInsts,
@@ -1905,29 +1906,21 @@ hsa_status_t XdnaDriver::SubmitCmdChain(hsa_queue_t& q, void* queue_metadata,
   auto* queue = static_cast<hsa_amd_aie_kernel_dispatch_packet_t*>(q.base_address);
   const uint64_t mask = q.size - 1;
 
-  // Nothing to submit. Returning early matters because the mode below is read out of the first
-  // packet: with no packets there is none to read, and committing a mode from an unwritten slot
-  // would pin the queue to whatever happened to be there.
+  // Nothing to submit.
   if (num_pkts == 0) return HSA_STATUS_SUCCESS;
 
-  // A queue is homogeneous: the first packet fixes the dispatch mode, because the two modes need
-  // hardware contexts whose CU configuration cannot be reconciled after the fact.
-  //
-  // The mode is only committed to the queue once every packet has been accepted, so a malformed
-  // submission cannot pin an otherwise-unused queue to a mode nothing ever ran in.
+  // The first packet fixes the mode for the whole batch; the loop below checks the rest agree as
+  // it walks them. Grouping dispatches by mode is the caller's job: a mixed batch is rejected
+  // rather than split. The queue itself is not pinned to that mode - a later batch may pick the
+  // other one, and the rebuild below switches the context to it.
   const QueueMode mode = PacketMode(&queue[first_pkt_idx & mask]);
-  if (kmq_metadata->mode == QueueMode::Undecided) {
-    // Full ELF is an aie2p feature. This reports what the silicon supports, not the running
-    // firmware: the firmware gate (management protocol minor >= 15) is not exposed through any
-    // ioctl, so too-old firmware only shows up as EOPNOTSUPP when a command is submitted.
+
+  // Full ELF is an aie2p feature.
+  if (mode == QueueMode::FullElf) {
     const auto& aie_agent = static_cast<const AieAgent&>(agent);
-    if (mode == QueueMode::FullElf &&
-        DeviceTypeOf(aie_agent.properties().DeviceId) != XDNADeviceType::Stx) {
+    if (DeviceTypeOf(aie_agent.properties().DeviceId) != XDNADeviceType::Stx) {
       return HSA_STATUS_ERROR_INVALID_PACKET_FORMAT;
     }
-  } else if (kmq_metadata->mode != mode) {
-    assert(false && "AIE queue cannot mix full-ELF and PDI dispatches.");
-    return HSA_STATUS_ERROR_INVALID_PACKET_FORMAT;
   }
 
   // Instruction and arguments BOs (performance hint: up to 3 argument BOs per packet).
@@ -1947,17 +1940,25 @@ hsa_status_t XdnaDriver::SubmitCmdChain(hsa_queue_t& q, void* queue_metadata,
   // to match once every packet has been built. If the batch fails in between, those entries would
   // claim compute units the context was never given, and the next submission would find them
   // cached, skip the reconfigure, and dispatch against a context that cannot run them. Roll them
-  // back unless the cache and the context end up agreeing.
+  // back unless the cache and the context end up agreeing. A full-ELF batch adds no entries and
+  // drops the cache outright below, so for one the rollback would have nothing to restore.
   const auto pdi_cache_watermark = kmq_metadata->pdi_cache.size();
-  MAKE_NAMED_SCOPE_GUARD(pdi_cache_guard,
-                         [&] { kmq_metadata->pdi_cache.Truncate(pdi_cache_watermark); });
+  MAKE_NAMED_SCOPE_GUARD(pdi_cache_guard, [&] {
+    if (mode == QueueMode::PdiInsts) kmq_metadata->pdi_cache.Truncate(pdi_cache_watermark);
+  });
 
   for (uint64_t i = 0; i < num_pkts; ++i) {
     const auto pkt_idx = (first_pkt_idx + i) & mask;
     auto* pkt = queue + pkt_idx;
 
-    if (static_cast<hsa_amd_aie_packet_opcode_t>(pkt->opcode) != HSA_AMD_AIE_PACKET_OPCODE_KMQ ||
-        PacketMode(pkt) != mode) {
+    // The first packet fixed the batch's mode; the rest have to agree.
+    if (static_cast<hsa_amd_aie_packet_opcode_t>(pkt->opcode) != HSA_AMD_AIE_PACKET_OPCODE_KMQ) {
+      return HSA_STATUS_ERROR_INVALID_PACKET_FORMAT;
+    }
+    if (PacketMode(pkt) != mode) {
+      log_warning_n(10,
+                    "AIE batch cannot mix full-ELF and PDI dispatches; submit each mode as its "
+                    "own batch.\n");
       return HSA_STATUS_ERROR_INVALID_PACKET_FORMAT;
     }
 
@@ -1973,33 +1974,38 @@ hsa_status_t XdnaDriver::SubmitCmdChain(hsa_queue_t& q, void* queue_metadata,
     cmd_arg_cnts.push_back(arg_cnt);
   }
 
-  // Every packet was accepted, so the queue is committed to this mode from here on.
-  kmq_metadata->mode = mode;
+  // Rebuild the hardware context when this batch needs one the queue does not have: either the
+  // dispatch mode changed, or a new PDI needs a compute unit.
+  //
+  // Note: we can do this because we have forced synchronization between command chains. If we
+  // move to a more asynchronous model, we will need to figure out how hardware context
+  // destruction works while applications are running.
+  const bool mode_changed = (kmq_metadata->mode != mode);
+  if (mode_changed || reconfigure_queue) {
+    // A full-ELF context must carry no CU configuration, and CreateHwCtx derives that from the
+    // PDI cache, so the cache is dropped before the rebuild. Switching back later finds it empty
+    // and re-adds each PDI, which is what forces the reconfigure that restores the CU config.
+    if (mode == QueueMode::FullElf) kmq_metadata->pdi_cache.Truncate(0);
 
-  // Reconfigure hardware context.
-  if (reconfigure_queue) {
-    // Destroy the existing hardware context.
-    // Note: we can do this because we have forced synchronization between command chains. If we
-    // move to a more asynchronous model, we will need to figure out how hardware context
-    // destruction works while applications are running.
-    hsa_status_t err = DestroyHwCtx(fd_, kmq_metadata->hw_ctx_handle);
-    if (err != HSA_STATUS_SUCCESS) {
-      assert(false && "Failed to destroy hardware context for queue.");
-      return err;
+    if (kmq_metadata->hw_ctx_handle != AMDXDNA_INVALID_CTX_HANDLE) {
+      const hsa_status_t err = DestroyHwCtx(fd_, kmq_metadata->hw_ctx_handle);
+      if (err != HSA_STATUS_SUCCESS) {
+        assert(false && "Failed to destroy hardware context for queue.");
+        return err;
+      }
+      kmq_metadata->hw_ctx_handle = AMDXDNA_INVALID_CTX_HANDLE;
+      kmq_metadata->syncobj_handle = 0;
     }
-    kmq_metadata->hw_ctx_handle = AMDXDNA_INVALID_CTX_HANDLE;
-    kmq_metadata->syncobj_handle = 0;
 
-    // Create a new hardware context.
-    err = CreateHwCtx(fd_, kmq_metadata);
+    const hsa_status_t err = CreateHwCtx(fd_, kmq_metadata);
     if (err != HSA_STATUS_SUCCESS) {
       assert(false && "Failed to configure hardware context for queue.");
       return err;
     }
   }
 
-  // The context now matches the cache, so the new entries stand even if the submission below
-  // fails: the commands they describe are still the ones this context can run.
+  // Every packet was accepted, so the queue is committed to this mode.
+  kmq_metadata->mode = mode;
   pdi_cache_guard.Dismiss();
 
   // Remove duplicate BOs, since the driver reports an error if the same BO is provided multiple
@@ -2020,7 +2026,7 @@ hsa_status_t XdnaDriver::SubmitCmdChain(hsa_queue_t& q, void* queue_metadata,
   size_t chunk_start = 0;
   while (chunk_start < cmd_bo_handles.size()) {
     // Every command in a chain shares one buffer, so take commands until the next one would not
-    // fit the same accounting the driver does as it packs the slots.
+    // fit.
     size_t chunk_len = 0;
     uint32_t chunk_bytesize = 0;
     for (size_t i = chunk_start; i < cmd_bo_handles.size(); ++i) {
