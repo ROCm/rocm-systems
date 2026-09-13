@@ -294,3 +294,52 @@ controls, ranges, profiles and frozen provenance are in
 The gfx950 GPU kernels are original Gluon/Triton kernels; their preparation and
 reference checks run on CPU because the installed PyTorch failed to load a
 gfx950 reference kernel. Hardware numerical qualification remains outstanding.
+
+### Source-built IREE kernels with CPU headroom
+
+To avoid crowding the reserved 16 cores, this follow-on explicitly uses two CU
+workers, one simulation engine and four MMA helpers. IREE task workers and
+OpenMP/MKL/OpenBLAS pools are capped at one. It uses the same frozen runtime
+`0020`, four balanced rounds, throughput signatures and numerical checks.
+The eight-worker/eight-engine results above describe a different configuration;
+they do not establish deployment limits on a machine with more available cores.
+
+IREE's repository generators supply the batch-MFMA presets and ordinary/scaled
+matmul tests. All fourteen measured workloads were compiled from generated MLIR
+and their emitted matrix instructions and zero-scratch metadata verified. The
+end-to-end runner retains its default sampled numerical check of up to 10,000
+output elements. Aggregate dispatch time includes generated reference-conversion
+and packing kernels; process wall time includes the entire runner.
+
+| IREE workload | Ordinary / async dispatch s | Change | Ordinary / async process wall s | Change |
+|---|---:|---:|---:|---:|
+| gfx950 MXFP4, 1024³, MFMA 16x16x128 | 2.4658 / 1.3233 | -46.3% | 2.855 / 1.795 | -37.1% |
+| gfx950 MXFP4, 4096x1024x256 | 2.4502 / 1.6070 | -34.4% | 2.905 / 2.010 | -30.8% |
+| gfx950 MXFP4, 1024³ with data tiling | 2.8220 / 2.7384 | -3.0% | 3.285 / 3.290 | +0.2% |
+| gfx950 f16, 1024³, MFMA 16x16x32 | 1.6205 / 1.5472 | -4.5% | 2.140 / 2.045 | -4.4% |
+| gfx1201 f16, 1024³, WMMA K16 | 2.5702 / 2.0662 | -19.6% | 2.790 / 2.305 | -17.4% |
+| gfx1250 f16, 1024³, WMMA K32 | 3.0101 / 3.6750 | +22.1% | 3.455 / 4.155 | +20.3% |
+
+Eight helpers lower the plain MXFP4 case to 1.1312 s dispatch / 1.550 s wall,
+versus 1.8691 / 2.180 with two helpers. Six ordinary workers take 2.5932 / 2.920:
+the kernel has only sixteen workgroups across eight XCDs, limiting independent
+CU work. The rectangular case has the same multiply count and more workgroups;
+six ordinary workers take 1.5466 / 1.940, slightly faster than two plus four
+helpers. Extra cores can be useful through either form of parallelism, depending
+on the kernel's grid and same-wave dependencies. Full-machine scaling is untested.
+
+The actual two-/four-block batch-MFMA kernels regress 18–52% in dispatch time;
+larger per-wave tiles reduce those losses to 10–17%. The emitted code reuses
+accumulators and overwrites MMA inputs, producing true scoreboard dependencies.
+LDS accesses and `v_perm_b32` also drain the current conservative window. The
+gfx1250 K32 kernel frequently changes VGPRMSB and accesses LDS between WMMAs.
+Those boundaries explain why these cases differ from the profitable kernels;
+they are prototype restrictions, not intrinsic requirements to serialize every
+LDS access or permutation with an MMA.
+
+All 168 final/control samples passed numerical checking and complete instruction
+signature comparisons. A larger-tile TileAndFuse preset failed IREE compilation
+before simulator execution and was excluded; its diagnostics are retained. The
+full tables, zero-helper controls, emitted ISA, generator snapshot, compiler and
+artifact hashes, ranges and CPU-use counters are in
+`/home/jakub/rocjitsu/misc/async-scoreboard-benchmark/iree-source/report.md`.
