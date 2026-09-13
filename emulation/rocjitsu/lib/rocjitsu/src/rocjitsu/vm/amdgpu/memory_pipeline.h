@@ -166,6 +166,27 @@ public:
   /// @details Use issue() when derived access-hook overrides must be honored.
   void issue_concrete(Instruction *inst, Wavefront &wf);
 
+  // Experimental host offload: only access runs on a worker. Issue accounting,
+  // architectural writeback and instruction destruction stay on the CU owner.
+  // The caller serializes all accesses to this CU's data caches until retirement.
+  void begin_async_access(Instruction &inst, Wavefront &wf) {
+    wf.wait_counters().increment(inst.data_as<VectorMemState>()->wait_counter_type);
+  }
+  void run_async_access(Instruction &inst, Wavefront &wf) {
+    GlobalMemPipeline::initiate_access(inst, wf);
+  }
+  void retire_async_access(Instruction *inst, Wavefront &wf, bool failed) {
+    const auto counter = inst->data_as<VectorMemState>()->wait_counter_type;
+    if (failed) {
+      finish_completed_access(inst, wf, counter);
+      return;
+    }
+    auto result = GlobalMemPipeline::complete_access(
+        *inst, wf, [this, inst, &wf, counter] { finish_completed_access(inst, wf, counter); });
+    if (result == MemoryAccessCompletion::Complete)
+      finish_completed_access(inst, wf, counter);
+  }
+
 protected:
   void initiate_access(Instruction &inst, Wavefront &wf) override;
   MemoryAccessCompletion complete_access(Instruction &inst, Wavefront &wf,

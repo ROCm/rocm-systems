@@ -7,6 +7,7 @@
 
 #include <array>
 #include <atomic>
+#include <bit>
 #include <cfenv>
 #include <cstdio>
 #include <cstdlib>
@@ -27,7 +28,8 @@
 namespace rocjitsu::amdgpu::matrix_coexecution {
 
 // Experimental controls: 0 = ordinary issue, 1 = scan only, 2 = serial batch,
-// 3 = parallel batch. Each process keeps its selected mode for the entire run.
+// 3 = parallel batch; 4/5/6 = scoreboard MMA/memory/both. Each process keeps
+// its selected mode for the entire run.
 inline int mode() {
   static const int value = [] {
     const char *text = std::getenv("RJ_MATRIX_COEXEC");
@@ -188,6 +190,8 @@ public:
     return error_;
   }
 
+  bool ready() const { return (state_.load(std::memory_order_acquire) & ~kSleeping) == 0; }
+
   void execute_pair(Instruction &a, Instruction &b, void *wave) {
     submit(a, wave);
     std::exception_ptr local_error;
@@ -292,19 +296,46 @@ inline void execute_private_batch(std::span<Instruction *> instructions, void *w
 
 // Each claim covers publication through joining, so another issuer cannot
 // reuse a helper's payload while its previous owner still reads completion.
-// There is no pending-job queue and no wait for capacity. Idle-slot scanning is
-// bounded by the configured pool size; occupied slots need no atomic RMW.
+// There is no pending-job queue and no wait for capacity. Two bitmap words
+// cover the entire pool; an exhausted pool needs no atomic RMW.
 class SharedPool {
   struct Slot {
-    alignas(64) std::atomic<bool> claimed{false};
     Helper helper;
+    unsigned index;
+    explicit Slot(unsigned i) : index(i) {}
   };
 
 public:
+  struct Ticket {
+    Slot *slot = nullptr;
+    explicit operator bool() const { return slot != nullptr; }
+  };
+
+  Ticket submit(Instruction &instruction, void *context) {
+    return {try_submit(instruction, context)};
+  }
+  static bool ready(Ticket ticket) { return ticket.slot->helper.ready(); }
+  std::exception_ptr finish(Ticket ticket) {
+    auto error = ticket.slot->helper.wait();
+    release(ticket.slot);
+    return error;
+  }
+
   explicit SharedPool(unsigned count) {
+    assert(count <= 128);
     slots_.reserve(count);
     for (unsigned i = 0; i != count; ++i)
-      slots_.push_back(std::make_unique<Slot>());
+      slots_.push_back(std::make_unique<Slot>(i));
+    for (unsigned word = 0; word != 2; ++word) {
+      const unsigned bits = count > word * 64 ? std::min(64u, count - word * 64) : 0;
+      free_[word].store(bits == 64 ? ~uint64_t{0} : (uint64_t{1} << bits) - 1,
+                        std::memory_order_relaxed);
+    }
+  }
+
+  bool available() const {
+    return free_[0].load(std::memory_order_relaxed) != 0 ||
+           (slots_.size() > 64 && free_[1].load(std::memory_order_relaxed) != 0);
   }
 
   void execute(std::span<Instruction *> instructions, void *wave) {
@@ -334,7 +365,7 @@ public:
     for (size_t i = 0; i != instructions.size(); ++i) {
       if (auto *slot = submitted[i]) {
         auto error = slot->helper.wait();
-        slot->claimed.store(false, std::memory_order_release);
+        release(slot);
         if (error && i < first_error_index) {
           first_error = error;
           first_error_index = i;
@@ -347,33 +378,43 @@ public:
 
 private:
   Slot *try_submit(Instruction &instruction, void *wave) {
-    if (slots_.empty())
-      return nullptr;
-    // Avoid making every issuer start at the same slot, without a shared
-    // cursor cache line. Rotation also spreads a single issuer's jobs.
-    thread_local size_t next = std::hash<std::thread::id>{}(std::this_thread::get_id());
-    for (size_t probe = 0; probe != slots_.size(); ++probe) {
-      ++stats.shared_probes;
-      auto *slot = slots_[next++ % slots_.size()].get();
-      if (slot->claimed.load(std::memory_order_relaxed))
-        continue;
-      bool expected = false;
-      if (!slot->claimed.compare_exchange_strong(expected, true, std::memory_order_acquire,
+    // One or two loads detect an exhausted pool. Reservation is bounded even
+    // under contention: after two failed CAS attempts per word, run inline.
+    // A conservative miss is allowed; waiting for worker capacity is not.
+    for (unsigned word = 0; word != (slots_.size() > 64 ? 2u : 1u); ++word) {
+      auto free = free_[word].load(std::memory_order_relaxed);
+      for (unsigned attempt = 0; free && attempt != 2; ++attempt) {
+        ++stats.shared_probes;
+        thread_local unsigned next = std::hash<std::thread::id>{}(std::this_thread::get_id()) & 63;
+        const unsigned bit = (std::countr_zero(std::rotr(free, int(next))) + next) & 63;
+        if (!free_[word].compare_exchange_strong(free, free & ~(uint64_t{1} << bit),
+                                                 std::memory_order_acquire,
                                                  std::memory_order_relaxed))
-        continue;
-      slot->helper.submit(instruction, wave);
-      return slot;
+          continue;
+        next = (bit + 1) & 63;
+        auto *slot = slots_[word * 64 + bit].get();
+        slot->helper.submit(instruction, wave);
+        return slot;
+      }
     }
     return nullptr;
   }
+  void release(Slot *slot) {
+    free_[slot->index / 64].fetch_or(uint64_t{1} << (slot->index % 64), std::memory_order_release);
+  }
+  alignas(64) std::array<std::atomic<uint64_t>, 2> free_{};
 
   std::vector<std::unique_ptr<Slot>> slots_;
 };
 
+inline SharedPool &shared_pool() {
+  static SharedPool pool(shared_helper_limit().value_or(4));
+  return pool;
+}
+
 inline void execute_batch(std::span<Instruction *> instructions, void *wave) {
   if (auto count = shared_helper_limit()) {
-    static SharedPool pool(*count);
-    pool.execute(instructions, wave);
+    shared_pool().execute(instructions, wave);
   } else {
     execute_private_batch(instructions, wave);
   }
