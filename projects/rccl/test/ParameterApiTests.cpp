@@ -69,7 +69,7 @@ DEFINE_NCCL_PARAM(testParamDeprecatedPub, int32_t, NCCL_TEST_PARAM_DEPRECATED_PU
                   "test-only deprecated published i32 param");
 DEFINE_NCCL_PARAM(testParamUnusedDep, int32_t, NCCL_TEST_PARAM_UNUSED_DEP, 0,
                   NCCL_PARAM_FLAG_UNUSED | NCCL_PARAM_FLAG_DEPRECATED, NCCL_PARAM_DEFAULT,
-                  "test-only unused+deprecated i32 param");
+                  "test-only unused deprecated i32 param");
 
 namespace {
 
@@ -146,7 +146,6 @@ TEST(ParameterApiTests, Bind_KnownKey_ReturnsSameHandleOnRebind) {
   });
 }
 
-// ncclParamBind succeeds for every flag combination, and PUBLISHED decides enumeration: only
 // ncclParamBind succeeds for every flag combination ncclParamCheckFlag branches on, and PUBLISHED
 // decides enumeration: only published params appear in ncclParamGetAllParameterKeys, whatever their
 // other flags.
@@ -323,7 +322,9 @@ TEST(ParameterApiTests, GetU16_MatchingType_ReturnsValue) {
         ASSERT_EQ(ncclParamGetU16(h, &v), ncclSuccess);
         ASSERT_EQ(v, static_cast<uint16_t>(65535));
       },
-      {{"NCCL_TEST_PARAM_U16", "65535"}});
+        ASSERT_EQ(v, static_cast<uint16_t>(40000));
+      },
+      {{"NCCL_TEST_PARAM_U16", "40000"}});
 }
 
 TEST(ParameterApiTests, GetU64_MatchingType_ReturnsValue) {
