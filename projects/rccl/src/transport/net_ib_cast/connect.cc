@@ -32,7 +32,8 @@ extern int64_t ncclParamIbCastResiliencyPortFailover();
 extern int64_t ncclParamIbCastReceiverSideMatchingScheme();
 
 struct ncclIbDevExtraProps {
-  bool oooRq;
+  bool     oooRq;
+  uint64_t procTag;   // sender's process identity, for the QP-sharing key
 };
 
 NCCL_PARAM(IbCastQpsPerConn, "IB_QPS_PER_CONNECTION", 2);
@@ -1038,12 +1039,14 @@ static ncclResult_t IbCastQpSharingSenderSetup(
   int probeRemIbDevIdx = remoteVProps->devs[0];
 
   // Count existing refs to determine groupIdx
-  int totalRefs = IbCastCountPeerTotalRefcount(probeIbDevN, &probeKey.peerAddr, probeRemIbDevIdx, true);
+  uint64_t peerProcTag = comm->base.peerProcTag;
+  int totalRefs = IbCastCountPeerTotalRefcount(probeIbDevN, &probeKey.peerAddr, peerProcTag, probeRemIbDevIdx, true);
   int groupIdx = totalRefs % ngroups;
   comm->base.sharedGroupIdx = groupIdx;
   comm->base.remIbDevIdx = probeRemIbDevIdx;
 
   probeKey.ibDevN = probeIbDevN;
+  probeKey.peerProcTag = peerProcTag;
   probeKey.remIbDevIdx = probeRemIbDevIdx;
   probeKey.isSend = true;
   probeKey.groupIdx = groupIdx;
@@ -1057,12 +1060,13 @@ static ncclResult_t IbCastQpSharingSenderSetup(
          __func__, comm->base.commId, groupIdx, totalRefs);
 
     comm->base.isSharedQpPrimary = false;
-    int primaryNqps = IbCastCountGroupQpSlots(&probeKey.peerAddr, probeRemIbDevIdx, true, groupIdx);
+    int primaryNqps = IbCastCountGroupQpSlots(&probeKey.peerAddr, peerProcTag, probeRemIbDevIdx, true, groupIdx);
     comm->base.sharedPrimaryNqps = primaryNqps;
 
     IbCastSharedQpKey key;
     memset(&key, 0, sizeof(key));
     memcpy(&key.peerAddr, &probeKey.peerAddr, sizeof(union ncclSocketAddress));
+    key.peerProcTag = peerProcTag;
     key.isSend = true;
     key.groupIdx = groupIdx;
 
@@ -1143,6 +1147,7 @@ static ncclResult_t IbCastQpSharingSenderRegisterPrimary(
     IbCastSharedQpKey key;
     memset(&key, 0, sizeof(key));
     key.peerAddr = peerAddr;
+    key.peerProcTag = comm->base.peerProcTag;
     key.ibDevN = comm->base.vProps.devs[q % comm->base.vProps.ndevs];
     key.remIbDevIdx = remoteVProps->devs[q % remoteVProps->ndevs];
     key.groupIdx = comm->base.sharedGroupIdx;
@@ -1234,7 +1239,9 @@ ib_connect_check:
   memcpy(stage->buffer, &mergedDev->vProps, sizeof(ncclNetVDeviceProps_t));
 
   struct ncclIbDevExtraProps exProps;
+  memset(&exProps, 0, sizeof(exProps));
   exProps.oooRq = true;
+  exProps.procTag = IbCastLocalProcTag();
   for (int i = 0; i < mergedDev->vProps.ndevs; i++) {
     int ibDevN = mergedDev->vProps.devs[i];
     exProps.oooRq = exProps.oooRq && IbCastDevs[ibDevN].oooRqSize;
@@ -1261,6 +1268,7 @@ ib_recv_dev_list:
   memcpy(&remoteVProps, stage->buffer, sizeof(ncclNetVDeviceProps_t));
   memcpy(&exProps, (char*)stage->buffer + sizeof(ncclNetVDeviceProps_t), sizeof(exProps));
   comm->base.remOooRq = exProps.oooRq;
+  comm->base.peerProcTag = exProps.procTag;
 
   mergedDev = IbCastMergedDevs + dev;
   comm->base.vProps = mergedDev->vProps;
@@ -1884,10 +1892,13 @@ static ncclResult_t IbCastQpSharingReceiverSetup(
   rComm->base.remIbDevIdx = remMeta->senderIbDevIdx;
   int recvProbeIbDevN = (rComm->base.vProps.ndevs > 0) ? rComm->base.vProps.devs[0] : 0;
 
+  uint64_t recvPeerProcTag = rComm->base.peerProcTag;
+
   IbCastSharedQpKey recvProbeKey;
   memset(&recvProbeKey, 0, sizeof(recvProbeKey));
   recvProbeKey.ibDevN = recvProbeIbDevN;
   recvProbeKey.peerAddr = recvPeerAddr;
+  recvProbeKey.peerProcTag = recvPeerProcTag;
   recvProbeKey.remIbDevIdx = remMeta->senderIbDevIdx;
   recvProbeKey.isSend = false;
   recvProbeKey.groupIdx = recvGroupIdx;
@@ -1901,13 +1912,14 @@ static ncclResult_t IbCastQpSharingReceiverSetup(
          __func__, rComm->base.commId, recvGroupIdx);
 
     rComm->base.isSharedQpPrimary = false;
-    int primaryNqps = IbCastCountGroupQpSlots(&recvPeerAddr, remMeta->senderIbDevIdx, false, remMeta->sharedGroupIdx);
+    int primaryNqps = IbCastCountGroupQpSlots(&recvPeerAddr, recvPeerProcTag, remMeta->senderIbDevIdx, false, remMeta->sharedGroupIdx);
     rComm->base.sharedPrimaryNqps = primaryNqps;
     rComm->useCtsOffload = false;
 
     IbCastSharedQpKey recvKey;
     memset(&recvKey, 0, sizeof(recvKey));
     recvKey.peerAddr = recvPeerAddr;
+    recvKey.peerProcTag = recvPeerProcTag;
     recvKey.isSend = false;
     recvKey.groupIdx = recvGroupIdx;
 
@@ -1968,6 +1980,7 @@ static ncclResult_t IbCastQpSharingReceiverSetup(
         memset(&flushKey, 0, sizeof(flushKey));
         flushKey.ibDevN = rComm->base.vProps.devs[i];
         flushKey.peerAddr = recvPeerAddr;
+        flushKey.peerProcTag = recvPeerProcTag;
         flushKey.remIbDevIdx = remMeta->senderIbDevIdx;
         flushKey.isSend = false;
         flushKey.groupIdx = recvGroupIdx;
@@ -2012,6 +2025,7 @@ static ncclResult_t IbCastQpSharingReceiverRegisterPrimary(
   IbCastSharedQpKey recvKey;
   memset(&recvKey, 0, sizeof(recvKey));
   recvKey.peerAddr = recvPeerAddr;
+  recvKey.peerProcTag = rComm->base.peerProcTag;
   recvKey.remIbDevIdx = remMeta->senderIbDevIdx;
   recvKey.isSend = false;
   recvKey.groupIdx = rComm->base.sharedGroupIdx;
@@ -2042,6 +2056,7 @@ static ncclResult_t IbCastQpSharingReceiverRegisterPrimary(
       memset(&flushKey, 0, sizeof(flushKey));
       flushKey.ibDevN = rComm->base.vProps.devs[i];
       flushKey.peerAddr = recvPeerAddr;
+      flushKey.peerProcTag = rComm->base.peerProcTag;
       flushKey.remIbDevIdx = remMeta->senderIbDevIdx;
       flushKey.isSend = false;
       flushKey.groupIdx = rComm->base.sharedGroupIdx;
@@ -2130,6 +2145,7 @@ ib_recv_dev_list:
 
   memcpy(&exProps, (char*)stage->buffer + sizeof(ncclNetVDeviceProps_t), sizeof(exProps));
   rComm->base.remOooRq = exProps.oooRq;
+  rComm->base.peerProcTag = exProps.procTag;  // capture before exProps is reused for the reply
 
   // Reduce the physical device list and store in the connection base
   struct ncclIbMergedDev* mergedDev;
@@ -2144,7 +2160,9 @@ ib_recv_dev_list:
   stage->offset = 0;
   stage->state = ncclIbCommStateSendDevList;
 
+  memset(&exProps, 0, sizeof(exProps));
   exProps.oooRq = true;
+  exProps.procTag = IbCastLocalProcTag();
   for (int i = 0; i < mergedDev->vProps.ndevs; i++) {
     int ibDevN = mergedDev->vProps.devs[i];
     exProps.oooRq = exProps.oooRq && IbCastDevs[ibDevN].oooRqSize;
