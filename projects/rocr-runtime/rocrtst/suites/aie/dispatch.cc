@@ -11,8 +11,10 @@
 #include <filesystem>
 #include <fstream>
 #include <functional>
+#include <map>
 #include <numeric>
 #include <stdexcept>
+#include <string>
 #include <vector>
 
 #include "gtest/gtest.h"
@@ -274,6 +276,34 @@ testing::AssertionResult load_binary_vmem(hsa_amd_memory_pool_t pool,
 // AIE packet submission
 // ---------------------------------------------------------------------------
 
+// Header fields every AIE dispatch packet carries, whatever kernel it names. The per-kernel
+// helpers below differ only in the fields they fill in on top of this.
+hsa_amd_aie_kernel_dispatch_packet_t make_aie_packet(hsa_signal_t completion_signal) {
+  hsa_amd_aie_kernel_dispatch_packet_t pkt{};
+  pkt.header = (HSA_AMD_AIE_PACKET_TYPE_READY << HSA_PACKET_HEADER_TYPE) |
+      (HSA_FENCE_SCOPE_SYSTEM << HSA_PACKET_HEADER_SCACQUIRE_FENCE_SCOPE) |
+      (HSA_FENCE_SCOPE_SYSTEM << HSA_PACKET_HEADER_SCRELEASE_FENCE_SCOPE);
+  pkt.opcode = HSA_AMD_AIE_PACKET_OPCODE_KMQ;
+  pkt.count = 24;
+  pkt.completion_signal = completion_signal;
+  return pkt;
+}
+
+// Claim the next queue slot and write `pkt` into it, returning its write index. Does not ring the
+// doorbell, so a caller can batch several packets into one command chain.
+std::uint64_t enqueue_aie_packet(hsa_queue_t* q, const hsa_amd_aie_kernel_dispatch_packet_t& pkt) {
+  auto* queue = static_cast<hsa_amd_aie_kernel_dispatch_packet_t*>(q->base_address);
+
+  const std::uint64_t wr_idx = hsa_queue_add_write_index_relaxed(q, 1);
+  while (wr_idx - hsa_queue_load_read_index_scacquire(q) >= q->size) {
+    // wait for available slot - if it hangs here, then the doorbell was not rung, or the packet
+    // was not processed for some reason
+  }
+
+  queue[wr_idx % q->size] = pkt;
+  return wr_idx;
+}
+
 // Compile-time constants and dispatch helper for the vector-scalar-add AIE
 // kernel: adds 1 to every element of a uint32 array of element_count entries.
 struct aie_vector_scalar_kernel {
@@ -314,13 +344,7 @@ struct aie_vector_scalar_kernel {
     kernargs[2] = element_bytes;  // input size in bytes
     kernargs[3] = element_bytes;  // output size in bytes
 
-    hsa_amd_aie_kernel_dispatch_packet_t pkt{};
-    pkt.header = (HSA_AMD_AIE_PACKET_TYPE_READY << HSA_PACKET_HEADER_TYPE) |
-        (HSA_FENCE_SCOPE_SYSTEM << HSA_PACKET_HEADER_SCACQUIRE_FENCE_SCOPE) |
-        (HSA_FENCE_SCOPE_SYSTEM << HSA_PACKET_HEADER_SCRELEASE_FENCE_SCOPE);
-    pkt.opcode = HSA_AMD_AIE_PACKET_OPCODE_KMQ;
-    pkt.count = 24;
-    pkt.completion_signal = completion_signal;
+    auto pkt = make_aie_packet(completion_signal);
     pkt.insts_addr_low = reinterpret_cast<std::uintptr_t>(insts_buf) & 0xFFFFFFFF;
     pkt.insts_addr_high = reinterpret_cast<std::uintptr_t>(insts_buf) >> 32;
     pkt.num_kernargs = num_kernargs;
@@ -328,22 +352,68 @@ struct aie_vector_scalar_kernel {
     pkt.insts_size = insts_size;
     pkt.pdi_addr = pdi_buf;
 
-    auto* queue = static_cast<hsa_amd_aie_kernel_dispatch_packet_t*>(q->base_address);
-
-    const std::uint64_t wr_idx = hsa_queue_add_write_index_relaxed(q, 1);
-    while (wr_idx - hsa_queue_load_read_index_scacquire(q) >= q->size) {
-      // wait for available slot - if it hangs here, then the doorbell was not rung, or the packet
-      // was not processed for some reason
-    }
-
-    const std::uint64_t pkt_idx = wr_idx % q->size;
-    queue[pkt_idx] = pkt;
-
-    return wr_idx;
+    return enqueue_aie_packet(q, pkt);
   }
 };
 const std::filesystem::path aie_vector_scalar_kernel::pdiPath = STRINGIFY(DEFAULT_PDI_PATH);
 const std::filesystem::path aie_vector_scalar_kernel::instsPath = STRINGIFY(DEFAULT_INSTS_PATH);
+
+// Compile-time constants and dispatch helper for the vector-scalar-mul AIE kernel: multiplies
+// every element of a uint32 array by `scale`, in place.
+//
+// Deliberately unlike aie_vector_scalar_kernel in the two ways a test can observe: the result
+// says which design ran, and the single in/out buffer means one kernarg instead of two, so the
+// two kernels' commands are not the same shape either.
+struct aie_vector_scalar_mul_kernel {
+  static const std::filesystem::path pdiPath;
+  static const std::filesystem::path instsPath;
+
+  // Injected by the build from VSMUL_SCALE, the same value it passes to the design script.
+  static constexpr std::uint32_t scale = MUL_SCALE;
+
+  // Number of elements in the in/out buffer for the vector-scalar mul kernel.
+  static constexpr std::size_t element_count = 1024;
+  static constexpr std::size_t element_bytes = element_count * sizeof(std::uint32_t);
+
+  // Number of kernargs: one buffer, read and written.
+  static constexpr std::size_t num_kernargs = 1;
+  // uint64_t slots one dispatch's kernargs occupy: every kernarg is an address plus a size, so
+  // two per argument. Deliberately not spelled as a `num_kernargs` + `num_kernarg_sizes` pair --
+  // those two names differ by one character and mistyping the stride silently halves it.
+  static constexpr std::size_t num_kernargs_sizes = 2 * num_kernargs;
+  // Buffer size for kernargs: 1 pointer + 1 size
+  static constexpr std::size_t kernarg_bytes = num_kernargs_sizes * sizeof(uint64_t);
+
+  /**
+   * @brief Create an AIE packet payload for vector-scalar mul.
+   *
+   * @param pdi_buf buffer containing the PDI for this packet
+   * @param insts_buf buffer containing the instruction sequence for this packet
+   * @param insts_size size of the instruction sequence in bytes
+   * @param inout buffer read and written by the packet
+   * @param kernargs pointer to the kernel arguments buffer
+   * @param completion_signal signal to be used for completion notification
+   * @param q HSA queue to which the packet will be submitted
+   */
+  static std::uint64_t dispatch_packet(void* pdi_buf, void* insts_buf, std::uint32_t insts_size,
+                                       void* inout, uint64_t* kernargs,
+                                       hsa_signal_t completion_signal, hsa_queue_t* q) {
+    kernargs[0] = reinterpret_cast<uint64_t>(inout);
+    kernargs[1] = element_bytes;  // in/out size in bytes
+
+    auto pkt = make_aie_packet(completion_signal);
+    pkt.insts_addr_low = reinterpret_cast<std::uintptr_t>(insts_buf) & 0xFFFFFFFF;
+    pkt.insts_addr_high = reinterpret_cast<std::uintptr_t>(insts_buf) >> 32;
+    pkt.num_kernargs = num_kernargs;
+    pkt.kernarg_address = kernargs;
+    pkt.insts_size = insts_size;
+    pkt.pdi_addr = pdi_buf;
+
+    return enqueue_aie_packet(q, pkt);
+  }
+};
+const std::filesystem::path aie_vector_scalar_mul_kernel::pdiPath = STRINGIFY(MUL_PDI_PATH);
+const std::filesystem::path aie_vector_scalar_mul_kernel::instsPath = STRINGIFY(MUL_INSTS_PATH);
 
 }  // namespace
 
@@ -1343,11 +1413,25 @@ namespace {
 class pool_buffer {
  public:
   pool_buffer() = default;
+  // Takes ownership of a pointer already allocated from a pool.
+  explicit pool_buffer(void* p) : ptr_(p) {}
   pool_buffer(const pool_buffer&) = delete;
   pool_buffer& operator=(const pool_buffer&) = delete;
+  pool_buffer(pool_buffer&& other) noexcept : ptr_(other.ptr_) { other.ptr_ = nullptr; }
+  pool_buffer& operator=(pool_buffer&& other) noexcept {
+    if (this != &other) {
+      reset();
+      ptr_ = other.ptr_;
+      other.ptr_ = nullptr;
+    }
+    return *this;
+  }
   ~pool_buffer() { reset(); }
 
+  // Releases anything already held: the class has value semantics, so a caller may reasonably
+  // reuse one buffer, and overwriting ptr_ would leak the previous allocation silently.
   hsa_status_t allocate(hsa_amd_memory_pool_t pool, std::size_t size) {
+    reset();
     return hsa_amd_memory_pool_allocate(pool, size, 0, &ptr_);
   }
 
@@ -1362,6 +1446,103 @@ class pool_buffer {
  private:
   void* ptr_ = nullptr;
 };
+
+// Load a file straight into a pool_buffer, so ownership never passes through a raw pointer the
+// caller has to remember to release.
+testing::AssertionResult load_binary(hsa_amd_memory_pool_t pool, const std::filesystem::path& path,
+                                     pool_buffer* out, std::size_t& size_out) {
+  void* p = nullptr;
+  if (auto r = load_binary(pool, path, &p, size_out); !r) {
+    // Leave nothing half-built: a caller that loads several artifacts in sequence should not see
+    // a stale size paired with an empty buffer.
+    out->reset();
+    size_out = 0;
+    return r;
+  }
+  *out = pool_buffer(p);
+  return testing::AssertionSuccess();
+}
+
+// A PDI-path design's two artifacts, loaded into the device heap and owned for the caller's scope.
+struct kernel_artifacts {
+  pool_buffer pdi;
+  pool_buffer insts;
+  std::size_t pdi_size = 0;
+  std::size_t insts_size = 0;
+
+  testing::AssertionResult load(hsa_amd_memory_pool_t dev_pool,
+                                const std::filesystem::path& pdi_path,
+                                const std::filesystem::path& insts_path) {
+    if (auto r = load_binary(dev_pool, pdi_path, &pdi, pdi_size); !r) return r;
+    return load_binary(dev_pool, insts_path, &insts, insts_size);
+  }
+
+  // The add design, which most PDI-path tests use.
+  testing::AssertionResult load_add(hsa_amd_memory_pool_t dev_pool) {
+    return load(dev_pool, aie_vector_scalar_kernel::pdiPath, aie_vector_scalar_kernel::instsPath);
+  }
+
+  // The mul design, used by the interleaving tests.
+  testing::AssertionResult load_mul(hsa_amd_memory_pool_t dev_pool) {
+    return load(dev_pool, aie_vector_scalar_mul_kernel::pdiPath,
+                aie_vector_scalar_mul_kernel::instsPath);
+  }
+};
+
+// Post-dispatch checks for the two designs.
+void VerifyAdd(const std::uint32_t* in, const std::uint32_t* out, std::size_t count) {
+  for (std::size_t i = 0; i < count; ++i) {
+    ASSERT_EQ(out[i], in[i] + 1) << "add mismatch at index " << i;
+  }
+}
+
+// The mul kernel works in place, so there is no untouched input to compare against and the
+// expected value has to be reconstructed from the element's position in the iota that seeded the
+// buffer. `base_index` is that position for inout[0]; it has no default because a slice of a
+// larger buffer that quietly assumed 0 would compare against another chunk's expectations.
+void VerifyMul(const std::uint32_t* inout, std::size_t count, std::size_t base_index) {
+  for (std::size_t i = 0; i < count; ++i) {
+    ASSERT_EQ(inout[i],
+              static_cast<std::uint32_t>(base_index + i) * aie_vector_scalar_mul_kernel::scale)
+        << "mul mismatch at index " << (base_index + i);
+  }
+}
+
+// Dispatch one add-kernel packet against `pdi`, wait for it, and check the whole output buffer.
+// Both PDI-cache tests walk the cache one PDI at a time exactly like this; call it under
+// ASSERT_NO_FATAL_FAILURE so a mismatch stops the caller too.
+void DispatchAddAndVerify(hsa_queue_t* queue, void* pdi, const kernel_artifacts& artifacts,
+                          std::uint32_t* in, std::uint32_t* out, std::uint64_t* kernargs) {
+  std::fill_n(out, aie_vector_scalar_kernel::element_count, 0);
+
+  hsa_signal_t signal{};
+  ASSERT_EQ(hsa_signal_create(1, 0, nullptr, &signal), HSA_STATUS_SUCCESS);
+  const auto wr_idx = aie_vector_scalar_kernel::dispatch_packet(
+      pdi, artifacts.insts.get(), artifacts.insts_size, in, out, kernargs, signal, queue);
+  hsa_signal_store_screlease(queue->doorbell_signal, wr_idx);
+  hsa_signal_wait_scacquire(signal, HSA_SIGNAL_CONDITION_EQ, 0, UINT64_MAX, HSA_WAIT_STATE_BLOCKED);
+  EXPECT_EQ(hsa_signal_destroy(signal), HSA_STATUS_SUCCESS);
+
+  VerifyAdd(in, out, aie_vector_scalar_kernel::element_count);
+}
+
+// The mul counterpart. Seeds the in-place buffer itself, since the kernel overwrites what it read
+// and a second run over a stale buffer would be checking the wrong expectations.
+void DispatchMulAndVerify(hsa_queue_t* queue, const kernel_artifacts& artifacts,
+                          std::uint32_t* inout, std::uint64_t* kernargs) {
+  std::iota(inout, inout + aie_vector_scalar_mul_kernel::element_count, 0);
+
+  hsa_signal_t signal{};
+  ASSERT_EQ(hsa_signal_create(1, 0, nullptr, &signal), HSA_STATUS_SUCCESS);
+  const auto wr_idx = aie_vector_scalar_mul_kernel::dispatch_packet(
+      artifacts.pdi.get(), artifacts.insts.get(), artifacts.insts_size, inout, kernargs, signal,
+      queue);
+  hsa_signal_store_screlease(queue->doorbell_signal, wr_idx);
+  hsa_signal_wait_scacquire(signal, HSA_SIGNAL_CONDITION_EQ, 0, UINT64_MAX, HSA_WAIT_STATE_BLOCKED);
+  EXPECT_EQ(hsa_signal_destroy(signal), HSA_STATUS_SUCCESS);
+
+  VerifyMul(inout, aie_vector_scalar_mul_kernel::element_count, 0);
+}
 
 // The full-ELF build of the same vector-scalar-add kernel used above.
 struct aie_full_elf_kernel {
@@ -1402,13 +1583,7 @@ struct aie_full_elf_kernel {
     kernargs[2] = element_bytes;  // input size in bytes
     kernargs[3] = element_bytes;  // output size in bytes
 
-    hsa_amd_aie_kernel_dispatch_packet_t pkt{};
-    pkt.header = (HSA_AMD_AIE_PACKET_TYPE_READY << HSA_PACKET_HEADER_TYPE) |
-        (HSA_FENCE_SCOPE_SYSTEM << HSA_PACKET_HEADER_SCACQUIRE_FENCE_SCOPE) |
-        (HSA_FENCE_SCOPE_SYSTEM << HSA_PACKET_HEADER_SCRELEASE_FENCE_SCOPE);
-    pkt.opcode = HSA_AMD_AIE_PACKET_OPCODE_KMQ;
-    pkt.count = 24;
-    pkt.completion_signal = completion_signal;
+    auto pkt = make_aie_packet(completion_signal);
     pkt.insts_addr_low = reinterpret_cast<std::uintptr_t>(ctrl_code) & 0xFFFFFFFF;
     pkt.insts_addr_high = reinterpret_cast<std::uintptr_t>(ctrl_code) >> 32;
     pkt.insts_size = ctrl_code_size;
@@ -1421,18 +1596,46 @@ struct aie_full_elf_kernel {
     // to be good.
     if (mutate) mutate(pkt);
 
-    auto* queue = static_cast<hsa_amd_aie_kernel_dispatch_packet_t*>(q->base_address);
-
-    const std::uint64_t wr_idx = hsa_queue_add_write_index_relaxed(q, 1);
-    while (wr_idx - hsa_queue_load_read_index_scacquire(q) >= q->size) {
-      // wait for an available slot
-    }
-
-    queue[wr_idx % q->size] = pkt;
-    return wr_idx;
+    return enqueue_aie_packet(q, pkt);
   }
 };
 const std::filesystem::path aie_full_elf_kernel::elfPath = STRINGIFY(DEFAULT_ELF_PATH);
+
+// The full-ELF build of the vector-scalar-mul kernel. Same shape as above, but one argument
+// instead of two, since the design reads and writes a single buffer.
+struct aie_full_elf_mul_kernel {
+  static const std::filesystem::path elfPath;
+  // Neither design names its aie.device or its runtime sequence, so aiecc gives both the same
+  // default name.
+  static constexpr const char* kernel_name = DEFAULT_ELF_KERNEL_NAME;
+
+  static constexpr std::size_t element_count = 1024;
+  static constexpr std::size_t element_bytes = element_count * sizeof(std::uint32_t);
+
+  static constexpr std::size_t num_kernargs = 1;
+  static constexpr std::size_t num_kernargs_sizes = 2 * num_kernargs;
+  static constexpr std::size_t kernarg_bytes = num_kernargs_sizes * sizeof(std::uint64_t);
+
+  static std::uint64_t dispatch_packet(void* ctrl_code, std::size_t ctrl_code_size, void* pdi,
+                                       std::uint64_t pdi_patch_offset, void* inout,
+                                       std::uint64_t* kernargs, hsa_signal_t completion_signal,
+                                       hsa_queue_t* q) {
+    kernargs[0] = reinterpret_cast<std::uint64_t>(inout);
+    kernargs[1] = element_bytes;  // in/out size in bytes
+
+    auto pkt = make_aie_packet(completion_signal);
+    pkt.insts_addr_low = reinterpret_cast<std::uintptr_t>(ctrl_code) & 0xFFFFFFFF;
+    pkt.insts_addr_high = reinterpret_cast<std::uintptr_t>(ctrl_code) >> 32;
+    pkt.insts_size = ctrl_code_size;
+    pkt.num_kernargs = num_kernargs;
+    pkt.kernarg_address = kernargs;
+    pkt.pdi_addr = pdi;
+    pkt.pdi_patch_offset = pdi_patch_offset;
+
+    return enqueue_aie_packet(q, pkt);
+  }
+};
+const std::filesystem::path aie_full_elf_mul_kernel::elfPath = STRINGIFY(MUL_ELF_PATH);
 
 // Rewrite the relocation at `index` in .rela.dyn to reference symbol `sym` with relocation type
 // `type`. Lets a test build a malformed variant of the real ELF in memory -- the entries are
@@ -1512,18 +1715,26 @@ class FullElfDispatchTest : public DispatchTest {
     DispatchTest::TearDown();
   }
 
-  // Allocate a control-code buffer and fill it with `arg_addrs` patched in.
-  testing::AssertionResult make_ctrl_code(pool_buffer* out,
+  // Allocate a control-code buffer for `design` and fill it with `arg_addrs` patched in. Takes the
+  // kernel rather than reading the fixture's, so a test carrying a second design patches it the
+  // same way instead of open-coding allocate-then-write.
+  testing::AssertionResult make_ctrl_code(const aie_full_elf::Kernel& design, pool_buffer* out,
                                           const std::vector<std::uint64_t>& arg_addrs) {
-    if (out->allocate(dev_pool, kernel.ctrl_code.size()) != HSA_STATUS_SUCCESS) {
+    if (out->allocate(dev_pool, design.ctrl_code.size()) != HSA_STATUS_SUCCESS) {
       return testing::AssertionFailure() << "failed to allocate control code";
     }
     try {
-      aie_full_elf::WriteControlCode(kernel, out->get(), kernel.ctrl_code.size(), arg_addrs);
+      aie_full_elf::WriteControlCode(design, out->get(), design.ctrl_code.size(), arg_addrs);
     } catch (const std::exception& e) {
       return testing::AssertionFailure() << "patching control code: " << e.what();
     }
     return testing::AssertionSuccess();
+  }
+
+  // The fixture's own design, which most full-ELF tests use.
+  testing::AssertionResult make_ctrl_code(pool_buffer* out,
+                                          const std::vector<std::uint64_t>& arg_addrs) {
+    return make_ctrl_code(kernel, out, arg_addrs);
   }
 
   // Dispatch `num_dispatches` full-ELF packets with distinct buffer pairs as a
@@ -2320,6 +2531,82 @@ TEST_F(DispatchTest, PdiCacheRolledBackOnFailedBatch) {
   EXPECT_EQ(hsa_amd_memory_pool_free(pdi_buf), HSA_STATUS_SUCCESS);
 }
 
+// The ceiling DispatchTest.PdiCacheHoldsThirtyTwo walks up to, seen from the other side. A
+// 33rd distinct PDI has no compute-unit slot left -- the CU mask is 32 bits -- so the runtime
+// refuses the packet rather than dispatching it against a context that cannot select it.
+//
+// The refusal happens while the batch is still being built, before anything is submitted, so
+// nothing runs and the output stays as the test left it.
+TEST_F(DispatchTest, PdiCacheRejectsThirtyThree) {
+  constexpr std::uint32_t cache_capacity = 32;
+
+  hsa_queue_t* queue = nullptr;
+  ASSERT_EQ(hsa_queue_create(aie_agents.front(), min_queue_size, HSA_QUEUE_TYPE_SINGLE, nullptr,
+                             nullptr, 0, 0, &queue),
+            HSA_STATUS_SUCCESS);
+
+  kernel_artifacts add;
+  ASSERT_TRUE(add.load_add(dev_pool));
+
+  // One more than the cache holds. Identical bytes, distinct BOs: the cache keys on the handle.
+  std::vector<pool_buffer> pdis(cache_capacity + 1);
+  for (std::uint32_t i = 0; i < pdis.size(); ++i) {
+    SCOPED_TRACE(i);
+    ASSERT_EQ(pdis[i].allocate(dev_pool, add.pdi_size), HSA_STATUS_SUCCESS);
+    std::memcpy(pdis[i].get(), add.pdi.get(), add.pdi_size);
+  }
+
+  pool_buffer input, output, kernargs;
+  ASSERT_EQ(input.allocate(data_pool, aie_vector_scalar_kernel::element_bytes), HSA_STATUS_SUCCESS);
+  ASSERT_EQ(output.allocate(data_pool, aie_vector_scalar_kernel::element_bytes),
+            HSA_STATUS_SUCCESS);
+  ASSERT_EQ(kernargs.allocate(kernarg_pool, aie_vector_scalar_kernel::kernarg_bytes),
+            HSA_STATUS_SUCCESS);
+  auto* in = input.as<std::uint32_t>();
+  auto* out = output.as<std::uint32_t>();
+  auto* args = kernargs.as<std::uint64_t>();
+  std::iota(in, in + aie_vector_scalar_kernel::element_count, 0);
+
+  // Fill the cache. Each of these has to succeed, or the test is not measuring what it claims.
+  for (std::uint32_t i = 0; i < cache_capacity; ++i) {
+    SCOPED_TRACE(i);
+    ASSERT_NO_FATAL_FAILURE(DispatchAddAndVerify(queue, pdis[i].get(), add, in, out, args));
+  }
+
+  // The 33rd: rejected, so the output keeps the sentinel.
+  constexpr std::uint32_t sentinel = 0xD0D0D0D0;
+  std::fill_n(out, aie_vector_scalar_kernel::element_count, sentinel);
+
+  hsa_signal_t signal{};
+  ASSERT_EQ(hsa_signal_create(1, 0, nullptr, &signal), HSA_STATUS_SUCCESS);
+  const auto wr_idx = aie_vector_scalar_kernel::dispatch_packet(
+      pdis[cache_capacity].get(), add.insts.get(), add.insts_size, in, out, args, signal, queue);
+  hsa_signal_store_screlease(queue->doorbell_signal, wr_idx);
+  hsa_signal_wait_scacquire(signal, HSA_SIGNAL_CONDITION_EQ, 0, UINT64_MAX, HSA_WAIT_STATE_BLOCKED);
+  for (std::size_t e = 0; e < aie_vector_scalar_kernel::element_count; ++e) {
+    ASSERT_EQ(out[e], sentinel) << "rejected dispatch wrote output at index " << e;
+  }
+  EXPECT_EQ(hsa_signal_destroy(signal), HSA_STATUS_SUCCESS);
+
+  // A PDI that is already cached still dispatches: hitting the ceiling refuses the one packet
+  // that could not be placed, it does not poison the queue.
+  //
+  // This step assumes the refused batch was fully unwound, which means two things the current
+  // code does neither of, because it aborts before it can:
+  //
+  //   * the packets are retired -- AieAqlQueue::SubmitPackets throws before storing
+  //     read_dispatch_id, so they stay in the ring; if they are not retired this dispatch
+  //     resubmits the 33rd packet alongside the new one and the batch can never drain; and
+  //   * the completion signals are released -- SubmitCmdChain returns before the loop that calls
+  //     SubRelease, so a waiter on the refused packet's signal would never wake.
+  //
+  // Both are what the planned ReportSubmitFailure path does, so the assertion below is written
+  // against that behaviour.
+  ASSERT_NO_FATAL_FAILURE(DispatchAddAndVerify(queue, pdis[0].get(), add, in, out, args));
+
+  EXPECT_EQ(hsa_queue_destroy(queue), HSA_STATUS_SUCCESS);
+}
+
 #endif  // ROCRTST_AIE_ASYNC_ERROR_REPORTING
 
 // The PDI + instruction sequence path packs a wider chain slot than full-ELF, so
@@ -2391,4 +2678,306 @@ TEST_F(DispatchTest, PdiChainSplit) {
   EXPECT_EQ(hsa_amd_memory_pool_free(input), HSA_STATUS_SUCCESS);
   EXPECT_EQ(hsa_amd_memory_pool_free(insts_buf), HSA_STATUS_SUCCESS);
   EXPECT_EQ(hsa_amd_memory_pool_free(pdi_buf), HSA_STATUS_SUCCESS);
+}
+
+// The PDI + instruction sequence path gives every distinct PDI a compute-unit slot in the queue's
+// hardware context, and the CU mask driving it is 32 bits wide, so 32 distinct PDIs is the
+// ceiling. Each new PDI tears the context down and rebuilds it with one more CU configured, so
+// walking all the way to the ceiling checks that the rebuild keeps producing a context that can
+// still run the kernel -- not just that the cache accepted the entry.
+//
+// Counterpart to FullElfDispatchTest.ElfNoPdiCeiling, which shows the full-ELF path has no such
+// limit because it loads the PDI from the control code instead of spending a CU slot on it.
+TEST_F(DispatchTest, PdiCacheHoldsThirtyTwo) {
+  constexpr std::uint32_t num_pdis = 32;
+
+  hsa_queue_t* queue = nullptr;
+  ASSERT_EQ(hsa_queue_create(aie_agents.front(), min_queue_size, HSA_QUEUE_TYPE_SINGLE, nullptr,
+                             nullptr, 0, 0, &queue),
+            HSA_STATUS_SUCCESS);
+
+  kernel_artifacts add;
+  ASSERT_TRUE(add.load_add(dev_pool));
+
+  // Distinct BOs holding identical PDI bytes: the cache keys on the BO handle, so these count as
+  // 32 separate PDIs even though the design is the same one every time.
+  std::vector<pool_buffer> pdis(num_pdis);
+  for (std::uint32_t i = 0; i < num_pdis; ++i) {
+    SCOPED_TRACE(i);
+    ASSERT_EQ(pdis[i].allocate(dev_pool, add.pdi_size), HSA_STATUS_SUCCESS);
+    std::memcpy(pdis[i].get(), add.pdi.get(), add.pdi_size);
+  }
+
+  pool_buffer input, output, kernargs;
+  ASSERT_EQ(input.allocate(data_pool, aie_vector_scalar_kernel::element_bytes), HSA_STATUS_SUCCESS);
+  ASSERT_EQ(output.allocate(data_pool, aie_vector_scalar_kernel::element_bytes),
+            HSA_STATUS_SUCCESS);
+  ASSERT_EQ(kernargs.allocate(kernarg_pool, aie_vector_scalar_kernel::kernarg_bytes),
+            HSA_STATUS_SUCCESS);
+  auto* in = input.as<std::uint32_t>();
+  auto* out = output.as<std::uint32_t>();
+  auto* args = kernargs.as<std::uint64_t>();
+  std::iota(in, in + aie_vector_scalar_kernel::element_count, 0);
+
+  // One dispatch per PDI, each waited on before the next: every iteration adds a cache entry and
+  // forces a context rebuild, and the result shows the rebuilt context still runs the kernel.
+  for (std::uint32_t i = 0; i < num_pdis; ++i) {
+    SCOPED_TRACE(i);
+    ASSERT_NO_FATAL_FAILURE(DispatchAddAndVerify(queue, pdis[i].get(), add, in, out, args));
+  }
+
+  EXPECT_EQ(hsa_queue_destroy(queue), HSA_STATUS_SUCCESS);
+}
+
+TEST_F(DispatchTest, MulSingleDispatch) {
+  // The second kernel on its own. Without this, a failure in the interleaving tests below cannot
+  // be told apart from the new design simply not working.
+  hsa_queue_t* queue = nullptr;
+  ASSERT_EQ(hsa_queue_create(aie_agents.front(), min_queue_size, HSA_QUEUE_TYPE_SINGLE, nullptr,
+                             nullptr, 0, 0, &queue),
+            HSA_STATUS_SUCCESS);
+
+  kernel_artifacts mul;
+  ASSERT_TRUE(mul.load_mul(dev_pool));
+
+  pool_buffer inout, kernargs;
+  ASSERT_EQ(inout.allocate(data_pool, aie_vector_scalar_mul_kernel::element_bytes),
+            HSA_STATUS_SUCCESS);
+  ASSERT_EQ(kernargs.allocate(kernarg_pool, aie_vector_scalar_mul_kernel::kernarg_bytes),
+            HSA_STATUS_SUCCESS);
+
+  ASSERT_NO_FATAL_FAILURE(
+      DispatchMulAndVerify(queue, mul, inout.as<std::uint32_t>(), kernargs.as<std::uint64_t>()));
+
+  EXPECT_EQ(hsa_queue_destroy(queue), HSA_STATUS_SUCCESS);
+}
+
+// Two different designs on one queue. Each holds a compute-unit slot in the shared hardware
+// context and is selected per command by its CU mask, so getting this wrong shows up as one
+// kernel's packets running the other's design -- which the differing results make visible.
+//
+// The two also carry different argument counts (two kernargs against one), so the commands are
+// not even the same size in the chain the driver packs them into.
+TEST_F(DispatchTest, InterleavedKernels) {
+  constexpr std::uint32_t num_pairs = 4;
+  // One stride `n` walks both designs' buffers below, which is only valid while they agree.
+  static_assert(aie_vector_scalar_kernel::element_count ==
+                aie_vector_scalar_mul_kernel::element_count);
+
+  hsa_queue_t* queue = nullptr;
+  ASSERT_EQ(hsa_queue_create(aie_agents.front(), min_queue_size, HSA_QUEUE_TYPE_SINGLE, nullptr,
+                             nullptr, 0, 0, &queue),
+            HSA_STATUS_SUCCESS);
+  // enqueue_aie_packet spins until a slot frees and the doorbell is only rung after the whole
+  // batch is staged, so a ring smaller than the batch would hang rather than fail.
+  ASSERT_GE(queue->size, 2 * num_pairs);
+
+  kernel_artifacts add, mul;
+  ASSERT_TRUE(add.load_add(dev_pool));
+  ASSERT_TRUE(mul.load_mul(dev_pool));
+
+  constexpr std::size_t n = aie_vector_scalar_kernel::element_count;
+  pool_buffer add_in, add_out, add_kernargs, mul_inout, mul_kernargs;
+  ASSERT_EQ(add_in.allocate(data_pool, aie_vector_scalar_kernel::element_bytes * num_pairs),
+            HSA_STATUS_SUCCESS);
+  ASSERT_EQ(add_out.allocate(data_pool, aie_vector_scalar_kernel::element_bytes * num_pairs),
+            HSA_STATUS_SUCCESS);
+  ASSERT_EQ(
+      add_kernargs.allocate(kernarg_pool, aie_vector_scalar_kernel::kernarg_bytes * num_pairs),
+      HSA_STATUS_SUCCESS);
+  ASSERT_EQ(mul_inout.allocate(data_pool, aie_vector_scalar_mul_kernel::element_bytes * num_pairs),
+            HSA_STATUS_SUCCESS);
+  ASSERT_EQ(
+      mul_kernargs.allocate(kernarg_pool, aie_vector_scalar_mul_kernel::kernarg_bytes * num_pairs),
+      HSA_STATUS_SUCCESS);
+
+  auto* ain = add_in.as<std::uint32_t>();
+  auto* aout = add_out.as<std::uint32_t>();
+  auto* mio = mul_inout.as<std::uint32_t>();
+  std::iota(ain, ain + n * num_pairs, 0);
+  std::fill_n(aout, n * num_pairs, 0);
+  std::iota(mio, mio + n * num_pairs, 0);
+
+  hsa_signal_t signal{};
+  ASSERT_EQ(hsa_signal_create(2 * num_pairs, 0, nullptr, &signal), HSA_STATUS_SUCCESS);
+
+  // Alternate the two designs in the ring and ring the doorbell once, so the runtime sees the
+  // whole mixed batch at one time and packs it into one chain.
+  std::uint64_t wr_idx = 0;
+  for (std::uint32_t i = 0; i < num_pairs; ++i) {
+    wr_idx = aie_vector_scalar_kernel::dispatch_packet(
+        add.pdi.get(), add.insts.get(), add.insts_size, ain + i * n, aout + i * n,
+        add_kernargs.as<std::uint64_t>() + i * aie_vector_scalar_kernel::num_kernargs_sizes, signal,
+        queue);
+    wr_idx = aie_vector_scalar_mul_kernel::dispatch_packet(
+        mul.pdi.get(), mul.insts.get(), mul.insts_size, mio + i * n,
+        mul_kernargs.as<std::uint64_t>() + i * aie_vector_scalar_mul_kernel::num_kernargs_sizes,
+        signal, queue);
+  }
+  hsa_signal_store_screlease(queue->doorbell_signal, wr_idx);
+  hsa_signal_wait_scacquire(signal, HSA_SIGNAL_CONDITION_EQ, 0, UINT64_MAX, HSA_WAIT_STATE_BLOCKED);
+
+  ASSERT_NO_FATAL_FAILURE(VerifyAdd(ain, aout, n * num_pairs));
+  ASSERT_NO_FATAL_FAILURE(VerifyMul(mio, n * num_pairs, 0));
+
+  EXPECT_EQ(hsa_signal_destroy(signal), HSA_STATUS_SUCCESS);
+  EXPECT_EQ(hsa_queue_destroy(queue), HSA_STATUS_SUCCESS);
+}
+
+// The same two designs alternating across separate doorbells rather than in one chain. The first
+// round introduces both PDIs and rebuilds the hardware context twice; every round after that
+// finds them cached and must skip the rebuild, still selecting the right one per packet.
+TEST_F(DispatchTest, InterleavedKernelsSeparateBatches) {
+  constexpr std::uint32_t num_rounds = 4;
+  static_assert(aie_vector_scalar_kernel::element_count ==
+                aie_vector_scalar_mul_kernel::element_count);
+
+  hsa_queue_t* queue = nullptr;
+  ASSERT_EQ(hsa_queue_create(aie_agents.front(), min_queue_size, HSA_QUEUE_TYPE_SINGLE, nullptr,
+                             nullptr, 0, 0, &queue),
+            HSA_STATUS_SUCCESS);
+
+  kernel_artifacts add, mul;
+  ASSERT_TRUE(add.load_add(dev_pool));
+  ASSERT_TRUE(mul.load_mul(dev_pool));
+
+  constexpr std::size_t n = aie_vector_scalar_kernel::element_count;
+  pool_buffer add_in, add_out, add_kernargs, mul_inout, mul_kernargs;
+  ASSERT_EQ(add_in.allocate(data_pool, aie_vector_scalar_kernel::element_bytes),
+            HSA_STATUS_SUCCESS);
+  ASSERT_EQ(add_out.allocate(data_pool, aie_vector_scalar_kernel::element_bytes),
+            HSA_STATUS_SUCCESS);
+  ASSERT_EQ(add_kernargs.allocate(kernarg_pool, aie_vector_scalar_kernel::kernarg_bytes),
+            HSA_STATUS_SUCCESS);
+  ASSERT_EQ(mul_inout.allocate(data_pool, aie_vector_scalar_mul_kernel::element_bytes),
+            HSA_STATUS_SUCCESS);
+  ASSERT_EQ(mul_kernargs.allocate(kernarg_pool, aie_vector_scalar_mul_kernel::kernarg_bytes),
+            HSA_STATUS_SUCCESS);
+
+  auto* ain = add_in.as<std::uint32_t>();
+  auto* aout = add_out.as<std::uint32_t>();
+  auto* mio = mul_inout.as<std::uint32_t>();
+  std::iota(ain, ain + n, 0);
+
+  for (std::uint32_t round = 0; round < num_rounds; ++round) {
+    SCOPED_TRACE(round);
+    ASSERT_NO_FATAL_FAILURE(DispatchAddAndVerify(queue, add.pdi.get(), add, ain, aout,
+                                                 add_kernargs.as<std::uint64_t>()));
+    ASSERT_NO_FATAL_FAILURE(
+        DispatchMulAndVerify(queue, mul, mio, mul_kernargs.as<std::uint64_t>()));
+  }
+
+  EXPECT_EQ(hsa_queue_destroy(queue), HSA_STATUS_SUCCESS);
+}
+
+// Adds the second design's full ELF on top of FullElfDispatchTest's.
+class FullElfInterleaveTest : public FullElfDispatchTest {
+ protected:
+  aie_full_elf::Kernel mul_kernel;
+  pool_buffer mul_pdi;
+
+  void SetUp() override {
+    FullElfDispatchTest::SetUp();
+    if (::testing::Test::HasFatalFailure() || ::testing::Test::IsSkipped()) return;
+
+    if (!std::filesystem::exists(aie_full_elf_mul_kernel::elfPath)) {
+      GTEST_SKIP() << "full ELF was not built: " << aie_full_elf_mul_kernel::elfPath;
+    }
+    // ParseFile throws on a malformed ELF; the lookup failure is a plain assertion. Keeping the
+    // two separate matters -- an ASSERT_* inside the ASSERT_NO_THROW block would only return from
+    // that block, and setup would carry on against an empty Kernel.
+    std::map<std::string, aie_full_elf::Kernel> kernels;
+    ASSERT_NO_THROW(kernels = aie_full_elf::ParseFile(aie_full_elf_mul_kernel::elfPath.string()));
+    auto it = kernels.find(aie_full_elf_mul_kernel::kernel_name);
+    ASSERT_NE(it, kernels.end()) << "kernel not in ELF: " << aie_full_elf_mul_kernel::kernel_name;
+    mul_kernel = std::move(it->second);
+    ASSERT_TRUE(mul_kernel.has_pdi_patch) << "full ELF has no PDI to load";
+    ASSERT_EQ(mul_pdi.allocate(dev_pool, mul_kernel.pdi.size()), HSA_STATUS_SUCCESS);
+    std::memcpy(mul_pdi.get(), mul_kernel.pdi.data(), mul_kernel.pdi.size());
+  }
+
+  void TearDown() override {
+    // Same ordering reason as the base class: release before the runtime shuts down.
+    mul_pdi.reset();
+    FullElfDispatchTest::TearDown();
+  }
+};
+
+// The full-ELF counterpart of DispatchTest.InterleavedKernels. This path has no PDI cache and no
+// CU masks -- each packet points at its own control code, which carries both its arguments and
+// the PDI it loads -- so what is being checked is the other half of interleaving: that alternating
+// designs in one chain each run against their own control code and PDI rather than the previous
+// packet's.
+TEST_F(FullElfInterleaveTest, ElfInterleavedKernels) {
+  constexpr std::uint32_t num_pairs = 4;
+  constexpr std::size_t n = aie_full_elf_kernel::element_count;
+  static_assert(aie_full_elf_kernel::element_count == aie_full_elf_mul_kernel::element_count);
+
+  // The differing argument counts are what make the two designs distinguishable at the ABI level,
+  // so assert it rather than assume the ELFs are what this test thinks they are.
+  ASSERT_EQ(kernel.num_args(), aie_full_elf_kernel::num_kernargs);
+  ASSERT_EQ(mul_kernel.num_args(), aie_full_elf_mul_kernel::num_kernargs);
+
+  hsa_queue_t* queue = nullptr;
+  ASSERT_EQ(hsa_queue_create(aie_agents.front(), min_queue_size, HSA_QUEUE_TYPE_SINGLE, nullptr,
+                             nullptr, 0, 0, &queue),
+            HSA_STATUS_SUCCESS);
+  // enqueue_aie_packet spins until a slot frees and the doorbell is only rung after the whole
+  // batch is staged, so a ring smaller than the batch would hang rather than fail.
+  ASSERT_GE(queue->size, 2 * num_pairs);
+
+  pool_buffer add_in, add_out, add_kernargs, mul_inout, mul_kernargs;
+  ASSERT_EQ(add_in.allocate(data_pool, aie_full_elf_kernel::element_bytes * num_pairs),
+            HSA_STATUS_SUCCESS);
+  ASSERT_EQ(add_out.allocate(data_pool, aie_full_elf_kernel::element_bytes * num_pairs),
+            HSA_STATUS_SUCCESS);
+  ASSERT_EQ(add_kernargs.allocate(kernarg_pool, aie_full_elf_kernel::kernarg_bytes * num_pairs),
+            HSA_STATUS_SUCCESS);
+  ASSERT_EQ(mul_inout.allocate(data_pool, aie_full_elf_mul_kernel::element_bytes * num_pairs),
+            HSA_STATUS_SUCCESS);
+  ASSERT_EQ(mul_kernargs.allocate(kernarg_pool, aie_full_elf_mul_kernel::kernarg_bytes * num_pairs),
+            HSA_STATUS_SUCCESS);
+
+  auto* ain = add_in.as<std::uint32_t>();
+  auto* aout = add_out.as<std::uint32_t>();
+  auto* mio = mul_inout.as<std::uint32_t>();
+  std::iota(ain, ain + n * num_pairs, 0);
+  std::fill_n(aout, n * num_pairs, 0);
+  std::iota(mio, mio + n * num_pairs, 0);
+
+  // Arguments live in the control code, so every dispatch needs its own copy.
+  std::vector<pool_buffer> add_ctrl(num_pairs), mul_ctrl(num_pairs);
+  for (std::uint32_t i = 0; i < num_pairs; ++i) {
+    SCOPED_TRACE(i);
+    ASSERT_TRUE(make_ctrl_code(&add_ctrl[i],
+                               {reinterpret_cast<std::uint64_t>(ain + i * n),
+                                reinterpret_cast<std::uint64_t>(aout + i * n)}));
+    ASSERT_TRUE(
+        make_ctrl_code(mul_kernel, &mul_ctrl[i], {reinterpret_cast<std::uint64_t>(mio + i * n)}));
+  }
+
+  hsa_signal_t signal{};
+  ASSERT_EQ(hsa_signal_create(2 * num_pairs, 0, nullptr, &signal), HSA_STATUS_SUCCESS);
+
+  std::uint64_t wr_idx = 0;
+  for (std::uint32_t i = 0; i < num_pairs; ++i) {
+    wr_idx = aie_full_elf_kernel::dispatch_packet(
+        add_ctrl[i].get(), kernel.ctrl_code.size(), pdi.get(), kernel.pdi_patch_offset, ain + i * n,
+        aout + i * n,
+        add_kernargs.as<std::uint64_t>() + i * aie_full_elf_kernel::num_kernargs_sizes, signal,
+        queue);
+    wr_idx = aie_full_elf_mul_kernel::dispatch_packet(
+        mul_ctrl[i].get(), mul_kernel.ctrl_code.size(), mul_pdi.get(), mul_kernel.pdi_patch_offset,
+        mio + i * n,
+        mul_kernargs.as<std::uint64_t>() + i * aie_full_elf_mul_kernel::num_kernargs_sizes, signal,
+        queue);
+  }
+  hsa_signal_store_screlease(queue->doorbell_signal, wr_idx);
+  hsa_signal_wait_scacquire(signal, HSA_SIGNAL_CONDITION_EQ, 0, UINT64_MAX, HSA_WAIT_STATE_BLOCKED);
+
+  ASSERT_NO_FATAL_FAILURE(VerifyAdd(ain, aout, n * num_pairs));
+  ASSERT_NO_FATAL_FAILURE(VerifyMul(mio, n * num_pairs, 0));
+
+  EXPECT_EQ(hsa_signal_destroy(signal), HSA_STATUS_SUCCESS);
+  EXPECT_EQ(hsa_queue_destroy(queue), HSA_STATUS_SUCCESS);
 }

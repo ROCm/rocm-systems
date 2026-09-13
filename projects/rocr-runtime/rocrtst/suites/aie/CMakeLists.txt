@@ -85,52 +85,10 @@ endif()
 message(STATUS "Peano install dir: ${PEANO_INSTALL_DIR}")
 
 # ---------------------------------------------------------------------------
-# Kernel artifact build pipeline
-# ---------------------------------------------------------------------------
-set(KERNEL ${CMAKE_CURRENT_SOURCE_DIR}/vector_scalar_add.py)
-set(KERNEL_BUILD_DIR ${CMAKE_CURRENT_BINARY_DIR}/kernel)
-set(AIE_MLIR ${KERNEL_BUILD_DIR}/aie.mlir)
-set(INSTS_BIN  ${KERNEL_BUILD_DIR}/insts.bin)
-set(DESIGN_PDI ${KERNEL_BUILD_DIR}/design.pdi)
-
-# Step 1: Python -> MLIR
-add_custom_command(
-  OUTPUT "${AIE_MLIR}"
-  COMMAND "${CMAKE_COMMAND}" -E make_directory "${KERNEL_BUILD_DIR}"
-  COMMAND "${Python3_EXECUTABLE}" "${KERNEL}" "${NPU_TARGET}" > "${AIE_MLIR}"
-  DEPENDS "${KERNEL}"
-  COMMENT "Generating aie.mlir from vector_scalar_add.py (target: ${NPU_TARGET})"
-  VERBATIM
-)
-
-# Step 2: MLIR -> insts.bin + design.pdi (via aiecc)
-add_custom_command(
-  OUTPUT "${INSTS_BIN}" "${DESIGN_PDI}"
-  COMMAND aiecc
-          --peano=${PEANO_INSTALL_DIR}
-          --get-npu-insts
-          --get-pdi
-          --npu-insts-name=insts.bin
-          --pdi-name=design.pdi
-          "${AIE_MLIR}"
-  WORKING_DIRECTORY "${KERNEL_BUILD_DIR}"
-  DEPENDS "${AIE_MLIR}"
-  COMMENT "Compiling AIE kernel with aiecc"
-  VERBATIM
-)
-
-add_custom_target(dispatch_kernel_artifacts
-  DEPENDS "${INSTS_BIN}" "${DESIGN_PDI}"
-)
-
-# ---------------------------------------------------------------------------
-# Full-ELF kernel artifact
+# Full-ELF toolchain detection
 #
-# The full-ELF design differs from the PDI one: its runtime sequence starts with
-# aiex.npu.load_pdi, because nothing configures the array for it out of band. It
-# also gets its own directory -- aiecc writes <input>.prj next to its input, so
-# sharing a directory would make the two aiecc runs clobber each other's
-# intermediates under 'make -j'.
+# Probes for the tools a full-ELF build needs and sets AIE_FULL_ELF_SUPPORTED.
+# The build itself lives in add_aie_kernel below.
 # ---------------------------------------------------------------------------
 
 # xclbinutil and aiebu-asm ship alongside XRT; aiecc needs both on PATH to
@@ -165,45 +123,123 @@ if(NOT AIE_FULL_ELF_SUPPORTED)
     "supporting the 'aie2_config' target); the full-ELF dispatch tests will skip themselves.")
 endif()
 
-set(FULL_ELF_BUILD_DIR "${CMAKE_CURRENT_BINARY_DIR}/kernel_full_elf")
-set(AIE_ELF_MLIR "${FULL_ELF_BUILD_DIR}/aie.mlir")
-set(FULL_ELF "${FULL_ELF_BUILD_DIR}/aie.elf")
+# ---------------------------------------------------------------------------
+# Kernel artifact build pipeline
+#
+# add_aie_kernel(<name> <source.py>) builds one IRON design two ways and sets, in
+# the caller's scope:
+#
+#   <name>_INSTS_BIN         instruction sequence for the PDI dispatch path
+#   <name>_DESIGN_PDI        PDI for that path
+#   <name>_FULL_ELF          path the standalone ELF would occupy
+#   <name>_FULL_ELF_TARGET   target building that ELF, or "" when unsupported
+#
+# <name>_FULL_ELF is always set, but the ELF is only built when
+# AIE_FULL_ELF_SUPPORTED. That is deliberate: the tests check the file for
+# existence and skip themselves when it is absent, so they need the path either
+# way. Depend on <name>_FULL_ELF_TARGET rather than naming
+# <name>_full_elf_artifacts directly -- it is empty when there is nothing to
+# build, so a consumer cannot accidentally require a target that was never
+# defined on a machine without the toolchain.
+#
+# The full-ELF build of a design differs from the PDI one: its runtime sequence
+# starts with aiex.npu.load_pdi, because nothing configures the array for it out
+# of band. Each build also gets its own directory keyed on <name>, because aiecc
+# writes <input>.prj beside its input and two runs sharing a directory clobber
+# each other's intermediates under 'make -j'.
+# ---------------------------------------------------------------------------
+# Extra arguments after <source.py> are forwarded to the design script for both builds.
+function(add_aie_kernel name source)
+  set(build_dir "${CMAKE_CURRENT_BINARY_DIR}/kernel_${name}")
+  set(mlir "${build_dir}/aie.mlir")
+  set(insts "${build_dir}/insts.bin")
+  set(pdi "${build_dir}/design.pdi")
+  get_filename_component(source_name "${source}" NAME)
 
-if(AIE_FULL_ELF_SUPPORTED)
+  # Step 1: Python -> MLIR
+  add_custom_command(
+    OUTPUT "${mlir}"
+    COMMAND "${CMAKE_COMMAND}" -E make_directory "${build_dir}"
+    COMMAND "${Python3_EXECUTABLE}" "${source}" "${NPU_TARGET}" ${ARGN} > "${mlir}"
+    DEPENDS "${source}"
+    COMMENT "Generating aie.mlir from ${source_name} (target: ${NPU_TARGET})"
+    VERBATIM
+  )
+
+  # Step 2: MLIR -> insts.bin + design.pdi (via aiecc)
+  add_custom_command(
+    OUTPUT "${insts}" "${pdi}"
+    COMMAND aiecc
+            --peano=${PEANO_INSTALL_DIR}
+            --get-npu-insts
+            --get-pdi
+            --npu-insts-name=insts.bin
+            --pdi-name=design.pdi
+            "${mlir}"
+    WORKING_DIRECTORY "${build_dir}"
+    DEPENDS "${mlir}"
+    COMMENT "Compiling AIE kernel ${source_name} with aiecc"
+    VERBATIM
+  )
+
+  add_custom_target(${name}_kernel_artifacts DEPENDS "${insts}" "${pdi}")
+  set(${name}_INSTS_BIN "${insts}" PARENT_SCOPE)
+  set(${name}_DESIGN_PDI "${pdi}" PARENT_SCOPE)
+
+  set(elf_build_dir "${CMAKE_CURRENT_BINARY_DIR}/kernel_full_elf_${name}")
+  set(elf_mlir "${elf_build_dir}/aie.mlir")
+  set(elf "${elf_build_dir}/aie.elf")
+  set(${name}_FULL_ELF "${elf}" PARENT_SCOPE)
+  if(NOT AIE_FULL_ELF_SUPPORTED)
+    set(${name}_FULL_ELF_TARGET "" PARENT_SCOPE)
+    return()
+  endif()
+
   get_filename_component(XCLBINUTIL_DIR "${XCLBINUTIL}" DIRECTORY)
   get_filename_component(AIEBU_ASM_DIR "${AIEBU_ASM}" DIRECTORY)
 
   add_custom_command(
-    OUTPUT "${AIE_ELF_MLIR}"
-    COMMAND "${CMAKE_COMMAND}" -E make_directory "${FULL_ELF_BUILD_DIR}"
-    COMMAND "${Python3_EXECUTABLE}" "${KERNEL}" "${NPU_TARGET}" --full-elf > "${AIE_ELF_MLIR}"
-    DEPENDS "${KERNEL}"
-    COMMENT "Generating full-ELF aie.mlir from vector_scalar_add.py (target: ${NPU_TARGET})"
+    OUTPUT "${elf_mlir}"
+    COMMAND "${CMAKE_COMMAND}" -E make_directory "${elf_build_dir}"
+    COMMAND "${Python3_EXECUTABLE}" "${source}" "${NPU_TARGET}" --full-elf ${ARGN} > "${elf_mlir}"
+    DEPENDS "${source}"
+    COMMENT "Generating full-ELF aie.mlir from ${source_name} (target: ${NPU_TARGET})"
     VERBATIM
   )
 
   add_custom_command(
-    OUTPUT "${FULL_ELF}"
+    OUTPUT "${elf}"
     # aiebu-asm exits 0 even when it fails, and aiecc does not check that the
     # ELF appeared. Delete first so that a silent failure leaves nothing behind
     # and the build stops, instead of resurrecting the previous ELF.
-    COMMAND "${CMAKE_COMMAND}" -E rm -f "${FULL_ELF}"
+    COMMAND "${CMAKE_COMMAND}" -E rm -f "${elf}"
     COMMAND "${CMAKE_COMMAND}" -E env "PATH=${XCLBINUTIL_DIR}:${AIEBU_ASM_DIR}:$ENV{PATH}"
             aiecc
             --peano=${PEANO_INSTALL_DIR}
             --get-full-elf
             --full-elf-name=aie.elf
-            "${AIE_ELF_MLIR}"
+            "${elf_mlir}"
     # Errors out (non-zero) if aiecc produced no ELF.
-    COMMAND "${CMAKE_COMMAND}" -E md5sum "${FULL_ELF}"
-    WORKING_DIRECTORY "${FULL_ELF_BUILD_DIR}"
-    DEPENDS "${AIE_ELF_MLIR}"
-    COMMENT "Generating full ELF from AIE kernel"
+    COMMAND "${CMAKE_COMMAND}" -E md5sum "${elf}"
+    WORKING_DIRECTORY "${elf_build_dir}"
+    DEPENDS "${elf_mlir}"
+    COMMENT "Generating full ELF from AIE kernel ${source_name}"
     VERBATIM
   )
 
-  add_custom_target(dispatch_full_elf_artifacts DEPENDS "${FULL_ELF}")
-endif()
+  add_custom_target(${name}_full_elf_artifacts DEPENDS "${elf}")
+  set(${name}_FULL_ELF_TARGET ${name}_full_elf_artifacts PARENT_SCOPE)
+endfunction()
+
+# vector_scalar_add: two kernargs (separate input and output), adds 1.
+add_aie_kernel(vsadd "${CMAKE_CURRENT_SOURCE_DIR}/vector_scalar_add.py")
+# vector_scalar_mul: one kernarg (in-place buffer), multiplies by a constant.
+# Its different result and different kernarg count are what let the interleaving
+# tests tell the two designs apart.
+# The scale lives here so the design and the tests' expected values cannot drift apart: the same
+# value is compiled into the kernel and into the assertion that checks it.
+set(VSMUL_SCALE 3)
+add_aie_kernel(vsmul "${CMAKE_CURRENT_SOURCE_DIR}/vector_scalar_mul.py" "--scale=${VSMUL_SCALE}")
 
 # ---------------------------------------------------------------------------
 # dispatch test executable
@@ -234,23 +270,31 @@ endif()
 
 target_compile_definitions(dispatch
   PRIVATE
-    DEFAULT_PDI_PATH=${DESIGN_PDI}
-    DEFAULT_INSTS_PATH=${INSTS_BIN}
+    DEFAULT_PDI_PATH=${vsadd_DESIGN_PDI}
+    DEFAULT_INSTS_PATH=${vsadd_INSTS_BIN}
     # The kernel is addressed as "<device>:<sequence>", the names aiecc writes
-    # into aie.mlir.prj/full_elf_config.json. vector_scalar_add.py leaves the
-    # aie.device and the runtime sequence unnamed, so aiecc defaults them to
-    # "main" and "sequence".
-    DEFAULT_ELF_PATH=${FULL_ELF}
+    # into aie.mlir.prj/full_elf_config.json. Neither design names its
+    # aie.device or its runtime sequence, so aiecc defaults them to "main" and
+    # "sequence" for both.
+    DEFAULT_ELF_PATH=${vsadd_FULL_ELF}
     DEFAULT_ELF_KERNEL_NAME="main:sequence"
+    MUL_PDI_PATH=${vsmul_DESIGN_PDI}
+    MUL_INSTS_PATH=${vsmul_INSTS_BIN}
+    MUL_ELF_PATH=${vsmul_FULL_ELF}
+    MUL_SCALE=${VSMUL_SCALE}
 )
 target_link_libraries(dispatch
   PRIVATE
     hsa-runtime64::hsa-runtime64
     GTest::gtest_main
 )
-add_dependencies(dispatch dispatch_kernel_artifacts)
-if(AIE_FULL_ELF_SUPPORTED)
-  add_dependencies(dispatch dispatch_full_elf_artifacts)
+add_dependencies(dispatch vsadd_kernel_artifacts vsmul_kernel_artifacts)
+# Both are empty when the toolchain cannot build full ELFs. The guard is needed because
+# add_dependencies() rejects a call with no dependencies, but it tests the variables themselves
+# rather than AIE_FULL_ELF_SUPPORTED, so adding a kernel here cannot name a target that the
+# function never defined.
+if(vsadd_FULL_ELF_TARGET OR vsmul_FULL_ELF_TARGET)
+  add_dependencies(dispatch ${vsadd_FULL_ELF_TARGET} ${vsmul_FULL_ELF_TARGET})
 endif()
 
 gtest_discover_tests(dispatch)
