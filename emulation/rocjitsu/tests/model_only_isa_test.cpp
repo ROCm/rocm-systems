@@ -49,6 +49,8 @@ TEST(ModelOnlyIsaTest, DecodesWithoutExecutionCallback) {
   ASSERT_EQ(inst->num_dst_operands(), 1);
   EXPECT_EQ(inst->src_operand(0)->name(), "v1");
   EXPECT_EQ(inst->dst_operand(0)->name(), "v0");
+  EXPECT_FALSE(inst->src_operand(0)->simd_capable());
+  EXPECT_FALSE(inst->dst_operand(0)->simd_capable());
   EXPECT_EQ(inst->execute, nullptr);
 }
 

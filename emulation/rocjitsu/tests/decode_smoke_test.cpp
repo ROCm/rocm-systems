@@ -92,10 +92,12 @@ constexpr uint32_t make_cdna1_sop1(uint32_t sdst, uint32_t ssrc0) {
   return 0xBE800000u | ((sdst & 0x7Fu) << 16) | (ssrc0 & 0xFFu);
 }
 
-TEST(OperandLayoutTest, DeferredSelectorStateFitsExistingPadding) {
-  EXPECT_EQ(sizeof(Operand), 32u);
-  EXPECT_EQ(sizeof(cdna5::Operand), 80u);
-  EXPECT_EQ(sizeof(cdna5::VAddF32Vop3), 512u);
+TEST(OperandLayoutTest, SharedExecutionTableKeepsDecodedOperandsCompact) {
+  // The shared table pointer lives in the base. Removing the derived pointer
+  // also removes padding, shrinking each decoded CDNA5 operand by eight bytes.
+  EXPECT_EQ(sizeof(Operand), 40u);
+  EXPECT_EQ(sizeof(cdna5::Operand), 72u);
+  EXPECT_EQ(sizeof(cdna5::VAddF32Vop3), 488u);
 }
 
 TEST(CodeArchApiTest, PreservesExistingPublicEnumValues) {

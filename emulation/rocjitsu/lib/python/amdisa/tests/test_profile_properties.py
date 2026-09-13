@@ -631,21 +631,23 @@ def test_gfx1250_operand_execution_backend_uses_separate_source(tmp_path):
     assert 'ROCJITSU_ISA_ARCH_AMDGPU_CDNA5_OPERAND_H_' in operand_h
     assert 'class Operand : public IsaOperand<Isa>' in operand_h
     assert 'ROCJITSU_ISA_MODEL_ONLY' not in operand_h
-    assert ': IsaOperand<Isa>(size_bits, opr_type, encoding_value)' in operand_cpp
+    assert ': IsaOperand<Isa>(size_bits, opr_type, encoding_value,' in operand_cpp
     assert 'ROCJITSU_ISA_MODEL_ONLY' not in operand_cpp
-    assert 'uint32_t Operand::read_scalar' in operand_cpp
+    assert 'uint32_t Operand::read_scalar' not in operand_cpp
     assert 'current_isa_operand_backend()' in operand_cpp
-    assert (
-        'execution_backend_ ? execution_backend_->read_scalar : nullptr' in operand_cpp
-    )
+    assert 'struct ExecutionBackend' not in operand_h
+    assert '(Operand::*' not in operand_h
+    assert 'const ExecutionBackend *execution_backend_' not in operand_h
     assert 'uint32_t Operand::read_scalar_exec' not in operand_cpp
     assert 'rocjitsu/vm/amdgpu/compute_unit.h' not in operand_cpp
     assert 'uint32_t Operand::read_scalar_exec' in operand_exec_cpp
     assert 'const void *Operand::full_execution_backend()' in operand_exec_cpp
     assert 'bool Operand::full_execution_backend_complete()' in operand_exec_cpp
-    assert 'Operand::simd_vgpr_base_mut_impl' in operand_cpp
+    assert 'Operand::simd_vgpr_base_mut_impl' not in operand_cpp
     assert 'Operand::simd_vgpr_base_mut_exec' in operand_exec_cpp
-    assert '&Operand::simd_vgpr_base_mut_exec' in operand_exec_cpp
+    assert (
+        'static_cast<const Operand &>(base).simd_vgpr_base_mut_exec' in operand_exec_cpp
+    )
     assert 'backend.simd_vgpr_base_mut != nullptr' in operand_exec_cpp
     assert 'backend.simd_notify_read64_mut != nullptr' in operand_exec_cpp
     assert 'vgpr_msb_role() == amdgpu::VgprMsbRole::None' in operand_exec_cpp
@@ -709,7 +711,7 @@ def test_rdna4_operand_execution_backend_is_split_from_model_source(tmp_path):
     operand_exec_cpp = (tmp_path / 'rdna4' / 'operand_exec.cpp').read_text()
 
     assert 'class Operand : public IsaOperand<Isa>' in operand_h
-    assert 'uint32_t Operand::read_scalar' in operand_cpp
+    assert 'uint32_t Operand::read_scalar' not in operand_cpp
     assert 'uint32_t Operand::read_scalar_exec' in operand_exec_cpp
     assert 'rocjitsu/vm/amdgpu/wavefront.h' not in operand_cpp
     assert 'rocjitsu/vm/amdgpu/wavefront.h' in operand_exec_cpp
@@ -733,9 +735,9 @@ def test_cdna1_split_operand_emits_simd_dispatch_methods(tmp_path):
     operand_cpp = (tmp_path / 'cdna1' / 'operand.cpp').read_text()
     operand_exec_cpp = (tmp_path / 'cdna1' / 'operand_exec.cpp').read_text()
 
-    assert 'bool simd_capable() const override;' in operand_h
-    assert 'void read_lane_chunk(' in operand_h
-    assert 'bool Operand::simd_capable() const' in operand_cpp
+    assert 'bool simd_capable() const override;' not in operand_h
+    assert 'void read_lane_chunk_exec(' in operand_h
+    assert 'bool Operand::simd_capable() const' not in operand_cpp
     assert 'bool Operand::simd_capable_exec() const' in operand_exec_cpp
     assert 'if (!reads_value())' in operand_exec_cpp
     assert 'if (!is_writable())' in operand_exec_cpp

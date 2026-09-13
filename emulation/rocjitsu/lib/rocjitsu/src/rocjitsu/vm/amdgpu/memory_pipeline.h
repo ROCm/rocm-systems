@@ -60,6 +60,26 @@ public:
   /// writeback work.  A timing backend may return Deferred and release the
   /// counter later through finish_completed_access().
   void issue(Instruction *inst, Wavefront &wf) {
+    issue_impl(
+        inst, wf, [this](Instruction &inst, Wavefront &wf) { initiate_access(inst, wf); },
+        [this](Instruction &inst, Wavefront &wf, MemoryAccessDeferredCompletion &&complete) {
+          return complete_access(inst, wf, std::move(complete));
+        });
+  }
+
+  /// @brief Advance the pipeline by one cycle (no-op in functional mode).
+  void tick() {}
+
+  bool empty() const { return true; }
+
+  WaitCounterType counter_type() const { return counter_type_; }
+
+protected:
+  /// @brief Share issue ownership and completion handling across dispatch modes.
+  /// Complete forwards the callback by rvalue reference to avoid an intermediate
+  /// std::function move before the access hook takes ownership.
+  template <typename Initiate, typename Complete>
+  void issue_impl(Instruction *inst, Wavefront &wf, Initiate initiate, Complete complete) {
     WaitCounterType issue_counter = counter_type_;
     if (auto *state = inst->data()) {
       switch (state->tag()) {
@@ -75,26 +95,18 @@ public:
       }
     }
     wf.wait_counters().increment(issue_counter);
-    initiate_access(*inst, wf);
+    initiate(*inst, wf);
     // The wait counter pins wf/inst ownership until this callback releases it.
     // ComputeUnitCore retires ENDING wavefronts only after wait_counters().empty(),
     // so a deferred backend must invoke this exactly once while that counter is held.
     MemoryAccessDeferredCompletion deferred_completion = [this, inst, &wf, issue_counter]() {
       finish_completed_access(inst, wf, issue_counter);
     };
-    MemoryAccessCompletion completion = complete_access(*inst, wf, std::move(deferred_completion));
+    MemoryAccessCompletion completion = complete(*inst, wf, std::move(deferred_completion));
     if (completion == MemoryAccessCompletion::Complete)
       finish_completed_access(inst, wf, issue_counter);
   }
 
-  /// @brief Advance the pipeline by one cycle (no-op in functional mode).
-  void tick() {}
-
-  bool empty() const { return true; }
-
-  WaitCounterType counter_type() const { return counter_type_; }
-
-protected:
   virtual void initiate_access(Instruction &inst, Wavefront &wf) = 0;
   /// Return Complete and do not call complete, or return Deferred and call it
   /// exactly once after the memory response is ready for architectural writeback.
@@ -121,6 +133,10 @@ public:
   explicit ScalarMemPipeline(L1ScalarCache *l1)
       : MemoryPipeline(WaitCounterType::LGKMCNT), l1_(l1) {}
 
+  /// @brief Issue with this concrete implementation's access hooks.
+  /// @details Use issue() when derived access-hook overrides must be honored.
+  void issue_concrete(Instruction *inst, Wavefront &wf);
+
 protected:
   void initiate_access(Instruction &inst, Wavefront &wf) override;
   MemoryAccessCompletion complete_access(Instruction &inst, Wavefront &wf,
@@ -138,6 +154,10 @@ public:
 
   void set_l2(L2Cache *l2) { l2_ = l2; }
 
+  /// @brief Issue with this concrete implementation's access hooks.
+  /// @details Use issue() when derived access-hook overrides must be honored.
+  void issue_concrete(Instruction *inst, Wavefront &wf);
+
 protected:
   void initiate_access(Instruction &inst, Wavefront &wf) override;
   MemoryAccessCompletion complete_access(Instruction &inst, Wavefront &wf,
@@ -152,6 +172,10 @@ private:
 class LocalMemPipeline : public MemoryPipeline {
 public:
   LocalMemPipeline() : MemoryPipeline(WaitCounterType::LGKMCNT) {}
+
+  /// @brief Issue with this concrete implementation's access hooks.
+  /// @details Use issue() when derived access-hook overrides must be honored.
+  void issue_concrete(Instruction *inst, Wavefront &wf);
 
 protected:
   void initiate_access(Instruction &inst, Wavefront &wf) override;

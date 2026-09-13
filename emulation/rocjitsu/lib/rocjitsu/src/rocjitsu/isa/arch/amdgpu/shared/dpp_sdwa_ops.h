@@ -44,7 +44,8 @@ public:
   static constexpr int MAX_LANES = 64;
 
   StagedOperand(const Operand &base, int lane_count)
-      : Operand(base.size_bits_, base.encoding_value_), lane_count_(lane_count) {}
+      : Operand(base.size_bits_, base.encoding_value_, &execution_backend_table_),
+        lane_count_(lane_count) {}
 
   StagedOperand(const Operand &base, const uint32_t *data, int lane_count)
       : StagedOperand(base, lane_count) {
@@ -59,7 +60,7 @@ public:
   }
 
   std::string name() const override { return "staged_src"; }
-  bool simd_capable() const override { return true; }
+  bool simd_capable() const { return true; }
 
   void set_lane(uint32_t lane, uint32_t value) { lo_[lane] = value; }
   void set_lane64(uint32_t lane, uint64_t value) {
@@ -68,23 +69,25 @@ public:
   }
 
 private:
-  uint32_t read_lane(const amdgpu::Wavefront &, uint32_t lane) const override {
+  static const ExecutionBackend execution_backend_table_;
+
+  uint32_t read_lane(const amdgpu::Wavefront &, uint32_t lane) const {
     return lane < static_cast<uint32_t>(lane_count_) ? lo_[lane] : 0;
   }
 
-  uint64_t read_lane64(const amdgpu::Wavefront &, uint32_t lane) const override {
+  uint64_t read_lane64(const amdgpu::Wavefront &, uint32_t lane) const {
     if (lane >= static_cast<uint32_t>(lane_count_))
       return 0;
     return uint64_t{lo_[lane]} | (uint64_t{hi_[lane]} << 32);
   }
 
-  uint32_t read_scalar(const amdgpu::Wavefront &) const override { return lo_[0]; }
-  uint64_t read_scalar64(const amdgpu::Wavefront &) const override {
+  uint32_t read_scalar(const amdgpu::Wavefront &) const { return lo_[0]; }
+  uint64_t read_scalar64(const amdgpu::Wavefront &) const {
     return uint64_t{lo_[0]} | (uint64_t{hi_[0]} << 32);
   }
 
   void read_lane_chunk(const amdgpu::Wavefront &, uint32_t lane_base, uint32_t count,
-                       uint32_t *out) const override {
+                       uint32_t *out) const {
     const uint32_t lanes = static_cast<uint32_t>(lane_count_);
     for (uint32_t i = 0; i < count; ++i) {
       const uint32_t lane = lane_base + i;
@@ -106,6 +109,66 @@ private:
   simdojo::VectorReg<MAX_LANES, uint32_t> hi_{};
   int lane_count_ = 0;
 };
+
+inline const Operand::ExecutionBackend StagedOperand::execution_backend_table_ = [] {
+  ExecutionBackend backend = default_execution_backend_;
+  backend.simd_capable = [](const Operand &base) -> bool {
+    return static_cast<const StagedOperand &>(base).simd_capable();
+  };
+  backend.read_lane_chunk = [](const Operand &base, const amdgpu::Wavefront &wf, uint32_t lane_base,
+                               uint32_t count, uint32_t *out) -> void {
+    return static_cast<const StagedOperand &>(base).read_lane_chunk(wf, lane_base, count, out);
+  };
+  backend.read_scalar = [](const Operand &base, const amdgpu::Wavefront &wf) -> uint32_t {
+    return static_cast<const StagedOperand &>(base).read_scalar(wf);
+  };
+  backend.read_lane = [](const Operand &base, const amdgpu::Wavefront &wf,
+                         uint32_t lane) -> uint32_t {
+    return static_cast<const StagedOperand &>(base).read_lane(wf, lane);
+  };
+  backend.read_lane64 = [](const Operand &base, const amdgpu::Wavefront &wf,
+                           uint32_t lane) -> uint64_t {
+    return static_cast<const StagedOperand &>(base).read_lane64(wf, lane);
+  };
+  backend.read_scalar64 = [](const Operand &base, const amdgpu::Wavefront &wf) -> uint64_t {
+    return static_cast<const StagedOperand &>(base).read_scalar64(wf);
+  };
+  backend.simd_vgpr_storage = [](const Operand &base,
+                                 const amdgpu::Wavefront &wf) -> amdgpu::ConstVgprStorage {
+    return static_cast<const StagedOperand &>(base).simd_vgpr_storage_impl(wf);
+  };
+  backend.simd_vgpr_storage64 = [](const Operand &base,
+                                   const amdgpu::Wavefront &wf) -> amdgpu::ConstVgprStoragePair64 {
+    return static_cast<const StagedOperand &>(base).simd_vgpr_storage64_impl(wf);
+  };
+  // Staged values have no physical-register identity or observer effects.
+  // Keep these successful empty/no-op queries off the legacy virtual fallback.
+  backend.simd_vgpr_base = [](const Operand &,
+                              const amdgpu::Wavefront &) -> std::optional<uint32_t> {
+    return std::nullopt;
+  };
+  backend.simd_vgpr_base_mut = [](const Operand &, amdgpu::Wavefront &) -> std::optional<uint32_t> {
+    return std::nullopt;
+  };
+  backend.simd_vgpr_storage_mut = [](const Operand &, amdgpu::Wavefront &) -> amdgpu::VgprStorage {
+    return {};
+  };
+  backend.simd_vgpr_storage64_mut =
+      [](const Operand &, amdgpu::Wavefront &) -> amdgpu::VgprStoragePair64 { return {}; };
+  backend.simd_notify_read = [](const Operand &, const amdgpu::Wavefront &, uint64_t,
+                                uint8_t) -> void {};
+  backend.simd_notify_read_mut = [](const Operand &, amdgpu::Wavefront &, uint64_t,
+                                    uint8_t) -> void {};
+  backend.simd_notify_read64 = [](const Operand &, const amdgpu::Wavefront &, uint64_t,
+                                  uint8_t) -> void {};
+  backend.simd_notify_read64_mut = [](const Operand &, amdgpu::Wavefront &, uint64_t,
+                                      uint8_t) -> void {};
+  backend.simd_notify_write_mut = [](const Operand &, amdgpu::Wavefront &, uint64_t,
+                                     uint8_t) -> void {};
+  backend.simd_notify_write64_mut = [](const Operand &, amdgpu::Wavefront &, uint64_t,
+                                       uint8_t) -> void {};
+  return backend;
+}();
 
 using DppOperand = StagedOperand;
 

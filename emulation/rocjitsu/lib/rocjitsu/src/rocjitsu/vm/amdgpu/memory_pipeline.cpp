@@ -217,6 +217,15 @@ MemoryAccessCompletion vector_complete(VectorMemState &d, Wavefront &wf, Compute
 
 } // namespace
 
+void ScalarMemPipeline::issue_concrete(Instruction *inst, Wavefront &wf) {
+  issue_impl(
+      inst, wf,
+      [this](Instruction &inst, Wavefront &wf) { ScalarMemPipeline::initiate_access(inst, wf); },
+      [this](Instruction &inst, Wavefront &wf, MemoryAccessDeferredCompletion &&complete) {
+        return ScalarMemPipeline::complete_access(inst, wf, std::move(complete));
+      });
+}
+
 void ScalarMemPipeline::initiate_access(Instruction &inst, Wavefront &wf) {
   auto &d = *inst.data_as<ScalarMemState>();
   if (d.is_load) {
@@ -541,6 +550,15 @@ void execute_lds_atomic_rmw(VectorMemState &d, Lds *lds,
 
 } // namespace
 
+void GlobalMemPipeline::issue_concrete(Instruction *inst, Wavefront &wf) {
+  issue_impl(
+      inst, wf,
+      [this](Instruction &inst, Wavefront &wf) { GlobalMemPipeline::initiate_access(inst, wf); },
+      [this](Instruction &inst, Wavefront &wf, MemoryAccessDeferredCompletion &&complete) {
+        return GlobalMemPipeline::complete_access(inst, wf, std::move(complete));
+      });
+}
+
 void GlobalMemPipeline::initiate_access(Instruction &inst, Wavefront &wf) {
   auto &d = *inst.data_as<VectorMemState>();
   d.wg_id = wf.wg_id();
@@ -592,6 +610,15 @@ MemoryAccessCompletion GlobalMemPipeline::complete_access(Instruction &inst, Wav
   if (d.transpose != 0)
     transpose_response(d);
   return vector_complete(d, wf, wf.raw_cu(), std::move(complete));
+}
+
+void LocalMemPipeline::issue_concrete(Instruction *inst, Wavefront &wf) {
+  issue_impl(
+      inst, wf,
+      [this](Instruction &inst, Wavefront &wf) { LocalMemPipeline::initiate_access(inst, wf); },
+      [this](Instruction &inst, Wavefront &wf, MemoryAccessDeferredCompletion &&complete) {
+        return LocalMemPipeline::complete_access(inst, wf, std::move(complete));
+      });
 }
 
 void LocalMemPipeline::initiate_access(Instruction &inst, Wavefront &wf) {

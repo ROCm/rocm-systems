@@ -113,11 +113,11 @@ public:
 
   /// @brief Read the raw status register value.
   /// @returns Status register as a raw uint32_t.
-  virtual uint32_t status_raw() const = 0;
+  uint32_t status_raw() const { return status_raw_; }
 
   /// @brief Write the raw status register value.
   /// @param val New status register value.
-  virtual void set_status_raw(uint32_t val) = 0;
+  void set_status_raw(uint32_t val) { status_raw_ = val; }
 
   /// @brief Read the raw MODE register value.
   uint32_t mode_raw() const { return mode_raw_; }
@@ -968,6 +968,7 @@ private:
   uint64_t vgpr_write_mask_ = ~0ULL; ///< Execution-local architectural and plugin write mask.
   uint64_t vcc_ = 0;                 ///< Vector condition code (per-lane comparison result).
   uint32_t m0_ = 0;                  ///< M0 special register (misc addressing).
+  uint32_t status_raw_ = 0;          ///< STATUS register state.
   uint32_t mode_raw_ = 0;            ///< MODE register state.
   bool mode_has_gpr_idx_en_ = false; ///< True when MODE[27] is GPR_IDX_EN.
   uint8_t vgpr_msb_mode_ = 0;        ///< S_SET_VGPR_MSB layout for MODE VGPR_MSB bits.
@@ -1060,34 +1061,20 @@ inline uint32_t apply_gpr_idx(const Wavefront &wf, uint32_t vgpr_off, VgprMsbRol
   return vgpr_off;
 }
 
-/// @brief ISA-parameterized concrete wavefront with ISA-specific status register.
+/// @brief ISA-parameterized concrete wavefront with fixed register limits.
 ///
-/// @details The Isa trait provides WF_SIZE, MAX_SGPRS_PER_WF, MAX_VGPRS_PER_WF, and StatusReg.
-/// Register storage lives in the parent ComputeUnit's physical register files;
-/// this class only adds the ISA-specific status register type.
+/// @details The Isa trait provides wave widths, register limits, and MODE capabilities.
+/// Register storage lives in the parent ComputeUnit's physical register files.
 ///
 /// @tparam Isa ISA traits struct satisfying the GpuIsa concept.
 template <GpuIsa Isa> class IsaWavefront final : public Wavefront {
 public:
-  using StatusType = typename Isa::StatusReg;
-
   /// @brief Construct a wavefront bound to a CU slot.
   /// @param cu Parent compute unit.
   /// @param wf_id Slot index within the CU.
   IsaWavefront(ComputeUnitCore &cu, uint32_t wf_id)
       : Wavefront(cu, wf_id, Isa::WF_SIZE, Isa::WF_SIZE_MAX, Isa::MAX_SGPRS_PER_WF,
                   Isa::MAX_VGPRS_PER_WF, Isa::MODE_HAS_GPR_IDX_EN) {}
-
-  /// @brief Return the raw status register value.
-  /// @returns Raw status register value.
-  uint32_t status_raw() const override { return static_cast<uint32_t>(status); }
-
-  /// @brief Set the raw status register value.
-  /// @param[in] val New raw status register value.
-  void set_status_raw(uint32_t val) override { status = val; }
-
-  /// @brief ISA-specific status register (SCC, EXECZ, VCCZ, HALT, etc.).
-  StatusType status{0};
 };
 
 } // namespace amdgpu
