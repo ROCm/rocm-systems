@@ -18,8 +18,7 @@
 #include <gtest/gtest.h>
 
 // Every header that DECLARES a name libc_seam.h renames, pulled in BEFORE the seam so a rename never rewrites a
-// declaration. client.cc reaches many more headers than these through os.h/nccl.h/ras_internal.h, but those are
-// included after the seam and are harmless as long as none of them is the first declaration of a seamed name.
+// declaration.
 #include <arpa/inet.h>
 #include <getopt.h>
 #include <netdb.h>
@@ -39,6 +38,11 @@
 #include "../common/LogCapture.hpp"
 #include "ScopedHook.h"
 #include "fakes/libc_fakes.h"
+
+// os.h reaches nccl.h and the HIP headers, the one chain of declarations client.cc pulls in that
+// the list above does not already cover; including it here keeps the seam's own ordering rule true.
+#include "os.h"
+
 #include "fakes/libc_seam.h"
 
 // client.cc's main() would collide with the gtest main in main_altrsmi.cpp.
@@ -286,6 +290,7 @@ TEST_F(RasClientMicrotest, ParseArgsFormat_UnknownValue_ReportsInvalidFormatAndE
   EXPECT_EQ(1, out.exitStatus);
   ASSERT_NE(nullptr, format);
   EXPECT_STREQ("xml", format);  // the store happens before the validation
+  EXPECT_EQ(std::vector<FILE*>{stderr}, g_fprintfCalls);
 }
 
 TEST_F(RasClientMicrotest, ParseArgsFormat_TextWithSuffix_ReportsInvalidFormatAndExitsOne) {
@@ -345,6 +350,7 @@ TEST_F(RasClientMicrotest, ParseArgsTimeout_RejectedValues_ExitOneAfterStoringWh
 
     EXPECT_EQ(1, out.exitStatus) << c.argv[0];
     EXPECT_EQ(c.stored, timeout) << c.argv[0];
+    EXPECT_EQ(std::vector<FILE*>{stderr}, g_fprintfCalls) << c.argv[0];
   }
 }
 
@@ -593,19 +599,7 @@ class RecordingReader {
     }
     if (count == 0 || pos_ >= steps_.size()) return 0;
     const MicroReadStep& step = steps_[pos_++];
-    if (step.ret < 0) {
-      errno = step.err;
-      return step.ret;
-    }
-    if (step.ret == 0) return 0;
-    // Same rule the default read seam enforces: a positive ret is the promise, so it must match the bytes on offer,
-    // and the delivery is clamped to it so a mismatched script cannot over-deliver where NDEBUG drops the assert.
-    assert(static_cast<size_t>(step.ret) == step.data.size() && "RecordingReader: positive ret must equal data.size()");
-    const size_t promised =
-        static_cast<size_t>(step.ret) < step.data.size() ? static_cast<size_t>(step.ret) : step.data.size();
-    const size_t n = promised < count ? promised : count;
-    memcpy(buf, step.data.data(), n);
-    return static_cast<ssize_t>(n);
+    return DeliverReadStep(step, buf, count);
   }
 
   std::vector<ReadRequest> requests;
@@ -1034,6 +1028,7 @@ TEST_F(RasClientMicrotest, ParseArgsVersion_FollowedByOtherOptions_ExitsBeforeAp
 
   EXPECT_EQ(0, out.exitStatus);
   EXPECT_FALSE(verbose);
+  EXPECT_EQ(std::vector<FILE*>{stderr}, g_fprintfCalls);
 }
 
 // --- default: the four distinct getopt routes ------------------------------
@@ -1343,19 +1338,12 @@ void ScriptThreeChunks() {
 TEST_F(RasClientMicrotest, GetNcclStatus_NonVerbose_SendsPlainStatusAndReturnsZeroOnEof) {
   sock = 17;
   verbose = false;
-  int writeFd = -1;
-  ScopedHook writeHook(g_write, [&](int fd, const void* buf, size_t count) -> ssize_t {
-    writeFd = fd;
-    g_writtenData.append(static_cast<const char*>(buf), count);
-    return static_cast<ssize_t>(count);
-  });
   ScopedHook fflushHook(g_fflush, [](FILE*) { return 0; });
 
   CaptureLog([]() { EXPECT_EQ(0, getNCCLStatus()); });
 
   EXPECT_EQ("STATUS\n", g_writtenData);
-  EXPECT_EQ(17, writeFd);
-  EXPECT_EQ(1, writeHook.calls);
+  EXPECT_EQ(std::vector<int>({17}), g_writtenFds);
   EXPECT_EQ(std::vector<int>({17}), g_readFds);
   EXPECT_EQ(0u, g_fwriteCalls.size());
   EXPECT_EQ(0, fflushHook.calls);
@@ -1465,6 +1453,7 @@ TEST_F(RasClientMicrotest, GetNcclStatus_ShortFwrite_ReportsFailureAndReturnsOne
   EXPECT_EQ(2u, g_fwriteCalls.size());
   EXPECT_EQ(1, fflushHook.calls);
   EXPECT_EQ(2u, g_readScriptPos);
+  EXPECT_EQ(std::vector<FILE*>{stderr}, g_fprintfCalls);
 }
 
 // fflush arm: the second flush fails, after its chunk already reached stdout.
@@ -1758,6 +1747,7 @@ TEST_F(RasClientMicrotest, ConnectToNccl_AllEntriesRefused_WalkExhaustsAndCloses
   EXPECT_EQ(std::vector<int>({300, 301, 302}), fds.issued);
   EXPECT_EQ(std::vector<int>({300, 301, 302}), g_closedFds);
   EXPECT_EQ(1, g_freeaddrinfoCalls);  // 2 would mean addrInfo was not nulled and fail: freed it again
+  EXPECT_EQ(std::vector<FILE*>(4, stderr), g_fprintfCalls);  // 3 per-entry reports plus the final failure report
 }
 
 // Arm: `if (timeout)` false. Zero disables the timeout, so neither socket
@@ -2708,6 +2698,7 @@ TEST_F(RasClientMicrotest, MonitorEvents_LeftoverFwriteShort_ReportsFwriteFailur
   EXPECT_EQ(1u, g_readFds.size());
   EXPECT_EQ(1, fwriteHook.calls);
   EXPECT_EQ(0, fflushHook.calls);
+  EXPECT_EQ(std::vector<FILE*>(3, stderr), g_fprintfCalls);  // the 2 activation banners plus the fwrite-failed report
 }
 
 TEST_F(RasClientMicrotest, MonitorEvents_LeftoverFflushFails_ReportsPerrorBeforeEnteringTheLoop) {
@@ -2755,6 +2746,7 @@ TEST_F(RasClientMicrotest, MonitorEvents_ServerSendsSeveralChunks_ForwardsThemIn
   EXPECT_EQ(1u, g_fwriteCalls[2].size);
   EXPECT_EQ(12u, g_fwriteCalls[2].nmemb);
   EXPECT_EQ(3, fflushHook.calls);
+  EXPECT_EQ(std::vector<FILE*>(3, stderr), g_fprintfCalls);  // the 2 activation banners plus the closed-by-job report
 }
 
 // rasRead swallows and retries EINTR itself, so the loop's `errno == EINTR`
@@ -2810,6 +2802,7 @@ TEST_F(RasClientMicrotest, MonitorEvents_LoopFwriteShort_ReportsFwriteFailureAft
   EXPECT_EQ("alpha\n", g_stdoutData);
   EXPECT_EQ(2u, g_fwriteCalls.size());
   EXPECT_EQ(3u, g_readFds.size());
+  EXPECT_EQ(std::vector<FILE*>(3, stderr), g_fprintfCalls);  // the 2 activation banners plus the fwrite-failed report
 }
 
 TEST_F(RasClientMicrotest, MonitorEvents_LoopFflushFails_ReportsPerrorAndReturnsOne) {

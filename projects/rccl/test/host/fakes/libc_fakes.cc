@@ -60,6 +60,26 @@ static ssize_t DefaultWrite(int fd, const void* buf, size_t count) {
   return static_cast<ssize_t>(count);
 }
 
+ssize_t DeliverReadStep(const MicroReadStep& step, void* buf, size_t count) {
+  // A failing or EOF step delivers nothing, so a payload on one is a script the fake would silently ignore.
+  assert((step.ret > 0 || step.data.empty()) &&
+         "DeliverReadStep: a non-positive ret cannot deliver data; drop the payload or make ret positive");
+  if (step.ret < 0) {
+    errno = step.err;
+    return step.ret;
+  }
+  if (step.ret == 0) return 0;
+  // A positive ret is the byte count the step promises. Assert the script means what it says, and clamp to the promise
+  // as well so a step of ret=3 with 8 bytes of data cannot hand over eight bytes in a Release build, where NDEBUG
+  // drops the assert. Without both, a mismatched script silently pins the fake's behaviour instead of the unit's.
+  assert(static_cast<size_t>(step.ret) == step.data.size() &&
+         "DeliverReadStep: a positive ret must equal data.size(); use ScriptReadData to derive it");
+  const size_t promised = std::min(static_cast<size_t>(step.ret), step.data.size());
+  const size_t n = std::min(promised, count);
+  std::memcpy(buf, step.data.data(), n);
+  return static_cast<ssize_t>(n);
+}
+
 static ssize_t DefaultRead(int fd, void* buf, size_t count) {
   g_readFds.push_back(fd);
   // A zero-length read returns 0 without consuming a step, as read(2) does and as RecordingReader does. rasRead asks
@@ -67,23 +87,7 @@ static ssize_t DefaultRead(int fd, void* buf, size_t count) {
   if (count == 0) return 0;
   if (g_readScriptPos >= g_readScript.size()) return 0;  // EOF past the end of the script
   const MicroReadStep& step = g_readScript[g_readScriptPos++];
-  // A failing or EOF step delivers nothing, so a payload on one is a script the fake would silently ignore.
-  assert((step.ret > 0 || step.data.empty()) &&
-         "ScriptRead: a non-positive ret cannot deliver data; drop the payload or make ret positive");
-  if (step.ret < 0) {
-    errno = step.err;
-    return step.ret;
-  }
-  if (step.ret == 0) return 0;
-  // A positive ret is the byte count the step promises. Assert the script means what it says, and clamp to the promise
-  // as well so ScriptRead(3, 0, "abcdefgh") cannot hand over eight bytes in a Release build, where NDEBUG drops the
-  // assert. Without both, a mismatched script silently pins the fake's behaviour instead of the unit's.
-  assert(static_cast<size_t>(step.ret) == step.data.size() &&
-         "ScriptRead: a positive ret must equal data.size(); use ScriptReadData to derive it");
-  const size_t promised = std::min(static_cast<size_t>(step.ret), step.data.size());
-  const size_t n = std::min(promised, count);
-  std::memcpy(buf, step.data.data(), n);
-  return static_cast<ssize_t>(n);
+  return DeliverReadStep(step, buf, count);
 }
 
 static int DefaultClose(int fd) {
@@ -186,7 +190,8 @@ static int DefaultFflush(FILE*) { return 0; }
 // Records the prefix and the errno the unit branched on, then forwards to the real perror so stderr still carries the
 // message. Tests assert on the record: the errno is the branch condition, where the sentence is only its wording.
 static void DefaultPerror(const char* prefix) {
-  g_perrorCalls.push_back(MicroPerrorCall{prefix ? prefix : "", errno});
+  const int err = errno;  // read before the std::string below can allocate and perturb it
+  g_perrorCalls.push_back(MicroPerrorCall{prefix ? prefix : "", err});
   ::perror(prefix);
 }
 

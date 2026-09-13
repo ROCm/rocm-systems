@@ -69,6 +69,11 @@ struct MicroReadStep {
   std::string data;
 };
 
+// Delivers one scripted MicroReadStep into buf/count exactly as a real read(2) would for that
+// outcome: asserts a non-positive ret carries no payload, sets errno and returns on failure/EOF,
+// else asserts the promised byte count and clamps the copy to whichever of promised/count is smaller.
+ssize_t DeliverReadStep(const MicroReadStep& step, void* buf, size_t count);
+
 // ---------------------------------------------------------------------------
 // Seams. Each defaults to the success behaviour described in the .cc.
 // ---------------------------------------------------------------------------
