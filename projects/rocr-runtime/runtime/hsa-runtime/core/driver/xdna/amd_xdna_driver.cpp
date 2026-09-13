@@ -439,9 +439,7 @@ static void FlushArguments(const hsa_amd_aie_kernel_dispatch_packet_t* pkt) {
   for (uint32_t kernarg_idx = 0; kernarg_idx < pkt->num_kernargs; ++kernarg_idx) {
     void* ptr = reinterpret_cast<void*>(kernarg_address[kernarg_idx]);
     size_t size = kernarg_address[kernarg_idx + pkt->num_kernargs];
-    if (size > 0) {
-      FlushCpuCache(ptr, 0, size);
-    }
+    FlushCpuCache(ptr, 0, size);
   }
 }
 
@@ -885,11 +883,14 @@ static hsa_status_t CreateCommand(KmqMetadata* kmq_metadata, uint32_t declared_d
   // size_t, not uint32_t: the expression is computed in 64 bits, and narrowing it here would make
   // the bound below depend on declared_dwords never being large enough to wrap.
   const size_t cmd_bytesize = sizeof(ert_start_kernel_cmd) + declared_dwords * sizeof(uint32_t);
+  // count is an 11-bit field: a larger value wraps, under-sizing the chain slot the driver derives
+  // from it and overflowing the chain buffer. Checked separately from the pool bound below, which
+  // only coincides with it at the pool's current entry size.
+  if (declared_dwords > MAX_CMD_COUNT) {
+    return HSA_STATUS_ERROR_INVALID_PACKET_FORMAT;
+  }
+  // Pool entries are fixed-size; a command that does not fit cannot be pooled.
   if (cmd_bytesize > CmdBOPool::kEntryByteSize) {
-    // Pool entries are fixed-size; a command that does not fit cannot be pooled. Entries are
-    // sized to MAX_CMD_COUNT dwords of payload, so this also rejects a declared_dwords that would
-    // not fit the 11-bit count field letting that wrap would under-size the chain slot the
-    // driver derives from it and overflow the chain buffer.
     return HSA_STATUS_ERROR_INVALID_PACKET_FORMAT;
   }
   *cmd_bo = kmq_metadata->cmd_bo_pool.AcquireCmdBO();
@@ -1246,12 +1247,13 @@ hsa_status_t XdnaDriver::CreateKernelModeQueue(size_t queue_size, uint32_t num_c
 }
 
 hsa_status_t XdnaDriver::DestroyKernelModeQueue(void* queue_metadata) const {
-  if (queue_metadata == nullptr ||
-      (static_cast<KmqMetadata*>(queue_metadata)->hw_ctx_handle == AMDXDNA_INVALID_CTX_HANDLE)) {
+  if (queue_metadata == nullptr) {
     return HSA_STATUS_ERROR_INVALID_QUEUE;
   }
 
-  // Create a unique_ptr to ensure cleanup.
+  // Take ownership first: the caller drops its pointer either way, so a bail-out below would leak
+  // the metadata and its command BOs. A queue whose context creation failed has no context to
+  // destroy, but still has a pool.
   std::unique_ptr<KmqMetadata> kmq_metadata;
   kmq_metadata.reset(static_cast<KmqMetadata*>(queue_metadata));
 
@@ -1266,12 +1268,14 @@ hsa_status_t XdnaDriver::DestroyKernelModeQueue(void* queue_metadata) const {
   }
 
   // Destroy hardware context associated with the queue.
-  hsa_status_t err = DestroyHwCtx(fd_, kmq_metadata->hw_ctx_handle);
-  if (err != HSA_STATUS_SUCCESS) {
-    return err;
+  if (kmq_metadata->hw_ctx_handle != AMDXDNA_INVALID_CTX_HANDLE) {
+    const hsa_status_t err = DestroyHwCtx(fd_, kmq_metadata->hw_ctx_handle);
+    if (err != HSA_STATUS_SUCCESS) {
+      return err;
+    }
+    kmq_metadata->hw_ctx_handle = AMDXDNA_INVALID_CTX_HANDLE;
+    kmq_metadata->syncobj_handle = 0;
   }
-  kmq_metadata->hw_ctx_handle = AMDXDNA_INVALID_CTX_HANDLE;
-  kmq_metadata->syncobj_handle = 0;
 
   return first_err;
 }
@@ -1937,7 +1941,10 @@ hsa_status_t XdnaDriver::SubmitCmdChain(hsa_queue_t& q, void* queue_metadata,
     const auto pkt_idx = (first_pkt_idx + i) & mask;
     auto* pkt = queue + pkt_idx;
 
-    // The first packet fixed the batch's mode; the rest have to agree.
+    // The first packet fixed the batch's mode; the rest have to agree. Checked here rather than in
+    // a pass of its own, so the ring is walked once. Packets built before a refusal keep what the
+    // build wrote - for full ELF, the PDI device address in the caller's control code - which is
+    // what a resubmission would write anyway.
     if (static_cast<hsa_amd_aie_packet_opcode_t>(pkt->opcode) != HSA_AMD_AIE_PACKET_OPCODE_KMQ) {
       return HSA_STATUS_ERROR_INVALID_PACKET_FORMAT;
     }
@@ -1966,17 +1973,26 @@ hsa_status_t XdnaDriver::SubmitCmdChain(hsa_queue_t& q, void* queue_metadata,
   // Note: we can do this because we have forced synchronization between command chains. If we
   // move to a more asynchronous model, we will need to figure out how hardware context
   // destruction works while applications are running.
+  //
+  // Undecided counts as a change, so a queue's first batch always lands here. That costs a
+  // full-ELF-first queue one rebuild of a context it could have kept - a PDI-first queue rebuilds
+  // regardless, having just cached its first PDI - and in exchange the checks below run only when
+  // a context is about to be built, not on every submission.
   const bool mode_changed = (kmq_metadata->mode != mode);
-  if (mode_changed || reconfigure_queue) {
+  // A failed CreateHwCtx leaves no context at all. Without this, a later batch needing neither a
+  // switch nor a reconfigure would submit against an invalid handle.
+  const bool no_context = (kmq_metadata->hw_ctx_handle == AMDXDNA_INVALID_CTX_HANDLE);
+  if (mode_changed || reconfigure_queue || no_context) {
     // A full-ELF context must carry no CU configuration, and CreateHwCtx derives that from the
     // PDI cache, so the cache is dropped before the rebuild. Switching back later finds it empty
     // and re-adds each PDI, which is what forces the reconfigure that restores the CU config.
     if (mode == QueueMode::FullElf) {
-      kmq_metadata->pdi_cache.Truncate(0);
+      // Full ELF is an aie2p feature. Reached whenever the queue enters the mode, which is the
+      // only time the device has to be asked about it.
       if (kmq_metadata->device_type != XDNADeviceType::Stx) {
-        // Full ELF is an aie2p feature.
         return HSA_STATUS_ERROR_INVALID_PACKET_FORMAT;
       }
+      kmq_metadata->pdi_cache.Truncate(0);
     }
 
     if (kmq_metadata->hw_ctx_handle != AMDXDNA_INVALID_CTX_HANDLE) {

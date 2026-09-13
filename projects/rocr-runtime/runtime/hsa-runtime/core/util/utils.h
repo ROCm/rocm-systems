@@ -428,7 +428,7 @@ static __forceinline std::string& trim(std::string& s) { return ltrim(rtrim(s));
 /// @param: offset(Input), offset of base address to flush
 /// @param: len(Input), length of buffer to flush
 inline void FlushCpuCache(const void* base, size_t offset, size_t len) {
-  // The loop below is a do-while, so it would flush one cacheline even for an empty range.
+  // The loop below is a do-while: an empty range would still flush one cacheline.
   if (len == 0) return;
 
   static long cacheline_size = 0;

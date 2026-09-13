@@ -29,13 +29,15 @@ MEM_TILE_WIDTH = 64
 AIE_TILE_WIDTH = 32
 
 # The scale is baked into the design rather than passed as a kernel argument, so the packet
-# carries exactly one kernarg. The build passes --scale so that this value and the tests' expected
-# results come from one place (VSMUL_SCALE in CMakeLists.txt); the default below only applies when
-# running this script by hand.
-SCALE = 3
+# carries exactly one kernarg. Required rather than defaulted: VSMUL_SCALE in CMakeLists.txt sets
+# it for both the build and the tests' expected results, and a default here would be a second copy
+# to drift from it.
+SCALE = None
 for _arg in sys.argv[1:]:
     if _arg.startswith("--scale="):
         SCALE = int(_arg.split("=", 1)[1])
+if SCALE is None:
+    raise ValueError("[ERROR] Expected --scale=<int> (the build passes VSMUL_SCALE)")
 
 # With --full-elf the design is compiled into a standalone ELF instead of an
 # xclbin. Nothing then configures the AIE array out of band, so the runtime

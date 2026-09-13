@@ -127,6 +127,9 @@ typedef struct hsa_amd_aie_kernel_dispatch_packet_s {
    * - entries [0 .. ::num_kernargs - 1] are the argument addresses
    * - entries [::num_kernargs .. 2 * ::num_kernargs - 1] are the corresponding argument sizes in
    * bytes
+   *
+   * A size of 0 for a kernarg means no cacheline is flushed for that argument; the argument is
+   * still resolved and kept resident for the duration of the dispatch.
    */
   void* kernarg_address;
 

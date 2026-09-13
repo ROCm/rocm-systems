@@ -1903,6 +1903,9 @@ TEST_F(FullElfDispatchTest, ElfSingleDispatch) {
 TEST_F(FullElfDispatchTest, ElfFullQueueDispatch) {
   // A chain as long as the queue allows. A full-ELF command occupies 60 bytes of
   // the driver's 4 KiB chain buffer, so 68 would fit; the queue tops out first.
+  // A one-packet queue would leave the chain path untested rather than failing.
+  ASSERT_GE(min_queue_size, 2u) << "queue too small to batch a chain";
+
   hsa_queue_t* queue = nullptr;
   ASSERT_EQ(hsa_queue_create(aie_agents.front(), min_queue_size, HSA_QUEUE_TYPE_SINGLE, nullptr,
                              nullptr, 0, 0, &queue),
@@ -2090,7 +2093,11 @@ TEST_F(FullElfDispatchTest, ElfNoPdiCeiling) {
 // Enable with -DROCRTST_AIE_ASYNC_ERROR_REPORTING (cmake: -DAIE_TEST_ASYNC_ERRORS=ON).
 //
 // As written they assume a rejected dispatch (a) does not abort, (b) releases its
-// completion signal so a waiter wakes, and (c) leaves the output buffer untouched.
+// completion signal so a waiter wakes, (c) leaves the output buffer untouched, and
+// (d) is retired from the ring, so it is not resubmitted with the next batch. All
+// four are what the planned ReportSubmitFailure path does; today SubmitCmdChain
+// returns before the loop that calls SubRelease, and AieAqlQueue::SubmitPackets
+// throws before storing read_dispatch_id.
 // If the runtime settles on different semantics -- an error callback, say -- these
 // assertions are the part to adjust; they pin down that a bad packet is refused
 // rather than executed.
@@ -2392,19 +2399,8 @@ TEST_F(DispatchTest, PdiCacheRejectsThirtyThree) {
   EXPECT_EQ(hsa_signal_destroy(signal), HSA_STATUS_SUCCESS);
 
   // A PDI that is already cached still dispatches: hitting the ceiling refuses the one packet
-  // that could not be placed, it does not poison the queue.
-  //
-  // This step assumes the refused batch was fully unwound, which means two things the current
-  // code does neither of, because it aborts before it can:
-  //
-  //   * the packets are retired -- AieAqlQueue::SubmitPackets throws before storing
-  //     read_dispatch_id, so they stay in the ring; if they are not retired this dispatch
-  //     resubmits the 33rd packet alongside the new one and the batch can never drain; and
-  //   * the completion signals are released -- SubmitCmdChain returns before the loop that calls
-  //     SubRelease, so a waiter on the refused packet's signal would never wake.
-  //
-  // Both are what the planned ReportSubmitFailure path does, so the assertion below is written
-  // against that behaviour.
+  // that could not be placed, it does not poison the queue. This leans on (d) above: an unretired
+  // 33rd packet would come back with this one and the batch could never drain.
   ASSERT_NO_FATAL_FAILURE(DispatchAddAndVerify(queue, pdis[0].get(), add, in, out, args));
 
   EXPECT_EQ(hsa_queue_destroy(queue), HSA_STATUS_SUCCESS);
@@ -2850,8 +2846,8 @@ TEST_F(FullElfInterleaveTest, ElfInterleavedKernels) {
 // waited on before the next is staged, so the queue is idle whenever the runtime rebuilds the
 // hardware context for the incoming mode.
 //
-// ModeSwitchAcrossBatches covers the single-packet case; this one checks that a switch still works
-// when each batch carries several packets and the PDI path has a populated cache to drop.
+// Each batch carries several packets, so the switch is checked with a populated PDI cache to drop
+// rather than with a single packet on either side.
 TEST_F(FullElfDispatchTest, ModeSwitchAlternatingBatches) {
   static_assert(aie_vector_scalar_kernel::element_count == aie_full_elf_kernel::element_count);
   constexpr std::size_t n = aie_vector_scalar_kernel::element_count;
