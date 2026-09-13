@@ -62,6 +62,7 @@ namespace amdgpu {
 
 class CommandProcessor;
 class AsyncInstructionWindow;
+struct AsyncInstructionWindowStorage;
 
 inline constexpr int32_t kWorkgroupBarrierId = -1;
 inline constexpr int32_t kWorkgroupTrapBarrierId = -2;
@@ -969,7 +970,8 @@ protected:
   template <bool EnableAsync>
   void issue_instruction_impl(
       Wavefront *wf,
-      std::conditional_t<EnableAsync, AsyncInstructionWindow *, NoAsyncWindow> window = {});
+      std::conditional_t<EnableAsync, AsyncInstructionWindow *, NoAsyncWindow> window = {},
+      std::conditional_t<EnableAsync, AsyncInstructionWindowStorage *, NoAsyncWindow> storage = {});
   template <bool EnableAsync> bool step_impl();
 
   /// @brief Apply any I$ invalidation a debug attach or detach published.

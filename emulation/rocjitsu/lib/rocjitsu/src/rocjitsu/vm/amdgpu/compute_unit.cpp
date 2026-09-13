@@ -11,6 +11,7 @@
 #include "rocjitsu/isa/arch/amdgpu/cdna3/isa.h"
 #include "rocjitsu/isa/arch/amdgpu/cdna4/isa.h"
 #include "rocjitsu/isa/arch/amdgpu/cdna5/isa.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna5/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/shared/isa_properties.h"
 #include "rocjitsu/isa/arch/amdgpu/rdna1/isa.h"
 #include "rocjitsu/isa/arch/amdgpu/rdna2/isa.h"
@@ -152,11 +153,11 @@ static std::unique_ptr<ComputeUnitCore> create_functional_cu(std::string name,
       bool step() override { return this->template step_impl<true>(); }
     };
     const int mode = matrix_coexecution::mode();
-    const bool enabled = HasLargeWmma<Isa> ? mode != 0
-                                           : mode >= 4 && mode <= 6 &&
-                                                 (Isa::ASYNC_MMA_WAVE_SIZE == 64
-                                                      ? matrix_coexecution::mfma_families() != 0
-                                                      : matrix_coexecution::min_wmma_k() <= 16);
+    const bool enabled = HasLargeWmma<Isa>
+                             ? mode >= 1 && mode <= 4
+                             : mode == 4 && (Isa::ASYNC_MMA_WAVE_SIZE == 64
+                                                 ? matrix_coexecution::mfma_families() != 0
+                                                 : matrix_coexecution::min_wmma_k() <= 16);
     if (enabled)
       return std::make_unique<Asynchronous>(std::move(name), config, memory, l2);
   }
@@ -734,33 +735,57 @@ void ComputeUnitCore::update_wf_states() {
 
 void ComputeUnitCore::issue_async_instruction(Wavefront *active) {
   const int mode = matrix_coexecution::mode();
+  // The default gfx1250 allowlist has a cheap encoding filter. On a cache hit,
+  // non-candidates use the ordinary issue body, including its fetchability and
+  // debugger checks. A miss or an experimental family uses full decoding below.
+  // This hint never executes a cached word or bypasses instruction validation.
+  if (mode == 4 && arch() == ROCJITSU_CODE_ARCH_CDNA5 && matrix_coexecution::min_wmma_k() == 64) {
+    uint32_t word;
+    if (inst_cache_.peek_word(active->pc, active->process_id(), word)) {
+      const uint32_t opcode = word >> 16;
+      constexpr uint32_t encoding = 0xcc00;
+      const bool candidate = (opcode >= encoding + cdna5::kVWmmaF3216x16x64Fp8Fp8Vop3p &&
+                              opcode <= encoding + cdna5::kVWmmaF3216x16x64Bf8Bf8Vop3p) ||
+                             (opcode >= encoding + cdna5::kVWmmaF3216x16x128Fp8Fp8Vop3p &&
+                              opcode <= encoding + cdna5::kVWmmaF3216x16x128Bf8Bf8Vop3p) ||
+                             opcode == encoding + cdna5::kVWmmaF3232x16x128F4Vop3p;
+      if (!candidate) {
+        issue_instruction(active);
+        if (active->is_halted())
+          async_execution::stats.flush();
+        return;
+      }
+    }
+  }
   const bool mfma_isa = arch() == ROCJITSU_CODE_ARCH_CDNA3 || arch() == ROCJITSU_CODE_ARCH_CDNA4;
   const bool supported_isa =
       mfma_isa || arch() == ROCJITSU_CODE_ARCH_CDNA5 || arch() == ROCJITSU_CODE_ARCH_RDNA4;
   const unsigned wave_size = mfma_isa ? 64 : 32;
   const uint64_t full_exec = mfma_isa ? ~uint64_t{0} : uint64_t{0xFFFFFFFF};
-  if (mode < 4 || mode > 6 || !supported_isa || active->wf_size() != wave_size ||
+  if (mode != 4 || !supported_isa || active->wf_size() != wave_size ||
       active->exec() != full_exec || active->vgpr_msb_mode() != 0 || active->gpr_idx_en() ||
       debug_active() || active->debug_single_step() || active->in_trap_handler() ||
       !plugin_group_->permits_matrix_coexecution_prototype()) {
     issue_instruction_impl<true>(active);
     return;
   }
-  AsyncInstructionWindow window(*this, *active);
+  AsyncInstructionWindowStorage storage;
   try {
     unsigned issued = 0;
     do {
-      issue_instruction_impl<true>(active, &window);
-      window.poll();
-      if (active->state() == WfState::WAITCNT) {
-        ++async_execution::stats.waits;
-        window.wait_memory();
+      issue_instruction_impl<true>(active, storage.window ? &*storage.window : nullptr, &storage);
+      if (!storage.window) {
+        if (active->is_halted())
+          async_execution::stats.flush();
+        return;
       }
-    } while (++issued < async_execution::window_limit() && window.pending() && !window.stopped() &&
-             active->state() == WfState::RUNNING);
-    window.drain();
+      storage.window->poll();
+    } while (++issued < async_execution::window_limit() && storage.window->pending() &&
+             !storage.window->stopped() && active->state() == WfState::RUNNING);
+    storage.window->drain();
   } catch (...) {
-    window.abandon();
+    if (storage.window)
+      storage.window->abandon();
     throw;
   }
   if (active->is_halted())
@@ -770,7 +795,8 @@ void ComputeUnitCore::issue_async_instruction(Wavefront *active) {
 template <bool EnableAsync>
 [[gnu::always_inline]] inline void ComputeUnitCore::issue_instruction_impl(
     Wavefront *active,
-    std::conditional_t<EnableAsync, AsyncInstructionWindow *, NoAsyncWindow> window) {
+    std::conditional_t<EnableAsync, AsyncInstructionWindow *, NoAsyncWindow> window,
+    std::conditional_t<EnableAsync, AsyncInstructionWindowStorage *, NoAsyncWindow> storage) {
   uint32_t vmid = active->process_id();
 
   // Deliberately not gated on debug_active_, unlike the data-side probe below.
@@ -839,6 +865,9 @@ template <bool EnableAsync>
   auto inst_size = static_cast<uint64_t>(inst_size_signed);
 
   if constexpr (EnableAsync) {
+    if (!window && storage && matrix_coexecution::async_candidate(inst->mnemonic()) &&
+        matrix_coexecution::width() > 1 && matrix_coexecution::shared_pool().available())
+      window = &storage->window.emplace(*this, *active);
     if (window) {
       bool transferred = false;
       try {
@@ -1269,12 +1298,7 @@ template <bool EnableAsync>
         auto *d = inst->data_as<VectorMemState>();
         d->issue_pc = active->pc;
       }
-      if constexpr (EnableAsync) {
-        if (!window || !window->submit_memory(inst))
-          route_memory_inst(inst, *active);
-      } else {
-        route_memory_inst(inst, *active);
-      }
+      route_memory_inst(inst, *active);
     }
   } else
     delete inst;

@@ -29,7 +29,7 @@
 namespace rocjitsu::amdgpu::matrix_coexecution {
 
 // Experimental controls: 0 = ordinary issue, 1 = scan only, 2 = serial batch,
-// 3 = parallel batch; 4/5/6 = scoreboard MMA/memory/both. Each process keeps
+// 3 = parallel batch; 4 = scoreboard MMA. Each process keeps
 // its selected mode for the entire run.
 inline int mode() {
   static const int value = [] {
