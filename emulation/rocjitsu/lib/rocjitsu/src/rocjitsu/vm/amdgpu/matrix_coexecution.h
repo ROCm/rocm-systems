@@ -11,7 +11,9 @@
 #include <cstdio>
 #include <cstdlib>
 #include <exception>
+#include <functional>
 #include <memory>
+#include <optional>
 #include <span>
 #include <thread>
 #include <vector>
@@ -43,14 +45,27 @@ inline unsigned width() {
   return value;
 }
 
-// Zero uses the standard library's atomic wait policy. A positive value adds
-// a bounded spin before sleeping, on both sides of the handoff. This is an
+// Zero uses the selected waiting protocol without additional spinning. A
+// positive value adds a bounded spin on both sides of the handoff. This is an
 // experiment control, not a CPU-count-aware production scheduling policy.
 inline unsigned spin_count() {
   static const unsigned value = [] {
     const char *text = std::getenv("RJ_MMA_SPINS");
     const int spins = text ? std::atoi(text) : 0;
     return static_cast<unsigned>(spins < 0 ? 0 : spins);
+  }();
+  return value;
+}
+
+// When present, this selects a process-wide helper pool instead of one pool
+// per issuer. Zero deliberately exercises the nonblocking inline fallback.
+inline std::optional<unsigned> shared_helper_limit() {
+  static const std::optional<unsigned> value = []() -> std::optional<unsigned> {
+    const char *text = std::getenv("RJ_MMA_SHARED_HELPERS");
+    if (!text)
+      return std::nullopt;
+    const int count = std::atoi(text);
+    return static_cast<unsigned>(count < 0 ? 0 : count > 128 ? 128 : count);
   }();
   return value;
 }
@@ -116,6 +131,10 @@ struct Stats {
   uint64_t conflicts = 0;
   uint64_t batches = 0;
   uint64_t covered = 0;
+  uint64_t shared_submitted = 0;
+  uint64_t shared_inline = 0;
+  uint64_t shared_full = 0;
+  uint64_t shared_probes = 0;
   std::array<uint64_t, 9> widths{};
   void flush() {
     if (candidates)
@@ -123,24 +142,30 @@ struct Stats {
           stderr,
           "RJ_COEXEC candidates=%llu adjacent=%llu conflicts=%llu batches=%llu "
           "covered=%llu width2=%llu width3=%llu width4=%llu width5=%llu width6=%llu "
-          "width7=%llu width8=%llu\n",
+          "width7=%llu width8=%llu shared_submitted=%llu shared_inline=%llu "
+          "shared_full=%llu shared_probes=%llu\n",
           static_cast<unsigned long long>(candidates), static_cast<unsigned long long>(adjacent),
           static_cast<unsigned long long>(conflicts), static_cast<unsigned long long>(batches),
           static_cast<unsigned long long>(covered), static_cast<unsigned long long>(widths[2]),
           static_cast<unsigned long long>(widths[3]), static_cast<unsigned long long>(widths[4]),
           static_cast<unsigned long long>(widths[5]), static_cast<unsigned long long>(widths[6]),
-          static_cast<unsigned long long>(widths[7]), static_cast<unsigned long long>(widths[8]));
+          static_cast<unsigned long long>(widths[7]), static_cast<unsigned long long>(widths[8]),
+          static_cast<unsigned long long>(shared_submitted),
+          static_cast<unsigned long long>(shared_inline),
+          static_cast<unsigned long long>(shared_full),
+          static_cast<unsigned long long>(shared_probes));
     candidates = adjacent = conflicts = batches = covered = 0;
     widths.fill(0);
+    shared_submitted = shared_inline = shared_full = shared_probes = 0;
   }
   ~Stats() { flush(); }
 };
 inline thread_local Stats stats;
 
-// Persistent helpers belong to the issuing host thread and are constructed lazily.
+// Persistent helpers belong to a private or shared pool, constructed lazily.
 // Instructions remain allocated and destroyed by the original decoder thread.
 // The caller validates disjoint register accesses and materializes destinations
-// before publication. Both operations complete before the CU can be rescheduled.
+// before publication. All jobs complete before the CU can be rescheduled.
 class Helper {
 public:
   Helper() : thread_([this] { work(); }) {}
@@ -243,7 +268,7 @@ private:
   std::thread thread_;
 };
 
-inline void execute_batch(std::span<Instruction *> instructions, void *wave) {
+inline void execute_private_batch(std::span<Instruction *> instructions, void *wave) {
   thread_local std::vector<std::unique_ptr<Helper>> helpers;
   while (helpers.size() + 1 < instructions.size())
     helpers.push_back(std::make_unique<Helper>());
@@ -263,6 +288,95 @@ inline void execute_batch(std::span<Instruction *> instructions, void *wave) {
     std::rethrow_exception(first_error);
   if (local_error)
     std::rethrow_exception(local_error);
+}
+
+// Each claim covers publication through joining, so another issuer cannot
+// reuse a helper's payload while its previous owner still reads completion.
+// There is no pending-job queue and no wait for capacity. Idle-slot scanning is
+// bounded by the configured pool size; occupied slots need no atomic RMW.
+class SharedPool {
+  struct Slot {
+    alignas(64) std::atomic<bool> claimed{false};
+    Helper helper;
+  };
+
+public:
+  explicit SharedPool(unsigned count) {
+    slots_.reserve(count);
+    for (unsigned i = 0; i != count; ++i)
+      slots_.push_back(std::make_unique<Slot>());
+  }
+
+  void execute(std::span<Instruction *> instructions, void *wave) {
+    assert(instructions.size() <= 8);
+    std::array<Slot *, 8> submitted{};
+    std::exception_ptr first_error;
+    size_t first_error_index = instructions.size();
+    for (size_t i = 0; i != instructions.size(); ++i) {
+      // Keep at least the final instruction on the issuing thread.
+      if (i + 1 < instructions.size()) {
+        if (auto *slot = try_submit(*instructions[i], wave)) {
+          submitted[i] = slot;
+          ++stats.shared_submitted;
+          continue;
+        }
+        ++stats.shared_full;
+      }
+      ++stats.shared_inline;
+      try {
+        instructions[i]->execute(*instructions[i], wave);
+      } catch (...) {
+        first_error = std::current_exception();
+        first_error_index = i;
+        break;
+      }
+    }
+    for (size_t i = 0; i != instructions.size(); ++i) {
+      if (auto *slot = submitted[i]) {
+        auto error = slot->helper.wait();
+        slot->claimed.store(false, std::memory_order_release);
+        if (error && i < first_error_index) {
+          first_error = error;
+          first_error_index = i;
+        }
+      }
+    }
+    if (first_error)
+      std::rethrow_exception(first_error);
+  }
+
+private:
+  Slot *try_submit(Instruction &instruction, void *wave) {
+    if (slots_.empty())
+      return nullptr;
+    // Avoid making every issuer start at the same slot, without a shared
+    // cursor cache line. Rotation also spreads a single issuer's jobs.
+    thread_local size_t next = std::hash<std::thread::id>{}(std::this_thread::get_id());
+    for (size_t probe = 0; probe != slots_.size(); ++probe) {
+      ++stats.shared_probes;
+      auto *slot = slots_[next++ % slots_.size()].get();
+      if (slot->claimed.load(std::memory_order_relaxed))
+        continue;
+      bool expected = false;
+      if (!slot->claimed.compare_exchange_strong(expected, true, std::memory_order_acquire,
+                                                 std::memory_order_relaxed))
+        continue;
+      slot->helper.submit(instruction, wave);
+      return slot;
+    }
+    return nullptr;
+  }
+
+  std::vector<std::unique_ptr<Slot>> slots_;
+};
+
+inline void execute_batch(std::span<Instruction *> instructions, void *wave) {
+  if (auto count = shared_helper_limit()) {
+    static SharedPool pool(*count);
+    pool.execute(instructions, wave);
+  } else {
+    execute_private_batch(instructions, wave);
+  }
 }
 
 } // namespace rocjitsu::amdgpu::matrix_coexecution
