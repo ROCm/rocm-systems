@@ -546,7 +546,8 @@ if(BUILD_TESTS)
     # direct-LSA gather addressing (the pointer-arithmetic core of
     # AllGatherLsaDirect) on real hardware, self-contained (no librccl / GIN
     # comm). Requires a visible GPU at run time (skips cleanly otherwise), so it
-    # carries a "gpu" label alongside "unit".
+    # carries the "gpu" label only so `ctest -L unit` on CPU nodes does not
+    # count an all-skip binary as a passing unit test.
     add_executable(rccl-UnitTestsGinSdmaAllGatherGpu gin/gin_sdma_allgather_gpu_test.cpp)
     set_source_files_properties(gin/gin_sdma_allgather_gpu_test.cpp PROPERTIES LANGUAGE CXX)
     target_include_directories(rccl-UnitTestsGinSdmaAllGatherGpu PRIVATE
@@ -569,7 +570,10 @@ if(BUILD_TESTS)
       RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/test"
       CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
     add_test(NAME rccl-UnitTestsGinSdmaAllGatherGpu COMMAND rccl-UnitTestsGinSdmaAllGatherGpu)
-    set_tests_properties(rccl-UnitTestsGinSdmaAllGatherGpu PROPERTIES LABELS "unit;gpu")
+    set_tests_properties(rccl-UnitTestsGinSdmaAllGatherGpu PROPERTIES LABELS "gpu")
+  else()
+    message(STATUS "Skipping GIN-SDMA AllGather policy/gpu unit tests: "
+                   "${_gin_sdma_ag_hdr_dir}/gin_sdma_allgather_policy.h not found")
   endif()
 
   # GIN Anvil-SDMA hybrid Broadcast (-D 3) policy host unit test (no GPU).
@@ -677,6 +681,29 @@ if(BUILD_TESTS)
       -Wl,--export-dynamic-symbol=ncclNetPlugin_v10
       -Wl,--export-dynamic-symbol=ncclNetPlugin_v11
       -Wl,--export-dynamic-symbol=ncclCollNetPlugin_v11)
+
+    # Transitive nccl_device/gin headers pull sdma/anvil_device.hpp from rocSHMEM.
+    if(ENABLE_ROCSHMEM_GIN)
+      if(ROCSHMEM_SOURCE_DIR)
+        target_include_directories(rccl-UnitTestsFixturesDebug PRIVATE
+          "${ROCSHMEM_SOURCE_DIR}/src"
+          "${ROCSHMEM_SOURCE_DIR}/include")
+      else()
+        target_include_directories(rccl-UnitTestsFixturesDebug PRIVATE
+          ${CMAKE_SOURCE_DIR}/../rocshmem/src
+          ${CMAKE_SOURCE_DIR}/../rocshmem/include)
+      endif()
+      if(ROCSHMEM_INCLUDE_DIR)
+        target_include_directories(rccl-UnitTestsFixturesDebug PRIVATE ${ROCSHMEM_INCLUDE_DIR})
+      elseif(ROCSHMEM_INSTALL_DIR)
+        target_include_directories(rccl-UnitTestsFixturesDebug PRIVATE "${ROCSHMEM_INSTALL_DIR}/include")
+      endif()
+      if(ROCSHMEM_BUILD_DIR)
+        target_include_directories(rccl-UnitTestsFixturesDebug PRIVATE ${ROCSHMEM_BUILD_DIR})
+      elseif(ROCSHMEM_SOURCE_DIR AND EXISTS "${ROCSHMEM_SOURCE_DIR}/build/include")
+        target_include_directories(rccl-UnitTestsFixturesDebug PRIVATE "${ROCSHMEM_SOURCE_DIR}/build/include")
+      endif()
+    endif()
   endif()
 
   # rccl-UnitTestsAltRsmi: Compiles alt_rsmi.cc directly (not via librccl.so) with
@@ -1039,7 +1066,8 @@ if(BUILD_TESTS)
     # into the Fixtures binary so the executable satisfies those symbols when
     # the dynamic loader brings in librccl.so.
     if(ENABLE_ROCSHMEM_GIN AND GIN_ANVIL_UNIT_TESTS AND NOT ENABLE_ROCSHMEM
-       AND ROCSHMEM_INSTALL_DIR AND "${test_executable}" STREQUAL "rccl-UnitTestsFixtures")
+       AND ROCSHMEM_INSTALL_DIR AND ("${test_executable}" STREQUAL "rccl-UnitTestsFixtures"
+                                     OR "${test_executable}" STREQUAL "rccl-UnitTestsFixturesDebug"))
       set(_ROCSHMEM_FIXTURES_OFFLOAD_FLAGS "")
       foreach(_g IN LISTS GPU_TARGETS)
         if(_g)
