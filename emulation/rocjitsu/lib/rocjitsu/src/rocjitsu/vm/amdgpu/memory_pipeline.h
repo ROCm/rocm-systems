@@ -78,7 +78,8 @@ protected:
   /// @brief Share issue ownership and completion handling across dispatch modes.
   /// Complete forwards the callback by rvalue reference to avoid an intermediate
   /// std::function move before the access hook takes ownership.
-  template <typename Initiate, typename Complete>
+  /// Synchronous completion takes only the instruction and wavefront.
+  template <bool MayDefer = true, typename Initiate, typename Complete>
   void issue_impl(Instruction *inst, Wavefront &wf, Initiate initiate, Complete complete) {
     WaitCounterType issue_counter = counter_type_;
     if (auto *state = inst->data()) {
@@ -96,15 +97,20 @@ protected:
     }
     wf.wait_counters().increment(issue_counter);
     initiate(*inst, wf);
-    // The wait counter pins wf/inst ownership until this callback releases it.
-    // ComputeUnitCore retires ENDING wavefronts only after wait_counters().empty(),
-    // so a deferred backend must invoke this exactly once while that counter is held.
-    MemoryAccessDeferredCompletion deferred_completion = [this, inst, &wf, issue_counter]() {
+    if constexpr (MayDefer) {
+      // The wait counter pins wf/inst ownership until this callback releases it.
+      // ComputeUnitCore retires ENDING wavefronts only after wait_counters().empty(),
+      // so a deferred backend must invoke this exactly once while that counter is held.
+      MemoryAccessDeferredCompletion deferred_completion = [this, inst, &wf, issue_counter]() {
+        finish_completed_access(inst, wf, issue_counter);
+      };
+      MemoryAccessCompletion completion = complete(*inst, wf, std::move(deferred_completion));
+      if (completion == MemoryAccessCompletion::Complete)
+        finish_completed_access(inst, wf, issue_counter);
+    } else {
+      complete(*inst, wf);
       finish_completed_access(inst, wf, issue_counter);
-    };
-    MemoryAccessCompletion completion = complete(*inst, wf, std::move(deferred_completion));
-    if (completion == MemoryAccessCompletion::Complete)
-      finish_completed_access(inst, wf, issue_counter);
+    }
   }
 
   virtual void initiate_access(Instruction &inst, Wavefront &wf) = 0;
@@ -143,6 +149,8 @@ protected:
                                          MemoryAccessDeferredCompletion complete) override;
 
 private:
+  void complete_access_sync(Instruction &inst, Wavefront &wf);
+
   L1ScalarCache *l1_;
 };
 

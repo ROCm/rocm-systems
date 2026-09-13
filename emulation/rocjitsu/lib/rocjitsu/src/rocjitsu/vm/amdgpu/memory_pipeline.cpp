@@ -218,12 +218,11 @@ MemoryAccessCompletion vector_complete(VectorMemState &d, Wavefront &wf, Compute
 } // namespace
 
 void ScalarMemPipeline::issue_concrete(Instruction *inst, Wavefront &wf) {
-  issue_impl(
+  // Scalar access completes synchronously, so it needs no deferred callback.
+  issue_impl<false>(
       inst, wf,
       [this](Instruction &inst, Wavefront &wf) { ScalarMemPipeline::initiate_access(inst, wf); },
-      [this](Instruction &inst, Wavefront &wf, MemoryAccessDeferredCompletion &&complete) {
-        return ScalarMemPipeline::complete_access(inst, wf, std::move(complete));
-      });
+      [this](Instruction &inst, Wavefront &wf) { complete_access_sync(inst, wf); });
 }
 
 void ScalarMemPipeline::initiate_access(Instruction &inst, Wavefront &wf) {
@@ -244,11 +243,16 @@ void ScalarMemPipeline::initiate_access(Instruction &inst, Wavefront &wf) {
 MemoryAccessCompletion
 ScalarMemPipeline::complete_access(Instruction &inst, Wavefront &wf,
                                    MemoryAccessDeferredCompletion /*complete*/) {
+  complete_access_sync(inst, wf);
+  return MemoryAccessCompletion::Complete;
+}
+
+void ScalarMemPipeline::complete_access_sync(Instruction &inst, Wavefront &wf) {
   auto &d = *inst.data_as<ScalarMemState>();
   if (!d.is_load)
-    return MemoryAccessCompletion::Complete;
+    return;
   if (d.dst_register.width != d.num_dwords)
-    return MemoryAccessCompletion::Complete;
+    return;
   RegisterAccess registers(wf);
   for (uint32_t i = 0; i < d.num_dwords; ++i)
     registers.write_scalar_unobserved(d.dst_register, i, d.response_data[i]);
@@ -265,7 +269,6 @@ ScalarMemPipeline::complete_access(Instruction &inst, Wavefront &wf,
       }
     }
   });
-  return MemoryAccessCompletion::Complete;
 }
 
 namespace {
