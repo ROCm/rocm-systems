@@ -78,7 +78,7 @@ agent-reserved-run taskset -c 80-95 /path/to/rocjitsu_tests \
 The complete local experiment and raw commands are under
 `/home/jakub/rocjitsu/misc/async-scoreboard-benchmark/admission/`.
 See `report.md` there for commands, frozen-runtime hashes, raw results,
-profiles, CPU counters, timing ranges and controls. The final campaign contains
+profiles, CPU counters, timing ranges and controls. The initial campaign contains
 554 successful timed application processes, including the full 32-case
 f16/bf16 and 80-case FP8 Gluon runtime GEMM selections. Numerical checks and
 complete throughput signatures agree throughout. Fifty focused tests pass in
@@ -143,3 +143,37 @@ kernel. A one-instruction scan misses partners and fragments wider groups.
 Sixteen is useful for tuning this workload; eight remains the default bound.
 Keep K32 admission opt-in: the experiment demonstrates selective profitability,
 with meaningful workload and CPU-budget limitations.
+
+
+### K64 and K128 admission follow-up
+
+A further 108 timed runs explicitly enable admission mode 3 for both large
+FP8 shapes. The earlier K128 control used mode 2 and did not run lookahead for
+that shape. This follow-up uses the same frozen runtime, original Gluon
+1024-cubed FP8 GEMM, tile 64x64x128, six rotated rounds and reserved CPUs 80–95.
+All numerical checks and complete instruction signatures pass.
+
+With twelve execution workers, ordinary execution uses twelve CUs; both async
+policies use eight CUs plus four helpers. Entries are median dispatch / process
+wall seconds:
+
+| Instruction K | Ordinary | Unrestricted offload | Cached admission |
+|---|---:|---:|---:|
+| 64 | 1.1835 / 3.810 | 0.9902 / 3.615 | 1.0025 / 3.640 |
+| 128 | 1.2106 / 3.830 | 0.9743 / 3.600 | 0.9522 / 3.585 |
+
+Cached admission improves dispatch / wall time by 15.3% / 4.5% for K64 and
+21.3% / 6.4% for K128 versus ordinary execution. Most of that gain comes from
+MMA offload: relative to unrestricted offload, admission changes dispatch time
+by +1.2% for K64 and -2.3% for K128. With two fixed CU issuers plus four helpers,
+both Gluon shapes retain about 26–27% dispatch-time gains versus two ordinary
+CUs; admission changes little compared with unrestricted offload.
+
+The eight-chain HIP controls show a cost: admission slows dispatch by 8.7%
+for K64 and 12.9% for K128 versus unrestricted offload, while CPU time rises
+only 1.1% and 2.0%. Helper submissions fall about 9–10%, consistent with less
+overlap from reserving the final MMA for the issuer. These results support
+keeping large WMMA on the existing unrestricted policy by default.
+
+Full tables, host counters and reproduction commands are in
+`/home/jakub/rocjitsu/misc/async-scoreboard-benchmark/admission/large-report.md`.
