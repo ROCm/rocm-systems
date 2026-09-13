@@ -170,6 +170,18 @@ testResult_t ReduceScatterGetDevCommRequirements(int deviceImpl, ncclDevCommRequ
     return testNcclError;
   }
 
+  // The read-reduce indexes peers with ncclGetLsaPointer(sendwin, sendoffset, s)
+  // for s over [0, devComm.nRanks), i.e. it feeds a WORLD rank where an LSA-team
+  // index is expected (ncclGetLsaPointer resolves lsaFlatBase + peer*stride4G).
+  // That is only the same number when the world team is exactly the LSA team, so
+  // require it here rather than reading a wrong or out-of-aperture peer. Matches
+  // the AllGather gate in all_gather.cu.
+  if (commProperties.nRanks != ncclTeamLsa(comm).nRanks) {
+    fprintf(stderr, "GinReduceScatterKernel requires CUDA P2P connectivity across all ranks. "
+                    "Not all ranks of this communicator have P2P connectivity.\n");
+    return testInvalidUsage;
+  }
+
   switch(deviceImpl) {
     case 3: { // GinReduceScatterKernel: single-tier LSA read-reduce (no scratch)
       if (commProperties.ginType == NCCL_GIN_TYPE_NONE) {
@@ -717,19 +729,19 @@ testResult_t ReduceScatterRunTest(struct threadArgs* args, int root, ncclDataTyp
 
   for (int i=0; i<type_count; i++) {
     for (int j=0; j<op_count; j++) {
-      // The GIN device path (deviceImpl != 0) has no PreMulSum ("mulsum") kernel
-      // for any type (deferred), and no prod kernel for fp8; SPECIALIZE_REDUCE_KERNEL
-      // returns nullptr for those, which would abort the op x type matrix on
-      // testNotImplemented. Skip them here so the device sweep only exercises the
-      // implemented combos. The host path (deviceImpl == 0) supports them all via
-      // ncclReduceScatter, so it keeps full coverage.
-      if (deviceImpl != 0) {
-        if (strcmp(run_opnames[j], "mulsum") == 0) continue;
 #if defined(RCCL_FLOAT8)
-        if ((run_types[i] == ncclFloat8e4m3 || run_types[i] == ncclFloat8e5m2) && run_ops[j] == ncclProd)
-          continue;
+      // fp8 avg is supported; fp8 prod/mulsum remain out of scope for fp8. This
+      // exclusion is unconditional -- it predates the device path and applies to
+      // the host path (deviceImpl == 0) too.
+      if ((run_types[i] == ncclFloat8e4m3 || run_types[i] == ncclFloat8e5m2) &&
+          (run_ops[j] == ncclProd || strcmp(run_opnames[j], "mulsum") == 0))
+        continue;
 #endif
-      }
+      // Additionally, the GIN device path has no PreMulSum ("mulsum") kernel for
+      // ANY type (deferred): SPECIALIZE_REDUCE_KERNEL returns nullptr, which would
+      // abort the op x type matrix on testNotImplemented. Skip it so the device
+      // sweep only exercises implemented combos; the host path keeps mulsum.
+      if (deviceImpl != 0 && strcmp(run_opnames[j], "mulsum") == 0) continue;
       TESTCHECK(TimeTest(args, run_types[i], run_typenames[i], run_ops[j], run_opnames[j], -1));
     }
   }
