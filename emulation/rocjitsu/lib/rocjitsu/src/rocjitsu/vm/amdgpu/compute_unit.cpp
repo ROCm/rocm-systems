@@ -20,6 +20,7 @@
 #include "rocjitsu/isa/instruction.h"
 #include "rocjitsu/isa/target_registry.h"
 #include "rocjitsu/vm/amdgpu/hwreg.h"
+#include "rocjitsu/vm/amdgpu/matrix_coexecution.h"
 #include "rocjitsu/vm/amdgpu/mem_state.h"
 #include "rocjitsu/vm/amdgpu/register_access.h"
 #include "util/except.h"
@@ -766,6 +767,112 @@ void ComputeUnitCore::issue_instruction(Wavefront *active) {
   int inst_size_signed = inst->size();
   assert(inst_size_signed > 0 && "instruction size must be positive");
   auto inst_size = static_cast<uint64_t>(inst_size_signed);
+
+  // Bounded experiment: adjacent gfx1250 K>=64 f32-output WMMA, full EXEC,
+  // valid low-bank registers, no debugger or architectural observer plugins.
+  if (matrix_coexecution::mode() != 0 && matrix_coexecution_functional_ &&
+      arch() == ROCJITSU_CODE_ARCH_CDNA5 && matrix_coexecution::candidate(inst->mnemonic()) &&
+      inst_size == 8 && active->wf_size() == 32 && active->exec() == 0xFFFFFFFFu &&
+      active->vgpr_msb_mode() == 0 && !debug_active() && !active->debug_single_step() &&
+      !active->in_trap_handler() && plugin_group_->permits_matrix_coexecution_prototype()) {
+    auto &stats = matrix_coexecution::stats;
+    ++stats.candidates;
+    auto footprint =
+        [&](const Instruction &instruction) -> std::optional<matrix_coexecution::Footprint> {
+      matrix_coexecution::Footprint result;
+      for (unsigned i = 0; i != 4; ++i) {
+        const Operand *operand =
+            i == 0 ? instruction.dst_operand(0) : instruction.src_operand(i - 1);
+        if (!operand || !operand->is_vgpr())
+          return std::nullopt;
+        const uint32_t reg = operand->unified_vgpr_index();
+        const uint32_t count = operand->vgpr_count();
+        if (reg > active->num_vgprs() || count > active->num_vgprs() - reg)
+          return std::nullopt;
+        const matrix_coexecution::Range range{active->vgpr_alloc().base + reg, count};
+        if (i == 0)
+          result.output = range;
+        else
+          result.inputs[i - 1] = range;
+      }
+      return result;
+    };
+    if (const auto first = footprint(*inst)) {
+      std::array<Instruction *, 8> instructions{inst};
+      std::array<std::unique_ptr<Instruction>, 8> owned;
+      std::array<matrix_coexecution::Footprint, 8> accesses;
+      accesses[0] = *first;
+      unsigned count = 1;
+      while (count < matrix_coexecution::width() &&
+             (active->pc % GpuMemory::PAGE_SIZE) + (count + 1) * 8 <= GpuMemory::PAGE_SIZE) {
+        rj_code_binary_inst_t lookahead[4]{};
+        if (count == 1) {
+          lookahead[0] = words[2];
+          lookahead[1] = words[3];
+        } else {
+          inst_cache_.fetch(*memory_, active->pc + count * 8, vmid,
+                            reinterpret_cast<uint8_t *>(lookahead));
+        }
+        if ((lookahead[0] & 0xFFFF0000u) != (words[0] & 0xFFFF0000u))
+          break;
+        auto next = decoder_->decode(lookahead, decode_error.emitter());
+        if (next.failed())
+          break;
+        auto candidate = std::move(next).value();
+        if (candidate->size() != 8 || std::string_view(candidate->mnemonic()) != inst->mnemonic())
+          break;
+        ++stats.adjacent;
+        const auto access = footprint(*candidate);
+        if (!access)
+          break;
+        bool independent = true;
+        for (unsigned i = 0; i != count; ++i)
+          independent &= matrix_coexecution::independent(accesses[i], *access);
+        if (!independent) {
+          ++stats.conflicts;
+          break;
+        }
+        accesses[count] = *access;
+        instructions[count] = candidate.get();
+        owned[count] = std::move(candidate);
+        ++count;
+      }
+      if (count > 1 && matrix_coexecution::mode() >= 2) {
+        // Allocate lazy storage before publication: different output registers
+        // can share a chunk and its allocation metadata is not concurrent.
+        for (unsigned i = 0; i != count; ++i)
+          for (uint32_t reg = 0; reg != accesses[i].output.count; ++reg)
+            (void)raw_vgpr_data(accesses[i].output.base + reg);
+        active->clear_pending_alu_causes();
+        active->clear_instruction_execution_error();
+        plugin_group_->onAmdgpuBeforeExecuteInstruction(active->pc, *inst, *active);
+        try {
+          if (matrix_coexecution::mode() == 3)
+            matrix_coexecution::execute_batch({instructions.data(), count}, active);
+          else
+            for (unsigned i = 0; i != count; ++i)
+              instructions[i]->execute(*instructions[i], active);
+        } catch (...) {
+          delete inst;
+          throw;
+        }
+        assert(!active->instruction_execution_failed());
+        plugin_group_->onAmdgpuAfterExecuteInstruction(active->pc, *inst, *active);
+        active->pc += 8;
+        for (unsigned i = 1; i != count; ++i) {
+          ++active->trace_inst_count_;
+          plugin_group_->onAmdgpuBeforeExecuteInstruction(active->pc, *instructions[i], *active);
+          plugin_group_->onAmdgpuAfterExecuteInstruction(active->pc, *instructions[i], *active);
+          active->pc += 8;
+        }
+        ++stats.batches;
+        stats.covered += count;
+        ++stats.widths[count];
+        delete inst;
+        return;
+      }
+    }
+  }
   // The cause classifiers report into this as they run; see alu_exceptions.h.
   active->clear_pending_alu_causes();
 
