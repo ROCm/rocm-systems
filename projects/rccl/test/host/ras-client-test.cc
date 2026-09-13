@@ -58,7 +58,7 @@ const char* const kCompiledInHostName = hostName;
 const int kCompiledInTimeout = timeout;
 const int kCompiledInSock = sock;
 
-// Mirrors of the default seams' own defaults (libc_fakes.cc:38, :46), used throughout this file so a
+// Mirrors of the default seams' own defaults (libc_fakes.cc:40, :48), used throughout this file so a
 // test failure names the value rather than a bare number. Scaffolding_DefaultSeams_AreReachableAndReset
 // ties each to its mirrored default, so drifting either one fails there by name instead of as a wall of
 // unrelated-looking mismatches everywhere the constant is used.
@@ -1229,6 +1229,7 @@ TEST_F(RasClientMicrotest, SetOutputFormat_RejectedResponses_ReturnOneAfterSendi
     EXPECT_EQ(1, rc) << reply;
     EXPECT_EQ("SET FORMAT quokka\n", g_writtenData) << reply;
     ExpectPerrors({});
+    EXPECT_EQ(std::vector<FILE*>{stderr}, g_fprintfCalls) << reply;
   }
 }
 
@@ -1355,6 +1356,7 @@ TEST_F(RasClientMicrotest, GetNcclStatus_NonVerbose_SendsPlainStatusAndReturnsZe
   EXPECT_EQ("STATUS\n", g_writtenData);
   EXPECT_EQ(17, writeFd);
   EXPECT_EQ(1, writeHook.calls);
+  EXPECT_EQ(std::vector<int>({17}), g_readFds);
   EXPECT_EQ(0u, g_fwriteCalls.size());
   EXPECT_EQ(0, fflushHook.calls);
   EXPECT_EQ("", g_stdoutData);
@@ -1403,6 +1405,7 @@ TEST_F(RasClientMicrotest, GetNcclStatus_WriteFailsWithEagain_ReportsTimeoutAndR
   EXPECT_EQ(0u, g_fwriteCalls.size());
   EXPECT_EQ(0u, g_readScriptPos);
   ExpectPerrors({});
+  EXPECT_EQ(std::vector<FILE*>{stderr}, g_fprintfCalls);  // "Connection timed out", not a silent return
 }
 
 // Write arm, non-EAGAIN: perror prints the label, ": " and the strerror text.
@@ -1428,6 +1431,7 @@ TEST_F(RasClientMicrotest, GetNcclStatus_ReadFailsWithEwouldblock_ReportsTimeout
   EXPECT_EQ("alpha", g_stdoutData);
   EXPECT_EQ(1u, g_fwriteCalls.size());
   ExpectPerrors({});
+  EXPECT_EQ(std::vector<FILE*>{stderr}, g_fprintfCalls);  // "Connection timed out", not a silent return
 }
 
 // Read arm, non-EAGAIN errno.
@@ -1548,7 +1552,7 @@ std::string TraceSetsockopt(const std::vector<SetsockoptCall>& calls) {
 }
 
 void RecordSetsockopt(std::vector<SetsockoptCall>* into, int fd, int level, int optname, const void* optval,
-                       socklen_t optlen) {
+                      socklen_t optlen) {
   struct timeval tv = {-1, -1};
   if (optval && optlen >= static_cast<socklen_t>(sizeof tv)) {
     std::memcpy(&tv, optval, sizeof tv);
@@ -1620,9 +1624,9 @@ TEST_F(RasClientMicrotest, ConnectToNccl_GetaddrinfoFails_ReportsResolveErrorAnd
   });
   ScopedHook sockHook(g_socket, [](int, int, int) { return 77; });
 
-  const int ret = RunConnectToNCCL();
+  const int rc = RunConnectToNCCL();
 
-  EXPECT_EQ(1, ret);
+  EXPECT_EQ(1, rc);
   EXPECT_EQ(1, gai.calls);
   EXPECT_EQ(EAI_NONAME, gaiCode);
   EXPECT_EQ(0, sockHook.calls);
@@ -1650,9 +1654,9 @@ TEST_F(RasClientMicrotest, ConnectToNccl_ResolvesConfiguredEndpoint_PassesUnspec
                        return EAI_AGAIN;
                      });
 
-  const int ret = RunConnectToNCCL();
+  const int rc = RunConnectToNCCL();
 
-  EXPECT_EQ(1, ret);
+  EXPECT_EQ(1, rc);
   EXPECT_EQ(1, resolve.calls);
   EXPECT_EQ(kOtherHost, node);
   EXPECT_EQ(kOtherPort, service);
@@ -1681,9 +1685,9 @@ TEST_F(RasClientMicrotest, ConnectToNccl_SocketFailsOnFirstEntry_SkipsToNextAddr
     return -1;
   });
 
-  const int ret = RunConnectToNCCL();
+  const int rc = RunConnectToNCCL();
 
-  EXPECT_EQ(1, ret);
+  EXPECT_EQ(1, rc);
   EXPECT_EQ(2, sockHook.calls);
   EXPECT_EQ(101, sock);
   ASSERT_EQ(1u, connectPorts.size());
@@ -1712,9 +1716,9 @@ TEST_F(RasClientMicrotest, ConnectToNccl_MiddleEntryAccepts_BreaksWithThatEntrys
     return -1;
   });
 
-  const int ret = RunConnectToNCCL();
+  const int rc = RunConnectToNCCL();
 
-  EXPECT_EQ(1, ret);  // the handshake EOF, not the walk, is what fails here
+  EXPECT_EQ(1, rc);  // the handshake EOF, not the walk, is what fails here
   EXPECT_EQ(201, sock);
   ASSERT_EQ(2u, socketCalls.size());
   for (const SocketCall& c : socketCalls) {
@@ -1746,9 +1750,9 @@ TEST_F(RasClientMicrotest, ConnectToNccl_AllEntriesRefused_WalkExhaustsAndCloses
   FdSequence fds(300);
   ScopedHook sockHook(g_socket, [&fds](int, int, int) { return fds(); });
 
-  const int ret = RunConnectToNCCL();
+  const int rc = RunConnectToNCCL();
 
-  EXPECT_EQ(1, ret);
+  EXPECT_EQ(1, rc);
   EXPECT_EQ(-1, sock);
   EXPECT_EQ(3, sockHook.calls);
   EXPECT_EQ(std::vector<int>({300, 301, 302}), fds.issued);
@@ -1765,9 +1769,9 @@ TEST_F(RasClientMicrotest, ConnectToNccl_TimeoutZero_SkipsBothSocketTimeoutOptio
   ScopedHook sockHook(g_socket, [](int, int, int) { return 330; });
   ScopedHook optHook(g_setsockopt, [](int, int, int, const void*, socklen_t) { return 0; });
 
-  const int ret = RunConnectToNCCL();
+  const int rc = RunConnectToNCCL();
 
-  EXPECT_EQ(1, ret);
+  EXPECT_EQ(1, rc);
   EXPECT_EQ(0, optHook.calls);
   EXPECT_EQ(1, sockHook.calls);
   EXPECT_EQ(std::vector<int>({330}), g_closedFds);
@@ -1783,9 +1787,9 @@ TEST_F(RasClientMicrotest, ConnectToNccl_TimeoutEnabled_SetsSendThenReceiveTimeo
   ScopedHook sockHook(g_socket, [](int, int, int) { return 340; });
   ScopedHook optHook(g_setsockopt, RecordingSetsockopt(&opts));
 
-  const int ret = RunConnectToNCCL();
+  const int rc = RunConnectToNCCL();
 
-  EXPECT_EQ(1, ret);
+  EXPECT_EQ(1, rc);
   ASSERT_EQ(2u, opts.size());
   EXPECT_EQ(SO_SNDTIMEO, opts[0].optname);
   EXPECT_EQ(SO_RCVTIMEO, opts[1].optname);
@@ -1809,9 +1813,9 @@ TEST_F(RasClientMicrotest, ConnectToNccl_SendTimeoutOptionFails_SkipsReceiveOpti
   });
   ScopedHook connectHook(g_connect, [](int, const struct sockaddr*, socklen_t) { return 0; });
 
-  const int ret = RunConnectToNCCL();
+  const int rc = RunConnectToNCCL();
 
-  EXPECT_EQ(1, ret);
+  EXPECT_EQ(1, rc);
   EXPECT_EQ(1, optHook.calls);
   EXPECT_EQ(1, connectHook.calls);
   EXPECT_EQ(350, sock);
@@ -1837,9 +1841,9 @@ TEST_F(RasClientMicrotest, ConnectToNccl_ReceiveTimeoutOptionFails_ReportsAfterB
     return -1;
   });
 
-  const int ret = RunConnectToNCCL();
+  const int rc = RunConnectToNCCL();
 
-  EXPECT_EQ(1, ret);
+  EXPECT_EQ(1, rc);
   EXPECT_EQ(2, optHook.calls);
   EXPECT_EQ(1, connectHook.calls);
   EXPECT_EQ(std::vector<int>({360}), g_closedFds);
@@ -1869,9 +1873,9 @@ TEST_F(RasClientMicrotest, ConnectToNccl_ConnectFails_QueriesNumericHostAndServi
   });
   ScopedHook sockHook(g_socket, [](int, int, int) { return 370; });
 
-  const int ret = RunConnectToNCCL();
+  const int rc = RunConnectToNCCL();
 
-  EXPECT_EQ(1, ret);
+  EXPECT_EQ(1, rc);
   EXPECT_EQ(1, nameHook.calls);
   EXPECT_EQ(NI_NUMERICHOST | NI_NUMERICSERV, flags);
   EXPECT_EQ(sizeof(struct sockaddr_in), salen);
@@ -1891,9 +1895,9 @@ TEST_F(RasClientMicrotest, ConnectToNccl_GetnameinfoFailsOnEveryEntry_WalkStillV
     return EAI_FAMILY;
   });
 
-  const int ret = RunConnectToNCCL();
+  const int rc = RunConnectToNCCL();
 
-  EXPECT_EQ(1, ret);
+  EXPECT_EQ(1, rc);
   EXPECT_EQ(3, nameHook.calls);
   EXPECT_EQ(std::vector<int>({380, 381, 382}), fds.issued);
   EXPECT_EQ(std::vector<int>({380, 381, 382}), g_closedFds);
@@ -1924,9 +1928,9 @@ TEST_F(RasClientMicrotest, ConnectToNccl_WalkExhausted_FreesTheHeadOfTheResolved
     }
   });
 
-  const int ret = RunConnectToNCCL();
+  const int rc = RunConnectToNCCL();
 
-  EXPECT_EQ(1, ret);
+  EXPECT_EQ(1, rc);
   EXPECT_EQ(1, freeHook.calls);
   EXPECT_FALSE(freedNull);
   EXPECT_EQ(kEntryPort0, freedHeadPort);
@@ -1964,24 +1968,28 @@ void ExpectClosedExactlyOnce(int fd) {
 // The banner check is one strncasecmp over 16 bytes plus a strtol; the version compare only decides whether a warning
 // is printed, never whether the handshake succeeds. So every accepted banner leaves the same state. One table per side.
 TEST_F(RasClientMicrotest, ConnectHandshake_AcceptedBanners_ReturnZeroAndLeaveTheSocketOpen) {
-  for (const char* banner : {"SERVER PROTOCOL 2\n",    // exact match, no warning
-                             "server protocol 2\n",    // strncasecmp folds case
-                             "SERVER PROTOCOL 7\n",    // version mismatch: warns, does not abort
-                             "SERVER PROTOCOL abc\n",  // strtol converts nothing -> 0, same warning
-                             "SERVER PROTOCOL 0x2\n"}) {  // base 10 stops at 'x', so also 0
+  const struct { const char* banner; bool expectWarning; } cases[] = {
+      {"SERVER PROTOCOL 2\n", false},    // exact match, no warning
+      {"server protocol 2\n", false},    // strncasecmp folds case
+      {"SERVER PROTOCOL 7\n", true},     // version mismatch: warns, does not abort
+      {"SERVER PROTOCOL abc\n", true},   // strtol converts nothing -> 0, same warning
+      {"SERVER PROTOCOL 0x2\n", true},   // base 10 stops at 'x', so also 0
+  };
+  for (const auto& c : cases) {
     ResetLibcFakes();
     ResetRasClientGlobals();
-    ScriptReadData(banner);
+    ScriptReadData(c.banner);
 
-    const int ret = RunConnectToNCCL();
+    const int rc = RunConnectToNCCL();
 
-    EXPECT_EQ(0, ret) << banner;
-    EXPECT_EQ(kClientHello, g_writtenData) << banner;
-    EXPECT_EQ(std::vector<int>({kSocketFd}), g_writtenFds) << banner;
-    EXPECT_EQ(std::vector<int>({kSocketFd}), g_readFds) << banner;
-    EXPECT_EQ(kSocketFd, sock) << banner;
-    EXPECT_TRUE(g_closedFds.empty()) << banner;  // not the `fail:` arm
+    EXPECT_EQ(0, rc) << c.banner;
+    EXPECT_EQ(kClientHello, g_writtenData) << c.banner;
+    EXPECT_EQ(std::vector<int>({kSocketFd}), g_writtenFds) << c.banner;
+    EXPECT_EQ(std::vector<int>({kSocketFd}), g_readFds) << c.banner;
+    EXPECT_EQ(kSocketFd, sock) << c.banner;
+    EXPECT_TRUE(g_closedFds.empty()) << c.banner;  // not the `fail:` arm
     ExpectPerrors({});
+    EXPECT_EQ(c.expectWarning ? std::vector<FILE*>{stderr} : std::vector<FILE*>{}, g_fprintfCalls) << c.banner;
   }
 }
 
@@ -1992,9 +2000,9 @@ TEST_F(RasClientMicrotest, ConnectHandshake_BannerSplitAcrossTwoReads_WaitsForTh
   ScriptReadData("SERVER PROTOCOL ");
   ScriptReadData("2\n");
 
-  const int ret = RunConnectToNCCL();
+  const int rc = RunConnectToNCCL();
 
-  EXPECT_EQ(0, ret);
+  EXPECT_EQ(0, rc);
   EXPECT_EQ(2u, g_readScriptPos);
   EXPECT_EQ(kClientHello, g_writtenData);
   EXPECT_EQ(kSocketFd, sock);
@@ -2012,12 +2020,13 @@ TEST_F(RasClientMicrotest, ConnectHandshake_RejectedBanners_ReturnOneAndCloseThe
     ResetRasClientGlobals();
     if (*banner != '\0') ScriptReadData(banner);
 
-    const int ret = RunConnectToNCCL();
+    const int rc = RunConnectToNCCL();
 
-    EXPECT_EQ(1, ret) << banner;
+    EXPECT_EQ(1, rc) << banner;
     EXPECT_EQ(kClientHello, g_writtenData) << banner;  // the write arm ran; only the reply is bad
     ExpectClosedExactlyOnce(kSocketFd);
     ExpectPerrors({});
+    EXPECT_EQ(std::vector<FILE*>{stderr}, g_fprintfCalls) << banner;
   }
 }
 
@@ -2026,9 +2035,9 @@ TEST_F(RasClientMicrotest, ConnectHandshake_RejectedBanners_ReturnOneAndCloseThe
 TEST_F(RasClientMicrotest, ConnectHandshake_WriteFailsWithEio_PerrorsAndFails) {
   ScopedHook writeHook(g_write, FailingWrite(EIO));
 
-  const int ret = RunConnectToNCCL();
+  const int rc = RunConnectToNCCL();
 
-  EXPECT_EQ(1, ret);
+  EXPECT_EQ(1, rc);
   EXPECT_EQ(1, writeHook.calls);
   ExpectPerrors({EIO});
   ExpectClosedExactlyOnce(kSocketFd);
@@ -2039,9 +2048,9 @@ TEST_F(RasClientMicrotest, ConnectHandshake_WriteFailsWithEio_PerrorsAndFails) {
 TEST_F(RasClientMicrotest, ConnectHandshake_ReadFailsWithEio_PerrorsAndFails) {
   ScriptRead(-1, EIO, "");
 
-  const int ret = RunConnectToNCCL();
+  const int rc = RunConnectToNCCL();
 
-  EXPECT_EQ(1, ret);
+  EXPECT_EQ(1, rc);
   EXPECT_EQ(kClientHello, g_writtenData);
   ExpectPerrors({EIO});
   ExpectClosedExactlyOnce(kSocketFd);
@@ -2067,9 +2076,9 @@ TEST_F(RasClientMicrotest, ConnectHandshake_WriteFailsWithEagainOnce_RetriesOnce
     return static_cast<ssize_t>(count);
   });
 
-  const int ret = RunConnectToNCCL();
+  const int rc = RunConnectToNCCL();
 
-  EXPECT_EQ(0, ret);
+  EXPECT_EQ(0, rc);
   EXPECT_EQ(2, writeHook.calls);
   EXPECT_EQ(2, connectHook.calls);         // the retry re-ran the whole resolve/connect walk
   EXPECT_EQ(kClientHello, g_writtenData);  // only the second, successful write reached the wire
@@ -2085,9 +2094,9 @@ TEST_F(RasClientMicrotest, ConnectHandshake_ReadFailsWithEagainOnce_RetriesOnceT
   ScriptReadData("SERVER PROTOCOL 2\n");
   ScopedHook connectHook(g_connect, [](int, const struct sockaddr*, socklen_t) { return 0; });
 
-  const int ret = RunConnectToNCCL();
+  const int rc = RunConnectToNCCL();
 
-  EXPECT_EQ(0, ret);
+  EXPECT_EQ(0, rc);
   EXPECT_EQ(2, connectHook.calls);
   EXPECT_EQ(std::string(kClientHello) + kClientHello, g_writtenData);
   EXPECT_EQ(kSocketFd, sock);
@@ -2400,6 +2409,7 @@ TEST_F(RasClientMicrotest, ConnectTimeout_RejectedReplies_CloseTheSocketOnceAndR
     EXPECT_EQ(kSocketFd, g_closedFds[0]) << reply;
     EXPECT_EQ(1, g_freeaddrinfoCalls) << reply;  // fail: sees addrInfo already nulled
     ExpectPerrors({});
+    EXPECT_EQ(std::vector<FILE*>{stderr}, g_fprintfCalls) << reply;
   }
 }
 
@@ -2562,6 +2572,7 @@ TEST_F(RasClientMicrotest, MonitorEvents_AcceptedActivationReplies_ReturnZeroAnd
     EXPECT_EQ(c.leftover, g_stdoutData) << c.reply;
     if (*c.leftover != '\0') {
       // g_stdoutData alone cannot tell stdout from stderr, so pin the stream the unit actually chose.
+      ASSERT_FALSE(g_fwriteCalls.empty());
       EXPECT_EQ(stdout, g_fwriteCalls.back().stream) << c.reply;
     }
   }
@@ -2784,9 +2795,7 @@ TEST_F(RasClientMicrotest, MonitorEvents_LoopFwriteShort_ReportsFwriteFailureAft
   ScriptReadData("bb\n");
 
   int rc = -1;
-  auto baseRead = g_read;
   auto baseFwrite = g_fwrite;
-  ScopedHook readHook(g_read, [baseRead](int fd, void* buf, size_t n) { return baseRead(fd, buf, n); });
   ScopedHook fwriteHook(g_fwrite, [baseFwrite](const void* p, size_t size, size_t nmemb, FILE* f) -> size_t {
     if (g_fwriteCalls.size() == 1) {                    // the second chunk is the one that short-writes
       g_fwriteCalls.push_back(MicroFwriteCall{size, nmemb, f});
@@ -2819,6 +2828,7 @@ TEST_F(RasClientMicrotest, MonitorEvents_LoopFflushFails_ReportsPerrorAndReturns
   EXPECT_EQ(1, rc);
   ExpectPerrors({ENOSPC});
   EXPECT_EQ("data1\n", g_stdoutData);
+  ASSERT_FALSE(g_fwriteCalls.empty());
   EXPECT_EQ(stdout, g_fwriteCalls.back().stream);
   EXPECT_EQ(2u, g_readFds.size());
   EXPECT_EQ(1, fflushHook.calls);

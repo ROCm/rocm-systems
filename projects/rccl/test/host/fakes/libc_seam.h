@@ -54,7 +54,7 @@ size_t micro_fwrite(const void*, size_t, size_t, FILE*);
 int micro_fflush(FILE*);
 void micro_perror(const char*);
 void micro_exit(int) __attribute__((noreturn));
-int micro_fprintf(FILE*, const char*, ...);
+int micro_fprintf(FILE*, const char*, ...) __attribute__((format(printf, 2, 3)));
 }  // extern "C"
 
 #define write micro_write
