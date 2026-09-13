@@ -44,6 +44,8 @@
 #define HSA_RUNTIME_CORE_INC_AMD_XDNA_DRIVER_H_
 
 #include <memory>
+#include <string>
+#include <vector>
 
 #include "core/inc/amd_aie_agent.h"
 #include "core/inc/driver.h"
