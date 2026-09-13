@@ -2115,6 +2115,111 @@
         }
       ]
     },
+    "unit_tests_amdsmi": {
+      "is_gtest": true,
+      "binary": "rccl-UnitTestsAmdSmi",
+      "num_ranks": 1,
+      "num_nodes": 1,
+      "num_gpus": 1,
+      "timeout": 180,
+      "tests": [
+        {
+          "name": "AmdSmi_AllTests",
+          "description": "All amdsmi_wrap fabric and wrapper tests",
+          "test_filter": "*"
+        }
+      ]
+    },
+    "unit_tests_dev_runtime": {
+      "is_gtest": true,
+      "binary": "rccl-UnitTestsDevRuntime",
+      "num_ranks": 1,
+      "num_nodes": 1,
+      "num_gpus": 1,
+      "timeout": 180,
+      "tests": [
+        {
+          "name": "DevRuntime_AllTests",
+          "description": "All host micro-tests for src/dev_runtime.cc",
+          "test_filter": "*"
+        }
+      ]
+    },
+    "unit_tests_gdr": {
+      "is_gtest": true,
+      "binary": "rccl-UnitTestsGdr",
+      "num_ranks": 1,
+      "num_nodes": 1,
+      "num_gpus": 1,
+      "timeout": 120,
+      "tests": [
+        {
+          "name": "Gdr_AllTests",
+          "description": "All net_ib peer-memory detection tests",
+          "test_filter": "*"
+        }
+      ]
+    },
+    "unit_tests_gin_sdma_policy": {
+      "is_gtest": true,
+      "binary": "rccl-UnitTestsGinSdmaPolicy",
+      "num_ranks": 1,
+      "num_nodes": 1,
+      "num_gpus": 1,
+      "timeout": 120,
+      "tests": [
+        {
+          "name": "GinSdmaPolicy_AllTests",
+          "description": "All GIN-SDMA AllReduce/put policy unit tests",
+          "test_filter": "*"
+        }
+      ]
+    },
+    "unit_tests_gin_sdma_allgather_policy": {
+      "is_gtest": true,
+      "binary": "rccl-UnitTestsGinSdmaAllGatherPolicy",
+      "num_ranks": 1,
+      "num_nodes": 1,
+      "num_gpus": 1,
+      "timeout": 120,
+      "tests": [
+        {
+          "name": "GinSdmaAllGatherPolicy_AllTests",
+          "description": "All GIN-SDMA AllGather policy unit tests",
+          "test_filter": "*"
+        }
+      ]
+    },
+    "unit_tests_gin_sdma_broadcast_policy": {
+      "is_gtest": true,
+      "binary": "rccl-UnitTestsGinSdmaBroadcastPolicy",
+      "num_ranks": 1,
+      "num_nodes": 1,
+      "num_gpus": 1,
+      "timeout": 120,
+      "tests": [
+        {
+          "name": "GinSdmaBroadcastPolicy_AllTests",
+          "description": "All GIN-SDMA Broadcast policy unit tests",
+          "test_filter": "*"
+        }
+      ]
+    },
+    "unit_tests_gin_sdma_allgather_gpu": {
+      "is_gtest": true,
+      "binary": "rccl-UnitTestsGinSdmaAllGatherGpu",
+      "num_ranks": 1,
+      "num_nodes": 1,
+      "num_gpus": 1,
+      "timeout": 180,
+      "tests": [
+        {
+          "name": "GinSdmaAllGatherGpu_AllTests",
+          "description": "All GIN-SDMA AllGather GPU unit tests",
+          "test_filter": "*"
+        }
+      ]
+    },
     "implicit_launch_order": {
       "extends": "default",
       "is_gtest": true,
@@ -6043,6 +6148,48 @@
       "name": "AltRsmi Tests - Complete Suite",
       "description": "All Alternative RSMI tests using public API only",
       "config": "alt_rsmi_tests",
+      "enabled": true
+    },
+    {
+      "name": "Unit Tests - AmdSmi",
+      "description": "All rccl-UnitTestsAmdSmi cases",
+      "config": "unit_tests_amdsmi",
+      "enabled": true
+    },
+    {
+      "name": "Unit Tests - DevRuntime",
+      "description": "All rccl-UnitTestsDevRuntime cases",
+      "config": "unit_tests_dev_runtime",
+      "enabled": true
+    },
+    {
+      "name": "Unit Tests - GDR peer memory",
+      "description": "All rccl-UnitTestsGdr cases",
+      "config": "unit_tests_gdr",
+      "enabled": true
+    },
+    {
+      "name": "Unit Tests - GIN-SDMA policy",
+      "description": "All rccl-UnitTestsGinSdmaPolicy cases",
+      "config": "unit_tests_gin_sdma_policy",
+      "enabled": true
+    },
+    {
+      "name": "Unit Tests - GIN-SDMA AllGather policy",
+      "description": "All rccl-UnitTestsGinSdmaAllGatherPolicy cases",
+      "config": "unit_tests_gin_sdma_allgather_policy",
+      "enabled": true
+    },
+    {
+      "name": "Unit Tests - GIN-SDMA Broadcast policy",
+      "description": "All rccl-UnitTestsGinSdmaBroadcastPolicy cases",
+      "config": "unit_tests_gin_sdma_broadcast_policy",
+      "enabled": true
+    },
+    {
+      "name": "Unit Tests - GIN-SDMA AllGather GPU",
+      "description": "All rccl-UnitTestsGinSdmaAllGatherGpu cases",
+      "config": "unit_tests_gin_sdma_allgather_gpu",
       "enabled": true
     },
     {
