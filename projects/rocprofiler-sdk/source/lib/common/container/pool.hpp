@@ -81,6 +81,7 @@ private:
     std::function<void()>  m_function      = nullptr;
     mutable std::mutex     m_pool_mtx      = {};
     pool_array_type        m_pool          = {};
+    std::atomic<size_type> m_pool_size     = 0;
     mutable std::mutex     m_available_mtx = {};
     std::queue<size_type>  m_available     = {};
     std::atomic<size_type> m_released      = 0;
@@ -106,6 +107,9 @@ pool<Tp>::pool(std::piecewise_construct_t, size_type count, FuncT&& ctor, Args&&
             _args_tuple);
         m_available.push(idx);
     }
+    // published last so that a reader of m_pool_size never sees an index whose object is not
+    // yet constructed. Invoked from the constructor and from acquire() under m_pool_mtx.
+    m_pool_size.store(m_pool.size(), std::memory_order_release);
 }}
 {
     m_function();
@@ -161,14 +165,14 @@ template <typename Tp>
 void
 pool<Tp>::release(size_type idx)
 {
-    if(idx < m_pool.size())
-    {
-        auto _write_lk = std::unique_lock<std::mutex>{m_available_mtx};
-        ROCP_FATAL_IF(m_pool.at(idx).in_use())
-            << fmt::format("Pool object at index {} was expected to be not in use", idx);
-        m_available.push(idx);
-        m_released++;
-    }
+    // Runs on the HSA async signal handler threads while acquire() may be growing m_pool, whose
+    // chunk index reallocates; and clear() calls in here already holding m_pool_mtx, so that lock
+    // cannot be taken. Hence m_pool is not touched.
+    if(idx >= m_pool_size.load(std::memory_order_acquire)) return;
+
+    auto _write_lk = std::unique_lock<std::mutex>{m_available_mtx};
+    m_available.push(idx);
+    m_released++;
 }
 
 // get an object from the pool. if all objects are in use, a new one will be created and added to
@@ -216,6 +220,7 @@ pool<Tp>::clear(FuncT&& func)
     while(!m_available.empty())
         m_available.pop();
     m_pool = pool_array_type{};
+    m_pool_size.store(0, std::memory_order_release);
     m_released.store(0);
     m_reused.store(0);
     m_new_batch.store(0);

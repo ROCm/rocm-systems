@@ -11,6 +11,7 @@ set(common_sources
     md5sum.cpp
     mpl.cpp
     parse.cpp
+    pool.cpp
     regex.cpp
     sha256.cpp
     string_entry.cpp
