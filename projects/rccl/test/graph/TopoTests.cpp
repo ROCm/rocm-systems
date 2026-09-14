@@ -11,6 +11,7 @@
 #include "graph/xml.h"
 #include "gtest/gtest.h"
 
+#include <algorithm>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
@@ -207,6 +208,33 @@ protected:
     // ncclTopoGetSystemFromXml() leaves netGdrLevel zeroed; initTransportsRank() is what
     // arms the "use the default level" sentinel, so do the same before computing paths.
     if (built) built->netGdrLevel = -2;
+    return built;
+  }
+
+  // One rail of a rail-optimised node: a GPU and a NIC on separate legs of their own PCIe switch,
+  // which puts a GPU at PATH_PXB from the NIC of its rail and at PATH_PHB from any other one.
+  void addRail(struct ncclXmlNode* cpu, int rail) {
+    const int busBase = 0x0b + rail * 0x10;
+    char switchBus[32], gpuLegBus[32], nicLegBus[32], gpuBus[32], nicBus[32];
+    snprintf(switchBus, sizeof(switchBus), "0000:%02x:00.0", busBase);
+    snprintf(gpuLegBus, sizeof(gpuLegBus), "0000:%02x:01.0", busBase);
+    snprintf(nicLegBus, sizeof(nicLegBus), "0000:%02x:02.0", busBase);
+    snprintf(gpuBus, sizeof(gpuBus), "0000:%02x:00.0", busBase + 1);
+    snprintf(nicBus, sizeof(nicBus), "0000:%02x:00.0", busBase + 2);
+
+    struct ncclXmlNode* pciSwitch = addPciBridge(cpu, switchBus);
+    addGpuPci(addPciBridge(pciSwitch, gpuLegBus), gpuBus, "gfx942", /*rank=*/rail, /*dev=*/rail);
+    addNic(addPciBridge(pciSwitch, nicLegBus), nicBus, /*dev=*/rail);
+  }
+
+  // netGdrLevel has to carry the sentinel initTransportsRank() arms before the paths are computed.
+  // Without it GDR is refused and every rail-local GPU<->NET path is diverted through the CPU.
+  struct ncclTopoSystem* buildSystemWithPaths(uint64_t host) {
+    struct ncclTopoSystem* built = nullptr;
+    EXPECT_EQ(ncclTopoGetSystemFromXml(xml, &built, host), ncclSuccess);
+    if (built == nullptr) return nullptr;
+    built->netGdrLevel = -2;
+    EXPECT_EQ(ncclTopoComputePaths(built, nullptr), ncclSuccess);
     return built;
   }
 
@@ -628,6 +656,53 @@ TEST_F(TopoTest, CheckGdr_NonMloPartGpuStillUsesOwnPath) {
   gpu->paths[NET][0].type = PATH_PHB;
   ASSERT_EQ(ncclTopoCheckGdr(built, gpu->gpu.rank, netId, /*read=*/0, &mode), ncclSuccess);
   EXPECT_EQ(mode, ncclTopoGdrModeDisable);
+
+  ncclTopoFree(built);
+}
+
+// The ring search caps the GPU-to-NIC path type it accepts with this helper (ROCM-30906), so on a
+// rail-optimised node the answer has to be the switch-local NIC and not the NIC of another rail.
+TEST_F(TopoTest, GpuMaxLocalNetPath_RailSystemStopsAtTheLocalNic) {
+  const uint64_t host = 0xe0;
+  struct ncclXmlNode* cpu = addSystemCpu(host);
+  addRail(cpu, /*rail=*/0);
+  addRail(cpu, /*rail=*/1);
+
+  struct ncclTopoSystem* built = buildSystemWithPaths(host);
+  ASSERT_NE(built, nullptr);
+  ASSERT_EQ(built->nodes[GPU].count, 2);
+  ASSERT_EQ(built->nodes[NET].count, 2);
+
+  for (int g = 0; g < built->nodes[GPU].count; g++) {
+    struct ncclTopoLinkList* paths = built->nodes[GPU].nodes[g].paths[NET];
+    SCOPED_TRACE(testing::Message() << "gpu " << g);
+    EXPECT_EQ(std::min(paths[0].type, paths[1].type), PATH_PXB);
+    EXPECT_EQ(std::max(paths[0].type, paths[1].type), PATH_PHB);
+  }
+
+  int maxPath = PATH_DIS;
+  ASSERT_EQ(ncclTopoGetGpuMaxLocalNetPath(built, &maxPath), ncclSuccess);
+  EXPECT_EQ(maxPath, PATH_PXB);
+
+  ncclTopoFree(built);
+}
+
+// The cap holds for the whole node, so the GPU with the worst of the local NICs sets it: here one
+// GPU shares a switch with a NIC and the other reaches both NICs across the CPU only.
+TEST_F(TopoTest, GpuMaxLocalNetPath_GpuOffTheRailsWidensTheBound) {
+  const uint64_t host = 0xe1;
+  struct ncclXmlNode* cpu = addSystemCpu(host);
+  addRail(cpu, /*rail=*/0);
+  addGpuPci(cpu, "0000:1c:00.0", "gfx942", /*rank=*/1, /*dev=*/1);
+
+  struct ncclTopoSystem* built = buildSystemWithPaths(host);
+  ASSERT_NE(built, nullptr);
+  ASSERT_EQ(built->nodes[GPU].count, 2);
+  ASSERT_EQ(built->nodes[NET].count, 1);
+
+  int maxPath = PATH_DIS;
+  ASSERT_EQ(ncclTopoGetGpuMaxLocalNetPath(built, &maxPath), ncclSuccess);
+  EXPECT_EQ(maxPath, PATH_PHB);
 
   ncclTopoFree(built);
 }
