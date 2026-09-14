@@ -49,7 +49,7 @@ For example, this table indicates that ``/``, ``/home``, and ``/data`` are eligi
 
 .. note::
 
-   For ``lvm`` backing, ``ais-check`` walks the device-mapper stack and reports
+   For ``lvm`` backing, ``ais-check`` follows the device-mapper stack and reports
    the volume as capable only when every layer is an LVM target and all of the
    underlying physical volumes are local NVMe.
 
