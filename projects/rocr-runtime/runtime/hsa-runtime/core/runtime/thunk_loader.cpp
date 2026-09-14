@@ -427,6 +427,11 @@ std::string GetAdjacentThunkLibraryPath(const std::string& library_name) {
       HSAKMT_PFN(hsaKmtQueueRingDoorbell) = (HSAKMT_DEF(hsaKmtQueueRingDoorbell)*)rocr::os::GetExportAddress(thunk_handle, "hsaKmtQueueRingDoorbell");
       if (HSAKMT_PFN(hsaKmtQueueRingDoorbell) == nullptr) goto LOAD_ERROR;
 
+      // Optional: only the DXG thunk exports these. Both call sites null-check, so a thunk
+      // without the native SDMA user queue just runs the legacy path.
+      HSAKMT_PFN(hsaKmtGetSdmaUserQueueInfo) = (HSAKMT_DEF(hsaKmtGetSdmaUserQueueInfo)*)rocr::os::GetExportAddress(thunk_handle, "hsaKmtGetSdmaUserQueueInfo");
+      HSAKMT_PFN(hsaKmtSetSdmaUserQueueConfig) = (HSAKMT_DEF(hsaKmtSetSdmaUserQueueConfig)*)rocr::os::GetExportAddress(thunk_handle, "hsaKmtSetSdmaUserQueueConfig");
+
       DRM_PFN(amdgpu_device_initialize) = (DRM_DEF(amdgpu_device_initialize)*)rocr::os::GetExportAddress(thunk_handle, "amdgpu_device_initialize");
       if (DRM_PFN(amdgpu_device_initialize) == nullptr) goto LOAD_ERROR;
 

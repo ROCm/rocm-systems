@@ -141,13 +141,6 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtCreateQueueV2(HSAuint32 NodeId,
     QueueResource->Queue_DoorBell_aql = queue_->GetDoorbellPtr();
     QueueResource->Queue_write_ptr_aql = queue_->GetRingWptr();
     QueueResource->Queue_read_ptr_aql = queue_->GetRingRptr();
-    // Native SDMA user queue exposes the HwQueue progress-fence VA so ROCr can
-    // emit a matching FENCE packet; 0 for the SWS-thread path.
-    QueueResource->SdmaProgressFenceVA = queue_->hwqueue_progress_fence_va_;
-    // Tell the producer how many epilogue bytes RingDoorbell will append per submit
-    // so it reserves matching headroom. Only the native HwQueue path appends them.
-    QueueResource->SdmaHwQueueEpilogueBytes =
-        queue_->IsNativeSdma() ? wsl::thunk::SDMAQueue::kHwQueueEpilogueBytes : 0;
   } break;
   default:
     assert(false);
@@ -267,10 +260,33 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtQueueRingDoorbell(HSA_QUEUEID QueueId, uint64_t va
   if (!queue_)
     return HSAKMT_STATUS_INVALID_PARAMETER;
 
-  fprintf(stderr, "[sdma] hsaKmtQueueRingDoorbell QueueId=%p value=0x%llx\n",
-          (void*)QueueId, (unsigned long long)value);
-  fflush(stderr);
   queue_->RingDoorbell(value);
+
+  return HSAKMT_STATUS_SUCCESS;
+}
+
+HSAKMT_STATUS HSAKMTAPI hsaKmtGetSdmaUserQueueInfo(HSA_QUEUEID QueueId,
+                                                   HsaSdmaUserQueueInfo *Info) {
+  CHECK_DXG_OPEN();
+
+  auto queue_ = reinterpret_cast<wsl::thunk::WDDMQueue *>(QueueId);
+  if (!queue_ || !Info)
+    return HSAKMT_STATUS_INVALID_PARAMETER;
+
+  memset(Info, 0, sizeof(*Info));
+
+  // Only a native SDMA user queue has a ring epilogue; every other queue kind (compute,
+  // or SDMA on the legacy SWS translation thread) reports zero, which leaves the
+  // producer's reservation arithmetic a no-op.
+  if (queue_->IsNativeSdma())
+    Info->EpilogueBytes = wsl::thunk::SDMAQueue::kHwQueueEpilogueBytes;
+
+  return HSAKMT_STATUS_SUCCESS;
+}
+
+HSAKMT_STATUS HSAKMTAPI hsaKmtSetSdmaUserQueueConfig(HsaSdmaUserQueueConfig Config) {
+  dxg_runtime->sdma_user_queue_enabled_ = Config.ui32.NativeUserQueue != 0;
+  dxg_runtime->sdma_user_queue_gpu_poll_ = Config.ui32.GpuPoll != 0;
   return HSAKMT_STATUS_SUCCESS;
 }
 

@@ -130,6 +130,19 @@ class Flag {
     var = os::GetEnvVar("HSA_ENABLE_SDMA");
     enable_sdma_ = (var == "0") ? SDMA_DISABLE : ((var == "1") ? SDMA_ENABLE : SDMA_DEFAULT);
 
+    // Native WDDM SDMA user queue. Native Windows takes it by default; a Linux build only ever
+    // reaches a WDDM HwQueue under WSL DXG, so there it must be asked for explicitly. Plain
+    // Linux/KFD has no such queue at all and Runtime::Load forces this off when DXG is absent.
+    var = os::GetEnvVar("HSA_ENABLE_SDMA_USER_QUEUE");
+#if defined(_WIN32)
+    enable_sdma_user_queue_ = (var != "0"); // Default to true
+#else
+    enable_sdma_user_queue_ = (var == "1"); // Default to false
+#endif
+
+    var = os::GetEnvVar("HSA_ENABLE_SDMA_USER_QUEUE_WITH_GPU_POLL");
+    enable_sdma_user_queue_with_gpu_poll_ = (var == "1");  // Default to false
+
     var = os::GetEnvVar("HSA_ENABLE_PEER_SDMA");
     enable_peer_sdma_ = (var == "0") ? SDMA_DISABLE : ((var == "1") ? SDMA_ENABLE : SDMA_DEFAULT);
 
@@ -440,6 +453,14 @@ class Flag {
 
   SDMA_OVERRIDE enable_sdma() const { return enable_sdma_; }
 
+  bool enable_sdma_user_queue() const { return enable_sdma_user_queue_; }
+
+  void disable_sdma_user_queue() { enable_sdma_user_queue_ = false; }
+
+  bool enable_sdma_user_queue_with_gpu_poll() const {
+    return enable_sdma_user_queue_with_gpu_poll_;
+  }
+
   SDMA_OVERRIDE enable_peer_sdma() const { return enable_peer_sdma_; }
 
   SDMA_OVERRIDE enable_sdma_gang() const { return enable_sdma_gang_; }
@@ -637,6 +658,8 @@ class Flag {
   SDMA_OVERRIDE sdma_multicast_ = SDMA_DEFAULT;
 
   SDMA_OVERRIDE enable_sdma_;
+  bool enable_sdma_user_queue_;
+  bool enable_sdma_user_queue_with_gpu_poll_;
   SDMA_OVERRIDE enable_peer_sdma_;
   SDMA_OVERRIDE enable_sdma_gang_;
   SDMA_OVERRIDE enable_sdma_copy_size_override_;
