@@ -90,9 +90,17 @@ def build_dfs(
             profiling_config.get("filter_blocks", []), arch
         )
 
-    # --membw-analysis asks for block 30, so keep it even when -b narrows.
-    if membw_analysis and user_metric_filter:
-        user_metric_filter = [*user_metric_filter, "30"]
+    # Block 30 renders alongside block 3 (Memory Chart).  Keep it in
+    # whichever filter is active so panel 3000 is not dropped.
+    membw_collected = profiling_config.get("membw_analysis", False)
+    block_3_visible = (
+        user_metric_filter is not None and "3" in user_metric_filter
+    ) or 300 in profile_panel_filter
+    if membw_analysis or (membw_collected and block_3_visible):
+        if user_metric_filter is not None:
+            user_metric_filter = [*user_metric_filter, "30"]
+        elif profile_panel_filter:
+            profile_panel_filter = {*profile_panel_filter, 3000}
 
     arch_configs.panel_configs = expand_placeholder_ranges(
         arch_configs.panel_configs, sys_info
