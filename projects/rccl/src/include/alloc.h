@@ -30,7 +30,10 @@ struct ncclComm;
 #include "cudawrap.h"
 #endif
 
-#if ROCM_VERSION >= 71200
+#if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
+#include <hip/hip_runtime.h>
+#include "rocmwrap.h"
+#elif defined(ROCM_VERSION) && ROCM_VERSION >= 71200
 #include <hip/hip_runtime.h>
 #include "rocmwrap.h"
 #endif
