@@ -1133,6 +1133,15 @@ bool WDDMDevice::CreateHwQueue(WDDMQueue *queue) {
   pr_err("[dbg] CreateHwQueue kind=%d aql=%d sdma=%d cmdbuf_addr=0x%" PRIx64 " cmdbuf_size=0x%" PRIx64 " schedid=%d engine=%d amdQueueT=0x%x\n",
          (int)kind, (int)IsAqlSupported(), (int)IsSdmaSupported(),
          queue->cmdbuf_addr, (uint64_t)queue->cmdbuf_size, dbg_schedid, (int)queue->queue_engine, (unsigned)resource);
+  // [aql-diag] TEMP: verify the IsAqlQueue bit actually present in the priv blob handed to the KMD.
+  // UMDKMDIF_CREATEHWQUEUE_PRIVATE_DATA layout (kdx_umd.h): Size@0, hUserQueue@4, UserQueueVA@8,
+  // HwQueueInfo(u32All)@16; HWQUEUEINFO.IsAqlQueue = bit 24. REMOVE before commit.
+  {
+    uint32_t blob_size = *reinterpret_cast<uint32_t*>(reinterpret_cast<char*>(priv_data) + 0);
+    uint32_t hwqi_u32  = *reinterpret_cast<uint32_t*>(reinterpret_cast<char*>(priv_data) + 16);
+    pr_err("[aql-diag] priv blob: Size=%u priv_size=%d HwQueueInfo.u32=0x%08x IsAqlQueue(bit24)=%d\n",
+           blob_size, priv_size, hwqi_u32, (int)((hwqi_u32 >> 24) & 1));
+  }
   NTSTATUS ret = DXCORE_CALL(D3DKMTCreateHwQueue(&createHwQueue));
   if (ret != STATUS_SUCCESS) {
     pr_err("fail %x kind=%d\n", ret, (int)kind);
@@ -1266,7 +1275,7 @@ bool WDDMDevice::SubmitToAqlQueue(WDDMQueue* queue, uint64_t command_addr, uint6
 // ================================================================================================
 bool WDDMDevice::SubmitToSdmaHwQueue(WDDMQueue* queue, uint64_t wptr_in_bytes) {
 #if defined(WIN32)
-  int priv_size = Wkmi::GetSdmaSubmitPrivDataSize();
+  static int priv_size = Wkmi::GetSdmaSubmitPrivDataSize();
   void* priv_data = alloca(priv_size);
   memset(priv_data, 0, priv_size);
   Wkmi::FillinSdmaSubmitPrivData(priv_data, wptr_in_bytes);
@@ -1276,8 +1285,9 @@ bool WDDMDevice::SubmitToSdmaHwQueue(WDDMQueue* queue, uint64_t wptr_in_bytes) {
   // fence_id was already incremented by RingDoorbell before appending the FENCE packet.
   uint64_t fence_id = queue->hwqueue_fence_id_;
   uint64_t sync_before = queue->sync_addr ? *queue->sync_addr : 0xDEADULL;
-  pr_err("[sdma] SubmitToSdmaHwQueue wptr=0x%" PRIx64 " fence_id=%" PRIu64 " hwqueue=0x%x sync_before=%" PRIu64 "\n",
-         wptr_in_bytes, fence_id, queue->queue, sync_before);
+  pr_err("[sdma] SubmitToSdmaHwQueue cmdbuf_addr=0x%" PRIx64 " wptr_in_bytes=0x%" PRIx64
+         " fence_id=%" PRIu64 " hwqueue=0x%x sync_before=%" PRIu64 "\n",
+         queue->cmdbuf_addr, wptr_in_bytes, fence_id, (unsigned)queue->queue, sync_before);
 
   // CommandBuffer/CommandLength MUST be non-zero: the KMD classifies a zero-length
   // submit as IFH (null-render) and, with modern null-render handling, SKIPS the

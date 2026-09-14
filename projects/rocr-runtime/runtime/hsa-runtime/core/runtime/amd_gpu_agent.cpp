@@ -2264,6 +2264,13 @@ hsa_status_t GpuAgent::DmaCopyRect(const hsa_pitched_ptr_t* dst, const hsa_dim3_
   }
 
   BlitSdmaBase* sdmaBlit = static_cast<BlitSdmaBase*>((*blit).get());
+
+  // Native SDMA HwQueue: completion is the HwQueue progress fence advancing, not the
+  // in-ring HSA signal write (the SDMA engine/KMD does not update out_signal here).
+  // Snapshot the fence before submit so we can wait for it to advance past this value.
+  volatile uint64_t* nfence = sdmaBlit->NativeSdmaProgressFence();
+  const uint64_t fence_before = nfence ? *nfence : 0;
+
   fprintf(stderr, "[dmacpy] DmaCopyRect calling SubmitCopyRectCommand out_signal_val=%lld\n",
           (long long)out_signal.LoadRelaxed());
   fflush(stderr);
@@ -2272,25 +2279,34 @@ hsa_status_t GpuAgent::DmaCopyRect(const hsa_pitched_ptr_t* dst, const hsa_dim3_
   fprintf(stderr, "[dmacpy] DmaCopyRect SubmitCopyRectCommand returned %d\n", (int)stat);
   fflush(stderr);
 
-  // Poll signal for 2 seconds to see if GPU decrement arrives.
-  for (int i = 0; i < 2000; i++) {
-    hsa_signal_value_t v = out_signal.LoadRelaxed();
-    if (v != 1 && v != 0) {
-      fprintf(stderr, "[dmacpy] signal changed after %d ms: val=%lld\n", i, (long long)v);
-      fflush(stderr);
-      break;
-    }
-    if (i % 200 == 0) {
-      fprintf(stderr, "[dmacpy] signal poll %d ms: val=%lld loc=%p\n",
-              i, (long long)v, out_signal.ValueLocation());
-      fflush(stderr);
-    } 
-    if (v==0) break;
+  if (nfence != nullptr) {
+    // Fence-based completion for the native SDMA path.
+    bool advanced = false;
+    for (int i = 0; i < 2000; i++) {
+      if (*nfence > fence_before) { advanced = true; break; }
 #ifdef _WIN32
-    Sleep(1);
+      Sleep(1);
 #else
-    usleep(1000);
+      usleep(1000);
 #endif
+    }
+    fprintf(stderr, "[dmacpy] native-fence completion: before=0x%llx after=0x%llx advanced=%d\n",
+            (unsigned long long)fence_before, (unsigned long long)*nfence, (int)advanced);
+    fflush(stderr);
+    // Release the HSA signal so higher layers observe completion. If the fence never
+    // advanced (ring not executed), leave the signal for the legacy path/diagnostics.
+    if (advanced) out_signal.StoreRelaxed(0);
+  } else {
+    // Legacy diagnostic: poll the signal for up to 2 seconds.
+    for (int i = 0; i < 2000; i++) {
+      hsa_signal_value_t v = out_signal.LoadRelaxed();
+      if (v == 0) break;
+#ifdef _WIN32
+      Sleep(1);
+#else
+      usleep(1000);
+#endif
+    }
   }
 
   return stat;

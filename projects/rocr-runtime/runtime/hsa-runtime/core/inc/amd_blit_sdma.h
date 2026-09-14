@@ -63,6 +63,10 @@ class BlitSdmaBase : public core::Blit {
   static const size_t kMaxSingleCopySize;
   static const size_t kMaxSingleFillSize;
   virtual bool isSDMA() const override { return true; }
+  // Native SDMA HwQueue (Windows/DXG) progress-fence CPU pointer, or nullptr when this
+  // blit is not a native SDMA HwQueue. On the native path completion is detected by this
+  // fence advancing (the SDMA engine/KMD does not update the in-ring HSA signal).
+  virtual volatile uint64_t* NativeSdmaProgressFence() const { return nullptr; }
   virtual hsa_status_t Initialize(const core::Agent& agent, bool use_xgmi,
                                   size_t linear_copy_size_override, int rec_engine) = 0;
   virtual hsa_status_t SubmitCopyRectCommand(const hsa_pitched_ptr_t* dst,
@@ -203,6 +207,12 @@ template <bool useGCR, bool scopeFields> class BlitSdma : public BlitSdmaBase {
   BlitSdma();
 
   virtual ~BlitSdma() override;
+
+  // Native SDMA HwQueue progress-fence CPU pointer (queue_rptr_ aliases it for the
+  // native path); nullptr otherwise. See BlitSdmaBase::NativeSdmaProgressFence.
+  volatile uint64_t* NativeSdmaProgressFence() const override {
+    return (is_dxg_ && queue_resource_.SdmaProgressFenceVA != 0) ? queue_rptr_ : nullptr;
+  }
 
   /// @brief Initialize a User Mode SDMA Queue object. Input parameters specify
   /// properties of queue being created.
@@ -385,6 +395,14 @@ template <bool useGCR, bool scopeFields> class BlitSdma : public BlitSdmaBase {
 
   /// @brief Build Hdp Flush command
   void BuildHdpFlushCommand(char* cmd_addr);
+
+  // Native SDMA user queue (DXG, AQL mode): emit one 64-byte SDMA_PKT_AQL_LINEAR_COPY
+  // for a linear copy. Sync (out_signal==nullptr): block on the HwQueue progress fence.
+  // Async (out_signal set): CPL_SIG_ADDR points at the signal; return immediately.
+  // Returns true if it handled the copy (native SDMA path), false to fall back to raw.
+  bool SubmitNativeAqlLinearCopy(void* dst, const void* src, size_t size,
+                                 core::Signal* out_signal = nullptr,
+                                 const std::vector<core::Signal*>& dep_signals = {});
 
   void BuildCopyCommand(char* cmd_addr, uint32_t num_copy_command, void* dst,
                         const void* src, size_t size);

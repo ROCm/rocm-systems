@@ -44,6 +44,7 @@
 
 #include <algorithm>
 #include <atomic>
+#include <chrono>
 #include <cmath>
 #include <cstring>
 #include <limits>
@@ -381,14 +382,38 @@ hsa_status_t BlitSdma<useGCR, scopeFields>::SubmitBlockingCommand(const void* cm
   // Mark signal as in use, guard against exception leaving the signal in an unusable state.
   completionSignal->StoreRelaxed(2);
   MAKE_SCOPE_GUARD([&]() { completionSignal->StoreRelaxed(0); });
-  lock.unlock();
+
+  // Native SDMA HwQueue completion is driven by the HwQueue progress fence, not the
+  // in-ring write to the HSA signal (the SDMA engine/KMD does not update out_signal on
+  // this path). For that path queue_rptr_ aliases the progress-fence CPU VA. Keep the
+  // submission serialized under the lock so the pre-submit fence snapshot is unambiguous.
+  const bool native_fence_completion =
+      is_dxg_ && queue_resource_.SdmaProgressFenceVA != 0 && queue_rptr_ != nullptr;
+  if (!native_fence_completion) lock.unlock();
 
   std::vector<core::Signal*> gang_signals(0);
+
+  const uint64_t fence_before = native_fence_completion ? *queue_rptr_ : 0;
 
   // Submit command and wait for completion
   hsa_status_t ret =
       SubmitCommand(cmd, cmd_size, size, std::vector<core::Signal*>(), *completionSignal,
                     gang_signals);
+
+  if (native_fence_completion) {
+    // Poll the progress fence past its pre-submit value == this submission completed.
+    bool fence_advanced = false;
+    for (long i = 0; i < 200000000L; ++i) {
+      if (*queue_rptr_ > fence_before) { fence_advanced = true; break; }
+      if ((i & 0xFFFF) == 0) os::YieldThread();
+    }
+    fprintf(stderr, "[blit] native-fence completion: before=0x%llx after=0x%llx advanced=%d\n",
+            (unsigned long long)fence_before, (unsigned long long)*queue_rptr_, (int)fence_advanced);
+    // Release the HSA signal so any higher-level waiter observes completion. If the fence
+    // never advanced (ring not executed), fall through to the legacy signal wait below.
+    if (fence_advanced) completionSignal->StoreRelaxed(1);
+  }
+
   completionSignal->WaitRelaxed(HSA_SIGNAL_CONDITION_EQ, 1, -1, HSA_WAIT_STATE_BLOCKED);
   return ret;
 }
@@ -1577,8 +1602,152 @@ hsa_status_t BlitSdma<useGCR, scopeFields>::SubmitBodies(
   return HSA_STATUS_SUCCESS;
 }
 
+// Native SDMA user queue (Windows/DXG, AQL_ENABLE=1): the ring must hold 64-byte
+// AQL-format packets, not a raw SDMA stream. Emit one SDMA_AQL_PKT_COPY_LINEAR
+// (16 dw / 64 B) per linear copy; libhsakmt's RingDoorbell appends the trailing
+// SDMA_PKT_FENCE_CONDITIONAL_INTERRUPT epilogue (TRAP ignored on gfx12xx), and
+// RETURN_ADDR points at that fence so the engine runs it in non-AQL context.
+// The header is an HSA AQL header: format = agent dispatch (4), op/subop = 0
+// (SDMA_OP_AQL_COPY). Completion is the packet's own COMPLETION_SIGNAL: the engine
+// decrements it when the copy retires, so both the synchronous and the asynchronous
+// caller wait on a signal. Synchronous callers have none of their own, so we borrow one
+// of the blit's pooled signals. Returns true if it handled the copy.
+template <bool useGCR, bool scopeFields>
+bool BlitSdma<useGCR, scopeFields>::SubmitNativeAqlLinearCopy(
+    void* dst, const void* src, size_t size,
+    core::Signal* out_signal, const std::vector<core::Signal*>& dep_signals) {
+  if (!(is_dxg_ && queue_resource_.SdmaProgressFenceVA != 0)) return false;
+  // Stage 2 only. The KMD creates the native SDMA user queue as an SDMA_AQL queue but
+  // deliberately leaves AQL_ENABLE clear in the SDMA MQD (KMD 2956d6f, "disable aql bit
+  // for sdma user queue": "For now AQL SDMA queue will still behave like a normal PM4
+  // SDMA queue under the hood. Meaning that we will only accept PM4 SDMA packets."), so
+  // the ring takes the ordinary SDMA command stream and an AQL packet would not be
+  // decoded. Stage 1 is that PM4-packet path on the user queue; AQL packet support lands
+  // in stage 2. Opt in with HSA_ENABLE_SDMA_AQL_PACKETS=1 once the KMD enables AQL_ENABLE.
+  static const bool aql_packets_enabled = []() {
+    const char* e = getenv("HSA_ENABLE_SDMA_AQL_PACKETS");
+    return e != nullptr && atoi(e) != 0;
+  }();
+  if (!aql_packets_enabled) return false;
+
+  // First increment: single AQL packet, no dependency waits. Fall back to the raw path
+  // otherwise. COUNT is [29:0] and 1-based, so one packet covers up to kMaxSize_.
+  if (!dep_signals.empty() || size == 0 || size > SDMA_AQL_PKT_COPY_LINEAR::kMaxSize_)
+    return false;
+
+  constexpr uint32_t kAqlPktBytes = sizeof(SDMA_AQL_PKT_COPY_LINEAR);
+  static_assert(kAqlPktBytes == 64, "AQL ring slots are fixed 64-byte packets");
+
+  // Borrow a pooled completion signal for the synchronous path, following the same
+  // protocol as SubmitBlockingCommand: take it at 0, arm it at 2, and let the engine's
+  // decrement take it to 1. lock_ is always acquired before reservation_lock_.
+  std::unique_lock<std::mutex> pool_lock;
+  core::Signal* completion = out_signal;
+  MAKE_SCOPE_GUARD([&]() {
+    if (out_signal == nullptr && completion != nullptr) completion->StoreRelaxed(0);
+  });
+  if (completion == nullptr) {
+    pool_lock = std::unique_lock<std::mutex>(lock_);
+    completion = parity_ ? signals_[0].get() : signals_[1].get();
+    parity_ ^= true;
+    completion->WaitRelaxed(HSA_SIGNAL_CONDITION_EQ, 0, -1, HSA_WAIT_STATE_BLOCKED);
+    completion->StoreRelaxed(2);
+  }
+
+  std::lock_guard<std::mutex> lock(reservation_lock_);
+
+  // Do NOT reach for atomic::Load here. On Windows core/util/atomic_helpers.h implements
+  // __atomic_load as InterlockedOr64(ptr, 0) - a read-modify-write, which needs the page
+  // to be writable. The HwQueue progress fence is KMD-owned and mapped read only, so an
+  // "atomic load" of it faults (confirmed: SIGSEGV on the same pointer this volatile read
+  // handles fine). An aligned 64-bit volatile read is single-copy atomic on x86-64 and is
+  // what the rest of this file uses for queue_rptr_.
+  const uint64_t fence_before = (queue_rptr_ != nullptr) ? *queue_rptr_ : 0;
+
+  uint64_t curr_index;
+  char* cmd = AcquireWriteAddress(kAqlPktBytes, curr_index);
+  if (cmd == nullptr) return false;
+
+  // Ring is mirrored system memory (CPU VA == GPU VA); the FENCE epilogue lands
+  // immediately after this 64-byte packet.
+  const uint64_t ring_gpu = reinterpret_cast<uint64_t>(queue_start_addr_);
+  const uint64_t ret_addr = ring_gpu + WrapIntoRing(curr_index + kAqlPktBytes);
+  // The field is named completion_signal, but the engine performs the same 64-bit atomic
+  // decrement the raw path builds with SDMA_PKT_ATOMIC, so it takes the address of
+  // amd_signal_t::value (handle + 8), not the signal handle. If the SDMA firmware instead
+  // follows the AQL packet-processor convention and applies the +8 itself, this is off by
+  // 8 and the diagnostic dump below shows the write landing at signal_base[2].
+  void* cpl_sig = completion->ValueLocation();
+
+  SDMA_AQL_PKT_COPY_LINEAR* packet = reinterpret_cast<SDMA_AQL_PKT_COPY_LINEAR*>(cmd);
+  memset(packet, 0, kAqlPktBytes);
+
+  // HSA AQL header. op/subop stay 0 (SDMA_OP_AQL_COPY) - they live in the reserved bits
+  // here, see SDMA_AQL_PKT_HEADER. System-scope acquire/release make the source visible
+  // to the engine and the destination plus completion-signal write visible to the host,
+  // matching what the raw path expresses through the per-address scope fields.
+  packet->HEADER_UNION.format = SDMA_AQL_HEADER_AGENT_DISPATCH;
+  packet->HEADER_UNION.barrier = 1;
+  packet->HEADER_UNION.acquire_fence_scope = SDMA_AQL_FENCE_SCOPE_SYSTEM;
+  packet->HEADER_UNION.release_fence_scope = SDMA_AQL_FENCE_SCOPE_SYSTEM;
+
+  packet->RETURN_ADDR_LO_UNION.return_addr_31_0 = static_cast<uint32_t>(ret_addr);
+  packet->RETURN_ADDR_HI_UNION.return_addr_63_32 = static_cast<uint32_t>(ret_addr >> 32);
+
+  packet->COUNT_UNION.count = static_cast<uint32_t>(size - 1); /* count is 1-based */
+
+  // PARAMETER_UNION (mall policies) left at 0: the firmware defs and the raw gfx12
+  // SDMA_PKT_COPY_LINEAR disagree on this DW's layout, and 0 is the default policy.
+
+  packet->SRC_ADDR_LO_UNION.src_addr_31_0 = ptrlow32(src);
+  packet->SRC_ADDR_HI_UNION.src_addr_63_32 = ptrhigh32(src);
+
+  packet->DST_ADDR_LO_UNION.dst_addr_31_0 = ptrlow32(dst);
+  packet->DST_ADDR_HI_UNION.dst_addr_63_32 = ptrhigh32(dst);
+
+  // Completion signal: the engine decrements this 64-bit location when the copy retires.
+  packet->COMPLETION_SIGNAL_LO_UNION.completion_signal_31_0 = ptrlow32(cpl_sig);
+  packet->COMPLETION_SIGNAL_HI_UNION.completion_signal_63_32 = ptrhigh32(cpl_sig);
+
+  fprintf(stderr, "[aql] LINEAR_COPY count=0x%zx src=%p dst=%p cpl_sig=%p ret_addr=0x%llx curr=0x%llx\n",
+          size, src, dst, cpl_sig, (unsigned long long)ret_addr, (unsigned long long)curr_index);
+
+  ReleaseWriteAddress(curr_index, kAqlPktBytes);
+
+  // Wait for the engine to decrement the completion signal. The synchronous caller has
+  // nothing else to wait on; the asynchronous caller will wait on the same signal itself,
+  // but we still watch it here so a signal that never arrives is reported rather than
+  // hanging silently one layer up. The HwQueue progress fence is sampled for diagnostics
+  // only - it is advanced by the OS scheduler and has been observed to move without the
+  // ring having been executed.
+  // volatile, not atomic::Load, for the same reason as the fence above - and because an
+  // InterlockedOr64 on the completion signal would dirty the very cache line we are
+  // asking whether the engine wrote. volatile keeps the compiler from hoisting the read
+  // out of the poll loop, which is all this needs: the reads are 8-byte aligned.
+  volatile int64_t* signal_base =
+      reinterpret_cast<volatile int64_t*>(static_cast<char*>(cpl_sig) - 8);
+  const int64_t value_before = signal_base[1];
+  const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+  bool signaled = false;
+  while (true) {
+    if (signal_base[1] != value_before) { signaled = true; break; }
+    if (std::chrono::steady_clock::now() >= deadline) break;
+    os::YieldThread();
+  }
+  fprintf(stderr,
+          "[aql] completion signal: signaled=%d before=%lld after=%lld "
+          "raw[kind,value,mailbox]=[0x%llx,0x%llx,0x%llx] fence before=0x%llx after=0x%llx\n",
+          (int)signaled, (long long)value_before, (long long)signal_base[1],
+          (unsigned long long)signal_base[0], (unsigned long long)signal_base[1],
+          (unsigned long long)signal_base[2], (unsigned long long)fence_before,
+          (unsigned long long)(queue_rptr_ != nullptr ? *queue_rptr_ : 0));
+  return true;
+}
+
 template <bool useGCR, bool scopeFields>
 hsa_status_t BlitSdma<useGCR, scopeFields>::SubmitLinearCopyCommand(void* dst, const void* src, size_t size) {
+  if (SubmitNativeAqlLinearCopy(dst, src, size)) return HSA_STATUS_SUCCESS;
+
   if (core::Runtime::runtime_singleton_->flag().enable_dtif_fast_copy()) {
     LogPrint(HSA_AMD_LOG_FLAG_BLIT_KERNEL_PKTS, "[ROCDTIF SDMA] src = %p, dst = %p, size = 0x%lx", src, dst, size);
     memcpy(dst, src, size);
@@ -1620,6 +1789,11 @@ hsa_status_t BlitSdma<useGCR, scopeFields>::SubmitLinearCopyCommand(void* dst, c
     }
     return HSA_STATUS_SUCCESS;
   }
+
+  // Native SDMA user queue: emit an AQL linear-copy packet (completion via CPL_SIG).
+  if (gang_signals.empty() &&
+      SubmitNativeAqlLinearCopy(dst, src, size, &out_signal, dep_signals))
+    return HSA_STATUS_SUCCESS;
 
   // Break the copy into multiple copy operations when the copy size exceeds
   // the SDMA linear copy limit.

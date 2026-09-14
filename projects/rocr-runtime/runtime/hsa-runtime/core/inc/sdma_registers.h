@@ -75,6 +75,16 @@ const unsigned int SDMA_SUBOP_TIMESTAMP_GET_GLOBAL = 2;
 const unsigned int SDMA_SUBOP_USER_GCR = 1;
 const unsigned int SDMA_ATOMIC_ADD64 = 47;
 
+// AQL-mode SDMA packets (AQL_ENABLE=1 queues). The header's format field is the HSA
+// packet type; op/subop are 0 for both AQL packets the engine defines.
+const unsigned int SDMA_AQL_HEADER_AGENT_DISPATCH = 4; /* SDMA_AQL_PKT_COPY_LINEAR */
+const unsigned int SDMA_AQL_HEADER_BARRIER = 5;        /* SDMA_AQL_PKT_BARRIER_OR */
+const unsigned int SDMA_OP_AQL_COPY = 0;
+// HSA fence scopes (hsa_fence_scope_t), used by the AQL header's acquire/release fields.
+const unsigned int SDMA_AQL_FENCE_SCOPE_NONE = 0;
+const unsigned int SDMA_AQL_FENCE_SCOPE_AGENT = 1;
+const unsigned int SDMA_AQL_FENCE_SCOPE_SYSTEM = 2;
+
 const unsigned int SDMA_MEMORY_SCOPE_CU = 0;  /* workgroup scope */
 const unsigned int SDMA_MEMORY_SCOPE_SE = 1;  /* super-group/group-of-group */
 const unsigned int SDMA_MEMORY_SCOPE_DEV = 2; /* device scope */
@@ -1929,6 +1939,141 @@ typedef struct SDMA_PKT_COPY_LINEAR_SWAP_WAITSIGNAL_TAG_GFX1250 {
   static const size_t kMaxSize_ = 0x3fffffe0;
   static const size_t kAlignment_ = 32;
 } SDMA_PKT_COPY_LINEAR_SWAP_WAITSIGNAL_GFX1250;
+
+// AQL-format linear copy, consumed by an SDMA queue created with AQL_ENABLE=1 (the
+// native WDDM SDMA HwQueue). A ring in AQL mode holds fixed 64-byte AQL packets, not a
+// raw SDMA command stream. Layout mirrors SDMA_AQL_PKT_COPY_LINEAR in the SDMA firmware
+// defs (ip_fw/sdma/nv/navi44/sdma/misc/sdma_pkt_struct.h).
+//
+// HEADER is the HSA AQL packet header: format[7:0] = HSA packet type, then the barrier
+// bit and the acquire/release fence scopes at the standard HSA offsets. The generic
+// SDMA_AQL_PKT_HEADER additionally carries op[19:16] and subop[22:20]; both are 0 for a
+// linear copy (SDMA_OP_AQL_COPY), which is why they read as reserved here.
+typedef struct SDMA_AQL_PKT_COPY_LINEAR_TAG {
+  union {
+    struct {
+      unsigned int format : 8;
+      unsigned int barrier : 1;
+      unsigned int acquire_fence_scope : 2;
+      unsigned int release_fence_scope : 2;
+      unsigned int reserved_0 : 19;
+    };
+    unsigned int DW_0_DATA;
+  } HEADER_UNION;
+
+  union {
+    struct {
+      unsigned int reserved_dw1 : 32;
+    };
+    unsigned int DW_1_DATA;
+  } RESERVED_DW1_UNION;
+
+  union {
+    struct {
+      unsigned int return_addr_31_0 : 32;
+    };
+    unsigned int DW_2_DATA;
+  } RETURN_ADDR_LO_UNION;
+
+  union {
+    struct {
+      unsigned int return_addr_63_32 : 32;
+    };
+    unsigned int DW_3_DATA;
+  } RETURN_ADDR_HI_UNION;
+
+  union {
+    struct {
+      unsigned int count : 30;
+      unsigned int reserved_0 : 2;
+    };
+    unsigned int DW_4_DATA;
+  } COUNT_UNION;
+
+  union {
+    struct {
+      unsigned int reserved_0 : 20;
+      unsigned int dst_mall_policy : 2;
+      unsigned int reserved_1 : 6;
+      unsigned int src_mall_policy : 2;
+      unsigned int reserved_2 : 2;
+    };
+    unsigned int DW_5_DATA;
+  } PARAMETER_UNION;
+
+  union {
+    struct {
+      unsigned int src_addr_31_0 : 32;
+    };
+    unsigned int DW_6_DATA;
+  } SRC_ADDR_LO_UNION;
+
+  union {
+    struct {
+      unsigned int src_addr_63_32 : 32;
+    };
+    unsigned int DW_7_DATA;
+  } SRC_ADDR_HI_UNION;
+
+  union {
+    struct {
+      unsigned int dst_addr_31_0 : 32;
+    };
+    unsigned int DW_8_DATA;
+  } DST_ADDR_LO_UNION;
+
+  union {
+    struct {
+      unsigned int dst_addr_63_32 : 32;
+    };
+    unsigned int DW_9_DATA;
+  } DST_ADDR_HI_UNION;
+
+  union {
+    struct {
+      unsigned int reserved_dw10 : 32;
+    };
+    unsigned int DW_10_DATA;
+  } RESERVED_DW10_UNION;
+
+  union {
+    struct {
+      unsigned int reserved_dw11 : 32;
+    };
+    unsigned int DW_11_DATA;
+  } RESERVED_DW11_UNION;
+
+  union {
+    struct {
+      unsigned int reserved_dw12 : 32;
+    };
+    unsigned int DW_12_DATA;
+  } RESERVED_DW12_UNION;
+
+  union {
+    struct {
+      unsigned int reserved_dw13 : 32;
+    };
+    unsigned int DW_13_DATA;
+  } RESERVED_DW13_UNION;
+
+  union {
+    struct {
+      unsigned int completion_signal_31_0 : 32;
+    };
+    unsigned int DW_14_DATA;
+  } COMPLETION_SIGNAL_LO_UNION;
+
+  union {
+    struct {
+      unsigned int completion_signal_63_32 : 32;
+    };
+    unsigned int DW_15_DATA;
+  } COMPLETION_SIGNAL_HI_UNION;
+
+  static const size_t kMaxSize_ = 0x3fffffe0;
+  static const size_t kAlignment_ = 64;
+} SDMA_AQL_PKT_COPY_LINEAR;
 
 // clang-format on
 
