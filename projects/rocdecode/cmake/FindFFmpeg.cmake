@@ -47,6 +47,24 @@ find_package_handle_standard_args(
   VERSION_VAR FFMPEG_VERSION
 )
 
+# FFMPEG_ROOT is only consulted on Windows, and every result below is cached,
+# so a later configure pointing at a different root would keep the first root's
+# headers and libraries: the shortcut immediately below skips discovery outright
+# once FFMPEG_LIBRARIES is set. Drop the cached results when the root changes so
+# the new one is actually picked up.
+if(WIN32 AND DEFINED FFMPEG_ROOT AND NOT "${FFMPEG_ROOT}" STREQUAL "${_FFMPEG_CACHED_ROOT}")
+  unset(AVCODEC_INCLUDE_DIR CACHE)
+  unset(AVCODEC_LIBRARY CACHE)
+  unset(AVFORMAT_INCLUDE_DIR CACHE)
+  unset(AVFORMAT_LIBRARY CACHE)
+  unset(AVUTIL_INCLUDE_DIR CACHE)
+  unset(AVUTIL_LIBRARY CACHE)
+  unset(FFMPEG_INCLUDE_DIR CACHE)
+  unset(FFMPEG_LIBRARIES CACHE)
+  unset(_FFMPEG_AVCODEC_VERSION CACHE)
+  set(_FFMPEG_CACHED_ROOT "${FFMPEG_ROOT}" CACHE INTERNAL "")
+endif()
+
 if(FFMPEG_LIBRARIES AND FFMPEG_INCLUDE_DIR)
   set(FFMPEG_FOUND TRUE)
 else()
@@ -62,67 +80,63 @@ else()
   endif()
 
   if(NOT WIN32)
-    # Union of all three components' pkg-config dirs: avformat/avutil may live
-    # under a different prefix than avcodec.
-    set(_FFMPEG_SEARCH_INCLUDE
-      ${_FFMPEG_AVCODEC_INCLUDE_DIRS}
-      ${_FFMPEG_AVFORMAT_INCLUDE_DIRS}
-      ${_FFMPEG_AVUTIL_INCLUDE_DIRS}
-      /usr/local/include
-      /usr/include
-      /opt/local/include
-      /sw/include)
-    set(_FFMPEG_SEARCH_LIB
-      ${_FFMPEG_AVCODEC_LIBRARY_DIRS}
-      ${_FFMPEG_AVFORMAT_LIBRARY_DIRS}
-      ${_FFMPEG_AVUTIL_LIBRARY_DIRS}
-      /usr/local/lib
-      /usr/lib
-      /opt/local/lib
-      /sw/lib)
+    set(_FFMPEG_SYSTEM_INCLUDE /usr/local/include /usr/include /opt/local/include /sw/include)
+    set(_FFMPEG_SYSTEM_LIB /usr/local/lib /usr/lib /opt/local/lib /sw/lib)
+    # avformat/avutil may live under a different prefix than avcodec, so each
+    # component falls back to the others' pkg-config directories -- but its own
+    # come first, so a match within its own prefix always wins and headers and
+    # libraries cannot be combined across two installations.
+    set(_AVCODEC_SEARCH_INCLUDE  ${_FFMPEG_AVCODEC_INCLUDE_DIRS}  ${_FFMPEG_AVFORMAT_INCLUDE_DIRS} ${_FFMPEG_AVUTIL_INCLUDE_DIRS}   ${_FFMPEG_SYSTEM_INCLUDE})
+    set(_AVFORMAT_SEARCH_INCLUDE ${_FFMPEG_AVFORMAT_INCLUDE_DIRS} ${_FFMPEG_AVCODEC_INCLUDE_DIRS}  ${_FFMPEG_AVUTIL_INCLUDE_DIRS}   ${_FFMPEG_SYSTEM_INCLUDE})
+    set(_AVUTIL_SEARCH_INCLUDE   ${_FFMPEG_AVUTIL_INCLUDE_DIRS}   ${_FFMPEG_AVCODEC_INCLUDE_DIRS}  ${_FFMPEG_AVFORMAT_INCLUDE_DIRS} ${_FFMPEG_SYSTEM_INCLUDE})
+    set(_AVCODEC_SEARCH_LIB  ${_FFMPEG_AVCODEC_LIBRARY_DIRS}  ${_FFMPEG_AVFORMAT_LIBRARY_DIRS} ${_FFMPEG_AVUTIL_LIBRARY_DIRS}   ${_FFMPEG_SYSTEM_LIB})
+    set(_AVFORMAT_SEARCH_LIB ${_FFMPEG_AVFORMAT_LIBRARY_DIRS} ${_FFMPEG_AVCODEC_LIBRARY_DIRS}  ${_FFMPEG_AVUTIL_LIBRARY_DIRS}   ${_FFMPEG_SYSTEM_LIB})
+    set(_AVUTIL_SEARCH_LIB   ${_FFMPEG_AVUTIL_LIBRARY_DIRS}   ${_FFMPEG_AVCODEC_LIBRARY_DIRS}  ${_FFMPEG_AVFORMAT_LIBRARY_DIRS} ${_FFMPEG_SYSTEM_LIB})
   else()
     # On Windows, allow FFMPEG_ROOT to point to a pre-built FFmpeg installation
-    # (e.g. -DFFMPEG_ROOT=C:/ffmpeg)
-    set(_FFMPEG_SEARCH_INCLUDE ${FFMPEG_ROOT}/include)
-    set(_FFMPEG_SEARCH_LIB ${FFMPEG_ROOT}/lib)
+    # (e.g. -DFFMPEG_ROOT=C:/ffmpeg). All three components come from one prefix.
+    foreach(_comp AVCODEC AVFORMAT AVUTIL)
+      set(_${_comp}_SEARCH_INCLUDE ${FFMPEG_ROOT}/include)
+      set(_${_comp}_SEARCH_LIB ${FFMPEG_ROOT}/lib)
+    endforeach()
   endif()
 
   # AVCODEC
   find_path(AVCODEC_INCLUDE_DIR
     NAMES libavcodec/avcodec.h
-    PATHS ${_FFMPEG_SEARCH_INCLUDE}
+    PATHS ${_AVCODEC_SEARCH_INCLUDE}
     PATH_SUFFIXES ffmpeg libav
   )
   mark_as_advanced(AVCODEC_INCLUDE_DIR)
   find_library(AVCODEC_LIBRARY
     NAMES avcodec
-    PATHS ${_FFMPEG_SEARCH_LIB}
+    PATHS ${_AVCODEC_SEARCH_LIB}
   )
   mark_as_advanced(AVCODEC_LIBRARY)
 
   # AVFORMAT
   find_path(AVFORMAT_INCLUDE_DIR
     NAMES libavformat/avformat.h
-    PATHS ${_FFMPEG_SEARCH_INCLUDE}
+    PATHS ${_AVFORMAT_SEARCH_INCLUDE}
     PATH_SUFFIXES ffmpeg libav
   )
   mark_as_advanced(AVFORMAT_INCLUDE_DIR)
   find_library(AVFORMAT_LIBRARY
     NAMES avformat
-    PATHS ${_FFMPEG_SEARCH_LIB}
+    PATHS ${_AVFORMAT_SEARCH_LIB}
   )
   mark_as_advanced(AVFORMAT_LIBRARY)
 
   # AVUTIL
   find_path(AVUTIL_INCLUDE_DIR
     NAMES libavutil/avutil.h
-    PATHS ${_FFMPEG_SEARCH_INCLUDE}
+    PATHS ${_AVUTIL_SEARCH_INCLUDE}
     PATH_SUFFIXES ffmpeg libav
   )
   mark_as_advanced(AVUTIL_INCLUDE_DIR)
   find_library(AVUTIL_LIBRARY
     NAMES avutil
-    PATHS ${_FFMPEG_SEARCH_LIB}
+    PATHS ${_AVUTIL_SEARCH_LIB}
   )
   mark_as_advanced(AVUTIL_LIBRARY)
 
