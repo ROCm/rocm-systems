@@ -86,7 +86,7 @@ void Stream::InvalidateCapture() {
 }
 
 // ================================================================================================
-hipError_t Stream::EndCapture(bool preserveInvalidated) {
+void Stream::EndCapture(bool preserveInvalidated) {
   if (originStream_) {
     // Swap the participant set out before walking it, so each participant is free to erase
     // itself from the owner on the way through. Iterating a local copy also means the walk
@@ -103,7 +103,6 @@ hipError_t Stream::EndCapture(bool preserveInvalidated) {
   }
 
   ResetCaptureState(preserveInvalidated);
-  return hipSuccess;
 }
 
 // ================================================================================================
@@ -135,7 +134,7 @@ void Stream::Detach() {
     // clearing all graph, event and membership bookkeeping. A participant removes itself from
     // its owner's set in here, and only aliases the origin's graph, so there is nothing for
     // it to free.
-    (void)EndCapture(/*preserveInvalidated=*/true);
+    EndCapture(/*preserveInvalidated=*/true);
   }
   detached_.store(true, std::memory_order_release);
 }
@@ -478,7 +477,7 @@ hipError_t hipStreamDestroy(hipStream_t stream) {
   hip::Stream* s = reinterpret_cast<hip::Stream*>(stream);
   if (s->GetCaptureStatus() != hipStreamCaptureStatusNone) {
     // EndCapture removes a participant from its owner's set itself.
-    [[maybe_unused]] auto error = s->EndCapture();
+    s->EndCapture();
   }
   s->GetDevice()->RemoveStreamFromPools(s);
 

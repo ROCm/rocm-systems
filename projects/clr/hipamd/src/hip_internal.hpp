@@ -454,7 +454,7 @@ namespace hip {
     void SetCaptureID(uint64_t captureId) { captureID_ = captureId; }
     /// Reset capture parameters, optionally keeping an invalidated status observable.
     /// The single entry point for capture teardown, on the origin and on participants alike.
-    hipError_t EndCapture(bool preserveInvalidated = false);
+    void EndCapture(bool preserveInvalidated = false);
     /// Set capture status
     void SetCaptureStatus(hipStreamCaptureStatus captureStatus) { captureStatus_ = captureStatus; }
     /// Set capture mode
