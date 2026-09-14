@@ -6,8 +6,8 @@ from collections import OrderedDict, defaultdict
 from collections.abc import Iterable
 from pathlib import Path
 
-from .code_index import CodeIndex
-from .records import (
+from ..code_index import CodeIndex
+from ..records import (
     Dispatch,
     Event,
     EventType,
