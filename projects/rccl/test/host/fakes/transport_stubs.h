@@ -21,7 +21,7 @@ struct ncclComm;
 // rcclUseAinic (src/transport/net.cc:343) queries whether an AINIC is present.
 // A host-only binary has no device, so `false` is the honest answer rather than
 // a steering choice; override it to exercise the AINIC arm.
-extern bool g_rcclUseAinic;
+extern bool g_rcclUseAinicValue;
 extern std::function<bool()> g_useAinic;
 
 // ncclPxnDisable (src/graph/paths.cc:754). The default mirrors an initialized

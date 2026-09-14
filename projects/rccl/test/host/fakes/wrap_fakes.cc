@@ -264,47 +264,33 @@ ncclResult_t amd_smi_getFirmwareVersion(uint32_t devIdx, uint64_t* fwVersion) {
 // which path supplied nMaxChannels. The unused 13x hooks remain distinct so a
 // future production call cannot silently agree with a neighboring path.
 
+#define DEFINE_DDA_REDUCTION_ELIGIBLE(hook, prod)                                                        \
+  std::function<bool(ncclComm*, const void*, void*, size_t, ncclDataType_t, ncclRedOp_t)> g_##hook =     \
+      [](ncclComm*, const void*, void*, size_t, ncclDataType_t, ncclRedOp_t) { return false; };          \
+  bool prod(ncclComm* comm, const void* send, void* recv, size_t count, ncclDataType_t type,             \
+            ncclRedOp_t op) {                                                                            \
+    return g_##hook(comm, send, recv, count, type, op);                                                   \
+  }
+
+#define DEFINE_DDA_ALLGATHER_ELIGIBLE(hook, prod)                                                         \
+  std::function<bool(ncclComm*, const void*, void*, size_t, ncclDataType_t)> g_##hook =                   \
+      [](ncclComm*, const void*, void*, size_t, ncclDataType_t) { return false; };                        \
+  bool prod(ncclComm* comm, const void* send, void* recv, size_t count, ncclDataType_t type) {            \
+    return g_##hook(comm, send, recv, count, type);                                                       \
+  }
+
+#define DEFINE_DDA_BLOCKS(hook, prod, sentinel)                                                           \
+  std::function<uint32_t(ncclComm*, size_t, ncclDataType_t)> g_##hook =                                  \
+      [](ncclComm*, size_t, ncclDataType_t) { return sentinel; };                                        \
+  uint32_t prod(ncclComm* comm, size_t count, ncclDataType_t type) {                                     \
+    return g_##hook(comm, count, type);                                                                   \
+  }
+
 // --- AllReduce DDA (dda_all_reduce.h) ---
-static bool DefaultAllReduceDdaIpcEligible(ncclComm*, const void*, void*, size_t, ncclDataType_t, ncclRedOp_t) {
-  return false;
-}
-std::function<bool(ncclComm*, const void*, void*, size_t, ncclDataType_t, ncclRedOp_t)>
-    g_allReduceDdaIpcEligible = DefaultAllReduceDdaIpcEligible;
-bool ncclAllReduceDdaIpcEligible(ncclComm* comm, const void* sb, void* rb, size_t count, ncclDataType_t dt,
-                                 ncclRedOp_t op) {
-  return g_allReduceDdaIpcEligible(comm, sb, rb, count, dt, op);
-}
-
-static bool DefaultAllReduceDdaFabricEligible(ncclComm*, const void*, void*, size_t, ncclDataType_t, ncclRedOp_t) {
-  return false;
-}
-std::function<bool(ncclComm*, const void*, void*, size_t, ncclDataType_t, ncclRedOp_t)>
-    g_allReduceDdaFabricEligible = DefaultAllReduceDdaFabricEligible;
-bool ncclAllReduceDdaFabricEligible(ncclComm* comm, const void* sb, void* rb, size_t count, ncclDataType_t dt,
-                                    ncclRedOp_t op) {
-  return g_allReduceDdaFabricEligible(comm, sb, rb, count, dt, op);
-}
-
-static bool DefaultAllReduceDdaFabricLLEligible(ncclComm*, const void*, void*, size_t, ncclDataType_t, ncclRedOp_t) {
-  return false;
-}
-std::function<bool(ncclComm*, const void*, void*, size_t, ncclDataType_t, ncclRedOp_t)>
-    g_allReduceDdaFabricLLEligible = DefaultAllReduceDdaFabricLLEligible;
-bool ncclAllReduceDdaFabricLLEligible(ncclComm* comm, const void* sb, void* rb, size_t count, ncclDataType_t dt,
-                                      ncclRedOp_t op) {
-  return g_allReduceDdaFabricLLEligible(comm, sb, rb, count, dt, op);
-}
-
-static bool DefaultAllReduceDdaFabricLL128Eligible(ncclComm*, const void*, void*, size_t, ncclDataType_t,
-                                                   ncclRedOp_t) {
-  return false;
-}
-std::function<bool(ncclComm*, const void*, void*, size_t, ncclDataType_t, ncclRedOp_t)>
-    g_allReduceDdaFabricLL128Eligible = DefaultAllReduceDdaFabricLL128Eligible;
-bool ncclAllReduceDdaFabricLL128Eligible(ncclComm* comm, const void* sb, void* rb, size_t count, ncclDataType_t dt,
-                                         ncclRedOp_t op) {
-  return g_allReduceDdaFabricLL128Eligible(comm, sb, rb, count, dt, op);
-}
+DEFINE_DDA_REDUCTION_ELIGIBLE(allReduceDdaIpcEligible, ncclAllReduceDdaIpcEligible)
+DEFINE_DDA_REDUCTION_ELIGIBLE(allReduceDdaFabricEligible, ncclAllReduceDdaFabricEligible)
+DEFINE_DDA_REDUCTION_ELIGIBLE(allReduceDdaFabricLLEligible, ncclAllReduceDdaFabricLLEligible)
+DEFINE_DDA_REDUCTION_ELIGIBLE(allReduceDdaFabricLL128Eligible, ncclAllReduceDdaFabricLL128Eligible)
 
 // The twelve *DdaBlocks fakes below each return a DISTINCT sentinel rather
 // than a shared value. Their results land in decision->nMaxChannels, so if
@@ -322,162 +308,31 @@ bool ncclAllReduceDdaFabricLL128Eligible(ncclComm* comm, const void* sb, void* r
 // in rccl_wrap.cc calls those four symbols. They keep distinct values anyway
 // so that if a channel count is ever wired up there, the existing tests fail
 // loudly rather than silently agreeing with a neighbouring path's value.
-static uint32_t DefaultAllReduceDdaIpcBlocks(ncclComm*, size_t, ncclDataType_t) { return 111; }
-std::function<uint32_t(ncclComm*, size_t, ncclDataType_t)> g_allReduceDdaIpcBlocks = DefaultAllReduceDdaIpcBlocks;
-uint32_t ncclAllReduceDdaIpcBlocks(ncclComm* comm, size_t count, ncclDataType_t dt) {
-  return g_allReduceDdaIpcBlocks(comm, count, dt);
-}
-
-static uint32_t DefaultAllReduceDdaFabricBlocks(ncclComm*, size_t, ncclDataType_t) { return 112; }
-std::function<uint32_t(ncclComm*, size_t, ncclDataType_t)> g_allReduceDdaFabricBlocks =
-    DefaultAllReduceDdaFabricBlocks;
-uint32_t ncclAllReduceDdaFabricBlocks(ncclComm* comm, size_t count, ncclDataType_t dt) {
-  return g_allReduceDdaFabricBlocks(comm, count, dt);
-}
-
-static uint32_t DefaultAllReduceDdaFabricLLBlocks(ncclComm*, size_t, ncclDataType_t) { return 113; }
-std::function<uint32_t(ncclComm*, size_t, ncclDataType_t)> g_allReduceDdaFabricLLBlocks =
-    DefaultAllReduceDdaFabricLLBlocks;
-uint32_t ncclAllReduceDdaFabricLLBlocks(ncclComm* comm, size_t count, ncclDataType_t dt) {
-  return g_allReduceDdaFabricLLBlocks(comm, count, dt);
-}
-
-static uint32_t DefaultAllReduceDdaFabricLL128Blocks(ncclComm*, size_t, ncclDataType_t) { return 114; }
-std::function<uint32_t(ncclComm*, size_t, ncclDataType_t)> g_allReduceDdaFabricLL128Blocks =
-    DefaultAllReduceDdaFabricLL128Blocks;
-uint32_t ncclAllReduceDdaFabricLL128Blocks(ncclComm* comm, size_t count, ncclDataType_t dt) {
-  return g_allReduceDdaFabricLL128Blocks(comm, count, dt);
-}
+DEFINE_DDA_BLOCKS(allReduceDdaIpcBlocks, ncclAllReduceDdaIpcBlocks, 111)
+DEFINE_DDA_BLOCKS(allReduceDdaFabricBlocks, ncclAllReduceDdaFabricBlocks, 112)
+DEFINE_DDA_BLOCKS(allReduceDdaFabricLLBlocks, ncclAllReduceDdaFabricLLBlocks, 113)
+DEFINE_DDA_BLOCKS(allReduceDdaFabricLL128Blocks, ncclAllReduceDdaFabricLL128Blocks, 114)
 
 // --- AllGather DDA (dda_all_gather.h) ---
-static bool DefaultAllGatherDdaIpcEligible(ncclComm*, const void*, void*, size_t, ncclDataType_t) { return false; }
-std::function<bool(ncclComm*, const void*, void*, size_t, ncclDataType_t)> g_allGatherDdaIpcEligible =
-    DefaultAllGatherDdaIpcEligible;
-bool ncclAllGatherDdaIpcEligible(ncclComm* comm, const void* sb, void* rb, size_t count, ncclDataType_t dt) {
-  return g_allGatherDdaIpcEligible(comm, sb, rb, count, dt);
-}
-
-static bool DefaultAllGatherDdaFabricEligible(ncclComm*, const void*, void*, size_t, ncclDataType_t) { return false; }
-std::function<bool(ncclComm*, const void*, void*, size_t, ncclDataType_t)> g_allGatherDdaFabricEligible =
-    DefaultAllGatherDdaFabricEligible;
-bool ncclAllGatherDdaFabricEligible(ncclComm* comm, const void* sb, void* rb, size_t count, ncclDataType_t dt) {
-  return g_allGatherDdaFabricEligible(comm, sb, rb, count, dt);
-}
-
-static bool DefaultAllGatherDdaFabricLLEligible(ncclComm*, const void*, void*, size_t, ncclDataType_t) {
-  return false;
-}
-std::function<bool(ncclComm*, const void*, void*, size_t, ncclDataType_t)> g_allGatherDdaFabricLLEligible =
-    DefaultAllGatherDdaFabricLLEligible;
-bool ncclAllGatherDdaFabricLLEligible(ncclComm* comm, const void* sb, void* rb, size_t count, ncclDataType_t dt) {
-  return g_allGatherDdaFabricLLEligible(comm, sb, rb, count, dt);
-}
-
-static bool DefaultAllGatherDdaFabricLL128Eligible(ncclComm*, const void*, void*, size_t, ncclDataType_t) {
-  return false;
-}
-std::function<bool(ncclComm*, const void*, void*, size_t, ncclDataType_t)> g_allGatherDdaFabricLL128Eligible =
-    DefaultAllGatherDdaFabricLL128Eligible;
-bool ncclAllGatherDdaFabricLL128Eligible(ncclComm* comm, const void* sb, void* rb, size_t count,
-                                         ncclDataType_t dt) {
-  return g_allGatherDdaFabricLL128Eligible(comm, sb, rb, count, dt);
-}
-
-static uint32_t DefaultAllGatherDdaIpcBlocks(ncclComm*, size_t, ncclDataType_t) { return 121; }
-std::function<uint32_t(ncclComm*, size_t, ncclDataType_t)> g_allGatherDdaIpcBlocks = DefaultAllGatherDdaIpcBlocks;
-uint32_t ncclAllGatherDdaIpcBlocks(ncclComm* comm, size_t count, ncclDataType_t dt) {
-  return g_allGatherDdaIpcBlocks(comm, count, dt);
-}
-
-static uint32_t DefaultAllGatherDdaFabricBlocks(ncclComm*, size_t, ncclDataType_t) { return 122; }
-std::function<uint32_t(ncclComm*, size_t, ncclDataType_t)> g_allGatherDdaFabricBlocks =
-    DefaultAllGatherDdaFabricBlocks;
-uint32_t ncclAllGatherDdaFabricBlocks(ncclComm* comm, size_t count, ncclDataType_t dt) {
-  return g_allGatherDdaFabricBlocks(comm, count, dt);
-}
-
-static uint32_t DefaultAllGatherDdaFabricLLBlocks(ncclComm*, size_t, ncclDataType_t) { return 123; }
-std::function<uint32_t(ncclComm*, size_t, ncclDataType_t)> g_allGatherDdaFabricLLBlocks =
-    DefaultAllGatherDdaFabricLLBlocks;
-uint32_t ncclAllGatherDdaFabricLLBlocks(ncclComm* comm, size_t count, ncclDataType_t dt) {
-  return g_allGatherDdaFabricLLBlocks(comm, count, dt);
-}
-
-static uint32_t DefaultAllGatherDdaFabricLL128Blocks(ncclComm*, size_t, ncclDataType_t) { return 124; }
-std::function<uint32_t(ncclComm*, size_t, ncclDataType_t)> g_allGatherDdaFabricLL128Blocks =
-    DefaultAllGatherDdaFabricLL128Blocks;
-uint32_t ncclAllGatherDdaFabricLL128Blocks(ncclComm* comm, size_t count, ncclDataType_t dt) {
-  return g_allGatherDdaFabricLL128Blocks(comm, count, dt);
-}
+DEFINE_DDA_ALLGATHER_ELIGIBLE(allGatherDdaIpcEligible, ncclAllGatherDdaIpcEligible)
+DEFINE_DDA_ALLGATHER_ELIGIBLE(allGatherDdaFabricEligible, ncclAllGatherDdaFabricEligible)
+DEFINE_DDA_ALLGATHER_ELIGIBLE(allGatherDdaFabricLLEligible, ncclAllGatherDdaFabricLLEligible)
+DEFINE_DDA_ALLGATHER_ELIGIBLE(allGatherDdaFabricLL128Eligible, ncclAllGatherDdaFabricLL128Eligible)
+DEFINE_DDA_BLOCKS(allGatherDdaIpcBlocks, ncclAllGatherDdaIpcBlocks, 121)
+DEFINE_DDA_BLOCKS(allGatherDdaFabricBlocks, ncclAllGatherDdaFabricBlocks, 122)
+DEFINE_DDA_BLOCKS(allGatherDdaFabricLLBlocks, ncclAllGatherDdaFabricLLBlocks, 123)
+DEFINE_DDA_BLOCKS(allGatherDdaFabricLL128Blocks, ncclAllGatherDdaFabricLL128Blocks, 124)
 
 // --- ReduceScatter DDA (dda_reduce_scatter.h) ---
-static bool DefaultReduceScatterDdaIpcEligible(ncclComm*, const void*, void*, size_t, ncclDataType_t, ncclRedOp_t) {
-  return false;
-}
-std::function<bool(ncclComm*, const void*, void*, size_t, ncclDataType_t, ncclRedOp_t)>
-    g_reduceScatterDdaIpcEligible = DefaultReduceScatterDdaIpcEligible;
-bool ncclReduceScatterDdaIpcEligible(ncclComm* comm, const void* sb, void* rb, size_t count, ncclDataType_t dt,
-                                     ncclRedOp_t op) {
-  return g_reduceScatterDdaIpcEligible(comm, sb, rb, count, dt, op);
-}
+DEFINE_DDA_REDUCTION_ELIGIBLE(reduceScatterDdaIpcEligible, ncclReduceScatterDdaIpcEligible)
+DEFINE_DDA_REDUCTION_ELIGIBLE(reduceScatterDdaFabricEligible, ncclReduceScatterDdaFabricEligible)
+DEFINE_DDA_REDUCTION_ELIGIBLE(reduceScatterDdaFabricLLEligible, ncclReduceScatterDdaFabricLLEligible)
+DEFINE_DDA_REDUCTION_ELIGIBLE(reduceScatterDdaFabricLL128Eligible, ncclReduceScatterDdaFabricLL128Eligible)
+DEFINE_DDA_BLOCKS(reduceScatterDdaIpcBlocks, ncclReduceScatterDdaIpcBlocks, 131)
+DEFINE_DDA_BLOCKS(reduceScatterDdaFabricBlocks, ncclReduceScatterDdaFabricBlocks, 132)
+DEFINE_DDA_BLOCKS(reduceScatterDdaFabricLLBlocks, ncclReduceScatterDdaFabricLLBlocks, 133)
+DEFINE_DDA_BLOCKS(reduceScatterDdaFabricLL128Blocks, ncclReduceScatterDdaFabricLL128Blocks, 134)
 
-static bool DefaultReduceScatterDdaFabricEligible(ncclComm*, const void*, void*, size_t, ncclDataType_t,
-                                                  ncclRedOp_t) {
-  return false;
-}
-std::function<bool(ncclComm*, const void*, void*, size_t, ncclDataType_t, ncclRedOp_t)>
-    g_reduceScatterDdaFabricEligible = DefaultReduceScatterDdaFabricEligible;
-bool ncclReduceScatterDdaFabricEligible(ncclComm* comm, const void* sb, void* rb, size_t count, ncclDataType_t dt,
-                                        ncclRedOp_t op) {
-  return g_reduceScatterDdaFabricEligible(comm, sb, rb, count, dt, op);
-}
-
-static bool DefaultReduceScatterDdaFabricLLEligible(ncclComm*, const void*, void*, size_t, ncclDataType_t,
-                                                    ncclRedOp_t) {
-  return false;
-}
-std::function<bool(ncclComm*, const void*, void*, size_t, ncclDataType_t, ncclRedOp_t)>
-    g_reduceScatterDdaFabricLLEligible = DefaultReduceScatterDdaFabricLLEligible;
-bool ncclReduceScatterDdaFabricLLEligible(ncclComm* comm, const void* sb, void* rb, size_t count,
-                                          ncclDataType_t dt, ncclRedOp_t op) {
-  return g_reduceScatterDdaFabricLLEligible(comm, sb, rb, count, dt, op);
-}
-
-static bool DefaultReduceScatterDdaFabricLL128Eligible(ncclComm*, const void*, void*, size_t, ncclDataType_t,
-                                                       ncclRedOp_t) {
-  return false;
-}
-std::function<bool(ncclComm*, const void*, void*, size_t, ncclDataType_t, ncclRedOp_t)>
-    g_reduceScatterDdaFabricLL128Eligible = DefaultReduceScatterDdaFabricLL128Eligible;
-bool ncclReduceScatterDdaFabricLL128Eligible(ncclComm* comm, const void* sb, void* rb, size_t count,
-                                             ncclDataType_t dt, ncclRedOp_t op) {
-  return g_reduceScatterDdaFabricLL128Eligible(comm, sb, rb, count, dt, op);
-}
-
-static uint32_t DefaultReduceScatterDdaIpcBlocks(ncclComm*, size_t, ncclDataType_t) { return 131; }
-std::function<uint32_t(ncclComm*, size_t, ncclDataType_t)> g_reduceScatterDdaIpcBlocks =
-    DefaultReduceScatterDdaIpcBlocks;
-uint32_t ncclReduceScatterDdaIpcBlocks(ncclComm* comm, size_t count, ncclDataType_t dt) {
-  return g_reduceScatterDdaIpcBlocks(comm, count, dt);
-}
-
-static uint32_t DefaultReduceScatterDdaFabricBlocks(ncclComm*, size_t, ncclDataType_t) { return 132; }
-std::function<uint32_t(ncclComm*, size_t, ncclDataType_t)> g_reduceScatterDdaFabricBlocks =
-    DefaultReduceScatterDdaFabricBlocks;
-uint32_t ncclReduceScatterDdaFabricBlocks(ncclComm* comm, size_t count, ncclDataType_t dt) {
-  return g_reduceScatterDdaFabricBlocks(comm, count, dt);
-}
-
-static uint32_t DefaultReduceScatterDdaFabricLLBlocks(ncclComm*, size_t, ncclDataType_t) { return 133; }
-std::function<uint32_t(ncclComm*, size_t, ncclDataType_t)> g_reduceScatterDdaFabricLLBlocks =
-    DefaultReduceScatterDdaFabricLLBlocks;
-uint32_t ncclReduceScatterDdaFabricLLBlocks(ncclComm* comm, size_t count, ncclDataType_t dt) {
-  return g_reduceScatterDdaFabricLLBlocks(comm, count, dt);
-}
-
-static uint32_t DefaultReduceScatterDdaFabricLL128Blocks(ncclComm*, size_t, ncclDataType_t) { return 134; }
-std::function<uint32_t(ncclComm*, size_t, ncclDataType_t)> g_reduceScatterDdaFabricLL128Blocks =
-    DefaultReduceScatterDdaFabricLL128Blocks;
-uint32_t ncclReduceScatterDdaFabricLL128Blocks(ncclComm* comm, size_t count, ncclDataType_t dt) {
-  return g_reduceScatterDdaFabricLL128Blocks(comm, count, dt);
-}
+#undef DEFINE_DDA_BLOCKS
+#undef DEFINE_DDA_ALLGATHER_ELIGIBLE
+#undef DEFINE_DDA_REDUCTION_ELIGIBLE
