@@ -1180,9 +1180,9 @@ ncclResult_t ncclTopoCompute(ncclTopoSystem* system, struct ncclTopoGraph* graph
   // Ampere relies on BALANCED_TREE which sometimes needs to come back through SYS or PHB.
   if (ccMin < 90) maxTypeInter = PATH_SYS;
 
-  // Widening typeInter past the level where every GPU still reaches a NIC of its own only admits
-  // NICs owned by another GPU, which on a rail-optimised fabric costs GDR. A ring can do without
-  // that step, entering and leaving the node on two NICs instead; the trees pin both legs to one.
+  // RCCL: cap how far the search may widen typeInter, the GPU-to-NIC path type it accepts. The cap
+  // makes a ring pick the closest NIC of each GPU, or a PXN relay. Farther NICs have no GDR, and a
+  // ring can use the crossNic step below instead of them; a tree cannot.
   int maxTypeInterUnbounded = maxTypeInter;
   if (system->inter && crossNic == 2 && graph->pattern == NCCL_TOPO_PATTERN_RING) {
     int localNetPath;
@@ -1389,8 +1389,8 @@ search:
     while (speedArray[speedIndex] > maxBw && speedIndex < nspeeds - 1) speedIndex++;
     tmpGraph.bwIntra = tmpGraph.bwInter = speedArray[speedIndex];
 
-    // A topology can have no solution at all within the bound on typeInter, and would then fall
-    // through to the 0.1 GB/s simple order below. Give the bound up and search once more.
+    // RCCL: a topology can have no solution at all within the bound on typeInter, and would then be
+    // left with the fallback order below. Give the bound up and search once more.
     if (graph->nChannels == 0 && maxTypeInter < maxTypeInterUnbounded) {
       maxTypeInter = maxTypeInterUnbounded;
       goto search;
