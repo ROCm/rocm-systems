@@ -649,7 +649,7 @@ rocpd_processor_t::handle(const hipfile_pmc_sample& hipfile_sample)
     const auto* name         = trait::name<category::hipfile>::value;
     const auto& process_info = m_metadata->get_process_info();
     const auto& agent_ref    = m_agent_manager->get_agent_by_type_index(
-        hipfile_sample.device_id, agent_type::GPU);
+        hipfile_sample.device_id, agent_type::gpu);
 
     const auto agent_uid = make_agent_uid(agent_ref);
     const auto event     = make_event(0, 0, 0, name);

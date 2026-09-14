@@ -321,7 +321,7 @@ get_visible_gpu_type_indices()
 
     std::vector<std::size_t> indices;
     for(const auto& gpu_agent :
-        get_agent_manager_instance().get_agents_by_type(agent_type::GPU))
+        get_agent_manager_instance().get_agents_by_type(agent_type::gpu))
     {
         if(!gpu_agent || !gpu_agent->hip_visible)
         {
