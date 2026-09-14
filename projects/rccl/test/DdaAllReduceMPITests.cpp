@@ -68,6 +68,8 @@ bool launchesOnUserStream(int algo)
     case RCCL_DDA_FABRIC_LL128:
     case RCCL_DDA_FABRIC_VMM:
     case RCCL_DDA_IPC:
+    case RCCL_HIERARCHICAL_ALLGATHER:
+    case RCCL_HIERARCHICAL_REDUCESCATTER:
     case RCCL_GIN_SDMA: return true;
     default: return false;
     }

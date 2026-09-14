@@ -3130,8 +3130,8 @@
       "is_gtest": true,
       "binary": "rccl-UnitTestsMPI",
       "num_ranks": 8,
-      "num_gpus": 8,
       "num_nodes": 1,
+      "num_gpus": 8,
       "timeout": 240,
       "tests": [
         {

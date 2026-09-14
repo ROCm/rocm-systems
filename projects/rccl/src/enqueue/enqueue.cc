@@ -2111,8 +2111,7 @@ ncclResult_t rcclAddonLaunchBegin(struct ncclComm* comm, cudaStream_t stream, in
   return ncclSuccess;
 }
 
-ncclResult_t rcclAddonLaunchEnd(struct ncclComm* comm, cudaStream_t stream, int savedDev,
-                                ncclResult_t launchRes) {
+ncclResult_t rcclAddonLaunchEnd(struct ncclComm* comm, cudaStream_t stream, int savedDev, ncclResult_t launchRes) {
   ncclResult_t result = launchRes;
 
   if (result == ncclSuccess) {
