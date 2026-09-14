@@ -22,7 +22,7 @@ Full documentation for HIP is available at [rocm.docs.amd.com](https://rocm.docs
 
 ### Resolved issues
 * On windows, HIP runtime now correctly handles non-P2P data transfers between GPUs and coordinates multi-GPU kernel execution, eliminates deadlocks and invalid values in multi-process workloads and resolve issues observed when running LLMs, such as Llama, on multi-GPU Windows configurations.
-* Resolved an out-of-memory issue affecting AMD variable graphics memory configurations under maximum AI workloads on Windows. The HIP runtime now correctly utilizes the full unified memory pool available on large-memory APUs, enabling system RAM to be dynamically allocated as graphics memory and supporting the execution of larger AI models.
+* Resolved an out-of-memory issue affecting certain AMD APUs, such as Strix Halo, on Windows when loading large language models (LLMs) that could exceed dedicated graphics memory and spill into shared memory. The HIP runtime now correctly utilizes the full unified memory pool available on high-memory APUs, enabling system RAM to be dynamically allocated as graphics memory. This enhancement improves memory utilization and supports the execution of larger AI models on affected APU platforms.
 
 ## HIP 10.0.0 for ROCm 10.0.0
 
