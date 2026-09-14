@@ -1267,6 +1267,28 @@ ncclResult_t rcclSelectAllReduce(struct ncclComm* comm, const void* sendbuff, vo
   decision->protocol = NCCL_PROTO_SIMPLE;
   decision->nMaxChannels = 0;
 
+  // CE AllReduce graph state. CE is graph-unsafe, so capture disables it.
+  // Probed before the symMaxR2 gate so graph mode can pick symMaxR2Graph.
+  //  - Live dispatch (query=false): probe the real stream and tick the graph
+  //    latch, exactly as the inline code did.
+  //  - Reporting (query=true): the query runs outside capture, so the stream
+  //    cannot reveal graph mode; the caller declares it via graphCapturingHint.
+  //    Mirror what the latch tick would do under capture (ceArGraphAllowed=false)
+  //    so CE 2-shot -- gated on the latch, not on ceCapturing directly -- is also
+  //    reported as disabled. The tick mutates comm state, so it is never run here.
+  bool ceCapturing;
+  if (query) {
+    ceCapturing = graphCapturingHint;
+  } else {
+    struct ncclCudaGraph ceGraph;
+    NCCLCHECK(ncclCudaGetCapturingGraph(&ceGraph, stream, comm->config.graphUsageMode));
+    ceCapturing = ncclCudaGraphValid(ceGraph);
+    rcclCeAllReduceGraphLatchTick(comm, ceCapturing);
+  }
+  bool ceArGraphAllowed = rcclCeAllReduceAllowed(comm);
+  if (query && ceCapturing) ceArGraphAllowed = false;
+  decision->ceCapturing = ceCapturing;
+  decision->ceArGraphAllowed = ceArGraphAllowed;
   const size_t msgBytes = count * ncclTypeSize(datatype);
   // When NCCL_ALGO is set, skip CE/DDA/Symmetric and let getAlgoInfo() pick Ring/Tree.
   if (rcclNcclAlgoEnvIsSet()) {
@@ -1321,28 +1343,6 @@ ncclResult_t rcclSelectAllReduce(struct ncclComm* comm, const void* sendbuff, vo
   const rcclArchThresholds* const archTable = extAlgoArchTable(comm);
   const bool ceArArchDefault = rcclCeAllReduceArchDefault(comm);
 
-  // CE AllReduce graph state. CE is graph-unsafe, so capture disables it.
-  // Probed before the symMaxR2 gate so graph mode can pick symMaxR2Graph.
-  //  - Live dispatch (query=false): probe the real stream and tick the graph
-  //    latch, exactly as the inline code did.
-  //  - Reporting (query=true): the query runs outside capture, so the stream
-  //    cannot reveal graph mode; the caller declares it via graphCapturingHint.
-  //    Mirror what the latch tick would do under capture (ceArGraphAllowed=false)
-  //    so CE 2-shot -- gated on the latch, not on ceCapturing directly -- is also
-  //    reported as disabled. The tick mutates comm state, so it is never run here.
-  bool ceCapturing;
-  if (query) {
-    ceCapturing = graphCapturingHint;
-  } else {
-    struct ncclCudaGraph ceGraph;
-    NCCLCHECK(ncclCudaGetCapturingGraph(&ceGraph, stream, comm->config.graphUsageMode));
-    ceCapturing = ncclCudaGraphValid(ceGraph);
-    rcclCeAllReduceGraphLatchTick(comm, ceCapturing);
-  }
-  bool ceArGraphAllowed = rcclCeAllReduceAllowed(comm);
-  if (query && ceCapturing) ceArGraphAllowed = false;
-  decision->ceCapturing = ceCapturing;
-  decision->ceArGraphAllowed = ceArGraphAllowed;
 
   // (1) Symmetric-window kernel eligibility takes priority over CE / DDA.
   // symkRequested is the raw "symk would run for these operands" signal and keeps
@@ -1529,6 +1529,18 @@ ncclResult_t rcclSelectAllGather(struct ncclComm* comm, const void* sendbuff, vo
   const size_t totalBytes = (size_t)comm->nRanks * sendcount * typeSize;
   size_t msgSize = totalBytes;
 
+  // Graph capture probe hoisted so symMaxR2 can pick symMaxR2Graph vs
+  // symMaxR2 depending on whether a capture is active. Mirrors AllReduce.
+  bool ceCapturing;
+  if (query) {
+    ceCapturing = graphCapturingHint;
+  } else {
+    struct ncclCudaGraph ceGraph;
+    NCCLCHECK(ncclCudaGetCapturingGraph(&ceGraph, stream, comm->config.graphUsageMode));
+    ceCapturing = ncclCudaGraphValid(ceGraph);
+  }
+  decision->ceCapturing = ceCapturing;
+
   // When NCCL_ALGO is set, skip CE/DDA/Symmetric and let getAlgoInfo() pick Ring/Tree.
   if (rcclNcclAlgoEnvIsSet()) {
     decision->algo = NCCL_ALGO_RING;
@@ -1555,16 +1567,6 @@ ncclResult_t rcclSelectAllGather(struct ncclComm* comm, const void* sendbuff, vo
     return ncclSuccess;
   }
 
-  // Graph capture probe hoisted so symMaxR2 can pick symMaxR2Graph vs
-  // symMaxR2 depending on whether a capture is active. Mirrors AllReduce.
-  bool ceCapturing;
-  if (query) {
-    ceCapturing = graphCapturingHint;
-  } else {
-    struct ncclCudaGraph ceGraph;
-    NCCLCHECK(ncclCudaGetCapturingGraph(&ceGraph, stream, comm->config.graphUsageMode));
-    ceCapturing = ncclCudaGraphValid(ceGraph);
-  }
 
   // Window registration type is needed for both symSuppressedBySize and CE
   // branch gates below; hoist the lookup here so it is computed once.
@@ -1673,8 +1675,6 @@ ncclResult_t rcclSelectAllGather(struct ncclComm* comm, const void* sendbuff, vo
     }
     return ncclSuccess;
   }
-
-  decision->ceCapturing = ceCapturing;
 
   // (3) CE AllGather. Outranks Direct, matching taskAppend's CE-before-useDirect
   // order. Live and query share these gates; taskAppend honors the decision.

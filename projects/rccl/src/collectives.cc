@@ -1120,6 +1120,13 @@ ncclResult_t ncclReduceScatter_impl(const void* sendbuff, void* recvbuff, size_t
   // re-derived (NCCL_ALGO=Ring must not still extract the symmetric kernel).
   struct rcclCollDecision decision;
   NCCLCHECK(rcclSelectReduceScatter(comm, sendbuff, recvbuff, recvcount, datatype, op, /*query=*/false, &decision));
+  // rcclSelectReduceScatter has no stream parameter (RS has no CE paths), so
+  // probe capture state here so enqueue.cc reads a valid ceCapturing.
+  {
+    struct ncclCudaGraph ceGraph;
+    NCCLCHECK(ncclCudaGetCapturingGraph(&ceGraph, stream, comm->config.graphUsageMode));
+    decision.ceCapturing = ncclCudaGraphValid(ceGraph);
+  }
   info.decision = decision;
   info.decisionValid = true;
 
