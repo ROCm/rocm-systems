@@ -2098,7 +2098,14 @@ ncclResult_t rcclAddonLaunchBegin(struct ncclComm* comm, cudaStream_t stream, in
   }
 
   if (comm->lastStreamTag != 0 && comm->lastStreamTag != ncclStreamTag(stream)) {
-    CUDACHECK(hipStreamWaitEvent(stream, comm->doneEvent, 0));
+    // doneEvent may carry a node from another capture or from outside one, and waiting on such an
+    // event inside a capture breaks capture isolation, so a captured stream gets no edge here. The
+    // native path has the same limit and orders captured launches through deviceStream instead.
+    struct ncclCudaGraph graph;
+    NCCLCHECK(ncclCudaGetCapturingGraph(&graph, stream, comm->config.graphUsageMode));
+    if (!ncclCudaGraphValid(graph)) {
+      CUDACHECK(hipStreamWaitEvent(stream, comm->doneEvent, 0));
+    }
   }
 
   return ncclSuccess;
