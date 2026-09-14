@@ -53,7 +53,7 @@ Stream::Stream(hip::Device* dev, Priority p, unsigned int f, bool null_stream,
 }
 
 // ================================================================================================
-hipError_t Stream::EndCapture(bool preserveInvalidated) {
+void Stream::ResetCaptureState(bool preserveInvalidated) {
   // Detach all captured events from this stream.
   {
     std::scoped_lock lock(lock_);
@@ -62,14 +62,7 @@ hipError_t Stream::EndCapture(bool preserveInvalidated) {
     }
     captureEvents_.clear();
   }
-  // Recursively end capture on all parallel (forked) streams.
-  for (auto stream : captureStreams_) {
-    [[maybe_unused]] const auto err =
-        reinterpret_cast<hip::Stream*>(stream)->EndCapture(preserveInvalidated);
-    assert(err == hipSuccess);
-  }
 
-  // Reset all capture state to defaults.
   captureStatus_ = preserveInvalidated ? hipStreamCaptureStatusInvalidated
                                        : hipStreamCaptureStatusNone;
   pCaptureGraph_ = nullptr;
@@ -77,7 +70,18 @@ hipError_t Stream::EndCapture(bool preserveInvalidated) {
   captureOwner_ = nullptr;
   lastCapturedNodes_.clear();
   captureStreams_.clear();
+}
 
+// ================================================================================================
+hipError_t Stream::EndCapture(bool preserveInvalidated) {
+  // Recursively end capture on all parallel (forked) streams.
+  for (auto stream : captureStreams_) {
+    [[maybe_unused]] const auto err =
+        reinterpret_cast<hip::Stream*>(stream)->EndCapture(preserveInvalidated);
+    assert(err == hipSuccess);
+  }
+
+  ResetCaptureState(preserveInvalidated);
   return hipSuccess;
 }
 
