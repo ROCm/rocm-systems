@@ -142,6 +142,7 @@ struct hsakmtRuntime {
       uint64_t enable_thunk_sub_allocator : 1;
       uint64_t is_svm_api_supported : 1;
       uint64_t disable_wait_timeout_ : 1;
+      uint64_t enable_sdma_user_queue_ : 1;
     };
     uint64_t settings_bits_ = 0;
   };

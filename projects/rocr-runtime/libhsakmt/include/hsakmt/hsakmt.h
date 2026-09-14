@@ -466,6 +466,27 @@ hsaKmtQueueRingDoorbell(
 );
 
 /**
+ * Queries the native-SDMA-user-queue properties a producer needs in order to write
+ * this queue's ring correctly. Windows/DXG only; other thunks return
+ * HSAKMT_STATUS_NOT_SUPPORTED, and a DXG queue that is not a native SDMA user queue
+ * reports a zeroed HsaSdmaUserQueueInfo.
+ *
+ * Kept out of hsaKmtCreateQueue's HsaQueueResource on purpose -- see the comment on
+ * HsaSdmaUserQueueInfo about the virtio wire format.
+ *
+ * @param[in]  QueueId Queue returned by hsaKmtCreateQueue.
+ * @param[out] Info    Receives the queue's native SDMA properties.
+ *
+ * @returns HSAKMT_STATUS_SUCCESS on success
+ */
+HSAKMT_STATUS
+HSAKMTAPI
+hsaKmtGetSdmaUserQueueInfo(
+    HSA_QUEUEID QueueId,             //IN
+    HsaSdmaUserQueueInfo* Info       //OUT
+);
+
+/**
   Allows an HSA process to set/change the default and alternate memory coherency, before starting to dispatch.
 */
 

@@ -64,9 +64,7 @@ SdmaQueue::SdmaQueue(core::Agent* agent, size_t size_bytes, uint64_t flags, int3
       queue_rptr_(nullptr),
       queue_doorbell_(nullptr),
       sdma_engine_id_(sdma_engine_id),
-      active_(false),
-      progress_fence_va_(0),
-      progress_fence_id_(0) {
+      active_(false) {
   memset(&queue_resource_, 0, sizeof(queue_resource_));
 }
 
@@ -170,10 +168,6 @@ hsa_status_t SdmaQueue::Initialize() {
   queue_wptr_ = reinterpret_cast<volatile uint64_t*>(queue_resource_.Queue_write_ptr);
   queue_rptr_ = reinterpret_cast<volatile uint64_t*>(queue_resource_.Queue_read_ptr);
   queue_doorbell_ = reinterpret_cast<volatile uint64_t*>(queue_resource_.Queue_DoorBell);
-  // Native SDMA user queue (Windows/DXG): the thunk hands back the HwQueue
-  // progress-fence GPU VA so RingDoorbell can emit a matching FENCE packet.
-  // 0 for KFD/SWS paths, which leaves fence emission disabled below.
-  progress_fence_va_ = queue_resource_.SdmaProgressFenceVA;
   if (queue_wptr_ == nullptr || queue_rptr_ == nullptr || queue_doorbell_ == nullptr) {
     Inactivate();
     FreeQueueBuffer();
@@ -239,27 +233,29 @@ hsa_status_t SdmaQueue::RingDoorbell(uint64_t write_index) {
     return HSA_STATUS_ERROR_INVALID_QUEUE;
   }
 
-  // FENCE+TRAP for the native SDMA HwQueue path is emitted inside libhsakmt's
-  // SDMAQueue::RingDoorbell, which writes them into [publish_index-epilogue,
-  // publish_index). Reserve that epilogue here by advancing the published wptr past
-  // the caller's packets, so the submitted wptr matches the region libhsakmt fills
-  // and libhsakmt does NOT advance again. SdmaHwQueueEpilogueBytes is 0 unless this
-  // is a native SDMA HwQueue, so the legacy/SWS path is unchanged.
-  uint64_t publish_index = write_index + queue_resource_.SdmaHwQueueEpilogueBytes;
+  // Published exactly as the caller advanced it: reserving the epilogue is the producer's
+  // job, like every other ring-space decision (see the class header's RESERVED TAIL note).
+  const uint64_t publish_index = write_index;
 
-  // Publish step of the submission protocol. SDMA queues are externally
-  // synchronized: by the time the doorbell is stored the caller must have
-  // written complete packets into the ring and handled wrap/space checks.
-  //
-  // The public write-index operations use queue_wptr_ directly. Ensure the
-  // canonical write pointer and packet stores are visible before the doorbell.
+  // Publish step: SDMA queues are externally synchronized, so by now the caller must have
+  // written complete packets and handled wrap/space checks. Make the write pointer and the
+  // packet stores visible before the doorbell.
   atomic::Store(queue_wptr_, publish_index, std::memory_order_release);
   std::atomic_thread_fence(std::memory_order_release);
   *queue_doorbell_ = publish_index;
 
   if (core::Runtime::runtime_singleton_->thunkLoader()->IsDXG() ||
       core::Runtime::runtime_singleton_->thunkLoader()->IsDTIF()) {
-    HSAKMT_CALL(hsaKmtQueueRingDoorbell(queue_resource_.QueueId, publish_index));
+    // On DXG this is what submits the span to the KMD, so a failure here means the span will
+    // never execute.
+    HSAKMT_STATUS kmt_status =
+        HSAKMT_CALL(hsaKmtQueueRingDoorbell(queue_resource_.QueueId, publish_index));
+    if (kmt_status != HSAKMT_STATUS_SUCCESS) {
+      debug_print("SDMA doorbell failed: QueueId=0x%llx, wptr=0x%llx, status=%d\n",
+                  (unsigned long long)queue_resource_.QueueId,
+                  (unsigned long long)publish_index, kmt_status);
+      return HSA_STATUS_ERROR;
+    }
   }
 
   return HSA_STATUS_SUCCESS;

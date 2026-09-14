@@ -427,6 +427,11 @@ std::string GetAdjacentThunkLibraryPath(const std::string& library_name) {
       HSAKMT_PFN(hsaKmtQueueRingDoorbell) = (HSAKMT_DEF(hsaKmtQueueRingDoorbell)*)rocr::os::GetExportAddress(thunk_handle, "hsaKmtQueueRingDoorbell");
       if (HSAKMT_PFN(hsaKmtQueueRingDoorbell) == nullptr) goto LOAD_ERROR;
 
+      // Optional: only the DXG thunk exports this, and only recent ones. Callers treat a
+      // null pointer as "no native SDMA user queue", so a missing symbol must not fail the
+      // whole load.
+      HSAKMT_PFN(hsaKmtGetSdmaUserQueueInfo) = (HSAKMT_DEF(hsaKmtGetSdmaUserQueueInfo)*)rocr::os::GetExportAddress(thunk_handle, "hsaKmtGetSdmaUserQueueInfo");
+
       DRM_PFN(amdgpu_device_initialize) = (DRM_DEF(amdgpu_device_initialize)*)rocr::os::GetExportAddress(thunk_handle, "amdgpu_device_initialize");
       if (DRM_PFN(amdgpu_device_initialize) == nullptr) goto LOAD_ERROR;
 

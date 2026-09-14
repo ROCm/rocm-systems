@@ -75,6 +75,13 @@
       - | 0: Disable
         | 1: Enable
 
+    * - | ``HSA_ENABLE_SDMA_USER_QUEUE``
+        | Windows only. Selects how SDMA copies are submitted: through a native WDDM hardware queue that the runtime writes to directly, or through the legacy software-scheduled translation thread.
+        | Ignored when the kernel-mode driver does not advertise SDMA user queue support, in which case the legacy path is always used.
+      - ``1``
+      - | 0: Use the legacy software-scheduled queue.
+        | 1: Use the native SDMA user queue when the driver supports it.
+
     * - | ``HSA_ENABLE_MWAITX``
         | When mwaitx is enabled, on AMD CPUs, runtime will hint to the CPU to go into lower power-states when doing busy loops by using the mwaitx instruction.
       - ``1``

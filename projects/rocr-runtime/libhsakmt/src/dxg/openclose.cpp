@@ -662,6 +662,14 @@ static HSAKMT_STATUS init_vars_from_env(void) {
   dxg_runtime->use_pm4_ = 1;  // Force PM4 usage on Linux for now
 #endif
 
+  // Submit SDMA copies through the native WDDM user queue unless HSA_ENABLE_SDMA_USER_QUEUE
+  // is 0, which forces the legacy software-scheduled path. Ignored when the KMD does not
+  // advertise support.
+  dxg_runtime->enable_sdma_user_queue_ = 1;
+  if ((envvar = getenv("HSA_ENABLE_SDMA_USER_QUEUE")) != nullptr) {
+    dxg_runtime->enable_sdma_user_queue_ = safe_env_to_int(envvar, 1) != 0;
+  }
+
   // Disable wait timeout if ROCR_DISABLE_WAIT_TIMEOUT is set.
   if ((envvar = getenv("ROCR_DISABLE_WAIT_TIMEOUT")) != nullptr) {
     dxg_runtime->disable_wait_timeout_ = safe_env_to_int(envvar, 0);

@@ -139,6 +139,7 @@ BlitSdma<useGCR, scopeFields>::BlitSdma()
       is_dxg_(false),
       enable_sdma_hdp_flush_(false),
       sw_poll_workaround_(false),
+      sdma_epilogue_bytes_(0),
       queue_wptr_(nullptr),
       queue_rptr_(nullptr),
       queue_doorbell_(nullptr),
@@ -258,6 +259,16 @@ hsa_status_t BlitSdma<useGCR, scopeFields>::Initialize(const core::Agent& agent,
   is_dxg_ = core::Runtime::runtime_singleton_->thunkLoader()->IsDXG();
   needs_kmt_doorbell_ = is_dxg_ ||
                         core::Runtime::runtime_singleton_->thunkLoader()->IsDTIF();
+
+  // libhsakmt appends a progress-fence epilogue on every doorbell, so every reservation must
+  // include it. DXG-only entry point; reports 0 for any queue that is not a native SDMA one.
+  if (HSAKMT_CALL(hsaKmtGetSdmaUserQueueInfo) != nullptr) {
+    HsaSdmaUserQueueInfo sdma_info = {};
+    if (HSAKMT_CALL(hsaKmtGetSdmaUserQueueInfo(queue_resource_.QueueId, &sdma_info)) ==
+        HSAKMT_STATUS_SUCCESS) {
+      sdma_epilogue_bytes_ = sdma_info.EpilogueBytes;
+    }
+  }
   sdma_wait_idle_ = core::Runtime::runtime_singleton_->flag().sdma_wait_idle();
   enable_sdma_hdp_flush_ = core::Runtime::runtime_singleton_->flag().enable_sdma_hdp_flush();
 
@@ -614,10 +625,6 @@ hsa_status_t BlitSdma<useGCR, scopeFields>::SubmitCommand(const void* cmd, size_
   }
 
   // After transfer is completed, decrement the signal value.
-  fprintf(stderr, "[blit] SubmitCommand: signal decrement: platform_atomic=%d"
-          " completion_val=0x%llx signal_loc=%p\n",
-          (int)platform_atomic_support_, (unsigned long long)completion_signal_value,
-          out_signal.ValueLocation());
   if (platform_atomic_support_) {
     BuildAtomicDecrementCommand(command_addr, out_signal.ValueLocation());
     command_addr += atomic_command_size_;
@@ -1958,19 +1965,16 @@ template <bool useGCR, bool scopeFields> hsa_status_t BlitSdma<useGCR, scopeFiel
 
 template <bool useGCR, bool scopeFields>
 char* BlitSdma<useGCR, scopeFields>::AcquireWriteAddress(uint32_t cmd_size, uint64_t& curr_index) {
-  // Reserve the caller's packets plus the native-SDMA FENCE/TRAP epilogue that
-  // libhsakmt appends on the doorbell (0 on non-native paths), so this producer's
-  // write index stays in step with the submitted wptr and the free-space check
-  // below accounts for those bytes.
-  const uint32_t reserve_size = cmd_size + queue_resource_.SdmaHwQueueEpilogueBytes;
+  // Reserve the caller's packets plus the FENCE epilogue libhsakmt appends on the doorbell
+  // (0 on non-native paths), so the write index stays in step with the submitted wptr and the
+  // epilogue cannot straddle the ring end.
+  const uint32_t reserve_size = cmd_size + sdma_epilogue_bytes_;
   // Ring is full when all but one byte is written.
   if (reserve_size >= kQueueSize) {
     return nullptr;
   }
 
   curr_index = atomic::Load(&cached_reserve_index_, std::memory_order_acquire);
-  fprintf(stderr, "[blit] AcquireWriteAddress cmd_size=%u curr_index=0x%llx rptr=0x%llx\n",
-          cmd_size, (unsigned long long)curr_index, (unsigned long long)*queue_rptr_);
 
   while (true) {
     // Check whether a linear region of the requested size is available.
@@ -2009,13 +2013,10 @@ char* BlitSdma<useGCR, scopeFields>::AcquireWriteAddress(uint32_t cmd_size, uint
 
 template <bool useGCR, bool scopeFields>
 void BlitSdma<useGCR, scopeFields>::UpdateWriteAndDoorbellRegister(uint64_t curr_index, uint64_t new_index) {
-  fprintf(stderr, "[blit] UpdateWriteAndDoorbellRegister curr=0x%llx new=0x%llx\n",
-          (unsigned long long)curr_index, (unsigned long long)new_index);
   while (true) {
     // Make sure that the address before ::curr_index is already released.
     // Otherwise the CP may read invalid packets.
     uint64_t commit_index = atomic::Load(&cached_commit_index_, std::memory_order_acquire);
-    fprintf(stderr, "[blit] commit_index=0x%llx\n", (unsigned long long)commit_index);
     if (commit_index == curr_index) {
       if (sdma_wait_idle_) {
         // TODO: remove when sdma wpointer issue is resolved.
@@ -2063,10 +2064,9 @@ void BlitSdma<useGCR, scopeFields>::UpdateWriteAndDoorbellRegister(uint64_t curr
 
 template <bool useGCR, bool scopeFields>
 void BlitSdma<useGCR, scopeFields>::ReleaseWriteAddress(uint64_t curr_index, uint32_t cmd_size) {
-  // Advance by the caller's packets plus the reserved native-SDMA epilogue so the
-  // doorbell wptr matches what AcquireWriteAddress reserved; libhsakmt fills the
-  // reserved [end-epilogue, end) region with FENCE+TRAP.
-  const uint32_t reserve_size = cmd_size + queue_resource_.SdmaHwQueueEpilogueBytes;
+  // Advance by packets + reserved epilogue so the doorbell wptr matches the reservation;
+  // libhsakmt fills [end-epilogue, end) with the progress FENCE.
+  const uint32_t reserve_size = cmd_size + sdma_epilogue_bytes_;
   if (reserve_size > kQueueSize) {
     assert(false && "cmd_addr is outside the queue buffer range");
     return;
@@ -2153,7 +2153,7 @@ void BlitSdma<useGCR, scopeFields>::BuildFenceCommand(char* fence_command_addr, 
     packet_addr->ADDR_LO_UNION.addr_31_0 = ptrlow32(fence);
     packet_addr->ADDR_HI_UNION.addr_63_32 = ptrhigh32(fence);
 
-    packet_addr->DATA_UNION.data = fence_value;\
+    packet_addr->DATA_UNION.data = fence_value;
   }
 }
 
@@ -2575,8 +2575,6 @@ void BlitSdma<useGCR, scopeFields>::BuildCopyRectCommand(const std::function<voi
           pkt->HEADER_UNION.sub_op = SDMA_SUBOP_COPY_LINEAR_RECT;
           if (scopeFields) pkt->HEADER_UNION.npd = 1;
           pkt->HEADER_UNION.element = element;
-          fprintf(stderr, "[blit] BuildCopyRect sbase=0x%llx dbase=0x%llx element=%d\n",
-                  (unsigned long long)sbase, (unsigned long long)dbase, element);
           pkt->SRC_ADDR_LO_UNION.src_addr_31_0 = sbase;
           pkt->SRC_ADDR_HI_UNION.src_addr_63_32 = sbase >> 32;
           pkt->SRC_PARAMETER_1_UNION.src_offset_x = soff;
