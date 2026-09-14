@@ -10,7 +10,57 @@
 
 #include <stddef.h>
 #include <stdint.h>
+#include <limits.h>
 #include "nccl.h"
+
+// Cap on physical segments per GIN/RMA symmetric buffer. HIP dma-buf export
+// describes only the first physical segment, so registration allocates one MR
+// per segment up to this limit.
+#ifndef NCCL_RMA_MAX_SEGMENTS
+#define NCCL_RMA_MAX_SEGMENTS 16
+#endif
+
+// A paired data transfer can split at every local and remote boundary. A
+// segment slice may split once more at the verbs 32-bit SGE length limit; the
+// fixed budget deliberately rejects larger chains before posting.
+#define NCCL_RMA_MAX_DATA_WRS (2 * NCCL_RMA_MAX_SEGMENTS)
+#define NCCL_RMA_MAX_SIGNAL_WRS (NCCL_RMA_MAX_DATA_WRS + 1)
+#define NCCL_RMA_MAX_FLUSH_WRS NCCL_RMA_MAX_SEGMENTS
+
+static inline size_t ncclRmaSegmentSliceBytes(size_t remaining, size_t localRemaining, size_t remoteRemaining) {
+  size_t chunk = remaining;
+  if (localRemaining < chunk) chunk = localRemaining;
+  if (remoteRemaining < chunk) chunk = remoteRemaining;
+  if ((size_t)UINT32_MAX < chunk) chunk = (size_t)UINT32_MAX;
+  return chunk;
+}
+
+static inline int ncclRmaWrIsSignaled(int wrIndex, int nWrs) {
+  return nWrs > 0 && wrIndex == nWrs - 1;
+}
+
+static inline int ncclRmaSignalOffsetValid(size_t signalOff, size_t segmentEnd) {
+  return (signalOff & (sizeof(uint64_t) - 1)) == 0 && signalOff <= segmentEnd &&
+         sizeof(uint64_t) <= segmentEnd - signalOff;
+}
+
+// Count WRs the HCA accepted when ibv_post_send fails at badWr. Walk a
+// next-linked chain of nWr entries. badWr == NULL counts the whole chain.
+static inline int ncclRmaPostedWrCount(const void* wr, int nWr, const void* badWr, size_t nextOffset) {
+  int posted = 0;
+  const char* cur = (const char*)wr;
+  while (cur != NULL && posted < nWr) {
+    if (cur == (const char*)badWr) break;
+    posted++;
+    cur = *(char* const*)(cur + nextOffset);
+  }
+  return posted;
+}
+
+// A failed handle calloc must not memcpy segOff before the status AllGather.
+static inline int ncclRmaRegistrationHandleReady(const void* handle, int nSeg) {
+  return handle != NULL && nSeg >= 1 && nSeg <= NCCL_RMA_MAX_SEGMENTS;
+}
 
 struct ncclGinIbCollComm {
   void* ctx;
