@@ -1,0 +1,157 @@
+{
+  "id": "benchmark-202606300530-a20bf642",
+  "comparisonId": "benchmark-202606300530-a20bf642",
+  "testCatalog": "test-catalogs/rocjitsu-core-v2.json",
+  "plugin": {
+    "id": "vanilla",
+    "name": "Vanilla"
+  },
+  "source": {
+    "branch": "develop",
+    "commit": "a20bf642f796602658a853cb6a46f790a9f1a168",
+    "committedAt": "2026-06-30T05:30:00.000Z",
+    "message": "Refine wavefront scheduling behavior"
+  },
+  "execution": {
+    "completedAt": "2026-06-30T05:30:00.000Z",
+    "trigger": "auto",
+    "machine": "sjc-rocjitsu-perf-01"
+  },
+  "environment": [
+    {
+      "key": "rocmSdkVersion",
+      "label": "ROCm SDK",
+      "value": "7.2.0.dev202606"
+    },
+    {
+      "key": "pythonVersion",
+      "label": "Python",
+      "value": "3.12.11"
+    },
+    {
+      "key": "torchVersion",
+      "label": "PyTorch",
+      "value": "2.9.0a0+rocm7.2"
+    },
+    {
+      "key": "tritonCommitSha",
+      "label": "Triton commit",
+      "value": "91f34ba7d15e"
+    },
+    {
+      "key": "tensileLiteCommitSha",
+      "label": "TensileLite commit",
+      "value": "b3c19e8a2a44"
+    }
+  ],
+  "targets": [
+    {
+      "id": "gfx1250",
+      "results": [
+        {
+          "testId": "triton-gemm-f16-1024",
+          "durationSeconds": 2.208,
+          "status": "completed",
+          "exitCode": 0,
+          "error": null
+        },
+        {
+          "testId": "triton-gemm-bf16-4096",
+          "durationSeconds": 11.585,
+          "status": "completed",
+          "exitCode": 0,
+          "error": null
+        },
+        {
+          "testId": "triton-softmax-f32-4096",
+          "durationSeconds": 3.34,
+          "status": "completed",
+          "exitCode": 0,
+          "error": null
+        },
+        {
+          "testId": "triton-layernorm-bf16-8192",
+          "durationSeconds": 4.065,
+          "status": "completed",
+          "exitCode": 0,
+          "error": null
+        },
+        {
+          "testId": "tensile-gemm-f16-8192",
+          "durationSeconds": 15.347,
+          "status": "completed",
+          "exitCode": 0,
+          "error": null
+        },
+        {
+          "testId": "tensile-gemm-fp8-4096",
+          "durationSeconds": 8.274,
+          "status": "completed",
+          "exitCode": 0,
+          "error": null
+        },
+        {
+          "testId": "deepseek-v3-decode-fp8",
+          "durationSeconds": 26.799,
+          "status": "completed",
+          "exitCode": 0,
+          "error": null
+        }
+      ]
+    },
+    {
+      "id": "gfx950",
+      "results": [
+        {
+          "testId": "triton-gemm-f16-1024",
+          "durationSeconds": 1.88,
+          "status": "completed",
+          "exitCode": 0,
+          "error": null
+        },
+        {
+          "testId": "triton-gemm-bf16-4096",
+          "durationSeconds": 10.036,
+          "status": "completed",
+          "exitCode": 0,
+          "error": null
+        },
+        {
+          "testId": "triton-softmax-f32-4096",
+          "durationSeconds": 2.924,
+          "status": "completed",
+          "exitCode": 0,
+          "error": null
+        },
+        {
+          "testId": "triton-layernorm-bf16-8192",
+          "durationSeconds": 3.616,
+          "status": "completed",
+          "exitCode": 0,
+          "error": null
+        },
+        {
+          "testId": "tensile-gemm-f16-8192",
+          "durationSeconds": 13.56,
+          "status": "completed",
+          "exitCode": 0,
+          "error": null
+        },
+        {
+          "testId": "tensile-gemm-fp8-4096",
+          "durationSeconds": 7.217,
+          "status": "completed",
+          "exitCode": 0,
+          "error": null
+        },
+        {
+          "testId": "deepseek-v3-decode-fp8",
+          "durationSeconds": 23.445,
+          "status": "completed",
+          "exitCode": 0,
+          "error": null
+        }
+      ]
+    }
+  ]
+}
