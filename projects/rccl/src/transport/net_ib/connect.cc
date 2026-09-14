@@ -1171,12 +1171,11 @@ static ncclResult_t ncclIbReceiverQpsCreateToRts(ncclIbRecvComm* rComm, struct n
   memset(&qpCreateAttrs, 0, sizeof(struct ncclIbQpCreateAttr));
   qpCreateAttrs.type = IBV_QPT_RC;
   qpCreateAttrs.maxRecvWorkRequest = NET_IB_MAX_REQUESTS;
-  // CTS messages are posted using send work requests.
-  // Note that because only specific CTS messages are signaled, the send queue
-  // size needs to be double the number of max requests.
-  // When resiliency is enabled, the number of send work requests is as the
-  // number of max requests because every CTS message is signaled.
-  qpCreateAttrs.maxSendWorkRequest = NET_IB_MAX_REQUESTS * (rComm->base.resiliency ? 1 : 2);
+  // CTS messages are posted using send work requests. Multi-segment CTS posts
+  // an unsignaled side-table WR before the CTS WR (two WRs per slot). Because
+  // only specific CTS WRs are signaled, the send queue needs 2x max requests
+  // times two WRs. Resiliency signals every CTS WR, so 1x times two WRs.
+  qpCreateAttrs.maxSendWorkRequest = NET_IB_MAX_REQUESTS * (rComm->base.resiliency ? 1 : 2) * 2;
   for (int qpIndex = 0; qpIndex < nqps; qpIndex++) {
     // The QPs are created in a "striped" manner across the available devices.
     // For example, if there are 2 devices and 4 QPs, the QPs will be created

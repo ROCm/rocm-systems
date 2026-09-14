@@ -75,6 +75,17 @@ static inline int ncclIbSegmentIndexForRange(int nSegments, const uintptr_t* seg
   return -1;
 }
 
+// MR index for a 0-byte RDMA_WRITE at addr. Inclusive start; the exclusive end
+// of the last segment still uses that last MR.
+static inline int ncclIbSegmentIndexForZeroLength(int nSegments, const uintptr_t* segStart, const size_t* segLen,
+                                                  uintptr_t addr) {
+  int s = ncclIbSegmentIndexForRange(nSegments, segStart, segLen, addr, 0);
+  if (s >= 0) return s;
+  if (nSegments < 1 || segStart == NULL || segLen == NULL) return -1;
+  uintptr_t end = segStart[nSegments - 1] + segLen[nSegments - 1];
+  return addr == end ? nSegments - 1 : -1;
+}
+
 // True iff the segment layout is "uniform": every interior segment has the same
 // size as segment 0, and the trailing segment is no larger. This keeps every
 // segment boundary at a multiple of the segment size, so step-aligned transfers
