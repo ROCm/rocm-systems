@@ -1714,9 +1714,10 @@ protected:
         ncclResult_t sendRet = ncclSuccess;
         bool         completed = false;
         int          fatalCount = 0;
-        // Set when the request was seen to finish. When it is false the helper has driven
-        // this communicator's queue pairs to error to retire the work instead; either way
-        // the caller's buffer is free to go.
+        // Set when the work is known to be retired: the request was seen to finish, or every
+        // queue pair of this communicator was driven to error, which retires their work with
+        // a flush status. When it is false the caller must keep its buffer and registration,
+        // since something may still reference them.
         bool         retired = false;
     };
 
@@ -1780,9 +1781,19 @@ protected:
                 usleep(kPollIntervalUs);
             }
             if (!outcome.retired) {
+                // Whether the transitions actually happened is the whole guarantee, so it is
+                // checked rather than assumed: a count query that failed used to become
+                // nqps = 1, which on the multi-QP suites leaves work live on the others, and
+                // every transition's result was discarded. When either does not hold the
+                // caller is told, and it keeps its memory instead.
                 int nqps = 0;
-                if (!WorkerCastLiveNqps(sendComm, &nqps).ok || nqps <= 0) nqps = 1;
-                for (int qp = 0; qp < nqps; qp++) WorkerCastDriveQpToError(sendComm, qp);
+                const bool counted = WorkerCastLiveNqps(sendComm, &nqps).ok && nqps > 0;
+                if (!counted) nqps = 1;
+                bool allDriven = counted;
+                for (int qp = 0; qp < nqps; qp++) {
+                    if (!WorkerCastDriveQpToError(sendComm, qp).ok) allDriven = false;
+                }
+                outcome.retired = allDriven;
             }
         }
         return outcome;

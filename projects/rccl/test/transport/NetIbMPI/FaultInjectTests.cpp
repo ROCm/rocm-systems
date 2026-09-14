@@ -129,6 +129,16 @@ TEST_F(NetIbMPITest, FaultInjCastQpErrorIsFatal) {
                                  "arming every QP with error injection";
                     return result;
                 }
+                if (!outcome.retired) {
+                    // The helper could not establish that the send's work is retired, so this
+                    // memory is kept rather than freed under it.
+                    result.ok = false;
+                    result.msg = "the injected-fault send left work that could not be retired, "
+                                 "so the buffer and its registration are retained";
+                    mhandleGuard.release();
+                    bufferGuard.release();
+                    return result;
+                }
                 return WorkerCastFaultClear(pair.sendComm);
             });
         MPI_Barrier(MPI_COMM_WORLD);
@@ -761,6 +771,16 @@ TEST_F(NetIbMPITest, FaultInjCastQpErrorClearRecovers) {
                     if (outcome.sendRet == ncclSuccess && outcome.fatalCount <= 0) {
                         result.ok = false;
                         result.msg = "phase 1 did not observe the injected fault";
+                        return result;
+                    }
+                    if (!outcome.retired) {
+                        // The helper could not establish that the send's work is retired, so this
+                        // memory is kept rather than freed under it.
+                        result.ok = false;
+                        result.msg = "the injected-fault send left work that could not be retired, "
+                                     "so the buffer and its registration are retained";
+                        faultedGuard.release();
+                        bufferGuard.release();
                         return result;
                     }
                     result = WorkerCastFaultClear(faulted.sendComm);
@@ -4119,6 +4139,16 @@ TEST_F(NetIbMPITest, FaultIsolationAcrossWorkers) {
                 if (outcome.sendRet == ncclSuccess && outcome.fatalCount <= 0) {
                     result.ok = false;
                     result.msg = "the victim connection did not observe its injected fault";
+                    return result;
+                }
+                if (!outcome.retired) {
+                    // The helper could not establish that the send's work is retired, so this
+                    // memory is kept rather than freed under it.
+                    result.ok = false;
+                    result.msg = "the injected-fault send left work that could not be retired, "
+                                 "so the buffer and its registration are retained";
+                    mhandleGuard.release();
+                    bufferGuard.release();
                     return result;
                 }
 
