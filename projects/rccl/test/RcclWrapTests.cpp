@@ -2913,8 +2913,12 @@ TEST(RcclDdaTierThresholds, Gfx1250_EnvOverridesArchTable)
          {"RCCL_DDA_THRESHOLD", "4194304"}});
 }
 
-// An arch with no threshold table gets no DDA: nothing is invented for arches
-// DDA was never tuned for.
+// An arch with no threshold table (e.g. gfx90a, not in the tuning table)
+// still gets base defaults from the resolvers -- the null-table path in
+// rcclDdaLLThresholdTab/rcclDdaLL128ThresholdTab/rcclDdaVmmThresholdTab
+// returns kDdaLL*BaseDefault, not 0. rcclDdaEnabled() returns false
+// because gfx90a is not in the recognised-arch list, independent of the
+// threshold value.
 TEST(RcclDdaTierThresholds, UntunedArch_NoEnv_NoThresholds)
 {
     RUN_ISOLATED_TEST_WITH_ENV(
@@ -2924,9 +2928,9 @@ TEST(RcclDdaTierThresholds, UntunedArch_NoEnv_NoThresholds)
             ncclComm comm{};
             InitDdaDecisionComm(comm, "gfx90a", 8, 1, /*symmetricSupport=*/false);
             ASSERT_EQ(rcclGetArchThresholds(comm.archName), nullptr);
-            EXPECT_EQ(rcclDdaLLThreshold(&comm, ncclFuncAllReduce), 0ul);
-            EXPECT_EQ(rcclDdaLL128Threshold(&comm, ncclFuncAllReduce), 0ul);
-            EXPECT_EQ(rcclDdaVmmThreshold(&comm, ncclFuncAllReduce), 0ul);
+            EXPECT_EQ(rcclDdaLLThreshold(&comm, ncclFuncAllReduce), kDdaLLBaseDefault);
+            EXPECT_EQ(rcclDdaLL128Threshold(&comm, ncclFuncAllReduce), kDdaLL128BaseDefault);
+            EXPECT_EQ(rcclDdaVmmThreshold(&comm, ncclFuncAllReduce), kDdaVmmBaseDefault);
             EXPECT_FALSE(rcclDdaEnabled(&comm, 1024, rcclDdaVmmThreshold(&comm, ncclFuncAllReduce)));
         },
         {});
