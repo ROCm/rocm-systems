@@ -137,8 +137,19 @@ jobs:
                 free -h
                 echo "--- Per-process top memory (top 10) ---"
                 ps aux --sort=-%mem | head -11
-                echo "--- GPU Memory (rocm-smi) ---"
-                rocm-smi --showmeminfo vram 2>/dev/null || true
+                echo "--- GPU Memory ---"
+                # Try multiple paths/tools for GPU memory info
+                if [[ -x "./build/bin/amd-smi" ]]; then
+                  ./build/bin/amd-smi metric -g 0 --mem 2>/dev/null || true
+                elif [[ -x "./build/bin/rocm-smi" ]]; then
+                  ./build/bin/rocm-smi --showmeminfo vram 2>/dev/null || true
+                elif command -v amd-smi &>/dev/null; then
+                  amd-smi metric -g 0 --mem 2>/dev/null || true
+                elif command -v rocm-smi &>/dev/null; then
+                  rocm-smi --showmeminfo vram 2>/dev/null || true
+                else
+                  echo "(no rocm-smi or amd-smi found)"
+                fi
                 echo "--- cgroup memory ---"
                 echo -n "limit: "; cat /sys/fs/cgroup/memory.max 2>/dev/null || cat /sys/fs/cgroup/memory/memory.limit_in_bytes 2>/dev/null || echo "N/A"
                 echo -n "current: "; cat /sys/fs/cgroup/memory.current 2>/dev/null || cat /sys/fs/cgroup/memory/memory.usage_in_bytes 2>/dev/null || echo "N/A"
