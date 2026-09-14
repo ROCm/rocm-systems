@@ -75,8 +75,8 @@ union gfx1250_TDM_GROUP0
                 uint32_t m_scope_trait : 2;
                 uint32_t m_th :3;
                 uint32_t m_reserved_space : 20;
-                uint32_t m_gather_mode : 1;
                 uint32_t m_gather_index_size : 1;
+                uint32_t m_gather_mode : 1;
             };
 
             uint32_t m_reserved0;
