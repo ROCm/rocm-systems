@@ -177,6 +177,23 @@ else()
     endif()
   endif()
 
+  # The gate above needs pkg-config version data, so on Windows it is applied
+  # here instead -- after the headers have been parsed. Only avcodec's version
+  # is recoverable that way; avformat/avutil are not checked. An unparseable
+  # version is rejected, matching the Linux path, where an unknown version
+  # likewise fails the gate.
+  if(WIN32 AND FFMPEG_FOUND)
+    if(NOT _FFMPEG_AVCODEC_VERSION)
+      message("-- ${Yellow}NOTE: FindFFmpeg could not determine the AVCODEC version${ColourReset}")
+      set(FFMPEG_FOUND FALSE)
+    elseif(_FFMPEG_AVCODEC_VERSION VERSION_LESS 58.18.100)
+      message("-- ${White}FFMPEG   required min version - 4.0.4${ColourReset}")
+      message("-- ${White}AVCODEC  required min version - 58.18.100 Found:${_FFMPEG_AVCODEC_VERSION}${ColourReset}")
+      message("-- ${Yellow}NOTE: FindFFmpeg failed to find -- FFMPEG${ColourReset}")
+      set(FFMPEG_FOUND FALSE)
+    endif()
+  endif()
+
   if(FFMPEG_FOUND)
     set(FFMPEG_INCLUDE_DIR ${AVFORMAT_INCLUDE_DIR} CACHE INTERNAL "")
     set(FFMPEG_LIBRARIES
