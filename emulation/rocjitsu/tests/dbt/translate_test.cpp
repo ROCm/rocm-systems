@@ -10,6 +10,9 @@
 /// These tests complement the hardware tests in hsa_translate_test.cpp which
 /// verify correctness on real DBT host GPUs.
 
+#if defined(RJ_TEST_ALLOCATION_FAILURE_INJECTION)
+#include "../allocation_failure_test_support.h"
+#endif
 #include "../amdgpu_elf_test_support.h"
 #include "../elf_test_support.h"
 #include "rocjitsu/code/amdgpu_code_object.h"
@@ -5603,9 +5606,15 @@ TEST(CodeObjectPatcher, PreservesExactGrowthWhenAlignedAllocationThrows) {
 
   ASSERT_LE(kRequiredGrowth, std::vector<uint8_t>{}.max_size() - image.size())
       << "the request must reach the allocator instead of the max_size precheck";
+#if defined(RJ_TEST_ALLOCATION_FAILURE_INJECTION)
+  test_support::ScopedAllocationFailure allocation_failure(kRequiredGrowth);
+#endif
   expect_text_growth_rejected_without_mutation(std::move(image), std::numeric_limits<size_t>::max(),
                                                TextReplacementOutcome::AllocationFailure,
                                                RequiredGrowthExpectation::Exact, kRequiredGrowth);
+#if defined(RJ_TEST_ALLOCATION_FAILURE_INJECTION)
+  EXPECT_EQ(allocation_failure.failures(), 1u);
+#endif
 }
 
 TEST(CodeObjectPatcher, SidecarDescriptorAppendIsTypedAndTransactional) {
@@ -5632,9 +5641,17 @@ TEST(CodeObjectPatcher, SidecarDescriptorAppendIsTypedAndTransactional) {
                                                     CodeObjectPatchOutcome::MalformedInput);
   }
 
-  expect_sidecar_append_rejected_without_mutation(make_minimal_amdgpu_elf_with_load_segments(),
-                                                  CodeObjectPatchOutcome::AllocationFailure,
-                                                  uint64_t{1} << 63u);
+  {
+#if defined(RJ_TEST_ALLOCATION_FAILURE_INJECTION)
+    test_support::ScopedAllocationFailure allocation_failure(size_t{1} << 62u);
+#endif
+    expect_sidecar_append_rejected_without_mutation(make_minimal_amdgpu_elf_with_load_segments(),
+                                                    CodeObjectPatchOutcome::AllocationFailure,
+                                                    uint64_t{1} << 63u);
+#if defined(RJ_TEST_ALLOCATION_FAILURE_INJECTION)
+    EXPECT_EQ(allocation_failure.failures(), 1u);
+#endif
+  }
 
   {
     const auto image = make_minimal_amdgpu_elf_with_load_segments();

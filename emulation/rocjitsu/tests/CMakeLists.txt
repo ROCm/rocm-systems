@@ -676,6 +676,14 @@ add_executable(
 if(RJ_ENABLE_ASSERTIONS)
     target_sources(rocjitsu_tests PRIVATE build_configuration_test.cpp)
 endif()
+# Fail selected allocator calls deterministically instead of asking ASan's
+# operator new for an impossible allocation (which aborts rather than throws).
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND CMAKE_SIZEOF_VOID_P EQUAL 8)
+    target_sources(rocjitsu_tests PRIVATE allocation_failure_test_support.cpp)
+    set_property(SOURCE dbt/translate_test.cpp APPEND PROPERTY
+        COMPILE_DEFINITIONS RJ_TEST_ALLOCATION_FAILURE_INJECTION=1)
+    target_link_options(rocjitsu_tests PRIVATE "LINKER:--wrap=_Znwm")
+endif()
 rj_add_consan_unit_sources(rocjitsu_tests)
 if(HAS_DEVICE_KERNELS)
     target_sources(
