@@ -22,4 +22,4 @@ A ``VideoSeekContext`` is passed to ``seek()``. The seek context specifies a see
 
   On Linux: ``sudo apt install libavcodec-dev libavformat-dev libavutil-dev``
 
-  On Windows: use pre-built FFmpeg libraries or build from source. CMake searches your ``PATH`` and common install locations automatically; pass ``-DFFMPEG_ROOT=<path-to-ffmpeg>`` only to override that search or point to a non-standard install.
+ On Windows: use pre-built FFmpeg libraries or build from source. CMake searches your ``PATH`` and common install locations automatically. Use ``-DFFMPEG_ROOT`` to set the path to the FFMpeg libraries only to override the CMake search or point to a specific non-standard location.

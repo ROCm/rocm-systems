@@ -73,7 +73,7 @@ On Windows, rocDecode uses the [vaon12](https://devblogs.microsoft.com/directx/v
 
 **Windows:**
 
-  Use pre-built FFmpeg libraries or build from source. CMake searches your `PATH` and common install locations automatically; pass `-DFFMPEG_ROOT=<path>` only to override that search or point to a non-standard install.
+Use pre-built FFmpeg libraries or build from source. CMake searches your ``PATH`` and common install locations automatically. Use ``-DFFMPEG_ROOT`` to set the path to the FFMpeg libraries only to override the CMake search or point to a specific non-standard location.
 
 ## Install
 
@@ -145,7 +145,7 @@ cmake --install . --config Release
 > [!NOTE]
 > * Set `ROCM_PATH` to the TheRock build output directory. The VA-API runtime and driver are
 >   picked up from there; no separate path needs to be supplied.
-> * FFmpeg support (samples and the host decoder) is detected automatically from your `PATH` and common install locations; add `-DFFMPEG_ROOT=<path-to-ffmpeg>` only to override that search or point to a non-standard install.
+>       * FFmpeg support is detected automatically from your ``PATH`` and common installation locations. Use  ``-DFFMPEG_ROOT=<path-to-ffmpeg>`` to override that search or point to a specific non-standard location
 
 ### Run tests
 
