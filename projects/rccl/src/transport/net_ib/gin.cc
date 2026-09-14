@@ -354,19 +354,6 @@ ncclGin_t ncclGinIbGdaki = {"GIN_IB_GDAKI",
                             ncclGinIbFinalize};
 #endif // !defined(__HIP_PLATFORM_AMD__)
 
-struct ncclRmaIbProxyMrHandle {
-  int nSegments;
-  // segOff[0]==0, segOff[nSegments]==size; per-segment local MRs.
-  // base_vas indexed [rank*nSegments + seg].
-  // rkeys indexed [rank][seg][dev]:
-  //   (rank * nSegments + seg) * NCCL_IB_MAX_DEVS_PER_NIC + remDevIdx
-  // so posting can pick the remote device that owns the QP, same as classic IB.
-  size_t segOff[NCCL_RMA_MAX_SEGMENTS + 1];
-  struct ncclIbMrHandle* mrHandle[NCCL_RMA_MAX_SEGMENTS];
-  uintptr_t* base_vas;
-  uint32_t* rkeys;
-};
-
 struct ncclRmaIbProxyRegistration {
   ncclResult_t status;
   int nSegments;
@@ -596,7 +583,9 @@ ncclResult_t ncclRmaIbProxyRegMrSymDmaBuf(void* collComm, void* data, size_t siz
   struct ncclGinIbCollComm* cComm = (struct ncclGinIbCollComm*)collComm;
   struct ncclRmaIbProxyMrHandle* rmaMrHandle = NULL;
   struct ncclRmaIbProxyRegistration localRegistration = {};
+  struct ncclRmaIbProxyRegistration registrationsStack[64];
   struct ncclRmaIbProxyRegistration* registrations = NULL;
+  int registrationsHeap = 0;
   uintptr_t localVas[NCCL_RMA_MAX_SEGMENTS] = {};
   uint32_t localRkeys[NCCL_RMA_MAX_SEGMENTS * NCCL_IB_MAX_DEVS_PER_NIC] = {};
   ncclResult_t ret = ncclSuccess;
@@ -604,7 +593,15 @@ ncclResult_t ncclRmaIbProxyRegMrSymDmaBuf(void* collComm, void* data, size_t siz
   int registered = 0;
 
   *mhandle = NULL;
-  NCCLCHECKGOTO(ncclCalloc(&registrations, cComm->nranks), ret, fail);
+  // The first allGather receive buffer cannot live only on the heap: a
+  // calloc failure would jump to fail before peers reach that collective.
+  if (cComm->nranks <= (int)(sizeof(registrationsStack) / sizeof(registrationsStack[0]))) {
+    registrations = registrationsStack;
+    memset(registrations, 0, sizeof(*registrations) * (size_t)cComm->nranks);
+  } else {
+    NCCLCHECKGOTO(ncclCalloc(&registrations, cComm->nranks), ret, fail);
+    registrationsHeap = 1;
+  }
   ret = ncclCalloc(&rmaMrHandle, 1);
   if (ret != ncclSuccess) goto reconcile;
   // calloc zeroes nSegments; fail paths below only dereg `registered` complete
@@ -646,7 +643,8 @@ ncclResult_t ncclRmaIbProxyRegMrSymDmaBuf(void* collComm, void* data, size_t siz
       CUdeviceptr segBase = 0;
       size_t segSize = 0;
       CUCHECKGOTO(cuMemGetAddressRange(&segBase, &segSize, (CUdeviceptr)segPtr), ret, reconcile);
-      size_t inSeg = segSize - (segPtr - (uintptr_t)segBase);
+      // Host VMM can report segBase==0; subtracting then wraps the length.
+      size_t inSeg = (segBase == 0) ? segSize : segSize - (segPtr - (uintptr_t)segBase);
       size_t thisLen = remaining < inSeg ? remaining : inSeg;
       int segFd = -1;
       // Export this segment alone: one physical allocation, so its fd is complete.
@@ -753,7 +751,7 @@ reconcile:
                                  sizeof(uint32_t) * nSeg * NCCL_IB_MAX_DEVS_PER_NIC),
                 ret, fail);
 
-  free(registrations);
+  if (registrationsHeap) free(registrations);
   *mhandle = rmaMrHandle;
   return ncclSuccess;
 
@@ -768,7 +766,7 @@ fail:
     free(rmaMrHandle->rkeys);
     free(rmaMrHandle);
   }
-  free(registrations);
+  if (registrationsHeap) free(registrations);
   return ret;
 }
 
@@ -848,7 +846,7 @@ static ncclResult_t ncclRmaCompletePostedRequest(struct ncclIbRequest* req, int 
     return postRet;
   }
   *request = req;
-  return postRet;
+  return ncclRmaPostedRequestStatus(postRet, posted);
 }
 
 ncclResult_t ncclRmaIbProxyIPut(void* rmaCtx, int context, uint64_t srcOff, void* srcMhandle, size_t size,

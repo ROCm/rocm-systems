@@ -156,6 +156,7 @@ function(add_rocshmem_targets)
         set(ROCSHMEM_INSTALL_DIR "${ROCSHMEM_INSTALL_DIR}"          PARENT_SCOPE)
         set(ROCSHMEM_INCLUDE_DIR "${ROCSHMEM_INSTALL_DIR}/include"  PARENT_SCOPE)
         set(ROCSHMEM_LIBRARY     "${ROCSHMEM_INSTALL_DIR}/lib/librocshmem.a" PARENT_SCOPE)
+        set(ROCSHMEM_BUILD_DIR   "${ROCSHMEM_INSTALL_DIR}/build"    PARENT_SCOPE)
 
         add_custom_target(rocshmem_static ALL DEPENDS rocshmem_ext)
     endif()

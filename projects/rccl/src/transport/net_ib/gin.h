@@ -27,6 +27,13 @@
 #define NCCL_RMA_MAX_SIGNAL_WRS (NCCL_RMA_MAX_DATA_WRS + 1)
 #define NCCL_RMA_MAX_FLUSH_WRS NCCL_RMA_MAX_SEGMENTS
 
+static_assert(NCCL_RMA_MAX_DATA_WRS == 2 * NCCL_RMA_MAX_SEGMENTS,
+              "data WR budget must cover a split on every local and remote boundary");
+static_assert(NCCL_RMA_MAX_SIGNAL_WRS == NCCL_RMA_MAX_DATA_WRS + 1,
+              "signal WR budget must cover the data chain plus the atomic");
+static_assert(NCCL_RMA_MAX_FLUSH_WRS == NCCL_RMA_MAX_SEGMENTS,
+              "flush WR budget must cover one RDMA_READ per physical segment");
+
 static inline size_t ncclRmaSegmentSliceBytes(size_t remaining, size_t localRemaining, size_t remoteRemaining) {
   size_t chunk = remaining;
   if (localRemaining < chunk) chunk = localRemaining;
@@ -60,6 +67,30 @@ static inline int ncclRmaPostedWrCount(const void* wr, int nWr, const void* badW
 // A failed handle calloc must not memcpy segOff before the status AllGather.
 static inline int ncclRmaRegistrationHandleReady(const void* handle, int nSeg) {
   return handle != NULL && nSeg >= 1 && nSeg <= NCCL_RMA_MAX_SEGMENTS;
+}
+
+// After a prefix post, keep the request and return success so Test() drains.
+// Callers NCCLCHECK the complete helper and never reach test() on error.
+static inline ncclResult_t ncclRmaPostedRequestStatus(ncclResult_t postRet, int posted) {
+  if (postRet != ncclSuccess && posted > 0) return ncclSuccess;
+  return postRet;
+}
+
+struct ncclIbMrHandle;
+struct ncclRmaIbProxyMrHandle {
+  int nSegments;
+  // segOff[0]==0, segOff[nSegments]==size; per-segment local MRs.
+  // base_vas indexed [rank*nSegments + seg].
+  // rkeys indexed (rank * nSegments + seg) * NCCL_IB_MAX_DEVS_PER_NIC + remDevIdx
+  size_t segOff[NCCL_RMA_MAX_SEGMENTS + 1];
+  struct ncclIbMrHandle* mrHandle[NCCL_RMA_MAX_SEGMENTS];
+  uintptr_t* base_vas;
+  uint32_t* rkeys;
+};
+
+static inline int ncclRmaHandleNSegments(const void* mhandle) {
+  const struct ncclRmaIbProxyMrHandle* h = (const struct ncclRmaIbProxyMrHandle*)mhandle;
+  return h != NULL ? h->nSegments : 0;
 }
 
 struct ncclGinIbCollComm {

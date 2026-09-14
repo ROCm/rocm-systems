@@ -1068,7 +1068,11 @@ if(GENERATE_SYM_KERNELS)
     # Pick the first arch's pre-opt bitcode dir (all archs produce identical
     # unoptimized IR since -Xclang -disable-llvm-passes is used).
     list(GET DL_GPU_TARGETS 0 _bc_arch)
-    set(_bc_dir "${ROCSHMEM_SOURCE_DIR}/build/bitcode/${_bc_arch}")
+    if(ROCSHMEM_BUILD_DIR)
+      set(_bc_dir "${ROCSHMEM_BUILD_DIR}/bitcode/${_bc_arch}")
+    else()
+      set(_bc_dir "${ROCSHMEM_SOURCE_DIR}/build/bitcode/${_bc_arch}")
+    endif()
     set(_qp_bc "${DEVICE_BUILD_DIR}/rocshmem_qp_device.bc")
     find_program(_llvm_link llvm-link HINTS ${ROCM_PATH}/llvm/bin REQUIRED)
     find_program(_llvm_dis  llvm-dis  HINTS ${ROCM_PATH}/llvm/bin REQUIRED)
