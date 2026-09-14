@@ -1471,7 +1471,8 @@ TEST_F(DdaFabricLL128EligibilityTest, AllGatherLL128_ScratchTooSmallForOneSlice)
 
 TEST_F(DdaFabricLL128EligibilityTest, AllGatherLL128_AtThresholdEligible)
 {
-    constexpr size_t totalCap = 64u * 1024u * 1024u;  // DDA_LL128_THRESHOLD default
+    // archThresholds == nullptr -> resolved threshold falls back to kDdaLL128BaseDefault (32 MiB)
+    constexpr size_t totalCap = kDdaLL128BaseDefault;
     const size_t perRankBytes = totalCap / (size_t)mockComm_.comm.nRanks;
     EXPECT_TRUE(ncclAllGatherDdaFabricLL128Eligible(
         mockComm_.get(), sendbuff_, recvbuff_, perRankBytes / sizeof(float), ncclFloat32));
@@ -1479,7 +1480,7 @@ TEST_F(DdaFabricLL128EligibilityTest, AllGatherLL128_AtThresholdEligible)
 
 TEST_F(DdaFabricLL128EligibilityTest, AllGatherLL128_PastThresholdRejected)
 {
-    constexpr size_t totalCap = 64u * 1024u * 1024u;
+    constexpr size_t totalCap = kDdaLL128BaseDefault;
     const size_t perRankBytes = totalCap / (size_t)mockComm_.comm.nRanks + 16;
     EXPECT_FALSE(ncclAllGatherDdaFabricLL128Eligible(
         mockComm_.get(), sendbuff_, recvbuff_, perRankBytes / sizeof(float), ncclFloat32));
