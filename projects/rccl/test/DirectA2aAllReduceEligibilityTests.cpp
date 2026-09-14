@@ -21,13 +21,17 @@ protected:
     std::strcpy(archName_, "gfx1151");
     comm_.archName = archName_;
     comm_.bootstrap = &bootstrapPlaceholder_;
-    comm_.nRanks = 4;
-    comm_.nNodes = 4;
     comm_.minLocalRanks = 1;
     comm_.maxLocalRanks = 1;
     comm_.config.blocking = 1;
     comm_.directA2aScratch = reinterpret_cast<void*>(0x1000);
-    comm_.directA2aScratchBytes = RCCL_DIRECT_A2A_MAX_RANKS * RCCL_DIRECT_A2A_MAX_BYTES;
+    setRanks(RCCL_DIRECT_A2A_MAX_RANKS);
+  }
+
+  void setRanks(int nRanks) {
+    comm_.nRanks = nRanks;
+    comm_.nNodes = nRanks;
+    comm_.directA2aScratchBytes = rcclDirectA2aAllReduceScratchBytes(nRanks);
   }
 
   ncclComm comm_{};
@@ -42,12 +46,15 @@ TEST_F(DirectA2aAllReduceEligibilityTest, EligibleSupportedTypes) {
 }
 
 TEST_F(DirectA2aAllReduceEligibilityTest, EligibleRankAndSizeBoundaries) {
-  comm_.nRanks = comm_.nNodes = RCCL_DIRECT_A2A_MIN_RANKS;
+  setRanks(RCCL_DIRECT_A2A_MIN_RANKS);
   EXPECT_TRUE(rcclDirectA2aAllReduceEligible(
     &comm_, RCCL_DIRECT_A2A_TWO_RANK_MAX_BYTES / sizeof(float), ncclFloat32, ncclSum));
   EXPECT_FALSE(rcclDirectA2aAllReduceEligible(
     &comm_, RCCL_DIRECT_A2A_TWO_RANK_MAX_BYTES / sizeof(float) + 1, ncclFloat32, ncclSum));
-  comm_.nRanks = comm_.nNodes = 3;
+  setRanks(3);
+  EXPECT_TRUE(rcclDirectA2aAllReduceEligible(
+    &comm_, RCCL_DIRECT_A2A_MAX_BYTES / sizeof(float), ncclFloat32, ncclSum));
+  setRanks(RCCL_DIRECT_A2A_MAX_RANKS);
   EXPECT_TRUE(rcclDirectA2aAllReduceEligible(
     &comm_, RCCL_DIRECT_A2A_MAX_BYTES / sizeof(float), ncclFloat32, ncclSum));
 }
@@ -55,12 +62,12 @@ TEST_F(DirectA2aAllReduceEligibilityTest, EligibleRankAndSizeBoundaries) {
 TEST_F(DirectA2aAllReduceEligibilityTest, SupportsOneShotAndUnevenTwoShotCounts) {
   const size_t oneShotCount = RCCL_DIRECT_A2A_DEFAULT_ONESHOT_THRESHOLD_BYTES / sizeof(float);
   EXPECT_TRUE(rcclDirectA2aAllReduceEligible(&comm_, oneShotCount, ncclFloat32, ncclSum));
+  // oneShotCount+1 = 16385 is not divisible by nRanks=4, so this is an uneven two-shot.
   EXPECT_TRUE(rcclDirectA2aAllReduceEligible(&comm_, oneShotCount + 1, ncclFloat32, ncclSum));
-  EXPECT_NE((oneShotCount + 1) % (size_t)comm_.nRanks, 0);
 }
 
 TEST_F(DirectA2aAllReduceEligibilityTest, TwoRanksUseOneShotThroughFourMiB) {
-  comm_.nRanks = comm_.nNodes = 2;
+  setRanks(2);
   const size_t count = RCCL_DIRECT_A2A_TWO_RANK_MAX_BYTES / sizeof(float);
   comm_.directA2aScratchBytes = (size_t)comm_.nRanks * count * sizeof(float) - 1;
   EXPECT_FALSE(rcclDirectA2aAllReduceEligible(&comm_, count, ncclFloat32, ncclSum));
@@ -89,12 +96,10 @@ TEST_F(DirectA2aAllReduceEligibilityTest, RejectsNonBlockingCommunicator) {
 }
 
 TEST_F(DirectA2aAllReduceEligibilityTest, EnforcesRankRange) {
-  comm_.nRanks = 1;
-  comm_.nNodes = 1;
+  setRanks(1);
   EXPECT_FALSE(rcclDirectA2aAllReduceEligible(&comm_, 256, ncclFloat32, ncclSum));
   reset();
-  comm_.nRanks = RCCL_DIRECT_A2A_MAX_RANKS + 1;
-  comm_.nNodes = comm_.nRanks;
+  setRanks(RCCL_DIRECT_A2A_MAX_RANKS + 1);
   EXPECT_FALSE(rcclDirectA2aAllReduceEligible(&comm_, 256, ncclFloat32, ncclSum));
 }
 
@@ -123,12 +128,16 @@ TEST_F(DirectA2aAllReduceEligibilityTest, RejectsUnsupportedOperationAndDatatype
 TEST_F(DirectA2aAllReduceEligibilityTest, RejectsInsufficientScratch) {
   comm_.directA2aScratchBytes = comm_.nRanks * 256 * sizeof(float) - 1;
   EXPECT_FALSE(rcclDirectA2aAllReduceEligible(&comm_, 256, ncclFloat32, ncclSum));
+  comm_.directA2aScratchBytes++;
+  EXPECT_TRUE(rcclDirectA2aAllReduceEligible(&comm_, 256, ncclFloat32, ncclSum));
 
   reset();
   const size_t count = RCCL_DIRECT_A2A_DEFAULT_ONESHOT_THRESHOLD_BYTES / sizeof(float) + 1;
   const size_t maxChunkCount = (count + (size_t)comm_.nRanks - 1) / (size_t)comm_.nRanks;
   comm_.directA2aScratchBytes = ((size_t)comm_.nRanks + 1) * maxChunkCount * sizeof(float) - 1;
   EXPECT_FALSE(rcclDirectA2aAllReduceEligible(&comm_, count, ncclFloat32, ncclSum));
+  comm_.directA2aScratchBytes++;
+  EXPECT_TRUE(rcclDirectA2aAllReduceEligible(&comm_, count, ncclFloat32, ncclSum));
 }
 
 } // namespace RcclUnitTesting

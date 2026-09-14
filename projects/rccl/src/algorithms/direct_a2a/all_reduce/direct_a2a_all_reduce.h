@@ -18,6 +18,10 @@ constexpr size_t RCCL_DIRECT_A2A_MAX_BYTES = 1ULL << 24;
 constexpr int RCCL_DIRECT_A2A_MIN_RANKS = 2;
 constexpr int RCCL_DIRECT_A2A_MAX_RANKS = 4;
 
+// Bytes CommInit would allocate for this rank count. Host tests size the
+// eligibility fixture from this so documented maxima match production scratch.
+size_t rcclDirectA2aAllReduceScratchBytes(int nRanks);
+
 // Initialize the per-communicator receive staging buffer when the strictly
 // gated gfx1151 direct-A2A path is enabled.
 ncclResult_t rcclDirectA2aAllReduceCommInit(struct ncclComm* comm);

@@ -1252,6 +1252,11 @@
           "name": "DdaIpcEligibilityTest",
           "description": "Dda IPC eligibility tests",
           "test_filter": "DdaIpcEligibilityTest.*"
+        },
+        {
+          "name": "DirectA2aAllReduceEligibilityTest",
+          "description": "gfx1151 DIRECT_A2A AllReduce eligibility tests",
+          "test_filter": "DirectA2aAllReduceEligibilityTest.*"
         }
       ]
     },

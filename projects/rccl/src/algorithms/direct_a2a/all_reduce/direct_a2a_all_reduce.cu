@@ -67,7 +67,7 @@ __global__ void directA2aSumKernel(const T* __restrict__ scratch, T* __restrict_
 
 template <typename T>
 ncclResult_t launchDirectA2aSum(void* scratch, void* recvbuff, size_t count, int nRanks, cudaStream_t stream) {
-  int blocks = (int)std::min<size_t>((count + kDirectA2aThreads - 1) / kDirectA2aThreads, kDirectA2aMaxBlocks);
+  int blocks = (int)dda::common::calcBlockCount(count, kDirectA2aThreads, kDirectA2aMaxBlocks);
   directA2aSumKernel<T><<<blocks, kDirectA2aThreads, 0, stream>>>(
     static_cast<const T*>(scratch), static_cast<T*>(recvbuff), count, nRanks);
   CUDACHECK(cudaGetLastError());
@@ -193,6 +193,15 @@ ncclResult_t directA2aTwoShot(const void* sendbuff, void* recvbuff, size_t count
 
 } // namespace
 
+size_t rcclDirectA2aAllReduceScratchBytes(int nRanks) {
+  if (nRanks <= 0) return 0;
+  const size_t oneShotScratchBytes = (size_t)nRanks * directA2aOneShotThreshold(nRanks);
+  const size_t maxTwoShotChunkBytes =
+    (directA2aMaxBytes(nRanks) + (size_t)nRanks - 1) / (size_t)nRanks + sizeof(double);
+  const size_t twoShotScratchBytes = ((size_t)nRanks + 1) * maxTwoShotChunkBytes;
+  return std::max(oneShotScratchBytes, twoShotScratchBytes);
+}
+
 ncclResult_t rcclDirectA2aAllReduceCommInit(ncclComm* comm) {
   if (comm == nullptr || !rcclParamDirectA2aEnable()) return ncclSuccess;
   if (!IsArchMatch(comm->archName, "gfx1151") || comm->nRanks < RCCL_DIRECT_A2A_MIN_RANKS ||
@@ -201,11 +210,7 @@ ncclResult_t rcclDirectA2aAllReduceCommInit(ncclComm* comm) {
     return ncclSuccess;
   }
 
-  const size_t oneShotScratchBytes = (size_t)comm->nRanks * directA2aOneShotThreshold(comm->nRanks);
-  const size_t maxTwoShotChunkBytes =
-    (directA2aMaxBytes(comm->nRanks) + (size_t)comm->nRanks - 1) / (size_t)comm->nRanks + sizeof(double);
-  const size_t twoShotScratchBytes = ((size_t)comm->nRanks + 1) * maxTwoShotChunkBytes;
-  const size_t scratchBytes = std::max(oneShotScratchBytes, twoShotScratchBytes);
+  const size_t scratchBytes = rcclDirectA2aAllReduceScratchBytes(comm->nRanks);
   ncclResult_t res = ncclCudaMalloc(&comm->directA2aScratch, scratchBytes, comm->memManager);
   if (res != ncclSuccess) {
     comm->directA2aScratch = nullptr;

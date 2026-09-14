@@ -863,8 +863,9 @@ bool rcclCeAllReduceAllowed(struct ncclComm* comm) {
 // Single source of truth for AllReduce implementation selection. See the header
 // comment on rcclSelectAllReduce(). The priority chain and every gate below are a
 // faithful consolidation of what was previously split between ncclAllReduce_impl()
-// (symmetric / CE 2-shot / DIRECT_A2A / DDA) and taskAppend() (CE registered /
-// kernel); the outcome for any given operands is identical.
+// (symmetric / CE 2-shot / DDA) and taskAppend() (CE registered / kernel);
+// DIRECT_A2A is new in this change. The outcome for any given pre-existing
+// operands is identical.
 ncclResult_t rcclSelectAllReduce(struct ncclComm* comm, const void* sendbuff, void* recvbuff, size_t count,
                                  ncclDataType_t datatype, ncclRedOp_t op, cudaStream_t stream, bool query,
                                  bool graphCapturingHint, struct rcclCollDecision* decision) {
@@ -930,9 +931,10 @@ ncclResult_t rcclSelectAllReduce(struct ncclComm* comm, const void* sendbuff, vo
     return ncclSuccess;
   }
 
-  // gfx1151 full-mesh NET fast path. Matches the pre-refactor collectives.cc
-  // guards: not symmetric, not graph-captured, not implicit launch order, not
-  // inside a group, plus the standalone eligibility check (arch/ranks/op/scratch).
+  // gfx1151 full-mesh NET fast path, new in this change (no pre-refactor
+  // equivalent). Gated on: not symmetric, not graph-captured, not implicit
+  // launch order, not inside a group, plus the standalone eligibility check
+  // (arch/ranks/op/scratch).
   if (!symEligible && !ceCapturing && !ncclParamLaunchOrderImplicit() && ncclGroupDepth == 0 &&
       rcclDirectA2aAllReduceEligible(comm, count, datatype, op)) {
     decision->algo = RCCL_DIRECT_A2A;

@@ -651,6 +651,8 @@ struct ncclComm {
 
   // Standalone gfx1151 DIRECT_A2A receive staging. Each rank owns one
   // contiguous slot per peer; grouped P2P fills the slots before local reduce.
+  // Unsafe to run two AllReduce calls concurrently on the same communicator
+  // across different streams (no serialization).
   void* directA2aScratch;
   size_t directA2aScratchBytes;
 

@@ -846,6 +846,11 @@
           "test_filter": "DdaIpcEligibilityTest.*"
         },
         {
+          "name": "DirectA2aAllReduceEligibilityTest",
+          "description": "gfx1151 DIRECT_A2A AllReduce eligibility tests",
+          "test_filter": "DirectA2aAllReduceEligibilityTest.*"
+        },
+        {
           "name": "DdaAlltoAllThresholdTest",
           "description": "DDA AlltoAll 4 MiB threshold and host staging-byte unit tests for gfx942/gfx950",
           "test_filter": "DdaAlltoAllThresholdTest.*:DdaAlltoAllThreshold.*"
