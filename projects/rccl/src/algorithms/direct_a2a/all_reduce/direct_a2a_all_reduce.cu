@@ -191,6 +191,8 @@ ncclResult_t directA2aTwoShot(const void* sendbuff, void* recvbuff, size_t count
 size_t rcclDirectA2aAllReduceScratchBytes(int nRanks) {
   if (nRanks <= 0) return 0;
   const size_t oneShotScratchBytes = (size_t)nRanks * directA2aOneShotThreshold(nRanks);
+  // Byte-then-divide sizing can undershoot the eligibility gate's count-then-multiply
+  // when nRanks does not divide the maximum; sizeof(double) covers that mismatch.
   const size_t maxTwoShotChunkBytes =
     (directA2aMaxBytes(nRanks) + (size_t)nRanks - 1) / (size_t)nRanks + sizeof(double);
   const size_t twoShotScratchBytes = ((size_t)nRanks + 1) * maxTwoShotChunkBytes;
