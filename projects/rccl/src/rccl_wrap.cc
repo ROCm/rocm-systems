@@ -1536,6 +1536,9 @@ ncclResult_t rcclSelectAllGather(struct ncclComm* comm, const void* sendbuff, vo
 
   // Graph capture probe hoisted so symMaxR2 can pick symMaxR2Graph vs
   // symMaxR2 depending on whether a capture is active. Mirrors AllReduce.
+  // Tick the latch on the live path so a capture containing only AG (and no
+  // AR) still sets graphModeSeen, preventing CE AR from firing on a later
+  // eager AllReduce that shares this comm (ce_coll.h:93).
   bool ceCapturing;
   if (query) {
     ceCapturing = graphCapturingHint;
@@ -1543,6 +1546,7 @@ ncclResult_t rcclSelectAllGather(struct ncclComm* comm, const void* sendbuff, vo
     struct ncclCudaGraph ceGraph;
     NCCLCHECK(ncclCudaGetCapturingGraph(&ceGraph, stream, comm->config.graphUsageMode));
     ceCapturing = ncclCudaGraphValid(ceGraph);
+    rcclCeAllReduceGraphLatchTick(comm, ceCapturing);
   }
   decision->ceCapturing = ceCapturing;
 
@@ -2065,6 +2069,9 @@ ncclResult_t rcclSelectAlltoAll(struct ncclComm* comm, const void* sendbuff, voi
   // CE is graph-unsafe. Live probes the stream; reporting uses graphCapturingHint.
   // taskAppend honors this decision, so capture must be recorded here rather than
   // re-probed at enqueue.
+  // Tick the latch on the live path so a capture containing only A2A (and no
+  // AR) still sets graphModeSeen, preventing CE AR from firing on a later
+  // eager AllReduce that shares this comm (ce_coll.h:93).
   bool ceCapturing;
   if (query) {
     ceCapturing = graphCapturingHint;
@@ -2072,6 +2079,7 @@ ncclResult_t rcclSelectAlltoAll(struct ncclComm* comm, const void* sendbuff, voi
     struct ncclCudaGraph ceGraph;
     NCCLCHECK(ncclCudaGetCapturingGraph(&ceGraph, stream, comm->config.graphUsageMode));
     ceCapturing = ncclCudaGraphValid(ceGraph);
+    rcclCeAllReduceGraphLatchTick(comm, ceCapturing);
   }
   decision->ceCapturing = ceCapturing;
 
