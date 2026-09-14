@@ -32,7 +32,7 @@ ROCm-prefix path being present on `sys.path`.
 | `rocprof_trace_decoder.codegen` | Builds in-memory code metadata from explicit code object inputs | Public utility |
 | `rocprof_trace_decoder.analysis` | Derived analyses over decoded records | Public utility |
 | `rocprof_trace_decoder.analysis.hidden_latency` | Instruction-pipe overlap and hidden-latency analysis | Public utility |
-| `rocprof_trace_decoder.rcv` | ROCprof Compute Viewer JSON writer | Internal utility |
+| `rocprof_trace_decoder.analysis.rcv` | ROCprof Compute Viewer JSON writer | Internal utility |
 | `rocprof_trace_decoder.att` | High-level ATT decode orchestration with explicit trace metadata | Public utility |
 | `generate_code.py` | Generates `code.json`, snapshots, and source copies from code objects | Tool module |
 | `att_tool.py` | CLI script for ATT output generation | Tool script |
@@ -203,9 +203,10 @@ write the returned `CodeIndex`.
 
 ## `rocprof_trace_decoder.analysis`
 
-`analysis` holds derived analyses computed from decoded records. It adds no new
-decoding: every submodule consumes the same `TraceRecords` the decoder already
-produced. Today it contains `hidden_latency`.
+`analysis` holds the modules that consume decoded records. None of them decode
+anything new: every submodule works from the same `TraceRecords` the decoder
+already produced. It contains `hidden_latency`, which estimates instruction-pipe
+overlap, and `rcv`, which serializes records into ROCprof Compute Viewer files.
 
 ## `rocprof_trace_decoder.analysis.hidden_latency`
 
@@ -261,7 +262,7 @@ and a truncated `3 * cycles / 4` to VALU, matching `buildUtil` in the viewer's
 `hidden_latency.cpp`. Without a `CodeIndex` they stay `VALU`, measurably
 changing results on traces that mix matrix and non-matrix work.
 
-## `rocprof_trace_decoder.rcv`
+## `rocprof_trace_decoder.analysis.rcv`
 
 `rcv.py` writes ROCprof Compute Viewer sidecar JSON. Its main class,
 `RcvOutputWriter`, receives decoded records grouped by shader engine and writes
