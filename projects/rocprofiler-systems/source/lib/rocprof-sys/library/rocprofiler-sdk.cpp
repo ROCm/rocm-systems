@@ -31,6 +31,8 @@
 #include "library/pmc/sampler.hpp"
 #include "library/process_sampler.hpp"
 #include "library/rocprofiler-sdk/counters.hpp"
+#include "library/rocprofiler-sdk/domain_selection.hpp"
+#include "library/rocprofiler-sdk/domain_service.hpp"
 #include "library/rocprofiler-sdk/fwd.hpp"
 #include "library/rocprofiler-sdk/rccl.hpp"
 #include "library/rocprofiler-sdk/trace_control.hpp"
@@ -44,6 +46,7 @@
 #include <timemory/unwind/processed_entry.hpp>
 #include <timemory/variadic/lightweight_tuple.hpp>
 
+#include <exception>
 #include <string_view>
 #include <type_traits>
 #include <utility>
@@ -89,8 +92,6 @@
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
-
-#include "library/rocprofiler-sdk/domain_service.hpp"
 
 namespace rocprofsys
 {

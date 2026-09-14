@@ -282,12 +282,16 @@ struct mock_sdk
     // trivial no-op stubs rather than g_mock forwards.
     static void       stop_context(context_id_t /*context*/) {}
     static agent_id_t make_agent_id(std::uint64_t handle) { return agent_id_t{ handle }; }
-    static status_t   sample_device_counting_service(context_id_t, user_data_t,
-                                                     counter_flag_t, counter_record_t*,
-                                                     std::size_t*)
+
+    // NOLINTBEGIN(readability-function-size)
+    static status_t sample_device_counting_service(context_id_t, user_data_t,
+                                                   counter_flag_t, counter_record_t*,
+                                                   std::size_t*)
     {
         return status_success;
     }
+    // NOLINTEND
+
     static status_t query_record_counter_id(counter_record_t, counter_id_t*)
     {
         return status_success;
@@ -306,12 +310,15 @@ struct mock_sdk
     {
         return status_success;
     }
+
+    // NOLINTBEGIN(readability-function-size)
     static status_t configure_device_counting_service(context_id_t, buffer_id_t,
                                                       agent_id_t,
                                                       device_counting_service_cb_t, void*)
     {
         return status_success;
     }
+    // NOLINTEND
 
     // NOLINTNEXTLINE(readability-function-size)
     static void create_buffer(context_id_t context, std::size_t buffer_size,

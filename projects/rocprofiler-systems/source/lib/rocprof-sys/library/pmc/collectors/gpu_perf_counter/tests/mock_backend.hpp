@@ -228,12 +228,15 @@ public:
     static void start_context(context_id_t ctx) { active().start_context(ctx); }
     static void stop_context(context_id_t ctx) { active().stop_context(ctx); }
 
-    static status_t sample_device_counting_service(context_id_t ctx, user_data_t ud,
+    // NOLINTBEGIN(readability-function-size)
+    static status_t sample_device_counting_service(context_id_t      ctx,
+                                                   user_data_t       user_data,
                                                    counter_flag_t    flags,
                                                    counter_record_t* out, size_t* count)
     {
-        return active().sample_device_counting_service(ctx, ud, flags, out, count);
+        return active().sample_device_counting_service(ctx, user_data, flags, out, count);
     }
+    // NOLINTEND
 
     static status_t query_record_counter_id(counter_record_t record,
                                             counter_id_t*    counter_id)
@@ -261,13 +264,15 @@ public:
                                               config_id);
     }
 
-    static status_t configure_device_counting_service(context_id_t ctx, buffer_id_t buf,
-                                                      agent_id_t                   agent,
-                                                      device_counting_service_cb_t cb,
-                                                      void* user_data)
+    // NOLINTBEGIN(readability-function-size)
+    static status_t configure_device_counting_service(
+        context_id_t ctx, buffer_id_t buf, agent_id_t agent,
+        device_counting_service_cb_t callback, void* user_data)
     {
-        return active().configure_device_counting_service(ctx, buf, agent, cb, user_data);
+        return active().configure_device_counting_service(ctx, buf, agent, callback,
+                                                          user_data);
     }
+    // NOLINTEND
 
     // --- domain_service_backend-only surface: never exercised, trivial no-ops ---
     static void create_buffer(context_id_t, std::size_t, std::size_t, buffer_policy_t,
