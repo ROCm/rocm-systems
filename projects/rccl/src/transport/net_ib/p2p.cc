@@ -224,7 +224,8 @@ static ncclResult_t ncclIbMultiSendSegmented(struct ncclIbSendComm* comm, int sl
       }
 
       if (chunkLen[r] == 0) {
-        // Zero-length write preserves the chain/imm; segment-0 keys suffice.
+        // Zero-length write preserves the chain/imm. The remote address can sit
+        // in a later physical segment, so use that segment's rkey.
         struct ibv_send_wr* wr = comm->wrs + w;
         struct ibv_sge* sge = comm->sges + w;
         memset(wr, 0, sizeof(struct ibv_send_wr));
@@ -232,7 +233,19 @@ static ncclResult_t ncclIbMultiSendSegmented(struct ncclIbSendComm* comm, int sl
         wr->send_flags = 0;
         wr->wr_id = wr_id;
         wr->wr.rdma.remote_addr = remoteBase + sendOffsets[r];
-        wr->wr.rdma.rkey = remoteMulti ? side[r].segRkeys[0][remDevIdx] : slots[r].rkeys[remDevIdx];
+        if (remoteMulti) {
+          uintptr_t starts[NCCL_IB_MAX_SEGMENTS];
+          size_t lens[NCCL_IB_MAX_SEGMENTS];
+          for (int t = 0; t < nRemote; t++) {
+            starts[t] = (uintptr_t)rVA[t];
+            lens[t] = (size_t)(rOff[t + 1] - rOff[t]);
+          }
+          int s = ncclIbSegmentIndexForZeroLength(nRemote, starts, lens, (uintptr_t)(remoteBase + sendOffsets[r]));
+          if (s < 0) return ncclInternalError;
+          wr->wr.rdma.rkey = side[r].segRkeys[s][remDevIdx];
+        } else {
+          wr->wr.rdma.rkey = slots[r].rkeys[remDevIdx];
+        }
         sge->addr = localBase + sendOffsets[r];
         sge->length = 0;
         sge->lkey = reqs[r]->send.lkeys[devIndex];
@@ -572,6 +585,14 @@ ncclResult_t ncclIbIsend(void* sendComm, void* data, size_t size, int tag, void*
   for (int r = 1; r < nreqs; r++)
     while (slots[r].idx != idx);
   std::atomic_thread_fence(std::memory_order_seq_cst); // order the nreqsPtr load against tag/rkey/addr loads below
+  // Side table and CTS are separate RDMA writes. Wait for the matching idx so
+  // a late side table is not treated as single-segment.
+  if (comm->peerCaps & NCCL_IB_CAP_MULTISEG) {
+    volatile struct ncclIbSegLayout* side = comm->segLayoutFifo[slot];
+    for (int r = 0; r < nreqs; r++)
+      while (side[r].idx != idx);
+    std::atomic_thread_fence(std::memory_order_seq_cst);
+  }
   for (int r = 0; r < nreqs; r++) {
     if (reqs[r] != NULL || slots[r].tag != tag) continue;
 
@@ -714,15 +735,9 @@ ncclResult_t ncclIbPostFifo(struct ncclIbRecvComm* comm, struct ncclIbRequest* r
     wr.wr_id = slot;
   }
 
-  bool postSide = false;
-  if (comm->peerCaps & NCCL_IB_CAP_MULTISEG) {
-    for (int i = 0; i < req->nreqs; i++) {
-      if (comm->remSegLayout.elems[slot][i].nSegments > 1) {
-        postSide = true;
-        break;
-      }
-    }
-  }
+  // Always publish the side table when the peer understands it, including
+  // nSegments==1, so the sender can wait on idx without hanging.
+  bool postSide = (comm->peerCaps & NCCL_IB_CAP_MULTISEG);
 
   struct ibv_sge sgeSide;
   struct ibv_send_wr wrSide;
@@ -870,22 +885,27 @@ ncclResult_t ncclIbIrecv(void* recvComm, int n, void** data, size_t* sizes, int*
     localElem[i].tag = tags[i];
     localElem[i].idx = comm->base.fifoHead + 1; // last store in the 64-byte CTS slot
 
-    // Multi-segment layout goes on the side table, never in CTS.
+    // Multi-segment layout goes on the side table, never in CTS. Always store
+    // idx when the peer has the cap so the sender can wait for this slot.
     struct ncclIbSegLayout* sideElem = comm->remSegLayout.elems[slot];
-    if (mhandleWrapper->nSegments > 1 && (comm->peerCaps & NCCL_IB_CAP_MULTISEG)) {
-      sideElem[i].nSegments = mhandleWrapper->nSegments;
-      for (int s = 0; s < mhandleWrapper->nSegments; s++) {
-        sideElem[i].segStart[s] = (uint64_t)mhandleWrapper->segStart[s];
-        for (int j = 0; j < comm->base.vProps.ndevs; j++) {
-          if (mhandleWrapper->segMrs[s][j] == NULL) {
-            WARN("NET/IB: irecv[%d] missing MR for segment %d device %d", i, s, j);
-            ret = ncclInternalError;
-            goto irecvFail;
-          }
-          sideElem[i].segRkeys[s][j] = mhandleWrapper->segMrs[s][j]->rkey;
-        }
-      }
+    if (comm->peerCaps & NCCL_IB_CAP_MULTISEG) {
       sideElem[i].idx = localElem[i].idx;
+      if (mhandleWrapper->nSegments > 1) {
+        sideElem[i].nSegments = mhandleWrapper->nSegments;
+        for (int s = 0; s < mhandleWrapper->nSegments; s++) {
+          sideElem[i].segStart[s] = (uint64_t)mhandleWrapper->segStart[s];
+          for (int j = 0; j < comm->base.vProps.ndevs; j++) {
+            if (mhandleWrapper->segMrs[s][j] == NULL) {
+              WARN("NET/IB: irecv[%d] missing MR for segment %d device %d", i, s, j);
+              ret = ncclInternalError;
+              goto irecvFail;
+            }
+            sideElem[i].segRkeys[s][j] = mhandleWrapper->segMrs[s][j]->rkey;
+          }
+        }
+      } else {
+        sideElem[i].nSegments = 0;
+      }
     } else {
       sideElem[i].nSegments = 0;
       sideElem[i].idx = 0;
