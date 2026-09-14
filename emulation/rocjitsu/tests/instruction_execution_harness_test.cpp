@@ -12,10 +12,13 @@
 #include "decode_test_util.h"
 #include "mma_test_util.h"
 #include "rocjitsu/base/rj_compiler.h"
+#include "rocjitsu/code/analysis/def_use_chain.h"
 #include "rocjitsu/code/rj_code.h"
 #include "rocjitsu/isa/arch/amdgpu/cdna4/isa.h"
 #include "rocjitsu/isa/arch/amdgpu/cdna5/isa.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna1/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna1/opcodes.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna2/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna2/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna3/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna3/opcodes.h"
@@ -29,9 +32,13 @@
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/operand_types.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna1/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna1/opcodes.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna2/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna2/opcodes.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna3/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna3/opcodes.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna3_5/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna3_5/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/execution_backend.h"
@@ -48,6 +55,7 @@
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"
 #include "rocjitsu/vm/amdgpu/hwreg.h"
 #include "rocjitsu/vm/amdgpu/l2_cache.h"
+#include "rocjitsu/vm/amdgpu/memory_pipeline.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
 #include "rocjitsu/vm/plugins/execution_plugin.h"
 #include "rocjitsu/vm/plugins/execution_plugin_group.h"
@@ -74,6 +82,7 @@
 #include <algorithm>
 #include <array>
 #include <bit>
+#include <cfenv>
 #include <cmath>
 #include <cstdint>
 #include <exception>
@@ -8497,3 +8506,122 @@ TEST(Cdna5VopdCndmaskTest, Wave32LaneMaskIgnoresTheNeighbouringScalar) {
   if (!wf->is_halted())
     wf->halt();
 }
+
+namespace {
+TEST(RdnaDot2Bf16ExecutionTest, RoundingAndDenormalsAcrossTargets) {
+  struct Case {
+    const char *name;
+    uint32_t left;
+    uint32_t right;
+    uint16_t accumulator;
+    uint16_t expected;
+  };
+  const std::array cases{
+      Case{"round_product", 0xbfed, 0x4007, 0, 0xc07a},
+      Case{"tie_even_lower", 0x3f80, 0x3f80, 0x3b80, 0x3f80},
+      Case{"tie_even_upper", 0x3f81, 0x3f80, 0x3b80, 0x3f82},
+      Case{"flush_low_input", 0x0040, 0x4000, 0, 0},
+      Case{"flush_high_input", 0x00400000, 0x40000000, 0, 0},
+      Case{"flush_accumulator", 0, 0, 0x0040, 0},
+      Case{"flush_output", 0x0080, 0x3f00, 0, 0},
+      Case{"flush_negative_output", 0x8080, 0x3f00, 0, 0x8000},
+      Case{"finite_control", 0x3f80, 0x4000, 0x4040, 0x40a0},
+      Case{"infinity", 0x7f80, 0x3f80, 0, 0x7f80},
+  };
+  for (rj_code_arch_t arch :
+       {ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_ARCH_RDNA3_5, ROCJITSU_CODE_ARCH_RDNA4}) {
+    amdgpu::GpuMemory memory("dot2_policy_memory");
+    amdgpu::L2Cache cache("dot2_policy_cache");
+    amdgpu::ComputeUnitCore::Config config{};
+    config.arch = arch;
+    config.num_wf_slots = 1;
+    config.sgprs_per_wf = 106;
+    config.vgprs_per_wf = 256;
+    config.lds_size_kb = 64;
+    std::unique_ptr<amdgpu::ComputeUnitCore> compute_unit =
+        amdgpu::ComputeUnitCore::create("dot2_policy", config, &memory, &cache);
+    std::unique_ptr<Decoder> decoder = Decoder::create(arch);
+    amdgpu::Wavefront *wave = compute_unit->dispatch_wf(0, 0, 106, 256);
+    wave->set_exec(1);
+    const uint32_t base = wave->vgpr_alloc().base;
+    for (uint32_t mode : {0u, 0xffu}) {
+      wave->set_mode_raw(mode);
+      for (int host_round : {FE_TONEAREST, FE_UPWARD, FE_DOWNWARD, FE_TOWARDZERO}) {
+        for (const Case &test : cases) {
+          SCOPED_TRACE(test.name);
+          SCOPED_TRACE(static_cast<int>(arch));
+          SCOPED_TRACE(mode);
+          SCOPED_TRACE(host_round);
+          compute_unit->write_vgpr(base, 0, test.left);
+          compute_unit->write_vgpr(base + 1, 0, test.right);
+          compute_unit->write_vgpr(base + 2, 0, test.accumulator);
+          compute_unit->write_vgpr(base + 3, 0, 0xcafe0000);
+          const std::array<uint32_t, 2> words =
+              encode_vop3(/*op=*/rdna4::kVDot2Bf16Bf16Vop3, /*vdst=*/3,
+                          /*src0=*/vgpr_src(0), /*src1=*/vgpr_src(1), /*src2=*/vgpr_src(2));
+          std::unique_ptr<Instruction> instruction(decode_valid(*decoder, words.data()));
+          ASSERT_NE(instruction, nullptr);
+          const int saved_round = std::fegetround();
+          ASSERT_EQ(std::fesetround(host_round), 0);
+          compute_unit->execute_instruction(instruction.get(), *wave);
+          const int restored_round = std::fegetround();
+          std::fesetround(saved_round);
+          EXPECT_EQ(restored_round, host_round);
+          EXPECT_EQ(compute_unit->read_vgpr(base + 3, 0), 0xcafe0000u | test.expected);
+        }
+      }
+    }
+    wave->halt();
+  }
+}
+} // namespace
+
+namespace {
+template <typename ComputeUnit> void check_flat_atomic_lds_policy(rj_code_arch_t arch) {
+  amdgpu::GpuMemory memory("flat_atomic_policy_memory");
+  amdgpu::L2Cache cache("flat_atomic_policy_cache");
+  amdgpu::ComputeUnitCore::Config config{};
+  config.arch = arch;
+  config.num_wf_slots = 1;
+  config.sgprs_per_wf = 106;
+  config.vgprs_per_wf = 256;
+  config.lds_size_kb = 64;
+  ComputeUnit compute_unit("flat_atomic_policy", config, &memory, &cache);
+  constexpr uint64_t kSharedBase = 0x100000000ULL;
+  compute_unit.set_apertures(kSharedBase, kSharedBase + 0xffff, 0, 0);
+  amdgpu::Wavefront *wave = compute_unit.dispatch_wf(0, 0, 106, 256);
+  wave->set_exec(1);
+  wave->set_apertures(kSharedBase, kSharedBase + 0xffff, 0, 0);
+  const uint32_t base = wave->vgpr_alloc().base;
+  std::unique_ptr<Decoder> decoder = Decoder::create(arch);
+  const bool modern = arch == ROCJITSU_CODE_ARCH_CDNA5;
+  std::array<uint32_t, 3> words{};
+  if (modern) {
+    words =
+        cdna5::build_vflat(cdna5::kFlatAtomicAddF32Vflat,
+                           {.saddr = 124, .vdst = 6, .scope = 2, .th = 1, .vsrc = 0, .vaddr = 2});
+  } else {
+    const std::array<uint32_t, 2> legacy_words = cdna4::build_flat(
+        cdna4::kFlatAtomicAddF32Flat, {.sc0 = 1, .addr = 2, .data = 0, .saddr = 127, .vdst = 6});
+    std::copy(legacy_words.begin(), legacy_words.end(), words.begin());
+  }
+  for (uint32_t mode : {0u, 0xf0u}) {
+    wave->set_mode_raw(mode);
+    wave->lds().write32(0x100, 1);
+    compute_unit.write_vgpr(base, 0, 1);
+    compute_unit.write_vgpr(base + 2, 0, 0x100);
+    compute_unit.write_vgpr(base + 3, 0, static_cast<uint32_t>(kSharedBase >> 32));
+    std::unique_ptr<Instruction> instruction(decode_valid(*decoder, words.data()));
+    ASSERT_NE(instruction, nullptr);
+    compute_unit.execute_and_route(instruction.release(), *wave);
+    EXPECT_EQ(wave->lds().read32(0x100), modern || mode ? 2u : 0u);
+    EXPECT_EQ(compute_unit.read_vgpr(base + 6, 0), 1u);
+  }
+  wave->halt();
+}
+
+TEST(AtomicPolicyRoutingTest, FlatLdsUsesTargetPolicy) {
+  check_flat_atomic_lds_policy<Cdna4MemoryTestCu>(ROCJITSU_CODE_ARCH_CDNA4);
+  check_flat_atomic_lds_policy<Gfx1250MemoryTestCu>(ROCJITSU_CODE_ARCH_CDNA5);
+}
+} // namespace

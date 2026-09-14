@@ -8,9 +8,13 @@ Full documentation for ROCm Systems Profiler is available at [https://rocm.docs.
 
 ### Changed
 
+- Minimum supported GCC raised from 10 to **GCC 11**, the first release with the
+  C++20 support this project relies on. GCC 10 is no longer tested; configuring
+  with an older GCC now emits a CMake warning. The RHEL 8 CI and release
+  containers moved from `gcc-toolset-10` to `gcc-toolset-11`.
 - `ROCPROFSYS_MONOCHROME` and `MONOCHROME` now treat any value other than a recognized
-false token (`off`/`false`/`no`/`n`/`f`/`0`) as `true`, instead of only recognizing a
-fixed set of true tokens.
+  false token (`off`/`false`/`no`/`n`/`f`/`0`) as `true`, instead of only recognizing a
+  fixed set of true tokens.
 
 ## ROCm Systems Profiler 1.9.0 for ROCm 10.1
 
