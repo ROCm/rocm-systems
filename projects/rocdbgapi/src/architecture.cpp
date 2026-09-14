@@ -2507,12 +2507,7 @@ protected:
     size_t lds_size () const override;
     size_t hwreg_count () const override;
 
-    agent_address_t begin () const override
-    {
-      return register_address (lane_count () == 32 ? amdgpu_regnum_t::v0_32
-                                                   : amdgpu_regnum_t::v0_64)
-        .value ();
-    }
+    agent_address_t begin () const override { return vgprs_addr (); }
     agent_address_t end () const override { return m_context_save_address; }
 
     std::optional<agent_address_t>
