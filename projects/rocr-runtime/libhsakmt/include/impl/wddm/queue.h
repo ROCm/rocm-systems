@@ -320,6 +320,11 @@ public:
   uint64_t * GetRingRptr(void) { return WDDMQueue::GetSyncAddr(); }
   uint64_t * GetDoorbellPtr() { return &doorbell_; }
   void RingDoorbell(uint64_t value);
+
+  //!< Appends the progress-fence epilogue to [start, end) and submits it through the WDDM
+  //!< HwQueue. Native path only, and only from SdmaThread -- the span's dependency
+  //!< POLL_REGMEM packets must already be resolved and stripped before the engine sees it.
+  void SubmitNative(uint64_t start, uint64_t end);
   void* GetHsaQueueAddr(void) const { return reinterpret_cast<void*>(GetCmdbufAddr()); }
 
   //!< True when this queue submits via the native WDDM SDMA HwQueue path
@@ -340,7 +345,6 @@ public:
 
 private:
   GpuMemory* amd_queue_memory_ = nullptr;
-  uint64_t amd_queue_addr_ = 0;
   bool native_sdma_ = false;
   uint64_t wptr_next_;
   uint64_t wptr_pre_;
@@ -349,6 +353,15 @@ private:
   std::vector<std::pair<uint64_t, uint64_t>> wptr_queue_;
   uint64_t ib_size;
   uint64_t ib_start_addr;
+
+  //!< True from when SdmaThread dequeues a batch until that batch is fully submitted. Guarded by
+  //!< thread_cond_lock_. RingDoorbell's inline fast path requires this clear AND wptr_queue_
+  //!< empty, so an inline submit can never advance the wptr past a span still awaiting its polls.
+  bool thread_busy_ = false;
+
+  //!< True when [start, end) opens with a dependency POLL_REGMEM packet, i.e. the span must go
+  //!< through SdmaThread for host-side poll emulation instead of being submitted inline.
+  bool SpanNeedsPollEmulation(uint64_t start, uint64_t end);
 
   std::thread thread_;
   bool thread_stop_;

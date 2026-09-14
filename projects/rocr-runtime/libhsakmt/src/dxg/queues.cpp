@@ -267,9 +267,6 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtQueueRingDoorbell(HSA_QUEUEID QueueId, uint64_t va
   if (!queue_)
     return HSAKMT_STATUS_INVALID_PARAMETER;
 
-  fprintf(stderr, "[sdma] hsaKmtQueueRingDoorbell QueueId=%p value=0x%llx\n",
-          (void*)QueueId, (unsigned long long)value);
-  fflush(stderr);
   queue_->RingDoorbell(value);
   return HSAKMT_STATUS_SUCCESS;
 }

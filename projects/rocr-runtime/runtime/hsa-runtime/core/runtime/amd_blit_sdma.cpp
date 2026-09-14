@@ -614,10 +614,6 @@ hsa_status_t BlitSdma<useGCR, scopeFields>::SubmitCommand(const void* cmd, size_
   }
 
   // After transfer is completed, decrement the signal value.
-  fprintf(stderr, "[blit] SubmitCommand: signal decrement: platform_atomic=%d"
-          " completion_val=0x%llx signal_loc=%p\n",
-          (int)platform_atomic_support_, (unsigned long long)completion_signal_value,
-          out_signal.ValueLocation());
   if (platform_atomic_support_) {
     BuildAtomicDecrementCommand(command_addr, out_signal.ValueLocation());
     command_addr += atomic_command_size_;
@@ -1969,8 +1965,6 @@ char* BlitSdma<useGCR, scopeFields>::AcquireWriteAddress(uint32_t cmd_size, uint
   }
 
   curr_index = atomic::Load(&cached_reserve_index_, std::memory_order_acquire);
-  fprintf(stderr, "[blit] AcquireWriteAddress cmd_size=%u curr_index=0x%llx rptr=0x%llx\n",
-          cmd_size, (unsigned long long)curr_index, (unsigned long long)*queue_rptr_);
 
   while (true) {
     // Check whether a linear region of the requested size is available.
@@ -2009,13 +2003,10 @@ char* BlitSdma<useGCR, scopeFields>::AcquireWriteAddress(uint32_t cmd_size, uint
 
 template <bool useGCR, bool scopeFields>
 void BlitSdma<useGCR, scopeFields>::UpdateWriteAndDoorbellRegister(uint64_t curr_index, uint64_t new_index) {
-  fprintf(stderr, "[blit] UpdateWriteAndDoorbellRegister curr=0x%llx new=0x%llx\n",
-          (unsigned long long)curr_index, (unsigned long long)new_index);
   while (true) {
     // Make sure that the address before ::curr_index is already released.
     // Otherwise the CP may read invalid packets.
     uint64_t commit_index = atomic::Load(&cached_commit_index_, std::memory_order_acquire);
-    fprintf(stderr, "[blit] commit_index=0x%llx\n", (unsigned long long)commit_index);
     if (commit_index == curr_index) {
       if (sdma_wait_idle_) {
         // TODO: remove when sdma wpointer issue is resolved.
@@ -2153,7 +2144,7 @@ void BlitSdma<useGCR, scopeFields>::BuildFenceCommand(char* fence_command_addr, 
     packet_addr->ADDR_LO_UNION.addr_31_0 = ptrlow32(fence);
     packet_addr->ADDR_HI_UNION.addr_63_32 = ptrhigh32(fence);
 
-    packet_addr->DATA_UNION.data = fence_value;\
+    packet_addr->DATA_UNION.data = fence_value;
   }
 }
 
@@ -2575,8 +2566,6 @@ void BlitSdma<useGCR, scopeFields>::BuildCopyRectCommand(const std::function<voi
           pkt->HEADER_UNION.sub_op = SDMA_SUBOP_COPY_LINEAR_RECT;
           if (scopeFields) pkt->HEADER_UNION.npd = 1;
           pkt->HEADER_UNION.element = element;
-          fprintf(stderr, "[blit] BuildCopyRect sbase=0x%llx dbase=0x%llx element=%d\n",
-                  (unsigned long long)sbase, (unsigned long long)dbase, element);
           pkt->SRC_ADDR_LO_UNION.src_addr_31_0 = sbase;
           pkt->SRC_ADDR_HI_UNION.src_addr_63_32 = sbase >> 32;
           pkt->SRC_PARAMETER_1_UNION.src_offset_x = soff;
