@@ -558,8 +558,10 @@ void IbCastBuildDataQpCreateAttr(struct ncclIbNetCommBase* base, int devIndex, s
   } else {
     IbCastResiliencyDataRqSizeGet(base->resiliency, devIndex, &out->maxRecvWorkRequest);
     // Multi-segment matches IbCastReceiverQpsCreateToRts (side-table WR per CTS WR) for AINIC recovery rebuilds.
+    // RMA recv QPs are flush QPs.
     out->maxSendWorkRequest =
       IbCastAdvertiseMultiSeg() ? NET_IB_MAX_REQUESTS * (base->resiliency ? 1 : 2) * 2 : NET_IB_MAX_REQUESTS;
+    if (base->isRma) out->maxSendWorkRequest = NCCL_IB_RMA_MAX_FLUSH_WRS;
   }
 }
 
