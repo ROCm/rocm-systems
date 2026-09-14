@@ -133,10 +133,14 @@ public:
     using device_counting_agent_cb_t   = mock_device_counting_agent_cb_t;
     using device_counting_service_cb_t = mock_device_counting_service_cb_t;
 
+    // Names mirror the `Backend` static interface required by device.hpp/provider.hpp
+    // (e.g. `Backend::status_success`), so they can't take the usual k_ prefix.
+    // NOLINTBEGIN(readability-identifier-naming)
     static constexpr counter_flag_t flag_none             = mock_flag::none;
     static constexpr status_t       status_success        = mock_status::success;
     static constexpr status_t       status_error          = mock_status::error;
     static constexpr status_t       status_hsa_not_loaded = mock_status::hsa_not_loaded;
+    // NOLINTEND(readability-identifier-naming)
 
     static agent_id_t make_agent_id(std::uint64_t handle) { return agent_id_t{ handle }; }
 
@@ -201,6 +205,9 @@ public:
     using on_records_cb_t           = mock_on_records_cb_t;
     using on_record_cb_t            = mock_on_record_cb_t;
 
+    // Names mirror the `Backend` static interface required by device.hpp/provider.hpp
+    // (e.g. `Backend::status_success`), so they can't take the usual k_ prefix.
+    // NOLINTBEGIN(readability-identifier-naming)
     static constexpr counter_flag_t flag_none      = mock_backend_impl::flag_none;
     static constexpr status_t       status_success = mock_backend_impl::status_success;
     static constexpr status_t       status_error   = mock_backend_impl::status_error;
@@ -208,6 +215,7 @@ public:
         mock_backend_impl::status_hsa_not_loaded;
     static constexpr std::uint32_t   compile_time_version   = 0;
     static constexpr buffer_policy_t BUFFER_POLICY_LOSSLESS = 0;
+    // NOLINTEND(readability-identifier-naming)
 
     static agent_id_t make_agent_id(std::uint64_t handle)
     {
@@ -236,7 +244,7 @@ public:
     {
         return active().sample_device_counting_service(ctx, user_data, flags, out, count);
     }
-    // NOLINTEND
+    // NOLINTEND(readability-function-size)
 
     static status_t query_record_counter_id(counter_record_t record,
                                             counter_id_t*    counter_id)
@@ -272,7 +280,7 @@ public:
         return active().configure_device_counting_service(ctx, buf, agent, callback,
                                                           user_data);
     }
-    // NOLINTEND
+    // NOLINTEND(readability-function-size)
 
     // --- domain_service_backend-only surface: never exercised, trivial no-ops ---
     static void create_buffer(context_id_t, std::size_t, std::size_t, buffer_policy_t,
@@ -292,13 +300,13 @@ public:
     {}
     static const mock_tracing_name_table& get_buffer_tracing_names()
     {
-        static const mock_tracing_name_table table{};
-        return table;
+        static const mock_tracing_name_table k_table{};
+        return k_table;
     }
     static const mock_tracing_name_table& get_callback_tracing_names()
     {
-        static const mock_tracing_name_table table{};
-        return table;
+        static const mock_tracing_name_table k_table{};
+        return k_table;
     }
 
 private:

@@ -290,7 +290,7 @@ struct mock_sdk
     {
         return status_success;
     }
-    // NOLINTEND
+    // NOLINTEND(readability-function-size)
 
     static status_t query_record_counter_id(counter_record_t, counter_id_t*)
     {
@@ -318,7 +318,7 @@ struct mock_sdk
     {
         return status_success;
     }
-    // NOLINTEND
+    // NOLINTEND(readability-function-size)
 
     // NOLINTNEXTLINE(readability-function-size)
     static void create_buffer(context_id_t context, std::size_t buffer_size,
