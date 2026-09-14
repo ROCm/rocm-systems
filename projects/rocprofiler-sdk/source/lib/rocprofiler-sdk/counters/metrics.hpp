@@ -143,7 +143,7 @@ has_spm_support(const Metric& metric, rocprofiler_agent_id_t agent_id);
  * Returns std::nullopt if valid, or an error message if invalid.
  */
 std::optional<std::string>
-validateExtraCounterYAML(const YAML::Node& root);
+validate_extra_counter_yaml(const YAML::Node& root);
 }  // namespace counters
 }  // namespace rocprofiler
 

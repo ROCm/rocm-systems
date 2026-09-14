@@ -142,7 +142,7 @@ loadYAML(const std::string& filename, std::optional<ArchMetric> add_metric)
 {
     // Stores metrics that are added via the API
     static MetricMap added_metrics;
-    YAML::Node       append_yaml;
+    auto             append_yaml = YAML::Node{};
 
     MetricMap ret;
     auto      override = getCustomCounterDefinition().wlock([&](auto& data) {
@@ -163,22 +163,18 @@ loadYAML(const std::string& filename, std::optional<ArchMetric> add_metric)
         counter_data << override.data;
     }
 
-    YAML::Node yaml;
-    YAML::Node header;
-    uint64_t   current_id = 0;
+    auto yaml       = YAML::Node{};
+    auto header     = YAML::Node{};
+    auto current_id = uint64_t{0};
 
     try
     {
         yaml = YAML::Load(counter_data.str());
         if(!override.data.empty() && !override.append)
         {
-            auto error = validateExtraCounterYAML(yaml);
-            if(error)
-            {
-                ROCP_FATAL << "Invalid extra counters YAML: " << *error << "\n"
-                           << "Content:\n"
-                           << override.data;
-            }
+            auto error = validate_extra_counter_yaml(yaml);
+            ROCP_FATAL_IF(error.has_value()) << fmt::format(
+                "Invalid extra counters YAML: {}\nContent:\n{}", *error, override.data);
         }
         header = yaml["rocprofiler-sdk"]["counters"];
     } catch(const YAML::Exception& e)
@@ -201,13 +197,9 @@ loadYAML(const std::string& filename, std::optional<ArchMetric> add_metric)
         {
             append_yaml = YAML::Load(override.data);
 
-            auto error = validateExtraCounterYAML(append_yaml);
-            if(error)
-            {
-                ROCP_FATAL << "Invalid extra counters YAML: " << *error << "\n"
-                           << "Content:\n"
-                           << override.data;
-            }
+            auto error = validate_extra_counter_yaml(append_yaml);
+            ROCP_FATAL_IF(error.has_value()) << fmt::format(
+                "Invalid extra counters YAML: {}\nContent:\n{}", *error, override.data);
 
             for(const auto& counter : append_yaml["rocprofiler-sdk"]["counters"])
                 header.push_back(counter);
@@ -248,16 +240,16 @@ loadYAML(const std::string& filename, std::optional<ArchMetric> add_metric)
                     }
                     else
                     {
-                        ROCP_FATAL
-                            << "Conflicting counter definitions for '" << counter_name
-                            << "' on architecture '" << arch_name << "'. Existing definition: "
-                            << format_yaml_counter_definition(existing_definition->second)
-                            << "; new definition: "
-                            << format_yaml_counter_definition(definition_data)
-                            << ". Counter names must resolve to one definition per architecture"
-                            << (override.append
-                                    ? "; append mode cannot override an existing counter"
-                                    : "");
+                        ROCP_FATAL << fmt::format(
+                            "Conflicting counter definitions for '{}' on architecture '{}'. "
+                            "Existing definition: {}; new definition: {}. Counter names must "
+                            "resolve to one definition per architecture{}",
+                            counter_name,
+                            arch_name,
+                            format_yaml_counter_definition(existing_definition->second),
+                            format_yaml_counter_definition(definition_data),
+                            override.append ? "; append mode cannot override an existing counter"
+                                            : "");
                     }
                     continue;
                 }
@@ -300,10 +292,8 @@ loadYAML(const std::string& filename, std::optional<ArchMetric> add_metric)
         ret.emplace(add_metric->first, std::vector<Metric>{}).first->second.push_back(with_id);
     }
 
-    if(current_id > 65536)
-    {
-        ROCP_FATAL << "Counter count exceeds 16 bits, which may break counter id output";
-    }
+    ROCP_FATAL_IF(current_id > 65536)
+        << "Counter count exceeds 16 bits, which may break counter id output";
 
     return {.arch_to_metric = ret,
             .id_to_metric =
@@ -402,7 +392,7 @@ locateMetricsFile(std::string_view name)
 }  // namespace
 
 std::optional<std::string>
-validateExtraCounterYAML(const YAML::Node& root)
+validate_extra_counter_yaml(const YAML::Node& root)
 {
     if(!root || !root.IsMap()) return "Top-level YAML node must be a map";
 

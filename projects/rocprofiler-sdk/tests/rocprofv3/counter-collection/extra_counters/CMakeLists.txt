@@ -14,16 +14,10 @@ find_package(Python3 REQUIRED COMPONENTS Interpreter)
 string(REPLACE "LD_PRELOAD=" "ROCPROF_PRELOAD=" PRELOAD_ENV
                "${ROCPROFILER_MEMCHECK_PRELOAD_ENV}")
 
-set(INVALID_YAML_CASES malformed missing_description mixed_definition
-                       conflicting_duplicate)
-set(INVALID_YAML_FILES)
-foreach(invalid_yaml IN LISTS INVALID_YAML_CASES)
-    list(APPEND INVALID_YAML_FILES invalid_${invalid_yaml}.yaml)
-endforeach()
-
 rocprofiler_configure_pytest_files(
     COPY input.txt extra_counters.yaml duplicate_identical.yaml run_invalid_yaml_test.py
-         ${INVALID_YAML_FILES})
+         invalid_malformed.yaml invalid_missing_description.yaml
+         invalid_mixed_definition.yaml invalid_conflicting_duplicate.yaml)
 
 # pmc1 with extra counters
 rocprofiler_add_integration_execute_test(
@@ -77,26 +71,26 @@ rocprofiler_add_integration_validate_test(
 
 # Representative parser, schema, and loader failures must produce a specific fatal
 # diagnostic without hanging. Exhaustive schema cases are covered by unit tests.
-set(malformed_error_regex "Failed to parse extra counters YAML")
-set(missing_description_error_regex
-    "Invalid extra counters YAML: Counter 'TEST': missing 'description'")
-set(mixed_definition_error_regex
-    "Invalid extra counters YAML:.*'expression' cannot be combined")
-set(conflicting_duplicate_error_regex
-    "Conflicting counter definitions for 'GRBM_GUI_ACTIVE'")
-
-foreach(invalid_yaml IN LISTS INVALID_YAML_CASES)
+function(add_invalid_yaml_test NAME ERROR_REGEX)
     rocprofiler_add_integration_execute_test(
-        rocprofv3-test-extra-counters-invalid-${invalid_yaml}
+        rocprofv3-test-extra-counters-invalid-${NAME}
         COMMAND
             ${Python3_EXECUTABLE} ${CMAKE_CURRENT_BINARY_DIR}/run_invalid_yaml_test.py
-            --timeout 15 --expect "${${invalid_yaml}_error_regex}" --
+            --timeout 15 --expect "${ERROR_REGEX}" --
             $<TARGET_FILE:rocprofiler-sdk::rocprofv3> -i
             ${CMAKE_CURRENT_BINARY_DIR}/input.txt -E
-            ${CMAKE_CURRENT_BINARY_DIR}/invalid_${invalid_yaml}.yaml --
-            $<TARGET_FILE:vector-ops>
+            ${CMAKE_CURRENT_BINARY_DIR}/invalid_${NAME}.yaml -- $<TARGET_FILE:vector-ops>
         DEPENDS vector-ops
         TIMEOUT 20
         LABELS "integration-tests"
         PRELOAD "${PRELOAD_ENV}")
-endforeach()
+endfunction()
+
+add_invalid_yaml_test(malformed "Failed to parse extra counters YAML")
+add_invalid_yaml_test(
+    missing_description
+    "Invalid extra counters YAML: Counter 'TEST': missing 'description'")
+add_invalid_yaml_test(mixed_definition
+                      "Invalid extra counters YAML:.*'expression' cannot be combined")
+add_invalid_yaml_test(conflicting_duplicate
+                      "Conflicting counter definitions for 'GRBM_GUI_ACTIVE'")
