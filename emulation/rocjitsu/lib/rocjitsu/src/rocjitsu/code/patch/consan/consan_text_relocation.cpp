@@ -538,7 +538,19 @@ relocate_consan_text(std::span<const uint8_t> descriptor_patched_image, rj_code_
       reinterpret_cast<const uint8_t *>(source.text_sections().front()->data()), source_text_size);
   if (supports_local_text_transaction(descriptor_patched_image, source, arch, fragments))
     return rewrite_consan_text_locally(source, arch, growth_limit, operation, fragments, result);
+  const size_t input_image_bytes = static_cast<size_t>(input_id.byte_size);
+  const auto budget = consan_patched_image_growth_budget(
+      growth_limit, input_image_bytes, descriptor_patched_image.size());
+  const auto limit = consan_patched_image_growth_limit_bytes(growth_limit, input_image_bytes);
+  const std::string policy =
+      consan_patched_image_growth_policy_description(growth_limit, input_image_bytes);
+  if (!budget || !limit) {
+    errors.emplace_back(error_prefix + " has an invalid patched-image growth policy (" + policy +
+                        ")");
+    return std::nullopt;
+  }
   BinaryTranslatorOptions translator_options;
+  translator_options.max_text_file_growth = budget->remaining_growth_bytes;
   translator_options.preserve_source_text_prefix = true;
   translator_options.preserve_source_descriptor_resources = true;
   const auto &preapplied_code_ranges = result.program_inventory.preapplied_mutation().code_ranges;
@@ -652,7 +664,7 @@ relocate_consan_text(std::span<const uint8_t> descriptor_patched_image, rj_code_
                                              source_text, arch, errors);
       });
   TranslatedCodeObject translated = translator.translate(source);
-  if (!translated.dispatchable() || !errors.empty()) {
+  if ((!translated.dispatchable() && !translated.rejected_text_file_growth) || !errors.empty()) {
     errors.emplace_back(error_prefix + " could not relocate executable text");
     for (const TranslationDiagnostic &diagnostic : translated.diagnostics) {
       if (diagnostic.severity != DiagnosticSeverity::Error)
@@ -668,18 +680,11 @@ relocate_consan_text(std::span<const uint8_t> descriptor_patched_image, rj_code_
     return std::nullopt;
   }
 
-  const size_t input_image_bytes = static_cast<size_t>(input_id.byte_size);
-  const auto limit = consan_patched_image_growth_limit_bytes(growth_limit, input_image_bytes);
-  const std::string policy =
-      consan_patched_image_growth_policy_description(growth_limit, input_image_bytes);
-  if (!limit) {
-    errors.emplace_back(error_prefix + " has an invalid patched-image growth policy (" + policy +
-                        ")");
-    return std::nullopt;
-  }
-  const size_t required_growth = translated.elf_bytes.size() > input_image_bytes
-                                     ? translated.elf_bytes.size() - input_image_bytes
-                                     : 0u;
+  const size_t required_growth = translated.rejected_text_file_growth
+      ? util::saturating_add(budget->existing_growth_bytes, *translated.rejected_text_file_growth)
+      : (translated.elf_bytes.size() > input_image_bytes
+             ? translated.elf_bytes.size() - input_image_bytes
+             : 0u);
   if (required_growth > *limit) {
     if (!has_preexisting_code &&
         supports_local_text_transaction(descriptor_patched_image, source, arch, fragments,

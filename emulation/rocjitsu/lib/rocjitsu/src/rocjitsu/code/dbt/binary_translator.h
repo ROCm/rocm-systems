@@ -214,6 +214,9 @@ struct SourceTextCodeRange {
 
 /// @brief Optional controls for DBT translation.
 struct BinaryTranslatorOptions {
+  /// Limit aligned file growth during text materialization, before allocation.
+  std::optional<size_t> max_text_file_growth;
+
   /// @brief Input silicon revision used to determine translation direction.
   ///
   /// @details The command-line translation tool requires this when the input
@@ -292,6 +295,9 @@ struct BinaryTranslatorOptions {
 
 /// @brief Result of translating a code object.
 struct TranslatedCodeObject {
+  /// Exact text-materialization growth rejected by the caller's allocation budget.
+  std::optional<size_t> rejected_text_file_growth;
+
   std::vector<uint8_t> elf_bytes;                        ///< Translated ELF for the host ISA.
   rj_code_arch_t host_arch = ROCJITSU_CODE_ARCH_INVALID; ///< Host ISA architecture.
   std::vector<TranslationDiagnostic> diagnostics;        ///< Translation warnings/errors.

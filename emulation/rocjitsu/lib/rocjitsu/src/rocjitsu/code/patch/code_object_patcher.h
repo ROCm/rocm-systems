@@ -287,7 +287,9 @@ public:
       std::span<const PcRelativeTextRelocation> code_relocations = {},
       bool require_every_text_symbol_mapped = false,
       const std::unordered_map<uint64_t, uint64_t> *canonical_code_pointer_placement = nullptr,
-      bool source_text_prefix_is_preserved = false);
+      bool source_text_prefix_is_preserved = false,
+      std::optional<size_t> max_file_growth = std::nullopt,
+      std::optional<size_t> *rejected_file_growth = nullptr);
 
   /// @brief True if any non-inert relocation's place (r_offset) falls inside .text.
   ///

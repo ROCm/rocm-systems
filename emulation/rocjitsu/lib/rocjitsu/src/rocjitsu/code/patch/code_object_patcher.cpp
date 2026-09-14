@@ -1720,7 +1720,10 @@ bool CodeObjectPatcher::replace_text(
     std::span<const PcRelativeTextRelocation> code_relocations,
     bool require_every_text_symbol_mapped,
     const std::unordered_map<uint64_t, uint64_t> *canonical_code_pointer_placement,
-    bool source_text_prefix_is_preserved) {
+    bool source_text_prefix_is_preserved, std::optional<size_t> max_file_growth,
+    std::optional<size_t> *rejected_file_growth) {
+  if (rejected_file_growth)
+    rejected_file_growth->reset();
   // Keep fail-closed behavior for callers that assume word-aligned executable
   // sections; accepting a non-word-aligned replacement can break downstream
   // PC-relative patching and branch-distance checks.
@@ -1832,6 +1835,13 @@ bool CodeObjectPatcher::replace_text(
     assert(*padded_file_delta >= growth && "aligned text growth underflowed");
     assert(*padded_file_delta % sizeof(uint32_t) == 0 && "text growth must stay word-aligned");
 
+    if (max_file_growth && *padded_file_delta > *max_file_growth) {
+      if (rejected_file_growth)
+        *rejected_file_growth = *padded_file_delta;
+      return false;
+    }
+    if (*padded_file_delta > image.max_size() - image.size())
+      return false;
     std::vector<uint8_t> inserted(*padded_file_delta, 0);
     std::vector<bool> shift_segment_vaddr(phdrs.size(), false);
     for (size_t i = 0; i < phdrs.size(); ++i) {

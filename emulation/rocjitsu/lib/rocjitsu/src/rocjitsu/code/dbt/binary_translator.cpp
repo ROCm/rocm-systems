@@ -1640,7 +1640,8 @@ adopted_root_return_offsets(const BlockOffsetIndex &block_index,
     std::span<const KdTranslation> translations, rj_code_arch_t host_arch, uint32_t target_mach,
     bool require_every_text_symbol_mapped,
     const std::unordered_map<uint64_t, uint64_t> &canonical_code_pointer_placement,
-    bool preserve_unreferenced_local_text_symbols,
+    bool preserve_unreferenced_local_text_symbols, std::optional<size_t> max_text_file_growth,
+    std::optional<size_t> &rejected_text_file_growth,
     std::vector<TranslationDiagnostic> &diagnostics) {
   if (translated_text.size() < original_text_size)
     append_nop_padding(translated_text, original_text_size - translated_text.size(), host_arch);
@@ -1665,7 +1666,8 @@ adopted_root_return_offsets(const BlockOffsetIndex &block_index,
 
   if (!patcher.replace_text(translated_text, text_relocations, data_relocations, code_relocations,
                             require_every_text_symbol_mapped, &canonical_code_pointer_placement,
-                            preserve_unreferenced_local_text_symbols)) {
+                            preserve_unreferenced_local_text_symbols, max_text_file_growth,
+                            &rejected_text_file_growth)) {
     append_error(diagnostics, DiagnosticKind::ResourceLimit,
                  "relocated .text could not be materialized safely; leaving code object unchanged");
     return std::nullopt;
@@ -5688,7 +5690,8 @@ TranslatedCodeObject BinaryTranslator::translate_impl(const AmdGpuCodeObject &ob
       std::move(patcher), std::move(translated_text), text.size(), text_relocations,
       data_relocations, code_relocations, descriptor_translations, host_arch_, target_mach_,
       relied_on_relocated_by_construction, canonical_code_pointer_placement,
-      options_.preserve_source_text_prefix, result.diagnostics);
+      options_.preserve_source_text_prefix, options_.max_text_file_growth,
+      result.rejected_text_file_growth, result.diagnostics);
   if (!materialized)
     return leave_unchanged();
   result.elf_bytes = std::move(*materialized);
