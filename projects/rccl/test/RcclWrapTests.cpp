@@ -326,10 +326,10 @@ TEST(Rcclwrap, RcclUpdateThreadThreshold_UserEnvSet)
             }
             else
             {
-                ncclComm comm;
-                comm.nRanks = 8;
-                comm.nNodes = 4;
-                memset(comm.minMaxLLRange, 0, sizeof(comm.minMaxLLRange));
+                auto comm = std::make_unique<ncclComm>();
+                comm->nRanks = 8;
+                comm->nNodes = 4;
+                memset(comm->minMaxLLRange, 0, sizeof(comm->minMaxLLRange));
 
                 ncclTaskColl info;
                 info.func     = ncclFuncReduceScatter;
@@ -337,7 +337,7 @@ TEST(Rcclwrap, RcclUpdateThreadThreshold_UserEnvSet)
 
                 int threadThreshold = 5; // Any number should do, we should make
                                          // sure this number does not change
-                rcclUpdateThreadThreshold(&comm, 0, &info, threadThreshold);
+                rcclUpdateThreadThreshold(comm.get(), 0, &info, threadThreshold);
 
                 EXPECT_EQ(threadThreshold, 5);
             }
@@ -364,17 +364,17 @@ TEST(Rcclwrap, RcclUpdateThreadThreshold_MinNChannelsSet)
             }
             else
             {
-                ncclComm     comm{};
+                auto comm = std::make_unique<ncclComm>();
                 ncclTaskColl info{};
                 int          threadThreshold = 5;
 
-                comm.nRanks   = 4;
-                comm.nNodes   = 4;
+                comm->nRanks   = 4;
+                comm->nNodes   = 4;
                 info.func     = ncclFuncAllGather;
                 info.protocol = 0;
-                memset(comm.minMaxLLRange, 0, sizeof(comm.minMaxLLRange));
+                memset(comm->minMaxLLRange, 0, sizeof(comm->minMaxLLRange));
 
-                rcclUpdateThreadThreshold(&comm, 0, &info, threadThreshold);
+                rcclUpdateThreadThreshold(comm.get(), 0, &info, threadThreshold);
 
                 EXPECT_EQ(threadThreshold, 5);
             }
@@ -401,17 +401,17 @@ TEST(Rcclwrap, RcclUpdateThreadThreshold_MaxChannelsSet)
             }
             else
             {
-                ncclComm     comm{};
+                auto comm = std::make_unique<ncclComm>();
                 ncclTaskColl info{};
                 int          threadThreshold = 5;
 
-                comm.nRanks   = 4;
-                comm.nNodes   = 4;
+                comm->nRanks   = 4;
+                comm->nNodes   = 4;
                 info.func     = ncclFuncAllGather;
                 info.protocol = 0;
-                memset(comm.minMaxLLRange, 0, sizeof(comm.minMaxLLRange));
+                memset(comm->minMaxLLRange, 0, sizeof(comm->minMaxLLRange));
 
-                rcclUpdateThreadThreshold(&comm, 0, &info, threadThreshold);
+                rcclUpdateThreadThreshold(comm.get(), 0, &info, threadThreshold);
 
                 EXPECT_EQ(threadThreshold, 5);
             }
@@ -422,75 +422,75 @@ TEST(Rcclwrap, RcclUpdateThreadThreshold_MaxChannelsSet)
 
 TEST(Rcclwrap, RcclUpdateThreadThreshold_NoEnv_nNodesLessThan2)
 {
-    ncclComm     comm{};
+    auto comm = std::make_unique<ncclComm>();
     ncclTaskColl info{};
     int          threadThreshold = 5;
 
-    comm.nRanks   = 4;
-    comm.nNodes   = 1; // less than 2
+    comm->nRanks   = 4;
+    comm->nNodes   = 1; // less than 2
     info.func     = ncclFuncReduceScatter;
     info.protocol = 0;
-    memset(comm.minMaxLLRange, 0, sizeof(comm.minMaxLLRange));
+    memset(comm->minMaxLLRange, 0, sizeof(comm->minMaxLLRange));
 
-    rcclUpdateThreadThreshold(&comm, 0, &info, threadThreshold);
+    rcclUpdateThreadThreshold(comm.get(), 0, &info, threadThreshold);
 
     EXPECT_EQ(threadThreshold, 5); // no change
 }
 
 TEST(Rcclwrap, RcclUpdateThreadThreshold_NoEnv_FuncUnsupported)
 {
-    ncclComm     comm{};
+    auto comm = std::make_unique<ncclComm>();
     ncclTaskColl info{};
     int          threadThreshold = 5;
 
-    comm.nRanks   = 4;
-    comm.nNodes   = 2;
+    comm->nRanks   = 4;
+    comm->nNodes   = 2;
     info.func     = ncclFuncAllReduce; // unsupported func
     info.protocol = 0;
-    memset(comm.minMaxLLRange, 0, sizeof(comm.minMaxLLRange));
+    memset(comm->minMaxLLRange, 0, sizeof(comm->minMaxLLRange));
 
-    rcclUpdateThreadThreshold(&comm, 0, &info, threadThreshold);
+    rcclUpdateThreadThreshold(comm.get(), 0, &info, threadThreshold);
 
     EXPECT_EQ(threadThreshold, 5);
 }
 
 TEST(Rcclwrap, RcclUpdateThreadThreshold_NoEnv_UpdateOccurs)
 {
-    ncclComm     comm{};
+    auto comm = std::make_unique<ncclComm>();
     ncclTaskColl info{};
     int          threadThreshold = 5;
 
-    comm.nRanks   = 4;
-    comm.nNodes   = 2;
+    comm->nRanks   = 4;
+    comm->nNodes   = 2;
     info.func     = ncclFuncReduceScatter;
     info.protocol = 0;
-    memset(comm.minMaxLLRange, 0, sizeof(comm.minMaxLLRange));
+    memset(comm->minMaxLLRange, 0, sizeof(comm->minMaxLLRange));
 
     int idx = rcclGetTunableIndex(info.func);
-    comm.minMaxLLRange[idx][info.protocol][RCCL_PROTOCOL_THREAD_THRESHOLD_IDX] = 10;
+    comm->minMaxLLRange[idx][info.protocol][RCCL_PROTOCOL_THREAD_THRESHOLD_IDX] = 10;
 
-    rcclUpdateThreadThreshold(&comm, 0, &info, threadThreshold);
+    rcclUpdateThreadThreshold(comm.get(), 0, &info, threadThreshold);
 
     EXPECT_EQ(threadThreshold, 40); // 10 * 4
 }
 
 TEST(Rcclwrap, RcclUpdateThreadThreshold_NoEnv_ThresholdUndefined)
 {
-    ncclComm     comm{};
+    auto comm = std::make_unique<ncclComm>();
     ncclTaskColl info{};
     int          threadThreshold = 5;
 
-    comm.nRanks   = 4;
-    comm.nNodes   = 3;
+    comm->nRanks   = 4;
+    comm->nNodes   = 3;
     info.func     = ncclFuncAllGather;
     info.protocol = 0;
-    memset(comm.minMaxLLRange, 0, sizeof(comm.minMaxLLRange));
+    memset(comm->minMaxLLRange, 0, sizeof(comm->minMaxLLRange));
 
     int idx = rcclGetTunableIndex(info.func);
-    comm.minMaxLLRange[idx][info.protocol][RCCL_PROTOCOL_THREAD_THRESHOLD_IDX]
+    comm->minMaxLLRange[idx][info.protocol][RCCL_PROTOCOL_THREAD_THRESHOLD_IDX]
         = RCCL_LL_LIMITS_UNDEFINED;
 
-    rcclUpdateThreadThreshold(&comm, 0, &info, threadThreshold);
+    rcclUpdateThreadThreshold(comm.get(), 0, &info, threadThreshold);
 
     EXPECT_EQ(threadThreshold, 5);
 }
@@ -1905,26 +1905,26 @@ TEST(Rcclwrap, GetAlgoInfo_LlOverridePreservedWithoutDirectRs)
 
 TEST(RcclCeGraphLatch, SetsLatchOnFirstCapture)
 {
-    ncclComm comm{};
-    comm.ceColl.graphModeSeen = false;
-    comm.localPersistentRefs  = 0;
+    auto comm = std::make_unique<ncclComm>();
+    comm->ceColl.graphModeSeen = false;
+    comm->localPersistentRefs  = 0;
 
-    rcclCeAllReduceGraphLatchTick(&comm, /*ceCapturing=*/true);
+    rcclCeAllReduceGraphLatchTick(comm.get(), /*ceCapturing=*/true);
 
-    EXPECT_TRUE(comm.ceColl.graphModeSeen);
-    EXPECT_FALSE(rcclCeAllReduceAllowed(&comm));
+    EXPECT_TRUE(comm->ceColl.graphModeSeen);
+    EXPECT_FALSE(rcclCeAllReduceAllowed(comm.get()));
 }
 
 TEST(RcclCeGraphLatch, StaysSetAcrossRepeatedCaptureTicks)
 {
-    ncclComm comm{};
-    comm.ceColl.graphModeSeen = false;
-    comm.localPersistentRefs  = 0;
+    auto comm = std::make_unique<ncclComm>();
+    comm->ceColl.graphModeSeen = false;
+    comm->localPersistentRefs  = 0;
 
     for(int i = 0; i < 3; ++i)
     {
-        rcclCeAllReduceGraphLatchTick(&comm, /*ceCapturing=*/true);
-        EXPECT_TRUE(comm.ceColl.graphModeSeen) << "iteration " << i;
+        rcclCeAllReduceGraphLatchTick(comm.get(), /*ceCapturing=*/true);
+        EXPECT_TRUE(comm->ceColl.graphModeSeen) << "iteration " << i;
     }
 }
 
@@ -1932,65 +1932,65 @@ TEST(RcclCeGraphLatch, StaysSetAcrossRepeatedCaptureTicks)
 // CE AR while still capturing -- this previously caused a cross-rank deadlock.
 TEST(RcclCeGraphLatch, DoesNotClearMidCaptureEvenWithZeroRefs)
 {
-    ncclComm comm{};
-    comm.ceColl.graphModeSeen = true;
-    comm.localPersistentRefs  = 0;
+    auto comm = std::make_unique<ncclComm>();
+    comm->ceColl.graphModeSeen = true;
+    comm->localPersistentRefs  = 0;
 
-    rcclCeAllReduceGraphLatchTick(&comm, /*ceCapturing=*/true);
+    rcclCeAllReduceGraphLatchTick(comm.get(), /*ceCapturing=*/true);
 
-    EXPECT_TRUE(comm.ceColl.graphModeSeen);
-    EXPECT_FALSE(rcclCeAllReduceAllowed(&comm));
+    EXPECT_TRUE(comm->ceColl.graphModeSeen);
+    EXPECT_FALSE(rcclCeAllReduceAllowed(comm.get()));
 }
 
 TEST(RcclCeGraphLatch, ClearsWhenCaptureEndsAndNoRefsRemain)
 {
-    ncclComm comm{};
-    comm.ceColl.graphModeSeen = true;
-    comm.localPersistentRefs  = 0;
+    auto comm = std::make_unique<ncclComm>();
+    comm->ceColl.graphModeSeen = true;
+    comm->localPersistentRefs  = 0;
 
-    rcclCeAllReduceGraphLatchTick(&comm, /*ceCapturing=*/false);
+    rcclCeAllReduceGraphLatchTick(comm.get(), /*ceCapturing=*/false);
 
-    EXPECT_FALSE(comm.ceColl.graphModeSeen);
-    EXPECT_TRUE(rcclCeAllReduceAllowed(&comm));
+    EXPECT_FALSE(comm->ceColl.graphModeSeen);
+    EXPECT_TRUE(rcclCeAllReduceAllowed(comm.get()));
 }
 
 TEST(RcclCeGraphLatch, StaysSetWhileCapturedPlanStillReferencesComm)
 {
-    ncclComm comm{};
-    comm.ceColl.graphModeSeen = true;
-    comm.localPersistentRefs  = 1;
+    auto comm = std::make_unique<ncclComm>();
+    comm->ceColl.graphModeSeen = true;
+    comm->localPersistentRefs  = 1;
 
-    rcclCeAllReduceGraphLatchTick(&comm, /*ceCapturing=*/false);
+    rcclCeAllReduceGraphLatchTick(comm.get(), /*ceCapturing=*/false);
 
-    EXPECT_TRUE(comm.ceColl.graphModeSeen)
+    EXPECT_TRUE(comm->ceColl.graphModeSeen)
         << "Latch must stay set until every captured plan is reclaimed";
-    EXPECT_FALSE(rcclCeAllReduceAllowed(&comm));
+    EXPECT_FALSE(rcclCeAllReduceAllowed(comm.get()));
 
     // Reclaim completes: the next tick clears the latch.
-    comm.localPersistentRefs = 0;
-    rcclCeAllReduceGraphLatchTick(&comm, /*ceCapturing=*/false);
-    EXPECT_FALSE(comm.ceColl.graphModeSeen);
-    EXPECT_TRUE(rcclCeAllReduceAllowed(&comm));
+    comm->localPersistentRefs = 0;
+    rcclCeAllReduceGraphLatchTick(comm.get(), /*ceCapturing=*/false);
+    EXPECT_FALSE(comm->ceColl.graphModeSeen);
+    EXPECT_TRUE(rcclCeAllReduceAllowed(comm.get()));
 }
 
 TEST(RcclCeGraphLatch, AllowedQueryHasNoSideEffects)
 {
-    ncclComm comm{};
-    comm.ceColl.graphModeSeen = true;
+    auto comm = std::make_unique<ncclComm>();
+    comm->ceColl.graphModeSeen = true;
 
     for(int i = 0; i < 5; ++i)
     {
-        EXPECT_FALSE(rcclCeAllReduceAllowed(&comm));
+        EXPECT_FALSE(rcclCeAllReduceAllowed(comm.get()));
     }
-    EXPECT_TRUE(comm.ceColl.graphModeSeen) << "Query must be a pure read, not a state transition";
+    EXPECT_TRUE(comm->ceColl.graphModeSeen) << "Query must be a pure read, not a state transition";
 }
 
 TEST(RcclCeGraphLatch, NeverLatchedAllowsCeAllReduceByDefault)
 {
-    ncclComm comm{};
-    comm.ceColl.graphModeSeen = false;
+    auto comm = std::make_unique<ncclComm>();
+    comm->ceColl.graphModeSeen = false;
 
-    EXPECT_TRUE(rcclCeAllReduceAllowed(&comm));
+    EXPECT_TRUE(rcclCeAllReduceAllowed(comm.get()));
 }
 
 #ifdef ENABLE_WARP_SPEED
@@ -2454,20 +2454,20 @@ size_t CountForBytes(size_t bytes, ncclDataType_t dt)
 // 4 MiB CE minimum) must still take DDA rather than fall to the generic kernel.
 TEST(RcclAllReduceDdaDecision, Gfx950_SymOff_LargeMsg_TakesDda)
 {
-    ncclComm comm{};
-    InitDdaDecisionComm(comm, "gfx950", 8, 1, /*symmetricSupport=*/false);
+    auto comm = std::make_unique<ncclComm>();
+    InitDdaDecisionComm(*comm, "gfx950", 8, 1, /*symmetricSupport=*/false);
     size_t   count = CountForBytes(8ull * 1024 * 1024, ncclFloat32);
-    EXPECT_TRUE(rcclAllReduceShouldTakeDdaPath(&comm, count, ncclFloat32,
+    EXPECT_TRUE(rcclAllReduceShouldTakeDdaPath(comm.get(), count, ncclFloat32,
                                                /*symEligible=*/false, /*ceAllReduceAllowed=*/false));
 }
 
 // gfx950, small message with CE unavailable: squarely in DDA's range, takes DDA.
 TEST(RcclAllReduceDdaDecision, Gfx950_SymOff_SmallMsg_TakesDda)
 {
-    ncclComm comm{};
-    InitDdaDecisionComm(comm, "gfx950", 8, 1, /*symmetricSupport=*/false);
+    auto comm = std::make_unique<ncclComm>();
+    InitDdaDecisionComm(*comm, "gfx950", 8, 1, /*symmetricSupport=*/false);
     size_t   count = CountForBytes(2ull * 1024 * 1024, ncclFloat32);
-    EXPECT_TRUE(rcclAllReduceShouldTakeDdaPath(&comm, count, ncclFloat32,
+    EXPECT_TRUE(rcclAllReduceShouldTakeDdaPath(comm.get(), count, ncclFloat32,
                                                /*symEligible=*/false, /*ceAllReduceAllowed=*/false));
 }
 
@@ -2475,10 +2475,10 @@ TEST(RcclAllReduceDdaDecision, Gfx950_SymOff_SmallMsg_TakesDda)
 // the call, so the DDA guard must yield (returns false).
 TEST(RcclAllReduceDdaDecision, Gfx950_SymOn_CeEligible_YieldsToCe)
 {
-    ncclComm comm{};
-    InitDdaDecisionComm(comm, "gfx950", 8, 1, /*symmetricSupport=*/true);
+    auto comm = std::make_unique<ncclComm>();
+    InitDdaDecisionComm(*comm, "gfx950", 8, 1, /*symmetricSupport=*/true);
     size_t   count = CountForBytes(8ull * 1024 * 1024, ncclFloat32); // divisible by 8 ranks
-    EXPECT_FALSE(rcclAllReduceShouldTakeDdaPath(&comm, count, ncclFloat32,
+    EXPECT_FALSE(rcclAllReduceShouldTakeDdaPath(comm.get(), count, ncclFloat32,
                                                 /*symEligible=*/false, /*ceAllReduceAllowed=*/true));
 }
 
@@ -2486,10 +2486,10 @@ TEST(RcclAllReduceDdaDecision, Gfx950_SymOn_CeEligible_YieldsToCe)
 // caller's ceAllReduceAllowed=false): CE will not run, so DDA must reclaim the call.
 TEST(RcclAllReduceDdaDecision, Gfx950_SymOn_GraphLatched_TakesDda)
 {
-    ncclComm comm{};
-    InitDdaDecisionComm(comm, "gfx950", 8, 1, /*symmetricSupport=*/true);
+    auto comm = std::make_unique<ncclComm>();
+    InitDdaDecisionComm(*comm, "gfx950", 8, 1, /*symmetricSupport=*/true);
     size_t   count = CountForBytes(8ull * 1024 * 1024, ncclFloat32);
-    EXPECT_TRUE(rcclAllReduceShouldTakeDdaPath(&comm, count, ncclFloat32,
+    EXPECT_TRUE(rcclAllReduceShouldTakeDdaPath(comm.get(), count, ncclFloat32,
                                                /*symEligible=*/false, /*ceAllReduceAllowed=*/false));
 }
 
@@ -2497,10 +2497,10 @@ TEST(RcclAllReduceDdaDecision, Gfx950_SymOn_GraphLatched_TakesDda)
 // with symmetricSupport on, so DDA reclaims the call.
 TEST(RcclAllReduceDdaDecision, Gfx950_SymOn_UnsupportedOp_TakesDda)
 {
-    ncclComm comm{};
-    InitDdaDecisionComm(comm, "gfx950", 8, 1, /*symmetricSupport=*/true);
+    auto comm = std::make_unique<ncclComm>();
+    InitDdaDecisionComm(*comm, "gfx950", 8, 1, /*symmetricSupport=*/true);
     size_t   count = CountForBytes(8ull * 1024 * 1024, ncclFloat32);
-    EXPECT_TRUE(rcclAllReduceShouldTakeDdaPath(&comm, count, ncclFloat32,
+    EXPECT_TRUE(rcclAllReduceShouldTakeDdaPath(comm.get(), count, ncclFloat32,
                                                /*symEligible=*/false, /*ceAllReduceAllowed=*/false));
 }
 
@@ -2508,20 +2508,20 @@ TEST(RcclAllReduceDdaDecision, Gfx950_SymOn_UnsupportedOp_TakesDda)
 // cap and, with CE unavailable, takes DDA.
 TEST(RcclAllReduceDdaDecision, Gfx942_SymOff_MidMsg_TakesDda)
 {
-    ncclComm comm{};
-    InitDdaDecisionComm(comm, "gfx942", 8, 1, /*symmetricSupport=*/false);
+    auto comm = std::make_unique<ncclComm>();
+    InitDdaDecisionComm(*comm, "gfx942", 8, 1, /*symmetricSupport=*/false);
     size_t   count = CountForBytes(6ull * 1024 * 1024, ncclFloat32);
-    EXPECT_TRUE(rcclAllReduceShouldTakeDdaPath(&comm, count, ncclFloat32,
+    EXPECT_TRUE(rcclAllReduceShouldTakeDdaPath(comm.get(), count, ncclFloat32,
                                                /*symEligible=*/false, /*ceAllReduceAllowed=*/false));
 }
 
 // gfx942 above its 8 MiB DDA cap: rcclDdaEnabled returns false, so no DDA.
 TEST(RcclAllReduceDdaDecision, Gfx942_SymOff_AboveCap_NoDda)
 {
-    ncclComm comm{};
-    InitDdaDecisionComm(comm, "gfx942", 8, 1, /*symmetricSupport=*/false);
+    auto comm = std::make_unique<ncclComm>();
+    InitDdaDecisionComm(*comm, "gfx942", 8, 1, /*symmetricSupport=*/false);
     size_t   count = CountForBytes(9ull * 1024 * 1024, ncclFloat32);
-    EXPECT_FALSE(rcclAllReduceShouldTakeDdaPath(&comm, count, ncclFloat32,
+    EXPECT_FALSE(rcclAllReduceShouldTakeDdaPath(comm.get(), count, ncclFloat32,
                                                 /*symEligible=*/false, /*ceAllReduceAllowed=*/false));
 }
 
@@ -2530,10 +2530,10 @@ TEST(RcclAllReduceDdaDecision, Gfx942_SymOff_AboveCap_NoDda)
 // Mirror of Gfx942_SymOff_MidMsg_TakesDda: ceAllReduceAllowed flips the decision.
 TEST(RcclAllReduceDdaDecision, Gfx942_SymOn_CeEligible_YieldsToCe)
 {
-    ncclComm comm{};
-    InitDdaDecisionComm(comm, "gfx942", 8, 1, /*symmetricSupport=*/true);
+    auto comm = std::make_unique<ncclComm>();
+    InitDdaDecisionComm(*comm, "gfx942", 8, 1, /*symmetricSupport=*/true);
     size_t   count = CountForBytes(6ull * 1024 * 1024, ncclFloat32); // divisible by 8 ranks
-    EXPECT_FALSE(rcclAllReduceShouldTakeDdaPath(&comm, count, ncclFloat32,
+    EXPECT_FALSE(rcclAllReduceShouldTakeDdaPath(comm.get(), count, ncclFloat32,
                                                 /*symEligible=*/false, /*ceAllReduceAllowed=*/true));
 }
 
@@ -2542,10 +2542,10 @@ TEST(RcclAllReduceDdaDecision, Gfx942_SymOn_CeEligible_YieldsToCe)
 // the 8 MiB gfx942 cap.
 TEST(RcclAllReduceDdaDecision, Gfx942_SymOn_UnsupportedOp_TakesDda)
 {
-    ncclComm comm{};
-    InitDdaDecisionComm(comm, "gfx942", 8, 1, /*symmetricSupport=*/true);
+    auto comm = std::make_unique<ncclComm>();
+    InitDdaDecisionComm(*comm, "gfx942", 8, 1, /*symmetricSupport=*/true);
     size_t   count = CountForBytes(6ull * 1024 * 1024, ncclFloat32);
-    EXPECT_TRUE(rcclAllReduceShouldTakeDdaPath(&comm, count, ncclFloat32,
+    EXPECT_TRUE(rcclAllReduceShouldTakeDdaPath(comm.get(), count, ncclFloat32,
                                                /*symEligible=*/false, /*ceAllReduceAllowed=*/false));
 }
 
@@ -2555,20 +2555,20 @@ TEST(RcclAllReduceDdaDecision, Gfx942_SymOn_UnsupportedOp_TakesDda)
 // divisible), so the short-circuit is the only reason DDA is chosen here.
 TEST(RcclAllReduceDdaDecision, Gfx1250_CeEligible_StillTakesDda)
 {
-    ncclComm comm{};
-    InitDdaDecisionComm(comm, "gfx1250", 8, 1, /*symmetricSupport=*/true);
+    auto comm = std::make_unique<ncclComm>();
+    InitDdaDecisionComm(*comm, "gfx1250", 8, 1, /*symmetricSupport=*/true);
     size_t   count = CountForBytes(64ull * 1024 * 1024, ncclFloat32); // CE-eligible size, divisible by 8
-    EXPECT_TRUE(rcclAllReduceShouldTakeDdaPath(&comm, count, ncclFloat32,
+    EXPECT_TRUE(rcclAllReduceShouldTakeDdaPath(comm.get(), count, ncclFloat32,
                                                /*symEligible=*/false, /*ceAllReduceAllowed=*/true));
 }
 
 // An arch DDA never runs on: rcclDdaEnabled returns false, so no DDA on any size.
 TEST(RcclAllReduceDdaDecision, UnsupportedArch_NoDda)
 {
-    ncclComm comm{};
-    InitDdaDecisionComm(comm, "gfx90a", 8, 1, /*symmetricSupport=*/false);
+    auto comm = std::make_unique<ncclComm>();
+    InitDdaDecisionComm(*comm, "gfx90a", 8, 1, /*symmetricSupport=*/false);
     size_t   count = CountForBytes(2ull * 1024 * 1024, ncclFloat32);
-    EXPECT_FALSE(rcclAllReduceShouldTakeDdaPath(&comm, count, ncclFloat32,
+    EXPECT_FALSE(rcclAllReduceShouldTakeDdaPath(comm.get(), count, ncclFloat32,
                                                 /*symEligible=*/false, /*ceAllReduceAllowed=*/false));
 }
 
@@ -2624,10 +2624,10 @@ TEST(Rcclwrap, AlltoAllDdaDecision_Gfx950_TooFewRanks_NoDda)
 // gfx942/gfx950 DDA requires the full 8-GPU node; fewer ranks disables it.
 TEST(RcclAllReduceDdaDecision, Gfx950_TooFewRanks_NoDda)
 {
-    ncclComm comm{};
-    InitDdaDecisionComm(comm, "gfx950", 4, 1, /*symmetricSupport=*/false);
+    auto comm = std::make_unique<ncclComm>();
+    InitDdaDecisionComm(*comm, "gfx950", 4, 1, /*symmetricSupport=*/false);
     size_t   count = CountForBytes(2ull * 1024 * 1024, ncclFloat32);
-    EXPECT_FALSE(rcclAllReduceShouldTakeDdaPath(&comm, count, ncclFloat32,
+    EXPECT_FALSE(rcclAllReduceShouldTakeDdaPath(comm.get(), count, ncclFloat32,
                                                 /*symEligible=*/false, /*ceAllReduceAllowed=*/false));
 }
 
@@ -2635,10 +2635,10 @@ TEST(RcclAllReduceDdaDecision, Gfx950_TooFewRanks_NoDda)
 // regardless of arch/size.
 TEST(RcclAllReduceDdaDecision, SymEligible_YieldsToSymmetricKernel)
 {
-    ncclComm comm{};
-    InitDdaDecisionComm(comm, "gfx950", 8, 1, /*symmetricSupport=*/false);
+    auto comm = std::make_unique<ncclComm>();
+    InitDdaDecisionComm(*comm, "gfx950", 8, 1, /*symmetricSupport=*/false);
     size_t   count = CountForBytes(2ull * 1024 * 1024, ncclFloat32);
-    EXPECT_FALSE(rcclAllReduceShouldTakeDdaPath(&comm, count, ncclFloat32,
+    EXPECT_FALSE(rcclAllReduceShouldTakeDdaPath(comm.get(), count, ncclFloat32,
                                                 /*symEligible=*/true, /*ceAllReduceAllowed=*/true));
 }
 
@@ -2806,16 +2806,16 @@ TEST(RcclDdaTierThresholds, Gfx1250_NoEnv_UsesArchTable)
         "Gfx1250_NoEnv_UsesArchTable",
         []()
         {
-            ncclComm comm{};
-            InitDdaDecisionComm(comm, "gfx1250", 8, 1, /*symmetricSupport=*/false);
-            comm.archThresholds = rcclGetArchThresholds("gfx1250");
-            ASSERT_NE(comm.archThresholds, nullptr);
-            EXPECT_EQ(rcclDdaLLThreshold(&comm, ncclFuncAllReduce),
-                      comm.archThresholds->ddaLLMax[ncclFuncAllReduce]);
-            EXPECT_EQ(rcclDdaLL128Threshold(&comm, ncclFuncAllReduce),
-                      comm.archThresholds->ddaLL128Max[ncclFuncAllReduce]);
-            EXPECT_EQ(rcclDdaVmmThreshold(&comm, ncclFuncAllReduce),
-                      comm.archThresholds->ddaVmmMax[ncclFuncAllReduce]);
+            auto comm = std::make_unique<ncclComm>();
+            InitDdaDecisionComm(*comm, "gfx1250", 8, 1, /*symmetricSupport=*/false);
+            comm->archThresholds = rcclGetArchThresholds("gfx1250");
+            ASSERT_NE(comm->archThresholds, nullptr);
+            EXPECT_EQ(rcclDdaLLThreshold(comm.get(), ncclFuncAllReduce),
+                      comm->archThresholds->ddaLLMax[ncclFuncAllReduce]);
+            EXPECT_EQ(rcclDdaLL128Threshold(comm.get(), ncclFuncAllReduce),
+                      comm->archThresholds->ddaLL128Max[ncclFuncAllReduce]);
+            EXPECT_EQ(rcclDdaVmmThreshold(comm.get(), ncclFuncAllReduce),
+                      comm->archThresholds->ddaVmmMax[ncclFuncAllReduce]);
         },
         {});
 }
@@ -2826,22 +2826,22 @@ TEST(RcclDdaTierThresholds, Gfx1250_EnvOverridesArchTable)
         "Gfx1250_EnvOverridesArchTable",
         []()
         {
-            ncclComm comm{};
-            InitDdaDecisionComm(comm, "gfx1250", 8, 1, /*symmetricSupport=*/false);
-            comm.archThresholds = rcclGetArchThresholds("gfx1250");
-            ASSERT_NE(comm.archThresholds, nullptr);
+            auto comm = std::make_unique<ncclComm>();
+            InitDdaDecisionComm(*comm, "gfx1250", 8, 1, /*symmetricSupport=*/false);
+            comm->archThresholds = rcclGetArchThresholds("gfx1250");
+            ASSERT_NE(comm->archThresholds, nullptr);
 
             constexpr size_t llEnv    = 16384;
             constexpr size_t ll128Env = 1048576;
             constexpr size_t vmmEnv   = 4194304;
             // Values differ from the table, so equality below can only come from the env.
-            ASSERT_NE(comm.archThresholds->ddaLLMax[ncclFuncAllReduce], llEnv);
-            ASSERT_NE(comm.archThresholds->ddaLL128Max[ncclFuncAllReduce], ll128Env);
-            ASSERT_NE(comm.archThresholds->ddaVmmMax[ncclFuncAllReduce], vmmEnv);
+            ASSERT_NE(comm->archThresholds->ddaLLMax[ncclFuncAllReduce], llEnv);
+            ASSERT_NE(comm->archThresholds->ddaLL128Max[ncclFuncAllReduce], ll128Env);
+            ASSERT_NE(comm->archThresholds->ddaVmmMax[ncclFuncAllReduce], vmmEnv);
 
-            EXPECT_EQ(rcclDdaLLThreshold(&comm, ncclFuncAllReduce), llEnv);
-            EXPECT_EQ(rcclDdaLL128Threshold(&comm, ncclFuncAllReduce), ll128Env);
-            EXPECT_EQ(rcclDdaVmmThreshold(&comm, ncclFuncAllReduce), vmmEnv);
+            EXPECT_EQ(rcclDdaLLThreshold(comm.get(), ncclFuncAllReduce), llEnv);
+            EXPECT_EQ(rcclDdaLL128Threshold(comm.get(), ncclFuncAllReduce), ll128Env);
+            EXPECT_EQ(rcclDdaVmmThreshold(comm.get(), ncclFuncAllReduce), vmmEnv);
         },
         {{"RCCL_DDA_LL_THRESHOLD", "16384"},
          {"RCCL_DDA_LL128_THRESHOLD", "1048576"},
@@ -2860,13 +2860,13 @@ TEST(RcclDdaTierThresholds, UntunedArch_NoEnv_NoThresholds)
         "UntunedArch_NoEnv_NoThresholds",
         []()
         {
-            ncclComm comm{};
-            InitDdaDecisionComm(comm, "gfx90a", 8, 1, /*symmetricSupport=*/false);
-            ASSERT_EQ(rcclGetArchThresholds(comm.archName), nullptr);
-            EXPECT_EQ(rcclDdaLLThreshold(&comm, ncclFuncAllReduce), kDdaLLBaseDefault);
-            EXPECT_EQ(rcclDdaLL128Threshold(&comm, ncclFuncAllReduce), kDdaLL128BaseDefault);
-            EXPECT_EQ(rcclDdaVmmThreshold(&comm, ncclFuncAllReduce), kDdaVmmBaseDefault);
-            EXPECT_FALSE(rcclDdaEnabled(&comm, 1024, rcclDdaVmmThreshold(&comm, ncclFuncAllReduce)));
+            auto comm = std::make_unique<ncclComm>();
+            InitDdaDecisionComm(*comm, "gfx90a", 8, 1, /*symmetricSupport=*/false);
+            ASSERT_EQ(rcclGetArchThresholds(comm->archName), nullptr);
+            EXPECT_EQ(rcclDdaLLThreshold(comm.get(), ncclFuncAllReduce), kDdaLLBaseDefault);
+            EXPECT_EQ(rcclDdaLL128Threshold(comm.get(), ncclFuncAllReduce), kDdaLL128BaseDefault);
+            EXPECT_EQ(rcclDdaVmmThreshold(comm.get(), ncclFuncAllReduce), kDdaVmmBaseDefault);
+            EXPECT_FALSE(rcclDdaEnabled(comm.get(), 1024, rcclDdaVmmThreshold(comm.get(), ncclFuncAllReduce)));
         },
         {});
 }
@@ -2879,18 +2879,18 @@ TEST(RcclDdaTierThresholds, NoAttachedTable_ResolvesViaArchName)
         "NoAttachedTable_ResolvesViaArchName",
         []()
         {
-            ncclComm comm{};
-            InitDdaDecisionComm(comm, "gfx942", 8, 1, /*symmetricSupport=*/false);
-            ASSERT_EQ(comm.archThresholds, nullptr);
-            EXPECT_EQ(rcclDdaVmmThreshold(&comm, ncclFuncAllReduce), rcclGetArchThresholds("gfx942")->ddaVmmMax[ncclFuncAllReduce]);
-            EXPECT_EQ(rcclDdaVmmThreshold(&comm, ncclFuncAlltoAll), rcclGetArchThresholds("gfx942")->ddaVmmMax[ncclFuncAlltoAll]);
+            auto comm = std::make_unique<ncclComm>();
+            InitDdaDecisionComm(*comm, "gfx942", 8, 1, /*symmetricSupport=*/false);
+            ASSERT_EQ(comm->archThresholds, nullptr);
+            EXPECT_EQ(rcclDdaVmmThreshold(comm.get(), ncclFuncAllReduce), rcclGetArchThresholds("gfx942")->ddaVmmMax[ncclFuncAllReduce]);
+            EXPECT_EQ(rcclDdaVmmThreshold(comm.get(), ncclFuncAlltoAll), rcclGetArchThresholds("gfx942")->ddaVmmMax[ncclFuncAlltoAll]);
 
-            InitDdaDecisionComm(comm, "gfx1250", 8, 1, /*symmetricSupport=*/false);
+            InitDdaDecisionComm(*comm, "gfx1250", 8, 1, /*symmetricSupport=*/false);
             const rcclArchThresholds* table = rcclGetArchThresholds("gfx1250");
             ASSERT_NE(table, nullptr);
-            EXPECT_EQ(rcclDdaLLThreshold(&comm, ncclFuncAlltoAll), table->ddaLLMax[ncclFuncAlltoAll]);
-            EXPECT_EQ(rcclDdaLL128Threshold(&comm, ncclFuncAlltoAll), table->ddaLL128Max[ncclFuncAlltoAll]);
-            EXPECT_EQ(rcclDdaVmmThreshold(&comm, ncclFuncAlltoAll), rcclGetArchThresholds("gfx1250")->ddaVmmMax[ncclFuncAlltoAll]);
+            EXPECT_EQ(rcclDdaLLThreshold(comm.get(), ncclFuncAlltoAll), table->ddaLLMax[ncclFuncAlltoAll]);
+            EXPECT_EQ(rcclDdaLL128Threshold(comm.get(), ncclFuncAlltoAll), table->ddaLL128Max[ncclFuncAlltoAll]);
+            EXPECT_EQ(rcclDdaVmmThreshold(comm.get(), ncclFuncAlltoAll), rcclGetArchThresholds("gfx1250")->ddaVmmMax[ncclFuncAlltoAll]);
         },
         {});
 }
@@ -2902,12 +2902,12 @@ TEST(RcclDdaTierThresholds, Gfx1250_EnvZeroDisablesLlTier)
         "Gfx1250_EnvZeroDisablesLlTier",
         []()
         {
-            ncclComm comm{};
-            InitDdaDecisionComm(comm, "gfx1250", 8, 1, /*symmetricSupport=*/false);
-            comm.archThresholds = rcclGetArchThresholds("gfx1250");
-            ASSERT_NE(comm.archThresholds, nullptr);
-            ASSERT_GT(comm.archThresholds->ddaLLMax[ncclFuncAllReduce], 0ul);
-            EXPECT_EQ(rcclDdaLLThreshold(&comm, ncclFuncAllReduce), 0ul);
+            auto comm = std::make_unique<ncclComm>();
+            InitDdaDecisionComm(*comm, "gfx1250", 8, 1, /*symmetricSupport=*/false);
+            comm->archThresholds = rcclGetArchThresholds("gfx1250");
+            ASSERT_NE(comm->archThresholds, nullptr);
+            ASSERT_GT(comm->archThresholds->ddaLLMax[ncclFuncAllReduce], 0ul);
+            EXPECT_EQ(rcclDdaLLThreshold(comm.get(), ncclFuncAllReduce), 0ul);
         },
         {{"RCCL_DDA_LL_THRESHOLD", "0"}});
 
@@ -2961,8 +2961,8 @@ ncclResult_t SelectA2A(ncclComm& comm, size_t totalBytes, rcclCollDecision& out)
 // rcclSelectAlltoAll must choose RCCL_DDA_FABRIC_LL.
 TEST(RcclAlltoAllDecision, Gfx1250_DdaLL_Band)
 {
-    ncclComm            comm{};
-    InitA2ADecisionComm(comm, "gfx1250", 4);
+    auto comm = std::make_unique<ncclComm>();
+    InitA2ADecisionComm(*comm, "gfx1250", 4);
     const rcclArchThresholds* tbl = rcclGetArchThresholds("gfx1250");
     ASSERT_NE(tbl, nullptr);
     const size_t llMax = tbl->ddaLLMax[ncclFuncAlltoAll];
@@ -2970,7 +2970,7 @@ TEST(RcclAlltoAllDecision, Gfx1250_DdaLL_Band)
 
     // Message at the ceiling; per-rank chunk is 16-byte aligned (LL eligibility).
     rcclCollDecision dec{};
-    ASSERT_EQ(SelectA2A(comm, llMax, dec), ncclSuccess);
+    ASSERT_EQ(SelectA2A(*comm, llMax, dec), ncclSuccess);
     EXPECT_EQ(dec.algo, RCCL_DDA_FABRIC_LL);
 }
 
@@ -2979,8 +2979,8 @@ TEST(RcclAlltoAllDecision, Gfx1250_DdaLL_Band)
 // rcclSelectAlltoAll must choose RCCL_DDA_FABRIC_LL128.
 TEST(RcclAlltoAllDecision, Gfx1250_DdaLL128_Band)
 {
-    ncclComm            comm{};
-    InitA2ADecisionComm(comm, "gfx1250", 4);
+    auto comm = std::make_unique<ncclComm>();
+    InitA2ADecisionComm(*comm, "gfx1250", 4);
     const rcclArchThresholds* tbl = rcclGetArchThresholds("gfx1250");
     ASSERT_NE(tbl, nullptr);
     const size_t llMax    = tbl->ddaLLMax[ncclFuncAlltoAll];
@@ -2990,12 +2990,12 @@ TEST(RcclAlltoAllDecision, Gfx1250_DdaLL128_Band)
     // One 16*nRanks step above the LL ceiling, still within LL128.
     // The alignment ensures each per-rank chunk is a multiple of 16 bytes
     // (required by both LL128 and LL eligibility predicates).
-    const size_t align      = 16u * (size_t)comm.nRanks;
+    const size_t align      = 16u * (size_t)comm->nRanks;
     const size_t totalBytes = ((llMax + align) / align) * align;
     ASSERT_LE(totalBytes, ll128Max);
 
     rcclCollDecision dec{};
-    ASSERT_EQ(SelectA2A(comm, totalBytes, dec), ncclSuccess);
+    ASSERT_EQ(SelectA2A(*comm, totalBytes, dec), ncclSuccess);
     EXPECT_EQ(dec.algo, RCCL_DDA_FABRIC_LL128);
 }
 
@@ -3003,19 +3003,19 @@ TEST(RcclAlltoAllDecision, Gfx1250_DdaLL128_Band)
 // ddaLL128Max[A2A] = 1 MiB): anything above 1 MiB falls to Direct p2p.
 TEST(RcclAlltoAllDecision, Gfx1250_AboveDdaCap_DirectFallback)
 {
-    ncclComm            comm{};
-    InitA2ADecisionComm(comm, "gfx1250", 4);
+    auto comm = std::make_unique<ncclComm>();
+    InitA2ADecisionComm(*comm, "gfx1250", 4);
     const rcclArchThresholds* tbl = rcclGetArchThresholds("gfx1250");
     ASSERT_NE(tbl, nullptr);
     ASSERT_EQ(tbl->ddaVmmMax[ncclFuncAlltoAll], 0ul)
         << "gfx1250 VMM must be disabled for AlltoAll";
     const size_t ll128Max = tbl->ddaLL128Max[ncclFuncAlltoAll];
 
-    const size_t align      = 16u * (size_t)comm.nRanks;
+    const size_t align      = 16u * (size_t)comm->nRanks;
     const size_t totalBytes = ((ll128Max + align) / align) * align;
 
     rcclCollDecision dec{};
-    ASSERT_EQ(SelectA2A(comm, totalBytes, dec), ncclSuccess);
+    ASSERT_EQ(SelectA2A(*comm, totalBytes, dec), ncclSuccess);
     EXPECT_EQ(dec.algo, RCCL_DIRECT_ALLTOALL);
 }
 
@@ -3023,32 +3023,32 @@ TEST(RcclAlltoAllDecision, Gfx1250_AboveDdaCap_DirectFallback)
 // rcclSelectAlltoAll must choose RCCL_DDA_IPC.
 TEST(RcclAlltoAllDecision, Gfx950_DdaIpc_Band)
 {
-    ncclComm            comm{};
-    InitA2ADecisionComm(comm, "gfx950", 8);
+    auto comm = std::make_unique<ncclComm>();
+    InitA2ADecisionComm(*comm, "gfx950", 8);
     const rcclArchThresholds* tbl = rcclGetArchThresholds("gfx950");
     ASSERT_NE(tbl, nullptr);
     const size_t ddaMax = tbl->ddaVmmMax[ncclFuncAlltoAll];
     ASSERT_GT(ddaMax, 0ul) << "gfx950 must have a non-zero DDA-IPC cap for AlltoAll";
 
     rcclCollDecision dec{};
-    ASSERT_EQ(SelectA2A(comm, ddaMax, dec), ncclSuccess);
+    ASSERT_EQ(SelectA2A(*comm, ddaMax, dec), ncclSuccess);
     EXPECT_EQ(dec.algo, RCCL_DDA_IPC);
 }
 
 // gfx950, message above its 4 MiB DDA-IPC cap: falls to RCCL_DIRECT_ALLTOALL.
 TEST(RcclAlltoAllDecision, Gfx950_AboveDdaCap_DirectFallback)
 {
-    ncclComm            comm{};
-    InitA2ADecisionComm(comm, "gfx950", 8);
+    auto comm = std::make_unique<ncclComm>();
+    InitA2ADecisionComm(*comm, "gfx950", 8);
     const rcclArchThresholds* tbl = rcclGetArchThresholds("gfx950");
     ASSERT_NE(tbl, nullptr);
     const size_t ddaMax = tbl->ddaVmmMax[ncclFuncAlltoAll];
 
-    const size_t align      = 16u * (size_t)comm.nRanks;
+    const size_t align      = 16u * (size_t)comm->nRanks;
     const size_t totalBytes = ((ddaMax + align) / align) * align;
 
     rcclCollDecision dec{};
-    ASSERT_EQ(SelectA2A(comm, totalBytes, dec), ncclSuccess);
+    ASSERT_EQ(SelectA2A(*comm, totalBytes, dec), ncclSuccess);
     EXPECT_EQ(dec.algo, RCCL_DIRECT_ALLTOALL);
 }
 
@@ -3056,13 +3056,13 @@ TEST(RcclAlltoAllDecision, Gfx950_AboveDdaCap_DirectFallback)
 // RCCL_DIRECT_ALLTOALL because rcclDdaEnabled returns false for unknown archs.
 TEST(RcclAlltoAllDecision, UnsupportedArch_DirectFallback)
 {
-    ncclComm comm{};
+    auto comm = std::make_unique<ncclComm>();
     // No fabric resources needed: rcclDdaEnabled exits before any eligibility
     // predicate is reached.
-    InitDdaDecisionComm(comm, "gfx90a", 8, /*nNodes=*/1, /*symmetricSupport=*/false);
+    InitDdaDecisionComm(*comm, "gfx90a", 8, /*nNodes=*/1, /*symmetricSupport=*/false);
 
     rcclCollDecision dec{};
-    ASSERT_EQ(rcclSelectAlltoAll(&comm, nullptr, nullptr, /*count=*/1024,
+    ASSERT_EQ(rcclSelectAlltoAll(comm.get(), nullptr, nullptr, /*count=*/1024,
                                  ncclFloat32, nullptr, /*query=*/true,
                                  /*graphCapturingHint=*/false, &dec),
               ncclSuccess);
