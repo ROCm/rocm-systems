@@ -399,7 +399,7 @@ struct RunWorkBatch {
         int ch = ncclShmem.warpChannelId[tid / WARP_SIZE];
         if (ncclShmem.warpComm == 0 || Algo != NCCL_ALGO_RING)
           RunWorkColl<Fn, T, RedOp, Algo, Proto>().run(tid, subtn, work);
-        else if (ch >= 0 && ch >= work->channelLo && ch <= work->channelHi)
+        else if (ch >= work->channelLo && ch <= work->channelHi)
           RunWorkColl<Fn, T, RedOp, Algo, Proto>().run(tid % WARP_SIZE, WARP_SIZE, work);
       }
 #else
