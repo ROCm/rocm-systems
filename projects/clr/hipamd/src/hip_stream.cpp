@@ -74,11 +74,19 @@ void Stream::ResetCaptureState(bool preserveInvalidated) {
 
 // ================================================================================================
 hipError_t Stream::EndCapture(bool preserveInvalidated) {
-  // Recursively end capture on all parallel (forked) streams.
-  for (auto stream : captureStreams_) {
-    [[maybe_unused]] const auto err =
-        reinterpret_cast<hip::Stream*>(stream)->EndCapture(preserveInvalidated);
-    assert(err == hipSuccess);
+  if (originStream_) {
+    // Swap the participant set out before walking it, so each participant is free to erase
+    // itself from the owner on the way through. Iterating a local copy also means the walk
+    // terminates whatever shape the set is in.
+    std::unordered_set<hipStream_t> participants;
+    participants.swap(captureStreams_);
+    for (auto stream : participants) {
+      reinterpret_cast<hip::Stream*>(stream)->EndCapture(preserveInvalidated);
+    }
+  } else if (captureOwner_ != nullptr) {
+    // A participant leaving the capture on its own, via hipStreamDestroy or Detach.
+    reinterpret_cast<hip::Stream*>(captureOwner_)
+        ->EraseCaptureStream(reinterpret_cast<hipStream_t>(this));
   }
 
   ResetCaptureState(preserveInvalidated);
@@ -105,20 +113,15 @@ void Stream::Detach() {
       captureStatus_ == hipStreamCaptureStatusInvalidated) {
     captureStatus_ = hipStreamCaptureStatusInvalidated;
 
-    if (captureOwner_ != nullptr && !originStream_) {
-      reinterpret_cast<hip::Stream*>(captureOwner_)->EraseCaptureStream(
-          reinterpret_cast<hipStream_t>(this));
-      // A participant only aliases the origin's graph, so drop the pointer without freeing.
-      ClearCaptureGraph();
-    }
-
     if (originStream_) {
       EraseCaptureTracking(this);
       ReleaseCaptureGraph();
     }
 
-    // Keep the invalidated status visible on the detached origin and every
-    // fork while clearing all graph, event, and parent/child bookkeeping.
+    // Keep the invalidated status visible on the detached origin and every participant while
+    // clearing all graph, event and membership bookkeeping. A participant removes itself from
+    // its owner's set in here, and only aliases the origin's graph, so there is nothing for
+    // it to free.
     (void)EndCapture(/*preserveInvalidated=*/true);
   }
   detached_.store(true, std::memory_order_release);
@@ -461,9 +464,7 @@ hipError_t hipStreamDestroy(hipStream_t stream) {
   }
   hip::Stream* s = reinterpret_cast<hip::Stream*>(stream);
   if (s->GetCaptureStatus() != hipStreamCaptureStatusNone) {
-    if (s->GetCaptureOwner() != nullptr) {
-      reinterpret_cast<hip::Stream*>(s->GetCaptureOwner())->EraseCaptureStream(stream);
-    }
+    // EndCapture removes a participant from its owner's set itself.
     [[maybe_unused]] auto error = s->EndCapture();
   }
   s->GetDevice()->RemoveStreamFromPools(s);
@@ -541,11 +542,14 @@ hipError_t hipStreamWaitEvent_common(hipStream_t stream, hipEvent_t event, unsig
     // Test for None rather than != Active: an invalidated stream must not be resurrected to
     // Active by the SetCaptureGraph below.
     if (waitStream->GetCaptureStatus() == hipStreamCaptureStatusNone) {
+      // Enroll against the capture's origin, not the stream that happened to record the
+      // event, so every participant is a direct member of one flat set.
+      auto* owner = reinterpret_cast<hip::Stream*>(eventStream->GetCaptureOwner());
       waitStream->SetCaptureGraph(eventStream->GetCaptureGraph());
       waitStream->SetCaptureID(eventStream->GetCaptureID());
       waitStream->SetCaptureMode(eventStream->GetCaptureMode());
-      waitStream->SetCaptureOwner(reinterpret_cast<hipStream_t>(eventStream));
-      eventStream->AddCaptureStream(stream);
+      waitStream->SetCaptureOwner(reinterpret_cast<hipStream_t>(owner));
+      owner->AddCaptureStream(stream);
     }
     waitStream->AddCrossCapturedNode(e->GetNodesPrevToRecorded());
     return hipSuccess;
