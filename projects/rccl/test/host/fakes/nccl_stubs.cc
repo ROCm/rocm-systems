@@ -71,7 +71,6 @@ ncclResult_t ncclDdaIpcCommFini(struct ncclComm* comm) { return ncclSuccess; }
 ncclResult_t ncclDdaIpcCommInit(struct ncclComm* comm) { ::abort(); }
 bool ncclDdaUseFabricPath(struct ncclComm* comm) { return false; }
 ncclResult_t ncclDevrFinalize(struct ncclComm* comm) { return ncclSuccess; }
-// ncclDevrFindWindow (src/dev_runtime.cc): dev_runtime_fakes.cc.
 bool ncclDevrIsOneLsaTeam(struct ncclComm* comm) { ::abort(); }
 ncclResult_t ncclGinA2AFinalize(struct ncclComm* comm) { return ncclSuccess; }
 ncclResult_t ncclGinAllReduceFinalize(struct ncclComm* comm) { return ncclSuccess; }
@@ -206,8 +205,6 @@ int getROCmVersion(unsigned int* major, unsigned int* minor, unsigned int* patch
 ncclResult_t ncclMemAlloc(void** ptr, size_t size) { ::abort(); }
 ncclResult_t ncclMemFree(void* ptr) { return g_ncclMemFree(ptr); }
 }
-
-// ncclSymkInitOnce (src/sym_kernels.cc): sym_kernels_fakes.cc.
 
 void ResetNcclStubs() {
 #ifndef RCCL_STUBS_OMIT_ncclInitKernelsForDevice

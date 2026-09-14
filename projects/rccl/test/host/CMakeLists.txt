@@ -67,12 +67,13 @@ set(RCCL_MICRO_TEST_SOURCES
   fakes/env_fakes.cc                   # src/misc/param.cc + getenv interposition
   fakes/ce_fakes.cc                    # src/ce_coll.cc availability seams
   fakes/collectives_fakes.cc           # src/collectives.cc name helpers
+  fakes/dda_fakes.cc                   # src/algorithms/dda/* selection seams
   fakes/dev_runtime_fakes.cc           # src/dev_runtime.cc window seams
   fakes/strongstream_stubs.cc          # src/misc/strongstream.cc capture seam
   fakes/sym_kernels_fakes.cc           # src/sym_kernels.cc query seams
   fakes/transport_stubs.cc             # transport/PXN/AINIC seams
   fakes/tuning_fakes.cc                # graph tuning/channel params
-  fakes/wrap_fakes.cc                  # rccl_wrap.cc dependency seams (cf. p2p_fakes.cc)
+  fakes/wrap_fakes.cc                  # remaining uncategorized dependency seams
   ../common/main_altrsmi.cpp           # minimal gtest main, no RCCL deps
   ../common/ProcessIsolatedTestRunner.cpp
 )

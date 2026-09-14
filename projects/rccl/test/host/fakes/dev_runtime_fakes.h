@@ -19,8 +19,8 @@ struct ncclDevrWindow;
 
 extern std::function<ncclResult_t(struct ncclComm*, void const*, struct ncclDevrWindow**)> g_devrFindWindow;
 extern std::function<bool(struct ncclDevrWindow*)> g_devrWindowHasSysmemSegment;
-extern bool g_devrWindowIsMultiSegment;  // UNDRIVEN
-extern bool g_devrWindowHasSysmemSegmentValue;  // UNDRIVEN
+extern bool g_devrWindowIsMultiSegment;
+extern bool g_devrWindowHasSysmemSegmentValue;
 
 void ResetDevRuntimeFakes();
 
