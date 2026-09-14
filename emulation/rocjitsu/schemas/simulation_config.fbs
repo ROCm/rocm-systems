@@ -12,7 +12,8 @@ table ComputeUnitConfig {
   sgprs_per_wf: uint32;   // Scalar GPRs per wavefront.
   vgprs_per_wf: uint32;   // Vector GPRs per wavefront.
   lds_size_kb: uint32;    // Local Data Share size in kilobytes.
-  functional_quantum: uint32;  // Max instructions per advance() in FUNCTIONAL mode (0 = unbounded).
+  // Maximum CU step() iterations per functional dispatch quantum (0 = unbounded).
+  functional_quantum: uint32;
 }
 
 /// Configuration for a command processor.
@@ -269,11 +270,18 @@ table TopologyDef {
 /// Top-level simulation configuration.
 table SimulationConfig {
   max_ticks: uint64;             // Maximum simulation ticks before halting.
-  num_threads: uint32;           // Number of simulation engine partitions (one per XCD when partitioned).
+  num_threads: uint32;           // Engine partitions (one per XCD when partitioned). 0/omitted = min(host threads, XCDs).
   exec_mode: string;             // Execution mode: "functional" (default) or "clocked".
   vm: VirtualMachineConfig;      // Virtual machine hardware model. Omit for dbt_guest-only configs.
   topology: TopologyDef;         // Declarative topology. Omit for dbt_guest-only configs.
   dbt_guest: DbtGuestConfig;     // Optional guest-GPU DBT interposition mode.
+  // Functional CU-dispatch width, including the calling command-processor thread.
+  // 0 explicitly selects one host-wide hardware-thread budget, capped at 32 and
+  // divided across SoCs; a nonzero value applies per SoC. Each effective SoC
+  // width is capped at its largest per-CP CU count. This is host acceleration,
+  // not a modeled GPU resource: changing the width must preserve the observable
+  // result of race-free workloads.
+  cpu_dispatch_threads: uint32 = 1;
 }
 
 root_type SimulationConfig;

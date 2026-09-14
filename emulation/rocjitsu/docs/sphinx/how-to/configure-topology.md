@@ -39,6 +39,7 @@ Copy a pre-built config and modify the fields that matter for your workload. The
 {
   "max_ticks": 100000,
   "num_threads": 1,
+  "cpu_dispatch_threads": 0,
   "exec_mode": "functional",
   "vm": { "arch": "cdna4" },
   "topology": { "..." : "..." }
@@ -51,7 +52,21 @@ An integer that caps the number of simulation ticks. The VM stops when all prima
 
 ### `num_threads`
 
-The number of worker threads the PDES simulation engine uses. Set to `1` for single-threaded execution.
+The number of Simdojo engine partitions. rocJITsu assigns whole XCD subtrees to
+these partitions and clamps the value to the aggregate XCD count. Set to `1` to
+keep all XCDs on one engine partition.
+
+### `cpu_dispatch_threads`
+
+The host-thread width used to execute accepted CU work in functional mode. A
+nonzero value is applied per SoC and shared by all command processors in that
+SoC. The default, `1`, keeps dispatch serial. Setting the field explicitly to
+`0` creates one automatic host-wide budget from the available hardware threads,
+caps it at 32, and divides it as evenly as possible across the SoCs. After
+either selection, each SoC's effective width is capped at the largest number of
+CUs owned by any one command processor in that SoC. This control does not
+change XCD partitioning, queue ownership, or XCD fan-out. Clocked mode always
+uses an effective value of `1`.
 
 ### `exec_mode`
 
