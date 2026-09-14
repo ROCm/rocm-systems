@@ -26,8 +26,6 @@
 
 namespace dda::common {
 
-// Precondition: the host launcher has staged sendbuff to scratch and completed
-// launchFabricGpuBarrierPublish on the same stream.
 template <typename T, int NRANKS_CT, bool hasAcc>
 #if defined(USE_ROCM)
 __launch_bounds__(512)
@@ -42,6 +40,10 @@ __launch_bounds__(512)
   const auto idxStart = gtIdx * countPerThread;
   const auto idxEnd = count;
   const auto idxStride = gridDim.x * blockDim.x * countPerThread;
+
+  // Publish the stream-ordered scratch copy before any rank consumes peer
+  // scratch. Keeping this in the collective avoids an extra graph node.
+  barrier.syncOnSameBlockIdx<true /* hasPreviousMemAccess */, true /* hasSubsequentMemAccess */>();
 
   reduceScatter<T, NRANKS_CT, hasAcc>(ipcbuffs, recvbuff, acc, selfRank, nRanks, idxStart, idxEnd, idxStride, 0);
 
