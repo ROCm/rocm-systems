@@ -1241,6 +1241,30 @@ static bool svm_api_range_get_locked(struct hsa_kfd_fmm_context *fmm_ctx,
 	return true;
 }
 
+/*
+ * Undo one svm_api_range_get_locked() whose grant then failed. Nothing reached
+ * the kernel, so unlike svm_api_range_put_locked there is no revoke to work out
+ * and this stays allocation-free on an error path that may itself be an
+ * out-of-memory one.
+ */
+static void svm_api_range_unget_locked(struct hsa_kfd_fmm_context *fmm_ctx,
+				       void *user_addr)
+{
+	svm_api_range_t *r = svm_api_range_find(fmm_ctx, user_addr);
+
+	if (!r || --r->refcount > 0)
+		return;
+
+	hsakmt_rbtree_delete(&fmm_ctx->svm_api_range_tree, &r->node);
+	free(r);
+
+	/* Kept in step with svm_api_range_put_locked: a stale bound only
+	 * widens later scans, but there is no reason to leave one behind.
+	 */
+	if (fmm_ctx->svm_api_range_tree.root == &fmm_ctx->svm_api_range_tree.sentinel)
+		fmm_ctx->svm_api_max_extent = 0;
+}
+
 /* A page range whose GPU access must be revoked on deregister. */
 struct svm_revoke_range {
 	void *addr;
@@ -1488,15 +1512,11 @@ static HSAKMT_STATUS fmm_register_mem_svm_api(HsaKFDContext *ctx,
 	/* Driver does one copy_from_user, with extra attrs size */
 	if (hsakmt_ioctl(ctx->fd, AMDKFD_IOC_SVM + (s_attr << _IOC_SIZESHIFT), args)) {
 		pr_debug("op set range attrs failed %s\n", strerror(errno));
-		if (tracked) {
-			struct svm_revoke_range *rr = NULL;
-
-			/* Nothing was granted, so give the reference back and
-			 * drop the revoke set rather than issuing it.
-			 */
-			svm_api_range_put_locked(fmm_ctx, address, &rr);
-			free(rr);
-		}
+		/* Nothing was granted, so only give the reference back. There
+		 * is no revoke to issue, and no revoke set to compute.
+		 */
+		if (tracked)
+			svm_api_range_unget_locked(fmm_ctx, address);
 		ret = HSAKMT_STATUS_ERROR;
 		goto out;
 	}
