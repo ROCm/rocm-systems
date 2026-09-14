@@ -301,8 +301,12 @@ TEST_F(NetIbMPITest, TagZeroReuse) {
                 // single-worker body covers with its FIFO check.
                 const int seed = WorkerSeed(threadIdx, 0);
                 for (int i = 0; i < kTagZeroIters; i++) {
-                    result = WorkerSendRecvPattern(rank, pair, buffer, sz, /*tag=*/0, mh, seed);
-                    if (!result.ok) return result;
+                    bool outstanding = false;
+                    result = WorkerSendRecvPattern(rank, pair, buffer, sz, /*tag=*/0, mh, seed,
+                                                   kDefaultTimeoutMs, &outstanding);
+                    if (!result.ok) {
+                        return outstanding ? WorkerRetainHostBuffer(result, h) : result;
+                    }
                 }
                 return result;
             });
@@ -517,15 +521,9 @@ TEST_F(NetIbMPITest, FifoPressureSenderFast) {
 
                     int sizes[1] = {0};
                     result = WorkerWait(request, sizes, kStressTimeoutMs);
-                    if (!result.ok) {
-                        // A timed-out wait does not cancel the work, so the buffer and its
-                        // registration are kept rather than freed under a live request.
-                        result.msg += "; the buffer and its registration are retained, since "
-                                      "the request may still reference them";
-                        h.mhandleGuard.release();
-                        h.bufferGuard.release();
-                        return result;
-                    }
+                    // A timed-out wait does not cancel the work, so the buffer and its
+                    // registration are kept rather than freed under a live request.
+                    if (!result.ok) return WorkerRetainHostBuffer(result, h);
 
                     if (rank != 0) continue;
                     if (sizes[0] != static_cast<int>(sz)) {
@@ -714,9 +712,12 @@ TEST_F(NetIbMPITest, RequestSlotExhaustion) {
                 // And ordinary traffic still works on a comm whose whole request
                 // pool has been cycled through.
                 for (int i = 0; i < 4; i++) {
+                    bool outstanding = false;
                     result = WorkerSendRecvPattern(rank, pair, buffer, sz, 100 + i, mh,
-                                                   workerPattern, kStressTimeoutMs);
-                    if (!result.ok) return result;
+                                                   workerPattern, kStressTimeoutMs, &outstanding);
+                    if (!result.ok) {
+                        return outstanding ? WorkerRetainHostBuffer(result, h) : result;
+                    }
                 }
                 return result;
             });
@@ -1858,9 +1859,12 @@ TEST_F(NetIbMPITest, LongRunningEndurance) {
                 // per-iteration seed reduces modulo 256 into another worker's space.
                 const int workerPattern = WorkerSeed(threadIdx, 0);
                 for (int i = 0; i < kThreadedIters; i++) {
+                    bool outstanding = false;
                     result = WorkerSendRecvPattern(rank, pair, buffer, sz, i % 1000, mh,
-                                                   workerPattern, kStressTimeoutMs);
-                    if (!result.ok) return result;
+                                                   workerPattern, kStressTimeoutMs, &outstanding);
+                    if (!result.ok) {
+                        return outstanding ? WorkerRetainHostBuffer(result, h) : result;
+                    }
                 }
                 return result;
             });

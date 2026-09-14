@@ -1425,16 +1425,33 @@ protected:
         return h;
     }
 
+    // Keeps a worker's buffer and its registration rather than freeing memory a request
+    // that timed out may still reference, and says so in the failure. Leaking one buffer on
+    // a test that is already failing is the cheaper mistake. Callers reach this through the
+    // outstanding flag the transfer helpers report.
+    ThreadResult WorkerRetainHostBuffer(ThreadResult failure, WorkerHostBuffer& held) {
+        failure.msg += "; the buffer and its registration are retained, since the request may "
+                       "still reference them";
+        held.mhandleGuard.release();
+        held.bufferGuard.release();
+        return failure;
+    }
+
     // Composite: allocate a host buffer, register it, run one seeded transfer,
     // and release both. Covers the common single-transfer worker body. The
     // holder outlives the transfer, so the buffer is deregistered and freed only
-    // after WorkerSendRecvPattern has returned.
+    // after WorkerSendRecvPattern has returned -- and on a wait that timed out it is not
+    // freed at all, since the work was never cancelled.
     ThreadResult WorkerHostTransfer(int rank, ConnectionPair& pair, size_t size, int tag,
                                     int seed, int timeoutMs = kDefaultTimeoutMs) {
         WorkerHostBuffer h = WorkerSetupHostBuffer(rank, pair, size);
         if (!h.result.ok) return h.result;
 
-        return WorkerSendRecvPattern(rank, pair, h.buffer, size, tag, h.mhandle, seed, timeoutMs);
+        bool outstanding = false;
+        ThreadResult result = WorkerSendRecvPattern(rank, pair, h.buffer, size, tag, h.mhandle,
+                                                    seed, timeoutMs, &outstanding);
+        if (!result.ok && outstanding) return WorkerRetainHostBuffer(result, h);
+        return result;
     }
 
     ncclResult_t InitNetIbCtx(void** ctxOut) {
@@ -1925,9 +1942,12 @@ protected:
                     for (int repeat = 0; repeat < repeats; repeat++) {
                         const int timeout = (size > 1024 * 1024) ? kLargeTransferTimeoutMs
                                                                  : kDefaultTimeoutMs;
+                        bool outstanding = false;
                         result = WorkerSendRecvPattern(rank, pair, buffer, size, tag, mhandle,
-                                                       workerPattern, timeout);
-                        if (!result.ok) return result;
+                                                       workerPattern, timeout, &outstanding);
+                        if (!result.ok) {
+                            return outstanding ? WorkerRetainHostBuffer(result, h) : result;
+                        }
                         tag++;
                     }
                 }
