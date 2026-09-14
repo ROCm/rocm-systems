@@ -67,6 +67,8 @@ static inline void IbCastCommInitSharingFields(struct ncclIbNetCommBase* base) {
   base->sharedGroupIdx = -1;
   base->remIbDevIdx = -1;
   base->sharedPrimaryNqps = 0;
+  // peerProcTag is intentionally not reset: it is peer identity captured on the
+  // dev-list receive, and the accept path can re-enter this call afterwards.
 }
 
 // Compute CQ/WR depth multiplier for shared QPs.
@@ -80,9 +82,12 @@ static inline int IbCastQpSharingDepthMultiplier(void) {
 #define IBCAST_FLUSH_QP_IDX  -1   // sentinel qpIdx for flush QPs in the shared pool
 
 // Pool key -- uniquely identifies a shared QP
+// peerProcTag is required: peerAddr has its port stripped, so without it two
+// processes on the same remote host share a key and bind to one RC QP.
 struct IbCastSharedQpKey {
     int             ibDevN;              // local IB device index
     union ncclSocketAddress peerAddr;    // remote peer address (port stripped)
+    uint64_t        peerProcTag;         // remote *process* identity (host+pid hash)
     int             remIbDevIdx;         // remote IB device index for disambiguation
     bool            isSend;              // send vs recv direction
     int             groupIdx;            // sharing group (0..m-1)
@@ -131,6 +136,9 @@ extern std::mutex                  g_IbCastSharedQpMutex;
 // Strip port from socket address for peer matching
 void IbCastStripPort(union ncclSocketAddress* addr);
 
+// This process's identity tag; exchanged with the peer in ncclIbDevExtraProps
+uint64_t IbCastLocalProcTag(void);
+
 // Compare two pool keys
 bool IbCastSharedQpKeyMatch(const IbCastSharedQpKey* a, const IbCastSharedQpKey* b);
 
@@ -151,11 +159,11 @@ void IbCastUnregisterSharedQpLocked(struct IbCastSharedQp* entry);
 
 // Count QP slots registered by the primary for a given group
 int IbCastCountGroupQpSlots(const union ncclSocketAddress* peerAddr,
-    int remIbDevIdx, bool isSend, int groupIdx);
+    uint64_t peerProcTag, int remIbDevIdx, bool isSend, int groupIdx);
 
 // Count total comms connected to a peer (for channelSeq computation)
 int IbCastCountPeerTotalRefcount(int ibDevN, const union ncclSocketAddress* peerAddr,
-    int remIbDevIdx, bool isSend);
+    uint64_t peerProcTag, int remIbDevIdx, bool isSend);
 
 // Allocate a commId and register in the global comm table (mutex-protected)
 uint16_t IbCastAllocCommId(void* comm, bool isSend);
