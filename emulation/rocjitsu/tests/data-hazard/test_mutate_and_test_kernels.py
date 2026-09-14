@@ -20,17 +20,28 @@ At session end, aggregated ``mutation_report.json`` and ``mutation_report.md`` a
 the pytest rootdir; the ``## Summary`` table is printed (GitHub Actions ``::group::``) for CI
 visibility. CI uploads those two files as job artifacts.
 
+A kernel selects its mutation path with a ``// mutate: <kinds>`` line (``wait``, ``memory``,
+or both); without one it defaults to wait-stripping. The two paths differ in what a killed
+mutant looks like:
+
+- **Wait mutants** remove an ``s_wait*`` the compiler emitted. The deterministic simulator
+  issues instructions in a fixed order and returns the expected result with the wait gone,
+  so the output is *not* the oracle: a killed wait mutant still exits 0 with matching output
+  (``m.correct`` stays true). A non-zero exit there is a real crash to diagnose.
+- **Memory mutants** rewrite a sub-dword load as a store to the same address, which genuinely
+  changes the computed result. The kernel's own host-side check then fails and the process
+  exits non-zero — that divergence *is* the kill, not a crash.
+
 **Detection rules** (each mutant vs the baseline run for that shader):
 
 - **Baseline FP:** unmodified shader must report ``baseline_hazard_count == 0``. Being the
   known-good program, it is where a false positive shows up.
-- **Missed hazard (FN):** a mutant that ran to completion (``m.exit_code == 0``) is missing a
-  wait the compiler emitted, so the plugin must report *more* hazards than baseline:
-  ``m.hazard_count > baseline_hazard_count``. Its output is not the oracle. The simulators
-  issue instructions in a fixed order and return the expected result with the wait removed,
-  so ``m.correct`` stays true there; real hardware is where the result can change.
-- **Crash:** a mutant that exited non-zero is judged separately — its hazard count says how
-  far it got, not how well hazards are detected.
+- **Missed hazard (FN):** a killed mutant whose introduced hazard the plugin did not catch,
+  i.e. ``m.hazard_count <= baseline_hazard_count``. For both paths the hazard count — not the
+  exit code or output — is the detection signal.
+- **Crash (wait path only):** a wait mutant that exited non-zero is judged separately — its
+  hazard count says how far it got, not how well hazards are detected. A memory mutant's
+  non-zero exit is expected and is not treated as a crash.
 
 ROCm tool discovery uses ``ROCM_PATH`` / ``ROCM_HOME`` when set; architecture uses
 ``TARGET_ARCH`` when set. A kernel that declares ``// requires: <arch>`` is skipped on
