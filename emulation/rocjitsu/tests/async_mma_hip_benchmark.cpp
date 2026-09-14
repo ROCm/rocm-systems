@@ -10,6 +10,7 @@
 #ifndef MMA_TARGET
 #error Compile with MMA_TARGET=1250, 1201, 950, or 942.
 #endif
+using I1 = int __attribute__((ext_vector_type(1)));
 using I2 = int __attribute__((ext_vector_type(2)));
 using I4 = int __attribute__((ext_vector_type(4)));
 using I8 = int __attribute__((ext_vector_type(8)));
@@ -68,6 +69,28 @@ HALF_MFMA(8, 8, F16, __builtin_amdgcn_mfma_f32_32x32x8f16);
 HALF_MFMA(116, 16, F4, __builtin_amdgcn_mfma_f32_16x16x16f16);
 #undef HALF_MFMA
 #if MMA_TARGET == 950
+// Larger output tiles are useful async candidates even at smaller K.
+template <> struct Matrix<201> {
+  using A = I1;
+  using C = F32;
+  static constexpr int k = 1, ones = 0x3f800000;
+  __device__ static C multiply(A a, A b, C c, int, int) {
+    return __builtin_amdgcn_mfma_f32_32x32x1f32(__builtin_bit_cast(float, a),
+                                                __builtin_bit_cast(float, b), c, 0, 0, 0);
+  }
+};
+#define LARGE_HALF_MFMA(SHAPE, K, RESULT, BUILTIN)                                                 \
+  template <> struct Matrix<SHAPE> {                                                               \
+    using A = I4;                                                                                  \
+    using C = RESULT;                                                                              \
+    static constexpr int k = K, ones = 0x3c003c00;                                                 \
+    __device__ static C multiply(A a, A b, C c, int, int) {                                        \
+      return BUILTIN(__builtin_bit_cast(H8, a), __builtin_bit_cast(H8, b), c, 0, 0, 0);            \
+    }                                                                                              \
+  }
+LARGE_HALF_MFMA(216, 16, F16, __builtin_amdgcn_mfma_f32_32x32x16_f16);
+LARGE_HALF_MFMA(232, 32, F4, __builtin_amdgcn_mfma_f32_16x16x32_f16);
+#undef LARGE_HALF_MFMA
 #define SCALED_MFMA(SHAPE, K, RESULT, BUILTIN)                                                     \
   template <> struct Matrix<SHAPE> {                                                               \
     using A = I8;                                                                                  \
@@ -173,6 +196,9 @@ int main(int argc, char **argv) {
     RUN(8);
     RUN(116);
 #if MMA_TARGET == 950
+    RUN(201);
+    RUN(216);
+    RUN(232);
     RUN(128);
     RUN(64);
 #endif
