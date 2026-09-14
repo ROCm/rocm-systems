@@ -127,6 +127,10 @@ if(NOT WIN32)
       HINTS $ENV{rocprofiler_register_ROOT} $ENV{ROCPROFILER_REGISTER_ROOT} ${CMAKE_INSTALL_PREFIX}
       PATHS ${ROCM_PATH})
   endif()
+elseif(ROCDECODE_ENABLE_ROCPROFILER_REGISTER)
+  # The option defaults to ON, so say plainly that it has no effect here
+  # rather than silently producing a build without profiling support.
+  message("-- ${Yellow}NOTE: rocprofiler-register is not available on Windows -- ROCDECODE_ENABLE_ROCPROFILER_REGISTER ignored${ColourReset}")
 endif()
 if(ROCDECODE_ENABLE_HOST_DECODER)
   find_package(FFmpeg QUIET)
@@ -158,7 +162,12 @@ if(_deps_met)
   include_directories(${LIBVA_INCLUDE_DIR})
   if(NOT (USING_THE_ROCK AND UNIX))
     set(LINK_LIBRARY_LIST ${LINK_LIBRARY_LIST} ${LIBVA_LIBRARY})
-    set(LINK_LIBRARY_LIST ${LINK_LIBRARY_LIST} ${LIBVA_DRM_LIBRARY})
+    if(NOT WIN32)
+      # FindLibva only looks for va-drm on Linux. Referencing the variable on
+      # Windows would pick up a stale LIBVA_DRM_LIBRARY-NOTFOUND left in the
+      # cache by an earlier configure and pass it to the linker.
+      set(LINK_LIBRARY_LIST ${LINK_LIBRARY_LIST} ${LIBVA_DRM_LIBRARY})
+    endif()
   endif()
 
   if(NOT WIN32)
@@ -185,10 +194,6 @@ if(_deps_met)
   # source files
   file(GLOB_RECURSE SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/src/*.cpp")
   list(FILTER SOURCES EXCLUDE REGEX "${CMAKE_CURRENT_SOURCE_DIR}/src/rocdecode-host/*.*")
-  if(WIN32)
-    # Exclude PAL backend sources if present (we use vaapi on Windows via vaon12)
-    list(FILTER SOURCES EXCLUDE REGEX "${CMAKE_CURRENT_SOURCE_DIR}/src/rocdecode/pal/.*")
-  endif()
   # rocdecode library
   add_library(${PROJECT_NAME} SHARED ${SOURCES})
 
@@ -196,15 +201,19 @@ if(_deps_met)
     # --all-warnings/-Wall       -- Enable most warning messages
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall")
   else()
-    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} /W3")
     target_compile_definitions(${PROJECT_NAME} PRIVATE NOMINMAX _CRT_SECURE_NO_WARNINGS)
-    # Suppress warnings from pre-existing code and external headers:
-    # C4200: zero-sized array in va.h (vaon12 external header)
-    # C4018: signed/unsigned mismatch in parser files (pre-existing, also on Linux)
-    # C4267: size_t conversion in parser files (pre-existing, also on Linux)
-    # C4244: narrowing conversion in parser files (pre-existing, also on Linux)
-    # C4146: unary minus on unsigned in parser files (pre-existing, also on Linux)
-    target_compile_options(${PROJECT_NAME} PRIVATE /wd4200 /wd4018 /wd4267 /wd4244 /wd4146)
+    # /-prefixed flags are MSVC syntax: a GNU-driver compiler on Windows reads
+    # them as input filenames, so gate on the compiler rather than on WIN32.
+    if(MSVC)
+      set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} /W3")
+      # Suppress warnings from pre-existing code and external headers:
+      # C4200: zero-sized array in va.h (vaon12 external header)
+      # C4018: signed/unsigned mismatch in parser files (pre-existing, also on Linux)
+      # C4267: size_t conversion in parser files (pre-existing, also on Linux)
+      # C4244: narrowing conversion in parser files (pre-existing, also on Linux)
+      # C4146: unary minus on unsigned in parser files (pre-existing, also on Linux)
+      target_compile_options(${PROJECT_NAME} PRIVATE /wd4200 /wd4018 /wd4267 /wd4244 /wd4146)
+    endif()
   endif()
   target_link_libraries(${PROJECT_NAME} ${LINK_LIBRARY_LIST})
 
