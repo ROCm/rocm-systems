@@ -29,6 +29,7 @@ enum class InstructionFamily : size_t {
 
 inline constexpr size_t kInstructionFamilyCount = static_cast<size_t>(InstructionFamily::Count);
 using InstructionCounts = std::array<uint64_t, kInstructionFamilyCount>;
+using UntimedInstructions = std::array<uint64_t, kInstructionFamilyCount>;
 using InstructionNanoseconds = std::array<uint64_t, kInstructionFamilyCount>;
 
 struct ThroughputWavefrontState final : WavefrontState {
@@ -37,6 +38,7 @@ struct ThroughputWavefrontState final : WavefrontState {
   std::chrono::steady_clock::time_point instruction_begin{};
   InstructionFamily active_family = InstructionFamily::Other;
   bool instruction_active = false;
+  UntimedInstructions untimed_instructions{};
 };
 
 /// Reports simulator throughput in executed wave instructions per host second.
@@ -51,6 +53,9 @@ public:
   ~ThroughputPlugin() override;
 
   bool observes_sgpr_reads() const override { return false; }
+  bool supports_async_instructions() const override { return true; }
+  void onAmdgpuAsyncInstructionIssued(uint64_t pc, const Instruction &inst,
+                                      amdgpu::Wavefront &wf) override;
 
   void onShutdown() override;
   void onAmdgpuDispatchPacketProcessed(const KernelDispatchInfo &info) override;
@@ -75,6 +80,7 @@ private:
     bool begun = false;
     InstructionCounts counts{};
     InstructionNanoseconds execution_nanoseconds{};
+    UntimedInstructions untimed_instructions{};
   };
 
   static uint64_t total(const InstructionCounts &counts);
@@ -82,12 +88,14 @@ private:
   static void finish_instruction(ThroughputWavefrontState &state, Clock::time_point end);
   void emit_record(std::string_view record, const KernelDispatchInfo *info,
                    const InstructionCounts &counts,
-                   const InstructionNanoseconds &execution_nanoseconds, double wall_seconds,
+                   const InstructionNanoseconds &execution_nanoseconds,
+                   const UntimedInstructions &untimed_instructions, double wall_seconds,
                    double dispatch_seconds_sum = 0.0);
 
   std::unordered_map<uint32_t, DispatchState> dispatches_;
   InstructionCounts aggregate_counts_{};
   InstructionNanoseconds aggregate_execution_nanoseconds_{};
+  UntimedInstructions aggregate_untimed_instructions_{};
   Clock::time_point first_begin_{};
   Clock::time_point last_end_{};
   double dispatch_seconds_sum_ = 0.0;

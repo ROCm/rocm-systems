@@ -4,6 +4,9 @@
 
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/vm/amdgpu/async_scoreboard.h"
+#include "rocjitsu/vm/amdgpu/gpu_memory.h"
+#include "rocjitsu/vm/amdgpu/instruction_cache.h"
+#include "util/log.h"
 #include <unordered_map>
 
 namespace rocjitsu::amdgpu {
@@ -27,27 +30,37 @@ public:
     }();
     return value;
   }
-  explicit MmaAdmissionCache(int mode, unsigned limit = 8) : mode_(mode), limit_(limit) {}
+  /// Retain bounded per-CU code history; pressure discards both caches at entry.
+  struct Capacity {
+    size_t plans = 16384;
+    size_t decodes = 65536;
+  };
+  explicit MmaAdmissionCache(int mode, unsigned limit = 8)
+      : MmaAdmissionCache(mode, limit, Capacity{}) {}
+  MmaAdmissionCache(int mode, unsigned limit, Capacity capacity)
+      : mode_(mode), limit_(std::clamp(limit, 1u, 16u)), capacity_(capacity) {
+    capacity_.plans = std::max(size_t{1}, capacity_.plans);
+    // One inspection may decode its initial instruction and the entire window.
+    capacity_.decodes = std::max(size_t{limit_} + 1, capacity_.decodes);
+  }
+  /// Number of retained plans and unique decoding snapshots, respectively.
+  Capacity size() const { return {plans_.size(), decoded_.size()}; }
   bool applies(const Instruction &inst) const {
-    return mode_ == 3 || inst.mnemonic() == "v_wmma_f32_16x16x32_f16" ||
-           inst.mnemonic() == "v_wmma_f32_16x16x32_bf16";
+    return async_mma_policy::needs_admission(mode_, inst.mnemonic());
   }
   bool observe_only() const { return mode_ == 1; }
   struct Counters {
     uint64_t decodes = 0, decode_hits = 0, plans = 0, hits = 0, validations = 0;
-    uint64_t accept = 0, reject = 0, issuer = 0;
+    uint64_t accept = 0, reject = 0, issuer = 0, evictions = 0;
   } stats;
   void flush() {
     if (!(stats.accept + stats.reject + stats.issuer))
       return;
-    std::fprintf(stderr,
-                 "RJ_ADMISSION decodes=%llu decode_hits=%llu plans=%llu hits=%llu "
-                 "validations=%llu accept=%llu reject=%llu issuer=%llu entries=%zu\n",
-                 (unsigned long long)stats.decodes, (unsigned long long)stats.decode_hits,
-                 (unsigned long long)stats.plans, (unsigned long long)stats.hits,
-                 (unsigned long long)stats.validations, (unsigned long long)stats.accept,
-                 (unsigned long long)stats.reject, (unsigned long long)stats.issuer,
-                 decoded_.size());
+    util::Logger::warn(
+        std::format("RJ_ADMISSION decodes={} decode_hits={} plans={} hits={} validations={} "
+                    "accept={} reject={} issuer={} entries={} evictions={}",
+                    stats.decodes, stats.decode_hits, stats.plans, stats.hits, stats.validations,
+                    stats.accept, stats.reject, stats.issuer, decoded_.size(), stats.evictions));
     stats = {};
   }
 
@@ -56,10 +69,11 @@ public:
   std::optional<uint64_t> inspect(Decoder &decoder, InstructionCache &icache,
                                   const GpuMemory &memory, uint64_t pc, uint32_t vmid,
                                   uint32_t num_vgprs, bool has_accvgprs, const Words &first) {
-    auto [it, inserted] = plans_.try_emplace(Key{pc, vmid, num_vgprs, has_accvgprs});
-    Plan &plan = it->second;
-    bool valid = !inserted && plan.first == first;
-    if (valid && plan.epoch != icache.epoch()) {
+    const Key key{pc, vmid, num_vgprs, has_accvgprs};
+    auto it = plans_.find(key);
+    bool valid = it != plans_.end() && it->second.first == first;
+    if (valid && it->second.epoch != icache.epoch()) {
+      auto &plan = it->second;
       ++stats.validations;
       // I$ invalidation rechecks bytes. Unchanged code retains its decoded
       // objects and both successful and rejected plans across dispatches.
@@ -74,6 +88,18 @@ public:
       plan.epoch = icache.epoch();
     }
     if (!valid) {
+      // Reserve for the worst-case scan before retaining references or decoded
+      // pointers. Cache hits need no capacity check or eviction bookkeeping.
+      if ((it == plans_.end() && plans_.size() == capacity_.plans) ||
+          decoded_.size() > capacity_.decodes - (size_t{limit_} + 1)) {
+        plans_.clear();
+        decoded_.clear();
+        it = plans_.end();
+        ++stats.evictions;
+      }
+      if (it == plans_.end())
+        it = plans_.try_emplace(key).first;
+      auto &plan = it->second;
       plan = {};
       plan.first = first;
       plan.epoch = icache.epoch();
@@ -111,9 +137,9 @@ public:
     } else {
       ++stats.hits;
     }
-    if (plan.issuer_offset) {
+    if (it->second.issuer_offset) {
       ++stats.accept;
-      return pc + plan.issuer_offset;
+      return pc + it->second.issuer_offset;
     }
     ++stats.reject;
     return std::nullopt;
@@ -176,6 +202,7 @@ private:
   }
   int mode_;
   unsigned limit_;
+  Capacity capacity_;
   std::unordered_map<Words, std::unique_ptr<Decoded>, WordsHash> decoded_;
   std::unordered_map<Key, Plan, Hash> plans_;
 };

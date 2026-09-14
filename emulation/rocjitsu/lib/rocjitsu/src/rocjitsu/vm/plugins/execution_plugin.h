@@ -70,6 +70,14 @@ public:
   /// value from construction onward.
   virtual bool requires_serial_hot_hooks() const { return false; }
 
+  /// Opt in to asynchronous arithmetic and its issue/retirement callbacks.
+  /// Sampled once on add(). Register hooks may run on helpers concurrently with
+  /// issuer hooks for the SAME wave, and may precede the issue notification.
+  /// Plugins must not inspect mutable wave state outside the current instruction's
+  /// operands, assume callback order equals program order, or require a complete
+  /// architectural snapshot. Serializing hooks alone does not meet this contract.
+  virtual bool supports_async_instructions() const { return false; }
+
   // -- Lifecycle hooks ------------------------------------------------------
 
   /// Called when the emulated driver opens (simulation is ready to accept work).
@@ -83,19 +91,32 @@ public:
 
   // -- AMDGPU hooks --------------------------------------------------------
 
-  /// Called before every AMDGPU instruction is executed.
+  /// Called before a synchronously executed AMDGPU instruction.
   /// Wavefront state reflects the state prior to the instruction's effects.
   /// May run concurrently across simulation partitions unless
   /// requires_serial_hot_hooks() returns true.
   virtual void onAmdgpuBeforeExecuteInstruction(uint64_t /*pc*/, const Instruction & /*inst*/,
                                                 amdgpu::Wavefront & /*wf*/) {}
 
-  /// Called after every AMDGPU instruction is executed.
+  /// Called after a synchronously executed AMDGPU instruction.
   /// Wavefront state (wait targets, PC, etc.) reflects the instruction's effects.
   /// May run concurrently across simulation partitions unless
   /// requires_serial_hot_hooks() returns true.
   virtual void onAmdgpuAfterExecuteInstruction(uint64_t /*pc*/, const Instruction & /*inst*/,
                                                amdgpu::Wavefront & /*wf*/) {}
+
+  /// Called on the issuer after an async job is accepted, before advancing PC.
+  /// The job may already be running or finished. Replaces the ordinary before/
+  /// after pair. The instruction object remains alive until retirement.
+  virtual void onAmdgpuAsyncInstructionIssued(uint64_t /*pc*/, const Instruction & /*inst*/,
+                                              amdgpu::Wavefront & /*wf*/) {}
+
+  /// Called on the issuer after joining a job, before releasing its dependencies
+  /// or destroying its instruction. Independent jobs may retire out of order.
+  /// Its destination is complete unless failed; unrelated wave state can already
+  /// reflect later instructions and other independent jobs may still be running.
+  virtual void onAmdgpuAsyncInstructionRetired(uint64_t /*pc*/, const Instruction & /*inst*/,
+                                               amdgpu::Wavefront & /*wf*/, bool /*failed*/) {}
 
   /// Called when an AMDGPU memory instruction is routed to a pipeline.
   /// May run concurrently across simulation partitions unless

@@ -58,7 +58,9 @@ RJ_DIAGNOSTIC_IGNORE_PEDANTIC
 RJ_DIAGNOSTIC_POP
 
 #include "halt_snapshot_plugin.h"
+#include "rocjitsu/vm/amdgpu/matrix_coexecution.h"
 #include "rocjitsu/vm/plugins/execution_plugin_group.h"
+#include "rocjitsu/vm/plugins/logging/plugin.h"
 #include "rocjitsu/vm/plugins/plugin_config_resolver.h"
 #include "rocjitsu/vm/plugins/plugin_sink.h"
 #include "rocjitsu/vm/plugins/race_detector/plugin.h"
@@ -1225,6 +1227,8 @@ struct ParsedThroughputRecord {
   uint64_t dispatches = 0;
   double dispatch_seconds_sum = 0.0;
   plugins::throughput::InstructionCounts family_instructions{};
+  plugins::throughput::InstructionCounts untimed_instructions{};
+  std::array<bool, plugins::throughput::kInstructionFamilyCount> execution_timing_valid{};
   std::array<double, plugins::throughput::kInstructionFamilyCount> execution_seconds{};
   std::array<double, plugins::throughput::kInstructionFamilyCount> execution_mips{};
   std::array<double, plugins::throughput::kInstructionFamilyCount> dispatch_mips{};
@@ -1340,10 +1344,20 @@ std::vector<ParsedThroughputRecord> parse_throughput_jsonl(std::string_view json
       const auto dispatch_mips = values["dispatch_mips"];
       EXPECT_TRUE(instructions.IsIntOrUint())
           << "families." << family_name << ".instructions must be an integer";
-      EXPECT_TRUE(execution_seconds.IsNumeric())
-          << "families." << family_name << ".execution_seconds must be numeric";
-      EXPECT_TRUE(execution_mips.IsNumeric())
-          << "families." << family_name << ".execution_mips must be numeric";
+      const auto valid = values["execution_timing_valid"];
+      const auto untimed = values["untimed_instructions"];
+      EXPECT_TRUE(valid.IsBool());
+      EXPECT_TRUE(untimed.IsIntOrUint());
+      record.execution_timing_valid[i] = valid.AsBool();
+      record.untimed_instructions[i] = untimed.AsUInt64();
+      EXPECT_EQ(valid.AsBool(), untimed.AsUInt64() == 0);
+      if (valid.AsBool()) {
+        EXPECT_TRUE(execution_seconds.IsNumeric());
+        EXPECT_TRUE(execution_mips.IsNumeric());
+      } else {
+        EXPECT_TRUE(execution_seconds.IsNull());
+        EXPECT_TRUE(execution_mips.IsNull());
+      }
       EXPECT_TRUE(dispatch_mips.IsNumeric())
           << "families." << family_name << ".dispatch_mips must be numeric";
       if (instructions.IsIntOrUint())
@@ -1476,6 +1490,121 @@ TEST(ThroughputPluginTest, TimesTerminatorWithoutAfterExecuteCallback) {
   EXPECT_EQ(dispatch.wave_instructions, 1u);
   EXPECT_EQ(dispatch.family_instructions[control], 1u);
   EXPECT_GT(dispatch.execution_seconds[control], 0.0);
+}
+
+class AsyncEventPlugin final : public ExecutionPlugin {
+public:
+  explicit AsyncEventPlugin(std::string name = "async-events") : ExecutionPlugin(std::move(name)) {}
+  bool supports_async_instructions() const override { return true; }
+  bool observes_sgpr_reads() const override { return false; }
+  void onAmdgpuAsyncInstructionIssued(uint64_t pc, const Instruction &inst, Wavefront &) override {
+    EXPECT_EQ(std::this_thread::get_id(), issuer_thread);
+    EXPECT_TRUE(pending.emplace(&inst, pc).second);
+    ++issued;
+  }
+  void onAmdgpuAsyncInstructionRetired(uint64_t pc, const Instruction &inst, Wavefront &,
+                                       bool failed) override {
+    EXPECT_EQ(std::this_thread::get_id(), issuer_thread);
+    EXPECT_FALSE(failed);
+    auto found = pending.find(&inst);
+    ASSERT_NE(found, pending.end());
+    EXPECT_EQ(found->second, pc);
+    pending.erase(found);
+    ++retired;
+  }
+  std::thread::id issuer_thread = std::this_thread::get_id();
+  std::map<const Instruction *, uint64_t> pending;
+  unsigned issued = 0, retired = 0;
+};
+
+TEST(ExecutionPluginTest, AsyncSupportComesFromCapabilities) {
+  ExecutionPluginGroup group(PluginSinkConfig{});
+  EXPECT_TRUE(group.supports_async_instructions());
+  ASSERT_TRUE(group.add(std::make_unique<AsyncEventPlugin>()));
+  EXPECT_TRUE(group.supports_async_instructions());
+  ASSERT_TRUE(group.add(std::make_unique<KernelLoggingPlugin>()));
+  EXPECT_TRUE(group.supports_async_instructions());
+  // A familiar name must not bypass the observation contract.
+  ASSERT_TRUE(group.add(std::make_unique<ExecutionPlugin>("throughput")));
+  EXPECT_FALSE(group.supports_async_instructions());
+
+  ExecutionPluginGroup consan(PluginSinkConfig{});
+  ASSERT_TRUE(consan.add(std::make_unique<RaceDetectorPlugin>()));
+  EXPECT_FALSE(consan.supports_async_instructions());
+}
+
+std::vector<uint32_t> independent_wmma_kernel() {
+  std::vector<uint32_t> code;
+  // Zero operands are sufficient: this test checks real offload and callback
+  // lifetimes; the matrix suites separately compare nonzero numerical results.
+  for (uint8_t dst : {uint8_t{64}, uint8_t{96}}) {
+    const auto words = cdna5::build_vop3p(cdna5::kVWmmaF3216x16x64Fp8Fp8Vop3p,
+                                          {.vdst = dst,
+                                           .src0 = 256,
+                                           .src1 = 288,
+                                           .src2 = static_cast<uint16_t>(256 + dst),
+                                           .opsel_hi = 3});
+    code.insert(code.end(), words.begin(), words.end());
+  }
+  code.push_back(cdna5::build_sopp(cdna5::kSEndpgmSopp, {})[0]);
+  return code;
+}
+
+TEST(ThroughputPluginTest, AsyncMmaCountsHaveExplicitlyUnavailableHandlerTiming) {
+  if (matrix_coexecution::mode() != 4 || matrix_coexecution::width() <= 1 ||
+      matrix_coexecution::shared_helper_limit().value_or(4) == 0)
+    GTEST_SKIP() << "requires mode 4 with shared helpers";
+  PluginFixture f(1, "cdna5", 32, 128);
+  PluginSinkConfig sink_config;
+  StringSink &sink = sink_config.emplace<StringSink>();
+  f.plugin_group_ = std::make_shared<ExecutionPluginGroup>(std::move(sink_config));
+  ASSERT_TRUE(f.plugin_group_->add(std::make_unique<plugins::throughput::ThroughputPlugin>()));
+  auto observer = std::make_unique<AsyncEventPlugin>();
+  auto *events = observer.get();
+  ASSERT_TRUE(f.plugin_group_->add(std::move(observer)));
+  f.soc->set_plugin_group(f.plugin_group_);
+  f.plugin_group_->onInit();
+  const auto code = independent_wmma_kernel();
+  f.run_kernel(code.data(), code.size(), 32, 32);
+  f.shutdown();
+  ASSERT_GT(events->issued, 0u);
+  EXPECT_EQ(events->issued, events->retired);
+  EXPECT_TRUE(events->pending.empty());
+  const auto records = parse_throughput_jsonl(sink.str());
+  ASSERT_EQ(records.size(), 2u);
+  const auto matrix = static_cast<size_t>(plugins::throughput::InstructionFamily::Matrix);
+  const auto control = static_cast<size_t>(plugins::throughput::InstructionFamily::Control);
+  for (const auto &record : records) {
+    EXPECT_EQ(record.wave_instructions, 3u);
+    EXPECT_EQ(record.family_instructions[matrix], 2u);
+    EXPECT_EQ(record.untimed_instructions[matrix], events->issued);
+    EXPECT_FALSE(record.execution_timing_valid[matrix]);
+    EXPECT_TRUE(record.execution_timing_valid[control]);
+    EXPECT_GT(record.dispatch_mips[matrix], 0.0);
+    EXPECT_GT(record.wall_seconds, 0.0);
+  }
+}
+
+TEST(ExecutionPluginTest, KernelLoggingSupportsActualAsyncMma) {
+  if (matrix_coexecution::mode() != 4 || matrix_coexecution::width() <= 1 ||
+      matrix_coexecution::shared_helper_limit().value_or(4) == 0)
+    GTEST_SKIP() << "requires mode 4 with shared helpers";
+  PluginFixture f(1, "cdna5", 32, 128);
+  PluginSinkConfig sink_config;
+  StringSink &sink = sink_config.emplace<StringSink>();
+  f.plugin_group_ = std::make_shared<ExecutionPluginGroup>(std::move(sink_config));
+  ASSERT_TRUE(f.plugin_group_->add(std::make_unique<KernelLoggingPlugin>()));
+  auto observer = std::make_unique<AsyncEventPlugin>();
+  auto *events = observer.get();
+  ASSERT_TRUE(f.plugin_group_->add(std::move(observer)));
+  f.soc->set_plugin_group(f.plugin_group_);
+  f.plugin_group_->onInit();
+  const auto code = independent_wmma_kernel();
+  f.run_kernel(code.data(), code.size(), 32, 32);
+  f.shutdown();
+  EXPECT_GT(events->issued, 0u);
+  EXPECT_EQ(events->issued, events->retired);
+  EXPECT_NE(sink.str().find("mfma detected"), std::string::npos);
 }
 
 TEST(ExecutionPluginTest, HotHookPolicyComesFromContainedPlugins) {

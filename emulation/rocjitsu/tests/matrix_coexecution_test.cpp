@@ -617,7 +617,7 @@ TEST(AsyncInstructionQueueTest, IndependentCompletionReleasesOnlyItsOwnDependenc
   Instruction second("ready", [](Instruction &, void *) {}, 1);
   Queue queue(
       &state,
-      [](void *ctx, Instruction *inst, bool failed) {
+      [](void *ctx, Instruction *inst, uint64_t, bool failed) {
         EXPECT_FALSE(failed);
         static_cast<State *>(ctx)->retired.push_back(inst->src_loc());
       },
@@ -666,7 +666,7 @@ TEST(AsyncInstructionQueueTest, OrderedCompletionRetainsThePrefixAndRejectsFullP
       1);
   Queue queue(
       &state,
-      [](void *ctx, Instruction *inst, bool failed) {
+      [](void *ctx, Instruction *inst, uint64_t, bool failed) {
         EXPECT_FALSE(failed);
         static_cast<State *>(ctx)->retired.push_back(inst->src_loc());
       },
@@ -694,22 +694,26 @@ struct ExtendedMmaCase {
   std::vector<uint32_t> words;
   uint32_t input;
   bool mfma;
+  unsigned wmma_k;
+  unsigned mfma_family;
 };
 std::vector<ExtendedMmaCase> extended_mma_cases() {
   std::vector<ExtendedMmaCase> cases;
-  auto add = [&](rj_code_arch_t arch, auto words, uint32_t input, bool mfma) {
-    cases.push_back({arch, {words.begin(), words.end()}, input, mfma});
+  auto add = [&](rj_code_arch_t arch, auto words, uint32_t input, unsigned wmma_k,
+                 unsigned mfma_family = 0) {
+    cases.push_back(
+        {arch, {words.begin(), words.end()}, input, mfma_family != 0, wmma_k, mfma_family});
   };
   for (auto opcode : {cdna5::kVWmmaF3216x16x32F16Vop3p, cdna5::kVWmmaF3216x16x32Bf16Vop3p})
     add(ROCJITSU_CODE_ARCH_CDNA5,
         cdna5::build_vop3p(opcode,
                            {.vdst = 64, .src0 = 256, .src1 = 288, .src2 = 320, .opsel_hi = 3}),
-        opcode == cdna5::kVWmmaF3216x16x32F16Vop3p ? 0x3c003c00u : 0x3f803f80u, false);
+        opcode == cdna5::kVWmmaF3216x16x32F16Vop3p ? 0x3c003c00u : 0x3f803f80u, 32);
   for (auto opcode : {rdna4::kVWmmaF3216x16x16F16Vop3p, rdna4::kVWmmaF3216x16x16Bf16Vop3p})
     add(ROCJITSU_CODE_ARCH_RDNA4,
         rdna4::build_vop3p(opcode,
                            {.vdst = 64, .src0 = 256, .src1 = 288, .src2 = 320, .opsel_hi = 3}),
-        opcode == rdna4::kVWmmaF3216x16x16F16Vop3p ? 0x3c003c00u : 0x3f803f80u, false);
+        opcode == rdna4::kVWmmaF3216x16x16F16Vop3p ? 0x3c003c00u : 0x3f803f80u, 16);
   for (auto arch : {ROCJITSU_CODE_ARCH_CDNA3, ROCJITSU_CODE_ARCH_CDNA4})
     for (auto opcode : {cdna4::kVMfmaF3232x32x42bF16Vop3pMfma,
                         cdna4::kVMfmaF3216x16x44bF16Vop3pMfma, cdna4::kVMfmaF324x4x416bF16Vop3pMfma,
@@ -718,7 +722,11 @@ std::vector<ExtendedMmaCase> extended_mma_cases() {
         add(arch,
             cdna4::build_vop3p_mfma(
                 opcode, {.vdst = 64, .acc_cd = acc, .src0 = 256, .src1 = 288, .src2 = 320}),
-            0x3c003c00, true);
+            0x3c003c00, 0,
+            opcode == cdna4::kVMfmaF3232x32x8F16Vop3pMfma ||
+                    opcode == cdna4::kVMfmaF3216x16x16F16Vop3pMfma
+                ? 4
+                : 1);
   for (auto arch : {ROCJITSU_CODE_ARCH_CDNA3, ROCJITSU_CODE_ARCH_CDNA4})
     for (auto opcode :
          {cdna4::kVMfmaF3232x32x12bF32Vop3pMfma, cdna4::kVMfmaF3216x16x14bF32Vop3pMfma})
@@ -726,30 +734,38 @@ std::vector<ExtendedMmaCase> extended_mma_cases() {
         add(arch,
             cdna4::build_vop3p_mfma(
                 opcode, {.vdst = 64, .acc_cd = acc, .src0 = 256, .src1 = 288, .src2 = 320}),
-            0x3f800000, true);
+            0x3f800000, 0, 1);
   for (auto opcode : {cdna4::kVMfmaF3232x32x16F16Vop3pMfma, cdna4::kVMfmaF3216x16x32F16Vop3pMfma})
     for (uint8_t acc : {0, 1})
       add(ROCJITSU_CODE_ARCH_CDNA4,
           cdna4::build_vop3p_mfma(
               opcode, {.vdst = 64, .acc_cd = acc, .src0 = 256, .src1 = 288, .src2 = 320}),
-          0x3c003c00, true);
+          0x3c003c00, 0, 4);
   for (unsigned opcode : {45, 46})
     for (bool inline_scale : {false, true})
       add(ROCJITSU_CODE_ARCH_CDNA4,
           mma_test::make_cdna4_mfma_scale_words(opcode, 1, inline_scale ? 242 : 448,
                                                 inline_scale ? 242 : 449, 0, 0, 4, 4, 64, 256, 288,
                                                 320),
-          0x22222222, true);
+          0x22222222, 0, 2);
   return cases;
 }
 
 TEST(AsyncInstructionQueueTest, SmallerWmmaAndMultiBlockMfmaMatchSerialAcrossRegisterHazards) {
+  // Run with MIN_K=16 and MFMA=7 to require offloads for every family. The
+  // narrower configurations also check that disabled families remain inline.
+  // Eligibility is recorded with each case instead of reusing the candidate
+  // predicate: dropping an opcode from that predicate must fail this test.
   constexpr uint64_t pc = 0x250000;
   for (const auto &c : extended_mma_cases()) {
     auto decoder = Decoder::create(c.arch);
     std::unique_ptr<Instruction> first(decode_valid(*decoder, c.words.data()));
     SCOPED_TRACE(first->mnemonic());
     SCOPED_TRACE(c.arch);
+    const bool family_enabled =
+        c.mfma ? (mc::mfma_families() & c.mfma_family) != 0 : mc::min_wmma_k() <= c.wmma_k;
+    const bool expect_async = mc::mode() == 4 && mc::width() > 1 &&
+                              mc::shared_helper_limit().value_or(4) > 0 && family_enabled;
     const size_t suffix = c.words.size() - 2;
     const bool acc = c.mfma && ((c.words[suffix] >> 15) & 1);
     for (unsigned hazard = 0; hazard != 5; ++hazard) {
@@ -812,10 +828,25 @@ TEST(AsyncInstructionQueueTest, SmallerWmmaAndMultiBlockMfmaMatchSerialAcrossReg
                               ? rdna4::build_sopp(rdna4::kSBranchSopp, {.simm16 = 0xffff})
                               : cdna5::build_sopp(cdna5::kSBranchSopp, {.simm16 = 0xffff});
       memory.write32(end, branch[0]);
+      const auto mma_before = amdgpu::async_execution::stats.mma;
+      const auto windows_before = amdgpu::async_execution::stats.windows;
+      const auto retired_before = amdgpu::async_execution::stats.retired_mma;
       for (unsigned steps = 0; wf->pc < end && steps != 3; ++steps)
         cu->step();
       EXPECT_EQ(wf->pc, end);
       EXPECT_EQ(snapshot(), expected);
+      const auto &after = amdgpu::async_execution::stats;
+      const auto offloads = after.mma - mma_before;
+      EXPECT_EQ(after.retired_mma - retired_before, offloads);
+      if (!expect_async) {
+        EXPECT_EQ(offloads, 0u);
+        EXPECT_EQ(after.windows - windows_before, 0u);
+      } else if (hazard == 0) {
+        // Admission may reject dependent pairs, but this pair is independent
+        // for every shape, register bank, and scale representation above.
+        EXPECT_GT(offloads, 0u);
+        EXPECT_GT(after.windows - windows_before, 0u);
+      }
     }
   }
 }

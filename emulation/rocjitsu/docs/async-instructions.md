@@ -74,9 +74,13 @@ and supplying its ISA adapter.
 
 The prototype requires functional execution, the adapter's wave size, full EXEC,
 no VGPRMSB or GPRIDX addressing, and no active debugger, trap handler or architectural observer
-plugin. Only the throughput plugin is admitted. Its instruction counts and
-dispatch wall times remain useful; its per-handler timing does not include
-background execution and must not be used to estimate concurrent CPU work.
+plugin. The plugin group caches an explicit async capability at registration.
+Throughput and kernel logging opt in to issue/retirement events; ConSan retains
+synchronous execution because its event state and diagnostic context require
+program ordering. Throughput preserves counts and dispatch wall times; a family
+with untimed async work emits `execution_timing_valid: false` and null
+`execution_seconds`/`execution_mips`. Async callbacks run on the issuer, while
+register hooks may run concurrently on helpers for the same wave.
 
 The original arithmetic selection is f32-output FP8/BF8 16x16x64/128 WMMA and
 32x16x128 FP4 WMMA. Separate controls add f32-output f16/bf16 K=32/K=16 WMMA,
