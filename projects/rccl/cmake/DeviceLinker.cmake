@@ -303,19 +303,11 @@ elseif(ROCM_PATH)
   target_include_directories(rccl_device_defs SYSTEM INTERFACE "${ROCM_PATH}/include")
 endif()
 
-# fmt headers: FetchContent provides fmt_SOURCE_DIR; find_package provides the target.
-if(fmt_SOURCE_DIR)
-  target_include_directories(rccl_device_defs SYSTEM INTERFACE "${fmt_SOURCE_DIR}/include")
-elseif(TARGET fmt::fmt-header-only)
-  get_target_property(_fmt_inc fmt::fmt-header-only INTERFACE_INCLUDE_DIRECTORIES)
-  if(_fmt_inc)
-    foreach(_p ${_fmt_inc})
-      if(NOT _p MATCHES "^\\$<")
-        target_include_directories(rccl_device_defs SYSTEM INTERFACE "${_p}")
-      endif()
-    endforeach()
-  endif()
-endif()
+# fmt headers, named directly rather than read off fmt::fmt-header-only: the
+# target carries its include directory in a $<BUILD_INTERFACE:...> generator
+# expression, which cannot be resolved at configure time.
+target_include_directories(rccl_device_defs SYSTEM INTERFACE
+  "${PROJECT_SOURCE_DIR}/external/fmt/include")
 
 # ---------------------------------------------------------------------------
 # Read specialized file list

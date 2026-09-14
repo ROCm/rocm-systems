@@ -1,4 +1,5 @@
 # ignore codes from external projects
+external/fmt/**
 src/include/nvtx3/**
 src/transport/net_ib/gdaki/doca-gpunetio/**
 src/include/gdrwrap.h
